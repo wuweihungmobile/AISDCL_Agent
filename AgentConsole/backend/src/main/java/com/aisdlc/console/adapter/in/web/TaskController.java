@@ -2,12 +2,15 @@ package com.aisdlc.console.adapter.in.web;
 
 import com.aisdlc.console.adapter.in.web.dto.ApiResult;
 import com.aisdlc.console.adapter.in.web.dto.CreateTaskRequest;
+import com.aisdlc.console.adapter.in.web.dto.ExecutionStepBrief;
 import com.aisdlc.console.adapter.in.web.dto.SignoffRequest;
 import com.aisdlc.console.adapter.in.web.dto.TaskDetailResponse;
 import com.aisdlc.console.adapter.in.web.dto.TaskResponse;
 import com.aisdlc.console.adapter.in.web.dto.TaskSummaryResponse;
 import com.aisdlc.console.adapter.in.web.dto.UpdateTaskRequest;
+import com.aisdlc.console.application.port.in.ExecutionQueryUseCase;
 import com.aisdlc.console.application.port.in.ManageTaskUseCase;
+import com.aisdlc.console.domain.model.task.Task;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -32,9 +35,11 @@ import java.util.UUID;
 public class TaskController {
 
     private final ManageTaskUseCase tasks;
+    private final ExecutionQueryUseCase executions;
 
-    public TaskController(ManageTaskUseCase tasks) {
+    public TaskController(ManageTaskUseCase tasks, ExecutionQueryUseCase executions) {
         this.tasks = tasks;
+        this.executions = executions;
     }
 
     @PostMapping("/goals/{goalId}/tasks")
@@ -51,9 +56,13 @@ public class TaskController {
     }
 
     @GetMapping("/tasks/{id}")
-    @Operation(summary = "查詢任務詳情", description = "含最近一次執行日誌與執行歷史（Phase 2 歷史為空清單）")
+    @Operation(summary = "查詢任務詳情",
+            description = "含最近一次執行日誌與執行歷史：executionHistory 由 execution_steps 依 task_id 衍生（跨執行批次、依時間升冪、"
+                    + "最多最近 200 筆；STARTED／RETRYING／COMPLETED／FAILED 各一列；tokensUsed 只在 COMPLETED／FAILED 列）；從未執行過為空清單")
     public ApiResult<TaskDetailResponse> get(@PathVariable UUID id) {
-        return ApiResult.ok(TaskDetailResponse.from(tasks.get(id)));
+        Task task = tasks.get(id);
+        return ApiResult.ok(TaskDetailResponse.from(task,
+                executions.taskHistory(id).stream().map(ExecutionStepBrief::from).toList()));
     }
 
     @PutMapping("/tasks/{id}")

@@ -10,6 +10,13 @@ console:
       # 測試 profile 預設關閉限流（否則整套 IT 共用同一批 token 會互相擠掉額度）；
       # RateLimitIT 以 @TestPropertySource 開著它打 101 次，驗第 101 次回 429（契約 §0.4 第 4 點）。
       enabled: false
+  monitor:
+    # 測試 profile 預設不啟動背景工作（啟動對帳、探測、30 秒 tick）：整合測試共用一個資料庫，背景執行緒會與測試互踩；
+    # 需要它的測試自行以 @TestPropertySource 開啟，或直接呼叫 MonitorTicker／RunConsumers。
+    background-enabled: false
+  sse:
+    # 與 e2e profile 一致（契約附錄 D.2：e2e／test profile 覆寫為 2），讓 keep-alive 測試不必等 15 秒。
+    keep-alive-seconds: 2
 management:
   prometheus:
     metrics:

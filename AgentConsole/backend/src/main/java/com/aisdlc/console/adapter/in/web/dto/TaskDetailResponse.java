@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-/** 任務詳情（Architecture §11.2 的 D 欄）：全部欄位＋最近一次執行日誌＋執行歷史（Phase 2 為空清單）。 */
+/** 任務詳情（Architecture §11.2 的 D 欄）：全部欄位＋最近一次執行日誌＋執行歷史（由 execution_steps 衍生；從未執行過的任務為空清單）。 */
 public record TaskDetailResponse(
         @NotNull UUID id,
         @NotNull UUID goalId,
@@ -36,11 +36,11 @@ public record TaskDetailResponse(
         Instant startedAt,
         Instant completedAt) {
 
-    public static TaskDetailResponse from(Task t) {
+    public static TaskDetailResponse from(Task t, List<ExecutionStepBrief> history) {
         return new TaskDetailResponse(t.id(), t.goalId(), t.name(), t.description(), t.passCriteria(),
                 t.evaluatorCommand(), t.expectedOutputRegex(), JsonSupport.toObject(t.passCriteriaSpec()),
                 t.sortOrder(), t.status(), t.estimatedTokens(), t.actualTokens(), t.retryCount(), t.maxRetries(),
-                t.assignedAgent(), t.executionLog(), List.of(), t.signedOff(), t.signedOffBy(), t.signedOffAt(),
+                t.assignedAgent(), t.executionLog(), history, t.signedOff(), t.signedOffBy(), t.signedOffAt(),
                 t.createdAt(), t.updatedAt(), t.startedAt(), t.completedAt());
     }
 }

@@ -2,6 +2,7 @@ package com.aisdlc.console.adapter.out.bridge;
 
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.domain.exception.UpstreamException;
+import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatusCode;
@@ -16,17 +17,33 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InterruptedIOException;
+import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
+import java.net.URI;
 import java.net.UnknownHostException;
+import java.net.http.HttpClient;
 import java.net.http.HttpConnectTimeoutException;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 /**
  * {@link AgentBridge} 的 {@code RestClient} 實作（契約 §3.1／§3.2）。Bridge 只有 console-api 以服務身分呼叫
@@ -46,7 +63,25 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final Duration HEALTH_READ_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration APPROVE_READ_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration COMPILE_READ_TIMEOUT = Duration.ofSeconds(15);
+    // 契約 §3.1 呼叫總表：連線 2s，讀取逾時依呼叫而定
+    private static final Duration START_READ_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration PAUSE_READ_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration RESUME_READ_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration STOP_READ_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration RESTORE_READ_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration GET_READ_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration EVENTS_READ_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration CHECKPOINTS_READ_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration STREAM_CONNECT_TIMEOUT = Duration.ofSeconds(3);
+    private static final int GET_RETRIES = 2;
+    private static final long GET_RETRY_BACKOFF_MS = 200;
     private static final int MAX_BODY_BYTES = 8 * 1024 * 1024;
+    /** SSE 閒置看門狗的共用排程器（daemon；每個串流各自 arm／disarm）。 */
+    private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "bridge-sse-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final RestClient.Builder builder;
     private final BridgeEndpoints endpoints;
@@ -110,6 +145,299 @@ class BridgeHttpAdapter implements AgentBridge {
         } catch (RuntimeException e) {
             LOG.debug("Bridge 健康探測失敗：{}", e.toString());
             return new BridgeHealth(false, 0);
+        }
+    }
+
+    // ── W3-B2：runs 系列（契約 §3.1；逾時與重試照呼叫總表）──────────────────────────────────────────
+
+    @Override
+    public RunStarted startRun(StartRunRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("run_id", request.runId().toString());
+        body.put("project", request.project());
+        body.put("execution_path", request.executionPath());
+        body.put("playbook", request.playbook());
+        body.put("config_overrides", request.configOverrides());
+        body.put("env", request.env());
+        body.put("fresh", request.fresh());
+        Map<String, Object> doc = postJson(runsBase() + "/autoclaude/runs", body, START_READ_TIMEOUT);
+        return new RunStarted(text(doc.get("run_id")), statusOf(doc.get("status")),
+                doc.get("pid") instanceof Number n ? n.intValue() : null, text(doc.get("workspace")),
+                text(doc.get("bridge_instance")));
+    }
+
+    @Override
+    public BridgeStatus pauseRun(UUID runId) {
+        return statusOf(postJson(runsBase() + "/autoclaude/runs/" + runId + ":pause", Map.of(), PAUSE_READ_TIMEOUT)
+                .get("status"));
+    }
+
+    @Override
+    public BridgeStatus resumeRun(UUID runId, Map<String, String> env) {
+        Map<String, Object> body = env == null || env.isEmpty() ? Map.of() : Map.of("env", env);
+        return statusOf(postJson(runsBase() + "/autoclaude/runs/" + runId + ":resume", body, RESUME_READ_TIMEOUT)
+                .get("status"));
+    }
+
+    @Override
+    public BridgeStatus stopRun(UUID runId) {
+        return statusOf(postJson(runsBase() + "/autoclaude/runs/" + runId + ":stop", Map.of(), STOP_READ_TIMEOUT)
+                .get("status"));
+    }
+
+    @Override
+    public void restoreRun(UUID runId, UUID checkpointId, Map<String, String> env) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("checkpoint_id", checkpointId.toString());
+        if (env != null && !env.isEmpty()) {
+            body.put("env", env);
+        }
+        postJson(runsBase() + "/autoclaude/runs/" + runId + "/restore", body, RESTORE_READ_TIMEOUT);
+    }
+
+    @Override
+    public RunSnapshot getRun(UUID runId) {
+        Map<String, Object> doc = asMap(getJson(runsBase() + "/autoclaude/runs/" + runId, GET_READ_TIMEOUT));
+        return new RunSnapshot(text(doc.get("run_id")), statusOf(doc.get("status")), text(doc.get("reason")),
+                intOrNull(doc.get("pid")), text(doc.get("started_at")), text(doc.get("completed_at")),
+                intOrNull(doc.get("exit_code")), text(doc.get("current_step")), intOrNull(doc.get("current_step_number")),
+                intOrZero(doc.get("attempt")), intOrZero(doc.get("completed_steps")), intOrZero(doc.get("total_steps")),
+                doc.get("tokens_used") instanceof Number n ? n.longValue() : 0L, intOrZero(doc.get("last_event_seq")),
+                text(doc.get("project")), text(doc.get("execution_path")), text(doc.get("bridge_instance")));
+    }
+
+    @Override
+    public List<BridgeEvent> listEvents(UUID runId, int after, int limit) {
+        Object doc = getJson(runsBase() + "/autoclaude/runs/" + runId + "/events?after=" + after + "&limit=" + limit,
+                EVENTS_READ_TIMEOUT);
+        List<BridgeEvent> events = new ArrayList<>();
+        for (Object item : asList(doc)) {
+            Map<String, Object> map = new LinkedHashMap<>(asMap(item));
+            String event = text(map.remove("event"));
+            events.add(eventOf(event, map, null));
+        }
+        return events;
+    }
+
+    @Override
+    public List<BridgeCheckpoint> listCheckpoints(UUID runId) {
+        Object doc = getJson(runsBase() + "/autoclaude/runs/" + runId + "/checkpoints", CHECKPOINTS_READ_TIMEOUT);
+        List<BridgeCheckpoint> checkpoints = new ArrayList<>();
+        for (Object item : asList(doc)) {
+            Map<String, Object> map = asMap(item);
+            checkpoints.add(new BridgeCheckpoint(text(map.get("checkpoint_id")), text(map.get("name")),
+                    text(map.get("created_at")), intOrZero(map.get("step_idx")), text(map.get("step_id")),
+                    !Boolean.FALSE.equals(map.get("is_automatic"))));
+        }
+        return checkpoints;
+    }
+
+    @Override
+    public void streamEvents(UUID runId, int afterSeq, Duration idleTimeout, Consumer<BridgeEvent> handler) {
+        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(STREAM_CONNECT_TIMEOUT).build();
+        HttpRequest request = HttpRequest.newBuilder(URI.create(runsBase() + "/autoclaude/runs/" + runId
+                + "/stream?after=" + afterSeq)).header("Accept", "text/event-stream").GET().build();
+        IdleWatchdog watchdog = new IdleWatchdog(Thread.currentThread(), idleTimeout);
+        try {
+            watchdog.arm();
+            HttpResponse<Stream<String>> response = http.send(request, HttpResponse.BodyHandlers.ofLines());
+            if (response.statusCode() != 200) {
+                try (Stream<String> body = response.body()) {
+                    handle(HttpStatusCode.valueOf(response.statusCode()), String.join("\n", body.toList()));
+                }
+                throw new UpstreamException.Failure("Bridge 事件串流回了非預期的狀態 " + response.statusCode(),
+                        Map.of("bridgeStatus", response.statusCode()));
+            }
+            try (Stream<String> lines = response.body()) {
+                SseFrameParser parser = new SseFrameParser(handler);
+                for (Iterator<String> it = lines.iterator(); it.hasNext();) {
+                    watchdog.arm();
+                    parser.feed(it.next());
+                }
+            }
+        } catch (InterruptedException e) {
+            throw streamInterrupted(watchdog, e);
+        } catch (UncheckedIOException e) {
+            throw watchdog.fired() || e.getCause() instanceof InterruptedIOException
+                    ? streamInterrupted(watchdog, e) : translateIo(e.getCause());
+        } catch (IOException e) {
+            throw watchdog.fired() ? streamInterrupted(watchdog, e) : translateIo(e);
+        } finally {
+            watchdog.disarm();
+        }
+    }
+
+    /** 看門狗逾時（不論 JDK 把中斷包成 {@code InterruptedException}、{@code InterruptedIOException} 或一般 {@code IOException}）＝閒置逾時。 */
+    private static UpstreamException streamInterrupted(IdleWatchdog watchdog, Exception cause) {
+        if (watchdog.fired()) {
+            return new UpstreamException.TimedOut("Engine Bridge 事件串流閒置逾時");
+        }
+        Thread.currentThread().interrupt();
+        return new UpstreamException.Unavailable("Engine Bridge 事件串流被中斷：" + cause.getClass().getSimpleName());
+    }
+
+    private static UpstreamException translateIo(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            if (t instanceof HttpTimeoutException || t instanceof SocketTimeoutException) {
+                return new UpstreamException.TimedOut("Engine Bridge 逾時：" + t.getClass().getSimpleName());
+            }
+        }
+        return new UpstreamException.Unavailable("與 Engine Bridge 通訊失敗：" + e.getClass().getSimpleName());
+    }
+
+    private String runsBase() {
+        return endpoints.autoclaudeBase();
+    }
+
+    private static BridgeEvent eventOf(String event, Map<String, Object> data, Integer fallbackSeq) {
+        int seq = data.get("seq") instanceof Number n ? n.intValue() : fallbackSeq == null ? 0 : fallbackSeq;
+        return new BridgeEvent(seq, text(data.get("ts")), event == null ? "" : event, data);
+    }
+
+    private static BridgeStatus statusOf(Object value) {
+        return BridgeStatus.parse(text(value)).orElseThrow(() -> new UpstreamException.Failure(
+                "Bridge 回了無法辨識的狀態：" + value, Map.of("bridgeStatus", 200)));
+    }
+
+    private static Integer intOrNull(Object value) {
+        return value instanceof Number n ? Integer.valueOf(n.intValue()) : null;
+    }
+
+    private static int intOrZero(Object value) {
+        return value instanceof Number n ? n.intValue() : 0;
+    }
+
+    /** GET＋JSON 解析（物件或陣列）；連線失敗與讀取逾時重試 2 次（200ms 退避，契約 §3.1），4xx／5xx 不重試。 */
+    private Object getJson(String url, Duration readTimeout) {
+        UpstreamException last = null;
+        for (int attempt = 0; attempt <= GET_RETRIES; attempt++) {
+            if (attempt > 0) {
+                try {
+                    Thread.sleep(GET_RETRY_BACKOFF_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new UpstreamException.Unavailable("等待重試時被中斷");
+                }
+            }
+            try {
+                return client(readTimeout).get().uri(url).exchange((req, response) -> {
+                    HttpStatusCode status = response.getStatusCode();
+                    String body = readBody(response.getBody());
+                    if (status.is2xxSuccessful()) {
+                        return parseAny(body);
+                    }
+                    handle(status, body);
+                    return null;
+                });
+            } catch (ResourceAccessException e) {
+                last = translate(e);
+            } catch (UpstreamException.Unavailable | UpstreamException.TimedOut e) {
+                last = e;
+            }
+        }
+        throw last;
+    }
+
+    private static Object parseAny(String body) {
+        try {
+            return JSON.readValue(body, Object.class);
+        } catch (JacksonException e) {
+            throw new UpstreamException.Failure("Bridge 回了無法解析的成功本文", Map.of("bridgeStatus", 200));
+        }
+    }
+
+    /** SSE 閒置看門狗：每收到一行（含 keep-alive 註解）就重新計時；逾時中斷讀取執行緒（Bridge 每 15 秒送 keep-alive）。 */
+    private static final class IdleWatchdog {
+
+        private final Thread reader;
+        private final Duration idleTimeout;
+        private final AtomicBoolean fired = new AtomicBoolean(false);
+        private final AtomicReference<ScheduledFuture<?>> pending = new AtomicReference<>();
+
+        IdleWatchdog(Thread reader, Duration idleTimeout) {
+            this.reader = reader;
+            this.idleTimeout = idleTimeout;
+        }
+
+        void arm() {
+            ScheduledFuture<?> next = WATCHDOG.schedule(() -> {
+                fired.set(true);
+                reader.interrupt();
+            }, idleTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            ScheduledFuture<?> previous = pending.getAndSet(next);
+            if (previous != null) {
+                previous.cancel(false);
+            }
+        }
+
+        boolean fired() {
+            return fired.get();
+        }
+
+        void disarm() {
+            ScheduledFuture<?> previous = pending.getAndSet(null);
+            if (previous != null) {
+                previous.cancel(false);
+            }
+            if (fired.get()) {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    /** 把 SSE 文字行組回事件（{@code event:}、{@code data:}，空行結尾）；註解行與 {@code retry:} 忽略。 */
+    private static final class SseFrameParser {
+
+        private final Consumer<BridgeEvent> handler;
+        private String event;
+        private String id;
+        private final StringBuilder data = new StringBuilder();
+
+        SseFrameParser(Consumer<BridgeEvent> handler) {
+            this.handler = handler;
+        }
+
+        void feed(String line) {
+            if (line.isEmpty()) {
+                dispatch();
+            } else if (line.startsWith(":")) {
+                return;
+            } else if (line.startsWith("event:")) {
+                event = line.substring(6).strip();
+            } else if (line.startsWith("id:")) {
+                id = line.substring(3).strip();
+            } else if (line.startsWith("data:")) {
+                if (!data.isEmpty()) {
+                    data.append('\n');
+                }
+                data.append(line.substring(5).stripLeading());
+            }
+        }
+
+        private void dispatch() {
+            String name = event;
+            String payload = data.toString();
+            String frameId = id;
+            event = null;
+            id = null;
+            data.setLength(0);
+            if (name == null || payload.isEmpty()) {
+                return;
+            }
+            Map<String, Object> map;
+            try {
+                map = new LinkedHashMap<>(asMap(JSON.readValue(payload, Object.class)));
+            } catch (JacksonException e) {
+                LOG.warn("略過無法解析的 Bridge 事件本文：{}", payload.length() > 200 ? payload.substring(0, 200) : payload);
+                return;
+            }
+            Integer fallback = null;
+            if (frameId != null && frameId.matches("[0-9]+")) {
+                fallback = Integer.valueOf(frameId);
+            }
+            map.remove("event");
+            handler.accept(eventOf(name, map, fallback));
         }
     }
 

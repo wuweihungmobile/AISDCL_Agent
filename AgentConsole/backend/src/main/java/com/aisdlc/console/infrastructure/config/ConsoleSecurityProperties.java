@@ -21,6 +21,7 @@ import java.util.Map;
  *                          要用其他供應商須由部署者明確加入，且 Bridge 的 {@code BRIDGE_OUTBOUND_ALLOWLIST} 也要含該 host
  * @param allowLoopback     是否放行「列在 allowlist 內」的 loopback（e2e 的假伺服器綁在 127.0.0.1）
  * @param testDnsOverrides  測試用 DNS 覆寫（{@code host: ip}），讓 {@code dns_rebinding} 可決定性重現
+ * @param evaluatorAllowlist 評估指令可執行檔白名單（契約附錄 D.3；只看第一個 token，去路徑與 .exe／.cmd／.bat、不分大小寫）
  */
 @Validated
 @ConfigurationProperties(prefix = "console.security")
@@ -29,7 +30,11 @@ public record ConsoleSecurityProperties(
         @DefaultValue({"api.minimax.io", "api.minimax.chat"}) List<String> outboundAllowlist,
         @DefaultValue("false") boolean allowLoopback,
         @DefaultValue Map<String, String> testDnsOverrides,
-        @Valid @DefaultValue RateLimit rateLimit) {
+        @Valid @DefaultValue RateLimit rateLimit,
+        @NotEmpty(message = "console.security.evaluator-allowlist 至少要有一個可執行檔")
+        @DefaultValue({"pytest", "python", "python3", "py", "npm", "npx", "node", "pnpm", "yarn", "mvn", "mvnw",
+                "gradle", "gradlew", "java", "dotnet", "go", "cargo", "make", "tsc", "eslint", "ruff", "mypy",
+                "git"}) List<String> evaluatorAllowlist) {
 
     /**
      * 限流（NFR-9.2-06；契約 §0.4 第 4 點）。

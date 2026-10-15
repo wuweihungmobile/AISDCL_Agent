@@ -55,4 +55,34 @@ public final class ErrorReasons {
     public static final String SETTINGS_FILE_TYPE = "只接受 JSON 設定檔";
     /** 匯入設定檔時，檔案裡有一筆「不存在於系統的鍵」（契約 §1.5.10）。 */
     public static final String CONFIG_KEY_UNKNOWN = "設定鍵不存在";
+
+    // ── 執行（Phase 4；附錄 B.2）────────────────────────────────────────────
+    /** PRD 逐字（API-EXE-11）。 */
+    public static final String UNSIGNED_DRAFT = "未經人工審批的草案不可執行";
+    public static final String PROJECT_EXECUTING = "專案正在執行中";
+    public static final String PROJECT_STATE_NOT_EXECUTABLE = "專案狀態不允許執行";
+    public static final String SCOPE_INVALID = "所選範圍不合法";
+    public static final String SCOPE_ALREADY_DONE = "所選任務或目標已完成";
+    public static final String SCOPE_MISSING_DEPENDENCIES = "所選目標依賴未完成的前置目標";
+    public static final String NOTHING_TO_EXECUTE = "沒有可執行的任務";
+    /** 與 Phase 2 的 {@code DagService.CYCLE_REASON} 同字串（附錄 B.1：400／執行時偵測到成環為 409）。 */
+    public static final String DEPENDENCY_CYCLE = "依賴成環";
+    public static final String PROMPT_TOO_LONG = "步驟 prompt 超過 20000 字元上限";
+    public static final String EVALUATOR_DENIED_CHARS = "評估指令含禁用字元";
+    public static final String EVALUATOR_NOT_ALLOWED = "評估指令不在可執行檔白名單";
+    public static final String REGEX_NOT_COMPILABLE = "expectedOutputRegex 無法編譯";
+    public static final String TOO_MANY_TASKS = "範圍任務數超過單一批次上限 500";
+    public static final String MAX_RETRIES_EXCEEDED = "任務最大重試次數超過上限 20";
+    public static final String LOCK_HELD = "同專案同路徑已有執行中的批次";
+    public static final String RUN_STATE_NOT_ALLOWED = "目前執行狀態不允許此操作";
+    public static final String NO_CHECKPOINT = "找不到可續跑的 checkpoint";
+    public static final String RUN_UNKNOWN_AT_BRIDGE = "引擎端已無此執行（工作區可能已清除）";
+    public static final String RESTORE_ONLY_LATEST = "只能還原專案最新的執行批次";
+    public static final String REVIEW_ALREADY_DECIDED = "審核項已處理";
+    public static final String REVIEW_DECISION_NOT_ALLOWED = "此審核項不允許該決定";
+
+    // ── 監控（Phase 5）──────────────────────────────────────────────────────
+    public static final String TIME_RANGE_INVALID = "時間範圍不合法";
+    public static final String REPORT_FORMAT_UNSUPPORTED = "不支援的報表格式";
+    public static final String PDF_NOT_AVAILABLE = "PDF 報表尚未提供（W5）";
 }

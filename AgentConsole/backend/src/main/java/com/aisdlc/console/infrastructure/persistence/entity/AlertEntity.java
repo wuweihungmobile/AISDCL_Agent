@@ -46,4 +46,12 @@ public class AlertEntity {
 
     @Column(name = "acknowledged_at")
     public Instant acknowledgedAt;
+
+    /** 重播錨點（V7；契約 §2.2）：建立當下已處理到的最後一則 Bridge 事件 seq。 */
+    @Column(name = "event_seq", nullable = false)
+    public int eventSeq;
+
+    /** 同錨點下的子序號（≥1）；0＝Bridge 告警事件的持久化鏡像（SSE 不重播它）。 */
+    @Column(name = "event_sub", nullable = false)
+    public int eventSub = 1;
 }

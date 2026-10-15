@@ -9,6 +9,7 @@ import com.aisdlc.console.infrastructure.security.JwtAuthenticationFilter;
 import com.aisdlc.console.infrastructure.security.JwtTokenService;
 import com.aisdlc.console.infrastructure.security.RateLimitFilter;
 import com.aisdlc.console.infrastructure.security.RestSecurityHandlers;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.Filter;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -66,6 +67,10 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(authorize -> authorize
+                        // SseEmitter 完成時容器以 ASYNC dispatch 再走一次過濾鏈（契約 §2.1、TBC-1）：JwtAuthenticationFilter 是
+                        // OncePerRequestFilter（不處理 ASYNC）、API 又沒有 session，這次 dispatch 會被判成未認證而在已提交的回應上丟
+                        // AccessDeniedException。ASYNC dispatch 是同一個已授權請求的內部重派，放行它不開任何新入口。
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**")

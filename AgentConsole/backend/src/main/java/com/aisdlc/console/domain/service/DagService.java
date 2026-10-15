@@ -46,6 +46,47 @@ public final class DagService {
     }
 
     /**
+     * 分層 Kahn（契約 §1.2.1 的範圍解析）：每一輪取出「目前全部前置依賴都已排定」的節點（同一層），
+     * 層內依 {@code tieBreak} 排序後接在結果後面；下一層以此類推。{@code tieBreak} 為 null 時層內保持輸入順序。
+     * 這是 {@code execution.dagSchedulerStrategy} 的三種策略（TOPOLOGICAL／PRIORITY／SHORTEST_FIRST）共用的骨架：
+     * 策略只決定同層的比較器。
+     *
+     * @throws ValidationException 圖含環時（reason＝{@link #CYCLE_REASON}）
+     */
+    public static List<UUID> layeredOrder(Map<UUID, ? extends Collection<UUID>> dependsOn,
+                                          java.util.Comparator<UUID> tieBreak) {
+        Map<UUID, Set<UUID>> deps = new LinkedHashMap<>();
+        for (Map.Entry<UUID, ? extends Collection<UUID>> entry : dependsOn.entrySet()) {
+            deps.computeIfAbsent(entry.getKey(), k -> new LinkedHashSet<>());
+            for (UUID dependency : entry.getValue()) {
+                deps.computeIfAbsent(dependency, k -> new LinkedHashSet<>());
+                deps.get(entry.getKey()).add(dependency);
+            }
+        }
+        List<UUID> order = new ArrayList<>();
+        Set<UUID> placed = new LinkedHashSet<>();
+        Set<UUID> remaining = new LinkedHashSet<>(deps.keySet());
+        while (!remaining.isEmpty()) {
+            List<UUID> layer = new ArrayList<>();
+            for (UUID node : remaining) {
+                if (placed.containsAll(deps.get(node))) {
+                    layer.add(node);
+                }
+            }
+            if (layer.isEmpty()) {
+                throw cycleException(extractCycle(new Run(deps, order, remaining)));
+            }
+            if (tieBreak != null) {
+                layer.sort(tieBreak);
+            }
+            order.addAll(layer);
+            placed.addAll(layer);
+            layer.forEach(remaining::remove);
+        }
+        return order;
+    }
+
+    /**
      * 找出一條實際的環路；無環回 empty。回傳的清單首尾相同（例：[A, B, C, A] 表示 A 依賴 B、B 依賴 C、C 依賴 A）。
      */
     public static Optional<List<UUID>> findCycle(Map<UUID, ? extends Collection<UUID>> dependsOn) {

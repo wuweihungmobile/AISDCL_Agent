@@ -75,4 +75,11 @@ public class ExecutionRunEntity {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "dag", updatable = false, columnDefinition = "jsonb")
     public String dag;
+
+    /**
+     * console-api 已處理到的 Bridge 事件 seq（V7；Console 擁有，Bridge 不寫）。為避免 JPA 整列回寫蓋掉其他寫入者，
+     * 實體對它唯讀；實際推進只用目標明確的 {@code UPDATE … SET console_last_seq = ?}（{@code ExecutionRunRepositoryAdapter}）。
+     */
+    @Column(name = "console_last_seq", insertable = false, updatable = false)
+    public Integer consoleLastSeq;
 }

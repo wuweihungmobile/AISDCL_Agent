@@ -59,7 +59,30 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/settings/{category}", List.of("get")),
             Map.entry("/api/v1/settings/{category}/reset", List.of("post")),
             Map.entry("/api/v1/settings/{category}/{key}", List.of("put")),
-            Map.entry("/api/v1/settings/{category}/{key}/reset", List.of("post"))));
+            Map.entry("/api/v1/settings/{category}/{key}/reset", List.of("post")),
+            // ── W3-B2：專案執行（Phase 4）──
+            Map.entry("/api/v1/projects/{projectId}/execute", List.of("post")),
+            Map.entry("/api/v1/projects/{projectId}/executions", List.of("get")),
+            Map.entry("/api/v1/executions/{runId}", List.of("get")),
+            Map.entry("/api/v1/executions/{runId}/pause", List.of("post")),
+            Map.entry("/api/v1/executions/{runId}/resume", List.of("post")),
+            Map.entry("/api/v1/executions/{runId}/cancel", List.of("post")),
+            Map.entry("/api/v1/executions/{runId}/steps", List.of("get")),
+            Map.entry("/api/v1/executions/{runId}/dag", List.of("get")),
+            Map.entry("/api/v1/executions/{runId}/checkpoints", List.of("get")),
+            Map.entry("/api/v1/executions/{runId}/restore/{checkpointId}", List.of("post")),
+            Map.entry("/api/v1/executions/{runId}/review/{stepId}", List.of("post")),
+            // ── W3-B2：專案監控（Phase 5）──
+            Map.entry("/api/v1/monitor/projects/{projectId}/metrics", List.of("get")),
+            Map.entry("/api/v1/monitor/projects/{projectId}/token-trend", List.of("get")),
+            Map.entry("/api/v1/monitor/projects/{projectId}/task-trend", List.of("get")),
+            Map.entry("/api/v1/monitor/projects/{projectId}/alerts", List.of("get")),
+            Map.entry("/api/v1/monitor/alerts/{alertId}/acknowledge", List.of("post")),
+            Map.entry("/api/v1/monitor/projects/{projectId}/logs", List.of("get")),
+            Map.entry("/api/v1/monitor/projects/{projectId}/report", List.of("get")),
+            // ── W3-B2：前端 SSE 兩條端點 ──
+            Map.entry("/api/v1/stream/executions/{runId}/logs", List.of("get")),
+            Map.entry("/api/v1/stream/executions/{runId}/metrics", List.of("get"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -68,10 +91,10 @@ class OpenApiIT extends AbstractApiIT {
     }
 
     @Test
-    void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndTheFirstBackendBaton() {
+    void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(53).containsExactlyElementsOf(EXPECTED.keySet());
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
             assertThat(new TreeSet<>(operations.keySet())).as(expected.getKey())
@@ -193,5 +216,118 @@ class OpenApiIT extends AbstractApiIT {
                 .isEqualTo("integer");
         assertThat(docs.<List<String>>read("$.components.schemas.SettingsExportDocument.required"))
                 .contains("version", "exportedAt", "configs");
+    }
+
+    // ── W3-B2 與契約 openapi-p3-6.yaml 對帳的結論（逐端點比對由 Python 腳本做過；這裡釘住狀態碼集合與幾處易退化的形狀）─────
+
+    /** 契約 yaml 逐端點的狀態碼集合（W3-B2 的 20 個端點）。 */
+    private static final Map<String, Set<String>> W3B2_STATUS_CODES = Map.ofEntries(
+            Map.entry("post /api/v1/projects/{projectId}/execute",
+                    Set.of("201", "400", "401", "403", "404", "409", "422", "429", "502", "504")),
+            Map.entry("get /api/v1/projects/{projectId}/executions", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/executions/{runId}", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/executions/{runId}/pause",
+                    Set.of("200", "400", "401", "403", "404", "409", "429", "502", "504")),
+            Map.entry("post /api/v1/executions/{runId}/resume",
+                    Set.of("200", "400", "401", "403", "404", "409", "429", "502", "504")),
+            Map.entry("post /api/v1/executions/{runId}/cancel",
+                    Set.of("200", "400", "401", "403", "404", "409", "429", "502", "504")),
+            Map.entry("get /api/v1/executions/{runId}/steps", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/executions/{runId}/dag", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/executions/{runId}/checkpoints", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/executions/{runId}/restore/{checkpointId}",
+                    Set.of("200", "400", "401", "403", "404", "409", "422", "429", "502", "504")),
+            Map.entry("post /api/v1/executions/{runId}/review/{stepId}",
+                    Set.of("204", "400", "401", "403", "404", "409", "422", "429", "502", "504")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/metrics", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/token-trend",
+                    Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/task-trend",
+                    Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/alerts", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/monitor/alerts/{alertId}/acknowledge",
+                    Set.of("204", "400", "401", "403", "404", "429")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/logs", Set.of("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/monitor/projects/{projectId}/report",
+                    Set.of("200", "400", "401", "404", "429", "501")),
+            Map.entry("get /api/v1/stream/executions/{runId}/logs", Set.of("200", "204", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/stream/executions/{runId}/metrics",
+                    Set.of("200", "204", "400", "401", "404", "429")));
+
+    @Test
+    void everyW3B2EndpointDocumentsExactlyTheStatusCodesOfTheContract() {
+        Resp docs = docs();
+        assertThat(W3B2_STATUS_CODES).hasSize(20);
+        for (Map.Entry<String, Set<String>> expected : W3B2_STATUS_CODES.entrySet()) {
+            String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
+            String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet())
+                    .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
+        }
+    }
+
+    @Test
+    void theTwoSseEndpointsAcceptBearerOrTheAccessTokenQueryParameter() {
+        Resp docs = docs();
+        assertThat(docs.<String>read("$.components.securitySchemes.queryAccessToken.in")).isEqualTo("query");
+        assertThat(docs.<String>read("$.components.securitySchemes.queryAccessToken.name")).isEqualTo("access_token");
+        for (String tail : List.of("logs", "metrics")) {
+            String path = "/api/v1/stream/executions/{runId}/" + tail;
+            List<Map<String, Object>> security = docs.read("$.paths['" + path + "'].get.security");
+            assertThat(security.stream().flatMap(m -> m.keySet().stream()).toList())
+                    .as(path).containsExactlyInAnyOrder("bearerAuth", "queryAccessToken");
+            assertThat(docs.<List<String>>read("$.paths['" + path + "'].get.parameters[?(@.in=='header')].name"))
+                    .as(path).containsExactly("Last-Event-ID");
+            assertThat(docs.<List<String>>read("$.paths['" + path + "'].get.parameters[?(@.name=='access_token')].in"))
+                    .as(path).containsExactly("query");
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "'].get.responses['200'].content").keySet())
+                    .as(path).containsExactly("text/event-stream");
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "'].get.responses['204']").keySet())
+                    .as(path + " 的 204 沒有本文（契約：結束重連的空回應，不是一條串流）").doesNotContain("content");
+        }
+        assertThat(docs.<List<String>>read("$.paths['/api/v1/stream/executions/{runId}/logs'].get.parameters"
+                + "[?(@.name=='tail')].schema.type")).containsExactly("integer");
+    }
+
+    @Test
+    void theReviewEndpointDocumentsTheFollowUpHeaderAndTheReportDocumentsBothFileTypes() {
+        Resp docs = docs();
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/executions/{runId}/review/{stepId}']"
+                + ".post.responses['204'].headers").keySet()).containsExactly("X-Follow-Up-Run-Id");
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/monitor/projects/{projectId}/report']"
+                + ".get.responses['200'].content").keySet()).containsExactlyInAnyOrder("text/csv", "application/pdf");
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/monitor/projects/{projectId}/report']"
+                + ".get.responses['200'].headers").keySet()).containsExactly("Content-Disposition");
+    }
+
+    @Test
+    void theExecutionAndMonitorSchemasCarryTheContractRequiredFieldsAndNames() {
+        Resp docs = docs();
+        assertThat(docs.<List<String>>read("$.components.schemas.ExecutionRunResponse.required"))
+                .containsExactlyInAnyOrder("id", "projectId", "runNumber", "status", "autonomyLevel", "scope",
+                        "totalTokensUsed", "startedAt");
+        assertThat(docs.<List<String>>read("$.components.schemas.ExecutionRunDetailResponse.required"))
+                .contains("completedSteps", "totalSteps", "pendingReviews", "bridge");
+        assertThat(docs.<List<String>>read("$.components.schemas.ReviewRequestResponse.required"))
+                .containsExactlyInAnyOrder("id", "runId", "kind", "status", "reason", "requestedAt",
+                        "allowedDecisions");
+        assertThat(docs.<List<String>>read("$.components.schemas.ReviewRequest.required"))
+                .containsExactly("decision");
+        assertThat(docs.<List<String>>read("$.components.schemas.MetricValue.required")).containsExactly("value");
+        assertThat(docs.<List<String>>read("$.components.schemas.CheckpointResponse.required"))
+                .containsExactlyInAnyOrder("id", "runId", "name", "createdAt", "isAutomatic");
+        assertThat(docs.<Map<String, Object>>read("$.components.schemas.CheckpointResponse.properties").keySet())
+                .contains("isAutomatic", "stepIdx", "stepId", "completedSteps");
+        assertThat(docs.<List<String>>read("$.components.schemas.DagNode.required"))
+                .containsExactlyInAnyOrder("id", "kind", "label", "status");
+        assertThat(docs.<List<String>>read("$.components.schemas.AlertResponse.properties.rule.enum"))
+                .containsExactlyInAnyOrder("TOKEN_BUDGET_WARNING", "TOKEN_BUDGET_EXCEEDED", "CONSECUTIVE_FAILURES",
+                        "AGENT_UNRESPONSIVE", "TASK_DURATION_EXCEEDED", "HIGH_RETRY_RATE", "ENGINE_ESCALATION",
+                        "ENGINE_TOKEN_HALT");
+        assertThat(docs.<List<String>>read("$.components.schemas.ExecutionStepResponse.properties.status.enum"))
+                .containsExactlyInAnyOrder("STARTED", "COMPLETED", "FAILED", "RETRYING");
+        assertThat(docs.<List<String>>read("$.components.schemas.ExecutionRunResponse.properties.bridgeStatus.enum"))
+                .containsExactlyInAnyOrder("INITIALIZING", "RUNNING", "PAUSING", "PAUSED", "CANCELLING", "COMPLETED",
+                        "FAILED", "CANCELLED");
     }
 }

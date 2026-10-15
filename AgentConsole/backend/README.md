@@ -1,6 +1,6 @@
 # backend（console-api）
 
-Spring Boot **4.1.1**／Java 21／Gradle 9.8.1（Kotlin DSL）／Clean Architecture。本目錄目前交付 PRD **Phase 1**（骨架、Flyway DB Schema、JWT 認證與 RBAC、統一回應封包）、**Phase 2**（專案／目標／任務 CRUD、reorder、目標依賴 Kahn 防環、retry、四條 signoff、NFR-SEC-03 輸入消毒、`draft` 旗標）、**Phase 3**（BRD/PRD 匯入：上傳／貼文字、三條解析路徑、有界閘、人工 signoff 硬閘、單一交易 confirm）、**Phase 6**（系統設定：50 個參數、敏感值 AES-256-GCM、Token Guard 成對校驗、測試連線、匯出入、歷史）與 PRD **§9.2 安全補完**（限流、審計落庫、SSRF allowlist、加密）。Phase 4～5（執行、監控、SSE）是下一波（W3-B2），同一棵樹續做。契約 SSOT：`docs/02_architecture/API_Contract_P3-6.md`＋`openapi-p3-6.yaml`。
+Spring Boot **4.1.1**／Java 21／Gradle 9.8.1（Kotlin DSL）／Clean Architecture。本目錄目前交付 PRD **Phase 1**（骨架、Flyway DB Schema、JWT 認證與 RBAC、統一回應封包）、**Phase 2**（專案／目標／任務 CRUD、reorder、目標依賴 Kahn 防環、retry、四條 signoff、NFR-SEC-03 輸入消毒、`draft` 旗標）、**Phase 3**（BRD/PRD 匯入：上傳／貼文字、三條解析路徑、有界閘、人工 signoff 硬閘、單一交易 confirm）、**Phase 6**（系統設定：50 個參數、敏感值 AES-256-GCM、Token Guard 成對校驗、測試連線、匯出入、歷史）與 PRD **§9.2 安全補完**（限流、審計落庫、SSRF allowlist、加密）；W3-B2 交付 PRD **Phase 4**（專案執行、自治等級審核閘、checkpoint 還原）、**Phase 5**（監控指標、告警六規則、結構化日誌、CSV 報表）與前端 **SSE** 兩條串流（Bridge 事件消費者把引擎事件投影成任務／目標／專案／批次的讀模型）。契約 SSOT：`docs/02_architecture/API_Contract_P3-6.md`＋`openapi-p3-6.yaml`。
 
 > 指令的工作目錄一律假設在 **monorepo 根**；每段 bash 區塊都有 PowerShell 對等區塊。`gradlew` 一律以 `sh gradlew`（Windows 用 `gradlew.bat`）呼叫，不依賴可執行位元。整合測試與 `docker build` 需要 Docker daemon 在線（`docker info` 回 rc=0）。
 
@@ -37,7 +37,19 @@ docker run -d --name console-pg -e POSTGRES_PASSWORD='<YOUR_POSTGRES_PASSWORD>' 
 Push-Location AgentConsole\backend; $env:JWT_SECRET="<YOUR_JWT_SECRET_MIN_32_CHARS>"; $env:CONSOLE_ENCRYPTION_KEY="<YOUR_CONSOLE_ENCRYPTION_KEY>"; $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5433/aisdlc"; $env:SPRING_DATASOURCE_USERNAME="aisdlc"; $env:SPRING_DATASOURCE_PASSWORD="<YOUR_POSTGRES_PASSWORD>"; .\gradlew.bat bootRun; Pop-Location
 docker rm -f console-pg
 ```
-**E2E／本機驗證用 profile**（`SPRING_PROFILES_ACTIVE=e2e`，契約 §5.0.1）：載入 `application-e2e.yml`——放行「列在 allowlist 內」的 loopback（假 chat-completions 伺服器綁 `127.0.0.1`）、`rebind.e2e.test` 解析到私網 `10.0.0.5`（驗 DNS rebinding）、限流開啟並信任 Tomcat 還原的客戶端位址。🔴 這幾個屬性（`allow-loopback`、`test-dns-overrides`）**只在 e2e／test profile 載入**：production 與 `docker` profile 不得出現，link-local／私網在任何設定下都拒絕。
+**E2E／本機驗證用 profile**（`SPRING_PROFILES_ACTIVE=e2e`，契約 §5.0.1）：載入 `application-e2e.yml`——放行「列在 allowlist 內」的 loopback（假 chat-completions 伺服器綁 `127.0.0.1`）、`rebind.e2e.test` 解析到私網 `10.0.0.5`（驗 DNS rebinding）、限流開啟並信任 Tomcat 還原的客戶端位址；W3-B2 另在此 profile 加 `console.execution.mock-env`（附到 Bridge 請求 `env` 的 `MOCK_CLAUDE_*`：每步延遲 0.6 秒、`[FAIL_ME]` 讓 mock claude 失敗）與 `console.sse.keep-alive-seconds=2`。🔴 這幾個屬性（`allow-loopback`、`test-dns-overrides`、`mock-env`）**只在 e2e／test profile 載入**：production 與 `docker` profile 不得出現，link-local／私網在任何設定下都拒絕。
+
+**執行與監控的本機驗證（真 Engine Bridge＋映像內建的 mock claude）**——三個行程各開一個終端前景執行：PostgreSQL（上例）、backend（e2e profile）、Engine Bridge（DB 模式，連同一顆 PG；Bridge 啟動前須先有 backend 跑過 Flyway）。`<E2E_ROOT>` 是你自選的空目錄（放工作區與測試專案，不要放進 repo）；Bridge 的 `BRIDGE_ALLOWED_PATH_ROOTS` 必須含專案的 `executionPath`。起來之後以 admin 把系統參數 `autoclaude.claudeCommand` 設成 `aisdlc-mock-claude` 可執行檔的路徑、`execution.autoResume` 設 `false`，再走「建專案→execute→開 SSE」。
+```bash
+(cd AgentConsole/backend && SPRING_PROFILES_ACTIVE=e2e JWT_SECRET='<YOUR_JWT_SECRET_MIN_32_CHARS>' CONSOLE_ENCRYPTION_KEY='<YOUR_CONSOLE_ENCRYPTION_KEY>' SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5433/aisdlc SPRING_DATASOURCE_USERNAME=aisdlc SPRING_DATASOURCE_PASSWORD='<YOUR_POSTGRES_PASSWORD>' ENGINE_BRIDGE_URL=http://127.0.0.1:8081 sh gradlew bootRun --args='--console.execution.mock-env[MOCK_CLAUDE_TRACE]=<E2E_ROOT>/mock-trace.jsonl')
+(cd AgentConsole/engine-bridge && . ../../.venv/bin/activate && ENGINE_WORKSPACE='<E2E_ROOT>/workspace' BRIDGE_ALLOWED_PATH_ROOTS='<E2E_ROOT>/projects:<E2E_ROOT>/workspace' BRIDGE_DB_DSN='postgresql://aisdlc:<YOUR_POSTGRES_PASSWORD>@localhost:5433/aisdlc' BRIDGE_DB_SCHEMA=console BRIDGE_OUTBOUND_ALLOWLIST=127.0.0.1,localhost BRIDGE_STOP_GRACE_SECONDS=5 BRIDGE_INSTANCE=e2e-bridge uvicorn app.main:app --host 127.0.0.1 --port 8081 --workers 1)
+curl -N -s "http://localhost:8080/api/v1/stream/executions/<RUN_ID>/logs?access_token=<ACCESS_TOKEN>"   # 即時事件；前十行含 retry 與 step 事件
+```
+```powershell
+Push-Location AgentConsole\backend; $env:SPRING_PROFILES_ACTIVE="e2e"; $env:JWT_SECRET="<YOUR_JWT_SECRET_MIN_32_CHARS>"; $env:CONSOLE_ENCRYPTION_KEY="<YOUR_CONSOLE_ENCRYPTION_KEY>"; $env:SPRING_DATASOURCE_URL="jdbc:postgresql://localhost:5433/aisdlc"; $env:SPRING_DATASOURCE_USERNAME="aisdlc"; $env:SPRING_DATASOURCE_PASSWORD="<YOUR_POSTGRES_PASSWORD>"; $env:ENGINE_BRIDGE_URL="http://127.0.0.1:8081"; .\gradlew.bat bootRun --args="--console.execution.mock-env[MOCK_CLAUDE_TRACE]=<E2E_ROOT>\mock-trace.jsonl"; Pop-Location
+Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; $env:ENGINE_WORKSPACE="<E2E_ROOT>\workspace"; $env:BRIDGE_ALLOWED_PATH_ROOTS="<E2E_ROOT>\projects;<E2E_ROOT>\workspace"; $env:BRIDGE_DB_DSN="postgresql://aisdlc:<YOUR_POSTGRES_PASSWORD>@localhost:5433/aisdlc"; $env:BRIDGE_DB_SCHEMA="console"; $env:BRIDGE_OUTBOUND_ALLOWLIST="127.0.0.1,localhost"; $env:BRIDGE_STOP_GRACE_SECONDS="5"; $env:BRIDGE_INSTANCE="e2e-bridge"; uvicorn app.main:app --host 127.0.0.1 --port 8081 --workers 1; Pop-Location
+curl.exe -N -s "http://localhost:8080/api/v1/stream/executions/<RUN_ID>/logs?access_token=<ACCESS_TOKEN>"
+```
 
 啟動即由 Flyway 遷移（不需要手動 Flyway 指令）。另開終端驗證：
 
@@ -71,6 +83,9 @@ docker run --rm -p 8080:8080 -e JWT_SECRET='<YOUR_JWT_SECRET_MIN_32_CHARS>' -e C
 | `ENGINE_BRIDGE_URL` | 否 | Engine Bridge 位址，預設 `http://localhost:8081`。管理員在設定頁改過的 `autoclaude.engineUrl`／`sdd.engineUrl`（值≠預設）優先，下一個 Bridge 呼叫立即生效 |
 | `CONSOLE_SECURITY_OUTBOUND_ALLOWLIST` | 否 | SEC-04 外呼 host 白名單（逗號分隔、精確比對），預設 `api.minimax.io,api.minimax.chat`（與 Bridge 對齊）；要用其他模型供應商須明確加入，且 Bridge 的 `BRIDGE_OUTBOUND_ALLOWLIST` 也要含該 host |
 | `console.security.rate-limit.*`（`enabled`／`requests-per-minute`／`trust-forwarded-for`） | 否 | 限流：每個使用者（JWT subject；未認證才以客戶端位址）每 60 秒 100 次；測試 profile 預設關閉 |
+| `console.execution.consumer.*`（`idle-timeout`／`backoff-initial`／`backoff-max`） | 否 | 事件消費者：Bridge 事件串流閒置逾 45 秒視為斷線，指數退避 1→30 秒重連（位移存 `execution_runs.console_last_seq`）。`console.execution.mock-env` 只在 e2e／test profile |
+| `console.sse.*`（`keep-alive-seconds`／`queue-size`） | 否 | 前端 SSE：連續 15 秒沒有事件送一行 `keep-alive` 註解（e2e／test 為 2）；每個連線送出佇列 1,000 個框架，滿了由伺服器主動關閉（客戶端以 `Last-Event-ID` 重連即補齊） |
+| `console.monitor.*`（`background-enabled`／`tick-interval`／`probe-capacity`） | 否 | 啟動後的 Bridge 探測、啟動對帳與每 30 秒一次的健康探測＋時間型告警；探測結果存記憶體環 2,880 筆（24 小時）。整合測試預設關閉背景工作 |
 | `console.import.max-prompt-chars`／`max-steps` | 否 | 匯入路徑 B 的 LLM 輸入字元上限（預設 120000）／每個目標任務數與目標數上限（預設 24；只准下調，硬上限 24） |
 | `CONSOLE_ADMIN_PASSWORD_HASH`／`CONSOLE_OPERATOR_PASSWORD_HASH`／`CONSOLE_VIEWER_PASSWORD_HASH` | 正式環境必填 | 覆寫三個帳號的 BCrypt 雜湊（見下節）；不設則用開發預設 |
 | `CONSOLE_CORS_ALLOWED_ORIGINS` | 否 | 逗號分隔，預設 `http://localhost:3000`（NFR-9.2-05） |
@@ -92,7 +107,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 (docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>').Split(':', 2)[1]
 ```
 
-## 端點（33 個路徑、42 個操作：Phase 1＋2 的 13 個路徑／22 個操作，加 W3-B1 的 20 個路徑／20 個操作；寫入＝OPERATOR／ADMIN，讀取＝任何已登入角色，系統設定的寫入與工具＝僅 ADMIN）
+## 端點（53 個路徑、62 個操作：Phase 1＋2 的 13 個路徑／22 個操作，加 W3-B1 的 20 個路徑／20 個操作，加 W3-B2 的 20 個路徑／20 個操作；寫入＝OPERATOR／ADMIN，讀取＝任何已登入角色，系統設定的寫入與工具＝僅 ADMIN）
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
@@ -105,7 +120,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | PUT | `/api/v1/goals/reorder` | `{projectId, orderedGoalIds[]}` 須恰好是專案下全部目標；回 204 |
 | POST | `/api/v1/goals/{id}/signoff` | 同專案 signoff |
 | POST／GET | `/api/v1/goals/{goalId}/tasks` | 建立／列表 |
-| GET／PUT／DELETE | `/api/v1/tasks/{id}` | 詳情（含 `executionLog`、`executionHistory`）／更新／軟刪除（RUNNING→409） |
+| GET／PUT／DELETE | `/api/v1/tasks/{id}` | 詳情（含 `executionLog`、`executionHistory`＝由 `execution_steps` 依任務衍生、跨批次依時間升冪、最多最近 200 筆，`tokensUsed` 只在 COMPLETED／FAILED 列）／更新／軟刪除（RUNNING→409） |
 | POST | `/api/v1/tasks/{id}/retry` | 只允許 FAILED／ESCALATED：`retryCount+1`、轉 QUEUED；其他→409 |
 | POST | `/api/v1/tasks/{id}/signoff` | 同專案 signoff |
 
@@ -121,7 +136,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | POST | `/api/v1/import/{id}/signoff` | 🔴 人工 signoff 硬閘：`approver` 非空白；路徑 C 對每個草案呼叫 Bridge `:approve`（失敗不改任何狀態）；只批准、不落庫 |
 | POST | `/api/v1/import/{id}/confirm` | 要求已 signoff；**單一交易**建立專案／目標／任務，全部 `signedOff=true`、`signedOffBy/At` 承襲匯入記錄；回 201 `ProjectResponse` |
 | POST | `/api/v1/import/{id}/reject` | 放棄；IMPORTED／REJECTED／PARSING 回 409 |
-| GET | `/api/v1/notifications/summary` | `pendingSignoffs`（專案＋目標＋任務＋待簽匯入）、`pendingReviews`、`unacknowledgedAlerts`；`bridgeConnected`／`bridgeCheckedAt` 本波恆為 null |
+| GET | `/api/v1/notifications/summary` | `pendingSignoffs`（專案＋目標＋任務＋待簽匯入）、`pendingReviews`（PENDING 的審核項）、`unacknowledgedAlerts`；`bridgeConnected`／`bridgeCheckedAt` 取自 Bridge 探測環的最新一筆（啟動後尚未探測過才是 null） |
 
 **系統設定（Phase 6；契約 §1.5、附錄 C）**——50 個參數、六個分類（`model`／`agent`／`execution`／`monitor`／`autoclaude`／`sdd`）
 
@@ -135,20 +150,47 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | GET | `/api/v1/settings/history` | 修改歷史（新到舊；加密參數的新舊值一律遮罩） |
 | POST | `/api/v1/settings/export`、`/api/v1/settings/import` | 匯出 50 鍵（加密值為 `<encrypted>`）／匯入 JSON 檔（≤ 1MB、`version=1`；逐筆驗證，部分失敗仍 200 並逐筆列 `errors`） |
 
+**專案執行（Phase 4；契約 §1.2、§3.4～§3.6）**——引擎是 Engine Bridge（`AgentBridge` 埠）；批次狀態六態（`INITIALIZING／RUNNING／PAUSED／COMPLETED／FAILED／CANCELLED`），Bridge 的 `PAUSING／CANCELLING` 只出現在 `bridgeStatus`
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| POST | `/api/v1/projects/{projectId}/execute` | 啟動（201）；body 全選填：`autonomyLevel`（1～10，預設取專案值；6～10 不送引擎）、`tokenBudget`、`scope`（`ALL`／`SELECTED`＋`goalIds`／`taskIds`）、`limits`。驗證順序固定：404 專案→400 欄位→409 正在執行／狀態不允許／未經人工審批的草案→400 範圍 id→409 範圍／依賴成環→422 物化失敗→Bridge（409 鎖、422、502、504；Bridge 拒絕時補償刪除剛建的 run 列）。成功＝專案 `EXECUTING`、範圍內任務 `QUEUED`、啟動事件消費者 |
+| GET | `/api/v1/projects/{projectId}/executions` | 批次列表（`page,size,status,sort=startedAt｜runNumber`；每列帶 Token／時間／成功率，終態批次也有） |
+| GET | `/api/v1/executions/{runId}` | 批次詳情＝DB 列合併 Bridge 快照；Bridge 不可達仍 200、`bridge.connected=false`、進度退回 DB 衍生值；`pendingReviews` 只含 PENDING |
+| POST | `/api/v1/executions/{runId}/pause`、`/resume`、`/cancel` | 暫停（下一個步驟邊界生效；回 `bridgeStatus=PAUSING`）／恢復（先重驗範圍內 signoff）／取消（回 `CANCELLING`，任務 `CANCELLED`、專案回 `READY`；終態由 SSE 通知） |
+| GET | `/api/v1/executions/{runId}/steps`、`/dag`、`/checkpoints` | 步驟分頁（`stepNumber`＝該 step 事件的 Bridge seq，`afterSeq` 嚴格大於，`size` ≤ 200）／批次建立時凍結的 DAG＋讀取當下的節點現況／歷史快照（舊→新，不含快照本體） |
+| POST | `/api/v1/executions/{runId}/restore/{checkpointId}` | 從歷史 checkpoint 還原續跑（接受 PAUSED 與終態；只允許專案最新批次；重驗 signoff） |
+| POST | `/api/v1/executions/{runId}/review/{stepId}` | 審核決定 `{decision,comment?}`，`{stepId}` 是 `review_requests.id`；決定須在該審核項的 `allowedDecisions` 內（否則 409）；`SKIP`／找不到還原點的 `RETRY` 另開後續批次，其 id 放回應標頭 `X-Follow-Up-Run-Id`（CORS 已 expose）；成功 204 |
+
+**專案監控（Phase 5；契約 §1.3、§3.7）**
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/monitor/projects/{projectId}/metrics`、`/token-trend`、`/task-trend` | 八項 KPI（含前一個等長視窗的 `previousValue`／`delta`）／Token 趨勢（含預算線）／任務趨勢；`runId`、`from`、`to`、`bucket` 選填（預設最近 24 小時；視窗 ≤ 48 小時用 `HOUR` 否則 `DAY`）；時間為 ISO-8601 帶 offset（未編碼的 `+` 被解成空白時會還原） |
+| GET | `/api/v1/monitor/projects/{projectId}/alerts`、`/logs` | 告警（新到舊，`limit` ≤ 200）／結構化日誌（來源 RUN／STEP／ALERT／REVIEW，由 `execution_runs`、`execution_steps`、`alerts`、`review_requests` 衍生；`level,taskId,q,order,page,size`） |
+| GET | `/api/v1/monitor/projects/{projectId}/report` | CSV 報表（UTF-8 BOM、CRLF、RFC 4180；`=`／`+`／`-`／`@` 開頭的文字欄位前補單引號防 CSV 注入）；`format=pdf` 回 501；`Content-Disposition` 已 expose |
+| POST | `/api/v1/monitor/alerts/{alertId}/acknowledge` | 確認告警（冪等，204）；確認後同一規則＋對象可再產生新告警 |
+
+**前端 SSE（契約 §2）**
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/stream/executions/{runId}/logs`、`/metrics` | `text/event-stream`。認證：`Authorization: Bearer` 或 `?access_token=`（EventSource 不能帶標頭；只收 access token、只在此路徑）。第一個框架是 `retry:3000`；事件的 `id:` 沿用 Bridge seq，後端自產的審核項／告警用 `<seq>.<n>`，嚴格遞增；`Last-Event-ID` 重播未送達事件；`/logs` 事件＝`log`／`status-change`／`review-request`／`alert`，`/metrics` 事件＝`progress-update`／`token-update`／`metric-update`（收斂快照 `<S>.1`～`<S>.3`）；PAUSED 不結束串流，終態後送完 `status-change` 與衍生事件才關閉；run 已終態且沒有可送的內容回 204 |
+
 **回應封包**（PRD §7.2）：成功 `{code,message:"success",data,timestamp,traceId}`；分頁資料在 `data` 內（`content,page,size,totalElements,totalPages`）；錯誤 `{code,message,errors[{field,message}],timestamp,traceId}`，另有選填的 `reason`（例：`依賴成環`）與 `details`（例：環路 id 清單、違規字元清單；**不輸出 null 值**，沒有值的鍵一律缺席）。`traceId` 每請求一個 UUID，同時在回應標頭 `X-Trace-Id` 與日誌 MDC。狀態碼：驗證 400、未認證 401、角色不足 403、找不到（含已軟刪除）404、狀態衝突 409、檔案過大 413、副檔名／內容型別不支援 415、有界閘／政策拒絕 422（有界閘的 `errors[]` 另帶 `gate`／`detail`／`location`）、限流 429（`Retry-After`、`X-RateLimit-Limit`／`-Remaining`）、Bridge 無法連線／錯誤 502、Bridge 逾時 504。`reason` 一律是契約附錄 B 的中文逐字常數（集中在 `domain.exception.ErrorReasons`，前端 `reasons.ts` 與此逐字相同）。
 
 ## 結構（PRD §4.1；規則由 `ArchitectureRulesTest` 以 ArchUnit 鎖住）
 
 | 套件（`com.aisdlc.console.`） | 內容 |
 |------|------|
-| `domain.model.{project,goal,task,auth,imports,config}`、`domain.service`、`domain.exception` | 純 Java（不依賴 Spring／JPA）：聚合與不變式、`StateMachines`（附錄 B）、`DagService`（Kahn）、`PassCriteriaSanitizer`（NFR-SEC-03）；W3-B1 新增 `ImportRecord`（匯入狀態機）、`ParsedResult`（三層草案樹）、`ParsedResultValidator`（有界閘）、`OutboundUrlPolicy`（SEC-04 規則 1～6）、`ConfigCatalog`（50 鍵目錄）／`ConfigValueRules`、`ErrorReasons`（reason 常數） |
-| `application.port.in／out`、`application.service` | 用例介面、出站埠、用例實作（`@Service`、交易邊界）。W3-B1 的出站埠：`AgentBridge`（`decompose`／`approveDraft`／`sddCompile`／`health`；W3-B2 在同一介面補 runs 系列）、`LlmClient`、`OutboundHttp`、`SecretCipher`、`DocumentTextExtractor`、`AuditTrail`、`SettingValues`；`ImportService`（parse／signoff 以 `TransactionTemplate` 切短交易，失敗先提交再丟例外）、`ImportParser`（三條路徑）、`SettingsService`、`SettingsReader`（給其他用例讀設定的入口，加密值回解密後明文）、`ImportStartupRecovery`（啟動時把殘留的 PARSING 退回 UPLOADED） |
+| `domain.model.{project,goal,task,auth,imports,config,execution,monitor}`、`domain.service`、`domain.exception` | 純 Java（不依賴 Spring／JPA）：聚合與不變式、`StateMachines`（附錄 B）、`DagService`（Kahn）、`PassCriteriaSanitizer`（NFR-SEC-03）；W3-B2 新增 `ExecutionRun`／`DagSnapshot`／`RunScope`／`BridgeStatus`（八態折六態）、`ReviewRequest`、`Alert`，與 `ExecutionPlanner`（範圍→展平 DAG）、`PlaybookBuilder`（任務→playbook、評估指令白名單）、`ReviewGatePolicy`（自治等級審核閘）、`GoalDerivation`（R-goal）、`AlertRules`（告警六規則）；W3-B1 新增 `ImportRecord`（匯入狀態機）、`ParsedResult`（三層草案樹）、`ParsedResultValidator`（有界閘）、`OutboundUrlPolicy`（SEC-04 規則 1～6）、`ConfigCatalog`（50 鍵目錄）／`ConfigValueRules`、`ErrorReasons`（reason 常數） |
+| `application.port.in／out`、`application.service` | 用例介面、出站埠、用例實作（`@Service`、交易邊界）。W3-B1 的出站埠：`AgentBridge`（`decompose`／`approveDraft`／`sddCompile`／`health`；W3-B2 在同一介面補 runs 系列）、`LlmClient`、`OutboundHttp`、`SecretCipher`、`DocumentTextExtractor`、`AuditTrail`、`SettingValues`；`ImportService`（parse／signoff 以 `TransactionTemplate` 切短交易，失敗先提交再丟例外）、`ImportParser`（三條路徑）、`SettingsService`、`SettingsReader`（給其他用例讀設定的入口，加密值回解密後明文）、`ImportStartupRecovery`（啟動時把殘留的 PARSING 退回 UPLOADED）。W3-B2：`ExecuteProjectService`／`RunLauncher`（建 run 列→呼叫 Bridge→失敗補償刪除）、`ExecutionControlService`／`ReviewService`（暫停／恢復／取消／還原／審核）、`ExecutionQueryService`、`RunConsumers`（每個活躍 run 一條虛擬執行緒讀 Bridge 事件串流，位移存 DB，斷線指數退避重連）、`RunEventProcessor`（**每則事件一個交易**：投影任務／目標／專案狀態、審核項、告警與 `console_last_seq`，提交後才發 SSE 框架與執行 `:pause`）、`RunEventHub`／`StreamService`／`StreamConnection`（SSE 扇出、`Last-Event-ID` 重播、去重、有界送出佇列）、`MonitorService`／`TimeRuleEvaluator`／`MonitorTicker`／`BridgeHealthMonitor`、`ConfigMaterializer`（系統參數→Bridge 的 `config_overrides` 與 `env`；API Key 只進 `env`） |
 | `adapter.in.web`（`dto`） | Controller、Request／Response record、`GlobalExceptionHandler`（全後端唯一產生錯誤封包處）、`ErrorResponseDocumentation`（把錯誤封包與各端點實際會回的狀態碼寫進 OpenAPI） |
-| `adapter.out.{persistence,bridge,llm,http,document}` | `*RepositoryAdapter`（Entity↔Domain 轉換）、`BridgeHttpAdapter`（`RestClient`；4xx→`BridgeRejectedException`、5xx→502、連線失敗→502、讀取逾時→504）、`OpenAiCompatibleClient`、`PinnedOutboundHttp`（Apache HttpClient 5：自訂 `DnsResolver` 把連線釘死在已驗證 IP、Host／SNI 用原 host、不跟 redirect）、`DocumentTextExtractorAdapter`（PDFBox 3／POI） |
-| `infrastructure.persistence.{entity,repository}` | 13 個 JPA 實體（對映 V1～V6 的 13 張表）與 Spring Data 儲存庫 |
+| `adapter.out.{persistence,bridge,llm,http,document}` | `*RepositoryAdapter`（Entity↔Domain 轉換；W3-B2 的執行／步驟／checkpoint／Token 樣本／審核項／告警／監控聚合走 `JdbcTemplate`）、`BridgeHttpAdapter`（`RestClient`；4xx→`BridgeRejectedException`、5xx→502、連線失敗→502、讀取逾時→504；事件串流用 JDK `HttpClient` 讀 SSE，不加依賴）、`OpenAiCompatibleClient`、`PinnedOutboundHttp`（Apache HttpClient 5：自訂 `DnsResolver` 把連線釘死在已驗證 IP、Host／SNI 用原 host、不跟 redirect）、`DocumentTextExtractorAdapter`（PDFBox 3／POI） |
+| `infrastructure.persistence.{entity,repository}` | 13 個 JPA 實體與 Spring Data 儲存庫（V1～V7 共 14 張表；`run_token_samples` 只走 JDBC） |
 | `infrastructure.security`、`infrastructure.config` | JWT、過濾器（traceId、限流、審計）、RBAC、CORS、OpenAPI、Bean 裝配；`AesGcmSecretCipher`（`v1:<iv>:<密文>`）、`RateLimiter`（Bucket4j，固定視窗）、`AuditLogWriter`（自己的新交易寫 `audit_log`，失敗只記 WARN） |
 
-**Flyway**（`src/main/resources/db/migration/`）：`V1` 為 PRD §6.2 DDL 逐字（前置 `CREATE SCHEMA console`）；`V2` 六類系統參數種子（`autoclaude.dalBackend` 預設 `FILE`，ADR-001 D13）；`V3` review_requests；`V4` alerts；`V5` 九個引擎對映鍵（合計 50 鍵）＋全 50 鍵的 `validation_rule` 與 `impact_note`（US-S-08）＋`import_records.parse_path／last_parse_errors`＋預設值校正（`model.apiUrl`／`model.name`／`monitor.refreshIntervalMs`，**只在值仍等於舊預設時才改**，不覆蓋管理員改過的值，由 `V5UpgradeMigrationIT` 釘住）；`V6` `audit_log`（寫入端點審計，不記請求本文與 query string）。全部表在 `console` schema；`ddl-auto=validate`。`execution_runs` 的欄位所有權（Bridge 擁有 status 等欄位）由實體的 `insertable／updatable` 與 `ExecutionRunOwnershipIT` 保護。
+**Flyway**（`src/main/resources/db/migration/`）：`V1` 為 PRD §6.2 DDL 逐字（前置 `CREATE SCHEMA console`）；`V2` 六類系統參數種子（`autoclaude.dalBackend` 預設 `FILE`，ADR-001 D13）；`V3` review_requests；`V4` alerts；`V5` 九個引擎對映鍵（合計 50 鍵）＋全 50 鍵的 `validation_rule` 與 `impact_note`（US-S-08）＋`import_records.parse_path／last_parse_errors`＋預設值校正（`model.apiUrl`／`model.name`／`monitor.refreshIntervalMs`，**只在值仍等於舊預設時才改**，不覆蓋管理員改過的值，由 `V5UpgradeMigrationIT` 釘住）；`V6` `audit_log`（寫入端點審計，不記請求本文與 query string）；`V7` 執行事件投影的基礎（W3-B2）：`review_requests`／`alerts` 加重播錨點 `event_seq`／`event_sub`、`execution_runs.console_last_seq`（console-api 已處理到的 Bridge 事件 seq）、`run_token_samples`（Token 趨勢與任務 Token 歸因的來源）、部分唯一索引 `uq_alerts_open_rule_subject`（同一規則＋對象在確認前不重複產生告警；升級行為由 `V5UpgradeMigrationIT` 釘住）。全部表在 `console` schema；`ddl-auto=validate`。`execution_runs` 的欄位所有權（Bridge 擁有 status 等欄位）由實體的 `insertable／updatable` 與 `ExecutionRunOwnershipIT` 保護。
 
 ## 行為備忘（實作時的裁量，QA 與 W3 後端請知悉）
 
@@ -161,10 +203,16 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 - **匯入**：失敗的 `parse` 一律退回 `UPLOADED`，只有「被有界閘拒絕」才寫 `lastParseErrors`，且**不寫** `parsedResult`／`parsePath`（先前成功的結果保留）；`GET /import/{id}` 的 `parsedResult` 在第一次成功解析前為 null。`model.apiUrl` 是**完整的 chat-completions 端點**，後端原樣 POST、不補任何路徑。外呼金鑰只經 `Authorization` 標頭送出，絕不進日誌、審計、錯誤訊息或給 Bridge 的請求本文。
 - **限流**（NFR-9.2-06）：鍵＝JWT subject（未認證才用 `getRemoteAddr()`；過濾器**不**解析 `X-Forwarded-For`），固定 60 秒視窗 100 次，只套 `/api/**`；超限者先得 429 而不是 401／403。
 - **actuator**：只暴露 `health`／`prometheus`（免認證）與 ADMIN 專用的 `info`，其餘端點（env／beans／heapdump／loggers…）不存在（`ActuatorIT` 釘住）。
+- **執行的讀模型是「事件驅動」的**（W3-B2）：任務／目標／專案／批次的狀態不是 REST 呼叫當下改的，而是 `RunConsumers` 讀到 Bridge 事件後在 `RunEventProcessor` 的單一交易內投影——所以 `POST execute` 回 201 時專案已是 `EXECUTING`、任務 `QUEUED`，但 `RUNNING`／`COMPLETED` 要等事件；`pause` 回 `bridgeStatus=PAUSING`、`status` 仍是 `RUNNING`，直到 SSE 送出 `status-change`（`PAUSED`）；審核決定的後續（恢復或另開後續批次）同樣先回 204、狀態隨事件更新。讀模型只反映**專案最新的批次**：審核 `SKIP`／`RETRY` 另開後續批次後，舊批次遲到的終態事件不會把已交給新批次的任務重設回去。人工 `REJECT` 的目標一律 `FAILED`（人類的否決優先於機械推導，AR-11）。
+- **自治等級審核閘**：「提前一步」——要在某一步之後停，必須在那一步 `STARTED` 時就呼叫 `:pause`（等它 `COMPLETED` 才呼叫就晚了一步）；暫停落在步驟邊界，審核項在 `PAUSED` 事件處理時建立（`<seq>.1`）。Level 1＝每個任務之間都停（`TASK_CONFIRM`，可 `APPROVE`／`REJECT`）、2＝每個目標之間停（`GOAL_CONFIRM`）、3＝每個目標完成後停（`GOAL_COMPLETED`，可 `APPROVE`／`REJECT`／`RETRY`）、4＝只有引擎升級（ESCALATION）時才介入、5～10 行為同 5（任何失敗都建審核項；6～10 不另送引擎設定，API-AUT-06）；最後一步完成時 run 直接 `COMPLETED`，不暫停也不建審核項。`ESCALATED` 審核項可 `RETRY`（還原到失敗步驟之前的 checkpoint，沒有就另開後續批次）、`SKIP`（跳過失敗任務，另開後續批次）、`REJECT`。
+- **SSE 的順序與重連**：終態時先送 `status-change`（id＝S），再送它衍生的事件（審核項、告警；id＝`S.n`，n ≥ 1），之後才關閉連線——id 必須嚴格遞增，客戶端依 id 去重，順序顛倒會丟事件。重連用 `Last-Event-ID`（`<seq>` 或 `<seq>.<n>`；格式不合視為沒帶）；`/metrics` 每次連線先送三則最新快照（`<S>.1`～`<S>.3`）。建議的前端做法：優先用 fetch 串流帶 `Authorization`，收到 `retry:3000` 後斷線 3 秒重連並帶最後收到的 id；收到 204 表示不必再重連。串流在連線建立時只算限流的一次請求（連線結束的 ASYNC dispatch 不重複計），被限流的使用者已開著的串流不受影響。
+- **告警**：六條規則（`TOKEN_BUDGET_WARNING`／`TOKEN_BUDGET_EXCEEDED`／`CONSECUTIVE_FAILURES`／`AGENT_UNRESPONSIVE`／`TASK_DURATION_EXCEEDED`／`HIGH_RETRY_RATE`）加引擎升級（`ENGINE_ESCALATION`）與 Token 暫停（`ENGINE_TOKEN_HALT`）的持久化鏡像；同一規則＋對象在被確認前不重複產生（資料庫部分唯一索引兜底）；預算超出與連續失敗會連帶呼叫 `:pause`。其餘 Bridge 的 `alert` 事件（例：`RESTORE`）只轉發給 SSE，不落庫。
+- **啟動對帳**：console-api 啟動後對 `RUNNING`／`PAUSED` 的批次問 Bridge——404 只記 WARN、資料庫不動（狀態欄由 Bridge 擁有）；Bridge 不可達時仍啟動消費者（由連線層重試）。另補一條契約沒寫的：批次在資料庫已是終態、專案卻仍是 `EXECUTING`（停機期間 Bridge 把 run 跑完了），同樣依 `console_last_seq` 補處理。
 
 ## 測試（本棒新增的基礎設施）
 
 - **`AbstractOutboundIT`**：需要外呼的整合測試共同基底——模擬 e2e profile 的外呼設定（`allow-loopback=true`、`rebind.e2e.test→10.0.0.5`、`console.bridge.url` 指向假 Bridge）；`OutboundFakes` 提供三台 JDK `HttpServer` 假伺服器（假 Bridge、假 OpenAI 相容端點、通用目標；記錄每個請求，所以能證明「SSRF 被拒時請求數是 0」「redirect 目標請求數是 0」）。Spring context 只有四種：預設、outbound、production 外呼政策（`allow-loopback=false`）、限流開啟。
+- **`AbstractExecutionIT`＋`MiniBridge`**（W3-B2）：執行與監控的整合測試共同基底——完整 Spring context（`RANDOM_PORT`，真 HTTP）＋迷你 Bridge（`com.aisdlc.minibridge`，JVM 內第二個 Spring 應用，真 HTTP／SSE；事件序列由旋鈕決定：`manualSteps`＋`release(n)` 決定性地控制步驟時序、`failStepIds` 讓步驟重試後失敗、`failNext(route,…)` 注入錯誤回應、`dropStreams()` 模擬斷線）。迷你 Bridge 與真 Bridge 一樣「事件先、欄位後」並把狀態／Token／步驟列／checkpoint 鏡射進同一顆 PG。**`SseProbe`** 是對真伺服器讀 SSE 的測試客戶端（逐行解析 `id／event／data／retry` 與註解）。測試分 2 個 JVM fork 平行（`maxParallelForks=2`），所以迷你 Bridge 一律以命令列引數 `--server.port=0` 起在隨機埠（`application.yml` 的 `server.port: 8080` 會蓋掉 default properties，兩個 fork 會搶同一個埠）。
 - **`ApiClient`**：包 MockMvc（含 `multipart`）；`FakeHttpServer`／`ImportFixtures`／`DocumentFixtures`（測試期用 PDFBox／POI 現場產生 PDF／DOCX，不入庫二進位檔）。
 - 整合測試共用單一 PostgreSQL 18 容器；`AbstractApiIT` 每個測試前清業務資料與審計表，前後都把 `system_configs` 還原為預設並清歷史。
 

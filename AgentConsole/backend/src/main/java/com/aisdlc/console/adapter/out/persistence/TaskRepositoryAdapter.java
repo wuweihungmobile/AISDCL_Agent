@@ -39,6 +39,19 @@ class TaskRepositoryAdapter implements TaskRepository {
     }
 
     @Override
+    public List<Task> findByProjectId(UUID projectId) {
+        return tasks.findByProject(projectId).stream().map(TaskMapper::toDomain).toList();
+    }
+
+    @Override
+    public List<Task> findByIds(java.util.Collection<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return tasks.findByIdInAndDeletedFalse(ids).stream().map(TaskMapper::toDomain).toList();
+    }
+
+    @Override
     public int nextSortOrder(UUID goalId) {
         return tasks.maxSortOrder(goalId) + 1;
     }

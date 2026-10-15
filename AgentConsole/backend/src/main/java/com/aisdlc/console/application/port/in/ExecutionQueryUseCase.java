@@ -1,0 +1,102 @@
+package com.aisdlc.console.application.port.in;
+
+import com.aisdlc.console.domain.model.execution.BridgeStatus;
+import com.aisdlc.console.domain.model.execution.DagSnapshot;
+import com.aisdlc.console.domain.model.execution.ReviewDecision;
+import com.aisdlc.console.domain.model.execution.ReviewKind;
+import com.aisdlc.console.domain.model.execution.ReviewStatus;
+import com.aisdlc.console.domain.model.execution.RunScope;
+import com.aisdlc.console.domain.model.execution.RunStatus;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * 執行批次的讀取用例（契約 §1.2.2～§1.2.9）：批次詳情（DB 列合併 Bridge 快照）、列表、步驟分頁、DAG、斷點。
+ * 回傳的是「視圖」record，由 web 層轉成 DTO（欄位名與契約的 schema 一致）。
+ */
+public interface ExecutionQueryUseCase {
+
+    /** {@link #taskHistory} 的上限：一個任務的歷史不得讓詳情回應無界成長。 */
+    int TASK_HISTORY_LIMIT = 200;
+
+    /** {@code ExecutionRunResponse}：批次快照。{@code bridgeStatus} 為 Bridge 原值（PAUSING／CANCELLING 在此可見）。 */
+    record RunView(UUID id, UUID projectId, int runNumber, RunStatus status, BridgeStatus bridgeStatus,
+                   int autonomyLevel, RunScope scope, long totalTokensUsed, Long tokenBudget, Instant startedAt,
+                   Instant completedAt) {
+    }
+
+    /** {@code CurrentStep}：{@code stepNumber} 是步驟在批次 playbook 內的位置（1 起），不是事件 seq。 */
+    record CurrentStepView(String stepId, int stepNumber, UUID taskId, String taskName, UUID goalId, int attempt) {
+    }
+
+    /** {@code BridgeInfo}：Bridge 不可達時 {@code connected=false}、{@code status} 為 null。 */
+    record BridgeInfoView(boolean connected, String instance, BridgeStatus status, Boolean runKnown,
+                          Instant checkedAt) {
+    }
+
+    /** {@code ReviewRequestResponse}：{@code stepId} 是佐證步驟列 {@code execution_steps.id}（UUID，不是 playbook 的 step_id）。 */
+    record ReviewView(UUID id, UUID runId, ReviewKind kind, ReviewStatus status, UUID stepId, UUID taskId,
+                      UUID goalId, String taskName, String goalName, String reason, Instant requestedAt,
+                      String decidedBy, Instant decidedAt, String comment, List<ReviewDecision> allowedDecisions) {
+    }
+
+    /** {@code ExecutionRunDetailResponse}。 */
+    record RunDetailView(RunView run, CurrentStepView currentStep, int completedSteps, int totalSteps,
+                         Integer lastEventSeq, String reason, long elapsedSec, List<ReviewView> pendingReviews,
+                         BridgeInfoView bridge) {
+    }
+
+    /** {@code ExecutionRunSummaryResponse}。 */
+    record RunSummaryView(UUID id, UUID projectId, int runNumber, RunStatus status, int autonomyLevel,
+                          String scopeMode, long totalTokensUsed, Long tokenBudget, Instant startedAt,
+                          Instant completedAt, long durationSec, int tasksTotal, int tasksCompleted, int tasksFailed,
+                          Double successRate) {
+    }
+
+    /** {@code ExecutionStepResponse}：{@code stepNumber} 是該 step 事件的 Bridge seq，{@code stepId} 才是 playbook 的 step_id。 */
+    record StepView(UUID id, UUID runId, UUID taskId, String taskName, UUID goalId, int stepNumber, String stepId,
+                    Integer attempt, String action, String status, Long tokensUsed, String errorMessage, String output,
+                    Instant timestamp) {
+    }
+
+    /**
+     * 任務詳情的「執行歷史」單筆（{@code ExecutionStepBrief}；US-T-02）：{@code stepNumber} 同 {@link StepView}（該 step 事件的 Bridge seq，
+     * 每個批次各自起算）；{@code tokensUsed} 只有結束的步驟（COMPLETED／FAILED）才有，是該任務在該批次的 Token 歸因累計。
+     */
+    record TaskStepView(UUID id, int stepNumber, String action, String status, Long tokensUsed, String errorMessage,
+                        Instant timestamp) {
+    }
+
+    /** {@code DagNode}：{@code status} 是讀取當下目標／任務的現況。 */
+    record DagNodeView(UUID id, DagSnapshot.NodeKind kind, String label, String status, UUID goalId, String stepId,
+                       Integer sequence) {
+    }
+
+    /** {@code DagResponse}。 */
+    record DagView(UUID runId, List<DagNodeView> nodes, List<DagSnapshot.Edge> edges, Instant statusAsOf) {
+    }
+
+    /** {@code CheckpointResponse}。 */
+    record CheckpointView(UUID id, UUID runId, String name, Instant createdAt, boolean automatic, int stepIdx,
+                          String stepId, int completedSteps) {
+    }
+
+    /** 批次列表的查詢條件（排序鍵 {@code startedAt}／{@code runNumber}）。 */
+    record RunListQuery(RunStatus status, boolean byRunNumber, boolean ascending, int page, int size) {
+    }
+
+    RunDetailView get(UUID runId);
+
+    PageResult<RunSummaryView> list(UUID projectId, RunListQuery query);
+
+    PageResult<StepView> steps(UUID runId, int afterSeq, int page, int size);
+
+    /** 某任務跨批次的步驟歷史：最近 {@value #TASK_HISTORY_LIMIT} 筆，依時間升冪（任務不存在由呼叫端先擋；這裡查不到就回空）。 */
+    List<TaskStepView> taskHistory(UUID taskId);
+
+    DagView dag(UUID runId);
+
+    List<CheckpointView> checkpoints(UUID runId);
+}

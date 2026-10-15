@@ -16,9 +16,10 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V5／V6 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
+ * V5～V7 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
  * 真正會出事的是升級——V5 的「預設值校正」只能在值仍等於舊預設時才改，絕不能蓋掉管理員改過的值；
  * 新增的欄位必須讓既有匯入記錄原封不動；新鍵不能與既有鍵重複。這裡在一個獨立資料庫上先遷到 V4、塞入「管理員改過的」資料，
  * 再遷到最新版，逐項核對。
@@ -128,8 +129,53 @@ class V5UpgradeMigrationIT {
 
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from "
                 + "console.flyway_schema_history where version is not null order by installed_rank");
-        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+    }
+
+    @Test
+    void existingRunsReviewItemsAndAlertsSurviveTheV7UpgradeWithTheDocumentedDefaults() {
+        String database = createDatabase();
+        flyway(database, "6").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        UUID project = UUID.randomUUID();
+        UUID goal = UUID.randomUUID();
+        UUID task = UUID.randomUUID();
+        UUID run = UUID.randomUUID();
+        UUID review = UUID.randomUUID();
+        UUID alert = UUID.randomUUID();
+        jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria) values (?, '升級前的專案', "
+                + "'/p', 'c')", project);
+        jdbc.update("insert into console.goals (id, project_id, name, pass_criteria) values (?, ?, '目標', 'c')",
+                goal, project);
+        jdbc.update("insert into console.tasks (id, goal_id, name, pass_criteria) values (?, ?, '任務', 'c')", task, goal);
+        jdbc.update("insert into console.execution_runs (id, project_id, run_number, status, autonomy_level, scope, "
+                + "total_tokens_used) values (?, ?, 1, 'COMPLETED', 4, '{\"mode\":\"ALL\"}'::jsonb, 1240)", run, project);
+        jdbc.update("insert into console.review_requests (id, run_id, task_id, goal_id, kind, status, reason) values "
+                + "(?, ?, ?, ?, 'TASK_CONFIRM', 'APPROVED', '升級前的審核')", review, run, task, goal);
+        jdbc.update("insert into console.alerts (id, project_id, run_id, rule, severity, subject, message) values "
+                + "(?, ?, ?, 'HIGH_RETRY_RATE', 'WARNING', 'run', '升級前的告警')", alert, project, run);
+
+        flyway(database, null).migrate();
+
+        // 既有資料列原封不動；V7 新欄位取契約 §0.5 載明的預設（重播錨點 0／1、已處理到的事件 seq 0）
+        assertThat(jdbc.queryForMap("select status, total_tokens_used, console_last_seq from console.execution_runs "
+                + "where id = ?", run)).containsEntry("status", "COMPLETED").containsEntry("total_tokens_used", 1240L)
+                .containsEntry("console_last_seq", 0);
+        assertThat(jdbc.queryForMap("select reason, status, event_seq, event_sub from console.review_requests "
+                + "where id = ?", review)).containsEntry("reason", "升級前的審核").containsEntry("status", "APPROVED")
+                .containsEntry("event_seq", 0).containsEntry("event_sub", 1);
+        assertThat(jdbc.queryForMap("select message, acknowledged, event_seq, event_sub from console.alerts "
+                + "where id = ?", alert)).containsEntry("message", "升級前的告警").containsEntry("acknowledged", false)
+                .containsEntry("event_seq", 0).containsEntry("event_sub", 1);
+        assertThat(jdbc.queryForObject("select count(*) from console.run_token_samples", Integer.class)).isZero();
+
+        // 「同一規則＋對象在確認前不重複」的部分唯一索引對升級後的資料同樣生效；確認之後才可再產生
+        String duplicate = "insert into console.alerts (project_id, run_id, rule, severity, subject, message) values "
+                + "(?, ?, 'HIGH_RETRY_RATE', 'WARNING', 'run', '重複')";
+        assertThatThrownBy(() -> jdbc.update(duplicate, project, run)).hasMessageContaining("uq_alerts_open_rule_subject");
+        jdbc.update("update console.alerts set acknowledged = true where id = ?", alert);
+        assertThat(jdbc.update(duplicate, project, run)).isEqualTo(1);
     }
 
     @Test

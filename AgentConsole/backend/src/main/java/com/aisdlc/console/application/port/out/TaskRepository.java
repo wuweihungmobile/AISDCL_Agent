@@ -18,6 +18,12 @@ public interface TaskRepository {
     /** 目標下全部任務，依 sortOrder、createdAt 排序。 */
     List<Task> findByGoalId(UUID goalId);
 
+    /** 專案內全部未軟刪任務（經由其未軟刪的目標），依 sortOrder、createdAt、id 排序（執行範圍解析、監控用）。 */
+    List<Task> findByProjectId(UUID projectId);
+
+    /** 依 id 取一批未軟刪任務。 */
+    List<Task> findByIds(java.util.Collection<UUID> ids);
+
     /** 目標內下一個 sortOrder（現有最大值＋1；沒有任務為 0）。 */
     int nextSortOrder(UUID goalId);
 

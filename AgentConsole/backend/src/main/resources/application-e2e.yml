@@ -6,7 +6,11 @@
 #      link-local／私網任何情形都拒，沒有「允許私網」的旗標（D-47）。
 #    - test-dns-overrides：讓 dns_rebinding 可決定性重現（rebind.e2e.test 在 allowlist 內，但解析到私網 10.0.0.5）。
 # 不是真實機密：本檔不含任何金鑰；CONSOLE_ENCRYPTION_KEY、JWT_SECRET 由啟動環境提供（測試值即可）。
-# W3-B2 在本檔補 console.execution.mock-env、console.sse.keep-alive-seconds（執行與 SSE 的 e2e 專用屬性）。
+# W3-B2 在本檔補 console.execution.mock-env、console.sse.keep-alive-seconds（執行與 SSE 的 e2e 專用屬性）：
+#    - mock-env：附加到 Bridge 請求 env 的 MOCK_CLAUDE_*（引擎的 Claude 替身 aisdlc-mock-claude 的旋鈕；鍵要用方括號才保留
+#      大小寫與底線）。MOCK_CLAUDE_TRACE（與 <E2E_ROOT> 相關的路徑）由啟動環境另給，例：
+#      --console.execution.mock-env[MOCK_CLAUDE_TRACE]=<E2E_ROOT>/mock-trace.jsonl
+#    - keep-alive-seconds＝2：讓 QA 在數秒內就看得到 keep-alive 註解行（production 預設 15）。
 # ============================================================================
 server:
   # Tomcat 的 RemoteIpValve 只信任內網代理位址（預設即涵蓋 nginx 容器與本機測試 client），
@@ -21,3 +25,9 @@ console:
     rate-limit:
       enabled: true
       trust-forwarded-for: true
+  execution:
+    mock-env:
+      "[MOCK_CLAUDE_DELAY]": "0.6"
+      "[MOCK_CLAUDE_FAIL_REGEX]": "\\[FAIL_ME\\]"
+  sse:
+    keep-alive-seconds: 2

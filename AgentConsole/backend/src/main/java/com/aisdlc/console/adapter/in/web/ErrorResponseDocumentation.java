@@ -40,7 +40,17 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/import/{id}/parse", "PUT /api/v1/import/{id}/result", "POST /api/v1/import/{id}/signoff",
             "POST /api/v1/import/{id}/confirm", "POST /api/v1/import/{id}/reject",
             // Phase 6 設定：敏感參數未帶 confirm=true
-            "PUT /api/v1/settings/{category}/{key}", "POST /api/v1/settings/{category}/{key}/reset");
+            "PUT /api/v1/settings/{category}/{key}", "POST /api/v1/settings/{category}/{key}/reset",
+            // Phase 4 執行：草案未 signoff、專案／批次狀態不允許、鎖被占用、審核項已處理…
+            "POST /api/v1/projects/{projectId}/execute", "POST /api/v1/executions/{runId}/pause",
+            "POST /api/v1/executions/{runId}/resume", "POST /api/v1/executions/{runId}/cancel",
+            "POST /api/v1/executions/{runId}/restore/{checkpointId}",
+            "POST /api/v1/executions/{runId}/review/{stepId}");
+
+    /** pause／resume／cancel 的上游錯誤：Bridge 無法連線、逾時（DB 狀態不變）。 */
+    private static final Map<String, String> BRIDGE_UPSTREAM = Map.of(
+            "502", "引擎橋接服務無法連線／回了非預期的錯誤（DB 狀態不變）",
+            "504", "引擎橋接服務逾時（DB 狀態不變）");
 
     /** 其餘（非 400／401／403／404／409／429）的狀態碼：方法＋路徑 → 狀態碼與說明。 */
     private static final Map<String, Map<String, String>> EXTRA = Map.ofEntries(
@@ -61,7 +71,27 @@ public class ErrorResponseDocumentation {
                     "413", "設定檔超過 1MB 上限",
                     "415", "只接受 JSON 設定檔")),
             Map.entry("POST /api/v1/settings/test-connection", Map.of(
-                    "422", "目標位址未通過 SSRF／allowlist 檢查（未發出任何連線）")));
+                    "422", "目標位址未通過 SSRF／allowlist 檢查（未發出任何連線）")),
+            // Phase 4 執行：物化失敗（prompt 超過上限、評估指令、regex、任務數）與 Bridge 的 409／422／502／504
+            Map.entry("POST /api/v1/projects/{projectId}/execute", Map.of(
+                    "422", "物化失敗（步驟 prompt 超過 20000 字元、評估指令禁用字元／不在白名單、regex 無法編譯、範圍任務數超過 500、"
+                            + "任務 maxRetries 超過 20）或 Bridge 拒絕（reason：引擎拒絕此請求）",
+                    "502", "引擎橋接服務無法連線／回了非預期的錯誤（剛建的 run 列已補償刪除）",
+                    "504", "引擎橋接服務逾時（剛建的 run 列已補償刪除）")),
+            Map.entry("POST /api/v1/executions/{runId}/pause", BRIDGE_UPSTREAM),
+            Map.entry("POST /api/v1/executions/{runId}/resume", BRIDGE_UPSTREAM),
+            Map.entry("POST /api/v1/executions/{runId}/cancel", BRIDGE_UPSTREAM),
+            Map.entry("POST /api/v1/executions/{runId}/restore/{checkpointId}", Map.of(
+                    "422", "Bridge 拒絕（execution_path 重驗失敗；reason：引擎拒絕此請求）",
+                    "502", "引擎橋接服務無法連線／回了非預期的錯誤（DB 狀態不變）",
+                    "504", "引擎橋接服務逾時（DB 狀態不變）")),
+            Map.entry("POST /api/v1/executions/{runId}/review/{stepId}", Map.of(
+                    "422", "SKIP／RETRY 開後續批次或 restore 時 Bridge 拒絕（reason：引擎拒絕此請求）",
+                    "502", "引擎橋接服務無法連線／回了非預期的錯誤（審核項維持 PENDING）",
+                    "504", "引擎橋接服務逾時（審核項維持 PENDING）")),
+            // Phase 5 監控：PDF 報表 W5 才提供
+            Map.entry("GET /api/v1/monitor/projects/{projectId}/report", Map.of(
+                    "501", "PDF 報表尚未提供（W5）；format=csv 為必做")));
 
     /** 讀取端點中，會因 {@code reveal=true} 而回 403 的路徑（GET 預設不列 403）。 */
     private static final Set<String> REVEAL_ENDPOINTS = Set.of("GET /api/v1/settings", "GET /api/v1/settings/{category}");

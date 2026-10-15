@@ -129,6 +129,18 @@ public final class Goal {
         updatedAt = now;
     }
 
+    /**
+     * 系統重設（契約 §3.5.3 的 R-goal 推導與人工判定）：直接設定狀態、不經 {@link StateMachines}
+     * （附錄 B.2 沒有 {@code FAILED→IN_PROGRESS}、{@code COMPLETED→任何}）；手動 API 仍完全遵守附錄 B。
+     * 狀態沒變時不動 {@code updatedAt}。
+     */
+    public void systemSetStatus(GoalStatus target, Instant now) {
+        if (status != target) {
+            status = target;
+            updatedAt = now;
+        }
+    }
+
     /** 人工 signoff：approver 不可為空白、不可重複。 */
     public void signoff(String approver, Instant now) {
         if (approver == null || approver.isBlank()) {

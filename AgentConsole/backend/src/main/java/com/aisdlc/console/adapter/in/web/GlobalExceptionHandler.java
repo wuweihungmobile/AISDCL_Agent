@@ -7,6 +7,7 @@ import com.aisdlc.console.domain.exception.DomainException;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.ForbiddenException;
 import com.aisdlc.console.domain.exception.NotFoundException;
+import com.aisdlc.console.domain.exception.NotImplementedYetException;
 import com.aisdlc.console.domain.exception.PayloadTooLargeException;
 import com.aisdlc.console.domain.exception.RateLimitedException;
 import com.aisdlc.console.domain.exception.UnauthorizedException;
@@ -160,6 +161,9 @@ public class GlobalExceptionHandler {
         }
         if (ex instanceof RateLimitedException) {
             return HttpStatus.TOO_MANY_REQUESTS;
+        }
+        if (ex instanceof NotImplementedYetException) {
+            return HttpStatus.NOT_IMPLEMENTED;
         }
         if (ex instanceof UpstreamException.TimedOut) {
             return HttpStatus.GATEWAY_TIMEOUT;

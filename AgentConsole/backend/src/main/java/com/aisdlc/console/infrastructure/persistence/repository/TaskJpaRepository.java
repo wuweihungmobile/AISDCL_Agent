@@ -19,6 +19,14 @@ public interface TaskJpaRepository extends JpaRepository<TaskEntity, UUID> {
 
     List<TaskEntity> findByGoalIdAndDeletedFalseOrderBySortOrderAscCreatedAtAscIdAsc(UUID goalId);
 
+    List<TaskEntity> findByIdInAndDeletedFalse(Collection<UUID> ids);
+
+    /** 專案內全部未軟刪任務（其目標也須未軟刪），依 sortOrder、createdAt、id 排序。 */
+    @Query("select t from TaskEntity t join GoalEntity g on t.goalId = g.id "
+            + "where g.projectId = :projectId and t.deleted = false and g.deleted = false "
+            + "order by t.sortOrder asc, t.createdAt asc, t.id asc")
+    List<TaskEntity> findByProject(@Param("projectId") UUID projectId);
+
     boolean existsByGoalIdAndStatusAndDeletedFalse(UUID goalId, TaskStatus status);
 
     @Query("select coalesce(max(t.sortOrder), -1) from TaskEntity t where t.goalId = :goalId and t.deleted = false")

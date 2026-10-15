@@ -200,6 +200,114 @@ public final class Task {
         retryCount++;
     }
 
+    // ── 執行引擎事件與審核決定造成的狀態變化（契約 §3.5.2／§3.5.3）──────────────────────────────
+    // 這些屬 console-api 的「系統重設」：由事件或審核決定觸發，直接設定結果，不經 StateMachines 的手動轉移表
+    // （附錄 B 沒有 QUEUED→CANCELLED、CANCELLED／COMPLETED／RUNNING→QUEUED 等）；手動 API 仍完全遵守附錄 B。
+
+    /** 系統重設：直接設定狀態（不驗證轉移）。 */
+    public void systemReset(TaskStatus target, Instant now) {
+        status = target;
+        updatedAt = now;
+    }
+
+    /**
+     * 納入新批次範圍：{@code PENDING／BLOCKED／FAILED／ESCALATED／PAUSED→QUEUED} 屬附錄 B.3（走狀態機）；
+     * {@code CANCELLED／RUNNING／VALIDATING→QUEUED} 屬系統重設。COMPLETED／SKIPPED 不應被納入（呼叫端篩掉）。
+     */
+    public void queueForRun(Instant now) {
+        if (StateMachines.canTransition(status, TaskStatus.QUEUED)) {
+            transitionTo(TaskStatus.QUEUED, now);
+        } else {
+            systemReset(TaskStatus.QUEUED, now);
+        }
+    }
+
+    /** step STARTED（第一次）：{@code QUEUED→RUNNING}；來源不是 QUEUED 者先系統重設為 QUEUED。{@code startedAt} 為 null 才寫。 */
+    public void markRunning(String agent, Instant now) {
+        if (status != TaskStatus.QUEUED) {
+            systemReset(TaskStatus.QUEUED, now);
+        }
+        transitionTo(TaskStatus.RUNNING, now);
+        if (startedAt == null) {
+            startedAt = now;
+        }
+        completedAt = null;
+        assignedAgent = agent;
+    }
+
+    /** step COMPLETED：{@code RUNNING→VALIDATING→COMPLETED}，寫 {@code completedAt}；已完成者不動。 */
+    public void markCompleted(Instant now) {
+        if (status == TaskStatus.COMPLETED) {
+            return;
+        }
+        if (status != TaskStatus.RUNNING && status != TaskStatus.VALIDATING) {
+            systemReset(TaskStatus.RUNNING, now);
+        }
+        if (status == TaskStatus.RUNNING) {
+            transitionTo(TaskStatus.VALIDATING, now);
+        }
+        transitionTo(TaskStatus.COMPLETED, now);
+        completedAt = now;
+        if (startedAt == null) {
+            startedAt = now;
+        }
+    }
+
+    /** step FAILED：{@code RUNNING→FAILED}（重試已耗盡的那一次）；已是 FAILED／ESCALATED 者不動。 */
+    public void markFailed(Instant now) {
+        if (status == TaskStatus.FAILED || status == TaskStatus.ESCALATED) {
+            return;
+        }
+        if (status != TaskStatus.RUNNING && status != TaskStatus.VALIDATING) {
+            systemReset(TaskStatus.RUNNING, now);
+        }
+        transitionTo(TaskStatus.FAILED, now);
+    }
+
+    /** run 因引擎升級（ESCALATION）失敗：失敗任務 {@code FAILED→ESCALATED}。 */
+    public void markEscalated(Instant now) {
+        if (status == TaskStatus.FAILED) {
+            transitionTo(TaskStatus.ESCALATED, now);
+        }
+    }
+
+    /** 人工 SKIP：{@code ESCALATED→SKIPPED}（B.3）；其他來源（例如已被系統重設）直接設定。 */
+    public void skip(Instant now) {
+        if (StateMachines.canTransition(status, TaskStatus.SKIPPED)) {
+            transitionTo(TaskStatus.SKIPPED, now);
+        } else {
+            systemReset(TaskStatus.SKIPPED, now);
+        }
+    }
+
+    /** step RETRYING：{@code retryCount+1}，維持 RUNNING（引擎內的 FAILED→QUEUED→RUNNING 折疊）。 */
+    public void countRetry(Instant now) {
+        retryCount++;
+        updatedAt = now;
+    }
+
+    /** 以 token 事件的增量歸因累計（跨所有批次）。 */
+    public void addActualTokens(long delta, Instant now) {
+        if (delta <= 0) {
+            return;
+        }
+        actualTokens = (actualTokens == null ? 0L : actualTokens) + delta;
+        updatedAt = now;
+    }
+
+    /** 最近一次執行日誌（US-T-05）：單任務上限 {@code maxChars}，超出保留尾端。 */
+    public void appendExecutionLog(String line, int maxChars, Instant now) {
+        String merged = executionLog == null || executionLog.isEmpty() ? line : executionLog + "\n" + line;
+        executionLog = merged.length() > maxChars ? merged.substring(merged.length() - maxChars) : merged;
+        updatedAt = now;
+    }
+
+    /** 新一次 STARTED（第一次）時清空重寫。 */
+    public void resetExecutionLog(Instant now) {
+        executionLog = null;
+        updatedAt = now;
+    }
+
     /** 人工 signoff：approver 不可為空白、不可重複。 */
     public void signoff(String approver, Instant now) {
         if (approver == null || approver.isBlank()) {

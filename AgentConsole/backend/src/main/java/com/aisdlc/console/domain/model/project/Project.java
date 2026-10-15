@@ -159,6 +159,35 @@ public final class Project {
         updatedAt = now;
     }
 
+    /**
+     * 系統重設（契約 §3.5.3）：執行事件造成的專案狀態變化，直接設定、不經 {@link StateMachines}
+     * （附錄 B.1 沒有 {@code COMPLETED→EXECUTING}；手動 API 仍完全遵守附錄 B）。狀態沒變時不動 {@code updatedAt}。
+     */
+    public void systemSetStatus(ProjectStatus target, Instant now) {
+        if (status != target) {
+            status = target;
+            updatedAt = now;
+        }
+    }
+
+    /**
+     * execute 成功後進入 EXECUTING：{@code DRAFT／FAILED} 先內部轉 {@code READY} 再轉 {@code EXECUTING}（兩步都合法）；
+     * {@code READY} 直接轉；{@code COMPLETED} 屬系統重設（補了新任務後可再跑，契約 D-31）。
+     */
+    public void startExecuting(Instant now) {
+        if (status == ProjectStatus.EXECUTING) {
+            return;
+        }
+        if (status == ProjectStatus.DRAFT || status == ProjectStatus.FAILED) {
+            transitionTo(ProjectStatus.READY, now);
+        }
+        if (StateMachines.canTransition(status, ProjectStatus.EXECUTING)) {
+            transitionTo(ProjectStatus.EXECUTING, now);
+        } else {
+            systemSetStatus(ProjectStatus.EXECUTING, now);
+        }
+    }
+
     /** 人工 signoff：approver 不可為空白（不可匿名）、不可重複 signoff。 */
     public void signoff(String approver, Instant now) {
         if (approver == null || approver.isBlank()) {

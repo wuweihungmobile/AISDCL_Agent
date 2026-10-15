@@ -8,6 +8,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,13 +25,17 @@ class RbacIT extends AbstractApiIT {
     private record Write(String method, String url, Object body) {
     }
 
-    /** 本波全部寫入端點（PUT／POST／DELETE）；id 一律用真實存在的資源，確保 403 是授權擋的而不是 404。 */
+    /**
+     * 專案／目標／任務（Phase 2）與執行／審核／告警確認（Phase 4～5）的寫入端點（PUT／POST／DELETE）。專案、目標、任務用真實存在的資源，
+     * 確保 403 是授權擋的而不是 404；執行批次、checkpoint、審核項、告警沒有「活著」的實體可用，一律用隨機 UUID——授權發生在 controller 之前，
+     * viewer 的 403 與匿名的 401 與資源存不存在無關（operator 越過授權層後的 404 另有測試證明）。
+     */
     private List<Write> everyWriteEndpoint(String project, String goal, String task) {
         Map<String, Object> newProject = Map.of("name", "X", "executionPath", "/x", "passCriteria", "c");
         Map<String, Object> newGoal = Map.of("name", "X", "passCriteria", "c");
         Map<String, Object> newTask = Map.of("name", "X", "passCriteria", "c");
         Map<String, Object> approver = Map.of("approver", "someone");
-        return List.of(
+        List<Write> phase2 = List.of(
                 new Write("POST", "/api/v1/projects", newProject),
                 new Write("PUT", "/api/v1/projects/" + project, Map.of("name", "renamed")),
                 new Write("DELETE", "/api/v1/projects/" + project, null),
@@ -45,6 +50,21 @@ class RbacIT extends AbstractApiIT {
                 new Write("DELETE", "/api/v1/tasks/" + task, null),
                 new Write("POST", "/api/v1/tasks/" + task + "/retry", null),
                 new Write("POST", "/api/v1/tasks/" + task + "/signoff", approver));
+        List<Write> all = new ArrayList<>(phase2);
+        all.addAll(executionWrites(project, UUID.randomUUID().toString()));
+        return all;
+    }
+
+    /** Phase 4～5 的寫入端點：啟動、暫停、恢復、取消、還原、審核、確認告警。 */
+    private static List<Write> executionWrites(String project, String run) {
+        return List.of(
+                new Write("POST", "/api/v1/projects/" + project + "/execute", Map.of()),
+                new Write("POST", "/api/v1/executions/" + run + "/pause", null),
+                new Write("POST", "/api/v1/executions/" + run + "/resume", null),
+                new Write("POST", "/api/v1/executions/" + run + "/cancel", null),
+                new Write("POST", "/api/v1/executions/" + run + "/restore/" + run, null),
+                new Write("POST", "/api/v1/executions/" + run + "/review/" + run, Map.of("decision", "APPROVE")),
+                new Write("POST", "/api/v1/monitor/alerts/" + run + "/acknowledge", null));
     }
 
     private Resp call(String token, Write write) {
@@ -104,6 +124,41 @@ class RbacIT extends AbstractApiIT {
     }
 
     @Test
+    void viewerReadsTheExecutionAndMonitoringEndpointsAndAnonymousGets401() {
+        String project = createProject("Rbac exec read");
+        String run = UUID.randomUUID().toString();
+        for (String url : List.of("/api/v1/projects/" + project + "/executions",
+                "/api/v1/monitor/projects/" + project + "/metrics",
+                "/api/v1/monitor/projects/" + project + "/token-trend",
+                "/api/v1/monitor/projects/" + project + "/task-trend",
+                "/api/v1/monitor/projects/" + project + "/alerts",
+                "/api/v1/monitor/projects/" + project + "/logs",
+                "/api/v1/monitor/projects/" + project + "/report")) {
+            assertThat(api.get(viewer(), url).status()).as("viewer GET " + url).isEqualTo(200);
+            assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
+        }
+        for (String suffix : List.of("", "/steps", "/dag", "/checkpoints")) {
+            String url = "/api/v1/executions/" + run + suffix;
+            assertThat(api.get(viewer(), url).status()).as("viewer 通過授權層、到 controller 才得 404：GET " + url)
+                    .isEqualTo(404);
+            assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
+        }
+    }
+
+    @Test
+    void operatorAndAdminPassTheAuthorizationLayerOfEveryExecutionWriteAndReachTheController() {
+        // 隨機 UUID 的專案／批次不存在 ⇒ 404 是 controller（用例）回的：證明 403／401 都不是它們造成的
+        List<Write> writes = executionWrites(UUID.randomUUID().toString(), UUID.randomUUID().toString());
+        for (String token : List.of(operator(), admin())) {
+            for (Write write : writes) {
+                Resp resp = call(token, write);
+                assertThat(resp.status()).as(write.method() + " " + write.url()).isEqualTo(404);
+                assertThat(resp.<Integer>read("$.code")).isEqualTo(404);
+            }
+        }
+    }
+
+    @Test
     void publicEndpointsNeedNoToken() {
         assertThat(api.get(null, "/actuator/health").status()).isEqualTo(200);
         assertThat(api.get(null, "/actuator/prometheus").status()).isEqualTo(200);
@@ -148,6 +203,43 @@ class RbacIT extends AbstractApiIT {
         Resp simple = api.send(admin(), MockMvcRequestBuilders.get("/api/v1/projects")
                 .header(HttpHeaders.ORIGIN, "http://localhost:3000"));
         assertThat(simple.header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).contains("X-Trace-Id");
+    }
+
+    @Test
+    void corsExposesEveryResponseHeaderTheBrowserFrontendNeedsToRead() {
+        Resp simple = api.send(viewer(), MockMvcRequestBuilders.get("/api/v1/projects")
+                .header(HttpHeaders.ORIGIN, "http://localhost:3000"));
+        assertThat(simple.header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("http://localhost:3000");
+        assertThat(simple.header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS))
+                .as("追蹤碼、審核 RETRY／SKIP 的新批次 id、限流等待秒數、報表檔名：少一個，跨來源的前端就讀不到（契約 §0.7）")
+                .contains("X-Trace-Id", "X-Follow-Up-Run-Id", "Retry-After", "Content-Disposition");
+
+        String project = createProject("Cors report");
+        Resp report = api.send(viewer(), MockMvcRequestBuilders
+                .get("/api/v1/monitor/projects/" + project + "/report")
+                .header(HttpHeaders.ORIGIN, "http://localhost:3000"));
+        assertThat(report.status()).isEqualTo(200);
+        assertThat(report.header(HttpHeaders.CONTENT_DISPOSITION)).startsWith("attachment");
+        assertThat(report.header(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS)).contains("Content-Disposition");
+    }
+
+    @Test
+    void theCorsPreflightOfAnSseReconnectAllowsLastEventIdAndAuthorizationButNothingElse() {
+        String path = "/api/v1/stream/executions/" + UUID.randomUUID() + "/logs";
+        Resp preflight = api.send(null, MockMvcRequestBuilders.options(path)
+                .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "last-event-id,authorization,accept"));
+        assertThat(preflight.status()).isEqualTo(200);
+        assertThat(preflight.header(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).isEqualTo("http://localhost:3000");
+        assertThat(preflight.header(HttpHeaders.ACCESS_CONTROL_ALLOW_HEADERS)).containsIgnoringCase("Last-Event-ID")
+                .containsIgnoringCase("Authorization");
+
+        Resp refused = api.send(null, MockMvcRequestBuilders.options(path)
+                .header(HttpHeaders.ORIGIN, "http://localhost:3000")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_METHOD, "GET")
+                .header(HttpHeaders.ACCESS_CONTROL_REQUEST_HEADERS, "x-not-in-the-allow-list"));
+        assertThat(refused.status()).as("沒列在 allowedHeaders 的請求標頭，預檢被拒").isEqualTo(403);
     }
 
     @Test

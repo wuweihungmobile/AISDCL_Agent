@@ -49,4 +49,12 @@ public class ReviewRequestEntity {
 
     @Column(name = "comment", columnDefinition = "text")
     public String comment;
+
+    /** 重播錨點（V7；契約 §2.2）：建立當下已處理到的最後一則 Bridge 事件 seq。 */
+    @Column(name = "event_seq", nullable = false)
+    public int eventSeq;
+
+    /** 同錨點下的子序號（≥1）。 */
+    @Column(name = "event_sub", nullable = false)
+    public int eventSub = 1;
 }

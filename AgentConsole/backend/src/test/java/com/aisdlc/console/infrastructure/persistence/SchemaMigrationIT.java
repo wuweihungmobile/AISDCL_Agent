@@ -30,7 +30,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     private static final Set<String> CONSOLE_TABLES = Set.of(
             "projects", "goals", "goal_dependencies", "tasks", "execution_runs", "execution_steps",
             "checkpoints", "import_records", "system_configs", "system_config_history",
-            "review_requests", "alerts", "audit_log");
+            "review_requests", "alerts", "audit_log", "run_token_samples");
 
     @Autowired
     JdbcTemplate jdbc;
@@ -46,7 +46,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void allThirteenTablesLiveInTheConsoleSchemaAndNoneLeakIntoPublic() {
+    void allFourteenTablesLiveInTheConsoleSchemaAndNoneLeakIntoPublic() {
         List<String> inConsole = jdbc.queryForList(
                 "select table_name from information_schema.tables where table_schema = 'console' "
                         + "and table_type = 'BASE TABLE'", String.class);
@@ -59,12 +59,35 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToSixSuccessfully() {
+    void flywayAppliedVersionsOneToSevenSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
-        assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6");
+        assertThat(history).extracting(row -> row.get("version"))
+                .containsExactly("1", "2", "3", "4", "5", "6", "7");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
+    }
+
+    /** V7（契約 §0.5）：重播錨點、console_last_seq、token 樣本表與「未確認不重複」的 partial unique index。 */
+    @Test
+    void v7AddsTheEventAnchorsTheConsoleOffsetTheTokenSamplesAndTheOpenAlertUniqueIndex() {
+        for (String table : List.of("review_requests", "alerts")) {
+            List<String> columns = jdbc.queryForList("select column_name from information_schema.columns "
+                    + "where table_schema = 'console' and table_name = ? order by column_name", String.class, table);
+            assertThat(columns).as(table).contains("event_seq", "event_sub");
+        }
+        assertThat(jdbc.queryForObject("select column_default from information_schema.columns where "
+                + "table_schema = 'console' and table_name = 'review_requests' and column_name = 'event_sub'",
+                String.class)).isEqualTo("1");
+        assertThat(jdbc.queryForObject("select column_default from information_schema.columns where "
+                + "table_schema = 'console' and table_name = 'execution_runs' and column_name = 'console_last_seq'",
+                String.class)).isEqualTo("0");
+        assertThat(jdbc.queryForList("select column_name from information_schema.columns where "
+                + "table_schema = 'console' and table_name = 'run_token_samples'", String.class))
+                .containsExactlyInAnyOrder("run_id", "seq", "ts", "tokens_used", "delta", "context_pct", "task_id");
+        String indexDef = jdbc.queryForObject("select indexdef from pg_indexes where schemaname = 'console' "
+                + "and indexname = 'uq_alerts_open_rule_subject'", String.class);
+        assertThat(indexDef).contains("UNIQUE").contains("project_id, rule, subject").contains("acknowledged = false");
     }
 
     @Test
