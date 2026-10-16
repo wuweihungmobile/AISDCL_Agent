@@ -105,7 +105,7 @@ Push-Location AgentConsole; docker compose --profile db --profile app --profile 
 | `JWT_SECRET` | backend | 必填，≥32 字元 |
 | `SPRING_DATASOURCE_URL`／`_USERNAME`／`_PASSWORD` | backend | 本機 `jdbc:postgresql://localhost:5432/aisdlc` |
 | `ENGINE_BRIDGE_URL`、`CONSOLE_ENCRYPTION_KEY` | backend | Bridge 位址；敏感參數 AES-256 金鑰 |
-| `BRIDGE_DB_DSN`、`BRIDGE_DB_SCHEMA` | Bridge | 無 DSN＝純檔案模式；schema 預設 `console` |
+| `BRIDGE_DB_DSN`、`BRIDGE_DB_SCHEMA` | Bridge | 無 DSN＝純檔案模式（🔴 Console 的步驟時間軸與斷點清單會是空的——那兩張表只由 Bridge 的 DB 模式寫入，W7-QA 實測；正式部署一律設 DSN）；schema 預設 `console` |
 | `BRIDGE_ALLOWED_PATH_ROOTS`、`BRIDGE_OUTBOUND_ALLOWLIST` | Bridge | 路徑與外呼 allowlist（NFR-SEC-03／04） |
 | `NEXT_PUBLIC_API_URL` | frontend | 後端 origin（不含 `/api/v1`）；全棧同源為空 |
 

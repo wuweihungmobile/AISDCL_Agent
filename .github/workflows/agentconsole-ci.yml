@@ -24,6 +24,8 @@ on:
       - "AutoClaude/autoclaude/**"      # engine-bridge 以子行程執行 python -m autoclaude，引擎變動必跑
       - "AutoClaude/pyproject.toml"
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
+      - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
+      - "AISDLC_SDD/*/tools/fsm_runtime/**"
   pull_request:
     branches: [main]
     paths:
@@ -32,6 +34,8 @@ on:
       - "AutoClaude/autoclaude/**"      # engine-bridge 以子行程執行 python -m autoclaude，引擎變動必跑
       - "AutoClaude/pyproject.toml"
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
+      - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
+      - "AISDLC_SDD/*/tools/fsm_runtime/**"
   workflow_dispatch:
 
 concurrency:

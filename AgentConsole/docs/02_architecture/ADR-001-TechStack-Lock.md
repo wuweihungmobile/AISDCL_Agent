@@ -51,7 +51,7 @@
 - **偏離 PRD §3.1，理由**：(a) PRD 自己授權「鎖定時取當時 stable、≥3.3」；(b) 新建專案不應從已停止 OSS 支援的主線起步；(c) QueryDSL 對 Spring Boot 4／Jakarta／Hibernate 的相容性未驗證，而 W2 任務書的依賴清單本就未列它。
 - **Alternatives**：Spring Boot 3.5.x（最後一條 3.x 主線；依掌舵者回報已出 OSS 支援期）；3.3／3.4（已 EOL）；停在 4.0.x（4.1 已 GA，無理由落後）。
 - **Consequences**：Spring Framework 7、Jackson 3（套件 `tools.jackson.*`）、Spring Security 7；`@MockBean` 改 `@MockitoBean`；starter 名稱一律以 Initializr 產物為準，**不憑記憶寫**；springdoc 版本以編譯通過者為準；jjwt 與 Jackson 3 的相容性由 W2-A 實測並寫入交卷；Testcontainers 需要 Docker daemon 在線。
-- **Virtual Threads 的實際範圍（W7 補；完整性審查 L-03）**：PRD §3.1 的「Java 21，Virtual Threads」在本專案的落地只有**兩處**明確使用 `Thread.ofVirtual()`——SSE 寫出（`StreamConnection.java:64`，每條前端連線一條寫出執行緒）與 run 事件消費者（`RunConsumers.java:90`，每個活躍 run 一條讀 Bridge 串流的執行緒）。`backend/src/main/resources` 的 yml／properties 沒有設定 `spring.threads.virtual.enabled`（依 Spring Boot 3.x 的預設值為 false；4.1 的預設值**未驗**），所以 Tomcat 請求執行緒與 `@Scheduled`／`@Async` 是否為虛擬執行緒取決於該預設，本文件不作宣稱。若要全域啟用，另開決策並重跑壓力與釘選（pinning）檢查。
+- **Virtual Threads 的實際範圍（W7 補；完整性審查 L-03）**：PRD §3.1 的「Java 21，Virtual Threads」在本專案的落地只有**兩處**明確使用 `Thread.ofVirtual()`——SSE 寫出（`StreamConnection.java:64`，每條前端連線一條寫出執行緒）與 run 事件消費者（`RunConsumers.java:90`，每個活躍 run 一條讀 Bridge 串流的執行緒）。`backend/src/main/resources` 的 yml／properties 沒有設定 `spring.threads.virtual.enabled`（W7-QA 以 `jcmd <pid> Thread.print` 對執行中的 backend 實測：Tomcat 請求執行緒為 `http-nio-18080-exec-N` 平台執行緒，即 Spring Boot 4.1 在本專案設定下**預設不啟用**虛擬執行緒；QA_W7_Closure.md §6 L-03、觀察 O-32），所以 Tomcat 請求執行緒與 `@Scheduled`／`@Async` 目前是平台執行緒。若要全域啟用，另開決策並重跑壓力與釘選（pinning）檢查。
 
 ### D2　Next.js 16 ＋ Tailwind 4 ＋ shadcn/ui（與 PRD §3.1 一致）
 
