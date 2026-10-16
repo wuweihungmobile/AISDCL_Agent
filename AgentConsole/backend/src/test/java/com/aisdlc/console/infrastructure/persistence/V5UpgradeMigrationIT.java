@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V5～V10 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
+ * V5～V11 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
  * 真正會出事的是升級——V5 的「預設值校正」只能在值仍等於舊預設時才改，絕不能蓋掉管理員改過的值；
  * 新增的欄位必須讓既有匯入記錄原封不動；新鍵不能與既有鍵重複。這裡在一個獨立資料庫上先遷到 V4、塞入「管理員改過的」資料，
  * 再遷到最新版，逐項核對。
@@ -132,8 +132,66 @@ class V5UpgradeMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from "
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+    }
+
+    /**
+     * V11（契約 §0.5；D-17）對「已經在跑的資料庫」：探測預設只在值仍等於舊預設 {@code /health} 時才改成 {@code /health/deep}
+     * （value 與 default_value 各自判斷），絕不覆蓋管理員改過的值；已經是新預設的不動；{@code impact_note} 一律換成附錄 C.5 的原文。
+     * 三種情形各用一個資料庫：資料庫分不出「刻意設成 /health」與「沒動過」，這個取捨寫在 V11 檔頭。
+     */
+    @Test
+    void v11RewritesOnlyTheOldHealthDefaultAndNeverAnAdministratorsValue() {
+        // ① 沒動過：value 與 default_value 都還是舊預設 → 兩者都改成 /health/deep
+        String untouched = createDatabase();
+        flyway(untouched, "10").migrate();
+        JdbcTemplate before = jdbcOf(untouched);
+        assertThat(value(before, "autoclaude", "healthCheckPath", "value")).isEqualTo("/health");
+        assertThat(value(before, "autoclaude", "healthCheckPath", "default_value")).isEqualTo("/health");
+        assertThat(value(before, "autoclaude", "healthCheckPath", "impact_note")).as("升級前是 V5 的舊文字")
+                .isNotEqualTo(AppendixCImpactNotes.HEALTH_CHECK_PATH);
+        String otherKeysBefore = healthUnrelatedKeys(before);
+        flyway(untouched, null).migrate();
+        assertThat(value(before, "autoclaude", "healthCheckPath", "value")).isEqualTo("/health/deep");
+        assertThat(value(before, "autoclaude", "healthCheckPath", "default_value")).isEqualTo("/health/deep");
+        assertThat(value(before, "autoclaude", "healthCheckPath", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.HEALTH_CHECK_PATH);
+        assertThat(healthUnrelatedKeys(before)).as("其餘 49 個鍵的 value／預設／提示一字不動").isEqualTo(otherKeysBefore);
+
+        // ② 管理員改成 /custom：value 不動；default_value 仍等於舊預設，所以只有它被校正（兩者各自判斷）
+        String customized = createDatabase();
+        flyway(customized, "10").migrate();
+        JdbcTemplate custom = jdbcOf(customized);
+        custom.update("update console.system_configs set value = '/custom' where category = 'autoclaude' "
+                + "and key = 'healthCheckPath'");
+        flyway(customized, null).migrate();
+        assertThat(value(custom, "autoclaude", "healthCheckPath", "value")).as("管理員改過的值不被蓋掉").isEqualTo("/custom");
+        assertThat(value(custom, "autoclaude", "healthCheckPath", "default_value")).isEqualTo("/health/deep");
+        assertThat(value(custom, "autoclaude", "healthCheckPath", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.HEALTH_CHECK_PATH);
+
+        // ③ 已經是新預設（例如管理員手動改過，或預設值被別處校正過）：不動
+        String already = createDatabase();
+        flyway(already, "10").migrate();
+        JdbcTemplate deep = jdbcOf(already);
+        deep.update("update console.system_configs set value = '/health/deep', default_value = '/health/deep' "
+                + "where category = 'autoclaude' and key = 'healthCheckPath'");
+        flyway(already, null).migrate();
+        assertThat(value(deep, "autoclaude", "healthCheckPath", "value")).isEqualTo("/health/deep");
+        assertThat(value(deep, "autoclaude", "healthCheckPath", "default_value")).isEqualTo("/health/deep");
+
+        // 伺服器端也不會因升級而出現第二個鍵
+        assertThat(deep.queryForObject("select count(*) from console.system_configs where category = 'autoclaude' "
+                + "and key = 'healthCheckPath'", Integer.class)).isEqualTo(1);
+    }
+
+    /** 除了 {@code autoclaude.healthCheckPath} 以外所有鍵的 value／預設／提示，串成一個字串供前後比對。 */
+    private static String healthUnrelatedKeys(JdbcTemplate jdbc) {
+        return jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>') || '|' || "
+                + "coalesce(default_value, '<null>') || '|' || coalesce(impact_note, '<null>'), ';' "
+                + "order by category, key) from console.system_configs "
+                + "where not (category = 'autoclaude' and key = 'healthCheckPath')", String.class);
     }
 
     /**
@@ -141,7 +199,7 @@ class V5UpgradeMigrationIT {
      * 三個語意改變的鍵的 {@code impact_note} 改成契約附錄 C 的原文，而其餘鍵的提示一字不動（V10 以 (category, key) 對位更新，不是整表覆寫）。
      */
     @Test
-    void runsCreatedBeforeV10KeepANullEngineCapabilitiesAndOnlyTheThreeImpactNotesAreRewritten() {
+    void runsBeforeV10KeepNullCapabilitiesAndOnlyThreeNotesChange() {
         String database = createDatabase();
         flyway(database, "9").migrate();
         JdbcTemplate jdbc = jdbcOf(database);
@@ -157,7 +215,8 @@ class V5UpgradeMigrationIT {
                 + "where (category, key) not in (('model','enableKernelBrain'),('agent','enableAutoMutation'),"
                 + "('agent','enableSelfEvolution'))", String.class);
 
-        flyway(database, null).migrate();
+        // 目標版本釘在 10：本測試只問 V10 動了什麼；之後的遷移（V11 校正 healthCheckPath 的預設與提示）各有自己的測試
+        flyway(database, "10").migrate();
 
         assertThat(jdbc.queryForMap("select status, autonomy_level, total_tokens_used, engine_capabilities from "
                 + "console.execution_runs where id = ?", run)).containsEntry("status", "COMPLETED")

@@ -156,7 +156,7 @@ class TaskApiIT extends AbstractApiIT {
 
     @ParameterizedTest(name = "evaluatorCommand 含 [{0}] 被擋")
     @ValueSource(strings = {"!", "`", ">", "<", "~", "$", "&", ";"})
-    void everyBlacklistedCharacterIsRejectedOnCreateAndUpdateAndNamedInTheResponse(String badChar) {
+    void badCharsAreRejectedAndNamedOnCreateAndUpdate(String badChar) {
         Map<String, Object> body = task("Sanitize");
         body.put("evaluatorCommand", "echo hi " + badChar + " there");
         Resp create = api.post(operator(), tasksUrl(), body);
@@ -273,7 +273,7 @@ class TaskApiIT extends AbstractApiIT {
 
     @ParameterizedTest(name = "{0} 的任務可手動重試")
     @EnumSource(value = TaskStatus.class, names = {"FAILED", "ESCALATED"})
-    void retryFromFailedOrEscalatedIncrementsRetryCountAndRequeues(TaskStatus from) {
+    void retryOfFailedOrEscalatedRequeuesAndCounts(TaskStatus from) {
         String id = createTask(goal, "Retry me");
         setTaskStatus(id, from.name());
         Resp resp = api.post(operator(), "/api/v1/tasks/" + id + "/retry");

@@ -21,6 +21,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>契約 §0.8 的既有測試同步：Phase 1+2 的 13 個路徑，加上 W3-B1 的 20 個路徑（匯入 9、通知摘要 1、設定 10；
  * 方法與路徑變數名逐字取自 {@code openapi-p3-6.yaml}）＝33。W3-B2 再加 20 個（執行 11、監控 7、SSE 2）＝53。
  * W5（契約 v1.2）再加 {@code GET /monitor/task-totals}（C-1）＝54、{@code POST /projects/{id}/restore}（C-3）＝55。
+ * W7（契約 v1.4）再加 {@code GET /engines/sdd}（D-16）＝56、{@code GET /signoffs/pending}（D-18）＝57、
+ * {@code POST /auth/logout}（D-19）＝58（操作數 64→67）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -86,7 +88,11 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/stream/executions/{runId}/metrics", List.of("get")),
             // ── W5（契約 v1.2）：全域任務總計（C-1）、軟刪除專案復原（C-3）──
             Map.entry("/api/v1/monitor/task-totals", List.of("get")),
-            Map.entry("/api/v1/projects/{id}/restore", List.of("post"))));
+            Map.entry("/api/v1/projects/{id}/restore", List.of("post")),
+            // ── W7（契約 v1.4）：引擎狀態（D-16）、待簽核清單（D-18）、登出（D-19）──
+            Map.entry("/api/v1/engines/sdd", List.of("get")),
+            Map.entry("/api/v1/signoffs/pending", List.of("get")),
+            Map.entry("/api/v1/auth/logout", List.of("post"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -98,12 +104,15 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(55).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(58).containsExactlyElementsOf(EXPECTED.keySet());
+        int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
             assertThat(new TreeSet<>(operations.keySet())).as(expected.getKey())
                     .containsExactlyElementsOf(expected.getValue());
+            operationCount += operations.size();
         }
+        assertThat(operationCount).as("契約 v1.4 的操作總數").isEqualTo(67);
     }
 
     @Test
@@ -123,13 +132,15 @@ class OpenApiIT extends AbstractApiIT {
     }
 
     @Test
-    void theBearerSchemeIsGlobalButLoginAndRefreshAreMarkedPublic() {
+    void theBearerSchemeIsGlobalButLoginRefreshAndLogoutAreMarkedPublic() {
         Resp docs = docs();
         assertThat(docs.<String>read("$.components.securitySchemes.bearerAuth.scheme")).isEqualTo("bearer");
         assertThat(docs.<String>read("$.components.securitySchemes.bearerAuth.bearerFormat")).isEqualTo("JWT");
         assertThat(docs.<List<Object>>read("$.security")).isNotEmpty();
         assertThat(docs.<List<Object>>read("$.paths['/api/v1/auth/login'].post.security")).isEmpty();
         assertThat(docs.<List<Object>>read("$.paths['/api/v1/auth/refresh'].post.security")).isEmpty();
+        assertThat(docs.<List<Object>>read("$.paths['/api/v1/auth/logout'].post.security"))
+                .as("登出免認證（契約 §1.9.1）：登出時 access token 可能已過期").isEmpty();
     }
 
     @Test
@@ -386,6 +397,110 @@ class OpenApiIT extends AbstractApiIT {
                 .endsWith("/ResourceUsage");
         assertThat(docs.<List<String>>read("$.components.schemas.BridgeInfo.required"))
                 .containsExactlyInAnyOrder("connected", "checkedAt");
+    }
+
+    /**
+     * v1.4（D-16、D-18、D-19；契約 §1.7.1、§1.8.1、§1.9.1）：三個新端點的狀態碼集合與參數規則逐字等於 {@code openapi-p3-6.yaml}。
+     * 為什麼重要：前端以 yaml 產生型別與錯誤處理——登出若多文件化一個 401，前端會為「登出被拒」寫出永遠走不到的分支；{@code limit}
+     * 的範圍文件與實作不一致，前端的輸入檢查就會放行會得到 400 的值。
+     */
+    @Test
+    void theV14EndpointsDocumentTheStatusCodesAndParametersOfTheContract() {
+        Resp docs = docs();
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/engines/sdd'].get.responses").keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "429");
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/signoffs/pending'].get.responses").keySet())
+                .containsExactlyInAnyOrder("200", "400", "401", "429");
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/auth/logout'].post.responses").keySet())
+                .as("免認證：沒有 401；請求格式合法一律 204").containsExactlyInAnyOrder("204", "400", "429");
+        assertThat(docs.<Boolean>read("$.paths['/api/v1/auth/logout'].post.requestBody.required")).isTrue();
+        assertThat(docs.<String>read("$.paths['/api/v1/auth/logout'].post.requestBody.content['application/json']"
+                + ".schema['$ref']")).endsWith("/LogoutRequest");
+
+        String project = "$.paths['/api/v1/engines/sdd'].get.parameters[?(@.name=='project')]";
+        assertThat(docs.<List<String>>read("$.paths['/api/v1/engines/sdd'].get.parameters[*].name"))
+                .containsExactly("project");
+        assertThat(docs.<List<Boolean>>read(project + ".required")).containsExactly(false);
+        assertThat(docs.<List<String>>read(project + ".schema.pattern")).containsExactly("^[A-Za-z0-9._-]{1,128}$");
+        assertThat(docs.<List<Integer>>read(project + ".schema.minLength")).containsExactly(1);
+        assertThat(docs.<List<Integer>>read(project + ".schema.maxLength")).containsExactly(128);
+
+        String limit = "$.paths['/api/v1/signoffs/pending'].get.parameters[?(@.name=='limit')]";
+        assertThat(docs.<List<String>>read("$.paths['/api/v1/signoffs/pending'].get.parameters[*].name"))
+                .containsExactly("limit");
+        assertThat(docs.<List<Boolean>>read(limit + ".required")).containsExactly(false);
+        assertThat(docs.<List<Integer>>read(limit + ".schema.minimum")).containsExactly(1);
+        assertThat(docs.<List<Integer>>read(limit + ".schema.maximum")).containsExactly(200);
+        assertThat(docs.<List<Integer>>read(limit + ".schema.default")).containsExactly(50);
+    }
+
+    /**
+     * v1.4（D-16；契約 §1.7.1、§3.1.3）：AISDLC_SDD 引擎狀態的 schema 欄位名、必填集合、列舉值與上限與 {@code openapi-p3-6.yaml} 一致。
+     * 差異（已登記）：yaml 把 {@code reason} 的值域獨立成 {@code SddEngineReason} 再以 oneOf 與 null 組合，springdoc 把列舉值內嵌在欄位上。
+     */
+    @Test
+    void theSddEngineSchemasMatchTheContractYaml() {
+        Resp docs = docs();
+        String schemas = "$.components.schemas.";
+        String status = schemas + "SddEngineStatusResponse";
+        assertThat(docs.<List<String>>read(status + ".required")).containsExactlyInAnyOrder("available", "reason",
+                "version", "projects", "fsm", "checkedAt");
+        assertThat(docs.<List<String>>read(status + ".properties.reason.enum").stream().filter(v -> v != null).toList())
+                .containsExactlyInAnyOrder("bridge_unreachable", "sdd_unavailable", "bridge_error", "fsm_not_found",
+                        "fsm_state_unreadable");
+        assertThat(docs.<List<String>>read(status + ".properties.version..['$ref']")).singleElement().asString()
+                .endsWith("/SddVersion");
+        assertThat(docs.<String>read(status + ".properties.projects.items['$ref']")).endsWith("/SddProjectEntry");
+        assertThat(docs.<List<String>>read(status + ".properties.fsm..['$ref']")).singleElement().asString()
+                .endsWith("/SddFsmState");
+        assertThat(docs.<String>read(status + ".properties.checkedAt.format")).isEqualTo("date-time");
+
+        assertThat(docs.<List<String>>read(schemas + "SddVersion.required")).containsExactlyInAnyOrder("latest", "root");
+        assertThat(docs.<List<String>>read(schemas + "SddProjectEntry.required")).containsExactlyInAnyOrder("project",
+                "source", "currentState", "updatedAt");
+        assertThat(docs.<String>read(schemas + "SddProjectEntry.properties.project.pattern"))
+                .isEqualTo("^[A-Za-z0-9._-]{1,128}$");
+
+        assertThat(docs.<List<String>>read(schemas + "SddFsmState.required")).containsExactlyInAnyOrder("project",
+                "source", "frozenStages", "decisionTrace", "humanPending", "retryHistory");
+        assertThat(docs.<Integer>read(schemas + "SddFsmState.properties.decisionTrace.maxItems")).isEqualTo(5);
+        assertThat(docs.<String>read(schemas + "SddFsmState.properties.humanPending['$ref']")).endsWith("/SddHumanPending");
+        assertThat(docs.<String>read(schemas + "SddFsmState.properties.retryHistory['$ref']"))
+                .endsWith("/SddRetryHistory");
+        assertThat(docs.<List<String>>read(schemas + "SddHumanPending.required")).containsExactlyInAnyOrder("count",
+                "items");
+        assertThat(docs.<Integer>read(schemas + "SddHumanPending.properties.items.maxItems")).isEqualTo(5);
+        assertThat(docs.<Integer>read(schemas + "SddHumanPending.properties.count.minimum")).isZero();
+        assertThat(docs.<List<String>>read(schemas + "SddRetryHistory.required")).containsExactlyInAnyOrder("count",
+                "last");
+    }
+
+    /** v1.4（D-18、D-19；契約 §1.8.1、§1.9.1）：待簽核清單與登出請求的 schema 與 {@code openapi-p3-6.yaml} 一致。 */
+    @Test
+    void thePendingSignoffAndLogoutSchemasMatchTheContractYaml() {
+        Resp docs = docs();
+        String schemas = "$.components.schemas.";
+        assertThat(docs.<List<String>>read(schemas + "PendingSignoffsResponse.required"))
+                .containsExactlyInAnyOrder("counts", "items");
+        assertThat(docs.<Integer>read(schemas + "PendingSignoffsResponse.properties.items.maxItems")).isEqualTo(200);
+        assertThat(docs.<String>read(schemas + "PendingSignoffsResponse.properties.items.items['$ref']"))
+                .endsWith("/PendingSignoffItem");
+        assertThat(docs.<String>read(schemas + "PendingSignoffsResponse.properties.counts['$ref']"))
+                .endsWith("/PendingSignoffCounts");
+        assertThat(docs.<List<String>>read(schemas + "PendingSignoffCounts.required"))
+                .containsExactlyInAnyOrder("projects", "goals", "tasks", "imports", "total");
+        for (String count : List.of("projects", "goals", "tasks", "imports", "total")) {
+            assertThat(docs.<Integer>read(schemas + "PendingSignoffCounts.properties." + count + ".minimum"))
+                    .as(count).isZero();
+        }
+        assertThat(docs.<List<String>>read(schemas + "PendingSignoffItem.required")).containsExactlyInAnyOrder("kind",
+                "id", "projectId", "projectName", "parentId", "title", "createdAt");
+        assertThat(docs.<List<String>>read(schemas + "PendingSignoffItem.properties.kind.enum"))
+                .containsExactlyInAnyOrder("PROJECT", "GOAL", "TASK", "IMPORT");
+        assertThat(docs.<String>read(schemas + "PendingSignoffItem.properties.createdAt.format")).isEqualTo("date-time");
+
+        assertThat(docs.<List<String>>read(schemas + "LogoutRequest.required")).containsExactly("refreshToken");
+        assertThat(docs.<Integer>read(schemas + "LogoutRequest.properties.refreshToken.minLength")).isEqualTo(1);
     }
 
     @Test

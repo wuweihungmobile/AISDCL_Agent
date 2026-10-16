@@ -157,7 +157,7 @@ class ImportParseGatesApiIT extends AbstractOutboundIT {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("gateCases")
-    void aGateViolationIs422ListsEverythingRevertsToUploadedAndIsClearedByASuccessfulReparse(GateCase gate) {
+    void aGateViolationIs422ThenReparseClearsIt(GateCase gate) {
         configureFakeModel();
         stubOnMarker(gate.marker(), gate.response());
         stubDefaultOk();

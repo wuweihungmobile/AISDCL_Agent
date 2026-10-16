@@ -11,10 +11,15 @@ import java.util.Deque;
 import java.util.Optional;
 
 /**
- * Engine Bridge 的健康探測環（契約 §3.1：每 30 秒 {@code GET {healthCheckPath}}、逾時 3 秒；console-api 啟動時與每個 run 開始時
+ * Engine Bridge 的健康探測環（契約 §3.1：每 30 秒 {@code GET {healthCheckPath}}；console-api 啟動時與每個 run 開始時
  * 各立即探測一次；結果存記憶體環形緩衝，容量 2,880 筆＝24 小時）。供三處使用：Agent 可用率 KPI（{@code agentAvailability}）、
  * 頂列「Engine Bridge · 已連線」燈（{@code /notifications/summary} 的 {@code bridgeConnected}／{@code bridgeCheckedAt}）、
- * 「Agent 無回應」告警（最近一次探測失敗才告警）。Redis 本輪不做，重啟即清空。
+ * 「Agent 無回應」告警（最近一次探測失敗才告警）。探測環不進 Redis，重啟即清空（Redis 只用在 refresh token 撤銷名單）。
+ *
+ * <p>契約 v1.4（D-17）：預設路徑是深度探針 {@code /health/deep}（{@code BridgeEndpoints#DEFAULT_HEALTH_PATH}），讀取逾時 8 秒
+ * （深度探針的 {@code git --version} 自己最多等 5 秒，舊的 3 秒會把「只是慢」誤判成不可用）。判準只看 HTTP 狀態碼：2xx＝可用；
+ * 深度探針的 503 {@code degraded}（Bridge 行程活著但 git／autoclaude／workspace／db 其中一項不通）與連線失敗、逾時一樣算<b>不可用</b>——
+ * Bridge 行程活著不等於引擎能工作。200 回應裡 {@code checks.sdd.ok=false} 只是資訊，不影響判定。
  */
 @Component
 public class BridgeHealthMonitor {

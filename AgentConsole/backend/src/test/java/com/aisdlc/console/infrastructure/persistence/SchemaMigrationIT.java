@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Flyway 遷移（V1～V10）與 JPA schema 驗證（ADR-001 D5）。
+ * Flyway 遷移（V1～V11）與 JPA schema 驗證（ADR-001 D5）。
  *
  * <p>能啟動本 context 本身就代表 {@code ddl-auto=validate} 通過（13 個實體與 Flyway 建出的表一致）；
  * 這裡另外把「為什麼重要」寫成斷言：DDL 必須由 Flyway 擁有、表必須全在 console schema（不與 AutoClaude 的
@@ -60,13 +60,29 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToTenSuccessfully() {
+    void flywayAppliedVersionsOneToElevenSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
+    }
+
+    /**
+     * V11（契約 §0.5；D-17）：Console 的 Bridge 探測環改打深度探針 {@code /health/deep}。全新資料庫的 {@code autoclaude.healthCheckPath}
+     * 的 value 與 default_value 都是 {@code /health/deep}，{@code impact_note} 逐字等於附錄 C.5（不含 {@code |} 與反引號、不超過 500 字元）；
+     * 對既有資料列的三種情形（舊預設被改、管理員改過的不動、已是新預設不動）見 {@code V5UpgradeMigrationIT}。
+     */
+    @Test
+    void v11MakesTheDeepProbeTheSeedDefaultAndCorrectsItsNote() {
+        assertThat(setting("autoclaude", "healthCheckPath", "value")).isEqualTo("/health/deep");
+        assertThat(setting("autoclaude", "healthCheckPath", "default_value")).isEqualTo("/health/deep");
+        assertThat(setting("autoclaude", "healthCheckPath", "impact_note")).isEqualTo(AppendixCImpactNotes.HEALTH_CHECK_PATH);
+        assertThat(AppendixCImpactNotes.HEALTH_CHECK_PATH).hasSizeLessThanOrEqualTo(500).doesNotContain("|")
+                .doesNotContain("`");
+        assertThat(setting("autoclaude", "healthCheckPath", "validation_rule")).as("新預設通過自己的驗證規則")
+                .satisfies(rule -> assertThat("/health/deep").matches(rule));
     }
 
     /**
@@ -87,7 +103,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
      * （不含 {@code |} 與反引號），且不超過欄位上限 500 字元；其餘鍵的提示不動。
      */
     @Test
-    void v10CorrectsTheImpactNotesOfTheThreeEngineKeysToTheVerbatimTextOfAppendixC() {
+    void v10CorrectsTheThreeImpactNotesToAppendixC() {
         assertThat(setting("model", "enableKernelBrain", "impact_note"))
                 .isEqualTo(AppendixCImpactNotes.ENABLE_KERNEL_BRAIN);
         assertThat(setting("agent", "enableAutoMutation", "impact_note"))

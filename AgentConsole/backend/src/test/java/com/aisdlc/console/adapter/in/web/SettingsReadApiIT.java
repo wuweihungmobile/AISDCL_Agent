@@ -133,6 +133,20 @@ class SettingsReadApiIT extends AbstractApiIT {
                         "validationLevel");
     }
 
+    /**
+     * v1.4（D-17；附錄 C.5；E2E-16 第 1 列）：健康探測路徑的種子預設是深度探針 {@code /health/deep}，注意事項逐字等於契約。
+     * 為什麼重要：舊預設 {@code /health} 只回答「Bridge 行程活著」，Bridge 裡資料庫或引擎載入壞了，Console 仍顯示引擎正常；預設值與說明
+     * 沒有一起改，設定頁就會對著新的預設講舊的故事。
+     */
+    @Test
+    void theHealthProbePathDefaultsToTheDeepProbeWithNoteC5() {
+        Resp resp = api.get(viewer(), BASE);
+
+        assertThat(config(resp, "autoclaude", "healthCheckPath")).containsEntry("value", "/health/deep")
+                .containsEntry("defaultValue", "/health/deep")
+                .containsEntry("impactNote", AppendixCImpactNotes.HEALTH_CHECK_PATH);
+    }
+
     @Test
     void theSeededDefaultsFollowTheCorrectedValuesOfTheContract() {
         Resp resp = api.get(viewer(), BASE);
@@ -314,6 +328,8 @@ class SettingsReadApiIT extends AbstractApiIT {
         assertThat(put("autoclaude", "engineUrl", "http://engine-bridge:8081").status()).isEqualTo(200);
         assertThat(put("autoclaude", "engineUrl", "ftp://engine-bridge").status()).isEqualTo(400);
         assertThat(put("autoclaude", "healthCheckPath", "/health").status()).isEqualTo(200);
+        assertThat(put("autoclaude", "healthCheckPath", "/health/deep").status()).as("新的種子預設本身通過驗證")
+                .isEqualTo(200);
         assertThat(put("autoclaude", "healthCheckPath", "health").status()).isEqualTo(400);
         assertThat(put("monitor", "notificationEmail", "ops@example.com").status()).isEqualTo(200);
         assertThat(put("monitor", "notificationEmail", "").status()).as("空字串＝沒有設定").isEqualTo(200);

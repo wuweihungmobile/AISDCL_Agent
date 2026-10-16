@@ -72,7 +72,7 @@ class ExecutionSecretLeakApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void theApiKeyNeverAppearsInAnyResponseStreamFrameOrLogLineOfARunStartedWithAKey() {
+    void theApiKeyNeverAppearsInAnyResponseFrameOrLogLine() {
         Fixture f = prjA("secret-leak", 4);
         putApiKey(FAKE_API_KEY);
         MINI.manualSteps = true;
@@ -107,7 +107,7 @@ class ExecutionSecretLeakApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void theEnginePidNeverAppearsInTheDetailOrInTheLiveStatusStreamAndTheStartedStatusKeepsItsOtherWords() {
+    void theEnginePidNeverAppearsInTheDetailOrTheStatusStream() {
         Fixture f = prjA("pid-leak", 4);
         MINI.manualSteps = true;
         String run = startRun(f.projectId());

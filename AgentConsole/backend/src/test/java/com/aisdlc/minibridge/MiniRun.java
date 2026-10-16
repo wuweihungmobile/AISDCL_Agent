@@ -91,6 +91,24 @@ public final class MiniRun {
         return new ArrayList<>(events);
     }
 
+    /**
+     * 目前所有 checkpoint 的 id（建立順序）：測試要 restore 時用。{@code AgentBridge.listCheckpoints} 已刪除（它在 {@code src/main} 沒有呼叫者，
+     * Console 的斷點清單與審核 RETRY 都走資料庫；完整性審查 I-07），測試改直接問迷你 Bridge 自己建了哪些 checkpoint。
+     */
+    public synchronized List<UUID> checkpointIds() {
+        return checkpoints.stream().map(Checkpoint::id).toList();
+    }
+
+    /** 目前所有 checkpoint 的名稱（建立順序，例 {@code after-G1-T1}）。 */
+    public synchronized List<String> checkpointNames() {
+        return checkpoints.stream().map(Checkpoint::name).toList();
+    }
+
+    /** 目前所有 checkpoint 的 {@code step_idx}（建立順序）。 */
+    public synchronized List<Integer> checkpointStepIndexes() {
+        return checkpoints.stream().map(Checkpoint::stepIdx).toList();
+    }
+
     /** 放行 manual 模式下的 {@code n} 個步驟。 */
     public void release(int n) {
         gate.release(n);

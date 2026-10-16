@@ -24,7 +24,7 @@ public final class ReviewGatePolicy {
      * <ul>
      *   <li>等級 1（Manual Confirm）：{@code position < total}，每個任務之間都停；</li>
      *   <li>等級 2／3：{@code position} 是所屬目標的最後一步且 {@code position < total}（目標之間停）；</li>
-     *   <li>等級 ≥ 4：不預先暫停（4＝只有升級時介入；5～10 同 5，等級 6～10 不另送引擎設定）。</li>
+     *   <li>等級 ≥ 4：不預先暫停（4＝只有升級時介入；5～10 同 5）。等級 6～10 的引擎能力旗標見 {@code ConfigMaterializer}；審核閘行為同等級 5。</li>
      * </ul>
      * 最後一個步驟（{@code position == total}）完成時 run 直接 COMPLETED，不暫停、不建審核項。
      */

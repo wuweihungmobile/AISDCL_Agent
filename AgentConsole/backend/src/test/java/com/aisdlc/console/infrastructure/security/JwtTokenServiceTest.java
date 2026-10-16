@@ -163,4 +163,41 @@ class JwtTokenServiceTest {
         assertThat(service.issue("admin", Role.ADMIN).accessToken())
                 .isNotEqualTo(service.issue("admin", Role.ADMIN).accessToken());
     }
+
+    // ── v1.4（D-19；契約 §1.9.2）：撤銷名單用 refresh token 的 jti 與 exp ───────────────────────────────
+
+    @Test
+    void aRefreshTokenExposesItsJtiAndExpiryForTheRevocationList() {
+        JwtTokenService service = serviceAt(NOW);
+        IssuedTokens tokens = service.issue("operator", Role.OPERATOR);
+
+        assertThat(service.verifyRefreshToken(tokens.refreshToken())).hasValueSatisfying(identity -> {
+            assertThat(identity.tokenId()).isNotBlank().hasSize(36);
+            assertThat(identity.expiresAt()).isEqualTo(NOW.plus(REFRESH));
+        });
+    }
+
+    @Test
+    void everyRefreshTokenHasItsOwnJtiSoOneRevocationNeverTouchesAnother() {
+        JwtTokenService service = serviceAt(NOW);
+
+        String first = service.verifyRefreshToken(service.issue("admin", Role.ADMIN).refreshToken()).orElseThrow().tokenId();
+        String second = service.verifyRefreshToken(service.issue("admin", Role.ADMIN).refreshToken()).orElseThrow().tokenId();
+
+        assertThat(first).isNotEqualTo(second);
+    }
+
+    @Test
+    void aRefreshTokenWithoutJtiOrExpIsInvalid() {
+        SecretKey key = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+        String noJti = Jwts.builder().subject("admin").claim("role", "ADMIN").claim("token_use", "refresh")
+                .expiration(Date.from(NOW.plus(REFRESH))).signWith(key, Jwts.SIG.HS256).compact();
+        String noExpiry = Jwts.builder().subject("admin").claim("role", "ADMIN").claim("token_use", "refresh")
+                .id("some-jti").signWith(key, Jwts.SIG.HS256).compact();
+
+        assertThat(serviceAt(NOW).verifyRefreshToken(noJti)).as("沒有 jti（來自更早的程式版本或偽造）").isEmpty();
+        assertThat(serviceAt(NOW).verifyRefreshToken(noExpiry)).as("沒有 exp：永遠有效且無法定下名單項目的壽命").isEmpty();
+        assertThat(serviceAt(NOW).verify(noJti, JwtTokenService.USE_REFRESH).outcome()).as("簽章與用途都對，只是不能撤銷")
+                .isEqualTo(Outcome.VALID);
+    }
 }

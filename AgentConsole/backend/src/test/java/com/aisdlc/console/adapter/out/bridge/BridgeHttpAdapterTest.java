@@ -7,6 +7,10 @@ import com.aisdlc.console.application.port.out.AgentBridge.DecomposeResult;
 import com.aisdlc.console.application.port.out.AgentBridge.SddCompileResult;
 import com.aisdlc.console.application.port.out.SettingValues;
 import com.aisdlc.console.domain.exception.UpstreamException;
+import com.aisdlc.console.domain.model.engine.SddFsmList;
+import com.aisdlc.console.domain.model.engine.SddFsmState;
+import com.aisdlc.console.domain.model.engine.SddProjectEntry;
+import com.aisdlc.console.domain.model.engine.SddVersion;
 import com.aisdlc.console.infrastructure.config.BridgeProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,6 +70,8 @@ class BridgeHttpAdapterTest {
     private static final String BASE = "http://bridge.test:8081";
 
     private final FakeSettings settings = new FakeSettings();
+    /** 每個 Bridge 呼叫向請求工廠要求的（連線逾時，讀取逾時），依呼叫順序（契約 §3.1 呼叫總表的逾時欄）。 */
+    private final List<Duration[]> requestedTimeouts = new ArrayList<>();
     private MockRestServiceServer server;
     private BridgeHttpAdapter adapter;
 
@@ -73,9 +79,12 @@ class BridgeHttpAdapterTest {
     void setUp() {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
-        // 回 null＝沿用 Builder 自己的（被 MockRestServiceServer 接手的）請求工廠
+        // 回 null＝沿用 Builder 自己的（被 MockRestServiceServer 接手的）請求工廠；順便記下每次要求的逾時
         adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE)),
-                (connect, read) -> null);
+                (connect, read) -> {
+                    requestedTimeouts.add(new Duration[] {connect, read});
+                    return null;
+                });
     }
 
     // ── decompose ────────────────────────────────────────────────────────────
@@ -260,15 +269,15 @@ class BridgeHttpAdapterTest {
 
     @Test
     void healthIsOkOnTwoHundredAndDownOtherwiseWithoutThrowing() {
-        server.expect(requestTo(BASE + "/health")).andExpect(method(HttpMethod.GET))
+        server.expect(requestTo(BASE + "/health/deep")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"status\":\"ok\"}", MediaType.APPLICATION_JSON));
         assertThat(adapter.health()).isEqualTo(new BridgeHealth(true, 200));
         server.reset();
-        server.expect(requestTo(BASE + "/health")).andRespond(withStatus(
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
         assertThat(adapter.health()).isEqualTo(new BridgeHealth(false, 503));
         server.reset();
-        server.expect(requestTo(BASE + "/health")).andRespond(withException(new ConnectException("down")));
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withException(new ConnectException("down")));
         assertThat(adapter.health()).isEqualTo(new BridgeHealth(false, 0));
     }
 
@@ -277,6 +286,266 @@ class BridgeHttpAdapterTest {
         settings.values.put("autoclaude.healthCheckPath", "/autoclaude/health");
         server.expect(requestTo(BASE + "/autoclaude/health")).andRespond(withSuccess());
         assertThat(adapter.health().ok()).isTrue();
+        server.verify();
+    }
+
+    // ── D-17：探測改打深度探針（契約 §3.1、§3.1.1）──────────────────────────────────────────────
+    // 為什麼重要：淺層 /health 在引擎壞了時照回 200，頂列燈與 Agent 可用率因此永遠說謊；深度探針在引擎自檢未通過時回 503，
+    // 探測環必須把它算成失敗。但 sdd 檢查只當資訊——它失敗時 Bridge 仍回 200，探測環不可以因為本文裡的 sdd.ok=false 就判失敗。
+
+    @Test
+    void theDefaultProbeIsDeepAndTheShallowOneStaysReachable() {
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withSuccess());
+        assertThat(adapter.health().ok()).isTrue();
+        server.verify();
+        server.reset();
+
+        settings.values.put("autoclaude.healthCheckPath", "/health");
+        server.expect(requestTo(BASE + "/health")).andRespond(withSuccess("{\"status\":\"ok\"}",
+                MediaType.APPLICATION_JSON));
+        assertThat(adapter.health()).as("管理員把路徑改回 /health＝只檢查行程是否存活").isEqualTo(new BridgeHealth(true, 200));
+        server.verify();
+    }
+
+    @Test
+    void aDegradedDeepProbeWithADetailedBodyIsAFailureAndTheBodyIsNotRead() {
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withStatus(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
+                .body("{\"status\":\"degraded\",\"reason\":\"git: 找不到 git 執行檔\",\"checks\":{\"git\":"
+                        + "{\"ok\":false,\"reason\":\"找不到 git 執行檔\"}}}"));
+        assertThat(adapter.health()).isEqualTo(new BridgeHealth(false, 503));
+    }
+
+    @Test
+    void aDeepProbeWithFailedSddCheckIsStillASuccess() {
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withSuccess("""
+                {"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.39.5"},"autoclaude":{"ok":true},
+                 "workspace":{"ok":true},"db":{"ok":null},
+                 "sdd":{"ok":false,"latest":null,"reason":"SDD_ROOT 不是目錄：sdd"}}}
+                """, MediaType.APPLICATION_JSON));
+        assertThat(adapter.health()).as("與 AutoClaude 批次無關的 SDD 目錄問題不拉低可用率（主控裁決 Q4）")
+                .isEqualTo(new BridgeHealth(true, 200));
+    }
+
+    @Test
+    void everyOtherNonTwoHundredAnswerOfTheProbeIsAFailureToo() {
+        for (org.springframework.http.HttpStatus status : List.of(org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
+                org.springframework.http.HttpStatus.BAD_GATEWAY, org.springframework.http.HttpStatus.NOT_FOUND)) {
+            server.reset();
+            server.expect(requestTo(BASE + "/health/deep")).andRespond(withStatus(status));
+            assertThat(adapter.health()).as(status.toString()).isEqualTo(new BridgeHealth(false, status.value()));
+        }
+    }
+
+    @Test
+    void theProbeAllowsEightSecondsToReadAndTheEngineStatusCallsThree() {
+        server.expect(requestTo(BASE + "/health/deep")).andRespond(withSuccess());
+        server.expect(requestTo(BASE + "/sdd/version")).andRespond(withSuccess(
+                "{\"latest\":\"AISDLC_SDD_v9.99\",\"root\":\"/sdd\"}", MediaType.APPLICATION_JSON));
+
+        adapter.health();
+        adapter.sddVersion();
+
+        assertThat(requestedTimeouts).hasSize(2);
+        assertThat(requestedTimeouts.get(0)).as("健康探測：連線 2 秒、讀取 8 秒（v1.4；git --version 自己最多等 5 秒）")
+                .containsExactly(Duration.ofSeconds(2), Duration.ofSeconds(8));
+        assertThat(requestedTimeouts.get(1)).as("引擎狀態查詢：連線 2 秒、讀取 3 秒")
+                .containsExactly(Duration.ofSeconds(2), Duration.ofSeconds(3));
+    }
+
+    // ── D-16：AISDLC_SDD 唯讀查詢（契約 §3.1 三列、§3.1.3）──────────────────────────────────────────
+    // 為什麼重要：這三個呼叫是 Console 對 FSM 狀態的唯一消費點。Bridge 的 snake_case 本文要轉成 camelCase 而巢狀內容一字不動
+    // （NFR-OBS-01：FSM 檔 ↔ API ↔ 畫面逐值比對）；錯誤要分得出「專案層級」（404／422）與「引擎層級」（503／連線／逾時）；
+    // 而且不重試——前端 30 秒輪詢一次，重試只會讓一個壞掉的 Bridge 被打三倍。
+
+    private static final String FSM_BODY = """
+            {"project":"e2e-alpha","current_state":"IMPLEMENTATION","current_sprint":2,"session_id":"sid-alpha",
+             "updated_at":"2026-10-16T01:02:03+00:00","frozen_stages":[{"stage":"SCG-0"}],
+             "decision_trace":[{"ts":"t3","from":"A","to":"B","reason":"r3","spec_refs":["S3"],"agents_consulted":[],"trigger":"auto"},
+                               {"ts":"t4","from":"B","to":"C","reason":"r4","spec_refs":[],"agents_consulted":["sa"],"trigger":"auto"}],
+             "source":"FSM-STATE-e2e-alpha.yaml",
+             "human_pending":{"count":1,"items":[{"entered_at":"2026-10-15T08:00:00+00:00","reminder_hours":72}]},
+             "retry_history":{"count":3,"last":{"gate":"PR_REVIEW","attempt":1,"date":"2026-10-16T00:30:00+00:00"}},
+             "rtm_coverage":null}
+            """;
+
+    @Test
+    void sddVersionReadsTheLatestDirectoryAndItsRoot() {
+        server.expect(requestTo(BASE + "/sdd/version")).andExpect(method(HttpMethod.GET)).andRespond(withSuccess(
+                "{\"latest\":\"AISDLC_SDD_v0.30\",\"root\":\"/sdd/AISDLC_SDD_v0.30\"}", MediaType.APPLICATION_JSON));
+
+        SddVersion version = adapter.sddVersion();
+
+        assertThat(version).isEqualTo(new SddVersion("AISDLC_SDD_v0.30", "/sdd/AISDLC_SDD_v0.30"));
+    }
+
+    @Test
+    void sddFsmListKeepsTheBridgeOrderAndTheNullsAndCollectsTheUnreadableNames() {
+        server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess("""
+                {"root":"AISDLC_SDD_v0.30","projects":[
+                   {"project":"AISDLC_SDD","source":"FSM-STATE-AISDLC_SDD.yaml","current_state":"INIT","updated_at":"2026-07-15T17:36:40+00:00"},
+                   {"project":"zulu","source":"FSM-STATE-zulu.yaml","current_state":null,"updated_at":null}],
+                 "errors":["FSM-STATE-broken.yaml","FSM-STATE-bad name.yaml"]}
+                """, MediaType.APPLICATION_JSON));
+
+        SddFsmList list = adapter.sddFsmList();
+
+        assertThat(list.root()).isEqualTo("AISDLC_SDD_v0.30");
+        assertThat(list.projects()).containsExactly(
+                new SddProjectEntry("AISDLC_SDD", "FSM-STATE-AISDLC_SDD.yaml", "INIT", "2026-07-15T17:36:40+00:00"),
+                new SddProjectEntry("zulu", "FSM-STATE-zulu.yaml", null, null));
+        assertThat(list.errors()).containsExactly("FSM-STATE-broken.yaml", "FSM-STATE-bad name.yaml");
+    }
+
+    @Test
+    void anEmptyFsmDirectoryIsAnEmptyListAndNotAnError() {
+        server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess(
+                "{\"root\":\"AISDLC_SDD_v0.30\",\"projects\":[],\"errors\":[]}", MediaType.APPLICATION_JSON));
+
+        SddFsmList list = adapter.sddFsmList();
+
+        assertThat(list.projects()).isEmpty();
+        assertThat(list.errors()).isEmpty();
+    }
+
+    @Test
+    void sddFsmMapsTheTopLevelKeysToCamelCaseAndLeavesTheNestedContentUntouched() {
+        server.expect(requestTo(BASE + "/sdd/fsm/e2e-alpha")).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(FSM_BODY, MediaType.APPLICATION_JSON));
+
+        SddFsmState state = adapter.sddFsm("e2e-alpha");
+
+        assertThat(state.project()).isEqualTo("e2e-alpha");
+        assertThat(state.currentState()).isEqualTo("IMPLEMENTATION");
+        assertThat(state.currentSprint()).isEqualTo(2);
+        assertThat(state.sessionId()).isEqualTo("sid-alpha");
+        assertThat(state.updatedAt()).as("原樣的字串，不轉型").isEqualTo("2026-10-16T01:02:03+00:00");
+        assertThat(state.source()).isEqualTo("FSM-STATE-e2e-alpha.yaml");
+        assertThat(state.frozenStages()).containsExactly(Map.of("stage", "SCG-0"));
+        assertThat(state.decisionTrace()).hasSize(2);
+        assertThat(state.decisionTrace().get(0)).as("巢狀內容保留 snake_case 鍵")
+                .containsEntry("spec_refs", List.of("S3")).containsEntry("agents_consulted", List.of())
+                .containsEntry("reason", "r3");
+        assertThat(state.humanPending().count()).isEqualTo(1);
+        assertThat(state.humanPending().items()).singleElement().satisfies(item -> assertThat(item)
+                .containsEntry("entered_at", "2026-10-15T08:00:00+00:00").containsEntry("reminder_hours", 72));
+        assertThat(state.retryHistory().count()).isEqualTo(3);
+        assertThat(state.retryHistory().last()).containsEntry("gate", "PR_REVIEW").containsEntry("attempt", 1);
+        assertThat(state.rtmCoverage()).as("現行 FSM-STATE 沒有 RTM 覆蓋數值：恆為 null").isNull();
+    }
+
+    @Test
+    void sddFsmKeepsOnlyTheLastFiveDecisionsEvenIfABridgeSendsMore() {
+        StringBuilder trace = new StringBuilder();
+        for (int i = 1; i <= 7; i++) {
+            trace.append(i > 1 ? "," : "").append("{\"reason\":\"r").append(i).append("\"}");
+        }
+        server.expect(requestTo(BASE + "/sdd/fsm/long")).andRespond(withSuccess(
+                "{\"project\":\"long\",\"decision_trace\":[" + trace + "]}", MediaType.APPLICATION_JSON));
+
+        SddFsmState state = adapter.sddFsm("long");
+
+        assertThat(state.decisionTrace()).extracting(entry -> entry.get("reason"))
+                .containsExactly("r3", "r4", "r5", "r6", "r7");
+    }
+
+    @Test
+    void sddFsmFillsInTheNameAndPassesRtmCoverageThrough() {
+        server.expect(requestTo(BASE + "/sdd/fsm/bare")).andRespond(withSuccess(
+                "{\"source\":\"FSM-STATE-bare.yaml\",\"rtm_coverage\":{\"percent\":87.5}}", MediaType.APPLICATION_JSON));
+
+        SddFsmState state = adapter.sddFsm("bare");
+
+        assertThat(state.project()).isEqualTo("bare");
+        assertThat(state.frozenStages()).isEmpty();
+        assertThat(state.decisionTrace()).isEmpty();
+        assertThat(state.humanPending().count()).isZero();
+        assertThat(state.retryHistory().count()).isZero();
+        assertThat(state.retryHistory().last()).isNull();
+        assertThat(state.rtmCoverage()).isEqualTo(Map.of("percent", 87.5));
+    }
+
+    @Test
+    void aMissingFsmFileAndAnUnreadableOneAreRejectionsWithTheirBridgeReasons() {
+        server.expect(requestTo(BASE + "/sdd/fsm/nope")).andRespond(withStatus(
+                org.springframework.http.HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
+                .body("{\"code\":404,\"reason\":\"fsm_not_found\",\"project\":\"nope\"}"));
+        assertThatThrownBy(() -> adapter.sddFsm("nope")).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
+            assertThat(e.status()).isEqualTo(404);
+            assertThat(e.reason()).isEqualTo("fsm_not_found");
+        });
+        server.reset();
+        server.expect(requestTo(BASE + "/sdd/fsm/broken")).andRespond(withStatus(
+                org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT).contentType(MediaType.APPLICATION_JSON)
+                .body("{\"code\":422,\"reason\":\"fsm_state_unreadable\",\"detail\":\"while scanning a simple key\"}"));
+        assertThatThrownBy(() -> adapter.sddFsm("broken")).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
+            assertThat(e.status()).isEqualTo(422);
+            assertThat(e.reason()).isEqualTo("fsm_state_unreadable");
+            assertThat(e.detail()).isEqualTo("while scanning a simple key");
+        });
+    }
+
+    @Test
+    void anInvalidSddRootIsAnUpstreamFailureThatCarriesTheBridgeStatusAndReason() {
+        for (String path : List.of("/sdd/version", "/sdd/fsm", "/sdd/fsm/alpha")) {
+            server.reset();
+            server.expect(requestTo(BASE + path)).andRespond(withStatus(
+                    org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE).contentType(MediaType.APPLICATION_JSON)
+                    .body("{\"code\":503,\"reason\":\"sdd_unavailable\",\"detail\":\"找不到 AISDLC_SDD 目錄\"}"));
+            Runnable call = switch (path) {
+                case "/sdd/version" -> adapter::sddVersion;
+                case "/sdd/fsm" -> adapter::sddFsmList;
+                default -> () -> adapter.sddFsm("alpha");
+            };
+            assertThatThrownBy(call::run).as(path).isInstanceOfSatisfying(UpstreamException.Failure.class,
+                    e -> assertThat(e.details()).containsEntry("bridgeStatus", 503)
+                            .containsEntry("bridgeReason", "sdd_unavailable"));
+        }
+    }
+
+    @Test
+    void aTwoHundredBodyOfTheWrongShapeIsAnUpstreamFailureNotAnException() {
+        server.expect(requestTo(BASE + "/sdd/version")).andRespond(withSuccess("{\"unexpected\":true}",
+                MediaType.APPLICATION_JSON));
+        assertThatThrownBy(() -> adapter.sddVersion()).isInstanceOf(UpstreamException.Failure.class);
+        server.reset();
+        server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess("{\"root\":\"x\"}",
+                MediaType.APPLICATION_JSON));
+        assertThatThrownBy(() -> adapter.sddFsmList()).as("沒有 projects 陣列").isInstanceOf(UpstreamException.Failure.class);
+        server.reset();
+        server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess(
+                "{\"root\":\"x\",\"projects\":[{\"source\":\"FSM-STATE-a.yaml\"}]}", MediaType.APPLICATION_JSON));
+        assertThatThrownBy(() -> adapter.sddFsmList()).as("清單項沒有專案名：不猜").isInstanceOf(UpstreamException.Failure.class);
+        server.reset();
+        server.expect(requestTo(BASE + "/sdd/fsm/x")).andRespond(withSuccess("not json", MediaType.TEXT_PLAIN));
+        assertThatThrownBy(() -> adapter.sddFsm("x")).isInstanceOf(UpstreamException.Failure.class);
+    }
+
+    @Test
+    void connectionFailuresAndReadTimeoutsOfTheEngineStatusCallsAreNeverRetried() {
+        server.expect(requestTo(BASE + "/sdd/version")).andRespond(withException(new ConnectException("down")));
+        assertThatThrownBy(() -> adapter.sddVersion()).isInstanceOf(UpstreamException.Unavailable.class);
+        server.verify();
+        server.reset();
+        // MockRestServiceServer 的期望是「恰好一次」：若有重試，第二個請求會因「沒有後續期望」而炸出 AssertionError，而不是 TimedOut
+        server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withException(new SocketTimeoutException("slow")));
+        assertThatThrownBy(() -> adapter.sddFsmList()).isInstanceOf(UpstreamException.TimedOut.class);
+        server.verify();
+        server.reset();
+        server.expect(requestTo(BASE + "/sdd/fsm/alpha")).andRespond(withException(new ConnectException("down")));
+        assertThatThrownBy(() -> adapter.sddFsm("alpha")).isInstanceOf(UpstreamException.Unavailable.class);
+        server.verify();
+    }
+
+    @Test
+    void theSddCallsFollowTheSddEngineUrlSetting() {
+        settings.customized.put("sdd.engineUrl", "http://sdd-bridge:9100");
+        settings.customized.put("autoclaude.engineUrl", "http://autoclaude-bridge:9200");
+        server.expect(requestTo("http://sdd-bridge:9100/sdd/version")).andRespond(withSuccess(
+                "{\"latest\":\"AISDLC_SDD_v9.99\",\"root\":\"/sdd\"}", MediaType.APPLICATION_JSON));
+
+        adapter.sddVersion();
+
         server.verify();
     }
 
@@ -303,22 +572,31 @@ class BridgeHttpAdapterTest {
                 .andRespond(withSuccess("{\"signed_off\":true}", MediaType.APPLICATION_JSON));
         server.expect(requestTo(BASE + "/sdd/compile")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
                 .andRespond(withSuccess("{\"tasks\":[]}", MediaType.APPLICATION_JSON));
-        server.expect(requestTo(BASE + "/health")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+        server.expect(requestTo(BASE + "/health/deep")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
                 .andRespond(withSuccess());
         server.expect(requestTo(BASE + "/autoclaude/runs/" + runId))
                 .andExpect(header("X-Trace-Id", "trace-from-the-request"))
                 .andRespond(withSuccess("{\"run_id\":\"" + runId + "\",\"status\":\"RUNNING\"}",
                         MediaType.APPLICATION_JSON));
-        server.expect(requestTo(BASE + "/autoclaude/runs/" + runId + "/checkpoints"))
-                .andExpect(header("X-Trace-Id", "trace-from-the-request"))
-                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        // v1.4：引擎狀態的三個唯讀查詢同樣帶標頭（契約 §0.4 第 6 點：console-api 對 Bridge 的每一個請求都帶）
+        server.expect(requestTo(BASE + "/sdd/version")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"latest\":\"AISDLC_SDD_v9.99\",\"root\":\"/sdd\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/sdd/fsm")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"root\":\"AISDLC_SDD_v9.99\",\"projects\":[],\"errors\":[]}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE + "/sdd/fsm/alpha")).andExpect(header("X-Trace-Id", "trace-from-the-request"))
+                .andRespond(withSuccess("{\"project\":\"alpha\",\"source\":\"FSM-STATE-alpha.yaml\"}",
+                        MediaType.APPLICATION_JSON));
 
         adapter.decompose(new DecomposeRequest("g", "", "p", 24, null), Duration.ofSeconds(30));
         adapter.approveDraft("d", "Alice");
         adapter.sddCompile("/spec");
         adapter.health();
         adapter.getRun(UUID.fromString(runId));
-        adapter.listCheckpoints(UUID.fromString(runId));
+        adapter.sddVersion();
+        adapter.sddFsmList();
+        adapter.sddFsm("alpha");
 
         server.verify();
     }
@@ -326,7 +604,7 @@ class BridgeHttpAdapterTest {
     @Test
     void withoutATraceContextEachCallGetsItsOwnFreshUuid() {
         List<String> seen = new ArrayList<>();
-        server.expect(ExpectedCount.times(3), requestTo(BASE + "/health")).andExpect(request -> seen.add(
+        server.expect(ExpectedCount.times(3), requestTo(BASE + "/health/deep")).andExpect(request -> seen.add(
                 request.getHeaders().getFirst("X-Trace-Id"))).andRespond(withSuccess());
 
         adapter.health();
@@ -341,7 +619,7 @@ class BridgeHttpAdapterTest {
     void aBlankTraceIdInTheMdcIsTreatedAsMissing() {
         MDC.put("traceId", "   ");
         List<String> seen = new ArrayList<>();
-        server.expect(requestTo(BASE + "/health")).andExpect(request -> seen.add(
+        server.expect(requestTo(BASE + "/health/deep")).andExpect(request -> seen.add(
                 request.getHeaders().getFirst("X-Trace-Id"))).andRespond(withSuccess());
 
         adapter.health();
@@ -379,7 +657,8 @@ class BridgeHttpAdapterTest {
                 .isEqualTo("http://engine-bridge:8081");
         assertThat(new BridgeEndpoints(settings, new BridgeProperties("")).sddBase())
                 .isEqualTo("http://localhost:8081");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null)).healthPath()).isEqualTo("/health");
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null)).healthPath())
+                .as("設定缺席時的兜底：v1.4 起是深度探針").isEqualTo("/health/deep");
         settings.values.put("autoclaude.healthCheckPath", "custom/health");
         assertThat(new BridgeEndpoints(settings, new BridgeProperties(null)).healthPath()).isEqualTo("/custom/health");
     }

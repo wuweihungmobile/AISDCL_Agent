@@ -40,7 +40,7 @@ import java.util.List;
  *
  * <p>RBAC（NFR-9.2-02；Architecture §8.2；契約 §0.4）：
  * <ul>
- *   <li>免認證：登入／續期、{@code /actuator/health}、{@code /actuator/prometheus}（nginx 對外擋 /actuator/）、
+ *   <li>免認證：登入／續期／登出、{@code /actuator/health}、{@code /actuator/prometheus}（nginx 對外擋 /actuator/）、
  *       {@code /v3/api-docs}、{@code /swagger-ui}。</li>
  *   <li>{@code GET /api/v1/**}：VIEWER／OPERATOR／ADMIN。</li>
  *   <li>{@code /api/v1/settings/**} 的<b>非 GET</b>：僅 ADMIN（含 {@code POST /settings/export｜import｜test-connection}：
@@ -71,7 +71,9 @@ public class SecurityConfig {
                         // OncePerRequestFilter（不處理 ASYNC）、API 又沒有 session，這次 dispatch 會被判成未認證而在已提交的回應上丟
                         // AccessDeniedException。ASYNC dispatch 是同一個已授權請求的內部重派，放行它不開任何新入口。
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh").permitAll()
+                        // 登出（v1.4，D-19）同樣免認證：登出時 access token 可能已過期，仍必須能撤銷 refresh token
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/refresh",
+                                "/api/v1/auth/logout").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/prometheus").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**")
                         .permitAll()

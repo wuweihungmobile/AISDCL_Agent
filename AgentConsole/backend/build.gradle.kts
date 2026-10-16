@@ -59,6 +59,10 @@ dependencies {
 	implementation("com.bucket4j:bucket4j-core:$bucket4jVersion")         // NFR-9.2-06 限流（記憶體）
 	implementation("org.apache.httpcomponents.client5:httpclient5")       // SSRF 外呼：自訂 DnsResolver 釘 IP、不跟 redirect
 
+	// v1.4（契約附錄 D.4；主控裁決 D-19，Q6 視同核可）：refresh token 撤銷名單的 Redis 實作（內含 Lettuce 客戶端）；版本由 Spring Boot BOM 管理。
+	// 只被撤銷名單使用（限流計數與 SSE 位移不用 Redis，ADR-001 D16／D23）；沒設 spring.data.redis.host 時不會連線。
+	implementation("org.springframework.boot:spring-boot-starter-data-redis")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
@@ -77,6 +81,12 @@ tasks.withType<Test> {
 	// 根 CLAUDE.md〈GitHub CI/CD 一律多 CPU 模式〉：測試分 2 個 JVM fork 平行（每 fork 各起一個 Testcontainers PG，
 	// 再多會讓 PG 容器數隨核數成長而拖慢；CI runner 4 核實測足夠）。
 	maxParallelForks = 2
+	// Windows 路徑上限（260 字元）：Gradle 9.8 的 HTML 測試報告為每個測試建一個「<類別全名>/<方法簽章>」的檔案或目錄，
+	// 本專案的測試方法名是完整敘述句（常 70～110 字元），加上預設的 build/reports/tests/test 前綴會逼近上限；
+	// 根層 tools/tests 的檔案樹掃描一旦走到超過 260 字元的路徑就整批 FileNotFoundError（W7 第二批實際發生）。
+	// 報告改放短目錄 build/rt，每個路徑省 17 字元；新增測試仍要守「方法名取短、參數化測試的參數型別取短」。
+	// 驗收：Get-ChildItem build -Recurse | ForEach-Object { $_.FullName.Length } | Sort-Object -Descending | Select-Object -First 1 必須 < 240。
+	reports.html.outputLocation = layout.buildDirectory.dir("rt")
 	finalizedBy(tasks.jacocoTestReport)
 	// 測試結束時印一行總計（筆數、成功、失敗、略過），讓 CI 日誌與本機輸出一眼看得到「真的跑了幾支」。
 	addTestListener(object : TestListener {

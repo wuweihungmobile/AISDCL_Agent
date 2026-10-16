@@ -100,6 +100,12 @@ public class ErrorResponseDocumentation {
     private static final Set<String> ROLE_GATED_READ_ENDPOINTS = Set.of("GET /api/v1/settings",
             "GET /api/v1/settings/{category}", "GET /api/v1/projects");
 
+    /**
+     * 免認證端點中「不可能回 401」的：{@code POST /auth/logout} 只要請求格式合法就一律 204（不論 token 有沒有效——不讓它變成探測 token 有效性的管道，
+     * 契約 §1.9.1），格式不合是 400；登入與續期的 401 是帳密錯誤與 refresh token 無效，所以仍列。
+     */
+    private static final Set<String> NEVER_UNAUTHORIZED = Set.of("POST /api/v1/auth/logout");
+
     @Bean
     OpenApiCustomizer errorEnvelopeCustomizer() {
         return openApi -> {
@@ -114,7 +120,9 @@ public class ErrorResponseDocumentation {
                 if (hasInput) {
                     add(operation, "400", "請求格式或欄位驗證失敗（errors 列出每個欄位的問題）");
                 }
-                add(operation, "401", isPublic ? "帳號密碼錯誤，或 refresh token 無效／過期" : "未登入，或 access token 無效／過期");
+                if (!NEVER_UNAUTHORIZED.contains(key)) {
+                    add(operation, "401", isPublic ? "帳號密碼錯誤，或 refresh token 無效／過期／已被撤銷" : "未登入，或 access token 無效／過期");
+                }
                 if ((!isPublic && !isRead) || ROLE_GATED_READ_ENDPOINTS.contains(key)) {
                     add(operation, "403", "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；"
                             + "已刪除專案清單需 OPERATOR 以上）");

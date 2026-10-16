@@ -94,7 +94,7 @@ class RunLauncherTest {
     }
 
     @Test
-    void theSettingsAreMaterializedOnceBeforeTheRowIsInsertedAndTheSameResultFeedsTheRowAndTheBridgeRequest() {
+    void materializesOnceBeforeTheRowAndFeedsRowAndRequest() {
         Materialized first = materialized("first", "key-one", new EngineCapabilities(ENABLED, ENABLED));
         Materialized second = materialized("second", null, new EngineCapabilities(OFF, OFF));
         // 若實作在別處又物化一次（例如回到「交易 1 之後才物化」），第二次呼叫會得到另一份設定：落庫與送出就會各說各話
@@ -130,7 +130,7 @@ class RunLauncherTest {
     }
 
     @Test
-    void aMaterializationThatFailsHappensBeforeAnyRowExistsSoThereIsNothingToCompensateAndTheBridgeIsNeverCalled() {
+    void aFailedMaterializationHappensBeforeAnyRowExists() {
         when(config.materialize(3)).thenThrow(new IllegalStateException("系統參數不存在：model.apiKey"));
 
         assertThatThrownBy(() -> launcher.launch(launch(3), run -> { })).isInstanceOf(IllegalStateException.class);

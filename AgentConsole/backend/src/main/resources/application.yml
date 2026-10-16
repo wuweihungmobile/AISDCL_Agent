@@ -27,6 +27,17 @@ spring:
     schemas: console
     default-schema: console
     locations: classpath:db/migration
+  data:
+    redis:
+      # 🔴 host／port 刻意不給預設值（v1.4，D-19；契約 §1.9.2、附錄 D.2）：未設＝不連 Redis，refresh token 撤銷名單用單實例記憶體
+      # （console.security.refresh-revocation.store=auto）。docker compose 設 SPRING_DATA_REDIS_HOST=redis／SPRING_DATA_REDIS_PORT=6379
+      # （Spring Boot 寬鬆綁定直接覆寫）。Redis 只被撤銷名單使用；限流計數與 SSE 位移不用它（ADR-001 D16／D23）。
+      # 逾時取短：Redis 不在線時每次呼叫最多等這麼久就降級為記憶體，不拖慢登入與換新。
+      connect-timeout: 2s
+      timeout: 2s
+      # 不使用 Spring Data Redis 的 repository 掃描（本專案只用 StringRedisTemplate；免得與 JPA repository 互相掃描而多出一堆日誌）。
+      repositories:
+        enabled: false
 
 server:
   port: 8080
@@ -43,6 +54,11 @@ management:
       probes:
         enabled: true
       show-details: never
+  health:
+    redis:
+      # 🔴 必須（v1.4，D-19；契約 §1.9.2）：classpath 有 Redis 時 Spring Boot 會自動註冊 Redis 健康指標，Redis 不在線會讓
+      # /actuator/health 變 DOWN、backend 容器 unhealthy——正好違背「Redis 不在線仍可用」的降級承諾（ADR-001 D16）。
+      enabled: false
 
 springdoc:
   api-docs:
@@ -95,6 +111,10 @@ console:
       requests-per-minute: 100
       # production 直連維持 false；docker／e2e profile 為 true（並設 server.forward-headers-strategy=native）。
       trust-forwarded-for: false
+    refresh-revocation:
+      # refresh token 撤銷名單的儲存（v1.4，D-19；契約 §1.9.2、附錄 D.2）：auto＝spring.data.redis.host 有值才用 Redis
+      # （不在線時降級為單實例記憶體並記 WARN），否則純記憶體；redis＝只用 Redis（降級照舊）；memory＝只用記憶體（本機 e2e、單元測試）。
+      store: auto
   import:
     # 路徑 B 的 LLM 輸入（系統訊息＋使用者訊息）字元上限；超過不呼叫模型，直接 prompt_too_long（契約 §3.3.3）。
     max-prompt-chars: 120000

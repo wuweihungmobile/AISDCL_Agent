@@ -461,7 +461,8 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
         String run = execute.id();
         assertThat(executeTrace).isNotBlank();
         assertThat(tracesOf("POST /autoclaude/runs")).as("使用者請求觸發的呼叫：取當前請求的 traceId").containsExactly(executeTrace);
-        assertThat(tracesOf("GET /health")).as("啟動後立即的健康探測也在同一個請求裡").containsExactly(executeTrace);
+        assertThat(tracesOf("GET /health/deep")).as("啟動後立即的健康探測（v1.4 預設打深度探針）也在同一個請求裡")
+                .containsExactly(executeTrace);
         String streamRequest = "GET /autoclaude/runs/" + run + "/stream";
         assertThat(awaitUntil(Duration.ofSeconds(10), () -> !tracesOf(streamRequest).isEmpty()))
                 .as("背景事件消費者連上了串流").isTrue();
@@ -773,7 +774,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void aLevelSevenRunWithAnApiKeyReportsBothCapabilitiesEnabledStoresThemAndSendsTheBrainFlagButNeverTheInertEvolutionKeys() {
+    void levelSevenWithAKeyEnablesBothAndSendsOnlyTheBrainFlag() {
         Fixture f = prjA("caps-level7-key", 4);
         putApiKey(FAKE_API_KEY);
 
@@ -804,7 +805,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void withoutAnApiKeyALevelSevenRunIsReportedUnavailableAndTheBridgeGetsNoMinimaxBlockAndNoKey() {
+    void withoutAKeyLevelSevenIsUnavailableAndNothingMinimaxIsSent() {
         Fixture f = prjA("caps-level7-nokey", 4);
         MINI.manualSteps = true;
 
@@ -822,7 +823,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void aLevelThreeRunWithNoFlagsAndNoKeyIsReportedOffAndSendsNothingBrainRelated() {
+    void levelThreeWithoutFlagsOrKeyIsOffAndSendsNothingBrainRelated() {
         Fixture f = prjA("caps-level3-off", 3);
         MINI.manualSteps = true;
 
@@ -870,7 +871,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void theCapabilitiesAreFrozenAtLaunchAreAbsentFromTheListAndAReadFailureOfTheStoredValueDegradesToAbsence() {
+    void capabilitiesAreFrozenAbsentFromTheListAndDegradeOnReadFailure() {
         Fixture f = prjA("caps-frozen", 4);
         putApiKey(FAKE_API_KEY);
         String run = startRun(f.projectId(), Map.of("autonomyLevel", 7));
@@ -902,7 +903,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void everyControlEndpointSnapshotCarriesTheFrozenCapabilitiesEvenAfterTheSettingsChanged() {
+    void controlSnapshotsCarryTheFrozenCapabilitiesAfterSettingsChange() {
         Fixture f = prjA("caps-control", 4);
         putApiKey(FAKE_API_KEY);
         MINI.manualSteps = true;
@@ -938,7 +939,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void aFollowUpRunOpenedByAReviewDecidesItsCapabilitiesAgainFromTheCurrentSettingsAndTheInheritedLevel() {
+    void aFollowUpRunDecidesItsCapabilitiesFromCurrentSettingsAndLevel() {
         Fixture f = prjA("caps-follow-up", 4);
         MINI.failStepIds.add("G1-T1");
         String first = startRun(f.projectId(), Map.of("autonomyLevel", 6));
@@ -961,7 +962,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     // ── D-12：資源使用 bridge.resources（契約 §1.2.3、§3.1.2；E2E-14 第 8～9 列的後端部分）──────────────────
 
     @Test
-    void theResourceSampleOfTheEngineProcessTreeIsProjectedIntoTheDetailExactlyAsTheBridgeSentIt() {
+    void theResourceSampleIsProjectedIntoTheDetailAsTheBridgeSentIt() {
         Fixture f = prjA("resources-sample", 4);
         MINI.manualSteps = true;
         String run = startRun(f.projectId());
@@ -1003,7 +1004,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void anOlderBridgeWhoseSnapshotHasNoResourcesKeyAtAllGivesNoResourcesAndNoError() {
+    void anOlderBridgeWithoutTheResourcesKeyGivesNoResources() {
         Fixture f = prjA("resources-omitted", 4);
         MINI.manualSteps = true;
         MINI.resourcesMode = MiniBridge.ResourcesMode.OMIT;
@@ -1018,7 +1019,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void whenTheBridgeIsUnreachableThereAreNoResourcesEitherAndTheDetailStillAnswers200() {
+    void anUnreachableBridgeGivesNoResourcesAndStillAnswers200() {
         Fixture f = prjA("resources-unreachable", 4);
         MINI.manualSteps = true;
         String run = startRun(f.projectId());
@@ -1034,7 +1035,7 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
     }
 
     @Test
-    void aPausedAndAFinishedRunHaveNoResourcesBecauseThereIsNoEngineProcessTreeToSample() {
+    void pausedAndFinishedRunsHaveNoResources() {
         Fixture f = prjA("resources-paused-finished", 4);
         MINI.manualSteps = true;
         String run = startRun(f.projectId());
@@ -1081,6 +1082,8 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
         int afterStart = health.size();
         ticker.tick();
         assertThat(health.size()).isEqualTo(afterStart + 1);
-        assertThat(MINI.countRequests("GET /health")).isGreaterThanOrEqualTo(2);
+        assertThat(MINI.countRequests("GET /health/deep")).as("探測環打的是深度探針，不是淺層 /health")
+                .isGreaterThanOrEqualTo(2);
+        assertThat(MINI.requests()).doesNotContain("GET /health");
     }
 }

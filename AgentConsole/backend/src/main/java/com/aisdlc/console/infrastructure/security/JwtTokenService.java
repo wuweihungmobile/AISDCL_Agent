@@ -42,13 +42,17 @@ public class JwtTokenService implements TokenIssuer {
     /** 驗證結果；EXPIRED 只在「簽章正確但已過期」時出現，讓前端知道該走 refresh 流程。 */
     public enum Outcome { VALID, EXPIRED, INVALID }
 
-    public record Verification(Outcome outcome, String username, Role role) {
-        static Verification valid(String username, Role role) {
-            return new Verification(Outcome.VALID, username, role);
+    /**
+     * @param tokenId   token 的 {@code jti}（簽發時一律寫入；沒有為 null）
+     * @param expiresAt token 的 {@code exp}（沒有為 null）
+     */
+    public record Verification(Outcome outcome, String username, Role role, String tokenId, Instant expiresAt) {
+        static Verification valid(String username, Role role, String tokenId, Instant expiresAt) {
+            return new Verification(Outcome.VALID, username, role, tokenId, expiresAt);
         }
 
         static Verification of(Outcome outcome) {
-            return new Verification(outcome, null, null);
+            return new Verification(outcome, null, null, null, null);
         }
     }
 
@@ -79,11 +83,18 @@ public class JwtTokenService implements TokenIssuer {
                 build(username, role, USE_REFRESH, now, refreshTtl), accessTtl.toSeconds());
     }
 
+    /**
+     * 驗證 refresh token 並取出撤銷名單要用的 {@code jti} 與 {@code exp}（契約 §1.9.2）。<b>沒有 {@code jti}（或沒有 {@code exp}）的 refresh
+     * token 視為無效</b>——本服務簽發的每個 token 都有這兩個 claim，沒有的只可能來自更早的程式版本或偽造，無從撤銷，使用者重新登入即可。
+     */
     @Override
     public Optional<RefreshIdentity> verifyRefreshToken(String token) {
         Verification result = verify(token, USE_REFRESH);
-        return result.outcome() == Outcome.VALID
-                ? Optional.of(new RefreshIdentity(result.username(), result.role())) : Optional.empty();
+        if (result.outcome() != Outcome.VALID || result.tokenId() == null || result.tokenId().isBlank()
+                || result.expiresAt() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(new RefreshIdentity(result.username(), result.role(), result.tokenId(), result.expiresAt()));
     }
 
     /** 驗證 token：簽章、期限、演算法、用途與角色都必須合格。 */
@@ -106,7 +117,9 @@ public class JwtTokenService implements TokenIssuer {
                     || roleName == null) {
                 return Verification.of(Outcome.INVALID);
             }
-            return Verification.valid(claims.getSubject(), Role.valueOf(roleName));
+            Date expiration = claims.getExpiration();
+            return Verification.valid(claims.getSubject(), Role.valueOf(roleName), claims.getId(),
+                    expiration == null ? null : expiration.toInstant());
         } catch (ExpiredJwtException e) {
             return Verification.of(Outcome.EXPIRED);
         } catch (JwtException | IllegalArgumentException e) {

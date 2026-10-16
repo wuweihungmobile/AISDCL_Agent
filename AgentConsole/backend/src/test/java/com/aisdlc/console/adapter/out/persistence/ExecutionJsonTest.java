@@ -22,7 +22,7 @@ class ExecutionJsonTest {
     }
 
     @Test
-    void noCapabilitiesAreWrittenAsNullSoTheColumnStaysSqlNullAndNeverTheTextNull() {
+    void noCapabilitiesAreWrittenAsSqlNull() {
         assertThat(ExecutionJson.capabilitiesToJson(null)).isNull();
     }
 
@@ -46,7 +46,7 @@ class ExecutionJsonTest {
     }
 
     @Test
-    void aMissingKeyOrAnUnknownValueIsTreatedAsThatKeyBeingAbsentWithoutThrowing() {
+    void aMissingKeyOrUnknownValueMeansThatKeyIsAbsent() {
         assertThat(ExecutionJson.capabilitiesFromJson("{\"autoMutation\":\"ENABLED\"}"))
                 .isEqualTo(new EngineCapabilities(EngineCapabilityState.ENABLED, null));
         assertThat(ExecutionJson.capabilitiesFromJson("{\"selfEvolution\":\"OFF\"}"))
@@ -59,7 +59,7 @@ class ExecutionJsonTest {
     }
 
     @Test
-    void aValueThatIsNotAJsonObjectIsTreatedAsNoCapabilitiesInsteadOfFailingTheRead() {
+    void aNonObjectValueIsTreatedAsNoCapabilities() {
         assertThat(ExecutionJson.capabilitiesFromJson("[\"ENABLED\"]")).isNull();
         assertThat(ExecutionJson.capabilitiesFromJson("\"ENABLED\"")).isNull();
         assertThat(ExecutionJson.capabilitiesFromJson("not json at all")).isNull();

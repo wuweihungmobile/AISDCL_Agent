@@ -1,10 +1,10 @@
 package com.aisdlc.console.support;
 
 /**
- * 契約附錄 C.1／C.2 三個鍵的 {@code impactNote} 原文（v1.3，D-11）。V10 以 {@code (category, key)} 對位逐字寫進
- * {@code system_configs.impact_note}（契約 §0.5 V10 寫入規則④）；{@code SchemaMigrationIT}（全新資料庫）、
- * {@code V5UpgradeMigrationIT}（升級帶資料）與 {@code SettingsReadApiIT}（從 API 看到的）都拿這裡的字串比對。
- * 改動任一邊（契約、V10、本檔）都要三邊一起改。
+ * 契約附錄 C.1／C.2 三個鍵的 {@code impactNote} 原文（v1.3，D-11）與 C.5 {@code healthCheckPath} 的原文（v1.4，D-17）。
+ * V10／V11 以 {@code (category, key)} 對位逐字寫進 {@code system_configs.impact_note}（契約 §0.5 V10 寫入規則④、V11）；
+ * {@code SchemaMigrationIT}（全新資料庫）、{@code V5UpgradeMigrationIT}（升級帶資料）與 {@code SettingsReadApiIT}
+ * （從 API 看到的）都拿這裡的字串比對。改動任一邊（契約、V10／V11、本檔）都要三邊一起改。
  */
 public final class AppendixCImpactNotes {
 
@@ -22,6 +22,10 @@ public final class AppendixCImpactNotes {
     public static final String ENABLE_SELF_EVOLUTION = "引擎沒有演化開關：有金鑰時失敗型 ESCALATION 一律由 Brain 產生演化提案，"
             + "只寫引擎日誌、不套用也不重載（max_evolutions／require_evolution_signoff 在引擎執行路徑上沒有讀者，Console 不送）。"
             + "本鍵只影響沒有金鑰時批次回報 OFF 或 UNAVAILABLE_NO_API_KEY（§3.4.2；E2E 以 model.apiKey 為空關閉演化，§5.0.2）";
+
+    /** C.5 {@code autoclaude.healthCheckPath}（v1.4，D-17；V11 寫入）。 */
+    public static final String HEALTH_CHECK_PATH = "Bridge 健康探測路徑（Agent 可用率、頂列連線燈）；預設 /health/deep："
+            + "Bridge 行程可達但引擎自檢未通過（503）也算失敗，改回 /health 只檢查行程是否存活";
 
     private AppendixCImpactNotes() {
     }

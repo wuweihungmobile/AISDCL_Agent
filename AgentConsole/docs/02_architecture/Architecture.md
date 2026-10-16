@@ -291,7 +291,7 @@ src/main/java/com/aisdlc/console/
 
 ### 4.3 `AgentBridge` 埠（反腐層）
 
-- 方法對映 §10 契約：`health`、`startRun`、`pause`、`resume`、`stop`、`getRun`、`streamEvents(runId, afterSeq)`、`replayEvents(runId, afterSeq, limit)`、`listCheckpoints`、`restore`、`decompose`、`approveDraft`、`sddVersion`、`sddFsmList`（W7 D-16：FSM 專案清單）、`sddFsm`、`sddCompile`。
+- 方法對映 §10 契約：`health`、`startRun`、`pause`、`resume`、`stop`、`getRun`、`streamEvents(runId, afterSeq)`、`replayEvents(runId, afterSeq, limit)`、`restore`（`listCheckpoints` 已於 W7 依完整性審查 I-07 刪除：斷點清單讀 DB）、`decompose`、`approveDraft`、`sddVersion`、`sddFsmList`（W7 D-16：FSM 專案清單）、`sddFsm`、`sddCompile`。
 - `EngineBridgeClient` 負責：snake_case（Bridge）↔ camelCase（Console）轉換；逾時（連線 3 秒、一般請求 30 秒、SSE 不設讀取逾時）；GET 可重試 2 次、**POST 一律不重試**（避免重複 spawn）；Bridge 的 409／422 原樣轉成領域例外（見 §11.1 狀態碼語意）。
 - 測試替身：W3 後端以 MockWebServer／WireMock 模擬 Bridge 契約；真 Bridge 於 W4 E2E 才接。
 

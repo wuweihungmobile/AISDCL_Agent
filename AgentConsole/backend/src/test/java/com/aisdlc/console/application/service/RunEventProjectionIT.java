@@ -436,7 +436,7 @@ class RunEventProjectionIT extends AbstractExecutionIT {
     }
 
     @Test
-    void anEscalationFailureEscalatesTheLastFailedTaskResetsQueuedOnesFailsTheProjectAndOpensTheReviewAfterTheStatusFrame() {
+    void anEscalationFailureEscalatesTheLastTaskAndOpensTheReviewAfterTheStatusFrame() {
         Run run = running("status-failed-esc", 4);
         run.step("G1-T1", 1, "STARTED", 1, "初始化");
         run.step("G1-T1", 1, "COMPLETED", 1, "初始化");

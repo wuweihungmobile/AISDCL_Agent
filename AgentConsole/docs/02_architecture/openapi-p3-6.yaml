@@ -3892,7 +3892,7 @@ components:
             - type: 'null'
         projects:
           type: array
-          description: '`available=false` 時為空陣列；`available=true` 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態）'
+          description: '前兩個呼叫（version、fsm 清單）任一失敗時為空陣列；只有第三個呼叫（指定專案）失敗時 `available=false` 但 `version` 與 `projects` 保留（§1.7.1）；`available=true` 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態）'
           items:
             $ref: '#/components/schemas/SddProjectEntry'
         fsm:

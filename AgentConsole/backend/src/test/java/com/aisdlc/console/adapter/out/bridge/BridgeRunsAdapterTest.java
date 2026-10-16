@@ -1,6 +1,5 @@
 package com.aisdlc.console.adapter.out.bridge;
 
-import com.aisdlc.console.application.port.out.AgentBridge.BridgeCheckpoint;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeEvent;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedException;
 import com.aisdlc.console.application.port.out.AgentBridge.RunSnapshot;
@@ -156,9 +155,8 @@ class BridgeRunsAdapterTest {
         assertThat(adapter.resumeRun(id, Map.of())).isEqualTo(BridgeStatus.RUNNING);
         run.release(10);
         assertThat(run.awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
-        assertThat(adapter.listCheckpoints(id)).extracting(BridgeCheckpoint::name)
-                .containsExactly("after-G1-T1", "after-G1-T2", "after-G1-T3");
-        assertThat(adapter.listCheckpoints(id)).extracting(BridgeCheckpoint::stepIdx).containsExactly(1, 2, 3);
+        assertThat(run.checkpointNames()).containsExactly("after-G1-T1", "after-G1-T2", "after-G1-T3");
+        assertThat(run.checkpointStepIndexes()).containsExactly(1, 2, 3);
     }
 
     private static void awaitEvents(MiniRun run, String stepStatus, int count) throws InterruptedException {
@@ -178,7 +176,7 @@ class BridgeRunsAdapterTest {
         UUID id = UUID.randomUUID();
         start(id, "/work/d", "一", "二");
         assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
-        UUID first = UUID.fromString(adapter.listCheckpoints(id).get(0).checkpointId());
+        UUID first = mini.run(id).checkpointIds().get(0);
 
         adapter.restoreRun(id, first, Map.of());
 
@@ -314,7 +312,7 @@ class BridgeRunsAdapterTest {
     // 這裡解析錯誤（丟例外）會讓「執行頁」在舊版 Bridge 上整頁 5xx；而解析太鬆（猜缺的欄位）會顯示不存在的數字。
 
     @Test
-    void theSnapshotCarriesTheResourceSampleWhileTheEngineIsAliveAndNullOnceThereIsNoProcessTree()
+    void theSnapshotCarriesTheResourceSampleWhileTheEngineIsAlive()
             throws InterruptedException {
         UUID id = UUID.randomUUID();
         mini.manualSteps = true;
@@ -332,7 +330,7 @@ class BridgeRunsAdapterTest {
     }
 
     @Test
-    void aSnapshotWithANullOrAMissingResourcesKeyIsNullWithoutAnyErrorAndTheRestOfTheSnapshotIsIntact() {
+    void aNullOrMissingResourcesKeyIsNullAndTheRestIsIntact() {
         UUID id = UUID.randomUUID();
         mini.manualSteps = true;
         start(id, "/work/res-b", "一");
@@ -350,7 +348,7 @@ class BridgeRunsAdapterTest {
     }
 
     @Test
-    void resourcesAreOnlyTakenWhenAllFourFieldsArePresentWithTheRightTypesAndNothingIsGuessed() {
+    void resourcesNeedAllFourFieldsWithTheRightTypes() {
         Map<String, Object> full = Map.of("cpu_percent", 0, "rss_bytes", 1L, "process_count", 1,
                 "sampled_at", "2026-10-16T03:21:45+00:00");
         assertThat(BridgeHttpAdapter.resourcesOf(full)).as("整數的 cpu_percent（例：0）也是數字")
@@ -433,9 +431,8 @@ class BridgeRunsAdapterTest {
         assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
         adapter.getRun(id);
         adapter.listEvents(id, 0, 500);
-        adapter.listCheckpoints(id);
         adapter.streamEvents(id, 0, Duration.ofSeconds(10), e -> { });
-        UUID first = UUID.fromString(adapter.listCheckpoints(id).get(0).checkpointId());
+        UUID first = mini.run(id).checkpointIds().get(0);
         adapter.restoreRun(id, first, Map.of());
         assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
         assertThatThrownBy(() -> adapter.pauseRun(id)).isInstanceOf(BridgeRejectedException.class);
@@ -453,8 +450,8 @@ class BridgeRunsAdapterTest {
             MDC.remove("traceId");
         }
 
-        assertThat(tracedRequests()).contains("GET /health", "POST /autoclaude/runs", "GET /autoclaude/runs/" + id,
-                "GET /autoclaude/runs/" + id + "/events", "GET /autoclaude/runs/" + id + "/checkpoints",
+        assertThat(tracedRequests()).contains("GET /health/deep", "POST /autoclaude/runs", "GET /autoclaude/runs/" + id,
+                "GET /autoclaude/runs/" + id + "/events",
                 "GET /autoclaude/runs/" + id + "/stream", "POST /autoclaude/runs/" + id + "/restore",
                 "POST /autoclaude/runs/" + id + ":pause", "POST /autoclaude/runs/" + id + ":resume",
                 "POST /autoclaude/runs/" + id + ":stop");
@@ -470,8 +467,8 @@ class BridgeRunsAdapterTest {
 
         assertThat(mini.traced()).as("探測環等背景工作：每個請求都有一個新產的 UUID").isNotEmpty()
                 .allSatisfy(t -> assertThat(t.traceId()).matches(UUID_FORMAT));
-        assertThat(mini.traced().stream().filter(t -> t.request().equals("GET /health")).map(MiniBridge.Traced::traceId))
-                .isNotEmpty();
+        assertThat(mini.traced().stream().filter(t -> t.request().equals("GET /health/deep"))
+                .map(MiniBridge.Traced::traceId)).isNotEmpty();
         assertThat(mini.traced().stream().map(MiniBridge.Traced::traceId).distinct().count())
                 .as("沒有上下文時每次呼叫各自新產（不是共用一個全域值）").isGreaterThan(1);
     }

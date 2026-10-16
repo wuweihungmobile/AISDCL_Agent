@@ -81,6 +81,104 @@ class MiniBridgeController {
         return map("status", "ok", "bridge_instance", bridge.bridgeInstance);
     }
 
+    /**
+     * 深度探針（契約 §3.1.1；對照 {@code app/health.py} 的 {@code deep_health}）：五項檢查，前四項任一失敗＝503 {@code degraded}
+     * 並附頂層 {@code reason}；第五項 {@code sdd} 只當資訊，失敗時整體仍是 200（主控裁決 Q4）。
+     */
+    @GetMapping("/health/deep")
+    ResponseEntity<Object> deepHealth() {
+        bridge.record("GET /health/deep");
+        ResponseEntity<Object> forced = injected("deepHealth");
+        if (forced != null) {
+            return forced;
+        }
+        Map<String, Object> checks = new java.util.LinkedHashMap<>();
+        checks.put("git", map("ok", true, "version", "git version 2.39.5"));
+        checks.put("autoclaude", map("ok", true, "version", "mini"));
+        checks.put("workspace", map("ok", true));
+        checks.put("db", map("ok", null));
+        checks.put("sdd", map("ok", true, "latest", bridge.sdd.latest));
+        switch (bridge.deepHealthMode) {
+            case DEGRADED -> {
+                checks.put("git", map("ok", false, "reason", "找不到 git 執行檔"));
+                return ResponseEntity.status(503).contentType(MediaType.APPLICATION_JSON)
+                        .body(map("status", "degraded", "reason", "git: 找不到 git 執行檔", "checks", checks));
+            }
+            case SDD_NOT_OK -> checks.put("sdd", map("ok", false, "latest", null, "reason", "SDD_ROOT 不是目錄：sdd"));
+            default -> {
+                // HEALTHY：五項都通過
+            }
+        }
+        return ResponseEntity.ok(map("status", "ok", "checks", checks));
+    }
+
+    // ── /sdd/*：AISDLC_SDD 唯讀查詢（契約 §3.1.3；對照 routers/sdd.py）─────────────────────────────
+
+    private ResponseEntity<Object> sddUnavailable() {
+        return error(503, "sdd_unavailable", "detail", "找不到 AISDLC_SDD 目錄；請設定 SDD_ROOT（Docker 需掛載）");
+    }
+
+    private void sddDelay() {
+        long delay = bridge.sdd.delayMillis;
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    @GetMapping("/sdd/version")
+    ResponseEntity<Object> sddVersion() {
+        bridge.record("GET /sdd/version");
+        ResponseEntity<Object> forced = injected("sddVersion");
+        if (forced != null) {
+            return forced;
+        }
+        sddDelay();
+        if (bridge.sdd.unavailable) {
+            return sddUnavailable();
+        }
+        return ResponseEntity.ok(map("latest", bridge.sdd.latest, "root", bridge.sdd.root));
+    }
+
+    @GetMapping("/sdd/fsm")
+    ResponseEntity<Object> sddFsmList() {
+        bridge.record("GET /sdd/fsm");
+        ResponseEntity<Object> forced = injected("sddFsmList");
+        if (forced != null) {
+            return forced;
+        }
+        sddDelay();
+        if (bridge.sdd.unavailable) {
+            return sddUnavailable();
+        }
+        return ResponseEntity.ok(map("root", bridge.sdd.latest, "projects", List.copyOf(bridge.sdd.projects),
+                "errors", List.copyOf(bridge.sdd.errors)));
+    }
+
+    @GetMapping("/sdd/fsm/{project}")
+    ResponseEntity<Object> sddFsm(@PathVariable String project) {
+        bridge.record("GET /sdd/fsm/" + project);
+        ResponseEntity<Object> forced = injected("sddFsm");
+        if (forced != null) {
+            return forced;
+        }
+        sddDelay();
+        if (bridge.sdd.unavailable) {
+            return sddUnavailable();
+        }
+        Map<String, Object> state = bridge.sdd.states.get(project);
+        if (!project.matches("^[A-Za-z0-9._-]{1,128}$") || (state == null && !bridge.sdd.unreadable.contains(project))) {
+            return error(404, "fsm_not_found", "project", project);
+        }
+        if (bridge.sdd.unreadable.contains(project)) {
+            return error(422, "fsm_state_unreadable", "detail", "while scanning a simple key");
+        }
+        return ResponseEntity.ok(state);
+    }
+
     @PostMapping("/autoclaude/runs")
     @SuppressWarnings("unchecked")
     ResponseEntity<Object> create(@RequestBody Map<String, Object> body) {

@@ -63,6 +63,94 @@ public final class MiniBridge implements AutoCloseable {
         SAMPLE, NULL, OMIT
     }
 
+    /** {@code GET /health/deep} 怎麼回（契約 §3.1.1；v1.4 起 console-api 的探測環預設打它，D-17）。預設 {@link DeepHealthMode#HEALTHY}。 */
+    public volatile DeepHealthMode deepHealthMode = DeepHealthMode.HEALTHY;
+
+    /**
+     * 深度探針的三種回法。注意 {@code sdd} 檢查<b>只當資訊</b>（契約 §3.1.1；主控裁決 Q4）：它失敗時整體仍是 200，
+     * 只有前四項（git／autoclaude／workspace／db）任一失敗才是 503 degraded。
+     */
+    public enum DeepHealthMode {
+        /** 200，五項檢查都通過（{@code checks.sdd.ok=true}）。 */
+        HEALTHY,
+        /** 503 {@code degraded}：引擎自檢未通過（git 找不到），Bridge 行程本身是活的。 */
+        DEGRADED,
+        /** 200，但 {@code checks.sdd.ok=false}：SDD 目錄有問題不影響 Bridge 可用，所以不是 503。 */
+        SDD_NOT_OK
+    }
+
+    /** {@code /sdd/version}、{@code /sdd/fsm}、{@code /sdd/fsm/{project}} 的夾具（契約 §3.1.3；測試直接改它的欄位）。 */
+    public final Sdd sdd = new Sdd();
+
+    /**
+     * AISDLC_SDD 唯讀查詢的假資料（欄位名與型別同真 Bridge 的 {@code routers/sdd.py}：snake_case 的本文、404 {@code fsm_not_found}、
+     * 422 {@code fsm_state_unreadable}、503 {@code sdd_unavailable}）。{@link #reset()} 回到預設夾具：兩個專案
+     * {@code e2e-alpha}（IMPLEMENTATION、三筆重試歷史）與 {@code e2e-bravo}（HUMAN_PENDING、待人工 1 筆），另有兩個讀不動的檔名。
+     */
+    public static final class Sdd {
+
+        /** true＝三個路由都回 503 {@code sdd_unavailable}（{@code SDD_ROOT} 無效）。 */
+        public volatile boolean unavailable;
+        /** 每個 {@code /sdd/*} 回應前先睡這麼久（毫秒）：用來造讀取逾時（console-api 的讀取逾時 3 秒）。 */
+        public volatile long delayMillis;
+        /** SDD 版本目錄名與 Bridge 看到的路徑（{@code /sdd/version}）。 */
+        public volatile String latest = "AISDLC_SDD_v9.99";
+        public volatile String root = "/sdd/AISDLC_SDD_v9.99";
+        /** {@code /sdd/fsm} 的 {@code projects[]}（Bridge 形狀：project／source／current_state／updated_at）。 */
+        public final List<Map<String, Object>> projects = new CopyOnWriteArrayList<>();
+        /** {@code /sdd/fsm} 的 {@code errors[]}（讀不動的檔名）。 */
+        public final List<String> errors = new CopyOnWriteArrayList<>();
+        /** {@code /sdd/fsm/{project}} 的本文（Bridge 形狀，snake_case）。沒有的 project → 404 {@code fsm_not_found}。 */
+        public final Map<String, Map<String, Object>> states = new ConcurrentHashMap<>();
+        /** 這些 project 的 {@code /sdd/fsm/{project}} 回 422 {@code fsm_state_unreadable}（檔在、內容讀不動）。 */
+        public final Set<String> unreadable = ConcurrentHashMap.newKeySet();
+
+        Sdd() {
+            reset();
+        }
+
+        public void reset() {
+            unavailable = false;
+            delayMillis = 0;
+            latest = "AISDLC_SDD_v9.99";
+            root = "/sdd/AISDLC_SDD_v9.99";
+            projects.clear();
+            errors.clear();
+            states.clear();
+            unreadable.clear();
+            addProject("e2e-alpha", "IMPLEMENTATION", 2, "sid-alpha", "2026-10-16T01:02:03+00:00",
+                    new SddRetry(3, map("gate", "PR_REVIEW", "attempt", 1, "date", "2026-10-16T00:30:00+00:00",
+                            "failure_reason", "review rejected", "scg_gate", "SCG-4")),
+                    map("count", 0, "items", List.of()));
+            addProject("e2e-bravo", "HUMAN_PENDING", 1, "sid-bravo", "2026-10-15T08:00:00+00:00", new SddRetry(0, null),
+                    map("count", 1, "items", List.of(map("entered_at", "2026-10-15T08:00:00+00:00",
+                            "reminder_sent_at", null, "reminder_hours", 72, "escalation_hours", 168))));
+            errors.add("FSM-STATE-e2e-broken.yaml");
+            errors.add("FSM-STATE-bad name.yaml");
+        }
+
+        /** {@code retry_history} 投影：{@code count} 與最近一筆（已含 {@code gate} 欄）；沒有為 null。 */
+        public record SddRetry(int count, Map<String, Object> last) {
+        }
+
+        /** 加一個專案：同時進 {@code /sdd/fsm} 的清單與 {@code /sdd/fsm/{project}} 的本文（五筆決策軌跡 r3～r7，舊→新）。 */
+        public void addProject(String project, String currentState, int sprint, String sessionId, String updatedAt,
+                               SddRetry retry, Map<String, Object> humanPending) {
+            String source = "FSM-STATE-" + project + ".yaml";
+            projects.add(map("project", project, "source", source, "current_state", currentState, "updated_at", updatedAt));
+            List<Map<String, Object>> trace = new ArrayList<>();
+            for (int i = 3; i <= 7; i++) {
+                trace.add(map("ts", "2026-10-16T00:0" + i + ":00+00:00", "from", "S" + (i - 1), "to", "S" + i,
+                        "reason", "r" + i, "spec_refs", List.of("SPEC-" + i), "agents_consulted", List.of("sa"),
+                        "trigger", "auto"));
+            }
+            states.put(project, map("project", project, "current_state", currentState, "current_sprint", sprint,
+                    "session_id", sessionId, "updated_at", updatedAt, "frozen_stages", List.of(map("stage", "SCG-0")),
+                    "decision_trace", trace, "source", source, "human_pending", humanPending,
+                    "retry_history", map("count", retry.count(), "last", retry.last()), "rtm_coverage", null));
+        }
+    }
+
     private final ConfigurableApplicationContext context;
     private final JdbcTemplate jdbc;
     private final int port;
@@ -149,6 +237,8 @@ public final class MiniBridge implements AutoCloseable {
         completionDelayMillis = 0;
         keepAliveMillis = 500;
         resourcesMode = ResourcesMode.SAMPLE;
+        deepHealthMode = DeepHealthMode.HEALTHY;
+        sdd.reset();
         dropStreams();
     }
 

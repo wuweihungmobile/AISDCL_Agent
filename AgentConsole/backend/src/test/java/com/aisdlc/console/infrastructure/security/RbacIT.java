@@ -145,6 +145,17 @@ class RbacIT extends AbstractApiIT {
         }
     }
 
+    /** v1.4（§0.8）：新增的兩個 GET 落在「GET /api/v1/** 為 VIEWER 以上」的既有規則，不必動 matcher——這裡把它釘成會失敗的事實。 */
+    @Test
+    void viewerReadsTheEngineStatusAndThePendingSignoffListAndAnonymousGets401() {
+        for (String url : List.of("/api/v1/engines/sdd", "/api/v1/signoffs/pending")) {
+            for (String token : List.of(viewer(), operator(), admin())) {
+                assertThat(api.get(token, url).status()).as("GET " + url).isEqualTo(200);
+            }
+            assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
+        }
+    }
+
     @Test
     void operatorAndAdminPassTheAuthorizationLayerOfEveryExecutionWriteAndReachTheController() {
         // 隨機 UUID 的專案／批次不存在 ⇒ 404 是 controller（用例）回的：證明 403／401 都不是它們造成的
@@ -167,6 +178,8 @@ class RbacIT extends AbstractApiIT {
         assertThat(api.get(null, "/swagger-ui.html").status()).as("導向 /swagger-ui/index.html").isEqualTo(302);
         assertThat(api.post(null, "/api/v1/auth/login", Map.of("username", "x", "password", "y")).status())
                 .as("登入端點本身免認證（帳密錯誤是 401，但不是因為沒 token）").isEqualTo(401);
+        assertThat(api.post(null, "/api/v1/auth/logout", Map.of("refreshToken", "not-a-token")).status())
+                .as("v1.4：登出端點同樣免認證（登出時 access token 可能已過期，仍必須能撤銷 refresh token）").isEqualTo(204);
     }
 
     @Test

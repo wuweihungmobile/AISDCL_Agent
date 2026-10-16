@@ -196,7 +196,9 @@ class ConfigMaterializerTest {
      * {@code model.enableKernelBrain} 決定、{@code effSelfEvolution} 只由 {@code agent.enableSelfEvolution} 決定。
      * {@code kernelBrain} 欄是「有金鑰時送出的 {@code enable_kernel_brain}」；沒有金鑰的列一律不送 {@code minimax.*}。
      */
-    @ParameterizedTest(name = "列 {0}：有金鑰={1}、brain={2}、自演化={3} → {4}／{5}")
+    // 方法名與參數型別刻意取短（預期狀態以字串傳入再轉列舉）：Gradle 9.8 的 HTML 測試報告為參數化測試建一個以
+    // 「方法名＋參數型別」命名的目錄，名稱過長會讓報告路徑逼近 Windows 的 260 字元上限（見 build.gradle.kts）。
+    @ParameterizedTest(name = "row {0}")
     @CsvSource({
             "1,true,true,true,ENABLED,ENABLED,true",
             "2,true,true,false,ENABLED,ENABLED,true",
@@ -206,9 +208,8 @@ class ConfigMaterializerTest {
             "6,false,true,false,UNAVAILABLE_NO_API_KEY,OFF,absent",
             "7,false,false,true,OFF,UNAVAILABLE_NO_API_KEY,absent",
             "8,false,false,false,OFF,OFF,absent"})
-    void theEightRowsOfTheDecisionTableGiveTheDocumentedStatesAndTheMatchingEngineSettings(
-            int row, boolean hasKey, boolean brain, boolean selfEvolution, EngineCapabilityState autoMutationState,
-            EngineCapabilityState selfEvolutionState, String kernelBrain) {
+    void decisionRow(int row, boolean hasKey, boolean brain, boolean selfEvolution, String autoMutationState,
+                     String selfEvolutionState, String kernelBrain) {
         flags(false, selfEvolution, brain);
         if (hasKey) {
             storeApiKey();
@@ -216,7 +217,8 @@ class ConfigMaterializerTest {
 
         Materialized m = materializer.materialize(3);
 
-        assertThat(m.engineCapabilities()).as("列 " + row).isEqualTo(caps(autoMutationState, selfEvolutionState));
+        assertThat(m.engineCapabilities()).as("列 " + row).isEqualTo(
+                caps(EngineCapabilityState.valueOf(autoMutationState), EngineCapabilityState.valueOf(selfEvolutionState)));
         if (hasKey) {
             assertThat(block(m, "minimax")).containsEntry("enable_kernel_brain", Boolean.valueOf(kernelBrain))
                     .containsOnlyKeys("base_url", "model", "timeout_seconds", "enable_kernel_brain");
@@ -232,7 +234,7 @@ class ConfigMaterializerTest {
      * 所以取 {1, 5}（1～5）、6、{7, 10}（7～10）驗邊界。預期值逐列抄自契約，不由程式重算（否則決策函式寫錯時測試會跟著錯）。
      * 注意 7～10 的列：旗標設為 false 關不掉等級的強制開啟（契約 §3.4.2 誠實劃界 2）。
      */
-    @ParameterizedTest(name = "等級 {0}、自動突變旗標={1}、自演化旗標={2}")
+    @ParameterizedTest(name = "level {0} flags {1}/{2}")
     @CsvSource({
             // level, autoMutation旗標, selfEvolution旗標, 有金鑰:enable_kernel_brain, 有金鑰:autoMutation, 有金鑰:selfEvolution, 無金鑰:autoMutation, 無金鑰:selfEvolution
             "1,false,false,false,OFF,ENABLED,OFF,OFF",
@@ -255,29 +257,30 @@ class ConfigMaterializerTest {
             "10,false,true,true,ENABLED,ENABLED,UNAVAILABLE_NO_API_KEY,UNAVAILABLE_NO_API_KEY",
             "10,true,false,true,ENABLED,ENABLED,UNAVAILABLE_NO_API_KEY,UNAVAILABLE_NO_API_KEY",
             "10,true,true,true,ENABLED,ENABLED,UNAVAILABLE_NO_API_KEY,UNAVAILABLE_NO_API_KEY"})
-    void theLevelAndFlagMatrixOfTheContractHoldsAtEveryBoundaryWithAndWithoutAKey(
-            int level, boolean autoMutation, boolean selfEvolution, boolean keyedKernelBrain,
-            EngineCapabilityState keyedAutoMutation, EngineCapabilityState keyedSelfEvolution,
-            EngineCapabilityState plainAutoMutation, EngineCapabilityState plainSelfEvolution) {
+    void matrix(int level, boolean autoMutation, boolean selfEvolution, boolean keyedKernelBrain,
+                String keyedAutoMutation, String keyedSelfEvolution, String plainAutoMutation,
+                String plainSelfEvolution) {
         flags(autoMutation, selfEvolution, false);
 
         Materialized plain = materializer.materialize(level);
-        assertThat(plain.engineCapabilities()).as("沒有金鑰").isEqualTo(caps(plainAutoMutation, plainSelfEvolution));
+        assertThat(plain.engineCapabilities()).as("沒有金鑰").isEqualTo(caps(EngineCapabilityState.valueOf(
+                plainAutoMutation), EngineCapabilityState.valueOf(plainSelfEvolution)));
         assertThat(plain.configOverrides()).as("沒有金鑰一律不送 minimax.*（送了引擎會啟動失敗）")
                 .doesNotContainKey("minimax");
         assertThat(plain.env()).doesNotContainKey("MINIMAX_API_KEY");
 
         storeApiKey();
         Materialized keyed = materializer.materialize(level);
-        assertThat(keyed.engineCapabilities()).as("有金鑰").isEqualTo(caps(keyedAutoMutation, keyedSelfEvolution));
+        assertThat(keyed.engineCapabilities()).as("有金鑰").isEqualTo(caps(EngineCapabilityState.valueOf(
+                keyedAutoMutation), EngineCapabilityState.valueOf(keyedSelfEvolution)));
         assertThat(block(keyed, "minimax")).as("有金鑰時顯式送 true 或 false，磁碟上的設定檔永遠看得到有效值")
                 .containsEntry("enable_kernel_brain", keyedKernelBrain);
         assertThat(keyed.env()).containsEntry("MINIMAX_API_KEY", SECRET);
     }
 
-    @ParameterizedTest(name = "等級 {0}")
+    @ParameterizedTest(name = "level {0}")
     @CsvSource({"1", "3", "5"})
-    void theKernelBrainFlagAloneRequestsTheBrainLikeTheAutoMutationFlagButNeverTheSelfEvolution(int level) {
+    void kernelBrainFlagAloneRequestsTheBrain(int level) {
         flags(false, false, true);
 
         assertThat(materializer.materialize(level).engineCapabilities()).as("沒有金鑰：有人要求 Brain 但送不出去")
@@ -295,7 +298,7 @@ class ConfigMaterializerTest {
     }
 
     @Test
-    void withoutAKeyNothingBrainRelatedIsSentAtLevelTenEvenWithEveryFlagOnBecauseTheEngineWouldFailToStart() {
+    void withoutAKeyNothingBrainRelatedIsSentEvenAtLevelTen() {
         flags(true, true, true);
 
         Materialized m = materializer.materialize(10);
@@ -334,7 +337,7 @@ class ConfigMaterializerTest {
     }
 
     @Test
-    void theInertEvolutionKeysAreNeverSentAndTheApiKeyNeverEntersTheConfigOverridesWhateverTheLevelFlagsAndKey() {
+    void inertEvolutionKeysAndTheApiKeyNeverEnterTheOverrides() {
         for (int level = 1; level <= 10; level++) {
             for (int mask = 0; mask < 8; mask++) {
                 flags((mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0);
@@ -362,7 +365,7 @@ class ConfigMaterializerTest {
     }
 
     @Test
-    void theKeyAndTheFlagsAreReadFreshOnEveryCallSoANewRunNeverReusesAnOlderDecision() {
+    void theKeyAndFlagsAreReadFreshOnEveryCall() {
         flags(false, false, false);
         assertThat(materializer.materialize(3).engineCapabilities()).isEqualTo(caps(OFF, OFF));
 

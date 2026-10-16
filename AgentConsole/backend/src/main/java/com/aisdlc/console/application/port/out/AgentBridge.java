@@ -1,5 +1,8 @@
 package com.aisdlc.console.application.port.out;
 
+import com.aisdlc.console.domain.model.engine.SddFsmList;
+import com.aisdlc.console.domain.model.engine.SddFsmState;
+import com.aisdlc.console.domain.model.engine.SddVersion;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 
@@ -175,11 +178,6 @@ public interface AgentBridge {
         }
     }
 
-    /** {@code GET …/checkpoints} 的一筆（{@code CheckpointOut}；沒有 {@code completedSteps}，Console 以 DB 為準）。 */
-    record BridgeCheckpoint(String checkpointId, String name, String createdAt, int stepIdx, String stepId,
-                            boolean automatic) {
-    }
-
     /** {@code POST /autoclaude/runs}（201）；非冪等，失敗即由呼叫端補償。 */
     RunStarted startRun(StartRunRequest request);
 
@@ -201,9 +199,6 @@ public interface AgentBridge {
     /** {@code GET …/events?after=&limit=}（裸陣列；已正規化成與 SSE 相同形狀的 {@link BridgeEvent}）。 */
     List<BridgeEvent> listEvents(UUID runId, int after, int limit);
 
-    /** {@code GET …/checkpoints}（審核 RETRY 找 {@code step_idx} 快照時使用；契約的 checkpoints 端點以 DB 為準）。 */
-    List<BridgeCheckpoint> listCheckpoints(UUID runId);
-
     /**
      * 開事件串流（{@code GET …/stream?after=<last_seq>}）並對每則事件呼叫 {@code handler}，<b>阻塞</b>到串流結束
      * （正常結束＝伺服器關閉連線）；閒置超過 {@code idleTimeout}（Bridge 每 15 秒送 keep-alive，契約 §3.1 取 45 秒）、
@@ -211,4 +206,22 @@ public interface AgentBridge {
      * Bridge 不認得該 run（404）丟 {@link BridgeRejectedException}。
      */
     void streamEvents(UUID runId, int afterSeq, Duration idleTimeout, java.util.function.Consumer<BridgeEvent> handler);
+
+    // ── v1.4（D-16）：AISDLC_SDD 引擎狀態（只讀；契約 §3.1 呼叫總表三列、§3.1.3）──────────────────────────
+    // 三個呼叫都是唯讀（console-api 不寫 SDD 目錄、不寫任何 FSM-STATE 檔，ADR-001 D22），連線 2 秒／讀取 3 秒、<b>不重試</b>。
+    // 錯誤約定同本介面其餘方法：連線失敗 → UpstreamException.Unavailable；讀取逾時 → UpstreamException.TimedOut；
+    // 5xx（含 503 sdd_unavailable，details.bridgeReason）或 2xx 但本文不是預期的形狀 → UpstreamException.Failure；4xx → BridgeRejectedException。
+
+    /** {@code GET /sdd/version}：{@code SDD_ROOT} 無效 → 503 {@code sdd_unavailable}。 */
+    SddVersion sddVersion();
+
+    /** {@code GET /sdd/fsm}：FSM 專案清單（目錄不存在＝200 空清單，不是錯誤）；{@code SDD_ROOT} 無效 → 503 {@code sdd_unavailable}。 */
+    SddFsmList sddFsmList();
+
+    /**
+     * {@code GET /sdd/fsm/{project}}：404 {@code fsm_not_found}（專案名不合白名單、檔不存在或 symlink 逃逸）、422 {@code fsm_state_unreadable}
+     * （YAML 壞掉、不是 UTF-8、缺 {@code fsm_state} 根節點）以 {@link BridgeRejectedException} 丟出。呼叫端須先驗 {@code project} 符合
+     * {@code ^[A-Za-z0-9._-]{1,128}$}（本方法把它原樣接進路徑）。
+     */
+    SddFsmState sddFsm(String project);
 }

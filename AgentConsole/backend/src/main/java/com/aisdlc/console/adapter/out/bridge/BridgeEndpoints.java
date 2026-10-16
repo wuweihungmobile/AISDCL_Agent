@@ -12,7 +12,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class BridgeEndpoints {
 
-    static final String DEFAULT_HEALTH_PATH = "/health";
+    /**
+     * 設定缺席時的兜底健康探測路徑（契約 §0.5 V11、§3.1；D-17）：v1.4 起探測環打 Bridge 的深度探針 {@code /health/deep}
+     * （git、autoclaude 匯入、工作區可寫、DB；v1.3 以前是淺層 {@code /health}，引擎壞了它照回 200）。種子預設與既有列的校正
+     * 由 Flyway V11 負責；這個常數只在 {@code system_configs} 沒有該鍵時才用到。
+     */
+    static final String DEFAULT_HEALTH_PATH = "/health/deep";
 
     private final SettingValues settings;
     private final BridgeProperties properties;
@@ -32,7 +37,7 @@ public class BridgeEndpoints {
         return base("sdd");
     }
 
-    /** 健康探測路徑（{@code autoclaude.healthCheckPath}，預設 {@code /health}）。 */
+    /** 健康探測路徑（{@code autoclaude.healthCheckPath}，預設 {@code /health/deep}）。 */
     public String healthPath() {
         String path = settings.find("autoclaude", "healthCheckPath").orElse(DEFAULT_HEALTH_PATH);
         return path.startsWith("/") ? path : "/" + path;

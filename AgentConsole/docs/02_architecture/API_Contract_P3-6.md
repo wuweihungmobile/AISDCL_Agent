@@ -1218,7 +1218,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 - **成功 204**（無內容、無封包，同 `review`、`acknowledge`）。**只要請求格式合法就一律 204**：refresh token 有效 → 撤銷它的 `jti`；無效、過期、已被撤銷、或是 access token → 同樣 204，不撤銷任何東西。理由：不讓這支端點變成「探測某個 token 是否有效」的管道，也讓客戶端的登出流程不必處理失敗分支。
 - **不撤銷 access token**：access token 無狀態，最長 30 分鐘後自然失效；撤銷名單只擋 refresh（D-19 的範圍）。要在登出當下就讓 access token 失效，必須每個請求都查名單，列為後續候選。
 - **前端**：`logout()` 先以 fire-and-forget 呼叫本端點（帶目前 session 的 `refreshToken`；沒有 session 就不呼叫），**不等結果，網路失敗或非 2xx 也不阻擋本機登出**（清 session、清 TanStack Query 快取、導向 `/login` 照舊，§2.8 第 10 點）。
-- **審計**：落 `audit_log`（§0.4 第 5 點對寫入方法一視同仁），`action=auth.logout`；匿名請求的 `subject` 為 `-`。
+- **審計**：落 `audit_log`（§0.4 第 5 點對寫入方法一視同仁），`action=auth.logout`；匿名請求的 `subject` 為 NULL（與 `auth.login` 的匿名列一致，V6 欄位註解「未認證為 NULL」；W7-BE 實作定稿，`AuthApiIT::aLogoutIsAuditedWithAnEmptyAnonymousSubject` 釘住）。
 
 | HTTP | reason | details／errors | 觸發 |
 |------|--------|-----------------|------|
@@ -1453,7 +1453,7 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 | 引擎狀態：版本（v1.4） | `GET /sdd/version` | 200 | 2s／3s | 無 | `sddVersion` |
 | 引擎狀態：FSM 專案清單（v1.4） | `GET /sdd/fsm` | 200 | 2s／3s | 無 | `sddFsmList` |
 | 引擎狀態：單一專案的 FSM（v1.4） | `GET /sdd/fsm/{project}` | 200 | 2s／3s | 無 | `sddFsm` |
-| 斷點列表 | `GET /autoclaude/runs/{id}/checkpoints`（`checkpoint_id,name,created_at,step_idx,step_id,is_automatic`；與 `console.checkpoints` 等價但沒有 `completedSteps`，契約的 `GET /executions/{runId}/checkpoints` 以 DB 為準，這條供審核 `RETRY` 找 `step_idx` 快照時使用） | 200 | 2s／5s | 2 次 | `listCheckpoints` |
+| 斷點列表 | `GET /autoclaude/runs/{id}/checkpoints`（Bridge 端點仍存在；**Console 不再呼叫**——斷點清單與審核 `RETRY` 的 `step_idx` 一律讀 DB 的 `console.checkpoints`（Bridge DB 模式寫入），W7 依完整性審查 I-07 刪除後端死碼 `listCheckpoints`） | — | — | — | （已移除） |
 
 `:resume` 與 `restore` 的 body 可帶 `env`（Bridge 重啟後請求層 env 會遺失，見其 `ENV_LOST` 告警）：console-api 一律重新物化並帶上 §3.4.2 的 `env`。**機密只能走 `env`**（Bridge 的 `config_overrides` 拒絕 `api_key`／`db_dsn`，且 `run.json` 只記 env 的名稱）。console-api 對上表**每個請求**（含事件串流與健康探測）都帶標頭 `X-Trace-Id`（v1.2，C-12；取值規則 §0.4 第 6 點，Bridge 端見 §3.1.1）。
 

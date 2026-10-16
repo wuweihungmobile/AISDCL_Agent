@@ -2,6 +2,10 @@ package com.aisdlc.console.adapter.out.bridge;
 
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.domain.exception.UpstreamException;
+import com.aisdlc.console.domain.model.engine.SddFsmList;
+import com.aisdlc.console.domain.model.engine.SddFsmState;
+import com.aisdlc.console.domain.model.engine.SddProjectEntry;
+import com.aisdlc.console.domain.model.engine.SddVersion;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import org.slf4j.Logger;
@@ -68,7 +72,13 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() { };
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
-    private static final Duration HEALTH_READ_TIMEOUT = Duration.ofSeconds(3);
+    /**
+     * 健康探測的讀取逾時 8 秒（契約 §3.1；v1.4 D-17，v1.3 以前 3 秒）：探測改打深度探針後，Bridge 光是 {@code git --version}
+     * 就最多等 5 秒，再加其餘各項；3 秒會把「Bridge 只是慢、並沒有壞」誤判成不可達。
+     */
+    private static final Duration HEALTH_READ_TIMEOUT = Duration.ofSeconds(8);
+    /** 引擎狀態查詢（{@code /sdd/version}、{@code /sdd/fsm}、{@code /sdd/fsm/{project}}）：連線 2 秒、讀取 3 秒、不重試（契約 §3.1）。 */
+    private static final Duration SDD_READ_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration APPROVE_READ_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration COMPILE_READ_TIMEOUT = Duration.ofSeconds(15);
     // 契約 §3.1 呼叫總表：連線 2s，讀取逾時依呼叫而定
@@ -79,7 +89,6 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final Duration RESTORE_READ_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration GET_READ_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration EVENTS_READ_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration CHECKPOINTS_READ_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration STREAM_CONNECT_TIMEOUT = Duration.ofSeconds(3);
     private static final int GET_RETRIES = 2;
     private static final long GET_RETRY_BACKOFF_MS = 200;
@@ -146,6 +155,93 @@ class BridgeHttpAdapter implements AgentBridge {
                 tasks);
     }
 
+    // ── v1.4（D-16）：AISDLC_SDD 唯讀查詢（契約 §3.1 三列、§3.1.3；連線 2s／讀取 3s、不重試）──────────────────
+
+    @Override
+    public SddVersion sddVersion() {
+        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/version", SDD_READ_TIMEOUT, 0));
+        String latest = text(doc.get("latest"));
+        if (latest == null || latest.isBlank()) {
+            throw malformed("GET /sdd/version");
+        }
+        String root = text(doc.get("root"));
+        return new SddVersion(latest, root == null ? "" : root);
+    }
+
+    @Override
+    public SddFsmList sddFsmList() {
+        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/fsm", SDD_READ_TIMEOUT, 0));
+        if (!(doc.get("projects") instanceof List<?> items)) {
+            throw malformed("GET /sdd/fsm");
+        }
+        List<SddProjectEntry> projects = new ArrayList<>();
+        for (Object item : items) {
+            Map<String, Object> entry = asMap(item);
+            String project = text(entry.get("project"));
+            String source = text(entry.get("source"));
+            if (project == null || project.isBlank() || source == null) {
+                throw malformed("GET /sdd/fsm 的 projects[]");
+            }
+            projects.add(new SddProjectEntry(project, source, text(entry.get("current_state")),
+                    text(entry.get("updated_at"))));
+        }
+        List<String> errors = new ArrayList<>();
+        for (Object name : asList(doc.get("errors"))) {
+            errors.add(text(name));
+        }
+        return new SddFsmList(text(doc.get("root")), projects, errors);
+    }
+
+    @Override
+    public SddFsmState sddFsm(String project) {
+        // project 已由呼叫端驗過白名單 ^[A-Za-z0-9._-]{1,128}$（只含不需要編碼的字元）
+        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/fsm/" + project, SDD_READ_TIMEOUT, 0));
+        if (doc.isEmpty()) {
+            throw malformed("GET /sdd/fsm/{project}");
+        }
+        String name = text(doc.get("project"));
+        // 最外層鍵轉 camelCase，巢狀內容（frozen_stages、decision_trace、human_pending.items、retry_history.last、rtm_coverage）原樣
+        List<Map<String, Object>> trace = objects(doc.get("decision_trace"));
+        return new SddFsmState(name == null || name.isBlank() ? project : name, text(doc.get("current_state")),
+                intOrNull(doc.get("current_sprint")), text(doc.get("session_id")), text(doc.get("updated_at")),
+                objects(doc.get("frozen_stages")), trace.size() > 5 ? trace.subList(trace.size() - 5, trace.size()) : trace,
+                text(doc.get("source")), humanPendingOf(doc.get("human_pending")), retryHistoryOf(doc.get("retry_history")),
+                doc.get("rtm_coverage"));
+    }
+
+    private static SddFsmState.HumanPending humanPendingOf(Object value) {
+        Map<String, Object> map = asMap(value);
+        List<Map<String, Object>> items = objects(map.get("items"));
+        return new SddFsmState.HumanPending(map.get("count") instanceof Number n ? n.intValue() : items.size(), items);
+    }
+
+    private static SddFsmState.RetryHistory retryHistoryOf(Object value) {
+        Map<String, Object> map = asMap(value);
+        Map<String, Object> last = map.get("last") instanceof Map<?, ?> ? asMap(map.get("last")) : null;
+        return new SddFsmState.RetryHistory(map.get("count") instanceof Number n ? n.intValue() : 0, last);
+    }
+
+    /** 清單裡的物件項（原樣）；不是物件的項目略過。 */
+    private static List<Map<String, Object>> objects(Object value) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object item : asList(value)) {
+            if (item instanceof Map<?, ?>) {
+                out.add(asMap(item));
+            }
+        }
+        return out;
+    }
+
+    /** 2xx 但本文不是預期的形狀（契約 §1.7.1：{@code bridge_error}）：與 Bridge 回非 2xx 同為上游錯誤，不是例外 500。 */
+    private static UpstreamException malformed(String what) {
+        return new UpstreamException.Failure("Bridge 的 " + what + " 回應不是預期的形狀", Map.of("bridgeStatus", 200));
+    }
+
+    /**
+     * 健康探測（契約 §3.1；v1.4 預設路徑 {@code /health/deep}）：<b>只看 HTTP 狀態碼</b>——2xx 為成功；503 {@code degraded}（引擎自檢未通過）、
+     * 其他非 2xx、連線失敗、逾時一律為失敗。回應本文完全不讀：深度探針 200 回應裡的 {@code checks.sdd.ok=false} 只是資訊
+     * （主控裁決 Q4：{@code sdd} 檢查不影響 HTTP 狀態，所以與 AutoClaude 批次無關的 SDD 目錄問題不會拉低 Agent 可用率）。
+     */
     @Override
     public BridgeHealth health() {
         try {
@@ -251,19 +347,6 @@ class BridgeHttpAdapter implements AgentBridge {
     }
 
     @Override
-    public List<BridgeCheckpoint> listCheckpoints(UUID runId) {
-        Object doc = getJson(runsBase() + "/autoclaude/runs/" + runId + "/checkpoints", CHECKPOINTS_READ_TIMEOUT);
-        List<BridgeCheckpoint> checkpoints = new ArrayList<>();
-        for (Object item : asList(doc)) {
-            Map<String, Object> map = asMap(item);
-            checkpoints.add(new BridgeCheckpoint(text(map.get("checkpoint_id")), text(map.get("name")),
-                    text(map.get("created_at")), intOrZero(map.get("step_idx")), text(map.get("step_id")),
-                    !Boolean.FALSE.equals(map.get("is_automatic"))));
-        }
-        return checkpoints;
-    }
-
-    @Override
     public void streamEvents(UUID runId, int afterSeq, Duration idleTimeout, Consumer<BridgeEvent> handler) {
         HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(STREAM_CONNECT_TIMEOUT).build();
@@ -347,9 +430,14 @@ class BridgeHttpAdapter implements AgentBridge {
 
     /** GET＋JSON 解析（物件或陣列）；連線失敗與讀取逾時重試 2 次（200ms 退避，契約 §3.1），4xx／5xx 不重試。 */
     private Object getJson(String url, Duration readTimeout) {
-        UpstreamException last = null;
+        return getJson(url, readTimeout, GET_RETRIES);
+    }
+
+    /** 同上，重試次數由呼叫端決定（引擎狀態查詢不重試：契約 §3.1，{@code retries=0}）。 */
+    private Object getJson(String url, Duration readTimeout, int retries) {
         String trace = traceId();
-        for (int attempt = 0; attempt <= GET_RETRIES; attempt++) {
+        // 至少嘗試一次；最後一次失敗（連線失敗或讀取逾時）就把它丟出去，其餘錯誤（4xx／5xx）在 handle 內直接丟出、不重試
+        for (int attempt = 0;; attempt++) {
             if (attempt > 0) {
                 try {
                     Thread.sleep(GET_RETRY_BACKOFF_MS);
@@ -358,6 +446,7 @@ class BridgeHttpAdapter implements AgentBridge {
                     throw new UpstreamException.Unavailable("等待重試時被中斷");
                 }
             }
+            UpstreamException failure;
             try {
                 return client(readTimeout, trace).get().uri(url).exchange((req, response) -> {
                     HttpStatusCode status = response.getStatusCode();
@@ -369,12 +458,14 @@ class BridgeHttpAdapter implements AgentBridge {
                     return null;
                 });
             } catch (ResourceAccessException e) {
-                last = translate(e);
+                failure = translate(e);
             } catch (UpstreamException.Unavailable | UpstreamException.TimedOut e) {
-                last = e;
+                failure = e;
+            }
+            if (attempt >= retries) {
+                throw failure;
             }
         }
-        throw last;
     }
 
     private static Object parseAny(String body) {

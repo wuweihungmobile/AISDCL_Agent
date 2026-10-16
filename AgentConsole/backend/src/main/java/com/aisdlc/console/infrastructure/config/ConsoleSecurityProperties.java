@@ -34,7 +34,20 @@ public record ConsoleSecurityProperties(
         @NotEmpty(message = "console.security.evaluator-allowlist 至少要有一個可執行檔")
         @DefaultValue({"pytest", "python", "python3", "py", "npm", "npx", "node", "pnpm", "yarn", "mvn", "mvnw",
                 "gradle", "gradlew", "java", "dotnet", "go", "cargo", "make", "tsc", "eslint", "ruff", "mypy",
-                "git"}) List<String> evaluatorAllowlist) {
+                "git"}) List<String> evaluatorAllowlist,
+        @Valid @DefaultValue RefreshRevocation refreshRevocation) {
+
+    /**
+     * refresh token 撤銷名單的儲存（契約 §1.9.2、附錄 D.2；v1.4，D-19）。
+     *
+     * @param store {@code auto}（預設）：{@code spring.data.redis.host} 有值才用 Redis（不在線時降級為記憶體並記 WARN），否則純記憶體，
+     *              本機開發不必起 Redis；{@code redis}：只用 Redis（降級照舊）；{@code memory}：只用記憶體（本機 e2e、單元測試）
+     */
+    public record RefreshRevocation(@DefaultValue("auto") Store store) {
+
+        /** 撤銷名單的儲存選擇。 */
+        public enum Store { AUTO, REDIS, MEMORY }
+    }
 
     /**
      * 限流（NFR-9.2-06；契約 §0.4 第 4 點）。

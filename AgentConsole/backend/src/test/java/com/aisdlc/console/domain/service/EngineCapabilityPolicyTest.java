@@ -25,9 +25,13 @@ class EngineCapabilityPolicyTest {
 
     /**
      * 決策表 8 列（等級 3，{@code agent.enableAutoMutation=false}：{@code brainRequested} 由 {@code model.enableKernelBrain} 製造、
-     * {@code effSelfEvolution} 由 {@code agent.enableSelfEvolution} 製造）。
+     * {@code effSelfEvolution} 由 {@code agent.enableSelfEvolution} 製造）。欄位依序：列號、有金鑰、brainRequested、
+     * effSelfEvolution、預期 autoMutation、預期 selfEvolution。
+     *
+     * <p>方法名與參數型別刻意取短（預期狀態以字串傳入再轉列舉）：Gradle 9.8 的 HTML 測試報告為參數化測試建一個以
+     * 「方法名＋參數型別」命名的目錄，名稱過長會讓報告路徑逼近 Windows 的 260 字元上限。
      */
-    @ParameterizedTest(name = "列 {0}：有金鑰={1}、brainRequested={2}、effSelfEvolution={3} → {4}／{5}")
+    @ParameterizedTest(name = "row {0}")
     @CsvSource({
             "1,true,true,true,ENABLED,ENABLED",
             "2,true,true,false,ENABLED,ENABLED",
@@ -37,14 +41,15 @@ class EngineCapabilityPolicyTest {
             "6,false,true,false,UNAVAILABLE_NO_API_KEY,OFF",
             "7,false,false,true,OFF,UNAVAILABLE_NO_API_KEY",
             "8,false,false,false,OFF,OFF"})
-    void theEightRowsOfTheContractTable(int row, boolean hasKey, boolean brainRequested, boolean effSelfEvolution,
-                                        EngineCapabilityState autoMutation, EngineCapabilityState selfEvolution) {
-        assertThat(decide(3, false, effSelfEvolution, brainRequested, hasKey)).as("列 " + row)
-                .isEqualTo(new EngineCapabilities(autoMutation, selfEvolution));
+    void tableRow(int row, boolean hasKey, boolean brain, boolean evolution, String autoMutation,
+                  String selfEvolution) {
+        assertThat(decide(3, false, evolution, brain, hasKey)).as("列 " + row)
+                .isEqualTo(new EngineCapabilities(EngineCapabilityState.valueOf(autoMutation),
+                        EngineCapabilityState.valueOf(selfEvolution)));
     }
 
     @Test
-    void levelSixIsTheFirstLevelThatRequestsAutoMutationAndLevelSevenTheFirstThatRequestsSelfEvolution() {
+    void levelSixAndSevenAreTheFirstToRequestEachCapability() {
         assertThat(EngineCapabilityPolicy.AUTO_MUTATION_FROM_LEVEL).isEqualTo(6);
         assertThat(EngineCapabilityPolicy.SELF_EVOLUTION_FROM_LEVEL).isEqualTo(7);
 
@@ -62,14 +67,14 @@ class EngineCapabilityPolicyTest {
     }
 
     @Test
-    void aFlagSetToFalseCannotSwitchOffWhatTheLevelForcesBecauseTheRuleIsAnOrNotAnAnd() {
+    void aFalseFlagCannotSwitchOffWhatTheLevelForces() {
         // 契約 §3.4.2 誠實劃界 2：要關 Brain 校正請降等級或清掉金鑰，不是把旗標設成 false
         assertThat(decide(7, false, false, false, true)).isEqualTo(new EngineCapabilities(ENABLED, ENABLED));
         assertThat(decide(10, false, false, false, true)).isEqualTo(new EngineCapabilities(ENABLED, ENABLED));
     }
 
     @Test
-    void theAutoMutationFlagAndTheKernelBrainFlagShareOneEngineKeyAndEitherOneRequestsTheBrain() {
+    void bothBrainFlagsShareOneEngineKey() {
         for (boolean hasKey : new boolean[] {false, true}) {
             EngineCapabilities viaAutoMutation = decide(3, true, false, false, hasKey);
             EngineCapabilities viaKernelBrain = decide(3, false, false, true, hasKey);
@@ -79,7 +84,7 @@ class EngineCapabilityPolicyTest {
     }
 
     @Test
-    void withAKeyTheSelfEvolutionIsAlwaysEnabledBecauseTheEngineHasNoSwitchForIt() {
+    void withAKeySelfEvolutionIsAlwaysEnabled() {
         for (int level = 1; level <= 10; level++) {
             for (int mask = 0; mask < 8; mask++) {
                 assertThat(decide(level, (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, true).selfEvolution())
@@ -89,7 +94,7 @@ class EngineCapabilityPolicyTest {
     }
 
     @Test
-    void withoutAKeyNothingIsEverReportedAsEnabledBecauseNothingWasSentToTheEngine() {
+    void withoutAKeyNothingIsReportedAsEnabled() {
         for (int level = 1; level <= 10; level++) {
             for (int mask = 0; mask < 8; mask++) {
                 EngineCapabilities result = decide(level, (mask & 1) != 0, (mask & 2) != 0, (mask & 4) != 0, false);
@@ -100,7 +105,7 @@ class EngineCapabilityPolicyTest {
     }
 
     @Test
-    void theStatesParseBackFromTheirStoredNamesAndAnythingElseIsUnknownRatherThanAnError() {
+    void storedNamesParseBackAndUnknownIsNotAnError() {
         for (EngineCapabilityState state : EngineCapabilityState.values()) {
             assertThat(EngineCapabilityState.parse(state.name())).contains(state);
         }
