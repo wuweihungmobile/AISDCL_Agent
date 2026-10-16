@@ -6,15 +6,15 @@
 **對應需求**：PRD §5.2～§5.5、§7.1.4～§7.1.8、附錄 B；RTM `API-IMP／SGN／EXE／MON／NTF／SSE／SET／ALR／AUT／DAG`（v1.2 增 `API-MON-08`、`API-PRJ-06`、`BR-26`；v1.4 增 `API-ENG-01`、`API-SGN-05`、`API-AUTH-03`）、`US-I／E／M／S`、`NFR-SEC-03／04／05`、`NFR-OBS-01`（v1.2 增 `NFR-9.3-04`、`NFR-9.4-04`；v1.3 不增新 ID，只為 `API-AUT-06` 與 `US-M-10` 的「資源使用情況」補可驗證的情境，見附錄 E 與 E2E-14；v1.4 以 E2E-15 補強 `NFR-OBS-01` 的 FSM 對照，並以 E2E-16 驗 D-17～D-19）
 
 > **本文的使用方式**：開發者照 §1（端點）、§2（SSE）、§3（Bridge 與讀模型）施工；QA 照 §5（E2E 情境）與附錄 B（reason 常數）驗收；§4 讓前端確認「設計稿每個元素有沒有資料來源」；§6 列出本文與其他文件不一致處的裁決。
-> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。v1.2 的 22 項變動（C-1～C-22）同樣全是主控已定的裁決（§6.5），沒有待裁決的規格點。v1.3 的 D-11、D-12 是主控授權的裁決（§6.6.1）；§6.6.3 列的偏離點主控已於 2026-10-16 確認採方案 A，沒有待裁決的規格點。v1.4 的 D-16～D-20 同樣是主控授權的裁決（§6.7.1）；SA 落筆時發現、**需要主控裁決的點**列在 §6.7.3（Q1～Q8，正文相關處以「〔待裁決 Qn〕」標示），其中 🔴 Q1（`/health/deep` 的 `sdd` 檢查）照主控任務書字面實作會讓乾淨 clone 的全棧起不來，INFRA 已在實作中偏離，本契約從其實作，請主控確認；其餘 Q 項先照本契約的預設寫法施工，裁決後再改。
+> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。v1.2 的 22 項變動（C-1～C-22）同樣全是主控已定的裁決（§6.5），沒有待裁決的規格點。v1.3 的 D-11、D-12 是主控授權的裁決（§6.6.1）；§6.6.3 列的偏離點主控已於 2026-10-16 確認採方案 A，沒有待裁決的規格點。v1.4 的 D-16～D-20 同樣是主控授權的裁決（§6.7.1）；SA 落筆時提出的 Q1～Q8 八點，主控已於 2026-10-16 全部裁決（§6.7.3 保留決策紀錄），所以本文沒有待裁決的規格點。
 
 > **v1.4 變更摘要**（逐條對照見 §6.7；W7 第二批，掌舵者授權的 D-16～D-20，契約先行；證據表見 §6.7.2）：
 > 1. **AISDLC_SDD 接入（D-16）**：Bridge 新增 `GET /sdd/fsm`（FSM 專案清單），`GET /sdd/fsm/{project}` 加 `human_pending`／`retry_history`／`rtm_coverage`（§3.1.3）；`GET /health/deep` 加 `sdd` 檢查（§3.1.1）；console-api 新增 `GET /api/v1/engines/sdd`（§1.7.1），監控頁新增「AISDLC_SDD 引擎」卡（§4.3 M-20）與 E2E-15。三項偏離 PRD 的決定（FSM 不走 SSE 改輪詢、分解器只用 `GoalDecomposer`、signoff 與 HUMAN_PENDING 只做語意對映且 Console 唯讀）登記於 ADR-001 D22。
-> 2. **深度探針（D-17）**：`autoclaude.healthCheckPath` 預設由 `/health` 改 `/health/deep`（種子預設＋Flyway V11 只改仍等於舊預設的既有列），console-api 探測環改打它、讀取逾時 3→8 秒；探測的「失敗」從此包含「Bridge 行程可達、引擎自檢未通過（503）」（§3.1、§3.1.1、§0.5 V11、附錄 C.5）。
+> 2. **深度探針（D-17）**：`autoclaude.healthCheckPath` 預設由 `/health` 改 `/health/deep`（種子預設＋Flyway V11 只改仍等於舊預設的既有列），console-api 探測環改打它、讀取逾時 3→8 秒；探測的「失敗」從此包含「Bridge 行程可達、`git`／`autoclaude`／`workspace`／`db` 任一自檢未通過（503）」；`/health/deep` 新增的 `sdd` 檢查**只當資訊**，不影響 200／503（主控裁決 Q1、Q4；§3.1、§3.1.1、§0.5 V11、附錄 C.5）。
 > 3. **待審批清單（D-18）**：新增 `GET /api/v1/signoffs/pending`（§1.8.1），與通知摘要的 `pendingSignoffs` 同一判準、同一組述詞；儀表板「待人工審批」卡改用它（§4.5 G-10）。
 > 4. **refresh token 撤銷名單（D-19）**：換新輪替時撤銷舊 token，並新增 `POST /api/v1/auth/logout` 讓登出也撤銷；Redis 優先、不在線退回單實例記憶體並記 WARN（§1.9）。ADR-001 D16 改寫、D23 補記。
 > 5. **文件登記（D-20）**：DAG 全螢幕由前端實作（§4.2 E-22）、公告列五項靜態標示與已實作的任務層級範圍（§4.6）；ADR-001 補登 D1 虛擬執行緒範圍、前端覆蓋率口徑與 INFRA 兩項偏離；Architecture 補與 PRD §4.1 目錄樹的差異、Redis 字樣訂正等。專案詳情「匯出」鈕與任務詳情第三張指標卡兩項屬 ADR-002 §4，不在 SA 持有面，文字交主控代填（§6.7.3）。
-> 6. **新路徑 3 個**：`GET /api/v1/engines/sdd`、`GET /api/v1/signoffs/pending`、`POST /api/v1/auth/logout`（`OpenApiIT` 路徑 55→58、操作 64→67，§0.8）；其中 `logout` 是主控裁決 D-19「登出時撤銷」所必需、但主控給定的新路徑清單沒有它，列為 〔待裁決 Q6〕。
+> 6. **新路徑 3 個**：`GET /api/v1/engines/sdd`、`GET /api/v1/signoffs/pending`、`POST /api/v1/auth/logout`（`OpenApiIT` 路徑 55→58、操作 64→67，§0.8）；其中 `logout` 是 D-19「登出時撤銷」所必需（主控給定的新路徑清單沒有它），主控已裁決視同核可（§6.7.3 Q6）。
 
 > **v1.3 變更摘要**（逐條對照見 §6.6；掌舵者授權的 D-11、D-12，契約先行；結論的依據是現查 `AutoClaude/` 的原始碼與引擎自己的測試，不是推測，證據表見 §6.6.2）：
 > 1. **引擎旋鈕查證（D-11）**：能由 Console 控制、而且在引擎生產路徑上**真的有讀者**的，只有 `minimax.enable_kernel_brain`（Brain 逐步校正）。`playbook.max_evolutions`／`require_evolution_signoff` 在生產的 Kernel 路徑沒有讀者（演化只提案、不套用，`AutoResumeService` 沒有核可閘），**Console 不送**；演化的 AI 提案只由金鑰的有無決定。`enable_kernel_brain=true` 而沒有金鑰時，引擎是**啟動即失敗**（不是忽略），所以沒有金鑰一律不送（§3.4.2）。
@@ -896,7 +896,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
   - `pendingSignoffs`＝`projects`、`goals`、`tasks` 三表中 `signed_off=false` 且未軟刪者（目標與任務所屬的專案、目標也須未軟刪）＋ `import_records` 中 `status∈{PARSED,REVIEWING}` 且 `signed_off=false` 者。每個待簽核的列算一次（執行閘要求三層全簽，每一列都是一次待做的 signoff）；`UPLOADED`／`PARSING` 的匯入記錄尚無可簽核內容，不計（§6 D-46）。**v1.4（D-18）：同一判準的清單端點是 `GET /signoffs/pending`（§1.8.1），它的 `counts.total` 恆等於本欄位**；
   - `pendingReviews`＝`review_requests.status='PENDING'` 總數；
   - `unacknowledgedAlerts`＝`alerts.acknowledged=false` 總數；
-  - `bridgeConnected`／`bridgeCheckedAt`＝最近一次 Bridge 健康探測（每 30 秒，`GET {autoclaude.healthCheckPath}`，**v1.4 起預設 `/health/deep`、讀取逾時 8 秒**〔v1.3 以前為 `/health`、3 秒〕，§3.1）的結果與時間；從未探測為 null。**v1.4 的語意變化**：探測成功＝回 2xx；Bridge 行程可達但深度自檢未通過（503 `degraded`，§3.1.1）也是 `false`——所以 `false` 涵蓋「連不上」與「連得上但引擎不可用」兩種，摘要不區分（要區分需另增欄位，列為後續候選，§6.7.3 Q4）。供頂列「Engine Bridge · 已連線」綠點（設計稿全域元素；`/actuator/health` 只代表 console-api 自己）。**歸屬（AR-08）**：這支端點由 W3-B1 實作，B1 階段兩欄一律回 null（探測環還不存在）；W3-B2 建好探測環後，在**同一支 controller** 補上實值，不新增端點。前端在 B1 階段看到 null 顯示「未知」灰點。
+  - `bridgeConnected`／`bridgeCheckedAt`＝最近一次 Bridge 健康探測（每 30 秒，`GET {autoclaude.healthCheckPath}`，**v1.4 起預設 `/health/deep`、讀取逾時 8 秒**〔v1.3 以前為 `/health`、3 秒〕，§3.1）的結果與時間；從未探測為 null。**v1.4 的語意變化**：探測成功＝回 2xx；Bridge 行程可達但深度自檢未通過（503 `degraded`：`git`／`autoclaude`／`workspace`／`db` 四項任一失敗，§3.1.1；`sdd` 只當資訊、不影響）也是 `false`——所以 `false` 涵蓋「連不上」與「連得上但引擎不可用」兩種，摘要不區分（要區分需另增欄位，列為後續候選）。供頂列「Engine Bridge · 已連線」綠點（設計稿全域元素；`/actuator/health` 只代表 console-api 自己）。**歸屬（AR-08）**：這支端點由 W3-B1 實作，B1 階段兩欄一律回 null（探測環還不存在）；W3-B2 建好探測環後，在**同一支 controller** 補上實值，不新增端點。前端在 B1 階段看到 null 顯示「未知」灰點。
 - 供頂列通知鈴與 signoff 佇列徽章輪詢：間隔＝`monitor.refreshIntervalMs`，**預設與最小值皆為 10 秒**（AR-06）；限流鍵是 JWT subject，同一使用者所有頁面共用每分鐘 100 次（§0.4 第 4 點）。401／429。
 
 ### 1.5 系統參數（Phase 6）
@@ -1092,7 +1092,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 
 | 參數 | 型別 | 必填 | 規則 |
 |------|------|:----:|------|
-| `project` | string | — | FSM 專案名，須符合 `^[A-Za-z0-9._-]{1,128}$`（與 Bridge 同一個白名單）；不合 → **400**（`errors[0].field=project`）。省略 → `fsm` 為 null（**不帶** `reason`），由前端依 `projects` 選一個再帶 `project` 重取 〔待裁決 Q8〕 |
+| `project` | string | — | FSM 專案名，須符合 `^[A-Za-z0-9._-]{1,128}$`（與 Bridge 同一個白名單）；不合 → **400**（`errors[0].field=project`）。省略 → `fsm` 為 null（**不帶** `reason`），由前端依 `projects` 選一個再帶 `project` 重取 |
 
 - **成功 200**：`ApiResult<SddEngineStatusResponse>`。**引擎不可用也回 200**（沿用 §1.2.3「Bridge 不可達回 200」的慣例）：這支端點回報的是「引擎現在的狀態」，不是「這次呼叫成不成功」，前端據此畫「不可用」而不是錯誤頁。`data`：
 
@@ -1100,7 +1100,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 |------|------|------|
 | `available` | boolean | `GET /sdd/version` 與 `GET /sdd/fsm` 都成功為 true；任一失敗為 false |
 | `reason` | string \| null | 見下方映射表；`available=true` 且沒有問題時為 null |
-| `version` | `{latest, root}` \| null | `latest`＝SDD 版本目錄名（例 `AISDLC_SDD_v0.30`）；`root`＝**Bridge 看到的**目錄路徑（Docker 下是容器內路徑；僅供顯示，前端預設只秀 `latest`）〔待裁決 Q8〕；`GET /sdd/version` 失敗為 null |
+| `version` | `{latest, root}` \| null | `latest`＝SDD 版本目錄名（例 `AISDLC_SDD_v0.30`）；`root`＝**Bridge 看到的**目錄路徑（Docker 下是容器內路徑；僅供顯示，前端預設只秀 `latest`）；`GET /sdd/version` 失敗為 null |
 | `projects` | `SddProjectEntry[]` | `{project, source, currentState, updatedAt}`：`project`＝FSM-STATE 檔名中的專案名、`source`＝檔名、`currentState`／`updatedAt` 取檔內 `fsm_state` 同名鍵（缺則 null）；順序＝Bridge 清單順序（專案名不分大小寫升冪，§3.1.3；console-api 不重排）；`available=false` 時為 `[]` |
 | `fsm` | `SddFsmState` \| null | 帶了 `project` 且取得時有值；其餘為 null |
 | `checkedAt` | date-time | console-api 處理這次請求的時間（UTC，`…Z`） |
@@ -1117,9 +1117,9 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | `frozenStages` | object[] | `frozen_stages`（原樣；缺則 `[]`） |
 | `decisionTrace` | object[] | `decision_trace` 的**尾 5 筆**（舊→新，原樣；每筆 `{ts, from, to, reason, spec_refs, agents_consulted, trigger}`；缺則 `[]`） |
 | `source` | string | 檔名（`FSM-STATE-<project>.yaml`） |
-| `humanPending` | `{count, items}` | 待人工確認的數量與項目，語意見 §3.1.3 〔待裁決 Q2〕 |
-| `retryHistory` | `{count, last}` | 重試歷史的總筆數與最近一筆（`last` 是原筆再加一個 `gate` 欄＝所屬的重試閘名），語意見 §3.1.3 〔待裁決 Q2〕 |
-| `rtmCoverage` | object \| null | 見 §3.1.3；現行 FSM-STATE 沒有這個鍵，**現況恆為 null**，畫面不顯示 〔待裁決 Q2〕 |
+| `humanPending` | `{count, items}` | 待人工確認的數量與項目，語意見 §3.1.3 |
+| `retryHistory` | `{count, last}` | 重試歷史的總筆數與最近一筆（`last` 是原筆再加一個 `gate` 欄＝所屬的重試閘名），語意見 §3.1.3 |
+| `rtmCoverage` | object \| null | 見 §3.1.3；現行 FSM-STATE 沒有這個鍵，**現況恆為 null**，畫面不顯示 |
 
 **`reason` 映射**（`SddEngineStatusResponse.reason` 是回應欄位，不是 `ApiError.reason`；§0.3 第 7 點、附錄 B.4）：
 
@@ -1129,10 +1129,10 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | `sdd_unavailable` | false | `GET /sdd/version` 或 `GET /sdd/fsm` 回 503 `sdd_unavailable`（`SDD_ROOT` 無效、找不到 SDD 版本目錄） |
 | `bridge_error` | false | 其餘非 2xx（第一、二個呼叫的 5xx、422 等；第三個呼叫 404／422 以外的錯誤），或 2xx 但本文不是預期的 JSON 形狀 |
 | `fsm_not_found` | true | 帶了 `project`，`GET /sdd/fsm/{project}` 回 404（`fsm_not_found`）：`fsm=null`，`projects` 與 `version` 照常 |
-| `fsm_state_unreadable` | true | 帶了 `project`，Bridge 回 422（`fsm_state_unreadable`：YAML 壞掉、或缺 `fsm_state` 根節點）：`fsm=null` |
+| `fsm_state_unreadable` | true | 帶了 `project`，Bridge 回 422（`fsm_state_unreadable`：YAML 壞掉、不是 UTF-8、缺 `fsm_state` 根節點、或巢狀過深）：`fsm=null` |
 | （null） | true | 其餘；`projects=[]` 也是正常狀態（SDD 目錄存在、但還沒有任何 FSM 狀態檔——SDD runtime 沒跑過，前端顯示「尚無 FSM 狀態檔」） |
 
-第三個呼叫（`GET /sdd/fsm/{project}`）若連線失敗、逾時或回 404／422 以外的錯誤：`available=false`，`reason` 依上表前三列，`fsm=null`；`version` 與 `projects` 保留前兩個呼叫已取得的值。Bridge `GET /sdd/fsm` 回應裡的 `errors[]`（讀不動的檔名）console-api 只記 WARN 日誌，不轉發 〔待裁決 Q8〕。
+第三個呼叫（`GET /sdd/fsm/{project}`）若連線失敗、逾時或回 404／422 以外的錯誤：`available=false`，`reason` 依上表前三列，`fsm=null`；`version` 與 `projects` 保留前兩個呼叫已取得的值。Bridge `GET /sdd/fsm` 回應裡的 `errors[]`（讀不動的檔名）console-api 只記 WARN 日誌，不轉發。
 
 ```json
 { "code":200, "message":"success", "data":{
@@ -1183,8 +1183,8 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 |------|------|------|
 | `kind` | `PROJECT`／`GOAL`／`TASK`／`IMPORT` | 草案種類 |
 | `id` | uuid | 該列的 id（也是 signoff 端點的路徑參數：`/projects｜goals｜tasks/{id}/signoff`、`/import/{id}/signoff`） |
-| `projectId` | uuid \| null | 所屬專案；`PROJECT` 項＝自己的 id；**`IMPORT` 項為 null**（匯入記錄在 `confirm` 之前還沒有專案）〔待裁決 Q5〕 |
-| `projectName` | string \| null | 所屬專案名稱；`IMPORT` 項為 null 〔待裁決 Q5〕 |
+| `projectId` | uuid \| null | 所屬專案；`PROJECT` 項＝自己的 id；**`IMPORT` 項為 null**（匯入記錄在 `confirm` 之前還沒有專案） |
+| `projectName` | string \| null | 所屬專案名稱；`IMPORT` 項為 null |
 | `parentId` | uuid \| null | `PROJECT`＝null；`GOAL`＝專案 id；`TASK`＝目標 id；`IMPORT`＝null |
 | `title` | string | `PROJECT`／`GOAL`／`TASK`＝`name`；`IMPORT`＝`source_file_name`，沒有檔名（貼上文字）時為 `貼上文字` |
 | `createdAt` | date-time | 該列的 `created_at`（UTC，`…Z`） |
@@ -1211,7 +1211,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 
 本節屬 Phase 1+2 的認證資源（`/api/v1/auth/*`，免認證）：v1.4 新增登出端點，並把「refresh token 輪替與撤銷名單」做完——ADR-001 D16 原本承諾、但後端零實作（完整性審查 I-06）。
 
-#### 1.9.1 `POST /api/v1/auth/logout`　登出並撤銷 refresh token（v1.4，D-19）　〔API-AUTH-03；待裁決 Q6〕
+#### 1.9.1 `POST /api/v1/auth/logout`　登出並撤銷 refresh token（v1.4，D-19）　〔API-AUTH-03；主控裁決 Q6：視同核可〕
 
 - **角色**：免認證（與 `login`、`refresh` 同：登出時 access token 可能已過期，仍必須能撤銷 refresh token）。**Bridge**：無。
 - **請求**：`LogoutRequest{ refreshToken }`（`@NotBlank`；缺漏或空白 → 400，`errors[0].field=refreshToken`）。
@@ -1466,20 +1466,20 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 | 項目 | 契約 |
 |------|------|
 | 路徑／認證 | `GET /health/deep`；**免認證**（與 `/health` 同；Bridge 本來就只在內網） |
-| 檢查（任一失敗＝整體 degraded） | ① `git`：以 subprocess 執行 `git --version`，**逾時 5 秒**；② `autoclaude`：`import autoclaude`；③ `workspace`：在 `ENGINE_WORKSPACE` 內建立並刪除一個暫存檔（可寫）；④ `db`：只有設了 `BRIDGE_DB_DSN` 才做，ping 一次；沒設 DSN 時 `ok` 為 `null`（不算失敗）；⑤ **`sdd`（v1.4，D-17）**：AISDLC_SDD 樹是否可用，三態，見下方「`sdd` 檢查」 |
-| 全部通過 | **200**：`{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.39.5"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":true},"sdd":{"ok":true,"latest":"AISDLC_SDD_v0.30"}}}`（無 DSN 時 `"db":{"ok":null}`；`sdd` 為 `null` 時見下方） |
-| 任一失敗 | **503**：`{"status":"degraded","reason":"<各失敗項的「名稱: 原因」，多項以「；」連接>","checks":{…}}`；失敗的項目 `ok:false` 並各附 `reason`（例：`"git":{"ok":false,"reason":"找不到 git 執行檔"}`、`"sdd":{"ok":false,"latest":null,"reason":"SDD_ROOT 不是目錄：sdd"}`），其餘項目照常回報 |
-| 使用者 | docker compose 的 bridge healthcheck 與 **console-api 的探測環（v1.4 起，預設 `autoclaude.healthCheckPath=/health/deep`，D-17）** 都打這一支。探測環的讀取逾時因此由 3 秒抬到 **8 秒**：`git --version` 自己最多等 5 秒，再加其餘各項，3 秒的讀取逾時會在 Bridge 只是慢、並沒有壞時把它判成不可達。**成本**：每次探測 spawn 一次 `git`、建立並刪除一個暫存檔、（有 DSN 時）ping 一次 DB，每 30 秒一次，對單一 Bridge 可以忽略（v1.2 曾因此讓探測環留在淺探測，D-17 改變這個取捨）。**代價**：`agentAvailability`、`bridgeConnected`、`AGENT_UNRESPONSIVE` 從此對「引擎自檢失敗」敏感，包括與 AutoClaude 批次無關的 `sdd` 檢查失敗（§3.7、§3.8.1、§6.7.3 Q4） |
+| 檢查（**前四項任一失敗＝整體 degraded**；第五項 `sdd` 只當資訊） | ① `git`：以 subprocess 執行 `git --version`，**逾時 5 秒**；② `autoclaude`：`import autoclaude`；③ `workspace`：在 `ENGINE_WORKSPACE` 內建立並刪除一個暫存檔（可寫）；④ `db`：只有設了 `BRIDGE_DB_DSN` 才做，ping 一次；沒設 DSN 時 `ok` 為 `null`（不算失敗）；⑤ **`sdd`（v1.4，D-17；主控裁決 Q4：只當資訊）**：AISDLC_SDD 樹是否可用，三態；**照常出現在 `checks` 裡，但 `ok:false` 不翻轉整體判定、不進頂層 `reason`、不觸發 503**，見下方「`sdd` 檢查」 |
+| 全部通過 | **200**：`{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.39.5"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":true},"sdd":{"ok":true,"latest":"AISDLC_SDD_v0.30"}}}`（無 DSN 時 `"db":{"ok":null}`；`sdd` 可為 `true`／`null`／`false`，三種都是 200，見下方） |
+| 前四項任一失敗 | **503**：`{"status":"degraded","reason":"<各失敗項的「名稱: 原因」，多項以「；」連接>","checks":{…}}`（頂層 `reason` **只列前四項的失敗，不含 `sdd`**）；失敗的項目 `ok:false` 並各附 `reason`（例：`"git":{"ok":false,"reason":"找不到 git 執行檔"}`），其餘項目（含 `sdd`）照常回報 |
+| 使用者 | docker compose 的 bridge healthcheck 與 **console-api 的探測環（v1.4 起，預設 `autoclaude.healthCheckPath=/health/deep`，D-17）** 都打這一支。探測環的讀取逾時因此由 3 秒抬到 **8 秒**（主控已接受）：`git --version` 自己最多等 5 秒，再加其餘各項，3 秒的讀取逾時會在 Bridge 只是慢、並沒有壞時把它判成不可達。**成本**：每次探測 spawn 一次 `git`、建立並刪除一個暫存檔、（有 DSN 時）ping 一次 DB，每 30 秒一次，對單一 Bridge 可以忽略（v1.2 曾因此讓探測環留在淺探測，D-17 改變這個取捨）。**探測的敏感面**：`agentAvailability`、`bridgeConnected`、`AGENT_UNRESPONSIVE` 只對 `git`／`autoclaude`／`workspace`／`db` 四項敏感；`sdd` 無效只會出現在 `checks.sdd` 與 Console 的 SDD 卡（`GET /engines/sdd` 的 `available=false`），**不會**拉低 Agent 可用率、讓頂列轉灰或誤報告警——SDD 是選用引擎，它壞了不該被當成 Bridge 不可用（主控裁決 Q4；§3.7、§3.8.1） |
 
-**`sdd` 檢查**（v1.4，D-17；實作 `engine-bridge/app/health.py` 的 `check_sdd`；回 `{"ok", "latest", "reason"?}`）：
+**`sdd` 檢查**（v1.4，D-17；實作 `engine-bridge/app/health.py` 的 `check_sdd`；回 `{"ok", "latest", "reason"?}`；**只當資訊：不論回什麼，整體判定都不看它**）：
 
 | `ok` | 條件 | 本文 |
 |:----:|------|------|
 | `null`（不算失敗） | `Settings.sdd_root` 為 None：`SDD_ROOT` 沒設，且預設位置 `<monorepo>/AISDLC_SDD` 下找不到版本目錄（映像內沒掛載 SDD 時即此情形）。Bridge 照樣能跑 AutoClaude 的批次，只有 `/sdd/version`、`/sdd/fsm*` 回 503 | `{"ok":null,"latest":null,"reason":"未設定 SDD_ROOT，也找不到預設位置的 AISDLC_SDD 目錄"}`（`reason` 在這裡只是說明，不算失敗） |
 | `true` | `sdd_root` 是目錄，**且**（有 `build/reports/fsm` **或**有版本入口文件 `AISDLC_SDD_INIT.md`） | `{"ok":true,"latest":"<目錄名>"}` |
-| `false` | `sdd_root` 不存在或不是目錄；或是目錄但兩者都沒有（空的或掛錯的唯讀掛載：Docker 對不存在的 bind 來源會建一個空目錄） | `{"ok":false,"latest":<目錄名或 null>,"reason":"…"}`；整體 503 |
+| `false` | `sdd_root` 不存在或不是目錄；或是目錄但兩者都沒有（空的或掛錯的唯讀掛載，例如掛載來源路徑不存在、被建成空目錄） | `{"ok":false,"latest":<目錄名或 null>,"reason":"…"}`；**整體仍 200**（只當資訊），頂層 `reason` 不列它 |
 
-🔴 **與主控任務書字面的偏離〔待裁決 Q1，INFRA 已照此實作，契約從其實作〕**：任務書寫「`build/reports/fsm` 不存在 → false」。但 `AISDLC_SDD/AISDLC_SDD_v0.30/build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore:313`，`git ls-files` 在該目錄為 0 筆），**全新 clone 沒有這個目錄**——照字面判，compose 的 `engine-bridge`（healthcheck 打 `/health/deep`）在乾淨 clone 永遠 unhealthy，而 `backend` 依賴它 healthy（`docker-compose.yml` 的 `depends_on`），全棧起不來；Bridge 既有的 `/health/deep` 快樂路徑 pytest（CI 會跑）在乾淨 checkout 也會一併紅，E2E-03 第 9 步的 `agentAvailability=100.0` 在乾淨 clone 上跑 E2E 時也會。FSM 狀態檔是**跑過 SDD runtime 才有的執行期產物**，不是「SDD 樹有沒有掛上」的證據；每個版本目錄都有、而且入庫的入口文件 `AISDLC_SDD_INIT.md` 才是。主控若堅持字面規則，需要同時讓 `build/reports/fsm` 在全新 clone 存在（例如 compose 啟動前建立、或 SDD 側入庫 `.gitkeep` 並調整 `.gitignore`），那是 INFRA／SDD 側的另案。
+**判準與「只當資訊」（主控裁決 Q1、Q4；INFRA 已實作並以 `tests/test_health_deep.py` 實測）**：①**為什麼入口文件也算數**——主控任務書原寫「`build/reports/fsm` 不存在 → false」，但 `AISDLC_SDD/AISDLC_SDD_v0.30/build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore:313`，`git ls-files` 在該目錄為 0 筆），**全新 clone 沒有這個目錄**。FSM 狀態檔是跑過 SDD runtime 才有的執行期產物，不是「SDD 樹有沒有掛上」的證據；每個版本目錄都有、而且入庫的入口文件 `AISDLC_SDD_INIT.md` 才是（`git ls-files` 30 筆，對應 30 個版本目錄）。②**為什麼不算進 503**——SDD 是選用引擎：compose 的 healthcheck 與 Console 的探測環都打這一支，503 會被當成「Bridge 不可用」（容器 unhealthy、頂列轉灰、Agent 可用率下降、誤報 `AGENT_UNRESPONSIVE`），而 `SDD_ROOT` 設定錯誤其實只影響 `/sdd/version`、`/sdd/fsm*` 兩類查詢（規格編譯 `/sdd/compile` 不讀 `SDD_ROOT`），AutoClaude 批次照常可跑；所以 `sdd.ok=false` 只顯示在 `checks.sdd` 與 Console 的 AISDLC_SDD 卡（`GET /engines/sdd` 的 `available=false`、`reason=sdd_unavailable`）。兩點合起來，乾淨 clone 的全棧起得來，Bridge 的快樂路徑 pytest 在 CI 的乾淨 checkout 也不會紅。
 
 **`X-Trace-Id`（NFR-9.4-04；C-12；QA O-11）**：console-api 對 Bridge 的**每個請求**都帶標頭 `X-Trace-Id`（取值規則見 §0.4 第 6 點）。Bridge 的 HTTP 中介層：① 讀取該標頭（缺漏或格式不合時自產 `uuid4`）；② **回應回帶同名標頭**（SSE 事件串流的回應同樣帶）；③ 把它放進 `contextvars`，使 Bridge 的**每一行**應用日誌都帶 `trace_id` 欄位——沒有請求上下文的行（啟動、關閉、與請求無關的背景執行緒）`trace_id` 為 `-`；Bridge 為某個請求啟動的背景工作（run 監督執行緒）是否沿用該請求的 trace id 由實作決定（建議沿用，例如 `contextvars.copy_context()`）。Bridge 另可設 `BRIDGE_LOG_DIR` 把日誌寫成滾動檔案（compose 掛 `app_logs` 卷，C-16；與 console-api 的 `LOG_DIR` 同義）。驗收見 E2E-13。
 
@@ -1520,21 +1520,21 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 | 回應 200 | `{"root":"<SDD 版本目錄名>","projects":[{"project","source","current_state","updated_at"}],"errors":["<檔名>",…]}` |
 | `projects[]` | `project`＝檔名去掉前綴 `FSM-STATE-` 與副檔名 `.yaml`（**就是 `GET /sdd/fsm/{project}` 吃的鍵**，每一筆都點得進去）；`source`＝檔名；`current_state`、`updated_at`＝檔內 `fsm_state` 同名鍵（缺則 null；`updated_at` 原樣，不轉型） |
 | 名稱白名單 | `<name>` 必須符合 `^[A-Za-z0-9._-]{1,128}$`（與 `{project}` 路徑參數同一條規則）；不合者（空白、非 ASCII、過長…）放進 `errors`，不進 `projects` |
-| `errors[]` | 讀不動的**檔名**（不含路徑與內容）：名稱不合白名單、YAML 語法錯誤、不是 UTF-8、缺 `fsm_state` 根節點或它不是映射、同名但是目錄、resolve 後跑出 fsm 目錄的 symlink（逃逸）。一個壞檔不影響其餘檔的列出；`errors` 永遠出現（可為空陣列） |
-| 排序 | 依專案名**不分大小寫**升冪（`casefold`；`Zulu` 排在 `beta` 之後）。console-api 不重排 |
-| 目錄不存在 | `build/reports/fsm` 不存在（全新 clone：`build/reports/` 被 git 忽略）→ **200** `{"root":…,"projects":[],"errors":[]}`，不是錯誤〔待裁決 Q3〕。此時 `GET /sdd/fsm/{任何名稱}` 是 404 `fsm_not_found` |
+| `errors[]` | 讀不動的**檔名**（不含路徑與內容）：名稱不合白名單、YAML 語法錯誤、YAML 巢狀過深（PyYAML 遞迴超限，`RecursionError`）、不是 UTF-8、檔案讀取失敗（`OSError`）、缺 `fsm_state` 根節點或它不是映射、同名但是目錄、resolve 後跑出 fsm 目錄的 symlink（逃逸）。一個壞檔不影響其餘檔的列出；`errors` 永遠出現（可為空陣列） |
+| 排序 | 依**檔名**不分大小寫升冪（`casefold`；`Zulu` 排在 `beta` 之後）。檔名前綴固定，所以一般情形等同依專案名；邊緣差別：一個名稱是另一個名稱的前綴時（例：`a` 與 `a-b`），排序鍵多了 `.yaml` 副檔名，`a-b` 會排在 `a` 之前（INFRA 的實作如此，契約從之）。console-api 不重排 |
+| 目錄不存在 | `build/reports/fsm` 不存在（全新 clone：`build/reports/` 被 git 忽略）→ **200** `{"root":…,"projects":[],"errors":[]}`，不是錯誤。此時 `GET /sdd/fsm/{任何名稱}` 是 404 `fsm_not_found` |
 | `SDD_ROOT` 無效 | 503 `{"code":503,"reason":"sdd_unavailable","detail":"…"}`（同 `GET /sdd/version`） |
-| 開發機上的實際內容 | 同一個目錄除了 `FSM-STATE-AISDLC_SDD.yaml`（真專案）之外，還有 SDD 測試套件留下的 `FSM-STATE-test-<數字>.yaml` 殘留檔（W7-SA 實見 7 個），**照列**，Bridge 不過濾；所以任何斷言一律寫「清單**包含**某專案」，不寫「清單等於…」（E2E-15）〔待裁決 Q3〕 |
+| 開發機上的實際內容 | 同一個目錄除了 `FSM-STATE-AISDLC_SDD.yaml`（真專案）之外，還有 SDD 測試套件留下的 `FSM-STATE-test-<數字>.yaml` 殘留檔（W7-SA 實見 7 個），**照列**，Bridge 不過濾；所以任何斷言一律寫「清單**包含**某專案」，不寫「清單等於…」（E2E-15） |
 
 **`GET /sdd/fsm/{project}`**：既有欄位**一個都不動**（`project`、`current_state`、`current_sprint`、`session_id`、`updated_at`、`frozen_stages`、`decision_trace`〔尾 5 筆〕、`source`），**只增不減**，新增三個：
 
 | 新欄位 | 型別 | 語意（以現行 FSM-STATE 的真實結構為準） |
 |--------|------|------------------------------------------|
-| `human_pending` | `{"count": int, "items": object[]}` | 讀 `fsm_state.human_pending_tracking`。**現行寫法是單一映射**（`entered_at`、`reminder_sent_at`、`reminder_hours`、`escalation_hours`；`entered_at` 在進入 `HUMAN_PENDING` 時蓋時戳、離開時清成 null）：`entered_at` 有值＝FSM 正停在人工確認點 → `{"count":1,"items":[<該映射原樣>]}`；`entered_at` 為 null／缺席 → `{"count":0,"items":[]}`。若它是 list（日後 schema 改成多筆）→ `count`＝筆數、`items`＝尾 5 筆原樣；其他型別 → `{"count":0,"items":[]}`。**所以 `count` 實務上只會是 0 或 1**〔待裁決 Q2〕 |
-| `retry_history` | `{"count": int, "last": object \| null}` | 讀 `fsm_state.retry_history`。**現行寫法是「以重試閘為鍵的映射」**（`SCG_VALIDATION`、`PR_REVIEW`、`RTM_VERIFY`，各有 `current_count`、`max_limit`、`history[]`；`history` 每筆 `{attempt, date, failure_reason, scg_gate}`）：`count`＝各閘 `history` 筆數的總和（`patterns` 等其他列表不算）；`last`＝全部筆中 `date` 最晚者（同時刻取後出現者）**原樣再加一個 `gate` 欄**（所屬的閘名；合併後無法從原筆看出）；沒有任何一筆 → `{"count":0,"last":null}`。若它是 list → `count`＝筆數、`last`＝尾 1 筆；其他型別 → `{"count":0,"last":null}`〔待裁決 Q2〕 |
-| `rtm_coverage` | object \| number \| null | 讀 `fsm_state.rtm_coverage`，**有就原樣帶出，沒有就 null**。現行 FSM-STATE schema（`FSM-STATE-TEMPLATE.yaml`、`state_loader.py`）**沒有任何 RTM 覆蓋數值的鍵**（`retry_history.RTM_VERIFY` 是重試計數，不是覆蓋率；RTM 覆蓋率在 `docs/03_testing/` 的 RTM 與 SCG-5 閘門結果），所以**現況恆為 null**；這個欄位是保留位，Console 卡片不顯示它〔待裁決 Q2〕 |
+| `human_pending` | `{"count": int, "items": object[]}` | 讀 `fsm_state.human_pending_tracking`。**現行寫法是單一映射**（`entered_at`、`reminder_sent_at`、`reminder_hours`、`escalation_hours`；`entered_at` 在進入 `HUMAN_PENDING` 時蓋時戳、離開時清成 null）：`entered_at` 有值＝FSM 正停在人工確認點 → `{"count":1,"items":[<該映射原樣>]}`；`entered_at` 為 null／缺席 → `{"count":0,"items":[]}`。若它是 list（日後 schema 改成多筆）→ `count`＝筆數、`items`＝尾 5 筆原樣；其他型別 → `{"count":0,"items":[]}`。**所以 `count` 實務上只會是 0 或 1** |
+| `retry_history` | `{"count": int, "last": object \| null}` | 讀 `fsm_state.retry_history`。**現行寫法是「以重試閘為鍵的映射」**（`SCG_VALIDATION`、`PR_REVIEW`、`RTM_VERIFY`，各有 `current_count`、`max_limit`、`history[]`；`history` 每筆 `{attempt, date, failure_reason, scg_gate}`）：`count`＝各閘 `history` 筆數的總和（`patterns` 等其他列表不算）；`last`＝全部筆中 `date` 最晚者（`date` 以字串比較〔ISO 8601 時戳〕，缺 `date` 視為空字串而最早；同時刻取後出現者）**原樣再加一個 `gate` 欄**（所屬的閘名；合併後無法從原筆看出；某筆若不是映射，則以 `{"gate":…,"value":<該筆>}` 帶出）；某閘的 `history` 不是 list 就略過該閘；沒有任何一筆 → `{"count":0,"last":null}`。若它是 list → `count`＝筆數、`last`＝尾 1 筆；其他型別 → `{"count":0,"last":null}` |
+| `rtm_coverage` | object \| number \| null | 讀 `fsm_state.rtm_coverage`，**有就原樣帶出，沒有就 null**。現行 FSM-STATE schema（`FSM-STATE-TEMPLATE.yaml`、`state_loader.py`）**沒有任何 RTM 覆蓋數值的鍵**（`retry_history.RTM_VERIFY` 是重試計數，不是覆蓋率；RTM 覆蓋率在 `docs/03_testing/` 的 RTM 與 SCG-5 閘門結果），所以**現況恆為 null**；這個欄位是保留位，Console 卡片不顯示它 |
 
-**錯誤**（`GET /sdd/fsm/{project}`；沿用 Bridge 的錯誤封包 `{"code","reason",…}`）：`project` 不合白名單、檔不存在、或 symlink 逃逸 → 404 `{"code":404,"reason":"fsm_not_found","project":"<名稱>"}`；YAML 壞掉、不是 UTF-8、缺 `fsm_state` 根節點 → 422 `{"code":422,"reason":"fsm_state_unreadable","detail":"…"}`；`SDD_ROOT` 無效 → 503 `sdd_unavailable`。
+**錯誤**（`GET /sdd/fsm/{project}`；沿用 Bridge 的錯誤封包 `{"code","reason",…}`）：`project` 不合白名單、檔不存在、或 symlink 逃逸 → 404 `{"code":404,"reason":"fsm_not_found","project":"<名稱>"}`；YAML 壞掉、YAML 巢狀過深（`RecursionError`）、不是 UTF-8、檔案讀取失敗（`OSError`）、缺 `fsm_state` 根節點 → 422 `{"code":422,"reason":"fsm_state_unreadable","detail":"…"}`（清單端點對同樣的檔放進 `errors[]`，不是 500）；`SDD_ROOT` 無效 → 503 `sdd_unavailable`。
 
 驗收：Bridge pytest（`tests/test_sdd_fsm.py`：清單的排序、`errors`、symlink 逃逸、目錄不存在、503；三個新欄位對真實結構與假設的 list 結構；只讀不寫的 mtime 快照；對真實 FSM 檔逐值比對〔檔不存在時 skip〕）；E2E-15。
 
@@ -1996,7 +1996,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | `TOKEN_BUDGET_WARNING` | WARNING | `token` 事件的累計 `tokens_used`、批次 `tokenBudget` | `execution.tokenBudgetWarningThreshold`（0.8） | `tokenBudget` 非 null 且 `used ≥ budget × 閾值` | `run:<runId>` | 持久化＋SSE | `Token 使用量已達預算的 <pct>%（<used> / <budget>）` |
 | `TOKEN_BUDGET_EXCEEDED` | CRITICAL | 同上；另含 `scope.limits.taskTokens`／`goalTokens` 對該任務／目標的歸因累計 | — | `used > budget`；或任務累計 > `taskTokens`；或目標累計 > `goalTokens` | `run:<runId>`／`task:<taskId>`／`goal:<goalId>` | 持久化＋SSE＋**`:pause`**：只在**這則告警真的新增了一列**（`INSERT` 成功，沒被未確認的同規則同對象擋下）**且** Bridge 狀態為 `RUNNING` 時才呼叫（AR-21）；被去重擋下的重複判定不再呼叫，所以使用者 resume 後，同一個仍未確認的告警不會再把 run 暫停（E2E-08 步驟 6）；不建審核項，使用者以 resume 或 cancel 處置 | `Token 使用量已超出預算（<used> / <budget>），已要求暫停執行`；限額版：`任務「<名>」Token 用量 <n> 超過上限 <limit>，已要求暫停執行` |
 | `CONSECUTIVE_FAILURES` | CRITICAL | 該目標下任務的終局結果序列（依其終局步驟時間；`COMPLETED` 為成功、`FAILED`／`ESCALATED` 為失敗、`SKIPPED` 略過） | `monitor.alertConsecutiveFailures`（3） | 最近 N 個終局結果全是失敗（在 `status FAILED` 與 `step FAILED` 處理後評估） | `goal:<goalId>` | 持久化＋SSE；Bridge 狀態仍為 `RUNNING` 才 `:pause`（Bridge 只能暫停整個 run；實務上首個 ESCALATION 已讓 run 結束，此規則在跨後續批次累計時才會觸發）；在該次 ESCALATED 審核項的 `reason` 註明 | `目標「<名>」連續 <n> 個任務失敗` |
-| `AGENT_UNRESPONSIVE` | CRITICAL | 最後一則 Bridge 事件時間、探測環（`autoclaude.healthCheckPath`，v1.4 預設 `/health/deep`） | `monitor.alertAgentTimeoutSec`（300） | run 為 `RUNNING／PAUSING／CANCELLING`，且 `現在−最後事件時間 > 閾值`，**且**最近一次探測失敗（或 Bridge 不可達）；單純長步驟（探測正常）不告警。**v1.4（D-17）**：探測失敗包含深度自檢未通過的 503，所以與該批次無關的自檢項失敗（例如 `sdd`）也可能讓一個安靜超過閾值的長步驟被告警〔待裁決 Q4〕 | `run:<runId>` | 持久化＋SSE（不自動動作） | `Agent 已超過 <sec> 秒無回應` |
+| `AGENT_UNRESPONSIVE` | CRITICAL | 最後一則 Bridge 事件時間、探測環（`autoclaude.healthCheckPath`，v1.4 預設 `/health/deep`） | `monitor.alertAgentTimeoutSec`（300） | run 為 `RUNNING／PAUSING／CANCELLING`，且 `現在−最後事件時間 > 閾值`，**且**最近一次探測失敗（或 Bridge 不可達）；單純長步驟（探測正常）不告警。**v1.4（D-17）**：探測失敗包含深度探針的 503（`git`／`autoclaude`／`workspace`／`db` 任一失敗）；`sdd` 檢查只當資訊、不影響 503，所以 SDD 設定錯誤**不會**觸發本告警（主控裁決 Q4） | `run:<runId>` | 持久化＋SSE（不自動動作） | `Agent 已超過 <sec> 秒無回應` |
 | `TASK_DURATION_EXCEEDED` | WARNING | `RUNNING` 任務的已執行時間（現在−`started_at`）；亦在 `COMPLETED` 時以實際耗時再評估一次 | `agent.taskTimeout` × `monitor.alertTaskDurationMultiplier`（600 × 2.0＝1,200 秒） | `耗時 > 閾值` | `task:<taskId>` | 持久化＋SSE | `任務「<名>」已執行 <sec> 秒，超過門檻 <threshold> 秒（<倍數> 倍）` |
 | `HIGH_RETRY_RATE` | WARNING | 該目標在本批次已開始的任務與其中發生過 `RETRYING` 的任務 | 固定 50%（PRD；最小樣本 2 個已開始的任務） | `有重試的任務數 ÷ 已開始的任務數 > 0.5` | `goal:<goalId>` | 持久化＋SSE | `目標「<名>」重試率 <pct>%，超過 50%` |
 | `ENGINE_ESCALATION` | CRITICAL | Bridge `alert`（`code=ESCALATION`） | — | 每則 | `step:<runId>:<stepId>`（v1.2；原 `step:<stepId>`） | 持久化（`event_sub=0`）＋轉發 | `引擎升級（ESCALATION）：<detail>` |
@@ -2025,7 +2025,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | `tokenBudgetUsageRate` | 範圍批次中 `started_at < to` 者：`Σ total_tokens_used ÷ Σ token_budget × 100`（只算有預算的批次）；無預算→null | null |
 | `projectCompletionRate` | 全域：`status=COMPLETED` 的專案數 ÷ 非 `ARCHIVED` 且未軟刪的專案數 × 100（現況，不隨視窗） | null |
 | `goalAchievementRate` | 專案內 `COMPLETED` 目標數 ÷ 未軟刪目標數 × 100（有 `runId` 時限該批次範圍的目標；現況） | null |
-| `agentAvailability` | `W` 內成功的健康探測數 ÷ 探測總數 × 100（探測環在記憶體，重啟即清空；視窗超出保留範圍就用現有樣本；沒有樣本→null）。**v1.4（D-17）**：探測預設打 `/health/deep`，「成功」＝回 2xx；503（引擎自檢未通過）、其他非 2xx、連線失敗、逾時都是失敗樣本——v1.3 以前打淺層 `/health`，Bridge 行程活著就恆成功，引擎壞了也不降（完整性審查 I-03）。環形緩衝在記憶體、重啟即清空，所以升級後不會混到舊語意的樣本 | null |
+| `agentAvailability` | `W` 內成功的健康探測數 ÷ 探測總數 × 100（探測環在記憶體，重啟即清空；視窗超出保留範圍就用現有樣本；沒有樣本→null）。**v1.4（D-17）**：探測預設打 `/health/deep`，「成功」＝回 2xx；503（`git`／`autoclaude`／`workspace`／`db` 任一自檢未通過；`sdd` 只當資訊）、其他非 2xx、連線失敗、逾時都是失敗樣本——v1.3 以前打淺層 `/health`，Bridge 行程活著就恆成功，引擎壞了也不降（完整性審查 I-03）。環形緩衝在記憶體、重啟即清空，所以升級後不會混到舊語意的樣本 | null |
 
 `delta`＝`value − previousValue`（兩者皆非 null 才有）。分布類欄位：`taskStatusDistribution`＝`S` 的 `tasks.status` 現況計數（十一態一律出現）；`taskDurations`＝`S` 中 `completed_at ∈ W` 的任務依耗時由長到短取 10 筆；`retryDistribution`＝`S` 中任務依 `retry_count`（現值，≥5 併入 5）分桶，桶 0～5 一律出現。
 
@@ -2124,7 +2124,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | M-17 | 「設定告警」 | 導向 `/settings` 的「監控」分頁（`monitor.*`） | 無專用端點 |
 | M-18 | 「自訂儀表板」（US-M-08） | 純前端（版面存 `localStorage`，ADR-001 G-18） | 無後端欄位 |
 | M-19 | Agent 狀態指示燈與資源使用（US-M-10；設計稿未畫） | `metrics.agentAvailability`；即時連線 ← `GET /executions/{runId}`→`bridge.connected／status`、`currentStep`；**資源使用（v1.3，D-12）← 同一個回應的 `bridge.resources`** | **「資源使用」欄的顯示格式**：`CPU 12.3%・記憶體 345 MB・3 行程`——`cpuPercent` 小數 1 位加 `%`；`memoryBytes ÷ 1,048,576` 四捨五入到整數加 ` MB`（≥ 1,024 MB 改以 GB：÷ 1,073,741,824、小數 1 位；< 1 MB 顯示 `<1 MB`）；`processCount` 加 ` 行程`；三段以全形中點「・」相連。**沒有資料一律顯示單一的 `—`**：`resources` 為 null 或缺席、`bridge.connected=false`、或批次已是終態（詳情輪詢在終態後會停止，最後一次抓到的數字不得繼續顯示）。v1.2 的說明句「資源使用情況（CPU／記憶體）：Engine Bridge 目前沒有提供這項資料…」**移除**（`agent-note` 只留 Bridge 實例資訊）。`sampledAt` 建議放 tooltip（非驗收項）。數字的新鮮度＝詳情輪詢（15 秒）加取樣週期（5 秒），最舊約 20 秒（§3.1.2） |
-| M-20 | 「AISDLC_SDD 引擎」卡（v1.4，D-16；設計稿未畫，建議放在 Agent 狀態卡旁） | `GET /api/v1/engines/sdd?project=<選定>`（§1.7.1）；輪詢 **30 秒**，分頁不可見時暫停；**不隨 Console 專案或執行批次的下拉變動**——SDD 引擎是全域的，FSM 專案與 Console 專案是兩個不同的東西 | 顯示：引擎狀態點與版本（`version.latest`）；FSM 專案下拉（`projects[].project`；預設＝上次選的且仍在清單內者〔`localStorage` 記住，只是方便〕，否則清單第一個，所以首次載入是兩段請求：先不帶 `project` 取清單、選定後帶 `project` 取內容〔待裁決 Q8〕）；選定專案的 `currentState`、`currentSprint`（「Sprint N」）、`updatedAt`（本機時區）、**待人工**＝`humanPending.count`（0 顯示「無」，1 顯示「等待人工確認」並可展開 `items[0].entered_at`）、**最近決策**＝`decisionTrace` 倒序最多 5 筆（`ts`、`from → to`、`reason`）。不可用文案依 `reason`：`bridge_unreachable`「Engine Bridge 無法連線」、`sdd_unavailable`「找不到 AISDLC_SDD 目錄（請檢查 Bridge 的 SDD_ROOT）」、`bridge_error`「Engine Bridge 回應異常」、`fsm_not_found`「找不到所選專案的 FSM 狀態檔」、`fsm_state_unreadable`「FSM 狀態檔無法讀取」；`available=true` 且 `projects=[]`：「尚無 FSM 狀態檔（SDD runtime 執行後才會產生）」。**唯讀**：卡片沒有任何寫入動作（ADR-001 D22 第 3 點）；`retryHistory`、`rtmCoverage`、`frozenStages` 不顯示，資料留在 API 供 NFR-OBS-01 對照與日後使用。FSM 專案清單在開發機上會含 SDD 測試留下的 `test-<數字>` 專案（§3.1.3），照列 |
+| M-20 | 「AISDLC_SDD 引擎」卡（v1.4，D-16；設計稿未畫，建議放在 Agent 狀態卡旁） | `GET /api/v1/engines/sdd?project=<選定>`（§1.7.1）；輪詢 **30 秒**，分頁不可見時暫停；**不隨 Console 專案或執行批次的下拉變動**——SDD 引擎是全域的，FSM 專案與 Console 專案是兩個不同的東西 | 顯示：引擎狀態點與版本（`version.latest`）；FSM 專案下拉（`projects[].project`；預設＝上次選的且仍在清單內者〔`localStorage` 記住，只是方便〕，否則清單第一個，所以首次載入是兩段請求：先不帶 `project` 取清單、選定後帶 `project` 取內容）；選定專案的 `currentState`、`currentSprint`（「Sprint N」）、`updatedAt`（本機時區）、**待人工**＝`humanPending.count`（0 顯示「無」，1 顯示「等待人工確認」並可展開 `items[0].entered_at`）、**最近決策**＝`decisionTrace` 倒序最多 5 筆（`ts`、`from → to`、`reason`）。不可用文案依 `reason`：`bridge_unreachable`「Engine Bridge 無法連線」、`sdd_unavailable`「找不到 AISDLC_SDD 目錄（請檢查 Bridge 的 SDD_ROOT）」、`bridge_error`「Engine Bridge 回應異常」、`fsm_not_found`「找不到所選專案的 FSM 狀態檔」、`fsm_state_unreadable`「FSM 狀態檔無法讀取」；`available=true` 且 `projects=[]`：「尚無 FSM 狀態檔（SDD runtime 執行後才會產生）」。**唯讀**：卡片沒有任何寫入動作（ADR-001 D22 第 3 點）；`retryHistory`、`rtmCoverage`、`frozenStages` 不顯示，資料留在 API 供 NFR-OBS-01 對照與日後使用。FSM 專案清單在開發機上會含 SDD 測試留下的 `test-<數字>` 專案（§3.1.3），照列 |
 
 ### 4.4 設定頁 `/settings`（畫面 9）
 
@@ -2178,7 +2178,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | G-G1 | 全域搜尋跨目標／任務 | PRD §7 沒有端點 | 超出 Phase 3～6；目前只搜專案 |
 | G-G2 | 頂列「通知總覽」連結頁 | 無對應頁面與端點 | 暫以通知鈴的計數取代，不做列表頁。**v1.4（D-18）**：待簽核草案的跨專案清單已有端點與卡片（`GET /signoffs/pending`，§4.5 G-10）；待審核項目與未確認告警仍沒有跨專案清單端點，鈴的連結落點見 G-G4 |
 | G-G3 | Dashboard「本週完成任務數」（跨專案） | **v1.2 已補**：全域端點 `GET /monitor/task-totals`（§1.3.8；C-1） | 前端改打該端點（每 60 秒 1 次），取代 v1.1 的近似做法（前 30 個專案各打一次 `task-trend` 再加總：單一分頁穩態每分鐘約 31 次請求，QA DEF-AC-009）；同一任務被還原重跑會重複計的語意不變（`completed` 是步驟事件列數） |
-| G-G4 | 通知鈴「待審核項目」「未確認告警」兩個連結的落點（完整性審查 I-05） | 通知摘要只有三個計數，**沒有 projectId**（`NotificationSummaryResponse` 不變）；`GET /signoffs/pending` 只涵蓋待簽核草案，不含待審核項目與告警 | **已知限制（v1.4 維持 v1.3 的行為）**：有「目前專案」（路由上的 `projectId`）時導向該專案的執行頁／監控頁，沒有時導向專案列表（`/projects`）；所以人在 Dashboard 等非專案頁面時，點進去只是專案列表，不是有待辦的那個專案；目標專案不是目前專案時點進去也可能是空的。「待簽核草案」列不受影響（導向 Dashboard 的待人工審批卡，§4.5 G-10；清單項各自帶專案連結）。要精準導向，需要摘要增兩個欄位（最早一筆待審核項目與未確認告警各自的 `projectId`）或新增待審核／告警清單端點〔待裁決 Q5〕 |
+| G-G4 | 通知鈴「待審核項目」「未確認告警」兩個連結的落點（完整性審查 I-05） | 通知摘要只有三個計數，**沒有 projectId**（`NotificationSummaryResponse` 不變）；`GET /signoffs/pending` 只涵蓋待簽核草案，不含待審核項目與告警 | **已知限制（v1.4 維持 v1.3 的行為）**：有「目前專案」（路由上的 `projectId`）時導向該專案的執行頁／監控頁，沒有時導向專案列表（`/projects`）；所以人在 Dashboard 等非專案頁面時，點進去只是專案列表，不是有待辦的那個專案；目標專案不是目前專案時點進去也可能是空的。「待簽核草案」列不受影響（導向 Dashboard 的待人工審批卡，§4.5 G-10；清單項各自帶專案連結）。要精準導向，需要摘要增兩個欄位（最早一筆待審核項目與未確認告警各自的 `projectId`）或新增待審核／告警清單端點（主控裁決 Q5：先接受此限制，要精準導向再另案） |
 | G-G5 | 公告列的靜態字樣（設計稿 README:57；完整性審查 D-04） | 設計稿只描述文字，沒說連到哪 | 「說明文件」「下載 CLI」「GitHub」「幫助中心」「繁體中文」五項是**靜態標示**（不可點、無行為；`TopRegion` 以 `<span>` 呈現）；「通知總覽」見 G-G2；「Engine Bridge」是功能性狀態點（§4.5 G-03）。日後要連到實際文件或做語言切換，另開需求 |
 | G-E4 | DAG 卡「全螢幕」 | PRD wireframe 有、設計稿無，v1.3 以前沒做也沒登記（完整性審查 D-01） | v1.4 由前端補實作，見 §4.2 E-22 |
 
@@ -2207,7 +2207,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 
 **e2e 專用屬性與假伺服器的放行（SSRF）**：假伺服器綁在 `127.0.0.1`（loopback），所以放行機制只有一個：allowlist 含 `127.0.0.1` **且** `console.security.allow-loopback=true`（§1.5.7 規則 4）。**沒有「允許私網」的旗標**：`rebind.e2e.test` 在 allowlist 內，但被 `test-dns-overrides` 解析到私網位址 `10.0.0.5`，正好用來驗 `dns_rebinding`（E2E-10），兩者互不衝突。`allow-loopback`、`test-dns-overrides`、`console.execution.mock-env`、`console.sse.keep-alive-seconds`（2 秒）這幾個屬性**只在 e2e／test profile 載入**（主控裁決 §6.3 第 11 項），production 與 docker profile 不得出現。
 
-**健康探測路徑與假 Bridge（v1.4，D-17）**：console-api 的探測環預設打 `GET /health/deep`（§3.1）。因此任何以 `autoclaude.engineUrl`／`ENGINE_BRIDGE_URL` 指向的**替身 Bridge**——後端整合測試的 `MiniBridgeController`、前端 mock 伺服器、e2e 腳本自己起的假伺服器——**必須提供 `GET /health/deep`**（200 `{"status":"ok","checks":{…}}`；要驗失敗路徑時回 503 `{"status":"degraded","reason":"…","checks":{…}}`）。缺這個路徑的替身會回 404，探測環一律判失敗：`bridgeConnected` 恆 `false`、`agentAvailability` 恆 0、`AGENT_UNRESPONSIVE` 可能誤報。若某個替身只實作 `/health`，須在 e2e 前置把 `autoclaude.healthCheckPath` 設為 `/health`（附錄 C.5 的驗證規則允許），並在該情境註明。真 Bridge 在 e2e 環境的 `/health/deep` 應為 200：`git` 在 PATH 上、工作區可寫、有 DSN 時 DB 可 ping、`sdd` 為 `true` 或 `null`（§3.1.1）。
+**健康探測路徑與假 Bridge（v1.4，D-17）**：console-api 的探測環預設打 `GET /health/deep`（§3.1）。因此任何以 `autoclaude.engineUrl`／`ENGINE_BRIDGE_URL` 指向的**替身 Bridge**——後端整合測試的 `MiniBridgeController`、前端 mock 伺服器、e2e 腳本自己起的假伺服器——**必須提供 `GET /health/deep`**（200 `{"status":"ok","checks":{…}}`；要驗失敗路徑時回 503 `{"status":"degraded","reason":"…","checks":{…}}`）。缺這個路徑的替身會回 404，探測環一律判失敗：`bridgeConnected` 恆 `false`、`agentAvailability` 恆 0、`AGENT_UNRESPONSIVE` 可能誤報。若某個替身只實作 `/health`，須在 e2e 前置把 `autoclaude.healthCheckPath` 設為 `/health`（附錄 C.5 的驗證規則允許），並在該情境註明。真 Bridge 在 e2e 環境的 `/health/deep` 應為 200：`git` 在 PATH 上、工作區可寫、有 DSN 時 DB 可 ping、`sdd` 只當資訊、任何值都不影響 200（§3.1.1）。
 
 **Docker 全棧版本**（W4-QA 驗證矩陣 D）不載入 e2e profile：容器內的 console-api 沒有 `allow-loopback`，假伺服器放在主機或另一個容器都會因私網位址被 SSRF 規則拒絕；compose 預設設定下路徑 B／C 也沒有模型金鑰與 Brain 可用。該矩陣的匯入步驟請改走路徑 A（把凍結規格放進容器內的專案目錄）或直接用 Phase 2 REST 建專案；路徑 B 留給本機 E2E 驗證。
 
@@ -2595,7 +2595,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 
 ### E2E-15　v1.4 追加情境（W7；D-16：AISDLC_SDD 接入）　〔API-ENG-01、NFR-OBS-01、BR-13、BR-14〕
 
-**前置**：照 §5.0；本機 e2e 環境（Docker 全棧另見第 9 列）；operator 寫、viewer 讀、admin 設參數。**本情境不使用 repo 內真實的 `build/reports/fsm`**：它被 git 忽略（`AISDLC_SDD/.gitignore:313`，§3.1.3），乾淨 clone 與 CI 沒有它，只有跑過 SDD runtime 的開發機才有；所以主體改用**夾具**，真實檔只在第 12 列選跑〔待裁決 Q7〕。
+**前置**：照 §5.0；本機 e2e 環境（Docker 全棧另見第 9 列）；operator 寫、viewer 讀、admin 設參數。**本情境不使用 repo 內真實的 `build/reports/fsm`**：它被 git 忽略（`AISDLC_SDD/.gitignore:313`，§3.1.3），乾淨 clone 與 CI 沒有它，只有跑過 SDD runtime 的開發機才有；所以主體改用**夾具**，真實檔只在第 12 列選跑（主控裁決 Q7）。
 
 **SDD 夾具**（QA 於情境前以 YAML 序列化器產生，路徑 `<E2E_ROOT>/sdd-fixture/AISDLC_SDD_v9.99/`）：
 
@@ -2615,8 +2615,8 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | 5 | FSM 檔 ↔ API ↔ 畫面（NFR-OBS-01 補強） | 測試以自己的 YAML 解析器讀夾具檔（不經 Bridge）；登入前端、開任一專案的監控頁，在「AISDLC_SDD 引擎」卡選 `e2e-alpha` | 卡片顯示的狀態、Sprint、更新時間（本機時區）、待人工「無」、最近決策 5 筆（倒序；`from → to` 與 `reason`）與**檔案內容逐值一致**，也與第 2 列的 API 一致（檔、API、DOM 三者相等）；改選 `e2e-bravo` → 待人工顯示「等待人工確認」 |
 | 6 | 檔案變動後下一輪輪詢跟上 | 頁面開著時改寫 `FSM-STATE-e2e-alpha.yaml`：`current_state` 換值、`updated_at` 更新、`decision_trace` 加一筆；等一個輪詢週期（≤ 35 秒，或以 Playwright 假時鐘快轉 30 秒） | 卡片更新為新狀態與新決策；沒有整頁重載；若恰好讀到寫一半的檔，卡片顯示「FSM 狀態檔無法讀取」、下一輪恢復，不得崩潰 |
 | 7 | 引擎不可用：Bridge 不可達 | 停掉 18082；`GET /engines/sdd`；看卡片 | **200**（不是 502）；`available=false`、`reason="bridge_unreachable"`、`version=null`、`projects=[]`、`fsm=null`；卡片顯示「Engine Bridge 無法連線」；重啟 Bridge 後下一輪輪詢復原 |
-| 8 | 引擎不可用：SDD 目錄無效 | 另起 Bridge 18083（`SDD_ROOT=<E2E_ROOT>/no-such-dir`，不存在），`sdd.engineUrl` 指向它；`GET /engines/sdd`；再直接 `GET http://127.0.0.1:18083/health/deep` 與 `/health` | `/engines/sdd`：200、`available=false`、`reason="sdd_unavailable"`；`/health/deep` **503**、`checks.sdd.ok=false`、頂層 `reason` 含 `sdd: SDD_ROOT 不是目錄`；`/health` 仍 200（E2E-16 第 2 列重用這個 Bridge） |
-| 9 | 乾淨 clone 等價：有入口文件、沒有 `build/reports/fsm`〔Q1〕 | 另起 Bridge 18084（`SDD_ROOT=<E2E_ROOT>/sdd-fresh`，只含 `AISDLC_SDD_v9.98/AISDLC_SDD_INIT.md`），`sdd.engineUrl` 指向它；`GET /engines/sdd`；直接 `GET :18084/health/deep`。Docker 全棧另跑：`AISDLC_SDD/<LATEST>/build/reports` 不存在的主機上 `docker compose --profile app up --wait` | `/engines/sdd`：`available=true`、`projects=[]`、`fsm=null`、`reason=null`（卡片「尚無 FSM 狀態檔」）；`/health/deep` **200**、`checks.sdd={ok:true, latest:"AISDLC_SDD_v9.98"}`；Docker 全棧 `engine-bridge` 與 `backend` 皆 healthy（這是 Q1 的證明；若主控裁決 Q1 採字面規則，本列 `/health/deep` 的預期改為 503，Docker 全棧改為不可用，並須先讓 `build/reports/fsm` 在乾淨 clone 存在） |
+| 8 | 引擎不可用：SDD 目錄無效（`sdd` 只當資訊，主控裁決 Q4） | 另起 Bridge 18083（`SDD_ROOT=<E2E_ROOT>/no-such-dir`，不存在），`sdd.engineUrl` 指向它；`GET /engines/sdd`；再直接 `GET http://127.0.0.1:18083/health/deep` 與 `/health` | `/engines/sdd`：200、`available=false`、`reason="sdd_unavailable"`、`version=null`、`projects=[]`、`fsm=null`，卡片顯示「找不到 AISDLC_SDD 目錄（請檢查 Bridge 的 SDD_ROOT）」；`/health/deep` 仍 **200**（`status=ok`），`checks.sdd={ok:false, latest:null, reason:"SDD_ROOT 不是目錄：no-such-dir"}`，頂層沒有 `reason`；`/health` 同為 200。**這個 Bridge 對探測環是健康的**（E2E-16 第 2 列用它驗「`sdd` 無效不拖累探測」） |
+| 9 | 乾淨 clone 等價：有入口文件、沒有 `build/reports/fsm`（主控裁決 Q1） | 另起 Bridge 18084（`SDD_ROOT=<E2E_ROOT>/sdd-fresh`，只含 `AISDLC_SDD_v9.98/AISDLC_SDD_INIT.md`），`sdd.engineUrl` 指向它；`GET /engines/sdd`；直接 `GET :18084/health/deep`。Docker 全棧另跑：`AISDLC_SDD/<LATEST>/build/reports` 不存在的主機上 `docker compose --profile app up --wait` | `/engines/sdd`：`available=true`、`projects=[]`、`fsm=null`、`reason=null`（卡片「尚無 FSM 狀態檔」）；`/health/deep` **200**、`checks.sdd={ok:true, latest:"AISDLC_SDD_v9.98"}`；Docker 全棧 `engine-bridge` 與 `backend` 皆 healthy（這是 Q1 裁決的證明：入口文件判準讓乾淨 clone 的全棧起得來） |
 | 10 | 權限 | 未認證、viewer、operator、admin 各 `GET /engines/sdd` | 未認證 401；其餘 200（VIEWER 以上） |
 | 11 | 只讀 | 第 1～9 列前後對夾具目錄（遞迴）做 mtime 快照 | 完全相同：Bridge 與 console-api 都不新增、不改動任何檔案（第 6 列由測試自己改檔，快照在改檔之後取） |
 | 12 | 真實 repo 根（**選跑**：只在 `AISDLC_SDD/<LATEST>/build/reports/fsm/FSM-STATE-AISDLC_SDD.yaml` 存在的開發機） | `sdd.engineUrl` 還原為預設（Bridge 預設指向 repo 的 `AISDLC_SDD`），`GET /engines/sdd` | `projects` **包含** `AISDLC_SDD`（不得斷言清單等於：同目錄可能有 `test-<數字>` 殘留檔）；`?project=AISDLC_SDD` 的 `fsm` 與該 YAML 檔逐欄一致（`currentState`、`currentSprint`、`updatedAt`、`humanPending.count`、`retryHistory.count`）。**該檔被 git 忽略，CI 與乾淨 clone 沒有，本列不得列為必過**：有檔就跑，沒有就在報告明寫「未跑：檔不存在」，不得靜默略過 |
@@ -2625,12 +2625,12 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 
 ### E2E-16　v1.4 追加情境（W7；D-17、D-18、D-19）　〔API-SGN-05、API-AUTH-03、API-NTF-01、US-M-10、UI-KPI-08〕
 
-**前置**：照 §5.0；各列各用新專案（名稱含 E2E-16 與列號）；第 2 列重用 E2E-15 第 8 列的 Bridge（18083）；第 10 列只在 Docker 全棧跑。
+**前置**：照 §5.0；各列各用新專案（名稱含 E2E-16 與列號）；第 2 列另起 Bridge 18085（環境同 §5.0.1，但 `PATH` 只剩一個空目錄 `<E2E_ROOT>/empty-bin`，使 `git` 解析不到）製造 503，並另起 18083 作對照（設定同 E2E-15 第 8 列：`SDD_ROOT` 指向不存在目錄，`/health/deep` 仍 200；E2E-15 的結束動作已停掉它，所以本情境要重起）；第 10 列只在 Docker 全棧跑。
 
 | # | 情境 | 動作 | 預期 |
 |---|------|------|------|
 | 1 | 探測預設值（D-17） | 全新資料庫：admin `GET /settings/autoclaude` | `healthCheckPath.value` 與 `defaultValue` 都是 `/health/deep`；`impactNote` 逐字等於附錄 C.5。V11 對既有列的三種情形由 `SchemaMigrationIT` 驗（§0.8） |
-| 2 | 探測打深度探針，503 計為失敗（D-17） | `autoclaude.engineUrl` 指向 18083（`/health` 回 200、`/health/deep` 回 503，E2E-15 第 8 列）；等一個探測週期（≤ 35 秒；console-api 啟動時與 run 開始時會立即探測一次）；`GET /notifications/summary`、`GET …/metrics`。**對照**：把 `autoclaude.healthCheckPath` 暫設 `/health`，再等一個週期 | `bridgeConnected=false`；`metrics.agentAvailability.value` < 100（失敗樣本計入）；**對照**：改打 `/health` 後同一個 Bridge 被判成功，`bridgeConnected=true`——證明差別來自探測路徑。結束把路徑與 `autoclaude.engineUrl` 還原 |
+| 2 | 探測打深度探針：503 計為失敗，`sdd` 無效不算（D-17；主控裁決 Q4） | ①另起 Bridge 18085（`BRIDGE_INSTANCE=e2e-nogit`，`PATH` 只剩空目錄，`git --version` 解析不到），`autoclaude.engineUrl` 指向它；等一個探測週期（≤ 35 秒；console-api 啟動時與 run 開始時會立即探測一次）；`GET /notifications/summary`、`GET …/metrics`；直接 `GET :18085/health` 與 `/health/deep`。②**對照**：把 `autoclaude.healthCheckPath` 暫設 `/health`，再等一個週期。③**`sdd` 無效不拖累探測**：`autoclaude.engineUrl` 改指 18083（設定同 E2E-15 第 8 列），把 `healthCheckPath` 還原成 `/health/deep`，等一個週期，`GET /notifications/summary`、`GET …/metrics`、`GET /engines/sdd` | ①18085 的 `/health` 回 **200**、`/health/deep` 回 **503**（`checks.git.ok=false`，頂層 `reason` 以 `git:` 開頭）；`bridgeConnected=false`；`metrics.agentAvailability.value` < 100（失敗樣本計入）。②改打 `/health` 後同一個 Bridge 被判成功，`bridgeConnected=true`——證明差別來自探測路徑。③18083 被判成功：`bridgeConnected=true`、`agentAvailability` 不因它下降，同時 `GET /engines/sdd` 為 `available=false`（SDD 卡顯示不可用）——證明 `sdd` 失敗只影響 SDD 卡。結束把 `healthCheckPath`、`autoclaude.engineUrl`、`sdd.engineUrl` 還原，停掉 18083～18085 |
 | 3 | 待審批清單與計數同源（D-18） | 造出四種待簽草案各 ≥ 1：專案、目標、任務（`draft:true` 建立、不簽）、一筆匯入記錄停在 `PARSED`（路徑 B 解析後不簽）；再造不該計入的干擾：已簽專案、軟刪專案（其目標任務未軟刪）、`UPLOADED` 與 `REJECTED` 的匯入記錄；viewer 依序 `GET /signoffs/pending`、`GET /notifications/summary` | `counts` 各值等於人工數出的數量；`counts.total == summary.pendingSignoffs`；`items` 長度＝`min(total, 50)`、`createdAt` 升冪；欄位逐一正確：`PROJECT.parentId=null`、`GOAL.parentId＝專案 id`、`TASK.parentId＝目標 id`、**`IMPORT` 的 `projectId`／`projectName`／`parentId` 為 null** 且 `title`＝檔名（貼上文字為 `貼上文字`）；干擾列都不出現 |
 | 4 | `limit` 與權限（D-18） | `?limit=2`、`?limit=0`、`?limit=201`、`?limit=abc`；未認證；viewer | `limit=2`：`items` 兩筆（最早的兩筆）、`counts.total` 不變；`0`、`201`、`abc` → 400（`errors[0].field=limit`）；未認證 401；viewer 200 |
 | 5 | 儀表板卡與簽核後同步（D-18） | operator 開 Dashboard：看「待人工審批」卡的徽章與項目數、KPI「待審批草案數」；依序對卡片上 PROJECT、GOAL、TASK、IMPORT 各一筆按「審批」並確認 | 徽章＝KPI 數字＝`counts.total`；項目數＝`min(total, 50)`；簽完一筆後卡片、徽章、KPI 同步減 1（重取後，不必整頁重載）；各 kind 的連結導向 §4.5 G-10 列的路徑 |
@@ -2922,16 +2922,16 @@ W7 收斂波（`docs/04_planning/agent_briefs/W7_OVERVIEW.md`）有五項掌舵�
 
 ### 6.7 v1.4 變更一覽（W7 第二批；2026-10-16）
 
-W7 第二批的裁決是 D-16～D-20（`Implementation_Plan.md` §5.3；來源是 `docs/06_quality/Completeness_Audit_W7.md` 的 I-01～I-07、D-01～D-04、L-03、L-04、V-07、V-11）。分三張表：6.7.1 是裁決對照（改了哪一節）；6.7.2 是 W7-SA 本輪的現查證據；6.7.3 是 SA 落筆時發現、**需要主控裁決的點（Q1～Q8）**與其餘判斷。
+W7 第二批的裁決是 D-16～D-20（`Implementation_Plan.md` §5.3；來源是 `docs/06_quality/Completeness_Audit_W7.md` 的 I-01～I-07、D-01～D-04、L-03、L-04、V-07、V-11）。分三張表：6.7.1 是裁決對照（改了哪一節）；6.7.2 是 W7-SA 本輪的現查證據；6.7.3 是 SA 落筆時提出、主控已全部裁決的點（Q1～Q8，保留為決策紀錄）與其餘判斷。
 
 #### 6.7.1 裁決 D-16～D-20 對照
 
 | 裁決 | 內容（一句話） | 契約位置 | YAML | 實作 |
 |------|----------------|----------|------|------|
 | D-16 | AISDLC_SDD 接入：Bridge `GET /sdd/fsm`（清單）＋三個新欄位；`/health/deep` 加 `sdd`；console-api `GET /engines/sdd`；監控頁 AISDLC_SDD 卡；三項偏離 PRD 登記 | 檔頭摘要、§0.3 第 7 點、§0.4 角色矩陣、§1.0 #43、§1.7.1、§3.1 呼叫總表、§3.1.1（`sdd` 檢查）、§3.1.3、§4.3 M-20、E2E-15、附錄 B.4、附錄 D、附錄 E（`API-ENG-01`、`NFR-OBS-01`）；ADR-001 D22、§4 偏離三列；Architecture §4.3、§10、§10.1、§11.1、§11.2、§12.1 | `/api/v1/engines/sdd`、`SddEngineStatusResponse`、`SddFsmState`、`SddProjectEntry`、`SddVersion`、`BridgeDeepHealthResponse.checks.sdd` | INFRA（Bridge）、BE（`EnginesController`）、FE（M-20）、QA |
-| D-17 | 深度探針：`autoclaude.healthCheckPath` 預設 `/health/deep`（種子預設＋V11），探測環讀取逾時 3→8 秒，`/health/deep` 加 `sdd` 檢查，假 Bridge 須提供 `/health/deep` | 檔頭摘要、§0.5 V11、§0.8、§1.4.1、§3.1、§3.1.1、§3.7、§3.8.1、§5.0.1、E2E-16 第 1～2 列、附錄 C.5、§6.1 D-44；Architecture §10.1、§11.4 | `BridgeDeepHealthResponse` | BE、INFRA、FE（mock 預設值）、QA |
+| D-17 | 深度探針：`autoclaude.healthCheckPath` 預設 `/health/deep`（種子預設＋V11），探測環讀取逾時 3→8 秒，`/health/deep` 加 `sdd` 檢查（只當資訊，不影響 503），假 Bridge 須提供 `/health/deep` | 檔頭摘要、§0.5 V11、§0.8、§1.4.1、§3.1、§3.1.1、§3.7、§3.8.1、§5.0.1、E2E-16 第 1～2 列、附錄 C.5、§6.1 D-44；Architecture §10.1、§11.4 | `BridgeDeepHealthResponse` | BE、INFRA、FE（mock 預設值）、QA |
 | D-18 | 待審批清單：`GET /signoffs/pending`，與 `pendingSignoffs` 同判準；儀表板卡改用它；通知鈴連結（受資料來源限制，見 Q5） | 檔頭摘要、§0.4、§0.8、§1.0 #44、§1.4.1、§1.8.1、§4.5 G-06／G-10、§4.6 G-G2／G-G4、E2E-16 第 3～6 列、附錄 E（`API-SGN-05`）、§6.1 D-46；Architecture §11.1、§11.2 | `/api/v1/signoffs/pending`、`PendingSignoffsResponse`、`PendingSignoffItem`、`PendingSignoffCounts` | BE、FE、QA |
-| D-19 | refresh token 撤銷名單：換新輪替與登出時撤銷，Redis 優先、不在線退記憶體並記 WARN；限流計數與 SSE 位移如實登記為不使用 Redis | 檔頭摘要、§0.4 第 7 點、§0.8、§1.0 #45、§1.9、§2.8 第 10 點、附錄 D.2／D.4、E2E-16 第 7～10 列、附錄 E（`API-AUTH-03`）；ADR-001 D16 改寫、D23；Architecture §6(c)、§6(d)、§8.1、§8.6、§9.4 | `/api/v1/auth/logout`、`LogoutRequest` | BE、FE（logout 呼叫）、QA；compose 的 Redis 相依見 Q6 |
+| D-19 | refresh token 撤銷名單：換新輪替與登出時撤銷，Redis 優先、不在線退記憶體並記 WARN；限流計數與 SSE 位移如實登記為不使用 Redis | 檔頭摘要、§0.4 第 7 點、§0.8、§1.0 #45、§1.9、§2.8 第 10 點、附錄 D.2／D.4、E2E-16 第 7～10 列、附錄 E（`API-AUTH-03`）；ADR-001 D16 改寫、D23；Architecture §6(c)、§6(d)、§8.1、§8.6、§9.4 | `/api/v1/auth/logout`、`LogoutRequest` | BE、FE（logout 呼叫）、QA；compose 的 `depends_on: redis` 維持不動（Q6） |
 | D-20 | 文件登記：DAG 全螢幕（FE 實作）、公告列靜態標示、任務層級範圍回寫、虛擬執行緒範圍、目錄樹差異、覆蓋率口徑、INFRA 兩項偏離、Redis／`dalBackend` 字樣訂正、Console 依賴 Bridge DB 模式 | §4.2 E-13／E-22、§4.6 G-E1／G-E4／G-G5、§6.7.3 第 9～10 點；ADR-001 D1、§4（V-07 口徑、INFRA 兩項偏離）；Architecture §2.5、§4.1、§6(c)、§6(d)、§11.4、§12.1（L-12） | — | FE（E-22）、SA（文件）、QA（RTM 補列） |
 
 #### 6.7.2 現查證據（W7-SA；路徑相對 monorepo 根，行號是 2026-10-16 查證當下的行號）
@@ -2953,20 +2953,20 @@ W7 第二批的裁決是 D-16～D-20（`Implementation_Plan.md` §5.3；來源�
 | E13 | 虛擬執行緒只用在兩處；設定檔沒有全域啟用 | `backend/.../application/service/StreamConnection.java:64`、`RunConsumers.java:90`（`Thread.ofVirtual()`，`src/main` 只有這兩處）；`backend/src/main/resources` 下 yml／properties Grep `virtual` 無命中（沒有 `spring.threads.virtual.enabled`；Spring Boot 4.1 的預設值未驗，只記「未設定」） |
 | E14 | 後端實際套件與 PRD §4.1 目錄樹的差異；ArchUnit 八條規則 | `backend/src/main/java/com/aisdlc/console/` 實際：`adapter/in/{web,web/dto}`、`adapter/out/{bridge,document,http,llm,persistence}`、`application/{port/in,port/out,service}`、`domain/{exception,model/*,service}`、`infrastructure/{config,logging,persistence/{entity,repository},security}`；沒有 `adapter/in/sse`、`adapter/out/messaging`、`domain/event`；`backend/src/test/java/com/aisdlc/console/architecture/ArchitectureRulesTest.java:22-69`（八條 `@ArchTest`：A1～A6＋JPA 實體只在 `infrastructure.persistence`＋控制器只在 `adapter.in.web`） |
 | E15 | INFRA 的兩項偏離（進行中，W7-INFRA 的 D-14） | `AgentConsole/docker-compose.yml:621-625`（`--storage.tsdb.retention.time=35d`，原 15d）、`:629`（`prometheus_data:/prometheus`）、`:739`（具名卷 `prometheus_data`，註解自承「PRD §11.3 未列」） |
-| E16 | INFRA 已在 Bridge 實作 D-16／D-17，並自行發現 Q1 而偏離主控任務書字面 | `AgentConsole/engine-bridge/app/routers/sdd.py`（`fsm_list`、`_human_pending`、`_retry_history`）、`app/health.py` 的 `check_sdd`（docstring 以 🔴 登記偏離）、`tests/test_sdd_fsm.py`、`tests/test_health_deep.py`（`test_a_fresh_clone_has_no_fsm_directory_but_the_entry_document_proves_the_tree`）——契約 §3.1.1、§3.1.3 從其實作 |
+| E16 | INFRA 已在 Bridge 實作 D-16／D-17：INFRA 自行發現 Q1 而偏離主控任務書字面，主控事後裁決採其判準，並裁決 `sdd` 只當資訊（Q4），INFRA 已照此落地並實測 | `AgentConsole/engine-bridge/app/routers/sdd.py`（`fsm_list`、`_human_pending`、`_retry_history`、`_load_state`）、`app/health.py` 的 `check_sdd`／`_INFORMATIONAL_CHECKS`／`deep_health`、`tests/test_sdd_fsm.py`、`tests/test_health_deep.py`——契約 §3.1.1、§3.1.3 從其實作 |
 
-#### 6.7.3 SA 的判斷與請主控確認的點
+#### 6.7.3 SA 提出的點與主控裁決（Q1～Q8 已全部裁決）
 
-Q1～Q8 是**需要主控裁決**的點（正文以〔待裁決 Qn〕標示）；每點列出「契約現在怎麼寫」與「備選」，主控沒有回覆前，後端與前端照契約現寫的版本施工。第 9 點以後是落筆時的其他判斷。
+Q1～Q8 是 SA 落筆時提出的八個點，**主控已於 2026-10-16 全部裁決**；每點保留「提問」與「裁決」兩段作為決策紀錄（正文已沒有待裁決標記，所有條文都是已裁決的寫法）。第 9 點以後是落筆時的其他判斷。
 
-1. **Q1 🔴　`/health/deep` 的 `sdd` 檢查：主控任務書的字面規則在乾淨 clone 會讓全棧起不來（INFRA 已偏離，契約從 INFRA）。** 任務書：「設了但目錄無效或 `build/reports/fsm` 不存在 → false 且整體 503」。事實（E4、E5）：`build/reports/` 被 git 忽略、入庫 0 筆，乾淨 clone 沒有 `build/reports/fsm`；compose 把 `../AISDLC_SDD` 唯讀掛進 Bridge、healthcheck 打 `/health/deep`、backend 依賴 Bridge healthy——照字面，乾淨 clone 的 `docker compose --profile app up` 起不來，探測環也永遠判失敗；Bridge 既有的 `/health/deep` 快樂路徑 pytest（CI 會跑）在乾淨 checkout 同樣會紅，E2E-03 第 9 步的 `agentAvailability=100.0` 在乾淨 clone 上跑 E2E 時也會。INFRA 的實作（`check_sdd`）改為「`sdd_root` 是目錄，且有 `build/reports/fsm` **或**有入庫的 `AISDLC_SDD_INIT.md` 才是 true」。**契約現寫**：INFRA 的版本（§3.1.1）。**備選**：照字面，另案讓 `build/reports/fsm` 在乾淨 clone 存在（SDD 側入庫 `.gitkeep` 並調整 `.gitignore`，或 compose 啟動前建立；後者與唯讀掛載互斥）。**建議**：採 INFRA 的版本。
-2. **Q2　`human_pending`／`retry_history`／`rtm_coverage` 的語意（形狀不變，內容定義）。** 主控形狀把 `human_pending_tracking` 當列表（「尾 5 筆」）、`retry_history` 當有「尾 1 筆」的序列；真實檔（E1、E2）是單一映射、以重試閘為鍵的映射，且完全沒有 RTM 覆蓋鍵。**契約現寫**（§3.1.3，INFRA 實作相同）：`human_pending.count` 實務上只有 0 或 1（`entered_at` 有值才是 1）；`retry_history.count`＝各閘 `history` 筆數總和、`last`＝`date` 最晚一筆**加一個 `gate` 欄**；`rtm_coverage` 現況恆為 null（保留位）；日後若 schema 改成列表，兩者各退回「筆數＋尾 5／尾 1」。**備選**：若 Console 需要 RTM 覆蓋率，要由 SDD 側先把它寫進 FSM-STATE（或另開端點讀 RTM 檔），不是 Bridge／Console 能補的——請主控決定是否另案。
-3. **Q3　`GET /sdd/fsm` 的邊界（主控形狀沒寫）。** 契約依 INFRA 實作寫定：目錄不存在 → 200 空清單（不是 503）；壞檔、非法檔名、symlink 逃逸、同名目錄 → 放 `errors[]`；依專案名不分大小寫排序；`.yml`／`.bak` 等不符檔名直接忽略；**開發機上測試殘留的 `FSM-STATE-test-<數字>.yaml` 照列**（W7-SA 實見 7 個），所以任何斷言寫「包含」不寫「等於」。**備選**：Bridge 過濾 `test-<數字>`（但 `test-` 可能是合法專案名，過濾規則需另定義）；或要求 SDD 測試別把殘留檔寫進真實的 `build/reports/fsm`（SDD 側另案）。**建議**：維持現寫（照列）。
-4. **Q4　D-17 的連動：「deep 503 即不可用」也包含與 AutoClaude 批次無關的 `sdd` 檢查。** 探測環預設改打 `/health/deep` 後，`sdd` 檢查失敗（`SDD_ROOT` 設了卻不是目錄、或空的唯讀掛載）會讓 Bridge 回 503 → `bridgeConnected=false`、`agentAvailability` 下降、安靜超過閾值的長步驟被 `AGENT_UNRESPONSIVE` 告警——儘管 AutoClaude 引擎本身可用。**契約現寫**：照主控裁決（503 一律失敗，§3.1.1「使用者」列），並把代價寫明；另把探測讀取逾時 3→8 秒（`git --version` 自己最多 5 秒；3 秒會把「慢」誤判成「不可達」）、成本（每 30 秒 spawn 一次 git＋建立並刪除暫存檔＋ping DB）寫明。`bridgeConnected=false` 不區分「連不上」與「連得上但自檢失敗」（要區分需在摘要加欄位，列為後續候選）。**備選**：①`sdd` 檢查只當資訊（`checks.sdd` 照回，但不影響 HTTP 狀態與 `status`）；②探測環讀本文，只對 `git`／`autoclaude`／`workspace`／`db` 敏感。**建議**：維持現寫；若實務上 `SDD_ROOT` 設定錯誤常見，改備選①。
-5. **Q5　D-18：形狀與資料來源的兩個落差。** (a) 主控形狀的每個項目都「含 `projectId`／`projectName`」，但 `IMPORT` 項（匯入記錄在 `confirm` 之前還沒有專案）沒有專案；要與 `pendingSignoffs` 同判準就必須列入匯入記錄，所以**契約現寫 `IMPORT` 項的 `projectId`／`projectName`／`parentId` 為 null**（`title`＝檔名或「貼上文字」）。(b) 主控要通知鈴的「待審核項目」「未確認告警」兩個連結「改帶 `projectId` 導向該專案的執行／監控頁」，但摘要只有三個計數，`GET /signoffs/pending` 只涵蓋待簽核草案——這兩列**沒有 `projectId` 的資料來源**。**契約現寫**：維持 v1.3 的行為（有目前專案才導向該專案，否則專案列表），登記為已知限制（§4.6 G-G4）；「待簽核草案」列導向 Dashboard 的待人工審批卡，卡片各項各自帶專案連結。**備選**：`NotificationSummaryResponse` 增兩個可為 null 的欄位（最早一筆待審核項目、最早一筆未確認告警各自的 `projectId`；改動點＝§1.4.1、YAML 兩欄、`NotificationCountsAdapter` 兩個查詢、`NotificationBell`），或新增待審核／告警清單端點。**建議**：先接受限制，要精準導向再開備選。
-6. **Q6　D-19：三件主控沒明講但實作必須面對的事。** (a) **登出沒有端點**（E12：後端只有 login／refresh，前端 `logout()` 只清 session）；「登出時撤銷舊 token」需要一個端點，所以**契約新增 `POST /api/v1/auth/logout`（第三個新路徑，§1.9.1）**——主控給的新路徑清單只有兩個。備選：只做換新輪替的撤銷、登出維持本機行為（被竊的 refresh token 在登出後仍可用到過期，最長 7 天）。(b) **新增相依 `spring-boot-starter-data-redis`**（E12：後端目前零 Redis 相依）；附錄 D.4 規定新增相依須主控核可，本契約把它登記在 D.4，**以 D-19 為核可依據**，請確認視同核可。(c) **compose 仍要求 redis healthy 才啟動 backend**（`docker-compose.yml:166`）；降級只保護執行期的 Redis 中斷，不保護冷啟動。是否放寬 `depends_on`（`required: false`）屬 INFRA 範圍，本契約不要求。另：必須設 `management.health.redis.enabled=false`，否則 Redis 一掛，`/actuator/health` 變 DOWN、backend 容器 unhealthy，降級承諾落空（§1.9.2）。**建議**：(a) 維持新增 `logout`；(b)(c) 照現寫。
-7. **Q7　E2E-15 的夾具設計與「SDD_ROOT 清空」。** 主控的 E2E-15 寫「Bridge 指向 repo 的 `AISDLC_SDD` 根，FSM 專案 `AISDLC_SDD` 必須出現；`SDD_ROOT` 清空時 `available=false`」。兩個事實使它不能照字面當必過項：①`FSM-STATE-AISDLC_SDD.yaml` 在被 git 忽略的 `build/reports/` 下（E4），乾淨 clone 與 CI 沒有；②Bridge 的 `SDD_ROOT` 空白時會退回預設探索（E6），在有 repo 的機器上**仍找得到** SDD 目錄，清空並不會變成不可用。**契約現寫**（E2E-15）：主體用夾具（`sdd.engineUrl` 指向另起的 Bridge）；「不可用」改用「Bridge 停掉」與「`SDD_ROOT` 指向不存在目錄」兩種；真實 repo 根改成第 12 列**選跑**（檔在才跑、不在要明寫未跑）。FSM 檔 ↔ API ↔ 畫面的比對（NFR-OBS-01 補強）在夾具上做，是同樣的比對、只是資料自帶。
-8. **Q8　`GET /engines/sdd` 的幾個小形狀選擇（主控形狀內，我補了定義）。** (a) 未帶 `project` → `fsm=null`（前端選一個再帶 `project` 取第二次；理由：後端預設選誰都會遇到 `test-<數字>` 殘留，前端有 `localStorage` 記憶更合理）；(b) `version.root` 是 Bridge 端的路徑，開發機上會是主機絕對路徑、VIEWER 可見（僅供顯示，前端只秀 `latest`）；(c) Bridge `errors[]` 只記日誌不轉發；(d) 三個 Bridge 呼叫依序、失敗短路，每個 2 秒／3 秒不重試；(e) `project` 不合白名單 → 400（不是 `fsm_not_found`）。若主控要別的選擇，每點都只是一兩句話的改動。
+1. **Q1　`/health/deep` 的 `sdd` 判準（已裁決：採 INFRA 判準）。** 提問：主控任務書原寫「設了但目錄無效或 `build/reports/fsm` 不存在 → false 且整體 503」；事實（E4、E5）是 `build/reports/` 被 git 忽略、入庫 0 筆，乾淨 clone 沒有 `build/reports/fsm`，而 compose 把 `../AISDLC_SDD` 唯讀掛進 Bridge、healthcheck 打 `/health/deep`、backend 依賴 Bridge healthy——照字面，乾淨 clone 的全棧起不來。**裁決**：採 INFRA 的 `check_sdd` 判準——目錄存在**且**（有 `build/reports/fsm` **或**有入庫的 `AISDLC_SDD_INIT.md`）→ `sdd.ok=true`；`SDD_ROOT` 未設（且預設位置也找不到）→ `null`；目錄不存在、不是目錄、或兩者都沒有 → `false`（§3.1.1）。
+2. **Q2　`human_pending`／`retry_history`／`rtm_coverage` 的語意（已裁決：照契約預設）。** 提問：主控形狀把 `human_pending_tracking` 當列表、`retry_history` 當有「尾 1 筆」的序列；真實檔（E1、E2）是單一映射、以重試閘為鍵的映射，且沒有 RTM 覆蓋鍵。**裁決**：照契約（§3.1.3，INFRA 實作相同）——`human_pending`：`entered_at` 有值 → `{count:1, items:[該映射]}`，否則 `{count:0, items:[]}`（若日後是列表則 `count`＝筆數、`items`＝尾 5 筆）；`retry_history`：`count`＝三個閘 `history[]` 筆數總和、`last`＝`date` 最晚一筆原樣加 `gate`；`rtm_coverage`：真實檔無此鍵，恆 null（保留位）。若 Console 需要 RTM 覆蓋率，得由 SDD 側先寫進 FSM-STATE，另案。
+3. **Q3　`GET /sdd/fsm` 的邊界（已裁決：照契約預設）。** 提問：主控形狀沒寫目錄不存在、壞檔、排序與測試殘留檔。**裁決**：目錄不存在 → 200 空清單；壞檔、非法檔名、symlink 逃逸、同名目錄、YAML 巢狀過深（`RecursionError`）→ 放 `errors[]`；依專案名（實為檔名，見 §3.1.3 排序列）不分大小寫排序；`.yml`／`.bak` 等不符檔名直接忽略；開發機上的 `FSM-STATE-test-<數字>.yaml`（W7-SA 實見 7 個）照列，斷言寫「包含」不寫「等於」（§3.1.3）。
+4. **Q4　D-17 的連動（已裁決：採備選——`checks.sdd` 只當資訊）。** 提問：探測環改打 `/health/deep` 後，與 AutoClaude 批次無關的 `sdd` 檢查失敗若觸發 503，會讓 `bridgeConnected=false`、`agentAvailability` 下降、安靜超過閾值的長步驟被 `AGENT_UNRESPONSIVE` 誤報。**裁決**：`checks.sdd` 照常出現在 `checks` 裡，但 `sdd.ok=false` **不觸發 503**；`/health/deep` 的 200／503 只由 `git`／`autoclaude`／`workspace`／`db` 四項決定，頂層 `reason` 不含 `sdd`（INFRA 已照此落地並實測：`engine-bridge/app/health.py` 的 `_INFORMATIONAL_CHECKS`）。探測讀取逾時 3→8 秒（`git --version` 自己最多 5 秒）主控接受。`bridgeConnected=false` 仍不區分「連不上」與「連得上但四項自檢失敗」（要區分需另增欄位，列為後續候選）；SDD 設定錯誤改由 Console 的 AISDLC_SDD 卡顯示（`available=false`、`reason=sdd_unavailable`）。
+5. **Q5　D-18 的兩個落差（已裁決：採契約現寫）。** 提問：(a) 主控形狀的每個項目都「含 `projectId`／`projectName`」，但 `IMPORT` 項（`confirm` 之前沒有專案）沒有專案；(b) 通知鈴「待審核項目」「未確認告警」兩個連結要「帶 `projectId`」，但摘要只有三個計數、`GET /signoffs/pending` 只涵蓋待簽核草案，這兩列沒有資料來源。**裁決**：(a) `IMPORT` 項的 `projectId`／`projectName`／`parentId` 為 null（`title`＝檔名或「貼上文字」），仍列入以與 `pendingSignoffs` 同判準；(b) 維持 v1.3 的鈴連結行為（有目前專案才導向該專案，否則專案列表），登記為已知限制（§4.6 G-G4）；「待簽核草案」列導向儀表板待人工審批卡，卡片各項各自帶專案連結。要精準導向（摘要增兩個 `projectId` 欄位，或新增待審核／告警清單端點）另案。
+6. **Q6　D-19 的三件事（已裁決：視同核可）。** 提問：(a) 後端沒有登出端點，「登出時撤銷」需要新增 `POST /api/v1/auth/logout`（主控給定的新路徑清單之外的第三條）；(b) 新增相依 `spring-boot-starter-data-redis`（後端原本零 Redis 相依）；(c) compose 仍要求 redis healthy 才啟動 backend，另須設 `management.health.redis.enabled=false`，否則 Redis 一掛 `/actuator/health` 變 DOWN。**裁決**：`logout` 端點、`spring-boot-starter-data-redis` 相依、`management.health.redis.enabled=false` 視同核可；compose 的 `depends_on: redis` 維持不動（降級只保護執行期的 Redis 中斷，不保護冷啟動）（§1.9、附錄 D.2／D.4）。
+7. **Q7　E2E-15 的夾具設計（已裁決：照契約預設）。** 提問：主控原寫「Bridge 指向 repo 的 `AISDLC_SDD` 根，FSM 專案 `AISDLC_SDD` 必須出現；`SDD_ROOT` 清空時 `available=false`」；但 `FSM-STATE-AISDLC_SDD.yaml` 在被 git 忽略的目錄下（E4），乾淨 clone 與 CI 沒有；且 `SDD_ROOT` 空白時 Bridge 退回預設探索（E6），在有 repo 的機器上清空並不會變成不可用。**裁決**：E2E-15 主體用夾具（`sdd.engineUrl` 指向另起的 Bridge）；「不可用」改用「Bridge 停掉」與「`SDD_ROOT` 指向不存在目錄」兩種；真實 repo 根改成第 12 列選跑（檔在才跑、不在要明寫未跑）；FSM 檔 ↔ API ↔ 畫面的比對在夾具上做。
+8. **Q8　`GET /engines/sdd` 的小形狀選擇（已裁決：照契約預設）。** 提問：SA 在主控形狀之外做了五個小選擇——(a) 未帶 `project` → `fsm=null`（前端選一個再帶 `project` 取第二次；`localStorage` 記住上次選擇）；(b) `version.root` 是 Bridge 端路徑，開發機上會是主機絕對路徑、VIEWER 可見（僅供顯示，前端只秀 `latest`）；(c) Bridge 的 `errors[]` 只記日誌、不轉發；(d) 三個 Bridge 呼叫依序、失敗短路，各 2 秒／3 秒、不重試；(e) `project` 不合白名單 → 400（不是 `fsm_not_found`）。**裁決**：五項照契約預設，維持不變（§1.7.1）。
 9. **D-02、D-03：ADR-002 §4 要補的文字（ADR-002 不在 SA 持有面，文字交主控代填；D-04 已寫在本文 §4.6 G-G5）。** 在 `ADR-002-Frontend-Design-System.md` §4〈與設計稿的已知差異〉表加兩列（#10、#11），並改 #4 的「原因」：
    - **#10**｜差異：專案詳情底部不提供 PRD wireframe（PRD:463）的「匯出」按鈕｜原因：PRD 沒有為「匯出」定義任何 User Story、端點或匯出內容（格式、範圍），設計稿也沒畫；若要做，需先定義匯出什麼、什麼格式（W7 完整性審查 D-02，主控裁決保留）。
    - **#11**｜差異：任務詳情的第三張指標卡取設計稿的「重試次數」，不取 PRD wireframe（PRD:600-603）的「執行時長」｜原因：設計稿 README:111 的三張卡是「開始時間／Token 消耗／重試次數」，實作照設計稿（`TaskDetailView.tsx:107-109`）；PRD 的「執行時長」被取代（W7 完整性審查 D-03，主控裁決保留）。
@@ -3089,7 +3089,7 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | `sdd_unavailable` | false | Bridge 回 503 `sdd_unavailable`（`SDD_ROOT` 無效、找不到 SDD 版本目錄） |
 | `bridge_error` | false | Bridge 回其他非 2xx，或回應本文不是預期的形狀 |
 | `fsm_not_found` | true | 帶了 `project`，找不到該專案的 FSM 狀態檔 |
-| `fsm_state_unreadable` | true | 帶了 `project`，該狀態檔讀不動（YAML 壞掉、缺 `fsm_state` 根節點） |
+| `fsm_state_unreadable` | true | 帶了 `project`，該狀態檔讀不動（YAML 壞掉、不是 UTF-8、缺 `fsm_state` 根節點、巢狀過深） |
 
 `fsm_not_found`、`sdd_unavailable`、`fsm_state_unreadable` 同時也是 Bridge 自己錯誤封包的 `reason`（§3.1.3）；console-api 把它們轉成上表欄位的值，而不是轉成 HTTP 錯誤。
 
@@ -3239,7 +3239,7 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | `console.retention.soft-delete-days` | `30` | 軟刪除專案可復原的天數（≥ 1；v1.2，§1.6.5） |
 | `console.retention.purge-enabled` | **`false`** | 是否註冊每日清除排程；預設關閉（實體刪除不可逆；v1.2，§1.6.5、ADR-001 D19） |
 | `console.security.refresh-revocation.store` | `auto` | refresh token 撤銷名單的儲存（v1.4，§1.9.2）：`auto`＝`spring.data.redis.host` 有值才用 Redis（Redis 不在線時降級為記憶體並記 WARN），否則純記憶體；`redis`＝只用 Redis（降級照舊）；`memory`＝只用記憶體（本機 e2e、單元測試） |
-| `spring.data.redis.host`／`spring.data.redis.port`（環境變數 `SPRING_DATA_REDIS_HOST`／`SPRING_DATA_REDIS_PORT`） | **選填**（未設＝不連 Redis；docker compose 設 `redis`／`6379`） | **只**被撤銷名單使用（限流計數與 SSE 位移不用 Redis，ADR-001 D16／D23）；v1.4 起 backend 程式本身不需要 Redis 才能運作（compose 是否仍要求 redis healthy 才啟動 backend 屬 INFRA，§6.7.3 Q6） |
+| `spring.data.redis.host`／`spring.data.redis.port`（環境變數 `SPRING_DATA_REDIS_HOST`／`SPRING_DATA_REDIS_PORT`） | **選填**（未設＝不連 Redis；docker compose 設 `redis`／`6379`） | **只**被撤銷名單使用（限流計數與 SSE 位移不用 Redis，ADR-001 D16／D23）；v1.4 起 backend 程式本身不需要 Redis 才能運作（compose 的 `depends_on: redis` 維持不動，主控裁決 Q6） |
 | `management.health.redis.enabled` | **`false`（必須）** | 否則 Redis 不在線會讓 `/actuator/health` 變 DOWN、backend 容器 unhealthy，降級承諾落空（§1.9.2） |
 | `LOG_DIR`（環境變數） | （空；docker compose 設 `/app/logs`） | 有值時 logback 另啟 JSON 行的 `RollingFileAppender`（`${LOG_DIR}/console.log`，每日切檔、保留 7 天）；沒設時行為不變（C-16） |
 | `server.tomcat.remoteip.internal-proxies`（環境變數 `CONSOLE_INTERNAL_PROXIES`） | 只信 compose 子網（值寫在 `docker/README.md`） | Tomcat `RemoteIpValve` 信任的代理位址；縮小它可避免內網客戶端以 `X-Forwarded-For` 繞過未認證限流（QA O-20；C-16） |
@@ -3264,7 +3264,7 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | `org.apache.poi:poi-ooxml` | DOCX 文字擷取（§1.1.1） | **5.5.1**（同上） | W3-B1 任務書 |
 | `com.bucket4j:bucket4j-core` | 限流（記憶體實作，§0.4 第 4 點） | **8.10.1**（Maven Central 上的最後一版，之後改名 `bucket4j_jdk17-core`；同上） | W3-B1 任務書 |
 | `org.apache.httpcomponents.client5:httpclient5` | SSRF 防護的外呼 HTTP 客戶端：自訂 `DnsResolver` 釘 IP、Host／SNI 用原 host、不跟 redirect（§1.5.7；AR-10；D-51） | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控補充裁決（W3-B1 補充節） |
-| `org.springframework.boot:spring-boot-starter-data-redis` | refresh token 撤銷名單的 Redis 實作（§1.9.2；內含 Lettuce 客戶端）；v1.4 以前後端**零 Redis 相依** | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控裁決 D-19（`Implementation_Plan.md` §5.3）；SA 依該裁決登記，**請主控確認視同核可**（§6.7.3 Q6） |
+| `org.springframework.boot:spring-boot-starter-data-redis` | refresh token 撤銷名單的 Redis 實作（§1.9.2；內含 Lettuce 客戶端）；v1.4 以前後端**零 Redis 相依** | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控裁決 D-19（`Implementation_Plan.md` §5.3）；主控已裁決視同核可（§6.7.3 Q6） |
 
 **字型資源（v1.2，C-4；不是相依）**：PDF 報表需要的 CJK 字型（建議 Noto Sans TC 靜態 Regular，SIL OFL 1.1）與其授權檔放 `backend/src/main/resources/fonts/`；來源網址與檔案雜湊寫在 W5-BE 交卷。
 
@@ -3307,7 +3307,7 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | API-MON-08（v1.2） | §1.3.8 | E2E-13 第 1 列；IT（與各專案 `task-trend` 加總逐欄相等、封存與軟刪專案不計、視窗 92 天、VIEWER 200） |
 | API-PRJ-06（v1.2） | §1.6.1、§1.6.2 | E2E-13 第 2～3 列；IT（復原連帶目標／任務、單獨先刪的不回來、404／409×2、VIEWER 403） |
 | NFR-9.3-04（軟刪除 30 天內可復原；v1.2） | §1.6.1、§1.6.5、§0.5 V9 | E2E-13 第 2～3 列；單元（清除排程：逾期專案連同子樹實體刪除、`purge-enabled=false` 不註冊） |
-| BR-26（Bridge 深度探針；v1.2） | §3.1.1 | E2E-13 第 13 列；Bridge pytest（200／503）；Docker 全棧 healthcheck 與批次跑到 `COMPLETED`；**v1.4（D-17）加 `sdd` 檢查**：Bridge pytest（三態、乾淨 clone 等價、空目錄／掛錯）、E2E-15 第 8～9 列 |
+| BR-26（Bridge 深度探針；v1.2） | §3.1.1 | E2E-13 第 13 列；Bridge pytest（200／503）；Docker 全棧 healthcheck 與批次跑到 `COMPLETED`；**v1.4（D-17）加 `sdd` 檢查（只當資訊，不影響 503）**：Bridge pytest（三態、乾淨 clone 等價、空目錄／掛錯、`sdd.ok=false` 時整體仍 200）、E2E-15 第 8～9 列 |
 | BR-13、BR-14（Bridge `GET /sdd/version`、`GET /sdd/fsm/{project}`；v1.4 起 Console 消費） | §1.7.1、§3.1.3 | Bridge pytest（`tests/test_sdd_fsm.py`）；`EnginesApiIT`；E2E-15（此前只驗到 Bridge 直連，完整性審查 I-01） |
 | NFR-9.4-04（日誌 traceId 串聯；v1.2） | §0.4 第 6 點、§3.1.1 | E2E-13 第 12 列；`BridgeRunsAdapterTest`（標頭存在）、Bridge pytest（回帶標頭、每行日誌含 `trace_id`） |
 | API-NTF-01 | §1.4.1 | E2E-04 步驟 3、E2E-05 步驟 3、E2E-08 步驟 5；v1.4：`pendingSignoffs` 與清單同源（`API-SGN-05` 的不變量，E2E-16 第 3 列）、`bridgeConnected` 對深度探針 503 為 `false`（E2E-16 第 2 列） |
