@@ -479,7 +479,7 @@ describe("監控頁：批次比較與 Agent 狀態（US-M-06、M-10）", () => {
     expect(await screen.findByTestId("compare-empty")).toHaveTextContent("至少需要兩個執行批次");
   });
 
-  it("Agent 狀態：Bridge 已連線＝綠燈、顯示目前任務與可用率；Bridge 不可達＝紅燈；並註明沒有 CPU／記憶體資料", async () => {
+  it("Agent 狀態：Bridge 已連線＝綠燈、顯示目前任務與可用率；Bridge 不可達＝紅燈；說明只留 Bridge 實例（v1.2 的「沒有提供資源資料」說明句已移除）", async () => {
     backend({ detail: runDetail({ id: "r2", currentStep: { stepId: "G2-T1", stepNumber: 3, taskName: "實作", attempt: 1 } }) });
     const first = view();
     const light = await screen.findByTestId("agent-light");
@@ -487,14 +487,83 @@ describe("監控頁：批次比較與 Agent 狀態（US-M-06、M-10）", () => {
     expect(light).toHaveAttribute("data-connected", "true");
     expect(screen.getByTestId("agent-current")).toHaveTextContent("實作（G2-T1）");
     expect(screen.getByTestId("agent-availability")).toHaveTextContent("100.0%");
-    expect(screen.getByTestId("agent-note")).toHaveTextContent("資源使用情況（CPU／記憶體）");
-    expect(screen.getByTestId("agent-note")).toHaveTextContent("Bridge 實例：e2e-bridge");
+    expect(screen.getByTestId("agent-note")).toHaveTextContent("Bridge 實例：e2e-bridge。");
+    expect(screen.getByTestId("agent-card")).not.toHaveTextContent("目前沒有提供這項資料");
     first.unmount();
 
     backend({ detail: runDetail({ id: "r2", bridge: { connected: false, checkedAt: TS } }) });
     view();
     await waitFor(() => expect(screen.getByTestId("agent-light")).toHaveTextContent("Engine Bridge 未連線"));
     expect(screen.getByTestId("agent-light")).toHaveAttribute("data-connected", "false");
+    expect(screen.getByTestId("agent-note")).toBeEmptyDOMElement(); // 沒有實例資訊：段落留著但是空的（CSS :empty 隱藏）
+  });
+});
+
+describe("監控頁：Agent 即時狀態的資源使用（契約 §4.3 M-19，D-12；US-M-10）", () => {
+  const SAMPLE = { cpuPercent: 12.3, memoryBytes: 361_758_720, processCount: 3, sampledAt: "2026-10-15T08:30:10Z" };
+  const bridge = (patch: Partial<ExecutionRunDetail["bridge"]> = {}): ExecutionRunDetail["bridge"] => ({
+    connected: true,
+    instance: "e2e-bridge",
+    status: "RUNNING",
+    runKnown: true,
+    checkedAt: TS,
+    ...patch,
+  });
+  /** 批次詳情載入完成後才有「資源使用」格（載入中整個格子區換成骨架）。 */
+  const resourceCell = async () => {
+    await waitFor(() => expect(screen.getByTestId("agent-run-status")).toHaveTextContent("Run #2"));
+    return screen.getByTestId("agent-resources");
+  };
+
+  it("有資源：顯示 `CPU 12.3%・記憶體 345 MB・3 行程`，取樣時間放 tooltip；欄位標籤是「資源使用」", async () => {
+    backend({ detail: runDetail({ id: "r2", runNumber: 2, bridge: bridge({ resources: SAMPLE }) }) });
+    view();
+    const cell = await resourceCell();
+    expect(cell).toHaveTextContent("CPU 12.3%・記憶體 345 MB・3 行程");
+    expect(cell).toHaveAttribute("title", `取樣時間 ${new Date(SAMPLE.sampledAt).toTimeString().slice(0, 8)}`);
+    expect(cell.previousElementSibling).toHaveTextContent("資源使用");
+    expect(screen.getByTestId("agent-card")).not.toHaveTextContent("目前沒有提供這項資料");
+    expect(screen.getByTestId("agent-card")).not.toHaveTextContent("資源使用情況（CPU／記憶體）");
+  });
+
+  it("資源格自成第二列整列：既有四格（連線狀態、批次狀態、目前任務、Agent 可用率）的順序與位置不動", async () => {
+    backend({ detail: runDetail({ id: "r2", runNumber: 2, bridge: bridge({ resources: SAMPLE }) }) });
+    view();
+    const cell = await resourceCell();
+    const grid = screen.getByTestId("agent-light").closest(".grid") as HTMLElement;
+    expect([...grid.children].map((c) => c.firstElementChild?.textContent)).toEqual(["連線狀態", "批次狀態", "目前任務", "Agent 可用率", "資源使用"]);
+    expect(grid).toHaveClass("grid-cols-4");
+    expect(cell.parentElement).toHaveClass("col-span-full");
+  });
+
+  const NO_DATA: Array<[string, Partial<ExecutionRunDetail>]> = [
+    ["resources 為 null（引擎行程不存活、還沒有第一筆樣本或樣本過期）", { bridge: bridge({ resources: null }) }],
+    ["resources 缺席（舊版 Bridge 沒有這個鍵）", { bridge: bridge() }],
+    ["Bridge 未連線（connected=false）：就算快取裡還有舊數字也不顯示", { bridge: bridge({ connected: false, resources: SAMPLE }) }],
+    ["批次已完成：詳情輪詢在終態後停止，最後一次抓到的數字不得繼續顯示", { status: "COMPLETED", bridgeStatus: "COMPLETED", bridge: bridge({ status: "COMPLETED", resources: SAMPLE }) }],
+    ["批次失敗（終態）", { status: "FAILED", bridgeStatus: "FAILED", bridge: bridge({ status: "FAILED", resources: SAMPLE }) }],
+    ["批次已取消（終態）", { status: "CANCELLED", bridgeStatus: "CANCELLED", bridge: bridge({ status: "CANCELLED", resources: SAMPLE }) }],
+    [
+      "批次暫停：pause 會終止整棵引擎行程樹，SSE 先把快取改成 PAUSED、REST 還沒重抓的空檔不得顯示暫停前的舊數字",
+      { status: "PAUSED", bridgeStatus: "PAUSED", bridge: bridge({ status: "PAUSED", resources: SAMPLE }) },
+    ],
+  ];
+
+  it.each(NO_DATA)("沒有資料一律單一「—」，沒有 tooltip，也沒有舊說明句：%s", async (_name, patch) => {
+    backend({ detail: runDetail({ id: "r2", runNumber: 2, ...patch }) });
+    view();
+    const cell = await resourceCell();
+    expect(cell).toHaveTextContent(/^—$/);
+    expect(cell).not.toHaveAttribute("title");
+    expect(screen.getByTestId("agent-card")).not.toHaveTextContent("目前沒有提供這項資料");
+  });
+
+  it("還沒有任何執行批次：資源格是「—」，不丟錯", async () => {
+    backend({ runs: [], detail: null });
+    view();
+    await screen.findByTestId("agent-card");
+    expect(screen.getByTestId("agent-resources")).toHaveTextContent(/^—$/);
+    expect(screen.getByTestId("agent-light")).toHaveTextContent("尚無執行批次");
   });
 });
 

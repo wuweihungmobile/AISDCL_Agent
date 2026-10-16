@@ -60,10 +60,30 @@ type Checkpoint = { id: string; runId: string; name: string; createdAt: string; 
 
 export type RunStatus = "RUNNING" | "PAUSED" | "COMPLETED" | "FAILED" | "CANCELLED";
 
+/** 引擎能力狀態（契約 §1.2.1、§3.4.2；v1.3，D-11）。 */
+export type CapabilityState = "ENABLED" | "OFF" | "UNAVAILABLE_NO_API_KEY";
+export type Capabilities = { autoMutation: CapabilityState; selfEvolution: CapabilityState };
+
+/**
+ * 契約 §3.4.2 決策表（兩個旗標都是預設的假）：自動突變只由等級 ≥ 6 要求、需要金鑰；
+ * 自演化沒有開關——有金鑰恆 ENABLED（只提案），沒有金鑰時等級 ≥ 7 要求者報 UNAVAILABLE_NO_API_KEY，否則 OFF。
+ */
+export function capabilitiesFor(level: number, apiKey: boolean): Capabilities {
+  return {
+    autoMutation: level >= 6 ? (apiKey ? "ENABLED" : "UNAVAILABLE_NO_API_KEY") : "OFF",
+    selfEvolution: apiKey ? "ENABLED" : level >= 7 ? "UNAVAILABLE_NO_API_KEY" : "OFF",
+  };
+}
+
+/** 引擎行程樹的資源取樣（契約 §3.1.2）：sampledAt 由假引擎在每次回詳情時補上現在時間（真後端保證取樣不超過 15 秒）。 */
+export type ResourceSample = { cpuPercent: number; memoryBytes: number; processCount: number };
+
 export type Run = {
   id: string;
   runNumber: number;
   level: number;
+  /** 建立批次當下凍結的引擎能力（契約 §1.2.1）；legacyRuns 時缺席（模擬 V10 之前的批次） */
+  engineCapabilities?: Capabilities;
   budget: number | null;
   status: RunStatus;
   bridgeStatus: string;
@@ -112,6 +132,10 @@ const isTerminalEvent = (kind: "logs" | "metrics", e: Ev): boolean => (kind === 
 
 export type EngineOptions = {
   signedOff?: boolean;
+  /** Console 的 model.apiKey 有沒有設（決定批次的 engineCapabilities；預設 true＝開發機常態）。 */
+  apiKey?: boolean;
+  /** 模擬 V10 之前建立的批次：回應不帶 engineCapabilities（契約 §1.2.1：缺席時前端不顯示晶片）。 */
+  legacyRuns?: boolean;
 };
 
 /** 一次串流連線的紀錄（含被拒絕的）：測試用它斷言 Last-Event-ID、token 與結果。 */
@@ -136,9 +160,18 @@ export class Engine {
   private refuse = 0;
   /** 後端整個不可用（nginx 在上游掛掉時立即回 502）：REST、換新與串流一律 502 */
   private outage = false;
+  /**
+   * 引擎行程樹的資源取樣（契約 §3.1.2、§1.2.3）：undefined＝舊版 Bridge，`bridge.resources` 鍵缺席；null＝沒有資料；物件＝有取樣。
+   * 只有 RUNNING 的批次回得出數字（暫停中與終態沒有存活的引擎行程樹，真後端回 null）。
+   */
+  resources: ResourceSample | null | undefined = undefined;
+  private readonly apiKey: boolean;
+  private readonly legacyRuns: boolean;
 
   constructor(opts: EngineOptions = {}) {
     this.project.signedOff = opts.signedOff ?? true;
+    this.apiKey = opts.apiKey ?? true;
+    this.legacyRuns = opts.legacyRuns ?? false;
   }
 
   get latest(): Run {
@@ -238,6 +271,7 @@ export class Engine {
       id: nextUuid("e5a7c3b9"),
       runNumber: this.runs.length + 1,
       level,
+      ...(this.legacyRuns ? {} : { engineCapabilities: capabilitiesFor(level, this.apiKey) }),
       budget,
       status: "RUNNING",
       bridgeStatus: "RUNNING",
@@ -610,6 +644,8 @@ export class Engine {
 
   private detail(r: Run) {
     const cur = r.current !== null ? TASKS[r.scope[r.current]] : undefined;
+    // 資源取樣：舊版 Bridge（resources 未設）鍵缺席；有設的也只有 RUNNING 回得出數字，暫停中與終態回 null（契約 §3.1.2）
+    const resources = this.resources === undefined ? undefined : this.resources !== null && r.status === "RUNNING" ? { ...this.resources, sampledAt: iso() } : null;
     return {
       id: r.id,
       projectId: PROJECT_ID,
@@ -617,6 +653,7 @@ export class Engine {
       status: r.status,
       bridgeStatus: r.bridgeStatus,
       autonomyLevel: r.level,
+      ...(r.engineCapabilities ? { engineCapabilities: r.engineCapabilities } : {}),
       scope: { mode: "ALL", goalIds: [], taskIds: [] },
       totalTokensUsed: r.tokens,
       tokenBudget: r.budget ?? undefined,
@@ -631,7 +668,7 @@ export class Engine {
       reason: r.reason,
       elapsedSec: Math.max(1, Math.round(((r.completedAt ? Date.parse(r.completedAt) : Date.now()) - Date.parse(r.startedAt)) / 1000)),
       pendingReviews: r.reviews.filter((x) => x.status === "PENDING"),
-      bridge: { connected: true, instance: "e2e-bridge", status: r.bridgeStatus, runKnown: true, checkedAt: iso() },
+      bridge: { connected: true, instance: "e2e-bridge", status: r.bridgeStatus, runKnown: true, checkedAt: iso(), ...(resources === undefined ? {} : { resources }) },
     };
   }
 
@@ -956,6 +993,7 @@ export class Engine {
           status: run.status,
           bridgeStatus: run.bridgeStatus,
           autonomyLevel: run.level,
+          ...(run.engineCapabilities ? { engineCapabilities: run.engineCapabilities } : {}),
           scope: { mode: scopeBody.mode ?? "ALL", goalIds: scopeBody.goalIds ?? [], taskIds: scopeBody.taskIds ?? [] },
           totalTokensUsed: 0,
           tokenBudget: run.budget ?? undefined,
@@ -993,6 +1031,7 @@ export class Engine {
         status: run.status,
         bridgeStatus: run.bridgeStatus,
         autonomyLevel: run.level,
+        ...(run.engineCapabilities ? { engineCapabilities: run.engineCapabilities } : {}),
         scope: { mode: "ALL", goalIds: [], taskIds: [] },
         totalTokensUsed: run.tokens,
         tokenBudget: run.budget ?? undefined,

@@ -4,6 +4,7 @@ import { contrastRatio, resolveVar, tokenHex } from "@/tests/helpers/tokens";
 import {
   ALERT_RULE_LABEL,
   ALERT_SEVERITY,
+  ENGINE_CAPABILITY_KEYS,
   GOAL_STATUS,
   IMPORT_STATUS,
   LOG_LEVEL_COLOR,
@@ -18,6 +19,8 @@ import {
   TASK_STATUS,
   alertSeverity,
   alertSeverityTextColor,
+  autonomyHint,
+  engineCapabilityView,
   goalStatus,
   importStatus,
   isImportReopenable,
@@ -242,5 +245,64 @@ describe("匯入記錄狀態表（契約 §1.1；ImportStatus 六態，lib/domai
     expect(isLive("PARSED")).toBe(false);
     const reopenable = CONTRACT_STATES.filter(isImportReopenable);
     expect(reopenable.sort()).toEqual(["PARSED", "REVIEWING", "UPLOADED"]);
+  });
+});
+
+describe("引擎能力晶片字典與自治等級說明（契約 §1.2.1、§3.4.2、§3.6.1、§4.2 E-21；v1.3 D-11）", () => {
+  const STATES = ["ENABLED", "OFF", "UNAVAILABLE_NO_API_KEY"] as const;
+
+  it("兩枚晶片固定順序（自動突變、自演化）；各三態共六格都有文字、說明與色調，文字互不重複", () => {
+    expect([...ENGINE_CAPABILITY_KEYS]).toEqual(["autoMutation", "selfEvolution"]);
+    const texts: string[] = [];
+    for (const key of ENGINE_CAPABILITY_KEYS) {
+      for (const state of STATES) {
+        const v = engineCapabilityView(key, state);
+        expect(v.text, `${key}／${state} 文字`).toMatch(/\S/);
+        expect(v.hint, `${key}／${state} 說明`).toMatch(/\S/);
+        texts.push(v.text);
+      }
+    }
+    expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  it("色調：已啟用＝on、關閉＝off、無金鑰不可用＝unavailable（兩枚晶片一致）", () => {
+    for (const key of ENGINE_CAPABILITY_KEYS) {
+      expect(engineCapabilityView(key, "ENABLED").tone).toBe("on");
+      expect(engineCapabilityView(key, "OFF").tone).toBe("off");
+      expect(engineCapabilityView(key, "UNAVAILABLE_NO_API_KEY").tone).toBe("unavailable");
+    }
+  });
+
+  it("🔴 自演化的「已啟用」寫明「僅提案」且說明「不自動套用」；其餘五格的文字不借用「僅提案」", () => {
+    const enabled = engineCapabilityView("selfEvolution", "ENABLED");
+    expect(enabled.text).toBe("自演化（僅提案）：已啟用");
+    expect(enabled.hint).toContain("僅提案、不自動套用");
+    expect(enabled.hint).toContain("與設定和自治等級無關");
+    for (const key of ENGINE_CAPABILITY_KEYS) {
+      for (const state of STATES) {
+        if (key === "selfEvolution" && state === "ENABLED") continue;
+        expect(engineCapabilityView(key, state).text).not.toContain("僅提案");
+      }
+    }
+  });
+
+  it("自動突變的「已啟用」說明是 Brain 逐步校正（契約 E-21 建議文字）", () => {
+    expect(engineCapabilityView("autoMutation", "ENABLED").hint).toContain("Brain 逐步校正：失敗步驟先由 Brain 改寫再重試");
+  });
+
+  it("後端日後新增狀態值：顯示「晶片名稱：原值」、中性色調、沒有說明，不崩潰", () => {
+    expect(engineCapabilityView("autoMutation", "FUTURE_STATE")).toEqual({ text: "自動突變：FUTURE_STATE", hint: "", tone: "off" });
+    expect(engineCapabilityView("selfEvolution", "FUTURE_STATE").text).toBe("自演化：FUTURE_STATE");
+  });
+
+  it("自治等級說明：1～5 各一句；6～10 同一句（審核閘同 Level 5、另要求自動突變／自演化、結果看晶片），不再說「不傳給引擎」（v1.2 說法已推翻）", () => {
+    const first = [1, 2, 3, 4, 5].map(autonomyHint);
+    expect(new Set(first).size).toBe(5);
+    const advanced = [6, 7, 8, 9, 10].map(autonomyHint);
+    expect(new Set(advanced).size).toBe(1);
+    expect(advanced[0]).toContain("審核閘行為同 Level 5");
+    expect(advanced[0]).toContain("Level 6 以上另要求自動突變、Level 7 以上另要求自演化");
+    expect(advanced[0]).toContain("引擎能力晶片");
+    expect(advanced[0]).not.toContain("不另傳給引擎");
   });
 });

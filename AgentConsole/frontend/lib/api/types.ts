@@ -116,6 +116,11 @@ export type ExecutionRunSummary = S36["ExecutionRunSummaryResponse"];
 export type ExecutionRunDetail = S36["ExecutionRunDetailResponse"];
 export type CurrentStep = S36["CurrentStep"];
 export type BridgeInfo = S36["BridgeInfo"];
+/** 引擎行程樹的資源取樣（v1.3，D-12；契約 §1.2.3、§3.1.2）：只在 `GET /executions/{runId}` 的 `bridge.resources`，沒有資料時為 null 或缺席。 */
+export type ResourceUsage = S36["ResourceUsage"];
+/** 批次 spawn 時 Console 實際送進引擎的能力狀態（v1.3，D-11；契約 §1.2.1、§3.4.2）：建立時凍結，V10 之前的批次缺席或 null。 */
+export type EngineCapabilities = S36["EngineCapabilities"];
+export type EngineCapabilityState = S36["EngineCapabilityState"];
 export type ExecutionStep = S36["ExecutionStepResponse"];
 export type ExecutionStepStatus = S36["ExecutionStepStatus"];
 export type Dag = S36["DagResponse"];

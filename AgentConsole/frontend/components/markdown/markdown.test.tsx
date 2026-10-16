@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, safeFileName } from "./MarkdownEditorImpl";
+import { BULK_EDIT_CHARS, DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, SYNC_RENDER_MAX_CHARS, safeFileName, shouldDeferPreview } from "./MarkdownEditorImpl";
 import { MarkdownView } from "./MarkdownView";
 
 /**
@@ -114,6 +114,51 @@ describe("預覽窗：大文件（超過 DEFER_ABOVE_CHARS 才分開排程）也
     fireEvent.change(textarea(), { target: { value: big + "\n\n## 最終標題" } });
     await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "最終標題" })).toBeInTheDocument(), { timeout: 5000 });
     expect(within(preview).queryByText("第一次")).toBeNull();
+  });
+
+  it("批次貼入（一次差上萬字，例如把 20KB 文件貼進空欄位）：預覽一次到位，內容與區塊數都正確", async () => {
+    const section = (i: number) => `## 區塊 ${i}\n\n\`\`\`python\nprint(${i})\n\`\`\`\n\n`;
+    const pasted = Array.from({ length: 300 }, (_, i) => section(i + 1)).join("");
+    expect(pasted.length).toBeGreaterThan(DEFER_ABOVE_CHARS);
+    expect(pasted.length).toBeLessThanOrEqual(SYNC_RENDER_MAX_CHARS);
+    expect(pasted.length).toBeGreaterThan(BULK_EDIT_CHARS);
+    const { container } = render(<Harness />);
+    fireEvent.change(textarea(), { target: { value: pasted } });
+    const preview = container.querySelector(".w-md-editor-preview") as HTMLElement;
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "區塊 300" })).toBeInTheDocument(), { timeout: 15000 });
+    expect(within(preview).getAllByRole("heading", { level: 2 })).toHaveLength(300);
+    expect(preview.querySelectorAll("pre code.language-python")).toHaveLength(300);
+    // 之後回到連續打字：落後只有幾個字，仍走排程（deferred），最終值不能丟
+    fireEvent.change(textarea(), { target: { value: `${pasted}## 打字加的標題\n` } });
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 2, name: "打字加的標題" })).toBeInTheDocument(), { timeout: 15000 });
+  }, 30000);
+});
+
+describe("預覽何時排到輸入之後（NFR-9.1-05：shouldDeferPreview）", () => {
+  const DOC_20KB = 14000; // p9 量法的 20KB 文件約 14,000 字
+
+  it("小文件不排：一幀內就渲染完，分兩段只會多等一個畫面", () => {
+    expect(shouldDeferPreview(DEFER_ABOVE_CHARS, 0)).toBe(false);
+    expect(shouldDeferPreview(500, 499)).toBe(false);
+  });
+
+  it("大文件連續打字（預覽只落後幾個字）要排：連續輸入時中間的值直接被跳過；剛好在批次門檻上還不算批次", () => {
+    expect(shouldDeferPreview(DOC_20KB, DOC_20KB - 1)).toBe(true);
+    expect(shouldDeferPreview(DOC_20KB, DOC_20KB)).toBe(true); // 已追上：shown 與 source 相同，排不排結果一樣
+    expect(shouldDeferPreview(DOC_20KB, DOC_20KB - BULK_EDIT_CHARS)).toBe(true);
+    expect(shouldDeferPreview(DOC_20KB - BULK_EDIT_CHARS, DOC_20KB)).toBe(true); // 刪掉一整段但沒超過門檻
+  });
+
+  it("批次變更（貼上、匯入、復原）一次渲染到位：預覽落後超過門檻，不再多插一個畫面", () => {
+    expect(shouldDeferPreview(DOC_20KB, 0)).toBe(false); // 20KB 貼進空欄位（p9 的量法）
+    expect(shouldDeferPreview(DOC_20KB, DOC_20KB - BULK_EDIT_CHARS - 1)).toBe(false);
+    expect(shouldDeferPreview(DOC_20KB, DOC_20KB + 5000)).toBe(false); // 刪掉一大段後仍是大文件
+  });
+
+  it("批次但文件太大（超過 SYNC_RENDER_MAX_CHARS）：仍然排，免得一次貼進超大文件時整頁卡住", () => {
+    expect(shouldDeferPreview(SYNC_RENDER_MAX_CHARS, 0)).toBe(false);
+    expect(shouldDeferPreview(SYNC_RENDER_MAX_CHARS + 1, 0)).toBe(true);
+    expect(shouldDeferPreview(1_000_000, 0)).toBe(true);
   });
 });
 

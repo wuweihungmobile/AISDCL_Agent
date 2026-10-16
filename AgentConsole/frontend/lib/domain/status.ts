@@ -9,7 +9,21 @@
  * 偏離只有三格：--color-text-muted（#5F6B5A）、--color-accent（#B93F22）、--color-error（#B8433F）為了 WCAG AA 對比，
  * 在 styles/tokens.console.css 的「無障礙覆寫」一節改深（W5 C-18；原因與數字見該檔）。
  */
-import type { AlertRule, AlertSeverity, BridgeRunStatus, ExecutionStepStatus, GoalStatus, ImportStatus, ProjectStatus, ReviewDecision, ReviewKind, RunStatus, TaskStatus } from "@/lib/api/types";
+import type {
+  AlertRule,
+  AlertSeverity,
+  BridgeRunStatus,
+  EngineCapabilities,
+  EngineCapabilityState,
+  ExecutionStepStatus,
+  GoalStatus,
+  ImportStatus,
+  ProjectStatus,
+  ReviewDecision,
+  ReviewKind,
+  RunStatus,
+  TaskStatus,
+} from "@/lib/api/types";
 
 export type StatusMeta = {
   /** 繁體中文標籤 */
@@ -175,9 +189,51 @@ const AUTONOMY_HINTS: Record<number, string> = {
   5: "全自動執行；任何失敗都升級給人類",
 };
 
-/** 自治等級的一句說明；Level 6～10 另註明目前不傳給引擎（契約 §3.6.1：enableAutoMutation／enableSelfEvolution 為 UNVERIFIED）。 */
+/**
+ * 自治等級的一句說明。Level 6～10（契約 §3.6.1，v1.3 改寫）：審核閘行為同 Level 5；差異只在引擎能力旗標——
+ * 等級 ≥ 6 要求自動突變、≥ 7 要求自演化，兩者都需要模型金鑰，沒有金鑰也不報錯，結果如實顯示在批次的引擎能力晶片。
+ * （v1.2 的寫法是「目前不另傳給引擎」，已被推翻。）
+ */
 export function autonomyHint(level: number): string {
-  return AUTONOMY_HINTS[level] ?? "進階自治：等級會記錄在批次上，但目前不另傳給引擎（對映尚未驗證），行為與 Level 5 相同";
+  return AUTONOMY_HINTS[level] ?? "進階自治：審核閘行為同 Level 5（只有失敗才升級給人類）；Level 6 以上另要求自動突變、Level 7 以上另要求自演化（都需要模型金鑰），實際結果見批次的引擎能力晶片";
+}
+
+/**
+ * 引擎能力晶片（契約 §1.2.1、§3.4.2、§4.2 E-21；v1.3，D-11）：「自動突變」「自演化」各三態。
+ * 值描述的是「這個批次 spawn 時 Console 實際送進引擎的」與「引擎因此會做的」，不是使用者設了什麼（兩者在 selfEvolution 上會不同）；
+ * 文字、色調與 tooltip 由本表決定，契約只定義值域與語意。
+ * 🔴 selfEvolution 的 ENABLED 必須讓人看得出「只提案、不自動套用」：引擎沒有演化開關，有金鑰就會在失敗型升級時由 Brain 產生演化提案，
+ * 只寫進引擎日誌、不套用也不重載；所以等級 3、有金鑰的批次也會顯示「已啟用」，tooltip 要講清楚它與設定和等級無關。
+ */
+export type EngineCapabilityKey = keyof EngineCapabilities;
+export type EngineCapabilityTone = "on" | "off" | "unavailable";
+export type EngineCapabilityView = { text: string; hint: string; tone: EngineCapabilityTone };
+
+/** 兩枚晶片的固定順序（契約 E-21：自動突變、自演化）。 */
+export const ENGINE_CAPABILITY_KEYS: readonly EngineCapabilityKey[] = ["autoMutation", "selfEvolution"];
+
+const ENGINE_CAPABILITY_TONE: Record<EngineCapabilityState, EngineCapabilityTone> = { ENABLED: "on", OFF: "off", UNAVAILABLE_NO_API_KEY: "unavailable" };
+
+const ENGINE_CAPABILITY_TEXT: Record<EngineCapabilityKey, Record<EngineCapabilityState, { text: string; hint: string }>> = {
+  autoMutation: {
+    ENABLED: { text: "自動突變：已啟用", hint: "Brain 逐步校正：失敗步驟先由 Brain 改寫再重試（Brain 呼叫失敗則該步驟直接升級）" },
+    OFF: { text: "自動突變：關閉", hint: "沒有啟用 Brain 逐步校正：失敗步驟照舊自動重試" },
+    UNAVAILABLE_NO_API_KEY: { text: "自動突變：無金鑰不可用", hint: "有人要求 Brain 逐步校正（系統參數或自治等級 6 以上），但 Console 沒有金鑰可送：批次照常執行，只是沒有 Brain" },
+  },
+  selfEvolution: {
+    ENABLED: { text: "自演化（僅提案）：已啟用", hint: "僅提案、不自動套用：引擎沒有演化開關，有金鑰時失敗型升級會由 Brain 產生演化提案，只寫進引擎日誌、不套用也不重載；與設定和自治等級無關" },
+    OFF: { text: "自演化：關閉", hint: "沒有金鑰且沒人要求：沒有 AI 演化提案" },
+    UNAVAILABLE_NO_API_KEY: { text: "自演化：無金鑰不可用", hint: "有人要求演化（系統參數或自治等級 7 以上），但沒有金鑰：AI 演化提案不會發生" },
+  },
+};
+
+const ENGINE_CAPABILITY_NAME: Record<EngineCapabilityKey, string> = { autoMutation: "自動突變", selfEvolution: "自演化" };
+
+/** 一枚晶片的文字、tooltip 與色調；後端若新增狀態值，顯示原值、用中性色，不崩潰。 */
+export function engineCapabilityView(key: EngineCapabilityKey, state: string): EngineCapabilityView {
+  const known = (ENGINE_CAPABILITY_TEXT[key] as Record<string, { text: string; hint: string }>)[state];
+  if (!known) return { text: `${ENGINE_CAPABILITY_NAME[key]}：${state}`, hint: "", tone: "off" };
+  return { ...known, tone: ENGINE_CAPABILITY_TONE[state as EngineCapabilityState] };
 }
 
 /**

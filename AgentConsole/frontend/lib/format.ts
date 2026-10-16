@@ -1,4 +1,5 @@
 /** 顯示用格式化（本機時區；一律不丟例外，缺值回「—」）。 */
+import type { ResourceUsage } from "@/lib/api/types";
 
 const DASH = "—";
 
@@ -38,6 +39,30 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * BYTES_PER_MB;
+
+/** 記憶體用量（契約 §4.3 M-19）：不足 1 MB 寫「<1 MB」；達 1,024 MB 改以 GB（小數 1 位）；其餘 MB 取整數。門檻都比未四捨五入的位元組數。 */
+function formatMemory(bytes: number): string {
+  if (bytes < BYTES_PER_MB) return "<1 MB";
+  if (bytes >= BYTES_PER_GB) return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`;
+  return `${Math.round(bytes / BYTES_PER_MB)} MB`;
+}
+
+/**
+ * Agent 即時狀態卡的「資源使用」（契約 §1.2.3、§4.3 M-19；US-M-10）：`CPU 12.3%・記憶體 345 MB・3 行程`，三段以全形中點相連。
+ * 沒有資料（null／缺席）或任一欄位不是非負有限數字，一律回單一「—」——不顯示半截的數字。
+ * 「批次已終態、Bridge 未連線」也是「沒有資料」，但那是呼叫端依批次狀態判的，不在這裡。
+ */
+export function formatResourceUsage(r?: ResourceUsage | null): string {
+  if (!r) return DASH;
+  const { cpuPercent, memoryBytes, processCount } = r;
+  for (const n of [cpuPercent, memoryBytes, processCount]) {
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return DASH;
+  }
+  return `CPU ${cpuPercent.toFixed(1)}%・記憶體 ${formatMemory(memoryBytes)}・${processCount} 行程`;
 }
 
 /** 01:23:45（執行頁耗時；缺值或負值「—」）。 */

@@ -6,8 +6,8 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import type { StreamState } from "@/lib/api/sse";
-import type { ExecutionRunSummary } from "@/lib/api/types";
-import { runStatusMeta } from "@/lib/domain/status";
+import type { EngineCapabilities, ExecutionRunSummary } from "@/lib/api/types";
+import { ENGINE_CAPABILITY_KEYS, engineCapabilityView, runStatusMeta, type EngineCapabilityTone } from "@/lib/domain/status";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { StartErrorView } from "./startErrors";
@@ -111,6 +111,44 @@ export function BridgeChip({ run, className }: { run: Pick<ExecutionRunSummary, 
     >
       {runStatusMeta(run.status, run.bridgeStatus).label}
     </span>
+  );
+}
+
+/** 三態的晶片色：已啟用＝主色邊＋tertiary 底（同 DAG 進行中節點）；關閉＝灰；無金鑰不可用＝告警底（同 BridgeChip，字用 text 色以過 WCAG AA）。 */
+const CAPABILITY_TONE_CLASS: Record<EngineCapabilityTone, string> = {
+  on: "border-wg-primary bg-wg-tertiary text-wg-text",
+  off: "border-wg-line bg-wg-base text-wg-muted",
+  unavailable: "border-wg-alert-border bg-wg-alert-bg text-wg-text",
+};
+
+/**
+ * 引擎能力晶片「自動突變」「自演化」（契約 §4.2 E-21，v1.3 D-11；設計稿沒畫）：每枚三態＝已啟用／關閉／無金鑰不可用，
+ * 值取自 `ExecutionRunResponse.engineCapabilities`（批次建立時凍結，切換批次後取該批次的值）。
+ * 欄位缺席或為 null（V10 之前的批次）整列不顯示——不猜測；文字、色調、tooltip 由 lib/domain/status.ts 的字典決定。
+ * 🔴 自演化的「已啟用」晶片文字帶「（僅提案）」、tooltip 說明不自動套用，不能讓人誤以為引擎會自己改自己。
+ */
+export function EngineCapabilityChips({ capabilities, className }: { capabilities: EngineCapabilities | null | undefined; className?: string }): ReactNode {
+  if (!capabilities) return null;
+  const chips = ENGINE_CAPABILITY_KEYS.flatMap((key) => {
+    const state = capabilities[key];
+    return state ? [{ key, state, view: engineCapabilityView(key, state) }] : [];
+  });
+  if (chips.length === 0) return null;
+  return (
+    <div role="group" aria-label="引擎能力" data-testid="engine-capabilities" className={cn("flex flex-wrap items-center gap-2", className)}>
+      {chips.map(({ key, state, view }) => (
+        <span
+          key={key}
+          data-testid="engine-capability"
+          data-capability={key}
+          data-state={state}
+          title={view.hint || undefined}
+          className={cn("inline-flex items-center rounded-sm border px-[7px] py-0.5 text-xs font-semibold", CAPABILITY_TONE_CLASS[view.tone])}
+        >
+          {view.text}
+        </span>
+      ))}
+    </div>
   );
 }
 

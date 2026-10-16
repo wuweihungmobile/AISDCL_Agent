@@ -54,7 +54,16 @@ const CATALOG: Record<Cat, Row[]> = {
     ["topP", "FLOAT", "0.9", C, { min: 0, max: 1, impactNote: "只影響匯入解析（路徑 B）" }],
     ["timeout", "INTEGER", "120", E, { min: 1, max: 600, impactNote: "引擎 minimax.timeout_seconds 與匯入解析逾時；測試連線上限 10 秒；經 nginx 部署時建議 ≤ 150" }],
     ["rateLimitPerMinute", "INTEGER", "60", S, { min: 1, max: 10000, impactNote: "目前不影響任何呼叫" }],
-    ["enableKernelBrain", "BOOLEAN", "false", E, { impactNote: "開啟後引擎的 Brain 可改寫失敗步驟並可能觸發升級；新批次起生效" }],
+    [
+      "enableKernelBrain",
+      "BOOLEAN",
+      "false",
+      E,
+      {
+        impactNote:
+          "有金鑰時，引擎的 Brain 會在步驟失敗且尚有重試次數時先改寫 prompt 再重試；Brain 呼叫失敗則該步驟直接升級。與 agent.enableAutoMutation 及自治等級 ≥6 共用引擎鍵 minimax.enable_kernel_brain（任一為真即開）；沒有金鑰時 Console 不送（送了引擎會啟動失敗）；新批次起生效",
+      },
+    ],
   ],
   agent: [
     ["defaultAutonomyLevel", "INTEGER", "3", C, { min: 1, max: 10, impactNote: "只改之後匯入與執行表單的預設值，不改動既有專案" }],
@@ -64,8 +73,27 @@ const CATALOG: Record<Cat, Row[]> = {
     ["retryBackoffMs", "INTEGER", "5000", S, { min: 0, max: 3600000, impactNote: "引擎無對應欄位" }],
     ["retryBackoffMultiplier", "FLOAT", "2.0", S, { min: 1, max: 10, impactNote: "引擎無對應欄位" }],
     ["checkpointInterval", "INTEGER", "5", S, { min: 1, max: 1000, impactNote: "Bridge 於每個步驟邊界自行記錄歷史快照，此值不生效" }],
-    ["enableAutoMutation", "BOOLEAN", "false", U, { impactNote: "引擎沒有對應的設定鍵，Console 不送任何引擎設定" }],
-    ["enableSelfEvolution", "BOOLEAN", "false", U, { impactNote: "引擎的 AI 演化提案只由 MINIMAX_API_KEY 的有無決定，與本鍵無關" }],
+    // v1.3（D-11；契約附錄 C.2 逐字）：enableAutoMutation 由 UNVERIFIED 改 ENGINE、enableSelfEvolution 改 STORED_ONLY
+    [
+      "enableAutoMutation",
+      "BOOLEAN",
+      "false",
+      E,
+      {
+        impactNote:
+          "對映引擎 minimax.enable_kernel_brain（Brain 逐步校正：失敗步驟先改寫 prompt 再重試），與 model.enableKernelBrain 任一為真即開；自治等級 ≥6 一律視為開啟。需要 model.apiKey：沒有金鑰時不送，批次回報 UNAVAILABLE_NO_API_KEY；新批次起生效（§3.4.2）",
+      },
+    ],
+    [
+      "enableSelfEvolution",
+      "BOOLEAN",
+      "false",
+      S,
+      {
+        impactNote:
+          "引擎沒有演化開關：有金鑰時失敗型 ESCALATION 一律由 Brain 產生演化提案，只寫引擎日誌、不套用也不重載（max_evolutions／require_evolution_signoff 在引擎執行路徑上沒有讀者，Console 不送）。本鍵只影響沒有金鑰時批次回報 OFF 或 UNAVAILABLE_NO_API_KEY（§3.4.2；E2E 以 model.apiKey 為空關閉演化，§5.0.2）",
+      },
+    ],
   ],
   execution: [
     ["globalTokenBudget", "LONG", "1000000", C, { min: 1, max: 1000000000000, impactNote: "新批次的預設 Token 預算；不改動既有批次" }],

@@ -239,6 +239,11 @@ export interface paths {
          *
          *     成功：建立 `execution_runs`（`run_number` 同專案遞增）→ Bridge `POST /autoclaude/runs` → 專案 `EXECUTING`、
          *     範圍內任務 `QUEUED`、啟動事件消費者。`autonomyLevel`／`tokenBudget`／`scope` 皆可省略（預設見 schema）。
+         *
+         *     **v1.3（D-11）**：201 的 `ExecutionRunResponse` 帶 `engineCapabilities`——Console 在 spawn 時依自治等級、
+         *     `agent.enableAutoMutation`／`agent.enableSelfEvolution`、`model.enableKernelBrain` 與 `model.apiKey` 有無，決定送進引擎的設定
+         *     （`minimax.enable_kernel_brain` 是唯一會依等級變動的引擎鍵；沒有金鑰一律不送，否則引擎啟動失敗），並如實標示能力狀態
+         *     （決策表見 Markdown 契約 §3.4.2）。等級 6～10 沒有額外的驗證項，沒有金鑰也不報錯。
          */
         post: operations["executeProject"];
         delete?: never;
@@ -282,6 +287,9 @@ export interface paths {
          * 查詢執行狀態
          * @description 合併 DB 列與 Bridge `GET /autoclaude/runs/{id}`。**Bridge 不可達時仍回 200**，`bridge.connected=false`，
          *     進度欄位退回 DB 衍生值（`currentStep=null`），不回 5xx。`pendingReviews` 只含 `PENDING`。
+         *
+         *     **v1.3（D-12）**：`bridge.resources` 帶引擎行程樹的資源取樣（CPU／記憶體／行程數；Bridge 規格見 Markdown 契約 §3.1.2），
+         *     行程不存活（含暫停中與終態）、尚無樣本、樣本過期或 Bridge 不可達時為 null。`engineCapabilities` 讀自 DB（建立時凍結）。
          */
         get: operations["getExecution"];
         put?: never;
@@ -671,6 +679,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/engines/sdd": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * AISDLC_SDD 引擎狀態（只讀；v1.4 補充端點，D-16）
+         * @description Console 對 FSM 狀態的唯一消費點（監控頁「AISDLC_SDD 引擎」卡；PRD §0.3：FSM-STATE 是 Console 對 SDD 的遙測來源）。
+         *     依序呼叫 Bridge 的 `GET /sdd/version`、`GET /sdd/fsm`，帶了 `project` 時再呼叫 `GET /sdd/fsm/{project}`；三者全是唯讀，
+         *     console-api 不寫 SDD 目錄、不寫任何 FSM-STATE 檔（ADR-001 D22）。每個呼叫 2 秒／3 秒逾時、不重試、失敗即短路。
+         *     **引擎不可用也回 200**（沿用「Bridge 不可達回 200」的慣例）：`available=false` 並以 `reason` 說明
+         *     （`bridge_unreachable`／`sdd_unavailable`／`bridge_error`）；帶了 `project` 而找不到或讀不動時 `available` 仍為 true、
+         *     `fsm=null`、`reason` 為 `fsm_not_found`／`fsm_state_unreadable`。`reason` 是**回應欄位**，不是 `ApiError.reason`
+         *     （Markdown 契約附錄 B.4）。`project` 省略 → `fsm=null`（不帶 `reason`），由前端依 `projects` 選一個再帶 `project` 重取。
+         *     FSM 狀態檔只在 SDD runtime 執行時才變動，前端 30 秒輪詢一次，不走 SSE（ADR-001 D22）。
+         *     `build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore`），乾淨 clone 沒有 FSM 狀態檔：`available=true`、`projects=[]` 是正常狀態。
+         *     （Markdown 契約 §1.7.1、§3.1.3）
+         */
+        get: operations["getSddEngineStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signoffs/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 待簽核的草案清單（跨專案；v1.4 補充端點，D-18）
+         * @description 列出待 signoff 的草案：專案、目標、任務與待審批的匯入記錄四種，**判準與通知摘要的 `pendingSignoffs` 完全相同**
+         *     （PROJECT：`signed_off=false` 且未軟刪；GOAL／TASK：另要求所屬專案（與目標）未軟刪；IMPORT：`PARSED`／`REVIEWING` 且未 signoff），
+         *     計數與清單的述詞由同一處產生，不變量：`counts.total` 恆等於 `GET /notifications/summary` 的 `pendingSignoffs`。
+         *     排序 `created_at` 升冪（同值以 `id` 升冪）；`limit` 只截斷 `items`（預設 50、上限 200），不影響 `counts`。
+         *     `IMPORT` 項的 `projectId`／`projectName`／`parentId` 為 null（匯入記錄在 `confirm` 之前還沒有專案）。
+         *     供儀表板「待人工審批」卡（Markdown 契約 §4.5 G-10）；取代前端用專案與目標 API 另組的近似清單（完整性審查 I-05）。
+         *     （Markdown 契約 §1.8.1）
+         */
+        get: operations["getPendingSignoffs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stream/executions/{runId}/logs": {
         parameters: {
             query?: never;
@@ -1045,6 +1108,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 登出並撤銷 refresh token（v1.4 補充端點，D-19；免認證）
+         * @description 登出時撤銷該 refresh token 的 `jti`（撤銷名單：Redis 優先，不在線降級為單實例記憶體並記 WARN；ADR-001 D16、D23）。
+         *     免認證，與 `login`／`refresh` 同：登出時 access token 可能已過期，仍必須能撤銷 refresh token。
+         *     **請求格式合法就一律 204**：refresh token 有效 → 撤銷；無效、過期、已被撤銷、或是 access token → 同樣 204、不撤銷任何東西
+         *     （不讓這支端點變成探測 token 有效性的管道）。不撤銷 access token（無狀態，最長 30 分鐘後自然失效）。
+         *     撤銷後再以該 refresh token 呼叫 `POST /auth/refresh` → 401 `INVALID_REFRESH_TOKEN`（客戶端分類為 `invalid`）。
+         *     前端 `logout()` 先 fire-and-forget 呼叫本端點，失敗不阻擋本機登出。
+         *     （Markdown 契約 §1.9.1、§1.9.2、§2.8 第 10 點）
+         */
+        post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/deep": {
         parameters: {
             query?: never;
@@ -1055,10 +1144,16 @@ export interface paths {
         /**
          * Bridge 深度探針（v1.2 補充端點；免認證）
          * @description **這是 Engine Bridge 自己的端點**（不是 console-api 的；為讓 v1.2 的新端點在機器可讀版也有紀錄而列在這裡，`servers` 已覆寫為 Bridge）。
-         *     原 `GET /health`（淺探測）不動；console-api 的探測環仍打 `/health`，本端點只供容器編排的 healthcheck（docker compose 的 bridge 服務）。
+         *     原 `GET /health`（淺探測，`status` 恆為 `ok`）不動；**v1.4（D-17）起 console-api 的探測環與容器編排的 healthcheck（docker compose 的 bridge 服務）都打本端點**
+         *     （`autoclaude.healthCheckPath` 預設 `/health/deep`；探測的讀取逾時 3→8 秒，因為 `git --version` 自己最多等 5 秒）。
          *     檢查：① `git`——subprocess 執行 `git --version`，逾時 5 秒；② `autoclaude`——`import autoclaude`；③ `workspace`——在
-         *     `ENGINE_WORKSPACE` 內建立並刪除暫存檔；④ `db`——只有設了 `BRIDGE_DB_DSN` 才 ping，沒設時 `ok` 為 `null`（不算失敗）。
-         *     全部通過 → 200 `status=ok`；任一失敗 → 503 `status=degraded`，頂層 `reason` 為失敗項原因（多項以「；」連接），失敗項的 `ok:false` 並各附 `reason`。
+         *     `ENGINE_WORKSPACE` 內建立並刪除暫存檔；④ `db`——只有設了 `BRIDGE_DB_DSN` 才 ping，沒設時 `ok` 為 `null`（不算失敗）；
+         *     ⑤ `sdd`（v1.4，D-17）——AISDLC_SDD 樹是否可用：`ok:null`（沒有可用的 SDD 目錄：`SDD_ROOT` 未設且預設位置也找不到；不算失敗）、
+         *     `ok:true`（目錄存在，**且**有 `build/reports/fsm` **或**有版本入口文件 `AISDLC_SDD_INIT.md`；`latest`＝目錄名）、
+         *     `ok:false`（目錄不存在或不是目錄；或目錄在但兩者都沒有——空的或掛錯的唯讀掛載）。
+         *     🔴 與主控任務書字面（「`build/reports/fsm` 不存在 → false」）不同：`build/reports/` 被 git 忽略，乾淨 clone 沒有 fsm 目錄，
+         *     照字面判會讓全棧起不來（Markdown 契約 §3.1.1、§6.7.3 Q1）。
+         *     全部通過 → 200 `status=ok`；任一失敗 → 503 `status=degraded`，頂層 `reason` 為各失敗項的「名稱: 原因」（多項以「；」連接），失敗項的 `ok:false` 並各附 `reason`。
          *     Bridge 映像須安裝 `git` 與 `ca-certificates`（QA DEF-AC-003，P1）。請求可帶 `X-Trace-Id`；回應一律帶同名標頭（缺則 Bridge 自產 uuid4，C-12）。
          *     （Markdown 契約 §3.1.1）
          */
@@ -1476,7 +1571,11 @@ export interface components {
          *       },
          *       "totalTokensUsed": 0,
          *       "tokenBudget": 100000,
-         *       "startedAt": "2026-10-15T08:30:12Z"
+         *       "startedAt": "2026-10-15T08:30:12Z",
+         *       "engineCapabilities": {
+         *         "autoMutation": "OFF",
+         *         "selfEvolution": "OFF"
+         *       }
          *     }
          */
         ExecutionRunResponse: {
@@ -1505,6 +1604,68 @@ export interface components {
             startedAt: string;
             /** Format: date-time */
             completedAt?: string;
+            /**
+             * @description v1.3（D-11）：該批次 spawn 時 Console 實際送進引擎的能力狀態（Markdown 契約 §3.4.2 的決策表）。落庫於
+             *     `execution_runs.engine_capabilities`（V10），建立時凍結，resume／restore 不更新。V10 之前建立的批次缺席或為 null
+             *     （不得猜測）。execute 的 201、`GET /executions/{runId}`、pause／resume／cancel／restore 的快照同值；
+             *     `ExecutionRunSummaryResponse`（批次列表）不帶它。
+             */
+            engineCapabilities?: components["schemas"]["EngineCapabilities"] | null;
+        };
+        /**
+         * @description 該批次 spawn 時 Console 送進引擎的能力狀態（v1.3，D-11；決策表見 Markdown 契約 §3.4.2）。
+         *     `ENABLED`＝已送進引擎且引擎會做；`OFF`＝沒有人要求（或有金鑰且明確送 `enable_kernel_brain=false`）；
+         *     `UNAVAILABLE_NO_API_KEY`＝有人要求（旗標或自治等級）但 Console 沒有金鑰可送，Console 不送 `minimax.*`
+         *     （送了引擎會啟動失敗），批次照常執行，只是沒有 Brain。
+         * @enum {string}
+         */
+        EngineCapabilityState: "ENABLED" | "OFF" | "UNAVAILABLE_NO_API_KEY";
+        /**
+         * @description v1.3（D-11）：兩個欄位描述的是「Console 送進引擎的、與引擎因此會做的」，不是使用者的設定。
+         *     `autoMutation` 對映引擎鍵 `minimax.enable_kernel_brain`（與 `model.enableKernelBrain` 任一為真即開；自治等級 ≥ 6 視為要求）：
+         *     `ENABLED`＝Brain 逐步校正——失敗步驟尚有重試次數時先由 Brain 改寫 prompt 再重試，Brain 呼叫失敗則該步驟直接升級；
+         *     實務上只有 prompt 改寫，不含步驟變異。
+         *     `selfEvolution`：引擎沒有演化開關，**有金鑰就是 `ENABLED`，與旗標和等級都無關**——失敗型 ESCALATION 時由 Brain 產生演化「提案」，
+         *     只寫引擎日誌，不套用、不重載、不產生 `evolved_*.yaml`；沒有金鑰時，有人要求（`agent.enableSelfEvolution` 或等級 ≥ 7）
+         *     為 `UNAVAILABLE_NO_API_KEY`，否則 `OFF`。
+         * @example {
+         *       "autoMutation": "ENABLED",
+         *       "selfEvolution": "ENABLED"
+         *     }
+         */
+        EngineCapabilities: {
+            autoMutation: components["schemas"]["EngineCapabilityState"];
+            selfEvolution: components["schemas"]["EngineCapabilityState"];
+        };
+        /**
+         * @description 引擎行程樹的資源取樣（v1.3，D-12；Bridge `RunStateOut.resources` 的投影，規格見 Markdown 契約 §3.1.2）：
+         *     Bridge 背景每 5 秒以 psutil 取樣一次，請求路徑只回最近一筆；不含 pid、命令列與環境變數。
+         *     「沒有資料」不用本物件表達，而是 `BridgeInfo.resources` 為 null。
+         * @example {
+         *       "cpuPercent": 12.3,
+         *       "memoryBytes": 361758720,
+         *       "processCount": 3,
+         *       "sampledAt": "2026-10-16T03:21:45.123456+00:00"
+         *     }
+         */
+        ResourceUsage: {
+            /** @description 整機正規化的 CPU 百分比＝行程樹各行程 `cpu_percent` 總和 ÷ 邏輯核心數，小數 1 位；取樣器第一筆可為 0.0 */
+            cpuPercent: number;
+            /**
+             * Format: int64
+             * @description 行程樹各行程 RSS 的總和（bytes）
+             */
+            memoryBytes: number;
+            /**
+             * Format: int32
+             * @description 取樣當下仍存活的行程數（含引擎根行程）
+             */
+            processCount: number;
+            /**
+             * Format: date-time
+             * @description 取樣時間（ISO-8601 含 offset；Bridge 一律 UTC，值原樣帶出）
+             */
+            sampledAt: string;
         };
         /** @description 批次列表（含 US-M-06 批次比較所需欄位） */
         ExecutionRunSummaryResponse: {
@@ -1584,6 +1745,13 @@ export interface components {
             runKnown?: boolean;
             /** Format: date-time */
             checkedAt: string;
+            /**
+             * @description v1.3（D-12；US-M-10）：引擎行程樹的資源取樣（Bridge `GET /autoclaude/runs/{id}` 回應的 `resources`，規格見 Markdown 契約 §3.1.2）。
+             *     引擎行程不存活（尚未啟動、暫停中、終態）、還沒有第一筆樣本、最近一筆樣本已超過 15 秒、Bridge 不可達（`connected=false`）、
+             *     `runKnown=false`，或 Bridge 的回應沒有這個鍵（舊版 Bridge）時為 null 或缺席。
+             *     只有 `GET /executions/{runId}`（`ExecutionRunDetailResponse.bridge`）帶 `bridge` 物件；pause／resume／cancel／restore 的快照沒有。
+             */
+            resources?: components["schemas"]["ResourceUsage"] | null;
         };
         /**
          * @description 與 V3 migration 的 CHECK 一致（不擴充）
@@ -1878,13 +2046,15 @@ export interface components {
             /** Format: int32 */
             retried: number;
         };
-        /** @description 深度探針單一檢查項的結果（Bridge 端；v1.2，C-2） */
+        /** @description 深度探針單一檢查項的結果（Bridge 端；v1.2，C-2；v1.4 加 `sdd` 與 `latest`） */
         BridgeHealthCheck: {
-            /** @description 通過為 true、失敗為 false；`null`＝未做（只有 `db` 在沒設 `BRIDGE_DB_DSN` 時） */
+            /** @description 通過為 true、失敗為 false；`null`＝未做（`db` 在沒設 `BRIDGE_DB_DSN` 時；`sdd` 在沒有可用的 SDD 目錄時） */
             ok: boolean | null;
             /** @description 成功時的版本字串（`git` 為 `git --version` 的輸出、`autoclaude` 為套件版本） */
             version?: string;
-            /** @description 失敗時的簡短原因 */
+            /** @description 只有 `sdd` 檢查有（v1.4）：SDD 版本目錄名（例 `AISDLC_SDD_v0.30`）；沒有可用目錄時為 null */
+            latest?: string | null;
+            /** @description 失敗時的簡短原因（`sdd` 的 `ok:null` 也帶一句說明，不算失敗） */
             reason?: string;
         };
         /**
@@ -1901,6 +2071,7 @@ export interface components {
                 autoclaude: components["schemas"]["BridgeHealthCheck"];
                 workspace: components["schemas"]["BridgeHealthCheck"];
                 db: components["schemas"]["BridgeHealthCheck"];
+                sdd: components["schemas"]["BridgeHealthCheck"];
             };
         };
         /**
@@ -2008,13 +2179,190 @@ export interface components {
             pendingReviews: number;
             /** Format: int32 */
             unacknowledgedAlerts: number;
-            /** @description 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null。W3-B1 階段恆為 null（探測環由 W3-B2 建立，B2 在同一支 controller 補實值；AR-08） */
+            /** @description 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null。W3-B1 階段恆為 null（探測環由 W3-B2 建立，B2 在同一支 controller 補實值；AR-08）。**v1.4（D-17）**：探測預設打 `/health/deep`，2xx 為成功；Bridge 行程可達但引擎自檢未通過（503）也是 `false`，摘要不區分「連不上」與「連得上但引擎不可用」 */
             bridgeConnected?: boolean | null;
             /**
              * Format: date-time
              * @description 最近一次 Bridge 健康探測的時間；尚未探測過（含 W3-B1 階段）為 null
              */
             bridgeCheckedAt?: string | null;
+        };
+        /**
+         * @description Bridge `GET /sdd/version` 的投影（v1.4，D-16；Markdown 契約 §1.7.1）。`root` 是 **Bridge 看到的**目錄路徑
+         *     （Docker 下是容器內路徑；開發機上是主機絕對路徑），僅供顯示，前端預設只秀 `latest`
+         */
+        SddVersion: {
+            /** @description SDD 版本目錄名（例 `AISDLC_SDD_v0.30`） */
+            latest: string;
+            /** @description Bridge 端的目錄路徑（僅供顯示） */
+            root: string;
+        };
+        /**
+         * @description FSM 專案清單的一筆（Bridge `GET /sdd/fsm` 的 `projects[]` 投影，鍵轉 camelCase；v1.4，D-16）。
+         *     `project` 就是 `GET /engines/sdd?project=` 吃的鍵，每一筆都點得進去
+         */
+        SddProjectEntry: {
+            /** @description 檔名 `FSM-STATE-<project>.yaml` 中的專案名 */
+            project: string;
+            /** @description 檔名（`FSM-STATE-<project>.yaml`） */
+            source: string;
+            /** @description 檔內 `fsm_state.current_state`；缺則 null */
+            currentState: string | null;
+            /** @description 檔內 `fsm_state.updated_at`（ISO-8601 字串，原樣、不轉型）；缺則 null */
+            updatedAt: string | null;
+        };
+        /**
+         * @description 待人工確認（v1.4，D-16；Markdown 契約 §3.1.3）。現行 FSM-STATE 的 `human_pending_tracking` 是**單一映射**
+         *     （`entered_at` 在進入 `HUMAN_PENDING` 時蓋時戳、離開時清成 null）：`entered_at` 有值 → `count=1`、`items=[該映射原樣]`；
+         *     否則 `count=0`、`items=[]`；若它是 list（日後 schema 改成多筆），`count`＝筆數、`items`＝尾 5 筆原樣。
+         *     所以 `count` 實務上只會是 0 或 1。`items` 的內容原樣＝FSM 檔寫什麼就是什麼（保留 snake_case 鍵）
+         */
+        SddHumanPending: {
+            /** Format: int32 */
+            count: number;
+            items: {
+                [key: string]: unknown;
+            }[];
+        };
+        /**
+         * @description 重試歷史（v1.4，D-16；Markdown 契約 §3.1.3）。現行 FSM-STATE 的 `retry_history` 是**以重試閘為鍵的映射**
+         *     （`SCG_VALIDATION`／`PR_REVIEW`／`RTM_VERIFY`，各有 `current_count`、`max_limit`、`history[]`，每筆 `{attempt,date,failure_reason,scg_gate}`）：
+         *     `count`＝各閘 `history` 筆數的總和；`last`＝全部筆中 `date` 最晚者（原樣，**另加 `gate` 欄**＝所屬的重試閘名）；
+         *     沒有任何一筆為 `{count: 0, last: null}`；若它是 list，`count`＝筆數、`last`＝尾 1 筆
+         */
+        SddRetryHistory: {
+            /** Format: int32 */
+            count: number;
+            last: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * @description 單一 FSM 專案的狀態（Bridge `GET /sdd/fsm/{project}` 的投影；v1.4，D-16）。**最外層鍵轉 camelCase，巢狀內容原樣**
+         *     （`frozenStages[]`、`decisionTrace[]`、`humanPending.items[]`、`retryHistory.last`、`rtmCoverage` 保留 FSM 檔的 snake_case 鍵），
+         *     使「FSM 檔 ↔ API ↔ 畫面」可逐值比對（NFR-OBS-01）。唯讀：Console 不寫 FSM-STATE（ADR-001 D22）
+         */
+        SddFsmState: {
+            project: string;
+            /** @description `current_state`（例 `INIT`、`HUMAN_PENDING`、`ESCALATION`） */
+            currentState?: string | null;
+            /**
+             * Format: int32
+             * @description `current_sprint`
+             */
+            currentSprint?: number | null;
+            /** @description `session_id` */
+            sessionId?: string | null;
+            /** @description `updated_at`（ISO-8601 字串，原樣、不轉型） */
+            updatedAt?: string | null;
+            /** @description `frozen_stages`（原樣；缺則空陣列） */
+            frozenStages: {
+                [key: string]: unknown;
+            }[];
+            /** @description `decision_trace` 的**尾 5 筆**（舊→新，原樣；每筆 `{ts, from, to, reason, spec_refs, agents_consulted, trigger}`） */
+            decisionTrace: {
+                [key: string]: unknown;
+            }[];
+            /** @description 檔名（`FSM-STATE-<project>.yaml`） */
+            source: string;
+            humanPending: components["schemas"]["SddHumanPending"];
+            retryHistory: components["schemas"]["SddRetryHistory"];
+            /**
+             * @description `fsm_state.rtm_coverage`：**有就原樣帶出，沒有就 null**。現行 FSM-STATE schema 沒有任何 RTM 覆蓋數值的鍵，
+             *     所以現況恆為 null（保留位；Console 卡片不顯示它）
+             */
+            rtmCoverage?: {
+                [key: string]: unknown;
+            } | number | null;
+        };
+        /**
+         * @description `SddEngineStatusResponse.reason` 的值域（v1.4，D-16）。**回應欄位的值，不是 `ApiError.reason`**（Markdown 契約 §0.3 第 7 點、附錄 B.4）：
+         *     `bridge_unreachable`／`sdd_unavailable`／`bridge_error` 時 `available=false`；
+         *     `fsm_not_found`／`fsm_state_unreadable` 時 `available=true`、`fsm=null`
+         * @enum {string}
+         */
+        SddEngineReason: "bridge_unreachable" | "sdd_unavailable" | "bridge_error" | "fsm_not_found" | "fsm_state_unreadable";
+        /**
+         * @description `GET /api/v1/engines/sdd` 的 `data`（v1.4，D-16；Markdown 契約 §1.7.1）。**引擎不可用也回 200**：
+         *     回報的是「引擎現在的狀態」，不是「這次呼叫成不成功」。`projects` 的順序＝Bridge 清單順序（專案名不分大小寫升冪）；
+         *     開發機上會含 SDD 測試套件留下的 `test-<數字>` 專案，照列
+         */
+        SddEngineStatusResponse: {
+            /** @description Bridge 的 `GET /sdd/version` 與 `GET /sdd/fsm` 都成功為 true；任一失敗為 false */
+            available: boolean;
+            /** @description 見 `SddEngineReason`；`available=true` 且沒有問題時為 null */
+            reason: components["schemas"]["SddEngineReason"] | null;
+            /** @description `GET /sdd/version` 失敗時為 null */
+            version: components["schemas"]["SddVersion"] | null;
+            /** @description `available=false` 時為空陣列；`available=true` 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態） */
+            projects: components["schemas"]["SddProjectEntry"][];
+            /** @description 帶了 `project` 且取得時有值；未帶 `project`、專案不存在、讀不動或引擎不可用時為 null */
+            fsm: components["schemas"]["SddFsmState"] | null;
+            /**
+             * Format: date-time
+             * @description console-api 處理這次請求的時間（UTC）
+             */
+            checkedAt: string;
+        };
+        /**
+         * @description 待簽核草案的種類（v1.4，D-18）
+         * @enum {string}
+         */
+        PendingSignoffKind: "PROJECT" | "GOAL" | "TASK" | "IMPORT";
+        /**
+         * @description 四種草案各自的待簽核數與總和（v1.4，D-18）。**`total` 恆等於 `GET /notifications/summary` 的 `pendingSignoffs`**
+         *     （同一組述詞、同一判準；`limit` 不影響本物件）
+         */
+        PendingSignoffCounts: {
+            /** Format: int32 */
+            projects: number;
+            /** Format: int32 */
+            goals: number;
+            /** Format: int32 */
+            tasks: number;
+            /** Format: int32 */
+            imports: number;
+            /** Format: int32 */
+            total: number;
+        };
+        /**
+         * @description 待簽核草案清單的一筆（v1.4，D-18）。`id` 也是對應 signoff 端點的路徑參數（`/projects｜goals｜tasks/{id}/signoff`、`/import/{id}/signoff`）。
+         *     **`IMPORT` 項的 `projectId`／`projectName`／`parentId` 為 null**（匯入記錄在 `confirm` 之前還沒有專案）
+         */
+        PendingSignoffItem: {
+            kind: components["schemas"]["PendingSignoffKind"];
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description 所屬專案；`PROJECT` 項＝自己的 id；`IMPORT` 項為 null
+             */
+            projectId: string | null;
+            /** @description 所屬專案名稱；`IMPORT` 項為 null */
+            projectName: string | null;
+            /**
+             * Format: uuid
+             * @description `PROJECT`＝null；`GOAL`＝專案 id；`TASK`＝目標 id；`IMPORT`＝null
+             */
+            parentId: string | null;
+            /** @description `PROJECT`／`GOAL`／`TASK`＝`name`；`IMPORT`＝`source_file_name`，沒有檔名（貼上文字）時為「貼上文字」 */
+            title: string;
+            /**
+             * Format: date-time
+             * @description 該列的 `created_at`（UTC）；清單依它升冪排序（同值以 `id`）
+             */
+            createdAt: string;
+        };
+        /** @description `GET /api/v1/signoffs/pending` 的 `data`（v1.4，D-18；Markdown 契約 §1.8.1） */
+        PendingSignoffsResponse: {
+            counts: components["schemas"]["PendingSignoffCounts"];
+            /** @description 依 `createdAt` 升冪；最多 `limit` 筆（預設 50、上限 200） */
+            items: components["schemas"]["PendingSignoffItem"][];
+        };
+        /** @description `POST /api/v1/auth/logout` 的請求本文（v1.4，D-19） */
+        LogoutRequest: {
+            /** @description 要撤銷的 refresh token（目前 session 的那一個） */
+            refreshToken: string;
         };
         /** @description SSE `event: log` 的 data（單行 JSON） */
         LogEventData: {
@@ -2182,7 +2530,8 @@ export interface components {
         /**
          * @description 參數對引擎的實際效果（誠實標示，Architecture §11.4）：
          *     ENGINE＝物化進 config_overrides／env／playbook；CONSOLE＝Console 內部使用；
-         *     STORED_ONLY＝只儲存、不影響引擎（引擎無對應欄位）；UNVERIFIED＝可能對映，尚未驗證。
+         *     STORED_ONLY＝只儲存、不影響引擎（引擎無對應欄位，或有欄位但已驗證它在引擎執行路徑上沒有讀者，例：`agent.enableSelfEvolution`）；
+         *     UNVERIFIED＝可能對映，尚未驗證（v1.3 起只剩 `sdd.specFormat`／`workflowEngine`／`validationLevel`）。
          * @enum {string}
          */
         ConfigEffect: "ENGINE" | "CONSOLE" | "STORED_ONLY" | "UNVERIFIED";
@@ -2619,6 +2968,24 @@ export interface components {
             code: number;
             message: string;
             data: components["schemas"]["PageDataConfigHistoryResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        ApiResultSddEngineStatusResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["SddEngineStatusResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        ApiResultPendingSignoffsResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["PendingSignoffsResponse"];
             /** Format: date-time */
             timestamp: string;
             traceId: string;
@@ -3748,6 +4115,74 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
         };
     };
+    getSddEngineStatus: {
+        parameters: {
+            query?: {
+                /** @description FSM 專案名（`FSM-STATE-<project>.yaml` 的 `<project>`）；須符合 `^[A-Za-z0-9._-]{1,128}$`，不合 → 400。省略 → `fsm=null` */
+                project?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK（含「引擎不可用」的情形；以 `available`／`reason` 判斷） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSddEngineStatusResponse"];
+                };
+            };
+            /** @description `project` 不符 `^[A-Za-z0-9._-]{1,128}$`（`errors[0].field=project`） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getPendingSignoffs: {
+        parameters: {
+            query?: {
+                /** @description 清單最多回幾筆（預設 50，範圍 1～200）；不影響 `counts` */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultPendingSignoffsResponse"];
+                };
+            };
+            /** @description `limit` 非整數或不在 1～200（`errors[0].field=limit`） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
     streamExecutionLogs: {
         parameters: {
             query?: {
@@ -4296,6 +4731,30 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    logout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogoutRequest"];
+            };
+        };
+        responses: {
+            /** @description 已處理（無內容；不論 token 是否有效） */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             429: components["responses"]["TooManyRequests"];
         };
     };

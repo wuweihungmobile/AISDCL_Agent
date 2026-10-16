@@ -44,6 +44,8 @@ async function open(page: Page, opts: OpenOptions = {}) {
 }
 
 const tone = (page: Page, taskIdx: number) => page.getByTestId(`dag-task-${TASKS[taskIdx].id}`);
+/** 批次下拉的選項值是批次 id（selectOption 不接受正規表示式）。 */
+const runIdOf = (engine: Engine, runNumber: number) => engine.runs.find((r) => r.runNumber === runNumber)?.id as string;
 const executeCall = (calls: Array<{ method: string; path: string; body: unknown }>) => calls.find((c) => c.method === "POST" && c.path === EXECUTE_API);
 
 /**
@@ -620,6 +622,170 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
     await expect(page.getByTestId("log-line").filter({ hasText: "開始：設定" })).toHaveCount(1);
     expect(engine.sseConnections[0]?.lastEventId).toBeNull();
     await expect(page.getByTestId("control-pause")).toBeEnabled();
+    expectClean(errors, unhandled);
+  });
+
+  test("引擎能力晶片（契約 E-21，v1.3 D-11）：有金鑰、Level 7 啟動 → 兩枚都「已啟用」；自演化寫明「僅提案」、tooltip 說明不自動套用；axe 零違規", async ({ page }) => {
+    const { calls, errors, unhandled } = await open(page);
+    await expect(page.getByTestId("engine-capabilities")).toHaveCount(0); // 還沒有批次：沒有晶片
+    await page.getByTestId("exec-level").selectOption("7");
+    await expect(page.getByTestId("autonomy-hint")).toContainText("審核閘行為同 Level 5");
+    await page.getByTestId("control-start").click();
+    await expect(page.getByTestId("run-number")).toHaveText("Run #1");
+    expect(executeCall(calls)?.body).toMatchObject({ autonomyLevel: 7 });
+
+    const group = page.getByRole("group", { name: "引擎能力" });
+    await expect(group.getByTestId("engine-capability")).toHaveText(["自動突變：已啟用", "自演化（僅提案）：已啟用"]);
+    const mutation = group.locator('[data-capability="autoMutation"]');
+    const evolution = group.locator('[data-capability="selfEvolution"]');
+    await expect(mutation).toHaveAttribute("data-state", "ENABLED");
+    await expect(mutation).toHaveAttribute("title", /Brain 逐步校正：失敗步驟先由 Brain 改寫再重試/);
+    await expect(evolution).toHaveAttribute("data-state", "ENABLED");
+    await expect(evolution).toHaveAttribute("title", /僅提案、不自動套用/);
+    await expectNoA11yViolations(page, "執行頁（引擎能力晶片：已啟用）");
+    expectClean(errors, unhandled);
+  });
+
+  test("引擎能力晶片：各批次建立時凍結——有金鑰的 Level 4 批次是「自動突變關閉」「自演化（僅提案）已啟用」，Level 7 批次兩枚都已啟用", async ({ page }) => {
+    const { engine, errors, unhandled } = await open(page, {
+      seed: (e) => {
+        e.begin(4);
+        for (let i = 0; i < 3; i++) {
+          e.startNext();
+          e.finishCurrent();
+        }
+        e.begin(7);
+        e.startNext();
+      },
+    });
+    const chips = page.getByTestId("engine-capability");
+    await expect(page.getByTestId("run-number")).toHaveText("Run #2"); // 預設看最新批次
+    await expect(chips).toHaveText(["自動突變：已啟用", "自演化（僅提案）：已啟用"]);
+
+    await page.getByTestId("run-select").selectOption(runIdOf(engine, 1));
+    await expect(page.getByTestId("run-number")).toHaveText("Run #1");
+    await expect(chips).toHaveText(["自動突變：關閉", "自演化（僅提案）：已啟用"]); // 等級 4、有金鑰：自演化沒有開關，有金鑰就是只提案
+    await expect(chips.nth(0)).toHaveAttribute("data-state", "OFF");
+    await expect(chips.nth(1)).toHaveAttribute("title", /與設定和自治等級無關/);
+    await expectNoA11yViolations(page, "執行頁（引擎能力晶片：關閉＋已啟用）");
+    expectClean(errors, unhandled);
+  });
+
+  test("引擎能力晶片：沒有金鑰時，Level 7 批次是「無金鑰不可用」×2、Level 4 批次是「關閉」×2（批次照常執行，不報錯）", async ({ page }) => {
+    const { engine, errors, unhandled } = await open(page, {
+      apiKey: false,
+      seed: (e) => {
+        e.begin(4);
+        for (let i = 0; i < 3; i++) {
+          e.startNext();
+          e.finishCurrent();
+        }
+        e.begin(7);
+        e.startNext();
+      },
+    });
+    const chips = page.getByTestId("engine-capability");
+    await expect(page.getByTestId("run-number")).toHaveText("Run #2");
+    await expect(chips).toHaveText(["自動突變：無金鑰不可用", "自演化：無金鑰不可用"]);
+    await expect(chips.nth(0)).toHaveAttribute("data-state", "UNAVAILABLE_NO_API_KEY");
+    await expect(chips.nth(0)).toHaveAttribute("title", /沒有金鑰可送：批次照常執行，只是沒有 Brain/);
+    await expect(chips.nth(1)).toHaveAttribute("title", /AI 演化提案不會發生/);
+    await expect(page.getByTestId("run-status")).toContainText("執行中"); // 沒有金鑰不影響批次執行
+    await expectNoA11yViolations(page, "執行頁（引擎能力晶片：無金鑰不可用）");
+
+    await page.getByTestId("run-select").selectOption(runIdOf(engine, 1));
+    await expect(page.getByTestId("run-number")).toHaveText("Run #1");
+    await expect(chips).toHaveText(["自動突變：關閉", "自演化：關閉"]);
+    await expectNoA11yViolations(page, "執行頁（引擎能力晶片：關閉）");
+    expectClean(errors, unhandled);
+  });
+
+  test("引擎能力晶片：V10 之前建立的批次（回應沒有 engineCapabilities）不顯示晶片，進度卡其餘照常", async ({ page }) => {
+    const { errors, unhandled } = await open(page, {
+      legacyRuns: true,
+      seed: (e) => {
+        e.begin(4);
+        e.startNext();
+        e.finishCurrent();
+        e.startNext();
+      },
+    });
+    await expect(page.getByTestId("run-number")).toHaveText("Run #1");
+    await expect(page.getByTestId("progress-tasks")).toHaveText("1 / 3 任務完成");
+    await expect(page.getByTestId("engine-capabilities")).toHaveCount(0);
+    await expect(page.getByTestId("engine-capability")).toHaveCount(0);
+    expectClean(errors, unhandled);
+  });
+
+  test("DAG 全螢幕（契約 E-22，v1.4 D-20）：「全螢幕」→ 覆蓋層尺寸等於視窗；「結束全螢幕」與 Esc 都能結束、焦點回到「全螢幕」鈕；SSE 節點更新與展開／收合在全螢幕內照常、狀態進出保留；axe 零違規", async ({
+    page,
+  }) => {
+    const { engine, errors, unhandled } = await open(page, {
+      seed: (e) => {
+        e.begin(4);
+        e.startNext();
+        e.finishCurrent();
+        e.startNext(); // 第 2 步進行中
+      },
+    });
+    const fsOpen = page.getByTestId("dag-fullscreen-open");
+    const overlay = page.getByTestId("dag-fullscreen");
+    await expect(tone(page, 1)).toHaveAttribute("data-tone", "active");
+    await expect(fsOpen).toHaveText("全螢幕");
+    await expect(fsOpen).toHaveAttribute("aria-pressed", "false");
+    await expect(overlay).toHaveCount(0);
+
+    // 進入全螢幕：頁面內覆蓋層，尺寸等於視窗（不是瀏覽器 Fullscreen API）
+    await fsOpen.click();
+    await expect(overlay).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "DAG 依賴視覺化" })).toBeVisible();
+    const viewport = page.viewportSize()!;
+    await expect
+      .poll(async () => {
+        const b = await overlay.boundingBox();
+        return b ? [Math.round(b.x), Math.round(b.y), Math.round(b.width), Math.round(b.height)] : null;
+      })
+      .toEqual([0, 0, viewport.width, viewport.height]);
+    expect(await page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([viewport.width, viewport.height]);
+    expect(await page.evaluate(() => document.fullscreenElement), "不使用瀏覽器 Fullscreen API").toBeNull();
+    const exit = page.getByRole("button", { name: "結束全螢幕" });
+    await expect(exit).toHaveAttribute("aria-pressed", "true");
+    await expect(exit).toHaveAttribute("data-testid", "dag-fullscreen-exit");
+    await expect(overlay.getByTestId("dag-scroll")).toHaveAttribute("tabindex", "0");
+    await expect(page.getByTestId("dag-scroll")).toHaveCount(1); // 圖形只掛一份
+
+    // SSE 驅動的節點狀態在全螢幕期間照常更新（節點就在覆蓋層裡）
+    await expect(overlay.getByTestId(`dag-task-${TASKS[1].id}`)).toHaveAttribute("data-tone", "active");
+    engine.finishCurrent();
+    await expect(tone(page, 1)).toHaveAttribute("data-tone", "done");
+    engine.startNext();
+    await expect(tone(page, 2)).toHaveAttribute("data-tone", "active");
+    await expect(overlay.getByTestId(`dag-task-${TASKS[2].id}`)).toBeVisible();
+
+    // 全螢幕內的「收合任務／展開任務」可用；收合後回到卡內仍是收合（狀態保留）
+    await overlay.getByTestId("dag-fs-toggle").click();
+    await expect(overlay.getByTestId("dag-fs-toggle")).toHaveText("展開任務");
+    await expect(tone(page, 0)).toHaveCount(0);
+    await expect(overlay.getByTestId(`dag-goal-${GOAL_IDS[0]}`)).toBeVisible(); // 目標節點還在
+
+    // Esc 結束：覆蓋層消失、焦點回到「全螢幕」鈕
+    await page.keyboard.press("Escape");
+    await expect(overlay).toHaveCount(0);
+    await expect(fsOpen).toBeFocused();
+    await expect(fsOpen).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("dag-toggle")).toHaveText("展開任務");
+    await expect(tone(page, 0)).toHaveCount(0);
+    await page.getByTestId("dag-toggle").click(); // 卡內展開：節點回來，狀態是即時的最新值
+    await expect(tone(page, 0)).toHaveAttribute("data-tone", "done");
+    await expect(tone(page, 2)).toHaveAttribute("data-tone", "active");
+
+    // 再進一次，用「結束全螢幕」鈕結束；層內掃 axe（含 scrollable-region-focusable、焦點順序、對比）
+    await fsOpen.click();
+    await expect(overlay).toBeVisible();
+    await expectNoA11yViolations(page, "執行頁（DAG 全螢幕）");
+    await page.getByRole("button", { name: "結束全螢幕" }).click();
+    await expect(overlay).toHaveCount(0);
+    await expect(fsOpen).toBeFocused();
     expectClean(errors, unhandled);
   });
 });

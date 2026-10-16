@@ -26,7 +26,7 @@ let overrides: Array<(call: ApiCall) => Response | undefined>;
 function fresh(): Record<ConfigCategory, Config[]> {
   return {
     model: [FIXTURE.provider(), FIXTURE.apiUrl(), FIXTURE.apiKey(true), FIXTURE.name(), FIXTURE.maxTokensPerRequest(), FIXTURE.temperature(), FIXTURE.enableKernelBrain()],
-    agent: [FIXTURE.defaultAutonomyLevel(), FIXTURE.maxConcurrentTasks(), FIXTURE.enableAutoMutation()],
+    agent: [FIXTURE.defaultAutonomyLevel(), FIXTURE.maxConcurrentTasks(), FIXTURE.enableAutoMutation(), FIXTURE.enableSelfEvolution()],
     execution: [FIXTURE.globalTokenBudget("2000000"), FIXTURE.dagSchedulerStrategy(), FIXTURE.compactThresholdPct("80"), FIXTURE.haltThresholdPct("90")],
     monitor: [FIXTURE.refreshIntervalMs("15000"), FIXTURE.notificationEmail()],
     autoclaude: [FIXTURE.dbDsn()],
@@ -145,8 +145,24 @@ describe("版面與分類 tab（US-S-01）", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: "AutoClaude" }));
     expect(row("autoclaude.dbDsn")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("tab", { name: "SDD" }));
+    expect(inRow("sdd.specFormat").getByTestId("effect-tag")).toHaveTextContent("尚未驗證對映"); // UNVERIFIED 現只剩 sdd 的三個鍵（契約 §1.5、附錄 C.6）
+  });
+
+  it("Agent 分頁的兩個旗標（契約 v1.3，D-11；S-13）：enableAutoMutation 現為 ENGINE＝不加小標籤、影響說明顯示 Brain 逐步校正；enableSelfEvolution 為 STORED_ONLY＝加「僅儲存、不影響引擎」並說明引擎沒有演化開關", async () => {
+    await mount();
     await userEvent.click(screen.getByRole("tab", { name: "Agent" }));
-    expect(inRow("agent.enableAutoMutation").getByTestId("effect-tag")).toHaveTextContent("尚未驗證對映");
+
+    const mutation = inRow("agent.enableAutoMutation");
+    expect(mutation.queryByTestId("effect-tag")).toBeNull(); // ENGINE 與 CONSOLE 的鍵不加小標籤
+    expect(mutation.getByTestId("impact-note")).toHaveTextContent("Brain 逐步校正：失敗步驟先改寫 prompt 再重試");
+    expect(mutation.getByTestId("impact-note")).toHaveTextContent("沒有金鑰時不送，批次回報 UNAVAILABLE_NO_API_KEY");
+    expect(mutation.getByTestId("impact-note")).not.toHaveTextContent("尚未驗證");
+
+    const evolution = inRow("agent.enableSelfEvolution");
+    expect(evolution.getByTestId("effect-tag")).toHaveTextContent("僅儲存、不影響引擎");
+    expect(evolution.getByTestId("impact-note")).toHaveTextContent("引擎沒有演化開關");
+    expect(evolution.getByTestId("impact-note")).toHaveTextContent("只寫引擎日誌、不套用也不重載");
   });
 
   it("監控 tab：refreshIntervalMs 的提示寫明最小 10000", async () => {

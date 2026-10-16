@@ -6,6 +6,7 @@ import { StatusLabel } from "@/components/ui/status-dot";
 import type { ExecutionRunDetail } from "@/lib/api/types";
 import { isLive, isRunTerminal, runStatusMeta } from "@/lib/domain/status";
 import { formatElapsed, formatNumber } from "@/lib/format";
+import { EngineCapabilityChips } from "./parts";
 
 /** Token 進度條的顏色（契約 §4.2 E-11、設計稿「Token 條超閾值變色」）：到警告閾值＝warning、超過預算＝error。 */
 export function tokenTone(used: number, budget: number | null | undefined, warnThreshold: number): "normal" | "warn" | "over" {
@@ -19,6 +20,7 @@ const TONE_BAR = { normal: undefined, warn: "bg-wg-warning", over: "bg-wg-error"
 /**
  * 「執行進度」卡（設計稿畫面 7 右上）：Run #n、狀態（RUNNING 帶 wg-blink 閃點）、任務進度條（completedSteps／totalSteps）、
  * Token 進度條（totalTokensUsed／tokenBudget；≥ 警告閾值變 warning、超限變 error）、耗時。
+ * 標題列下方是引擎能力晶片（自動突變、自演化；契約 E-21，v1.3；批次建立時凍結的值，缺席時整列不顯示）。
  * 資料全部來自批次詳情快取（REST 當底、SSE 即時修補），這裡只讀、不訂閱。
  */
 export function ProgressCard({
@@ -63,6 +65,8 @@ export function ProgressCard({
           </span>
         </div>
       </div>
+
+      <EngineCapabilityChips capabilities={run.engineCapabilities} className="mb-3" />
 
       <div className="mb-1 flex items-baseline justify-between text-sm">
         <span data-testid="progress-tasks">

@@ -17,7 +17,12 @@ import { collectConsoleErrors, compose, installApiMock, signInAs, snap, type Moc
 const MONITOR_URL = `/projects/${PROJECT_ID}/monitor`;
 const DAY = 86_400_000;
 
-type OpenOptions = { role?: "ADMIN" | "OPERATOR" | "VIEWER"; before?: MockHandler };
+type OpenOptions = {
+  role?: "ADMIN" | "OPERATOR" | "VIEWER";
+  before?: MockHandler;
+  /** 開頁前再調整假引擎（例如設定資源取樣） */
+  setup?: (engine: Engine) => void;
+};
 
 /** Run #1 完成（3 步）、Run #2 失敗（T2 完成、T3 升級）、Run #3 進行中（T1 完成、T2 進行中）。 */
 function seed(e: Engine): void {
@@ -40,6 +45,7 @@ function seed(e: Engine): void {
 async function open(page: Page, opts: OpenOptions = {}) {
   const engine = new Engine();
   seed(engine);
+  opts.setup?.(engine);
   const world = new MonitorWorld(engine);
   await signInAs(page, opts.role ?? "OPERATOR");
   const unhandled: string[] = [];
@@ -354,9 +360,62 @@ test.describe("專案監控頁（route mock）", () => {
     await expect(page.getByTestId("agent-run-status")).toHaveText("Run #3 · 執行中");
     await expect(page.getByTestId("agent-current")).toHaveText("設定（G1-T2）");
     await expect(page.getByTestId("agent-availability")).toHaveText("99.1%");
-    await expect(page.getByTestId("agent-note")).toContainText("Bridge 實例：e2e-bridge。");
-    await expect(page.getByTestId("agent-note")).toContainText("資源使用情況（CPU／記憶體）：Engine Bridge 目前沒有提供這項資料");
+    await expect(page.getByTestId("agent-note")).toHaveText("Bridge 實例：e2e-bridge。");
+    // v1.3（D-12）：說明句「Engine Bridge 目前沒有提供這項資料」已移除；這個假引擎沒有資源取樣（resources 鍵缺席）→ 資源格是單一「—」
+    await expect(page.getByTestId("agent-resources")).toHaveText("—");
+    await expect(page.getByTestId("agent-card")).not.toContainText("目前沒有提供這項資料");
     await expectNoA11yViolations(page, "監控頁（批次比較＋事件時間軸＋Agent 狀態）");
+    expectClean(errors, unhandled);
+  });
+
+  test("Agent 即時狀態的資源使用（契約 §4.3 M-19，D-12；E2E-14 第 8～9 列的前端那一半）：有取樣＝`CPU x.x%・記憶體 N MB・M 行程`；已結束的批次與沒有取樣＝單一「—」", async ({ page }) => {
+    const { errors, unhandled, runId } = await open(page, {
+      setup: (e) => {
+        e.resources = { cpuPercent: 12.3, memoryBytes: 361_758_720, processCount: 3 };
+      },
+    });
+    // Run #3 進行中、引擎行程樹有取樣
+    await expect(page.getByTestId("agent-run-status")).toHaveText("Run #3 · 執行中");
+    await expect(page.getByTestId("agent-resources")).toHaveText("CPU 12.3%・記憶體 345 MB・3 行程");
+    await expect(page.getByTestId("agent-resources")).toHaveAttribute("title", /^取樣時間 \d{2}:\d{2}:\d{2}$/);
+    await expect(page.getByTestId("agent-resources").locator("xpath=preceding-sibling::div[1]")).toHaveText("資源使用");
+    await expect(page.getByTestId("agent-note")).toHaveText("Bridge 實例：e2e-bridge。"); // 只留實例資訊
+    await expect(page.getByTestId("agent-card")).not.toContainText("目前沒有提供這項資料");
+    await expectNoA11yViolations(page, "監控頁（Agent 即時狀態：有資源使用）");
+
+    // 既有四格的版面不動：同一列四欄，資源使用自成第二列整列
+    const boxes = await Promise.all(["agent-light", "agent-run-status", "agent-current", "agent-availability", "agent-resources"].map((id) => page.getByTestId(id).boundingBox()));
+    const [light, status, current, availability, resources] = boxes.map((b) => b!);
+    expect(new Set([light, status, current, availability].map((b) => Math.round(b.y))).size, "前四格在同一列").toBe(1);
+    expect(light.x).toBeLessThan(status.x);
+    expect(status.x).toBeLessThan(current.x);
+    expect(current.x).toBeLessThan(availability.x);
+    expect(resources.y, "資源使用在第二列").toBeGreaterThan(light.y + light.height);
+
+    // 切到已結束的批次（Run #1 完成）：行程樹已不存在，顯示單一「—」，沒有 tooltip
+    await page.getByTestId("run-select").selectOption(runId(1));
+    await expect(page.getByTestId("agent-run-status")).toHaveText("Run #1 · 已完成");
+    await expect(page.getByTestId("agent-resources")).toHaveText("—");
+    await expect(page.getByTestId("agent-resources")).not.toHaveAttribute("title");
+    await page.getByTestId("run-select").selectOption(runId(2));
+    await expect(page.getByTestId("agent-run-status")).toHaveText("Run #2 · 失敗");
+    await expect(page.getByTestId("agent-resources")).toHaveText("—");
+
+    // 回到進行中的批次：數字又回來
+    await page.getByTestId("run-select").selectOption(runId(3));
+    await expect(page.getByTestId("agent-resources")).toHaveText("CPU 12.3%・記憶體 345 MB・3 行程");
+    expectClean(errors, unhandled);
+  });
+
+  test("資源使用：引擎行程樹沒有取樣（resources 為 null：還沒有第一筆樣本或樣本過期）→ 單一「—」，不顯示舊數字也不編造", async ({ page }) => {
+    const { errors, unhandled } = await open(page, {
+      setup: (e) => {
+        e.resources = null;
+      },
+    });
+    await expect(page.getByTestId("agent-run-status")).toHaveText("Run #3 · 執行中");
+    await expect(page.getByTestId("agent-resources")).toHaveText("—");
+    await expect(page.getByTestId("agent-card")).not.toContainText("CPU");
     expectClean(errors, unhandled);
   });
 

@@ -20,6 +20,12 @@ const nextConfig: NextConfig = {
   // 本專案資料全部 client-side（TanStack Query），沒有伺服端資料可快取；開了反而要求所有讀 params／searchParams
   // 的路由包 Suspense、並禁用 route segment config。理由與重新評估條件見 docs/02_architecture/ADR-002。
   turbopack: {
+    // Markdown 編輯器的左欄原始碼著色與預覽的程式碼區塊都走 rehype-prism-plus（@uiw/react-md-editor、@uiw/react-markdown-preview 都是 `import … from 'rehype-prism-plus'`）。
+    // 上游的逐行拆分是 O(行數 × 節點數)，20KB 文件的左欄著色一次就占約 40～50ms（NFR-9.1-05）；換成行為等價、線性時間的版本。
+    // 等價性由 components/markdown/rehypePrismLinear.test.ts 對上游逐位比對；那支測試也守這條別名仍然有效（別名只對裸名稱生效，子路徑 /all 等不受影響）。
+    resolveAlias: {
+      "rehype-prism-plus": "./components/markdown/rehypePrismLinear.ts",
+    },
     // Tailwind 4 的 Turbopack 整合（create-next-app 16.4 預設做法）
     rules: {
       "*.css": {

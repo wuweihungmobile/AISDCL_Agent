@@ -53,7 +53,25 @@ export const FIXTURE = {
   enableKernelBrain: () => cfg("model", "enableKernelBrain", { value: "false", defaultValue: "false", valueType: "BOOLEAN" }),
   defaultAutonomyLevel: (value = "3") => cfg("agent", "defaultAutonomyLevel", { value, defaultValue: "3", valueType: "INTEGER", min: 1, max: 10, effect: "CONSOLE" }),
   maxConcurrentTasks: () => cfg("agent", "maxConcurrentTasks", { value: "3", defaultValue: "3", valueType: "INTEGER", min: 1, max: 32, effect: "STORED_ONLY" }),
-  enableAutoMutation: () => cfg("agent", "enableAutoMutation", { value: "false", defaultValue: "false", valueType: "BOOLEAN", effect: "UNVERIFIED" }),
+  // v1.3（D-11）：enableAutoMutation 由 UNVERIFIED 改 ENGINE（不加小標籤）、enableSelfEvolution 為 STORED_ONLY（加「僅儲存」小標籤）；impactNote 逐字取自契約附錄 C.2
+  enableAutoMutation: () =>
+    cfg("agent", "enableAutoMutation", {
+      value: "false",
+      defaultValue: "false",
+      valueType: "BOOLEAN",
+      effect: "ENGINE",
+      impactNote:
+        "對映引擎 minimax.enable_kernel_brain（Brain 逐步校正：失敗步驟先改寫 prompt 再重試），與 model.enableKernelBrain 任一為真即開；自治等級 ≥6 一律視為開啟。需要 model.apiKey：沒有金鑰時不送，批次回報 UNAVAILABLE_NO_API_KEY；新批次起生效（§3.4.2）",
+    }),
+  enableSelfEvolution: () =>
+    cfg("agent", "enableSelfEvolution", {
+      value: "false",
+      defaultValue: "false",
+      valueType: "BOOLEAN",
+      effect: "STORED_ONLY",
+      impactNote:
+        "引擎沒有演化開關：有金鑰時失敗型 ESCALATION 一律由 Brain 產生演化提案，只寫引擎日誌、不套用也不重載（max_evolutions／require_evolution_signoff 在引擎執行路徑上沒有讀者，Console 不送）。本鍵只影響沒有金鑰時批次回報 OFF 或 UNAVAILABLE_NO_API_KEY（§3.4.2；E2E 以 model.apiKey 為空關閉演化，§5.0.2）",
+    }),
   globalTokenBudget: (value = "1000000") =>
     cfg("execution", "globalTokenBudget", { value, defaultValue: "1000000", valueType: "LONG", min: 1, max: 1000000000000, effect: "CONSOLE", impactNote: "新批次的預設 Token 預算；不改動既有批次" }),
   tokenBudgetWarningThreshold: (value = "0.8") =>

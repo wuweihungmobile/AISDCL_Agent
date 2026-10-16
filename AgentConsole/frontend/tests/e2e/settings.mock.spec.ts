@@ -83,6 +83,28 @@ test.describe("系統參數設定（route mock）", () => {
     expect(consoleErrors, "整段流程不應有主控台錯誤").toEqual([]);
   });
 
+  test("Agent tab 的兩個引擎旗標（契約 v1.3，D-11；S-13）：enableAutoMutation 為 ENGINE＝沒有小標籤、影響說明寫 Brain 逐步校正；enableSelfEvolution 為 STORED_ONLY＝加「僅儲存、不影響引擎」", async ({
+    page,
+  }) => {
+    const { consoleErrors } = await open(page);
+    await page.getByRole("tab", { name: "Agent", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Agent設定" })).toBeVisible();
+
+    const mutation = row(page, "agent.enableAutoMutation");
+    await expect(mutation.getByTestId("effect-tag")).toHaveCount(0); // ENGINE 與 CONSOLE 的鍵不加小標籤
+    await expect(mutation.getByTestId("impact-note")).toContainText("Brain 逐步校正：失敗步驟先改寫 prompt 再重試");
+    await expect(mutation.getByTestId("impact-note")).toContainText("沒有金鑰時不送，批次回報 UNAVAILABLE_NO_API_KEY");
+    await expect(mutation).not.toContainText("尚未驗證對映");
+
+    const evolution = row(page, "agent.enableSelfEvolution");
+    await expect(evolution.getByTestId("effect-tag")).toHaveText("僅儲存、不影響引擎");
+    await expect(evolution.getByTestId("impact-note")).toContainText("引擎沒有演化開關");
+    await expect(evolution.getByTestId("impact-note")).toContainText("只寫引擎日誌、不套用也不重載");
+
+    await expectNoA11yViolations(page, "系統設定（Agent tab：引擎旗標的標籤與影響說明）");
+    expect(consoleErrors, "整段流程不應有主控台錯誤").toEqual([]);
+  });
+
   test("改一個數值並儲存：只送有變動的鍵；成功 toast；修改歷史多一列", async ({ page }) => {
     const { calls, consoleErrors } = await open(page);
     const input = row(page, "model.maxTokensPerRequest").getByRole("textbox");

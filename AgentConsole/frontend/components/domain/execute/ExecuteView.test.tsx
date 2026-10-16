@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExecutionRunDetail, ExecutionRunSummary, ProjectDetail } from "@/lib/api/types";
+import type { EngineCapabilities, EngineCapabilityState, ExecutionRunDetail, ExecutionRunSummary, ProjectDetail } from "@/lib/api/types";
 import { Providers, failure, makeClient, signIn, stubApi, type ApiCall, type Reply } from "@/tests/helpers/api";
 import { FakeEventSource } from "@/tests/helpers/fakeEventSource";
 import { checkpoints, dag, projectDetail, reviewItem, runDetail, runSummary, taskSummary } from "@/tests/helpers/runFixtures";
@@ -104,7 +104,7 @@ describe("執行頁：版面與鎖定（設計稿畫面 7）", () => {
     expect(await screen.findByText("審批 signoff：專案")).toBeInTheDocument();
   });
 
-  it("自治等級預設取專案的等級、預算預設取系統參數 execution.globalTokenBudget；Level 6～10 說明不傳引擎", async () => {
+  it("自治等級預設取專案的等級、預算預設取系統參數 execution.globalTokenBudget；Level 6～10 說明審核閘同 Level 5、另要求自動突變／自演化（契約 §3.6.1，v1.3）", async () => {
     backend({ project: projectDetail({ autonomyLevel: 4 }) });
     view();
     const level = (await screen.findByTestId("exec-level")) as HTMLSelectElement;
@@ -114,7 +114,11 @@ describe("執行頁：版面與鎖定（設計稿畫面 7）", () => {
     await waitFor(() => expect(screen.getByTestId("exec-budget")).toHaveValue("200,000"));
     expect(screen.getByTestId("autonomy-hint")).toHaveTextContent("全自動執行，僅重試失敗後升級給人類");
     await userEvent.selectOptions(level, "7");
-    expect(screen.getByTestId("autonomy-hint")).toHaveTextContent("目前不另傳給引擎");
+    const hint = screen.getByTestId("autonomy-hint");
+    expect(hint).toHaveTextContent("審核閘行為同 Level 5");
+    expect(hint).toHaveTextContent("Level 6 以上另要求自動突變、Level 7 以上另要求自演化");
+    expect(hint).toHaveTextContent("引擎能力晶片"); // 結果看批次上的晶片，不在這裡猜
+    expect(hint).not.toHaveTextContent("不另傳給引擎"); // v1.2 的說法已被 v1.3 推翻（等級 ≥ 6 現在會送 enable_kernel_brain）
   });
 });
 
@@ -412,6 +416,101 @@ describe("執行頁：執行進度卡（US-E-09 的進度、E-10 的 Token）", 
     backend({ runs: [runSummary()], details: { r1: runDetail({ bridge: { connected: false, checkedAt: "2026-10-15T08:30:12Z" } }) } });
     view();
     expect(await screen.findByTestId("bridge-down")).toHaveTextContent("Engine Bridge 目前無法連線");
+  });
+});
+
+describe("執行頁：引擎能力晶片「自動突變」「自演化」（契約 §4.2 E-21，v1.3 D-11）", () => {
+  const caps = (autoMutation: EngineCapabilityState, selfEvolution: EngineCapabilityState): EngineCapabilities => ({ autoMutation, selfEvolution });
+  const chip = (key: "autoMutation" | "selfEvolution") =>
+    within(screen.getByTestId("engine-capabilities"))
+      .getAllByTestId("engine-capability")
+      .find((c) => c.getAttribute("data-capability") === key)!;
+
+  async function open(engineCapabilities: EngineCapabilities | null | undefined) {
+    backend({ runs: [runSummary()], details: { r1: runDetail({ engineCapabilities }) } });
+    const rendered = view();
+    await screen.findByTestId("run-status"); // 批次詳情載入後才有進度卡
+    return rendered;
+  }
+
+  // [晶片, 狀態, 晶片文字, tooltip 要講清楚的重點]
+  const CELLS: Array<["autoMutation" | "selfEvolution", EngineCapabilityState, string, string]> = [
+    ["autoMutation", "ENABLED", "自動突變：已啟用", "Brain 逐步校正：失敗步驟先由 Brain 改寫再重試"],
+    ["autoMutation", "OFF", "自動突變：關閉", "失敗步驟照舊自動重試"],
+    ["autoMutation", "UNAVAILABLE_NO_API_KEY", "自動突變：無金鑰不可用", "沒有金鑰可送：批次照常執行，只是沒有 Brain"],
+    ["selfEvolution", "ENABLED", "自演化（僅提案）：已啟用", "不自動套用"],
+    ["selfEvolution", "OFF", "自演化：關閉", "沒有 AI 演化提案"],
+    ["selfEvolution", "UNAVAILABLE_NO_API_KEY", "自演化：無金鑰不可用", "AI 演化提案不會發生"],
+  ];
+
+  it.each(CELLS)("%s＝%s：晶片文字「%s」，tooltip 說明「%s」", async (key, state, text, hintPart) => {
+    await open(key === "autoMutation" ? caps(state, "OFF") : caps("OFF", state));
+    const c = chip(key);
+    expect(c).toHaveTextContent(text);
+    expect(c).toHaveAttribute("data-state", state);
+    expect(c.getAttribute("title")).toContain(hintPart);
+  });
+
+  it("兩枚晶片固定順序：自動突變在前、自演化在後；整組有「引擎能力」的群組名稱", async () => {
+    await open(caps("ENABLED", "ENABLED"));
+    const group = screen.getByRole("group", { name: "引擎能力" });
+    expect(
+      within(group)
+        .getAllByTestId("engine-capability")
+        .map((c) => c.getAttribute("data-capability")),
+    ).toEqual(["autoMutation", "selfEvolution"]);
+  });
+
+  it("🔴 自演化「已啟用」讓人看得出「只提案、不自動套用」：文字帶「僅提案」、tooltip 說明與設定和自治等級無關（有金鑰的等級 3 批次也是這個值）", async () => {
+    await open(caps("OFF", "ENABLED"));
+    const c = chip("selfEvolution");
+    expect(c.textContent).toContain("僅提案");
+    expect(c.getAttribute("title")).toContain("不自動套用");
+    expect(c.getAttribute("title")).toContain("只寫進引擎日誌");
+    expect(c.getAttribute("title")).toContain("與設定和自治等級無關");
+  });
+
+  it("三態的外觀互不相同（已啟用／關閉／無金鑰不可用要一眼分得出來）", async () => {
+    const first = await open(caps("ENABLED", "OFF"));
+    const enabled = chip("autoMutation").className;
+    const off = chip("selfEvolution").className;
+    first.unmount();
+    await open(caps("UNAVAILABLE_NO_API_KEY", "OFF"));
+    const unavailable = chip("autoMutation").className;
+    expect(new Set([enabled, off, unavailable]).size).toBe(3);
+  });
+
+  it.each([
+    ["缺席（V10 之前建立的批次）", undefined],
+    ["null", null],
+  ])("engineCapabilities %s：整列晶片不顯示（不猜測），進度卡其餘內容照常", async (_name, value) => {
+    await open(value);
+    expect(screen.queryByTestId("engine-capabilities")).toBeNull();
+    expect(screen.queryByTestId("engine-capability")).toBeNull();
+    expect(screen.getByTestId("progress-tasks")).toHaveTextContent("1 / 3 任務完成");
+  });
+
+  it("後端日後新增狀態值：顯示原值、不崩潰；缺一個欄位時只顯示另一枚", async () => {
+    await open({ autoMutation: "FUTURE_STATE", selfEvolution: undefined } as unknown as EngineCapabilities);
+    expect(screen.getAllByTestId("engine-capability")).toHaveLength(1);
+    expect(chip("autoMutation")).toHaveTextContent("自動突變：FUTURE_STATE");
+    expect(chip("autoMutation")).not.toHaveAttribute("title"); // 沒有說明文字就不放空 tooltip
+  });
+
+  it("切換批次後取該批次的值（建立時凍結，各批次不同）", async () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    backend({
+      runs: [runSummary({ id: "r2", runNumber: 2 }), runSummary({ id: "r1", runNumber: 1, status: "COMPLETED" })],
+      details: {
+        r2: runDetail({ id: "r2", runNumber: 2, engineCapabilities: caps("ENABLED", "ENABLED") }),
+        r1: runDetail({ id: "r1", runNumber: 1, status: "COMPLETED", bridgeStatus: "COMPLETED", engineCapabilities: caps("UNAVAILABLE_NO_API_KEY", "OFF") }),
+      },
+    });
+    view();
+    await waitFor(() => expect(chip("autoMutation")).toHaveTextContent("自動突變：已啟用"));
+    await userEvent.selectOptions(await screen.findByTestId("run-select"), "r1");
+    await waitFor(() => expect(chip("autoMutation")).toHaveTextContent("自動突變：無金鑰不可用"));
+    expect(chip("selfEvolution")).toHaveTextContent("自演化：關閉");
   });
 });
 
