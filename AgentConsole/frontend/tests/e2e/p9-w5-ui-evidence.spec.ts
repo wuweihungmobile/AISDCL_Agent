@@ -11,7 +11,7 @@ import { E2E_ROOT, FakeLlm, NEEDS_BRIDGE, bootstrapSettings, brd, call, createFi
  *   UI-DS-04 僅用 Lucide 線性圖示、UI-DS-06 動效規範（僅色彩／透明度；hover 不位移不縮放不浮起）、UI-DS-07 狀態中文標籤與顏色、
  *   UI-OVL-02 Toast（底部置中、一次一則、自動消失）、UI-OVL-03 載入 Skeleton／spinner；另量 NFR-9.1-05（Markdown 預覽更新時間，含 20KB）。
  * 依據：設計稿 README〈Iconography〉〈Motion〉〈狀態 enum〉〈全域覆蓋層〉（docs/01_requirements/01.UI_Design/Design_ConsoleUI/README.md）。
- * 量測值以 console.log 印出（`[ui-evidence]` 開頭），報告引用；斷言只釘設計規範本身，不釘本機的絕對毫秒數（NFR-9.1-05 除外：5KB 以內 < 100ms）。
+ * 量測值以 console.log 印出（`[ui-evidence]` 開頭），報告引用；斷言只釘設計規範本身，不釘本機的絕對毫秒數（NFR-9.1-05 除外：1KB／5KB／20KB 的中位數都必須 < 100ms；W7 起 20KB 也收緊，原為 < 400ms 的寬鬆上限）。
  */
 test.skip(!E2E_ROOT, NEEDS_BRIDGE);
 
@@ -576,7 +576,10 @@ test.describe("設計系統與覆蓋層：真瀏覽器逐項證據", () => {
     }
   });
 
-  test("NFR-9.1-05｜Markdown 預覽更新時間（編輯器貼入 N KB → 預覽穩定；每種大小 7 次取中位數）：5KB 以內 < 100ms；20KB 重量（W4：112ms、W5-FE 去抖後：149ms）", async ({ page, request }) => {
+  test("NFR-9.1-05｜Markdown 預覽更新時間（編輯器貼入 N KB → 預覽穩定；每種大小 7 次取中位數）：1KB／5KB／20KB 中位數都 < 100ms（歷史：W4 20KB 112ms、W5 131ms；W7-FE 之後的數字見 QA_W7_Closure.md §4）", async ({
+    page,
+    request,
+  }) => {
     await signIn(page, request, "operator");
     await page.goto("/projects/new");
     const box = page.getByRole("textbox", { name: "說明描述", exact: true });
@@ -633,6 +636,6 @@ test.describe("設計系統與覆蓋層：真瀏覽器逐項證據", () => {
     }
     expect(medians["1KB"], "1KB 中位數").toBeLessThan(100);
     expect(medians["5KB"], "5KB 中位數").toBeLessThan(100);
-    expect(medians["20KB"], "20KB 只設寬鬆上限（目標 100ms 未達屬已知 🟡，見 RTM NFR-9.1-05）").toBeLessThan(400);
+    expect(medians["20KB"], "20KB 中位數（PRD §9.1 的 100ms；W7 起不再是寬鬆上限）").toBeLessThan(100);
   });
 });
