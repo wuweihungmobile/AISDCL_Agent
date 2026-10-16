@@ -95,13 +95,22 @@ test.describe("Markdown 編輯器（UI-MD-01～08）", () => {
 
   test("UI-MD-07：匯入 .md——讀入本機檔案並覆蓋欄位、成功提示；不支援的副檔名被擋下並提示、欄位不變", async ({ page }) => {
     const ta = textarea(page);
-    await page.getByTestId("md-import-input").first().setInputFiles({ name: "spec.md", mimeType: "text/markdown", buffer: Buffer.from(DOC, "utf-8") });
+    await page
+      .getByTestId("md-import-input")
+      .first()
+      .setInputFiles({ name: "spec.md", mimeType: "text/markdown", buffer: Buffer.from(DOC, "utf-8") });
     await expect(ta).toHaveValue(DOC);
     await expect(page.getByRole("status").filter({ hasText: "已匯入 spec.md" })).toBeVisible();
-    await page.getByTestId("md-import-input").first().setInputFiles({ name: "evil.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4", "utf-8") });
+    await page
+      .getByTestId("md-import-input")
+      .first()
+      .setInputFiles({ name: "evil.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4", "utf-8") });
     await expect(page.getByRole("status").filter({ hasText: "只支援 .md／.markdown／.txt 文字檔" })).toBeVisible();
     await expect(ta, "被拒絕的檔案不改動欄位").toHaveValue(DOC);
-    await page.getByTestId("md-import-input").first().setInputFiles({ name: "big.md", mimeType: "text/markdown", buffer: Buffer.alloc(1024 * 1024 + 1, 0x61) });
+    await page
+      .getByTestId("md-import-input")
+      .first()
+      .setInputFiles({ name: "big.md", mimeType: "text/markdown", buffer: Buffer.alloc(1024 * 1024 + 1, 0x61) });
     await expect(page.getByRole("status").filter({ hasText: "檔案超過 1 MB 上限" })).toBeVisible();
     await expect(ta, "超過 1 MB 的檔案不改動欄位").toHaveValue(DOC);
   });

@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 
 import { API_URL, RUN } from "./helpers";
 import { collectConsoleErrors, snap } from "./mockApi";
-import { DEFECTS_OPEN, E2E_ROOT, FakeLlm, LLM_MARKER, NEEDS_BRIDGE, bootstrapSettings, brd, call, dataOf, ensureQuota, signIn, tokenOf, waitRun, type Json } from "./realBackend";
+import { E2E_ROOT, FakeLlm, LLM_MARKER, NEEDS_BRIDGE, bootstrapSettings, brd, call, dataOf, ensureQuota, signIn, tokenOf, waitRun, type Json } from "./realBackend";
 
 /**
  * Phase 3 匯入（畫面 6）——對真後端（console-api＋PG）＋本檔自起的假 OpenAI 相容伺服器（綁 127.0.0.1）。
@@ -80,9 +80,18 @@ function miniDocx(paragraphs: string[]): Buffer {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   const entries: Array<[string, string]> = [
-    ["[Content_Types].xml", `${head}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`],
-    ["_rels/.rels", `${head}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`],
-    ["word/document.xml", `${head}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphs.map((p) => `<w:p><w:r><w:t>${esc(p)}</w:t></w:r></w:p>`).join("")}</w:body></w:document>`],
+    [
+      "[Content_Types].xml",
+      `${head}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`,
+    ],
+    [
+      "_rels/.rels",
+      `${head}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`,
+    ],
+    [
+      "word/document.xml",
+      `${head}<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paragraphs.map((p) => `<w:p><w:r><w:t>${esc(p)}</w:t></w:r></w:p>`).join("")}</w:body></w:document>`,
+    ],
   ];
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
@@ -241,9 +250,9 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     await page.getByRole("button", { name: "編輯任務：設定" }).click();
     const edit = page.getByRole("dialog", { name: "編輯任務" });
     await edit.getByLabel("任務名稱").fill("設定環境");
-    // DEF-AC-001 的繞過：真後端對 AI 解析的任務回 maxRetries:null，對話框把它顯示成字面「null」並擋住「確定」；
-    // 本情境的目的是驗其餘流程，所以先清空該欄（缺陷本身由本檔最後一支 test.fail 情境釘住）
-    await edit.getByLabel("最大重試次數").fill("");
+    // DEF-AC-001（W5 已修）：真後端對 AI 解析的任務回 maxRetries:null；對話框現在把 null 當成空白（不再顯示字面「null」），
+    // 所以不必手動清空該欄就能按「確定」（W4 版在這裡得先 fill("") 繞過）
+    await expect(edit.getByLabel("最大重試次數")).toHaveValue("");
     await edit.getByRole("button", { name: "確定" }).click();
     await expect(page.getByTestId("dirty-notice")).toBeVisible();
     await expect(page.getByRole("button", { name: "signoff 審批" })).toBeDisabled();
@@ -328,9 +337,9 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     await expect(page.getByTestId("tree-task")).toHaveCount(3);
 
     // 後端：來源型別由副檔名決定（MARKDOWN）、sourceContent 是檔案的文字
-    const rec = (dataOf<{ content: Array<{ id: string; sourceType: string; status: string; sourceFileName: string }> }>(
+    const rec = dataOf<{ content: Array<{ id: string; sourceType: string; status: string; sourceFileName: string }> }>(
       await call(request, "viewer", "GET", `/api/v1/import?q=${encodeURIComponent(`upload-${RUN}`)}`),
-    ).content[0])!;
+    ).content[0]!;
     expect(rec).toMatchObject({ sourceType: "MARKDOWN", status: "PARSED", sourceFileName: fileName });
     const detail = dataOf<{ sourceContent: string }>(await call(request, "viewer", "GET", `/api/v1/import/${rec.id}`));
     expect(detail.sourceContent).toContain("BRD：E2E 匯入專案");
@@ -378,7 +387,13 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
       [LLM_MARKER.empty, [["empty_prompt", "goals[0].tasks[1].description", []]]],
       [LLM_MARKER.emptyName, [["empty_prompt", "goals[0].tasks[0].name", []]]],
       [LLM_MARKER.long, [["prompt_too_long", "goals[0].tasks[0]", []]]],
-      [LLM_MARKER.multi, [["empty_prompt", "goals[0].tasks[1].description", []], ["max_steps", "goals[0].tasks", ["25"]]]],
+      [
+        LLM_MARKER.multi,
+        [
+          ["empty_prompt", "goals[0].tasks[1].description", []],
+          ["max_steps", "goals[0].tasks", ["25"]],
+        ],
+      ],
       [LLM_MARKER.badJson, [["brain_failed", undefined, []]]],
       [LLM_MARKER.http500, [["brain_failed", undefined, ["500"]]]],
     ];
@@ -389,7 +404,10 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
       expect(r.status, `${marker} → ${JSON.stringify(r.json).slice(0, 300)}`).toBe(422);
       expect(r.json.reason, marker).toBe("解析結果未通過有界閘");
       const errors = r.json.errors as GateErr[];
-      expect(errors.map((e) => e.gate), marker).toEqual(expected.map((e) => e[0]));
+      expect(
+        errors.map((e) => e.gate),
+        marker,
+      ).toEqual(expected.map((e) => e[0]));
       expected.forEach(([, location, detailParts], i) => {
         expect(errors[i].location, `${marker} location`).toBe(location);
         for (const part of detailParts) expect(errors[i].detail, `${marker} detail`).toContain(part);
@@ -417,7 +435,7 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     // 狀態機：REJECTED 是終態，confirm 回 409 匯入記錄狀態不允許此操作（details.action）
     const afterReject = await call(request, "operator", "POST", `/api/v1/import/${noKeyId}/confirm`);
     expect([afterReject.status, afterReject.json.reason]).toEqual([409, "匯入記錄狀態不允許此操作"]);
-    expect((afterReject.json.details as { action: string; status: string })).toMatchObject({ action: "confirm", status: "REJECTED" });
+    expect(afterReject.json.details as { action: string; status: string }).toMatchObject({ action: "confirm", status: "REJECTED" });
     expect((await call(request, "admin", "PUT", "/api/v1/settings/model/apiKey", { value: "sk-e2e-dummy", confirm: true })).status).toBe(200);
 
     // ── 主序列（E2E-01 步驟 1～14）：解析 → 編輯 → 消毒變體 → signoff／confirm 狀態機 ──
@@ -479,7 +497,17 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     expect([resigned.status, resigned.json.reason]).toEqual([409, "已 signoff，不可重新解析"]);
     const confirm = await call(request, "operator", "POST", `/api/v1/import/${id}/confirm`);
     expect(confirm.status).toBe(201);
-    expect(dataOf(confirm)).toMatchObject({ signedOff: true, signedOffBy: "e2e-approver", status: "DRAFT", goalsCount: 2, tasksCount: 4, autonomyLevel: 3, executionPath: dir, name: PROJECT_NAME, createdBy: "operator" });
+    expect(dataOf(confirm)).toMatchObject({
+      signedOff: true,
+      signedOffBy: "e2e-approver",
+      status: "DRAFT",
+      goalsCount: 2,
+      tasksCount: 4,
+      autonomyLevel: 3,
+      executionPath: dir,
+      name: PROJECT_NAME,
+      createdBy: "operator",
+    });
     const again = await call(request, "operator", "POST", `/api/v1/import/${id}/confirm`);
     expect([again.status, again.json.reason], "再次 confirm").toEqual([409, "已匯入"]);
     expect((again.json.details as { projectId: string }).projectId).toBe(dataOf<{ id: string }>(confirm).id);
@@ -494,7 +522,7 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     ];
     for (const [action, r] of stuck) {
       expect([r.status, r.json.reason], action).toEqual([409, "匯入記錄狀態不允許此操作"]);
-      expect((r.json.details as { action: string; status: string }), action).toMatchObject({ action, status: "IMPORTED" });
+      expect(r.json.details as { action: string; status: string }, action).toMatchObject({ action, status: "IMPORTED" });
     }
     const listed = dataOf<{ content: Array<{ id: string; projectId?: string }> }>(await call(request, "viewer", "GET", "/api/v1/import?status=IMPORTED&sort=createdAt,desc&size=50"));
     expect(listed.content.find((x) => x.id === id)?.projectId).toBe(dataOf<{ id: string }>(confirm).id);
@@ -505,7 +533,12 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     // ── 上傳變體 ──
     const token = await tokenOf(request, "operator");
     const upload = (name: string, buffer: Buffer, who = token) =>
-      request.fetch(`${API_URL}/api/v1/import/upload`, { method: "POST", headers: { Authorization: `Bearer ${who}` }, multipart: { file: { name, mimeType: "application/octet-stream", buffer } }, failOnStatusCode: false });
+      request.fetch(`${API_URL}/api/v1/import/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${who}` },
+        multipart: { file: { name, mimeType: "application/octet-stream", buffer } },
+        failOnStatusCode: false,
+      });
     const ok = await upload(`up-${RUN}.md`, Buffer.from("# BRD\n\n## 一\n內容", "utf-8"));
     expect(ok.status()).toBe(201);
     expect(((await ok.json()) as { data: { sourceType: string; status: string } }).data).toMatchObject({ sourceType: "MARKDOWN", status: "UPLOADED" });
@@ -603,7 +636,12 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
   test("上傳 PDF 與 DOCX（本檔獨立產生的真檔，不是後端測試用的 PDFBox／POI 夾具）：擷取文字、sourceType、擷取結果進入路徑 B 的提示詞", async ({ request }) => {
     const token = await tokenOf(request, "operator");
     const upload = (name: string, buffer: Buffer) =>
-      request.fetch(`${API_URL}/api/v1/import/upload`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, multipart: { file: { name, mimeType: "application/octet-stream", buffer } }, failOnStatusCode: false });
+      request.fetch(`${API_URL}/api/v1/import/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: { file: { name, mimeType: "application/octet-stream", buffer } },
+        failOnStatusCode: false,
+      });
     type Rec = { id: string; sourceType: string; status: string; sourceFileName: string };
     const detail = async (id: string) => dataOf<{ sourceContent: string }>(await call(request, "viewer", "GET", `/api/v1/import/${id}`));
 
@@ -646,7 +684,12 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     const parse = (id: string) => call(request, "operator", "POST", `/api/v1/import/${id}/parse`, { executionPath: dir, autonomyLevel: 4, additionalPrompt: "QA 補充說明" });
     // 三道有界閘＋Brain 失敗：Bridge 的 422 gate 對映到契約的 errors[].gate；全部不呼叫模型
     const callsBefore = llm.count();
-    for (const [marker, gate] of [["GATE_MAX", "max_steps"], ["GATE_CYCLE", "cycle"], ["GATE_EMPTY", "empty_prompt"], ["GATE_NONE", "brain_failed"]] as const) {
+    for (const [marker, gate] of [
+      ["GATE_MAX", "max_steps"],
+      ["GATE_CYCLE", "cycle"],
+      ["GATE_EMPTY", "empty_prompt"],
+      ["GATE_NONE", "brain_failed"],
+    ] as const) {
       const id = await newRecord(`把使用者登入功能做完 ${marker}`);
       const r = await parse(id);
       expect(r.status, `${marker} → ${JSON.stringify(r.json).slice(0, 300)}`).toBe(422);
@@ -658,7 +701,14 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     const id = await newRecord("把使用者登入功能做完");
     const ok = await parse(id);
     expect(ok.status, JSON.stringify(ok.json).slice(0, 300)).toBe(200);
-    type PathC = { path: string; aiModel?: string | null; tokenUsed?: number | null; reasoning?: string; warnings: Array<{ code: string }>; parsedResult: { draftIds: string[]; goals: Array<{ tasks: Array<{ name: string; evaluatorCommand?: string | null; passCriteriaSpec?: { source: string; draftId: string } }> }> } };
+    type PathC = {
+      path: string;
+      aiModel?: string | null;
+      tokenUsed?: number | null;
+      reasoning?: string;
+      warnings: Array<{ code: string }>;
+      parsedResult: { draftIds: string[]; goals: Array<{ tasks: Array<{ name: string; evaluatorCommand?: string | null; passCriteriaSpec?: { source: string; draftId: string } }> }> };
+    };
     const d = dataOf<PathC>(ok);
     expect(d.path).toBe("DECOMPOSE");
     expect([d.aiModel ?? null, d.tokenUsed ?? null]).toEqual([null, null]);
@@ -691,11 +741,10 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
     expect(run, `run 終態＝${run.status}；reason＝${run.reason}`).toMatchObject({ status: "COMPLETED", completedSteps: 3, totalSteps: 3, totalTokensUsed: 3720 });
   });
 
-  test("DEF-AC-001：AI 解析結果裡值為 null 的欄位（maxRetries 等）在節點編輯對話框不得顯示成字面「null」", async ({ page, request }) => {
-    // 契約 §0.2：client 視 null 與缺席等價。真後端對 AI 解析的任務回 maxRetries／evaluatorCommand／expectedOutputRegex 皆為 null，
-    // 前端 NodeEditDialog 用 `=== undefined` 判斷空值，把 null 變成「null」並讓 zod 驗證（0～20 的整數）擋住「確定」。
-    // 目前是已知缺陷（QA 報告 DEF-AC-001）：修好後這支會「意外通過」，屆時把下一行 test.fail 拿掉即可。
-    test.fail(DEFECTS_OPEN, "DEF-AC-001（P2）：NodeEditDialog 把 maxRetries:null 顯示成「null」並卡住確定");
+  test("DEF-AC-001（W5 已修）：AI 解析結果裡值為 null 的欄位（maxRetries 等）在節點編輯對話框不得顯示成字面「null」，樹狀預覽也不印「最大重試次數：null」", async ({ page, request }) => {
+    // 契約 §0.2：client 視 null 與缺席等價。真後端對 AI 解析的任務回 maxRetries／evaluatorCommand／expectedOutputRegex 皆為 null；
+    // W4 的 NodeEditDialog 用 `=== undefined` 判斷空值，把 null 變成「null」並讓 zod 驗證（0～20 的整數）擋住「確定」（QA 報告 DEF-AC-001）。
+    // W5-FE 改判 `== null`；本情境在 W5-QA 移除了 test.fail，改為正向斷言（E2E_DEFECTS_FIXED 不再需要）。
     const projectDir = path.join(E2E_ROOT, "projects", `imp-def001-${RUN}`);
     mkdirSync(projectDir, { recursive: true });
     const created = await call(request, "operator", "POST", "/api/v1/import/text", { content: brd(), sourceFileName: `def001-${RUN}.md`, sourceType: "MARKDOWN" });
@@ -707,10 +756,17 @@ test.describe("BRD/PRD 匯入（真後端＋假 OpenAI 相容伺服器）", () =
       await signIn(page, request, "operator");
       await page.goto(`/import?id=${id}`);
       await expect(page.getByTestId("import-step2")).toBeVisible(FIRST_LOAD);
+      // 樹狀預覽：maxRetries 為 null 的任務不印「最大重試次數」（W4 版印成「最大重試次數：null」）
+      await expect(page.getByTestId("import-tree")).not.toContainText("null");
       await page.getByRole("button", { name: "編輯任務：設定" }).click();
-      const retries = page.getByRole("dialog", { name: "編輯任務" }).getByLabel("最大重試次數");
+      const dialog = page.getByRole("dialog", { name: "編輯任務" });
+      const retries = dialog.getByLabel("最大重試次數");
       await expect(retries).toBeVisible();
-      await expect(retries).toHaveValue(""); // 目前是 "null"
+      await expect(retries).toHaveValue(""); // W4：字面 "null"
+      // 不改任何欄位就能按「確定」關閉對話框（W4：zod 擋住），且不算未儲存的編輯
+      await dialog.getByRole("button", { name: "確定" }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.getByTestId("dirty-notice")).toHaveCount(0);
     } finally {
       await call(request, "operator", "POST", `/api/v1/import/${id}/reject`); // 不留待簽核的草案
     }

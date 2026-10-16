@@ -60,7 +60,12 @@ const statusOf = async (request: APIRequestContext, kind: "projects" | "goals" |
 
 /** 契約 §2.4：Bridge 直接寫 DB 的終態／暫停狀態，比 Console 消費事件建審核項早一步——GET run 看到狀態時審核項可能還沒建好，所以等到它出現。 */
 const waitWithReview = (request: APIRequestContext, runId: string, status: "FAILED" | "PAUSED", timeoutMs = 120_000) =>
-  poll(() => getRun(request, runId), (r) => r.status === status && (r.pendingReviews ?? []).length > 0, `批次 ${runId} 進入 ${status} 且審核項已建立`, timeoutMs);
+  poll(
+    () => getRun(request, runId),
+    (r) => r.status === status && (r.pendingReviews ?? []).length > 0,
+    `批次 ${runId} 進入 ${status} 且審核項已建立`,
+    timeoutMs,
+  );
 
 test.describe("Phase 4 補充情境（真後端＋真 Bridge＋mock claude）", () => {
   test.setTimeout(240_000);
@@ -228,8 +233,7 @@ test.describe("Phase 4 補充情境（真後端＋真 Bridge＋mock claude）", 
 
   test("E2E-05 變體：V1 第一步失敗的 RETRY（沒有還原點→後續批次）、V3 新批次取代舊審核項、V4 等級 5 與等級 4 同樣建 ESCALATED 審核項（API-AUT-05）", async ({ request }) => {
     test.setTimeout(420_000);
-    const start = (f: Fixture, level: number) =>
-      call(request, "operator", "POST", `/api/v1/projects/${f.projectId}/execute`, { autonomyLevel: level, tokenBudget: 100000, scope: { mode: "ALL" } });
+    const start = (f: Fixture, level: number) => call(request, "operator", "POST", `/api/v1/projects/${f.projectId}/execute`, { autonomyLevel: level, tokenBudget: 100000, scope: { mode: "ALL" } });
     const idOf = (r: Awaited<ReturnType<typeof start>>) => {
       expect(r.status, JSON.stringify(r.json).slice(0, 300)).toBe(201);
       return dataOf<{ id: string }>(r).id;
@@ -342,8 +346,7 @@ test.describe("Phase 4 補充情境（真後端＋真 Bridge＋mock claude）", 
     // 重跑 ALL 又會卡在同一個任務，因此用 REJECT（只關審核項、任務維持 ESCALATED）搭配 SELECTED 的 taskIds。
     const f = await createFixture(request, { name: nm("QA 連續失敗"), kind: "B", level: 4, failTasks: [1, 2, 3] });
     type AlertRow = { rule: string; severity: string; subject: string; message: string; acknowledged: boolean };
-    const alertsOf = async (runId: string): Promise<AlertRow[]> =>
-      dataOf<AlertRow[]>(await call(request, "viewer", "GET", `/api/v1/monitor/projects/${f.projectId}/alerts?runId=${runId}`));
+    const alertsOf = async (runId: string): Promise<AlertRow[]> => dataOf<AlertRow[]>(await call(request, "viewer", "GET", `/api/v1/monitor/projects/${f.projectId}/alerts?runId=${runId}`));
     for (let i = 0; i < 3; i += 1) {
       const started = await call(request, "operator", "POST", `/api/v1/projects/${f.projectId}/execute`, {
         autonomyLevel: 4,

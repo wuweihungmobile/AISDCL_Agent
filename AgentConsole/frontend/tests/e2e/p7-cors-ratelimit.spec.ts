@@ -14,7 +14,10 @@ test.skip(!E2E_ROOT, NEEDS_BRIDGE);
 test.describe("跨來源標頭與限流（瀏覽器內 fetch）", () => {
   test.setTimeout(240_000);
 
-  test("429 的 Retry-After 與 X-Trace-Id 在瀏覽器內可讀（X-RateLimit-* 契約未要求暴露）；超限先得 429 而不是 403；伺服器端 429 帶 X-RateLimit-Limit／Remaining；operator 不受影響", async ({ page, request }) => {
+  test("429 的 Retry-After 與 X-Trace-Id 在瀏覽器內可讀（X-RateLimit-* 契約未要求暴露）；超限先得 429 而不是 403；伺服器端 429 帶 X-RateLimit-Limit／Remaining；operator 不受影響", async ({
+    page,
+    request,
+  }) => {
     await ensureQuota(request, "viewer", 95); // 視窗要夠新：後面要把 viewer 的 100 次打滿
     await page.goto("/login");
     const viewerToken = await tokenOf(request, "viewer");

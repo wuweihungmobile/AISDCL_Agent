@@ -5,7 +5,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 import { API_URL, RUN, loginViaUi } from "./helpers";
 import { collectConsoleErrors, snap } from "./mockApi";
-import { DEFECTS_OPEN, bootstrapSettings, call, dataOf, ensureQuota, getRun, parseSse, poll, tokenOf, waitRun, type SseFrame } from "./realBackend";
+import { bootstrapSettings, call, dataOf, ensureQuota, getRun, parseSse, poll, tokenOf, waitRun, type SseFrame } from "./realBackend";
 
 /**
  * Docker 全棧（經 nginx、同源）——W4-QA 矩陣 D／I 與契約 §6.2 #20：
@@ -43,7 +43,8 @@ function sddFiles(root: string): Record<string, string> {
   const ids = [1, 2, 3].map((n) => `AT-00${n}-1-1`);
   const rows = ids.map((at, i) => `| AC-00${i + 1}-1 | 驗收 ${i + 1} | ${at} | 情境 ${i + 1} | ✅ | Unit | □ |`);
   const blocks = ids.map((at, i) => `\`\`\`gherkin\n# ${at}\nScenario: 情境 ${i + 1}\n  Given 前置條件\n  When 執行動作\n  Then 輸出「[AT${i + 1}_DONE]」\n\`\`\``);
-  const fsm = "fsm_state:\n  project: demo\n  session_id: sid-1\n  current_state: IMPLEMENTATION\n  current_sprint: 2\n  updated_at: '2026-10-14T00:00:00+00:00'\n  frozen_stages:\n  - stage: SCG-0\n  decision_trace:\n  - {ts: t0, from: S0, to: S1, reason: r0}\n";
+  const fsm =
+    "fsm_state:\n  project: demo\n  session_id: sid-1\n  current_state: IMPLEMENTATION\n  current_sprint: 2\n  updated_at: '2026-10-14T00:00:00+00:00'\n  frozen_stages:\n  - stage: SCG-0\n  decision_trace:\n  - {ts: t0, from: S0, to: S1, reason: r0}\n";
   const md = `# Test Contract Specification — Demo\n\n場景：brownfield 既有系統改進\n\n## 1. AC → AT 映射表\n\n| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |\n|-------|---------|-------|---------|-------|---------|------|\n${rows.join("\n")}\n\n## 2. AT 格式\n\n${blocks.join("\n\n")}\n`;
   const tests = ids.map((at) => `def test_${at.replace(/-/g, "_")}_basic():\n    assert True\n`).join("\n");
   return {
@@ -62,7 +63,10 @@ async function createStackFixture(request: APIRequestContext, name: string, leve
   const p = await call(request, "operator", "POST", "/api/v1/projects", { name, executionPath: dir, passCriteria: "全部完成", description: "QA Docker 夾具", autonomyLevel: level, draft: false });
   expect(p.status, `建專案 → ${JSON.stringify(p.json)}`).toBe(201);
   const projectId = dataOf<{ id: string }>(p).id;
-  const layout: Array<[string, string[]]> = [["基礎", ["初始化", "設定"]], ["核心", ["實作"]]];
+  const layout: Array<[string, string[]]> = [
+    ["基礎", ["初始化", "設定"]],
+    ["核心", ["實作"]],
+  ];
   const goalIds: string[] = [];
   const taskIds: string[] = [];
   let n = 0;
@@ -257,10 +261,10 @@ test.describe("Docker 全棧（經 nginx、同源）", () => {
     await call(request, "operator", "POST", `/api/v1/executions/${runId}/cancel`);
   });
 
-  test("重啟 backend → 前端串流重連、session 不得被清除、不重複 → 通過審核跑完（矩陣 I；DEF-AC-007 釘住）", async ({ page, request }) => {
-    // 缺陷 DEF-AC-007（P2）：SSE 重連路徑換 token（POST /auth/refresh）時 backend 還沒起來（nginx 回 502），前端把任何換新失敗都當成登入失效，
-    // 清掉 session 並導向 /login。本機直連 backend 的重啟只有約 10 秒、重連先成功所以沒踩到；全棧經 nginx 約 15～40 秒。修好後這支會「意外通過」，屆時移除下一行。
-    test.fail(DEFECTS_OPEN, "DEF-AC-007（P2）：後端暫時不可用（502）時前端 refresh 失敗即清 session、導向 /login");
+  test("重啟 backend → 前端串流重連、session 不得被清除、不重複 → 通過審核跑完（矩陣 I；DEF-AC-007／契約 E2E-13 列 5，W5 已修）", async ({ page, request }) => {
+    // 缺陷 DEF-AC-007（P2，W5-FE 已修；本支在 W5-QA 移除了 test.fail）：SSE 重連路徑換 token（POST /auth/refresh）時 backend 還沒起來（nginx 回 502），
+    // W4 的前端把任何換新失敗都當成登入失效，清掉 session 並導向 /login。本機直連 backend 的重啟只有約 10 秒、重連先成功所以沒踩到；全棧經 nginx 約 15～40 秒。
+    // C-5：換新失敗分 renewed／invalid／unavailable 三類，只有 invalid（400／401／403）才登出；SSE 以 1→2→4→…→30 秒退避重連並維持「重新連線中」。
     const f = await createStackFixture(request, `QA Docker SSE ${RUN}`, 1);
     await page.goto("/login");
     await loginViaUi(page);
@@ -337,13 +341,123 @@ test.describe("Docker 全棧（經 nginx、同源）", () => {
     expect(stdout).not.toMatch(/access_token=/);
   });
 
-  test("nginx error log：重啟 backend 造成的上游錯誤，不得把 access_token 的值印進去（契約 §0.7 第 4 點的殘留風險）", async () => {
-    // 缺陷 DEF-AC-008（P3）：上游被切斷時 nginx 在 [error] 行印出完整請求行（含 ?access_token=<JWT>）；log_format 管不到 error_log。
-    // 修好（降 error_log 等級、或前端改 fetch＋Authorization 標頭）後這支會「意外通過」，屆時移除下一行。
-    test.fail(DEFECTS_OPEN, "DEF-AC-008（P3）：nginx error_log 的上游錯誤行帶出 access_token 的值");
+  test("nginx error log：重啟 backend 造成的上游錯誤，不得把 access_token 的值印進去（契約 §0.7 第 4 點的殘留風險；DEF-AC-008，W5 已修）", async () => {
+    // 缺陷 DEF-AC-008（P3，W5-INFRA 已修；本支在 W5-QA 移除了 test.fail）：W4 的 nginx 在上游被切斷時於 [error] 行印出完整請求行（含 ?access_token=<JWT>），
+    // log_format 管不到 error_log。C-15：error_log 降為 crit（要除錯時暫改回 error 並清檔）。
     const { stderr } = await docker("logs", NGINX);
     const leaked = [...usedTokens].filter((t) => stderr.includes(t));
     const sample = (stderr.split("\n").find((l) => l.includes("access_token")) ?? "").replace(/access_token=[^&" ]+/g, "access_token=<redacted-in-report>");
     expect(leaked.length, `error log 出現 ${leaked.length} 個 token 的值；樣本行：${sample}`).toBe(0);
+  });
+
+  test("C-15／O-08／O-09｜經 nginx：/api/health 回前端自己的 200（不再被反代到 backend 而回 401）；/_next/static 的 Cache-Control 恰好一份", async ({ request }) => {
+    const health = await request.get(`${API_URL}/api/health`, { failOnStatusCode: false });
+    expect(health.status(), "W4：/api/ 整段被反代到 backend，回 401").toBe(200);
+    expect(await health.json()).toEqual({ status: "ok" });
+    const home = await (await request.get(`${API_URL}/`)).text();
+    const asset = home.match(/\/_next\/static\/[^"'\\)]+\.(?:js|css)/)?.[0];
+    expect(asset, "首頁引用了 /_next/static 的資源").toBeTruthy();
+    const res = await request.get(`${API_URL}${asset}`);
+    expect(res.status()).toBe(200);
+    const cacheControl = res.headersArray().filter((h) => h.name.toLowerCase() === "cache-control");
+    expect(
+      cacheControl.map((h) => h.value),
+      "W4：nginx 與 Next 各加一份（共兩份）",
+    ).toEqual(["public, max-age=31536000, immutable"]);
+  });
+
+  test("BR-26／DEF-AC-003｜Bridge 深度探針（全棧）：容器 healthcheck 打 /health/deep 且 healthy、映像內 git 可執行、/health/deep 200 且四項檢查皆 ok；移走 git 後 503（淺層 /health 仍 200）並使容器轉 unhealthy；還原後回到 healthy", async () => {
+    test.setTimeout(420_000);
+    const state = async () => (await docker("inspect", "-f", "{{.State.Health.Status}}", BRIDGE)).stdout.trim();
+    const probe =
+      "import urllib.request as u,urllib.error as e,sys\ntry:\n r=u.urlopen(sys.argv[1],timeout=9); print(r.status, r.read().decode())\nexcept e.HTTPError as x:\n print(x.code, x.read().decode())";
+    const get = async (p: string) => (await docker("exec", BRIDGE, "python", "-c", probe, `http://127.0.0.1:8081${p}`)).stdout.trim();
+    type Deep = {
+      status: string;
+      reason?: string;
+      checks: { git: { ok: boolean; version?: string; reason?: string }; autoclaude: { ok: boolean }; workspace: { ok: boolean }; db: { ok: boolean | null } };
+    };
+    const parse = (s: string): { code: number; body: Deep } => ({ code: Number(s.slice(0, 3)), body: JSON.parse(s.slice(4)) as Deep });
+
+    expect((await docker("inspect", "-f", "{{json .Config.Healthcheck.Test}}", BRIDGE)).stdout, "容器的 healthcheck 打 /health/deep").toContain("/health/deep");
+    expect(await state()).toBe("healthy");
+    expect((await docker("exec", BRIDGE, "git", "--version")).stdout, "映像內 git 可執行（W4：沒有 git）").toMatch(/^git version \d+\./);
+    const ok = parse(await get("/health/deep"));
+    expect(ok.code, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body.status).toBe("ok");
+    expect(ok.body.checks.git.ok).toBe(true);
+    expect(ok.body.checks.git.version ?? "").toMatch(/^git version /);
+    expect([ok.body.checks.autoclaude.ok, ok.body.checks.workspace.ok, ok.body.checks.db.ok], "autoclaude／workspace／db（DB 模式：true）").toEqual([true, true, true]);
+
+    const gitPath = (await docker("exec", BRIDGE, "sh", "-c", "command -v git")).stdout.trim();
+    expect(gitPath).toMatch(/^\/.+git$/);
+    await docker("exec", "-u", "root", BRIDGE, "mv", gitPath, `${gitPath}.qa-off`);
+    try {
+      const bad = parse(await get("/health/deep"));
+      expect(bad.code, JSON.stringify(bad.body)).toBe(503);
+      expect(bad.body.status).toBe("degraded");
+      expect(bad.body.checks.git.ok).toBe(false);
+      expect(bad.body.reason ?? "").toContain("git");
+      expect(Number((await get("/health")).slice(0, 3)), "淺層 /health 仍 200——DEF-AC-003 當時看不見問題的原因").toBe(200);
+      await poll(state, (s) => s === "unhealthy", "缺 git 時 bridge 容器轉 unhealthy（W4：永遠 healthy）", 180_000, 5_000);
+    } finally {
+      await docker("exec", "-u", "root", BRIDGE, "mv", `${gitPath}.qa-off`, gitPath);
+    }
+    await poll(state, (s) => s === "healthy", "git 還原後 bridge 容器回到 healthy", 180_000, 5_000);
+    expect(parse(await get("/health/deep")).code).toBe(200);
+  });
+
+  test("C-12／NFR-9.4-04／INF-VOL-06（全棧）｜X-Trace-Id 貫穿：經 nginx 啟動批次，回應的 X-Trace-Id 出現在 Bridge 日誌的 POST /autoclaude/runs 行；Bridge 日誌每一行有 trace_id（容器 stderr 與卷內 bridge.log）；backend 的卷內 console.log 是 JSON 行", async ({
+    request,
+  }) => {
+    const f = await createStackFixture(request, `QA Docker trace ${RUN}`, 4);
+    const started = await call(request, "operator", "POST", `/api/v1/projects/${f.projectId}/execute`, { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } });
+    expect(started.status, JSON.stringify(started.json).slice(0, 300)).toBe(201);
+    const traceId = started.headers["x-trace-id"];
+    expect(traceId).toBeTruthy();
+    const runId = dataOf<{ id: string }>(started).id;
+    await waitRun(request, runId, ["COMPLETED"], 150_000);
+
+    const r = await docker("logs", BRIDGE);
+    const lines = `${r.stdout}\n${r.stderr}`.split("\n").filter((l) => l.trim() !== "");
+    const hit = lines.filter((l) => l.includes(`trace_id=${traceId} `));
+    expect(
+      hit.some((l) => l.includes("POST /autoclaude/runs") && l.includes(" 201")),
+      `Bridge 容器日誌裡找不到 trace_id=${traceId} 的 POST /autoclaude/runs：${hit.slice(0, 3).join(" ⏎ ")}`,
+    ).toBe(true);
+    expect(hit.length, "同一個 trace id 還貫穿該批次的其他 Bridge 請求").toBeGreaterThanOrEqual(2);
+    expect(
+      lines.filter((l) => !/ trace_id=\S+/.test(l)),
+      "容器日誌沒有 trace_id 的行",
+    ).toEqual([]);
+    const fileLines = (await docker("exec", BRIDGE, "cat", "/app/logs/bridge.log")).stdout.split("\n").filter((l) => l.trim() !== "");
+    expect(fileLines.length).toBeGreaterThan(10);
+    expect(
+      fileLines.filter((l) => !/ trace_id=\S+/.test(l)),
+      "卷內 bridge.log 沒有 trace_id 的行",
+    ).toEqual([]);
+    expect(fileLines.some((l) => l.includes(`trace_id=${traceId} `))).toBe(true);
+    // backend：卷內 console.log 為 JSON 行（LOG_DIR=/app/logs）
+    const back = (await docker("exec", BACKEND, "sh", "-c", "ls -l /app/logs/console.log && tail -n 40 /app/logs/console.log")).stdout.split("\n").filter((l) => l.startsWith("{"));
+    expect(back.length, "console.log 有 JSON 行").toBeGreaterThan(5);
+    const parsed = back.map((l) => JSON.parse(l) as Record<string, unknown>);
+    console.log(`[docker-trace] traceId=${traceId}；Bridge 命中 ${hit.length} 行；Bridge 卷內 ${fileLines.length} 行；backend JSON 行鍵：${Object.keys(parsed[0]).slice(0, 8).join(",")}`);
+  });
+
+  test("O-20／C-16｜未認證限流不可被偽造 X-Forwarded-For 繞過：連打 101 次、每次偽造不同來源，仍得到 429（W4：全是 401、沒有 429）", async () => {
+    test.setTimeout(240_000);
+    await new Promise((r) => setTimeout(r, 62_000)); // 讓主機來源（172.31.250.1）的未認證桶回到整個視窗
+    const codes: number[] = [];
+    for (let i = 0; i < 101; i += 1) {
+      const res = await fetch(`${API_URL}/api/v1/projects`, { headers: { "X-Forwarded-For": `203.0.113.${(i % 250) + 1}` } });
+      codes.push(res.status);
+    }
+    const n401 = codes.filter((c) => c === 401).length;
+    const n429 = codes.filter((c) => c === 429).length;
+    expect(n429, `101 次的狀態分佈：401×${n401}、429×${n429}`).toBeGreaterThanOrEqual(1);
+    expect(n401, "最多放 100 個 401（共用一個來源桶）").toBeLessThanOrEqual(100);
+    expect(n401 + n429).toBe(101);
+    console.log(`[docker-xff] 偽造 101 個不同 X-Forwarded-For：401×${n401}、429×${n429}`);
+    await new Promise((r) => setTimeout(r, 62_000)); // 把桶還給後面的情境
   });
 });

@@ -5,21 +5,8 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 import { RUN } from "./helpers";
 import { collectConsoleErrors, snap } from "./mockApi";
-import {
-  E2E_ROOT,
-  NEEDS_BRIDGE,
-  bootstrapSettings,
-  call,
-  createFixture,
-  dataOf,
-  ensureQuota,
-  getRun,
-  poll,
-  signIn,
-  waitRun,
-  type Fixture,
-  type Json,
-} from "./realBackend";
+import { extractPdfText } from "./pdfText";
+import { E2E_ROOT, NEEDS_BRIDGE, bootstrapSettings, call, createFixture, dataOf, ensureQuota, getRun, poll, signIn, waitRun, type Fixture, type Json } from "./realBackend";
 
 /**
  * Phase 5 專案監控（畫面 8）——對真後端＋真 Bridge＋mock claude（契約 §1.3、§3.8、§5 E2E-03 步驟 9～13、15、E2E-05、E2E-08）。
@@ -37,7 +24,12 @@ const kpi = (page: Page, key: string) => page.getByTestId(`kpi-${key}-value`);
 const fmt = (n: number, digits = 0) => n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
 type Metric = { value: number | null; previousValue: number | null; delta: number | null };
-type Metrics = Record<string, Metric> & { tokenBudget?: number; taskStatusDistribution: Record<string, number>; taskDurations: unknown[]; retryDistribution: Array<{ retries: number; tasks: number }> };
+type Metrics = Record<string, Metric> & {
+  tokenBudget?: number;
+  taskStatusDistribution: Record<string, number>;
+  taskDurations: unknown[];
+  retryDistribution: Array<{ retries: number; tasks: number }>;
+};
 
 let m1: Fixture;
 let m2: Fixture;
@@ -70,7 +62,12 @@ test.describe("專案監控（真後端＋真 Bridge＋mock claude）", () => {
     m2 = await createFixture(request, { name: nm("QA 監控 M2"), kind: "A", level: 4, failTasks: [2] });
     const r1 = await execute(request, m2, { autonomyLevel: 4, tokenBudget: 100000, scope: { mode: "ALL" } });
     // 契約 §2.4：Bridge 直接寫 DB 的終態比 Console 消費事件建審核項早一步，所以等到審核項出現再取
-    const failed = await poll(() => getRun(request, r1), (r) => r.status === "FAILED" && (r.pendingReviews ?? []).length > 0, `批次 ${r1} FAILED 且審核項已建立`, 90_000);
+    const failed = await poll(
+      () => getRun(request, r1),
+      (r) => r.status === "FAILED" && (r.pendingReviews ?? []).length > 0,
+      `批次 ${r1} FAILED 且審核項已建立`,
+      90_000,
+    );
     const review = failed.pendingReviews![0].id;
     const skip = await call(request, "operator", "POST", `/api/v1/executions/${r1}/review/${review}`, { decision: "SKIP" });
     expect(skip.status).toBe(204);
@@ -170,13 +167,11 @@ test.describe("專案監控（真後端＋真 Bridge＋mock claude）", () => {
     await expect(rows.first()).toContainText("ESCALATION");
     await expect(page.getByTestId("alerts-open-count")).toHaveText("1");
     await rows.first().getByTestId("alert-detail-toggle").click();
-    await expect(rows.first().getByTestId("alert-detail")).toContainText("step:G1-T2");
+    await expect(rows.first().getByTestId("alert-detail")).toContainText(`step:${m2Runs[0]}:G1-T2`); // C-7：去重鍵帶 runId（v1.1 是 step:G1-T2）
     await snap(page, "p5-monitor-alerts.png", { focus: page.getByTestId("alerts-card") });
     await rows.first().getByTestId("alert-ack").click();
     await expect(rows.first()).toHaveAttribute("data-ack", "true");
-    const list = dataOf<Array<{ acknowledged: boolean; acknowledgedBy?: string; rule: string }>>(
-      await call(request, "viewer", "GET", `/api/v1/monitor/projects/${m2.projectId}/alerts`),
-    );
+    const list = dataOf<Array<{ acknowledged: boolean; acknowledgedBy?: string; rule: string }>>(await call(request, "viewer", "GET", `/api/v1/monitor/projects/${m2.projectId}/alerts`));
     await poll(
       async () => dataOf<Array<{ acknowledged: boolean }>>(await call(request, "viewer", "GET", `/api/v1/monitor/projects/${m2.projectId}/alerts`)),
       (a) => a.every((x) => x.acknowledged),
@@ -202,7 +197,7 @@ test.describe("專案監控（真後端＋真 Bridge＋mock claude）", () => {
     await expect(kpi(page, "tokenBudgetUsageRate")).toHaveText("413.3%");
   });
 
-  test("匯出報表：CSV 下載（檔名取自 Content-Disposition＝CORS 暴露）、BOM、四段內容；PDF 回 501 顯示「尚未提供」", async ({ page, request }) => {
+  test("匯出報表：CSV 下載（檔名取自 Content-Disposition＝CORS 暴露）、BOM、四段內容；PDF 下載 200 的真檔、抽得出專案名稱／四區段／中文任務名（C-4，W4 的 501 已退役）", async ({ page, request }) => {
     await open(page, request, m1);
     await page.getByTestId("run-select").selectOption(m1Run);
     await expect(kpi(page, "totalTokens")).toHaveText(fmt(3720));
@@ -224,9 +219,21 @@ test.describe("專案監控（真後端＋真 Bridge＋mock claude）", () => {
     expect(section("runs")).toHaveLength(1);
     expect(section("tasks")).toHaveLength(3);
     expect(section("alerts")).toHaveLength(0);
-    await expect(page.getByText(/已匯出報表：monitor-report-/)).toBeVisible();
-    await page.getByTestId("export-pdf").click();
-    await expect(page.getByText("PDF 報表尚未提供（預計 W5 提供），請先匯出 CSV")).toBeVisible();
+    await expect(page.getByText(/已匯出報表：monitor-report-.*\.csv/)).toBeVisible();
+
+    // PDF（C-4）：200 的真檔——位元組原樣存成 .pdf，檔名取自 Content-Disposition；不再有「PDF 報表尚未提供」
+    const [pdfDownload] = await Promise.all([page.waitForEvent("download"), page.getByTestId("export-pdf").click()]);
+    expect(pdfDownload.suggestedFilename()).toMatch(/^monitor-report-[0-9a-f]{8}-\d{8}-\d{4}\.pdf$/);
+    expect(pdfDownload.suggestedFilename().slice("monitor-report-".length, "monitor-report-".length + 8)).toBe(m1.projectId.slice(0, 8));
+    const pdf = await readFile((await pdfDownload.path()) as string);
+    expect(pdf.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    const pdfText = extractPdfText(pdf);
+    expect(pdfText).toContain(`${m1.name} 監控報表`);
+    for (const s of ["summary", "runs", "tasks", "alerts"]) expect(pdfText.split("\n")).toContain(s);
+    expect(pdfText.replace(/\s+/g, "")).toContain("totalTokens3720");
+    for (const zh of ["基礎", "核心", "初始化", "設定", "實作"]) expect(pdfText).toContain(zh);
+    await expect(page.getByText(/已匯出報表：monitor-report-.*\.pdf/)).toBeVisible();
+    await expect(page.getByText("PDF 報表尚未提供")).toHaveCount(0);
     await snap(page, "p5-monitor-export.png");
   });
 });

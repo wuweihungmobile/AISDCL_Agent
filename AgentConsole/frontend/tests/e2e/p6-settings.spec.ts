@@ -5,7 +5,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 import { API_URL, RUN } from "./helpers";
 import { collectConsoleErrors, snap } from "./mockApi";
-import { DEFECTS_OPEN, E2E_ROOT, FakeLlm, NEEDS_BRIDGE, bootstrapSettings, call, dataOf, ensureQuota, signIn, tokenOf, type Json } from "./realBackend";
+import { E2E_ROOT, FakeLlm, NEEDS_BRIDGE, bootstrapSettings, call, dataOf, ensureQuota, signIn, tokenOf, type Json } from "./realBackend";
 
 /**
  * Phase 6 系統設定（畫面 9）——對真後端（console-api＋PG）：50 鍵、Token Guard 跨鍵校驗、敏感值二次確認與 reveal、
@@ -90,7 +90,11 @@ test.describe("系統參數設定（真後端）", () => {
     const all = dataOf<Record<string, Cfg[]>>(await call(request, "viewer", "GET", "/api/v1/settings"));
     expect(Object.keys(all)).toEqual(["model", "agent", "execution", "monitor", "autoclaude", "sdd"]);
     expect(Object.values(all).map((v) => v.length)).toEqual(KEY_COUNTS);
-    expect(Object.values(all).flat().every((c) => !!c.effect)).toBe(true);
+    expect(
+      Object.values(all)
+        .flat()
+        .every((c) => !!c.effect),
+    ).toBe(true);
     const apiKey = all.model.find((c) => c.key === "apiKey")!;
     expect(apiKey).toMatchObject({ value: MASK, isEncrypted: true, hasValue: false });
     expect(all.monitor.find((c) => c.key === "refreshIntervalMs")).toMatchObject({ value: "10000", defaultValue: "10000", min: 10000 });
@@ -167,14 +171,20 @@ test.describe("系統參數設定（真後端）", () => {
       expect(r.status).toBe(400);
       expect(r.json.reason).toBe(REASON);
     }
-    for (const body of [{ compactThresholdPct: 100, haltThresholdPct: 100 }, { compactThresholdPct: 0, haltThresholdPct: 50 }]) {
+    for (const body of [
+      { compactThresholdPct: 100, haltThresholdPct: 100 },
+      { compactThresholdPct: 0, haltThresholdPct: 50 },
+    ]) {
       const r = await call(request, "admin", "PUT", "/api/v1/settings/execution/token-guard", body);
       expect(r.status).toBe(400);
       expect(r.json.reason, JSON.stringify(r.json)).not.toBe(REASON); // Bean Validation：欄位錯誤，不是跨鍵 reason
       expect((r.json.errors as Array<{ field: string }>)[0].field).toMatch(/ThresholdPct$/);
     }
     // 單鍵跨鍵校驗（對端現值 70／95）
-    for (const [key, value] of [["haltThresholdPct", "60"], ["compactThresholdPct", "96"]] as const) {
+    for (const [key, value] of [
+      ["haltThresholdPct", "60"],
+      ["compactThresholdPct", "96"],
+    ] as const) {
       const r = await call(request, "admin", "PUT", `/api/v1/settings/execution/${key}`, { value });
       expect(r.status, key).toBe(400);
       expect(r.json.reason).toBe(REASON);
@@ -373,27 +383,45 @@ test.describe("系統參數設定（真後端）", () => {
     expect((await call(request, "admin", "POST", "/api/v1/settings/monitor/refreshIntervalMs/reset")).status).toBe(200);
   });
 
-  test("DEF-AC-002：匯出後原樣匯入（一個值都沒改）不得出現 errors——值與現值相同者一律 skipped（契約 §1.5.10）", async ({ request }) => {
-    // 現況：匯入對「值未變」的項目仍先跑 SSRF／allowlist 驗證。e2e profile 的 allowlist 是 127.0.0.1,localhost,rebind.e2e.test，
+  test("DEF-AC-002（W5 已修）：匯出後原樣匯入（一個值都沒改）errors=[]、applied=0、skipped=50（2 筆 <encrypted>＋48 筆值未變）；把 model.apiUrl 改成不在 allowlist 的主機才進 errors，其餘 skipped（契約 §1.5.10；E2E-13 列 6）", async ({
+    request,
+  }) => {
+    // W4 的缺陷：匯入對「值未變」的項目仍先跑 SSRF／allowlist 驗證。e2e profile 的 allowlist 是 127.0.0.1,localhost,rebind.e2e.test，
     // 種子預設的 model.apiUrl（api.minimax.io）不在其中 ⇒ 原樣匯入得到 errors=[model.apiUrl 目標位址未通過 SSRF／allowlist 檢查]、skipped=49。
-    // 修好後這支會「意外通過」，屆時把下一行 test.fail 拿掉即可。
-    test.fail(DEFECTS_OPEN, "DEF-AC-002（P3）：設定匯入對值未變的項目仍重驗 allowlist，原樣匯入出現 errors");
+    // W5-BE：值未變一律先計 skipped（順序：<encrypted> 佔位 → 加密鍵給明文 errors → 值未變 skipped → 驗證 → 候選）。本情境在 W5-QA 移除了 test.fail。
     expect((await call(request, "admin", "POST", "/api/v1/settings/model/apiUrl/reset")).status).toBe(200);
     const token = await tokenOf(request, "admin");
     const exported = await request.fetch(`${API_URL}/api/v1/settings/export`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, failOnStatusCode: false });
     expect(exported.status()).toBe(200);
-    const imported = await request.fetch(`${API_URL}/api/v1/settings/import`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      multipart: { file: { name: "aisdlc-settings.json", mimeType: "application/json", buffer: await exported.body() } },
-      failOnStatusCode: false,
-    });
-    expect(imported.status()).toBe(200);
-    const data = ((await imported.json()) as { data: { applied: number; skipped: number; errors: Array<{ category: string; key: string; reason: string }> } }).data;
-    expect(data.errors, `原樣匯入的結果：${JSON.stringify(data)}`).toEqual([]);
-    expect(data.applied).toBe(0);
+    const exportedBody = await exported.body();
+    type ImportData = { applied: number; skipped: number; errors: Array<{ category: string; key: string; reason: string }> };
+    const upload = async (buffer: Buffer): Promise<{ status: number; data: ImportData }> => {
+      const res = await request.fetch(`${API_URL}/api/v1/settings/import`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        multipart: { file: { name: "aisdlc-settings.json", mimeType: "application/json", buffer } },
+        failOnStatusCode: false,
+      });
+      return { status: res.status(), data: ((await res.json()) as { data: ImportData }).data };
+    };
+    // ① 原樣匯入
+    const same = await upload(exportedBody);
+    expect(same.status).toBe(200);
+    expect(same.data.errors, `原樣匯入的結果：${JSON.stringify(same.data)}`).toEqual([]);
+    expect(same.data.applied).toBe(0);
+    expect(same.data.skipped, "2 筆 <encrypted> 佔位＋48 筆值未變").toBe(50);
+    // ② 只把 model.apiUrl 改成不在 allowlist 的主機：該鍵進 errors，其餘 skipped，且沒有任何值被套用
+    const doc = JSON.parse(exportedBody.toString("utf-8")) as { configs: Array<{ category: string; key: string; value: string }> };
+    const before = (await settingsOf(request, "admin", "model")).find((c) => c.key === "apiUrl")!.value;
+    const forbidden = "https://not-on-the-allowlist.example/v1/chat/completions";
+    const changed = await upload(Buffer.from(JSON.stringify({ ...doc, configs: doc.configs.map((c) => (c.key === "apiUrl" ? { ...c, value: forbidden } : c)) })));
+    expect(changed.status).toBe(200);
+    expect(changed.data.errors.map((e) => `${e.category}.${e.key}`)).toEqual(["model.apiUrl"]);
+    expect(changed.data.errors[0].reason).toContain("allowlist");
+    expect(changed.data.applied).toBe(0);
+    expect(changed.data.skipped, "其餘 49 筆（2 佔位＋47 值未變）").toBe(49);
+    expect((await settingsOf(request, "admin", "model")).find((c) => c.key === "apiUrl")!.value, "被拒的值沒有寫進去").toBe(before);
   });
-
   test("角色：operator／viewer 看得到參數與歷史，但輸入、重置、儲存、匯出入、測試連線全部停用；後端對寫入 403（契約 E2E-09 步驟 9）", async ({ page, request }) => {
     await openSettings(page, request, "viewer");
     await expect(page.getByTestId("readonly-banner")).toContainText("目前角色（VIEWER）只能檢視系統參數");

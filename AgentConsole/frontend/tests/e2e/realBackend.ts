@@ -48,13 +48,7 @@ export async function tokenOf(request: APIRequestContext, role: Role): Promise<s
 }
 
 /** 呼叫 REST（任何狀態碼都回傳，由呼叫端斷言）。 */
-export async function call(
-  request: APIRequestContext,
-  role: Role,
-  method: "GET" | "POST" | "PUT" | "DELETE",
-  apiPath: string,
-  body?: unknown,
-): Promise<Reply> {
+export async function call(request: APIRequestContext, role: Role, method: "GET" | "POST" | "PUT" | "DELETE", apiPath: string, body?: unknown): Promise<Reply> {
   const token = await tokenOf(request, role);
   const res = await request.fetch(`${API_URL}${apiPath}`, {
     method,
@@ -152,7 +146,12 @@ export async function getRun(request: APIRequestContext, runId: string): Promise
 }
 
 export async function waitRun(request: APIRequestContext, runId: string, statuses: string[], timeoutMs = 90_000): Promise<RunView> {
-  return poll(() => getRun(request, runId), (r) => statuses.includes(r.status), `run ${runId} 進入 ${statuses.join("／")}`, timeoutMs);
+  return poll(
+    () => getRun(request, runId),
+    (r) => statuses.includes(r.status),
+    `run ${runId} 進入 ${statuses.join("／")}`,
+    timeoutMs,
+  );
 }
 
 export type Fixture = { projectId: string; name: string; dir: string; goalIds: string[]; taskIds: string[] };
@@ -161,10 +160,7 @@ export type Fixture = { projectId: string; name: string; dir: string; goalIds: s
  * 契約 §5.0.3 夾具：A＝PRJ-A（G1：T1、T2；G2：T3，依賴 G1）、B＝PRJ-B（G1：T1～T3；G2：T4、T5）。
  * failTasks＝要帶 [FAIL_ME] 的任務全域序號（1 起）；draft＝建成未簽核草案。每個任務 maxRetries=1。
  */
-export async function createFixture(
-  request: APIRequestContext,
-  opts: { name: string; kind?: "A" | "B"; level?: number; draft?: boolean; failTasks?: number[] },
-): Promise<Fixture> {
+export async function createFixture(request: APIRequestContext, opts: { name: string; kind?: "A" | "B"; level?: number; draft?: boolean; failTasks?: number[] }): Promise<Fixture> {
   const { name, kind = "A", level = 4, draft = false, failTasks = [] } = opts;
   const dir = path.join(E2E_ROOT, "projects", name.replace(/[^A-Za-z0-9_-]/g, "_"));
   mkdirSync(dir, { recursive: true });
@@ -180,8 +176,14 @@ export async function createFixture(
   const projectId = dataOf<{ id: string }>(p).id;
   const layout: Array<[string, string[]]> =
     kind === "A"
-      ? [["基礎", ["初始化", "設定"]], ["核心", ["實作"]]]
-      : [["基礎", ["任務一", "任務二", "任務三"]], ["核心", ["任務四", "任務五"]]];
+      ? [
+          ["基礎", ["初始化", "設定"]],
+          ["核心", ["實作"]],
+        ]
+      : [
+          ["基礎", ["任務一", "任務二", "任務三"]],
+          ["核心", ["任務四", "任務五"]],
+        ];
   const goalIds: string[] = [];
   const taskIds: string[] = [];
   let n = 0;
@@ -301,8 +303,7 @@ export { MARKER as LLM_MARKER };
 
 type Task = { name: string; description: string; passCriteria: string; sortOrder: number };
 const task = (i: number, description = `請輸出 [T${i}_DONE]`, name = `任務${i}`): Task => ({ name, description, passCriteria: `輸出含 [T${i}_DONE]`, sortOrder: i - 1 });
-const manyTasks = (count: number, brokenIndex = -1): Task[] =>
-  Array.from({ length: count }, (_, i) => task(i + 1, i === brokenIndex ? "  " : undefined));
+const manyTasks = (count: number, brokenIndex = -1): Task[] => Array.from({ length: count }, (_, i) => task(i + 1, i === brokenIndex ? "  " : undefined));
 
 /** 契約 E2E-01 的 S-OK 樹：g1 兩個任務、g2 一個任務且依賴 g1。 */
 export function okTree(projectName: string): Json {
@@ -407,7 +408,11 @@ export class FakeLlm {
         }
         const text = JSON.stringify(body);
         // 標記有包含關係（GATE_EMPTY ⊂ GATE_EMPTY_NAME）：長的先比
-        const hit = this.gatesOn ? Object.values(MARKER).sort((a, b) => b.length - a.length).find((m) => text.includes(m)) : undefined;
+        const hit = this.gatesOn
+          ? Object.values(MARKER)
+              .sort((a, b) => b.length - a.length)
+              .find((m) => text.includes(m))
+          : undefined;
         if (hit === MARKER.http500) send(500, { error: "boom" });
         else if (hit === MARKER.badJson) send(200, wrap("not json"));
         else if (hit) send(200, wrap(JSON.stringify(gateTree(hit, this.projectName))));

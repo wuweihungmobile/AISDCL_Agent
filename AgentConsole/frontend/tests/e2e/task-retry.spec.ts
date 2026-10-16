@@ -4,7 +4,8 @@ import { loginViaStorage } from "./helpers";
 
 /**
  * 重試只在 FAILED／ESCALATED 啟用。後端目前沒有把任務改成 FAILED 的入口（要由執行引擎事件驅動，Phase 4），
- * 所以這支用 route mock 回傳 FAILED 的任務詳情與重試結果，驗證前端：按鈕啟用、送出 POST /retry、toast 帶 x / y。
+ * 所以這支用 route mock 回傳 FAILED 的任務詳情與重試結果，驗證前端：按鈕啟用、送出 POST /retry、toast 帶「手動重試第 N 次（不計入自動重試上限 M）」（W5 C-9；
+ * W4 的文案是「重試 x / y」，把手動重試誤導成受 maxRetries 限制）。真後端的 ESCALATED 任務重試在 p9-w5-api／p9-w5-ui。
  * （PENDING 任務的重試鈕停用，已在 crud-flow 以真資料驗證。）
  */
 const PROJECT = "11111111-1111-4111-8111-111111111111";
@@ -32,7 +33,7 @@ const taskDetail = (status: string, retryCount: number) => ({
 });
 const ok = (data: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify({ code: 200, message: "success", data }) });
 
-test("FAILED 任務可重試：送出 POST /retry，toast 顯示重試 1 / 3；日誌可搜尋", async ({ page, request }) => {
+test("FAILED 任務可重試：送出 POST /retry，toast 顯示手動重試第 1 次（不計入自動重試上限 3）；日誌可搜尋", async ({ page, request }) => {
   await loginViaStorage(page, request);
   let current = taskDetail("FAILED", 0);
   let retryCalls = 0;
@@ -44,10 +45,43 @@ test("FAILED 任務可重試：送出 POST /retry，toast 顯示重試 1 / 3；�
     return route.fulfill(ok(current));
   });
   await page.route(`**/api/v1/goals/${GOAL}`, (route) =>
-    route.fulfill(ok({ id: GOAL, projectId: PROJECT, name: "模擬目標", passCriteria: "-", sortOrder: 0, status: "IN_PROGRESS", dependsOn: [], signedOff: true, taskCount: 1, completedTaskCount: 0, completionRatio: 0, tasks: [], createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" })),
+    route.fulfill(
+      ok({
+        id: GOAL,
+        projectId: PROJECT,
+        name: "模擬目標",
+        passCriteria: "-",
+        sortOrder: 0,
+        status: "IN_PROGRESS",
+        dependsOn: [],
+        signedOff: true,
+        taskCount: 1,
+        completedTaskCount: 0,
+        completionRatio: 0,
+        tasks: [],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ),
   );
   await page.route(`**/api/v1/projects/${PROJECT}`, (route) =>
-    route.fulfill(ok({ id: PROJECT, name: "模擬專案", executionPath: "/x", passCriteria: "-", status: "EXECUTING", autonomyLevel: 3, signedOff: true, goalsCount: 1, tasksCount: 1, tasksDone: 0, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", goals: [] })),
+    route.fulfill(
+      ok({
+        id: PROJECT,
+        name: "模擬專案",
+        executionPath: "/x",
+        passCriteria: "-",
+        status: "EXECUTING",
+        autonomyLevel: 3,
+        signedOff: true,
+        goalsCount: 1,
+        tasksCount: 1,
+        tasksDone: 0,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        goals: [],
+      }),
+    ),
   );
 
   await page.goto(`/projects/${PROJECT}/goals/${GOAL}/tasks/${TASK}`);
@@ -63,7 +97,7 @@ test("FAILED 任務可重試：送出 POST /retry，toast 顯示重試 1 / 3；�
   const retry = page.getByRole("button", { name: "重試" });
   await expect(retry).toBeEnabled();
   await retry.click();
-  await expect(page.getByRole("status").filter({ hasText: "已重新排入佇列（重試 1 / 3）" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "已重新排入佇列：手動重試第 1 次（不計入自動重試上限 3）" })).toBeVisible();
   expect(retryCalls).toBe(1);
   await expect(page.getByTestId("metric-retries")).toHaveText("1 / 3");
   await expect(retry).toBeDisabled(); // 已轉 QUEUED，不可再重試

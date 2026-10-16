@@ -109,7 +109,12 @@ test.describe("專案執行（真後端＋真 Bridge＋mock claude）", () => {
       await expect(page.getByTestId("log-line").filter({ hasText: `開始：${name}` })).toHaveCount(1);
       await expect(page.getByTestId("log-line").filter({ hasText: `完成：${name}` })).toHaveCount(1);
     }
-    await expect(page.getByTestId("log-line").filter({ hasText: "Token: 1240" }).or(page.getByTestId("log-line").filter({ hasText: "Token: 1,240" }))).toHaveCount(3);
+    await expect(
+      page
+        .getByTestId("log-line")
+        .filter({ hasText: "Token: 1240" })
+        .or(page.getByTestId("log-line").filter({ hasText: "Token: 1,240" })),
+    ).toHaveCount(3);
     await snap(page, "p4-execute-completed.png", { tall: true });
 
     // 後端一致（契約 E2E-03 步驟 4～8、14）
@@ -276,7 +281,12 @@ test.describe("專案執行（真後端＋真 Bridge＋mock claude）", () => {
     await expect(page.getByTestId("run-status")).toHaveAttribute("data-status", "COMPLETED", { timeout: 90_000 });
     const run = await latestRun(request, f.projectId, 1);
     // restore 後的終態：6200 ＝ 3720 ＋ 2 × 1240（Bridge 的累計跨 restore 持續）；T1 沒有重跑
-    const after = await poll(() => getRun(request, run.id), (r) => r.status === "COMPLETED" && r.totalTokensUsed === 6200, "restore 後 COMPLETED 且 Token=6200", 60_000);
+    const after = await poll(
+      () => getRun(request, run.id),
+      (r) => r.status === "COMPLETED" && r.totalTokensUsed === 6200,
+      "restore 後 COMPLETED 且 Token=6200",
+      60_000,
+    );
     expect(after.totalTokensUsed).toBe(6200);
     const cps = dataOf<unknown[]>(await call(request, "viewer", "GET", `/api/v1/executions/${run.id}/checkpoints`));
     expect(cps.length).toBeGreaterThan(3); // append-only
@@ -296,7 +306,12 @@ test.describe("專案執行（真後端＋真 Bridge＋mock claude）", () => {
     await expect(page.getByTestId("run-status")).toContainText("已暫停", { timeout: 60_000 });
     const pausedRun = await latestRun(request, g.projectId, 1);
     // Bridge 直接寫 DB 的暫停狀態比 Console 消費事件建審核項早一步（契約 §2.4）：等審核項出現再取
-    const before = await poll(() => getRun(request, pausedRun.id), (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length > 0, `批次 ${pausedRun.id} PAUSED 且審核項已建立`, 60_000);
+    const before = await poll(
+      () => getRun(request, pausedRun.id),
+      (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length > 0,
+      `批次 ${pausedRun.id} PAUSED 且審核項已建立`,
+      60_000,
+    );
     const oldReview = before.pendingReviews![0].id;
     await page.getByTestId("control-restore").click();
     await expect(page.getByTestId("checkpoint-option")).toHaveCount(1);
@@ -304,7 +319,12 @@ test.describe("專案執行（真後端＋真 Bridge＋mock claude）", () => {
     await page.getByTestId("checkpoint-confirm").click();
     await expect(page.getByTestId("checkpoint-dialog")).toHaveCount(0);
     // 還原後從 G1-T2 再跑：Level 1 在該步之後再暫停一次，產生新的審核項；舊審核項已被系統拒絕
-    await poll(() => getRun(request, pausedRun.id), (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length === 1 && r.pendingReviews![0].id !== oldReview, "restore 後再次 PAUSED 且是新的審核項", 60_000);
+    await poll(
+      () => getRun(request, pausedRun.id),
+      (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length === 1 && r.pendingReviews![0].id !== oldReview,
+      "restore 後再次 PAUSED 且是新的審核項",
+      60_000,
+    );
     await expect(page.getByTestId("review-row")).toHaveCount(1);
     const rows = await call(request, "viewer", "GET", `/api/v1/monitor/projects/${g.projectId}/logs?runId=${pausedRun.id}&size=200&order=asc`);
     const logText = JSON.stringify(rows.json);
@@ -406,7 +426,10 @@ test.describe("專案執行（真後端＋真 Bridge＋mock claude）", () => {
     // 靠客戶端 (seq,n) 去重補齊（契約 §2.8 第 4 點）。短暫斷線（<3 秒）的原生 Last-Event-ID 重播由下方 E2E-12 的 API 情境驗。
     const reconnects = streamReqs.slice(before).filter((r) => r.url.includes("/logs"));
     expect(reconnects.length, `重連的 /logs 請求：${JSON.stringify(reconnects)}`).toBeGreaterThanOrEqual(1);
-    expect(reconnects.some((r) => r.url.includes("tail=1000")), `重建連線要帶 tail=1000：${JSON.stringify(reconnects)}`).toBe(true);
+    expect(
+      reconnects.some((r) => r.url.includes("tail=1000")),
+      `重建連線要帶 tail=1000：${JSON.stringify(reconnects)}`,
+    ).toBe(true);
     // 重播後畫面沒有重複：已發生的事件各一次、仍是暫停＋一個待審核項
     await expect(page.getByTestId("run-status")).toContainText("已暫停");
     await expect(page.getByTestId("review-row")).toHaveCount(1);
@@ -615,7 +638,14 @@ test.describe("契約 E2E-02／E2E-12（API 層，真 SseEmitter）", () => {
     const statusFrames = idFrames.filter((fr) => fr.event === "status-change").map((fr) => JSON.parse(fr.data!) as { runStatus: string; bridgeStatus: string });
     expect(statusFrames.at(-1)).toMatchObject({ runStatus: "COMPLETED", bridgeStatus: "COMPLETED" });
     const steps = idFrames.filter((fr) => fr.event === "log").map((fr) => JSON.parse(fr.data!) as { source: string; stepId?: string; stepStatus?: string; message: string; taskId?: string });
-    expect(steps.filter((s) => s.source === "STEP").map((s) => `${s.stepStatus} ${s.stepId}`)).toEqual(["STARTED G1-T1", "COMPLETED G1-T1", "STARTED G1-T2", "COMPLETED G1-T2", "STARTED G2-T1", "COMPLETED G2-T1"]);
+    expect(steps.filter((s) => s.source === "STEP").map((s) => `${s.stepStatus} ${s.stepId}`)).toEqual([
+      "STARTED G1-T1",
+      "COMPLETED G1-T1",
+      "STARTED G1-T2",
+      "COMPLETED G1-T2",
+      "STARTED G2-T1",
+      "COMPLETED G2-T1",
+    ]);
     expect(steps.filter((s) => s.source === "STEP" && s.stepStatus === "COMPLETED").every((s) => s.message.endsWith("Token: 1240"))).toBe(true);
     expect(steps.some((s) => s.source === "ENGINE")).toBe(true);
     expect(idFrames.some((fr) => fr.event === "review-request" || fr.event === "alert")).toBe(false);
@@ -632,7 +662,11 @@ test.describe("契約 E2E-02／E2E-12（API 層，真 SseEmitter）", () => {
     const metrics = await readSse(`${base}/metrics?access_token=${opT}`);
     expect(metrics.status).toBe(200);
     const mFrames = metrics.frames.filter((fr) => fr.id);
-    expect(mFrames.map((fr) => [fr.id, fr.event])).toEqual([[`${S}.1`, "progress-update"], [`${S}.2`, "token-update"], [`${S}.3`, "metric-update"]]);
+    expect(mFrames.map((fr) => [fr.id, fr.event])).toEqual([
+      [`${S}.1`, "progress-update"],
+      [`${S}.2`, "token-update"],
+      [`${S}.3`, "metric-update"],
+    ]);
     expect(JSON.parse(mFrames[0].data!)).toMatchObject({ completedSteps: 3, totalSteps: 3, progressPct: 100 });
     expect(JSON.parse(mFrames[1].data!)).toMatchObject({ tokensUsed: 3720 });
     expect(JSON.parse(mFrames[2].data!)).toMatchObject({ completedTasks: 3, totalTasks: 3, totalTokensUsed: 3720 });
@@ -645,7 +679,12 @@ test.describe("契約 E2E-02／E2E-12（API 層，真 SseEmitter）", () => {
     const p = await call(request, "operator", "POST", `/api/v1/projects/${paused.projectId}/execute`, { autonomyLevel: 1, tokenBudget: 100000, scope: { mode: "ALL" } });
     const pausedRun = dataOf<{ id: string }>(p).id;
     // 契約 §2.4：PAUSED 的狀態比審核項早一步可見——等到審核項出現
-    const pausedView = await poll(() => getRun(request, pausedRun), (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length > 0, `批次 ${pausedRun} PAUSED 且審核項已建立`, 90_000);
+    const pausedView = await poll(
+      () => getRun(request, pausedRun),
+      (r) => r.status === "PAUSED" && (r.pendingReviews ?? []).length > 0,
+      `批次 ${pausedRun} PAUSED 且審核項已建立`,
+      90_000,
+    );
     expect(pausedView.pendingReviews).toHaveLength(1);
     const alive = await readSse(`${API_URL}/api/v1/stream/executions/${pausedRun}/logs?access_token=${opT}&tail=0`, { maxMs: 7_000 });
     expect(alive.status).toBe(200);
@@ -677,7 +716,10 @@ test.describe("契約 E2E-02／E2E-12（API 層，真 SseEmitter）", () => {
     await waitRun(request, pausedRun, ["PAUSED"]);
     expect((await call(request, "operator", "POST", `/api/v1/executions/${pausedRun}/cancel`)).status).toBe(200);
     // 步驟 11：預檢——Allow-Headers 含 Last-Event-ID
-    const pre = await fetch(`${base}/logs`, { method: "OPTIONS", headers: { Origin: "http://localhost:3000", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "last-event-id,authorization" } });
+    const pre = await fetch(`${base}/logs`, {
+      method: "OPTIONS",
+      headers: { Origin: "http://localhost:3000", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "last-event-id,authorization" },
+    });
     expect(pre.status).toBeLessThan(300);
     expect((pre.headers.get("access-control-allow-headers") ?? "").toLowerCase()).toContain("last-event-id");
   });
