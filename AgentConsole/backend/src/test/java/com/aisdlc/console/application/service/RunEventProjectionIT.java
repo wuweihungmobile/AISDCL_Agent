@@ -104,7 +104,7 @@ class RunEventProjectionIT extends AbstractExecutionIT {
         List<Edge> edges = List.of(new Edge(UUID.fromString(f.g1()), UUID.fromString(f.g2()), EdgeKind.DEPENDENCY));
         ExecutionRun run = runRepository.insert(new ExecutionRun(UUID.randomUUID(), UUID.fromString(f.projectId()), 1,
                 RunStatus.INITIALIZING, level, RunScope.all(), 0L, budget, Instant.now(), null,
-                new DagSnapshot(nodes, edges), 0, null));
+                new DagSnapshot(nodes, edges), 0, null, null));
         // 「execute 成功之後」的讀模型：專案 EXECUTING、範圍內任務 QUEUED
         jdbc.update("update console.projects set status = 'EXECUTING' where id = ?", UUID.fromString(f.projectId()));
         jdbc.update("update console.tasks set status = 'QUEUED' where goal_id in (?, ?)", UUID.fromString(f.g1()),
@@ -510,7 +510,8 @@ class RunEventProjectionIT extends AbstractExecutionIT {
         old.step("G1-T1", 1, "STARTED", 1, "初始化");
         // 後續批次已接手：任務重新 QUEUED、專案 EXECUTING；舊批次遲到的 CANCELLED 不得動它們
         runRepository.insert(new ExecutionRun(UUID.randomUUID(), UUID.fromString(old.f.projectId()), 2,
-                RunStatus.INITIALIZING, 4, RunScope.all(), 0L, null, Instant.now(), null, DagSnapshot.EMPTY, 0, null));
+                RunStatus.INITIALIZING, 4, RunScope.all(), 0L, null, Instant.now(), null, DagSnapshot.EMPTY, 0, null,
+                null));
         jdbc.update("update console.tasks set status = 'QUEUED' where id = ?", UUID.fromString(old.f.t1()));
         Outcome late = old.status("CANCELLED", "使用者取消");
         assertThat(late.terminal()).as("舊批次的消費者照常結束").isTrue();

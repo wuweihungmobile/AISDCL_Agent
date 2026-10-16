@@ -132,7 +132,8 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
         RunView view = new RunView(run.id(), run.projectId(), run.runNumber(),
                 bridgeStatus == null ? run.status() : bridgeStatus.fold(), bridgeStatus, run.autonomyLevel(),
                 run.scope(), snap == null ? run.totalTokensUsed() : snap.tokensUsed(), run.tokenBudget(),
-                run.startedAt(), snap == null ? run.completedAt() : parse(snap.completedAt(), run.completedAt()));
+                run.startedAt(), snap == null ? run.completedAt() : parse(snap.completedAt(), run.completedAt()),
+                run.engineCapabilities());
         List<StepRow> rows = snap == null ? steps.findAllByRun(run.id()) : List.of();
         int total = run.dag().totalSteps();
         int completed = snap != null ? snap.completedSteps() : distinctTasks(rows, "COMPLETED");
@@ -143,9 +144,11 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
         long elapsed = run.startedAt() == null ? 0 : Math.max(0, Duration.between(run.startedAt(), end).getSeconds());
         List<ReviewView> pending = reviews.findByRunAndStatus(run.id(), ReviewStatus.PENDING).stream()
                 .map(r -> StreamFrames.reviewView(r, run.dag())).toList();
+        // 資源取樣（契約 §1.2.3、§3.1.2）：Bridge 不可達（snap 為 null）、run_not_found、回應缺鍵或值為 null 時都是 null；
+        // 值原樣帶出，不在這裡重算或判斷是否過期（Bridge 對不存活與過期樣本本來就回 null）
         BridgeInfoView info = new BridgeInfoView(connected,
                 snap != null && snap.bridgeInstance() != null ? snap.bridgeInstance() : run.bridgeInstance(),
-                bridgeStatus, runKnown, now);
+                bridgeStatus, runKnown, now, snap == null ? null : snap.resources());
         return new RunDetailView(view, current, completed, total, lastSeq, snap == null ? null : snap.reason(),
                 elapsed, pending, info);
     }

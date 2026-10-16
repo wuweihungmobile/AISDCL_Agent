@@ -111,7 +111,7 @@ public class ExecutionControlService {
             ExecutionRun run = require(runId);
             requireStatus(run, "resume", RunStatus.PAUSED);
             requireSignedOff(run);
-            call(run, "resume", () -> bridge.resumeRun(runId, config.materialize().env()));
+            call(run, "resume", () -> bridge.resumeRun(runId, config.materialize(run.autonomyLevel()).env()));
             tx.executeWithoutResult(status -> afterResume(run, actor, "以手動恢復處理"));
             return snapshot(runId);
         });
@@ -148,10 +148,13 @@ public class ExecutionControlService {
         });
     }
 
-    /** 呼叫 Bridge restore（帶重新物化的 env）。審核 RETRY 也走這裡；呼叫端須持有該 run 的鎖。 */
+    /**
+     * 呼叫 Bridge restore（帶重新物化的 env）。審核 RETRY 也走這裡；呼叫端須持有該 run 的鎖。只取 {@code .env()}：
+     * 引擎設定檔在 spawn 時就凍結，{@code engineCapabilities} 不重算（契約 §3.4.2 一致性規則③）。
+     */
     void callRestore(ExecutionRun run, CheckpointRow checkpoint) {
         call(run, "restore", () -> {
-            bridge.restoreRun(run.id(), checkpoint.id(), config.materialize().env());
+            bridge.restoreRun(run.id(), checkpoint.id(), config.materialize(run.autonomyLevel()).env());
             return BridgeStatus.RUNNING;
         });
     }
@@ -285,18 +288,22 @@ public class ExecutionControlService {
         }
     }
 
-    /** 回應快照：再讀一次 Bridge；Bridge 暫時讀不到就退回 DB 欄位。 */
+    /**
+     * 回應快照：再讀一次 Bridge；Bridge 暫時讀不到就退回 DB 欄位。{@code engineCapabilities} 讀自 DB（建立時凍結，契約 §1.2.1），
+     * 不隨 resume／restore 重算。
+     */
     RunView snapshot(UUID runId) {
         ExecutionRun run = require(runId);
         try {
             RunSnapshot snap = bridge.getRun(runId);
             return new RunView(run.id(), run.projectId(), run.runNumber(), snap.status().fold(), snap.status(),
                     run.autonomyLevel(), run.scope(), snap.tokensUsed(), run.tokenBudget(), run.startedAt(),
-                    completedAt(snap, run));
+                    completedAt(snap, run), run.engineCapabilities());
         } catch (BridgeRejectedException | UpstreamException e) {
             LOG.warn("控制操作成功，但讀不到批次 {} 的 Bridge 快照：{}", runId, e.getMessage());
             return new RunView(run.id(), run.projectId(), run.runNumber(), run.status(), null, run.autonomyLevel(),
-                    run.scope(), run.totalTokensUsed(), run.tokenBudget(), run.startedAt(), run.completedAt());
+                    run.scope(), run.totalTokensUsed(), run.tokenBudget(), run.startedAt(), run.completedAt(),
+                    run.engineCapabilities());
         }
     }
 

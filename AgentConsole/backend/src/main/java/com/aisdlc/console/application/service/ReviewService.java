@@ -173,7 +173,7 @@ public class ReviewService {
                                       String actor) {
         if (decision == ReviewDecision.APPROVE) {
             control.requireSignedOff(run);
-            control.call(run, "review", () -> bridge.resumeRun(run.id(), config.materialize().env()));
+            control.call(run, "review", () -> bridge.resumeRun(run.id(), config.materialize(run.autonomyLevel()).env()));
             tx.executeWithoutResult(status -> {
                 markDecided(review, decision, actor, note);
                 control.afterResume(run, actor, "已核准");

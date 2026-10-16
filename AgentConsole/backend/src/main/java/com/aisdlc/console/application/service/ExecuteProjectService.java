@@ -84,7 +84,8 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
         RunLauncher.Launch launch = readTx.execute(status -> prepare(projectId, command));
         ExecutionRun run = launcher.launch(launch, created -> { });
         return new RunView(run.id(), run.projectId(), run.runNumber(), RunStatus.RUNNING, BridgeStatus.RUNNING,
-                run.autonomyLevel(), run.scope(), 0L, run.tokenBudget(), run.startedAt(), null);
+                run.autonomyLevel(), run.scope(), 0L, run.tokenBudget(), run.startedAt(), null,
+                run.engineCapabilities());
     }
 
     private RunLauncher.Launch prepare(UUID projectId, Command command) {

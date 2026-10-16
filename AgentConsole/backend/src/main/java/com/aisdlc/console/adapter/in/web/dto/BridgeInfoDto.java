@@ -16,9 +16,15 @@ public record BridgeInfoDto(
         @Schema(description = "Bridge 實例識別（bridge_instance）；不含 pid、lock key") String instance,
         BridgeStatus status,
         @Schema(description = "Bridge 可達但回 404 run_not_found 時為 false（workspace 已清除）") Boolean runKnown,
-        @NotNull Instant checkedAt) {
+        @NotNull Instant checkedAt,
+        @Schema(description = "v1.3（D-12；US-M-10）：引擎行程樹的資源取樣（Bridge GET /autoclaude/runs/{id} 回應的 resources，規格見契約 §3.1.2）。"
+                + "引擎行程不存活（尚未啟動、暫停中、終態）、還沒有第一筆樣本、最近一筆樣本已超過 15 秒、Bridge 不可達（connected=false）、"
+                + "runKnown=false，或 Bridge 的回應沒有這個鍵（舊版 Bridge）時為 null 或缺席。"
+                + "只有 GET /executions/{runId}（ExecutionRunDetailResponse.bridge）帶 bridge 物件；pause／resume／cancel／restore 的快照沒有")
+        ResourceUsageDto resources) {
 
     public static BridgeInfoDto from(BridgeInfoView v) {
-        return new BridgeInfoDto(v.connected(), v.instance(), v.status(), v.runKnown(), v.checkedAt());
+        return new BridgeInfoDto(v.connected(), v.instance(), v.status(), v.runKnown(), v.checkedAt(),
+                ResourceUsageDto.from(v.resources()));
     }
 }

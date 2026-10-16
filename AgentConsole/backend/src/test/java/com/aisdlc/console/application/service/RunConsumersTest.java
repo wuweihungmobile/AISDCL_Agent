@@ -123,7 +123,7 @@ class RunConsumersTest {
     }
 
     private ExecutionRun run(RunStatus status) {
-        return new ExecutionRun(runId, UUID.randomUUID(), 1, status, 4, null, 0, null, NOW, null, null, 0, null);
+        return new ExecutionRun(runId, UUID.randomUUID(), 1, status, 4, null, 0, null, NOW, null, null, 0, null, null);
     }
 
     private static BridgeRejectedException rejected(int status) {

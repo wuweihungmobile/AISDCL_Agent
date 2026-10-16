@@ -364,6 +364,9 @@ class ExecuteProjectApiIT extends AbstractExecutionIT {
         assertThat(resp.has("$.data.completedAt")).isFalse();
         assertThat(resp.has("$.data.scope.limits")).as("沒有限額就不輸出").isFalse();
         assertThat(resp.header("X-Trace-Id")).isNotBlank();
+        // v1.3（D-11）：沒有金鑰、等級 2、旗標全 false → 沒人要求任何引擎能力，如實回 OFF／OFF（契約 §1.2.1 的範例）
+        assertThat(resp.<String>read("$.data.engineCapabilities.autoMutation")).isEqualTo("OFF");
+        assertThat(resp.<String>read("$.data.engineCapabilities.selfEvolution")).isEqualTo("OFF");
     }
 
     @Test

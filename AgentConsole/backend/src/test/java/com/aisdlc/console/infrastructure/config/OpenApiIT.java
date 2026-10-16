@@ -345,6 +345,49 @@ class OpenApiIT extends AbstractApiIT {
                 + ".get.responses['200'].headers").keySet()).containsExactly("Content-Disposition");
     }
 
+    /**
+     * v1.3（D-11、D-12；契約 §1.2.1、§1.2.3、§3.1.2）：引擎能力與資源取樣的 schema 與 {@code openapi-p3-6.yaml} 的欄位名、必填集合、
+     * 列舉值與型別一致——前端以 yaml 產生型別，這裡的名稱或列舉值一旦漂移，前端的 {@code engineCapabilities} 晶片與「資源使用」欄就讀不到。
+     * 差異（已登記）：yaml 把狀態列舉獨立成 {@code EngineCapabilityState}，springdoc 把它內嵌在兩個欄位上（與 RunStatus 等既有列舉同做法）。
+     */
+    @Test
+    void theEngineCapabilitiesAndTheResourceUsageSchemasMatchTheContractYaml() {
+        Resp docs = docs();
+        String capabilities = "$.components.schemas.EngineCapabilities";
+        assertThat(docs.<List<String>>read(capabilities + ".required")).containsExactlyInAnyOrder("autoMutation",
+                "selfEvolution");
+        for (String property : List.of("autoMutation", "selfEvolution")) {
+            assertThat(docs.<List<String>>read(capabilities + ".properties." + property + ".enum"))
+                    .as(property).containsExactly("ENABLED", "OFF", "UNAVAILABLE_NO_API_KEY");
+        }
+        for (String response : List.of("ExecutionRunResponse", "ExecutionRunDetailResponse")) {
+            assertThat(docs.<String>read("$.components.schemas." + response + ".properties.engineCapabilities['$ref']"))
+                    .as(response).endsWith("/EngineCapabilities");
+            assertThat(docs.<List<String>>read("$.components.schemas." + response + ".required"))
+                    .as(response + "：engineCapabilities 不是必填（V10 之前的批次缺席）").doesNotContain("engineCapabilities");
+        }
+        assertThat(docs.<Map<String, Object>>read("$.components.schemas.ExecutionRunSummaryResponse.properties")
+                .keySet()).as("批次列表項不帶能力狀態").doesNotContain("engineCapabilities");
+
+        String usage = "$.components.schemas.ResourceUsage";
+        assertThat(docs.<List<String>>read(usage + ".required")).containsExactlyInAnyOrder("cpuPercent",
+                "memoryBytes", "processCount", "sampledAt");
+        assertThat(docs.<String>read(usage + ".properties.cpuPercent.type")).isEqualTo("number");
+        assertThat(docs.<Integer>read(usage + ".properties.cpuPercent.minimum")).isEqualTo(0);
+        assertThat(docs.<Integer>read(usage + ".properties.cpuPercent.maximum")).isEqualTo(100);
+        assertThat(docs.<String>read(usage + ".properties.memoryBytes.type")).isEqualTo("integer");
+        assertThat(docs.<String>read(usage + ".properties.memoryBytes.format")).isEqualTo("int64");
+        assertThat(docs.<String>read(usage + ".properties.processCount.format")).isEqualTo("int32");
+        assertThat(docs.<Integer>read(usage + ".properties.processCount.minimum")).isEqualTo(1);
+        assertThat(docs.<String>read(usage + ".properties.sampledAt.type")).isEqualTo("string");
+        assertThat(docs.<String>read(usage + ".properties.sampledAt.format")).isEqualTo("date-time");
+
+        assertThat(docs.<String>read("$.components.schemas.BridgeInfo.properties.resources['$ref']"))
+                .endsWith("/ResourceUsage");
+        assertThat(docs.<List<String>>read("$.components.schemas.BridgeInfo.required"))
+                .containsExactlyInAnyOrder("connected", "checkedAt");
+    }
+
     @Test
     void theExecutionAndMonitorSchemasCarryTheContractRequiredFieldsAndNames() {
         Resp docs = docs();

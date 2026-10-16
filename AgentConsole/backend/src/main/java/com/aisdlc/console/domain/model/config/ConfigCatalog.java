@@ -85,8 +85,10 @@ public final class ConfigCatalog {
         specs.add(spec("agent", "retryBackoffMs", STORED_ONLY, "0", "3600000"));
         specs.add(spec("agent", "retryBackoffMultiplier", STORED_ONLY, "1", "10"));
         specs.add(spec("agent", "checkpointInterval", STORED_ONLY, "1", "1000"));
-        specs.add(spec("agent", "enableAutoMutation", UNVERIFIED, null, null));
-        specs.add(spec("agent", "enableSelfEvolution", UNVERIFIED, null, null));
+        // v1.3（D-11）：enableAutoMutation 經 minimax.enable_kernel_brain 送進引擎（需 model.apiKey）；
+        // enableSelfEvolution 已驗證不影響引擎（引擎沒有演化開關），只決定沒有金鑰時報 OFF 還是 UNAVAILABLE_NO_API_KEY（契約 §3.4.2）
+        specs.add(spec("agent", "enableAutoMutation", ENGINE, null, null));
+        specs.add(spec("agent", "enableSelfEvolution", STORED_ONLY, null, null));
         // C.3 execution（10）
         // 上限 999999999999（12 位）：與 V5 的 validation_rule ^[1-9][0-9]{0,11}$ 一致（契約 v1.2 更正，B1-1；v1.1 寫的 13 位上限會讓 GET /settings 的 max 比規則多 1）
         specs.add(spec("execution", "globalTokenBudget", CONSOLE, "1", "999999999999"));

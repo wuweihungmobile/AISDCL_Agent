@@ -2,6 +2,8 @@ package com.aisdlc.console.application.port.in;
 
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.DagSnapshot;
+import com.aisdlc.console.domain.model.execution.EngineCapabilities;
+import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import com.aisdlc.console.domain.model.execution.ReviewDecision;
 import com.aisdlc.console.domain.model.execution.ReviewKind;
 import com.aisdlc.console.domain.model.execution.ReviewStatus;
@@ -21,19 +23,28 @@ public interface ExecutionQueryUseCase {
     /** {@link #taskHistory} 的上限：一個任務的歷史不得讓詳情回應無界成長。 */
     int TASK_HISTORY_LIMIT = 200;
 
-    /** {@code ExecutionRunResponse}：批次快照。{@code bridgeStatus} 為 Bridge 原值（PAUSING／CANCELLING 在此可見）。 */
+    /**
+     * {@code ExecutionRunResponse}：批次快照。{@code bridgeStatus} 為 Bridge 原值（PAUSING／CANCELLING 在此可見）。
+     *
+     * @param engineCapabilities spawn 時 Console 送進引擎的能力狀態（讀自 DB，建立時凍結；契約 §1.2.1）；null＝V10 之前的批次
+     */
     record RunView(UUID id, UUID projectId, int runNumber, RunStatus status, BridgeStatus bridgeStatus,
                    int autonomyLevel, RunScope scope, long totalTokensUsed, Long tokenBudget, Instant startedAt,
-                   Instant completedAt) {
+                   Instant completedAt, EngineCapabilities engineCapabilities) {
     }
 
     /** {@code CurrentStep}：{@code stepNumber} 是步驟在批次 playbook 內的位置（1 起），不是事件 seq。 */
     record CurrentStepView(String stepId, int stepNumber, UUID taskId, String taskName, UUID goalId, int attempt) {
     }
 
-    /** {@code BridgeInfo}：Bridge 不可達時 {@code connected=false}、{@code status} 為 null。 */
+    /**
+     * {@code BridgeInfo}：Bridge 不可達時 {@code connected=false}、{@code status} 與 {@code resources} 為 null。
+     *
+     * @param resources 引擎行程樹的資源取樣（v1.3，D-12；契約 §3.1.2），來自同一次 {@code GET run} 的回應；引擎行程不存活、
+     *                  還沒有樣本、樣本過期、Bridge 不可達或不認得該 run、回應缺這個鍵（舊版 Bridge）時為 null
+     */
     record BridgeInfoView(boolean connected, String instance, BridgeStatus status, Boolean runKnown,
-                          Instant checkedAt) {
+                          Instant checkedAt, ResourceUsage resources) {
     }
 
     /** {@code ReviewRequestResponse}：{@code stepId} 是佐證步驟列 {@code execution_steps.id}（UUID，不是 playbook 的 step_id）。 */

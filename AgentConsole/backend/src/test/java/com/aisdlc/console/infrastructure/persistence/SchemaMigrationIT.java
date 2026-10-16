@@ -1,6 +1,7 @@
 package com.aisdlc.console.infrastructure.persistence;
 
 import com.aisdlc.console.support.AbstractIntegrationTest;
+import com.aisdlc.console.support.AppendixCImpactNotes;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
@@ -16,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Flyway 遷移（V1～V6）與 JPA schema 驗證（ADR-001 D5）。
+ * Flyway 遷移（V1～V10）與 JPA schema 驗證（ADR-001 D5）。
  *
  * <p>能啟動本 context 本身就代表 {@code ddl-auto=validate} 通過（13 個實體與 Flyway 建出的表一致）；
  * 這裡另外把「為什麼重要」寫成斷言：DDL 必須由 Flyway 擁有、表必須全在 console schema（不與 AutoClaude 的
@@ -59,13 +60,46 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToNineSuccessfully() {
+    void flywayAppliedVersionsOneToTenSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
+    }
+
+    /**
+     * V10（契約 §0.5；D-11）：{@code execution_runs.engine_capabilities}——該批次 spawn 時 Console 送進引擎的能力狀態。
+     * JSONB、可 NULL、沒有預設值：NULL＝V10 之前建立的批次（當時送了什麼已不可考，不回填、不猜測）。
+     */
+    @Test
+    void v10AddsTheNullableJsonbEngineCapabilitiesColumnWithoutADefault() {
+        Map<String, Object> column = jdbc.queryForMap("select data_type, is_nullable, column_default from "
+                + "information_schema.columns where table_schema = 'console' and table_name = 'execution_runs' "
+                + "and column_name = 'engine_capabilities'");
+        assertThat(column).containsEntry("data_type", "jsonb").containsEntry("is_nullable", "YES")
+                .containsEntry("column_default", null);
+    }
+
+    /**
+     * V10 校正三個鍵的 {@code impact_note}（三個鍵的語意在 v1.3 改變）：文字必須與契約附錄 C.1／C.2 的 {@code impactNote} 逐字相同
+     * （不含 {@code |} 與反引號），且不超過欄位上限 500 字元；其餘鍵的提示不動。
+     */
+    @Test
+    void v10CorrectsTheImpactNotesOfTheThreeEngineKeysToTheVerbatimTextOfAppendixC() {
+        assertThat(setting("model", "enableKernelBrain", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_KERNEL_BRAIN);
+        assertThat(setting("agent", "enableAutoMutation", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_AUTO_MUTATION);
+        assertThat(setting("agent", "enableSelfEvolution", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_SELF_EVOLUTION);
+        for (String note : List.of(AppendixCImpactNotes.ENABLE_KERNEL_BRAIN, AppendixCImpactNotes.ENABLE_AUTO_MUTATION,
+                AppendixCImpactNotes.ENABLE_SELF_EVOLUTION)) {
+            assertThat(note).hasSizeLessThanOrEqualTo(500).doesNotContain("|").doesNotContain("`");
+        }
+        assertThat(setting("model", "apiKey", "impact_note")).as("其餘鍵的提示不動（V5 的文字）")
+                .startsWith("加密儲存；新批次起使用新金鑰");
     }
 
     /** V9（契約 §0.5；C-3）：專案、目標、任務的軟刪除時間，加上專案軟刪除前的狀態；「已刪除」清單用的 partial index。 */

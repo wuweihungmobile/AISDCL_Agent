@@ -9,6 +9,7 @@ import com.aisdlc.console.application.port.out.AgentBridge.StartRunRequest;
 import com.aisdlc.console.application.port.out.SettingValues;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
+import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import com.aisdlc.console.infrastructure.config.BridgeProperties;
 import com.aisdlc.minibridge.MiniBridge;
 import com.aisdlc.minibridge.MiniRun;
@@ -306,6 +307,112 @@ class BridgeRunsAdapterTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    // ── D-12：RunStateOut.resources（契約 §3.1.2）──────────────────────────────────────────────
+    // 為什麼重要：資源取樣只是顯示用的輔助資料。Bridge 的回應少一個鍵、值為 null、或欄位不齊，都不可以讓整個批次詳情失敗——
+    // 這裡解析錯誤（丟例外）會讓「執行頁」在舊版 Bridge 上整頁 5xx；而解析太鬆（猜缺的欄位）會顯示不存在的數字。
+
+    @Test
+    void theSnapshotCarriesTheResourceSampleWhileTheEngineIsAliveAndNullOnceThereIsNoProcessTree()
+            throws InterruptedException {
+        UUID id = UUID.randomUUID();
+        mini.manualSteps = true;
+        start(id, "/work/res-a", "一", "二");
+        MiniRun run = mini.run(id);
+        awaitEvents(run, "STARTED", 1);
+
+        ResourceUsage alive = adapter.getRun(id).resources();
+        assertThat(alive).as("引擎行程樹存活：原樣帶出迷你 Bridge 的樣本（欄位對映與型別）")
+                .isEqualTo(new ResourceUsage(12.3, 361_758_720L, 3, "2026-10-16T03:21:45.123456+00:00"));
+
+        run.release(10);
+        assertThat(run.awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
+        assertThat(adapter.getRun(id).resources()).as("終態沒有行程").isNull();
+    }
+
+    @Test
+    void aSnapshotWithANullOrAMissingResourcesKeyIsNullWithoutAnyErrorAndTheRestOfTheSnapshotIsIntact() {
+        UUID id = UUID.randomUUID();
+        mini.manualSteps = true;
+        start(id, "/work/res-b", "一");
+
+        mini.resourcesMode = MiniBridge.ResourcesMode.NULL;
+        RunSnapshot withNull = adapter.getRun(id);
+        mini.resourcesMode = MiniBridge.ResourcesMode.OMIT;
+        RunSnapshot withoutKey = adapter.getRun(id);
+
+        assertThat(withNull.resources()).isNull();
+        assertThat(withoutKey.resources()).as("舊版 Bridge 的回應沒有這個鍵").isNull();
+        assertThat(withNull.status()).isEqualTo(withoutKey.status()).isEqualTo(BridgeStatus.RUNNING);
+        assertThat(withNull.runId()).isEqualTo(id.toString());
+        mini.run(id).release(10);
+    }
+
+    @Test
+    void resourcesAreOnlyTakenWhenAllFourFieldsArePresentWithTheRightTypesAndNothingIsGuessed() {
+        Map<String, Object> full = Map.of("cpu_percent", 0, "rss_bytes", 1L, "process_count", 1,
+                "sampled_at", "2026-10-16T03:21:45+00:00");
+        assertThat(BridgeHttpAdapter.resourcesOf(full)).as("整數的 cpu_percent（例：0）也是數字")
+                .isEqualTo(new ResourceUsage(0.0, 1L, 1, "2026-10-16T03:21:45+00:00"));
+
+        assertThat(BridgeHttpAdapter.resourcesOf(null)).isNull();
+        assertThat(BridgeHttpAdapter.resourcesOf("not an object")).isNull();
+        assertThat(BridgeHttpAdapter.resourcesOf(List.of(full))).isNull();
+        assertThat(BridgeHttpAdapter.resourcesOf(Map.of())).isNull();
+        for (String missing : full.keySet()) {
+            Map<String, Object> partial = new HashMap<>(full);
+            partial.remove(missing);
+            assertThat(BridgeHttpAdapter.resourcesOf(partial)).as("缺 " + missing).isNull();
+        }
+        for (Map.Entry<String, Object> wrong : Map.<String, Object>of("cpu_percent", "12.3", "rss_bytes", "1",
+                "process_count", "1", "sampled_at", 20261016).entrySet()) {
+            Map<String, Object> bad = new HashMap<>(full);
+            bad.put(wrong.getKey(), wrong.getValue());
+            assertThat(BridgeHttpAdapter.resourcesOf(bad)).as(wrong.getKey() + " 型別不符").isNull();
+        }
+        Map<String, Object> blankTime = new HashMap<>(full);
+        blankTime.put("sampled_at", "  ");
+        assertThat(BridgeHttpAdapter.resourcesOf(blankTime)).as("沒有取樣時間＝無法判斷新鮮度，不採用").isNull();
+    }
+
+    // ── 狀態文字不外露 pid（契約 §1.2.3；BridgeText）────────────────────────────────────────────
+
+    @Test
+    void theStatusTextOfASnapshotAndOfItsEventsNeverCarriesTheEnginePid() throws InterruptedException {
+        UUID id = UUID.randomUUID();
+        mini.manualSteps = true;
+        start(id, "/work/res-c", "一");
+        MiniRun run = mini.run(id);
+        awaitEvents(run, "STARTED", 1);
+        assertThat(run.reason()).as("迷你 Bridge 與真 Bridge 同形：狀態文字帶 pid").contains("pid=");
+
+        String reason = adapter.getRun(id).reason();
+        assertThat(reason).isEqualTo("引擎已啟動（第 1 次 spawn）");
+
+        List<BridgeEvent> events = adapter.listEvents(id, 0, 500);
+        assertThat(events.stream().filter(e -> e.event().equals("status")).map(e -> e.text("reason")))
+                .contains("引擎已啟動（第 1 次 spawn）").noneMatch(text -> text != null && text.contains("pid"));
+        List<BridgeEvent> streamed = new CopyOnWriteArrayList<>();
+        run.release(10);
+        adapter.streamEvents(id, 0, Duration.ofSeconds(10), streamed::add);
+        assertThat(streamed.stream().filter(e -> e.event().equals("status")).map(e -> e.text("reason")))
+                .as("SSE 串流的事件同樣清過").isNotEmpty().noneMatch(text -> text != null && text.contains("pid"));
+    }
+
+    @Test
+    void anAlertMessageThatMentionsPidsIsCleanedToo() {
+        UUID id = UUID.randomUUID();
+        start(id, "/work/res-d", "一");
+        assertThat(mini.run(id).awaitStatus("COMPLETED", Duration.ofSeconds(10))).isTrue();
+        mini.run(id).inject("alert", Map.of("level", "warning", "code", "FORCE_KILL",
+                "message", "終止訊號後 5s 仍未退出，已強制終止 pid=[4242, 4243]"));
+
+        List<BridgeEvent> events = adapter.listEvents(id, 0, 500);
+
+        BridgeEvent alert = events.stream().filter(e -> e.event().equals("alert")).findFirst().orElseThrow();
+        assertThat(alert.text("message")).isEqualTo("終止訊號後 5s 仍未退出，已強制終止");
+        assertThat(alert.text("code")).as("其他欄位不動").isEqualTo("FORCE_KILL");
     }
 
     // ── X-Trace-Id（契約 §0.4 第 6 點、§3.1.1，C-12；NFR-9.4-04）────────────────────────────────

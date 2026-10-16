@@ -63,12 +63,32 @@ class ConfigCatalogTest {
     void effectLabelsAreHonestAboutWhatReachesTheEngine() {
         assertThat(ConfigCatalog.find("autoclaude", "dalBackend").orElseThrow().effect())
                 .as("Bridge 固定 yaml_only，此鍵不生效").isEqualTo(ConfigEffect.STORED_ONLY);
-        assertThat(ConfigCatalog.find("agent", "enableSelfEvolution").orElseThrow().effect())
-                .isEqualTo(ConfigEffect.UNVERIFIED);
         assertThat(ConfigCatalog.find("execution", "compactThresholdPct").orElseThrow().effect())
                 .isEqualTo(ConfigEffect.ENGINE);
         assertThat(ConfigCatalog.find("agent", "defaultAutonomyLevel").orElseThrow().effect())
                 .isEqualTo(ConfigEffect.CONSOLE);
+    }
+
+    /**
+     * v1.3（D-11；契約附錄 C.1／C.2）：兩個旗標的標籤要說真話。{@code enableAutoMutation} 經 {@code minimax.enable_kernel_brain}
+     * 送進引擎（與 {@code model.enableKernelBrain} 共用同一個引擎鍵）；{@code enableSelfEvolution} 已驗證不影響引擎（引擎沒有演化
+     * 開關，有金鑰就會提案），標成 ENGINE 會是假的，所以是 STORED_ONLY。
+     */
+    @Test
+    void theTwoEngineFlagsAreLabelledByWhatTheEngineReallyDoesWithThem() {
+        assertThat(ConfigCatalog.find("agent", "enableAutoMutation").orElseThrow().effect())
+                .isEqualTo(ConfigEffect.ENGINE);
+        assertThat(ConfigCatalog.find("model", "enableKernelBrain").orElseThrow().effect())
+                .isEqualTo(ConfigEffect.ENGINE);
+        assertThat(ConfigCatalog.find("agent", "enableSelfEvolution").orElseThrow().effect())
+                .isEqualTo(ConfigEffect.STORED_ONLY);
+    }
+
+    @Test
+    void onlyTheThreeSddKeysAreStillUnverified() {
+        assertThat(ConfigCatalog.all().stream().filter(s -> s.effect() == ConfigEffect.UNVERIFIED)
+                .map(ConfigSpec::fullKey).toList())
+                .containsExactly("sdd.specFormat", "sdd.workflowEngine", "sdd.validationLevel");
     }
 
     @Test

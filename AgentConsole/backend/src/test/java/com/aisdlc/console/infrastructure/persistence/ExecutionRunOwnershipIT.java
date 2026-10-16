@@ -73,6 +73,11 @@ class ExecutionRunOwnershipIT extends AbstractIntegrationTest {
                 String.class, runId)).isEqualTo("object");
         assertThat(jdbc.queryForObject("select jsonb_typeof(dag) from console.execution_runs where id = ?",
                 String.class, runId)).isEqualTo("object");
+        // V10：能力狀態是 console 在建立時寫的欄位（同一次 INSERT），同樣必須是 jsonb 物件
+        assertThat(jdbc.queryForObject("select jsonb_typeof(engine_capabilities) from console.execution_runs "
+                + "where id = ?", String.class, runId)).isEqualTo("object");
+        assertThat(jdbc.queryForObject("select engine_capabilities->>'autoMutation' from console.execution_runs "
+                + "where id = ?", String.class, runId)).isEqualTo("ENABLED");
     }
 
     @Test
@@ -99,6 +104,7 @@ class ExecutionRunOwnershipIT extends AbstractIntegrationTest {
             entity.completedAt = Instant.now();
             entity.tokenBudget = 1L;
             entity.autonomyLevel = 10;
+            entity.engineCapabilities = "{\"autoMutation\":\"OFF\",\"selfEvolution\":\"OFF\"}";
             em.flush();
         });
 
@@ -111,6 +117,9 @@ class ExecutionRunOwnershipIT extends AbstractIntegrationTest {
         assertThat(row.get("completed_at")).as("Bridge 才會寫 completed_at").isNull();
         assertThat(row.get("token_budget")).as("建立後 console 也不再改這些欄位").isEqualTo(1000L);
         assertThat(row.get("autonomy_level")).isEqualTo(3);
+        assertThat(jdbc.queryForObject("select engine_capabilities->>'autoMutation' from console.execution_runs "
+                + "where id = ?", String.class, runId)).as("能力狀態只在建立時寫一次（updatable=false），之後不再被 JPA 回寫")
+                .isEqualTo("ENABLED");
     }
 
     private void createRunFromConsole() {
@@ -124,6 +133,7 @@ class ExecutionRunOwnershipIT extends AbstractIntegrationTest {
             entity.tokenBudget = 1000L;
             entity.dag = "{\"nodes\":[],\"edges\":[]}";
             entity.startedAt = Instant.now();
+            entity.engineCapabilities = "{\"autoMutation\":\"ENABLED\",\"selfEvolution\":\"ENABLED\"}";
             em.persist(entity);
         });
     }

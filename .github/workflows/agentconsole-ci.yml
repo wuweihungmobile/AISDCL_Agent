@@ -8,8 +8,10 @@
 #     （pgvector/pgvector:pg18，與 docker-compose.yml 同映像）供 BRIDGE_TEST_DSN。
 #   · backend：Gradle `maxParallelForks = 2`（build.gradle.kts；每 fork 各起一個
 #     Testcontainers PG）＋ `--parallel`。
-#   · frontend：vitest 預設多 worker。Playwright E2E 需前後端全棧，不在本 CI（本機與
-#     Windows 輪手動／nightly 跑；見 AgentConsole/frontend/tests/e2e/README.md）。
+#   · frontend：vitest 預設多 worker。Playwright 的 route mock 版 spec（`tests/e2e/*.mock.spec.ts`，
+#     不需後端與資料庫）自 W7 起在本 CI 跑（Implementation_Plan §5.3 D-20：E2E 證據要有機械重跑），
+#     以 standalone 建置產物起站；真後端／Docker 全棧 E2E 仍需全棧，本機與 Windows 輪手動跑
+#     （見 AgentConsole/frontend/tests/e2e/README.md）。
 # 版本鎖：actions/* 一律與根層其他 workflow 同世代（checkout@v5／setup-python@v6）。
 name: agentconsole-ci
 
@@ -95,9 +97,9 @@ jobs:
         run: sh gradlew clean build --no-daemon --parallel
 
   frontend:
-    name: frontend（lint ＋ tsc ＋ build ＋ vitest）
+    name: frontend（lint ＋ tsc ＋ build ＋ vitest ＋ Playwright mock spec）
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -117,3 +119,19 @@ jobs:
       - name: vitest
         working-directory: AgentConsole/frontend
         run: npx vitest run
+      - name: Playwright 瀏覽器（chromium ＋ 系統相依）
+        working-directory: AgentConsole/frontend
+        run: npx playwright install --with-deps chromium
+      - name: Playwright route mock spec（standalone 產物起站；不需後端）
+        working-directory: AgentConsole/frontend
+        env:
+          E2E_MODE: standalone
+          E2E_WEB_PORT: "3000"
+        run: npx playwright test mock.spec --output=test-results-mock
+      - name: 上傳 Playwright 失敗痕跡（trace／截圖；只在失敗時）
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: agentconsole-frontend-playwright-mock
+          path: AgentConsole/frontend/test-results-mock
+          if-no-files-found: ignore

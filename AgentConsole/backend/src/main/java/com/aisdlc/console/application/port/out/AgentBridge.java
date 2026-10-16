@@ -1,6 +1,7 @@
 package com.aisdlc.console.application.port.out;
 
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
+import com.aisdlc.console.domain.model.execution.ResourceUsage;
 
 import java.time.Duration;
 import java.util.List;
@@ -136,11 +137,13 @@ public interface AgentBridge {
 
     /**
      * {@code GET /autoclaude/runs/{id}} 的快照（{@code RunStateOut}）。時間欄位保留 Bridge 的原字串（UTC，{@code +00:00}）。
+     *
+     * @param resources 引擎行程樹的資源取樣（v1.3，D-12；契約 §3.1.2）；Bridge 回 null、回應缺這個鍵（舊版 Bridge）或欄位不齊時為 null
      */
     record RunSnapshot(String runId, BridgeStatus status, String reason, Integer pid, String startedAt,
                        String completedAt, Integer exitCode, String currentStep, Integer currentStepNumber,
                        int attempt, int completedSteps, int totalSteps, long tokensUsed, int lastEventSeq,
-                       String project, String executionPath, String bridgeInstance) {
+                       String project, String executionPath, String bridgeInstance, ResourceUsage resources) {
     }
 
     /**

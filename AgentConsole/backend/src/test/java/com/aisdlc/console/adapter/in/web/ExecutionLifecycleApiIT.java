@@ -747,6 +747,315 @@ class ExecutionLifecycleApiIT extends AbstractExecutionIT {
         assertThat(consumers.isRunning(UUID.fromString(run))).as("不可達時仍啟動消費者，由連線層重試").isTrue();
     }
 
+    // ── D-11：引擎能力 engineCapabilities（契約 §1.2.1、§3.4.2；E2E-14 第 1～7 列的後端部分）────────────────
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> sentOverrides(String run) {
+        return (Map<String, Object>) mini(run).request.get("config_overrides");
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> sentEnv(String run) {
+        return (Map<String, Object>) mini(run).request.get("env");
+    }
+
+    /** 資料庫裡落的 {@code engine_capabilities}：兩個鍵的值與「整欄是否為 NULL」。 */
+    private Map<String, Object> storedCapabilities(String run) {
+        return jdbc.queryForMap("select engine_capabilities->>'autoMutation' as auto_mutation, "
+                + "engine_capabilities->>'selfEvolution' as self_evolution, engine_capabilities is null as absent "
+                + "from console.execution_runs where id = ?", UUID.fromString(run));
+    }
+
+    private static void assertCapabilities(Resp resp, String autoMutation, String selfEvolution) {
+        assertThat(resp.<String>read("$.data.engineCapabilities.autoMutation")).as("autoMutation").isEqualTo(autoMutation);
+        assertThat(resp.<String>read("$.data.engineCapabilities.selfEvolution")).as("selfEvolution")
+                .isEqualTo(selfEvolution);
+    }
+
+    @Test
+    void aLevelSevenRunWithAnApiKeyReportsBothCapabilitiesEnabledStoresThemAndSendsTheBrainFlagButNeverTheInertEvolutionKeys() {
+        Fixture f = prjA("caps-level7-key", 4);
+        putApiKey(FAKE_API_KEY);
+
+        Resp created = execute(f.projectId(), Map.of("autonomyLevel", 7));
+
+        assertThat(created.status()).isEqualTo(201);
+        String run = created.id();
+        assertCapabilities(created, "ENABLED", "ENABLED");
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+
+        // 同一次物化：回應的、落庫的、實際送給 Bridge 的三者一致
+        assertThat(storedCapabilities(run)).containsEntry("auto_mutation", "ENABLED")
+                .containsEntry("self_evolution", "ENABLED").containsEntry("absent", false);
+        Map<String, Object> overrides = sentOverrides(run);
+        assertThat(overrides.get("minimax")).isEqualTo(Map.of("base_url",
+                "https://api.minimax.io/v1/text/chatcompletion_v2", "model", "MiniMax-M2.7", "timeout_seconds", 120,
+                "enable_kernel_brain", true));
+        assertThat(overrides.get("playbook")).as("不送惰性的演化鍵（max_evolutions、require_evolution_signoff）")
+                .isEqualTo(Map.of("step_timeout_seconds", 600));
+        assertThat(sentEnv(run)).containsEntry("MINIMAX_API_KEY", FAKE_API_KEY);
+        assertThat(overrides.toString()).as("金鑰只走 env").doesNotContain(FAKE_API_KEY);
+
+        Resp detail = getRun(run);
+        assertThat(detail.status()).isEqualTo(200);
+        assertCapabilities(detail, "ENABLED", "ENABLED");
+        assertThat(created.body()).as("回應不含金鑰明文（A5）").doesNotContain(FAKE_API_KEY);
+        assertThat(detail.body()).doesNotContain(FAKE_API_KEY);
+    }
+
+    @Test
+    void withoutAnApiKeyALevelSevenRunIsReportedUnavailableAndTheBridgeGetsNoMinimaxBlockAndNoKey() {
+        Fixture f = prjA("caps-level7-nokey", 4);
+        MINI.manualSteps = true;
+
+        Resp created = execute(f.projectId(), Map.of("autonomyLevel", 7));
+
+        assertThat(created.status()).as("沒有金鑰不報錯：批次照常執行，只是沒有 Brain").isEqualTo(201);
+        String run = created.id();
+        assertCapabilities(created, "UNAVAILABLE_NO_API_KEY", "UNAVAILABLE_NO_API_KEY");
+        assertThat(storedCapabilities(run)).containsEntry("auto_mutation", "UNAVAILABLE_NO_API_KEY")
+                .containsEntry("self_evolution", "UNAVAILABLE_NO_API_KEY");
+        assertThat(sentOverrides(run)).as("送了 enable_kernel_brain=true 卻沒有金鑰，真引擎會啟動即失敗（exit=1）")
+                .doesNotContainKey("minimax");
+        assertThat(sentEnv(run)).doesNotContainKey("MINIMAX_API_KEY");
+        assertCapabilities(getRun(run), "UNAVAILABLE_NO_API_KEY", "UNAVAILABLE_NO_API_KEY");
+    }
+
+    @Test
+    void aLevelThreeRunWithNoFlagsAndNoKeyIsReportedOffAndSendsNothingBrainRelated() {
+        Fixture f = prjA("caps-level3-off", 3);
+        MINI.manualSteps = true;
+
+        Resp created = execute(f.projectId(), Map.of("autonomyLevel", 3));
+
+        assertThat(created.status()).isEqualTo(201);
+        assertCapabilities(created, "OFF", "OFF");
+        assertThat(storedCapabilities(created.id())).containsEntry("auto_mutation", "OFF")
+                .containsEntry("self_evolution", "OFF");
+        assertThat(sentOverrides(created.id())).doesNotContainKey("minimax");
+        assertThat(sentEnv(created.id())).doesNotContainKey("MINIMAX_API_KEY");
+    }
+
+    @Test
+    void eachFlagTakesEffectAloneAtLevelThreeAndMatchesWhatTheBridgeWasSent() {
+        MINI.manualSteps = true;
+
+        // ① 有金鑰、只開 agent.enableAutoMutation ② 有金鑰、只開 model.enableKernelBrain：共用同一個引擎鍵
+        putApiKey(FAKE_API_KEY);
+        setting("agent", "enableAutoMutation", "true");
+        Resp viaAutoMutation = execute(prjA("caps-flag-auto-mutation", 3).projectId(), Map.of());
+        assertCapabilities(viaAutoMutation, "ENABLED", "ENABLED");
+        assertThat(((Map<?, ?>) sentOverrides(viaAutoMutation.id()).get("minimax")).get("enable_kernel_brain"))
+                .isEqualTo(true);
+        setting("agent", "enableAutoMutation", "false");
+        setting("model", "enableKernelBrain", "true");
+        Resp viaKernelBrain = execute(prjA("caps-flag-kernel-brain", 3).projectId(), Map.of());
+        assertCapabilities(viaKernelBrain, "ENABLED", "ENABLED");
+        assertThat(((Map<?, ?>) sentOverrides(viaKernelBrain.id()).get("minimax")).get("enable_kernel_brain"))
+                .isEqualTo(true);
+        setting("model", "enableKernelBrain", "false");
+
+        // ④ 有金鑰、只開 agent.enableSelfEvolution：有金鑰時它不改變任何東西（Brain 仍關、演化提案本來就會發生）
+        setting("agent", "enableSelfEvolution", "true");
+        Resp keyedSelfEvolution = execute(prjA("caps-flag-self-evolution-key", 3).projectId(), Map.of());
+        assertCapabilities(keyedSelfEvolution, "OFF", "ENABLED");
+        assertThat(((Map<?, ?>) sentOverrides(keyedSelfEvolution.id()).get("minimax")).get("enable_kernel_brain"))
+                .isEqualTo(false);
+
+        // ③ 沒有金鑰、只開 agent.enableSelfEvolution：有人要求但沒有金鑰 → UNAVAILABLE（自動突變沒人要求 → OFF）
+        putApiKey("");
+        Resp plainSelfEvolution = execute(prjA("caps-flag-self-evolution-plain", 3).projectId(), Map.of());
+        assertCapabilities(plainSelfEvolution, "OFF", "UNAVAILABLE_NO_API_KEY");
+        assertThat(sentOverrides(plainSelfEvolution.id())).doesNotContainKey("minimax");
+    }
+
+    @Test
+    void theCapabilitiesAreFrozenAtLaunchAreAbsentFromTheListAndAReadFailureOfTheStoredValueDegradesToAbsence() {
+        Fixture f = prjA("caps-frozen", 4);
+        putApiKey(FAKE_API_KEY);
+        String run = startRun(f.projectId(), Map.of("autonomyLevel", 7));
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+
+        // 建立後清掉金鑰：詳情仍是建立時的值（凍結，不隨設定變）
+        putApiKey("");
+        assertCapabilities(getRun(run), "ENABLED", "ENABLED");
+
+        // 批次列表項沒有這個欄位
+        List<Map<String, Object>> rows = api.get(viewer(), "/api/v1/projects/" + f.projectId() + "/executions")
+                .read("$.data.content");
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0)).doesNotContainKey("engineCapabilities");
+
+        // V10 之前建立的批次（欄位 NULL）：詳情缺席、不是 5xx
+        jdbc.update("update console.execution_runs set engine_capabilities = null where id = ?", UUID.fromString(run));
+        Resp legacy = getRun(run);
+        assertThat(legacy.status()).isEqualTo(200);
+        assertThat(legacy.has("$.data.engineCapabilities")).as("缺席（null 與缺席等價），前端不顯示、不猜測").isFalse();
+
+        // 日後新增的狀態值：只有它那一個鍵缺席，其餘照常，仍不是 5xx（前向相容）
+        jdbc.update("update console.execution_runs set engine_capabilities = ?::jsonb where id = ?",
+                "{\"autoMutation\":\"SOMETHING_NEW\",\"selfEvolution\":\"ENABLED\"}", UUID.fromString(run));
+        Resp partial = getRun(run);
+        assertThat(partial.status()).isEqualTo(200);
+        assertThat(partial.<String>read("$.data.engineCapabilities.selfEvolution")).isEqualTo("ENABLED");
+        assertThat(partial.has("$.data.engineCapabilities.autoMutation")).isFalse();
+    }
+
+    @Test
+    void everyControlEndpointSnapshotCarriesTheFrozenCapabilitiesEvenAfterTheSettingsChanged() {
+        Fixture f = prjA("caps-control", 4);
+        putApiKey(FAKE_API_KEY);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId(), Map.of("autonomyLevel", 7));
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        Resp pause = api.post(operator(), "/api/v1/executions/" + run + "/pause");
+        assertThat(pause.status()).isEqualTo(200);
+        assertCapabilities(pause, "ENABLED", "ENABLED");
+        assertThat(pause.has("$.data.bridge")).as("只有詳情帶 bridge 物件，控制端點的快照沒有").isFalse();
+
+        // 之後任何重新物化都會得到 UNAVAILABLE；快照必須仍是建立時凍結的值（resume／restore 只重帶 env，不重算能力）
+        putApiKey("");
+        mini(run).release(1);
+        assertThat(awaitProjected(run, "PAUSED")).isTrue();
+        Resp resume = api.post(operator(), "/api/v1/executions/" + run + "/resume");
+        assertThat(resume.status()).isEqualTo(200);
+        assertCapabilities(resume, "ENABLED", "ENABLED");
+
+        Resp cancel = api.post(operator(), "/api/v1/executions/" + run + "/cancel");
+        assertThat(cancel.status()).isEqualTo(200);
+        assertCapabilities(cancel, "ENABLED", "ENABLED");
+        assertThat(awaitProjected(run, "CANCELLED")).isTrue();
+        assertThat(consumers.awaitIdle(Duration.ofSeconds(5))).isTrue();
+
+        String checkpoint = api.get(viewer(), "/api/v1/executions/" + run + "/checkpoints")
+                .<List<String>>read("$.data[*].id").get(0);
+        Resp restore = api.post(operator(), "/api/v1/executions/" + run + "/restore/" + checkpoint);
+        assertThat(restore.status()).isEqualTo(200);
+        assertCapabilities(restore, "ENABLED", "ENABLED");
+        assertThat(storedCapabilities(run)).as("控制操作都不更新落庫的能力狀態").containsEntry("auto_mutation", "ENABLED")
+                .containsEntry("self_evolution", "ENABLED");
+    }
+
+    @Test
+    void aFollowUpRunOpenedByAReviewDecidesItsCapabilitiesAgainFromTheCurrentSettingsAndTheInheritedLevel() {
+        Fixture f = prjA("caps-follow-up", 4);
+        MINI.failStepIds.add("G1-T1");
+        String first = startRun(f.projectId(), Map.of("autonomyLevel", 6));
+        assertCapabilities(getRun(first), "UNAVAILABLE_NO_API_KEY", "OFF");
+        assertThat(awaitProjected(first, "FAILED")).isTrue();
+        String item = (String) pendingReviews(first).get(0).get("id");
+
+        // 之後管理員補了金鑰；後續批次繼承原批次的等級（6），依「當下」的設定重新決定（契約 §3.4.2 一致性規則②）
+        putApiKey(FAKE_API_KEY);
+        MINI.failStepIds.clear();
+        String followUp = review(first, item, "RETRY").header("X-Follow-Up-Run-Id");
+        assertThat(followUp).isNotBlank();
+
+        assertThat(awaitProjected(followUp, "COMPLETED")).isTrue();
+        assertCapabilities(getRun(followUp), "ENABLED", "ENABLED");
+        assertCapabilities(getRun(first), "UNAVAILABLE_NO_API_KEY", "OFF");
+        assertThat(((Map<?, ?>) sentOverrides(followUp).get("minimax")).get("enable_kernel_brain")).isEqualTo(true);
+    }
+
+    // ── D-12：資源使用 bridge.resources（契約 §1.2.3、§3.1.2；E2E-14 第 8～9 列的後端部分）──────────────────
+
+    @Test
+    void theResourceSampleOfTheEngineProcessTreeIsProjectedIntoTheDetailExactlyAsTheBridgeSentIt() {
+        Fixture f = prjA("resources-sample", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        Resp detail = getRun(run);
+
+        assertThat(detail.status()).isEqualTo(200);
+        assertThat(detail.<Boolean>read("$.data.bridge.connected")).isTrue();
+        Map<String, Object> resources = detail.read("$.data.bridge.resources");
+        assertThat(resources).as("四個欄位，逐字對映 cpu_percent／rss_bytes／process_count／sampled_at，不多不少")
+                .containsOnlyKeys("cpuPercent", "memoryBytes", "processCount", "sampledAt");
+        assertThat(((Number) resources.get("cpuPercent")).doubleValue()).isEqualTo(12.3);
+        assertThat(((Number) resources.get("memoryBytes")).longValue()).isEqualTo(361_758_720L);
+        assertThat(resources.get("processCount")).isEqualTo(3);
+        assertThat(resources.get("sampledAt")).as("值原樣帶出（含 Bridge 的 +00:00 寫法），console-api 不重算")
+                .isEqualTo("2026-10-16T03:21:45.123456+00:00");
+        // 迷你 Bridge 的快照有 pid 欄位、狀態文字也寫「pid=…」（與真 Bridge 同形）：回應整份都不得出現。比的是字樣
+        // （單字邊界的 pid；stepId 這種欄位名裡的 "pId" 不算），不比數字——數字會與隨機 UUID／時間戳的字元碰巧相同
+        assertThat(detail.body()).as("回應不外露 pid 與 lock key").doesNotContainPattern("(?i)\\bpid\\b")
+                .doesNotContainPattern("(?i)lock");
+    }
+
+    @Test
+    void aBridgeThatAnswersNullForResourcesGivesNoResourcesAndStillAFullDetail() {
+        Fixture f = prjA("resources-null", 4);
+        MINI.manualSteps = true;
+        MINI.resourcesMode = MiniBridge.ResourcesMode.NULL;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        Resp detail = getRun(run);
+
+        assertThat(detail.status()).isEqualTo(200);
+        assertThat(detail.<Boolean>read("$.data.bridge.connected")).isTrue();
+        assertThat(detail.<Boolean>read("$.data.bridge.runKnown")).isTrue();
+        assertThat(detail.has("$.data.bridge.resources")).as("null 與缺席等價").isFalse();
+        assertThat(detail.<String>read("$.data.bridge.status")).isEqualTo("RUNNING");
+    }
+
+    @Test
+    void anOlderBridgeWhoseSnapshotHasNoResourcesKeyAtAllGivesNoResourcesAndNoError() {
+        Fixture f = prjA("resources-omitted", 4);
+        MINI.manualSteps = true;
+        MINI.resourcesMode = MiniBridge.ResourcesMode.OMIT;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+
+        Resp detail = getRun(run);
+
+        assertThat(detail.status()).isEqualTo(200);
+        assertThat(detail.<Boolean>read("$.data.bridge.connected")).isTrue();
+        assertThat(detail.has("$.data.bridge.resources")).isFalse();
+    }
+
+    @Test
+    void whenTheBridgeIsUnreachableThereAreNoResourcesEitherAndTheDetailStillAnswers200() {
+        Fixture f = prjA("resources-unreachable", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+        assertThat(getRun(run).has("$.data.bridge.resources")).as("可達時有樣本（排除「本來就沒有」的假通過）").isTrue();
+
+        setting("autoclaude", "engineUrl", "http://127.0.0.1:1");
+        Resp detail = getRun(run);
+
+        assertThat(detail.status()).isEqualTo(200);
+        assertThat(detail.<Boolean>read("$.data.bridge.connected")).isFalse();
+        assertThat(detail.has("$.data.bridge.resources")).isFalse();
+    }
+
+    @Test
+    void aPausedAndAFinishedRunHaveNoResourcesBecauseThereIsNoEngineProcessTreeToSample() {
+        Fixture f = prjA("resources-paused-finished", 4);
+        MINI.manualSteps = true;
+        String run = startRun(f.projectId());
+        assertThat(awaitUntil(Duration.ofSeconds(10), () -> "RUNNING".equals(taskStatus(f.t1())))).isTrue();
+        assertThat(getRun(run).has("$.data.bridge.resources")).as("執行中有樣本").isTrue();
+
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/pause").status()).isEqualTo(200);
+        mini(run).release(1);
+        assertThat(awaitProjected(run, "PAUSED")).isTrue();
+        Resp paused = getRun(run);
+        assertThat(paused.<String>read("$.data.bridge.status")).isEqualTo("PAUSED");
+        assertThat(paused.has("$.data.bridge.resources")).as("暫停會終止整棵行程樹，沒有資源可言").isFalse();
+
+        assertThat(api.post(operator(), "/api/v1/executions/" + run + "/resume").status()).isEqualTo(200);
+        mini(run).release(10);
+        assertThat(awaitProjected(run, "COMPLETED")).isTrue();
+        Resp finished = getRun(run);
+        assertThat(finished.<String>read("$.data.bridge.status")).isEqualTo("COMPLETED");
+        assertThat(finished.has("$.data.bridge.resources")).as("終態沒有行程").isFalse();
+    }
+
     // ── 健康探測環與通知摘要 ─────────────────────────────────────────────────────
 
     @Test

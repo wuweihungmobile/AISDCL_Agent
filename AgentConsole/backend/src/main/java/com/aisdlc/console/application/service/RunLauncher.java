@@ -35,8 +35,11 @@ import java.util.function.Consumer;
  * 建立一個執行批次並交給 Bridge（契約 §3.4.5）：execute 與審核的後續批次共用。
  *
  * <ol>
- *   <li><b>交易 1</b>：鎖專案列 → 取 {@code run_number} → 插入 {@code execution_runs}（只寫 console 欄位）→ <b>提交</b>
- *       （Bridge 的 {@code UPDATE … WHERE id=run_id} 需要列已存在）；</li>
+ *   <li><b>物化</b>（交易 1 之前，只呼叫一次，契約 §3.4.2 一致性規則）：{@link ConfigMaterializer#materialize(int)} 的回傳值同時用於
+ *       下一步 INSERT 的 {@code engine_capabilities} 與送給 Bridge 的 {@code config_overrides}／{@code env}——兩次分開讀設定，
+ *       設定可能在中間被改，落庫的值就會與實際送出的不符；</li>
+ *   <li><b>交易 1</b>：鎖專案列 → 取 {@code run_number} → 插入 {@code execution_runs}（只寫 console 欄位，含
+ *       {@code engine_capabilities}）→ <b>提交</b>（Bridge 的 {@code UPDATE … WHERE id=run_id} 需要列已存在）；</li>
  *   <li>呼叫 Bridge {@code POST /autoclaude/runs}（非冪等，不重試）；</li>
  *   <li>201 → <b>交易 2</b>：專案 {@code EXECUTING}、範圍內任務 {@code QUEUED}、前一批次仍 PENDING 的審核項自動關閉，
  *       然後啟動事件消費者；</li>
@@ -96,17 +99,20 @@ public class RunLauncher {
      */
     public ExecutionRun launch(Launch launch, Consumer<ExecutionRun> beforeEffects) {
         UUID projectId = launch.project().id();
+        // 在交易 1 之前、只呼叫這一次：結果同時決定落庫的 engine_capabilities 與送給 Bridge 的請求（契約 §3.4.2 一致性規則）。
+        // 物化失敗（例如設定讀取失敗）發生在建列之前，所以不需要補償。
+        ConfigMaterializer.Materialized materialized = config.materialize(launch.autonomyLevel());
         ExecutionRun created = tx.execute(status -> {
             projects.findByIdForUpdate(projectId).orElseThrow(() -> NotFoundException.of("專案", projectId));
             ExecutionRun draft = new ExecutionRun(UUID.randomUUID(), projectId, runs.nextRunNumber(projectId),
                     RunStatus.INITIALIZING, launch.autonomyLevel(), launch.scope(), 0L, launch.tokenBudget(),
-                    clock.instant(), null, launch.plan().dag(), 0, null);
+                    clock.instant(), null, launch.plan().dag(), 0, null, materialized.engineCapabilities());
             return runs.insert(draft);
         });
         // 契約 §0.4 第 6 點：背景消費者之後呼叫 Bridge 沿用「啟動這個 run 的請求」的 traceId（只存記憶體）
         registry.bindTrace(created.id(), TraceIds.current());
         try {
-            AgentBridge.RunStarted started = bridge.startRun(startRequest(launch, created));
+            AgentBridge.RunStarted started = bridge.startRun(startRequest(launch, created, materialized));
             LOG.info("Bridge 已接受批次 {}（run #{}，狀態 {}）", created.id(), created.runNumber(), started.status());
         } catch (BridgeRejectedException e) {
             compensate(created.id());
@@ -137,8 +143,8 @@ public class RunLauncher {
         return created;
     }
 
-    private StartRunRequest startRequest(Launch launch, ExecutionRun run) {
-        ConfigMaterializer.Materialized materialized = config.materialize();
+    private static StartRunRequest startRequest(Launch launch, ExecutionRun run,
+                                                ConfigMaterializer.Materialized materialized) {
         return new StartRunRequest(run.id(), launch.playbook().project(), launch.project().executionPath(),
                 launch.playbook().toMap(), materialized.configOverrides(), materialized.env(), false);
     }

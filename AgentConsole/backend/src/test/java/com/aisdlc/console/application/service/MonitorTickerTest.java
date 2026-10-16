@@ -71,7 +71,7 @@ class MonitorTickerTest {
 
     private static ExecutionRun run(RunStatus status, int lastSeq, Instant startedAt) {
         return new ExecutionRun(UUID.randomUUID(), UUID.randomUUID(), 1, status, 4, null, 0, null, startedAt, null, null,
-                lastSeq, null);
+                lastSeq, null, null);
     }
 
     private static BridgeRejectedException rejected(int status) {

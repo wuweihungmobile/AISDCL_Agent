@@ -1,5 +1,6 @@
 package com.aisdlc.console.infrastructure.persistence;
 
+import com.aisdlc.console.support.AppendixCImpactNotes;
 import com.aisdlc.console.support.SharedPostgres;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V5～V9 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
+ * V5～V10 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
  * 真正會出事的是升級——V5 的「預設值校正」只能在值仍等於舊預設時才改，絕不能蓋掉管理員改過的值；
  * 新增的欄位必須讓既有匯入記錄原封不動；新鍵不能與既有鍵重複。這裡在一個獨立資料庫上先遷到 V4、塞入「管理員改過的」資料，
  * 再遷到最新版，逐項核對。
@@ -131,8 +132,50 @@ class V5UpgradeMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from "
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+    }
+
+    /**
+     * V10（D-11）對「已經在跑的資料庫」：升級前建立的批次沒有能力狀態——當時送了什麼已不可考，所以是 NULL，不回填、不猜測；
+     * 三個語意改變的鍵的 {@code impact_note} 改成契約附錄 C 的原文，而其餘鍵的提示一字不動（V10 以 (category, key) 對位更新，不是整表覆寫）。
+     */
+    @Test
+    void runsCreatedBeforeV10KeepANullEngineCapabilitiesAndOnlyTheThreeImpactNotesAreRewritten() {
+        String database = createDatabase();
+        flyway(database, "9").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        UUID project = UUID.randomUUID();
+        UUID run = UUID.randomUUID();
+        jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria) values (?, '升級前的專案', "
+                + "'/p', 'c')", project);
+        jdbc.update("insert into console.execution_runs (id, project_id, run_number, status, autonomy_level, scope, "
+                + "total_tokens_used) values (?, ?, 1, 'COMPLETED', 7, '{\"mode\":\"ALL\"}'::jsonb, 1240)", run, project);
+        String oldKernelBrain = value(jdbc, "model", "enableKernelBrain", "impact_note");
+        String untouchedBefore = jdbc.queryForObject("select string_agg(category || '.' || key || '=' || "
+                + "coalesce(impact_note, '<null>'), '|' order by category, key) from console.system_configs "
+                + "where (category, key) not in (('model','enableKernelBrain'),('agent','enableAutoMutation'),"
+                + "('agent','enableSelfEvolution'))", String.class);
+
+        flyway(database, null).migrate();
+
+        assertThat(jdbc.queryForMap("select status, autonomy_level, total_tokens_used, engine_capabilities from "
+                + "console.execution_runs where id = ?", run)).containsEntry("status", "COMPLETED")
+                .containsEntry("autonomy_level", 7).containsEntry("total_tokens_used", 1240L)
+                .containsEntry("engine_capabilities", null);
+        assertThat(oldKernelBrain).as("升級前是 V5 的舊文字").isNotEqualTo(AppendixCImpactNotes.ENABLE_KERNEL_BRAIN);
+        assertThat(value(jdbc, "model", "enableKernelBrain", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_KERNEL_BRAIN);
+        assertThat(value(jdbc, "agent", "enableAutoMutation", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_AUTO_MUTATION);
+        assertThat(value(jdbc, "agent", "enableSelfEvolution", "impact_note"))
+                .isEqualTo(AppendixCImpactNotes.ENABLE_SELF_EVOLUTION);
+        assertThat(jdbc.queryForObject("select string_agg(category || '.' || key || '=' || "
+                + "coalesce(impact_note, '<null>'), '|' order by category, key) from console.system_configs "
+                + "where (category, key) not in (('model','enableKernelBrain'),('agent','enableAutoMutation'),"
+                + "('agent','enableSelfEvolution'))", String.class)).as("其餘 47 個鍵的提示不變").isEqualTo(untouchedBefore);
+        assertThat(jdbc.queryForObject("select count(*) from console.system_configs where impact_note is null",
+                Integer.class)).isZero();
     }
 
     /**

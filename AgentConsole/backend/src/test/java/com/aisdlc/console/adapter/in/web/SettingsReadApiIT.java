@@ -4,6 +4,7 @@ import com.aisdlc.console.domain.model.config.ConfigCatalog;
 import com.aisdlc.console.domain.model.config.ConfigSpec;
 import com.aisdlc.console.support.AbstractApiIT;
 import com.aisdlc.console.support.ApiClient.Resp;
+import com.aisdlc.console.support.AppendixCImpactNotes;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -110,6 +111,26 @@ class SettingsReadApiIT extends AbstractApiIT {
                 assertThat(item.get("updatedBy")).as(full + " 種子尚未被任何人改過").isNull();
             }
         }
+    }
+
+    /**
+     * v1.3（D-11；附錄 C.1／C.2）：三個語意改變的鍵，從 API 看到的 {@code effect} 與 {@code impactNote} 就是契約寫的——前端設定頁的小標籤
+     * 與寫入前的確認對話框只讀這兩個欄位。{@code effect} 說謊（例如把沒有開關的演化旗標標成 ENGINE），使用者就會以為關掉旗標能關掉
+     * 引擎的行為；{@code impactNote} 沒更新，就還是 v1.2 的「Console 不送任何引擎設定」。
+     */
+    @Test
+    void theThreeEngineFlagsShowTheirV13EffectAndTheVerbatimImpactNoteOfAppendixC() {
+        Resp resp = api.get(viewer(), BASE);
+
+        assertThat(config(resp, "model", "enableKernelBrain")).containsEntry("effect", "ENGINE")
+                .containsEntry("impactNote", AppendixCImpactNotes.ENABLE_KERNEL_BRAIN);
+        assertThat(config(resp, "agent", "enableAutoMutation")).containsEntry("effect", "ENGINE")
+                .containsEntry("impactNote", AppendixCImpactNotes.ENABLE_AUTO_MUTATION);
+        assertThat(config(resp, "agent", "enableSelfEvolution")).containsEntry("effect", "STORED_ONLY")
+                .containsEntry("impactNote", AppendixCImpactNotes.ENABLE_SELF_EVOLUTION);
+        assertThat(resp.<List<String>>read("$.data.*[?(@.effect=='UNVERIFIED')].key"))
+                .as("UNVERIFIED 只剩 sdd 的三個鍵").containsExactlyInAnyOrder("specFormat", "workflowEngine",
+                        "validationLevel");
     }
 
     @Test

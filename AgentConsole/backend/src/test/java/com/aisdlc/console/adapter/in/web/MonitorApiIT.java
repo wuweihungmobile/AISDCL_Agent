@@ -97,7 +97,7 @@ class MonitorApiIT extends AbstractExecutionIT {
         }
         ExecutionRun run = runRepository.insert(new ExecutionRun(UUID.randomUUID(), UUID.fromString(f.projectId()),
                 number, RunStatus.INITIALIZING, 4, RunScope.all(), 0L, budget, at(started).toInstant(), null,
-                new DagSnapshot(nodes, edges), 0, null));
+                new DagSnapshot(nodes, edges), 0, null, null));
         jdbc.update("update console.execution_runs set status = ?, total_tokens_used = ?, completed_at = ?, "
                 + "bridge_instance = 'seed' where id = ?", status, used, at(completed), run.id());
         return run.id();

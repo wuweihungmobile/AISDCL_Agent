@@ -38,7 +38,7 @@
 | D13 | `autoclaude.dalBackend` 預設 FILE；Bridge 強制使用檔案型 checkpoint | 偏離 §5.5.1.5 預設值 | — |
 | D14 | Compose／Infra 十二項調整（映像釘版、pgBackRest 改 apt、exporter、MinIO、profile 等） | 逐條標於 §3 D14 | W2-B 實測 |
 | D15 | 跨平台（Windows 11 ＋ PowerShell）約束 | 補充 | Windows 接續檢查清單 |
-| D16 | Redis 角色：refresh token 撤銷、rate limit、SSE 消費位移 | 補充 §11.2 | Phase 4／6 啟用 |
+| D16 | Redis 角色（**W7 D-19 改寫**）：只用於 refresh token 撤銷名單，Redis 不在線降級為單實例記憶體並記 WARN；限流計數與 SSE 消費位移**不使用 Redis**（原決定三項全列，實作時兩項從未用到，如實登記） | 補充 §11.2 | D23；降級測試見契約 §1.9.2 |
 
 ---
 
@@ -51,6 +51,7 @@
 - **偏離 PRD §3.1，理由**：(a) PRD 自己授權「鎖定時取當時 stable、≥3.3」；(b) 新建專案不應從已停止 OSS 支援的主線起步；(c) QueryDSL 對 Spring Boot 4／Jakarta／Hibernate 的相容性未驗證，而 W2 任務書的依賴清單本就未列它。
 - **Alternatives**：Spring Boot 3.5.x（最後一條 3.x 主線；依掌舵者回報已出 OSS 支援期）；3.3／3.4（已 EOL）；停在 4.0.x（4.1 已 GA，無理由落後）。
 - **Consequences**：Spring Framework 7、Jackson 3（套件 `tools.jackson.*`）、Spring Security 7；`@MockBean` 改 `@MockitoBean`；starter 名稱一律以 Initializr 產物為準，**不憑記憶寫**；springdoc 版本以編譯通過者為準；jjwt 與 Jackson 3 的相容性由 W2-A 實測並寫入交卷；Testcontainers 需要 Docker daemon 在線。
+- **Virtual Threads 的實際範圍（W7 補；完整性審查 L-03）**：PRD §3.1 的「Java 21，Virtual Threads」在本專案的落地只有**兩處**明確使用 `Thread.ofVirtual()`——SSE 寫出（`StreamConnection.java:64`，每條前端連線一條寫出執行緒）與 run 事件消費者（`RunConsumers.java:90`，每個活躍 run 一條讀 Bridge 串流的執行緒）。`backend/src/main/resources` 的 yml／properties 沒有設定 `spring.threads.virtual.enabled`（依 Spring Boot 3.x 的預設值為 false；4.1 的預設值**未驗**），所以 Tomcat 請求執行緒與 `@Scheduled`／`@Async` 是否為虛擬執行緒取決於該預設，本文件不作宣稱。若要全域啟用，另開決策並重跑壓力與釘選（pinning）檢查。
 
 ### D2　Next.js 16 ＋ Tailwind 4 ＋ shadcn/ui（與 PRD §3.1 一致）
 
@@ -175,6 +176,8 @@
 | 10 | **pgadmin 加入 backend-net；全棧模式 PG 不對 host 發布，本機開發由 dev compose 發布** | 偏離 §11.3 | `db-net` 為 `internal: true`，只掛在它上面的容器其 `ports:` 對 host 不可達（**待 W2-B 實測**：`docker compose` 起來後對 5050／5432 做連線測試） | Architect 新增 |
 | 11 | 刪除 `docker compose exec backend java -jar app.jar --spring.flyway.enabled=true` | 偏離 §11.7 | Flyway 隨 Spring Boot 啟動自動執行；該指令會在容器內另起一個應用實例 | Architect 新增 |
 | 12 | `NEXT_PUBLIC_API_URL` 語意＝後端 origin（不含 `/api/v1`），Docker 同源時為空字串 | 偏離 §11.6 | PRD 寫 `/api` 會與路徑 `/api/v1/...` 疊成 `/api/api/v1` | Architect 新增 |
+| 13 | Prometheus 保留期 15d→**35d**（`--storage.tsdb.retention.time=35d`） | 偏離 §11.3 | 可用性 SLO 的 `ratio_30d` 要有完整 30 天原始樣本才名實相符；15d 時它實際只涵蓋 15 天 | W7-INFRA（D-14） |
+| 14 | 新增具名卷 `prometheus_data`（掛 prometheus 的 `/prometheus`；卷總數 11→12） | 偏離 §11.3（卷清單未列） | `down` 或重建容器後仍接得上，SLO 的 30 天歷史才不會歸零；`down -v` 才會清掉 | W7-INFRA（D-14） |
 
 - **Consequences**：#9～#12 為 Architect 新增，W2-B 須實測確認並回寫 `docker/README.md` 〈與 PRD 的差異〉；compose 最終服務、埠、卷以 `docker compose config` 輸出為準，並回填 Architecture §2。
 
@@ -189,11 +192,13 @@
 - **🔴 已知衝突（須主控裁決）**：掌舵者的跨平台補充要求 `gradlew` 索引模式為 100755，但根層 `tools/tests/test_platform_neutral_paths.py` 的 exec bit 鎖要求「索引內的 100755 只准落在 `ONBOARDING.md` §6 粗體跨度『755 入庫範圍』之內」。`AgentConsole/backend/gradlew` 以 100755 入庫會讓根層全套轉紅，除非同一個 commit 把該路徑補進 ONBOARDING §6 的粗體跨度。二擇一：① 補進跨度；② `gradlew` 以 644 入庫，文件一律寫 `sh gradlew` 與 `.\gradlew.bat`。本輪文件的 bash 區塊寫 `./gradlew`，並註明 Permission denied 時改 `sh gradlew`。
 - **Consequences**：Windows 上 `terminate()` 不是優雅信號，stop 的「SIGTERM→30 秒→SIGKILL」退化為立即結束；Bridge 測試套件須在 Windows 全套實跑（見 Implementation_Plan〈Windows 接續檢查清單〉）。
 
-### D16　Redis 的角色（補充 PRD §11.2「快取／Session 儲存」）
+### D16　Redis 的角色（補充 PRD §11.2「快取／Session 儲存」；**W7 主控裁決 D-19 改寫，2026-10-16**）
 
-- **Decision**：Redis 為選配加速層，Phase 1／2 不依賴：(1) refresh token 輪替與撤銷名單；(2) Rate Limit 計數（每分鐘 100 次，NFR-9.2-06）；(3) console-api 消費 Bridge SSE 的位移（`console:run:{runId}:last_seq`）與短期重播緩衝。本機開發未起 Redis 時退回記憶體實作（僅單實例有效）。
-- **Alternatives**：不用 Redis（JWT 無狀態則無法撤銷）；改存 PostgreSQL（可行，但 PRD 已配置 Redis）。
-- **Consequences**：`docker-compose.dev.yml` 將 redis 列為選配服務；Phase 4／6 開工時須有「Redis 不在線仍可用」的降級測試。
+- **現況（完整性審查 I-06，W7 查證）**：原決定列了三個用途，**實作時全部沒有做**：後端的 `build.gradle.kts` 與 `application*.yml` 沒有任何 Redis 相依或設定；限流是 Bucket4j 記憶體實作（契約 §0.4 第 4 點）；SSE 位移存資料庫（`execution_runs.console_last_seq`，Flyway V7）；Bridge 探測環形緩衝在記憶體（`BridgeHealthMonitor`）；登出只清瀏覽器 session。但 compose 仍把 `SPRING_DATA_REDIS_HOST／PORT` 傳給 backend、並要求 redis healthy 才啟動 backend，也就從來沒有 D16 承諾的「Redis 不在線仍可用」降級測試。
+- **Decision（改寫）**：Redis 為**選配**，本輪**只實作原三項中最有價值的一項**——**refresh token 撤銷名單**：換新輪替與登出時撤銷舊 token（鍵＝`jti`，存活到該 token 的 `exp`），**Redis 優先；Redis 不在線時降級為單實例記憶體名單並記 WARN**（D16 原本的降級承諾，現在才有實作與測試）；新增 `POST /api/v1/auth/logout`（契約 §1.9；細節與取捨見 D23）。**限流計數（每分鐘 100 次，NFR-9.2-06）維持 Bucket4j 記憶體實作、SSE 消費位移維持資料庫**，兩項列為「**未使用 Redis**」，文件不再宣稱它們用 Redis。
+- **原決定（v1.0，保留供追溯）**：「Redis 為選配加速層，Phase 1／2 不依賴：(1) refresh token 輪替與撤銷名單；(2) Rate Limit 計數（每分鐘 100 次，NFR-9.2-06）；(3) console-api 消費 Bridge SSE 的位移（`console:run:{runId}:last_seq`）與短期重播緩衝。本機開發未起 Redis 時退回記憶體實作（僅單實例有效）。」
+- **Alternatives**：不用 Redis（JWT 無狀態則無法撤銷）；改存 PostgreSQL（可行，但 PRD 已配置 Redis）；三個用途都做（否決：限流與 SSE 位移沒有分散式需求，Console 目前單實例，做了只增加相依與失效面）；移除 compose 的 Redis（需 INFRA 另案，見後果）。
+- **Consequences**：後端新增相依 `spring-boot-starter-data-redis`（契約附錄 D.4）；**必須設 `management.health.redis.enabled=false`**（否則 Redis 不在線會讓 `/actuator/health` 變 DOWN，降級承諾落空）；`SPRING_DATA_REDIS_HOST／PORT` 改為選填（契約附錄 D.2）；`docker-compose.dev.yml` 的 redis 維持選配；**compose 仍要求 redis healthy 才啟動 backend**（`docker-compose.yml` 的 `depends_on`），降級只保護**執行期**的 Redis 中斷、不保護冷啟動——是否放寬屬 INFRA 範圍（契約 §6.7.3 Q6）。Architecture §6(c)、§6(d)、§8.1、§8.6、§9.4 的 Redis 字樣已同步訂正。
 
 ---
 
@@ -212,7 +217,14 @@
 | `autoclaude.dalBackend` 預設值 | §5.5.1.5 | D13 |
 | US-I-05 驗收字樣「支援瀏覽按鈕」不提供（以路徑輸入＋allowlist 驗證取代） | §5.2.3 | G-15 |
 | KPI「專案完成率」「目標達成率」的「環形進度圖（Tremor DonutChart）」→ 設計稿畫面 8 的數值卡＋delta（W5 主控裁決 C-13，2026-10-15） | §5.4.2 | D11；G-20 |
+| PRD §5.3.2「等級 6-10 含自動突變、自演化」與 §5.5.1.2 兩個旗標的字面期待 → 引擎現況只有 Brain 逐步校正（對映 `minimax.enable_kernel_brain`），自演化只產生提案、不套用，`playbook.max_evolutions`／`require_evolution_signoff` 在生產路徑沒有讀者；Console 如實回報 `engineCapabilities`，`agent.enableSelfEvolution` 標 `STORED_ONLY`（W7 主控裁決 D-11，2026-10-16；證據表＝契約 §6.6.2） | §5.3.2、§5.5.1.2 | D20 |
 | 設計稿 water_green 色票用作**文字**時對比不足（text-muted 3.78:1、accent／error／warning／secondary 當文字 3.1～3.6:1，QA DEF-AC-004）→ `frontend/styles/tokens.console.css`〈無障礙覆寫〉加深文字色並新增 warning-text／secondary-text／terminal-* 四個文字專用色，達 WCAG 2.1 AA 4.5:1；設計稿原值仍在 `tokens.css` 逐字保留、主色 `#498428` 與區塊底色不動（W5 主控裁決 C-18，2026-10-16；axe 閘 `tests/e2e/a11y.ts` 釘住，設計若改色票須同時過閘） | §8.2、§8.4 | D11；DEF-AC-004 |
+| **FSM 狀態不走 SSE，改由 console-api 對 Bridge 的 `GET /sdd/fsm*` 做 30 秒輪詢**（PRD §0.2「SSE 推 log＋ExecutionObservation＋FSM 狀態」；FSM 檔只在 SDD runtime 執行時才變動，Bridge 事件型別只有六種、沒有 FSM 事件；W7 主控裁決 D-16，2026-10-16） | §0.2 | D22 |
+| **`POST /decompose` 以 AutoClaude `GoalDecomposer` 為唯一分解器，SDD 規格走路徑 A（`/sdd/compile`）編譯**；不另建「呼叫 SDD skill」的分解路徑（PRD §0.2「`POST /decompose` 呼叫 GoalDecomposer／SDD skill」；Bridge `decompose.py` 只用 GoalDecomposer；W7 D-16） | §0.2 | D22；契約 §3.3.2 |
+| **signoff 與 SDD `HUMAN_PENDING` 只做語意對映：Console 只讀 FSM-STATE、不回寫**（PRD §0.4／US-I-09「signoff 對應 SDD HUMAN_PENDING」；Console 的 signoff 只寫自己的表與 GoalDecomposer 的 `:approve`；回寫 FSM-STATE 會繞過 SDD FSM runtime 的不變量——AISDLC_SDD Rule 9「繞過 `FSMRuntime` 直接讀寫 `FSM-STATE-*.yaml`」是違反即停機的禁令；W7 D-16） | §0.4、§5.2.3 US-I-09 | D22 |
+| **前端測試覆蓋率「≥ 70%」的量測口徑**：只量 `frontend/vitest.config.mts` 的 `coverage.include`（31 個項目、其中 2 個是 glob：API client／auth store／狀態表／格式化／表單驗證與錯誤對應／匯入與設定的邏輯層／SSE 與即時狀態／Markdown 元件／四區塊版面／少數 UI 原子）；整頁視圖與卡片（`components/domain/**` 的頁面檔、`app/**` 路由、`components/ui` 與 `components/charts` 的其餘檔）由 Playwright E2E 驗證、**不計入**；門檻 lines／statements／functions 70、**branches 60**（低於 PRD 的 70）。QA 報告的前端覆蓋率數字就是這個子集的數字；**全量覆蓋率未量**（W7 完整性審查 V-07，主控裁決保留，2026-10-16） | §9.4（NFR-9.4-02） | G-21 |
+| **Prometheus 保留期 15d → 35d**（`--storage.tsdb.retention.time=35d`）：可用性 SLO 的 `ratio_30d` 要有完整 30 天原始樣本才名實相符，15d 時它實際只涵蓋 15 天（W7-INFRA，D-14） | §11.3（compose 的 prometheus 服務） | D14 追加 #13 |
+| **新增具名卷 `prometheus_data`**（掛在 prometheus 的 `/prometheus`）：`down` 或重建容器後仍接得上，可用性 SLO 的 30 天歷史才不會歸零；PRD §11.3 的卷清單沒有它（W7-INFRA，D-14；Architecture §2.5，卷總數 11→12） | §11.3 | D14 追加 #14 |
 
 ## 5. PRD 缺口與矛盾登記
 
@@ -235,9 +247,10 @@
 | G-15 | §5.2.3 US-I-05 | 驗收寫「支援瀏覽按鈕」，但瀏覽器無法瀏覽伺服器檔案系統，PRD §7 也沒有目錄瀏覽端點 | 不提供瀏覽；以路徑輸入＋Bridge allowlist 驗證滿足（偏離驗收字樣，RTM `US-I-05` 以此為準） |
 | G-16 | §7.1.5／§5.4.5 | 缺「列出專案執行批次」端點，但設計稿監控頁有「執行批次」下拉、US-M-06 要批次比較；監控端點也沒有 `runId`／時間範圍參數 | 補 `GET /api/v1/projects/{projectId}/executions`（`API-EXE-14`）與監控端點的 `runId`／`from`／`to` 查詢參數 |
 | G-17 | 設計稿頂列 | 通知鈴與 signoff 佇列徽章需要跨專案計數，PRD 無端點 | 補 `GET /api/v1/notifications/summary`（`API-NTF-01`） |
-| G-18 | §5.4.3 US-M-08／M-10 | 自訂儀表板版面無後端欄位；「資源使用情況」在 Bridge 契約中沒有 CPU／記憶體欄位 | 版面存前端 `localStorage`；Agent 狀態以連線、當前任務、Token 與步驟進度呈現 |
+| G-18 | §5.4.3 US-M-08／M-10 | 自訂儀表板版面無後端欄位；「資源使用情況」在 Bridge 契約中沒有 CPU／記憶體欄位 | 版面存前端 `localStorage`；Agent 狀態以連線、當前任務、Token 與步驟進度呈現。**資源使用情況已於 W7 補上（D21，2026-10-16）**：Bridge `resources`（psutil 取樣引擎行程樹）→ `bridge.resources` → Agent 即時狀態卡 |
 | G-19 | §5.1.3 US-T-02 | 驗收要「執行歷史」，Task DTO 無對應欄位 | 補 `executionHistory`（由 `execution_steps` 依 `task_id` 衍生；Phase 2 為空清單，Phase 4 起為真資料，契約 E2E-03 步驟 8 驗兩筆） |
 | G-20 | §5.4.2 UI-KPI-01／02 | KPI「專案完成率」「目標達成率」PRD 寫「環形進度圖」（Tremor `DonutChart`），設計稿畫面 8 只有數值卡與 delta；W4 實作依設計稿畫數值卡，QA 因 PRD 字樣把兩列留在 🟡 | **以設計稿畫面 8 的數值卡為準**（依據 D11「視覺以設計稿為準」；本列把它落到 KPI 這兩列，並同步登記於 §4 偏離清單）：兩張卡以數值＋delta 呈現，資料來源 `projectCompletionRate`／`goalAchievementRate`（契約 §1.3.1）；RTM `UI-KPI-01`／`UI-KPI-02` 改 `✅ 已驗證`（W5-QA，主控裁決 C-13，2026-10-15）；PRD §5.4.2 對這兩列的「環形」不再作為驗收依據（D3 的「元件欄改以圖表型別為驗收依據」對其他圖表照舊；這兩列是主控以 D11 明確裁決的例外） |
+| G-21 | §9.4 NFR-9.4-02「測試覆蓋率 後端 ≥ 80%、前端 ≥ 70%」 | 前端的覆蓋率只量 `vitest.config.mts` 的 `coverage.include`，整頁視圖由 E2E 驗證、不計入，分支門檻只有 60；QA 報告的前端數字是這個子集的數字，ADR、契約與 Architecture 都沒有登記這個口徑（完整性審查 V-07） | 登記量測口徑（本檔 §4 對應列）；**全量覆蓋率未量**，RTM `NFR-9.4-02` 的證據欄須寫明口徑（QA 合併時處理）；若要以全量範圍量測，另案 |
 
 ## 6. 證據欄（待回填；貼逐字輸出，不得寫「應該」）
 
@@ -276,6 +289,41 @@
   3. **資料面**：Flyway V9 加 `projects.deleted_at`、`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`；刪除專案時專案與連帶軟刪的目標、任務寫**同一個** `deleted_at`，復原以它辨識「同一次刪除連帶軟刪」的列（刪除專案前就單獨刪除的目標／任務不回來）；復原專案時還原 `status_before_delete`。升級前已軟刪的列以 `updated_at` 近似 `deleted_at`。
 - **Alternatives**：預設開啟清除（不可逆，部署者可能不知情就失去資料，否決）；既不提供保留期也永遠不清除（資料無限成長，且違反 NFR-9.3-04，否決）；只提供 DB 手動復原腳本（不是產品功能，否決）；復原一律回 `READY`／`DRAFT`（`COMPLETED`／`FAILED` 專案復原後失去狀態，否決）。
 - **Consequences**：`ProjectSummaryResponse` 加 `deletedAt`（只在 `deleted=true` 列表帶值）；契約新增 `project_not_deleted`、`restore_window_expired` 兩個 reason（契約 §0.3 第 5 點、附錄 B.2）；審計新增 `project.restore`／`project.purge`；清除排程的範圍是專案層級，單獨軟刪除的目標／任務不被清除（隨其專案被清除時才一併實體刪除）；預設關閉意味著長期運行的部署必須自行決定是否開啟，並與 pgBackRest 的備份保留期（28 天）一併評估。契約落點：`API_Contract_P3-6.md` §0.5 V9、§1.6；RTM 新列 `API-PRJ-06`。
+
+### D20　等級 6～10 的引擎對映與誠實的能力旗標（W7 主控裁決 D-11，2026-10-16；PRD §5.3.2、§5.5.1.2）
+- **Context**：PRD 把「自動突變（Level 6+）」「自演化（Level 7+）」寫成等級 6～10 的能力並各配一個設定鍵；契約 v1.2 因查無對應的引擎鍵標 `UNVERIFIED`，RTM `API-AUT-06` 判 🟡。D-11 授權「真的送引擎」並要求批次回應誠實標示。W7-SA 現查 `AutoClaude/` 的結果（證據表＝契約 §6.6.2，含檔案:行號與原文）：
+  1. `minimax.enable_kernel_brain` 為真且有金鑰時，Kernel 在步驟失敗且尚有重試次數時先請 Brain 改寫 prompt；Brain 呼叫失敗則該步驟直接升級。**沒有金鑰而旗標為真，引擎啟動即失敗（`return 1`），不是忽略。** Kernel 呼叫 Brain 時不要求步驟變異，所以實務上只有 prompt 改寫。
+  2. `playbook.max_evolutions`、`playbook.require_evolution_signoff` 在生產的 Kernel 路徑**沒有讀者**：Kernel 只發布演化提案並寫日誌，`KernelResult.evolved_playbook_path` 恆為 `None`；`AutoResumeService` 讀 `max_evolutions` 的重載迴圈進不去，也沒有核可閘；`require_evolution_signoff` 只被已沒有建構點的舊 `PlaybookRunner` 讀。引擎自己的測試（`test_proposal_is_logged_but_never_applied`）鎖住「只提案不套用」。
+  3. 演化的 AI 提案只由金鑰的有無決定；有金鑰的批次另外會在最後一步之後多一次目標驗證外呼。
+- **Decision**：
+  1. Console 只送一個引擎旋鈕：`minimax.enable_kernel_brain`＝`model.enableKernelBrain ∨ agent.enableAutoMutation ∨ 自治等級 ≥ 6`，**只在 `model.apiKey` 有值時送**（有金鑰時顯式送 `true`／`false`）。
+  2. **永不送** `playbook.max_evolutions`、`playbook.require_evolution_signoff`（另含 `enable_rtm_feedback`、`goal_synthesis_enabled`、`enable_translation_auto_propose`，對 Console 的 playbook 沒有可觀測效果或會關掉既有檢查）。
+  3. `agent.enableAutoMutation` 的 effect 由 `UNVERIFIED` 改 `ENGINE`；`agent.enableSelfEvolution` 由 `UNVERIFIED` 改 `STORED_ONLY`（已驗證不影響引擎）。
+  4. 批次回應與 `execution_runs.engine_capabilities`（Flyway V10）回報 `{autoMutation, selfEvolution}`，值域 `ENABLED`／`OFF`／`UNAVAILABLE_NO_API_KEY`；`selfEvolution` 有金鑰即 `ENABLED`（引擎沒有開關），語意是「只提案、不套用」。
+- **偏離 PRD**：PRD §5.3.2 說 6～10 級「含自動突變、自演化」；引擎現況只有 Brain 逐步校正、自演化只提案（登記於 §4）。
+- **Alternatives**：照主控預設方案送 `max_evolutions`／`require_evolution_signoff`（否決：兩鍵無讀者，標 `ENGINE` 為假；`require_evolution_signoff=true` 製造假的 fail-closed 安全感——`AutoResumeService` 缺核可閘，日後若 Kernel 產生 `evolved_playbook_path` 這個鍵也保護不了任何事；QA 只能驗到無作用的鍵）；金鑰按需遞送讓 `selfEvolution=OFF` 成真（否決：改變「有金鑰就送」的既有行為，目標驗證會悄悄停止，D-58 的 E2E 關閉演化手法也要重寫）；沒有金鑰時仍送 `enable_kernel_brain=true`（否決：引擎啟動即失敗）。
+- **Consequences**：Console 的「自演化」開關沒有引擎效果，UI 以 `STORED_ONLY` 標籤與 tooltip 如實呈現；日後若 AutoClaude 讓 Kernel 真的套用演化，須先在 `AutoResumeService` 補核可閘，再由新 ADR 決定 Console 是否送這兩個鍵；Docker 全棧的 Bridge 環境本身必填金鑰，`engineCapabilities` 只認 Console 的 `model.apiKey`，方向是低估；`resume`／`restore` 沿用建立時凍結的設定檔，金鑰在批次中途被清掉會讓重新啟動失敗。契約落點：`API_Contract_P3-6.md` §0.5 V10、§1.2.1、§3.4.2、§3.6.1、附錄 C、E2E-14、§6.6；Architecture §6(c)、§7、§11.4、§12.1 L-10／L-11；RTM `API-AUT-06` 由 QA 依證據升級。
+
+### D21　資源使用情況的資料來源（W7 主控裁決 D-12，2026-10-16；US-M-10）
+- **Context**：G-18 與契約 v1.2 把「資源使用情況（CPU／記憶體）」標為 Bridge 沒有資料來源（RTM `US-M-10` 🟡）。
+- **Decision**：Bridge 在背景每 5 秒以 psutil 對每個存活 run 的**引擎行程樹**取樣（CPU 整機正規化、RSS 總和、行程數、取樣時間），`GET /autoclaude/runs/{id}` 的回應加 `resources`（只增不減）；console-api 把它投影到 `ExecutionRunDetailResponse.bridge.resources`；前端 Agent 即時狀態卡顯示 `CPU 12.3%・記憶體 345 MB・3 行程`，沒有資料顯示 `—`。資源**不入庫、不進 SSE**。
+- **Alternatives**：在請求路徑現場取樣（阻塞請求，且 `cpu_percent(interval=None)` 第一筆恆為 0）；寫進 `execution_runs`（違反 D10 的欄位所有權分工，資料高頻且沒有追溯價值）；走 SSE `metric-update`（多一條事件契約與重播語意，現有 15 秒詳情輪詢已足夠）。
+- **Consequences**：PAUSED 時 Bridge 已終止行程樹（D8），`resources` 為 null；樣本超過 15 秒未更新回 null，不回舊數字；畫面數字最舊約 20 秒；取樣器必須跨 tick 持有 `psutil.Process` 物件，否則 CPU 恆為 0.0。契約落點：§1.2.3、§3.1.2、§4.3 M-19、E2E-14 第 8～9 列；Architecture §10.1。
+
+### D22　AISDLC_SDD 的接入、深度探針與三項偏離（W7 主控裁決 D-16、D-17，2026-10-16；PRD §0.2、§0.3、§0.4、NFR-OBS-01）
+- **Context**：PRD 把 FSM-STATE 列為 Console 對 SDD 的遙測來源（§0.3：Run＝FSM-STATE session、監控遙測＝FSM `decision_trace`／`retry_history`／RTM）；Bridge 早有 `GET /sdd/version`、`GET /sdd/fsm/{project}`，但 Console 後端與前端沒有任何消費者，NFR-OBS-01 的「四源一致」也從未比對 FSM-STATE（完整性審查 I-01、I-02、V-06）。另外，Console 的探測環打淺層 `/health`（恆 ok），引擎或 `SDD_ROOT` 壞了也看不出來（I-03）。W7-SA 現讀 AISDLC_SDD v0.30 的真實 FSM 狀態檔：`retry_history` 是**以重試閘為鍵的映射**、`human_pending_tracking` 是**單一映射**、**沒有任何 RTM 覆蓋數值的鍵**（證據：契約 §6.7.2 E1～E3）。
+- **Decision**：
+  1. **唯讀接入**：Bridge 新增 `GET /sdd/fsm`（FSM 專案清單），`GET /sdd/fsm/{project}` 增 `human_pending`、`retry_history`、`rtm_coverage`（只增不減；語意以上述真實結構為準，契約 §3.1.3）；console-api 新增 `GET /api/v1/engines/sdd`（Bridge 不可達也回 200，以 `available`／`reason` 表達）；監控頁新增「AISDLC_SDD 引擎」卡（版本、FSM 專案選單、當前狀態／Sprint／更新時間、待人工、最近 5 筆決策；30 秒輪詢）。
+  2. **深度探針（D-17）**：`autoclaude.healthCheckPath` 預設改 `/health/deep`（Flyway V11 只改仍等於舊預設的既有列）；Bridge 的 `/health/deep` 加 `sdd` 檢查：沒有可用 SDD 目錄為 `null`（不算失敗）、有目錄且（有 `build/reports/fsm` **或**入口文件 `AISDLC_SDD_INIT.md`）為 `true`、否則 `false` 並 503。**與主控任務書字面不同**：任務書寫「無 `build/reports/fsm` 即 false」，但 `AISDLC_SDD/.gitignore` 忽略 `AISDLC_SDD_v0.30/build/reports/`（入庫 0 筆），乾淨 clone 沒有 fsm 目錄，照字面判會讓 compose 的 `engine-bridge` 永遠 unhealthy、`backend` 起不來（INFRA 實測發現並已偏離；契約 §3.1.1、§6.7.3 Q1，待主控確認）。
+  3. **三項偏離 PRD**（逐項登記於 §4）：①**FSM 不走 SSE、改 30 秒輪詢**——FSM 檔只在 SDD runtime 執行時才變動（人工操作頻率），Bridge 事件型別只有六種且沒有 FSM 事件，要推送就得讓 Bridge 監看檔案，成本高、收益低；②**decompose 以 AutoClaude `GoalDecomposer` 為唯一分解器，SDD 規格走路徑 A 編譯**——不另建「呼叫 SDD skill」的分解路徑；③**signoff 與 `HUMAN_PENDING` 只做語意對映，Console 只讀、不回寫 FSM-STATE**——回寫會繞過 SDD FSM runtime 的不變量，AISDLC_SDD Rule 9 把「繞過 `FSMRuntime` 直接讀寫 `FSM-STATE-*.yaml`」列為違反即停機的禁令；Console 只顯示 `humanPending`，不替 SDD 簽核。
+- **Alternatives**：FSM 走 SSE（否決：見上）；Console 回寫 FSM-STATE（否決：Rule 9）；RTM 覆蓋率由 Bridge 另讀 RTM 檔（否決：超出本輪；FSM-STATE 沒有該鍵，`rtm_coverage` 先為保留位，現況恆 null，列為後續候選）；`/health/deep` 對 `sdd` 照字面判（否決：乾淨 clone 全棧起不來）；`sdd` 檢查只當資訊、不影響 503（備選，契約 §6.7.3 Q4）。
+- **Consequences**：`GET /engines/sdd` 在乾淨 clone 回 `available=true`、`projects=[]`（正常狀態）；開發機上會列出 SDD 測試套件留下的 `FSM-STATE-test-<數字>.yaml`（照列，斷言一律寫「包含」）；探測環對 `sdd` 檢查失敗敏感（`bridgeConnected`／`agentAvailability`／`AGENT_UNRESPONSIVE` 都會受影響）；探測讀取逾時 3→8 秒；`human_pending.count` 實務上只有 0 或 1；Bridge 與 SSOT 對 SDD LATEST 的判定可能分歧（Architecture §12.2 V-11）；Console 對 FSM 的唯一消費點是 `GET /engines/sdd`。契約落點：§1.7.1、§3.1、§3.1.1、§3.1.3、§4.3 M-20、附錄 B.4、E2E-15、E2E-16 第 1～2 列；Architecture §4.3、§10、§10.1、§11.1、§11.2；RTM 新列 `API-ENG-01`、補強 `NFR-OBS-01`。
+
+### D23　refresh token 撤銷名單的設計（W7 主控裁決 D-19，2026-10-16；D16 的落地）
+- **Context**：見 D16（原決定三項全未實作）。W7-SA 現查：JWT 已為每個 token 簽發 `jti`（`JwtTokenService.build` 的 `.id(UUID)`）；後端只有 `login`、`refresh` 兩個認證端點，前端 `logout()` 只清 sessionStorage；後端沒有 Redis 相依。
+- **Decision**：①鍵＝refresh token 的 `jti`，存活到 `exp`；②**換新時原子撤銷舊 token**（`tryRevoke`：Redis `SET NX EX`／記憶體 `putIfAbsent`；回 false＝已撤銷＝401 `INVALID_REFRESH_TOKEN`）；③新增**免認證**的 `POST /api/v1/auth/logout`（`{refreshToken}`，請求格式合法一律 204，不洩漏 token 有效性），前端 `logout()` 先 fire-and-forget 呼叫、失敗不阻擋本機登出；④Redis 優先、不在線降級為單實例記憶體名單並記 WARN（只在狀態轉換時記）；⑤`console.security.refresh-revocation.store`＝`auto`（預設：`spring.data.redis.host` 有值才用 Redis）／`redis`／`memory`；⑥`management.health.redis.enabled=false`。
+- **Alternatives**：只做換新輪替、不加 logout 端點（備選，契約 §6.7.3 Q6：登出後被竊的 refresh token 仍可用到過期，最長 7 天）；撤銷名單存 PostgreSQL（可行，但 D16 的 Redis 已配置）；同時撤銷 access token（否決：每個請求都要查名單，違背 JWT 無狀態的簡單性；access 最長 30 分鐘）；換新給「重放寬限窗」（否決：讓被竊的 token 在窗內可重放，且多一份狀態）。
+- **Consequences**：①降級記憶體名單隨行程重啟清空，重啟前已登出、尚未過期的 refresh token 在重啟後復活（Redis 在線時不會）；②換新回應在網路上遺失時，舊 token 重試得 401 而被登出（機率很低，不做寬限）；③access token 在登出後最長 30 分鐘仍有效；④後端新增相依（契約附錄 D.4）；⑤多實例部署前須改成只認 Redis（記憶體名單只對單一實例有效）；⑥`POST /auth/logout` 是主控給定的新路徑清單之外的第三條（契約 §6.7.3 Q6）。契約落點：§1.9、§2.8 第 10 點、§0.4 第 7 點、附錄 D.2／D.4、E2E-16 第 7～10 列；Architecture §8.1；RTM 新列 `API-AUTH-03`。
 
 ### 主控親驗紀錄（2026-10-15）
 - Bridge：`ruff` 全過；`pytest -n 4` 235 passed／9 skipped（無 DB）；slim 映像字面指令 build rc=0、容器 `/health` 兩引擎 ok。

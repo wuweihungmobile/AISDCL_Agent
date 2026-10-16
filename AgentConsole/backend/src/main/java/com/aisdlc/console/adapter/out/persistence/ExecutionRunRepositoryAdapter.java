@@ -16,15 +16,15 @@ import java.util.UUID;
 
 /**
  * {@link ExecutionRunRepository} 的 JDBC 實作。刻意不用 JPA 實體做寫入：{@code execution_runs} 的大半欄位由 Bridge
- * 直接更新，整列回寫（merge）會蓋掉它們（PRD §0.2.2）；INSERT 只列 console 欄位，更新只有目標明確的
- * {@code UPDATE … SET console_last_seq}。
+ * 直接更新，整列回寫（merge）會蓋掉它們（PRD §0.2.2）；INSERT 只列 console 欄位（含 V10 的 {@code engine_capabilities}，
+ * 只在建立時寫一次），更新只有目標明確的 {@code UPDATE … SET console_last_seq}。
  */
 @Component
 class ExecutionRunRepositoryAdapter implements ExecutionRunRepository {
 
     private static final String COLUMNS = "id, project_id, run_number, status, autonomy_level, scope::text as scope, "
             + "total_tokens_used, token_budget, started_at, completed_at, dag::text as dag, console_last_seq, "
-            + "bridge_instance";
+            + "bridge_instance, engine_capabilities::text as engine_capabilities";
 
     private static final RowMapper<ExecutionRun> MAPPER = (rs, rowNum) -> new ExecutionRun(
             JdbcSupport.uuid(rs, "id"), JdbcSupport.uuid(rs, "project_id"), rs.getInt("run_number"),
@@ -32,7 +32,8 @@ class ExecutionRunRepositoryAdapter implements ExecutionRunRepository {
             ExecutionJson.scopeFromJson(rs.getString("scope")), rs.getLong("total_tokens_used"),
             JdbcSupport.nullableLong(rs, "token_budget"), JdbcSupport.instant(rs, "started_at"),
             JdbcSupport.instant(rs, "completed_at"), ExecutionJson.dagFromJson(rs.getString("dag")),
-            rs.getInt("console_last_seq"), rs.getString("bridge_instance"));
+            rs.getInt("console_last_seq"), rs.getString("bridge_instance"),
+            ExecutionJson.capabilitiesFromJson(rs.getString("engine_capabilities")));
 
     private final JdbcTemplate jdbc;
 
@@ -43,9 +44,11 @@ class ExecutionRunRepositoryAdapter implements ExecutionRunRepository {
     @Override
     public ExecutionRun insert(ExecutionRun run) {
         jdbc.update("insert into console.execution_runs (id, project_id, run_number, autonomy_level, scope, "
-                        + "token_budget, dag, started_at) values (?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?)",
+                        + "token_budget, dag, started_at, engine_capabilities) "
+                        + "values (?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?, ?::jsonb)",
                 run.id(), run.projectId(), run.runNumber(), run.autonomyLevel(), ExecutionJson.scopeToJson(run.scope()),
-                run.tokenBudget(), ExecutionJson.dagToJson(run.dag()), JdbcSupport.ts(run.startedAt()));
+                run.tokenBudget(), ExecutionJson.dagToJson(run.dag()), JdbcSupport.ts(run.startedAt()),
+                ExecutionJson.capabilitiesToJson(run.engineCapabilities()));
         return findById(run.id()).orElseThrow();
     }
 

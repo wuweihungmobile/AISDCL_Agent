@@ -187,7 +187,19 @@ public final class MiniRun {
         snap.put("bridge_instance", bridge.bridgeInstance);
         snap.put("current_step_number", currentStepNumber);
         snap.put("attempt", attempt);
+        // 資源取樣（契約 §3.1.2）：真 Bridge 只在引擎行程樹存活時回值（暫停會終止整棵樹、終態沒有行程），其餘為 null
+        switch (bridge.resourcesMode) {
+            case OMIT -> { }
+            case NULL -> snap.put("resources", null);
+            case SAMPLE -> snap.put("resources", processTreeAlive() ? new LinkedHashMap<>(bridge.resourcesSample) : null);
+            default -> throw new IllegalStateException("未知的 resourcesMode：" + bridge.resourcesMode);
+        }
         return snap;
+    }
+
+    /** 引擎行程樹是否存活：RUNNING、PAUSING、CANCELLING（INITIALIZING 尚未 spawn；PAUSED 與終態沒有行程）。 */
+    private boolean processTreeAlive() {
+        return "RUNNING".equals(status) || "PAUSING".equals(status) || "CANCELLING".equals(status);
     }
 
     // ── 對外操作（與真 Bridge 同前置狀態、同錯誤）───────────────────────────────

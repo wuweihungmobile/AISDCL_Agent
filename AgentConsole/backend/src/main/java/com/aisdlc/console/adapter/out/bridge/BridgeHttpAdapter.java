@@ -3,6 +3,7 @@ package com.aisdlc.console.adapter.out.bridge;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
+import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -83,6 +84,8 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final int GET_RETRIES = 2;
     private static final long GET_RETRY_BACKOFF_MS = 200;
     private static final int MAX_BODY_BYTES = 8 * 1024 * 1024;
+    /** 狀態事件的 {@code reason} 與告警事件的 {@code message} 是 Bridge 的自由文字，可能帶 pid（{@link BridgeText}）。 */
+    private static final List<String> FREE_TEXT_KEYS = List.of("reason", "message");
     /** SSE 閒置看門狗的共用排程器（daemon；每個串流各自 arm／disarm）。 */
     private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(task -> {
         Thread thread = new Thread(task, "bridge-sse-watchdog");
@@ -206,12 +209,32 @@ class BridgeHttpAdapter implements AgentBridge {
     @Override
     public RunSnapshot getRun(UUID runId) {
         Map<String, Object> doc = asMap(getJson(runsBase() + "/autoclaude/runs/" + runId, GET_READ_TIMEOUT));
-        return new RunSnapshot(text(doc.get("run_id")), statusOf(doc.get("status")), text(doc.get("reason")),
+        return new RunSnapshot(text(doc.get("run_id")), statusOf(doc.get("status")),
+                BridgeText.withoutPid(text(doc.get("reason"))),
                 intOrNull(doc.get("pid")), text(doc.get("started_at")), text(doc.get("completed_at")),
                 intOrNull(doc.get("exit_code")), text(doc.get("current_step")), intOrNull(doc.get("current_step_number")),
                 intOrZero(doc.get("attempt")), intOrZero(doc.get("completed_steps")), intOrZero(doc.get("total_steps")),
                 doc.get("tokens_used") instanceof Number n ? n.longValue() : 0L, intOrZero(doc.get("last_event_seq")),
-                text(doc.get("project")), text(doc.get("execution_path")), text(doc.get("bridge_instance")));
+                text(doc.get("project")), text(doc.get("execution_path")), text(doc.get("bridge_instance")),
+                resourcesOf(doc.get("resources")));
+    }
+
+    /**
+     * {@code RunStateOut.resources}（契約 §3.1.2）：{@code cpu_percent／rss_bytes／process_count／sampled_at} 四個欄位都在且型別正確才採用，
+     * 值<b>原樣</b>帶出（不重算、不四捨五入、不夾範圍）。Bridge 回 null、回應缺這個鍵（舊版 Bridge）、不是物件或欄位不齊一律回 null——
+     * 資源取樣只是顯示用的輔助資料，寧可沒有，也不讓它拖垮整個詳情回應，更不猜測缺的欄位。
+     */
+    static ResourceUsage resourcesOf(Object value) {
+        if (!(value instanceof Map<?, ?> map)) {
+            return null;
+        }
+        if (map.get("cpu_percent") instanceof Number cpu && map.get("rss_bytes") instanceof Number rss
+                && map.get("process_count") instanceof Number processes && map.get("sampled_at") instanceof String at
+                && !at.isBlank()) {
+            return new ResourceUsage(cpu.doubleValue(), rss.longValue(), processes.intValue(), at);
+        }
+        LOG.debug("Bridge 的 resources 欄位不齊或型別不符，視為沒有資料");
+        return null;
     }
 
     @Override
@@ -301,6 +324,11 @@ class BridgeHttpAdapter implements AgentBridge {
 
     private static BridgeEvent eventOf(String event, Map<String, Object> data, Integer fallbackSeq) {
         int seq = data.get("seq") instanceof Number n ? n.intValue() : fallbackSeq == null ? 0 : fallbackSeq;
+        for (String key : FREE_TEXT_KEYS) {
+            if (data.get(key) instanceof String value) {
+                data.put(key, BridgeText.withoutPid(value));
+            }
+        }
         return new BridgeEvent(seq, text(data.get("ts")), event == null ? "" : event, data);
     }
 

@@ -69,7 +69,8 @@ public class ExecutionController {
                     + "409 專案狀態不允許執行 → 409 未經人工審批的草案不可執行 → 400 範圍 id 不屬於此專案 → 409 範圍問題 → "
                     + "409 目標依賴成環 → 422 物化失敗 → Bridge（409 鎖／422／502／504，並補償刪除剛建的 run 列）。"
                     + "成功：建立 execution_runs（run_number 同專案遞增）→ Bridge POST /autoclaude/runs → 專案 EXECUTING、"
-                    + "範圍內任務 QUEUED、啟動事件消費者")
+                    + "範圍內任務 QUEUED、啟動事件消費者。v1.3：依自治等級（≥ 6 要求自動突變、≥ 7 要求自演化）與旗標物化引擎設定，"
+                    + "回應的 engineCapabilities 如實標示「實際送進引擎的」能力（沒有 model.apiKey 不報錯，回 UNAVAILABLE_NO_API_KEY）")
     public ApiResult<ExecutionRunResponse> execute(@PathVariable UUID projectId,
                                                    @RequestBody StartExecutionRequest request, Principal principal) {
         return ApiResult.created(ExecutionRunResponse.from(
@@ -98,7 +99,9 @@ public class ExecutionController {
     @GetMapping("/api/v1/executions/{runId}")
     @Operation(summary = "查詢執行狀態",
             description = "合併 DB 列與 Bridge GET /autoclaude/runs/{id}。Bridge 不可達時仍回 200，bridge.connected=false，"
-                    + "進度欄位退回 DB 衍生值（currentStep 缺席），不回 5xx。pendingReviews 只含 PENDING")
+                    + "進度欄位退回 DB 衍生值（currentStep 缺席），不回 5xx。pendingReviews 只含 PENDING。"
+                    + "v1.3：engineCapabilities（讀自 DB，建立時凍結）與 bridge.resources（引擎行程樹的資源取樣，值原樣來自同一次 Bridge 快照；"
+                    + "行程不存活、Bridge 不可達或不認得該批次時缺席）")
     public ApiResult<ExecutionRunDetailResponse> get(@PathVariable UUID runId) {
         return ApiResult.ok(ExecutionRunDetailResponse.from(query.get(runId)));
     }

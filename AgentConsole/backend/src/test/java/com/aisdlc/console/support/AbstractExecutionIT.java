@@ -209,6 +209,20 @@ public abstract class AbstractExecutionIT extends AbstractApiIT {
         thresholds.invalidate();
     }
 
+    /**
+     * 測試用假金鑰。刻意不以 {@code sk-} 開頭：根層 pre-commit 的機密掃描會把 openai／minimax 形態的字串當真值擋下 commit
+     * （迷你 Bridge 不驗金鑰格式，真引擎的 {@code MinimaxClient} 建構時也只擋空字串）。
+     */
+    protected static final String FAKE_API_KEY = "your_api_key_here_test_fixture_0123456789";
+
+    /** admin 設定 {@code model.apiKey}（加密參數須 {@code confirm=true}）；傳空字串＝清掉金鑰。 */
+    protected void putApiKey(String value) {
+        Resp resp = api.put(admin(), "/api/v1/settings/model/apiKey", Map.of("value", value, "confirm", true));
+        if (resp.status() != 200) {
+            throw new IllegalStateException("設定 model.apiKey 失敗：" + resp.status());
+        }
+    }
+
     /** 目前待決的審核項（來自 {@code GET run} 的 {@code pendingReviews}）。 */
     protected List<Map<String, Object>> pendingReviews(String runId) {
         return getRun(runId).read("$.data.pendingReviews");

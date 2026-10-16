@@ -52,6 +52,16 @@ public final class MiniBridge implements AutoCloseable {
     /** SSE 在多久沒有事件時送一行 keep-alive 註解（毫秒）。 */
     public volatile long keepAliveMillis = 500;
     public volatile String bridgeInstance = "mini-bridge";
+    /** {@code GET run} 快照的 {@code resources} 怎麼回（契約 §3.1.2）。預設 {@link ResourcesMode#SAMPLE}（對照真 Bridge）。 */
+    public volatile ResourcesMode resourcesMode = ResourcesMode.SAMPLE;
+    /** {@link ResourcesMode#SAMPLE} 回的樣本：欄位名與型別同真 Bridge 的 {@code ResourcesOut}；{@code sampled_at} 刻意用 {@code +00:00}（非 {@code Z}）以驗「原樣帶出」。 */
+    public volatile Map<String, Object> resourcesSample = map("cpu_percent", 12.3, "rss_bytes", 361758720L,
+            "process_count", 3, "sampled_at", "2026-10-16T03:21:45.123456+00:00");
+
+    /** 快照的 {@code resources}：{@code SAMPLE}＝引擎行程樹存活（RUNNING／PAUSING／CANCELLING）時回一筆樣本、其餘（暫停、終態）回 null；{@code NULL}＝恆回 null；{@code OMIT}＝不帶這個鍵（舊版 Bridge）。 */
+    public enum ResourcesMode {
+        SAMPLE, NULL, OMIT
+    }
 
     private final ConfigurableApplicationContext context;
     private final JdbcTemplate jdbc;
@@ -138,6 +148,7 @@ public final class MiniBridge implements AutoCloseable {
         manualSteps = false;
         completionDelayMillis = 0;
         keepAliveMillis = 500;
+        resourcesMode = ResourcesMode.SAMPLE;
         dropStreams();
     }
 
