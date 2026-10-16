@@ -15,9 +15,11 @@ import com.aisdlc.console.domain.exception.UnsupportedFormatException;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.exception.ValidationException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -28,6 +30,7 @@ import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
@@ -37,6 +40,8 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -44,12 +49,17 @@ import java.util.stream.Collectors;
  * 領域例外後經由 HandlerExceptionResolver 進來（見 RestSecurityHandlers）。
  *
  * <p>對映：驗證失敗 400、未認證 401、權限不足 403、找不到 404、狀態衝突 409、其餘未預期 500（只回通用訊息，
- * 細節只寫日誌並帶 traceId，不洩漏內部資訊）。
+ * 細節只寫日誌並帶 traceId，不洩漏內部資訊）。唯一的例外是<b>客戶端已斷線</b>（{@link AsyncRequestNotUsableException}，SSE 的日常結尾）：
+ * 不是錯誤、也沒有連線可回，不寫本文、只記一行 DEBUG（{@link #handleClientGone}）。
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
     private static final Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    /** 與 {@code TraceIdFilter.HEADER} 同值（adapter.in 不得依賴 infrastructure，所以寫字面）。 */
+    private static final String TRACE_HEADER = "X-Trace-Id";
+    private static final Pattern STREAM_PATH =
+            Pattern.compile("^/api/v1/stream/executions/([0-9a-fA-F-]{36})/(?:logs|metrics)$");
 
     @ExceptionHandler(DomainException.class)
     public ResponseEntity<ApiError> handleDomain(DomainException ex) {
@@ -120,6 +130,44 @@ public class GlobalExceptionHandler {
         String message = "參數 " + ex.getName() + " 的值格式不正確";
         return respond(HttpStatus.BAD_REQUEST, message, null, List.of(new FieldError(ex.getName(), message)),
                 Map.of());
+    }
+
+    /**
+     * 客戶端已斷線（DEF-AC-014；契約 §2）：SSE 最日常的結尾——關頁面、{@code EventSource.close()}、網路中斷。伺服器下一次寫出失敗時，
+     * Tomcat 通知容器、Spring 把那個 {@code IOException} 包成 {@link AsyncRequestNotUsableException}（訊息「Servlet container error
+     * notification for disconnected client」，原因因平台而異：Linux 是 Broken pipe、Windows 是「連線已被您主機上的軟體中止」，所以只認型別、
+     * 不比對訊息）並以非同步分派交給例外解析器。這時回應已被 {@code produces=text/event-stream} 定了 Content-Type 而且連線已死：
+     * 既沒有人讀得到 {@link ApiError}、也沒有轉換器寫得出它。所以這<b>不是錯誤</b>——不走 {@link #handleOther}（那會記一筆 ERROR
+     * 「未預期的例外」，緊接著再多一筆寫不出回應的 WARN「Failure in @ExceptionHandler」），不寫任何本文，只以一行 DEBUG 記下哪個 run、
+     * 哪個請求。回傳 void 且宣告 {@link HttpServletResponse} 參數＝告訴 Spring 這個請求已由本方法處理完（Spring 預設對它也是「什麼都不做」）。
+     *
+     * <p>traceId 取自回應標頭 {@code X-Trace-Id}（{@code TraceIdFilter} 在請求一開始就寫了）：非同步分派不再經過那個過濾器，
+     * 這個執行緒的 MDC 是空的。日誌只記路徑，不記 query string（{@code access_token}，契約 §0.7）。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleClientGone(AsyncRequestNotUsableException ex, HttpServletRequest request,
+                                 HttpServletResponse response) {
+        if (LOG.isDebugEnabled()) {
+            Throwable cause = NestedExceptionUtils.getMostSpecificCause(ex);
+            LOG.debug("客戶端已斷線，串流視為正常結束（run={}，traceId={}，path={}）：{}: {}", runIdOf(request),
+                    traceIdOf(response), request.getRequestURI(), cause.getClass().getSimpleName(), cause.getMessage());
+        }
+    }
+
+    /** SSE 路徑 {@code /api/v1/stream/executions/<runId>/logs｜metrics} 的 runId；其他路徑回 {@code -}（只收 UUID 字元，不把路徑原樣寫進日誌）。 */
+    private static String runIdOf(HttpServletRequest request) {
+        Matcher stream = STREAM_PATH.matcher(request.getRequestURI());
+        return stream.matches() ? stream.group(1) : "-";
+    }
+
+    /** 這個請求自己的 traceId：回應標頭優先（非同步分派的 MDC 是空的），其次 MDC，都沒有回 {@code -}。 */
+    private static String traceIdOf(HttpServletResponse response) {
+        String header = response.getHeader(TRACE_HEADER);
+        if (header != null && !header.isBlank()) {
+            return header;
+        }
+        String mdc = MDC.get("traceId");
+        return mdc == null ? "-" : mdc;
     }
 
     /** 其餘例外：Spring MVC 自己的 HTTP 例外（405／415／404…）保留其狀態碼；真正未預期的才是 500。 */

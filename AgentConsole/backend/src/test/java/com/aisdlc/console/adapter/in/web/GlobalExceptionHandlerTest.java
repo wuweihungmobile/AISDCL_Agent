@@ -1,5 +1,9 @@
 package com.aisdlc.console.adapter.in.web;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.aisdlc.console.adapter.in.web.dto.ApiError;
 import com.aisdlc.console.adapter.in.web.dto.ApiError.FieldError;
 import com.aisdlc.console.domain.exception.ConflictException;
@@ -16,16 +20,22 @@ import com.aisdlc.console.domain.exception.ValidationException;
 import com.aisdlc.console.domain.exception.Violation;
 import com.aisdlc.console.domain.model.imports.GateError;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.method.annotation.ExceptionHandlerMethodResolver;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -35,11 +45,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** 例外 → HTTP 狀態與 PRD §7.2 錯誤封包的對映（不啟動 Spring，純單元）。 */
 class GlobalExceptionHandlerTest {
 
+    private static final String RUN = "1a28bd6f-14ca-4afb-955e-e66ce2981725";
+
     private final GlobalExceptionHandler handler = new GlobalExceptionHandler();
+    private final Logger handlerLogger = (Logger) LoggerFactory.getLogger(GlobalExceptionHandler.class);
+    private final ListAppender<ILoggingEvent> logs = new ListAppender<>();
+    private Level levelBefore;
+
+    @BeforeEach
+    void captureHandlerLog() {
+        levelBefore = handlerLogger.getLevel();
+        handlerLogger.setLevel(Level.DEBUG);
+        logs.start();
+        handlerLogger.addAppender(logs);
+    }
 
     @AfterEach
-    void clearMdc() {
+    void clearMdcAndRestoreLog() {
         MDC.clear();
+        handlerLogger.detachAppender(logs);
+        logs.stop();
+        handlerLogger.setLevel(levelBefore);
     }
 
     @Test
@@ -192,5 +218,107 @@ class GlobalExceptionHandlerTest {
         assertThat(body).isNotNull();
         assertThat(body.reason()).isEqualTo("未提供檔案");
         assertThat(body.errors()).extracting(FieldError::field).containsExactly("file");
+    }
+
+    // ── 客戶端斷線（DEF-AC-014）──────────────────────────────────────────────────
+
+    private static AsyncRequestNotUsableException clientGone() {
+        return new AsyncRequestNotUsableException("Servlet container error notification for disconnected client",
+                new IOException("Broken pipe"));
+    }
+
+    private static MockHttpServletResponse sseResponse(String traceId) {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        response.setContentType("text/event-stream;charset=UTF-8");
+        if (traceId != null) {
+            response.setHeader("X-Trace-Id", traceId);
+        }
+        return response;
+    }
+
+    /** 到目前為止攔到的日誌事件（處理器的 logger 在每個測試前已開到 DEBUG）。 */
+    private List<ILoggingEvent> events() {
+        return List.copyOf(logs.list);
+    }
+
+    @Test
+    void aClientThatLeftIsNotAnErrorAndNothingIsWrittenToTheDeadConnection() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/stream/executions/" + RUN + "/logs");
+        MockHttpServletResponse response = sseResponse("trace-abc");
+
+        handler.handleClientGone(clientGone(), request, response);
+
+        assertThat(response.getContentAsByteArray()).as("不寫任何本文（沒有 ApiError）").isEmpty();
+        assertThat(response.getContentType()).as("Content-Type 不被改成 JSON").startsWith("text/event-stream");
+        assertThat(events()).hasSize(1).noneMatch(event -> event.getLevel().isGreaterOrEqual(Level.WARN));
+        ILoggingEvent line = events().get(0);
+        assertThat(line.getLevel()).isEqualTo(Level.DEBUG);
+        assertThat(line.getFormattedMessage()).contains("run=" + RUN).contains("traceId=trace-abc")
+                .contains("path=/api/v1/stream/executions/" + RUN + "/logs").contains("Broken pipe");
+    }
+
+    @Test
+    void theDisconnectLineNeverCarriesTheQueryStringOrTheAccessToken() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/stream/executions/" + RUN + "/metrics");
+        request.setQueryString("access_token=SECRET-TOKEN-VALUE");
+        request.setParameter("access_token", "SECRET-TOKEN-VALUE");
+
+        handler.handleClientGone(clientGone(), request, sseResponse("t-1"));
+
+        assertThat(events()).singleElement().satisfies(event -> assertThat(event.getFormattedMessage())
+                .contains("run=" + RUN).doesNotContain("SECRET-TOKEN-VALUE").doesNotContain("access_token"));
+    }
+
+    @Test
+    void theTraceIdComesFromTheResponseHeaderThenTheMdcThenADash() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/stream/executions/" + RUN + "/logs");
+        MDC.put("traceId", "from-mdc");
+
+        handler.handleClientGone(clientGone(), request, sseResponse("from-header"));
+        handler.handleClientGone(clientGone(), request, sseResponse(null));
+        MDC.clear();
+        handler.handleClientGone(clientGone(), request, sseResponse(null));
+
+        assertThat(events()).extracting(ILoggingEvent::getFormattedMessage).satisfiesExactly(
+                first -> assertThat(first).contains("traceId=from-header"),
+                second -> assertThat(second).contains("traceId=from-mdc"),
+                third -> assertThat(third).contains("traceId=-"));
+    }
+
+    @Test
+    void aDisconnectOutsideTheStreamPathsIsJustAsQuietAndSaysThereIsNoRun() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/monitor/projects/x/report");
+
+        handler.handleClientGone(clientGone(), request, new MockHttpServletResponse());
+
+        assertThat(events()).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.DEBUG);
+            assertThat(event.getFormattedMessage()).contains("run=-").contains("path=/api/v1/monitor/projects/x/report");
+        });
+    }
+
+    @Test
+    void springSendsAClientThatLeftToItsOwnHandlerAndTheRestToHandleOther() {
+        ExceptionHandlerMethodResolver resolver = new ExceptionHandlerMethodResolver(GlobalExceptionHandler.class);
+
+        assertThat(resolver.resolveMethodByThrowable(clientGone()).getName()).isEqualTo("handleClientGone");
+        assertThat(resolver.resolveMethodByThrowable(new IllegalStateException("boom")).getName())
+                .isEqualTo("handleOther");
+        assertThat(resolver.resolveMethodByThrowable(new IOException("Broken pipe")).getName())
+                .as("沒有被容器包成 AsyncRequestNotUsableException 的 IOException 維持原行為（不猜訊息字樣）")
+                .isEqualTo("handleOther");
+    }
+
+    @Test
+    void aRealUnexpectedExceptionStillLogsOneErrorWithTraceIdAndStack() {
+        MDC.put("traceId", "trace-real");
+
+        handler.handleOther(new IllegalStateException("boom"));
+
+        assertThat(events()).singleElement().satisfies(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.ERROR);
+            assertThat(event.getFormattedMessage()).isEqualTo("未預期的例外（traceId=trace-real）");
+            assertThat(event.getThrowableProxy().getClassName()).isEqualTo("java.lang.IllegalStateException");
+        });
     }
 }
