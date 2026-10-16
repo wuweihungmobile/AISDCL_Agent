@@ -613,6 +613,8 @@ grep -c -E '^\| (US|API|BR|NFR|INF|UI)-.*✅ 已驗證 \|$' AgentConsole/docs/06
 
 W4 的 10 筆缺陷（DEF-AC-001～010）編號不變；本輪沒有改動任何既有編號。DEF-AC-011 之外，W5 新增的程式（task-totals、restore、PDF、`/health/deep`、traceId、bridgeStatus、匯入記錄警告）在對應情境中**沒有**發現新缺陷。
 
+> **主控補記 2026-10-16（W6）**：DEF-AC-011 已於 W6-FE 修復，修在共用層 `frontend/components/ui/dialog.tsx`：內容掛上時以 insertion effect 記下 `document.activeElement`（先於任何 `autoFocus`），`onCloseAutoFocus` 時若該元素仍在 DOM 且未停用就歸還；根因＝Radix 的 `DialogContent` 關閉時一律 `preventDefault` 並只把焦點還給自己的 `DialogTrigger`，本專案的對話框全由頁面狀態控制、沒有任何 `DialogTrigger`，`triggerRef` 恆為 null，焦點就掉到 `<body>`。主控親跑：lint／tsc rc=0、vitest 725 支通過（新增 `components/ui/dialog.test.tsx` 16 支與 `components/domain/dialogFocusReturn.test.tsx` 12 支，Statements 95.58％）、mock spec 53 支通過、以重建的 standalone 對真後端跑 `p9-w5-a11y.spec.ts` 9 支全過，四個對話框 Esc 關閉後焦點皆回到觸發鈕（新建專案、新增目標、刪除專案、通過）；該 spec 的 `test.fail` 已移除改為正向斷言，`UI-A11Y-02` 升 `✅ 已驗證`，RTM 的 `🟡 部分` 剩 5 列。已知邊界（未改）：Safari／macOS Firefox 以滑鼠點擊按鈕不會讓按鈕取得焦點，開啟當下 `activeElement` 是 `<body>` 時不記錄、不歸還；對話框開著時觸發鈕被拆除或停用則不歸還、焦點留在 `<body>`。
+
 ### 9.2 新增觀察（P4，不立缺陷；W4 的 O-01～O-21 之後續號）
 
 | 編號 | 觀察 | 建議 |

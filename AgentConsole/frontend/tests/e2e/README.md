@@ -110,7 +110,7 @@ Push-Location AgentConsole\frontend; npx playwright test tests/e2e/p3-import.spe
 ```
 
 - **限流**：e2e profile 每個使用者（JWT subject）每 60 秒 100 次，UI 與 REST 共用同一個桶，所以輪詢一律用 viewer、UI 用 operator、設定用 admin；`realBackend.ts` 的 `ensureQuota()` 在情境開始前確認餘額，不夠就等視窗過去（多步驟 UI 情境中途撞 429 會被誤判成功能缺陷）；不需要 `E2E_ROOT` 的既有 spec（例如 `signoff.spec.ts`）用 `helpers.ts` 的 `waitForQuota()`。總覽頁每次載入就要 30 次上下請求（QA 報告 DEF-AC-009），整套連續跑時，前一支 spec 可能已把這個使用者的額度用光。
-- 選配環境變數：`E2E_JWT_SECRET`（backend 的 `JWT_SECRET`，用來偽造過期 token，E2E-12 步驟 1）、`E2E_RESTART_BACKEND`（停止並重新啟動 backend、等到 `/actuator/health` 才返回的腳本路徑；沒設就略過「重啟 backend 看 SSE 重連」的情境）、`E2E_DEFECTS_FIXED=1`（關掉 `test.fail` 釘住的已登記缺陷，看真實失敗訊息；缺陷清單見 `docs/06_quality/QA_P3-6_E2E_Verification.md` 與 `docs/06_quality/QA_W5_Reverification.md`，目前只剩 DEF-AC-011 用它釘住）。
+- 選配環境變數：`E2E_JWT_SECRET`（backend 的 `JWT_SECRET`，用來偽造過期 token，E2E-12 步驟 1）、`E2E_RESTART_BACKEND`（停止並重新啟動 backend、等到 `/actuator/health` 才返回的腳本路徑；沒設就略過「重啟 backend 看 SSE 重連」的情境）、`E2E_DEFECTS_FIXED=1`（關掉 `test.fail` 釘住的已登記缺陷，看真實失敗訊息；缺陷清單見 `docs/06_quality/QA_P3-6_E2E_Verification.md` 與 `docs/06_quality/QA_W5_Reverification.md`，W6 修掉 DEF-AC-011 後已沒有任何 spec 用它釘住，旗標保留給日後登記的缺陷）。
 - 路徑 C（高階目標拆解）要真 Brain，E2E 環境沒有；`support/fake_brain_bridge.py` 以假 Brain 啟動同一個 Bridge（`uvicorn --app-dir AgentConsole/frontend/tests/e2e/support fake_brain_bridge:app --host 127.0.0.1 --port 18081`，環境同上），再設 `E2E_FAKE_BRAIN=1` 跑 `p3-import.spec.ts` 即多跑一支路徑 C 情境（後端 → 真 Bridge 的 decompose 與草案 approve 都是真的，只有「拆解出什麼」是假的）。
 
 ## W5 複驗（契約 v1.2 §5 E2E-13；`p9-w5-*.spec.ts`）
@@ -122,7 +122,7 @@ W5 修復波（task-totals、專案復原、PDF 報表、Bridge 深度探針、t
 | `p9-w5-api.spec.ts` | E2E-13 列 1（task-totals 與各專案 task-trend 加總逐欄相等）、2～3（復原與錯誤路徑）、4（PDF 抽字）、7（升級告警跨批次）、8（執行中刪除 409）、9（手動重試）、11（列表 bridgeStatus）、12（traceId 貫穿 Bridge） |
 | `p9-w5-bridge.spec.ts` | 列 13 的本機半邊：`/health/deep` 200，與「PATH 沒有 git」「工作區被刪」兩種 503（自起第二個 Bridge 在埠 18082） |
 | `p9-w5-ui.spec.ts` | 專案列表「已刪除」與「復原」、執行中刪除的白話原因、手動重試 toast、執行頁暫停中晶片、重開匯入記錄還原警告與選項（路徑 C）、儀表板在 ≥31 個專案下的請求量與「本週完成」 |
-| `p9-w5-a11y.spec.ts` | axe 掃 16 個頁面狀態（WCAG 2.0／2.1 A／AA 零違規）與鍵盤走查（Tab／Enter／Esc、拖曳的鍵盤替代、分頁籤方向鍵）；DEF-AC-011（對話框關閉後焦點沒歸還）以 `test.fail` 釘住 |
+| `p9-w5-a11y.spec.ts` | axe 掃 16 個頁面狀態（WCAG 2.0／2.1 A／AA 零違規）與鍵盤走查（Tab／Enter／Esc、拖曳的鍵盤替代、分頁籤方向鍵）；對話框關閉後焦點歸還觸發鈕（DEF-AC-011，W6 修於共用層 `components/ui/dialog.tsx`）為正向斷言 |
 | `p9-w5-ui-evidence.spec.ts` | UI-DS-04／06／07、UI-OVL-02／03 的真瀏覽器逐項證據，另量 Markdown 預覽更新時間（NFR-9.1-05） |
 
 - 選配環境變數：`E2E_BRIDGE_URL`（預設 `http://127.0.0.1:18081`，直連 Bridge）、`E2E_BRIDGE_LOG`（Bridge 以 `BRIDGE_LOG_DIR` 啟動時的 `bridge.log` 絕對路徑；沒設就略過「日誌每一行有 trace_id」那支）、`E2E_PG_CONTAINER`（本機 e2e 的 PostgreSQL 容器名，例 `qa-pg`；「復原逾保留期」要把 `deleted_at` 撥到 31 天前，沒設就略過）。

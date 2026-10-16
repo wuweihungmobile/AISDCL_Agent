@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { expectNoA11yViolations } from "./a11y";
 import { RUN } from "./helpers";
 import { collectConsoleErrors, snap } from "./mockApi";
-import { DEFECTS_OPEN, E2E_ROOT, NEEDS_BRIDGE, bootstrapSettings, call, createFixture, dataOf, ensureQuota, getRun, poll, signIn, waitRun, type Fixture } from "./realBackend";
+import { E2E_ROOT, NEEDS_BRIDGE, bootstrapSettings, call, createFixture, dataOf, ensureQuota, getRun, poll, signIn, waitRun, type Fixture } from "./realBackend";
 
 /**
  * W5 複驗：無障礙（UI-A11Y-01／02／03；DEF-AC-004／005 的複驗）——真瀏覽器對真後端（e2e profile）＋真 Bridge＋aisdlc-mock-claude。
@@ -182,11 +182,8 @@ test.describe("鍵盤走查（UI-A11Y-02）：不碰滑鼠完成 Tab／Enter／E
     await expect(dialog).toHaveCount(0); // 焦點是否回到觸發鈕：見下一支（DEF-AC-011）
   });
 
-  test("對話框關閉後焦點回到觸發的按鈕（WCAG 2.4.3 焦點順序；DEF-AC-011，P3，test.fail 釘住）：新建專案、新增目標、刪除專案確認、審核確認四個對話框 Esc 關閉後的焦點落點", async ({
-    page,
-    request,
-  }) => {
-    test.fail(DEFECTS_OPEN, "DEF-AC-011（P3）：以程式控制開啟的對話框關閉後焦點回到 <body>，鍵盤使用者要從頁首重新 Tab");
+  test("對話框關閉後焦點回到觸發的按鈕（WCAG 2.4.3 焦點順序；DEF-AC-011，P3，W6 已修）：新建專案、新增目標、刪除專案確認、審核確認四個對話框 Esc 關閉後的焦點落點", async ({ page, request }) => {
+    // DEF-AC-011（P3）在 W6 修於共用層 components/ui/dialog.tsx（開啟時記下 document.activeElement、關閉時歸還）；W5-QA 當時以 test.fail 釘住，W6 改為正向斷言。
     const f = await createFixture(request, { name: nm("QA W5 焦點歸還"), kind: "A", level: 4 });
     await signIn(page, request, "operator");
     const where = () =>
