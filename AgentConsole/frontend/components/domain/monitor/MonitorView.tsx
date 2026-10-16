@@ -23,6 +23,7 @@ import { CompareCard } from "./CompareCard";
 import { ExportBar } from "./ExportBar";
 import { KpiCards } from "./KpiCards";
 import { LogQueryCard } from "./LogQueryCard";
+import { SddEngineCard } from "./SddEngineCard";
 import { TimelineCard } from "./TimelineCard";
 
 function SortableSection({ id, editing, children }: { id: SectionId; editing: boolean; children: ReactNode }) {
@@ -61,7 +62,7 @@ function SortableSection({ id, editing, children }: { id: SectionId; editing: bo
 /**
  * 專案監控頁（設計稿畫面 8；契約 §1.3、§4.3；PRD §5.4）：
  * 返回連結、標題、右側時間範圍（1h／24h／7d／30d）與執行批次下拉；指標卡、Token 趨勢、狀態與時間分佈、任務趨勢、事件時間軸、
- * 日誌查詢、告警、批次比較、Agent 即時狀態；底部匯出報表／設定告警／自訂儀表板。
+ * 日誌查詢、告警、批次比較、Agent 即時狀態、AISDLC_SDD 引擎（v1.4，M-20）；底部匯出報表／設定告警／自訂儀表板。
  * 各區塊可拖曳重排（自訂儀表板；順序存 localStorage console.monitor.layout）。
  * 輪詢間隔＝max(monitor.refreshIntervalMs，15 秒)，頁面不可見時暫停（契約 §0.4 第 4 點、§1.3）。
  */
@@ -127,6 +128,8 @@ export function MonitorView() {
     alerts: <AlertsCard projectId={projectId} runId={runId} pollMs={pollMs} canWrite={canWrite} />,
     compare: <CompareCard runs={runs} />,
     agent: <AgentCard runId={focusRun?.id} availability={metricsQ.data?.agentAvailability} />,
+    // SDD 引擎是全域的：不隨上面的批次下拉與時間範圍變動（契約 §4.3 M-20）
+    sdd: <SddEngineCard pollMs={pollMs} />,
   };
 
   return (

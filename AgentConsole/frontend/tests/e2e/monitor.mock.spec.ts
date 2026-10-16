@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { expectNoA11yViolations } from "./a11y";
 import { Engine, PROJECT_ID, TASKS } from "./execFixture";
 import { SHOTS } from "./helpers";
-import { CSV_BODY, CSV_FILENAME, MonitorWorld, PDF_BODY, PDF_FILENAME } from "./monitorFixture";
+import { CSV_BODY, CSV_FILENAME, MonitorWorld, PDF_BODY, PDF_FILENAME, type SddFile } from "./monitorFixture";
 import { collectConsoleErrors, compose, installApiMock, signInAs, snap, type MockHandler } from "./mockApi";
 
 /**
@@ -22,6 +22,8 @@ type OpenOptions = {
   before?: MockHandler;
   /** 開頁前再調整假引擎（例如設定資源取樣） */
   setup?: (engine: Engine) => void;
+  /** 開頁（goto）之前的最後一步：可改假監控世界（SDD 引擎狀態）、或安裝假時鐘（page.clock.install 必須在 goto 之前） */
+  beforeGoto?: (page: Page, ctx: { world: MonitorWorld; engine: Engine }) => Promise<void> | void;
 };
 
 /** Run #1 完成（3 步）、Run #2 失敗（T2 完成、T3 升級）、Run #3 進行中（T1 完成、T2 進行中）。 */
@@ -55,11 +57,21 @@ async function open(page: Page, opts: OpenOptions = {}) {
   };
   const { calls } = await installApiMock(page, compose(...(opts.before ? [opts.before] : []), world.handler, engine.handler, tail));
   const errors = collectConsoleErrors(page);
+  await opts.beforeGoto?.(page, { world, engine });
   await page.goto(MONITOR_URL);
   await expect(page.getByRole("heading", { name: "專案監控：AISDLC Core Platform" })).toBeVisible({ timeout: 60_000 });
   const runId = (n: number) => engine.runs.find((r) => r.runNumber === n)?.id as string;
   return { engine, world, calls, errors, unhandled, runId };
 }
+
+/** 本機時區的「2026-10-16 09:02:03」：與卡片的時間格式相同，但由測試自己組（不引用被測程式）。 */
+const pad = (n: number) => String(n).padStart(2, "0");
+const localTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+/** 假後端依序收到的 GET /engines/sdd 的 project 參數（null＝沒帶）。 */
+const sddRequests = (world: MonitorWorld) => world.seen.filter((s) => s.path === "/api/v1/engines/sdd").map((s) => s.query.get("project"));
 
 const kpi = (page: Page, key: string) => page.getByTestId(`kpi-${key}-value`);
 const span = (q: URLSearchParams) => Date.parse(q.get("to") as string) - Date.parse(q.get("from") as string);
@@ -419,15 +431,159 @@ test.describe("專案監控頁（route mock）", () => {
     expectClean(errors, unhandled);
   });
 
+  test("AISDLC_SDD 引擎卡（契約 §4.3 M-20；E2E-15 第 5 列的前端那一半）：兩段請求；選 e2e-alpha 的狀態、Sprint、更新時間、待人工與最近決策 5 筆與「檔案」逐值一致；改選 e2e-bravo 顯示等待人工確認；選擇被記住", async ({
+    page,
+  }) => {
+    const { world, errors, unhandled } = await open(page);
+    const card = page.getByTestId("sdd-card");
+    await expect(card.getByTestId("sdd-state")).toHaveText("IMPLEMENTATION");
+    // 兩段請求：先不帶 project 取清單，選定第一個專案後再帶 project 取它的 FSM
+    expect(sddRequests(world)).toEqual([null, "e2e-alpha"]);
+    await expect(card.getByTestId("sdd-status")).toHaveAttribute("data-available", "true");
+    await expect(card.getByTestId("sdd-version")).toHaveText("AISDLC_SDD_v9.99"); // 只秀 latest；version.root 是 Bridge 端路徑，不顯示
+    await expect(card).not.toContainText("/sdd/AISDLC_SDD_v9.99");
+    await expect(card.getByTestId("sdd-project-select")).toHaveValue("e2e-alpha");
+    await expect(card.getByTestId("sdd-project-select").locator("option")).toHaveText(["e2e-alpha", "e2e-bravo"]);
+
+    // 檔案 ↔ 畫面：卡片的每個值都與假「FSM 檔」的原值一致
+    const alpha = world.sdd.files["e2e-alpha"] as SddFile;
+    await expect(card.getByTestId("sdd-sprint")).toHaveText(`Sprint ${alpha.current_sprint}`);
+    await expect(card.getByTestId("sdd-updated")).toHaveText(localTime(alpha.updated_at as string));
+    await expect(card.getByTestId("sdd-human-pending")).toHaveText("無");
+    const newestFirst = (alpha.decision_trace ?? []).slice(-5).reverse(); // 檔內 7 筆的最後 5 筆，倒序（新→舊）
+    const decisions = card.getByTestId("sdd-decision");
+    await expect(decisions).toHaveCount(5);
+    for (const [i, d] of newestFirst.entries()) {
+      await expect(decisions.nth(i).getByTestId("sdd-decision-transition")).toHaveText(`${d.from} → ${d.to}`);
+      await expect(decisions.nth(i).getByTestId("sdd-decision-reason")).toHaveText(String(d.reason));
+    }
+    await expect(card).not.toContainText("SCG_VALIDATION"); // retryHistory、frozenStages、rtmCoverage 不顯示
+    await expectNoA11yViolations(page, "監控頁（AISDLC_SDD 引擎卡：e2e-alpha）");
+
+    // 改選 e2e-bravo：待人工 1 筆（可展開看進入時間）、沒有決策紀錄
+    await card.getByTestId("sdd-project-select").selectOption("e2e-bravo");
+    await expect(card.getByTestId("sdd-state")).toHaveText("HUMAN_PENDING");
+    expect(sddRequests(world)).toEqual([null, "e2e-alpha", "e2e-bravo"]);
+    await expect(card.getByTestId("sdd-sprint")).toHaveText("Sprint 1");
+    await expect(card.getByTestId("sdd-human-pending")).toHaveText("等待人工確認");
+    await card.getByTestId("sdd-human-pending").click();
+    const bravo = world.sdd.files["e2e-bravo"] as SddFile;
+    await expect(card.getByTestId("sdd-human-pending-items")).toContainText(`進入時間：${localTime(bravo.human_pending_tracking?.entered_at as string)}`);
+    await expect(card.getByTestId("sdd-decision")).toHaveCount(0);
+    await expect(card.getByTestId("sdd-decisions-empty")).toBeVisible();
+    await expectNoA11yViolations(page, "監控頁（AISDLC_SDD 引擎卡：e2e-bravo、待人工已展開）");
+
+    // 記住選擇（localStorage，只是方便）：重新整理後預設就是 bravo
+    expect(await page.evaluate(() => window.localStorage.getItem("console.monitor.sddProject"))).toBe("e2e-bravo");
+    await page.reload();
+    await expect(card.getByTestId("sdd-state")).toHaveText("HUMAN_PENDING");
+    await expect(card.getByTestId("sdd-project-select")).toHaveValue("e2e-bravo");
+    expect(sddRequests(world).slice(-2)).toEqual([null, "e2e-bravo"]);
+    expectClean(errors, unhandled);
+  });
+
+  test("AISDLC_SDD 引擎卡不隨 Console 專案的批次下拉與時間範圍變動（SDD 引擎是全域的，契約 M-20）", async ({ page }) => {
+    const { world, runId, errors, unhandled } = await open(page);
+    const card = page.getByTestId("sdd-card");
+    await expect(card.getByTestId("sdd-state")).toHaveText("IMPLEMENTATION");
+    const before = sddRequests(world);
+
+    await page.getByTestId("range-select").selectOption("7d");
+    await page.getByTestId("run-select").selectOption(runId(1));
+    await expect.poll(() => lastOf(world, "/metrics")?.query.get("runId")).toBe(runId(1)); // 其他區塊確實跟著重查了
+    expect(sddRequests(world)).toEqual(before); // SDD 卡沒有任何新請求
+    await expect(card.getByTestId("sdd-state")).toHaveText("IMPLEMENTATION");
+    expectClean(errors, unhandled);
+  });
+
+  test("檔案變動後下一輪輪詢跟上（E2E-15 第 6 列的前端那一半）：快轉 30 秒，卡片換成新狀態與新決策、沒有整頁重載；讀到寫一半的檔顯示「FSM 狀態檔無法讀取」，下一輪恢復", async ({ page }) => {
+    const { world, errors, unhandled } = await open(page, { beforeGoto: (p) => p.clock.install() });
+    const card = page.getByTestId("sdd-card");
+    await expect(card.getByTestId("sdd-state")).toHaveText("IMPLEMENTATION");
+    await page.evaluate(() => ((window as unknown as { __kept?: number }).__kept = 1)); // 整頁重載會清掉它
+    expect(sddRequests(world)).toEqual([null, "e2e-alpha"]);
+
+    // 改寫檔案：current_state 換值、updated_at 更新、decision_trace 加一筆
+    const alpha = world.sdd.files["e2e-alpha"] as SddFile;
+    alpha.current_state = "REVIEW";
+    alpha.updated_at = "2026-10-16T02:30:00+00:00";
+    alpha.decision_trace = [
+      ...(alpha.decision_trace ?? []),
+      { ts: new Date(2026, 9, 16, 9, 0, 0).toISOString(), from: "S7", to: "REVIEW", reason: "新的一筆決策", spec_refs: [], agents_consulted: [], trigger: "auto" },
+    ];
+    await page.clock.fastForward(31_000);
+    await expect(card.getByTestId("sdd-state")).toHaveText("REVIEW");
+    await expect(card.getByTestId("sdd-updated")).toHaveText(localTime("2026-10-16T02:30:00+00:00"));
+    await expect(card.getByTestId("sdd-decision").first().getByTestId("sdd-decision-transition")).toHaveText("S7 → REVIEW");
+    await expect(card.getByTestId("sdd-decision").first().getByTestId("sdd-decision-reason")).toHaveText("新的一筆決策");
+    await expect(card.getByTestId("sdd-decision")).toHaveCount(5);
+    expect(await page.evaluate(() => (window as unknown as { __kept?: number }).__kept)).toBe(1);
+    expect(sddRequests(world).filter((p) => p === null)).toHaveLength(1); // 選定專案後只輪詢帶 project 的那一份
+
+    // 恰好讀到寫一半的檔：卡片顯示無法讀取（不崩潰），下一輪恢復
+    world.sdd.files["e2e-alpha"] = "broken";
+    await page.clock.fastForward(31_000);
+    await expect(card.getByTestId("sdd-message")).toHaveText("FSM 狀態檔無法讀取");
+    await expect(card.getByTestId("sdd-status")).toHaveAttribute("data-available", "true");
+    world.sdd.files["e2e-alpha"] = alpha;
+    await page.clock.fastForward(31_000);
+    await expect(card.getByTestId("sdd-state")).toHaveText("REVIEW");
+    await expect(card.getByTestId("sdd-message")).toHaveCount(0);
+    expectClean(errors, unhandled);
+  });
+
+  test("引擎不可用與空清單（E2E-15 第 7～9 列的前端那一半）：Bridge 無法連線、SDD 目錄無效、回應異常各有文案；沒有 FSM 狀態檔顯示「尚無 FSM 狀態檔」；復原後下一輪輪詢回來", async ({ page }) => {
+    const { world, errors, unhandled } = await open(page, {
+      beforeGoto: async (p, ctx) => {
+        ctx.world.sdd.mode = "bridge_unreachable";
+        await p.clock.install();
+      },
+    });
+    const card = page.getByTestId("sdd-card");
+    const message = card.getByTestId("sdd-message");
+    // 第 7 列：Bridge 不可達——回 200、卡片顯示不可用與原因，沒有下拉
+    await expect(message).toHaveText("Engine Bridge 無法連線");
+    await expect(card.getByTestId("sdd-status")).toHaveAttribute("data-available", "false");
+    await expect(card.getByTestId("sdd-status")).toContainText("不可用");
+    await expect(card.getByTestId("sdd-project-select")).toHaveCount(0);
+    await expect(card.getByTestId("sdd-state")).toHaveCount(0);
+    await expectNoA11yViolations(page, "監控頁（AISDLC_SDD 引擎卡：Bridge 無法連線）");
+
+    // 第 8 列：SDD 目錄無效
+    world.sdd.mode = "sdd_unavailable";
+    await page.clock.fastForward(31_000);
+    await expect(message).toHaveText("找不到 AISDLC_SDD 目錄（請檢查 Bridge 的 SDD_ROOT）");
+    world.sdd.mode = "bridge_error";
+    await page.clock.fastForward(31_000);
+    await expect(message).toHaveText("Engine Bridge 回應異常");
+
+    // 第 9 列：目錄有效但還沒有任何 FSM 狀態檔——不是錯誤
+    const files = world.sdd.files;
+    world.sdd.mode = "ok";
+    world.sdd.files = {};
+    await page.clock.fastForward(31_000);
+    await expect(card.getByTestId("sdd-empty")).toHaveText("尚無 FSM 狀態檔（SDD runtime 執行後才會產生）");
+    await expect(card.getByTestId("sdd-status")).toHaveAttribute("data-available", "true");
+    await expect(card.getByTestId("sdd-version")).toHaveText("AISDLC_SDD_v9.99");
+    await expect(card.getByTestId("sdd-project-select")).toHaveCount(0);
+
+    // 復原：檔案出現，下一輪輪詢自動選定第一個專案並顯示
+    world.sdd.files = files;
+    await page.clock.fastForward(31_000);
+    await expect(card.getByTestId("sdd-state")).toHaveText("IMPLEMENTATION");
+    await expect(card.getByTestId("sdd-empty")).toHaveCount(0);
+    expectClean(errors, unhandled);
+  });
+
   test("自訂儀表板：拖曳重排區塊，順序存 localStorage、重新整理後保留、可重設", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 3600 }); // 九個區塊都在視窗內，拖曳不必捲動
+    await page.setViewportSize({ width: 1440, height: 3600 }); // 被拖的 agent 與 compare 在視窗內（第十個區塊 sdd 在最下面，拖曳不必捲動）
     const { errors, unhandled } = await open(page);
-    const DEFAULT = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent"];
+    const DEFAULT = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent", "sdd"];
     expect(await sectionOrder(page)).toEqual(DEFAULT);
     await expect(page.getByTestId("drag-kpi")).toHaveCount(0); // 沒進入編輯模式沒有把手
     await page.getByTestId("layout-toggle").click();
     await expect(page.getByTestId("layout-toggle")).toHaveText("完成自訂");
-    await expect(page.locator('[data-testid^="drag-"]')).toHaveCount(9);
+    await expect(page.locator('[data-testid^="drag-"]')).toHaveCount(10);
     await page.screenshot({ path: `${SHOTS}/08-monitor-customize.png`, clip: { x: 0, y: 0, width: 1440, height: 1400 } });
 
     // 把「Agent 即時狀態」拖到「批次比較」之前
@@ -442,7 +598,7 @@ test.describe("專案監控頁（route mock）", () => {
     await page.mouse.move(x, y + dy / 2, { steps: 8 });
     await page.mouse.move(x, y + dy, { steps: 8 });
     await page.mouse.up();
-    const MOVED = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "agent", "compare"];
+    const MOVED = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "agent", "compare", "sdd"];
     await expect.poll(() => sectionOrder(page)).toEqual(MOVED);
     expect(await page.evaluate(() => window.localStorage.getItem("console.monitor.layout"))).toBe(JSON.stringify(MOVED));
 

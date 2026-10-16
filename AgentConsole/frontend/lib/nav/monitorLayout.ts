@@ -7,7 +7,8 @@
  */
 export const LAYOUT_STORAGE_KEY = "console.monitor.layout";
 
-export const SECTION_IDS = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent"] as const;
+/** `sdd`（v1.4，D-16；契約 §4.3 M-20）接在 `agent` 之後：舊的已存版本會把缺的 `sdd` 補在尾端（sanitizeLayout），不必遷移。 */
+export const SECTION_IDS = ["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent", "sdd"] as const;
 export type SectionId = (typeof SECTION_IDS)[number];
 
 export const DEFAULT_LAYOUT: readonly SectionId[] = SECTION_IDS;
@@ -22,6 +23,7 @@ export const SECTION_TITLE: Record<SectionId, string> = {
   alerts: "告警",
   compare: "批次比較",
   agent: "Agent 即時狀態",
+  sdd: "AISDLC_SDD 引擎",
 };
 
 const KNOWN = new Set<string>(SECTION_IDS);

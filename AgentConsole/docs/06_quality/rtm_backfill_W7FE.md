@@ -232,3 +232,91 @@ Push-Location AgentConsole\frontend; $env:E2E_MODE = "standalone"; $env:E2E_WEB_
 - 對真後端驗 E2E-14 第 9 列時：終態、PAUSED、Bridge 停掉三種都應顯示單一「—」且沒有「目前沒有提供這項資料」字樣；`US-M-10` 升級以那一列的當回合證據為準。
 - 全螢幕 e2e（E-22）：本棒的 mock 版已量到覆蓋層 bounding box 等於視窗；真瀏覽器全棧版可沿用同一組 testid。
 - RTM 該改的列：`US-M-10`、`API-AUT-06`、`US-E-09`（本檔〈十一〉三列）。真後端 spec（p3 至 p9、signoff、crud-flow、task-retry、markdown-editor）本批沒動（持有面）。
+
+---
+
+# 第三批：契約 v1.4 前端項——SDD 引擎卡、待審批清單同源、通知鈴落點、登出撤銷、設定頁用字（D-16、D-18、D-19）
+
+> 日期 2026-10-16｜依據：`docs/04_planning/agent_briefs/W7_OVERVIEW.md` 與 `docs/02_architecture/API_Contract_P3-6.md` 的 §1.7.1、§1.8.1、§1.9.1、§4.3 M-20、§4.5 G-10、§4.6 G-G4 與 G-G5、E2E-15、E2E-16（契約已含主控裁決 Q1～Q8 的補丁）。
+> 本節同樣**不改 RTM.md**，由 W7-QA 單線合併；格式同〈一〉；測試計數寫中文，行內不放四位數字。
+> 結論：五項前端工作皆**實作與測試完成**；與真後端的對接（E2E-15、E2E-16）和 RTM 狀態升級由 QA 依當回合證據判定。
+
+## 十六、第三批 RTM 列
+
+| ID | 實作檔 | 自動測試 | E2E 驗證 | 建議狀態 |
+|----|--------|----------|----------|----------|
+| API-ENG-01（前端：引擎狀態端點的呼叫、型別與輪詢，D-16） | frontend/lib/api/endpoints.ts（`getSddEngineStatus({ project })`：GET `/api/v1/engines/sdd`，未帶 project 時網址沒有 query）、frontend/lib/api/types.ts（`SddEngineStatus`、`SddEngineReason`、`SddVersion`、`SddProjectEntry`、`SddFsmState`、`SddHumanPending` 別名，取自重產的型別）、frontend/lib/api/queries.ts（`qk.sddEngine`、`SDD_POLL_MS` 固定 30 秒、`useSddEngine(project, { pollMs, enabled, pollWhile })`）、frontend/lib/domain/sdd.ts（`reason` 的中文字典與欄位顯示規則：五個值逐字取自契約 M-20，未知值顯示「引擎回報：原值」） | frontend/lib/api/endpoints.test.ts（新函式的網址表列與省略參數、匯出函式數同步）、frontend/lib/api/queries.polling.test.tsx::useSddEngine 的輪詢節奏（4 支：30 秒節奏與網址形狀、帶 project、`pollWhile` 與 `enabled`、`pollMs` 放慢與失焦停止）、frontend/lib/domain/sdd.test.ts（8 支）；突變驗證見〈十八〉 | frontend/tests/e2e/monitor.mock.spec.ts::AISDLC_SDD 引擎卡…（四個情境，見下一列）；與真後端對接＝契約 E2E-15 第 1～4 列與第 7～10 列，待 QA | ✅ 前端實作＋測試；RTM `API-ENG-01` 由 QA 依 E2E-15 的當回合證據判定 |
+| UI-SCR-08／US-M-10（監控頁第十個區塊「AISDLC_SDD 引擎」卡，契約 §4.3 M-20；同時是 `NFR-OBS-01` 的 FSM 對照的前端那一半） | frontend/components/domain/monitor/SddEngineCard.tsx（兩段請求：先不帶 project 取版本與專案清單，選定後帶 project 取該專案的 FSM；狀態點與版本、「FSM 專案」下拉、目前狀態、Sprint、更新時間（本機時區）、待人工（有值時可展開看進入時間）、最近決策 5 筆（新到舊，`from → to` 與 `reason`）；引擎不可用與「所選專案取不到 FSM」各一個訊息框、清單為空寫「尚無 FSM 狀態檔」；輪詢間隔取 30 秒與監控頁輪詢設定的較大者；選定後只輪詢選定專案那一份）、frontend/lib/nav/sddProject.ts（localStorage 鍵 `console.monitor.sddProject`，只記「上次選的專案」，只是方便）、frontend/lib/nav/monitorLayout.ts（`SECTION_IDS` 第十個 `sdd`；舊版已存的順序由 `sanitizeLayout` 把缺的補在尾端，不必遷移）、frontend/components/domain/monitor/MonitorView.tsx（註冊區塊，不隨批次與時間範圍下拉變動） | frontend/components/domain/monitor/SddEngineCard.test.tsx（29 支：兩段請求與欄位逐值一致、最近決策的順序與缺值、待人工展開；預設專案、記住、切換；引擎不可用的三種原因、空清單、後端新增的 reason、console-api 非 2xx 的錯誤與重試；輪詢節奏與失焦暫停、檔案變動跟上、檔案被刪與寫一半的壞檔及恢復；唯讀）、frontend/lib/nav/sddProject.test.ts（4 支）、frontend/lib/nav/monitorLayout.test.ts（9 支，含舊版順序補 `sdd`）、frontend/components/domain/monitor/MonitorView.test.tsx（區塊清單與拖曳把手數改為十個）；突變驗證見〈十八〉 | frontend/tests/e2e/monitor.mock.spec.ts::AISDLC_SDD 引擎卡（E2E-15 第 5 列的前端那一半：兩段請求、選 e2e-alpha 的狀態、Sprint、更新時間、待人工與最近決策 5 筆與「檔案」逐值一致，改選 e2e-bravo 顯示等待人工確認，選擇被記住，axe 零違規）、同檔::引擎卡不隨 Console 專案的批次下拉與時間範圍變動、同檔::檔案變動後下一輪輪詢跟上（第 6 列：假時鐘快轉 30 秒，卡片換成新狀態與新決策、沒有整頁重載；讀到寫一半的檔顯示「FSM 狀態檔無法讀取」，下一輪恢復）、同檔::引擎不可用與空清單（第 7～9 列：三種原因各有文案、空清單、復原）。真後端版＝E2E-15，待 QA | ✅ 前端實作＋測試；`UI-SCR-08`、`US-M-10`、`NFR-OBS-01` 的 RTM 狀態由 QA 依 E2E-15 第 5 列的當回合證據判定 |
+| API-SGN-05（前端：儀表板「待人工審批」卡，D-18；契約 §4.5 G-10） | frontend/components/domain/views/DashboardView.tsx（清單與徽章改取 `GET /signoffs/pending`：卡片徽章＝`counts.total`；四種種類的中文副標與連結；IMPORT 連匯入頁；按「審批」開簽核對話框；清單被 limit 截斷時卡片底部寫「僅列出最早的 N 筆，共 M 筆」；載入骨架、錯誤重試、空狀態）、frontend/lib/domain/signoff.ts（種類標籤、副標、連結、截斷說明）、frontend/lib/api/endpoints.ts（`getPendingSignoffs({ limit })`）、frontend/lib/api/types.ts（`PendingSignoffItem`、`PendingSignoffCounts`、`PendingSignoffs`、`PendingSignoffKind` 別名）、frontend/lib/api/queries.ts（`usePendingSignoffs(limit)` 預設 `limit=50`，30 秒輪詢，掛在 `["notifications"]` 查詢鍵底下；專案、目標、任務三種簽核成功後一併讓 notifications 家族過期；**移除 `useSignoffQueue` 與 `SignoffItem`**） | frontend/components/domain/views/DashboardView.test.tsx::Dashboard「待人工審批」卡（12 支：四種草案各一列與連結副標、審批鈕名稱、PROJECT／GOAL／TASK／IMPORT 各一支的對話框與 POST 路徑、卡片徽章＝KPI＝頂列徽章且簽核後同步減 1、截斷說明、空狀態、錯誤重試、VIEWER 停用、錨點）、frontend/lib/domain/signoff.test.ts（7 支）、frontend/lib/api/endpoints.test.ts、frontend/lib/api/queries.polling.test.tsx::usePendingSignoffs 的輪詢節奏（2 支）；突變驗證見〈十八〉 | frontend/tests/e2e/dashboard.mock.spec.ts::待人工審批卡（契約 G-10）…（四種各有副標與連結、列序、請求帶 `limit=50` 且不再逐專案展開）、同檔::在待審批卡簽核一筆…（E2E-16 第 5 列的 mock 版：任務與匯入草案各簽一筆，POST 路徑與審批者正確，卡片徽章、清單、KPI、頂列徽章同步減 1）、同檔::待審批超過 limit…（徽章、KPI、頂列徽章顯示總數，清單只列最早的 50 筆並寫明截斷說明）、同檔第一支 KPI 情境（五筆時三處同為 5）。真後端版＝E2E-16 第 3～5 列，待 QA | ✅ 前端實作＋測試；RTM `API-SGN-05` 由 QA 依 E2E-16 第 3～5 列的當回合證據判定 |
+| API-AUTH-03（前端：登出撤銷 refresh token，D-19） | frontend/lib/api/endpoints.ts（`logout(refreshToken)`：POST `/api/v1/auth/logout`，body `{ refreshToken }`，免認證 `auth:false`，不做 401 換新）、frontend/lib/api/types.ts（`LogoutRequest` 別名）、frontend/lib/auth/AuthProvider.tsx（`logout()`：先讀出 session 的 refresh token，有就 fire-and-forget 呼叫端點，失敗一律吞掉；再清 session 與查詢快取、導向 `/login`；沒有 session 不呼叫） | frontend/lib/auth/AuthProvider.test.tsx（6 支：先 POST 且 body 帶目前 session 的 refresh token、不帶 Authorization，再清 session 與快取、導向登入頁；伺服器 500、400 與網路失敗都照常登出且失敗被吞掉；請求永遠沒回應也不阻擋本機登出；沒有 session 不呼叫）、frontend/lib/api/endpoints.test.ts（免認證與失敗處理）；突變驗證見〈十八〉 | frontend/tests/e2e/dashboard.mock.spec.ts::頂列登出（兩支＝E2E-16 第 9 列的 mock 版：端點回 204 與回 503，都送出一個帶 refresh token 的 POST、不帶 Authorization、之後 session 清空並到登入頁）。撤銷名單本身（E2E-16 第 7、8、10 列）是後端與全棧的事，待 QA | ✅ 前端實作＋測試；RTM `API-AUTH-03` 由 QA 依 E2E-16 第 7～10 列的當回合證據判定 |
+| API-NTF-01（前端：通知鈴的連結落點與文案，G-G4；D-18） | frontend/components/domain/notifications/NotificationBell.tsx（「待審核項目」「未確認告警」兩列的落點只看**路由上的專案**：在專案頁→該專案的執行頁與監控頁，其他頁面（含儀表板）→專案列表；「待簽核草案」列恆為 `/#pending-signoff`；每列的 `title` 提示先講「數字是全部專案的合計」再講落點；面板底下加註腳 `notification-scope-note`） | frontend/components/domain/notifications/NotificationBell.test.tsx（13 支：徽章加總與全 0 不顯示、三列連結、專案頁底下各子頁的落點、儀表板／專案列表／新建專案／匯入頁／系統設定五種非專案頁都導向專案列表、不猜最近造訪的專案、連結文案不把計數說成屬於某個專案、專案頁的提示文字、點連結與 Esc 關閉面板）；突變驗證見〈十八〉 | frontend/tests/e2e/notifications.mock.spec.ts::通知鈴徽章…（儀表板上兩個連結是 `/projects`、提示文案、註腳逐字）、同檔::人在專案頁…（新增：連到該專案的執行頁與監控頁；點「待簽核草案」回儀表板並停在待人工審批卡，卡片徽章與清單同為摘要的數字）、同檔::全部為 0…（卡片徽章與 KPI、頂列徽章同為 7）。真後端版＝E2E-16 第 6 列，待 QA | ✅ 前端實作＋測試；RTM `API-NTF-01` 由 QA 依 E2E-16 第 3 列與第 6 列的當回合證據判定 |
+
+## 十七、第三批驗證摘要（本棒實跑；指令與 rc）
+
+在 `frontend/` 下（Windows PowerShell，`Push-Location`／`Pop-Location` 同呼叫成對；rc 一律先導檔再讀）：
+
+| 指令 | rc | 結果 |
+|------|----|------|
+| `npm run gen:api-p36`（交卷前最後一次） | 0 | 重產前後 SHA256 相同，見下方；與 HEAD 的差異只有 JSDoc 文字，沒有 schema 形狀變動 |
+| `npm run lint`（ESLint＋Prettier 檢查） | 0 | 無警告、All matched files use Prettier code style |
+| `npx tsc --noEmit` | 0 | 無輸出 |
+| `npm run build` | 0 | 20 個路由 |
+| `npx vitest run` | 0 | 57 個測試檔、886 支通過（第二批結束時為 52 個檔、799 支；本批新增 5 個檔與 87 支） |
+| `npm run test:cov`（`vitest run --coverage`） | 0 | Statements 95.61%、Branches 89.71%、Functions 97.44%、Lines 97.17%（門檻 70／60／70／70，沒有下降） |
+| `npx playwright test <八支 *.mock.spec.ts> --output=<自己的暫存目錄>`（`E2E_MODE=standalone`，對 production 建置） | 0 | 合計 71 支通過（第二批結束時 61 支；本批新增 10 支：dashboard 5、monitor 4、notifications 1；settings 既有情境加斷言）；axe 掃描全部零違規；monitor 情境含假時鐘快轉，三次完整執行皆過 |
+| 四區塊只在 `app/layout.tsx` 組裝的掃描 | — | 無輸出 |
+| 變更檔的 CR 掃描 | — | 0 個檔含 CR（全部 LF） |
+
+- 型別重產：`lib/api/schema-p3-6.d.ts` HEAD 版 SHA256 `6F2DFDF78F543053E874E0E39BC4E1C966E9F80BA6B0A346331FDB7DD8A0B43B`（204,652 bytes）→ 本批動工時第一次重產（SA 的補丁尚在進行）`875C9546F775135A555C4D3F1BD88CCBA85649FF8CA003DC0E348D0D1116563A`（205,593 bytes）→ 補丁 commit 之後再重產 `8FEC429E74B5129E788EC6CE564E0046B13C682FEDAC3F586CA90F720591C20F`（205,683 bytes）；交卷前最後一次重產，前後都是這個值。來源 `docs/02_architecture/openapi-p3-6.yaml` SHA256 `50F50E52889B0EA50446585E764168AB588D61C1400D2035405874802A6C0927`（203,252 bytes；工作樹與 HEAD 相同）。與 HEAD 版 d.ts 的差異只有 `/health/deep` 與探測說明的 JSDoc（`sdd` 只當資訊），前端程式不受影響。
+- 跑 mock spec 會重寫 `tests/e2e/__screenshots__/` 的已追蹤 PNG；本批已依 HEAD 內容逐檔還原，截圖目錄在 `git status` 無差異。**本批 UI 有變動**（監控頁多一張 SDD 卡、儀表板待審批卡換成跨專案清單、通知面板多一行註腳、設定頁兩個標籤改字），這些設計證據圖尚未更新；另外 `08-monitor-full.png` 的「tall」視窗高度不夠，拍不到最底下的 SDD 卡本體，要拍它需加高視窗或用 `snap` 的 `focus` 選項。
+- 重現指令（bash 與 PowerShell 並列；需先以 `PORT` 設為 3100 起 production 伺服器 `node scripts/start-standalone.mjs`，用完停掉，見 `tests/e2e/README.md`）：
+
+```bash
+(cd AgentConsole/frontend && npx vitest run lib/api lib/auth lib/domain lib/nav components/domain/monitor components/domain/notifications components/domain/views components/domain/settings)
+(cd AgentConsole/frontend && E2E_MODE=standalone E2E_WEB_PORT=3100 npx playwright test tests/e2e/dashboard.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/notifications.mock.spec.ts tests/e2e/settings.mock.spec.ts --output=<自己的暫存目錄>)
+```
+
+```powershell
+Push-Location AgentConsole\frontend; npx vitest run lib/api lib/auth lib/domain lib/nav components/domain/monitor components/domain/notifications components/domain/views components/domain/settings; Pop-Location
+Push-Location AgentConsole\frontend; $env:E2E_MODE = "standalone"; $env:E2E_WEB_PORT = "3100"; npx playwright test tests/e2e/dashboard.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/notifications.mock.spec.ts tests/e2e/settings.mock.spec.ts "--output=<自己的暫存目錄>"; Pop-Location
+```
+
+## 十八、突變驗證（確認新測試會紅）
+
+每一項都是「改一行 → 只跑對應測試檔 → 看紅 → 改回」。除「`usePendingSignoffs` 拿掉 `refetchInterval`」那一項是手動改與改回（改回後該測試檔重跑為綠、該處與原文逐字相同）外，其餘用腳本自動還原並比對檔案雜湊與改前相同：
+
+| 改動 | 結果 |
+|------|------|
+| `AuthProvider.tsx` 拿掉呼叫 `apiLogout` 那一行 | `AuthProvider.test.tsx` 六支中五支紅（只剩「沒有 session 不呼叫」仍綠，因為它本來就不該呼叫） |
+| `queries.ts` 的 `useSignoffProject` 拿掉讓 notifications 家族過期 | `DashboardView.test.tsx` 兩支紅：卡片、KPI、頂列徽章同步減 1 那支，與 PROJECT 草案簽核後清單立即重抓那支 |
+| `SddEngineCard.tsx` 拿掉 `pollWhile` | `SddEngineCard.test.tsx` 兩支紅：選定專案後只輪詢選定那份、輪詢設定放慢時跟著放慢 |
+| `queries.ts` 的 `usePendingSignoffs` 拿掉 `refetchInterval` | `queries.polling.test.tsx` 一支紅（30 秒後沒有第二次請求） |
+| `NotificationBell.tsx` 的執行頁落點固定為專案列表 | `NotificationBell.test.tsx` 兩支紅（專案頁與專案子頁） |
+| `labels.ts` 把「啟用自動突變」改回「啟用自動變異」，另一次把「啟用自演化」改回「啟用自我演化」 | `labels.test.ts` 各一支紅（讀 PRD 原文比對） |
+
+- 第一次做標籤突變時錨點落在註解上、沒改到實際用字，測試維持綠，**不算數**；改用精準錨點重做後才有上表的紅。
+- 所有檔案都已還原，突變驗證做完後 lint、tsc、全套 vitest 再各跑一次皆為綠（rc 皆為 0、886 支通過）。
+
+## 十九、偏離、限制與發現（供主控與 QA）
+
+1. **通知鈴的兩個連結改為「只看路由上的專案」**（行為變更）：原本用「最近造訪或列表第一筆」當後備，人在儀表板時「待審核項目」會連到某個專案的執行頁，把全部專案的合計說成屬於它。依契約 G-G4（括號寫「路由上的 `projectId`」）與 E2E-16 第 6 列（儀表板→`/projects`）改掉；原單元測試與 mock spec 的期望已同步。側欄「執行中心」「監控中心」仍用 `useCurrentProjectId`（沒動）。
+2. **簽核類寫入成功後新增讓 notifications 家族過期**（專案、目標、任務三種；匯入草案原本就會）：讓頂列徽章、KPI、卡片立即同步（E2E-16 第 5 列），不必等 30 秒輪詢。
+3. **移除 `useSignoffQueue` 與 `SignoffItem`**：唯一的使用者是儀表板卡，已改用 `usePendingSignoffs`。
+4. **SDD 卡的輪詢**：契約固定 30 秒，實作取「30 秒與監控頁輪詢設定的較大者」（不得比使用者設定更密）；卡片不隨批次與時間範圍下拉變動（SDD 引擎是全域的，FSM 專案與 Console 專案是兩回事）；選定專案後只輪詢選定那一份，不帶 project 的那一份只在清單為空或引擎不可用時才繼續輪詢等它復原（所以一張開著的卡片約每分鐘 2 次請求）。
+5. **SDD 卡的訊息框用 `div` 不用 `p`**：設計系統的全域規則（`styles/tokens.css`）把 `p` 的寬度上限設為 800px，有邊框的 `p` 在寬卡片裡會比卡片窄一截（截圖時發現）。其他頁面若在寬卡片裡用有邊框的 `p` 也會這樣；本批只改了自己新增的，沒有全面清查。
+6. **登出後網址是 `/login?next=%2F`**（既有行為：`logout()` 清掉 session 的同時，`components/layout/ContentRegion.tsx` 的登入閘看到未登入，把「登出前所在的頁」記成 `next` 再導一次；本批只在 `logout()` 前面加了撤銷呼叫）。E2E-16 第 9 列寫「頁面導向 `/login`」，QA 的斷言請放寬成「路徑是 `/login`」，不要比對整串網址。本批沒改登入閘的行為（超出本批範圍，且真後端 spec 可能依賴它）。
+7. **待審批卡最多 50 列，卡片高度隨清單增長**：沒設卡內捲動（避免在固定高度的內容區裡再套一層捲動區）。匯入一份 PRD 後三層草案都是未簽核，清單可能很長；若要限高請主控裁決。
+8. **設定頁用字已統一**（第二批〈十四〉第 4 點的待裁決項）：「啟用自動突變」「啟用自演化」，取 PRD §5.5.1.2 原文並以單元測試讀 PRD 檔釘住（與契約 E-21 的晶片用字一致）；`labels.test.ts` 本來就讀 monorepo 內的契約檔，這次多讀一個 PRD 檔，同樣依賴 monorepo 目錄結構。
+9. **`tests/e2e/README.md` 第 23 行的情境數量**（第二批〈十四〉第 8 點）已改成現查值（execute 21、monitor 15、dashboard 8），並註明以 `--list` 現查為準。
+10. **範圍外加做的測試**：`lib/api/queries.polling.test.tsx` 補了兩個新輪詢來源的節奏（共 6 支）。理由：契約 §0.4 的限流鍵是使用者，每多一個輪詢來源就多吃額度，節奏要釘住；原檔只覆蓋通知摘要與本週完成任務數。
+11. 未驗證：全程在 Windows 11 與 PowerShell 完成，**沒在 macOS 實跑**；本批沒有平台相依的程式碼（`localStorage`、`fetch`、頁面內元件）。
+
+## 二十、給 QA 的提醒（第三批）
+
+- SDD 卡 testid：`section-sdd`（區塊）、`sdd-card`、`sdd-status`（`data-available`＝true 或 false）、`sdd-version`、`sdd-project-select`（原生下拉，名稱「FSM 專案」）、`sdd-fsm`（`data-project`）、`sdd-state`、`sdd-sprint`、`sdd-updated`（`title`＝檔案裡的原始時間字串）、`sdd-human-pending`（待人工為 0 時是文字「無」；大於 0 時是可展開的摘要，展開後 `sdd-human-pending-items` 列各項的進入時間）、`sdd-decisions`（`aria-label`「最近決策」，新到舊）、`sdd-decision`、`sdd-decision-ts`、`sdd-decision-transition`、`sdd-decision-reason`、`sdd-decisions-empty`、`sdd-message`（`role=status`，`data-reason`＝契約的 reason 值）、`sdd-empty`。
+- 對真後端驗 E2E-15 第 5 列時：預設選的是「上次選的且仍在清單內」或清單第一個；全新的瀏覽器環境預設就是 `e2e-alpha`。第 6 列用假時鐘快轉 30 秒即可（本棒的 mock 版就是這樣做的）。時間顯示是本機時區的「年-月-日 時:分:秒」，比對檔案裡的 ISO 字串要自己轉。
+- 儀表板卡 testid：`pending-signoff-card`（同時保留 `id="pending-signoff"` 錨點）、`pending-count`、`pending-item`（`data-kind`＝PROJECT、GOAL、TASK、IMPORT）、`pending-truncated`；每列連結的文字是標題，審批鈕的名稱是「審批：標題」。IMPORT 的連結是 `/import`（匯入頁目前沒有以記錄 id 深連結的路由）。
+- 對真後端驗 E2E-16 第 5 列時：簽核成功後是立即重抓，不必等 30 秒；專案草案、目標、任務三種各自的簽核路徑是 `/projects/{id}/signoff`、`/goals/{id}/signoff`、`/tasks/{id}/signoff`，匯入草案是 `/import/{id}/signoff`。
+- 通知鈴 testid：`bell-trigger`、`bell-badge`、`notification-panel`、`notification-signoffs`、`notification-reviews`、`notification-alerts`（各自的 `href` 與 `title`）、`notification-scope-note`。
+- 登出：頂列的「登出」按鈕；請求本文 `{ "refreshToken": "…" }`，不帶 Authorization；session 存在 sessionStorage 的 `aisdlc.console.session`，登出後應為空。
+- RTM 該改的列：`API-ENG-01`、`UI-SCR-08`／`US-M-10`（含 `NFR-OBS-01` 的前端對照）、`API-SGN-05`、`API-AUTH-03`、`API-NTF-01`（本檔〈十六〉五列）。真後端 spec（p3 至 p9、signoff、crud-flow、task-retry、markdown-editor 等）本批沒動（持有面）。

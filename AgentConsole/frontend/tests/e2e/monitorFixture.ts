@@ -28,6 +28,101 @@ const metric = (value: number | null, previousValue?: number | null) => ({
   delta: value !== null && previousValue !== undefined && previousValue !== null ? Math.round((value - previousValue) * 100) / 100 : null,
 });
 
+/**
+ * AISDLC_SDD 引擎（契約 §1.7.1、§3.1.3；v1.4 D-16）的假世界：`files` 是「FSM 狀態檔」`fsm_state` 的原樣內容（snake_case 鍵），
+ * 假後端依契約把它映射成 `GET /engines/sdd` 的回應（最外層鍵轉 camelCase、巢狀內容原樣、decision_trace 取尾 5 筆），
+ * 所以測試可以直接拿 `files` 與畫面比對（NFR-OBS-01 的「檔案 ↔ API ↔ 畫面」，E2E-15 第 5 列）。
+ */
+export type SddFile = {
+  project: string;
+  current_state?: string;
+  current_sprint?: number;
+  session_id?: string;
+  updated_at?: string;
+  frozen_stages?: Array<Record<string, unknown>>;
+  decision_trace?: Array<Record<string, unknown>>;
+  human_pending_tracking?: Record<string, unknown>;
+  retry_history?: Record<string, { history?: Array<Record<string, unknown>> }>;
+};
+
+export type SddWorld = {
+  /** ok＝引擎可用；其餘三種＝引擎不可用（契約 reason 映射），一律回 200 */
+  mode: "ok" | "bridge_unreachable" | "sdd_unavailable" | "bridge_error";
+  /** 專案名 → 檔案內容；"broken"＝檔名合法但內容讀不動（Bridge 422 → fsm_state_unreadable） */
+  files: Record<string, SddFile | "broken">;
+  version: { latest: string; root: string };
+};
+
+/** E2E-15 的夾具形狀：alpha（IMPLEMENTATION、Sprint 2、7 筆決策、沒有待人工）與 bravo（HUMAN_PENDING、待人工 1 筆、沒有決策）。 */
+export function makeSddWorld(): SddWorld {
+  const at = (n: number) => new Date(2026, 9, 16, 8, n, 0).toISOString();
+  return {
+    mode: "ok",
+    version: { latest: "AISDLC_SDD_v9.99", root: "/sdd/AISDLC_SDD_v9.99" },
+    files: {
+      "e2e-alpha": {
+        project: "e2e-alpha",
+        current_state: "IMPLEMENTATION",
+        current_sprint: 2,
+        session_id: "sid-alpha",
+        updated_at: "2026-10-16T01:02:03+00:00",
+        frozen_stages: [{ stage: "SCG-0" }],
+        decision_trace: Array.from({ length: 7 }, (_, i) => ({
+          ts: at(i + 1),
+          from: `S${i}`,
+          to: `S${i + 1}`,
+          reason: `r${i + 1}`,
+          spec_refs: [`SPEC-${i + 1}`],
+          agents_consulted: ["sd-architect"],
+          trigger: "auto",
+        })),
+        human_pending_tracking: { entered_at: null, reminder_sent_at: null, reminder_hours: 72, escalation_hours: 168 },
+        retry_history: {
+          SCG_VALIDATION: {
+            history: [
+              { attempt: 1, date: "2026-10-14", failure_reason: "x", scg_gate: "SCG-1" },
+              { attempt: 2, date: "2026-10-15", failure_reason: "y", scg_gate: "SCG-1" },
+            ],
+          },
+          PR_REVIEW: { history: [{ attempt: 1, date: "2026-10-16", failure_reason: "z", scg_gate: "SCG-4" }] },
+          RTM_VERIFY: { history: [] },
+        },
+      },
+      "e2e-bravo": {
+        project: "e2e-bravo",
+        current_state: "HUMAN_PENDING",
+        current_sprint: 1,
+        session_id: "sid-bravo",
+        updated_at: "2026-10-15T08:00:00+00:00",
+        frozen_stages: [],
+        decision_trace: [],
+        human_pending_tracking: { entered_at: "2026-10-15T08:00:00+00:00", reminder_sent_at: null, reminder_hours: 72, escalation_hours: 168 },
+        retry_history: { SCG_VALIDATION: { history: [] }, PR_REVIEW: { history: [] }, RTM_VERIFY: { history: [] } },
+      },
+    },
+  };
+}
+
+/** 檔案 → `SddFsmState`（契約 §1.7.1 的欄位來源表）。 */
+function sddFsmOf(file: SddFile) {
+  const hp = file.human_pending_tracking;
+  const history = Object.entries(file.retry_history ?? {}).flatMap(([gate, v]) => (v.history ?? []).map((h): Record<string, unknown> => ({ ...h, gate })));
+  const last = history.reduce<Record<string, unknown> | null>((best, h) => (best === null || String(h.date) >= String(best.date) ? h : best), null);
+  return {
+    project: file.project,
+    currentState: file.current_state ?? null,
+    currentSprint: file.current_sprint ?? null,
+    sessionId: file.session_id ?? null,
+    updatedAt: file.updated_at ?? null,
+    frozenStages: file.frozen_stages ?? [],
+    decisionTrace: (file.decision_trace ?? []).slice(-5),
+    source: `FSM-STATE-${file.project}.yaml`,
+    humanPending: hp && hp.entered_at ? { count: 1, items: [hp] } : { count: 0, items: [] },
+    retryHistory: { count: history.length, last },
+    rtmCoverage: null,
+  };
+}
+
 export const CSV_FILENAME = "monitor-report-20261015.csv";
 export const CSV_BODY = "runNumber,status,tokens\n1,COMPLETED,3720\n2,FAILED,1240\n3,RUNNING,1240\n";
 /** PDF 報表（v1.2，C-4）：回 200 application/pdf；本文是假的 PDF 前綴，足以驗證「前端把位元組原樣存成 .pdf」 */
@@ -66,6 +161,8 @@ export class MonitorWorld {
   ackDelayMs = 0;
   /** 監控系統參數 monitor.refreshIntervalMs（前端輪詢間隔＝max(此值, 15 秒)） */
   refreshIntervalMs = "15000";
+  /** AISDLC_SDD 引擎（GET /engines/sdd）：測試可改 mode 與 files 模擬引擎不可用、檔案變動、壞檔（契約 §1.7.1） */
+  sdd: SddWorld = makeSddWorld();
 
   constructor(private readonly engine: Engine) {
     const run = (n: number) => this.engine.runs.find((r) => r.runNumber === n)?.id;
@@ -159,6 +256,31 @@ export class MonitorWorld {
     return { content: rows.slice(page * size, page * size + size), page, size, totalElements: rows.length, totalPages: Math.max(1, Math.ceil(rows.length / size)) };
   }
 
+  /** GET /engines/sdd 的回應（契約 §1.7.1 的 reason 映射）：引擎不可用也回 200；project 不合白名單 400；未帶 project → fsm=null。 */
+  private sddReply(project: string | null): MockReply {
+    const checkedAt = new Date().toISOString();
+    if (this.sdd.mode !== "ok") {
+      return { data: { available: false, reason: this.sdd.mode, version: null, projects: [], fsm: null, checkedAt } };
+    }
+    const names = Object.keys(this.sdd.files).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    const projects = names.map((name) => {
+      const file = this.sdd.files[name];
+      return {
+        project: name,
+        source: `FSM-STATE-${name}.yaml`,
+        currentState: file === "broken" ? null : (file.current_state ?? null),
+        updatedAt: file === "broken" ? null : (file.updated_at ?? null),
+      };
+    });
+    const ok = (fsm: ReturnType<typeof sddFsmOf> | null, reason: string | null = null): MockReply => ({ data: { available: true, reason, version: this.sdd.version, projects, fsm, checkedAt } });
+    if (project === null) return ok(null);
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(project)) return { status: 400, error: { message: "請求參數錯誤", errors: [{ field: "project", message: "不符合 ^[A-Za-z0-9._-]{1,128}$" }] } };
+    const file = this.sdd.files[project];
+    if (file === undefined) return ok(null, "fsm_not_found");
+    if (file === "broken") return ok(null, "fsm_state_unreadable");
+    return ok(sddFsmOf(file));
+  }
+
   readonly handler: MockHandler = (call): MockReply => {
     const { method, path, query } = call;
     if (method === "GET" && path === "/api/v1/settings/monitor") {
@@ -176,6 +298,10 @@ export class MonitorWorld {
         updatedAt: new Date().toISOString(),
       });
       return { data: [cfg("refreshIntervalMs", this.refreshIntervalMs, "INT")] };
+    }
+    if (method === "GET" && path === "/api/v1/engines/sdd") {
+      this.seen.push({ method, path, query, headers: call.headers });
+      return this.sddReply(query.get("project"));
     }
     const ack = /^\/api\/v1\/monitor\/alerts\/([^/]+)\/acknowledge$/.exec(path);
     if (method === "POST" && ack) {

@@ -5,7 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "@/lib/auth/AuthProvider";
 import { clearSession, resetSessionCache, saveSession } from "@/lib/auth/store";
-import { DASHBOARD_AGG_POLL_MS, NOTIFICATION_POLL_FLOOR_MS, NOTIFICATION_POLL_MS, useNotificationSummary, useWeekCompletedTasks } from "./queries";
+import {
+  DASHBOARD_AGG_POLL_MS,
+  NOTIFICATION_POLL_FLOOR_MS,
+  NOTIFICATION_POLL_MS,
+  PENDING_SIGNOFF_LIMIT,
+  SDD_POLL_MS,
+  useNotificationSummary,
+  usePendingSignoffs,
+  useSddEngine,
+  useWeekCompletedTasks,
+} from "./queries";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
@@ -133,5 +143,107 @@ describe("useWeekCompletedTasks 的輪詢節奏（task-totals，每 60 秒 1 次
     focusManager.setFocused(false);
     await vi.advanceTimersByTimeAsync(DASHBOARD_AGG_POLL_MS * 3);
     expect(urls).toHaveLength(1);
+  });
+});
+
+/**
+ * v1.4 的兩個新輪詢來源（契約 §0.4：同一使用者所有頁面共用每分鐘 100 次，每多一個輪詢來源就多吃額度，所以節奏要釘住）：
+ * 待審批清單（儀表板「待人工審批」卡，GET /signoffs/pending）與 AISDLC_SDD 引擎（監控頁卡，GET /engines/sdd）都是每 30 秒 1 次、每次輪詢 1 個請求。
+ */
+function stubJsonByUrl(urls: string[], dataOf: (n: number) => unknown) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ code: 200, message: "success", data: dataOf(urls.length) }), { status: 200, headers: { "content-type": "application/json" } });
+    }),
+  );
+}
+
+describe("usePendingSignoffs 的輪詢節奏（GET /signoffs/pending，每 30 秒 1 次）", () => {
+  let urls: string[];
+
+  beforeEach(() => {
+    urls = [];
+    stubJsonByUrl(urls, (n) => ({ counts: { projects: n, goals: 0, tasks: 0, imports: 0, total: n }, items: [] }));
+  });
+
+  it("與通知摘要同節奏（不低於地板 10 秒）、帶 limit=50；29 秒內不會有第二次請求，過了 30 秒才有", async () => {
+    expect(PENDING_SIGNOFF_LIMIT).toBe(50); // 契約 G-10 指定
+    const { result } = renderHook(() => usePendingSignoffs(), { wrapper });
+    await waitFor(() => expect(result.current.data?.counts.total).toBe(1));
+    expect(urls).toEqual(["/api/v1/signoffs/pending?limit=50"]);
+
+    await vi.advanceTimersByTimeAsync(NOTIFICATION_POLL_MS - 1_000);
+    expect(urls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(result.current.data?.counts.total).toBe(2);
+  });
+
+  it("頁面不可見（失焦）時停止輪詢：過了好幾個週期也不再請求", async () => {
+    const { result } = renderHook(() => usePendingSignoffs(), { wrapper });
+    await waitFor(() => expect(result.current.data?.counts.total).toBe(1));
+
+    focusManager.setFocused(false);
+    await vi.advanceTimersByTimeAsync(NOTIFICATION_POLL_MS * 3);
+    expect(urls).toHaveLength(1);
+  });
+});
+
+describe("useSddEngine 的輪詢節奏（GET /engines/sdd，每 30 秒 1 次）", () => {
+  let urls: string[];
+
+  beforeEach(() => {
+    urls = [];
+    stubJsonByUrl(urls, (n) => ({ available: true, reason: null, version: { latest: `v${n}`, root: "/sdd" }, projects: [], fsm: null, checkedAt: "2026-10-16T08:00:00Z" }));
+  });
+
+  it("輪詢間隔 30 秒（常數釘住、不低於地板 10 秒）：不帶 project 的請求網址沒有 query；29 秒內不會有第二次請求，過了 30 秒才有", async () => {
+    expect(SDD_POLL_MS).toBe(30_000);
+    expect(SDD_POLL_MS).toBeGreaterThanOrEqual(NOTIFICATION_POLL_FLOOR_MS);
+    const { result } = renderHook(() => useSddEngine(null), { wrapper });
+    await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));
+    expect(urls).toEqual(["/api/v1/engines/sdd"]);
+
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS - 1_000);
+    expect(urls).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(result.current.data?.version?.latest).toBe("v2");
+  });
+
+  it("帶 project 時只在網址加 ?project=（FSM 專案名原樣編碼）；每次輪詢仍只有一個請求", async () => {
+    const { result } = renderHook(() => useSddEngine("e2e-alpha"), { wrapper });
+    await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS + 1_000);
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(urls).toEqual(["/api/v1/engines/sdd?project=e2e-alpha", "/api/v1/engines/sdd?project=e2e-alpha"]);
+  });
+
+  it("pollWhile 回 false（已選定專案、清單已有內容）就不再輪詢這一份；enabled＝false 連第一次請求都不發", async () => {
+    const { result } = renderHook(() => useSddEngine(null, { pollWhile: () => false }), { wrapper });
+    await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS * 3);
+    expect(urls).toHaveLength(1);
+
+    renderHook(() => useSddEngine("e2e-bravo", { enabled: false }), { wrapper });
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS * 2);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("pollMs 可放慢（監控頁的輪詢設定調得比 30 秒慢時跟著慢）；頁面不可見（失焦）時停止輪詢", async () => {
+    const { result } = renderHook(() => useSddEngine(null, { pollMs: 60_000 }), { wrapper });
+    await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(urls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await waitFor(() => expect(urls).toHaveLength(2));
+
+    focusManager.setFocused(false);
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS * 4);
+    expect(urls).toHaveLength(2);
   });
 });

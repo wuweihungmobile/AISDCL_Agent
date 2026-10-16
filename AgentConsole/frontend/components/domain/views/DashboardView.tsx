@@ -14,9 +14,10 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { StatusLabel } from "@/components/ui/status-dot";
-import { useAllProjects, useLatestRuns, useNotificationSummary, useSignoffQueue, useWeekCompletedTasks } from "@/lib/api/queries";
+import { useAllProjects, useLatestRuns, useNotificationSummary, usePendingSignoffs, useWeekCompletedTasks } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { weekStart } from "@/lib/domain/metrics";
+import { pendingHref, pendingMeta, pendingSignoffTarget, pendingTruncatedNote } from "@/lib/domain/signoff";
 import { projectStatus } from "@/lib/domain/status";
 import { percent } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -60,12 +61,16 @@ function KpiCard({
  * 一次請求、每 60 秒輪詢一次；取代 v1.1 對各專案扇出 task-trend 的近似做法，QA DEF-AC-009）；
  * 執行中 run 數＝各 EXECUTING 專案「最新批次」仍在跑的計數（契約 §4.5 G-07）。
  * 「進行中的執行」卡列 EXECUTING 專案與其最新批次的進度（tasksCompleted／tasksTotal）。
- * 「待人工審批」卡的清單仍由專案／目標 API 組（可直接點「審批」的項目）。
+ * 「待人工審批」卡（v1.4，D-18；契約 §1.8.1、§4.5 G-10）：清單與徽章取 GET /signoffs/pending（`limit=50`；專案、目標、任務、匯入草案四種，
+ * 徽章＝`counts.total`），與 KPI「待審批草案數」及頂列徽章（通知摘要 `pendingSignoffs`）同判準、同數字；
+ * 取代 v1.3 以前用專案與目標 API 另外組的近似清單。每列連到對應頁、可直接點「審批」；清單被 limit 截斷時卡片底部寫「僅列出最早的 N 筆，共 M 筆」。
  */
 export function DashboardView() {
   const { canWrite } = useAuth();
   const all = useAllProjects();
-  const queue = useSignoffQueue();
+  const pending = usePendingSignoffs();
+  const pendingItems = pending.data?.items ?? [];
+  const truncatedNote = pending.data ? pendingTruncatedNote(pendingItems.length, pending.data.counts.total) : null;
   const summary = useNotificationSummary();
   const pendingSignoffs = summary.data?.pendingSignoffs;
   const [signoff, setSignoff] = useState<SignoffTarget | null>(null);
@@ -176,41 +181,45 @@ export function DashboardView() {
               )}
             </Card>
 
-            <Card id="pending-signoff" className="scroll-mt-4 px-[22px] py-5">
+            <Card id="pending-signoff" data-testid="pending-signoff-card" className="scroll-mt-4 px-[22px] py-5">
               <div className="mb-3.5 flex items-center gap-2">
                 <CardTitle>待人工審批</CardTitle>
-                <CountBadge count={queue.count} data-testid="pending-count" />
+                {pending.data ? <CountBadge count={pending.data.counts.total} data-testid="pending-count" /> : null}
               </div>
               <p className="mb-1.5 text-[13px] text-wg-muted">AI 草案 signoff 硬閘 — 未審批禁止執行</p>
-              {queue.isLoading ? (
+              {pending.isPending ? (
                 <Skeleton className="mt-2 h-16" />
-              ) : queue.items.length === 0 ? (
+              ) : !pending.data ? (
+                <ErrorState error={pending.error} onRetry={() => pending.refetch()} title="無法載入待審批清單" />
+              ) : pendingItems.length === 0 ? (
                 <EmptyState title="沒有待審批的草案" />
               ) : (
-                queue.items.map((d) => (
-                  <div key={`${d.kind}:${d.id}`} data-testid="pending-item" className="flex items-center justify-between gap-2 border-t border-wg-line py-3">
+                pendingItems.map((d) => (
+                  <div key={`${d.kind}:${d.id}`} data-testid="pending-item" data-kind={d.kind} className="flex items-center justify-between gap-2 border-t border-wg-line py-3">
                     <div className="min-w-0">
-                      <Link
-                        href={d.kind === "project" ? `/projects/${d.id}` : `/projects/${d.projectId}/goals/${d.id}`}
-                        className="block max-w-[200px] truncate text-sm font-semibold text-wg-text transition-colors hover:text-wg-primary"
-                      >
-                        {d.name}
+                      <Link href={pendingHref(d)} className="block max-w-[200px] truncate text-sm font-semibold text-wg-text transition-colors hover:text-wg-primary">
+                        {d.title}
                       </Link>
-                      <span className="text-xs text-wg-muted">{d.meta}</span>
+                      <span className="text-xs text-wg-muted">{pendingMeta(d)}</span>
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
                       disabled={!canWrite}
                       title={canWrite ? undefined : "權限不足（唯讀角色不可審批）"}
-                      aria-label={`審批：${d.name}`}
-                      onClick={() => setSignoff({ kind: d.kind, id: d.id, name: d.name })}
+                      aria-label={`審批：${d.title}`}
+                      onClick={() => setSignoff(pendingSignoffTarget(d))}
                     >
                       審批
                     </Button>
                   </div>
                 ))
               )}
+              {truncatedNote ? (
+                <p data-testid="pending-truncated" className="mt-2 border-t border-wg-line pt-2.5 text-xs text-wg-muted">
+                  {truncatedNote}
+                </p>
+              ) : null}
             </Card>
           </div>
 

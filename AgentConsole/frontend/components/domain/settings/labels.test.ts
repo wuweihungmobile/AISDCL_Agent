@@ -62,6 +62,17 @@ describe("設定頁字典與契約附錄 C 一致", () => {
     for (const c of CONFIG_CATEGORIES) expect(CATEGORY_META[c].icon).toBeTruthy();
   });
 
+  it("兩個引擎旗標的名稱取 PRD §5.5.1.2 原文（「啟用自動突變」「啟用自演化」），與執行頁晶片的「自動突變」「自演化」用字一致", () => {
+    const prd = readFileSync(path.join(process.cwd(), "..", "..", "docs", "01_requirements", "Agent_ConsoleUI_PRD.md"), "utf-8");
+    const prdName = (key: string): string | undefined => new RegExp(`^\\| \`${key.replace(".", "\\.")}\` \\|[^|]*\\|[^|]*\\| ([^|（]+)（`, "m").exec(prd)?.[1].trim();
+    expect(prdName("agent.enableAutoMutation")).toBe("啟用自動突變");
+    expect(prdName("agent.enableSelfEvolution")).toBe("啟用自演化");
+    expect(settingLabel("agent", "enableAutoMutation")).toBe(prdName("agent.enableAutoMutation"));
+    expect(settingLabel("agent", "enableSelfEvolution")).toBe(prdName("agent.enableSelfEvolution"));
+    // 舊用字（設計稿之前的寫法）不得回來
+    expect(Object.values(SETTING_LABELS).join("\n")).not.toMatch(/自動變異|自我演化/);
+  });
+
   it("字典沒有的鍵退回鍵名（後端新增鍵不崩潰）；技術字串（URL、命令、DSN）用等寬字體", () => {
     expect(settingLabel("model", "futureKey")).toBe("futureKey");
     expect(isMonoSetting("model", "apiUrl")).toBe(true);

@@ -91,12 +91,18 @@ test.describe("系統參數設定（route mock）", () => {
     await expect(page.getByRole("heading", { name: "Agent設定" })).toBeVisible();
 
     const mutation = row(page, "agent.enableAutoMutation");
+    // 用字與 PRD §5.5.1.2 一致（v1.4 前端項 5）：「啟用自動突變」「啟用自演化」，不是舊稿的「自動變異」「自我演化」；開關、重置鈕的名稱都跟著
+    await expect(mutation.getByRole("switch", { name: "啟用自動突變", exact: true })).toBeVisible();
+    await expect(mutation.getByRole("button", { name: "重置：啟用自動突變", exact: true })).toBeVisible();
+    await expect(page.getByTestId("settings-panel")).not.toContainText(/自動變異|自我演化/);
     await expect(mutation.getByTestId("effect-tag")).toHaveCount(0); // ENGINE 與 CONSOLE 的鍵不加小標籤
     await expect(mutation.getByTestId("impact-note")).toContainText("Brain 逐步校正：失敗步驟先改寫 prompt 再重試");
     await expect(mutation.getByTestId("impact-note")).toContainText("沒有金鑰時不送，批次回報 UNAVAILABLE_NO_API_KEY");
     await expect(mutation).not.toContainText("尚未驗證對映");
 
     const evolution = row(page, "agent.enableSelfEvolution");
+    await expect(evolution.getByRole("switch", { name: "啟用自演化", exact: true })).toBeVisible();
+    await expect(evolution.getByRole("button", { name: "重置：啟用自演化", exact: true })).toBeVisible();
     await expect(evolution.getByTestId("effect-tag")).toHaveText("僅儲存、不影響引擎");
     await expect(evolution.getByTestId("impact-note")).toContainText("引擎沒有演化開關");
     await expect(evolution.getByTestId("impact-note")).toContainText("只寫引擎日誌、不套用也不重載");

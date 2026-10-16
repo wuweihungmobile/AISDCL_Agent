@@ -30,8 +30,10 @@ import {
   getGoal,
   getImport,
   getNotificationSummary,
+  getPendingSignoffs,
   getProject,
   getProjectMetrics,
+  getSddEngineStatus,
   getTask,
   getTaskTotals,
   getTaskTrend,
@@ -97,6 +99,7 @@ import type {
   ProjectDetail,
   ReportParams,
   ReviewDecision,
+  SddEngineStatus,
   StartExecutionRequest,
   TestConnectionRequest,
   TextImportRequest,
@@ -118,6 +121,10 @@ export const qk = {
   imports: (params: ListImportsParams) => ["imports", "list", params] as const,
   importDetail: (id: string) => ["imports", "detail", id] as const,
   notifications: ["notifications", "summary"] as const,
+  /** 待審批清單掛在 "notifications" 底下：任何失效 ["notifications"] 的動作（簽核、確認告警、匯入變動）會連它一起重抓。 */
+  pendingSignoffs: (limit: number) => ["notifications", "pending-signoffs", limit] as const,
+  /** project＝null：未帶 project 的第一次請求（取清單用）；其餘依 FSM 專案名各一份。 */
+  sddEngine: (project: string | null) => ["sdd", "engine", project] as const,
   settings: ["settings", "all"] as const,
   settingsCategory: (category: ConfigCategory) => ["settings", "category", category] as const,
   settingsHistory: (params: ListSettingsHistoryParams) => ["settings", "history", params] as const,
@@ -222,68 +229,37 @@ export function useTask(id: string | undefined) {
   });
 }
 
-// ── 待人工審批佇列（頂列 signoff 鈕徽章、Dashboard「待人工審批」卡共用）──────────
-export type SignoffItem = {
-  kind: "project" | "goal";
-  id: string;
-  projectId: string;
-  name: string;
-  meta: string;
-};
+// ── 待人工審批清單（Dashboard「待人工審批」卡；契約 §1.8.1、§4.5 G-10；v1.4 D-18）──────────
+/** 卡片清單最多取幾筆（契約 G-10 指定 `limit=50`；超過時卡片底部寫「僅列出最早的 N 筆，共 M 筆」）。 */
+export const PENDING_SIGNOFF_LIMIT = 50;
 
 /**
- * signedOff=false 的專案，加上這些草案專案底下 signedOff=false 的目標。
- * 取捨：只對「草案專案」逐一查目標（草案通常很少）；已簽核專案底下以 draft 建立的目標不在此佇列。
- * 計數已改走 GET /notifications/summary 的 pendingSignoffs（頂列徽章與 Dashboard KPI 用它，跨專案且含任務與匯入草案）；
- * 本 hook 只剩「待人工審批」卡的清單用途（可直接點「審批」的專案／目標）。
+ * 跨專案的待簽核草案（專案、目標、任務、匯入記錄四種）：`counts.total` 與通知摘要的 `pendingSignoffs` 同判準、同數字
+ * （後端以同一組述詞產生計數與清單）；清單依建立時間升冪。取代 v1.3 以前的 `useSignoffQueue`（前端用專案與目標 API 另外組的近似清單：
+ * 沒有任務、沒有匯入記錄、也沒有已簽專案底下的草案，數字大於點得到的項目）。
+ * 掛在 `["notifications"]` 查詢鍵底下，輪詢節奏與通知摘要相同；任何簽核成功都會把整個 notifications 家族標為過期、立即重抓。
  */
-export function useSignoffQueue(): { items: SignoffItem[]; count: number; isLoading: boolean } {
-  const all = useAllProjects();
+export function usePendingSignoffs(limit: number = PENDING_SIGNOFF_LIMIT) {
   const enabled = useEnabled();
-  const drafts = (all.data?.content ?? []).filter((p) => !p.signedOff);
-  const goalQueries = useQueries({
-    queries: drafts.map((p) => ({
-      queryKey: qk.goals(p.id),
-      queryFn: ({ signal }: { signal: AbortSignal }) => listGoals(p.id, { signal }),
-      enabled,
-      staleTime: 15_000,
-    })),
+  return useQuery({
+    queryKey: qk.pendingSignoffs(limit),
+    queryFn: ({ signal }) => getPendingSignoffs({ limit }, { signal }),
+    enabled,
+    staleTime: NOTIFICATION_POLL_FLOOR_MS,
+    refetchInterval: NOTIFICATION_POLL_MS,
   });
-
-  const items: SignoffItem[] = [];
-  drafts.forEach((p, idx) => {
-    items.push({
-      kind: "project",
-      id: p.id,
-      projectId: p.id,
-      name: p.name,
-      meta: `AI 草案 · ${p.goalsCount} 目標 / ${p.tasksCount} 任務`,
-    });
-    for (const g of goalQueries[idx]?.data ?? []) {
-      if (!g.signedOff) {
-        items.push({
-          kind: "goal",
-          id: g.id,
-          projectId: p.id,
-          name: g.name,
-          meta: `目標草案 · ${p.name} · ${g.taskCount} 任務`,
-        });
-      }
-    }
-  });
-  return {
-    items,
-    count: items.length,
-    isLoading: all.isLoading || goalQueries.some((q) => q.isLoading),
-  };
 }
 
 // ── 寫入 ────────────────────────────────────────────────────────────────
-function useWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
+/**
+ * 寫入成功後三層快取標為過期。`notifications: true`＝簽核類寫入：它會改變待簽核數，所以通知摘要（頂列徽章、Dashboard KPI）
+ * 與待審批清單（卡片）一併重抓——否則要等下一輪 30 秒輪詢，卡片、徽章、KPI 會各自停在舊數字（契約 E2E-16 第 5 列）。
+ */
+function useWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>, opts: { notifications?: boolean } = {}) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => invalidateTree(qc),
+    onSuccess: () => (opts.notifications ? Promise.all([invalidateTree(qc), qc.invalidateQueries({ queryKey: ["notifications"] })]) : invalidateTree(qc)),
   });
 }
 
@@ -292,18 +268,18 @@ export const useUpdateProject = () => useWrite((v: { id: string; body: UpdatePro
 export const useDeleteProject = () => useWrite((id: string) => deleteProject(id));
 /** 復原軟刪除的專案（C-3）：成功後三層快取全部標為過期（專案、目標、任務一併回來）。 */
 export const useRestoreProject = () => useWrite((id: string) => restoreProject(id));
-export const useSignoffProject = () => useWrite((v: { id: string; approver: string }) => signoffProject(v.id, v.approver));
+export const useSignoffProject = () => useWrite((v: { id: string; approver: string }) => signoffProject(v.id, v.approver), { notifications: true });
 
 export const useCreateGoal = () => useWrite((v: { projectId: string; body: CreateGoalRequest }) => createGoal(v.projectId, v.body));
 export const useUpdateGoal = () => useWrite((v: { id: string; body: UpdateGoalRequest }) => updateGoal(v.id, v.body));
 export const useDeleteGoal = () => useWrite((id: string) => deleteGoal(id));
-export const useSignoffGoal = () => useWrite((v: { id: string; approver: string }) => signoffGoal(v.id, v.approver));
+export const useSignoffGoal = () => useWrite((v: { id: string; approver: string }) => signoffGoal(v.id, v.approver), { notifications: true });
 
 export const useCreateTask = () => useWrite((v: { goalId: string; body: CreateTaskRequest }) => createTask(v.goalId, v.body));
 export const useUpdateTask = () => useWrite((v: { id: string; body: UpdateTaskRequest }) => updateTask(v.id, v.body));
 export const useDeleteTask = () => useWrite((id: string) => deleteTask(id));
 export const useRetryTask = () => useWrite((id: string) => retryTask(id));
-export const useSignoffTask = () => useWrite((v: { id: string; approver: string }) => signoffTask(v.id, v.approver));
+export const useSignoffTask = () => useWrite((v: { id: string; approver: string }) => signoffTask(v.id, v.approver), { notifications: true });
 
 /**
  * 目標拖曳排序：先樂觀改寫專案詳情快取內的目標順序（畫面立即換位），
@@ -820,6 +796,28 @@ export function useProjectLogs(projectId: string | undefined, q: LogQuery, pollM
     enabled,
     placeholderData: keepPreviousData,
     refetchInterval: pollMs,
+  });
+}
+
+// ══ AISDLC_SDD 引擎（監控頁「AISDLC_SDD 引擎」卡；契約 §1.7.1、§4.3 M-20；v1.4 D-16）═══════════════════
+/** 契約 §1.7.1：前端 30 秒輪詢一次（FSM 檔只在 SDD runtime 執行時才變動，不需要 SSE；30 秒大於輪詢地板 10 秒）。分頁不可見時 TanStack Query 預設暫停。 */
+export const SDD_POLL_MS = 30_000;
+
+/**
+ * project＝null：不帶 project 的請求，只取版本與 FSM 專案清單（`fsm` 為 null）；選定專案後帶 project 取該專案的 FSM 狀態。
+ * 引擎不可用也回 200（`available=false`＋`reason`），所以 isError 只代表 console-api 自己連不上或回了非 2xx。
+ * enabled＝false：不發請求、也不輪詢。pollWhile：依最近一份資料決定要不要繼續輪詢（回 false＝停；不給＝一直輪詢）——
+ * 卡片選定專案後，不帶 project 的那一份只當「專案清單的底」留在快取，不必再打；清單還是空的（或引擎不可用）時才繼續輪詢等它復原。
+ */
+export function useSddEngine(project: string | null, opts: { pollMs?: number; enabled?: boolean; pollWhile?: (data: SddEngineStatus | undefined) => boolean } = {}) {
+  const authed = useEnabled();
+  const interval = opts.pollMs ?? SDD_POLL_MS;
+  const pollWhile = opts.pollWhile;
+  return useQuery({
+    queryKey: qk.sddEngine(project),
+    queryFn: ({ signal }) => getSddEngineStatus({ project: project ?? undefined }, { signal }),
+    enabled: authed && (opts.enabled ?? true),
+    refetchInterval: pollWhile ? (query) => (pollWhile(query.state.data) ? interval : false) : interval,
   });
 }
 

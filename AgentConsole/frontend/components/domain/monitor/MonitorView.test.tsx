@@ -74,6 +74,8 @@ function backend(over: Partial<World> = {}) {
         return { data: [{ bucketStart: "2026-10-15T08:00:00Z", started: 3, completed: 2, failed: 1, retried: 1 }] };
       case "/api/v1/monitor/projects/p1/alerts":
         return { data: w.alerts };
+      case "/api/v1/engines/sdd":
+        return { data: { available: true, reason: null, version: { latest: "AISDLC_SDD_v9.99", root: "/sdd/AISDLC_SDD_v9.99" }, projects: [], fsm: null, checkedAt: TS } }; // 引擎卡本身的情境在 SddEngineCard.test.tsx
       case "/api/v1/monitor/projects/p1/logs":
         return {
           data: page(
@@ -163,14 +165,14 @@ describe("監控頁：版面（設計稿畫面 8）", () => {
     await waitFor(() => expect(runSel.options).toHaveLength(3));
   });
 
-  it("九個區塊依預設順序出現；底部有「匯出報表」「設定告警」「自訂儀表板」", async () => {
+  it("十個區塊依預設順序出現（v1.4 起最後多一張「AISDLC_SDD 引擎」卡，契約 §4.3 M-20）；底部有「匯出報表」「設定告警」「自訂儀表板」", async () => {
     backend();
     view();
     await screen.findByTestId("kpi-cards");
     const ids = within(screen.getByTestId("monitor-sections"))
       .getAllByRole("region")
       .map((s) => s.getAttribute("data-section"));
-    expect(ids).toEqual(["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent"]);
+    expect(ids).toEqual(["kpi", "token", "distribution", "trends", "timeline", "logs", "alerts", "compare", "agent", "sdd"]);
     expect(screen.getByTestId("export-csv")).toHaveTextContent("匯出報表");
     expect(screen.getByTestId("alert-settings-link")).toHaveAttribute("href", "/settings");
     expect(screen.getByTestId("layout-toggle")).toHaveTextContent("自訂儀表板");
@@ -652,7 +654,7 @@ describe("監控頁：自訂儀表板（US-M-08；版面存 localStorage console
     const ids = within(screen.getByTestId("monitor-sections"))
       .getAllByRole("region")
       .map((s) => s.getAttribute("data-section"));
-    expect(ids).toEqual(["agent", "alerts", "kpi", "token", "distribution", "trends", "timeline", "logs", "compare"]);
+    expect(ids).toEqual(["agent", "alerts", "kpi", "token", "distribution", "trends", "timeline", "logs", "compare", "sdd"]);
   });
 
   it("「自訂儀表板」切換編輯模式：每個區塊出現拖曳把手與標題；「重設版面」回預設並清掉儲存", async () => {
@@ -665,7 +667,7 @@ describe("監控頁：自訂儀表板（US-M-08；版面存 localStorage console
     await userEvent.click(screen.getByTestId("layout-toggle"));
     expect(screen.getByTestId("layout-toggle")).toHaveTextContent("完成自訂");
     expect(screen.getByTestId("drag-kpi")).toHaveAttribute("aria-label", "拖曳排序：指標卡");
-    expect(screen.getAllByRole("button", { name: /^拖曳排序：/ })).toHaveLength(9);
+    expect(screen.getAllByRole("button", { name: /^拖曳排序：/ })).toHaveLength(10);
 
     await userEvent.click(screen.getByTestId("layout-reset"));
     const ids = within(screen.getByTestId("monitor-sections"))

@@ -90,6 +90,22 @@ export type ListImportsParams = {
 // ── 通知摘要（契約 §1.4）──────────────────────────────────────────────────
 export type NotificationSummary = S36["NotificationSummaryResponse"];
 
+// ── v1.4（W7 第二批）：待審批清單（§1.8.1，D-18）、AISDLC_SDD 引擎狀態（§1.7.1，D-16）、登出（§1.9.1，D-19）────
+/** 待簽核草案的種類：專案、目標、任務、匯入記錄（判準與通知摘要的 pendingSignoffs 完全相同）。 */
+export type PendingSignoffKind = S36["PendingSignoffKind"];
+export type PendingSignoffItem = S36["PendingSignoffItem"];
+/** `total` 恆等於通知摘要的 `pendingSignoffs`；`limit` 不影響它。 */
+export type PendingSignoffCounts = S36["PendingSignoffCounts"];
+export type PendingSignoffs = S36["PendingSignoffsResponse"];
+/** `GET /engines/sdd` 的 data：引擎不可用也回 200，以 `available`／`reason` 判斷（回應欄位的值，不是 ApiError.reason）。 */
+export type SddEngineStatus = S36["SddEngineStatusResponse"];
+export type SddEngineReason = S36["SddEngineReason"];
+export type SddVersion = S36["SddVersion"];
+export type SddProjectEntry = S36["SddProjectEntry"];
+export type SddFsmState = S36["SddFsmState"];
+export type SddHumanPending = S36["SddHumanPending"];
+export type LogoutRequest = S36["LogoutRequest"];
+
 // ── Phase 6：系統參數（契約 §1.5）─────────────────────────────────────────
 export type Config = S36["ConfigResponse"];
 export type ConfigCategory = Config["category"];

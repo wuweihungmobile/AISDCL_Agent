@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { clearSession, resetSessionCache } from "@/lib/auth/store";
+import { clearSession, resetSessionCache, saveSession } from "@/lib/auth/store";
 import * as api from "./endpoints";
 
 /** 函式名與 PRD §7.1 的端點一一對應（RTM：API-PRJ／GOL／TSK／SGN／AUTH）。 */
 const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, method: string, path: string, body?: unknown]> = [
   ["login", () => api.login("u", "p"), "POST", "/api/v1/auth/login", { username: "u", password: "p" }],
   ["refreshToken", () => api.refreshToken("r"), "POST", "/api/v1/auth/refresh", { refreshToken: "r" }],
+  // v1.4（D-19，API-AUTH-03）：登出並撤銷 refresh token（免認證，204）
+  ["logout", () => api.logout("RT"), "POST", "/api/v1/auth/logout", { refreshToken: "RT" }],
   ["createProject", () => api.createProject({ name: "n", executionPath: "/x", passCriteria: "c" }), "POST", "/api/v1/projects", { name: "n", executionPath: "/x", passCriteria: "c" }],
   ["listProjects", () => api.listProjects({ page: 1, size: 5 }), "GET", "/api/v1/projects?page=1&size=5"],
   ["getProject", () => api.getProject("P"), "GET", "/api/v1/projects/P"],
@@ -54,6 +56,9 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
 
   // ── 通知摘要（契約 §1.4）──
   ["getNotificationSummary", () => api.getNotificationSummary(), "GET", "/api/v1/notifications/summary"],
+  // ── v1.4（W7 第二批）：待審批清單（契約 §1.8.1，API-SGN-05）與 AISDLC_SDD 引擎狀態（§1.7.1，API-ENG-01）──
+  ["getPendingSignoffs", () => api.getPendingSignoffs({ limit: 50 }), "GET", "/api/v1/signoffs/pending?limit=50"],
+  ["getSddEngineStatus", () => api.getSddEngineStatus({ project: "e2e-alpha" }), "GET", "/api/v1/engines/sdd?project=e2e-alpha"],
 
   // ── Phase 6：系統參數（契約 §1.5）：匯入是 multipart、匯出是下載，另見下方專屬測試 ──
   ["listSettings", () => api.listSettings(), "GET", "/api/v1/settings"],
@@ -130,10 +135,35 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 62 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 65 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(62);
+    expect(names).toHaveLength(65);
+  });
+
+  it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project）", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.getPendingSignoffs();
+    await api.getSddEngineStatus();
+    await api.getSddEngineStatus({ project: undefined });
+    const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]);
+    expect(urls).toEqual(["/api/v1/signoffs/pending", "/api/v1/engines/sdd", "/api/v1/engines/sdd"]);
+  });
+
+  it("logout（契約 §1.9.1）：免認證——即使本機有 session 也不帶 Authorization；204 回 undefined；失敗丟 ApiError（由呼叫端吞掉，不阻擋本機登出）", async () => {
+    saveSession({ accessToken: "stale-access", refreshToken: "RT", expiresAt: Date.now() - 1000, role: "OPERATOR", username: "operator" });
+    const replies = [
+      new Response(null, { status: 204 }),
+      new Response(JSON.stringify({ code: 400, message: "請求格式錯誤", errors: [{ field: "refreshToken", message: "不可為空" }] }), { status: 400, headers: { "content-type": "application/json" } }),
+    ];
+    const fetchMock = vi.fn(async () => replies.shift() as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.logout("RT")).resolves.toBeUndefined();
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    await expect(api.logout("")).rejects.toMatchObject({ status: 400, errors: [{ field: "refreshToken" }] });
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 400 不會觸發換新或重送
   });
 
   it("listProjects：deleted=true 只列軟刪除的專案（C-3）；省略時網址上沒有 deleted", async () => {

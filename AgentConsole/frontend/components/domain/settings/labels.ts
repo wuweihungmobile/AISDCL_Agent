@@ -38,8 +38,9 @@ export const SETTING_LABELS: Record<string, string> = {
   "agent.retryBackoffMs": "重試退避（毫秒）",
   "agent.retryBackoffMultiplier": "重試退避倍率",
   "agent.checkpointInterval": "斷點間隔（步）",
-  "agent.enableAutoMutation": "啟用自動變異",
-  "agent.enableSelfEvolution": "啟用自我演化",
+  // 用字取 PRD §5.5.1.2 原文（「啟用自動突變」「啟用自演化」），與執行頁引擎能力晶片的「自動突變」「自演化」（契約 §4.2 E-21）一致
+  "agent.enableAutoMutation": "啟用自動突變",
+  "agent.enableSelfEvolution": "啟用自演化",
   // execution（10）
   "execution.globalTokenBudget": "全域 Token 預算",
   "execution.tokenBudgetWarningThreshold": "Token 預算警示門檻",

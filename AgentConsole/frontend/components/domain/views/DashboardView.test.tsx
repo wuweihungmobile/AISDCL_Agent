@@ -1,9 +1,17 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Providers, envelope, failure, makeClient, signIn, stubApi } from "@/tests/helpers/api";
+import { TopRegion } from "@/components/layout/TopRegion";
+import type { PendingSignoffItem } from "@/lib/api/types";
+import { Providers, envelope, failure, makeClient, signIn, stubApi as stubApiRaw, type ApiCall, type Reply } from "@/tests/helpers/api";
 import { DashboardView } from "./DashboardView";
+
+/** 待審批清單端點（契約 §1.8.1）：這支檔前半段的 KPI 情境不關心待人工審批卡，預設回「沒有待審批」；驗卡片的情境用 stubApiRaw 自己提供清單。 */
+const PENDING_PATH = "/api/v1/signoffs/pending";
+const PENDING_NONE = { data: { counts: { projects: 0, goals: 0, tasks: 0, imports: 0, total: 0 }, items: [] } };
+const stubApi = (handler: (c: ApiCall) => Reply) => stubApiRaw((c) => (c.path === PENDING_PATH ? PENDING_NONE : handler(c)));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -120,6 +128,7 @@ describe("Dashboard「本週完成任務數」與「執行中 run 數」KPI（�
       vi.fn(async (input: string) => {
         const path = new URL(input, "http://api.test").pathname;
         if (path === "/api/v1/notifications/summary") return envelope(SUMMARY_ZERO.data);
+        if (path === PENDING_PATH) return envelope(PENDING_NONE.data);
         if (path === "/api/v1/projects") return envelope({ ...PROJECTS, ...MORE });
         if (path === TOTALS_PATH) {
           await gate;
@@ -250,5 +259,189 @@ describe("Dashboard「待審批草案數」KPI（契約 §4.5 G-06）", () => {
     );
     expect(await screen.findByTestId("kpi-drafts")).toHaveTextContent("—");
     expect(screen.getByText("待通知摘要載入")).toBeInTheDocument();
+  });
+});
+
+describe("Dashboard「待人工審批」卡（契約 §1.8.1、§4.5 G-10；v1.4 D-18，API-SGN-05）", () => {
+  const AT = "2026-10-15T08:30:12Z";
+  const pend = (kind: PendingSignoffItem["kind"], id: string, title: string): PendingSignoffItem => ({
+    kind,
+    id,
+    projectId: kind === "IMPORT" ? null : kind === "PROJECT" ? id : "pj1",
+    projectName: kind === "IMPORT" ? null : kind === "PROJECT" ? title : "專案甲",
+    parentId: kind === "GOAL" ? "pj1" : kind === "TASK" ? "g1" : null,
+    title,
+    createdAt: AT,
+  });
+  /** 伺服器給的順序＝建立時間升冪（契約 §1.8.1）；四種各一筆。 */
+  const FOUR = [pend("IMPORT", "i1", "需求文件.md"), pend("PROJECT", "pj1", "新專案"), pend("GOAL", "g1", "基礎"), pend("TASK", "t1", "初始化")];
+  const countsOf = (items: PendingSignoffItem[], total = items.length) => ({
+    projects: items.filter((i) => i.kind === "PROJECT").length,
+    goals: items.filter((i) => i.kind === "GOAL").length,
+    tasks: items.filter((i) => i.kind === "TASK").length,
+    imports: items.filter((i) => i.kind === "IMPORT").length,
+    total,
+  });
+
+  /**
+   * 假後端：待審批清單與通知摘要由同一份 items 產生（後端以同一組述詞算兩者，不變量：counts.total＝pendingSignoffs）；
+   * 四個 signoff 端點成功就把該筆從 items 拿掉。totalOverride＝總數大於清單（模擬 limit 截斷）。
+   */
+  function backend(initial: PendingSignoffItem[], opts: { totalOverride?: number; failList?: () => boolean } = {}) {
+    let items = [...initial];
+    const total = () => opts.totalOverride ?? items.length;
+    const { calls } = stubApiRaw((c) => {
+      if (c.path === PENDING_PATH) {
+        if (opts.failList?.()) return failure(500, { message: "伺服器錯誤" });
+        const limit = Number(c.query.get("limit") ?? 50);
+        return { data: { counts: countsOf(items, total()), items: items.slice(0, limit) } };
+      }
+      if (c.path === "/api/v1/notifications/summary") return { data: { pendingSignoffs: total(), pendingReviews: 0, unacknowledgedAlerts: 0, bridgeConnected: null, bridgeCheckedAt: null } };
+      if (c.path === "/api/v1/projects") return { data: PROJECTS };
+      if (c.path === TOTALS_PATH) return totals(0, 0);
+      const signoff = /^\/api\/v1\/(projects|goals|tasks|import)\/([^/]+)\/signoff$/.exec(c.path);
+      if (c.method === "POST" && signoff) {
+        items = items.filter((i) => i.id !== signoff[2]);
+        return { data: { id: signoff[2], status: "REVIEWING", signedOff: true, signedOffBy: "operator", signedOffAt: AT } };
+      }
+      return { data: [] };
+    });
+    return { calls, remaining: () => items };
+  }
+
+  const view = (...extra: ReactNode[]) =>
+    render(
+      <Providers client={makeClient()}>
+        {extra}
+        <DashboardView />
+      </Providers>,
+    );
+  const pendingCalls = (calls: ApiCall[]) => calls.filter((c) => c.path === PENDING_PATH);
+
+  it("清單取 GET /signoffs/pending?limit=50（一次）：四種草案各一列，連結與副標依契約 G-10，順序照伺服器給的；徽章＝counts.total；不再為草案專案逐一查目標", async () => {
+    const { calls } = backend(FOUR);
+    view();
+    const rows = await screen.findAllByTestId("pending-item");
+    expect(rows.map((r) => r.getAttribute("data-kind"))).toEqual(["IMPORT", "PROJECT", "GOAL", "TASK"]);
+    const links = rows.map((r) => within(r).getByRole("link"));
+    expect(links.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
+      ["需求文件.md", "/import"], // 匯入頁沒有以 id 深連結某筆記錄的路由
+      ["新專案", "/projects/pj1"],
+      ["基礎", "/projects/pj1/goals/g1"],
+      ["初始化", "/projects/pj1/goals/g1/tasks/t1"],
+    ]);
+    expect(rows.map((r) => within(r).getByText(/草案/).textContent)).toEqual(["匯入草案", "專案草案", "目標草案・專案甲", "任務草案・專案甲"]);
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("4");
+    expect(pendingCalls(calls)).toHaveLength(1);
+    expect(pendingCalls(calls)[0].query.get("limit")).toBe("50");
+    expect(
+      calls.some((c) => /\/projects\/[^/]+\/goals$/.test(c.path)),
+      "舊做法：對每個草案專案各查一次目標清單",
+    ).toBe(false);
+    expect(screen.queryByTestId("pending-truncated")).toBeNull(); // 清單沒被截斷
+  });
+
+  it("每列的「審批」鈕名稱含標題；清單與 KPI 同源：沒有任何「KPI 大於點得到的項目」的情形", async () => {
+    backend(FOUR);
+    view();
+    await screen.findAllByTestId("pending-item");
+    for (const title of ["需求文件.md", "新專案", "基礎", "初始化"]) expect(screen.getByRole("button", { name: `審批：${title}` })).toBeEnabled();
+    await waitFor(() => expect(screen.getByTestId("kpi-drafts")).toHaveTextContent("4"));
+    expect(screen.getAllByTestId("pending-item")).toHaveLength(Number(screen.getByTestId("kpi-drafts").textContent));
+  });
+
+  it("🔴 同源：卡片徽章（counts.total）、KPI「待審批草案數」、頂列 signoff 徽章（通知摘要 pendingSignoffs）是同一個數字；簽核一筆後三者同步減 1、那一列消失（不必整頁重載）", async () => {
+    const { calls, remaining } = backend(FOUR);
+    view(<TopRegion key="top" />);
+    await waitFor(() => expect(screen.getByTestId("pending-count")).toHaveTextContent("4"));
+    await waitFor(() => expect(screen.getByTestId("kpi-drafts")).toHaveTextContent("4"));
+    await waitFor(() => expect(screen.getByTestId("signoff-badge")).toHaveTextContent("4"));
+
+    await userEvent.click(screen.getByRole("button", { name: "審批：新專案" }));
+    const dialog = await screen.findByRole("dialog", { name: "審批 signoff：專案" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "確認 signoff" }));
+
+    await waitFor(() => expect(screen.getByTestId("pending-count")).toHaveTextContent("3"));
+    await waitFor(() => expect(screen.getByTestId("kpi-drafts")).toHaveTextContent("3"));
+    await waitFor(() => expect(screen.getByTestId("signoff-badge")).toHaveTextContent("3"));
+    expect(screen.queryByRole("link", { name: "新專案" })).toBeNull();
+    expect(screen.getAllByTestId("pending-item")).toHaveLength(3);
+    expect(remaining().map((i) => i.id)).toEqual(["i1", "g1", "t1"]);
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({ approver: "operator" });
+  });
+
+  it.each([
+    ["PROJECT", "審批：新專案", "審批 signoff：專案", "/api/v1/projects/pj1/signoff"],
+    ["GOAL", "審批：基礎", "審批 signoff：目標", "/api/v1/goals/g1/signoff"],
+    ["TASK", "審批：初始化", "審批 signoff：任務", "/api/v1/tasks/t1/signoff"],
+    ["IMPORT", "審批：需求文件.md", "審批 signoff：匯入草案", "/api/v1/import/i1/signoff"],
+  ])("%s 草案按「審批」：開 SignoffDialog（%s → %s）、POST %s；成功後清單與通知摘要立即重抓（簽核類寫入讓 notifications 家族標為過期）", async (_kind, button, dialogName, path) => {
+    const { calls } = backend(FOUR);
+    view();
+    await screen.findAllByTestId("pending-item");
+    const listBefore = pendingCalls(calls).length;
+    const summaryBefore = calls.filter((c) => c.path === "/api/v1/notifications/summary").length;
+    await userEvent.click(screen.getByRole("button", { name: button }));
+    await userEvent.click(within(await screen.findByRole("dialog", { name: dialogName })).getByRole("button", { name: "確認 signoff" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === path)).toBe(true));
+    await waitFor(() => expect(pendingCalls(calls).length).toBeGreaterThan(listBefore));
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/notifications/summary").length).toBeGreaterThan(summaryBefore));
+    await waitFor(() => expect(screen.getAllByTestId("pending-item")).toHaveLength(3));
+  });
+
+  it("清單被 limit 截斷（counts.total 大於清單）：徽章仍是 counts.total，卡片底部寫「僅列出最早的 N 筆，共 M 筆」", async () => {
+    backend(FOUR, { totalOverride: 63 });
+    view();
+    expect(await screen.findByTestId("pending-truncated")).toHaveTextContent("僅列出最早的 4 筆，共 63 筆");
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("63");
+    await waitFor(() => expect(screen.getByTestId("kpi-drafts")).toHaveTextContent("63"));
+  });
+
+  it("沒有待審批：空狀態「沒有待審批的草案」，徽章 0，沒有截斷說明", async () => {
+    backend([]);
+    view();
+    expect(await screen.findByText("沒有待審批的草案")).toBeInTheDocument();
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("0");
+    expect(screen.queryByTestId("pending-item")).toBeNull();
+    expect(screen.queryByTestId("pending-truncated")).toBeNull();
+  });
+
+  it("清單載入失敗：卡片內顯示錯誤與重試（沒有徽章、不編造清單），KPI 與其他卡照常；重試成功後清單出現", async () => {
+    let failing = true;
+    const { calls } = backend(FOUR, { failList: () => failing });
+    view();
+    expect(await screen.findByText("無法載入待審批清單")).toBeInTheDocument();
+    expect(screen.queryByTestId("pending-count")).toBeNull();
+    expect(screen.queryByTestId("pending-item")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("kpi-drafts")).toHaveTextContent("4")); // KPI 取通知摘要，不受影響
+    expect(screen.getByTestId("kpi-active")).toBeInTheDocument();
+
+    failing = false;
+    const before = pendingCalls(calls).length;
+    await userEvent.click(within(screen.getByTestId("pending-signoff-card")).getByRole("button", { name: "重試" }));
+    await waitFor(() => expect(pendingCalls(calls).length).toBeGreaterThan(before));
+    expect(await screen.findAllByTestId("pending-item")).toHaveLength(4);
+    expect(screen.getByTestId("pending-count")).toHaveTextContent("4");
+  });
+
+  it("唯讀角色（VIEWER）：清單與連結照常，「審批」鈕全部停用並附權限說明", async () => {
+    signIn("VIEWER", "viewer");
+    backend(FOUR);
+    view();
+    const rows = await screen.findAllByTestId("pending-item");
+    for (const row of rows) {
+      const button = within(row).getByRole("button", { name: /^審批：/ });
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("title", "權限不足（唯讀角色不可審批）");
+    }
+    expect(within(rows[1]).getByRole("link")).toHaveAttribute("href", "/projects/pj1");
+  });
+
+  it("卡片是 Dashboard 上 #pending-signoff 的錨點（頂列「待審批佇列」鈕與通知鈴「待簽核草案」列都連到 /#pending-signoff）", async () => {
+    backend(FOUR);
+    view();
+    const card = await screen.findByTestId("pending-signoff-card");
+    expect(card).toHaveAttribute("id", "pending-signoff");
+    expect(within(card).getByText("待人工審批")).toBeInTheDocument();
   });
 });

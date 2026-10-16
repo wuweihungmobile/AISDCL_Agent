@@ -34,6 +34,7 @@ import type {
   ListSettingsHistoryParams,
   ListStepsParams,
   LogEntry,
+  LogoutRequest,
   MonitorRangeParams,
   MonitorTrendParams,
   NotificationSummary,
@@ -41,12 +42,14 @@ import type {
   ParseOptions,
   ParseResult,
   ParsedResult,
+  PendingSignoffs,
   ProjectDetail,
   ProjectMetrics,
   ProjectResponse,
   ProjectSummary,
   ReportParams,
   ReviewBody,
+  SddEngineStatus,
   StartExecutionRequest,
   TaskDetail,
   TaskResponse,
@@ -82,6 +85,16 @@ export function refreshToken(refreshTokenValue: string): Promise<TokenResponse> 
     body: { refreshToken: refreshTokenValue },
     auth: false,
   });
+}
+
+/**
+ * 登出並撤銷 refresh token（契約 §1.9.1；API-AUTH-03，v1.4 D-19）：免認證（登出時 access token 可能已過期，仍必須能撤銷），
+ * 請求格式合法一律 204（有效、無效、過期、已撤銷、或是 access token 都一樣，不洩漏有效性）。
+ * 不帶 token、不做 401 換新（auth:false）；呼叫端 AuthProvider.logout 以 fire-and-forget 呼叫，失敗也不阻擋本機登出。
+ */
+export function logout(refreshTokenValue: string): Promise<void> {
+  const body: LogoutRequest = { refreshToken: refreshTokenValue };
+  return apiRequest<void>("/api/v1/auth/logout", { method: "POST", body, auth: false });
 }
 
 // ── 專案（API-PRJ-01～05、API-SGN-02）────────────────────────────────────
@@ -241,6 +254,21 @@ export function rejectImport(id: string): Promise<ImportRecord> {
 // ── 通知摘要（契約 §1.4；API-NTF-01）────────────────────────────────────────
 export function getNotificationSummary(opts: Opts = {}): Promise<NotificationSummary> {
   return apiRequest<NotificationSummary>("/api/v1/notifications/summary", { signal: opts.signal });
+}
+
+// ── 待審批清單（契約 §1.8.1；API-SGN-05，v1.4 D-18）──────────────────────────────
+/** 跨專案列出待簽核的草案（專案、目標、任務、匯入記錄）；`limit` 只截斷 items（預設 50、1～200），不影響 counts。 */
+export function getPendingSignoffs(params: { limit?: number } = {}, opts: Opts = {}): Promise<PendingSignoffs> {
+  return apiRequest<PendingSignoffs>("/api/v1/signoffs/pending", { query: { limit: params.limit }, signal: opts.signal });
+}
+
+// ── AISDLC_SDD 引擎狀態（契約 §1.7.1；API-ENG-01，v1.4 D-16）──────────────────────
+/**
+ * 唯讀：版本、FSM 專案清單，帶 `project` 時另帶該專案的 FSM 狀態；引擎不可用也回 200（`available=false`＋`reason`）。
+ * 省略 `project` → `fsm` 為 null（由前端依 `projects` 選一個再帶 `project` 重取）。
+ */
+export function getSddEngineStatus(params: { project?: string } = {}, opts: Opts = {}): Promise<SddEngineStatus> {
+  return apiRequest<SddEngineStatus>("/api/v1/engines/sdd", { query: { project: params.project }, signal: opts.signal });
 }
 
 // ── 系統參數（Phase 6；契約 §1.5；API-SET-01～09）──────────────────────────────

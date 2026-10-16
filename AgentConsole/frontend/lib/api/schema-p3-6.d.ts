@@ -1148,12 +1148,14 @@ export interface paths {
          *     （`autoclaude.healthCheckPath` 預設 `/health/deep`；探測的讀取逾時 3→8 秒，因為 `git --version` 自己最多等 5 秒）。
          *     檢查：① `git`——subprocess 執行 `git --version`，逾時 5 秒；② `autoclaude`——`import autoclaude`；③ `workspace`——在
          *     `ENGINE_WORKSPACE` 內建立並刪除暫存檔；④ `db`——只有設了 `BRIDGE_DB_DSN` 才 ping，沒設時 `ok` 為 `null`（不算失敗）；
-         *     ⑤ `sdd`（v1.4，D-17）——AISDLC_SDD 樹是否可用：`ok:null`（沒有可用的 SDD 目錄：`SDD_ROOT` 未設且預設位置也找不到；不算失敗）、
+         *     ⑤ `sdd`（v1.4，D-17；主控裁決 Q4）——AISDLC_SDD 樹是否可用，**只當資訊**：照常出現在 `checks` 裡，但 `ok:false` **不翻轉整體判定、
+         *     不進頂層 `reason`、不觸發 503**。三態：`ok:null`（沒有可用的 SDD 目錄：`SDD_ROOT` 未設且預設位置也找不到）、
          *     `ok:true`（目錄存在，**且**有 `build/reports/fsm` **或**有版本入口文件 `AISDLC_SDD_INIT.md`；`latest`＝目錄名）、
          *     `ok:false`（目錄不存在或不是目錄；或目錄在但兩者都沒有——空的或掛錯的唯讀掛載）。
-         *     🔴 與主控任務書字面（「`build/reports/fsm` 不存在 → false」）不同：`build/reports/` 被 git 忽略，乾淨 clone 沒有 fsm 目錄，
-         *     照字面判會讓全棧起不來（Markdown 契約 §3.1.1、§6.7.3 Q1）。
-         *     全部通過 → 200 `status=ok`；任一失敗 → 503 `status=degraded`，頂層 `reason` 為各失敗項的「名稱: 原因」（多項以「；」連接），失敗項的 `ok:false` 並各附 `reason`。
+         *     判準與主控任務書字面（「`build/reports/fsm` 不存在 → false」）不同（主控裁決 Q1）：`build/reports/` 被 git 忽略，乾淨 clone 沒有 fsm 目錄，
+         *     照字面判會讓全棧起不來；入口文件才是「這是一棵 SDD 樹」的證據。SDD 無效改由 console-api 的 `GET /engines/sdd`（`available=false`）呈現
+         *     （Markdown 契約 §3.1.1、§6.7.3 Q1／Q4）。
+         *     前四項（`git`、`autoclaude`、`workspace`、`db`）全部通過 → 200 `status=ok`；任一失敗 → 503 `status=degraded`，頂層 `reason` 為各失敗項的「名稱: 原因」（多項以「；」連接，**不含 `sdd`**），失敗項的 `ok:false` 並各附 `reason`。
          *     Bridge 映像須安裝 `git` 與 `ca-certificates`（QA DEF-AC-003，P1）。請求可帶 `X-Trace-Id`；回應一律帶同名標頭（缺則 Bridge 自產 uuid4，C-12）。
          *     （Markdown 契約 §3.1.1）
          */
@@ -2048,7 +2050,7 @@ export interface components {
         };
         /** @description 深度探針單一檢查項的結果（Bridge 端；v1.2，C-2；v1.4 加 `sdd` 與 `latest`） */
         BridgeHealthCheck: {
-            /** @description 通過為 true、失敗為 false；`null`＝未做（`db` 在沒設 `BRIDGE_DB_DSN` 時；`sdd` 在沒有可用的 SDD 目錄時） */
+            /** @description 通過為 true、失敗為 false；`null`＝未做（`db` 在沒設 `BRIDGE_DB_DSN` 時；`sdd` 在沒有可用的 SDD 目錄時）。`sdd` 的 `false` 只當資訊，不算整體失敗 */
             ok: boolean | null;
             /** @description 成功時的版本字串（`git` 為 `git --version` 的輸出、`autoclaude` 為套件版本） */
             version?: string;
@@ -2058,13 +2060,14 @@ export interface components {
             reason?: string;
         };
         /**
-         * @description Bridge `GET /health/deep` 的本文（200 與 503 同形）。`status=ok` 時全部檢查通過（`db.ok` 可為 `null`）；
-         *     `status=degraded` 時頂層 `reason` 出現，失敗項 `ok:false` 並附 `reason`（v1.2，C-2；Markdown 契約 §3.1.1）
+         * @description Bridge `GET /health/deep` 的本文（200 與 503 同形）。`status=ok` 時前四項（`git`／`autoclaude`／`workspace`／`db`）全部通過（`db.ok` 可為 `null`）；
+         *     `sdd`（v1.4，D-17）**只當資訊**：`ok` 可為 `true`／`null`／`false`，**不影響 `status` 與 HTTP 狀態，頂層 `reason` 也不列它**；
+         *     前四項任一失敗則 `status=degraded`（503），頂層 `reason` 出現，失敗項 `ok:false` 並附 `reason`（v1.2，C-2；Markdown 契約 §3.1.1）
          */
         BridgeDeepHealthResponse: {
             /** @enum {string} */
             status: "ok" | "degraded";
-            /** @description 僅 `degraded` 時出現：失敗項的簡短原因，多項以「；」連接 */
+            /** @description 僅 `degraded` 時出現：失敗項的簡短原因，多項以「；」連接（只含前四項，**不含 `sdd`**） */
             reason?: string;
             checks: {
                 git: components["schemas"]["BridgeHealthCheck"];
@@ -2179,7 +2182,7 @@ export interface components {
             pendingReviews: number;
             /** Format: int32 */
             unacknowledgedAlerts: number;
-            /** @description 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null。W3-B1 階段恆為 null（探測環由 W3-B2 建立，B2 在同一支 controller 補實值；AR-08）。**v1.4（D-17）**：探測預設打 `/health/deep`，2xx 為成功；Bridge 行程可達但引擎自檢未通過（503）也是 `false`，摘要不區分「連不上」與「連得上但引擎不可用」 */
+            /** @description 最近一次 Bridge 健康探測的結果（頂列「Engine Bridge · 已連線」）；尚未探測過為 null。W3-B1 階段恆為 null（探測環由 W3-B2 建立，B2 在同一支 controller 補實值；AR-08）。**v1.4（D-17）**：探測預設打 `/health/deep`，2xx 為成功；Bridge 行程可達但引擎自檢未通過（503；`git`／`autoclaude`／`workspace`／`db` 任一失敗，`sdd` 只當資訊、不影響）也是 `false`，摘要不區分「連不上」與「連得上但引擎不可用」 */
             bridgeConnected?: boolean | null;
             /**
              * Format: date-time
@@ -4773,7 +4776,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 全部檢查通過 */
+            /** @description 前四項檢查（git／autoclaude／workspace／db）全部通過；`sdd` 只當資訊，可為 true／null／false */
             200: {
                 headers: {
                     "X-Trace-Id": components["headers"]["TraceIdResponseHeader"];
@@ -4783,7 +4786,7 @@ export interface operations {
                     "application/json": components["schemas"]["BridgeDeepHealthResponse"];
                 };
             };
-            /** @description 至少一項檢查失敗（degraded） */
+            /** @description 前四項檢查（git／autoclaude／workspace／db）至少一項失敗（degraded）；`sdd` 失敗不會造成 503 */
             503: {
                 headers: {
                     "X-Trace-Id": components["headers"]["TraceIdResponseHeader"];

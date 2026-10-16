@@ -25,9 +25,11 @@ afterEach(() => {
 });
 
 describe("監控頁版面順序（US-M-08；localStorage 鍵 console.monitor.layout）", () => {
-  it("鍵名固定；九個區塊都有標題", () => {
+  it("鍵名固定；十個區塊都有標題（v1.4 新增 sdd：AISDLC_SDD 引擎卡）", () => {
     expect(LAYOUT_STORAGE_KEY).toBe("console.monitor.layout");
-    expect(SECTION_IDS).toHaveLength(9);
+    expect(SECTION_IDS).toHaveLength(10);
+    expect(SECTION_IDS.at(-1)).toBe("sdd"); // 接在 agent 之後（契約 §4.3 M-20：建議放在 Agent 狀態卡旁）
+    expect(SECTION_TITLE.sdd).toBe("AISDLC_SDD 引擎");
     for (const id of SECTION_IDS) expect(SECTION_TITLE[id]).toMatch(/\S/);
   });
 
@@ -38,7 +40,7 @@ describe("監控頁版面順序（US-M-08；localStorage 鍵 console.monitor.lay
   });
 
   it("淨化：丟未知 id 與重複、保留使用者順序、缺的依預設順序補在尾端；非陣列回預設", () => {
-    expect(sanitizeLayout(["logs", "kpi", "logs", "不存在", 42, null])).toEqual(["logs", "kpi", "token", "distribution", "trends", "timeline", "alerts", "compare", "agent"]);
+    expect(sanitizeLayout(["logs", "kpi", "logs", "不存在", 42, null])).toEqual(["logs", "kpi", "token", "distribution", "trends", "timeline", "alerts", "compare", "agent", "sdd"]);
     for (const bad of [null, undefined, "kpi", { kpi: 1 }, 7]) expect(sanitizeLayout(bad)).toEqual([...DEFAULT_LAYOUT]);
   });
 
@@ -71,6 +73,12 @@ describe("監控頁版面順序（US-M-08；localStorage 鍵 console.monitor.lay
     expect(listener).toHaveBeenCalledTimes(2); // 取消訂閱後不再通知
   });
 
+  it("舊版（還沒有 sdd）存下來的順序：保留使用者排的順序，缺的 sdd 補在尾端，不必遷移（v1.4）", () => {
+    const old = ["agent", "compare", "alerts", "logs", "timeline", "trends", "distribution", "token", "kpi"]; // v1.3 以前的九個區塊，使用者把順序整個倒過來
+    window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(old));
+    expect(getLayout()).toEqual([...old, "sdd"]);
+  });
+
   it("重設：移除儲存、回預設、通知訂閱者", () => {
     saveLayout(["agent", ...DEFAULT_LAYOUT.filter((id) => id !== "agent")]);
     const listener = vi.fn();
@@ -90,7 +98,7 @@ describe("監控頁版面順序（US-M-08；localStorage 鍵 console.monitor.lay
     resetLayoutCache();
     window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(["agent", "kpi"]));
     expect(getLayout().slice(0, 2)).toEqual(["agent", "kpi"]);
-    expect(getLayout()).toHaveLength(9);
+    expect(getLayout()).toHaveLength(10);
   });
 
   it("localStorage 不可用（隱私模式、額度用盡）：讀寫都吞掉例外，順序仍活在記憶體裡", () => {
