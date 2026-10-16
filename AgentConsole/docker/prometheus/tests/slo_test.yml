@@ -1,0 +1,217 @@
+# docker/prometheus/tests/slo_test.yml — slo.yml 的 promtool 單元測試（NFR-9.3-01：量測機制可驗證；W7 D-14）
+# 跑法（PowerShell 與 bash 同一條；<monorepo> 換成自己的 monorepo 路徑，Windows 用絕對路徑）：
+#   docker run --rm -v <monorepo>/AgentConsole/docker/prometheus:/etc/prometheus --entrypoint promtool prom/prometheus:v3.15.0 test rules /etc/prometheus/tests/slo_test.yml
+# 約 20 秒：promtool 從時間 0 逐點評估到 31 天，沒有辦法跳過中間的評估點。
+# 這裡驗的是「規則會不會算對、會不會在對的時候響」，不是「Console 這 30 天實際有多少可用率」——後者是營運觀測值，看 Grafana。
+#
+# 寫法備註
+#   · promtool 比較浮點數時要求逐位元相等（實測：0.9990277777777777 與 …778 即判失敗），所以比率一律先 round 到小數 4 位再比。
+#   · 告警的 annotations 也是逐字比對（含 {{ $value | humanizePercentage }} 展開後的字），改 slo.yml 的文案時要同步改這裡。
+#   · `1xN` 展開成 N+1 個樣本；`0x0` 是 1 個樣本。
+rule_files:
+  - ../slo.yml
+
+# promtool 以這個間隔逐點評估（與 slo.yml 的群組 interval 無關）。1 分鐘夠細，足以驗 ConsoleDown 的 for: 1m
+evaluation_interval: 1m
+
+tests:
+  # ── ConsoleDown：連續 up = 0 超過 1 分鐘才 firing；短暫掉線與已恢復的不能響 ─────────────────────────
+  # 取樣間隔 15 秒（與正式抓取一致）；評估點在整分鐘（0、1m、2m…）。每個 case 以 instance 標籤區分。
+  - name: ConsoleDown 的 for 1m
+    interval: 15s
+    input_series:
+      # 0～45 秒正常，60 秒起一直掉線
+      - series: 'up{job="spring-boot", instance="case-down"}'
+        values: '1x3 0x16'
+      # 只掉 2 個樣本（30 秒）就恢復：第 1 分鐘的評估點看到 0（pending），第 2 分鐘已是 1
+      - series: 'up{job="spring-boot", instance="case-blip"}'
+        values: '1x3 0x1 1x14'
+      # 掉線 60～165 秒，180 秒（第 3 分鐘）恢復
+      - series: 'up{job="spring-boot", instance="case-recovered"}'
+        values: '1x3 0x7 1x8'
+    alert_rule_test:
+      # 第 1 分鐘：case-down 與 case-recovered 剛看到 0，只是 pending（for 1m 還沒滿）
+      - eval_time: 1m
+        alertname: ConsoleDown
+        exp_alerts: []
+      # 第 2 分鐘：兩者都已連續 1 分鐘為 0 → firing；case-blip 在第 2 分鐘是 1，從未 firing
+      - eval_time: 2m
+        alertname: ConsoleDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-down
+            exp_annotations:
+              summary: "Console 後端（console-api）無法抓取（case-down）"
+              description: "Prometheus 連續 1 分鐘抓不到 backend 的 /actuator/prometheus（up = 0）：容器重啟中、不健康或網路異常。每一次 up = 0 的抓取都會計入可用率（PRD §9.3、NFR-9.3-01）。"
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-recovered
+            exp_annotations:
+              summary: "Console 後端（console-api）無法抓取（case-recovered）"
+              description: "Prometheus 連續 1 分鐘抓不到 backend 的 /actuator/prometheus（up = 0）：容器重啟中、不健康或網路異常。每一次 up = 0 的抓取都會計入可用率（PRD §9.3、NFR-9.3-01）。"
+      # 第 3 分鐘：case-recovered 已恢復 → 只剩 case-down
+      - eval_time: 3m
+        alertname: ConsoleDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-down
+            exp_annotations:
+              summary: "Console 後端（console-api）無法抓取（case-down）"
+              description: "Prometheus 連續 1 分鐘抓不到 backend 的 /actuator/prometheus（up = 0）：容器重啟中、不健康或網路異常。每一次 up = 0 的抓取都會計入可用率（PRD §9.3、NFR-9.3-01）。"
+
+  # ── 30 天可用率與 99.5% 目標告警 ──────────────────────────────────────────────────────────────
+  # 取樣間隔 1 小時：30 天 ＝ 720 個樣本（時間 0 的樣本落在窗口外：窗口為左開右閉），停機 N 個樣本 ＝ 停機 N 小時。
+  # 99.5% 的 30 天誤差預算 ＝ 3.6 小時：停 3 小時在目標內、停 4 小時超標，這一對夾住 0.5% 的邊界（不測「恰好」，
+  # 浮點平均值可能差 1 ulp）。7 小時（0.97%）≈ 1%、1 小時（0.14%）≈ 0.1%。
+  # 序列長 745 個樣本（到第 31 天），用來驗「停機移出 30 天窗口後告警解除」。
+  - name: 30 天可用率與 99.5% 目標
+    interval: 1h
+    input_series:
+      # 停機 7 小時（約 1%），從第 300 個樣本起（約第 12.5 天）
+      - series: 'up{job="spring-boot", instance="case-7h"}'
+        values: '1x299 0x6 1x437'
+      # 停機 1 小時（約 0.1%）
+      - series: 'up{job="spring-boot", instance="case-1h"}'
+        values: '1x299 0x0 1x443'
+      # 停機 3 小時（0.42%）：在目標內
+      - series: 'up{job="spring-boot", instance="case-3h"}'
+        values: '1x299 0x2 1x441'
+      # 停機 4 小時（0.56%）：超出目標
+      - series: 'up{job="spring-boot", instance="case-4h"}'
+        values: '1x299 0x3 1x440'
+      # 從不停機
+      - series: 'up{job="spring-boot", instance="case-none"}'
+        values: '1x744'
+      # 只有第 30 天（時間 30 天的前一天內）停機 2 小時：1 天、7 天窗口很低，30 天窗口仍在目標內
+      - series: 'up{job="spring-boot", instance="case-recent"}'
+        values: '1x699 0x1 1x42'
+      # 停機 7 小時發生在第 5～11 小時（序列開頭）：第 30 天時還在窗口內，第 31 天時已被移出
+      - series: 'up{job="spring-boot", instance="case-aged-out"}'
+        values: '1x4 0x6 1x732'
+    promql_expr_test:
+      - expr: round(aisdlc:console_availability:ratio_30d, 0.0001)
+        eval_time: 30d
+        exp_samples:
+          - labels: '{job="spring-boot", instance="case-7h"}'
+            value: 0.9903
+          - labels: '{job="spring-boot", instance="case-1h"}'
+            value: 0.9986
+          - labels: '{job="spring-boot", instance="case-3h"}'
+            value: 0.9958
+          - labels: '{job="spring-boot", instance="case-4h"}'
+            value: 0.9944
+          - labels: '{job="spring-boot", instance="case-none"}'
+            value: 1
+          - labels: '{job="spring-boot", instance="case-recent"}'
+            value: 0.9972
+          - labels: '{job="spring-boot", instance="case-aged-out"}'
+            value: 0.9903
+      # 同一個「最近 2 小時停機」，三個窗口各自的可用率（窗口長度＝分母）：1 天 22/24、7 天 166/168、30 天 718/720
+      - expr: round(aisdlc:console_availability:ratio_1d{instance="case-recent"}, 0.0001)
+        eval_time: 30d
+        exp_samples:
+          - labels: '{job="spring-boot", instance="case-recent"}'
+            value: 0.9167
+      - expr: round(aisdlc:console_availability:ratio_7d{instance="case-recent"}, 0.0001)
+        eval_time: 30d
+        exp_samples:
+          - labels: '{job="spring-boot", instance="case-recent"}'
+            value: 0.9881
+      # 第 31 天：序列開頭的那段停機已移出 30 天窗口，可用率回到 100%；其他 case 的停機仍在窗口內
+      - expr: round(aisdlc:console_availability:ratio_30d{instance=~"case-aged-out|case-7h"}, 0.0001)
+        eval_time: 31d
+        exp_samples:
+          - labels: '{job="spring-boot", instance="case-aged-out"}'
+            value: 1
+          - labels: '{job="spring-boot", instance="case-7h"}'
+            value: 0.9903
+    alert_rule_test:
+      # 第 30 天：只有「停 7 小時」「停 4 小時」「序列開頭停 7 小時」三個 case 響；
+      # 停 3 小時、停 1 小時、從不停機、最近 2 小時停機（30 天仍 99.72%）都不響
+      - eval_time: 30d
+        alertname: ConsoleAvailabilityBelowTarget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-7h
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-7h）"
+              description: "過去 30 天的可用率為 99.03%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-4h
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-4h）"
+              description: "過去 30 天的可用率為 99.44%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-aged-out
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-aged-out）"
+              description: "過去 30 天的可用率為 99.03%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+      # 第 31 天：case-aged-out 的停機移出窗口，告警解除；另兩個仍在窗口內、仍響
+      - eval_time: 31d
+        alertname: ConsoleAvailabilityBelowTarget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-7h
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-7h）"
+              description: "過去 30 天的可用率為 99.03%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-4h
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-4h）"
+              description: "過去 30 天的可用率為 99.44%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+
+  # ── 歷史不足 30 天：以已有資料的期間計算（slo.yml 檔頭的已知現象，這裡把它釘成測試）──────────────────
+  # 剛部署 2 小時（取樣間隔 1 分鐘）就停機 1 個樣本（1 分鐘）：窗口內只有 121 個樣本，可用率 120/121＝99.17%，
+  # 低於 99.5% 目標而告警——這是「歷史不足」造成的放大，不是 30 天真的不達標。
+  # 同一組也驗告警的 for: 15m：第 60 分鐘可用率掉到目標以下，第 74 分鐘仍是 pending、第 75 分鐘才 firing。
+  - name: 歷史不足 30 天時短暫停機被放大
+    interval: 1m
+    input_series:
+      - series: 'up{job="spring-boot", instance="case-fresh"}'
+        values: '1x59 0 1x59'
+    promql_expr_test:
+      - expr: round(aisdlc:console_availability:ratio_30d, 0.0001)
+        eval_time: 2h
+        exp_samples:
+          - labels: '{job="spring-boot", instance="case-fresh"}'
+            value: 0.9917
+    alert_rule_test:
+      - eval_time: 74m
+        alertname: ConsoleAvailabilityBelowTarget
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: ConsoleAvailabilityBelowTarget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-fresh
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-fresh）"
+              description: "過去 30 天的可用率為 98.68%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
+      - eval_time: 2h
+        alertname: ConsoleAvailabilityBelowTarget
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: spring-boot
+              instance: case-fresh
+            exp_annotations:
+              summary: "Console 30 天可用率低於 99.5% 目標（case-fresh）"
+              description: "過去 30 天的可用率為 99.17%，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"

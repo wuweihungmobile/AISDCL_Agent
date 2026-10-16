@@ -2,14 +2,14 @@
   "id": null,
   "uid": "aisdlc-app",
   "title": "Application Overview",
-  "description": "應用層（console-api）健康與資料層連線；backend 未啟動時 Spring Boot 面板顯示 No data",
+  "description": "應用層（console-api）健康、可用性 SLO（NFR-9.3-01）與資料層連線；backend 未啟動時 Spring Boot 面板顯示 No data",
   "tags": [
     "aisdlc",
     "application"
   ],
   "timezone": "browser",
   "schemaVersion": 41,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "graphTooltip": 1,
   "refresh": "30s",
@@ -421,6 +421,174 @@
       }
     },
     {
+      "id": 21,
+      "type": "row",
+      "title": "可用性 SLO（NFR-9.3-01：目標 99.5%）— slo.yml 的 recording rules",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "30 天可用率（目標 99.5%）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "aisdlc:console_availability:ratio_30d",
+          "editorMode": "code",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "noValue": "No data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          },
+          "mappings": []
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto"
+      },
+      "description": "aisdlc:console_availability:ratio_30d＝up{job=\"spring-boot\"} 在 30 天窗口內的平均值（docker/prometheus/slo.yml）；低於 99.5% 為紅，與 ConsoleAvailabilityBelowTarget 告警同一條門檻（PRD §9.3）。歷史不足 30 天（剛部署、或資料卷被清掉）時以已有資料的期間計算；只起資料庫層（profile db）時 backend 恆為 down，這裡會是 0%。"
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "1 天可用率（另附 7 天、30 天窗口）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 18,
+        "x": 6,
+        "y": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "A",
+          "expr": "aisdlc:console_availability:ratio_1d",
+          "editorMode": "code",
+          "legendFormat": "1 天"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "B",
+          "expr": "aisdlc:console_availability:ratio_7d",
+          "editorMode": "code",
+          "legendFormat": "7 天"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "refId": "C",
+          "expr": "aisdlc:console_availability:ratio_30d",
+          "editorMode": "code",
+          "legendFormat": "30 天"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": true,
+            "axisSoftMin": 0.99,
+            "thresholdsStyle": {
+              "mode": "dashed"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0.995
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "description": "slo.yml 的三條 recording rule（每分鐘一點）：ratio_1d、ratio_7d、ratio_30d；虛線＝99.5% 目標。窗口越短越敏感：1 天窗口停機超過約 7 分鐘就會掉到 99.5% 以下，30 天窗口要累積超過約 3.6 小時才會越線。"
+    },
+    {
       "id": 7,
       "type": "row",
       "title": "Spring Boot（console-api）— /actuator/prometheus",
@@ -429,7 +597,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 5
+        "y": 12
       },
       "panels": []
     },
@@ -445,7 +613,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 6
+        "y": 13
       },
       "targets": [
         {
@@ -509,7 +677,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 6
+        "y": 13
       },
       "targets": [
         {
@@ -569,7 +737,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 6
+        "y": 13
       },
       "targets": [
         {
@@ -629,7 +797,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 14
+        "y": 21
       },
       "targets": [
         {
@@ -693,7 +861,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 14
+        "y": 21
       },
       "targets": [
         {
@@ -763,7 +931,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 14
+        "y": 21
       },
       "targets": [
         {
@@ -823,7 +991,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 22
+        "y": 29
       },
       "targets": [
         {
@@ -903,7 +1071,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 22
+        "y": 29
       },
       "targets": [
         {
@@ -973,7 +1141,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 22
+        "y": 29
       },
       "targets": [
         {
@@ -1030,7 +1198,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 37
       },
       "panels": []
     },
@@ -1046,7 +1214,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 31
+        "y": 38
       },
       "targets": [
         {
@@ -1106,7 +1274,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 31
+        "y": 38
       },
       "targets": [
         {
@@ -1166,7 +1334,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 31
+        "y": 38
       },
       "targets": [
         {

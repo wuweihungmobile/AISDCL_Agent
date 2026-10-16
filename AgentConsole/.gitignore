@@ -22,3 +22,7 @@ build/
 
 # 本機驗證暫存（compose 驗證用的測試環境檔，用完即刪）
 .env.ci
+
+# nginx 的 HTTPS server 區塊：由 https.conf.example 複製後依網域修改的部署本機檔（docker/README.md〈14〉）；
+# 範例檔 https.conf.example 仍入庫。
+docker/nginx/conf.d/https.conf

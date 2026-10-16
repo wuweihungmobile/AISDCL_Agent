@@ -152,6 +152,15 @@ class StatusAckOut(BaseModel):
     status: str
 
 
+class ResourcesOut(BaseModel):
+    """引擎行程樹的資源取樣（契約 v1.3 §3.1.2）。不含 pid、命令列、環境變數。"""
+
+    cpu_percent: float         # 整機正規化（總和 ÷ 邏輯核心數）、0.0～100.0、小數 1 位
+    rss_bytes: int             # 行程樹各行程 RSS 的總和（共用頁重複計入，是上界估計）
+    process_count: int         # 取樣當下仍存活（取樣成功）的行程數，含根
+    sampled_at: str            # ISO-8601 含 offset（Bridge 一律 UTC `+00:00`）
+
+
 class RunStateOut(BaseModel):
     run_id: str
     status: str
@@ -171,6 +180,9 @@ class RunStateOut(BaseModel):
     bridge_instance: str = ""
     current_step_number: int | None = None
     attempt: int = 0
+    # v1.3（D-12）：引擎行程樹不存活（尚未 spawn、PAUSED、終態）、還沒有第一筆樣本、或最近一筆
+    # 超過 15 秒沒更新時為 null。
+    resources: ResourcesOut | None = None
 
 
 class CheckpointOut(BaseModel):

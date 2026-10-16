@@ -43,6 +43,7 @@ from .events import EventStore
 from .locks import AdvisoryLock, LockBusy, LockUnavailable
 from .logparse import LineParser, ParsedLine, StepDef, StepTracker
 from .models import DB_STATUS, TERMINAL_STATUSES, RunCreateIn, RunStatus
+from .resources import ResourceSampler
 from .runstate import RunPaths, RunRecord, load_record, save_record
 from .settings import Settings
 
@@ -162,9 +163,21 @@ class RunHandle:
                     if self.rec.completed_at else None
             self.mgr.mirror(self.rec.run_id, **db_fields)
 
+    def live_engine_pid(self) -> int | None:
+        """引擎行程樹的根 pid；引擎沒有在跑（尚未 spawn、PAUSED、終態、剛結束）＝None。"""
+        with self.lock:
+            proc = self.proc
+            if proc is None or proc.poll() is not None:
+                return None
+            return proc.pid
+
     def snapshot(self) -> dict[str, Any]:
         with self.lock:
             rec = self.rec
+            pid = self.live_engine_pid()
+            # 資源：只讀取樣器最近一筆（請求路徑不取樣、不阻塞）；引擎不在跑、還沒有第一筆、
+            # 或最近一筆已過期（超過 15 秒）都是 None（契約 v1.3 §3.1.2）。
+            resources = None if pid is None else self.mgr.sampler.latest(rec.run_id, pid)
             return {
                 "run_id": rec.run_id, "status": rec.status, "pid": rec.pid,
                 "started_at": rec.started_at, "completed_at": rec.completed_at,
@@ -174,6 +187,7 @@ class RunHandle:
                 "reason": rec.reason, "project": rec.project,
                 "execution_path": rec.execution_path, "bridge_instance": rec.bridge_instance,
                 "current_step_number": rec.current_step_number, "attempt": rec.attempt,
+                "resources": resources,
             }
 
     # ── 啟動 ─────────────────────────────────────────────────────────────────
@@ -237,6 +251,7 @@ class RunHandle:
             target=ctx.run, args=(self._supervise, proc, log_path), daemon=True,
             name=f"bridge-run-{rec.run_id[:8]}-{index}")
         self.supervisor.start()
+        self.mgr.sampler.request_sample()          # 讓第一次輪詢就有值（CPU 0.0）；只喚醒、不阻塞
 
     # ── 監督迴圈 ─────────────────────────────────────────────────────────────
     def _supervise(self, proc: subprocess.Popen[bytes], log_path: Path) -> None:
@@ -643,6 +658,15 @@ class RunManager:
         self._stores: dict[str, EventStore] = {}
         self._creating: set[str] = set()
         self._mutex = threading.RLock()
+        # 資源取樣器（D-12）：這裡只建物件、不開執行緒；執行緒由 create_app 的 lifespan 啟動。
+        self.sampler = ResourceSampler(self.engine_pids)
+
+    def engine_pids(self) -> dict[str, int]:
+        """{run_id: 引擎根 pid}，只含引擎行程樹存活的 run（取樣器每一輪來問一次）。"""
+        with self._mutex:
+            handles = list(self._runs.values())
+        pids = ((h.rec.run_id, h.live_engine_pid()) for h in handles)
+        return {run_id: pid for run_id, pid in pids if pid is not None}
 
     # ── 取得 ─────────────────────────────────────────────────────────────────
     def get(self, run_id: str) -> RunHandle | None:
@@ -852,6 +876,7 @@ class RunManager:
 
     # ── 關閉 ─────────────────────────────────────────────────────────────────
     def shutdown(self) -> None:
+        self.sampler.stop()
         with self._mutex:
             handles = list(self._runs.values())
         for handle in handles:

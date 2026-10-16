@@ -1,11 +1,13 @@
 # docker/prometheus/prometheus.yml — 抓取設定（PRD §12.6.1）
-# 與 PRD 的差異：增 pgbackrest（備份指標，ADR-001 G-04）與 prometheus 自身兩個 job；增 rule_files（告警規則，見 alerts.yml）。
+# 與 PRD 的差異：增 pgbackrest（備份指標，ADR-001 G-04）與 prometheus 自身兩個 job；增 rule_files（告警規則，見 alerts.yml；
+# Console 可用性 SLO 的 recording rules 與告警，見 slo.yml）。
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
 rule_files:
   - /etc/prometheus/alerts.yml
+  - /etc/prometheus/slo.yml
 
 scrape_configs:
   # backend 屬 profile app：只起資料庫層（profile db）時此目標為 down 屬預期

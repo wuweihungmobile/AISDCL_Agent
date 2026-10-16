@@ -72,6 +72,7 @@ def create_app(settings: Settings | None = None, *,
         orphaned = await asyncio.to_thread(runs.reconcile)
         if orphaned:
             logger.warning("啟動時回收孤兒 run：%s", orphaned)
+        runs.sampler.start()                       # 資源取樣（契約 v1.3 §3.1.2）；shutdown 時停
         app.state.audit = audit
         app.state.db = db
         app.state.runs = runs
@@ -105,9 +106,12 @@ def create_app(settings: Settings | None = None, *,
     def health(request: Request) -> dict[str, Any]:
         return build_health(request)
 
-    @app.get("/health/deep", responses={503: {"description": "至少一項檢查失敗（degraded）"}})
+    @app.get("/health/deep", responses={
+        503: {"description": "git／autoclaude／workspace／db 至少一項失敗（degraded）；"
+                             "`checks.sdd` 只當資訊，不會單獨造成 503"}})
     def health_deep(request: Request) -> JSONResponse:
-        """深度探針（契約 §3.1.1）：git／autoclaude／workspace／DB 逐項實測；免認證。"""
+        """深度探針（契約 §3.1.1）：git／autoclaude／workspace／DB／SDD 樹逐項實測；免認證。
+        前四項決定 200／503；SDD 樹只回報、不影響判定。"""
         status, body = deep_health(cfg, getattr(request.app.state, "db", None))
         return JSONResponse(status_code=status, content=body)
 

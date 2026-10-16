@@ -4,7 +4,7 @@
 單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/health`、`/health/deep`。**零侵入**：不改 `AutoClaude/`、`AISDLC_SDD/` 任何檔。
 
 ```
-app/main.py        FastAPI app／lifespan（啟動做孤兒回收）／/health／/health/deep
+app/main.py        FastAPI app／lifespan（啟動做孤兒回收、起資源取樣器）／/health／/health/deep
 app/settings.py    環境變數 → Settings        app/models.py    請求／回應模型（照 API 契約）
 app/security.py    NFR-SEC-03/04 消毒鏈       app/runner.py    spawn `python -m autoclaude`、監督、pause/resume/stop/restore
 app/events.py      events.jsonl + 記憶體環    app/logparse.py  引擎 stdout 步驟訊號解析 + 步驟狀態機
@@ -12,7 +12,7 @@ app/checkpoints.py 歷史快照 + 引擎格式寫入    app/locks.py     並發�
 app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆解（GoalDecomposer）+ 草稿存檔
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
 app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
-app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔
+app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔      app/resources.py 引擎行程樹資源取樣（`resources`；D-12）
 app/routers/       autoclaude.py、sdd.py
 ```
 
@@ -51,7 +51,18 @@ Invoke-RestMethod http://localhost:8081/health
 `/health` 回 `{"status":"ok","bridge_instance":…,"engines":{"autoclaude":{"ok","version"},"sdd":{"ok","latest"}},"db":{…}}`。
 `status` 只代表 Bridge 自己活著；引擎／DB 的狀況看 `engines.*.ok`、`db.ok`。**必須單一 worker**（run 登記表與行程監督在記憶體內）。
 
-`GET /health/deep`（免認證，契約 v1.2 §3.1.1；QA DEF-AC-003）是**深度探針**：把「引擎真正依賴的外部條件」逐項實測——① `git --version`（subprocess，逾時 5 秒）、② `import autoclaude`、③ 在 `ENGINE_WORKSPACE` 建立並刪除暫存檔（可寫）、④ DB ping（只有設了 `BRIDGE_DB_DSN` 才做，否則 `ok:null`）。全部通過回 **200** `{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.47.3"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":null}}}`；任一失敗回 **503** `{"status":"degraded","reason":"git: 找不到 git 執行檔","checks":{…}}`（失敗項 `ok:false` 並各附 `reason`，頂層 `reason` 以「；」連接各項）。為什麼有 `/health` 還要它：Docker 映像曾缺 `git`，`/health` 永遠 200、容器永遠 healthy，任何批次卻一律 `FAILED`。docker compose 與映像內建的 healthcheck 打 `/health/deep`；**console-api 的探測環仍打 `/health`**（深度探針會 spawn 子行程與寫檔，不適合每 30 秒打）。
+`GET /health/deep`（免認證，契約 v1.2 §3.1.1；QA DEF-AC-003）是**深度探針**：把「引擎真正依賴的外部條件」逐項實測——① `git --version`（subprocess，逾時 5 秒）、② `import autoclaude`、③ 在 `ENGINE_WORKSPACE` 建立並刪除暫存檔（可寫）、④ DB ping（只有設了 `BRIDGE_DB_DSN` 才做，否則 `ok:null`）、⑤ SDD 樹（W7 D-17，**只當資訊、不影響 200／503**，規則見下）。前四項全部通過回 **200** `{"status":"ok","checks":{"git":{"ok":true,"version":"git version 2.47.3"},"autoclaude":{"ok":true,"version":"…"},"workspace":{"ok":true},"db":{"ok":null},"sdd":{"ok":true,"latest":"AISDLC_SDD_v0.30"}}}`；前四項任一失敗回 **503** `{"status":"degraded","reason":"git: 找不到 git 執行檔","checks":{…}}`（失敗項 `ok:false` 並各附 `reason`，頂層 `reason` 以「；」連接前四項的失敗，不含 `sdd`）。為什麼有 `/health` 還要它：Docker 映像曾缺 `git`，`/health` 永遠 200、容器永遠 healthy，任何批次卻一律 `FAILED`。docker compose 與映像內建的 healthcheck 打 `/health/deep`；契約 v1.4（D-17）起 **console-api 的探測環預設也打它**（`autoclaude.healthCheckPath`；成本是每 30 秒 spawn 一次 git、建刪一個暫存檔，對單一 Bridge 可忽略）。淺層 `/health` 的形狀不動。
+
+第五項 `checks.sdd`（W7 D-17）的形狀是 `{"ok": true／false／null, "latest": "<目錄名>"／null, "reason": "…"}`（`reason` 只在 `false`、`null` 時出現）。🔴 **它只當資訊：不論 `ok` 是什麼，整體 `status` 與 HTTP 狀態都只由 git／autoclaude／workspace／db 四項決定**，頂層 `reason` 也只列那四項的失敗（契約 v1.4 §3.1.1，主控裁定）。為什麼：SDD 是選用引擎，它壞了要顯示在 Console 的 SDD 卡，不該讓 Agent 可用率下降或誤報 `AGENT_UNRESPONSIVE`——console-api 的探測環與 compose 的 healthcheck 都打這一支，503 會被當成 Bridge 不可用。
+
+| `SDD_ROOT`（含預設位置）的狀況 | `ok` | 整體 `status`／HTTP |
+|------|------|------|
+| 沒設、預設位置也找不到 `AISDLC_SDD`（Bridge 照樣能跑 AutoClaude 的批次；`/sdd/*` 會回 503） | `null`（`latest` 為 `null`） | 不受影響 |
+| 設了但不是目錄（不存在或是檔案） | `false`（`latest` 為 `null`） | 不受影響：前四項健康就是 200 `ok` |
+| 是目錄，且有 `build/reports/fsm`，**或**有版本入口文件 `AISDLC_SDD_INIT.md` | `true`，`latest`＝目錄名 | 不受影響 |
+| 是目錄，兩者都沒有（空目錄、唯讀掛載沒掛到東西） | `false`（`latest` 為目錄名） | 不受影響 |
+
+為什麼入口文件也算數、不能只看 `build/reports/fsm`：LATEST 版的 `build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore`），入庫檔數為 0，所以**全新 clone 沒有 FSM 狀態目錄**——那是跑過 SDD runtime 才會產生的執行期產物，不是「SDD 樹有沒有掛上」的證據。只看它的話，Console 的 SDD 卡會對一份完好的全新 clone 顯示失敗。
 
 ## 環境變數
 
@@ -75,8 +86,29 @@ Invoke-RestMethod http://localhost:8081/health
 
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202）、
 `GET /autoclaude/runs/{id}`、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`、
-`POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm/{project}`、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
+`POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm`、`GET /sdd/fsm/{project}`、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
+
+### 資源取樣：`GET /autoclaude/runs/{id}` 的 `resources`（契約 v1.3 §3.1.2；W7 D-12）
+
+回應多一個欄位 `resources`：`{"cpu_percent": 12.3, "rss_bytes": 104857600, "process_count": 3, "sampled_at": "2026-10-16T04:30:05.123456+00:00"}`，或 `null`。
+
+- `cpu_percent`＝**整機正規化**：引擎行程樹（`python -m autoclaude` 與它的全部子孫，含 claude 或 mock claude；不含 Bridge 自己、也不含別的 run）各行程 `cpu_percent` 的總和 ÷ 邏輯核心數，夾在 0.0～100.0、小數 1 位（100＝整台機器所有邏輯核心被占滿，與 `top` 的單核 100% 不同）。`rss_bytes`＝各行程 RSS 的總和（共用頁會重複計入，是上界估計）。`process_count`＝取樣成功的行程數（含根）。`sampled_at` 帶 offset（Bridge 一律 UTC）。**不含** pid、命令列、環境變數。
+- 何時是 `null`：引擎行程樹不存活（尚未 spawn、**PAUSED**、任何終態、行程已消失）、還沒有第一筆樣本、或最近一筆超過 **15 秒**沒更新（取樣器卡住時寧可回 null，也不回過期的數字）。resume／restore 後根 pid 換了，舊樣本不會被沿用。
+- 怎麼取樣：`app/resources.py` 的背景執行緒（lifespan 在孤兒回收後啟動、關閉時先停）**每 5 秒**對每個存活的 run 取一筆，只留最近一筆；請求路徑只讀那一筆，**從不取樣、不阻塞**。新 spawn 的 run 會喚醒執行緒立刻補一筆（CPU 為 0.0：沒有上一次的基準）。
+- 🔴 陷阱：`psutil.Process.cpu_percent(interval=None)` 是「與同一個 Process 物件上一次呼叫之間」的差值，而 `children()` 每次都回新物件——所以取樣器**跨 tick 持有每個 pid 的 `Process` 物件**（以 pid＋create_time 判斷是不是同一個行程），每個 tick 重建物件會讓 CPU 永遠是 0.0。
+- 單一行程取不到（剛結束、權限不足）只略過它；取樣器自己的例外只記日誌（同處最多每 60 秒一行，且只記例外類別）。Windows 行為＝只走 psutil；用 venv 的 `python.exe` 啟動的行程會多一層啟動器殼，`process_count` 因此比直覺大。
+
+### SDD 狀態：`GET /sdd/fsm`（清單）與 `GET /sdd/fsm/{project}`（W7 D-16）
+
+資料來源是 `<SDD_ROOT>/build/reports/fsm/FSM-STATE-<project>.yaml`（`project` 只收 `^[A-Za-z0-9._-]{1,128}$`）。`SDD_ROOT` 無效（沒設、不是目錄）一律 `503 sdd_unavailable`。
+
+- `GET /sdd/fsm` → `{"root":"AISDLC_SDD_v0.30","projects":[{"project","source","current_state","updated_at"}],"errors":["…"]}`。`project`＝檔名去掉 `FSM-STATE-` 與 `.yaml`（就是 `GET /sdd/fsm/{project}` 吃的那個鍵）；依 `project` 不分大小寫排序；名稱不合白名單、讀不動（非 UTF-8、不是 YAML、巢狀過深）、缺 `fsm_state` 根節點、或 symlink 指到 `fsm` 目錄之外的檔名放進 `errors`，不影響其他檔。`build/reports/fsm` 不存在（全新 clone 沒有，原因見上方 `/health/deep` 第五項的說明）回 **200 空清單**，不是錯。
+- `GET /sdd/fsm/{project}`：既有 8 個欄位不動，另增（只增不減）：
+  - `human_pending` ＝ `{"count": N, "items": [尾 5 筆，原樣]}`，來源 `human_pending_tracking`。**真實檔裡它是單一 dict**（`entered_at`、`reminder_sent_at`、`reminder_hours`、`escalation_hours`；離開 HUMAN_PENDING 時 `entered_at` 被清成 null）：`entered_at` 有值＝正在等人（`count` 1、`items` 為該 dict 原樣），沒有＝`count` 0、`items` 空；若哪天改成 list，則 `count`＝筆數、`items`＝尾 5 筆。
+  - `retry_history` ＝ `{"count": N, "last": 尾 1 筆｜null}`。**真實檔裡它是 dict of dict**，以重試閘為鍵（`SCG_VALIDATION`、`PR_REVIEW`、`RTM_VERIFY`），每個閘有 `current_count`、`max_limit`、`history`（list，每筆 `attempt`、`date`、`failure_reason`、`scg_gate`）：`count`＝各閘 `history` 筆數的總和，`last`＝全部筆中 `date` 最晚者（同時刻取後出現的）原樣再加一個 `gate` 欄；若改成 list，則取筆數與尾端一筆。
+  - `rtm_coverage` ＝ 檔內 `fsm_state.rtm_coverage` 原樣，沒有這個鍵就是 `null`（真實狀態檔沒有任何 RTM 覆蓋數值，所以目前恆為 `null`）。
+- 找不到檔、`project` 不合白名單 → 404 `fsm_not_found`；檔存在但讀不動 → 422 `fsm_state_unreadable`。
 
 ## 追蹤碼與日誌（契約 v1.2 §3.1.1；NFR-9.4-04）
 
@@ -132,7 +164,8 @@ Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; ruff
 ```
 
 不需 DB、不需真 Claude：真引擎（`python -m autoclaude`）＋ mock claude，經真 HTTP／SSE（背景執行緒起 uvicorn）。
-另有兩支與 Docker 部署相關的測試：`tests/test_health_deep.py`（`/health/deep` 的 200／503 與四項檢查的失敗路徑）、`tests/test_trace_logging.py`（`X-Trace-Id` 回帶、每行日誌的 `trace_id`、`BRIDGE_LOG_DIR`）；以及 `tests/test_deploy_config.py`——**靜態**讀檔，把 W5 的部署缺陷修法（映像裝 git、healthcheck 打 `/health/deep`、compose 必填金鑰、日誌卷 `nocopy`、信任代理預設值、nginx `error_log crit`、`restore.sh` 的 root 階段建目錄…）各釘成一條斷言，因為這類缺陷只在 Docker 全棧真跑才現形，而 docker／nginx 設定沒有自己的 pytest 家。
+W7 新增兩支：`tests/test_resources.py`（`resources` 取樣：欄位型別與範圍、整機正規化、終態與 PAUSED 為 null、已消失的 pid 不炸、**跨 tick 持有同一組 `Process` 物件**、過期樣本回 null、背景執行緒與 spawn 後立即補樣，含真 psutil 行程與經真 HTTP 的 E2E）、`tests/test_sdd_fsm.py`（`GET /sdd/fsm` 清單與 `errors`、detail 的 `human_pending`／`retry_history`／`rtm_coverage`；用合成夾具，另有一支對**真實**狀態檔的測試，該版本沒有任何狀態檔時 skip 並寫明原因）。
+另有兩支與 Docker 部署相關的測試：`tests/test_health_deep.py`（`/health/deep` 的 200／503 與各項檢查的失敗路徑；`sdd` 的未設／有效／全新 clone／不存在／是檔案／空目錄六種情境，並鎖住「`sdd.ok` 為 false 時整體仍 200、頂層 `reason` 不含 sdd」）、`tests/test_trace_logging.py`（`X-Trace-Id` 回帶、每行日誌的 `trace_id`、`BRIDGE_LOG_DIR`）；以及 `tests/test_deploy_config.py`——**靜態**讀檔，把 W5 的部署缺陷修法（映像裝 git、healthcheck 打 `/health/deep`、compose 必填金鑰、日誌卷 `nocopy`、信任代理預設值、nginx `error_log crit`、`restore.sh` 的 root 階段建目錄…）各釘成一條斷言，因為這類缺陷只在 Docker 全棧真跑才現形，而 docker／nginx 設定沒有自己的 pytest 家。
 DB 整合測試（寫入 `console` schema、advisory lock 跨實例互斥）需要一個可寫的 PostgreSQL：
 
 ```bash

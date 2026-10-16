@@ -214,7 +214,8 @@ services:
       # 映像為 python:3.11-slim、沒有 curl：用 Python 標準庫探測（與映像內建 HEALTHCHECK 同形）。
       # 🔴 探 /health/deep（git／autoclaude／工作區可寫／DB 逐項實測，契約 §3.1.1）而不是 /health：
       #    Bridge 映像曾缺 git（DEF-AC-003），/health 永遠 200、容器永遠 healthy，任何批次卻一律 FAILED。
-      #    503 時 urlopen 拋 HTTPError ⇒ 非零離開碼。backend 的探測環仍打 /health（深度探針會 spawn 子行程、寫檔）。
+      #    503 時 urlopen 拋 HTTPError ⇒ 非零離開碼。深度探針的第五項 sdd（SDD 樹）只當資訊、不影響 200／503，
+      #    所以沒掛 SDD 或掛錯也不會讓這個容器 unhealthy。契約 v1.4（D-17）起 backend 的探測環預設也打這一支。
       test: ["CMD", "python", "-c", "import sys,urllib.request as u; sys.exit(0 if u.urlopen('http://127.0.0.1:8081/health/deep', timeout=9).status == 200 else 1)"]
       interval: 30s
       timeout: 10s
@@ -621,10 +622,15 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
+      # 35d＞30d：slo.yml 的 ratio_30d 要有完整 30 天的原始樣本才名實相符（15d 時它實際只涵蓋 15 天）
+      - --storage.tsdb.retention.time=35d
     volumes:
+      # 具名卷（不是映像宣告的匿名卷）：`down` 或重建容器後仍接得上，可用性 SLO 的 30 天歷史才不會歸零；
+      # `down -v` 才會清掉它。映像的 /prometheus 屬 nobody：新建的具名卷會繼承該擁有者，不必另外 chown。
+      - prometheus_data:/prometheus
       - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - ./docker/prometheus/slo.yml:/etc/prometheus/slo.yml:ro
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
     healthcheck:
@@ -730,4 +736,6 @@ volumes:
   minio_data:           # 離站備份物件
     driver: local
   minio_certs:          # MinIO 自簽 TLS 憑證（minio-certs job 產生）
+    driver: local
+  prometheus_data:      # Prometheus 時序資料（W7：可用性 SLO 的 30 天歷史要跨 down／容器重建存活；PRD §11.3 未列）
     driver: local

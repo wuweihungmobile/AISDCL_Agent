@@ -1,0 +1,55 @@
+# docker/prometheus/slo.yml — Console 可用性 SLO 量測（PRD §9.3「可用性 目標 99.5% Uptime」＝RTM NFR-9.3-01；W7 D-14）
+#
+# 訊號與口徑
+#   · 訊號＝backend（console-api）`/actuator/prometheus` 的抓取結果 up{job="spring-boot"}：成功 1、失敗（連不上／逾時／非 2xx）0。
+#   · 可用率＝窗口內 up 樣本的平均值（avg_over_time）。抓取間隔固定為 15 秒，所以「樣本平均」就是「時間平均」。1 ＝ 100%，目標 0.995。
+#   · 為什麼不是 nginx：專案沒有 nginx exporter（PRD §12.6.1 也未列）。Console 的請求都經 nginx 反代到 backend，backend 抓不到時
+#     使用者也必然失敗，所以 backend 的 up 是「Console 能不能用」夠接近的代理訊號。
+#   · 盲區（量到的不是外部使用者的實際體驗）：只有 frontend 或 nginx 掛掉不會讓 up 變 0；Prometheus 自己停機的期間沒有樣本，
+#     不計入分母。要涵蓋這兩者需要從外部探測入口（blackbox_exporter 打 https://<入口>/nginx-health），不在本專案範圍。
+#   · 只起資料庫層（profile db）時 backend 不存在、目標恆為 down ⇒ ConsoleDown 會 firing、可用率為 0，屬預期（prometheus.yml 同註）。
+#
+# 窗口與保留期
+#   · 30 天窗口需要至少 30 天的原始樣本：compose 的 --storage.tsdb.retention.time 已由 15d 提高到 35d
+#     （維持 15d 時 ratio_30d 實際只涵蓋 15 天卻標成 30 天）。
+#   · Prometheus 的時序資料放在具名卷 prometheus_data（掛 /prometheus）：down、容器重建、映像升版都不影響歷史；只有 down -v
+#     （或手動刪卷）會歸零，各窗口從那刻重新累積。歷史不足窗口長度時（剛部署、或卷被清掉），
+#     以「已有資料的期間」計算，所以前幾天的短暫停機會被放大（例如剛起 2 小時就停機 1 分鐘＝99.2%，低於 99.5% 目標）。
+#
+# 沒有 Alertmanager（PRD 未列）：告警只在 Prometheus UI 的 Alerts 頁與 Grafana 面板可見，不會對外通知。
+# 驗證：docker/prometheus/tests/slo_test.yml（promtool test rules；指令見 docker/README.md〈7〉可用性 SLO）。
+groups:
+  # ConsoleDown 要在 1 分鐘內反應，沿用全域 15 秒的評估間隔
+  - name: aisdlc-console-availability
+    rules:
+      - alert: ConsoleDown
+        expr: up{job="spring-boot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Console 後端（console-api）無法抓取（{{ $labels.instance }}）"
+          description: "Prometheus 連續 1 分鐘抓不到 backend 的 /actuator/prometheus（up = 0）：容器重啟中、不健康或網路異常。每一次 up = 0 的抓取都會計入可用率（PRD §9.3、NFR-9.3-01）。"
+
+  # 長窗口比率每分鐘算一次就夠（30 天窗口含 17 萬個樣本，沒有必要每 15 秒重算）；
+  # 告警緊接在三條 recording rule 之後（同一個群組內依序評估，同一時間點可讀到剛記錄的值）
+  - name: aisdlc-console-slo
+    interval: 1m
+    rules:
+      - record: aisdlc:console_availability:ratio_1d
+        expr: avg_over_time(up{job="spring-boot"}[1d])
+
+      - record: aisdlc:console_availability:ratio_7d
+        expr: avg_over_time(up{job="spring-boot"}[7d])
+
+      - record: aisdlc:console_availability:ratio_30d
+        expr: avg_over_time(up{job="spring-boot"}[30d])
+
+      - alert: ConsoleAvailabilityBelowTarget
+        expr: aisdlc:console_availability:ratio_30d < 0.995
+        for: 15m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Console 30 天可用率低於 99.5% 目標（{{ $labels.instance }}）"
+          description: "過去 30 天的可用率為 {{ $value | humanizePercentage }}，低於目標 99.5%（PRD §9.3 可靠性；NFR-9.3-01）。這是長窗口告警：停機結束後仍會持續到那段停機移出 30 天窗口為止。"
