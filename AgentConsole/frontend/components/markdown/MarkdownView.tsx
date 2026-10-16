@@ -2,7 +2,8 @@
 
 /**
  * Markdown 渲染（PRD §5.1.4：GFM 表格、程式碼區塊語法高亮、checklist）。
- * react-markdown ＋ remark-gfm ＋ rehype-highlight；不渲染原始 HTML（預設安全）。
+ * react-markdown ＋ remark-gfm ＋ rehype-highlight；不渲染原始 HTML（預設安全；原文當成文字顯示，編輯器預覽端比照辦理，見 MarkdownEditorImpl 的 omitRawHtml）。
+ * 網址走 safeUrlTransform（與編輯器預覽同一支白名單）：javascript:、data: 等協定的連結拿掉 href，變成沒有行為的文字。
  * variant="prose"＝說明描述（15px／1.7）；variant="criteria"＝通過標準（14px 清單，- [ ] / - [x] 為 18px 核取方塊）。
  */
 import { Check } from "lucide-react";
@@ -13,6 +14,7 @@ import remarkGfm from "remark-gfm";
 import "@/styles/markdown.css";
 import { cn } from "@/lib/utils";
 import { rehypeTaskLabels } from "./rehypeTaskLabels";
+import { safeUrlTransform } from "./safeUrl";
 
 const components: Components = {
   // GFM task list：唯讀核取方塊，視覺同設計稿 18px 方塊（勾選＝主色底＋白勾）；名稱＝該項目的文字（rehypeTaskLabels 補上 aria-label）
@@ -67,7 +69,7 @@ export function MarkdownView({
   }
   return (
     <div data-slot="markdown-view" className={cn("md-view", variant === "criteria" && "md-criteria", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeTaskLabels]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeTaskLabels]} components={components} urlTransform={safeUrlTransform}>
         {text}
       </ReactMarkdown>
     </div>

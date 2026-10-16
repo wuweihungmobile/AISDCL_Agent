@@ -1,10 +1,13 @@
+import MDEditor from "@uiw/react-md-editor";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import rehypeRaw from "rehype-raw";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BULK_EDIT_CHARS, DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, SYNC_RENDER_MAX_CHARS, safeFileName, shouldDeferPreview } from "./MarkdownEditorImpl";
+import { BULK_EDIT_CHARS, DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, SYNC_RENDER_MAX_CHARS, omitRawHtml, safeFileName, shouldDeferPreview } from "./MarkdownEditorImpl";
 import { MarkdownView } from "./MarkdownView";
+import { safeUrlTransform } from "./safeUrl";
 
 /**
  * PRD §5.1.4 Markdown 編輯器八項功能的行為測試（RTM：UI-MD-01～08）。
@@ -33,6 +36,294 @@ describe("UI-MD-01 即時預覽（Split View）", () => {
     const preview = container.querySelector(".w-md-editor-preview") as HTMLElement;
     await waitFor(() => expect(within(preview).getByRole("heading", { level: 1, name: "標題一" })).toBeInTheDocument());
     expect(preview.querySelector("strong")?.textContent).toBe("粗體");
+  });
+});
+
+/**
+ * DEF-AC-013（P2 資安，W8-FE）：預覽端不渲染 Markdown 內嵌的 HTML，與唯讀的 MarkdownView 一致（兩處對同一份內容的呈現必須相同）。
+ * 套件（@uiw/react-markdown-preview）的預設鏈無條件掛 rehype-raw，`<iframe srcdoc>`、`<script>`、`<img onerror>`、`<a href=javascript:>`
+ * 會被建成真元素；srcdoc 的文件與父頁同源，內層腳本讀得到 sessionStorage 裡的 session（儲存式：operator 存、admin 開編輯頁即中）。
+ * 判準看「元素與屬性」而不是「有沒有真的跑起來」：預覽端不得出現危險元素、任何 on* 屬性、srcdoc、或 javascript:／vbscript:／data: 開頭的網址屬性；
+ * HTML 原文改以文字顯示（與詳情頁相同）。這幾支在修前都要是紅的（見 rtm_backfill_W7FE.md〈二十二〉）。
+ */
+const xssFlag = () => (window as unknown as { __w8xss?: string }).__w8xss;
+afterEach(() => {
+  delete (window as unknown as { __w8xss?: string }).__w8xss;
+});
+const previewOf = (container: HTMLElement) => container.querySelector(".w-md-editor-preview") as HTMLElement;
+const normalizedText = (el: Element | null) => (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+
+const DANGEROUS_TAGS = ["iframe", "frame", "frameset", "script", "object", "embed", "applet", "meta", "base", "form", "style", "link", "svg", "math"];
+const URL_ATTRS = ["href", "src", "srcset", "action", "formaction", "poster", "data", "background", "xlink:href"];
+/** 瀏覽器解析網址時會忽略空白與控制字元（`java\tscript:` 照樣是 javascript:），所以先剝掉再比。 */
+const UNSAFE_URL = /^(?:javascript|vbscript|data):/i;
+
+/** 預覽內所有「會執行或載入東西」的跡象：危險元素、on* 屬性、srcdoc、危險網址屬性。空陣列＝乾淨。 */
+function executableTraces(root: Element): string[] {
+  const traces: string[] = [];
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    const tag = el.tagName.toLowerCase();
+    // 預覽自己的核取方塊圖示與工具圖示不是 HTML 內嵌，所以 svg 只在「不是套件自己的標題錨點與複製鈕」時才算（這些圖示在 aria-hidden 的容器內）
+    if (DANGEROUS_TAGS.includes(tag) && !(tag === "svg" && el.closest("[aria-hidden='true'], .copied, .anchor"))) traces.push(`<${tag}>`);
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) traces.push(`<${tag} ${attr.name}>`);
+      if (name === "srcdoc") traces.push(`<${tag} srcdoc>`);
+      if (URL_ATTRS.includes(name) && UNSAFE_URL.test(attr.value.replace(/[\u0000- ]+/g, ""))) traces.push(`<${tag} ${name}="${attr.value.slice(0, 48)}">`);
+    }
+  }
+  return traces;
+}
+
+describe("UI-MD-01 預覽端不渲染內嵌 HTML（DEF-AC-013，P2 資安；與詳情頁 MarkdownView 一致）", () => {
+  it("內嵌 <iframe srcdoc>（內層腳本與父頁同源、讀得到 sessionStorage）：預覽端不建出 iframe、沒有 srcdoc 屬性；原文當成文字顯示", () => {
+    const payload = `<iframe srcdoc="<script>parent.__w8xss='iframe-srcdoc';parent.__w8keys=Object.keys(parent.sessionStorage).join(',')</script>"></iframe>`;
+    const { container } = render(<Harness initial={`${payload}\n\n後面的文字`} />);
+    const preview = previewOf(container);
+    expect(preview.querySelector("iframe")).toBeNull();
+    expect(preview.querySelector("[srcdoc]")).toBeNull();
+    expect(executableTraces(preview)).toEqual([]);
+    expect(preview.textContent).toContain("<iframe srcdoc="); // 與詳情頁一致：原文當成文字，不是被吞掉
+    expect(preview.textContent).toContain("後面的文字");
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it("內嵌 <script>：預覽端不建出 script 元素、window 上沒有被寫旗標；原文當成文字顯示", () => {
+    const payload = `<script>window.__w8xss='script-tag'</script>`;
+    const before = document.querySelectorAll("script").length;
+    const { container } = render(<Harness initial={`${payload}\n\n前文 <script>window.__w8xss='inline-script'</script> 後文`} />);
+    const preview = previewOf(container);
+    expect(preview.querySelector("script")).toBeNull();
+    expect(document.querySelectorAll("script")).toHaveLength(before); // 文件裡也沒有多出任何 script
+    expect(executableTraces(preview)).toEqual([]);
+    expect(preview.textContent).toContain("<script>window.__w8xss='script-tag'</script>");
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it("內嵌 <img onerror=…>（獨立一行與行內兩種位置）：預覽端不建出 img、沒有任何 on* 屬性，也不會因字串事件處理器讓 React 丟錯", () => {
+    const block = `<img src="x" onerror="window.__w8xss='img-block'">`;
+    const inline = `前文 <img src="y" onerror="window.__w8xss='img-inline'"> 後文`;
+    const errors: unknown[] = [];
+    const onError = (e: ErrorEvent) => errors.push(e.error ?? e.message);
+    window.addEventListener("error", onError);
+    try {
+      const { container } = render(<Harness initial={`${block}\n\n${inline}`} />);
+      const preview = previewOf(container);
+      expect(preview.querySelector("img")).toBeNull();
+      expect(preview.querySelector("[onerror]")).toBeNull();
+      expect(executableTraces(preview)).toEqual([]);
+      expect(preview.textContent).toContain(`onerror="window.__w8xss='img-block'"`);
+      expect(preview.textContent).toContain("前文");
+      expect(preview.textContent).toContain("後文");
+      expect(errors).toEqual([]);
+    } finally {
+      window.removeEventListener("error", onError);
+    }
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it("javascript: 連結（HTML 的 <a>、Markdown 的 [文字](網址)、<自動連結>、大小寫與空白混淆）：預覽端沒有任何 javascript:／vbscript:／data: 開頭的網址屬性；連結文字仍在", () => {
+    const source = [
+      `<a id="w8js" href="javascript:window.__w8xss='html-anchor'">HTML 連結</a>`,
+      "",
+      `[Markdown 連結](javascript:window.__w8xss='md-link')`,
+      "",
+      `<javascript:window.__w8xss='autolink'>`,
+      "",
+      `[大小寫混淆](JaVaScRiPt:window.__w8xss=1) 與 [內嵌空白](java%09script:window.__w8xss=2)`,
+      "",
+      `![圖片](javascript:window.__w8xss=3) 與 [資料網址](data:text/html;base64,PHNjcmlwdD48L3NjcmlwdD4=)`,
+    ].join("\n");
+    const { container } = render(<Harness initial={source} />);
+    const preview = previewOf(container);
+    expect(executableTraces(preview)).toEqual([]);
+    expect(preview.querySelector("#w8js")).toBeNull(); // HTML 的 <a> 不被建成元素
+    expect(preview.textContent).toContain(`<a id="w8js" href="javascript:`); // 原文當成文字
+    for (const text of ["Markdown 連結", "大小寫混淆", "內嵌空白", "資料網址"]) expect(within(preview).getByText(text), `連結文字「${text}」仍在`).toBeInTheDocument();
+    // 不合格的網址是整個拿掉 href（沒有行為的文字），不是留下 `href=""`：空 href 點下去會重新載入本頁，編輯中還沒存的內容就丟了
+    const anchors = Array.from(preview.querySelectorAll("a"));
+    expect(anchors.map((a) => a.textContent)).toEqual(["Markdown 連結", "javascript:window.__w8xss='autolink'", "大小寫混淆", "內嵌空白", "資料網址"]);
+    for (const a of anchors) expect(a.hasAttribute("href"), `${a.textContent} 沒有 href`).toBe(false);
+    for (const img of Array.from(preview.querySelectorAll("img"))) expect(img.hasAttribute("src"), "圖片沒有 src").toBe(false);
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it.each([
+    ["<object data=\"javascript:window.__w8xss='object'\"></object>"],
+    ["<embed src=\"javascript:window.__w8xss='embed'\">"],
+    ["<svg onload=\"window.__w8xss='svg-onload'\"></svg>"],
+    ['<form action="javascript:window.__w8xss=\'form\'"><input type="submit"></form>'],
+    ['<meta http-equiv="refresh" content="0;url=javascript:window.__w8xss=\'meta\'">'],
+    ['<iframe src="data:text/html;base64,PHNjcmlwdD53aW5kb3cucGFyZW50Ll9fdzh4c3M9J2RhdGEnPC9zY3JpcHQ+"></iframe>'],
+    ['<base href="https://evil.example/">'],
+    ['<link rel="stylesheet" href="https://evil.example/x.css">'],
+    ["<style>body{background:url(https://evil.example/x)}</style>"],
+    ["<math><mtext><script>window.__w8xss='math'</script></mtext></math>"],
+    ["<details open ontoggle=\"window.__w8xss='details-ontoggle'\"><summary>摘要</summary>內容</details>"],
+    ["<a href=\"&#106;avascript:window.__w8xss='entity'\">實體編碼</a>"],
+  ])("整組載體（QA §10.1 第 11 點列出而尚未逐一驗的那些）：%s 不產生可執行內容", (payload) => {
+    const headBefore = document.head.innerHTML;
+    const { container } = render(<Harness initial={`前文\n\n${payload}\n\n後文`} />);
+    const preview = previewOf(container);
+    expect(executableTraces(preview)).toEqual([]);
+    // React 19 會把 <meta>、<link>、<title> 從樹裡任何位置搬進 document.head（<meta http-equiv=refresh> 就是靠這條路生效）：預覽不得往 <head> 塞任何東西
+    expect(document.head.innerHTML).toBe(headBefore);
+    expect(preview.querySelector("details, summary, a[href], object, embed, form, input:not([type=checkbox])")).toBeNull();
+    expect(preview.textContent).toContain("前文");
+    expect(preview.textContent).toContain("後文");
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it("與詳情頁（MarkdownView）一致：同一份含內嵌 HTML 的內容，預覽端與詳情頁顯示的文字相同，兩邊都沒有任何可執行的跡象", () => {
+    const docs = [
+      `<iframe srcdoc="<script>parent.__w8xss='x'</script>"></iframe>\n\n摘要`,
+      `<script>window.__w8xss='x'</script>\n\n前文 <img src=x onerror="window.__w8xss='y'"> 後文`,
+      `前文 <b>粗</b> 與 <kbd>Ctrl</kbd> 加 <br/> 換行\n\n<details><summary>摘要</summary>內容</details>`,
+      `<a href="javascript:window.__w8xss='z'">點我</a> 與 [連結](javascript:window.__w8xss='w')`,
+      `[撥號](tel:+886-2-1234-5678) 與 [官網](https://example.com) 與 [站內](/projects#top) 與 [錨點](#下一節) 與 [信箱](mailto:ops@example.com)`,
+    ];
+    const hrefsOf = (root: Element) => Array.from(root.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+    for (const doc of docs) {
+      const view = render(<MarkdownView source={doc} />);
+      const viewRoot = view.container.querySelector("[data-slot='markdown-view']") as HTMLElement;
+      const viewText = normalizedText(viewRoot);
+      const viewHrefs = hrefsOf(viewRoot);
+      expect(executableTraces(viewRoot), `詳情頁：${doc.slice(0, 30)}`).toEqual([]);
+      view.unmount();
+
+      const editor = render(<Harness initial={doc} />);
+      const previewRoot = previewOf(editor.container).querySelector(".wmde-markdown") as HTMLElement;
+      expect(executableTraces(previewRoot), `預覽端：${doc.slice(0, 30)}`).toEqual([]);
+      expect(normalizedText(previewRoot), `同一份內容兩處的文字：${doc.slice(0, 30)}`).toBe(viewText);
+      expect(hrefsOf(previewRoot), `同一份內容兩處的連結網址：${doc.slice(0, 30)}`).toEqual(viewHrefs);
+      editor.unmount();
+    }
+    expect(xssFlag()).toBeUndefined();
+  });
+
+  it("Markdown 本身的功能不退化：GFM 表格、程式碼區塊語法高亮（hljs＋prism token）、核取清單、標題、一般連結（https、站內、mailto）原樣保留", () => {
+    const source = [
+      "## 標題",
+      "",
+      "| 欄位 | 說明 |",
+      "| --- | --- |",
+      "| id | 唯一識別碼 |",
+      "",
+      "```ts",
+      "const answer: number = 42;",
+      "```",
+      "",
+      "- [x] 完成項",
+      "- [ ] 待辦項",
+      "",
+      "[官網](https://example.com) 與 [站內](/projects) 與 [信箱](mailto:ops@example.com) 與 https://example.org/auto",
+    ].join("\n");
+    const { container } = render(<Harness initial={source} />);
+    const preview = previewOf(container);
+    expect(within(preview).getByRole("heading", { level: 2, name: "標題" })).toBeInTheDocument();
+    expect(within(preview).getByRole("columnheader", { name: "欄位" })).toBeInTheDocument();
+    expect(within(preview).getByRole("cell", { name: "唯一識別碼" })).toBeInTheDocument();
+    const code = preview.querySelector("pre code.language-ts") as HTMLElement;
+    expect(code.className).toContain("hljs");
+    expect(code.querySelector(".token.keyword")?.textContent).toBe("const");
+    expect(within(preview).getByRole("checkbox", { name: "完成項" })).toBeChecked();
+    expect(within(preview).getByRole("checkbox", { name: "待辦項" })).not.toBeChecked();
+    const hrefOf = (name: string) => within(preview).getByRole("link", { name }).getAttribute("href");
+    expect(hrefOf("官網")).toBe("https://example.com");
+    expect(hrefOf("站內")).toBe("/projects");
+    expect(hrefOf("信箱")).toBe("mailto:ops@example.com");
+    expect(hrefOf("https://example.org/auto")).toBe("https://example.org/auto");
+    expect(executableTraces(preview)).toEqual([]);
+  });
+
+  it("左欄原始碼著色不受影響：含 HTML 的原文照樣被切成 token、原文逐字顯示（<、& 與引號已跳脫），左欄沒有建出任何元素", async () => {
+    const source = `# 標題\n\n**粗體** 與 <iframe srcdoc="<script>1</script>"></iframe> 與 <img src=x onerror=alert(1)>`;
+    const { container } = render(<Harness initial={source} />);
+    await waitFor(() => expect(container.querySelector(".w-md-editor-text-pre .token.title")).not.toBeNull());
+    const pre = container.querySelector(".w-md-editor-text-pre") as HTMLElement;
+    expect(pre.querySelector(".token.bold")).not.toBeNull();
+    expect(pre.textContent).toContain(`<iframe srcdoc="<script>1</script>"></iframe>`);
+    expect(pre.textContent).toContain("<img src=x onerror=alert(1)>");
+    expect(pre.querySelector("iframe, script, img")).toBeNull();
+    expect(executableTraces(pre)).toEqual([]);
+  });
+});
+
+describe("UI-MD-01 DEF-AC-013 的兩個零件：omitRawHtml 與 safeUrlTransform", () => {
+  it("套件的預設 rehype 鏈仍含 rehype-raw（所以 pluginsFilter 才有東西可拿；套件改了做法時這支先紅，回頭重新評估 omitRawHtml）", () => {
+    const seen: Array<{ type: string; plugins: unknown[] }> = [];
+    render(
+      <MDEditor.Markdown
+        source="x"
+        pluginsFilter={(type, plugins) => {
+          seen.push({ type, plugins: [...plugins] });
+          return plugins;
+        }}
+      />,
+    );
+    const rehype = seen.find((s) => s.type === "rehype")?.plugins ?? [];
+    expect(rehype.some((p) => (Array.isArray(p) ? p[0] : p) === rehypeRaw)).toBe(true);
+    expect(seen.some((s) => s.type === "remark")).toBe(true);
+  });
+
+  it("omitRawHtml 只拿掉 rehype 清單裡的 rehype-raw（含 [外掛, 選項] 的寫法），其餘外掛與順序不動；remark 清單原樣", () => {
+    const a = () => undefined;
+    const b = () => undefined;
+    expect(omitRawHtml("rehype", [a, rehypeRaw, b])).toEqual([a, b]);
+    expect(omitRawHtml("rehype", [a, [rehypeRaw, {}], [b, { x: 1 }]])).toEqual([a, [b, { x: 1 }]]);
+    expect(omitRawHtml("rehype", [a, b])).toEqual([a, b]);
+    expect(omitRawHtml("rehype", [])).toEqual([]);
+    const remark = [a, rehypeRaw, b]; // remark 清單裡不會有 rehype-raw；就算有，也不是這支要管的
+    expect(omitRawHtml("remark", remark)).toBe(remark);
+  });
+
+  it("safeUrlTransform：與 MarkdownView 同一支白名單；不合格的網址回 undefined（整個拿掉 href），不是空字串（空 href 點下去會重新載入本頁）", () => {
+    for (const ok of [
+      "https://example.com/a?b=1#c",
+      "http://example.com",
+      "mailto:ops@example.com",
+      "irc://irc.example/x",
+      "xmpp:me@example.com",
+      "/projects",
+      "projects/1",
+      "../up",
+      "#錨點",
+      "?q=1",
+      "a/b:c",
+      "",
+    ]) {
+      expect(safeUrlTransform(ok), ok).toBe(ok);
+    }
+    for (const bad of [
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      " javascript:alert(1)",
+      "java\tscript:alert(1)",
+      "java%09script:alert(1)",
+      "vbscript:msgbox(1)",
+      "data:text/html;base64,PHNjcmlwdD4=",
+      "tel:+886-2-1234-5678",
+      "file:///etc/passwd",
+      "blob:https://example.com/x",
+      "custom-scheme:payload",
+    ]) {
+      expect(safeUrlTransform(bad), JSON.stringify(bad)).toBeUndefined();
+    }
+  });
+
+  it("不合格的連結在預覽端與詳情頁一樣是沒有 href 的文字（點了不導頁、不重新載入本頁，編輯中的內容不會丟）", async () => {
+    const source = "[撥號](tel:+886-2-1234-5678) 與 [壞連結](javascript:alert(1))";
+    const view = render(<MarkdownView source={source} />);
+    expect(Array.from(view.container.querySelectorAll("a")).map((a) => a.hasAttribute("href"))).toEqual([false, false]);
+    view.unmount();
+    const { container } = render(<Harness initial={source} />);
+    const anchors = Array.from(previewOf(container).querySelectorAll("a"));
+    expect(anchors.map((a) => a.textContent)).toEqual(["撥號", "壞連結"]);
+    for (const a of anchors) {
+      expect(a.hasAttribute("href")).toBe(false);
+      fireEvent.click(a); // jsdom 對「導頁」會報 not implemented；沒有 href 就什麼都不會發生
+    }
+    expect((textarea() as HTMLTextAreaElement).value).toBe(source); // 編輯器內容原封不動
   });
 });
 

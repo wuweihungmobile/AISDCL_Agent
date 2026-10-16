@@ -10,12 +10,14 @@
  *    重複高亮的成本很小（20KB 約 4ms，見 rtm_backfill_W7FE.md），不值得為此改動被斷言的 DOM，所以保留。
  *    左欄與預覽的 rehype-prism-plus 在 next.config.ts 以別名換成線性時間版（rehypePrismLinear.ts，NFR-9.1-05）。
  *  7 匯入 .md＝下方「匯入 .md」（讀入本機檔案、覆蓋欄位內容）　8 匯出 .md＝「匯出 .md」（Blob 下載）
+ *  🔴 預覽端不渲染 Markdown 內嵌的 HTML（DEF-AC-013，P2 資安；與唯讀的 MarkdownView 一致）：見 omitRawHtml 與 PREVIEW_OPTIONS。
  * 這支檔直接 import 編輯器套件（需要瀏覽器 API），頁面一律經 MarkdownEditor.tsx 以 next/dynamic（ssr:false）載入。
  */
 import MDEditor, { getCommands, getExtraCommands, type ICommand } from "@uiw/react-md-editor";
 import { FileDown, FileUp } from "lucide-react";
 import { cloneElement, isValidElement, useDeferredValue, useId, useMemo, useRef, useState, type ComponentProps } from "react";
 import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
 
 import "@uiw/react-md-editor/markdown-editor.css";
@@ -24,11 +26,33 @@ import "@/styles/markdown.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { rehypeTaskLabels } from "./rehypeTaskLabels";
+import { safeUrlTransform } from "./safeUrl";
 
-/** 預覽端的 remark／rehype 外掛：模組層級常數（每次 render 重建會讓預覽的記憶化失效）；核取清單的名稱由 rehypeTaskLabels 補上。 */
-const PREVIEW_OPTIONS: NonNullable<ComponentProps<typeof MDEditor>["previewOptions"]> = {
+type PreviewOptions = NonNullable<ComponentProps<typeof MDEditor>["previewOptions"]>;
+
+/**
+ * 預覽端不渲染 Markdown 內嵌的 HTML（DEF-AC-013，P2 資安）。
+ * 套件（@uiw/react-markdown-preview）的預設鏈**無條件**掛 rehype-raw：`<iframe srcdoc>`、`<script>`、`<img onerror>`、`<a href=javascript:>`、
+ * `<base>`、`<meta http-equiv=refresh>`（React 19 會把它搬進 document.head）都會被建成真元素；`srcdoc` 的文件與父頁同源，內層腳本讀得到
+ * sessionStorage 裡的 session。這是儲存式的：operator 把 payload 存進專案說明（匯入的 .md 同理），管理者開編輯頁、預覽一渲染就中。
+ * 套件的 `skipHtml` 旗標管不到這件事（語意與名稱相反，而且 rehype-raw 不看它），官方的擴充點是 `pluginsFilter`：把 rehype-raw 從 rehype 清單拿掉，
+ * HTML 節點就原封不動留到 react-markdown，由它當成文字顯示——與唯讀的 MarkdownView（沒有 rehype-raw）完全相同，兩處對同一份內容的呈現必須一致。
+ * 以函式身分比對（含 `[外掛, 選項]` 的寫法）：與套件匯入的是 node_modules 裡同一份 rehype-raw；套件日後改了做法，markdown.test.tsx 的「預設鏈仍含 rehype-raw」會先紅。
+ * 左欄原始碼著色是另一條路（編輯器自己把原文跳脫後再上色），不經過這裡。
+ */
+export const omitRawHtml: NonNullable<PreviewOptions["pluginsFilter"]> = (type, plugins) =>
+  type === "rehype" ? plugins.filter((plugin) => (Array.isArray(plugin) ? plugin[0] : plugin) !== rehypeRaw) : plugins;
+
+/**
+ * 預覽端的 remark／rehype 外掛：模組層級常數（每次 render 重建會讓預覽的記憶化失效）；核取清單的名稱由 rehypeTaskLabels 補上。
+ * `urlTransform`：套件預設是「原樣放行」，Markdown 語法的 `[文字](javascript:…)`、`<javascript:…>` 自動連結與 `![](javascript:…)` 因此都會變成
+ * 帶 javascript: 的 href（React 19 另會把它換成只會丟錯的字串，那是最後一道，不該靠它）；改用與 MarkdownView 同一支白名單（safeUrl.ts）。
+ */
+const PREVIEW_OPTIONS: PreviewOptions = {
   remarkPlugins: [remarkGfm],
   rehypePlugins: [[rehypeHighlight, { detect: false, ignoreMissing: true }], rehypeTaskLabels],
+  pluginsFilter: omitRawHtml,
+  urlTransform: safeUrlTransform,
 };
 
 /**

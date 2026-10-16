@@ -21,6 +21,8 @@
 - `monitorFixture.ts`：假監控後端（`MonitorWorld`）——指標、Token／任務趨勢、告警（確認可延遲或失敗以驗樂觀更新與還原）、45 筆日誌的篩選與分頁、CSV／PDF 報表、
   AISDLC_SDD 引擎（`world.sdd`：以「FSM 狀態檔」的原樣內容依契約 §1.7.1 映射成 `GET /engines/sdd`，可切引擎不可用的三種原因、改檔案與壞檔）；批次與步驟事件借用 `Engine`。
 - 新增的三支：`execute.mock.spec.ts`（21 個情境）、`monitor.mock.spec.ts`（15 個）、`dashboard.mock.spec.ts`（8 個，含頂列登出 2 個）；情境數會隨波次增加，一律以 `npx playwright test <檔> --list` 現查為準。
+- `markdown-preview.mock.spec.ts`（3 個）：Markdown 編輯器預覽不渲染內嵌 HTML（DEF-AC-013，P2 資安）——新建專案對話框貼入各種載體、儲存式（管理者開編輯頁）、不合格網址的連結沒有 href；
+  一定要對 **production 建置**跑（`E2E_MODE=standalone`）：修法靠 rehype-raw 的函式身分比對，jsdom 看不出 bundler 讓身分對不上的情形。真後端版是 QA 的 `p9-w7-html.spec.ts`。
 
 ```bash
 (cd AgentConsole/frontend && npx playwright test tests/e2e/execute.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/dashboard.mock.spec.ts)
