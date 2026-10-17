@@ -107,7 +107,9 @@ def test_an_engine_escalation_is_the_only_failure_that_blocks_the_fsm(
     # Console 看得到：ESCALATION 的阻塞態、provenance、可複製的恢復指令（恢復只有人能做、留在 SDD
     # session）
     view = sdd_live.client.get("/sdd/fsm/alpha", params={"root": str(sdd_proj)}).json()
-    assert view["current_state"] == "ESCALATION" and view["phase"] is None
+    assert view["current_state"] == "ESCALATION"
+    assert view["phase"] == {"name": "BLOCKED", "order": 0, "blocking": True,
+                             "observation": False}, "阻塞態：BLOCKED／0／blocking（契約 §3.1.5）"
     assert view["escalation_provenance"]["source"] == "autoclaude_delegated_failed"
     assert view["recovery"]["target"] == "IMPLEMENTATION"
     # 下一個批次被擋（Bridge 沒有恢復動詞，也不碰 ESCALATION）；零副作用

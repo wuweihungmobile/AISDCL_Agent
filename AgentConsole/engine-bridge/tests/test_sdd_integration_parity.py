@@ -6,9 +6,9 @@ adapter（行程內）**加假 SDD 樹的假 CLI；檔尾〈真的 SDD CLI〉改
 環境 import 不了（缺相依套件），略過時會印出原因。
 
 對拍編號與檔案的對應：
-  本檔：F-1 欄位對拍、F-2 只認指定者、F-3 凍結後改檔、F-4 只經 CLI（AST 鎖）、F-6 摘要演算法、
-        F-7 權杖與環境不外洩、F-9／F-10 的缺口列、F-11 AT 文法與歸屬、唯讀端點不動狀態檔；
-        F-5 phase 表是 W4 dogfood 的產物，現為略過。
+  本檔：F-1 欄位對拍、F-2 只認指定者、F-3 凍結後改檔、F-4 只經 CLI（AST 鎖）、F-5 phase 表
+        （W4 dogfood 的 T-G 純函式 app/fsm_phase.py 對真 SDD 樹的狀態集合）、F-6 摘要演算法、
+        F-7 權杖與環境不外洩、F-9／F-10 的缺口列、F-11 AT 文法與歸屬、唯讀端點不動狀態檔。
   F-8 名稱規則：tests/test_fsm_names.py（與 SDD sanitize_component 以路徑載入逐一對拍）＋
   tests/test_sdd_fsm.py。
   F-9／F-10 其餘列：tests/test_sdd_run.py、tests/test_sdd_run_lifecycle.py、tests/test_sdd_sync.py。
@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -33,6 +34,7 @@ import yaml
 
 import app as app_package
 from app import sdd_cli, sdd_sync, spec_digest
+from app.fsm_phase import KNOWN_STATES, phase_of
 from tests.conftest import TERMINAL
 from tests.fake_sdd import read_calls, seed_state, set_control
 from tests.sdd_run_support import (
@@ -549,11 +551,52 @@ def test_read_only_endpoints_leave_every_state_file_untouched(
     assert len(read_calls(sdd_fake)) == calls, "讀取類端點連 CLI 子行程都不該起"
 
 
-# ── F-5：phase 表（W4 dogfood 的產物；本輪 `phase` 恆為 null） ────────────────────
-@pytest.mark.skip(reason="W4：T-G phase 純函式與表尚未落地"
-                         "（本輪 GET /sdd/fsm/{project} 的 phase 恆 null）")
-def test_the_phase_table_matches_the_sdd_latest_state_sets() -> None:
-    raise AssertionError("W4 落地後實作：OBSERVATION_STATES／_BLOCKING_STATES／_HAPPY_PATH 對拍")
+# ── F-5：phase 表對拍（G-13；W4 dogfood 的 T-G 純函式已搬入 app/fsm_phase.py） ─────────────────
+# SDD 的狀態集合用子行程取（與真 CLI 測試同一手法：cwd＝版本目錄、PYTHONPATH＝版本目錄；
+# FSMRuntime 要整個套件才 import 得了）；測試行程自己不 import AISDLC_SDD。
+_SDD_STATE_SETS = """
+import json
+from tools.fsm_runtime import transition_rules as tr
+from tools.fsm_runtime.fsm_runtime import FSMRuntime
+print(json.dumps({"happy_path": list(tr._HAPPY_PATH),
+                  "observation": sorted(tr.OBSERVATION_STATES),
+                  "blocking": sorted(FSMRuntime._BLOCKING_STATES)}))
+"""
+
+
+def test_the_phase_table_matches_the_sdd_latest_state_sets(settings) -> None:
+    """F-5（契約 §3.1.5 末段）：T-G 的表與 SDD LATEST 的狀態集合一致——`_HAPPY_PATH` 的每個鍵都有
+    對映（SDD 日後新增狀態而表沒有 ⇒ 紅，不是靜默落到 UNKNOWN；表裡有 SDD 已不存在的狀態也紅）；
+    `OBSERVATION_STATES`＝表中 observation=true 的集合；`FSMRuntime._BLOCKING_STATES`＝
+    blocking=true 的集合；主路徑 order 沿 `_HAPPY_PATH` 的宣告順序（＝生命週期順序）單調不減、
+    相鄰階段差 1（涵蓋 1～8）。真 SDD 樹在此環境 import 不了才略過並印原因。"""
+    sdd_root = settings.sdd_root
+    assert sdd_root is not None, "找不到真的 AISDLC_SDD 樹"
+    problem = real_cli_problem(sdd_root)
+    if problem is not None:
+        pytest.skip(f"真 SDD 樹在此環境 import 不了（缺相依套件？）：{problem}")
+    with tempfile.TemporaryDirectory() as scratch:
+        done = run_real_python(sdd_root, Path(scratch), "-W", "ignore::RuntimeWarning", "-c",
+                               _SDD_STATE_SETS)
+    assert done.returncode == 0, done.stderr
+    sdd = json.loads(done.stdout.strip().splitlines()[-1])
+    happy: list[str] = sdd["happy_path"]
+
+    unmapped = sorted(set(happy) - KNOWN_STATES)
+    stale = sorted(KNOWN_STATES - set(happy))
+    assert not unmapped, f"SDD 的 _HAPPY_PATH 有 phase 表沒有對映的狀態：{unmapped}"
+    assert not stale, f"phase 表有 SDD 的 _HAPPY_PATH 已經沒有的狀態：{stale}"
+    assert len(happy) == len(set(happy)) == len(KNOWN_STATES)
+    phases = {state: phase_of(state) for state in happy}
+    assert [s for s, p in phases.items() if p["name"] == "UNKNOWN"] == [], "每個鍵都不得是 UNKNOWN"
+    assert {s for s, p in phases.items() if p["observation"]} == set(sdd["observation"])
+    assert {s for s, p in phases.items() if p["blocking"]} == set(sdd["blocking"])
+    assert not any(p["observation"] and p["blocking"] for p in phases.values())
+
+    main = [phases[s]["order"] for s in happy if phases[s]["order"] >= 1
+            and not phases[s]["observation"]]
+    assert main == sorted(main), "主路徑 order 沿 _HAPPY_PATH 的宣告順序必須單調不減"
+    assert sorted(set(main)) == list(range(1, 9)), "主路徑階段 order 必須是 1～8 連續（相鄰差 1）"
 
 
 # ── F-6：摘要演算法對拍（G-06）——adapter 與 Bridge 面（CLI 凍結寫入的那一面在〈真的 SDD CLI〉）

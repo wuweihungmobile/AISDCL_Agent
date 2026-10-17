@@ -97,7 +97,9 @@ def test_freeze_records_the_stage_with_independently_computed_digests(
     assert body["current_state"] == "SPEC_FROZEN"
     assert body["stage"] == "Stage-1", "省略 stage＝Stage-<n>，n＝已凍結筆數＋1"
     assert body["spec_doc_digests"] == {TCS_REL: _digest(TCS_TEXT)}
-    assert body["fsm_project"] == "alpha" and body["phase"] is None
+    assert body["fsm_project"] == "alpha"
+    assert body["phase"] == {"name": "FROZEN", "order": 4, "blocking": False,
+                             "observation": False}, "凍結後重讀的狀態＝SPEC_FROZEN→FROZEN／4"
     on_disk = read_state(root / _FSM, "alpha")
     stage = on_disk["frozen_stages"][-1]
     assert stage["stage"] == "Stage-1" and stage["spec_docs"] == [TCS_REL]

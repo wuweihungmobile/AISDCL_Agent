@@ -26,8 +26,9 @@ _FSM_REL = Path("build") / "reports" / "fsm"
 _OLD_KEYS = {"project", "current_state", "current_sprint", "session_id", "updated_at",
              "frozen_stages", "decision_trace", "source"}
 _D16_KEYS = {"human_pending", "retry_history", "rtm_coverage"}
-#: v1.5（ADR-XPLAT-016 §5.3、§7.2、§7.4）：`phase` 恆 null（W4 dogfood 產物）；`recovery` 只在
-#: ESCALATION／ESCALATION_FINAL 時出現、其餘情形鍵缺席（契約 §3.1.4 (c)），所以不在常態鍵集合裡。
+#: v1.5（ADR-XPLAT-016 §5.3、§7.2、§7.4）：`phase` 永遠出現、是 current_state 的純函式投影
+#: （app/fsm_phase.py；W4 dogfood 產物）；`recovery` 只在 ESCALATION／ESCALATION_FINAL 時出現、
+#: 其餘情形鍵缺席（契約 §3.1.4 (c)），所以不在常態鍵集合裡。
 _V15_KEYS = {"phase", "escalation_history", "escalation_provenance", "fsm_project"}
 _NEW_KEYS = _D16_KEYS | _V15_KEYS
 _LIST_KEYS = {"project", "source", "current_state", "updated_at"}
@@ -432,12 +433,45 @@ def test_root_still_needs_a_usable_sdd_tree_503_before_anything_else(
 
 
 # ── v1.5：新欄位（phase／escalation_history／escalation_provenance／fsm_project／recovery）──────
-def test_phase_is_always_present_and_null_until_the_dogfood_function_lands(
-        live_sdd, sdd_tree: Path) -> None:
-    for state in ("INIT", "HUMAN_PENDING", "AUTOCLAUDE_DELEGATED", "ESCALATION"):
-        _write(sdd_tree / _FSM_REL, f"p-{state.lower()}", state=state)
-        body = live_sdd.client.get(f"/sdd/fsm/p-{state.lower()}").json()
-        assert "phase" in body and body["phase"] is None, state
+@pytest.mark.parametrize(("state", "phase"), [
+    ("INIT", ("INTAKE", 1, False, False)),
+    ("HUMAN_PENDING", ("HUMAN_GATE", 3, False, False)),
+    ("SPEC_FROZEN", ("FROZEN", 4, False, False)),
+    ("IMPLEMENTATION", ("IMPLEMENTATION", 5, False, False)),
+    ("RELEASE", ("RELEASE", 8, False, False)),
+    ("AUTOCLAUDE_DELEGATED", ("IMPLEMENTATION", 5, False, True)),    # 觀測態：回歸階段＋旗標
+    ("HUB_SYNC", ("OBSERVATION", 0, False, True)),                   # 回歸點不可靜態判定
+    ("AUTO_COMPACT_PENDING", ("TRANSIENT", 0, False, False)),
+    ("ESCALATION", ("BLOCKED", 0, True, False)),
+    ("NOT_A_STATE", ("UNKNOWN", 0, False, False)),
+])
+def test_phase_is_the_projection_of_current_state_never_null(
+        state: str, phase: tuple[str, int, bool, bool], live_sdd, sdd_tree: Path) -> None:
+    """契約 §3.1.5：`phase` 永遠是 `{name, order, blocking, observation}` 物件（W4 dogfood 的
+    T-G 純函式 app/fsm_phase.py 接線後不再恆 null）；不認得的狀態是 UNKNOWN／0，不是 null。"""
+    key = f"p-{state.lower()}"
+    _write(sdd_tree / _FSM_REL, key, state=state)
+    body = live_sdd.client.get(f"/sdd/fsm/{key}").json()
+    name, order, blocking, observation = phase
+    assert body["phase"] == {"name": name, "order": order, "blocking": blocking,
+                             "observation": observation}, state
+
+
+@pytest.mark.parametrize("bad", [None, ["INIT"], {"state": "INIT"}, 42, "", "   ", " INIT "])
+def test_a_malformed_current_state_gives_an_unknown_phase_and_never_a_500(
+        bad: Any, live_sdd, sdd_tree: Path) -> None:
+    """壞檔的 current_state 不是字串（None、list、dict、數字）或是空白／前後帶空白：GET 仍是
+    200，phase 是 UNKNOWN／0，沒有 recovery；清單也照常列出（list／dict 不可 hash，不能讓 500
+    漏出去）。"""
+    _write(sdd_tree / _FSM_REL, "weird", current_state=bad)
+    resp = live_sdd.client.get("/sdd/fsm/weird")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["current_state"] == bad
+    assert body["phase"] == {"name": "UNKNOWN", "order": 0, "blocking": False,
+                             "observation": False}
+    assert "recovery" not in body
+    assert live_sdd.client.get("/sdd/fsm").status_code == 200
 
 
 def test_the_list_items_do_not_carry_phase_or_the_v15_fields(live_sdd, sdd_tree: Path) -> None:

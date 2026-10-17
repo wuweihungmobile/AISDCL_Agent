@@ -24,6 +24,7 @@ from fastapi import APIRouter, Header, Query, Request
 from .. import procutil, sdd_adapter, security, spec_digest
 from ..errors import ApiError, fsm_state_conflict, spec_digest_changed, unprocessable
 from ..fsm_names import fsm_component, is_fsm_project_name
+from ..fsm_phase import phase_of
 from ..models import SddCompileIn, SddFreezeIn
 from ..sdd_cli import (
     VERB_SPEC_FROZEN,
@@ -171,10 +172,13 @@ def _state_view(state: dict[str, Any], *, source: str, key: str, sdd_root: Path,
     """`GET /sdd/fsm/{project}` 與 `:freeze` 成功回應的共同形狀。既有欄位一個都不動，只增不減。"""
     trace = state.get("decision_trace") or []
     provenance = state.get("escalation_provenance")
-    escalated = state.get("current_state") in ESCALATION_STATES
+    current = state.get("current_state")
+    # 壞檔的 current_state 可能是 list／dict（不可 hash）：先判型別，不能直接 `in` frozenset
+    # （會 500）。
+    escalated = isinstance(current, str) and current in ESCALATION_STATES
     view: dict[str, Any] = {
         "project": state.get("project", key),
-        "current_state": state.get("current_state"),
+        "current_state": current,
         "current_sprint": state.get("current_sprint"),
         "session_id": state.get("session_id"),
         "updated_at": state.get("updated_at"),
@@ -186,9 +190,9 @@ def _state_view(state: dict[str, Any], *, source: str, key: str, sdd_root: Path,
         "human_pending": _human_pending(state.get("human_pending_tracking")),
         "retry_history": _retry_history(state.get("retry_history")),
         "rtm_coverage": state.get("rtm_coverage"),
-        # v1.5：`phase` 是 W4 dogfood 的產物（純函式搬入前恆為 null；欄位永遠出現，消費端一律當選
-        # 填）。
-        "phase": None,
+        # v1.5：`phase`＝current_state 的純函式投影（app/fsm_phase.py，契約 §3.1.5；W4 dogfood
+        # 產物）。欄位永遠出現；缺值、非字串、不認得的狀態回 UNKNOWN／0 物件（不是 null）。
+        "phase": phase_of(current),
         "escalation_history": tail(state.get("escalation_history")),
         # 辨識「這是委派失敗」要讀 provenance.source（trace 那筆是 ESCALATION→ESCALATION，不可靠）。
         # 🔴 provenance 與 `autoclaude_delegated_tracking` 在人工恢復後都**不會被清除**：判斷「現

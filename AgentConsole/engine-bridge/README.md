@@ -18,6 +18,7 @@ app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固�
 app/sdd_state.py   FSM 狀態檔唯讀存取（tail／凍結階段／委派引用／恢復指令）   app/sdd_sync.py  委派同步純函式（reason 組字、終態對映、預檢表、回收點判定）
 app/sdd_run.py     批次的 SDD 側（路徑閘、三點摘要預檢、FSM 寫入、補償、`resume`／`restore` 重驗）    app/sdd_adapter.py AutoClaude adapter 的呼叫接縫
 app/fsm_names.py   FSM 專案名規則（`sanitize_component` 的逐字鏡像＋輸出域判準）    app/spec_digest.py 規格摘要（換行正規化的 UTF-8 sha256）    app/rtm.py `GET …/rtm`
+app/fsm_phase.py   `current_state` → `phase{name,order,blocking,observation}` 純函式（契約 §3.1.5；W4 dogfood 由真 haiku 寫出、SCG-4 審查通過後搬入）
 ```
 
 ## 前置需求
@@ -114,7 +115,7 @@ Invoke-RestMethod http://localhost:8081/health
   - `human_pending` ＝ `{"count": N, "items": [尾 5 筆，原樣]}`，來源 `human_pending_tracking`。**真實檔裡它是單一 dict**（`entered_at`、`reminder_sent_at`、`reminder_hours`、`escalation_hours`；離開 HUMAN_PENDING 時 `entered_at` 被清成 null）：`entered_at` 有值＝正在等人（`count` 1、`items` 為該 dict 原樣），沒有＝`count` 0、`items` 空；若哪天改成 list，則 `count`＝筆數、`items`＝尾 5 筆。
   - `retry_history` ＝ `{"count": N, "last": 尾 1 筆｜null}`。**真實檔裡它是 dict of dict**，以重試閘為鍵（`SCG_VALIDATION`、`PR_REVIEW`、`RTM_VERIFY`），每個閘有 `current_count`、`max_limit`、`history`（list，每筆 `attempt`、`date`、`failure_reason`、`scg_gate`）：`count`＝各閘 `history` 筆數的總和，`last`＝全部筆中 `date` 最晚者（同時刻取後出現的）原樣再加一個 `gate` 欄；若改成 list，則取筆數與尾端一筆。
   - `rtm_coverage` ＝ 檔內 `fsm_state.rtm_coverage` 原樣，沒有這個鍵就是 `null`（真實狀態檔沒有任何 RTM 覆蓋數值，所以目前恆為 `null`）。
-  - v1.5 再增：`phase`（**恆為 `null`**——它是 W4 dogfood 的產物，本輪不實作；消費端一律當選填）、`escalation_history`（尾 5 筆原樣）、`escalation_provenance`（檔內原樣，沒有就 `null`；辨識「這是委派失敗」要讀它的 `source == "autoclaude_delegated_failed"`）、`fsm_project`（狀態檔名裡**淨化後的鍵**；`project` 是檔內原名，兩者可不同）、`recovery`（只在 `ESCALATION`／`ESCALATION_FINAL` 時出現、其餘情形**鍵缺席**而不是 `null`：`{"target","powershell","posix"}`，一行可複製的人工恢復指令，**恢復只有人能做、留在 SDD session**，Bridge 沒有恢復動詞）。🔴 `recovery` 與 `escalation_provenance`、`autoclaude_delegated_tracking` 在人工恢復後都不會被清除：判斷「現在有沒有未解的委派失敗」要看 `current_state` 屬 ESCALATION 類且 `escalation_history[-1].resolved_at` 為空。Docker 內執行時，指令裡的路徑是**容器內**看到的路徑，在主機上貼用前要自己換成主機路徑。
+  - v1.5 再增：`phase`（`{name,order,blocking,observation}` 物件，永遠出現、**不是 `null`**：`current_state` 經 `app/fsm_phase.py` 純函式投影——主路徑八個階段 `order` 1～8、觀測態 `observation=true` 並取回歸階段、阻塞態 `BLOCKED`／0、過渡態 `TRANSIENT`／0；缺值、非字串或不認得的狀態是 `UNKNOWN`／0，不拋例外；`GET /sdd/fsm` 的清單項不帶它）、`escalation_history`（尾 5 筆原樣）、`escalation_provenance`（檔內原樣，沒有就 `null`；辨識「這是委派失敗」要讀它的 `source == "autoclaude_delegated_failed"`）、`fsm_project`（狀態檔名裡**淨化後的鍵**；`project` 是檔內原名，兩者可不同）、`recovery`（只在 `ESCALATION`／`ESCALATION_FINAL` 時出現、其餘情形**鍵缺席**而不是 `null`：`{"target","powershell","posix"}`，一行可複製的人工恢復指令，**恢復只有人能做、留在 SDD session**，Bridge 沒有恢復動詞）。🔴 `recovery` 與 `escalation_provenance`、`autoclaude_delegated_tracking` 在人工恢復後都不會被清除：判斷「現在有沒有未解的委派失敗」要看 `current_state` 屬 ESCALATION 類且 `escalation_history[-1].resolved_at` 為空。Docker 內執行時，指令裡的路徑是**容器內**看到的路徑，在主機上貼用前要自己換成主機路徑。
 - 找不到檔、或 `project` 不在淨化輸出域 → 404 `fsm_not_found`（回報的是使用者問的名稱）；原名含 `/`（單一路徑段的 `{project}` 對不到路由，見下）→ 框架預設的 404 `{"detail":"Not Found"}`，**沒有 `reason`**、不是 Bridge 的錯誤封包；檔存在但讀不動 → 422 `fsm_state_unreadable`。
 
 ### 追溯覆蓋：`GET /autoclaude/runs/{id}/rtm`（ADR-XPLAT-016 §8.5；契約 v1.5 §3.1.4 (f)）
@@ -253,7 +254,7 @@ Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; ruff
 
 不需 DB、不需真 Claude：真引擎（`python -m autoclaude`）＋ mock claude，經真 HTTP／SSE（背景執行緒起 uvicorn）。
 W7 新增兩支：`tests/test_resources.py`（`resources` 取樣：欄位型別與範圍、整機正規化、終態與 PAUSED 為 null、已消失的 pid 不炸、**跨 tick 持有同一組 `Process` 物件**、過期樣本回 null、背景執行緒與 spawn 後立即補樣，含真 psutil 行程與經真 HTTP 的 E2E）、`tests/test_sdd_fsm.py`（`GET /sdd/fsm` 清單與 `errors`、detail 的 `human_pending`／`retry_history`／`rtm_coverage`；用合成夾具，另有一支對**真實**狀態檔的測試，該版本沒有任何狀態檔時 skip 並寫明原因）。
-整合輪 115（ADR-XPLAT-016）新增：`tests/fake_sdd.py`（假 SDD 樹：一支只依 ADR §4 契約回放 JSON 的迷你 FSM 狀態機 CLI，記錄 argv／cwd／環境到 `fake_calls.jsonl`）與 `tests/sdd_run_support.py`（共用夾具）；`test_fsm_names.py`（專案名鏡像與 SDD 原檔逐樣本對拍）、`test_spec_digest.py`、`test_sdd_cli.py`（argv／環境／rc 對映／逾時殺樹／白名單／互斥鎖）、`test_sdd_sync.py`（reason 組字、終態對映表、預檢表、回收點判定）、`test_sdd_token.py`、`test_sdd_freeze.py`（`:freeze` 逐格）、`test_sdd.py`（compile 擴充）、`test_sdd_run.py`（建立流程、預檢、補償、稽核）、`test_sdd_run_lifecycle.py`（終態同步、回收點、`resume`／`restore` 重驗與權杖、孤兒、`RunRecord`、`_child_env`）、`test_rtm.py`、`test_sdd_integration_parity.py`（跨專案對拍 F-1～F-11：compile 與 `sdd_compile` CLI 逐任務相等、只認指定者、凍結後改檔、AST 鎖、摘要演算法、權杖與環境不外洩、同步與補償矩陣、AT 文法；**含用真 SDD CLI 子行程的整合測試**——真 CLI 在該環境 import 不了時略過並印原因）。F-8 在 `test_fsm_names.py`、F-12 在 `test_sdd_cli.py`；F-5（`phase` 表）等 W4 落地，現為略過。
+整合輪 115（ADR-XPLAT-016）新增：`tests/fake_sdd.py`（假 SDD 樹：一支只依 ADR §4 契約回放 JSON 的迷你 FSM 狀態機 CLI，記錄 argv／cwd／環境到 `fake_calls.jsonl`）與 `tests/sdd_run_support.py`（共用夾具）；`test_fsm_names.py`（專案名鏡像與 SDD 原檔逐樣本對拍）、`test_spec_digest.py`、`test_sdd_cli.py`（argv／環境／rc 對映／逾時殺樹／白名單／互斥鎖）、`test_sdd_sync.py`（reason 組字、終態對映表、預檢表、回收點判定）、`test_sdd_token.py`、`test_sdd_freeze.py`（`:freeze` 逐格）、`test_sdd.py`（compile 擴充）、`test_sdd_run.py`（建立流程、預檢、補償、稽核）、`test_sdd_run_lifecycle.py`（終態同步、回收點、`resume`／`restore` 重驗與權杖、孤兒、`RunRecord`、`_child_env`）、`test_rtm.py`、`test_sdd_integration_parity.py`（跨專案對拍 F-1～F-11：compile 與 `sdd_compile` CLI 逐任務相等、只認指定者、凍結後改檔、AST 鎖、摘要演算法、權杖與環境不外洩、同步與補償矩陣、AT 文法；**含用真 SDD CLI 子行程的整合測試**——真 CLI 在該環境 import 不了時略過並印原因）。F-8 在 `test_fsm_names.py`、F-12 在 `test_sdd_cli.py`；F-5（`phase` 表對 SDD LATEST 狀態集合的對拍，用真 SDD 樹的子行程取 `_HAPPY_PATH`／`OBSERVATION_STATES`／`_BLOCKING_STATES`）已真跑。`test_fsm_phase.py` 收納 W4 dogfood 的七個 AT（真 claude haiku 寫出、SCG-4 審查通過，測試名保留 AT 編號）與契約 §3.1.5 的逐鍵對映表。
 另有兩支與 Docker 部署相關的測試：`tests/test_health_deep.py`（`/health/deep` 的 200／503 與各項檢查的失敗路徑；`sdd` 的未設／有效／全新 clone／不存在／是檔案／空目錄六種情境，並鎖住「`sdd.ok` 為 false 時整體仍 200、頂層 `reason` 不含 sdd」）、`tests/test_trace_logging.py`（`X-Trace-Id` 回帶、每行日誌的 `trace_id`、`BRIDGE_LOG_DIR`）；以及 `tests/test_deploy_config.py`——**靜態**讀檔，把 W5 的部署缺陷修法（映像裝 git、healthcheck 打 `/health/deep`、compose 必填金鑰、日誌卷 `nocopy`、信任代理預設值、nginx `error_log crit`、`restore.sh` 的 root 階段建目錄…）各釘成一條斷言，因為這類缺陷只在 Docker 全棧真跑才現形，而 docker／nginx 設定沒有自己的 pytest 家。
 DB 整合測試（寫入 `console` schema、advisory lock 跨實例互斥）需要一個可寫的 PostgreSQL：
 
@@ -309,7 +310,7 @@ SDD 寫入面預設停用（compose 的 `BRIDGE_SDD_WRITE_TOKEN` 預設空；啟
 - run 登記表與事件環常駐記憶體（單機量級足夠；事件另存 JSONL，重啟後可重播）。
 - 不處理 Claude Code 的授權提示互動（引擎自己的 `loop.auth_patterns` 負責）。
 - `/sdd/compile` 與批次預檢底層的 adapter 自整合輪 115 起**以專案鍵選 FSM 狀態檔**（`fsm_project`；同目錄多專案共處又沒給鍵即 fail-closed，不再取字母序第一份）；Bridge 一律顯式傳值（含空字串＝明確不指定），不讀自己的環境。
-- 路徑參數無法定址原名含 `/` 的專案（見〈專案名規則與 URL 定址邊界〉）；`GET /sdd/fsm/{project}` 的 `phase` 本輪恆為 `null`（W4）。
+- 路徑參數無法定址原名含 `/` 的專案（見〈專案名規則與 URL 定址邊界〉）。
 - SDD 寫入面只由 `BRIDGE_SDD_WRITE_TOKEN` 這一道 HTTP 權杖封住；它不防禦主動對抗的 AI（引擎子行程內的步驟仍可自己執行框架的 FSM CLI，見〈SDD 整合〉的誠實劃界）。
 - 終態同步在終態事件之後約 0.1～0.5 秒才完成（CLI 最壞 20 秒，不該卡住 `snapshot()`）：這段視窗內 run 已是終態、FSM 仍在 `AUTOCLAUDE_DELEGATED`，由下一次建立的回收點與 `GET /sdd/fsm` 的現況為準。
 
