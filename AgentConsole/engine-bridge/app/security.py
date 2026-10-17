@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import inspect
 import json
 import logging
@@ -28,6 +29,9 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, ValidationError
 
+from .errors import ApiError
+from .tracing import trace_id_var
+
 DENY_CHARS: frozenset[str] = frozenset("!`><~$&;")
 #: 換行／回車／NUL：`sh -c` 把換行當命令分隔，不在 adapter 的集合內，但同樣是注入向量。
 CONTROL_CHARS: frozenset[str] = frozenset("\n\r\x00")
@@ -39,6 +43,10 @@ _ENV_DENY = frozenset({
     "PYTHONUTF8", "PYTHONIOENCODING", "PYTHONUNBUFFERED",       # 後三者由 Bridge 自己設定
     "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH",
     "DYLD_FRAMEWORK_PATH", "NODE_OPTIONS", "BASH_ENV", "ENV",
+    # ADR-XPLAT-016 §9：SDD 寫入面的三個名字只准 Bridge 自己設定（權杖永不進引擎；FSM 專案由
+    # `sdd` 區塊伺服端注入；狀態目錄只給 CLI 子行程）。請求層 `env` 帶它們＝422
+    # `forbidden_name`，大聲而非靜默覆蓋。
+    "BRIDGE_SDD_WRITE_TOKEN", "SDD_PROJECT", "SDD_STATE_DIR",
 })
 _ENV_URL_KEYS = ("MINIMAX_BASE_URL", "MINIMAX_EMBED_BASE_URL", "TEI_URL")
 _ENV_VALUE_MAX = 8192
@@ -97,6 +105,37 @@ class AuditLog:
             self._logger.error("audit 寫入失敗：%s", exc)
 
 
+# ── SDD 寫入面權杖（ADR-XPLAT-016 §9；G-09）───────────────────────────────────────────────
+SDD_WRITE_TOKEN_HEADER = "X-Bridge-Token"
+
+
+def require_sdd_write_token(configured: str | None, provided: str | None, *,
+                            audit: AuditLog | None, verb: str, project: str | None = None,
+                            approver: str | None = None, run_id: str | None = None) -> None:
+    """寫入動詞（`:freeze`、含 `sdd` 區塊的 `POST /autoclaude/runs`、其 `:resume`／`/restore`）的
+    入口檢查。
+
+    Bridge 沒設權杖＝整個寫入面停用，503 `sdd_write_disabled`（fail-closed）；設了而標頭缺漏或不符＝
+    403 `sdd_write_forbidden`（缺與錯同一個 reason，不給探測者區分）。以 `hmac.compare_digest`
+    比對（常數時間；兩邊先編成 UTF-8 bytes，非 ASCII 字元也不會拋例外）。
+    被拒的請求也記稽核（決策、不含任何權杖值——包括被拒的那個值）。這個檢查必須先於一切會碰檔案系統的檢查。"""
+    def reject(error: ApiError, result: str) -> ApiError:
+        if audit is not None:
+            which_run = {"run_id": run_id} if run_id else {}        # 續跑類才有：被拒的是哪個 run
+            audit.record("sdd_write", verb=verb, project=project,
+                         approver=(approver or "")[:100] or None, result=result,
+                         trace_id=trace_id_var.get(), **which_run)
+        return error
+
+    if not configured:
+        raise reject(ApiError(503, "sdd_write_disabled",
+                              detail="Bridge 未設定 BRIDGE_SDD_WRITE_TOKEN：SDD 寫入面停用"),
+                     "rejected:sdd_write_disabled")
+    if provided is None or not hmac.compare_digest(provided.encode("utf-8"),
+                                                   configured.encode("utf-8")):
+        raise reject(ApiError(403, "sdd_write_forbidden"), "rejected:sdd_write_forbidden")
+
+
 # ── 1. 路徑閘 ──────────────────────────────────────────────────────────────────
 def is_within(child: Path, root: Path) -> bool:
     """`child` 是否位於 `root` 之下（含相等）。兩邊都先 resolve，再 normcase 後比對。
@@ -133,6 +172,37 @@ def check_path(raw: Any, roots: Iterable[Path], *,
         return bad("not_a_directory", f"{field} 不是目錄：{resolved}")
     if not any(is_within(resolved, root) for root in roots):
         return bad("outside_allowed_roots", f"{field} 不在允許的根目錄之下：{resolved}")
+    return resolved, []
+
+
+def check_spec_file(spec_dir: Path, raw: Any, *, field: str) -> tuple[Path | None, list[Violation]]:
+    """`spec_file`（ADR-XPLAT-016 §7.3、§8.3）：相對 `spec_dir` 或絕對（須在 `spec_dir` 之下）、
+    不含 `..`、副檔名 `.md`（不分大小寫）、是既有檔案。回傳 (realpath, 違規)。
+    副檔名限制是縱深防禦：檔案內容會進 prompt 與摘要，不能讓路徑指到 `spec_dir` 內任意檔。
+    規則碼：empty、invalid_chars、contains_dotdot、outside_spec_dir、not_markdown、not_found
+    （呼叫端可把單一 `not_found` 轉成 `spec_not_found`）。`spec_dir` 須已是 realpath（`check_path`
+    的輸出）。"""
+    def bad(rule: str, message: str) -> tuple[None, list[Violation]]:
+        return None, [{"field": field, "rule": rule, "message": message}]
+
+    if not isinstance(raw, str) or not raw.strip():
+        return bad("empty", f"{field} 不可為空")
+    if "\x00" in raw:
+        return bad("invalid_chars", f"{field} 含 NUL 字元")
+    text = raw.replace("\\", "/")           # 檔案路徑一律以 POSIX 形傳遞；Windows 的反斜線形也接受
+    if ".." in Path(text).parts:
+        return bad("contains_dotdot", f"{field} 不接受 `..` 片段：{raw}")
+    candidate = Path(text) if os.path.isabs(raw) or os.path.isabs(text) else spec_dir / text
+    try:
+        resolved = candidate.resolve()
+    except (OSError, RuntimeError) as exc:
+        return bad("not_found", f"{field} 無法解析：{raw}（{type(exc).__name__}）")
+    if not is_within(resolved, spec_dir):
+        return bad("outside_spec_dir", f"{field} 不在 spec_dir 之下：{raw}")
+    if resolved.suffix.lower() != ".md":
+        return bad("not_markdown", f"{field} 必須是 .md 檔：{raw}")
+    if not resolved.is_file():
+        return bad("not_found", f"{field} 不是既有檔案：{raw}")
     return resolved, []
 
 

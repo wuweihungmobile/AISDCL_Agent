@@ -21,6 +21,13 @@
   BRIDGE_LOG_DIR              有值時，另把日誌寫成滾動檔 <dir>/bridge.log
                               （UTC 午夜切檔、保留 7 份）；未設＝只輸出到 stderr。
                               docker compose 設 /app/logs（與 backend 共用 app_logs 卷）
+  BRIDGE_SDD_WRITE_TOKEN      SDD 寫入面權杖（ADR-XPLAT-016 §9）：`:freeze`、含 `sdd` 區塊的
+                              `POST /autoclaude/runs`（及其 `:resume`／`/restore`）須帶標頭
+                              `X-Bridge-Token`，值與此相同。
+                              未設＝這些請求整個停用（503 `sdd_write_disabled`）；有設但短於 32
+                              字元或仍是 `<…>` 佔位＝啟動即 SettingsError（不靜默退回停用）。
+                              只有 backend 與 Bridge 持有；引擎子行程與 FSM CLI 子行程的環境一律
+                              不含它。repo 內不放真值
 """
 from __future__ import annotations
 
@@ -29,12 +36,14 @@ import re
 import socket
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULT_OUTBOUND_ALLOWLIST = ("api.minimax.io", "api.minimax.chat", "localhost", "127.0.0.1")
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _SDD_DIR_RE = re.compile(r"^AISDLC_SDD_v(\d+)\.(\d+)$")
+#: 寫入權杖的最短長度（≥32 字元隨機；`openssl rand -hex 32` 得 64 字元）。
+SDD_WRITE_TOKEN_MIN_LEN = 32
 
 # <monorepo>/AgentConsole/engine-bridge
 BRIDGE_DIR = Path(__file__).resolve().parents[1]
@@ -60,6 +69,8 @@ class Settings:
     allowed_path_roots: tuple[Path, ...]
     outbound_allowlist: tuple[str, ...]
     log_dir: Path | None = None
+    #: SDD 寫入權杖；repr=False 讓 `print(settings)`／日誌不會把它帶出去。None＝寫入面停用。
+    sdd_write_token: str | None = field(default=None, repr=False)
 
 
 def _looks_like_monorepo(root: Path) -> bool:
@@ -94,6 +105,22 @@ def _parse_roots(raw: str) -> tuple[Path, ...]:
     if not roots:
         raise SettingsError("BRIDGE_ALLOWED_PATH_ROOTS 解析後為空")
     return tuple(roots)
+
+
+def _parse_sdd_write_token(env: Mapping[str, str]) -> str | None:
+    """未設（含全空白）＝None；有設但太短或是 `<…>` 佔位＝SettingsError。
+    佔位當真值等於公開密鑰、太短的權杖擋不住猜測，所以啟動即大聲失敗，不退回「停用」。
+    錯誤訊息不含值本身（連佔位也不回印，免得把真值寫進日誌）。"""
+    raw = env.get("BRIDGE_SDD_WRITE_TOKEN", "").strip()
+    if not raw:
+        return None
+    if (raw.startswith("<") and raw.endswith(">")) or "<YOUR_" in raw.upper():
+        raise SettingsError("BRIDGE_SDD_WRITE_TOKEN 仍是 <…> 佔位符：請換成 ≥32 字元的隨機值，"
+                            "或整個移除以停用 SDD 寫入面")
+    if len(raw) < SDD_WRITE_TOKEN_MIN_LEN:
+        raise SettingsError(f"BRIDGE_SDD_WRITE_TOKEN 太短（{len(raw)} 字元）：至少 "
+                            f"{SDD_WRITE_TOKEN_MIN_LEN} 字元，或整個移除以停用 SDD 寫入面")
+    return raw
 
 
 def _parse_float(env: Mapping[str, str], name: str, default: float) -> float:
@@ -169,4 +196,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         allowed_path_roots=roots,
         outbound_allowlist=allowlist,
         log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
+        sdd_write_token=_parse_sdd_write_token(e),
     )

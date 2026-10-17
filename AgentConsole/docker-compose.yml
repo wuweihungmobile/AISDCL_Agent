@@ -142,6 +142,10 @@ services:
       CONSOLE_INTERNAL_PROXIES: ${CONSOLE_INTERNAL_PROXIES:-172\.31\.250\.(?:[2-9]|[1-9]\d|1\d\d|2[0-4]\d|25[0-4])}
       # 單一 Engine Bridge 旁車（path 前綴 /autoclaude /sdd 區分兩引擎）
       ENGINE_BRIDGE_URL: ${ENGINE_BRIDGE_URL:-http://engine-bridge:8081}
+      # 🔴 SDD 寫入面權杖（ADR-XPLAT-016 §9）：backend 發送（HTTP 標頭 X-Bridge-Token）、engine-bridge 驗證，兩個服務
+      # 必須是同一個值。預設空＝SDD 寫入面整個停用（SDD 是選用引擎，不像 JWT_SECRET 設成必填）；設了就要 ≥32 字元，
+      # 短於 32 字或仍是 <…> 佔位，Bridge 啟動即失敗（不靜默退回停用）。產生方式見 .env.example。
+      BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}
       # 使用者密碼雜湊：未在 .env 設定時「不傳入」（用 application.yml 的開發預設）；正式環境必須覆寫
       # （.env 內的 $ 要寫成 $$，見 .env.example）。
       CONSOLE_ADMIN_PASSWORD_HASH:
@@ -197,6 +201,9 @@ services:
       # 每一行都帶 trace_id（契約 §3.1.1）。stdout 的日誌（docker compose logs）不受影響。
       BRIDGE_LOG_DIR: /app/logs
       SDD_ROOT: /sdd
+      # 🔴 SDD 寫入面權杖（與 backend 同值；預設空＝停用）。Bridge 只用它驗 X-Bridge-Token；它不會進引擎與 FSM CLI 子行程
+      # （`_child_env` 一律剝除），稽核與回應也不記它的值。
+      BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}
       BRIDGE_DB_DSN: postgresql://${POSTGRES_USER:-aisdlc}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@${POSTGRES_HOST:-postgres-primary}:5432/${POSTGRES_DB:-aisdlc}
       BRIDGE_DB_SCHEMA: console
       # 路徑 allowlist：映像內只有 /workspace 可寫；要讓引擎改主機專案目錄就 bind mount 並把掛載點加進來

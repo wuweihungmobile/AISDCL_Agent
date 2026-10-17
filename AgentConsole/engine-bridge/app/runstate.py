@@ -42,6 +42,11 @@ class RunRecord:
     db_lock_key: int | None = None
     steps: list[dict[str, Any]] = field(default_factory=list)   # [{step_id,name,goal_task_id}]
     env_keys: list[str] = field(default_factory=list)           # 只記名稱，不記值
+    # SDD 批次（ADR-XPLAT-016 §10.3）：`{spec_dir, spec_file, fsm_project, root, state_dir,
+    # approver, sync}`；`sync`＝終態同步的結果（`{exit, ok, at, …}`）。不含任何機密（權杖永不
+    # 落盤）。舊 run.json 沒有這個鍵 → None（`from_dict` 忽略未知鍵、缺欄走預設，
+    # `schema_version` 不變）。
+    sdd: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
 
     def to_dict(self) -> dict[str, Any]:

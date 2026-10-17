@@ -1,4 +1,5 @@
-"""D-16：`GET /sdd/fsm`（清單）與 `GET /sdd/fsm/{project}` 新增的三個欄位。
+"""D-16：`GET /sdd/fsm`（清單）與 `GET /sdd/fsm/{project}` 新增的三個欄位；v1.5：選填 `root`、
+`phase`／`escalation_history`／`escalation_provenance`／`fsm_project`／`recovery`、專案名規則（S-10）。
 
 結構以 AISDLC_SDD 真實的 FSM 狀態檔為準（`tools/fsm_runtime/templates/FSM-STATE-TEMPLATE.yaml`、
 `state_loader.py`）：`retry_history` 是 **dict of dict**（以重試閘為鍵，每個閘有 `history` list），
@@ -7,6 +8,8 @@
 """
 from __future__ import annotations
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -15,12 +18,18 @@ from typing import Any
 import pytest
 import yaml
 
+from app import sdd_cli
+from app.fsm_names import fsm_component
 from app.settings import Settings
 
 _FSM_REL = Path("build") / "reports" / "fsm"
 _OLD_KEYS = {"project", "current_state", "current_sprint", "session_id", "updated_at",
              "frozen_stages", "decision_trace", "source"}
-_NEW_KEYS = {"human_pending", "retry_history", "rtm_coverage"}
+_D16_KEYS = {"human_pending", "retry_history", "rtm_coverage"}
+#: v1.5（ADR-XPLAT-016 §5.3、§7.2、§7.4）：`phase` 恆 null（W4 dogfood 產物）；`recovery` 只在
+#: ESCALATION／ESCALATION_FINAL 時出現、其餘情形鍵缺席（契約 §3.1.4 (c)），所以不在常態鍵集合裡。
+_V15_KEYS = {"phase", "escalation_history", "escalation_provenance", "fsm_project"}
+_NEW_KEYS = _D16_KEYS | _V15_KEYS
 _LIST_KEYS = {"project", "source", "current_state", "updated_at"}
 
 
@@ -99,13 +108,17 @@ def test_the_list_names_every_state_file_with_its_state_and_timestamp(
 
 def test_unreadable_and_badly_named_files_go_to_errors_and_the_rest_still_list(
         live_sdd, sdd_tree: Path) -> None:
+    """v1.5（S-10）：空白與 CJK 的專案名不再被拒（見下一支）；仍進 errors 的是「不在淨化輸出域」的
+    名稱（以 `.` 結尾、前導空白、非 NFC、超過 80 字）與讀不動的檔。"""
     fsm_dir = sdd_tree / _FSM_REL
     _write(fsm_dir, "good")
     _write(fsm_dir, "broken", "this: [is: not valid yaml")
     _write(fsm_dir, "noroot", "something_else: 1\n")
     _write(fsm_dir, "binary", b"\xff\xfe\x00\x01 not utf-8 \x80\x81")
-    _write(fsm_dir, "bad name")                               # 空白不在白名單
-    _write(fsm_dir, "中文專案")                                # 非 ASCII 不在白名單
+    _write(fsm_dir, "dot.")                                   # 以 . 結尾：sanitizer 不會產生
+    _write(fsm_dir, " lead")                                  # 前導空白：同上
+    _write(fsm_dir, "e\N{COMBINING ACUTE ACCENT}cole")                            # NFD：不是 NFC
+    _write(fsm_dir, "x" * 81)                                 # 超過 80 字
     (fsm_dir / "FSM-STATE-adir.yaml").mkdir()                 # 同名但是目錄
     (fsm_dir / "FSM-STATE-good.yaml.bak").write_text("ignored", encoding="utf-8")
     (fsm_dir / "FSM-STATE-other.yml").write_text("ignored", encoding="utf-8")
@@ -114,7 +127,81 @@ def test_unreadable_and_badly_named_files_go_to_errors_and_the_rest_still_list(
     assert [p["project"] for p in body["projects"]] == ["good"]
     assert sorted(body["errors"]) == sorted([
         "FSM-STATE-broken.yaml", "FSM-STATE-noroot.yaml", "FSM-STATE-binary.yaml",
-        "FSM-STATE-bad name.yaml", "FSM-STATE-中文專案.yaml", "FSM-STATE-adir.yaml"])
+        "FSM-STATE-dot..yaml", "FSM-STATE- lead.yaml",
+        "FSM-STATE-e\N{COMBINING ACUTE ACCENT}cole.yaml",
+        f"FSM-STATE-{'x' * 81}.yaml", "FSM-STATE-adir.yaml"])
+
+
+S10_NAMES = ("訂單系統", "Order System", "proj(v2)", "a+b", "名稱含@符號")
+
+
+def test_the_five_s10_names_are_listed_and_readable_by_their_original_names(
+        live_sdd, sdd_tree: Path) -> None:
+    """體檢 S-10：SDD 側能產生這五個專案名的狀態檔，舊白名單把它們全拒（清單進 errors、讀取 404）。
+    新規則以 `sanitize_component` 的輸出域為準：全部列得出、點得進去（F-8 的 E2E 面）。"""
+    fsm_dir = sdd_tree / _FSM_REL
+    for name in S10_NAMES:
+        _write(fsm_dir, fsm_component(name), state="IMPLEMENTATION")
+    listing = live_sdd.client.get("/sdd/fsm").json()
+    assert listing["errors"] == []
+    assert sorted(p["project"] for p in listing["projects"]) == sorted(S10_NAMES)
+    for name in S10_NAMES:
+        resp = live_sdd.client.get(f"/sdd/fsm/{name}")
+        assert resp.status_code == 200, (name, resp.text)
+        body = resp.json()
+        assert body["current_state"] == "IMPLEMENTATION"
+        assert body["fsm_project"] == name and body["source"] == f"FSM-STATE-{name}.yaml"
+
+
+def test_a_name_and_its_sanitized_key_reach_the_same_state_file(
+        live_sdd, sdd_tree: Path) -> None:
+    """進入 Bridge 的專案名一律先過 `fsm_component`（ADR §7.4）：傳原名與傳鍵等價；
+    `fsm_project` 回的是狀態檔名裡淨化後的鍵（寫回綁定與唯一性檢查用它，不是檔內的 `project` 原
+    名）。"""
+    fsm_dir = sdd_tree / _FSM_REL
+    _write(fsm_dir, "a_b", state="SPEC_DRAFTING")
+    by_original = live_sdd.client.get("/sdd/fsm/a:b")           # SDD 側 `a:b` → 檔名 `a_b`
+    by_encoded = live_sdd.client.get("/sdd/fsm/a%3Ab")
+    by_key = live_sdd.client.get("/sdd/fsm/a_b")
+    for resp in (by_original, by_encoded, by_key):
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["fsm_project"] == "a_b"
+    assert by_original.json() == by_key.json()
+    missing = live_sdd.client.get("/sdd/fsm/x:y")               # 404 回報的是使用者問的名稱
+    assert (missing.status_code, missing.json()["reason"], missing.json()["project"]) == (
+        404, "fsm_not_found", "x:y")
+
+
+def test_a_name_with_a_slash_is_not_addressable_by_url_but_its_key_is(
+        live_sdd, sdd_tree: Path) -> None:
+    """D-115-18 ②：路徑參數只收淨化後的 FSM 鍵（`{project}` 不改成 `{project:path}`）。原名含 `/`
+    的專案（`x/y` → 檔名 `x_y`）無法由 URL 定址——不論寫成兩段路徑或編碼的 `%2F`；清單與每個回應
+    都帶 `fsm_project`（＝鍵），呼叫端改用它定址。請求本文裡的 `fsm_project`（compile、sdd 區塊）
+    不受此限。"""
+    fsm_dir = sdd_tree / _FSM_REL
+    _write(fsm_dir, "x_y", state="IMPLEMENTATION")
+    for address in ("/sdd/fsm/x/y", "/sdd/fsm/x%2Fy", "/sdd/fsm/x%2fy"):
+        resp = live_sdd.client.get(address)
+        assert resp.status_code == 404, address
+        assert "reason" not in resp.json(), "路由根本對不到：框架預設 404，不是 Bridge 的錯誤封包"
+    assert fsm_component("x/y") == "x_y"
+    listing = live_sdd.client.get("/sdd/fsm").json()
+    assert [p["project"] for p in listing["projects"]] == ["x_y"], "清單給的名稱就是可定址的鍵"
+    by_key = live_sdd.client.get(f"/sdd/fsm/{listing['projects'][0]['project']}")
+    assert by_key.status_code == 200
+    got = by_key.json()
+    assert (got["fsm_project"], got["current_state"]) == ("x_y", "IMPLEMENTATION")
+
+
+def test_traversal_shaped_names_never_leave_the_fsm_directory(
+        live_sdd, sdd_tree: Path, tmp_path: Path) -> None:
+    """`..` 與分隔符在淨化時被換掉或退成 `untitled`；就算同名檔存在，也只讀得到 fsm 目錄內的檔。"""
+    (tmp_path / "FSM-STATE-outside.yaml").write_text(
+        "fsm_state: {current_state: LEAKED}", encoding="utf-8")
+    for name in ("..", "../x", "..%2F..%2Foutside", "a%2F..%2Fb", "%2E%2E", "a\\..\\b"):
+        resp = live_sdd.client.get(f"/sdd/fsm/{name}")
+        assert resp.status_code == 404, (name, resp.text)
+        assert "LEAKED" not in resp.text
 
 
 def test_a_pathologically_nested_state_file_is_an_error_not_a_crash(
@@ -130,16 +217,6 @@ def test_a_pathologically_nested_state_file_is_an_error_not_a_crash(
     detail = live_sdd.client.get("/sdd/fsm/nested")
     assert detail.status_code == 422 and detail.json()["reason"] == "fsm_state_unreadable"
     assert live_sdd.client.get("/sdd/fsm/good").status_code == 200
-
-
-def test_the_project_name_whitelist_is_one_to_128_safe_characters() -> None:
-    """名稱長度的邊界：Windows 的路徑長度上限讓 129 字元的檔名建不出來，所以直接驗規則。"""
-    from app.routers.sdd import _PROJECT_RE
-
-    assert _PROJECT_RE.match("a" * 128) and not _PROJECT_RE.match("a" * 129)
-    assert _PROJECT_RE.match("A.b_c-1") and not _PROJECT_RE.match("")
-    for bad in ("a b", "a/b", "a\\b", "..\\x", "a%2Fb", "中文", "a\nb"):
-        assert not _PROJECT_RE.match(bad), bad
 
 
 def test_a_symlinked_state_file_that_points_outside_is_an_error_not_a_listing(
@@ -195,8 +272,8 @@ def test_the_sdd_endpoints_never_write_into_the_sdd_tree_including_the_list(
     assert snapshot() == before, "唯讀：不得新增、改動任何檔案或目錄"
 
 
-# ── GET /sdd/fsm/{project}：既有欄位不動、新增三個 ─────────────────────────────────────────
-def test_the_detail_keeps_every_existing_field_and_adds_exactly_three(
+# ── GET /sdd/fsm/{project}：既有欄位不動、只增不減 ─────────────────────────────────────────
+def test_the_detail_keeps_every_existing_field_and_adds_only_the_documented_ones(
         live_sdd, sdd_tree: Path) -> None:
     trace = [{"ts": f"t{i}", "from": f"S{i}", "to": f"S{i + 1}"} for i in range(8)]
     _write(sdd_tree / _FSM_REL, "demo", state="IMPLEMENTATION", decision_trace=trace,
@@ -294,6 +371,214 @@ def test_rtm_coverage_is_null_unless_the_file_carries_it(live_sdd, sdd_tree: Pat
     assert get("/sdd/fsm/structured").json()["rtm_coverage"] == {"covered": 41, "total": 43}
 
 
+# ── v1.5：選填 `root`（狀態目錄＝<root>/build/reports/fsm）────────────────────────────────
+@pytest.fixture
+def project_root(tmp_path: Path) -> Path:
+    root = tmp_path / "projects" / "proj-a"
+    (root / _FSM_REL).mkdir(parents=True)
+    return root
+
+
+def test_root_redirects_both_endpoints_to_the_project_state_directory(
+        live_sdd, sdd_tree: Path, project_root: Path) -> None:
+    _write(sdd_tree / _FSM_REL, "framework-own", state="INIT")
+    _write(project_root / _FSM_REL, "alpha", state="HUMAN_PENDING")
+    plain = live_sdd.client.get("/sdd/fsm").json()
+    assert [p["project"] for p in plain["projects"]] == ["framework-own"], "省略 root＝v1.4 行為"
+    scoped = live_sdd.client.get("/sdd/fsm", params={"root": str(project_root)}).json()
+    assert [p["project"] for p in scoped["projects"]] == ["alpha"]
+    assert scoped["root"] == plain["root"] == sdd_tree.name, \
+        "清單的 root 欄位語意不變（SDD 版本目錄名）"
+    detail = live_sdd.client.get("/sdd/fsm/alpha", params={"root": str(project_root)})
+    assert detail.status_code == 200 and detail.json()["current_state"] == "HUMAN_PENDING"
+    assert live_sdd.client.get("/sdd/fsm/alpha").status_code == 404, "沒帶 root 就看不到專案根的檔"
+    assert live_sdd.client.get("/sdd/fsm/framework-own",
+                               params={"root": str(project_root)}).status_code == 404
+
+
+def test_root_is_checked_against_the_allowed_roots_like_every_other_path(
+        live_sdd, tmp_path: Path) -> None:
+    outside = tmp_path / "not-allowed"
+    (outside / _FSM_REL).mkdir(parents=True)
+    for url in ("/sdd/fsm", "/sdd/fsm/alpha"):
+        resp = live_sdd.client.get(url, params={"root": str(outside)})
+        assert resp.status_code == 422 and resp.json()["reason"] == "sanitization_failed"
+        violation = resp.json()["violations"][0]
+        assert (violation["field"], violation["rule"]) == ("root", "outside_allowed_roots")
+        relative = live_sdd.client.get(url, params={"root": "projects/proj-a"})
+        assert relative.json()["violations"][0]["rule"] == "not_absolute"
+        dotdot = live_sdd.client.get(url, params={"root": str(tmp_path / "projects" / ".." / "x")})
+        assert dotdot.json()["violations"][0]["rule"] == "contains_dotdot"
+        blank = live_sdd.client.get(url, params={"root": ""})
+        assert blank.json()["violations"][0]["rule"] == "empty"
+
+
+def test_a_root_without_a_state_directory_is_an_empty_list_and_a_404_like_v14(
+        live_sdd, tmp_path: Path) -> None:
+    bare = tmp_path / "projects" / "bare"
+    bare.mkdir(parents=True)
+    listing = live_sdd.client.get("/sdd/fsm", params={"root": str(bare)})
+    assert (listing.status_code, listing.json()["projects"], listing.json()["errors"]) == (
+        200, [], [])
+    assert live_sdd.client.get("/sdd/fsm/any", params={"root": str(bare)}).status_code == 404
+
+
+def test_root_still_needs_a_usable_sdd_tree_503_before_anything_else(
+        make_bridge, settings: Settings, project_root: Path, tmp_path: Path) -> None:
+    live = make_bridge(replace(settings, sdd_root=None))
+    for url in ("/sdd/fsm", "/sdd/fsm/alpha"):
+        resp = live.client.get(url, params={"root": str(project_root)})
+        assert (resp.status_code, resp.json()["reason"]) == (503, "sdd_unavailable")
+
+
+# ── v1.5：新欄位（phase／escalation_history／escalation_provenance／fsm_project／recovery）──────
+def test_phase_is_always_present_and_null_until_the_dogfood_function_lands(
+        live_sdd, sdd_tree: Path) -> None:
+    for state in ("INIT", "HUMAN_PENDING", "AUTOCLAUDE_DELEGATED", "ESCALATION"):
+        _write(sdd_tree / _FSM_REL, f"p-{state.lower()}", state=state)
+        body = live_sdd.client.get(f"/sdd/fsm/p-{state.lower()}").json()
+        assert "phase" in body and body["phase"] is None, state
+
+
+def test_the_list_items_do_not_carry_phase_or_the_v15_fields(live_sdd, sdd_tree: Path) -> None:
+    _write(sdd_tree / _FSM_REL, "alpha")
+    item = live_sdd.client.get("/sdd/fsm").json()["projects"][0]
+    assert set(item) == _LIST_KEYS
+
+
+def test_escalation_history_is_the_last_five_entries_oldest_first(
+        live_sdd, sdd_tree: Path) -> None:
+    history = [{"triggered_at": f"t{i}", "trigger_reason": f"r{i}", "resolved_at": None,
+                "resolution": None} for i in range(8)]
+    fsm_dir = sdd_tree / _FSM_REL
+    _write(fsm_dir, "many", state="ESCALATION", escalation_history=history)
+    _write(fsm_dir, "few", escalation_history=history[:2])
+    _write(fsm_dir, "missing", escalation_history=None)
+    _write(fsm_dir, "weird", escalation_history="not a list")
+    get = live_sdd.client.get
+    assert [h["triggered_at"] for h in get("/sdd/fsm/many").json()["escalation_history"]] == [
+        "t3", "t4", "t5", "t6", "t7"]
+    assert get("/sdd/fsm/few").json()["escalation_history"] == history[:2]
+    assert get("/sdd/fsm/missing").json()["escalation_history"] == []
+    assert get("/sdd/fsm/weird").json()["escalation_history"] == []
+
+
+def test_escalation_provenance_is_passed_through_so_a_delegation_failure_can_be_recognised(
+        live_sdd, sdd_tree: Path) -> None:
+    provenance = {"session_id": "unknown", "at": "2026-10-17T01:00:00+00:00", "reason": "r",
+                  "rule_id": "unknown", "source": "autoclaude_delegated_failed"}
+    fsm_dir = sdd_tree / _FSM_REL
+    _write(fsm_dir, "failed", state="ESCALATION", escalation_provenance=provenance)
+    _write(fsm_dir, "clean")
+    _write(fsm_dir, "odd", escalation_provenance="nope")
+    get = live_sdd.client.get
+    assert get("/sdd/fsm/failed").json()["escalation_provenance"] == provenance
+    assert get("/sdd/fsm/clean").json()["escalation_provenance"] is None
+    assert get("/sdd/fsm/odd").json()["escalation_provenance"] is None
+
+
+def test_recovery_commands_appear_only_in_escalation_states(
+        live_sdd, sdd_tree: Path, project_root: Path) -> None:
+    fsm_dir = project_root / _FSM_REL
+    for state in ("ESCALATION", "ESCALATION_FINAL"):
+        _write(fsm_dir, state.lower(), state=state)
+    _write(fsm_dir, "fine", state="IMPLEMENTATION")
+
+    def get(name: str) -> dict[str, Any]:
+        resp = live_sdd.client.get(f"/sdd/fsm/{name}", params={"root": str(project_root)})
+        return resp.json()
+
+    assert "recovery" not in get("fine"), "非 ESCALATION 類：鍵缺席（契約 §3.1.4 (c)），不是 null"
+    for name in ("escalation", "escalation_final"):
+        recovery = get(name)["recovery"]
+        assert set(recovery) == {"target", "powershell", "posix"}
+
+
+def test_the_recovery_command_follows_the_adr_template_for_both_shells(
+        live_sdd, sdd_tree: Path, project_root: Path) -> None:
+    """ADR §5.3：PowerShell 用 `Push-Location … -ErrorAction Stop; …; Pop-Location` 同一句內成對、
+    不裸 cd；POSIX 的 `VAR=值 指令` 前綴只作用於該指令。委派失敗的目標是 IMPLEMENTATION（與
+    tracking.resume_state 一致）。"""
+    failed = {"source": "autoclaude_delegated_failed", "reason": "r", "rule_id": "unknown",
+              "session_id": "unknown", "at": "t"}
+    tracking = {"entered_at": "t", "resume_state": "IMPLEMENTATION", "playbook_ref": "run:R1"}
+    _write(project_root / _FSM_REL, "alpha", state="ESCALATION", escalation_provenance=failed,
+           autoclaude_delegated_tracking=tracking)
+    recovery = live_sdd.client.get("/sdd/fsm/alpha", params={"root": str(project_root)}).json()[
+        "recovery"]
+    assert recovery["target"] == "IMPLEMENTATION"
+    fsm_dir = (project_root / _FSM_REL).resolve()
+    powershell, posix = recovery["powershell"], recovery["posix"]
+    assert powershell.startswith(f"Push-Location '{sdd_tree}' -ErrorAction Stop; ")
+    assert f"$env:SDD_STATE_DIR = '{fsm_dir}'; " in powershell
+    assert ("-m tools.fsm_runtime.fsm_runtime resume-from-escalation --project 'alpha' "
+            '--to IMPLEMENTATION --reason "<人工原因>"; ') in powershell
+    assert powershell.endswith("Remove-Item Env:SDD_STATE_DIR; Pop-Location")
+    assert not powershell.lstrip().lower().startswith(("cd ", "set-location"))
+    assert posix.startswith("cd ") and " && SDD_STATE_DIR=" in posix
+    assert posix.endswith('resume-from-escalation --project alpha --to IMPLEMENTATION '
+                          '--reason "<人工原因>"')
+    assert str(fsm_dir) in posix and "Pop-Location" not in posix
+
+
+def test_the_recovery_target_falls_back_like_the_sdd_recovery_hint(
+        live_sdd, sdd_tree: Path, project_root: Path) -> None:
+    fsm_dir = project_root / _FSM_REL
+    _write(fsm_dir, "plain", state="ESCALATION")                              # 無任何線索
+    _write(fsm_dir, "compact", state="ESCALATION_FINAL",
+           auto_compact_state={"resume_state": "PR_REVIEW"})
+    _write(fsm_dir, "badresume", state="ESCALATION",
+           auto_compact_state={"resume_state": "HUMAN_PENDING"})              # 不在 RESUME_TARGETS
+    _write(fsm_dir, "delegfail", state="ESCALATION",
+           escalation_provenance={"source": "autoclaude_delegated_failed"},
+           autoclaude_delegated_tracking={"resume_state": "not-a-target"})
+    targets = {name: live_sdd.client.get(f"/sdd/fsm/{name}", params={"root": str(project_root)})
+               .json()["recovery"]["target"]
+               for name in ("plain", "compact", "badresume", "delegfail")}
+    assert targets == {"plain": "SPEC_DRAFTING", "compact": "PR_REVIEW",
+                       "badresume": "SPEC_DRAFTING", "delegfail": "IMPLEMENTATION"}
+
+
+def test_the_recovery_command_quotes_hostile_names_so_the_shell_cannot_expand_them(
+        live_sdd, sdd_tree: Path, project_root: Path) -> None:
+    name = "o'brien $(whoami) `x` & y"
+    _write(project_root / _FSM_REL, fsm_component(name), state="ESCALATION")
+    body = live_sdd.client.get(f"/sdd/fsm/{name}", params={"root": str(project_root)}).json()
+    key = body["fsm_project"]
+    assert "'" in key and "$(whoami)" in key
+    powershell, posix = body["recovery"]["powershell"], body["recovery"]["posix"]
+    assert "--project '" + key.replace("'", "''") + "'" in powershell
+    assert "--project 'o'\"'\"'brien" in posix, "POSIX 以 shlex 的單引號形引用，$()、反引號不被展開"
+
+
+# ── 互斥鎖：讀取與 CLI 寫入同一把（ADR §3.5）──────────────────────────────────────────────
+def test_a_get_waits_while_the_same_project_is_being_written(
+        live_sdd, sdd_tree: Path) -> None:
+    fsm_dir = sdd_tree / _FSM_REL
+    _write(fsm_dir, "busy", state="IMPLEMENTATION")
+    other = _write(fsm_dir, "other", state="INIT")
+    assert other.is_file()
+    finished: dict[str, float] = {}
+
+    def fetch(name: str) -> None:
+        resp = live_sdd.client.get(f"/sdd/fsm/{name}")
+        assert resp.status_code == 200
+        finished[name] = time.monotonic()
+
+    began = time.monotonic()
+    with sdd_cli.state_guard(fsm_dir, "busy"):                 # 扮演「CLI 正在改這個專案」
+        blocked = threading.Thread(target=fetch, args=("busy",))
+        free = threading.Thread(target=fetch, args=("other",))
+        blocked.start()
+        free.start()
+        free.join(10)
+        time.sleep(0.5)
+        assert "other" in finished, "別的專案不受影響"
+        assert "busy" not in finished, "同一個 (狀態目錄, 專案鍵) 的讀取要等寫入結束"
+    blocked.join(10)
+    assert "busy" in finished and finished["busy"] >= began + 0.5
+
+
 # ── 對真實檔（AISDLC_SDD 不存在或沒有狀態檔時 skip）──────────────────────────────────────
 def _real_state_files(sdd_root: Path | None) -> list[Path]:
     if sdd_root is None:
@@ -339,7 +624,8 @@ def test_against_the_real_state_files_of_the_latest_sdd_version(bridge) -> None:
         detail = bridge.client.get(f"/sdd/fsm/{item['project']}")
         assert detail.status_code == 200, (item, detail.text)
         body = detail.json()
-        assert set(body) == _OLD_KEYS | _NEW_KEYS
+        escalated = state["current_state"] in ("ESCALATION", "ESCALATION_FINAL")
+        assert set(body) == _OLD_KEYS | _NEW_KEYS | ({"recovery"} if escalated else set())
         tracking = state.get("human_pending_tracking")
         assert body["human_pending"]["count"] == _expected_human_pending_count(tracking)
         assert len(body["human_pending"]["items"]) <= 5

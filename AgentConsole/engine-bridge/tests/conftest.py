@@ -14,6 +14,7 @@ import time
 import uuid
 import zlib
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,9 @@ import uvicorn
 from app.logsetup import teardown_logging
 from app.main import create_app
 from app.settings import Settings, load_settings
+from tests.fake_sdd import make_fake_sdd
+from tests.sdd_run_support import TOKEN as SDD_TOKEN
+from tests.sdd_run_support import make_project
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
 STEP_TIMEOUT = 60.0
@@ -232,6 +236,28 @@ def run_body(project_dir: Path, mock_claude_cmd: str) -> Callable[..., dict[str,
                 "env": merged_env, "fresh": False}
 
     return build
+
+
+# ── SDD 批次（ADR-XPLAT-016）：假 SDD 樹、專案根、帶寫入權杖的 Bridge ────────────────────
+@pytest.fixture
+def sdd_fake(tmp_path: Path) -> Path:
+    """暫存目錄內的假 SDD 版本目錄（只回放 ADR §4 契約的假 FSMRuntime CLI；見
+    tests/fake_sdd.py）。"""
+    return make_fake_sdd(tmp_path / "sdd")
+
+
+@pytest.fixture
+def sdd_proj(tmp_path: Path) -> Path:
+    """專案根（allowed roots 之下）：`docs/03_testing/contracts/` 放一份 TCS；FSM 狀態由各測試自己
+    seed。"""
+    return make_project(tmp_path / "projects")
+
+
+@pytest.fixture
+def sdd_live(make_bridge: Callable[..., Any], settings: Settings, sdd_fake: Path) -> Any:
+    """SDD 寫入面啟用的 Bridge：`sdd_root` 指向假 SDD 樹、設了寫入權杖
+    （`tests.sdd_run_support.TOKEN`）。"""
+    return make_bridge(replace(settings, sdd_root=sdd_fake, sdd_write_token=SDD_TOKEN))
 
 
 def read_trace(path: Path) -> list[dict[str, Any]]:

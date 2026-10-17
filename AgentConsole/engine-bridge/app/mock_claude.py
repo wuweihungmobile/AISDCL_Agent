@@ -14,8 +14,8 @@
 行為（全由環境變數控制；預設只有 0.2 秒的處理延遲，別無副作用）：
   MOCK_CLAUDE_DELAY        每次 `-p` 呼叫的處理秒數（預設 0.2）
   MOCK_CLAUDE_TRACE        若設定，每次 `-p` 呼叫 append 一行 JSON（pid／ts／prompt 頭尾／
-                           keywords）到該檔，測試用它證明「哪些步驟真的被呼叫過」，
-                           獨立於 Bridge 自己的帳
+                           keywords／sdd_env）到該檔，測試用它證明「哪些步驟真的被呼叫過」與
+                           「引擎子行程的環境有沒有 SDD 寫入面的名字」，獨立於 Bridge 自己的帳
   MOCK_CLAUDE_FAIL_REGEX   prompt 命中此 regex 時輸出不含任何 `[KEYWORD]`（讓 evaluator 判失敗）
   MOCK_CLAUDE_IGNORE_TERM  設為 1 時忽略 SIGTERM（POSIX；用來驗證 SIGKILL 升級路徑）
 輸出：單行 JSON，形狀對齊真 claude 的 `--output-format json`（含 usage／modelUsage，使引擎
@@ -64,6 +64,12 @@ def run(argv: list[str]) -> int:
                 "prompt_head": prompt[:80],
                 "prompt_tail": prompt[-120:],   # 引擎只會在前面加前綴：尾端必須原樣到達
                 "keywords": keywords,   # 引擎可能在 prompt 前加 global_goal 前綴：認關鍵字最穩
+                # 證明「引擎子行程的環境」長什麼樣（ADR-XPLAT-016 §9「剝除」列；F-7）：Bridge 自己
+                # 的環境若帶權杖／狀態目錄／別的專案鍵，它們不得走到這裡。只記名稱是否存在與非機密
+                # 值，絕不記權杖值。
+                "sdd_env": {"SDD_PROJECT": os.environ.get("SDD_PROJECT"),
+                            "SDD_STATE_DIR": os.environ.get("SDD_STATE_DIR"),
+                            "has_write_token": "BRIDGE_SDD_WRITE_TOKEN" in os.environ},
             }, ensure_ascii=False) + "\n")
     delay = float(os.environ.get("MOCK_CLAUDE_DELAY", "0.2") or 0)
     if delay > 0:

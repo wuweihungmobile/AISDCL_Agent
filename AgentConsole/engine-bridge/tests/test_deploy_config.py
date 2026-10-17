@@ -69,6 +69,32 @@ def test_the_encryption_key_is_required_by_compose_itself() -> None:
     assert ":-" not in line, "不得有預設值"
 
 
+# ── ADR-XPLAT-016 §9（G-09）：SDD 寫入面權杖的部署接線 ─────────────────────────────────────────
+def test_only_backend_and_engine_bridge_receive_the_sdd_write_token_with_an_empty_default() -> None:
+    """持有者只有 backend（發送）與 Bridge（驗證）：前端、資料庫層與其他服務都不該拿到它；預設空＝
+    停用（SDD 是選用引擎，不像 JWT_SECRET 設成 `:?` 必填）。"""
+    compose = _read(COMPOSE)
+    for service in ("backend", "engine-bridge"):
+        lines = [ln.strip() for ln in _service_block(compose, service).splitlines()]
+        assert "BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}" in lines, service
+    services = yaml.safe_load(compose)["services"]
+    holders = sorted(name for name, body in services.items()
+                     if "BRIDGE_SDD_WRITE_TOKEN" in (body.get("environment") or {}))
+    assert holders == ["backend", "engine-bridge"]
+    assert "BRIDGE_SDD_WRITE_TOKEN:?" not in compose, "必填會讓不用 SDD 的部署起不來"
+
+
+def test_the_env_example_holds_only_the_placeholder_and_the_bridge_refuses_it_verbatim() -> None:
+    from app.settings import SettingsError, load_settings
+
+    text = _read(CONSOLE_DIR / ".env.example")
+    entries = re.findall(r"^\s*#?\s*BRIDGE_SDD_WRITE_TOKEN=(.*)$", text, flags=re.M)
+    assert entries == ["<YOUR_BRIDGE_SDD_WRITE_TOKEN_MIN_32_CHARS>"], \
+        "範例檔只准放佔位，不放任何真值"
+    with pytest.raises(SettingsError):          # 原樣取消註解照抄＝啟動即失敗，不靜默退回停用
+        load_settings({"BRIDGE_SDD_WRITE_TOKEN": entries[0]})
+
+
 # ── C-16：檔案日誌與共用卷的權限 ─────────────────────────────────────────────────
 def test_file_logging_is_wired_to_the_shared_volume_without_order_dependence() -> None:
     compose = _read(COMPOSE)

@@ -96,8 +96,27 @@ class PlaybookIn(StrictModel):
             raise ValueError(f"引擎的 Playbook 模型拒絕：{exc.errors()[0]['msg']}") from exc
         return self
 
-    def to_engine_dict(self) -> dict[str, Any]:
-        return self.model_dump(exclude_none=True)
+    def to_engine_dict(self, *, sdd_workflow_path: str | None = None) -> dict[str, Any]:
+        """給引擎的 playbook。外部契約不開 `workflow_*`（`workflow_type` 只收 `auto`、
+        `extra=forbid`）；有 `sdd` 區塊時由 Bridge **伺服端**傳入已驗證的規格路徑，覆寫成
+        `aisdlc_sdd`＋`workflow_path`（D-115-06；ADR-XPLAT-016 §7.3）。"""
+        data = self.model_dump(exclude_none=True)
+        if sdd_workflow_path is not None:
+            data["workflow_type"] = "aisdlc_sdd"
+            data["workflow_path"] = sdd_workflow_path
+        return data
+
+
+class SddBlockIn(StrictModel):
+    """`POST /autoclaude/runs` 的選填 `sdd` 區塊（與 `playbook` 同層；ADR-XPLAT-016 §7.3）。
+    有這個區塊的請求要 `X-Bridge-Token`（它會觸發 FSM 寫入）；內容的清理在權杖檢查之後。"""
+
+    spec_dir: str
+    spec_file: str | None = None
+    # 原名或淨化後的鍵皆可：Bridge 一律先過 `fsm_names.fsm_component`。
+    fsm_project: str = Field(min_length=1, max_length=512)
+    root: str | None = None
+    approver: str | None = None
 
 
 class RunCreateIn(StrictModel):
@@ -108,6 +127,7 @@ class RunCreateIn(StrictModel):
     config_overrides: dict[str, Any] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
     fresh: bool = False
+    sdd: SddBlockIn | None = None
 
 
 class RestoreIn(StrictModel):
@@ -137,6 +157,24 @@ class ApproveIn(StrictModel):
 
 class SddCompileIn(StrictModel):
     spec_dir: str
+    # v1.5：同一目錄有多份 TCS 時指定要編譯的那份（相對 spec_dir；有給時 adapter 只讀這一份）。
+    spec_file: str | None = None
+    # v1.5：凍結閘只認 `FSM-STATE-<fsm_project>.yaml`（原名或淨化後的鍵皆可；省略＝不指定）。
+    fsm_project: str | None = Field(default=None, max_length=512)
+
+
+class SddFreezeIn(StrictModel):
+    """`POST /sdd/fsm/{project}:freeze` 的 body（唯一的 FSM 寫入動詞；ADR-XPLAT-016 §4.3、§6.3①）。
+    approver／reason 的內容規則（1～100／1～500 字、無控制字元、approver 不含 `;`）由路由在權杖檢
+    查後套 `sdd_sync.clean_*`，違反＝422 `sdd_invalid_argument`；這裡只管形狀。"""
+
+    root: str
+    stage: str | None = Field(default=None, pattern=r"^[A-Za-z0-9._-]{1,64}$")
+    docs: list[str] = Field(min_length=1, max_length=20)
+    approver: str
+    reason: str
+    # 核准人當時看到的摘要（相對 root 的 POSIX 路徑 → `sha256:<hex>`）：與現檔比對，不符＝409。
+    expected_digests: dict[str, str] | None = None
 
 
 # ── 回應 ──────────────────────────────────────────────────────────────────────
@@ -146,6 +184,8 @@ class RunCreatedOut(BaseModel):
     pid: int | None
     workspace: str
     bridge_instance: str
+    # v1.5：放行但值得出聲的事（例如 `sdd_frozen_digest_absent`）。沒有 `sdd` 的請求恆為空陣列。
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class StatusAckOut(BaseModel):

@@ -30,7 +30,7 @@ from typing import Any
 
 import yaml
 
-from . import procutil, security
+from . import procutil, sdd_run, security
 from .checkpoints import (
     CheckpointHistory,
     build_checkpoint_state,
@@ -45,9 +45,23 @@ from .logparse import LineParser, ParsedLine, StepDef, StepTracker
 from .models import DB_STATUS, TERMINAL_STATUSES, RunCreateIn, RunStatus
 from .resources import ResourceSampler
 from .runstate import RunPaths, RunRecord, load_record, save_record
+from .sdd_sync import (
+    RunFacts,
+    reason_exit_cancelled,
+    reason_exit_completed,
+    reason_exit_failed,
+    reason_exit_spawn_failed,
+    terminal_decision,
+)
 from .settings import Settings
 
 logger = logging.getLogger("bridge.runner")
+
+#: 引擎子行程環境要先剝除的、繼承自 Bridge 自己環境的名字（ADR-XPLAT-016 §9「剝除」列）。開發機先
+#: 在 SDD session 匯出再起 Bridge 是常態；不剝的話引擎子行程會悄悄拿到寫入權杖、狀態目錄指標與別的
+#: 專案鍵（子行程內的 AI 步驟就能自己呼叫「核准凍結」）。之後只有含 `sdd` 區塊的 run 才設
+#: `SDD_PROJECT`。
+_CHILD_ENV_STRIPPED = frozenset({"BRIDGE_SDD_WRITE_TOKEN", "SDD_STATE_DIR", "SDD_PROJECT"})
 
 _POLL_SECONDS = 0.05
 #: 單則 log 事件的字元上限：引擎的「啟動行」會把整份 prompt 印出來（可達數十 KB），
@@ -128,6 +142,9 @@ class RunHandle:
         self._end: Any = None
         self._last_error = ""
         self._escalation = ""
+        self._escalation_step = ""
+        #: 建立時放行但值得出聲的事（`POST /autoclaude/runs` 的 201 `warnings`；不落盤）。
+        self.create_warnings: list[dict[str, Any]] = []
         self._store: EventStore | None = None
 
     # ── 事件／狀態 ───────────────────────────────────────────────────────────
@@ -201,12 +218,19 @@ class RunHandle:
             self._spawn(fresh=fresh)
 
     def _child_env(self) -> dict[str, str]:
-        env = dict(os.environ)
+        # 先剝除繼承自 Bridge 的 SDD 寫入面名字（比對一律照大寫：Windows 的 os.environ 鍵恆為大
+        # 寫）。
+        env = {k: v for k, v in os.environ.items() if k.upper() not in _CHILD_ENV_STRIPPED}
         for key, value in self.request_env.items():
             # Windows 行為＝環境變數名不分大小寫，且 os.environ 以大寫保存；統一轉大寫免得重複。
             env[key.upper() if sys.platform == "win32" else key] = value
         # 引擎輸出含中文與符號：不論主機 locale（Windows cp950）一律 UTF-8，且不緩衝。
         env.update({"PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+        if self.rec.sdd:
+            # 只有含 `sdd` 區塊的 run 才有 SDD_PROJECT（adapter 靠它在多專案共處的狀態目錄選對檔）。
+            # 不注入 SDD_STATE_DIR：引擎沒有任何讀者需要它，給了只會讓子行程內的 AI 步驟拿到
+            # 「直接呼叫 FSM CLI 簽自己」的現成指向（ADR §7.3）。
+            env["SDD_PROJECT"] = str(self.rec.sdd["fsm_project"])
         return env
 
     def _spawn(self, *, fresh: bool) -> None:
@@ -223,6 +247,7 @@ class RunHandle:
         self._end = None
         self._last_error = ""
         self._escalation = ""
+        self._escalation_step = ""
         try:
             with log_path.open("wb") as log_fh:
                 proc = subprocess.Popen(
@@ -423,6 +448,7 @@ class RunHandle:
     def _on_state(self, parsed: ParsedLine) -> None:
         if parsed.state == "ESCALATION":
             self._escalation = parsed.detail
+            self._escalation_step = parsed.step_id or ""        # 終態同步的 reason 要記是哪一步
             failed = self.tracker.fail_current()
             if failed is not None:
                 self._emit_step(failed[0], "FAILED", failed[1], error=parsed.detail)
@@ -453,6 +479,98 @@ class RunHandle:
                 self._finish_normally(returncode, common)
             self.store.close()
             self.persist()
+        # 終態事件已先發布；現在（handle.lock 之外）才對 FSM 做委派同步——CLI 最壞 20 秒，不該卡住
+        # snapshot()。代價是「終態事件」到「FSM 回 IMPLEMENTATION」之間約 0.1 秒的視窗。
+        self._sdd_sync_terminal()
+
+    # ── SDD 委派同步（ADR-XPLAT-016 §10）─────────────────────────────────────────────────────
+    def _sdd_context(self) -> sdd_run.SddContext | None:
+        return sdd_run.SddContext.from_record(self.rec.sdd) if self.rec.sdd else None
+
+    def _record_sdd_sync(self, result: dict[str, Any]) -> None:
+        with self.lock:
+            if self.rec.sdd is not None:
+                self.rec.sdd["sync"] = result
+                self.persist()
+
+    def _sdd_exit(self, decision: str, reason: str) -> dict[str, Any]:
+        """對 FSM 做一次 `delegate-exit`，回傳要記進 `RunRecord.sdd.sync` 的結果；**永不丟例外**
+        （終態同步失敗只記 alert，不改 run 狀態、不重試；監督執行緒的例外會把已終態的 run 誤標成崩
+        潰）。rc 3（FSM 已不在 AUTOCLAUDE_DELEGATED，例如人工已處理）＝視為「已就位」，記
+        `SDD_SYNC_STATE_DRIFT` 警告，不算失敗。"""
+        ctx = self._sdd_context()
+        result: dict[str, Any] = {"exit": decision, "ok": True, "at": _now()}
+        if ctx is None:
+            return result
+        try:
+            sdd_run.exit_delegation(ctx, self.rec.run_id, decision=decision, reason=reason,
+                                    sdd_root=self.mgr.settings.sdd_root, audit=self.mgr.audit)
+        except ApiError as exc:
+            if exc.status_code == 409 and exc.body.get("reason") == "fsm_state_conflict":
+                result["drift"] = True
+                self.alert("warning", "SDD_SYNC_STATE_DRIFT",
+                           f"終態同步時 FSM 已不在 AUTOCLAUDE_DELEGATED（現況 "
+                           f"{exc.body.get('current_state')}），視為已就位，未再動 FSM")
+            else:
+                result.update(ok=False, error=str(exc.body.get("reason")))
+                self.alert("error", "SDD_FSM_SYNC_FAILED",
+                           f"終態同步（delegate-exit {decision}）失敗：{exc.body.get('reason')}；"
+                           "FSM 留在原態，由下一個批次的回收點或人工處理")
+        except Exception as exc:                                  # noqa: BLE001
+            logger.exception("SDD 終態同步發生未預期的錯誤（run=%s）", self.rec.run_id)
+            result.update(ok=False, error=type(exc).__name__)
+            self.alert("error", "SDD_FSM_SYNC_FAILED",
+                       f"終態同步（delegate-exit {decision}）發生未預期的錯誤："
+                       f"{type(exc).__name__}")
+        return result
+
+    def _sdd_sync_terminal(self, *, orphan: bool = False) -> None:
+        """終態對映（§10.1，純函式 `sdd_sync.terminal_decision`）：完成與使用者取消＝`done`（交還
+        控制權，不是「成功」）、引擎升級型失敗＝`failed`；其餘（額度停機、異常、被訊號終止、spawn
+        失敗、Bridge 關閉、孤兒、暫停）不動 FSM，留給下一個批次的回收點。"""
+        try:
+            rec = self.rec
+            if not rec.sdd:
+                return
+            decision = terminal_decision(
+                rec.status, escalation=self._escalation, stop_requested=self.stop_requested,
+                shutting_down=self.shutting_down, orphan=orphan)
+            if decision is None:
+                return
+            if decision == "failed":
+                reason = reason_exit_failed(rec.run_id, self._escalation_step, self._escalation)
+            elif rec.status == RunStatus.CANCELLED.value:
+                reason = reason_exit_cancelled(rec.run_id)
+            else:
+                reason = reason_exit_completed(rec.run_id)
+            self._record_sdd_sync(self._sdd_exit(decision, reason))
+        except Exception:                                         # noqa: BLE001
+            logger.exception("SDD 終態同步失敗（run=%s）", self.rec.run_id)
+
+    def sdd_compensate_spawn_failure(self) -> None:
+        """spawn 失敗的補償：`delegate-enter` 已做、委派從未開始，以 `done` 離開（回
+        IMPLEMENTATION＝「沒有進行中的委派」）。🔴 不得用 `failed`——那會進阻塞態 ESCALATION，不可
+        把基礎設施故障映成它。
+        補償本身失敗只記 ERROR 與 alert，不改變對呼叫端的錯誤回應。"""
+        try:
+            self._record_sdd_sync(self._sdd_exit("done", reason_exit_spawn_failed(self.rec.run_id)))
+        except Exception:                                         # noqa: BLE001
+            logger.exception("SDD 補償失敗（run=%s）", self.rec.run_id)
+
+    def _sdd_continue(self) -> bool:
+        """`resume`／`restore` 的 SDD 重驗與 FSM 前置（§10.1 末列）：重跑 `load_spec`（凍結＝現檔）
+        並比對匯入時的任務摘要（不符＝409 `spec_digest_changed`）；FSM 為 AUTOCLAUDE_DELEGATED 且
+        `playbook_ref` 就是本 run⇒直接續；為 IMPLEMENTATION⇒`delegate-enter` 重進；引用別的 run⇒
+        走回收點判定；其餘（含 ESCALATION）⇒409 並**不 spawn**。回傳這次呼叫是否做了
+        `delegate-enter`（之後失敗要補償）。"""
+        ctx = self._sdd_context()
+        if ctx is None:
+            return False
+        sdd_run.revalidate(ctx, self.paths.playbook)
+        outcome = sdd_run.execute_delegation(
+            ctx, self.rec.run_id, mode="continue", sdd_root=self.mgr.settings.sdd_root,
+            audit=self.mgr.audit, lookup=self.mgr.sdd_facts)
+        return bool(outcome["entered"])
 
     def _finish_pause(self, common: dict[str, Any]) -> None:
         self.tracker.fail_current()          # 邊界之後才開始的步驟是被中止的 spawn：靜默丟棄
@@ -550,15 +668,17 @@ class RunHandle:
                 self.stop_requested = True
                 self.set_status(RunStatus.CANCELLING, "已要求取消：終止引擎行程樹")
                 return RunStatus.CANCELLING.value
-            if status == RunStatus.PAUSED:               # 沒有行程可終止：直接收尾
-                self.set_status(RunStatus.CANCELLING, "已要求取消（暫停中，無行程）")
-                self.rec.completed_at = _now()
-                self.set_status(RunStatus.CANCELLED, "使用者取消",
-                                completed_at=self.rec.completed_at)
-                self.mgr.release_lock(self)
-                self.store.close()
-                return RunStatus.CANCELLING.value
-            raise invalid_state(self.rec.run_id, status, "stop")
+            if status != RunStatus.PAUSED:
+                raise invalid_state(self.rec.run_id, status, "stop")
+            # PAUSED：沒有行程可終止，直接收尾
+            self.set_status(RunStatus.CANCELLING, "已要求取消（暫停中，無行程）")
+            self.rec.completed_at = _now()
+            self.set_status(RunStatus.CANCELLED, "使用者取消", completed_at=self.rec.completed_at)
+            self.mgr.release_lock(self)
+            self.store.close()
+        # 暫停中取消也是終態：委派交還控制權（`done`）。在 handle.lock 之外呼叫（CLI 最壞 20 秒）。
+        self._sdd_sync_terminal()
+        return RunStatus.CANCELLING.value
 
     def _recheck_path(self) -> None:
         """續跑前重驗 execution_path：暫停期間目錄可能被換成指向白名單外的 symlink（TOCTOU）。"""
@@ -572,18 +692,27 @@ class RunHandle:
             if self.rec.status != RunStatus.PAUSED:
                 raise invalid_state(self.rec.run_id, self.rec.status, "resume")
             self._recheck_path()
-            self._adopt_env(env)
-            checkpoint = load_engine_checkpoint(self.paths.checkpoints, self.paths.playbook)
-            if checkpoint is None:                       # 引擎 checkpoint 被刪：用最新歷史快照補寫
-                latest = self.history.latest()
-                if latest is None:
-                    raise ApiError(409, "no_checkpoint", detail="找不到可續跑的 checkpoint")
-                write_engine_checkpoint(self.paths.checkpoints, self.paths.playbook,
-                                        latest["state"])
+            # SDD 批次：重驗（凍結＝現檔＝匯入）與 FSM 前置；不合就 409／422 並**不 spawn**（run
+            # 仍是 PAUSED）。
+            entered = self._sdd_continue()
+            try:
+                self._adopt_env(env)
                 checkpoint = load_engine_checkpoint(self.paths.checkpoints, self.paths.playbook)
-            self._rewind_to(list(checkpoint.completed_step_ids),
-                            list(checkpoint.completed_step_log))
-            self._spawn(fresh=False)
+                if checkpoint is None:                   # 引擎 checkpoint 被刪：用最新歷史快照補寫
+                    latest = self.history.latest()
+                    if latest is None:
+                        raise ApiError(409, "no_checkpoint", detail="找不到可續跑的 checkpoint")
+                    write_engine_checkpoint(self.paths.checkpoints, self.paths.playbook,
+                                            latest["state"])
+                    checkpoint = load_engine_checkpoint(self.paths.checkpoints,
+                                                        self.paths.playbook)
+                self._rewind_to(list(checkpoint.completed_step_ids),
+                                list(checkpoint.completed_step_log))
+                self._spawn(fresh=False)
+            except BaseException:
+                if entered:                              # 這次呼叫剛 enter 的委派：失敗就補償退出
+                    self.sdd_compensate_spawn_failure()
+                raise
             return RunStatus.RUNNING.value
 
     def restore(self, checkpoint_id: str, env: dict[str, str] | None = None) -> None:
@@ -596,7 +725,11 @@ class RunHandle:
                 raise not_found("checkpoint_not_found", checkpoint_id=checkpoint_id)
             self._recheck_path()
             self.mgr.reacquire_lock(self)                # PAUSED 持鎖＝略過；終態重取：可能 409
+            entered = False
             try:
+                # SDD 批次：重驗與 FSM 前置放在第一步（還沒動任何東西），不合就 409／422 並不
+                # spawn。
+                entered = self._sdd_continue()
                 self._adopt_env(env)
                 state = snap["state"]
                 write_engine_checkpoint(self.paths.checkpoints, self.paths.playbook, state)
@@ -611,10 +744,17 @@ class RunHandle:
                 # 重取之後、spawn 之前失敗：終態 run 的鎖是剛重取的、run 仍是終態 ⇒ 放掉再丟，
                 # 否則終態 run 會一直持著它（同 project＋path 的新 run 全 409，直到 Bridge 重啟）。
                 # PAUSED run 的鎖本來就是它的、沒有重取：不動。spawn 本身的失敗由 _spawn 自己收尾。
+                if entered:                              # 這次剛 enter 的委派：失敗就補償退出
+                    self.sdd_compensate_spawn_failure()
                 if status in TERMINAL_STATUSES:
                     self.mgr.release_lock(self)
                 raise
-            self._spawn(fresh=False)
+            try:
+                self._spawn(fresh=False)
+            except BaseException:
+                if entered:
+                    self.sdd_compensate_spawn_failure()
+                raise
 
     def _adopt_env(self, env: dict[str, str] | None) -> None:
         if env:
@@ -746,22 +886,80 @@ class RunManager:
 
     def _create(self, req: RunCreateIn, run_id: str) -> RunHandle:
         exec_path = self._validate(req, run_id)
+        # 1 SDD 唯讀預檢（路徑閘→規格與凍結→三點摘要→FSM 狀態）：4xx、零副作用，先於取鎖
+        plan = self._sdd_precheck(req, run_id, exec_path) if req.sdd is not None else None
         try:
             info = self.locks.acquire(req.project, str(exec_path), run_id)
         except LockBusy as busy:
             raise lock_held(busy.holder_run_id) from busy
         except LockUnavailable as exc:
             raise ApiError(503, "lock_backend_unavailable", detail=str(exc)) from exc
+        entered = False
         try:
-            handle = self._materialize(req, run_id, exec_path, info)
+            if plan is not None:
+                # 3 FSM 寫入（依預檢表）：在 _materialize 之前，失敗時才不會留下半成品 run 目錄
+                # （否則 reconcile 下次啟動會把它當「活躍而無行程」的孤兒標成 FAILED，憑空多一筆假
+                # 紀錄）
+                outcome = sdd_run.execute_delegation(
+                    plan.ctx, run_id, mode="create", sdd_root=self.settings.sdd_root,
+                    audit=self.audit, lookup=self.sdd_facts, spec_rel=plan.spec_rel,
+                    digest=plan.spec.digest)
+                entered = bool(outcome["entered"])
+            handle = self._materialize(req, run_id, exec_path, info, plan)
         except BaseException:
+            # 4 _materialize 失敗：補償 delegate-exit done
+            if entered and plan is not None:
+                self._sdd_compensate_without_handle(plan.ctx, run_id)
             self.locks.release(info.key, run_id)
             raise
         with self._mutex:
             self._runs[run_id] = handle
-        handle.start(fresh=req.fresh,
-                     ignored_overrides=security.ignored_managed_keys(req.config_overrides))
+        if plan is not None:
+            handle.create_warnings = list(plan.warnings)
+        try:
+            handle.start(fresh=req.fresh,
+                         ignored_overrides=security.ignored_managed_keys(req.config_overrides))
+        except ApiError as exc:
+            if entered and exc.body.get("reason") == "spawn_failed":
+                handle.sdd_compensate_spawn_failure()    # 5 spawn 失敗：補償（handle.lock 之外）
+            raise
         return handle
+
+    def _sdd_precheck(self, req: RunCreateIn, run_id: str, exec_path: Path) -> sdd_run.SddPrecheck:
+        """§10.2 步驟 1 的 SDD 部分（權杖已在路由檢查）：全部唯讀，任何一關不過就 4xx、不取鎖、不
+        寫 FSM、不 spawn。FSM 狀態在這裡只判不寫（寫入前會在 `state_guard` 內重讀重判，防
+        TOCTOU）。"""
+        assert req.sdd is not None
+        ctx = sdd_run.build_context(self.settings, req.sdd, exec_path)
+        check = sdd_run.precheck_spec(ctx, req.playbook)
+        state = sdd_run.read_snapshot(ctx)                    # 沒有狀態檔＝404（Bridge 不 init）
+        sdd_run.plan_delegation(state, ctx=ctx, run_id=run_id, mode="create", lookup=self.sdd_facts)
+        return check
+
+    def sdd_facts(self, run_id: str) -> RunFacts | None:
+        """回收點判定（§10.3）要的事實：Bridge 登錄裡（含重啟後由 `run.json` 還原的）該 run 的狀態與
+        所屬 FSM 專案；查無此 run＝None。"""
+        handle = self.get(run_id)
+        if handle is None:
+            return None
+        rec = handle.rec
+        sdd = rec.sdd or {}
+        state_dir = sdd.get("state_dir")
+        return RunFacts(status=rec.status,
+                        state_dir=os.path.normcase(state_dir) if state_dir else None,
+                        fsm_project=sdd.get("fsm_project"))
+
+    def _sdd_compensate_without_handle(self, ctx: sdd_run.SddContext, run_id: str) -> None:
+        """`_materialize` 失敗時（還沒有 handle）的補償：`delegate-enter` 已做、run 從未建立，以
+        `done`退出。失敗只記 ERROR 與稽核，不改變對呼叫端的錯誤回應。"""
+        try:
+            sdd_run.exit_delegation(ctx, run_id, decision="done",
+                                    reason=reason_exit_spawn_failed(run_id),
+                                    sdd_root=self.settings.sdd_root, audit=self.audit)
+        except Exception as exc:                              # noqa: BLE001
+            logger.error("SDD 補償失敗（run=%s）：%s", run_id, exc)
+            self.audit.record("sdd_write", verb="compensate", project=ctx.fsm_project,
+                              result=f"error:{type(exc).__name__}", run_id=run_id)
 
     def _validate(self, req: RunCreateIn, run_id: str) -> Path:
         allow = self.settings.outbound_allowlist
@@ -796,14 +994,18 @@ class RunManager:
         return security._check_url_field(effective, "effective.minimax.base_url", allow,
                                          self.audit, ctx)
 
-    def _materialize(self, req: RunCreateIn, run_id: str, exec_path: Path,
-                     info: Any) -> RunHandle:
+    def _materialize(self, req: RunCreateIn, run_id: str, exec_path: Path, info: Any,
+                     plan: sdd_run.SddPrecheck | None = None) -> RunHandle:
         paths = RunPaths(self.settings.engine_workspace / run_id)
         paths.run_dir.mkdir(parents=True, exist_ok=False)
         for sub in (paths.checkpoints, paths.logs, paths.backups, paths.scripts):
             sub.mkdir(parents=True, exist_ok=True)
-        paths.playbook.write_text(_yaml_dump(req.playbook.to_engine_dict()),
-                                  encoding="utf-8", newline="\n")
+        # 含 `sdd` 區塊：伺服端把 workflow_type 覆寫成 aisdlc_sdd、workflow_path 設成已驗證的
+        # realpath（外部契約不開 workflow_*；D-115-06）。沒有 `sdd` 的請求行為與 v1.4 完全相同。
+        workflow_path = str(plan.ctx.workflow_path) if plan is not None else None
+        paths.playbook.write_text(
+            _yaml_dump(req.playbook.to_engine_dict(sdd_workflow_path=workflow_path)),
+            encoding="utf-8", newline="\n")
         paths.config.write_text(_yaml_dump(materialize_config(req.config_overrides, paths)),
                                 encoding="utf-8", newline="\n")
         steps = [StepDef(t.step_id, t.name, t.prompt, t.goal_task_id) for t in req.playbook.tasks]
@@ -813,7 +1015,8 @@ class RunManager:
             total_steps=len(steps), lock_key=info.key, db_lock_key=info.db_key,
             steps=[{"step_id": s.step_id, "name": s.name, "goal_task_id": s.goal_task_id}
                    for s in steps],
-            env_keys=sorted(req.env))
+            env_keys=sorted(req.env),
+            sdd=plan.ctx.record() if plan is not None else None)
         handle = RunHandle(self, rec, paths, steps, request_env=req.env)
         handle.persist()
         return handle
