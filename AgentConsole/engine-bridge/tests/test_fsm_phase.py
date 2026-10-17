@@ -381,11 +381,32 @@ class _State(StrEnum):
     BLOCKING_STATE = "ESCALATION"
 
 
+# 注意：參數化的 id 一律手寫固定字串。xdist 每個 worker 各自收集，id 只要含物件 repr（`object()`
+# 的記憶體位址在 Linux 每個行程都不同）、集合順序或雜湊值，worker 之間收集到的測試清單就不一致，
+# 整個 pytest 直接中止（「Different tests were collected between gw0 and gw1」）。
 @pytest.mark.parametrize("value", [
-    b"INIT", bytearray(b"INIT"), object(), float("nan"), (1, 2), frozenset({"INIT"}), range(3),
-    Ellipsis, -1, 0, 10**30, "x" * 10_000, "INIT\x00", "INIT\n", "\tINIT", "Init", "init",
-    "ＩＮＩＴ", "INIT ", "\N{IDEOGRAPHIC SPACE}", "\N{ZERO WIDTH SPACE}",
-], ids=lambda v: type(v).__name__ + ":" + repr(v)[:24])
+    pytest.param(b"INIT", id="bytes"),
+    pytest.param(bytearray(b"INIT"), id="bytearray"),
+    pytest.param(object(), id="object"),
+    pytest.param(float("nan"), id="float-nan"),
+    pytest.param((1, 2), id="tuple"),
+    pytest.param(frozenset({"INIT"}), id="frozenset"),
+    pytest.param(range(3), id="range"),
+    pytest.param(Ellipsis, id="ellipsis"),
+    pytest.param(-1, id="int-negative"),
+    pytest.param(0, id="int-zero"),
+    pytest.param(10**30, id="int-huge"),
+    pytest.param("x" * 10_000, id="str-10k-chars"),
+    pytest.param("INIT\x00", id="str-nul-suffix"),
+    pytest.param("INIT\n", id="str-newline-suffix"),
+    pytest.param("\tINIT", id="str-tab-prefix"),
+    pytest.param("Init", id="str-mixed-case"),
+    pytest.param("init", id="str-lower-case"),
+    pytest.param("ＩＮＩＴ", id="str-fullwidth-letters"),
+    pytest.param("INIT ", id="str-trailing-space"),
+    pytest.param("\N{IDEOGRAPHIC SPACE}", id="str-ideographic-space"),
+    pytest.param("\N{ZERO WIDTH SPACE}", id="str-zero-width-space"),
+])
 def test_unrecognised_inputs_of_any_type_are_unknown_and_never_raise(value: object) -> None:
     assert phase_of(value) == UNKNOWN
 

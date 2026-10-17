@@ -25,6 +25,7 @@ from typing import Any
 import pytest
 import yaml
 
+from app.fsm_phase import phase_of
 from tests.conftest import TERMINAL, read_trace
 from tests.sdd_run_support import (
     CONTRACTS_REL,
@@ -53,9 +54,22 @@ OK_ROWS = [
 #: E2E 類 AT 走 SCG-5（重試上限 2）；Then 的字面值替身永遠不會輸出 ⇒ 驗收 regex 必敗。
 FAIL_ROWS = [("AC-001-1", "AT-001-1-1", "E2E", "NEVER_PRINTED_1")]
 
+#: 契約 §3.1.5 的字面值（獨立於 app/fsm_phase.py 手寫）：ESCALATION→BLOCKED／0、IMPLEMENTATION→
+#: IMPLEMENTATION／5。
 BLOCKED_PHASE = {"name": "BLOCKED", "order": 0, "blocking": True, "observation": False}
 IMPLEMENTATION_PHASE = {"name": "IMPLEMENTATION", "order": 5, "blocking": False,
                         "observation": False}
+
+
+def assert_phase(view: dict[str, Any], expected: dict[str, Any]) -> None:
+    """T-G（app/fsm_phase.py）已接線：phase 必須是 `{name, order, blocking, observation}` 物件
+    （不得是 null），四欄型別與值合契約 §3.1.5，且等於 `phase_of(current_state)` 的回傳。"""
+    phase = view["phase"]
+    assert isinstance(phase, dict), f"phase 不得是 null／非物件：{phase!r}"
+    assert set(phase) == {"name", "order", "blocking", "observation"}, phase
+    assert type(phase["name"]) is str and type(phase["order"]) is int, phase
+    assert type(phase["blocking"]) is bool and type(phase["observation"]) is bool, phase
+    assert phase == expected == phase_of(view["current_state"]), (view["current_state"], phase)
 
 #: SDD v0.24 起規則遙測預設 ON：沒有這兩個 0 的 CLI 驅動會把 fire／catch 計數寫回 tracked 的
 #: `governance/rules/*.yaml`（fsm_runtime.py D28 註解），測試不得弄髒 SDD 樹。Bridge 自己呼叫 CLI
@@ -292,11 +306,11 @@ def test_the_success_fixture_walks_the_whole_loop_and_hands_control_back(
         "ac": {"covered": 2, "total": 2, "pct": 100.0}, "failed_at_ids": [],
         "weak_regex_at_ids": [], "unmapped_at_ids": [], "fully_covered": True, "advisory": True}
 
-    # Console 卡片讀的 Bridge 視圖：回 IMPLEMENTATION、沒有恢復指令；phase 在 T-G 搬入前為 null
+    # Console 卡片讀的 Bridge 視圖：回 IMPLEMENTATION、沒有恢復指令；phase 是 T-G 純函式的投影
     view = live.client.get(f"/sdd/fsm/{key}", params={"root": str(root)}).json()
     assert view["current_state"] == "IMPLEMENTATION" and view["fsm_project"] == key
     assert view["escalation_history"] == [] and "recovery" not in view
-    assert view["phase"] in (None, IMPLEMENTATION_PHASE)
+    assert_phase(view, IMPLEMENTATION_PHASE)
 
 
 # ── 失敗夾具：重試耗盡 → 引擎升級 → ESCALATION → 人工恢復 → 下一批次可啟動 ──────────────────
@@ -339,7 +353,8 @@ def test_the_failure_fixture_escalates_and_is_recovered_by_the_displayed_command
 
     # Console 卡片：阻塞態、provenance、可複製的恢復指令（兩種殼各一條）
     view = live.client.get(f"/sdd/fsm/{key}", params={"root": str(root)}).json()
-    assert view["current_state"] == "ESCALATION" and view["phase"] in (None, BLOCKED_PHASE)
+    assert view["current_state"] == "ESCALATION"
+    assert_phase(view, BLOCKED_PHASE)
     assert view["escalation_provenance"]["source"] == "autoclaude_delegated_failed"
     assert view["escalation_history"][-1]["resolved_at"] is None
     recovery = view["recovery"]
@@ -366,7 +381,8 @@ def test_the_failure_fixture_escalates_and_is_recovered_by_the_displayed_command
     assert healed["escalation_provenance"]["source"] == "autoclaude_delegated_failed", \
         "恢復後 provenance 不清除：有沒有未解的失敗要看 current_state 與歷史末筆"
     again = live.client.get(f"/sdd/fsm/{key}", params={"root": str(root)}).json()
-    assert again["phase"] in (None, IMPLEMENTATION_PHASE) and "recovery" not in again
+    assert_phase(again, IMPLEMENTATION_PHASE)
+    assert "recovery" not in again
 
     # 下一個批次可直接啟動（這個夾具的規格仍必敗，所以再升級一次：歷史多一筆未解的）
     second = post(live, batch_body(run_body, root, key, FAIL_TCS, tasks))
