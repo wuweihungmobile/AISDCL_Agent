@@ -264,6 +264,22 @@ T-G 規格輪廓（供 QA 寫 TCS；Gherkin 的 Then 必含引號字面值，使
 
 ⇒ **軌道① 系列自本檔起重新休眠**（範圍結案；北極星不因此視為達成）。對掌舵者兩問的答案：問題 2（框架體檢）＝已完成、可從提示詞拿掉；問題 1（SDD 融入整個系統）＝**是**——範圍限 Windows、haiku、單機、Unit 類 AT（證據檔 §1.8／§1.10 的但書與 §8 未涵蓋），可從提示詞拿掉；再開只由範本〈🏁〉T1～T4 事件驅動。
 
+## §8 零退化驗證矩陣（收尾單人窗口、主控親跑；逐字）
+
+量測樹＝`dadb49f5`（矩陣起跑時 HEAD；其後僅 `4c24710c` 文件與 `45b74056` 兩支 Bridge 測試檔改動，不在下列各面的輸入內；Bridge 面另於 `45b74056` 工作樹補跑）。
+
+| 檢查 | 命令 | 本輪實測 | 通過條件 |
+|---|---|---|---|
+| 缺陷帳本 | `python tools/check_defect_log_crossref.py --unresolved-count` | `未結列數＝0／全部 243 列｜warn=86 fail=98` | 未結列數＝0 |
+| 根層 tools/tests 全套 | `python tools/run_root_unittests.py` | `✅ unittest 數量下限釘選通過：發現 5384 個測試（下限 5326）`，rc=0 | rc=0 |
+| AutoClaude 全套 | `python -m pytest tests/ -q -n 8 --dist loadgroup` | `5875 passed, 7 skipped, 14 warnings in 54.18s`；`lint-imports` `Contracts: 9 kept, 0 broken.` | rc=0、9 kept |
+| AISDLC_SDD 閘門 | `AISDLC_SDD/scripts/ci-gate.ps1` | `逐軌計數：AISDLC_SDD_v0.01:1478 AISDLC_SDD_v0.30:2140 scripts/tests:383`，rc=0；TLC＝N/A（`transition_rules.py` 與 `formal/` diff 為空，W5 核） | rc=0 |
+| Bridge | `ruff check` 根視角；`pytest tests/test_fsm_phase.py tests/test_sdd_dogfood_fixture.py -n 4`（`45b74056` 樹） | `All checks passed!`；`81 passed`（xdist 4 worker 收集一致）；全套 `996 passed, 24 skipped`＝他包回報（W5 於 `ae31e882`、Dev-Bridge 於最終樹各一次） | rc=0 |
+| Backend | `.\gradlew.bat clean build --console=plain` | `BUILD SUCCESSFUL`（1946 支、0 失敗＝他包回報；主控只讀 BUILD 結果行） | BUILD SUCCESSFUL |
+| Frontend | `npm run lint`／`npx tsc --noEmit`／`npx vitest run` | rc 皆 0；`Tests 1122 passed (1122)` | rc=0 |
+| 文件鎖 | `check_pytest_baseline_sites`／`check_handoff_carriers`／`TestR81GhostPathClaims` | 皆 rc=0（本輪多次現跑；最近一次於 QA 交卷後） | rc=0 |
+| 雲端 | `gh run list` 對 `5593e178`：五支 success；對 `ae31e882`：root-infra／macos／windows success、agentconsole-ci 紅（xdist 收集不一致，修於 `45b74056`）；最終 HEAD 的 run 由收尾 push 後現查 | 觸發的 workflow 皆 success |
+
 ## §7 各棒交卷與主控親驗（W2 起逐棒填；「他包回報」與「主控親跑」分開寫）
 
 | 棒 | commit | 主控親跑（當回合逐字） | 接受的偏離（D-115-17） | 未做／待整合 |
