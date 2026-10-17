@@ -4,6 +4,7 @@ import com.aisdlc.console.domain.exception.ConflictException;
 import com.aisdlc.console.domain.exception.ValidationException;
 import com.aisdlc.console.domain.exception.Violations;
 import com.aisdlc.console.domain.service.FieldRules;
+import com.aisdlc.console.domain.service.SddBindingRules;
 import com.aisdlc.console.domain.service.StateMachines;
 
 import java.time.Instant;
@@ -40,12 +41,16 @@ public final class Project {
     private final String createdBy;
     private Instant deletedAt;
     private ProjectStatus statusBeforeDelete;
+    private String sddProject;
+    private String sddSpecDir;
+    private String sddSpecFile;
 
     @SuppressWarnings("java:S107")
     private Project(UUID id, String name, String executionPath, String passCriteria, String description,
                     ProjectStatus status, int autonomyLevel, boolean signedOff, String signedOffBy,
                     Instant signedOffAt, boolean deleted, Instant createdAt, Instant updatedAt,
-                    String createdBy, Instant deletedAt, ProjectStatus statusBeforeDelete) {
+                    String createdBy, Instant deletedAt, ProjectStatus statusBeforeDelete, String sddProject,
+                    String sddSpecDir, String sddSpecFile) {
         this.id = id;
         this.name = name;
         this.executionPath = executionPath;
@@ -62,9 +67,15 @@ public final class Project {
         this.createdBy = createdBy;
         this.deletedAt = deletedAt;
         this.statusBeforeDelete = statusBeforeDelete;
+        this.sddProject = sddProject;
+        this.sddSpecDir = sddSpecDir;
+        this.sddSpecFile = sddSpecFile;
     }
 
-    /** 建立新專案：狀態 DRAFT；手動建立（非草案）預設已 signoff，草案則 signedOff=false。 */
+    /**
+     * 建立新專案：狀態 DRAFT；手動建立（非草案）預設已 signoff，草案則 signedOff=false。{@link NewProject} 的 SDD 綁定三欄只有路徑 A
+     * 的 confirm 會帶（契約 §0.5 V12 寫入規則②：{@code POST／PUT /projects} 的請求不收這三欄）。
+     */
     public static Project create(NewProject spec, String createdBy, Instant now) {
         Violations v = new Violations();
         String name = FieldRules.requiredText(v, "name", "名稱", spec.name(), 200);
@@ -72,10 +83,14 @@ public final class Project {
         String passCriteria = FieldRules.requiredMarkdown(v, "passCriteria", "通過標準", spec.passCriteria());
         Integer autonomy = FieldRules.autonomyLevel(v, "autonomyLevel", spec.autonomyLevel(),
                 DEFAULT_AUTONOMY_LEVEL);
+        String sddProject = SddBindingRules.storedProject(v, "sddProject", spec.sddProject());
+        String sddSpecDir = SddBindingRules.storedPath(v, "sddSpecDir", spec.sddSpecDir());
+        String sddSpecFile = SddBindingRules.storedPath(v, "sddSpecFile", spec.sddSpecFile());
         v.throwIfAny();
         return new Project(UUID.randomUUID(), name, path, passCriteria,
                 FieldRules.optionalMarkdown(spec.description()), ProjectStatus.DRAFT, autonomy,
-                !spec.draft(), null, null, false, now, now, createdBy, null, null);
+                !spec.draft(), null, null, false, now, now, createdBy, null, null, sddProject, sddSpecDir,
+                sddSpecFile);
     }
 
     /** 由持久層資料還原（不做驗證、不產生新 id）。 */
@@ -84,10 +99,11 @@ public final class Project {
                                   String description, ProjectStatus status, int autonomyLevel,
                                   boolean signedOff, String signedOffBy, Instant signedOffAt,
                                   boolean deleted, Instant createdAt, Instant updatedAt, String createdBy,
-                                  Instant deletedAt, ProjectStatus statusBeforeDelete) {
+                                  Instant deletedAt, ProjectStatus statusBeforeDelete, String sddProject,
+                                  String sddSpecDir, String sddSpecFile) {
         return new Project(id, name, executionPath, passCriteria, description, status, autonomyLevel,
                 signedOff, signedOffBy, signedOffAt, deleted, createdAt, updatedAt, createdBy, deletedAt,
-                statusBeforeDelete);
+                statusBeforeDelete, sddProject, sddSpecDir, sddSpecFile);
     }
 
     /**
@@ -253,6 +269,60 @@ public final class Project {
         updatedAt = now;
     }
 
+    // ── SDD 綁定（契約 §1.10.5、§0.5 V12；Console 專案是錨）──────────────────────────────
+
+    /**
+     * 有效 FSM 專案（契約 §1.10.5）：{@code sddProject} 有值取它，否則取<b>專案名</b>。<b>Backend 不自行淨化</b>（淨化鏡像只有 Bridge 有）：
+     * 一律把「有效值（可以是原名）」交給 Bridge，由 Bridge 回應帶淨化後的標準鍵。
+     */
+    public String effectiveSddProject() {
+        return sddProject == null || sddProject.isBlank() ? name : sddProject;
+    }
+
+    /**
+     * 改寫 FSM 專案鍵（{@code null}＝清除，回到「用預設」）：第一次使用時寫回標準鍵，或使用者在 {@code PUT /projects/{id}/sdd-binding}
+     * 輸入的值。值先經 {@link SddBindingRules#storedProject} 驗長度。
+     *
+     * @return 值有變才 true（只有真的改了才動 {@code updatedAt}；相同值＝冪等）
+     */
+    public boolean rebindSddProject(String value, Instant now) {
+        Violations v = new Violations();
+        String next = SddBindingRules.storedProject(v, "sddProject", value);
+        v.throwIfAny();
+        if (Objects.equals(next, sddProject)) {
+            return false;
+        }
+        sddProject = next;
+        updatedAt = now;
+        return true;
+    }
+
+    /**
+     * 路徑 A 的 confirm 回填規格綁定（冪等更新；契約 §1.10.8）：{@code sddSpecDir}＝編譯回應 {@code spec_path} 的父目錄、
+     * {@code sddSpecFile}＝{@code spec_path}（皆絕對路徑）。null 的參數不動該欄位。
+     *
+     * @return 任一欄位有變才 true
+     */
+    public boolean bindSddSpec(String specDir, String specFile, Instant now) {
+        Violations v = new Violations();
+        String dir = SddBindingRules.storedPath(v, "sddSpecDir", specDir);
+        String file = SddBindingRules.storedPath(v, "sddSpecFile", specFile);
+        v.throwIfAny();
+        boolean changed = false;
+        if (dir != null && !dir.equals(sddSpecDir)) {
+            sddSpecDir = dir;
+            changed = true;
+        }
+        if (file != null && !file.equals(sddSpecFile)) {
+            sddSpecFile = file;
+            changed = true;
+        }
+        if (changed) {
+            updatedAt = now;
+        }
+        return changed;
+    }
+
     public UUID id() {
         return id;
     }
@@ -317,5 +387,20 @@ public final class Project {
     /** 軟刪除前的狀態；未被軟刪除、或升級前就已軟刪者為 null。 */
     public ProjectStatus statusBeforeDelete() {
         return statusBeforeDelete;
+    }
+
+    /** FSM 專案鍵（V12，≤ 100 字元）；null＝「用預設」（專案名）。 */
+    public String sddProject() {
+        return sddProject;
+    }
+
+    /** 規格檔所在目錄（V12；絕對路徑）；尚未用路徑 A 匯入規格為 null。 */
+    public String sddSpecDir() {
+        return sddSpecDir;
+    }
+
+    /** 規格檔（V12；絕對路徑）；尚未用路徑 A 匯入規格為 null。 */
+    public String sddSpecFile() {
+        return sddSpecFile;
     }
 }

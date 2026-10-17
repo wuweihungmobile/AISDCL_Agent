@@ -10,6 +10,7 @@ import com.aisdlc.console.domain.exception.UpstreamException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -23,6 +24,18 @@ final class BridgeErrors {
 
     /** execute／審核開後續批次時 {@code startRun} 被拒：409 鎖被持有、422 消毒或格式、其餘 4xx 一律當成「引擎拒絕此請求」。 */
     static DomainException forStart(BridgeRejectedException e) {
+        return forStart(e, null);
+    }
+
+    /**
+     * 同上；{@code sddProject} 是這次送出的有效 FSM 專案（帶 {@code sdd} 區塊的批次才有，放進 {@code sdd_fsm_not_found} 的 details）。
+     * SDD 專屬的拒絕（預檢的 409／422、503 {@code sdd_write_disabled}、403 {@code sdd_write_forbidden}；契約 §3.2）優先轉譯。
+     */
+    static DomainException forStart(BridgeRejectedException e, String sddProject) {
+        Optional<DomainException> sdd = SddBridgeErrors.map(e, sddProject);
+        if (sdd.isPresent()) {
+            return sdd.get();
+        }
         if (e.status() == 409 && "advisory_lock_held".equals(e.reason())) {
             return lockHeld(e);
         }
@@ -34,12 +47,31 @@ final class BridgeErrors {
     }
 
     /**
+     * 核准凍結（SDD 寫入面）的 Bridge 4xx（契約 §1.10.2 的 Bridge 失敗對映）：SDD 專屬轉譯優先，其餘一律「引擎拒絕此請求」。
+     *
+     * @param sddProject 這次送出的有效 FSM 專案（放進 {@code sdd_fsm_not_found} 的 {@code details.sddProject}）
+     */
+    static DomainException forSddWrite(BridgeRejectedException e, String sddProject) {
+        return SddBridgeErrors.map(e, sddProject).orElseGet(() -> rejected(e));
+    }
+
+    /** 唯讀 Bridge 查詢（RTM）被拒：404 由呼叫端依端點語意處理，其餘 4xx 一律「引擎拒絕此請求」（契約 §1.10.3 的 422 列）。 */
+    static DomainException forRead(BridgeRejectedException e) {
+        return rejected(e);
+    }
+
+    /**
      * pause／resume／stop／restore 被拒。
      *
      * @param action    {@code pause}／{@code resume}／{@code cancel}／{@code restore}／{@code review}
      * @param runStatus Console 認定的批次狀態（DB 欄位值）
      */
     static DomainException forControl(BridgeRejectedException e, String action, UUID runId, String runStatus) {
+        // SDD run 的 resume／restore（權杖、預檢、FSM 重進）失敗的轉譯同 execute（契約 §1.2.4～§1.2.6、§1.2.10；DB 與 FSM 狀態都不變）
+        Optional<DomainException> sdd = SddBridgeErrors.map(e, null);
+        if (sdd.isPresent()) {
+            return sdd.get();
+        }
         String reason = e.reason();
         if (e.status() == 409 && "invalid_state".equals(reason)) {
             Map<String, Object> details = new LinkedHashMap<>();

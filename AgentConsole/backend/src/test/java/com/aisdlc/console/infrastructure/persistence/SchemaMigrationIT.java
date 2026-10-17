@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Flyway 遷移（V1～V11）與 JPA schema 驗證（ADR-001 D5）。
+ * Flyway 遷移（V1～V12）與 JPA schema 驗證（ADR-001 D5）。
  *
  * <p>能啟動本 context 本身就代表 {@code ddl-auto=validate} 通過（13 個實體與 Flyway 建出的表一致）；
  * 這裡另外把「為什麼重要」寫成斷言：DDL 必須由 Flyway 擁有、表必須全在 console schema（不與 AutoClaude 的
@@ -60,13 +60,68 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void flywayAppliedVersionsOneToElevenSuccessfully() {
+    void flywayAppliedVersionsOneToTwelveSuccessfully() {
         List<Map<String, Object>> history = jdbc.queryForList(
                 "select version, success from console.flyway_schema_history where version is not null "
                         + "order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
+    }
+
+    /**
+     * V12（契約 §0.5；G-07、D-115-14）：projects 增三個可 NULL 的綁定欄（varchar 100／500／500）與部分唯一索引
+     * {@code ux_projects_sdd_binding}。為什麼重要：「一個 FSM 專案只對應一個未刪除的 Console 專案」若只靠應用層檢查，
+     * 並發的兩個請求仍可能雙雙通過；索引是最後的兜底，所以它的「部分」語意（NULL 不佔位、軟刪除後可重新綁定）要逐項驗。
+     */
+    @Test
+    void v12AddsThreeNullableBindingColumns() {
+        Map<String, Integer> expected = Map.of("sdd_project", 100, "sdd_spec_dir", 500, "sdd_spec_file", 500);
+        expected.forEach((column, length) -> {
+            Map<String, Object> row = jdbc.queryForMap("select data_type, is_nullable, character_maximum_length, "
+                    + "column_default from information_schema.columns where table_schema = 'console' "
+                    + "and table_name = 'projects' and column_name = ?", column);
+            assertThat(row).as(column).containsEntry("data_type", "character varying")
+                    .containsEntry("is_nullable", "YES").containsEntry("character_maximum_length", length)
+                    .containsEntry("column_default", null);
+        });
+    }
+
+    @Test
+    void v12IndexIsPartialOnNonNullKeyAndLiveRows() {
+        String def = jdbc.queryForObject("select indexdef from pg_indexes where schemaname = 'console' "
+                + "and indexname = 'ux_projects_sdd_binding'", String.class);
+        assertThat(def).containsIgnoringCase("UNIQUE").contains("execution_path, sdd_project")
+                .containsIgnoringCase("sdd_project IS NOT NULL").containsIgnoringCase("is_deleted IS NOT TRUE");
+
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        UUID third = UUID.randomUUID();
+        try {
+            insertBoundProject(first, "/same/root", "alpha");
+            assertThatThrownBy(() -> insertBoundProject(second, "/same/root", "alpha"))
+                    .isInstanceOf(DataIntegrityViolationException.class).hasMessageContaining("ux_projects_sdd_binding");
+            insertBoundProject(second, "/same/root", "beta");                // 不同的 FSM 專案：可以
+            insertBoundProject(third, "/other/root", "alpha");               // 不同的專案根：可以
+
+            jdbc.update("update console.projects set is_deleted = true where id = ?", first);
+            UUID reborn = UUID.randomUUID();
+            insertBoundProject(reborn, "/same/root", "alpha");               // 原持有者軟刪除後可重新綁定
+            jdbc.update("delete from console.projects where id = ?", reborn);
+
+            UUID nullA = UUID.randomUUID();
+            UUID nullB = UUID.randomUUID();
+            insertBoundProject(nullA, "/same/root", null);                   // sdd_project 為 NULL 的多列不衝突
+            insertBoundProject(nullB, "/same/root", null);
+            jdbc.update("delete from console.projects where id in (?, ?)", nullA, nullB);
+        } finally {
+            jdbc.update("delete from console.projects where id in (?, ?, ?)", first, second, third);
+        }
+    }
+
+    private void insertBoundProject(UUID id, String path, String sddProject) {
+        jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria, sdd_project) "
+                + "values (?,?,?,?,?)", id, "p-" + id, path, "c", sddProject);
     }
 
     /**

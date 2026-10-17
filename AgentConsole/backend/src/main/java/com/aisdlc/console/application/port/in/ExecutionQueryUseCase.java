@@ -3,6 +3,8 @@ package com.aisdlc.console.application.port.in;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.DagSnapshot;
 import com.aisdlc.console.domain.model.execution.EngineCapabilities;
+import com.aisdlc.console.domain.model.execution.ExecutionRtm;
+import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import com.aisdlc.console.domain.model.execution.ReviewDecision;
 import com.aisdlc.console.domain.model.execution.ReviewKind;
@@ -27,10 +29,24 @@ public interface ExecutionQueryUseCase {
      * {@code ExecutionRunResponse}：批次快照。{@code bridgeStatus} 為 Bridge 原值（PAUSING／CANCELLING 在此可見）。
      *
      * @param engineCapabilities spawn 時 Console 送進引擎的能力狀態（讀自 DB，建立時凍結；契約 §1.2.1）；null＝V10 之前的批次
+     * @param warnings           v1.5（契約 §1.10.6）：<b>只有 execute 的 201</b> 帶（SDD 治理未啟用的 {@code sdd_governance_inactive}、Bridge 轉入的
+     *                           {@code sdd_frozen_digest_absent}）；其餘端點一律空（回應不輸出 {@code warnings} 鍵）
      */
     record RunView(UUID id, UUID projectId, int runNumber, RunStatus status, BridgeStatus bridgeStatus,
                    int autonomyLevel, RunScope scope, long totalTokensUsed, Long tokenBudget, Instant startedAt,
-                   Instant completedAt, EngineCapabilities engineCapabilities) {
+                   Instant completedAt, EngineCapabilities engineCapabilities, List<ExecutionWarning> warnings) {
+
+        public RunView {
+            warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        }
+
+        /** 沒有警告（execute 以外的所有端點）。 */
+        public RunView(UUID id, UUID projectId, int runNumber, RunStatus status, BridgeStatus bridgeStatus,
+                       int autonomyLevel, RunScope scope, long totalTokensUsed, Long tokenBudget, Instant startedAt,
+                       Instant completedAt, EngineCapabilities engineCapabilities) {
+            this(id, projectId, runNumber, status, bridgeStatus, autonomyLevel, scope, totalTokensUsed, tokenBudget,
+                    startedAt, completedAt, engineCapabilities, List.of());
+        }
     }
 
     /** {@code CurrentStep}：{@code stepNumber} 是步驟在批次 playbook 內的位置（1 起），不是事件 seq。 */
@@ -113,4 +129,12 @@ public interface ExecutionQueryUseCase {
     DagView dag(UUID runId);
 
     List<CheckpointView> checkpoints(UUID runId);
+
+    /**
+     * 執行追溯覆蓋（v1.5，G-05；契約 §1.10.3）：Bridge {@code GET /autoclaude/runs/{id}/rtm} 的投影（諮詢視圖，{@code advisory} 恆 true）。
+     * 批次不在資料庫 → {@code NotFoundException}（無 reason）；批次存在但沒有報告（沒啟用 SDD 治理、尚未結束、非正常走完、工作區已清除，或 Bridge
+     * 404 {@code rtm_not_found}）→ {@code NotFoundException}（reason {@code rtm_not_found}，{@code details={runId}}）；報告壞掉（422
+     * {@code rtm_unreadable}）→ 422「引擎拒絕此請求」；Bridge 連不上／逾時 → 502／504。不輪詢、不快取。
+     */
+    ExecutionRtm rtm(UUID runId);
 }

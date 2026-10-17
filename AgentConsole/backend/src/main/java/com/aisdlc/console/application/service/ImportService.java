@@ -42,6 +42,8 @@ import com.aisdlc.console.domain.service.FieldRules;
 import com.aisdlc.console.domain.service.GoalKeyOrder;
 import com.aisdlc.console.domain.service.ParsedResultValidator;
 import com.aisdlc.console.domain.service.PassCriteriaSanitizer;
+import com.aisdlc.console.domain.service.SddBindingRules;
+import com.aisdlc.console.domain.service.SpecPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -218,14 +220,16 @@ public class ImportService implements ImportUseCase {
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ParseOutcome parse(UUID id, ParseOptions options) {
         ParseOptions checked = checkOptions(options);
+        // 帶 targetProjectId：executionPath／sddProject／specDir／specFile 取自目標專案（404／409 發生在進入 PARSING 之前，記錄不動）
+        ParseOptions resolved = resolveTarget(checked);
         ImportRecord claimed = tx.execute(status -> {
             ImportRecord record = load(id, true);
-            record.beginParse(checked);      // 同一交易內把本次請求的選項原樣存下（C-10；不論之後成敗）
+            record.beginParse(resolved);     // 同一交易內把本次請求的（解析後）選項存下（C-10；不論之後成敗）
             return records.save(record);
         });
         audit.note("import.parse", "import", id.toString());
         try {
-            ImportParser.Draft draft = parser.parse(claimed, checked);
+            ImportParser.Draft draft = parser.parse(claimed, resolved);
             List<GateError> gates = validator.validate(draft.result());
             if (!gates.isEmpty()) {
                 throw ImportParser.gateRejected(draft.result().path(), gates);
@@ -269,8 +273,75 @@ public class ImportService implements ImportUseCase {
         if (options.specDir() != null && options.specDir().length() > 500) {
             v.add("specDir", "specDir 長度不可超過 500 字元");
         }
+        String specFile = SddBindingRules.storedPath(v, "specFile", options.specFile());
+        String sddProject = SddBindingRules.requestedProject(v, "sddProject", options.sddProject());
         v.throwIfAny();
-        return new ParseOptions(path, autonomy, options.additionalPrompt(), options.specDir());
+        return new ParseOptions(path, autonomy, options.additionalPrompt(), options.specDir(), specFile, sddProject,
+                options.targetProjectId());
+    }
+
+    /**
+     * 帶 {@code targetProjectId} 的 parse（契約 §1.10.8、§3.3.2 第 2 點）：目標專案須存在且未軟刪除（404）；{@code executionPath}、
+     * {@code sddProject}（有效值）、{@code specDir}、{@code specFile} <b>一律取自目標專案</b>，請求另帶不同值 → 409
+     * {@code sdd_binding_conflict}（{@code details.cause=request_differs_from_target}、{@code details.field}）；目標專案某欄位為 NULL
+     * （尚未綁定規格）時，該欄位不受限，以請求值為準（{@code sddProject} 都沒有則取專案名＝預設）。回傳的是<b>解析後的有效選項</b>——
+     * confirm 據此判斷綁定在 parse 與 confirm 之間有沒有被改過。最後（有沒有目標都一樣）檢查 {@code specFile} 須與 {@code specDir} 並用（400）。
+     */
+    private ParseOptions resolveTarget(ParseOptions checked) {
+        ParseOptions resolved = checked;
+        UUID targetId = checked.targetProjectId();
+        if (targetId != null) {
+            Project target = tx.execute(status -> projects.findById(targetId))
+                    .orElseThrow(() -> NotFoundException.of("專案", targetId));
+            if (!SpecPaths.same(checked.executionPath(), target.executionPath())) {
+                throw requestDiffers("executionPath");
+            }
+            if (target.sddProject() != null && checked.sddProject() != null
+                    && !checked.sddProject().equals(target.sddProject())) {
+                throw requestDiffers("sddProject");
+            }
+            if (target.sddSpecDir() != null && isPresent(checked.specDir())
+                    && !SpecPaths.same(checked.specDir(), target.sddSpecDir())) {
+                throw requestDiffers("specDir");
+            }
+            String specDir = target.sddSpecDir() != null ? target.sddSpecDir() : checked.specDir();
+            if (target.sddSpecFile() != null && checked.specFile() != null
+                    && !isSameSpecFile(specDir, checked.specFile(), target.sddSpecFile())) {
+                throw requestDiffers("specFile");
+            }
+            resolved = new ParseOptions(target.executionPath(), checked.autonomyLevel(), checked.additionalPrompt(),
+                    specDir, target.sddSpecFile() != null ? target.sddSpecFile() : checked.specFile(),
+                    target.sddProject() != null ? target.sddProject()
+                            : checked.sddProject() != null ? checked.sddProject() : target.name(),
+                    targetId);
+        }
+        if (resolved.specFile() != null && !isPresent(resolved.specDir())) {
+            throw ValidationException.of("specFile", "specFile 須與明示的 specDir 並用（目標專案已有 sddSpecDir 時以它為 specDir）");
+        }
+        return resolved;
+    }
+
+    private static boolean isPresent(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    /** 請求的 specFile（相對 specDir 的 POSIX 路徑，或其下的絕對路徑）是否就是目標專案已綁定的那份規格檔。 */
+    private static boolean isSameSpecFile(String specDir, String requested, String bound) {
+        String text = requested.strip().replace('\\', '/');
+        if (text.startsWith("/") || text.matches("^[A-Za-z]:/.*")) {
+            return SpecPaths.same(text, bound);
+        }
+        if (specDir == null) {
+            return false;
+        }
+        String base = specDir.strip().replace('\\', '/');
+        return SpecPaths.same((base.endsWith("/") ? base : base + "/") + (text.startsWith("./") ? text.substring(2) : text),
+                bound);
+    }
+
+    private static ConflictException requestDiffers(String field) {
+        return new ConflictException("請求的 " + field + " 與目標專案已有的綁定不同", ErrorReasons.SDD_BINDING_CONFLICT,
+                Map.of("cause", "request_differs_from_target", "field", field));
     }
 
     // ── PUT result ───────────────────────────────────────────────────────────
@@ -286,8 +357,11 @@ public class ImportService implements ImportUseCase {
         if (!gates.isEmpty()) {
             throw ImportParser.gateRejected(record.parsePath(), gates);
         }
-        // 提示只取決於三層樹（伺服器欄位不影響），所以先算再存：重算後的值覆寫記錄的 warnings（C-10），回應與重開記錄所見一致
-        List<ParseWarning> warnings = placeholderWarnings(tree);
+        // 提示只取決於三層樹（伺服器欄位不影響），所以先算再存：重算後的值覆寫記錄的 warnings（C-10），回應與重開記錄所見一致。
+        // 路徑 A 的三個規格層級提示（at_unmapped／frozen_digest_absent／state_dir_not_ignored）說的是規格本身、與人可編輯的任務內容
+        // 無關，編輯後仍成立：沿用庫內值（契約 §3.3.2 v1.5 補充第 6 點）；其餘（evaluator／regex 被清空）照舊只含仍成立者。
+        List<ParseWarning> warnings = new ArrayList<>(record.warnings().stream().filter(ParseWarning::isSpecLevel).toList());
+        warnings.addAll(placeholderWarnings(tree));
         record.editResult(tree, warnings);
         records.save(record);
         audit.note("import.result", "import", id.toString());
@@ -413,12 +487,19 @@ public class ImportService implements ImportUseCase {
         String approver = record.signedOffBy();
         Instant approvedAt = record.signedOffAt();
 
-        ParsedProject p = tree.project();
-        Project project = withPath("parsedResult.project", () -> Project.create(
-                new NewProject(p.name(), p.executionPath(), p.passCriteria(), p.description(), p.autonomyLevel(),
-                        false), actor, now));
-        project.inheritSignoff(approver, approvedAt);
-        projects.save(project);
+        // v1.5（契約 §1.10.8）：parse 帶 targetProjectId 的記錄不建立新專案，改把目標與任務併入目標專案；兩種都回填 SDD 綁定。
+        // 解析後的有效選項在進入 PARSING 時就存在記錄上，PUT result 不動它，所以這裡讀到的永遠是產生這份草稿的那一次 parse 的選項。
+        ParseOptions parsedWith = record.parseOptions();
+        UUID targetId = parsedWith == null ? null : parsedWith.targetProjectId();
+        Project project;
+        int sortBase;
+        if (targetId == null) {
+            project = createProject(tree, actor, now, approver, approvedAt);
+            sortBase = 0;
+        } else {
+            project = mergeTarget(targetId, tree, parsedWith, now);
+            sortBase = goals.nextSortOrder(project.id());       // 既有未刪目標的最大 sortOrder＋1（沒有則 0）
+        }
 
         // 依賴在前建立（goal_dependencies 有外鍵）；sortOrder 取自陣列位置，與建立順序無關
         Map<String, UUID> idByKey = new HashMap<>();
@@ -431,7 +512,8 @@ public class ImportService implements ImportUseCase {
                 dependsOn.add(idByKey.get(key));
             }
             Goal goal = withPath(goalPath, () -> Goal.create(project.id(),
-                    new NewGoal(g.name(), g.description(), g.passCriteria(), dependsOn, false), g.sortOrder(), now));
+                    new NewGoal(g.name(), g.description(), g.passCriteria(), dependsOn, false),
+                    sortBase + g.sortOrder(), now));
             goal.inheritSignoff(approver, approvedAt);
             goals.save(goal);
             idByKey.put(g.key(), goal.id());
@@ -450,7 +532,62 @@ public class ImportService implements ImportUseCase {
         record.markImported(project.id());
         records.save(record);
         audit.note("import.confirm", "import", id.toString());
-        return new ProjectView(project, new ProjectCounts(tree.goals().size(), taskCount, 0));
+        // 新專案：計數就是剛建的；併入既有專案：回傳目標專案<b>整體</b>的計數（既有＋新建）
+        ProjectCounts counts = targetId == null ? new ProjectCounts(tree.goals().size(), taskCount, 0)
+                : projects.countsFor(List.of(project.id())).getOrDefault(project.id(), ProjectCounts.ZERO);
+        return new ProjectView(project, counts);
+    }
+
+    /** 不帶 targetProjectId：建立新專案並把編譯回應的綁定一併落庫（契約 §0.5 V12、§1.10.8）；同一專案根下綁定衝突 → 409，先檢查、索引兜底。 */
+    private Project createProject(ParsedResult tree, String actor, Instant now, String approver, Instant approvedAt) {
+        ParsedProject p = tree.project();
+        Project project = withPath("parsedResult.project", () -> Project.create(
+                new NewProject(p.name(), p.executionPath(), p.passCriteria(), p.description(), p.autonomyLevel(),
+                        false, tree.sddProject(), tree.sddSpecDir(), tree.sddSpecFile()), actor, now));
+        project.inheritSignoff(approver, approvedAt);
+        SddBindings.requireFree(projects, project.executionPath(), project.sddProject(), project.id());
+        projects.save(project);
+        return project;
+    }
+
+    /**
+     * 帶 targetProjectId：鎖住目標專案（與 sdd-binding 編輯、凍結寫回序列化），複驗綁定後回填（契約 §1.10.8）。專案本身的欄位與專案層
+     * {@code signedOff} 一律不動（只有 {@code sddSpecDir／File}、{@code sddProject} 三欄綁定可能被寫）。
+     *
+     * <ul>
+     *   <li>目標專案不存在或已軟刪除 → 404。</li>
+     *   <li>規格根不在目標專案的 {@code executionPath} 之下 → 409 {@code target_bound_differently}。</li>
+     *   <li>目標專案已有 {@code sddProject}，且既不是編譯回應的標準鍵、也不是 parse 當時用的有效值（綁定在 parse 與 confirm 之間被改過）
+     *       → 409 {@code target_bound_differently}。Backend 不淨化，所以「使用者在綁定頁輸入的原名」與它的標準鍵視為同一個綁定。</li>
+     *   <li>目標專案的 {@code sddProject} 為 NULL → 寫入標準鍵（同專案根下已有別的專案綁了它 → 409 {@code already_bound_elsewhere}）。</li>
+     * </ul>
+     */
+    private Project mergeTarget(UUID targetId, ParsedResult tree, ParseOptions parsedWith, Instant now) {
+        Project target = projects.findByIdForUpdate(targetId).orElseThrow(() -> NotFoundException.of("專案", targetId));
+        String canonicalKey = tree.sddProject();
+        String boundKey = target.sddProject();
+        if (tree.sddSpecDir() != null && !SpecPaths.isUnder(tree.sddSpecDir(), target.executionPath())) {
+            throw targetBoundDifferently(target.effectiveSddProject());
+        }
+        if (canonicalKey != null && boundKey != null && !boundKey.equals(canonicalKey)
+                && !boundKey.equals(parsedWith.sddProject())) {
+            throw targetBoundDifferently(boundKey);
+        }
+        boolean changed = false;
+        if (canonicalKey != null && boundKey == null) {
+            SddBindings.requireFree(projects, target.executionPath(), canonicalKey, target.id());
+            changed = target.rebindSddProject(canonicalKey, now);
+        }
+        changed |= target.bindSddSpec(tree.sddSpecDir(), tree.sddSpecFile(), now);
+        if (changed) {
+            projects.save(target);
+        }
+        return target;
+    }
+
+    private static ConflictException targetBoundDifferently(String sddProject) {
+        return new ConflictException("目標專案已綁定了不同的 SDD 規格或 FSM 專案，請重新解析", ErrorReasons.SDD_BINDING_CONFLICT,
+                Map.of("cause", "target_bound_differently", "sddProject", sddProject));
     }
 
     /** 落庫前複驗不過：把 domain 的欄位名補上 {@code parsedResult.goals[i].tasks[j].} 前綴（契約 §1.1.6）。 */

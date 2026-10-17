@@ -23,6 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * W5（契約 v1.2）再加 {@code GET /monitor/task-totals}（C-1）＝54、{@code POST /projects/{id}/restore}（C-3）＝55。
  * W7（契約 v1.4）再加 {@code GET /engines/sdd}（D-16）＝56、{@code GET /signoffs/pending}（D-18）＝57、
  * {@code POST /auth/logout}（D-19）＝58（操作數 64→67）。
+ * 整合輪 115（契約 v1.5）再加 {@code POST /projects/{id}/sdd/freeze}（API-SGN-06）、{@code PUT /projects/{id}/sdd-binding}（API-PRJ-08）、
+ * {@code GET /executions/{runId}/rtm}（API-EXE-16）＝61（操作數 67→70）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -92,7 +94,11 @@ class OpenApiIT extends AbstractApiIT {
             // ── W7（契約 v1.4）：引擎狀態（D-16）、待簽核清單（D-18）、登出（D-19）──
             Map.entry("/api/v1/engines/sdd", List.of("get")),
             Map.entry("/api/v1/signoffs/pending", List.of("get")),
-            Map.entry("/api/v1/auth/logout", List.of("post"))));
+            Map.entry("/api/v1/auth/logout", List.of("post")),
+            // ── 整合輪 115（契約 v1.5）：核准凍結、SDD 綁定編輯、執行追溯覆蓋 ──
+            Map.entry("/api/v1/projects/{id}/sdd/freeze", List.of("post")),
+            Map.entry("/api/v1/projects/{id}/sdd-binding", List.of("put")),
+            Map.entry("/api/v1/executions/{runId}/rtm", List.of("get"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -104,7 +110,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(58).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(61).containsExactlyElementsOf(EXPECTED.keySet());
         int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
@@ -112,7 +118,7 @@ class OpenApiIT extends AbstractApiIT {
                     .containsExactlyElementsOf(expected.getValue());
             operationCount += operations.size();
         }
-        assertThat(operationCount).as("契約 v1.4 的操作總數").isEqualTo(67);
+        assertThat(operationCount).as("契約 v1.5 的操作總數").isEqualTo(70);
     }
 
     @Test
@@ -408,7 +414,7 @@ class OpenApiIT extends AbstractApiIT {
     void theV14EndpointsDocumentTheStatusCodesAndParametersOfTheContract() {
         Resp docs = docs();
         assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/engines/sdd'].get.responses").keySet())
-                .containsExactlyInAnyOrder("200", "400", "401", "429");
+                .as("v1.5：projectId 找不到專案 → 404").containsExactlyInAnyOrder("200", "400", "401", "404", "429");
         assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/signoffs/pending'].get.responses").keySet())
                 .containsExactlyInAnyOrder("200", "400", "401", "429");
         assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/auth/logout'].post.responses").keySet())
@@ -419,11 +425,17 @@ class OpenApiIT extends AbstractApiIT {
 
         String project = "$.paths['/api/v1/engines/sdd'].get.parameters[?(@.name=='project')]";
         assertThat(docs.<List<String>>read("$.paths['/api/v1/engines/sdd'].get.parameters[*].name"))
-                .containsExactly("project");
+                .as("v1.5 多一個選填的 projectId").containsExactlyInAnyOrder("projectId", "project");
+        String projectId = "$.paths['/api/v1/engines/sdd'].get.parameters[?(@.name=='projectId')]";
+        assertThat(docs.<List<Boolean>>read(projectId + ".required")).containsExactly(false);
+        assertThat(docs.<List<String>>read(projectId + ".schema.type")).containsExactly("string");
+        assertThat(docs.<List<String>>read(projectId + ".schema.format")).containsExactly("uuid");
         assertThat(docs.<List<Boolean>>read(project + ".required")).containsExactly(false);
-        assertThat(docs.<List<String>>read(project + ".schema.pattern")).containsExactly("^[A-Za-z0-9._-]{1,128}$");
+        assertThat(docs.<List<String>>read(project + ".schema.pattern"))
+                .as("v1.5：Console 不再淨化專案名，只驗長度與控制字元（專案名規則在 Bridge）")
+                .containsExactly("^[^\\x00-\\x1f\\x7f]{1,200}$");
         assertThat(docs.<List<Integer>>read(project + ".schema.minLength")).containsExactly(1);
-        assertThat(docs.<List<Integer>>read(project + ".schema.maxLength")).containsExactly(128);
+        assertThat(docs.<List<Integer>>read(project + ".schema.maxLength")).containsExactly(200);
 
         String limit = "$.paths['/api/v1/signoffs/pending'].get.parameters[?(@.name=='limit')]";
         assertThat(docs.<List<String>>read("$.paths['/api/v1/signoffs/pending'].get.parameters[*].name"))
@@ -447,7 +459,7 @@ class OpenApiIT extends AbstractApiIT {
                 "version", "projects", "fsm", "checkedAt");
         assertThat(docs.<List<String>>read(status + ".properties.reason.enum").stream().filter(v -> v != null).toList())
                 .containsExactlyInAnyOrder("bridge_unreachable", "sdd_unavailable", "bridge_error", "fsm_not_found",
-                        "fsm_state_unreadable");
+                        "fsm_state_unreadable", "sdd_root_rejected");
         assertThat(docs.<List<String>>read(status + ".properties.version..['$ref']")).singleElement().asString()
                 .endsWith("/SddVersion");
         assertThat(docs.<String>read(status + ".properties.projects.items['$ref']")).endsWith("/SddProjectEntry");
@@ -458,12 +470,23 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<List<String>>read(schemas + "SddVersion.required")).containsExactlyInAnyOrder("latest", "root");
         assertThat(docs.<List<String>>read(schemas + "SddProjectEntry.required")).containsExactlyInAnyOrder("project",
                 "source", "currentState", "updatedAt");
-        assertThat(docs.<String>read(schemas + "SddProjectEntry.properties.project.pattern"))
-                .isEqualTo("^[A-Za-z0-9._-]{1,128}$");
+        assertThat(docs.<Integer>read(schemas + "SddProjectEntry.properties.project.maxLength")).isEqualTo(80);
+        assertThat(docs.has(schemas + "SddProjectEntry.properties.project.pattern"))
+                .as("v1.5：淨化後的標準鍵可含 CJK、空白與括號，不再有 [A-Za-z0-9._-] 的 pattern").isFalse();
 
         assertThat(docs.<List<String>>read(schemas + "SddFsmState.required")).containsExactlyInAnyOrder("project",
                 "source", "frozenStages", "decisionTrace", "humanPending", "retryHistory");
         assertThat(docs.<Integer>read(schemas + "SddFsmState.properties.decisionTrace.maxItems")).isEqualTo(5);
+        // v1.5（G-13、D-115-16）：階段、升級歷史、升級來源、標準鍵、恢復指令五個選填欄位（required 集合不變：舊版 Bridge 缺鍵由 Backend 補預設）
+        assertThat(docs.<Map<String, Object>>read(schemas + "SddFsmState.properties").keySet()).contains("phase",
+                "escalationHistory", "escalationProvenance", "fsmProject", "recovery");
+        assertThat(docs.<Integer>read(schemas + "SddFsmState.properties.escalationHistory.maxItems")).isEqualTo(5);
+        assertThat(docs.<List<String>>read(schemas + "SddFsmPhase.required")).containsExactlyInAnyOrder("name", "order",
+                "blocking", "observation");
+        assertThat(docs.<Integer>read(schemas + "SddFsmPhase.properties.order.minimum")).isZero();
+        assertThat(docs.<Integer>read(schemas + "SddFsmPhase.properties.order.maximum")).isEqualTo(8);
+        assertThat(docs.<List<String>>read(schemas + "SddRecovery.required")).containsExactlyInAnyOrder("target",
+                "powershell", "posix");
         assertThat(docs.<String>read(schemas + "SddFsmState.properties.humanPending['$ref']")).endsWith("/SddHumanPending");
         assertThat(docs.<String>read(schemas + "SddFsmState.properties.retryHistory['$ref']"))
                 .endsWith("/SddRetryHistory");
@@ -501,6 +524,155 @@ class OpenApiIT extends AbstractApiIT {
 
         assertThat(docs.<List<String>>read(schemas + "LogoutRequest.required")).containsExactly("refreshToken");
         assertThat(docs.<Integer>read(schemas + "LogoutRequest.properties.refreshToken.minLength")).isEqualTo(1);
+    }
+
+    /**
+     * v1.5（整合輪 115；契約 §1.10）：三個新端點的 operationId、狀態碼集合、請求本文與回應 schema 逐字等於 {@code openapi-p3-6.yaml}。
+     * 為什麼重要：前端以 yaml 產生型別與錯誤處理——凍結若少文件化 503，前端就沒有「SDD 寫入面停用」的分支；RTM 的 404 若不是 JSON
+     * 封包（reason 是這個端點獨有的例外），前端分不出「批次不存在」與「批次存在但沒有報告」。
+     */
+    @Test
+    void theV15EndpointsDocumentTheStatusCodesAndSchemasOfTheContract() {
+        Resp docs = docs();
+        Map<String, Set<String>> codes = Map.of(
+                "post /api/v1/projects/{id}/sdd/freeze",
+                Set.of("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504"),
+                "put /api/v1/projects/{id}/sdd-binding", Set.of("200", "400", "401", "403", "404", "409", "429"),
+                "get /api/v1/executions/{runId}/rtm", Set.of("200", "400", "401", "404", "422", "429", "502", "504"));
+        for (Map.Entry<String, Set<String>> expected : codes.entrySet()) {
+            String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
+            String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet())
+                    .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
+        }
+
+        String freeze = "$.paths['/api/v1/projects/{id}/sdd/freeze'].post";
+        assertThat(docs.<String>read(freeze + ".operationId")).isEqualTo("freezeProjectSddSpec");
+        assertThat(docs.<Boolean>read(freeze + ".requestBody.required")).isTrue();
+        assertThat(docs.<String>read(freeze + ".requestBody.content['application/json'].schema['$ref']"))
+                .endsWith("/SddFreezeRequest");
+        assertThat(docs.<List<String>>read(freeze + ".responses['200'].content.*.schema['$ref']")).singleElement()
+                .asString().endsWith("/ApiResultSddFsmState");
+
+        String binding = "$.paths['/api/v1/projects/{id}/sdd-binding'].put";
+        assertThat(docs.<String>read(binding + ".operationId")).isEqualTo("updateProjectSddBinding");
+        assertThat(docs.<Boolean>read(binding + ".requestBody.required")).isTrue();
+        assertThat(docs.<String>read(binding + ".requestBody.content['application/json'].schema['$ref']"))
+                .endsWith("/SddBindingRequest");
+        assertThat(docs.<List<String>>read(binding + ".responses['200'].content.*.schema['$ref']")).singleElement()
+                .asString().endsWith("/ApiResultProjectDetailResponse");
+
+        String rtm = "$.paths['/api/v1/executions/{runId}/rtm'].get";
+        assertThat(docs.<String>read(rtm + ".operationId")).isEqualTo("getExecutionRtm");
+        assertThat(docs.<List<String>>read(rtm + ".responses['200'].content.*.schema['$ref']")).singleElement()
+                .asString().endsWith("/ApiResultExecutionRtmResponse");
+        assertThat(docs.<Map<String, Object>>read(rtm + ".responses['404'].content").keySet())
+                .as("404 是 JSON 的 ApiError（reason 是本端點獨有的例外）").containsExactly("application/json");
+        assertThat(docs.<String>read(rtm + ".responses['404'].content['application/json'].schema['$ref']"))
+                .endsWith("/ApiError");
+    }
+
+    /**
+     * v1.5（整合輪 115）：新的請求／回應 schema 與 {@code openapi-p3-6.yaml} 的欄位名、必填集合與上下限一致。
+     * 為什麼重要：前端依 yaml 產生型別與輸入檢查——{@code expectedDigests} 的 pattern、{@code docs} 的筆數上限若與實作不同，前端放行的值會得到 400；
+     * {@code advisory} 若不是必填的恆真欄位，前端就沒有義務標示「諮詢視圖」。
+     */
+    @Test
+    void theV15SchemasMatchTheContractYaml() {
+        Resp docs = docs();
+        String schemas = "$.components.schemas.";
+
+        assertThat(docs.<List<String>>read(schemas + "SddFreezeRequest.required")).containsExactly("reason");
+        assertThat(docs.<Integer>read(schemas + "SddFreezeRequest.properties.reason.minLength")).isEqualTo(1);
+        assertThat(docs.<Integer>read(schemas + "SddFreezeRequest.properties.reason.maxLength")).isEqualTo(500);
+        assertThat(docs.<String>read(schemas + "SddFreezeRequest.properties.stage.pattern"))
+                .isEqualTo("^[A-Za-z0-9._-]{1,64}$");
+        assertThat(docs.<Integer>read(schemas + "SddFreezeRequest.properties.docs.minItems")).isEqualTo(1);
+        assertThat(docs.<Integer>read(schemas + "SddFreezeRequest.properties.docs.maxItems")).isEqualTo(20);
+        assertThat(docs.<Integer>read(schemas + "SddFreezeRequest.properties.docs.items.maxLength")).isEqualTo(500);
+        assertThat(docs.<String>read(schemas + "SddFreezeRequest.properties.expectedDigests.type")).isEqualTo("object");
+        assertThat(docs.<String>read(schemas + "SddFreezeRequest.properties.expectedDigests.additionalProperties.type"))
+                .isEqualTo("string");
+        assertThat(docs.<Map<String, Object>>read(schemas + "SddFreezeRequest.properties").keySet())
+                .as("approver 不在請求內（一律取 JWT subject），也沒有 binding 欄").containsExactlyInAnyOrder("reason", "stage",
+                        "docs", "expectedDigests");
+
+        assertThat(docs.<List<String>>read(schemas + "SddBindingRequest.required")).containsExactly("sddProject");
+        assertThat(docs.<Integer>read(schemas + "SddBindingRequest.properties.sddProject.minLength")).isEqualTo(1);
+        assertThat(docs.<Integer>read(schemas + "SddBindingRequest.properties.sddProject.maxLength")).isEqualTo(100);
+
+        assertThat(docs.<List<String>>read(schemas + "ExecutionRtmResponse.required")).containsExactlyInAnyOrder(
+                "scenario", "specDigest", "at", "ac", "failedAtIds", "weakRegexAtIds", "unmappedAtIds", "fullyCovered",
+                "advisory");
+        assertThat(docs.<String>read(schemas + "ExecutionRtmResponse.properties.at['$ref']")).endsWith("/RtmAtCoverage");
+        assertThat(docs.<String>read(schemas + "ExecutionRtmResponse.properties.ac['$ref']")).endsWith("/RtmAcCoverage");
+        Map<String, Object> advisory = docs.read(schemas + "ExecutionRtmResponse.properties.advisory");
+        assertThat(advisory.get("type")).isEqualTo("boolean");
+        assertThat(advisory).as("契約寫 const: true；springdoc 的 allowableValues 對 boolean 會產出字串 enum「true」（與 type 不符），"
+                + "所以不用它，改以說明表達").doesNotContainKey("enum");
+        assertThat((String) advisory.get("description")).contains("恆為 true");
+        assertThat(docs.<List<String>>read(schemas + "RtmAtCoverage.required")).containsExactlyInAnyOrder("passed",
+                "total", "unmapped", "pct");
+        assertThat(docs.<List<String>>read(schemas + "RtmAcCoverage.required")).containsExactlyInAnyOrder("covered",
+                "total", "pct");
+        for (String bucket : List.of("RtmAtCoverage", "RtmAcCoverage")) {
+            assertThat(docs.<Integer>read(schemas + bucket + ".properties.pct.minimum")).as(bucket).isZero();
+            assertThat(docs.<Integer>read(schemas + bucket + ".properties.pct.maximum")).as(bucket).isEqualTo(100);
+            assertThat(docs.<Integer>read(schemas + bucket + ".properties.total.minimum")).as(bucket).isZero();
+        }
+
+        assertThat(docs.<List<String>>read(schemas + "ExecutionWarning.required")).containsExactlyInAnyOrder("code",
+                "detail");
+        assertThat(docs.<String>read(schemas + "ExecutionRunResponse.properties.warnings.items['$ref']"))
+                .endsWith("/ExecutionWarning");
+        assertThat(docs.<List<String>>read(schemas + "ExecutionRunResponse.required"))
+                .as("warnings 只有 execute 的 201 帶，不是必填").doesNotContain("warnings");
+        assertThat(docs.has(schemas + "ExecutionWarning.properties.code.enum"))
+                .as("契約：日後新增的 code 前端要原樣顯示，所以文件上是開放字串、不是列舉").isFalse();
+        assertThat(docs.has(schemas + "ExecutionWarning.properties.cause.enum"))
+                .as("同上：cause 的五個值寫在說明裡，不列舉").isFalse();
+        assertThat(docs.<String>read(schemas + "ExecutionWarning.properties.cause.description"))
+                .contains("not_bound", "token_not_configured", "mixed_scope", "spec_mismatch", "duplicate_step_id");
+    }
+
+    /**
+     * v1.5（整合輪 115）：既有 schema 的新欄位——專案的三個綁定欄、匯入選項的三個參數、解析結果的四個伺服器擁有欄位。
+     * 為什麼重要：這些欄位是前端「專案詳情的 SDD 治理區」與「匯入到既有專案」的資料來源；伺服器擁有的欄位若被文件化成必填，
+     * 前端的編輯請求就必須帶它們（而 {@code PUT /import/{id}/result} 本來就會忽略這些欄位）。
+     */
+    @Test
+    void theV15FieldsOfTheExistingSchemasMatchTheContractYaml() {
+        Resp docs = docs();
+        String schemas = "$.components.schemas.";
+        for (String response : List.of("ProjectResponse", "ProjectDetailResponse")) {
+            assertThat(docs.<Map<String, Object>>read(schemas + response + ".properties").keySet()).as(response)
+                    .contains("sddProject", "sddSpecDir", "sddSpecFile");
+            assertThat(docs.<Integer>read(schemas + response + ".properties.sddProject.maxLength")).as(response)
+                    .isEqualTo(100);
+            assertThat(docs.<Integer>read(schemas + response + ".properties.sddSpecDir.maxLength")).as(response)
+                    .isEqualTo(500);
+            assertThat(docs.<Integer>read(schemas + response + ".properties.sddSpecFile.maxLength")).as(response)
+                    .isEqualTo(500);
+            assertThat(docs.<List<String>>read(schemas + response + ".required")).as(response + "：缺席等價於 null")
+                    .doesNotContain("sddProject", "sddSpecDir", "sddSpecFile");
+        }
+
+        String options = schemas + "ParseOptions";
+        assertThat(docs.<List<String>>read(options + ".required")).containsExactly("executionPath");
+        assertThat(docs.<Integer>read(options + ".properties.specFile.maxLength")).isEqualTo(500);
+        assertThat(docs.<Integer>read(options + ".properties.sddProject.minLength")).isEqualTo(1);
+        assertThat(docs.<Integer>read(options + ".properties.sddProject.maxLength")).isEqualTo(200);
+        assertThat(docs.<String>read(options + ".properties.sddProject.pattern")).isEqualTo("^[^\\x00-\\x1f\\x7f]{1,200}$");
+        assertThat(docs.<String>read(options + ".properties.targetProjectId.type")).isEqualTo("string");
+        assertThat(docs.<String>read(options + ".properties.targetProjectId.format")).isEqualTo("uuid");
+
+        String result = schemas + "ParsedResult";
+        assertThat(docs.<List<String>>read(result + ".required")).containsExactlyInAnyOrder("project", "goals");
+        assertThat(docs.<Map<String, Object>>read(result + ".properties").keySet()).contains("specFormatVersion",
+                "sddProject", "sddSpecDir", "sddSpecFile");
+
+        assertThat(docs.<String>read(schemas + "ParseWarning.properties.code.description"))
+                .as("v1.5 的三個新警告碼寫在說明裡").contains("at_unmapped", "frozen_digest_absent", "state_dir_not_ignored");
     }
 
     @Test

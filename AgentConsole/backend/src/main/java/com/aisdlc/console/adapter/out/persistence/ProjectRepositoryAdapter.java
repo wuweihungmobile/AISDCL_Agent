@@ -5,6 +5,8 @@ import com.aisdlc.console.application.port.in.ManageProjectUseCase.ProjectCounts
 import com.aisdlc.console.application.port.in.ManageProjectUseCase.SortField;
 import com.aisdlc.console.application.port.in.PageResult;
 import com.aisdlc.console.application.port.out.ProjectRepository;
+import com.aisdlc.console.domain.exception.ConflictException;
+import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.model.task.TaskStatus;
 import com.aisdlc.console.infrastructure.persistence.entity.ProjectEntity;
@@ -14,6 +16,8 @@ import com.aisdlc.console.infrastructure.persistence.repository.KeyedTaskCount;
 import com.aisdlc.console.infrastructure.persistence.repository.ProjectJpaRepository;
 import com.aisdlc.console.infrastructure.persistence.repository.TaskJpaRepository;
 import jakarta.persistence.criteria.Predicate;
+import org.springframework.core.NestedExceptionUtils;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -43,10 +47,29 @@ class ProjectRepositoryAdapter implements ProjectRepository {
         this.tasks = tasks;
     }
 
+    /** SDD 綁定的部分唯一索引名（V12）：寫入撞到它＝兩個未刪除專案認領同一個 {@code (execution_path, sdd_project)}。 */
+    private static final String SDD_BINDING_INDEX = "ux_projects_sdd_binding";
+
     @Override
     public Project save(Project project) {
-        projects.save(ProjectMapper.toEntity(project));
+        try {
+            // 立即 flush：索引違反才會在這裡（而不是提交時、離開本方法之後）出現，才轉得成 409
+            projects.saveAndFlush(ProjectMapper.toEntity(project));
+        } catch (DataIntegrityViolationException e) {
+            String cause = NestedExceptionUtils.getMostSpecificCause(e).getMessage();
+            if (project.sddProject() != null && cause != null && cause.contains(SDD_BINDING_INDEX)) {
+                // 撞索引時交易已被資料庫中止，查不到持有者：holderProjectId 是選填鍵，省略
+                throw new ConflictException("這個 FSM 專案已被同一個專案根的另一個專案綁定", ErrorReasons.SDD_BINDING_CONFLICT,
+                        Map.of("cause", "already_bound_elsewhere", "sddProject", project.sddProject()));
+            }
+            throw e;
+        }
         return project;
+    }
+
+    @Override
+    public Optional<UUID> findSddBindingHolder(String executionPath, String sddProject, UUID excludedProjectId) {
+        return projects.findSddBindingHolders(executionPath, sddProject, excludedProjectId).stream().findFirst();
     }
 
     @Override

@@ -109,18 +109,18 @@ class ImportParserTest {
 
     @Test
     void anExplicitSpecDirGoesStraightToPathAWithoutProbingTheExecutionPath() {
-        when(bridge.sddCompile("/spec/frozen")).thenReturn(compiled(2));
+        when(bridge.sddCompile("/spec/frozen", null, null)).thenReturn(compiled(2));
         Draft draft = parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options("/spec/frozen"));
 
         assertThat(draft.result().path()).isEqualTo(ParsePath.SDD);
-        verify(bridge).sddCompile("/spec/frozen");
-        verify(bridge, never()).sddCompile(EXEC_PATH);
+        verify(bridge).sddCompile("/spec/frozen", null, null);
+        verify(bridge, never()).sddCompile(EXEC_PATH, null, null);
         verify(llm, never()).generate(any());
     }
 
     @Test
     void withoutASpecDirTheExecutionPathIsProbedAndAFrozenSpecWinsOverEverythingElse() {
-        when(bridge.sddCompile(EXEC_PATH)).thenReturn(compiled(3));
+        when(bridge.sddCompile(EXEC_PATH, null, null)).thenReturn(compiled(3));
         Draft draft = parser.parse(record(ImportSourceType.PLAIN_TEXT, "做一個待辦清單"), options(null));
         assertThat(draft.result().path()).as("即使內容很短（本來會走 C）也以規格為準").isEqualTo(ParsePath.SDD);
         verify(bridge, never()).decompose(any(), any());
@@ -128,7 +128,7 @@ class ImportParserTest {
 
     @Test
     void noSpecFoundFallsThroughToDecomposeForShortPlainTextAndToLlmOtherwise() {
-        doThrow(rejected(422, "spec_not_found", "沒有規格")).when(bridge).sddCompile(EXEC_PATH);
+        doThrow(rejected(422, "spec_not_found", "沒有規格")).when(bridge).sddCompile(EXEC_PATH, null, null);
         when(bridge.decompose(any(), any())).thenReturn(decomposed(2));
         assertThat(parser.parse(record(ImportSourceType.PLAIN_TEXT, "做一個待辦清單"), options(null)).result().path())
                 .isEqualTo(ParsePath.DECOMPOSE);
@@ -140,7 +140,7 @@ class ImportParserTest {
 
     @Test
     void aSanitizationFailureOnTheProbeAlsoMeansNoSpec() {
-        doThrow(rejected(422, "sanitization_failed", null)).when(bridge).sddCompile(EXEC_PATH);
+        doThrow(rejected(422, "sanitization_failed", null)).when(bridge).sddCompile(EXEC_PATH, null, null);
         when(bridge.decompose(any(), any())).thenReturn(decomposed(1));
         assertThat(parser.parse(record(ImportSourceType.PLAIN_TEXT, "短目標"), options(null)).result().path())
                 .isEqualTo(ParsePath.DECOMPOSE);
@@ -150,7 +150,7 @@ class ImportParserTest {
     void aSpecThatExistsButIsRejectedFailsClosedInsteadOfFallingBackToTheLlm() {
         for (String reason : List.of("spec_not_frozen", "spec_tainted", "spec_format_version_unsupported",
                 "spec_ambiguous")) {
-            doThrow(rejected(422, reason, "規格有問題：" + reason)).when(bridge).sddCompile(EXEC_PATH);
+            doThrow(rejected(422, reason, "規格有問題：" + reason)).when(bridge).sddCompile(EXEC_PATH, null, null);
             assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)))
                     .isInstanceOfSatisfying(UnprocessableException.class, e -> {
                         assertThat(e.reason()).isEqualTo(ErrorReasons.SDD_SPEC_REJECTED);
@@ -167,42 +167,42 @@ class ImportParserTest {
     void anUnreachableOrFailingBridgeDuringTheProbeIsSkippedNotFatal() {
         when(llm.generate(any())).thenReturn(new LlmResult(llmDraft(), 10L, "m"));
 
-        doThrow(new UpstreamException.Unavailable("down")).when(bridge).sddCompile(EXEC_PATH);
+        doThrow(new UpstreamException.Unavailable("down")).when(bridge).sddCompile(EXEC_PATH, null, null);
         assertThat(parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)).result().path())
                 .isEqualTo(ParsePath.LLM);
 
-        doThrow(new UpstreamException.TimedOut("slow")).when(bridge).sddCompile(EXEC_PATH);
+        doThrow(new UpstreamException.TimedOut("slow")).when(bridge).sddCompile(EXEC_PATH, null, null);
         assertThat(parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)).result().path())
                 .isEqualTo(ParsePath.LLM);
 
         doThrow(new UpstreamException.Failure("500", Map.of("bridgeStatus", 500))).when(bridge)
-                .sddCompile(EXEC_PATH);
+                .sddCompile(EXEC_PATH, null, null);
         assertThat(parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)).result().path())
                 .isEqualTo(ParsePath.LLM);
 
-        doThrow(rejected(400, "bad_request", null)).when(bridge).sddCompile(EXEC_PATH);
+        doThrow(rejected(400, "bad_request", null)).when(bridge).sddCompile(EXEC_PATH, null, null);
         assertThat(parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)).result().path())
                 .as("非預期的 4xx 同樣略過路徑 A").isEqualTo(ParsePath.LLM);
     }
 
     @Test
     void withAnExplicitSpecDirEveryBridgeFailureIsReportedIncludingSpecNotFound() {
-        doThrow(rejected(422, "spec_not_found", "找不到規格")).when(bridge).sddCompile("/spec");
+        doThrow(rejected(422, "spec_not_found", "找不到規格")).when(bridge).sddCompile("/spec", null, null);
         assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")))
                 .isInstanceOfSatisfying(UnprocessableException.class,
                         e -> assertThat(e.details()).containsEntry("bridgeReason", "spec_not_found"));
 
-        doThrow(rejected(422, "sanitization_failed", null)).when(bridge).sddCompile("/spec");
+        doThrow(rejected(422, "sanitization_failed", null)).when(bridge).sddCompile("/spec", null, null);
         assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")))
                 .isInstanceOfSatisfying(UnprocessableException.class,
                         e -> assertThat(e.details()).containsEntry("bridgeReason", "sanitization_failed")
                                 .containsKey("detail"));
 
-        doThrow(new UpstreamException.Unavailable("down")).when(bridge).sddCompile("/spec");
+        doThrow(new UpstreamException.Unavailable("down")).when(bridge).sddCompile("/spec", null, null);
         assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")))
                 .isInstanceOf(UpstreamException.Unavailable.class);
 
-        doThrow(rejected(404, "nope", null)).when(bridge).sddCompile("/spec");
+        doThrow(rejected(404, "nope", null)).when(bridge).sddCompile("/spec", null, null);
         assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")))
                 .isInstanceOf(UpstreamException.Failure.class);
     }
@@ -239,7 +239,7 @@ class ImportParserTest {
 
     @Test
     void thirtyContractsAreSplitIntoTwentyFourPlusSixWithAChainOfDependencies() {
-        when(bridge.sddCompile("/spec")).thenReturn(compiled(30));
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiled(30));
         ParsedResult result = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result();
 
         assertThat(result.goals()).hasSize(2);
@@ -260,7 +260,7 @@ class ImportParserTest {
 
     @Test
     void aSingleBatchKeepsThePlainScenarioNameAndTheProjectFieldsComeFromTheSpecAndTheOptions() {
-        when(bridge.sddCompile("/spec")).thenReturn(compiled(3));
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiled(3));
         ParsedResult result = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result();
 
         assertThat(result.goals()).singleElement().satisfies(g -> assertThat(g.name()).isEqualTo("購物車"));
@@ -277,7 +277,7 @@ class ImportParserTest {
 
     @Test
     void sddTasksCarryTheirPromptRegexCommandAndTheStructuredPassCriteriaSpec() {
-        when(bridge.sddCompile("/spec")).thenReturn(compiled(2));
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiled(2));
         List<ParsedTask> tasks = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result()
                 .goals().get(0).tasks();
 
@@ -297,7 +297,7 @@ class ImportParserTest {
                 new SddTask("C1", "壞 regex", "做事", "([", "pytest -q", false),
                 new SddTask("C2", "壞指令", "做事", null, "pytest; rm -rf /", false),
                 new SddTask("C3", "沒有 regex", "做事", null, null, false)));
-        when(bridge.sddCompile("/spec")).thenReturn(dirty);
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(dirty);
 
         Draft draft = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec"));
         List<ParsedTask> tasks = draft.result().goals().get(0).tasks();
@@ -314,7 +314,7 @@ class ImportParserTest {
 
     @Test
     void aSpecThatCompilesToNoTasksIsRejectedInsteadOfCreatingAnEmptyDraft() {
-        when(bridge.sddCompile("/spec")).thenReturn(new SddCompileResult("S", "/s", "d", List.of()));
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(new SddCompileResult("S", "/s", "d", List.of()));
         assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")))
                 .isInstanceOfSatisfying(UnprocessableException.class,
                         e -> assertThat(e.details()).containsEntry("bridgeReason", "no_tasks"));
@@ -322,11 +322,159 @@ class ImportParserTest {
 
     @Test
     void aBlankScenarioFallsBackToTheLastSegmentOfTheExecutionPath() {
-        when(bridge.sddCompile("/spec")).thenReturn(new SddCompileResult("  ", "/s", "d",
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(new SddCompileResult("  ", "/s", "d",
                 List.of(new SddTask("C1", "n", "p", null, null, false))));
         ParseOptions windowsPath = new ParseOptions("C:\\work\\my-proj\\", 3, null, "/spec");
         assertThat(parser.parse(record(ImportSourceType.MARKDOWN, "x"), windowsPath).result().project().name())
                 .isEqualTo("my-proj");
+    }
+
+    // ── 路徑 A（v1.5）：選檔、專案鍵、409 fail-closed、伺服器欄位與規格層級提示 ─────────────────────
+
+    private static ParseOptions v15Options(String specDir, String specFile, String sddProject) {
+        return new ParseOptions(EXEC_PATH, 3, null, specDir, specFile, sddProject, null);
+    }
+
+    private static SddCompileResult compiledWith(String specPath, String fsmProject, String frozenDigest,
+                                                 List<String> unmapped, List<AgentBridge.SddCompileWarning> warnings,
+                                                 SddTask... tasks) {
+        return new SddCompileResult("購物車", specPath, "0123456789abcdef0123", List.of(tasks), "cart.md", fsmProject,
+                frozenDigest, "1.2", unmapped, warnings);
+    }
+
+    @Test
+    void anExplicitSpecFileAndProjectAreForwardedVerbatimToTheCompile() {
+        when(bridge.sddCompile("/spec", "tcs/b.md", "My Proj 專案")).thenReturn(compiled(1));
+
+        parser.parse(record(ImportSourceType.MARKDOWN, "x"), v15Options("/spec", "tcs/b.md", "My Proj 專案"));
+
+        verify(bridge).sddCompile("/spec", "tcs/b.md", "My Proj 專案");
+    }
+
+    @Test
+    void theProbeSendsTheKnownProjectButNeverTheSpecFile() {
+        when(bridge.sddCompile(EXEC_PATH, null, "known-key")).thenReturn(compiled(1));
+
+        parser.parse(record(ImportSourceType.MARKDOWN, "x"), v15Options(null, "ignored.md", "known-key"));
+
+        verify(bridge).sddCompile(EXEC_PATH, null, "known-key");
+        verify(bridge, never()).sddCompile(anyString(), eq("ignored.md"), any());
+    }
+
+    @Test
+    void probeSpecRejectsA409SpecDigestChangedInsteadOfSkippingPathA() {
+        doThrow(rejected(409, "spec_digest_changed", "TCS 在凍結後被改過")).when(bridge)
+                .sddCompile(EXEC_PATH, null, null);
+        when(llm.generate(any())).thenReturn(new LlmResult(llmDraft(), 10L, "m"));
+
+        assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)))
+                .as("凍結後內容已變更＝規格存在但被拒：fail-closed，不得降級成 LLM 草稿（契約 §3.3.2 第 9 點）")
+                .isInstanceOfSatisfying(UnprocessableException.class, e -> {
+                    assertThat(e.reason()).isEqualTo(ErrorReasons.SDD_SPEC_REJECTED);
+                    assertThat(e.details()).containsEntry("bridgeReason", "spec_digest_changed")
+                            .containsEntry("detail", "TCS 在凍結後被改過");
+                });
+        verify(llm, never()).generate(any());
+        verify(bridge, never()).decompose(any(), any());
+    }
+
+    @Test
+    void anExplicitSpecDirAlsoRejectsA409SpecDigestChanged() {
+        doThrow(rejected(409, "spec_digest_changed", null)).when(bridge).sddCompile("/spec", "a.md", null);
+
+        assertThatThrownBy(() -> parser.parse(record(ImportSourceType.MARKDOWN, "x"), v15Options("/spec", "a.md", null)))
+                .isInstanceOfSatisfying(UnprocessableException.class,
+                        e -> assertThat(e.details()).containsEntry("bridgeReason", "spec_digest_changed"));
+    }
+
+    @Test
+    void anotherConflictOnTheProbeIsStillSkippedLikeAnyOtherFourXx() {
+        doThrow(rejected(409, "some_other_conflict", null)).when(bridge).sddCompile(EXEC_PATH, null, null);
+        when(llm.generate(any())).thenReturn(new LlmResult(llmDraft(), 10L, "m"));
+
+        assertThat(parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null)).result().path())
+                .isEqualTo(ParsePath.LLM);
+    }
+
+    @Test
+    void theCompileResponseFillsTheFourServerOwnedFields() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiledWith("/work/proj/spec/sub/cart.md",
+                "cart-key", "verified", List.of(), List.of(), new SddTask("C1", "n", "p", null, null, false)));
+
+        ParsedResult result = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result();
+
+        assertThat(result.specFormatVersion()).isEqualTo("1.2");
+        assertThat(result.sddProject()).as("Bridge 的標準鍵，原樣").isEqualTo("cart-key");
+        assertThat(result.sddSpecFile()).isEqualTo("/work/proj/spec/sub/cart.md");
+        assertThat(result.sddSpecDir()).as("＝spec_path 的父目錄").isEqualTo("/work/proj/spec/sub");
+    }
+
+    @Test
+    void aWindowsSpecPathKeepsItsOwnSeparatorsWhenSplitIntoTheDirectory() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiledWith("D:\\work\\spec\\cart.md", " ", null,
+                null, null, new SddTask("C1", "n", "p", null, null, false)));
+
+        ParsedResult result = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result();
+
+        assertThat(result.sddSpecFile()).isEqualTo("D:\\work\\spec\\cart.md");
+        assertThat(result.sddSpecDir()).isEqualTo("D:\\work\\spec");
+        assertThat(result.sddProject()).as("空白的標準鍵視為沒有").isNull();
+    }
+
+    @Test
+    void anOldBridgeWithoutTheNewKeysLeavesTheServerFieldsAndWarningsEmpty() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(new SddCompileResult("S", null, "d",
+                List.of(new SddTask("C1", "n", "p", null, null, false))));
+
+        Draft draft = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec"));
+
+        assertThat(draft.result().sddProject()).isNull();
+        assertThat(draft.result().sddSpecDir()).isNull();
+        assertThat(draft.result().sddSpecFile()).isNull();
+        assertThat(draft.result().specFormatVersion()).isNull();
+        assertThat(draft.warnings()).isEmpty();
+    }
+
+    @Test
+    void specLevelWarningsComeFromTheCompileResponseWithTheirLocations() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiledWith("/s/cart.md", "k", "absent",
+                List.of("AT-9", "AT-10"), List.of(
+                        new AgentBridge.SddCompileWarning("state_dir_not_ignored", "build/reports/fsm 未被 git 忽略"),
+                        new AgentBridge.SddCompileWarning("unknown_future_code", "不認得的警告不轉入")),
+                new SddTask("C1", "n", "p", null, null, false)));
+
+        List<ParseWarning> warnings = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).warnings();
+
+        assertThat(warnings).extracting(ParseWarning::code).containsExactly("at_unmapped", "frozen_digest_absent",
+                "state_dir_not_ignored");
+        assertThat(warnings).extracting(ParseWarning::location).containsExactly("specDir", "specDir", "executionPath");
+        assertThat(warnings.get(0).detail()).contains("AT-9").contains("AT-10");
+        assertThat(warnings.get(2).detail()).isEqualTo("build/reports/fsm 未被 git 忽略");
+        assertThat(ParseWarning.isSpecLevel(warnings.get(0))).isTrue();
+    }
+
+    @Test
+    void aVerifiedDigestAndNoUnmappedAtsRaiseNoSpecLevelWarning() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiledWith("/s/cart.md", "k", "verified",
+                List.of(), List.of(), new SddTask("C1", "n", "p", null, null, false)));
+
+        assertThat(parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).warnings()).isEmpty();
+    }
+
+    @Test
+    void maxRetriesAndMaintainContextFromTheBridgeLandOnTheDraftTask() {
+        when(bridge.sddCompile("/spec", null, null)).thenReturn(compiledWith("/s/cart.md", "k", "verified",
+                List.of(), List.of(),
+                new SddTask("C1", "有值", "p", null, null, false, 5, true, "0123456789abcdef0123"),
+                new SddTask("C2", "沒給", "p", null, null, false)));
+
+        List<ParsedTask> tasks = parser.parse(record(ImportSourceType.MARKDOWN, "x"), options("/spec")).result()
+                .goals().get(0).tasks();
+
+        assertThat(tasks.get(0).maxRetries()).isEqualTo(5);
+        assertThat(tasks.get(0).passCriteriaSpec()).containsEntry("maintainContext", true);
+        assertThat(tasks.get(1).maxRetries()).as("Bridge 沒給：null，落庫取預設 3").isNull();
+        assertThat(tasks.get(1).passCriteriaSpec()).as("沒給就不放這個鍵").doesNotContainKey("maintainContext");
     }
 
     // ── 路徑 C：decompose ────────────────────────────────────────────────────
@@ -605,12 +753,12 @@ class ImportParserTest {
 
     @Test
     void theParserNeverCallsTheBridgeForPathBBeyondTheProbe() {
-        when(bridge.sddCompile(EXEC_PATH)).thenThrow(rejected(422, "spec_not_found", null));
+        when(bridge.sddCompile(EXEC_PATH, null, null)).thenThrow(rejected(422, "spec_not_found", null));
         when(llm.generate(any())).thenReturn(new LlmResult(llmDraft(), 1L, "m"));
         parser.parse(record(ImportSourceType.MARKDOWN, MARKDOWN_DOC), options(null));
-        verify(bridge).sddCompile(EXEC_PATH);
+        verify(bridge).sddCompile(EXEC_PATH, null, null);
         verify(bridge, never()).decompose(any(), any());
         verify(bridge, never()).approveDraft(anyString(), anyString());
-        verify(bridge, never()).sddCompile(eq("/other"));
+        verify(bridge, never()).sddCompile(eq("/other"), any(), any());
     }
 }

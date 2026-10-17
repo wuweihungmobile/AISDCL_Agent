@@ -125,6 +125,14 @@ public final class ImportFixtures {
 
     /** {@code POST /sdd/compile} 的 200 本文：{@code count} 個合約。 */
     public static String sddCompileResponse(String scenario, int count) {
+        return sddCompileResponse(scenario, count, Map.of());
+    }
+
+    /**
+     * 同上，另把 {@code extras} 併進本文（覆蓋同名鍵）：v1.5 的 {@code spec_path}（絕對路徑）、{@code spec_file}、{@code fsm_project}、
+     * {@code spec_format_version}、{@code frozen_digest}、{@code unmapped_at_ids}、{@code warnings[]}（契約 §3.1.4 (e)）。
+     */
+    public static String sddCompileResponse(String scenario, int count, Map<String, Object> extras) {
         List<Map<String, Object>> tasks = new ArrayList<>();
         for (int i = 1; i <= count; i++) {
             Map<String, Object> task = new LinkedHashMap<>();
@@ -141,6 +149,7 @@ public final class ImportFixtures {
         body.put("spec_path", "/spec/cart.yaml");
         body.put("digest", "0123456789abcdef0123456789abcdef");
         body.put("tasks", tasks);
+        body.putAll(extras);
         return JSON.writeValueAsString(body);
     }
 

@@ -14,6 +14,7 @@ import com.aisdlc.console.application.port.out.ProjectRepository;
 import com.aisdlc.console.application.port.out.ReviewRequestRepository;
 import com.aisdlc.console.application.port.out.TaskRepository;
 import com.aisdlc.console.application.port.out.TokenSampleRepository;
+import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.NotFoundException;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.exception.Violations;
@@ -21,6 +22,7 @@ import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.DagSnapshot;
 import com.aisdlc.console.domain.model.execution.DagSnapshot.Node;
 import com.aisdlc.console.domain.model.execution.DagSnapshot.NodeKind;
+import com.aisdlc.console.domain.model.execution.ExecutionRtm;
 import com.aisdlc.console.domain.model.execution.ExecutionRun;
 import com.aisdlc.console.domain.model.execution.ReviewStatus;
 import com.aisdlc.console.domain.model.execution.RunStatus;
@@ -312,5 +314,22 @@ public class ExecutionQueryService implements ExecutionQueryUseCase {
             return checkpoints.findByRun(runId).stream().map(c -> new CheckpointView(c.id(), c.runId(), c.name(),
                     c.createdAt(), c.automatic(), c.stepIdx(), c.stepId(), c.completedSteps())).toList();
         });
+    }
+
+    // ── GET /executions/{runId}/rtm（v1.5，G-05）────────────────────────────────
+
+    @Override
+    public ExecutionRtm rtm(UUID runId) {
+        readTx.executeWithoutResult(status -> require(runId));       // 批次不在資料庫：無 reason 的 404
+        try {
+            return bridge.getRunRtm(runId);
+        } catch (BridgeRejectedException e) {
+            if (e.status() == 404) {
+                // Bridge 的 404 有兩種：run_not_found（工作區已清除）與 rtm_not_found（沒有報告）；對前端都是「這個批次沒有追溯報告」
+                throw new NotFoundException("此批次沒有追溯覆蓋報告", ErrorReasons.RTM_NOT_FOUND,
+                        Map.of("runId", runId.toString()));
+            }
+            throw BridgeErrors.forRead(e);                            // 422 rtm_unreadable 等：引擎拒絕此請求
+        }
     }
 }

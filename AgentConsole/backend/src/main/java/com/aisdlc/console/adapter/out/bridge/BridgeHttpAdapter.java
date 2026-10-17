@@ -1,12 +1,16 @@
 package com.aisdlc.console.adapter.out.bridge;
 
 import com.aisdlc.console.application.port.out.AgentBridge;
+import com.aisdlc.console.domain.exception.ErrorReasons;
+import com.aisdlc.console.domain.exception.ServiceUnavailableException;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.engine.SddFsmList;
 import com.aisdlc.console.domain.model.engine.SddFsmState;
 import com.aisdlc.console.domain.model.engine.SddProjectEntry;
 import com.aisdlc.console.domain.model.engine.SddVersion;
 import com.aisdlc.console.domain.model.execution.BridgeStatus;
+import com.aisdlc.console.domain.model.execution.ExecutionRtm;
+import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,6 +53,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -67,6 +72,10 @@ import java.util.stream.Stream;
 class BridgeHttpAdapter implements AgentBridge {
 
     static final String TRACE_HEADER = "X-Trace-Id";
+    /** SDD 寫入權杖標頭（ADR-XPLAT-016 §9）：只附在四個會觸發 FSM 寫入的呼叫。🔴 值絕不進日誌、錯誤封包或 details。 */
+    static final String TOKEN_HEADER = "X-Bridge-Token";
+    /** Bridge 在「SDD 寫入面停用」時回的 503 reason（它的 {@code BRIDGE_SDD_WRITE_TOKEN} 沒設）：不是 5xx 故障，而是設定決定的停用。 */
+    private static final String SDD_WRITE_DISABLED = "sdd_write_disabled";
     private static final String TRACE_MDC_KEY = "traceId";
     private static final Logger LOG = LoggerFactory.getLogger(BridgeHttpAdapter.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -83,10 +92,18 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final Duration COMPILE_READ_TIMEOUT = Duration.ofSeconds(15);
     // 契約 §3.1 呼叫總表：連線 2s，讀取逾時依呼叫而定
     private static final Duration START_READ_TIMEOUT = Duration.ofSeconds(30);
+    /** 帶 {@code sdd} 的建立批次：含最多三次 FSM CLI 子行程（每次 ≤ 20 秒），所以 90 秒（契約 §3.1；一般批次維持 30 秒）。 */
+    private static final Duration START_SDD_READ_TIMEOUT = Duration.ofSeconds(90);
     private static final Duration PAUSE_READ_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration RESUME_READ_TIMEOUT = Duration.ofSeconds(15);
+    /**
+     * resume／restore 的讀取逾時 30 秒（v1.5，原 15 秒；契約 §3.1）：SDD run 可能多一次 {@code delegate-enter}（CLI 單次最多 20 秒），
+     * 15 秒會在 Bridge 還在工作時先讀取逾時而得到 504；console-api 分不出 SDD 與非 SDD run，兩者共用同一個值。
+     */
+    private static final Duration RESUME_READ_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration STOP_READ_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration RESTORE_READ_TIMEOUT = Duration.ofSeconds(15);
+    private static final Duration RESTORE_READ_TIMEOUT = Duration.ofSeconds(30);
+    /** 核准凍結：Bridge 經 CLI 子行程記錄凍結並重讀狀態檔（契約 §3.1：連線 2 秒／讀取 40 秒、不重試）。 */
+    private static final Duration FREEZE_READ_TIMEOUT = Duration.ofSeconds(40);
     private static final Duration GET_READ_TIMEOUT = Duration.ofSeconds(3);
     private static final Duration EVENTS_READ_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration STREAM_CONNECT_TIMEOUT = Duration.ofSeconds(3);
@@ -141,25 +158,45 @@ class BridgeHttpAdapter implements AgentBridge {
     }
 
     @Override
-    public SddCompileResult sddCompile(String specDir) {
-        Map<String, Object> doc = postJson(endpoints.sddBase() + "/sdd/compile", Map.of("spec_dir", specDir),
-                COMPILE_READ_TIMEOUT);
+    public SddCompileResult sddCompile(String specDir, String specFile, String fsmProject) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("spec_dir", specDir);
+        if (specFile != null && !specFile.isBlank()) {
+            body.put("spec_file", specFile);
+        }
+        if (fsmProject != null && !fsmProject.isBlank()) {
+            body.put("fsm_project", fsmProject);                 // 有效值原樣送出：Backend 不淨化（契約 §3.3.2 v1.5 補充第 1 點）
+        }
+        Map<String, Object> doc = postJson(endpoints.sddBase() + "/sdd/compile", body, COMPILE_READ_TIMEOUT);
         List<SddTask> tasks = new ArrayList<>();
         for (Object item : asList(doc.get("tasks"))) {
             Map<String, Object> task = asMap(item);
             tasks.add(new SddTask(text(task.get("step_id")), text(task.get("name")), text(task.get("prompt")),
                     text(task.get("expected_output_regex")), text(task.get("evaluator_command")),
-                    Boolean.TRUE.equals(task.get("weak_regex"))));
+                    Boolean.TRUE.equals(task.get("weak_regex")), intOrNull(task.get("max_retries")),
+                    task.get("maintain_context") instanceof Boolean b ? b : null, text(task.get("spec_digest"))));
+        }
+        List<String> unmapped = new ArrayList<>();
+        for (Object id : asList(doc.get("unmapped_at_ids"))) {
+            unmapped.add(text(id));
+        }
+        List<SddCompileWarning> warnings = new ArrayList<>();
+        for (Object item : asList(doc.get("warnings"))) {
+            Map<String, Object> warning = asMap(item);
+            if (text(warning.get("code")) != null) {
+                warnings.add(new SddCompileWarning(text(warning.get("code")), text(warning.get("detail"))));
+            }
         }
         return new SddCompileResult(text(doc.get("scenario")), text(doc.get("spec_path")), text(doc.get("digest")),
-                tasks);
+                tasks, text(doc.get("spec_file")), text(doc.get("fsm_project")), text(doc.get("frozen_digest")),
+                text(doc.get("spec_format_version")), unmapped, warnings);
     }
 
     // ── v1.4（D-16）：AISDLC_SDD 唯讀查詢（契約 §3.1 三列、§3.1.3；連線 2s／讀取 3s、不重試）──────────────────
 
     @Override
     public SddVersion sddVersion() {
-        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/version", SDD_READ_TIMEOUT, 0));
+        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/version", Map.of(), SDD_READ_TIMEOUT, 0));
         String latest = text(doc.get("latest"));
         if (latest == null || latest.isBlank()) {
             throw malformed("GET /sdd/version");
@@ -169,8 +206,14 @@ class BridgeHttpAdapter implements AgentBridge {
     }
 
     @Override
-    public SddFsmList sddFsmList() {
-        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/fsm", SDD_READ_TIMEOUT, 0));
+    public SddFsmList sddFsmList(String root) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        String template = endpoints.sddBase() + "/sdd/fsm";
+        if (root != null) {
+            template += "?root={root}";
+            variables.put("root", root);
+        }
+        Map<String, Object> doc = asMap(getJson(template, variables, SDD_READ_TIMEOUT, 0));
         if (!(doc.get("projects") instanceof List<?> items)) {
             throw malformed("GET /sdd/fsm");
         }
@@ -193,20 +236,122 @@ class BridgeHttpAdapter implements AgentBridge {
     }
 
     @Override
-    public SddFsmState sddFsm(String project) {
-        // project 已由呼叫端驗過白名單 ^[A-Za-z0-9._-]{1,128}$（只含不需要編碼的字元）
-        Map<String, Object> doc = asMap(getJson(endpoints.sddBase() + "/sdd/fsm/" + project, SDD_READ_TIMEOUT, 0));
+    public SddFsmState sddFsm(String project, String root) {
+        // 有效值原樣交給 Bridge 的淨化鏡像：這裡只做 URI 變數的嚴格 percent-encode（CJK、空白、`:` 都安全）
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("project", project);
+        String template = endpoints.sddBase() + "/sdd/fsm/{project}";
+        if (root != null) {
+            template += "?root={root}";
+            variables.put("root", root);
+        }
+        Map<String, Object> doc = asMap(getJson(template, variables, SDD_READ_TIMEOUT, 0));
         if (doc.isEmpty()) {
             throw malformed("GET /sdd/fsm/{project}");
         }
+        return fsmStateOf(doc, project);
+    }
+
+    @Override
+    public SddFsmState sddFreeze(String project, SddFreeze request) {
+        Map<String, String> auth = writeToken();
+        if (auth.isEmpty()) {
+            // 呼叫端本來就該先檢查；這裡是最後一道網：沒有權杖就不發出請求（發了也只會被 Bridge 回 503／403）
+            throw new ServiceUnavailableException("backend 沒有設定 SDD 寫入權杖（BRIDGE_SDD_WRITE_TOKEN），核准凍結已停用",
+                    ErrorReasons.SDD_WRITE_DISABLED);
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("root", request.root());
+        if (request.stage() != null && !request.stage().isBlank()) {
+            body.put("stage", request.stage());
+        }
+        body.put("docs", request.docs());
+        body.put("approver", request.approver());
+        body.put("reason", request.reason());
+        if (request.expectedDigests() != null && !request.expectedDigests().isEmpty()) {
+            body.put("expected_digests", request.expectedDigests());
+        }
+        Map<String, Object> doc = postJson(endpoints.sddBase() + "/sdd/fsm/{project}:freeze", Map.of("project", project),
+                body, FREEZE_READ_TIMEOUT, auth);
+        if (doc.isEmpty()) {
+            throw malformed("POST /sdd/fsm/{project}:freeze");
+        }
+        return fsmStateOf(doc, project);
+    }
+
+    /**
+     * Bridge 的 FSM 狀態本文（{@code GET /sdd/fsm/{project}} 與 {@code :freeze} 成功回應共用）→ {@link SddFsmState}。最外層鍵轉 camelCase，
+     * 巢狀內容（{@code frozen_stages}、{@code decision_trace}、{@code human_pending.items}、{@code retry_history.last}、{@code rtm_coverage}、
+     * {@code escalation_history}、{@code escalation_provenance}）原樣；v1.5 的五個新欄位缺鍵一律補預設，不得失敗（舊版 Bridge 相容）。
+     */
+    static SddFsmState fsmStateOf(Map<String, Object> doc, String fallbackProject) {
         String name = text(doc.get("project"));
-        // 最外層鍵轉 camelCase，巢狀內容（frozen_stages、decision_trace、human_pending.items、retry_history.last、rtm_coverage）原樣
         List<Map<String, Object>> trace = objects(doc.get("decision_trace"));
-        return new SddFsmState(name == null || name.isBlank() ? project : name, text(doc.get("current_state")),
+        List<Map<String, Object>> escalations = objects(doc.get("escalation_history"));
+        return new SddFsmState(name == null || name.isBlank() ? fallbackProject : name, text(doc.get("current_state")),
                 intOrNull(doc.get("current_sprint")), text(doc.get("session_id")), text(doc.get("updated_at")),
-                objects(doc.get("frozen_stages")), trace.size() > 5 ? trace.subList(trace.size() - 5, trace.size()) : trace,
-                text(doc.get("source")), humanPendingOf(doc.get("human_pending")), retryHistoryOf(doc.get("retry_history")),
-                doc.get("rtm_coverage"));
+                objects(doc.get("frozen_stages")), tail(trace, 5), text(doc.get("source")),
+                humanPendingOf(doc.get("human_pending")), retryHistoryOf(doc.get("retry_history")),
+                doc.get("rtm_coverage"), phaseOf(doc.get("phase")), tail(escalations, 5),
+                doc.get("escalation_provenance") instanceof Map<?, ?> ? asMap(doc.get("escalation_provenance")) : null,
+                text(doc.get("fsm_project")), recoveryOf(doc.get("recovery")));
+    }
+
+    private static <T> List<T> tail(List<T> items, int max) {
+        return items.size() > max ? items.subList(items.size() - max, items.size()) : items;
+    }
+
+    /** {@code phase}：四個欄位型別正確才採用；缺鍵、null、形狀不對一律 null（前端顯示「—」，不猜測）。 */
+    private static SddFsmState.Phase phaseOf(Object value) {
+        if (value instanceof Map<?, ?> map && map.get("name") instanceof String name && !name.isBlank()
+                && map.get("order") instanceof Number order) {
+            return new SddFsmState.Phase(name, order.intValue(), Boolean.TRUE.equals(map.get("blocking")),
+                    Boolean.TRUE.equals(map.get("observation")));
+        }
+        return null;
+    }
+
+    /** {@code recovery}：{@code target}／{@code powershell}／{@code posix} 三個字串都在才採用，否則 null（Bridge 無法判定目標時整個省略，Console 不猜）。 */
+    private static SddFsmState.Recovery recoveryOf(Object value) {
+        if (value instanceof Map<?, ?> map && map.get("target") instanceof String target && !target.isBlank()
+                && map.get("powershell") instanceof String powershell && map.get("posix") instanceof String posix) {
+            return new SddFsmState.Recovery(target, powershell, posix);
+        }
+        return null;
+    }
+
+    @Override
+    public ExecutionRtm getRunRtm(UUID runId) {
+        Map<String, Object> doc = asMap(getJson(runsBase() + "/autoclaude/runs/" + runId + "/rtm", Map.of(),
+                GET_READ_TIMEOUT, 0));
+        Map<String, Object> at = asMap(doc.get("at"));
+        Map<String, Object> ac = asMap(doc.get("ac"));
+        return new ExecutionRtm(text(doc.get("scenario")), text(doc.get("spec_digest")),
+                new ExecutionRtm.At(intOrZero(at.get("passed")), intOrZero(at.get("total")),
+                        intOrZero(at.get("unmapped")), decimalOrZero(at.get("pct"))),
+                new ExecutionRtm.Ac(intOrZero(ac.get("covered")), intOrZero(ac.get("total")),
+                        decimalOrZero(ac.get("pct"))),
+                strings(doc.get("failed_at_ids")), strings(doc.get("weak_regex_at_ids")),
+                strings(doc.get("unmapped_at_ids")), Boolean.TRUE.equals(doc.get("fully_covered")));
+    }
+
+    private static List<String> strings(Object value) {
+        List<String> out = new ArrayList<>();
+        for (Object item : asList(value)) {
+            if (item != null) {
+                out.add(item.toString());
+            }
+        }
+        return out;
+    }
+
+    private static double decimalOrZero(Object value) {
+        return value instanceof Number n ? n.doubleValue() : 0.0;
+    }
+
+    /** 權杖標頭（backend 有設才有）：空 map＝沒設。 */
+    private Map<String, String> writeToken() {
+        return endpoints.sddWriteToken().map(token -> Map.of(TOKEN_HEADER, token)).orElse(Map.of());
     }
 
     private static SddFsmState.HumanPending humanPendingOf(Object value) {
@@ -267,10 +412,42 @@ class BridgeHttpAdapter implements AgentBridge {
         body.put("config_overrides", request.configOverrides());
         body.put("env", request.env());
         body.put("fresh", request.fresh());
-        Map<String, Object> doc = postJson(runsBase() + "/autoclaude/runs", body, START_READ_TIMEOUT);
+        Map<String, String> auth = Map.of();
+        Duration readTimeout = START_READ_TIMEOUT;
+        if (request.sdd() != null) {
+            // 帶 sdd 的請求會觸發 FSM 寫入（談判、委派）：須附權杖，讀取逾時放寬到 90 秒（含最多三次 CLI 子行程）
+            auth = writeToken();
+            if (auth.isEmpty()) {
+                throw new ServiceUnavailableException("backend 沒有設定 SDD 寫入權杖（BRIDGE_SDD_WRITE_TOKEN），SDD 批次已停用",
+                        ErrorReasons.SDD_WRITE_DISABLED);
+            }
+            readTimeout = START_SDD_READ_TIMEOUT;
+            body.put("sdd", sddBlockOf(request.sdd()));
+        }
+        Map<String, Object> doc = postJson(runsBase() + "/autoclaude/runs", Map.of(), body, readTimeout, auth);
+        List<ExecutionWarning> warnings = new ArrayList<>();
+        for (Object item : asList(doc.get("warnings"))) {
+            Map<String, Object> warning = asMap(item);
+            if (text(warning.get("code")) != null) {
+                warnings.add(new ExecutionWarning(text(warning.get("code")), null, text(warning.get("detail"))));
+            }
+        }
         return new RunStarted(text(doc.get("run_id")), statusOf(doc.get("status")),
                 doc.get("pid") instanceof Number n ? n.intValue() : null, text(doc.get("workspace")),
-                text(doc.get("bridge_instance")));
+                text(doc.get("bridge_instance")), warnings);
+    }
+
+    /** {@code sdd} 區塊的線上形狀（snake_case；沒有 {@code spec_file} 則省略該鍵）。 */
+    private static Map<String, Object> sddBlockOf(SddBlock block) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("spec_dir", block.specDir());
+        if (block.specFile() != null && !block.specFile().isBlank()) {
+            out.put("spec_file", block.specFile());
+        }
+        out.put("fsm_project", block.fsmProject());
+        out.put("root", block.root());
+        out.put("approver", block.approver());
+        return out;
     }
 
     @Override
@@ -282,8 +459,9 @@ class BridgeHttpAdapter implements AgentBridge {
     @Override
     public BridgeStatus resumeRun(UUID runId, Map<String, String> env) {
         Map<String, Object> body = env == null || env.isEmpty() ? Map.of() : Map.of("env", env);
-        return statusOf(postJson(runsBase() + "/autoclaude/runs/" + runId + ":resume", body, RESUME_READ_TIMEOUT)
-                .get("status"));
+        // console-api 不記錄批次是否為 SDD，所以有設權杖就一律附（Bridge 只對 SDD run 驗；D-115-18）
+        return statusOf(postJson(runsBase() + "/autoclaude/runs/" + runId + ":resume", Map.of(), body,
+                RESUME_READ_TIMEOUT, writeToken()).get("status"));
     }
 
     @Override
@@ -299,7 +477,8 @@ class BridgeHttpAdapter implements AgentBridge {
         if (env != null && !env.isEmpty()) {
             body.put("env", env);
         }
-        postJson(runsBase() + "/autoclaude/runs/" + runId + "/restore", body, RESTORE_READ_TIMEOUT);
+        postJson(runsBase() + "/autoclaude/runs/" + runId + "/restore", Map.of(), body, RESTORE_READ_TIMEOUT,
+                writeToken());
     }
 
     @Override
@@ -430,11 +609,14 @@ class BridgeHttpAdapter implements AgentBridge {
 
     /** GET＋JSON 解析（物件或陣列）；連線失敗與讀取逾時重試 2 次（200ms 退避，契約 §3.1），4xx／5xx 不重試。 */
     private Object getJson(String url, Duration readTimeout) {
-        return getJson(url, readTimeout, GET_RETRIES);
+        return getJson(url, Map.of(), readTimeout, GET_RETRIES);
     }
 
-    /** 同上，重試次數由呼叫端決定（引擎狀態查詢不重試：契約 §3.1，{@code retries=0}）。 */
-    private Object getJson(String url, Duration readTimeout, int retries) {
+    /**
+     * 同上，重試次數由呼叫端決定（引擎狀態查詢不重試：契約 §3.1，{@code retries=0}），且 {@code urlTemplate} 可帶 URI 變數
+     * （{@code {project}}、{@code {root}}）：變數值嚴格 percent-encode，所以 CJK、空白、{@code :} 與路徑分隔符都能安全定址。
+     */
+    private Object getJson(String urlTemplate, Map<String, Object> variables, Duration readTimeout, int retries) {
         String trace = traceId();
         // 至少嘗試一次；最後一次失敗（連線失敗或讀取逾時）就把它丟出去，其餘錯誤（4xx／5xx）在 handle 內直接丟出、不重試
         for (int attempt = 0;; attempt++) {
@@ -448,7 +630,7 @@ class BridgeHttpAdapter implements AgentBridge {
             }
             UpstreamException failure;
             try {
-                return client(readTimeout, trace).get().uri(url).exchange((req, response) -> {
+                return client(readTimeout, trace).get().uri(urlTemplate, variables).exchange((req, response) -> {
                     HttpStatusCode status = response.getStatusCode();
                     String body = readBody(response.getBody());
                     if (status.is2xxSuccessful()) {
@@ -589,9 +771,19 @@ class BridgeHttpAdapter implements AgentBridge {
     }
 
     private Map<String, Object> postJson(String url, Object body, Duration readTimeout) {
+        return postJson(url, Map.of(), body, readTimeout, Map.of());
+    }
+
+    /**
+     * POST＋JSON：{@code urlTemplate} 可帶 URI 變數（嚴格 percent-encode）；{@code headers} 是額外標頭（目前只有 {@value #TOKEN_HEADER}）。
+     * 🔴 標頭值（權杖）只放進請求，不進日誌、例外訊息或錯誤封包。
+     */
+    private Map<String, Object> postJson(String urlTemplate, Map<String, Object> variables, Object body,
+                                         Duration readTimeout, Map<String, String> headers) {
         String payload = JSON.writeValueAsString(body);
         try {
-            return client(readTimeout, traceId()).post().uri(url).contentType(MediaType.APPLICATION_JSON).body(payload)
+            return client(readTimeout, traceId()).post().uri(urlTemplate, variables)
+                    .headers(h -> headers.forEach(h::set)).contentType(MediaType.APPLICATION_JSON).body(payload)
                     .exchange((request, response) -> handle(response.getStatusCode(), readBody(response.getBody())));
         } catch (ResourceAccessException e) {
             throw translate(e);
@@ -604,13 +796,15 @@ class BridgeHttpAdapter implements AgentBridge {
         }
         Map<String, Object> error = parseErrorBody(body);
         String reason = text(error.get("reason"));
-        if (status.is4xxClientError()) {
+        // 503 sdd_write_disabled 是「明確拒絕」（權杖沒設＝這個動詞停用），與 4xx 同走 BridgeRejectedException，由用例轉成 503；其餘 5xx 才是故障
+        boolean writeDisabled = status.value() == 503 && SDD_WRITE_DISABLED.equals(reason);
+        if (status.is4xxClientError() || writeDisabled) {
             List<Map<String, Object>> violations = new ArrayList<>();
             for (Object item : asList(error.get("violations"))) {
                 violations.add(asMap(item));
             }
             throw new BridgeRejectedException(status.value(), reason == null ? "" : reason, text(error.get("gate")),
-                    text(error.get("detail")), violations, error);
+                    detailText(error.get("detail")), violations, error);
         }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("bridgeStatus", status.value());
@@ -667,5 +861,16 @@ class BridgeHttpAdapter implements AgentBridge {
 
     private static String text(Object value) {
         return value == null ? null : value.toString();
+    }
+
+    /**
+     * Bridge 錯誤封包的 {@code detail}：字串原樣；物件（{@code fsm_state_conflict}、{@code spec_digest_changed} 的 {@code detail} 是物件，
+     * 契約 §6.8.6 靜默處 #8）轉成一行 {@code k=v; k=v}——完整物件另由 {@code BridgeRejectedException.detailObject()} 取。
+     */
+    private static String detailText(Object detail) {
+        if (detail instanceof Map<?, ?> map) {
+            return map.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining("; "));
+        }
+        return text(detail);
     }
 }

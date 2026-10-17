@@ -59,13 +59,15 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
     private final SettingsReader settings;
     private final RuntimeSettings runtime;
     private final RunLauncher launcher;
+    private final SddBatches sddBatches;
     private final AuditTrail audit;
     private final TransactionTemplate readTx;
 
     @SuppressWarnings("java:S107")
     public ExecuteProjectService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks,
                                  ExecutionRunRepository runs, SettingsReader settings, RuntimeSettings runtime,
-                                 RunLauncher launcher, AuditTrail audit, PlatformTransactionManager transactions) {
+                                 RunLauncher launcher, SddBatches sddBatches, AuditTrail audit,
+                                 PlatformTransactionManager transactions) {
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;
@@ -73,6 +75,7 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
         this.settings = settings;
         this.runtime = runtime;
         this.launcher = launcher;
+        this.sddBatches = sddBatches;
         this.audit = audit;
         this.readTx = new TransactionTemplate(transactions);
         this.readTx.setReadOnly(true);
@@ -81,14 +84,15 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
     @Override
     public RunView execute(UUID projectId, Command command, String actor) {
         audit.note("execution.start", "project", projectId.toString());
-        RunLauncher.Launch launch = readTx.execute(status -> prepare(projectId, command));
-        ExecutionRun run = launcher.launch(launch, created -> { });
+        RunLauncher.Launch launch = readTx.execute(status -> prepare(projectId, command, actor));
+        RunLauncher.Launched launched = launcher.launchWithWarnings(launch, created -> { });
+        ExecutionRun run = launched.run();
         return new RunView(run.id(), run.projectId(), run.runNumber(), RunStatus.RUNNING, BridgeStatus.RUNNING,
                 run.autonomyLevel(), run.scope(), 0L, run.tokenBudget(), run.startedAt(), null,
-                run.engineCapabilities());
+                run.engineCapabilities(), launched.warnings());
     }
 
-    private RunLauncher.Launch prepare(UUID projectId, Command command) {
+    private RunLauncher.Launch prepare(UUID projectId, Command command, String actor) {
         Project project = projects.findById(projectId).orElseThrow(() -> NotFoundException.of("專案", projectId));
         RunScope scope = validateRequest(command);
         if (project.status() == ProjectStatus.EXECUTING) {
@@ -113,13 +117,17 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
         ExecutionPlanner.Strategy strategy = ExecutionPlanner.Strategy.parse(
                 settings.value("execution", "dagSchedulerStrategy"));
         Plan plan = ExecutionPlanner.plan(grouped, goals.dependencyGraph(projectId), scope, strategy, true);
+        // v1.5：SDD 批次資格判定（契約 §1.10.5）——成立時 step_id 換成 passCriteriaSpec.stepId，Bridge 請求另帶 sdd 區塊；不成立時出聲
+        SddBatches.Prepared sdd = sddBatches.prepare(project, plan, actor);
         Set<String> allowlist = runtime.evaluatorAllowlist();
-        Playbook playbook = PlaybookBuilder.build(project, plan, settings.intValue("agent", "maxRetries"), allowlist);
+        Playbook playbook = PlaybookBuilder.build(project, sdd.plan(), settings.intValue("agent", "maxRetries"),
+                allowlist, sdd.decision().specs());
 
         int level = command.autonomyLevel() == null ? project.autonomyLevel() : command.autonomyLevel();
         long budget = command.tokenBudget() == null ? settings.longValue("execution", "globalTokenBudget")
                 : command.tokenBudget();
-        return new RunLauncher.Launch(project, plan, playbook, scope, level, budget);
+        return new RunLauncher.Launch(project, sdd.plan(), playbook, scope, level, budget, sdd.decision(),
+                sdd.approver());
     }
 
     /** 第 2 項：請求欄位（等級 1～10、預算 ≥ 1、範圍模式與 id 的組合、限額 ≥ 1）。 */

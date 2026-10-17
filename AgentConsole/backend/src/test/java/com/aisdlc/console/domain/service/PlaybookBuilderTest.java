@@ -4,6 +4,7 @@ import com.aisdlc.console.domain.exception.DomainException;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.UnprocessableException;
 import com.aisdlc.console.domain.model.execution.RunScope;
+import com.aisdlc.console.domain.model.execution.SddTaskSpec;
 import com.aisdlc.console.domain.model.goal.Goal;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.model.task.Task;
@@ -179,6 +180,86 @@ class PlaybookBuilderTest {
 
         assertThat(e.reason()).isEqualTo(ErrorReasons.TOO_MANY_TASKS);
         assertThat(e.details()).containsEntry("count", 501).containsEntry("limit", 500);
+    }
+
+    // ── v1.5：SDD 批次的 playbook（契約 §3.4.1 的 SDD 補充）──────────────────────────────────
+
+    private Plan sddPlan(Task... tasks) {
+        Plan plan = planOf(tasks);
+        Map<UUID, String> stepIds = new LinkedHashMap<>();
+        for (Task task : tasks) {
+            stepIds.put(task.id(), "sdd-greenfield-at-" + task.name().toLowerCase());
+        }
+        return plan.withStepIds(stepIds);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aSddBatchUsesTheSddStepIdsAndAddsOnlyTheThreeSddFieldsThatHaveValues() {
+        Task a = DomainFixtures.sddTask(g1.id(), "AT-001", 0, "x", null);
+        Task b = DomainFixtures.sddTask(g1.id(), "AT-002", 1, "x", null);
+        Plan plan = sddPlan(a, b);
+        String digest = "sha256:" + "a".repeat(64);
+        Map<UUID, SddTaskSpec> specs = Map.of(
+                a.id(), new SddTaskSpec("sdd", "sdd-greenfield-at-at-001", digest, true, Boolean.TRUE),
+                b.id(), new SddTaskSpec("sdd", "sdd-greenfield-at-at-002", digest, false, null));
+
+        Playbook playbook = PlaybookBuilder.build(project, plan, 3, PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST, specs);
+
+        List<Map<String, Object>> tasks = (List<Map<String, Object>>) playbook.toMap().get("tasks");
+        assertThat(tasks.get(0)).containsEntry("step_id", "sdd-greenfield-at-at-001").containsEntry("spec_digest", digest)
+                .containsEntry("weak_regex", true).containsEntry("maintain_context", true)
+                .containsEntry("max_retries", 5).containsEntry("goal_task_id", a.id().toString())
+                .doesNotContainKey("command");
+        assertThat(tasks.get(1)).containsEntry("step_id", "sdd-greenfield-at-at-002").containsEntry("weak_regex", false)
+                .as("maintainContext 缺就不送這個鍵").doesNotContainKey("maintain_context");
+        assertThat(playbook.tasks().get(0).prompt()).as("prompt 樣板不變，但帶的是 SDD step_id（邊界辨識要互不為子字串）")
+                .startsWith("## 任務 sdd-greenfield-at-at-001：AT-001\n");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aBatchWithoutSddSpecsIsByteForByteTheV14ShapeWithNoSddKeys() {
+        Task t = DomainFixtures.taskWith(g1.id(), "T1", 0, "請輸出 [T1_DONE]", "pytest -q", "\\[T1_DONE\\]", 2, null);
+
+        Map<String, Object> first = PlaybookBuilder.build(project, planOf(t), 3,
+                PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST).toMap();
+        Map<String, Object> second = PlaybookBuilder.build(project, planOf(t), 3,
+                PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST, Map.of()).toMap();
+
+        List<Map<String, Object>> tasks = (List<Map<String, Object>>) first.get("tasks");
+        assertThat(tasks.get(0).keySet()).containsExactly("step_id", "name", "prompt", "expected_output_regex",
+                "evaluator_command", "max_retries", "goal_task_id");
+        assertThat(second).as("兩個多載同形").isEqualTo(first);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aBlankSpecDigestIsNotSentAndTheSddFieldsAreNeverInvented() {
+        Task t = DomainFixtures.sddTask(g1.id(), "AT-001", 0, "x", null);
+        Plan plan = sddPlan(t);
+
+        Playbook playbook = PlaybookBuilder.build(project, plan, 3, PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST,
+                Map.of(t.id(), new SddTaskSpec("sdd", "sdd-greenfield-at-at-001", " ", null, null)));
+
+        assertThat(((List<Map<String, Object>>) playbook.toMap().get("tasks")).get(0))
+                .doesNotContainKeys("spec_digest", "weak_regex", "maintain_context");
+    }
+
+    @Test
+    void sddTasksKeepTheirOwnMaxRetriesAndTheUsualValidationsStillReject() {
+        Task ok = DomainFixtures.sddTask(g1.id(), "AT-001", 0, "x", null);
+        SddTaskSpec spec = new SddTaskSpec("sdd", "sdd-greenfield-at-at-001", "sha256:" + "a".repeat(64), false, null);
+
+        assertThat(PlaybookBuilder.build(project, sddPlan(ok), 3, PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST,
+                Map.of(ok.id(), spec)).tasks()).as("路徑 A 填的 5（SCG-4 型）或 2（SCG-5 型）照常沿用 task.maxRetries")
+                .singleElement().satisfies(task -> assertThat(task.maxRetries()).isEqualTo(5));
+
+        Task unlisted = DomainFixtures.taskWith(g1.id(), "AT-001", 0, "d", "bash run.sh", null, 5, null);
+        Plan plan = sddPlan(unlisted);
+        assertThatThrownBy(() -> PlaybookBuilder.build(project, plan, 3, PlaybookBuilder.DEFAULT_EVALUATOR_ALLOWLIST,
+                Map.of(unlisted.id(), spec))).isInstanceOfSatisfying(UnprocessableException.class,
+                e -> assertThat(e.reason()).isEqualTo(ErrorReasons.EVALUATOR_NOT_ALLOWED));
     }
 
     @Test

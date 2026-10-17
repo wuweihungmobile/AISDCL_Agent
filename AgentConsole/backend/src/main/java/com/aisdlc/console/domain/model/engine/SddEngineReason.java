@@ -16,7 +16,12 @@ public enum SddEngineReason {
     /** 帶了 {@code project}，{@code GET /sdd/fsm/{project}} 回 404（{@code fsm_not_found}）。 */
     FSM_NOT_FOUND("fsm_not_found", true),
     /** 帶了 {@code project}，Bridge 回 422（{@code fsm_state_unreadable}：YAML 壞掉、或缺 {@code fsm_state} 根節點）。 */
-    FSM_STATE_UNREADABLE("fsm_state_unreadable", true);
+    FSM_STATE_UNREADABLE("fsm_state_unreadable", true),
+    /**
+     * v1.5：帶了 {@code projectId}，而 Bridge 對該專案的 {@code root} 回 422 {@code sanitization_failed}（專案路徑不在
+     * {@code BRIDGE_ALLOWED_PATH_ROOTS} 內、或已不存在）：{@code available=true}、{@code projects=[]}、{@code fsm=null}、{@code version} 保留。
+     */
+    SDD_ROOT_REJECTED("sdd_root_rejected", true);
 
     private final String wire;
     private final boolean engineAvailable;

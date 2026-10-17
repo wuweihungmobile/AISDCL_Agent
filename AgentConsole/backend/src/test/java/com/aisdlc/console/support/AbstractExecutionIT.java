@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -33,6 +34,7 @@ import java.util.function.BooleanSupplier;
  * 下一個測試（{@link AbstractApiIT} 的 {@code @BeforeEach}）才能安全地 TRUNCATE 資料。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@TestPropertySource(properties = "console.bridge.sdd-write-token=" + MiniBridge.SDD_TOKEN)
 public abstract class AbstractExecutionIT extends AbstractApiIT {
 
     /** 整個 JVM 一個迷你 Bridge（隨機埠）；鏡射用的資料來源不經 Spring（Bridge 本來就是另一個行程）。 */

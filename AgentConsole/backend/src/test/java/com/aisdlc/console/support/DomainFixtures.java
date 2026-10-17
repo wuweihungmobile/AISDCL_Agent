@@ -22,7 +22,14 @@ public final class DomainFixtures {
 
     public static Project project(String name) {
         return Project.restore(UUID.randomUUID(), name, "/work/" + name, "全部完成", "說明", ProjectStatus.DRAFT, 3,
-                true, null, null, false, T0, T0, "tester", null, null);
+                true, null, null, false, T0, T0, "tester", null, null, null, null, null);
+    }
+
+    /** 帶 SDD 綁定三欄的專案（契約 §0.5 V12；null＝尚未綁定），其餘同 {@link #project(String)}。 */
+    public static Project boundProject(String name, String executionPath, String sddProject, String sddSpecDir,
+                                       String sddSpecFile) {
+        return Project.restore(UUID.randomUUID(), name, executionPath, "全部完成", "說明", ProjectStatus.DRAFT, 3,
+                true, null, null, false, T0, T0, "tester", null, null, sddProject, sddSpecDir, sddSpecFile);
     }
 
     public static Goal goal(UUID projectId, String name, int sortOrder, UUID... dependsOn) {
@@ -42,6 +49,18 @@ public final class DomainFixtures {
         return Task.restore(UUID.randomUUID(), goalId, name, "請輸出 [" + name + "_DONE]", "輸出含 [" + name + "_DONE]",
                 null, "\\[" + name + "_DONE\\]", null, sortOrder, status, null, null, 0, 1, null, null, true, null,
                 null, false, T0.plusSeconds(sortOrder), T0, null, null, null);
+    }
+
+    /** 路徑 A（規格驅動）產生的任務：{@code passCriteriaSpec} 是 JSON 文字（可為 null），簽核人承襲匯入記錄；maxRetries＝5（SCG-4 型）。 */
+    public static Task sddTask(UUID goalId, String name, int sortOrder, String passCriteriaSpecJson, String signedOffBy) {
+        return Task.restore(UUID.randomUUID(), goalId, name, "請輸出 [" + name + "_DONE]", "輸出含 [" + name + "_DONE]",
+                null, "\\[" + name + "_DONE\\]", passCriteriaSpecJson, sortOrder, TaskStatus.PENDING, null, null, 0, 5,
+                null, null, true, signedOffBy, null, false, T0.plusSeconds(sortOrder), T0, null, null, null);
+    }
+
+    /** {@code {source:"sdd", stepId, specDigest, weakRegex:false}} 的 JSON 文字（路徑 A 的 {@code passCriteriaSpec} 形狀）。 */
+    public static String sddSpec(String stepId, String specDigest) {
+        return "{\"source\":\"sdd\",\"specDigest\":\"" + specDigest + "\",\"stepId\":\"" + stepId + "\",\"weakRegex\":false}";
     }
 
     public static Task taskWith(UUID goalId, String name, int sortOrder, String description, String evaluator,

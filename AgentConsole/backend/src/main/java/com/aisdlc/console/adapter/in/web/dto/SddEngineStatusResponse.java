@@ -17,10 +17,11 @@ import java.util.List;
 public record SddEngineStatusResponse(
         @NotNull @Schema(description = "Bridge 的 GET /sdd/version 與 GET /sdd/fsm 都成功為 true；任一失敗為 false") boolean available,
         @NotNull @Schema(description = "available=true 且沒有問題時為 null。bridge_unreachable／sdd_unavailable／bridge_error 時 available=false；"
-                + "fsm_not_found／fsm_state_unreadable 時 available=true、fsm=null（回應欄位的值，不是 ApiError.reason）",
+                + "fsm_not_found／fsm_state_unreadable／sdd_root_rejected（v1.5：帶了 projectId，而 Bridge 對該專案的 root 回 422 "
+                + "sanitization_failed；projects=[]，version 保留）時 available=true、fsm=null（回應欄位的值，不是 ApiError.reason）",
                 nullable = true,
                 allowableValues = {"bridge_unreachable", "sdd_unavailable", "bridge_error", "fsm_not_found",
-                        "fsm_state_unreadable"})
+                        "fsm_state_unreadable", "sdd_root_rejected"})
         String reason,
         @NotNull @Schema(description = "GET /sdd/version 失敗時為 null", nullable = true) SddVersionDto version,
         @NotNull @Schema(description = "available=false 時為空陣列（第三個呼叫失敗時保留前兩個呼叫已取得的值）；available=true 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態）")

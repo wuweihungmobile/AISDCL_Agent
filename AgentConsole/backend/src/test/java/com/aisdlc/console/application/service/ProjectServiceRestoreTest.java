@@ -57,7 +57,7 @@ class ProjectServiceRestoreTest {
     private Project deletedProject(Instant deletedAt) {
         Project project = Project.restore(UUID.randomUUID(), "已刪除的專案", "/work/deleted", "全部完成", null,
                 ProjectStatus.ARCHIVED, 3, true, null, null, true, NOW.minus(Duration.ofDays(100)), deletedAt, "tester",
-                deletedAt, ProjectStatus.READY);
+                deletedAt, ProjectStatus.READY, null, null, null);
         when(projects.findIncludingDeletedForUpdate(project.id())).thenReturn(Optional.of(project));
         when(projects.findById(project.id())).thenReturn(Optional.of(project));
         return project;
@@ -120,7 +120,7 @@ class ProjectServiceRestoreTest {
     @Test
     void aProjectThatIsNotDeletedIsRefusedWithItsStatusAndNothingIsTouched() {
         Project alive = Project.restore(UUID.randomUUID(), "存活", "/work/alive", "ok", null, ProjectStatus.READY, 3,
-                true, null, null, false, NOW, NOW, "tester", null, null);
+                true, null, null, false, NOW, NOW, "tester", null, null, null, null, null);
         when(projects.findIncludingDeletedForUpdate(alive.id())).thenReturn(Optional.of(alive));
 
         assertThatThrownBy(() -> service.restore(alive.id())).isInstanceOfSatisfying(ConflictException.class, e -> {

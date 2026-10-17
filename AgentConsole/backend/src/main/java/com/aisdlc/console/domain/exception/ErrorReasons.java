@@ -98,4 +98,19 @@ public final class ErrorReasons {
     // ── 監控（Phase 5）──────────────────────────────────────────────────────
     public static final String TIME_RANGE_INVALID = "時間範圍不合法";
     public static final String REPORT_FORMAT_UNSUPPORTED = "不支援的報表格式";
+
+    // ── SDD 整合迴圈（v1.5，整合輪 115；契約 §0.3 第 8 點、附錄 B.5）────────────────────
+    // 🔴 全是英文識別字（逐字、前後端各一份、不得用 message 判斷）；沒有 sdd_not_bound（D-115-14 之後不存在「未綁定」狀態）。
+    /** freeze：{@code current_state} 不是 {@code HUMAN_PENDING}；execute／resume／restore（SDD run）：預檢表判 409。 */
+    public static final String SDD_FSM_STATE_CONFLICT = "sdd_fsm_state_conflict";
+    /** freeze／execute：有效 FSM 專案沒有狀態檔（要先在專案根的 SDD session 建立）。 */
+    public static final String SDD_FSM_NOT_FOUND = "sdd_fsm_not_found";
+    /** 規格內容與（核准人看過的／凍結時的／匯入時的）摘要不同：freeze 的 {@code expected_vs_file}、批次預檢的 {@code frozen_vs_file}／{@code import_vs_file}。 */
+    public static final String SDD_SPEC_DIGEST_CHANGED = "sdd_spec_digest_changed";
+    /** 綁定唯一性：同一個 {@code (executionPath, sddProject)} 已被另一個未刪除的專案綁定，或匯入併入時與目標專案的綁定不一致。 */
+    public static final String SDD_BINDING_CONFLICT = "sdd_binding_conflict";
+    /** backend 或 Bridge 沒有設定寫入權杖（{@code BRIDGE_SDD_WRITE_TOKEN}）：SDD 寫入面整個停用（503）。 */
+    public static final String SDD_WRITE_DISABLED = "sdd_write_disabled";
+    /** {@code GET /executions/{runId}/rtm}：批次存在但沒有追溯報告（404；<b>「404 的 reason 省略」慣例的唯一例外</b>）。 */
+    public static final String RTM_NOT_FOUND = "rtm_not_found";
 }

@@ -48,4 +48,12 @@ public interface RuntimeSettings {
      * 未開啟時軟刪除資料只會累積、不會消失。
      */
     boolean purgeEnabled();
+
+    /**
+     * backend 是否設定了 SDD 寫入權杖（{@code console.bridge.sdd-write-token}，環境變數 {@code BRIDGE_SDD_WRITE_TOKEN}；v1.5，
+     * ADR-XPLAT-016 §9）。<b>只回有沒有設、不回值</b>：權杖值只有 Bridge 出站介面卡持有，application 層永遠看不到它。
+     * 未設＝SDD 寫入面停用：核准凍結回 503 {@code sdd_write_disabled}；execute 不送 {@code sdd} 區塊並以
+     * {@code token_not_configured} 警告（契約 §1.10.5）。
+     */
+    boolean sddWriteTokenConfigured();
 }

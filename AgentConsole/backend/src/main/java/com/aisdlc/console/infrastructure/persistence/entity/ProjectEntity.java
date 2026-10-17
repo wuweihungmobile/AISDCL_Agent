@@ -72,4 +72,16 @@ public class ProjectEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "status_before_delete", length = 20)
     public ProjectStatus statusBeforeDelete;
+
+    /** V12（G-07、D-115-14）：FSM 專案鍵；NULL＝「用預設」（專案名）。{@code (execution_path, sdd_project)} 有部分唯一索引。 */
+    @Column(name = "sdd_project", length = 100)
+    public String sddProject;
+
+    /** V12：規格檔所在目錄（絕對路徑）；尚未用路徑 A 匯入規格為 NULL。 */
+    @Column(name = "sdd_spec_dir", length = 500)
+    public String sddSpecDir;
+
+    /** V12：規格檔（絕對路徑）；尚未用路徑 A 匯入規格為 NULL。 */
+    @Column(name = "sdd_spec_file", length = 500)
+    public String sddSpecFile;
 }

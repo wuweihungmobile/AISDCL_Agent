@@ -73,6 +73,19 @@ public final class ExecutionPlanner {
             goals = List.copyOf(goals);
             tasks = List.copyOf(tasks);
         }
+
+        /**
+         * 把指定任務的 {@code step_id} 換掉（只換 {@code stepIdByTaskId} 有的任務），步驟與 {@code dag.nodes[].stepId} 同步更新
+         * （契約 §3.4.4 v1.5 例外：SDD 批次沿用 {@code passCriteriaSpec.stepId}；位置 {@code sequence} 與目標位置的規則不變）。
+         */
+        public Plan withStepIds(Map<UUID, String> stepIdByTaskId) {
+            List<PlannedTask> renamed = tasks.stream().map(p -> new PlannedTask(p.task(), p.goal(), p.goalPosition(),
+                    p.taskPosition(), p.sequence(), stepIdByTaskId.getOrDefault(p.task().id(), p.stepId()))).toList();
+            List<Node> nodes = dag.nodes().stream().map(n -> n.kind() == NodeKind.TASK && stepIdByTaskId.containsKey(n.id())
+                    ? new Node(n.id(), n.kind(), n.label(), n.goalId(), stepIdByTaskId.get(n.id()), n.sequence()) : n)
+                    .toList();
+            return new Plan(goals, renamed, new DagSnapshot(nodes, dag.edges()));
+        }
     }
 
     private ExecutionPlanner() {

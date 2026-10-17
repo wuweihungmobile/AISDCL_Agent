@@ -80,6 +80,7 @@ public class ReviewService {
     private final ExecutionControlService control;
     private final RunLauncher launcher;
     private final ConfigMaterializer config;
+    private final SddBatches sddBatches;
     private final SettingsReader settings;
     private final RuntimeSettings runtime;
     private final RunRegistry registry;
@@ -90,8 +91,9 @@ public class ReviewService {
     public ReviewService(ExecutionRunRepository runs, ProjectRepository projects, GoalRepository goals,
                          TaskRepository tasks, ReviewRequestRepository reviews, CheckpointRepository checkpoints,
                          AgentBridge bridge, ExecutionControlService control, RunLauncher launcher,
-                         ConfigMaterializer config, SettingsReader settings, RuntimeSettings runtime,
-                         RunRegistry registry, PlatformTransactionManager transactions, Clock clock) {
+                         ConfigMaterializer config, SddBatches sddBatches, SettingsReader settings,
+                         RuntimeSettings runtime, RunRegistry registry, PlatformTransactionManager transactions,
+                         Clock clock) {
         this.runs = runs;
         this.projects = projects;
         this.goals = goals;
@@ -102,6 +104,7 @@ public class ReviewService {
         this.control = control;
         this.launcher = launcher;
         this.config = config;
+        this.sddBatches = sddBatches;
         this.settings = settings;
         this.runtime = runtime;
         this.registry = registry;
@@ -283,7 +286,7 @@ public class ReviewService {
         Instant now = clock.instant();
         // 範圍任務在規劃時須「未完成」：已完成者先在記憶體內重設，Bridge 接受之後才在交易內真的落庫
         rerun.forEach(t -> t.systemReset(TaskStatus.PENDING, now));
-        ExecutionRun followUp = launchFollowUp(run, project, all, rerun.stream().map(Task::id).toList(), null,
+        ExecutionRun followUp = launchFollowUp(run, project, all, rerun.stream().map(Task::id).toList(), null, actor,
                 created -> {
                     rerun.forEach(t -> {
                         t.systemReset(TaskStatus.PENDING, now);
@@ -320,7 +323,7 @@ public class ReviewService {
             });
             return run.id();
         }
-        ExecutionRun followUp = launchFollowUp(run, project, all, remaining, skipped, created -> {
+        ExecutionRun followUp = launchFollowUp(run, project, all, remaining, skipped, actor, created -> {
             tasks.save(skipped);
             markDecided(review, ReviewDecision.SKIP, actor, note);
             control.recomputeGoals(run.dag(), run.projectId(), now);
@@ -333,7 +336,7 @@ public class ReviewService {
      * Token 預算／限額；後續批次不檢查「依賴已完成」（範圍本來就是專案內其餘任務）。
      */
     private ExecutionRun launchFollowUp(ExecutionRun original, Project project, List<Task> allTasks, List<UUID> taskIds,
-                                        Task skipped, java.util.function.Consumer<ExecutionRun> beforeEffects) {
+                                        Task skipped, String actor, java.util.function.Consumer<ExecutionRun> beforeEffects) {
         List<Goal> projectGoals = goals.findByProjectId(project.id());
         List<GoalWithTasks> grouped = new ArrayList<>();
         for (Goal goal : projectGoals) {
@@ -345,12 +348,14 @@ public class ReviewService {
         ExecutionPlanner.Strategy strategy = ExecutionPlanner.Strategy.parse(
                 settings.value("execution", "dagSchedulerStrategy"));
         Plan plan = ExecutionPlanner.plan(grouped, goals.dependencyGraph(project.id()), scope, strategy, false);
-        PlaybookBuilder.Playbook playbook = PlaybookBuilder.build(project, plan,
-                settings.intValue("agent", "maxRetries"), runtime.evaluatorAllowlist());
+        // v1.5（契約 §1.10.6）：後續批次走同一條建立路徑——同樣依資格送 sdd、同樣預檢；警告只寫日誌（RunLauncher 以 WARN 記），這些端點回 204
+        SddBatches.Prepared sdd = sddBatches.prepare(project, plan, actor);
+        PlaybookBuilder.Playbook playbook = PlaybookBuilder.build(project, sdd.plan(),
+                settings.intValue("agent", "maxRetries"), runtime.evaluatorAllowlist(), sdd.decision().specs());
         LOG.info("審核決定開後續批次：原批次 {}，範圍任務 {} 個{}", original.id(), taskIds.size(),
                 skipped == null ? "" : "（剔除 " + skipped.id() + "）");
-        return launcher.launch(new RunLauncher.Launch(project, plan, playbook, scope, original.autonomyLevel(),
-                original.tokenBudget()), beforeEffects);
+        return launcher.launch(new RunLauncher.Launch(project, sdd.plan(), playbook, scope, original.autonomyLevel(),
+                original.tokenBudget(), sdd.decision(), sdd.approver()), beforeEffects);
     }
 
     // ── 共用 ────────────────────────────────────────────────────────────────────

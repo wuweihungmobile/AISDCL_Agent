@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * V5～V11 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
+ * V5～V12 對「已經在跑的資料庫」的升級（契約 §0.5、AR-06／AR-09）。為什麼重要：新資料庫從零遷移很容易對，
  * 真正會出事的是升級——V5 的「預設值校正」只能在值仍等於舊預設時才改，絕不能蓋掉管理員改過的值；
  * 新增的欄位必須讓既有匯入記錄原封不動；新鍵不能與既有鍵重複。這裡在一個獨立資料庫上先遷到 V4、塞入「管理員改過的」資料，
  * 再遷到最新版，逐項核對。
@@ -132,8 +132,38 @@ class V5UpgradeMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from "
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+    }
+
+    /**
+     * V12（契約 §0.5；D-115-14）對「已經在跑的資料庫」：升級前的專案不回填、不猜測——三個綁定欄皆為 NULL，其餘欄位原封不動；
+     * 兩個升級前就存在、同專案根的專案（綁定欄都是 NULL）不會撞上新建的部分唯一索引。
+     */
+    @Test
+    void projectsBeforeV12KeepNullBindingColumnsAndOtherFields() {
+        String database = createDatabase();
+        flyway(database, "11").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        UUID first = UUID.randomUUID();
+        UUID second = UUID.randomUUID();
+        for (UUID id : List.of(first, second)) {
+            jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria, status, "
+                    + "signed_off) values (?, '升級前的專案', '/same/root', '標準', 'READY', true)", id);
+        }
+
+        flyway(database, null).migrate();
+
+        for (UUID id : List.of(first, second)) {
+            assertThat(jdbc.queryForMap("select name, execution_path, status, signed_off, sdd_project, sdd_spec_dir, "
+                    + "sdd_spec_file from console.projects where id = ?", id))
+                    .containsEntry("name", "升級前的專案").containsEntry("execution_path", "/same/root")
+                    .containsEntry("status", "READY").containsEntry("signed_off", true)
+                    .containsEntry("sdd_project", null).containsEntry("sdd_spec_dir", null)
+                    .containsEntry("sdd_spec_file", null);
+        }
+        assertThat(jdbc.queryForObject("select count(*) from pg_indexes where schemaname = 'console' and indexname = "
+                + "'ux_projects_sdd_binding'", Integer.class)).isEqualTo(1);
     }
 
     /**

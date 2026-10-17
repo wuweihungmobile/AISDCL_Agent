@@ -123,6 +123,12 @@ console:
   bridge:
     # Engine Bridge 位址（契約 §3.1）：管理員在設定頁改過的 autoclaude.engineUrl／sdd.engineUrl 優先，否則用這個。
     url: ${ENGINE_BRIDGE_URL:http://localhost:8081}
+    # SDD 寫入權杖（v1.5；契約附錄 D.2、ADR-XPLAT-016 §9）：與 Bridge 同名同值的環境變數 BRIDGE_SDD_WRITE_TOKEN，附在 X-Bridge-Token 標頭，
+    # 只用於會觸發 FSM 寫入的四個呼叫（核准凍結、帶 sdd 的建立批次、SDD run 的 resume／restore）。
+    # 空＝SDD 寫入面停用（預設；SDD 是選用引擎）：核准凍結回 503 sdd_write_disabled，execute 不送 sdd 區塊並以 token_not_configured 警告。
+    # 🔴 有設但短於 32 字元，或仍是 <…> 佔位＝backend 啟動即失敗（BridgeProperties 驗證；不靜默退回停用）。repo 內不放任何真值，值只進環境變數；
+    # 權杖值絕不進日誌、錯誤封包或 details。
+    sdd-write-token: ${BRIDGE_SDD_WRITE_TOKEN:}
   execution:
     # 事件消費者（每個活躍 run 一條虛擬執行緒，契約 §3.5.4）：事件串流閒置逾 idle-timeout 視為斷線（Bridge 每 15 秒送 keep-alive），
     # 以指數退避 backoff-initial→backoff-max 重連，位移用 DB 的 console_last_seq。

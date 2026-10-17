@@ -42,6 +42,32 @@ class ProjectApiIT extends AbstractApiIT {
         assertThat(UUID.fromString(resp.id())).isNotNull();
     }
 
+    /** v1.5（契約 §1.10.5）：ProjectResponse／ProjectDetailResponse 帶 SDD 綁定三欄（預設 null）；列表項（ProjectSummaryResponse）不帶；請求帶了也不採用。 */
+    @Test
+    void projectResponsesCarryNullSddBindingFieldsAndIgnoreThemOnInput() {
+        Map<String, Object> request = body("綁定欄位");
+        request.put("sddProject", "forged");
+        request.put("sddSpecDir", "/forged");
+        request.put("sddSpecFile", "/forged/TCS.md");
+        Resp created = api.post(operator(), "/api/v1/projects", request);
+        assertThat(created.status()).isEqualTo(201);
+        for (String field : List.of("sddProject", "sddSpecDir", "sddSpecFile")) {
+            assertThat(created.<Object>read("$.data." + field)).as("create " + field).isNull();
+        }
+
+        Resp detail = api.get(viewer(), "/api/v1/projects/" + created.id());
+        Resp updated = api.put(operator(), "/api/v1/projects/" + created.id(), Map.of("description", "改說明"));
+        for (String field : List.of("sddProject", "sddSpecDir", "sddSpecFile")) {
+            assertThat(detail.<Object>read("$.data." + field)).as("detail " + field).isNull();
+            assertThat(updated.<Object>read("$.data." + field)).as("update " + field).isNull();
+        }
+        assertThat(jdbc.queryForObject("select sdd_project from console.projects where id = ?::uuid", String.class,
+                created.id())).as("POST /projects 不收這三欄（契約 §0.5 寫入規則②）").isNull();
+
+        Resp list = api.get(viewer(), "/api/v1/projects");
+        assertThat(list.<List<Map<String, Object>>>read("$.data.content").get(0)).doesNotContainKey("sddProject");
+    }
+
     @Test
     void draftTrueCreatesAnUnsignedProjectAndCustomAutonomyIsKept() {
         Map<String, Object> draft = body("草案專案");

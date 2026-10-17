@@ -142,4 +142,138 @@ class BridgeErrorsTest {
         assertThat(BridgeErrors.forControl(rejected(404, "something_else", Map.of()), "pause", RUN, "RUNNING"))
                 .as("404 但不是 run_not_found／checkpoint_not_found").isInstanceOf(UnprocessableException.class);
     }
+
+    // ── v1.5：SDD 專屬的拒絕（契約 §3.2；核准凍結、帶 sdd 的 execute、SDD run 的 resume／restore）────────────
+
+    private static BridgeRejectedException withDetail(int status, String reason, Map<String, Object> detail) {
+        return new BridgeRejectedException(status, reason, null, "一行摘要", List.of(),
+                Map.of("code", status, "reason", reason, "detail", detail));
+    }
+
+    @Test
+    void aStateConflictBecomesSddFsmStateConflictWithEveryDetail() {
+        DomainException e = BridgeErrors.forStart(withDetail(409, "fsm_state_conflict", Map.of("current_state",
+                "AUTOCLAUDE_DELEGATED", "expected_state", List.of("IMPLEMENTATION", "SPEC_FROZEN"), "run_id", "r-1",
+                "run_status", "RUNNING", "reason", "foreign_delegation")), "proj");
+
+        assertThat(e).isInstanceOf(ConflictException.class);
+        assertThat(e.reason()).isEqualTo(ErrorReasons.SDD_FSM_STATE_CONFLICT);
+        assertThat(e.details()).containsEntry("currentState", "AUTOCLAUDE_DELEGATED")
+                .containsEntry("expectedState", List.of("IMPLEMENTATION", "SPEC_FROZEN")).containsEntry("runId", "r-1")
+                .containsEntry("runStatus", "RUNNING").containsEntry("cause", "foreign_delegation");
+    }
+
+    @Test
+    void detailsNeverCarryNullValuesSoAKeyTheBridgeOmittedIsAbsent() {
+        DomainException e = BridgeErrors.forStart(withDetail(409, "fsm_state_conflict", Map.of("current_state",
+                "ESCALATION")), null);
+
+        assertThat(e.details()).containsOnly(Map.entry("currentState", "ESCALATION"));
+    }
+
+    @Test
+    void aDigestChangeBecomesSddSpecDigestChangedWithCamelCaseDetails() {
+        DomainException expectedVsFile = BridgeErrors.forSddWrite(withDetail(409, "spec_digest_changed", Map.of("pair",
+                "expected_vs_file", "doc", "docs/a.md", "expected_digest", "sha256:1", "current_digest", "sha256:2")), "p");
+        DomainException frozenVsFile = BridgeErrors.forStart(withDetail(409, "spec_digest_changed", Map.of("pair",
+                "frozen_vs_file", "doc", "a.md", "frozen_digest", "sha256:3", "current_digest", "sha256:4")), "p");
+        DomainException importVsFile = BridgeErrors.forControl(withDetail(409, "spec_digest_changed", Map.of("pair",
+                "import_vs_file", "doc", "a.md", "import_digest", "sha256:5", "current_digest", "sha256:6")), "resume",
+                RUN, "PAUSED");
+
+        assertThat(expectedVsFile.reason()).isEqualTo(ErrorReasons.SDD_SPEC_DIGEST_CHANGED);
+        assertThat(expectedVsFile.details()).containsOnly(Map.entry("pair", "expected_vs_file"),
+                Map.entry("doc", "docs/a.md"), Map.entry("expectedDigest", "sha256:1"),
+                Map.entry("currentDigest", "sha256:2"));
+        assertThat(frozenVsFile.details()).containsEntry("frozenDigest", "sha256:3").doesNotContainKeys("expectedDigest",
+                "importDigest");
+        assertThat(importVsFile.details()).containsEntry("importDigest", "sha256:5").containsEntry("pair", "import_vs_file");
+    }
+
+    @Test
+    void aMissingStateFileBecomesSddFsmNotFoundNamingTheProject() {
+        DomainException sent = BridgeErrors.forStart(rejected(404, "fsm_not_found", Map.of("project", "from-bridge")),
+                "sent-name");
+        DomainException fallback = BridgeErrors.forStart(rejected(404, "fsm_not_found", Map.of("project", "from-bridge")),
+                null);
+        DomainException nothing = BridgeErrors.forStart(rejected(404, "fsm_not_found", Map.of()), null);
+
+        assertThat(sent).isInstanceOf(ConflictException.class);
+        assertThat(sent.reason()).isEqualTo(ErrorReasons.SDD_FSM_NOT_FOUND);
+        assertThat(sent.details()).containsOnly(Map.entry("sddProject", "sent-name"));
+        assertThat(fallback.details()).containsOnly(Map.entry("sddProject", "from-bridge"));
+        assertThat(nothing.details()).isEmpty();
+    }
+
+    @Test
+    void aSpecRejectionOn422IsTheSameSpecCheckFailureAsPathA() {
+        for (String reason : List.of("spec_not_frozen", "spec_tainted", "spec_format_version_unsupported", "spec_not_found",
+                "spec_ambiguous")) {
+            BridgeRejectedException source = new BridgeRejectedException(422, reason, null, "規格有問題", List.of(), Map.of());
+
+            DomainException e = BridgeErrors.forStart(source, "p");
+
+            assertThat(e).as(reason).isInstanceOf(UnprocessableException.class);
+            assertThat(e.reason()).isEqualTo(ErrorReasons.SDD_SPEC_REJECTED);
+            assertThat(e.details()).containsEntry("bridgeReason", reason).containsEntry("detail", "規格有問題");
+        }
+    }
+
+    @Test
+    void anEngineRefusalCarriesViolationsAndDetailOnlyWhenNoneGiven() {
+        List<Map<String, Object>> violations = List.of(Map.of("field", "docs[0]", "rule", "not_found"));
+        for (String reason : List.of("fsm_state_unreadable", "sanitization_failed", "sdd_invalid_argument",
+                "sdd_block_invalid")) {
+            DomainException withViolations = BridgeErrors.forSddWrite(new BridgeRejectedException(422, reason, null, "x",
+                    violations, Map.of()), "p");
+            DomainException without = BridgeErrors.forSddWrite(new BridgeRejectedException(422, reason, null, "找不到檔",
+                    List.of(), Map.of()), "p");
+
+            assertThat(withViolations.reason()).as(reason).isEqualTo(ErrorReasons.BRIDGE_REJECTED);
+            assertThat(withViolations.details()).containsEntry("bridgeReason", reason)
+                    .containsEntry("violations", violations).doesNotContainKey("detail");
+            assertThat(without.details()).containsEntry("bridgeReason", reason).containsEntry("violations", List.of())
+                    .containsEntry("detail", "找不到檔");
+        }
+    }
+
+    @Test
+    void aDisabledWriteSurfaceIs503AndAMismatchedTokenIs502() {
+        DomainException disabled = BridgeErrors.forStart(rejected(503, "sdd_write_disabled", Map.of()), "p");
+        DomainException forbidden = BridgeErrors.forStart(rejected(403, "sdd_write_forbidden", Map.of("secret", "x")), "p");
+
+        assertThat(disabled.reason()).isEqualTo(ErrorReasons.SDD_WRITE_DISABLED);
+        assertThat(disabled.getClass().getSimpleName()).isEqualTo("ServiceUnavailableException");
+        assertThat(forbidden).isInstanceOf(UpstreamException.Failure.class);
+        assertThat(forbidden.reason()).isEqualTo(ErrorReasons.BRIDGE_ERROR);
+        assertThat(forbidden.details()).containsOnly(Map.entry("bridgeStatus", 403),
+                Map.entry("bridgeReason", "sdd_write_forbidden"));
+    }
+
+    @Test
+    void controlCallsTranslateSddRefusalsBeforeTheirOwnTable() {
+        DomainException e = BridgeErrors.forControl(withDetail(409, "fsm_state_conflict", Map.of("current_state",
+                "ESCALATION")), "resume", RUN, "PAUSED");
+
+        assertThat(e.reason()).as("不是 run_state_not_allowed").isEqualTo(ErrorReasons.SDD_FSM_STATE_CONFLICT);
+        assertThat(BridgeErrors.forControl(rejected(409, "invalid_state", Map.of()), "resume", RUN, "RUNNING").reason())
+                .as("SDD 之外的拒絕走原本的對映").isEqualTo(ErrorReasons.RUN_STATE_NOT_ALLOWED);
+    }
+
+    @Test
+    void readFailuresAreTheGenericEngineRefusalWithTheBridgeReason() {
+        DomainException e = BridgeErrors.forRead(rejected(422, "rtm_unreadable", Map.of()));
+
+        assertThat(e).isInstanceOf(UnprocessableException.class);
+        assertThat(e.reason()).isEqualTo(ErrorReasons.BRIDGE_REJECTED);
+        assertThat(e.details()).containsEntry("bridgeReason", "rtm_unreadable").containsEntry("violations", List.of());
+    }
+
+    @Test
+    void aStartRefusalThatIsNotSddSpecificStillUsesTheOrdinaryMapping() {
+        assertThat(BridgeErrors.forStart(rejected(409, "advisory_lock_held", Map.of("holder_run_id", "h")), "p").reason())
+                .isEqualTo(ErrorReasons.LOCK_HELD);
+        assertThat(BridgeErrors.forStart(rejected(409, "something_new", Map.of()), "p").reason())
+                .isEqualTo(ErrorReasons.BRIDGE_REJECTED);
+    }
 }

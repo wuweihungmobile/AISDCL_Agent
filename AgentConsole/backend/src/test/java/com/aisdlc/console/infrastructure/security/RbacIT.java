@@ -52,7 +52,15 @@ class RbacIT extends AbstractApiIT {
                 new Write("POST", "/api/v1/tasks/" + task + "/signoff", approver));
         List<Write> all = new ArrayList<>(phase2);
         all.addAll(executionWrites(project, UUID.randomUUID().toString()));
+        all.addAll(sddWrites(project));
         return all;
+    }
+
+    /** v1.5（整合輪 115）的兩個 SDD 寫入端點：核准凍結（人工閘）與編輯 FSM 專案綁定。 */
+    private static List<Write> sddWrites(String project) {
+        return List.of(
+                new Write("POST", "/api/v1/projects/" + project + "/sdd/freeze", Map.of("reason", "規格已核准")),
+                new Write("PUT", "/api/v1/projects/" + project + "/sdd-binding", Map.of("sddProject", "rbac-key")));
     }
 
     /** Phase 4～5 的寫入端點：啟動、暫停、恢復、取消、還原、審核、確認告警。 */
@@ -137,7 +145,7 @@ class RbacIT extends AbstractApiIT {
             assertThat(api.get(viewer(), url).status()).as("viewer GET " + url).isEqualTo(200);
             assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
         }
-        for (String suffix : List.of("", "/steps", "/dag", "/checkpoints")) {
+        for (String suffix : List.of("", "/steps", "/dag", "/checkpoints", "/rtm")) {
             String url = "/api/v1/executions/" + run + suffix;
             assertThat(api.get(viewer(), url).status()).as("viewer 通過授權層、到 controller 才得 404：GET " + url)
                     .isEqualTo(404);
@@ -154,12 +162,17 @@ class RbacIT extends AbstractApiIT {
             }
             assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
         }
+        String unknown = "/api/v1/engines/sdd?projectId=" + UUID.randomUUID();
+        assertThat(api.get(viewer(), unknown).status()).as("v1.5：projectId 找不到專案 → 404（VIEWER 通過授權層）").isEqualTo(404);
+        assertThat(api.get(null, unknown).status()).as("匿名 GET " + unknown).isEqualTo(401);
     }
 
     @Test
     void operatorAndAdminPassTheAuthorizationLayerOfEveryExecutionWriteAndReachTheController() {
         // 隨機 UUID 的專案／批次不存在 ⇒ 404 是 controller（用例）回的：證明 403／401 都不是它們造成的
-        List<Write> writes = executionWrites(UUID.randomUUID().toString(), UUID.randomUUID().toString());
+        String unknownProject = UUID.randomUUID().toString();
+        List<Write> writes = new ArrayList<>(executionWrites(unknownProject, UUID.randomUUID().toString()));
+        writes.addAll(sddWrites(unknownProject));
         for (String token : List.of(operator(), admin())) {
             for (Write write : writes) {
                 Resp resp = call(token, write);

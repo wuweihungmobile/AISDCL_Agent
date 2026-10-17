@@ -39,6 +39,12 @@ public final class MiniBridge implements AutoCloseable {
 
     static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /**
+     * 迷你 Bridge 與 console-api 共用的 SDD 寫入權杖（契約 §3.1.4 共通規則 2；Spring 屬性 {@code console.bridge.sdd-write-token}）。
+     * 一律是「假」值：≥ 32 字元（console-api 與 Bridge 的啟動驗證下限）、含 {@code mock}（根層機密掃描把它當佔位）。
+     */
+    public static final String SDD_TOKEN = "mock-bridge-sdd-write-token-for-tests-0123456789";
+
     /** 每步耗時（毫秒）；{@link #manualSteps} 為 true 時不用。 */
     public volatile long stepMillis = 40;
     /** 每個 attempt 的 Token（mock claude 固定 1,240）。 */
@@ -105,6 +111,38 @@ public final class MiniBridge implements AutoCloseable {
         /** 這些 project 的 {@code /sdd/fsm/{project}} 回 422 {@code fsm_state_unreadable}（檔在、內容讀不動）。 */
         public final Set<String> unreadable = ConcurrentHashMap.newKeySet();
 
+        /**
+         * Bridge 端的寫入權杖（契約 §3.1.4 共通規則 2）：預設＝{@link MiniBridge#SDD_TOKEN}；{@code null}＝Bridge 沒設權杖＝寫入動詞整個停用
+         * （503 {@code sdd_write_disabled}）；其他值＝與 console-api 附的不符（403 {@code sdd_write_forbidden}）。
+         */
+        public volatile String writeToken;
+        /** 帶 {@code root} 的讀取回 422 {@code sanitization_failed}（{@code violations[].field=root}）的專案根（不在 allowlist 或已不存在）。 */
+        public final Set<String> rejectedRoots = ConcurrentHashMap.newKeySet();
+        /** 存在、但 {@code build/reports/fsm} 沒有任何狀態檔的專案根：清單回 200 空清單、任何 {@code GET /sdd/fsm/{名稱}} 回 404 {@code fsm_not_found}。 */
+        public final Set<String> emptyRoots = ConcurrentHashMap.newKeySet();
+        /** {@code :freeze} 的 {@code docs[i]} 要回 422 {@code not_found} 的相對路徑（迷你 Bridge 沒有檔案系統）。 */
+        public final Set<String> missingDocs = ConcurrentHashMap.newKeySet();
+        /** 各 doc 的「現檔摘要」覆蓋值（沒有就是 {@link #digestOf}）：用來造 {@code expected_vs_file} 的 409。 */
+        public final Map<String, String> docDigests = new ConcurrentHashMap<>();
+        /** 帶 {@code sdd} 的 {@code POST /autoclaude/runs} 成功時 201 另帶的 {@code warnings[]}（例：{@code sdd_frozen_digest_absent}）。 */
+        public final List<Map<String, Object>> createWarnings = new CopyOnWriteArrayList<>();
+        /** 每個 run 的 RTM 報告本文（不含 {@code advisory}，迷你 Bridge 自己加）；沒有 → 404 {@code rtm_not_found}。 */
+        public final Map<UUID, Map<String, Object>> rtmReports = new ConcurrentHashMap<>();
+        /** 這些 run 的 {@code /rtm} 回 422 {@code rtm_unreadable}。 */
+        public final Set<UUID> rtmUnreadable = ConcurrentHashMap.newKeySet();
+        /** 每個收到的 {@code :freeze}（依到達順序）。 */
+        public final List<Freeze> freezes = new CopyOnWriteArrayList<>();
+        /** 每個帶 {@code root} 或不帶的 {@code GET /sdd/fsm*} 請求與它的 {@code root}（null＝沒帶）。 */
+        public final List<RootSeen> rootsSeen = new CopyOnWriteArrayList<>();
+
+        /** 一個收到的 {@code :freeze}：路徑參數（解碼後）、{@code X-Bridge-Token} 標頭（null＝沒帶）與請求本文。 */
+        public record Freeze(String project, String token, Map<String, Object> body) {
+        }
+
+        /** 一個收到的讀取請求與它帶的 {@code root}（null＝沒帶）。 */
+        public record RootSeen(String request, String root) {
+        }
+
         Sdd() {
             reset();
         }
@@ -114,6 +152,16 @@ public final class MiniBridge implements AutoCloseable {
             delayMillis = 0;
             latest = "AISDLC_SDD_v9.99";
             root = "/sdd/AISDLC_SDD_v9.99";
+            writeToken = SDD_TOKEN;
+            rejectedRoots.clear();
+            emptyRoots.clear();
+            missingDocs.clear();
+            docDigests.clear();
+            createWarnings.clear();
+            rtmReports.clear();
+            rtmUnreadable.clear();
+            freezes.clear();
+            rootsSeen.clear();
             projects.clear();
             errors.clear();
             states.clear();
@@ -133,22 +181,90 @@ public final class MiniBridge implements AutoCloseable {
         public record SddRetry(int count, Map<String, Object> last) {
         }
 
-        /** 加一個專案：同時進 {@code /sdd/fsm} 的清單與 {@code /sdd/fsm/{project}} 的本文（五筆決策軌跡 r3～r7，舊→新）。 */
+        /**
+         * 加一個專案：同時進 {@code /sdd/fsm} 的清單與 {@code /sdd/fsm/{project}} 的本文（五筆決策軌跡 r3～r7，舊→新）。
+         * {@code project} 是檔內原名；檔名與清單用它淨化後的標準鍵 {@link MiniBridge#canonical}（e2e 夾具的名稱本來就是標準鍵，兩者相同）。
+         * v1.5 的欄位也一併帶上：{@code phase}（由狀態對映）、{@code escalation_history}（空）、{@code escalation_provenance}（null）、
+         * {@code fsm_project}（標準鍵），ESCALATION 狀態另帶 {@code recovery}。
+         */
         public void addProject(String project, String currentState, int sprint, String sessionId, String updatedAt,
                                SddRetry retry, Map<String, Object> humanPending) {
-            String source = "FSM-STATE-" + project + ".yaml";
-            projects.add(map("project", project, "source", source, "current_state", currentState, "updated_at", updatedAt));
+            String key = canonical(project);
+            String source = "FSM-STATE-" + key + ".yaml";
+            projects.add(map("project", key, "source", source, "current_state", currentState, "updated_at", updatedAt));
             List<Map<String, Object>> trace = new ArrayList<>();
             for (int i = 3; i <= 7; i++) {
                 trace.add(map("ts", "2026-10-16T00:0" + i + ":00+00:00", "from", "S" + (i - 1), "to", "S" + i,
                         "reason", "r" + i, "spec_refs", List.of("SPEC-" + i), "agents_consulted", List.of("sa"),
                         "trigger", "auto"));
             }
-            states.put(project, map("project", project, "current_state", currentState, "current_sprint", sprint,
+            Map<String, Object> state = map("project", project, "current_state", currentState, "current_sprint", sprint,
                     "session_id", sessionId, "updated_at", updatedAt, "frozen_stages", List.of(map("stage", "SCG-0")),
                     "decision_trace", trace, "source", source, "human_pending", humanPending,
-                    "retry_history", map("count", retry.count(), "last", retry.last()), "rtm_coverage", null));
+                    "retry_history", map("count", retry.count(), "last", retry.last()), "rtm_coverage", null,
+                    "phase", phaseOf(currentState), "escalation_history", List.of(), "escalation_provenance", null,
+                    "fsm_project", key);
+            if (currentState.startsWith("ESCALATION")) {
+                state.put("recovery", map("target", "IMPLEMENTATION",
+                        "powershell", "Push-Location \"<SDD 版本目錄>\"; & \"<python>\" -m tools.fsm_runtime.fsm_runtime "
+                                + "resume-from-escalation --project \"" + key + "\" --to IMPLEMENTATION --reason \"<人工原因>\"; "
+                                + "Pop-Location",
+                        "posix", "cd \"<SDD 版本目錄>\" && \"<python>\" -m tools.fsm_runtime.fsm_runtime "
+                                + "resume-from-escalation --project \"" + key + "\" --to IMPLEMENTATION --reason \"<人工原因>\""));
+            }
+            states.put(key, state);
         }
+    }
+
+    /**
+     * 淨化鏡像（契約 §3.1.4 (b)；簡化版，足以區分「原名」與「標準鍵」）：NFC → strip → {@code <>:"?*\/|} 與控制字元換 {@code _} →
+     * 截 80 → {@code rstrip(" .")}（空則 {@code untitled}）。冪等，所以傳原名與傳標準鍵等價。
+     */
+    public static String canonical(String name) {
+        String text = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFC).strip();
+        text = text.replaceAll("[<>:\"?*\\\\/|\\p{Cntrl}]", "_");
+        if (text.length() > 80) {
+            text = text.substring(0, 80);
+        }
+        text = text.replaceAll("[ .]+$", "");
+        return text.isEmpty() ? "untitled" : text;
+    }
+
+    /** 由 {@code current_state} 投影的階段資訊（契約 §3.1.5 的子集：夠測試用）。 */
+    static Map<String, Object> phaseOf(String state) {
+        return switch (state) {
+            case "INIT", "SPEC_DRAFTING" -> map("name", "SPECIFICATION", "order", 2, "blocking", false, "observation", false);
+            case "HUMAN_PENDING" -> map("name", "HUMAN_GATE", "order", 3, "blocking", false, "observation", false);
+            case "SPEC_FROZEN" -> map("name", "FROZEN", "order", 4, "blocking", false, "observation", false);
+            case "IMPLEMENTATION", "TEST_CONTRACT_NEGOTIATED" ->
+                    map("name", "IMPLEMENTATION", "order", 5, "blocking", false, "observation", false);
+            case "AUTOCLAUDE_DELEGATED" -> map("name", "IMPLEMENTATION", "order", 5, "blocking", false, "observation", true);
+            case "ESCALATION", "ESCALATION_FINAL", "TERMINATED" -> map("name", "BLOCKED", "order", 0, "blocking", true,
+                    "observation", false);
+            default -> map("name", "UNKNOWN", "order", 0, "blocking", false, "observation", false);
+        };
+    }
+
+    /** 迷你 Bridge 對某個 doc 路徑的「現檔摘要」：路徑字串的 sha256（確定性、與檔案系統無關）。 */
+    public static String digestOf(String path) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(path.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return "sha256:" + java.util.HexFormat.of().formatHex(hash);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** RTM 報告本文（契約 §3.1.4 (f) 的形狀，不含 {@code advisory}）。 */
+    public static Map<String, Object> rtmReport(String scenario, int passedAt, int totalAt, int unmappedAt, double atPct,
+                                                int coveredAc, int totalAc, double acPct, List<String> failedAtIds,
+                                                List<String> weakRegexAtIds, List<String> unmappedAtIds,
+                                                boolean fullyCovered) {
+        return map("scenario", scenario, "spec_digest", "sha256:" + "0123456789abcdef".repeat(4),
+                "at", map("passed", passedAt, "total", totalAt, "unmapped", unmappedAt, "pct", atPct),
+                "ac", map("covered", coveredAc, "total", totalAc, "pct", acPct), "failed_at_ids", failedAtIds,
+                "weak_regex_at_ids", weakRegexAtIds, "unmapped_at_ids", unmappedAtIds, "fully_covered", fullyCovered);
     }
 
     private final ConfigurableApplicationContext context;
@@ -159,6 +275,7 @@ public final class MiniBridge implements AutoCloseable {
     private final Map<String, ConcurrentLinkedQueue<Injected>> injected = new ConcurrentHashMap<>();
     private final List<String> requestLog = new CopyOnWriteArrayList<>();
     private final List<Traced> traced = new CopyOnWriteArrayList<>();
+    private final List<Authed> authed = new CopyOnWriteArrayList<>();
     private final AtomicInteger streamGeneration = new AtomicInteger();
     private final AtomicInteger openStreams = new AtomicInteger();
 
@@ -168,6 +285,10 @@ public final class MiniBridge implements AutoCloseable {
 
     /** 迷你 Bridge 收到的一個請求（{@code METHOD /path}，不含查詢字串）與它帶的 {@code X-Trace-Id}（null＝沒帶；契約 §3.1.1）。 */
     public record Traced(String request, String traceId) {
+    }
+
+    /** 迷你 Bridge 收到的一個請求（同 {@link Traced}）與它帶的 {@code X-Bridge-Token}（null＝沒帶；契約 §3.1.4 共通規則 2）。 */
+    public record Authed(String request, String token) {
     }
 
     private MiniBridge(JdbcTemplate jdbc) {
@@ -223,6 +344,11 @@ public final class MiniBridge implements AutoCloseable {
         return List.copyOf(traced);
     }
 
+    /** 每個收到的請求與它帶的 {@code X-Bridge-Token}（依到達順序）：測試斷言「權杖只出現在那四個呼叫上」。 */
+    public List<Authed> authed() {
+        return List.copyOf(authed);
+    }
+
     public void reset() {
         runs.values().forEach(MiniRun::shutdown);
         runs.clear();
@@ -230,6 +356,7 @@ public final class MiniBridge implements AutoCloseable {
         injected.clear();
         requestLog.clear();
         traced.clear();
+        authed.clear();
         failStepIds.clear();
         stepMillis = 40;
         tokensPerAttempt = 1240;
@@ -279,6 +406,10 @@ public final class MiniBridge implements AutoCloseable {
 
     void recordTrace(String request, String traceId) {
         traced.add(new Traced(request, traceId));
+    }
+
+    void recordToken(String request, String token) {
+        authed.add(new Authed(request, token));
     }
 
     Injected takeInjected(String route) {

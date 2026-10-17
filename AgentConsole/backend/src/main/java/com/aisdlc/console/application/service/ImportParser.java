@@ -6,6 +6,7 @@ import com.aisdlc.console.application.port.out.AgentBridge.DecomposeRequest;
 import com.aisdlc.console.application.port.out.AgentBridge.DecomposeResult;
 import com.aisdlc.console.application.port.out.AgentBridge.DraftStep;
 import com.aisdlc.console.application.port.out.AgentBridge.SddCompileResult;
+import com.aisdlc.console.application.port.out.AgentBridge.SddCompileWarning;
 import com.aisdlc.console.application.port.out.AgentBridge.SddTask;
 import com.aisdlc.console.application.port.out.LlmClient;
 import com.aisdlc.console.application.port.out.LlmClient.LlmException;
@@ -30,6 +31,7 @@ import com.aisdlc.console.domain.service.OutboundUrlPolicy;
 import com.aisdlc.console.domain.service.OutboundUrlPolicy.Rejected;
 import com.aisdlc.console.domain.service.ParsedResultValidator;
 import com.aisdlc.console.domain.service.PassCriteriaSanitizer;
+import com.aisdlc.console.domain.service.SpecPaths;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -110,9 +112,9 @@ class ImportParser {
         int autonomy = options.autonomyLevel() == null ? DEFAULT_AUTONOMY : options.autonomyLevel();
         String specDir = options.specDir() == null || options.specDir().isBlank() ? null : options.specDir().strip();
         if (specDir != null) {
-            return fromSdd(compileOrReject(specDir), options, autonomy);
+            return fromSdd(compileOrReject(specDir, options.specFile(), options.sddProject()), options, autonomy);
         }
-        SddCompileResult probed = probeSpec(options.executionPath());
+        SddCompileResult probed = probeSpec(options.executionPath(), options.sddProject());
         if (probed != null) {
             return fromSdd(probed, options, autonomy);
         }
@@ -133,12 +135,12 @@ class ImportParser {
 
     // ── 路徑 A：規格驅動 ──────────────────────────────────────────────────────
 
-    /** 明示 specDir：任何失敗都報錯。 */
-    private SddCompileResult compileOrReject(String specDir) {
+    /** 明示 specDir：任何失敗都報錯（含 {@code spec_not_found}；凍結後內容已變更的 409 也是拒絕）。 */
+    private SddCompileResult compileOrReject(String specDir, String specFile, String sddProject) {
         try {
-            return bridge.sddCompile(specDir);
+            return bridge.sddCompile(specDir, specFile, sddProject);
         } catch (BridgeRejectedException e) {
-            if (e.status() == 422) {
+            if (e.status() == 422 || isDigestChanged(e)) {
                 throw specRejected(e);
             }
             throw new UpstreamException.Failure("Bridge 編譯規格時回了非預期的錯誤（HTTP " + e.status() + "）",
@@ -146,15 +148,22 @@ class ImportParser {
         }
     }
 
-    /** 探測 executionPath：回 null＝沒有規格（改走 C／B）。 */
-    private SddCompileResult probeSpec(String executionPath) {
+    /**
+     * 探測 executionPath：回 null＝沒有規格（改走 C／B）。探測模式只送 {@code spec_dir}（與已知時的 {@code fsm_project}），不送
+     * {@code spec_file}（契約 §3.3.2 v1.5 補充第 1 點）。
+     *
+     * <p>🔴 <b>fail-closed</b>（契約 §3.3.2 第 9 點；ADR-016 §6.3）：規格存在但被拒＝拒絕，不退回 LLM 瞎猜——除了 422
+     * {@code spec_not_frozen}／{@code spec_tainted}…，<b>凍結後內容已變更的 409 {@code spec_digest_changed} 也必須明確拒絕</b>。
+     * 此前「非 422 的 4xx 一律略過路徑 A」會把這個 409 靜默降級成 LLM 草稿（fail-open）。
+     */
+    private SddCompileResult probeSpec(String executionPath, String sddProject) {
         try {
-            return bridge.sddCompile(executionPath);
+            return bridge.sddCompile(executionPath, null, sddProject);
         } catch (BridgeRejectedException e) {
             if (e.status() == 422 && SPEC_ABSENT_REASONS.contains(e.reason())) {
                 return null;
             }
-            if (e.status() == 422) {
+            if (e.status() == 422 || isDigestChanged(e)) {
                 throw specRejected(e);       // 規格存在但被拒：fail-closed
             }
             LOG.warn("探測 SDD 規格時 Bridge 回了非預期的 HTTP {}（{}），略過路徑 A", e.status(), e.reason());
@@ -163,6 +172,11 @@ class ImportParser {
             LOG.warn("探測 SDD 規格時無法與 Bridge 通訊（{}），略過路徑 A", e.reason());
             return null;
         }
+    }
+
+    /** 凍結後內容已變更（Bridge 409 {@code spec_digest_changed}；ADR-016 §6.2）：與 {@code spec_not_frozen} 一樣是「規格存在但被拒」。 */
+    private static boolean isDigestChanged(BridgeRejectedException e) {
+        return e.status() == 409 && "spec_digest_changed".equals(e.reason());
     }
 
     private static UnprocessableException specRejected(BridgeRejectedException e) {
@@ -201,7 +215,7 @@ class ImportParser {
                 "規格「" + scenario + "」的全部合約驗收通過", description, autonomy);
         List<SddTask> all = compiled.tasks();
         int batches = (all.size() + GOALS_PER_SDD_BATCH - 1) / GOALS_PER_SDD_BATCH;
-        List<ParseWarning> warnings = new ArrayList<>();
+        List<ParseWarning> warnings = new ArrayList<>(sddLevelWarnings(compiled));
         List<ParsedGoal> goals = new ArrayList<>();
         for (int k = 0; k < batches; k++) {
             List<SddTask> chunk = all.subList(k * GOALS_PER_SDD_BATCH, Math.min(all.size(),
@@ -215,8 +229,40 @@ class ImportParser {
                     "全部 " + chunk.size() + " 個合約的驗收標準通過", k,
                     k == 0 ? List.of() : List.of("g" + k), tasks));
         }
-        ParsedResult result = new ParsedResult(project, goals, ParsePath.SDD, null, null, null, null, digest);
+        // v1.5 的四個伺服器擁有欄位（契約 §3.3.2 第 5 點）：只有路徑 A 才有值，confirm 才回填（parse／預覽不回填）
+        String specPath = blankToNull(compiled.specPath());
+        ParsedResult result = new ParsedResult(project, goals, ParsePath.SDD, null, null, null, null, digest,
+                blankToNull(compiled.specFormatVersion()), blankToNull(compiled.fsmProject()),
+                specPath == null ? null : SpecPaths.parentOf(specPath), specPath);
         return new Draft(result, warnings);
+    }
+
+    /**
+     * 路徑 A 的規格層級提示（黃色、不阻擋；契約 §3.3.2 第 6 點）：{@code at_unmapped}（規格<b>宣告位置</b>出現、卻沒編成步驟的 AT；已編成的
+     * AT 照常產出任務）、{@code frozen_digest_absent}（凍結時沒有記錄內容摘要，無法偵測凍結後改檔）、{@code state_dir_not_ignored}
+     * （Bridge 回報專案根的 {@code build/reports/fsm/} 未被 git 忽略；原樣轉入）。
+     */
+    private static List<ParseWarning> sddLevelWarnings(SddCompileResult compiled) {
+        List<ParseWarning> warnings = new ArrayList<>();
+        if (!compiled.unmappedAtIds().isEmpty()) {
+            warnings.add(new ParseWarning(ParseWarning.AT_UNMAPPED,
+                    "規格出現但未編成步驟的 AT：" + String.join("、", compiled.unmappedAtIds()), "specDir"));
+        }
+        if ("absent".equals(compiled.frozenDigest())) {
+            warnings.add(new ParseWarning(ParseWarning.FROZEN_DIGEST_ABSENT,
+                    "規格凍結時沒有記錄內容摘要（舊狀態檔），無法偵測凍結後改檔", "specDir"));
+        }
+        for (SddCompileWarning warning : compiled.warnings()) {
+            if (ParseWarning.STATE_DIR_NOT_IGNORED.equals(warning.code())) {
+                warnings.add(new ParseWarning(ParseWarning.STATE_DIR_NOT_IGNORED, nullToEmpty(warning.detail()),
+                        "executionPath"));
+            }
+        }
+        return warnings;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.strip();
     }
 
     private static ParsedTask sddTask(SddTask task, String digest, int sortOrder, String where,
@@ -235,8 +281,12 @@ class ImportParser {
         spec.put("specDigest", digest);
         spec.put("stepId", task.stepId());
         spec.put("weakRegex", task.weakRegex());
+        if (task.maintainContext() != null) {
+            spec.put("maintainContext", task.maintainContext());       // G-08：跨 AC 脈絡隔離；Bridge 沒給就不放這個鍵
+        }
+        // G-08：SCG-4 型 5、SCG-5 型 2 的重試上限不再丟成 null（落庫取預設 3）；Bridge 沒給仍是 null
         return new ParsedTask(clip(task.name(), 200), task.prompt(), passCriteria, sortOrder, null, command,
-                regex == null || regex.isBlank() ? null : regex, spec, null);
+                regex == null || regex.isBlank() ? null : regex, spec, task.maxRetries());
     }
 
     // ── 路徑 C：高階目標 → Bridge decompose ────────────────────────────────────

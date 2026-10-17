@@ -88,6 +88,25 @@ class ExecutionPlannerTest {
     }
 
     @Test
+    void renamingStepIdsRewritesBothTheStepsAndTheFrozenDagButNothingElse() {
+        Plan plan = plan(prjA, RunScope.all());
+
+        Plan renamed = plan.withStepIds(Map.of(t1.id(), "sdd-greenfield-at-001-1-1", t3.id(), "sdd-greenfield-at-002-1-1"));
+
+        assertThat(renamed.tasks()).extracting(p -> p.stepId()).as("沒列在映射裡的任務維持 G<g>-T<t>")
+                .containsExactly("sdd-greenfield-at-001-1-1", "G1-T2", "sdd-greenfield-at-002-1-1");
+        assertThat(renamed.dag().taskNodes()).extracting(n -> n.stepId())
+                .containsExactly("sdd-greenfield-at-001-1-1", "G1-T2", "sdd-greenfield-at-002-1-1");
+        assertThat(renamed.tasks()).extracting(p -> p.sequence()).as("位置與目標位置的規則不變").containsExactly(1, 2, 3);
+        assertThat(renamed.tasks()).extracting(p -> p.goalPosition()).containsExactly(1, 1, 2);
+        assertThat(renamed.dag().edges()).isEqualTo(plan.dag().edges());
+        assertThat(renamed.dag().taskByStepId("sdd-greenfield-at-002-1-1")).get().extracting(n -> n.id())
+                .isEqualTo(t3.id());
+        assertThat(plan.tasks()).extracting(p -> p.stepId()).as("原計畫不變（record 不可變）")
+                .containsExactly("G1-T1", "G1-T2", "G2-T1");
+    }
+
+    @Test
     void completedAndSkippedTasksAreLeftOutAndAGoalWithNothingLeftDisappears() {
         Task done = task(g1.id(), "D", 0, TaskStatus.COMPLETED);
         Task skipped = task(g1.id(), "S", 1, TaskStatus.SKIPPED);

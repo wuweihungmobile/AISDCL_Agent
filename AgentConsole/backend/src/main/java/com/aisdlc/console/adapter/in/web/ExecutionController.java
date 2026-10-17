@@ -3,6 +3,7 @@ package com.aisdlc.console.adapter.in.web;
 import com.aisdlc.console.adapter.in.web.dto.ApiResult;
 import com.aisdlc.console.adapter.in.web.dto.CheckpointResponse;
 import com.aisdlc.console.adapter.in.web.dto.DagResponse;
+import com.aisdlc.console.adapter.in.web.dto.ExecutionRtmResponse;
 import com.aisdlc.console.adapter.in.web.dto.ExecutionRunDetailResponse;
 import com.aisdlc.console.adapter.in.web.dto.ExecutionRunResponse;
 import com.aisdlc.console.adapter.in.web.dto.ExecutionRunSummaryResponse;
@@ -162,6 +163,18 @@ public class ExecutionController {
                     + "不含 stateSnapshot 本體；stepIdx／stepId 取自快照內的 step_idx／step_id（＝還原後下一個要跑的步驟）")
     public ApiResult<List<CheckpointResponse>> checkpoints(@PathVariable UUID runId) {
         return ApiResult.ok(query.checkpoints(runId).stream().map(CheckpointResponse::from).toList());
+    }
+
+    @GetMapping("/api/v1/executions/{runId}/rtm")
+    @Operation(operationId = "getExecutionRtm", summary = "執行追溯覆蓋（諮詢視圖；v1.5 補充端點，G-05）",
+            description = "Bridge GET /autoclaude/runs/{id}/rtm 的投影：引擎 RtmWritebackPlugin 在 SDD 批次正常走完時寫的 AT／AC 覆蓋報告。"
+                    + "諮詢視圖：AT 通過只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；SCG-4 的人工審查才是真閘，所以回應恆帶 advisory:true。"
+                    + "有無法歸屬 AC 的 AT 時 unmappedAtIds 列出它們（已計入 at.total、at.passed／failedAtIds，但不計入任何 AC），fullyCovered 恆為 false。"
+                    + "批次存在但沒有報告（沒有啟用 SDD 治理、批次尚未結束、批次不是正常走完、工作區已清除）→ 404 rtm_not_found（details.runId）；"
+                    + "報告壞掉 → 422 引擎拒絕此請求（details.bridgeReason=rtm_unreadable）。不輪詢、不快取：前端在批次進入終態後取一次。"
+                    + "Bridge 逾時 2 秒／3 秒、不重試。")
+    public ApiResult<ExecutionRtmResponse> rtm(@PathVariable UUID runId) {
+        return ApiResult.ok(ExecutionRtmResponse.from(query.rtm(runId)));
     }
 
     @PostMapping("/api/v1/executions/{runId}/restore/{checkpointId}")

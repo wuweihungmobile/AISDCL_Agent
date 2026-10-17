@@ -143,9 +143,19 @@ class MiniBridgeController {
         return ResponseEntity.ok(map("latest", bridge.sdd.latest, "root", bridge.sdd.root));
     }
 
+    /** 帶 {@code root} 的讀取：不合 allowlist／不存在的根 → 422 {@code sanitization_failed}（契約 §3.1.4 (a)）；沒有問題回 null。 */
+    private ResponseEntity<Object> rootGate(String root) {
+        if (root != null && bridge.sdd.rejectedRoots.contains(root)) {
+            return error(422, "sanitization_failed", "violations", List.of(map("field", "root", "rule",
+                    "outside_allowlist", "message", "專案根不在允許的根目錄內")));
+        }
+        return null;
+    }
+
     @GetMapping("/sdd/fsm")
-    ResponseEntity<Object> sddFsmList() {
+    ResponseEntity<Object> sddFsmList(@RequestParam(required = false) String root) {
         bridge.record("GET /sdd/fsm");
+        bridge.sdd.rootsSeen.add(new MiniBridge.Sdd.RootSeen("GET /sdd/fsm", root));
         ResponseEntity<Object> forced = injected("sddFsmList");
         if (forced != null) {
             return forced;
@@ -154,13 +164,20 @@ class MiniBridgeController {
         if (bridge.sdd.unavailable) {
             return sddUnavailable();
         }
-        return ResponseEntity.ok(map("root", bridge.sdd.latest, "projects", List.copyOf(bridge.sdd.projects),
-                "errors", List.copyOf(bridge.sdd.errors)));
+        ResponseEntity<Object> rejected = rootGate(root);
+        if (rejected != null) {
+            return rejected;
+        }
+        boolean emptyRoot = root != null && bridge.sdd.emptyRoots.contains(root);
+        return ResponseEntity.ok(map("root", bridge.sdd.latest,
+                "projects", emptyRoot ? List.of() : List.copyOf(bridge.sdd.projects),
+                "errors", emptyRoot ? List.of() : List.copyOf(bridge.sdd.errors)));
     }
 
     @GetMapping("/sdd/fsm/{project}")
-    ResponseEntity<Object> sddFsm(@PathVariable String project) {
+    ResponseEntity<Object> sddFsm(@PathVariable String project, @RequestParam(required = false) String root) {
         bridge.record("GET /sdd/fsm/" + project);
+        bridge.sdd.rootsSeen.add(new MiniBridge.Sdd.RootSeen("GET /sdd/fsm/" + project, root));
         ResponseEntity<Object> forced = injected("sddFsm");
         if (forced != null) {
             return forced;
@@ -169,20 +186,227 @@ class MiniBridgeController {
         if (bridge.sdd.unavailable) {
             return sddUnavailable();
         }
-        Map<String, Object> state = bridge.sdd.states.get(project);
-        if (!project.matches("^[A-Za-z0-9._-]{1,128}$") || (state == null && !bridge.sdd.unreadable.contains(project))) {
-            return error(404, "fsm_not_found", "project", project);
+        ResponseEntity<Object> rejected = rootGate(root);
+        if (rejected != null) {
+            return rejected;
         }
-        if (bridge.sdd.unreadable.contains(project)) {
+        // v1.5：專案名先過淨化鏡像，傳原名與傳標準鍵等價（契約 §3.1.4 (b)）
+        String key = MiniBridge.canonical(project);
+        boolean emptyRoot = root != null && bridge.sdd.emptyRoots.contains(root);
+        boolean unreadable = !emptyRoot && bridge.sdd.unreadable.contains(key);
+        Map<String, Object> state = emptyRoot ? null : bridge.sdd.states.get(key);
+        if (unreadable) {
             return error(422, "fsm_state_unreadable", "detail", "while scanning a simple key");
+        }
+        if (state == null) {
+            return error(404, "fsm_not_found", "project", project);
         }
         return ResponseEntity.ok(state);
     }
 
+    // ── 寫入面（契約 §3.1.4 (d)、共通規則 2）：權杖、:freeze、RTM ──────────────────────────────────
+
+    /**
+     * 權杖閘（共通規則 2）：Bridge 沒設權杖 → 503 {@code sdd_write_disabled}；標頭缺漏或不符 → 403 {@code sdd_write_forbidden}
+     * （缺與錯同一個 reason）；通過回 null。
+     */
+    private ResponseEntity<Object> tokenGate(String token) {
+        String expected = bridge.sdd.writeToken;
+        if (expected == null) {
+            return error(503, "sdd_write_disabled", "detail", "Bridge 沒有設定 BRIDGE_SDD_WRITE_TOKEN：SDD 寫入面停用");
+        }
+        if (token == null || !expected.equals(token)) {
+            return error(403, "sdd_write_forbidden");
+        }
+        return null;
+    }
+
+    private static boolean isSddRun(MiniRun run) {
+        return run.request.get("sdd") != null;
+    }
+
+    private static ResponseEntity<Object> invalidArgument(String detail) {
+        return error(422, "sdd_invalid_argument", "detail", detail);
+    }
+
+    /** {@code POST /sdd/fsm/{project}:freeze}：檢查順序同契約（本文格式 → 權杖 → 清理 → root → 專案 → docs → 前置狀態 → 摘要 → 寫入）。 */
+    @PostMapping("/sdd/fsm/{projectAction}")
+    @SuppressWarnings("unchecked")
+    ResponseEntity<Object> sddFreeze(@PathVariable String projectAction, @RequestBody Map<String, Object> body,
+                                     @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
+        bridge.record("POST /sdd/fsm/" + projectAction);
+        int colon = projectAction.lastIndexOf(':');
+        if (colon < 0 || !"freeze".equals(projectAction.substring(colon + 1))) {
+            return error(404, "not_found");
+        }
+        String project = projectAction.substring(0, colon);
+        bridge.sdd.freezes.add(new MiniBridge.Sdd.Freeze(project, token, MiniBridge.copy(body)));
+        ResponseEntity<Object> denied = tokenGate(token);
+        if (denied != null) {
+            return denied;
+        }
+        ResponseEntity<Object> forced = injected("freeze");
+        if (forced != null) {
+            return forced;
+        }
+        sddDelay();
+        String approver = (String) body.get("approver");
+        String reason = (String) body.get("reason");
+        if (approver == null || approver.isBlank() || approver.length() > 100 || approver.contains(";")) {
+            return invalidArgument("approver 須為 1～100 字元且不含 ;");
+        }
+        if (reason == null || reason.strip().isEmpty() || reason.strip().length() > 500) {
+            return invalidArgument("reason 須為 1～500 字元");
+        }
+        String root = (String) body.get("root");
+        ResponseEntity<Object> rejected = rootGate(root);
+        if (rejected != null) {
+            return rejected;
+        }
+        String key = MiniBridge.canonical(project);
+        Map<String, Object> state = bridge.sdd.states.get(key);
+        if (state == null) {
+            return error(404, "fsm_not_found", "project", project);
+        }
+        if (bridge.sdd.unreadable.contains(key)) {
+            return error(422, "fsm_state_unreadable", "detail", "while scanning a simple key");
+        }
+        List<String> docs = (List<String>) body.get("docs");
+        ResponseEntity<Object> badDocs = checkDocs(docs);
+        if (badDocs != null) {
+            return badDocs;
+        }
+        synchronized (state) {
+            if (!"HUMAN_PENDING".equals(state.get("current_state"))) {
+                return error(409, "fsm_state_conflict", "detail", map("current_state", state.get("current_state"),
+                        "expected_state", "HUMAN_PENDING"));
+            }
+            Map<String, Object> expected = (Map<String, Object>) body.get("expected_digests");
+            if (expected != null) {
+                for (Map.Entry<String, Object> entry : expected.entrySet()) {
+                    if (!docs.contains(entry.getKey())) {
+                        return error(422, "sanitization_failed", "violations", List.of(map("field", "expected_digests",
+                                "rule", "not_in_docs", "message", entry.getKey())));
+                    }
+                    String current = currentDigest(entry.getKey());
+                    if (!current.equals(entry.getValue())) {
+                        return error(409, "spec_digest_changed", "detail", map("pair", "expected_vs_file", "doc",
+                                entry.getKey(), "expected_digest", entry.getValue(), "current_digest", current));
+                    }
+                }
+            }
+            return ResponseEntity.ok(freezeState(state, body, docs, approver, reason, key));
+        }
+    }
+
+    private String currentDigest(String doc) {
+        return bridge.sdd.docDigests.getOrDefault(doc, MiniBridge.digestOf(doc));
+    }
+
+    private ResponseEntity<Object> checkDocs(List<String> docs) {
+        if (docs == null || docs.isEmpty() || docs.size() > 20) {
+            return error(422, "invalid_request", "violations", List.of(map("field", "docs", "rule", "size", "message",
+                    "docs 須為 1～20 項")));
+        }
+        List<Map<String, Object>> violations = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (int i = 0; i < docs.size(); i++) {
+            String doc = docs.get(i);
+            String rule = null;
+            if (doc == null || doc.isBlank()) {
+                rule = "invalid";
+            } else if (doc.startsWith("/") || doc.matches("^[A-Za-z]:.*") || doc.startsWith("\\")) {
+                rule = "absolute";
+            } else if (java.util.Arrays.asList(doc.split("[/\\\\]")).contains("..")) {
+                rule = "contains_dotdot";
+            } else if (!seen.add(doc)) {
+                rule = "duplicate";
+            } else if (bridge.sdd.missingDocs.contains(doc)) {
+                rule = "not_found";
+            }
+            if (rule != null) {
+                violations.add(map("field", "docs[" + i + "]", "rule", rule, "message", String.valueOf(doc)));
+            }
+        }
+        if (violations.isEmpty() && docs.stream().noneMatch(MiniBridgeController::isTcs)) {
+            violations.add(map("field", "docs", "rule", "missing_tcs", "message", "docs 不含 TCS 規格檔"));
+        }
+        return violations.isEmpty() ? null : error(422, "sanitization_failed", "violations", violations);
+    }
+
+    private static boolean isTcs(String doc) {
+        String name = doc.substring(doc.lastIndexOf('/') + 1).toUpperCase(java.util.Locale.ROOT);
+        return name.startsWith("TEST-CONTRACT-SPEC-") || name.startsWith("TCS-");
+    }
+
+    /** 凍結成功的狀態變化（契約 §3.1.4 (d)「FSM 側的效果」）與回應（同 GET 加 {@code stage}、{@code spec_doc_digests}）。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> freezeState(Map<String, Object> state, Map<String, Object> body, List<String> docs,
+                                            String approver, String reason, String key) {
+        List<Map<String, Object>> stages = new java.util.ArrayList<>((List<Map<String, Object>>) state.get("frozen_stages"));
+        String stage = body.get("stage") instanceof String s && !s.isBlank() ? s : "Stage-" + (stages.size() + 1);
+        Map<String, Object> digests = new java.util.LinkedHashMap<>();
+        docs.forEach(doc -> digests.put(doc, currentDigest(doc)));
+        String now = MiniBridge.now();
+        stages.add(map("stage", stage, "frozen_at", now, "spec_docs", List.copyOf(docs), "spec_doc_digests", digests,
+                "approved_by", approver));
+        List<Map<String, Object>> trace = new java.util.ArrayList<>((List<Map<String, Object>>) state.get("decision_trace"));
+        trace.add(map("ts", now, "from", "HUMAN_PENDING", "to", "SPEC_FROZEN", "reason",
+                "console-freeze approver=" + approver + "; reason=" + reason.strip(), "spec_refs", List.copyOf(docs),
+                "agents_consulted", List.of(), "trigger", "spec_frozen"));
+        state.put("frozen_stages", stages);
+        state.put("decision_trace", trace.subList(Math.max(0, trace.size() - 5), trace.size()));
+        state.put("current_state", "SPEC_FROZEN");
+        state.put("updated_at", now);
+        state.put("phase", MiniBridge.phaseOf("SPEC_FROZEN"));
+        state.put("human_pending", map("count", 0, "items", List.of()));
+        bridge.sdd.projects.stream().filter(p -> key.equals(p.get("project"))).findFirst().ifPresent(p -> {
+            p.put("current_state", "SPEC_FROZEN");
+            p.put("updated_at", now);
+        });
+        Map<String, Object> out = new java.util.LinkedHashMap<>(state);
+        out.put("stage", stage);
+        out.put("spec_doc_digests", digests);
+        return out;
+    }
+
+    /** {@code GET /autoclaude/runs/{id}/rtm}（契約 §3.1.4 (f)；唯讀、不需權杖）。 */
+    @GetMapping("/autoclaude/runs/{id}/rtm")
+    ResponseEntity<Object> rtm(@PathVariable String id) {
+        bridge.record("GET /autoclaude/runs/" + id + "/rtm");
+        ResponseEntity<Object> forced = injected("rtm");
+        if (forced != null) {
+            return forced;
+        }
+        MiniRun run = parse(id).map(bridge.runs()::get).orElse(null);
+        if (run == null) {
+            return error(404, "run_not_found", "run_id", id);
+        }
+        if (bridge.sdd.rtmUnreadable.contains(run.id)) {
+            return error(422, "rtm_unreadable", "detail", "RTM 報告缺 summary");
+        }
+        Map<String, Object> report = bridge.sdd.rtmReports.get(run.id);
+        if (report == null) {
+            return error(404, "rtm_not_found", "run_id", id);
+        }
+        Map<String, Object> out = new java.util.LinkedHashMap<>(report);
+        out.put("advisory", true);
+        return ResponseEntity.ok(out);
+    }
+
     @PostMapping("/autoclaude/runs")
     @SuppressWarnings("unchecked")
-    ResponseEntity<Object> create(@RequestBody Map<String, Object> body) {
+    ResponseEntity<Object> create(@RequestBody Map<String, Object> body,
+                                  @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
         bridge.record("POST /autoclaude/runs");
+        boolean sdd = body.get("sdd") != null;
+        if (sdd) {
+            // 共通規則 2：帶 sdd 的建立要權杖，檢查先於一切（沒有 sdd 的請求行為與 v1.4 完全相同，不看權杖）
+            ResponseEntity<Object> denied = tokenGate(token);
+            if (denied != null) {
+                return denied;
+            }
+        }
         ResponseEntity<Object> forced = injected("start");
         if (forced != null) {
             return forced;
@@ -207,12 +431,17 @@ class MiniBridgeController {
         MiniRun run = new MiniRun(bridge, id, project, path, lockKey, steps, MiniBridge.copy(body));
         bridge.runs().put(id, run);
         run.start();
-        return ResponseEntity.status(HttpStatus.CREATED).body(map("run_id", id.toString(), "status", "RUNNING", "pid",
-                4242, "workspace", "mini-workspace/" + id, "bridge_instance", bridge.bridgeInstance));
+        Map<String, Object> created = map("run_id", id.toString(), "status", "RUNNING", "pid", 4242, "workspace",
+                "mini-workspace/" + id, "bridge_instance", bridge.bridgeInstance);
+        if (sdd && !bridge.sdd.createWarnings.isEmpty()) {
+            created.put("warnings", List.copyOf(bridge.sdd.createWarnings));
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(created);
     }
 
     @PostMapping("/autoclaude/runs/{idAction}")
-    ResponseEntity<Object> action(@PathVariable String idAction, @RequestBody(required = false) Map<String, Object> body) {
+    ResponseEntity<Object> action(@PathVariable String idAction, @RequestBody(required = false) Map<String, Object> body,
+                                  @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
         bridge.record("POST /autoclaude/runs/" + idAction);
         int colon = idAction.indexOf(':');
         if (colon < 0) {
@@ -228,6 +457,13 @@ class MiniBridgeController {
         if (run == null) {
             return error(404, "run_not_found", "run_id", rawId);
         }
+        if ("resume".equals(verb) && isSddRun(run)) {
+            // D-115-18：SDD run 的 :resume 也要權杖（先查到 run 才知道它帶不帶 sdd）；缺／錯回 503／403，run 狀態不變
+            ResponseEntity<Object> denied = tokenGate(token);
+            if (denied != null) {
+                return denied;
+            }
+        }
         Optional<String> result = switch (verb) {
             case "pause" -> run.pause();
             case "resume" -> run.resume();
@@ -242,7 +478,8 @@ class MiniBridgeController {
     }
 
     @PostMapping("/autoclaude/runs/{id}/restore")
-    ResponseEntity<Object> restore(@PathVariable String id, @RequestBody Map<String, Object> body) {
+    ResponseEntity<Object> restore(@PathVariable String id, @RequestBody Map<String, Object> body,
+                                   @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
         bridge.record("POST /autoclaude/runs/" + id + "/restore");
         ResponseEntity<Object> forced = injected("restore");
         if (forced != null) {
@@ -251,6 +488,12 @@ class MiniBridgeController {
         MiniRun run = parse(id).map(bridge.runs()::get).orElse(null);
         if (run == null) {
             return error(404, "run_not_found", "run_id", id);
+        }
+        if (isSddRun(run)) {
+            ResponseEntity<Object> denied = tokenGate(token);
+            if (denied != null) {
+                return denied;
+            }
         }
         UUID checkpointId = UUID.fromString((String) body.get("checkpoint_id"));
         Optional<String> result = run.restore(checkpointId);

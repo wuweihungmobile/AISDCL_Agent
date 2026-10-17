@@ -40,6 +40,7 @@ class MiniBridgeApp {
             HttpServletRequest http = (HttpServletRequest) request;
             String traceId = http.getHeader(TRACE_HEADER);
             bridge.recordTrace(http.getMethod() + " " + http.getRequestURI(), traceId);
+            bridge.recordToken(http.getMethod() + " " + http.getRequestURI(), http.getHeader("X-Bridge-Token"));
             ((HttpServletResponse) response).setHeader(TRACE_HEADER,
                     traceId == null || traceId.isBlank() ? UUID.randomUUID().toString() : traceId);
             chain.doFilter(request, response);

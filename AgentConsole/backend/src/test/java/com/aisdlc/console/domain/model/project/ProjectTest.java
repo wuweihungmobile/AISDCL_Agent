@@ -28,7 +28,7 @@ class ProjectTest {
 
     private static Project projectIn(ProjectStatus status) {
         return Project.restore(UUID.randomUUID(), "核心平台", "/work/core", "標準", null, status, 3, true,
-                null, null, false, T0, T0, "admin", null, null);
+                null, null, false, T0, T0, "admin", null, null, null, null, null);
     }
 
     private static ProjectUpdate update(String name, String path, String criteria, String description,
@@ -256,9 +256,9 @@ class ProjectTest {
     @Test
     void aProjectDeletedBeforeV9HasNoRecordedStatusSoItComesBackAsDraftWhenUnsignedAndReadyWhenSigned() {
         Project unsigned = Project.restore(UUID.randomUUID(), "舊", "/x", "標準", null, ProjectStatus.ARCHIVED, 3, false,
-                null, null, true, T0, T0, "admin", T0, null);
+                null, null, true, T0, T0, "admin", T0, null, null, null, null);
         Project signed = Project.restore(UUID.randomUUID(), "舊", "/x", "標準", null, ProjectStatus.ARCHIVED, 3, true,
-                "boss", T0, true, T0, T0, "admin", T0, null);
+                "boss", T0, true, T0, T0, "admin", T0, null, null, null, null);
 
         unsigned.recover(T1);
         signed.recover(T1);
@@ -278,5 +278,75 @@ class ProjectTest {
         p.recover(T1);
 
         assertThat(p.status()).isEqualTo(ProjectStatus.READY);
+    }
+
+    // ---- SDD 綁定（V12；契約 §1.10.5）----
+
+    @Test
+    void aNewProjectHasNoBindingAndItsEffectiveFsmProjectIsItsName() {
+        Project p = Project.create(spec(), "operator", T0);
+
+        assertThat(p.sddProject()).isNull();
+        assertThat(p.sddSpecDir()).isNull();
+        assertThat(p.sddSpecFile()).isNull();
+        assertThat(p.effectiveSddProject()).as("NULL＝用預設（專案名；Backend 不淨化）").isEqualTo("核心平台");
+    }
+
+    @Test
+    void bindingGivenAtCreationIsKeptAndTheEffectiveValueIsTheStoredKey() {
+        Project p = Project.create(new NewProject("核心平台", "/work/core", "標準", null, null, false, " e2e-alpha ",
+                "/work/core/docs", "/work/core/docs/TCS-A.md"), "operator", T0);
+
+        assertThat(p.sddProject()).isEqualTo("e2e-alpha");
+        assertThat(p.sddSpecDir()).isEqualTo("/work/core/docs");
+        assertThat(p.sddSpecFile()).isEqualTo("/work/core/docs/TCS-A.md");
+        assertThat(p.effectiveSddProject()).isEqualTo("e2e-alpha");
+    }
+
+    @Test
+    void rebindingReportsWhetherAnythingChangedAndOnlyThenTouchesUpdatedAt() {
+        Project p = Project.create(spec(), "operator", T0);
+
+        assertThat(p.rebindSddProject("alpha", T1)).isTrue();
+        assertThat(p.updatedAt()).isEqualTo(T1);
+        assertThat(p.rebindSddProject("alpha", T1.plusSeconds(60))).as("相同值＝冪等").isFalse();
+        assertThat(p.updatedAt()).isEqualTo(T1);
+        assertThat(p.rebindSddProject(null, T1.plusSeconds(120))).as("null＝清除，回到用預設").isTrue();
+        assertThat(p.sddProject()).isNull();
+        assertThat(p.effectiveSddProject()).isEqualTo("核心平台");
+    }
+
+    @ParameterizedTest(name = "FSM 專案不合法（第 {index} 組）")
+    @ValueSource(strings = {"  ", "", "a\u0000b", "a\nb"})
+    void blankOrControlCharacterBindingIsRejected(String bad) {
+        Project p = Project.create(spec(), "operator", T0);
+
+        assertThatThrownBy(() -> p.rebindSddProject(bad, T1)).isInstanceOf(ValidationException.class)
+                .satisfies(e -> assertThat(((ValidationException) e).violations().get(0).field())
+                        .isEqualTo("sddProject"));
+    }
+
+    @Test
+    void anOverlongBindingIsRejectedAtTheColumnLimits() {
+        Project p = Project.create(spec(), "operator", T0);
+
+        assertThatThrownBy(() -> p.rebindSddProject("x".repeat(101), T1)).isInstanceOf(ValidationException.class);
+        assertThat(p.rebindSddProject("x".repeat(100), T1)).isTrue();
+        assertThatThrownBy(() -> p.bindSddSpec("/" + "d".repeat(500), null, T1))
+                .isInstanceOf(ValidationException.class);
+    }
+
+    @Test
+    void bindingTheSpecIsIdempotentAndLeavesUntouchedFieldsAlone() {
+        Project p = Project.create(spec(), "operator", T0);
+
+        assertThat(p.bindSddSpec("/work/core/docs", "/work/core/docs/TCS-A.md", T1)).isTrue();
+        assertThat(p.bindSddSpec("/work/core/docs", "/work/core/docs/TCS-A.md", T1.plusSeconds(60)))
+                .as("相同值＝冪等，不動 updatedAt").isFalse();
+        assertThat(p.updatedAt()).isEqualTo(T1);
+        assertThat(p.bindSddSpec(null, "/work/core/docs/TCS-B.md", T1.plusSeconds(120))).isTrue();
+        assertThat(p.sddSpecDir()).as("null 的參數不動該欄位").isEqualTo("/work/core/docs");
+        assertThat(p.sddSpecFile()).isEqualTo("/work/core/docs/TCS-B.md");
+        assertThat(p.sddProject()).as("規格綁定不影響 FSM 專案鍵").isNull();
     }
 }

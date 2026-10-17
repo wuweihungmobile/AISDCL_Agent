@@ -2,6 +2,7 @@ package com.aisdlc.console.domain.service;
 
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.UnprocessableException;
+import com.aisdlc.console.domain.model.execution.SddTaskSpec;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.model.task.Task;
 import com.aisdlc.console.domain.service.ExecutionPlanner.PlannedTask;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -38,9 +40,21 @@ public final class PlaybookBuilder {
     private static final Pattern UNSAFE_PROJECT_CHARS = Pattern.compile("[^A-Za-z0-9._\\-\\u4e00-\\u9fff]");
     private static final int MAX_PROJECT_NAME = 200;
 
-    /** Playbook 的一個任務（欄位名對映 {@code tasks[]}；{@code command} 永不送，引擎 Kernel 路徑對它零消費）。 */
+    /**
+     * Playbook 的一個任務（欄位名對映 {@code tasks[]}；{@code command} 永不送，引擎 Kernel 路徑對它零消費）。
+     *
+     * <p>v1.5（契約 §3.4.1 的 SDD 補充）：{@code maintainContext}、{@code specDigest}、{@code weakRegex} 只有 SDD 批次才有值
+     * （取自 {@code passCriteriaSpec}），null 一律<b>不送</b>——所以非 SDD 批次的請求本文與 v1.4 逐位元相同。
+     */
     public record PlaybookTask(String stepId, String name, String prompt, String expectedOutputRegex,
-                               String evaluatorCommand, int maxRetries, String goalTaskId) {
+                               String evaluatorCommand, int maxRetries, String goalTaskId, Boolean maintainContext,
+                               String specDigest, Boolean weakRegex) {
+
+        /** 非 SDD 任務（沒有 SDD 欄位）。 */
+        public PlaybookTask(String stepId, String name, String prompt, String expectedOutputRegex,
+                            String evaluatorCommand, int maxRetries, String goalTaskId) {
+            this(stepId, name, prompt, expectedOutputRegex, evaluatorCommand, maxRetries, goalTaskId, null, null, null);
+        }
 
         Map<String, Object> toMap() {
             Map<String, Object> map = new LinkedHashMap<>();
@@ -55,6 +69,15 @@ public final class PlaybookBuilder {
             }
             map.put("max_retries", maxRetries);
             map.put("goal_task_id", goalTaskId);
+            if (maintainContext != null) {
+                map.put("maintain_context", maintainContext);
+            }
+            if (specDigest != null && !specDigest.isBlank()) {
+                map.put("spec_digest", specDigest);
+            }
+            if (weakRegex != null) {
+                map.put("weak_regex", weakRegex);
+            }
             return map;
         }
     }
@@ -85,13 +108,25 @@ public final class PlaybookBuilder {
      * @param evaluatorAllowlist 評估指令可執行檔白名單（小寫，不含路徑與 .exe／.cmd／.bat）
      */
     public static Playbook build(Project project, Plan plan, int maxRetriesPerStep, Set<String> evaluatorAllowlist) {
+        return build(project, plan, maxRetriesPerStep, evaluatorAllowlist, Map.of());
+    }
+
+    /**
+     * @param sddSpecs SDD 批次（資格成立，{@code SddBatchPolicy.Decision#active}）的任務 id → {@code passCriteriaSpec} 欄位；
+     *                 {@code plan} 的 step_id 此時已是 SDD 的 {@code stepId}。非 SDD 批次傳空映射（請求本文與 v1.4 相同）
+     */
+    public static Playbook build(Project project, Plan plan, int maxRetriesPerStep, Set<String> evaluatorAllowlist,
+                                 Map<UUID, SddTaskSpec> sddSpecs) {
         List<PlaybookTask> tasks = new ArrayList<>();
         for (PlannedTask planned : plan.tasks()) {
             Task task = planned.task();
             String prompt = StepPrompt.build(planned.stepId(), task.name(), planned.goal().name(),
                     task.description(), task.passCriteria());
+            SddTaskSpec sdd = sddSpecs.get(task.id());
             tasks.add(new PlaybookTask(planned.stepId(), task.name(), prompt, task.expectedOutputRegex(),
-                    task.evaluatorCommand(), task.maxRetries(), task.id().toString()));
+                    task.evaluatorCommand(), task.maxRetries(), task.id().toString(),
+                    sdd == null ? null : sdd.maintainContext(), sdd == null ? null : sdd.specDigest(),
+                    sdd == null ? null : sdd.weakRegex()));
         }
         requirePromptsWithinLimit(plan, tasks);
         requireSafeEvaluators(plan);

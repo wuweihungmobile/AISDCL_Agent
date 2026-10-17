@@ -13,10 +13,12 @@ import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.DagSnapshot;
 import com.aisdlc.console.domain.model.execution.EngineCapabilities;
 import com.aisdlc.console.domain.model.execution.ExecutionRun;
+import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.RunScope;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.service.ExecutionPlanner.Plan;
 import com.aisdlc.console.domain.service.PlaybookBuilder.Playbook;
+import com.aisdlc.console.domain.service.SddBatchPolicy;
 import com.aisdlc.console.support.DomainFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -136,5 +138,104 @@ class RunLauncherTest {
         assertThatThrownBy(() -> launcher.launch(launch(3), run -> { })).isInstanceOf(IllegalStateException.class);
 
         verifyNoInteractions(runs, bridge, consumers, health);
+    }
+
+    // ── v1.5：SDD 批次（契約 §1.10.6、§3.4.1）──────────────────────────────────────────────
+
+    private RunLauncher.Launch sddLaunch(Project bound, SddBatchPolicy.Decision decision, String approver) {
+        return new RunLauncher.Launch(bound, new Plan(List.of(), List.of(), DagSnapshot.EMPTY),
+                new Playbook("launcher", "全部完成", 3, List.of()), RunScope.all(), 4, 1000L, decision, approver);
+    }
+
+    private static final SddBatchPolicy.Decision ACTIVE = new SddBatchPolicy.Decision(true, null, Map.of(), Map.of());
+
+    private StartRunRequest sentRequest() {
+        ArgumentCaptor<StartRunRequest> request = ArgumentCaptor.forClass(StartRunRequest.class);
+        verify(bridge).startRun(request.capture());
+        return request.getValue();
+    }
+
+    @Test
+    void anActiveSddDecisionSendsTheBlockBuiltFromTheProjectsBinding() {
+        Project bound = DomainFixtures.boundProject("bound", "/work/bound", "my-key", "/work/bound/docs",
+                "/work/bound/docs/TCS-A.md");
+        when(projects.findByIdForUpdate(bound.id())).thenReturn(Optional.of(bound));
+        when(runs.nextRunNumber(bound.id())).thenReturn(1);
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+
+        launcher.launch(sddLaunch(bound, ACTIVE, "approver-1"), run -> { });
+
+        assertThat(sentRequest().sdd()).isEqualTo(new AgentBridge.SddBlock("/work/bound/docs", "/work/bound/docs/TCS-A.md",
+                "my-key", "/work/bound", "approver-1"));
+    }
+
+    @Test
+    void theEffectiveFsmProjectIsTheProjectNameWhenNothingIsBound() {
+        Project named = DomainFixtures.boundProject("My Project 專案", "/work/named", null, "/work/named/docs", null);
+        when(projects.findByIdForUpdate(named.id())).thenReturn(Optional.of(named));
+        when(runs.nextRunNumber(named.id())).thenReturn(1);
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+
+        launcher.launch(sddLaunch(named, ACTIVE, "someone"), run -> { });
+
+        AgentBridge.SddBlock block = sentRequest().sdd();
+        assertThat(block.fsmProject()).as("原名原樣，Backend 不淨化").isEqualTo("My Project 專案");
+        assertThat(block.specFile()).isNull();
+        assertThat(block.root()).isEqualTo("/work/named");
+    }
+
+    @Test
+    void aLaunchWithoutAnActiveDecisionSendsNoSddBlockAtAll() {
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+        SddBatchPolicy.Decision inactive = new SddBatchPolicy.Decision(false,
+                ExecutionWarning.inactive(ExecutionWarning.MIXED_SCOPE, "混合"), Map.of(), Map.of());
+
+        launcher.launch(sddLaunch(project, inactive, null), run -> { });
+
+        assertThat(sentRequest().sdd()).isNull();
+    }
+
+    @Test
+    void theInactiveWarningComesFirstThenTheBridgesOwnWarningsVerbatim() {
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+        ExecutionWarning bridgeWarning = new ExecutionWarning(ExecutionWarning.FROZEN_DIGEST_ABSENT, null, "舊狀態檔");
+        when(bridge.startRun(any(StartRunRequest.class))).thenAnswer(invocation -> new RunStarted(
+                ((StartRunRequest) invocation.getArgument(0)).runId().toString(), BridgeStatus.RUNNING, null, null,
+                "test-bridge", List.of(bridgeWarning)));
+        ExecutionWarning inactiveWarning = ExecutionWarning.inactive(ExecutionWarning.NOT_BOUND, "尚未綁定");
+
+        RunLauncher.Launched launched = launcher.launchWithWarnings(sddLaunch(project,
+                new SddBatchPolicy.Decision(false, inactiveWarning, Map.of(), Map.of()), null), run -> { });
+
+        assertThat(launched.warnings()).containsExactly(inactiveWarning, bridgeWarning);
+        assertThat(launched.run().projectId()).isEqualTo(project.id());
+    }
+
+    @Test
+    void aLaunchWithoutAnyWarningReturnsAnEmptyListNotNull() {
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+
+        RunLauncher.Launched launched = launcher.launchWithWarnings(sddLaunch(project, SddBatchPolicy.Decision.NONE, null),
+                run -> { });
+
+        assertThat(launched.warnings()).isEmpty();
+    }
+
+    @Test
+    void aBridgeSddRefusalIsTranslatedAndTheRowCompensated() {
+        Project bound = DomainFixtures.boundProject("bound", "/work/bound", null, "/work/bound/docs", null);
+        when(projects.findByIdForUpdate(bound.id())).thenReturn(Optional.of(bound));
+        when(runs.nextRunNumber(bound.id())).thenReturn(1);
+        when(config.materialize(4)).thenReturn(materialized("c", null, new EngineCapabilities(OFF, OFF)));
+        when(bridge.startRun(any(StartRunRequest.class))).thenThrow(new AgentBridge.BridgeRejectedException(404,
+                "fsm_not_found", null, null, List.of(), Map.of("code", 404, "reason", "fsm_not_found")));
+
+        assertThatThrownBy(() -> launcher.launch(sddLaunch(bound, ACTIVE, "approver"), run -> { }))
+                .isInstanceOfSatisfying(com.aisdlc.console.domain.exception.ConflictException.class, e -> {
+                    assertThat(e.reason()).isEqualTo("sdd_fsm_not_found");
+                    assertThat(e.details()).containsEntry("sddProject", "bound");
+                });
+        verify(runs).deleteById(any());
+        verifyNoInteractions(consumers);
     }
 }

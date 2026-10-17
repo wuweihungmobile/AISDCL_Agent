@@ -139,18 +139,191 @@ class EnginesApiIT extends AbstractExecutionIT {
         assertThat(resp.body()).as("Bridge 的 detail 不外露").doesNotContain("while scanning");
     }
 
-    // ── project 驗證：不合白名單 400（第 4 列③④）─────────────────────────────────────────────
+    // ── project 驗證（v1.5：1～200 字元、不含控制字元；其餘原樣交給 Bridge 的淨化鏡像）──────────────────
 
     @Test
-    void namesOutsideTheWhitelistAre400AndNeverReachTheBridge() {
-        for (String query : List.of("?project=a%20b", "?project=..%2Fx", "?project=", "?project=a%2Fb",
-                "?project=" + "x".repeat(129), "?project=%E5%90%8D%E7%A8%B1")) {
+    void anEmptyTooLongOrControlCharNameIs400AndNeverReachesTheBridge() {
+        // 注意：MockMvc 會把範本字串裡的 % 再編一次碼，所以這裡寫真實字元（換行、tab、DEL、NUL），不寫 %0A 這類跳脫
+        for (String query : List.of("?project=", "?project=" + "x".repeat(201), "?project=a\nb", "?project=a\tb",
+                "?project=a\u007fb", "?project=a\u0000b")) {
             Resp resp = get(query);
 
-            assertThat(resp.status()).as(query).isEqualTo(400);
-            assertThat(resp.errorFields()).as(query).containsExactly("project");
+            assertThat(resp.status()).as(query.length() + "").isEqualTo(400);
+            assertThat(resp.errorFields()).as(query.length() + "").containsExactly("project");
         }
         assertThat(sddRequests()).as("驗證在任何 Bridge 呼叫之前").isZero();
+    }
+
+    @Test
+    void anyOtherNameGoesToTheBridgeRawAndItsMirrorFindsTheCanonicalKey() {
+        MINI.sdd.addProject("a:b", "IMPLEMENTATION", 1, "sid-colon", "2026-10-16T02:00:00+00:00",
+                new MiniBridge.Sdd.SddRetry(0, null), Map.of("count", 0, "items", List.of()));
+
+        Resp raw = get("?project=a:b");
+        Resp spaced = get("?project=a b");
+
+        assertThat(raw.status()).isEqualTo(200);
+        assertThat(raw.<String>read("$.data.fsm.project")).as("檔內原名").isEqualTo("a:b");
+        assertThat(raw.<String>read("$.data.fsm.fsmProject")).as("淨化後的標準鍵（不能拿 project 當鍵）").isEqualTo("a_b");
+        assertThat(raw.<List<String>>read("$.data.projects[*].project")).contains("a_b");
+        assertThat(spaced.<String>read("$.data.reason")).as("原名 a b 淨化後是 a b，沒有這個檔").isEqualTo("fsm_not_found");
+        assertThat(MINI.requests()).as("Console 沒有改寫名稱").contains("GET /sdd/fsm/a:b", "GET /sdd/fsm/a b");
+    }
+
+    // ── v1.5：fsm 的新欄位（契約 §1.10.4）──────────────────────────────────────────────────
+
+    @Test
+    void theV15FieldsAreVerbatimAndRecoveryIsAbsentOutsideAnEscalation() {
+        Resp resp = get("?project=e2e-alpha");
+
+        assertThat(resp.<Map<String, Object>>read("$.data.fsm.phase")).containsEntry("name", "IMPLEMENTATION")
+                .containsEntry("order", 5).containsEntry("blocking", false).containsEntry("observation", false);
+        assertThat(resp.<List<Object>>read("$.data.fsm.escalationHistory")).isEmpty();
+        assertThat(resp.<Object>read("$.data.fsm.escalationProvenance")).isNull();
+        assertThat(resp.<String>read("$.data.fsm.fsmProject")).isEqualTo("e2e-alpha");
+        assertThat(resp.<Object>read("$.data.fsm.recovery")).as("非 ESCALATION：null（鍵固定出現）").isNull();
+    }
+
+    @Test
+    void anEscalationCarriesHistoryProvenanceAndRecoveryVerbatim() {
+        MINI.sdd.addProject("e2e-esc", "ESCALATION", 1, "sid-esc", "2026-10-17T09:12:40+00:00",
+                new MiniBridge.Sdd.SddRetry(0, null), Map.of("count", 0, "items", List.of()));
+        Map<String, Object> state = MINI.sdd.states.get("e2e-esc");
+        state.put("escalation_history", List.of(Map.of("triggered_at", "2026-10-17T09:12:40+00:00", "source",
+                "autoclaude_delegated_failed", "resolved_at", "")));
+        state.put("escalation_provenance", Map.of("rule_id", "unknown", "source", "autoclaude_delegated_failed",
+                "reason", "console-run ENGINE-ESCALATION"));
+
+        Resp resp = get("?project=e2e-esc");
+
+        assertThat(resp.<Map<String, Object>>read("$.data.fsm.phase")).containsEntry("name", "BLOCKED")
+                .containsEntry("order", 0).containsEntry("blocking", true);
+        assertThat(resp.<String>read("$.data.fsm.escalationHistory[0].triggered_at")).as("巢狀鍵保留 snake_case")
+                .isEqualTo("2026-10-17T09:12:40+00:00");
+        assertThat(resp.<String>read("$.data.fsm.escalationProvenance.source")).isEqualTo("autoclaude_delegated_failed");
+        assertThat(resp.<String>read("$.data.fsm.recovery.target")).isEqualTo("IMPLEMENTATION");
+        assertThat(resp.<String>read("$.data.fsm.recovery.powershell")).startsWith("Push-Location ").endsWith("Pop-Location")
+                .contains("<人工原因>");
+        assertThat(resp.<String>read("$.data.fsm.recovery.posix")).contains("resume-from-escalation")
+                .contains("<人工原因>");
+    }
+
+    @Test
+    void aBridgeThatLacksTheV15KeysYieldsTheDefaultsInsteadOfFailing() {
+        Map<String, Object> state = MINI.sdd.states.get("e2e-alpha");
+        for (String key : List.of("phase", "escalation_history", "escalation_provenance", "fsm_project", "recovery")) {
+            state.remove(key);
+        }
+
+        Resp resp = get("?project=e2e-alpha");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<Boolean>read("$.data.available")).isTrue();
+        assertThat(resp.<Object>read("$.data.fsm.phase")).isNull();
+        assertThat(resp.<List<Object>>read("$.data.fsm.escalationHistory")).isEmpty();
+        assertThat(resp.<Object>read("$.data.fsm.escalationProvenance")).isNull();
+        assertThat(resp.<Object>read("$.data.fsm.fsmProject")).isNull();
+        assertThat(resp.<Object>read("$.data.fsm.recovery")).isNull();
+    }
+
+    // ── v1.5：projectId（root 取自專案的 executionPath）──────────────────────────────────────
+
+    private String projectAt(String name, String path) {
+        return createProject(Map.of("name", name, "executionPath", path, "passCriteria", "- 通過"));
+    }
+
+    @Test
+    void aProjectIdSendsTheProjectsRootToBothCallsAndDefaultsToTheProjectName() {
+        String id = projectAt("e2e-alpha", "/work/e2e-alpha");
+
+        Resp resp = get("?projectId=" + id);
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.fsm.project")).isEqualTo("e2e-alpha");
+        assertThat(MINI.sdd.rootsSeen).extracting(MiniBridge.Sdd.RootSeen::request, MiniBridge.Sdd.RootSeen::root)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("GET /sdd/fsm", "/work/e2e-alpha"),
+                        org.assertj.core.groups.Tuple.tuple("GET /sdd/fsm/e2e-alpha", "/work/e2e-alpha"));
+        assertThat(MINI.countRequests("GET /sdd/version")).as("version 不帶 root").isEqualTo(1);
+    }
+
+    @Test
+    void aBoundSddProjectBeatsTheProjectNameAndAnExplicitProjectBeatsBoth() {
+        String id = projectAt("Some Other Name", "/work/bound");
+        jdbc.update("update console.projects set sdd_project = 'e2e-bravo' where id = ?::uuid", id);
+
+        assertThat(get("?projectId=" + id).<String>read("$.data.fsm.project")).isEqualTo("e2e-bravo");
+        assertThat(get("?projectId=" + id + "&project=e2e-alpha").<String>read("$.data.fsm.project"))
+                .isEqualTo("e2e-alpha");
+        assertThat(MINI.sdd.rootsSeen).extracting(MiniBridge.Sdd.RootSeen::root).containsOnly("/work/bound");
+    }
+
+    @Test
+    void anUnknownOrDeletedProjectIdIs404AndNeverReachesTheBridge() {
+        String unknown = java.util.UUID.randomUUID().toString();
+        Resp missing = get("?projectId=" + unknown);
+        assertThat(missing.status()).isEqualTo(404);
+        assertThat(missing.<String>read("$.message")).isEqualTo("專案不存在或已刪除：" + unknown);
+        assertThat(missing.has("$.reason")).as("一般 404 沒有 reason").isFalse();
+
+        String gone = projectAt("gone", "/work/gone");
+        assertThat(api.delete(operator(), "/api/v1/projects/" + gone).status()).isEqualTo(204);
+        assertThat(get("?projectId=" + gone).status()).isEqualTo(404);
+        assertThat(sddRequests()).isZero();
+    }
+
+    @Test
+    void aBadProjectIdIs400AndAnInvalidProjectParamBeatsAnUnknownId() {
+        Resp notUuid = get("?projectId=not-a-uuid");
+        assertThat(notUuid.status()).isEqualTo(400);
+        assertThat(notUuid.errorFields()).containsExactly("projectId");
+
+        Resp both = get("?projectId=" + java.util.UUID.randomUUID() + "&project=a\nb");
+        assertThat(both.status()).as("project 的 400 先於 projectId 的 404").isEqualTo(400);
+        assertThat(both.errorFields()).containsExactly("project");
+        assertThat(sddRequests()).isZero();
+    }
+
+    @Test
+    void anEmptyRootIsNoErrorAndSkipsTheThirdCallForTheDefaultProject() {
+        MINI.sdd.emptyRoots.add("/work/fresh");
+        String id = projectAt("fresh", "/work/fresh");
+
+        Resp resp = get("?projectId=" + id);
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<Boolean>read("$.data.available")).isTrue();
+        assertThat(resp.<Object>read("$.data.reason")).as("尚無 FSM 狀態檔：不是錯誤").isNull();
+        assertThat(resp.<List<Object>>read("$.data.projects")).isEmpty();
+        assertThat(resp.<Object>read("$.data.fsm")).isNull();
+        assertThat(MINI.requests()).containsExactly("GET /sdd/version", "GET /sdd/fsm");
+    }
+
+    @Test
+    void aRootTheBridgeRejectsIsAvailableWithSddRootRejectedAndNoProjects() {
+        MINI.sdd.rejectedRoots.add("/work/outside");
+        String id = projectAt("outside", "/work/outside");
+
+        Resp resp = get("?projectId=" + id);
+
+        assertThat(resp.status()).as("不是 422／502").isEqualTo(200);
+        assertThat(resp.<Boolean>read("$.data.available")).isTrue();
+        assertThat(resp.<String>read("$.data.reason")).isEqualTo("sdd_root_rejected");
+        assertThat(resp.<List<Object>>read("$.data.projects")).isEmpty();
+        assertThat(resp.<Object>read("$.data.fsm")).isNull();
+        assertThat(resp.<String>read("$.data.version.latest")).as("version 保留").isEqualTo("AISDLC_SDD_v9.99");
+    }
+
+    @Test
+    void aRootRejectedOnTheThirdCallIsAlsoSddRootRejected() {
+        MINI.failNext("sddFsm", 422, Map.of("code", 422, "reason", "sanitization_failed", "violations",
+                List.of(Map.of("field", "root", "rule", "not_found"))));
+        String id = projectAt("e2e-alpha", "/work/e2e-alpha");
+
+        Resp resp = get("?projectId=" + id);
+
+        assertThat(resp.<String>read("$.data.reason")).isEqualTo("sdd_root_rejected");
+        assertThat(resp.<List<Object>>read("$.data.projects")).isEmpty();
+        assertThat(resp.<Boolean>read("$.data.available")).isTrue();
     }
 
     // ── 引擎層級的不可用：200＋available=false（第 7、8 列）──────────────────────────────────

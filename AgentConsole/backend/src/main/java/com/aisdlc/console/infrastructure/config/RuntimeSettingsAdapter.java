@@ -21,14 +21,16 @@ class RuntimeSettingsAdapter implements RuntimeSettings {
     private final SseProperties sse;
     private final MonitorProperties monitor;
     private final RetentionProperties retention;
+    private final BridgeProperties bridge;
 
     RuntimeSettingsAdapter(ConsoleSecurityProperties security, ExecutionProperties execution, SseProperties sse,
-                           MonitorProperties monitor, RetentionProperties retention) {
+                           MonitorProperties monitor, RetentionProperties retention, BridgeProperties bridge) {
         this.security = security;
         this.execution = execution;
         this.sse = sse;
         this.monitor = monitor;
         this.retention = retention;
+        this.bridge = bridge;
     }
 
     @Override
@@ -90,5 +92,10 @@ class RuntimeSettingsAdapter implements RuntimeSettings {
     @Override
     public boolean purgeEnabled() {
         return retention.purgeEnabled();
+    }
+
+    @Override
+    public boolean sddWriteTokenConfigured() {
+        return bridge.sddWriteTokenConfigured();
     }
 }

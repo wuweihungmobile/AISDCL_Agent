@@ -27,6 +27,9 @@ final class ProjectMapper {
         e.createdBy = p.createdBy();
         e.deletedAt = p.deletedAt();
         e.statusBeforeDelete = p.statusBeforeDelete();
+        e.sddProject = p.sddProject();
+        e.sddSpecDir = p.sddSpecDir();
+        e.sddSpecFile = p.sddSpecFile();
         return e;
     }
 
@@ -34,6 +37,6 @@ final class ProjectMapper {
         return Project.restore(e.id, e.name, e.executionPath, e.passCriteria, e.description, e.status,
                 e.autonomyLevel == null ? Project.DEFAULT_AUTONOMY_LEVEL : e.autonomyLevel, e.signedOff,
                 e.signedOffBy, e.signedOffAt, Boolean.TRUE.equals(e.deleted), e.createdAt, e.updatedAt,
-                e.createdBy, e.deletedAt, e.statusBeforeDelete);
+                e.createdBy, e.deletedAt, e.statusBeforeDelete, e.sddProject, e.sddSpecDir, e.sddSpecFile);
     }
 }

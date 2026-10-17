@@ -45,10 +45,18 @@ public class ErrorResponseDocumentation {
             // Phase 6 設定：敏感參數未帶 confirm=true
             "PUT /api/v1/settings/{category}/{key}", "POST /api/v1/settings/{category}/{key}/reset",
             // Phase 4 執行：草案未 signoff、專案／批次狀態不允許、鎖被占用、審核項已處理…
+            // v1.5：核准凍結（FSM 不在 HUMAN_PENDING、沒有狀態檔、摘要不符、綁定衝突）與編輯綁定（唯一性）
+            "POST /api/v1/projects/{id}/sdd/freeze", "PUT /api/v1/projects/{id}/sdd-binding",
             "POST /api/v1/projects/{projectId}/execute", "POST /api/v1/executions/{runId}/pause",
             "POST /api/v1/executions/{runId}/resume", "POST /api/v1/executions/{runId}/cancel",
             "POST /api/v1/executions/{runId}/restore/{checkpointId}",
             "POST /api/v1/executions/{runId}/review/{stepId}");
+
+    /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
+    private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
+            // v1.5（契約 §1.10.3）：本端點是「404 的 reason 省略」慣例的唯一例外
+            "GET /api/v1/executions/{runId}/rtm", "批次不存在（訊息「執行批次不存在或已刪除：<id>」，無 reason），或批次存在但沒有追溯報告"
+                    + "（reason rtm_not_found；本端點是「404 的 reason 省略」慣例的唯一例外）");
 
     /** pause／resume／cancel 的上游錯誤：Bridge 無法連線、逾時（DB 狀態不變）。 */
     private static final Map<String, String> BRIDGE_UPSTREAM = Map.of(
@@ -57,6 +65,21 @@ public class ErrorResponseDocumentation {
 
     /** 其餘（非 400／401／403／404／409／429）的狀態碼：方法＋路徑 → 狀態碼與說明。 */
     private static final Map<String, Map<String, String>> EXTRA = Map.ofEntries(
+            // v1.5（契約 §1.10.4）：端點沒有路徑變數，但選填的 projectId 找不到專案時回 404（訊息「專案不存在或已刪除：<id>」，無 reason）
+            Map.entry("GET /api/v1/engines/sdd", Map.of(
+                    "404", "projectId 找不到（專案不存在或已軟刪除；訊息「專案不存在或已刪除：<id>」，無 reason）")),
+            // v1.5（契約 §1.10.2）：核准凍結的 Bridge 失敗對映——422 引擎拒絕、502 含 403 sdd_write_forbidden、503 sdd_write_disabled
+            Map.entry("POST /api/v1/projects/{id}/sdd/freeze", Map.of(
+                    "422", "引擎拒絕此請求（details.bridgeReason 為 sanitization_failed／sdd_invalid_argument／fsm_state_unreadable；"
+                            + "docs 不合法、缺檔、跑出根目錄、不含 TCS，或 approver／reason 值域不合）",
+                    "502", "引擎橋接服務無法連線／回了非預期的錯誤（含 403 sdd_write_forbidden＝兩端權杖設定不一致；已寫回的綁定不回滾）",
+                    "503", "sdd_write_disabled：backend 或 Bridge 沒有設定寫入權杖（BRIDGE_SDD_WRITE_TOKEN），SDD 寫入面停用",
+                    "504", "引擎橋接服務逾時")),
+            // v1.5（契約 §1.10.3）：RTM 報告壞掉（422 rtm_unreadable）與 Bridge 失敗
+            Map.entry("GET /api/v1/executions/{runId}/rtm", Map.of(
+                    "422", "報告檔存在但壞掉（引擎拒絕此請求；details.bridgeReason=rtm_unreadable）",
+                    "502", "引擎橋接服務無法連線／回了非預期的錯誤",
+                    "504", "引擎橋接服務逾時")),
             Map.entry("POST /api/v1/import/upload", Map.of(
                     "413", "上傳超過 10MB 上限（reason：檔案超過 10MB 上限）",
                     "415", "副檔名不在 .md／.pdf／.docx（reason：只支援 .md／.pdf／.docx 檔案）",
@@ -128,7 +151,7 @@ public class ErrorResponseDocumentation {
                             + "已刪除專案清單需 OPERATOR 以上）");
                 }
                 if (path.contains("{") || path.endsWith("/reorder")) {
-                    add(operation, "404", "資源不存在或已軟刪除");
+                    add(operation, "404", NOT_FOUND_DESCRIPTION.getOrDefault(key, "資源不存在或已軟刪除"));
                 }
                 if (CONFLICT_ENDPOINTS.contains(key)) {
                     add(operation, "409", "與目前狀態衝突（reason 說明原因）");

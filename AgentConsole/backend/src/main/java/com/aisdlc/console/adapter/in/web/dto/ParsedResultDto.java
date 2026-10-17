@@ -22,7 +22,8 @@ import java.util.Map;
  *
  * <p>結構性問題（缺必填欄位、型別錯誤、{@code goals}／{@code tasks} 為空、通過標準空白）是 <b>400</b>（Bean Validation）；
  * 任務的 {@code name}／{@code description} 為<b>空白字串</b>則不在這裡擋，交給有界閘 {@code empty_prompt}（422，AR-21）。
- * 伺服器擁有的欄位（{@code path／aiModel／tokenUsed／reasoning／draftIds／specDigest}）請求帶了也忽略。
+ * 伺服器擁有的欄位（{@code path／aiModel／tokenUsed／reasoning／draftIds／specDigest}，以及 v1.5 的
+ * {@code specFormatVersion／sddProject／sddSpecDir／sddSpecFile}）請求帶了也忽略。
  */
 @Schema(name = "ParsedResult", description = "三層草案樹（專案→目標→任務）；後半的 path／aiModel／… 為伺服器擁有的欄位，請求帶了也忽略")
 public record ParsedResultDto(
@@ -33,12 +34,21 @@ public record ParsedResultDto(
         Long tokenUsed,
         String reasoning,
         List<String> draftIds,
-        String specDigest) {
+        String specDigest,
+        @Schema(description = "v1.5：路徑 A 的規格格式版本（Bridge /sdd/compile 的 spec_format_version）；伺服器擁有，只供顯示與稽核")
+        String specFormatVersion,
+        @Schema(description = "v1.5：路徑 A 通過凍結閘的 FSM 專案的標準鍵（Bridge 回應的 fsm_project）；伺服器擁有；confirm 據此回填專案的 sddProject")
+        String sddProject,
+        @Schema(description = "v1.5：規格檔所在目錄（絕對路徑）＝Bridge 回應 spec_path 的父目錄；伺服器擁有；confirm 據此回填專案的 sddSpecDir")
+        String sddSpecDir,
+        @Schema(description = "v1.5：路徑 A 實際採用的規格檔（絕對路徑）＝Bridge 回應的 spec_path；伺服器擁有；confirm 據此回填專案的 sddSpecFile")
+        String sddSpecFile) {
 
     public static ParsedResultDto from(ParsedResult tree) {
         return new ParsedResultDto(ParsedProjectDto.from(tree.project()),
                 tree.goals().stream().map(ParsedGoalDto::from).toList(), tree.path(), tree.aiModel(),
-                tree.tokenUsed(), tree.reasoning(), tree.draftIds(), tree.specDigest());
+                tree.tokenUsed(), tree.reasoning(), tree.draftIds(), tree.specDigest(), tree.specFormatVersion(),
+                tree.sddProject(), tree.sddSpecDir(), tree.sddSpecFile());
     }
 
     /** 轉成 domain（只有三層樹，伺服器欄位忽略）；同時對每個任務的 passCriteriaSpec 套用 NFR-SEC-03 消毒。 */

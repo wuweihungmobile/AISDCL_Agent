@@ -80,7 +80,7 @@ class BridgeHttpAdapterTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         // 回 null＝沿用 Builder 自己的（被 MockRestServiceServer 接手的）請求工廠；順便記下每次要求的逾時
-        adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE)),
+        adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, null)),
                 (connect, read) -> {
                     requestedTimeouts.add(new Duration[] {connect, read});
                     return null;
@@ -186,7 +186,7 @@ class BridgeHttpAdapterTest {
                                    "evaluator_command":"pytest -q","weak_regex":true},
                                   {"step_id":"C2","name":"結帳","prompt":"實作結帳"}]}
                         """, MediaType.APPLICATION_JSON));
-        SddCompileResult result = adapter.sddCompile("C:\\work\\proj");
+        SddCompileResult result = adapter.sddCompile("C:\\work\\proj", null, null);
         server.verify();
         assertThat(result.scenario()).isEqualTo("購物車");
         assertThat(result.digest()).isEqualTo("abcdef0123456789");
@@ -202,7 +202,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT).contentType(MediaType.APPLICATION_JSON)
                 .body("{\"code\":422,\"reason\":\"spec_not_frozen\",\"detail\":\"規格尚未凍結\"}"));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOfSatisfying(BridgeRejectedException.class,
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOfSatisfying(BridgeRejectedException.class,
                 e -> {
                     assertThat(e.status()).isEqualTo(422);
                     assertThat(e.reason()).isEqualTo("spec_not_frozen");
@@ -217,7 +217,7 @@ class BridgeHttpAdapterTest {
                 org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT).contentType(MediaType.APPLICATION_JSON)
                 .body("{\"code\":422,\"reason\":\"sanitization_failed\",\"violations\":[{\"field\":\"spec_dir\","
                         + "\"rule\":\"allowed_root\",\"message\":\"不在 allowlist 內\"}]}"));
-        assertThatThrownBy(() -> adapter.sddCompile("/etc")).isInstanceOfSatisfying(BridgeRejectedException.class,
+        assertThatThrownBy(() -> adapter.sddCompile("/etc", null, null)).isInstanceOfSatisfying(BridgeRejectedException.class,
                 e -> assertThat(e.violations()).singleElement().satisfies(v ->
                         assertThat(v).containsEntry("message", "不在 allowlist 內")));
     }
@@ -229,7 +229,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR).contentType(MediaType.APPLICATION_JSON)
                 .body("{\"code\":500,\"reason\":\"spawn_failed\"}"));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOfSatisfying(UpstreamException.Failure.class,
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOfSatisfying(UpstreamException.Failure.class,
                 e -> {
                     assertThat(e.reason()).isEqualTo("引擎橋接服務錯誤");
                     assertThat(e.details()).containsEntry("bridgeStatus", 500).containsEntry("bridgeReason",
@@ -241,28 +241,28 @@ class BridgeHttpAdapterTest {
     void aBridgeServerErrorWithAnUnparsableBodyStillReportsTheStatus() {
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.BAD_GATEWAY).body("<html>proxy error</html>"));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOfSatisfying(UpstreamException.Failure.class,
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOfSatisfying(UpstreamException.Failure.class,
                 e -> assertThat(e.details()).containsEntry("bridgeStatus", 502).doesNotContainKey("bridgeReason"));
     }
 
     @Test
     void aSuccessBodyThatIsNotJsonIsAnUpstreamFailureNotAnException500() {
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withSuccess("not json", MediaType.TEXT_PLAIN));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOf(UpstreamException.Failure.class);
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOf(UpstreamException.Failure.class);
     }
 
     @Test
     void connectionFailuresAreUnavailableAndReadTimeoutsAreTimedOut() {
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withException(new ConnectException("refused")));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOf(UpstreamException.Unavailable.class)
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOf(UpstreamException.Unavailable.class)
                 .hasMessageNotContaining("bridge.test");
         server.reset();
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(withException(new SocketTimeoutException("slow")));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOf(UpstreamException.TimedOut.class);
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOf(UpstreamException.TimedOut.class);
         server.reset();
         server.expect(requestTo(BASE + "/sdd/compile")).andRespond(
                 withException(new java.io.IOException("something else")));
-        assertThatThrownBy(() -> adapter.sddCompile("/spec")).isInstanceOf(UpstreamException.Unavailable.class);
+        assertThatThrownBy(() -> adapter.sddCompile("/spec", null, null)).isInstanceOf(UpstreamException.Unavailable.class);
     }
 
     // ── health ───────────────────────────────────────────────────────────────
@@ -388,7 +388,7 @@ class BridgeHttpAdapterTest {
                  "errors":["FSM-STATE-broken.yaml","FSM-STATE-bad name.yaml"]}
                 """, MediaType.APPLICATION_JSON));
 
-        SddFsmList list = adapter.sddFsmList();
+        SddFsmList list = adapter.sddFsmList(null);
 
         assertThat(list.root()).isEqualTo("AISDLC_SDD_v0.30");
         assertThat(list.projects()).containsExactly(
@@ -402,7 +402,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess(
                 "{\"root\":\"AISDLC_SDD_v0.30\",\"projects\":[],\"errors\":[]}", MediaType.APPLICATION_JSON));
 
-        SddFsmList list = adapter.sddFsmList();
+        SddFsmList list = adapter.sddFsmList(null);
 
         assertThat(list.projects()).isEmpty();
         assertThat(list.errors()).isEmpty();
@@ -413,7 +413,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm/e2e-alpha")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(FSM_BODY, MediaType.APPLICATION_JSON));
 
-        SddFsmState state = adapter.sddFsm("e2e-alpha");
+        SddFsmState state = adapter.sddFsm("e2e-alpha", null);
 
         assertThat(state.project()).isEqualTo("e2e-alpha");
         assertThat(state.currentState()).isEqualTo("IMPLEMENTATION");
@@ -443,7 +443,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm/long")).andRespond(withSuccess(
                 "{\"project\":\"long\",\"decision_trace\":[" + trace + "]}", MediaType.APPLICATION_JSON));
 
-        SddFsmState state = adapter.sddFsm("long");
+        SddFsmState state = adapter.sddFsm("long", null);
 
         assertThat(state.decisionTrace()).extracting(entry -> entry.get("reason"))
                 .containsExactly("r3", "r4", "r5", "r6", "r7");
@@ -454,7 +454,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm/bare")).andRespond(withSuccess(
                 "{\"source\":\"FSM-STATE-bare.yaml\",\"rtm_coverage\":{\"percent\":87.5}}", MediaType.APPLICATION_JSON));
 
-        SddFsmState state = adapter.sddFsm("bare");
+        SddFsmState state = adapter.sddFsm("bare", null);
 
         assertThat(state.project()).isEqualTo("bare");
         assertThat(state.frozenStages()).isEmpty();
@@ -470,7 +470,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm/nope")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON)
                 .body("{\"code\":404,\"reason\":\"fsm_not_found\",\"project\":\"nope\"}"));
-        assertThatThrownBy(() -> adapter.sddFsm("nope")).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
+        assertThatThrownBy(() -> adapter.sddFsm("nope", null)).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
             assertThat(e.status()).isEqualTo(404);
             assertThat(e.reason()).isEqualTo("fsm_not_found");
         });
@@ -478,7 +478,7 @@ class BridgeHttpAdapterTest {
         server.expect(requestTo(BASE + "/sdd/fsm/broken")).andRespond(withStatus(
                 org.springframework.http.HttpStatus.UNPROCESSABLE_CONTENT).contentType(MediaType.APPLICATION_JSON)
                 .body("{\"code\":422,\"reason\":\"fsm_state_unreadable\",\"detail\":\"while scanning a simple key\"}"));
-        assertThatThrownBy(() -> adapter.sddFsm("broken")).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
+        assertThatThrownBy(() -> adapter.sddFsm("broken", null)).isInstanceOfSatisfying(BridgeRejectedException.class, e -> {
             assertThat(e.status()).isEqualTo(422);
             assertThat(e.reason()).isEqualTo("fsm_state_unreadable");
             assertThat(e.detail()).isEqualTo("while scanning a simple key");
@@ -494,8 +494,8 @@ class BridgeHttpAdapterTest {
                     .body("{\"code\":503,\"reason\":\"sdd_unavailable\",\"detail\":\"找不到 AISDLC_SDD 目錄\"}"));
             Runnable call = switch (path) {
                 case "/sdd/version" -> adapter::sddVersion;
-                case "/sdd/fsm" -> adapter::sddFsmList;
-                default -> () -> adapter.sddFsm("alpha");
+                case "/sdd/fsm" -> () -> adapter.sddFsmList(null);
+                default -> () -> adapter.sddFsm("alpha", null);
             };
             assertThatThrownBy(call::run).as(path).isInstanceOfSatisfying(UpstreamException.Failure.class,
                     e -> assertThat(e.details()).containsEntry("bridgeStatus", 503)
@@ -511,14 +511,14 @@ class BridgeHttpAdapterTest {
         server.reset();
         server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess("{\"root\":\"x\"}",
                 MediaType.APPLICATION_JSON));
-        assertThatThrownBy(() -> adapter.sddFsmList()).as("沒有 projects 陣列").isInstanceOf(UpstreamException.Failure.class);
+        assertThatThrownBy(() -> adapter.sddFsmList(null)).as("沒有 projects 陣列").isInstanceOf(UpstreamException.Failure.class);
         server.reset();
         server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withSuccess(
                 "{\"root\":\"x\",\"projects\":[{\"source\":\"FSM-STATE-a.yaml\"}]}", MediaType.APPLICATION_JSON));
-        assertThatThrownBy(() -> adapter.sddFsmList()).as("清單項沒有專案名：不猜").isInstanceOf(UpstreamException.Failure.class);
+        assertThatThrownBy(() -> adapter.sddFsmList(null)).as("清單項沒有專案名：不猜").isInstanceOf(UpstreamException.Failure.class);
         server.reset();
         server.expect(requestTo(BASE + "/sdd/fsm/x")).andRespond(withSuccess("not json", MediaType.TEXT_PLAIN));
-        assertThatThrownBy(() -> adapter.sddFsm("x")).isInstanceOf(UpstreamException.Failure.class);
+        assertThatThrownBy(() -> adapter.sddFsm("x", null)).isInstanceOf(UpstreamException.Failure.class);
     }
 
     @Test
@@ -529,11 +529,11 @@ class BridgeHttpAdapterTest {
         server.reset();
         // MockRestServiceServer 的期望是「恰好一次」：若有重試，第二個請求會因「沒有後續期望」而炸出 AssertionError，而不是 TimedOut
         server.expect(requestTo(BASE + "/sdd/fsm")).andRespond(withException(new SocketTimeoutException("slow")));
-        assertThatThrownBy(() -> adapter.sddFsmList()).isInstanceOf(UpstreamException.TimedOut.class);
+        assertThatThrownBy(() -> adapter.sddFsmList(null)).isInstanceOf(UpstreamException.TimedOut.class);
         server.verify();
         server.reset();
         server.expect(requestTo(BASE + "/sdd/fsm/alpha")).andRespond(withException(new ConnectException("down")));
-        assertThatThrownBy(() -> adapter.sddFsm("alpha")).isInstanceOf(UpstreamException.Unavailable.class);
+        assertThatThrownBy(() -> adapter.sddFsm("alpha", null)).isInstanceOf(UpstreamException.Unavailable.class);
         server.verify();
     }
 
@@ -591,12 +591,12 @@ class BridgeHttpAdapterTest {
 
         adapter.decompose(new DecomposeRequest("g", "", "p", 24, null), Duration.ofSeconds(30));
         adapter.approveDraft("d", "Alice");
-        adapter.sddCompile("/spec");
+        adapter.sddCompile("/spec", null, null);
         adapter.health();
         adapter.getRun(UUID.fromString(runId));
         adapter.sddVersion();
-        adapter.sddFsmList();
-        adapter.sddFsm("alpha");
+        adapter.sddFsmList(null);
+        adapter.sddFsm("alpha", null);
 
         server.verify();
     }
@@ -646,20 +646,20 @@ class BridgeHttpAdapterTest {
     void anAdminCustomizedEngineUrlWinsOverTheEnvironmentDefaultAndEachPrefixUsesItsOwnSetting() {
         settings.customized.put("autoclaude.engineUrl", "http://custom-bridge:9000/");
         settings.customized.put("sdd.engineUrl", "http://sdd-bridge:9100");
-        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties(BASE));
+        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties(BASE, null));
         assertThat(endpoints.autoclaudeBase()).isEqualTo("http://custom-bridge:9000");
         assertThat(endpoints.sddBase()).isEqualTo("http://sdd-bridge:9100");
     }
 
     @Test
     void withoutACustomizedSettingTheEnvironmentValueIsUsedAndTheLocalDefaultIsTheLastResort() {
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties("http://engine-bridge:8081/")).autoclaudeBase())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties("http://engine-bridge:8081/", null)).autoclaudeBase())
                 .isEqualTo("http://engine-bridge:8081");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties("")).sddBase())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties("", null)).sddBase())
                 .isEqualTo("http://localhost:8081");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null)).healthPath())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null)).healthPath())
                 .as("設定缺席時的兜底：v1.4 起是深度探針").isEqualTo("/health/deep");
         settings.values.put("autoclaude.healthCheckPath", "custom/health");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null)).healthPath()).isEqualTo("/custom/health");
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null)).healthPath()).isEqualTo("/custom/health");
     }
 }

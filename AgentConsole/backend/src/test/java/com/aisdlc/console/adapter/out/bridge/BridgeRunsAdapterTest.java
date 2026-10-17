@@ -70,7 +70,7 @@ class BridgeRunsAdapterTest {
                 return Optional.empty();
             }
         };
-        return new BridgeHttpAdapter(RestClient.builder(), new BridgeEndpoints(settings, new BridgeProperties(url)),
+        return new BridgeHttpAdapter(RestClient.builder(), new BridgeEndpoints(settings, new BridgeProperties(url, null)),
                 new JdkRequestFactoryProvider());
     }
 

@@ -4,6 +4,8 @@ import com.aisdlc.console.application.port.out.SettingValues;
 import com.aisdlc.console.infrastructure.config.BridgeProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * Engine Bridge 的基底位址解析（契約 §3.1）：管理員在設定頁改過的 {@code autoclaude.engineUrl}／{@code sdd.engineUrl}
  * 優先，否則取 {@code ENGINE_BRIDGE_URL}（{@link BridgeProperties}，預設 {@value BridgeProperties#LOCAL_DEFAULT}）。
@@ -41,6 +43,14 @@ public class BridgeEndpoints {
     public String healthPath() {
         String path = settings.find("autoclaude", "healthCheckPath").orElse(DEFAULT_HEALTH_PATH);
         return path.startsWith("/") ? path : "/" + path;
+    }
+
+    /**
+     * SDD 寫入權杖（{@code console.bridge.sdd-write-token}；ADR-XPLAT-016 §9）：只給 Bridge 出站介面卡附 {@code X-Bridge-Token}
+     * 標頭用，未設為空。🔴 值絕不進日誌、錯誤封包或 {@code details}。
+     */
+    public Optional<String> sddWriteToken() {
+        return Optional.ofNullable(properties.sddWriteToken());
     }
 
     private String base(String category) {

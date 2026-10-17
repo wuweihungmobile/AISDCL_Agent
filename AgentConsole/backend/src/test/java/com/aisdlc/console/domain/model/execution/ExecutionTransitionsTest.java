@@ -159,7 +159,7 @@ class ExecutionTransitionsTest {
         assertThat(project.status()).isEqualTo(ProjectStatus.EXECUTING);
 
         Project completed = Project.restore(UUID.randomUUID(), "p", "/x", "ok", null, ProjectStatus.COMPLETED, 3, true,
-                null, null, false, NOW, NOW, "t", null, null);
+                null, null, false, NOW, NOW, "t", null, null, null, null, null);
         assertThatThrownBy(() -> completed.transitionTo(ProjectStatus.EXECUTING, NOW))
                 .isInstanceOf(IllegalStateTransitionException.class);
         completed.startExecuting(NOW);

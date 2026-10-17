@@ -13,7 +13,18 @@ import java.util.UUID;
 /** 專案儲存埠。除特別註明（{@link #findIncludingDeletedForUpdate}、{@link #search} 的 deleted 篩選）外，查詢一律排除已軟刪除（is_deleted=true）的列。 */
 public interface ProjectRepository {
 
+    /**
+     * 儲存專案（立即寫入資料庫）。寫入撞到 SDD 綁定的部分唯一索引 {@code ux_projects_sdd_binding}（V12）時一律轉成
+     * 409 {@code sdd_binding_conflict}（{@code details.cause=already_bound_elsewhere}）：Backend 一律「先檢查、後寫入」，
+     * 索引是最後的兜底（契約 §0.5 V12 寫入規則④）。
+     */
     Project save(Project project);
+
+    /**
+     * 同 {@code executionPath}、以同一個 {@code sddProject} 綁定、<b>未軟刪除</b>且不是 {@code excludedProjectId} 的專案 id
+     * （綁定唯一性的「先檢查」；契約 §1.10.5）。新建專案尚未入庫時，傳它自己的新 id 即可。
+     */
+    Optional<UUID> findSddBindingHolder(String executionPath, String sddProject, UUID excludedProjectId);
 
     Optional<Project> findById(UUID id);
 
