@@ -8,6 +8,7 @@ mock claude 回放驗收關鍵字；FSM 這一側由 tests/fake_sdd.py 的假 CL
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from pathlib import Path
 from typing import Any
@@ -181,6 +182,27 @@ def wait_fsm(root: Path, wanted: set[str] | str, *, key: str = "alpha",
         time.sleep(0.1)
     raise AssertionError(f"FSM 在 {timeout:g}s 內沒有到達 {sorted(targets)}；現況："
                          f"{state.get('current_state')}")
+
+
+def wait_sync(run_dir: Path, *, timeout: float = 20.0) -> dict[str, Any]:
+    """輪詢 `<run_dir>/run.json` 到 `sdd.sync` 落盤，回傳整份紀錄。
+
+    終態同步在終態事件**之後**，而且 Bridge 的順序是「CLI 寫完 FSM → 記 sync → persist」
+    （runner `_finalize` → `_sdd_sync_terminal` → `_record_sdd_sync`）：run 已終態、FSM 已回到
+    IMPLEMENTATION 的那一刻，run.json 的 sync 仍可能是 None（雲端 runner 慢時真的讀到過），
+    不能單次讀。替換中的 run.json 偶爾讀到半檔也只當「還沒好」再讀一次。"""
+    deadline = time.monotonic() + timeout
+    record: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            record = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = {}
+        if (record.get("sdd") or {}).get("sync") is not None:
+            return record
+        time.sleep(0.05)
+    raise AssertionError(f"{timeout:g}s 內 run.json 的 sdd.sync 沒有落盤；現況："
+                         f"{record.get('sdd')}")
 
 
 def audit_entries(live) -> list[dict[str, Any]]:

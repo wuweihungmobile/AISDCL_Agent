@@ -41,6 +41,7 @@ from tests.sdd_run_support import (
     trace_calls,
     verbs,
     wait_fsm,
+    wait_sync,
     workspace_has,
 )
 
@@ -55,7 +56,8 @@ def _wait_trace(trace: Path, n: int = 1, timeout: float = 40.0) -> None:
 
 
 def _record(live, rid: str) -> dict[str, Any]:
-    return json.loads((live.settings.engine_workspace / rid / "run.json").read_text("utf-8"))
+    """終態後的 run.json——等到 `sdd.sync` 落盤才回（它在 FSM 回寫之後才 persist；見 wait_sync）。"""
+    return wait_sync(live.settings.engine_workspace / rid)
 
 
 def _start_long(live, run_body, proj: Path, tmp_path: Path, **kw: Any) -> tuple[str, Path]:

@@ -683,6 +683,10 @@ test.describe("執行頁：追溯覆蓋（諮詢）面板與 execute 的 warning
     await page.waitForTimeout(400);
     expect(running.calls.filter((c) => c.path.endsWith("/rtm"))).toHaveLength(0);
     expectClean(running.errors, running.unhandled);
+    // 先把頁面導離、讓瀏覽器自己關掉兩條 SSE，再關第一個假引擎：close() 會 destroy 還開著的串流回應，伺服端先斷線時
+    // Chrome 會記一筆「net::ERR_INCOMPLETE_CHUNKED_ENCODING」，而且是非同步到達——雲端 runner 慢時會落進下一段
+    // openExecute 的主控台收集器（agentconsole-ci 對 1132a039 即此）。導航是同步屏障，舊頁面的訊息不會跨到下一段。
+    await page.goto("about:blank");
     await activeEngine?.close();
 
     const unbound = await openExecute(page, { seed: completedRun, sdd: false, rtm: () => ({ data: RTM_OK }) });

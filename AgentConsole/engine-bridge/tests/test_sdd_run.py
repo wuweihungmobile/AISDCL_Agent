@@ -42,6 +42,7 @@ from tests.sdd_run_support import (
     seed_frozen,
     verbs,
     wait_fsm,
+    wait_sync,
     workspace_has,
 )
 
@@ -104,7 +105,7 @@ def test_the_first_batch_negotiates_delegates_runs_and_hands_control_back(
                     ("AUTOCLAUDE_DELEGATED", "IMPLEMENTATION")]
     assert final["autoclaude_delegated_tracking"]["playbook_ref"] == ref
 
-    record = json.loads((Path(resp.json()["workspace"]) / "run.json").read_text("utf-8"))
+    record = wait_sync(Path(resp.json()["workspace"]))      # sync 在 FSM 回寫之後才 persist
     assert record["sdd"]["fsm_project"] == "alpha" and record["sdd"]["approver"] == "operator"
     assert record["sdd"]["sync"]["exit"] == "done" and record["sdd"]["sync"]["ok"] is True
     assert "MOCK_CLAUDE_TRACE" in record["env_keys"]
@@ -521,8 +522,7 @@ def test_a_spawn_failure_exits_the_delegation_with_done_never_failed(
     assert state["current_state"] == "IMPLEMENTATION" and not state["escalation_history"]
     run = sdd_live.get_run(body["run_id"])
     assert run["status"] == "FAILED" and "無法啟動引擎" in run["reason"]
-    record = json.loads((sdd_live.settings.engine_workspace / body["run_id"] / "run.json")
-                        .read_text(encoding="utf-8"))
+    record = wait_sync(sdd_live.settings.engine_workspace / body["run_id"])
     assert record["sdd"]["sync"]["exit"] == "done" and record["sdd"]["sync"]["ok"] is True
     monkeypatch.undo()
     body["run_id"] = "00000000-0000-4000-8000-0000000000aa"
@@ -568,8 +568,7 @@ def test_a_failing_compensation_does_not_change_the_callers_error(
         "/autoclaude/runs", json=body, headers={"X-Bridge-Token": TOKEN})
     assert (resp.status_code, resp.json()["reason"]) == (500, "spawn_failed")
     assert fsm_state(sdd_proj)["current_state"] == "AUTOCLAUDE_DELEGATED", "補償失敗：FSM 留在原態"
-    record = json.loads((sdd_live.settings.engine_workspace / body["run_id"] / "run.json")
-                        .read_text(encoding="utf-8"))
+    record = wait_sync(sdd_live.settings.engine_workspace / body["run_id"])
     assert record["sdd"]["sync"]["ok"] is False
     alerts = events_of(sdd_live, body["run_id"], "alert")
     assert "SDD_FSM_SYNC_FAILED" in [a["code"] for a in alerts]
