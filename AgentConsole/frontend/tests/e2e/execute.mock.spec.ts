@@ -232,7 +232,26 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
   });
 
   test("暫停（步驟邊界生效）→ 恢復 → 取消（確認對話框）", async ({ page }) => {
-    const { engine, calls, errors, unhandled } = await open(page);
+    // 暫停原因：假引擎只把它放在 SSE 的 status-change 事件裡，REST 詳情沒有。事件寫進快取後，400 毫秒的去抖重抓會用 REST 詳情把它蓋掉，
+    // 所以「事件後立刻看到文字」是競態——雲端 runner 一慢就紅（對照實驗：兩個斷言之間等 1.5 秒，本機照樣紅、訊息與雲端相同）。
+    // 真後端的詳情帶得出暫停原因（真後端版 p4 spec 斷言同一句），這個情境讓 REST 詳情也回「最近一次進入 PAUSED 的 status-change 的 reason」：
+    // 不論先看到 SSE 還是重抓後的 REST，文字都在；斷言只剩「畫面顯示暫停原因」這個產品行為，不再賭時序。
+    let fake: Engine | null = null;
+    const restPauseReason: MockHandler = async (call) => {
+      if (!fake || call.method !== "GET" || !/^\/api\/v1\/executions\/[^/]+$/.test(call.path)) return undefined;
+      const reply = await fake.handler(call);
+      const detail = (reply as { data?: { id?: string; status?: string; reason?: string } } | undefined)?.data;
+      if (!detail || detail.status !== "PAUSED" || detail.reason) return reply;
+      const run = fake.runs.find((r) => r.id === detail.id);
+      const paused = [...(run?.logs ?? [])].reverse().find((ev) => ev.name === "status-change" && ev.data.runStatus === "PAUSED");
+      return { data: { ...detail, reason: paused?.data.reason } };
+    };
+    const { engine, calls, errors, unhandled } = await open(page, {
+      before: restPauseReason,
+      seed: (e) => {
+        fake = e;
+      },
+    });
     await page.getByTestId("control-start").click();
     await expect(page.getByTestId("run-number")).toHaveText("Run #1");
     engine.startNext();
@@ -251,9 +270,9 @@ test.describe("專案執行頁（route mock＋假引擎 SSE）", () => {
 
     engine.finishCurrent(); // 步驟邊界：真的停下
     await expect(page.getByTestId("run-status")).toContainText("已暫停");
-    // 暫停原因只在 SSE 事件裡（假引擎的 REST 詳情沒有它），事件後的去抖重抓會把它換掉：先驗它，再驗列表的晶片
     await expect(page.getByTestId("run-reason")).toContainText("在步驟邊界暫停");
     await expect(page.getByTestId("bridge-chip")).toHaveCount(0); // 過渡結束（列表重抓後），晶片消失
+    await expect(page.getByTestId("run-reason")).toContainText("在步驟邊界暫停"); // 重抓後由 REST 詳情接手，暫停原因仍在
     await expect(page.getByTestId("control-resume")).toBeEnabled();
     await expect(page.getByTestId("control-restore")).toBeEnabled();
     await expect(page.getByTestId("run-select")).toContainText("已暫停");
