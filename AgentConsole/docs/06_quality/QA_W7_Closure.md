@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 版本 | v1.0（W7-QA 產出；供主控收斂使用） |
+| 版本 | v1.1（v1.0 為 W7-QA 第一輪產出；W8-QA 第二輪複驗於 2026-10-17 追加 §13，並更新 §10.1、§12.2 的缺陷狀態；第一輪的其餘章節維持當時的描述，不回頭改寫） |
 | 日期 | 2026-10-17 |
 | 驗證者 | 獨立 QA（零信任：BE／FE／INFRA 三棒的交卷與三份 RTM 回填 `rtm_backfill_W7BE.md`／`W7FE.md`／`W7INFRA.md` 的「已驗證」一律不採信，每一列親跑才設 `✅ 已驗證`） |
 | 被驗 commit | HEAD `06891089`（W7 六個 commit：`230d70af` 第一批、`10033d5d` INFRA、`a4e028ed` FE 第一＋二批、`3c95862b` 契約 v1.4 補丁、`a7993946` FE 第三批、`06891089` BE 第二批） |
@@ -10,6 +10,8 @@
 | 相關文件 | [RTM.md](RTM.md)（E2E 驗證欄的節號都指向本檔）、`frontend/tests/e2e/README.md`〈W7 複驗〉 |
 
 ## 1. 摘要
+
+> **W8 複驗更新（2026-10-17）**：第一輪登記的 DEF-AC-013（P2，資安）與 DEF-AC-014（P3）已由主控依 D-21 修於 `85ed0915`（前端）與 `520c2850`（後端），第二輪複驗全數通過（§13）；下文本節其餘段落、§8.4、§11 描述的是第一輪當時的狀態，保留不改；DEF-AC-012 維持 P4 保留（D-21）。
 
 **結論**：**W7 收尾波通過 QA 複驗，可進主控收斂；但有一個資安缺陷需要你決定（DEF-AC-013，P2）。** 我在本機真後端（Windows）、真 Bridge、真瀏覽器與 Docker 全棧（Linux 容器）上親跑：本機 Playwright 整套 213 個全數通過（0 失敗、0 略過）；Docker 全棧 32 個測試都有通過的紀錄（第一次整套 28 個通過，唯一的失敗是我自己新寫那支測試的限流額度設計，修正後該檔重跑兩次各 5 個全數通過）；RTM 五列 `🟡` 全部升 `✅`、新增十列全 `✅`，合併後 **374 列全為 `✅ 已驗證`**；完整性審查 27 筆逐筆處置完畢；設計稿九畫面逐項對照完成（145 項 DOM 斷言加人眼逐張對照）；V-05 的 63 列 INF 重驗 56 列、部分 6 列、1 列未逐列重驗。**新登三筆缺陷**：DEF-AC-012（P4，Bridge 與 SSOT 對 SDD LATEST 的判定在未入庫目錄時分歧）、DEF-AC-013（P2，資安，編輯器預覽會執行內嵌 `<iframe srcdoc>` 的腳本）、DEF-AC-014（P3，SSE 客戶端斷線被記成 ERROR 日誌）；三筆都沒有讓任何 RTM 列掉成 `❌`。BE／FE／INFRA 三棒的交卷與三份回填檔的「建議狀態」我一律沒有採信，每個升級都附本輪親跑的輸出（§4～§8）。
 
@@ -743,10 +745,12 @@ rc=1 elapsed_sec=911 start=2026-10-17T02:02:54.9182791+08:00 end=2026-10-17T02:1
 | 編號 | 級別 | 摘要 | 影響的 RTM 列 | 重現與證據 |
 |------|------|------|---------------|------------|
 | DEF-AC-012 | P4 | Bridge 與 SSOT 對「SDD LATEST」的判定在「工作樹有合法名稱但未入庫的版本目錄」時分歧：Bridge 的 `discover_sdd_root` 掃磁碟、取數字最大者（回 `AISDLC_SDD_v9.99`），SSOT `AISDLC_SDD/scripts/sdd_version.py` 以 `git ls-files` 判定、只認已 tracked 的（回 `AISDLC_SDD_v0.30` 並在 stderr 警告）。本機開發模式（Bridge 預設探索 `REPO_ROOT/AISDLC_SDD`）下，Copy-on-Evolve 剛複製出、尚未 `git add` 的新版目錄會讓 Console 的 SDD 卡顯示新版號，而 ci-gate 仍測舊版；Docker 全棧唯讀掛載的是 git checkout，通常沒有這種目錄，所以不分歧 | `BR-13`（SDD LATEST 版）、`API-ENG-01`（`version.latest`） | `logs\i04_probe.log`（§6 的 I-04 列有逐字輸出）。指令：在拋棄式 git repo 內放 v0.29、v0.30（commit）與未 `git add` 的 v9.99，對同一個 `AISDLC_SDD/` 目錄分別執行 `python AISDLC_SDD/scripts/sdd_version.py --sdd-root <dir>`（印 `AISDLC_SDD_v0.30`）與 `python -c "from app.settings import discover_sdd_root; …"`（在 `engine-bridge/` 內，印 `AISDLC_SDD_v9.99`）。`v0.31.bak`、`v0.30 - Copy` 兩者都正確排除；`git add` 之後與非 git 目錄兩者一致。**處置建議**（QA 不改程式）：二擇一——Bridge 對照 SSOT 的 tracked 過濾；或在 `settings.py` 註明「磁碟語意、刻意與 SSOT 不同」的理由，並把 Architecture §12.2 V-11 的結論改成「已驗：未入庫的合法版本目錄會分歧（DEF-AC-012，P4）」 |
-| DEF-AC-013 | **P2（資安）** | **Markdown 編輯器預覽會執行內嵌 `<iframe srcdoc>` 裡的腳本（儲存式 XSS 向量）**：編輯器預覽走 `@uiw/react-md-editor` 預設鏈的 rehype-raw，原始 HTML 被建成真元素；`<iframe srcdoc="<script>…">` 的內層腳本與父頁同源，可存取 `parent.sessionStorage`（鍵 `aisdlc.console.session`，值含 access／refresh token）。同一組實驗中 `<img onerror>` 的字串事件處理器被 React 拒絕（pageerror＝React error #231）、`<script>` 元素經 DOM 插入後不執行、`javascript:` 連結的 `href` 被 React 換成只會丟錯的字串（三種載體都不執行，但靠的是 React 的執行期行為，不是明確的消毒）——只有 iframe `srcdoc` 通過。唯讀的專案詳情頁（`MarkdownView`，react-markdown 不渲染原始 HTML）對照組不受影響。**儲存式**：operator 把 payload 寫進專案說明（匯入的 BRD／PRD `.md` 同理），管理者開「編輯專案」頁時，預覽渲染儲存的內容而執行——權限提升（operator→admin）的向量 | `UI-MD-01`（即時預覽）。RTM／PRD §9.2 沒有任何一列要求「預覽不執行內嵌腳本」，所以不改狀態；是否補列與是否升級，請主控決定 | `p9-w7-html.spec.ts` ①～④（②③以 `test.fail(DEFECTS_OPEN)` 釘住，設 `E2E_DEFECTS_FIXED=1` 可看真實失敗訊息）。逐字證據行在 §8.4（`logs\pw_html3.log`）：②預覽端 `window.__w7xss＝"iframe-srcdoc"`、srcdoc 內腳本讀到 sessionStorage 的鍵名 `aisdlc.console.session`；③管理者開已儲存內容的編輯頁同樣執行，鍵名 `aisdlc.console.lastProject,aisdlc.console.session`（只讀鍵名，不讀值、不外送）；④唯讀詳情頁 `window.__w7xss＝null`、頁面內 iframe 數 0。重現：在「新建專案」的說明描述欄貼 `<iframe srcdoc="<script>parent.__w7xss='x'</script>"></iframe>`，預覽端 `window.__w7xss` 變成 `x`（`E2E_DEFECTS_FIXED=1` 可看 spec 的真實失敗訊息）。**根因是待驗假設**（鐵律 10）：`components/markdown/MarkdownEditorImpl.tsx` 第 29～32 行的 `PREVIEW_OPTIONS` 只有 `remarkGfm`、`rehypeHighlight`、`rehypeTaskLabels`，沒有 `skipHtml`、也沒有 `rehype-sanitize`。**候選修法**（QA 未驗證，由 FE 評估）：`PREVIEW_OPTIONS` 加 `skipHtml: true`，或加 `rehype-sanitize`（把 iframe／script／事件屬性剔除）；修好後 ②③會「意外通過」，請移除 spec 內的 `test.fail` 一行 |
-| DEF-AC-014 | P3 | **SSE 客戶端斷線被記成 ERROR「未預期的例外」，緊接著還有一筆寫不出回應的 WARN**：`StreamController` 的兩條 SSE 端點（`/api/v1/stream/executions/{runId}/logs` 與 `/metrics`）在客戶端斷線（關掉頁面、`EventSource.close()`、curl 被結束）後，Tomcat 以 `AsyncRequestNotUsableException: Servlet container error notification for disconnected client`（cause＝`IOException: Broken pipe`）通知，落到 `GlobalExceptionHandler#handleOther(Exception)`，記一筆 `ERROR 未預期的例外（traceId=null）`；`handleOther` 隨後要把 `ApiError` 寫進已被 `produces=text/event-stream` 定了 Content-Type 的回應，找不到轉換器，再記一筆 `WARN Failure in @ExceptionHandler …（HttpMessageNotWritableException: No converter for [class …ApiError] with preset Content-Type 'text/event-stream;charset=UTF-8'）`。對使用者沒有影響（客戶端已經離開）、串流功能與重連語意不受影響；影響是 ERROR 級日誌被正常行為灌水（以日誌級別計數或告警會被污染，真正的錯誤更難看出來），而且 `traceId` 是 null（非同步分派丟了 MDC） | `API-SSE-01`、`API-SSE-02`（串流端點；功能成立，狀態不改，E2E 欄已加註） | 重現（`logs\sse_repro.log`；Docker 全棧，經 nginx）：①以 admin 登入取 access token；②挑一個 PAUSED 的批次（PAUSED 不結束串流）；③`curl.exe -N -H @<標頭檔> http://localhost/api/v1/stream/executions/<runId>/logs`，4 秒後已收到 87052 bytes，結束 curl；④`docker logs --since <時刻> aisdlc-backend`——30 秒內出現 1 筆 `"level":"ERROR"`（logger `com.aisdlc.console.adapter.in.web.GlobalExceptionHandler`、thread `http-nio-8080-exec-1`、stack 首行 `AsyncRequestNotUsableException`）與 1 筆 `Failure in @ExceptionHandler` WARN；`/metrics` 同樣（4 秒後 684 bytes，結束後 1 ERROR＋1 WARN）。自然發生的次數：本機整套 Playwright 的 backend 日誌（`logs\backend_r010652.log`）13 組，常是同一毫秒兩組（logs 與 metrics 兩條串流一起斷）；Docker 第一次整套 1 組（18:31:11Z，`/executions/{id}/cancel` 的同一秒）。**根因是待驗假設**（鐵律 10）：`GlobalExceptionHandler.handleOther` 是 `Exception.class` 的總接，沒有針對 `AsyncRequestNotUsableException`（或回應已 committed、Content-Type 是 event-stream）略過或降級。**候選修法**（QA 未驗證，由 BE 評估）：加一個 `@ExceptionHandler(AsyncRequestNotUsableException.class)`（不回 body、以 DEBUG 記一行），或在 `handleOther` 內先判斷回應是否已 committed／是否為 event-stream，是的話不寫 body 並降級日誌 |
+| DEF-AC-013 | **P2（資安）**；**已修（W8，`85ed0915`），W8 複驗通過（§13）** | **【已修，W8 複驗通過】** **Markdown 編輯器預覽會執行內嵌 `<iframe srcdoc>` 裡的腳本（儲存式 XSS 向量）**：編輯器預覽走 `@uiw/react-md-editor` 預設鏈的 rehype-raw，原始 HTML 被建成真元素；`<iframe srcdoc="<script>…">` 的內層腳本與父頁同源，可存取 `parent.sessionStorage`（鍵 `aisdlc.console.session`，值含 access／refresh token）。同一組實驗中 `<img onerror>` 的字串事件處理器被 React 拒絕（pageerror＝React error #231）、`<script>` 元素經 DOM 插入後不執行、`javascript:` 連結的 `href` 被 React 換成只會丟錯的字串（三種載體都不執行，但靠的是 React 的執行期行為，不是明確的消毒）——只有 iframe `srcdoc` 通過。唯讀的專案詳情頁（`MarkdownView`，react-markdown 不渲染原始 HTML）對照組不受影響。**儲存式**：operator 把 payload 寫進專案說明（匯入的 BRD／PRD `.md` 同理），管理者開「編輯專案」頁時，預覽渲染儲存的內容而執行——權限提升（operator→admin）的向量 | `UI-MD-01`（即時預覽）。RTM／PRD §9.2 沒有任何一列要求「預覽不執行內嵌腳本」，所以不改狀態；是否補列與是否升級，請主控決定 | `p9-w7-html.spec.ts` ①～④（②③以 `test.fail(DEFECTS_OPEN)` 釘住，設 `E2E_DEFECTS_FIXED=1` 可看真實失敗訊息）。逐字證據行在 §8.4（`logs\pw_html3.log`）：②預覽端 `window.__w7xss＝"iframe-srcdoc"`、srcdoc 內腳本讀到 sessionStorage 的鍵名 `aisdlc.console.session`；③管理者開已儲存內容的編輯頁同樣執行，鍵名 `aisdlc.console.lastProject,aisdlc.console.session`（只讀鍵名，不讀值、不外送）；④唯讀詳情頁 `window.__w7xss＝null`、頁面內 iframe 數 0。重現：在「新建專案」的說明描述欄貼 `<iframe srcdoc="<script>parent.__w7xss='x'</script>"></iframe>`，預覽端 `window.__w7xss` 變成 `x`（`E2E_DEFECTS_FIXED=1` 可看 spec 的真實失敗訊息）。**根因是待驗假設**（鐵律 10）：`components/markdown/MarkdownEditorImpl.tsx` 第 29～32 行的 `PREVIEW_OPTIONS` 只有 `remarkGfm`、`rehypeHighlight`、`rehypeTaskLabels`，沒有 `skipHtml`、也沒有 `rehype-sanitize`。**候選修法**（QA 未驗證，由 FE 評估）：`PREVIEW_OPTIONS` 加 `skipHtml: true`，或加 `rehype-sanitize`（把 iframe／script／事件屬性剔除）；修好後 ②③會「意外通過」，請移除 spec 內的 `test.fail` 一行 **W8 複驗證據座標**：§13.4（`p9-w7-html.spec.ts` 八個情境全數通過、對修復前建置同一支 spec 為 2 個通過 6 個失敗）、§13.5（Markdown 相關七個檔回歸）、§13.7（本機整套 225 個全數通過）。 |
+| DEF-AC-014 | P3；**已修（W8，`520c2850`），W8 複驗通過（§13）** | **【已修，W8 複驗通過】** **SSE 客戶端斷線被記成 ERROR「未預期的例外」，緊接著還有一筆寫不出回應的 WARN**：`StreamController` 的兩條 SSE 端點（`/api/v1/stream/executions/{runId}/logs` 與 `/metrics`）在客戶端斷線（關掉頁面、`EventSource.close()`、curl 被結束）後，Tomcat 以 `AsyncRequestNotUsableException: Servlet container error notification for disconnected client`（cause＝`IOException: Broken pipe`）通知，落到 `GlobalExceptionHandler#handleOther(Exception)`，記一筆 `ERROR 未預期的例外（traceId=null）`；`handleOther` 隨後要把 `ApiError` 寫進已被 `produces=text/event-stream` 定了 Content-Type 的回應，找不到轉換器，再記一筆 `WARN Failure in @ExceptionHandler …（HttpMessageNotWritableException: No converter for [class …ApiError] with preset Content-Type 'text/event-stream;charset=UTF-8'）`。對使用者沒有影響（客戶端已經離開）、串流功能與重連語意不受影響；影響是 ERROR 級日誌被正常行為灌水（以日誌級別計數或告警會被污染，真正的錯誤更難看出來），而且 `traceId` 是 null（非同步分派丟了 MDC） | `API-SSE-01`、`API-SSE-02`（串流端點；功能成立，狀態不改，E2E 欄已加註） | 重現（`logs\sse_repro.log`；Docker 全棧，經 nginx）：①以 admin 登入取 access token；②挑一個 PAUSED 的批次（PAUSED 不結束串流）；③`curl.exe -N -H @<標頭檔> http://localhost/api/v1/stream/executions/<runId>/logs`，4 秒後已收到 87052 bytes，結束 curl；④`docker logs --since <時刻> aisdlc-backend`——30 秒內出現 1 筆 `"level":"ERROR"`（logger `com.aisdlc.console.adapter.in.web.GlobalExceptionHandler`、thread `http-nio-8080-exec-1`、stack 首行 `AsyncRequestNotUsableException`）與 1 筆 `Failure in @ExceptionHandler` WARN；`/metrics` 同樣（4 秒後 684 bytes，結束後 1 ERROR＋1 WARN）。自然發生的次數：本機整套 Playwright 的 backend 日誌（`logs\backend_r010652.log`）13 組，常是同一毫秒兩組（logs 與 metrics 兩條串流一起斷）；Docker 第一次整套 1 組（18:31:11Z，`/executions/{id}/cancel` 的同一秒）。**根因是待驗假設**（鐵律 10）：`GlobalExceptionHandler.handleOther` 是 `Exception.class` 的總接，沒有針對 `AsyncRequestNotUsableException`（或回應已 committed、Content-Type 是 event-stream）略過或降級。**候選修法**（QA 未驗證，由 BE 評估）：加一個 `@ExceptionHandler(AsyncRequestNotUsableException.class)`（不回 body、以 DEBUG 記一行），或在 `handleOther` 內先判斷回應是否已 committed／是否為 event-stream，是的話不寫 body 並降級日誌 **W8 複驗證據座標**：§13.6（本機受控重現與整套日誌統計：ERROR 0、Failure 0；Docker 全棧經 nginx 三輪 ERROR 0）、§13.8（Docker 32 個情境全數通過）。 |
 
 > 本輪新登三筆：DEF-AC-012（P4，文件與取捨層級）、DEF-AC-013（P2，資安，**需要主控決定是否進下一波**）與 DEF-AC-014（P3，日誌衛生）。W7 沒有發現會讓任何 RTM 列掉回 `❌ 缺陷` 的**功能**缺陷：契約 v1.3／v1.4 的新增面（E2E-14～E2E-16）在真後端、真 Bridge、真瀏覽器與 Docker 全棧下都與契約字面一致，唯一的契約字面與實作不同處已由 BE 在回填檔登記（匿名請求的審計主體實作為 `NULL` 而契約寫 `-`；第三個呼叫失敗時 `projects` 保留前兩個呼叫的值，契約 yaml 與 §1.7.1 互相矛盾，實作採 §1.7.1，由 `EnginesApiIT` 釘住）。
+>
+> W8 複驗（§13）：DEF-AC-013、DEF-AC-014 已修並複驗通過；DEF-AC-012 維持 P4 保留（D-21）；本輪沒有新增缺陷。
 
 ### 10.2 觀察（P4，不立缺陷；W5 的 O-22～O-27 之後續號）
 
@@ -818,8 +822,8 @@ grep -cE '^\| (US|API|BR|NFR|INF|UI)-.*\| (🟡|❌|⬜)' AgentConsole/docs/06_q
 
 ### 12.2 需要你決定或動手的事
 
-1. **DEF-AC-013（P2，資安）要不要進下一波**：編輯器預覽會執行內嵌 `<iframe srcdoc>` 裡的腳本，而且是儲存式（operator 存、管理者開編輯頁就中，§10.1）。候選修法在 `components/markdown/MarkdownEditorImpl.tsx` 第 29～32 行的 `PREVIEW_OPTIONS` 加 `skipHtml: true` 或 `rehype-sanitize`（QA 沒驗證）。已用 `p9-w7-html.spec.ts` 的 `test.fail` 釘住；**修好後那兩個情境會「意外通過」而變紅，要同一個 commit 移除 spec 內的 `test.fail` 一行**。沒有 RTM 列要求「預覽不執行內嵌腳本」，所以我沒動狀態、只在 `UI-MD-01` 加註；要不要補列由你定。
-2. **DEF-AC-014（P3）**：SSE 客戶端斷線被 `GlobalExceptionHandler.handleOther` 記成 ERROR「未預期的例外」，並多一筆寫不出回應的 WARN（§10.1，重現指令與候選修法都在那裡）。功能不受影響，是日誌衛生；`API-SSE-01`、`API-SSE-02` 的 E2E 欄已加註、狀態不改。
+1. **【已結案（W8）】DEF-AC-013（P2，資安）**：主控裁決 D-21 進 W8，已修於 `85ed0915`，W8 複驗全數通過（§13.4，spec 的 `test.fail` 已移除）。以下是第一輪當時的決定項原文，保留作歷史——**要不要進下一波**：編輯器預覽會執行內嵌 `<iframe srcdoc>` 裡的腳本，而且是儲存式（operator 存、管理者開編輯頁就中，§10.1）。候選修法在 `components/markdown/MarkdownEditorImpl.tsx` 第 29～32 行的 `PREVIEW_OPTIONS` 加 `skipHtml: true` 或 `rehype-sanitize`（QA 沒驗證）。已用 `p9-w7-html.spec.ts` 的 `test.fail` 釘住；**修好後那兩個情境會「意外通過」而變紅，要同一個 commit 移除 spec 內的 `test.fail` 一行**。沒有 RTM 列要求「預覽不執行內嵌腳本」，所以我沒動狀態、只在 `UI-MD-01` 加註；要不要補列由你定。
+2. **【已結案（W8）】DEF-AC-014（P3）**：已修於 `520c2850`，W8 複驗全數通過（§13.6）。以下是第一輪當時的決定項原文，保留作歷史：SSE 客戶端斷線被 `GlobalExceptionHandler.handleOther` 記成 ERROR「未預期的例外」，並多一筆寫不出回應的 WARN（§10.1，重現指令與候選修法都在那裡）。功能不受影響，是日誌衛生；`API-SSE-01`、`API-SSE-02` 的 E2E 欄已加註、狀態不改。
 3. **DEF-AC-012（P4）**：Bridge 與 SSOT 對 SDD LATEST 的判定在「未入庫的合法版本目錄」時分歧（§10.1）。二擇一：Bridge 對照 SSOT 的 tracked 過濾，或在 `engine-bridge/app/settings.py` 註明「磁碟語意、刻意不同」並把 Architecture §12.2 V-11 的結論改成實驗結果。
 4. **文件訂正（不在 QA 持有面，請主控或 SA 落字）**：
    - `ADR-001` D1 第 54 行：把「虛擬執行緒預設值未驗」改成實測結論（Tomcat 請求執行緒是平台執行緒，§6 L-03；觀察 O-32）。
@@ -858,3 +862,267 @@ grep -cE '^\| (US|API|BR|NFR|INF|UI)-.*\| (🟡|❌|⬜)' AgentConsole/docs/06_q
 | 建置產物 | `AgentConsole/backend/build/` 與 `AgentConsole/frontend/.next/` 都被 `.gitignore` 忽略（`git status` 沒列）。**前端 `.next` 是用 `NEXT_PUBLIC_API_URL=http://localhost:18080` 建的**（e2e 用），要回到一般本機開發請重建 |
 | 工作樹 | `docker/nginx/conf.d/https.conf` 不存在、`default.conf` 位元組與 `HEAD` 相同（§4.5）；已追蹤的 `__screenshots__` 依 `HEAD` 位元組還原後 `git diff` 為 0 張（`restore_screens.py`：`被改寫的已追蹤截圖：0 張`）；16 張新截圖與 `HEAD` 之外的差異只有新檔 |
 | 沒動的東西 | `autoclaude_pg` 與 5432、`AutoClaude/`、`AISDLC_SDD/`、`.claude/`、`tools/`、`.github/`、後端與前端與 Bridge 的程式碼；沒有 commit、沒有 push、沒有派子 agent |
+
+## 13. 第二輪複驗（W8，DEF-AC-013／014）
+
+> 本節是 W8-QA（第二輪、獨立零信任）的補充：第一輪（§1～§12）的結論與數字維持當時的描述不改；本節只回答「主控依 D-21 修掉的兩筆缺陷，修好了沒有、有沒有帶來回歸」。`<SCRATCH>` 是本輪 session 的暫存目錄（絕對路徑寫在交卷訊息裡，文件不寫磁碟絕對路徑，與第一輪同做法）；本輪的腳本與 log 在 `<SCRATCH>\w8_qa\`，log 在其下的 `logs\`。測試計數一律寫中文或不與日期同行。
+
+### 13.1 結論與數字
+
+**結論**：DEF-AC-013（P2，資安）與 DEF-AC-014（P3）都已修好並通過複驗，沒有發現回歸、沒有新缺陷。RTM 現查（`Grep`）：總列 374、`✅ 已驗證` 374、`🟡`／`❌`／`⬜` 各 0；`UI-MD-01`、`API-SSE-01`、`API-SSE-02` 三列的 E2E 欄已把「未修」改成「已修＋W8 證據」，狀態維持 `✅`。DEF-AC-012 維持 P4 保留（D-21），本輪不修、也沒有重驗。
+
+| 項目 | 當回合實測 | 節 |
+|------|------------|----|
+| 被驗版本 | HEAD `38e46582`；修復 commit：前端 `85ed0915`、後端 `520c2850`（兩者 `git show --stat` 現查，改動檔與任務書相符）；工作樹起點只有一個髒檔＝上一位 QA 半改的 `p9-w7-html.spec.ts` | 13.2 |
+| 後端產物來源 | 本機 backend jar 與 Docker 映像內建出的 jar 位元組完全相同（SHA-256 皆 `5F88DC22…15EB`、109718408 bytes）；jar 內 `GlobalExceptionHandler.class` 含 `handleClientGone` | 13.2 |
+| 前端閘門 | `npm run lint` rc=0（第一次 rc=1，原因與處置見 13.3）、`tsc --noEmit` rc=0、`npm run build` rc=0（內嵌 `http://localhost:18080`）、vitest rc=0：57 個檔、909 個案例全數通過 | 13.3 |
+| `p9-w7-html.spec.ts` | 八個情境對真後端、真瀏覽器（production 建置）**全數通過**（20.8 秒、0 失敗，已沒有任何 `test.fail`）；同一支 spec 對**修復前**的前端建置跑：2 個通過（①④）、6 個失敗（②③⑤⑤b⑥⑥b）——證明新增情境鑑別得出缺陷 | 13.4 |
+| Markdown 相關回歸 | 七個檔共 41 個情境全數通過（13.5 分）；NFR-9.1-05 的 20KB 預覽更新中位數 55ms（整套中 58ms），上限 100ms | 13.5 |
+| DEF-AC-014 受控重現（本機） | 3 輪 × 2 條串流（`/logs`、`/metrics`），每輪都先確認兩條串流開著且收到資料、再同時結束 curl：30 秒內 `level=ERROR` 0 筆、`Failure in @ExceptionHandler` 0 筆；DEBUG 開時每條串流斷線恰一行 DEBUG（共 6 行），預設等級完全不記 | 13.6 |
+| 本機整套 Playwright | **225 個全數通過**（0 失敗、0 略過；68.2 分，34 個檔；第一輪是 213 個、67.5 分）；跑完 backend 日誌 `ERROR` 0 筆、`Failure in @ExceptionHandler` 0 筆（第一輪同型整套留下 13 筆 ERROR 與 13 筆 WARN；這次同樣 13 次自然斷線全變成 DEBUG 行） | 13.7 |
+| Docker 全棧（加分項） | `up -d --build --wait` rc=0（67 秒）；經 nginx 三輪斷線 `ERROR` 0、`WARN` 0；Docker 32 個情境全數通過（13.0 分）；跑完容器日誌 313 行：INFO 307、WARN 6（SpringDoc 4＋Redis 降級情境的預期 WARN 2）、ERROR 0 | 13.6、13.8 |
+| 其他 | 上一位 QA 第二輪留下的「4 通過、4 失敗」不是 FE 修法的缺陷，是前端建置沒有內嵌 API 位址（13.9） | 13.9 |
+
+### 13.2 被驗版本、產物來源與環境
+
+| 項目 | 值 |
+|------|----|
+| 主機與工具 | Windows 11 專業版 10.0.26300（20 個邏輯核心）；Node v22.23.3／npm 10.9.9、OpenJDK 21.0.10、Python 3.11.9（根層 `.venv`）、Playwright 1.64.1（Chromium）、Docker 29.5.3／Compose 5.1.4；所有指令都用 PowerShell 工具執行（Windows 上禁用 Bash 工具） |
+| 被驗 commit | 前端修法 `85ed0915`：`MarkdownEditorImpl.tsx`（`pluginsFilter` 的 `omitRawHtml` 拿掉預設鏈的 rehype-raw、`urlTransform` 走 `safeUrl.ts`）、`MarkdownView.tsx`（同一支白名單）、`safeUrl.ts`（新）、`markdown.test.tsx` 加測、`markdown-preview.mock.spec.ts`（新，3 個情境）；後端修法 `520c2850`：`GlobalExceptionHandler.handleClientGone`（`AsyncRequestNotUsableException` 專屬處理器，回 void、只記一行 DEBUG，traceId 取回應標頭 `X-Trace-Id`、日誌只記路徑不記 query string）、`StreamDisconnectApiIT`（新）、`GlobalExceptionHandlerTest` 加測。我讀了這幾支改動檔的現況（不採信 commit 訊息） |
+| 靜態檢查（Grep，全 `frontend/` 原始碼） | Markdown 渲染只有兩條路徑：`MarkdownEditorImpl.tsx`（唯一的 `MDEditor` 匯入、`MDEditor.Markdown` 只用在預覽窗並帶 `PREVIEW_OPTIONS`）與 `MarkdownView.tsx`（`ReactMarkdown`）；沒有任何 `dangerouslySetInnerHTML`；`rehype-raw` 只在 `MarkdownEditorImpl.tsx`（拿來做函式身分比對）與測試檔出現。目標、任務、匯入節點的編輯器（`EntityForms.tsx`、`NodeEditDialog.tsx`、`TreeEditor.tsx`）都是同一個 `MarkdownEditor` 元件，專案、目標、任務的詳情頁（`ProjectDetailView.tsx`、`GoalDetailView.tsx`、`TaskDetailView.tsx`）都是同一個 `MarkdownView`，所以共用同一個修法 |
+| 本機 backend jar | `AgentConsole/backend/build/libs/console-0.0.1-SNAPSHOT.jar`：109718408 bytes、mtime 2026-10-17T04:22:35+08:00、SHA-256 `5F88DC2271A24A99B4D383F4A6E865AE1E52A3158F46E24F40287076241A15EB`；以 Python `zipfile` 讀 `BOOT-INF/classes/com/aisdlc/console/adapter/in/web/GlobalExceptionHandler.class`（18140 bytes）含 `handleClientGone`（`logs\jar_probe_local.txt`）。我沒有重跑 `gradlew`（任務書：不需要），改以下一列的獨立來源交叉驗證 |
+| Docker 映像內的 jar | `docker cp aisdlc-backend:/app/app.jar` 取出：109718408 bytes、SHA-256 `5F88DC2271A24A99B4D383F4A6E865AE1E52A3158F46E24F40287076241A15EB`——**與本機 jar 位元組完全相同**（`logs\jar_probe_docker.txt`）。映像是 `Dockerfile` 的 builder 階段在容器內用 `./gradlew bootJar --no-daemon -x test` 從 `backend/src` 建出的；本輪 `up -d --build` 時 `COPY src src`、`RUN ./gradlew bootJar`、`COPY --from=builder … app.jar` 三層都標 `CACHED`（`logs\stack_up2.log` 的 #50、#44、#48；BuildKit 以內容雜湊比對，命中代表現在工作樹的 `backend/src` 與建出那顆 jar 時的內容一致）。三者（工作樹原始碼、Docker 內建出的 jar、本機 jar）互相印證，不是只信主控的 `gradlew clean build` |
+| 前端 `.next`（e2e 用） | 我以 `NEXT_PUBLIC_API_URL=http://localhost:18080 npm run build` 重建（rc=0，16 秒）；掃 `.next` 的 JS：`localhost:18080` 出現在 2 個檔、`localhost:8080` 為 0 個——確認內嵌的是 e2e 的後端位址 |
+| 本機環境形態 | 同 §2.3：PG 25433（容器 `qa-pg`）→ backend 18080（`e2e` profile）→ 假 Brain 版 Bridge 18081 → 重啟 backend；前端 3000（standalone，Playwright 的 webServer 起）；`E2E_ROOT` 是 `%TEMP%\e2e`；每次 Playwright 都帶自己的 `--output`。本輪另在 backend 啟動參數加 `--logging.file.name=<SCRATCH>\w8_qa\logs\backend_r<時分秒>.log.spring.log`（Spring 自己寫 UTF-8 日誌；PowerShell 5.1 的 `*>` 擷取檔是 UTF-16 且被主機碼頁弄成亂碼，只能比對 ASCII 片段），整套與 DEBUG 受控重現時再加 `--logging.level.com.aisdlc.console.adapter.in.web.GlobalExceptionHandler=DEBUG` |
+| 我接手時的殘留 | 上一位 QA 第二輪留下整套仍在運轉：Docker 全棧 14 個長駐服務（`Up 5 hours`，04:41 啟動）、`qa-pg`、本機 backend（PID 37440，04:41 起）與假 Brain Bridge（PID 28572）。我先對全棧 `docker compose … down`（**不帶 `-v`**，12 個 `aisdlc_*` 卷前後都是 12 個；`logs\leftover_stack_down.log`），本機行程與 PG 由 `reset_local.ps1` 換成我自己起的（`logs\reset1.log`） |
+
+### 13.3 前端閘門（`<SCRATCH>\w8_qa\logs\`）
+
+```powershell
+Push-Location AgentConsole\frontend; npm run lint; npx tsc --noEmit; Pop-Location
+Push-Location AgentConsole\frontend; $env:NEXT_PUBLIC_API_URL="http://localhost:18080"; npm run build; Pop-Location
+Push-Location AgentConsole\frontend; npx vitest run; Pop-Location
+```
+
+```bash
+(cd AgentConsole/frontend && npm run lint && npx tsc --noEmit)
+(cd AgentConsole/frontend && NEXT_PUBLIC_API_URL=http://localhost:18080 npm run build)
+(cd AgentConsole/frontend && npx vitest run)
+```
+
+（實際用 PowerShell 形態、每行指令各自 `*> log` 後讀 `$LASTEXITCODE`，不接管線；bash 形態在這台 Windows 機器上沒有跑。）
+
+| 指令 | rc | 關鍵輸出（逐字） | log |
+|------|----|------------------|-----|
+| `npm run lint`（第一次，改完 spec 後） | **1** | `[warn] tests/e2e/p9-w7-html.spec.ts`／`[warn] Code style issues found in the above file. Run Prettier with --write to fix.` | `lint1.log` |
+| `npx prettier --write tests/e2e/p9-w7-html.spec.ts` | 0 | 只重排上一位 QA 半改時寫的兩行 `console.log`（⑤、⑥ 各一行，6 行新增、2 行刪除，`prettier_diff.txt`）；內容不變 | `prettier_write.log` |
+| `npm run lint`（重跑） | 0 | `All matched files use Prettier code style!` | `lint2.log` |
+| `npx tsc --noEmit` | 0 | （無輸出，log 0 bytes） | `tsc2.log` |
+| `NEXT_PUBLIC_API_URL=http://localhost:18080 npm run build` | 0 | 16 秒；路由表末列 `└ ○ /settings` | `build1.log` |
+| `npx vitest run` | 0 | `Test Files  57 passed (57)`／`Tests  909 passed (909)`／`Duration  30.37s` | `vitest1.log` |
+
+### 13.4 `p9-w7-html.spec.ts` 最終版
+
+**改了什麼**（`AgentConsole/frontend/tests/e2e/p9-w7-html.spec.ts`，接上一位 QA 半改的檔）：移除 ②、③ 兩行 `test.fail(DEFECTS_OPEN, …)` 與已無人使用的 `DEFECTS_OPEN` 匯入；②③ 的標題與檔頭註解改成正向敘述（「不執行」，註明 W8 修於 `85ed0915`）；保留 ①④⑤⑤b⑥⑥b；Prettier 重排兩行 `console.log`。`tests/e2e/` 全樹 Grep：沒有任何 spec 再用 `test.fail(DEFECTS_OPEN`；`realBackend.ts` 的 `DEFECTS_OPEN` 與環境變數 `E2E_DEFECTS_FIXED` 保留為機制（下次登記未修缺陷時照用），`README.md` 第 115、156 行已同步（本輪起沒有 spec 用它釘住缺陷）。
+
+**最終情境清單（八個）**：
+
+| 情境 | 驗什麼 |
+|------|--------|
+| ① 編輯器預覽 | img onerror、script 標籤、javascript: 連結三種載體都不執行（新建專案對話框；含點連結後開出的視窗） |
+| ② DEF-AC-013（P2） | 同一個預覽裡 `<iframe srcdoc>` 內的腳本不執行（修前會執行、可讀 sessionStorage） |
+| ③ DEF-AC-013 儲存式 | 專案說明已存著 iframe srcdoc，管理者開「編輯專案」頁，預覽不執行 |
+| ④ 對照 | 同一份已儲存內容在唯讀的專案詳情頁不執行、頁面內 iframe 為 0 |
+| ⑤ meta／base | 新建專案預覽貼入 `<meta http-equiv=refresh>` 與 `<base href>`：文件內兩者皆 0、原文以文字顯示 |
+| ⑤b meta／base（儲存式） | 管理者開編輯頁與詳情頁，文件內兩者皆 0、編輯頁預覽以文字顯示原文 |
+| ⑥ 連結白名單 | https、mailto 保有 href；javascript:、tel: 整個拿掉 href；點了不導頁、預覽仍在、不執行 |
+| ⑥b 連結白名單（儲存式） | 編輯頁預覽與詳情頁的連結規則一致 |
+
+**修後（HEAD）的執行結果**（`run_pw.ps1 -Tag html`，輸出目錄 `<SCRATCH>\w8_qa\pw_out\html`，log `logs\pw_html.log`、rc 檔 `logs\pw_html.rc.txt`＝`rc=0 elapsed_sec=23`；`[w7-html]` 行與摘要行逐字）：
+
+```
+[w7-html] ①預覽端建出的元素＝{"img":0,"imgHasOnerror":false,"script":0,"anchorHref":null,"details":0}；window.__w7xss＝null；點連結後開出的視窗數＝0、其 __w7xss＝[]；主控台錯誤數＝0
+[w7-html] ②DEF-AC-013 預覽端：window.__w7xss＝null；srcdoc 內腳本讀到的 sessionStorage 鍵名＝null（只讀鍵名，不讀值）
+[w7-html] ⑤新建專案預覽：貼入前文件＝{"metaRefresh":0,"base":0}；貼入後文件＝{"metaRefresh":0,"base":0}；預覽文字含 http-equiv＝true
+[w7-html] ⑥新建專案預覽的連結＝{"官網":{"hasHref":true,"href":"https://example.com/w7"},"寄信":{"hasHref":true,"href":"mailto:qa@example.com"},"撥號":{"hasHref":false,"href":null},"腳本":{"hasHref":false,"href":null}}；點撥號與腳本之後網址不變＝true、預覽仍在＝true、window.__w7xss＝null
+[w7-html] ③DEF-AC-013 儲存式（admin 開編輯頁）：window.__w7xss＝null；srcdoc 內腳本讀到的 sessionStorage 鍵名＝null（只讀鍵名，不讀值）
+[w7-html] ④唯讀詳情頁：window.__w7xss＝null；頁面內 iframe 元素數＝0
+[w7-html] ⑤b儲存式：編輯頁文件＝{"metaRefresh":0,"base":0}（預覽文字含 http-equiv＝true）；詳情頁文件＝{"metaRefresh":0,"base":0}
+[w7-html] ⑥b儲存式：編輯頁預覽的連結＝{"官網":{"hasHref":true,"href":"https://example.com/w7"},"寄信":{"hasHref":true,"href":"mailto:qa@example.com"},"撥號":{"hasHref":false,"href":null},"腳本":{"hasHref":false,"href":null}}；詳情頁的連結＝{"官網":{"hasHref":true,"href":"https://example.com/w7"},"寄信":{"hasHref":true,"href":"mailto:qa@example.com"},"撥號":{"hasHref":false,"href":null},"腳本":{"hasHref":false,"href":null}}；window.__w7xss＝null
+  8 passed (20.8s)
+```
+
+八個情境全部是 `✓`（不是 `test.fail` 的預期失敗）；`tel:` 兩處都是無 href 的文字，與主控裁決（D-21）一致。
+
+**負向對照（修復前的前端建置，證明新情境鑑別得出缺陷）**：用 `git archive 520c2850 AgentConsole/frontend` 取出修復前的前端原始碼到暫存目錄（確認 `MarkdownEditorImpl.tsx` 沒有 `omitRawHtml`、沒有 `safeUrl.ts`），`node_modules` 從工作樹複製，以同樣的 `NEXT_PUBLIC_API_URL=http://localhost:18080 npm run build`（rc=0，31 秒，`logs\prefix_build.log`）建出 standalone，用 `node scripts/start-standalone.mjs` 在 3100 埠服務（後端 CORS 本來就放行 3100），**同一個 backend、同一個 Bridge、同一支 spec** 以 `run_pw.ps1 -Tag prefix -WebPort 3100` 跑（`logs\pw_prefix.log`，rc=1）：
+
+| 情境 | 修復前的前端建置 | 修後（HEAD） |
+|------|------------------|--------------|
+| ① | 通過；但預覽建出真元素 `{"img":1,"script":1,"details":1}`，`anchorHref` 是 React 換上的 `javascript:throw new Error('React has blocked…')`，主控台錯誤 2 | 通過；建出元素全 0、`anchorHref＝null`、主控台錯誤 0 |
+| ② | **失敗**：`window.__w7xss＝"iframe-srcdoc"`，srcdoc 內腳本讀到鍵名 `aisdlc.console.session` | 通過：`null` |
+| ③ | **失敗**：`"iframe-srcdoc"`，鍵名 `aisdlc.console.lastProject,aisdlc.console.session` | 通過：`null` |
+| ④ | 通過（詳情頁本來就不受影響） | 通過 |
+| ⑤ | **失敗**：貼入後文件 `{"metaRefresh":1,"base":1}`、預覽文字不含 `http-equiv` | 通過：`{"metaRefresh":0,"base":0}`、文字含 `http-equiv` |
+| ⑤b | **失敗**：編輯頁文件 `{"metaRefresh":1,"base":1}`（詳情頁 0） | 通過 |
+| ⑥ | **失敗**：`撥號` 的 href 是 `tel:+886123456789`、`腳本` 的 href 是 React 換上的 `javascript:throw new Error(…)` | 通過：兩者皆無 href |
+| ⑥b | **失敗**：編輯頁預覽同上；詳情頁的 `撥號`、`腳本` 是空字串 href（`href=""`，點下去會重新載入本頁） | 通過：兩處皆無 href |
+| 摘要行 | `6 failed`／`2 passed (24.2s)` | `8 passed (20.8s)` |
+
+同一個瀏覽器、同一個後端，只有前端建置不同：缺陷在修前真的存在、六個情境（②③⑤⑤b⑥⑥b）都抓得到、修後全部消失。暫存目錄的修復前建置在本節完成後已刪除（log 保留）。
+
+### 13.5 Markdown 相關 spec 回歸
+
+挑出所有會碰 Markdown 預覽或 `MarkdownView` 的既有 spec（Grep `w-md-editor-preview`、`markdown-view`、`MarkdownView`、`md-preview-region`、`md-criteria` 等：八個檔，扣掉 `p9-w7-html` 剩七個）各跑一次（`run_pw.ps1 -Tag md`，`logs\pw_md.log`、`logs\pw_md.rc.txt`＝`rc=0 elapsed_sec=810`；逐檔統計 `logs\pw_md.summary.txt`）：
+
+| 檔案 | 情境數 | 通過 | 失敗 | 略過 |
+|------|-------:|-----:|-----:|-----:|
+| `markdown-editor.spec.ts`（編輯器八項功能） | 5 | 5 | 0 | 0 |
+| `markdown-preview.mock.spec.ts`（FE 新增，production 建置） | 3 | 3 | 0 | 0 |
+| `design-system.spec.ts` | 3 | 3 | 0 | 0 |
+| `a11y.mock.spec.ts` | 3 | 3 | 0 | 0 |
+| `p9-w5-a11y.spec.ts`（axe 掃 16 個頁面狀態） | 9 | 9 | 0 | 0 |
+| `p9-w5-ui-evidence.spec.ts`（含 NFR-9.1-05） | 6 | 6 | 0 | 0 |
+| `p9-w7-ui.spec.ts`（九畫面對設計稿） | 12 | 12 | 0 | 0 |
+| **合計** | **41** | **41** | **0** | **0** |
+
+尾端摘要行：`41 passed (13.5m)`。NFR-9.1-05 的 20KB 預覽更新（同 W5 量法，七次取中位數；上限 100ms），逐字：
+
+```
+[ui-evidence] NFR-9.1-05 1KB：樣本(ms)=27, 9, 9, 7, 6, 6, 8；中位數 8ms、最大 27ms
+[ui-evidence] NFR-9.1-05 5KB：樣本(ms)=22, 23, 17, 17, 21, 17, 14；中位數 17ms、最大 23ms
+[ui-evidence] NFR-9.1-05 20KB：樣本(ms)=58, 63, 54, 57, 54, 55, 53；中位數 55ms、最大 63ms
+```
+
+（整套裡同一支再量一次：20KB 中位數 58ms、最大 62ms；兩次都在閒置機上〔開跑前 CPU 讀數：逐檔批次 7%、整套 5%〕、都遠低於 100ms；FE 自己量的 61ms 與第一輪的 57～62ms 同一量級，`omitRawHtml` 沒有拖慢預覽。）
+
+### 13.6 DEF-AC-014 複驗
+
+**受控重現（本機真後端）**——沿用第一輪的作法（登入取 token → 找或造一個 PAUSED 批次 → `curl.exe -N` 接 `/logs` 與 `/metrics` → 收到資料後結束 curl → 看 backend 日誌 30 秒），腳本 `<SCRATCH>\w8_qa\repro_local.ps1`：登入 admin 取 token 寫進 curl 的標頭檔（不印出）；用等級 1 夾具建專案、`POST /api/v1/projects/{id}/execute`、等到 `PAUSED` 且審核項出現（PAUSED 不結束串流）；每輪同時開兩條串流、4 秒後確認兩個 curl 都還活著且 bytes>0，再同時 `Stop-Process -Force`；30 秒後讀「該輪開始之後」新寫入的 backend 日誌，統計 `ERROR` 層級行、`Failure in @ExceptionHandler`、`AsyncRequestNotUsableException` 提及次數、`WARN` 與 `GlobalExceptionHandler` 的 DEBUG 行。結束時再登入一次，確認那一行 `audit` 在 3 秒內出現在被監看的日誌裡（日誌監看是活的，「0 行」才有意義）。
+
+```powershell
+# 等價的最小形態（完整流程在腳本裡）：
+$p1 = Start-Process curl.exe -ArgumentList '-N','-s','-H',"@$hdr","http://127.0.0.1:18080/api/v1/stream/executions/$run/logs" -RedirectStandardOutput $out1 -PassThru -WindowStyle Hidden
+$p2 = Start-Process curl.exe -ArgumentList '-N','-s','-H',"@$hdr","http://127.0.0.1:18080/api/v1/stream/executions/$run/metrics" -RedirectStandardOutput $out2 -PassThru -WindowStyle Hidden
+Start-Sleep -Seconds 4; Stop-Process -Id $p1.Id,$p2.Id -Force
+```
+
+```bash
+curl -N -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:18080/api/v1/stream/executions/$RUN/logs" > logs.out & P1=$!
+curl -N -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:18080/api/v1/stream/executions/$RUN/metrics" > metrics.out & P2=$!
+sleep 4; kill $P1 $P2   # bash 形態在這台 Windows 機器上沒有跑
+```
+
+| 回合 | backend 日誌等級 | 結果（逐字摘自 log） |
+|------|------------------|----------------------|
+| DEBUG 開（`logs\repro_debug.log`，PAUSED 批次 `4fd9d77e-c422-4082-9fab-6126666c790c`） | `GlobalExceptionHandler` 設為 DEBUG | 三輪皆 `streams were open and delivering = True`（`/logs` 7965 bytes、`/metrics` 約 676 bytes，首行 `retry:3000`）；每輪斷線後 30 秒：`level=ERROR lines=0; 'Failure in @ExceptionHandler' lines=0; AsyncRequestNotUsableException mentions=0; level=WARN lines=0; DEBUG GlobalExceptionHandler lines=2`；合計 `ERROR=0; Failure-in-ExceptionHandler=0; WARN=0; DEBUG GlobalExceptionHandler=6`；`log liveness probe … audit lines seen … = 1`；`run state after: PAUSED` |
+| 預設（INFO，`logs\repro_info.log`，重啟 backend 後再用同一個 PAUSED 批次） | 預設 | 三輪皆兩條串流開著且收到資料；每輪斷線後 30 秒新寫入的日誌行數 0：`ERROR=0; Failure-in-ExceptionHandler=0; AsyncRequestNotUsableException mentions=0; WARN=0; DEBUG GlobalExceptionHandler=0`；`log liveness probe … = 1`；`run state after: PAUSED`；整份日誌 `ERROR` 0 行 |
+
+DEBUG 開時的處理器日誌（`logs\repro_debug.log` 的第一輪，逐字；`traceId` 取自回應標頭、路徑不含 `access_token`）：
+
+```
+2026-10-17T11:18:31.180+08:00 DEBUG [traceId=] 40384 --- [console] [http-nio-18080-exec-9] c.a.c.a.in.web.GlobalExceptionHandler    : 客戶端已斷線，串流視為正常結束（run=4fd9d77e-c422-4082-9fab-6126666c790c，traceId=9e3c3fef-1c9b-415c-8ab1-6b174a2eadaa，path=/api/v1/stream/executions/4fd9d77e-c422-4082-9fab-6126666c790c/logs）：IOException: Connection reset by peer
+2026-10-17T11:18:33.176+08:00 DEBUG [traceId=] 40384 --- [console] [http-nio-18080-exec-7] c.a.c.a.in.web.GlobalExceptionHandler    : 客戶端已斷線，串流視為正常結束（run=4fd9d77e-c422-4082-9fab-6126666c790c，traceId=e6f2abda-04b5-4686-864d-bb766b8e4a79，path=/api/v1/stream/executions/4fd9d77e-c422-4082-9fab-6126666c790c/metrics）：IOException: Connection reset by peer
+```
+
+**整套 Playwright 跑完後的 backend 日誌統計**（本機整套用 DEBUG 開著跑，才數得出自然斷線的次數；統計腳本 `<SCRATCH>\w8_qa\log_stats.py`，輸出 `logs\suite_log_stats.txt`；**同一支解析器先對第一輪修前的整套日誌重算作校準**，算出 13／13／13，確認這個判準看得到缺陷）：
+
+| 日誌 | `ERROR` 層級行 | `Failure in @ExceptionHandler` | `AsyncRequestNotUsableException` 提及 | `GlobalExceptionHandler` 的 DEBUG 行 |
+|------|---------------:|-------------------------------:|--------------------------------------:|-------------------------------------:|
+| 第一輪整套（修前、213 個情境，`backend_r010652.log` 重算） | 13 | 13 | 13 | 0 |
+| W8 整套（修後、225 個情境，兩個 backend 行程的 Spring UTF-8 日誌） | **0** | **0** | **0** | 13 |
+| 同兩個行程的 stdout 擷取（交叉比對） | 0 | 0 | 0 | 13 |
+
+W8 整套的 WARN 共 35 筆，全部與 SSE 無關（SDD 狀態檔讀不動／引擎不可用的情境 26 筆、PDF 字型 `Format 14 cmap` 4 筆、SpringDoc 預設啟用 4 筆、Bridge 暫時無法連線 1 筆）。兩次整套的情境數不同（213／225），自然斷線次數同為 13 次只是同一批開串流的情境造成，不作驗收判準；判準是 ERROR 與 `Failure in @ExceptionHandler` 為 0，以及斷線確實發生過（13 行 DEBUG）。
+
+**Docker 全棧經 nginx（加分項）**：`up -d --build --wait` rc=0、67 秒（`logs\stack_up2.log`／`stack_up2.rc.txt`），14 個長駐服務皆 `healthy`、兩個一次性 job `Exited (0)`；後端映像 `aisdlc-backend:dev` 的 `COPY src src`、`RUN ./gradlew bootJar`、`COPY --from=builder … app.jar` 三層都命中快取（映像 `Created` 為 2026-10-16T20:40:55Z、ID `989de5b18bc0`；容器內 jar 的 SHA-256 見 13.2）。`<SCRATCH>\w8_qa\sse_disconnect_repro2.ps1 -Rounds 3 -WaitSec 40`（沿用第一輪 Docker 重現的做法，目標是資料庫裡殘留的 PAUSED 批次 `1a28bd6f-14ca-4afb-955e-e66ce2981725`），`logs\sse_repro2.log` 逐字：
+
+```
+round 1 [logs] after 4s: bytes=87052 curl alive=True
+round 1 [metrics] after 4s: bytes=685 curl alive=True
+round 1: 40s after the disconnect: level=ERROR lines=0; 'Failure in @ExceptionHandler' lines=0; AsyncRequestNotUsableException lines=0; level=WARN lines (any)=0; total backend log lines since t0=0
+（第 2、3 輪同形：兩條串流都開著、收到 87052／685 bytes，斷線後 40 秒 ERROR 0、Failure 0、Async 0、WARN 0）
+TOTAL over 3 rounds x 2 streams: ERROR=0; Failure-in-ExceptionHandler=0; AsyncRequestNotUsableException=0; WARN(any)=0
+backend health: healthy; cumulative ERROR lines in the whole container log: 0
+```
+
+對照第一輪修前同一個做法（`/logs` 4 秒後 87052 bytes、`/metrics` 684 bytes，結束 curl 後 30 秒內各 1 筆 `"level":"ERROR"` 與 1 筆 `Failure in @ExceptionHandler`）：同一個批次、同樣的資料量，ERROR 與 WARN 都從 1 變 0。日誌監看是活的：另外經 nginx 登入一次，`docker logs --since` 在 3 秒內看到 1 行 `audit` 的 `/api/v1/auth/login`。Docker 容器的日誌等級是預設 INFO，所以處理器一行都不記（「total backend log lines since t0=0」）。
+
+### 13.7 本機整套回歸（225 個）
+
+`run_pw.ps1 -Tag full`（環境：重置後的乾淨資料庫、DEBUG 開、`--list` 現查 225 個情境、34 個檔）：`logs\pw_full.rc.txt`＝`rc=0 elapsed_sec=4089 start=2026-10-17T10:08:07+08:00 end=2026-10-17T11:16:17+08:00`；Playwright 尾端摘要行（逐字）與逐檔統計（`logs\pw_full.summary.txt`，測試本體耗時加總 65.2 分，不含 hooks）如下：
+
+```
+  225 passed (1.1h)
+```
+
+| 檔案 | 情境 | 通過 | 失敗 | 略過 | 分 |
+|------|-----:|-----:|-----:|-----:|---:|
+| `a11y.mock.spec.ts` | 3 | 3 | 0 | 0 | 0.1 |
+| `chart.spec.ts` | 1 | 1 | 0 | 0 | 0.0 |
+| `crud-flow.spec.ts` | 1 | 1 | 0 | 0 | 0.1 |
+| `dashboard.mock.spec.ts` | 8 | 8 | 0 | 0 | 0.1 |
+| `design-system.spec.ts` | 3 | 3 | 0 | 0 | 0.0 |
+| `execute.mock.spec.ts` | 21 | 21 | 0 | 0 | 0.7 |
+| `import.mock.spec.ts` | 8 | 8 | 0 | 0 | 0.2 |
+| `markdown-editor.spec.ts` | 5 | 5 | 0 | 0 | 0.1 |
+| `markdown-preview.mock.spec.ts` | 3 | 3 | 0 | 0 | 0.1 |
+| `monitor.mock.spec.ts` | 15 | 15 | 0 | 0 | 0.3 |
+| `notifications.mock.spec.ts` | 3 | 3 | 0 | 0 | 0.0 |
+| `p3-import.spec.ts` | 8 | 8 | 0 | 0 | 3.3 |
+| `p4-execute.spec.ts` | 12 | 12 | 0 | 0 | 11.6 |
+| `p4b-execute-more.spec.ts` | 9 | 9 | 0 | 0 | 8.5 |
+| `p5-monitor.spec.ts` | 4 | 4 | 0 | 0 | 1.2 |
+| `p6-settings.spec.ts` | 8 | 8 | 0 | 0 | 1.2 |
+| `p7-cors-ratelimit.spec.ts` | 1 | 1 | 0 | 0 | 2.1 |
+| `p9-w5-a11y.spec.ts` | 9 | 9 | 0 | 0 | 2.3 |
+| `p9-w5-api.spec.ts` | 10 | 10 | 0 | 0 | 5.0 |
+| `p9-w5-bridge.spec.ts` | 2 | 2 | 0 | 0 | 0.0 |
+| `p9-w5-ui-evidence.spec.ts` | 6 | 6 | 0 | 0 | 6.0 |
+| `p9-w5-ui.spec.ts` | 6 | 6 | 0 | 0 | 5.5 |
+| `p9-w7-engine.spec.ts` | 8 | 8 | 0 | 0 | 1.8 |
+| `p9-w7-html.spec.ts` | 8 | 8 | 0 | 0 | 1.4 |
+| `p9-w7-purefile.spec.ts` | 1 | 1 | 0 | 0 | 0.2 |
+| `p9-w7-resources.spec.ts` | 3 | 3 | 0 | 0 | 3.7 |
+| `p9-w7-sdd.spec.ts` | 13 | 13 | 0 | 0 | 3.7 |
+| `p9-w7-signoffs.spec.ts` | 9 | 9 | 0 | 0 | 2.4 |
+| `p9-w7-ui.spec.ts` | 12 | 12 | 0 | 0 | 3.2 |
+| `projects.mock.spec.ts` | 3 | 3 | 0 | 0 | 0.0 |
+| `settings.mock.spec.ts` | 10 | 10 | 0 | 0 | 0.2 |
+| `shells-and-layout.spec.ts` | 6 | 6 | 0 | 0 | 0.1 |
+| `signoff.spec.ts` | 5 | 5 | 0 | 0 | 0.1 |
+| `task-retry.spec.ts` | 1 | 1 | 0 | 0 | 0.0 |
+| **合計（34 個檔）** | **225** | **225** | **0** | **0** | **65.2** |
+
+與第一輪（213 個、31 個檔）的差別：多出的 12 個＝`markdown-preview.mock.spec.ts` 3 個、`p9-w7-purefile.spec.ts` 1 個、`p9-w7-html.spec.ts` 由 4 個變 8 個（第一輪這兩支在整套之後才單獨跑，本輪放進整套）。整套與逐檔跑法都用同一個最終版 `p9-w7-html.spec.ts`（檔案 SHA-256 `B130B1DC…D600`，mtime 在所有跑次之前，跑完沒有再改）。
+
+### 13.8 Docker 全棧情境（32 個）
+
+`run_pw_docker.ps1 -Tag docker2`（`docker.config.ts`，經 nginx 同源）：`logs\pw_docker2.rc.txt`＝`rc=0 elapsed_sec=782`；尾端摘要行 `32 passed (13.0m)`；逐檔：`chart.spec.ts` 1、`crud-flow.spec.ts` 1、`design-system.spec.ts` 3、`p8-docker-stack.stack.ts` 11、`p9-w7-docker.stack.ts` 5、`shells-and-layout.spec.ts` 6、`signoff.spec.ts` 5，全數通過（含「SSE 經 nginx（`proxy_buffering off`）」與「重啟 backend → 前端串流重連、session 不得被清除」）。跑完對 backend 容器（`docker logs aisdlc-backend`，`logs\docker_backend_full.log`）統計：313 行，`INFO` 307、`WARN` 6、`ERROR` 0；`Failure in @ExceptionHandler` 0、`AsyncRequestNotUsableException` 0；6 筆 WARN 是 SpringDoc 預設啟用 4 筆（兩次啟動各 2 筆）與 E2E-16 列 10 的 Redis 降級情境依設計產生的 2 筆。容器 `RestartCount＝0`、`OOMKilled＝false`（容器 `StartedAt` 晚於 `up` 七分鐘，是 `p8-docker-stack` 的「重啟 backend」情境主動重啟，不是自動重啟）。第一輪 Docker 整套曾自然留下 1 組 ERROR＋WARN（`/executions/{id}/cancel` 同一秒），這次 0 組。
+
+### 13.9 上一位 QA 第二輪的殘留與失敗診斷
+
+我接手時，工作樹的 `p9-w7-html.spec.ts` 是半改狀態（加了 ⑤⑥⑤b⑥b，兩行 `test.fail` 還在、兩行 `console.log` 沒過 Prettier），上一位 QA 的暫存目錄裡有它最後一次跑的 log（`pw_html_old.log`）：**4 通過、4 失敗**——失敗的四個都是需要「已儲存專案」的情境（③④⑤b⑥b），畫面顯示「無法載入專案：Not Found」。我沒有採信那份結果，也沒有把它當缺陷：
+
+1. 該次跑的 Playwright trace（`pw_out\html_old\…\trace.zip` 的 `*.network`）顯示頁面對 API 的請求打到 `http://localhost:3000/api/v1/projects` 與 `…/notifications/summary`，三次都是 **404**（同源的 Next.js），而 e2e 後端在 18080；只有 spec 的 `request` fixture（直接打 18080）成功。也就是說那次的前端 `.next` 建置**沒有內嵌** `NEXT_PUBLIC_API_URL=http://localhost:18080`。
+2. 需要後端資料的情境（③④⑤b⑥b）因此全部 404；只靠「新建專案對話框」的情境（①②⑤⑥）不需要 API 資料，所以照常通過（②「預期失敗卻通過」正是修法已在那份建置裡）。
+3. 我以 `NEXT_PUBLIC_API_URL=http://localhost:18080 npm run build` 重建（13.3、13.2 的 JS 掃描確認內嵌）後，同樣八個情境全部通過（13.4）。
+4. **根因屬待驗假設**（鐵律 10）：我沒有看到是誰、在什麼時候用不帶 API 位址的指令重建了 `.next`（時序上吻合主控自己跑 `npm run build` 閘門）；我能確認的是 trace 的 404 證據與重建後的結果。**給主控的提醒**：任何不帶 `NEXT_PUBLIC_API_URL` 的 `npm run build` 都會覆蓋 `frontend/.next`；之後再跑真後端 Playwright（`E2E_MODE=standalone`）前一定要用 18080 重建一次（`tests/e2e/README.md`〈真 Bridge specs〉第 5 點已寫，但這個失敗形態容易被誤讀成產品缺陷）。我留下的 `.next` 是內嵌 18080 的版本，要回到一般本機開發請重建。
+
+### 13.10 未覆蓋與保留的口徑
+
+1. **瀏覽器 `EventSource` 的各種斷線形態沒有逐一驗**（網路中斷、電腦睡眠、nginx 逾時切斷）：本輪驗的是 curl 被結束（用戶端主動結束）與整套 Playwright 自然發生的 13 次斷線（關頁面、`EventSource.close()`）；另沒有量「執行中批次」與「終態後」兩種狀態下斷線的差異（受控重現只用 PAUSED 批次，整套的自然斷線涵蓋各種狀態）。
+2. **其他 Markdown 編輯器沒有逐一在瀏覽器驗**：目標、任務、匯入節點的編輯頁沒有各自貼 payload；依據是 13.2 的靜態檢查（全站只有一個編輯器元件、一個唯讀檢視元件、沒有 `dangerouslySetInnerHTML`），加上 FE 的單元測試與 mock spec 的 12 種以上載體。瀏覽器端我只驗了新建專案對話框與已儲存專案的編輯頁／詳情頁；沒有新增第七個「更多載體」情境，因為 `markdown-preview.mock.spec.ts` 已在 production 建置下涵蓋 `iframe srcdoc`、`script`、`img onerror`、`javascript:`、`meta`、`base`、`object`、`svg onload`、`details ontoggle`，再加只會重複。
+3. **預設等級（INFO）下處理器完全不記，DEBUG 下每次斷線一行**：前者在 13.6 受控重現與 Docker 驗過，後者在 DEBUG 受控重現與整套驗過；DEBUG 的開關是 `logging.level.com.aisdlc.console.adapter.in.web.GlobalExceptionHandler`（我用啟動參數開）。
+4. **Docker 全棧沒有跑 `p9-w7-html.spec.ts`**：它需要 `e2e` profile（allow-loopback）與可寫入的專案路徑，Docker 全棧沒有；Docker 裡的前端映像已含 FE 修法，被 `design-system.spec.ts`（Markdown 編輯器 box-shadow 掃描）與 `crud-flow.spec.ts` 觸及編輯器，但沒有逐項驗 XSS 載體。
+5. **後端 `gradlew clean build` 沒有重跑**（任務書：不需要）；後端單元與整合測試的結果以主控的回報為準（他包回報，不當我的證據），我的證據是行為（受控重現、整套日誌）與 jar 位元組來源（13.2）。
+6. **`tel:` 取捨**：依主控裁決（D-21）驗證成「無 href 的文字」；若日後 PRD 要 `tel:` 可點，要同步改 `safeUrl.ts` 與 ⑥／⑥b。
+7. 沒有在 macOS／Linux 主機跑；本節 bash 形態的指令沒有在這台 Windows 機器上實跑。
+
+### 13.11 DEF-AC-012 與缺陷表結論
+
+DEF-AC-012（P4，Bridge 與 SSOT 對 SDD LATEST 的判定在未入庫目錄時分歧）依 D-21 **維持 P4 保留**：本輪不修、也沒有重驗。DEF-AC-013、DEF-AC-014 狀態改為已修並複驗通過（§10.1 兩列已更新、§12.2 第 1～2 項標結案）。本輪沒有新增缺陷。
+
+### 13.12 收尾與要 commit 的檔案
+
+- **環境收尾**（逐項現查，結果見交卷訊息）：Docker 全棧只做 `down`（不帶 `-v`；12 個 `aisdlc_*` 卷保留，`autoclaude_pg` 全程沒動）；本機 backend、Bridge、前端與 `qa-pg` 都已停止並移除；修復前建置的暫存目錄已刪除；Playwright 改寫的已追蹤截圖（本輪四次還原：17、123、21、0 張，共 161 張）都用 `git show HEAD:<path>` 的位元組寫回（`restore_screens.py`，不用 `git restore`／`checkout`），最後一次還原後 `git diff` 的截圖差異為 0 張。
+- **要 commit 的檔案**（皆在我的持有面）：`AgentConsole/frontend/tests/e2e/p9-w7-html.spec.ts`、`AgentConsole/frontend/tests/e2e/README.md`（第 115、156 行）、`AgentConsole/docs/06_quality/RTM.md`（只有 3 列的 E2E 欄，`git diff --stat` 3 行新增 3 行刪除）、`AgentConsole/docs/06_quality/QA_W7_Closure.md`（版本列、§1 的 W8 提示、§10.1 兩列、§12.2 第 1～2 項、本節）。
