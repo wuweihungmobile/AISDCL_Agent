@@ -202,6 +202,16 @@ def _make_dir_link(link: Path, target: Path) -> None:
         os.symlink(target, link, target_is_directory=True)
 
 
+def _remove_dir_link(link: Path) -> None:
+    """只移除連結本身、不動 target。鐵律三自問「在另一個平台是什麼值」：Windows 的 junction 是
+    目錄項、要 `os.rmdir`；POSIX 的 symlink 是檔案項、`os.rmdir` 會 `NotADirectoryError`
+    （整合輪 115 雲端 aisdlc-sdd-ci／macos-compat-ci 實紅），要 `os.unlink`。"""
+    if sys.platform == "win32":
+        os.rmdir(link)
+    else:
+        os.unlink(link)
+
+
 def test_link_pointing_outside_root_is_rejected(tmp_path: Path) -> None:
     """跟隨連結：根內的連結指向根外 ⇒ `resolve()` 後落在根外 ⇒ doc_outside_root（fail-closed）。"""
     root = tmp_path / "proj"
@@ -216,7 +226,7 @@ def test_link_pointing_outside_root_is_rejected(tmp_path: Path) -> None:
             sd.normalize_doc(root, "docs/link/secret.md")
         assert err.value.code == "doc_outside_root"
     finally:
-        os.rmdir(link)  # 只移除連結本身（junction／symlink 皆可），不動 target
+        _remove_dir_link(link)
 
 
 def test_link_pointing_inside_root_keys_by_the_real_file(tmp_path: Path) -> None:
@@ -230,7 +240,7 @@ def test_link_pointing_inside_root_keys_by_the_real_file(tmp_path: Path) -> None
     try:
         assert sd.normalize_doc(root, "docs/alias/TCS.md")[1] == "real/TCS.md"
     finally:
-        os.rmdir(link)
+        _remove_dir_link(link)
 
 
 # ───────────────────────────── digest_doc／digest_docs ─────────────────────────────
