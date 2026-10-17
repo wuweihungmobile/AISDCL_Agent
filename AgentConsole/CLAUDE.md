@@ -12,7 +12,7 @@
 
 ## 📍 這是什麼
 
-AISDLC Agent Console UI：掌舵者用網頁管理 AI Agent 的開發生命週期（專案→目標→任務、BRD/PRD 匯入、🔴 人工 signoff 硬閘、執行與監控、系統參數）。**零侵入**：不改 AutoClaude 與 AISDLC_SDD，由 Engine Bridge 旁車包它們。
+AISDLC Agent Console UI：掌舵者用網頁管理 AI Agent 的開發生命週期（專案→目標→任務、BRD/PRD 匯入、🔴 人工 signoff 硬閘、執行與監控、系統參數）。**最小侵入白名單**（2026-10-17 整合輪 115 取代原「零侵入」）：兩引擎只准改 `docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md` §11 列出的檔，其餘仍由 Engine Bridge 旁車包它們；SDD FSM 的寫入一律經 `FSMRuntime` CLI 子行程，Bridge 不開寫狀態檔。
 
 | 服務 | 技術 | 埠 | 路徑 |
 |------|------|----|------|
@@ -136,7 +136,7 @@ ruff check AgentConsole\engine-bridge
 4. **不准寫真實機密**；`.env.example` 只放 `<YOUR_...>`；pre-commit 有機密掃描。
 5. 新 `.sh` 須 shellcheck 乾淨且 `bash -n` 過，且**只給容器內（Linux）用**。
 6. 新 Python：`open()`／`read_text()`／`write_text()` 一律帶 `encoding="utf-8"`；`os.replace`／`os.rename`／`shutil.move`／`Path.rename`／`Path.replace` 呼叫點須包 `try/except OSError`；平台專屬 API 罩 `sys.platform`；時間戳一律帶 tz（`datetime.now(timezone.utc)`）；`ruff check` 必須 0 錯。
-7. 不准動 `AutoClaude/`、`AISDLC_SDD/`、根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`。
+7. 不准動根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`；`AutoClaude/` 與 `AISDLC_SDD/` 只准改 ADR-XPLAT-016 §11 白名單列出的檔（AISDLC_SDD 只准 LATEST 原地改，凍結版一律不碰），白名單外仍禁止、以 `git diff --name-only` 機械核對。
 8. 暫存檔放 session 提供的暫存目錄，不放 repo；不自架背景等待後交卷；不再派子 agent。
 9. Write 被擋（例如檔名含 report）就改用 Bash heredoc 落檔。
 10. 「根因是 X」只是待驗假設，實證後才寫成結論；宣稱「已驗證／通過」必附當回合真跑的輸出。

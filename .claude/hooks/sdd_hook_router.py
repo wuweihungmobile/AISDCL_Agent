@@ -18,7 +18,7 @@ discovery of hook files）。因此從 monorepo 根啟動 session 時，
 - `SDD_ACTIVE_VERSION` 未設 → no-op（純 AutoClaude session 零污染）：
   PreToolUse/PostToolUse 完全靜默放行；SessionStart 印一行 dormant 提示
   （fail-loud，可用 `SDD_ROUTER_QUIET=1` 全靜音）。
-- `SDD_ACTIVE_VERSION` 已設（如 `0.18` 或 `v0.18`）→ exec 該版實體 hook，
+- `SDD_ACTIVE_VERSION` 已設（如 `X.YY` 或 `vX.YY`，值＝LATEST 版號）→ exec 該版實體 hook，
   原樣轉發 stdin / stdout / stderr / exit code。
 - 版本目錄不存在 → 不讓 CC 崩潰：印 WARN（additionalContext）後 exit 0。
 
@@ -94,7 +94,9 @@ def _noop(event_name: str) -> int:
                 "additionalContext": (
                     "[SDD-ROUTER] SDD 治理 hooks 休眠中（SDD_ACTIVE_VERSION 未設）。"
                     "若本 session 要對框架做 B 軌 dogfooding，請先設定 "
-                    "SDD_ACTIVE_VERSION（例：0.18）以啟用 FSM/context-ledger 守門；"
+                    "SDD_ACTIVE_VERSION（值＝LATEST 版號；現查 "
+                    "python AISDLC_SDD/scripts/sdd_version.py 去掉 AISDLC_SDD_v 前綴）"
+                    "以啟用 FSM/context-ledger 守門；"
                     "純 AutoClaude 工作可忽略此訊息（設 SDD_ROUTER_QUIET=1 可全靜音）。"
                 ),
             }
@@ -234,7 +236,7 @@ def main(argv: list[str]) -> int:
     if not re.fullmatch(r"\d+\.\d+", version):
         return _warn(
             event_name,
-            f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 格式非法（須形如 0.19）。"
+            f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 格式非法（須形如 X.YY）。"
             f"本次放行、未套用 SDD 守門。",
         )
     target = REPO_ROOT / "AISDLC_SDD" / f"AISDLC_SDD_v{version}" / ".claude" / "hooks" / script_name
@@ -253,7 +255,7 @@ def main(argv: list[str]) -> int:
         return _warn(
             event_name,
             f"[SDD-ROUTER][WARN] SDD_ACTIVE_VERSION={raw_ver!r} 指向的 hook 不存在："
-            f"{target}。請確認版本號（例：0.18）。本次放行、未套用 SDD 守門。",
+            f"{target}。版本號須為 LATEST（sdd_version.py 現查）。本次放行、未套用 SDD 守門。",
         )
 
     # DEF-43-004（R158 P4 擴充）：僅 SessionStart 算一次 LATEST 漂移 advisory 文字。 round-label-ok

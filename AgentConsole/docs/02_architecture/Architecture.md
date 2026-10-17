@@ -875,6 +875,21 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | 引擎設定檔位置（W7，供 E2E 斷言） | Bridge 為每個 run 把物化後的引擎設定寫成 `<ENGINE_WORKSPACE>/<runId>/config.yaml`（`runner.py` 的 `_materialize`，`RunPaths.config`），引擎以 `--config` 讀它；機密只走 `env`，不進這個檔。契約 §3.4.2、E2E-14 |
 | 落地差異 | W1-B 交卷須列出與本節的差異；主控回寫本節與 RTM `BR-*`；回寫前以 Bridge 實作與其 `/openapi.json` 為準 |
 
+### 10.2 SDD 寫入面（improving_115；ADR-XPLAT-016）
+
+> §10.1「AISDLC_SDD 唯讀查詢」列對三個 GET 端點仍成立；本小節只記 Bridge 新增**寫入面**的不變量。HTTP 欄位形狀以契約 v1.5（`API_Contract_P3-6.md`）為準，裁決、證據與白名單見 [ADR-XPLAT-016](../../../docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md)。
+
+| 不變量 | 內容 |
+|------|------|
+| 寫入只經 CLI | Bridge 以子行程呼叫 `python -m tools.fsm_runtime.fsm_runtime`：cwd＝SDD 版本目錄、`PYTHONPATH`＝版本目錄、`PYTHONDONTWRITEBYTECODE=1`、兩個規則遙測旗標 `0`、`SDD_STATE_DIR=<專案根>/build/reports/fsm`、`SDD_PROJECT=<專案鍵>`、不繼承任何 `BRIDGE_*`；Bridge 原始碼不得開寫 `FSM-STATE-*.yaml`（Rule 9 禁令 #1，AST 測試釘住）；每次呼叫必帶 `--must-exist`（現行 CLI 會替不存在的專案自動建檔） |
+| 動詞白名單 | `spec-frozen`（僅經 `POST /sdd/fsm/{project}:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed`；其餘動詞一律不呼叫。人工閘只有「核准凍結」；談判與委派同步是批次生命週期的自動動作 |
+| 權杖 | 兩個寫入入口（`:freeze`、含 `sdd` 區塊的 `POST /autoclaude/runs`）須帶標頭 `X-Bridge-Token`；Bridge 未設 `BRIDGE_SDD_WRITE_TOKEN`＝503 `sdd_write_disabled`、缺或錯＝403 `sdd_write_forbidden`；backend 的屬性是 `console.bridge.sdd-write-token`（未設時 freeze 回 503、execute 不送 `sdd` 並以警告出聲）；`_child_env` 剝除該變數，引擎子行程不持有；佔位字串或短於 32 字元＝兩端啟動即失敗 |
+| 狀態目錄 | `<root>/build/reports/fsm`；`GET /sdd/fsm*` 的 `root` 選填（過 `BRIDGE_ALLOWED_PATH_ROOTS`），不帶＝框架目錄（相容）；進入 Bridge 的專案名一律先過與 SDD `sanitize_component` 一致的鏡像淨化；引擎子行程只帶 `SDD_PROJECT`、不帶 `SDD_STATE_DIR`（繼承自 Bridge 環境的兩者先剝除） |
+| 綁定（Console 專案為錨，D-115-14） | 綁定＝`execution_path`（狀態目錄根）＋`sdd_project`（預設＝專案名，由 Bridge 淨化、第一次使用時寫回）；路徑 A 匯入帶選填 `targetProjectId` 併入既有專案；同一 `(execution_path, sdd_project)` 只能綁一個未刪除專案；核准凍結維持專案層端點、不帶 `binding` |
+| 凍結綁內容 | `frozen_stages[].spec_doc_digests`（換行正規化後的 UTF-8 文字的 sha256，與 adapter 的 `SddSpec.digest` 逐位元相同）；編譯、匯入、執行前、`resume`／`restore` 皆比對；不吻合＝409 `spec_digest_changed`、未凍結＝422 `spec_not_frozen`；規格出現卻未編成的 AT 不是錯誤（`/sdd/compile` 回 200＋`unmapped_at_ids`，Console 轉警告） |
+| 委派同步 | 建立順序＝唯讀預檢→鎖→FSM 寫入→工作區→spawn；終態 COMPLETED 與 CANCELLED⇒`delegate-exit done`（語意＝委派交還控制權，不是「成功」）、引擎升級型 FAILED⇒`failed`，其餘（PAUSED、額度停機、引擎異常、孤兒、Bridge 關閉）不動 FSM；新批次遇 FSM 仍在 AUTOCLAUDE_DELEGATED 時，依 `playbook_ref`（`run:<run_id>`）所指的 run 判定：終態或不存在⇒先 `delegate-exit done`（reason 記 RECLAIMED）再前進，活躍或外來委派⇒409 |
+| 失敗之後 | `failed`⇒ESCALATION（阻塞態）；恢復**只有人**（`resume-from-escalation --to IMPLEMENTATION`，R-9.5），Bridge 與 Console 不提供恢復動詞，只顯示狀態與可複製的恢復指令 |
+
 ## 11. 後端 API
 
 ### 11.1 端點與狀態碼語意

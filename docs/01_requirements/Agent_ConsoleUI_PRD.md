@@ -110,7 +110,7 @@
 | NFR-SEC-05 | Token 閘 | **禁止經 Console 提高 Token 預算上限以繞過安全收斂**；`halt_threshold_pct` 必 > `compact_threshold_pct`（後端硬校驗）|
 | NFR-OBS-01 | 狀態一致 | 四源真相一致：`FSM-STATE-{project}.yaml` / 引擎執行邏輯 / Console 渲染 / PG 持久化，抽查比對；漂移即缺陷 |
 | NFR-REL-03 | 備份 | §9.3「每日一次」備份**以 §12 PG18 備援/DR 方案為準**（WAL 連續歸檔 + 串流複製 standby + PITR + pgBackRest + **離站 S3/MinIO 預設啟用** + 每日 pg_dump 邏輯離站 + 定期真實 restore 演練）；離站備份為**必要**非選配 |
-| NFR-COMPAT-01 | 零侵入 | 不改 AutoClaude/AISDLC_SDD 核心；框架演進遵 Copy-on-Evolve（v0.0X 凍結、複製 v0.0(X+1)）|
+| NFR-COMPAT-01 | 零侵入 | 不改 AutoClaude/AISDLC_SDD 核心；框架演進遵 Copy-on-Evolve（v0.0X 凍結、複製 v0.0(X+1)）。🔴 註記（2026-10-17 整合輪 115，掌舵者 T1「也調整 AutoClaude、AgentConsole 等做適當搭配」）：本列口徑改為**最小侵入白名單**——兩引擎只准改 `docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md` §11 列出的檔、白名單外仍禁止；AISDLC_SDD 日常演化為原地改 LATEST（Copy-on-Evolve 只在需保留回歸快照時開新版，見 `AISDLC_SDD/CLAUDE.md`〈版本狀態〉）。原文保留 |
 
 ### 0.6 系統參數真相校正（與 §5.5.1.1 合併）
 

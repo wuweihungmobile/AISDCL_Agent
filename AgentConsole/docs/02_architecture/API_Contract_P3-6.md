@@ -1,12 +1,33 @@
 # API 契約 — Phase 3～6（BRD/PRD 匯入、專案執行、專案監控、系統設定）
 
-**版本**：v1.4（W7 第二批：掌舵者授權的 D-16〔AISDLC_SDD 接入〕、D-17〔深度探針〕、D-18〔待審批清單〕、D-19〔refresh token 撤銷名單〕與 D-20〔文件登記〕；v1.3 為 W7 第一批，D-11〔引擎旋鈕查證與等級 6～10 的 `engineCapabilities`〕與 D-12〔資源使用情況〕；v1.2 為 W5 修復波，W4 獨立 QA 缺陷修復的 22 項主控裁決〔C-1～C-22〕與契約漂移一次回寫；v1.1 為 v1.0〔6df940c〕之後套用 11 項未決問題裁決並回應獨立 Architect 審查的版本）｜**日期**：2026-10-16｜**作者角色**：SA／SD
+**版本**：v1.5（整合輪 115〔`docs/04_planning/AutoSDD_improving_115.md`〕：把 AISDLC_SDD 接成 Console × Bridge × AutoClaude × SDD 的系統迴圈，主控裁決 D-115-01～16、18，契約先行；已與 ADR-XPLAT-016 對齊（處置見 §6.8.6）；v1.4 為 W7 第二批：掌舵者授權的 D-16〔AISDLC_SDD 接入〕、D-17〔深度探針〕、D-18〔待審批清單〕、D-19〔refresh token 撤銷名單〕與 D-20〔文件登記〕；v1.3 為 W7 第一批，D-11〔引擎旋鈕查證與等級 6～10 的 `engineCapabilities`〕與 D-12〔資源使用情況〕；v1.2 為 W5 修復波，W4 獨立 QA 缺陷修復的 22 項主控裁決〔C-1～C-22〕與契約漂移一次回寫；v1.1 為 v1.0〔6df940c〕之後套用 11 項未決問題裁決並回應獨立 Architect 審查的版本）｜**日期**：2026-10-17（v1.5；v1.4 為 2026-10-16）｜**作者角色**：SA／SD
 **讀者**：後端開發者（Spring Boot 4.1／Java 21）、前端開發者（Next.js 16）、QA（依本契約驗收）
 **機器可讀版**：[openapi-p3-6.yaml](openapi-p3-6.yaml)（OpenAPI 3.1；schema 名稱、欄位與本文一致；兩者衝突以本文為準並回報修正）
-**對應需求**：PRD §5.2～§5.5、§7.1.4～§7.1.8、附錄 B；RTM `API-IMP／SGN／EXE／MON／NTF／SSE／SET／ALR／AUT／DAG`（v1.2 增 `API-MON-08`、`API-PRJ-06`、`BR-26`；v1.4 增 `API-ENG-01`、`API-SGN-05`、`API-AUTH-03`）、`US-I／E／M／S`、`NFR-SEC-03／04／05`、`NFR-OBS-01`（v1.2 增 `NFR-9.3-04`、`NFR-9.4-04`；v1.3 不增新 ID，只為 `API-AUT-06` 與 `US-M-10` 的「資源使用情況」補可驗證的情境，見附錄 E 與 E2E-14；v1.4 以 E2E-15 補強 `NFR-OBS-01` 的 FSM 對照，並以 E2E-16 驗 D-17～D-19）
+**對應需求**：PRD §5.2～§5.5、§7.1.4～§7.1.8、附錄 B；RTM `API-IMP／SGN／EXE／MON／NTF／SSE／SET／ALR／AUT／DAG`（v1.2 增 `API-MON-08`、`API-PRJ-06`、`BR-26`；v1.4 增 `API-ENG-01`、`API-SGN-05`、`API-AUTH-03`）、`US-I／E／M／S`、`NFR-SEC-03／04／05`、`NFR-OBS-01`（v1.2 增 `NFR-9.3-04`、`NFR-9.4-04`；v1.3 不增新 ID，只為 `API-AUT-06` 與 `US-M-10` 的「資源使用情況」補可驗證的情境，見附錄 E 與 E2E-14；v1.4 以 E2E-15 補強 `NFR-OBS-01` 的 FSM 對照，並以 E2E-16 驗 D-17～D-19；v1.5 增 `API-PRJ-07`、`API-SGN-06`、`API-EXE-15`、`API-EXE-16`、`API-ENG-02`、`API-IMP-11`、`API-IMP-12`、`API-PRJ-08`、`BR-27`～`BR-33`、`UI-SDD-01`～`UI-SDD-03`，並以 E2E-17 補強 `NFR-OBS-01` 的 FSM 四源對拍；新列草案見 §6.8.4）
 
 > **本文的使用方式**：開發者照 §1（端點）、§2（SSE）、§3（Bridge 與讀模型）施工；QA 照 §5（E2E 情境）與附錄 B（reason 常數）驗收；§4 讓前端確認「設計稿每個元素有沒有資料來源」；§6 列出本文與其他文件不一致處的裁決。
-> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。v1.2 的 22 項變動（C-1～C-22）同樣全是主控已定的裁決（§6.5），沒有待裁決的規格點。v1.3 的 D-11、D-12 是主控授權的裁決（§6.6.1）；§6.6.3 列的偏離點主控已於 2026-10-16 確認採方案 A，沒有待裁決的規格點。v1.4 的 D-16～D-20 同樣是主控授權的裁決（§6.7.1）；SA 落筆時提出的 Q1～Q8 八點，主控已於 2026-10-16 全部裁決（§6.7.3 保留決策紀錄），所以本文沒有待裁決的規格點。
+> v1.1 起沒有待裁決的規格點：v1.0 的 11 項未決問題已由主控裁決（§6.3），審查缺陷已逐條回應（§6.4），其餘章節都是可直接施工的定案。v1.2 的 22 項變動（C-1～C-22）同樣全是主控已定的裁決（§6.5），沒有待裁決的規格點。v1.3 的 D-11、D-12 是主控授權的裁決（§6.6.1）；§6.6.3 列的偏離點主控已於 2026-10-16 確認採方案 A，沒有待裁決的規格點。v1.4 的 D-16～D-20 同樣是主控授權的裁決（§6.7.1）；SA 落筆時提出的 Q1～Q8 八點，主控已於 2026-10-16 全部裁決（§6.7.3 保留決策紀錄），所以本文沒有待裁決的規格點。**v1.5**：D-115-01～16 與 D-115-18 是主控已定的裁決（§6.8.1），SA 初稿的 Q1～Q5 與 S1～S8 已結案（§6.8.3），本文已與 ADR-016 對齊（§6.8.6 A）。§6.8.6 B 列的 14 項「ADR 沒寫、契約暫定」的靜默處中，#1、#2、#3、#6、#14 已由 D-115-18 的五項裁決定案，其餘為契約暫定、待 SD 或 Dev 在落地時確認；Dev-Bridge 等已依 ADR 開工，**契約與 ADR 衝突時以 ADR 為準**，並回寫本文。
+
+**版本沿革**
+
+| 版本 | 日期 | 範圍 | 對應裁決／來源 |
+|------|------|------|----------------|
+| v1.0 | — | 初版（commit 6df940c） | — |
+| v1.1 | 2026-10-15 | 套用 11 項未決問題裁決並回應獨立 Architect 審查 | §6.3、§6.4（AR-01～21、TBC-1～3） |
+| v1.2 | 2026-10-15 | W5 修復波：W4 獨立 QA 缺陷修復與契約漂移回寫 | C-1～C-22（§6.5） |
+| v1.3 | 2026-10-16 | W7 第一批：引擎旋鈕查證與資源使用情況 | D-11、D-12（§6.6） |
+| v1.4 | 2026-10-16 | W7 第二批：AISDLC_SDD 接入、深度探針、待審批清單、refresh token 撤銷 | D-16～D-20（§6.7） |
+| v1.5 | 2026-10-17 | 整合輪 115：SDD 迴圈（批次治理、人工閘寫入、FSM 同步、追溯覆蓋、專案綁定） | D-115-01～13（§6.8；`AutoSDD_improving_115.md` §6） |
+| v1.5（ADR 對齊） | 2026-10-17 | v1.5 與 ADR-XPLAT-016 對齊：Console 專案為錨（凍結請求無 `binding`）、委派退出語意與回收點、AT 文法與逆向 RTM 歸屬、摘要／權杖／CLI rc／專案名規則等值落定；D-115-18：SDD run 的 `:resume`／`/restore` 也帶權杖（共四個呼叫）、含 `/` 的專案原名降級為已知邊界 | D-115-14～16、18；ADR-XPLAT-016 附錄 A、B（§6.8.6） |
+
+> **v1.5 變更摘要**（逐條對照見 §6.8；整合輪 115，主控裁決 D-115-01～16、18，契約先行；證據表見 §6.8.2；**已與 ADR-XPLAT-016〔下稱 ADR-016，Proposed〕對齊**，逐項處置與仍待確認的靜默處見 §6.8.6；環境契約、CLI 動詞與 rc、摘要、權杖與最小侵入白名單的完整規格一律以 ADR-016 為唯一真相源，本文只引用位置，並在需要機械斷言處逐字引用其值）：
+> 1. **SDD 批次（G-01、G-06、G-08；D-115-06）**：Bridge `POST /autoclaude/runs` 增選填頂層 `sdd` 區塊——Bridge 伺服端預檢（凍結、三點摘要、FSM 狀態）後注入 `workflow_type`／`workflow_path`（有 `spec_file` 時是檔案路徑）與引擎環境 `SDD_PROJECT`，外部契約仍不開 `workflow_*`；Console 對「範圍內任務全為 SDD 來源」的批次送 `sdd`，step_id 沿用規格的 `sdd-<場景>-<at id 小寫>`，混合批次不啟用並在 execute 的 201 以 `warnings[]` 出聲（§1.10.6、§3.1.6、§3.4.1）。
+> 2. **人工閘寫入（G-09；D-115-01、D-115-03）**：Bridge 新增 `POST /sdd/fsm/{project}:freeze`（唯一的 FSM 寫入動詞，須帶 `X-Bridge-Token`，經 FSMRuntime CLI 子行程）；Console 新增 `POST /api/v1/projects/{id}/sdd/freeze`（approver＝JWT subject；**沒有 `binding` 欄**）。Bridge 原始碼不得直接開寫 `FSM-STATE-*.yaml`；權杖不進引擎子行程（§1.10.2、§3.1.4）。
+> 3. **FSM 同步（G-04；D-115-04、D-115-10、D-115-15）**：SDD 批次 spawn 前依預檢表談判並委派進入（`TEST_CONTRACT_NEGOTIATED` 自癒、`AUTOCLAUDE_DELEGATED` 回收點）；`COMPLETED` 與 `CANCELLED` 以 `done` 交還控制權、引擎升級型 `FAILED` 以 `failed` 進 `ESCALATION`（恢復留在 SDD session）；`PAUSED`、額度停機、孤兒不動；`resume`／`restore` 重驗（§3.1.6）。
+> 4. **追溯覆蓋（G-05）**：Bridge `GET /autoclaude/runs/{id}/rtm`、Console `GET /api/v1/executions/{runId}/rtm`，一律標諮詢視圖；有無法歸屬 AC 的 AT 時 `fullyCovered=false`（§1.10.3、§3.1.4）。
+> 5. **Console 專案為錨（G-07、G-13；D-115-02、D-115-14）**：`projects` 增三欄與部分唯一索引（Flyway V12）；FSM 專案預設＝專案名；路徑 A 匯入帶選填 `targetProjectId` 併入既有專案；新增 `PUT /api/v1/projects/{id}/sdd-binding` 編輯綁定；`GET /sdd/fsm*` 與 `GET /engines/sdd` 依專案帶 `root`，回應加 `phase`、`escalation_history`（尾 5 筆）、`escalation_provenance`、`fsm_project`，ESCALATION 時加 `recovery`；專案名改由 Bridge 的淨化鏡像處理（S-10）（§1.10.4、§1.10.5、§1.10.7、§1.10.8、§3.1.4、§3.1.5）。
+> 6. **編譯與路徑 A（S-03、S-04、S-12、G-08；D-115-16）**：`POST /sdd/compile` 增 `spec_file`、`fsm_project`，回應增 `spec_file`、`fsm_project`、`frozen_digest`、`unmapped_at_ids[]`、`warnings[]`，凍結後內容已變更＝409；AT 文法 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`、前兩段＝所屬 AC；路徑 A 補齊 `max_retries`／`maintain_context`／`spec_digest`／`weak_regex`，並收下 `spec_format_version`（§3.1.4、§3.3.2）。
+> 7. **新路徑**：console-api 3 個（`POST /projects/{id}/sdd/freeze`、`GET /executions/{runId}/rtm`、`PUT /projects/{id}/sdd-binding`；`OpenApiIT` 路徑 58→61、操作 67→70）、Bridge 2 個（`POST /sdd/fsm/{project}:freeze`、`GET /autoclaude/runs/{id}/rtm`）；E2E-17 與 Bridge 對拍測試清單見 §5。
 
 > **v1.4 變更摘要**（逐條對照見 §6.7；W7 第二批，掌舵者授權的 D-16～D-20，契約先行；證據表見 §6.7.2）：
 > 1. **AISDLC_SDD 接入（D-16）**：Bridge 新增 `GET /sdd/fsm`（FSM 專案清單），`GET /sdd/fsm/{project}` 加 `human_pending`／`retry_history`／`rtm_coverage`（§3.1.3）；`GET /health/deep` 加 `sdd` 檢查（§3.1.1）；console-api 新增 `GET /api/v1/engines/sdd`（§1.7.1），監控頁新增「AISDLC_SDD 引擎」卡（§4.3 M-20）與 E2E-15。三項偏離 PRD 的決定（FSM 不走 SSE 改輪詢、分解器只用 `GoalDecomposer`、signoff 與 HUMAN_PENDING 只做語意對映且 Console 唯讀）登記於 ADR-001 D22。
@@ -94,6 +115,8 @@
 6. **501 已退役**（C-4）：PDF 報表自 v1.2 起回 200（§1.3.7）；`PDF 報表尚未提供（W5）` 常數與後端的 `NotImplementedYetException` 一併移除，附錄 B.2 不再列它。
 7. **v1.4 的回應本文欄位 `reason` 不是 `ApiError.reason`**（D-16）：`GET /engines/sdd` 的 200 回應有一個 `data.reason` 欄位（§1.7.1），值是英文識別字（`bridge_unreachable`、`sdd_unavailable`、`bridge_error`、`fsm_not_found`、`fsm_state_unreadable`），描述「引擎目前的狀態」，**不是錯誤封包**；它們不進附錄 B.2，另列附錄 B.4，也不得拿來當 HTTP 錯誤處理的判斷依據（該端點在引擎不可用時仍回 200，同 §1.2.3 的慣例）。
 
+8. **v1.5 新增的五個 `ApiError.reason` 與一個 404 例外都是英文識別字**（整合輪 115；已與 ADR-016 對齊）：`sdd_fsm_state_conflict`、`sdd_fsm_not_found`、`sdd_spec_digest_changed`、`sdd_binding_conflict`、`sdd_write_disabled`（由後端回；SA 初稿的 `sdd_not_bound` 隨 D-115-14 移除），以及 `GET /executions/{runId}/rtm` 的 404 `rtm_not_found`——**本端點是「404 的 `reason` 省略」慣例的唯一例外**，因為「批次不存在」與「批次存在但沒有追溯報告」必須能機械區分。規則同第 5 點（逐字、前後端各一份常數、不得用 `message` 判斷）。此外 `GET /engines/sdd` 的回應欄位 `data.reason` 新增一個值 `sdd_root_rejected`（回應欄位，不是 `ApiError.reason`，同第 7 點，附錄 B.4）。全部列在附錄 B.5。其餘 SDD 相關錯誤一律沿用既有 reason（`SDD 規格檢查未通過`、`引擎拒絕此請求`、`引擎橋接服務錯誤`等，§3.2 的新列）。
+
 ### 0.4 認證、角色、CORS 與限流
 
 **角色矩陣**（最低角色；ADMIN ⊃ OPERATOR ⊃ VIEWER）：
@@ -106,6 +129,9 @@
 | 執行寫入（execute／pause／resume／cancel／restore／review） | — | ✅ | ✅ |
 | 監控讀取（metrics／趨勢／`task-totals`／alerts／logs／report／notifications） | ✅ | ✅ | ✅ |
 | 引擎狀態（`GET /engines/sdd`）、待審批清單（`GET /signoffs/pending`）（v1.4） | ✅ | ✅ | ✅ |
+| 執行追溯覆蓋（`GET /executions/{runId}/rtm`）（v1.5） | ✅ | ✅ | ✅ |
+| SDD 核准凍結（`POST /projects/{id}/sdd/freeze`；人工閘，角色與 signoff 同級）（v1.5） | — | ✅ | ✅ |
+| SDD 綁定編輯（`PUT /projects/{id}/sdd-binding`；角色與 freeze 同級）（v1.5） | — | ✅ | ✅ |
 | 告警確認 | — | ✅ | ✅ |
 | 專案復原（`POST /projects/{id}/restore`）、檢視已刪除專案（`GET /projects?deleted=true`；VIEWER → 403 `ACCESS_DENIED`，由 controller 檢查，與 `reveal` 同型） | — | ✅ | ✅ |
 | 設定讀取（`GET /settings*`、`history`；加密值遮罩） | ✅ | ✅ | ✅ |
@@ -130,7 +156,7 @@
 
 ### 0.5 資料庫增補（Flyway；契約所需）
 
-現況：V1～V4 已套用（`V3__review_requests`、`V4__monitor_alerts` 在 Phase 1+2 已建表）。本契約涉及 **V5～V11**；版號依任務書分工：V5、V6 屬後端第一棒（W3-B1），V7 屬後端第二棒（W3-B2，在 B1 交卷後的同一棵樹上接續，所以版號不會撞），**V8、V9 屬 W5-BE（v1.2，在 V7 之後接續）**，**V10 屬 W7-BE（v1.3，在 V9 之後接續）**，**V11 屬 W7-BE（v1.4，在 V10 之後接續；只有一支 `UPDATE`，沒有新欄位）**；已套用的 V1～V9 **不得修改**。
+現況：V1～V4 已套用（`V3__review_requests`、`V4__monitor_alerts` 在 Phase 1+2 已建表）。本契約涉及 **V5～V12**（V12 為 v1.5 增補，見該節）；版號依任務書分工：V5、V6 屬後端第一棒（W3-B1），V7 屬後端第二棒（W3-B2，在 B1 交卷後的同一棵樹上接續，所以版號不會撞），**V8、V9 屬 W5-BE（v1.2，在 V7 之後接續）**，**V10 屬 W7-BE（v1.3，在 V9 之後接續）**，**V11 屬 W7-BE（v1.4，在 V10 之後接續；只有一支 `UPDATE`，沒有新欄位）**；已套用的 V1～V9 **不得修改**。
 
 **V5 `V5__seed_engine_configs.sql`**（W3-B1；Architecture §11.4 的 V5 補充鍵，加上審查回應的欄位與預設值校正）：①新增下列九個鍵；②補全部鍵的 `validation_rule`；③新增欄位 `system_configs.impact_note VARCHAR(500)`（US-S-08）；④新增 `import_records.parse_path`、`import_records.last_parse_errors`（AR-07，見下方 SQL）；⑤預設值校正（AR-06、AR-09，見下方 SQL）。
 
@@ -268,6 +294,23 @@ UPDATE console.system_configs SET impact_note = '<附錄 C.5 healthCheckPath 的
 
 寫入規則與限制：①沒有新欄位、沒有新表，`ddl-auto=validate` 不受影響。②預設值的真相源是 `system_configs.default_value`（V2 種子，本支遷移校正）與 `BridgeEndpoints.DEFAULT_HEALTH_PATH`（設定缺席時的程式內兜底，`/health` 改 `/health/deep`）；`ConfigCatalog` 只放中繼資料（effect 等），沒有預設值。③管理員**刻意**把值設成 `/health`（與舊預設相同）的既有部署會被一併改成 `/health/deep`——資料庫分不出「刻意」與「沒動過」（V5 ⑤ 同樣的取捨）；要保留淺探測，升級後把值改回 `/health`（附錄 C.5 的驗證規則允許）。④`SchemaMigrationIT` 驗三種情形：舊預設→被改成 `/health/deep`；管理員改成其他值（例 `/custom`）→不動；已是 `/health/deep`→不動；`impact_note` 逐字等於附錄 C.5。
 
+**V12 `V12__project_sdd_binding.sql`**（W3-BE；v1.5；G-07、D-115-14；在 V11 之後接續；三個新欄位加一個部分唯一索引；ADR-016 §7.2）：
+
+```sql
+-- Console 專案為錨的 SDD 綁定：三欄皆可 NULL；既有專案升級後皆為 NULL，不回填、不猜測
+ALTER TABLE console.projects
+    ADD COLUMN sdd_project   VARCHAR(100),   -- FSM 專案鍵（第一次使用時寫回標準鍵，或由使用者編輯）；NULL＝用預設（專案名）
+    ADD COLUMN sdd_spec_dir  VARCHAR(500),   -- 規格檔所在目錄（絕對路徑）＝編譯回應 spec_path 的父目錄；與 execution_path 同長度上限
+    ADD COLUMN sdd_spec_file VARCHAR(500);   -- 規格檔（絕對路徑）＝編譯回應的 spec_path；NULL＝尚未用路徑 A 匯入規格
+
+-- 一個 FSM 專案只對應一個「未軟刪除」的 Console 專案（NULL 不佔位）
+CREATE UNIQUE INDEX ux_projects_sdd_binding
+    ON console.projects (execution_path, sdd_project)
+    WHERE sdd_project IS NOT NULL AND is_deleted IS NOT TRUE;
+```
+
+寫入規則與限制：①寫入點只有三處：(a) `POST /projects/{id}/sdd/freeze` 的第 5 項（§1.10.2）與 `POST /import/{id}/confirm`（§1.10.8）把 Bridge 回的標準鍵寫進 `sdd_project`（原為 NULL 時）；(b) `POST /import/{id}/confirm` 把 `ParsedResult.sddSpecDir／sddSpecFile`（路徑 A 才有值，§3.3.2）寫進 `sdd_spec_dir`／`sdd_spec_file`（建立新專案時一併帶入，併入既有專案時冪等更新）；(c) `PUT /projects/{id}/sdd-binding`（§1.10.7）編輯 `sdd_project`。②`POST`／`PUT /projects` 的請求不收這三欄（帶了也不採用）；沒有「解除綁定」端點——編輯 `sdd_project`（含清成 NULL）即改綁。③`ProjectEntity`、`NewProject`、`ProjectResponse`、`ProjectDetailResponse` 同步加欄（`ddl-auto=validate`）；`ProjectSummaryResponse`（列表）不帶。④**部分唯一索引**：`(execution_path, sdd_project)` 在 `sdd_project` 非空且 `is_deleted IS NOT TRUE` 的列中唯一（`is_deleted` 是可為 NULL 的布林，所以用 `IS NOT TRUE`）；Backend 在任何 Bridge 寫入呼叫之前先檢查、後寫入，衝突回 409 `sdd_binding_conflict`，索引是最後的兜底（寫入時撞索引一律轉成同一個 409）。⑤`SchemaMigrationIT` 驗：三欄存在、型別為 varchar（長度 100／500／500）、可 NULL，索引存在且為部分索引（兩個未刪專案同 `(execution_path, sdd_project)` 失敗；其中一個軟刪除後可成立；`sdd_project` 為 NULL 的多列不衝突）；既有專案列升級後三欄為 NULL。
+
 ### 0.6 名詞對照
 
 | Bridge | Console | 說明 |
@@ -366,10 +409,26 @@ Phase 3～6 落地時，下列 Phase 1+2 的既有內容必然受影響；任務
 | `SchemaMigrationIT` | Flyway 版本改 `containsExactly("1",…,"11")`；V11 的三種情形（§0.5 V11）；`V5UpgradeMigrationIT` 的升級帶資料測試補 V11 |
 | 前端 | `lib/api/endpoints.ts` 加 `getSddEngine(project?)`、`getPendingSignoffs(limit?)`、`logout(refreshToken)`；`lib/auth/AuthProvider.tsx` 的 `logout()` 先 fire-and-forget 呼叫 `logout`；`useSignoffQueue` 改以 `getPendingSignoffs` 為資料來源（§4.5 G-10）；mock fixture（`tests/e2e/settingsFixture.ts` 的 `healthCheckPath` 預設）與 e2e 的假 Bridge 補 `/health/deep`（§5.0.1） |
 
+**v1.5 追加（W2-Bridge／W3-BE／W3-FE 同步；同樣是改，不是刪；已與 ADR-016 對齊）**
+
+| 測試／程式 | 改動 |
+|-----------|------|
+| `OpenApiIT` 的 `EXPECTED` 路徑表 | 再加 3 個路徑——`POST /api/v1/projects/{id}/sdd/freeze`、`GET /api/v1/executions/{runId}/rtm`、`PUT /api/v1/projects/{id}/sdd-binding`；路徑 58→61、操作 67→70；`GET /api/v1/engines/sdd` 多一個 `projectId` 查詢參數與 404 文件化、`POST /api/v1/projects/{projectId}/execute` 的 201 schema 多 `warnings`、`POST /api/v1/import/{id}/parse` 的請求 schema 多 `targetProjectId`（皆不是新路徑） |
+| `SchemaMigrationIT` | Flyway 版本改 `containsExactly("1",…,"12")`；`projects` 多三欄（varchar 100／500／500、可 NULL）與部分唯一索引 `ux_projects_sdd_binding`；`V5UpgradeMigrationIT` 的升級帶資料測試補 V12（既有專案升級後三欄為 NULL） |
+| `SecurityConfig`／`RbacIT` | 不必動 matcher：freeze、sdd-binding 落在「GET 之外一律 OPERATOR 以上」、rtm 落在「`GET /api/v1/**` 為 VIEWER 以上」；`RbacIT` 補：VIEWER 對 freeze、sdd-binding 回 403、對 rtm 回 200，未認證三者皆 401 |
+| `ErrorResponseDocumentation` | `CONFLICT_ENDPOINTS` 補 freeze、sdd-binding 與 confirm（併入）；rtm 的 404 `rtm_not_found` 與 freeze／execute／resume／restore 的 503 `sdd_write_disabled` 文件化 |
+| `application.yml`／`BridgeProperties`／`docker-compose.yml`／`.env.example` | `console.bridge.sdd-write-token`（`${BRIDGE_SDD_WRITE_TOKEN:}`；有設但短於 32 字元或仍是 `<…>` 佔位⇒啟動失敗）；compose 對 backend 與 engine-bridge 都傳 `BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}`；`.env.example` 只放 `<YOUR_BRIDGE_SDD_WRITE_TOKEN_MIN_32_CHARS>`（ADR-016 §9） |
+| `AgentBridge`／`BridgeHttpAdapter`／`BridgeEndpoints` | `SddTask` 加 `maxRetries`、`maintainContext`、`specDigest`；`SddCompileResult` 加 `specFile`、`fsmProject`、`frozenDigest`、`specFormatVersion`、`unmappedAtIds`、`warnings`（既有的 `specPath` 供回填）；`sddCompile(specDir, specFile, fsmProject)`；`StartRunRequest` 加 `sdd`；新增 `sddFreeze(project, request)`（POST，2 秒／40 秒，不重試）、`getRunRtm(runId)`（GET，2 秒／3 秒，不重試）；`sddFsmList(root)`、`sddFsm(project, root)` 加選填 `root`；`startRun` 的讀取逾時依是否帶 `sdd` 取 30／90 秒；`resumeRun`、`restoreRun` 的讀取逾時由 15 秒改 30 秒（主控裁決；§3.1 呼叫表）；`X-Bridge-Token` 附在 `sddFreeze`、帶 `sdd` 的 `startRun`，以及 `resumeRun`、`restoreRun`（D-115-18：SDD run 的這兩個呼叫也驗權杖；console-api 不記錄批次是否為 SDD，所以一律附，由 Bridge 只對 SDD run 驗），**不得寫進日誌、錯誤封包或 `details`** |
+| 新增：SDD 治理用例（建議名 `SddGovernanceService`） | freeze 用例（approver＝JWT subject、稽核、唯讀 GET 取標準鍵、綁定唯一性先檢查後寫入與寫回、錯誤對映，§1.10.2）；binding 編輯（§1.10.7）；`projectId`→`root` 與有效 FSM 專案的解析（與 `SddEngineQueryService` 共用，§1.10.4、§1.10.5）；SDD 批次資格判定與 `sdd` 區塊組裝（§1.10.6）；`ErrorReasons` 補附錄 B.5 的五個常數 |
+| `ImportParser`／`ParseOptions`／`ParsedResult`／`ImportService.confirm`／`NewProject` | `ParseOptions` 加 `specFile`、`sddProject`、`targetProjectId`；`ParsedResult` 加四個伺服器擁有欄位；`sddTask()` 填 `maxRetries` 並把 `maintainContext` 放進 `passCriteriaSpec`；`confirm` 帶 `targetProjectId` 時併入目標專案（§1.10.8）、否則把綁定帶進新專案；新增 `at_unmapped`、`frozen_digest_absent`、`state_dir_not_ignored` 警告；🔴 `ImportParser.probeSpec` 對 409 `spec_digest_changed` 明確丟拒絕（不得降級成略過路徑 A；回歸測試具名，§3.3.2 第 9 點） |
+| `ExecutionPlanner`／`PlaybookBuilder`／`RunLauncher` | SDD 批次的 step_id 沿用 `passCriteriaSpec.stepId`（`dag.nodes[].stepId` 同）；playbook 任務多送 `maintain_context`、`spec_digest`、`weak_regex`；`RunLauncher` 依資格送 `sdd` 區塊並把 `warnings`（含 Bridge 回的 `sdd_frozen_digest_absent`）放進 execute 的 201；補償刪除規則不變（§3.4.1）；resume／restore 對 SDD run 的 Bridge 失敗對映（§3.2） |
+| `MiniBridge`（測試用迷你 Bridge） | 補 `POST /sdd/fsm/{project}:freeze`（可切換 200／403／409／503）、`GET /autoclaude/runs/{id}/rtm`（有資料／404／422 三種）、`GET /sdd/fsm?root=`、`GET /sdd/fsm/{project}`（新欄位）、`/sdd/compile` 的新請求與回應欄位（含 409）；`POST /autoclaude/runs` 收 `sdd` 區塊 |
+| 前端 | `lib/api/endpoints.ts` 加 `freezeProjectSdd(id, body)`、`updateProjectSddBinding(id, body)`、`getExecutionRtm(runId)`；`getSddEngine` 加 `projectId`；`lib/domain/sdd.ts` 加階段字典與顯示規則（§4.7）；專案詳情「SDD 治理」區、執行詳情「追溯覆蓋（諮詢）」面板與 SDD 卡的階段進度為新元件；匯入頁加「併入既有專案」選擇；mock fixture 與 e2e 的假 Bridge 補上述路由 |
+
 ---
 ## 1. 端點總表與逐端點契約
 
-### 1.0 總表（45 個端點；SSE 兩條詳見 §2；#41～#42 為 v1.2 新增、#43～#45 為 v1.4 新增）
+### 1.0 總表（45 個端點；SSE 兩條詳見 §2；#41～#42 為 v1.2 新增、#43～#45 為 v1.4 新增；v1.5 另增 #46～#48，共 48 個）
 
 「補」＝PRD 未列、為設計稿或 Architecture 所需的補充端點（§6 D-05、D-10…）。Phase 2 已實作的 `POST /projects|goals|tasks/{id}/signoff`（`API-SGN-02～04`）不重複定義。
 
@@ -420,8 +479,13 @@ Phase 3～6 落地時，下列 Phase 1+2 的既有內容必然受影響；任務
 | 43 | `GET /api/v1/engines/sdd`（v1.4 補，D-16） | VIEWER | `project?` → `SddEngineStatusResponse`（200；Bridge 不可達也回 200） | API-ENG-01／NFR-OBS-01、BR-13、BR-14 |
 | 44 | `GET /api/v1/signoffs/pending`（v1.4 補，D-18） | VIEWER | `limit?` → `PendingSignoffsResponse`（200） | API-SGN-05／US-E-07 |
 | 45 | `POST /api/v1/auth/logout`（v1.4 補，D-19；Phase 1+2 資源，免認證） | 免認證 | `LogoutRequest` → 無內容（204） | API-AUTH-03 |
+| 46 | `POST /api/v1/projects/{id}/sdd/freeze`（v1.5 補，D-115-03；Phase 2 資源） | OPERATOR | `SddFreezeRequest` → `SddFsmState`（200） | API-SGN-06、API-PRJ-07 |
+| 47 | `GET /api/v1/executions/{runId}/rtm`（v1.5 補，G-05） | VIEWER | → `ExecutionRtmResponse`（200；沒有報告為 404 `rtm_not_found`） | API-EXE-16 |
+| 48 | `PUT /api/v1/projects/{id}/sdd-binding`（v1.5 補，D-115-14；Phase 2 資源） | OPERATOR | `SddBindingRequest` → `ProjectDetailResponse`（200；唯一性衝突為 409 `sdd_binding_conflict`） | API-PRJ-08 |
 
 v1.2 另有三處是改動 Phase 2 既有端點（不編號，詳見 §1.6）：`GET /api/v1/projects` 新增查詢參數 `deleted`（§1.6.2）；`DELETE /api/v1/goals/{id}`、`DELETE /api/v1/tasks/{id}` 新增 409 `project_executing`（§1.6.3）；`POST /api/v1/tasks/{id}/retry` 的「不受 `maxRetries` 限制」明文（§1.6.4）。
+
+v1.5 另有改動既有端點與 schema 的幾處（不編號，詳見 §1.10）：`GET /api/v1/engines/sdd` 新增 `projectId` 查詢參數與回應欄位 `phase`、`escalationHistory`、`escalationProvenance`、`fsmProject`、`recovery`（§1.10.4）；`POST /api/v1/projects/{projectId}/execute` 新增 SDD 批次行為與 201 的 `warnings[]`（§1.10.6）；`ProjectResponse`／`ProjectDetailResponse` 新增綁定三欄（§1.10.5）；匯入的 `ParseOptions`（含 `targetProjectId`）／`ParsedResult`／`ParseWarning` 新增欄位與警告碼，`confirm` 可併入既有專案（§1.10.8、§3.3.2）。
 
 ---
 
@@ -533,6 +597,8 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 502／504 | `引擎橋接服務無法連線`／`引擎橋接服務逾時` | | 路徑 A（明示 specDir）或 C 的 Bridge 不可達 |
 | 401／403／429 | 通用 | | |
 
+- **v1.5（D-115-14）**：`ParseOptions` 另有選填欄位 `specFile`、`sddProject`、`targetProjectId`（路徑 A；規則見 §3.3.2 的 v1.5 補充與 §1.10.8）。帶 `targetProjectId` 時多出：404（訊息 `專案不存在或已刪除：<id>`，無 reason）與 409 `sdd_binding_conflict`（`details={cause, field?, …}`，附錄 B.5）；`SDD 規格檢查未通過` 的 `bridgeReason` 另可能是 `spec_digest_changed`（凍結後規格內容已變更，探測模式同樣 fail-closed）。解析結果 `warnings[]` 另有 `at_unmapped`、`frozen_digest_absent`、`state_dir_not_ignored`。
+
 #### 1.1.4 `PUT /api/v1/import/{id}/result`　編輯解析結果　〔API-IMP-04／US-I-04、10〕
 
 - **角色**：OPERATOR。**Bridge**：無。
@@ -574,6 +640,8 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 409 | `已匯入` | `{projectId}` | 狀態 IMPORTED |
 | 409 | `匯入記錄狀態不允許此操作` | `{action:"confirm",status}` | UPLOADED／PARSING／REJECTED |
 | 401／403／429 | 通用 | | |
+
+- **v1.5（D-115-14）**：`parse` 帶 `targetProjectId` 的記錄，`confirm` **不建立新專案**，改為把草稿的目標與任務併入目標專案並回填 SDD 綁定（規則見 §1.10.8；成功仍回 **201**，回傳的是目標專案；匯入記錄的 `projectId`＝目標專案）；多出 409 `sdd_binding_conflict`（`cause` 為 `target_bound_differently` 或 `already_bound_elsewhere`）與 404（目標專案已被刪除）。不帶 `targetProjectId` 的 `confirm` 建立新專案時，也會回填綁定（§0.5 V12），且同一 `executionPath` 下已有未刪除專案綁定同一個標準鍵時回 409 `sdd_binding_conflict`（`cause="already_bound_elsewhere"`）。
 
 #### 1.1.7 `POST /api/v1/import/{id}/reject`　放棄匯入（補）　〔API-IMP-10〕
 
@@ -653,6 +721,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
   - **何時決定、存在哪**：spawn 時決定（等級 6～10 沒有額外的驗證項；沒有金鑰也不報錯，如實回 `UNAVAILABLE_NO_API_KEY`），落庫於 `execution_runs.engine_capabilities`（V10，§0.5），建立後不再更新。
   - **缺席**：V10 之前建立的批次沒有這個欄位（null 與缺席等價，§0.2）；前端不顯示晶片、不得猜測。
   - **不在列表**：`ExecutionRunSummaryResponse`（批次列表）不帶它。
+- **v1.5（D-115-06）SDD 批次**：上表第 10 項的 Bridge 呼叫，在「範圍內任務全為 SDD 來源」時改帶頂層 `sdd` 區塊（資格判定與組裝見 §1.10.5～§1.10.6；Bridge 預檢與 FSM 同步見 §3.1.6）。第 10 項因此多出下列失敗：Bridge 422 `spec_not_frozen` 等 → 422 `SDD 規格檢查未通過`；Bridge 409 `spec_digest_changed` → 409 `sdd_spec_digest_changed`；Bridge 409 `fsm_state_conflict` → 409 `sdd_fsm_state_conflict`；Bridge 404 `fsm_not_found` → 409 `sdd_fsm_not_found`；Bridge 422 `sdd_invalid_argument`／`sdd_block_invalid` → 422 `引擎拒絕此請求`；Bridge 503 `sdd_write_disabled` → 503 `sdd_write_disabled`；Bridge 的 `sdd_cli_*`（500／502／504）→ 502 `引擎橋接服務錯誤`（對映總表見 §3.2 的 v1.5 列）。它們與其他第 10 項失敗一樣**補償刪除**剛建的 `execution_runs` 列（此時尚無任何 `execution_steps`）。201 回應新增選填欄位 `warnings[]`（`{code, cause?, detail}`；`sdd_governance_inactive`、`sdd_frozen_digest_absent`，§1.10.6），**只有 execute 的 201 帶它**，pause／resume／cancel／restore 與 `GET` 不帶。
 
 #### 1.2.2 `GET /api/v1/projects/{projectId}/executions`　列出執行批次（補）　〔API-EXE-14／US-M-06〕
 
@@ -699,6 +768,9 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 502／504 | `引擎橋接服務無法連線`／`…逾時`／`引擎橋接服務錯誤` | | DB 狀態不變 |
 | 401／403／429 | 通用 | | |
 
+- **v1.5（D-115-15）SDD 批次的 `resume`**：Bridge 對 SDD run 先**重跑預檢**（凍結＝現檔、匯入摘要＝現檔、FSM 前置；§3.1.6 第 7 點），額外失敗：409 `sdd_spec_digest_changed`（規格在暫停期間被改動）、409 `sdd_fsm_state_conflict`（FSM 不在 `AUTOCLAUDE_DELEGATED` 且不是可重進的 `IMPLEMENTATION`，或委派屬於別的 run／外來）、422 `SDD 規格檢查未通過`；失敗時 run 維持 `PAUSED`、不 spawn。`pause` 不碰 FSM；`cancel` 的終態同步由 Bridge 在終態後做（`CANCELLED`⇒`delegate-exit done`，§3.1.6 第 5 點）。
+- **v1.5（D-115-18）SDD run 的權杖**：對 SDD run，console-api 呼叫 Bridge `:resume` 須附 `X-Bridge-Token`（§3.1.4 共通規則 2；ADR-016 §9 的兩個呼叫擴大為四個，`restore` 同，見 §1.2.10）。Bridge 沒設權杖 → 503 `sdd_write_disabled`、標頭缺漏或不符 → 403 `sdd_write_forbidden`，Console 轉譯同 execute（§3.2）：503 → **503** `sdd_write_disabled`、403 → **502** `引擎橋接服務錯誤`（`details={bridgeStatus:403, bridgeReason:"sdd_write_forbidden"}`，另記 ERROR 日誌）；權杖檢查在預檢之前，所以 run 維持 `PAUSED`、DB 與 FSM 都不變。console-api 不記錄批次是否為 SDD，`:resume` 一律附標頭（backend 有設權杖時）；不含 `sdd` 的 run 不受影響。Bridge 呼叫的讀取逾時為 30 秒（§3.1 呼叫表；原 15 秒，SDD run 可能多一次 `delegate-enter`），逾時回 504 `引擎橋接服務逾時`、DB 狀態不變。
+
 #### 1.2.7 `GET /api/v1/executions/{runId}/steps`　分頁查詢步驟　〔API-EXE-06、SSE-03／US-M-03、09〕
 
 - **角色**：VIEWER。查詢參數：`page`（0 起）、`size`（預設 50、上限 200）、`afterSeq`（≥0，**嚴格大於**）。依 `stepNumber` 升冪。
@@ -738,6 +810,9 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 | 409 | `引擎端已無此執行（工作區可能已清除）` | | Bridge 404 `run_not_found` |
 | 422 | `引擎拒絕此請求` | `{bridgeReason,violations[]}` | `execution_path` 重驗失敗 |
 | 502／504 | 通用 | | |
+
+- **v1.5（D-115-15）SDD 批次的 `restore`**：同 `resume`，Bridge 重跑預檢；FSM 為 `IMPLEMENTATION` 時重新 `delegate-enter`，為 `ESCALATION` 或被別的 run／外來委派佔用時 409 `sdd_fsm_state_conflict` 並不 spawn；額外失敗另有 409 `sdd_spec_digest_changed`、422 `SDD 規格檢查未通過`（§3.2、§3.1.6 第 7 點）。
+- **v1.5（D-115-18）SDD run 的權杖**：同 `resume`（§1.2.4～§1.2.6）：Bridge `restore` 須附 `X-Bridge-Token`；缺／錯 → Bridge 503 `sdd_write_disabled`／403 `sdd_write_forbidden` → Console **503** `sdd_write_disabled`／**502** `引擎橋接服務錯誤`（`details.bridgeStatus=403`）；檢查在預檢之前，run、專案與 FSM 狀態都不變。Bridge 呼叫的讀取逾時同為 30 秒（§3.1 呼叫表）。
 
 #### 1.2.11 `POST /api/v1/executions/{runId}/review/{stepId}`　審核　〔API-EXE-10、AUT-01～06／US-E-07、08〕
 
@@ -1087,6 +1162,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 #### 1.7.1 `GET /api/v1/engines/sdd`　AISDLC_SDD 引擎狀態（只讀）（v1.4，D-16）　〔API-ENG-01／NFR-OBS-01、BR-13、BR-14〕
 
 - **角色**：VIEWER 以上。**Bridge**：依序呼叫 `GET /sdd/version`、`GET /sdd/fsm`，帶了 `project` 時再呼叫 `GET /sdd/fsm/{project}`（§3.1.3）；三者全是唯讀，console-api 不寫 SDD 目錄、不寫任何 FSM-STATE 檔（ADR-001 D22 第 3 點）。每個呼叫連線／讀取逾時 2 秒／3 秒、不重試，失敗即短路（後面的呼叫不再發）；這支端點不快取，每次請求都打 Bridge。
+- **v1.5 加註（D-115-01、D-115-02、D-115-14；S-10）**：①本端點新增選填查詢參數 `projectId`，依專案帶 `root`，讀「該專案根目錄下」的 FSM 狀態（§1.10.4）；②`SddFsmState` 新增 `phase`、`escalationHistory`、`escalationProvenance`、`fsmProject`、`recovery`（§1.10.4）；③`project` 的驗證由 `^[A-Za-z0-9._-]{1,128}$` 改為「1～200 字元、不含控制字元」，值原樣交給 Bridge 的淨化鏡像處理（§3.1.4 (b)；ADR-016 §7.4）——下表「`project`」列、`errors[0].field=project` 的判準與附錄 D.1 的舊 regex 一律以本條與 §1.10.4 為準；④本端點本身仍只讀、console-api 仍不直接寫任何 FSM-STATE 檔——v1.5 唯一的 FSM 寫入動詞是 Bridge 的 `:freeze`，經 FSMRuntime CLI 子行程完成（§3.1.4；ADR-001 D22 第 3 點的「Console 只讀」由 ADR-016 修訂為「只經 CLI 窄寫」）。
 - **為什麼有它**：PRD §0.2、§0.3 把 FSM-STATE 列為 Console 對 SDD 的遙測來源，但 v1.3 以前 Bridge 的 `/sdd/version`、`/sdd/fsm/{project}` 在 Console 後端與前端沒有任何消費者（完整性審查 I-01、I-02、V-06），Console 只用過規格編譯（`/sdd/compile`）。本端點是 Console 對 FSM 狀態的唯一消費點，供監控頁「AISDLC_SDD 引擎」卡（§4.3 M-20）與 NFR-OBS-01 的「FSM 檔 ↔ Console 渲染」對照（E2E-15）使用。
 - **查詢參數**：
 
@@ -1241,6 +1317,193 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | 已知限制 | ①換新回應在網路上遺失時，客戶端以舊 token 重試會得到 401 而被登出（舊 token 已撤銷）；access token 約 30 分鐘才換新一次，機率很低，且「重放寬限窗」會讓被竊的 token 在窗內可重放、也要多一份狀態，所以不做寬限。②記憶體名單隨行程重啟清空：重啟前已登出、尚未過期的 refresh token 在重啟後復活（Redis 在線時不會）——這是降級的代價，登記於 ADR-001 D23 |
 
 **驗收**：`AuthApiIT`（降級以丟 `RedisConnectionFailureException` 的替身驗，不需真 Redis）：①換新一次後，用舊 refresh token 再換新 → 401 `INVALID_REFRESH_TOKEN`，新 token 可用；②登出後，被登出的 refresh token 換新 → 401；③登出垃圾字串、過期 token、access token → 皆 204；④同一個 refresh token 兩個併發換新 → 一個 200、一個 401；⑤Redis 替身拋例外 → 撤銷與查詢退到記憶體、仍得到正確結果、只記一次 WARN，恢復後記一次 INFO；⑥`/actuator/health` 在 Redis 替身不可用時仍為 UP；E2E-16 第 5～6 列。
+
+### 1.10 SDD 整合迴圈（v1.5；整合輪 115；已與 ADR-XPLAT-016 對齊）
+
+本節是 v1.5 的 console-api 契約：一條從「在 SDD 下凍結規格」到「批次執行、FSM 同步、追溯覆蓋」的迴圈，Console 負責其中的人工閘（核准凍結）、路徑 A 匯入（既有，補欄位並可併入既有專案）、SDD 批次、追溯與觀測。Bridge 與 SDD 側的行為見 §3.1.4～§3.1.7。環境契約、CLI 動詞與 rc、摘要、權杖、預檢、委派同步與最小侵入白名單的**完整規格**以 ADR-XPLAT-016（下稱 ADR-016，Proposed）為唯一真相源；本節只寫 HTTP 面的欄位、錯誤與對映，並在需要機械斷言處逐字引用 ADR 的值（引用處標 ADR 節次）。判準對照：整合輪 115 §2 的 C1～C6。
+
+#### 1.10.1 迴圈總覽（誰在哪一步做什麼）
+
+| 段 | 動作 | 執行者 | 端點／動詞 | FSM `current_state` 的變化 |
+|----|------|--------|------------|----------------------------|
+| S1 | 建立 Console 專案：`executionPath`＝SDD 專案根；FSM 專案預設＝專案名（§1.10.5） | Console | Phase 2 `POST /projects` | 無 |
+| S2 | 在專案根的 SDD session 建 FSM 專案、跑 SCG-0～3 到人工確認點（`SDD_STATE_DIR=<executionPath>/build/reports/fsm`、`SDD_PROJECT`＝專案名或其淨化鍵；Console 不提供，§6.8.6 登記延後） | SDD session（人或 AI） | SDD CLI | `INIT`→…→`HUMAN_PENDING` |
+| S3 | **人工核准凍結** | Console（OPERATOR 以上） | `POST /projects/{id}/sdd/freeze`（§1.10.2）→ Bridge `:freeze` | `HUMAN_PENDING`→`SPEC_FROZEN` |
+| S4 | 路徑 A 匯入並**併入同一個專案**：編譯凍結規格→草稿→signoff→confirm | Console | `parse`（帶 `targetProjectId`）→…→`confirm`（§1.10.8、§3.3.2） | 無（只唯讀檢查凍結與摘要） |
+| S5 | 執行 SDD 批次 | Console → Bridge | `POST /projects/{id}/execute`（§1.10.6）→ `POST /autoclaude/runs`＋`sdd`（§3.1.6） | `SPEC_FROZEN`→（談判）→`IMPLEMENTATION`→`AUTOCLAUDE_DELEGATED`（`TEST_CONTRACT_NEGOTIATED` 自癒與 `AUTOCLAUDE_DELEGATED` 回收點見 §3.1.6） |
+| S6 | 批次結束 | Bridge（自動） | — | `COMPLETED`／`CANCELLED`→`IMPLEMENTATION`；引擎升級型 `FAILED`→`ESCALATION`；其餘終態與 `PAUSED` 不動 |
+| S7 | 追溯覆蓋 | Console | `GET /executions/{runId}/rtm`（§1.10.3） | 無 |
+| S8 | 觀測 | Console | `GET /engines/sdd?projectId=`（§1.10.4） | 無 |
+| S9 | 失敗後恢復 | **人，在 SDD session**（Console 只顯示 `ESCALATION`、`escalationProvenance` 與可複製的恢復指令；沒有恢復動詞） | `resume-from-escalation` | `ESCALATION`→`IMPLEMENTATION` |
+
+**Console 專案是錨（D-115-14；ADR-016 §7.2）**：綁定＝專案的 `executionPath`（狀態目錄根＝`<executionPath>/build/reports/fsm`；**只有 Bridge 對 CLI 子行程設定 `SDD_STATE_DIR`**）加 `sddProject`（FSM 專案鍵，預設＝專案名）。因此**不存在「未綁定」狀態**：核准凍結的請求沒有 `binding` 欄、也沒有 `sdd_not_bound`；「先凍結才能匯入、先有專案才能凍結」的循環依賴由「專案先建、匯入併入它」解開，不再需要佔位專案。一個 FSM 專案只對應一個未刪除的 Console 專案（部分唯一索引，§0.5 V12）。
+
+#### 1.10.2 `POST /api/v1/projects/{id}/sdd/freeze`　核准凍結（人工閘；v1.5，D-115-03）　〔API-SGN-06、API-PRJ-07／PRD §0.4〕
+
+- **角色**：OPERATOR 以上（與 `POST /projects/{id}/signoff` 同級；VIEWER → 403 `ACCESS_DENIED`）。**Bridge**：唯讀 `GET /sdd/fsm/{project}?root=`（取標準鍵）與 `POST /sdd/fsm/{project}:freeze`（§3.1.4；後者帶 `X-Bridge-Token`，逾時 2 秒／40 秒、不重試）。
+- **為什麼有它**：PRD §0.4 把 Console 的 signoff 對映 FSM 的 `HUMAN_PENDING`。v1.4 以前 Console 對 FSM 只讀（ADR-001 D22）；v1.5（D-115-01、D-115-03）只新開這一個人工閘寫入動詞：`HUMAN_PENDING`→`SPEC_FROZEN`，帶 approver、理由與文件摘要。退回修改、init、gate、恢復一律留在 SDD session（§6.8.6 延後格）。
+- **Request**（`SddFreezeRequest`；**沒有 `binding` 欄**，D-115-14）：
+
+| 欄位 | 型別 | 必填 | 規則 |
+|------|------|:----:|------|
+| `reason` | string | ✅ | 去前後空白後 1～500 字元，不含控制字元（含換行）；**不靜默截斷、不替換**，違反即 400（Bridge 同規則，違反回 422 `sdd_invalid_argument`；ADR-016 §4.4） |
+| `stage` | string | — | `^[A-Za-z0-9._-]{1,64}$`；省略 → Bridge 以 `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1）。階段名不要求唯一（ADR-016 §4.4） |
+| `docs` | string[] | 條件 | 1～20 項；每項是**相對專案 `executionPath`** 的 POSIX 路徑（不得為絕對路徑、不得含 `..`）。省略＝`[sddSpecFile 換算成相對 executionPath 的路徑]`（專案已有 `sddSpecFile` 時）；省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下 → 400（`errors[0].field=docs`）；專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（同欄位）。**須含至少一份 TCS**（檔名符合 `TEST-CONTRACT-SPEC-*` 或 `TCS-*`），由 Bridge 判定（ADR-016 §6.3 ①） |
+| `expectedDigests` | object | — | `{<docs 內的相對路徑>: "sha256:<64 位小寫 hex>"}`：核准人當時看到的摘要。有帶＝Bridge 逐一與現檔比對，不符 → 409 `sdd_spec_digest_changed`（`details.pair=expected_vs_file`；防「核准人看的版本不是現在要凍結的版本」，ADR-016 §6.3 ①）。鍵必須都在 `docs` 內，否則 400（`errors[0].field=expectedDigests`）。**v1.5 的畫面不送這欄**（沒有顯示規格摘要的元件）；保留給 API 消費者（§6.8.6 靜默處 #2） |
+
+  approver **不在請求內**：一律取 JWT subject（人工 signoff 不可匿名，也不可由 client 指定）；Bridge 要求 1～100 字元、無控制字元、不含 `;`（違反回 422 `sdd_invalid_argument`，Console 轉成 422 `引擎拒絕此請求`）。
+
+- **驗證順序**（固定，QA 依序斷言）：
+
+| # | 檢查 | HTTP | reason | details |
+|---|------|------|--------|---------|
+| 1 | 專案存在且未軟刪除 | 404 | （訊息）`專案不存在或已刪除：<id>` | — |
+| 2 | Bean Validation（`reason`／`stage`／`docs`／`expectedDigests` 的格式；缺 `docs` 又無規格檔；`docs` 不含已綁定的規格檔） | 400 | （無） | `errors[]` |
+| 3 | backend 沒有設定寫入權杖 | 503 | `sdd_write_disabled` | — |
+| 4 | **唯讀** `GET /sdd/fsm/{有效 FSM 專案}?root=<executionPath>` 取回標準鍵 `fsm_project`（有效值見 §1.10.5）；失敗依下表對映 | — | — | — |
+| 5 | **綁定唯一性與寫回**：以標準鍵查 `(executionPath, sddProject)` 在未軟刪除的其他專案是否已被綁定；通過後，專案的 `sddProject` 為 NULL 時**寫入標準鍵**（獨立短交易，**先於** Bridge 的寫入呼叫） | 409 | `sdd_binding_conflict` | `{cause:"already_bound_elsewhere", sddProject, holderProjectId}` |
+| 6 | 呼叫 Bridge `:freeze`；失敗依下表對映 | — | — | — |
+
+  第 5 項的次序是 ADR-016 §7.2 的設計：衝突要在**任何 Bridge 寫入呼叫之前**發現，以免 FSM 已被寫入才發現兩個 Console 專案認領同一個 FSM 專案；寫回發生在「這個鍵真的有狀態檔」（第 4 項）被確認之後，所以填錯的名字不會留下綁定。第 6 項之後失敗**不回滾**第 5 項的寫回（鍵確實有狀態檔，綁定本身是對的）。
+
+- **Bridge 失敗對映**（第 4、6 項）：
+
+| Bridge 回應 | Console 回應 |
+|-------------|--------------|
+| 409 `fsm_state_conflict`（`detail.current_state` 不是 `HUMAN_PENDING`，含已凍結） | **409** `sdd_fsm_state_conflict`，`details={currentState, expectedState:"HUMAN_PENDING"}` |
+| 404 `fsm_not_found`（第 4 項的 GET，或 CLI rc 5 `state_not_found`） | **409** `sdd_fsm_not_found`，`details={sddProject}`（送出的有效 FSM 專案名）——狀態檔要先在 `executionPath` 的 SDD session 建立（CLI 恆帶 `--must-exist`，ADR-016 §3.5） |
+| 409 `spec_digest_changed`（`detail.pair=expected_vs_file`） | **409** `sdd_spec_digest_changed`，`details={pair, doc, expectedDigest, currentDigest}` |
+| 422 `fsm_state_unreadable`／`sanitization_failed`／`sdd_invalid_argument`（`root`、`docs[i]` 不合法或缺檔或跑出根目錄、`docs` 不含 TCS、`approver`／`reason` 不合） | **422** `引擎拒絕此請求`，`details={bridgeReason, violations[]}`（Bridge 沒給 `violations` 時為 `[]`，並加 `details.detail`＝Bridge 的 `detail` 文字） |
+| 503 `sdd_write_disabled`（Bridge 沒設權杖） | **503** `sdd_write_disabled` |
+| 403 `sdd_write_forbidden`（權杖不符＝兩端設定不一致） | **502** `引擎橋接服務錯誤`，`details={bridgeStatus:403, bridgeReason:"sdd_write_forbidden"}`；另記 ERROR 日誌（設定缺陷，不是使用者錯誤） |
+| 500 `sdd_cli_usage`、502 `sdd_cli_failed`、504 `sdd_cli_timeout`、其餘 5xx | **502** `引擎橋接服務錯誤`，`details={bridgeStatus, bridgeReason}` |
+| 連線失敗／讀取逾時 | **502**／**504**（§3.2） |
+
+- **成功 200**：`ApiResult<SddFsmState>`——與 `GET /engines/sdd` 的 `fsm` 同形（凍結後的狀態：`currentState="SPEC_FROZEN"`、`frozenStages` 多一筆，含 `spec_doc_digests`、`approved_by`）。
+- **稽核與 FSM 側對上**（C2）：沿用 §0.4 第 5 點，每個請求一列 `audit_log`，`action=project.sdd.freeze`、`entity=project:<id>`、`http_status` 記結果，`subject`＝approver。FSM 檔 `decision_trace` 末筆（`trigger=spec_frozen`、`to=SPEC_FROZEN`）的 `reason` 固定為 `console-freeze approver=<approver>; reason=<使用者理由>`，`spec_refs`＝正規化後的 `docs`；`frozen_stages[-1].approved_by`＝approver（ADR-016 §4.3、§4.4）。Bridge 稽核事件 `sdd_write`（`verb=spec-frozen`、`project`、`approver`、`result`、`trace_id`〔取自 `X-Trace-Id`，沒有則省略〕；不含權杖，ADR-016 §9）。三處以「approver＋traceId＋時間」互相對上。
+- **非冪等**：第二次呼叫（FSM 已不在 `HUMAN_PENDING`）→ 409 `sdd_fsm_state_conflict`。
+- **文件摘要**：`frozen_stages[-1].spec_doc_digests` 是映射 `{<相對 root 的 POSIX 路徑>: "sha256:<64 位小寫 hex>"}`；演算法＝**換行正規化後的 UTF-8 文字**（`\r\n`、`\r`→`\n`，BOM 不剝）的 sha256，與 adapter 的 `SddSpec.digest` 逐位元相同，**不是**原始 bytes（CRLF 檔會假性不符）；非 UTF-8 的檔不能凍結，單檔上限 16 MiB（ADR-016 §4.3）。Console 不解讀，原樣出現在 `GET /engines/sdd` 的 `frozenStages`。
+- 前端：§4.7.1。
+
+#### 1.10.3 `GET /api/v1/executions/{runId}/rtm`　執行追溯覆蓋（諮詢視圖；v1.5，G-05）　〔API-EXE-16〕
+
+- **角色**：VIEWER 以上。**Bridge**：`GET /autoclaude/runs/{id}/rtm`（§3.1.4；逾時 2 秒／3 秒、不重試）。
+- **為什麼有它**：A 軌逆向回寫（`RtmWritebackPlugin`）把每個 SDD 批次的 AT／AC 覆蓋寫成 `RTM-COVERAGE-*.yaml`，v1.4 以前沒有任何讀者（`rtm_coverage` 欄恆 null）。本端點是 Console 對它的唯一消費點。**諮詢視圖**：「AT 通過」只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；SCG-4 的人工審查才是真閘，所以回應恆帶 `advisory:true`，前端必須標示（§4.7.2）。
+- **成功 200**：`ApiResult<ExecutionRtmResponse>`（來源＝Bridge 同名欄位，鍵轉 camelCase，值原樣）：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `scenario` | string | 場景（缺則 `""`） |
+| `specDigest` | string | 編譯規格的摘要（`sha256:<hex>`；缺則 `""`） |
+| `at` | `{passed, total, unmapped, pct}` | AT 通過數／總數／**無法歸屬 AC 的個數**／百分比（0～100，1 位小數）。`total`、`passed` **含**無法歸屬者（ADR-016 §8.5：AT 級指標不假裝它不存在）；`unmapped`＝YAML `summary.unmapped_at`，舊報告缺欄為 0 |
+| `ac` | `{covered, total, pct}` | AC 覆蓋數／總數／百分比（同上）；無法歸屬的 AT **不進**任何 AC 桶 |
+| `failedAtIds` | string[] | 未通過的 AT（Bridge 已排序；沒有為 `[]`；含無法歸屬者） |
+| `weakRegexAtIds` | string[] | 驗收 regex 偏弱（轉譯保真度警訊）的 AT（同上） |
+| `unmappedAtIds` | string[] | **逆向還原後無法歸屬 AC 的 AT**（YAML 頂層 `unmapped_at_ids`，已排序；舊報告缺欄為 `[]`）。注意：這與 `POST /sdd/compile` 回應的同名 `unmapped_at_ids`（規格出現卻沒編成步驟）是**兩個不同層的欄位**，不得混用（ADR-016 §8.2） |
+| `fullyCovered` | boolean | `ac.total>0` 且 AC 全數覆蓋，**且 `unmappedAtIds` 為空**——有無法歸屬的 AT 時恆為 `false`（ADR-016 §8.5；SCG-5 的機器判斷，仍是諮詢） |
+| `advisory` | boolean | **恆為 `true`** |
+
+- **錯誤**：
+
+| HTTP | reason | details | 觸發 |
+|------|--------|---------|------|
+| 400 | （訊息）`參數 runId 的值格式不正確` | | runId 不是 UUID |
+| 404 | （訊息）`執行批次不存在或已刪除：<id>`；**無 reason** | | 資料庫沒有這個批次 |
+| 404 | `rtm_not_found` | `{runId}` | 批次存在但沒有報告：沒有啟用 SDD 治理的批次、批次尚未結束、批次不是正常走完（引擎只在 run 正常走完時才寫報告，`FAILED`／`CANCELLED`／額度停機都沒有）、工作區已清除（Bridge 404 `run_not_found`）、或 Bridge 404 `rtm_not_found`（D-115-16：維持 404，不改 200 加旗標） |
+| 422 | `引擎拒絕此請求` | `{bridgeReason:"rtm_unreadable", violations:[]}` | 報告檔存在但 YAML 壞掉或缺 `summary` |
+| 502／504 | 通用 | | Bridge 失敗 |
+| 401／429 | 通用 | | |
+
+- **邊界**：①有無法歸屬的 AT 時，`at.total` 與 `ac` 的分母口徑不同（前者含、後者不含），前端不得拿 `at.total` 去除 `ac.total` 之類互推；②不輪詢、不快取：前端在批次進入終態後取一次（§4.7.2）。
+
+#### 1.10.4 `GET /api/v1/engines/sdd` 的 v1.5 變更（D-115-02；G-07、G-13）　〔API-ENG-02〕
+
+- **新增選填查詢參數**：
+
+| 參數 | 型別 | 規則 |
+|------|------|------|
+| `projectId` | uuid | 帶了＝讀「該專案」的 FSM：`root`＝該專案的 `executionPath`。專案不存在或已軟刪除 → **404**（訊息 `專案不存在或已刪除：<id>`，無 reason）；格式不合 → 400（`errors[0].field=projectId`）。省略＝v1.4 行為（讀 Bridge 預設的狀態目錄），完全不變 |
+| `project` | string | 取代 v1.4 的 `^[A-Za-z0-9._-]{1,128}$`：1～200 字元（專案名上限）、不含控制字元（U+0000～U+001F、U+007F），不合 → 400（`errors[0].field=project`）。**Console 不淨化、不檢查 Windows 禁用字元**：值原樣交給 Bridge，由 Bridge 的淨化鏡像處理（§3.1.4 (b)；ADR-016 §7.2、§7.4）。帶了 `projectId` 而省略 `project` 時，預設取**有效 FSM 專案**（§1.10.5：`sddProject` 有值取它，否則專案名） |
+
+- **呼叫 Bridge**：同 v1.4 的依序短路規則，但 `GET /sdd/fsm` 與 `GET /sdd/fsm/{project}` 帶 `root=<executionPath>`（§3.1.4）；`GET /sdd/version` 不帶。
+- **回應新增**（皆選填；舊 Bridge 缺欄時一律補預設，不得失敗）：
+
+| 欄位 | 型別 | 說明 |
+|------|------|------|
+| `fsm.phase` | `SddFsmPhase`｜null | 階段資訊（定義與對映表見 §3.1.5） |
+| `fsm.escalationHistory` | object[] | **尾 5 筆**、舊→新、原樣——保留 FSM 檔的 snake_case 鍵，例 `triggered_at`、`trigger_reason`、`resolved_at`、`resolution`、`source`；缺則 `[]` |
+| `fsm.escalationProvenance` | object｜null | FSM 檔的 `escalation_provenance` 原樣（例 `{rule_id, source, reason, …}`；`source="autoclaude_delegated_failed"` 即「委派失敗進入 ESCALATION」）；缺則 null。🔴 恢復後它**不會被清除**，所以「現在有沒有未解的委派失敗」只能由 `currentState` 與 `escalationHistory` 末筆判斷（§4.7.3；ADR-016 §5.3） |
+| `fsm.fsmProject` | string｜null | 狀態檔名裡**淨化後的標準鍵**（`FSM-STATE-<鍵>.yaml` 的 `<鍵>`）；現有的 `fsm.project` 是檔內的原名，兩者可能不同，**不能拿 `project` 當鍵**（ADR-016 §7.2）；缺則 null |
+| `fsm.recovery` | `{target, powershell, posix}`｜null | **僅 `currentState` 為 `ESCALATION`／`ESCALATION_FINAL` 時由 Bridge 回**（其餘狀態缺席或 null）：`target`＝建議的 `--to`（委派失敗＝`IMPLEMENTATION`）、`powershell`／`posix`＝可複製的 `resume-from-escalation` 指令（ADR-016 §5.3 模板；只含路徑與指令，理由欄位留 `<人工原因>` 佔位，**不含任何機密**）。Console 原樣顯示，不得自行組字或猜測目標；Bridge 無法判定目標時整個省略（§6.8.6 靜默處 #5） |
+
+  `frozenStages[]` 的項目自 v1.5 起可含 `spec_doc_digests`、`approved_by`（形狀見 §1.10.2；Console 原樣帶出、不解讀）。`rtmCoverage` 維持保留位（現況恆 null）；單一批次的覆蓋改看 §1.10.3。
+- **`reason` 新值 `sdd_root_rejected`**（回應欄位，附錄 B.4）：帶了 `projectId`，而 Bridge 對 `root` 回 422 `sanitization_failed`（專案路徑不在 `BRIDGE_ALLOWED_PATH_ROOTS` 內、或已不存在）→ 200、`available=true`、`projects=[]`、`fsm=null`、`reason="sdd_root_rejected"`（`version` 保留）。專案根目錄存在但還沒有 `build/reports/fsm` **不是錯誤**：`projects=[]`、`reason=null`（卡片顯示「尚無 FSM 狀態檔」）。
+- **舊 Bridge 相容**：Bridge 回應缺 `phase`／`escalation_history`／`escalation_provenance`／`fsm_project`／`recovery` 時，Backend 補 `phase=null`、`escalationHistory=[]`、其餘 null，不得因此失敗。
+
+#### 1.10.5 專案的 SDD 綁定欄位、有效值與批次資格（v1.5，G-07、D-115-14）　〔API-PRJ-07〕
+
+- **欄位**：`ProjectResponse`（confirm 的回傳）與 `ProjectDetailResponse`（詳情與 restore 的回傳）新增 `sddProject`、`sddSpecDir`、`sddSpecFile`（皆 string｜null，null 與缺席等價，§0.2；`ProjectSummaryResponse` 不帶）。語意：
+
+| 欄位 | 語意 | 寫入點 |
+|------|------|--------|
+| `sddProject` | FSM 專案鍵（≤ 100 字元）；**NULL＝「用預設」**（專案名）。存的是標準鍵（第一次使用時寫回）或使用者在 §1.10.7 輸入的值 | 核准凍結第 5 項、路徑 A confirm、`PUT /projects/{id}/sdd-binding` |
+| `sddSpecDir` | 規格檔所在目錄（絕對路徑）＝編譯回應 `spec_path` 的父目錄 | 只有路徑 A 的 confirm |
+| `sddSpecFile` | 規格檔（絕對路徑）＝編譯回應的 `spec_path`（ADR-016 §7.2）；後續批次據此**精確指到那份 TCS**，之後多一份 TCS 也不會變歧義 | 只有路徑 A 的 confirm |
+
+- **有效 FSM 專案**：`sddProject` 有值時取它，否則取**專案名**。**Backend 不自行淨化**（淨化鏡像只有 Bridge 有）：一律把「有效值（可以是原名）」交給 Bridge，Bridge 回應帶淨化後的標準鍵 `fsm_project`。
+- **寫回（固定專案鍵）**：在**第一次使用**時——核准凍結（§1.10.2 第 5 項）、路徑 A 的 confirm 落庫時——Backend 把 Bridge 回的標準鍵寫進 `sddProject`（原為 NULL 時）。此後專案改名不會讓綁定悄悄移到另一個 FSM 專案。
+- **唯一性**：`(executionPath, sddProject)` 在**未軟刪除且 `sddProject` 非空**的列中唯一（部分唯一索引，§0.5 V12）；衝突 → 409 `sdd_binding_conflict`。Backend 一律「先檢查、後寫入」（核准凍結第 5 項在任何 Bridge 寫入之前；confirm 在落庫交易內）；索引是最後的兜底。
+- **SDD 批次資格**（execute 判定；以本批次「範圍內」任務為準，**全部成立**才送 `sdd` 區塊，任一不成立＝不送、走既有的 `G<g>-T<t>` 路徑並依 §1.10.6 出聲）：
+
+| # | 條件 | 不成立的 `cause` |
+|---|------|------------------|
+| 1 | 專案已有規格綁定（`sddSpecDir` 非空，亦即已用路徑 A 匯入過規格；ADR-016 §7.2） | `not_bound` |
+| 2 | backend 已設定寫入權杖 | `token_not_configured` |
+| 3 | 範圍內每個任務的 `passCriteriaSpec.source` 都是 `sdd`，且 `stepId`、`specDigest` 皆為非空字串 | `mixed_scope` |
+| 4 | 範圍內所有任務的 `specDigest` 相等（同一份規格） | `spec_mismatch` |
+| 5 | 範圍內各任務的 `stepId` 互不相同 | `duplicate_step_id` |
+
+#### 1.10.6 `POST /api/v1/projects/{projectId}/execute` 的 SDD 批次（v1.5；D-115-06）　〔API-EXE-15〕
+
+- **請求不變**（`StartExecutionRequest` 沒有任何新欄位；SDD 治理是否啟用由資格判定決定，不由 client 指定）。
+- **資格成立時**，Bridge 請求（§3.4.1 的 v1.5 補充）多一個頂層 `sdd`：`{ "spec_dir": <sddSpecDir>, "spec_file": <sddSpecFile，沒有則省略>, "fsm_project": <有效 FSM 專案>, "root": <專案 executionPath>, "approver": <簽核人> }`。`approver`＝範圍內 SDD 來源任務的 `signedOffBy`（承襲匯入記錄的核准人；多個值時取排序最前任務的值）；為空時取觸發 execute 的 JWT subject，所以 **Backend 永遠送具名人**（ADR-016 §5.2 C-1；Bridge 端此欄選填、省略時記 `console`）。
+- **201 的 `warnings[]`**（`ExecutionWarning{code, cause?, detail}`；選填，缺席＝沒有警告）：
+
+| `code` | `cause` | 意思 |
+|--------|---------|------|
+| `sdd_governance_inactive` | `not_bound`／`token_not_configured`／`mixed_scope`／`spec_mismatch`／`duplicate_step_id`（§1.10.5） | 本批次**沒有**啟用 SDD 治理：沒有預檢、沒有 FSM 同步、step_id 維持 `G<g>-T<t>`、事後也不會有追溯報告；`detail` 是給人看的中文說明。只有「範圍內至少有一個 SDD 來源任務（`passCriteriaSpec.source=sdd`）」才出聲；沒有任何 SDD 來源任務的批次不帶 |
+| `sdd_frozen_digest_absent` | （無） | 本批次已啟用 SDD 治理，但凍結時沒有記錄內容摘要（舊狀態檔，或以舊版 CLI 凍結）：放行但**無法偵測凍結後改檔**，`detail` 說明（Bridge 回的 201 `warnings` 原樣轉入；ADR-016 §6.3 ③） |
+
+  **只有 execute 的 201 帶 `warnings`**。沒有警告時維持 v1.4 的回應形狀。
+- **失敗**：見 §1.2.1 的 v1.5 加註與 §3.2；補償刪除規則不變。
+- **後續批次**（審核 `SKIP`／`RETRY` 開的後續批次）走同一條建立路徑：同樣依資格送 `sdd`、同樣預檢。這些端點回 204（無本文），`warnings` 只寫 console-api 日誌（WARN），不回前端。FSM 若停在 `ESCALATION`（引擎升級型失敗後的常態）或被外來委派佔用，後續批次會被 409 `sdd_fsm_state_conflict` 擋下，審核決定隨之失敗（原子性規則見 §1.2.11），須先在 SDD session 恢復 FSM（§3.1.7 第 1 點）。
+- **`resume`／`restore`**：SDD 批次的 `resume`／`restore` 由 Bridge **重跑預檢**（§3.1.6 第 7 點）：內容摘要重驗與 FSM 前置檢查。額外的失敗回應見 §1.2.4～§1.2.6 與 §1.2.10 的 v1.5 加註；Console 的 DB 預檢不變。
+
+#### 1.10.7 `PUT /api/v1/projects/{id}/sdd-binding`　編輯專案的 FSM 專案（v1.5；ADR-016 §7.2「可編輯」「改綁」）　〔API-PRJ-08〕
+
+- **角色**：OPERATOR 以上。**Bridge**：無。**為什麼有它**：ADR-016 §7.2 規定 `sdd_project` 可由使用者編輯（自由輸入、Bridge 淨化後生效），且沒有「解除綁定」端點——編輯它即改綁；而 Phase 1+2 的專案更新端點不在本契約範圍，所以另開這個窄端點（§6.8.6 靜默處 #1，需主控確認）。
+- **Request**（`SddBindingRequest`）：`{ "sddProject": "<名稱>" | null }`。非 null 時：去前後空白後 1～100 字元、無控制字元；`null`＝清除，回到「用預設」（專案名）。
+- **處理**：存入去空白後的值，**不檢查狀態檔是否存在**、**不呼叫 Bridge**（填錯的名字只會讓 `GET /engines/sdd` 回 `fsm_not_found`，不留下寫入）；先檢查唯一性（同 §1.10.5），衝突 → 409。相同值再送＝冪等（200，不寫稽核）。改綁**不搬移** FSM 狀態檔，也不影響進行中的批次（終態同步用 run 建立時存下的專案鍵，§3.1.6）。
+- **成功 200**：`ApiResult<ProjectDetailResponse>`。
+
+| HTTP | reason | details | 觸發 |
+|------|--------|---------|------|
+| 400 | （Bean Validation） | `errors[0].field=sddProject` | 空白、過長或含控制字元 |
+| 404 | （訊息）`專案不存在或已刪除：<id>` | | |
+| 409 | `sdd_binding_conflict` | `{cause:"already_bound_elsewhere", sddProject, holderProjectId}` | 同 `executionPath` 已有未刪除的專案以同一個 `sddProject` 綁定 |
+| 401／403／429 | 通用 | | VIEWER → 403 `ACCESS_DENIED` |
+
+- 稽核：沿用 §0.4 第 5 點，`action=project.sdd.bind`、`entity=project:<id>`。前端：§4.7.1。
+
+#### 1.10.8 路徑 A 匯入併入既有專案（`targetProjectId`；v1.5，D-115-14）　〔API-IMP-12〕
+
+- **為什麼有它**：解開「先凍結、後匯入」的循環依賴（§1.10.1）。`ParseOptions` 新增選填 `targetProjectId`（uuid；見 §3.3.2 的 v1.5 補充）。
+- **帶 `targetProjectId`**：
+  - **parse**：目標專案須存在且未軟刪除，否則 404（訊息 `專案不存在或已刪除：<id>`）。`executionPath`、`sddProject`（有效值）、`specFile` **一律取自目標專案**；請求另帶不同值 → 409 `sdd_binding_conflict`（`details={cause:"request_differs_from_target", field}`）。`executionPath` 在 `ParseOptions` 仍是必填欄位：帶目標專案的值即可。目標專案某欄位為 NULL（尚未綁定規格檔）時，該欄位不受限，以請求值為準。
+  - **confirm**：**不建立新專案**，把草稿的目標與任務**併入目標專案**，並回填 SDD 綁定：`sddSpecDir`／`sddSpecFile`（取自 `ParsedResult`，冪等更新）、`sddProject`（為 NULL 時寫入編譯回應的標準鍵）。專案已有不同的綁定——編譯回應的標準鍵與目標專案的 `sddProject`（或其預設淨化鍵）不同，或規格根不在目標專案的 `executionPath` 之下——→ 409 `sdd_binding_conflict`（`details={cause:"target_bound_differently", sddProject}`）。confirm 與 parse 各驗一次（兩次之間綁定可能被 §1.10.7 改掉）。成功仍回 **201** `ApiResult<ProjectResponse>`（目標專案；新建的是目標與任務，不是專案），匯入記錄的 `projectId`＝目標專案、`status=IMPORTED`。
+  - **併入規則**（ADR-016 §7.2 把排序與編號交給本契約）：新目標加在目標專案**既有未刪目標之後**——新目標的 `sortOrder`＝既有未刪目標的最大 `sortOrder`＋1＋草稿內的序（從 0 起；沒有既有目標時從 0 起）；草稿內的 `dependsOn` 依 key 換成新建的目標 id，**不會產生指向既有目標的依賴**；專案本身的欄位（名稱、說明、`passCriteria`、自治等級、`executionPath`、簽核欄位）一律不動，草稿的 `project.*` 不採用；新建的目標與任務 `signedOff=true`，`signedOffBy／At` 承襲匯入記錄（同 confirm 既有規則）。**專案層的 `signedOff` 不動**：目標專案若尚未簽核，execute 的第 5 項（整案 signedOff 檢查）會擋下，須另以 Phase 2 的專案 signoff 簽核（匯入記錄的 signoff 只涵蓋它建立的目標與任務；§6.8.6 靜默處 #3）。
+- **不帶 `targetProjectId`**：維持現行「建立新專案」，以 `ParseOptions.executionPath` 當專案的 `executionPath`，以編譯回應回填綁定；同一 `executionPath` 下已有未刪除專案綁定同一個標準鍵 → 409 `sdd_binding_conflict`（`details={cause:"already_bound_elsewhere", sddProject, holderProjectId}`；confirm 先檢查、唯一索引兜底）。
+- **回填只在 confirm 成功落庫時做**，parse／預覽不回填——放棄的草稿不該產生綁定。
 
 ---
 ## 2. SSE 契約（`API-SSE-01～03`／`US-E-03、07`）
@@ -1440,9 +1703,9 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 |--------------|-------------|--------|--------------------|------|--------|
 | execute | `POST /autoclaude/runs` | 201 | 2s／30s | 無（非冪等；失敗即補償） | `startRun` |
 | pause | `POST /autoclaude/runs/{id}:pause` | 202 | 2s／5s | 無 | `pauseRun` |
-| resume | `POST /autoclaude/runs/{id}:resume`（可帶 `env`） | 202 | 2s／15s | 無 | `resumeRun` |
+| resume | `POST /autoclaude/runs/{id}:resume`（可帶 `env`；SDD run 另帶 `X-Bridge-Token`，v1.5） | 202 | 2s／**30s**（v1.5：原 15s；SDD run 可能多一次 `delegate-enter`，CLI 單次 ≤ 20 秒） | 無 | `resumeRun` |
 | cancel | `POST /autoclaude/runs/{id}:stop` | 202 | 2s／10s | 無 | `stopRun` |
-| restore | `POST /autoclaude/runs/{id}/restore` | 202 | 2s／15s | 無 | `restoreRun` |
+| restore | `POST /autoclaude/runs/{id}/restore`（SDD run 另帶 `X-Bridge-Token`，v1.5） | 202 | 2s／**30s**（v1.5：原 15s；理由同 resume） | 無 | `restoreRun` |
 | 取快照（v1.3 起回應含 `resources`，§3.1.2） | `GET /autoclaude/runs/{id}` | 200 | 2s／3s | 2 次（200ms 退避） | `getRun` |
 | 事件重播 | `GET /autoclaude/runs/{id}/events?after=&limit=` | 200（裸陣列） | 2s／10s | 2 次 | `listEvents` |
 | 事件串流 | `GET /autoclaude/runs/{id}/stream?after=<last_seq>` | 200 SSE | 3s／45s（閒置逾 45 秒視為斷線，以 `after=<last_seq>` 重連；Bridge 每 15 秒送 keep-alive） | 指數退避 1→30s | `streamEvents` |
@@ -1453,9 +1716,16 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 | 引擎狀態：版本（v1.4） | `GET /sdd/version` | 200 | 2s／3s | 無 | `sddVersion` |
 | 引擎狀態：FSM 專案清單（v1.4） | `GET /sdd/fsm` | 200 | 2s／3s | 無 | `sddFsmList` |
 | 引擎狀態：單一專案的 FSM（v1.4） | `GET /sdd/fsm/{project}` | 200 | 2s／3s | 無 | `sddFsm` |
+| 核准凍結（v1.5；人工閘，§3.1.4） | `POST /sdd/fsm/{project}:freeze`（帶 `X-Bridge-Token`；`{project}` 須 percent-encode） | 200 | 2s／40s | 無（非冪等：第二次回 409） | `sddFreeze` |
+| 執行 SDD 批次（v1.5；§3.1.6） | `POST /autoclaude/runs`（帶頂層 `sdd` 與 `X-Bridge-Token`） | 201 | 2s／**90s**（含最多三次 FSM CLI 子行程，每次 ≤ 20 秒；一般批次維持 30s） | 無（非冪等；失敗即補償） | `startRun` |
+| 追溯覆蓋（v1.5；§3.1.4） | `GET /autoclaude/runs/{id}/rtm` | 200 | 2s／3s | 無 | `getRunRtm` |
+| 引擎狀態：FSM 清單與單一專案（v1.5 加選填 `root`） | `GET /sdd/fsm?root=`、`GET /sdd/fsm/{project}?root=` | 200 | 2s／3s | 無 | `sddFsmList(root)`、`sddFsm(project, root)` |
+| 匯入規格（v1.5 加 `spec_file`、`fsm_project`） | `POST /sdd/compile {spec_dir, spec_file?, fsm_project?}` | 200 | 2s／15s | 無 | `sddCompile(specDir, specFile, fsmProject)` |
 | 斷點列表 | `GET /autoclaude/runs/{id}/checkpoints`（Bridge 端點仍存在；**Console 不再呼叫**——斷點清單與審核 `RETRY` 的 `step_idx` 一律讀 DB 的 `console.checkpoints`（Bridge DB 模式寫入），W7 依完整性審查 I-07 刪除後端死碼 `listCheckpoints`） | — | — | — | （已移除） |
 
 `:resume` 與 `restore` 的 body 可帶 `env`（Bridge 重啟後請求層 env 會遺失，見其 `ENV_LOST` 告警）：console-api 一律重新物化並帶上 §3.4.2 的 `env`。**機密只能走 `env`**（Bridge 的 `config_overrides` 拒絕 `api_key`／`db_dsn`，且 `run.json` 只記 env 的名稱）。console-api 對上表**每個請求**（含事件串流與健康探測）都帶標頭 `X-Trace-Id`（v1.2，C-12；取值規則 §0.4 第 6 點，Bridge 端見 §3.1.1）。
+
+**v1.5（D-115-18）**：SDD run 的 `:resume` 與 `restore` 另帶標頭 `X-Bridge-Token`（§3.1.4 共通規則 2；與 `sddFreeze`、帶 `sdd` 的 `startRun` 合計四個呼叫）；console-api 不記錄批次是否為 SDD，這兩個呼叫一律附（backend 有設權杖時）。**讀取逾時由 15 秒放寬為 30 秒**（只這兩個呼叫；主控裁決）：SDD run 可能多一次 `delegate-enter`（FSMRuntime CLI 單次逾時 20 秒，§3.1.4 共通規則 1），15 秒會在 Bridge 還在工作時先讀取逾時而得到 504；因為 console-api 分不出 SDD 與非 SDD run，兩者共用同一個逾時值。其餘欄位不變。
 
 #### 3.1.1 Bridge 深度探針 `GET /health/deep` 與 `X-Trace-Id`（v1.2；C-2、C-12）
 
@@ -1510,6 +1780,8 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 
 > 本小節是 **Bridge 的端點**，實作者是 W7-INFRA（`engine-bridge/app/routers/sdd.py`）；console-api 只消費它們（§1.7.1）。形狀由主控 D-16 定死；下表補的是**對現行 FSM 狀態檔真實結構的語意定義**——W7-SA 現讀 `AISDLC_SDD_v0.30/tools/fsm_runtime/templates/FSM-STATE-TEMPLATE.yaml`、`state_loader.py` 與 `build/reports/fsm/FSM-STATE-AISDLC_SDD.yaml`（證據見 §6.7.2）；INFRA 的實作與其測試（`engine-bridge/tests/test_sdd_fsm.py`）與下表一致，契約從其實作。Bridge 的完整契約仍以其 `/openapi.json` 與 `engine-bridge/README.md` 為準，INFRA 須同步更新 README。三個端點全是**唯讀**：不寫、不建立、不改動 SDD 目錄下的任何東西（ADR-001 D22 第 3 點；AISDLC_SDD Rule 9「繞過 `FSMRuntime` 直接讀寫 FSM-STATE」是違反即停機的禁令，Console 只讀）。
 
+> **v1.5 加註（D-115-01、D-115-02、D-115-14；S-10）**：本小節描述 v1.4 的三個**唯讀**端點；v1.5 對它們的改動（選填 `root`、回應增 `phase`／`escalation_history`／`escalation_provenance`／`fsm_project`／`recovery`、專案名改由淨化鏡像處理）與新增的唯一寫入動詞 `:freeze` 一律寫在 §3.1.4，本小節的「名稱白名單」「只讀不寫」等字句在與 §3.1.4 衝突處以 §3.1.4 為準。
+
 **`GET /sdd/version`**：不變（`{"latest":"<版本目錄名>","root":"<路徑>"}`；`SDD_ROOT` 無效 → 503 `sdd_unavailable`）。
 
 **`GET /sdd/fsm`**（新）：
@@ -1538,6 +1810,259 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 
 驗收：Bridge pytest（`tests/test_sdd_fsm.py`：清單的排序、`errors`、symlink 逃逸、目錄不存在、503；三個新欄位對真實結構與假設的 list 結構；只讀不寫的 mtime 快照；對真實 FSM 檔逐值比對〔檔不存在時 skip〕）；E2E-15。
 
+#### 3.1.4 Bridge 的 SDD 讀取擴充與寫入面（v1.5；D-115-01、D-115-02、D-115-03；已與 ADR-016 對齊）
+
+> 本小節是 **Bridge 的端點與行為**（實作者是 W2 Dev-Bridge：`engine-bridge/app/routers/sdd.py`、`routers/autoclaude.py`、`models.py`、`runner.py`、`settings.py` 與新模組）；console-api 只消費它們（§1.10）。Bridge 的完整契約仍以其 `/openapi.json` 與 `engine-bridge/README.md` 為準，Dev-Bridge 須同步更新 README。環境契約、CLI 動詞與 rc、權杖的**完整規格**以 ADR-016 §3.5、§4、§9 為唯一真相源；本節寫 HTTP 面，並逐字引用需要機械斷言的值。
+
+**共通規則（v1.5 起適用於所有 SDD 寫入）**：
+
+1. **只經 CLI 子行程**（ADR-016 §3.5）：Bridge 對 FSM 的一切寫入都是 FSMRuntime CLI 子行程——argv＝`[sys.executable, "-W", "ignore::RuntimeWarning", "-m", "tools.fsm_runtime.fsm_runtime", <動詞>, "--project", <專案鍵>, "--must-exist", …]`，cwd＝SDD 版本目錄；環境以 `os.environ` 為底**移除所有 `BRIDGE_*`、`SDD_*`、`PYTHONPATH`**，再設 `PYTHONPATH=<版本目錄>`、`PYTHONDONTWRITEBYTECODE=1`、`PYTHONUTF8=1`、兩個規則遙測旗標＝`0`、`SDD_STATE_DIR=<root>/build/reports/fsm`、`SDD_PROJECT=<專案鍵>`；stdin＝DEVNULL，行程旗標沿用 `procutil.popen_platform_kwargs()`；stdout 取最後一個非空行解析為 JSON，stderr 只作診斷（截 2 KB 入稽核、不入回應）；單次逾時 **20 秒**（逾時以行程樹終止後回 504）。動詞白名單：`spec-frozen`（僅經 `:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed`；其餘動詞 Bridge 一律不呼叫。**Bridge 原始碼不得出現對 `FSM-STATE-*.yaml` 的寫入開檔**（Rule 9 絕對禁令第 1 條；對拍測試 F-4 以原始碼掃描釘住）。
+2. **權杖**（ADR-016 §9）：寫入動詞須帶標頭 `X-Bridge-Token`，**共四個呼叫**：`POST /sdd/fsm/{project}:freeze`、帶 `sdd` 的 `POST /autoclaude/runs`，以及 SDD run（`RunRecord.sdd` 存在）的 `POST /autoclaude/runs/{id}:resume` 與 `POST /autoclaude/runs/{id}/restore`（D-115-18 把 ADR-016 §9 的兩個呼叫擴大為四個：這兩個動作同樣會寫 FSM〔`delegate-enter` 重進〕）；權杖的環境變數名為 **`BRIDGE_SDD_WRITE_TOKEN`**（Bridge 與 backend 同名；backend 的 Spring 屬性 `console.bridge.sdd-write-token`，附錄 D.2）。Bridge 沒有設定權杖＝這些動詞整個停用：**503** `{"code":503,"reason":"sdd_write_disabled","detail":"…"}`（不含 `sdd` 的 run——含它的 `:resume`／`/restore`——照舊，不需要權杖）；設了而標頭缺漏或不符＝**403** `{"code":403,"reason":"sdd_write_forbidden"}`（缺與錯同一個 reason，`hmac.compare_digest` 比對）。設定值**短於 32 字元或仍是 `<…>` 佔位**＝Bridge **啟動即失敗**（`SettingsError`，不靜默退回停用）。權杖**只有 backend 與 Bridge 持有**：`RunHandle._child_env` 必須在合併請求層 `env` 之前先移除繼承來的 `BRIDGE_SDD_WRITE_TOKEN`、`SDD_STATE_DIR`、`SDD_PROJECT`，之後**只有**含 `sdd` 區塊的 run 才設 `SDD_PROJECT=<專案鍵>`（**不注入 `SDD_STATE_DIR`**：引擎沒有讀者，給了只會讓子行程內的 AI 步驟拿到呼叫 FSM CLI 的現成指向）；`security.validate_env` 的拒絕清單加入這三個名稱（請求層 `env` 設定它們 → 422 `forbidden_name`）；任何回應、日誌、稽核事件都不得出現權杖值（對拍測試 F-7）。權杖檢查先於一切會碰檔案系統的檢查（`:resume`／`/restore` 例外：須先查到 run 才知道它帶不帶 `sdd`，順序是 run 查找〔404 `run_not_found`〕→ 權杖 → 其餘預檢、取鎖與 FSM 動作；缺／錯同樣回 503／403，run 狀態不變、不 spawn）。console-api 不記錄批次是否為 SDD，對 `:resume`／`/restore` 一律附標頭（backend 有設權杖時；Bridge 對非 SDD run 不看它）。
+3. **序列化與稽核**（ADR-016 §3.5、§9）：行程內以 `(狀態目錄, 專案鍵)` 為鍵的互斥鎖，**同時罩住**「CLI 呼叫」與「`GET /sdd/fsm/{project}` 的檔案讀取」（消除 Bridge 自己「讀的當下被 `os.replace` 換檔」的 Windows 共享違規）。跨行程競態（例如 SDD session 同時在寫）**沒有跨行程鎖**，是已知邊界（§3.1.7 第 9 點）。每個成功或被拒的寫入動詞都記一筆 Bridge 稽核事件 `sdd_write`（`security.AuditLog`：`verb`、`project`、`approver`、`result`，另帶 `trace_id`；不記權杖與環境）。
+4. **CLI 失敗的共同對映**（rc 表見 ADR-016 §4.1；CLI stdout 恰好一行 JSON，失敗為 `{"ok":false,"error":<代碼>,"detail":<ASCII，≤200 字>}`；`--reason` 內的中文只進 YAML、不回印）：
+
+| CLI rc | stdout `error` | Bridge 回應 |
+|:------:|----------------|-------------|
+| 0 | —（含 `"noop":true`） | 繼續 |
+| 1 | —（非預期例外） | **502** `sdd_cli_failed`（`detail` 為 ASCII，不含環境變數與權杖） |
+| 2 | —（argparse 用法錯誤；stdout 無 JSON） | **500** `sdd_cli_usage`（Bridge 自己的 bug，測試必須零次出現） |
+| 3 | `transition_not_allowed` | **409** `fsm_state_conflict`（`detail.current_state`） |
+| 4 | `invalid_argument`／`doc_not_found`／`doc_outside_root`／`doc_too_large`／`doc_not_utf8` | **422** `sdd_invalid_argument`（Bridge 先驗過，出現＝Bridge bug 或競態） |
+| 5 | `state_not_found`／`state_unreadable` | **404** `fsm_not_found`／**422** `fsm_state_unreadable` |
+| —（逾時 20 秒） | — | **504** `sdd_cli_timeout` |
+| —（無法啟動） | — | **502** `sdd_cli_failed` |
+
+**(a) 選填查詢參數 `root`（`GET /sdd/fsm`、`GET /sdd/fsm/{project}`）**
+
+| 項目 | 契約 |
+|------|------|
+| 語意 | 專案根目錄（絕對路徑）；狀態目錄＝`<root>/build/reports/fsm`（取代預設的 `<SDD_ROOT>/build/reports/fsm`）。省略＝v1.4 行為，完全不變 |
+| 驗證 | 經 `security.check_path`（`BRIDGE_ALLOWED_PATH_ROOTS`；絕對路徑、無 `..`、存在、是目錄）；不合 → **422** `{"code":422,"reason":"sanitization_failed","violations":[{"field":"root","rule":…}]}`（沿用既有形狀） |
+| 其餘 | `<root>/build/reports/fsm` 不存在＝與 v1.4 相同（清單回 200 空清單、`GET /sdd/fsm/{任何名稱}` 回 404 `fsm_not_found`）；symlink 逃逸檢查維持；`SDD_ROOT` 無效仍是 503 `sdd_unavailable`（CLI 與版本資訊仍需要它）；清單回應的 `root` 欄位語意不變（SDD 版本目錄名） |
+
+**(b) 專案名規則（S-10；ADR-016 §7.4；取代 `^[A-Za-z0-9._-]{1,128}$`）**
+
+- **淨化鏡像**：Bridge 持有**一份**逐字鏡像 `fsm_component(name)`（Bridge 與 SDD 同屬 monorepo 但不同子專案，不 import；建議檔 `fsm_names.py`），規則來源 `AISDLC_SDD/scripts/component_sanitizer.py` 的 `sanitize_component`：NFC → strip → 把 `<`、`>`、`:`、`"`、`?`、`*`、`\`、`/`、ASCII 豎線與 ord<0x20／0x7F 換成 `_` → 截 80 → `rstrip(" .")`（空則 `untitled`）→ stem 若是 Windows 保留裝置名則加 `_` 前綴並重截。**進入 Bridge 的專案名（`:freeze` 的路徑參數、`GET /sdd/fsm/{project}` 的路徑參數、`sdd.fsm_project`、`/sdd/compile` 的 `fsm_project`）一律先過它**；淨化是冪等的，所以傳原名與傳標準鍵等價。
+- **讀取白名單＝淨化輸出域**：非空；已是 NFC；長度 ≤ 80；不是 `.`／`..`；不含 `<`、`>`、`:`、`"`、`?`、`*`、`\`、`/`、ASCII 豎線、控制字元、DEL；無前後空白；不以 `.` 結尾。`GET /sdd/fsm`（清單）的 `errors` 語意不變：檔名不合此判準者進 `errors`，不進 `projects`。`..` 只有整段等於 `.`／`..` 或帶分隔符才有穿越意義；`_readable_state_file` 的 symlink 逃逸檢查維持。
+- **原名反查**：`GET /sdd/fsm/{project}` 先以淨化後的鍵找 `FSM-STATE-<鍵>.yaml`；無該檔但**恰有一個**檔的 YAML `fsm_state.project` 等於輸入原名時採用它（含 `:` 等字元的原名在 Windows 上會被 NTFS 當資料流，只能走這條）。路徑參數須 percent-encode（`%`、`#`、`+`、`;`、空白與非 ASCII）；含 `/`、`\` 的原名也要能被接受並淨化（§6.8.6 靜默處 #6）。
+- **Console 側**：Backend 不淨化、不檢查 Windows 禁用字元，只做長度與控制字元的檢查（§1.10.4），把有效值原樣交給 Bridge。對拍測試 F-8：`fsm_component` 對一批樣本（含 CJK、空白、括號、`+`、`@`、`a:b`、`x/y`、`CON`、80 字以上、NFD 輸入、尾端空白與句點）與 SDD 原函式逐一相等且冪等，其輸出皆被讀取白名單接受。
+
+**(c) 回應新欄位（只增不減；僅 `GET /sdd/fsm/{project}` 與 `:freeze` 的成功回應）**
+
+| 新欄位 | 型別 | 語意 |
+|--------|------|------|
+| `phase` | `{"name":str,"order":int,"blocking":bool,"observation":bool}` 或 null | 由 `current_state` 純函式投影出的階段資訊（定義與對映表見 §3.1.5）。**欄位永遠出現**；尚未接線該函式的 Bridge 回 null（W4 dogfood 產物搬入後恆有值，未知狀態回 `UNKNOWN` 物件而不是 null）；Backend／Frontend 一律當選填，缺值顯示「—」 |
+| `escalation_history` | object[] | 讀 `fsm_state.escalation_history`（list）的**尾 5 筆**，舊→新、原樣；缺或不是 list → `[]` |
+| `escalation_provenance` | object 或 null | 讀 `fsm_state.escalation_provenance` 原樣；缺或不是映射 → null。🔴 它與 `autoclaude_delegated_tracking` 在人工恢復後都**不會被清除**，是歷史殘留欄、不是現況旗標，消費者必須先看 `current_state`（ADR-016 §5.3） |
+| `fsm_project` | string | 狀態檔名裡**淨化後的標準鍵**（`FSM-STATE-<鍵>.yaml` 的 `<鍵>`）。現有的 `project` 欄是檔內原名，兩者可能不同，不能拿 `project` 當鍵（ADR-016 §7.2） |
+| `recovery` | `{"target":str,"powershell":str,"posix":str}`，或鍵缺席 | **僅 `current_state` 為 `ESCALATION`／`ESCALATION_FINAL` 時出現**：`target`＝建議的 `resume-from-escalation --to`（委派失敗＝`IMPLEMENTATION`，與 `autoclaude_delegated_tracking.resume_state` 一致；Bridge 無法判定目標時整個鍵省略，§6.8.6 靜默處 #5）；`powershell`／`posix`＝ADR-016 §5.3 的恢復指令模板（PowerShell 形態用 `Push-Location`／`Pop-Location` 同一句內成對、不裸 `cd`；POSIX 的 `VAR=值 指令` 前綴只作用於該指令；嵌入的路徑與專案鍵須依各殼層規則跳脫），`--reason` 留 `<人工原因>` 佔位。Bridge 與 Console **都不提供恢復動詞**（`resume-from-escalation` 不在 CLI 白名單；恢復只有人、留在 SDD session，R-9.5） |
+
+`frozen_stages[]` 的項目自 v1.5 起可含兩個只在有值時才出現的新鍵：`spec_doc_digests`、`approved_by`（見 (d)）。`GET /sdd/fsm`（清單）的項目**不帶**以上任何新欄位。
+
+**(d) `POST /sdd/fsm/{project}:freeze`　核准凍結（唯一的 FSM 寫入動詞）**
+
+- **請求**：標頭 `X-Bridge-Token`（必填）、`X-Trace-Id`（選填，既有規則）；body（`extra=forbid`）：
+
+| 欄位 | 型別 | 規則 |
+|------|------|------|
+| `root` | string | 專案根目錄（絕對路徑；同 (a) 的 `check_path`） |
+| `stage` | string | 選填；`^[A-Za-z0-9._-]{1,64}$`；省略 → `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1，Bridge 持互斥鎖時讀狀態檔計得）。階段名不要求唯一（摘要鍵遇重複以後者為準） |
+| `docs` | string[] | 1～20 項；每項是相對 `root` 的 POSIX 路徑，不得為絕對路徑、不得含 `..`，須是 `root` 之下的既有檔案（resolve 後不得跑出 `root`，含 symlink）；**至少一份檔名符合官方 TCS 命名**（`TEST-CONTRACT-SPEC-*` 或 `TCS-*`，與 adapter 的官方命名判準同形） |
+| `approver` | string | 1～100 字元，無控制字元，**不含 `;`**（否則 422 `sdd_invalid_argument`，讓 `--reason` 的 `key=value; …` 組字可無歧義解析） |
+| `reason` | string | 去前後空白後 1～500 字元，無控制字元（含換行）；**不靜默截斷、不替換**，違反即 422 `sdd_invalid_argument` |
+| `expected_digests` | object | 選填；`{<docs 內的相對路徑>: "sha256:<64 位小寫 hex>"}`＝核准人當時看到的摘要；鍵須都在 `docs` 內 |
+
+- **檢查順序（固定；與 Dev-Bridge 實作一致）**：①本文格式（422 `invalid_request`，既有）②權杖（503／403，共通規則 2）③`approver`／`reason` 清理（不合 → 422 `sdd_invalid_argument`）④`root`（422 `sanitization_failed`）⑤`{project}` 經淨化鏡像後找狀態檔（不存在 → 404 `fsm_not_found`；YAML 壞掉 → 422 `fsm_state_unreadable`）⑥`docs` 逐項檢查（422 `sanitization_failed`，`violations[].field` 為 `docs[i]`，`rule` 為 `absolute`、`contains_dotdot`、`not_found`、`outside_root`、`duplicate`、`invalid`；Console 把 `rule` 當不透明字串顯示，不依賴碼表；整份 `docs` 不含 TCS → 同為 422 `sanitization_failed`，`violations=[{"field":"docs","rule":"missing_tcs"}]`，規則碼與 Dev-Bridge 實作一致；§6.8.6 靜默處 #4）⑦前置：`current_state==HUMAN_PENDING`，否則 **409** `fsm_state_conflict`（`detail={"current_state":"<實際>","expected_state":"HUMAN_PENDING"}`）⑧`expected_digests` 逐一與現檔摘要比對，不符 → **409** `spec_digest_changed`（`detail={"pair":"expected_vs_file","doc":…,"expected_digest":…,"current_digest":…}`；鍵不在 `docs` 內 → 422 `sanitization_failed`，`rule=not_in_docs`）⑨以 CLI `spec-frozen --digest --root --stage --doc… --approver --reason --json` 記錄凍結（CLI 先驗前置、再算摘要、最後才改狀態；缺檔、非 UTF-8、超過 16 MiB 時 CLI 自己也會失敗＝縱深防禦，rc 4）。
+- **成功 200**：與 `GET /sdd/fsm/{project}` 同形（凍結後重讀；含 `phase`、`escalation_history`、`escalation_provenance`、`fsm_project`），**另加** `stage`（實際採用的階段名）與 `spec_doc_digests`（映射，同 `frozen_stages[-1]`）。
+- **摘要（S4 定案，ADR-016 §4.3）**：`spec_doc_digests`＝`{<相對 root 的 POSIX 路徑>: "sha256:<64 位小寫 hex>"}`；演算法＝**換行正規化後的 UTF-8 文字**（先 `\r\n`→`\n`、再 `\r`→`\n`；BOM 不剝）的 sha256，與 adapter 的 `SddSpec.digest`（＝`sha256(read_text(encoding="utf-8").encode("utf-8"))`）**逐位元相同**；不是原始 bytes（Windows 編輯器存成 CRLF 是常態，用原始 bytes 會讓每次比對假紅）。檔案必須是合法 UTF-8、單檔 ≤ 16 MiB。CLI、adapter、Bridge 三處各持一份等價的兩行實作，由對拍測試 F-6 守，不得跨子專案 import。
+- **FSM 側的效果**：`current_state` 轉為 `SPEC_FROZEN`、`frozen_stages` 加一筆（`stage`、`frozen_at`、`spec_docs`、`spec_doc_digests`、`approved_by`）、`decision_trace` 加一筆（`trigger=spec_frozen`，`reason`＝`console-freeze approver=<approver>; reason=<使用者理由>`，`spec_refs`＝正規化後的 `spec_docs`）；其餘由 SDD runtime 既有行為決定（例如重試計數歸零）。
+- **不做的事**：不跑 `/stage-compaction`（R-9.4 的凍結後壓縮是 SDD session 的責任）、不退回修改、不 init、不 gate、不恢復。
+
+**(e) `POST /sdd/compile` 的 v1.5 變更（S-03、S-04、S-11、S-12、G-02、G-06；ADR-016 §6、§7.1、§8）**
+
+| 方向 | 欄位 | 契約 |
+|------|------|------|
+| 請求（新，選填） | `spec_file` | 相對 `spec_dir` 的 POSIX 路徑（或 `spec_dir` 之下的絕對路徑），指定要編譯的規格檔（同一目錄有多份 TCS 時用，S-04）。`resolve()` 後須是 `spec_dir` 之下、副檔名 `.md`（不分大小寫）的**既有檔案**；**不掃描、不套官方命名規則**（呼叫端已具名）。不合 → 422 `sanitization_failed`（`violations[].field="spec_file"`）；檔不存在 → 422 `spec_not_found` |
+| 請求（新，選填） | `fsm_project` | FSM 專案名（原名或標準鍵皆可，先過 (b) 的淨化鏡像）。**Bridge 行程內呼叫 adapter 一律顯式傳值**（省略時傳空字串＝明確不指定，不讀 Bridge 自己的環境）。有給＝凍結閘只認 `FSM-STATE-<鍵>.yaml`（無該檔但恰有一個檔的 `fsm_state.project` 等於輸入原名時採用它）；其餘情況 → 422 `spec_not_frozen`（`detail` 列出該目錄現有的專案鍵，**不再往上層目錄找**）。省略＝狀態目錄內恰一個狀態檔時採用它；有兩個以上而無法指認 → fail-closed 422 `spec_not_frozen`（`detail`：狀態檔不唯一，請指定專案）（G-02／S-05；ADR-016 §7.1） |
+| 行為（既有） | 狀態目錄 | adapter 自 `spec_dir` 向上搜尋第一個含 `FSM-STATE-*.yaml` 的 `build/reports/fsm`；`root` 不是 compile 的參數 |
+| 回應（新） | `spec_file` | 實際採用的規格檔，相對 `spec_dir` 的 POSIX 路徑 |
+| 回應（既有，補述） | `spec_path` | 實際採用的規格檔的絕對路徑；Console 用它填 `sddSpecFile`、用它的父目錄填 `sddSpecDir`（ADR-016 §7.2；§6.8.6 靜默處 #7） |
+| 回應（新） | `fsm_project` | 通過凍結閘的狀態檔的**標準鍵**（檔名 `FSM-STATE-<鍵>.yaml` 的 `<鍵>`；Console 用它寫回 `sddProject`） |
+| 回應（新） | `frozen_digest` | `"verified"`（狀態檔有摘要且與現檔吻合）或 `"absent"`（沒有任何階段帶摘要：舊狀態檔，或凍結時沒帶 `--digest`；放行並出聲一次，Console 轉成匯入警告 `frozen_digest_absent`） |
+| 回應（新） | `unmapped_at_ids` | string[]：規格**宣告位置**出現、卻**沒有被編成 step** 的 AT 字樣，依首次出現順序去重；全部對得上＝`[]`。**欄位永遠出現**。宣告位置只有兩處：①AC 映射列（以豎線開頭、第一欄形如 `AC-…` 的表格列）的第三欄第一個寬鬆 AT 字樣；②每個 `gherkin` 圍欄區塊的第一個 `# AT-…` 標頭。§3 清單表、§4 邊界表（第一欄是場景類型）與散文都不是宣告位置，所以照模板填不會讓編譯失敗；AC 映射列的 AC 與 AT 前兩段推得的 `AC-<第一段>-<第二段>` 不一致者視為未編成。有值時仍回 **200**（D-115-16：是否阻擋由消費者決定，Console 轉成匯入警告，§3.3.2；`sdd_compile` CLI 則 rc 6 且不寫輸出檔，D-115-09） |
+| 回應（新） | `warnings` | `[{code, detail}]`，選填。專案根是 git 工作樹而 `build/reports/fsm/` **未被忽略**時帶 `state_dir_not_ignored`（以 `git -C <根> check-ignore -q -- build/reports/fsm/FSM-STATE-x.yaml` 判定：rc 0 已忽略、1 未忽略、128 非 git 樹則略過）；只警告不擋 |
+| 回應（補述） | `spec_format_version` | 既有欄位。宣告＝**行首**（容許 `>`、`*`、`_`、反引號、`-`、空白的裝飾）的 `spec-format-version`，值＝同行第一個 `\d+\.\d+`；行內散文提及不算宣告；缺欄＝預設 `1.0`；宣告卻解析不出值（例 `tbd`）→ 拒絕；不在支援集（現為 `1.0`）→ 422 `spec_format_version_unsupported`（S-11）。自 v1.5 起 Console 讀它（§3.3.2） |
+| 回應（補述） | `scenario` | 既有欄位：行首的 `**scenario**:`（或 `場景:`，半／全形冒號）宣告優先，值須屬 10 個場景之一，否則 422 `spec_ambiguous`；沒有宣告才退回既有的內文啟發式（沿用既有 step_id，另出聲 `sdd.scenario_inferred`）（S-12） |
+| AT 文法 | — | `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`（整串全比對、區分大小寫；D-115-16）：**前兩段數字＝所屬 AC**（`AT-001-12-3-a` 屬 `AC-001-12`），第三段起的英數尾綴不影響歸屬；`step_id`＝`sdd-<scenario>-<at id 小寫>`。模板 §4 的 `AT-{NNN}-E-n` 因第二段不是數字而**不可編譯**；要由 AutoClaude 執行的邊界／錯誤 AT 須命名為 `AT-{NNN}-{Y}-E-{n}` 並列入 §1（ADR-016 §8.1；模板不改，D-115-09） |
+| 行為（新） | 凍結內容綁定 | 狀態檔的 `frozen_stages[*].spec_doc_digests` 有該規格檔的摘要時，與現檔摘要比對，**不符 → 409 `spec_digest_changed`**（`detail={"pair":"frozen_vs_file","doc":…,"frozen_digest":…,"current_digest":…}`；D-115-16 後「內容與凍結時不同」在三個預檢點一律 409，不是 422）；規格檔不在任何階段的清單內 → 422 `spec_not_frozen`；舊狀態檔沒有摘要＝維持 v1.4 行為（只驗「有凍結」）並出聲一次（`frozen_digest="absent"`，G-06）。摘要的取用：全部階段的 `spec_doc_digests` 取**聯集**（同一鍵在多個階段出現時，後一階段勝出）；以「規格檔絕對路徑的尾段等於某個鍵」比對，**不依賴專案根的絕對路徑**（Docker 與主機路徑不同也成立） |
+
+**(f) `GET /autoclaude/runs/{id}/rtm`　追溯覆蓋（唯讀；G-05）**
+
+- **來源**：該 run 工作區 `engine/checkpoints/rtm/` 下的 `RTM-COVERAGE-<project>.yaml`（引擎 `RtmWritebackPlugin` 在 run **正常走完**時寫入；glob `RTM-COVERAGE-*.yaml`，多份取修改時間最新者；`.jsonl` 歷史檔不讀）。**不需權杖**（唯讀）。
+- **成功 200**：
+
+```json
+{ "scenario":"greenfield", "spec_digest":"sha256:…",
+  "at":{ "passed":4, "total":4, "unmapped":0, "pct":100.0 },
+  "ac":{ "covered":2, "total":2, "pct":100.0 },
+  "failed_at_ids":[], "weak_regex_at_ids":[], "unmapped_at_ids":[], "fully_covered":true, "advisory":true }
+```
+
+  欄位取自 YAML：`scenario`、`spec_digest`、`summary.passed_at`／`total_at`／`unmapped_at`／`at_coverage_pct`、`summary.covered_ac`／`total_ac`／`ac_coverage_pct`、`failed_at_ids`、`weak_regex_at_ids`、頂層 `unmapped_at_ids`、`summary.fully_covered`；舊報告缺 `unmapped_at`／`unmapped_at_ids` 時視為 0／`[]`；`advisory` **恆為 `true`**（Bridge 自己加，不來自檔案）。逆向歸屬規則（ADR-016 §8.5）：還原不出 AC 的 AT（字串以 `AT-` 開頭卻不過文法）**仍計入** `total_at`、依完成與否計入 `passed_at`／`failed_at_ids`，但**不進任何 AC 桶**，並列入 `unmapped_at_ids`；`fully_covered` 在 `unmapped_at_ids` 非空時為 `false`。
+- **錯誤**：run 不存在 → 404 `run_not_found`（既有）；沒有報告檔（沒有啟用 SDD 治理、run 尚未結束、run 不是正常走完——引擎只在正常走完時寫報告）→ **404** `{"code":404,"reason":"rtm_not_found","run_id":"…"}`；YAML 壞掉、不是映射、缺 `summary` → **422** `{"code":422,"reason":"rtm_unreadable","detail":"…"}`。
+
+**(g) 部署備註**：①`root` 底下的 `build/reports/fsm` 必須對 Bridge 行程可寫（Docker 下專案目錄須是可寫掛載；專案根唯讀掛載時 `:freeze` 與批次同步因 CLI 寫狀態檔失敗而回 502 `sdd_cli_failed`）；SDD 本身仍可唯讀掛載，由 CLI 的固定環境（遙測旗標＝0、不寫 `__pycache__`）避免寫入版本目錄（〔未驗〕容器級，ADR-016 §14.1）。②使用者專案根須把 `build/reports/` 加進 `.gitignore`（FSM 狀態檔是執行期產物，不入庫）：`/sdd/compile` 偵測到未忽略時回 `warnings[state_dir_not_ignored]`；Console 另在專案詳情的「SDD 治理」區以靜態提示提醒（§4.7.1）。③寫入權杖是 backend 與 Bridge 共用的祕密：compose 對 backend 與 engine-bridge 兩個服務都傳 `BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}`（預設空＝停用；SDD 是選用引擎，不像 `JWT_SECRET` 設成必填），`.env.example` 只放 `<YOUR_BRIDGE_SDD_WRITE_TOKEN_MIN_32_CHARS>` 佔位，**repo 內不放任何真值**。
+
+#### 3.1.5 `phase` 對映表（v1.5；G-13；W4 dogfood 標的 T-G 的規格輪廓）
+
+> 本小節是 W4 dogfood（D-115-08）的標的規格：Bridge 純函式「FSM `current_state` → 階段／阻塞／觀測旗標」。階段分組由本契約依 SDD LATEST 的 `transition_rules.py`（`_HAPPY_PATH` 主路徑、`OBSERVATION_STATES`）與 `FSMRuntime._BLOCKING_STATES` 定義；QA 據此寫 TCS（Gherkin 的 Then 須含引號字面值，使驗收 regex 可推導、避免 `weak_regex`）。函式輸入只有 `current_state`（任何型別），輸出恆為下列形狀之一，**不拋例外**。
+
+輸出 `SddFsmPhase{name, order, blocking, observation}`；判定順序（先命中者勝）：
+
+1. `current_state` 不是字串、為空白、或不在本表任何一格 → `{name:"UNKNOWN", order:0, blocking:false, observation:false}`。
+2. 阻塞狀態（`ESCALATION`、`ESCALATION_FINAL`、`TERMINATED`、`TOKEN_BUDGET_CRITICAL`；＝SDD `_BLOCKING_STATES`）→ `{name:"BLOCKED", order:0, blocking:true, observation:false}`。
+3. 觀測狀態（＝SDD `OBSERVATION_STATES`，現況 15 個）→ `observation:true`、`blocking:false`；`name`／`order` 取「回歸階段」（下表第二張）；回歸點只能由執行期的 `resume_state` 決定者 → `name:"OBSERVATION"`、`order:0`。
+4. 過渡狀態（`AUTO_COMPACT_PENDING`、`AUTO_RECOVERY_ATTEMPT`、`RESUME_VERIFICATION`）→ `{name:"TRANSIENT", order:0, blocking:false, observation:false}`。
+5. 其餘（主路徑）→ 下表第一張的階段，`blocking:false`、`observation:false`。
+
+主路徑階段（`order` 沿主路徑單調不減；相鄰兩個階段差 1）：
+
+| `order` | `name` | 中文標籤 | 包含的 `current_state` |
+|:---:|--------|----------|------------------------|
+| 1 | `INTAKE` | 立案 | `INIT`、`SCENARIO_DETECT`、`AGENT_LOAD`、`INTENT_DECOMPOSITION`、`BACKLOG_PRIORITIZED` |
+| 2 | `SPECIFICATION` | 規格撰寫 | `SPEC_DRAFTING`、`SCG_VALIDATION` |
+| 3 | `HUMAN_GATE` | 人工確認 | `HUMAN_PENDING`、`REMINDER`、`SPEC_REGRESSION_CHECK` |
+| 4 | `FROZEN` | 規格凍結 | `SPEC_FROZEN`、`TEST_CONTRACT_NEGOTIATED` |
+| 5 | `IMPLEMENTATION` | 實作 | `IMPLEMENTATION`、`SANDBOX_HARDENING_GATE`、`EXECUTION_EVALUATION`、`ADVERSARIAL_EVALUATION` |
+| 6 | `REVIEW` | 審查 | `PR_REVIEW`、`SPEC_AUDIT` |
+| 7 | `VERIFICATION` | 追溯驗證 | `RTM_VERIFY` |
+| 8 | `RELEASE` | 發布 | `RELEASE_READY`、`RELEASE` |
+
+非主路徑的 `name`（`order` 一律 0）：`BLOCKED`（阻塞）、`TRANSIENT`（過渡中）、`OBSERVATION`（觀測中，回歸點未定）、`UNKNOWN`（未知）；前端的中文標籤字典見 §4.7.3。
+
+觀測狀態的回歸階段：
+
+| 觀測狀態 | 回歸階段（`name`／`order`） |
+|----------|----------------------------|
+| `AUTOCLAUDE_DELEGATED`、`EVALUATOR_AUDIT` | `IMPLEMENTATION`／5 |
+| `SPEC_DEBATE` | `SPECIFICATION`／2 |
+| `SPEC_PATCH_PROPOSAL`、`EXPERIMENT_REPLAY` | `REVIEW`／6 |
+| `PRODUCTION_SIGNAL`、`LEARNING_COMMIT`、`SCAFFOLD_GC`、`MEMORY_CONSOLIDATION`、`PRODUCTION_BEHAVIORAL_SIGNAL`、`CAPABILITY_BENCHMARK` | `RELEASE`／8 |
+| `HUB_SYNC`、`TRAJECTORY_PREDICTED`、`DRIFT_OBSERVATION`、`MONITOR_VIOLATION` | `OBSERVATION`／0（回歸點不可由狀態字串靜態判定） |
+
+涵蓋範圍：`_HAPPY_PATH` 的全部鍵（W115-SA 現查共 43 個：主路徑 21、觀測 15、阻塞 4、過渡 3；§6.8.2 E6）都有對映；SDD 日後新增狀態而本表沒有對映時，對拍測試 F-5 變紅（而不是靜默落到 `UNKNOWN`）。
+
+T-G 的 AC 輪廓（給 QA 寫 TCS；全部 Unit）：AC-001-1 主路徑各狀態回上表階段、`order` 沿主路徑單調不減（2 個 AT：`INIT`～`HUMAN_PENDING`、`SPEC_FROZEN`～`RELEASE`）；AC-001-2 觀測態 `observation=true`、`blocking=false`，`name`／`order` 為回歸階段（例：`AUTOCLAUDE_DELEGATED`→`IMPLEMENTATION`／5；`HUB_SYNC`→`OBSERVATION`／0）；AC-001-3 阻塞態 `blocking=true`、`observation=false`、`name=BLOCKED`、`order=0`；AC-001-4 容錯：未知字串、`None`、整數、列表、字典、空字串、前後有空白的合法狀態名一律 `UNKNOWN`／0 且不拋例外（2 個 AT）；AC-001-5 過渡態回 `TRANSIENT`／0。約 7 個 AT。
+
+#### 3.1.6 SDD 批次：`sdd` 區塊、預檢與 FSM 同步（D-115-04、D-115-06、D-115-10、D-115-15；已與 ADR-016 §6.3、§7.3、§10 對齊）
+
+**`sdd` 區塊**（`POST /autoclaude/runs` 的頂層選填欄位，`RunCreateIn.sdd`；與 `playbook` 同層，不在 `playbook` 內；欄位語意取 ADR-016 §7.3）：
+
+| 欄位 | 型別 | 必填 | 規則 |
+|------|------|:----:|------|
+| `spec_dir` | string | ✅ | 絕對路徑，`check_path`（`BRIDGE_ALLOWED_PATH_ROOTS`）；須在 `root` 之下（否則 422 `sdd_block_invalid`） |
+| `spec_file` | string | — | 相對 `spec_dir`，或絕對路徑但須在 `spec_dir` 之下；`spec_dir` 內有多份 TCS 時必填；其餘規則同 §3.1.4 (e) |
+| `fsm_project` | string | ✅ | 原名或標準鍵皆可，Bridge 一律先過淨化鏡像（§3.1.4 (b)） |
+| `root` | string | — | 專案根，預設＝請求的 `execution_path`；`check_path`；`spec_dir` 必須在其內；FSM 狀態目錄＝`<root>/build/reports/fsm` |
+| `approver` | string | — | 簽核人：1～100 字元、無控制字元、不含 `;`（否則 422 `sdd_invalid_argument`）；省略＝`console`（服務身分，稽核上一眼可辨不是具名人，不假裝有人簽）；Backend 永遠送具名人（§1.10.6） |
+
+- `PlaybookIn.workflow_type` 仍只收 `auto`、`PlaybookIn` 仍 `extra=forbid`：**外部契約不開 `workflow_*`**。有 `sdd` 時由 Bridge **伺服端**在寫 `playbook.yaml` 時覆寫 `workflow_type=aisdlc_sdd`、`workflow_path`＝**已驗證的 realpath**（有 `spec_file` 用該檔案路徑、否則用 `spec_dir`；引擎 PRE_RUN 的 `load_spec(workflow_path)` 把檔案路徑視為 `spec_file`，port 簽名不改，ADR-016 §8.3）；引擎子行程環境**只有** `SDD_PROJECT=<專案鍵>`（先剝除繼承自 Bridge 的 `SDD_*`，§3.1.4 共通規則 2）。沒有 `sdd` 的請求行為與 v1.4 完全相同（不需要權杖）。
+- `RunRecord` 增選填 `sdd`（`spec_dir`、`spec_file`、`fsm_project`、`root`、`state_dir`、`approver`、同步結果）；`resume`／`restore` 的重驗與回收判定都從它取值，舊 `run.json` 缺欄走預設、`schema_version` 不變；除 `approver` 與 `fsm_project` 之外不含任何機密。
+
+**預檢順序**（固定，QA 依序斷言；全部通過前不取鎖、不寫 FSM、不 spawn；ADR-016 §6.3、§10.2）：
+
+| # | 檢查 | HTTP | reason | 附加欄位 |
+|---|------|------|--------|----------|
+| 0 | 本文格式（既有） | 422 | `invalid_request` | `violations[]` |
+| 1 | 權杖（Bridge 沒設／標頭缺漏或不符） | 503／403 | `sdd_write_disabled`／`sdd_write_forbidden` | — |
+| 2 | 區塊與路徑閘：`root`、`spec_dir`、`spec_file` 過 `check_path`；`fsm_project` 先淨化；`approver` 值域 | 422 | 路徑不合 `sanitization_failed`（`violations[].field` 為 `sdd.root`、`sdd.spec_dir`、`sdd.spec_file`）；`spec_dir` 不在 `root` 之下 `sdd_block_invalid`；`approver` 不合 `sdd_invalid_argument` | `violations[]`／`detail` |
+| 3 | 凍結與規格檢查（同 `/sdd/compile` 的 adapter、`fsm_project`、`spec_file`；「執行前」那一點的凍結＝現檔） | 422／409 | `spec_not_frozen`、`spec_tainted`、`spec_format_version_unsupported`、`spec_not_found`、`spec_ambiguous`；內容不符＝**409** `spec_digest_changed` | `detail`；409 的 `detail={pair:"frozen_vs_file", doc, frozen_digest, current_digest}` |
+| 4 | **匯入摘要**：playbook 各任務的 `spec_digest`（匯入時存下的值）必須恰為現檔摘要這一個值 | 409／422 | `spec_digest_changed`；任務完全沒有 `spec_digest`＝`sdd_block_invalid`（Backend bug） | 409 的 `detail={pair:"import_vs_file", doc, import_digest, current_digest}` |
+| 5 | FSM 狀態（**唯讀**讀取）依下方預檢表處置 | 409／404 | `fsm_state_conflict`／`fsm_not_found` | `detail`（見預檢表與回收點） |
+| — | 之後才是既有的取鎖（409 `advisory_lock_held`）→ **FSM 寫入** → `_materialize` → spawn | | | |
+
+- 第 3 項「凍結摘要缺」（舊狀態檔，或凍結時沒帶 `--digest`；`frozen_digest="absent"`）→ 放行，並在 Bridge 回的 201 帶 `warnings:[{code:"sdd_frozen_digest_absent", detail}]`（不靜默；Backend 原樣轉入 Console 的 201 `warnings[]`，§1.10.6）。摘要的演算法與值格式見 §3.1.4 (d)：CLI、adapter、現檔重算三處必須是同一個演算法，否則 CRLF 檔會假性不符（對拍測試 F-6）。
+- 三個預檢點的錯誤對映一致（ADR-016 §6.3）：①`:freeze` 的 `expected_digests`、②`/sdd/compile`、③執行前——「內容與凍結（或核准人看過的版本）不同」一律 **409 `spec_digest_changed`**，「未凍結、狀態檔缺、規格檔不在凍結清單」一律 **422 `spec_not_frozen`**。
+
+**FSM 同步**（寫入全部經 CLI，動詞與 `--reason` 見下表；順序與條件如下）：
+
+1. **FSM 寫入在 `_materialize` 之前、取鎖之後**（失敗時才不會留下半成品 run 目錄——否則 `reconcile` 下次啟動會把它當「活躍而無行程」的孤兒標成 FAILED）。依預檢表：
+
+| FSM 現況 | 處置 | 備註 |
+|----------|------|------|
+| `IMPLEMENTATION` | `delegate-enter` | 常態 |
+| `AUTOCLAUDE_DELEGATED` | 回收點（第 3 點）：所引用的 run 已終態或不存在 ⇒ `delegate-exit done`（RECLAIMED）→ `delegate-enter`；仍活著或外來委派 ⇒ 409 `fsm_state_conflict` | 回收也是 FSM 寫入，在鎖內做 |
+| `TEST_CONTRACT_NEGOTIATED` | `negotiate-exit agreed` → `delegate-enter` | 上次 enter 後 exit 前中斷的自癒（C-4） |
+| `SPEC_FROZEN` | `negotiate-enter` → `negotiate-exit agreed` → `delegate-enter` | 首次批次 |
+| 其他（含 `HUMAN_PENDING`、`ESCALATION`、`ESCALATION_FINAL`） | 409 `fsm_state_conflict`，`detail.current_state` 帶回 | `ESCALATION` 的出路見 §3.1.7 第 1 點 |
+| 狀態檔不存在 | 404 `fsm_not_found` | Bridge 不 init |
+
+   `--reason` 的固定組字（ADR-016 §4.4；稽核三處的對上靠它；格式為 `console-` 開頭、`key=value` 以 `; ` 分隔）：
+
+| 動詞 | `--reason`（與其他旗標） |
+|------|--------------------------|
+| `negotiate-enter` | `console-signoff approver=<approver>; run=<run_id>`；`--contract-ref`＝TCS 相對路徑 |
+| `negotiate-exit --outcome agreed` | `console-signoff approver=<approver>; oracle=<TCS 相對路徑>@<sha256:…>; basis=import-draft-signoff; r9.20.3=not-satisfied` |
+| `delegate-enter` | `console-run run=<run_id> START`；`--playbook-ref run:<run_id>`（`run:` 前綴讓回收規則只認 Bridge 簽發的值） |
+| `delegate-exit --decision done` | `console-run run=<id> COMPLETED`／`console-run run=<id> CANCELLED`／`console-run run=<舊 id> RECLAIMED old_status=<舊終態或 missing> by=<新 id>`／`console-run run=<id> SPAWN-FAILED delegation not started` |
+| `delegate-exit --decision failed` | `console-run run=<id> ENGINE-ESCALATION step=<step_id>: <detail>`（`detail` 取前 200 字、換行與控制字元換成空格） |
+
+2. **談判閘對映（D-115-10；ADR-016 §5.2 裁決：接受「Console 簽核匯入草稿＝談判 `agreed`」，附四條件）**：C-1 只在 Bridge 收到**帶有效權杖**且含 `sdd` 區塊的請求時執行，簽署人＝`sdd.approver`；C-2 憑證的誠實條款寫進 `negotiate-exit` 的 reason（`r9.20.3=not-satisfied`：稽核者讀到的是「人簽了這份 oracle、獨立性條款未滿足」，不是假裝完整談判）；C-3 真正的閘仍是 SCG-4 的獨立審查，RTM 面板一律標「諮詢視圖」，本契約**不宣稱** R-9.20.3 已滿足；C-4 enter 與 exit 在同一個 Bridge 請求內背靠背，中間失敗留在 `TEST_CONTRACT_NEGOTIATED`，由預檢表自癒。Bridge **不**呼叫 `negotiate-exit underspecified`（Console 沒有「退回修改」）。
+3. **回收點（D-115-15；ADR-016 §10.3）**：FSM 可能留在 `AUTOCLAUDE_DELEGATED` 而沒有任何行程（引擎異常結束、額度停機、孤兒、Bridge 關閉都「不動」）；回收點讓**新批次**自己解開陳舊委派，且只在確認「舊 run 已不在跑」時才動手。🔴 判斷只在 `current_state=AUTOCLAUDE_DELEGATED` 時才讀 `autoclaude_delegated_tracking.playbook_ref`（tracking 在 exit 後**不清除**，在 `IMPLEMENTATION` 上是歷史殘留欄）。判定依序：
+
+| # | 條件 | 處置 |
+|---|------|------|
+| 1 | `playbook_ref` 缺，或不以 `run:` 開頭（外來委派：人在 SDD session 進入的） | 409 `fsm_state_conflict`，`detail={current_state, reason:"foreign_delegation"}`；Bridge **不碰**——解卡由人在 SDD session `delegate-exit` |
+| 2 | 解出 `run_id` 後，Bridge 的 run 登錄（含重啟後由 `run.json` 還原的）**查無此 run** | 視為不存在 ⇒ 回收 |
+| 3 | 該 run 存在，但其 `sdd.state_dir` 或 `sdd.fsm_project` 與本次不同 | 視為外來，同第 1 項 409 |
+| 4 | 該 run 為**活躍**（`INITIALIZING`／`RUNNING`／`PAUSING`／`PAUSED`／`CANCELLING`） | 409 `fsm_state_conflict`，`detail={current_state, run_id, run_status}`（同一個 Console 專案與路徑另由 advisory lock 先回 409；**不同** Console 專案指向同一個 `(狀態目錄, fsm_project)` 由這一條回 409，Backend 的部分唯一索引是第一道） |
+| 5 | 該 run 為**終態**（`COMPLETED`／`FAILED`／`CANCELLED`） | 回收 |
+
+   **回收**＝鎖內依序 `delegate-exit --decision done`（reason `…RECLAIMED…`）→ `delegate-enter`（`--playbook-ref run:<新 id>`）；兩步之間 `delegate-enter` 失敗 ⇒ FSM 停在 `IMPLEMENTATION`（無委派）、本次建立回 409／5xx 並不 spawn，下次建立從 `IMPLEMENTATION` 常態進入，不需人工。回收在 Bridge 稽核記一筆（含舊 run id 與舊終態）。回收只對 `AUTOCLAUDE_DELEGATED` 成立：`ESCALATION` 只有人能解（`delegate-exit` 在 `ESCALATION` 回 rc 3）。
+4. **補償**：從 FSM 寫入成功起，到引擎行程確認啟動之前的任何失敗（`_materialize` 例外、`spawn_failed`…），Bridge 必須補償——以 `done` 離開委派（`AUTOCLAUDE_DELEGATED`→`IMPLEMENTATION`，reason 見上表 `SPAWN-FAILED`）；**不得**用 `failed` 離開，那會進阻塞態 `ESCALATION`，不可把基礎設施故障映成它。補償本身失敗只記 ERROR 與 alert `SDD_FSM_SYNC_FAILED`，不改變對呼叫端的錯誤回應。談判已完成而進入委派失敗＝FSM 停在 `IMPLEMENTATION`（已談判），重試安全。
+5. **終態同步**（run 監督執行緒在 `_finalize` 寫完終態之後，狀態事件先發布，**在 `handle.lock` 之外**才呼叫 CLI；只對帶 `sdd` 建立的 run；ADR-016 §10.1）。🔴 `delegate-exit --decision done` 的語意是「**委派交還控制權、未升級**」，不是「成功」：run 是否成功由後續閘門判（SCG-4 審查、RTM 面板），FSM 不替它背書；所以完成與使用者取消都是 `done`，只有引擎升級型失敗是 `failed`：
+
+| 事件 | 判定（`runner.py` 實際分支） | FSM 動作 | FSM 結果 |
+|------|------------------------------|----------|----------|
+| `COMPLETED` | 最終狀態 `COMPLETED` | `delegate-exit done`（`… COMPLETED`） | `IMPLEMENTATION` |
+| `CANCELLED`（使用者取消，非孤兒；含 `PAUSED` 時直接收尾） | 最終狀態 `CANCELLED` | `delegate-exit done`（`… CANCELLED`；D-115-15 修訂 D-115-10 的「不動」） | `IMPLEMENTATION`（之後可再委派） |
+| `FAILED`·引擎升級型 | `reason` 以 `引擎升級（ESCALATION）` 開頭，亦即 `runner.py` 的 `_escalation` 非空 | `delegate-exit failed`（`… ENGINE-ESCALATION step=…`） | `ESCALATION`（FSM 自己寫 `escalation_history`，`source=autoclaude_delegated_failed`；`autoclaude_delegated_tracking.playbook_ref` 仍指出是哪個 run） |
+| `FAILED`·額度或 token 停機 | `_failure_reason` 的 halted 分支、無 `_escalation` | **不動**（基礎設施故障不得映成阻塞態） | 維持 `AUTOCLAUDE_DELEGATED`（留給回收點） |
+| `FAILED`·引擎異常結束、被訊號終止、Bridge 關閉 | 同上，無 `_escalation` | **不動** | 維持 `AUTOCLAUDE_DELEGATED`（留給回收點） |
+| `FAILED`／`CANCELLED`·孤兒（Bridge 重啟後 `reconcile`） | 不論被標成 `FAILED` 或 `CANCELLED` | **不動** | 維持 `AUTOCLAUDE_DELEGATED`（留給回收點） |
+| `FAILED`·spawn 失敗 | `_spawn` 的 `OSError` | 補償 `delegate-exit done`（`… SPAWN-FAILED delegation not started`） | `IMPLEMENTATION` |
+| `PAUSED`（非終態） | — | **不動** | 維持 `AUTOCLAUDE_DELEGATED`；`resume` 沿用同一個委派 |
+
+   終態事件到「FSM 回到 `IMPLEMENTATION`」之間有約 0.1 秒（暖機）視窗：**四源對拍必須輪詢到 FSM 離開 `AUTOCLAUDE_DELEGATED`（上限 30 秒）再比，不得單次讀取**（E2E-17 第 15 列）。
+6. **exit 的容錯與 alert**：`delegate-exit` 回 rc 3（FSM 已不在 `AUTOCLAUDE_DELEGATED`，例如人工已處理）⇒ 視為「已就位」，記 alert `{level:"warning", code:"SDD_SYNC_STATE_DRIFT"}`、不失敗；其他非零 ⇒ 記 alert `{level:"error", code:"SDD_FSM_SYNC_FAILED"}` 與稽核，並把 `{exit, ok:false, error}` 寫進 run 紀錄，FSM 留在原態（由回收點或人工處理）；同步動作失敗**不改 run 狀態、不重試**。這幾個 alert 與其他 Bridge 告警一樣經 SSE 轉發，不另存成 Console 告警（§3.7、D-17 的「其餘 Bridge 告警只轉發」）。
+7. **`resume`／`restore`（SDD run）**：先重跑預檢第 3、4 項（凍結＝現檔、匯入摘要＝現檔；任務摘要取自該 run 工作區已存的 `playbook.yaml`）；FSM 為 `AUTOCLAUDE_DELEGATED` 且 `playbook_ref` 就是本 run（`run:<本 id>`）⇒ 直接續；引用別的 run 或外來委派 ⇒ 409（回收點第 1、3、4 項）；為 `IMPLEMENTATION` ⇒ `delegate-enter` 重進（`playbook_ref` 仍用本 run 的 id）；其他（含 `ESCALATION`）⇒ **409 `fsm_state_conflict` 並不 spawn**。審核決定（`SKIP`／`RETRY`）開的後續批次走建立流程，與 execute 相同。被回收的舊 run 若是可 `restore` 的終態（額度停機的 `FAILED`、取消後的 `CANCELLED`），之後 `:restore` 走本點的 `IMPLEMENTATION`⇒`delegate-enter` 一列，與新批次不衝突（新批次仍在跑時 `restore` 會因回收點第 4 項得 409）。**權杖**：SDD run 的 `:resume`／`/restore` 也須帶 `X-Bridge-Token`（D-115-18；§3.1.4 共通規則 2），檢查在上述預檢之前；缺／錯回 503／403，不 spawn、FSM 不動。
+
+**建立流程順序**（ADR-016 §10.2）：
+
+```
+create(req 含 sdd):
+ 1  既有驗證＋sdd 唯讀預檢（上表 0～5）                      → 4xx，零副作用
+ 2  取得 advisory lock（既有）
+ 3  FSM 寫入（依預檢表）                                    → rc≠0：釋放鎖、回 409／5xx，尚無任何工作區產物
+ 4  _materialize（既有）                                    → 例外：補償 delegate-exit done ＋釋放鎖
+ 5  start／_spawn（既有）                                   → spawn 失敗：補償 delegate-exit done
+ 6  終態：狀態事件先發布，之後（handle.lock 之外）才呼叫 delegate-exit
+```
+
+#### 3.1.7 已知邊界（誠實劃界；不是待修缺陷）
+
+1. **`ESCALATION` 只有人能解，Console 沒有恢復動詞**（D-115-15；ADR-016 §5.3）：引擎升級型失敗會讓 FSM 進 `ESCALATION`（阻塞態；R-9.5、絕對禁令第 6 條：必須等人工）。恢復**留在 SDD session**：`resume-from-escalation --to IMPLEMENTATION --project <鍵> --reason "<人工原因>"`（`GET /sdd/fsm/{project}` 在 `ESCALATION`／`ESCALATION_FINAL` 時多回 `recovery`，Console 顯示可複製的指令）；恢復後 FSM 回 `IMPLEMENTATION`、歷史回填 `resolved_at`，**下一個 Console 批次可直接啟動**。恢復前新的 SDD 批次一律 409 `sdd_fsm_state_conflict`（`details.currentState="ESCALATION"`）。判斷「有未解的委派失敗」只能用「`currentState` 屬 `ESCALATION`／`ESCALATION_FINAL`，且 `escalationHistory` 末筆 `resolved_at` 為空」——`escalation_provenance` 與 `autoclaude_delegated_tracking` 在恢復後**不會被清除**，只看它們在不在，會在 `IMPLEMENTATION` 上顯示過期的失敗。**停在委派態的其餘情形**（取消除外：取消走 `done`；額度停機、異常結束、孤兒、Bridge 關閉）由**新批次的回收點**自動解開（§3.1.6 第 3 點）；外來委派（人在 SDD session 進入的）與仍活躍的 run 則 409，解卡由人處理。
+2. **`restore`／`resume` 會重驗，但沒有 Console 解卡動詞**（§3.1.6 第 7 點）：已 `COMPLETED` 的批次 `restore` 時，FSM 是 `IMPLEMENTATION`，Bridge 會重新 `delegate-enter`；若 FSM 在 `ESCALATION` 或被別的 run／外來委派佔用則 409 並不 spawn。要讓 FSM 軌跡乾淨地反映新一輪，建議另開新批次而不是 restore。
+3. **一個 FSM 專案只對應一個未刪除的 Console 專案**（D-115-14；部分唯一索引，§0.5 V12）：同一個 `(executionPath, sddProject)` 不能被兩個專案認領；Bridge 側的縱深是回收點第 4 項（不同 Console 專案指向同一個 `(狀態目錄, fsm_project)` 且對方的 run 仍活躍 ⇒ 409）。Bridge 的 advisory lock 以「專案名＋路徑」為鍵，兩個專案名不同不會互擋，所以不能靠它。
+4. **談判閘的語意落差**（D-115-10；ADR-016 §5.2）：R-9.20.3 要求 oracle 對 Generator 不可見，AutoClaude 路徑上測試與實作由同一個 AI 寫，此條件**結構上不成立**；本契約把「Console 簽核＝談判同意」當作人工背書，並把 `r9.20.3=not-satisfied` 寫進 `negotiate-exit` 的 reason，不當作 oracle 獨立性的證明。
+5. **RTM 與 AT 文法**：正向 `unmapped_at_ids`（規格宣告位置出現卻沒編成步驟；Bridge `/sdd/compile` 回應、Console 轉警告）與逆向 `unmappedAtIds`（已編成的 AT 還原後無法歸屬 AC；RTM 回應）是**兩個不同層的欄位**；文法與歸屬規則見 §3.1.4 (e)、(f)（ADR-016 §8）。舊規格若用兩位首段（`AT-14-…`）或字母第二段（`AT-001-E-1`），其 AT 會列入 `unmapped_at_ids`（可執行的邊界／錯誤 AT 須命名為 `AT-{NNN}-{Y}-E-{n}`）。
+6. **`spec_doc_digests` 只有凍結當下的文件清單**：凍結後新增的規格檔不在其內；預檢只比對 `spec_file`（或 adapter 選定的檔）。
+7. **評估指令的鑑別力**（整合輪 115 §5.1-2）：`pytest -k AT_x` 只證「有測試且綠」；RTM 一律標諮詢，SCG-4 的人工審查才是真閘。
+8. **權杖只封住 Bridge 的 HTTP 寫入面**（ADR-016 §9 劃界）：引擎子行程內的 AI 步驟仍可自己執行框架的 FSM CLI（框架程式碼對它可讀）。縱深在於：不注入 `SDD_STATE_DIR`；批次期間 FSM 在 `IMPLEMENTATION`／`AUTOCLAUDE_DELEGATED`，`spec-frozen` 轉態不合法；凍結綁內容，竄改規格可偵測。**不防禦主動對抗的 AI**，與 Bridge 無認證的既有限制（Architecture §12 L-6）同級。
+9. **跨行程競態**（ADR-016 §3.5）：FSM 狀態檔 load-modify-save 沒有跨行程鎖（只有 `os.replace` 原子）；Bridge 只在 spawn 與終態各呼叫一次、且行程內序列化，預期近零，但 SDD session 與 Bridge 同時寫＝競態（再開症狀：觀測到 `escalation_history`／`decision_trace` 遺失）。
+10. **`done` 不是「成功」**：FSM 軌跡不再區分「完成」與「取消」，靠 `decision_trace` 的 reason 字串（`COMPLETED`／`CANCELLED`）區分；成敗由後續閘門與 RTM 判（ADR-016 §14.1）。
+11. **Bridge 的專案路徑只收不含 `/` 的名稱**（D-115-18 ③；ADR-016 §7.4「原名與標準鍵等價」的邊界）：`GET /sdd/fsm/{project}` 與 `POST /sdd/fsm/{project}:freeze` 的 `{project}` 是**單一路徑段**，只收淨化後的 FSM 鍵（或本來就不含 `/` 的原名，經淨化鏡像後與標準鍵等價）；含 `/` 的原名經 URL 解碼後路由不匹配，Bridge 回**沒有 `reason`** 的 404（框架預設的 `Not Found`，不是 Bridge 錯誤封包；以 Starlette TestClient 實測：`{project}` 對 `a%2Fb` 回 404，`\` 與空白不受影響）。契約**不要求** Bridge 為此改用 `{project:path}`。影響：專案名含 `/` 且 `sddProject` 仍為 NULL 時，第一次使用（核准凍結第 4 項的唯讀 GET、`GET /engines/sdd?project=`）無法由 URL 定址；Console 暫把這個 404 當「找不到狀態檔」轉譯（`GET /engines/sdd` 為 `reason="fsm_not_found"`，核准凍結為 409 `sdd_fsm_not_found`、`details.sddProject` 帶出送出的名稱），不另設錯誤碼。避開：用 `PUT /projects/{id}/sdd-binding`（§1.10.7）把 `sddProject` 設成不含 `/` 的名稱（例如淨化後的鍵），有效 FSM 專案改取它，就不會再用到含 `/` 的專案名。請求本文裡的 `fsm_project`（`/sdd/compile`、`POST /autoclaude/runs` 的 `sdd`）不受此限，Bridge 一律先淨化。
+
 ### 3.2 錯誤轉譯（Bridge → Console）
 
 Bridge 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations[]`（`{field,rule,message,…}`）。
@@ -1558,6 +2083,18 @@ Bridge 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `v
 | 500 `spawn_failed`、503 `lock_backend_unavailable`、`run_exists`（console 的 id 是新 UUID，不應發生）、其餘 5xx | execute 等 | **502** `引擎橋接服務錯誤`，`details={bridgeStatus,bridgeReason}`；execute 補償刪除 run 列（守門＝該 run 尚無 `execution_steps`，不看狀態，`spawn_failed` 時列已被 Bridge 標成 `FAILED` 仍要刪；§3.4.5，AR-15）。`/sdd/compile` 遇其餘 5xx：探測模式略過路徑 A、明示 `specDir` 時同樣 502 |
 | 連線失敗（拒絕連線、DNS、連線逾時） | 任何 | **502** `引擎橋接服務無法連線` |
 | 讀取逾時 | 任何 | **504** `引擎橋接服務逾時` |
+| 409 `fsm_state_conflict`＋`detail{current_state, expected_state?, run_id?, run_status?, reason?}`（v1.5） | 核准凍結、帶 `sdd` 的 execute、SDD run 的 resume／restore | **409** `sdd_fsm_state_conflict`，`details={currentState, expectedState?, runId?, runStatus?, cause?}`（`expected_state` 是字串或陣列，原樣帶出；`detail.reason="foreign_delegation"`→`details.cause`；`run_id`／`run_status`→`runId`／`runStatus`）；execute 補償刪除剛建的 run 列 |
+| 409 `spec_digest_changed`＋`detail{pair, doc, expected_digest?, frozen_digest?, import_digest?, current_digest}`（v1.5） | 核准凍結（`pair=expected_vs_file`）、帶 `sdd` 的 execute（預檢第 3、4 項：`frozen_vs_file`／`import_vs_file`）、SDD run 的 resume／restore | **409** `sdd_spec_digest_changed`，`details={pair, doc, expectedDigest, frozenDigest, importDigest, currentDigest}`（沒有的鍵省略）；execute 補償刪除剛建的 run 列 |
+| 409 `spec_digest_changed`（v1.5；`POST /sdd/compile`） | 匯入 `parse` | **422** `SDD 規格檢查未通過`，`details={bridgeReason:"spec_digest_changed", detail:"<Bridge detail 物件的一行文字>"}`；**不得**降級成「沒有規格」而退回 LLM 路徑——探測模式同樣 fail-closed（§3.3.1、§3.3.2 第 9 點；ADR-016 §6.3 要求 `ImportParser.probeSpec` 對 409 明確丟拒絕） |
+| 404 `fsm_not_found`（v1.5） | 核准凍結（第 4 項的唯讀 GET 或 CLI rc 5）、帶 `sdd` 的 execute | **409** `sdd_fsm_not_found`，`details={sddProject}`（專案存在，但那個 FSM 專案沒有狀態檔：要先在專案根的 SDD session 建立）；execute 補償刪除 |
+| 422 `spec_not_frozen`／`spec_tainted`／`spec_format_version_unsupported`／`spec_not_found`／`spec_ambiguous`（v1.5） | 帶 `sdd` 的 execute（預檢第 3 項）、SDD run 的 resume／restore | **422** `SDD 規格檢查未通過`，`details={bridgeReason, detail}`（與路徑 A 同一個轉譯；§3.3.1 的「探測模式例外」只適用 `parse`）；execute 補償刪除剛建的 run 列 |
+| 422 `fsm_state_unreadable`／`sanitization_failed`／`sdd_invalid_argument`／`sdd_block_invalid`（`:freeze` 的 `root`、`docs[i]`、`approver`、`reason`；帶 `sdd` 的 execute 的 `sdd.*`）（v1.5） | 核准凍結、execute | **422** `引擎拒絕此請求`，`details={bridgeReason, violations[]}`（逐項原樣帶出；Bridge 沒給 `violations` 時為 `[]`，並加 `details.detail`＝Bridge 的 `detail` 文字） |
+| 503 `sdd_write_disabled`（v1.5） | 核准凍結、帶 `sdd` 的 execute、SDD run 的 resume／restore（D-115-18） | **503** `sdd_write_disabled`（無 `details`）；execute 並補償刪除剛建的 run 列；resume／restore 不改 run 與 DB 狀態 |
+| 403 `sdd_write_forbidden`（v1.5） | 核准凍結、帶 `sdd` 的 execute、SDD run 的 resume／restore（D-115-18） | **502** `引擎橋接服務錯誤`，`details={bridgeStatus:403, bridgeReason:"sdd_write_forbidden"}`；另記 ERROR 日誌（兩端的權杖設定不一致，是設定缺陷不是使用者錯誤） |
+| 500 `sdd_cli_usage`、502 `sdd_cli_failed`、504 `sdd_cli_timeout`（v1.5） | 核准凍結、帶 `sdd` 的 execute、SDD run 的 resume／restore | 落在上方「其餘 5xx → 502 `引擎橋接服務錯誤`」那一列（`details.bridgeStatus`、`details.bridgeReason`）；execute 補償刪除。（Bridge 回的 504 是 HTTP 回應，不是連線讀取逾時，所以不走「讀取逾時 → 504」那一列） |
+| 404 `rtm_not_found`、404 `run_not_found`（v1.5；rtm 端點） | `GET /executions/{runId}/rtm` | **404** `rtm_not_found`，`details={runId}`（本端點的 `run_not_found` 不走上方控制類呼叫的 409 對映：批次是否存在以資料庫為準，Bridge 端沒有就是沒有報告） |
+| 422 `rtm_unreadable`（v1.5） | `GET /executions/{runId}/rtm` | **422** `引擎拒絕此請求`，`details={bridgeReason:"rtm_unreadable", violations:[]}` |
+| 422 `sanitization_failed`（`GET /sdd/fsm*` 的 `root`；v1.5） | `GET /engines/sdd?projectId=` | **200**＋`available=true`、`reason="sdd_root_rejected"`（回應欄位，不是錯誤；§1.10.4） |
 
 ### 3.3 匯入：三條解析路徑
 
@@ -1597,6 +2134,31 @@ Bridge 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `v
 | `specDigest` | `digest`；`aiModel`／`tokenUsed` 皆 null；不呼叫任何 Brain |
 
 每組 ≤ 24 個任務，所以每個目標仍套 `max_steps` 閘；其餘閘（`cycle`、`empty_prompt`、`prompt_too_long`）不變。只有合約數超過 24×24 時，目標數才會 > 24 而被 `max_steps`（`location=goals`）擋下。
+
+**v1.5 補充（G-08、S-03、S-04、G-06；D-115-09、D-115-14、D-115-16；已與 ADR-016 §6～§8 對齊）**——以下條文只加不改，與上表衝突處以本段為準：
+
+1. **請求**：`POST /sdd/compile {"spec_dir": …, "spec_file"?: …, "fsm_project"?: …}`。`spec_file` 取自 `ParseOptions.specFile`；`fsm_project` 取自 `ParseOptions.sddProject`（有 `targetProjectId` 時取目標專案的**有效 FSM 專案**，§1.10.5）——Backend 不淨化，值原樣送出，Bridge 淨化後在回應帶標準鍵。匯入探測模式（§3.3.1 第 2 步）只送 `spec_dir`（與已知時的 `fsm_project`），不送 `spec_file`。
+2. **`ParseOptions` 新增選填欄位**：
+   - `specFile`：要編譯的規格檔——相對 `specDir` 的 POSIX 路徑，或 `specDir` 之下的絕對路徑；須與明示的 `specDir` 並用（目標專案已有 `sddSpecDir` 時以它為 `specDir`）；單獨帶 → 400（`errors[0].field=specFile`）。
+   - `sddProject`：FSM 專案名的**有效值**（可以是原名；1～200 字元、無控制字元；§1.10.5）；同一個狀態目錄有多個 FSM 專案時用來指認凍結閘要認哪一個，缺漏時由 adapter 在「只有一份」時自動採用（§3.1.4 (e)）。
+   - `targetProjectId`（uuid）：**併入既有專案**（D-115-14；§1.10.8）。帶了之後 `executionPath`、`sddProject`、`specFile` 取自目標專案（目標專案某欄位為 NULL 時以請求值為準），請求另帶不同值 → 409 `sdd_binding_conflict`；目標專案不存在或已軟刪除 → 404。
+3. **Bridge 回應的新欄位**（§3.1.4 (e)）：`SddCompileResult` 收下 `spec_file`、`fsm_project`、`frozen_digest`、`spec_format_version`、`unmapped_at_ids`、`warnings`。
+4. **欄位保真**（G-08；與 `sdd_compile` CLI 逐任務對拍，F-1）：
+
+| Console 欄位 | v1.5 的來源 |
+|--------------|-------------|
+| `tasks[i].maxRetries` | `task.max_retries`（SCG-4 型 5、SCG-5 型 2）；Bridge 沒給則 null（落庫取預設 3）。v1.4 是一律 null |
+| `tasks[i].passCriteriaSpec` | v1.4 的 `{source, specDigest, stepId, weakRegex}` **加** `maintainContext`（布林，＝`task.maintain_context`；Bridge 沒給則不放這個鍵）。`specDigest` 仍取回應的規格層級 `digest`（與各任務的 `spec_digest` 相同） |
+
+5. **`ParsedResult` 新增四個伺服器擁有欄位**（`PUT /import/{id}/result` 的請求帶了也忽略，同 `specDigest`）：`specFormatVersion`（＝`spec_format_version`；只供顯示與稽核，不做任何閘控）、`sddProject`（＝回應的 `fsm_project`，標準鍵）、`sddSpecDir`（＝回應 `spec_path` 的**父目錄**，絕對路徑）、`sddSpecFile`（＝回應的 `spec_path`，絕對路徑；ADR-016 §7.2）。只有路徑 A 才有值，路徑 B／C 缺席。**`confirm` 才回填**（parse／預覽不回填）：不帶 `targetProjectId` 時帶進新專案的 `sdd_project`／`sdd_spec_dir`／`sdd_spec_file`（§0.5 V12）；帶 `targetProjectId` 時併入目標專案並冪等更新 `sdd_spec_dir`／`sdd_spec_file`、為 NULL 時寫入 `sdd_project`（§1.10.8）。
+6. **解析結果 `warnings[]` 的三個新警告碼**（黃色提示，不阻擋；匯入頁照既有的警告區顯示，signoff 前由人決定）：
+   - `at_unmapped`：`unmapped_at_ids` 非空 → `{code:"at_unmapped", detail:"規格出現但未編成步驟的 AT：<id、id…>", location:"specDir"}`；空則不加。已編成的 AT 照常產出任務。
+   - `frozen_digest_absent`：回應 `frozen_digest="absent"` → `{code:"frozen_digest_absent", detail:"規格凍結時沒有記錄內容摘要（舊狀態檔），無法偵測凍結後改檔", location:"specDir"}`（SA 補：ADR-016 §6.2 只要求 adapter 出聲，Console 轉成警告，§6.8.6 靜默處 #9）。
+   - `state_dir_not_ignored`：Bridge 回應的 `warnings` 帶它 → 原樣轉入（`location:"executionPath"`）；提醒使用者把 `build/reports/` 加進該專案的 `.gitignore`。
+7. **`spec_ambiguous`（S-04）**：同目錄有多份 TCS 而沒給 `specFile`，仍是 422 `SDD 規格檢查未通過`（`details.bridgeReason=spec_ambiguous`），`detail` 列出符合條件的檔名，使用者據此帶 `specFile` 重試。
+8. **凍結與內容綁定（G-06；D-115-16 後的對映）**：規格未凍結、狀態檔缺、規格檔不在凍結清單 → 422 `SDD 規格檢查未通過`（`details.bridgeReason=spec_not_frozen`）；**凍結之後又改了 TCS**（Bridge 409 `spec_digest_changed`）→ 同樣回 422 `SDD 規格檢查未通過`，`details.bridgeReason=spec_digest_changed`，`detail` 說明凍結後內容已變更。**一律不是 200，也不退回 LLM 路徑。**
+9. **探測模式的 fail-closed（ADR-016 §6.3）**：`ImportParser.probeSpec` 現行把「非 422」的 4xx 當成「略過路徑 A」——Bridge 的 409 `spec_digest_changed` 若走這條會被**靜默降級成 LLM 草稿（fail-open）**。契約要求 Backend 對 `spec_digest_changed`（409）與 `spec_not_frozen`（422）一律當**拒絕**處理：探測模式下同樣視為「規格存在但被拒」，回 422 `SDD 規格檢查未通過`，不得繼續第 3 步（回歸測試須具名釘住 409 的案例）。
+10. **AT 文法與 `step_id`**（D-115-16；ADR-016 §8.1）：編譯接受的 AT id 為 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，前兩段數字＝所屬 AC，尾綴不影響歸屬；`step_id`＝`sdd-<scenario>-<at id 小寫>`（`passCriteriaSpec.stepId` 同值）。**照模板填 §4 的 `AT-{NNN}-E-n` 不會讓編譯失敗，但這些 AT 也不會被編成任務**；要執行邊界／錯誤 AT 須命名為 `AT-{NNN}-{Y}-E-{n}` 並列入 §1。
 
 #### 3.3.3 路徑 B：自由文件 → OpenAI 相容 chat completions（`path=LLM`）
 
@@ -1731,6 +2293,23 @@ JSON 結構：
 
 Bridge 請求：`{ "run_id": "<execution_runs.id>", "project": "<淨化名>", "execution_path": "<project.executionPath>", "playbook": {…}, "config_overrides": {…}, "env": {…}, "fresh": false }`。
 
+**v1.5 補充：SDD 批次的 playbook 與 Bridge 請求（D-115-06；G-01、G-06、G-08；已與 ADR-016 對齊）**——只有 §1.10.5 的資格全部成立時適用；不成立時上表與 v1.4 完全相同。
+
+| 欄位 | SDD 批次的做法 |
+|------|----------------|
+| `workflow_type`／`workflow_path` | Console **仍不送**；由 Bridge 伺服端覆寫（§3.1.6；有 `spec_file` 時 `workflow_path` 是規格檔的 realpath，否則是規格目錄） |
+| `tasks[].step_id` | 沿用 `passCriteriaSpec.stepId`（`sdd-<場景>-<at id 小寫>`；整份 playbook 唯一，由資格第 5 項保證）；`dag.nodes[].stepId`、`ExecutionStepResponse.stepId`、SSE 與日誌的 `stepId` 同值（`G<g>-T<t>` 只用於非 SDD 批次，§3.4.4）。引擎的 `RtmWritebackPlugin` 只認 `sdd-` 前綴，這是追溯報告的前提 |
+| `tasks[].max_retries` | `task.maxRetries`（路徑 A 現在填 5 或 2）；其餘規則不變 |
+| `tasks[].maintain_context` | `passCriteriaSpec.maintainContext`（布林；缺則不送） |
+| `tasks[].spec_digest` | `passCriteriaSpec.specDigest`（Bridge 預檢第 4 項的「匯入時」摘要；`sha256:<64 位小寫 hex>`，§3.1.4 (d)） |
+| `tasks[].weak_regex` | `passCriteriaSpec.weakRegex`（布林；缺則不送） |
+| 頂層 `sdd` | `{spec_dir, spec_file?, fsm_project, root, approver}`（§1.10.6），與 `playbook` 同層；同時附標頭 `X-Bridge-Token` |
+| 請求層 `env` | `ConfigMaterializer` **不會**送 `BRIDGE_SDD_WRITE_TOKEN`、`SDD_PROJECT`、`SDD_STATE_DIR`；Bridge 的 `validate_env` 拒絕它們（422 `forbidden_name`，§3.1.4 共通規則 2） |
+| 201 回應 | Bridge 的 201 可帶選填 `warnings:[{code, detail}]`（目前只有 `sdd_frozen_digest_absent`）；Backend 原樣轉入 Console 201 的 `warnings[]`（§1.10.6） |
+| 讀取逾時 | 90 秒（含最多三次 FSM CLI 子行程，每次 ≤ 20 秒；一般批次維持 30 秒；§3.1） |
+
+prompt 樣板（§3.4.3）不變：SDD 任務的 `description` 就是編譯出的 prompt（已含契約、驗收閘與規格出處）。`PlaybookIn` 仍是 `extra=forbid`：Bridge 已接受 `maintain_context`／`spec_digest`／`weak_regex`（引擎 `PlaybookTask` 的既有欄位），所以不需要放寬 `PlaybookIn`；補償與 `execution_runs` 的建立流程（§3.4.5）不變。
+
 #### 3.4.2 `config_overrides` 與 `env` 物化（`ConfigMaterializer`；`API-SET-10`）
 
 Bridge 對 `config_overrides` 的規則：頂層鍵限 `claude, minimax, embedder, loop, playbook, token_guard, alert_ladder, notification, tool_invocation, executor, preferences`；未知鍵 → 422（引擎會靜默丟棄打錯字的欄位，所以 Bridge 擋）；機密鍵（`minimax.api_key`、`storage.db_dsn` 等）→ 422；`storage`／`checkpoint_dir`／`log_dir` 等管控鍵**合法但被忽略並發 `CONFIG_OVERRIDE_IGNORED` 告警**（所以 Console **不送**，避免每個 run 都帶噪音告警）。
@@ -1830,6 +2409,7 @@ hasKey           = model.apiKey 解密後非空
 #### 3.4.4 DAG 與 `step_id`
 
 - **目標位置 `g`**＝該批次範圍內的目標依拓撲＋策略排序後的序號（1 起）；**任務位置 `t`**＝該目標在**本批次範圍內**的任務序（1 起，依 `sortOrder`、`createdAt`、`id`）。`step_id` ＝ `G<g>-T<t>`（例 `G1-T1`、`G1-T2`、`G2-T1`）。整份 playbook 內唯一，且每個批次獨立編號（後續批次重新從 `G1-T1` 起；`dag.nodes[].stepId` 是權威對映）。這取代 Architecture 的全域 `T001…` 與 W3 任務書的 `G<sortOrder>-T<sortOrder>`（後者在 `sortOrder` 重複時會撞 id，§6 D-06）。
+- **v1.5 例外（SDD 批次，§1.10.5 資格成立時）**：`step_id` 不用 `G<g>-T<t>`，而是沿用任務 `passCriteriaSpec.stepId`（`sdd-<場景>-at-…`），`dag.nodes[].stepId` 同值；`sequence`（展平後位置）與目標位置 `g` 的規則不變。非 SDD 批次與混合批次維持本節原規則。
 - **展平順序**＝DAG 節點的 `sequence`：`TASK` 節點的 `sequence` 等於 Bridge 的 `step_number`（1 起）。
 - `execution_runs.dag`（建立時凍結，只含結構，不含狀態）：
 
@@ -2125,6 +2705,7 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | M-18 | 「自訂儀表板」（US-M-08） | 純前端（版面存 `localStorage`，ADR-001 G-18） | 無後端欄位 |
 | M-19 | Agent 狀態指示燈與資源使用（US-M-10；設計稿未畫） | `metrics.agentAvailability`；即時連線 ← `GET /executions/{runId}`→`bridge.connected／status`、`currentStep`；**資源使用（v1.3，D-12）← 同一個回應的 `bridge.resources`** | **「資源使用」欄的顯示格式**：`CPU 12.3%・記憶體 345 MB・3 行程`——`cpuPercent` 小數 1 位加 `%`；`memoryBytes ÷ 1,048,576` 四捨五入到整數加 ` MB`（≥ 1,024 MB 改以 GB：÷ 1,073,741,824、小數 1 位；< 1 MB 顯示 `<1 MB`）；`processCount` 加 ` 行程`；三段以全形中點「・」相連。**沒有資料一律顯示單一的 `—`**：`resources` 為 null 或缺席、`bridge.connected=false`、或批次已是終態（詳情輪詢在終態後會停止，最後一次抓到的數字不得繼續顯示）。v1.2 的說明句「資源使用情況（CPU／記憶體）：Engine Bridge 目前沒有提供這項資料…」**移除**（`agent-note` 只留 Bridge 實例資訊）。`sampledAt` 建議放 tooltip（非驗收項）。數字的新鮮度＝詳情輪詢（15 秒）加取樣週期（5 秒），最舊約 20 秒（§3.1.2） |
 | M-20 | 「AISDLC_SDD 引擎」卡（v1.4，D-16；設計稿未畫，建議放在 Agent 狀態卡旁） | `GET /api/v1/engines/sdd?project=<選定>`（§1.7.1）；輪詢 **30 秒**，分頁不可見時暫停；**不隨 Console 專案或執行批次的下拉變動**——SDD 引擎是全域的，FSM 專案與 Console 專案是兩個不同的東西 | 顯示：引擎狀態點與版本（`version.latest`）；FSM 專案下拉（`projects[].project`；預設＝上次選的且仍在清單內者〔`localStorage` 記住，只是方便〕，否則清單第一個，所以首次載入是兩段請求：先不帶 `project` 取清單、選定後帶 `project` 取內容）；選定專案的 `currentState`、`currentSprint`（「Sprint N」）、`updatedAt`（本機時區）、**待人工**＝`humanPending.count`（0 顯示「無」，1 顯示「等待人工確認」並可展開 `items[0].entered_at`）、**最近決策**＝`decisionTrace` 倒序最多 5 筆（`ts`、`from → to`、`reason`）。不可用文案依 `reason`：`bridge_unreachable`「Engine Bridge 無法連線」、`sdd_unavailable`「找不到 AISDLC_SDD 目錄（請檢查 Bridge 的 SDD_ROOT）」、`bridge_error`「Engine Bridge 回應異常」、`fsm_not_found`「找不到所選專案的 FSM 狀態檔」、`fsm_state_unreadable`「FSM 狀態檔無法讀取」；`available=true` 且 `projects=[]`：「尚無 FSM 狀態檔（SDD runtime 執行後才會產生）」。**唯讀**：卡片沒有任何寫入動作（ADR-001 D22 第 3 點）；`retryHistory`、`rtmCoverage`、`frozenStages` 不顯示，資料留在 API 供 NFR-OBS-01 對照與日後使用。FSM 專案清單在開發機上會含 SDD 測試留下的 `test-<數字>` 專案（§3.1.3），照列 |
+| M-21 | 「AISDLC_SDD 引擎」卡的 v1.5 改動（D-115-02；**覆蓋 M-20 中「不隨 Console 專案或執行批次的下拉變動」與「唯讀、沒有任何寫入動作」兩句的適用範圍**） | `GET /api/v1/engines/sdd?projectId=<目前專案>`（§1.10.4）；專案沒有綁定時行為同 M-20（不帶 `projectId`、全域清單） | ①**專案帶入**：監控頁所屬的 Console 專案有綁定（`sddProject` 非空）時，卡片改帶 `projectId`，FSM 專案預設為 `sddProject`（下拉仍可改選同一個狀態目錄內的其他專案）；沒有綁定時維持 M-20。②**階段進度與 ESCALATION 標示**：見 §4.7.3。③**卡片仍然唯讀**——核准凍結只出現在專案詳情的「SDD 治理」區（§4.7.1），不在監控卡。④新增 `reason` 文案：`sdd_root_rejected`「專案路徑不在 Bridge 允許的根目錄內（或已不存在）」 |
 
 ### 4.4 設定頁 `/settings`（畫面 9）
 
@@ -2181,6 +2762,76 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | G-G4 | 通知鈴「待審核項目」「未確認告警」兩個連結的落點（完整性審查 I-05） | 通知摘要只有三個計數，**沒有 projectId**（`NotificationSummaryResponse` 不變）；`GET /signoffs/pending` 只涵蓋待簽核草案，不含待審核項目與告警 | **已知限制（v1.4 維持 v1.3 的行為）**：有「目前專案」（路由上的 `projectId`）時導向該專案的執行頁／監控頁，沒有時導向專案列表（`/projects`）；所以人在 Dashboard 等非專案頁面時，點進去只是專案列表，不是有待辦的那個專案；目標專案不是目前專案時點進去也可能是空的。「待簽核草案」列不受影響（導向 Dashboard 的待人工審批卡，§4.5 G-10；清單項各自帶專案連結）。要精準導向，需要摘要增兩個欄位（最早一筆待審核項目與未確認告警各自的 `projectId`）或新增待審核／告警清單端點（主控裁決 Q5：先接受此限制，要精準導向再另案） |
 | G-G5 | 公告列的靜態字樣（設計稿 README:57；完整性審查 D-04） | 設計稿只描述文字，沒說連到哪 | 「說明文件」「下載 CLI」「GitHub」「幫助中心」「繁體中文」五項是**靜態標示**（不可點、無行為；`TopRegion` 以 `<span>` 呈現）；「通知總覽」見 G-G2；「Engine Bridge」是功能性狀態點（§4.5 G-03）。日後要連到實際文件或做語言切換，另開需求 |
 | G-E4 | DAG 卡「全螢幕」 | PRD wireframe 有、設計稿無，v1.3 以前沒做也沒登記（完整性審查 D-01） | v1.4 由前端補實作，見 §4.2 E-22 |
+
+### 4.7 SDD 治理介面（v1.5；D-115-02、D-115-03、D-115-14；G-05、G-07、G-13；已與 ADR-016 對齊）
+
+欄位來源一律是 §1.10 的 API。**缺值（null、缺席、空字串、無法解析）一律顯示單一的「—」**（同 M-19 與 `lib/domain/sdd.ts` 的 `sddText`），不顯示 `undefined`、`null` 或「目前沒有提供這項資料」之類字樣；**空陣列與缺席要分開**：空陣列表示「確定沒有」（顯示「無」），缺席才是「—」。
+
+#### 4.7.1 專案詳情「SDD 治理」區（UI-SDD-01）
+
+位置：專案詳情頁（`/projects/{projectId}`）的目標清單之下、「刪除」之上。**沒有「未綁定」狀態**（D-115-14：Console 專案是錨，FSM 專案預設＝專案名）：專案從未使用 SDD（`sddProject`、`sddSpecDir`、`sddSpecFile` 皆空）時預設**收合**，標題「SDD 治理（尚未使用）」；展開後內容與已使用者相同，只是 `fsm` 通常為 null。已使用時預設展開。
+
+資料來源：`GET /projects/{id}`（綁定三欄）＋`GET /engines/sdd?projectId={id}`（FSM 狀態；輪詢 30 秒，分頁不可見時暫停，與 M-20 同節奏；收合時不輪詢）。
+
+| 顯示項 | 來源欄位 | 規則 |
+|--------|----------|------|
+| SDD 專案 | `sddProject` | 等寬字；缺值顯示「（預設：<專案名>）」而非「—」，並附「編輯」鈕（OPERATOR 以上，見下） |
+| 標準鍵 | `fsm.fsmProject` | 等寬字；缺值「—」；與 `fsm.project`（檔內原名）不同時，兩者並列（原名加註「檔內原名」） |
+| 規格目錄、規格檔 | `sddSpecDir`、`sddSpecFile` | 等寬字，長路徑可換行；各自缺值「—」（尚未用路徑 A 匯入規格） |
+| 目前狀態 | `fsm.currentState` | 等寬字；`fsm` 為 null 時依 `reason` 顯示 M-20 的文案（`fsm_not_found`「找不到所選專案的 FSM 狀態檔」並加註「請在專案根的 SDD session 建立：<executionPath>/build/reports/fsm」等），本表其餘欄位全部「—」 |
+| 階段 | `fsm.phase` | 標籤與旗標規則見 §4.7.3；`phase` 缺席或 null：階段欄「—」，仍顯示 `currentState` |
+| 凍結狀態 | `fsm.frozenStages` | 空陣列＝「尚未凍結」；≥ 1 筆＝「已凍結：<最後一筆的 `stage`>（<`frozen_at` 轉本機時區>）」，單筆內缺值各自「—」；不解讀 `spec_doc_digests` |
+| 待人工 | `fsm.humanPending.count` | 同 M-20：0「無」、1「等待人工確認」 |
+| 最近一次升級 | `fsm.escalationHistory` 末筆 | 只有 `currentState` 為 `ESCALATION`／`ESCALATION_FINAL`（或 `phase.blocking=true`）時顯示（完整區塊見 §4.7.3）：`triggered_at`（本機時區）與 `trigger_reason`；缺值「—」 |
+
+「編輯 SDD 專案」（OPERATOR 以上；VIEWER 不顯示）：對話框一個輸入欄（自由輸入，1～100 字元、無控制字元；留空並儲存＝清除，回到「用預設」）；說明文字「值會交給引擎橋接淨化後生效；改綁不搬移 FSM 狀態檔，也不影響進行中的批次」；送出 `PUT /projects/{id}/sdd-binding`（§1.10.7）；成功 → toast「已更新 SDD 專案」並重取專案詳情與 `engines/sdd`；失敗：400 在欄位下顯示 `errors[0].message`，`sdd_binding_conflict`「同一個專案根下已有另一個專案（<`details.holderProjectId` 前 8 碼>）綁定了這個 FSM 專案」，其餘照一般錯誤顯示 `message` 與 `traceId`。
+
+「核准凍結」鈕（人工閘）：
+
+- **顯示條件**：登入者角色為 OPERATOR 以上（VIEWER 不顯示，與其他寫入鈕同）。
+- **啟用條件**：`fsm.currentState == "HUMAN_PENDING"`。其他狀態停用，tooltip「FSM 目前不在 HUMAN_PENDING（目前：<currentState，缺值「—」>）」；`fsm` 為 null 時一律停用。
+- **對話框**（沿用 `ConfirmDialog`）：說明文字「核准後 FSM 進入 SPEC_FROZEN，規格內容將被摘要綁定；此動作無法由 Console 退回」；**「要凍結的規格文件」**多行輸入（每行一個相對專案根的路徑，1～20 行；已有 `sddSpecFile` 時預填其相對路徑；前端只做格式檢查：相對路徑、不含 `..`、不重複；是否含 TCS 與檔案是否存在由 Bridge 判定，錯誤原樣顯示）；**理由欄必填**（去前後空白後 1～500 字元，不得含換行，不合不得送出，即時顯示字數）；顯示「核准人：<目前登入者>」（唯讀；approver 取自 JWT，不由畫面指定）。
+- **送出**：`POST /projects/{id}/sdd/freeze`（§1.10.2；body 為 `reason` 與 `docs`，不送 `stage`、`expectedDigests`）；成功 → toast「已核准凍結」並重取專案詳情與 `engines/sdd`；失敗依 `reason` 顯示：`sdd_fsm_state_conflict`「FSM 目前不在 HUMAN_PENDING（目前：<details.currentState>）」、`sdd_fsm_not_found`「找不到 FSM 專案狀態檔（<details.sddProject>）；請先在專案根的 SDD session 建立」、`sdd_binding_conflict`「同一個專案根下已有另一個專案綁定了這個 FSM 專案」、`sdd_spec_digest_changed`「規格檔在凍結前已被改動，請重新確認內容」、`sdd_write_disabled`「SDD 寫入功能未啟用（需管理員設定寫入權杖）」，422 `引擎拒絕此請求`顯示 `details.violations[]` 的 `field` 與 `rule`（例如 `docs`／`missing_tcs`「規格文件須含至少一份 TCS」），其餘照一般錯誤顯示 `message` 與 `traceId`。
+- **靜態提示**（區塊底部）：「FSM 狀態檔位於專案根的 build/reports/fsm，請把 build/reports/ 加入該專案的 .gitignore。」（匯入時 Bridge 偵測到未忽略會另有黃色警告 `state_dir_not_ignored`。）
+
+#### 4.7.2 執行詳情「追溯覆蓋（諮詢）」面板（UI-SDD-02）
+
+位置：執行頁（`/projects/[projectId]/execute`）的批次詳情區；專案**沒有 SDD 規格綁定**（`sddSpecDir` 為空）時整個面板不顯示；批次**非終態**時只顯示一行說明「批次結束後才會有追溯覆蓋報告」，不呼叫端點。
+
+資料來源：`GET /executions/{runId}/rtm`（§1.10.3）；批次進入終態（`COMPLETED`／`FAILED`／`CANCELLED`）後取**一次**，不輪詢。
+
+標示：標題「追溯覆蓋」＋徽章「諮詢視圖」（`advisory=true` 時必顯示）；面板內固定一行說明：「AT 通過只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；SCG-4 的人工審查才是真閘。」
+
+| 顯示項 | 來源欄位 | 規則 |
+|--------|----------|------|
+| AT 通過 | `at.passed`／`at.total`／`at.pct` | 「4／4（100.0%）」；`at.unmapped` > 0 時加註「其中 <n> 個無法歸屬到 AC」；`at` 缺席「—」 |
+| AC 覆蓋 | `ac.covered`／`ac.total`／`ac.pct` | 「2／2（100.0%）」；缺席「—」 |
+| SCG-5 覆蓋 | `fullyCovered`＋`unmappedAtIds` | `true`「AC 已達 100% 覆蓋」；`false` 且 `unmappedAtIds` 非空而 AC 已全覆蓋「AC 已達 100%，但有無法歸屬的 AT，不視為全覆蓋」；其餘 `false`「AC 未達 100% 覆蓋」；缺席「—」 |
+| 規格摘要 | `specDigest` | 前 19 碼（`sha256:` 加 12 碼十六進位）加「…」，tooltip 顯示全值；空字串「—」 |
+| 場景 | `scenario` | 空字串「—」 |
+| 未通過的 AT | `failedAtIds` | 逗號分隔；空陣列「無」；缺席「—」 |
+| 驗收 regex 偏弱的 AT | `weakRegexAtIds` | 同上；非空時加註「規格的 Then 沒有可推導的引號字面值，驗收可能偏鬆」 |
+| 無法歸屬 AC 的 AT | `unmappedAtIds` | 同上；非空時加註「這些 AT 的編號不符 AT-NNN-Y-… 文法或 AC 對不上，已計入 AT 總數但不計入任何 AC」 |
+
+狀態：404 `rtm_not_found` → 顯示中性文字「此批次沒有追溯覆蓋報告」（不是錯誤樣式；常見原因：批次沒有啟用 SDD 治理、批次不是正常走完）；422、502、504 → 一般錯誤區塊（`message` 與 `traceId`）加「重試」鈕。
+
+#### 4.7.3 SDD 卡的階段進度與 ESCALATION 標示（UI-SDD-03；M-21）
+
+階段字典（`lib/domain/sdd.ts`）：`phase.name` → 中文標籤——`INTAKE`「立案」、`SPECIFICATION`「規格撰寫」、`HUMAN_GATE`「人工確認」、`FROZEN`「規格凍結」、`IMPLEMENTATION`「實作」、`REVIEW`「審查」、`VERIFICATION`「追溯驗證」、`RELEASE`「發布」；非主路徑：`BLOCKED`「阻塞（需人工）」、`TRANSIENT`「過渡中」、`OBSERVATION`「觀測中」、`UNKNOWN`「未知」。字典沒有的新值（日後 Bridge 加階段）→ 顯示原字串，不崩潰。
+
+進度條（放在「目前狀態」欄下方）：八個步驟（`order` 1～8，標籤取自字典）依序排列——
+
+- `phase.order` 為 1～8：該步驟標為「目前」，之前的標為「已過」，之後的標為「未到」。
+- `observation=true`：額外顯示小標籤「觀測中」，「目前」步驟改用虛線外框（表示回歸階段）；`currentState` 為 `AUTOCLAUDE_DELEGATED` 時另顯示標籤「委派 AutoClaude 執行中」。
+- `blocking=true`：所有步驟都標為「未到」的灰階，進度條上方顯示紅色橫幅「阻塞：<currentState>（需人工恢復）」，橫幅內說明「請在 SDD session 依恢復指令處理，Console 不提供恢復動作」，並顯示下方的 ESCALATION 區塊。
+- `order` 為 0（`OBSERVATION`／`TRANSIENT`／`UNKNOWN`，或 `phase` 缺席）：不標任何步驟，只顯示 `currentState` 與對應標籤（`phase` 缺席則標籤欄「—」）。
+
+ESCALATION 區塊：`phase.blocking=true`，或 `currentState` 為 `ESCALATION`／`ESCALATION_FINAL` 時，顯示 `escalationHistory` 末筆——「ESCALATION・<`triggered_at` 本機時區>・<`trigger_reason`>」，有 `resolved_at` 時加「已解決：<`resolved_at`>／<`resolution`>」；`escalationHistory` 為空而狀態卻是阻塞態 → 區塊內寫「（沒有升級紀錄）」，橫幅照顯示。各欄位缺值「—」。🔴 **「有沒有未解的升級」的判斷式只能是「`currentState` 屬 `ESCALATION`／`ESCALATION_FINAL`，且 `escalationHistory` 末筆的 `resolved_at` 為空」**，不得只看 `escalationProvenance` 在不在（恢復後它不會被清除，在 `IMPLEMENTATION` 上會顯示過期的失敗；ADR-016 §5.3）。
+
+- **來源行**：`escalationProvenance` 有值時加一行「來源：<`source`>」，`source=autoclaude_delegated_failed` 時註明「AutoClaude 委派失敗（引擎升級）」；缺值不顯示這一行（不寫「—」）。
+- **恢復指令**：`fsm.recovery` 有值時顯示「恢復（在 SDD session 執行；Console 不提供恢復動作）」，PowerShell 與 POSIX 兩個分頁各一段等寬字指令與「複製」鈕；指令內的 `<人工原因>` 由使用者自行替換，Console 不替換、不提供執行鈕；`fsm.recovery` 缺席時只顯示橫幅的文字說明，不得由前端自行組指令（目標與路徑由 Bridge 決定，ADR-016 §5.3）。
+
+建議的測試屬性（e2e 用）：進度條 `data-testid="sdd-phase"`，並帶 `data-phase`（`phase.name`）、`data-order`（`phase.order`）、`data-blocking`、`data-observation`（布林字串）；ESCALATION 區塊 `data-testid="sdd-escalation"`；恢復指令 `data-testid="sdd-recovery"`（內含 `data-shell="powershell"｜"posix"` 的兩段）；追溯面板 `data-testid="rtm-panel"`。
 
 ---
 ## 5. E2E 情境（QA 與兩位開發者共用；全部以 `aisdlc-mock-claude` 為 Claude 替身，結果可決定）
@@ -2608,10 +3259,10 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 
 | # | 情境 | 動作 | 預期 |
 |---|------|------|------|
-| 1 | 清單 | viewer `GET /engines/sdd`（不帶 `project`） | 200；`available=true`、`reason=null`；`version.latest="AISDLC_SDD_v9.99"`；`projects` **恰兩筆**，順序 `e2e-alpha`、`e2e-bravo`（`broken`、`bad name`、`.yml` 都不在其中）；每筆 `source` 等於檔名、`currentState`／`updatedAt` 與檔內一致；`fsm=null` 且沒有 `reason`；`checkedAt` 為 `…Z` |
+| 1 | 清單 | viewer `GET /engines/sdd`（不帶 `project`） | 200；`available=true`、`reason=null`；`version.latest="AISDLC_SDD_v9.99"`；`projects` **恰兩筆**，順序 `e2e-alpha`、`e2e-bravo`（`broken`、`bad name`、`.yml` 都不在其中）；每筆 `source` 等於檔名、`currentState`／`updatedAt` 與檔內一致；`fsm=null` 且沒有 `reason`；`checkedAt` 為 `…Z`。**v1.5 覆寫**（§1.7.1、§1.10.4、§3.1.4 (b)；ADR-016 §7.4；上列原文保留，與本註記不同處以本註記為準）：Bridge 改以淨化輸出域判斷檔名，**內部空白合法**，`FSM-STATE-bad name.yaml` 不再因檔名被擋；夾具內容可讀（現為 `fsm_state: {project: bad}`）時它**會**列入——`projects` 為**三筆**，順序（檔名 casefold 排序）`bad name`、`e2e-alpha`、`e2e-bravo`，`bad name` 那筆 `source="FSM-STATE-bad name.yaml"`、`currentState`／`updatedAt` 為 null（檔內沒有）；夾具若改成讀不動的內容，則進 `errors`、`projects` 仍兩筆。`broken`（讀不動，進 `errors`）與 `.yml`（副檔名不符）照舊不在 `projects` 內。Bridge 側的名稱規則由 E2E-17 第 13 列與 Bridge pytest 驗 |
 | 2 | 單一專案：欄位與「原樣」 | `GET /engines/sdd?project=e2e-alpha` | `fsm.currentState="IMPLEMENTATION"`、`currentSprint=2`、`sessionId`、`updatedAt` 與檔相同；`decisionTrace` 長度 5，等於檔內 7 筆的**最後 5 筆**（舊→新），每筆與檔**逐值相等**（含 snake_case 鍵 `spec_refs`、`agents_consulted`）；`frozenStages` 等於檔；`humanPending={count:0,items:[]}`；`retryHistory.count=3`，`retryHistory.last` 等於 `date` 最晚那筆加上 `gate`；`rtmCoverage=null`；`source="FSM-STATE-e2e-alpha.yaml"` |
 | 3 | 待人工 | `GET /engines/sdd?project=e2e-bravo` | `fsm.currentState="HUMAN_PENDING"`、`humanPending.count=1`、`items[0].entered_at="2026-10-15T08:00:00+00:00"`（原樣）；`retryHistory={count:0,last:null}` |
-| 4 | 找不到、壞檔、非法名 | ①`?project=nope`；②`?project=e2e-broken`；③`?project=a%20b`；④`?project=..%2Fx` | ① 200、`available=true`、`fsm=null`、`reason="fsm_not_found"`、`projects` 照常；② 200、`fsm=null`、`reason="fsm_state_unreadable"`（檔名合法、取得到檔、內容讀不動→Bridge 422）；③④ **400**（`errors[0].field=project`） |
+| 4 | 找不到、壞檔、非法名 | ①`?project=nope`；②`?project=e2e-broken`；③`?project=a%20b`；④`?project=..%2Fx` | ① 200、`available=true`、`fsm=null`、`reason="fsm_not_found"`、`projects` 照常；② 200、`fsm=null`、`reason="fsm_state_unreadable"`（檔名合法、取得到檔、內容讀不動→Bridge 422）；③④ **400**（`errors[0].field=project`）。**v1.5 覆寫**（§1.7.1、§1.10.4、§3.1.7 第 11 點；上列原文保留，與本註記不同處以本註記為準）：Console 不再以 regex 擋 `project`（規則改為 1～200 字元、不含控制字元；名稱交 Bridge 的淨化鏡像處理），所以 ③④ 不再是 400——③ `a%20b`（名稱 `a b` 合法、無此狀態檔）→ 200、`available=true`、`fsm=null`、`reason="fsm_not_found"`；④ `..%2Fx`（含 `/` 的名稱不可由 URL 定址，Bridge 回無 `reason` 的 404，Console 暫轉「找不到狀態檔」）→ 同為 200、`reason="fsm_not_found"`；① 的 `projects` 照第 1 列覆寫（三筆）；`errors[0].field=project` 的 400 只剩「超過 200 字元或含控制字元」（E2E-17 第 13 列⑤） |
 | 5 | FSM 檔 ↔ API ↔ 畫面（NFR-OBS-01 補強） | 測試以自己的 YAML 解析器讀夾具檔（不經 Bridge）；登入前端、開任一專案的監控頁，在「AISDLC_SDD 引擎」卡選 `e2e-alpha` | 卡片顯示的狀態、Sprint、更新時間（本機時區）、待人工「無」、最近決策 5 筆（倒序；`from → to` 與 `reason`）與**檔案內容逐值一致**，也與第 2 列的 API 一致（檔、API、DOM 三者相等）；改選 `e2e-bravo` → 待人工顯示「等待人工確認」 |
 | 6 | 檔案變動後下一輪輪詢跟上 | 頁面開著時改寫 `FSM-STATE-e2e-alpha.yaml`：`current_state` 換值、`updated_at` 更新、`decision_trace` 加一筆；等一個輪詢週期（≤ 35 秒，或以 Playwright 假時鐘快轉 30 秒） | 卡片更新為新狀態與新決策；沒有整頁重載；若恰好讀到寫一半的檔，卡片顯示「FSM 狀態檔無法讀取」、下一輪恢復，不得崩潰 |
 | 7 | 引擎不可用：Bridge 不可達 | 停掉 18082；`GET /engines/sdd`；看卡片 | **200**（不是 502）；`available=false`、`reason="bridge_unreachable"`、`version=null`、`projects=[]`、`fsm=null`；卡片顯示「Engine Bridge 無法連線」；重啟 Bridge 後下一輪輪詢復原 |
@@ -2639,6 +3290,92 @@ AutoClaude 沒有審核鉤子，也不改它：閘點由 `ReviewGatePolicy` 依�
 | 8 | 登出撤銷（D-19） | login 得 `RT`；`POST /auth/logout {RT}`；再 `POST /auth/refresh {RT}`；`POST /auth/logout`：垃圾字串、已撤銷的 `RT`、一個 access token、缺 `refreshToken`；全程不帶 Authorization | logout **204**；之後 refresh → 401 `INVALID_REFRESH_TOKEN`；垃圾字串、已撤銷的 `RT`、access token 皆 **204**（不洩漏有效性）；缺 `refreshToken` → 400（`errors[0].field=refreshToken`）；不帶 Authorization 也能呼叫（免認證）；限流照常計（未認證以 IP 計） |
 | 9 | 前端登出流程（D-19） | 瀏覽器登入後按「登出」，觀察網路請求；再用登出前記下的 refresh token 打 `POST /auth/refresh`；另把 logout 請求以網路攔截弄成失敗再登出一次 | 登出時瀏覽器送出一個 `POST /api/v1/auth/logout`（body 帶 `refreshToken`）；頁面導向 `/login`、session 清空，不論 logout 請求成敗；之後以該 refresh token 換新 → 401 |
 | 10 | Redis 降級（D-19；Docker 全棧才跑） | 全棧起好後 `docker compose stop redis`；login → refresh（舊 token 再換→401）→ logout；`GET /actuator/health`；看 backend 日誌；`docker compose start redis` 後再做一輪 | Redis 停掉期間撤銷仍有效（第 7、8 列的行為不變）；`/actuator/health` 仍 `UP`、backend 容器維持 healthy；日誌有**一筆** WARN（進入降級）、恢復後**一筆** INFO；Redis 回來後新的撤銷寫進 Redis（`redis-cli --scan --pattern 'console:revoked-refresh:*'` 可見）。本機 e2e（`store=memory`）略過本列 |
+
+---
+
+### E2E-17　v1.5 追加情境（整合輪 115；D-115-01～16：SDD 迴圈；已與 ADR-016 對齊）　〔API-SGN-06、API-PRJ-07、API-PRJ-08、API-EXE-15、API-EXE-16、API-ENG-02、API-IMP-11、API-IMP-12、BR-27～BR-33、UI-SDD-01～03、NFR-OBS-01〕
+
+**前置**：照 §5.0；本機 e2e 環境（Docker 全棧不載入 e2e profile，假伺服器不可達，所以只有第 26 列在全棧跑）；operator 寫、viewer 讀、admin 設參數。**本情境用真的 SDD CLI 與真的 FSM 狀態檔**（不是 E2E-15 那種手寫夾具）：測試自己扮演「SDD session」，以 SDD CLI 把 FSM 專案推進到 `HUMAN_PENDING`（動詞見 ADR-016 §4.2 與 SDD `tools/fsm_runtime/README.md`；環境 `SDD_STATE_DIR=<夾具根>/build/reports/fsm`、`SDD_PROJECT=<FSM 專案名>`；**不得手寫 YAML**，Rule 9 絕對禁令第 1 條）。共通後置斷言 A1～A5（§5.0.4）照樣適用。夾具的評估指令用裸 `pytest`，必須靠 §5.0.1「Bridge 啟動環境」第 1 點的 `PATH` 前置，才會解析到專案 `.venv`（此機的 `Get-Command pytest` 可能先命中 pyenv 的 shim；見 `docs/04_planning/AutoSDD_improving_115.md` §5.1 第 1 點）。
+
+**Console 專案與 FSM 專案的命名**（D-115-14）：每個夾具對應一個 Console 專案，**專案名＝FSM 專案名**（有效 FSM 專案預設＝專案名，§1.10.5），所以夾具用 `--project <專案名>` 建 FSM 專案、Console 專案的 `executionPath`＝夾具根；名稱用 ASCII 安全字元（例 `e2e17-alpha`），只有 `names/` 夾具刻意用特殊字元。專案層的簽核（Phase 2 `POST /projects/{id}/signoff`）要在 execute 之前由測試補做（匯入記錄的 signoff 只涵蓋它建立的目標與任務，§1.10.8）。
+
+**環境**（在 §5.0.1 之上追加）：
+
+- Bridge（18081）設寫入權杖：環境變數 **`BRIDGE_SDD_WRITE_TOKEN`**＝`<E2E_SDD_TOKEN>`（佔位，測試自產 `secrets.token_hex(32)`，**≥ 32 字元**；少於 32 字元 Bridge 與 backend 啟動即失敗，那一項由 Bridge／backend 的單元測試守，不在 E2E）；console-api 以同一個環境變數名帶入（Spring 屬性 `console.bridge.sdd-write-token`，附錄 D.2）；`BRIDGE_ALLOWED_PATH_ROOTS` 含 `<E2E_ROOT>`；SDD 用 repo 的 LATEST（`SDD_ROOT` 預設）。**第二個 Bridge**（18086）同設定但**不設**權杖（第 1 列用；console-api 以 `autoclaude.engineUrl` 切換指向，結束動作還原）。
+- 替身（§5.0.3）：`MOCK_CLAUDE_DELAY` 設 ≥ 3 秒，讓測試能觀察到 `AUTOCLAUDE_DELEGATED`（第 15、20、21、25 列）；`model.apiKey` 必須是空（§5.0.2）。
+- 稽核與 FSM 讀取：測試用獨立的 YAML 讀取（不經被測 API）讀 `FSM-STATE-*.yaml`；所有「等 FSM 回到某狀態」的斷言一律**輪詢**（每 ≥ 1 秒、上限 30 秒），因為終態事件到 FSM 回 `IMPLEMENTATION` 之間約有 0.1 秒視窗（§3.1.6 第 5 點）。
+
+**SDD 夾具**（QA 於情境前建立，全部在 `<E2E_ROOT>/sdd-e2e/` 之下；FSM 狀態只經 CLI 產生）：
+
+- `alpha/`：Console 專案 P1（名稱 `e2e17-alpha`，`executionPath`＝夾具根）；FSM 專案 `e2e17-alpha`。`docs/03_testing/contracts/TCS-Alpha-<日期>.md` 是**成功夾具**：檔頭 `**scenario**: greenfield`（S-12；測試類型欄會出現 `Integration` 字樣，沒有這個欄位時啟發式會誤判成 integration）與 `**spec-format-version**: 1.0`；2 個 AC、4 個 AT（`AT-001-1-1`、`AT-001-1-2` 屬 `AC-001-1`；`AT-001-2-1`、`AT-001-2-E-1` 屬 `AC-001-2`——後者是 ADR-016 §8.1 規定的邊界／錯誤 AT 命名；測試類型欄 `Unit` 與 `Integration` 各兩個 ⇒ 重試上限 5）；每個 AT 的 Gherkin `Then` 引號字面值取替身必然回放的 `[AT_OK_<序號>]`（替身只回放 prompt 內的 `[KEYWORD]`，§5.0.3）；`tests/` 預置會通過的測試檔，測試函式名含 AT 的底線化 token（例 `test_AT_001_1_1_basic`、`test_AT_001_2_E_1_basic`），使評估指令 `pytest tests -k "AT_001_1_1" -q` 不依賴 AI；`.gitignore` 含 `build/reports/`。
+- `alpha-fail/`：同形的**失敗夾具**，Console 專案 P3、FSM 專案 `e2e17-alpha-fail`——AT 的測試類型欄寫 `E2E`（⇒ 重試上限 2，三個 attempt 即升級），Gherkin `Then` 引號字面值取替身**必不輸出**的詞 `NEVER_PRINTED_<序號>`（沒有方括號，替身不會回放），預置測試檔仍會通過（失敗只來自驗收 regex）。
+- `multi/`：同一個 `build/reports/fsm/` 下兩個 FSM 專案——`m-alpha`（停在 `INIT`，未凍結）、`m-zeta`（已凍結：推進到 `HUMAN_PENDING` 後以 CLI 凍結）；規格目錄放兩份 TCS（`TCS-MAlpha-….md`、`TCS-MZeta-….md`，各 1 個 AT）。
+- `two-tcs/`：同一個規格目錄放兩份官方命名的 TCS（`TCS-One-….md`、`TCS-Two-….md`，各 1～2 個 AT；FSM 專案 `e2e17-two` 已凍結）。
+- `unmapped/`：TCS 的 Gherkin 區塊有一個標頭 `# AT-009-1-1`，但 §1 的 AC→AT 映射表**沒有**這一列；另有一列 §1 映射寫成舊編號 `AT-14-2-1`（首段非三位）；兩者都沒被編成 step（FSM 專案 `e2e17-unmapped` 已凍結）。
+- `edit/`：已凍結的單一 TCS（1 個 AT；FSM 專案 `e2e17-edit`），供第 12 列改檔用。
+- `names/`：兩個 FSM 專案——`訂單系統 v2`（含 CJK 與空白；檔名不變）與 `a:b`（`sanitize_component` 把 `:` 換成 `_`，所以檔案是 `FSM-STATE-a_b.yaml`，檔內 `fsm_state.project="a:b"`），各有同名的 Console 專案；皆已推進並凍結。
+- `notcs/`、`expect/`：各一個停在 `HUMAN_PENDING` 的 FSM 專案（`e2e17-notcs`、`e2e17-expect`），規格目錄分別只有一份非 TCS 命名的 `README.md`、一份 TCS，供第 6 列用。
+- `cancel/`、`reclaim/`、`foreign/`、`mixed/`：結構同 `alpha/`（FSM 專案 `e2e17-cancel`、`e2e17-reclaim`、`e2e17-foreign`、`e2e17-mixed`；`foreign/` 只推進到 `IMPLEMENTATION`，其餘已凍結並匯入簽核），供第 20～22、25 列用。
+- **摘要比對**：測試以獨立實作的雜湊（**換行正規化後的 UTF-8 文字**的 sha256，演算法見 §3.1.4 (d)）計算規格檔摘要，與 FSM 檔內值逐值比對；另備一份**同內容、CRLF 換行**的規格檔變體（F-6 的 E2E 面：不得因換行不同而假性不符）。
+
+| # | 情境 | 動作 | 預期 |
+|---|------|------|------|
+| 1 | 寫入面停用：Bridge 沒設權杖（BR-33） | 對 18086 直接 `POST /sdd/fsm/e2e17-alpha:freeze`（合法 body，帶任意 `X-Bridge-Token`）；對 18086 `POST /autoclaude/runs` 帶 `sdd`；對照 `GET /sdd/fsm/e2e17-alpha?root=…`；再對 18086 送一個**不含** `sdd` 的 `POST /autoclaude/runs`；前後對 `alpha/build/reports/fsm` 做 mtime 快照 | 兩個寫入皆 **503** `sdd_write_disabled`；`GET` 照常 200（唯讀不需權杖）；不含 `sdd` 的 run 照舊 201（不需要權杖）；FSM 檔 mtime 不變；帶 `sdd` 的請求沒有建立任何 run 目錄 |
+| 2 | 權杖缺或錯（BR-33） | 對 18081 同上兩個寫入：①不帶 `X-Bridge-Token`②帶錯值（`e2e17-alpha` 此時已在 `HUMAN_PENDING`） | 皆 **403** `sdd_write_forbidden`（缺與錯同一個 reason）；回應與 Bridge 日誌**不含**權杖值；FSM 檔不變；Bridge 稽核檔有拒絕事件（`event=sdd_write`，`result` 為拒絕，事件內沒有權杖） |
+| 3 | 前置狀態不符（BR-27） | 另建 FSM 專案 `e2e17-init` 停在 `INIT`；帶正確權杖 `:freeze`（`docs` 合法） | **409** `fsm_state_conflict`，`detail.current_state="INIT"`、`detail.expected_state="HUMAN_PENDING"`；FSM 檔不變 |
+| 4 | 多專案狀態共處只認指定者（G-02；F-2 的 E2E 面） | `multi/`，Bridge `POST /sdd/compile`：①`{spec_dir, spec_file:"TCS-MAlpha-….md", fsm_project:"m-alpha"}`②`{spec_dir, spec_file:"TCS-MZeta-….md", fsm_project:"m-zeta"}`③`{spec_dir, spec_file:"TCS-MAlpha-….md"}`（不帶 `fsm_project`）④`fsm_project:"nope"` | ① **422** `spec_not_frozen`（**不得**因 `m-zeta` 已凍結而放行）；② 200，`fsm_project="m-zeta"`、`frozen_digest="verified"`；③ 422 `spec_not_frozen`，`detail` 說明狀態檔不唯一；④ 422 `spec_not_frozen`，`detail` 列出現有專案鍵（`m-alpha`、`m-zeta`） |
+| 5 | 核准凍結：人工閘（C2；BR-27、API-SGN-06、API-PRJ-07） | P1（`e2e17-alpha`；`sddProject` 為 NULL）；`e2e17-alpha` 已推進到 `HUMAN_PENDING`；operator `POST /projects/{P1}/sdd/freeze` `{reason:"E2E 核准", docs:["docs/03_testing/contracts/TCS-Alpha-….md"]}`（不帶 `binding`，沒有這個欄位） | **200**，`fsm.currentState="SPEC_FROZEN"`、`fsm.fsmProject="e2e17-alpha"`；`fsm.frozenStages` 末筆：`stage="Stage-1"`、`spec_docs` 含該檔、`spec_doc_digests[<相對路徑>]`＝測試獨立計算者（`sha256:<64 位小寫 hex>`）、`approved_by="operator"`；FSM 檔 `decision_trace` 末筆 `trigger=spec_frozen`、`to=SPEC_FROZEN`、`reason="console-freeze approver=operator; reason=E2E 核准"`、`spec_refs` 為該檔；Bridge 稽核檔 `event=sdd_write`（`verb=spec-frozen`、`approver=operator`、`result` 成功、與請求同一個 `trace_id`、無權杖）；`audit_log` 一列 `action=project.sdd.freeze`、`entity=project:<P1>`、`subject=operator`；`GET /projects/{P1}`：`sddProject="e2e17-alpha"`（第 5 項寫回標準鍵）、`sddSpecDir`／`sddSpecFile` 仍為 null；PG `projects.sdd_project` 相等 |
+| 6 | 凍結的不可重做、權限與驗證（API-SGN-06） | ①P1 再 `POST …/sdd/freeze`；②viewer；③未認證；④另建專案 P1x（無 `sddSpecFile`）不帶 `docs`；⑤`reason` 全空白；⑥`notcs/` 專案（`HUMAN_PENDING`）`docs:["README.md"]`；⑦`expect/` 專案（`HUMAN_PENDING`）帶 `expectedDigests`（鍵＝該 TCS，值為錯的摘要）；⑧`docs:["../x.md"]`；⑨`reason` 含換行 | ① **409** `sdd_fsm_state_conflict`，`details.currentState="SPEC_FROZEN"`、`expectedState="HUMAN_PENDING"`；② **403** `ACCESS_DENIED`；③ **401**；④ **400**（`errors[0].field=docs`）；⑤ **400**（`errors[0].field=reason`）；⑥ **422** `引擎拒絕此請求`，`details.violations[0]` 為 `{field:"docs", rule:"missing_tcs"}`；⑦ **409** `sdd_spec_digest_changed`，`details.pair="expected_vs_file"`；⑧ **400**（`errors[0].field=docs`）；⑨ **400**（`errors[0].field=reason`）；⑥⑦ 之後各自的 FSM 檔不變（仍 `HUMAN_PENDING`）；①～⑨ 之後 P1 的 FSM 檔不再變動 |
+| 7 | 綁定唯一性與編輯（D-115-14；API-PRJ-08） | ①另建專案 P1b（名稱 `e2e17-alpha`、`executionPath` 同 `alpha/`；`sddProject` 為 NULL），operator 對它 `POST …/sdd/freeze`（合法 body）；②`PUT /projects/{P1b}/sdd-binding {sddProject:"e2e17-alpha"}`；③同一個 PUT 改 `{sddProject:"other"}`；④`{sddProject:null}`；⑤viewer 做②；⑥`{sddProject:"<101 字元>"}`；⑦`{sddProject:"  "}` | ① **409** `sdd_binding_conflict`，`details={cause:"already_bound_elsewhere", sddProject:"e2e17-alpha", holderProjectId:<P1>}`，且 **Bridge 沒收到任何寫入呼叫**（稽核檔 `sdd_write` 筆數不變、FSM 檔不變）；② 409 同 ①；③ 200，`sddProject="other"`；④ 200，`sddProject=null`；⑤ **403**；⑥⑦ **400**（`errors[0].field=sddProject`）；`audit_log` 有 `action=project.sdd.bind` 的列（③④各一） |
+| 8 | 路徑 A 匯入並併入既有專案（G-08、G-07；F-1 的 E2E 面；API-IMP-12） | operator `POST /import/text`（任意文字）→ `parse` `{executionPath:"<alpha 根>", specDir:"<alpha 根>/docs/03_testing/contracts", specFile:"TCS-Alpha-….md", targetProjectId:<P1>}`；`GET` 詳情；`signoff`；`confirm`；再以 Phase 2 `POST /projects/{P1}/signoff` 簽核專案 | `parse` 200：`path=SDD`；`parsedResult` 恰 4 個任務；`specFormatVersion="1.0"`、`sddProject="e2e17-alpha"`、`sddSpecDir`＝規格目錄、`sddSpecFile`＝TCS 的**絕對路徑**（＝Bridge 回應的 `spec_path`）；`warnings=[]`；任務的 `passCriteriaSpec.stepId` 依序為 `sdd-greenfield-at-001-1-1`、`…-001-1-2`、`…-001-2-1`、`…-001-2-e-1`；`maxRetries=5`；`passCriteriaSpec.maintainContext` 依序為 `false`、`true`、`false`、`true`（每個 AC 的第一個任務 `false`）；各任務 `passCriteriaSpec.specDigest` 全部相等且＝第 5 列的凍結摘要。`confirm` → **201**，回傳的專案 `id=<P1>`（**沒有建立新專案**）、`sddSpecDir`／`sddSpecFile` 與 PG `projects.sdd_*` 相等、`sddProject` 不變；匯入記錄 `projectId=<P1>`、`status=IMPORTED`；P1 的名稱與 `executionPath` 不變；新目標的 `sortOrder` 接在既有目標之後 |
+| 9 | 併入與匯入的錯誤（D-115-14） | ①`parse` 帶不存在（或已軟刪除）的 `targetProjectId`；②`parse` 帶 `targetProjectId=<P1>` 但 `executionPath` 填 `<別的根>`；③不帶 `targetProjectId`、規格根＝`<alpha 根>`：parse 後 signoff、confirm；④帶 `targetProjectId=<P1>` parse 並 signoff 後，先 `PUT /projects/{P1}/sdd-binding {sddProject:"other"}`，再 confirm（之後把 P1 改回 `e2e17-alpha`） | ① **404**（訊息 `專案不存在或已刪除：<id>`，無 reason）；② **409** `sdd_binding_conflict`，`details={cause:"request_differs_from_target", field:"executionPath"}`；③ parse 200，但 confirm → **409** `sdd_binding_conflict`（`cause="already_bound_elsewhere"`，同 `(executionPath, e2e17-alpha)` 已被 P1 綁定），**沒有建立新專案**；④ confirm → **409** `sdd_binding_conflict`（`cause="target_bound_differently"`），P1 的目標與任務數不變 |
+| 10 | `spec_file` 選檔（S-04） | `two-tcs/`，`parse`：①只給 `specDir`②加 `specFile:"TCS-One-….md"`③加 `specFile:"../escape.md"`④加 `specFile:"nope.md"`⑤只給 `specFile`、不給 `specDir`（且無 `targetProjectId`） | ① **422** `SDD 規格檢查未通過`，`details.bridgeReason="spec_ambiguous"`，`detail` 列出兩個符合條件的檔名；② 200，任務只含 `TCS-One` 的 AT，`sddSpecFile` 是 `TCS-One-….md` 的絕對路徑；③ **422** `SDD 規格檢查未通過`，`details.bridgeReason="sanitization_failed"`；④ **422** `SDD 規格檢查未通過`，`details.bridgeReason="spec_not_found"`；⑤ **400**（`errors[0].field=specFile`） |
+| 11 | 未映射 AT 出聲（S-03；D-115-16） | `unmapped/`，`parse`；另直接打 Bridge `POST /sdd/compile`，並對同一規格跑 `sdd_compile` CLI；再對照「照模板填 §4 的 `AT-{NNN}-E-n` 邊界表」的規格 | `parse` 200，`warnings` 含一筆 `code="at_unmapped"`、`detail` 含 `AT-009-1-1` 與 `AT-14-2-1`、`location="specDir"`，`parsedResult` 的任務不含它們；Bridge 回應 `unmapped_at_ids=["AT-14-2-1","AT-009-1-1"]`（依首次出現順序：§1 映射列在前、Gherkin 標頭在後；仍 200）；`sdd_compile` CLI **rc 6** 且**不寫輸出檔**；§4 邊界表照模板填的規格＝`unmapped_at_ids=[]`、不出聲 |
+| 12 | 凍結後改檔 → 編譯 fail-closed（G-06；F-3 的 E2E 面） | `edit/`：改動 TCS 的一個字元後 ①Bridge `POST /sdd/compile`②Console `parse`（明示 `specDir`）③Console `parse`（不帶 `specDir`，以 `executionPath` 探測）；再還原內容重打 ② | ① **409** `spec_digest_changed`，`detail.pair="frozen_vs_file"`；② **422** `SDD 規格檢查未通過`，`details.bridgeReason="spec_digest_changed"`；③ 同 ②，**且不退回 LLM 路徑**（探測模式 fail-closed：`parsePath` 不是 `LLM`、沒有任何模型呼叫；ADR-016 §6.3）；還原後 ② 回 200 |
+| 13 | 專案名規則與原名等價（S-10；F-8 的 E2E 面） | `names/`：①Bridge `GET /sdd/fsm?root=<names 根>`②`GET /sdd/fsm/%E8%A8%82%E5%96%AE%E7%B3%BB%E7%B5%B1%20v2?root=…`③`GET /sdd/fsm/a%3Ab?root=…` 與 `GET /sdd/fsm/a_b?root=…`④Console 專案 `訂單系統 v2`：`GET /engines/sdd?projectId=<該專案>`⑤`GET /engines/sdd?project=<201 字元>`、`?project=a%00b` | ① `projects` 含兩個專案（`訂單系統 v2` 與 `a_b`，皆不在 `errors`）；② 200，`fsm_project="訂單系統 v2"`；③ 兩者都 200 且指向同一個檔：`project="a:b"`（檔內原名）、`fsm_project="a_b"`（原名與標準鍵等價）；④ 200，`fsm.fsmProject="訂單系統 v2"`；⑤ 兩者皆 **400**（`errors[0].field=project`） |
+| 14 | 專案根與 `projectId`（API-ENG-02；BR-28） | ①`GET /engines/sdd?projectId=<P1>`②`?projectId=<不存在的 uuid>`③`?projectId=abc`④viewer 讀①⑤另建一個 `executionPath` 指向 allowlist 之外目錄的專案，`?projectId=` | ① 200，`projects` 只含**該專案根**下的 FSM 專案（含 `e2e17-alpha`），`fsm.fsmProject="e2e17-alpha"`（預設取有效值），`fsm.escalationHistory=[]`、`fsm.escalationProvenance=null`、`fsm.recovery` 缺席，`fsm.phase={name:"FROZEN",order:4,blocking:false,observation:false}`（W4 dogfood 接線後；之前為 null）；② **404**（無 reason）；③ **400**；④ 200；⑤ 200，`available=true`、`reason="sdd_root_rejected"`、`projects=[]`、`fsm=null` |
+| 15 | SDD 批次成功路徑（C3、C4；BR-30、BR-31；API-EXE-15） | P1 全範圍 `POST execute`；viewer 每 ≥ 2 秒輪詢 `GET run`，並同時讀 FSM 檔（`GET /sdd/fsm/e2e17-alpha?root=…` 與測試自己的 YAML 解析），直到 run 終態，再輪詢到 FSM 離開 `AUTOCLAUDE_DELEGATED`（≤ 30 秒），記下 FSM 狀態序列 | 201，**沒有 `warnings`**；`dag.nodes[].stepId` 與 playbook 的 `step_id` 都是 `sdd-greenfield-at-…`（不是 `G1-T1`）；執行中 FSM `current_state="AUTOCLAUDE_DELEGATED"`（至少被觀測到一次）且 `autoclaude_delegated_tracking.playbook_ref="run:<runId>"`；run `COMPLETED` 後 FSM `current_state="IMPLEMENTATION"`；FSM `decision_trace` 依序含 ①`SPEC_FROZEN→TEST_CONTRACT_NEGOTIATED`（reason `console-signoff approver=<匯入記錄的 signedOffBy>; run=<runId>`）②`TEST_CONTRACT_NEGOTIATED→IMPLEMENTATION`（reason `console-signoff approver=<…>; oracle=<TCS 相對路徑>@sha256:<凍結摘要>; basis=import-draft-signoff; r9.20.3=not-satisfied`）③`IMPLEMENTATION→AUTOCLAUDE_DELEGATED`（reason `console-run run=<runId> START`）④`AUTOCLAUDE_DELEGATED→IMPLEMENTATION`（reason `console-run run=<runId> COMPLETED`）；run 工作區 `playbook.yaml` 的 `workflow_type="aisdlc_sdd"`、`workflow_path`＝**TCS 檔案的 realpath**；引擎子行程環境**只有** `SDD_PROJECT=e2e17-alpha`（沒有 `SDD_STATE_DIR`、沒有任何 `BRIDGE_*`）；`run.json` 的 `env_keys` 不含權杖名；run 目錄內任何檔案與引擎日誌**搜不到權杖值**（BR-33） |
+| 16 | 追溯覆蓋（C5；BR-32；API-EXE-16） | 第 15 列的 run：`GET /executions/{runId}/rtm`；對照 Bridge `GET /autoclaude/runs/{id}/rtm` 與引擎寫的 `RTM-COVERAGE-*.yaml`；另對一個進行中（`RUNNING` 或 `PAUSED`）的批次再取一次 | 200；`scenario="greenfield"`、`at={passed:4,total:4,unmapped:0,pct:100.0}`、`ac={covered:2,total:2,pct:100.0}`（`AT-001-2-E-1` 歸 `AC-001-2`）、`failedAtIds=[]`、`weakRegexAtIds=[]`、`unmappedAtIds=[]`、`fullyCovered=true`、`advisory=true`；`specDigest`＝第 5 列的凍結摘要；三處（YAML、Bridge、Console）逐值相等；進行中批次 → **404** `rtm_not_found` |
+| 17 | 四源對拍（NFR-OBS-01 補強；C4） | 第 15、16 列結束後，依下方〈四源對拍表〉逐列比對（測試用獨立的 YAML／SQL 讀取，不經任何被測 API；FSM 側先輪詢到離開委派態） | 每列四源逐值相等；任一列不等即缺陷 |
+| 18 | 凍結後改檔 → 執行 409（G-06；BR-30） | 第 15 列之後，在 `alpha/` 規格檔末尾加一行文字（不碰 FSM）；P1 再 `POST execute`；之後把檔案還原 | **409** `sdd_spec_digest_changed`，`details.pair="frozen_vs_file"`，含 `doc`、`frozenDigest`、`currentDigest`，且 `currentDigest≠frozenDigest`；**沒有新的 `execution_runs` 列**（已補償刪除）；FSM `current_state` 仍為 `IMPLEMENTATION`；還原後再 execute 回 201 |
+| 19 | 失敗路徑與人工恢復（C4；BR-31；D-115-15；替身） | `alpha-fail/`：依第 5、8 列的步驟建立、凍結、匯入（併入 P3）並簽核專案；`POST execute`；等終態（60 秒）；再 execute；之後測試扮演 SDD session 執行真 CLI `resume-from-escalation --to IMPLEMENTATION --project e2e17-alpha-fail --reason "E2E 人工恢復"`，再 `GET /engines/sdd?projectId=<P3>`，再 execute | run `FAILED`，`reason` 以 `引擎升級（ESCALATION）` 開頭；FSM `current_state="ESCALATION"`、`escalation_provenance.source="autoclaude_delegated_failed"`、`escalation_history[-1].resolved_at` 為空；`GET /engines/sdd?projectId=<P3>`：`fsm.escalationHistory` 末筆與 FSM 檔逐值相同、`fsm.escalationProvenance.source` 同、`fsm.phase={name:"BLOCKED",order:0,blocking:true,observation:false}`（W4 接線後）、`fsm.recovery.target="IMPLEMENTATION"` 且 `powershell`／`posix` 兩段都含 `resume-from-escalation`、`--to IMPLEMENTATION` 與 `<夾具根>` 下的 `build/reports/fsm`；專案詳情「SDD 治理」區顯示紅色阻塞橫幅、ESCALATION 區塊與可複製的恢復指令（§4.7.3）；`GET /executions/{runId}/rtm` → **404** `rtm_not_found`；恢復前再 execute → **409** `sdd_fsm_state_conflict`（`details.currentState="ESCALATION"`）；CLI rc 0 後：FSM `IMPLEMENTATION`、`escalation_history[-1].resolved_at` 有值、**`escalationProvenance` 仍在**（恢復後不清除），畫面**不再**顯示未解的升級區塊（判斷式用 `currentState`，§4.7.3），再 execute → **201**（下一個批次可直接啟動） |
+| 20 | 取消交還控制權（D-115-15；BR-31） | `cancel/`：P 全範圍 `POST execute`（`MOCK_CLAUDE_DELAY` ≥ 3 秒）；進行中 `POST cancel`；等 `CANCELLED`，輪詢到 FSM 離開委派態；再對 P `POST execute` | run `CANCELLED`；FSM `current_state="IMPLEMENTATION"`，`decision_trace` 末筆 `AUTOCLAUDE_DELEGATED→IMPLEMENTATION`、reason `console-run run=<runId> CANCELLED`；第二次 execute → **201**（Bridge 重新 `delegate-enter`，`playbook_ref="run:<新 runId>"`） |
+| 21 | 回收點與外來委派（D-115-15；§3.1.6 第 3 點） | ①`reclaim/`：P `POST execute`（`MOCK_CLAUDE_DELAY` ≥ 3 秒）後，由測試在外部殺掉引擎行程 → run `FAILED`（引擎異常結束；FSM 不動，仍 `AUTOCLAUDE_DELEGATED`）；再對 P `POST execute`②`foreign/`：測試以真 CLI 在 `IMPLEMENTATION` 執行 `delegate-enter`（不帶 `--playbook-ref`），再對 P `POST execute` | ① 第二次 execute → **201**；FSM `decision_trace` 依序含 `AUTOCLAUDE_DELEGATED→IMPLEMENTATION`（reason `console-run run=<舊 id> RECLAIMED old_status=FAILED by=<新 id>`）與 `IMPLEMENTATION→AUTOCLAUDE_DELEGATED`（reason `console-run run=<新 id> START`）；Bridge 稽核記一筆回收（含舊 run id 與舊終態）；② **409** `sdd_fsm_state_conflict`，`details.currentState="AUTOCLAUDE_DELEGATED"`、`details.cause="foreign_delegation"`；FSM 檔不變（Bridge 不碰外來委派） |
+| 22 | 混合批次與資格（G-01；API-EXE-15） | `mixed/`：專案 P5 依第 5、8 列建立、凍結、匯入並簽核專案，再手動新增一個一般任務（Phase 2）；`POST execute`（`scope.mode=ALL`）。另對只有手動任務、但已被第 5 列寫回 `sddProject` 的專案 P6 `POST execute` | P5：201，`warnings[0]={code:"sdd_governance_inactive", cause:"mixed_scope", detail:…}`；`dag` 的 `stepId` 是 `G<g>-T<t>`；FSM 檔不變；批次照常跑完、沒有追溯報告。P6：201 且**沒有** `warnings`（沒有 SDD 來源任務），步驟 id 為 `G1-T1`…。（`token_not_configured`、`spec_mismatch`、`duplicate_step_id` 與 `sdd_frozen_digest_absent` 由 `RunLauncher` 的整合測試涵蓋，E2E 不必另起實例） |
+| 23 | 權限與錯誤形狀（API-EXE-16、API-ENG-02、API-SGN-06、API-PRJ-08） | rtm、engines、freeze、sdd-binding 端點：未認證、viewer、operator；freeze 的失敗回應 | 未認證 401；viewer 對 rtm、engines 為 200，對 freeze、sdd-binding 為 403；每個非 2xx 都是 `ApiError` 封包且 `traceId` 等於 `X-Trace-Id`（A2）；任何回應與日誌都不含權杖值（A5 的延伸） |
+| 24 | 唯讀不變與 CLI 窄寫（A1；BR-33；F-4） | 對 `GET` 類端點（`/sdd/fsm*`、`/engines/sdd`、`/autoclaude/runs/{id}/rtm`）前後對所有 FSM 狀態目錄做 mtime 快照；另跑 Bridge 原始碼掃描 | `GET` 前後 FSM 檔的 mtime 與大小完全相同；`engine-bridge/app/**/*.py` 沒有任何以寫入模式開啟 `FSM-STATE` 檔的呼叫（F-4）；CLI 呼叫處只使用白名單動詞 |
+| 25 | SDD run 的 `resume` 重驗與權杖（ADR-016 §10.1 最後一列；D-115-18） | `cancel/` 以外另一個已匯入簽核的專案：`POST execute`（`MOCK_CLAUDE_DELAY` ≥ 3 秒）→ `POST pause` 等 `PAUSED`；**直接對 Bridge** 打該 run 的 `POST /autoclaude/runs/{id}:resume` 與 `…/restore`，各做①不帶 `X-Bridge-Token`②帶錯值；在規格檔末尾加一行；`POST resume`；還原檔案再 `POST resume` | PAUSED 期間 FSM 仍 `AUTOCLAUDE_DELEGATED`（`playbook_ref` 指本 run）；直打 Bridge 的①②共四次皆 **403** `sdd_write_forbidden`，run 仍 `PAUSED`、沒有 spawn、FSM 檔不變（Bridge 沒設權杖的 503 由 Bridge pytest 守）；第一次 resume → **409** `sdd_spec_digest_changed`（`details.pair="frozen_vs_file"`），run 維持 `PAUSED`、沒有 spawn；還原後 resume → 200（`RUNNING`），FSM 不變、沿用同一個委派（console-api 有附權杖，所以這一步成功本身就是權杖附上的證據） |
+| 26 | Docker 全棧（只在 Docker 全棧跑） | 全棧起好後（專案根在可寫掛載、SDD 唯讀掛載、權杖兩端同值且 ≥ 32 字元）：第 5、15、19 列各做一次簡化版；再把專案根換成唯讀掛載重打第 5 列 | `:freeze` 與批次同步成功，FSM 檔寫在專案根，`/sdd` 之下沒有新增 `__pycache__` 或遙測檔（SDD 版本目錄內 `governance/rules/*.yaml` 的內容雜湊前後相同）；權杖只存在 backend 與 Bridge 的環境，不在引擎子行程環境；專案根唯讀時 `:freeze` 回 **502**（Bridge 502 `sdd_cli_failed`）且 FSM 不變 |
+
+**四源對拍表**（第 17 列；每列四源逐值相等；①②③④ 的順序即 NFR-OBS-01 的四源）：
+
+| 比對項 | ① FSM 狀態檔（YAML） | ② Bridge | ③ Console API | ④ PG |
+|--------|----------------------|----------|---------------|------|
+| 目前狀態（跨狀態機語意對照） | `fsm_state.current_state` | `GET /sdd/fsm/{p}?root=` 的 `current_state` | `GET /engines/sdd?projectId=` 的 `fsm.currentState` | `execution_runs.status` 依對照：`COMPLETED`、`CANCELLED`⇄`IMPLEMENTATION`（FSM 已輪詢離開委派態）；引擎升級型 `FAILED`⇄`ESCALATION`；進行中、以及額度停機／異常結束／孤兒的 `FAILED`⇄`AUTOCLAUDE_DELEGATED`（不動） |
+| 凍結階段與文件 | `frozen_stages[-1].stage`、`spec_docs` | 同鍵 | `fsm.frozenStages[-1].stage`、`spec_docs` | `projects.sdd_spec_dir`／`sdd_spec_file`（絕對路徑）換算出的相對 `executionPath` 路徑＝`spec_docs` 的一項 |
+| 凍結摘要 | `frozen_stages[-1].spec_doc_digests`（`{<相對路徑>: "sha256:…"}`） | 同 | `fsm.frozenStages[-1]` 原樣 | `tasks.pass_criteria_spec->>'specDigest'`（匯入後的全部任務）＝規格檔現摘要（凍結後未改檔時） |
+| 凍結稽核 | `decision_trace` 凍結那一筆的 `reason`（`console-freeze approver=…; reason=…`）與 `ts`、`frozen_stages[-1].approved_by` | 同 | `fsm.decisionTrace`（尾 5 筆內）、`fsm.frozenStages[-1].approved_by` | `audit_log` 的 `action=project.sdd.freeze` 一列：`subject`＝approver、`occurred_at` 與 `ts` 相差數秒內 |
+| 綁定 | — | — | `ProjectDetailResponse` 的 `sddProject`／`sddSpecDir`／`sddSpecFile` | `projects.sdd_project`／`sdd_spec_dir`／`sdd_spec_file` |
+| 委派追蹤 | `autoclaude_delegated_tracking.playbook_ref`（執行中＝`run:<runId>`） | — | `GET /executions/{runId}` 的 `id` | `execution_runs.id` |
+
+### 跨專案一致性對拍測試清單（v1.5；§4.3-F；放 Bridge tests，不碰根層 `tools/tests`）
+
+ADR-XPLAT-010 §2.1 要求跨專案一致性斷言放在整合層；本輪放 `AgentConsole/engine-bridge/tests/`（建議檔 `test_sdd_integration_parity.py`）——Bridge 是唯一同時看得到兩個引擎的元件，也避開根層守衛線的重釘稅。一律用**真的 SDD CLI（子行程）與真的 adapter（行程內）**，狀態目錄在暫存目錄，不碰 repo 真實的 `build/reports`。
+
+| # | 名稱 | 斷言 |
+|---|------|------|
+| F-1 | 欄位對拍（G-08） | 同一份 TCS：Bridge `POST /sdd/compile` 的 `tasks[]` 與 `sdd_compile` CLI 的輸出，逐任務 `step_id`、`name`、`expected_output_regex`、`evaluator_command`、`max_retries`、`maintain_context`、`spec_digest`、`weak_regex` 相等（`prompt` 不比）。backend 的欄位映射（§3.3.2）另由 `ImportParserTest` 對本契約的表釘住，兩段合起來構成 G-08 的對拍 |
+| F-2 | 只認指定者（G-02） | 同一狀態目錄 `m-alpha`（`INIT`）與 `m-zeta`（`SPEC_FROZEN`）：`fsm_project=m-alpha` → `spec_not_frozen`；`m-zeta` → 通過；未指認 → `spec_not_frozen`（狀態檔不唯一）；只有單一狀態檔的目錄不需指認；原名反查（`fsm_project="a:b"` 找到 `FSM-STATE-a_b.yaml`）；找不到時**不再往上層目錄找** |
+| F-3 | 凍結後改檔（G-06） | 真 CLI 凍結（含 `spec_doc_digests`）→ 改 TCS → `/sdd/compile` 得 **409** `spec_digest_changed`（`pair=frozen_vs_file`）、`POST /autoclaude/runs` 預檢得 409 `spec_digest_changed`；規格檔不在凍結清單 → 422 `spec_not_frozen`；舊狀態檔（無摘要）→ 放行、`frozen_digest="absent"` 並出聲一次（行為同 v1.4） |
+| F-4 | 只經 CLI（A1；D-115-01） | 掃描 `engine-bridge/app/**/*.py`：出現字串 `FSM-STATE` 的模組不得含寫入形態呼叫（`open(…, "w"／"a"／"x")`、`write_text`／`write_bytes`、`os.replace`／`rename`、`shutil` 複製移動、`unlink`）；唯一提到 `tools.fsm_runtime.fsm_runtime` 的子行程呼叫處受 `ALLOWED_VERBS` 限制；掃描器自帶一個故意違規的樣本，證明它會紅 |
+| F-5 | `phase` 表對拍（G-13） | T-G 純函式的表與 SDD LATEST 的集合一致：`OBSERVATION_STATES`＝表中 `observation=true` 的狀態集；`FSMRuntime._BLOCKING_STATES`＝`blocking=true` 的集合；`_HAPPY_PATH` 的每個鍵都有對映（日後新增狀態未對映 ⇒ 紅）；主路徑 `order` 沿 `_HAPPY_PATH` 單調不減（讀 SDD 檔以 `importlib` 依路徑載入，只在測試內，不進 `app/`） |
+| F-6 | 摘要演算法對拍（G-06） | 對同一個內容的 LF、CRLF、CR、BOM＋LF、BOM＋CRLF 五種檔（含非 ASCII）：CLI 凍結寫入的摘要＝adapter 的 `SddSpec.digest`＝Bridge 預檢重算的現檔摘要，**五種全部相等**；並以「原始 bytes 的 sha256」為反向對照——CRLF 與 CR 兩種必須**不等**（證明實作沒有退回原始 bytes）；非 UTF-8 檔 CLI rc 4 `doc_not_utf8`；> 16 MiB rc 4 `doc_too_large` |
+| F-7 | 權杖與環境不外洩（G-09） | Bridge 環境有權杖時，`RunHandle._child_env()` 的輸出不含它；Bridge 自己的環境帶 `SDD_STATE_DIR`／`SDD_PROJECT` 時，**不含** `sdd` 區塊的 run 的子行程環境兩者皆無、含 `sdd` 區塊的只有 `SDD_PROJECT`；`validate_env` 對 `BRIDGE_SDD_WRITE_TOKEN`、`SDD_PROJECT`、`SDD_STATE_DIR` 回 422 `forbidden_name`；`run.json`、`playbook.yaml`、`config.yaml`、`events.jsonl`、引擎日誌、稽核檔與任何錯誤回應都搜不到權杖值；權杖短於 32 字元或佔位 → `SettingsError`（啟動失敗） |
+| F-8 | 名稱規則對拍（S-10） | `fsm_component()` 對 ADR-016 §7.4 的 21 個樣本（含 CJK、空白、括號、`+`、`@`、`a:b`、`x/y`、`CON`、80 字以上、NFD 輸入、尾端空白與句點）與模糊集，輸出逐一等於 SDD `sanitize_component`（以 `importlib` 依路徑載入）且冪等；其輸出都被讀取白名單（淨化輸出域）接受；含 `/`、`\`、`:` 的原名經淨化後等價於標準鍵；`GET /sdd/fsm/{name}` 對含 CJK 與空白的名稱可取得 |
+| F-9 | 同步與補償（D-115-10、D-115-15） | 以假 CLI 驅動：`COMPLETED` → `delegate-exit done`；`CANCELLED`（非孤兒）→ `delegate-exit done`；引擎升級型 `FAILED` → `delegate-exit failed`；其餘 `FAILED`（額度停機、異常結束、被訊號終止、Bridge 關閉）、孤兒、`PAUSED` → **零呼叫**；spawn 失敗與 `_materialize` 例外 → 補償 `done`（reason `SPAWN-FAILED…`）且回應是 500 `spawn_failed`；`delegate-exit` rc 3 → alert `SDD_SYNC_STATE_DRIFT`、其他失敗 → `SDD_FSM_SYNC_FAILED`；run 的狀態都不被改變；六種 `--reason` 組字逐字釘住；`ALLOWED_VERBS` 釘住 |
+| F-10 | 預檢表與回收點（D-115-15） | 假 CLI＋假 run 登錄：預檢表每一列（`IMPLEMENTATION`／`TEST_CONTRACT_NEGOTIATED`／`SPEC_FROZEN`／其他／狀態檔不存在）的動詞序列；回收點五列（`playbook_ref` 缺或不以 `run:` 開頭＝外來／查無 run／他專案的 run／活躍 run／終態 run）；回收兩步之間 `delegate-enter` 失敗 → FSM 停在 `IMPLEMENTATION`、不 spawn、回 5xx；`resume`／`restore` 的重驗（本 run 為引用者⇒續；別的 run⇒409；`IMPLEMENTATION`⇒重進；`ESCALATION`⇒409 不 spawn） |
+| F-11 | AT 文法與歸屬（D-115-16；§3.1.4 (e)、(f)） | ADR-016 §8.1 的 17 個樣本逐一以 `re.fullmatch` 驗過（接受 `AT-001-1-1`、`AT-001-1`、`AT-001-12-3-a`、`AT-001-1-E1`、`AT-001-1-E-1`、`AT-029-1-1-1-1`；拒絕 `AT-14-1-1`、`AT-123`、`AT-001-E-1`、`AT-0001-1-1`、`AT-001-1-`、`AT-001--1`、`at-001-1-1`、`AT-001-1-1_a`、`AT-001-1-1 x`、`AT-{NNN}-1-1`）；正向 adapter 與逆向 RTM adapter 由**同一個** `AT_ID_PATTERN` 組 regex；逆向：多段尾綴歸 AC（`AT-001-12-3-a`→`AC-001-12`）、不符文法者計入 `total_at`／`failed_at_ids`／`unmapped_at_ids` 而不進 AC 桶、有 unmapped 時 `fully_covered=False`、舊三段形輸出逐位元不變；宣告位置只掃 AC 映射列第三欄與 Gherkin 標頭 |
+| F-12 | CLI rc→HTTP 對映（ADR-016 §4.1） | 假 SDD 樹（暫存目錄內只回放 JSON 的 `tools/fsm_runtime/fsm_runtime.py`）真起子行程：rc 0／1／2／3／4／5 與逾時、無法啟動各一，逐一斷言 §3.1.4 共通規則 4 的對映表；斷言 argv、cwd、環境集合（無 `BRIDGE_*`）、逾時殺樹、`-W ignore::RuntimeWarning`、`--must-exist` |
 
 ---
 ## 6. 差異與裁決
@@ -2975,6 +3712,161 @@ Q1～Q8 是 SA 落筆時提出的八個點，**主控已於 2026-10-16 全部裁
 11. **I-04（Bridge 與 SSOT 對「SDD LATEST」的判定可能分歧）**：E6 的差異是真的（Bridge 看目錄名、SSOT 看 `git ls-files`），但是否在實務上分歧「待驗」，不是這輪的形狀問題；本輪只在 Architecture §12.2 登記為待驗項（V-11），不改 Bridge。
 12. **給 QA 的 RTM 對照**：新增 `API-ENG-01`、`API-SGN-05`、`API-AUTH-03` 三列；補強 `NFR-OBS-01`（E2E-15 第 5 列）、`US-M-10`／`UI-KPI-08`（探測改打深度探針，E2E-16 第 2 列）、`BR-13`／`BR-14`（Console 現在消費 Bridge 的 SDD 查詢）、`API-NTF-01`（`pendingSignoffs` 與清單同源）、`US-E-09`（DAG 全螢幕）、`INF-SVC-07`（Redis 現在真的被使用）；細目見附錄 E。
 
+### 6.8 v1.5 變更一覽（整合輪 115；2026-10-17）
+
+整合輪 115（`docs/04_planning/AutoSDD_improving_115.md`；軌道① T1 再開）的主控裁決是 D-115-01～16；契約涉及其中 01～06、09、10、14～16（07、08、11、12、13 是 SDD 本身與流程面的裁決，不涉及本契約）；SA 交卷後另有 D-115-18 五項裁決（6.8.1 末列），皆涉及本契約。SD 的 ADR-XPLAT-016（下稱 ADR-016，Proposed）已落檔，本契約**已與它對齊**（逐項處置見 6.8.6）。分六節：6.8.1 是裁決對照；6.8.2 是 W115-SA 本輪的現查證據；6.8.3 是 SA 當初提出的待裁決點與待 SD 定案清單，以及它們的結案；6.8.4 是 RTM 新列草案（QA 單線合併用）；6.8.5 是 SDD 框架體檢缺陷（S-xx）與契約條文的對照；6.8.6 是與 ADR-016 的對齊處置，以及 ADR 沒寫、契約暫定而需確認的靜默處。
+
+#### 6.8.1 裁決 D-115-01～16、D-115-18 對照
+
+| 裁決 | 內容（一句話） | 契約位置 | YAML | 實作 |
+|------|----------------|----------|------|------|
+| D-115-01 | FSM 一切寫入只經 FSMRuntime CLI 子行程；Bridge 原始碼不得開寫 `FSM-STATE-*.yaml`；D22③「只讀」修訂為「只經 CLI 窄寫」 | §1.7.1 v1.5 加註、§3.1.4 共通規則 1、E2E-17 第 24 列、F-4 | — | Bridge；ADR-016 |
+| D-115-02 | 狀態目錄導向 `<execution_path>/build/reports/fsm`；`/sdd/fsm*` 增選填 `root`；`GET /engines/sdd` 依專案帶 `root` | §1.10.4、§3.1.4 (a)、§4.3 M-21 | `getSddEngineStatus` 的 `projectId` | SDD LATEST；Bridge；Backend |
+| D-115-03 | 人工閘只開「核准凍結」一個寫動詞（`HUMAN_PENDING`→`SPEC_FROZEN`，帶 approver、理由、文件摘要）；退回邊不做 | §1.10.2、§3.1.4 (d)、§4.7.1、E2E-17 第 1～7 列 | `freezeProjectSddSpec`、`SddFreezeRequest` | SDD CLI；Bridge；Backend；Frontend |
+| D-115-04 | Bridge 是委派與談判狀態的唯一同步者；AutoClaude 與 SDD 互不 import | §3.1.6 | — | Bridge |
+| D-115-05 | 「零侵入」改「最小侵入白名單」（ADR-016 §11；`NFR-COMPAT-01` 驗證口徑、`AgentConsole/CLAUDE.md` 鐵律 7、Bridge README、PRD §0.5 註記由主控於收尾單人窗口同步） | 本文不涉及 | — | ADR；收尾 |
+| D-115-06 | 外部契約不開 `workflow_*`；SDD 批次以 `sdd` 區塊由 Bridge 伺服端注入；預檢（凍結＋三點摘要）不過不 spawn | §1.2.1 v1.5 加註、§1.10.5、§1.10.6、§3.1.6、§3.4.1 | `ExecutionRunResponse.warnings`、`ExecutionWarning` | Bridge；Backend |
+| D-115-09 | 框架體檢併入：S-03 AT 文法（以 D-115-16 為準）與出聲、S-04 增 `spec_file`、S-05＝G-02、S-10 專案名規則、S-11／S-12 | §3.1.4 (b)(e)、§3.3.2 | `ParseOptions.specFile`／`sddProject`、`ParsedResult` 四欄 | AutoClaude adapter；Bridge；Backend |
+| D-115-10 | 談判閘對映「Console 簽核匯入草稿＝談判同意」；`delegate-exit failed` 只對引擎升級型失敗——**由 ADR-016 §5.2 定案（附四條件），終態對映由 D-115-15 修訂** | §3.1.6 第 2、5 點、§3.1.7 第 4 點 | — | SD；Bridge |
+| D-115-14 | **Console 專案為錨**：路徑 A 匯入增選填 `targetProjectId`（併入既有專案並回填綁定；有不同綁定則 409）；核准凍結維持專案層端點，綁定＝`execution_path`＋`sddProject`（預設＝專案名）；不採佔位專案；凍結請求沒有 `binding`、沒有 `sdd_not_bound` | §1.10.1、§1.10.2、§1.10.5、§1.10.7、§1.10.8、§3.3.2、§0.5 V12、§4.7.1 | `SddFreezeRequest`（無 `binding`）、`SddBindingRequest`、`ParseOptions.targetProjectId` | Backend；Frontend；契約 |
+| D-115-15 | 委派退出語意：`done`＝交還控制權（不是成功）；COMPLETED→done、CANCELLED→done、引擎升級型 FAILED→failed、PAUSED／額度停機／孤兒／異常結束不動；新批次遇 `AUTOCLAUDE_DELEGATED` 走回收點（終態或不存在⇒回收，活躍或外來⇒409）；恢復留在 SDD session | §3.1.6 第 3～6 點、§3.1.7 第 1、2、10 點、E2E-17 第 19～21、25 列 | — | Bridge；SD |
+| D-115-16 | SA 的 Q2／Q4／Q5 採 SA 建議（rtm 無報告 404；`sdd.approver`、compile 的 `fsm_project` 與回應採用；`unmapped_at_ids` 回 200）；AT 文法 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`、前兩段＝所屬 AC；逆向 RTM 以前兩段歸 AC、無法歸屬者計入 `total_at`；`GET /sdd/fsm/{project}` 補 `escalation_provenance`、`fsm_project`、`recovery`；RTM 回應補 `unmapped_at_ids`／`summary.unmapped_at` 且有 unmapped 時 `fully_covered=false` | §1.10.3、§1.10.4、§3.1.4 (c)(e)(f)、§3.3.2、§4.7.2、§4.7.3 | `ExecutionRtmResponse.unmappedAtIds`、`RtmAtCoverage.unmapped`、`SddFsmState` 三新欄 | AutoClaude adapter；Bridge；Backend |
+| D-115-18 | SA 交卷後的五項裁決：①採新端點 `PUT /api/v1/projects/{id}/sdd-binding`（#48）；②併入既有專案時專案層 `signedOff` 不動；③路徑 `{project}` 只收淨化後的 FSM 鍵，含 `/` 的原名不可由 URL 定址（降級為已知邊界，不要求 `{project:path}`）；④SDD run 的 `:resume` 與 `/restore` 也須 `X-Bridge-Token`（ADR §9 的兩個呼叫擴大為四個，缺／錯同 503／403）；⑤`expectedDigests` 維持穿透、v1.5 畫面不送 | §1.10.7、§1.10.8、§3.1.7 第 11 點、§3.1.4 共通規則 2、§1.2.4～§1.2.6、§1.2.10、§3.1.6 第 7 點、§6.8.6 B#1／#2／#3／#6／#14 | `updateProjectSddBinding`、`resumeExecution`／`restoreExecution`（加 503 與說明） | Backend；Bridge；契約 |
+
+#### 6.8.2 現查證據（W115-SA；路徑相對 monorepo 根，行號是 2026-10-17 查證當下的行號）
+
+| # | 事實 | 證據 |
+|---|------|------|
+| E1 | 外部契約的 `PlaybookIn` 鎖死 `workflow_type=auto` 且 `extra=forbid`；`sdd` 因此只能放 `RunCreateIn` 頂層（與 `playbook` 同層） | `AgentConsole/engine-bridge/app/models.py:76-100`（`PlaybookIn`）、`:103-110`（`RunCreateIn`） |
+| E2 | 引擎升級型失敗的判別依據：`_on_state` 在引擎日誌出現 ESCALATION 狀態行時設 `_escalation`，`_failure_reason` 以它組出 `引擎升級（ESCALATION）：…`；額度停機、異常結束、孤兒是另外的 reason 形態 | `AgentConsole/engine-bridge/app/runner.py:423-431`（`_on_state`）、`:507-517`（`_failure_reason`）、`:479-492`（`_finish_normally`）、`:844-867`（`_reap_orphan`） |
+| E3 | 子行程環境繼承 Bridge 的 `os.environ`，所以權杖必須在 `_child_env` 剝除，否則引擎裡的 AI 步驟能自己簽自己的核准 | `runner.py:203-210`（`_child_env`）；Architecture §12 L-6（Bridge 無認證） |
+| E4 | 建立順序：`_validate`（路徑、環境、覆寫檢查）→ 取鎖 → `_materialize` → `start`（spawn）。預檢第 2～5 項接在 `_validate`，FSM 寫入接在 `_materialize` 之後、spawn 之前 | `runner.py:747-764`（`_create`）、`:766-778`（`_validate`）、`:799-819`（`_materialize`）、`:194-246`（`start`、`_spawn`） |
+| E5 | SDD 側 CLI 現有 10 個子命令，沒有談判與委派動詞；談判與委派的 API 已落地（`failed` 會走 `record_escalation` 進 `ESCALATION`）；`record_spec_frozen` 只記階段與文件路徑，沒有摘要 | `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/fsm_runtime.py:3288-3293`（`_cli`）、`:1939-1979`（談判進出）、`:3216-3285`（委派進出）、`:641-648`（`record_spec_frozen`）；`state_loader.py:237-247` |
+| E6 | 阻塞集合與觀測集合是 `phase` 表的來源；`_HAPPY_PATH` 的鍵共 43 個 | `fsm_runtime.py:660-662`（`_BLOCKING_STATES`）；`transition_rules.py:12-201`（`_HAPPY_PATH`）、`:223-239`（`OBSERVATION_STATES`） |
+| E7 | adapter 現況：凍結閘取字母序第一份狀態檔；多份 TCS 時選檔即 `ValueError`；AT 文法 `AT-[\d\-]+`；`spec_format_version` 擷取；scenario 取內文子字串；`digest`＝對 `read_text` 結果的 sha256（文字模式讀檔，換行已被正規化） | `AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py:63-69`、`:100`、`:137`、`:198-213`、`:241-252`、`:257-278`、`:280-285` |
+| E8 | 逆向 RTM：只在 run 正常走完（POST_RUN）才寫；檔名 `RTM-COVERAGE-<project>.yaml`，在 `<checkpoint_dir>/rtm`；欄位 `summary.*`、`failed_at_ids`、`weak_regex_at_ids`；AT 還原文法 `^AT-(\d+)-(\d+)-(\d+)$` | `AutoClaude/autoclaude/plugins/rtm_writeback_plugin.py:4-14,50-87`、`autoclaude/core/wiring.py:299-314`、`autoclaude/infra/adapters/playbook_to_rtm_adapter.py:31,99-125`；run 工作區路徑 `engine-bridge/app/runstate.py:56-70` |
+| E9 | Console 路徑 A 現況：`SddTask` 只六欄、`sddTask()` 的 `maxRetries` 傳 null、`maintain_context` 不送、規格 `digest` 只存不比；`projects` 沒有任何 SDD 綁定欄；Flyway 現有最大版號 V11 | `AgentConsole/backend/src/main/java/com/aisdlc/console/application/port/out/AgentBridge.java:47-52`、`application/service/ImportParser.java:188-240`、`backend/src/main/resources/db/migration/V1__init.sql:10-27`、`db/migration/V11__health_check_path_deep.sql` |
+| E10 | 執行計畫與 playbook 現況：step_id 是 `G<g>-T<t>`；playbook 任務只送七欄 | `backend/src/main/java/com/aisdlc/console/domain/service/ExecutionPlanner.java:169`、`domain/service/PlaybookBuilder.java:42-60` |
+| E11 | 專案名白名單差距：SDD 的淨化函式只替換 Windows 禁用字元與控制字元（NFC、上限 80），Bridge 只收 `[A-Za-z0-9._-]` | `AISDLC_SDD/scripts/component_sanitizer.py:36,113-123`；`engine-bridge/app/routers/sdd.py:18` |
+| E12 | 替身 `aisdlc-mock-claude` 只回放 prompt 內符合 `\[[A-Z][A-Z0-9_]*\]` 的字樣、不寫檔，所以夾具的驗收字面值只能是這種詞（成功路徑）或不含方括號的詞（失敗路徑） | `engine-bridge/app/mock_claude.py:14-22,35,56-79` |
+
+#### 6.8.3 SA 提出的待裁決點與待 SD 定案清單：結案紀錄
+
+契約初稿（v1.5 對齊修訂之前）曾列 Q1～Q5 待主控裁決、S1～S8 待 SD 定案；主控已於 D-115-14～16 裁決、SD 已於 ADR-016 附錄 B 逐項給值。本表是結案紀錄（值一律以 ADR-016 為唯一真相源，本文只引用位置；需要機械斷言的值已寫進對應章節）。
+
+**A. 主控裁決（SA 提問 Q1～Q5）**
+
+| # | 提問 | 結案 | 契約位置 |
+|---|------|------|----------|
+| Q1 | 核准凍結與路徑 A 匯入的先後（循環依賴） | **D-115-14**：Console 專案為錨；匯入帶選填 `targetProjectId`，併入既有專案；核准凍結請求沒有 `binding`、沒有 `sdd_not_bound`。**SA 初稿的「佔位 P0 專案」不採**（一個 FSM 專案綁兩個 Console 專案） | §1.10.1、§1.10.2、§1.10.8 |
+| Q2 | rtm 無報告用 404 而非 200 加旗標 | **D-115-16 採 SA 建議**：維持 404 `rtm_not_found` | §1.10.3 |
+| Q3 | FSM 停在委派態的解卡 | **D-115-15／ADR-016 §10.3**：取消走 `delegate-exit done`；新批次遇 `AUTOCLAUDE_DELEGATED` 時以 FSM 記的 `playbook_ref` 所指的 run 判定——終態或不存在⇒回收，活躍或外來⇒409。**與 SA 初稿的建議不同**（SA：看 Bridge 有沒有同 `fsm_project` 的活躍 run；ADR 以 FSM 記的 run 為準，能辨認外來委派而不碰） | §3.1.6 第 3、5 點 |
+| Q4 | `approver` 與 `fsm_project` 兩個 SA 補的欄位 | **D-115-16 採用**（`sdd.approver` 選填，省略記 `console`；compile 請求 `fsm_project`、回應 `spec_file`／`fsm_project`） | §3.1.4 (e)、§3.1.6 |
+| Q5 | 回應形狀的小選擇 | **D-115-16 採用**：`ParsedResult` 四欄伺服器擁有；`unmapped_at_ids` 非空仍回 200、Console 轉警告 `at_unmapped`；清單項不帶 `phase`；`spec_format_version` 只顯示 | §3.3.2、§3.1.4 (c)(e) |
+
+**B. SD 定案（SA 的 S1～S8；ADR-016 附錄 B）**
+
+| # | 項目 | 結案（引用位置；值見 ADR） | 契約位置 |
+|---|------|----------------------------|----------|
+| S1 | 寫入權杖 | 環境變數 `BRIDGE_SDD_WRITE_TOKEN`（兩端同名）、標頭 `X-Bridge-Token`、backend 屬性 `console.bridge.sdd-write-token`；Bridge 未設⇒503、backend 未設⇒freeze 503＋execute 不送 `sdd` 並警告 `token_not_configured`（**同意 SA 暫行寫法**）、不符⇒403；短於 32 字元或佔位⇒兩端啟動失敗（ADR-016 §9） | §3.1.4 共通規則 2、附錄 D.2 |
+| S2 | 環境契約 | `SDD_STATE_DIR`（絕對路徑，**只給 CLI 子行程**）、`SDD_PROJECT`（CLI 與引擎子行程）；`spec_file` 靠 playbook 的 `workflow_path`＝TCS 檔案 realpath 進引擎；CLI argv／cwd／環境／逾時 20 秒（ADR-016 §3.5、§7.3、§8.3） | §3.1.4 共通規則 1、§3.1.6 |
+| S3 | CLI 動詞表 | 四個新動詞＋`spec-frozen` 擴充；rc 0／1／2／3／4／5；`playbook-ref`＝`run:<run_id>`（不是裸 run_id）；預設階段名 `Stage-<n>`；六種 `--reason` 組字（ADR-016 §4） | §3.1.4 共通規則 4、§3.1.6 |
+| S4 | 摘要鍵名與演算法 | 映射 `{<相對 root 的 POSIX 路徑>: "sha256:<64 位小寫 hex>"}`＋`approved_by`；演算法＝換行正規化後的 UTF-8 文字（不是原始 bytes）；與 adapter `SddSpec.digest` 逐位元相同（ADR-016 §4.3） | §1.10.2、§3.1.4 (d) |
+| S5 | 談判閘對映與 `failed` 後恢復 | 接受「Console 簽核匯入草稿＝談判 `agreed`」附四條件 C-1～C-4，誠實標註 R-9.20.3 不滿足；`failed`⇒`ESCALATION`，恢復只有人、留在 SDD session（ADR-016 §5） | §3.1.6 第 2 點、§3.1.7 第 1、4 點 |
+| S6 | 逆向 RTM 對放寬文法的 AC 聚合 | AT 文法 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`（正逆向同一份）；前兩段歸 AC；不符者**仍計入** `total_at`、列入 `unmapped_at_ids`、不進 AC 桶；`fully_covered` 在有 unmapped 時為 `false`（ADR-016 §8.5） | §1.10.3、§3.1.4 (f) |
+| S7 | `/sdd/compile` 摘要不符的例外型別 | `SpecDigestMismatchError`（`SpecNotFrozenError` 子類）⇒三個預檢點一律 **409** `spec_digest_changed`；其餘 `SpecNotFrozenError`⇒422 `spec_not_frozen`（**與 SA 暫行寫法不同**：凍結後內容已變更是 409，不是 422；ADR-016 §6.2、§6.3） | §3.1.4 (e)、§3.1.6 |
+| S8 | 最小侵入白名單 | AutoClaude 與 SDD LATEST 的兩張檔案表（ADR-016 §11）；不屬本契約 | — |
+
+#### 6.8.4 RTM 新列草案（給 QA 單線合併；層與 Phase 依 RTM §1.2、§1.3；摘要不超過 20 字；實作檔相對 `AgentConsole/`，`backend/…` 的套件前綴 `com/aisdlc/console/` 省略）
+
+| ID | 來源 | 摘要 | 層 | Phase | 預期實作檔 | 預期自動測試 |
+|----|------|------|----|-------|------------|--------------|
+| API-PRJ-07 | 契約 v1.5 §0.5 V12、§1.10.5·G-07·D-115-14·PRD §0.4 | 專案 SDD 綁定與唯一索引 | BE+FE | 2 | `backend/src/main/resources/db/migration/V12__project_sdd_binding.sql`、`ProjectEntity`、`dto/ProjectResponse`、`dto/ProjectDetailResponse`、`domain/model/project/NewProject`、`ImportService`（confirm 回填） | `SchemaMigrationIT`（V12 三欄與部分唯一索引）、`ProjectApiIT`（綁定欄回傳）、`ImportApiIT`（confirm 回填） |
+| API-PRJ-08 | 契約 v1.5 §1.10.7·ADR-016 §7.2·`PUT /api/v1/projects/{id}/sdd-binding` | 編輯專案的 FSM 專案 | BE+FE | 2 | `adapter/in/web/ProjectController`（或獨立 Controller）、`application/service/SddGovernanceService`、`frontend/lib/api/endpoints.ts`（`updateProjectSddBinding`）、「編輯 SDD 專案」對話框 | `SddBindingApiIT`（驗證、唯一性 409、角色、冪等、稽核）、前端單元（對話框驗證與錯誤顯示） |
+| API-SGN-06 | 契約 v1.5 §1.10.2·`POST /api/v1/projects/{id}/sdd/freeze`·PRD §0.4 | 核准凍結（人工閘） | FE+BE+Bridge | 2 | `adapter/in/web/ProjectController`（或獨立 Controller）、`application/service/SddGovernanceService`、`adapter/out/bridge/BridgeHttpAdapter`（`sddFreeze`）、`frontend/lib/api/endpoints.ts`、SDD 治理區元件 | `SddFreezeApiIT`（驗證順序六項、先檢查後寫入、對映表每列、角色）、`BridgeHttpAdapterTest`（`sddFreeze`）、`RbacIT` |
+| API-EXE-15 | 契約 v1.5 §1.10.5～§1.10.6、§3.4.1·G-01、G-06、G-08 | SDD 批次與 warnings | BE | 4 | `domain/service/ExecutionPlanner`、`domain/service/PlaybookBuilder`、`application/service/RunLauncher`、`SddGovernanceService`、`BridgeHttpAdapter`（`startRun` 的 `sdd`、權杖、逾時） | `ExecuteProjectApiIT`（SDD 批次、五種 `cause`、`sdd_frozen_digest_absent`、補償、resume／restore 的 409）、`PlaybookBuilderTest`、`ExecutionPlannerTest`（step_id 沿用） |
+| API-EXE-16 | 契約 v1.5 §1.10.3·G-05·`GET /api/v1/executions/{runId}/rtm` | 執行追溯覆蓋（諮詢） | FE+BE+Bridge | 4 | `adapter/in/web/ExecutionController`、`dto/ExecutionRtmResponse`、`BridgeHttpAdapter`（`getRunRtm`）、追溯覆蓋面板元件 | `ExecutionRtmApiIT`（有資料、`unmappedAtIds`、404、422、權限）、`BridgeHttpAdapterTest`（`getRunRtm`）、前端單元（面板顯示規則） |
+| API-ENG-02 | 契約 v1.5 §1.10.4·D-115-02·G-13 | 引擎狀態依專案帶 root | FE+BE+Bridge | 5 | `adapter/in/web/EnginesController`、`application/service/SddEngineQueryService`、`dto/SddFsmStateDto`（`phase`、`escalationHistory`、`escalationProvenance`、`fsmProject`、`recovery`）、`frontend/lib/api/queries.ts`、`frontend/lib/domain/sdd.ts` | `EnginesApiIT`（`projectId`、404、`sdd_root_rejected`、新欄位、舊 Bridge 相容、`project` 參數驗證）、`SddEngineQueryServiceTest` |
+| API-IMP-11 | 契約 v1.5 §3.3.2·G-08、S-03、S-04 | 路徑 A 欄位保真與選檔 | BE | 3 | `application/service/ImportParser`、`domain/model/imports/ParsedResult`、`ParseOptions`、`application/port/out/AgentBridge`（`SddTask`、`SddCompileResult`） | `ImportParserTest`（欄位表逐列、`at_unmapped`、`frozen_digest_absent`、`specFile`、409 不降級）、`ImportApiIT` |
+| API-IMP-12 | 契約 v1.5 §1.10.8、§3.3.2·D-115-14 | 匯入併入既有專案 | BE+FE | 3 | `application/service/ImportParser`、`application/service/ImportService`（confirm 併入與回填）、`ParseOptions`（`targetProjectId`）、匯入頁的專案選擇 | `ImportApiIT`（併入、排序、404、三種 409、不帶 target 的重複綁定 409）、`ImportParserTest` |
+| BR-27 | 契約 v1.5 §3.1.4 (d)·`POST /sdd/fsm/{project}:freeze`·D-115-03 | 核准凍結寫入動詞 | Bridge | 3 | `engine-bridge/app/routers/sdd.py`、`engine-bridge/app/models.py`、CLI 呼叫新模組 | `engine-bridge/tests/test_sdd_freeze.py`（檢查順序、409／422／403／503、`expected_digests`、摘要、稽核） |
+| BR-28 | 契約 v1.5 §3.1.4 (a)(b)(c)、§3.1.5·D-115-02、S-10、G-13 | FSM 讀取擴充與名稱規則 | Bridge | 5 | `engine-bridge/app/routers/sdd.py`、`fsm_names.py`（淨化鏡像）、`phase` 純函式新模組 | `engine-bridge/tests/test_sdd_fsm.py`（`root`、名稱規則、`escalation_history`、`escalation_provenance`、`fsm_project`、`recovery`）、`test_sdd_phase.py`（T-G） |
+| BR-29 | 契約 v1.5 §3.1.4 (e)·S-03、S-04、G-02、G-06 | 規格編譯擴充 | Bridge | 3 | `engine-bridge/app/routers/sdd.py`、`engine-bridge/app/models.py` | `engine-bridge/tests/test_sdd.py`（`spec_file`、`fsm_project`、`unmapped_at_ids`、`frozen_digest`、409 摘要不符） |
+| BR-30 | 契約 v1.5 §3.1.6·D-115-06 | SDD 批次預檢與注入 | Bridge | 4 | `engine-bridge/app/routers/autoclaude.py`、`engine-bridge/app/runner.py`、`engine-bridge/app/models.py` | `engine-bridge/tests/test_sdd_run.py`（預檢順序、三點摘要、`workflow_*` 注入、`workflow_path` 為檔） |
+| BR-31 | 契約 v1.5 §3.1.6·D-115-04、D-115-15 | 批次的 FSM 同步與回收 | Bridge | 4 | `engine-bridge/app/runner.py`、同步新模組 | `test_sdd_integration_parity.py`（F-9、F-10）、`test_sdd_run.py`（終態同步、回收點、resume／restore 重驗） |
+| BR-32 | 契約 v1.5 §3.1.4 (f)·G-05 | 追溯覆蓋讀取 | Bridge | 4 | `engine-bridge/app/routers/autoclaude.py` | `engine-bridge/tests/test_rtm.py`（200、404、422、`advisory`、`unmapped_at_ids`） |
+| BR-33 | 契約 v1.5 §3.1.4 共通規則 1、2·D-115-01、G-09 | 寫入權杖與環境剝除 | Bridge | 3 | `engine-bridge/app/settings.py`、`engine-bridge/app/runner.py`（`_child_env`）、`engine-bridge/app/security.py`（`validate_env`）、`engine-bridge/app/routers/sdd.py` | `test_sdd_integration_parity.py`（F-4、F-7、F-12） |
+| UI-SDD-01 | 契約 v1.5 §4.7.1·G-07、D-115-03、D-115-14 | 專案詳情 SDD 治理區 | FE | 2 | `frontend/components/domain/views/ProjectDetailView.tsx`、SDD 治理區新元件、`frontend/lib/domain/sdd.ts` | 前端單元（顯示規則、鈕啟用條件、對話框驗證、編輯綁定）、mock e2e |
+| UI-SDD-02 | 契約 v1.5 §4.7.2·G-05 | 追溯覆蓋（諮詢）面板 | FE | 4 | 執行頁批次詳情元件、面板新元件、`frontend/lib/domain/sdd.ts` | 前端單元（缺值「—」、`unmappedAtIds`、404 中性文字、諮詢標示） |
+| UI-SDD-03 | 契約 v1.5 §4.7.3、M-21·G-13 | SDD 卡階段進度與升級 | FE | 5 | `frontend/components/domain/monitor/SddEngineCard.tsx`、`frontend/lib/domain/sdd.ts` | 前端單元（階段字典、阻塞與觀測呈現、恢復指令與「未解升級」判斷式）、mock e2e |
+
+另需 QA 在合併時處理的**既有列**：`NFR-OBS-01`（E2E 驗證欄加 E2E-17 第 17 列的四源對拍）、`NFR-COMPAT-01`（驗證口徑由「零侵入」改為「最小侵入白名單」，不刪列不改號，依 D-115-05）、`BR-13`／`BR-14`（`GET /sdd/fsm*` 加 `root`、`phase`、`escalation_history`、`escalation_provenance`、`fsm_project`、`recovery`）、`API-ENG-01`（`SddFsmState` 新欄位）、`API-EXE-01`（201 新增 `warnings`）、`API-IMP-03`／`API-IMP-05`（`ParseOptions.targetProjectId`、confirm 併入）。RTM §1.2 的 `UI-` 前綴表要補一個 `SDD`（或改用 `UI-SCR-10～12`），由 QA 擇一。
+
+#### 6.8.5 SDD 框架體檢缺陷（S-xx）與契約條文的對照
+
+| S-xx | 處置 | 契約 |
+|------|------|------|
+| S-01（P1：FSM 進度沒有文件化的寫入者） | SDD 文件補寫入指令；Console 以 `:freeze` 與批次同步提供生產者 | §1.10.2、§3.1.4 (d)、§3.1.6 |
+| S-03 | AT 文法（D-115-16）、`unmapped_at_ids`、CLI rc 6 | §3.1.4 (e)、§3.3.2 |
+| S-04 | `spec_file` | §3.1.4 (e)、§3.3.2 |
+| S-05（＝G-02） | `fsm_project`、單檔採用、多檔 fail-closed、不再往上層找 | §3.1.4 (e)、§3.1.6 |
+| S-06（＝G-16） | 文件漂移由 SDD 側處理；本契約把談判與委派寫成 Bridge 的責任 | §3.1.6 |
+| S-09（＝G-17） | 框架目錄的測試殘檔；Console 改讀專案根後不再受污染 | §1.10.4 |
+| S-10 | 專案名淨化鏡像與輸出域白名單 | §3.1.4 (b) |
+| S-11 | 版本宣告判準；「文中出現該字樣卻解析不出版本」一律拒絕 | §3.1.4 (e) |
+| S-12 | `**scenario**:` 欄位優先 | §3.1.4 (e) |
+| S-02、S-07、S-08、S-13～S-19 | 不涉及契約 | — |
+
+#### 6.8.6 與 ADR-016 的對齊處置（v1.5 對齊修訂）
+
+**A. 逐項處置**（ADR-016 附錄 A 的 A-1～A-22；「已對齊」＝契約文字已依 ADR 改寫，與 ADR 一致）：
+
+| ADR | 項 | 契約處置 |
+|-----|----|----------|
+| A-1 | CLI rc 0／1／2／3／4／5；失敗也印單行 JSON | 已對齊：§3.1.4 共通規則 4 的對映表（rc 3⇒409 `fsm_state_conflict`、rc 4⇒422 `sdd_invalid_argument`、rc 5⇒404／422、rc 1⇒502 `sdd_cli_failed`、rc 2⇒500 `sdd_cli_usage`、逾時⇒504 `sdd_cli_timeout`）；SA 初稿的「rc=2⇒409」作廢 |
+| A-2 | CLI 旗標、摘要＝正規化文字、缺檔 rc 4 | 已對齊：§3.1.4 (d)、§1.10.2（`--digest`／`--root`／`--approver`／`--json`；16 MiB、UTF-8） |
+| A-3 | 引擎子行程只注入 `SDD_PROJECT`；CLI 環境剝除 `BRIDGE_*`／`SDD_*` | 已對齊：§3.1.4 共通規則 1、2、§3.1.6 |
+| A-4 | `sdd` 區塊加 `spec_file?`、`root?`、`approver?` | 已對齊：§3.1.6（`root` 由必填改**選填**，預設 `execution_path`） |
+| A-5 | `:freeze` 加 `expected_digests`、`docs` 含 TCS、回應帶 `spec_doc_digests` | 已對齊：§3.1.4 (d)、§1.10.2（Console 請求選填穿透 `expectedDigests`，靜默處 #2） |
+| A-6 | `/sdd/compile` 的請求／回應欄位、摘要不符＝409、無 `spec_at_dropped` | 已對齊：§3.1.4 (e)（SA 初稿「422 `spec_not_frozen`（內容已變更）」改 409） |
+| A-7 | 錯誤 reason 清單；**沒有** `sdd_not_bound` | 已對齊：附錄 B.5（移除 `sdd_not_bound`；新增 `sdd_binding_conflict`；Bridge 側新增 `sdd_block_invalid`、`sdd_invalid_argument`、`sdd_cli_usage`、`sdd_cli_timeout`，`sdd_cli_failed` 改 502） |
+| A-8 | 預檢表加 `TEST_CONTRACT_NEGOTIATED` 自癒與 `AUTOCLAUDE_DELEGATED` 回收點 | 已對齊：§3.1.6 預檢表與第 3 點 |
+| A-9 | 生命週期：預檢（唯讀）→鎖→FSM 寫入→`_materialize`→spawn；補償；終態在 `handle.lock` 之外 | 已對齊：§3.1.6 建立流程順序與第 4、5 點 |
+| A-10 | `GET /sdd/fsm/{project}` 多回 `escalation_provenance`、`fsm_project`，ESCALATION 時回 `recovery` | 已對齊：§3.1.4 (c)、§1.10.4（主控採納 SD 建議，`recovery` 的 `target` 規則見靜默處 #5） |
+| A-11 | 專案名：Bridge 鏡像 `fsm_component()`＋輸出域判準 | 已對齊：§3.1.4 (b)（取代 SA 初稿的 `FSM_PROJECT_NAME` regex 與 1～128 字元）；附錄 D.1 |
+| A-12 | Backend 綁定欄（含 `sdd_spec_file`）、Console 專案為錨、部分唯一索引、`targetProjectId`、`sdd_binding_conflict`、凍結請求無 `binding` | 已對齊：§0.5 V12（`sdd_project` 為 `VARCHAR(100)`，SA 初稿是 128）、§1.10.1、§1.10.2、§1.10.5、§1.10.8、§3.3.2；**`sddSpecFile` 改為絕對路徑**（SA 初稿是相對 `sddSpecDir`） |
+| A-13 | 權杖：backend 屬性、未設行為、<32 字元啟動失敗、`_child_env` 剝除 `SDD_*`、`validate_env`、audit 不記值、compose 預設空 | 已對齊：§3.1.4 共通規則 2、(g)、附錄 D.2 |
+| A-14 | 狀態目錄收斂（SDD 側 7 個站點） | 不涉及契約 |
+| A-15 | `_POST_FROZEN_STATES` 加 `AUTOCLAUDE_DELEGATED` | 不涉及契約（adapter 內部） |
+| A-16 | S-02 PowerShell matcher 與 AUTO_COMPACT 放行 | 不涉及契約 |
+| A-17 | 委派退出（D-115-15）：CANCELLED⇒`done`；`done`＝交還控制權；回收點 | 已對齊：§3.1.6 第 3、5 點、§3.1.7 第 1、10 點、E2E-17 第 20、21 列（SA 初稿的「取消不動 FSM」與 E2E 第 18 列作廢） |
+| A-18 | `playbook-ref`＝`run:<run_id>` | 已對齊：§3.1.6 `--reason` 表 |
+| A-19 | AT 文法與歸屬（D-115-16）；E 類 AT 命名；宣告位置只限 AC 映射列第三欄與 Gherkin 標頭 | 已對齊：§3.1.4 (e)、§3.3.2 第 10 點、E2E-17 夾具（SA 初稿的 `AT-[\w\-]+` 作廢） |
+| A-20 | 逆向 RTM：unmapped 計入 `total_at`、不進 AC 桶；`fully_covered` 在有 unmapped 時為 `false` | 已對齊：§1.10.3、§3.1.4 (f)、§4.7.2（RTM 回應新增 `unmappedAtIds`、`at.unmapped`） |
+| A-21 | 白名單 | 不涉及契約（D-115-05） |
+| A-22 | 預設階段名 `Stage-<n>`、六種 `--reason` 組字、輸入清理 | 已對齊：§1.10.2、§3.1.4 (d)、§3.1.6 `--reason` 表 |
+
+**B. ADR 沒寫、契約暫定而需確認的靜默處**（#1、#2、#3、#6、#14 已由主控以 D-115-18 裁決定案〔SA 交卷後〕；其餘請 SD 或 Dev 在落地時確認，與本表不同處以確認後的契約為準，並回寫本表）：
+
+| # | 靜默處 | 契約暫定 |
+|---|--------|----------|
+| 1 | 編輯 `sdd_project` 的 API（主控已確認，D-115-18 ①）：ADR-016 §7.2 說「可編輯」「編輯即改綁」「UI 與稽核屬 SA 契約」，但沒給端點；Phase 1+2 的專案更新端點不在本契約範圍 | 新增 `PUT /api/v1/projects/{id}/sdd-binding`（#48；OPERATOR 以上；`operationId=updateProjectSddBinding`；稽核 `project.sdd.bind`）；`OpenApiIT` 路徑 58→61、操作 67→70。替代案：改擴充 Phase 2 的 `PUT /projects/{id}`（不在本文件範圍） |
+| 2 | `expectedDigests` 在 Console 層（主控已確認，D-115-18 ⑤） | Console 請求選填穿透給 Bridge 的 `expected_digests`；v1.5 畫面不送（沒有顯示規格摘要的元件）。若要由畫面送，需另加「讀取現檔摘要」的端點（未排入本輪） |
+| 3 | 併入既有專案的規則（專案層 `signedOff` 不動：主控已確認，D-115-18 ②）：ADR-016 §7.2 把「排序與編號」交給本契約 | 新目標接在既有未刪目標之後、`dependsOn` 只在草稿內、專案欄位不動、**專案層 `signedOff` 不動**（須另以 Phase 2 專案 signoff；替代案是 confirm 同時把目標專案標為已簽核，但那會讓匯入記錄的 signoff 越權涵蓋人工建立的內容）、`executionPath` 在 `ParseOptions` 仍必填（帶目標專案的值）、目標欄位為 NULL 時以請求值為準、confirm 回 201 |
+| 4 | `:freeze` 的 `docs` 檢查歸屬與失敗形狀：ADR-016 §6.3 ① 把「已綁定 `sdd_spec_file` 時它必須在 `docs[]` 內」寫在 Bridge 檢查欄，但該資訊在 Console DB，Bridge 沒有；「含 TCS」的失敗形狀也沒寫 | 前者由 Backend 擋（400 `errors[0].field=docs`）；Bridge 只檢查「含 TCS」，失敗為 422 `sanitization_failed`＋`violations=[{field:"docs",rule:"missing_tcs"}]`（沿用既有 422 封包形狀；規則碼採 Dev-Bridge 實作的 `missing_tcs`，ADR 靜默） |
+| 5 | `recovery.target` 的決定規則：ADR-016 §5.3 只給模板，並說 `ESCALATION_FINAL` 的目標可能不同 | 委派失敗（`escalation_provenance.source=autoclaude_delegated_failed`）＝`IMPLEMENTATION`；Bridge 無法判定時整個 `recovery` 省略，Console 不猜 |
+| 6 | 路徑參數含 `/` 的原名：ADR-016 §7.4 要求原名與標準鍵等價，但 `%2F` 進路由前已被還原成 `/`，單一路徑段的 `{project}` 對它不匹配 | **主控裁決降級為已知邊界（D-115-18 ③）**：Bridge 的專案路徑只收不含 `/` 的名稱（淨化後的 FSM 鍵），含 `/` 的原名不可由 URL 定址；契約**不要求** `{project:path}`；影響與避開方式見 §3.1.7 第 11 點 |
+| 7 | `spec_file` 與 `spec_path` 的關係：ADR-016 §7.2 回填取既有欄位 `spec_path`，§8.3 另增 `spec_file` | `spec_path`＝絕對路徑（Console 填 `sddSpecFile`、父目錄填 `sddSpecDir`）；`spec_file`＝相對 `spec_dir` 的 POSIX 路徑 |
+| 8 | Bridge 錯誤封包的 `detail` 型別：ADR 的 `detail.pair`、`detail.current_state`、`detail.reason` 隱含 `detail` 是物件 | `fsm_state_conflict`、`spec_digest_changed` 的 `detail` 為物件；其餘 reason 的 `detail` 仍是字串；SA 初稿的頂層 `current_state`／`doc` 等欄位作廢（Dev-Bridge 目前另在封包頂層重複放同名欄位作過渡相容；Backend 的 `BridgeClient` 一律只讀 `detail`，不依賴頂層欄位） |
+| 9 | `warnings` 的形狀與 Console 轉譯：ADR 只說「201 的 `warnings`」「compile 回應 `warnings`」「adapter 出聲」 | Bridge 的 `warnings` 項為 `{code, detail}`；Console 轉入 execute 201 的 `warnings[]`（`sdd_frozen_digest_absent`）與解析結果 `warnings[]`（`state_dir_not_ignored`；`frozen_digest="absent"`⇒`frozen_digest_absent`） |
+| 10 | `approver` 的取值：ADR-016 C-1 說「匯入記錄的核准人」 | 範圍內 SDD 來源任務的 `signedOffBy`（承襲自匯入記錄；多值取排序最前者），為空取 JWT subject |
+| 11 | alert 碼：ADR 只命名 `SDD_SYNC_STATE_DRIFT` | 沿用 SA 的 `SDD_FSM_SYNC_FAILED` 表示其他非零失敗；捨棄 SA 初稿的 `SDD_FSM_SYNC_SKIPPED`、`SDD_FROZEN_DIGEST_MISSING`（後者改由 201 `warnings` 承擔） |
+| 12 | Console `GET /engines/sdd` 的 `project` 參數驗證：ADR 規定 Backend 不淨化 | 1～200 字元（專案名上限）、不含控制字元，其餘交 Bridge |
+| 13 | 錯誤的 `details` 鍵：ADR 只給 reason 名稱與 Bridge 的 `detail` | `sdd_binding_conflict`：`cause`（`already_bound_elsewhere`／`target_bound_differently`／`request_differs_from_target`）、`holderProjectId`、`sddProject`、`field`；`sdd_fsm_state_conflict` 另增 `runId`、`runStatus`、`cause`（`foreign_delegation`） |
+| 14 | `:resume`／`/restore` 的權杖：ADR-016 §9 只要求 `:freeze` 與含 `sdd` 的建立請求帶 `X-Bridge-Token`，但這兩個動作也會寫 FSM（`delegate-enter` 重進） | **主控已裁決擴大（D-115-18 ④）**：SDD run 的 `:resume` 與 `/restore` 也須帶權杖，ADR §9 的兩個呼叫由此成為四個（缺／錯同 503／403），見 §3.1.4 共通規則 2、§1.2.4～§1.2.6、§1.2.10、§3.1.6 第 7 點；ADR 本文待 SD 同步。仍屬 §3.1.7 第 8 點的誠實劃界（Bridge 本身無認證，Architecture §12 L-6） |
+
+**C. 延後（只登記，本輪不做；沿用 ADR-016 §14.1）**：Console「退回修改」（須改 `_HAPPY_PATH` 與 TLA）、Console 內的 FSM init／gate／`resume-from-escalation` 恢復動詞（再開症狀：使用者回報「ESCALATION 後要在終端機操作太難」）、`negotiate-exit underspecified` 的畫面、「解除綁定」端點（改綁已可由 §1.10.7 達成）、FSM 狀態檔的跨行程鎖、R-9.20.3 的 oracle 獨立性。
+
 ---
 
 ## 附錄 A　狀態機速查（本期涉及的部分）
@@ -3090,8 +3982,47 @@ HTTP 狀態與端點見各小節。**404 沿用 Phase 2：`reason` 省略，只�
 | `bridge_error` | false | Bridge 回其他非 2xx，或回應本文不是預期的形狀 |
 | `fsm_not_found` | true | 帶了 `project`，找不到該專案的 FSM 狀態檔 |
 | `fsm_state_unreadable` | true | 帶了 `project`，該狀態檔讀不動（YAML 壞掉、不是 UTF-8、缺 `fsm_state` 根節點、巢狀過深） |
+| `sdd_root_rejected` | true | （v1.5）帶了 `projectId`，而 Bridge 對該專案的 `root` 回 422 `sanitization_failed`（路徑不在允許的根目錄內、或已不存在）；`fsm=null`、`projects=[]`，`version` 保留（§1.10.4） |
 
 `fsm_not_found`、`sdd_unavailable`、`fsm_state_unreadable` 同時也是 Bridge 自己錯誤封包的 `reason`（§3.1.3）；console-api 把它們轉成上表欄位的值，而不是轉成 HTTP 錯誤。
+
+### B.5 v1.5 新增（整合輪 115；已與 ADR-016 對齊）
+
+**console-api 的 `ApiError.reason`**（英文識別字；§0.3 第 8 點；前後端各一份常數、逐字）：
+
+| HTTP | reason | `details` 鍵 | 端點與觸發 |
+|------|--------|--------------|------------|
+| 409 | `sdd_fsm_state_conflict` | `currentState`、`expectedState?`（字串或陣列）、`runId?`、`runStatus?`、`cause?`（`foreign_delegation`） | freeze：`current_state` 不是 `HUMAN_PENDING`；execute／resume／restore（SDD run）：預檢表判 409（§3.1.6）——`current_state` 不在可進入的集合，或回收點判活躍／外來委派（`runId`、`runStatus`、`cause`） |
+| 409 | `sdd_fsm_not_found` | `sddProject` | freeze／execute：有效 FSM 專案沒有狀態檔（§1.10.2、§3.1.6） |
+| 409 | `sdd_spec_digest_changed` | `pair`（`expected_vs_file`｜`frozen_vs_file`｜`import_vs_file`）、`doc`、`expectedDigest?`、`frozenDigest?`、`importDigest?`、`currentDigest`（沒有的鍵省略） | freeze 帶 `expectedDigests`（`expected_vs_file`）；execute／resume／restore（SDD run）的預檢（`frozen_vs_file`、`import_vs_file`；§3.1.6）。路徑 A 的內容不符走 422 `SDD 規格檢查未通過`，不是這個 reason（§3.3.2 第 8 點） |
+| 409 | `sdd_binding_conflict` | `cause`（`already_bound_elsewhere`｜`target_bound_differently`｜`request_differs_from_target`）、`sddProject?`、`holderProjectId?`、`field?` | freeze 的綁定唯一性（第 5 項）、`PUT /projects/{id}/sdd-binding`、路徑 A 匯入帶或不帶 `targetProjectId` 的 parse／confirm（§1.10.5、§1.10.7、§1.10.8） |
+| 503 | `sdd_write_disabled` | — | freeze 或 execute（SDD 批次）：backend 或 Bridge 沒有設定寫入權杖；resume／restore（SDD run，D-115-18）：Bridge 沒有設定寫入權杖 |
+| 404 | `rtm_not_found` | `runId` | `GET /executions/{runId}/rtm`：批次存在但沒有追溯報告（**404 的 `reason` 省略慣例的唯一例外**，§0.3 第 8 點） |
+
+（SA 初稿的 `sdd_not_bound` **已移除**：D-115-14 之後不存在「未綁定」狀態，核准凍結的請求也沒有 `binding` 欄。）
+
+**沿用既有常數的 SDD 情形**（不新增常數）：`SDD 規格檢查未通過`（`details={bridgeReason, detail}`；execute 的預檢第 3 項與路徑 A 同一個轉譯；`bridgeReason` 新增可能值 `spec_digest_changed`）、`引擎拒絕此請求`（`details={bridgeReason, violations[]}`；`:freeze` 的 `root`／`docs[i]`／`approver`／`reason` 不合法、`rtm_unreadable`、`sdd_block_invalid`）、`引擎橋接服務錯誤`（`details={bridgeStatus, bridgeReason}`；Bridge 403 `sdd_write_forbidden`、500 `sdd_cli_usage`、502 `sdd_cli_failed`、504 `sdd_cli_timeout`）。
+
+**Bridge 自己的錯誤封包 `reason`**（v1.5 新增；形狀 `{"code","reason",…}`，不進上表；ADR-016 §4.1、§6.3、§9、§10）：
+
+| HTTP | reason | 附加欄位 | 觸發 |
+|------|--------|----------|------|
+| 503 | `sdd_write_disabled` | `detail`（字串） | Bridge 沒設寫入權杖（§3.1.4 共通規則 2）；適用四個呼叫：`:freeze`、帶 `sdd` 的建立、SDD run 的 `:resume`、`/restore`（D-115-18） |
+| 403 | `sdd_write_forbidden` | — | 權杖缺漏或不符（缺與錯同一個 reason）；同上四個呼叫 |
+| 409 | `fsm_state_conflict` | `detail` 物件：`current_state`、`expected_state?`、`run_id?`、`run_status?`、`reason?`（`foreign_delegation`） | `:freeze` 前置不符；批次預檢表與回收點；CLI rc 3；`resume`／`restore` 的 FSM 檢查 |
+| 409 | `spec_digest_changed` | `detail` 物件：`pair`、`doc`、`expected_digest?`、`frozen_digest?`、`import_digest?`、`current_digest` | `:freeze` 的 `expected_digests`、`/sdd/compile`、批次預檢第 3、4 項、`resume`／`restore` |
+| 404 | `fsm_not_found` | `project` | 狀態檔不存在（`GET /sdd/fsm/{project}`、`:freeze`、CLI rc 5 `state_not_found`） |
+| 422 | `fsm_state_unreadable` | `detail` | 狀態檔讀不動（YAML 壞掉、CLI rc 5 `state_unreadable`） |
+| 422 | `sdd_invalid_argument` | `detail`（字串） | `approver`／`reason` 值域不合、CLI rc 4 |
+| 422 | `sdd_block_invalid` | `detail`／`violations[]` | `sdd` 區塊結構不合：`spec_dir` 不在 `root` 之下、任務缺 `spec_digest`（Backend bug） |
+| 422 | `spec_not_frozen`／`spec_tainted`／`spec_format_version_unsupported`／`spec_not_found`／`spec_ambiguous`（既有；v1.5 擴充情形） | `detail` | `spec_not_frozen` 新增：狀態檔不唯一、`fsm_project` 找不到、規格檔不在凍結清單。**凍結後內容已變更不再是 422**（改 409 `spec_digest_changed`） |
+| 500 | `sdd_cli_usage` | `detail` | CLI rc 2（Bridge 自己的 bug，測試必須零次出現） |
+| 502 | `sdd_cli_failed` | `detail`（ASCII，≤ 200 字） | CLI rc 1、無法啟動 |
+| 504 | `sdd_cli_timeout` | `detail` | CLI 超過 20 秒 |
+| 404 | `rtm_not_found` | `run_id` | `GET /autoclaude/runs/{id}/rtm` 沒有報告 |
+| 422 | `rtm_unreadable` | `detail` | 報告檔壞掉 |
+
+**回應本文的警告碼與 alert 碼**（不是錯誤）：`ExecutionRunResponse.warnings[].code`＝`sdd_governance_inactive`（`cause` 為 `not_bound`、`token_not_configured`、`mixed_scope`、`spec_mismatch`、`duplicate_step_id`，§1.10.5）、`sdd_frozen_digest_absent`（無 `cause`）；`ParseWarning.code`＝`at_unmapped`、`frozen_digest_absent`、`state_dir_not_ignored`（§3.3.2）；Bridge run alert `code`＝`SDD_SYNC_STATE_DRIFT`（warning）、`SDD_FSM_SYNC_FAILED`（error）（§3.1.6）。
 
 ---
 ## 附錄 C　設定鍵目錄（50 鍵；`ConfigCatalog` 與 V5 `validation_rule` 的唯一真相源）
@@ -3216,6 +4147,13 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | 引擎狀態輪詢間隔 | 30 秒（前端；分頁不可見時暫停） | §1.7.1、§4.3 M-20（v1.4，D-16） |
 | FSM 專案名白名單 | `^[A-Za-z0-9._-]{1,128}$`（Bridge 與 console-api 同一條） | §1.7.1、§3.1.3（v1.4，D-16） |
 | FSM `decision_trace`／`human_pending.items` 回傳筆數 | 各取尾 5 筆 | §3.1.3（v1.4，D-16） |
+| FSM 專案名規則（v1.5；**取代上方「FSM 專案名白名單」那一列的 regex**） | 進入 Bridge 的專案名一律先過淨化鏡像 `fsm_component()`（NFC→strip→把 `< > : " ? * \ /`、ASCII 豎線與控制字元換成 `_`→截 80→`rstrip(" .")`）；讀取白名單＝淨化輸出域（非空、NFC、≤ 80、不是 `.`／`..`、無禁用字元與控制字元、無前後空白、不以 `.` 結尾）。Console 的 `project` 查詢參數只驗 1～200 字元與無控制字元 | §3.1.4 (b)、§1.10.4（v1.5，S-10；ADR-016 §7.4） |
+| `escalation_history` 回傳筆數（v1.5） | 取尾 5 筆 | §3.1.4 (c) |
+| SDD 寫入相關的逾時（v1.5） | `:freeze` 讀取 40 秒；帶 `sdd` 的 `POST /autoclaude/runs` 讀取 90 秒（一般批次維持 30 秒）；追溯覆蓋讀取 3 秒；**FSM CLI 子行程單次 20 秒**（逾時回 504 `sdd_cli_timeout`；ADR-016 §3.5） | §3.1、§3.1.4 共通規則 1 |
+| `:freeze` 欄位上限（v1.5） | `docs` 1～20 項；`stage` ≤ 64 字元；`approver` 1～100 字元且不含 `;` 與控制字元；`reason` 1～500 字元且無控制字元（含換行）；單檔 ≤ 16 MiB、須為 UTF-8；預設階段名 `Stage-<n>` | §1.10.2、§3.1.4 (d) |
+| `phase` 的主路徑階段數（v1.5） | 8（`order` 為 1～8）；非主路徑的 `order` 為 0 | §3.1.5 |
+| 專案綁定欄位長度（v1.5） | `sdd_project` ≤ 100；`sdd_spec_dir`、`sdd_spec_file` ≤ 500；`ParseOptions.sddProject` 與 `GET /engines/sdd?project=` ≤ 200（專案名上限；值是「有效值」，可以是原名） | §0.5 V12、§1.10.4 |
+| 寫入權杖（v1.5） | 環境變數 `BRIDGE_SDD_WRITE_TOKEN`；≥ 32 字元；不得是 `<…>` 佔位；標頭 `X-Bridge-Token` | §3.1.4 共通規則 2；附錄 D.2 |
 | Bridge 健康探測逾時 | 連線 2 秒、讀取 **8 秒**（v1.3 以前 3 秒）；每 30 秒一次 | §3.1、§3.1.1（v1.4，D-17） |
 | refresh token 撤銷名單 | 鍵＝`jti`；存活到該 token 的 `exp`；降級記憶體名單每 10 分鐘掃描 | §1.9.2（v1.4，D-19） |
 | 命令黑名單字元（NFR-SEC-03 第 1、2 層） | `` ! ` > < ~ $ & ; ``（8 個）＋換行、回車、NUL（Bridge 另加） | SSOT：`AutoClaude/autoclaude/utils/shell_deny_chars.py` 的 `BASE_DENY_CHARS`；後端複製並於檔頭註明（W4 QA 腳本比對兩端字元集一致） |
@@ -3236,6 +4174,7 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | `console.sse.queue-size` | `1000` | |
 | `console.import.max-prompt-chars` | `120000` | |
 | `console.execution.mock-env` | （空；**僅 e2e／test profile**） | 附加到 Bridge 請求 `env` 的 `MOCK_CLAUDE_*` |
+| `console.bridge.sdd-write-token`（環境變數 `BRIDGE_SDD_WRITE_TOKEN`；`application.yml` 的 `console.bridge` 段，值 `${BRIDGE_SDD_WRITE_TOKEN:}`；`BridgeProperties.sddWriteToken`） | （空＝SDD 寫入面停用；**repo 內不放真值**，`.env.example` 只放 `<YOUR_BRIDGE_SDD_WRITE_TOKEN_MIN_32_CHARS>`） | v1.5（ADR-016 §9）：核准凍結與帶 `sdd` 的批次所需的寫入權杖，與 Bridge 同名同值；**有設但短於 32 字元或仍是 `<…>` 佔位⇒backend 啟動即失敗**（不靜默退回停用）；未設時 freeze 回 503 `sdd_write_disabled`、execute 不送 `sdd` 並以 `token_not_configured` 警告（§1.10.5）。只附在 `sddFreeze` 與帶 `sdd` 的 `startRun`，**不得寫進日誌、錯誤封包或 `details`** |
 | `console.retention.soft-delete-days` | `30` | 軟刪除專案可復原的天數（≥ 1；v1.2，§1.6.5） |
 | `console.retention.purge-enabled` | **`false`** | 是否註冊每日清除排程；預設關閉（實體刪除不可逆；v1.2，§1.6.5、ADR-001 D19） |
 | `console.security.refresh-revocation.store` | `auto` | refresh token 撤銷名單的儲存（v1.4，§1.9.2）：`auto`＝`spring.data.redis.host` 有值才用 Redis（Redis 不在線時降級為記憶體並記 WARN），否則純記憶體；`redis`＝只用 Redis（降級照舊）；`memory`＝只用記憶體（本機 e2e、單元測試） |
@@ -3344,3 +4283,14 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | API-SGN-05（v1.4，D-18；QA 追加 RTM 列：待審批清單；編號避開既有 `API-SGN-01～04`） | §1.8.1、§4.5 G-10 | `SignoffsPendingApiIT`（四種各一＋干擾列、`limit`、排序、VIEWER 200／未認證 401、**`counts.total` 等於 `pendingSignoffs` 的不變量**）；前端單元（G-10 的連結與「僅列出最早的 N 筆」）；**E2E-16 第 3～6 列** |
 | API-AUTH-03（v1.4，D-19；QA 追加 RTM 列：登出與 refresh token 撤銷名單） | §1.9.1、§1.9.2、§2.8 第 10 點 | `AuthApiIT`（換新後舊 token 401、登出後 401、垃圾 token 仍 204、併發換新只一個成功、Redis 替身降級與恢復各記一次日誌、`/actuator/health` 不受影響）；前端單元（`logout()` 先呼叫端點、失敗不阻擋）；**E2E-16 第 7～10 列** |
 | INF-SVC-07（Redis 服務；v1.4 起 backend 真的使用它） | §1.9.2、ADR-001 D16／D23 | E2E-16 第 10 列（Docker 全棧：停 Redis 後撤銷仍有效、backend 維持 healthy；此前只驗容器健康，完整性審查 I-06） |
+| API-PRJ-07（v1.5；QA 追加 RTM 列：專案 SDD 綁定） | §0.5 V12、§1.10.5 | `SchemaMigrationIT`（V12 三欄與部分唯一索引）；`ProjectApiIT`（綁定欄回傳）；`ImportApiIT`（confirm 回填）；**E2E-17 第 5、8 列** |
+| API-PRJ-08（v1.5；QA 追加 RTM 列：編輯專案的 FSM 專案） | §1.10.7 | `SddBindingApiIT`（驗證、唯一性 409、角色、冪等、稽核）；前端單元（編輯對話框）；**E2E-17 第 7 列** |
+| API-SGN-06（v1.5；QA 追加 RTM 列：核准凍結） | §1.10.2、§3.1.4 (d) | `SddFreezeApiIT`（驗證順序六項、先檢查後寫入、對映表每列、角色）；`BridgeHttpAdapterTest`；Bridge `test_sdd_freeze.py`；**E2E-17 第 1～7 列** |
+| API-EXE-15（v1.5；QA 追加 RTM 列：SDD 批次） | §1.10.5～§1.10.6、§3.1.6、§3.4.1 | `ExecuteProjectApiIT`；`PlaybookBuilderTest`；`ExecutionPlannerTest`；Bridge `test_sdd_run.py`；**E2E-17 第 15、18～22、25 列** |
+| API-EXE-16（v1.5；QA 追加 RTM 列：執行追溯覆蓋） | §1.10.3、§3.1.4 (f) | `ExecutionRtmApiIT`；Bridge `test_rtm.py`；前端單元（面板顯示規則）；**E2E-17 第 16、19 列** |
+| API-ENG-02（v1.5；QA 追加 RTM 列：引擎狀態依專案帶 root） | §1.10.4、§3.1.4 (a)(b)(c) | `EnginesApiIT`；`SddEngineQueryServiceTest`；**E2E-17 第 13、14、19 列** |
+| API-IMP-11（v1.5；QA 追加 RTM 列：路徑 A 欄位保真與選檔） | §3.3.2、§3.1.4 (e) | `ImportParserTest`；Bridge `test_sdd.py`；**E2E-17 第 8、10～12 列** |
+| API-IMP-12（v1.5；QA 追加 RTM 列：匯入併入既有專案） | §1.10.8、§3.3.2 | `ImportApiIT`（併入、排序、404、三種 409、不帶 target 的重複綁定 409）；`ImportParserTest`；**E2E-17 第 8、9 列** |
+| BR-27～BR-33（v1.5；QA 追加 RTM 列：Bridge 的 SDD 寫入面、擴充與同步） | §3.1.4～§3.1.6 | Bridge pytest（`test_sdd_freeze.py`、`test_sdd_fsm.py`、`test_sdd_phase.py`、`test_sdd.py`、`test_sdd_run.py`、`test_rtm.py`、`test_sdd_integration_parity.py` 的 F-1～F-12）；**E2E-17** |
+| UI-SDD-01～03（v1.5；QA 追加 RTM 列：SDD 治理介面） | §4.7.1～§4.7.3、§4.3 M-21 | 前端單元（`lib/domain/sdd.ts` 的顯示規則）；mock e2e；**E2E-17 第 5、19 列的畫面斷言** |
+| NFR-OBS-01（v1.5 補強） | §1.10、§5 E2E-17 第 17 列 | 四源對拍表（FSM 檔 ↔ Bridge ↔ Console API ↔ PG） |

@@ -430,7 +430,7 @@ def sdd_fsm_line(env: Mapping[str, str] | None = None,
         return "SDD FSM：休眠（SDD_ACTIVE_VERSION 未設）"
     ver = raw[1:] if raw[:1] in ("v", "V") else raw
     if not re.fullmatch(r"\d+\.\d+", ver):
-        return (f"SDD FSM：SDD_ACTIVE_VERSION={raw!r} 格式非法（須形如 0.19）"
+        return (f"SDD FSM：SDD_ACTIVE_VERSION={raw!r} 格式非法（須形如 X.YY）"
                 "⇒ router 放行、未套用守門")
     sdd = (repo_root or Path(__file__).resolve().parents[2]) / "AISDLC_SDD"
     path = (sdd / f"AISDLC_SDD_v{ver}" / "build" / "reports" / "fsm"
