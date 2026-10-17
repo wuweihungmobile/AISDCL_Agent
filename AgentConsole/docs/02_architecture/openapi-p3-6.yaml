@@ -4536,7 +4536,8 @@ components:
           description: |
             要凍結並計摘要的規格文件，每項是**相對專案 `executionPath`** 的 POSIX 路徑（不得為絕對路徑、不得含 `..`）；須含至少一份 TCS
             （檔名符合 `TEST-CONTRACT-SPEC-*` 或 `TCS-*`，由 Bridge 判定）。省略＝`[sddSpecFile 換算成相對 executionPath 的路徑]`（專案已有 `sddSpecFile` 時）；
-            省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下、或專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（`errors[0].field=docs`）
+            省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下、或專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（`errors[0].field=docs`）；
+            單一項不合（絕對路徑、含 `..` 等）→ 400（`errors[0].field=docs[<索引>]`，例 `docs[0]`；v1.5 訂正，DEF-AC-028）
           items:
             type: string
             minLength: 1

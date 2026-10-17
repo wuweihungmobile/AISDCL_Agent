@@ -236,13 +236,43 @@ T-G 規格輪廓（供 QA 寫 TCS；Gherkin 的 Then 必含引號字面值，使
 | D-115-17 | 各棒交卷的「偏離 ADR」由主控逐條裁決，結果記在 §7 表（不另開文件）；偏離若屬「ADR 字面比實況嚴而實況有既有測試／生產端在用」一律採實況並回寫 ADR 附錄 | §7 |
 | D-115-13 | 立案（缺陷帳本 `docs/06_quality/AutoSDD_Defect_Log.md`，`DEF-200-534` 起；同輪 fixed）：G-01、G-02（＝S-05）、G-06、G-16（＝S-06）、G-17（＝S-09）、S-01、S-02（LATEST 半）、S-03、S-04。其餘 S-xx P3／P4 不入帳，以本檔 §6 與審查證據檔為載體 | 收尾 |
 
+## §9 四方審查閉環、缺口歸格與休眠重評（本節為本檔末節之前的結案帳；§8 零退化矩陣在其下）
+
+### 9.1 四方審查表（範本〈🏁〉〈審查閉環的終止〉：PASS＝無 P≤2；一審全查、二審驗修復）
+
+| 角色 | 審查者 | 結論 | 日期 | 範圍 | 處置 | 證據 |
+|---|---|---|---|---|---|---|
+| Architect | Sonnet，唯讀 | 問題 1＝部分；缺口 G-01～G-17（P1 三、P2 九、P3 四、P4 一） | 2026-10-17 | 三子專案整合面讀碼、F-SBR-001 與 improving_95 史料 | 全數裁決於 §6；P1／P2 皆同輪修（§7 各棒） | 本檔 §1～§5 |
+| SDD 審查員（問題 2） | Sonnet，唯讀＋跑閘門 | 閘門全綠；S-01～S-20（P1 一、P2 四、P3 十一、P4 四） | 2026-10-17 | LATEST v0.30 全樹、十支 lint、ci-gate、hook 活性、平台掃描 | P1／P2 同輪修（`302aefd9`／`7197c3ca`）；P3 除 S-17 外同輪修；P4 登記（D-115-09） | 證據檔 §1 補註指路；本檔 §6 D-115-09 |
+| SA／SD 鏡 | Sonnet（SA 二次對齊 ADR、SD 真 FSM 乾跑） | 契約 v1.5 與 ADR-XPLAT-016 逐條對齊（附錄 A 22 項、附錄 B S1～S8） | 2026-10-17 | 契約↔ADR↔實作 | 差異由主控裁決 D-115-14～19 | ADR 附錄 A／B／C；契約 §6.8 |
+| QA 鏡（W5） | Sonnet，獨立（未參與實作與 dogfood） | **VERDICT: PASS**（無 P≤2；P3 六：Q-01／02／03／04／09／12、P4 六：Q-05～08／10／11，皆文字面） | 2026-10-18 | 全變更集 `38e46582..ae31e882`：閘門全部親跑、dogfood 證據複核、E2E-17 真後端 25／26 列、白名單機械核對、RTM 單線合併 | P3 全數當輪改字（Q-01 本節與 §7、Q-03／Q-12 ADR 附錄 C、Q-02／04／05／07／09 契約、Q-08／11 證據檔 §1 補註）；P4 登記於證據檔 §4（DEF-AC-030～034） | 證據檔 §2～§8 |
+| 主控 | Fable 5.1 | 提案者，不投票 | — | — | 逐棒親驗（§7）、收尾單人窗口（NTFS 站點表、下限重釘、表②、帳本、文案） | §7、§8 |
+
+### 9.2 缺口歸格（只准三分類；無「候選」）
+
+| 類 | 條目 |
+|---|---|
+| 立案且同輪 fixed（帳本） | DEF-200-534～541（S-01／S-02 LATEST 半／S-03／S-04／G-02＝S-05／G-06／G-16＝S-06／G-17＝S-09）、DEF-200-542（G-01）；AgentConsole 面 DEF-AC-015～034 住證據檔 §1.9／§4（P3／P4，034 已修） |
+| 同輪修、不入帳（P3／P4 文字或小修） | G-03／G-04／G-05／G-07／G-08／G-09／G-10／G-11／G-12／G-13（功能補足，以 RTM 新列追溯）；S-07／S-08／S-10／S-11／S-12／S-13／S-14／S-15／S-16／S-18／S-19 |
+| 延後（各附再開症狀） | §5.2 延後清單十一項（Console 內由 PRD 產出凍結規格、退回修改邊、一鍵 init／gate、IMPLEMENTATION 之後閘門動詞、待審批清單納入 SDD、CLI-only 委派同步、G-14 跨 run RTM 趨勢、G-15 路徑 A 探測、治理事件進 Console、`BoundedGoalFreezeGate` 接入、DEF-AC-012）；S-17 七支 lint `--help`（症狀：有人照 `--help` 試用得 rc=1）；S-02 根層 router matcher（症狀見 D-115-09）；上游 `sanitize_component` 截 80 字後不冪等（症狀：名稱長於 80 字且第 80 字落在空白前的專案出現重複狀態檔） |
+| 退役（附依據） | §5.2 退役三項（「零侵入」字面→最小侵入白名單；ADR-001 對 Bridge 另讀 RTM 的否決；架構評估紅線 6） |
+
+### 9.3 休眠重評（範本〈🏁〉休眠判準三條）
+1. 驅動本輪的規格＝掌舵者 T1 原文＋本檔 §2 判準 C1～C6＋ADR-XPLAT-016；C1～C6 皆以當回合證據成立（證據檔 §1.8，W5 第二眼 PASS）；§9.2 無未分類列 ✓
+2. `python tools/check_defect_log_crossref.py --unresolved-count`：主控親跑「未結列數＝0」（§8 逐字）✓
+3. 本檔無「下一輪候選」：未做項全部落在 §9.2 的延後（附症狀）或退役；W5 的 P4 住證據檔 §4 並附再開症狀 ✓
+
+⇒ **軌道① 系列自本檔起重新休眠**（範圍結案；北極星不因此視為達成）。對掌舵者兩問的答案：問題 2（框架體檢）＝已完成、可從提示詞拿掉；問題 1（SDD 融入整個系統）＝**是**——範圍限 Windows、haiku、單機、Unit 類 AT（證據檔 §1.8／§1.10 的但書與 §8 未涵蓋），可從提示詞拿掉；再開只由範本〈🏁〉T1～T4 事件驅動。
+
 ## §7 各棒交卷與主控親驗（W2 起逐棒填；「他包回報」與「主控親跑」分開寫）
 
 | 棒 | commit | 主控親跑（當回合逐字） | 接受的偏離（D-115-17） | 未做／待整合 |
 |---|---|---|---|---|
 | Dev-AutoClaude | `7197c3ca`（16 檔，+1975／−96） | 聚焦七檔 `377 passed`（`-n 0`）；全套 `5875 passed, 7 skipped in 57.20s`（`-n 8 --dist loadgroup`）；`lint-imports` `Contracts: 9 kept, 0 broken.`；`ruff check` 16 檔 `All checks passed!`；`check_loc_budget.py --json` rc=0（adapter 計價 343/400、`_sdd_frozen_gate` 123/400） | D1 版本／場景宣告收 HTML 註解形、表格列形與 BOM 行首；D2 掃描略過圍欄程式碼區塊；D3 `sdd.at_unmapped` 事件多帶 `reasons`；D4 `ac_id_of_at()` 一家；D5 壞 YAML 一律 `SpecNotFrozenError`、`spec_dir` 為檔又給 `spec_file` ⇒ `ValueError`；D6 `tests/conftest.py` autouse 隔離 `SDD_PROJECT` | N1 專案鍵 NFC／NFD 未正規化（Bridge 先淨化）；N2 官方模板未讀進 AutoClaude 測試（一次性探針：模板本體編譯 unmapped＝`AT-001-1-1`／`AT-001-1-2`、rc 6），交 QA；N3 macOS／Linux／Docker 未實跑；N4 §15 對拍屬 Bridge 側。他包回報：突變鏡 23 個修法逐一拿掉皆 KILLED |
 | Dev-SDD-RT | `302aefd9`（與 DOC 同 commit） | `ci-gate.ps1` rc=0：`AISDLC_SDD_v0.01:1478 AISDLC_SDD_v0.30:2140 scripts/tests:383`、v0.30 `2140 passed, 6 skipped`、arch_fitness `fail=0 warn=3`；`framework_status_snapshot.py --check` rc=0；九支 lint rc=0；v0.01 與中間版 `git status` 零筆、`transition_rules.py` 與 `formal/` diff 空；`git diff --check` rc=0 | `--digest` 需 ≥1 `--doc`；`--root` 須絕對且存在、沒搭 `--digest` 為 rc 2；摘要鍵取 `resolve()` 後相對 root 的 POSIX 路徑（Windows 為磁碟實際大小寫）；`--digest` 無 `--json` 時沿用人讀輸出；兩支 hook 各持 `_resolve_ledger_dir()`；沙盒另導向 abort／test-analysis；`test_e2e_smoke` hook 子行程帶 `SDD_STATE_DIR` | 〔未驗〕`claude --debug hooks` 對 PowerShell matcher 正負兩面、Docker 容器級、mac／linux；〔未跑〕chaos_runner 100 輪；下限餘裕為推算（mac≈2135 最緊）；他包回報：突變 17/17 detected、chaos 34 支通過、`build/reports` 497 檔 sha256 零差異。收尾單人窗口：`skip_group_policy.py` untagged 表、`sync_onboarding_baselines.py --write --with-slow`、`fsm_names.py` 登 NTFS 站點表 |
-| Dev-SDD-DOC | `302aefd9`（與 RT 同 commit） | 同上列（RT＋DOC 合併後的工作樹一次親跑） |
+| Dev-SDD-DOC | `302aefd9`（與 RT 同 commit） | 同上列（RT＋DOC 合併後的工作樹一次親跑） | 見上一列（TCS 模板 E 類改寫、S-08 範圍放大、README 去版號範圍放大、ADR §6.3① 由 Backend 擋、`--retry-reset` 無對應動詞只註明） | 同族殘留見 EVOLUTION_LOG〈同族殘留〉 |
+| Dev-Bridge（T-G 搬入） | `ae31e882` | ruff 根視角 rc=0；聚焦六檔 `324 passed, 2 skipped`；`git diff --check` rc=0 | 搬入只改檔名／import／型別／docstring／對映表唯讀包裝；順手修壞檔 `current_state` 非字串 500→200 | 他包回報：全套 996 通過／24 略過、煙霧 phase 非 null；雲端 agentconsole-ci 對 `ae31e882` 紅＝`test_fsm_phase` 參數化 id 跨 xdist worker 不一致（收尾修） |
+| W5 QA（獨立鏡） | 見 §9 | 主控親驗：`npm run lint` rc=0、`tsc` rc=0、RTM Grep 現查 392 列全 ✅、baseline sites rc=0、carriers rc=0、diff --check rc=0 | — | VERDICT PASS（無 P≤2）；P3 六／P4 六皆文字面（證據檔 §4）；未涵蓋：Docker 全棧、POSIX／macOS、真 AI、S-02 活體 |
 | Dev-Bridge | `2f643ae2`（36 檔）＋修復 `e19814b4` | `ruff check` 兩視角 rc=0；`python -m pytest -q`（根 `.venv` 直譯器、序列）`898 passed, 25 skipped`；根層 `TestDirEntryPrimitivesAreAccountedFor` OK；`docker build`（context＝monorepo 根）rc=0；修復後 `test_spec_digest`＋`test_sdd_freeze` 本機 77 支、Linux 映像內 78 支通過 | D-115-19 七項（尾端判準不動點、approver 拒前後空白、原名反查不實作、頂層與 detail 並存、`sdd_governance_inactive` 由 Backend 出、resume／restore CLI 呼叫在 `handle.lock` 內、上游 sanitize 不冪等＝SDD 側 P4） | 他包回報：uvicorn 18089 煙霧、映像內真 CLI 11 支、突變 12/12 KILLED；〔未驗〕Docker 全棧（compose）、macOS／Linux 主機直跑（只在 Linux 容器內驗）；雲端 agentconsole-ci 對 `8d0aa093` 紅＝`file_digest` 先量大小把 POSIX 目錄（st_size 4096）判成超限，修於 `e19814b4` |
 | Dev-Backend | `93ac5ecf`（70 檔 M＋36 新） | `.\gradlew.bat clean build --console=plain` `BUILD SUCCESSFUL in 1m 54s`（測試結果行與 JaCoCo／Checkstyle／ArchUnit 細數＝他包回報：1946 支 0 失敗、96.85%／85.80%、0、8）；`backend\build` 最長真實路徑 238；`git diff --check` rc=0；改動全在 `backend/` | 九項（sdd-binding 400 先於 404；匯入 specDir 與目標已綁不同也 409；規格根前綴比對純字串；approver 原樣送；freeze 省略 docs 由綁定檔換算；RTM 404 一律 `rtm_not_found`；OpenAPI 的 advisory 以 boolean＋說明；逾時只驗請求值；RTM 列測試類名以實際為準） | 〔未驗〕MiniBridge 與真 Bridge 逐值對照（交 W4／W5）；流程備註：Dev-Backend 誤派一次 noop 子代理（4 秒內回、零副作用，如實記） |
 | W4 dogfood（操作員兼 SA／QA／掌舵者代理） | `10b10a8a`（證據檔 §1＋Bridge 失敗路徑夾具） | 夾具 `2 passed`（11.4 秒）；ruff rc=0；`check_pytest_baseline_sites` rc=0；`check_handoff_carriers` rc=0；`git diff --check` rc=0；雲端對 `5593e178` 五支 workflow 全 success（主控 `gh run list` 現查） | TCS 多一條 AC-001-5（三個過渡態→TRANSIENT，否則契約 §3.1.5 的 43 個鍵有 3 個無歸屬）；SCG-4 審查者＝TCS 作者＝操作員（被審程式由另一行程 haiku 所寫），W5 為第二眼 | C1～C6 皆成立、各附但書（§1.8）；DEF-AC-015～027（P3 五、P4 八、無 P≤2）；〔未驗〕macOS／Linux／Docker 全棧、真 AI 的 Integration／E2E 類 AT、PR_REVIEW 以後各態、取消／回收／外來委派在 Console 實跑；`phase` 全程 null 直到 T-G 搬入（D-115-08 後半由 Dev-Bridge 續做） |

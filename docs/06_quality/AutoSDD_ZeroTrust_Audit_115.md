@@ -6,6 +6,8 @@
 
 ## §1 Dogfood 證據
 
+> 主控補註（2026-10-18，W5 QA Q-08／Q-11）：本節撰寫時 T-G 尚未搬入 Bridge，文中「`phase` 全程為 null」為當時實況；T-G 於 commit `ae31e882` 接線後 `phase` 已為物件，W5 於 §3.4 補驗。框架體檢 S-01～S-20 的原文住主控 scratchpad（`sdd_review_115.md`），其裁決與處置座標＝`docs/04_planning/AutoSDD_improving_115.md` §6 D-115-09 與 §7 表。
+
 ### §1.0 結論先行
 
 一個真實小功能 T-G（Bridge 純函式：FSM `current_state` 對映 `phase{name,order,blocking,observation}`）完整走過一次 Console × Bridge × AutoClaude × SDD 迴圈：SDD session 以真 CLI 走閘門到 HUMAN_PENDING → Console 畫面核准凍結 → 路徑 A 匯入並簽核 → 以 `aisdlc_sdd` 啟動批次（真 claude，haiku）→ 引擎評估指令與驗收 regex 全過 → FSM 回 IMPLEMENTATION → RTM 在 Console 可見；失敗路徑以決定性替身走了兩遍（CI 夾具一遍、Console 實機一遍）。本場沒有發現 P2 以上缺陷（P≤2 為零）；登記 P3 五筆（SDD 三筆、Console 兩筆）加 P4 八筆，見 §1.9。

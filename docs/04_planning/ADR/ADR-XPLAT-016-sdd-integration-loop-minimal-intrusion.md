@@ -1,6 +1,6 @@
 # ADR-XPLAT-016：SDD 整合迴圈的最小侵入白名單——環境契約、FSM 窄寫面、凍結綁內容與委派同步
 
-- **狀態**：**Proposed**（SD 設計稿；主控收尾時改 Accepted）。本檔是設計文件，不含任何生產碼；§11 的白名單是施工授權範圍。
+- **狀態**：**Accepted**（2026-10-18 主控收尾單人窗口；條件＝W5 QA 獨立審查 VERDICT PASS、各棒親驗 commit、落地實況回寫附錄 C；原為 SD 設計稿 Proposed）。本檔是設計文件，不含任何生產碼；§11 的白名單是施工授權範圍。
 - **日期**：2026-10-17
 - **平台**：平台中立（Windows 11＋PowerShell 為主控機；Docker 全棧以唯讀掛載 SDD 為第二載具，兩者的取捨逐項寫在各節）
 - **關聯**：[AutoSDD_improving_115](../AutoSDD_improving_115.md) §3 G-01～G-17、§6 D-115-01～16；SA 契約 v1.5 的〈待 SD 定案〉S1～S8（`AgentConsole/docs/02_architecture/API_Contract_P3-6.md` §6.8.3，本檔附錄 B 逐項給值）；[ADR-XPLAT-010](ADR-XPLAT-010-root-subproject-boundary.md) §2.1（跨子專案不 import）；`AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md` D22；PRD `docs/01_requirements/Agent_ConsoleUI_PRD.md` §0.4／§0.5；AISDLC_SDD Rule 9（R-9.5／R-9.6／R-9.20／R-9.38）；框架體檢 S-01～S-20（住本輪審查證據檔）
@@ -687,6 +687,11 @@ FSM 可能留在 AUTOCLAUDE_DELEGATED 而沒有任何行程（引擎異常結束
 | `_HAPPY_PATH`／TLA 不變 | `git diff` 對 `transition_rules.py` 與 `formal/` 為空（TLC 為 N/A，證據＝空 diff） | — |
 
 ---
+
+## 附錄 C：落地實況對本 ADR 的回寫（主控收尾單人窗口，2026-10-18；W5 QA Q-03／Q-12）
+
+- **§11.3 第 5 列「根層 `tools/`、`.claude/`、`.github/` 必須為空」的實況**：本輪有 4 個根層檔由主控在收尾單人窗口改動，皆非守衛面擴張——`tools/lib/skip_tag_policy.py`（掃描面下限三值依前置掃描逐字指示重釘）、`tools/tests/test_windows_forbidden_filename_parity.py`（NTFS 站點表登記 Bridge 鏡像接受器，檔案行數不變、棘輪淨額 +0）、`.claude/hooks/sdd_hook_router.py` 與 `tools/lib/session_brief.py`（S-14 過期版本號範例文案；每個 session 必印＝真實暴露）。判準維持「必須為空」，例外一律由收尾單人窗口做並在此登記。
+- **各棒接受的偏離**（唯一真相源＝`docs/04_planning/AutoSDD_improving_115.md` §6 D-115-17～19 與 §7 表；本節只列與本文字面相牴的條目）：§7.4 的「冪等」只在乾跑樣本成立——上游 `sanitize_component` 截 80 字後可能以空白結尾、再淨化一次不等於自身（SDD 側 P4，Bridge 鏡像逐字同源不修）；§7.4 的尾端判準實作取 `rstrip(" .")` 不動點；§4.3 的 `--digest` 需至少一個 `--doc`、`--root` 須為既存絕對目錄、`--digest` 無 `--json` 時沿用人讀輸出；§4.4 的 approver 另拒前後空白；§9 的權杖呼叫為四個（含 `:resume`／`/restore`，見該節補註）；§6.3① 的「已綁定 `sdd_spec_file` 須在 `docs[]`」由 Backend 擋；`unmapped_at_ids` 的事件多帶 `reasons`；版本／場景宣告另收 HTML 註解形與表格列形並略過圍欄程式碼區塊。
 
 ## 附錄 A：與 improving_115 §4.3（Architect 草案）的差異，逐條
 
