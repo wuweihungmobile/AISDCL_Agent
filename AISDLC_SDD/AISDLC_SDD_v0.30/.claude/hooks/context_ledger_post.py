@@ -7,7 +7,7 @@ API usage 的真實 ratio（`context_window.measure`）：70%（soft）／85%（
 AUTO_COMPACT_PENDING 且真實 used 回落 <85% ⇒ 自動 complete_auto_compact（D4／C5）。
 
 Matcher note (A6-02, by-design — do NOT add `Task` here): the PostToolUse matcher
-is `Write|Edit|Read|Bash|NotebookEdit` WITHOUT `Task`, deliberately asymmetric
+is `Write|Edit|Read|Bash|PowerShell|NotebookEdit` WITHOUT `Task`, deliberately asymmetric
 with PreToolUse (which adds `Task` purely for the ACT-020 subagent-contract
 injection hint, not for accounting). A subagent runs in its own context window,
 so its result tokens must NOT be charged to the main session's ledger.
@@ -36,7 +36,28 @@ from tools.fsm_runtime.context_window import (  # noqa: E402
     window_evidence,
 )
 
-LEDGER_DIR = _SDD_ROOT / "build" / "reports" / "fsm"
+
+def _resolve_ledger_dir() -> Path:
+    """ADR-XPLAT-016 §3.4 A4：與 `context_ledger_pre.py`（A3）同一個解析點，兩支 hook 寫同一本帳。
+
+    hook 是 fail-open 載具：解析失敗（`SDD_STATE_DIR` 寫成相對路徑、state_loader 缺 PyYAML 時的
+    `SystemExit` 等）一律退回預設目錄並在 stderr 出一行 ASCII 警告，**不得**讓每次工具呼叫的 hook
+    因此崩潰。（兩支 hook 刻意各持一份：它們是獨立啟動的腳本，不共用模組。）
+    """
+    try:
+        from tools.fsm_runtime.state_loader import state_dir  # type: ignore
+
+        return state_dir()
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — SystemExit 不是 Exception 的子類
+        if sys.stderr is not None:
+            sys.stderr.write(
+                "[SDD-HOOK] state_dir() unavailable, falling back to build/reports/fsm: "
+                + ascii(str(exc))[:160] + "\n"
+            )
+        return _SDD_ROOT / "build" / "reports" / "fsm"
+
+
+LEDGER_DIR = _resolve_ledger_dir()
 
 
 def _estimate_result_tokens(tool_response) -> int:

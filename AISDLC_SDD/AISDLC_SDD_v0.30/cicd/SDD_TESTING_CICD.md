@@ -5,7 +5,7 @@
 **建立日期**: 2026-04-13
 **文件類型**: 部署規格（Deployment Specification）
 **所屬分類**: `AISDLC_SDD_v0.01/cicd/`
-**Spec Gate**: 🔷 SCG-4 Test Strategy Gate
+**Spec Gate**: 🔷 SCG-4 PR Review Gate（RG-TEST 為補充閘）  <!-- 🔴 115／S-08 訂正：原文「🔷 SCG-4 Test Strategy Gate」；SCG-4＝PR Review Gate（SSOT：workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md），Test Strategy Gate＝補充閘 RG-TEST（guides/system/sdd/SDD_GUIDE.md） -->
 **對應 Phase**: Phase 05 — 情境八：Testing（測試與QA）
 
 ---

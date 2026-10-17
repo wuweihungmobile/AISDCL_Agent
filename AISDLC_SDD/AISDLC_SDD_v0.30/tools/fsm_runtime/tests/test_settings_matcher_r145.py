@@ -181,6 +181,8 @@ class AgentWorkflowGatingTests(unittest.TestCase):
                          classmethod(lambda cls, project=None: self._rt)),
             patch.object(snap_mod, "SNAPSHOT_DIR", self.root / "abort"),
             patch.object(sl_mod, "REPO_ROOT", self.root / "repo"),
+            # ADR-XPLAT-016 A2：`_reset_today_ledger` 的帳本目錄走 `state_dir()`（＝DEFAULT_STATE_DIR）。
+            patch.object(sl_mod, "DEFAULT_STATE_DIR", self.root / "repo" / "build" / "reports" / "fsm"),
         ]
         for p in self._patches:
             p.start()

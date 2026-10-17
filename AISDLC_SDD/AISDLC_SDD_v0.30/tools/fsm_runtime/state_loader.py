@@ -30,6 +30,34 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "FSM-STATE-TEMPLATE.yaml"
 DEFAULT_STATE_DIR = REPO_ROOT / "build" / "reports" / "fsm"
 
+#: 外部專案模式的環境變數（ADR-XPLAT-016 §3）：非空白＝狀態目錄改指向該絕對路徑。
+STATE_DIR_ENV = "SDD_STATE_DIR"
+
+
+def state_dir() -> Path:
+    """FSM 狀態目錄的**唯一解析點**（ADR-XPLAT-016 §3.2；狀態檔與同目錄衍生物都走這裡）。
+
+    優先序（呼叫端顯式 `path=` 不經本函式，維持現況）：
+      1. 環境變數 `SDD_STATE_DIR`（`strip()` 後非空）→ 必須是**絕對路徑**，否則 `ValueError`。
+         不接受相對路徑：Bridge 的 cwd 是 SDD 版本目錄、hook 的 cwd 是專案根、人的 cwd 任意，
+         相對路徑會讓同一變數在不同呼叫者指向不同目錄＝靜默的檔案分裂。不 `resolve()` symlink。
+      2. 模組常數 `DEFAULT_STATE_DIR`——**呼叫時才讀模組屬性**（晚綁定；既有測試以 monkeypatch
+         改它，`test_path_cost.py`／`test_phase_i_m5.py` 等依賴這個行為，不得改成 import 時求值）。
+
+    目錄不由本函式建立（`save_state` 本來就 `mkdir(parents=True)`）。
+    ValueError 訊息一律 ASCII（CLI 入口無 UTF-8 stdio 保護，錯誤會被原樣印到 stderr）。
+    """
+    raw = os.environ.get(STATE_DIR_ENV, "").strip()
+    if not raw:
+        return DEFAULT_STATE_DIR
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        raise ValueError(
+            f"{STATE_DIR_ENV} must be an absolute path (got {raw!a}); a relative path would point "
+            "to different directories for the Bridge, hooks and humans"
+        )
+    return candidate
+
 
 def _now() -> str:
     return _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds")
@@ -75,7 +103,7 @@ _MAX_COMPONENT_LEN = _shared_component_sanitizer._MAX_COMPONENT_LEN
 
 
 def _default_state_path(project: str) -> Path:
-    return DEFAULT_STATE_DIR / f"FSM-STATE-{_sanitize_component(project)}.yaml"
+    return state_dir() / f"FSM-STATE-{_sanitize_component(project)}.yaml"
 
 
 # Phase I M5 / ACT-070：艦隊並行的 track 維度 state key。
@@ -85,7 +113,7 @@ def track_state_path(project: str, track_id: Optional[str] = None) -> Path:
     if not track_id:
         return _default_state_path(project)
     safe = _sanitize_component(track_id)
-    return DEFAULT_STATE_DIR / f"FSM-STATE-{_sanitize_component(project)}-{safe}.yaml"
+    return state_dir() / f"FSM-STATE-{_sanitize_component(project)}-{safe}.yaml"
 
 
 def load_track_state(
@@ -234,16 +262,32 @@ class FSMState:
         entry["current_count"] = 0
         entry.setdefault("history", [])
 
-    def record_spec_frozen(self, stage: str, spec_docs: list[str], compaction_report: Optional[str] = None) -> None:
+    def record_spec_frozen(
+        self,
+        stage: str,
+        spec_docs: list[str],
+        compaction_report: Optional[str] = None,
+        *,
+        spec_doc_digests: Optional[Dict[str, str]] = None,
+        approved_by: Optional[str] = None,
+    ) -> None:
+        """記一筆凍結階段。
+
+        ADR-XPLAT-016 §4.3：`spec_doc_digests`（`{POSIX 相對 root 路徑: "sha256:<hex>"}`）與
+        `approved_by` **只在有值時才寫入該筆**（舊讀者與舊狀態檔的鍵集合不受影響）。
+        """
+        entry: Dict[str, Any] = {
+            "stage": stage,
+            "frozen_at": _now(),
+            "compaction_report": compaction_report,
+            "spec_docs": spec_docs,
+        }
+        if spec_doc_digests:
+            entry["spec_doc_digests"] = dict(spec_doc_digests)
+        if approved_by:
+            entry["approved_by"] = approved_by
         stages = self.root.setdefault("frozen_stages", []) or []
-        stages.append(
-            {
-                "stage": stage,
-                "frozen_at": _now(),
-                "compaction_report": compaction_report,
-                "spec_docs": spec_docs,
-            }
-        )
+        stages.append(entry)
         self.root["frozen_stages"] = stages
         cum = self.cumulative()
         cum["total_spec_frozen_count"] = int(cum.get("total_spec_frozen_count", 0)) + 1
@@ -433,8 +477,11 @@ def save_state(state: FSMState) -> None:
 
 
 def project_from_env(default: str = "default") -> str:
-    """Resolve project name from env; fall back to repo folder name."""
+    """Resolve project name from env; fall back to repo folder name.
+
+    ADR-XPLAT-016 §3.1：`SDD_PROJECT` 純空白視同未設（此前會得到一個以空白命名的專案）。
+    """
     override = os.environ.get("SDD_PROJECT")
-    if override:
+    if override and override.strip():
         return override
     return REPO_ROOT.parent.name or default

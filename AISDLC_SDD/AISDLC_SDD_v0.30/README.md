@@ -1,11 +1,18 @@
-# AISDLC-SDD v0.01
+# AISDLC-SDD
 # AI-assisted Software Development Lifecycle — Spec-First / System Design Document Driven
 
-**框架版本**: v0.01
+> 🔴 **本檔刻意不寫版號與資產計數**（寫死即過期；原標題與標頭曾逐版沿用 `v0.01`、計數停在 2026-06）。
+> 版本號、各類資產數量一律見 [FRAMEWORK_STATUS.md](../FRAMEWORK_STATUS.md)（機械生成，ci-gate `--check` 守新鮮）；
+> LATEST 現查：`python AISDLC_SDD/scripts/sdd_version.py`。**被訂正的原文逐字保留**：標題「`# AISDLC-SDD v0.01`」、
+> 「`**框架版本**: v0.01`」、「`**最後更新**: 2026-06-12`」、「`**最新發布 Tag**: v2026.06.06-02`」。
+> 其餘被改寫的原計數與驗收快照（框架組成總覽表、模板分類表、目錄樹註解、chaos 情境數、pytest 快照等）逐字收在
+> `EVOLUTION_LOG.md`〈LATEST 修改備忘：整合輪 115／Dev-SDD-DOC 文件面〉。
+
+**框架版本**: 見 [FRAMEWORK_STATUS.md](../FRAMEWORK_STATUS.md)
 **建立日期**: 2026-04-12
-**最後更新**: 2026-06-12
+**最後更新**: 一律現查 `git log -1 --format='%h %ci' -- <本檔路徑>`
 **基於**: AISDLC v0.09（開發專注版）
-**最新發布 Tag**: v2026.06.06-02
+**最新發布 Tag**: 一律現查 `git tag --list --sort=-creatordate`（本檔不寫快照值）
 
 ---
 
@@ -32,8 +39,8 @@ AISDLC-SDD 是基於 AISDLC 框架的 **SDD（規格先行 / 系統設計文件�
 | **SDD 核心轉型（Phase 01~09）** | ✅ 完成（Phase 01-06 核心轉型；Phase 07-09 完整性補強） |
 | **Layer 1 Runtime（Phase D~Y）** | ✅ 完成 — 把 Rule 9 從紙上規則升級為 Hook 層強制攔截，演進至 meta⁸ 互遞迴自我擴充 + 具身接地 + 可解釋性視覺化 |
 | **形式化驗證** | ✅ 五軌 TLA+/TLC（SDD / COMPOSITION / OPTIMIZATION / META / FLEET）雙源一致 |
-| **Chaos 有界停機驗收** | ✅ 37 故障情境隨機注入 × 100 輪，bounded_ratio == 1.0 |
-| **最新驗收快照** | pytest 1512 passed / 4 skip / 14 subtests passed · 五軌 TLC No error（META 13 distinct 不回歸）· chaos 37 故障情境 bounded · next_free ACT-162 / R-9.38 |
+| **Chaos 有界停機驗收** | ✅ 多種故障情境隨機注入 × 100 輪，bounded_ratio == 1.0（情境表見 `tools/fsm_runtime/chaos_runner.py`） |
+| **驗收數字** | 一律現查，本檔不複寫：`bash AISDLC_SDD/scripts/ci-gate.sh`（PowerShell：`AISDLC_SDD/scripts/ci-gate.ps1`）的輸出；各軌 passed 數的唯一出處＝monorepo 根層 `ONBOARDING.md` §7；下一個可用 ACT／Rule 編號＝`python -m tools.fsm_runtime.id_registry next-act`／`next-rule`（在版本目錄下執行） |
 | **本機優先 CI 平價層** | ✅ ADR-001（Accepted 2026-06-11）：Docker 迷你環境 + act + pre-commit/pre-push + Mock/地端LLM；單一真相源 `scripts/ci-gate.sh`（地端綠 ⇒ 雲端綠）；artifact-cleanup 配額治本 + Dependabot 週更 |
 
 > Runtime 演進細節見 [AISDLC_SDD_INIT.md](AISDLC_SDD_INIT.md) 的 Phase D~Y 元件表與 Rule 9 禁止事項清單；
@@ -46,15 +53,15 @@ AISDLC-SDD 是基於 AISDLC 框架的 **SDD（規格先行 / 系統設計文件�
 
 | 元件 | 數量 | 說明 |
 |------|------|------|
-| **Agents** | 26 | 7 core + 19 specialized（含 4 系統級 runtime agent：orchestrator / diagnostic / evaluator / gc；v0.02 +sdd-playbook-compiler） |
-| **Scenarios** | 10 | Greenfield / Brownfield / Refactoring / Documentation / DevOps / Integration / Migration / Performance / Security / Testing |
-| **Workflows** | 23 | 1 SDD Gate + 8 core + 13 scenario + 1 ADR（另有 4 Runtime 工作流：FSM Engine / Escalation / Context Governor / Self-Evolution） |
-| **SDD 模板** | 59 | 56 md + 3 yaml（見下方分類） |
-| **CI/CD 規格** | 12 | 9 場景規格 + 3 Runtime 規格（Drift Monitor / Hub Sync / Production Feedback） |
-| **Skills** | 42 | 33 繼承強化 + 9 SDD 核心 |
-| **參考指南** | 58 | C4、ID 命名、估算、文檔品質等 |
-| **Governance 規則** | 38 | Rule 9.x 自動化閉環防護（R-*.yaml） |
-| **形式化軌道** | 5 | TLA+/TLC（tools/fsm_runtime/formal/） |
+| **Agents** | 見 FRAMEWORK_STATUS.md | core（SDD 強化）＋ specialized；含系統級 runtime agent（orchestrator / diagnostic / evaluator / gc 等）與橋接 agent（sdd-playbook-compiler / sdd-prd-to-playbook） |
+| **Scenarios** | 見 FRAMEWORK_STATUS.md | Greenfield / Brownfield / Refactoring / Documentation / DevOps / Integration / Migration / Performance / Security / Testing |
+| **Workflows** | 見 FRAMEWORK_STATUS.md（取 `workflow/README.md` 宣稱的 curated 數，非檔數） | SDD Gate ＋ core ＋ scenario-specific ＋ ADR；另有 Runtime 工作流（`workflow/sdd-*/`：FSM Engine / Escalation / Context Governor / Self-Evolution / AutoClaude Bridge 等，以磁碟目錄為準） |
+| **SDD 模板** | 見 FRAMEWORK_STATUS.md | md ＋ yaml（分類見下方；各分類數量以 `docs_template/sdd/<分類>/` 磁碟實掃為準） |
+| **CI/CD 規格** | 磁碟現查（`cicd/` 下 `*.md`） | 場景規格 ＋ Runtime 規格（Drift Monitor / Hub Sync / Production Feedback） |
+| **Skills** | 見 FRAMEWORK_STATUS.md | 繼承強化 ＋ SDD 核心 |
+| **參考指南** | 磁碟現查（`guides/` 下 `*.md`） | C4、ID 命名、估算、文檔品質等 |
+| **Governance 規則** | 見 FRAMEWORK_STATUS.md | Rule 9.x 自動化閉環防護（R-*.yaml） |
+| **形式化軌道** | 見 `tools/fsm_runtime/formal/` | TLA+/TLC（SDD / COMPOSITION / OPTIMIZATION / META / FLEET 各一軌，雙源一致） |
 
 ---
 
@@ -62,7 +69,7 @@ AISDLC-SDD 是基於 AISDLC 框架的 **SDD（規格先行 / 系統設計文件�
 
 ```
 1. 載入框架: 讀取 AISDLC_SDD_INIT.md
-2. 選擇場景: greenfield / brownfield / refactoring / … （共 10 種）
+2. 選擇場景: greenfield / brownfield / refactoring / … （場景清單見上表，數量見 FRAMEWORK_STATUS.md）
 3. 自動載入: Agent + Workflow + SDD Enhancement（按需載入，初始 ~200 tokens）
 4. 開始執行: SOP + SCG 閘門
 ```
@@ -74,27 +81,27 @@ AISDLC-SDD 是基於 AISDLC 框架的 **SDD（規格先行 / 系統設計文件�
 
 ## SDD 新增內容
 
-### 59 個 SDD 專屬模板（56 md + 3 yaml）
+### SDD 專屬模板（總數見 FRAMEWORK_STATUS.md）
 
-| 分類 | 數量 | 重點模板 |
-|------|------|---------|
-| Testing | 19 | RTM, Invariant Test Contract, Contract Test Spec, Chaos Contract |
-| Architecture | 13 | As-Is / To-Be SRD, Before/After Arch, Trust Boundary Map, Spec Anchor |
-| Deployment | 7 | CI/CD Pipeline, Monitoring, Cutover, Rollback, IaC |
-| Requirements | 5 | Invariant Spec, Third-Party API Research |
-| ADR | 4 | ADR Template, ADR Index |
-| API | 4 | API Compat, Consumer Contract, Migration Contract Map |
-| Quality | 3 | Code Quality Baseline, Tech Debt Spec, SDD Compliance Audit |
-| Planning | 2 | Gap Analysis, Refactor Plan |
-| Build / Development | 2 | Living Doc Strategy 等 |
+| 分類 | 重點模板（各分類數量以 `docs_template/sdd/<分類>/` 磁碟實掃為準） |
+|------|---------|
+| Testing | RTM, Invariant Test Contract, Contract Test Spec, Chaos Contract |
+| Architecture | As-Is / To-Be SRD, Before/After Arch, Trust Boundary Map, Spec Anchor |
+| Deployment | CI/CD Pipeline, Monitoring, Cutover, Rollback, IaC |
+| Requirements | Invariant Spec, Third-Party API Research |
+| ADR | ADR Template, ADR Index |
+| API | API Compat, Consumer Contract, Migration Contract Map |
+| Quality | Code Quality Baseline, Tech Debt Spec, SDD Compliance Audit |
+| Planning | Gap Analysis, Refactor Plan |
+| Build / Development | Living Doc Strategy 等 |
 
-### 12 個 CI/CD 規格
+### CI/CD 規格（數量以 `cicd/` 磁碟實掃為準）
 
 - **Base Layer**: DocLint + SpecTrace + OpenAPI Validate + RTM Check（全場景通用）
-- **9 場景規格**: Greenfield / Brownfield / Refactoring / Migration / Integration / Testing / Performance / Security（各帶專屬閘門）
-- **3 Runtime 規格**: Drift Monitor / Hub Sync / Production Feedback
+- **場景規格**: Greenfield / Brownfield / Refactoring / Migration / Integration / Testing / Performance / Security（各帶專屬閘門）
+- **Runtime 規格**: Drift Monitor / Hub Sync / Production Feedback
 
-### 6 個核心 Agent SDD 技能增強
+### 核心 Agent 的 SDD 技能增強
 
 | Agent | 新增技能 |
 |-------|---------|
@@ -119,7 +126,7 @@ Claude Code Hook 層的**強制攔截**；Phase E~Y 在其上持續加固，形�
 | FSM Runtime | 唯一合法 FSM 讀寫入口（atomic write + .bak 輪替） |
 | Runtime Hooks | `.claude/settings.json` 的 SessionStart / PreToolUse / PostToolUse 強制層 |
 | Formal 驗證 | 五軌 TLA+/TLC 雙源一致 + reachable 不污染 |
-| Chaos 驗收 | 37 故障情境隨機注入 × 100 輪，bounded_ratio == 1.0 |
+| Chaos 驗收 | 多種故障情境隨機注入 × 100 輪，bounded_ratio == 1.0 |
 | 自我演進防護 | meta⁸ 互遞迴良基停機證書 + 反 Goodhart 對抗分離 + 人類 signoff 棘輪 |
 
 **絕對禁令（違反即停機）** 與各 Phase 子規則 ACT 對照，完整列於 [AISDLC_SDD_INIT.md](AISDLC_SDD_INIT.md)
@@ -162,18 +169,18 @@ Node24 相容；新增 `aisdlc-sdd-ci.yml`
 ## 目錄結構
 
 ```
-AISDLC_SDD_v0.01/
+AISDLC_SDD_v<LATEST>/            # 讀作「當前最新演化版」；現查：python AISDLC_SDD/scripts/sdd_version.py
 ├── AISDLC_SDD_INIT.md          # 框架入口（必讀）
 ├── FILE_DIRECTORY_RULES.md      # 目錄規則
 ├── README.md                    # 本文件
-├── agent/                       # 26 Agents（7 core + 19 specialized；v0.02 +sdd-playbook-compiler）
-├── scenarios/                   # 10 場景（含 SDD 增強）
-├── workflow/                    # 23 工作流 + 4 Runtime 工作流
-├── docs_template/sdd/           # 59 SDD 專屬模板
-├── cicd/                        # 12 CI/CD 規格
-├── guides/                      # 58 參考指南（含 system/sdd 核心）
-├── .claude/                     # skills/（42 Skills）+ hooks/ + settings.json
-├── governance/                  # Rule 9.x 規則（38 R-*.yaml）+ RULES_INDEX.md
+├── agent/                       # core + specialized Agents（數量見 FRAMEWORK_STATUS.md）
+├── scenarios/                   # 場景（含 SDD 增強）
+├── workflow/                    # 工作流 + Runtime 工作流（workflow/sdd-*/）
+├── docs_template/sdd/           # SDD 專屬模板
+├── cicd/                        # CI/CD 規格
+├── guides/                      # 參考指南（含 system/sdd 核心）
+├── .claude/                     # skills/ + hooks/ + settings.json
+├── governance/                  # Rule 9.x 規則（R-*.yaml）+ RULES_INDEX.md
 ├── tools/fsm_runtime/           # FSM Runtime + 五軌 formal/（TLA+）
 ├── prompts/                     # 場景指令集與快速啟動指引
 ├── releases/                    # 框架發布包（v0.01 + CHANGELOG）

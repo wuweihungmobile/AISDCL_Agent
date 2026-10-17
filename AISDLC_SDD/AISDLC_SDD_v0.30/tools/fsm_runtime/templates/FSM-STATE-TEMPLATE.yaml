@@ -146,6 +146,10 @@ fsm_state:
   #   compaction_report: "build/reports/compaction/COMPACT-Stage1-2026-04-19.md"
   #   spec_docs:
   #     - "docs/01_requirements/FRD-SystemName.md"
+  #   # 以下兩鍵**只在有值時才出現**（`spec-frozen --digest`／`--approver`；ADR-XPLAT-016 §4.3），舊讀者不受影響：
+  #   spec_doc_digests:                  # {POSIX 相對 root 的路徑: "sha256:<64 位小寫 hex>"}，鍵與 spec_docs 同一組字串；
+  #     "docs/01_requirements/FRD-SystemName.md": "sha256:<換行正規化後 UTF-8 bytes 的 sha256>"   # \r\n、\r 先換成 \n，BOM 不剝
+  #   approved_by: "alice"               # `--approver`：非空、≤100 字、無控制字元（Console 的核准人／JWT subject）
 
   escalation_history: []
   # 格式:

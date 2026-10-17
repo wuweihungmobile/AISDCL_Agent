@@ -67,4 +67,4 @@
 ---
 
 **最後更新**: YYYY-MM-DD
-**Spec Gate**: 🔷 SCG-4 Test Strategy Gate
+**Spec Gate**: 🔷 SCG-4 PR Review Gate（RG-TEST 為補充閘）  <!-- 🔴 115／S-08 訂正：原文「🔷 SCG-4 Test Strategy Gate」；SCG-4＝PR Review Gate（SSOT：workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md），Test Strategy Gate＝補充閘 RG-TEST（guides/system/sdd/SDD_GUIDE.md） -->

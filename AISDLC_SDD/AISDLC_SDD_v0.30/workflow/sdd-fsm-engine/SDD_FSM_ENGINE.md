@@ -16,6 +16,10 @@
 
 ---
 
+> **狀態檔位置**：本檔所有 `build/reports/fsm/` 字面都是預設路徑（`<版本目錄>/build/reports/fsm/FSM-STATE-{project}.yaml`）；
+> **`SDD_STATE_DIR` 有設時改指該目錄**（必須是絕對路徑；外部專案模式，規則命中遙測回寫預設關）。寫入一律經 FSMRuntime CLI，
+> 不得手改 yaml——每個閘門結果對應的確切指令見 [SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈FSM 寫入指令〉。
+
 ## 📋 狀態定義
 
 ```yaml

@@ -604,7 +604,11 @@ auto_load_config:
 | `agent/specialized/sdd-gc-zh.yaml` | 鷹架代謝 GC（規則 Scaffold ROI、退役過時鷹架） | Runtime / 系統級（Phase H M5） |
 | `agent/specialized/sdd-zero-trust-auditor-zh.yaml` | 文件級零信任稽核者（唯讀；SCG-4／SCG-5 前的獨立複審） | Runtime / 系統級（R85 補列，DEF-200-081①） |
 | `agent/specialized/sdd-playbook-compiler-zh.yaml` | SDD→AutoClaude Playbook 編譯者（凍結規格 → playbook YAML，R-9.38 保真） | Bridge / 系統級（v0.02 Phase Z / ACT-163） |
-| `agent/specialized/sdd-prd-to-playbook-zh.yaml` | PRD→Playbook 規劃架構師（PRD → 專案→目標→任務 three_tier YAML，交 tools/three_tier_to_playbook.py 攤平為可執行 playbook） | Bridge / 前端（AutoSDD_improving_94 A 軌） |
+| `agent/specialized/sdd-prd-to-playbook-zh.yaml` | PRD→Playbook 規劃架構師（PRD → 專案→目標→任務 three_tier YAML，交 `AutoClaude/tools/three_tier_to_playbook.py` 攤平為可執行 playbook；該工具住 AutoClaude 子專案、版本目錄內不存在，需 AutoClaude 環境） | Bridge / 前端（AutoSDD_improving_94 A 軌） |
+
+> 🔴 **115／S-19 訂正**：上表最後一列**被訂正的原文逐字保留**：「交 tools/three_tier_to_playbook.py 攤平為可執行 playbook」。
+> 該工具實住 `AutoClaude/tools/three_tier_to_playbook.py`（版本目錄下不存在 `tools/three_tier_to_playbook.py`），需 AutoClaude 環境；
+> 同一宣稱的其他站點＝`agent/specialized/sdd-prd-to-playbook-zh.yaml` 五處，已同步訂正。
 
 ---
 

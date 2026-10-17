@@ -210,6 +210,8 @@ def _pending_runtime(tmp_path, *, owner_sid):
     patches += [
         patch.object(snap_mod, "SNAPSHOT_DIR", tmp_path / "abort"),
         patch.object(sl_mod, "REPO_ROOT", tmp_path / "repo"),
+        # ADR-XPLAT-016 A2：`_reset_today_ledger` 的帳本目錄走 `state_dir()`（＝DEFAULT_STATE_DIR）。
+        patch.object(sl_mod, "DEFAULT_STATE_DIR", tmp_path / "repo" / "build" / "reports" / "fsm"),
         patch.dict(os.environ, {"SDD_MAX_CONTEXT": str(_PINNED_WINDOW)}),
     ]
     snapshot = tmp_path / "CONTEXT-SNAPSHOT-test.md"

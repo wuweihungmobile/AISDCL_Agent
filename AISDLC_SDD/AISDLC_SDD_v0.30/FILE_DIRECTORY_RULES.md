@@ -1,10 +1,14 @@
 # AISDLC-SDD 檔案目錄維護與分類規則
 # File & Directory Maintenance Rules
 
-**版本**: v0.06
+**版本**: 不寫版號（現行版號與各類資產計數一律見 `AISDLC_SDD/FRAMEWORK_STATUS.md`；LATEST 現查：`python AISDLC_SDD/scripts/sdd_version.py`）
 **建立日期**: 2026-04-12
 **最後更新**: 一律現查 `git log -1 --format='%h %ci' -- <本檔路徑>`
 **來源框架**: AISDLC v0.09
+
+> 🔴 **115／S-07 訂正**：本檔原寫「`**版本**: v0.06`」與一批資產計數（SDD 模板 59、cicd 9、skills 39、prompts 15、tools 6、Agent 21…，
+> 與磁碟實況已不符）。現一律改為**版本中性**並指向 `AISDLC_SDD/FRAMEWORK_STATUS.md`（FRAMEWORK_STATUS 沒追蹤的目錄＝以磁碟實掃為準）。
+> **被訂正的原文逐字收在** `EVOLUTION_LOG.md`〈LATEST 修改備忘：整合輪 115／Dev-SDD-DOC 文件面〉。下方〈變更記錄〉表是歷史，未動。
 
 ---
 
@@ -44,7 +48,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 ├── 📄 AISDLC_SDD_UPGRADE_CHECKLIST.md   # 升版前完整檢查清單
 │
 ├── 📁 agent/                         # Agent 配置
-│   ├── 📁 core/                      # 7 核心 Agent（含 SDD 技能）
+│   ├── 📁 core/                      # core Agent（含 SDD 技能；數量見 FRAMEWORK_STATUS.md）
 │   │   ├── 01.agent-template-zh.yaml
 │   │   ├── 02.ba-business-analyst-zh.yaml
 │   │   ├── 03.pm-po-agent-zh.yaml
@@ -52,7 +56,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   │   ├── 05.sd-architect-zh.yaml    # +sdd_brownfield, +sdd_refactoring
 │   │   ├── 06.dev-developer-zh.yaml
 │   │   └── 07.qa-tester-zh.yaml      # +sdd_phase03
-│   ├── 📁 specialized/               # 14 專業化 Agent（含 SDD 增強）
+│   ├── 📁 specialized/               # specialized Agent（含 SDD 增強；下列僅為節錄，完整清單以 agent/specialized/ 磁碟實掃為準）
 │   │   ├── code-analyzer-zh.yaml     # +sdd_phase03
 │   │   ├── compliance-officer-zh.yaml
 │   │   ├── dev-senior-zh.yaml        # +sdd_refactoring
@@ -71,9 +75,9 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   ├── AGENT_PHASE2_UPDATE_GUIDE.md
 │   └── README.md
 │
-├── 📁 scenarios/                     # 10 大情境（含 SDD 增強）+ 跨場景指南
+├── 📁 scenarios/                     # 情境（含 SDD 增強；數量見 FRAMEWORK_STATUS.md）+ 跨場景指南
 │   ├── 📄 README.md                 # 場景選擇入口（含 SCG 閘門說明）
-│   ├── 📄 SCENARIO_AGENT_MAPPING.md # 場景 × Agent 對應表（SDD 10 場景版）
+│   ├── 📄 SCENARIO_AGENT_MAPPING.md # 場景 × Agent 對應表（SDD 場景版；場景數見 FRAMEWORK_STATUS.md）
 │   ├── 📄 ERROR_RECOVERY_GUIDE.md   # 執行錯誤恢復指南
 │   ├── 📄 FRONTEND_SPECIFIC_GUIDE.md # 前端特定指南
 │   ├── 📄 SCALING_GUIDE.md          # 框架擴展指南
@@ -120,7 +124,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   │   └── SDD_ESCALATION_PROTOCOL.md
 │   ├── 📁 sdd-context-governor/     # ★ SDD 閉環防護：上下文管理（Phase B）
 │   │   └── SDD_CONTEXT_GOVERNOR.md
-│   ├── 📁 core/                     # 8 核心工作流（繼承 AISDLC）
+│   ├── 📁 core/                     # core 工作流（繼承 AISDLC；數量見 FRAMEWORK_STATUS.md 的 workflow 欄說明）
 │   │   ├── api-specification.md
 │   │   ├── change-management.md
 │   │   ├── consistency-check.md
@@ -129,7 +133,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   │   ├── sprint-execution.md
 │   │   ├── user-story-design.md
 │   │   └── validation-documentation.md
-│   ├── 📁 scenario-specific/        # 13 場景工作流（繼承 AISDLC）
+│   ├── 📁 scenario-specific/        # 場景工作流（繼承 AISDLC；數量同上）
 │   │   ├── brownfield-analysis-flow.md
 │   │   ├── code-analysis-flow.md
 │   │   ├── devops-setup-flow.md
@@ -148,7 +152,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   └── README.md
 │
 ├── 📁 docs_template/                # 文檔模板
-│   ├── 📁 sdd/                      # ★ SDD 專屬模板（59 個：56 md + 3 yaml）
+│   ├── 📁 sdd/                      # ★ SDD 專屬模板（數量見 FRAMEWORK_STATUS.md）
 │   │   ├── 📁 requirements/
 │   │   │   ├── INVARIANT-SPEC-TEMPLATE.md
 │   │   │   └── THIRD-PARTY-API-RESEARCH-TEMPLATE.md
@@ -227,7 +231,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   ├── 📁 support/                  # 支援模板（繼承 AISDLC）
 │   └── README.md
 │
-├── 📁 cicd/                         # ★ SDD CI/CD 規格（9 個）
+├── 📁 cicd/                         # ★ SDD CI/CD 規格（數量以磁碟實掃為準；下列僅為節錄）
 │   ├── SDD_CICD_BASE_LAYER.md       # 基礎層（DocLint + SpecTrace + OpenAPI + RTM）
 │   ├── SDD_GREENFIELD_CICD.md
 │   ├── SDD_BROWNFIELD_CICD.md
@@ -258,11 +262,11 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   │   └── 📁 technical/
 │   └── README.md
 │
-├── 📁 .claude/skills/               # ★ Claude Code Skills（39 個）
+├── 📁 .claude/skills/               # ★ Claude Code Skills（數量見 FRAMEWORK_STATUS.md）
 │   ├── README.md
 │   ├── SKILL_DEVELOPMENT_PLAN.md
 │   ├── SKILL_STANDARD_TEMPLATE.md
-│   └── {skill-name}/SKILL.md        # 39 個 skill 目錄（各含 SKILL.md）
+│   └── {skill-name}/SKILL.md        # 每個 skill 一個目錄（各含 SKILL.md）
 │
 ├── 📁 prompts/                      # 使用者指令集
 │   ├── 📄 README.md
@@ -274,7 +278,7 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
 │   ├── 📁 complete-flow/
 │   │   ├── end-to-end-greenfield-example.md
 │   │   └── multi-scenario-combination-example.md
-│   └── 📁 scenario-prompts/         # 10 個場景專用指令集
+│   └── 📁 scenario-prompts/         # 場景專用指令集（每場景一份）
 │       ├── README.md
 │       ├── greenfield-prompts.md / brownfield-prompts.md / refactoring-prompts.md
 │       ├── documentation-prompts.md / testing-prompts.md / devops-prompts.md
@@ -366,17 +370,17 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 
 升版時需要完整複製的目錄：
 
-| 目錄 | 說明 | 檔案數 |
+| 目錄 | 說明 | 檔案數（不複寫數字：FRAMEWORK_STATUS.md 有追蹤者見該檔，其餘以磁碟實掃為準） |
 |------|------|--------|
-| agent/ | Agent 配置 | 7 core + 14 specialized |
-| scenarios/ | 場景 SOP + SDD 增強 | 10 場景 × (SOP + DeepDive + QuickRef + SDD Enhancement) |
-| workflow/ | 工作流定義 | 1 SDD Gate + 8 core + 13 scenario + 1 ADR |
-| docs_template/ | 文檔模板 | 59 SDD（56 md + 3 yaml）+ 50+ AISDLC |
-| cicd/ | CI/CD 規格 | 9 個（Base Layer + 8 場景專屬） |
-| guides/ | 參考指南 | 57+ |
-| .claude/skills/ | Claude Code Skills | 39（33 繼承強化 + 6 SDD 新增） |
-| tools/ | 工具腳本 | 6 個 |
-| prompts/ | 使用者指令集 | 15 個 |
+| agent/ | Agent 配置 | core ＋ specialized（見 FRAMEWORK_STATUS.md） |
+| scenarios/ | 場景 SOP + SDD 增強 | 每場景 SOP + DeepDive + QuickRef + SDD Enhancement（場景數見 FRAMEWORK_STATUS.md） |
+| workflow/ | 工作流定義 | SDD Gate + core + scenario-specific + ADR ＋ Runtime 工作流（見 FRAMEWORK_STATUS.md 與 `workflow/README.md`） |
+| docs_template/ | 文檔模板 | SDD 模板（見 FRAMEWORK_STATUS.md）＋ AISDLC 繼承模板 |
+| cicd/ | CI/CD 規格 | Base Layer ＋ 場景專屬 ＋ Runtime 規格（磁碟實掃） |
+| guides/ | 參考指南 | 磁碟實掃 |
+| .claude/skills/ | Claude Code Skills | 繼承強化 ＋ SDD 新增（見 FRAMEWORK_STATUS.md） |
+| tools/ | 工具腳本 | 磁碟實掃 |
+| prompts/ | 使用者指令集 | 磁碟實掃 |
 
 ### Layer 3: 專案產出檔（不複製）
 
@@ -446,13 +450,21 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 
 | 報告類型 | 寫入位置 |
 |---------|---------|
-| 分析報告 | build/reports/analysis/ |
-| 階段報告 | build/reports/phase/ |
-| 驗證報告 | build/reports/verification/ |
-| KPI 報告 | build/reports/kpi/ |
+| 分析報告（要入庫的結論性報告） | docs/06_quality/ |
+| 階段報告（要入庫者） | build/planning/archive/ |
+| 驗證報告 | build/reports/verification/（`build/reports/` 被 git 忽略，不入庫） |
+| KPI 報告 | build/reports/kpi/（同上，不入庫） |
 | 規劃文件 | build/planning/active/ |
 | 歸檔文件 | build/planning/archive/ |
 | 版本日誌 | build/logs/ |
+
+> 🔴 **115／S-15 訂正**：**被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）**：
+> 「`| 分析報告 | build/reports/analysis/ |`」「`| 階段報告 | build/reports/phase/ |`」。
+> 為何改：`AISDLC_SDD/.gitignore` 的各版區塊都忽略 `build/reports/` 內的報告（LATEST 例：`AISDLC_SDD_v0.30/build/reports/` 整個目錄；
+> v0.13 起皆此形，v0.05～v0.12 為 `build/reports/*` 並只放行 `fsm/FSM-STATE-TEMPLATE.yaml` 一檔），
+> 照原表寫的分析／階段報告 clone 後就消失；LATEST 被追蹤的 build 內容只有 `planning/` 與 `logs/README.md`。`build/reports/` 只放
+> 工具自動寫的執行期產物。同一宣稱的其他站點：`AISDLC_SDD/CLAUDE.md` Rule 2 表（已同步訂正）；`tools/AISDLC_CLAUDE_RULES.md`
+> 第 103～104 行同寫法（不在本輪文件白名單，未動，已登記交卷）。
 
 ---
 
@@ -462,12 +474,12 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 
 - ★ `guides/system/sdd/SDD_Core_Principles.md` — SDD 核心原則
 - ★ `guides/system/sdd/SDD_GUIDE.md` — SDD 核心指引
-- ★ `cicd/` — 9 個 SDD CI/CD 規格
-- ★ `docs_template/sdd/` — 59 個 SDD 專屬模板（56 md + 3 yaml）
+- ★ `cicd/` — SDD CI/CD 規格（數量以磁碟實掃為準）
+- ★ `docs_template/sdd/` — SDD 專屬模板（數量見 FRAMEWORK_STATUS.md）
 - ★ `workflow/sdd-spec-first-gate/` — Spec-First Gate 工作流
-- ★ `scenarios/*/SDD_*_ENHANCEMENT.md` — 10 個場景 SDD 增強
-- ★ Agent SDD 技能附加（21 個 Agent 全數完成 SDD 升級）
-- ★ `.claude/skills/` 中 6 個 SDD 新增 Skills（sdd-gate、sdd-review、spec-compliance-check、rtm-generate、brownfield-analysis、adr-generate）
+- ★ `scenarios/*/SDD_*_ENHANCEMENT.md` — 各場景 SDD 增強
+- ★ Agent SDD 技能附加（Agent 數量見 FRAMEWORK_STATUS.md）
+- ★ `.claude/skills/` 中的 SDD 新增 Skills（早期六項：sdd-gate、sdd-review、spec-compliance-check、rtm-generate、brownfield-analysis、adr-generate；現況清單以 `.claude/skills/README.md` 為準）
 - ★ `docs/02_architecture/migration/` — Migration Contract Map 存放目錄
 - ★ `docs/04_planning/performance/` — Performance Baseline Spec 存放目錄
 - ★ `docs/06_quality/security/` — 安全相關文件存放目錄

@@ -118,8 +118,9 @@ def write_violation_report(
     except Exception:  # noqa: BLE001
         return None
     if out_dir is None:
-        from .state_loader import REPO_ROOT
-        out_dir = REPO_ROOT / "build" / "reports" / "fsm"
+        # ADR-XPLAT-016 §3.4 A5：呼叫時求值，與狀態檔同目錄（外部專案模式＝SDD_STATE_DIR）。
+        from .state_loader import state_dir
+        out_dir = state_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     date = today or _dt.date.today().isoformat()
     path = out_dir / f"MONITOR-VIOLATION-{date}.yaml"

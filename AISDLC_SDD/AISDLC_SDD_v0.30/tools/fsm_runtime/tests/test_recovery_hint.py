@@ -220,7 +220,8 @@ class CompleteAutoCompactD4Tests(_Base):
         repo = self.tmp / "repo"
         path = self._ledger_path_under(repo)
         path.write_text("date: x\nentries:\n- t: null\n  - [broken\n", encoding="utf-8")
-        with patch.object(sl_mod, "REPO_ROOT", repo):
+        # ADR-XPLAT-016 A2：`_reset_today_ledger` 經 `state_dir()` 解析帳本目錄（不再讀 REPO_ROOT）。
+        with patch.object(sl_mod, "DEFAULT_STATE_DIR", path.parent):
             self._enter_pending("IMPLEMENTATION")
             out = self.rt.complete_auto_compact()  # reset_ledger=True（預設）
         self.assertEqual(self.state.current, "IMPLEMENTATION")
@@ -246,7 +247,7 @@ class CompleteAutoCompactD4Tests(_Base):
         path.write_text(yaml.safe_dump({"date": "d", "cumulative_tokens": 4200, "entries": [{"tokens": 4200}],
                                         "conversation_overhead": {"last_merge_entry_index": 1}}),
                         encoding="utf-8")
-        with patch.object(sl_mod, "REPO_ROOT", repo):
+        with patch.object(sl_mod, "DEFAULT_STATE_DIR", path.parent):
             self._enter_pending("IMPLEMENTATION")
             out = self.rt.complete_auto_compact()
         self.assertTrue(out["ledger"]["reset"])
@@ -270,7 +271,7 @@ class CompleteAutoCompactD4Tests(_Base):
                         encoding="utf-8")
         before = path.read_bytes()
         (path.parent / f"{path.name}.lock").write_text("pid=0 host=test ts=fresh\n", encoding="utf-8")
-        with patch.object(sl_mod, "REPO_ROOT", repo):
+        with patch.object(sl_mod, "DEFAULT_STATE_DIR", path.parent):
             self._enter_pending("IMPLEMENTATION")
             t0 = time.monotonic()
             out = self.rt.complete_auto_compact()
@@ -299,7 +300,7 @@ class CompleteAutoCompactD4Tests(_Base):
             if p == path and "r" in mode and "+" not in mode:
                 raise PermissionError(13, "Permission denied (simulated)", str(p))
             return orig(p, mode, *a, **k)
-        with patch.object(sl_mod, "REPO_ROOT", repo), patch.object(Path, "open", _open):
+        with patch.object(sl_mod, "DEFAULT_STATE_DIR", path.parent), patch.object(Path, "open", _open):
             self._enter_pending("IMPLEMENTATION")
             out = self.rt.complete_auto_compact()
         self.assertEqual(self.state.current, "IMPLEMENTATION")

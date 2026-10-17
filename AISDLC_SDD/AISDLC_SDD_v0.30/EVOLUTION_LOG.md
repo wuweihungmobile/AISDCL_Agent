@@ -120,6 +120,226 @@
 > 改回單世代登記；不影響任何版本的 API／FSM 狀態／`*.tla`（sample 在本 repo 永不執行）。
 
 
+## LATEST 修改備忘：整合輪 115／Dev-SDD-DOC 文件面（S-01、S-06～S-08、S-15、S-18、S-19；G-10、G-11、G-16；2026-10-17）
+
+> **注意**：本節**不是**凍結基線例外——只動 LATEST v0.30 與 `AISDLC_SDD/` 層共享文件（`CLAUDE.md`、`.claude/skills/` 父層曝光鏡像、
+> `.claude/settings.local.json.example`）；v0.01 與 v0.02～v0.29 一個位元組未碰。本棒不改任何 `.py`、不碰 `_HAPPY_PATH`／`*.tla`
+> （形式化模型零改動，依 Rule 9.18.1 無重跑義務；TLC＝N/A，證據＝`git diff` 對 `transition_rules.py` 與 `formal/` 為空，由收尾窗口與 QA 現跑）。
+> 立節原因：本棒有多處「訂正」。訂正協議（`agent/EVIDENCE_DISCIPLINE.md`〈四、訂正協議〉）要求被訂正的原文逐字保留；不方便留在原處者
+> （README 的計數表、FILE_DIRECTORY_RULES 的樹註解、舊 `settings.local.json.example`）收在下方〈被訂正原文〉。
+> 設計依據：`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md` §11.2（DOC 棒白名單）、§13（增量條款）；
+> `docs/04_planning/AutoSDD_improving_115.md` §3 G-10／G-11／G-16、§6 D-115-07／D-115-09；框架體檢 `sdd_review_115`（S-xx 即其缺陷編號）。
+> Dev-SDD-RT 棒的 runtime／測試改動另記於各自小節，不在本節。
+
+### delta 清單
+
+1. **S-01（P1）FSM 寫入指令**：`workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` 新增〈FSM 寫入指令〉——雙形態（PowerShell／bash）呼叫樣板
+   （cwd＝版本目錄、`Push-Location`／`Pop-Location` 成對、禁裸 `cd`）、外部專案模式（`SDD_STATE_DIR`／`SDD_PROJECT`）、十四列「閘門結果 → 指令」
+   對照表（第 0～13 列）、`spec-frozen --digest --root --reason --approver --json` 旗標與 rc 契約、ESCALATION 人工恢復；
+   `sdd-gate` skill 加〈階段 4〉、`stage-compaction` skill 加 Step 0 並把 Step 5 雙形態化，`spec-compliance-check` skill 加指標。
+   同節訂正：gate 文件第 3 步「retry_count 不重置，待 SPEC_FROZEN 後重置」與 runtime 不符（`gate … PASS` 當下即歸零）。
+2. **G-10／D-115-07 增量（delta）條款**：ADR §13 草案（一百九十九字）逐字放入 gate 文件〈增量（delta）條款〉、`sdd-gate`、`spec-compliance-check`
+   （腳本核對：三處＋父層鏡像兩處皆恰一次逐字命中）；gate 文件另寫適用範圍、〈增量追溯表〉欄位與「免重寫不等於免列」。
+3. **G-16／S-06／G-11**：`workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md`（v0.02→v0.03）——§5 改「已落地（Phase Z′）、由 Bridge 驅動」並列出誰呼叫
+   enter／exit；§3 evaluator 範本改裸 `pytest`；exit code 補 5 與 6；依據連結改 `docs/04_planning/Archive/…`；新增 §6〈Console／Bridge 路徑〉單一 SOP
+   （角色、逐步 SOP、預檢三點、談判閘對映 C-1～C-4、委派同步、回收點、`failed` 後恢復指令、權杖與動詞白名單、已知邊界）與 §7〈何時走 SDD 迴圈〉判準。
+4. **TCS 模板**（`docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md`）：檔頭加 `**scenario**:`（10 場景之一）；§1 加 AT ID 文法
+   `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*` 與「前兩段＝所屬 AC」；§2 加「實例化時刪除或改成真實 ID」提醒；§4 加 E 類說明（`AT-{NNN}-E-n` 是文件內編號、
+   不可編譯；要執行請命名 `AT-{NNN}-{Y}-E-{n}` 並列入 §1）；新增選填〈增量變更專用：FRD-lite 與增量追溯表〉；SCG-4 命名訂正（S-08）。
+   〔實測〕改後模板餵 Dev-AutoClaude 的 adapter 判讀函式：版本 1.0、場景 greenfield、`unmapped_at_ids`＝`AT-001-1-1`、`AT-001-1-2`（與 ADR §8.2〈模板本體〉列相符）。
+5. **S-08** SCG-4 命名（「Test Strategy Gate」→「PR Review Gate（RG-TEST 為補充閘）」）：`TEST-STRATEGY-SPEC-TEMPLATE.md`、`TEST-CONTRACT-SPEC-TEMPLATE.md`、
+   `RTM-TEMPLATE.md`、`cicd/SDD_TESTING_CICD.md`、`cicd/SDD_GREENFIELD_CICD.md`；`scenarios/testing/SDD_TESTING_ENHANCEMENT.md`、
+   `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md` 兩份場景增強文件原本把 SCG-4 描述成測試計畫閘，改為 RG-TEST（補充閘）與 SCG-4（PR Review Gate）分列，
+   同檔同型的流程行（TESTING 的〈SDD 執行流程差異〉、GREENFIELD 的 Stage 5 與強制時序）一併訂正。
+6. **S-07** 版本戳與計數改版本中性：`README.md`（標題、標頭、組成總覽、模板分類、目錄樹、驗收快照）、`FILE_DIRECTORY_RULES.md`（版本欄、樹註解、Layer 2 表、
+   新增內容標記）改為指向 `FRAMEWORK_STATUS.md`（它沒追蹤者＝磁碟實掃為準）；`AISDLC_SDD_UPGRADE_SOP.md` §2.2 與 `AISDLC_SDD_UPGRADE_CHECKLIST.md` 3.1／3.3 訂正
+   `framework_version` 鍵名（INIT 沒有該鍵；版本戳手寫於標題行、首段、目錄樹根、檔尾 `**版本**` 四處，`skill_header_sync.py` 不含 INIT）。
+7. **S-15** 報告寫入位置：`AISDLC_SDD/CLAUDE.md` Rule 2 表與 `FILE_DIRECTORY_RULES.md`〈報告寫入位置〉表——分析報告改 `docs/06_quality/`、階段報告改
+   `build/planning/archive/`（皆會入庫），`build/reports/` 註明為被 `.gitignore` 忽略的執行期產物。
+8. **S-18** `AISDLC_SDD/.claude/settings.local.json.example` 改寫成現行最小範例（十條唯讀 allow：git 查詢與兩個框架查詢指令，PowerShell 與 Bash 各一組；
+   無舊絕對路徑、無 `git push`／`commit`／`add`／`mv` 全放行）。
+9. **S-19** 路徑未限定／佔位：`AISDLC_SDD_INIT.md` 的 sdd-prd-to-playbook 列與 `agent/specialized/sdd-prd-to-playbook-zh.yaml` 五處，
+   `tools/three_tier_to_playbook.py` → `AutoClaude/tools/three_tier_to_playbook.py`（需 AutoClaude 環境）；`sdd-playbook-compiler-zh.yaml` 的 exit code 補 5、6；
+   `stage-compaction` skill 的 `cd AISDLC_SDD_v0.0X` 改 `<LATEST>` 雙形態。
+10. **B9**（ADR §3.4）：`workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` 與 `stage-compaction` skill 各補一句「`SDD_STATE_DIR` 有設時改指該目錄」。
+11. **父層鏡像**：三支 skill 改完後跑 `python AISDLC_SDD/scripts/sync_exposed_skills.py --write` 重生 `AISDLC_SDD/.claude/skills/`。
+
+### 被訂正原文（逐字）
+
+README.md（`AISDLC_SDD/AISDLC_SDD_v0.30/README.md`，改動前的 HEAD 版）：
+
+```text
+# AISDLC-SDD v0.01
+
+**框架版本**: v0.01
+**最後更新**: 2026-06-12
+**最新發布 Tag**: v2026.06.06-02
+
+| **Chaos 有界停機驗收** | ✅ 37 故障情境隨機注入 × 100 輪，bounded_ratio == 1.0 |
+| **最新驗收快照** | pytest 1512 passed / 4 skip / 14 subtests passed · 五軌 TLC No error（META 13 distinct 不回歸）· chaos 37 故障情境 bounded · next_free ACT-162 / R-9.38 |
+
+| 元件 | 數量 | 說明 |
+|------|------|------|
+| **Agents** | 26 | 7 core + 19 specialized（含 4 系統級 runtime agent：orchestrator / diagnostic / evaluator / gc；v0.02 +sdd-playbook-compiler） |
+| **Scenarios** | 10 | Greenfield / Brownfield / Refactoring / Documentation / DevOps / Integration / Migration / Performance / Security / Testing |
+| **Workflows** | 23 | 1 SDD Gate + 8 core + 13 scenario + 1 ADR（另有 4 Runtime 工作流：FSM Engine / Escalation / Context Governor / Self-Evolution） |
+| **SDD 模板** | 59 | 56 md + 3 yaml（見下方分類） |
+| **CI/CD 規格** | 12 | 9 場景規格 + 3 Runtime 規格（Drift Monitor / Hub Sync / Production Feedback） |
+| **Skills** | 42 | 33 繼承強化 + 9 SDD 核心 |
+| **參考指南** | 58 | C4、ID 命名、估算、文檔品質等 |
+| **Governance 規則** | 38 | Rule 9.x 自動化閉環防護（R-*.yaml） |
+| **形式化軌道** | 5 | TLA+/TLC（tools/fsm_runtime/formal/） |
+
+2. 選擇場景: greenfield / brownfield / refactoring / … （共 10 種）
+
+### 59 個 SDD 專屬模板（56 md + 3 yaml）
+| 分類 | 數量 | 重點模板 |
+| Testing | 19 | …（Architecture 13／Deployment 7／Requirements 5／ADR 4／API 4／Quality 3／Planning 2／Build / Development 2）
+### 12 個 CI/CD 規格
+- **9 場景規格**: Greenfield / Brownfield / Refactoring / Migration / Integration / Testing / Performance / Security（各帶專屬閘門）
+- **3 Runtime 規格**: Drift Monitor / Hub Sync / Production Feedback
+### 6 個核心 Agent SDD 技能增強
+
+| Chaos 驗收 | 37 故障情境隨機注入 × 100 輪，bounded_ratio == 1.0 |
+
+AISDLC_SDD_v0.01/
+├── agent/                       # 26 Agents（7 core + 19 specialized；v0.02 +sdd-playbook-compiler）
+├── scenarios/                   # 10 場景（含 SDD 增強）
+├── workflow/                    # 23 工作流 + 4 Runtime 工作流
+├── docs_template/sdd/           # 59 SDD 專屬模板
+├── cicd/                        # 12 CI/CD 規格
+├── guides/                      # 58 參考指南（含 system/sdd 核心）
+├── .claude/                     # skills/（42 Skills）+ hooks/ + settings.json
+├── governance/                  # Rule 9.x 規則（38 R-*.yaml）+ RULES_INDEX.md
+```
+
+FILE_DIRECTORY_RULES.md（`AISDLC_SDD/AISDLC_SDD_v0.30/FILE_DIRECTORY_RULES.md`，改動前的 HEAD 版；完整原文以 `git show HEAD:<路徑>` 為準）：
+
+```text
+**版本**: v0.06
+│   ├── 📁 core/                      # 7 核心 Agent（含 SDD 技能）
+│   ├── 📁 specialized/               # 14 專業化 Agent（含 SDD 增強）
+├── 📁 scenarios/                     # 10 大情境（含 SDD 增強）+ 跨場景指南
+│   ├── 📄 SCENARIO_AGENT_MAPPING.md # 場景 × Agent 對應表（SDD 10 場景版）
+│   ├── 📁 core/                     # 8 核心工作流（繼承 AISDLC）
+│   ├── 📁 scenario-specific/        # 13 場景工作流（繼承 AISDLC）
+│   ├── 📁 sdd/                      # ★ SDD 專屬模板（59 個：56 md + 3 yaml）
+├── 📁 cicd/                         # ★ SDD CI/CD 規格（9 個）
+├── 📁 .claude/skills/               # ★ Claude Code Skills（39 個）
+│   └── {skill-name}/SKILL.md        # 39 個 skill 目錄（各含 SKILL.md）
+│   └── 📁 scenario-prompts/         # 10 個場景專用指令集
+| agent/ | Agent 配置 | 7 core + 14 specialized |
+| scenarios/ | 場景 SOP + SDD 增強 | 10 場景 × (SOP + DeepDive + QuickRef + SDD Enhancement) |
+| workflow/ | 工作流定義 | 1 SDD Gate + 8 core + 13 scenario + 1 ADR |
+| docs_template/ | 文檔模板 | 59 SDD（56 md + 3 yaml）+ 50+ AISDLC |
+| cicd/ | CI/CD 規格 | 9 個（Base Layer + 8 場景專屬） |
+| guides/ | 參考指南 | 57+ |
+| .claude/skills/ | Claude Code Skills | 39（33 繼承強化 + 6 SDD 新增） |
+| tools/ | 工具腳本 | 6 個 |
+| prompts/ | 使用者指令集 | 15 個 |
+- ★ `cicd/` — 9 個 SDD CI/CD 規格
+- ★ `docs_template/sdd/` — 59 個 SDD 專屬模板（56 md + 3 yaml）
+- ★ `scenarios/*/SDD_*_ENHANCEMENT.md` — 10 個場景 SDD 增強
+- ★ Agent SDD 技能附加（21 個 Agent 全數完成 SDD 升級）
+- ★ `.claude/skills/` 中 6 個 SDD 新增 Skills（sdd-gate、sdd-review、spec-compliance-check、rtm-generate、brownfield-analysis、adr-generate）
+```
+
+其餘各檔的被訂正原文都留在原處（該處的〈🔴 訂正〉註記、HTML／YAML 註解或程式碼區塊內的 `#` 註解行）；`AISDLC_SDD/.claude/settings.local.json.example` 的舊內容
+（JSON 不能帶註解，故收在這裡）：
+
+```json
+      "Bash(rsync -av --exclude='*/archive/' AISDLC_v0.08/agent/ AISDLC_v0.09/agent/)",
+      "Bash(ls AISDLC_v0.09/agent/core/*-zh.yaml)",
+      "Bash(ls AISDLC_v0.09/agent/specialized/*.yaml)",
+      "Bash(git add:*)",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)",
+      "Bash(grep -E \"yaml$\")",
+      "Bash(grep \"version: \\\\\"v0.09\\\\\"\" \"d:/CursorProject/AISDLC_SDD/AISDLC_SDD_v0.01/agent/specialized/\"*.yaml)",
+      "Bash(tar -czf AISDLC_SDD_v0.01/releases/v0.01/AISDLC-SDD_v0.01_release_2026-04-16.tar.gz --exclude=AISDLC_SDD_v0.01/releases/v0.01/AISDLC-SDD_v0.01_release_2026-04-16.tar.gz --exclude=AISDLC_v0.09 --exclude=docs AISDLC_SDD_v0.01/)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(git mv *)"
+```
+
+（以上為原檔 `permissions.allow` 的十四條，逐行照原檔 JSON 字面（含轉義）列出。）
+
+### 同族殘留（本棒未動；超出 §11.2 白名單或超出 S 項範圍，已登記交卷）
+
+- `tools/AISDLC_CLAUDE_RULES.md` 第 103～104 行仍寫「分析報告 → `build/reports/analysis/…`」「階段報告 → `build/reports/phase/…`」（S-15 同族，非白名單檔）。
+- `guides/system/sdd/SDD_Core_Principles.md` 第 93 行「SCG-4（測試計畫後）」、`TEST-STRATEGY-SPEC-TEMPLATE.md`／`TEST-CONTRACT-SPEC-TEMPLATE.md` 內部的「SCG-4 Gate 通過標準」／
+  「SCG-4 人工確認點」、三份 Contract Test／Chaos 模板的「待 SCG-4 凍結／確認」——仍把 SCG-4 當成測試計畫閘（S-08 同族；英文名稱 `Test Strategy Gate` 已全數訂正，語意層殘留待決）。
+- `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md` 的 Stage 樹另有疑似與 SSOT 閘門表不符的標註（Stage 2 把 FRD＋RTM 凍結標成 SCG-1、Stage 6 把安全規格凍結標成 SCG-5；舊編號殘留，未逐項查證）。
+- `AISDLC_SDD_INIT.md` 文末〈最新驗收〉快照（以 `**最新驗收**：` 開頭的那一段；動手前在第 962 行，S-19 在上方多加 4 行後現為第 966 行）寫的
+  pytest 數、tag、next_free 已過期——其 pytest 數是凍結基線 v0.01 的舊計數，不是 LATEST 現值。
+- `AISDLC_SDD_UPGRADE_SOP.md` §2.2「所有 Agent YAML：更新 `version` 欄位」與 `agent_scg_anchor_lint` 判準 4（`agent.version` 一律指向 FRAMEWORK_STATUS、禁寫版號字面）互斥；CHECKLIST 3.4 同。
+
+### 驗證與回退
+
+- **驗證指令**：`AISDLC_SDD/scripts/` 十支 lint（`agent_template_lint`、`agent_scg_anchor_lint`、`collaboration_symmetry_lint`、`gitignore_coverage_lint`、`rfc_lifecycle_lint`、
+  `router_hook_coverage_lint`、`scenario_frequency_lint` 傳 `AISDLC_SDD`；`skill_header_sync`、`sync_exposed_skills`、`framework_status_snapshot` 用 `--check --repo-root`）逐支 rc；
+  `ci-gate.ps1`。文件內的指令樣板另在隔離沙盒（`SDD_STATE_DIR` 指向暫存目錄、規則命中遙測旗標顯式 0）真跑：PowerShell 樣板二十三個呼叫（INIT→RELEASE 全流程，
+  含刻意失敗的缺檔 `--must-exist` rc 5、HUMAN_PENDING 下 `transition --to SPEC_DRAFTING` rc 1、重複 `spec-frozen` rc 3），bash 樣板八個呼叫（含相對路徑 `SDD_STATE_DIR` rc 4）。
+  逐字 rc 與輸出見 Dev-SDD-DOC 交卷與該棒 log，不抄進本檔（數字會過期）。
+- **回退**：純文件變更，`git revert` 該 commit 即可；之後再跑 `python AISDLC_SDD/scripts/sync_exposed_skills.py --write` 讓父層鏡像回到 LATEST。無 API、無狀態檔格式、無 `*.tla` 影響。
+
+## LATEST 修改備忘：整合輪 115／Dev-SDD-RT runtime 面（S-02 LATEST 半、S-09、S-13、S-16；G-02 的 SDD 側、G-17；2026-10-17）
+
+> **注意**：本節**不是**凍結基線例外——只動 LATEST v0.30 與共享層 `AISDLC_SDD/scripts/`（`ci-gate.sh` 下限＋新增一支新鮮度測試）；v0.01 與 v0.02～v0.29
+> 一個位元組未碰。不碰 `_HAPPY_PATH`／任何 `*.tla`（形式化模型零改動，依 Rule 9.18.1 無重跑義務；TLC＝N/A，證據＝`git diff` 對
+> `tools/fsm_runtime/transition_rules.py` 與 `tools/fsm_runtime/formal/` 為空，由收尾窗口與 QA 現跑）。
+> 立節原因：本棒新增 CLI 契約（四個新動詞與 `spec-frozen` 擴充）、改變 `record_spec_frozen` 的簽名與順序（先驗前置）、把狀態目錄收斂到單一解析點，
+> 且多支既有測試夾具必須隨之改動——日後考古「為什麼 CLI 的 rc 是 0～5」「為什麼狀態目錄有個環境變數」「為什麼這幾支測試改 patch `DEFAULT_STATE_DIR`」時要找的就是這裡。
+> 設計依據：`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md` §3、§4、§12、§15；`docs/04_planning/AutoSDD_improving_115.md` §3 G-02／G-17；
+> 框架體檢 `sdd_review_115`（S-xx 即其缺陷編號）。Dev-SDD-DOC 棒的文件改動記於上一節，不在本節。
+
+### delta 清單
+
+1. **§3 環境契約（G-02 的 SDD 側）**：`state_loader.state_dir()` 成為狀態目錄**唯一解析點**——`SDD_STATE_DIR`（`strip()` 後非空、必須是絕對路徑，否則 `ValueError`）＞ 模組常數
+   `DEFAULT_STATE_DIR`（**呼叫時才讀**，既有測試以 monkeypatch 改它）。七個目錄站點收斂：A1 `_default_state_path`／`track_state_path`、A2 `fsm_runtime._reset_today_ledger`、
+   A3／A4 兩支 context hook 的 `LEDGER_DIR`（hook 是 fail-open 載具：解析失敗退回預設目錄並在 stderr 出一行 ASCII 警告）、A5 `spec_monitor` 違反報告、A6 `production_monitor.DEFAULT_DRIFT_LOG_DIR`、
+   A7 `subagent_contract.BYPASS_LOG_DIR`；**A8** 外部專案模式（`SDD_STATE_DIR` 非空白）規則命中遙測（`fire_count`／`catch_count` 會寫回版本目錄內被追蹤的 `governance/rules/*.yaml`）**預設關**
+   （顯式 `0／1` 仍優先、不出聲、排在 D28 hook 身分判定之前）。`project_from_env()`：`SDD_PROJECT` 純空白視同未設。
+2. **§4 CLI 契約（新模組 `spec_digest.py` ＋ `fsm_runtime._cli`）**：四個新動詞 `negotiate-enter`／`negotiate-exit`／`delegate-enter`／`delegate-exit`（直接包既有 `FSMRuntime` 方法，零新轉態邊）、
+   `spec-frozen` 擴充（`--digest`／`--root`／`--reason`／`--approver`／`--json`）、全域 `--must-exist`。stdout 恰好一行 ASCII JSON、失敗另在 stderr 印一行 ASCII；rc 表 0 成功／1 非預期例外／
+   2 argparse 用法錯誤／3 前置狀態不符／4 參數值不合法／5 狀態檔不存在或不可讀（現行非法轉態是 traceback＋rc 1，Bridge 因此分不出「前置不符」與「程式壞了」）。
+   摘要＝換行正規化後 UTF-8 bytes 的 sha256（`sha256:<hex>`，與 AutoClaude adapter 的 `SddSpec.digest` 逐位元相同；不是原始 bytes——CRLF 檔會假紅）；鍵＝POSIX 相對 `--root`；
+   寫 `frozen_stages[-1].spec_doc_digests`／`approved_by`（只在有值時才出現）。**先驗前置、再算摘要、最後才改狀態**：`FSMRuntime.record_spec_frozen` 改為先 `assert_transition`
+   （此前先改記憶體再轉態，前置不合法時留下改了一半的記憶體狀態）。不帶新旗標時舊動詞輸出與 rc 逐字不變。
+3. **§12 S-02 LATEST 半**：`.claude/settings.json` 的 PreToolUse／PostToolUse matcher 各加 `PowerShell`；同批 `_assert_allowed_under_auto_compact` 放行 PowerShell（否則 Windows 上
+   AUTO_COMPACT_PENDING 期間連 `complete-auto-compact` 都跑不了＝死鎖）、`conversation_ledger.estimate_tool_tokens` 與 `context_ledger_pre._estimate_tokens` 備援對 PowerShell 與 Bash 同形（否則帳本估 0）。
+4. **S-09／G-17 測試沙盒**：`tests/conftest.py` 新增 session 級 autouse 沙盒（清 `SDD_STATE_DIR`／`SDD_PROJECT`，把 `DEFAULT_STATE_DIR`、`DEFAULT_DRIFT_LOG_DIR`、`BYPASS_LOG_DIR`、
+   `DISPATCH_LOG_DIR`、`SNAPSHOT_DIR` 導向 `build/reports/fsm` 形狀的暫存目錄）＋函式級 autouse 守衛（任何測試結束時環境變數洩漏即紅，洩漏者自己的 teardown 現形）；`test_transitions.py`
+   `RuntimeBootstrapTests` tearDown 還原 `SDD_PROJECT`；`test_e2e_smoke.py` 的 hook 子行程改帶 `SDD_STATE_DIR`；六支既有測試夾具（`test_recovery_hint`／`test_e2e_smoke`／兩支 hook 測試／
+   `test_session_start_rules`／`test_settings_matcher_r145`）因 A2 不再讀 `REPO_ROOT`，同步 patch `DEFAULT_STATE_DIR`（意圖與斷言不動）。刪除 7 支 `FSM-STATE-test-*.yaml` 殘檔
+   （逐一現查：`git ls-files --error-unmatch` 回 1＝未追蹤、`git check-ignore` 回 0＝被忽略）。
+5. **S-16**：`test_conversation_ledger.py` 的 `_dead_pid()` 改「剛結束的子行程 pid」可攜寫法（Windows 握著 `Popen` handle 保住該 pid 不被回收；移除 `os.kill`——Windows 上 `os.kill(pid, 0)`
+   是 `TerminateProcess` 語意）；Windows 上原本恆 skip 的 5 支 orphan-part 測試改為真的執行（沒有 psutil 時以 `[TOOL-ABSENCE]` 標籤 skip）。
+6. **S-13**：`scripts/ci-gate.sh` 下限重釘——`MIN_TESTS_LATEST` 1650→2132、`MIN_TESTS_SHARED` 240→375（各取本輪 Windows 實測 − 8；凍結基線 1470 不動）；新增
+   `scripts/tests/test_ci_gate_floor_freshness.py`（對照 ONBOARDING §7 表② 的實測，比值不得越過根層 `RATCHET_STALE_RATIO`）。
+7. **文件**：`tools/fsm_runtime/README.md` 補 14 個子命令、環境變數、橋接契約與 rc 表；`templates/FSM-STATE-TEMPLATE.yaml` 僅補 `frozen_stages` 兩個新鍵的註解。
+
+### 與 ADR 的差異／ADR 未規定而本棒補上的判準（供主控裁決）
+
+- `--digest` 至少需要一個 `--doc`（否則 rc 4）：空摘要表會被讀成「沒綁內容」而放行；`--root` 必須是絕對路徑且為既存目錄（否則 rc 4）；`--root` 沒搭配 `--digest` ⇒ rc 2。
+- 摘要鍵取自 `resolve()` 後相對 `--root` 的路徑：POSIX 上等同 `--doc` 字面；Windows 上是磁碟實際大小寫（ADR 寫「照 `--doc` 字面」，兩者只在 Windows 大小寫打錯時才不同；比對端以 `os.path.normcase` 折疊）。
+  鍵與實際被讀的檔因此一一對應（連結指向根內另一處時，鍵是真檔路徑）。
+- `--digest` 沒給 `--json` 時成功輸出沿用人讀的 `OK spec frozen: <stage>`，失敗仍走新契約（單行 JSON＋rc 表）；`--reason`／`--approver` 與摘要無關，兩種模式一視同仁。
+- 兩支 hook 的 `LEDGER_DIR` 解析各持一份 `_resolve_ledger_dir()`（獨立啟動的腳本不共用模組）。
+
+### 驗證與回退
+
+- **驗證**：`python -m pytest tools/fsm_runtime/tests/ -m "not chaos"`（在 v0.30 下）2140 passed／6 skipped（baseline 1979／11 skipped：+156 支本輪新測試、+5 支 Windows 由 skip 轉執行）；
+  `scripts/tests` 383 passed／1 skipped（baseline 373）；沙盒驗收＝整套跑完（序列與 xdist 兩種跑法）`build/reports/` 全樹逐檔 sha256 前後相同（baseline 對照：舊樹跑完會改動當日帳本、
+  `MONITOR-VIOLATION`、`ABORT-RAW`、`DISPATCH-LOG` 四個真實檔）；對 17 個修法各做一次突變（還原該修法），17／17 對應測試轉紅、還原後位元組逐檔相同；ruff 對所有改動檔 rc 0。
+  `ci-gate.ps1` 雙軌全閘與逐字 rc 見 Dev-SDD-RT 交卷與該棒 log，不抄進本檔（數字會過期）。
+- **未驗（〔未驗〕）**：`claude --debug hooks` 對 PowerShell matcher 的活體正負兩面驗證（根層〈hook 載具〉驗收規則，落地後由主控補）；Docker 容器級（唯讀 `/sdd` ＋ `PYTHONDONTWRITEBYTECODE` ＋遙測關）。
+- **回退**：純向後相容（舊動詞不帶新旗標時輸出與 rc 不變；`SDD_STATE_DIR` 未設時預設目錄不變）。還原 `state_loader.py`／`fsm_runtime.py`／`spec_monitor.py`／`production_monitor.py`／
+  `subagent_contract.py`／`conversation_ledger.py`／兩支 hook／`settings.json` 即還原行為；**不建議回退 settings.json 的 PowerShell matcher**（Windows 上 FSM 守門會再次對唯一的 shell 工具失明）。
+  無狀態檔格式破壞（新鍵只在有值時才出現）、無 `*.tla` 影響。
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

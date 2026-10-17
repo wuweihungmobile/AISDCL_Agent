@@ -198,7 +198,10 @@ class GreenfieldSmokeTest(unittest.TestCase):
         ledger_dir = tmp_root / "build" / "reports" / "fsm"
         ledger_dir.mkdir(parents=True, exist_ok=True)
         ledger_path = ledger_dir / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
+        # ADR-XPLAT-016 A2：`_reset_today_ledger` 的帳本目錄走 `state_dir()`（＝`DEFAULT_STATE_DIR`），
+        # 不再讀 REPO_ROOT——兩者都指到 tmp，才量得到「歸零的是這本帳」。
         with patch.object(sl_mod, "REPO_ROOT", tmp_root), \
+                patch.object(sl_mod, "DEFAULT_STATE_DIR", ledger_dir), \
                 patch.object(snap_mod, "SNAPSHOT_DIR", tmp_root / "build" / "reports" / "abort"):
             with ledger_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump({
@@ -255,16 +258,22 @@ class HookBypassSubprocessTest(unittest.TestCase):
         env.update(env_extra)
         # Ensure PYTHONIOENCODING for Windows console UTF-8.
         env.setdefault("PYTHONIOENCODING", "utf-8")
-        proc = subprocess.run(
-            [sys.executable, str(hook)],
-            input=json.dumps(stdin_json),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=str(_SDD_ROOT),
-            env=env,
-            timeout=15,
-        )
+        # 體檢 S-09／ADR-XPLAT-016 §3.4：子行程不繼承 conftest 的模組級沙盒（`DEFAULT_STATE_DIR` 的
+        # monkeypatch 只活在測試行程內），裸跑 hook 會 bootstrap 並寫**真實**的
+        # `build/reports/fsm/`（FSM 狀態檔、當日帳本）。改以 `SDD_STATE_DIR`（子行程看得到的唯一
+        # 解析入口，hook 的 LEDGER_DIR 也走它）導向 tmp，順便在真子行程裡走一遍 A3／A4 的解析點。
+        with tempfile.TemporaryDirectory() as state_tmp:
+            env.setdefault("SDD_STATE_DIR", state_tmp)
+            proc = subprocess.run(
+                [sys.executable, str(hook)],
+                input=json.dumps(stdin_json),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                cwd=str(_SDD_ROOT),
+                env=env,
+                timeout=15,
+            )
         self.assertEqual(
             proc.returncode, 0,
             f"hook {script} exited {proc.returncode}; stderr={proc.stderr}",

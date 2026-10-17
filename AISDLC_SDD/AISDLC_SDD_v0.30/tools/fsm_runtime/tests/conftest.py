@@ -178,3 +178,74 @@ def _isolate_scaffold_gc_default():
             os.environ.pop(_ENV, None)
         else:
             os.environ[_ENV] = prior
+
+
+# ADR-XPLAT-016 §3.4「測試沙盒」（體檢 S-09／G-17 的根因）autouse 隔離 ─────────────────────────
+# WHY：測試把狀態檔、當日帳本（CONTEXT-LEDGER-*）、違反報告（MONITOR-VIOLATION-*）、旁路日誌寫進
+# **真實**的 `build/reports/fsm/`——審查實測全閘門跑完該目錄多出 9 個檔、abort／test-analysis 各多
+# 數個，且與真實 hook 共用同一個「當日」檔名（測試的合成 `FRD.md` Write 與 `retry_count=99` 混進
+# 活帳本）。更糟的是 `test_transitions.RuntimeBootstrapTests` 設了 `SDD_PROJECT=test-<pid>` 卻沒
+# 還原，之後任何走 `project_from_env()` 的裸 bootstrap 都在真實目錄長出 `FSM-STATE-test-<pid>.yaml`
+# 假專案（Bridge 的 `/sdd/fsm` 清單於是把它們當成真專案列出）。
+# 做法：①清掉 `SDD_STATE_DIR`／`SDD_PROJECT`（不是「設成 tmp」——設了 `SDD_STATE_DIR` 會讓測試對
+# `DEFAULT_STATE_DIR` 的 monkeypatch 被環境變數蓋過，且外部專案模式會關掉遙測預設，改變被測行為）；
+# ②把 `state_loader.DEFAULT_STATE_DIR` 與**載入時求值**的各目錄常數導向 session 級暫存目錄。暫存目錄
+# 取 `build/reports/fsm` 的形狀，使既有「`.name == "fsm"`」斷言（test_template_location）不破。
+# 各測試自己的 monkeypatch 照舊疊在這一層之上、結束時還原回這個沙盒值（不是回到真實目錄）。
+# 除 fsm 目錄外，abort（`snapshot.SNAPSHOT_DIR`）與 test-analysis（`subagent_contract.DISPATCH_LOG_DIR`）
+# 也一併導向同一個沙盒——審查實測它們同樣被測試寫穿；其餘 build/reports/* 站點不是 FSM 狀態、Bridge
+# 不觸發，ADR §3.4 B8 明列不搬，本沙盒也不碰。
+# 驗收：整套跑完，`build/reports/fsm/` 的檔案清單前後完全相同（序列與 xdist 兩種跑法都驗過）。
+_SANDBOX_ENVS = ("SDD_STATE_DIR", "SDD_PROJECT")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolate_fsm_state_dir():
+    import tools.fsm_runtime.production_monitor as production_monitor
+    import tools.fsm_runtime.snapshot as snapshot
+    import tools.fsm_runtime.state_loader as state_loader
+    import tools.fsm_runtime.subagent_contract as subagent_contract
+
+    prior_env = {k: os.environ.get(k) for k in _SANDBOX_ENVS}
+    for k in _SANDBOX_ENVS:
+        os.environ.pop(k, None)
+    with tempfile.TemporaryDirectory(prefix="sdd-state-sandbox-") as td:
+        reports = Path(td) / "build" / "reports"
+        fsm_dir = reports / "fsm"
+        fsm_dir.mkdir(parents=True)
+        redirected = (
+            (state_loader, "DEFAULT_STATE_DIR", fsm_dir),
+            (production_monitor, "DEFAULT_DRIFT_LOG_DIR", fsm_dir),
+            (subagent_contract, "BYPASS_LOG_DIR", fsm_dir),
+            (subagent_contract, "DISPATCH_LOG_DIR", reports / "test-analysis"),
+            (snapshot, "SNAPSHOT_DIR", reports / "abort"),
+        )
+        saved = [(mod, name, getattr(mod, name)) for mod, name, _ in redirected]
+        for mod, name, value in redirected:
+            setattr(mod, name, value)
+        try:
+            yield fsm_dir
+        finally:
+            for mod, name, value in saved:
+                setattr(mod, name, value)
+            for k, v in prior_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
+@pytest.fixture(autouse=True)
+def _no_test_leaks_the_state_env():
+    """每支測試結束時 `SDD_STATE_DIR`／`SDD_PROJECT` 必須回到「未設」（沙盒起算的值），洩漏者當場紅。
+
+    S-09 的原始缺陷正是洩漏：`RuntimeBootstrapTests` 設了 `SDD_PROJECT=test-<pid>` 卻沒還原，之後同一行程內
+    任何走 `project_from_env()` 的裸 bootstrap 都換了專案名。沙盒讓洩漏不再弄髒真實目錄，但洩漏本身仍會悄悄
+    改變後續測試的行為——這裡讓它在**洩漏者自己的 teardown** 就現形，而不是等到某個無辜的測試莫名其妙失敗。
+    （函式級 autouse 在 monkeypatch／unittest 的 tearDown 之後才收尾，不會誤傷已正確還原的測試。）
+    """
+    yield
+    leaked = {k: os.environ[k] for k in _SANDBOX_ENVS if k in os.environ}
+    assert not leaked, (
+        f"本測試結束時環境變數洩漏：{leaked}——請用 monkeypatch／patch.dict，或 tearDown 還原進場前的值"
+    )

@@ -95,10 +95,19 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 | 場景 SOP/Enhancement | `AISDLC_SDD_v<LATEST>/scenarios/{scenario}/` |
 | SDD 框架模板 | `AISDLC_SDD_v<LATEST>/docs_template/sdd/{category}/` |
 | CI/CD 規格 | `AISDLC_SDD_v<LATEST>/cicd/` |
-| 分析報告 | `AISDLC_SDD_v<LATEST>/build/reports/analysis/` |
-| 階段報告 | `AISDLC_SDD_v<LATEST>/build/reports/phase/` |
+| 分析報告（要入庫的結論性報告） | `AISDLC_SDD_v<LATEST>/docs/06_quality/` |
+| 階段報告（要入庫者） | `AISDLC_SDD_v<LATEST>/build/planning/archive/` |
+| 工具自動寫的執行期報告（FSM-STATE／ledger／abort／scg／compaction 等；**不入庫**，勿手寫報告到這裡） | `AISDLC_SDD_v<LATEST>/build/reports/**` |
 | 規劃文件 | `AISDLC_SDD_v<LATEST>/build/planning/active/` |
 | 歸檔文件 | `AISDLC_SDD_v<LATEST>/build/planning/archive/` |
+
+> 🔴 **115／S-15 訂正**：**被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）**：
+> 「`| 分析報告 | AISDLC_SDD_v<LATEST>/build/reports/analysis/ |`」「`| 階段報告 | AISDLC_SDD_v<LATEST>/build/reports/phase/ |`」。
+> 為何改：`AISDLC_SDD/.gitignore` 的各版區塊都忽略 `build/reports/` 內的報告（LATEST 例：`AISDLC_SDD_v0.30/build/reports/` 整個目錄；
+> v0.13 起皆此形，v0.05～v0.12 為 `build/reports/*` 並只放行 `fsm/FSM-STATE-TEMPLATE.yaml` 一檔），
+> 照原表寫的分析／階段報告 clone 後就消失；LATEST 被追蹤的 build 內容只有 `planning/` 與 `logs/README.md`。
+> `build/reports/` 只放工具自動寫的執行期產物。同一宣稱的其他站點：`FILE_DIRECTORY_RULES.md` 〈報告寫入位置〉表（已同步訂正）；
+> `tools/AISDLC_CLAUDE_RULES.md` 第 103～104 行同寫法（不在本輪文件白名單，未動，已登記交卷）。
 
 **專案層（Layer 3）— 寫入 `AISDLC_SDD_v<LATEST>/docs/` 子目錄**：
 

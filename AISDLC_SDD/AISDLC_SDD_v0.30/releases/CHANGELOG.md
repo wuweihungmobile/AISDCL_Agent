@@ -1,9 +1,62 @@
 # AISDLC-SDD Framework CHANGELOG
 
 **維護者**: AISDLC-SDD Framework Team
-**最後更新**: 2026-06-30
+**最後更新**: 2026-10-17
 
 ---
+
+## [v0.30 LATEST 原地修改] - 2026-10-17（整合輪 115／Dev-SDD-DOC 文件面；LATEST 本就可原地改，未開新版）
+
+> 來源：AutoSDD_improving_115（A 柱 Console↔Bridge↔AutoClaude↔SDD 端到端迴圈＋B 柱 SDD LATEST 接線面文件）；設計依據
+> `docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`（§11.2 DOC 棒白名單、§13 增量條款）。本節只記 Dev-SDD-DOC 棒
+> （文件、模板、skills、agent yaml 文字）；runtime／測試改動由 Dev-SDD-RT 棒另節記載。被訂正的原文與完整 delta 見 `EVOLUTION_LOG.md`
+> 〈LATEST 修改備忘：整合輪 115／Dev-SDD-DOC 文件面〉。
+
+### 新增
+- `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈FSM 寫入指令〉（S-01，P1）：雙形態呼叫樣板、閘門結果 → 指令對照表、`spec-frozen --digest` 旗標與 rc 契約、ESCALATION 人工恢復；
+  `sdd-gate` skill〈階段 4〉、`stage-compaction` skill Step 0 補確切指令。
+- 〈增量（delta）條款〉（G-10／D-115-07）：ADR-XPLAT-016 §13 草案逐字放入 gate 文件、`sdd-gate`、`spec-compliance-check`。
+- `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` v0.03：§6〈Console／Bridge 路徑〉單一 SOP、§7〈何時走 SDD 迴圈〉判準（G-16／G-11）。
+- `docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md`：`**scenario**:` 欄、AT ID 文法句、E 類 AT 說明、實例化提醒、選填〈增量追溯表〉。
+- `SDD_FSM_ENGINE.md` 與 `stage-compaction` skill 各補一句「`SDD_STATE_DIR` 有設時改指該目錄」（ADR §3.4 B9）。
+
+### 修正
+- S-06：`SDD_AUTOCLAUDE_BRIDGE.md` 與程式／本檔 Phase Z′ 條目互斥四點（§5「提案，未落地」、evaluator 範本、exit code 缺 5／6、依據連結已搬到 `Archive/`）。
+- S-07：`README.md`、`FILE_DIRECTORY_RULES.md` 改版本中性並指向 `FRAMEWORK_STATUS.md`；`AISDLC_SDD_UPGRADE_SOP.md`／`AISDLC_SDD_UPGRADE_CHECKLIST.md` 訂正不存在的 `framework_version` 鍵。
+- S-08：SCG-4 英文名「Test Strategy Gate」→「PR Review Gate（RG-TEST 為補充閘）」（七處，另含兩份場景增強文件的同型流程行）。
+- S-15：`AISDLC_SDD/CLAUDE.md` Rule 2 與 `FILE_DIRECTORY_RULES.md` 的報告寫入位置改指向會入庫的位置。
+- S-18：`AISDLC_SDD/.claude/settings.local.json.example` 改寫成現行最小範例（移除舊絕對路徑與 `git push` 等全放行）。
+- S-19：`AutoClaude/tools/three_tier_to_playbook.py` 路徑限定（INIT 一列、`sdd-prd-to-playbook-zh.yaml` 五處）、`sdd-playbook-compiler-zh.yaml` exit code 補 5／6、
+  `stage-compaction` 的 `cd AISDLC_SDD_v0.0X` 改 `<LATEST>` 雙形態。
+- `SDD_SPEC_FIRST_GATE.md` 第 3 步「retry_count 不重置，待 SPEC_FROZEN 後重置」與 runtime 不符（`gate … PASS` 當下即歸零）——加訂正註記，原文保留。
+
+### 形式化驗證
+- **`_HAPPY_PATH`／`*.tla` 本棒零改動 → Rule 9.18.1 無重跑義務**（本棒不碰任何 `.py`；不取新 ACT／Rule）。
+
+## [v0.30 LATEST 原地修改] - 2026-10-17（整合輪 115／Dev-SDD-RT runtime 面；LATEST 本就可原地改，未開新版）
+
+> 來源：AutoSDD_improving_115；設計依據 `docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`（§3 環境契約、§4 CLI 契約、§12 PowerShell matcher、§15 守護測試）。
+> 本節只記 Dev-SDD-RT 棒（runtime、hooks、測試、共享 ci-gate）；文件改動見上一節。與 ADR 的差異與完整 delta 見 `EVOLUTION_LOG.md`
+> 〈LATEST 修改備忘：整合輪 115／Dev-SDD-RT runtime 面〉。
+
+### 新增
+- **狀態目錄單一解析點** `state_loader.state_dir()`（`SDD_STATE_DIR` 絕對路徑 ＞ `DEFAULT_STATE_DIR`；相對路徑 `ValueError`）：七個目錄站點（狀態檔、當日帳本、兩支 context hook、違反報告、PBS-DRIFT、旁路日誌）全跟隨；
+  外部專案模式（`SDD_STATE_DIR` 非空白）規則命中遙測預設關。
+- **CLI 新動詞** `negotiate-enter`／`negotiate-exit`／`delegate-enter`／`delegate-exit`，`spec-frozen` 擴充 `--digest`／`--root`／`--reason`／`--approver`／`--json`，全域 `--must-exist`；
+  stdout 單行 ASCII JSON、rc 表 0／1／2／3／4／5（見 `tools/fsm_runtime/README.md`）。新模組 `tools/fsm_runtime/spec_digest.py`（換行正規化 sha256 摘要、路徑正規化、超限判斷）。
+- 守護測試：`test_sdd_state_dir.py`、`test_cli_bridge_verbs.py`、`test_spec_digest.py`、`test_settings_matcher_powershell.py`（版本內）、`scripts/tests/test_ci_gate_floor_freshness.py`（共享層）；
+  測試沙盒與「環境變數不得洩漏」守衛（`tests/conftest.py`）。
+
+### 修正
+- S-02（LATEST 半）：`.claude/settings.json` 兩個 matcher 加 `PowerShell`；`_assert_allowed_under_auto_compact` 放行 PowerShell（防 Windows 上 AUTO_COMPACT_PENDING 死鎖）；
+  `conversation_ledger.estimate_tool_tokens`／`context_ledger_pre._estimate_tokens` 備援對 PowerShell 與 Bash 同形。
+- S-09：測試寫進真實 `build/reports/`（含 `SDD_PROJECT` 洩漏長出 `FSM-STATE-test-<pid>` 假專案）——沙盒＋tearDown 還原；清除 7 支殘檔。
+- S-16：`_dead_pid()` 改可攜寫法，Windows 上 5 支 orphan-part 測試由恆 skip 轉為真的執行。
+- S-13：`scripts/ci-gate.sh` 的 `MIN_TESTS_LATEST` 1650→2132、`MIN_TESTS_SHARED` 240→375（實測 − 8），並加新鮮度測試。
+- `FSMRuntime.record_spec_frozen` 先驗前置再改狀態（錯誤型別與訊息不變）；`project_from_env()` 純空白視同未設。
+
+### 形式化驗證
+- **`_HAPPY_PATH`／`*.tla` 本棒零改動 → Rule 9.18.1 無重跑義務**（四個新動詞直接包既有 `FSMRuntime` 方法，零新轉態邊；不取新 ACT／Rule）。
 
 ## [v0.30] - 2026-06-30（Copy-on-Evolve 自 v0.29；v0.29 凍結唯讀）
 

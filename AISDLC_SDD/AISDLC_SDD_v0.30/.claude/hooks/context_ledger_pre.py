@@ -3,7 +3,7 @@
 Wiring (.claude/settings.json):
     "hooks": {
       "PreToolUse": [{
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task",
+        "matcher": "Write|Edit|Read|Bash|PowerShell|NotebookEdit|Task|Agent|Workflow",
         "hooks": [{ "type": "command",
            "command": "python .claude/hooks/context_ledger_pre.py" }]
       }]
@@ -63,7 +63,29 @@ from tools.fsm_runtime.context_window import (  # noqa: E402
     window_evidence,
 )
 
-LEDGER_DIR = _SDD_ROOT / "build" / "reports" / "fsm"
+
+def _resolve_ledger_dir() -> Path:
+    """ADR-XPLAT-016 §3.4 A3：帳本目錄與狀態檔、`_reset_today_ledger` 同走 `state_loader.state_dir()`
+    （外部專案模式＝SDD_STATE_DIR）——`complete-auto-compact` 歸零的才是 hook 寫的那本帳。
+
+    hook 是 fail-open 載具：解析失敗（`SDD_STATE_DIR` 寫成相對路徑、state_loader 缺 PyYAML 時的
+    `SystemExit` 等）一律退回預設目錄並在 stderr 出一行 ASCII 警告，**不得**讓每次工具呼叫的 hook
+    因此崩潰。
+    """
+    try:
+        from tools.fsm_runtime.state_loader import state_dir  # type: ignore
+
+        return state_dir()
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 — SystemExit 不是 Exception 的子類
+        if sys.stderr is not None:
+            sys.stderr.write(
+                "[SDD-HOOK] state_dir() unavailable, falling back to build/reports/fsm: "
+                + ascii(str(exc))[:160] + "\n"
+            )
+        return _SDD_ROOT / "build" / "reports" / "fsm"
+
+
+LEDGER_DIR = _resolve_ledger_dir()
 
 _BYPASS_HINT = "緊急繞過：set SDD_HOOKS_DISABLE=1（全關）或 SDD_HOOKS_DRY_RUN=1（改發警告不阻擋）。"
 # D17（DEF-200-275 第六輪；F-ARCH-04）：擴到 TOKEN_BUDGET_CRITICAL／TERMINATED——deny 訊息「一律帶
@@ -176,7 +198,7 @@ def _estimate_tokens(tool: str, tool_input: dict) -> int:
         if tool in {"Write", "Edit"}:
             text = tool_input.get("content") or tool_input.get("new_string") or ""
             return max(1, len(text) // 4)
-        if tool == "Bash":
+        if tool in {"Bash", "PowerShell"}:  # ADR-XPLAT-016 §12：與 conversation_ledger 同形
             cmd = tool_input.get("command", "") or ""
             return max(1, len(cmd) // 4) if cmd else 0
         if tool == "NotebookEdit":

@@ -42,6 +42,16 @@ SDD 三大支柱之 **Spec-First Gate** 的自動驗證子任務。所有 Agent 
 
 ### 階段 2：按文件類型執行驗證
 
+> **增量（delta）變更的檢查表判定**（G-10／D-115-07；與 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈增量（delta）條款〉
+> 同一條，本處引用一次）：
+>
+> 增量條款：變更限於已凍結系統的單一 Feature 時，SCG-0～3 各清單項可用「追溯 ID＋已凍結上位文件路徑與凍結摘要」滿足，於 TCS 檔頭〈增量追溯表〉逐項列出，免重寫整份。增量文件集＝FRD-lite（US／AC 併入 TCS 檔頭）＋TCS。僅新架構決策才另立 ADR，僅對外 API／事件契約變更才另附 OpenAPI delta。引用不得指向未凍結文件；未列入追溯表視為未滿足。
+>
+> 驗證增量文件集時：FRD-lite（TCS 檔頭的 US／AC）照 FRD 的 AC 格式規則檢查；PRD／SRD／ADR／Contract 的必填欄位與
+> 命名檢查改驗〈增量追溯表〉——每個清單項一列、追溯 ID 與上位文件路徑存在、`sha256:` 摘要與 FSM 狀態檔
+> `frozen_stages[*].spec_doc_digests` 相符、被引用文件確實列在 `frozen_stages[*].spec_docs`。**沒有那一列＝該檢查項
+> 視為未通過**，不得當成 N/A；有新架構決策才檢查新 ADR、有對外 API／事件契約變更才檢查 OpenAPI delta。
+
 #### 📄 PRD（Product Requirements Document）
 ```
 必填欄位:
@@ -213,6 +223,8 @@ SDD 三大支柱之 **Spec-First Gate** 的自動驗證子任務。所有 Agent 
 
 - 若全部通過 → 執行 `/sdd-gate SCG-{N}` 正式驗證閘門
 - 若有失敗項 → 依報告修正後重新執行 `/spec-compliance-check`
+- 閘門結果要落成 FSM 寫入（`gate`／`spec-frozen` CLI），確切指令見 `/sdd-gate`〈階段 4〉與
+  `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈FSM 寫入指令〉；本 Skill 自己不寫 FSM
 
 🔷 **本 Skill 是 SCG 閘門的自動驗證前置步驟**
 

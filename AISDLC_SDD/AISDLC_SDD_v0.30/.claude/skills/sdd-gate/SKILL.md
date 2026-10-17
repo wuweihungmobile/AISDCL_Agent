@@ -30,6 +30,11 @@ SDD 三大支柱之 **Spec-First Gate**：每個關鍵里程碑前的強制閘�
 /sdd-gate SCG-0 --retry-reset  # 人工修復後重置 retry_count（須在 ESCALATION 解除後執行）
 ```
 
+> 🔴 **現況對照（整合輪 115／S-01）**：`--status` 的權威來源是 FSM 狀態檔（`show` 讀 `retry_history.<GATE>`，
+> 見下方〈階段 4〉）。FSM CLI **沒有**單獨重置 retry_count 的動詞：該 gate 的計數在下一次 `gate … PASS` 或
+> `spec-frozen` 時歸零；ESCALATION 的人工恢復用 `resume-from-escalation`。不得手改 `FSM-STATE-*.yaml`
+> （Rule 9 絕對禁令 #1）。
+
 ---
 
 ## 🔄 FSM 整合：Retry Budget 管理
@@ -55,6 +60,10 @@ retry_policy:
 ```
 
 ### Retry_count 追蹤規則
+
+> retry_count 的**權威存放處是 FSM 狀態檔**（只經 `python -m tools.fsm_runtime.fsm_runtime gate …` 寫入，見〈階段 4〉）；
+> 下列 context 記錄只是本場工作筆記，**不能取代** CLI 寫入——不寫＝FSM 看不到這次閘門，橋接的凍結閘與 Console
+> 的 FSM 視圖也就永遠看不到進度。
 
 ```
 每次執行 /sdd-gate 時，在 context 中記錄：
@@ -149,6 +158,15 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 ---
 
 ### 階段 2：逐項驗證
+
+> **增量（delta）變更的清單判定**（G-10／D-115-07；與 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈增量（delta）條款〉
+> 同一條，本處引用一次）：
+>
+> 增量條款：變更限於已凍結系統的單一 Feature 時，SCG-0～3 各清單項可用「追溯 ID＋已凍結上位文件路徑與凍結摘要」滿足，於 TCS 檔頭〈增量追溯表〉逐項列出，免重寫整份。增量文件集＝FRD-lite（US／AC 併入 TCS 檔頭）＋TCS。僅新架構決策才另立 ADR，僅對外 API／事件契約變更才另附 OpenAPI delta。引用不得指向未凍結文件；未列入追溯表視為未滿足。
+>
+> 判定時：下列 SCG-0～3 的每個勾選項，若該變更走增量，就到 TCS 檔頭〈增量追溯表〉找對應列（追溯 ID、上位文件路徑、
+> `sha256:` 摘要），並以 `show` 確認該文件在 `frozen_stages[*].spec_docs` 內；**沒有那一列＝該項未通過**，不得因為
+> 「增量」而當成 N/A。SCG-4～6 清單不因增量而縮減。
 
 #### 🔷 SCG-0：需求凍結
 ```
@@ -255,6 +273,46 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 
 ---
 
+### 階段 4：把結果寫進 FSM（S-01：不寫＝這道閘門在 FSM 眼裡沒發生過）
+
+驗證報告產出後**立即**執行對應指令。cwd＝SDD 版本目錄；不得手改 `FSM-STATE-*.yaml`（Rule 9 絕對禁令 #1）。
+完整時機表、`spec-frozen` 旗標與 rc 契約見 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈FSM 寫入指令〉。
+`<SDD 版本目錄>`＝`AISDLC_SDD/<LATEST>`（現查：`python AISDLC_SDD/scripts/sdd_version.py`）；`<鍵>`＝FSM 專案鍵。
+
+PowerShell（Windows；不裸 `cd`，`Push-Location`／`Pop-Location` 同一次呼叫成對；讀 rc 不接管線）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>; Pop-Location
+```
+
+bash／zsh（mac／Linux）：
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>
+```
+
+外部專案模式（`SDD_STATE_DIR` 必須是絕對路徑；Console 管理的專案屬此類）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; $env:SDD_STATE_DIR = "<專案根>\build\reports\fsm"; $env:SDD_PROJECT = "<鍵>"; python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>; Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT; Pop-Location
+```
+
+```bash
+cd "<SDD 版本目錄>" && SDD_STATE_DIR="<專案根>/build/reports/fsm" SDD_PROJECT="<鍵>" python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>
+```
+
+| 本 Skill 的結果 | `<動詞> <旗標>` |
+|---|---|
+| 讀進度（`--status`） | `show`（看 `fsm_state.current_state`、`retry_history.<GATE>.current_count`、`frozen_stages`） |
+| SCG-0～3 未通過（retry_count++） | `gate --gate SCG_VALIDATION --result FAIL --reason "<失敗原因>"`（第 3 次 → ESCALATION） |
+| SCG-0～3 通過（待人類確認） | `gate --gate SCG_VALIDATION --result PASS --reason "SCG-<n> PASS"`（→ HUMAN_PENDING） |
+| 🔴 **人類明確確認之後**（才可執行） | `spec-frozen --stage "Stage-<n>" --doc "<凍結文件相對路徑>" … --digest --root "<專案根>" --reason "<確認依據>" --approver "<人類確認者>" --json`（→ SPEC_FROZEN；`--doc` 須含 TCS；之後執行 `/stage-compaction`）。`--approver` 填人類，不得填 agent |
+| SCG-4 通過／未通過 | `gate --gate PR_REVIEW --result PASS`（→ RTM_VERIFY）／`--result FAIL --reason "<失敗模式>"`（上限 5；同模式 3 次 → SPEC_AUDIT） |
+| SCG-5 通過／未通過 | `gate --gate RTM_VERIFY --result PASS`（→ RELEASE_READY）／`--result FAIL --reason "<缺口>"`（上限 2） |
+| SCG-6 通過 | `transition --to RELEASE --reason "SCG-6 PASS"` |
+
+---
+
 ## 強制產出（SDD 文件）
 
 | 產出物 | 路徑 | 說明 |
@@ -297,6 +355,6 @@ SCG-6 → 所有 SCG-0~5 驗證報告
 ---
 
 **基於**: AISDLC-SDD v0.30（SDD 專屬 Skill）
-**強化版本**: v1.1（加入 FSM retry_count + pattern_detection）
+**強化版本**: v1.2（v1.1 加入 FSM retry_count + pattern_detection；整合輪 115 補 FSM 寫入指令與增量條款）
 **對應 SDD 原則**: Spec-First Gate（所有 SCG 閘門）
 **對應工作流**: `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`

@@ -26,8 +26,8 @@
     ],
     "PreToolUse": [
       {
-        "_comment": "R145／D20（DEF-200-280／SD-03／F-ARCH-02）：matcher 補上 Agent|Workflow。四方複審實測本條原本圈的 Write|Edit|Read|Bash|NotebookEdit|Task 完全不含 Agent/Workflow，子代理（Agent）／批次編排（Workflow）呼叫因此整條繞過本檔承載的 SDD FSM guardrail（context_ledger_pre）——ESCALATION／AUTO_COMPACT_PENDING 等狀態守門對這兩種工具形同虛設，是 DEF-200-279（不該擋卻擋）的鏡像問題（該擋沒擋）。與根層 `.claude/settings.json` 同型缺口同批修復（F-ARCH-02：根層開 claude + SDD_ACTIVE_VERSION 是更常見的工作流，該檔已同步）。context_ledger_pre.py 的 gating 邏輯（FSMRuntime.assert_tool_allowed）對 _BLOCKING_STATES 的判斷完全由 FSM 狀態決定、與 tool 名稱無關，加寬 matcher 不需要同步改該檔任何邏輯（回歸鎖見 tools/fsm_runtime/tests/test_settings_matcher_r145.py 的 AgentWorkflowGatingTests，兩案在修 matcher 前後皆為綠）。",
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit|Task|Agent|Workflow",
+        "_comment": "R145／D20（DEF-200-280／SD-03／F-ARCH-02）：matcher 補上 Agent|Workflow。四方複審實測本條原本圈的 Write|Edit|Read|Bash|NotebookEdit|Task 完全不含 Agent/Workflow，子代理（Agent）／批次編排（Workflow）呼叫因此整條繞過本檔承載的 SDD FSM guardrail（context_ledger_pre）——ESCALATION／AUTO_COMPACT_PENDING 等狀態守門對這兩種工具形同虛設，是 DEF-200-279（不該擋卻擋）的鏡像問題（該擋沒擋）。與根層 `.claude/settings.json` 同型缺口同批修復（F-ARCH-02：根層開 claude + SDD_ACTIVE_VERSION 是更常見的工作流，該檔已同步）。context_ledger_pre.py 的 gating 邏輯（FSMRuntime.assert_tool_allowed）對 _BLOCKING_STATES 的判斷完全由 FSM 狀態決定、與 tool 名稱無關，加寬 matcher 不需要同步改該檔任何邏輯（回歸鎖見 tools/fsm_runtime/tests/test_settings_matcher_r145.py 的 AgentWorkflowGatingTests，兩案在修 matcher 前後皆為綠）。ADR-XPLAT-016 §12（S-02）：matcher 另補 PowerShell——根層鐵律一在 Windows 禁用 Bash，Windows 唯一的 shell 工具就是 PowerShell，不列它＝FSM 進 ESCALATION 後模型仍可用 PowerShell 跑任意指令；同批已把 `fsm_runtime._assert_allowed_under_auto_compact`（AUTO_COMPACT_PENDING 期間放行 PowerShell，否則 Windows 上死鎖）與 `conversation_ledger.estimate_tool_tokens`／`context_ledger_pre._estimate_tokens` 的 Bash 分支改為與 PowerShell 同形（回歸鎖 tools/fsm_runtime/tests/test_settings_matcher_powershell.py）。",
+        "matcher": "Write|Edit|Read|Bash|PowerShell|NotebookEdit|Task|Agent|Workflow",
         "hooks": [
           {
             "type": "command",
@@ -43,7 +43,8 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "_comment": "ADR-XPLAT-016 §12（S-02）：matcher 含 PowerShell（與 PreToolUse 同批；理由見該條 _comment）。刻意不含 Task／Agent／Workflow：子代理在自己的 context window 內執行，其結果不得記到主 session 的帳（context_ledger_post.py 檔頭 A6-02）。",
+        "matcher": "Write|Edit|Read|Bash|PowerShell|NotebookEdit",
         "hooks": [
           {
             "type": "command",

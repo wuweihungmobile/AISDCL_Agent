@@ -204,9 +204,11 @@ def estimate_read_tokens(file_path: Optional[str]) -> int:
 
 
 def estimate_bash_command_tokens(command: Optional[str]) -> int:
-    """Pre-hook estimate for a Bash call — command text only.
+    """Pre-hook estimate for a Bash／PowerShell call — command text only.
 
     The post hook captures stdout/stderr size via tool_response.
+    ADR-XPLAT-016 §12：Windows 的 shell 工具是 PowerShell（指令文字同樣在 `tool_input.command`），
+    `estimate_tool_tokens` 對兩者走同一個估算，否則 PowerShell 呼叫在帳本裡估成 0。
     """
     if not command:
         return 0
@@ -911,7 +913,7 @@ def estimate_tool_tokens(tool: str, tool_input: Dict[str, Any]) -> int:
         if tool in {"Write", "Edit"}:
             text = tool_input.get("content") or tool_input.get("new_string") or ""
             return max(1, len(text) // _CHARS_PER_TOKEN) if text else 0
-        if tool == "Bash":
+        if tool in {"Bash", "PowerShell"}:
             return estimate_bash_command_tokens(tool_input.get("command"))
         if tool == "NotebookEdit":
             text = tool_input.get("new_source") or tool_input.get("content") or ""

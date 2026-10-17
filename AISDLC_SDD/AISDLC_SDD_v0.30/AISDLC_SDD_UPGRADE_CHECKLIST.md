@@ -37,9 +37,12 @@
 
 ## 階段 3：版本號更新
 
-- [ ] **3.1** `AISDLC_SDD_INIT.md` — framework_version 已更新
+- [ ] **3.1** `AISDLC_SDD_INIT.md` — 版本戳已更新（標題行、首段、目錄樹根、檔尾 `**版本**` 四處；該檔沒有 `framework_version` 鍵）
 - [ ] **3.2** `SDD_Core_Principles.md` — 版本已更新
-- [ ] **3.3** `FILE_DIRECTORY_RULES.md` — 版本已更新
+- [ ] **3.3** `FILE_DIRECTORY_RULES.md` — 免更新（已版本中性）；確認它仍未寫入版號或資產計數
+
+> 🔴 **115／S-07 訂正**：**被訂正的原文逐字保留**：3.1「`AISDLC_SDD_INIT.md` — framework_version 已更新」、
+> 3.3「`FILE_DIRECTORY_RULES.md` — 版本已更新」。理由同 `AISDLC_SDD_UPGRADE_SOP.md` §2.2 的訂正註記。
 - [ ] **3.4** 所有 Agent YAML — version 欄位已更新（全 21 個）
 - [ ] **3.5** `CLAUDE.md`（專案根目錄）— 框架版本已更新
 

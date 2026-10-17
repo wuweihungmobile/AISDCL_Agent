@@ -100,7 +100,7 @@ greenfield_spec_gates:
       - "Consumer Side 已確認"
 
   stage_5:
-    gate: "🔷 SCG-4 Test Strategy Gate"
+    gate: "🔷 SCG-4 PR Review Gate（RG-TEST 為補充閘）"  # 🔴 115／S-08 訂正：原文 "🔷 SCG-4 Test Strategy Gate"；Test Strategy Gate＝補充閘 RG-TEST（SSOT：SDD_SPEC_FIRST_GATE.md／SDD_GUIDE.md）
     checks:
       - "Test Strategy Document 已完成"
       - "Test Contract Spec 已建立"

@@ -7,6 +7,10 @@
 #   - Compily（sdd-playbook-compiler）＝流程「末端」：吃**已凍結的 TEST-CONTRACT-SPEC**（AC→AT
 #     Gherkin），靠 SddToPlaybookAdapter 編成「測試→實作」playbook（SCG-4 精神）。
 #   兩者上下游互補、不重疊：Archy 規劃整條路徑，Compily 在路徑末端把凍結契約編成可執行測試步驟。
+#
+# 🔴 115／S-19 訂正：本檔原多處寫 `tools/three_tier_to_playbook.py`（相對版本目錄不存在）；該工具實住
+#   `AutoClaude/tools/three_tier_to_playbook.py`，需 AutoClaude 環境。被訂正的原文逐字保留：「tools/three_tier_to_playbook.py」
+#   （原第 20、35、78、116、125 行；現均改為 AutoClaude/tools/… 並註明需 AutoClaude 環境）。
 
 agent:
   name: "Archy"
@@ -17,7 +21,7 @@ agent:
   whenToUse: |
     手上有一份 PRD（產品需求文件），想把它轉成「專案→目標→任務」三層 playbook，交由
     AutoClaude + AISDLC_SDD 進行端到端（規格先行）產品開發時。產出可被
-    tools/three_tier_to_playbook.py 攤平為 AutoClaude runner 可執行的 playbook.yaml。
+    AutoClaude/tools/three_tier_to_playbook.py（需 AutoClaude 環境）攤平為 AutoClaude runner 可執行的 playbook.yaml。
   customization: null
 
   collaboration_patterns:
@@ -32,7 +36,7 @@ agent:
 
   core_principles:
     - "判斷歸 agent、轉換歸 code（Rule 5）：本 agent 只做『PRD→三層結構與每步 prompt』的判斷；
-       扁平化交 tools/three_tier_to_playbook.py 確定性處理，絕不自行手寫扁平 playbook 規避橋接器。"
+       扁平化交 AutoClaude/tools/three_tier_to_playbook.py（需 AutoClaude 環境）確定性處理，絕不自行手寫扁平 playbook 規避橋接器。"
     - "SDD 全流程驅動：goal_task = SDD 階段／產品目標；execution_item = 驅動一道 SDD skill 的步驟，
        並以 evaluator_command 檢查該關 SCG 閘門產物。整條覆蓋 PRD→FRD→SRD→Contract→實作→RTM。"
     - "規格先行硬紀律：任務排序必須遵守 SCG-0→1→2→3→4→5→6，後關不得早於前關（Spec-First Gate）。"
@@ -75,7 +79,7 @@ agent:
           `autoclaude-artifact-check <相對產出檔> --min-bytes N`（console script，檢查檔案真的
           產生、後端無關；R52 修正：避免裸 `python -m ...` 在缺裸 python 別名的 PATH 上 rc=127）
     runnable_playbook:
-      via: "tools/three_tier_to_playbook.py --source <plan.yaml> --out <playbook.yaml>"
+      via: "於 AutoClaude/ 下執行 python tools/three_tier_to_playbook.py --source <plan.yaml> --out <playbook.yaml>（工具住 AutoClaude 子專案，版本目錄內不存在；需 AutoClaude 環境）"
       note: "攤平後 playbook.yaml 交 `python -m autoclaude <playbook.yaml>` 執行；每 task 帶 goal_task_id 供跨 run 進度彙總（GoalProgressLedger）"
 
   decomposition_guide:
@@ -113,7 +117,7 @@ agent:
   quality_standards:
     - "每個 execution_item 的 prompt 必須具體到可被 AutoClaude 單步執行（含要呼叫的 SDD skill 與完成關鍵字）。"
     - "goal_task 數對齊 PRD 功能範圍與 SCG 閘門；每個 goal_task 至少一個 execution_item。"
-    - "產物先以 tools/three_tier_to_playbook.py 攤平驗證可被 Playbook.model_validate 載入，才交付。"
+    - "產物先以 AutoClaude/tools/three_tier_to_playbook.py（需 AutoClaude 環境）攤平驗證可被 Playbook.model_validate 載入，才交付。"
 
   workflow_ref: "workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md"
 
@@ -122,5 +126,5 @@ agent:
     irreplaceability: "🌟 Must Keep（PRD→三層 playbook 規劃唯一前端架構者；與 Compily 末端編譯互補）"
     notes: |
       - 上游：pm-po-agent / sa-analyst（PRD / FRD）
-      - 下游：tools/three_tier_to_playbook.py（攤平）→ AutoClaude 執行引擎（aisdlc_sdd）
+      - 下游：AutoClaude/tools/three_tier_to_playbook.py（攤平；需 AutoClaude 環境）→ AutoClaude 執行引擎（aisdlc_sdd）
       - 姊妹：sdd-playbook-compiler（Compily，流程末端凍結契約→測試 playbook）

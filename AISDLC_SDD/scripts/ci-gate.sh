@@ -33,13 +33,20 @@ export PYTHONUTF8=1
 # 噪聲觸發假紅）。往後每輪只可把下限「往上棘輪」，往下調整僅限伴隨蓄意刪測試。
 MIN_TESTS_FROZEN=1470   # R59 重釘（R47 為 1400）。實測 v0.01=1478，留 8 餘裕吸收
                         # docker daemon 停用的 −3（見 ONBOARDING §7 差異歸因表）
-MIN_TESTS_LATEST=1650   # R47 二審修復後實測 LATEST=1729（留 ~79 餘裕；此數字會隨後續各輪
-                        # 新增測試自然漂移，門檻本身不逐輪重新對齊，留有餘裕即可）
-MIN_TESTS_SHARED=240    # R59 重釘（R49 為 190，其註解記的 226 亦已過期——實測 248，
-                        # 比值 248/190=**1.305 已越過根層 run_root_unittests.py 自訂的
-                        # RATCHET_STALE_RATIO=1.25 紅線**，鑑別力少掉三成〔可靜默蒸發 58
-                        # 支仍全綠〕；依 Rule 7「兩套相反政策要擇一」對齊根層 ratchet 精神。
-                        # 留 8 餘裕吸收跨平台 ±1 漂移。R59 二審 ARCH-R59-NB3 指出
+MIN_TESTS_LATEST=2132   # 🔴 整合輪 115／S-13 重釘（原值 1650＝R47 二審修復後實測 1729 留 ~79 餘裕；
+                        # 此後測試一路長到 1979，餘裕膨脹到 329＝可靜默蒸發 329 支仍全綠，而全 repo
+                        # 沒有任何機械物守這個下限的新鮮度）。重釘紀律＝「實測 − 8」：本輪 Windows 實測
+                        # 2140（＝1979＋5 支在 Windows 由恆 skip 轉為執行〔S-16 的 `_dead_pid` 可攜寫法〕
+                        # ＋156 支本輪新測試），留 8 餘裕吸收跨平台 ±1 漂移與 docker daemon 停用的 −3。
+                        # 那 5 支 mac／linux 本來就計入，故 mac／linux 欄預期比 Windows 欄低約 2（推算、
+                        # 非實測；收輪由 `sync_onboarding_baselines.py --write --with-slow` 以真機回填）。
+                        # 守新鮮度的機械物：AISDLC_SDD/scripts/tests/test_ci_gate_floor_freshness.py
+MIN_TESTS_SHARED=375    # 🔴 整合輪 115／S-13 重釘（原值 240＝R59 重釘，其註解記：R49 的 190 對實測 248
+                        # 比值 1.305 已越過根層 tools/run_root_unittests.py 自訂的 RATCHET_STALE_RATIO=1.25
+                        # 紅線，故依 Rule 7「兩套相反政策要擇一」對齊根層 ratchet 精神重釘為 240）。
+                        # 體檢實測 240 對 373 比值 1.554，**又越過同一條紅線**（可靜默蒸發約 130 支仍全綠）。
+                        # 重釘紀律＝「實測 − 8」：本輪實測 383（373＋本輪新增 10 支，即上列守護測試自己），
+                        # 留 8 餘裕吸收跨平台 ±1 漂移。守新鮮度的機械物同上。
 
 # 🔴 R68：載具守門。macOS 預設 shell 是 zsh，`zsh scripts/ci-gate.sh` 下
 # ${BASH_SOURCE[0]} 未定義（zsh: parameter not set）→ REPO_ROOT/dot-source 全解錯，

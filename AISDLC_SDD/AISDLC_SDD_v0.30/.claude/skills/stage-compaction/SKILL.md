@@ -39,6 +39,30 @@ allowed-tools:
 
 ## 執行步驟
 
+### Step 0：凍結寫入（FSM 尚未在 SPEC_FROZEN 時；🔴 人類明確確認之後才可執行）
+
+本 Skill 的前置條件是「當前 FSM 狀態 = SPEC_FROZEN」。若狀態檔還停在 HUMAN_PENDING（凍結只發生在文件層、FSM 沒寫），
+先以 CLI 寫入凍結——這是整條橋接（AutoClaude 凍結閘／Bridge／Console）唯一看得到的凍結憑證；不得手改
+`FSM-STATE-*.yaml`（Rule 9 絕對禁令 #1）。完整旗標與 rc 契約見
+`workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈FSM 寫入指令〉。`--approver` 填**人類**確認者，不得填 agent；
+`--doc` 須含要交給 AutoClaude 的 TCS；一律帶 `--digest`（不帶＝舊行為，凍結後改檔偵測不到）。
+`<SDD 版本目錄>`＝`AISDLC_SDD/<LATEST>`（現查：`python AISDLC_SDD/scripts/sdd_version.py`）；`<鍵>`＝FSM 專案鍵。
+
+PowerShell（不裸 `cd`；`Push-Location`／`Pop-Location` 同一次呼叫成對）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime spec-frozen --project "<鍵>" --stage "Stage-<n>" --doc "<凍結文件相對路徑>" --digest --root "<專案根>" --reason "<人類確認依據>" --approver "<人類確認者>" --json; Pop-Location
+```
+
+bash／zsh（mac／Linux）：
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-frozen --project "<鍵>" --stage "Stage-<n>" --doc "<凍結文件相對路徑>" --digest --root "<專案根>" --reason "<人類確認依據>" --approver "<人類確認者>" --json
+```
+
+外部專案模式（`SDD_STATE_DIR` 有設時改指該目錄，必須是絕對路徑）請套用 `SDD_SPEC_FIRST_GATE.md`〈FSM 寫入指令〉的
+第二組樣板（多設 `SDD_STATE_DIR` 與 `SDD_PROJECT`）。
+
 ### Step 1：文件持久化驗證
 
 ```
@@ -151,18 +175,35 @@ Stage Summary 已建立，包含所有關鍵決策摘要。
 
 ### Step 5：FSM 閉環收尾（90% Auto-Compact 觸發時必執行）
 
-若本次 Compaction 是由 90% 閾值的 AUTO_COMPACT_PENDING 觸發（檢查 `build/reports/fsm/FSM-STATE-{project}.yaml` 的 `current_state == "AUTO_COMPACT_PENDING"`），**必須執行**以下兩條 Bash 指令完成閉環，否則 FSM 會永遠卡在 AUTO_COMPACT_PENDING、Ledger cumulative 也不會歸零，下次 PreToolUse 仍 ≥ 90% 觸發無限迴圈：
+若本次 Compaction 是由 90% 閾值的 AUTO_COMPACT_PENDING 觸發（檢查 `build/reports/fsm/FSM-STATE-{project}.yaml` 的 `current_state == "AUTO_COMPACT_PENDING"`；`SDD_STATE_DIR` 有設時改指該目錄），**必須執行**以下指令（PowerShell 或 bash，擇當前平台一種）完成閉環，否則 FSM 會永遠卡在 AUTO_COMPACT_PENDING、Ledger cumulative 也不會歸零，下次 PreToolUse 仍 ≥ 90% 觸發無限迴圈。
+cwd 必須是「本 skill 所在的框架版本目錄」`AISDLC_SDD/<LATEST>`（現查：`python AISDLC_SDD/scripts/sdd_version.py`）——
+`tools.fsm_runtime` 是以該版本目錄為根的 namespace package，須以其為 cwd 才能解析；勿寫死特定版本號（避免每輪
+Copy-on-Evolve 漂移，DEF-CLDREV-008 紀律）。指令把 FSM 從 AUTO_COMPACT_PENDING 轉回原 resume_state，並重置今日 Ledger
+cumulative_tokens：
+
+PowerShell（Windows；不裸 `cd`，`Push-Location`／`Pop-Location` 同一次呼叫成對）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime complete-auto-compact --project "<鍵>"; Pop-Location
+```
+
+bash／zsh（mac／Linux）：
 
 ```bash
-# 1) 將 FSM 從 AUTO_COMPACT_PENDING 轉回原 resume_state，並重置今日 Ledger cumulative_tokens
-#    cd 至「本 skill 所在的框架版本目錄根」（AISDLC_SDD_v0.0X/，X=當前版本）——tools.fsm_runtime
-#    是以該版本目錄為根的 namespace package，須以其為 cwd 才能解析；勿寫死特定版本號（避免
-#    每輪 Copy-on-Evolve 漂移，DEF-CLDREV-008 紀律）。
-cd AISDLC_SDD_v0.0X && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact --project "<鍵>"
+```
 
+```
 # 預期輸出（範例）：
 # {"resumed_to": "SPEC_DRAFTING", "ledger": {"reset": true, "path": "...", "previous_cumulative": 184000}}
 ```
+
+> 🔴 **訂正（整合輪 115／S-19②）**：**被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）**：
+> 「`cd AISDLC_SDD_v0.0X && python -m tools.fsm_runtime.fsm_runtime complete-auto-compact`」與句中的「以下兩條 Bash 指令」。
+> 為何改：`v0.0X` 佔位對 v0.30 這類兩位次版號易被代成錯版本；原指令是 bash＋裸 `cd`，Windows 鐵律一／二下不可照抄；
+> 該區塊實際只有一條指令（不是兩條）。現改為 `<LATEST>` 雙形態（與 `SDD_CONTEXT_GOVERNOR.md` 的 `<LATEST>` 寫法一致）。
+> 全文搜尋同一寫法（`cd AISDLC_SDD_v0.0X && …complete-auto-compact`）：全樹僅此一處（`SDD_CONTEXT_GOVERNOR.md` 已用
+> `AISDLC_SDD_v<LATEST>`；其餘 `v0.0X` 字樣是 skills README／開發計畫裡的泛稱佔位，不是指令）。
 
 若 `complete-auto-compact` 回傳 `{"noop": true, ...}`，表示 FSM 不在 AUTO_COMPACT_PENDING，本次屬一般 SPEC_FROZEN compaction，不需執行 Step 5。
 

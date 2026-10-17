@@ -1,11 +1,11 @@
 # SDD Spec-First Gate Workflow
 # 規格優先閘門工作流程
 
-**版本**: v1.1
+**版本**: v1.2
 **建立日期**: 2026-04-12
-**最後更新**: 2026-04-18
+**最後更新**: 2026-10-17
 **工作流程類型**: 品質閘門（Quality Gate）
-**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）
+**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）；整合輪 115 補強（S-01 FSM 寫入指令、G-10 增量條款）
 
 ---
 
@@ -106,6 +106,162 @@
    → retry_count 重置為 0（進入新 Stage）
    → 進入下一 Stage 的 SPEC_DRAFTING
 ```
+
+> 🔴 **訂正（整合輪 115／S-01）：上方第 3 步的括號與 runtime 不符。**
+> **被訂正的原文逐字保留（訂正協議：禁止靜默覆寫；原文仍在上方第 3 步，未動）**：
+> 「retry_count 不重置，待 SPEC_FROZEN 後重置」。
+> **實際行為**（`FSMRuntime.record_gate_result` 的 `reset_retry`、`FSMState.record_spec_frozen`；〔實測〕隔離沙盒中
+> `gate … PASS` 之後 `retry_history.SCG_VALIDATION.current_count` 即為 0）：`gate … PASS` 當下就把**該 gate**
+> 的 `current_count` 歸零；`spec-frozen` 再把 SCG_VALIDATION／PR_REVIEW／RTM_VERIFY 全部歸零；兩者都**不**清除
+> `cumulative_history`。全文搜尋同一宣稱：全樹僅此一處（`SDD_FSM_ENGINE.md` 與 `sdd-review` skill 的相關敘述與
+> runtime 一致，未動）。
+
+---
+
+## 🧾 FSM 寫入指令（S-01：每個閘門結果都要落成一行 CLI）
+
+> **為什麼需要本節**：上方流程裡的「retry_count++」「SPEC_FROZEN milestone」若只是模型記憶中的動作，
+> `FSM-STATE-<專案鍵>.yaml` 就永遠停在 `INIT`——而它是 SDD→AutoClaude 橋接**唯一的接頭**（AutoClaude 的凍結閘、
+> Bridge 的 `GET /sdd/fsm`、Console 的 SDD 卡都只看它）。Rule 9 絕對禁令 #1 又禁止手改 yaml，所以合法的寫入路徑只有
+> 一條：`python -m tools.fsm_runtime.fsm_runtime <動詞>`。本節把每個閘門結果對應到確切指令；讀狀態用 `show`。
+
+### 呼叫樣板（cwd＝SDD 版本目錄；雙形態）
+
+- `<SDD 版本目錄>`＝`AISDLC_SDD/<LATEST>`（LATEST 現查：`python AISDLC_SDD/scripts/sdd_version.py`）。`tools.fsm_runtime`
+  是以版本目錄為根的 package，**cwd 必須是版本目錄**；`python` 須是裝有 PyYAML 的直譯器（monorepo 內＝根層 `.venv`）。
+- `<鍵>`＝FSM 專案鍵（原名或淨化後的檔名幹皆可；預設＝`SDD_PROJECT`，再退回版本目錄上一層的目錄名）。**每次都帶
+  `--project "<鍵>"`**，並與 hooks 讀到的 `SDD_PROJECT` 保持一致。
+- `SDD_STATE_DIR`（選用，必須是**絕對路徑**；相對路徑會被拒）：未設＝狀態檔在 `<SDD 版本目錄>/build/reports/fsm/`；
+  有設＝**外部專案模式**（狀態檔放在被治理專案自己的樹，例如 Console 管理的專案；規則命中遙測回寫預設關，不弄髒
+  框架樹）。外部專案模式的 `<專案根>`＝被治理專案根；預設模式的 `<專案根>`＝`<SDD 版本目錄>`（專案文件寫在
+  `<版本目錄>/docs/`）。
+- **讀 rc 不接管線**：要看輸出就先接到變數；不要寫 `… | Select-Object -First 1` 之後再讀 `$LASTEXITCODE`（真 rc 會被吃掉）。
+- 每次呼叫 stderr 都會多一行 runpy 的 `RuntimeWarning: 'tools.fsm_runtime.fsm_runtime' found in sys.modules …`，與成敗無關
+  （要消音就在 `python` 後加 `-W ignore::RuntimeWarning`）；成敗只看 rc 與 stdout。
+
+PowerShell（Windows；不裸 `cd`——`Push-Location`／`Pop-Location` 在同一次呼叫內成對）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>; Pop-Location
+```
+
+bash／zsh（mac／Linux）：
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>
+```
+
+外部專案模式（多設 `SDD_STATE_DIR` 與 `SDD_PROJECT`）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; $env:SDD_STATE_DIR = "<專案根>\build\reports\fsm"; $env:SDD_PROJECT = "<鍵>"; python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>; Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT; Pop-Location
+```
+
+```bash
+cd "<SDD 版本目錄>" && SDD_STATE_DIR="<專案根>/build/reports/fsm" SDD_PROJECT="<鍵>" python -m tools.fsm_runtime.fsm_runtime <動詞> --project "<鍵>" <旗標>
+```
+
+範例（SCG-0 通過，兩種形態各一行）：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime gate --project "<鍵>" --gate SCG_VALIDATION --result PASS --reason "SCG-0 PASS"; Pop-Location
+```
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime gate --project "<鍵>" --gate SCG_VALIDATION --result PASS --reason "SCG-0 PASS"
+```
+
+### 閘門結果 → 指令對照表
+
+下表「指令」欄＝填入上面樣板 `<動詞> <旗標>` 的內容（`--project "<鍵>"` 已在樣板內，不再重複）。SCG-0～SCG-3 四道閘共用
+FSM 的 `SCG_VALIDATION` 一個重試預算（上限 3）；SCG-4＝`PR_REVIEW`（上限 5）、SCG-5＝`RTM_VERIFY`（上限 2）。
+
+| # | 時機（對應上方流程步驟） | FSM 轉態 | 指令 |
+|---|---|---|---|
+| 0 | 隨時確認進度 | （唯讀） | `show`：印完整狀態 JSON，看 `fsm_state.current_state`、`retry_history.<GATE>.current_count`、`frozen_stages`。狀態檔不存在時 `show`／`transition` 會**建立** INIT 狀態檔；只想確認專案已存在、不想誤建檔就加 `--must-exist`（不存在 → rc 5，不建檔） |
+| 1 | 新專案起手（步驟 0 之前） | INIT → SCENARIO_DETECT → AGENT_LOAD → SPEC_DRAFTING | 依序三次：`transition --to SCENARIO_DETECT`、`transition --to AGENT_LOAD`、`transition --to SPEC_DRAFTING --reason "<Stage 名稱>"` |
+| 2 | 規格草稿完成、送驗（步驟 1～2b 開始） | SPEC_DRAFTING → SCG_VALIDATION | `transition --to SCG_VALIDATION --reason "SCG-<n> 驗證開始"` |
+| 3 | 步驟 2a／2a-bis／2b 任一失敗（retry_count++） | SCG_VALIDATION → SPEC_DRAFTING；第 3 次失敗 → ESCALATION | `gate --gate SCG_VALIDATION --result FAIL --reason "<失敗原因，例：SLV-002／FRD 缺 NFR 量化>"` |
+| 4 | 步驟 3 Compliance Gate PASSED | SCG_VALIDATION → HUMAN_PENDING | `gate --gate SCG_VALIDATION --result PASS --reason "SCG-<n> PASS"` |
+| 5 | 步驟 4 🔴 人要求修改 | 維持 HUMAN_PENDING（FSM **沒有** HUMAN_PENDING → SPEC_DRAFTING 的邊） | `gate --gate SCG_VALIDATION --result FAIL --reason "人工審查：<修改要求>"`：retry_count++，被擋的轉態記進 `decision_trace`（`gate_fail_blocked`）；改好文件後**重新取得人的確認**；不要嘗試 `transition --to SPEC_DRAFTING`（TransitionError，rc 1） |
+| 6 | 步驟 4 🔴 **人明確確認通過之後**（步驟 5） | HUMAN_PENDING → SPEC_FROZEN | `spec-frozen …`（見下一小節；之後依步驟 5 執行 `/stage-compaction`） |
+| 7 | SPEC_FROZEN 之後，還有下一個 Stage | SPEC_FROZEN → SPEC_DRAFTING | `transition --to SPEC_DRAFTING --reason "進入 Stage-<n+1>"`（再回第 2 列） |
+| 8 | SPEC_FROZEN 之後，進入實作（R-9.20.2 先過測試合約談判閘） | SPEC_FROZEN → TEST_CONTRACT_NEGOTIATED → IMPLEMENTATION | `negotiate-enter --reason "<原因>" --contract-ref "<TCS 相對路徑>"`；Dev／QA 對 oracle 達成共識並簽署後 `negotiate-exit --outcome agreed --reason "<共識依據>"`（規格不夠明確、定不出 oracle 時改 `--outcome underspecified` → SPEC_DRAFTING）。`SPEC_FROZEN → IMPLEMENTATION` 直達邊為向後相容仍存在，但走它等於靜默略過 R-9.20.2，無明文理由不要用 |
+| 9 | 實作交 AutoClaude 執行 | IMPLEMENTATION → AUTOCLAUDE_DELEGATED → IMPLEMENTATION | `delegate-enter`／`delegate-exit`：見 `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md`（Console／Bridge 路徑由 Bridge 呼叫） |
+| 10 | SCG-4 開始 PR 審查 | IMPLEMENTATION → PR_REVIEW | `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"` |
+| 11 | SCG-4 結果 | PASS：PR_REVIEW → RTM_VERIFY；FAIL：→ IMPLEMENTATION（同模式 3 次 → SPEC_AUDIT；耗盡 → ESCALATION） | `gate --gate PR_REVIEW --result PASS --reason "SCG-4 PASS"`；失敗時 `--result FAIL --reason "<失敗模式>"` |
+| 12 | SCG-5 結果 | PASS：RTM_VERIFY → RELEASE_READY；FAIL：→ IMPLEMENTATION（耗盡 → ESCALATION） | `gate --gate RTM_VERIFY --result PASS --reason "SCG-5 PASS"`；失敗時 `--result FAIL --reason "<缺口>"` |
+| 13 | SCG-6 通過 | RELEASE_READY → RELEASE | `transition --to RELEASE --reason "SCG-6 PASS"` |
+
+補充：
+
+- **只認合法邊**：`transition`／`gate` 只走 `tools/fsm_runtime/transition_rules.py` 的合法邊；其他＝TransitionError
+  （舊動詞：traceback＋rc 1；新動詞與帶 `--digest` 或 `--json` 的 `spec-frozen`：rc 3＋單行 JSON）。
+- **SPEC_REGRESSION_CHECK**：若 `SDD_FSM_ENGINE.md` 的轉換表要求先過它（本 Stage 有重試歷史，即第 5 列留下的
+  `current_count > 0`）：`transition --to SPEC_REGRESSION_CHECK --reason "<原因>"`，通過後仍以 `spec-frozen`
+  凍結（SPEC_REGRESSION_CHECK → SPEC_FROZEN 是合法邊）。**不要**用 `gate --gate SPEC_REGRESSION_CHECK --result PASS`
+  代替——它只轉態，不寫 `frozen_stages`／`spec_doc_digests`。
+- **ESCALATION**：重試耗盡或其他 R-9.x 觸發後，hooks 會擋下一切工具呼叫，**只有人能解**（Rule 9.5／絕對禁令 #6）。
+  人在 SDD session 以上面的呼叫樣板執行（外部專案模式要帶同一組環境）：
+  `resume-from-escalation --to IMPLEMENTATION --reason "<人工原因>"`（`--to` 只能是 SPEC_DRAFTING／IMPLEMENTATION／
+  PR_REVIEW；缺 `--reason` 或 `--to` 不合法＝argparse 用法錯誤，rc 2，狀態不動）。完整的 Console／Bridge 版恢復指令樣板見
+  `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §6.8。
+- 現況沒有「單獨重置 retry_count」的 CLI 動詞：該 gate 的計數在下一次 `gate … PASS` 或 `spec-frozen` 時歸零；
+  不得為此手改 yaml（`/sdd-gate --retry-reset` 並不對應任何 FSM 寫入）。
+
+### `spec-frozen`：凍結寫入（只在人類確認之後）
+
+🔴 **Human Checkpoint 是人類動作**：agent 不得自行判定「已確認」；`--approver` 必須填**人類確認者**（非空、≤100 字、
+不含控制字元；Bridge 路徑另禁 `;`，因為它的 `--reason` 以 `; ` 分隔欄位），不得填 agent／skill 名。確認前不要執行本指令
+（Rule 8／R-9.5）。
+
+PowerShell：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime spec-frozen --project "<鍵>" --stage "Stage-<n>" --doc "docs/03_testing/contracts/TCS-<Feature>-<date>.md" --doc "<其他凍結文件相對路徑>" --digest --root "<專案根>" --reason "<人類確認依據>" --approver "<人類確認者>" --json; Pop-Location
+```
+
+bash／zsh：
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-frozen --project "<鍵>" --stage "Stage-<n>" --doc "docs/03_testing/contracts/TCS-<Feature>-<date>.md" --doc "<其他凍結文件相對路徑>" --digest --root "<專案根>" --reason "<人類確認依據>" --approver "<人類確認者>" --json
+```
+
+| 旗標 | 說明 |
+|---|---|
+| `--stage` | 階段名；沿用 `Stage-<n>` 慣例（`tools/fsm_runtime/README.md`）。同一專案的階段名不要求唯一（摘要鍵遇重複以後者為準） |
+| `--doc`（可重複） | 本階段凍結的文件；相對（POSIX 形）或絕對路徑皆可，但須落在 `--root` 之下。**必含要交給 AutoClaude 的 TCS**（官方命名 `TEST-CONTRACT-SPEC-*.md`／`TCS-*.md`）——TCS 不在任何階段的凍結清單內時，橋接的凍結閘 fail-closed |
+| `--digest` | 開啟摘要模式：逐檔驗證存在、在根之下、為合法 UTF-8 且 ≤16 MiB，並把 `sha256:<64 位小寫 hex>`（**換行正規化後 UTF-8 文字**的雜湊，與 AutoClaude adapter 的 `spec.digest` 逐位元相同）寫入 `frozen_stages[-1].spec_doc_digests`（鍵＝POSIX 相對路徑）。至少要一個 `--doc`（否則 rc 4）。只帶 `--digest`、不帶 `--json` 時，成功輸出仍是人讀的一行 `OK spec frozen: <stage>`（失敗照下方 rc 契約）。**不帶 `--digest`＝舊行為**：不查檔、不算摘要，`spec_docs` 照字面記；此形態的凍結無法在事後偵測「凍結後改檔」，新文件一律帶 |
+| `--root` | 路徑基準＝專案根，必須是**存在的絕對路徑目錄**（否則 rc 4）；只能與 `--digest` 一起用（單獨給＝argparse 用法錯誤，rc 2）。省略時：狀態目錄以 `build/reports/fsm` 結尾則取其上三層，否則取框架版本目錄；自訂 `SDD_STATE_DIR` 落在慣例之外而未給 `--root` 時，`doc_not_found` 會大聲失敗，不會靜默算錯檔 |
+| `--reason` | 寫進 `decision_trace` 的稽核理由（缺省為 `Stage frozen: <stage>`）；寫人類確認的依據 |
+| `--approver` | 確認凍結的人；寫入 `frozen_stages[-1].approved_by`（只在有值時才出現這個鍵） |
+| `--json` | 輸出恰好一行 JSON（成功含 `spec_doc_digests`；失敗 `{"ok":false,"error":<代碼>,…}`），rc 如下 |
+
+rc 契約（適用四個新動詞與帶 `--digest` 或 `--json` 的 `spec-frozen`；舊動詞不帶新旗標時輸出與 rc 逐字不變）：0 成功（含 `"noop":true`）／
+1 非預期例外／2 argparse 用法錯誤（stdout 無 JSON）／3 前置狀態不符（`transition_not_allowed`，例如 FSM 不在
+HUMAN_PENDING）／4 參數值不合法（`invalid_argument`、`doc_not_found`、`doc_outside_root`、`doc_too_large`、
+`doc_not_utf8`；`SDD_STATE_DIR` 寫成相對路徑）／5 狀態檔不存在（`--must-exist`）或不可讀。
+
+---
+
+## 🔷 增量（delta）條款（G-10／D-115-07）
+
+> 增量條款：變更限於已凍結系統的單一 Feature 時，SCG-0～3 各清單項可用「追溯 ID＋已凍結上位文件路徑與凍結摘要」滿足，於 TCS 檔頭〈增量追溯表〉逐項列出，免重寫整份。增量文件集＝FRD-lite（US／AC 併入 TCS 檔頭）＋TCS。僅新架構決策才另立 ADR，僅對外 API／事件契約變更才另附 OpenAPI delta。引用不得指向未凍結文件；未列入追溯表視為未滿足。
+
+怎麼用：
+
+- **適用範圍**：「已凍結系統」＝其上位文件（PRD／FRD／SRD／C4／ADR／OpenAPI）已通過 SCG 並經人類確認、列在
+  `frozen_stages[*].spec_docs`。全新系統、跨 Feature 變更、或要改動已凍結上位文件本身者**不適用**，走下方完整清單。
+- **〈增量追溯表〉**（放在 TCS 檔頭，模板見 `docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md`）：每個
+  SCG-0～3 清單項一列，欄位＝清單項／追溯 ID／已凍結上位文件路徑／凍結摘要（`sha256:…`，取自該文件在
+  `frozen_stages[*].spec_doc_digests` 的值，`show` 可查）。
+- **免重寫不等於免列**：沒有新決策／沒有對外契約變更時，ADR、OpenAPI 清單項仍要列——追溯到**既有**已凍結的
+  ADR／OpenAPI（路徑＋摘要）；沒列進追溯表＝未滿足，省略不是 N/A（防「判斷型 skill 把條款讀成放水」的結構性回應）。
+- **引用的凍結狀態可機械查**：被引用文件必須出現在 `frozen_stages[*].spec_docs`（有 `--digest` 時另有摘要）；
+  不在其中＝引用未凍結文件，視為未滿足。
+- 增量文件集（FRD-lite＋TCS）本身仍照常走 `SCG_VALIDATION` → 人類確認 → `spec-frozen --digest`（TCS 必須在 `--doc`
+  內）；SCG-4～6 的清單**不因增量而縮減**。
+- 同一條款另見 `/sdd-gate`、`/spec-compliance-check` 兩支 skill（檢查表各引用一次）。
 
 ---
 

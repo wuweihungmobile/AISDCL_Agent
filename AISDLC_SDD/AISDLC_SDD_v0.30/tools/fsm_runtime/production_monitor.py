@@ -48,7 +48,7 @@ except ImportError as exc:  # pragma: no cover
 # 比照 spec_patch_proposer.py 已示範的做法直接重用（見下方 `_sanitize_nfr_id()`）。
 # 重匯出別名：test_production_monitor 以 `pm._NFR_ID_MAX_LEN` 取用（本檔自身不用，故 noqa）。
 from .state_loader import _MAX_COMPONENT_LEN as _NFR_ID_MAX_LEN  # noqa: F401
-from .state_loader import _sanitize_component
+from .state_loader import _sanitize_component, state_dir
 
 
 # --------------------------------------------------------------------------- #
@@ -59,7 +59,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INBOX = REPO_ROOT / "data" / "slo_events"
 DEFAULT_QUARANTINE = DEFAULT_INBOX / "quarantine"
 DEFAULT_PROCESSED = DEFAULT_INBOX / "processed"
-DEFAULT_DRIFT_LOG_DIR = REPO_ROOT / "build" / "reports" / "fsm"
+# ADR-XPLAT-016 §3.4 A6：PBS-DRIFT 滾動檔與狀態檔同目錄（載入時求值；外部專案模式＝SDD_STATE_DIR）。
+DEFAULT_DRIFT_LOG_DIR = state_dir()
 DEFAULT_DRIFT_REPORT_DIR = REPO_ROOT / "docs" / "06_quality"
 DEFAULT_METRIC_MAP = DEFAULT_INBOX / "metric_nfr_map.yaml"
 

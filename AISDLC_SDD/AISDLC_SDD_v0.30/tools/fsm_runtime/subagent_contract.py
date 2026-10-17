@@ -33,10 +33,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .fsm_runtime import FSMRuntime
-from .state_loader import REPO_ROOT
+from .state_loader import REPO_ROOT, state_dir
 
 DISPATCH_LOG_DIR = REPO_ROOT / "build" / "reports" / "test-analysis"
-BYPASS_LOG_DIR = REPO_ROOT / "build" / "reports" / "fsm"
+# ADR-XPLAT-016 §3.4 A7：旁路日誌與狀態檔同目錄（載入時求值；外部專案模式＝SDD_STATE_DIR）。
+# 同檔 DISPATCH_LOG_DIR 在 build/reports/test-analysis，不是 fsm 目錄，不動。
+BYPASS_LOG_DIR = state_dir()
 
 # Registered subagent names (kept small to start — matches orchestrator).
 REGISTERED: set[str] = {

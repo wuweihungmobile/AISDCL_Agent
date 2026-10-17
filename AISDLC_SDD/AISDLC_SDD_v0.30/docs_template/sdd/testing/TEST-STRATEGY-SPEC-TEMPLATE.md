@@ -3,7 +3,7 @@
 # Phase 05 — Testing 情境 SDD 強化
 
 **文件類型**: Test Strategy Specification (TSS)
-**SDD Gate**: SCG-4 Test Strategy Gate
+**SDD Gate**: SCG-4 PR Review Gate（RG-TEST 為補充閘）  <!-- 🔴 115／S-08 訂正：原文「SCG-4 Test Strategy Gate」；SCG-4＝PR Review Gate（SSOT：workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md），Test Strategy Gate＝補充閘 RG-TEST（guides/system/sdd/SDD_GUIDE.md） -->
 **使用時機**: SRD 完成後、開發開始前（Spec-First 強制）
 **存放位置**: `docs/03_testing/TEST-STRATEGY-{project}-{date}.md`
 

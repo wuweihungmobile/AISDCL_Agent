@@ -48,7 +48,8 @@ Stage 5: Test Strategy Spec（🆕 提前至實作前）
   ├── qa: Test Strategy Document
   ├── 🆕 qa: Test Contract Spec（AC → AT 映射）
   ├── qa: RTM 更新（AT 層完成）
-  └── 🔷 SCG-4 → 🔴 Human: Test Strategy Freeze
+  └── RG-TEST（補充閘；SCG-4＝PR Review Gate，於實作 PR 階段執行）→ 🔴 Human: Test Strategy Freeze
+      # 🔴 115／S-08 訂正：原文「└── 🔷 SCG-4 → 🔴 Human: Test Strategy Freeze」（SCG-4 的 SSOT 名稱是 PR Review Gate；Test Strategy Gate＝RG-TEST）
 
 Stage 6: Security & Compliance Spec（選用）
   ├── security-engineer: STRIDE Threat Model
@@ -169,7 +170,8 @@ Contract-First 強制規則：
 
 強制時序：
 ```
-RTM（AC 層完整）→ Test Contract Spec → Test Strategy → 🔷 SCG-4 → 🔴 Human → 開始實作
+RTM（AC 層完整）→ Test Contract Spec → Test Strategy → RG-TEST → 🔴 Human → 開始實作
+# 🔴 115／S-08 訂正：原文「RTM（AC 層完整）→ Test Contract Spec → Test Strategy → 🔷 SCG-4 → 🔴 Human → 開始實作」（SCG-4＝PR Review Gate；Test Strategy Gate＝RG-TEST）
 ```
 
 **2.1.10 RTM 完整（AC → AT 完整填入）**

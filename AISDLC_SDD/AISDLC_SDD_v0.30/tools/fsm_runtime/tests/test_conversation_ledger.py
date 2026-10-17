@@ -897,22 +897,46 @@ class LedgerOrphanPartCleanupTests(unittest.TestCase):
         os.utime(p, (old, old))
         return p
 
+    #: 已結束子行程的 `Popen` 物件在測試行程存續期間一直被持有（見 `_dead_pid` 的 WHY）。
+    _PINNED_EXITED_CHILDREN: list = []
+
     @staticmethod
     def _dead_pid() -> int:
-        """找一個保證不存在的 pid：從 PID_MAX 往下找第一個 os.kill(pid, 0) 拋 ProcessLookupError 的值。"""
-        import errno
+        """取得一個**真的剛結束**的子行程 pid——可攜寫法，不使用 `os.kill`。
 
-        for candidate in (2**31 - 1, 999999, 888888, 777777):
+        體檢 S-16：舊寫法以 POSIX 慣用法 `os.kill(pid, 0)` 的 ESRCH 判死 pid；Windows 上它回 WinError 87
+        （非 ESRCH）⇒ 四個候選全被跳過 ⇒ 這 5 支 orphan-part 測試在 Windows 恆 `SkipTest`（skip census
+        的 untagged 5）。更糟的是 Windows 上 `os.kill(pid, 0)` 是 `TerminateProcess` 語意，候選 `888888`
+        是合法的 Windows PID 形——正是 `AgentConsole/CLAUDE.md` 跨平台鐵律 2 禁止的寫法。
+
+        做法：起一個立即結束的子行程、`wait()` 收屍，回它的 pid。
+          · Windows：**握著這個 `Popen`（handle）不放**，該 pid 就不會被回收再配給別的行程（Windows 的
+            PID 重用很積極，xdist 多 worker 同時起行程時不握著會有機率撞到）；`psutil.pid_exists()` 對
+            「已結束但 handle 仍在」回 False（實測），正是生產碼 `_is_pid_alive` 在 Windows 的判準。
+          · POSIX：`wait()` 已收屍，pid 循環分配，毫秒內被重用的機率可忽略。
+        生產碼 `conversation_ledger._is_pid_alive` 在 Windows 上靠 `psutil`，沒有 psutil 時**刻意**保守回
+        True（寧可少清也不誤刪還在寫的檔）——此時「刪除孤兒」類斷言結構上無法成立，以 `[TOOL-ABSENCE]`
+        標籤 skip（不是缺陷，也不是平台差；CI 的 windows-compat-ci 有裝 psutil，本機 venv 也有）。
+        判死的**來源**是「子行程確實已結束」這個事實，不是被測的 `_is_pid_alive`（避免循環：被測函式若
+        退化成恆 True，本助手不會跟著把測試 skip 掉）。
+        """
+        import subprocess
+
+        if sys.platform == "win32":
             try:
-                os.kill(candidate, 0)
-            except ProcessLookupError:
-                return candidate
-            except PermissionError:
-                continue
-            except OSError as exc:
-                if exc.errno == errno.ESRCH:
-                    return candidate
-        raise unittest.SkipTest("找不到保證不存在的 pid，本機環境無法安全驗證")
+                import psutil  # noqa: F401
+            except ImportError:
+                raise unittest.SkipTest(
+                    "[TOOL-ABSENCE] Windows 上 `_is_pid_alive` 需要 psutil（未安裝時刻意保守回 True），"
+                    "孤兒 .part 清理的斷言無法成立；pip install psutil 後即會執行"
+                ) from None
+        child = subprocess.Popen(
+            [sys.executable, "-c", "pass"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        child.wait(timeout=60)
+        LedgerOrphanPartCleanupTests._PINNED_EXITED_CHILDREN.append(child)
+        return child.pid
 
     def test_stale_dead_pid_part_is_removed(self) -> None:
         dead = self._dead_pid()

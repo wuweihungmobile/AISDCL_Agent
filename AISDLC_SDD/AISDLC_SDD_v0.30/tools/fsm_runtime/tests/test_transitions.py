@@ -75,6 +75,10 @@ class ErrorPathTests(unittest.TestCase):
 class RuntimeBootstrapTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
+        # 體檢 S-09：此前設了 SDD_PROJECT 卻沒還原（tearDown 只還原另一個變數）——同一行程後續任何走
+        # `project_from_env()` 的裸 bootstrap 都會在狀態目錄長出 `FSM-STATE-test-<pid>.yaml` 假專案。
+        # 記下進場前的值（含「原本不存在」），tearDown 原樣還原。
+        self._prior_sdd_project = os.environ.get("SDD_PROJECT")
         os.environ["SDD_PROJECT"] = f"test-{os.getpid()}"
         # v0.22 預設 AUTO_RECOVERY=ON（improving_57 B 軌常態化）；本類驗純 retry-limit→
         # escalation 轉態（與 auto-recovery 正交），顯式 opt-out 隔離該關注點。
@@ -83,6 +87,10 @@ class RuntimeBootstrapTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         os.environ.pop("SDD_ENABLE_AUTO_RECOVERY", None)
+        if self._prior_sdd_project is None:
+            os.environ.pop("SDD_PROJECT", None)
+        else:
+            os.environ["SDD_PROJECT"] = self._prior_sdd_project
         self._tmp.cleanup()
 
     def test_bootstrap_creates_state_file(self) -> None:

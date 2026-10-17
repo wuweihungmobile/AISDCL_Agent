@@ -75,10 +75,17 @@ helper 仍保留「補回 `build/reports/fsm/FSM-STATE-TEMPLATE.yaml`」特例�
 
 ### 2.2 更新版本號（批次替換）
 需要更新版本號的檔案：
-- `AISDLC_SDD_INIT.md`：更新 `framework_version`
+- `AISDLC_SDD_INIT.md`：更新版本戳。🔴 該檔**沒有**名為 `framework_version` 的鍵；版本戳是手寫在四處：標題行
+  `# AISDLC-SDD v<X> …`、首段 `AISDLC-SDD v<X> 是基於…`、目錄樹根 `AISDLC_SDD_v<X>/`、檔尾 `**版本**: AISDLC-SDD v<X> — …`。
+  `scripts/skill_header_sync.py` 只管 skills 的戳記、**不含 INIT**，這四處要手動改
 - `SDD_Core_Principles.md`：更新版本
-- `FILE_DIRECTORY_RULES.md`：更新版本
+- `FILE_DIRECTORY_RULES.md`：**不需更新**——該檔自整合輪 115 起版本中性（不寫版號與資產計數，指向 `FRAMEWORK_STATUS.md`）；`README.md` 同理
 - 所有 Agent YAML：更新 `version` 欄位
+
+> 🔴 **115／S-07 訂正**：**被訂正的原文逐字保留（訂正協議：禁止靜默覆寫）**：「`AISDLC_SDD_INIT.md`：更新 `framework_version`」
+> 與「`FILE_DIRECTORY_RULES.md`：更新版本」。為何改：INIT 全檔無 `framework_version` 鍵（訂正前 `Grep framework_version` 全樹僅命中本檔與
+> CHECKLIST 3.1 兩處敘述，INIT 本身零命中）；FILE_DIRECTORY_RULES 的版本欄已改為版本中性，沒有版號可更新。同一宣稱的另一站點＝
+> `AISDLC_SDD_UPGRADE_CHECKLIST.md` 3.1／3.3，已同步訂正。
 - 所有 Skills SKILL.md：更新版本
 - `CLAUDE.md`（專案根目錄）：更新框架版本
 

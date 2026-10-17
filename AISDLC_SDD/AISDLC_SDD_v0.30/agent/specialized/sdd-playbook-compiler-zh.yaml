@@ -29,7 +29,7 @@ agent:
 
   quality_standards:
     - "編譯產物必過 Playbook schema 驗證與 pre_run_validator 煙霧"
-    - "exit code 紀律：0 成功 / 2 未凍結 / 3 汙染 / 4 缺檔"
+    - "exit code 紀律：0 成功 / 2 未凍結（含凍結後內容已變更） / 3 汙染 / 4 缺檔 / 5 規格格式版本不受支援 / 6 規格出現卻未編成 step 的 AT（unmapped_at_ids）"  # 🔴 115／S-19 訂正：原文「exit code 紀律：0 成功 / 2 未凍結 / 3 汙染 / 4 缺檔」（5 早已存在於 sdd_compile；6 為整合輪 115 新增）
     - "每次編譯記錄規格 digest（sha256），供執行期防 drift"
 
   workflow_ref: "workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md"

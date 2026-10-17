@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,7 +12,15 @@ from typing import Optional
 
 from .event_reconciler import reconcile
 from .snapshot import save_abort_report, save_auto_snapshot
-from .state_loader import FSMState, load_state, project_from_env, save_state
+from .state_loader import (
+    STATE_DIR_ENV,
+    FSMState,
+    load_state,
+    project_from_env,
+    save_state,
+    state_dir,
+    track_state_path,
+)
 from .transition_rules import (
     _HAPPY_PATH,
     MAX_AUTO_COMPACT_PER_STAGE,
@@ -181,13 +190,21 @@ def _explicit_telemetry_bool_env(name: str) -> Optional[bool]:
 def _telemetry_writeback_allowed(explicit_env: str) -> bool:
     """D28 共用判定：顯式 0/1（含 true/false/yes/no/on/off）永遠優先，v0.24 契約零變更。
 
-    未設顯式值時：session 要求 hook 身分（REQUIRES_HOOK 為真）且本行程不是 hook
-    （HOOK_ENTRY 不為真）→ False（跳過寫回，stderr 出聲一次）；否則 → True
-    （v0.24 預設 ON，含 session 外裸 CLI 與已標記的 hook 行程）。
+    未設顯式值時：
+      · **外部專案模式**（`SDD_STATE_DIR` 非空白，ADR-XPLAT-016 §3.3）→ False，**不出聲**：
+        `rule_loader.record_state_fires／record_state_catches` 會把 `fire_count／catch_count`
+        寫回**版本目錄內被 git 追蹤的** `governance/rules/*.yaml`，外部專案的每次轉態都會弄髒
+        框架樹（Docker 唯讀掛載下還會寫入失敗）。順序刻意在 D28 判定之前：外部專案模式根本
+        不是「漏加前綴的探針」，沒有理由對它印那則 D28 提示。
+      · session 要求 hook 身分（REQUIRES_HOOK 為真）且本行程不是 hook（HOOK_ENTRY 不為真）
+        → False（跳過寫回，stderr 出聲一次）；
+      · 否則 → True（v0.24 預設 ON，含 session 外裸 CLI 與已標記的 hook 行程）。
     """
     explicit = _explicit_telemetry_bool_env(explicit_env)
     if explicit is not None:
         return explicit
+    if os.environ.get(STATE_DIR_ENV, "").strip():
+        return False
     requires_hook = _explicit_telemetry_bool_env(_TELEMETRY_WRITEBACK_REQUIRES_HOOK_ENV) or False
     if requires_hook and os.environ.get(_FSM_HOOK_ENTRY_ENV, "").strip() != "1":
         global _telemetry_writeback_skip_warned
@@ -266,14 +283,15 @@ def _reset_today_ledger(*, lock_timeout: float = 1.0) -> dict:
     `rotated=True`（誠實：這不是「已歸零」）。
     """
     import datetime as _dt
-    from .state_loader import REPO_ROOT  # local to avoid cycles
     try:
         import yaml  # type: ignore  # noqa: F401
     except Exception:
         return {"reset": False, "path": None, "previous_cumulative": 0}
     from .conversation_ledger import _atomic_write_yaml, _load_ledger_doc, ledger_lock
 
-    ledger_dir = REPO_ROOT / "build" / "reports" / "fsm"
+    # ADR-XPLAT-016 §3.4 A2：與 context hook 的 LEDGER_DIR（A3／A4）同走 `state_dir()`——
+    # `complete-auto-compact` 歸零的才是 hook 實際寫的那本帳（外部專案模式下兩者同在 SDD_STATE_DIR）。
+    ledger_dir = state_dir()
     path = ledger_dir / f"CONTEXT-LEDGER-{_dt.date.today().isoformat()}.yaml"
     if not path.exists():
         return {"reset": False, "path": str(path), "previous_cumulative": 0}
@@ -638,11 +656,30 @@ class FSMRuntime:
         )
         return {"escalated": False, "audit_count": pr_entry["spec_audit_count"]}
 
-    def record_spec_frozen(self, stage: str, spec_docs: list[str]) -> None:
-        self.state.record_spec_frozen(stage, spec_docs)
+    def record_spec_frozen(
+        self,
+        stage: str,
+        spec_docs: list[str],
+        *,
+        spec_doc_digests: Optional[dict] = None,
+        approved_by: Optional[str] = None,
+        reason: str = "",
+    ) -> None:
+        """記錄 SPEC_FROZEN（ADR-XPLAT-016 §4.3）。
+
+        **先驗前置、最後才改狀態**：此前先改記憶體（`frozen_stages`／計數／retry 歸零）再轉態，
+        前置不合法時 `TransitionError` 會留下一個改了一半的記憶體狀態（持有同一個 runtime 物件
+        的呼叫端會看到它）；現在先 `assert_transition`，不合法就什麼都沒動。錯誤型別與訊息不變。
+        `spec_doc_digests`／`approved_by` 只在有值時才進該筆 `frozen_stages`；`reason` 缺省仍是
+        `Stage frozen: <stage>`。
+        """
+        assert_transition(self.state.current, "SPEC_FROZEN")
+        self.state.record_spec_frozen(
+            stage, spec_docs, spec_doc_digests=spec_doc_digests, approved_by=approved_by
+        )
         self.transition(
             "SPEC_FROZEN",
-            reason=f"Stage frozen: {stage}",
+            reason=reason if reason.strip() else f"Stage frozen: {stage}",
             spec_refs=list(spec_docs or []),
             trigger="spec_frozen",
         )
@@ -718,8 +755,11 @@ class FSMRuntime:
             )
             if any(p in normalized for p in allowed_prefixes):
                 return
-        # Allow Bash to run compaction / python fsm_runtime CLI.
-        if tool == "Bash":
+        # Allow Bash／PowerShell to run compaction / python fsm_runtime CLI.
+        # ADR-XPLAT-016 §12：Windows 的唯一 shell 載具是 PowerShell（根層鐵律一禁用 Bash）；
+        # 版本目錄 settings.json 的 matcher 一旦含 PowerShell，這裡若只放行 Bash，
+        # AUTO_COMPACT_PENDING 期間 Windows 上連 `complete-auto-compact` 都跑不了＝死鎖。
+        if tool in {"Bash", "PowerShell"}:
             return
         raise TransitionError(
             "state AUTO_COMPACT_PENDING — 只允許 /stage-compaction 相關操作。"
@@ -3285,11 +3325,207 @@ class FSMRuntime:
         return {"exited": True, "decision": decision, "to": target}
 
 
+# ===== ADR-XPLAT-016 §4：橋接用 CLI 契約（四個新動詞＋`spec-frozen` 擴充）=====
+# Bridge（AgentConsole engine-bridge）以子行程呼叫本 CLI 寫 FSM（Rule 9 絕對禁令 #1：一切寫入
+# 只經 FSMRuntime），所以失敗必須有「可程式辨識」的形態：現行 CLI 的非法轉態是 traceback＋rc 1
+# （〔乾跑〕ADR §2.3 #5／#10），Bridge 無從區分「前置狀態不符」與「程式壞了」。新契約：
+#   · stdout 恰好一行 JSON（`ensure_ascii=True`、緊湊分隔）；失敗時 stderr 一行 ASCII
+#     `[SDD-FSM] <動詞> failed: <代碼>: <detail>`（本入口無 UTF-8 stdio 保護，全 ASCII）；
+#   · rc：0 成功（含 `noop`）／1 非預期例外（traceback，本檔不攔）／2 argparse 用法錯誤
+#     （stdout 無 JSON）／3 前置狀態不符或轉態不合法／4 參數值不合法／5 狀態檔不存在或不可讀；
+#   · 舊動詞不帶新旗標時輸出與 rc 逐字不變。
+#: 四個新動詞：恆視為已帶 `--must-exist`、輸出單行 JSON、`--reason` 必填且 strip 後非空
+#: （它是寫進 `decision_trace` 的稽核憑證）。
+_BRIDGE_VERBS = ("negotiate-enter", "negotiate-exit", "delegate-enter", "delegate-exit")
+_RC_TRANSITION, _RC_INVALID, _RC_STATE = 3, 4, 5
+_CLI_DETAIL_MAX = 200
+_APPROVER_MAX = 100
+
+
+class _CliError(Exception):
+    """新契約下**可預期**的失敗；`rc`／`error`／`detail` 即 stdout JSON 的退出碼與欄位。"""
+
+    def __init__(self, rc: int, error: str, detail: str, *, current_state: Optional[str] = None):
+        super().__init__(f"{error}: {detail}")
+        self.rc = rc
+        self.error = error
+        self.detail = detail
+        self.current_state = current_state
+
+
+def _ascii_detail(text: object) -> str:
+    """單行、純 ASCII、≤200 字（控制字元換成空格、非 ASCII 以 backslashreplace 轉義）。"""
+    flat = re.sub(r"[\x00-\x1f\x7f]+", " ", str(text)).strip()
+    return flat.encode("ascii", "backslashreplace").decode("ascii")[:_CLI_DETAIL_MAX]
+
+
+def _emit_cli_json(payload: dict) -> None:
+    print(json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+
+
+def _cli_fail(verb: str, err: _CliError) -> int:
+    payload: dict = {"ok": False, "error": err.error, "detail": _ascii_detail(err.detail)}
+    if err.current_state is not None:
+        payload["current_state"] = err.current_state
+    _emit_cli_json(payload)
+    print(f"[SDD-FSM] {verb} failed: {err.error}: {payload['detail']}", file=sys.stderr)
+    return err.rc
+
+
+def _bootstrap_cli(project: Optional[str], *, must_exist: bool) -> FSMRuntime:
+    """新契約下的 bootstrap（可預期失敗一律轉成 `_CliError`）。
+
+    `must_exist=True`：狀態檔不存在 ⇒ rc 5 `state_not_found`，**不建檔**（現行 `show`／`transition`
+    對不存在的專案會自動建出 INIT 狀態檔，ADR §2.3 #12）。`must_exist=False`：沿用現行「缺檔就從模板
+    建」（`spec-frozen --json／--digest` 未帶 `--must-exist` 時）。壞 YAML 且 `.bak` 也壞 ⇒ rc 5
+    `state_unreadable`；`SDD_STATE_DIR` 寫成相對路徑 ⇒ rc 4（detail 指名該變數）。"""
+    name = project or project_from_env()
+    try:
+        path = track_state_path(name)
+    except ValueError as exc:
+        raise _CliError(_RC_INVALID, "invalid_argument", str(exc)) from exc
+    try:
+        return FSMRuntime(load_state(name, path=path, create_if_missing=not must_exist))
+    except FileNotFoundError as exc:
+        raise _CliError(_RC_STATE, "state_not_found", f"no FSM state file at {path}") from exc
+    except ValueError as exc:
+        raise _CliError(_RC_STATE, "state_unreadable", str(exc)) from exc
+
+
+def _validate_approver(raw: Optional[str]) -> Optional[str]:
+    """`--approver`：非空、≤100 字、不含控制字元（ADR §4.3；`;` 的限制屬 Bridge，CLI 不管）。"""
+    if raw is None:
+        return None
+    import unicodedata
+
+    value = raw.strip()
+    if not value:
+        raise _CliError(_RC_INVALID, "invalid_argument", "--approver must not be blank")
+    if len(value) > _APPROVER_MAX:
+        raise _CliError(_RC_INVALID, "invalid_argument", f"--approver is longer than {_APPROVER_MAX} chars")
+    if any(unicodedata.category(ch) == "Cc" for ch in raw):
+        raise _CliError(_RC_INVALID, "invalid_argument", "--approver must not contain control characters")
+    return value
+
+
+def _resolve_digest_root(raw_root: Optional[str]) -> Path:
+    """`--root`（絕對路徑、須為既存目錄）；省略 ⇒ 由 `state_dir()` 反推（見 `spec_digest.derive_root`）。"""
+    from . import spec_digest
+
+    if raw_root is not None:
+        root = Path(raw_root)
+        if not root.is_absolute():
+            raise _CliError(_RC_INVALID, "invalid_argument", f"--root must be an absolute path (got {raw_root!a})")
+        if not root.is_dir():
+            raise _CliError(_RC_INVALID, "invalid_argument", f"--root is not an existing directory ({raw_root!a})")
+        return root
+    from . import state_loader  # 呼叫時才讀 REPO_ROOT：與測試對 `REPO_ROOT` 的 patch 一致
+
+    try:
+        return spec_digest.derive_root(state_dir(), state_loader.REPO_ROOT)
+    except ValueError as exc:  # SDD_STATE_DIR 相對路徑
+        raise _CliError(_RC_INVALID, "invalid_argument", str(exc)) from exc
+
+
+def _structured_usage(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """argparse 層用法錯誤（rc 2、stdout 無 JSON）：缺必填旗標。"""
+    if args.command in _BRIDGE_VERBS and not args.project:
+        parser.error(f"{args.command} requires --project")
+    if args.command == "delegate-exit" and not args.decision:
+        parser.error("delegate-exit requires --decision done|failed")
+    if args.command == "negotiate-exit" and not args.outcome:
+        parser.error("negotiate-exit requires --outcome agreed|underspecified")
+    if args.command == "spec-frozen" and not args.stage:
+        parser.error("--stage required")
+
+
+def _structured_options(args: argparse.Namespace) -> dict:
+    """純參數檢查（rc 4），先於任何 I/O：讓「參數壞」與「狀態檔不存在」的優先序確定。"""
+    if args.command in _BRIDGE_VERBS:
+        if not args.reason.strip():
+            raise _CliError(
+                _RC_INVALID, "invalid_argument",
+                f"{args.command} requires a non-blank --reason (audit evidence written to decision_trace)",
+            )
+        return {}
+    options: dict = {"approver": _validate_approver(args.approver)}
+    if args.digest:
+        if not args.doc:
+            raise _CliError(_RC_INVALID, "invalid_argument", "--digest requires at least one --doc")
+        options["root"] = _resolve_digest_root(args.root)
+    return options
+
+
+def _structured_run(args: argparse.Namespace, runtime: FSMRuntime, options: dict) -> dict:
+    """執行動詞，回傳動詞專屬輸出欄（併入 stdout JSON）。拋 `TransitionError`／`ValueError`。"""
+    verb = args.command
+    if verb == "negotiate-enter":
+        return runtime.enter_test_contract_negotiated(reason=args.reason, contract_ref=args.contract_ref)
+    if verb == "negotiate-exit":
+        return runtime.exit_test_contract_negotiated(args.outcome, reason=args.reason)
+    if verb == "delegate-enter":
+        return runtime.enter_autoclaude_delegated(reason=args.reason, playbook_ref=args.playbook_ref)
+    if verb == "delegate-exit":
+        return runtime.exit_autoclaude_delegated(args.decision, reason=args.reason)
+    # spec-frozen：先驗前置、再算摘要、最後才改狀態（ADR §4.2）
+    if not is_transition_allowed(runtime.state.current, "SPEC_FROZEN"):
+        raise TransitionError(f"transition not allowed: {runtime.state.current} -> SPEC_FROZEN")
+    docs = list(args.doc or [])
+    digests = None
+    if args.digest:
+        from . import spec_digest
+
+        docs, digests = spec_digest.digest_docs(options["root"], docs)
+    runtime.record_spec_frozen(
+        args.stage, docs, spec_doc_digests=digests, approved_by=options["approver"], reason=args.reason
+    )
+    out: dict = {"stage": args.stage}
+    if digests:
+        out["spec_doc_digests"] = digests
+    return out
+
+
+def _cli_structured(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    """四個新動詞與 `spec-frozen --json／--digest` 的入口：本函式內的可預期失敗一律走新契約。"""
+    from . import spec_digest
+
+    verb = args.command
+    _structured_usage(parser, args)
+    try:
+        options = _structured_options(args)
+        runtime = _bootstrap_cli(args.project, must_exist=args.command in _BRIDGE_VERBS or args.must_exist)
+    except _CliError as err:
+        return _cli_fail(verb, err)
+    before = runtime.state.current
+    try:
+        extra = _structured_run(args, runtime, options)
+    except TransitionError as exc:
+        return _cli_fail(verb, _CliError(_RC_TRANSITION, "transition_not_allowed", str(exc), current_state=before))
+    except spec_digest.SpecDocError as exc:  # 必須排在 ValueError 前：它是 ValueError 的子類
+        return _cli_fail(verb, _CliError(_RC_INVALID, exc.code, exc.detail))
+    except ValueError as exc:
+        return _cli_fail(verb, _CliError(_RC_INVALID, "invalid_argument", str(exc)))
+    if verb == "spec-frozen" and not args.json:
+        print(f"OK spec frozen: {args.stage}")  # --digest 但沒要 JSON：沿用人讀的那一行
+        return 0
+    payload: dict = {
+        "ok": True,
+        "verb": verb,
+        "project": args.project or str(runtime.state.root.get("project", "")),
+        "from_state": before,
+        "current_state": runtime.state.current,
+    }
+    payload.update(extra)
+    _emit_cli_json(payload)
+    return 0
+
+
 def _cli() -> int:
     parser = argparse.ArgumentParser(description="SDD FSM Runtime CLI")
     parser.add_argument("command", choices=[
         "show", "transition", "gate", "reconcile", "spec-audit", "spec-frozen", "check-impl",
         "complete-auto-compact", "reset-ledger", "resume-from-escalation",
+        *_BRIDGE_VERBS,
     ])
     parser.add_argument("--project", default=None)
     parser.add_argument("--to", dest="target", default=None)
@@ -3299,9 +3535,32 @@ def _cli() -> int:
     parser.add_argument("--trigger", default="cli_manual")
     parser.add_argument("--stage", default=None)
     parser.add_argument("--doc", action="append", default=None)
+    # ADR-XPLAT-016 §4（新）：全域旗標與四個新動詞／`spec-frozen` 的專屬旗標
+    parser.add_argument("--must-exist", action="store_true",
+                        help="state file missing => rc 5 and no file is created (always on for the Bridge verbs)")
+    parser.add_argument("--decision", choices=["done", "failed"], default=None, help="delegate-exit")
+    parser.add_argument("--outcome", choices=["agreed", "underspecified"], default=None, help="negotiate-exit")
+    parser.add_argument("--playbook-ref", default="", help="delegate-enter, e.g. run:<run_id>")
+    parser.add_argument("--contract-ref", default="", help="negotiate-enter")
+    parser.add_argument("--digest", action="store_true",
+                        help="spec-frozen: record sha256 digests of the --doc files (frozen_stages[-1].spec_doc_digests)")
+    parser.add_argument("--root", default=None, help="spec-frozen --digest: absolute project root for --doc paths")
+    parser.add_argument("--approver", default=None, help="spec-frozen: written to frozen_stages[-1].approved_by")
+    parser.add_argument("--json", action="store_true", help="spec-frozen: single-line JSON result (Bridge contract)")
     args = parser.parse_args()
 
-    runtime = FSMRuntime.bootstrap(args.project)
+    if args.command == "spec-frozen" and args.root is not None and not args.digest:
+        parser.error("--root only applies together with --digest")
+    if args.command in _BRIDGE_VERBS or (args.command == "spec-frozen" and (args.json or args.digest)):
+        return _cli_structured(parser, args)
+
+    if args.must_exist:  # 舊動詞加 `--must-exist`：缺檔 rc 5 且不建檔；不帶則行為與輸出逐字不變
+        try:
+            runtime = _bootstrap_cli(args.project, must_exist=True)
+        except _CliError as err:
+            return _cli_fail(args.command, err)
+    else:
+        runtime = FSMRuntime.bootstrap(args.project)
     if args.command == "show":
         print(json.dumps(runtime.state.to_dict(), indent=2, ensure_ascii=False, default=str))
     elif args.command == "transition":
@@ -3324,9 +3583,15 @@ def _cli() -> int:
     elif args.command == "spec-audit":
         print(json.dumps(runtime.record_spec_audit(), ensure_ascii=False))
     elif args.command == "spec-frozen":
+        # 不帶 `--digest`／`--json`：現行行為與輸出逐字不變（不查檔、不算摘要、spec_docs 照字面記；
+        # 非法轉態＝traceback＋rc 1）。`--reason`／`--approver` 與摘要無關，兩種模式一視同仁。
         if not args.stage:
             parser.error("--stage required")
-        runtime.record_spec_frozen(args.stage, args.doc or [])
+        try:
+            approver = _validate_approver(args.approver)
+        except _CliError as err:
+            parser.error(err.detail)
+        runtime.record_spec_frozen(args.stage, args.doc or [], approved_by=approver, reason=args.reason)
         print(f"OK spec frozen: {args.stage}")
     elif args.command == "check-impl":
         print(json.dumps(runtime.check_implementation_budget(), ensure_ascii=False))
