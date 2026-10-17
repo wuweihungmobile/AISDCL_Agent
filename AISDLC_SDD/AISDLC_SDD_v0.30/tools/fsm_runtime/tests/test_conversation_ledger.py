@@ -792,10 +792,14 @@ class LedgerPerformanceTests(unittest.TestCase):
         worker 同時吃滿全部核心，牆鐘量到的是 CPU 競爭不是程式碼——實測 15 次約 2 次量到
         0.41s（上界 0.3s）。xdist worker 行程恆帶 `PYTEST_XDIST_WORKER` 環境變數（controller
         與序列跑法皆無），故在 worker 內比照 Windows 放寬到 1.0s；序列跑法（含凍結基線
-        v0.01 那一軌，ci-gate.sh 對它維持序列）仍守 0.3s 緊門檻，退化鑑別仍由 (a) 承擔。"""
+        v0.01 那一軌，ci-gate.sh 對它維持序列）仍守 0.3s 緊門檻，退化鑑別仍由 (a) 承擔。
+    (d) 整合輪 115 收尾：windows-compat-ci run 39054605307（GitHub windows-latest、LATEST 軌
+        xdist）量到 1.1801s，而同一條粗線前八次 push 皆綠、該 commit 未動本模組——1.0s 與
+        (b) 自己指出的共用跑者變異同數量級，守不住也不該守。粗線的職責只有「回到 5s+」，
+        Windows／xdist 分支放到 2.0s（仍是 5s 的 2.5 倍以下）；0.3s 緊門檻與 (a) 身分斷言不動。"""
 
     LIMIT_SEC = (
-        1.0 if (sys.platform.startswith("win") or os.environ.get("PYTEST_XDIST_WORKER"))
+        2.0 if (sys.platform.startswith("win") or os.environ.get("PYTEST_XDIST_WORKER"))
         else 0.3
     )
 
