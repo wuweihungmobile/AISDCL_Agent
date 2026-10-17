@@ -503,6 +503,18 @@ P1／P2＝立即回報主控、同輪修、二審驗修復；P3＝文字修正�
 
 **Q-12**：D-115-17 寫「ADR 字面比實況嚴而實況有既有測試／生產端在用，一律採實況並回寫 ADR 附錄」；對 ADR 全文搜 `D-115-19`、`附錄 C` 皆零命中。ADR 是契約自稱的「唯一真相源」，七項偏離只住計畫書會讓後來的讀者照 ADR 字面改回去。
 
+### §4.1 結案後補記（主控，2026-10-18；雲端 `agentconsole-ci` 在最終樹上抓到的測試側競態）
+
+W5 QA 判決之後、最終樹 push 到雲端時，`agentconsole-ci` 的 ubuntu runner 連續抓到三個**只在負載下現形**的測試競態（本機 Windows 與 QA 機都重現不了；產品碼零改動、§7 VERDICT 不受影響）。依鐵律四逐筆登記：
+
+| Q | 嚴重度 | 歸屬／編號 | 摘要 | 處置 |
+|---|:------:|-----------|------|------|
+| Q-13 | P4 | DEF-AC-035（已修） | `frontend/tests/e2e/execute.mock.spec.ts`「暫停→恢復→取消」：暫停原因只在 SSE 事件裡、假引擎的 REST 詳情沒有，400ms 去抖重抓把 `run-reason` 蓋掉；斷言賭「事件先於重抓」 | 情境自加 `before` 攔截讓 PAUSED 的 REST 詳情也帶 reason（與真後端一致）、事件後與重抓後各驗一次；`1132a039` |
+| Q-14 | P4 | DEF-AC-036（已修） | `engine-bridge/tests/test_sdd_run.py`／`test_sdd_run_lifecycle.py`：run 終態、FSM 回 IMPLEMENTATION 後單次讀 run.json 的 `sdd.sync` 得 None——`_finalize()` 的順序是「發終態事件 → CLI 寫 FSM → 記 sync 並 persist」（runner 註解明寫有視窗） | 新增 `tests/sdd_run_support.wait_sync()` 輪詢到落盤，五個讀點換用；`da375066` |
+| Q-15 | P4 | DEF-AC-037（已修） | `frontend/tests/e2e/p10-w115-sdd.mock.spec.ts`「批次還在跑／沒有規格綁定」：情境中途 `activeEngine.close()` destroy 還開著的 SSE，Chrome 非同步記 `net::ERR_INCOMPLETE_CHUNKED_ENCODING`、落進下一段的主控台收集器 | 關假引擎前先 `page.goto("about:blank")` 讓瀏覽器自己關 SSE（導航是同步屏障）；`da375066` |
+
+同一天 `windows-compat-ci` 另抓到一個非 AgentConsole 的同類偽陽性（v0.30 `test_conversation_ledger` 掛鐘粗線在 GitHub Windows runner 量到 1.18s），屬框架測試，登在根層缺陷帳本 DEF-200-543。三筆共同的再開症狀：`agentconsole-ci` 在 push 後的某一次紅、同一支測試重跑即綠、前端／Bridge 原始碼在兩個 HEAD 之間沒動。通則：**本機綠不算數，push 後要等 `agentconsole-ci` 跑完才結案**；mock spec 若賭「SSE 文字先於去抖重抓」或在頁面還開著時先斷伺服端串流，就是雲端 flaky。
+
 ## §5 RTM 單線合併與現查數字
 
 **合併內容**（`docs/06_quality/RTM.md` 的同路徑在 AgentConsole 之下）：
