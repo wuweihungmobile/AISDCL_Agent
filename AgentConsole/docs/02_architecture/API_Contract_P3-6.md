@@ -1844,7 +1844,7 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 
 - **淨化鏡像**：Bridge 持有**一份**逐字鏡像 `fsm_component(name)`（Bridge 與 SDD 同屬 monorepo 但不同子專案，不 import；建議檔 `fsm_names.py`），規則來源 `AISDLC_SDD/scripts/component_sanitizer.py` 的 `sanitize_component`：NFC → strip → 把 `<`、`>`、`:`、`"`、`?`、`*`、`\`、`/`、ASCII 豎線與 ord<0x20／0x7F 換成 `_` → 截 80 → `rstrip(" .")`（空則 `untitled`）→ stem 若是 Windows 保留裝置名則加 `_` 前綴並重截。**進入 Bridge 的專案名（`:freeze` 的路徑參數、`GET /sdd/fsm/{project}` 的路徑參數、`sdd.fsm_project`、`/sdd/compile` 的 `fsm_project`）一律先過它**；淨化是冪等的，所以傳原名與傳標準鍵等價。
 - **讀取白名單＝淨化輸出域**：非空；已是 NFC；長度 ≤ 80；不是 `.`／`..`；不含 `<`、`>`、`:`、`"`、`?`、`*`、`\`、`/`、ASCII 豎線、控制字元、DEL；無前後空白；不以 `.` 結尾。`GET /sdd/fsm`（清單）的 `errors` 語意不變：檔名不合此判準者進 `errors`，不進 `projects`。`..` 只有整段等於 `.`／`..` 或帶分隔符才有穿越意義；`_readable_state_file` 的 symlink 逃逸檢查維持。
-- **原名反查**：`GET /sdd/fsm/{project}` 先以淨化後的鍵找 `FSM-STATE-<鍵>.yaml`；無該檔但**恰有一個**檔的 YAML `fsm_state.project` 等於輸入原名時採用它（含 `:` 等字元的原名在 Windows 上會被 NTFS 當資料流，只能走這條）。路徑參數須 percent-encode（`%`、`#`、`+`、`;`、空白與非 ASCII）；含 `/`、`\` 的原名也要能被接受並淨化（§6.8.6 靜默處 #6）。
+- **原名反查**（🔴 D-115-19 覆寫：本條**不實作**、原文保留）：~~`GET /sdd/fsm/{project}` 先以淨化後的鍵找 `FSM-STATE-<鍵>.yaml`；無該檔但**恰有一個**檔的 YAML `fsm_state.project` 等於輸入原名時採用它~~——ADR-XPLAT-016 §7.4 無此條；SDD 的 `state_loader` 與 Bridge 同用 `sanitize_component`，CLI 產生的檔名必等於標準鍵，反查只對手動改名的檔有意義；原名反查仍存在於 **adapter 內部**（ADR §7.1、F-2 的 `a:b` 對拍）。路徑參數須 percent-encode（`%`、`#`、`+`、`;`、空白與非 ASCII）；含 `/` 的原名不可由 URL 定址（§3.1.7 第 11 點，已知邊界），請改用回應的 `fsm_project`。
 - **Console 側**：Backend 不淨化、不檢查 Windows 禁用字元，只做長度與控制字元的檢查（§1.10.4），把有效值原樣交給 Bridge。對拍測試 F-8：`fsm_component` 對一批樣本（含 CJK、空白、括號、`+`、`@`、`a:b`、`x/y`、`CON`、80 字以上、NFD 輸入、尾端空白與句點）與 SDD 原函式逐一相等且冪等，其輸出皆被讀取白名單接受。
 
 **(c) 回應新欄位（只增不減；僅 `GET /sdd/fsm/{project}` 與 `:freeze` 的成功回應）**
