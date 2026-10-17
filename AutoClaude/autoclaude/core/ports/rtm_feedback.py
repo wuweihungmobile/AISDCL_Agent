@@ -48,6 +48,7 @@ def coverage_report_to_doc(
             "covered_ac": report.ac_covered,
             "ac_coverage_pct": report.ac_coverage_pct,
             "fully_covered": report.is_fully_covered,
+            "unmapped_at": len(report.unmapped_at_ids),  # improving_115 §8.5
         },
         "ac_coverage": [
             {"ac_id": ac, "passed_at": passed, "total_at": total}
@@ -57,6 +58,8 @@ def coverage_report_to_doc(
         # improving_61 W-61-1：weak_regex 第二信號搭 history jsonl（additive；
         # 舊紀錄無此欄 → from_doc 讀回 fail-soft 為 ()）。
         "weak_regex_at_ids": list(report.weak_regex_at_ids),
+        # improving_115 §8.5：無法歸屬 AC 的 AT（additive；舊 doc 缺欄讀回 ()）。
+        "unmapped_at_ids": list(report.unmapped_at_ids),
     }
     if saved_at:
         doc["saved_at"] = saved_at
@@ -83,6 +86,8 @@ def coverage_report_from_doc(doc: dict[str, Any]) -> RtmCoverageReport:
         ac_coverage=ac_coverage,
         # improving_61 W-61-1：fail-soft——舊 doc 無此欄回 ()，向後相容。
         weak_regex_at_ids=tuple(str(x) for x in (doc.get("weak_regex_at_ids") or [])),
+        # improving_115 §8.5：同上 fail-soft（improving_115 以前寫下的 doc 都沒有這一欄）。
+        unmapped_at_ids=tuple(str(x) for x in (doc.get("unmapped_at_ids") or [])),
     )
 
 

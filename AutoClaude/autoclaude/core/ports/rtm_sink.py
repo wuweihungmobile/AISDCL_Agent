@@ -42,6 +42,12 @@ class RtmCoverageReport:
     # 與 failed_at_ids 正交的第二元學習信號（轉譯保真度本身的弱點）；additive 預設 ()，
     # 舊 coverage doc 無此欄讀回 fail-soft 為空（向後相容）。
     weak_regex_at_ids: tuple[str, ...] = field(default=())
+    # improving_115（ADR-XPLAT-016 §8.5，S6／D-115-16）：還原後**無法歸屬任何 AC** 的 AT id
+    # （`AT-` 開頭卻不合 AT_ID_PATTERN，如舊規格的 `AT-14-1-1`、E 類 `AT-001-E-1`）。這些 AT
+    # 仍計入 total_at／passed_at／failed_at_ids（AT 級指標不假裝它不存在），但不進任何 AC 桶；
+    # additive 預設 ()，舊 coverage doc 無此欄讀回 fail-soft 為空（與 weak_regex_at_ids 同模式）。
+    # ⚠️ 與 SddSpec.unmapped_at_ids（規格出現卻沒編成 step）是兩個不同層的欄位，不得混用。
+    unmapped_at_ids: tuple[str, ...] = field(default=())
 
     @property
     def coverage_pct(self) -> float:
@@ -68,8 +74,9 @@ class RtmCoverageReport:
 
     @property
     def is_fully_covered(self) -> bool:
-        """SCG-5 RTM 閘門判準：全部 AC 皆已覆蓋（且非空）。"""
-        return self.ac_total > 0 and self.ac_covered == self.ac_total
+        """SCG-5 RTM 閘門判準：全部 AC 皆已覆蓋（且非空），**且沒有無法歸屬 AC 的 AT**
+        （有 unmapped_at_ids 時不得宣稱全覆蓋——否則覆蓋率分母外還藏著未被 AC 級指標看見的 AT）。"""
+        return self.ac_total > 0 and self.ac_covered == self.ac_total and not self.unmapped_at_ids
 
 
 class IRtmSink(Protocol):

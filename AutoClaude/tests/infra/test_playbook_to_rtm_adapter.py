@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import yaml
 
+from autoclaude.core.ports.rtm_feedback import coverage_report_from_doc
 from autoclaude.core.ports.rtm_sink import NullRtmSink, RtmCoverageReport
 from autoclaude.infra.adapters.playbook_to_rtm_adapter import PlaybookToRtmAdapter
 from autoclaude.models.playbook import PlaybookTask
@@ -197,3 +198,110 @@ class TestWeakRegexCollection:
         rep = ad.compile_report(self._tasks_with_weak(), [])
         doc = yaml.safe_load(ad.render_yaml(rep))
         assert doc["weak_regex_at_ids"] == ["AT-001-1-1"]
+
+
+# ── improving_115（ADR-XPLAT-016 §8.5，S6／D-115-16）：AC 歸屬改為「前兩段數字」──────────
+# WHY：AT 文法放寬（首段三位、第二段數字、第三段起任意英數尾綴）後，若逆向仍只認恰好三段數字，
+# 帶尾綴的 AT 會因「還原不出」被略過而從覆蓋率分母悄悄消失——覆蓋率被灌高。新規則：前兩段歸 AC；
+# 不符文法的 AT 仍計入 AT 級指標、不進 AC 桶、列 unmapped、有它時不得宣稱 fully_covered。
+def _ids(*pairs):
+    """[(AT id, 是否完成)] → (tasks, completed)；step_id＝sdd-greenfield-<小寫 at_id>，同正向。"""
+    tasks = [_task(f"sdd-greenfield-{at.lower()}", at) for at, _ in pairs]
+    return tasks, [f"sdd-greenfield-{at.lower()}" for at, done in pairs if done]
+
+
+class TestAcAttributionByFirstTwoSegments:
+    def test_multi_segment_suffixes_belong_to_the_ac_of_their_first_two_segments(self):
+        tasks, completed = _ids(
+            ("AT-001-12-3-a", True), ("AT-001-12-3-b", True), ("AT-001-1-E-1", True),
+            ("AT-001-1-1", False), ("AT-029-1-1-1-1", True))
+        rep = PlaybookToRtmAdapter().compile_report(tasks, completed)
+        assert dict((ac, (p, t)) for ac, p, t in rep.ac_coverage) == {
+            "AC-001-12": (2, 2), "AC-001-1": (1, 2), "AC-029-1": (1, 1)}
+        assert rep.total_at == 5 and rep.passed_at == 4
+        assert rep.unmapped_at_ids == ()
+
+    def test_reported_ids_are_upper_cased_but_attribution_is_not_affected(self):
+        tasks, _ = _ids(("AT-001-1-1-a", False))
+        rep = PlaybookToRtmAdapter().compile_report(tasks, [])
+        assert rep.failed_at_ids == ("AT-001-1-1-A",)
+        assert rep.ac_coverage == (("AC-001-1", 0, 1),)
+
+    def test_non_grammar_ats_stay_in_at_level_metrics_but_in_no_ac_bucket(self):
+        """AT 級指標不假裝它不存在（total_at／passed_at／failed_at_ids），AC 級指標不被它污染。"""
+        tasks, completed = _ids(
+            ("AT-001-1-1", True), ("AT-14-1-1", True), ("AT-001-E-2", False))
+        rep = PlaybookToRtmAdapter().compile_report(tasks, completed)
+        assert rep.total_at == 3 and rep.passed_at == 2
+        assert rep.failed_at_ids == ("AT-001-E-2",)
+        assert rep.ac_coverage == (("AC-001-1", 1, 1),)
+        assert rep.unmapped_at_ids == ("AT-001-E-2", "AT-14-1-1")  # 排序
+
+    def test_fully_covered_is_false_while_any_at_is_unmapped(self):
+        """舊的三段形（對照組）全覆蓋為真；多一個無法歸屬的 AT，就算它通過、AC 也全覆蓋，仍為假。"""
+        ad = PlaybookToRtmAdapter()
+        tasks, completed = _ids(("AT-001-1-1", True), ("AT-001-2-1", True))
+        assert ad.compile_report(tasks, completed).is_fully_covered is True
+        tasks, completed = _ids(("AT-001-1-1", True), ("AT-001-2-1", True), ("AT-14-1-1", True))
+        rep = ad.compile_report(tasks, completed)
+        assert rep.ac_covered == rep.ac_total == 2 and rep.passed_at == rep.total_at == 3
+        assert rep.is_fully_covered is False
+
+    def test_the_legacy_three_segment_shape_is_attributed_exactly_as_before(self):
+        rep = PlaybookToRtmAdapter().compile_report(
+            _sdd_tasks(), ["sdd-greenfield-at-001-1-1", "sdd-greenfield-at-001-2-1"])
+        assert (rep.total_at, rep.passed_at, rep.failed_at_ids) == (3, 2, ("AT-001-1-2",))
+        assert rep.ac_coverage == (("AC-001-1", 1, 2), ("AC-001-2", 1, 1))
+        assert rep.unmapped_at_ids == () and rep.weak_regex_at_ids == ()
+
+    def test_a_name_that_is_not_an_at_falls_back_to_the_step_id_and_may_be_unmapped(self):
+        events = []
+
+        class _Obs:
+            def emit_counter(self, *a, **k): pass
+            def emit_histogram(self, *a, **k): pass
+            def start_span(self, *a, **k): raise AssertionError("unused")
+            def record_event(self, name, attributes=None):
+                events.append(name)
+
+        ad = PlaybookToRtmAdapter(observability=_Obs())
+        rep = ad.compile_report(
+            [_task("sdd-greenfield-at-001-e-1", name="登入頁"),   # 名稱被改過，step_id 還在
+             _task("sdd-greenfield-at-001-1-1", name="登入頁")], ["sdd-greenfield-at-001-1-1"])
+        assert rep.total_at == 2 and rep.unmapped_at_ids == ("AT-001-E-1",)
+        assert rep.ac_coverage == (("AC-001-1", 1, 1),)
+        assert events == []  # 有 `-at-` 界線的任務不算「還原不出」
+
+    def test_render_yaml_carries_the_unmapped_fields_and_survives_the_round_trip(self):
+        ad = PlaybookToRtmAdapter()
+        tasks, completed = _ids(("AT-001-1-1", True), ("AT-14-1-1", False), ("AT-001-E-2", True))
+        rep = ad.compile_report(tasks, completed, spec_digest="sha256:abc")
+        doc = yaml.safe_load(ad.render_yaml(rep))
+        assert doc["summary"]["unmapped_at"] == 2 and doc["summary"]["fully_covered"] is False
+        assert doc["unmapped_at_ids"] == ["AT-001-E-2", "AT-14-1-1"]
+        assert coverage_report_from_doc(doc) == rep  # 含新欄的全欄位等值
+
+    def test_the_yaml_of_a_clean_report_says_zero_unmapped(self):
+        ad = PlaybookToRtmAdapter()
+        doc = yaml.safe_load(ad.render_yaml(ad.compile_report(_sdd_tasks(), [])))
+        assert doc["summary"]["unmapped_at"] == 0 and doc["unmapped_at_ids"] == []
+
+    def test_gap_markdown_names_the_unmapped_ats_and_never_claims_a_clean_pass(self):
+        ad = PlaybookToRtmAdapter()
+        tasks, completed = _ids(("AT-001-1-1", True), ("AT-14-1-1", True))
+        md = ad.render_gap_markdown(ad.compile_report(tasks, completed))
+        assert "無法歸屬 AC 的 AT 清單" in md and "- AT-14-1-1" in md
+        assert "無 gap" not in md and "✅" not in md
+        assert "不得宣稱全覆蓋" in md  # AC 都覆蓋了卻仍不是 100%：原因必須說出來
+
+
+class TestRtmCoverageReportUnmappedField:
+    def test_unmapped_defaults_empty_and_leaves_the_gate_untouched(self):
+        rep = RtmCoverageReport(scenario="s", spec_digest="d", total_at=1, passed_at=1,
+                                ac_coverage=(("AC-001-1", 1, 1),))
+        assert rep.unmapped_at_ids == () and rep.is_fully_covered is True
+
+    def test_unmapped_ids_veto_the_fully_covered_verdict(self):
+        rep = RtmCoverageReport(scenario="s", spec_digest="d", total_at=2, passed_at=2,
+                                ac_coverage=(("AC-001-1", 1, 1),), unmapped_at_ids=("AT-14-1-1",))
+        assert rep.ac_covered == rep.ac_total and rep.is_fully_covered is False

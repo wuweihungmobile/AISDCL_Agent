@@ -812,6 +812,22 @@ def _hermetic_external_resume_cmd(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────
+# 同家族（improving_115／ADR-XPLAT-016 §7.1）：開發機殼層 export 的 `SDD_PROJECT` 不得漏進測試
+# ──────────────────────────────────────────────────────────────
+# SddToPlaybookAdapter 在**建構時**讀 `SDD_PROJECT` 選 FSM 狀態檔。在 SDD session 的殼層（匯出它是
+# 常態）跑測試時，所有「單檔、無專案鍵」的凍結閘測試會改去找 `FSM-STATE-<那個專案>.yaml` 而紅，失敗
+# 訊息只說「找不到專案」、不提環境變數。要驗專案鍵行為的測試在測試內自己 setenv／傳 fsm_project，
+# 它們在本 fixture 之後才施作，照舊生效。
+# 鎖（含 `--noconftest` 對照組）：tests/infra/test_sdd_frozen_gate.py::
+# TestSddProjectEnvIsHermeticInTests。
+@pytest.fixture(autouse=True)
+def _hermetic_sdd_project_env(monkeypatch):
+    from autoclaude.infra.adapters._sdd_frozen_gate import SDD_PROJECT_ENV
+
+    monkeypatch.delenv(SDD_PROJECT_ENV, raising=False)
+
+
+# ──────────────────────────────────────────────────────────────
 # B1（DEF-200-274 系列後續）：接 根層 tools/lib/cpu_budget.py 的實體核心預算
 # ──────────────────────────────────────────────────────────────
 # 立案：本檔 `pyproject.toml` 的 `addopts` 對任何呼叫端都帶 `-n auto`，而 xdist 內建的

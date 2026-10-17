@@ -302,7 +302,7 @@ def _build_rtm_writeback(
     """組裝 RtmWritebackPlugin + PlaybookToRtmAdapter + FileRtmSink（AutoSDD_improving_24 W-24-2）。
 
     延遲 import infra adapter（wiring 為 core-purity 唯一豁免點）。報告寫到
-    run 工作區 build/reports/rtm/（base_dir=checkpoint_dir/rtm）；非 SDD playbook
+    <checkpoint_dir>/rtm（base_dir=checkpoint_dir/rtm）；非 SDD playbook
     時 plugin 於 POST_RUN 自行 no-op，sink 不會被觸碰。
     """
     from ..infra.adapters.playbook_to_rtm_adapter import PlaybookToRtmAdapter  # noqa: PLC0415

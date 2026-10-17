@@ -187,3 +187,39 @@ class TestWeakRegexAtIdsDoc:
         }
         restored = coverage_report_from_doc(legacy_doc)
         assert restored.weak_regex_at_ids == ()
+
+
+class TestUnmappedAtIdsDoc:
+    """improving_115（ADR-XPLAT-016 §8.5）：unmapped_at_ids 搭 history doc 往返；
+    improving_115 以前寫下的舊 doc 缺欄 → from_doc fail-soft 回 ()，讀得回、不 raise。"""
+
+    def _report(self, **kw):
+        base = dict(
+            scenario="brownfield", spec_digest="sha256:abc", total_at=3, passed_at=2,
+            failed_at_ids=("AT-14-1-1",), ac_coverage=(("AC-001-1", 1, 1),),
+            unmapped_at_ids=("AT-001-E-1", "AT-14-1-1"))
+        base.update(kw)
+        return RtmCoverageReport(**base)
+
+    def test_round_trip_keeps_the_unmapped_ids_and_the_count(self):
+        report = self._report()
+        doc = coverage_report_to_doc(report)
+        assert doc["unmapped_at_ids"] == ["AT-001-E-1", "AT-14-1-1"]
+        assert doc["summary"]["unmapped_at"] == 2
+        assert doc["summary"]["fully_covered"] is False  # 有 unmapped 時不得宣稱全覆蓋
+        assert coverage_report_from_doc(doc) == report
+
+    def test_legacy_doc_without_the_field_reads_back_empty(self):
+        legacy_doc = {
+            "kind": "rtm-coverage", "scenario": "x", "spec_digest": "sha256:1",
+            "summary": {"total_at": 1, "passed_at": 1},
+            "ac_coverage": [{"ac_id": "AC-001-1", "passed_at": 1, "total_at": 1}],
+            "failed_at_ids": [], "weak_regex_at_ids": [],
+            # 刻意沒有 summary.unmapped_at 與 unmapped_at_ids
+        }
+        restored = coverage_report_from_doc(legacy_doc)
+        assert restored.unmapped_at_ids == () and restored.is_fully_covered is True
+
+    def test_a_clean_report_serialises_zero_unmapped(self):
+        doc = coverage_report_to_doc(self._report(unmapped_at_ids=()))
+        assert doc["unmapped_at_ids"] == [] and doc["summary"]["unmapped_at"] == 0

@@ -8,6 +8,8 @@
 """
 from __future__ import annotations
 
+import codecs
+import hashlib
 import os
 import re
 import subprocess
@@ -18,8 +20,10 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+from autoclaude.core.ports.observability import NullObservability
 from autoclaude.core.ports.spec_source import (
     ISpecSource,
+    SpecDigestMismatchError,
     SpecFormatVersionError,
     SpecNotFrozenError,
     SpecTaintedError,
@@ -80,6 +84,64 @@ def _write_spec(root, text=_SPEC_MD, name="TEST-CONTRACT-SPEC-Demo.md"):
     docs.mkdir(parents=True, exist_ok=True)
     (docs / name).write_text(text, encoding="utf-8")
     return root / "docs"
+
+
+# ── improving_115（ADR-XPLAT-016）共用夾具：多專案狀態檔、凍結摘要、可調的規格文字 ──────────
+def _spec_path(root, name="TEST-CONTRACT-SPEC-Demo.md"):
+    return root / "docs" / "03_testing" / "contracts" / name
+
+
+def _write_state(root, key, *, current="IMPLEMENTATION", frozen_stages=None, project=None):
+    """寫 `FSM-STATE-<key>.yaml`（檔內 project 欄位預設＝key；同目錄可放多個專案）。"""
+    fsm_dir = root / "build" / "reports" / "fsm"
+    fsm_dir.mkdir(parents=True, exist_ok=True)
+    doc = {"fsm_state": {"project": key if project is None else project,
+                         "current_state": current, "frozen_stages": frozen_stages or []}}
+    path = fsm_dir / f"FSM-STATE-{key}.yaml"
+    path.write_text(yaml.safe_dump(doc, allow_unicode=True), encoding="utf-8")
+    return path
+
+
+def _producer_digest(path):
+    """SDD 生產端（`spec-frozen --digest`，ADR §4.3）的演算法，獨立於 adapter 的實作：
+    換行正規化後（`\\r\\n`→`\\n`、再 `\\r`→`\\n`）的 UTF-8 bytes 取 sha256，BOM 不剝。
+    當對拍的真值——adapter 的 `SddSpec.digest` 必須與它逐位元相同。"""
+    raw = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _frozen_stage(root, *paths, stage="Stage-1"):
+    """一筆帶 `spec_doc_digests` 的 frozen_stages 項（鍵＝POSIX 相對專案根，同 SDD CLI）。"""
+    keys = [p.relative_to(root).as_posix() for p in paths]
+    return {"stage": stage, "frozen_at": "t", "compaction_report": None, "spec_docs": keys,
+            "spec_doc_digests": {k: _producer_digest(p) for k, p in zip(keys, paths)}}
+
+
+def _spec_text(*, rows=(), gherkin_ids=(), preamble="場景：greenfield 全新模組\n",
+               test_type="Unit", extra=""):
+    """組一份最小 TCS：rows＝[(AC id, AT 欄原文)]；gherkin_ids＝§2 要放標頭的 AT。"""
+    lines = ["# Test Contract Specification — T", "", preamble, "## 1. AC → AT 映射表", "",
+             "| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |",
+             "|-------|---------|-------|---------|-------|---------|------|"]
+    lines += [f"| {ac} | 描述 | {at} | 描述 | ✅ | {test_type} | □ |" for ac, at in rows]
+    lines += ["", "## 2. AT 格式", ""]
+    for at in gherkin_ids:
+        lines += ["```gherkin", f"# {at}", "Scenario: s", "  Given g", "  When w",
+                  "  Then 回傳 201 Created", "```", ""]
+    return "\n".join(lines) + "\n" + extra
+
+
+class _Events(NullObservability):
+    """收集 record_event，供「出聲」類斷言（事件名＋屬性）。"""
+
+    def __init__(self):
+        self.events: list[tuple[str, dict]] = []
+
+    def record_event(self, name, attributes=None):
+        self.events.append((name, dict(attributes or {})))
+
+    def named(self, name):
+        return [attrs for n, attrs in self.events if n == name]
 
 
 class TestFrozenGate:
@@ -1045,3 +1107,464 @@ class TestPromptCarriesTheAcceptanceGate:
         for t in tasks:
             assert t.evaluator_command.startswith("pytest spec_tests "), t.step_id
             assert "spec_tests/" in t.prompt, t.step_id
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# improving_115（ADR-XPLAT-016）：以專案選檔／凍結綁內容／AT 文法與出聲／spec_file／版本與場景宣告
+# 每條規則至少一支具名測試；fail-closed 的反向案例（拿掉修法必須變紅）寫在 docstring。
+# ══════════════════════════════════════════════════════════════════════════════════════
+
+
+class TestProjectSelection:
+    """G-02／S-05（§7.1）：凍結閘以專案鍵選檔；他專案已凍結不得放行本專案。"""
+
+    @pytest.fixture()
+    def shared_dir(self, tmp_path):
+        """同一個狀態目錄兩個專案：alpha 已凍結、zeta 還在草稿（體檢 S-05 的探針形態）。"""
+        spec_dir = _write_spec(tmp_path)
+        _write_state(tmp_path, "alpha", current="SPEC_FROZEN")
+        _write_state(tmp_path, "zeta", current="INIT")
+        return spec_dir
+
+    def test_an_unfrozen_project_is_not_let_through_by_another_projects_freeze(self, shared_dir):
+        """舊版取字母序第一份（alpha）⇒ zeta 的規格通過凍結閘並編出步驟；新規則只認被指定者。"""
+        with pytest.raises(SpecNotFrozenError, match="INIT"):
+            SddToPlaybookAdapter(fsm_project="zeta").load_spec(str(shared_dir))
+        spec = SddToPlaybookAdapter(fsm_project="alpha").load_spec(str(shared_dir))
+        assert spec.fsm_project == "alpha" and spec.contracts
+
+    def test_several_state_files_without_a_project_fail_closed(self, shared_dir):
+        """框架自己的狀態目錄現有 8 個檔：不指定專案就不能通過凍結閘（刻意），不依字母序猜。"""
+        with pytest.raises(SpecNotFrozenError, match="不唯一"):
+            SddToPlaybookAdapter().load_spec(str(shared_dir))
+
+    def test_the_environment_variable_is_read_when_the_adapter_is_built(
+            self, shared_dir, monkeypatch):
+        monkeypatch.setenv("SDD_PROJECT", "zeta")
+        adapter = SddToPlaybookAdapter()
+        monkeypatch.setenv("SDD_PROJECT", "alpha")  # 建構之後再改，不影響已建好的實例
+        with pytest.raises(SpecNotFrozenError, match="INIT"):
+            adapter.load_spec(str(shared_dir))
+        assert SddToPlaybookAdapter().load_spec(str(shared_dir)).fsm_project == "alpha"
+
+    def test_an_empty_project_string_ignores_the_environment(self, shared_dir, monkeypatch):
+        """Bridge 行程內顯式傳 ""：開發機匯出的 SDD_PROJECT 不得左右 Bridge 替各專案做的選檔。"""
+        monkeypatch.setenv("SDD_PROJECT", "alpha")
+        with pytest.raises(SpecNotFrozenError, match="不唯一"):
+            SddToPlaybookAdapter(fsm_project="").load_spec(str(shared_dir))
+
+    def test_a_single_state_file_without_a_project_keeps_working(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        assert SddToPlaybookAdapter().load_spec(str(spec_dir)).fsm_project == "demo"
+
+    def test_the_named_project_is_not_searched_for_in_parent_directories(self, tmp_path):
+        """往上找會撞到別的專案：最近的 build/reports/fsm 沒有該專案就拒絕。"""
+        inner = tmp_path / "work"
+        spec_dir = _write_spec(inner)
+        _write_state(tmp_path, "alpha", current="SPEC_FROZEN")  # 外層有 alpha
+        _write_state(inner, "zeta", current="SPEC_FROZEN")      # 內層只有 zeta
+        with pytest.raises(SpecNotFrozenError, match="找不到專案 'alpha'"):
+            SddToPlaybookAdapter(fsm_project="alpha").load_spec(str(spec_dir))
+
+    def test_the_original_project_name_resolves_through_the_state_file_field(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_state(tmp_path, "a_b", project="a:b", current="SPEC_FROZEN")
+        _write_state(tmp_path, "other", current="INIT")
+        spec = SddToPlaybookAdapter(fsm_project="a:b").load_spec(str(spec_dir))
+        assert spec.fsm_project == "a_b"  # 回報的是狀態檔鍵（淨化後），不是原名
+
+    def test_a_path_traversal_project_key_is_rejected(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        for key in ("..\\evil", "../evil", "..", "a/b"):
+            with pytest.raises(SpecNotFrozenError, match="非法"):
+                SddToPlaybookAdapter(fsm_project=key).load_spec(str(spec_dir))
+
+    def test_autoclaude_delegated_counts_as_frozen_for_legacy_state_files(self, tmp_path):
+        """Bridge 在 spawn 前已 delegate-enter：引擎 PRE_RUN 讀到的 current_state 就是它。
+        frozen_stages 為空的舊狀態檔缺這一項，委派一啟動就被 veto。"""
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path, current_state="AUTOCLAUDE_DELEGATED")
+        assert SddToPlaybookAdapter().load_spec(str(spec_dir)).contracts
+        from autoclaude.infra.adapters import sdd_to_playbook_adapter as mod
+        assert "AUTOCLAUDE_DELEGATED" in mod._POST_FROZEN_STATES  # 舊名仍可取用
+
+    def test_an_explicit_state_path_still_wins_over_the_project_key(self, shared_dir, tmp_path):
+        alpha = tmp_path / "build" / "reports" / "fsm" / "FSM-STATE-alpha.yaml"
+        adapter = SddToPlaybookAdapter(fsm_state_path=str(alpha), fsm_project="zeta")
+        assert adapter.load_spec(str(shared_dir)).fsm_project == "alpha"
+
+
+class TestFrozenDigestBinding:
+    """G-06（§6）：凍結時記內容摘要，載入時比對；改檔即 fail-closed，舊狀態檔放行但出聲一次。"""
+
+    @pytest.fixture()
+    def frozen(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        spec_file = _spec_path(tmp_path)
+        _write_state(tmp_path, "demo", current="SPEC_FROZEN",
+                     frozen_stages=[_frozen_stage(tmp_path, spec_file)])
+        return tmp_path, spec_dir, spec_file
+
+    def test_an_unchanged_spec_is_verified(self, frozen):
+        _, spec_dir, spec_file = frozen
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.frozen_digest_status == "verified"
+        assert spec.digest == _producer_digest(spec_file)  # 與生產端同一個演算法
+
+    def test_editing_the_spec_after_the_freeze_is_a_digest_mismatch(self, frozen):
+        """舊版只驗「有凍結」不驗「凍結的就是這份」⇒ 凍結後改檔仍可編譯、仍可執行。"""
+        _, spec_dir, spec_file = frozen
+        spec_file.write_text(_SPEC_MD + "\n凍結之後偷加的一行\n", encoding="utf-8")
+        with pytest.raises(SpecDigestMismatchError, match="與凍結時不同") as info:
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert isinstance(info.value, SpecNotFrozenError)  # 既有 except 路徑照樣接得住
+
+    def test_a_spec_that_was_not_part_of_the_freeze_is_rejected_as_not_frozen(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        other = tmp_path / "docs" / "README.md"
+        other.write_text("x", encoding="utf-8")
+        _write_state(tmp_path, "demo", current="SPEC_FROZEN",
+                     frozen_stages=[_frozen_stage(tmp_path, other)])
+        with pytest.raises(SpecNotFrozenError, match="不在凍結清單") as info:
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert not isinstance(info.value, SpecDigestMismatchError)
+
+    def test_a_refreeze_supersedes_the_older_digest(self, tmp_path):
+        """同一鍵在多個階段出現＝以最近一次凍結為準。"""
+        spec_dir = _write_spec(tmp_path)
+        spec_file = _spec_path(tmp_path)
+        old = _frozen_stage(tmp_path, spec_file, stage="Stage-1")
+        spec_file.write_text(_SPEC_MD + "\n改版後重新凍結\n", encoding="utf-8")
+        new = _frozen_stage(tmp_path, spec_file, stage="Stage-2")
+        _write_state(tmp_path, "demo", current="SPEC_FROZEN", frozen_stages=[old, new])
+        assert SddToPlaybookAdapter().load_spec(str(spec_dir)).frozen_digest_status == "verified"
+
+    def test_legacy_state_files_without_digests_pass_and_say_so_once(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path, frozen_stages=[{"stage": "SCG-3", "frozen_at": "t"}])
+        obs = _Events()
+        adapter = SddToPlaybookAdapter(observability=obs)
+        assert adapter.load_spec(str(spec_dir)).frozen_digest_status == "absent"
+        adapter.load_spec(str(spec_dir))
+        assert len(obs.named("sdd.frozen_digest_absent")) == 1  # 每個 adapter 實例只出聲一次
+        again = _Events()
+        SddToPlaybookAdapter(observability=again).load_spec(str(spec_dir))
+        assert len(again.named("sdd.frozen_digest_absent")) == 1  # 新實例照樣出聲
+
+    def test_a_verified_freeze_does_not_raise_the_absent_alarm(self, frozen):
+        _, spec_dir, _ = frozen
+        obs = _Events()
+        SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+        assert obs.named("sdd.frozen_digest_absent") == []
+
+    @pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"], ids=["LF", "CRLF", "CR"])
+    @pytest.mark.parametrize("bom", [False, True], ids=["no-bom", "bom"])
+    def test_the_digest_equals_the_producers_for_every_newline_and_bom_variant(
+            self, tmp_path, newline, bom):
+        """對拍：Windows 編輯器存成 CRLF 是常態，用原始 bytes 會讓每次比對假紅。adapter 的
+        SddSpec.digest 必須與 SDD 生產端（換行正規化後的 UTF-8 bytes，BOM 不剝）逐位元相同。"""
+        spec_dir = _write_spec(tmp_path)
+        spec_file = _spec_path(tmp_path)
+        body = _SPEC_MD.replace("\n", newline).encode("utf-8")
+        spec_file.write_bytes((codecs.BOM_UTF8 if bom else b"") + body)
+        _write_state(tmp_path, "demo", current="SPEC_FROZEN",
+                     frozen_stages=[_frozen_stage(tmp_path, spec_file)])
+        spec = SddToPlaybookAdapter().load_spec(str(spec_dir))
+        assert spec.digest == _producer_digest(spec_file)
+        assert spec.frozen_digest_status == "verified"
+        lf = hashlib.sha256(_SPEC_MD.encode("utf-8")).hexdigest()
+        expected_bom = hashlib.sha256(codecs.BOM_UTF8 + _SPEC_MD.encode("utf-8")).hexdigest()
+        assert spec.digest == "sha256:" + (expected_bom if bom else lf)
+
+
+class TestAtGrammarAndUnmappedAts:
+    """S-03（§8.1-8.2）：AT 文法、AC 一致性，與「出現卻未編成」一律出聲。"""
+
+    @staticmethod
+    def _load(tmp_path, text, obs=None):
+        spec_dir = _write_spec(tmp_path, text=text)
+        _write_fsm_state(tmp_path)
+        adapter = SddToPlaybookAdapter(observability=obs)
+        return adapter, adapter.load_spec(str(spec_dir))
+
+    def test_e_class_and_multi_segment_ats_named_under_their_ac_compile(self, tmp_path):
+        text = _spec_text(
+            rows=[("AC-001-1", "AT-001-1-1"), ("AC-001-1", "AT-001-1-E-1"),
+                  ("AC-001-1", "AT-001-1-E-2"), ("AC-001-12", "AT-001-12-3-a")],
+            gherkin_ids=["AT-001-1-E-1"])
+        adapter, spec = self._load(tmp_path, text)
+        assert [c.at_id for c in spec.contracts] == [
+            "AT-001-1-1", "AT-001-1-E-1", "AT-001-1-E-2", "AT-001-12-3-a"]
+        assert spec.unmapped_at_ids == ()
+        tasks = adapter.compile_tasks(spec)
+        assert [t.step_id for t in tasks][1] == "sdd-greenfield-at-001-1-e-1"
+        for t in tasks:  # 含字母的尾綴：evaluator 的 -k 代號仍合白名單模板
+            assert re.fullmatch(r'pytest [\w./\\-]+ -k "[A-Za-z0-9_]+" -q', t.evaluator_command)
+        assert 'AT_001_1_E_1' in tasks[1].evaluator_command
+
+    def test_template_style_e_ids_are_reported_not_silently_dropped(self, tmp_path):
+        """S-03 探針（14_at_drop_probe）：5 個相異 AT、只編出 2 步、無任何 audit 事件。
+        舊 `AT-[\\d\\-]+` 對 `AT-001-E-n` 整列不匹配＝靜默消失；現在必須出聲。"""
+        text = _spec_text(
+            rows=[("AC-001-1", "AT-001-1-1"), ("AC-001-1", "AT-001-1-2"),
+                  ("AC-001-1", "AT-001-E-1"), ("AC-001-1", "AT-001-E-3"),
+                  ("AC-001-1", "AT-001-E-4")],
+            gherkin_ids=["AT-001-1-1", "AT-001-1-2", "AT-001-E-1"])
+        obs = _Events()
+        adapter, spec = self._load(tmp_path, text, obs)  # load_spec 不拋（引擎 PRE_RUN 也走它）
+        assert len(adapter.compile_tasks(spec)) == 2
+        assert spec.unmapped_at_ids == ("AT-001-E-1", "AT-001-E-3", "AT-001-E-4")
+        (event,) = obs.named("sdd.at_unmapped")
+        assert event["at_ids"] == list(spec.unmapped_at_ids) and event["count"] == 3
+        assert event["reasons"] == {a: "invalid_id" for a in spec.unmapped_at_ids}
+        assert event["spec_path"] == spec.spec_path
+
+    def test_every_unmapped_reason_is_reported_in_first_appearance_order(self, tmp_path):
+        """AC 不一致／ID 後有尾隨文字／舊編號／只有 Gherkin 標頭——依首見順序、去重，各有原因。"""
+        text = _spec_text(
+            rows=[("AC-001-1", "AT-001-1-1"),
+                  ("AC-002-1", "AT-001-1-9"),          # AT 前兩段推得 AC-001-1 ≠ AC-002-1
+                  ("AC-001-3", "AT-001-3-1 (E2E)"),    # 合法 ID 後有尾隨文字，整列不進 §1 表
+                  ("AC-014-2", "AT-14-2-1")],          # 舊編號（首段非三位）
+            gherkin_ids=["AT-001-1-1", "AT-001-1-7", "AT-14-2-1"])
+        obs = _Events()
+        _, spec = self._load(tmp_path, text, obs)
+        assert [c.at_id for c in spec.contracts] == ["AT-001-1-1"]
+        assert spec.unmapped_at_ids == ("AT-001-1-9", "AT-001-3-1", "AT-14-2-1", "AT-001-1-7")
+        assert obs.named("sdd.at_unmapped")[0]["reasons"] == {
+            "AT-001-1-9": "ac_mismatch", "AT-001-3-1": "malformed_row",
+            "AT-14-2-1": "invalid_id", "AT-001-1-7": "no_row"}
+
+    def test_the_ac_of_a_row_must_match_the_first_two_segments_of_its_at(self, tmp_path):
+        """逆向 RTM 以 AT 前兩段歸 AC：正向若放過不一致的列，兩邊會悄悄歸到不同 AC。"""
+        text = _spec_text(rows=[("AC-002-1", "AT-001-1-1")])
+        _, spec = self._load(tmp_path, text)
+        assert spec.contracts == () and spec.unmapped_at_ids == ("AT-001-1-1",)
+
+    def test_declaration_positions_only_tables_three_and_four_and_prose_do_not_count(
+            self, tmp_path):
+        """§3 的清單表（第一欄是 AT）、§4 的邊界表（第一欄是場景類型）、散文與模板佔位列都不是
+        宣告位置——照模板填 §3／§4 不會讓編譯失敗。"""
+        extra = (
+            "\n## 3. AT 完整清單\n| AT ID | 對應 AC | 描述 |\n|---|---|---|\n"
+            "| AT-001-E-9 | AC-001-1 | 邊界 |\n"
+            "\n## 4. 邊界與錯誤測試規格\n| 場景類型 | AT ID | 描述 |\n|---|---|---|\n"
+            "| 空值處理 | AT-001-E-1 | None |\n"
+            "| AC-{NNN}-{Y} | 描述 | AT-{NNN}-{Y}-{Z} | 描述 | ✅ | Unit | □ |\n"
+            "\n散文提到 AT-14-1-1 與 AT-001-E-2，但只是敘述。\n")
+        obs = _Events()
+        _, spec = self._load(
+            tmp_path, _spec_text(rows=[("AC-001-1", "AT-001-1-1")],
+                                 gherkin_ids=["AT-001-1-1"], extra=extra), obs)
+        assert spec.unmapped_at_ids == ()
+        assert obs.named("sdd.at_unmapped") == []
+
+    @pytest.mark.parametrize("at_id", [
+        "AT-001-1-1", "AT-001-1", "AT-001-12-3-a", "AT-001-1-E1", "AT-001-1-E-1",
+        "AT-029-1-1-1-1"])
+    def test_ids_the_grammar_accepts_compile_under_their_derived_ac(self, tmp_path, at_id):
+        parts = at_id.split("-")
+        ac = f"AC-{parts[1]}-{parts[2]}"
+        _, spec = self._load(tmp_path, _spec_text(rows=[(ac, at_id)]))
+        assert [c.at_id for c in spec.contracts] == [at_id] and spec.unmapped_at_ids == ()
+
+    @pytest.mark.parametrize("at_id", [
+        "AT-14-1-1", "AT-123", "AT-001", "AT-001-E-1", "AT-0001-1-1", "AT-001-1-",
+        "AT-001--1", "at-001-1-1", "AT-001-1-1_a"])
+    def test_ids_the_grammar_rejects_never_compile_and_are_reported(self, tmp_path, at_id):
+        _, spec = self._load(tmp_path, _spec_text(rows=[("AC-001-1", at_id)]))
+        assert spec.contracts == ()
+        if at_id.startswith("AT-"):  # 小寫 at- 根本不算 AT 字樣：不在宣告掃描的字樣內
+            assert spec.unmapped_at_ids != ()
+
+    def test_the_wordcount_fixture_still_compiles_three_ats_with_none_unmapped(self, tmp_path):
+        obs = _Events()
+        spec, tasks = _compile_wordcount(tmp_path, observability=obs)
+        assert len(tasks) == 3 and spec.unmapped_at_ids == ()
+        assert obs.named("sdd.at_unmapped") == []
+        assert obs.named("sdd.scenario_inferred") == []  # 夾具宣告了 **場景**
+        assert spec.scenario == "greenfield" and spec.spec_format_version == "1.0"
+
+
+class TestSpecFile:
+    """S-04（§8.3）：同一目錄兩份 TCS（模板規定的標準版面）可依 spec_file 具名編譯。"""
+
+    @pytest.fixture()
+    def two_specs(self, tmp_path):
+        alpha = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], gherkin_ids=["AT-001-1-1"])
+        beta = _spec_text(rows=[("AC-002-1", "AT-002-1-1"), ("AC-002-1", "AT-002-1-2")],
+                          gherkin_ids=["AT-002-1-1", "AT-002-1-2"])
+        spec_dir = _write_spec(tmp_path, text=alpha, name="TCS-Alpha-20261017.md")
+        _write_spec(tmp_path, text=beta, name="TCS-Beta-20261017.md")
+        _write_fsm_state(tmp_path)
+        return tmp_path, spec_dir
+
+    def test_two_official_tcs_in_one_directory_are_ambiguous_without_spec_file(self, two_specs):
+        _, spec_dir = two_specs
+        with pytest.raises(ValueError, match="spec_file"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_spec_file_picks_one_relative_to_spec_dir_or_absolute(self, two_specs):
+        root, spec_dir = two_specs
+        adapter = SddToPlaybookAdapter()
+        beta = adapter.load_spec(str(spec_dir), "03_testing/contracts/TCS-Beta-20261017.md")
+        assert [c.at_id for c in beta.contracts] == ["AT-002-1-1", "AT-002-1-2"]
+        absolute = _spec_path(root, "TCS-Alpha-20261017.md").resolve()
+        alpha = adapter.load_spec(str(spec_dir), str(absolute))
+        assert [c.at_id for c in alpha.contracts] == ["AT-001-1-1"]
+        assert Path(alpha.spec_path) == absolute
+
+    def test_a_spec_dir_that_is_a_file_is_taken_as_the_spec_file(self, two_specs):
+        """引擎 PRE_RUN 的 load_spec(workflow_path) 因此不必改 port 簽名。"""
+        root, _ = two_specs
+        beta = _spec_path(root, "TCS-Beta-20261017.md")
+        spec = SddToPlaybookAdapter().load_spec(str(beta))
+        assert [c.at_id for c in spec.contracts] == ["AT-002-1-1", "AT-002-1-2"]
+        with pytest.raises(ValueError, match="不得再指定 spec_file"):
+            SddToPlaybookAdapter().load_spec(str(beta), "TCS-Alpha-20261017.md")
+
+    def test_spec_file_outside_spec_dir_is_refused(self, two_specs, tmp_path_factory):
+        _, spec_dir = two_specs
+        outside = tmp_path_factory.mktemp("outside") / "TCS-Out.md"
+        outside.write_text(_spec_text(rows=[("AC-001-1", "AT-001-1-1")]), encoding="utf-8")
+        for target in (str(outside), "../../../" + outside.name):
+            with pytest.raises(ValueError, match="不在 spec_dir"):
+                SddToPlaybookAdapter().load_spec(str(spec_dir), target)
+
+    def test_spec_file_must_be_a_markdown_file_that_exists(self, two_specs):
+        root, spec_dir = two_specs
+        (_spec_path(root, "notes.txt")).write_text("x", encoding="utf-8")
+        with pytest.raises(ValueError, match=r"\.md"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir), "03_testing/contracts/notes.txt")
+        with pytest.raises(FileNotFoundError, match="spec_file"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir), "03_testing/contracts/Nope.md")
+
+    def test_each_named_file_is_bound_to_its_own_digest(self, two_specs):
+        """凍結清單裡兩份 TCS 各有各的摘要：尾段比對對到的是被指定的那一份。"""
+        root, spec_dir = two_specs
+        alpha = _spec_path(root, "TCS-Alpha-20261017.md")
+        beta = _spec_path(root, "TCS-Beta-20261017.md")
+        _write_state(root, "demo", current="SPEC_FROZEN",
+                     frozen_stages=[_frozen_stage(root, alpha, beta)])
+        for name in ("TCS-Alpha-20261017.md", "TCS-Beta-20261017.md"):
+            spec = SddToPlaybookAdapter(fsm_project="demo").load_spec(
+                str(spec_dir), f"03_testing/contracts/{name}")
+            assert spec.frozen_digest_status == "verified"
+        beta.write_text(beta.read_text(encoding="utf-8") + "\n改了\n", encoding="utf-8")
+        with pytest.raises(SpecDigestMismatchError):
+            SddToPlaybookAdapter(fsm_project="demo").load_spec(
+                str(spec_dir), "03_testing/contracts/TCS-Beta-20261017.md")
+        assert SddToPlaybookAdapter(fsm_project="demo").load_spec(
+            str(spec_dir), "03_testing/contracts/TCS-Alpha-20261017.md").contracts
+
+
+class TestVersionAndScenarioDeclarations:
+    """S-11／S-12（§8.4）：宣告判讀放寬但不放行「宣告了卻解析不出」；場景宣告優先於啟發式。"""
+
+    @staticmethod
+    def _load(tmp_path, text, obs=None):
+        spec_dir = _write_spec(tmp_path, text=text)
+        _write_fsm_state(tmp_path)
+        return SddToPlaybookAdapter(observability=obs).load_spec(str(spec_dir))
+
+    _FORMS = [
+        "**spec-format-version**: {v}",
+        "**spec-format-version**:  {v}",       # 多一個空白
+        "**spec-format-version** : {v}",       # 冒號前有空白
+        "**spec-format-version**: `{v}`",      # 反引號
+        "**spec-format-version**： {v}",       # 全形冒號加空白
+        "> spec_format_version: {v}",          # 引用區塊與底線寫法
+        "- spec format version: {v}",          # 清單項與空白寫法
+        "<!-- spec-format-version: {v} -->",   # HTML 註解形（生產端與既有測試用過）
+    ]
+
+    @pytest.mark.parametrize("form", _FORMS)
+    def test_decorated_declarations_are_parsed_instead_of_falling_back_to_the_default(
+            self, tmp_path, form):
+        """舊樣式 \\D{0,4} 對其中多種解不出而退回預設 1.0 放行（S-11 的 fail-open）。
+        以未支援的 2.0 驗「解出了值」：解不出就會被當成未宣告而放行。"""
+        with pytest.raises(SpecFormatVersionError, match="2.0"):
+            self._load(tmp_path, _SPEC_MD + "\n" + form.format(v="2.0") + "\n")
+
+    @pytest.mark.parametrize("form", _FORMS)
+    def test_decorated_supported_declarations_are_accepted_and_marked_declared(
+            self, tmp_path, form):
+        obs = _Events()
+        spec = self._load(tmp_path, _SPEC_MD + "\n" + form.format(v="1.0") + "\n", obs)
+        assert spec.spec_format_version == "1.0"
+        assert obs.named("sdd.spec_format_version")[-1]["declared"] is True
+
+    def test_a_declaration_without_a_parsable_value_is_refused(self, tmp_path):
+        """宣告了卻解析不出版本值 ⇒ 拒絕（不得靜默退回預設 1.0）。"""
+        obs = _Events()
+        with pytest.raises(SpecFormatVersionError, match="解析不出"):
+            self._load(tmp_path, _SPEC_MD + "\n**spec-format-version**: tbd\n", obs)
+        assert obs.named("sdd.spec_format_version") == [
+            {"version": "", "declared": True, "accepted": False}]
+
+    def test_a_mid_sentence_mention_is_not_a_declaration(self, tmp_path):
+        obs = _Events()
+        text = _SPEC_MD + "\n本規格採用的 spec-format-version 為 2.0（尚未生效，僅供對照）。\n"
+        spec = self._load(tmp_path, text, obs)
+        assert spec.spec_format_version == "1.0"
+        assert obs.named("sdd.spec_format_version")[-1]["declared"] is False
+
+    def test_a_declaration_shown_inside_a_code_fence_is_not_a_declaration(self, tmp_path):
+        text = _SPEC_MD + "\n```\n**spec-format-version**: 2.0\n```\n"
+        assert self._load(tmp_path, text).spec_format_version == "1.0"
+
+    def test_a_declaration_on_the_first_line_of_a_bom_file_still_counts(self, tmp_path):
+        """BOM 不剝（與摘要演算法一致），所以檔首第一行的宣告前面站著 U+FEFF：它也是「行首」。"""
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        body = "**spec-format-version**: 2.0\n" + _SPEC_MD
+        _spec_path(tmp_path).write_bytes(codecs.BOM_UTF8 + body.encode("utf-8"))
+        with pytest.raises(SpecFormatVersionError, match="2.0"):
+            SddToPlaybookAdapter().load_spec(str(spec_dir))
+
+    def test_the_official_template_line_still_parses(self, tmp_path):
+        line = "**spec-format-version**: 1.0  <!-- improving_85：AutoClaude 消費端驗證 -->"
+        assert self._load(tmp_path, _SPEC_MD + "\n" + line + "\n").spec_format_version == "1.0"
+
+    def test_a_declared_scenario_wins_over_the_substring_heuristic(self, tmp_path):
+        """S-12 探針：表格有 `Integration` 測試類型，舊法把場景判成 integration 並隨文字微調而變
+        （step_id、global_goal、checkpoint 的 completed_step_ids 連帶失效）。"""
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], test_type="Integration",
+                          preamble="**scenario**: security\n")
+        obs = _Events()
+        spec = self._load(tmp_path, text, obs)
+        assert spec.scenario == "security"
+        assert obs.named("sdd.scenario_inferred") == []
+        assert SddToPlaybookAdapter().compile_tasks(spec)[0].step_id == "sdd-security-at-001-1-1"
+
+    @pytest.mark.parametrize("line", [
+        "**scenario**: Brownfield", "場景：brownfield 既有系統", "**場景**: brownfield",
+        "> scenario: brownfield"])
+    def test_scenario_declaration_forms(self, tmp_path, line):
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], preamble=line + "\n")
+        assert self._load(tmp_path, text).scenario == "brownfield"
+
+    def test_a_declared_scenario_outside_the_ten_is_refused(self, tmp_path):
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], preamble="**scenario**: moonshot\n")
+        with pytest.raises(ValueError, match="moonshot"):
+            self._load(tmp_path, text)
+
+    def test_without_a_declaration_the_heuristic_stays_and_says_so(self, tmp_path):
+        """不改既有 step_id（避免舊 checkpoint 的 completed_step_ids 失效），但推斷要可見。"""
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], test_type="Integration",
+                          preamble="")
+        obs = _Events()
+        spec = self._load(tmp_path, text, obs)
+        assert spec.scenario == "integration"
+        (event,) = obs.named("sdd.scenario_inferred")
+        assert event["scenario"] == "integration"
+
+    def test_a_gherkin_scenario_keyword_is_not_a_scenario_declaration(self, tmp_path):
+        """Gherkin 的 `Scenario: Valid login`（英文標題）在圍欄區塊內，不是場景宣告；
+        否則每份英文 Gherkin 的 TCS 都會被 ValueError 擋下。"""
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], preamble="",
+                          gherkin_ids=["AT-001-1-1"])
+        spec = self._load(tmp_path, text.replace("Scenario: s", "Scenario: Valid login"))
+        assert spec.scenario == "greenfield" and spec.contracts

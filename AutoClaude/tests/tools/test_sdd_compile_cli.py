@@ -9,18 +9,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from autoclaude.execution.pre_run_validator import PreRunValidator
+from autoclaude.infra.adapters.sdd_to_playbook_adapter import SddToPlaybookAdapter
 from autoclaude.models.playbook import Playbook
-from autoclaude.tools.sdd_compile import compile_spec, main
+from autoclaude.tools.sdd_compile import SpecAtUnmappedError, compile_spec, main
 from autoclaude.utils.config import load_config
 from tests.infra.test_sdd_to_playbook_adapter import (
     _SPEC_MD,
     _WORDCOUNT_DIR,
     _WORDCOUNT_TCS,
+    _frozen_stage,
+    _spec_path,
+    _spec_text,
     _write_fsm_state,
     _write_spec,
+    _write_state,
 )
 
 
@@ -189,3 +195,186 @@ class TestBridgeWordcountFixture:
         assert Path(cfg.checkpoint_dir) == tmp_path / "checkpoints"
         thresholds = [k for k in yaml.safe_load(text)["token_guard"] if k.endswith("_pct")]
         assert thresholds == [], f"範本不得覆寫門檻：{thresholds}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# improving_115（ADR-XPLAT-016 §8.2-8.3／§6）：rc 6、--spec-file、--fsm-project、摘要不符 rc 2
+# ══════════════════════════════════════════════════════════════════════════════════════
+
+# 官方模板本體的形狀（§1 的列是佔位、§2 示例標頭卻是真 ID）：模板住 docs_template/，
+# **不是**編譯輸入，硬拿去編譯是預期的大聲失敗（§8.2「模板本體」列），
+# 實例化時示例區塊要刪或改成真實 AC 的 AT。
+_TEMPLATE_BODY = """# Test Contract Specification — 範本本體
+
+**spec-format-version**: 1.0
+**scenario**: greenfield
+
+## 1. AC → AT 映射表
+
+| AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
+|-------|---------|-------|---------|-------|---------|------|
+| AC-{NNN}-{Y} | {描述} | AT-{NNN}-{Y}-{Z} | {描述} | ✅ | Unit | □ |
+
+## 2. AT 格式（示例）
+
+```gherkin
+# AT-001-1-1
+Scenario: 示例
+  Given g
+  When w
+  Then 回傳 201 Created
+```
+
+```gherkin
+# AT-001-1-2
+Scenario: 示例二
+  Given g
+  When w
+  Then 回傳 200 OK
+```
+"""
+
+
+class TestUnmappedAtsExitCode6:
+    """S-03／D-115-09：AT 出現卻未編成 ⇒ CLI 回 rc 6、印清單、不寫輸出檔（無覆寫旗標）。"""
+
+    def _run(self, tmp_path, text, *extra):
+        spec_dir = _write_spec(tmp_path, text=text)
+        _write_fsm_state(tmp_path)
+        out = tmp_path / "out.yaml"
+        return main(["--spec-dir", str(spec_dir), "--out", str(out), *extra]), out
+
+    def test_an_appearing_but_uncompiled_at_exits_6_lists_it_and_writes_nothing(
+            self, tmp_path, capsys):
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1"), ("AC-001-1", "AT-001-E-1")],
+                          gherkin_ids=["AT-001-1-1"])
+        rc, out = self._run(tmp_path, text)
+        assert rc == 6 and not out.exists()
+        err = capsys.readouterr().err
+        assert "AT-001-E-1" in err
+        assert "AT-001-1-1" not in err  # 已編成的 AT 不在清單裡
+
+    def test_the_uninstantiated_template_body_fails_loudly_with_rc_6(self, tmp_path, capsys):
+        rc, out = self._run(tmp_path, _TEMPLATE_BODY)
+        assert rc == 6 and not out.exists()  # 不是 rc 4「無可編譯步驟」：未編成的 AT 先被點名
+        err = capsys.readouterr().err
+        assert "AT-001-1-1" in err and "AT-001-1-2" in err
+
+    def test_a_clean_spec_still_exits_0(self, tmp_path):
+        text = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], gherkin_ids=["AT-001-1-1"])
+        rc, out = self._run(tmp_path, text)
+        assert rc == 0 and out.is_file()
+
+    def test_compile_spec_raises_a_value_error_subclass_that_carries_the_ids(self, tmp_path):
+        spec_dir = _write_spec(tmp_path, text=_spec_text(
+            rows=[("AC-002-1", "AT-001-1-1")]))  # AC 與 AT 前兩段不一致
+        _write_fsm_state(tmp_path)
+        with pytest.raises(SpecAtUnmappedError) as info:
+            compile_spec(str(spec_dir))
+        assert isinstance(info.value, ValueError) and info.value.at_ids == ("AT-001-1-1",)
+
+    def test_rc_6_does_not_collide_with_the_format_version_code(self, tmp_path):
+        """5 是規格格式版本不受支援（既有）、6 是未編成的 AT（新）：兩種原因不得共用退碼。"""
+        rc6, _ = self._run(tmp_path / "unmapped", _spec_text(rows=[("AC-001-1", "AT-001-E-1")]))
+        spec_dir = _write_spec(tmp_path / "ver", text=_SPEC_MD + "\n**spec-format-version**: 2.0\n")
+        _write_fsm_state(tmp_path / "ver")
+        rc5 = main(["--spec-dir", str(spec_dir), "--out", str(tmp_path / "ver.yaml")])
+        assert (rc5, rc6) == (5, 6)
+
+
+class TestDigestMismatchExitCode2:
+    """G-06：凍結後改檔 ⇒ rc 2（SpecNotFrozenError 子類走同一個退碼），訊息說「內容已變更」。"""
+
+    def test_editing_the_spec_after_the_freeze_exits_2_with_its_own_message(
+            self, tmp_path, capsys):
+        spec_dir = _write_spec(tmp_path)
+        spec_file = _spec_path(tmp_path)
+        _write_state(tmp_path, "demo", current="SPEC_FROZEN",
+                     frozen_stages=[_frozen_stage(tmp_path, spec_file)])
+        out = tmp_path / "o.yaml"
+        assert main(["--spec-dir", str(spec_dir), "--out", str(out)]) == 0  # 未改：放行
+        out.unlink()
+        spec_file.write_text(_SPEC_MD + "\n凍結後偷加的一行\n", encoding="utf-8")
+        rc = main(["--spec-dir", str(spec_dir), "--out", str(out)])
+        assert rc == 2 and not out.exists()
+        err = capsys.readouterr().err
+        assert "內容已變更" in err and "摘要" in err and "未凍結（Spec-First" not in err
+
+
+class TestSpecFileAndFsmProjectFlags:
+    """S-04／G-02：--spec-file 讓同目錄兩份 TCS 可編；--fsm-project 讓多專案狀態目錄可指定。"""
+
+    @pytest.fixture()
+    def two_specs(self, tmp_path):
+        alpha = _spec_text(rows=[("AC-001-1", "AT-001-1-1")], gherkin_ids=["AT-001-1-1"])
+        beta = _spec_text(rows=[("AC-002-1", "AT-002-1-1")], gherkin_ids=["AT-002-1-1"])
+        spec_dir = _write_spec(tmp_path, text=alpha, name="TCS-Alpha.md")
+        _write_spec(tmp_path, text=beta, name="TCS-Beta.md")
+        _write_fsm_state(tmp_path)
+        return tmp_path, spec_dir
+
+    def test_two_tcs_in_one_directory_are_ambiguous_without_the_flag(self, two_specs, capsys):
+        root, spec_dir = two_specs
+        out = root / "o.yaml"
+        assert main(["--spec-dir", str(spec_dir), "--out", str(out)]) == 4
+        assert "spec_file" in capsys.readouterr().err and not out.exists()
+
+    def test_spec_file_compiles_the_named_one_and_anchors_workflow_path_to_the_file(
+            self, two_specs):
+        root, spec_dir = two_specs
+        out = root / "o.yaml"
+        rc = main(["--spec-dir", str(spec_dir), "--spec-file", "03_testing/contracts/TCS-Beta.md",
+                   "--out", str(out)])
+        assert rc == 0
+        pb = Playbook.model_validate(yaml.safe_load(out.read_text(encoding="utf-8")))
+        assert [t.step_id for t in pb.tasks] == ["sdd-greenfield-at-002-1-1"]
+        assert Path(pb.workflow_path) == _spec_path(root, "TCS-Beta.md").resolve()
+        # 引擎 PRE_RUN 以 workflow_path 呼叫 load_spec：檔案路徑被視為 spec_file，載到同一份規格
+        runtime = SddToPlaybookAdapter().load_spec(pb.workflow_path)
+        assert [c.at_id for c in runtime.contracts] == ["AT-002-1-1"]
+
+    def test_without_spec_file_workflow_path_stays_the_directory(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_fsm_state(tmp_path)
+        assert compile_spec(str(spec_dir)).workflow_path == str(spec_dir)
+
+    def test_the_runtime_equivalent_precheck_follows_the_spec_file(self, two_specs):
+        """--fsm-state-path 的預檢（D-SBR-04）以 playbook 所帶的 workflow_path 呼叫；
+        若仍用目錄，兩份 TCS 的目錄會在預檢丟 ValueError 未捕捉 traceback。"""
+        root, spec_dir = two_specs
+        state = root / "build" / "reports" / "fsm" / "FSM-STATE-demo.yaml"
+        out = root / "o.yaml"
+        rc = main(["--spec-dir", str(spec_dir), "--spec-file", "03_testing/contracts/TCS-Alpha.md",
+                   "--fsm-state-path", str(state), "--out", str(out)])
+        assert rc == 0 and out.is_file()
+
+    @pytest.fixture()
+    def shared_state_dir(self, tmp_path):
+        spec_dir = _write_spec(tmp_path)
+        _write_state(tmp_path, "alpha", current="SPEC_FROZEN")
+        _write_state(tmp_path, "zeta", current="INIT")
+        return tmp_path, spec_dir
+
+    def test_fsm_project_selects_the_state_file_of_that_project_only(self, shared_state_dir):
+        """舊版取字母序第一份（alpha）⇒ zeta 的規格也過；現在只認被指定者。"""
+        root, spec_dir = shared_state_dir
+        out = root / "o.yaml"
+        assert main(["--spec-dir", str(spec_dir), "--fsm-project", "alpha",
+                     "--out", str(out)]) == 0
+        out.unlink()
+        assert main(["--spec-dir", str(spec_dir), "--fsm-project", "zeta",
+                     "--out", str(out)]) == 2
+        assert not out.exists()
+
+    def test_several_state_files_and_no_project_exit_2(self, shared_state_dir, capsys):
+        root, spec_dir = shared_state_dir
+        rc = main(["--spec-dir", str(spec_dir), "--out", str(root / "o.yaml")])
+        assert rc == 2 and "不唯一" in capsys.readouterr().err
+
+    def test_the_environment_variable_is_the_default_project_and_empty_string_opts_out(
+            self, shared_state_dir, monkeypatch):
+        root, spec_dir = shared_state_dir
+        monkeypatch.setenv("SDD_PROJECT", "alpha")
+        assert main(["--spec-dir", str(spec_dir), "--out", str(root / "env.yaml")]) == 0
+        assert main(["--spec-dir", str(spec_dir), "--fsm-project", "",
+                     "--out", str(root / "none.yaml")]) == 2
