@@ -644,8 +644,8 @@ _KNOWN_NTFS_ANCHOR_SITES = {
     "tools/check_ntfs_paths.py": "實作：Python CI 全量掃描版 _ntfs_seg_bad()",
     "AutoClaude/autoclaude/utils/logger.py": "實作：_sanitize_log_filename()（autoclaude 套件邊界）",
     "AISDLC_SDD/scripts/component_sanitizer.py": "實作：sanitize_component()（SDD 子專案邊界）",
-    # ② 只在註解／docstring 提及清單，淨化本身走委派或不在此檔——粗粒度錨的必然命中，
-    #    非第 5 份實作。這幾筆存在本身就是「錨不剝註解」這個取捨的可見成本。
+    # ② 註解提及或鏡像接受器（Bridge fsm_names 認 SDD 淨化輸出域）——錨必命中，非第 5 份實作
+    "AgentConsole/engine-bridge/app/fsm_names.py": "鏡像：Bridge 接受器；對等鎖在 Bridge tests",
     "AutoClaude/autoclaude/infra/adapters/rtm_file_sink.py": "註解：DEF-101-343 沿革；實作已委派共用函式",
     "AutoClaude/autoclaude/plugins/playbook_persistence_plugin.py": "註解：說明保留名／禁用字元語意",
     "AISDLC_SDD/<LATEST>/tools/fsm_runtime/counterfactual_replay.py": "註解：提醒組檔名前須淨化",
