@@ -175,6 +175,24 @@ W7 波（等級 6～10 傳遞引擎旋鈕 D-11、資源取樣 D-12、AISDLC_SDD 
 Push-Location AgentConsole\frontend; $env:E2E_BRIDGE_LOG = "$env:E2E_ROOT\bridge-logs\bridge.log"; $env:E2E_PG_CONTAINER = "qa-pg"; $env:E2E_FAKE_BRAIN = "1"; npx playwright test tests/e2e/p9-w7-engine.spec.ts tests/e2e/p9-w7-sdd.spec.ts tests/e2e/p9-w7-signoffs.spec.ts tests/e2e/p9-w7-ui.spec.ts tests/e2e/p9-w7-purefile.spec.ts tests/e2e/p9-w7-html.spec.ts tests/e2e/p9-w7-resources.spec.ts; Pop-Location
 ```
 
+## 整合輪 115 複驗（契約 v1.5 E2E-17；`p10-w115-sdd.spec.ts`）
+
+SDD 迴圈的真後端複驗（核准凍結、綁定、併入匯入、SDD 批次、FSM 同步、追溯覆蓋、四源對拍）：測試自己扮演「SDD session」，用**真的 SDD CLI**（LATEST）把 FSM 專案推進到 HUMAN_PENDING，不手寫 YAML；FSM、稽核與 PG 一律獨立讀取（根層 `.venv` 的 PyYAML、Bridge 稽核檔、`docker exec <PG 容器> psql`），不經被測 API。環境同〈W5 複驗〉，另加：
+
+- 寫入權杖：backend 與 Bridge（18081）設**同一個** `BRIDGE_SDD_WRITE_TOKEN`（至少 32 字元的拋棄式測試值，不入檔、不印出），同一個值放進 `E2E_SDD_TOKEN`；沒設 `E2E_SDD_TOKEN` 整支略過。
+- backend 的替身引擎設定：`--console.execution.mock-env[MOCK_CLAUDE_DELAY]=3`（讓測試觀察得到 AUTOCLAUDE_DELEGATED）與 `--console.execution.mock-env[MOCK_CLAUDE_TRACE]=<E2E_ROOT>/mock-trace.jsonl`（引擎子行程環境的斷言讀它；`E2E_MOCK_TRACE` 可改路徑）；`BRIDGE_ALLOWED_PATH_ROOTS` 要含 `E2E_ROOT`。
+- `E2E_PG_CONTAINER`（必要：稽核與綁定欄直查 PG，例 `qa-pg`）；Bridge 稽核檔預設讀 `<E2E_ROOT>/workspace/_audit.jsonl`（`E2E_BRIDGE_WORKSPACE` 可改）。
+- 額外行程：第二個 Bridge（18086，不設權杖，只驗契約列 1，spec 自己起停）。
+- 🔴 `workers: 1`，不可與其他真後端 spec 或 mock spec 同時跑（共用的 Bridge 與限流額度）；整支約六至七分鐘。契約列 18 的前置改在「尚未跑過的專案」做（審查 Q-09）；未涵蓋的列（列 26 的 Docker、列 1 的後半、列 22 的另四種 `cause`）見 `docs/06_quality/AutoSDD_ZeroTrust_Audit_115.md` §3.2、§8。跑 mock 整套之後，被改寫的已追蹤截圖要用 `git show HEAD:<path>` 的位元組還原。
+
+```bash
+(cd AgentConsole/frontend && E2E_SDD_TOKEN="<與兩端相同的權杖值>" E2E_PG_CONTAINER=qa-pg E2E_MODE=standalone npx playwright test tests/e2e/p10-w115-sdd.spec.ts --output=<自己的暫存目錄>/pw)
+```
+
+```powershell
+Push-Location AgentConsole\frontend; $env:E2E_SDD_TOKEN = "<與兩端相同的權杖值>"; $env:E2E_PG_CONTAINER = "qa-pg"; $env:E2E_MODE = "standalone"; npx playwright test tests/e2e/p10-w115-sdd.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
+```
+
 ## Docker 全棧（`*.stack.ts`，經 nginx 同源）
 
 `docker compose --profile db --profile app --profile full up -d` 之後，用 `docker.config.ts` 跑 `p8-docker-stack.stack.ts`：入口（首頁／`/actuator/` 被封／401）、路徑 A 匯入全鏈（凍結規格放進 Bridge 容器的 `/workspace`，因為全棧不載入 e2e profile、沒有 allow-loopback）、SSE 經 nginx（`proxy_buffering off`）與重啟 backend 後重連（W5 起不再 `test.fail`：換新失敗不登出）、10MB 上傳、nginx access／error 日誌都不含 `access_token` 的值，以及 W5 新增的全棧情境：`/api/health` 與 `/_next/static` 的 Cache-Control 恰好一份、Bridge 深度探針（移走容器內的 git → 503 → 容器轉 unhealthy → 還原後回 healthy）、`X-Trace-Id` 貫穿 Bridge 與 backend 卷內日誌、偽造 `X-Forwarded-For` 仍會被限流（含兩段各 62 秒的等待）。

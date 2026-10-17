@@ -283,3 +283,276 @@ Windows 專屬邊界：
 **暫存目錄證據檔**（絕對路徑根：`C:\Users\wuwei\AppData\Local\Temp\claude\D--CursorProject-AISDCL-Agent\0f21f73d-2c1d-4c72-a705-54ac42f61c74\scratchpad\w4_dogfood\`）：`logs\*.log`（本檔引用的原檔）、`shots\*.png`（十四張截圖）、`artifacts\`（AI 的 `tg_phase.py` 與七個測試、TCS、SCG-0～3 報告、SLV 報告、SCG-4 審查報告）、`*.ps1`、`*.py`、`pw\*.cjs`（操作員工具，非產品碼）。
 
 **環境殘留**（給接手者）：`%TEMP%\e2e\projects\tg-phase`（FSM 停在 IMPLEMENTATION，供 W5 重驗）、`%TEMP%\e2e\projects\tg-phase-fail`（FSM 停在 IMPLEMENTATION，兩筆升級歷史皆已解；另有第二個 FSM 專案 `tg-other` 停在 SCENARIO_DETECT）。收尾已停服務並停掉 `qa-pg` 容器：該容器以 `docker run --rm` 啟動，`docker stop` 後容器與其中的 Console 資料（專案、run、稽核列、為 C1 驗證建又刪的 `tg-dup`）一併消失，所以 PG 側的引文（稽核列、`execution_runs`、綁定欄）只留在本檔與 `logs\`；W5 要重驗須先重建環境（`reset_local.ps1` 類腳本），再以路徑 A 對仍在磁碟上的專案根與 FSM 狀態檔重新匯入。埠狀態見交卷訊息。
+
+## §2 W5 QA 獨立稽核：範圍、方法與環境
+
+> 本節起由 W5 QA（Sonnet 5.5，獨立零信任審查鏡；本輪沒有參與任何實作，也沒有參與 W4 dogfood）追加；§1 是 W4 操作員的原文，本節一字不改。判準採根 CLAUDE.md〈守衛面准入〉的「量、不挖」：跑既有閘門與重測、核對證據與程式，不構造變體去找新缺陷；構造性命中不計 P≤2。
+
+### §2.1 範圍與環境
+
+| 項目 | 內容 |
+|------|------|
+| 被審區間 | `38e46582..ae31e882`（現 HEAD）：17 個 commit、288 個檔（新增 32032 行、刪除 1000 行）；AgentConsole 208 檔、AutoClaude 16 檔、AISDLC_SDD 54 檔（LATEST 目錄內 47 檔）、根層 docs 5 檔、根層守衛面 4 檔、`ONBOARDING.md` 1 檔 |
+| 依據 | improving_115（§2 判準 C1～C6、§6 裁決 D-115-01～19、§7 親驗表）、ADR-XPLAT-016、契約 v1.5（§1.10、§3.1.4～§3.1.7、E2E-17、§6.8）、本檔 §1、Audit_114 體例、三份 CLAUDE.md、SDD 體檢 S-01～S-20 |
+| 不做 | 不改產品碼、契約、ADR-XPLAT-016、AISDLC_SDD、AutoClaude 與根層檔案；不 commit、不派子代理；不自架背景等待後交卷 |
+| 環境 | Windows 11（10.0.26300）、pwsh 7.6.7、Python 3.11.9（根 `.venv`）、Node v22.23.3、OpenJDK 21.0.10、Docker 29.5.3、claude 2.1.302；PG＝容器 `qa-pg`（`pgvector/pgvector:pg18`，埠 25433；埠 5432 的 `autoclaude_pg` 全程沒動）；backend 18080（e2e profile）、Bridge 18081（真引擎；`BRIDGE_SDD_WRITE_TOKEN` 兩端同值，拋棄式測試值，不入檔、不印出）、第二個 Bridge 18086（不設權杖，專驗列 1）、前端 3000（standalone，建置內嵌 `NEXT_PUBLIC_API_URL=http://localhost:18080`）、替身 `aisdlc-mock-claude`（`MOCK_CLAUDE_DELAY=3`、`MOCK_CLAUDE_TRACE` 開） |
+
+### §2.2 方法
+
+1. **設計對實作**：逐節讀 ADR-XPLAT-016 §3～§13 與契約 v1.5 的對應條文，對照 Bridge（`sdd_cli.py`、`routers/sdd.py`、`sdd_run.py`、`sdd_sync.py`、`security.py`、`settings.py`、`fsm_phase.py`）、AutoClaude（`_sdd_frozen_gate.py`、adapter、`sdd_compile.py`）、後端（`SddGovernanceService`、`SddFreezeRules`、`SddBatchPolicy`、`ImportService`）與前端元件；§11.3 白名單以腳本逐項機械核對（§3.6）。
+2. **閘門親跑**：他包回報的各閘數字一律自己跑一次（序列、各一次、rc 取自緊接的 `$LASTEXITCODE`、不接管線），結果見 §3.1。
+3. **dogfood 證據複驗**：§1.3 的 FSM 引文用 PyYAML 獨立讀回；TCS 摘要獨立重算；SCG-4 審查表對 TCS 的 Gherkin 獨立重判；W4 的突變探針原樣重跑；CI 夾具重跑（§3.4）。
+4. **真後端 E2E-17**：新寫 `frontend/tests/e2e/p10-w115-sdd.spec.ts`，測試自己扮演「SDD session」，用真 SDD CLI 把 FSM 專案推到 HUMAN_PENDING（不手寫 YAML）；FSM、稽核、PG 一律用獨立讀取（PyYAML、Bridge 稽核檔、`psql`），不經被測 API（§3.2）。
+5. **RTM 單線合併**：18 個新列、8 個既有列的修訂、11 處過期測試引用（§5）。
+6. **既有 spec 追隨契約**：`p9-w7-sdd.spec.ts` 列 1、列 2、列 4 改為 v1.5 口徑並實跑（§3.3）。
+7. **文件**：`ADR-002-Frontend-Design-System.md` §4 補登四個新元件與偏離；`QA_W7_Closure.md` 補缺陷編號指路；`frontend/tests/e2e/README.md` 補〈整合輪 115 複驗〉一節（前置與跑法）；本檔 §2 起。
+
+### §2.3 嚴重度與處置
+
+P1／P2＝立即回報主控、同輪修、二審驗修復；P3＝文字修正或登記；P4＝登記並寫出「可觀測的再開症狀」。VERDICT 的 PASS＝沒有 P≤2。缺陷編號：AgentConsole 側自 DEF-AC-028 起（接 §1.9 的 DEF-AC-015～027）；歸屬根層文件的以 Q 編號列出，請主控入根帳。
+
+## §3 閘門親跑表與證據
+
+### §3.1 全套閘門（各跑一次；起點為乾淨 HEAD）
+
+| # | 閘門（指令） | rc | 結果 |
+|---|-------------|:--:|------|
+| A1 | AutoClaude：`python -m pytest tests/ -q -n 8 --dist loadgroup` | 0 | 通過 5875 項、略過 7 項、警告 14 個（49.26 秒） |
+| A2 | AutoClaude：`lint-imports` | 0 | 九條契約全部維持、零違反 |
+| A3 | AutoClaude：`ruff check`（變動的 16 個 .py） | 0 | 全數通過 |
+| A4 | `python AutoClaude/tools/check_loc_budget.py --json` | 0 | 總量 18512（上限 20438）；絕對紅線、分級、特殊檔三欄違規皆空 |
+| F1 | 根層：`AUTOSDD_PARALLEL_TESTS=1 python tools/run_root_unittests.py` | 0 | 發現 5384 個測試（下限 5326）；略過 46 支（platform 42、env-disabled 4） |
+| B1 | `powershell.exe … AISDLC_SDD\scripts\ci-gate.ps1`（PS 5.1 語意，顯式外呼） | 0 | v0.01 凍結基線：通過 1478、略過 4、取消選取 34；LATEST v0.30：通過 2140、略過 6；scripts/tests：通過 383、略過 1；arch_fitness 缺陷 0、警告 3；結語「本機 CI 閘門全數通過」 |
+| B2 | `framework_status_snapshot.py --check`；`sync_exposed_skills.py --check` | 0；0 | FRAMEWORK_STATUS.md 新鮮；父層 skills 與 LATEST 一致（59 檔） |
+| C1 | Bridge：`ruff check .`（engine-bridge 視角） | 0 | 全數通過 |
+| C2 | Bridge：`ruff check AgentConsole/engine-bridge`（monorepo 根視角） | 0 | 全數通過 |
+| C3 | Bridge：`python -m pytest -q`（未設 `BRIDGE_TEST_DSN`） | 0 | 通過 996 項、略過 24 項、警告 1 個（456.07 秒）；略過原因見 H2、H3 |
+| D1 | Backend：`.\gradlew.bat clean build` | 0 | 1946 項測試全數成功（失敗 0、略過 0）；`BUILD SUCCESSFUL in 2m 9s`；JaCoCo 指令 96.85%、分支 85.80%；checkstyle main 與 test 皆 0 error |
+| E1 | Frontend：`npm run lint`（eslint＋prettier 檢查） | 0 | 無輸出 |
+| E2 | Frontend：`npx tsc --noEmit` | 0 | 無輸出 |
+| E3 | Frontend：`npx vitest run` | 0 | 68 個檔、1122 項全數通過 |
+| E4 | Frontend：`npm run build`（`NEXT_PUBLIC_API_URL=http://localhost:18080`） | 0 | 建置成功 |
+| E5 | Frontend：`npx playwright test mock.spec`（standalone） | 0 | 92 個情境全數通過（2.2 分鐘） |
+| G1 | 真後端：`p9-w7-sdd.spec.ts`（改寫後） | 0 | 13 個情境全數通過（3.7 分鐘） |
+| G2 | 真後端：`p10-w115-sdd.spec.ts`（定稿版） | 0 | 19 個情境全數通過（6.4 分鐘）；spec 檔 1206 行（sha256 前八碼 9EDC47CE），該次跑之後未再修改 |
+| H1 | Bridge：`tests/test_sdd_dogfood_fixture.py -rs` | 0 | 2 項全數通過（13.28 秒）：成功夾具與失敗夾具各一，真 SDD CLI 在此環境啟動、沒有略過 |
+| H2 | Bridge：`tests/test_db_integration.py -rs`（`BRIDGE_TEST_DSN` 指向 qa-pg） | 0 | 17 項全數通過（50.03 秒）＝C3 因未設 DSN 而略過的 17 項；C3 的 24 項略過＝這 17 項加 7 項「此環境無法建立 symlink」 |
+| H3 | Bridge：SDD 相關十二個測試檔 `-rs` | 0 | 通過 640 項、略過 4 項、警告 1 個（245.23 秒）；四項略過皆為「此環境無法建立 symlink」（`test_sdd_freeze.py`、`test_sdd_fsm.py`、`test_sdd.py` 兩處）；RTM 新列引用的測試沒有一項落在略過裡 |
+| M1 | W4 `mutation_probe.py`（暫存副本，不碰專案根） | 0 | 基線 8 項通過；14 個突變全數被殺（存活 0） |
+| W1 | `whitelist_check.py`（ADR §11.3 五列逐項） | 0 | 見 §3.6 |
+| S1 | `verify_s_items.py`（體檢 S-01～S-19 修法落地現查） | 0 | 見 §3.7 |
+
+補充：schema 型別檔 `lib/api/schema-p3-6.d.ts` 以 `openapi-typescript` 對 `openapi-p3-6.yaml` 重產，與已入庫檔逐位元相同（207475 字元）。TLC（五軌 TLA+）未跑：`SDD_RUN_TLC` 未啟用（B1 的四筆 ENV-DISABLED 略過即其表徵）；ADR §11.3 第 2 列免跑 TLC 的前提——`_HAPPY_PATH`（transition_rules.py）與 formal 目錄的 diff 為零、`*.tla` 零變動——已機械核對成立（§3.6）。
+
+### §3.2 真後端 E2E-17（`frontend/tests/e2e/p10-w115-sdd.spec.ts`，19 個情境）
+
+跑法：`E2E_MODE=standalone`、真後端 18080、真 Bridge 18081、第二個 Bridge 18086、PG 25433、真 SDD CLI（LATEST）、替身 claude；`run_pw.ps1` 帶各自的 `--output` 目錄。證據行（console 輸出，最終版）：
+
+```
+[w115-sdd] 列 1：18086 兩個寫入皆 503 sdd_write_disabled；GET 200；FSM 檔 sha256 不變；沒有 run 目錄
+[w115-sdd] 列 5：畫面核准凍結 → FSM SPEC_FROZEN／Stage-1／摘要＝獨立計算；稽核 trace c5b8dda7-9d76-4a72-834e-9efbdaa07a53 三處同 approver；PG sdd_project=e2e17-alpha
+[w115-sdd] 列 15～17：run d6e41457-6c44-4cb8-a648-c869e1b2bc7c COMPLETED；FSM 四跳逐字；RTM 三處相等；四源對拍（FSM／Bridge／Console／PG）一致
+```
+
+結果：19 個情境全數通過（6.4 分鐘），rc=0。各情境耗時：列 1 1.7 秒、列 2 30 毫秒、列 3 170 毫秒、列 4 0.8 秒、列 5 1.6 秒、列 6 1.4 秒、列 7 0.2 秒、列 8＋14 0.4 秒、列 9～12 1.1 分、列 13 0.3 秒、列 15～17 18.9 秒、列 18 1.2 分、列 19 20.3 秒、列 20 1.4 分、列 21① 18.7 秒、列 21②＋22 16.0 秒、列 23 1.0 分、列 24 0.1 秒、列 25 21.5 秒。
+
+跑通之前的失敗都是 spec 自己的前提寫錯（沒有一筆是產品缺陷）：列 6⑧的欄位名（Q-02）、列 8 的專案簽核（Q-05）、列 10 的夾具沒凍結 FSM、列 18 與列 21② 在跑完批次的專案上再 execute 被前置檢查 7c 擋下（Q-09）、列 19 對監控頁 reload 後找治理區、列 22 對剛 201 的批次立刻讀步驟列（步驟列在批次開始後才陸續出現；空陣列的 `every` 恆為真，已改成等終態並要求非空）。
+
+逐列對照（契約 §5 E2E-17；「實跑」＝spec 有斷言且通過）：
+
+| 契約列 | 實跑 | 備註 |
+|:--:|:--:|------|
+| 1 | 是（前兩項） | 18086：兩個寫入皆 503 `sdd_write_disabled`、`GET` 200、FSM 檔 sha256 不變、沒有 run 目錄。「不含 `sdd` 的 run 照舊 201」未跑：18086 沒有替身引擎設定，會誤起真 claude |
+| 2 | 是 | 缺或錯權杖同為 403 `sdd_write_forbidden`；回應與稽核檔都搜不到權杖值；稽核有拒絕事件 |
+| 3 | 是 | INIT 態 409 `fsm_state_conflict`，含目前與期望狀態 |
+| 4 | 是 | 多專案共處四種呼叫逐項符合 |
+| 5 | 是 | 畫面核准凍結；FSM 末筆、`spec_doc_digests`（測試端獨立計算）、Bridge 稽核、PG `audit_log`、PG 綁定同 approver 與 trace_id |
+| 6 | 是 | ①～⑨ 全部符合；⑧的欄位名為 `docs[0]`，契約寫 `docs`（Q-02） |
+| 7 | 是 | 重複綁定 409 且 Bridge 沒收到任何寫入；PUT 的角色、驗證、稽核 |
+| 8 | 是（與 14 合併） | 併入既有專案；契約寫「再以 Phase 2 簽核專案」，對手動建立（`draft:false`）的專案會 409，spec 兩種都接受（Q-05） |
+| 9 | 是 | ①②③④ 皆實跑 |
+| 10 | 是 | 兩份 TCS 同目錄五種情形 |
+| 11 | 是（`sdd_compile` CLI 的 rc 6 除外） | rc 6 與 §4 邊界表由 AutoClaude `test_sdd_compile_cli.py` 覆蓋（A1） |
+| 12 | 是 | Bridge 409、Console 422（明示與探測兩種）、還原後 200 |
+| 13 | 是 | CJK＋空白、`a:b`↔`a_b`、201 字元與 NUL 皆 400 |
+| 14 | 是（與 8 合併） | `phase` 為 FROZEN／4（T-G 已接線，非 null） |
+| 15 | 是 | 成功批次：FSM 四跳逐字、step_id、playbook 治理欄、引擎子行程環境、權杖搜尋零命中 |
+| 16 | 是 | RTM 三處逐值相等；進行中批次 404 |
+| 17 | 是 | 四源對拍（FSM 檔／Bridge／Console／PG）逐值一致 |
+| 18 | 是（前置改寫） | 契約的前置「第 15 列之後」不可行（Q-09）；改在尚未跑過的專案做（FSM 為 SPEC_FROZEN），並於列 19 恢復後再做一次（FSM 為 IMPLEMENTATION） |
+| 19 | 是 | 失敗路徑→ESCALATION→顯示的指令原樣恢復（Windows PowerShell 5.1）→下一批次 201；恢復前 409 零副作用；畫面橫幅與兩段指令 |
+| 20 | 是 | 取消交還控制權；再 execute 回 201 且 `playbook_ref` 換新 |
+| 21 | 是（①②） | ① 外部殺掉引擎行程→run FAILED、FSM 不動；再 execute 201 並寫回收兩跳與稽核；② 外來委派 409 `foreign_delegation` |
+| 22 | 是（`mixed_scope` 一種） | 其餘四種 `cause` 依契約由 `RunLauncher` 整合測試覆蓋，E2E 不另起實例 |
+| 23 | 是 | 401／403 與 `traceId` 等於 `X-Trace-Id`；回應不含權杖值 |
+| 24 | 是（mtime 快照） | 「Bridge 原始碼掃描」＝F-4 的 AST 鎖，由 Bridge 單元測試覆蓋（C3、H3） |
+| 25 | 是 | 直打 Bridge 缺／錯權杖四次皆 403；PAUSED 期間改檔 resume 409；還原後 resume 200 |
+| 26 | 否 | Docker 全棧未跑（§8） |
+
+### §3.3 既有 spec 追隨契約（`p9-w7-sdd.spec.ts`）
+
+列 1（清單）由兩個專案改為三個：`["bad name","e2e-alpha","e2e-bravo"]`，`bad name` 的項目為 `{project:"bad name", source:"FSM-STATE-bad name.yaml", currentState:null, updatedAt:null}`；列 2 的「清單照常」同為三個；列 4 的名稱規則：含空白的 `a%20b` 與 `..%2Fx` 由 400 改為 200 加 `fsm_not_found`（`fsm` 為 null），201 字元與 `a%00b` 仍 400（`errors[0].field=project`）。實跑：13 個情境全數通過，rc=0。
+
+### §3.4 Dogfood 證據複驗（§1 的第二眼）
+
+- **§1.3 FSM 引文**：以 PyYAML 獨立讀 `tg-phase` 的狀態檔（`check_fsm_quote.py`）——`current_state=IMPLEMENTATION`、`updated_at=2026-10-17T12:52:20+00:00`、`decision_trace` 14 筆；`frozen_stages` 為 `[Stage-1, Stage-2]`，Stage-2 的 `frozen_at=2026-10-17T12:47:39+00:00`、`spec_doc_digests` 為 `sha256:8f440a68e683837ddb2e8e3e37a9c9593116bca18a702d834a3616bd427b1e84`、`approved_by=operator`；末五筆軌跡與 `playbook_ref=run:830d4b92-5a91-430b-94dd-ab84e94473bb` 逐字同 §1.3；`escalation_history` 為空。全部相符。
+- **摘要獨立重算**：以「換行正規化後的 UTF-8 文字」sha256（`digest_check.py`，不引用任何產品碼）重算——專案內 TCS 與 W4 暫存的 TCS 副本皆為 `sha256:8f440a68…1e84`（21684 位元組），與 FSM 檔與 §1.8 C3 的引文相等；失敗夾具的 TCS 為 `sha256:7dab39d1…bfc6`，同 §1.8 C3 負向引文。
+- **SCG-4 審查表重判**：對 TCS 的 Gherkin 獨立重判——AT-001-1-1、AT-001-2-1、AT-001-3-1、AT-001-4-1、AT-001-4-2、AT-001-5-1 與程式忠實；AT-001-1-2 的第一個測試函式忠實，第二個只取樣 4、5 個狀態而非完整的 10、11 個（輕度弱化，不改變效果，與 W4 的標註一致）。TCS 層級的偏離（AC-001-1／2／3／5 沒有專屬的負向 AT）是結構性且已自陳，不是 P≤2。
+- **突變探針重跑**：W4 的 `mutation_probe.py` 在暫存副本上原樣重跑——基線 8 項通過，14 個突變全數被殺、存活 0，與 §1.6 的宣稱相同。
+- **CI 夾具**：H1（見 §3.1）。fixture 內 `view["phase"] in (None, …)` 三處的容忍在 T-G 接線後已過時（Q-06，P4）。
+- **C1～C6 但書的誠實度**：逐條核對 §1.8——但書全部與 §1.10〈未驗證〉一致、沒有把未驗的事寫成已驗；§1.10 第 6 項（`phase` 恆為 null、F-5 預留位、E2E-17 列 14／19 的 phase 斷言未驗）在 `ae31e882` 搬入 T-G 後已過時，本稽核列 8＋14（FROZEN／4）、列 19（BLOCKED／0）、列 15～17（IMPLEMENTATION／5）實跑補驗，§1.7 第 4 點與 §1.8 C4 但書 (c) 同（Q-11，P4；§1 屬 W4 原文，不在本節改寫）。
+
+### §3.5 設計對實作一致性（逐項）
+
+| ADR／契約條款 | 驗證方式 | 結果 |
+|---------------|----------|------|
+| §3 `SDD_STATE_DIR` 單一解析點、`SDD_PROJECT` 由 adapter 讀 | 真 CLI 在外部專案模式運作：所有 FSM 檔都寫在專案根 `build/reports/fsm`；列 24 對 SDD LATEST 自己的狀態目錄做前後 mtime 與大小比對；框架目錄無 `FSM-STATE-test-*` 殘檔 | 成立（SDD runtime 內部七個站點未逐行讀，靠 ci-gate v0.30 與 E2E 間接驗證，見 §8） |
+| §4 CLI 動詞白名單、固定環境、rc→HTTP | 讀 `sdd_cli.py`；Bridge F-4／F-12 測試；E2E 列 3、6、19 的錯誤碼 | 成立 |
+| §5 談判對映（Console 簽核＝談判 agreed，reason 帶 `r9.20.3=not-satisfied`） | 列 15 的 `decision_trace` 逐字 | 成立 |
+| §6 摘要綁內容、三點預檢 | 摘要獨立計算；`frozen_vs_file`（列 12、18、25）與 `expected_vs_file`（列 6⑦）實跑 | 成立；`import_vs_file` 僅 Bridge 單元測試覆蓋（§8） |
+| §7 Console 專案為錨、V12、部分唯一索引、`PUT sdd-binding`、併入匯入 | 列 5、7、8、9；PG 直查 | 成立 |
+| §8 AT 文法、`unmapped_at_ids`、逆向 RTM 歸屬 | 列 8、11、16（`AT-001-2-E-1` 歸 `AC-001-2`） | 成立 |
+| §9 寫入權杖與環境剝除 | 列 1、2、15、25；run 目錄、稽核檔、回應皆搜不到權杖值；引擎子行程環境只有 `SDD_PROJECT` | 成立 |
+| §10 終態對映、回收點 | 列 15、19、20、21①②、25 | 成立 |
+| §11 白名單 | §3.6 | 成立（根層四檔例外，Q-03） |
+| §12 S-02 LATEST 半 | LATEST `settings.json` 兩個 matcher 含 `PowerShell`，三個站點與回歸鎖在；根層半依 §12 第 4 點登理論洞（DEF-200-535） | 成立 |
+| §13 增量條款 | `SDD_SPEC_FIRST_GATE.md` 含該條款原文；W4 dogfood 為第一個使用者 | 成立 |
+| 契約 §1.10 ↔ OpenAPI ↔ 型別檔 | 重產型別與入庫檔逐位元相同；`OpenApiIT` 在 D1 通過 | 成立 |
+| 後端 `freeze` 驗證順序 | 讀 `SddGovernanceService.freeze`：404→400→503→唯讀 GET→綁定短交易→Bridge 寫入；approver＝JWT subject（列 5、6 實跑） | 成立 |
+| `phase` 表 | `fsm_phase.py` 與 W4 的 `tg_phase.py` 兩張表逐項相同；F-5 對 SDD LATEST 狀態集合的對拍在 C3、H3 通過 | 成立 |
+
+### §3.6 白名單機械核對（ADR-XPLAT-016 §11.3；起點 `38e46582`、終點 `ae31e882`，`whitelist_check.py` 現跑）
+
+| §11.3 判準 | 現跑結果 |
+|-----------|----------|
+| 非 LATEST 的 SDD 版本目錄 | AISDLC_SDD 變動 54 檔；除 `scripts/**`、`CLAUDE.md`、`FRAMEWORK_STATUS.md`、`.claude/**` 與 LATEST 目錄（`AISDLC_SDD_v0.30`）外 0 檔 |
+| `_HAPPY_PATH` 與 `*.tla` | `transition_rules.py` 與 `formal/` 的 diff 長度 0；`*.tla` 變動 0 檔 |
+| AutoClaude 白名單外 | 變動 16 檔（源碼 8、測試 8）；白名單外 0 檔 |
+| LATEST 內白名單外 | LATEST 內變動 47 檔；§11.2 兩張表與 `tools/fsm_runtime/tests/**` 之外 0 檔；其餘 7 檔為 `scripts/**`、`CLAUDE.md`、`.claude/**`（含 `settings.local.json.example`、三個技能與 `ci-gate.sh`、新鮮度測試） |
+| 根層 `tools/`、`.claude/`、`.github/` | **4 檔，判準寫「必須為空」**：`.claude/hooks/sdd_hook_router.py`、`tools/lib/session_brief.py`（`d7cc329f`，S-14 文案，D-115-09）；`tools/tests/test_windows_forbidden_filename_parity.py`（`4b85bfb2`，NTFS 站點表登記 `fsm_names.py`，D-115-19）；`tools/lib/skip_tag_policy.py`（`8d0aa093`，掃描面下限 240→241、25→26、65→68）。皆收尾單人窗口（鐵律七）、各有登記，但 ADR §11.3 沒有補註，字面上第 5 列不成立（Q-03） |
+
+### §3.7 SDD 體檢 S-01～S-20 處置現查
+
+`verify_s_items.py` 對每項做機械判準（命中數），其中六項（S-06、S-08、S-11、S-16、S-19 與 S-17）的粗判準最初判為「不成立」，逐一讀上下文後確認：前五項的殘留字樣都是「訂正協議」保留的原文引用或註解（原文逐字保留、新文字已落地），修法已落地；S-17 是真的沒做（D-115-09 明定可做可不做）。
+
+| S | 嚴重度 | 修法落地現查 | 結論 |
+|---|:------:|-------------|------|
+| S-01 | P1 | SPEC_FIRST_GATE 與兩個技能含 `fsm_runtime gate／transition／spec-frozen` 確切指令（命中 4＋2），PowerShell 形態（`Push-Location`）在；父層技能鏡像與 LATEST 一致（B2） | 已修 |
+| S-02 | P2 | LATEST `settings.json` 兩個 matcher 含 `PowerShell`；`fsm_runtime.py`、`conversation_ledger.py`、`context_ledger_pre.py` 三站點含 PowerShell 分支；回歸鎖檔在。根層半＝DEF-200-535 理論洞（D-115-09） | LATEST 半已修；根層半依裁決登記 |
+| S-03 | P2 | `AT_ID_PATTERN`、`unmapped_at_ids` 在 `spec_source.py`；`sdd_compile.py` 含 `SpecAtUnmappedError`；E2E 列 11 | 已修 |
+| S-04 | P2 | adapter 與 Bridge `SddCompileIn` 皆有 `spec_file`；E2E 列 10 | 已修 |
+| S-05 | P2 | `_sdd_frozen_gate.py` 按專案鍵選檔，adapter 無 `sorted(glob)[0]`；E2E 列 4 | 已修 |
+| S-06 | P3 | BRIDGE.md 標頭連結改指 `docs/04_planning/Archive/`；§5 以「訂正」表保留原文並改寫 | 已修 |
+| S-07 | P3 | README、FILE_DIRECTORY_RULES 版本中性並指向 FRAMEWORK_STATUS（13／18 處） | 已修 |
+| S-08 | P3 | 七處皆改「PR Review Gate（RG-TEST 為補充閘）」並以註解保留原文；`EVOLUTION_LOG` 自陳語意層殘留 | 已修（語意層殘留已自陳） |
+| S-09 | P3 | 框架 FSM 目錄 `FSM-STATE-test-*` 殘檔 0 支；`tools/fsm_runtime/tests/conftest.py` 沙盒在 | 已修 |
+| S-10 | P3 | `fsm_names.py` 淨化鏡像與對拍測試；E2E 列 13 | 已修 |
+| S-11 | P3 | adapter 版本宣告改為行首宣告＋`[^\d\n]{0,16}` 擷取；宣告卻解析不出值即拒絕；舊樣式只剩註解 | 已修 |
+| S-12 | P3 | TCS 模板含 `**scenario**` 欄；E2E 列 8 的表格含 `Integration` 字樣時仍得 `sdd-greenfield-at-…` | 已修 |
+| S-13 | P3 | `ci-gate.sh` 下限重釘（LATEST 2132、shared 375，皆為實測減 8）；`test_ci_gate_floor_freshness.py` 在（B1 的 scripts/tests 內） | 已修 |
+| S-14 | P3 | router 休眠提示改「`sdd_version.py` 去掉前綴」現查；殘留 `0.18` 只在模組 docstring | 已修 |
+| S-15 | P3 | `AISDLC_SDD/CLAUDE.md` Rule 2 註明 `build/reports/` 為執行期產物 | 已修 |
+| S-16 | P3 | `_dead_pid` 改取剛結束子行程的 pid；v0.30 的略過由十一降為六 | 已修 |
+| S-17 | P4 | 七支 lint 以 `--help` 呼叫仍皆回 rc=1 | 未修（D-115-09 明定可做可不做）；再開症狀見 Q-08 |
+| S-18 | P4 | `settings.local.json.example` 舊 repo 路徑與 `git push` 放行皆 0 處 | 已修 |
+| S-19 | P4 | `stage-compaction` 與 INIT 以「訂正」保留原文並改寫為 `<LATEST>` 雙形態與 AutoClaude 路徑 | 已修 |
+| S-20 | P4 | 已知引用，不重登 | 不動 |
+
+## §4 發現
+
+審查結論：沒有 P1、P2。P3 六筆、P4 六筆，其中 DEF-AC-034 已在本包內修畢。
+
+| Q | 嚴重度 | 歸屬／編號 | 摘要 | 處置 |
+|---|:------:|-----------|------|------|
+| Q-01 | P3 | 根層文件（請主控入根帳） | `AutoSDD_improving_115.md` §7 表格錯位，且缺 T-G 搬入（`ae31e882`）的親驗列 | 主控收尾補正文字 |
+| Q-02 | P3 | DEF-AC-028 | 契約 E2E-17 列 6⑧寫 `errors[0].field=docs`，實作回 `docs[0]`；前端 `OWN_FIELDS` 只認 `docs` | 契約改寫或前端歸併，二擇一 |
+| Q-03 | P3 | 根層 ADR（請主控入根帳） | ADR §11.3 第 5 列判準「必須為空」，現跑 4 檔（皆收尾單人窗口、各有登記），ADR 無補註 | ADR 補註四檔與授權出處 |
+| Q-04 | P3 | DEF-AC-029 | 契約 §4.7.3 仍寫恢復指令在「兩個分頁」，實作為上下兩段（ADR-002 §4 第 14 列已登記偏離） | 契約該句改為「兩段」 |
+| Q-05 | P4 | DEF-AC-030 | 契約 E2E-17 列 8 未說夾具專案要建成草稿；手動建立（`draft:false`）的專案再簽核回 409（既有行為） | 契約列 8 補一句前置 |
+| Q-06 | P4 | DEF-AC-031 | `test_sdd_dogfood_fixture.py` 三處 `phase` 斷言仍容忍 null（T-G 已接線） | 收緊為確切值 |
+| Q-07 | P4 | DEF-AC-032 | 契約 §1.7.1 參數表與 §3.1 部分字句仍寫 v1.4 的 `^[A-Za-z0-9._-]{1,128}$`；兩節各有 v1.5 加註說明以 §1.10.4／§3.1.4 為準，但表列本身沒有標示 | 就地加「已被取代」標記 |
+| Q-08 | P4 | 根層（請主控入根帳） | 體檢 S-01～S-20 原文尚未進證據檔附錄（improving_115 §6 寫由主控收尾搬入）；S-17 未修 | 見下 |
+| Q-09 | P3 | DEF-AC-033 | 契約 E2E-17 列 18 的前置「第 15 列之後 P1 再 execute」不可行：P1 的任務已全部完成，再 execute 先在前置檢查 7c 回 409「沒有可執行的任務」 | 契約列 18 改為「尚未跑過的專案」 |
+| Q-10 | P4 | DEF-AC-034（已修） | RTM 有 11 處測試引用在 v1.5 改名後過期（`flywayAppliedVersionsOneToEleven…` 六列、名稱規則的三支 Java 測試、Bridge 兩支） | 本包合併時已改為現名，現查找不到 0 個 |
+| Q-11 | P4 | 根層證據檔（請主控入根帳） | §1.7 第 4 點、§1.8 C4 但書 (c)、§1.10 第 6 項的「`phase` 恆為 null」在 T-G 搬入後過時 | 本稽核列 8＋14、15～17、19 已補驗；主控可在 §1 旁加一行指向 §3.4 |
+| Q-12 | P3 | 根層 ADR（請主控入根帳） | ADR 沒有 D-115-17 要求的「實況回寫附錄」：D-115-19 的七項偏離只住 improving_115 §6；契約 §3.1.4 (b) 與 ADR §7.4 仍寫「淨化是冪等的」，而 D-115-19 登記上游截 80 字後不冪等（SDD 側 P4） | ADR 補附錄 C（偏離七項與冪等的邊界句） |
+
+**Q-01**：腳本逐列切格（`check_improving_section7.py`）——§7 表頭 5 格，第 243～249 行的格數依序為 5、5、3、5、5、5、7：Dev-SDD-DOC 列只有 3 格（第 245 行），它的第 4、5 格（「接受：TCS 模板 §4 E 類…」「同族殘留…」）被接在 Dev-Frontend 列尾（第 249 行，7 格）；全文 `ae31e882` 零命中，§7 沒有 T-G 搬入的親驗列。不影響任何機械閘；影響是讀者會把 DOC 棒的「接受」誤讀成 Frontend 的。
+
+**Q-02**：`SddFreezeRules` 對單一項回 `docs[<索引>]`（列 6⑧實測 `errors[0].field=docs[0]`）；契約列 6⑧與 §1.10.2 驗證表寫 `docs`（列 6④「不帶 docs」確為 `docs`）。前端 `SddFreezeDialog` 的 `OWN_FIELDS=["docs","reason","stage"]` 對 `docs[0]` 不歸欄，改列在對話框下方的訊息區（沒有吞掉，文字仍顯示）；畫面的客戶端驗證先擋掉這類輸入，只有繞過畫面的呼叫才會碰到。spec 對這一格認兩種寫法。
+
+**Q-03**：`git diff --name-only 38e46582 ae31e882 -- tools .claude .github` 回 4 檔（見 §3.6）。授權與登記齊全（D-115-09、D-115-19、三個 commit），缺的是 ADR 本檔的補註，所以照 §11.3 字面核對會紅。
+
+**Q-04**：契約 §4.7.3 該句與 ADR-002 §4 第 14 列的偏離登記互相矛盾；實作理由（兩種殼同時可見才不會複製錯殼）已在 ADR-002 登記。
+
+**Q-05**：契約列 8 的「再以 Phase 2 簽核專案」只對草稿專案成立；列 5 之前專案由 `POST /projects`（`draft:false`）建立，簽核回 409「專案已完成 signoff」。這是既有行為，不在本輪 diff 內；順帶觀察：該 409 回應的 `details.signedOffBy` 是字串 `"null"`，與型別不符，同樣是既有行為。
+
+**Q-06**：`engine-bridge/tests/test_sdd_dogfood_fixture.py` 第 299、342、369 行（`in (None, …)`）與第 295 行註解（「T-G 搬入前為 null」）。目前守「Bridge 回應的 phase 非 null」的是 `test_sdd_fsm.py::test_phase_is_the_projection_of_current_state_never_null` 與本稽核的 E2E，夾具這三處即使 T-G 被拆掉仍綠。再開症狀：把 `app/fsm_phase.py` 的接線拿掉後，夾具測試仍全綠。
+
+**Q-07**：契約第 1171 行（§1.7.1 `project` 參數列）、第 1233 行（400 列）、第 1794 行（清單的名稱白名單）的表列字句仍是 v1.4；§1.7.1 與 §3.1 各有一則 v1.5 加註說明「衝突處以 §1.10.4／§3.1.4 為準」，但表列本身沒有標示已被取代。再開症狀：有人只讀 §1.7.1 的表就實作 `project` 驗證，對含空白的專案名回 400。
+
+**Q-08**：improving_115 §6 開頭寫「原文住本輪 QA 證據檔〈附錄〉（主控於收尾時搬入）」，現證據檔沒有該附錄；S-06～S-19 的載體因此只剩 D-115-09 一行摘要與各檔內的「訂正」註記。S-17（七支 lint 的 `--help`）未修。再開症狀：以 `--help` 呼叫 `agent_template_lint.py` 等七支 lint 回 rc=1、把 `--help` 當 repo_root。
+
+**Q-09**：契約自己的 §1.2.1 前置檢查 7c 與 E2E-04 列 12 已寫「原專案已 COMPLETED，再 execute 會在第 7c 項回 409 `沒有可執行的任務`」（既有的 `p4b-execute-more.spec.ts` 也實跑過這一點）；列 18 的前置沒有套這條。列 21② 的夾具清單寫「`foreign/` 只推進到 IMPLEMENTATION」則沒有這個問題（本稽核以真 CLI 走談判閘到 IMPLEMENTATION、不跑批次）。W4 的 C3 負向（§1.8）因失敗路徑專案仍有可執行任務而繞過了這點。本稽核 spec 的處理見 §3.2 列 18。
+
+**Q-10**：見 §5；`check_test_refs.py` 對合併前的 RTM 回報 11 個找不到、合併後 0 個。
+
+**Q-11**：見 §3.4 末條。
+
+**Q-12**：D-115-17 寫「ADR 字面比實況嚴而實況有既有測試／生產端在用，一律採實況並回寫 ADR 附錄」；對 ADR 全文搜 `D-115-19`、`附錄 C` 皆零命中。ADR 是契約自稱的「唯一真相源」，七項偏離只住計畫書會讓後來的讀者照 ADR 字面改回去。
+
+## §5 RTM 單線合併與現查數字
+
+**合併內容**（`docs/06_quality/RTM.md` 的同路徑在 AgentConsole 之下）：
+
+- 新增 18 列（皆依契約 §6.8.4 的草案：來源、摘要、層、Phase 照抄，實作檔與自動測試欄改填實際檔名與已實跑的測試名）：API-PRJ-07、API-PRJ-08、API-SGN-06、API-EXE-15、API-EXE-16、API-IMP-11、API-IMP-12、API-ENG-02、BR-27～BR-33、UI-SDD-01～UI-SDD-03。§1.2 的 `UI-` 前綴表新增 `SDD` 一類（擇契約的第一個選項）。
+- 修訂既有 8 列（只動實作檔、自動測試、E2E 驗證三欄；E2E 欄一律附加、舊文字是新文字的前綴）：NFR-COMPAT-01（口徑改為最小侵入白名單，摘要由「零侵入引擎核心」改為「最小侵入引擎核心（白名單）」——摘要變動已由 D-115-05 登記，列與編號保留）、BR-13、BR-14（含專案名規則由 400 改為原名等價的改口徑）、API-ENG-01、API-EXE-01、NFR-OBS-01（加四源對拍）、API-IMP-03、API-IMP-05。
+- 過期測試引用 11 處改為現名（Q-10）。
+- 狀態：新列 18 列皆 `✅ 已驗證`，依據是本稽核當回合的閘門與 E2E-17 實跑；各列 E2E 欄寫明未實跑的部分（例如 API-EXE-15 的另四種 `cause`、BR-30 的列 1 後半、API-SGN-06 的 Console 503）。既有列沒有升降級。
+
+**現查數字**（合併後；指令見 RTM §3.4）：
+
+| 現查項目 | 數字 |
+|----------|------|
+| 總列數（RTM §3.4 第一條） | 392（US 58／API 105／BR 33／NFR 33／INF 108／UI 55；檔頭、§1.2、§3.2 三處相同） |
+| US 列（第二條） | 58 |
+| `⬜ 未開始`（第三條） | 0 |
+| `✅ 已驗證` | 392 |
+| 其他狀態（`🟡 部分`、`✅ 實作+測試`、`❌ 缺陷`、`⛔ 範圍外`） | 0 |
+| §3.2 類別×Phase 的合計列 | P1 97、P2 67、P3 33、P4 64、P5 46、P6 85，合計 392 |
+| §3.3 層×Phase（複合層重複計入） | FE 134、BE 214、Bridge 85、Infra 98 |
+
+**驗證**：`verify_rtm_w115.py`（HEAD 的 RTM 對工作樹逐列比對）——列數 374→392、新列名單恰為預期 18 列、既有列的來源／層／Phase 零改動（摘要只有 NFR-COMPAT-01 一列，已登記）、儲存格內無管線字元、檔案 LF 無 BOM、E2E 欄只附加、摘要皆不超過 20 字、狀態皆在詞彙內；`check_test_refs.py` 對合併後的 RTM 檢查 1769 個測試引用、找不到 0 個。
+
+## §6 ADR-XPLAT-016 狀態建議
+
+建議由 Proposed 改 Accepted，**條件三項，皆為文字面、不涉程式**：
+
+1. §11.3 第 5 列補註：根層 `tools／.claude` 的四個檔與授權出處（`d7cc329f`、`4b85bfb2`、`8d0aa093`；D-115-09、D-115-19），並把判準改為「必須為空，除收尾單人窗口依鐵律七登記者」（Q-03）。
+2. 補附錄 C：D-115-19 的七項實況偏離逐條回寫，並把 §7.4／契約 §3.1.4 (b) 的「淨化是冪等的」改為帶邊界的說法（Q-12）。
+3. 契約 v1.5 的三處字面（Q-02、Q-04、Q-09）與 improving_115 §7（Q-01）由主控收尾訂正，使「唯一真相源」與實況一致。
+
+支持改 Accepted 的證據：§3.5 的十四項逐項一致、§3.6 白名單外零檔、E2E-17 的 26 列中 25 列實跑（列 1 缺後半、列 11 缺 CLI rc 6、列 22 只跑 `mixed_scope`；列 26 的 Docker 全棧未跑，理由見 §8）、四源對拍與稽核三向逐值相等、沒有 P≤2。未驗證的邊界見 §8；其中 POSIX、Docker、macOS 的真機驗證是 Accepted 之後仍要補的覆蓋，不是 Accepted 的阻擋條件。
+
+## §7 VERDICT
+
+**PASS**（沒有 P≤2）。
+
+- P1／P2 清單：無。
+- 條件性事項：Q-01、Q-02、Q-03、Q-04、Q-09、Q-12 為 P3（文字修正或登記，主控收尾處理）；Q-05～Q-08、Q-10、Q-11 為 P4（已登記並附可觀測的再開症狀，Q-10 已在本包內修畢）。
+- 本稽核的 PASS 建立在：閘門全數親跑 rc=0（§3.1）、E2E-17 實跑（§3.2）、W4 dogfood 證據複驗全數相符（§3.4）、白名單機械核對（§3.6）。範圍之外的事見 §8。
+
+## §8 未涵蓋
+
+1. **E2E-17 列 26（Docker 全棧）**：未跑——本機整套與 Docker 全棧不同時跑，且該列需要可寫專案根與 SDD 唯讀掛載的全棧設定；專案根唯讀時 `:freeze` 回 502 一項因此沒有實證。
+2. **列 1 後半**：「18086 不含 `sdd` 的 run 照舊 201」未跑——該實例沒有替身引擎設定，會誤起真 claude。
+3. **列 22 的另四種 `cause`**（`token_not_configured`、`spec_mismatch`、`duplicate_step_id`、`sdd_frozen_digest_absent`）：依契約由 `RunLauncher` 整合測試覆蓋，E2E 不另起實例；本稽核只實跑 `mixed_scope`。
+4. **Console 在 backend 沒設權杖時的 503**：沒有起第二個 backend 變體；由 `SddWriteDisabledApiIT` 覆蓋（D1 通過）。
+5. **三點預檢的 `import_vs_file`**：只有 Bridge 單元測試（`test_a_stale_import_digest_is_409_naming_both_digests`），沒有 E2E。
+6. **`sdd_compile` CLI 的 rc 6 與 TCS 模板 §4 邊界表**：由 AutoClaude `test_sdd_compile_cli.py` 覆蓋，不在 E2E-17 spec。
+7. **SDD runtime 內部**（§3 的七個目錄站點、§4 的 CLI 動詞實作）：未逐行讀碼，靠 v0.30 ci-gate、真 CLI 的 E2E 行為與 Bridge 的 F-12 對拍驗證。
+8. **平台**：只在 Windows 11、pwsh 7.6.7、claude 2.1.302 上跑；macOS、Linux 與 POSIX 形恢復指令的真殼執行沒有實證（Bridge 夾具的 POSIX 分支要等 CI 或 macOS）。
+9. **真 AI 的批次**：本稽核的 E2E 用替身 claude；真 AI（haiku）的批次只有 W4 的一場（§1）。
+10. **TLC**：未啟用，前提（`_HAPPY_PATH`、formal 零變動）已核對成立。
+11. **S-02 的活體驗證**：`claude --debug hooks` 對 PowerShell 呼叫確實觸發 SDD hook 的正負兩面（ADR §12 末段〔未驗〕、DEF-200-535 的〔未驗〕）本稽核也沒有做；現有證據是 matcher 字串、三個站點的程式與回歸鎖。
+12. **觀察（不計缺陷）**：mock Playwright 整套會改寫 43 張已追蹤截圖（`__screenshots__`），commit 前須用 `git show HEAD:<path>` 位元組寫回（本稽核已還原，最終 `git status` 無截圖差異）；`AgentConsole/docs/04_planning/Implementation_Plan.md` 尚無整合輪 115 的進度條目（主控收尾彙總）。

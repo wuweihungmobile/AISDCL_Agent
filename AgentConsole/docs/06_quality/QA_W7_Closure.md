@@ -2,7 +2,7 @@
 
 | 項目 | 內容 |
 |------|------|
-| 版本 | v1.1（v1.0 為 W7-QA 第一輪產出；W8-QA 第二輪複驗於 2026-10-17 追加 §13，並更新 §10.1、§12.2 的缺陷狀態；第一輪的其餘章節維持當時的描述，不回頭改寫） |
+| 版本 | v1.2（v1.0 為 W7-QA 第一輪產出；W8-QA 第二輪複驗於 2026-10-17 追加 §13，並更新 §10.1、§12.2 的缺陷狀態；整合輪 115 的 W5-QA 於同日追加 §14，只指路缺陷編號的去處；第一輪的其餘章節維持當時的描述，不回頭改寫） |
 | 日期 | 2026-10-17 |
 | 驗證者 | 獨立 QA（零信任：BE／FE／INFRA 三棒的交卷與三份 RTM 回填 `rtm_backfill_W7BE.md`／`W7FE.md`／`W7INFRA.md` 的「已驗證」一律不採信，每一列親跑才設 `✅ 已驗證`） |
 | 被驗 commit | HEAD `06891089`（W7 六個 commit：`230d70af` 第一批、`10033d5d` INFRA、`a4e028ed` FE 第一＋二批、`3c95862b` 契約 v1.4 補丁、`a7993946` FE 第三批、`06891089` BE 第二批） |
@@ -1126,3 +1126,11 @@ DEF-AC-012（P4，Bridge 與 SSOT 對 SDD LATEST 的判定在未入庫目錄時�
 
 - **環境收尾**（逐項現查，結果見交卷訊息）：Docker 全棧只做 `down`（不帶 `-v`；12 個 `aisdlc_*` 卷保留，`autoclaude_pg` 全程沒動）；本機 backend、Bridge、前端與 `qa-pg` 都已停止並移除；修復前建置的暫存目錄已刪除；Playwright 改寫的已追蹤截圖（本輪四次還原：17、123、21、0 張，共 161 張）都用 `git show HEAD:<path>` 的位元組寫回（`restore_screens.py`，不用 `git restore`／`checkout`），最後一次還原後 `git diff` 的截圖差異為 0 張。
 - **要 commit 的檔案**（皆在我的持有面）：`AgentConsole/frontend/tests/e2e/p9-w7-html.spec.ts`、`AgentConsole/frontend/tests/e2e/README.md`（第 115、156 行）、`AgentConsole/docs/06_quality/RTM.md`（只有 3 列的 E2E 欄，`git diff --stat` 3 行新增 3 行刪除）、`AgentConsole/docs/06_quality/QA_W7_Closure.md`（版本列、§1 的 W8 提示、§10.1 兩列、§12.2 第 1～2 項、本節）。
+
+## 14. 整合輪 115 的缺陷編號去處（指路）
+
+整合輪 115（SDD 迴圈）的 W4 dogfood 與 W5 獨立稽核另立證據檔，缺陷編號沿用本檔的 DEF-AC 序列、不重起：
+
+- DEF-AC-015～DEF-AC-027（共 13 筆：P3 五筆、P4 八筆，沒有 P2 以上）由 W4 dogfood 登記，內容在根層 [AutoSDD_ZeroTrust_Audit_115.md](../../../docs/06_quality/AutoSDD_ZeroTrust_Audit_115.md) §1.9。
+- W5 獨立稽核的缺陷自 DEF-AC-028 起，內容在同一檔 §4（歸屬根層帳本者，由該檔標明請主控入帳）。
+- 本檔 §10.1、§12.2 的缺陷表停在 DEF-AC-014，不回頭改寫；DEF-AC-012 維持 P4 保留，與整合輪 115 無關。

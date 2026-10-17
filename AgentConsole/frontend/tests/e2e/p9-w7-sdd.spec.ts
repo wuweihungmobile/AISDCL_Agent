@@ -167,7 +167,9 @@ test.describe("E2E-15：AISDLC_SDD 接入（夾具；NFR-OBS-01 檔案 ↔ API �
   test.setTimeout(300_000);
   let before: Record<string, string> = {};
 
-  test("列 1｜清單：恰兩筆（alpha、bravo），broken／bad name／.yml 都不在其中；version.latest＝AISDLC_SDD_v9.99；fsm＝null 且沒有 reason", async ({ request }) => {
+  test("列 1｜清單：三筆（含空白的 bad name 自 v1.5 起屬淨化輸出域而列入，另有 alpha、bravo），broken 與 .yml 不在其中；version.latest＝AISDLC_SDD_v9.99；fsm＝null 且沒有 reason", async ({
+    request,
+  }) => {
     before = dirSnapshot(VERSION_DIR); // 列 11 的唯讀快照：第 1～5 列都不得改動夾具目錄
     const s = await status(request);
     expect(s.available).toBe(true);
@@ -176,13 +178,14 @@ test.describe("E2E-15：AISDLC_SDD 接入（夾具；NFR-OBS-01 檔案 ↔ API �
     expect(s.version?.root ?? "", "root 是 Bridge 看到的目錄").toContain("AISDLC_SDD_v9.99");
     expect(
       s.projects.map((p) => p.project),
-      "順序 alpha、bravo；壞檔、含空白的檔名、.yml 都不列",
-    ).toEqual(["e2e-alpha", "e2e-bravo"]);
-    expect(s.projects[0]).toEqual({ project: "e2e-alpha", source: "FSM-STATE-e2e-alpha.yaml", currentState: "IMPLEMENTATION", updatedAt: "2026-10-16T01:02:03+00:00" });
-    expect(s.projects[1]).toEqual({ project: "e2e-bravo", source: "FSM-STATE-e2e-bravo.yaml", currentState: "HUMAN_PENDING", updatedAt: "2026-10-15T08:00:00+00:00" });
+      "順序＝專案名不分大小寫升冪：bad name、alpha、bravo（契約 §1.7.1／§1.10.4：含空白的名稱屬 sanitize_component 輸出域，v1.5 起列入）；壞檔與 .yml 不列",
+    ).toEqual(["bad name", "e2e-alpha", "e2e-bravo"]);
+    expect(s.projects[0]).toEqual({ project: "bad name", source: "FSM-STATE-bad name.yaml", currentState: null, updatedAt: null });
+    expect(s.projects[1]).toEqual({ project: "e2e-alpha", source: "FSM-STATE-e2e-alpha.yaml", currentState: "IMPLEMENTATION", updatedAt: "2026-10-16T01:02:03+00:00" });
+    expect(s.projects[2]).toEqual({ project: "e2e-bravo", source: "FSM-STATE-e2e-bravo.yaml", currentState: "HUMAN_PENDING", updatedAt: "2026-10-15T08:00:00+00:00" });
     expect(s.fsm).toBeNull();
     expect(s.checkedAt, "UTC，…Z").toMatch(/Z$/);
-    console.log(`[w7-sdd] 列 1：${JSON.stringify({ available: s.available, version: s.version?.latest, projects: s.projects.map((p) => `${p.project}:${p.currentState}`) })}`);
+    console.log(`[w7-sdd] 列 1（v1.5 對齊）：${JSON.stringify({ available: s.available, version: s.version?.latest, projects: s.projects.map((p) => `${p.project}:${p.currentState}`) })}`);
   });
 
   test("列 2｜單一專案 alpha：欄位與檔案「原樣」（decisionTrace 是檔內 7 筆的最後 5 筆，snake_case 鍵保留；frozenStages；retryHistory.last；rtmCoverage＝null）", async ({ request }) => {
@@ -207,8 +210,8 @@ test.describe("E2E-15：AISDLC_SDD 接入（夾具；NFR-OBS-01 檔案 ↔ API �
     expect(f.project).toBe("e2e-alpha");
     expect(
       s.projects.map((p) => p.project),
-      "清單照常",
-    ).toEqual(["e2e-alpha", "e2e-bravo"]);
+      "清單照常（v1.5：三筆）",
+    ).toEqual(["bad name", "e2e-alpha", "e2e-bravo"]);
   });
 
   test("列 3｜待人工：bravo 的 humanPending.count＝1 且 items[0].entered_at 原樣；retryHistory＝{0, null}", async ({ request }) => {
@@ -220,16 +223,24 @@ test.describe("E2E-15：AISDLC_SDD 接入（夾具；NFR-OBS-01 檔案 ↔ API �
     expect(f.decisionTrace).toEqual([]);
   });
 
-  test("列 4｜找不到、壞檔、非法名：nope→fsm_not_found（200）；e2e-broken→fsm_state_unreadable（200）；a%20b、..%2Fx→400（errors[0].field＝project）", async ({ request }) => {
+  test("列 4｜找不到、壞檔、非法名：nope→fsm_not_found（200）；e2e-broken→fsm_state_unreadable（200）；a%20b、..%2Fx 自 v1.5 起是合法請求值（交 Bridge 淨化鏡像處理）→200＋fsm_not_found；201 字元與含 NUL 才回 400（errors[0].field＝project）", async ({
+    request,
+  }) => {
     const nope = await status(request, "?project=nope");
     expect({ available: nope.available, reason: nope.reason, fsm: nope.fsm }).toEqual({ available: true, reason: "fsm_not_found", fsm: null });
-    expect(nope.projects, "projects 照常").toHaveLength(2);
+    expect(nope.projects, "projects 照常（v1.5：三筆）").toHaveLength(3);
     const broken = await status(request, "?project=e2e-broken");
     expect({ available: broken.available, reason: broken.reason, fsm: broken.fsm }).toEqual({ available: true, reason: "fsm_state_unreadable", fsm: null });
-    for (const bad of ["a%20b", "..%2Fx"]) {
+    // 契約 §1.7.1（v1.5 加註③）／§1.10.4：`project` 改為 1～200 字元、不含控制字元；Console 不淨化、不檢查 Windows 禁用字元，值原樣交給 Bridge。
+    // `a b`（含空白）是淨化輸出域內的名稱：找不到狀態檔 → fsm_not_found；`../x` 的 URL 解碼後路由不匹配，Bridge 回沒有 reason 的 404，Console 暫轉成 fsm_not_found（§3.1.7 第 11 點）。
+    for (const odd of ["a%20b", "..%2Fx"]) {
+      const d = await status(request, `?project=${odd}`);
+      expect({ available: d.available, reason: d.reason, fsm: d.fsm }, odd).toEqual({ available: true, reason: "fsm_not_found", fsm: null });
+    }
+    for (const bad of [encodeURIComponent("x".repeat(201)), "a%00b"]) {
       const r = await sdd(request, `?project=${bad}`);
-      expect(r.status, bad).toBe(400);
-      expect((r.json.errors as Array<{ field: string }>)[0].field, bad).toBe("project");
+      expect(r.status, bad.slice(0, 12)).toBe(400);
+      expect((r.json.errors as Array<{ field: string }>)[0].field, bad.slice(0, 12)).toBe("project");
     }
   });
 
