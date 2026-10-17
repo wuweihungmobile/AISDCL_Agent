@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
 import { REASONS } from "@/lib/api/reasons";
-import { GATE_LABEL, gateLabel, highlightsFromRows, parseFailureFromError, parseFailureFromRecord, rowsFromApiError, rowsFromGateErrors } from "./gateErrors";
+import { GATE_LABEL, describeConfirmError, gateLabel, highlightsFromRows, parseFailureFromError, parseFailureFromRecord, rowsFromApiError, rowsFromGateErrors } from "./gateErrors";
 
 /** 422 有界閘回應的 errors 項目帶 gate／detail／location（比 ApiError 的 FieldError 型別多），測試以此函式組出。 */
 const apiError = (init: Record<string, unknown>) => new ApiError(init as unknown as ConstructorParameters<typeof ApiError>[0]);
@@ -19,6 +19,68 @@ const GATE_422 = apiError({
   ],
   details: { path: "LLM" },
   traceId: "tr-422",
+});
+
+describe("匯入的 SDD 錯誤（v1.5，整合輪 115；契約 §3.3.2 第 8、9 點、§1.10.8）", () => {
+  it("SDD 規格檢查未通過、bridgeReason=spec_digest_changed（凍結後規格被改，探測模式同樣 fail-closed）：除了引擎回報，另說明怎麼辦、且不會退回 AI 草稿路徑", () => {
+    const view = parseFailureFromError(
+      apiError({
+        status: 422,
+        message: "規格已變更",
+        reason: REASONS.IMPORT_SDD_SPEC_REJECTED,
+        errors: [],
+        details: { bridgeReason: "spec_digest_changed", detail: "TCS 內容與凍結時的摘要不同" },
+        traceId: "tr-1",
+      }),
+    );
+    expect(view.notes).toEqual(["引擎回報：spec_digest_changed", "TCS 內容與凍結時的摘要不同", "規格在凍結之後又被改動：請在 SDD session 重新凍結（或還原改動）後再解析；不會退回 AI 草稿路徑。"]);
+    expect(view.title).toBe("SDD 規格檢查未通過");
+  });
+
+  it("其他 bridgeReason（例如 spec_not_frozen）維持原本的兩行（不加 digest 的提示）", () => {
+    const view = parseFailureFromError(
+      apiError({ status: 422, message: "未凍結", reason: REASONS.IMPORT_SDD_SPEC_REJECTED, errors: [], details: { bridgeReason: "spec_not_frozen", detail: "請先完成凍結" } }),
+    );
+    expect(view.notes).toEqual(["引擎回報：spec_not_frozen", "請先完成凍結"]);
+  });
+
+  it("409 sdd_binding_conflict：標題維持逐字 reason，白話原因（依 cause）放補充說明", () => {
+    const request = parseFailureFromError(
+      apiError({ status: 409, message: "綁定衝突", reason: REASONS.SDD_BINDING_CONFLICT, errors: [], details: { cause: "request_differs_from_target", field: "specFile" } }),
+    );
+    expect(request.title).toBe("sdd_binding_conflict");
+    expect(request.notes[0]).toContain("取自目標專案");
+    expect(request.notes).toContain("不一致的欄位：specFile");
+    const elsewhere = parseFailureFromError(
+      apiError({
+        status: 409,
+        message: "綁定衝突",
+        reason: REASONS.SDD_BINDING_CONFLICT,
+        errors: [],
+        details: { cause: "already_bound_elsewhere", sddProject: "a", holderProjectId: "1a2b3c4d-0000" },
+      }),
+    );
+    expect(elsewhere.notes).toEqual(["同一個專案根下已有另一個專案（1a2b3c4d）綁定了這個 FSM 專案"]);
+  });
+
+  it("確認匯入失敗的一句話：綁定衝突給白話（不含英文代碼）附 traceId；其餘照一般錯誤；非 ApiError 退回例外訊息", () => {
+    const conflict = apiError({
+      status: 409,
+      message: "綁定衝突",
+      reason: REASONS.SDD_BINDING_CONFLICT,
+      errors: [],
+      details: { cause: "target_bound_differently", sddProject: "beta" },
+      traceId: "tr-409",
+    });
+    expect(describeConfirmError(conflict)).toBe("目標專案已綁定了不同的 FSM 專案或規格根，這份規格不能併入它（目標專案目前綁定的 FSM 專案：beta）（traceId：tr-409）");
+    const bare = apiError({ status: 409, message: "綁定衝突", reason: REASONS.SDD_BINDING_CONFLICT, errors: [], details: { cause: "request_differs_from_target" } });
+    expect(describeConfirmError(bare)).toBe("使用「匯入到既有專案」時，執行路徑與 SDD 綁定一律取自目標專案，請求帶的值與它不同");
+    expect(describeConfirmError(apiError({ status: 409, message: "草案尚未 signoff", reason: REASONS.IMPORT_NOT_SIGNED_OFF, errors: [], traceId: "tr-9" }))).toBe(
+      "草案尚未 signoff：草案尚未 signoff，不可確認匯入（traceId：tr-9）",
+    );
+    expect(describeConfirmError(new Error("斷線"))).toBe("斷線");
+    expect(describeConfirmError("oops")).toBe("發生未知錯誤");
+  });
 });
 
 describe("有界閘錯誤正規化（US-I-10）", () => {

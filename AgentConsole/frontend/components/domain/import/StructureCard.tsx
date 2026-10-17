@@ -20,14 +20,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusLabel } from "@/components/ui/status-dot";
 import { useToast } from "@/components/ui/toast";
-import { describeError } from "@/lib/api/client";
 import { useConfirmImport, useEditImportResult, useRejectImport } from "@/lib/api/queries";
 import type { ImportRecordDetail, ParsedResult, ParsePath, ParseWarning } from "@/lib/api/types";
 import { importStatus, isLive } from "@/lib/domain/status";
 import { formatDateTime, formatNumber } from "@/lib/format";
-import { highlightsFromRows, parseFailureFromError, type ParseFailure } from "./gateErrors";
+import { describeConfirmError, highlightsFromRows, parseFailureFromError, type ParseFailure } from "./gateErrors";
 import { NodeEditDialog, type NodeTarget } from "./NodeEditDialog";
-import { ParseFailurePanel, ParseWarnings, StepHeader } from "./parts";
+import { ParseFailurePanel, ParseWarnings, SddSpecInfo, StepHeader } from "./parts";
 import { countTasks, isTreeDirty, randomId, toParsedResult, toTree, treeReducer, treeSignature, uniqueGoalKey, type TreeAction } from "./tree";
 import { TreeEditor } from "./TreeEditor";
 
@@ -43,6 +42,7 @@ export function StructureCard({
   warnings,
   onWarnings,
   onDiscarded,
+  targetName,
 }: {
   /** status 為 PARSED／REVIEWING 且 parsedResult 非 null 的匯入記錄 */
   record: ImportRecordDetail;
@@ -52,10 +52,14 @@ export function StructureCard({
   onWarnings: (warnings: ParseWarning[]) => void;
   /** 放棄成功後（記錄已轉 REJECTED）：由頁面清掉目前記錄 */
   onDiscarded: () => void;
+  /** 「匯入到既有專案」的目標專案名稱（v1.5；頁面從專案清單查；查不到時畫面退回 id 前 8 碼） */
+  targetName?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
   const parsed = record.parsedResult as ParsedResult;
+  /** parse 時帶了 targetProjectId（記錄上存的最近一次 parse 選項，契約 §1.1.9）：confirm 併入既有專案、不建立新專案（§1.10.8） */
+  const targetId = record.parseOptions?.targetProjectId ?? null;
   const [tree, dispatch] = useReducer(treeReducer, parsed, toTree);
   /** 樹被改動的次數：用來判斷「錯誤清單指到的節點索引」是否還有效（改過順序之後索引就不準了） */
   const [edits, setEdits] = useState(0);
@@ -104,10 +108,10 @@ export function StructureCard({
     setActionError(null);
     try {
       const project = await confirm.mutateAsync(record.id);
-      toast.success(`已匯入專案：${project.name}`);
+      toast.success(`${targetId ? "已併入專案" : "已匯入專案"}：${project.name}`);
       router.push(`/projects/${project.id}`);
     } catch (e) {
-      setActionError(describeError(e));
+      setActionError(describeConfirmError(e));
     }
   }
 
@@ -137,6 +141,7 @@ export function StructureCard({
         {`共 ${goalCount} 個目標 · ${countTasks(tree)} 個任務。展開節點看說明與通過標準；改動只存在畫面上，按「儲存編輯」才會寫回（儲存會撤銷既有 signoff）。`}
       </p>
 
+      <SddSpecInfo parsed={parsed} targetProjectId={targetId} targetName={targetName} />
       <ParseWarnings warnings={warnings} />
       {failure ? <ParseFailurePanel failure={failure.value} className="mb-4" /> : null}
 

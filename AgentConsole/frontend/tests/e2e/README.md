@@ -23,15 +23,21 @@
 - 新增的三支：`execute.mock.spec.ts`（21 個情境）、`monitor.mock.spec.ts`（15 個）、`dashboard.mock.spec.ts`（8 個，含頂列登出 2 個）；情境數會隨波次增加，一律以 `npx playwright test <檔> --list` 現查為準。
 - `markdown-preview.mock.spec.ts`（3 個）：Markdown 編輯器預覽不渲染內嵌 HTML（DEF-AC-013，P2 資安）——新建專案對話框貼入各種載體、儲存式（管理者開編輯頁）、不合格網址的連結沒有 href；
   一定要對 **production 建置**跑（`E2E_MODE=standalone`）：修法靠 rehype-raw 的函式身分比對，jsdom 看不出 bundler 讓身分對不上的情形。真後端版是 QA 的 `p9-w7-html.spec.ts`。
+- `p10-w115-sdd.mock.spec.ts`（整合輪 115、契約 v1.5；UI-SDD-01～03）：專案詳情「SDD 治理」區（綁定、FSM 狀態與階段、核准凍結成功／503／409／422、編輯 SDD 專案、VIEWER 唯讀、Esc 焦點歸還、ESCALATION 與恢復指令，人工恢復後不再顯示）、
+  匯入到既有專案（`targetProjectId`、SDD 規格資訊與警告）、執行頁追溯覆蓋（諮詢）面板（200／404／非終態／無綁定）與 execute 201 的 `warnings[]`、
+  監控頁 SDD 卡（專案模式 `?projectId=`、階段進度、ESCALATION 橫幅與兩段恢復指令的複製鈕；人工恢復後不誤報）。專案詳情的假後端是檔內自帶的 `SddProjectWorld`，執行與監控情境借用 `Engine`／`MonitorWorld`。
+  設環境變數 `E2E_SHOTS_DIR` 才會把重點畫面存成 png（不進 repo）；情境數以 `--list` 現查。對 production 建置跑（`E2E_MODE=standalone`），並一律帶 `--output=<自己的暫存目錄>`，避免與別的 Playwright 行程共用、清掉 `test-results`。
 
 ```bash
 (cd AgentConsole/frontend && npx playwright test tests/e2e/execute.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/dashboard.mock.spec.ts)
 (cd AgentConsole/frontend && npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts)
+(cd AgentConsole/frontend && E2E_MODE=standalone npx playwright test tests/e2e/p10-w115-sdd.mock.spec.ts --output=<自己的暫存目錄>/pw)
 ```
 
 ```powershell
 Push-Location AgentConsole\frontend; npx playwright test tests/e2e/execute.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/dashboard.mock.spec.ts; Pop-Location
 Push-Location AgentConsole\frontend; npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts; Pop-Location
+Push-Location AgentConsole\frontend; $env:E2E_MODE="standalone"; npx playwright test tests/e2e/p10-w115-sdd.mock.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
 ```
 
 寫 mock spec 的陷阱：Playwright 的 `getByLabel` 預設是**子字串**比對，而每列參數另有「重置：○○」「顯示：○○」按鈕，查輸入框要加 `{ exact: true }`；

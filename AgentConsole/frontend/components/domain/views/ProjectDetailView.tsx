@@ -12,6 +12,7 @@ import { SignoffBanner } from "@/components/domain/SignoffBanner";
 import { SignoffDialog, type SignoffTarget } from "@/components/domain/SignoffDialog";
 import { EntityDialog } from "@/components/domain/entity/EntityDialog";
 import type { EntityTarget } from "@/components/domain/entity/EntityEditor";
+import { SddGovernanceCard } from "@/components/domain/sdd/SddGovernanceCard";
 import { MarkdownView } from "@/components/markdown/MarkdownView";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
@@ -96,6 +97,9 @@ export function ProjectDetailView() {
       </div>
 
       <GoalListCard projectId={p.id} goals={p.goals} canWrite={canWrite} onAdd={() => setEntity({ kind: "goal", mode: "create", projectId: p.id })} />
+
+      {/* SDD 治理區（契約 §4.7.1）：目標清單之下、行動列（含「刪除專案」）之上；從未使用 SDD 的專案預設收合 */}
+      <SddGovernanceCard project={p} canWrite={canWrite} />
 
       <div className="flex flex-wrap gap-2.5">
         <Button asChild iconLeft={Play}>

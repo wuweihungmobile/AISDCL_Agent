@@ -21,7 +21,7 @@ import { PillTabs, pillPanelId, pillTabId } from "@/components/ui/pill-tabs";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ABSOLUTE_PATH } from "@/components/domain/entity/schemas";
-import type { ImportRecordDetail, ImportSourceType, ParseOptions } from "@/lib/api/types";
+import type { ImportRecordDetail, ImportSourceType, ParseOptions, ProjectSummary } from "@/lib/api/types";
 import { formatBytes, formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ParseFailure } from "./gateErrors";
@@ -51,6 +51,9 @@ const SOURCE_TYPE_LABEL: Record<ImportSourceType, string> = {
 const ID_BASE = "import-source";
 const LEVELS = Array.from({ length: 10 }, (_, i) => i + 1);
 
+/** 「匯入到既有專案」選擇器需要的欄位（`GET /projects` 的未刪除專案；契約 §1.10.8）。 */
+export type TargetProjectOption = Pick<ProjectSummary, "id" | "name" | "executionPath">;
+
 export function SourceCard({
   existing,
   canWrite,
@@ -59,6 +62,7 @@ export function SourceCard({
   failure,
   sourceError,
   fieldErrors,
+  projects = [],
   onStart,
   onLeaveExisting,
   onOpenFromHistory,
@@ -76,6 +80,8 @@ export function SourceCard({
   sourceError: string | null;
   /** 後端 400 的欄位錯誤（例：executionPath） */
   fieldErrors: Record<string, string>;
+  /** 可併入的既有專案（未刪除者；v1.5，契約 §1.10.8）；沒給＝選擇器只有「建立新專案」 */
+  projects?: readonly TargetProjectOption[];
   onStart: (request: ParseRequest) => void;
   /** 離開沿用模式（清掉目前記錄）；原文由本元件先放進「貼上文字」 */
   onLeaveExisting: () => void;
@@ -94,8 +100,14 @@ export function SourceCard({
   const [pathDraft, setPathDraft] = useState<string | null>(null);
   const [autonomyDraft, setAutonomyDraft] = useState<number | null>(null);
   const [additionalDraft, setAdditionalDraft] = useState<string | null>(null);
+  /** 「匯入到既有專案」（v1.5，契約 §1.10.8）：空字串＝建立新專案（預設）；同樣是草稿，null＝沿用記錄上還原的值 */
+  const [targetDraft, setTargetDraft] = useState<string | null>(null);
   const restored = existing?.parseOptions ?? null;
-  const executionPath = pathDraft ?? restored?.executionPath ?? "";
+  const targetId = targetDraft ?? restored?.targetProjectId ?? "";
+  const targetProject = targetId ? projects.find((p) => p.id === targetId) : undefined;
+  // 選了目標專案：執行路徑取自該專案（契約：帶 targetProjectId 時 executionPath 一律取自目標專案，請求帶不同值回 409），欄位唯讀；
+  // 目標不在清單內（清單最多 100 筆、或專案剛被刪）時退回還原的路徑，由後端的 404／409 說話
+  const executionPath = targetProject ? targetProject.executionPath : (pathDraft ?? restored?.executionPath ?? "");
   const effectiveAutonomy = autonomyDraft ?? restored?.autonomyLevel ?? defaultAutonomy;
   const additional = additionalDraft ?? restored?.additionalPrompt ?? "";
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -155,8 +167,12 @@ export function SourceCard({
         autonomyLevel: effectiveAutonomy,
         executionPath: path,
         additionalPrompt: additional.trim() || undefined,
-        // specDir 沒有 UI 欄位（契約 §4.1 I-05）；API 呼叫端設過的值在重新解析時原樣帶回，不因為從畫面重試而被丟掉
-        ...(existing && restored?.specDir ? { specDir: restored.specDir } : {}),
+        // 併入既有專案：只帶 targetProjectId（與取自目標專案的執行路徑）；規格目錄、規格檔、FSM 專案一律由後端取自目標專案（請求帶不同值回 409）
+        ...(targetId ? { targetProjectId: targetId } : {}),
+        // specDir／specFile／sddProject 沒有 UI 欄位（契約 §4.1 I-05；specFile 須與明示的 specDir 並用）；API 呼叫端設過的值在重新解析時原樣帶回，不因為從畫面重試而被丟掉
+        ...(!targetId && existing && restored?.specDir ? { specDir: restored.specDir } : {}),
+        ...(!targetId && existing && restored?.specFile ? { specFile: restored.specFile } : {}),
+        ...(!targetId && existing && restored?.sddProject ? { sddProject: restored.sddProject } : {}),
       },
     });
   }
@@ -170,9 +186,10 @@ export function SourceCard({
       setFile(null);
       setFileError(null);
       setTab("text");
-      setPathDraft(executionPath);
+      setPathDraft(pathDraft ?? restored?.executionPath ?? "");
       setAutonomyDraft(effectiveAutonomy);
       setAdditionalDraft(additional);
+      setTargetDraft(targetId);
     }
     onLeaveExisting();
   }
@@ -182,6 +199,7 @@ export function SourceCard({
     setPathDraft(null);
     setAutonomyDraft(null);
     setAdditionalDraft(null);
+    setTargetDraft(null);
     setTab("file");
     onOpenFromHistory(id);
   }
@@ -301,6 +319,23 @@ export function SourceCard({
               ))}
           </div>
 
+          <Field className="mt-5" label="匯入到既有專案" hint="(選填；規格驅動 SDD)">
+            <Select value={targetId} disabled={!canWrite} onChange={(e) => setTargetDraft(e.target.value)} data-testid="import-target-select">
+              <option value="">建立新專案（預設）</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+              {targetId && !targetProject ? <option value={targetId}>{`（專案 ${targetId.slice(0, 8)}，不在清單內）`}</option> : null}
+            </Select>
+          </Field>
+          <p className="mt-1.5 text-xs leading-relaxed text-wg-muted" data-testid="import-target-hint">
+            {targetId
+              ? "選了專案：把這份規格編譯出的目標與任務併入它（新目標接在既有目標之後；專案本身的欄位與專案層簽核不動），執行路徑與 SDD 綁定一律取自該專案。專案須已用 SDD 凍結規格。"
+              : "不選：建立新專案。要把規格併入已建好的專案（例如先在專案根跑完 SDD 閘門並核准凍結），請先選它。"}
+          </p>
+
           <div className="mt-5 grid grid-cols-[200px_1fr] gap-4 max-md:grid-cols-1">
             <Field label="自治等級" hint="(影響任務粒度)">
               <Select value={String(effectiveAutonomy)} disabled={!canWrite} onChange={(e) => setAutonomyDraft(Number(e.target.value))}>
@@ -316,12 +351,18 @@ export function SourceCard({
                 className="font-mono text-sm"
                 value={executionPath}
                 disabled={!canWrite}
+                readOnly={Boolean(targetProject)}
                 placeholder="/home/user/projects/new-service"
                 aria-invalid={errors.executionPath || fieldErrors.executionPath ? true : undefined}
                 onChange={(e) => setPathDraft(e.target.value)}
               />
             </Field>
           </div>
+          {targetProject ? (
+            <p className="mt-1.5 text-xs leading-relaxed text-wg-muted" data-testid="import-target-path-note">
+              執行路徑取自目標專案「{targetProject.name}」，不可修改。
+            </p>
+          ) : null}
           <p className="mt-1.5 text-xs leading-relaxed text-wg-muted">{EXECUTION_PATH_HINT}</p>
 
           <Field className="mt-4" label="補充說明" hint="(可選，引導 AI 解析方向)" error={errors.additionalPrompt || fieldErrors.additionalPrompt}>

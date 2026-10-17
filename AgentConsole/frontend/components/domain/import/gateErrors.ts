@@ -7,9 +7,10 @@
  *   ③ 重新整理或從歷史重開後：GET /import/{id} 的 lastParseErrors[]（{gate,detail,location?}）。
  * 另有非閘的失敗（422 `SDD 規格檢查未通過`、409、502／504），只有標題與說明，沒有逐項清單。
  */
-import { ApiError } from "@/lib/api/client";
+import { ApiError, describeError } from "@/lib/api/client";
 import { REASONS } from "@/lib/api/reasons";
 import type { GateError, GateName } from "@/lib/api/types";
+import { describeSddError } from "@/lib/domain/sddErrors";
 
 /** 清單的一列：有界閘違規或欄位錯誤，原因全文都在 text（不截斷）。 */
 export type ErrorRow = {
@@ -86,6 +87,13 @@ export function parseFailureFromError(error: unknown): ParseFailure {
     const detail = detailString(error.details, "detail");
     if (bridgeReason) notes.push(`引擎回報：${bridgeReason}`);
     if (detail) notes.push(detail);
+    // v1.5（契約 §3.3.2 第 8、9 點）：凍結後規格內容又被改動是「拒絕」，一律不退回 LLM 路徑——說清楚怎麼辦
+    if (bridgeReason === "spec_digest_changed") notes.push("規格在凍結之後又被改動：請在 SDD session 重新凍結（或還原改動）後再解析；不會退回 AI 草稿路徑。");
+  }
+  // v1.5（契約 §1.10.8）：「匯入到既有專案」的綁定衝突（parse 與 confirm 都可能）——標題維持逐字 reason，白話原因放補充說明
+  if (error.reason === REASONS.SDD_BINDING_CONFLICT) {
+    const sdd = describeSddError(error, "import");
+    notes.push(sdd.title, ...sdd.lines);
   }
   const title = error.reason ?? error.message;
   return {
@@ -96,6 +104,19 @@ export function parseFailureFromError(error: unknown): ParseFailure {
     traceId: error.traceId,
     gateRejected: error.reason === REASONS.IMPORT_GATE_REJECTED,
   };
+}
+
+/**
+ * 「確認匯入」失敗的一句話（契約 §1.10.8；confirm 帶或不帶 targetProjectId 都可能 409 sdd_binding_conflict）：
+ * 綁定衝突給白話原因（附 traceId）；其餘照一般錯誤（message、reason、traceId）。
+ */
+export function describeConfirmError(error: unknown): string {
+  if (error instanceof ApiError && error.reason === REASONS.SDD_BINDING_CONFLICT) {
+    const sdd = describeSddError(error, "import");
+    const detail = sdd.lines.length > 0 ? `（${sdd.lines.join("；")}）` : "";
+    return `${sdd.title}${detail}${error.traceId ? `（traceId：${error.traceId}）` : ""}`;
+  }
+  return describeError(error);
 }
 
 /** 從重開的記錄還原「上一次被有界閘拒絕」的清單；沒有就回 null。 */

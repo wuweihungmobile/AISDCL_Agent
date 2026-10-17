@@ -16,6 +16,7 @@ import type {
   CreateProjectRequest,
   CreateTaskRequest,
   Dag,
+  ExecutionRtm,
   ExecutionRun,
   ExecutionRunDetail,
   ExecutionRunSummary,
@@ -49,7 +50,10 @@ import type {
   ProjectSummary,
   ReportParams,
   ReviewBody,
+  SddBindingRequest,
   SddEngineStatus,
+  SddFreezeRequest,
+  SddFsmState,
   StartExecutionRequest,
   TaskDetail,
   TaskResponse,
@@ -262,13 +266,43 @@ export function getPendingSignoffs(params: { limit?: number } = {}, opts: Opts =
   return apiRequest<PendingSignoffs>("/api/v1/signoffs/pending", { query: { limit: params.limit }, signal: opts.signal });
 }
 
-// ── AISDLC_SDD 引擎狀態（契約 §1.7.1；API-ENG-01，v1.4 D-16）──────────────────────
+// ── AISDLC_SDD 引擎狀態（契約 §1.7.1；API-ENG-01，v1.4 D-16；v1.5 加 projectId，§1.10.4、API-ENG-02）──────────────
 /**
  * 唯讀：版本、FSM 專案清單，帶 `project` 時另帶該專案的 FSM 狀態；引擎不可用也回 200（`available=false`＋`reason`）。
- * 省略 `project` → `fsm` 為 null（由前端依 `projects` 選一個再帶 `project` 重取）。
+ * 省略 `project` 且省略 `projectId` → `fsm` 為 null（由前端依 `projects` 選一個再帶 `project` 重取）。
+ * v1.5：帶 `projectId`（Console 專案 id）＝讀「該專案根目錄下」的 FSM（`root`＝專案的 executionPath；專案不存在或已軟刪除回 404）；
+ * 這時省略 `project` 會預設取該專案的有效 FSM 專案（`sddProject` 有值取它，否則專案名），所以一個請求就帶回 fsm；
+ * `project` 在這個模式是「同一個狀態目錄內改選別的 FSM 專案」。`project` 值原樣編碼交給後端（不淨化）。
  */
-export function getSddEngineStatus(params: { project?: string } = {}, opts: Opts = {}): Promise<SddEngineStatus> {
-  return apiRequest<SddEngineStatus>("/api/v1/engines/sdd", { query: { project: params.project }, signal: opts.signal });
+export function getSddEngineStatus(params: { project?: string; projectId?: string } = {}, opts: Opts = {}): Promise<SddEngineStatus> {
+  return apiRequest<SddEngineStatus>("/api/v1/engines/sdd", { query: { projectId: params.projectId, project: params.project }, signal: opts.signal });
+}
+
+// ── SDD 治理（整合輪 115；契約 §1.10）──────────────────────────────────────────────
+/**
+ * 核准凍結（人工閘；OPERATOR 以上；契約 §1.10.2、API-SGN-06）：`HUMAN_PENDING`→`SPEC_FROZEN`。approver 不在請求內（一律取 JWT subject）、沒有 binding 欄。
+ * 驗證順序固定：404 專案 → 400 欄位 → 503 sdd_write_disabled → 409 sdd_fsm_not_found → 409 sdd_binding_conflict → Bridge（409／422／502／503／504）。
+ * 非冪等：FSM 已不在 HUMAN_PENDING（含已凍結）→ 409 sdd_fsm_state_conflict。成功 200 回凍結後的 FSM 狀態（與 engines/sdd 的 fsm 同形）。
+ */
+export function freezeProjectSddSpec(projectId: string, body: SddFreezeRequest): Promise<SddFsmState> {
+  return apiRequest<SddFsmState>(`/api/v1/projects/${projectId}/sdd/freeze`, { method: "POST", body });
+}
+
+/**
+ * 編輯專案的 FSM 專案（OPERATOR 以上；契約 §1.10.7、API-PRJ-08）：`sddProject` 為 null＝清除、回到「用預設」（專案名）。
+ * 不檢查狀態檔是否存在、不呼叫 Bridge；唯一性衝突回 409 sdd_binding_conflict；相同值再送＝冪等。成功 200 回專案詳情。
+ */
+export function updateProjectSddBinding(projectId: string, sddProject: string | null): Promise<ProjectDetail> {
+  const body: SddBindingRequest = { sddProject };
+  return apiRequest<ProjectDetail>(`/api/v1/projects/${projectId}/sdd-binding`, { method: "PUT", body });
+}
+
+/**
+ * 執行追溯覆蓋（諮詢視圖；VIEWER 以上；契約 §1.10.3、API-EXE-16）：AT／AC 覆蓋、失敗 AT、無法歸屬 AC 的 AT、`fullyCovered`，`advisory` 恆為 true。
+ * 404 有兩種：批次不存在（無 reason）與批次存在但沒有報告（reason `rtm_not_found`）；422 報告壞掉；502／504 Bridge 失敗。不輪詢、不快取。
+ */
+export function getExecutionRtm(runId: string, opts: Opts = {}): Promise<ExecutionRtm> {
+  return apiRequest<ExecutionRtm>(`/api/v1/executions/${runId}/rtm`, { signal: opts.signal });
 }
 
 // ── 系統參數（Phase 6；契約 §1.5；API-SET-01～09）──────────────────────────────

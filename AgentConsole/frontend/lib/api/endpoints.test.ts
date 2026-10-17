@@ -59,6 +59,16 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   // ── v1.4（W7 第二批）：待審批清單（契約 §1.8.1，API-SGN-05）與 AISDLC_SDD 引擎狀態（§1.7.1，API-ENG-01）──
   ["getPendingSignoffs", () => api.getPendingSignoffs({ limit: 50 }), "GET", "/api/v1/signoffs/pending?limit=50"],
   ["getSddEngineStatus", () => api.getSddEngineStatus({ project: "e2e-alpha" }), "GET", "/api/v1/engines/sdd?project=e2e-alpha"],
+  // ── v1.5（整合輪 115；契約 §1.10）：核准凍結（API-SGN-06）、編輯 FSM 專案（API-PRJ-08）、執行追溯覆蓋（API-EXE-16）──
+  [
+    "freezeProjectSddSpec",
+    () => api.freezeProjectSddSpec("P", { reason: "規格已走完 SCG-0～3", docs: ["docs/03_testing/contracts/TCS-Alpha.md"] }),
+    "POST",
+    "/api/v1/projects/P/sdd/freeze",
+    { reason: "規格已走完 SCG-0～3", docs: ["docs/03_testing/contracts/TCS-Alpha.md"] },
+  ],
+  ["updateProjectSddBinding", () => api.updateProjectSddBinding("P", "e2e17-alpha"), "PUT", "/api/v1/projects/P/sdd-binding", { sddProject: "e2e17-alpha" }],
+  ["getExecutionRtm", () => api.getExecutionRtm("R"), "GET", "/api/v1/executions/R/rtm"],
 
   // ── Phase 6：系統參數（契約 §1.5）：匯入是 multipart、匯出是下載，另見下方專屬測試 ──
   ["listSettings", () => api.listSettings(), "GET", "/api/v1/settings"],
@@ -135,20 +145,42 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 65 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 68 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(68);
   });
 
-  it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project）", async () => {
+  it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project 也不帶 projectId）", async () => {
     const fetchMock = vi.fn(async () => okJson());
     vi.stubGlobal("fetch", fetchMock);
     await api.getPendingSignoffs();
     await api.getSddEngineStatus();
     await api.getSddEngineStatus({ project: undefined });
+    await api.getSddEngineStatus({ project: undefined, projectId: undefined });
     const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]);
-    expect(urls).toEqual(["/api/v1/signoffs/pending", "/api/v1/engines/sdd", "/api/v1/engines/sdd"]);
+    expect(urls).toEqual(["/api/v1/signoffs/pending", "/api/v1/engines/sdd", "/api/v1/engines/sdd", "/api/v1/engines/sdd"]);
+  });
+
+  it("getSddEngineStatus 的 v1.5 專案模式（契約 §1.10.4）：projectId 單獨＝讀專案根下的有效 FSM 專案；再帶 project＝同一個狀態目錄內改選別的 FSM 專案（原樣編碼，含空白與中文）", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.getSddEngineStatus({ projectId: "0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02" });
+    await api.getSddEngineStatus({ projectId: "0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02", project: "我的 專案" });
+    const urls = fetchMock.mock.calls.map((c) => (c as unknown as [string])[0]);
+    expect(urls).toEqual([
+      "/api/v1/engines/sdd?projectId=0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02",
+      "/api/v1/engines/sdd?projectId=0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02&project=%E6%88%91%E7%9A%84+%E5%B0%88%E6%A1%88",
+    ]);
+  });
+
+  it("updateProjectSddBinding：null 原樣送出（清除＝回到「用預設」），不被當成缺值丟掉", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.updateProjectSddBinding("P", null);
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ sddProject: null });
   });
 
   it("logout（契約 §1.9.1）：免認證——即使本機有 session 也不帶 Authorization；204 回 undefined；失敗丟 ApiError（由呼叫端吞掉，不阻擋本機登出）", async () => {

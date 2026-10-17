@@ -128,8 +128,8 @@ export function MonitorView() {
     alerts: <AlertsCard projectId={projectId} runId={runId} pollMs={pollMs} canWrite={canWrite} />,
     compare: <CompareCard runs={runs} />,
     agent: <AgentCard runId={focusRun?.id} availability={metricsQ.data?.agentAvailability} />,
-    // SDD 引擎是全域的：不隨上面的批次下拉與時間範圍變動（契約 §4.3 M-20）
-    sdd: <SddEngineCard pollMs={pollMs} />,
+    // SDD 引擎不隨上面的批次下拉與時間範圍變動（契約 §4.3 M-20）；v1.5（M-21）：專案有綁定 FSM 專案（sddProject 非空）時改帶 projectId、預設顯示它，沒有綁定維持全域清單
+    sdd: <SddEngineCard pollMs={pollMs} binding={{ projectId, sddProject: project.data.sddProject, executionPath: project.data.executionPath }} />,
   };
 
   return (

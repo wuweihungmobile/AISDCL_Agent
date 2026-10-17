@@ -58,6 +58,14 @@ export default defineConfig({
         "components/ui/toast.tsx",
         "components/ui/pagination.tsx",
         "components/ui/button.tsx",
+        // 整合輪 115（v1.5）：SDD 治理的邏輯層——顯示規則與階段進度、ESCALATION 判斷式、核准凍結與編輯綁定的表單與錯誤對映、追溯覆蓋、執行警告；
+        // 以及把「複製恢復指令」做成不丟例外的元件（Clipboard API → execCommand → 老實說失敗）。畫面本體（專案詳情區、監控卡、面板）由元件測試與 mock e2e 驗證
+        "lib/domain/sdd.ts",
+        "lib/domain/sddErrors.ts",
+        "lib/domain/sddFreeze.ts",
+        "lib/domain/rtm.ts",
+        "lib/domain/executionWarnings.ts",
+        "components/domain/sdd/CopyCommand.tsx",
       ],
       thresholds: { lines: 70, statements: 70, functions: 70, branches: 60 },
     },

@@ -223,6 +223,25 @@ describe("useSddEngine 的輪詢節奏（GET /engines/sdd，每 30 秒 1 次）"
     expect(urls).toEqual(["/api/v1/engines/sdd?project=e2e-alpha", "/api/v1/engines/sdd?project=e2e-alpha"]);
   });
 
+  it("專案模式（v1.5，契約 §1.10.4）：projectId 單獨＝?projectId=；再帶 project＝&project=；每次輪詢仍只有一個請求；與全域模式的快取互不干擾", async () => {
+    const P = "0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02";
+    const { result } = renderHook(() => useSddEngine(null, { projectId: P }), { wrapper });
+    await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));
+    await vi.advanceTimersByTimeAsync(SDD_POLL_MS + 1_000);
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(urls).toEqual([`/api/v1/engines/sdd?projectId=${P}`, `/api/v1/engines/sdd?projectId=${P}`]);
+
+    const picked = renderHook(() => useSddEngine("other-fsm", { projectId: P }), { wrapper });
+    await waitFor(() => expect(picked.result.current.data?.version?.latest).toBeDefined());
+    expect(urls[urls.length - 1]).toBe(`/api/v1/engines/sdd?projectId=${P}&project=other-fsm`);
+
+    // 全域模式的 useSddEngine(null) 是另一個快取鍵：不會拿到專案模式那份，也不會被它的輪詢帶動
+    const before = urls.length;
+    renderHook(() => useSddEngine(null), { wrapper });
+    await waitFor(() => expect(urls.length).toBe(before + 1));
+    expect(urls[urls.length - 1]).toBe("/api/v1/engines/sdd");
+  });
+
   it("pollWhile 回 false（已選定專案、清單已有內容）就不再輪詢這一份；enabled＝false 連第一次請求都不發", async () => {
     const { result } = renderHook(() => useSddEngine(null, { pollWhile: () => false }), { wrapper });
     await waitFor(() => expect(result.current.data?.version?.latest).toBe("v1"));

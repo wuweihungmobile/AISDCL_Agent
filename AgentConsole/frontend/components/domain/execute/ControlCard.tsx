@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import type { ExecutionWarningView } from "@/lib/domain/executionWarnings";
 import type { ControlAction, ControlButton } from "@/lib/domain/runControl";
 import type { LockReport, ScopeGoal, ScopeTask, Selection } from "@/lib/domain/scope";
 import { autonomyHint, autonomyLabel } from "@/lib/domain/status";
-import { StartErrorPanel } from "./parts";
+import { ExecutionWarningsPanel, StartErrorPanel } from "./parts";
 import { ScopeTree } from "./ScopeTree";
 import type { StartErrorView } from "./startErrors";
 
@@ -45,6 +46,8 @@ export type ControlCardProps = {
   onAction: (action: ControlAction) => void;
   lock: LockReport;
   startError: StartErrorView | null;
+  /** 剛啟動的批次在 201 帶回的警告（契約 §1.10.6）；沒有警告或不是剛啟動的批次＝省略或空陣列 */
+  warnings?: readonly ExecutionWarningView[];
   onApprove: () => void;
 };
 
@@ -163,6 +166,7 @@ export function ControlCard(props: ControlCardProps) {
       </div>
 
       {props.startError ? <StartErrorPanel view={props.startError} onApprove={props.startError.unsigned ? props.onApprove : undefined} /> : null}
+      <ExecutionWarningsPanel warnings={props.warnings ?? []} />
     </Card>
   );
 }

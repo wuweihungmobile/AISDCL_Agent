@@ -681,6 +681,30 @@ describe("監控頁：自訂儀表板（US-M-08；版面存 localStorage console
   });
 });
 
+describe("監控頁：SDD 卡依專案綁定帶入（v1.5，契約 §4.3 M-21；整合輪 115）", () => {
+  const sddCalls = (calls: ApiCall[]) => calls.filter((c) => c.method === "GET" && c.path === "/api/v1/engines/sdd");
+
+  it("專案有 sddProject：SDD 卡進專案模式——改帶 projectId、只一個請求（不先取全域清單）；其他區塊不受影響", async () => {
+    const { calls, world } = backend();
+    world.extra = (c) => (c.method === "GET" && c.path === "/api/v1/projects/p1" ? { data: projectDetail({ sddProject: "core-fsm", executionPath: "/work/core" }) } : undefined);
+    view();
+    const card = await screen.findByTestId("sdd-card");
+    await waitFor(() => expect(sddCalls(calls).length).toBeGreaterThan(0));
+    expect(card).toHaveAttribute("data-mode", "project");
+    expect(sddCalls(calls).map((c) => c.url)).toEqual(["/api/v1/engines/sdd?projectId=p1"]);
+    expect(await screen.findByTestId("kpi-cards")).toBeInTheDocument();
+  });
+
+  it("專案沒有綁定（sddProject 缺席或空）：維持 M-20 的全域模式——不帶 projectId、卡片不隨專案變動", async () => {
+    const { calls } = backend();
+    view();
+    const card = await screen.findByTestId("sdd-card");
+    await waitFor(() => expect(sddCalls(calls).length).toBeGreaterThan(0));
+    expect(card).toHaveAttribute("data-mode", "global");
+    expect(sddCalls(calls).every((c) => !c.query.has("projectId"))).toBe(true);
+  });
+});
+
 describe("監控頁：輪詢節奏（契約 §0.4 第 4 點、§1.3）", () => {
   it("輪詢間隔＝max(監控參數 refreshIntervalMs，15 秒)：設定 10 秒時仍用 15 秒；設定 60 秒時用 60 秒；讀不到用 30 秒", async () => {
     const { useMonitorPollMs, MONITOR_POLL_FLOOR_MS, MONITOR_DEFAULT_POLL_MS } = await import("@/lib/api/queries");

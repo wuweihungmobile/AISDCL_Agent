@@ -29,8 +29,9 @@ import {
   useSettingsCategory,
   useStartExecution,
 } from "@/lib/api/queries";
-import type { Checkpoint, ReviewDecision, ReviewItem, StartExecutionRequest } from "@/lib/api/types";
+import type { Checkpoint, ExecutionWarning, ReviewDecision, ReviewItem, StartExecutionRequest } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { executionWarningViews, warningsToastSuffix } from "@/lib/domain/executionWarnings";
 import { controlButtons, type ControlAction } from "@/lib/domain/runControl";
 import { buildScope, initialSelection, lockReport, type ScopeGoal, type ScopeTask, type Selection } from "@/lib/domain/scope";
 import { isRunTerminal } from "@/lib/domain/status";
@@ -42,6 +43,7 @@ import { LockBanner, RunSelect } from "./parts";
 import { ProgressCard } from "./ProgressCard";
 import { ReviewCard } from "./ReviewCard";
 import { reviewDoneMessage } from "./reviewHelp";
+import { RtmPanel } from "./RtmPanel";
 import { describeStartError, type StartErrorView } from "./startErrors";
 
 /** 批次下拉的列表輪詢：批次進行中時 run 的新增（例如後續批次）要看得到；遠高於契約的 10 秒地板。 */
@@ -137,6 +139,8 @@ export function ExecuteView() {
   const reviewM = useReviewExecution();
   const [budgetError, setBudgetError] = useState<string | undefined>();
   const [startError, setStartError] = useState<StartErrorView | null>(null);
+  /** 剛啟動的批次在 201 帶回的警告（契約 §1.10.6；只有 execute 的 201 帶，所以只對那個批次顯示） */
+  const [startWarnings, setStartWarnings] = useState<{ runId: string; items: readonly ExecutionWarning[] } | null>(null);
   const [signoffOpen, setSignoffOpen] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [checkpointOpen, setCheckpointOpen] = useState(false);
@@ -190,7 +194,9 @@ export function ExecuteView() {
     try {
       const run = await startM.mutateAsync({ projectId, body });
       setSelectedRunId(run.id);
-      toast.success(`已啟動 Run #${run.runNumber}`);
+      setStartWarnings({ runId: run.id, items: run.warnings ?? [] });
+      // toast 一次只顯示一則：有警告時併進同一句，詳情在執行控制卡的警告清單
+      toast.success(`已啟動 Run #${run.runNumber}${warningsToastSuffix(executionWarningViews(run.warnings).length)}`);
     } catch (err) {
       setStartError(describeStartError(err, nameOf));
     }
@@ -256,6 +262,9 @@ export function ExecuteView() {
     );
   }
   const p = project.data;
+  const warningViews = startWarnings && startWarnings.runId === activeRunId ? executionWarningViews(startWarnings.items) : [];
+  // 追溯覆蓋面板只在專案有 SDD 規格綁定（sddSpecDir 非空）時才出現（契約 §4.7.2）
+  const hasSddSpec = Boolean(p.sddSpecDir && p.sddSpecDir.trim() !== "");
 
   return (
     <div data-testid="execute-view">
@@ -308,6 +317,7 @@ export function ExecuteView() {
           onAction={onAction}
           lock={lock}
           startError={startError}
+          warnings={warningViews}
           onApprove={() => setSignoffOpen(true)}
         />
         <div className="flex min-w-0 flex-col gap-6">
@@ -322,6 +332,7 @@ export function ExecuteView() {
 
       <LiveLogCard live={stream.live} connection={stream.connection} onReconnect={stream.reconnect} />
       <ReviewCard projectId={projectId} reviews={detail?.pendingReviews ?? []} canWrite={canWrite} onDecide={onDecide} />
+      <RtmPanel runId={activeRunId} runStatus={runStatus} bound={hasSddSpec} />
 
       <SignoffDialog target={signoffOpen ? { kind: "project", id: p.id, name: p.name } : null} onClose={() => setSignoffOpen(false)} />
       <ConfirmDialog

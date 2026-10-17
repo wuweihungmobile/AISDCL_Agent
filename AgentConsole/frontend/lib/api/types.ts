@@ -11,8 +11,13 @@ type S36 = components36["schemas"];
 
 /** 專案列表項；`deletedAt` 是 v1.2（C-3）新增：只有 `GET /projects?deleted=true` 的列表項帶值，其餘缺席。 */
 export type ProjectSummary = S["ProjectSummaryResponse"] & Pick<S36["ProjectSummaryResponse"], "deletedAt">;
-export type ProjectDetail = S["ProjectDetailResponse"];
-export type ProjectResponse = S["ProjectResponse"];
+/**
+ * 專案詳情與專案回應：v1.5（整合輪 115；契約 §1.10.5、API-PRJ-07）新增 SDD 綁定三欄 `sddProject`／`sddSpecDir`／`sddSpecFile`
+ * （皆 string｜null，null 與缺席等價；`ProjectSummaryResponse` 不帶）。Phase 1+2 的 schema.d.ts 由後端 /v3/api-docs 產生、尚未含這三欄，
+ * 所以從契約產生的 schema-p3-6.d.ts 借這三欄（同 ProjectSummary 借 deletedAt 的做法）。
+ */
+export type ProjectDetail = S["ProjectDetailResponse"] & Pick<S36["ProjectDetailResponse"], "sddProject" | "sddSpecDir" | "sddSpecFile">;
+export type ProjectResponse = S["ProjectResponse"] & Pick<S36["ProjectResponse"], "sddProject" | "sddSpecDir" | "sddSpecFile">;
 export type GoalBrief = S["GoalBrief"];
 export type GoalSummary = S["GoalSummaryResponse"];
 export type GoalDetail = S["GoalDetailResponse"];
@@ -105,6 +110,22 @@ export type SddProjectEntry = S36["SddProjectEntry"];
 export type SddFsmState = S36["SddFsmState"];
 export type SddHumanPending = S36["SddHumanPending"];
 export type LogoutRequest = S36["LogoutRequest"];
+
+// ── v1.5（整合輪 115）：SDD 治理（契約 §1.10；API-SGN-06、API-PRJ-08、API-EXE-15／16、API-ENG-02）─────────────────
+/** FSM 階段資訊（§3.1.5、§4.7.3）：`name` 的主路徑值 order 1～8，非主路徑（BLOCKED／TRANSIENT／OBSERVATION／UNKNOWN）order 為 0；日後新增的 name 要原樣顯示。 */
+export type SddFsmPhase = S36["SddFsmPhase"];
+/** ESCALATION 的恢復指令（Bridge 組字；Console 原樣顯示、不得自行組字，§1.10.4、§4.7.3）。 */
+export type SddRecovery = S36["SddRecovery"];
+/** 核准凍結的請求本文（§1.10.2）：approver 一律取 JWT subject，不在請求內；沒有 `binding` 欄。 */
+export type SddFreezeRequest = S36["SddFreezeRequest"];
+/** 編輯專案的 FSM 專案（§1.10.7）：`sddProject` 為 null＝清除、回到「用預設」（專案名）。 */
+export type SddBindingRequest = S36["SddBindingRequest"];
+/** 執行追溯覆蓋（§1.10.3；諮詢視圖，`advisory` 恆為 true）。 */
+export type ExecutionRtm = S36["ExecutionRtmResponse"];
+export type RtmAtCoverage = S36["RtmAtCoverage"];
+export type RtmAcCoverage = S36["RtmAcCoverage"];
+/** execute 的 201 的警告項（§1.10.6）：`code`／`cause` 日後新增的值要原樣顯示、不崩潰。 */
+export type ExecutionWarning = S36["ExecutionWarning"];
 
 // ── Phase 6：系統參數（契約 §1.5）─────────────────────────────────────────
 export type Config = S36["ConfigResponse"];

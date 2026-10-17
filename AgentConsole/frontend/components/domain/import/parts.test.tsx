@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { REASONS } from "@/lib/api/reasons";
 import { parseFailureFromError, parseFailureFromRecord } from "./gateErrors";
-import { ParseFailurePanel, ParseWarnings, StepHeader } from "./parts";
+import { ParseFailurePanel, ParseWarnings, StepHeader, WARNING_LABEL } from "./parts";
 
 const apiError = (init: Record<string, unknown>) => new ApiError(init as unknown as ConstructorParameters<typeof ApiError>[0]);
 
@@ -116,6 +116,24 @@ describe("解析提示與步驟標題", () => {
     expect(rows[2]).toHaveTextContent("future_code");
     rerender(<ParseWarnings warnings={[]} />);
     expect(screen.queryByTestId("parse-warnings")).toBeNull();
+  });
+
+  it("v1.5 的三個路徑 A 警告碼（at_unmapped、frozen_digest_absent、state_dir_not_ignored）有白話標題，後端 detail 與位置照列", () => {
+    render(
+      <ParseWarnings
+        warnings={[
+          { code: "at_unmapped", detail: "規格出現但未編成步驟的 AT：AT-9-X、AT-010", location: "specDir" },
+          { code: "frozen_digest_absent", detail: "舊狀態檔", location: "specDir" },
+          { code: "state_dir_not_ignored", detail: "未被忽略", location: "executionPath" },
+        ]}
+      />,
+    );
+    const rows = screen.getAllByTestId("parse-warning");
+    expect(rows[0]).toHaveTextContent("規格出現、但未編成步驟的 AT（不會被執行");
+    expect(rows[0]).toHaveTextContent("AT-9-X、AT-010");
+    expect(rows[1]).toHaveTextContent("規格凍結時沒有記錄內容摘要");
+    expect(rows[2]).toHaveTextContent("build/reports/fsm/ 沒有被 git 忽略");
+    expect(Object.keys(WARNING_LABEL)).toEqual(expect.arrayContaining(["at_unmapped", "frozen_digest_absent", "state_dir_not_ignored"]));
   });
 
   it("StepHeader：步驟號與標題", () => {

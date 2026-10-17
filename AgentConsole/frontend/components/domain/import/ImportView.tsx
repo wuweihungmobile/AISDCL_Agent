@@ -21,7 +21,7 @@ import { ErrorState } from "@/components/ui/states";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { ApiError, describeError } from "@/lib/api/client";
-import { useImportDetail, useImportText, useParseImport, useSettingsCategory, useUploadImport } from "@/lib/api/queries";
+import { useAllProjects, useImportDetail, useImportText, useParseImport, useSettingsCategory, useUploadImport } from "@/lib/api/queries";
 import type { ParseWarning } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { parseFailureFromError, parseFailureFromRecord, type ParseFailure } from "./gateErrors";
@@ -55,6 +55,9 @@ export function ImportView() {
   // 預設自治等級＝設定 agent.defaultAutonomyLevel（契約 §4.1 I-04）；讀不到就用 3
   const agent = useSettingsCategory("agent");
   const defaultAutonomy = clampLevel(agent.data?.find((c) => c.key === "defaultAutonomyLevel")?.value);
+  // 「匯入到既有專案」的候選（v1.5，契約 §1.10.8）：未刪除的專案（與頂列 chips、側欄、Dashboard 共用同一份快取，最多 100 筆）
+  const projectsQ = useAllProjects();
+  const projects = projectsQ.data?.content ?? [];
 
   const [creating, setCreating] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -165,6 +168,7 @@ export function ImportView() {
             failure={shownFailure}
             sourceError={sourceError}
             fieldErrors={fieldErrors}
+            projects={projects}
             onStart={start}
             onLeaveExisting={startOver}
             onOpenFromHistory={openRecord}
@@ -181,6 +185,7 @@ export function ImportView() {
           warnings={warnings && warnings.id === record.id ? warnings.items : (record.warnings ?? [])}
           onWarnings={(items) => setWarnings({ id: record.id, items })}
           onDiscarded={startOver}
+          targetName={projects.find((p) => p.id === record.parseOptions?.targetProjectId)?.name}
         />
       ) : null}
 

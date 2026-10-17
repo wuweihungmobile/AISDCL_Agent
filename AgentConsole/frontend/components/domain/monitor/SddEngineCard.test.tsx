@@ -443,3 +443,315 @@ describe("AISDLC_SDD 引擎卡：唯讀", () => {
     expect(await screen.findByTestId("sdd-state")).toHaveTextContent("IMPLEMENTATION");
   });
 });
+
+// ══ v1.5（整合輪 115；契約 §4.3 M-21、§4.7.3；UI-SDD-03）：階段進度與 ESCALATION、專案模式 ═══════════════════════════════
+const P1 = "0b8c5d1e-6a47-4d3f-8f2a-9c1e7b3a5d02";
+const phaseOf = (name: string, order: number, patch: Partial<NonNullable<SddFsmState["phase"]>> = {}): SddFsmState["phase"] => ({ name, order, blocking: false, observation: false, ...patch });
+
+describe("AISDLC_SDD 引擎卡：階段進度（契約 §4.7.3）", () => {
+  it("fsm.phase 為 IMPLEMENTATION／5：進度條標出「目前」；data-phase／data-order／data-blocking／data-observation 供 e2e；沒有阻塞橫幅也沒有 ESCALATION 區塊", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = fsmOf("e2e-alpha", { phase: phaseOf("IMPLEMENTATION", 5) });
+    view();
+    const bar = await screen.findByTestId("sdd-phase");
+    expect(bar).toHaveAttribute("data-phase", "IMPLEMENTATION");
+    expect(bar).toHaveAttribute("data-order", "5");
+    expect(bar).toHaveAttribute("data-blocking", "false");
+    expect(bar).toHaveAttribute("data-observation", "false");
+    expect(screen.getByTestId("sdd-phase-label")).toHaveTextContent("實作");
+    expect(screen.getAllByTestId("sdd-phase-step").map((li) => li.getAttribute("data-state"))).toEqual(["done", "done", "done", "done", "current", "upcoming", "upcoming", "upcoming"]);
+    expect(screen.queryByTestId("sdd-blocked-banner")).toBeNull();
+    expect(screen.queryByTestId("sdd-escalation")).toBeNull();
+    expect(screen.getByTestId("sdd-state")).toHaveTextContent(/^IMPLEMENTATION$/); // 狀態欄維持原樣（FSM 檔原值），階段標籤另放
+  });
+
+  it("觀測態＋AUTOCLAUDE_DELEGATED：「觀測中」與「委派 AutoClaude 執行中」標籤、虛線外框的「目前」步驟", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = fsmOf("e2e-alpha", { currentState: "AUTOCLAUDE_DELEGATED", phase: phaseOf("IMPLEMENTATION", 5, { observation: true }) });
+    view();
+    await screen.findByTestId("sdd-phase");
+    expect(screen.getByTestId("sdd-phase")).toHaveAttribute("data-observation", "true");
+    expect(screen.getByTestId("sdd-phase-observation")).toHaveTextContent("觀測中");
+    expect(screen.getByTestId("sdd-phase-delegated")).toHaveTextContent("委派 AutoClaude 執行中");
+    const current = screen.getAllByTestId("sdd-phase-step").find((li) => li.getAttribute("data-state") === "current");
+    expect(current).toHaveAttribute("data-step", "IMPLEMENTATION");
+    expect(current?.className).toContain("border-dashed");
+  });
+
+  it("phase 缺席（舊 Bridge）：只顯示「階段 —」與 currentState，不畫步驟、不崩潰；order 0 的非主路徑同樣不畫步驟", async () => {
+    const { world } = sddWorld();
+    view();
+    expect(await screen.findByTestId("sdd-phase-label")).toHaveTextContent("—");
+    expect(screen.getByTestId("sdd-phase")).toHaveAttribute("data-order", "0");
+    expect(screen.queryByTestId("sdd-phase-steps")).toBeNull();
+    expect(screen.getByTestId("sdd-state")).toHaveTextContent("IMPLEMENTATION");
+    world.fsms["e2e-alpha"] = fsmOf("e2e-alpha", { currentState: "HUB_SYNC", phase: phaseOf("OBSERVATION", 0, { observation: true }) });
+    await userEvent.selectOptions(screen.getByTestId("sdd-project-select"), "e2e-bravo");
+    await userEvent.selectOptions(screen.getByTestId("sdd-project-select"), "e2e-alpha");
+    await waitFor(() => expect(screen.getByTestId("sdd-phase-label")).toHaveTextContent("觀測中"));
+    expect(screen.queryByTestId("sdd-phase-steps")).toBeNull();
+  });
+});
+
+describe("AISDLC_SDD 引擎卡：ESCALATION 標示與恢復指令（契約 §4.7.3；ADR-XPLAT-016 §5.3）", () => {
+  const OPEN = { triggered_at: new Date(2026, 9, 17, 9, 0, 0).toISOString(), trigger_reason: "引擎升級：評估未通過", resolved_at: null, resolution: null };
+  const blocked = (patch: Partial<SddFsmState> = {}) =>
+    fsmOf("e2e-alpha", {
+      currentState: "ESCALATION",
+      phase: phaseOf("BLOCKED", 0, { blocking: true }),
+      escalationHistory: [OPEN],
+      escalationProvenance: { source: "autoclaude_delegated_failed", rule_id: "R-9.20.2", reason: "x" },
+      recovery: {
+        target: "IMPLEMENTATION",
+        powershell: 'Push-Location "C:\\sdd"; python -m x resume-from-escalation --reason "<人工原因>"; Pop-Location',
+        posix: 'cd "/sdd" && python -m x resume-from-escalation --reason "<人工原因>"',
+      },
+      ...patch,
+    });
+
+  it("阻塞態：紅色橫幅「阻塞：ESCALATION（需人工恢復）」＋Console 不提供恢復動作的說明；八個步驟全灰；ESCALATION 區塊顯示末筆與來源", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = blocked();
+    view();
+    const banner = await screen.findByTestId("sdd-blocked-banner");
+    expect(banner).toHaveTextContent("阻塞：ESCALATION（需人工恢復）");
+    expect(banner).toHaveTextContent("請在 SDD session 依恢復指令處理，Console 不提供恢復動作");
+    expect(screen.getByTestId("sdd-phase")).toHaveAttribute("data-blocking", "true");
+    expect(screen.getAllByTestId("sdd-phase-step").every((li) => li.getAttribute("data-state") === "upcoming")).toBe(true);
+    expect(screen.getByTestId("sdd-escalation-summary")).toHaveTextContent("ESCALATION・2026-10-17 09:00:00・引擎升級：評估未通過");
+    expect(screen.getByTestId("sdd-escalation-source")).toHaveTextContent("來源：autoclaude_delegated_failed・AutoClaude 委派失敗（引擎升級）");
+    expect(screen.getByTestId("sdd-escalation")).toHaveAttribute("data-unresolved", "true");
+  });
+
+  it("恢復指令：PowerShell 與 POSIX 兩段原樣顯示（含 <人工原因> 佔位）、各有一個複製鈕；不提供執行鈕", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = blocked();
+    view();
+    const recovery = await screen.findByTestId("sdd-recovery");
+    expect(recovery).toHaveTextContent("恢復（在 SDD session 執行；Console 不提供恢復動作）");
+    expect([...recovery.querySelectorAll("[data-shell]")].map((el) => el.getAttribute("data-shell"))).toEqual(["powershell", "posix"]);
+    expect(within(recovery).getByTestId("sdd-recovery-command-powershell")).toHaveTextContent('Push-Location "C:\\sdd"; python -m x resume-from-escalation --reason "<人工原因>"; Pop-Location');
+    expect(within(recovery).getByTestId("sdd-recovery-command-posix")).toHaveTextContent('cd "/sdd" && python -m x resume-from-escalation --reason "<人工原因>"');
+    expect(
+      within(recovery)
+        .getAllByRole("button")
+        .map((b) => b.getAttribute("aria-label")),
+    ).toEqual(["複製 PowerShell 指令", "複製 POSIX（bash／zsh） 指令"]);
+    expect(within(recovery).queryByRole("button", { name: /執行|恢復/ })).toBeNull();
+  });
+
+  it("fsm.recovery 缺席：只有橫幅的文字說明，前端不自己組指令", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = blocked({ recovery: null });
+    view();
+    await screen.findByTestId("sdd-blocked-banner");
+    expect(screen.queryByTestId("sdd-recovery")).toBeNull();
+    expect(screen.getByTestId("sdd-card").textContent).not.toContain("resume-from-escalation");
+  });
+
+  it("ESCALATION_FINAL 與 phase.blocking（TERMINATED）同樣顯示橫幅與區塊；escalationHistory 為空：區塊寫「（沒有升級紀錄）」、橫幅照顯示", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = blocked({ currentState: "ESCALATION_FINAL", escalationHistory: [], escalationProvenance: null, recovery: null });
+    view();
+    expect(await screen.findByTestId("sdd-blocked-banner")).toHaveTextContent("阻塞：ESCALATION_FINAL");
+    expect(screen.getByTestId("sdd-escalation-summary")).toHaveTextContent("（沒有升級紀錄）");
+    expect(screen.queryByTestId("sdd-escalation-source")).toBeNull(); // provenance 缺席：不顯示這一行（不寫「—」）
+  });
+
+  it("🔴 人工恢復後（IMPLEMENTATION）即使 escalationProvenance 還在、歷史末筆已有 resolved_at：不顯示橫幅、不顯示 ESCALATION 區塊與恢復指令（不得只看 provenance）", async () => {
+    const { world } = sddWorld();
+    world.fsms["e2e-alpha"] = fsmOf("e2e-alpha", {
+      currentState: "IMPLEMENTATION",
+      phase: phaseOf("IMPLEMENTATION", 5),
+      escalationHistory: [{ ...OPEN, resolved_at: new Date(2026, 9, 17, 10, 0, 0).toISOString(), resolution: "人工恢復" }],
+      escalationProvenance: { source: "autoclaude_delegated_failed" },
+      recovery: null,
+    });
+    view();
+    await screen.findByTestId("sdd-phase");
+    expect(screen.queryByTestId("sdd-blocked-banner")).toBeNull();
+    expect(screen.queryByTestId("sdd-escalation")).toBeNull();
+    expect(screen.queryByTestId("sdd-recovery")).toBeNull();
+    expect(screen.getByTestId("sdd-card").textContent).not.toContain("autoclaude_delegated_failed");
+  });
+
+  it("卡片仍是唯讀：沒有阻塞時沒有任何按鈕；阻塞時按鈕只有兩個「複製」，全部請求都是 GET", async () => {
+    const { world, calls } = sddWorld();
+    world.fsms["e2e-alpha"] = blocked();
+    view();
+    await screen.findByTestId("sdd-recovery");
+    expect(
+      within(screen.getByTestId("sdd-card"))
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["複製", "複製"]);
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
+  });
+});
+
+describe("AISDLC_SDD 引擎卡：專案模式（契約 §4.3 M-21；專案有綁定 FSM 專案）", () => {
+  const EXEC_PATH = "/work/core";
+  /** 專案模式的假後端：`?projectId=P1`（不帶 project）＝專案根下的有效 FSM 專案；再帶 project＝同一個狀態目錄內改選。 */
+  function projectWorld(patch: { reason?: SddEngineStatus["reason"]; available?: boolean; throwNotFound?: boolean } = {}) {
+    const files: Record<string, SddFsmState> = {
+      "core-fsm": fsmOf("core-fsm", { fsmProject: "core-fsm", phase: phaseOf("IMPLEMENTATION", 5) }),
+      "other-fsm": fsmOf("other-fsm", { fsmProject: "other-fsm", currentState: "REVIEW", phase: phaseOf("REVIEW", 6) }),
+    };
+    const entries = Object.values(files).map((f) => entry(f.fsmProject as string, f.currentState as string));
+    const { calls } = stubApi((c: ApiCall) => {
+      if (c.path !== PATH) return undefined;
+      if (patch.throwNotFound) return failure(404, { message: `專案不存在或已刪除：${P1}` });
+      const version = { latest: "AISDLC_SDD_v9.99", root: "/sdd/AISDLC_SDD_v9.99" };
+      const base = { checkedAt: CHECKED_AT };
+      if (patch.available === false) return { data: { available: false, reason: patch.reason ?? "bridge_unreachable", version: null, projects: [], fsm: null, ...base } satisfies SddEngineStatus };
+      if (patch.reason)
+        return { data: { available: true, reason: patch.reason, version, projects: patch.reason === "sdd_root_rejected" ? [] : entries, fsm: null, ...base } satisfies SddEngineStatus };
+      const project = c.query.get("project") ?? "core-fsm";
+      const fsm = files[project] ?? null;
+      return { data: { available: true, reason: fsm ? null : "fsm_not_found", version, projects: entries, fsm, ...base } satisfies SddEngineStatus };
+    });
+    return { calls, files };
+  }
+
+  function projectView(binding: { sddProject?: string | null; executionPath?: string } = { sddProject: "core-fsm", executionPath: EXEC_PATH }) {
+    return render(
+      <Providers client={makeClient()}>
+        <SddEngineCard binding={{ projectId: P1, ...binding }} />
+      </Providers>,
+    );
+  }
+  const urlsOf = (calls: ApiCall[]) => sddCalls(calls).map((c) => c.url);
+
+  it("專案有 sddProject：只發一個請求 ?projectId=（不帶 project，由後端取有效 FSM 專案）；顯示該 FSM；下拉預選它的標準鍵；不會有全域模式的第一段請求", async () => {
+    const { calls } = projectWorld();
+    projectView();
+    expect(await screen.findByTestId("sdd-state")).toHaveTextContent("IMPLEMENTATION");
+    expect(urlsOf(calls)).toEqual([`${PATH}?projectId=${P1}`]);
+    expect(screen.getByTestId("sdd-card")).toHaveAttribute("data-mode", "project");
+    const select = screen.getByTestId("sdd-project-select") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.value)).toEqual(["core-fsm", "other-fsm"]);
+    expect(select.value).toBe("core-fsm");
+    expect(screen.getByTestId("sdd-phase")).toHaveAttribute("data-phase", "IMPLEMENTATION");
+  });
+
+  it("下拉改選同一個狀態目錄內的其他 FSM 專案：改帶 ?projectId=&project=；不寫入 localStorage 的「上次選的專案」（那是全域模式的方便）", async () => {
+    const { calls } = projectWorld();
+    projectView();
+    await screen.findByTestId("sdd-state");
+    await userEvent.selectOptions(screen.getByTestId("sdd-project-select"), "other-fsm");
+    await waitFor(() => expect(screen.getByTestId("sdd-state")).toHaveTextContent("REVIEW"));
+    expect(urlsOf(calls)).toEqual([`${PATH}?projectId=${P1}`, `${PATH}?projectId=${P1}&project=other-fsm`]);
+    expect(window.localStorage.getItem(SDD_PROJECT_STORAGE_KEY)).toBeNull();
+    expect(screen.getByTestId("sdd-phase")).toHaveAttribute("data-phase", "REVIEW");
+  });
+
+  it("沒有綁定（sddProject 為 null 或空白、或沒有 binding）：維持 M-20 的全域模式——兩段請求、不帶 projectId", async () => {
+    for (const binding of [{ sddProject: null }, { sddProject: "  " }, {}]) {
+      const { calls } = sddWorld();
+      const { unmount } = render(
+        <Providers client={makeClient()}>
+          <SddEngineCard binding={{ projectId: P1, ...binding }} />
+        </Providers>,
+      );
+      await screen.findByTestId("sdd-state");
+      expect(projectParams(calls)).toEqual([null, "e2e-alpha"]);
+      expect(sddCalls(calls).every((c) => !c.query.has("projectId"))).toBe(true);
+      expect(screen.getByTestId("sdd-card")).toHaveAttribute("data-mode", "global");
+      unmount();
+    }
+  });
+
+  it("專案模式每次輪詢仍只有一個請求（30 秒）：輪詢節奏不因多了 projectId 而變密", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { calls } = projectWorld();
+      projectView();
+      await screen.findByTestId("sdd-state");
+      expect(sddCalls(calls)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(29_000);
+      expect(sddCalls(calls)).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await waitFor(() => expect(sddCalls(calls)).toHaveLength(2));
+    } finally {
+      focusManager.setFocused(undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("sdd_root_rejected（專案路徑不在 Bridge 允許的根目錄內）：引擎仍是「可用」，顯示專案的文案（不是「尚無 FSM 狀態檔」）", async () => {
+    projectWorld({ reason: "sdd_root_rejected" });
+    projectView();
+    const note = await screen.findByTestId("sdd-message");
+    expect(note).toHaveTextContent("專案路徑不在 Bridge 允許的根目錄內（或已不存在）");
+    expect(note).toHaveAttribute("data-reason", "sdd_root_rejected");
+    expect(screen.getByTestId("sdd-status")).toHaveAttribute("data-available", "true");
+    expect(screen.queryByTestId("sdd-empty")).toBeNull();
+    expect(screen.queryByTestId("sdd-project-select")).toBeNull();
+  });
+
+  it("綁定的 FSM 專案沒有狀態檔（fsm_not_found）：顯示文案並加註建立位置；下拉仍列出綁定的名字（註明狀態檔不存在）與目錄內其他專案，改選就恢復", async () => {
+    const world = projectWorld();
+    const real = globalThis.fetch;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("projectId") && !url.includes("project=")) {
+        const res = await real(input, init);
+        const body = await res.json();
+        return new Response(JSON.stringify({ ...body, data: { ...body.data, reason: "fsm_not_found", fsm: null } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return real(input, init);
+    });
+    projectView({ sddProject: "missing-fsm", executionPath: EXEC_PATH });
+    const note = await screen.findByTestId("sdd-message");
+    expect(note).toHaveTextContent("找不到所選專案的 FSM 狀態檔");
+    expect(screen.getByTestId("sdd-message-hint")).toHaveTextContent("請在專案根的 SDD session 建立：/work/core/build/reports/fsm");
+    const select = screen.getByTestId("sdd-project-select") as HTMLSelectElement;
+    expect([...select.options].map((o) => o.text)).toEqual(["core-fsm", "other-fsm", "missing-fsm（狀態檔已不存在）"]);
+    expect(select.value).toBe("missing-fsm");
+    await userEvent.selectOptions(select, "core-fsm");
+    expect(await screen.findByTestId("sdd-state")).toHaveTextContent("IMPLEMENTATION");
+    expect(world.calls.length).toBeGreaterThan(1);
+  });
+
+  it("引擎不可用（bridge_unreachable）：與全域模式相同的文案；專案已刪除（console-api 404）：顯示錯誤與重試，不編造狀態", async () => {
+    projectWorld({ available: false, reason: "bridge_unreachable" });
+    const first = projectView();
+    expect(await screen.findByTestId("sdd-message")).toHaveTextContent("Engine Bridge 無法連線");
+    first.unmount();
+
+    projectWorld({ throwNotFound: true });
+    projectView();
+    expect(await screen.findByText("無法取得 AISDLC_SDD 引擎狀態")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(`專案不存在或已刪除：${P1}`);
+    expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+  });
+
+  it("專案模式的 ESCALATION：階段進度與恢復指令照常顯示（與全域模式同一組元件）", async () => {
+    const files = {
+      "core-fsm": fsmOf("core-fsm", {
+        fsmProject: "core-fsm",
+        currentState: "ESCALATION",
+        phase: phaseOf("BLOCKED", 0, { blocking: true }),
+        escalationHistory: [{ triggered_at: new Date(2026, 9, 17, 9, 0, 0).toISOString(), trigger_reason: "r", resolved_at: null }],
+        recovery: { target: "IMPLEMENTATION", powershell: "ps-cmd <人工原因>", posix: "sh-cmd <人工原因>" },
+      }),
+    };
+    stubApi((c) =>
+      c.path === PATH
+        ? {
+            data: {
+              available: true,
+              reason: null,
+              version: { latest: "v", root: "/r" },
+              projects: [entry("core-fsm", "ESCALATION")],
+              fsm: files["core-fsm"],
+              checkedAt: CHECKED_AT,
+            } satisfies SddEngineStatus,
+          }
+        : undefined,
+    );
+    projectView();
+    expect(await screen.findByTestId("sdd-blocked-banner")).toHaveTextContent("阻塞：ESCALATION");
+    expect(screen.getByTestId("sdd-recovery-command-posix")).toHaveTextContent("sh-cmd <人工原因>");
+  });
+});

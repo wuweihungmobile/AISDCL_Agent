@@ -1,7 +1,9 @@
 import { AlertTriangle, Info } from "lucide-react";
 import type { ReactNode } from "react";
 
-import type { ParseWarning } from "@/lib/api/types";
+import { PARSE_WARNING_CODES } from "@/lib/api/reasons";
+import type { ParsedResult, ParseWarning } from "@/lib/api/types";
+import { sddText } from "@/lib/domain/sdd";
 import { cn } from "@/lib/utils";
 import { gateLabel, type ParseFailure } from "./gateErrors";
 
@@ -18,12 +20,57 @@ export function StepHeader({ step, title, right }: { step: number; title: string
   );
 }
 
-/** 契約 §3.3.6 的 warnings[].code → 給人看的說明（未知 code 退回原字串）。 */
+/**
+ * 契約 §3.3.6 的 warnings[].code → 給人看的說明（未知 code 退回原字串）。
+ * v1.5（整合輪 115；契約 §3.3.2 第 6 點）新增三個路徑 A 的黃色提示（不阻擋，signoff 前由人決定）：
+ * at_unmapped 的 detail 列出「規格出現但未編成步驟的 AT」（即編譯回應的 `unmapped_at_ids`）。
+ */
 export const WARNING_LABEL: Record<string, string> = {
   evaluator_command_dropped: "驗證命令含禁用字元，已被清空",
   regex_dropped: "期望輸出 regex 無法編譯，已被清空",
   passcriteria_placeholder: "通過標準是佔位字串，signoff 前請補齊",
+  [PARSE_WARNING_CODES.AT_UNMAPPED]: "規格出現、但未編成步驟的 AT（不會被執行；signoff 前請確認編號是否合文法）",
+  [PARSE_WARNING_CODES.FROZEN_DIGEST_ABSENT]: "規格凍結時沒有記錄內容摘要（舊狀態檔），無法偵測凍結後改檔",
+  [PARSE_WARNING_CODES.STATE_DIR_NOT_IGNORED]: "專案根的 build/reports/fsm/ 沒有被 git 忽略，請把 build/reports/ 加進該專案的 .gitignore",
 };
+
+/**
+ * 路徑 A（規格驅動）的解析結果新欄位與併入說明（契約 §3.3.2 第 5 點、§1.10.8；整合輪 115，API-IMP-11／12）：
+ * 規格格式版本（只供顯示與稽核，不閘控）、FSM 專案（標準鍵）、規格目錄、規格檔——都是伺服器擁有的欄位，**confirm 才回填**到專案
+ * （parse／預覽不回填，放棄的草稿不留綁定）；缺值「—」。帶 `targetProjectId` 時另說明併入規則（新目標接在既有目標之後、專案層簽核不動）。
+ * 路徑 B／C 的結果沒有這些欄位、也沒有 targetProjectId 時整塊不顯示。
+ */
+export function SddSpecInfo({ parsed, targetProjectId, targetName }: { parsed: Partial<ParsedResult>; targetProjectId?: string | null; targetName?: string | null }) {
+  const hasSpec = [parsed.specFormatVersion, parsed.sddProject, parsed.sddSpecDir, parsed.sddSpecFile].some((v) => typeof v === "string" && v !== "");
+  if (!hasSpec && !targetProjectId) return null;
+  const mono = (value: string | undefined) => <span className={value ? "font-mono text-[13px] break-all" : undefined}>{sddText(value)}</span>;
+  return (
+    <div data-testid="sdd-spec-info" className="mb-4 rounded-md border border-wg-line bg-wg-base px-4 py-3">
+      {hasSpec ? (
+        <>
+          <div className="mb-2 text-sm font-semibold">規格資訊（規格驅動 SDD）</div>
+          <dl className="grid grid-cols-[150px_1fr] gap-x-4 gap-y-1.5 text-sm max-md:grid-cols-1 max-md:gap-y-0.5">
+            <dt className="text-wg-muted">規格格式版本</dt>
+            <dd data-testid="sdd-info-format">{mono(parsed.specFormatVersion)}</dd>
+            <dt className="text-wg-muted">FSM 專案（標準鍵）</dt>
+            <dd data-testid="sdd-info-project">{mono(parsed.sddProject)}</dd>
+            <dt className="text-wg-muted">規格目錄</dt>
+            <dd data-testid="sdd-info-dir">{mono(parsed.sddSpecDir)}</dd>
+            <dt className="text-wg-muted">規格檔</dt>
+            <dd data-testid="sdd-info-file">{mono(parsed.sddSpecFile)}</dd>
+          </dl>
+          <p className="mt-2 text-xs text-wg-muted">這些欄位要「確認匯入」成功後才會回填到專案；解析與預覽不會回填，放棄的草稿不會留下綁定。</p>
+        </>
+      ) : null}
+      {targetProjectId ? (
+        <p data-testid="sdd-merge-note" className={cn("text-sm", hasSpec && "mt-3 border-t border-wg-line pt-3")}>
+          <b>併入既有專案</b>：確認匯入後不會建立新專案，而是把這份草稿的目標與任務併入「{targetName || `專案 ${targetProjectId.slice(0, 8)}`}
+          」——新目標接在既有目標之後；專案本身的欄位與專案層的簽核都不動， 專案若尚未簽核，執行前仍須另外簽核。
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 /** 解析提示（US-I-08 之外的非阻擋提示；契約 §4.1 I-12）：黃色提示列，逐項列出。 */
 export function ParseWarnings({ warnings }: { warnings: readonly ParseWarning[] }) {

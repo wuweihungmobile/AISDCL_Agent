@@ -25,8 +25,10 @@ import {
   editImportResult,
   executeProject,
   exportSettings,
+  freezeProjectSddSpec,
   getExecution,
   getExecutionDag,
+  getExecutionRtm,
   getGoal,
   getImport,
   getNotificationSummary,
@@ -70,6 +72,7 @@ import {
   testConnection,
   updateGoal,
   updateProject,
+  updateProjectSddBinding,
   updateSetting,
   updateTask,
   updateTokenGuard,
@@ -100,6 +103,7 @@ import type {
   ReportParams,
   ReviewDecision,
   SddEngineStatus,
+  SddFreezeRequest,
   StartExecutionRequest,
   TestConnectionRequest,
   TextImportRequest,
@@ -123,8 +127,17 @@ export const qk = {
   notifications: ["notifications", "summary"] as const,
   /** 待審批清單掛在 "notifications" 底下：任何失效 ["notifications"] 的動作（簽核、確認告警、匯入變動）會連它一起重抓。 */
   pendingSignoffs: (limit: number) => ["notifications", "pending-signoffs", limit] as const,
-  /** project＝null：未帶 project 的第一次請求（取清單用）；其餘依 FSM 專案名各一份。 */
-  sddEngine: (project: string | null) => ["sdd", "engine", project] as const,
+  /**
+   * project＝null：未帶 project（全域模式＝第一次請求取清單用；專案模式＝讓後端取專案的有效 FSM 專案）；其餘依 FSM 專案名各一份。
+   * projectId（v1.5，§1.10.4）：專案模式的 Console 專案 id；全域模式為 null——兩種模式的回應不同，快取鍵必須分開。
+   */
+  sddEngine: (project: string | null, projectId: string | null = null) => ["sdd", "engine", project, projectId] as const,
+  /**
+   * 一個批次的追溯覆蓋（v1.5，§1.10.3）；不輪詢、不快取（staleTime 0），批次重新進入終態時重抓。
+   * 🔴 刻意不放在 "executions" 家族底下：SSE 事件（終態回放）與任何控制動作都會 invalidateRuns，掛在那裡會讓已取得的報告被連帶重抓，
+   * 破壞「進入終態後取一次」（E2E 實測：終態批次開頁，同一份報告被請求兩次）。
+   */
+  rtm: (runId: string) => ["rtm", runId] as const,
   settings: ["settings", "all"] as const,
   settingsCategory: (category: ConfigCategory) => ["settings", "category", category] as const,
   settingsHistory: (params: ListSettingsHistoryParams) => ["settings", "history", params] as const,
@@ -808,16 +821,65 @@ export const SDD_POLL_MS = 30_000;
  * 引擎不可用也回 200（`available=false`＋`reason`），所以 isError 只代表 console-api 自己連不上或回了非 2xx。
  * enabled＝false：不發請求、也不輪詢。pollWhile：依最近一份資料決定要不要繼續輪詢（回 false＝停；不給＝一直輪詢）——
  * 卡片選定專案後，不帶 project 的那一份只當「專案清單的底」留在快取，不必再打；清單還是空的（或引擎不可用）時才繼續輪詢等它復原。
+ *
+ * projectId（v1.5，§1.10.4）＝專案模式：讀「該 Console 專案的專案根」下的 FSM。這時 project＝null 的請求（只帶 projectId）後端會預設取
+ * 專案的有效 FSM 專案（sddProject 有值取它，否則專案名），一個請求就帶回 fsm；project 有值＝同一個狀態目錄內改選別的 FSM 專案。
+ * 專案不存在或已軟刪除回 404（isError）。兩種模式的快取鍵分開（qk.sddEngine）；節奏不變：每次輪詢只有一個請求。
  */
-export function useSddEngine(project: string | null, opts: { pollMs?: number; enabled?: boolean; pollWhile?: (data: SddEngineStatus | undefined) => boolean } = {}) {
+export function useSddEngine(project: string | null, opts: { pollMs?: number; enabled?: boolean; pollWhile?: (data: SddEngineStatus | undefined) => boolean; projectId?: string } = {}) {
   const authed = useEnabled();
   const interval = opts.pollMs ?? SDD_POLL_MS;
   const pollWhile = opts.pollWhile;
+  const projectId = opts.projectId;
   return useQuery({
-    queryKey: qk.sddEngine(project),
-    queryFn: ({ signal }) => getSddEngineStatus({ project: project ?? undefined }, { signal }),
+    queryKey: qk.sddEngine(project, projectId ?? null),
+    queryFn: ({ signal }) => getSddEngineStatus({ project: project ?? undefined, projectId }, { signal }),
     enabled: authed && (opts.enabled ?? true),
     refetchInterval: pollWhile ? (query) => (pollWhile(query.state.data) ? interval : false) : interval,
+  });
+}
+
+/**
+ * 一個批次的追溯覆蓋（諮詢視圖；契約 §1.10.3、§4.7.2）：只在 `enabled`（批次進入終態且專案有規格綁定）時查一次——不輪詢、不快取（staleTime 0），
+ * 批次因還原再度進入終態時（enabled 由 false 轉 true）重抓。不重試：404 `rtm_not_found` 是「沒有報告」的正常答案（面板顯示中性說明），
+ * 422／502／504 由面板的「重試」鈕手動重抓。
+ */
+export function useExecutionRtm(runId: string | undefined | null, enabled: boolean) {
+  const authed = useEnabled(Boolean(runId) && enabled);
+  return useQuery({
+    queryKey: qk.rtm(runId ?? ""),
+    queryFn: ({ signal }) => getExecutionRtm(runId as string, { signal }),
+    enabled: authed,
+    staleTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchInterval: false,
+  });
+}
+
+/** SDD 寫入類動作成功後要重抓的東西：專案三層（綁定三欄在專案詳情）與 FSM 狀態（`["sdd"]` 家族）。 */
+function invalidateSddGovernance(qc: QueryClient): Promise<unknown> {
+  return Promise.all([invalidateTree(qc), qc.invalidateQueries({ queryKey: ["sdd"] })]);
+}
+
+/**
+ * 核准凍結（人工閘；契約 §1.10.2）：成功後專案詳情（核准凍結第 5 項可能把標準鍵寫回 sddProject）與 FSM 狀態都標為過期、立即重抓，
+ * 畫面不用等 30 秒輪詢。失敗不動快取（呼叫端依 reason 顯示訊息）。
+ */
+export function useFreezeProjectSdd() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { projectId: string; body: SddFreezeRequest }) => freezeProjectSddSpec(v.projectId, v.body),
+    onSuccess: () => invalidateSddGovernance(qc),
+  });
+}
+
+/** 編輯專案的 FSM 專案（契約 §1.10.7）：`sddProject` 為 null＝清除、回到「用預設」。成功後專案詳情與 FSM 狀態重抓（有效 FSM 專案變了）。 */
+export function useUpdateSddBinding() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { projectId: string; sddProject: string | null }) => updateProjectSddBinding(v.projectId, v.sddProject),
+    onSuccess: () => invalidateSddGovernance(qc),
   });
 }
 

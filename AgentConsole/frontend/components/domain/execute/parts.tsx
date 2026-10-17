@@ -1,12 +1,13 @@
 "use client";
 
-import { AlertTriangle, Lock, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Info, Lock, RefreshCw, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import type { StreamState } from "@/lib/api/sse";
 import type { EngineCapabilities, ExecutionRunSummary } from "@/lib/api/types";
+import type { ExecutionWarningView } from "@/lib/domain/executionWarnings";
 import { ENGINE_CAPABILITY_KEYS, engineCapabilityView, runStatusMeta, type EngineCapabilityTone } from "@/lib/domain/status";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,40 @@ export function StartErrorPanel({ view, onApprove }: { view: StartErrorView; onA
           </Button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 啟動成功（201）帶回的警告（契約 §1.10.6、§1.2.1 的 v1.5 加註；整合輪 115，API-EXE-15）：批次已啟動，警告不阻擋，但要讓人看見——
+ * 例如「本批次沒有啟用 SDD 治理」（沒有預檢、沒有 FSM 同步、事後也不會有追溯報告；附 cause 與後端的 detail）。
+ * 只有 execute 的 201 帶 warnings，所以這個清單只在剛啟動的那個批次上顯示（切到別的批次就不顯示）。
+ */
+export function ExecutionWarningsPanel({ warnings }: { warnings: readonly ExecutionWarningView[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div role="status" data-testid="execution-warnings" className="mt-4 rounded-md border border-wg-alert-border bg-wg-alert-bg px-3.5 py-3 text-sm">
+      <div className="flex items-center gap-2 font-semibold">
+        <Info size={18} className="shrink-0 text-wg-warning" aria-hidden />
+        啟動警告（共 {warnings.length} 項；批次已啟動，不阻擋）
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {warnings.map((w) => (
+          <li key={w.key} data-testid="execution-warning" data-code={w.code} className="min-w-0">
+            <p className="font-medium break-words">{w.title}</p>
+            {w.cause ? (
+              <p data-testid="execution-warning-cause" className="mt-0.5 text-wg-muted">
+                原因：{w.cause}
+              </p>
+            ) : null}
+            {w.detail ? (
+              <p data-testid="execution-warning-detail" className="mt-0.5 break-words text-wg-muted">
+                {w.detail}
+              </p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

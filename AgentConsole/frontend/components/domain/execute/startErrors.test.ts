@@ -55,3 +55,50 @@ describe("啟動失敗的說明（契約 §1.2.1 驗證順序表）", () => {
     expect(describeStartError("weird", nameOf).title).toBe("啟動失敗");
   });
 });
+
+describe("SDD 批次的預檢失敗（契約 §1.2.1 的 v1.5 加註、§1.10.6、附錄 B.5；整合輪 115）", () => {
+  it("409 sdd_fsm_state_conflict：白話標題、目前狀態、可啟動的狀態、外來委派與佔用批次；附「代碼」行；不標 unsigned", () => {
+    const v = describeStartError(
+      err(409, REASONS.SDD_FSM_STATE_CONFLICT, { currentState: "AUTOCLAUDE_DELEGATED", expectedState: "IMPLEMENTATION", cause: "foreign_delegation", runId: "11112222-3333", runStatus: "RUNNING" }),
+      nameOf,
+    );
+    expect(v.title).toBe("FSM 狀態不允許啟動 SDD 批次");
+    expect(v.lines).toEqual([
+      "目前狀態：AUTOCLAUDE_DELEGATED",
+      "可啟動批次的狀態：IMPLEMENTATION",
+      "FSM 正由外來委派佔用（不是 Console 的批次），請在 SDD session 處理後再試。",
+      "佔用中的批次：11112222（RUNNING）",
+      "代碼：sdd_fsm_state_conflict",
+    ]);
+    expect(v.unsigned).toBe(false);
+    expect(v.traceId).toBe("tr-1");
+  });
+
+  it("ESCALATION 後的常態：指向恢復指令（Console 不提供恢復動作）", () => {
+    const v = describeStartError(err(409, REASONS.SDD_FSM_STATE_CONFLICT, { currentState: "ESCALATION", expectedState: "IMPLEMENTATION" }), nameOf);
+    expect(v.lines.some((l) => l.includes("SDD session 依恢復指令處理"))).toBe(true);
+  });
+
+  it.each([
+    [REASONS.SDD_FSM_NOT_FOUND, { sddProject: "core-fsm" }, "找不到 FSM 專案狀態檔（core-fsm）；請先在專案根的 SDD session 建立"],
+    [REASONS.SDD_SPEC_DIGEST_CHANGED, { pair: "frozen_vs_file", doc: "docs/T.md", frozenDigest: "sha256:a", currentDigest: "sha256:b" }, "凍結後規格檔內容已變更"],
+    [REASONS.SDD_SPEC_DIGEST_CHANGED, { pair: "import_vs_file", doc: "docs/T.md" }, "規格檔內容與匯入時不同，請重新匯入規格"],
+    [REASONS.SDD_WRITE_DISABLED, {}, "SDD 寫入功能未啟用（需管理員設定寫入權杖）"],
+  ])("%s：標題是白話句子（原 reason 退到「代碼」行）", (reason, details, title) => {
+    const v = describeStartError(err(409, reason, details), nameOf);
+    expect(v.title).toContain(title);
+    expect(v.lines).toContain(`代碼：${reason}`);
+  });
+
+  it("422 SDD 規格檢查未通過（預檢第 3 項）：引擎回報的原因白話化、附 Bridge 的 detail；reason 是中文，不另附代碼行", () => {
+    const v = describeStartError(err(422, REASONS.IMPORT_SDD_SPEC_REJECTED, { bridgeReason: "spec_not_frozen", detail: "規格檔不在凍結清單" }), nameOf);
+    expect(v.title).toBe("SDD 規格檢查未通過");
+    expect(v.lines).toEqual(["引擎回報：規格尚未凍結（或不在凍結清單內）", "規格檔不在凍結清單"]);
+  });
+
+  it("422 引擎拒絕此請求維持原有的說明（bridgeReason 一行）；sdd_block_invalid 這類 Bridge 代碼原樣顯示", () => {
+    const v = describeStartError(err(422, REASONS.EXEC_ENGINE_REJECTED, { bridgeReason: "sdd_block_invalid", violations: [] }), nameOf);
+    expect(v.title).toBe("引擎拒絕此請求");
+    expect(v.lines).toEqual(["引擎回報：sdd_block_invalid"]);
+  });
+});

@@ -5,6 +5,7 @@
  */
 import { ApiError } from "@/lib/api/client";
 import { REASONS } from "@/lib/api/reasons";
+import { SDD_EXECUTE_REASONS, describeSddError } from "@/lib/domain/sddErrors";
 
 export type StartErrorView = {
   /** 一句話標題（通常是 reason） */
@@ -21,6 +22,12 @@ const asIds = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is s
 export function describeStartError(error: unknown, nameOf: (id: string) => string | undefined): StartErrorView {
   if (!(error instanceof ApiError)) {
     return { title: error instanceof Error ? error.message : "啟動失敗", lines: [], unsigned: false };
+  }
+  // v1.5（整合輪 115；契約 §1.2.1 加註、§1.10.6、附錄 B.5）：SDD 批次的預檢失敗——白話標題與逐項說明；英文 reason 另附「代碼」行方便回報
+  if (error.reason && SDD_EXECUTE_REASONS.includes(error.reason)) {
+    const sdd = describeSddError(error, "execute");
+    const code = /^[a-z_]+$/.test(error.reason) ? [`代碼：${error.reason}`] : [];
+    return { title: sdd.title, lines: [...sdd.lines, ...code], unsigned: false, traceId: error.traceId };
   }
   const d = error.details ?? {};
   const label = (id: string) => nameOf(id) ?? id.slice(0, 8);

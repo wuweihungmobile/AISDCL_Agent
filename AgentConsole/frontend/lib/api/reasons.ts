@@ -80,6 +80,20 @@ export const REASONS = {
   /** 軟刪除已超過保留期（§1.6.1；details.retentionDays） */
   RESTORE_WINDOW_EXPIRED: "restore_window_expired",
 
+  // ── B.5 v1.5 SDD 治理（整合輪 115；英文識別字，契約 §0.3 第 8 點；只列 console-api 的 ApiError.reason）──────────
+  /** freeze：FSM 的 current_state 不是 HUMAN_PENDING；execute／resume／restore（SDD run）的預檢 409（details.currentState、expectedState?、runId?、runStatus?、cause?） */
+  SDD_FSM_STATE_CONFLICT: "sdd_fsm_state_conflict",
+  /** freeze／execute：有效 FSM 專案沒有狀態檔（details.sddProject） */
+  SDD_FSM_NOT_FOUND: "sdd_fsm_not_found",
+  /** freeze 帶 expectedDigests，或 execute／resume／restore（SDD run）預檢的摘要不符（details.pair、doc、expectedDigest?、frozenDigest?、importDigest?、currentDigest） */
+  SDD_SPEC_DIGEST_CHANGED: "sdd_spec_digest_changed",
+  /** 綁定唯一性：freeze、PUT sdd-binding、路徑 A 匯入的 parse／confirm（details.cause、sddProject?、holderProjectId?、field?） */
+  SDD_BINDING_CONFLICT: "sdd_binding_conflict",
+  /** backend（或 Bridge）沒有設定 SDD 寫入權杖 */
+  SDD_WRITE_DISABLED: "sdd_write_disabled",
+  /** GET /executions/{runId}/rtm：批次存在但沒有追溯報告（404 的 reason 省略慣例的唯一例外；details.runId） */
+  RTM_NOT_FOUND: "rtm_not_found",
+
   // ── B.2 監控 ─────────────────────────────────────────────────────────
   MONITOR_RANGE_INVALID: "時間範圍不合法",
   MONITOR_REPORT_FORMAT_UNSUPPORTED: "不支援的報表格式",
@@ -97,6 +111,30 @@ export const REASONS = {
 } as const;
 
 export type Reason = (typeof REASONS)[keyof typeof REASONS];
+
+/**
+ * 回應本文裡的警告碼（契約附錄 B.5「回應本文的警告碼與 alert 碼」；**不是** ApiError.reason，所以不進 REASONS）：
+ * execute 201 的 `warnings[].code`（§1.10.6）。日後 Bridge／後端新增的值前端要原樣顯示、不崩潰。
+ */
+export const EXECUTION_WARNING_CODES = {
+  /** 範圍內至少有一個 SDD 來源任務，但本批次沒有啟用 SDD 治理（`cause` 見 GOVERNANCE_INACTIVE_CAUSES） */
+  SDD_GOVERNANCE_INACTIVE: "sdd_governance_inactive",
+  /** 已啟用 SDD 治理，但凍結時沒有記錄內容摘要（舊狀態檔）：放行，無法偵測凍結後改檔（無 `cause`） */
+  SDD_FROZEN_DIGEST_ABSENT: "sdd_frozen_digest_absent",
+} as const;
+
+/** `sdd_governance_inactive` 的 `cause`（契約 §1.10.5：批次資格五條件各自不成立時的代碼）。 */
+export const GOVERNANCE_INACTIVE_CAUSES = ["not_bound", "token_not_configured", "mixed_scope", "spec_mismatch", "duplicate_step_id"] as const;
+
+/** 匯入解析結果 `warnings[].code` 的 v1.5 新碼（契約 §3.3.2 第 6 點；黃色提示、不阻擋）。 */
+export const PARSE_WARNING_CODES = {
+  /** 規格出現但未編成步驟的 AT（`unmapped_at_ids` 非空）；detail 列出它們 */
+  AT_UNMAPPED: "at_unmapped",
+  /** 規格凍結時沒有記錄內容摘要（舊狀態檔），無法偵測凍結後改檔 */
+  FROZEN_DIGEST_ABSENT: "frozen_digest_absent",
+  /** 專案根的 build/reports/fsm/ 未被 git 忽略（Bridge 回報） */
+  STATE_DIR_NOT_IGNORED: "state_dir_not_ignored",
+} as const;
 
 /**
  * 附錄 B.2「設定」列：`目標位址未通過 SSRF／allowlist 檢查` 的 details.violation 值域，

@@ -121,6 +121,11 @@ export interface paths {
          *     有界閘 422 的 `errors[]` 項目：`field`＝`location`（沒有 location 的閘退回閘名）、`message`＝`detail`（B1-3）。
          *     **v1.2（C-10）**：進入 `PARSING` 時把本次請求的選項原樣存進 `parse_options`（不論成敗，保存最近一次請求）；
          *     成功時以該次 `warnings` 覆寫記錄的 `warnings`；失敗不動 `warnings`（Markdown 契約 §0.5 V8）。
+         *
+         *     **v1.5（D-115-14、D-115-16）**：路徑 A 新增選填 `specFile`／`sddProject`／`targetProjectId`（併入既有專案；規則見 Markdown 契約 §3.3.2 與 §1.10.8）。
+         *     帶 `targetProjectId` 時目標專案不存在或已軟刪除 → 404，請求另帶不同的 `executionPath`／`sddProject`／`specFile` → 409 `sdd_binding_conflict`。
+         *     規格被拒的 422「SDD 規格檢查未通過」之 `details.bridgeReason` 另可能是 `spec_digest_changed`（凍結後規格內容已變更；探測模式同樣 fail-closed，
+         *     不退回 LLM 路徑）。解析結果 `warnings[]` 另有 `at_unmapped`、`frozen_digest_absent`、`state_dir_not_ignored`。
          */
         post: operations["parseImport"];
         delete?: never;
@@ -189,6 +194,11 @@ export interface paths {
          * 確認匯入（單一交易建立專案／目標／任務）
          * @description 要求 `signedOff=true`，否則 409。成功時在單一交易內建立 Project（`status=DRAFT`）、Goals、Tasks 與目標依賴，
          *     全部 `signedOff=true`、`signedOffBy／At` 承襲匯入記錄；記錄轉 `IMPORTED` 並回填 `projectId`。
+         *
+         *     **v1.5（D-115-14）**：`parse` 帶 `targetProjectId` 的記錄，`confirm` **不建立新專案**，改為把草稿的目標與任務併入目標專案並回填 SDD 綁定
+         *     （`sddSpecDir`／`sddSpecFile`；`sddProject` 為 NULL 時寫入標準鍵；新目標接在既有未刪目標之後；專案層 `signedOff` 不動），成功仍回 201，
+         *     回傳的是目標專案。不帶時建立新專案並回填綁定；同一 `executionPath` 下已有未刪除專案綁定同一個標準鍵 → 409 `sdd_binding_conflict`
+         *     （`details.cause=already_bound_elsewhere`）；目標專案綁定不同 → 409（`cause=target_bound_differently`）（Markdown 契約 §1.10.8、§0.5 V12）。
          */
         post: operations["confirmImport"];
         delete?: never;
@@ -244,6 +254,15 @@ export interface paths {
          *     `agent.enableAutoMutation`／`agent.enableSelfEvolution`、`model.enableKernelBrain` 與 `model.apiKey` 有無，決定送進引擎的設定
          *     （`minimax.enable_kernel_brain` 是唯一會依等級變動的引擎鍵；沒有金鑰一律不送，否則引擎啟動失敗），並如實標示能力狀態
          *     （決策表見 Markdown 契約 §3.4.2）。等級 6～10 沒有額外的驗證項，沒有金鑰也不報錯。
+         *
+         *     **v1.5（D-115-06、D-115-14、D-115-15；G-01、G-06、G-08）SDD 批次**：專案已有規格綁定（`sddSpecDir` 非空）、backend 已設定寫入權杖，
+         *     且範圍內任務全為 SDD 來源（`passCriteriaSpec.source=sdd`、`stepId`／`specDigest` 非空、同一份規格、`stepId` 互異）時，
+         *     Bridge 請求改帶頂層 `sdd` 區塊（資格與組裝見 Markdown 契約 §1.10.5～§1.10.6），step_id 沿用規格的 `sdd-<場景>-<at id 小寫>`；
+         *     Bridge 預檢（凍結、三點摘要、FSM 狀態）不過不 spawn：422 `SDD 規格檢查未通過`、409 `sdd_spec_digest_changed`、
+         *     409 `sdd_fsm_state_conflict`、409 `sdd_fsm_not_found`、422 `引擎拒絕此請求`、503 `sdd_write_disabled`，
+         *     皆與其他 Bridge 失敗一樣補償刪除剛建的 run 列。不成立而範圍內至少有一個 SDD 來源任務時，維持一般批次並在 201 的 `warnings[]`
+         *     出聲（`sdd_governance_inactive`＋`cause`）；凍結時沒有記錄內容摘要（舊狀態檔）時放行並出聲 `sdd_frozen_digest_absent`。
+         *     請求本身沒有任何新欄位（是否啟用治理由資格判定決定，不由 client 指定）。
          */
         post: operations["executeProject"];
         delete?: never;
@@ -334,6 +353,12 @@ export interface paths {
          * 恢復執行（PAUSED 同進度接續）
          * @description Bridge `:resume`（只收 PAUSED）。後端先重驗範圍內 Goal／Task 皆 signedOff（否則 409「未經人工審批的草案不可執行」）。
          *     回應 `bridgeStatus=RUNNING`。
+         *
+         *     **v1.5（D-115-15、D-115-18）SDD 批次**：Bridge 先重跑預檢（凍結＝現檔、匯入摘要＝現檔、FSM 前置），失敗不 spawn、run 維持 `PAUSED`：
+         *     409 `sdd_spec_digest_changed`、409 `sdd_fsm_state_conflict`、422 `SDD 規格檢查未通過`。SDD run 的 Bridge `:resume` 另須帶 `X-Bridge-Token`
+         *     （Markdown 契約 §3.1.4 共通規則 2；console-api 一律附，Bridge 只對 SDD run 驗，檢查在預檢之前）：Bridge 沒設權杖 → 503 `sdd_write_disabled`；
+         *     標頭缺漏或不符 → 502 `引擎橋接服務錯誤`（`details.bridgeStatus=403`、`bridgeReason=sdd_write_forbidden`）；兩者都不改 run、DB 與 FSM 狀態。
+         *     Bridge 呼叫的讀取逾時 30 秒（v1.5：原 15 秒；SDD run 可能多一次 `delegate-enter`，CLI 單次 ≤ 20 秒）。
          */
         post: operations["resumeExecution"];
         delete?: never;
@@ -446,6 +471,11 @@ export interface paths {
          *     **依賴 Bridge 修復（AR-01）**：對 `PAUSED` 的 run 做 restore，Bridge 在 DB 模式目前會自撞 advisory lock
          *     （回 `advisory_lock_held`，`holder_run_id` 是自己，且失敗路徑洩漏鎖）；主控已另派修復者修 Bridge。
          *     修復落地前，`PAUSED` 的 restore 與 `GOAL_COMPLETED` 的 `RETRY` 在 DB 模式不可用；終態 run 的 restore 不受影響。
+         *
+         *     **v1.5（D-115-15、D-115-18）SDD 批次**：同 `resume`：Bridge 重跑預檢（失敗 409 `sdd_spec_digest_changed`／`sdd_fsm_state_conflict`、
+         *     422 `SDD 規格檢查未通過`，不 spawn）；SDD run 的 Bridge `restore` 另須帶 `X-Bridge-Token`（Markdown 契約 §3.1.4 共通規則 2）：
+         *     Bridge 沒設權杖 → 503 `sdd_write_disabled`，標頭缺漏或不符 → 502 `引擎橋接服務錯誤`（`details.bridgeStatus=403`）；
+         *     檢查在預檢之前，run、專案與 FSM 狀態都不變。Bridge 呼叫的讀取逾時 30 秒（v1.5：原 15 秒；理由同 resume）。
          */
         post: operations["restoreExecution"];
         delete?: never;
@@ -698,6 +728,14 @@ export interface paths {
          *     FSM 狀態檔只在 SDD runtime 執行時才變動，前端 30 秒輪詢一次，不走 SSE（ADR-001 D22）。
          *     `build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore`），乾淨 clone 沒有 FSM 狀態檔：`available=true`、`projects=[]` 是正常狀態。
          *     （Markdown 契約 §1.7.1、§3.1.3）
+         *
+         *     **v1.5（D-115-02、D-115-14；G-07、G-13；Markdown 契約 §1.10.4）**：新增選填查詢參數 `projectId`——帶了就讀「該專案」的 FSM
+         *     （`root`＝專案的 `executionPath`；專案不存在或已軟刪除 → 404，格式不合 → 400）；`project` 省略時預設取該專案的**有效 FSM 專案**
+         *     （`sddProject` 有值取它，否則專案名；Backend 不淨化，值原樣交給 Bridge 的淨化鏡像）。回應的 `fsm` 新增 `phase`（階段，Markdown 契約 §3.1.5）、
+         *     `escalationHistory`（尾 5 筆）、`escalationProvenance`、`fsmProject`（淨化後的標準鍵）與 ESCALATION 時的 `recovery`
+         *     （可複製的恢復指令；Console 不提供恢復動作）；`reason` 新增值 `sdd_root_rejected`（`projectId` 的專案根不在 Bridge 允許的根目錄內或已不存在，
+         *     仍回 200、`available=true`、`fsm=null`）。`project` 的驗證改為 1～200 字元、不含控制字元（專案名規則在 Bridge，Markdown 契約 §3.1.4 (b)）。
+         *     本端點仍只讀：console-api 不直接寫任何 FSM-STATE 檔。
          */
         get: operations["getSddEngineStatus"];
         put?: never;
@@ -1134,6 +1172,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{id}/sdd/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 核准凍結 SDD 規格（人工閘；v1.5 補充端點，D-115-03、D-115-14）
+         * @description PRD §0.4 把 Console 的 signoff 對映 FSM 的 `HUMAN_PENDING`。本端點是 v1.5 唯一新開的 FSM 寫入動詞：
+         *     `HUMAN_PENDING`→`SPEC_FROZEN`，帶 approver（＝JWT subject，不可由請求指定）、理由與文件摘要；Bridge 以 FSMRuntime CLI
+         *     子行程完成，console-api 不直接寫任何 FSM-STATE 檔（D-115-01）。退回修改、init、gate、恢復一律留在 SDD session。
+         *     **Console 專案是錨（D-115-14）**：沒有「未綁定」狀態，請求沒有 `binding` 欄；FSM 專案＝`sddProject`（NULL 時取專案名）。
+         *
+         *     驗證順序固定：404 專案 → 400 欄位（`reason`／`stage`／`docs`／`expectedDigests`；缺 `docs` 又無規格檔；`docs` 不含已綁定的規格檔）
+         *     → 503 `sdd_write_disabled`（backend 沒有設定寫入權杖）→ 唯讀 `GET /sdd/fsm/{有效 FSM 專案}?root=<executionPath>` 取標準鍵
+         *     （找不到 → 409 `sdd_fsm_not_found`）→ **綁定唯一性先檢查、後寫入**（衝突 → 409 `sdd_binding_conflict`，**不呼叫 Bridge 的寫入端點**；
+         *     通過後 `sddProject` 為 NULL 時寫入標準鍵）→ Bridge `:freeze`（失敗對映見 Markdown 契約 §1.10.2）。
+         *     非冪等：FSM 已不在 `HUMAN_PENDING`（含已凍結）→ 409 `sdd_fsm_state_conflict`。
+         *     成功回傳凍結後的 FSM 狀態（與 `GET /engines/sdd` 的 `fsm` 同形，`frozenStages` 末筆含 `spec_doc_digests`、`approved_by`）。
+         *     稽核：每個請求一列 `audit_log`（`action=project.sdd.freeze`、`entity=project:<id>`）。
+         *     （Markdown 契約 §1.10.2、§3.1.4 (d)；ADR-XPLAT-016 §4.3、§6.3、§7.2）
+         */
+        post: operations["freezeProjectSddSpec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{id}/sdd-binding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 編輯專案的 FSM 專案（v1.5 補充端點，D-115-14；ADR-XPLAT-016 §7.2）
+         * @description ADR-XPLAT-016 §7.2：`projects.sdd_project` 可由使用者編輯（自由輸入，由 Bridge 淨化後生效），沒有「解除綁定」端點——編輯它即改綁。
+         *     `sddProject` 為 `null`＝清除，回到「用預設」（專案名）。**不檢查狀態檔是否存在、不呼叫 Bridge**；改綁不搬移 FSM 狀態檔，
+         *     也不影響進行中的批次（終態同步用 run 建立時存下的專案鍵）。
+         *     唯一性：同一個 `executionPath` 下已有未刪除的專案以同一個 `sddProject` 綁定 → 409 `sdd_binding_conflict`
+         *     （`details.cause=already_bound_elsewhere`）。相同值再送＝冪等（200，不寫稽核）。
+         *     稽核：`action=project.sdd.bind`、`entity=project:<id>`。
+         *     （Markdown 契約 §1.10.7）
+         */
+        put: operations["updateProjectSddBinding"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/executions/{runId}/rtm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 執行追溯覆蓋（諮詢視圖；v1.5 補充端點，G-05）
+         * @description Bridge `GET /autoclaude/runs/{id}/rtm` 的投影：引擎 `RtmWritebackPlugin` 在 SDD 批次**正常走完**時寫的 AT／AC 覆蓋報告
+         *     （`RTM-COVERAGE-*.yaml`）。**諮詢視圖**：「AT 通過」只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；
+         *     SCG-4 的人工審查才是真閘，所以回應恆帶 `advisory: true`，前端必須標示。
+         *     有無法歸屬 AC 的 AT 時，`unmappedAtIds` 列出它們（已計入 `at.total`、`at.passed`／`failedAtIds`，但不計入任何 AC），
+         *     且 `fullyCovered` 恆為 false（ADR-XPLAT-016 §8.5）。
+         *     批次存在但沒有報告（沒有啟用 SDD 治理、批次尚未結束、批次不是正常走完、工作區已清除）→ 404 `rtm_not_found`
+         *     ——**本端點是「404 的 reason 省略」慣例的唯一例外**（批次不存在則仍是無 reason 的 404）。
+         *     不輪詢、不快取：前端在批次進入終態後取一次。
+         *     （Markdown 契約 §1.10.3、§3.1.4 (f)）
+         */
+        get: operations["getExecutionRtm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health/deep": {
         parameters: {
             query?: never;
@@ -1260,6 +1384,27 @@ export interface components {
             additionalPrompt?: string;
             /** @description 明示的 SDD 規格目錄（絕對路徑）；省略則以 executionPath 探測是否有凍結規格 */
             specDir?: string;
+            /**
+             * @description v1.5（S-04）：要編譯的規格檔——相對 `specDir` 的 POSIX 路徑，或 `specDir` 之下的絕對路徑（同一目錄有多份 TCS 時用）。
+             *     須與明示的 `specDir` 並用（目標專案已有 `sddSpecDir` 時以它為 `specDir`），單獨帶 → 400（`errors[0].field=specFile`）；
+             *     Bridge 只讀這一份，須是 `specDir` 之下的 `.md` 檔（Markdown 契約 §3.3.2）
+             */
+            specFile?: string;
+            /**
+             * @description v1.5（G-02、D-115-14）：FSM 專案名的**有效值**（可以是原名；Console 不淨化，由 Bridge 的淨化鏡像處理，Markdown 契約 §3.1.4 (b)）；
+             *     同一個狀態目錄有多個 FSM 專案時用來指認凍結閘要認哪一個；省略時 adapter 在狀態目錄只有一份狀態檔時自動採用它，
+             *     有多份而無法指認＝422 `SDD 規格檢查未通過`（`bridgeReason=spec_not_frozen`）。帶 `targetProjectId` 時取自目標專案，
+             *     請求另帶不同值 → 409 `sdd_binding_conflict`
+             */
+            sddProject?: string;
+            /**
+             * Format: uuid
+             * @description v1.5（D-115-14）：**併入既有專案**（Console 專案是錨）。目標專案須存在且未軟刪除（否則 404）；帶了之後 `executionPath`、`sddProject`、
+             *     `specFile` 取自目標專案（目標專案某欄位為 NULL 時以請求值為準），請求另帶不同值 → 409 `sdd_binding_conflict`
+             *     （`details.cause=request_differs_from_target`）；`confirm` 不建立新專案，改把草稿的目標與任務併入目標專案並回填 SDD 綁定
+             *     （Markdown 契約 §1.10.8）。省略＝維持「建立新專案」
+             */
+            targetProjectId?: string;
         };
         ParsedProject: {
             name: string;
@@ -1289,7 +1434,7 @@ export interface components {
             evaluatorCommand?: string;
             /** @description 須可編譯，否則 400 */
             expectedOutputRegex?: string;
-            /** @description 結構化通過標準（路徑 C 會放 {source, stepId, draftId}） */
+            /** @description 結構化通過標準（路徑 C 會放 {source, stepId, draftId}；路徑 A 放 {source=sdd, specDigest, stepId, weakRegex}，v1.5 另加布林 maintainContext，Markdown 契約 §3.3.2） */
             passCriteriaSpec?: {
                 [key: string]: unknown;
             };
@@ -1324,13 +1469,21 @@ export interface components {
             draftIds?: string[];
             /** @description 路徑 A 的 SDD 規格 digest */
             specDigest?: string;
+            /** @description v1.5：路徑 A 的規格格式版本（Bridge `/sdd/compile` 回應的 `spec_format_version`；伺服器擁有，只供顯示與稽核，不閘控） */
+            specFormatVersion?: string;
+            /** @description v1.5：路徑 A 編譯時通過凍結閘的 FSM 專案的**標準鍵**（Bridge 回應的 `fsm_project`；伺服器擁有）。`confirm` 帶進新專案的 `sddProject`，或在目標專案的 `sddProject` 為 NULL 時寫入它 */
+            sddProject?: string;
+            /** @description v1.5：規格檔所在目錄（絕對路徑）＝Bridge 回應 `spec_path` 的父目錄（伺服器擁有；ADR-XPLAT-016 §7.2）。`confirm` 帶進（或冪等更新）專案的 `sddSpecDir` */
+            sddSpecDir?: string;
+            /** @description v1.5：路徑 A 實際採用的規格檔（絕對路徑）＝Bridge 回應的 `spec_path`（伺服器擁有；ADR-XPLAT-016 §7.2）。`confirm` 帶進（或冪等更新）專案的 `sddSpecFile` */
+            sddSpecFile?: string;
         };
         EditParsedResultRequest: {
             parsedResult: components["schemas"]["ParsedResult"];
         };
         /** @description 非阻擋提示（例如不安全的 evaluatorCommand 被清空） */
         ParseWarning: {
-            /** @description 例：evaluator_command_dropped、passcriteria_placeholder */
+            /** @description 例：evaluator_command_dropped、regex_dropped、passcriteria_placeholder；v1.5 新增 at_unmapped（規格宣告位置出現但未編成步驟的 AT；`location=specDir`）、frozen_digest_absent（規格凍結時沒有記錄內容摘要，無法偵測凍結後改檔；`location=specDir`）、state_dir_not_ignored（專案根的 `build/reports/fsm/` 未被 git 忽略；Bridge 回報，`location=executionPath`）——皆為黃色提示、不阻擋 */
             code: string;
             detail: string;
             location?: string;
@@ -1434,6 +1587,12 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             createdBy?: string;
+            /** @description v1.5（G-07、D-115-14）：FSM 專案鍵（≤ 100 字元）；null＝「用預設」（專案名；缺席等價）。第一次使用時（核准凍結、路徑 A 的 confirm）寫回標準鍵，或由 `PUT /projects/{id}/sdd-binding` 編輯（Markdown 契約 §0.5 V12、§1.10.5） */
+            sddProject?: string | null;
+            /** @description v1.5：規格檔所在目錄（絕對路徑）＝編譯回應 `spec_path` 的父目錄；尚未用路徑 A 匯入為 null */
+            sddSpecDir?: string | null;
+            /** @description v1.5：規格檔（絕對路徑）＝編譯回應的 `spec_path`（ADR-XPLAT-016 §7.2）；尚未用路徑 A 匯入為 null */
+            sddSpecFile?: string | null;
         };
         /**
          * @description 專案狀態（Phase 2；PRD 附錄 B.1）。軟刪除會把狀態改成 ARCHIVED，復原時還原為刪除前的狀態（v1.2，C-3）
@@ -1509,6 +1668,12 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             createdBy?: string;
+            /** @description v1.5（G-07、D-115-14）：FSM 專案鍵；null＝「用預設」（專案名；缺席等價）。見 `ProjectResponse.sddProject` */
+            sddProject?: string | null;
+            /** @description v1.5：規格檔所在目錄（絕對路徑）；尚未用路徑 A 匯入為 null */
+            sddSpecDir?: string | null;
+            /** @description v1.5：規格檔（絕對路徑）＝編譯回應的 `spec_path`；尚未用路徑 A 匯入為 null */
+            sddSpecFile?: string | null;
             /** @description 目標摘要（只含未軟刪除者；復原後只含「同一次刪除連帶軟刪」而回來的目標） */
             goals: components["schemas"]["GoalBrief"][];
         };
@@ -1613,6 +1778,13 @@ export interface components {
              *     `ExecutionRunSummaryResponse`（批次列表）不帶它。
              */
             engineCapabilities?: components["schemas"]["EngineCapabilities"] | null;
+            /**
+             * @description v1.5（D-115-06）：**只有 `POST /projects/{projectId}/execute` 的 201 帶它**（pause／resume／cancel／restore 與 `GET` 不帶）。
+             *     缺席＝沒有警告。目前兩種：①`sdd_governance_inactive`——範圍內至少有一個 SDD 來源任務、但本批次沒有啟用 SDD 治理；
+             *     ②`sdd_frozen_digest_absent`——已啟用 SDD 治理，但凍結時沒有記錄內容摘要（舊狀態檔），放行而無法偵測凍結後改檔
+             *     （Bridge 回的 201 `warnings` 原樣轉入；Markdown 契約 §1.10.6）
+             */
+            warnings?: components["schemas"]["ExecutionWarning"][];
         };
         /**
          * @description 該批次 spawn 時 Console 送進引擎的能力狀態（v1.3，D-11；決策表見 Markdown 契約 §3.4.2）。
@@ -2205,7 +2377,7 @@ export interface components {
          *     `project` 就是 `GET /engines/sdd?project=` 吃的鍵，每一筆都點得進去
          */
         SddProjectEntry: {
-            /** @description 檔名 `FSM-STATE-<project>.yaml` 中的專案名 */
+            /** @description 檔名 `FSM-STATE-<project>.yaml` 中的專案名（**淨化後的標準鍵**；v1.5 起值域＝Bridge 淨化鏡像 `fsm_component()` 的輸出域：非空、NFC、≤ 80、不含禁用字元與控制字元、不以 `.` 結尾，可含 CJK、空白、括號；Markdown 契約 §3.1.4 (b)；ADR-XPLAT-016 §7.4） */
             project: string;
             /** @description 檔名（`FSM-STATE-<project>.yaml`） */
             source: string;
@@ -2243,7 +2415,8 @@ export interface components {
         /**
          * @description 單一 FSM 專案的狀態（Bridge `GET /sdd/fsm/{project}` 的投影；v1.4，D-16）。**最外層鍵轉 camelCase，巢狀內容原樣**
          *     （`frozenStages[]`、`decisionTrace[]`、`humanPending.items[]`、`retryHistory.last`、`rtmCoverage` 保留 FSM 檔的 snake_case 鍵），
-         *     使「FSM 檔 ↔ API ↔ 畫面」可逐值比對（NFR-OBS-01）。唯讀：Console 不寫 FSM-STATE（ADR-001 D22）
+         *     使「FSM 檔 ↔ API ↔ 畫面」可逐值比對（NFR-OBS-01）。唯讀：Console 不寫 FSM-STATE（ADR-001 D22）。
+         *     v1.5 新增 `phase`、`escalationHistory`、`escalationProvenance`、`fsmProject`、`recovery`（皆選填；舊版 Bridge 缺鍵時 Backend 補預設）
          */
         SddFsmState: {
             project: string;
@@ -2258,7 +2431,7 @@ export interface components {
             sessionId?: string | null;
             /** @description `updated_at`（ISO-8601 字串，原樣、不轉型） */
             updatedAt?: string | null;
-            /** @description `frozen_stages`（原樣；缺則空陣列） */
+            /** @description `frozen_stages`（原樣；缺則空陣列）。v1.5 起項目可含只在有值時才出現的 `spec_doc_digests`（`{<相對 root 的 POSIX 路徑>: "sha256:<64 位小寫 hex>"}`，換行正規化後的 UTF-8 文字摘要）與 `approved_by`（approver）；Console 原樣帶出、不解讀 */
             frozenStages: {
                 [key: string]: unknown;
             }[];
@@ -2277,14 +2450,82 @@ export interface components {
             rtmCoverage?: {
                 [key: string]: unknown;
             } | number | null;
+            /**
+             * @description v1.5（G-13）：由 `current_state` 純函式投影出的階段資訊（定義與對映表見 Markdown 契約 §3.1.5）。
+             *     Bridge 尚未接線該函式的版本為 null；舊版 Bridge 缺這個鍵時 Backend 補 null；未知狀態是 `UNKNOWN` 物件而不是 null。
+             *     前端一律當選填，缺值顯示「—」
+             */
+            phase?: components["schemas"]["SddFsmPhase"] | null;
+            /**
+             * @description v1.5（G-13）：`escalation_history` 的**尾 5 筆**（舊→新，原樣——保留 FSM 檔的 snake_case 鍵，例 `triggered_at`、`trigger_reason`、
+             *     `resolved_at`、`resolution`、`source`）；缺則空陣列（舊版 Bridge 缺這個鍵時 Backend 補 `[]`）
+             */
+            escalationHistory?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * @description v1.5（D-115-16；ADR-XPLAT-016 §5.3）：`escalation_provenance` 原樣（例 `{rule_id, source, reason, …}`；
+             *     `source=autoclaude_delegated_failed`＝AutoClaude 委派失敗而進入 ESCALATION）；缺或不是映射為 null。
+             *     🔴 人工恢復後它**不會被清除**（歷史殘留欄）：「有沒有未解的升級」只能由 `currentState` 屬 `ESCALATION`／`ESCALATION_FINAL`
+             *     且 `escalationHistory` 末筆的 `resolved_at` 為空判斷，不得只看它在不在
+             */
+            escalationProvenance?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * @description v1.5（ADR-XPLAT-016 §7.2）：狀態檔名裡**淨化後的標準鍵**（`FSM-STATE-<鍵>.yaml` 的 `<鍵>`）。`project` 是檔內原名，
+             *     兩者可能不同，**不能拿 `project` 當鍵**；Backend 以它做綁定寫回與唯一性檢查。舊版 Bridge 缺這個鍵時為 null
+             */
+            fsmProject?: string | null;
+            /**
+             * @description v1.5（D-115-16；ADR-XPLAT-016 §5.3）：**僅 `currentState` 為 `ESCALATION`／`ESCALATION_FINAL` 時由 Bridge 回**——可複製的
+             *     `resume-from-escalation` 恢復指令（只含路徑與指令模板，理由欄位留 `<人工原因>` 佔位，**不含機密**）。Console 原樣顯示，
+             *     不提供恢復動作，也不得自行組字或猜測目標；Bridge 無法判定目標時整個省略。恢復只有人、留在 SDD session
+             */
+            recovery?: components["schemas"]["SddRecovery"] | null;
         };
         /**
-         * @description `SddEngineStatusResponse.reason` 的值域（v1.4，D-16）。**回應欄位的值，不是 `ApiError.reason`**（Markdown 契約 §0.3 第 7 點、附錄 B.4）：
+         * @description ESCALATION 的恢復指令（v1.5；ADR-XPLAT-016 §5.3 的模板，由 Bridge 組字）。兩段指令都符合根層鐵律：PowerShell 用
+         *     `Push-Location`／`Pop-Location` 同一句內成對、不裸 `cd`；POSIX 的 `VAR=值 指令` 前綴只作用於該指令。不含任何機密
+         */
+        SddRecovery: {
+            /** @description 建議的 `resume-from-escalation --to`（須屬 SDD 的 `RESUME_TARGETS`：`SPEC_DRAFTING`／`IMPLEMENTATION`／`PR_REVIEW`；委派失敗＝`IMPLEMENTATION`） */
+            target: string;
+            /** @description PowerShell 形態的完整指令（含 `<人工原因>` 佔位） */
+            powershell: string;
+            /** @description bash／zsh 形態的完整指令（含 `<人工原因>` 佔位） */
+            posix: string;
+        };
+        /**
+         * @description FSM 階段資訊（v1.5，G-13；W4 dogfood 標的 T-G 的輸出形狀）。`name` 的主路徑值為 `INTAKE`、`SPECIFICATION`、`HUMAN_GATE`、`FROZEN`、
+         *     `IMPLEMENTATION`、`REVIEW`、`VERIFICATION`、`RELEASE`（`order` 1～8，沿主路徑單調不減）；非主路徑為 `BLOCKED`（阻塞態）、
+         *     `TRANSIENT`（過渡態）、`OBSERVATION`（觀測態而回歸點只能由執行期決定）、`UNKNOWN`（未知或缺值），其 `order` 一律為 0。
+         *     觀測態的 `name`／`order` 取「回歸階段」（例：`AUTOCLAUDE_DELEGATED`→`IMPLEMENTATION`／5）並帶 `observation=true`。
+         *     前端的字典沒有的新 `name` 值要原樣顯示（Markdown 契約 §3.1.5、§4.7.3）
+         * @example {
+         *       "name": "IMPLEMENTATION",
+         *       "order": 5,
+         *       "blocking": false,
+         *       "observation": true
+         *     }
+         */
+        SddFsmPhase: {
+            name: string;
+            /** Format: int32 */
+            order: number;
+            /** @description 阻塞態（`ESCALATION`、`ESCALATION_FINAL`、`TERMINATED`、`TOKEN_BUDGET_CRITICAL`＝SDD `_BLOCKING_STATES`）為 true */
+            blocking: boolean;
+            /** @description 觀測態（＝SDD `OBSERVATION_STATES`）為 true */
+            observation: boolean;
+        };
+        /**
+         * @description `SddEngineStatusResponse.reason` 的值域（v1.4，D-16；v1.5 加 `sdd_root_rejected`）。**回應欄位的值，不是 `ApiError.reason`**（Markdown 契約 §0.3 第 7 點、附錄 B.4）：
          *     `bridge_unreachable`／`sdd_unavailable`／`bridge_error` 時 `available=false`；
-         *     `fsm_not_found`／`fsm_state_unreadable` 時 `available=true`、`fsm=null`
+         *     `fsm_not_found`／`fsm_state_unreadable`／`sdd_root_rejected` 時 `available=true`、`fsm=null`
+         *     （`sdd_root_rejected`：帶了 `projectId`，而 Bridge 對該專案的 `root` 回 422 `sanitization_failed`；`projects=[]`，`version` 保留）
          * @enum {string}
          */
-        SddEngineReason: "bridge_unreachable" | "sdd_unavailable" | "bridge_error" | "fsm_not_found" | "fsm_state_unreadable";
+        SddEngineReason: "bridge_unreachable" | "sdd_unavailable" | "bridge_error" | "fsm_not_found" | "fsm_state_unreadable" | "sdd_root_rejected";
         /**
          * @description `GET /api/v1/engines/sdd` 的 `data`（v1.4，D-16；Markdown 契約 §1.7.1）。**引擎不可用也回 200**：
          *     回報的是「引擎現在的狀態」，不是「這次呼叫成不成功」。`projects` 的順序＝Bridge 清單順序（專案名不分大小寫升冪）；
@@ -2297,7 +2538,7 @@ export interface components {
             reason: components["schemas"]["SddEngineReason"] | null;
             /** @description `GET /sdd/version` 失敗時為 null */
             version: components["schemas"]["SddVersion"] | null;
-            /** @description `available=false` 時為空陣列；`available=true` 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態） */
+            /** @description 前兩個呼叫（version、fsm 清單）任一失敗時為空陣列；只有第三個呼叫（指定專案）失敗時 `available=false` 但 `version` 與 `projects` 保留（§1.7.1）；`available=true` 而為空表示 SDD 目錄存在但還沒有任何 FSM 狀態檔（正常狀態） */
             projects: components["schemas"]["SddProjectEntry"][];
             /** @description 帶了 `project` 且取得時有值；未帶 `project`、專案不存在、讀不動或引擎不可用時為 null */
             fsm: components["schemas"]["SddFsmState"] | null;
@@ -2306,6 +2547,135 @@ export interface components {
              * @description console-api 處理這次請求的時間（UTC）
              */
             checkedAt: string;
+        };
+        /**
+         * @description `PUT /api/v1/projects/{id}/sdd-binding` 的請求本文（v1.5，D-115-14；ADR-XPLAT-016 §7.2）。`sddProject` 為 `null`＝清除，
+         *     回到「用預設」（專案名）；非 null 時去前後空白後 1～100 字元、不含控制字元。**不檢查狀態檔是否存在、不呼叫 Bridge**
+         *     （Markdown 契約 §1.10.7）
+         * @example {
+         *       "sddProject": "e2e17-alpha"
+         *     }
+         */
+        SddBindingRequest: {
+            /** @description FSM 專案鍵（自由輸入，由 Bridge 淨化後生效）；`null`＝清除，回到「用預設」（專案名） */
+            sddProject: string | null;
+        };
+        /**
+         * @description `POST /api/v1/projects/{id}/sdd/freeze` 的請求本文（v1.5，D-115-03、D-115-14）。**approver 不在請求內**：一律取 JWT subject
+         *     （人工 signoff 不可匿名，也不可由 client 指定）；**沒有 `binding` 欄**——Console 專案是錨，FSM 專案＝`sddProject`（NULL 時取專案名）
+         */
+        SddFreezeRequest: {
+            /** @description 去前後空白後 1～500 字元，不含控制字元（含換行）；不靜默截斷、不替換；寫進 FSM `decision_trace`（`console-freeze approver=<approver>; reason=<理由>`）與 Console 稽核 */
+            reason: string;
+            /** @description 階段名；省略時 Bridge 用 `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1；ADR-XPLAT-016 §4.4）。階段名不要求唯一 */
+            stage?: string;
+            /**
+             * @description 要凍結並計摘要的規格文件，每項是**相對專案 `executionPath`** 的 POSIX 路徑（不得為絕對路徑、不得含 `..`）；須含至少一份 TCS
+             *     （檔名符合 `TEST-CONTRACT-SPEC-*` 或 `TCS-*`，由 Bridge 判定）。省略＝`[sddSpecFile 換算成相對 executionPath 的路徑]`（專案已有 `sddSpecFile` 時）；
+             *     省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下、或專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（`errors[0].field=docs`）
+             */
+            docs?: string[];
+            /**
+             * @description 選填：核准人當時看到的摘要 `{<docs 內的相對路徑>: "sha256:<64 位小寫 hex>"}`。有帶＝Bridge 逐一與現檔比對，不符 → 409
+             *     `sdd_spec_digest_changed`（`details.pair=expected_vs_file`；ADR-XPLAT-016 §6.3 ①）；鍵須都在 `docs` 內，否則 400
+             *     （`errors[0].field=expectedDigests`）。v1.5 的畫面不送這欄，保留給 API 消費者
+             */
+            expectedDigests?: {
+                [key: string]: string;
+            };
+        };
+        /** @description AT 層的覆蓋（v1.5；來源＝報告 `summary.passed_at`／`total_at`／`unmapped_at`／`at_coverage_pct`）。`total`、`passed` **含**無法歸屬 AC 的 AT（ADR-XPLAT-016 §8.5：AT 級指標不假裝它不存在） */
+        RtmAtCoverage: {
+            /** Format: int32 */
+            passed: number;
+            /** Format: int32 */
+            total: number;
+            /**
+             * Format: int32
+             * @description 逆向還原後無法歸屬 AC 的 AT 個數（YAML `summary.unmapped_at`；舊報告缺欄為 0）；已計入 `total`，不計入任何 AC
+             */
+            unmapped: number;
+            /** @description 百分比（0～100，1 位小數；Bridge 原值） */
+            pct: number;
+        };
+        /** @description AC 層的覆蓋（v1.5；來源＝報告 `summary.covered_ac`／`total_ac`／`ac_coverage_pct`）；無法歸屬的 AT 不進任何 AC 桶 */
+        RtmAcCoverage: {
+            /** Format: int32 */
+            covered: number;
+            /** Format: int32 */
+            total: number;
+            /** @description 百分比（0～100，1 位小數；Bridge 原值） */
+            pct: number;
+        };
+        /**
+         * @description `GET /api/v1/executions/{runId}/rtm` 的 `data`（v1.5，G-05；Markdown 契約 §1.10.3）。Bridge 同名欄位的投影，鍵轉 camelCase、值原樣。
+         *     **諮詢視圖**：「AT 通過」只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；SCG-4 的人工審查才是真閘。
+         *     有無法歸屬 AC 的 AT 時（`unmappedAtIds` 非空）：它們仍計入 `at.total`、`at.passed`／`failedAtIds`，但不計入任何 AC，且 `fullyCovered` 恆為 false
+         *     （ADR-XPLAT-016 §8.5；D-115-16）
+         * @example {
+         *       "scenario": "greenfield",
+         *       "specDigest": "sha256:1f0e2b7a9c4d8e3f6a1b5c7d9e0f2a4b6c8d0e1f3a5b7c9d1e3f5a7b9c0d2e4f",
+         *       "at": {
+         *         "passed": 4,
+         *         "total": 4,
+         *         "unmapped": 0,
+         *         "pct": 100
+         *       },
+         *       "ac": {
+         *         "covered": 2,
+         *         "total": 2,
+         *         "pct": 100
+         *       },
+         *       "failedAtIds": [],
+         *       "weakRegexAtIds": [],
+         *       "unmappedAtIds": [],
+         *       "fullyCovered": true,
+         *       "advisory": true
+         *     }
+         */
+        ExecutionRtmResponse: {
+            /** @description 場景；缺則空字串 */
+            scenario: string;
+            /** @description 編譯規格的摘要（`sha256:<hex>`）；缺則空字串 */
+            specDigest: string;
+            at: components["schemas"]["RtmAtCoverage"];
+            ac: components["schemas"]["RtmAcCoverage"];
+            /** @description 未通過的 AT（Bridge 已排序；沒有為空陣列；含無法歸屬者） */
+            failedAtIds: string[];
+            /** @description 驗收 regex 偏弱（轉譯保真度警訊）的 AT；沒有為空陣列 */
+            weakRegexAtIds: string[];
+            /**
+             * @description 逆向還原後無法歸屬 AC 的 AT（YAML 頂層 `unmapped_at_ids`，已排序；舊報告缺欄為空陣列）。🔴 與 `POST /sdd/compile` 回應的同名
+             *     `unmapped_at_ids`（規格宣告位置出現卻沒編成步驟）是**兩個不同層的欄位**，不得混用
+             */
+            unmappedAtIds: string[];
+            /** @description `ac.total>0` 且 AC 全數覆蓋，**且 `unmappedAtIds` 為空**（SCG-5 的機器判斷，仍是諮詢） */
+            fullyCovered: boolean;
+            /**
+             * @description 恆為 true；前端必須標示「諮詢視圖」
+             * @constant
+             */
+            advisory: true;
+        };
+        /**
+         * @description execute 的 201 回應的警告項（v1.5，D-115-06）。目前兩種 `code`：
+         *     ①`sdd_governance_inactive`——範圍內至少有一個 SDD 來源任務，但本批次**沒有**啟用 SDD 治理（沒有預檢、沒有 FSM 同步、step_id 維持 `G<g>-T<t>`、事後也不會有追溯報告）；
+         *     `cause` 見 Markdown 契約 §1.10.5：`not_bound`（專案尚無規格綁定）、`token_not_configured`（backend 沒設寫入權杖）、
+         *     `mixed_scope`（範圍內有非 SDD 來源任務）、`spec_mismatch`（任務來自不同的規格摘要）、`duplicate_step_id`（stepId 重複）。
+         *     ②`sdd_frozen_digest_absent`——已啟用 SDD 治理，但凍結時沒有記錄內容摘要（舊狀態檔）：放行，**無法偵測凍結後改檔**（Bridge 回的 201 `warnings` 原樣轉入，無 `cause`；ADR-XPLAT-016 §6.3 ③）
+         * @example {
+         *       "code": "sdd_governance_inactive",
+         *       "cause": "mixed_scope",
+         *       "detail": "範圍內有非 SDD 來源的任務，本批次不啟用 SDD 治理"
+         *     }
+         */
+        ExecutionWarning: {
+            /** @description `sdd_governance_inactive` 或 `sdd_frozen_digest_absent`；日後新增的值前端要原樣顯示、不崩潰 */
+            code: string;
+            /** @description 只有 `sdd_governance_inactive` 帶；見上方說明；日後新增的值前端要原樣顯示 */
+            cause?: string;
+            /** @description 給人看的中文說明 */
+            detail: string;
         };
         /**
          * @description 待簽核草案的種類（v1.4，D-18）
@@ -2993,6 +3363,25 @@ export interface components {
             timestamp: string;
             traceId: string;
         };
+        /** @description `POST /api/v1/projects/{id}/sdd/freeze` 的 200（v1.5）：`data` 是凍結後重讀的 FSM 狀態，與 `GET /engines/sdd` 的 `fsm` 同形 */
+        ApiResultSddFsmState: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["SddFsmState"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        ApiResultExecutionRtmResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["ExecutionRtmResponse"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
     };
     responses: {
         /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題；reason 常數見 Markdown 契約附錄 B） */
@@ -3093,6 +3482,15 @@ export interface components {
         };
         /** @description Bridge 逾時（reason「引擎橋接服務逾時」） */
         GatewayTimeout: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ApiError"];
+            };
+        };
+        /** @description SDD 寫入功能未啟用——backend 或 Bridge 沒有設定寫入權杖（reason `sdd_write_disabled`；v1.5，Markdown 契約 §1.10.2、§3.1.4 共通規則 2）。SDD run 的 resume／restore（D-115-18）只在 Bridge 沒設時回這個 503 */
+        ServiceUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -3420,7 +3818,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 已建立專案 */
+            /** @description 已建立專案（帶 `targetProjectId` 時為併入後的目標專案） */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -3506,6 +3904,7 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
             504: components["responses"]["GatewayTimeout"];
         };
     };
@@ -3629,6 +4028,7 @@ export interface operations {
             409: components["responses"]["Conflict"];
             429: components["responses"]["TooManyRequests"];
             502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
             504: components["responses"]["GatewayTimeout"];
         };
     };
@@ -3781,6 +4181,7 @@ export interface operations {
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
             504: components["responses"]["GatewayTimeout"];
         };
     };
@@ -4121,7 +4522,9 @@ export interface operations {
     getSddEngineStatus: {
         parameters: {
             query?: {
-                /** @description FSM 專案名（`FSM-STATE-<project>.yaml` 的 `<project>`）；須符合 `^[A-Za-z0-9._-]{1,128}$`，不合 → 400。省略 → `fsm=null` */
+                /** @description 選填（v1.5）。帶了＝以該 Console 專案的 `executionPath` 為 `root` 讀它的 FSM；專案不存在或已軟刪除 → 404，不是 UUID → 400。省略＝v1.4 行為（讀 Bridge 預設的狀態目錄） */
+                projectId?: string;
+                /** @description FSM 專案名的**有效值**（可以是原名；v1.5 起 Console 不淨化，只驗長度與控制字元，由 Bridge 的淨化鏡像處理，Markdown 契約 §1.10.4、§3.1.4 (b)）；1～200 字元、不含控制字元，不合 → 400。省略 → 沒有 `projectId` 時 `fsm=null`；帶了 `projectId` 時取該專案的有效 FSM 專案（`sddProject` 有值取它，否則專案名） */
                 project?: string;
             };
             header?: never;
@@ -4139,7 +4542,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiResultSddEngineStatusResponse"];
                 };
             };
-            /** @description `project` 不符 `^[A-Za-z0-9._-]{1,128}$`（`errors[0].field=project`） */
+            /** @description `project` 過長或含控制字元（`errors[0].field=project`）；或 `projectId` 不是 UUID（`errors[0].field=projectId`） */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -4149,6 +4552,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description `projectId` 找不到（專案不存在或已軟刪除；訊息「專案不存在或已刪除：<id>」，無 reason；v1.5） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -4759,6 +5171,146 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             429: components["responses"]["TooManyRequests"];
+        };
+    };
+    freezeProjectSddSpec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 專案 id（Phase 2 資源的路徑變數名為 `id`，與 `ProjectIdPath` 的 `projectId` 不同） */
+                id: components["parameters"]["ProjectResourceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SddFreezeRequest"];
+            };
+        };
+        responses: {
+            /** @description 已凍結（FSM `current_state=SPEC_FROZEN`，`frozenStages` 多一筆） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSddFsmState"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description FSM 不在 `HUMAN_PENDING`（`sdd_fsm_state_conflict`）、FSM 專案沒有狀態檔（`sdd_fsm_not_found`）、 核准人看過的摘要與現檔不符（`sdd_spec_digest_changed`），或這個 FSM 專案已被同專案根的另一個專案綁定（`sdd_binding_conflict`） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description `引擎拒絕此請求`（`details.bridgeReason` 為 `sanitization_failed`／`sdd_invalid_argument`／`fsm_state_unreadable`； `docs` 不合法、缺檔、跑出根目錄、不含 TCS〔`violations[].rule=missing_tcs`〕，或 `approver`／`reason` 值域不合） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
+            504: components["responses"]["GatewayTimeout"];
+        };
+    };
+    updateProjectSddBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 專案 id（Phase 2 資源的路徑變數名為 `id`，與 `ProjectIdPath` 的 `projectId` 不同） */
+                id: components["parameters"]["ProjectResourceIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SddBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description 已更新（回傳專案詳情；`sddProject` 為儲存的值，清除後為 null） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultProjectDetailResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 同一個專案根已有另一個專案以同一個 `sddProject` 綁定（`sdd_binding_conflict`） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    getExecutionRtm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 執行批次 id（同時是 Bridge 的 run_id） */
+                runId: components["parameters"]["RunIdPath"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultExecutionRtmResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 批次不存在（訊息「執行批次不存在或已刪除：<id>」，無 reason），或批次存在但沒有追溯報告（reason `rtm_not_found`） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 報告檔存在但壞掉（`引擎拒絕此請求`，`details.bridgeReason=rtm_unreadable`） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+            502: components["responses"]["BadGateway"];
+            504: components["responses"]["GatewayTimeout"];
         };
     };
     bridgeDeepHealth: {
