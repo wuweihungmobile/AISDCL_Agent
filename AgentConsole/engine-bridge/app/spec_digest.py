@@ -37,6 +37,13 @@ def text_digest(text: str) -> str:
 def file_digest(path: Path) -> str:
     """檔案的規格摘要。缺檔／目錄／讀取失敗＝OSError；過大＝DocTooLargeError；非 UTF-8＝
     DocNotUtf8Error。"""
+    # 先判「是不是一般檔案」再量大小：POSIX 目錄的 st_size 常見 4096（ext4），若先量大小，目錄會被
+    # 誤判成 DocTooLargeError（ValueError）而不是 OSError——整合輪 115 雲端 agentconsole-ci 實紅；
+    # ADR-XPLAT-016 §4.3：缺檔或是目錄一律 doc_not_found（此處＝OSError 家族）。
+    if not path.is_file():
+        if path.is_dir():
+            raise IsADirectoryError(f"{path.name} 是目錄，不是規格檔")
+        raise FileNotFoundError(f"{path.name} 不存在或不是一般檔案")
     size = path.stat().st_size
     if size > MAX_DOC_BYTES:
         raise DocTooLargeError(f"{path.name}：{size} bytes 超過上限 {MAX_DOC_BYTES}")
