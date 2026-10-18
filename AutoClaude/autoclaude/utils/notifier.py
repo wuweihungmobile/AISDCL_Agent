@@ -11,11 +11,12 @@ from __future__ import annotations
 import logging
 import subprocess
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .platform_caps import is_macos, is_windows
+from .webhook_sender import send_webhook
 
 # 🔴 R82（ACC-01）：彈窗預設停留秒數由 10 降到 3。
 # WHY：plyer 的 Windows 後端把 balloon_tip 丟進一個**沒帶 daemon kwarg** 的執行緒並
@@ -49,8 +50,7 @@ def notify_escalation(title: str, message: str, dump_path: str, cfg: AppConfig) 
     ESCALATION 級別的強化通知。
 
     無論 notification.enabled 是否開啟，永遠寫入 escalation_alert.log。
-    若設定了 webhook_url，目前僅記錄警告 — webhook HTTP 發送尚待實作，
-    詳見 docs/05_development/Phase6_P1_Backlog.md「其他技術 TODO」段落。
+    若設定了 webhook_url，以 send_webhook 發送 POST（TD-1），結果只寫日誌。
     """
     notify(title, message, enabled=cfg.notification.enabled)
 
@@ -64,11 +64,21 @@ def notify_escalation(title: str, message: str, dump_path: str, cfg: AppConfig) 
     except Exception as exc:
         logger.warning("escalation_alert.log 寫入失敗: %s", exc)
 
-    # Webhook 通知（webhook_url 設定後待實作 HTTP POST 發送，目前僅記錄警告）
+    # Webhook 通知（TD-1）：只記遮罩後的結果，絕不把 webhook_url 寫進日誌
     if cfg.notification.webhook_url:
-        logger.warning(
-            "Webhook 通知尚未實作，跳過 webhook_url=%s", cfg.notification.webhook_url
-        )
+        payload = {
+            "title": title,
+            "message": message,
+            "dump_path": dump_path,
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+        result = send_webhook(cfg.notification.webhook_url, payload)
+        if result.ok:
+            logger.info("Webhook 已送出 status=%s attempts=%d", result.status, result.attempts)
+        else:
+            logger.warning(
+                "Webhook 送出失敗 error=%s attempts=%d", result.error, result.attempts
+            )
 
 
 def notify(
