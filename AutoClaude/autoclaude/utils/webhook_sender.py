@@ -1,10 +1,10 @@
 """
-Webhook 發送（TD-1）：以 httpx 對 ESCALATION 位址發 POST JSON。
+Webhook 發送（TD-1；規格 TCS-WebhookSender-20261018）：以 httpx 對 ESCALATION 位址發 POST JSON。
 
-目前實作 AT-001-1-1 的成功路徑（FRD-lite R4 的 timeout_s 傳遞、R5 的 2xx、R7）、
-AT-001-2-1 的位址驗證（R1）、AT-001-3-1 的重試退避（R5 的可重試失敗、R6）、
-AT-001-4-E-1 的 payload／參數驗證（R2、R3）與永不拋例外（R5 的其他例外、R8）、
-AT-001-5-1 的日誌遮罩（R9）。
+用途與邊界：只接受 https 位址（R1）；payload 與參數先驗、不合即回 invalid_*（R2、R3）；
+timeout_s 套到 httpx 的 connect／read／write／pool 四鍵（R4）；2xx 即成功，只對 5xx 與網路錯
+做有界的指數退避重試（R5、R6）；任何例外都收進 WebhookResult、永不拋出（R8）；日誌一律遮罩
+位址（使用者資訊、埠、查詢字串、片段）與 payload 內容（R9）。呼叫端＝notifier.notify_escalation。
 """
 from __future__ import annotations
 

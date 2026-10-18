@@ -125,7 +125,17 @@ def main(argv: list[str] | None = None) -> int:
         "SDD_ENABLE_RULE_FIRE_TELEMETRY": "0",
         "SDD_ENABLE_RULE_CATCH_TELEMETRY": "0",
     }
-    sys.stdout.write(render(env, args.shell))
+    text = render(env, args.shell)
+    # SCG-4 F-03／NFR-001-3：輸出形態由 --shell 決定、不由平台決定。Windows 文字模式預設把 \n
+    # 翻成 \r\n（eval "$(… --shell bash)" 會把 \r 黏進值）⇒ 繞過文字層直接寫 UTF-8 位元組；
+    # 串流沒有 .buffer（極少數替身）才退回文字寫入。
+    sys.stdout.flush()
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+    else:
+        buffer.write(text.encode("utf-8"))
+        buffer.flush()
     return 0
 
 

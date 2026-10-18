@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -154,6 +156,21 @@ def test_AT_001_2_2_bash_lines_and_quote_escaping(tmp_path, monkeypatch, capsys)
         os.path.abspath(str(root)), "AgentConsole", "build", "reports", "fsm"
     )
     assert "'\\''" in vals[2]
+
+
+@pytest.mark.parametrize("shell", ["bash", "powershell", "json"])
+def test_AT_001_2_2_raw_stdout_bytes_carry_no_cr(shell):
+    """SCG-4 F-03（NFR-001-3）：輸出形態由 --shell 決定、不由平台決定。capsys 看不到文字層
+    把 LF 翻成 CRLF 的那一步，所以取子行程的原始位元組：任何平台都不得出現 CR。"""
+    proc = subprocess.run(
+        [sys.executable, str(Path(sdd_env.__file__).resolve()),
+         "--sub", "monorepo", "--slug", "f03", "--shell", shell],
+        capture_output=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert b"\r" not in proc.stdout
+    assert proc.stdout.endswith(b"\n")
 
 
 @pytest.mark.parametrize(
