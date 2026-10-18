@@ -6,7 +6,7 @@ TCS-WebhookSender-20261018 的 Unit 測試（F-001 send_webhook）。
 import dataclasses
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -56,6 +56,20 @@ def test_AT_001_1_1_success_posts_json():
     assert result.ok is True
     assert len(timeouts) == 1
     assert timeouts[0]["read"] == 2.5
+    assert timeouts[0] == {"connect": 2.5, "read": 2.5, "write": 2.5, "pool": 2.5}
+
+    # WHY：整數 timeout_s 也是合法的 number，不得被當成壞參數。
+    result = send_webhook(URL, PAYLOAD, timeout_s=3, transport=httpx.MockTransport(timed_handler))
+    assert result.ok is True
+    assert timeouts[1] == {"connect": 3, "read": 3, "write": 3, "pool": 3}
+
+    # WHY：欄位順序是公開契約的一部分（位置參數建構與序列化依賴）。
+    assert [f.name for f in dataclasses.fields(WebhookResult)] == [
+        "ok",
+        "status",
+        "attempts",
+        "error",
+    ]
 
     # WHY：結果是 frozen dataclass，呼叫端拿到之後不能被就地改寫。
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -300,6 +314,24 @@ def test_AT_001_4_E_1_never_raises_on_bad_input():
         assert result == WebhookResult(ok=False, status=None, attempts=0, error="invalid_argument")
     assert calls == []
 
+    # 情境三之二：組合壞輸入的驗證順序——位址先於 payload，payload 先於參數。
+    result = send_webhook(
+        "http://hooks.example.com/x",
+        None,
+        transport=httpx.MockTransport(never_called),
+        sleep=sleeps.append,
+    )
+    assert result == WebhookResult(ok=False, status=None, attempts=0, error="invalid_url")
+    result = send_webhook(
+        URL,
+        None,
+        max_attempts=0,
+        transport=httpx.MockTransport(never_called),
+        sleep=sleeps.append,
+    )
+    assert result == WebhookResult(ok=False, status=None, attempts=0, error="invalid_payload")
+    assert calls == []
+
     # 情境四：BaseException 不被攔截，原樣拋到呼叫端；只發一次、不睡眠。
     class _Stop(BaseException):
         pass
@@ -369,6 +401,7 @@ def test_AT_001_5_1_logs_only_the_masked_url(caplog):
     assert len(warnings) == 1
     assert "https://hooks.example.com" in warnings[0].getMessage()
     assert "http_500" in warnings[0].getMessage()
+    assert "attempts=3" in warnings[0].getMessage()
 
     # 第三次：http（違反 R1），只能記一筆含 invalid_url 的 WARNING；handler 不被呼叫。
     calls = []
@@ -397,7 +430,7 @@ def test_AT_001_5_1_logs_only_the_masked_url(caplog):
     caplog.clear()
     result = send_webhook(
         secret_url,
-        {"x": object()},
+        {"x": object(), "leak-me-42": 1},
         transport=httpx.MockTransport(counting),
         sleep=sleeps.append,
     )
@@ -410,7 +443,25 @@ def test_AT_001_5_1_logs_only_the_masked_url(caplog):
     assert records[0].levelno == logging.WARNING
     assert "invalid_payload" in records[0].getMessage()
 
-    # WHY：四次呼叫的日誌全文與 error 欄位都不得含 userinfo、port、path、query、fragment、payload。
+    # 第五次：合法位址、合法 payload、不合法參數（R3），只能記一筆含 invalid_argument 的 WARNING。
+    caplog.clear()
+    result = send_webhook(
+        secret_url,
+        {"title": "T", "message": "leak-me-42"},
+        max_attempts=0,
+        transport=httpx.MockTransport(counting),
+        sleep=sleeps.append,
+    )
+    records = module_records()
+    all_texts += [r.getMessage() for r in records]
+    all_errors.append(result.error)
+    assert result == WebhookResult(ok=False, status=None, attempts=0, error="invalid_argument")
+    assert len(calls) == 0
+    warnings = [r for r in records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "invalid_argument" in warnings[0].getMessage()
+
+    # WHY：五次呼叫的日誌全文與 error 欄位都不得含 userinfo、port、path、query、fragment、payload。
     for marker in leaked_markers:
         assert not any(marker in text for text in all_texts), marker
         assert not any(marker in error for error in all_errors if error), marker
@@ -435,7 +486,18 @@ def test_AT_001_6_1_notify_escalation_posts_via_send_webhook(tmp_path, caplog):
     ]
     caplog.set_level(logging.INFO, logger="autoclaude.utils.notifier")
 
-    with patch("autoclaude.utils.notifier.send_webhook", side_effect=outcomes) as mock_send:
+    alert_log = tmp_path / "escalation_alert.log"
+    results = iter(outcomes)
+
+    def fake_send(*args, **kwargs):
+        # WHY：先落 escalation_alert.log、後呼叫 webhook；呼叫當下本輪那一行必須已寫入。
+        assert alert_log.exists()
+        assert len(alert_log.read_text(encoding="utf-8").splitlines()) == len(seen_calls) + 1
+        seen_calls.append(args)
+        return next(results)
+
+    seen_calls = []
+    with patch("autoclaude.utils.notifier.send_webhook", side_effect=fake_send) as mock_send:
         for round_no, (level, frag_a, frag_b) in enumerate(expected, start=1):
             caplog.clear()
             notify_escalation("ESC", "step failed", dump_path, cfg)
@@ -452,6 +514,8 @@ def test_AT_001_6_1_notify_escalation_posts_via_send_webhook(tmp_path, caplog):
             assert payload["dump_path"] == dump_path
             # WHY：timestamp 必須是帶時區的 ISO 8601，否則跨時區事件無法排序。
             assert datetime.fromisoformat(payload["timestamp"]).tzinfo is not None
+            # WHY：R 條文要求 UTC（offset 為 0），不是任意本地時區。
+            assert datetime.fromisoformat(payload["timestamp"]).utcoffset() == timedelta(0)
 
             webhook_records = [
                 r

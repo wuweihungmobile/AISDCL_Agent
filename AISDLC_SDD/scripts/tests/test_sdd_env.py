@@ -157,7 +157,7 @@ def test_AT_001_2_2_bash_lines_and_quote_escaping(tmp_path, monkeypatch, capsys)
 
 
 @pytest.mark.parametrize(
-    "slug", ["", "-a", "a-", "a--b", "A", "a_b", "a b", "a.b", "中文"]
+    "slug", ["", "-a", "a-", "a--b", "A", "a_b", "a b", "a.b", "中文", "A" * 31]
 )
 def test_AT_001_3_1_bad_slugs_are_rejected_with_rc_2(slug, capsys):
     rc = sdd_env.main(["--sub", "monorepo", "--slug=" + slug])
@@ -263,11 +263,14 @@ def test_AT_001_5_1_failure_boundaries_and_zero_side_effects(tmp_path, monkeypat
     root = _fake_root(tmp_path, name="ok_root")
     env_before = dict(os.environ)
     tree_before = _tree(root)
+    calls = []
+    monkeypatch.setattr(sdd_env, "force_utf8_stdio", lambda: calls.append(1))
     rc = sdd_env.main(
         ["--sub", "autoclaude", "--slug", "demo", "--root", str(root), "--shell", "bash"]
     )
     capsys.readouterr()
     assert rc == 0
+    assert calls == [1]
     assert dict(os.environ) == env_before
     assert _tree(root) == tree_before
     # 情境五：--help
