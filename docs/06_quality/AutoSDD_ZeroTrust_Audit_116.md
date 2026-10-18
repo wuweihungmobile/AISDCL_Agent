@@ -4,6 +4,7 @@
 **本檔分工**：W3 QA（Sonnet；未參與三份規格的撰寫、未參與任何實作；規格作者＝W2 SA、實作者＝真 haiku 經 Bridge 委派〔DF-A〕與 hooks-ON 的 headless Sonnet〔DF-B、DF-C〕）一人寫入。三份 SCG-4 報告與 RTM 在各子專案自己的 `docs/06_quality/`，本檔是總表。
 **證據原則**：每一格「成立」都附當回合真跑的指令、rc 與逐字輸出；沒跑的寫進 §8〈未涵蓋〉。證據原檔住 QA 暫存目錄 `…\scratchpad\qa_w3\`（閘門日誌、突變結果 JSON、FSM 引文）與 `…\scratchpad\qa_drill\`（C7 演練），重點輸出已逐字引在本檔。本檔不含任何機密值（Bridge 寫入權杖為拋棄式測試值，只以「命中檔數」形式出現）。**突變檢驗全部在記憶體內改寫，repo 檔案零改動**（`git status --short` 在本檔寫入前只有本輪交付文件）。
 **本檔不含的決定**：缺陷編號 DEF-200 由主控入帳；AgentConsole 面缺陷編號續用 `DEF-AC-0NN`——115 收尾補記已佔用 035～037，本輪新編號自 **DEF-AC-038** 起。
+> 主控補註（2026-10-18 收尾後）：本檔「G-116-17 未修／修後行為未驗」各處（§1.0、§1 表 C1／C7、§7、§9.7）為一審／二審當時實況，逐字保留。根 router 兩格 matcher 已修齊（PostToolUse `d75a38a0`、PreToolUse `a8504ba1`；帳本 DEF-200-551），修後行為由 Sonnet 操作員以 haiku headless 三件組視窗（從根啟動、狀態目錄在 scratch）驗過：ESCALATION 下 PowerShell 回 JSON deny、INIT 下 CONTEXT-LEDGER 出現 pre／post 兩條 PowerShell、SessionStart 注入專案鍵；逐字座標＝`AutoSDD_improving_116.md` §7 末列。
 
 ## §1 三路 dogfood 證據與 C1～C7 判定
 

@@ -618,7 +618,7 @@ FSM 可能留在 AUTOCLAUDE_DELEGATED 而沒有任何行程（引擎異常結束
 1. `.claude/settings.json`：PreToolUse matcher＝`Write|Edit|Read|Bash|PowerShell|NotebookEdit|Task|Agent|Workflow`；PostToolUse matcher＝`Write|Edit|Read|Bash|PowerShell|NotebookEdit`（`PowerShell` 緊接 `Bash`）。
 2. 三個站點的 `Bash` 判斷改為 `{"Bash", "PowerShell"}` 同形處理；PowerShell 的指令文字在 `tool_input.command`（與 Bash 同鍵，本機根層 lint hook 以 `matcher: PowerShell` 攔下裸 `Set-Location` 的真實事件佐證工具名＝`PowerShell`）。
 3. 回歸鎖放**新檔** `test_settings_matcher_powershell.py`（置於 `tools/fsm_runtime/tests/`；不併入 `test_settings_matcher_r145.py`，該檔 docstring 綁定那一輪的 Agent／Workflow 議題；夾具依該檔「抄而非共用」的慣例複製）。四組斷言：(a) 兩個 matcher 的 token 集合含 `Bash` 與 `PowerShell`；(b) `estimate_tool_tokens("PowerShell", {"command": …})` 與同輸入的 `Bash` 相等；(c) AUTO_COMPACT_PENDING（owner session）下 `assert_tool_allowed("PowerShell", None)` 不拋、與 Bash 對稱；(d) ESCALATION 下 `context_ledger_pre.main()` 對 `tool_name=PowerShell` 回 `deny`。
-4. **根層** `.claude/settings.json` 的 router 條目屬守衛面，本輪無暴露證據⇒登理論洞，附再開症狀「Windows 設 `SDD_ACTIVE_VERSION` 的真實 session，其 CONTEXT-LEDGER 缺 PowerShell 呼叫」（D-115-09）。
+4. **根層** `.claude/settings.json` 的 router 條目屬守衛面，本輪無暴露證據⇒登理論洞，附再開症狀「Windows 設 `SDD_ACTIVE_VERSION` 的真實 session，其 CONTEXT-LEDGER 缺 PowerShell 呼叫」（D-115-09）。（整合輪 116 QA 一審命中該症狀 ⇒ 升 P2 入帳 DEF-200-551；2026-10-18 兩格修齊：PostToolUse `d75a38a0`、PreToolUse `a8504ba1`；同日以從根啟動的三件組 headless 視窗補了下行〔未驗〕的正負兩面——INIT 下 PowerShell pre／post 入帳、ESCALATION 下 JSON deny，逐字座標＝`AutoSDD_improving_116.md` §7 末列。）
 
 〔未驗〕沒有起 `claude --debug hooks` 做「PowerShell 呼叫確實觸發 SDD hook」的活體正向驗證（體檢報告同樣只做了靜態推論）；落地後主控須補一次正負兩面（根層 CLAUDE.md〈hook 載具〉的驗收規則）。
 

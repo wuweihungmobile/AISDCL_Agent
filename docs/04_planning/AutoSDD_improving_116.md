@@ -68,7 +68,7 @@
 | G-116-14 | P3 | AgentConsole 無 01／03；ADR 位置與命名與 SDD 期望不同 | 不搬檔；追溯表以實際路徑引用；AgentConsole 新建 docs/03_testing/contracts/（隨 DF-B 的 TCS 建立）、CLAUDE.md 鐵律 1 改 02／03／04／06 | Dev-DOC；SA | 本輪修 |
 | G-116-15 | P3 | 115 的 DEF-AC-015／016／017：增量專案的機械半段（SLV 檔名樣式、`score_frd` 表格 AC）空轉 | SOP 註明由 QA 人讀補位 | Dev-SDD | 文件本輪；碼延後（再開症狀：QA 發現機械半段放行了有缺陷 AC） |
 | G-116-16 | P3 | 子專案 `.claude/settings.json` 的 hooks 只在以該目錄為根的 session 載入；根 session 無 AutoClaude 守衛（反之亦然） | SOP 註明；以 CI／ruff／LOC 兜底 | Dev-SDD | 本輪文件化 |
-| G-116-17 | P4 | 根 router matcher 無 PowerShell（`.claude/settings.json` 第 60、137 行）；D-115-09 已登理論洞 | 見 D-116-14 | 主控（守衛面） | 延後（症狀由 W2 hooks-ON Windows 視窗觸發，W4 裁） |
+| G-116-17 | P4→P2 | 根 router matcher 無 PowerShell（`.claude/settings.json` 第 60、137 行）；D-115-09 已登理論洞 | 見 D-116-14 | 主控（守衛面） | 已修（W2 兩場 hooks-ON session 命中再開症狀；PostToolUse 半 `d75a38a0`、PreToolUse 半 `a8504ba1`；帳本 DEF-200-551） |
 | G-116-18 | P4 | adapter／Bridge 向上找祖先狀態目錄；根層 FSM 目錄是所有子專案的祖先 | compile 一律帶 `--fsm-project`；SOP 一句 | Dev-SDD | 延後（再開症狀：子專案 compile 回應的 `fsm_project` 不是該子專案的鍵） |
 | G-116-19 | P4 | 檔案系統大小寫差異 | 標準鍵一律小寫 kebab（D-116-03） | Dev-SDD | 本輪文字 |
 | G-116-20 | P4 | 狀態在被忽略的 build/ 下，凍結證據不入庫 | 每功能收尾把 `show` 逐字輸出與 `spec_doc_digests` 引進證據檔（115 §1.3 做法） | QA | 本輪文字 |
@@ -88,7 +88,7 @@
 
 ## §5 刻意不做（只准三分類）
 
-- **延後（附再開症狀）**：G-116-03 判準改動；G-116-11 pytest 殼代跑 Java／TS；G-116-12 碼收緊；G-116-15 機械半段修碼；G-116-17 根 matcher（見 D-116-14）；G-116-18；SSRF 私網封鎖（§4-3）；Console 內「改綁新鍵」UI（再開症狀：同一 Console 專案要跑第二個 SDD 功能時 `PUT sdd-binding` 不夠用）；CLI-only 路徑的 FSM 委派自動同步（沿 115 §5.2）。
+- **延後（附再開症狀）**：G-116-03 判準改動；G-116-11 pytest 殼代跑 Java／TS；G-116-12 碼收緊；G-116-15 機械半段修碼；G-116-18；SSRF 私網封鎖（§4-3）；Console 內「改綁新鍵」UI（再開症狀：同一 Console 專案要跑第二個 SDD 功能時 `PUT sdd-binding` 不夠用）；CLI-only 路徑的 FSM 委派自動同步（沿 115 §5.2）。
 - **退役（附依據）**：擴大 evaluator 白名單（依據：Gap-046 資安過濾器，evaluator 命令必須是單一模板內插）；「每子專案一個 FSM 鍵」（依據：`transition_rules.py` RELEASE 終態無回邊）；根層 `.claude/skills` 第三份鏡像（依據：每份鏡像都進每個 session 的技能清單，既有 `AISDLC_SDD:` 前綴已可達）。
 - **立案**：DEF-200-544～549（§3），同輪 fixed。
 
@@ -136,6 +136,7 @@
 | F-03／F-05 主控單人修復 | `1c802e92` | test_sdd_env `26 passed in 0.60s`；ruff 綠；dedup 鎖 OK；編碼鎖 OK；`--shell bash` 原始位元組 CR 5→0；test_webhook_sender `9 passed, 1 warning in 0.46s` | 不用 `reconfigure(newline)`：根層行內 stdio 複本棘輪只准縮不准長 ⇒ 改經 `sys.stdout.buffer` 寫位元組 | 併入 QA 二審 |
 | W4 收尾文件（API_Contract「原樣」例外、Backlog TD-1、ADR-XPLAT-016 附錄 D、§7.1 改號） | `90d911e4` | — | — | §8／§9 於收尾補 |
 | G-116-17 根 router matcher＋ONBOARDING 表① | `d75a38a0` | router r158 OK；hooks liveness OK；context_budget_guard OK；doc_loc_baseline_freshness OK；`sync_onboarding_baselines.py --write` rc=0（loc 18625／rootunit 5326） | PreToolUse 那一格被 auto mode 分類器拒（Self-Modification）⇒ 只套 PostToolUse 半，CLAUDE.md 守衛總表如實記兩半；帳本列（open／partial）撞淨額棘輪（本輪無可結列）⇒ 待掌舵者套上另一半後以 `fixed@` 入帳 | 掌舵者：`/permissions`→r 核准根 `.claude/settings.json` PreToolUse matcher 加 `PowerShell` |
+| G-116-17 PreToolUse 半格（2026-10-18 收尾後補，新 session 同一 Edit 經分類器放行） | `a8504ba1` | liveness 192 OK（`_REGISTRATION_BASELINE` router 兩列加 PowerShell，同行數）；router r158 13 OK；context_budget_guard OK；doc_loc_baseline_freshness OK；c1c2 lock OK；subprocess_encoding_hygiene 39 OK；v0.30 test_settings_matcher_r145 4 passed；scripts test_pretooluse_matcher_task 5 passed；crossref 未結 0。真機探針（Sonnet 操作員、haiku headless ×2、從根啟動、三件組指向 scratch 狀態目錄；主控再讀 hooks log 與 ledger）：ESCALATION 下 PreToolUse router 回 JSON `permissionDecision: deny`（rc=0、工具未派發、log「Hook denied tool use for PowerShell」）；INIT 下 CONTEXT-LEDGER 出現 `phase: pre`／`phase: post` 兩條 `tool: PowerShell`；SessionStart 注入 `project: probe-g11617`；受保護四個狀態目錄 104 檔雜湊 diff 0（他包回報） | 擋下機制是 JSON deny 不是 rc=2（與 BRIDGE §8.3 一致）；被 deny 的呼叫不入帳（deny 先於 `_record_audit`），阻塞態證據看 hooks log 不看 ledger；`sdd_env.py --sub monorepo` 給的狀態目錄＝根 `build/reports/fsm`（設計如此），探針手動改指 scratch | 帳本 DEF-200-551 fixed@；根 CLAUDE.md 守衛總表列兩格齊；BRIDGE §8.12 列、ADR-XPLAT-016 §621、證據檔 116 主控補註同步（docs commit） |
 | W3 QA 二審（`git archive` 匯出 322e1351／90d911e4 量測） | — | 他包回報：DF-A 殺 50/50、DF-C 殺 29/29、存活 0；弱化 0；F-03 拿掉修復 3/3 轉紅、F-05 AST 同；兩鍵 gate rc 0 → RELEASE_READY；新 P4 F-10／F-11（docstring 措辭）、F-12（`encode("utf-8")` 嚴格編碼，理論洞無暴露證據） | 主控裁決：P4 三筆登記不修（成品已過二審，RELEASE_READY→RELEASE 是唯一出邊）；DEF-AC-038 依 115 慣例留證據檔 §4 不另入帳 | RTM 兩檔同步由 QA 補（≈6 行） |
 
 ### 7.1 W1 持有面（互斥；§6 D-116 裁決的派工附表，W1 派工時用）
@@ -166,7 +167,7 @@
 
 ### 9.2 問題 3 歸格：「AutoClaude、AgentConsole 等模組（含本專案）是否可以完美利用 AISDLC_SDD 流程進行開發？」
 - **答：是（範圍＝Windows／Sonnet 實作＋haiku 委派／單機；Unit 類 AT）**。判準 C1～C7（§2）在 W1 修齊缺口後全部成立，三路 dogfood 各自走完 Stage-1／Stage-2 凍結（digest 綁內容）→ 談判閘 → IMPLEMENTATION（hooks deny 守規格檔）→ SCG-4 獨立審查 → RTM 100% → RELEASE_READY，三個鍵的狀態檔各住自家 `build/reports/fsm`（`.gitignore` 已收）、框架真狀態檔零變。
-- 「完美」的誠實劃界（不是本輪沒做完，是結構上的邊界）：(1) Java／TS 面走 session-only（AT 由 `gradlew test --tests`／`vitest run -t` 自跑、逐字貼證據，D-116 裁決）；(2) 委派徑的 evaluator 白名單不擴（D-116）；(3) 一個 hooks-ON 視窗同時只綁一個功能（規格檔 deny 看路徑子字串）；(4) G-116-17 的 PreToolUse 半格待掌舵者本人套上（分類器 Self-Modification）。
+- 「完美」的誠實劃界（不是本輪沒做完，是結構上的邊界）：(1) Java／TS 面走 session-only（AT 由 `gradlew test --tests`／`vitest run -t` 自跑、逐字貼證據，D-116 裁決）；(2) 委派徑的 evaluator 白名單不擴（D-116）；(3) 一個 hooks-ON 視窗同時只綁一個功能（規格檔 deny 看路徑子字串）；(4)（已消除）G-116-17 兩格於 2026-10-18 收尾後補齊（PreToolUse 半 `a8504ba1`、帳本 DEF-200-551，真機驗收見 §7 末列）——劃界只剩 (1)～(3)。
 - 問題 1／2 上輪已答、本輪不重答，可從提示詞拿掉；問題 3 本輪答畢，下輪提示詞亦可拿掉。
 
 ### 9.3 休眠重評（範本〈🏁 終止條件・休眠・再開〉T1～T4）
@@ -175,4 +176,4 @@
 
 ### 9.4 收尾清單（本檔定稿時的實況）
 - 已做：`%TEMP%\e2e` 刪除、Docker 懸空卷 49 個與 `aisdlc_*` 卷清空（`docker volume ls` 現查 0 筆 aisdlc）、scratchpad 於 push 後刪除、記憶檔更新。
-- 待掌舵者：`D:\w5e2e`（工具層受保護路徑擋下兩次，不繞過；`rmdir /s /q D:\w5e2e`）；根 `.claude/settings.json` 第 60 行 PreToolUse matcher 加 `PowerShell`（`/permissions`→Recently denied→`r`），之後帳本補一列 `fixed@`（編號屆時取現存最大號＋1；本輪不先立號，立了就是未結列、撞淨額棘輪）、根 CLAUDE.md 守衛總表列改回兩格齊。
+- 收尾後補（2026-10-18 新 session）：`D:\w5e2e` 掌舵者已手刪；根 `.claude/settings.json` 第 60 行 PreToolUse matcher 加 `PowerShell`——同一 Edit 這次被分類器放行，不需 `/permissions`→r（`a8504ba1`）；帳本 DEF-200-551 `fixed@a8504ba1`、根 CLAUDE.md 守衛總表列兩格齊、BRIDGE §8.12／ADR-XPLAT-016 §621／證據檔 116 補註同步（見 §7 末列）。
