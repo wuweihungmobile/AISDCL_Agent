@@ -55,7 +55,7 @@ full/update → 讀取以下所有存在的文件:
   docs/02_architecture/api/CONTRACT-*.yaml   ← API 端點清單
   docs/03_testing/TEST-PLAN-{System}.md      ← TC-XXX-Y-Z
 
-verify → 讀取 docs/03_testing/RTM-{System}.md 進行覆蓋率計算
+verify → 讀取 docs/06_quality/RTM-{System}.md 進行覆蓋率計算
 ```
 
 ---
@@ -135,8 +135,8 @@ EPIC-XXX（業務目標）
 
 ### 階段 5：存檔 🔴
 
-1. 存放路徑：`docs/03_testing/RTM-{SystemName}.md`
-2. 執行 `/spec-compliance-check docs/03_testing/RTM-{SystemName}.md`
+1. 存放路徑：`docs/06_quality/RTM-{SystemName}.md`（落點理由見下方〈強制產出〉）
+2. 執行 `/spec-compliance-check docs/06_quality/RTM-{SystemName}.md`
 3. 🔴 確認點：核對追溯矩陣與 FRD/Test Plan 的一致性
 
 ---
@@ -145,17 +145,22 @@ EPIC-XXX（業務目標）
 
 | 產出物 | 路徑 | 對應 SCG |
 |--------|------|---------|
-| RTM 文件（初版） | `docs/03_testing/RTM-{SystemName}.md` | SCG-0 後建立 |
+| RTM 文件（初版） | `docs/06_quality/RTM-{SystemName}.md` | SCG-0 後建立 |
 | RTM 文件（含 API） | 同上（更新） | SCG-3 後更新 |
 | RTM 文件（含 TC） | 同上（更新） | SCG-4 後更新 |
-| RTM 驗證報告 | `docs/03_testing/RTM-VERIFY-{SystemName}.md` | SCG-5 前 |
+| RTM 驗證報告 | `docs/06_quality/RTM-VERIFY-{SystemName}.md` | SCG-5 前 |
+
+> **落點（整合輪 116／D-116-09）**：RTM 與其驗證報告是跨整個週期持續更新的執行期產物（SCG-4 後、SCG-5 前仍要寫），而
+> Rule 9.6 絕對禁令 #3 在 SCG_VALIDATION／PR_REVIEW／RTM_VERIFY／IMPLEMENTATION 等態擋寫路徑含 `docs/01_requirements/`｜
+> `docs/02_architecture/`｜`docs/03_testing/` 的 Write／Edit——所以一律放 `docs/06_quality/`，初版也不例外（同一份檔案不換
+> 目錄）。上方 `TEST-PLAN-{System}.md` 是**凍結前**的測試規格，仍在 `docs/03_testing/`。
 
 ---
 
 ## 後置動作
 
 ```
-/spec-compliance-check docs/03_testing/RTM-{SystemName}.md
+/spec-compliance-check docs/06_quality/RTM-{SystemName}.md
 ```
 
 **各階段後置動作**：

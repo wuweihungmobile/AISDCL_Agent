@@ -1,12 +1,12 @@
-# SDD_AUTOCLAUDE_BRIDGE — SDD 文件 → AutoClaude Playbook 標準作業（Phase Z / ACT-162；整合輪 115 增補 Console／Bridge 路徑）
+# SDD_AUTOCLAUDE_BRIDGE — SDD 文件 → AutoClaude Playbook 標準作業（Phase Z / ACT-162；整合輪 115 增補 Console／Bridge 路徑；整合輪 116 增補子專案 SDD session SOP）
 
-> **版本**：v0.03（v0.02＝Phase Z：AutoClaude 執行引擎橋接，ACT-162~171；v0.03＝整合輪 115：Phase Z′ 落地更正、Console／Bridge 路徑單一 SOP、何時走 SDD 迴圈）
-> **依據**：monorepo `docs/04_planning/Archive/AutoSDD_improving_01.md`（已凍結，2026-06-12）；Console／Bridge 路徑與 FSM CLI 契約＝`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`
+> **版本**：v0.04（v0.02＝Phase Z：AutoClaude 執行引擎橋接，ACT-162~171；v0.03＝整合輪 115：Phase Z′ 落地更正、Console／Bridge 路徑單一 SOP、何時走 SDD 迴圈；v0.04＝整合輪 116：§7 改三徑、新增 §8 子專案 SDD session〔根 session、外部專案模式〕單一 SOP）
+> **依據**：monorepo `docs/04_planning/Archive/AutoSDD_improving_01.md`（已凍結，2026-06-12）；Console／Bridge 路徑與 FSM CLI 契約＝`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`；子專案 SDD session 的裁決與探針事實＝`docs/04_planning/AutoSDD_improving_116.md`（§1.1 探針 P1～P10、§6 裁決 D-116-01～18）
 > **配套 Agent**：`agent/specialized/sdd-playbook-compiler-zh.yaml`
 > **配套規則**：`governance/rules/R-9.38-playbook-translation-fidelity.yaml`
 > **FSM 寫入指令**：[SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈FSM 寫入指令〉
 
-> 🔴 **訂正紀錄（整合輪 115／G-16、S-06；訂正協議：禁止靜默覆寫，被訂正的原文逐字保留於此）**
+> 🔴 **訂正紀錄（整合輪 115／G-16、S-06；整合輪 116／G-116-04、G-116-11；訂正協議：禁止靜默覆寫，被訂正的原文逐字保留於此）**
 >
 > | 站點 | 被訂正的原文（逐字） | 現況與依據 |
 > |---|---|---|
@@ -14,6 +14,8 @@
 > | §2 exit code | 「exit 0=成功 / 2=規格未凍結 / 3=規格遭汙染(SPEC_TAINTED) / 4=缺檔或無契約」 | `sdd_compile` 另有 5＝規格格式版本不受支援（`SpecFormatVersionError`）；整合輪 115 再加 6＝規格出現卻未編成 step 的 AT（見 §2、§3） |
 > | §3 evaluator 範本 | 「僅白名單模板 `python -m pytest {path} -k "{at}" -q`」 | adapter 實際範本是裸 `pytest {path} -k "{at}" -q`（R52 起；`_EVALUATOR_TEMPLATE`，adapter 的 prompt 還明寫「不是 python -m pytest」） |
 > | §5 標題與內文 | 「`AUTOCLAUDE_DELEGATED` 觀察態（提案，未落地）」；「v0.02 **不新增** FSM 狀態（`_HAPPY_PATH` 零修改 → 五軌 TLC 維持有效，N/A）」 | Phase Z′ 已落地（`transition_rules.py` 的 `_HAPPY_PATH`／`OBSERVATION_STATES`、`formal/SDD_FSM.tla`、`FSMRuntime.enter_autoclaude_delegated`／`exit_autoclaude_delegated`、`releases/CHANGELOG.md` 的 Phase Z′ 條目）；原文完整引用見 §5 |
+> | §7 判準（整合輪 116） | 「**兩個條件都成立才走**（缺一就改走一般開發流程，仍受倉內 CI 閘門約束，不要為了套流程而硬寫佔位 AT）：1. **有 Python 可測的 AT**：AC 能寫成以 `pytest -k "<at>"` 自動判定的 AT（Given-When-Then；evaluator 白名單只收裸 `pytest`）。2. **規格可凍結**：FRD-lite／TCS 能在實作**之前**通過 SCG-0～3，並經人類確認、以 `spec-frozen --digest` 凍結。」 | 改為三徑（§7）。原判準把 Java／TypeScript 子專案連規格、閘門、RTM 一併排除；事實上它們的規格仍可凍結、SCG 閘門仍可走，不能的只有「AT 交給 evaluator 自動判定」，所以只該把徑①（委派迴圈）限定在 pytest 可評的 AT，另開徑②（SDD session-only） |
+> | §7 補充（hooks；整合輪 116） | 「本 monorepo 自身的開發預設不受 SDD 治理（根層 SDD hook router 在 `SDD_ACTIVE_VERSION` 未設時休眠）；一般 session 不要為了走這條迴圈而啟用 Rule 9 hooks——FSM 進入阻塞態（ESCALATION 等）時會擋下一切工具呼叫，把工具鎖死。」 | 「預設 hooks-OFF」仍成立；「不要啟用」的反向語氣過時。走徑①②就是要開 hooks-ON 視窗，§8 給出單一 SOP（三件組、一視窗一功能、阻塞態三層處置），不是叫人不要開 |
 >
 > 全文搜尋同一宣稱：`SDD_FSM_ENGINE.md` 的轉換表早已列出 AUTOCLAUDE_DELEGATED 兩個出口（與本檔舊 §5 互斥的是本檔，不是它）。
 
@@ -300,18 +302,309 @@ cd "<SDD 版本目錄>" && SDD_STATE_DIR="<專案根>/build/reports/fsm" "<pytho
 R-9.20.3 獨立性不滿足（§6.4）；外部專案模式下由人觸發的 SCAFFOLD_GC／LEARNING_COMMIT 等仍寫框架的 `build/reports/*`；
 Console 沒有「退回修改」與「解除綁定」。完整清單與再開症狀見 ADR-XPLAT-016 §14.1。
 
-## 7. 何時走 SDD 迴圈（判準；G-11）
+## 7. 何時走 SDD 迴圈（判準；G-11；整合輪 116 改為三徑）
 
-**兩個條件都成立才走**（缺一就改走一般開發流程，仍受倉內 CI 閘門約束，不要為了套流程而硬寫佔位 AT）：
+三徑共同的入場券是「**規格能在實作之前凍結**」：FRD-lite／TCS 能在實作**之前**通過 SCG-0～3，並經人類確認、以
+`spec-frozen --digest` 凍結。這條不成立就走徑③。成立之後，再看 **AT 能不能被 evaluator 自動判定**，決定走徑①還是徑②：
 
-1. **有 Python 可測的 AT**：AC 能寫成以 `pytest -k "<at>"` 自動判定的 AT（Given-When-Then；evaluator 白名單只收裸 `pytest`）。
-2. **規格可凍結**：FRD-lite／TCS 能在實作**之前**通過 SCG-0～3，並經人類確認、以 `spec-frozen --digest` 凍結。
+| 徑 | 判準 | 做法 | 目前適用 |
+|---|---|---|---|
+| ① 委派迴圈 | 規格可凍結，**且**每個 AC 能寫成以 `pytest -k "<at>"` 自動判定的 AT（Given-When-Then；evaluator 白名單只收裸 `pytest`，見 §3） | 走 §6（Console／Bridge）或 §5 的人工委派：AutoClaude 依編譯出的 playbook 實作並雙重驗證；SDD 側的閘門在 §8 的 hooks-ON 視窗走 | Python 標的：AutoClaude、AgentConsole 的 `engine-bridge`、AISDLC_SDD 自身 |
+| ② SDD session-only | 規格可凍結；AT **不是** pytest 可評（Java、TypeScript） | 全程走 §8：hooks-ON 的 SDD session 內依凍結規格實作；AT 由 session 內自跑 `gradlew test --tests …`／`vitest run -t …`／pytest，**輸出逐字貼進證據檔與 RTM 欄**（沒貼＝未驗證） | AgentConsole 的 `backend`（Java）、`frontend`（TypeScript） |
+| ③ 一般流程 | 規格無法在實作前凍結，或功能小到不值得走閘門 | 一般開發流程，仍受倉內 CI 閘門約束；不要為了套流程而硬寫佔位 AT | 其餘 |
 
 補充：
 
-- **不強制全面套用**：SDD 迴圈是選用的橋接（Console 路徑或 SDD session）。本 monorepo 自身的開發預設不受 SDD 治理（根層 SDD hook router
-  在 `SDD_ACTIVE_VERSION` 未設時休眠）；一般 session 不要為了走這條迴圈而啟用 Rule 9 hooks——FSM 進入阻塞態（ESCALATION 等）時會
-  擋下一切工具呼叫，把工具鎖死。
+- **不強制全面套用**：SDD 迴圈是選用的橋接（Console 路徑或 SDD session）。**預設 hooks-OFF**——根層 SDD hook router 在
+  `SDD_ACTIVE_VERSION` 未設時休眠，一般 session 零污染；要走徑①②時，依 §8 開 hooks-ON 視窗。hooks-ON 視窗是把 SDD 守門裝上去的
+  專用視窗（一次綁一個功能、收工即關），不是把整個 monorepo 的開發預設改成受治理；阻塞態（ESCALATION 等）會擋下被 matcher 命中的
+  工具呼叫，§8.8 給了三層處置，風險是被管理的，不是迴避的理由。
+- **不擴 evaluator 白名單**：evaluator 命令必須是單一模板內插（Gap-046 資安過濾器），Java／TS 的 AT 不會被「放寬白名單」救進徑①；
+  以 pytest 殼代跑 Java／TS 也不做。再開症狀：掌舵者要求 Java／TS 功能走 Console 委派。
 - **小功能走增量條款**：變更限於已凍結系統的單一 Feature 時，見 [SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈增量（delta）條款〉
   ——FRD-lite 併入 TCS 檔頭，加上 TCS，不必重寫全套 PRD／SRD／C4／OpenAPI。
 - 整合輪 115 的 dogfood 是本迴圈第一個真實使用者；新發現的缺口請走缺陷帳本，不要在本檔補丁式追加。
+
+## 8. 子專案 SDD session（根 session、外部專案模式；單一 SOP；整合輪 116）
+
+本節是「在 monorepo 根開一個 hooks-ON 的 SDD session，把 AutoClaude、AgentConsole、monorepo 根層或 AISDLC_SDD 自身任一個當成 SDD
+外部專案來開發」的**唯一** SOP。§6 是 Console／Bridge 的 HTTP 路徑，本節是人在終端的路徑，兩者在**狀態目錄**相會（§8.11）。機制本身
+（外部專案模式＝ADR-XPLAT-016 §3 的 `SDD_STATE_DIR`／`SDD_PROJECT`）早已就位，缺的是 SOP 與幾條守門，整合輪 116 補上。事實依據是
+2026-10-18 的探針實測（編號 P1～P10、P3x 見 `docs/04_planning/AutoSDD_improving_116.md` §1.1）。
+
+### 8.0 適用與不做
+
+| 項 | 規定 |
+|---|---|
+| 何時走本節 | 依 §7：徑①（委派迴圈）與徑②（SDD session-only）走本節；徑③（一般流程）不開 hooks-ON 視窗 |
+| FSM 的單位 | **一個功能週期一個 FSM 專案鍵**（D-116-03）。原因：`transition_rules.py` 的 `RELEASE` 是終態（出邊集合為空），IMPLEMENTATION／PR_REVIEW／RTM_VERIFY 也沒有回 SPEC_DRAFTING 的邊——一個鍵只走得完一個功能，下一個功能用新鍵 |
+| 鍵的格式 | `<sub>-<slug>`：`sub` ∈ `autoclaude`／`agentconsole`／`monorepo`／`sdd`；`slug` 小寫 kebab、≤30 字。**鍵一律小寫**：Windows 檔名不分大小寫、POSIX 分，混用大小寫會在兩個平台各得一份 `FSM-STATE-*.yaml`（G-116-19） |
+| 狀態目錄 | 每個子專案一個目錄（§8.1），目錄內多個鍵的狀態檔共處；同目錄多檔而無法指認鍵＝adapter／Bridge fail-closed（§1） |
+| RELEASE 語意 | 週期終點是 RELEASE_READY；功能合併進 main 且雲端 CI 綠之後，由收尾者記一次 `RELEASE`（終態，不重開；§8.7） |
+| Console | 一個功能一個 Console 專案（`execution_path`＝子專案根；§8.11） |
+| 本節不做 | 不改 hook 判準（規格檔 deny 仍看路徑子字串，§8.3）、不擴 evaluator 白名單（§7）、不新增 CLI 動詞、不碰 `_HAPPY_PATH`／`formal/` |
+
+### 8.1 三件組標準值與啟動區塊
+
+三件組＝`SDD_ACTIVE_VERSION`（hooks 版本）＋`SDD_STATE_DIR`（狀態目錄，**絕對路徑**）＋`SDD_PROJECT`（FSM 專案鍵）；**缺一不可**（§8.3）。
+標準值（路徑相對 monorepo 根；LATEST 現查 `python AISDLC_SDD/scripts/sdd_version.py`，`SDD_ACTIVE_VERSION`＝其輸出去掉 `AISDLC_SDD_v`
+前綴，例 `0.30`）：
+
+| `sub` | `SDD_STATE_DIR` | 鍵 | 專案文件根（`docs/`） | Console `execution_path` | `spec-frozen --root` |
+|---|---|---|---|---|---|
+| `autoclaude` | `AutoClaude\build\reports\fsm` | `autoclaude-<slug>` | `AutoClaude/docs/` | `<根>\AutoClaude` | `<根>\AutoClaude`（凍結文件都在其下；省略 `--root` 也會推導到這裡） |
+| `agentconsole` | `AgentConsole\build\reports\fsm` | `agentconsole-<slug>` | `AgentConsole/docs/`（PRD 在根層 `docs/01_requirements/`） | `<根>\AgentConsole` | 凍結文件含根層 PRD 時取 monorepo 根（`--doc` 寫相對根的路徑，如 `AgentConsole/docs/…`、`docs/01_requirements/…`）；只含子專案內文件時取 `<根>\AgentConsole` |
+| `monorepo` | `build\reports\fsm` | `monorepo-<slug>` | 根 `docs/` | `<根>` | monorepo 根 |
+| `sdd` | `AISDLC_SDD\AISDLC_SDD_v<LATEST>\build\reports\sdd-dogfood` | `sdd-<slug>` | 版本目錄 `docs/` | 不走 Console：Bridge 固定讀 `<execution_path>\build\reports\fsm`，`sdd-dogfood` 不在慣例內 | 版本目錄（凍結文件含 `AISDLC_SDD/CLAUDE.md` 時取 `AISDLC_SDD/`） |
+
+`--root` 規則：取「含全部凍結文件的最小目錄」（絕對路徑、須為存在的目錄）。省略時：狀態目錄以 `build/reports/fsm` 結尾 ⇒ 取其上三層（子專案根），
+否則退回框架版本目錄；自訂目錄落在慣例之外又不給 `--root`＝rc 4 `doc_not_found`，大聲失敗而不是靜默算錯檔（P7）。摘要的鍵是相對 `--root` 的
+POSIX 路徑；adapter 與 Bridge 以「鍵為路徑尾段」比對、不依賴 `--root` 的絕對路徑，所以以根層為基準的鍵也對得上子專案內的規格檔。
+
+四個狀態目錄都已被 `.gitignore` 忽略（根 `.gitignore` 的 `/build/reports/fsm/`、`AutoClaude/.gitignore`、`AgentConsole/.gitignore`、
+`AISDLC_SDD/.gitignore` 的各版 `build/reports/`；`git check-ignore` 實測）——狀態不入庫，所以每個功能收尾要把證據引進證據檔（§8.12）。
+
+啟動區塊（**hooks-ON 視窗專用**，收工關視窗即清環境；一律從 monorepo 根啟動，§8.3）。PowerShell：
+
+```powershell
+# 在 monorepo 根的 PowerShell 視窗啟動（子目錄啟動則根 router 不載入）；hooks-ON 視窗專用，收工關視窗即清環境
+$root = (Get-Location).Path
+$ver  = ((python AISDLC_SDD/scripts/sdd_version.py) -replace '^AISDLC_SDD_v', '').Trim()
+$sub  = 'autoclaude'   # autoclaude｜agentconsole｜monorepo｜sdd
+$slug = 'webhook'      # 小寫 kebab、≤30 字；一個功能週期一個鍵
+$rel  = @{ autoclaude = 'AutoClaude\build\reports\fsm'; agentconsole = 'AgentConsole\build\reports\fsm'; monorepo = 'build\reports\fsm'; sdd = "AISDLC_SDD\AISDLC_SDD_v$ver\build\reports\sdd-dogfood" }
+$env:SDD_ACTIVE_VERSION = $ver
+$env:SDD_PROJECT        = "$sub-$slug"
+$env:SDD_STATE_DIR      = Join-Path $root $rel[$sub]
+$env:SDD_ENABLE_RULE_FIRE_TELEMETRY = '0'; $env:SDD_ENABLE_RULE_CATCH_TELEMETRY = '0'
+# 日常視窗可加：$env:SDD_HOOKS_DRY_RUN = '1'（deny 降為警告）；證明守門的場次不要設
+claude
+```
+
+bash／zsh（mac／Linux）：
+
+```bash
+# 在 monorepo 根的 bash／zsh 視窗啟動；hooks-ON 視窗專用
+root="$(git rev-parse --show-toplevel)"; ver="$(python AISDLC_SDD/scripts/sdd_version.py | sed 's/^AISDLC_SDD_v//')"
+sub=autoclaude; slug=webhook   # sub：autoclaude｜agentconsole｜monorepo｜sdd
+case "$sub" in autoclaude) rel=AutoClaude/build/reports/fsm;; agentconsole) rel=AgentConsole/build/reports/fsm;; monorepo) rel=build/reports/fsm;; sdd) rel="AISDLC_SDD/AISDLC_SDD_v$ver/build/reports/sdd-dogfood";; esac
+export SDD_ACTIVE_VERSION="$ver" SDD_PROJECT="$sub-$slug" SDD_STATE_DIR="$root/$rel" SDD_ENABLE_RULE_FIRE_TELEMETRY=0 SDD_ENABLE_RULE_CATCH_TELEMETRY=0
+claude
+```
+
+貼到最後一行 `claude` 之前停手：先做 §8.2 的 (a)(c)，通過後才執行 `claude`。環境變數在 `claude` 啟動那一刻就定案（hooks 子行程繼承的是這一份），
+之後在視窗內改環境影響不到已在跑的 session；要換功能＝關視窗、改 `$sub`／`$slug` 重新貼（§8.3 一視窗一功能）。
+
+### 8.2 開場三步
+
+**(a) 驗三件組同址**——在已設三件組的同一個視窗、`claude` 還沒啟動時。`<版本目錄>`＝`$root\AISDLC_SDD\AISDLC_SDD_v$ver`。
+
+PowerShell（不裸 `cd`；`Push-Location`／`Pop-Location` 成對；先接到變數再讀 rc）：
+
+```powershell
+$vd = Join-Path $root "AISDLC_SDD\AISDLC_SDD_v$ver"; $py = Join-Path $root '.venv\Scripts\python.exe'
+Push-Location $vd -ErrorAction Stop
+# 新功能（這個鍵第一次出現）才跑下一行：整個週期唯一允許「缺檔自動建立 INIT 狀態檔」的一次；續做既有功能跳過
+$null = & $py -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project $env:SDD_PROJECT
+# 之後（以及續做既有功能時）一律帶 --must-exist
+$out = & $py -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project $env:SDD_PROJECT --must-exist
+$rc = $LASTEXITCODE
+Pop-Location
+"rc=$rc"   # 0＝三件組同址；5＝state_not_found＝鍵或目錄錯：改三件組，不要拿掉 --must-exist 硬過
+"current_state=" + (($out -join "`n" | ConvertFrom-Json).fsm_state.current_state)   # 新功能＝INIT
+Test-Path (Join-Path $env:SDD_STATE_DIR "FSM-STATE-$($env:SDD_PROJECT).yaml")   # 必須 True
+```
+
+bash／zsh：
+
+```bash
+vd="$root/AISDLC_SDD/AISDLC_SDD_v$ver"; py="$root/.venv/bin/python"
+( cd "$vd" && "$py" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project "$SDD_PROJECT" >/dev/null )   # 新功能第一次才跑；續做跳過
+( cd "$vd" && "$py" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project "$SDD_PROJECT" --must-exist >/dev/null ); echo "rc=$?"   # 0＝同址；5＝鍵或目錄錯
+test -f "$SDD_STATE_DIR/FSM-STATE-$SDD_PROJECT.yaml" && echo "狀態檔在三件組指定的目錄"
+```
+
+**(b) 第二終端備妥恢復指令**——另開一個終端（同一 monorepo 根、**不設**三件組、已啟用 `.venv`），先把恢復指令填好存著。ESCALATION 時 hooks 印出的恢復行
+（`recovery_hint.py`；外部專案模式下自帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`／`--must-exist`／`-W ignore::RuntimeWarning`，G-116-01）與下列樣板等價；
+自己填時 `--to` 只能是 SPEC_DRAFTING／IMPLEMENTATION／PR_REVIEW 之一，選「要回到的工作階段」（委派失敗＝IMPLEMENTATION，與 §6.8 一致）。
+
+```powershell
+Push-Location "<根>\AISDLC_SDD\AISDLC_SDD_v<LATEST>" -ErrorAction Stop; $env:SDD_STATE_DIR = '<狀態目錄>'; $env:SDD_PROJECT = '<鍵>'; & "<根>\.venv\Scripts\python.exe" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime resume-from-escalation --project '<鍵>' --to IMPLEMENTATION --must-exist --reason "<人工原因>"; Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT; Pop-Location
+```
+
+```bash
+cd "<根>/AISDLC_SDD/AISDLC_SDD_v<LATEST>" ; SDD_STATE_DIR='<狀態目錄>' SDD_PROJECT='<鍵>' "<根>/.venv/bin/python" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime resume-from-escalation --project '<鍵>' --to IMPLEMENTATION --must-exist --reason "<人工原因>"
+```
+
+**(c) 活性正負兩面驗收**（配方出自根 `CLAUDE.md`〈hook 載具〉；同樣在已設三件組的視窗）。「不閃窗了」「沒報錯」都不算驗收通過：載具解析不到時 Claude Code
+fail-open（只記 ERROR、工具照跑），表徵與「修好了」完全相同，所以正負兩面都要看。
+
+```powershell
+$log = Join-Path $env:TEMP 'sdd_hooks_probe.log'
+claude -p --model haiku --debug hooks --debug-file $log "ok"
+Select-String -Path $log -Pattern 'Hook SessionStart.*success'        # 正面①：hooks 活著（要有 success）
+Select-String -Path $log -Pattern "project: $($env:SDD_PROJECT)"      # 正面②：注入的是你的鍵與狀態
+Select-String -Path $log -Pattern 'project: AISDLC_SDD'               # 負面①：不得有輸出（有＝鍵退回目錄名，缺 SDD_PROJECT）
+Test-Path (Join-Path $vd ('build\reports\fsm\FSM-STATE-{0}.yaml' -f $env:SDD_PROJECT))   # 負面②：必須 False（True＝狀態寫進框架預設目錄）
+Remove-Item -LiteralPath $log
+```
+
+```bash
+log="$(mktemp)"; claude -p --model haiku --debug hooks --debug-file "$log" "ok"
+grep 'Hook SessionStart.*success' "$log"; grep "project: $SDD_PROJECT" "$log"
+grep 'project: AISDLC_SDD' "$log" && echo "負面①失敗" || echo "負面①通過（無命中）"
+test -e "$vd/build/reports/fsm/FSM-STATE-$SDD_PROJECT.yaml" && echo "負面②失敗" || echo "負面②通過"
+rm -f "$log"
+```
+
+### 8.3 硬規則
+
+1. **一律從 monorepo 根啟動 `claude`**（P3x）：`CLAUDE_PROJECT_DIR` 指向子專案時，根層啟動器找不到 router ⇒ rc=0 空輸出，hooks **靜默 fail-open**；直接跑 router
+   只會 WARN＋放行。從子專案目錄啟動只會載入該目錄自己的 `.claude/settings.json`（§8.12）。
+2. **三件組缺一不可**：缺 `SDD_STATE_DIR` ⇒ 狀態寫進框架預設目錄 `AISDLC_SDD/<LATEST>/build/reports/fsm/`，且 hook 對不存在的專案名會自動建檔（P3）；缺
+   `SDD_PROJECT` ⇒ 鍵退回版本目錄上一層的目錄名 `AISDLC_SDD`，缺檔即建一份 `FSM-STATE-AISDLC_SDD.yaml`（INIT）（P1）；缺 `SDD_ACTIVE_VERSION` ⇒ 根 router 休眠，
+   所有 hooks 不動（等於沒開）。
+3. **一個 hooks-ON 視窗同時只綁一個功能**（P4）：規格檔 deny 看**路徑字串**含 `docs/01_requirements/`｜`docs/02_architecture/`｜`docs/03_testing/`，與該檔屬於哪個專案
+   無關——在非草擬態，任何子專案（含根層）的這三個目錄都被擋（Write／Edit；deny 走 stdout JSON `permissionDecision=deny`、rc=0）。**允許寫規格檔的態**（
+   `fsm_runtime._STATES_ALLOWING_SPEC_WRITE`）：INIT、SCENARIO_DETECT、AGENT_LOAD、SPEC_DRAFTING、SPEC_AUDIT、SPEC_REGRESSION_CHECK、RESUME_VERIFICATION。程式碼與
+   `docs/04_planning/`、`docs/06_quality/` 放行。跨專案的文件編修走 hooks-OFF 視窗。
+4. **CLI 形態**一律 `python -m tools.fsm_runtime.fsm_runtime …`，且 cwd 或 `PYTHONPATH`＝版本目錄（P1：直接跑 `.py`＝ImportError，rc=1）。每次呼叫 stderr 會多一行 runpy 的
+   `RuntimeWarning`，與成敗無關，加 `-W ignore::RuntimeWarning` 消音；成敗只看 rc 與 stdout。
+5. **兩個遙測旗標顯式 0**：`SDD_ENABLE_RULE_FIRE_TELEMETRY=0`、`SDD_ENABLE_RULE_CATCH_TELEMETRY=0`（P6：兩者為 0 時整套探針後 `git status --short` 空、governance `diff --stat` 空；
+   外部專案模式的預設雖已關回寫，仍不靠預設）。
+
+### 8.4 棕地 Stage-1 基線採納程序（G-116-08／D-116-10）
+
+**何時做**：該子專案的上位文件（PRD／SRD／ADR／契約）從未走過 SCG、FSM 裡沒有凍結紀錄——也就是每個**新功能鍵的開頭**做一次（鍵是新檔，基準文件不變、摘要相同，做起來是幾行指令）。
+採納**不是**重跑 SCG：它只把「人類確認過這批文件的現況」記進 FSM，讓後續的凍結綁內容有基準，也讓 §8.5 的增量追溯表有可引用的已凍結文件。
+
+**鏈**：五次 `transition`（INIT→SCENARIO_DETECT→AGENT_LOAD→SPEC_DRAFTING→SCG_VALIDATION→HUMAN_PENDING）＋一次 `spec-frozen --stage Stage-1 --doc …（上位文件）--digest --root <根> --approver <人> --json`。
+用 `transition` 而不是 `gate … PASS`：後者會把這一步記成 SCG 通過；採納沒有重跑 SCG，不得留下通過紀錄。reason 一律寫「baseline adoption；SCG 未重跑」。
+
+PowerShell（前置：§8.1 已設三件組、§8.2(a) 已建檔；`$vd`、`$py` 同 §8.2；`--doc` 路徑相對 `--root`、用正斜線）：
+
+```powershell
+function sdd { & $py -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime @args }
+Push-Location $vd -ErrorAction Stop
+foreach ($to in 'SCENARIO_DETECT', 'AGENT_LOAD', 'SPEC_DRAFTING', 'SCG_VALIDATION', 'HUMAN_PENDING') {
+    sdd transition --project $env:SDD_PROJECT --must-exist --to $to --reason 'baseline adoption；SCG 未重跑'
+}
+$docs = 'CLAUDE.md', 'docs/02_architecture/SRD_AGT_Phase1_Memory.md'   # 依下表填；此例＝autoclaude（--root 取 AutoClaude）
+$docArgs = $docs | ForEach-Object { '--doc'; $_ }
+sdd spec-frozen --project $env:SDD_PROJECT --must-exist --stage Stage-1 @docArgs --digest --root (Join-Path $root 'AutoClaude') --reason 'baseline adoption；SCG 未重跑；授權依據：<…>' --approver '<人類確認者>' --json
+Pop-Location
+```
+
+bash／zsh：
+
+```bash
+sdd() { ( cd "$vd" && "$py" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime "$@" ); }
+for to in SCENARIO_DETECT AGENT_LOAD SPEC_DRAFTING SCG_VALIDATION HUMAN_PENDING; do
+  sdd transition --project "$SDD_PROJECT" --must-exist --to "$to" --reason 'baseline adoption；SCG 未重跑'
+done
+sdd spec-frozen --project "$SDD_PROJECT" --must-exist --stage Stage-1 --doc CLAUDE.md --doc docs/02_architecture/SRD_AGT_Phase1_Memory.md --digest --root "$root/AutoClaude" --reason 'baseline adoption；SCG 未重跑；授權依據：<…>' --approver '<人類確認者>' --json
+```
+
+| `sub` | Stage-1 上位文件（`--doc`；相對 `--root`） | `--root` |
+|---|---|---|
+| `autoclaude` | `CLAUDE.md`、`docs/02_architecture/SRD_AGT_Phase1_Memory.md`、`docs/02_architecture/SRD_AGT_Phase2_Closedloop.md`、`docs/02_architecture/SRD_AGT_Phase3_Autonomy.md`（本功能涉及的既有 FRD 另加，如 `docs/01_requirements/FRD_*.md`） | `<根>\AutoClaude` |
+| `agentconsole` | `docs/01_requirements/Agent_ConsoleUI_PRD.md`、`AgentConsole/docs/02_architecture/Architecture.md`、`AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md`、`AgentConsole/docs/02_architecture/ADR-002-Frontend-Design-System.md`、`AgentConsole/docs/02_architecture/API_Contract_P3-6.md`、`AgentConsole/docs/02_architecture/openapi-p3-6.yaml`（SCG-3 契約） | `<根>`（含根層 PRD） |
+| `monorepo` | `CLAUDE.md`、`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md` | `<根>` |
+| `sdd` | `CLAUDE.md`、`AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md`、`AISDLC_SDD_v<LATEST>/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`（`--root` 取 `AISDLC_SDD/`，所以 `CLAUDE.md` 即 `AISDLC_SDD/CLAUDE.md`） | `<根>\AISDLC_SDD` |
+
+**慣例**：
+
+- 追溯表（TCS 檔頭〈增量追溯表〉，見 [SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈增量（delta）條款〉）裡，指向採納文件的列在「追溯 ID」欄標
+  `ADOPTED`（例：`ADOPTED SRD-AGT-Phase2 §3`）；「凍結摘要」欄照填 Stage-1 記下的 `sha256:…`（`show` 的 `frozen_stages[0].spec_doc_digests` 可查）。
+- `--approver` 必須是**人類確認者**（非空、≤100 字、不含控制字元；Bridge 路徑另禁 `;`）。掌舵者授權主控代決時填 `掌舵者代理（主控）`，並把授權依據（日期＋授權原話的出處）寫進 `--reason`。
+  agent 不得自行判定「已確認」（Rule 8／R-9.5）。
+- 採納後 `show --must-exist` 看 `frozen_stages[-1]`：`spec_docs` 與 `spec_doc_digests` 應列出全部 `--doc`；把這段逐字引進證據檔（§8.12）。
+
+### 8.5 Stage-2 增量規格
+
+- **文件集**：FRD-lite（US／AC 併入 TCS 檔頭）＋TCS，寫進**被治理專案自己的** `docs/03_testing/contracts/TCS-<Feature>-<date>.md`（模板
+  `docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md`，複製後填寫、不改模板）；目前 AutoClaude、AgentConsole、monorepo 根層都還沒有 `docs/03_testing/contracts/`，隨第一份 TCS 新建（G-116-14）。
+  僅新架構決策才另立 ADR，僅對外 API／事件契約變更才另附 OpenAPI delta。
+- **增量追溯表**：照 [SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈增量（delta）條款〉逐項列出，追溯到 §8.4 採納的已凍結上位文件（路徑＋摘要）；沒列進表＝未滿足。
+- **走法**：SPEC_FROZEN 之後 `transition --to SPEC_DRAFTING --reason "進入 Stage-2"` → 寫規格 → `transition --to SCG_VALIDATION --reason "SCG-0～3 驗證開始"` →
+  `gate --gate SCG_VALIDATION --result PASS／FAIL`（指令全表見 [SDD_SPEC_FIRST_GATE.md](../sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md)〈FSM 寫入指令〉）→ HUMAN_PENDING → 人確認 → `spec-frozen --stage Stage-2 …`（`--doc` 必含 TCS）。
+- **報告與 RTM 落 `docs/06_quality/`**（D-116-09）：SCG_VALIDATION 起 `docs/03_testing/` 被擋寫（§8.3 第 3 點），SCG 驗證報告、SCG-4 審查報告、RTM 與 RTM 驗證報告一律放 `docs/06_quality/`；
+  `docs/03_testing/` 只放凍結前的測試規格（TCS、測試策略、測試計畫）。
+- **增量專案的機械半段會空轉**（G-116-15；整合輪 115 的 DEF-AC-015／016／017）：SLV 的檔名樣式與 `score_frd` 在表格形 AC 上不會產生判斷，**由 QA 人讀補位**——逐條讀 AC 與追溯表，
+  不要把「機械半段沒報錯」當成通過。再開症狀：QA 發現機械半段放行了有缺陷的 AC（屆時修碼）。
+
+### 8.6 人工閘與實作
+
+1. **人工閘**：`spec-frozen` 是人類動作，`--approver` 填人（§8.4 慣例）；確認前 agent 不得執行（Rule 8）。
+2. **談判閘**：SPEC_FROZEN 之後 `negotiate-enter --reason "<原因>" --contract-ref "<TCS 相對路徑>"` → Dev／QA 對 oracle 達成共識後 `negotiate-exit --outcome agreed --reason "<共識依據>"` →
+   IMPLEMENTATION（R-9.20.2；全表見 GATE〈FSM 寫入指令〉第 8 列）。Console 路徑由 Bridge 代為（§6.4）。
+3. **徑①（委派）**：Console 路徑走 §6，由 Bridge 同步 FSM。**CLI-only**：人在 session 內 `delegate-enter --reason "<原因>"`（`--playbook-ref` 不帶，或寫不以 `run:` 開頭的值＝外來委派，Bridge 不會回收，見 §5、§6.7）→ 依 §2 編譯並執行
+   playbook → 完成或使用者取消 `delegate-exit --decision done`，引擎升級型失敗 `--decision failed`（進 ESCALATION，只有人能解，§8.8）。CLI-only 路徑的 FSM 委派**不自動同步**：
+   延後，再開症狀＝掌舵者在純 CLI 路徑要求 FSM 反映 AutoClaude 執行狀態。
+4. **徑②（session-only）**：session 內依凍結規格實作，Rule 4（每支程式立即編譯＋跑單元測試）；AT 由 session 內自跑——Java：`gradlew test --tests …`；TypeScript：`vitest run -t …`；Python：`pytest -k …`——
+   **輸出逐字貼進證據檔與 RTM 的「自動測試」欄**，沒貼＝未驗證。
+
+### 8.7 SCG-4 獨立審查 → RELEASE
+
+1. `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"`；審查者必須是**未參與規格撰寫與實作**的角色（AI 自寫自驗的補償控制，§6.4 C-3），以 `AISDLC_SDD:sdd-review` 產報告 → `docs/06_quality/SCG4-REVIEW-<Feature>-<日期>.md`。
+2. `gate --gate PR_REVIEW --result PASS --reason "SCG-4 PASS"` → RTM_VERIFY；`AISDLC_SDD:rtm-generate verify` 產 `docs/06_quality/RTM-<System>.md`／`RTM-VERIFY-<System>.md`；`gate --gate RTM_VERIFY --result PASS --reason "SCG-5 PASS"` → RELEASE_READY。
+   失敗與重試上限照 GATE〈FSM 寫入指令〉第 11、12 列（PR 5 次、同模式 3 次 → SPEC_AUDIT；RTM 2 次）。
+3. **RELEASE**：功能合併進 main 且雲端 CI 綠之後，由**收尾者**執行一次 `transition --to RELEASE --reason "SCG-6 PASS；已合併 <commit>，雲端 CI 綠"`（終態；`RELEASE: set()`，不重開）。下一個功能用新鍵、新視窗。
+4. 收尾時把 `show --must-exist` 的逐字輸出與 `frozen_stages[*].spec_doc_digests` 引進證據檔（狀態在被忽略的 `build/` 下，不入庫；§8.12）。
+
+### 8.8 阻塞態三層處置（D-116-08；不改任何 hook）
+
+FSM 進入 ESCALATION／ESCALATION_FINAL（或 TERMINATED、TOKEN_BUDGET_CRITICAL）後，根 router 轉發的 PreToolUse 對**被 matcher 命中的工具**（Write／Edit／Read／Bash／NotebookEdit／Task／Agent／Workflow）
+一律 deny，deny 訊息附恢復指令（P5）；**只有人能解**（Rule 9.5、絕對禁令 #6）。ESCALATION 是**專案級黏著**：關視窗再用同一組三件組重開，仍然被擋。三層：
+
+| 層 | 做什麼 | 誰 |
+|---|---|---|
+| ① 預防 | 一個視窗只綁一個功能（§8.3，不讓別的功能的態擋住這個視窗）；日常視窗可設 `SDD_HOOKS_DRY_RUN=1`（deny 降為警告；**證明守門的場次不要設**）；開場先備妥恢復指令（§8.2 b）。**不**把 `SDD_HOOKS_DRY_RUN` 寫進 `$PROFILE`／`~/.zshrc`：那會讓所有視窗的守門靜默降級 | 人 |
+| ② 解除 | 在**第二終端**執行 hook 印出的恢復行（外部專案模式下自帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`；舊版不帶，照貼會打到框架預設 INIT 檔、回 noop rc=0 的假成功，子專案仍鎖死——G-116-01 已修）。**agent 不得代跑**（Rule 9.5）。跑完用 `show --must-exist` 確認 `current_state` 已離開 ESCALATION | 人 |
+| ③ 全關 | 關視窗，重啟前清 `SDD_ACTIVE_VERSION`（PowerShell `Remove-Item Env:SDD_ACTIVE_VERSION`；bash `unset SDD_ACTIVE_VERSION`）——router 休眠、全部放行（P5：拿掉 `SDD_ACTIVE_VERSION` 即全放行）；或重啟前設 `SDD_HOOKS_DISABLE=1`（全關，保留子代理注入）。環境在 `claude` 啟動時就定案，視窗內改不動 | 人 |
+
+③ 只關守門、**不解 FSM**：狀態檔仍是 ESCALATION，下一個 hooks-ON 視窗照樣被擋；要續做該功能就得走②。
+
+### 8.9 閘門對映（D-116-05）
+
+SCG 是**單一功能**的閘；AutoClaude 的 G0～G6 與 AgentConsole 的 W 波次是 **Sprint／波次層級**的交付里程碑簽核。兩套並存，不改名、不互相取代：
+
+| 層 | 閘 | FSM 驗證 | 三子專案共同點 |
+|---|---|---|---|
+| 規格閘 | SCG-0～3 | `gate --gate SCG_VALIDATION`（共用一個重試預算，上限 3）→ HUMAN_PENDING → `spec-frozen` | 一個功能一份 FRD-lite＋TCS，三子專案同一套（FSM 可驗） |
+| 品質閘 | SCG-4 | `PR_REVIEW`（上限 5；同模式 3 次 → SPEC_AUDIT） | 獨立審查：審查者未參與規格與實作 |
+| 品質閘 | SCG-5 | `RTM_VERIFY`（上限 2） | RTM 100% 覆蓋；RTM 與報告落 `docs/06_quality/` |
+| 發布閘 | SCG-6 | RELEASE_READY → `RELEASE`（合併＋雲端 CI 綠後，§8.7） | 以倉內 CI 為憑 |
+| 交付里程碑 | G0～G6（AutoClaude；見 `AutoClaude/docs/05_development/gate_audit.md`）／W1～W5 入口與出口閘（AgentConsole；見 `AgentConsole/docs/04_planning/Implementation_Plan.md` §2） | 不在 FSM 內，人工簽核 | 範圍比單一功能大：一個 G／W 之內可以有多個功能週期（多個鍵）；SCG 的通過紀錄與報告可作為簽核證據引用 |
+
+### 8.10 skills 與路徑語意（G-116-13）
+
+- **一律以 `AISDLC_SDD:<skill>` 前綴叫起**（來源＝`AISDLC_SDD/.claude/skills`，LATEST 的機械鏡像）。根層與 AgentConsole 不另建鏡像：每份鏡像都會進每個 session 的技能清單，既有前綴已可達。
+- **AutoClaude 自己的 `.claude/skills` 也是 LATEST 的機械鏡像**，由 `AISDLC_SDD/scripts/sync_exposed_skills.py` 守：`--check` 預設同時守父層與 AutoClaude 兩個目標，stale 時訊息指出修法
+  `--write --target autoclaude`（AutoClaude 專案目錄不存在的獨立 checkout，該目標略過、不紅）。原因：Claude Code 對 skills 採「最具體者優先」，在 `AutoClaude/` 的檔案上它會壓過 `AISDLC_SDD:` 前綴；
+  它曾是 33 支 AISDLC v0.09 舊版（缺 sdd-gate 等 SDD 專屬 skill），於是在 AutoClaude 的檔案上叫到的是非 SDD 版。
+- **skill 內相對路徑的語意**（外部專案模式下兩個根不同）：`docs/`、`build/reports/` 以**專案根**（被治理專案的根）為準；`workflow/`、`governance/`、`docs_template/`、`agent/` 以**版本目錄**
+  （`AISDLC_SDD/AISDLC_SDD_v<LATEST>/`）為準。
+
+### 8.11 Bridge 綁定一致性（探針 P8）
+
+| 項 | 事實／規定 |
+|---|---|
+| 狀態目錄 | Bridge 固定讀寫 `<sdd.root 或 execution_path>/build/reports/fsm`。Console 專案的 `execution_path`＝子專案根 ⇒ 與 §8.1 的標準值（autoclaude／agentconsole／monorepo）**同址**，session 與 Bridge 看到同一份狀態；`sdd` 鍵的 `sdd-dogfood` 目錄不在此慣例內，不走 Console |
+| 專案鍵 | 由請求的 `sdd.fsm_project`（compile 為 `--fsm-project`）指定；Bridge 的 `fsm_component` 與 SDD 的 `sanitize_component` 對 13 個樣本逐筆相同，傳原名與傳淨化鍵等價 |
+| 寫入 | Bridge 對 FSM CLI 恆帶 `--must-exist`：狀態檔須先由 §8.2(a) 建好，Bridge 不替專案建檔（404 `fsm_not_found`） |
+| compile | 一律帶 `--fsm-project <鍵>`：adapter 與 Bridge 會向上找祖先的狀態目錄，而根層 `build/reports/fsm` 是所有子專案的祖先，不帶鍵時可能選到錯的 FSM（G-116-18）。再開症狀：子專案 compile 回應的 `fsm_project` 不是該子專案的鍵 |
+| 一功能一專案 | 一個 Console 專案綁一個 FSM 鍵（§6.1）；下一個功能建新的 Console 專案與新鍵。「改綁新鍵」的 UI 延後，再開症狀：同一 Console 專案要跑第二個 SDD 功能時 `PUT sdd-binding` 不夠用 |
+
+### 8.12 已知邊界
+
+| 邊界 | 事實 | 處置與再開症狀 |
+|---|---|---|
+| 子專案 hooks 的載入射程（G-116-16） | `AutoClaude/.claude/settings.json` 的 hooks（`enforce_docs_path`、`loc_budget_check`、`check_lang`、`claude_md_freshness`）只在**以該目錄為根**的 session 載入；根 session 一行都不跑，反之在 `AutoClaude/` 啟動的 session 沒有根層 SDD router | SDD session 一律從根啟動（§8.3）；AutoClaude 的守衛改由收尾前手動兜底：`python AutoClaude/tools/check_loc_budget.py --json`、`ruff check <改到的檔>`、`pytest tests/contract/test_claude_md_*.py`（cwd `AutoClaude/`）與雲端 CI |
+| 根 router 的 PowerShell matcher 缺口（G-116-17） | 根 `.claude/settings.json` 的 router PreToolUse／PostToolUse matcher 不含 `PowerShell`（Windows 上唯一的 shell 載具）⇒ 推論：Claude Code 不會因 PowerShell 呼叫而觸發 router，所以 PowerShell 不經 context-ledger 守門與計量，阻塞態下也不被擋（hook 邏輯本身遇到工具名 PowerShell 是會 deny 的，探針 P5；缺的只是 matcher）。D-115-09 已登理論洞 | 延後，再開症狀：Windows 設 `SDD_ACTIVE_VERSION` 的真實 session 其 CONTEXT-LEDGER 缺 PowerShell 呼叫 |
+| 規格檔 deny 看路徑子字串（G-116-03） | 見 §8.3 第 3 點：一個視窗綁一個功能是唯一的處置 | 判準改動延後，再開症狀：合法寫入被他專案狀態誤擋 |
+| 缺三件組的自動建檔（G-116-12） | 缺 `SDD_PROJECT`／缺檔即建（§8.3 第 2 點）；SOP 以三件組＋開場 `show --must-exist` 守 | 碼的收緊延後，再開症狀：子專案狀態目錄出現 `FSM-STATE-AISDLC_SDD.yaml` |
+| 狀態不入庫（G-116-20） | 狀態檔在被忽略的 `build/` 下，凍結證據 clone 後就沒了 | 每功能收尾把 `show --must-exist` 的逐字輸出與 `spec_doc_digests` 引進證據檔（整合輪 115 §1.3 的做法） |
+| 鍵的大小寫（G-116-19） | 檔案系統大小寫差異 | 標準鍵一律小寫 kebab（§8.0） |
+| 機械半段空轉（G-116-15） | 見 §8.5 | 由 QA 人讀補位；碼延後，再開症狀見 §8.5 |
+| Java／TS 的 AT（G-116-11） | 不入 evaluator（§7） | pytest 殼代跑延後，再開症狀：掌舵者要求 Java／TS 功能走 Console 委派 |

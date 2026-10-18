@@ -151,7 +151,7 @@ SCG-1 → docs/02_architecture/SRD-*.md
 SCG-2 → docs/02_architecture/C4-*.md + adr/ADR-*.md
 SCG-3 → docs/02_architecture/api/CONTRACT-*.yaml
 SCG-4 → 程式碼變更（git diff）+ docs/02_architecture/api/
-SCG-5 → docs/03_testing/RTM-*.md
+SCG-5 → docs/06_quality/RTM-*.md
 SCG-6 → 所有 SCG-0~5 驗證報告
 ```
 
@@ -317,7 +317,12 @@ cd "<SDD 版本目錄>" && SDD_STATE_DIR="<專案根>/build/reports/fsm" SDD_PRO
 
 | 產出物 | 路徑 | 說明 |
 |--------|------|------|
-| SCG 驗證報告 | `docs/03_testing/SCG-{N}-REPORT-{System}.md` | 每次執行必產出 |
+| SCG 驗證報告 | `docs/06_quality/SCG-{N}-REPORT-{System}.md` | 每次執行必產出 |
+
+> **落點（整合輪 116／D-116-09）**：SCG 報告與 RTM 一律寫 `docs/06_quality/`。原因：Rule 9.6 絕對禁令 #3 在 SCG_VALIDATION／
+> PR_REVIEW／RTM_VERIFY／IMPLEMENTATION 等態擋寫路徑含 `docs/01_requirements/`｜`docs/02_architecture/`｜`docs/03_testing/` 的
+> Write／Edit——報告寫進 `docs/03_testing/` 會被自己的守門擋下。`docs/03_testing/` 只放**凍結前**的測試規格（TCS、測試策略、
+> 測試計畫）。
 
 ---
 

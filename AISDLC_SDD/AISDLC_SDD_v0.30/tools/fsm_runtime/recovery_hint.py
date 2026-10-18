@@ -7,15 +7,23 @@ WHY：此前 SessionStart 的 BLOCK 訊息只說「必須人工介入並執行 S
 R-9.5 只規範「進入 ESCALATION 後**禁止自動**恢復」；本模組產出的是給**人**在終端執行的指令，
 走既有合法邊 `ESCALATION→RESUME_VERIFICATION→<resume_state>`，零新增狀態／邊、不碰 TLA。
 `-m tools.fsm_runtime.fsm_runtime` 是唯一可跑形態（直跑檔案會因相對 import 而 ImportError）。
+
+整合輪 116（G-116-01／DEF-200-544）：**外部專案模式**（`SDD_STATE_DIR` 非空白且為絕對路徑；hooks-ON 的
+子專案 SDD session）下，狀態檔不在框架預設目錄。舊版指令不帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`，
+人在另一個終端照貼會打到框架預設目錄的 INIT 檔——非 ESCALATION 回 noop、rc=0 的**假成功**，子專案仍鎖死。
+本模組因此讀行程環境（hook 行程繼承自 claude 的環境）：外部專案模式下兩殼形態都自帶環境與 `--project`；
+未設 `SDD_STATE_DIR` 時輸出逐字不變。
 """
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
+from . import state_loader as _state_loader
 # ARCH-04：`RESUME_TARGETS` 的家在核心 `fsm_runtime`（表現層反過來 import，不讓核心依賴表現層）。
 from .fsm_runtime import RESUME_TARGETS  # noqa: F401  (re-export for callers/tests)
 
@@ -137,8 +145,45 @@ def console_python(python: str, *, exists: Optional[Callable[[Path], bool]] = No
         return python
 
 
+#: 專案鍵環境變數（`state_loader.project_from_env()` 讀的那一個；該函式內是字面值、沒有常數可引）。
+PROJECT_ENV = "SDD_PROJECT"
+
+#: PowerShell 把這四種字元都當單引號界定符（ASCII `'` 與 U+2018／U+2019／U+201A／U+201B 三個 Unicode 彎引號）；
+#: 單引號字串內須各自加倍。以 `chr()` 組出而不寫字面彎引號：編輯器的「智慧引號」正規化會無聲改壞字面常數。
+_PS_SINGLE_QUOTES = "'" + "".join(chr(cp) for cp in (0x2018, 0x2019, 0x201A, 0x201B))
+
+
+def external_binding(environ: Optional[Mapping[str, str]] = None) -> Optional[tuple[str, str]]:
+    """外部專案模式（DEF-200-544）下回 `(狀態目錄, 專案鍵)`，否則 None（＝預設模式）。
+
+    判準與 `state_loader.state_dir()` 同一條：`SDD_STATE_DIR` `strip()` 後非空**且為絕對路徑**
+    （相對路徑時 hook 自己會退回預設目錄並出警告，提示就不該宣稱外部專案模式）。專案鍵與
+    `state_loader.project_from_env()` 同語意：`SDD_PROJECT` 非空白就用它（原值，不 strip），否則
+    退回版本目錄上一層的目錄名——所以印出去的鍵必然等於人貼上後 CLI 自己算出的鍵。
+    `environ` 預設讀行程環境（hook 行程繼承自 claude 的環境）；測試可注入。"""
+    env = os.environ if environ is None else environ
+    raw = str(env.get(_state_loader.STATE_DIR_ENV, "")).strip()
+    if not raw or not Path(raw).is_absolute():
+        return None
+    project = env.get(PROJECT_ENV)
+    if not (project and project.strip()):
+        project = _state_loader.REPO_ROOT.parent.name or "default"
+    return raw, str(project)
+
+
+def _sh_quote(text: str) -> str:
+    """POSIX 單引號引用（內嵌 `'` → `'\\''`）：不插值、不逸出，任何值都原樣進環境。"""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def _ps_quote(text: str) -> str:
+    """PowerShell 單引號引用：單引號字串不插值（`$`／反引號皆字面），只需把引號字元加倍。"""
+    return "'" + "".join(ch * 2 if ch in _PS_SINGLE_QUOTES else ch for ch in text) + "'"
+
+
 def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
-                     shell: str = "posix", exists: Optional[Callable[[Path], bool]] = None) -> str:
+                     shell: str = "posix", exists: Optional[Callable[[Path], bool]] = None,
+                     environ: Optional[Mapping[str, str]] = None) -> str:
     """一行可複製的恢復指令。`shell`＝`posix`（bash／zsh：`cd … ;`）或 `powershell`
     （`Push-Location …; & "<py>" …; Pop-Location`——`&` 必須緊貼直譯器路徑前，不是整行最前；
     `Push-Location`／`Pop-Location` 必須同一句內成對，否則會被根層
@@ -146,19 +191,48 @@ def recovery_command(*, sdd_root: Path, python: str, target: str, reason: str,
     `Set-Location` 皆擋，鐵律二只放行同一呼叫內成對的 `Push-Location`/`Pop-Location`；
     `Pop-Location` 不會改動 `$LASTEXITCODE`，取用回傳碼不受影響）。`-m` 是唯一可跑
     形態。理由裡的雙引號、`$`、反引號、反斜線一律換成 `'`（SA-R4-09／SD-R2-04）：兩殼的雙引號字串都會
-    對 `$`／反引號插值、對反斜線逸出；reason 目前是機器字串，仍不假設它永遠乾淨。"""
+    對 `$`／反引號插值、對反斜線逸出；reason 目前是機器字串，仍不假設它永遠乾淨。
+
+    **外部專案模式**（`external_binding()` 非 None；DEF-200-544）另帶三樣東西，缺任一樣照貼都會打錯目標：
+    ①環境 `SDD_STATE_DIR`／`SDD_PROJECT`（PowerShell：`Push-Location` **之後**以 `$env:X = '…'` 賦值、
+    指令跑完以 `Remove-Item Env:…` 清掉，不污染人的終端，且整行仍以 `Push-Location "` 開頭、`; Pop-Location`
+    結尾；bash：`VAR='…'` 前綴只作用於該指令）；②`-W ignore::RuntimeWarning`（`-m` 形態每次都會多一行 runpy 的
+    RuntimeWarning，與成敗無關，Bridge 子行程同做法）；③`--project <鍵>` 與 `--must-exist`（狀態檔不存在＝rc 5
+    大聲失敗，不在錯目錄建出新的 INIT 檔）。值一律單引號引用（路徑含空白、鍵含引號都不被殼展開）。
+    未設 `SDD_STATE_DIR`（預設模式）時輸出與舊版逐字相同。`environ` 預設讀行程環境，測試可注入。"""
     safe_reason = re.sub(r'["$`\\]', "'", reason)
     py = console_python(python, exists=exists)
-    tail = (
-        f'"{py}" -m tools.fsm_runtime.fsm_runtime '
-        f'resume-from-escalation --to {target} --reason "{safe_reason}"'
-    )
+    binding = external_binding(environ)
+    if binding is None:
+        tail = (
+            f'"{py}" -m tools.fsm_runtime.fsm_runtime '
+            f'resume-from-escalation --to {target} --reason "{safe_reason}"'
+        )
+        if shell == "powershell":
+            # `-ErrorAction Stop`（DEF-200-407）：`Push-Location` 對不存在路徑只丟**非終止**錯誤、
+            # cwd 不變，`;` 鏈會繼續在錯誤 cwd 跑 `-m`，把清楚的「路徑不存在」換成令人困惑的
+            # 「找不到模組」；加旗標讓鏈在 Push-Location 處中止（Windows pwsh 實測 rc=1、tail 未執行）。
+            return f'Push-Location "{sdd_root}" -ErrorAction Stop; & {tail}; Pop-Location'
+        return f'cd "{sdd_root}" ; {tail}'
+
+    state_dir, key = binding
+    module = '-W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime'
     if shell == "powershell":
-        # `-ErrorAction Stop`（DEF-200-407）：`Push-Location` 對不存在路徑只丟**非終止**錯誤、
-        # cwd 不變，`;` 鏈會繼續在錯誤 cwd 跑 `-m`，把清楚的「路徑不存在」換成令人困惑的
-        # 「找不到模組」；加旗標讓鏈在 Push-Location 處中止（Windows pwsh 實測 rc=1、tail 未執行）。
-        return f'Push-Location "{sdd_root}" -ErrorAction Stop; & {tail}; Pop-Location'
-    return f'cd "{sdd_root}" ; {tail}'
+        tail = (
+            f'& "{py}" {module} resume-from-escalation --project {_ps_quote(key)} '
+            f'--to {target} --must-exist --reason "{safe_reason}"'
+        )
+        # 環境賦值放在 Push-Location 之後：路徑不存在時鏈在 Push-Location 就中止，環境還沒動過。
+        return (
+            f'Push-Location "{sdd_root}" -ErrorAction Stop; '
+            f'$env:SDD_STATE_DIR = {_ps_quote(state_dir)}; $env:SDD_PROJECT = {_ps_quote(key)}; '
+            f'{tail}; Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT; Pop-Location'
+        )
+    tail = (
+        f'"{py}" {module} resume-from-escalation --project {_sh_quote(key)} '
+        f'--to {target} --must-exist --reason "{safe_reason}"'
+    )
+    return f'cd "{sdd_root}" ; SDD_STATE_DIR={_sh_quote(state_dir)} SDD_PROJECT={_sh_quote(key)} {tail}'
 
 
 def recovery_hint(state, *, sdd_root: Path, python: str = sys.executable,
@@ -273,6 +347,16 @@ def recovery_hint(state, *, sdd_root: Path, python: str = sys.executable,
         provenance_line,
         f"  目標={target}" + ("（resume_state 不在合法出口，fallback 為 SPEC_DRAFTING）" if fallback else ""),
         water_line,
+    ]
+    binding = external_binding()
+    if binding is not None:
+        # DEF-200-544：外部專案模式——明說這個 ESCALATION 住在哪、指令為何自帶環境（人常會想「簡化」掉它）。
+        lines.append(
+            f"  外部專案模式（{_state_loader.STATE_DIR_ENV} 有設）：狀態目錄={binding[0]}；專案鍵={binding[1]}。"
+            "下列兩行已帶環境與 --project，請整行複製；省略任一項會打到框架預設目錄"
+            "（回 noop、rc=0 的假成功，專案仍鎖死）"
+        )
+    lines += [
         "  人工恢復（R-9.5：需人類在終端執行；依你的殼複製對應那一整行）：",
         f"  bash/zsh   : {posix_cmd}",
         f"  PowerShell : {ps_cmd}",

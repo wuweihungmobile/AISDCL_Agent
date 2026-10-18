@@ -1,11 +1,11 @@
 # SDD Spec-First Gate Workflow
 # 規格優先閘門工作流程
 
-**版本**: v1.2
+**版本**: v1.3
 **建立日期**: 2026-04-12
-**最後更新**: 2026-10-17
+**最後更新**: 2026-10-18
 **工作流程類型**: 品質閘門（Quality Gate）
-**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）；整合輪 115 補強（S-01 FSM 寫入指令、G-10 增量條款）
+**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）；整合輪 115 補強（S-01 FSM 寫入指令、G-10 增量條款）；整合輪 116 補強（D-116-09 報告與 RTM 落點、棕地基線採納指路）
 
 ---
 
@@ -45,6 +45,12 @@
 | 🔷 SCG-4 | PR Review Gate | 實作 PR 審查（實作與規格一致性） | dev-senior / tech-lead |
 | 🔷 SCG-5 | RTM Completeness Gate | 交付前（RTM 100% 覆蓋） | qa-lead |
 | 🔷 SCG-6 | Release Gate | 發布前（所有閘門通過確認） | all |
+
+> **產出落點（整合輪 116／D-116-09）**：SCG 驗證報告、SCG-4 審查報告、RTM 與 RTM 驗證報告一律寫 `docs/06_quality/`；
+> `docs/03_testing/` 只放**凍結前**的測試規格（TCS、測試策略、測試計畫）。原因：Rule 9.6 絕對禁令 #3 在 SCG_VALIDATION／
+> PR_REVIEW／RTM_VERIFY／IMPLEMENTATION 等態擋寫路徑含 `docs/01_requirements/`｜`docs/02_architecture/`｜`docs/03_testing/`
+> 的 Write／Edit，報告與 RTM 寫進 `docs/03_testing/` 會被自己的守門擋下（整合輪 115 dogfood 的 DEF-AC-018，六列 BLOCKED）。
+> 判準本身不改；對映的三支 skill（`/sdd-gate`、`/sdd-review`、`/rtm-generate`）與 `AISDLC_SDD/CLAUDE.md` Rule 2 表同步。
 
 ---
 
@@ -252,6 +258,11 @@ HUMAN_PENDING）／4 參數值不合法（`invalid_argument`、`doc_not_found`�
 
 - **適用範圍**：「已凍結系統」＝其上位文件（PRD／FRD／SRD／C4／ADR／OpenAPI）已通過 SCG 並經人類確認、列在
   `frozen_stages[*].spec_docs`。全新系統、跨 Feature 變更、或要改動已凍結上位文件本身者**不適用**，走下方完整清單。
+- **棕地基線採納（前置）**：既有專案的上位文件從未走過 SCG、FSM 裡沒有任何凍結紀錄時，先把它們以 Stage-1 記成「已凍結」，
+  才有可被增量條款引用的對象。程序（五次 `transition` ＋ `spec-frozen --stage Stage-1 --digest`）、reason 慣例
+  「baseline adoption；SCG 未重跑」、追溯表標 `ADOPTED`、approver 慣例、三個子專案各自的上位文件清單，見
+  [SDD_AUTOCLAUDE_BRIDGE.md](../sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md) §8.4。採納**不等於**重跑 SCG：它只把「人類確認過這批
+  文件的現況」記進 FSM，讓後續的凍結綁內容（摘要）有基準。
 - **〈增量追溯表〉**（放在 TCS 檔頭，模板見 `docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md`）：每個
   SCG-0～3 清單項一列，欄位＝清單項／追溯 ID／已凍結上位文件路徑／凍結摘要（`sha256:…`，取自該文件在
   `frozen_stages[*].spec_doc_digests` 的值，`show` 可查）。

@@ -111,6 +111,8 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 
 **專案層（Layer 3）— 寫入 `AISDLC_SDD_v<LATEST>/docs/` 子目錄**：
 
+> 🔴 **外部專案模式（整合輪 116／G-116-10）**：`SDD_STATE_DIR` 有設（外部專案模式）時，專案層文件寫 `<專案根>/docs/`，不寫框架樹；見 `AISDLC_SDD_v<LATEST>/workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §8。下表的 `docs/` 一律相對「專案根」（未設 `SDD_STATE_DIR` 時專案根＝框架版本目錄）。
+
 | 文件類型 | 正確路徑 |
 |---------|---------|
 | PRD / FRD / Invariant Spec / Third-Party API Research | `docs/01_requirements/` |
@@ -118,7 +120,8 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 | ADR 檔案 | `docs/02_architecture/adr/` |
 | API 規格 / Compat / Consumer Contract | `docs/02_architecture/api/` |
 | Migration Contract Map | `docs/02_architecture/migration/` |
-| RTM / Test Plan / Test Strategy / Defect Classification | `docs/03_testing/` |
+| Test Strategy / Test Plan（凍結前的測試規格）/ Defect Classification | `docs/03_testing/` |
+| RTM / Test Plan 執行期產物（SCG 驗證報告、SCG-4 審查報告、RTM 驗證報告）——整合輪 116 D-116-09：SCG_VALIDATION 起 `docs/03_testing/` 被 Rule 9.6 擋寫，這些產物一律放這裡 | `docs/06_quality/` |
 | Invariant Test Contract / Contract Test Spec / Chaos Contract | `docs/03_testing/contracts/` |
 | Gap Analysis / Refactor Plan | `docs/04_planning/` |
 | Performance Baseline Spec（PBS） | `docs/04_planning/performance/` |
@@ -423,7 +426,7 @@ AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 | 安全設計前未做 STRIDE | STRIDE 威脅模型是安全實作前置文件 |
 | Integration 未做 ACL 設計 | 先建立 ADR-INTEGRATION-ACL，定義防腐層 |
 | Migration 未定義 Contract Map | 先產出 MIGRATION-CONTRACT-MAP，再執行切換 |
-| 直接在根目錄 `docs/` 寫框架產出 | 框架產出應寫入 `AISDLC_SDD_v<LATEST>/docs/` |
+| 直接在根目錄 `docs/` 寫框架產出 | 框架產出應寫入 `AISDLC_SDD_v<LATEST>/docs/`；`SDD_STATE_DIR` 有設（外部專案模式）時，專案層文件寫 `<專案根>/docs/`，不寫框架樹（見 `SDD_AUTOCLAUDE_BRIDGE.md` §8） |
 | SCG 失敗後無限繼續重試（Rule 9） | 超過 3 次進入 ESCALATION，等待人工介入 |
 | Token 超過 85% 仍繼續工作（Rule 9） | 執行 `/stage-compaction` 清理上下文 |
 | SCG-0/3 前未執行邏輯驗證（Rule 9） | 必須先執行 `/spec-logical-validator` |

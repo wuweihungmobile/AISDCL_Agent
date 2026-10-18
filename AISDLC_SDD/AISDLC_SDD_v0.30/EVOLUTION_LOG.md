@@ -340,6 +340,59 @@ FILE_DIRECTORY_RULES.md（`AISDLC_SDD/AISDLC_SDD_v0.30/FILE_DIRECTORY_RULES.md`�
   `subagent_contract.py`／`conversation_ledger.py`／兩支 hook／`settings.json` 即還原行為；**不建議回退 settings.json 的 PowerShell matcher**（Windows 上 FSM 守門會再次對唯一的 shell 工具失明）。
   無狀態檔格式破壞（新鍵只在有值時才出現）、無 `*.tla` 影響。
 
+## LATEST 修改備忘：整合輪 116／Dev-SDD（G-116-01、02、04、05、06、08、10、11、13、15、16、19、20；DEF-200-544、545、549；2026-10-18）
+
+> **注意**：本節**不是**凍結基線例外——只動 LATEST v0.30 與共享層 `AISDLC_SDD/scripts/`（`sync_exposed_skills.py`＋其測試）；v0.01 與 v0.02～v0.29 一個位元組未碰。
+> 不碰 `_HAPPY_PATH`／任何 `*.tla`（形式化模型零改動，依 Rule 9.18.1 無重跑義務；TLC＝N/A，證據＝`git diff` 對 `tools/fsm_runtime/transition_rules.py` 與
+> `tools/fsm_runtime/formal/` 為空，由收尾窗口現跑）。
+> 立節原因：①`recovery_command()` 的輸出契約在外部專案模式下改變（多帶環境、`--project`、`--must-exist`、`-W ignore::RuntimeWarning`），且與根層 ps-lint 鎖
+> `tools/tests/test_recovery_hint_passes_ps_lint.py`、Bridge 的 `recovery_commands` 有三方耦合；②`sync_exposed_skills.py` 由單一父層鏡像變成多目標，`--check` 的失敗面變大——日後考古
+> 「為什麼 ci-gate 會因為 AutoClaude 的 skills 而紅」「為什麼恢復指令那麼長」找的就是這裡。設計依據：`docs/04_planning/AutoSDD_improving_116.md` §3（缺口）、§6（D-116-01～18）、
+> §1.1（探針 P1～P10、P3x）。立案：DEF-200-544（G-116-01）、545（G-116-02）、549（G-116-13）。
+
+### delta 清單
+
+1. **恢復指令自帶外部專案模式環境（G-116-01／D-116-13）**：`recovery_hint.recovery_command()` 新增唯讀 helper `external_binding(environ=None)`（`SDD_STATE_DIR` `strip()` 後非空且為絕對路徑 ⇒
+   `(狀態目錄, 專案鍵)`；鍵與 `state_loader.project_from_env()` 同語意）。外部專案模式下：bash 形態前置 `SDD_STATE_DIR='…' SDD_PROJECT='…'`；PowerShell 形態在 `Push-Location` **之後**以
+   `$env:X = '…'` 賦值、跑完 `Remove-Item Env:…` 清掉（整行仍以 `Push-Location "` 開頭、`; Pop-Location` 結尾，根層 ps-lint 鎖續綠）；兩殼都補 `-W ignore::RuntimeWarning`、`--project <鍵>`、`--must-exist`。
+   `recovery_hint()` 在外部專案模式多印一行範圍說明（狀態目錄、鍵、為何不可省略）。未設（或空白、或相對路徑）`SDD_STATE_DIR` ⇒ 輸出與舊版**逐字相同**（既有 37 支測試未改）。
+   呼叫端（`session_start.py`、`context_ledger_pre.py`）零改動：兩者呼叫 `recovery_hint()`，它內部讀行程環境。
+2. **報告與 RTM 落點改 `docs/06_quality/`（G-116-02／D-116-09）**：`sdd-gate`（報告路徑與 SCG-5 收集素材路徑）、`sdd-review`（前置條件與報告路徑）、`rtm-generate`（RTM、RTM 驗證報告、`verify` 讀取路徑與
+   `/spec-compliance-check` 引數）各改指 `docs/06_quality/` 並加一段落點理由；`SDD_SPEC_FIRST_GATE.md` v1.3 在閘門表後新增〈產出落點〉說明（該檔原本沒有任何落點敘述）；`AISDLC_SDD/CLAUDE.md` Rule 2 表把 RTM
+   列拆成兩列（凍結前測試規格留 `docs/03_testing/`、執行期產物進 `docs/06_quality/`）。**不改** `_is_blocked_spec_write` 判準。父層 `.claude/skills` 鏡像以 `sync_exposed_skills.py --write --target parent` 重生。
+3. **`SDD_AUTOCLAUDE_BRIDGE.md` v0.04（G-116-04、05、06、08、11、13、15、16、19、20；D-116-01～12）**：§7 由「兩條件」改三徑（①委派迴圈／②SDD session-only／③一般流程；Java／TS 不再被整個排除；不擴 evaluator 白名單）；
+   新增 §8〈子專案 SDD session（根 session、外部專案模式）〉§8.0～§8.12：一功能一鍵、三件組標準值表與雙形態啟動區塊、開場三步（驗同址／備恢復指令／活性正負兩面）、硬規則、棕地 Stage-1 基線採納程序與三子專案上位文件清單、
+   Stage-2 增量規格、人工閘與實作、SCG-4→RELEASE、阻塞態三層處置、SCG 與 G／W 閘門對映、skills 與路徑語意、Bridge 綁定一致性、已知邊界。被訂正的 §7 原文逐字存於文件開頭〈訂正紀錄〉。
+   `SDD_SPEC_FIRST_GATE.md` 的增量條款補一條「棕地基線採納（前置）」指路 §8.4。
+4. **`sync_exposed_skills.py` 多鏡像目標（G-116-13／DEF-200-549）**：目標表 `parent`（`<repo_root>/.claude/skills`）＋`autoclaude`（`<repo_root>/../AutoClaude/.claude/skills`）；`--check` 預設驗全部、
+   `--write` 預設寫全部、新增 `--target parent|autoclaude|all`；AutoClaude 專案目錄不存在（獨立 checkout）時該目標印一行說明並略過（`--check` 不紅、`--write` 不動、不替不存在的專案造目錄）；
+   目錄存在但鏡像 stale ⇒ 紅，訊息指出 `--write --target autoclaude`。`_rmtree_windows_safe` 加向後相容的 `label`（預設「父層」＝舊訊息逐字不變）。
+   🔴 **本節不含 AutoClaude 鏡像的實際重生**：`--write --target autoclaude` 是「整個目錄取代」（rmtree＋copytree），由收尾單人窗口執行（`.claude/**` 是受保護路徑）；在那之前 `--check` 的
+   autoclaude 目標為 stale（預期，ci-gate 會停在 skills 鏡像那一步）。**實測現況（2026-10-18）：缺 24 檔、多餘 0 檔、內容漂移 35 檔**——33 支 AISDLC v0.09 舊版 skill 與 LATEST 的同名檔內容不同
+   （加上 `README.md`、`SKILL_DEVELOPMENT_PLAN.md`），LATEST 另有 9 支 SDD 專屬 skill 與 `rules/*.yaml` 等 24 檔是新增；所以寫入的實際效果是 35 檔內容替換＋24 檔新增，**沒有任何檔被刪**
+   （原先預期的「刪掉 33 支舊版＝淨減法」不成立：舊版與 LATEST 同名，是被取代而不是被刪）。腳本對「鏡像裡有而 LATEST 沒有的檔」仍會刪（`--check` 先列為「多餘」），寫入前看一眼即可。
+5. **`AISDLC_SDD/CLAUDE.md`（G-116-10／DEF-200-548）**：專案層文件寫入表前與〈常見錯誤防範〉的「根目錄 `docs/` 寫框架產出」列各補一句「`SDD_STATE_DIR` 有設（外部專案模式）時，專案層文件寫 `<專案根>/docs/`，不寫框架樹；見 BRIDGE §8」。
+
+### 與任務書的差異／任務書未規定而本棒補上的判準（供主控裁決）
+
+- 恢復指令在外部專案模式多帶 `--must-exist`（任務書只列環境、`--project`、`-W`）：狀態檔不存在時 rc 5 大聲失敗，而不是在錯目錄建出新的 INIT 檔再回 noop 假成功；與 Bridge 子行程恆帶 `--must-exist` 的語意一致。
+  預設模式不帶（逐字不變）。要拿掉只需刪兩處 `--must-exist` 字面與對應測試斷言。
+- PowerShell 形態在指令後 `Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT`（比照 Bridge `recovery_commands` 的清理做法與 GATE 文件外部專案模式樣板），不污染人的第二終端。
+- 與 Bridge `recovery_commands` 的語意差異（Bridge 那份未改）：Bridge 不設 `SDD_PROJECT` 環境（只靠 `--project`）、不帶 `-W`、不帶 `--must-exist`、用 `shlex.quote`／單引號全引用路徑；本模組另設 `SDD_PROJECT`
+  （與 `--project` 一致，其他讀 `project_from_env()` 的站點不會分叉）、補 `-W`、補 `--must-exist`；`Push-Location`／`cd` 的路徑沿用既有雙引號（本輪不動既有形態）。
+- 新增的根層 lint 引用測試（`test_powershell_forms_pass_root_ps_lint`）在框架被單獨 checkout、找不到根層 `.claude/hooks/lint_powershell_command.py` 時 skip，不讓獨立發布版因缺根層檔而紅。
+
+### 驗證與回退
+
+- **驗證**：`tools/fsm_runtime/tests/test_recovery_hint.py` 37→46 支（新增 `ExternalProjectModeRecoveryTests` 9 支：兩殼字串逐字、預設模式逐字舊形態五種輸入、鍵退回語意、引號引用、根層 ps-lint 判準、
+  hint 層範圍行、**印出的指令在乾淨環境逐字照跑會恢復被綁定的狀態**、打錯目錄 rc 5 且不建檔）；`scripts/tests/test_sync_exposed_skills.py` 4→20 支。對 `--must-exist` 與 `external_binding` 各做一次突變
+  （還原該修法），對應測試 4／8 處轉紅、還原後全綠。真機端對端：在 scratch 狀態目錄建 ESCALATION 狀態，分別在乾淨環境的 PowerShell（`Invoke-Expression` 逐字執行印出的整行）與 Git Bash 執行，
+  兩者皆 rc 0、狀態 ESCALATION→SPEC_DRAFTING、PowerShell 的 `SDD_*` 環境與 cwd 已還原；BRIDGE §8.2(a)(c)、§8.4～§8.7 的指令在 scratch 沙盒逐字跑通（基線採納五次 `transition`＋`spec-frozen` 與後半鏈十二步，
+  共 INIT→RELEASE 全程 rc 0；`retry_history` 無任何 gate 記錄＝採納沒有留下 SCG 通過紀錄；`claude -p --model haiku --debug hooks` 的 SessionStart success、`project: <鍵>` 正面與
+  `project: AISDLC_SDD`／框架預設目錄無狀態檔的負面皆成立）。
+- **回退**：純向後相容（預設模式輸出逐字不變）。還原 `recovery_hint.py` 即還原行為（`test_recovery_hint.py` 新增類別一併還原）；skills／文件改動 `git revert` 後以
+  `python AISDLC_SDD/scripts/sync_exposed_skills.py --write --target parent` 讓父層鏡像回到 LATEST。無 API、無狀態檔格式、無 `*.tla` 影響。
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

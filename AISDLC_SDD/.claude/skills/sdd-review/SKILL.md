@@ -34,7 +34,7 @@ allowed-tools:
 |---------|------|
 | `docs/01_requirements/FRD-{System}.md` | 功能需求規格（AC-XXX-Y 清單） |
 | `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml` | 已凍結的 OpenAPI 3.1 Contract（SCG-3） |
-| `docs/03_testing/RTM-{System}.md` | 需求追蹤矩陣 |
+| `docs/06_quality/RTM-{System}.md` | 需求追蹤矩陣 |
 | Refactoring 情境：`docs/01_requirements/INVARIANT-SPEC-{System}.md` | Business Invariants |
 
 ---
@@ -119,7 +119,10 @@ allowed-tools:
 
 | 產出物 | 路徑 | 對應 SCG |
 |--------|------|---------|
-| SCG-4 PR Review 報告 | `docs/03_testing/SCG4-REVIEW-{Feature}-{YYYYMMDD}.md` | SCG-4 |
+| SCG-4 PR Review 報告 | `docs/06_quality/SCG4-REVIEW-{Feature}-{YYYYMMDD}.md` | SCG-4 |
+
+> **落點（整合輪 116／D-116-09）**：PR_REVIEW 態下 Rule 9.6 絕對禁令 #3 擋寫 `docs/03_testing/`（連同 `docs/01_requirements/`、
+> `docs/02_architecture/`），審查報告與 RTM 因此一律寫 `docs/06_quality/`；`docs/03_testing/` 只放凍結前的測試規格。
 
 ---
 

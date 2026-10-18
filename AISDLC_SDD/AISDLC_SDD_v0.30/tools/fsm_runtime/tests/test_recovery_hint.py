@@ -9,8 +9,11 @@ WHY（Rule 9）：根因 C 是 session 級事件寫進專案級黏著的 ESCALAT
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -538,6 +541,200 @@ class ResumeFromEscalationTests(_Base):
         payload = json.loads(ok.stdout.strip().splitlines()[-1])
         self.assertEqual(payload["to"], "SPEC_DRAFTING")
         self.assertEqual(sl.load_state("rh", path=self.state_path).current, "SPEC_DRAFTING")
+
+
+# ── 整合輪 116 G-116-01／DEF-200-544：外部專案模式的恢復指令必須自帶環境與 --project ──────────
+_EXT_KEY = "autoclaude-webhook"
+
+
+def _load_root_ps_lint():
+    """載入 monorepo 根層 `.claude/hooks/lint_powershell_command.py`（載法比照根層
+    `tools/tests/test_recovery_hint_passes_ps_lint.py`）。硬依賴、找不到就大聲失敗：框架只以
+    monorepo 形態存在（根層 CLAUDE.md〈已脫離為單一 monorepo〉），而 runtime `skipTest` 會讓站點
+    落進根層 `skip_tag_policy._SITE_CLASS_CENSUS` 的 `runtime-skipTest` 格、使全套在靜態掃描階段早退。"""
+    path = _SDD_ROOT.parents[1] / ".claude" / "hooks" / "lint_powershell_command.py"
+    if not path.is_file():
+        raise FileNotFoundError(f"根層 ps-lint hook 不在：{path}（本測試是跨專案回歸鎖的框架側半邊）")
+    spec = importlib.util.spec_from_file_location("_recovery_hint_ext_ps_lint", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"無法載入根層 ps-lint hook：{path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class ExternalProjectModeRecoveryTests(_Base):
+    """WHY（DEF-200-544）：hooks-ON 的子專案 session 下狀態檔住在 `SDD_STATE_DIR`，舊版恢復指令卻不帶它——
+    人在另一個終端照貼會打到框架預設目錄的 INIT 檔：非 ESCALATION 回 noop、rc=0 的假成功，子專案仍鎖死。
+    這裡鎖四件事：(1) 外部專案模式兩殼都自帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`／`--must-exist`／
+    `-W ignore::RuntimeWarning`；(2) 未設（或相對路徑、空白）`SDD_STATE_DIR` 時輸出與舊版逐字相同；
+    (3) PowerShell 形態仍過根層 ps-lint（`Push-Location "`開頭、`; Pop-Location` 結尾、無裸 cd）；
+    (4) 印出來的指令在**乾淨環境**逐字照跑會恢復「被綁定的那份」狀態，打錯目錄時大聲失敗而不建檔。"""
+
+    def _env(self) -> dict[str, str]:
+        return {"SDD_STATE_DIR": str(self.tmp / "ext-fsm"), "SDD_PROJECT": _EXT_KEY}
+
+    @staticmethod
+    def _cmd(shell: str, environ: dict[str, str], *, target: str = "IMPLEMENTATION") -> str:
+        return rh.recovery_command(sdd_root=Path("/x"), python="/p", target=target, reason="r",
+                                   shell=shell, environ=environ)
+
+    def test_posix_form_prefixes_env_and_carries_project_and_must_exist(self) -> None:
+        env = self._env()
+        root = str(Path("/x"))  # 鐵律三：Windows 渲染成反斜線，期望值與生產碼同一渲染
+        expected = (
+            f"cd \"{root}\" ; SDD_STATE_DIR='{env['SDD_STATE_DIR']}' SDD_PROJECT='{_EXT_KEY}' \"/p\" "
+            f"-W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime resume-from-escalation "
+            f"--project '{_EXT_KEY}' --to IMPLEMENTATION --must-exist --reason \"r\""
+        )
+        self.assertEqual(self._cmd("posix", env), expected)
+
+    def test_powershell_form_assigns_env_after_push_location_and_cleans_up(self) -> None:
+        env = self._env()
+        root = str(Path("/x"))
+        expected = (
+            f"Push-Location \"{root}\" -ErrorAction Stop; $env:SDD_STATE_DIR = '{env['SDD_STATE_DIR']}'; "
+            f"$env:SDD_PROJECT = '{_EXT_KEY}'; & \"/p\" -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime "
+            f"resume-from-escalation --project '{_EXT_KEY}' --to IMPLEMENTATION --must-exist --reason \"r\"; "
+            "Remove-Item Env:SDD_STATE_DIR, Env:SDD_PROJECT; Pop-Location"
+        )
+        ps = self._cmd("powershell", env)
+        self.assertEqual(ps, expected)
+        # 環境賦值必須在 Push-Location 之後（路徑不存在時鏈先中止、環境尚未動過）、直譯器呼叫之前。
+        self.assertLess(ps.index("Push-Location"), ps.index("$env:SDD_STATE_DIR"))
+        self.assertLess(ps.index("$env:SDD_PROJECT"), ps.index("& \"/p\""))
+        self.assertNotIn("Set-Location", ps)
+
+    def test_default_mode_output_is_verbatim_legacy(self) -> None:
+        """未設 `SDD_STATE_DIR`＝逐字舊形態（含：空字串、純空白、相對路徑——hook 自己遇到相對路徑會退回預設目錄，
+        提示就不該宣稱外部專案模式；以及只設 `SDD_PROJECT` 沒設狀態目錄）。"""
+        root = str(Path("/x"))
+        legacy_posix = (f'cd "{root}" ; "/p" -m tools.fsm_runtime.fsm_runtime '
+                        'resume-from-escalation --to PR_REVIEW --reason "r"')
+        legacy_ps = (f'Push-Location "{root}" -ErrorAction Stop; & "/p" -m tools.fsm_runtime.fsm_runtime '
+                     'resume-from-escalation --to PR_REVIEW --reason "r"; Pop-Location')
+        for env in ({}, {"SDD_STATE_DIR": ""}, {"SDD_STATE_DIR": "   "},
+                    {"SDD_STATE_DIR": "relative/dir", "SDD_PROJECT": _EXT_KEY}, {"SDD_PROJECT": _EXT_KEY}):
+            with self.subTest(env=env):
+                self.assertEqual(self._cmd("posix", env, target="PR_REVIEW"), legacy_posix)
+                self.assertEqual(self._cmd("powershell", env, target="PR_REVIEW"), legacy_ps)
+                self.assertIsNone(rh.external_binding(env))
+
+    def test_project_key_falls_back_with_the_same_semantics_as_project_from_env(self) -> None:
+        """`SDD_PROJECT` 未設或純空白時，印出的鍵必須等於人貼上後 CLI 自己算出的鍵（`project_from_env()`）。"""
+        from tools.fsm_runtime import state_loader
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SDD_PROJECT", None)
+            expected_key = state_loader.project_from_env()
+        d = str(self.tmp / "ext-fsm")
+        for env in ({"SDD_STATE_DIR": d}, {"SDD_STATE_DIR": d, "SDD_PROJECT": "   "}):
+            with self.subTest(env=env):
+                self.assertEqual(rh.external_binding(env), (d, expected_key))
+                self.assertIn(f"--project '{expected_key}'", self._cmd("posix", env))
+        self.assertEqual(rh.PROJECT_ENV, "SDD_PROJECT")
+
+    def test_values_are_quoted_per_shell_so_quotes_in_paths_and_keys_survive(self) -> None:
+        env = {"SDD_STATE_DIR": str(self.tmp / "it's fsm"), "SDD_PROJECT": "a'b\u2019c"}
+        posix = self._cmd("posix", env)
+        self.assertIn("SDD_STATE_DIR='" + env["SDD_STATE_DIR"].replace("'", "'\\''") + "'", posix)
+        self.assertIn("SDD_PROJECT='a'\\''b\u2019c'", posix)  # bash：`'` → `'\''`；彎引號對 bash 無特殊意義
+        ps = self._cmd("powershell", env)
+        # PowerShell：ASCII 單引號與三個彎單引號都是引號界定符，各自加倍；`$`、反引號在單引號內不插值。
+        self.assertIn("$env:SDD_STATE_DIR = '" + env["SDD_STATE_DIR"].replace("'", "''") + "'", ps)
+        self.assertIn("$env:SDD_PROJECT = 'a''b\u2019\u2019c'", ps)
+        self.assertIn("--project 'a''b\u2019\u2019c'", ps)
+
+    def test_powershell_forms_pass_root_ps_lint(self) -> None:
+        """鐵律一、二的回歸鎖：外部專案模式的 PowerShell 形態仍須零命中根層 lint（DEF-200-340 同族）。"""
+        lint = _load_root_ps_lint()
+        self.assertNotEqual(lint.lint_command('Set-Location "/x"'), [], "負向自證：判準本身必須有鑑別力")
+        for env in (self._env(), {}):
+            with self.subTest(external=bool(env)):
+                cmd = self._cmd("powershell", env)
+                self.assertTrue(cmd.startswith('Push-Location "'), cmd)
+                self.assertTrue(cmd.endswith("; Pop-Location"), cmd)
+                self.assertEqual(lint.lint_command(cmd), [], cmd)
+
+    def test_recovery_hint_prints_scope_line_and_both_commands_in_external_mode(self) -> None:
+        self.state.record_escalation("structural: ext", details={"session_id": "s-ext"})
+        with patch.dict(os.environ, self._env()):
+            text = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, python="/venv/bin/python")
+        lines = text.splitlines()
+        bash_line = next(ln for ln in lines if ln.startswith("  bash/zsh   : "))
+        ps_line = next(ln for ln in lines if ln.startswith("  PowerShell : "))
+        for line in (bash_line, ps_line):
+            self.assertIn(f"--project '{_EXT_KEY}'", line)
+            self.assertIn("--must-exist", line)
+            self.assertIn("-W ignore::RuntimeWarning", line)
+        self.assertIn(f"SDD_STATE_DIR='{self._env()['SDD_STATE_DIR']}'", bash_line)
+        self.assertIn(f"$env:SDD_STATE_DIR = '{self._env()['SDD_STATE_DIR']}'", ps_line)
+        scope = next(ln for ln in lines if "外部專案模式" in ln)
+        self.assertIn(self._env()["SDD_STATE_DIR"], scope)
+        self.assertIn(_EXT_KEY, scope)
+        # 對照組：未設環境時整段逐字維持舊形態（沒有範圍行、沒有 --project）。
+        plain = rh.recovery_hint(self.state, sdd_root=_SDD_ROOT, python="/venv/bin/python")
+        self.assertNotIn("外部專案模式", plain)
+        self.assertNotIn("--project", plain)
+
+    # ── 印出來的指令在乾淨環境逐字照跑（以 shlex 還原環境與 argv，不經任何殼，跨平台可跑）──────────────
+    def _prepare_escalated_state(self) -> tuple[Path, Path]:
+        from tools.fsm_runtime.state_loader import save_state
+        ext_dir = self.tmp / "ext-fsm"
+        ext_dir.mkdir()
+        path = ext_dir / f"FSM-STATE-{_EXT_KEY}.yaml"
+        st = load_state(_EXT_KEY, path=path)
+        st.record_escalation("structural: e2e", details={"session_id": "s-e2e"})
+        save_state(st)
+        return ext_dir, path
+
+    def _printed_posix_invocation(self, state_dir: Path) -> tuple[dict[str, str], list[str]]:
+        cmd = rh.recovery_command(
+            sdd_root=_SDD_ROOT, python=sys.executable, target="SPEC_DRAFTING", reason="e2e", shell="posix",
+            environ={"SDD_STATE_DIR": str(state_dir), "SDD_PROJECT": _EXT_KEY})
+        words = shlex.split(cmd.split(" ; ", 1)[1])  # 去掉 `cd "<根>"`；cwd 改由 subprocess 的 cwd= 承接
+        assigns: dict[str, str] = {}
+        while words and re.fullmatch(r"[A-Z_]+=.*", words[0], flags=re.S):
+            name, _, value = words.pop(0).partition("=")
+            assigns[name] = value
+        return assigns, words
+
+    def _run_printed(self, assigns: dict[str, str], words: list[str], canary: Path) -> "subprocess.CompletedProcess[str]":
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("SDD_")}
+        env.update({
+            "PYTHONUTF8": "1",
+            "SDD_ENABLE_RULE_FIRE_TELEMETRY": "0", "SDD_ENABLE_RULE_CATCH_TELEMETRY": "0",
+            "SDD_META_LEDGER_PATH": str(self.tmp / "meta-loop-ledger.yaml"), "SDD_SPEC_MONITOR": "0",
+            # 金絲雀：指令若沒帶自己的 SDD_STATE_DIR，就只會打到這個空目錄，永遠碰不到框架樹。
+            "SDD_STATE_DIR": str(canary),
+        })
+        env.update(assigns)
+        return subprocess.run(words, cwd=str(_SDD_ROOT), env=env, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", check=False)
+
+    def test_printed_command_resumes_the_bound_state_when_run_in_a_clean_env(self) -> None:
+        ext_dir, path = self._prepare_escalated_state()
+        canary = self.tmp / "canary-fsm"
+        canary.mkdir()
+        assigns, words = self._printed_posix_invocation(ext_dir)
+        self.assertEqual(assigns, {"SDD_STATE_DIR": str(ext_dir), "SDD_PROJECT": _EXT_KEY})
+        proc = self._run_printed(assigns, words, canary)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertEqual(json.loads(proc.stdout.strip().splitlines()[-1])["to"], "SPEC_DRAFTING")
+        self.assertEqual(load_state(_EXT_KEY, path=path).current, "SPEC_DRAFTING")
+        self.assertNotIn("RuntimeWarning", proc.stderr)
+        self.assertEqual(list(canary.iterdir()), [], "指令必須自帶 SDD_STATE_DIR：金絲雀目錄不得被寫入")
+
+    def test_printed_command_against_the_wrong_state_dir_fails_loud_and_creates_nothing(self) -> None:
+        """打錯目錄（`--must-exist`）：rc 5、不建檔——對照舊形態會在錯目錄建出新的 INIT 檔再回 noop 假成功。"""
+        wrong = self.tmp / "wrong-fsm"
+        wrong.mkdir()
+        canary = self.tmp / "canary-fsm"
+        canary.mkdir()
+        assigns, words = self._printed_posix_invocation(wrong)
+        proc = self._run_printed(assigns, words, canary)
+        self.assertEqual(proc.returncode, 5, msg=proc.stdout + proc.stderr)
+        self.assertEqual(list(wrong.iterdir()), [], "--must-exist：找不到狀態檔時不得建出新的 INIT 檔")
+        self.assertEqual(list(canary.iterdir()), [])
 
 
 if __name__ == "__main__":

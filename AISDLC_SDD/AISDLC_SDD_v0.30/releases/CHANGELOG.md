@@ -1,9 +1,32 @@
 # AISDLC-SDD Framework CHANGELOG
 
 **維護者**: AISDLC-SDD Framework Team
-**最後更新**: 2026-10-17
+**最後更新**: 2026-10-18
 
 ---
+
+## [v0.30 LATEST 原地修改] - 2026-10-18（整合輪 116／Dev-SDD；LATEST 本就可原地改，未開新版）
+
+> 來源：AutoSDD_improving_116（B 柱：AutoClaude／AgentConsole／monorepo 根層以 AISDLC_SDD 流程自我開發；C 柱：skills 鏡像與閘門對映）；裁決與探針事實見
+> `docs/04_planning/AutoSDD_improving_116.md` §1.1、§3、§6（D-116-01～18）。本節記 Dev-SDD 棒（runtime 恢復提示、文件、skills、共享層腳本）；完整 delta、與任務書的差異與回退見
+> `EVOLUTION_LOG.md`〈LATEST 修改備忘：整合輪 116／Dev-SDD〉。
+
+### 新增
+- `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` v0.04：§8〈子專案 SDD session（根 session、外部專案模式）〉單一 SOP——一功能一鍵、三件組標準值與 PowerShell／bash 雙形態啟動區塊、
+  開場三步、硬規則、棕地 Stage-1 基線採納、Stage-2 增量規格、人工閘與實作、SCG-4→RELEASE、阻塞態三層處置、SCG 與 G／W 閘門對映、skills 與路徑語意、Bridge 綁定一致性、已知邊界。
+- `scripts/sync_exposed_skills.py`：多鏡像目標（`parent`＋`autoclaude`＝`AutoClaude/.claude/skills`）與 `--target parent|autoclaude|all`；`--check` 預設同時守兩者；獨立 checkout（無 AutoClaude 目錄）略過、不紅。
+- `tools/fsm_runtime/recovery_hint.py`：`external_binding()`（外部專案模式判定與專案鍵）；`recovery_hint()` 在外部專案模式多印一行範圍說明。
+
+### 修正
+- G-116-01／DEF-200-544（P1）：ESCALATION 的人工恢復指令在外部專案模式（`SDD_STATE_DIR` 有設）下自帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`／`--must-exist`／`-W ignore::RuntimeWarning`
+  （bash 前置賦值、PowerShell 於 `Push-Location` 後賦值並於指令後清掉）；舊版不帶，照貼會打到框架預設 INIT 檔、回 noop rc=0 的假成功，子專案仍鎖死。預設模式輸出逐字不變。
+- G-116-02／DEF-200-545：`sdd-gate`、`sdd-review`、`rtm-generate` 三支 skill 的報告與 RTM 落點由 `docs/03_testing/` 改 `docs/06_quality/`（SCG_VALIDATION 起 `docs/03_testing/` 被 Rule 9.6 擋寫）；
+  `SDD_SPEC_FIRST_GATE.md` v1.3 新增〈產出落點〉與增量條款的基線採納指路；`AISDLC_SDD/CLAUDE.md` Rule 2 表 RTM 列拆分。
+- G-116-04／G-116-11：`SDD_AUTOCLAUDE_BRIDGE.md` §7 由「兩條件」改三徑（①委派迴圈／②SDD session-only／③一般流程），移除「不要啟用 Rule 9 hooks」的反向語氣；原文逐字存於該文件〈訂正紀錄〉。
+- G-116-10／DEF-200-548：`AISDLC_SDD/CLAUDE.md` 兩處「專案層文件寫入框架樹」補外部專案模式一句。
+
+### 形式化驗證
+- **`_HAPPY_PATH`／`*.tla` 本棒零改動 → Rule 9.18.1 無重跑義務**（不新增 FSM 狀態或轉態邊；不取新 ACT／Rule）。
 
 ## [v0.30 LATEST 原地修改] - 2026-10-17（整合輪 115／Dev-SDD-DOC 文件面；LATEST 本就可原地改，未開新版）
 
