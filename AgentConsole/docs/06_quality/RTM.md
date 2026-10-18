@@ -464,6 +464,29 @@
 | UI-CHT-04 | PRD §5.4.2 | 圖 執行時間分佈（柱狀） | FE+BE | 5 | frontend/components/charts/SimpleCharts.tsx（`ColumnChart`，最高的用主色）、frontend/lib/domain/metrics.ts（`durationColumns`） | 同 UI-CHT-01、frontend/lib/domain/metrics.test.ts::分佈整形 | QA 2026-10-15：p5-monitor.spec.ts::M1（執行時間分佈 3 柱）（QA_P3-6_E2E_Verification.md §4.4） | ✅ 已驗證 |
 | UI-CHT-05 | PRD §5.4.2 | 圖 重試次數分佈（柱狀） | FE+BE | 5 | frontend/components/charts/SimpleCharts.tsx（`ColumnChart`）、frontend/lib/domain/metrics.ts（`retryColumns`，桶一律出現，五次以上併成一欄） | 同 UI-CHT-04 | QA 2026-10-15：p5-monitor.spec.ts::M1（重試次數分佈 6 柱）（QA_P3-6_E2E_Verification.md §4.4） | ✅ 已驗證 |
 
+## 2.1 整合輪 116 增量功能的 TCS 本地 ID 追溯（DEF-AC-023 決策軌跡投影；不計入 §2 總列數）
+
+> 本子表的 ID 是 `AgentConsole/docs/03_testing/contracts/TCS-FsmTrail-20261018.md` 的本地編號（F／US／AC／AT），與 §1.2 的六種前綴無關，所以 ID 欄一律加反引號：§3.4 的現查指令以行首 `| <前綴>-` 計數，不會把這 14 列算進總列數 392，§3 的統計表與檔頭數字因此不變。掛靠的既有列＝BR-14（`GET /sdd/fsm/{project}`）與 BR-13；那兩列的四格本輪未改。規格摘要 `sha256:409b2c5e32f24a7ea93adc0b88da31c9d1dd3757866bd22d9f8750140f58e8e1`（Stage-2 凍結）；實作 commit `4c327ea0`；SCG-4 報告 [SCG4-REVIEW-FsmTrail-20261018.md](SCG4-REVIEW-FsmTrail-20261018.md)（建議：通過）。
+
+| ID | 來源 | 摘要（≤20 字） | 層 | Phase | 實作檔 | 自動測試 | E2E 驗證 | 狀態 |
+|----|------|----------------|----|-------|--------|----------|----------|------|
+| `F-001` | DEF-AC-023·TCS-FsmTrail-20261018 | 軌跡 from 欄還原投影 | Bridge | 3 | engine-bridge/app/fsm_trail.py（純函式 `restore_trail`）、engine-bridge/app/routers/sdd.py（`_state_view` 一個運算式與一行 import） | engine-bridge/tests/test_fsm_trail.py（七個 AT 函式，見下列各 AT 列） | QA 2026-10-18（整合輪 116 W3）：非 E2E（未跑 Console 監控頁與真後端）；Bridge 層：整檔單跑與 engine-bridge 全套 rc 0（無新增略過）、ruff 兩視角綠、突變 19 個全被殺、單次呼叫 P99 0.80 微秒；E2E-15 對拍用 IMPLEMENTATION 態夾具，依 R3 不會有筆被改寫，不受影響 | ✅ 實作+測試 |
+| `US-001` | DEF-AC-023 | 監控頁最近決策顯示真來源 | Bridge | 3 | 同 `F-001` | 同 `F-001`（AT-001-1-1～AT-001-5-2） | 同 `F-001`；畫面端（「AUTOCLAUDE_DELEGATED → ESCALATION」的實際顯示）本輪未重驗，Backend 與 Frontend 是否透傳 `from_inferred` 不在本增量 | ✅ 實作+測試 |
+| `AC-001-1` | TCS-FsmTrail US-001 | 委派失敗筆 from 還原 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_1_1_restores_from_of_the_delegated_failure_entry | － | ✅ 實作+測試 |
+| `AC-001-2` | TCS-FsmTrail US-001 | 只改符合條件的筆 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_2_1_only_matching_entries_are_rewritten | － | ✅ 實作+測試 |
+| `AC-001-3` | TCS-FsmTrail US-001 | provenance 閘 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_3_1_provenance_gate_blocks_every_rewrite | － | ✅ 實作+測試 |
+| `AC-001-4` | TCS-FsmTrail US-001 | 不良輸入不拋例外 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_4_1_non_list_trace_is_returned_as_is、engine-bridge/tests/test_fsm_trail.py::test_AT_001_4_2_malformed_elements_pass_through | － | ✅ 實作+測試 |
+| `AC-001-5` | TCS-FsmTrail US-001 | 端點接線且磁碟檔不變 | Bridge | 3 | engine-bridge/app/routers/sdd.py、engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_5_1_view_restores_the_delegated_failure_and_leaves_the_file_untouched、engine-bridge/tests/test_fsm_trail.py::test_AT_001_5_2_non_delegated_files_are_not_projected | － | ✅ 實作+測試 |
+| `AT-001-1-1` | TCS-FsmTrail AC-001-1 | 符合筆還原且輸入不變 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_1_1_restores_from_of_the_delegated_failure_entry | QA 2026-10-18：該 AT 被 B04、B05、B07、B15、B16、B19 等突變打紅（單元層，無跨層實跑） | ✅ 實作+測試 |
+| `AT-001-2-1` | TCS-FsmTrail AC-001-2 | 混合十筆只改符合者 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_2_1_only_matching_entries_are_rewritten | QA 2026-10-18：被 B01、B10、B11、B16、B19 等突變打紅（單元層） | ✅ 實作+測試 |
+| `AT-001-3-1` | TCS-FsmTrail AC-001-3 | provenance 八種不合格值 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_3_1_provenance_gate_blocks_every_rewrite | QA 2026-10-18：被 B02、B03、B09 等突變打紅（單元層） | ✅ 實作+測試 |
+| `AT-001-4-1` | TCS-FsmTrail AC-001-4 | 非 list 原樣回同一物件 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_4_1_non_list_trace_is_returned_as_is | QA 2026-10-18：被 B12 突變打紅（單元層） | ✅ 實作+測試 |
+| `AT-001-4-2` | TCS-FsmTrail AC-001-4 | 不良元素原樣、好元素改寫 | Bridge | 3 | engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_4_2_malformed_elements_pass_through | QA 2026-10-18：被 B08、B11 等突變打紅（單元層） | ✅ 實作+測試 |
+| `AT-001-5-1` | TCS-FsmTrail AC-001-5 | 端點還原最後一筆、檔不變 | Bridge | 3 | engine-bridge/app/routers/sdd.py、engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_5_1_view_restores_the_delegated_failure_and_leaves_the_file_untouched | QA 2026-10-18：經 TestClient 打 `GET /sdd/fsm/{project}`（Bridge 應用程式內，非真後端）；被 B06、B13、B20 等突變打紅 | ✅ 實作+測試 |
+| `AT-001-5-2` | TCS-FsmTrail AC-001-5 | 非委派失敗檔不受投影 | Bridge | 3 | engine-bridge/app/routers/sdd.py、engine-bridge/app/fsm_trail.py | engine-bridge/tests/test_fsm_trail.py::test_AT_001_5_2_non_delegated_files_are_not_projected | QA 2026-10-18：TestClient 打四個檔；被 B01、B02、B20 等突變打紅 | ✅ 實作+測試 |
+
+**備註**：(1) 契約 §1.7.1 的 `SddFsmState` 表與 OpenAPI 的 `SddFsmState`／`decisionTrace` description 承諾 `decision_trace`「原樣」帶出；本增量讓委派失敗那一筆的 `from` 不再等於檔內值（並多一個 `from_inferred`），對那一筆而言該描述不再逐字為真。schema 不變（`additionalProperties: true`），偏離的是「逐值相等」的語意；TCS 已登記為已知邊界 3。文件措辭訂正是文件變更，由主控在 SCG-5 或收尾補一句；日後 E2E-15 或任何「檔案 ↔ API 逐值比對」擴及委派失敗情境時須把 `from_inferred` 那筆列為已知例外。(2) 狀態欄不是 `✅ 已驗證`：本增量沒有跑 Console 畫面與真後端的 E2E；升格須由 QA 在 E2E 欄填入實跑指令與日期。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）
