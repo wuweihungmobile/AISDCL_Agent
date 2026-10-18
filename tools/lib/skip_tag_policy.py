@@ -490,7 +490,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-12 重釘 230→231（R212 第四列新增 `AutoClaude/tests/execution/
     # test_prd12_permission_bypass_invariant8.py`，收尾實測 289 支，230 低於實測的 80%，
     # 前置掃描逐字指示重釘為 231 ⇒ 照填，零加減推算）。
-    "AutoClaude/tests": 241,  # 115 輪：240→241（實測 302、逐字指示；只准往上）  round-label-ok
+    "AutoClaude/tests": 242,  # 116 輪：241→242（DF-A 新增 tests/utils/test_webhook_sender.py 後實測 303、逐字指示；只准往上）  round-label-ok
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

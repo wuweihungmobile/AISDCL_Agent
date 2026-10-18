@@ -87,15 +87,48 @@ _CONTEXT_USAGE_KEYS = (
 )
 
 
+def _context_used_tokens(usage: dict) -> float:
+    """把一筆 usage 映射的三個 context 鍵加總（非數值／布林一律不計）。"""
+    used = 0.0
+    for key in _CONTEXT_USAGE_KEYS:
+        val = usage.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            used += float(val)
+    return used
+
+
+def _latest_iteration_usage(usage: dict) -> dict | None:
+    """``usage.iterations[-1]``＝**最後一次 API 呼叫**的用量（＝目前 context 占用）；
+    缺席、不是非空 list、末筆不是映射、或末筆沒有任何 context 鍵 ⇒ ``None``（退回累計值）。"""
+    iterations = usage.get("iterations")
+    if not isinstance(iterations, list) or not iterations:
+        return None
+    last = iterations[-1]
+    if not isinstance(last, dict):
+        return None
+    if not any(isinstance(last.get(k), (int, float)) and not isinstance(last.get(k), bool)
+               for k in _CONTEXT_USAGE_KEYS):
+        return None
+    return last
+
+
 def context_pct_from_claude_json(parsed: dict) -> float | None:
     """從 ``claude -p --output-format json`` 結果推算 context 使用率（範圍 0-100）。
 
     DEF-81-001 PTY 支根因修復（W-82-1）：``claude -p`` 純文字輸出不含 context%，故
     改以 ``--output-format json`` 的結構化用量推算：
 
-        used   = usage.input_tokens + cache_read_input_tokens + cache_creation_input_tokens
+        used   = usage.iterations[-1] 的 input_tokens + cache_read_input_tokens
+                 + cache_creation_input_tokens（最後一次 API 呼叫＝目前 context 占用）；
+                 缺 ``iterations`` 時退回頂層 usage 同三鍵的累計值（舊形狀、向後相容）
         window = max(modelUsage[*].contextWindow)
         pct    = clamp(used / window * 100, 0, 100)
+
+    🔴 整合輪 116 DF-A（DEF-200-550）：頂層 ``usage`` 的三個鍵是**跨回合累計**（每一回合
+    都把整個 prompt cache 再讀一次），與「目前 context 占多少」無關——真實 AutoClaude 樹每回合
+    載入根層與子專案 CLAUDE.md 約 86k token，一步 16 回合累計 1,465,541 ÷ 1,000,000 夾成
+    100% ⇒ Token Guard 偽 TOKEN_HALT、run FAILED；同一次呼叫 ``iterations[-1]`` 只有 130,123
+    （13.0%）。整合輪 115 的 T-G 在 TEMP 小專案沒踩到，因為每回合 context 很小。
 
     缺 ``usage``/``modelUsage``、used<=0 或 window<=0 → 回 ``None``（訊號源未產出，由
     上游 fail-loud 處理；嚴禁回 0.0 偽裝「context 真的 0%」）。
@@ -110,11 +143,8 @@ def context_pct_from_claude_json(parsed: dict) -> float | None:
     model_usage = parsed.get("modelUsage")
     if not isinstance(usage, dict) or not isinstance(model_usage, dict):
         return None
-    used = 0.0
-    for key in _CONTEXT_USAGE_KEYS:
-        val = usage.get(key)
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            used += float(val)
+    latest = _latest_iteration_usage(usage)
+    used = _context_used_tokens(latest if latest is not None else usage)
     window = 0.0
     for mu in model_usage.values():
         if isinstance(mu, dict):

@@ -257,6 +257,90 @@ class TestContextPctFromClaudeJson:
         assert context_pct_from_claude_json(None) is None  # type: ignore[arg-type]
         assert context_pct_from_claude_json("not a dict") is None  # type: ignore[arg-type]
 
+
+# ══════════════════════════════════════════════
+# 整合輪 116 DF-A（DEF-200-550）：頂層 usage 是跨回合累計，目前 context 取 usage.iterations[-1]
+# 夾具＝2026-10-18 真實 haiku 在真實 AutoClaude 樹跑 16 回合的 claude -p JSON（去掉 result 長文）：
+# 累計 24+1,354,671+110,846 = 1,465,541 → 146.6% 夾成 100%（偽 TOKEN_HALT）；
+# iterations[-1] = 2+129,496+625 = 130,123 → 13.0123%。
+# ══════════════════════════════════════════════
+_HALT_FIXTURE_CLAUDE_JSON = {
+    "type": "result",
+    "subtype": "success",
+    "num_turns": 16,
+    "usage": {
+        "input_tokens": 24,
+        "cache_creation_input_tokens": 110846,
+        "cache_read_input_tokens": 1354671,
+        "output_tokens": 9093,
+        "iterations": [
+            {
+                "input_tokens": 2,
+                "output_tokens": 1312,
+                "cache_read_input_tokens": 129496,
+                "cache_creation_input_tokens": 625,
+                "type": "message",
+            }
+        ],
+    },
+    "modelUsage": {
+        "claude-haiku-5-5": {"inputTokens": 24, "contextWindow": 1000000},
+    },
+}
+
+
+class TestContextPctUsesLatestIteration:
+    def test_latest_iteration_not_cumulative(self):
+        """DEF-200-550：真實樹 16 回合的夾具必須算成 13.0%，不是累計夾成的 100%。"""
+        pct = context_pct_from_claude_json(_HALT_FIXTURE_CLAUDE_JSON)
+        assert pct is not None
+        assert abs(pct - 13.0123) < 0.001
+
+    def test_cumulative_fallback_when_iterations_absent(self):
+        """舊形狀（沒有 iterations）逐字維持累計算法；本夾具去掉 iterations 後仍夾成 100。"""
+        cumulative_only = {
+            k: v for k, v in _HALT_FIXTURE_CLAUDE_JSON["usage"].items() if k != "iterations"
+        }
+        parsed = {"usage": cumulative_only, "modelUsage": _HALT_FIXTURE_CLAUDE_JSON["modelUsage"]}
+        assert context_pct_from_claude_json(parsed) == 100.0
+
+    def test_cumulative_fallback_when_iterations_unusable(self):
+        """iterations 是空 list／末筆不是映射／末筆沒有任何 context 鍵 ⇒ 退回累計值。"""
+        base = _HALT_FIXTURE_CLAUDE_JSON["usage"]
+        for bad in ([], [None], [{"output_tokens": 1312, "type": "message"}], "x", 7):
+            usage = {**base, "iterations": bad}
+            parsed = {"usage": usage, "modelUsage": _HALT_FIXTURE_CLAUDE_JSON["modelUsage"]}
+            assert context_pct_from_claude_json(parsed) == 100.0, bad
+
+    def test_single_turn_latest_equals_cumulative(self):
+        """只跑一回合時最後一回合＝累計（操作員 1 回合實測相等），兩種算法同值。"""
+        single = {"input_tokens": 6, "cache_read_input_tokens": 21676,
+                  "cache_creation_input_tokens": 37121, "output_tokens": 6}
+        parsed = {
+            "usage": {**single, "iterations": [dict(single, type="message")]},
+            "modelUsage": {"m": {"contextWindow": 1_000_000}},
+        }
+        pct = context_pct_from_claude_json(parsed)
+        assert pct is not None and abs(pct - 5.8803) < 0.001
+
+    def test_latest_iteration_takes_the_last_element(self):
+        """多筆 iterations 取**最後**一筆（最新一次 API 呼叫），不是第一筆也不是加總。"""
+        parsed = {
+            "usage": {
+                "input_tokens": 100, "cache_read_input_tokens": 900_000,
+                "cache_creation_input_tokens": 0,
+                "iterations": [
+                    {"input_tokens": 1, "cache_read_input_tokens": 50_000,
+                     "cache_creation_input_tokens": 0},
+                    {"input_tokens": 1, "cache_read_input_tokens": 80_000,
+                     "cache_creation_input_tokens": 0},
+                ],
+            },
+            "modelUsage": {"m": {"contextWindow": 1_000_000}},
+        }
+        pct = context_pct_from_claude_json(parsed)
+        assert pct is not None and abs(pct - 8.0001) < 0.001
+
     def test_context_pct_ignores_bool_values(self):
         """bool 是 int 子類；usage 欄位為 True/False 時不可誤當 token 數累加。"""
         parsed = {
