@@ -535,10 +535,10 @@ sdd spec-frozen --project "$SDD_PROJECT" --must-exist --stage Stage-1 --doc CLAU
 
 ### 8.6 人工閘與實作
 
-1. **人工閘**：`spec-frozen` 是人類動作，`--approver` 填人（§8.4 慣例）；確認前 agent 不得執行（Rule 8）。
+1. **人工閘**：`spec-frozen` 是人類動作，`--approver` 填人（§8.4 慣例）；確認前 agent 不得執行（Rule 8）。**人工閘退回修訂**（整合輪 116 實證）：`HUMAN_PENDING → SPEC_DRAFTING` **不是合法邊**（CLI 回 `TransitionError`），審查者要求改規格時走 `transition --to SPEC_REGRESSION_CHECK --reason "<預審結論>"`（該態允許寫規格檔）→ 修訂 → `transition --to HUMAN_PENDING --reason "<重核依據>"` → 再 `spec-frozen`；先前的 `gate SCG_VALIDATION PASS` 紀錄仍在軌跡裡，修訂依據寫進兩次 transition 的 reason（不重跑 gate、不捏造第二次通過）。
 2. **談判閘**：SPEC_FROZEN 之後 `negotiate-enter --reason "<原因>" --contract-ref "<TCS 相對路徑>"` → Dev／QA 對 oracle 達成共識後 `negotiate-exit --outcome agreed --reason "<共識依據>"` →
    IMPLEMENTATION（R-9.20.2；全表見 GATE〈FSM 寫入指令〉第 8 列）。Console 路徑由 Bridge 代為（§6.4）。
-3. **徑①（委派）**：Console 路徑走 §6，由 Bridge 同步 FSM。**CLI-only**：人在 session 內 `delegate-enter --reason "<原因>"`（`--playbook-ref` 不帶，或寫不以 `run:` 開頭的值＝外來委派，Bridge 不會回收，見 §5、§6.7）→ 依 §2 編譯並執行
+3. **徑①（委派）**：Console 路徑走 §6，由 Bridge 同步 FSM。🔴 **真實樹的委派批次**（`execution_path`＝子專案根，不是 TEMP 專案）：被委派的 claude 會讀到根層與子專案的 CLAUDE.md——Windows 上鐵律一會讓它正確地拒用 Bash，所以 `--allowedTools` 必須含 `PowerShell`（整合輪 116 DF-A 實證：沿 115 的 `Read,Edit,Write,Bash` 會讓評估指令跑不了）；每回合會載入約 86k token 的規則文件，context 量測以最後一次 API 呼叫為準（DEF-200-550）。**CLI-only**：人在 session 內 `delegate-enter --reason "<原因>"`（`--playbook-ref` 不帶，或寫不以 `run:` 開頭的值＝外來委派，Bridge 不會回收，見 §5、§6.7）→ 依 §2 編譯並執行
    playbook → 完成或使用者取消 `delegate-exit --decision done`，引擎升級型失敗 `--decision failed`（進 ESCALATION，只有人能解，§8.8）。CLI-only 路徑的 FSM 委派**不自動同步**：
    延後，再開症狀＝掌舵者在純 CLI 路徑要求 FSM 反映 AutoClaude 執行狀態。
 4. **徑②（session-only）**：session 內依凍結規格實作，Rule 4（每支程式立即編譯＋跑單元測試）；AT 由 session 內自跑——Java：`gradlew test --tests …`；TypeScript：`vitest run -t …`；Python：`pytest -k …`——

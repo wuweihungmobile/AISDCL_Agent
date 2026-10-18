@@ -72,6 +72,10 @@
 | G-116-18 | P4 | adapter／Bridge 向上找祖先狀態目錄；根層 FSM 目錄是所有子專案的祖先 | compile 一律帶 `--fsm-project`；SOP 一句 | Dev-SDD | 延後（再開症狀：子專案 compile 回應的 `fsm_project` 不是該子專案的鍵） |
 | G-116-19 | P4 | 檔案系統大小寫差異 | 標準鍵一律小寫 kebab（D-116-03） | Dev-SDD | 本輪文字 |
 | G-116-20 | P4 | 狀態在被忽略的 build/ 下，凍結證據不入庫 | 每功能收尾把 `show` 逐字輸出與 `spec_doc_digests` 引進證據檔（115 §1.3 做法） | QA | 本輪文字 |
+| G-116-21 | P3 | W2 實證：`HUMAN_PENDING → SPEC_DRAFTING` 不是合法邊（CLI `TransitionError`），人工閘沒有「退回修訂」的直達邊；115 §5.2 已把 Console 退回邊列延後 | SOP §8.6 寫明合法迴路＝`HUMAN_PENDING → SPEC_REGRESSION_CHECK`（允許寫規格）→ 修訂 → `HUMAN_PENDING` → `spec-frozen`；不改 `_HAPPY_PATH` | 主控（收尾） | 本輪文件化；Console 退回邊維持 115 延後（再開症狀不變） |
+| G-116-22 | **P1** | W2 DF-A 真跑：引擎把 `claude -p` JSON 的跨回合累計 usage 當目前 context，真實樹 16 回合即偽 TOKEN_HALT（DEF-200-550） | `context_pct_from_claude_json` 取 `usage.iterations[-1]`，缺則退回累計 | 主控（代 Dev，額度守衛擋下扇出時） | 立案 DEF-200-550、同輪 fixed@d9dc1ff0 |
+| G-116-23 | P3 | W2 DF-A 真跑：真實樹的根 CLAUDE.md 鐵律一讓 haiku 正確拒用 Bash，而委派批次的 `--allowedTools` 沿 115（TEMP 專案）只給 `Read,Edit,Write,Bash` ⇒ 評估指令跑不了（6 次 PowerShell 呼叫被 permission_denials 擋） | 真實樹的委派批次 `--allowedTools` 須含 `PowerShell`（Windows）；§8.6 徑① 補一句 | 操作員重跑；主控（SOP 一句） | 本輪修 |
+| G-116-24 | P3 | W2 DF-A 真跑：引擎 subprocess 模式沒關 claude 的 stdin，每次呼叫印 `Warning: no stdin data received in 3s` 白等 3 秒 | 引擎 spawn 時以 `stdin=DEVNULL` 或關閉（須先確認 `send()` 路徑不依賴 stdin，115 的 DEF-AC-021 同族） | — | 延後（再開症狀：每步固定多 3 秒；與 DEF-AC-021 合併處理） |
 
 ## §4 風險與誠實劃界
 
@@ -110,6 +114,22 @@
 | D-116-16 | 文件集見檔頭；ADR 不新開 | 主控 |
 | D-116-17 | 棒次：W1 Dev-SDD ∥ Dev-DOC → 主控單人（gitignore、skills `--write`、親驗、commit）→ W2 SA（三份 FRD-lite＋TCS，串行）→ 主控核准凍結（三鍵）→ DF-B ∥ DF-C（headless Sonnet）→ DF-A（operator Sonnet＋Bridge＋haiku）→ W3 QA 獨立（一審全查、二審驗修復）→ W4 主控收尾（搬入、帳本、證據檔、休眠重評、環境殘留刪除、push 對帳） | 全部 |
 | D-116-18 | 立案 DEF-200-544（G-116-01）、545（G-116-02）、546（G-116-07）、547（G-116-09）、548（G-116-10）、549（G-116-13）；同輪 fixed；其餘 P3／P4 以本檔為載體 | 主控收尾 |
+
+## §7 各棒交卷與主控親驗（「他包回報」與「主控親跑」分開寫；commit 以 `git log` 為準）
+
+| 棒 | commit | 主控親跑（當回合逐字） | 接受的偏離 | 未做／待整合 |
+|---|---|---|---|---|
+| W0 Architect（唯讀）∥ 探針 | — | 探針工作目錄 `probe_116/` 全部案 `git status --short` 空、框架預設狀態目錄 95 檔 sha256 零變 | 探針 P3 控制組在框架預設目錄建後即刪一檔（任務書授權） | 報告併入 §1、§1.1、§3 |
+| W1 Dev-SDD（RT＋DOC） | `9f2d36c8` | ci-gate.ps1 rc=0（1478／2149／399）；test_recovery_hint 46 passed；根層 ps-lint 鎖 2 tests OK；sync_exposed_skills 20 passed | 恢復指令多帶 `--must-exist`；GATE 文件新增〈產出落點〉節；skip 改硬依賴與訊息去裸 `python` 字由主控補 | autoclaude 鏡像 `--write` 由主控做 |
+| W1 Dev-DOC | `56fed990` | 四支 claude_md 契約測試 37 passed；check_loc_budget rc=0；AutoClaude/CLAUDE.md 392 行、AgentConsole 167 行 | 路徑正斜線；「W 波次」不寫 W1～W5 | 檔頭與 footer 的 v0.09 由主控改 |
+| W1 主控單人 | `56fed990`、`54a3ddeb` | `git check-ignore -v` 命中 `.gitignore:70`；`--check` 兩目標 59 檔一致；根層全套 5384 rc=0；crossref 未結 0 | — | — |
+| W1 Dev-SDD 第二棒（落點全樹） | `81faa59a` | ci-gate.ps1 rc=0；兩鏡像 59 檔一致；根層全套 5384 rc=0 | 超點名 17 檔（執行期測試報告同原則）；EVOLUTION_LOG 用 `###` 小節；S-15 殘留一併訂正 | BASELINE-PERFORMANCE-REPORT 與 API_Contract 一句由主控補 |
+| W2 SA／操作員 | `f3fcb709` | Stage-1 凍結三鍵 rc=0（approver 掌舵者代理（主控））；Stage-2 凍結三鍵 rc=0；B／C negotiate rc=0 → IMPLEMENTATION | 走 SPEC_REGRESSION_CHECK 修訂（G-116-21）；DF-A 加 NFR-001-9／10、DF-B trigger 第三條件 | — |
+| W2.5 QA 預審 | — | 由主控執行退回轉態三鍵 rc=0 | DF-A 7 項、DF-B 1 項、DF-C 1 項全數採納 | — |
+| W2 DF-B（headless Sonnet，hooks-ON） | `4c327ea0` | pytest test_fsm_trail 7 passed；ruff 三檔綠；diff 只含 R8 與 import；hooks.log SessionStart success 注入 `agentconsole-fsm-trail`／IMPLEMENTATION | 行寬折行；型別標註 `Any -> Any` | 全套 1003／24 skipped＝他包回報 |
+| W2 DF-C（headless Sonnet，hooks-ON） | `343d583a`、`e73749bf` | test_sdd_env 22 passed；scripts/tests 421 passed；ruff 綠；sdd_env 實跑印五鍵；dedup 鎖 OK | stdio 改走島內共用入口（主控補） | ONBOARDING §7 基線回填於收尾 |
+| W2 DF-A 第一輪（Bridge＋真 haiku） | — | 操作員回報 FAILED（TOKEN_HALT 偽陽性）；主控親跑半成品 `pytest tests -k AT_001_1_1` 1 passed | — | 重跑待 RC-1 修後 |
+| RC-1 修復（主控代 Dev；額度守衛擋下扇出） | `d9dc1ff0` | test_token_regex 39 passed；AutoClaude 全套 5881 passed；lint-imports 9 kept；check_loc_budget rc=0 | — | DF-A 重跑進行中 |
 
 ### 6.1 W1 持有面（互斥）
 
