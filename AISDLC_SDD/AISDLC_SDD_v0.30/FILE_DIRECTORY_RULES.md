@@ -324,12 +324,12 @@ AISDLC_SDD_v<LATEST>/       # ← 讀作「當前最新演化版」；現查：p
     │   ├── 📁 adr/                   # Architecture Decision Records（.gitkeep）
     │   ├── 📁 api/                   # API Contract Spec, Consumer Contract（.gitkeep）
     │   └── 📁 migration/             # Migration Contract Maps（.gitkeep）
-    ├── 📁 03_testing/                # RTM, Test Plans, Test Specs
+    ├── 📁 03_testing/                # Test Plans, Test Strategy, Test Specs（凍結前；RTM 與報告在 06_quality/）
     │   └── 📁 contracts/             # Test Contract Spec, Invariant Test Contract（.gitkeep）
     ├── 📁 04_planning/               # Gap Analysis, Refactor Plans
     │   └── 📁 performance/           # Performance Baseline Specs（.gitkeep）
     ├── 📁 05_development/            # Living Doc Strategy（.gitkeep）
-    ├── 📁 06_quality/                # Code Quality Baseline, Tech Debt Spec
+    ├── 📁 06_quality/                # RTM, SCG 報告, Code Quality Baseline, Tech Debt Spec
     │   └── 📁 security/              # SAD, STRIDE, Compliance Matrix, Asset Inventory（.gitkeep）
     ├── 📁 07_design/                 # UI/UX, Database Design（.gitkeep）
     └── 📁 08_deployment/             # Pipeline Spec, Monitoring, Release Notes
@@ -415,8 +415,8 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 | API Compat | docs_template/sdd/api/ | docs/02_architecture/api/ |
 | Consumer/Provider Contract | docs_template/sdd/api/ | docs/02_architecture/api/ |
 | Contract（通用） | docs_template/sdd/api/ | docs/02_architecture/api/ |
-| RTM | docs_template/sdd/testing/ | docs/03_testing/ |
-| RTM-Existing-System | docs_template/sdd/testing/ | docs/03_testing/ |
+| RTM | docs_template/sdd/testing/ | docs/06_quality/ |
+| RTM-Existing-System | docs_template/sdd/testing/ | docs/06_quality/ |
 | Invariant Test Contract | docs_template/sdd/testing/ | docs/03_testing/contracts/ |
 | Test Strategy Spec | docs_template/sdd/testing/ | docs/03_testing/ |
 | Test Contract Spec | docs_template/sdd/testing/ | docs/03_testing/contracts/ |
@@ -426,7 +426,7 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 | Env Contract Spec | docs_template/sdd/testing/ | docs/03_testing/contracts/ |
 | Data Integrity Test Spec | docs_template/sdd/testing/ | docs/03_testing/ |
 | Defect Classification Spec | docs_template/sdd/testing/ | docs/03_testing/ |
-| Living Test Report | docs_template/sdd/testing/ | docs/03_testing/ |
+| Living Test Report | docs_template/sdd/testing/ | docs/06_quality/ |
 | Security Test Spec | docs_template/sdd/testing/ | docs/03_testing/ |
 | Performance Baseline Spec（PBS） | docs_template/sdd/testing/ | docs/04_planning/performance/ |
 | Baseline Performance Report | docs_template/sdd/testing/ | docs/04_planning/performance/ |
@@ -451,6 +451,7 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 | 報告類型 | 寫入位置 |
 |---------|---------|
 | 分析報告（要入庫的結論性報告） | docs/06_quality/ |
+| SCG 驗證報告／SCG-4 審查報告／RTM 與 RTM 驗證報告／Living Test Report（執行期產物） | docs/06_quality/（SCG_VALIDATION 起 docs/03_testing/ 被 Rule 9.6 擋寫；整合輪 116 D-116-09） |
 | 階段報告（要入庫者） | build/planning/archive/ |
 | 驗證報告 | build/reports/verification/（`build/reports/` 被 git 忽略，不入庫） |
 | KPI 報告 | build/reports/kpi/（同上，不入庫） |
@@ -464,7 +465,7 @@ GitHub Actions 僅讀 **repo 根目錄** `.github/workflows/`；巢狀 `AISDLC_S
 > v0.13 起皆此形，v0.05～v0.12 為 `build/reports/*` 並只放行 `fsm/FSM-STATE-TEMPLATE.yaml` 一檔），
 > 照原表寫的分析／階段報告 clone 後就消失；LATEST 被追蹤的 build 內容只有 `planning/` 與 `logs/README.md`。`build/reports/` 只放
 > 工具自動寫的執行期產物。同一宣稱的其他站點：`AISDLC_SDD/CLAUDE.md` Rule 2 表（已同步訂正）；`tools/AISDLC_CLAUDE_RULES.md`
-> 第 103～104 行同寫法（不在本輪文件白名單，未動，已登記交卷）。
+> 第 103～104 行同寫法（115 當時不在文件白名單、未動；整合輪 116 已同步訂正）。
 
 ---
 

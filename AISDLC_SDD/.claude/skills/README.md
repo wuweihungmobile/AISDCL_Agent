@@ -270,18 +270,18 @@
 >
 > | 形式 | 來源 | 用途 |
 > |------|------|------|
-> | `AISDLC_SDD:<skill>` | 父層 SSOT 鏡像（= ci-gate LATEST，由 `scripts/sync_exposed_skills.py` 守新鮮） | **對外預設調用**（版本穩定，免綁版本號） |
+> | `AISDLC_SDD:<skill>` | 對外曝光鏡像（`AISDLC_SDD/.claude/skills` = ci-gate LATEST，由 `scripts/sync_exposed_skills.py` 守新鮮；`AutoClaude/.claude/skills` 是同一份 LATEST 的第二個鏡像） | **對外預設調用**（版本穩定，免綁版本號） |
 > | `AISDLC_SDD/AISDLC_SDD_v0.0X:<skill>` | 該版本目錄 | 僅限**明確指定版本做 B 軌 dogfooding** 時使用 |
 >
-> **優先序規範**：對外一律用父層 `AISDLC_SDD:` 形式；路徑版僅在需鎖定特定凍結版本時用。
-> ⚠️ 同名 skill 在多版目錄並存（父層 + 各 `v0.0X`），CC 以路徑前綴區分；跨多版工作時務必認明
-> namespace 前綴，對外請一律用父層 `AISDLC_SDD:`（= LATEST）以免誤叫到某凍結版。
+> **優先序規範**：對外一律用 `AISDLC_SDD:` 前綴形式；路徑版僅在需鎖定特定凍結版本時用。
+> ⚠️ 同名 skill 在多版目錄並存（對外曝光鏡像 + 各 `v0.0X`），CC 以路徑前綴區分；跨多版工作時務必認明
+> namespace 前綴，對外請一律用 `AISDLC_SDD:` 前綴（= LATEST）以免誤叫到某凍結版。
 > （實測 `sdd-gate` 等 skill 跨版內容一致、差異僅 line-ending〔CRLF/LF〕，無語意落後；個別 skill
 > 若未來某版做語意改寫，需鎖該版內容時改用路徑版 `AISDLC_SDD/AISDLC_SDD_v0.0X:<skill>`。）
 >
 > 🔁 **hooks / skills 版本綁定不對稱（刻意設計，非缺陷）**：B 軌 dogfooding 以 `SDD_ACTIVE_VERSION`
 > 釘凍結版時，**治理 hooks 經根 router 走該指定版、但 `AISDLC_SDD:` skills 一律曝光 LATEST**
-> （skills 為無狀態知識載體、父層鏡像綁 LATEST 為單一 SSOT 並由 ci-gate 守新鮮；hooks 為有狀態
+> （skills 為無狀態知識載體、鏡像綁 LATEST 為單一 SSOT 並由 ci-gate 守新鮮；hooks 為有狀態
 > 治理閉環故需精確版本路由）。兩者版本語意敏感度不同，採差異化策略。若需 skill 內容也鎖該版，
 > 改用路徑版 `AISDLC_SDD/AISDLC_SDD_v0.0X:<skill>`。
 

@@ -130,8 +130,8 @@ rtm_review:
     p0_gaps: "缺 AC 的核心功能 US → sa-analyst 補充"
     p1_gaps: "缺 AT 的 AC → qa-tester 補充"
     p2_gaps: "NFR 未對應 → 下個 Sprint 補充"
-  output: "docs/03_testing/RTM-{project}.md 更新"
-  template: "docs/03_testing/RTM-EXISTING-SYSTEM-TEMPLATE.md"
+  output: "docs/06_quality/RTM-{project}.md 更新"
+  template: "docs_template/sdd/testing/RTM-EXISTING-SYSTEM-TEMPLATE.md"
   frequency: "每月 + 每個 Sprint Review 後"
   human_confirmation: "🔴 Human 確認缺口優先級與補充計畫"
 ```
@@ -184,5 +184,5 @@ api_spec_review:
 - [SDD 符合度審計範本](../../../docs/02_architecture/SDD-COMPLIANCE-AUDIT-TEMPLATE.md)
 - [ADR 索引](../../../docs/02_architecture/adr/ADR-INDEX.md)
 - [Living Doc 策略範本](../../../docs/05_development/LIVING-DOC-STRATEGY-TEMPLATE.md)
-- [RTM 既有系統範本](../../../docs/03_testing/RTM-EXISTING-SYSTEM-TEMPLATE.md)
+- [RTM 既有系統範本](../../docs_template/sdd/testing/RTM-EXISTING-SYSTEM-TEMPLATE.md)
 - [Greenfield SDD 強化規範](../greenfield/SDD_GREENFIELD_ENHANCEMENT.md)

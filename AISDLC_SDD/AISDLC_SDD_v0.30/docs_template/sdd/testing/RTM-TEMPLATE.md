@@ -6,6 +6,7 @@
 **建立日期**: YYYY-MM-DD
 **建立者**: QA Lead / SA Analyst
 **觸發 Skill**: `traceability_matrix`
+**存放位置**: `docs/06_quality/RTM-{project}-{date}.md`（執行期產物；SCG_VALIDATION 起 `docs/03_testing/` 被 Rule 9.6 擋寫，見 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈產出落點〉）
 
 ---
 

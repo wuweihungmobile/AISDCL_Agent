@@ -4,7 +4,7 @@
 
 **文件類型**: Living Test Report (LTR)
 **SDD 特性**: Living Document — 每次 CI 執行後自動更新
-**存放位置**: `docs/03_testing/LIVING-TEST-REPORT-{project}.md`
+**存放位置**: `docs/06_quality/LIVING-TEST-REPORT-{project}.md`
 **自動更新**: CI Pipeline → RTM Coverage Report Generator
 
 ---

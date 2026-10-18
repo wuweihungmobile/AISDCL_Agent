@@ -182,7 +182,7 @@ Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的
 
 ```bash
 /rtm-generate full docs/02_architecture/AS-IS-SRD-{SystemName}.md
-# 產出 docs/03_testing/RTM-{SystemName}-existing.md
+# 產出 docs/06_quality/RTM-{SystemName}-existing.md
 ```
 
 ---
@@ -203,7 +203,7 @@ Brownfield 是 SDD 中最複雜的場景。本 Skill 是 Brownfield 工作流的
 | Gap Analysis | `docs/04_planning/GAP-ANALYSIS-{SystemName}.md` | To-Be 設計輸入 |
 | Tech Debt Spec | `docs/06_quality/TECH-DEBT-SPEC-{SystemName}.md` | Refactoring 計畫 |
 | ADR Archaeology | `docs/02_architecture/ADR-ARCHAEOLOGY-{SystemName}.md` | SCG-2 補充 |
-| RTM（現有系統）| `docs/03_testing/RTM-{SystemName}-existing.md` | 現有測試基線 |
+| RTM（現有系統）| `docs/06_quality/RTM-{SystemName}-existing.md` | 現有測試基線 |
 
 ---
 

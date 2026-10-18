@@ -112,7 +112,7 @@ doc_sync_validation:
 1. **已廢棄 ADR**：標記狀態為 Deprecated，不刪除，更新 ADR-INDEX
 2. **已廢棄 API Contract**：標記 `deprecated: true`，保留至少 2 個版本
 3. **已廢棄 Test Contract**：移至 `docs/03_testing/contracts/archive/`
-4. **舊版 RTM**：移至 `docs/03_testing/archive/`
+4. **舊版 RTM**：移至 `docs/06_quality/archive/`
 
 ---
 

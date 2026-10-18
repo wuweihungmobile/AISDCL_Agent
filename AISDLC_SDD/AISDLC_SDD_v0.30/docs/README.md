@@ -16,12 +16,12 @@
 | `02_architecture/adr/` | Architecture Decision Records (ADR-NNN-*.md) | `docs_template/sdd/adr/ADR-TEMPLATE.md` |
 | `02_architecture/api/` | API Contract Spec、API Compat 聲明、Consumer Contract | `docs_template/sdd/api/` |
 | `02_architecture/migration/` | Migration Contract Map (MCM) | `docs_template/sdd/architecture/MIGRATION-CONTRACT-MAP-TEMPLATE.md` |
-| `03_testing/` | RTM、Test Strategy Spec、Test Plan、Defect Classification | `docs_template/sdd/testing/`、`docs_template/core/tests/` |
+| `03_testing/` | Test Strategy Spec、Test Plan、Defect Classification（凍結前的測試規格） | `docs_template/sdd/testing/`、`docs_template/core/tests/` |
 | `03_testing/contracts/` | Test Contract Spec (TCS)、Invariant Test Contract、Contract Test Spec | `docs_template/sdd/testing/` |
 | `04_planning/` | Gap Analysis、Refactor Plan | `docs_template/sdd/planning/` |
 | `04_planning/performance/` | Performance Baseline Spec (PBS) | `docs_template/sdd/testing/PERFORMANCE-BASELINE-SPEC-TEMPLATE.md` |
 | `05_development/` | Living Documentation Strategy | `docs_template/sdd/development/LIVING-DOC-STRATEGY-TEMPLATE.md` |
-| `06_quality/` | Code Quality Baseline、Tech Debt Spec | `docs_template/sdd/quality/` |
+| `06_quality/` | RTM、SCG 驗證報告、SCG-4 審查報告、Code Quality Baseline、Tech Debt Spec | `docs_template/sdd/quality/` |
 | `06_quality/security/` | SAD、STRIDE Threat Model、Compliance Matrix、Asset Inventory、Incident Response | `docs_template/sdd/architecture/SAD-TEMPLATE.md`、`docs_template/sdd/testing/` |
 | `07_design/` | UI/UX 設計文件、Database Schema Design | `docs_template/core/` |
 | `08_deployment/` | Pipeline Spec、Monitoring Alert Spec、Security Monitoring Spec、Release Notes | `docs_template/sdd/deployment/` |

@@ -46,7 +46,7 @@ Sprint 是 SDD 規格驅動執行的單元。本 Skill 確保每個進入 Sprint
 ```bash
 docs/01_requirements/FRD-{SystemName}.md   # 讀取 F-XXX/US-XXX 清單
 docs/04_planning/PRODUCT-BACKLOG.md        # 讀取優先級排序
-docs/03_testing/RTM-{SystemName}.md        # 確認哪些 US 尚未有 TC
+docs/06_quality/RTM-{SystemName}.md        # 確認哪些 US 尚未有 TC
 ```
 
 確認清單：

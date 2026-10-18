@@ -28,6 +28,14 @@
 ### 形式化驗證
 - **`_HAPPY_PATH`／`*.tla` 本棒零改動 → Rule 9.18.1 無重跑義務**（不新增 FSM 狀態或轉態邊；不取新 ACT／Rule）。
 
+### 落點全樹收齊（第二棒；D-116-09）
+- G-116-02 的落點由三支 skill 擴及 LATEST 全樹：先 Grep `03_testing`（309 處／126 檔）逐處判「規格」或「產出」，**產出（RTM、SCG 驗證報告、SCG-4 審查報告、RTM 驗證報告，以及 Sprint 測試報告、Bug 報告、
+  Living Test Report 等執行期測試報告）改指 `docs/06_quality/`；規格（TCS、Test Strategy、Test Plan／Test Cases、各類 Test Spec、PBS、Defect Classification、`contracts/`）留 `docs/03_testing/`**。
+- 改動 55 檔：skills 11＋`skills/README.md`（「父層」措辭改目標中性）、agent YAML 14（`traceability_matrix` 的 `output:`）、`cicd/` 3、`scenarios/` 4、`prompts/` 2、`docs_template/` 8、`workflow/` 3、`guides/` 3、
+  VD 根層文件 3（`AISDLC_SDD_INIT.md`、`FILE_DIRECTORY_RULES.md`、`docs/README.md`）、`tools/` 文件 3；父層 `.claude/skills` 鏡像重生 12 檔。同表同檔順手訂正：場景增強文件四處指向不存在的 RTM 範本路徑改指 `docs_template/sdd/testing/`；
+  兩份 RTM 範本補 `**存放位置**` 標頭；`tools/AISDLC_CLAUDE_RULES.md` 補做 115／S-15 訂正（原文逐字留註記）。
+- 不動：`contracts/`、hook／FSM 程式與測試、歷史 `archive/`、`BASELINE-PERFORMANCE-REPORT-TEMPLATE.md`（存放位置與 `FILE_DIRECTORY_RULES.md` 對照表原本不一致，待裁決）。形式化驗證同上：本棒零改動，無 `.py`／`*.tla`。
+
 ## [v0.30 LATEST 原地修改] - 2026-10-17（整合輪 115／Dev-SDD-DOC 文件面；LATEST 本就可原地改，未開新版）
 
 > 來源：AutoSDD_improving_115（A 柱 Console↔Bridge↔AutoClaude↔SDD 端到端迴圈＋B 柱 SDD LATEST 接線面文件）；設計依據

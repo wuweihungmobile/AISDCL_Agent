@@ -4,7 +4,7 @@
 
 **文件類型**: Baseline Performance Report (BPR)
 **SDD 原則**: 每次 Benchmark 必須對照 PBS 規格進行分析
-**存放位置**: `docs/03_testing/BASELINE-PERFORMANCE-REPORT-{project}-{date}.md`
+**存放位置**: `docs/06_quality/BASELINE-PERFORMANCE-REPORT-{project}-{date}.md`（整合輪 116 D-116-09：每次 Benchmark 的執行期報告落 `docs/06_quality/`；PBS 規格本身仍住 `docs/04_planning/performance/`，見 `FILE_DIRECTORY_RULES.md`）
 
 ---
 

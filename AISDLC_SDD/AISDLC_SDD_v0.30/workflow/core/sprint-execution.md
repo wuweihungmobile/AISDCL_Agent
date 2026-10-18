@@ -219,10 +219,10 @@ feat: 新增商品管理 CRUD API
 
 | 文檔 | 存放位置 | 說明 |
 |------|---------|------|
-| Sprint 測試報告 | `docs/03_testing/` | 每個 Sprint 的測試結果 |
+| Sprint 測試報告 | `docs/06_quality/` | 每個 Sprint 的測試結果 |
 | Code Review 紀錄 | `docs/06_quality/` | 代碼審查記錄 |
 | Sprint 進度日誌 | `docs/05_development/` | 每日/每 Sprint 進度 |
-| Bug 報告 | `docs/03_testing/` | 已發現缺陷清單 |
+| Bug 報告 | `docs/06_quality/` | 已發現缺陷清單 |
 
 ---
 

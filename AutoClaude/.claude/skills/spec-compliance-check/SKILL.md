@@ -163,7 +163,7 @@ SDD 三大支柱之 **Spec-First Gate** 的自動驗證子任務。所有 Agent 
 
 格式:
 - [ ] 命名: RTM-{SystemName}.md
-- [ ] 路徑: docs/03_testing/
+- [ ] 路徑: docs/06_quality/
 - [ ] Markdown 表格格式正確
 ```
 
@@ -215,7 +215,7 @@ SDD 三大支柱之 **Spec-First Gate** 的自動驗證子任務。所有 Agent 
 |--------|------|------|
 | 驗證報告（內嵌輸出） | 無需存檔 | 即時輸出至對話 |
 
-> 若作為 SCG 閘門依據，人工執行截圖或摘錄存入 `docs/03_testing/SCG-{N}-REPORT-{System}.md`
+> 若作為 SCG 閘門依據，人工執行截圖或摘錄存入 `docs/06_quality/SCG-{N}-REPORT-{System}.md`
 
 ---
 

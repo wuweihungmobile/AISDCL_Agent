@@ -43,7 +43,7 @@ brownfield_doclint:
 
 brownfield_spectrace:
   name: "SpecTrace - Brownfield Impact Matrix"
-  trigger: "docs/03_testing/RTM-*.md 有變更時"
+  trigger: "docs/06_quality/RTM-*.md 有變更時"
   checks:
     - "As-Is FRD 的 US 都在 RTM 中（無遺漏）"
     - "Gap Analysis 中的受影響 US 都有對應 AT"

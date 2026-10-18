@@ -36,7 +36,7 @@ QA 在 SDD 工作流中負責從 Contract 凍結（SCG-3）後制定測試策略
 |------|------|---------|
 | 🔷 SCG-3 通過 | API Contract 已凍結 | `/sdd-gate SCG-3` 報告存在 |
 | FRD 存在 | 驗收標準（AC-XXX-Y）已定義 | `docs/01_requirements/FRD-{System}.md` |
-| RTM 初版存在 | SA 已建立 RTM 初版 | `docs/03_testing/RTM-{System}.md` |
+| RTM 初版存在 | SA 已建立 RTM 初版 | `docs/06_quality/RTM-{System}.md` |
 
 ---
 
@@ -47,7 +47,7 @@ QA 在 SDD 工作流中負責從 Contract 凍結（SCG-3）後制定測試策略
 讀取：
 - `docs/01_requirements/FRD-{SystemName}.md`（AC-XXX-Y 清單）
 - `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml`（Contract Testing 依據）
-- `docs/03_testing/RTM-{SystemName}.md`（確認哪些 AC 尚未有 TC）
+- `docs/06_quality/RTM-{SystemName}.md`（確認哪些 AC 尚未有 TC）
 
 可測試性評估：
 ```markdown
@@ -212,7 +212,7 @@ RTM 更新後，檢查覆蓋率：
 | Test Cases | `docs/03_testing/TEST-CASES-{Feature}.md` | SCG-4 前 |
 | Contract Test Cases | `docs/03_testing/TEST-CASES-CONTRACT-{Module}.md` | SCG-4 前 |
 | Invariant Test Contract（Refactoring） | `docs/03_testing/contracts/ITC-{SystemName}.md` | SCG-4 前 |
-| RTM（更新至 TC 追溯） | `docs/03_testing/RTM-{SystemName}.md` | SCG-5 前 |
+| RTM（更新至 TC 追溯） | `docs/06_quality/RTM-{SystemName}.md` | SCG-5 前 |
 
 ---
 

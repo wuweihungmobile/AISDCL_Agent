@@ -218,7 +218,7 @@ sdd_skills:
   traceability_matrix:
     description: "需求追溯矩陣生成"
     trigger: "SCG-0（FRD 後）、SCG-1（SRD 後）、RG-TEST（測試策略閘門後；SCG-3 後、測試開始前）、需求變更後 — AT 欄位須於 SCG-5（RTM Completeness Gate）前 100% 覆蓋"
-    output: "docs/03_testing/RTM-{project}-{date}.md"
+    output: "docs/06_quality/RTM-{project}-{date}.md"
     template: "docs_template/sdd/testing/RTM-TEMPLATE.md"
     format: "| EPIC | Feature | User Story | AC | AT | API | NFR | Status |"
 

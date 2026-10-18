@@ -259,7 +259,7 @@ auto_compact_flow:
 - docs/01_requirements/FRD-{system}.md
 - docs/02_architecture/SRD-{system}.md
 - docs/02_architecture/adr/ （N 個 ADR）
-- docs/03_testing/RTM-{system}.md
+- docs/06_quality/RTM-{system}.md
 
 ## Retry 狀態
 - SCG_VALIDATION retry_count: {N}

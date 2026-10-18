@@ -32,7 +32,7 @@ allowed-tools:
 | 閘門 | 說明 | 驗證方式 |
 |------|------|---------|
 | 🔷 SCG-5 通過 | RTM 100% 覆蓋，所有測試通過 | `/sdd-gate SCG-5` 報告存在 |
-| RTM 覆蓋率 100% | `/rtm-generate verify` 通過 | `docs/03_testing/RTM-{System}.md` |
+| RTM 覆蓋率 100% | `/rtm-generate verify` 通過 | `docs/06_quality/RTM-{System}.md` |
 | 無 P1 未修復缺陷 | 所有 Critical 問題已關閉 | Code Review 報告 |
 
 ---
@@ -47,12 +47,12 @@ allowed-tools:
 ## SCG-6 發布閘門驗證清單
 
 ### SCG-0~5 追蹤
-- [ ] SCG-0 通過（文件：docs/03_testing/SCG-0-REPORT-{System}.md）
-- [ ] SCG-1 通過（文件：docs/03_testing/SCG-1-REPORT-{System}.md）
-- [ ] SCG-2 通過（文件：docs/03_testing/SCG-2-REPORT-{System}.md）
-- [ ] SCG-3 通過（文件：docs/03_testing/SCG-3-REPORT-{System}.md）
-- [ ] SCG-4 通過（文件：docs/03_testing/SCG-4-REPORT-{System}.md）
-- [ ] SCG-5 通過（文件：docs/03_testing/SCG-5-REPORT-{System}.md）
+- [ ] SCG-0 通過（文件：docs/06_quality/SCG-0-REPORT-{System}.md）
+- [ ] SCG-1 通過（文件：docs/06_quality/SCG-1-REPORT-{System}.md）
+- [ ] SCG-2 通過（文件：docs/06_quality/SCG-2-REPORT-{System}.md）
+- [ ] SCG-3 通過（文件：docs/06_quality/SCG-3-REPORT-{System}.md）
+- [ ] SCG-4 通過（文件：docs/06_quality/SCG-4-REPORT-{System}.md）
+- [ ] SCG-5 通過（文件：docs/06_quality/SCG-5-REPORT-{System}.md）
 
 ### 發布文件
 - [ ] Release Notes 已撰寫（SDD 格式）

@@ -770,11 +770,11 @@ AISDLC_SDD_v0.30/
 │   ├── 02_architecture/               # 架構設計 (SRD, C4, ADR)
 │   │   ├── adr/                       # Architecture Decision Records
 │   │   └── api/                       # API 規格與相容性聲明
-│   ├── 03_testing/                    # 測試文檔 (RTM, Test Plans, Contracts)
+│   ├── 03_testing/                    # 測試規格與契約 (Test Plans, Test Strategy, Contracts；凍結前)
 │   │   └── contracts/                 # Invariant Test Contracts
 │   ├── 04_planning/                   # 開發規劃 (Gap Analysis, Refactor Plan)
 │   ├── 05_development/                # 開發文檔 (Living Doc Strategy)
-│   ├── 06_quality/                    # 品質保證 (Code Quality, Tech Debt)
+│   ├── 06_quality/                    # 品質保證 (RTM 與 SCG 報告, Code Quality, Tech Debt)
 │   ├── 07_design/                     # 設計文檔 (UI/UX, Database)
 │   └── 08_deployment/                 # 部署文檔 (CI/CD, Release Notes)
 ```

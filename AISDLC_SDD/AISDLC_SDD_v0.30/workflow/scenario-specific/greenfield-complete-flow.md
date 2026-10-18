@@ -678,7 +678,7 @@
 - [ ] Sprint 回顧完成
 
 **產出文件**：
-- Sprint 測試報告 → `docs/03_testing/`
+- Sprint 測試報告 → `docs/06_quality/`
 - Code Review 紀錄 → `docs/06_quality/`
 - Sprint 進度日誌 → `docs/05_development/`
 

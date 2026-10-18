@@ -203,7 +203,7 @@ SCG-6 發布前：
 | C4-TaskMaster.md | docs/02_architecture/ | SCG-2 |
 | ADR-001~003.md | docs/02_architecture/adr/ | SCG-2 |
 | openapi.yaml | docs/02_architecture/api/ | SCG-3 |
-| RTM-TaskMaster.md | docs/03_testing/ | SCG-5 |
+| RTM-TaskMaster.md | docs/06_quality/ | SCG-5 |
 | Test-Plan-TaskMaster.md | docs/03_testing/ | SCG-5 |
 
 ---

@@ -192,7 +192,7 @@ RTM 初版只填入 EPIC/Feature/US/AC 欄位，API 和 TC 欄位留空（稍後
 |--------|------|---------|
 | FRD | `docs/01_requirements/FRD-{SystemName}.md` | SCG-0 |
 | User Stories | FRD 內 US 章節 | SCG-0 |
-| RTM 初版 | `docs/03_testing/RTM-{SystemName}.md` | SCG-0 |
+| RTM 初版 | `docs/06_quality/RTM-{SystemName}.md` | SCG-0 |
 | Invariant Spec（Refactoring） | `docs/01_requirements/INVARIANT-SPEC-{SystemName}.md` | SCG-0 |
 
 ---

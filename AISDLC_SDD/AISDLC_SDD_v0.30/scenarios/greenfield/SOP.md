@@ -8792,7 +8792,7 @@ Step 4: [All] 資料一致性最終驗證
 - [ ] 已驗證 WebSocket/推播在多客戶端的同步正確性
 - [ ] 已測試離線/線上切換的資料同步（Mobile 平台）
 - [ ] 已記錄各平台效能基準數據（回應時間對比）
-- [ ] 跨平台整合測試報告已產出 → `docs/03_testing/`
+- [ ] 跨平台整合測試報告已產出 → `docs/06_quality/`
 
 🆕 **跨領域端到端測試場景**（多業務領域融合系統適用）:
 
@@ -8933,7 +8933,7 @@ Code Review 檢查清單：
 **🔴 人類確認點**: Sprint 驗收結果確認
 
 **階段產出**:
-- Sprint 測試報告 → `docs/03_testing/`
+- Sprint 測試報告 → `docs/06_quality/`
 - Code Review 紀錄 → `docs/06_quality/`
 - Sprint 進度日誌 → `docs/05_development/`
 

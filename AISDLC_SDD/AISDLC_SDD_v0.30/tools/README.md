@@ -179,10 +179,10 @@ bash AISDLC_SDD_v0.01/tools/init_project.sh -h                     # 查看說�
 │   └── docs/                   # 📄 您的專案文件放這裡
 │       ├── 01_requirements/    # PRD, FRD, User Stories
 │       ├── 02_architecture/    # SRD, API Specification
-│       ├── 03_testing/         # Test Plan, Test Cases, Reports
+│       ├── 03_testing/         # Test Plan, Test Cases, Test Strategy（凍結前的測試規格）
 │       ├── 04_planning/        # Roadmap, Estimation
 │       ├── 05_development/     # Iteration Plans, Progress Logs
-│       ├── 06_quality/         # Code Quality, Security, Performance
+│       ├── 06_quality/         # RTM 與報告, Code Quality, Security, Performance
 │       ├── 07_design/          # UI/UX, Database Design
 │       └── 08_deployment/      # CI/CD, Release Notes
 └── （其他專案檔案）

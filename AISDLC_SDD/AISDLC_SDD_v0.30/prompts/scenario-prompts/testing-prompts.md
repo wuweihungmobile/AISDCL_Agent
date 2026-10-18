@@ -33,7 +33,7 @@ FRD 路徑：[路徑]
 - 目標：100% 覆蓋所有功能需求
 - 記錄覆蓋率統計
 
-產出：docs/03_testing/RTM-[System].md
+產出：docs/06_quality/RTM-[System].md
 ```
 
 ### 測試策略規劃
@@ -83,7 +83,7 @@ OpenAPI 規格：[路徑]
 ```
 請執行 SCG-5 RTM 覆蓋率驗證。
 
-RTM 路徑：docs/03_testing/RTM-[System].md
+RTM 路徑：docs/06_quality/RTM-[System].md
 
 驗證：
 - 總需求數：[N]

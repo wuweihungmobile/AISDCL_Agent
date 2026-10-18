@@ -68,12 +68,12 @@ cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-frozen -
 ```
 讀取 docs/ 目錄，確認當前 Stage 所有文件存在：
 
-Stage 0: docs/02_architecture/adr/ADR-INDEX.md, docs/03_testing/RTM-*.md（骨架）
+Stage 0: docs/02_architecture/adr/ADR-INDEX.md, docs/06_quality/RTM-*.md（骨架）
 Stage 1: docs/01_requirements/PRD-*.md
-Stage 2: docs/01_requirements/FRD-*.md, docs/03_testing/RTM-*-v1.md
+Stage 2: docs/01_requirements/FRD-*.md, docs/06_quality/RTM-*-v1.md
 Stage 3: docs/02_architecture/SRD-*.md, docs/02_architecture/C4-*.md, docs/02_architecture/adr/ADR-*.md
 Stage 4: docs/02_architecture/api/CONTRACT-*.yaml
-Stage 5: docs/03_testing/contracts/TCS-*.md, docs/03_testing/RTM-*-final.md
+Stage 5: docs/03_testing/contracts/TCS-*.md, docs/06_quality/RTM-*-final.md
 Stage 6: docs/06_quality/security/SAD-*.md, docs/06_quality/security/STRIDE-*.md
 ```
 

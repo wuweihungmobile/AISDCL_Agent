@@ -98,7 +98,7 @@ SDD（Spec-First Design-Driven Development）是 AISDLC 框架的品質強化層
 | BIS | Business Invariant Spec | `docs/01_requirements/` | `invariant_spec` |
 | STM | STRIDE Threat Model | `docs/06_quality/security/` | `stride_threat_model` |
 | CM | Compliance Matrix | `docs/06_quality/security/` | `compliance_matrix_format` |
-| RTM | Requirements Traceability Matrix | `docs/03_testing/` | `traceability_matrix` |
+| RTM | Requirements Traceability Matrix | `docs/06_quality/` | `traceability_matrix` |
 
 ---
 

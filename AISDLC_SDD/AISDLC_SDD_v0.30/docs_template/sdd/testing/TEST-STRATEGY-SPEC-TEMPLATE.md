@@ -199,10 +199,10 @@ stages:
 
 | 文件 | 路徑 |
 |------|------|
-| RTM（含 AT 層） | `docs/03_testing/RTM-{project}-{date}.md` |
+| RTM（含 AT 層） | `docs/06_quality/RTM-{project}-{date}.md` |
 | Test Contract Spec | `docs/03_testing/contracts/TCS-{feature}.md` |
 | Defect Classification Spec | `docs/03_testing/DEFECT-CLASSIFICATION-SPEC-{project}.md` |
-| Living Test Report | `docs/03_testing/LIVING-TEST-REPORT-{project}.md` |
+| Living Test Report | `docs/06_quality/LIVING-TEST-REPORT-{project}.md` |
 
 ---
 

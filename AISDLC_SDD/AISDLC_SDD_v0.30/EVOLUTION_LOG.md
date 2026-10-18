@@ -393,6 +393,26 @@ FILE_DIRECTORY_RULES.md（`AISDLC_SDD/AISDLC_SDD_v0.30/FILE_DIRECTORY_RULES.md`�
 - **回退**：純向後相容（預設模式輸出逐字不變）。還原 `recovery_hint.py` 即還原行為（`test_recovery_hint.py` 新增類別一併還原）；skills／文件改動 `git revert` 後以
   `python AISDLC_SDD/scripts/sync_exposed_skills.py --write --target parent` 讓父層鏡像回到 LATEST。無 API、無狀態檔格式、無 `*.tla` 影響。
 
+### 落點全樹收齊（第二棒；D-116-09）
+
+第一棒只改了 `sdd-gate`／`sdd-review`／`rtm-generate` 與 GATE 文件、`CLAUDE.md`，全樹仍有一批檔把 RTM 與報告寫成 `docs/03_testing/`——其中 `spec-compliance-check`（RTM 檢查項要求路徑 `docs/03_testing/`）
+與 `release-management`（SCG 報告路徑七處）會直接與三支新落點的 skill 互相矛盾。本棒對 LATEST 全樹先 Grep `03_testing`（動工前 309 處／126 檔）、逐處判「規格」或「產出」再改：
+**產出 → `docs/06_quality/`，規格留 `docs/03_testing/`**。只改落點字串與緊鄰說明、不改流程邏輯；`contracts/` 路徑與 `_is_blocked_spec_write` 判準零改動。
+
+- **改動 55 檔**（不含本檔與 CHANGELOG；父層 `.claude/skills` 鏡像另跟著重生 12 檔）：skills 11 支（RTM、SCG 報告路徑）＋ `skills/README.md`（「父層」措辭改目標中性——該 README 現在也住在 AutoClaude 鏡像）；
+  agent YAML 14 支（`traceability_matrix` 的 `output:`；`04.sa-analyst` 另含 `RTM-EXISTING-SYSTEM`）；`cicd/` 3；`scenarios/` 4；`prompts/` 2；`docs_template/` 8；`workflow/` 3；`guides/` 3；
+  VD 根層文件 3（`AISDLC_SDD_INIT.md`〈專案文件目錄結構〉註解、`FILE_DIRECTORY_RULES.md` 目錄樹註解／對照表／〈報告寫入位置〉新增一列、`docs/README.md`）；`tools/` 文件 3。
+- **留在 `docs/03_testing/`（判為規格）**：TCS、Test Strategy、Test Plan／Test Cases、Invariant／Contract／Chaos／Security Test Spec、ENV-CONTRACT、PBS、Defect Classification 等凍結前的測試規格與全部 `contracts/` 路徑；
+  hook／FSM 程式與其測試（`fsm_runtime.py`、`subagent_contract.py`；`test_subagent_contract.py` 刻意拿 `docs/03_testing/RTM.md` 當「被擋的寫入目標」）、歷史 `archive/`、本檔與 CHANGELOG 的舊節——一字未動。
+- **任務書未逐檔點名、依同一原則併改**：「Sprint 測試報告／Bug 報告／Living Test Report／跨平台整合測試報告／Test Reports」這類執行期測試報告（同樣是執行期產物、同樣被 Rule 9.6 擋寫）也改 `docs/06_quality/`，共 8 檔 12 處；可個別撤回。
+- **同表同檔順手訂正**：場景增強文件四處指向不存在的 `docs/03_testing/RTM-*TEMPLATE.md` 的連結／`template:` 改指 `docs_template/sdd/testing/`；`RTM-TEMPLATE.md`、`RTM-EXISTING-SYSTEM-TEMPLATE.md` 補 `**存放位置**` 標頭（原本沒寫）；
+  `tools/AISDLC_CLAUDE_RULES.md` 第 103～104 行補做 115／S-15 訂正（原文逐字留在註記內；該殘留原本登記在 `FILE_DIRECTORY_RULES.md` 的 S-15 註記，現已同步改字）。
+- **未動（交主控裁決或不涉 RTM／報告）**：`BASELINE-PERFORMANCE-REPORT-TEMPLATE.md`（每次 Benchmark 的執行期報告，存放位置寫 `docs/03_testing/`，`FILE_DIRECTORY_RULES.md` 對照表卻寫 `docs/04_planning/performance/`，兩者原本就不一致；
+  該改成哪一個要裁決，兩處不得各改各的）；`PROJECT_INITIALIZATION_GUIDE.md`／`PROJECT_INITIALIZATION_CHECKLIST.md` 的「測試文檔／測試文件寫入 `docs/03_testing/`」泛稱與 `mkdir` 清單、
+  `init_project.*`／`verify_traceability.sh` 的目錄清單（不點名 RTM 或報告）。
+- **鏡像與回退**：`sync_exposed_skills.py --check --target parent` 一致（59 檔）；`--check --target autoclaude` 的 stale 檔數 12（`README.md`＋11 支 `SKILL.md`，預期）——收尾窗口再 `--write --target autoclaude`。
+  回退＝`git revert` 這批文字改動後 `--write --target parent`；無程式、無狀態檔、無 `*.tla` 影響（形式化驗證同第一棒：零改動，Rule 9.18.1 無重跑義務）。逐檔清單與閘門數字見第二棒交卷，不抄進本檔（數字會過期）。
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

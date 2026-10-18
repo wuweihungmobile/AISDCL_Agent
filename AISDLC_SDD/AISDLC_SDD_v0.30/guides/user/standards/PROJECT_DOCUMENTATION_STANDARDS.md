@@ -69,8 +69,7 @@ AISDLC_SDD_v0.01/                         # 工作目錄（框架即專案目錄
 │   │       ├── API_Compat_{Module}.md# API 相容性聲明
 │   │       └── Consumer_Contract_{Service}.md # Consumer-Driven Contract
 │   │
-│   ├── 03_testing/                   # 測試文檔目錄（SCG-4/SCG-5 產出）
-│   │   ├── RTM_{ProjectName}.md      # Requirements Traceability Matrix（SCG-5 必用）
+│   ├── 03_testing/                   # 測試規格目錄（凍結前的測試規格與契約）
 │   │   ├── Test_Plan_{TestType}.md   # Test Plan
 │   │   ├── Test_Strategy.md          # Test Strategy Document
 │   │   ├── Defect_Classification.md  # 缺陷分類規則
@@ -89,6 +88,9 @@ AISDLC_SDD_v0.01/                         # 工作目錄（框架即專案目錄
 │   │   └── Living_Doc_Strategy.md    # Living Documentation 策略
 │   │
 │   ├── 06_quality/                   # 品質文檔目錄
+│   │   ├── RTM_{ProjectName}.md      # Requirements Traceability Matrix（SCG-5 必用；執行期產物，不放 03_testing）
+│   │   ├── SCG-{N}-REPORT-{SystemName}.md # SCG 驗證報告（執行期產物，/sdd-gate 產出）
+│   │   ├── SCG4-REVIEW-{Feature}-{YYYYMMDD}.md # SCG-4 PR Review 報告（執行期產物，/sdd-review 產出）
 │   │   ├── Code_Quality_Baseline.md  # 代碼品質基準線
 │   │   ├── Tech_Debt_Spec.md         # 技術債規格化（TD-XXX，Brownfield 必用）
 │   │   └── security/                 # 安全文檔（Security 情境）
@@ -126,12 +128,12 @@ AISDLC_SDD_v0.01/                         # 工作目錄（框架即專案目錄
 | **必須** | `docs/02_architecture/` | SCG-1/SCG-2 | 🔴 必須建立 | SRD / C4 / ADR / As-Is / Trust Boundary Map |
 | **必須** | `docs/02_architecture/adr/` | SCG-2 | 🔴 必須建立 | ADR-{NNN} 架構決策記錄 |
 | **必須** | `docs/02_architecture/api/` | SCG-3 | 🔴 必須建立 | OpenAPI 3.1 Contract / Consumer Contract |
-| **必須** | `docs/03_testing/` | SCG-4/SCG-5 | 🔴 必須建立 | RTM / Test Plan / Test Strategy |
+| **必須** | `docs/03_testing/` | SCG-4/SCG-5 | 🔴 必須建立 | Test Plan / Test Strategy（凍結前的測試規格） |
 | **必須** | `docs/03_testing/contracts/` | SCG-4/SCG-5 | 🔴 必須建立（SDD 新增）| Invariant Test Contract / Contract Test Spec |
 | **建議** | `docs/04_planning/` | - | 🟡 建議建立 | Gap Analysis / Refactor Plan |
 | **建議** | `docs/04_planning/performance/` | PBS Gate | 🟡 效能情境必用 | PBS（Performance Baseline Spec） |
 | **建議** | `docs/05_development/` | - | 🟡 建議建立 | Living Doc Strategy |
-| **建議** | `docs/06_quality/` | - | 🟡 建議建立 | Code Quality Baseline / Tech Debt Spec |
+| **建議** | `docs/06_quality/` | - | 🟡 建議建立（走 SDD 閘門時，RTM 與報告必須在此） | RTM / SCG 驗證報告 / Code Quality Baseline / Tech Debt Spec |
 | **建議** | `docs/06_quality/security/` | SCG-5 | 🟡 Security 情境必用 | SAD / STRIDE / Compliance Matrix |
 | **選用** | `docs/07_design/` | - | 🟢 選用 | UI/UX / Database Design |
 | **選用** | `docs/08_deployment/` | SCG-6 | 🟢 DevOps 情境必用 | CI/CD Pipeline / Release Notes / Runbook |

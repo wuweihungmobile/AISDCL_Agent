@@ -486,10 +486,10 @@ SDD 模板存放於 `docs_template/sdd/` 目錄，使用規則：
 | `docs/02_architecture/` | `sdd/architecture/` | AS-IS/TO-BE SRD、SAD、C4、Migration Contract Map |
 | `docs/02_architecture/adr/` | `sdd/adr/` | ADR 模板與索引 |
 | `docs/02_architecture/api/` | `sdd/api/` | API-COMPAT、Contract YAML |
-| `docs/03_testing/` | `sdd/testing/` | RTM、Test Strategy、Performance Baseline 等 |
+| `docs/03_testing/` | `sdd/testing/` | Test Strategy、Performance Baseline 等凍結前的測試規格（RTM 與驗證報告改放 `docs/06_quality/`） |
 | `docs/04_planning/` | `sdd/planning/` | Gap Analysis、Refactor Plan |
 | `docs/05_development/` | `sdd/development/` | Living Doc Strategy |
-| `docs/06_quality/` | `sdd/quality/` | Code Quality Baseline、Tech Debt Spec |
+| `docs/06_quality/` | `sdd/quality/` | RTM（模板在 `sdd/testing/`）、SCG 驗證報告、Code Quality Baseline、Tech Debt Spec |
 | `docs/08_deployment/` | `sdd/deployment/` | Canary/Cutover/Rollback/Monitoring Spec 等 |
 
 ---

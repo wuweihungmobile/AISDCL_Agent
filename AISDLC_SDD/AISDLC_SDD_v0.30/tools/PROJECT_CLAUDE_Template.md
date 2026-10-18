@@ -124,11 +124,11 @@
 │   ├── 02_architecture/                 # SRD, C4, ADR, As-Is, To-Be
 │   │   ├── adr/                         # ADR 決策記錄
 │   │   └── api/                         # API 規格, OpenAPI Spec, Compat 聲明
-│   ├── 03_testing/                      # RTM, Test Plan, Contract
+│   ├── 03_testing/                      # Test Plan, Test Strategy, Contract（凍結前）
 │   │   └── contracts/                   # Invariant Test Contract
 │   ├── 04_planning/                     # Gap Analysis, Refactor Plan
 │   ├── 05_development/                  # Living Doc Strategy
-│   ├── 06_quality/                      # Code Quality Baseline, Tech Debt
+│   ├── 06_quality/                      # RTM, SCG 報告, Code Quality Baseline, Tech Debt
 │   ├── 07_design/                       # UI/UX, Database Design
 │   └── 08_deployment/                   # CI/CD Pipeline, Release Notes
 ```
@@ -141,7 +141,8 @@
 | SRD / C4 / ADR / As-Is / To-Be | `docs/02_architecture/` |
 | ADR 檔案 | `docs/02_architecture/adr/` |
 | API 規格 / Compat 聲明 | `docs/02_architecture/api/` |
-| RTM / Test Plan / Contract | `docs/03_testing/` |
+| Test Plan / Test Strategy / Contract（凍結前的測試規格） | `docs/03_testing/` |
+| RTM / SCG 驗證報告 / SCG-4 審查報告（執行期產物） | `docs/06_quality/` |
 | Invariant Test Contract | `docs/03_testing/contracts/` |
 | Gap Analysis / Refactor Plan | `docs/04_planning/` |
 | Living Doc Strategy | `docs/05_development/` |

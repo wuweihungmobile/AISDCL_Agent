@@ -69,7 +69,7 @@
 | PRD | docs/01_requirements/PRD-{system}.md | ✅ FROZEN |
 | FRD | docs/01_requirements/FRD-{system}.md | {狀態} |
 | SRD | docs/02_architecture/SRD-{system}.md | {狀態} |
-| RTM | docs/03_testing/RTM-{system}.md | {狀態} |
+| RTM | docs/06_quality/RTM-{system}.md | {狀態} |
 | ADR Index | docs/02_architecture/adr/ADR-INDEX.md | {狀態} |
 | {其他} | {路徑} | {狀態} |
 

@@ -119,10 +119,10 @@ bash tools/init_project.sh
 |------|------|------------|
 | `docs/01_requirements/` | 需求文檔 | PRD, FRD, User Stories, Epic Backlog |
 | `docs/02_architecture/` | 架構設計 | SRD, API Specification, Architecture Diagram |
-| `docs/03_testing/` | 測試文檔 | Test Plan, Test Cases, Test Reports, AT |
+| `docs/03_testing/` | 測試文檔 | Test Plan, Test Cases, AT（Test Reports 與 RTM 放 `docs/06_quality/`） |
 | `docs/04_planning/` | 專案規劃 | Roadmap, Effort Estimation, Task Breakdown |
 | `docs/05_development/` | 迭代執行 | Iteration Plans, Progress Logs, Sprint Reports |
-| `docs/06_quality/` | 程式碼品質 | Code Quality Reports, Security Audits, Performance Analysis |
+| `docs/06_quality/` | 程式碼品質 | RTM, Test Reports, Code Quality Reports, Security Audits, Performance Analysis |
 | `docs/07_design/` | 設計文檔 | UI/UX Design, Database Schema, ER Diagram |
 | `docs/08_deployment/` | 部署維運 | CI/CD Config, Release Notes, Deployment Guide, CHANGELOG |
 
@@ -319,7 +319,6 @@ git commit -m "chore: initialize AISDLC project structure
 範例:
   - Test_Plan_Acceptance_Testing.md
   - AT_Core_Transaction_Module.md
-  - Test_Report_Sprint_1.md
 ```
 
 #### 專案規劃 (`docs/04_planning/`)
@@ -347,6 +346,7 @@ git commit -m "chore: initialize AISDLC project structure
   - Code_Quality_Report_Sprint_1.md
   - Security_Audit_Report.md
   - Performance_Analysis_Report.md
+  - Test_Report_Sprint_1.md
 ```
 
 ### 文檔模板使用

@@ -46,7 +46,7 @@ SD 在 SDD 工作流中負責從 FRD 到可執行架構的轉化。本 Skill 產
 
 讀取前置文件：
 - `docs/01_requirements/FRD-{SystemName}.md`
-- `docs/03_testing/RTM-{SystemName}.md`（確認 NFR 量化指標）
+- `docs/06_quality/RTM-{SystemName}.md`（確認 NFR 量化指標）
 
 技術評估確認（🔴 確認點）：
 

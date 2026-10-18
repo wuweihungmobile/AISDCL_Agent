@@ -17,7 +17,7 @@ Greenfield 是 SDD 的天然沃土，規格完全先行，無歷史包袱。
 ```
 Stage 0: Spec Foundation（🆕 SDD 新增）
   ├── 0.1 建立 ADR 目錄（docs/02_architecture/adr/）
-  ├── 0.2 建立空白 RTM 骨架（docs/03_testing/RTM-{project}.md）
+  ├── 0.2 建立空白 RTM 骨架（docs/06_quality/RTM-{project}.md）
   └── 0.3 🔷 SCG-0：確認規格先行原則
 
 Stage 1: Product Vision
@@ -78,8 +78,8 @@ Stage 8-11: Implementation & Delivery
 - 時機：專案啟動第一步
 
 **2.1.2 建立空白 RTM 骨架**
-- 執行：從 `docs/03_testing/RTM-TEMPLATE.md` 複製
-- 存放：`docs/03_testing/RTM-{project}-v0.md`
+- 執行：從 `docs_template/sdd/testing/RTM-TEMPLATE.md` 複製
+- 存放：`docs/06_quality/RTM-{project}-v0.md`
 - 時機：Stage 0，作為追溯鏈的容器
 
 **2.1.3 SCG-0 Spec Foundation Gate**
@@ -230,7 +230,7 @@ Stage 5 RTM 必須達到：
 | `ADR-001-tech-stack.md` | 3 | sd-architect | `docs/02_architecture/adr/` |
 | `ADR-002-arch-pattern.md` | 3 | sd-architect | `docs/02_architecture/adr/` |
 | `ADR-003-deployment.md` | 3 | sd-architect | `docs/02_architecture/adr/` |
-| `RTM-{project}.md` | 2-5（漸進） | sa + qa | `docs/03_testing/` |
+| `RTM-{project}.md` | 2-5（漸進） | sa + qa | `docs/06_quality/` |
 | `CONTRACT-{module}-v1.yaml` | 4 | sd + integration | `docs/02_architecture/api/` |
 | `TCS-{feature}-{date}.md` | 5 | qa-tester | `docs/03_testing/contracts/` |
 | `SAD-{system}-{date}.md`（選用） | 6 | security-engineer | `docs/06_quality/security/` |
@@ -241,6 +241,6 @@ Stage 5 RTM 必須達到：
 
 - [SDD 核心原則](../../docs/02_architecture/SDD_Core_Principles.md)
 - [ADR 範本](../../docs/02_architecture/adr/ADR-TEMPLATE.md)
-- [RTM 範本](../../docs/03_testing/RTM-TEMPLATE.md)
+- [RTM 範本](../../docs_template/sdd/testing/RTM-TEMPLATE.md)
 - [API Contract 範本](../../docs/02_architecture/api/CONTRACT-TEMPLATE.yaml)
 - [Greenfield SOP](SOP.md)

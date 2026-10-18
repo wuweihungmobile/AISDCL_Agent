@@ -6,6 +6,7 @@
 **建立日期**: YYYY-MM-DD
 **建立者**: sa-analyst（`reverse_rtm_extraction` Skill）
 **適用情境**: Documentation（既有系統）
+**存放位置**: `docs/06_quality/RTM-EXISTING-SYSTEM-{date}.md`（執行期產物，理由同 `RTM-TEMPLATE.md`）
 
 ---
 

@@ -31,7 +31,7 @@ allowed-tools:
 | 閘門 | 說明 | 驗證方式 |
 |------|------|---------|
 | 🔷 FRD NFR-COMP 存在 | 合規需求已量化 | `docs/01_requirements/FRD-{System}.md` 中 NFR-COMP-XXX 節 |
-| RTM 建立 | 合規 TC 已建立 | `docs/03_testing/RTM-{System}.md` 中含 TC-COMP-XXX |
+| RTM 建立 | 合規 TC 已建立 | `docs/06_quality/RTM-{System}.md` 中含 TC-COMP-XXX |
 | STRIDE 完成 | 安全威脅已分析 | `docs/06_quality/security/STRIDE-{System}.md` 存在 |
 
 ---

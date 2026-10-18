@@ -523,7 +523,7 @@ doc_pipeline:
 
     - name: "RTM Completeness Check"
       tool: "custom SpecTrace script"
-      trigger: "docs/03_testing/RTM-*.md 有變更時"
+      trigger: "docs/06_quality/RTM-*.md 有變更時"
       validation_rules:
         - "所有 US 都有對應 AC（無空白 AC 欄）"
         - "AC 覆蓋率 ≥ 80%（有 AT 的 AC 數 / 總 AC 數）"

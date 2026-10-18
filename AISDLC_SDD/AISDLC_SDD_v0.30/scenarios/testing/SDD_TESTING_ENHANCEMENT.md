@@ -22,10 +22,12 @@ Testing 情境的 SDD 強化核心：**Test Pyramid Spec（測試金字塔規格
 |------|------|------|---------|
 | Test Strategy Spec | TSS | `docs_template/sdd/testing/TEST-STRATEGY-SPEC-TEMPLATE.md` | `docs/03_testing/` |
 | Test Contract Spec | TCS | `docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md` | `docs/03_testing/contracts/` |
-| RTM | - | `docs_template/sdd/testing/RTM-TEMPLATE.md` | `docs/03_testing/` |
+| RTM | - | `docs_template/sdd/testing/RTM-TEMPLATE.md` | `docs/06_quality/` |
 | Defect Classification Spec | - | `docs_template/sdd/testing/DEFECT-CLASSIFICATION-SPEC-TEMPLATE.md` | `docs/03_testing/` |
-| Living Test Report | - | `docs_template/sdd/testing/LIVING-TEST-REPORT-TEMPLATE.md` | `docs/03_testing/` |
+| Living Test Report | - | `docs_template/sdd/testing/LIVING-TEST-REPORT-TEMPLATE.md` | `docs/06_quality/` |
 | Env Contract Spec | - | `docs_template/sdd/testing/ENV-CONTRACT-SPEC-TEMPLATE.md` | `docs/03_testing/contracts/` |
+
+> RTM 與 Living Test Report 是跨週期持續更新的執行期產物，落 `docs/06_quality/`（SCG_VALIDATION 起 `docs/03_testing/` 被 Rule 9.6 擋寫；整合輪 116 D-116-09）；其餘各列是凍結前的測試規格，留 `docs/03_testing/`。
 
 ---
 

@@ -29,7 +29,7 @@
 | FRD | `docs/01_requirements/` | ✅/❌ | ✅/⚠️/❌ | |
 | SRD | `docs/02_architecture/` | ✅/❌ | ✅/⚠️/❌ | |
 | API Spec | `docs/02_architecture/api/` | ✅/❌ | ✅/⚠️/❌ | |
-| RTM | `docs/03_testing/` | ✅/❌ | ✅/⚠️/❌ | |
+| RTM | `docs/06_quality/` | ✅/❌ | ✅/⚠️/❌ | |
 | Test Plan | `docs/03_testing/` | ✅/❌ | ✅/⚠️/❌ | |
 
 **符合度評分**：___/6 文件存在

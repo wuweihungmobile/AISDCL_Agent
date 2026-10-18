@@ -31,7 +31,7 @@ allowed-tools:
 
 | 閘門 | 說明 | 驗證方式 |
 |------|------|---------|
-| 🔷 RTM 建立 | AC 已定義，TC 尚待建立 | `docs/03_testing/RTM-{System}.md` AC 列存在 |
+| 🔷 RTM 建立 | AC 已定義，TC 尚待建立 | `docs/06_quality/RTM-{System}.md` AC 列存在 |
 | SCG-3 通過 | API Contract 凍結（Contract Testing 依據）| `CONTRACT-*.yaml` 存在 |
 
 ---
@@ -45,7 +45,7 @@ allowed-tools:
 ```markdown
 # Test Strategy — {SystemName}
 
-**對應 RTM**: `docs/03_testing/RTM-{SystemName}.md`
+**對應 RTM**: `docs/06_quality/RTM-{SystemName}.md`
 **對應 Contract**: `docs/02_architecture/api/CONTRACT-*.yaml`
 
 ## SDD 測試金字塔

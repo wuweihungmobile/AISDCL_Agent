@@ -47,11 +47,11 @@
   - `docs/02_architecture/` — SRD, C4, ADR, As-Is, To-Be
     - `docs/02_architecture/adr/` — Architecture Decision Records
     - `docs/02_architecture/api/` — OpenAPI Spec, Compat 聲明
-  - `docs/03_testing/` — RTM, Test Plan, Contract
+  - `docs/03_testing/` — Test Plan, Test Strategy, Contract（凍結前的測試規格）
     - `docs/03_testing/contracts/` — Invariant Test Contract
   - `docs/04_planning/` — Gap Analysis, Refactor Plan
   - `docs/05_development/` — Living Doc Strategy
-  - `docs/06_quality/` — Code Quality Baseline, Tech Debt
+  - `docs/06_quality/` — RTM, SCG 報告, Code Quality Baseline, Tech Debt
   - `docs/07_design/` — UI/UX, Database Design
   - `docs/08_deployment/` — CI/CD Pipeline, Release Notes
 
@@ -100,17 +100,20 @@ done
 - ❌ **絕不在框架版本根目錄創建臨時檔案**
 
 **快速規則 - AISDLC 框架 (build/ 目錄)**:
-- 📊 分析報告 → `build/reports/analysis/{TOPIC}_{TYPE}.md`
-- 📋 階段報告 → `build/reports/phase/{PHASE_NAME}_REPORT.md`
+- 📊 分析報告（要入庫者）→ `docs/06_quality/{TOPIC}_{TYPE}.md`
+- 📋 階段報告（要入庫者）→ `build/planning/archive/{PHASE_NAME}_REPORT.md`
 - 📝 計劃文檔 → `build/planning/active/{PLAN_NAME}.md`
 - 📦 歸檔計劃 → `build/planning/archive/{PLAN_NAME}.md`
+
+> 🔴 **115／S-15 訂正（整合輪 116 於本檔補做）**：被訂正的原文逐字保留：「- 📊 分析報告 → `build/reports/analysis/{TOPIC}_{TYPE}.md`」「- 📋 階段報告 → `build/reports/phase/{PHASE_NAME}_REPORT.md`」。為何改：`build/reports/` 被 git 忽略（不入庫），照原寫法的報告 clone 後就消失；`build/reports/` 只放工具自動寫的執行期產物，對照 `FILE_DIRECTORY_RULES.md` 〈報告寫入位置〉。
 
 **快速規則 - 使用 AISDLC-SDD 的專案（docs/ 目錄）**:
 - 📄 PRD/FRD/Invariant Spec → `docs/01_requirements/`
 - 🏗️ SRD/C4/ADR/As-Is/To-Be → `docs/02_architecture/`
 - 🔑 ADR 檔案 → `docs/02_architecture/adr/`
 - 📡 OpenAPI/Contract/Compat → `docs/02_architecture/api/`
-- ✅ RTM/Test Plan/Contract → `docs/03_testing/`
+- ✅ Test Plan/Test Strategy/Contract（凍結前）→ `docs/03_testing/`
+- 📋 RTM/SCG 驗證報告/SCG-4 審查報告（執行期產物）→ `docs/06_quality/`（SCG_VALIDATION 起 `docs/03_testing/` 被 Rule 9.6 擋寫）
 - 🔒 Invariant Test Contract → `docs/03_testing/contracts/`
 - 📊 Gap Analysis/Refactor Plan → `docs/04_planning/`
 - 🎨 UI/UX/Database Design → `docs/07_design/`

@@ -67,7 +67,7 @@ greenfield_spec_gates:
     gate: "SCG-0 Spec Foundation"
     checks:
       - "docs/02_architecture/adr/ 目錄存在"
-      - "docs/03_testing/RTM-{project}.md 已建立"
+      - "docs/06_quality/RTM-{project}.md 已建立"
 
   stage_1:
     gate: "🔷 SCG-1 Requirement Spec Gate（PRD）"

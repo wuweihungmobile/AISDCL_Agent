@@ -49,12 +49,12 @@ test_failure_analyzer:
       - failure_message: "CI 輸出的失敗訊息（assertion error / exception）"
     optional:
       - test_report_path: "JUnit XML 或 pytest JSON 報告路徑"
-      - rtm_path: "RTM 文件路徑（預設：docs/03_testing/RTM-*.md）"
+      - rtm_path: "RTM 文件路徑（預設：docs/06_quality/RTM-*.md）"
 
   process:
     step_1_rtm_lookup:
       action: "從 RTM 查詢 test_id → AC_id → US_id → F_id"
-      source: "docs/03_testing/RTM-{SystemName}.md"
+      source: "docs/06_quality/RTM-{SystemName}.md"
       output: "追溯鏈：{test_id} → {AC_id} → {US_id} → {F_id}"
       on_not_found: |
         若 RTM 中找不到 test_id：
