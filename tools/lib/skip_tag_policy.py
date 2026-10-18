@@ -504,7 +504,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # test_ruff_root_config_excludes_only_frozen.py` 後該樹實測 **32** 支，24 只剩實測的 75%，
     # 前置掃描逐字指示重釘為 25 ⇒ 照填、零加減推算（上修＝判準更嚴；25 只對 32 支成立，
     # 再新增 1 支即過期——收輪者請在所有包停工後重量一次）。
-    "AISDLC_SDD/scripts/tests": 26,  # 115 輪：25→26（S-13 新增一支後實測 33）
+    "AISDLC_SDD/scripts/tests": 27,  # 116 輪：26→27（DF-C 新增 test_sdd_env.py 後實測 34，逐字指示）  round-label-ok
     # 🔴 DEF-200-275 第四輪重釘 60 → 62：該樹由 76 支長到 **78**（本包新增
     # `test_context_window.py`／`test_recovery_hint.py`），60 只剩實測的 77%，第三向逐字
     # 指示「重釘為 62」⇒ 照填、零加減推算。

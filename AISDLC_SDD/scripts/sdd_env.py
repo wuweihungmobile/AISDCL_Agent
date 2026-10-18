@@ -21,6 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sdd_version  # noqa: E402
+from rfc_lifecycle_lint import force_utf8_stdio  # noqa: E402  島內唯一的 stdio UTF-8 實作（根層 dedup 棘輪）
 
 VERSION_PREFIX = "AISDLC_SDD_v"
 SLUG_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
@@ -77,11 +78,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
-        except Exception:  # pragma: no cover - 非 TextIO
-            pass
+    # R1 的 stdio UTF-8 重設走島內共用入口（`rfc_lifecycle_lint.force_utf8_stdio`），不自帶第 11 份
+    # 行內 reconfigure：根層 `tools/tests/test_platform_utils_dedup.py` 對 `AISDLC_SDD/scripts`
+    # 的實作數是 shrink-only 棘輪（實測第一次全套即紅 10→11）。
+    force_utf8_stdio()
     try:
         args = _build_parser().parse_args(argv)
     except SystemExit as exc:
