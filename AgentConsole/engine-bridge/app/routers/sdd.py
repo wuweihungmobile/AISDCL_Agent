@@ -25,6 +25,7 @@ from .. import procutil, sdd_adapter, security, spec_digest
 from ..errors import ApiError, fsm_state_conflict, spec_digest_changed, unprocessable
 from ..fsm_names import fsm_component, is_fsm_project_name
 from ..fsm_phase import phase_of
+from ..fsm_trail import restore_trail
 from ..models import SddCompileIn, SddFreezeIn
 from ..sdd_cli import (
     VERB_SPEC_FROZEN,
@@ -183,7 +184,8 @@ def _state_view(state: dict[str, Any], *, source: str, key: str, sdd_root: Path,
         "session_id": state.get("session_id"),
         "updated_at": state.get("updated_at"),
         "frozen_stages": state.get("frozen_stages") or [],
-        "decision_trace": trace[-FSM_TRAIL:] if isinstance(trace, list) else [],
+        "decision_trace": restore_trail(trace[-FSM_TRAIL:], provenance)
+        if isinstance(trace, list) else [],
         "source": source,
         # D-16 新增：真實檔沒有 RTM 覆蓋數值，所以通常為 null；只有檔內有 `rtm_coverage` 鍵時才原
         # 樣帶出。
