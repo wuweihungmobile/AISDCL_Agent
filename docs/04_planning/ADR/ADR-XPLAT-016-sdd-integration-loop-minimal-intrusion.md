@@ -693,6 +693,12 @@ FSM 可能留在 AUTOCLAUDE_DELEGATED 而沒有任何行程（引擎異常結束
 - **§11.3 第 5 列「根層 `tools/`、`.claude/`、`.github/` 必須為空」的實況**：本輪有 4 個根層檔由主控在收尾單人窗口改動，皆非守衛面擴張——`tools/lib/skip_tag_policy.py`（掃描面下限三值依前置掃描逐字指示重釘）、`tools/tests/test_windows_forbidden_filename_parity.py`（NTFS 站點表登記 Bridge 鏡像接受器，檔案行數不變、棘輪淨額 +0）、`.claude/hooks/sdd_hook_router.py` 與 `tools/lib/session_brief.py`（S-14 過期版本號範例文案；每個 session 必印＝真實暴露）。判準維持「必須為空」，例外一律由收尾單人窗口做並在此登記。
 - **各棒接受的偏離**（唯一真相源＝`docs/04_planning/AutoSDD_improving_115.md` §6 D-115-17～19 與 §7 表；本節只列與本文字面相牴的條目）：§7.4 的「冪等」只在乾跑樣本成立——上游 `sanitize_component` 截 80 字後可能以空白結尾、再淨化一次不等於自身（SDD 側 P4，Bridge 鏡像逐字同源不修）；§7.4 的尾端判準實作取 `rstrip(" .")` 不動點；§4.3 的 `--digest` 需至少一個 `--doc`、`--root` 須為既存絕對目錄、`--digest` 無 `--json` 時沿用人讀輸出；§4.4 的 approver 另拒前後空白；§9 的權杖呼叫為四個（含 `:resume`／`/restore`，見該節補註）；§6.3① 的「已綁定 `sdd_spec_file` 須在 `docs[]`」由 Backend 擋；`unmapped_at_ids` 的事件多帶 `reasons`；版本／場景宣告另收 HTML 註解形與表格列形並略過圍欄程式碼區塊。
 
+## 附錄 D：整合輪 116 的回寫（主控收尾單人窗口，2026-10-18）——子專案以 SDD 流程開發自身
+
+- **§11 白名單的射程只有「Console 整合對兩引擎的侵入」**：各子專案（AutoClaude／AgentConsole／monorepo 根）用 AISDLC_SDD 流程開發**自身**功能時改的是自家的檔，受各自 `CLAUDE.md` 與 SCG-0～6 閘門管，不受 §11 限制。本輪三路 dogfood：`autoclaude-webhook` 改 `AutoClaude/autoclaude/utils/{notifier,webhook_sender}.py`、`agentconsole-fsm-trail` 改 `AgentConsole/engine-bridge/app/{fsm_trail.py,routers/sdd.py}`、`monorepo-sdd-env` 新增 `AISDLC_SDD/scripts/sdd_env.py`。
+- **單一 SOP 落點**＝`AISDLC_SDD/AISDLC_SDD_v<LATEST>/workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §8（§7 三徑：hooks-ON session／Bridge 委派／session-only）。§3.1 的三件組改由 `AISDLC_SDD/scripts/sdd_env.py` 產生（`--sub <autoclaude|agentconsole|monorepo> --slug <功能> --shell <powershell|bash|json>`；`--check` 以 rc 5 表示狀態檔不存在），一功能一鍵 `<sub>-<slug>`；§3.2 的解析優先序不變。
+- **本輪證據**：`docs/04_planning/AutoSDD_improving_116.md`（判準 C1～C7、缺口 G-116-01～24、裁決 D-116-01～18）、`docs/06_quality/AutoSDD_ZeroTrust_Audit_116.md`（QA 獨立審查與真機驗收）；缺陷 DEF-200-544～550。
+
 ## 附錄 A：與 improving_115 §4.3（Architect 草案）的差異，逐條
 
 | # | 項 | 草案 | 本 ADR | 理由 |

@@ -1181,7 +1181,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | `fsm` | `SddFsmState` \| null | 帶了 `project` 且取得時有值；其餘為 null |
 | `checkedAt` | date-time | console-api 處理這次請求的時間（UTC，`…Z`） |
 
-`SddFsmState`（對映 Bridge `GET /sdd/fsm/{project}`；**最外層鍵轉 camelCase，巢狀內容原樣**＝FSM 檔寫什麼就是什麼，保留 snake_case 鍵，使「檔案 ↔ API ↔ 畫面」可逐值比對）：
+`SddFsmState`（對映 Bridge `GET /sdd/fsm/{project}`；**最外層鍵轉 camelCase，巢狀內容原樣**＝FSM 檔寫什麼就是什麼（唯一例外＝`decisionTrace` 的委派失敗投影，見下表），保留 snake_case 鍵，使「檔案 ↔ API ↔ 畫面」可逐值比對）：
 
 | 欄位 | 型別 | 來源（Bridge 欄位＝`fsm_state` 內同名的鍵） |
 |------|------|------|
@@ -1191,7 +1191,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | `sessionId` | string \| null | `session_id` |
 | `updatedAt` | string \| null | `updated_at`（ISO-8601 字串，原樣） |
 | `frozenStages` | object[] | `frozen_stages`（原樣；缺則 `[]`） |
-| `decisionTrace` | object[] | `decision_trace` 的**尾 5 筆**（舊→新，原樣；每筆 `{ts, from, to, reason, spec_refs, agents_consulted, trigger}`；缺則 `[]`） |
+| `decisionTrace` | object[] | `decision_trace` 的**尾 5 筆**（舊→新；每筆 `{ts, from, to, reason, spec_refs, agents_consulted, trigger}`；缺則 `[]`）。**唯一的非原樣處**（DEF-AC-023；整合輪 116 DF-B，`TCS-FsmTrail-20261018`）：`escalation_provenance.source="autoclaude_delegated_failed"` 時，Bridge 把尾 5 筆中 `from=to=ESCALATION` 且 `trigger="autoclaude_delegated_exit"` 的那幾筆之 `from` 投影成 `AUTOCLAUDE_DELEGATED` 並加 `from_inferred: true`（純顯示投影，FSM 檔不動；其餘筆原樣）。Console 原樣帶出 `from_inferred` |
 | `source` | string | 檔名（`FSM-STATE-<project>.yaml`） |
 | `humanPending` | `{count, items}` | 待人工確認的數量與項目，語意見 §3.1.3 |
 | `retryHistory` | `{count, last}` | 重試歷史的總筆數與最近一筆（`last` 是原筆再加一個 `gate` 欄＝所屬的重試閘名），語意見 §3.1.3 |

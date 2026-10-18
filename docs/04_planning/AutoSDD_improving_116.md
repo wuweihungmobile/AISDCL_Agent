@@ -131,7 +131,7 @@
 | W2 DF-A 第一輪（Bridge＋真 haiku） | — | 操作員回報 FAILED（TOKEN_HALT 偽陽性）；主控親跑半成品 `pytest tests -k AT_001_1_1` 1 passed | — | 重跑待 RC-1 修後 |
 | RC-1 修復（主控代 Dev；額度守衛擋下扇出） | `d9dc1ff0` | test_token_regex 39 passed；AutoClaude 全套 5881 passed；lint-imports 9 kept；check_loc_budget rc=0 | — | DF-A 重跑進行中 |
 
-### 6.1 W1 持有面（互斥）
+### 7.1 W1 持有面（互斥；§6 D-116 裁決的派工附表，W1 派工時用）
 
 | 棒 | 只准寫的檔 | 出口閘門（主控親跑） |
 |---|---|---|

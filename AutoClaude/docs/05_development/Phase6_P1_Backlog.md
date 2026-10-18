@@ -63,7 +63,7 @@ P1 #1-#5 全部完成後：
 
 | ID | 位置 | 說明 | 對應採納方 |
 |----|------|------|------------|
-| TD-1 | [autoclaude/utils/notifier.py](../../autoclaude/utils/notifier.py) `notify_escalation()` | Webhook HTTP 發送尚未實作（目前僅 log warning）；未來規劃以 httpx POST + retry/backoff 實作 `_send_webhook(url, title, message, dump_path)` | Infra / SRE |
+| TD-1 | [autoclaude/utils/notifier.py](../../autoclaude/utils/notifier.py) `notify_escalation()` → [autoclaude/utils/webhook_sender.py](../../autoclaude/utils/webhook_sender.py) `send_webhook()` | **已實作**（整合輪 116 DF-A，commit `306dbb2a`；由 AISDLC_SDD 流程在 FSM 鍵 `autoclaude-webhook` 下交付）：https-only、只對 5xx／網路錯指數退避重試、永不拋例外、日誌遮罩 URL；規格 `docs/03_testing/contracts/TCS-WebhookSender-20261018.md`、審查 `docs/06_quality/SCG4-REVIEW-WebhookSender-20261018.md` | Infra / SRE |
 
 ---
 
