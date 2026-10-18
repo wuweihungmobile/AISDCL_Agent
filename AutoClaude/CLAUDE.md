@@ -106,7 +106,7 @@ autoclaude/
 ├── execution/                       # playbook_runner (thin facade) / steps_orchestrator/ /
 │                                   # workflow_detector / failure_tracker / convergence_monitor /
 │                                   # error_classifier / error_budget / cross_step_validator
-├── evolution/                       # PlaybookEvolver（INJECT_STEP / SPLIT_STEP）
+├── evolution/                       # PlaybookEvolver（INJECT_STEP / SPLIT_STEP / REVISE_EVALUATOR）
 └── utils/                           # config / logger / notifier / checkpoint_manager /
                                     # token_tracker / knowledge_base / trace_context（SD_08 W4）
 
