@@ -35,13 +35,13 @@
 ### 1.1 專案願景
 讓 AutoSDD 對「同一類流程缺陷反覆發生」這件事，不再靠掌舵者與主控的記憶，而是由帳本驅動一條**有界、人工逐項核准、可一個動作回滾、以真實症狀驗收**的改進迴圈（觀察→歸因→提案→人工閘→沙盒套用→驗證→量測→退役）；全程不更新模型權重、不自動修改治理面。
 
-**可被反證**：迴圈採納若干改進後，若連續兩個量測窗的同根因缺陷復發率（M1）都沒有低於迴圈啟用前的同尺度基線，或採納後回滾比例（M5）隨採納數上升，本願景即被反證——不自動下線，改列為掌舵者 T1 決策項（縮減範圍或廢止）。樣本不足＝NOT-EVALUABLE，既不算支持也不算反證。
+**可被反證**：在**可評估窗**內——基線窗內確認再現事件數 ≥ `W_EVT`（初值 2，無先例、未校準；§1.3 M1）——迴圈採納若干改進後，若連續兩個可評估的採納窗都仍復發（M1：窗結果 `recurred`），或採納後回滾比例（M5，含與不含 `unverified_ack` 兩值）隨採納數上升，本願景即被反證——不自動下線，改列為掌舵者 T1 決策項（縮減範圍或廢止）。基線窗事件數不足（含 0 事件）、或 M5 的已關閉採納窗數 < `W_MIN`＝NOT-EVALUABLE，既不算支持也不算反證，不得把基線 0 事件算成「未低於」或「已改善」；M1 的「未再現」因基線窗為事件所選（均值回歸）而不構成成效證明，只用於反證（§1.3 M1 檢定力說明）。
 
 ### 1.2 業務目標
 **解決的問題**:
 - **現況痛點**（座標皆寫稿時現查）:
   - 復發靠人記得：缺陷帳本以自由文字記「再開症狀」，復發連結沒有結構化欄（例：DEF-200-551 現象欄以文字寫「DEF-200-535 再開症狀於 116 命中」，`docs/06_quality/AutoSDD_Defect_Log.md` 寫稿時第 324 行）⇒ 復發率今天只能人工數。
-  - 記憶面沒有結果標籤與退役機制：Claude Code 記憶索引 `MEMORY.md` 寫稿時為 22,755 bytes／113 行（記憶目錄共 125 個 .md 檔，含索引），逼近官方載入上限（S-08 稱「前 200 行或 25KB」；25KB 換算未查證）；2026-10-19 主控人工歸檔後降為 15,558 bytes／76 行（22,755→15,558 bytes、113→76 行；OBS-SI-016，PROP-SI-003 的手動先例；§9.0 Q5），歸檔是人手做的一次性動作、不是機制。
+  - 記憶面沒有結果標籤與退役機制：Claude Code 記憶索引 `MEMORY.md` 寫稿時為 22,755 bytes／113 行（記憶目錄共 125 個 .md 檔，含索引），逼近官方載入上限（S-08 稱「前 200 行或 25KB」；25KB 換算未查證）；2026-10-19 主控人工歸檔後降為 15,558 bytes／76 行（22,755→15,558 bytes、113→76 行；OBS-SI-016，PROP-SI-003 的手動先例；§9.0 Q5），歸檔是人手做的一次性動作、不是機制。另有 harness 自帶的容量機制（官方 memory 頁，S-08；SCG-0 一審 F-05 開頁複核，`docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md`）：Claude 寫入 `MEMORY.md` 後 harness 自行量測，近上限時提醒 Claude「一條一行、細節搬到主題檔、合併或丟棄過期條目」，超限時寫入仍成功但回錯誤要求重寫索引——它由不受本迴圈控制的寫入者（harness 內的 Claude）執行，不帶結果標籤、不經人工閘；SI 的容量事件（`CAP_FRAC`）與它並存而非取代，衝突處置見 AC-SI-27-1。
   - 引擎演化「只提案不套用」靠「舊 PlaybookRunner 沒有生產建構點」而非守衛（OBS-SI-010；`AutoClaude/CLAUDE.md:191`）。
   - 改進提案沒有獨立評估器：AutoClaude 演化提案與根整合層的改進迴圈皆無 held-out（SOP II-6 缺口欄）。
   - 提案沒有統一審閱介面與冷卻：被否決的同型提案可重複出現（SDD 規則面有 add↔retire 抖動防護 R-9.24，其他面無）。
@@ -54,15 +54,17 @@
 - **長期＝P3**：M1～M5 可重跑量測；至少一個採納窗關閉並入帳；至少一筆退役走完人工閘。
 
 ### 1.3 成功指標 (Success Metrics)
-只准症狀型結果指標。初值參數（W_N、W_MIN 等）皆標「初值（未校準）」，見 §5 開頭說明。基線未量測者一律寫 NOT-EVALUABLE，不得用估計值頂替。
+只准症狀型結果指標。初值參數（W_N、W_MIN、W_EVT、W_OPP 等）皆標「初值（未校準）」，見 §5 開頭說明。基線未量測者一律寫 NOT-EVALUABLE，不得用估計值頂替。M2、M3 無因果連結而降為資訊欄（見表內說明），成功指標為 M1、M4、M5。
 
 | 指標類型 | 具體指標 | 目標值 | 衡量時間點（事件，非日曆） | 量法與資料來源 |
 |---------|---------|--------|---------------------------|----------------|
-| **結果指標** | **M1 同根因缺陷復發率** | 窗內 M1 低於迴圈啟用前的同尺度基線；連續兩窗未低於基線＝願景被反證（§1.1） | P2、P3 出口評估；每個採納量測窗關閉時 | M1＝窗內「已結列被確認再現」數 ÷ 窗內已結列數；窗＝最近 `W_N`（初值 20，無先例）筆首詞為 `fixed` 的 DEF／OBS 列；再現候選由量測腳本自帳本抓（`reopens:` 標記、現象欄「再開症狀…命中」字樣），確認由審查者（≠歸因者）；n < `W_MIN`（初值 5，先例 `params.json` 的 `q1b_min_n`）＝NOT-EVALUABLE。歷史基線結構性 NOT-EVALUABLE（OBS-SI-027：1,490 筆 fixed 列只有 34 列有 git 認得的 commit hex、`reopens:` 0 列；§9.0 Q6），基線改在首次 `app.promote` 前以前瞻窗取得（ADR-SI-05）；§1.1 反證條件自該窗關閉後才可評估。來源：`docs/06_quality/AutoSDD_Defect_Log.md`（含 `_archive_*`）、觀察帳本 |
-| **結果指標** | **M2 DEF 列從立案到 fixed 的中位時間** | 不高於基線；不得以多開 `closed-by-decision` 取得改善（該類另列資訊欄） | 同上 | 中位數（`fixed@<sha>` 的 commit 時間 − 該列「發現日期」），單位日（日期欄無時分）；sha 取自狀態欄、commit 時間以 git 查；sha 無法解析者排除並計數。來源：缺陷帳本＋git |
-| **結果指標** | **M3 再開症狀命中後到修復的時間** | 不高於基線 | 同上 | 中位數（修復 commit 時間 − 命中列發現日期）；命中清單同 M1 的確認結果。來源：缺陷帳本＋觀察帳本＋git |
+| **結果指標** | **M1 同根因缺陷復發率（per-PROP 前後對照）** | 可評估採納窗中，採納後仍復發的比例低於基線（可評估的基線窗依定義已含 ≥ `W_EVT` 次再現，即基線＝有再現）；連續兩個可評估採納窗皆仍復發＝願景被反證（§1.1）；不可評估＝NOT-EVALUABLE（不算支持、不算反證） | P2、P3 出口評估；每個採納量測窗關閉時 | M1＝可評估採納窗中「採納後仍復發」（窗結果 `recurred`）的窗數 ÷ 可評估採納窗數，並附 n。**基線窗**（前）＝同一 PROP 晉升前、同一機會列規則（AC-SI-23-1）、自再現標記上線後的最近 `W_OPP` 筆機會列；**採納窗**（後）＝FR-SI-23 的窗。**可評估條件（NE 護欄量事件數、不量列數）**：基線窗內確認再現事件數 ≥ `W_EVT`（初值 2，無先例、未校準），且基線窗機會列數 ≥ `W_MIN`（初值 5，先例 `params.json` 的 `q1b_min_n`）；基線事件數＝0 一律 NE，不得算「未低於」或「已改善」。因再現而提早關閉的採納窗（`recurred`）照樣可評估——再現本身是決定性觀察，不設最小列數；`clean` 的窗必已累計 `W_OPP` 筆機會列；因回滾先到而關閉、窗內無確認再現者（`rolled-back`）M1 不評估（無再現觀察、窗被截短），仍計入 M5。再現候選在立案當下寫入標記（`reopens`／現象欄 `reopens:DEF-xxx`），確認由審查者（≠立案者）以 `attr.confirm` 為準；量測腳本只讀已寫入的標記與確認事件，不在量測期掃描產生候選（AC-SI-06-2）。全域窗（最近 `W_N`〔初值 20，無先例〕筆首詞為 `fixed` 的 DEF／OBS 列內被確認再現者的比例）降為資訊欄，不得單獨宣稱成效。歷史基線結構性 NOT-EVALUABLE（OBS-SI-027：1,490 筆 fixed 列只有 34 列有 git 認得的 commit hex、`reopens:` 0 列；§9.0 Q6）：基線窗只計標記上線後的列、不回溯標註，並於首次 `app.promote` 前以前瞻窗記一筆基線報告（ADR-SI-05）；§1.1 反證條件自首個可評估採納窗關閉後才可評估。來源：`docs/06_quality/AutoSDD_Defect_Log.md`（含 `_archive_*`）、觀察帳本 |
+| **資訊欄**（不作成功指標） | **M2 DEF 列從立案到 fixed 的中位時間** | 無目標值（只看趨勢，不設達成門檻；不得宣稱成效） | 同上 | 中位數（`fixed@<sha>` 的 commit 時間 − 該列「發現日期」），單位日（日期欄無時分）；sha 取自狀態欄、commit 時間以 git 查；sha 無法解析者排除並計數；`closed-by-decision` 另列。**降為資訊欄的理由**（SCG-0 一審 F-14）：與迴圈沒有因果連結，且可被拆列快速結案、改發現日期、批次結案影響。來源：缺陷帳本＋git |
+| **資訊欄**（不作成功指標） | **M3 再開症狀命中後到修復的時間** | 無目標值（只看趨勢，不設達成門檻；不得宣稱成效） | 同上 | 中位數（修復 commit 時間 − 命中列發現日期）；命中清單同 M1 的確認結果；降為資訊欄的理由同 M2（無因果連結、可被拆列與批次結案影響）。來源：缺陷帳本＋觀察帳本＋git |
 | **結果指標** | **M4 提案被否決後同型提案再出現的次數** | 0（由冷卻結構保證；>0＝冷卻被繞過） | 每次人工閘決定時 | 計數（同型＝artifact_class＋target＋〔根因鍵相同或證據座標有交集〕）在冷卻期內且無再提資格事件而再生成者。來源：PROP／DEC 紀錄 |
-| **結果指標** | **M5 採納後回滾比例** | 不隨採納數上升；無「未經人工閘而採納」者 | 每個採納量測窗關閉時 | M5＝窗內被回滾的 promoted PROP 數 ÷ 量測窗已關閉的 promoted PROP 數；`unverified_ack` 採納另列、不併入分母。來源：DEC 紀錄 |
+| **結果指標** | **M5 採納後回滾比例** | 兩個值（見量法）皆不隨採納數上升；無「未經人工閘而採納」者 | 每個採納量測窗關閉時 | M5＝窗內被回滾的 promoted PROP 數 ÷ 量測窗已關閉（AC-SI-23-1）的 promoted PROP 數；窗未關閉者不計。**同時報兩個值並列**：(a) 主值＝不含 `unverified_ack` 採納（已驗證類）；(b) 含 `unverified_ack` 採納的值。M／D 類預設走 `unverified_ack`（AC-SI-19-2；§9.4 預期常態），主值的分母主要是易驗證類，有倖存者偏誤，故兩值缺一不可、不得只報其一（AC-SI-22-2）。已關閉的 promoted PROP 數 < `W_MIN`＝NOT-EVALUABLE。來源：DEC 紀錄 |
+
+**M1 檢定力說明**（SCG-0 一審 F-02）：§9.0 Q6 快照基率為 1,490 筆 `fixed` 列中「再開症狀」4 列、「…命中」1 列、`reopens:` 標記 0 列；以此估算，全域 20 列窗的期望再現事件數約 0.01～0.05 件（20×1÷1,490≈0.013、20×4÷1,490≈0.054），全域 M1 幾乎恆為 0／20：基線為 0 時「低於基線」不可能成立，「連續兩窗未低於基線」在最可能的世界裡幾乎必然成立、與迴圈有無效果無關，所以全域窗不能當成功指標或反證依據，只作資訊欄。per-PROP 設計只在基線窗已含 ≥ `W_EVT` 次再現時才評估，但樣本仍是個位數：M1 是證據、不是顯著性檢定；基線窗因「已出現再現」而被選入，之後的窗本就會因均值回歸而較少再現，所以「採納窗未再現」不構成成效證明，只有「可評估卻連續兩窗仍復發」才構成反證。樣本不足的結論一律是 NOT-EVALUABLE（既不算支持、也不算反證）。
 
 #### 1.3.1 明文禁止當成功指標（Goodhart）
 | 禁用指標 | 為什麼不行 | 座標 |
@@ -73,7 +75,7 @@
 | 覆蓋度、測試數、行數等量化代理 | 對代理指標過度最佳化會損害真實表現 | DP-10；C-12（無覆蓋度門檻） |
 | 「零發現」 | 零發現不是 PASS | C-13；`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md`:371–375 |
 
-**🔴 人機協作確認點**：[ ] Stakeholders 確認願景與反證條件一致　[ ] 成功指標可衡量且合理（尤其 `W_N`、`W_MIN` 初值）　[ ] 短中長期成果有清晰路徑
+**🔴 人機協作確認點**：[ ] Stakeholders 確認願景與反證條件一致　[ ] 成功指標可衡量且合理（尤其 `W_N`、`W_MIN`、`W_EVT` 初值）　[ ] 短中長期成果有清晰路徑
 
 ## 👥 2. 目標用戶與使用場景 (Target Users & Use Cases)
 ### 2.1 用戶角色定義
@@ -87,14 +89,14 @@
 | **Console 操作者** | 經 AgentConsole 檢視與簽核的人（目前即掌舵者） | 只讀顯示、既有簽核硬閘 | 隨使用 | 中 |
 
 #### 2.1.1 迴圈權限矩陣（能做／不能做）
-| 角色 | 能做 | 不能做 |
-|------|------|--------|
-| 掌舵者 | 立案 T1；對每張 PROP 下核准／否決／退回；下達晉升與回滾指令；明示解除冷卻；修改不可進化面（經 T1／PRD 修訂，不經本迴圈） | 沒有 digest 綁定的口頭「好」不構成核准；核准不能覆蓋憲法禁令（不提供「採納自我發明評估器」的核准路徑，須先修憲，禁令 22～25 末項） |
-| 主控 agent | 派工與角色分派；讀全部帳本；親驗（親跑指令、先存 rc 再讀）；退回不合規交件；以單一窗口寫帳本處置欄 | 代為核准任何 PROP（MVP 不開放代決，附錄 C.2 #2）；改不可進化面；跳過驗證；以自評分數當成效；ESCALATION 後自動恢復 |
-| 子代理 | 擔任擷取者、歸因者、提案者（產 `proposed` 物件）、審查者（唯讀、獨立 context）；在沙盒副本跑驗證 | 寫正式面；寫 DEC 紀錄；提案者看見 held-out 與評估指令；同一提案兼任提案者與審查者；再派子代理（遞迴）；寫報告檔（文字交卷，OBS-SI-004） |
-| AutoClaude 引擎 | 產出 `MutationProposal`／escalation dump／KB 記錄（只提案）；執行 `evaluator_command` 取客觀訊號 | 未經人工閘把演化套用到正式 playbook；自改 `evaluator_command`（`REVISE_EVALUATOR` 型不受理）；ESCALATION 後自動恢復 |
-| AISDLC_SDD FSM runtime | 驅動狀態、載入規則、產 `trust_level: proposed` 的 SLV／SPEC-PATCH 草案、`meta_halt_monitor` 把關、HUMAN_PENDING 閘 | 自動採納或退役 active 規則（禁令 11）；自動改 FRD／AC（禁令 12）；本迴圈不得繞過 `FSMRuntime` 讀寫狀態檔（禁令 1） |
-| Console 操作者 | 只讀檢視 FSM 與（post-MVP）提案卡鏡像；在既有簽核硬閘內簽核 | Console 寫 FSM 狀態檔（一律經 `FSMRuntime` CLI 子行程，`AgentConsole/CLAUDE.md:15`）；以 Console 繞過 K=1 |
+| 角色 | 能做 | 不能做（①②…編號對應右欄） | 邊界型（M／D／P；§9.4；P 型不得讀成「被擋」） |
+|------|------|--------|--------|
+| 掌舵者 | 立案 T1；對每張 PROP 下核准／否決／退回；下達晉升與回滾指令；明示解除冷卻；修改不可進化面（經 T1／PRD 修訂，不經本迴圈） | ①沒有 digest 綁定的口頭「好」不構成核准；②核准不能覆蓋憲法禁令（不提供「採納自我發明評估器」的核准路徑，須先修憲，禁令 22～25 末項） | ①M（`si decide` 驗 digest 綁定與引言，AC-SI-12-1／12-4）；②M（類別白名單與不可進化面轉交，AC-SI-11-1／07-3；沒有核准入口） |
+| 主控 agent | 派工與角色分派；讀全部帳本；親驗（親跑指令、先存 rc 再讀）；退回不合規交件；以單一窗口寫帳本處置欄 | ①代為核准任何 PROP（MVP 不開放代決，附錄 C.2 #2）；②改不可進化面；③跳過驗證；④以自評分數當成效；⑤ESCALATION 後自動恢復 | ①M（`si decide` 只認 `origin.kind=="human"`；`AUTOSDD_UNATTENDED` 下一律非零 rc）；②M（經 SI CLI 建立／晉升的 PROP，AC-SI-07-3）＋P（直接 Edit／Write 不經 SI，仍歸既有治理，§9.4 誠實劃界）；③M（`si promote` 驗 verdict＋DEC＋digest，AC-SI-16-1）；④P（量測腳本不讀自評，但「不得宣稱」本身無機械物）；⑤P（本迴圈不驅動 FSM，恢復只走既有人工路徑，AC-SI-17-2） |
+| 子代理 | 擔任擷取者、歸因者、提案者（產 `proposed` 物件）、審查者（唯讀、獨立 context）；在沙盒副本跑驗證 | ①寫正式面；②寫 DEC 紀錄；③提案者看見 held-out 與評估指令；④同一提案兼任提案者與審查者；⑤再派子代理（遞迴）；⑥寫報告檔（文字交卷，OBS-SI-004） | ①P＋D（流程型約束；偵測＝正式面 `git status`／HEAD 對照與 AC-SI-08-4 重放，AC-SI-08-1）；②D（CLI 為唯一支援寫入者；直接改檔由 `si check` 事後標紅，ADR-SI-02）；③P＋D（AC-SI-20-1；偵測見 AC-SI-20-4）；④P（角色標籤為自述，`reviewer≠proposer` 只檢標籤、不證身分，AC-SI-18-1）；⑤P（AC-SI-10-2；無專屬機械物）；⑥P（任務書；harness 曾拒寫報告檔〔OBS-SI-004〕，但非本迴圈保證） |
+| AutoClaude 引擎 | 產出 `MutationProposal`／escalation dump／KB 記錄（只提案）；執行 `evaluator_command` 取客觀訊號 | ①未經人工閘把演化套用到正式 playbook；②自改 `evaluator_command`（`REVISE_EVALUATOR` 型不受理）；③ESCALATION 後自動恢復 | ①M（AC-SI-28-1 的 AST 普查；形態判準）；②P（機械辨識需引擎碼變更＝⏸ F-SI-105；MVP 由歸因者讀 dump／log 判讀，AC-SI-11-2）；③P（既有約束、本迴圈不驅動引擎，FR-SI-17 追溯） |
+| AISDLC_SDD FSM runtime | 驅動狀態、載入規則、產 `trust_level: proposed` 的 SLV／SPEC-PATCH 草案、`meta_halt_monitor` 把關、HUMAN_PENDING 閘 | ①自動採納或退役 active 規則（禁令 11）；②自動改 FRD／AC（禁令 12）；③本迴圈不得繞過 `FSMRuntime` 讀寫狀態檔（禁令 1） | 既有約束、非本 PRD 新增：①M（`set_maturity` 的 `reviewed_by` 為必填、空值即拒，`rule_loader.py`:309）；②P（R-9.22：SPEC-PATCH 草案為 proposed、經 HUMAN_PENDING）；③預設 hooks-OFF 時為 P，hooks-ON 時由既有 SDD hook 擋（根 `CLAUDE.md`〈AISDLC_SDD 快查〉） |
+| Console 操作者 | 只讀檢視 FSM 與（post-MVP）提案卡鏡像；在既有簽核硬閘內簽核 | ①Console 寫 FSM 狀態檔（一律經 `FSMRuntime` CLI 子行程，`AgentConsole/CLAUDE.md:15`）；②以 Console 繞過 K=1 | ①既有契約、非本 PRD 新增（P；MVP 無 Console 接點）；②N/A（MVP 無 Console 接點；post-MVP 須另立 ADR，ADR-SI-03 再開） |
 
 ### 2.2 核心使用場景
 | 場景 | 觸發條件 | 用戶目標 | 關鍵步驟 | 成功標準 |
@@ -137,7 +139,8 @@
 
 ### 3.2 範圍外 (Out of Scope)
 - ❌ 更新模型權重（RL 微調、自博弈訓練；SOP S1 不在範圍）。
-- ❌ 自動改根 `CLAUDE.md`／`AISDLC_SDD/CLAUDE.md`／`AutoClaude/CLAUDE.md`／`.claude/**`／守衛面——無暴露證據不得碰（根 `CLAUDE.md`〈守衛面准入〉）；本 PRD 亦不新增任何守衛碼、鎖或 hook。
+- ❌ 自動改各層 `CLAUDE.md`（根／`AISDLC_SDD`／`AutoClaude`／`AgentConsole`）／`**/.claude/**`（含各子專案與各版本目錄）／守衛面——無暴露證據不得碰（根 `CLAUDE.md`〈守衛面准入〉）；本 PRD 亦不新增任何守衛碼、鎖或 hook。
+- ❌ D 類（非治理文件 diff）直接改 `docs/01～03` 的規格文件本體（PRD／FRD／AC／SRD…）：規格變更一律走既有 SPEC-PATCH（`trust_level: proposed` 草案）＋HUMAN_PENDING。本迴圈的 K=1 晉升不是 FSM 的 HUMAN_PENDING 態、不得取代它（R-9.22；SOP C-02）；D 類目標落在 `docs/01～03` 者，其 PROP 只能是 SPEC-PATCH 草案檔。邊界型 **P**（流程型；機械化選項＝`si prop-new` 對 `docs/01～03` 下非 SPEC-PATCH 草案的 D 類目標轉交，留 SD 於 §9.4 評估）。
 - ❌ 自我發明評估器（meta-oracle 自演化；禁令 22～25 末項、C-07）。反例（候選 CD-01：label-free 自設計評估套件作次級把關；S-24 單一來源，且須先有對抗分離不可繞過性證明，只登記不採納）。
 - ❌ 以自評當唯一判官；以無驗證資料的軌跡蒸餾結果直接當採納依據（候選 CD-04，DP-01）。
 - ❌ 經自動評估通過即自動採納、無人工閘（候選 CD-02，S-18／S-19；違反禁令 11、12）。
@@ -196,7 +199,7 @@
 | 分類 | `process`／`bug`／`tooling`／`doc`／`decision` | 必 | 單選 |
 | 嚴重度 | P1～P4（口徑見下） | 必 | 兩套口徑不得混用 |
 | 處置 | 枚舉見下 | 必 | 不得空白或「之後再看」；唯一可原地改寫的欄位，且只能由 `open` 轉為終值一次 |
-| 標記（第 9 欄；key=value，`;` 分隔） | `面`＝守衛／產品／文件／流程；`暴露`＝a／b／c／無（`面=守衛` 時必填）；`來源`＝人／代理／工具／逐字稿／帳本（`外部衍生=是` 見 FR-SI-02）；`回報者`＝角色標籤；`根因`＝立案當下已知的根因鍵（其後的歸因與確認一律以事件帳本 `attr`／`attr.confirm` 追加、不回寫本列，§9.2）；`rel`＝關聯列 ID；`reopens`＝立案當下已知的被再現已結列 ID（事後確認走 `attr`）；`orig`＝遷移前處置原文（逐字；僅處置值被改寫者記，加第 9 欄後超長者原文搬附註檔、列上留 `orig=@<附註檔>#OBS-SI-NNN`） | 條件 | 加此欄後仍 ≤ `ROW_MAX_BYTES`（700 bytes，先例 `tools/lib/defect_ledger_index.py:545`）；超長內容搬附註檔並留座標 |
+| 標記（第 9 欄；key=value，`;` 分隔） | `面`＝守衛／產品／文件／流程；`暴露`＝a／b／c／無（`面=守衛` 時必填）；`來源`＝人／代理／工具／逐字稿／帳本（`外部衍生=是` 見 FR-SI-02）；`回報者`＝角色標籤；`根因`＝立案當下已知的根因鍵（其後的歸因與確認一律以事件帳本 `attr`／`attr.confirm` 追加、不回寫本列，§9.2）；`rel`＝關聯列 ID；`reopens`＝立案當下已知的被再現已結列 ID（事後確認走 `attr`）；`orig`＝遷移前處置原文（逐字；僅處置值被改寫者記，加第 9 欄後超長者原文搬附註檔、列上留 `orig=@<附註檔>#OBS-SI-NNN`）；`orig` 只用於一次性遷移（AC-SI-01-3），遷移後的更正一律追加更正列（AC-SI-04-3） | 條件 | 加此欄後仍 ≤ `ROW_MAX_BYTES`（700 bytes，先例 `tools/lib/defect_ledger_index.py:545`）；超長內容搬附註檔並留座標 |
 
 **嚴重度口徑（兩套，依 `面` 擇一）**：
 - `面≠守衛`（產品／文件／流程）：P1＝走不通、鎖死、資料分裂或已造成不實結案宣稱；P2＝須手動繞過、文件自相矛盾、結案不成立或終點設計有結構漏洞；P3＝文字／可用性；P4＝理論洞（構造性、無暴露證據）。座標：`docs/04_planning/AutoSDD_improving_116.md` §3 標題列；範本〈審查閉環的終止〉（`AutoSDD_Iteration_Prompt_Template.md`:371–375）。
@@ -211,10 +214,12 @@
 | sources | 來源 OBS／DEF ID（≥1） |
 | attribution | (種類, 座標) 清單；不含任何自評分數 |
 | cls／action | M／P／R／D × add／modify／delete／retire；另有 `evaluator-change`、`loop-self` 兩類標記（不受理，只轉交） |
-| target／diff／digest／touch | 目標座標；增量 delta；內容摘要（演算法見 §9.2，核准綁定此值）；新增／刪除行數與觸及比例 |
+| target／touched／diff／digest／touch | `target`＝目標路徑**集合**（排序、去重；POSIX 邏輯路徑，M 類為 `memory/<檔名>`）；`touched`＝自 `rN.patch` 導出的實際觸及路徑集合與檔數（含新增、刪除、改名兩端，AC-SI-07-3）；增量 delta；內容摘要（演算法見 §9.2，核准綁定此值；`target` 與 `touched` 皆在 digest 內）；新增／刪除行數與觸及比例 |
 | budget／verify_plan | 回合・牆鐘・token（零扇出）；提案者建議的可重跑探針、基線症狀預期、突變規格（僅供審查者參考；判定用的評估指令與 held-out 由提案者以外角色凍結，FR-SI-20） |
 | rollback／retire_when／reopen_symptom | 一個動作的回滾配方；各一句可觀測條件 |
-| proposer／reviewer／route | 角色標籤（reviewer≠proposer）；`loop`／`handoff:<通道>` |
+| proposer／reviewer／route | 角色標籤（reviewer≠proposer）；`loop`／`handoff:<通道>`（由 `si prop-new` 依 AC-SI-07-3 判定，提案者不得自填 `loop`） |
+
+**不可進化面比對**（唯一真相源＝NFR-SI-02-1：錨定語意與實體 glob 皆在該處）：前置檢查對 `touched` 的**每一條**路徑逐一比對 `non_evolvable_globs`，不只比 `target`（glob 相對 repo 根，不帶 `**/` 前綴者只錨定 repo 根，故守衛面寫 `**/.claude/**`）；任一命中＝整張 PROP `route=handoff`（AC-SI-07-3）。
 
 **狀態機（唯一合法轉移）**：`proposed → approved｜rejected｜returned｜handed-off`；`returned → proposed`（修訂 ≤ `MAX_REVISIONS`，超限＝rejected）；`approved → sandboxed → verified`（verdict＝PASS／FAIL／NE）；`verified[PASS] → promoted｜rejected`（人決定不晉升，入冷卻）；`verified[NE] → promoted｜rejected`（promoted 須 `unverified_ack`）；`verified[FAIL] → returned｜rejected`；`promoted → measuring → closed`（clean／recurred／rolled-back）；`closed → retired`（退役提案經閘）。
 
@@ -227,10 +232,10 @@
 **追溯**：DP-08；既有：`docs/06_quality/SelfImproving_Observation_Ledger.md`（欄位暫定版）、`AutoSDD_Defect_Log.md` 列體例。｜**憲法對照**：守衛面准入（`暴露` 欄）；鐵律三（時間欄帶 offset）。
 - **AC-SI-01-1** Given 一筆新觀察 When 寫入帳本 Then 必填欄（ID／時間／情境／症狀／證據座標／分類／嚴重度／處置）皆有值、證據座標 ≥1 個可定位、時間帶 UTC offset（列內明示，或沿用檔頭 `tz=` 宣告）；缺任一欄者被檢查器（`si check`，§9.3）判不合規並拒收。
 - **AC-SI-01-2** Given `面=守衛` 的列 When 嚴重度標 P1／P2 Then `暴露` 必為 a／b／c 之一且附座標，否則降為 P4 並入理論洞清單；`面≠守衛` 者依非守衛口徑判級。
-- **AC-SI-01-3** Given 既有各列（寫稿時 OBS-SI-001～014，帳本現查）When 遷移到定稿欄位 Then ID 不變、處置值被改寫者原文逐字留 `orig=`（加第 9 欄後超 `ROW_MAX_BYTES` 者原文搬附註檔、列上留座標）、處置值落入枚舉、遷移後無「之後再看」類字樣（訂正協議：禁止靜默覆寫）。
+- **AC-SI-01-3** Given 既有各列（列數與範圍以遷移當下的帳本現查為準，不寫死） When 遷移到定稿欄位 Then 遷移作為**一次性、單一 commit**（遷移 commit）：ID 不變、處置值被改寫者原文逐字留 `orig=`（加第 9 欄後超 `ROW_MAX_BYTES` 者原文搬附註檔、列上留座標）、處置值落入枚舉、遷移後無「之後再看」類字樣（訂正協議：禁止靜默覆寫）。此一次性原地改寫**不計** `ROW-MUTATED`，豁免須同時具備：(a) 遷移 commit 的 sha 寫入 `params.json` 的 `migration_base_sha`（`si check` 的 `ROW-MUTATED` 比對自該 commit 起，AC-SI-04-3）；(b) 一筆掌舵者確認紀錄——處置為 `decided` 的觀察列，附掌舵者原句與逐字稿座標（`sid`＋`line`，體例同 FR-SI-12；P0 階段只記錄、不機械驗引言，驗引言屬 P2 的 AC-SI-12-4）並引用該 sha；二者缺一，遷移視為未豁免（`si check` 自第一個提交起比對，遷移改動的列標 `ROW-MUTATED`）。`orig=` 只用於本次遷移，遷移後的更正走 AC-SI-04-3 的追加更正列。
 ##### FR-SI-02 觀察來源標記與外部衍生內容隔離〔P0｜新建〕
 **追溯**：DP-09、DP-08；既有：無（記憶「依寫入來源過濾」本輪未見，SOP II-6）。｜**憲法對照**：禁令 26（外聯須 OPEN-X.x）；守衛面准入。
-- **AC-SI-02-1** Given 觀察內容源自網頁、第三方檔案或工具輸出中的內嵌指示 When 入帳 Then `外部衍生=是`，且該列不得單獨充當 M 類或 R 類提案的證據；須另有 ≥1 個內部來源（本 repo 檔案、指令 rc、掌舵者回報）佐證。
+- **AC-SI-02-1** Given 觀察內容源自網頁、第三方檔案或工具輸出中的內嵌指示 When 入帳 Then `外部衍生=是`，且該列不得單獨充當**任何類別（M／P／R／D）**提案的證據；須另有 ≥1 個內部來源（本 repo 檔案、指令 rc、掌舵者回報）佐證。P 類（Playbook 片段＝可執行步驟）與 D 類不排除：外部內嵌指示是與 S-13（MemoryGraft）、S-09 的內嵌指示風險同型的入口，P 類被毒化的後果比 M 類更直接。
 - **AC-SI-02-2** Given 任一觀察 When 入帳 Then `來源` 與 `回報者` 皆有值；觀察本身不自動啟動任何行為（觀察≠記憶，不得直接寫入記憶或規則）。
 ##### FR-SI-03 迴圈只由事件啟動〔P0｜接既有〕
 **追溯**：既有 C-12（範本〈🏁〉T1～T4：`AutoSDD_Iteration_Prompt_Template.md`:352–358；五問協定 S1～S6：`FiveQuestion_Audit_Protocol/README.md`:67–76）；DP-06。｜**憲法對照**：C-12、C-13。
@@ -241,7 +246,7 @@
 **追溯**：DP-08；既有：`AutoSDD_Defect_Log.md` 治理、`tools/check_defect_log_crossref.py`、`tools/tests/test_defect_id_reference_integrity.py`（`_REF_RE` 現含 DEF-101／200 兩族）。｜**憲法對照**：鐵律四。
 - **AC-SI-04-1** Given 處置為 `DEF-<id>` 或任何 `OBS-SI-`／`PROP-SI-`／`DEC-SI-` 跨檔引用 When 檢查 Then 被引列存在（含 archive）；引用不存在的 ID＝不合規。`DEF-` 引用由既有 `tools/tests/test_defect_id_reference_integrity.py`（`git grep --untracked`，含帳本家族與 archive）涵蓋；`OBS-SI-`／`ATT-SI-`／`PROP-SI-`／`DEC-SI-`／`APP-SI-`／`MEA-SI-`／`RUN-SI-` 由 `si check` 涵蓋；載體尚未建立的 ID 家族（P1 前的 `PROP-SI-`／`DEC-SI-`）印「未判：載體未建立」（NOT-EVALUABLE），不得判通過、亦不得判不合規。
 - **AC-SI-04-2** Given 符合缺陷帳本收錄定義的真缺陷 When 觀察入帳 Then 處置須為 `DEF-<id>`（OBS 只留觀察與座標，不取代 DEF 帳本）。
-- **AC-SI-04-3** Given 已存在的列 When `si check`（唯讀）對 HEAD 與歷次提交逐對比較同 ID 列 Then 除「處置欄 open→終值一次」外的原地改寫被標 `ROW-MUTATED` 並要求掌舵者過目；更正一律追加「更正列」（`rel=corrects:OBS-SI-NNN`）。誠實劃界：未提交工作樹內的多次改寫無歷史可比、不可偵測；事件帳本的同型檢查見 AC-SI-08-4。
+- **AC-SI-04-3** Given 已存在的列 When `si check`（唯讀）自**遷移基準 commit**（`params.json` 的 `migration_base_sha`，AC-SI-01-3）起，對 HEAD 與歷次提交逐對比較同 ID 列 Then 除「處置欄 open→終值一次」外的原地改寫被標 `ROW-MUTATED` 並要求掌舵者過目；基準以前的歷史不比對（一次性遷移豁免，AC-SI-01-3）。更正一律追加「更正列」（`rel=corrects:OBS-SI-NNN`），這是遷移以外**唯一**的更正機制，`orig=` 只在遷移內使用。誠實劃界：未提交工作樹內的多次改寫無歷史可比、不可偵測；事件帳本無遷移、自首個提交起比對（AC-SI-08-4）。
 
 #### FG-B 歸因（P1）
 ##### FR-SI-05 歸因映射〔P1｜接既有（唯讀量測器）＋新建（映射格式）〕
@@ -254,8 +259,9 @@
 - **AC-SI-06-2** Given 新列疑似為已結列所防症狀的再現 When 立案當下（`si check` 對新列列出「同證據座標檔案路徑」的已結列供立案者確認；DEF 列無「分類」欄，僅比路徑，候選精準度未量） Then 立案者寫入 `reopens` 標記（OBS）或現象欄 `reopens:DEF-xxx`（DEF，附錄 C.2 #3），其後經審查者（≠立案者）以 `attr.confirm` 確認才計入 M1；量測腳本只讀已寫入的標記與確認事件，不在量測期掃描產生候選；未確認者標「候選」，只印數量、不計數。
 ##### FR-SI-07 不可進化面的歸因出口（轉交，不套用）〔P1｜新建（流程）；零新增守衛碼〕
 **追溯**：DP-11、DP-12；既有：守衛面准入；治理檔唯讀守衛（`.claude/hooks/block_destructive_git.py`:1423–1472，僅 `AUTOSDD_UNATTENDED` 下阻斷）。｜**憲法對照**：守衛面准入；禁令 22～25 末項；PRD v2.1 §15.5 紅線 10。
-- **AC-SI-07-1** Given 歸因目標落在不可進化面（NFR-SI-02-1 清單） When 產生提案 Then `route=handoff:<既有通道>`（DEF／R 系列／T1／PRD 修訂擇一），卡面標「僅轉交，本迴圈不套用」，迴圈對該目標零寫入（例：OBS-SI-005 的候選 PROP-SI-001 屬守衛面、OBS-SI-012 的候選 PROP-SI-002 屬根 `CLAUDE.md`，皆走轉交）。
+- **AC-SI-07-1** Given 歸因目標，或 `rN.patch` 觸及的任一路徑（AC-SI-07-3），落在不可進化面（NFR-SI-02-1 清單） When 產生提案 Then `route=handoff:<既有通道>`（DEF／R 系列／T1／PRD 修訂擇一），卡面標「僅轉交，本迴圈不套用」，迴圈對該目標零寫入（例：OBS-SI-005 的候選 PROP-SI-001 屬守衛面、OBS-SI-012 的候選 PROP-SI-002 屬根 `CLAUDE.md`，皆走轉交）。
 - **AC-SI-07-2** Given 轉交目標屬守衛面且無暴露證據（`severity.md`〈暴露度〉三取一） When 轉交 Then 一律登記為理論洞（P4）、不立案修復；本 PRD 不新增任何守衛碼、鎖或 hook。
+- **AC-SI-07-3**（SCG-0 一審 F-01 新增；追溯 DP-11、DP-12；憲法對照：禁令 11、12、守衛面准入） Given 一筆 PROP 的 `rN.patch`（unified diff，可含多檔） When `si prop-new`／`si prop-revise` 受理，且 `si promote` 於晉升前以當下的 `params.json` 重驗 Then 解析 patch 內**全部**路徑——`---`／`+++` 行、`diff --git` 標頭、`rename from／to`、`copy from／to`（`/dev/null` 視為無路徑；新增、刪除、改名兩端皆算）——逐一以 `realpath`＋`normcase` 正規化後比對 NFR-SI-02-1 的實體 glob；任一路徑命中不可進化面（含凍結版本目錄與模板），或逃出該類別的合法根（M 類＝邏輯根 `memory/`；其餘類別＝repo 根；含 `..`、絕對路徑、磁碟機代號）⇒ **整張** PROP `route=handoff`（不得只轉交命中的檔、其餘照走）。`target` 為排序、去重的路徑集合（不是單一路徑），與 `touched` 一併進 digest（§9.2）；卡核心區顯示「觸及檔案數」與「不在 `target` 內的路徑」（為 0 時顯示 0；非 0 時逐筆列出且計入核心區行數上限，超限者 `prop-new` 拒收並要求拆分或補齊 `target`，AC-SI-14-3）。以合成 patch 自證：正控（只動 `target` 內檔案⇒`route=loop`）；負控（夾帶根 `CLAUDE.md`、`.claude/hooks/*.py`（含子專案與各版本目錄下的 `.claude/`）、凍結版本目錄下的檔、`docs_template/` 下的檔、SI 帳本與 `SelfImproving_Proposals/` 下的檔、路徑逃逸、純改名標頭 ⇒ 皆被轉交）。邊界型 M（SI CLI 前置檢查與晉升前重驗）；誠實劃界：只擋經 SI CLI 建立與晉升的 PROP，直接用 Edit／Write 改檔不經 SI（§9.4）。
 
 #### FG-C 提案生成（P1）
 ##### FR-SI-08 提案物件（只產 proposed）與狀態機〔P1｜接既有＋新建（統一物件）〕
@@ -272,11 +278,11 @@
 ##### FR-SI-10 提案數量、預算與不遞迴〔P1｜接既有＋新建〕
 **追溯**：DP-06；既有：`translation_max_proposals_per_run=3`（`AutoClaude/autoclaude/utils/config.py`:226）、`max_evolutions=3`（:192）、Gap-042／048 計數器（`AutoClaude/CLAUDE.md`:200–201）、`select_proposals` 的 dedup（`core/ports/translation_learning.py`:94）。｜**憲法對照**：禁令 4、16。
 - **AC-SI-10-1** Given 一次運轉（以 `RUN-SI-NNN` 識別，AC-SI-10-3） When 產生提案 Then 提案數 ≤ `MAX_PROPOSALS_PER_RUN`（初值 3，先例同上）；與待決或已核准提案同型者（artifact_class＋target＋根因鍵）不重複產生。
-- **AC-SI-10-2** Given 提案者或審查者 When 執行 Then 不得再派提案者／審查者（零遞迴）；每提案宣告預算（回合、牆鐘、token），超界即停並升級人工（禁令 4）。
+- **AC-SI-10-2** Given 提案者或審查者 When 執行 Then 不得再派提案者／審查者（零遞迴；邊界型 **P**：任務書約束，無專屬機械物，偵測面＝無，審查者可人工讀提案者逐字稿〔含 `subagents/`〕但不構成機制，不得讀成「被擋」）；每提案宣告預算（回合、牆鐘、token），超界即停並升級人工（禁令 4）：沙盒與驗證階段的牆鐘／回合上限＝**M**（CLI 收 verdict，AC-SI-17-1），提案者與審查者自身的 token 預算＝**P**（任務書宣告、超出必揭露，NFR-SI-07-3）。
 - **AC-SI-10-3**（SD 新增；追溯 DP-06；憲法對照：C-12） Given 任何啟動事件（AC-SI-03-1 的 (a)～(e)） When 迴圈開始 Then 先記一筆 `run.open`（`RUN-SI-NNN`、trigger 與證據座標、輸入快照 `head_sha`）；本運轉內的提案數、修訂數、驗證重跑數皆以該 `RUN-SI-NNN` 計；運轉結束記 `run.close`（各提案落入的終態清單；零事件或零提案＝`no-event`，AC-SI-03-2）；無 `run.open` 的提案不受理。
 ##### FR-SI-11 提案類別白名單與評估器變更提案不受理〔P1｜新建；接既有型別標記〕
 **追溯**：DP-05、DP-12、DP-11；既有：`playbook_evolver.py`:14–16、:37（含 `REVISE_EVALUATOR`）、`evolution_plugin.py`:284–289。｜**憲法對照**：禁令 22～25 末項（meta-oracle 自演化紅線）；C-07。
-- **AC-SI-11-1** Given 提案類別 When 受理 Then 僅 M／P／R／D 四類（及其退役）受理；任何改變評估器、held-out、評分權重、本迴圈預算／閘門／停機條件者標 `evaluator-change` 或 `loop-self`，走 FR-SI-07 轉交，不進採納流程。
+- **AC-SI-11-1** Given 提案類別 When 受理 Then 僅 M／P／R／D 四類（及其退役）受理；任何改變評估器、held-out、評分權重、本迴圈預算／閘門／停機條件者，或 `rN.patch` 的任一路徑落在不可進化面 (iii)(iv)（AC-SI-07-3，機械判定）者，標 `evaluator-change` 或 `loop-self`，走 FR-SI-07 轉交，不進採納流程；僅憑內容語意才能判定者（無路徑命中）仍由歸因者讀判（AC-SI-11-2）。
 - **AC-SI-11-2** Given 引擎演化提案內容涉及評估器（`evaluator_command`、`expected_output_regex`、`[evolved evaluator suggested]` 字樣；舊路徑 `REVISE_EVALUATOR` 型，Kernel 路徑已將其轉成 `REVISE_CURRENT`，log 只留 `type=REVISE_CURRENT` 與理由前 200 字，無法機械辨識型別） When 歸因者讀 dump／log 判讀 Then 標 `evaluator-change` 並記一筆 OBS；不得轉送沙盒或晉升。機械辨識需引擎碼變更（持久化提案型別），同 F-SI-105（AC-SI-08-1），不在 MVP。
 
 #### FG-D 人工閘（P2；FR-SI-14 為 P1）
@@ -285,7 +291,7 @@
 - **AC-SI-12-1** Given 一張 PROP 卡 When 掌舵者回覆 Then 僅「核准／否決／退回＋PROP ID」構成決定，且綁定該 PROP 最近一次送達之卡面 digest（卡面與 digest 一併留存）；DEC 須附掌舵者原句與其逐字稿座標（`sid`＋`line`，見 §5.1.3；引言由 `si decide` 自逐字稿抽取，驗證規則見 AC-SI-12-4），使「主控偽造核准」可被事後稽核；無決定或無法解析的回覆＝預設拒絕、狀態不變。
 - **AC-SI-12-2** Given 核准後 PROP 內容改變（digest 不同），或決定對應的卡面 digest ≠ 現行 digest（過期卡） When 嘗試進入沙盒 Then 核准失效、決定被拒並重新上卡。
 - **AC-SI-12-3** Given 多張 PROP When 呈現 Then 逐張決定（K=1），不提供「全部核准」；核准者必須是掌舵者本人（MVP 不開放代決，附錄 C.2 #2），DEC 記 `decider`。
-- **AC-SI-12-4**（SD 新增；追溯 DP-04、DP-10；憲法對照：禁令 11、12、鐵律四） Given 一筆待記的 DEC When `si decide` 驗證 Then ① 引言逐字出現在「真人發言」（`origin.kind=="human"`；`sdk`〔`claude -p` 的 prompt，主控可自製〕、`isMeta`、harness 代筆皆不算；出處欄位缺席＝判 NOT-EVALUABLE、不得記為已核准）；② 引言符合 §7.2 回覆語法，且 PROP ID 與動詞和 `--kind` 一致；③ 同一逐字稿中，該發言之前最近一則 assistant 訊息的 text 逐字含該 PROP 現行卡面核心區（工具輸出不算送達）；④ 逐字稿取不到（他機）＝NOT-EVALUABLE、不記 DEC。以合成逐字稿的正控（真人核准→受理）與負控（`sdk` 發言、他 PROP、過期 digest、被改寫的卡面→拒絕）自證；座標＝`sid`＋`line`（1 起算實體行號；不沿用 `seq`）。
+- **AC-SI-12-4**（SD 新增；SCG-0 一審 F-07 補錨定；追溯 DP-04、DP-10；憲法對照：禁令 11、12、鐵律四） Given 一筆待記的 DEC When `si decide` 驗證 Then ① 引言逐字出現在「真人發言」（`origin.kind=="human"`；`sdk`〔`claude -p` 的 prompt，主控可自製〕、`isMeta`、harness 代筆皆不算；出處欄位缺席＝判 NOT-EVALUABLE、不得記為已核准）；② 引言須**錨定**於 §7.2 回覆語法：決定語法位於整則 human 訊息的開頭（去除前後空白後），或獨立成一行且整則訊息只含一個決定行；核准／晉升語法之後不得有任何尾隨文字，否決／退回語法之後只准接一句理由或修改要求；子字串命中不算（動詞前有任何前綴字，例如否定詞，亦不受理）；一則訊息含多個 PROP 的決定，或夾帶卡面引用者，整則不受理（回報「無法解析」，預設拒絕，AC-SI-12-1）；PROP ID 與動詞須和 `--kind` 一致；③ 同一逐字稿中，該發言之前最近一則 assistant 訊息的 text 逐字含該 PROP 現行卡面核心區（工具輸出不算送達）；④ 逐字稿取不到（他機）＝NOT-EVALUABLE、不記 DEC。以合成逐字稿的正控（真人核准→受理）與負控（`sdk` 發言、他 PROP、過期 digest、被改寫的卡面、**否定句**〔「不核准 PROP-SI-007」〕、**疑問句**〔「核准 PROP-SI-007？先等一下」〕、**引用卡面**〔貼回含「決定：核准 ／ 否決…」的卡面〕、**多 PROP 同則訊息**→皆拒絕）自證；座標＝`sid`＋`line`（1 起算實體行號；不沿用 `seq`）。本 repo 的同型先例：Stop hook 否定句誤報（DEF-200-501）。
 ##### FR-SI-13 拒絕紀錄與同型冷卻〔P2｜新建；接既有（dedup、抖動防護）〕
 **追溯**：DP-04、DP-10；既有：SDD 抖動防護 R-9.24.1／9.24.2（`AISDLC_SDD/AISDLC_SDD_v0.30/governance/rules/R-9.24-meta-halting-offline-experiment-phase-l.yaml`）、`select_proposals` 的 dedup。｜**憲法對照**：禁令 14。
 - **AC-SI-13-1** Given 否決或退回 When 記 DEC Then 必含 `reason_class` 與一句理由；「未說明」亦可，但採最嚴冷卻。
@@ -293,14 +299,14 @@
 - **AC-SI-13-3** Given 冷卻被繞過 When 量測 M4 Then 計數 >0 並記 OBS（分類 `bug`）。
 ##### FR-SI-14 提案卡由確定性轉換產出〔P1｜新建；類比既有 R-9.37〕
 **追溯**：DP-04、DP-10；既有類比：`recursion_topology_view` 的 `verify_topology_consistency`（`AISDLC_SDD/CLAUDE.md`:341 禁令 27，渲染須與來源物件同構）。｜**憲法對照**：禁令 27（可審批性不得靠簡化呈現繞過）。
-- **AC-SI-14-1** Given PROP When 產卡 Then 卡面核心三句（症狀／改動／風險與回滾）、diff、digest、證據座標與預算皆由 PROP 欄位確定性轉換而來；提案者自由撰寫的摘要不得取代 diff 本文。
-- **AC-SI-14-2** Given 一張卡 When 反解析卡面欄位 Then 與 PROP 物件逐欄一致（digest、diff 行數、驗證狀態）；不一致的卡不得送達掌舵者。
+- **AC-SI-14-1** Given PROP When 產卡 Then 卡面核心三句（症狀／改動／風險與回滾）、diff、digest、證據座標、預算、觸及檔案數與不在 `target` 內的路徑（AC-SI-07-3）皆由 PROP 欄位與 `rN.patch` 確定性轉換而來；提案者自由撰寫的摘要不得取代 diff 本文。
+- **AC-SI-14-2** Given 一張卡 When 反解析卡面欄位 Then 與 PROP 物件逐欄一致（digest、diff 行數、觸及檔案數、驗證狀態）；不一致的卡不得送達掌舵者。
 - **AC-SI-14-3** Given 一張卡 When 檢視版面 Then 核心區 ≤ 12 行、每項單行且寬度 ≤ `CARD_LINE_MAX`（初值 100，無先例；CJK 算 2，同根層 E501 量法）；完整 diff 與證據以座標附於卡尾（§7.3）。
 
 #### FG-E 套用（P2；僅沙盒，最後一步晉升為人工動作）
 ##### FR-SI-15 沙盒套用（正式面零變更）〔P2｜接既有＋新建〕
 **追溯**：DP-04、DP-07、DP-11；既有：`PlaybookEvolver.apply_evolution` 寫 `evolved_<原檔名>.yaml` 而非原地改（`AutoClaude/autoclaude/evolution/playbook_evolver.py`:302）、SDD `sandbox_runner.py`／R-9.20.1。｜**憲法對照**：鐵律五；根 `CLAUDE.md`〈權限姿態〉。
-- **AC-SI-15-1** Given 已核准 PROP When 套用 Then 只作用於隔離副本（沙盒；例：git worktree 或等價隔離）；沙盒位置不得改變正式面的掃描與棘輪量測結果——沙盒根必須在 repo 樹外、且不得在 `.claude/worktrees/`（R178 實測：樹內 worktree 被全庫掃描鎖算成第二份複本而假紅）；套用前後正式面 `git status --porcelain`、HEAD、`git worktree list` 逐字相同。
+- **AC-SI-15-1** Given 已核准 PROP When 套用 Then 只作用於隔離副本（沙盒；形態由 ADR-SI-04 定，預設 `git archive` 匯出到樹外）；沙盒位置不得改變正式面的掃描與棘輪量測結果——沙盒根必須在 repo 樹外、且不得在 `.claude/worktrees/`（R178 實測：樹內 worktree 被全庫掃描鎖算成第二份複本而假紅）；套用前後正式面 `git status --porcelain`、HEAD、`git worktree list` 逐字相同（任何沙盒形態都不得在正式面新增 worktree 登記；此項同時偵測誤建樹內 worktree）。
 - **AC-SI-15-2** Given 沙盒建立與清理 When 執行 Then 不使用鐵律五擋下的毀滅性 git 形態（`stash`、`reset --hard`、`checkout --`、`clean` 等）；清理＝丟棄副本即回原狀。
 - **AC-SI-15-3** Given 遇 R-9.6 擋寫（路徑子字串含 `docs/01～03` 且視窗綁定 IMPLEMENTATION 中功能鍵）或 harness 分類器拒絕（`.claude/**`） When 套用 Then 不得以改派子代理或換路徑繞過；改由符合條件的視窗處理，或走轉交（FR-SI-07）。
 ##### FR-SI-16 晉升為人工動作與回滾配方〔P2｜新建；接既有（git、set_maturity）〕
@@ -311,7 +317,7 @@
 ##### FR-SI-17 套用預算、停機與不自動恢復〔P2｜接既有〕
 **追溯**：DP-06；既有：R-9.5／R-9.14（ESCALATION 後不自動恢復）、`step_timeout_seconds`（`AutoClaude/autoclaude/utils/config.py`:188）。｜**憲法對照**：禁令 4、6、7、26。
 - **AC-SI-17-1** Given 沙盒套用或驗證超出宣告預算 When 超界 Then 立即停止並收一個 verdict（FAIL 或 NE），不等沙箱（禁令 26：沙箱 hang 收 verdict），並升級人工。
-- **AC-SI-17-2** Given 進入 ESCALATION When 恢復 Then 僅能由人工恢復，迴圈不得自動恢復（禁令 6、7）。
+- **AC-SI-17-2** Given 迴圈進入 SUSPENDED（AC-SI-24-1），或驗證超界而升級人工（AC-SI-17-1） When 要繼續 Then 僅能由掌舵者以 DEC 恢復或決定下一步（SUSPENDED＝`dec(resume)`；超界升級後＝依 §5.1.2 狀態機的人工決定），迴圈與子代理不得自動恢復、自行重試或繞過（禁令 6、7 同精神；重跑上限見 NFR-SI-01）；SUSPENDED 期間 `si prop-new` 拒收（邊界型 M，由事件帳本折疊判定，§9.4）。FSM 自身的 ESCALATION 恢復不在本迴圈內：本迴圈不讀寫 FSM-STATE、不恢復任何 FSM 鍵，該恢復只走既有人工路徑（禁令 1、6、7；邊界型 P，不由本迴圈機械擋）。
 
 #### FG-F 驗證（P2）
 ##### FR-SI-18 審查者≠提案者；外部訊號為主依據〔P2｜接既有＋新建〕
@@ -337,12 +343,12 @@
 #### FG-G 量測（P3）
 ##### FR-SI-22 症狀型指標量測（確定性）〔P3｜新建；類比既有量測器〕
 **追溯**：DP-10；既有：`tools/probe/audit_session.py`（只量不閘，檔頭:8–14；印判準指紋，檔頭:31–32）、`tools/probe/misstep_attribution.py`。｜**憲法對照**：C-13；根 `CLAUDE.md` 12-Rule Rule 5（確定性轉換不用模型）。
-- **AC-SI-22-1** Given 帳本與 git 歷史 When 跑量測腳本 Then 輸出 M1～M5 的值、樣本數、窗定義與「判準指紋」；n < `W_MIN`（初值 5，先例 `q1b_min_n`／`q2_min_n`＝5）者印 NOT-EVALUABLE；腳本不呼叫模型。
-- **AC-SI-22-2** Given 輸出 When 呈現 Then 資訊欄（提案數、決定分佈、OBS 筆數、`closed-by-decision` 數、未驗採納數）與成功指標分區；指標定義變更必改指紋，不同指紋的數字不得並列；量測腳本不接任何閘門。
+- **AC-SI-22-1** Given 帳本與 git 歷史 When 跑量測腳本 Then 輸出 M1～M5 的值、樣本數、窗定義與「判準指紋」；腳本不呼叫模型。NE 判準：M1 為 per-PROP 前後對照（§1.3），NE 護欄量**基線窗內確認再現事件數**（< `W_EVT`＝NOT-EVALUABLE，基線事件數 0 一律 NE），並同時印基線窗事件數與機會列數（機會列數 < `W_MIN` 亦 NE）；因再現而提早關閉的採納窗（`recurred`）照樣可評估，無再現的 `rolled-back` 窗 M1 不評估（仍計 M5）；全域 `W_N` 窗的值只印在資訊欄；M5 同印含與不含 `unverified_ack` 兩值；其餘 n < `W_MIN`（初值 5，先例 `q1b_min_n`／`q2_min_n`＝5）者印 NOT-EVALUABLE。
+- **AC-SI-22-2** Given 輸出 When 呈現 Then 資訊欄（提案數、決定分佈、OBS 筆數、`closed-by-decision` 數、未驗採納數，以及 M2、M3 與全域窗 M1）與成功指標（M1 per-PROP、M4、M5）分區；M5 的兩個值並列於成功指標區，不得只報「不含 `unverified_ack`」者；指標定義變更必改指紋，不同指紋的數字不得並列；量測腳本不接任何閘門。
 - **AC-SI-22-3** Given 提案者 When 運作 Then 任務書不含指標目標值、計算細節與 `params.json` 路徑（迴圈層指標只對掌舵者與量測者呈現；流程型隔離，偵測同 AC-SI-20-4 ②）。
 ##### FR-SI-23 採納後量測窗與回滾偵測〔P3｜新建〕
 **追溯**：DP-04、DP-10；既有：缺陷帳本「再開症狀」體例。｜**憲法對照**：C-12。
-- **AC-SI-23-1** Given 一筆 promoted PROP When 開量測窗 Then 窗以事件界定：自晉升起，到「同目標路徑前綴新立列累計 `W_OPP`（初值 5，無先例）筆」（OBS／DEF 列的證據路徑落在該 PROP `target` 最近公共目錄之下；DEF 表頭無「面」欄，不能比「面」；無路徑的列不計）或「出現再現／回滾」先到者關閉；窗關閉結果記 `clean`／`recurred`／`rolled-back`。
+- **AC-SI-23-1** Given 一筆 promoted PROP When 開量測窗 Then 窗以事件界定：自晉升起，到「機會列」累計 `W_OPP`（初值 5，無先例）筆，或「出現再現／回滾」先到者關閉；窗關閉結果記 `clean`／`recurred`／`rolled-back`。**機會列規則**（採納窗與 M1 的基線窗共用）：非 M 類＝OBS／DEF 新立列，其證據路徑落在該 PROP `target` 路徑集合的最近公共目錄之下（DEF 表頭無「面」欄，不能比「面」；無路徑的列不計）；**M 類**（`target`＝repo 外的邏輯路徑 `memory/<檔名>`，證據路徑幾乎不會落在其前綴下）＝新立列中，其根因鍵（經 `attr.confirm` 確認）與該 PROP 歸因的根因鍵相同，或其證據座標／現象欄引用該記憶條目（檔名或條目標題）者。M1 的基線窗＝同一 PROP 晉升前、同一機會列規則、自再現標記上線後的最近 `W_OPP` 筆機會列（§1.3）。窗未關閉的 PROP 不計入 M5 分母，也不以暫值宣稱 M1（維持 NOT-EVALUABLE）。
 - **AC-SI-23-2** Given 窗內偵測到再現 When 出聲 Then 產生回滾提案卡（不自動回滾）；回滾動作由掌舵者執行，記 DEC。
 ##### FR-SI-24 劣化暫停（邊際報酬遞減）〔P3｜新建〕
 **追溯**：DP-06；既有：SDD `SDD_META_CHURN_MAX`（R-9.24.1）、ESCALATION 不自動恢復（R-9.5）。｜**憲法對照**：禁令 6、7、14。
@@ -359,9 +365,9 @@
 - **AC-SI-26-1** Given 同一（target, 根因鍵）的 add→retire→re-add 循環 When 次數 > `CHURN_MAX`（初值 2，先例 `SDD_META_CHURN_MAX`） Then 不再受理並升級人工。
 - **AC-SI-26-2** Given 已退役工件被再提 When 受理 Then 須附 capability-delta 證據＝退役後新出現、與原證據集不相交的症狀證據；SDD 規則面沿用 `meta_halt_monitor` 把關，其他面由本迴圈檢查。
 ##### FR-SI-27 容量事件觸發退役／合併提案〔P3｜新建；接既有上限〕
-**追溯**：DP-03、DP-09；既有：S-08（`MEMORY.md` 前 200 行或 25KB）、`_MAX_ENTRIES=1000`（`AutoClaude/autoclaude/utils/knowledge_base.py`:31）、preference 10 鍵（`preference_memory_plugin.py`:19）。｜**憲法對照**：C-12（事件驅動、無日曆）。
-- **AC-SI-27-1** Given 有上限的儲存或載入面（記憶索引、KB、偏好注入） When 用量達其上限的 `CAP_FRAC`（初值 0.9，無先例；`MEMORY.md` 寫稿時約為上限的 89%～91%，25KB 換算未查證；人工歸檔後已下降，數值一律以 `si capacity` 現查為準） Then 記憶索引：產生退役／合併提案清單（M 類，逐字歸檔，只提議、不自動刪除）；KB（`_MAX_ENTRIES` 自動汰除，現有 `kb_cache_eviction_count` 指標）與偏好（`IPreferenceStore` 無 delete，唯一 production 寫入點為 `wiring.py:187` 的 config seed）：MVP 只印容量報告並記 OBS，不產退役提案（需引擎碼變更，§9.7 #23）。
-- **AC-SI-27-2** Given 索引檔實際大小超過載入上限（位元組或行數）而仍有條目排在上限之後 When 檢查 Then 視為「截斷風險」缺陷入帳（面＝流程），因為「被截斷」與「已退役」的表徵不同。
+**追溯**：DP-03、DP-09；既有：S-08（`MEMORY.md` 前 200 行或 25KB；官方頁另述 harness 自帶的近上限提醒與超限錯誤回報）、`_MAX_ENTRIES=1000`（`AutoClaude/autoclaude/utils/knowledge_base.py`:31）、preference 10 鍵（`preference_memory_plugin.py`:19）。｜**憲法對照**：C-12（事件驅動、無日曆）。
+- **AC-SI-27-1** Given 有上限的儲存或載入面（記憶索引、KB、偏好注入） When 用量達其上限的 `CAP_FRAC`（初值 0.9，無先例；`MEMORY.md` 寫稿時約為上限的 89%～91%，25KB 換算未查證；人工歸檔後已下降，數值一律以 `si capacity` 現查為準） Then 記憶索引：產生退役／合併提案清單（M 類，逐字歸檔，只提議、不自動刪除）；KB（`_MAX_ENTRIES` 自動汰除，現有 `kb_cache_eviction_count` 指標）與偏好（`IPreferenceStore` 無 delete，唯一 production 寫入點為 `wiring.py:187` 的 config seed）：MVP 只印容量報告並記 OBS，不產退役提案（需引擎碼變更，§9.7 #23）。**與 harness 自帶容量機制的先後與衝突**（S-08；SCG-0 一審 F-05）：harness 在 Claude 寫入索引後自行量測並提醒或報錯，其改寫者（harness 內的 Claude）是不受本迴圈控制的寫入者；兩個機制各自觸發、先後不預設（harness 提醒的觸發門檻本 PRD 未查證），故衝突處置不依賴先後，一律以機械的 pre-image 比對為準——M 類 PROP 的 digest 綁被觸及行的 pre-image，晉升前重驗，不符＝拒絕並重新上卡、不嘗試自動合併，且 CLI 印可貼入的 OBS 草稿列（§9.4，ADR-SI-06）；harness 自行改寫索引的結果（含其因提醒而合併或丟棄條目）不在本迴圈管轄內，只作觀察來源。
+- **AC-SI-27-2** Given 索引檔實際大小超過載入上限（位元組或行數）而仍有條目排在上限之後 When 檢查 Then 視為「截斷風險」缺陷入帳（面＝流程），因為「被截斷」與「已退役」的表徵不同；官方頁另述超限時 harness 的寫入仍成功但回錯誤要求重寫索引（S-08），該錯誤出現過同樣入帳，不得當成「harness 已處理」而略過。
 
 #### FG-I 既有缺口收斂／元層
 ##### FR-SI-28 「演化只提案不套用」由宣稱升為可重跑檢查〔P1｜既有缺口收斂；零新增守衛碼〕
@@ -394,15 +400,17 @@
 context 三段水位與額度四道門檻一律現查（`python tools/session_resume_planner.py --check`、`python tools/lib/quota_policy.py --print-env-example`），本文不複寫百分比。
 
 ### NFR-SI-02: 安全（守衛面與受保護路徑）
-- **NFR-SI-02-1 不可進化面（唯一真相源）**：(i) agent 指令與憲法檔：根／`AISDLC_SDD`／`AutoClaude`／`AgentConsole` 的 `CLAUDE.md`、`maturity: active` 的 `governance/rules/R-*.yaml` 規則本體；(ii) 守衛面：`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、根 `CLAUDE.md`〈守衛面准入〉所列 `tools/lib/` 檔與 `tools/session_resume_planner.py`；(iii) 評估與協定：`evaluator_command`、`knowledge/held-out-corpus/`、評分權重常數、`docs/06_quality/FiveQuestion_Audit_Protocol/`、範本〈🏁〉、量測腳本與指標定義；(iv) 迴圈自身：本 PRD、預算／閘門／停機參數、狀態機、角色任務書範本。**實體 glob**（可測化；機器可讀 SSOT＝`docs/06_quality/SelfImproving_Protocol/params.json` 的 `non_evolvable_globs`，`si prop-new` 前置檢查讀它，散文與 JSON 不一致＝`si check` 紅）：(i) `**/CLAUDE.md`、`AISDLC_SDD/*/governance/rules/R-*.yaml` 中**既有且 `maturity: active`** 者（新增的 `trust_level: proposed` 候選檔不在此列，由 `si prop-new` 讀檔判定）；(ii) `.claude/**`、根 `CLAUDE.md`〈守衛面准入〉所列 `tools/lib/` 檔、`tools/session_resume_planner.py`；(iii) `docs/06_quality/FiveQuestion_Audit_Protocol/**`、`AISDLC_SDD/*/knowledge/held-out-corpus/**`、`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md`、`tools/probe/selfimproving_measure.py`、`docs/06_quality/SelfImproving_Protocol/**`；(iv) 本 PRD、`docs/05_development/SelfImproving_Operations_SOP.md`、`tools/selfimproving.py` 與 `tools/lib/si_*.py`。比對用 `realpath`＋`normcase`（NTFS 大小寫不敏感）。
+- **NFR-SI-02-1 不可進化面（唯一真相源）**：(i) agent 指令與憲法檔：根／`AISDLC_SDD`／`AutoClaude`／`AgentConsole` 的 `CLAUDE.md`、`maturity: active` 的 `governance/rules/R-*.yaml` 規則本體；(ii) 守衛面：各層 `.claude/**`（含 hooks、`settings*.json`〔含 permissions.allow〕、skills）、根 `CLAUDE.md`〈守衛面准入〉所列 `tools/lib/` 檔與 `tools/session_resume_planner.py`；(iii) 評估與協定：`evaluator_command`、`knowledge/held-out-corpus/`、評分權重常數、`docs/06_quality/FiveQuestion_Audit_Protocol/`、範本〈🏁〉、量測腳本與指標定義；(iv) 迴圈自身：本 PRD 與 SI 全部文件、帳本與提案目錄、預算／閘門／停機參數、狀態機、角色任務書範本、SI 腳本；(v) 凍結版本與模板：`AISDLC_SDD` 的非 LATEST 版本目錄（只有 LATEST 可原地改，根 `CLAUDE.md`〈路徑陷阱〉；**所有提案類別適用，不只 R 類**）與 `docs_template/` 模板（模板不可直接改，`AISDLC_SDD/CLAUDE.md` Rule 3）。「不可進化」＝不得成為任何 PROP 的 `target` 或 patch 觸及路徑；SI CLI 自己對事件帳本與 `SelfImproving_Proposals/` 的追加／新建寫入是運轉紀錄、不是提案套用，不受此限（只准追加／新建，改寫由 AC-SI-08-4 偵測）。機器可讀 SSOT＝`docs/06_quality/SelfImproving_Protocol/params.json` 的 `non_evolvable_globs`；`si prop-new`、`si promote` 讀它，散文與 JSON 不一致＝`si check` 紅。
+  - **錨定語意**（SCG-0 一審 F-01）：glob 相對 repo 根（`git rev-parse --show-toplevel` 的 realpath），分隔符先正規化為 `/`；`**` 可吃零段至多段；**不帶 `**/` 前綴者只錨定 repo 根**（例：根錨定的 `.claude/**` 管不到 `AutoClaude/.claude/` 與 `AISDLC_SDD/AISDLC_SDD_v*/.claude/`——修復當下現查 `git ls-files`：tracked 的 `.claude/` 目錄共 33 處＝根、`AutoClaude/`、`AISDLC_SDD/` 與 `AISDLC_SDD/AISDLC_SDD_v*/` 各版，根錨定只涵蓋其中 1 處，故守衛面一律寫 `**/.claude/**`）；比對對象是 patch 內**每一條**路徑（AC-SI-07-3），先 `realpath`（解符號連結）再 `normcase`（NTFS 大小寫不敏感）；路徑逃出該類別的合法根（M 類＝邏輯根 `memory/`；其餘＝repo 根）視同命中。
+  - **實體 glob**：(i) `**/CLAUDE.md`；`AISDLC_SDD/*/governance/rules/R-*.yaml` 中**既有且 `maturity: active`** 者（新增的 `trust_level: proposed` 候選檔不在此列，由 `si prop-new` 讀檔判定）；(ii) `**/.claude/**`、根 `CLAUDE.md`〈守衛面准入〉所列 `tools/lib/` 檔、`tools/session_resume_planner.py`；(iii) `docs/06_quality/FiveQuestion_Audit_Protocol/**`、`AISDLC_SDD/*/knowledge/held-out-corpus/**`、`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md`、`tools/probe/selfimproving_measure.py`、`docs/06_quality/SelfImproving_Protocol/**`；(iv) `docs/01_requirements/SelfImproving_PRD.md`、`docs/05_development/SelfImproving_*.md`、`docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/06_quality/SelfImproving_Event_Ledger.jsonl`、`docs/06_quality/SelfImproving_Proposals/**`、`tools/selfimproving.py`、`tools/lib/si_*.py`；(v) `AISDLC_SDD/AISDLC_SDD_v*/**` 去掉 LATEST（`python AISDLC_SDD/scripts/sdd_version.py` 現查、不寫死版號；查不到＝整個 `AISDLC_SDD_v*/**` 一律視為凍結，fail-closed）、`**/docs_template/**`。
 - **NFR-SI-02-2 受保護路徑**：`.claude/**` 屬 harness 受保護路徑（auto 模式一律交分類器，根 `CLAUDE.md`〈權限姿態〉）；子代理成品一律 staged 到 scratchpad 交主控；被拒一次走人工核准重試，不改派子代理或換路徑繞過。
 - **NFR-SI-02-3 無人值守**：`AUTOSDD_UNATTENDED` 下治理檔唯讀；迴圈在無人值守下僅可執行到「提案」止；人工閘、套用、晉升必須有人；人的逃生口（`AUTOSDD_GOVWRITE_GUARD_OFF`、`AUTOSDD_GIT_GUARD_OFF`）模型碰不到，迴圈不得要求關閉任何守衛。
-- **NFR-SI-02-4 無外聯與最小留存**：運轉期不開網路外聯（禁令 26：外聯須 OPEN-X.x）；證據只存座標、不存原始輸出全文（降低密鑰／PII 外洩面；日誌遮蔽先例 `AutoClaude/autoclaude/utils/redaction.py`）。
+- **NFR-SI-02-4 無外聯與最小留存**：運轉期不開網路外聯（禁令 26：外聯須 OPEN-X.x；邊界型 **P**——任務書約束，無機械物，偵測面＝無專屬機械物，審查者可人工讀逐字稿的工具呼叫但不構成機制；額度守衛對 WebFetch／WebSearch 的限流只是流量節制、不是外聯禁令，不得讀成「被擋」）；證據只存座標、不存原始輸出全文（邊界型 **M**——CLI 只寫 `out_sha256`／`out_bytes`／遮蔽末段，AC-SI-21-1；降低密鑰／PII 外洩面；日誌遮蔽先例 `AutoClaude/autoclaude/utils/redaction.py`）。
 - **NFR-SI-02-5 守衛面准入的誠實劃界**：現有 `_GOV_EXACT` 僅在 `AUTOSDD_UNATTENDED` 下阻斷、僅涵蓋 Write／Edit／NotebookEdit，且不含三份 `CLAUDE.md`、`governance/rules/*.yaml`（`.claude/hooks/block_destructive_git.py`:1423–1472）；本 PRD 不為此新增守衛碼（無暴露證據⇒理論洞 P4），MVP 以流程性邊界達成：提案產物只落沙盒、晉升為人工動作、不可進化面轉交。
 
 ### NFR-SI-03: 可稽核
 - **NFR-SI-03-1** 每個 PROP 可追到 OBS→歸因→PROP→DEC→套用→驗證→量測→退役；斷鏈者不得晉升。
-- **NFR-SI-03-2** ID 不重用、不改號；更正以追加列；已存在列的原地改寫被標 `ROW-MUTATED`（AC-SI-04-3）。
+- **NFR-SI-03-2** ID 不重用、不改號；更正以追加列（遷移以外唯一的更正機制，AC-SI-04-3）；已存在列的原地改寫（自遷移基準 `migration_base_sha` 起算）被標 `ROW-MUTATED`（AC-SI-04-3）。
 - **NFR-SI-03-3** 每筆紀錄含執行者角色與帶 offset 的時間；驗證證據含指令、rc、母體數（FR-SI-21）；追溯完整性由確定性檢查產出（不用模型）。
 
 ### NFR-SI-04: 可逆
@@ -433,7 +441,7 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 - **NFR-SI-09-2** 擷取通路失效可偵測：子代理交卷的「流程摩擦」項目數與入帳 OBS 數對帳（只量、不接閘門；先例 `tools/probe/audit_session.py`）。
 - **NFR-SI-09-3** 迴圈任一階段失敗都留一筆 OBS（分類 `bug`），不得靜默吞掉。
 
-**追蹤鏈**：`NFR-SI-01 → AC-SI-10-2／17-1／24-1`；`NFR-SI-02 → AC-SI-07-1／15-3`；`NFR-SI-05 → AC-SI-20-1／22-3`；`NFR-SI-09 → AC-SI-19-2／20-2`。
+**追蹤鏈**：`NFR-SI-01 → AC-SI-10-2／17-1／24-1`；`NFR-SI-02 → AC-SI-07-1／07-3／15-3`；`NFR-SI-05 → AC-SI-20-1／22-3`；`NFR-SI-09 → AC-SI-19-2／20-2`。
 
 **🔴 人機協作確認點**：[ ] 所有 NFR 已定義 ID　[ ] 預算初值與先例座標可接受　[ ] 安全要求符合守衛面准入與受保護路徑姿態
 
@@ -452,7 +460,7 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 ```text
 [PROP-SI-007] 記憶條目｜retire｜目標：<座標>｜digest：a1b2c3d4｜驗證：PASS／FAIL／NE／未驗
 一、症狀：<一句；含 OBS／DEF 座標與再現次數>
-二、改什麼：<一句；+x／-y 行；觸及比例>
+二、改什麼：<一句；+x／-y 行；觸及比例；觸及檔案數 n；不在 target 內的路徑〔無則 0〕>
 三、風險與回滾：<一句；影響面＋一個動作的回滾配方＋驗證狀態>
 決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求
 --- 以下不計入核心區 ---
@@ -463,10 +471,10 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 ### 8.1 專案里程碑（階段出口一律為症狀型判準；沒有日期、沒有版本號）
 | 階段 | 里程碑 | 交付物 | 出口判準（症狀型；條件全部成立） | 負責人 |
 |------|--------|--------|--------------------------------|--------|
-| **P0** | 觀察帳本＋資料模型（本輪已 dogfood） | §5.1.1 欄位定稿、遷移後的觀察帳本；FR-SI-01～04、29 | (a) 任何視窗新增一筆觀察時不需向掌舵者追問任何必填欄（反症狀：出現「某欄無法填」的觀察即未達）；(b) 全帳本通過欄位與引用檢查；(c) 既有各列處置皆合枚舉且 `orig` 保全；(d) 零筆無座標列、零筆「之後再看」 | 主控（帳本單一窗口）、SD、QA（SCG-0 審查） |
+| **P0** | 觀察帳本＋資料模型（本輪已 dogfood） | §5.1.1 欄位定稿、遷移後的觀察帳本；FR-SI-01～04、29 | (a) 任何視窗新增一筆觀察時不需向掌舵者追問任何必填欄（反症狀：出現「某欄無法填」的觀察即未達）；(b) 自遷移基準 `migration_base_sha` 起，全帳本通過欄位、引用與 `ROW-MUTATED` 檢查（`check` 綠；遷移 commit 本身依 AC-SI-01-3 豁免）；(c) 既有各列處置皆合枚舉且 `orig` 保全；(d) 零筆無座標列、零筆「之後再看」 | 主控（帳本單一窗口）、SD、QA（SCG-0 審查） |
 | **P1** | 歸因＋提案（只提案） | FR-SI-05～11、14、28；PROP 物件與提案卡 | (a) 至少一筆真實（非構造）觀察端到端走到提案卡，且至少一筆屬 M／P／R／D 類（PROP-SI-001、002 屬不可進化面，走轉交，不能充當本條）；(b) 零提案觸及正式面（`git status`／HEAD 逐字對照）；(c) 掌舵者回饋中無 `reason_class=卡面不清` 的退回；(d) FR-SI-28 的可重跑檢查存在且綠 | 子代理（提案者）、主控 |
 | **P2** | 人工閘＋沙盒套用＋驗證 | FR-SI-12、13、15～21 | (a) 至少一筆 M／P／R／D 類真實提案走完「閘→沙盒→驗證→晉升或否決」，DEC 紀錄齊全；(b) 該筆驗證含對照與突變，且突變確實使驗證轉紅（證明驗證有鑑別力）；(c) 至少一次同型再提被冷卻擋下（M4 結構性為 0 的證據）；(d) 正式面零「未經人工閘的變更」（git 歷史與 DEC 對帳）；(e) 回滾配方乾跑通過 | 掌舵者（閘）、審查者（子代理）、主控 |
-| **P3** | 量測＋退役 | FR-SI-22～27；量測腳本 | (a) 量測腳本在真實帳本上跑通，輸出 M1～M5 值、樣本數、窗與判準指紋（樣本不足者印 NOT-EVALUABLE）；(b) 至少一個採納量測窗關閉並入帳（clean／recurred／rolled-back）；(c) 至少一筆退役提案走完人工閘；(d) §1.1 反證條件已檢查並留紀錄（M1 未優於基線者列為 T1 決策項，不自動下線） | 主控、掌舵者 |
+| **P3** | 量測＋退役 | FR-SI-22～27；量測腳本 | (a) 量測腳本在真實帳本上跑通，輸出 M1～M5 值、樣本數、窗與判準指紋（樣本不足者印 NOT-EVALUABLE）；(b) 至少一個採納量測窗關閉並入帳（clean／recurred／rolled-back）；(c) 至少一筆退役提案走完人工閘；(d) §1.1 反證條件已檢查並留紀錄（連續兩個可評估採納窗皆仍復發者列為 T1 決策項，不自動下線；無可評估窗＝NOT-EVALUABLE，記錄缺什麼） | 主控、掌舵者 |
 
 **🔴 人機協作確認點**：[ ] 出口判準為症狀型且無日期　[ ] 負責人已確認　[ ] 里程碑定義清晰
 
@@ -721,8 +729,8 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | **記憶污染／記憶獎勵膨脹**（S-13、S-11、S-22） | 中 | 高 | `knowledge_base` 存結果標籤；`MEMORY.md` 可人審 | FR-SI-02、09、27；K=1 閘 | Claude Code auto memory 由 harness 自寫、不在本迴圈控制內（誠實劃界）；只能事後稽核（只讀） | 掌舵者 |
 | **Misevolution／工具與技能供應鏈**（S-22、S-09、S-10） | 低 | 高 | Rule 9；hooks deny 連 `bypassPermissions` 都擋（S-10）；治理檔唯讀守衛 | NFR-SI-02；FR-SI-07（skill／hook 一律轉交） | 新 skill／hook 啟用前的掃描流程本輪未確認存在（SOP II-6） | 掌舵者 |
 | **信心懸崖**（S-25：裁判可靠度隨迴圈衰退） | 中 | 中 | K=1 人工閘；`meta_halt_monitor` | FR-SI-24（劣化暫停）、19（對照／突變，不靠裁判預測） | 後期提案的裁判可靠度仍可能衰退；以回滾／再現作落後訊號 | 掌舵者 |
-| **提案疲勞（審閱瓶頸）** | 中 | 中 | — | FR-SI-10（≤3）、§7 三句話卡、預設拒絕（不審＝不變） | 長期不審則迴圈靜止（安全但無價值）；M1 會顯示無改善，走 §1.1 反證路徑 | 掌舵者 |
-| **樣本過小致指標常態 NOT-EVALUABLE** | 高 | 中 | NOT-EVALUABLE 體例（五問協定） | FR-SI-22（印樣本數；不以小樣本宣稱） | P3 出口可能長期達不到 ⇒ 價值主張長期「未證」；是否維持由掌舵者決定 | 量測者 |
+| **提案疲勞（審閱瓶頸）** | 中 | 中 | — | FR-SI-10（≤3）、§7 三句話卡、預設拒絕（不審＝不變） | 長期不審則迴圈靜止（安全但無價值）；無採納窗可評估＝M1 NOT-EVALUABLE（不是「顯示無改善」），價值主張長期未證，見下列「樣本過小」列與 §1.1 | 掌舵者 |
+| **樣本過小致指標常態 NOT-EVALUABLE** | 高 | 中 | NOT-EVALUABLE 體例（五問協定） | FR-SI-22（印樣本數與基線窗事件數；不以小樣本宣稱；M1 的 NE 護欄量事件數，§1.3） | 基率≈0（§1.3 檢定力說明）⇒ 多數採納窗的 M1 為 NOT-EVALUABLE；P3 出口 (b)(d) 可能長期達不到 ⇒ 價值主張長期「未證」；是否維持由掌舵者決定 | 量測者 |
 | **額度耗盡**（C-16） | 高 | 中 | 額度守衛、`--pace` | NFR-SI-07 | 研究型 Web 工具節流已被實測成瓶頸（OBS-SI-005）；運轉期不使用 Web（§3.2） | 主控 |
 
 ### 10.2 依賴項目
@@ -750,7 +758,7 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | 10 | 根層改進軌道與缺陷帳本 | `docs/04_planning/AutoSDD_improving_NN.md`（軌道①）、`docs/06_quality/AutoSDD_Defect_Log.md` | 缺陷／摩擦→DEF 列，附「再開症狀」文字 | 人工單一窗口入帳；休眠範本〈🏁〉T1～T4 | 每列 ≤700 bytes；crossref 閘 | 復發連結無結構化欄；發現日期無時分 → FR-SI-01、04、06 |
 | 11 | 根層五問審計協定 | `docs/06_quality/FiveQuestion_Audit_Protocol/`、`docs/06_quality/FiveQuestion_Round_Ledger.jsonl` | hook 行為症狀量測 | 症狀閘＋三態；家族計數降為資訊欄 | `params.json` | （參考體例）→ FR-SI-19、22 |
 | 12 | 根層事後量測器 | `tools/probe/audit_session.py`、`tools/probe/misstep_attribution.py` | 逐字稿／帳本的違規與失誤歸因（關鍵詞啟發式，量級可信） | 只量不閘（`audit_session.py` 檔頭:8–14） | — | 歸因／量測的既有載體 → FR-SI-05、22 |
-| 13 | Claude Code 記憶檔 | `~/.claude/projects/<slug>/memory/`（`MEMORY.md`＋記憶檔；不在 repo 內） | Claude 依修正與偏好自寫筆記（S-08）；人可編輯／刪除 | 每次對話載入索引（有上限）；視為 context 非強制設定 | 寫稿時 `MEMORY.md` 22,755 bytes／113 行（目錄共 125 個 .md 檔含索引；本稿量測）；2026-10-19 主控人工歸檔後 22,755→15,558 bytes／113→76 行（OBS-SI-016，PROP-SI-003 的手動先例；§9.0 Q5） | 無結果標籤、無退役機制（歸檔靠人工）；依寫入來源過濾未見；auto memory 不在迴圈控制內 → FR-SI-02、09、27 |
+| 13 | Claude Code 記憶檔 | `~/.claude/projects/<slug>/memory/`（`MEMORY.md`＋記憶檔；不在 repo 內） | Claude 依修正與偏好自寫筆記（S-08）；人可編輯／刪除 | 每次對話載入索引（有上限）；視為 context 非強制設定 | 寫稿時 `MEMORY.md` 22,755 bytes／113 行（目錄共 125 個 .md 檔含索引；本稿量測）；2026-10-19 主控人工歸檔後 22,755→15,558 bytes／113→76 行（OBS-SI-016，PROP-SI-003 的手動先例；§9.0 Q5） | 無結果標籤、無退役機制（歸檔靠人工）；harness 自帶近上限提醒與超限錯誤回報（S-08；寫入者不受控）；依寫入來源過濾未見；auto memory 不在迴圈控制內 → FR-SI-02、09、27 |
 | 14 | Claude Code hooks／skills | 根 `.claude/hooks/`、`.claude/settings*.json`；各子專案 `.claude/skills/` | hooks＝確定性控制（deny 連 bypassPermissions 都擋，S-10）；skills 由 Claude 自建／改寫（S-09） | 守衛面准入；治理檔唯讀守衛 | `allowed-tools`、`` !`cmd` `` 風險（S-09） | 新 skill／hook 啟用前掃描流程未確認存在 → FR-SI-07（轉交） |
 | 15 | AgentConsole | `AgentConsole/CLAUDE.md`:15；`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md` | BRD／PRD 匯入、人工 signoff 硬閘、FSM 唯讀顯示 | SDD FSM 寫入一律經 `FSMRuntime` CLI 子行程 | — | MVP 不整合提案卡（⏸，§8.3）→ FR-SI-12 的既有人工閘 |
 | 16 | 休眠重評與延後體例 | `docs/04_planning/AutoSDD_improving_116.md` §9、`AutoSDD_improving_115.md` §5.2、PRD v2.1 §16 | 每輪末歸格＋延後清單附可觀測再開症狀 | 只准三分類；四格結案帳 | — | §8 階段出口沿用此體例 |
@@ -764,7 +772,7 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | G-SI-04 AutoClaude 演化提案與根層改進迴圈皆無 held-out／獨立評估器 | SOP II-6 | FR-SI-20 | 新建（通用化 SDD 機制） |
 | G-SI-05 Playbook 與規則層無通用 delta 策展 | SOP II-6 | FR-SI-09 | 新建 |
 | G-SI-06 無邊際報酬遞減停機規則 | SOP II-6 | FR-SI-24 | 新建 |
-| G-SI-07 記憶面無結果標籤／退役機制；索引曾逼近載入上限（2026-10-19 主控人工歸檔後 22,755→15,558 bytes／113→76 行，PROP-SI-003 的手動先例） | `MEMORY.md`（本機，不在 repo）；S-08；OBS-SI-016；§9.0 Q5 | FR-SI-02、09、27 | 新建 |
+| G-SI-07 記憶面無結果標籤／退役機制；索引曾逼近載入上限（2026-10-19 主控人工歸檔後 22,755→15,558 bytes／113→76 行，PROP-SI-003 的手動先例）；harness 另有自帶的近上限提醒與超限錯誤回報（S-08；SCG-0 一審 F-05），其寫入者不受控，與 SI 容量事件並存（AC-SI-27-1） | `MEMORY.md`（本機，不在 repo）；S-08；OBS-SI-016；§9.0 Q5 | FR-SI-02、09、27 | 新建 |
 | G-SI-08 新 skill／hook 啟用前掃描流程未確認存在 | SOP II-6 | FR-SI-07（轉交；不新增守衛碼） | 登記（理論洞） |
 | G-SI-09 可進化／不可進化面缺機械分界（`_GOV_EXACT` 僅無人值守阻斷、僅涵蓋 Write／Edit／NotebookEdit，不含三份 `CLAUDE.md`、`governance/rules/*.yaml`） | `.claude/hooks/block_destructive_git.py`:1423–1472 | FR-SI-07、15（流程性邊界） | 登記（理論洞；守衛面准入） |
 | G-SI-10 復發連結無結構化欄；DEF 發現日期無時分 | `AutoSDD_Defect_Log.md`:70（欄位列）、DEF-200-551 列 | FR-SI-01、06、22 | 新建（OBS 側）；DEF 側欄位變更須掌舵者裁決（附錄 C.2 #3） |
@@ -818,8 +826,9 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | 觀察（OBS）／提案（PROP）／決定（DEC） | OBS＝帶座標的一句症狀記錄，不取代 DEF 缺陷帳本；PROP＝起始狀態必為 `proposed` 的改進物件，產生者無正式面寫入權；DEC＝掌舵者對 PROP 的人工決定紀錄，綁 digest |
 | 運轉／再開症狀／容量事件 | 運轉＝由啟動事件起、到該次各提案皆落入終態止的一次迴圈執行（非日曆週期）；再開症狀＝一句可觀測事件，成立時重新啟動某延後項，不得含輪號、日期；容量事件＝有上限的儲存用量達 `CAP_FRAC`，觸發退役／合併提案 |
 | 歸因／根因鍵／復發 | 歸因＝把觀察映射到 DEF／OBS／規則／Playbook 步驟／文件／記憶條目的座標清單（不含自評分數）；根因鍵＝`<面>/<機制>` 短字串，由歸因者提出、審查者確認；復發（再現）＝已結列所防症狀再次發生且經審查者確認 |
+| 機會列／採納窗／基線窗 | 機會列＝同目標前綴（M 類：同根因鍵或引用同條目）的新立 OBS／DEF 列；採納窗＝晉升後累計 `W_OPP` 筆機會列或再現／回滾先到者；基線窗＝同一 PROP 晉升前、同規則的最近 `W_OPP` 筆機會列（AC-SI-23-1；M1 以兩窗前後對照，§1.3） |
 | 暴露度／守衛面 | 暴露度＝P2 的必要條件：a 掌舵者真機回報／b 非構造性逐字稿／c 真實語料重放命中（`severity.md`〈暴露度〉）；守衛面＝根 `CLAUDE.md`〈守衛面准入〉所列 `.claude/hooks/**`、`.claude/settings*.json`、指定 `tools/lib/` 檔與 `tools/session_resume_planner.py` |
-| 不可進化面／可進化面／轉交 | 不可進化面＝NFR-SI-02-1 清單，本迴圈對其零寫入；可進化面＝M 記憶條目／P Playbook 片段／R SDD 規則草案／D 非治理文件 diff；轉交（handoff）＝目標在不可進化面時，把提案交給既有人工通道（DEF／R 系列／T1／PRD 修訂） |
+| 不可進化面／可進化面／轉交 | 不可進化面＝NFR-SI-02-1 清單（含凍結版本目錄與模板；以 PROP 的 `rN.patch` 全部路徑逐一比對），本迴圈不得以 PROP 對其寫入（SI CLI 自己的運轉紀錄除外）；可進化面＝M 記憶條目／P Playbook 片段／R SDD 規則草案／D 非治理文件 diff；轉交（handoff）＝目標或 patch 任一路徑在不可進化面時，把整張提案交給既有人工通道（DEF／R 系列／T1／PRD 修訂） |
 | K=1／digest | K=1＝逐項人工核准，一個決定對應一個 PROP、不批次；digest＝PROP 內容摘要（演算法由 SD 定），核准綁定此值、內容變動即失效 |
 | 沙盒／晉升／回滾配方 | 沙盒＝與正式面隔離的副本，丟棄即回原狀；晉升＝把已驗證的沙盒變更合入正式面，必為人工動作；回滾配方＝一個動作即可回到採納前的指示（git revert、逐行反向 patch、刪檔、`set_maturity` 退回；前置快照僅稽核副本，AC-SI-16-2） |
 | 對照／突變／held-out | 對照／突變＝基線重現症狀、套用後消失、弱化後再現，缺一則驗證無鑑別力；held-out＝提案者看不到的評估資料與指令，由提案者以外角色凍結 |
@@ -830,7 +839,7 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 
 ### 13.2 參考資料
 - **上游與帳本**：SOP `docs/05_development/SelfImproving_Research_Methodology_SOP.md`；觀察帳本 `docs/06_quality/SelfImproving_Observation_Ledger.md`。
-- **研究來源（只引 SOP 來源表 S-NN；層級 V1／V2／V3 與 URL 見 SOP II-3；本 PRD 不引用任何來源的量化結果——V2 數字是小模型轉述，引用前須開原頁面核對）**：S-01 Reflexion；S-02 Self-Refine；S-03 Large Language Models Cannot Self-Correct Reasoning Yet；S-05 Voyager；S-06 Agentic Context Engineering；S-07 Effective context engineering for AI agents；S-08 Claude Code 記憶官方文件；S-09 skills 官方文件；S-10 hooks 官方文件；S-11 Memory Reward Inflation；S-12 When Continual Learning Moves to Memory；S-13 MemoryGraft；S-14 Coding Agents are Strong Prompt Optimizers；S-15 MAS-PromptBench；S-16 ADAS；S-17 Darwin Gödel Machine；S-18 AlphaEvolve；S-19 Ouroboros；S-20 Scaling Laws for Reward Model Overoptimization；S-21 Categorizing Variants of Goodhart's Law；S-22 Your Agent May Misevolve；S-23 PACE；S-24 Self-Designed Evaluators and Warm Memory；S-25 Rehearse；S-26 Building effective agents；S-27 Practices for Governing Agentic AI Systems；S-28、S-29 綜述（地圖用）。S-04、S-30 為旁證、無 DP 去處，本 PRD 未引用。
+- **研究來源（只引 SOP 來源表 S-NN；層級 V1／V2／V3 與 URL 見 SOP II-3；本 PRD 不引用任何來源的量化結果——V2 數字是小模型轉述，引用前須開原頁面核對）**：S-01 Reflexion；S-02 Self-Refine；S-03 Large Language Models Cannot Self-Correct Reasoning Yet；S-05 Voyager；S-06 Agentic Context Engineering；S-07 Effective context engineering for AI agents；S-08 Claude Code 記憶官方文件；S-09 skills 官方文件；S-10 hooks 官方文件；S-11 Memory Reward Inflation；S-12 When Continual Learning Moves to Memory；S-13 MemoryGraft；S-14 Coding Agents are Strong Prompt Optimizers；S-15 MAS-PromptBench；S-16 ADAS；S-17 Darwin Gödel Machine；S-18 AlphaEvolve；S-19 Ouroboros；S-20 Scaling Laws for Reward Model Overoptimization；S-21 Categorizing Variants of Goodhart's Law；S-22 Your Agent May Misevolve；S-23 PACE；S-24 Self-Designed Evaluators and Warm Memory；S-25 Rehearse；S-26 Building effective agents；S-27 Practices for Governing Agentic AI Systems；S-28、S-29 綜述（地圖用）。S-04 已升 V2（QA 一審開頁）、作者 6 人，支撐 DP-02／DP-08 旁證；S-30 為旁證、無 DP 去處；二者皆不入 FR 追溯，本 PRD 不以其立論。
 - **憲法**：`AISDLC_SDD/CLAUDE.md` Rule 9〈絕對禁令〉1～27 與〈核心機制速查〉R-9.20～9.37；根 `CLAUDE.md`〈守衛面准入〉〈鐵律一～七〉〈權限姿態〉〈三條改進軌道〉；`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md`〈🏁〉；`docs/06_quality/FiveQuestion_Audit_Protocol/`（`README.md`、`severity.md`、`params.json`）。
 - **既有機制與體例**：§11.1 各列座標；`docs/06_quality/AutoSDD_Defect_Log.md`；`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` §16；`docs/04_planning/AutoSDD_improving_115.md` §5.2、`AutoSDD_improving_116.md` §9。
 
@@ -838,9 +847,11 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | 日期 | 版本 | 變更內容 | 變更人 |
 |------|------|---------|--------|
 | 2026-10-19 | v0.1（Draft） | 初版：依掌舵者 T1 與 SOP 起草 Stage-1 上位規格（Brownfield） | SA 棒（Sonnet 5.5） |
-| 2026-10-19 | v0.2（Draft） | SD／Architect 棒：填寫 §9（元件 C1～C15、ADR-SI-01～09、§9.0 查證 Q1～Q10、§9.7 審閱紀錄 27 處）；審閱並改動 §5／§6（AC 72→76：新增 AC-SI-08-4、10-3、12-4、20-4）；§5.1 補 JSONL 事件帳本載體與 RUN／ATT 記述 | SD 棒（Sonnet 5.5） |
+| 2026-10-19 | v0.2（Draft） | SD／Architect 棒：填寫 §9（元件 C1～C15、ADR-SI-01～09、§9.0 查證 Q1～Q10、§9.7 審閱紀錄 28 處〔初版 27 處，#28 於 6c23495d 補入〕）；審閱並改動 §5／§6（AC 72→76：新增 AC-SI-08-4、10-3、12-4、20-4）；§5.1 補 JSONL 事件帳本載體與 RUN／ATT 記述 | SD 棒（Sonnet 5.5） |
 | 2026-10-19 | v0.3（Draft） | 主控裁決（授權依據見附錄 C.2 表頭）：C.2 #5 修訂（OBS 維持 Markdown；ATT／PROP／DEC／APP／MEA／RUN 自 P1 起用 JSONL 事件帳本）、新增 #6～#9（SI 白名單自持、不加引擎閘、歸檔型提案豁免觸及比例、DEC 只認 `human` 出處） | 主控（代掌舵者決策） |
 | 2026-10-19 | v0.4（Draft） | SA 連動修改（只動連動處）：§1.2／§11.1／§11.2 的 MEMORY.md 數字與「未查證→已查證」（§9.0 Q1、Q2、Q5）；§1.3 M1 補歷史基線 NOT-EVALUABLE 與前瞻窗（OBS-SI-027）；§3.3／§8.3 新增 ⏸ F-SI-105（OBS-SI-024）並補註 F-SI-103 的載體現況；§12.1 #6 回滾備註對齊 AC-SI-16-2；附錄 C.1 補帳本後續裁決至 OBS-SI-030；C.2 改寫為已裁決表（附錄 C 標題同步去掉「待裁決」）；§9.5 ADR-SI-02／03／06／07 的待裁決標記改為已裁決 | SA 棒（Sonnet 5.5） |
+| 2026-10-19 | v0.4.1（Draft） | SD 殘留清理（commit 6c23495d）：待裁決標記與「建議補入」等現在式改寫清零、§13.1 回滾配方、AC-SI-28-2 改引註解字樣、AC-SI-09-2 歸檔型豁免與 §9.7 #28、檢核表現況 | SD 棒（續棒；主控提交） |
+| 2026-10-19 | v0.5（Draft） | SA 修復棒（SCG-0 一審 FAIL，報告 `docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md`：P2＝3、P3＝18、P4＝7；非 §9 部分，§9 由 SD 修；AC 76→77）：F-01 patch 全路徑比對（新增 AC-SI-07-3；NFR-SI-02-1 錨定語意與 glob 補齊；AC-SI-07-1、11-1、14-1／14-2、§5.1.2、§3.2、詞彙表、附錄 B 同步）；F-02 M1 改 per-PROP 前後對照、NE 護欄量事件數（`W_EVT`）、補檢定力說明（§1.1、§1.3、AC-SI-22-1／22-2、23-1、§8.1 P3、§10.1）；F-03 遷移與原地改寫偵測以 `migration_base_sha` 對齊、更正機制統一為追加更正列（AC-SI-01-3／04-3、§8.1 P0、NFR-SI-03-2）；F-04 C.2 授權引句與範圍、C.1 補座標；F-05 harness 容量機制（§1.2、§11.1 列 13、G-SI-07、AC-SI-27-1／27-2）；F-07 AC-SI-12-4 錨定；F-08 AC-SI-17-2；F-09 邊界型（§2.1.1、NFR-SI-02-4、AC-SI-10-2）；F-10 AC-SI-02-1 擴及各類；F-12 AC-SI-23-1 M 類窗；F-13 M1 量法；F-14 M2／M3 降為資訊欄、M5 兩值並列；F-18 計數與變更記錄；F-19 附錄 A 強度欄同步 SOP II-5 一審後重判；F-20 §13.2 S-04；F-21 §3.2 與附錄 B（R-9.22）；順手 F-23（AC-SI-15-1）；P4 其餘（F-22、24～28）登記不改 | SA 棒（Sonnet 5.5） |
 
 ## 🔗 14. 文檔追蹤鏈 (Traceability)
 ### 上游文檔
@@ -861,20 +872,20 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 - **追蹤鏈範例**：`DP-04 → FR-SI-12 → AC-SI-12-1 → （FRD BR）→ TCS → TC`；`T1 第 3 點 → FR-SI-29 → AC-SI-29-1 → OBS-SI-NNN → DEF-<id>`。
 
 ## 附錄 A　追溯矩陣（DP → FR-SI → 既有機制／新建）
-每條 FR 的 DP／既有機制追溯見 §5.2 各條「追溯」行；FR-SI-03、04、29 以既有機制為主（C-12、缺陷帳本治理、T1 原文第 3、4 點）。強度與來源取自 SOP II-5；SOP 該表「PR」欄由本表「FR-SI」欄填寫（PR＝FR-SI-NN）。
+每條 FR 的 DP／既有機制追溯見 §5.2 各條「追溯」行；FR-SI-03、04、29 以既有機制為主（C-12、缺陷帳本治理、T1 原文第 3、4 點）。強度與來源取自 SOP II-5：強度欄為**一審後重判值**（強→中：DP-01、04、05、06、09、10，標「一審後重判；原強」；其餘維持），組別與理由見 SOP II-5〈強度重判表〉，本表不複寫、不引行號；SOP 該表「PR」欄由本表「FR-SI」欄填寫（PR＝FR-SI-NN）。
 
 | DP | 原則（摘自 SOP） | 主要來源 | 強度 | FR-SI | 既有機制／新建 |
 |----|-----------------|---------|------|-------|---------------|
-| DP-01 | 外部可驗證訊號優先於自評，自評只作輔助 | S-03、S-26、S-24、S-11、S-06、S-17 | 強 | 18、19 | 有（`evaluator_command`、R-9.27、鐵律四）；通用化到 M／D 類＝新建 |
+| DP-01 | 外部可驗證訊號優先於自評，自評只作輔助 | S-03、S-26、S-24、S-11、S-06、S-17 | 中（一審後重判；原強） | 18、19 | 有（`evaluator_command`、R-9.27、鐵律四）；通用化到 M／D 類＝新建 |
 | DP-02 | 改進落成人類可讀、可版本化、可刪除的工件，不碰權重 | S-05、S-06、S-08、S-09、S-16、S-18 | 強 | 08、16、25 | 有（KB、偏好、`MEMORY.md`、skills、git）→ 接既有 |
 | DP-03 | 增量 delta 與逐條策展，禁整份重寫，容量有界 | S-06、S-07、S-08、S-12 | 中 | 09、25、27 | 部分（preference 10 鍵、`_MAX_ENTRIES`、`NoBigBangValueRewrite`）；Playbook／規則層策展＝新建 |
-| DP-04 | 提案—驗證—採納三段分離；採納只經人工 K=1、可回滾 | S-17、S-19、S-27、S-26、S-23、S-08 | 強 | 08、12～16、23、26、28 | 有（`evolution_plugin` NO-OP、`translation_learner`、R-9.22、Console 簽核）→ 接既有；統一閘＝新建 |
-| DP-05 | 評估器對生成器隔離；評估器不得由被評估者自行發明或修改 | S-17、S-20、S-11、S-21、S-24 | 強 | 11、18、20 | 部分（SDD R-9.27～9.32 有；AutoClaude／根層無）→ 新建（通用化） |
-| DP-06 | 迴圈有界，且有邊際報酬遞減的停止規則 | S-25、S-17、S-26、S-10、S-23 | 強 | 03、10、17、24 | 有（`SDD_*_BUDGET`、Gap-042／048、ESCALATION、額度守衛）；停止規則（劣化暫停）＝新建 |
+| DP-04 | 提案—驗證—採納三段分離；採納只經人工 K=1、可回滾 | S-17、S-19、S-27、S-26、S-23、S-08 | 中（一審後重判；原強） | 08、12～16、23、26、28 | 有（`evolution_plugin` NO-OP、`translation_learner`、R-9.22、Console 簽核）→ 接既有；統一閘＝新建 |
+| DP-05 | 評估器對生成器隔離；評估器不得由被評估者自行發明或修改 | S-17、S-20、S-11、S-21、S-24 | 中（一審後重判；原強） | 11、18、20 | 部分（SDD R-9.27～9.32 有；AutoClaude／根層無）→ 新建（通用化） |
+| DP-06 | 迴圈有界，且有邊際報酬遞減的停止規則 | S-25、S-17、S-26、S-10、S-23 | 中（一審後重判；原強） | 03、10、17、24 | 有（`SDD_*_BUDGET`、Gap-042／048、ESCALATION、額度守衛）；停止規則（劣化暫停）＝新建 |
 | DP-07 | 保留譜系與回滾；探索型改進保留多分支 | S-17、S-18、S-19、S-08（S-16 同組） | 中 | 08、15、16 | 有（git、Copy-on-Evolve、`EvolutionMetadata`）；「探索型多分支」不在 MVP |
 | DP-08 | 提案以真實失敗軌跡與帳本列為輸入（抽象化、帶結果標籤） | S-01、S-14、S-06、S-05 | 強 | 01、02、04、05、09、29 | 有（`translation_learner`、KB、缺陷帳本、觀察帳本）→ 接既有 |
-| DP-09 | 記憶只存帶真實結果標籤的條目，可審計並防毒化 | S-11、S-08、S-13、S-22、S-25 | 強 | 02、09、27 | 部分（KB 結果標籤、`MEMORY.md` 可人審）；來源過濾＝新建 |
-| DP-10 | 成效以真實症狀驗收，不以自評分數、審查產出數、貪婪接受當成功 | S-20、S-21、S-17、S-11（機制 S-23） | 強 | 06、13、14、19、21、22、23 | 部分（症狀閘、再開症狀）；指標量測腳本＝新建 |
+| DP-09 | 記憶只存帶真實結果標籤的條目，可審計並防毒化 | S-11、S-08、S-13、S-22、S-25 | 中（一審後重判；原強） | 02、09、27 | 部分（KB 結果標籤、`MEMORY.md` 可人審）；來源過濾＝新建 |
+| DP-10 | 成效以真實症狀驗收，不以自評分數、審查產出數、貪婪接受當成功 | S-20、S-21、S-17、S-11（機制 S-23） | 中（一審後重判；原強） | 06、13、14、19、21、22、23 | 部分（症狀閘、再開症狀）；指標量測腳本＝新建 |
 | DP-11 | 自我進化本身要做安全評估；新 skill／hook／工具啟用前掃描並人審；治理檔不在可進化面 | S-22、S-09、S-10、S-13、S-17、S-27 | 強 | 07、11、15；NFR-SI-02 | 有（Rule 9、hooks deny、治理檔唯讀守衛、守衛面准入）→ 接既有；掃描流程＝轉交（登記） |
 | DP-12 | harness 可成為優化對象，但一律 diff 提案＋凍結快照評估後才活化；探索／評估流程本身不可改 | S-16、S-19、S-14、S-29、S-15 | 中 | 07、11、28、29 | 部分（INJECT_STEP／SPLIT_STEP／REVISE_EVALUATOR 提案；無 harness 整體 diff 管線）→ MVP 只落地「評估與迴圈自身不可改」半條；harness 整體 diff 提案＝⏸ F-SI-104 |
 
@@ -884,11 +895,11 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | 禁令 1、3（繞過 `FSMRuntime` 讀寫 FSM-STATE；IMPLEMENTATION 期間寫 `docs/01~03`；R-9.6） | 迴圈讀 FSM 狀態；D／R 類目標可能落在 `docs/01～03` | 只讀 `show`、寫入一律經 CLI、不新增 FSM 狀態（§12 #4）；不繞過 R-9.6 擋寫，改由符合條件的視窗處理或轉交（AC-SI-15-3） |
 | 禁令 4、5、6、7（retry 超限；Token ≥95% 仍工作；ESCALATION 後自動恢復；structural 強行 auto-recovery） | 提案修訂、驗證重跑、扇出耗額度、停機 | `MAX_REVISIONS`、重跑 ≤ 2、超界升級人工（NFR-SI-01；AC-SI-10-2、10-3、17-1）；扇出前 `--pace`（NFR-SI-07）；ESCALATION／SUSPENDED 後僅人工恢復（AC-SI-17-2、24-1） |
 | 禁令 8、9、10（`_HAPPY_PATH`／TLA+；觀測態入 Terminals；proposed／external 規則阻塞 SCG） | 是否新增狀態；R 類草案 | 不新增 FSM 狀態、PROP 狀態機只在帳本欄位（不觸 `_HAPPY_PATH`，N/A）；AC-SI-08-3：`proposed` 不阻塞 SCG |
-| 禁令 11、12、13（自動退役 active 規則；自動套用 spec patch；planner 自動選目標、localizer 自動改 spec） | 退役提案；R／D 類 diff；歸因會指向 spec | FR-SI-25（系統只提議、SDD 規則退役必經 `set_maturity`）；FR-SI-12、16（K=1、晉升為人工動作；AC-SI-12-4 引言驗證）；FR-SI-05（歸因只指向座標、不改檔） |
+| 禁令 11、12、13（自動退役 active 規則；自動套用 spec patch；planner 自動選目標、localizer 自動改 spec） | 退役提案；R／D 類 diff；歸因會指向 spec | FR-SI-25（系統只提議、SDD 規則退役必經 `set_maturity`）；FR-SI-12、16（K=1、晉升為人工動作；AC-SI-12-4 引言驗證）；FR-SI-05（歸因只指向座標、不改檔）；AC-SI-07-3（patch 全部路徑逐一比對不可進化面）。**R-9.22**（SPEC-PATCH 草案為 proposed、絕不自動套用、經 HUMAN_PENDING）：本迴圈的 K=1 晉升是人工動作而非自動套用，故不違反；但 K=1 不是 FSM 的 HUMAN_PENDING 態，所以 D 類不得以 K=1 直接改 `docs/01～03` 規格文件本體，規格變更仍走 SPEC-PATCH＋HUMAN_PENDING（§3.2；SOP C-02） |
 | 禁令 14、15、16（繞過 `meta_halt_monitor`／無 capability-delta 重學／重放命中率自動 approve；組合排程與最佳化搜尋無界） | 退役與再採納、重放驗證、候選生成 | FR-SI-26；AC-SI-19-3；不做組合最佳化搜尋、候選數上限 FR-SI-10（15、16 其餘 N/A） |
 | 禁令 17～25（自評放水、tuner 讀寫 held-out；維度／詞彙／算子／字母／深度／互遞迴自我發明；末項：未獲對抗分離證明即採納自我發明評估器） | 評估、指標與提案類別邊界 | FR-SI-18、20（含 AC-SI-20-4 暴露偵測）；NFR-SI-05；§3.2 範圍外；FR-SI-11（評估器變更不受理）；AC-SI-29-2（`loop-self` 轉交） |
 | 禁令 26、27（接地 fail-closed、沙箱 hang 收 verdict、外聯須 OPEN-X.x；視覺化自動 signoff／簡化呈現繞過） | 沙盒驗證、量不到、提案卡呈現 | AC-SI-19-2、17-1；NFR-SI-02-4、09-1；FR-SI-14（卡面確定性轉換、反解析比對） |
-| 守衛面准入（R197：量、不挖）、〈權限姿態〉（`.claude/**` 受保護路徑；不改派子代理繞過）、PRD v2.1 §15.5 紅線 10、`severity.md`〈暴露度〉 | 不可進化面、轉交與沙盒目標、無人值守、守衛面觀察的嚴重度 | FR-SI-01（`暴露` 欄）、07；NFR-SI-02-2、02-3、02-5；AC-SI-15-3；本 PRD 零新增守衛碼，無暴露證據一律理論洞 P4 |
+| 守衛面准入（R197：量、不挖）、〈權限姿態〉（`.claude/**` 受保護路徑；不改派子代理繞過）、PRD v2.1 §15.5 紅線 10、`severity.md`〈暴露度〉 | 不可進化面、轉交與沙盒目標、無人值守、守衛面觀察的嚴重度 | FR-SI-01（`暴露` 欄）、07（含 AC-SI-07-3）；NFR-SI-02-1～02-5；AC-SI-15-3；本 PRD 零新增守衛碼，無暴露證據一律理論洞 P4 |
 | 鐵律四（宣稱附當回合輸出） | 驗證與指標宣稱 | FR-SI-21；AC-SI-08-4、12-4 |
 | 鐵律一～三、五、六（Windows 載具、絕對路徑、跨平台自問、毀滅性 git、壞等待形態） | 新腳本與欄位、沙盒建立／清理、背景任務 | NFR-SI-06；AC-SI-15-2 |
 | 鐵律七（並行派工前切鎖持有面；四點檢查表） | 角色分離與帳本寫入 | FR-SI-18（複審唯讀）；角色矩陣（帳本單一窗口）；附錄 C.1 串行裁決 |
@@ -897,18 +908,20 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 | AgentConsole 人工 signoff 硬閘、FSM 只讀（C-15） | post-MVP Console 接點 | FR-SI-12；§12 #5 |
 
 ## 附錄 C　主控裁決
-### C.1 主控裁決（掌舵者授權；掌舵者可隨時以 T1 推翻）
+### C.1 主控裁決（流程類；授權範圍與限制見 C.2 表頭；掌舵者可隨時以 T1 推翻）
 | 編號 | 裁決 | 座標 |
 |------|------|------|
 | OBS-SI-001 | 檔名用 repo 慣例 `docs/01_requirements/SelfImproving_PRD.md`（T1 原文 `SelfImproving.prd` 不合 `*_PRD.md` 慣例，文件工具鏈與 docs 守門只認 `.md`）；回報掌舵者 | 觀察帳本 OBS-SI-001 |
 | OBS-SI-002 | 額度守衛 `--pace` 回 cap=1，四方專家串行：研究員→SA→SD／Architect→QA；每棒交卷後主控親驗再派下一棒 | 觀察帳本 OBS-SI-002 |
 | OBS-SI-003 | 延後；再開症狀：第二次有人為探針手改三件組而寫錯真狀態目錄 | 觀察帳本 OBS-SI-003 |
 | OBS-SI-004 | 任務書一律改「文字交卷」，不再要求子代理寫報告檔 | 觀察帳本 OBS-SI-004 |
-| 不開 `AutoSDD_improving_117` | 掌舵者要求省去非必要文件；本 PRD 本身是驅動器（不複製範本、不產四件套；軌道① 仍依範本〈🏁〉T1～T4 休眠） | 根 `CLAUDE.md`〈三條改進軌道〉；`AutoSDD_Iteration_Prompt_Template.md`〈🏁〉 |
+| 不開 `AutoSDD_improving_117` | 掌舵者要求省去非必要文件（原句「省去非必要文件，只留一定需要文件」，sid f3ead132-29b1-418c-97d9-35868ab11c70 line 13）；本 PRD 本身是驅動器（不複製範本、不產四件套；軌道① 仍依範本〈🏁〉T1～T4 休眠） | 根 `CLAUDE.md`〈三條改進軌道〉；`AutoSDD_Iteration_Prompt_Template.md`〈🏁〉 |
 
-帳本後續裁決（快照至 OBS-SI-030；只列編號與一句，細節以帳本為準）：OBS-SI-006（任務書一次一題）、OBS-SI-007（Glob 任務書寫法改「path 指到目錄＋純檔名 pattern」，再開症狀已命中、升 P3）、OBS-SI-008（PDF 走本機 `python -I` 粗抽、大頁改抓摘要頁）、OBS-SI-011（鐵律一優先於系統提示的 Bash 偏好；SA、SD 棒復發，累計 ×3）、OBS-SI-013（時間欄寫實際日期、任務書改寫「起算日」）、OBS-SI-015（自 SD 棒起任務書標明輸入快照的 HEAD，棒內主控不動受審檔）、OBS-SI-016（記憶索引人工歸檔 22,755→15,558 bytes，PROP-SI-003 的手動先例、不經閘）、OBS-SI-018（＝C.2 #4）、OBS-SI-019（表頭宣告「本機 +08:00」即視為帶 offset、區間允許）、OBS-SI-021（＝C.2 #3）、OBS-SI-022（＝C.2 #7）、OBS-SI-029（scratch 腳本自行 `reconfigure` UTF-8；repo 內工具走 `init_utf8_streams`）、OBS-SI-030（記憶索引常青兩節移前、輪次列表殿後，主控已重排）。
+帳本後續裁決（快照至 OBS-SI-030；只列編號與一句，細節以帳本為準）：OBS-SI-006（任務書一次一題）、OBS-SI-007（Glob 任務書寫法改「path 指到目錄＋純檔名 pattern」，再開症狀已命中、升 P3）、OBS-SI-008（PDF 走本機 `python -I` 粗抽、大頁改抓摘要頁）、OBS-SI-011（鐵律一優先於系統提示的 Bash 偏好；各棒復發，累計 ×6，見帳本）、OBS-SI-013（時間欄寫實際日期、任務書改寫「起算日」）、OBS-SI-015（自 SD 棒起任務書標明輸入快照的 HEAD，棒內主控不動受審檔）、OBS-SI-016（記憶索引人工歸檔 22,755→15,558 bytes，PROP-SI-003 的手動先例、不經閘）、OBS-SI-018（＝C.2 #4）、OBS-SI-019（表頭宣告「本機 +08:00」即視為帶 offset、區間允許）、OBS-SI-021（＝C.2 #3）、OBS-SI-022（＝C.2 #7）、OBS-SI-029（scratch 腳本自行 `reconfigure` UTF-8；repo 內工具走 `init_utf8_streams`）、OBS-SI-030（記憶索引常青兩節移前、輪次列表殿後，主控已重排）。
 
-### C.2 已裁決（主控代決 2026-10-19；授權依據＝掌舵者本輪原文「以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案，我授權幫我決策」；#1～#4 採 SA 建議預設值；#5 修訂（採 SD 棒 ADR-SI-02 建議，原文逐字保留於該列）；#6～#9 為 SD 棒標為待裁決項目的主控裁決，授權依據同上；凍結核准時掌舵者可逐項推翻，推翻即以 T1 改寫本表）
+### C.2 已裁決（主控代決 2026-10-19；授權範圍與限制見下）
+主控代決（2026-10-19）；授權依據＝掌舵者於本 session 第一則訊息（2026-10-18 21:03 +08:00，sid f3ead132-29b1-418c-97d9-35868ab11c70 line 13）原文：『以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案，我授權幫我決策, 若真需要我決定, 請以最簡單的解釋, 讓我互動選項決策』。該句的『以上』指該則訊息的四個問題；SelfImproving T1（同 sid line 901，22:40）未重述此句，故本表 #1～#9 是主控對該授權的延伸解釋，凍結核准時由掌舵者以互動選項逐項確認、可推翻；凍結核准本身不代決。
+
 | # | 事項（原為待裁決） | 裁決（#1～#4＝SA 建議預設值；#5 起見各列） | 影響 |
 |---|-----------|-----------|------|
 | 1 | 晉升形態：核准（綁 digest）後，驗證 PASS 仍須掌舵者再執行一次「晉升」動作（兩次人工接觸，第二次只確認）是否可接受？ | 接受（核准一次、晉升確認一次；晉升前顯示驗證摘要） | FR-SI-12、16 |
@@ -930,11 +943,11 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 - [ ] 所有 🔴 確認點已通過（待掌舵者與 QA SCG-0；本稿作者不得自證）
 - [x] 時程與資源合理（不適用日曆：改以症狀出口 §8 與額度／人審成本 §4.1 表達）
 - [x] 風險已識別並有緩解措施（§10：12 項，含現有防線座標與剩餘風險）
-- [ ] 與 Stakeholders 完成評審（待 QA 獨立審查與掌舵者）
+- [ ] 與 Stakeholders 完成評審（QA SCG-0 一審 FAIL〔`docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md`〕；SA 已修非 §9 部分，待 SD 修 §9、QA 二審驗修復、掌舵者）
 
 ### AISDLC 流程檢查
 - [ ] 已由 PM/PO Agent (Victoria) 主導撰寫——不適用：本稿由 SA 棒（Sonnet 5.5）依掌舵者 T1 與 SOP 起草（四方專家流程）
-- [ ] 已由 BA Agent (Beatrice) 協助驗證——不適用：由下一棒 QA 做 SCG-0 獨立審查
+- [ ] 已由 BA Agent (Beatrice) 協助驗證——不適用：由 QA 做 SCG-0 獨立審查（一審已做、判 FAIL；二審驗修復待做）
 - [ ] 所有人機協作確認點已完成（待掌舵者）
 - [x] 文檔追蹤鏈完整（§14、附錄 A；FRD／TCS／SRD 為實作輪下游，非缺漏）
 - [x] 版本控制正確（Draft；落在 git 追蹤的 `docs/01_requirements/`；本稿作者未做 git 寫入，由主控提交）
@@ -949,6 +962,6 @@ context 三段水位與額度四道門檻一律現查（`python tools/session_re
 ---
 
 **文檔所有者**: 掌舵者
-**最後審查日期**: 尚未審查（待 QA SCG-0）
-**下一次審查日期**: 事件驅動（QA 審查完成後；不排日曆）
+**最後審查日期**: 2026-10-19（QA SCG-0 一審：FAIL；修復後待二審）
+**下一次審查日期**: 事件驅動（SD 修完 §9 後的 QA 二審；不排日曆）
 
