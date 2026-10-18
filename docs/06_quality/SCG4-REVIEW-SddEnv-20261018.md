@@ -56,3 +56,25 @@ AC 5／5、AT 9／9 皆有測試（`docs/06_quality/RTM-SddEnv.md`；測試檔�
 |------|------|-----------|----------|
 | F-02（P2） | oracle 無鑑別力：CP1 拿掉 `force_utf8_stdio()` 呼叫、CP2 把長度檢查排到格式檢查之前，皆不會讓任何 AT 轉紅 | 只動 `scripts/tests/test_sdd_env.py`：CP1——AT-001-5-1（`:238` 起）用 `monkeypatch.setattr(sdd_env, "force_utf8_stdio", spy)` 斷言一次 `main()` 恰呼叫一次；CP2——AT-001-3-1 的參數表加 `"A" * 31`（`:160`），既有 `"格式" in cap.err` 即可咬住「格式先於長度」 | R1、R7（檢查順序固定） |
 | F-03（P3） | `--shell bash` 在 Windows 的輸出帶 CRLF：`eval "$(… --shell bash)"` 於 Git Bash 會把 `\r` 黏進值；違反 NFR-001-3「輸出形態由 --shell 決定而不是由平台決定」與根層鐵律三的行尾項 | `sdd_env.py:128` 改以 `sys.stdout.buffer.write(render(...).encode("utf-8"))`（或 `sys.stdout.reconfigure(newline="\n")`）；並補一支以子行程取原始位元組、斷言無 `\r` 的測試（capsys 看不到此差異） | R6、NFR-001-3 |
+
+### 二審（2026-10-18；HEAD `90d911e4`）
+
+**本節取代**上方「審查結論」表的「測試強度（突變）｜Fail」一列、「SCG-4 建議：[需修正後再審查]」與「必修項目」兩列（F-02、F-03）；一審原文保留不改。
+
+| 項目 | 狀態 |
+|------|------|
+| FRD 功能規格 | Pass（0 項不符） |
+| Contract 一致性 | N/A |
+| Invariants 保護 | Pass |
+| RTM 覆蓋率 | 100%（AC 5／5、AT 9／9） |
+| 測試強度（突變） | **Pass**：29 個突變全數被殺（核心 26、探針 3） |
+
+**SCG-4 建議**: [通過]
+
+**F-02（P2）已結案**：`322e1351` 只動 `scripts/tests/test_sdd_env.py`（+4／−1）。逐行複核：既有斷言刪除 0、弱化 0（被移除的 1 行是參數表那一行，只加一個值 `"A" * 31`）。CP1 由 AT-001-5-1 的 spy 咬住（`:284` 安裝、`:290` 斷言 `calls == [1]`）；CP2 由 AT-001-3-1 的新參數值咬住（`:177`，配既有 `"格式" in cap.err`）。座標為 `90d911e4` 版。
+
+**F-03（P3）已結案**：`1c802e92`。`sdd_env.py` 成功路徑改為 `sys.stdout.flush()` 後取 `sys.stdout.buffer` 直接寫 UTF-8 位元組（無 `.buffer` 才退回文字寫入）；新測試 `test_AT_001_2_2_raw_stdout_bytes_carry_no_cr`（bash、powershell、json 三參數）用子行程取原始位元組，斷言 rc 0、無 `\r`、以 `\n` 結尾。**拿掉修復就該紅**：在匯出樹的磁碟複本上套回修前原碼，新測試 3／3 轉紅；另三個變形（LF 換成 CRLF、去掉結尾換行、位元組寫到 stderr）也都讓新測試 3／3 轉紅。本機實測三種 `--shell` 的 stdout 都是 CR 0 個。`--check` 的 OK 行與 stderr 診斷仍走文字層（Windows 為 CRLF），不是 `eval` 的對象，只記為觀察。
+
+**F-04**：維持（TCS 文字偏離，主控於 `e73749bf` 已接受）。**新增 P4（不擋閘）**：F-12 新寫法 `text.encode("utf-8")` 是嚴格編碼，POSIX 上含非 UTF-8 位元組的路徑會拋 `UnicodeEncodeError`，舊文字層有 `errors="replace"`；理論洞、無暴露證據。
+
+**證據**（當回合親跑）：突變在 `322e1351` 與 `90d911e4` 兩個 commit 皆 29／29 全殺（匯出樹量測；C09、C27 於新碼改錨、語意不變）；整檔單跑 rc 0、26 支通過；根層 `test_platform_utils_dedup` 43 項、`test_subprocess_encoding_hygiene` 39 項、`test_platform_neutral_paths` 177 項皆 OK；ruff 兩檔無違規；FSM `monorepo-sdd-env`：`IMPLEMENTATION → PR_REVIEW → RTM_VERIFY → RELEASE_READY`。全文見 `docs/06_quality/AutoSDD_ZeroTrust_Audit_116.md` §9。

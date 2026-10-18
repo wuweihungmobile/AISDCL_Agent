@@ -629,3 +629,134 @@ The first line of `D:\CursorProject\AISDCL_Agent\README.md` is:
 8. **二審未發生**：F-01、F-02 修復前，DF-A 與 DF-C 的 SCG-4／SCG-5 未閉環；兩份 RTM 狀態為 In Review。
 9. **G-116-17 的修復**：本輪不含 matcher 變更，因此「修後 PowerShell 入帳與阻塞態被擋」沒有證據；本場的暴露證據只證明缺口存在。
 10. **突變檢驗的邊界**：突變為手工挑選的 98 個（核心 83、由 R 條文導出的探針 15；探針中 12 個存活、3 個被殺），不是窮舉；對 R6「`sleep=None` 時用 `time.sleep`」與 R4「每次嘗試用完即關閉 client」這兩條，在 NFR-001-4（不真睡眠、不碰網路）的前提下結構上無法由測試觀察，不計入存活。
+
+## §9 二審（SCG-4 複審：F-01～F-03、F-05）
+
+**日期**：2026-10-18　**二審者**：同一位 QA（未參與實作）　**對象**：HEAD `90d911e4`（主控指定的二審範圍；寫本節時 HEAD 已前進到 `d75a38a0`，該 commit 只動 `.claude/settings.json`、`CLAUDE.md`、`ONBOARDING.md`、`AutoSDD_improving_116.md` 四檔，`AISDLC_SDD/scripts`、`AutoClaude/autoclaude`、`AutoClaude/tests` 三處與 `90d911e4` 的 diff 為空，本節結論對其同樣成立）
+
+**本節與一審的關係**：§7 的 VERDICT「FAIL」、§8 第 8 項「二審未發生」、§5 末段「`RTM_VERIFY` 未執行」皆以本節為準；一審原文一字未改（訂正協議：不靜默覆寫）。
+
+### 9.1 提交對照與取證方式
+
+| commit | 內容 | 增刪（`git show --numstat`） |
+|--------|------|-----------------------------|
+| `322e1351` | F-01／F-02 測試補強，只動兩支測試檔 | DF-A 測試 +68／−4；DF-C 測試 +4／−1 |
+| `1c802e92` | F-03：`sdd_env.py` 改寫位元組並新增測試一支；F-05：`webhook_sender.py` 只改模組 docstring | `sdd_env.py` +11／−1；`test_sdd_env.py` +17／−0；`webhook_sender.py` +5／−5 |
+| `90d911e4` | 只有四份 `.md`（API_Contract_P3-6、Phase6_P1_Backlog、ADR-XPLAT-016、improving_116） | `AISDLC_SDD/scripts`、`AutoClaude/autoclaude`、`AutoClaude/tests` 三處與 `1c802e92` 的 diff 為空 |
+
+**取證方式（如實登記）**：突變與閘門量的是 commit 內容，不是工作樹。我第一次在工作樹上跑突變時，主控正在改 `sdd_env.py` 與測試（工作樹 14:27 的 F-03／F-05 修改）：DF-C 從 C14 起多出 3 支測試（基線 23 變 26），該次結果作廢、不採用（原檔留在 scratch，檔名帶 `contaminated`）。改以唯讀 `git archive` 把 `322e1351` 與 `90d911e4` 的相關子樹匯出到 scratch，突變載具用環境變數指向匯出樹；每個突變結果都記錄被改模組的載入來源路徑，全部落在匯出樹內。
+
+### 9.2 弱化複核（`git show 322e1351`）
+
+**結論**：既有斷言刪除 0 條、弱化 0 條；測試函式名稱（AT 底線形）一個都沒改，新增的函式只有巢狀輔助 `fake_send`（`1c802e92` 另有新測試，見 9.4）。被移除的 5 行逐行如下。
+
+| # | 檔 | 被移除的行 | 改成 | 判定 |
+|---|----|-----------|------|------|
+| 1 | DF-A | `from datetime import datetime` | `from datetime import datetime, timedelta` | 匯入放寬，非斷言 |
+| 2 | DF-A（AT-001-5-1 第四次呼叫） | `{"x": object()},` | `{"x": object(), "leak-me-42": 1},` | payload 仍不可序列化；`invalid_payload`、零呼叫、恰一筆 WARNING 三組斷言原樣；只讓既有標記字串進得了 payload（P08） |
+| 3 | DF-A | 註解「四次呼叫的日誌全文…」 | 「五次呼叫…」 | 註解 |
+| 4 | DF-A（AT-001-6-1） | `with patch(…, side_effect=outcomes) as mock_send:` | `side_effect=fake_send`（函式依序回同樣兩個 `WebhookResult`） | `outcomes` 只有兩個結果物件、沒有例外項，回傳等價；`call_count`、`call_args_list`、位置參數、四鍵 payload、日誌層級等後續斷言一字未動。`notifier.py:75` 對 `send_webhook` 沒有 try／except，替身內的斷言失敗會直接外拋、不會被吞 |
+| 5 | DF-C（AT-001-3-1 參數表） | `… "中文"]` | `… "中文", "A" * 31]` | 只加一個值 |
+
+### 9.3 突變複跑
+
+**DF-A 殺 50/50、DF-C 殺 29/29**（兩個 commit 皆然；存活 0；apply／not-loaded／collect 異常 0）
+
+| commit | 對象 | 基線 | 突變 | 被殺 | 存活 |
+|--------|------|------|------|------|------|
+| `322e1351` | DF-A | 9 支通過 | 50（核心 40、探針 10） | 50 | 0 |
+| `322e1351` | DF-C | 23 支通過 | 29（核心 26、探針 3） | 29 | 0 |
+| `90d911e4` | DF-A | 9 支通過 | 50（核心 40、探針 10） | 50 | 0 |
+| `90d911e4` | DF-C | 26 支通過 | 29（核心 26、探針 3） | 29 | 0 |
+
+**一審 12 個存活者逐個轉紅**（兩個 commit 的轉紅測試相同；座標＝`AutoClaude/tests/utils/test_webhook_sender.py` 或 `AISDLC_SDD/scripts/tests/test_sdd_env.py` 於 `90d911e4`）：
+
+| 突變 | 內容 | 轉紅的測試 | 咬住它的斷言座標 |
+|------|------|-----------|------------------|
+| P01 | R4 逾時只套 `read` | AT-001-1-1 | DF-A `:59` 四鍵全等 |
+| P06 | R3 `timeout_s` 只收 float | AT-001-1-1 | `:61-64` int 正例 |
+| P07 | `WebhookResult` 欄位順序 | AT-001-1-1 | `:66-72` `dataclasses.fields` |
+| P02a | R2 先於 R1（payload 先於位址） | AT-001-4-E-1 | `:317-324` 壞位址加 `None` payload 須回 `invalid_url` |
+| P02b | R3 先於 R2（參數先於 payload） | AT-001-4-E-1 | `:325-333` 壞 payload 加 `max_attempts=0` 須回 `invalid_payload` |
+| P03 | 終局 WARNING 缺 `attempts` | AT-001-5-1 | `:404` |
+| P08 | `invalid_payload` 的日誌帶 payload | AT-001-5-1 | `:433` payload 加標記鍵，配 `:465-467` 標記迴圈 |
+| P09 | `invalid_argument` 的日誌帶原始 URL | AT-001-5-1 | `:446-462` 第五次呼叫，配 `:465-467` |
+| P04 | `timestamp` 用本地偏移 | AT-001-6-1 | `:517-518` `utcoffset() == timedelta(0)` |
+| P05 | 先呼叫 webhook 再寫 alert log | AT-001-6-1 | `:489-500` 替身在被呼叫當下斷言 log 已存在且行數相符 |
+| CP1 | 拿掉 `force_utf8_stdio()` | AT-001-5-1 | DF-C `:284` spy、`:290` `calls == [1]` |
+| CP2 | R7 長度檢查先於格式檢查 | AT-001-3-1［`"A"*31`］ | `:177` 新參數值，配既有 `"格式" in cap.err` |
+
+**方法註記**：（1）C09、C27 原先錨定在被 F-03 刪掉的 `sys.stdout.write(render(env, args.shell))` 一行；`1c802e92` 版改錨在 `text = render(env, args.shell)`，變異語意不變（成功時寫入 `os.environ`；stdout 多一行說明），兩者皆被殺（C09 由 AT-001-5-1、C27 由 9 支測試）。（2）P04 只在機器時區非 UTC 時咬得住：本機 UTC+8 所以被殺；UTC 的 CI 上該突變與正解同值（一審已載，不是測試缺陷）。
+
+### 9.4 F-03／F-05 複核（`git show 1c802e92`）
+
+**F-03（`sdd_env.py` 行尾）：成立，修得對。**
+
+- 碼：成功路徑改為 `text = render(...)`、`sys.stdout.flush()`、取 `sys.stdout.buffer`、`buffer.write(text.encode("utf-8"))`、`buffer.flush()`；串流沒有 `.buffer`（極少數替身）才退回文字寫入。`--check` 的 OK 行與 stderr 診斷仍走文字層，Windows 上為 CRLF（本機實測：OK 行 stdout 84 位元組含 1 個 CR；兩種診斷 stderr 各 1 個 CR）；它們不是 `eval` 的對象，TCS R6／NFR-001-3 針對的是 `--shell` 三形態，所以只記為觀察、不列缺陷。
+- 新測試 `test_AT_001_2_2_raw_stdout_bytes_carry_no_cr`（bash、powershell、json 三參數）：用 `sys.executable` 起子行程、取原始位元組，斷言 rc 0、無 `\r`、以 `\n` 結尾。本機實測三種 `--shell` 的 stdout 皆 CR 0 個。
+- **拿掉修復就該紅**（突變做在 `90d911e4` 匯出樹的磁碟複本上，因為子行程跑的是磁碟檔；基線 26 支通過）：R0 修前原碼 `sys.stdout.write(text)`＝3 失敗（恰為新測試三參數）；R1 位元組寫入但 LF 換成 CRLF＝5 失敗（新測試 3、既有 2）；R2 去掉結尾換行＝3 失敗（新測試）；R3 位元組寫到 `stderr.buffer`＝12 失敗（含新測試 3）。誠實劃界：CR 只出現在 Windows 的文字層，mac／Linux 上新測試有沒有修復都是綠（該回歸本來就只存在於 Windows）。
+- 不用 `reconfigure(newline=)` 的理由（行內 stdio 複本棘輪只准縮不准長）成立：本場 `test_platform_utils_dedup` 43 項 OK。
+
+**F-05（`webhook_sender.py` 模組 docstring）：成立。** 兩版去掉模組 docstring 後的 AST 完全相同；行數 136／136；差異只在第 2 行與第 4～7 行；第 8 行之後逐行相同。新 docstring 已由開發進度敘述改為用途與邊界，與讀碼一致（R1～R6、R8、R9 逐項核過）；兩處文字面落差見 F-10、F-11（P4）。
+
+### 9.5 閘門（二審範圍；全套由主控收尾統跑，我沒跑）
+
+| 閘 | 指令（cwd） | 結果 |
+|----|------------|------|
+| G1 | DF-A 整檔 `python -m pytest tests/utils/test_webhook_sender.py -p no:xdist -o addopts= -q`（`AutoClaude`；設 `AUTOCLAUDE_NO_PG_AUTODETECT=1`） | rc 0；`9 passed, 1 warning in 0.45s` |
+| G2 | DF-C 整檔 `python -m pytest scripts/tests/test_sdd_env.py -p no:xdist -o addopts= -q`（`AISDLC_SDD`） | rc 0；`26 passed in 0.59s` |
+| G3 | 根層棘輪三模組 `python -m unittest discover -s tools/tests -p <模組>.py` | rc 皆 0：`test_platform_utils_dedup` Ran 43 OK；`test_subprocess_encoding_hygiene` Ran 39 OK；`test_platform_neutral_paths` Ran 177 OK |
+| G4 | ruff 五檔（`webhook_sender.py`、`notifier.py`、`test_webhook_sender.py`、`sdd_env.py`、`test_sdd_env.py`；commit 內容經 stdin，以 `--stdin-filename` 套各檔原有設定） | rc 0；各檔 `All checks passed!` |
+
+G1、G2 在真實工作樹跑（`git status` 顯示 `.py` 無未提交修改，工作樹內容＝HEAD）。
+
+### 9.6 FSM 結果（三鍵最終狀態；`show --must-exist` 逐字）
+
+兩鍵的指令：`transition --to PR_REVIEW`、`gate --gate PR_REVIEW --result PASS`、`gate --gate RTM_VERIFY --result PASS`，rc 皆 0；環境同一審（`SDD_ACTIVE_VERSION=0.30`、同一狀態目錄、`SDD_PROJECT=<鍵>`、cwd `AISDLC_SDD_v0.30`）。框架真實狀態檔 `FSM-STATE-AISDLC_SDD.yaml` 的修改時間仍是 2026-07-16 01:36:40、2417 位元組，未動。
+
+```text
+autoclaude-webhook     current_state: RELEASE_READY    decision_trace 共 23 筆；最後 3 筆：
+  [20] 2026-10-18T06:39:26+00:00 | IMPLEMENTATION -> PR_REVIEW | trigger=cli_manual | reason=SCG-4 二審開始：F-01 測試補強 322e1351、F-05 docstring 1c802e92，HEAD 90d911e4
+  [21] 2026-10-18T06:39:26+00:00 | PR_REVIEW -> RTM_VERIFY | trigger=gate_pass | reason=PR_REVIEW PASS
+  [22] 2026-10-18T06:39:26+00:00 | RTM_VERIFY -> RELEASE_READY | trigger=gate_pass | reason=RTM_VERIFY PASS
+monorepo-sdd-env       current_state: RELEASE_READY    decision_trace 共 19 筆；最後 3 筆：
+  [16] 2026-10-18T06:39:34+00:00 | IMPLEMENTATION -> PR_REVIEW | trigger=cli_manual | reason=SCG-4 二審開始：F-02 測試補強 322e1351、F-03／F-05 修復 1c802e92，HEAD 90d911e4
+  [17] 2026-10-18T06:39:34+00:00 | PR_REVIEW -> RTM_VERIFY | trigger=gate_pass | reason=PR_REVIEW PASS
+  [18] 2026-10-18T06:39:34+00:00 | RTM_VERIFY -> RELEASE_READY | trigger=gate_pass | reason=RTM_VERIFY PASS
+agentconsole-fsm-trail current_state: RELEASE_READY    decision_trace 共 17 筆；最後 3 筆（一審已到，本場未動）：
+  [14] 2026-10-18T05:51:55+00:00 | IMPLEMENTATION -> PR_REVIEW | trigger=cli_manual | reason=SCG-4 PR 審查開始
+  [15] 2026-10-18T06:05:17+00:00 | PR_REVIEW -> RTM_VERIFY | trigger=gate_pass | reason=PR_REVIEW PASS
+  [16] 2026-10-18T06:05:28+00:00 | RTM_VERIFY -> RELEASE_READY | trigger=gate_pass | reason=RTM_VERIFY PASS
+```
+
+### 9.7 發現與結案狀態
+
+| 編號 | 嚴重度 | 狀態 |
+|------|:------:|------|
+| F-01 | P2 | **已結案**：`322e1351`；DF-A 殺 50/50 |
+| F-02 | P2 | **已結案**：`322e1351`；DF-C 殺 29/29 |
+| F-03 | P3 | **已結案**：`1c802e92`；拿掉修復即紅（9.4） |
+| F-05 | P3 | **已結案**：`1c802e92`；docstring 差異經 AST 驗證程式未變 |
+| F-04、F-09 | P3 | 維持：F-04 是 TCS 文字偏離（主控 `e73749bf` 已接受）；F-09 是 QA 自身流程註記 |
+| DEF-AC-038 | P3 | 維持開啟、本輪不修；入帳位置見 9.8 |
+| G-116-17 | P4（建議升 P2） | 不屬本次二審範圍。依 `d75a38a0` 的 commit 訊息：根 router 的 PostToolUse matcher 已納入 PowerShell，PreToolUse 那一格被 auto mode 分類器拒絕、待掌舵者套上；我沒有驗證修後行為（驗法見 §7 末項） |
+| F-06、F-07、F-08 | P4 | 不變 |
+| F-10 | P4（新） | `webhook_sender.py` 新 docstring 第 6 行「任何例外都收進 `WebhookResult`、永不拋出」偏廣：程式（第 122 行註解、AT-001-4-E-1 情境四）只攔 `Exception`，`BaseException` 照常上拋；建議改「任何 `Exception`」 |
+| F-11 | P4（新） | 同一 docstring 第 7 行遮罩清單「使用者資訊、埠、查詢字串、片段」漏列「路徑」；程式（第 35 行）與測試標記 `s3cret` 都涵蓋路徑，而 webhook 的 token 常在路徑裡 |
+| F-12 | P4（新） | `sdd_env.py` 新寫法 `text.encode("utf-8")` 是嚴格編碼：POSIX 上含非 UTF-8 位元組的路徑（解出 lone surrogate）會拋 `UnicodeEncodeError`，舊文字層有 `errors="replace"`。理論洞、無暴露證據，不要求處理；再開症狀＝真實環境出現此例外 |
+
+### 9.8 帳務與文件現況
+
+- **DEF-AC-038 的入帳位置**：DEF-AC 序列沒有獨立帳本，慣例是記在各輪證據檔 §4（115 的 DEF-AC-030～037 就在 `docs/06_quality/AutoSDD_ZeroTrust_Audit_115.md` 第 473～514 行）。現查（含 `d75a38a0`；整個 repo 對 `DEF-AC-038` 的命中只有四份文件）：①本檔 §4 第 401 行（另見第 6、58、392、615 行）；②`AutoClaude/docs/06_quality/SCG4-REVIEW-WebhookSender-20261018.md` 第 40 行；③`AutoClaude/docs/06_quality/RTM-WebhookSender.md` 第 67 行；④主控的 `docs/04_planning/AutoSDD_improving_116.md` 第 133 行（W2 DF-A 第二輪列的末欄，是提及、不是入帳）。根層帳本 `docs/06_quality/AutoSDD_Defect_Log.md`（HEAD 版）與 `AgentConsole/docs` 都沒有。我沒有寫任何帳本。
+- **兩份 RTM 依主控指示未動**：`RTM-WebhookSender.md`、`RTM-SddEnv.md` 的「狀態」欄仍寫 In Review、備註寫「待二審通過」，與本節結論不符；`RTM-SddEnv.md` 另有三處過期：「整檔 22 項」（現 26）、AT-001-2-2 未列新測試、AT-001-3-1 的「9 個參數」（現 10）。是否同步由主控裁量（約 6 行）。
+- 一審兩份 SCG-4 報告的測試座標是 `306dbb2a`／`343d583a` 版；修復後行號位移，以本節 9.3 為準。
+
+### 9.9 二審 VERDICT
+
+**PASS**。無 P1、無 P2；一審的 P2 兩筆（F-01、F-02）與 P3 兩筆（F-03、F-05）皆已結案；新增 P4 三筆（F-10～F-12），不擋閘。三鍵最終狀態：`autoclaude-webhook`＝**RELEASE_READY**；`monorepo-sdd-env`＝**RELEASE_READY**；`agentconsole-fsm-trail`＝**RELEASE_READY**。
+
+### 9.10 二審未涵蓋
+
+1. 全套與其他閘門（`tools/run_root_unittests.py`、AutoClaude 全套、`ci-gate`、Docker 全棧）：主控收尾統跑，本場只跑 9.5 的整檔與相關模組。
+2. 新測試在 mac／Linux 的行為：設計上恆綠（CR 只存在於 Windows 文字層），本場未跑。
+3. 一審 §8 的其餘項目（真實網路、Backend／Frontend 承接、委派批次重跑、互動 TUI、真實委派失敗的恢復路徑）不變；G-116-17 的修復現況見 9.7，修後行為未驗。

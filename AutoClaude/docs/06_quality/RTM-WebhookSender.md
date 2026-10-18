@@ -2,7 +2,7 @@
 
 **版本**: 1.0（整合輪 116 W3 QA 建立；依 `AISDLC_SDD:rtm-generate` 表格形，路徑依 D-116-09 落 `docs/06_quality/`）
 **日期**: 2026-10-18
-**狀態**: In Review（SCG-4 一審有 P2：F-01，見 `SCG4-REVIEW-WebhookSender-20261018.md`；RTM 覆蓋已達 100%，`RTM_VERIFY` 閘門待二審通過後執行）
+**狀態**: 二審 PASS／RELEASE_READY（SCG-4 一審的 P2 F-01 已於 `322e1351` 修復，二審結論見 `SCG4-REVIEW-WebhookSender-20261018.md` 二審節；`RTM_VERIFY` 已 PASS，FSM `autoclaude-webhook` 為 RELEASE_READY）
 **覆蓋率**: 6/6 AC（100%）；AT 9/9
 **規格**: `AutoClaude/docs/03_testing/contracts/TCS-WebhookSender-20261018.md`（凍結摘要 `sha256:2d473454d33d46fa341566a6f4cea25d135ce3a7a22dd0acce1d41f1bfcec8cf`）
 **實作**: commit `306dbb2a`（`autoclaude/utils/webhook_sender.py`、`autoclaude/utils/notifier.py`、`tests/utils/test_webhook_sender.py`）；引擎根因修復 `d9dc1ff0`（DEF-200-550）
@@ -65,4 +65,4 @@
 
 - **測試強度缺口（SCG-4 F-01，P2）**：下列行為在 TCS 的 R 條文中明文要求、但現有測試不會因其被改壞而轉紅（記憶體內突變檢驗存活）：R4 四階段逾時、R3 驗證順序 R1→R2→R3、R9 終局 WARNING 含 `attempts`、R9 的 `invalid_payload` 與 `invalid_argument` 路徑日誌不含 payload 與 URL、R10 時間戳為 UTC、R10 先寫 alert log 再呼叫、R3 `timeout_s` 接受 int、`WebhookResult` 欄位順序。補強限於在既有測試追加斷言，不改 TCS。
 - 引擎層 TOKEN_HALT 偽陽性（DEF-200-550）已於 `d9dc1ff0` 修復；Bridge StepTracker 遮罩漏配（DEF-AC-038，P3）不影響本 RTM。
-- 狀態欄 ✅＝測試實跑為綠；整體仍待 SCG-4 二審通過後才算閉環。
+- 狀態欄 ✅＝測試實跑為綠；SCG-4 二審已 PASS（證據檔 `docs/06_quality/AutoSDD_ZeroTrust_Audit_116.md` §9）。上列「測試強度缺口（SCG-4 F-01，P2）」是一審當時的發現紀錄，已於 `322e1351` 補強結案（二審突變 50／50 全殺）。

@@ -2,7 +2,7 @@
 
 **版本**: 1.0（整合輪 116 W3 QA 建立；依 `AISDLC_SDD:rtm-generate` 表格形，路徑依 D-116-09 落 `docs/06_quality/`）
 **日期**: 2026-10-18
-**狀態**: In Review（SCG-4 一審有 P2：F-02，見 `SCG4-REVIEW-SddEnv-20261018.md`；RTM 覆蓋已達 100%，`RTM_VERIFY` 閘門待二審通過後執行）
+**狀態**: 二審 PASS／RELEASE_READY（SCG-4 一審的 P2 F-02、P3 F-03 已於 `322e1351`、`1c802e92` 修復，二審結論見 `SCG4-REVIEW-SddEnv-20261018.md` 二審節；`RTM_VERIFY` 已 PASS，FSM `monorepo-sdd-env` 為 RELEASE_READY）
 **覆蓋率**: 5/5 AC（100%）；AT 9/9
 **規格**: `docs/03_testing/contracts/TCS-SddEnv-20261018.md`（凍結摘要 `sha256:cc0988beef137f6fa3222513f176afb8890bd53d9af6b1b7fec689258c820d5a`）
 **實作**: commit `343d583a`（`AISDLC_SDD/scripts/sdd_env.py`、`AISDLC_SDD/scripts/tests/test_sdd_env.py`）＋主控修補 `e73749bf`
@@ -14,8 +14,8 @@
 | EPIC-001（整合輪 116：SDD 外部專案模式可重複；來源 G-116-12、D-116-04） | F-001 | US-001 | AC-001-1 | AT-001-1-1 → `test_AT_001_1_1_default_root_and_json_shell` | － | NFR-001-3 | ✅ |
 | EPIC-001 | F-001 | US-001 | AC-001-1 | AT-001-1-2 → `test_AT_001_1_2_state_dir_table_for_each_sub`（4 個參數）、`test_AT_001_1_2_relative_and_non_ascii_root` | － | NFR-001-3 | ✅ |
 | EPIC-001 | F-001 | US-001 | AC-001-2 | AT-001-2-1 → `test_AT_001_2_1_powershell_lines_and_quote_escaping` | － | NFR-001-3 | ✅ |
-| EPIC-001 | F-001 | US-001 | AC-001-2 | AT-001-2-2 → `test_AT_001_2_2_bash_lines_and_quote_escaping` | － | NFR-001-3 | ✅ |
-| EPIC-001 | F-001 | US-001 | AC-001-3 | AT-001-3-1 → `test_AT_001_3_1_bad_slugs_are_rejected_with_rc_2`（9 個參數）、`test_AT_001_3_1_overlong_slug_is_rejected_with_rc_2` | － | NFR-001-1 | ✅ |
+| EPIC-001 | F-001 | US-001 | AC-001-2 | AT-001-2-2 → `test_AT_001_2_2_bash_lines_and_quote_escaping`、`test_AT_001_2_2_raw_stdout_bytes_carry_no_cr`（3 個參數：bash、powershell、json） | － | NFR-001-3 | ✅ |
+| EPIC-001 | F-001 | US-001 | AC-001-3 | AT-001-3-1 → `test_AT_001_3_1_bad_slugs_are_rejected_with_rc_2`（10 個參數）、`test_AT_001_3_1_overlong_slug_is_rejected_with_rc_2` | － | NFR-001-1 | ✅ |
 | EPIC-001 | F-001 | US-001 | AC-001-3 | AT-001-3-2 → `test_AT_001_3_2_reserved_words_and_length_boundaries` | － | NFR-001-1 | ✅ |
 | EPIC-001 | F-001 | US-001 | AC-001-4 | AT-001-4-1 → `test_AT_001_4_1_check_reports_an_existing_state_file` | － | NFR-001-6 | ✅ |
 | EPIC-001 | F-001 | US-001 | AC-001-4 | AT-001-4-2 → `test_AT_001_4_2_check_reports_a_missing_state_file_without_creating_anything` | － | NFR-001-6 | ✅ |
@@ -30,7 +30,7 @@
 | 有 TC 的 AC 數 | 5 |
 | **覆蓋率** | **100%** |
 | SCG-5 目標 | 100% |
-| 實跑（2026-10-18，當回合） | 整檔 22 項通過；`scripts/tests` 421 通過、1 略過（既有 Windows 不可達分支）；`ci-gate.ps1` rc 0（逐軌 1478／2149／421） |
+| 實跑（2026-10-18；整檔為二審重跑，其餘為一審量測） | 整檔 26 項通過；`scripts/tests` 421 通過、1 略過（既有 Windows 不可達分支）；`ci-gate.ps1` rc 0（逐軌 1478／2149／421） |
 
 ## R 條文 → AT 對映
 
@@ -64,4 +64,4 @@
 1. **已知偏離（SCG-4 F-04，P3，主控於 `e73749bf` 接受）**：TCS 的 R1 寫行內 `reconfigure`，R9 與 NFR-001-1 寫「只用標準庫與同目錄 `sdd_version`」；實作改由同目錄 `rfc_lifecycle_lint.force_utf8_stdio()` 重設 stdio（根層 `test_platform_utils_dedup` 的 shrink-only 棘輪不允許再多一份行內實作）。行為等價；TCS 已凍結、不改，本備註為文字面的訂正。
 2. **測試強度缺口（SCG-4 F-02，P2）**：R1 的 stdio 重設與 R7 的「格式先於長度」在現有測試下被改壞也不會轉紅；補強限於在既有測試追加一個 spy 斷言與一個參數值。
 3. **行尾（SCG-4 F-03，P3）**：Windows 上 stdout 文字模式把 `\n` 寫成 `\r\n`；json 與 powershell 形無妨，bash 形供 Git Bash `eval` 時會黏進 `\r`。
-4. 狀態欄 ✅＝測試實跑為綠；整體仍待 SCG-4 二審通過後才算閉環。
+4. 狀態欄 ✅＝測試實跑為綠；SCG-4 二審已 PASS（證據檔 `docs/06_quality/AutoSDD_ZeroTrust_Audit_116.md` §9）。上列備註 2、3 與對映表、NFR 表中的 F-02／F-03 字樣是一審當時的發現紀錄，均已結案（F-02：`322e1351` 補強斷言；F-03：`1c802e92` 改寫位元組並新增子行程測試，掛 AT-001-2-2）。

@@ -135,6 +135,8 @@
 | DF-A／DF-C 修復棒（hooks-ON headless Sonnet，只動測試檔） | `322e1351` | test_webhook_sender `9 passed, 1 warning in 0.51s`；test_sdd_env `23 passed in 0.34s`；ruff 兩檔 `All checks passed!` | 修復棒未跑突變複測（任務書未要求） | 二審由 QA 以 `mutate_all.py dfa dfc` 判 12 存活者是否全殺 |
 | F-03／F-05 主控單人修復 | `1c802e92` | test_sdd_env `26 passed in 0.60s`；ruff 綠；dedup 鎖 OK；編碼鎖 OK；`--shell bash` 原始位元組 CR 5→0；test_webhook_sender `9 passed, 1 warning in 0.46s` | 不用 `reconfigure(newline)`：根層行內 stdio 複本棘輪只准縮不准長 ⇒ 改經 `sys.stdout.buffer` 寫位元組 | 併入 QA 二審 |
 | W4 收尾文件（API_Contract「原樣」例外、Backlog TD-1、ADR-XPLAT-016 附錄 D、§7.1 改號） | `90d911e4` | — | — | §8／§9 於收尾補 |
+| G-116-17 根 router matcher＋ONBOARDING 表① | `d75a38a0` | router r158 OK；hooks liveness OK；context_budget_guard OK；doc_loc_baseline_freshness OK；`sync_onboarding_baselines.py --write` rc=0（loc 18625／rootunit 5326） | PreToolUse 那一格被 auto mode 分類器拒（Self-Modification）⇒ 只套 PostToolUse 半，CLAUDE.md 守衛總表如實記兩半；帳本列（open／partial）撞淨額棘輪（本輪無可結列）⇒ 待掌舵者套上另一半後以 `fixed@` 入帳 | 掌舵者：`/permissions`→r 核准根 `.claude/settings.json` PreToolUse matcher 加 `PowerShell` |
+| W3 QA 二審（`git archive` 匯出 322e1351／90d911e4 量測） | — | 他包回報：DF-A 殺 50/50、DF-C 殺 29/29、存活 0；弱化 0；F-03 拿掉修復 3/3 轉紅、F-05 AST 同；兩鍵 gate rc 0 → RELEASE_READY；新 P4 F-10／F-11（docstring 措辭）、F-12（`encode("utf-8")` 嚴格編碼，理論洞無暴露證據） | 主控裁決：P4 三筆登記不修（成品已過二審，RELEASE_READY→RELEASE 是唯一出邊）；DEF-AC-038 依 115 慣例留證據檔 §4 不另入帳 | RTM 兩檔同步由 QA 補（≈6 行） |
 
 ### 7.1 W1 持有面（互斥；§6 D-116 裁決的派工附表，W1 派工時用）
 
@@ -143,3 +145,33 @@
 | Dev-SDD | `AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py`＋其測試；`AISDLC_SDD/AISDLC_SDD_v0.30/workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md`；`AISDLC_SDD/AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`；`AISDLC_SDD/AISDLC_SDD_v0.30/.claude/skills/{sdd-gate,sdd-review,rtm-generate}/SKILL.md`＋父層鏡像（`sync_exposed_skills.py --write`）；`AISDLC_SDD/scripts/sync_exposed_skills.py`＋`AISDLC_SDD/scripts/tests/test_sync_exposed_skills.py`；`AISDLC_SDD/CLAUDE.md`；`AISDLC_SDD/AISDLC_SDD_v0.30/EVOLUTION_LOG.md`；`AISDLC_SDD/AISDLC_SDD_v0.30/releases/CHANGELOG.md`；`AISDLC_SDD/FRAMEWORK_STATUS.md`（重生） | `AISDLC_SDD/scripts/ci-gate.ps1` rc=0；`framework_status_snapshot.py --check`；`sync_exposed_skills.py --check`；`python tools/run_root_unittests.py`（含 recovery_hint ps-lint 鎖）；`git diff` 對 `transition_rules.py`／`formal/` 為空；`git status` 對其他版本目錄為空 |
 | Dev-DOC | `AutoClaude/CLAUDE.md`（淨 ≤0）；`AgentConsole/CLAUDE.md`（≤200 行） | `check_loc_budget.py --json`；`pytest tests/contract/test_claude_md_*.py`（cwd `AutoClaude/`）；AgentConsole 行數 |
 | 主控 | 根 `.gitignore`；`AutoClaude/.claude/skills`（`--write`）；`ONBOARDING.md`；根 `CLAUDE.md` | 根層全套、`sync_exposed_skills.py --check` |
+
+## §8 零退化矩陣（收尾單人窗口，2026-10-18；數字一律取自主控當回合 tool_result，「他包回報」另標）
+
+| 面 | 載具／來源 | 結果 | 備註 |
+|---|---|---|---|
+| 根層 unittest（`tools/tests`） | `python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`），**最後一次跑在本檔定稿之後**，結果逐字記在收尾 commit 訊息（`git log`） | 收集數 5326（`sync_onboarding_baselines.py --write` 的 `rootunit-baseline-live`） | 守衛鎖逐支：router r158 OK、hooks liveness OK、context_budget_guard OK、doc_loc_baseline_freshness OK、platform_utils_dedup OK、subprocess_encoding_hygiene OK、幽靈路徑鎖 OK、帳本 crossref rc=0（未結 0） |
+| AutoClaude 全套 | 乾淨 venv 載具 `tools/lib/clean_venv_carrier.py`（Windows、`pgextras: absent`、`docker: up`） | `5693 passed / 169 skipped`（ONBOARDING §7 表② Windows 欄同值） | lint-imports 9 kept（d9dc1ff0 列）；`check_loc_budget` total 18625／violations 0（表① live 格）；test_webhook_sender 9 passed |
+| AISDLC_SDD ci-gate 三軌 | 同一載具的 `ci-gate.sh` 逐軌計數自證行 | v0.01 `1478`／v0.30 `2149`／scripts `425` passed | test_sdd_env 26 passed；recovery_hint 46 passed（W1 列） |
+| AgentConsole Engine Bridge | `python -m pytest -q`（cwd `AgentConsole/engine-bridge`）＋ `ruff check AgentConsole/engine-bridge` | `1003 passed, 24 skipped, 1 warning in 458.75s`；ruff `All checks passed!` | DF-B 只動 Bridge；frontend／backend 本輪未動 ⇒ lint／tsc／gradlew **未觸發（N/A）**，不是隨全套通過 |
+| SCG-4 突變鑑別力 | QA `mutate_all.py dfa dfc`（`git archive` 匯出 322e1351／90d911e4） | 他包回報：DF-A 殺 50/50、DF-C 殺 29/29、存活 0 | 一審 12 存活者全轉紅；F-03 拿掉修復 3/3 轉紅 |
+| 三鍵 FSM 終態 | QA `show --must-exist` | 他包回報：三鍵皆 RELEASE_READY；框架真狀態檔 `FSM-STATE-AISDLC_SDD.yaml` 未動（2026-07-16、2417 bytes） | RELEASE 轉態在 push＋雲端綠之後由主控做（`transition_rules.py:69` 唯一出邊） |
+
+## §9 審查閉環・歸格・休眠重評
+
+### 9.1 審查閉環（SCG-4 獨立審查 × 三路 dogfood）
+- DF-B（hooks-ON headless Sonnet）一審 PASS → RELEASE_READY。DF-A（Bridge 委派＋真 haiku）／DF-C（hooks-ON headless Sonnet）一審 FAIL（各一筆 P2：測試鑑別力）→ 兩個只動測試檔的修復棒（`322e1351`）→ 二審 PASS（殺 50/50、29/29）；P3 F-03／F-05 同輪修（`1c802e92`）並經二審複核。QA 新登 P4 三筆（F-10／F-11 docstring 措辭、F-12 嚴格編碼理論洞）：成品已過二審、`RELEASE_READY` 唯一出邊是 `RELEASE` ⇒ **登記不修**，留證據檔 §9；DEF-AC-038（Bridge StepTracker 被日誌遮罩漏配）依 115 慣例住證據檔 §4。
+- 審查形態本身的驗證：QA 以 `git archive` 匯出的 commit 量突變（不量工作樹）——第一次在工作樹量到主控同時在改 `sdd_env.py` 而作廢，是「審查期間主控不動工作樹」（鐵律七檢查表 3）的真實違例，本輪以 QA 重量而不是放過收場。
+
+### 9.2 問題 3 歸格：「AutoClaude、AgentConsole 等模組（含本專案）是否可以完美利用 AISDLC_SDD 流程進行開發？」
+- **答：是（範圍＝Windows／Sonnet 實作＋haiku 委派／單機；Unit 類 AT）**。判準 C1～C7（§2）在 W1 修齊缺口後全部成立，三路 dogfood 各自走完 Stage-1／Stage-2 凍結（digest 綁內容）→ 談判閘 → IMPLEMENTATION（hooks deny 守規格檔）→ SCG-4 獨立審查 → RTM 100% → RELEASE_READY，三個鍵的狀態檔各住自家 `build/reports/fsm`（`.gitignore` 已收）、框架真狀態檔零變。
+- 「完美」的誠實劃界（不是本輪沒做完，是結構上的邊界）：(1) Java／TS 面走 session-only（AT 由 `gradlew test --tests`／`vitest run -t` 自跑、逐字貼證據，D-116 裁決）；(2) 委派徑的 evaluator 白名單不擴（D-116）；(3) 一個 hooks-ON 視窗同時只綁一個功能（規格檔 deny 看路徑子字串）；(4) G-116-17 的 PreToolUse 半格待掌舵者本人套上（分類器 Self-Modification）。
+- 問題 1／2 上輪已答、本輪不重答，可從提示詞拿掉；問題 3 本輪答畢，下輪提示詞亦可拿掉。
+
+### 9.3 休眠重評（範本〈🏁 終止條件・休眠・再開〉T1～T4）
+- T1（掌舵者明示新需求）＝本輪的問題 3，已消化；T2～T4 本輪結束時無一成立 ⇒ **軌道① 回休眠**：不開 117、不產四件套，直接做產品工作；掌舵者可隨時以 T1 推翻。
+- 下一個會自然觸發的事件不是迭代輪而是產品工作：用 BRIDGE §8 的 SOP 開下一個功能鍵（`python AISDLC_SDD/scripts/sdd_env.py --sub <sub> --slug <功能> --shell powershell`）。
+
+### 9.4 收尾清單（本檔定稿時的實況）
+- 已做：`%TEMP%\e2e` 刪除、Docker 懸空卷 49 個與 `aisdlc_*` 卷清空（`docker volume ls` 現查 0 筆 aisdlc）、scratchpad 於 push 後刪除、記憶檔更新。
+- 待掌舵者：`D:\w5e2e`（工具層受保護路徑擋下兩次，不繞過；`rmdir /s /q D:\w5e2e`）；根 `.claude/settings.json` 第 60 行 PreToolUse matcher 加 `PowerShell`（`/permissions`→Recently denied→`r`），之後帳本補一列 `fixed@`（編號屆時取現存最大號＋1；本輪不先立號，立了就是未結列、撞淨額棘輪）、根 CLAUDE.md 守衛總表列改回兩格齊。
