@@ -1892,7 +1892,7 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # 恆 exit 0 不出聲／detached 子行程故不阻塞開場／缺 planner 即 fail-open。
     ("SessionStart", ".claude/hooks/context_budget_guard.py"): frozenset({"*"}),
     ("PreToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
-        {"Write", "Edit", "Read", "Bash", "NotebookEdit", "Task"}),
+        {"Write", "Edit", "Read", "Bash", "PowerShell", "NotebookEdit", "Task"}),
     ("PreToolUse", ".claude/hooks/lint_powershell_command.py"): frozenset(
         {"PowerShell"}),
     ("PreToolUse", ".claude/hooks/block_bash_on_windows.py"): frozenset({"Bash"}),
@@ -1901,7 +1901,7 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PreToolUse", ".claude/hooks/block_destructive_git.py"): frozenset(
         {"Bash", "PowerShell", "Write", "Edit", "NotebookEdit"}),
     ("PostToolUse", ".claude/hooks/sdd_hook_router.py"): frozenset(
-        {"Write", "Edit", "Read", "Bash", "NotebookEdit"}),
+        {"Write", "Edit", "Read", "Bash", "PowerShell", "NotebookEdit"}),
     # 🔴 QA M4 打的就是下面這兩支共用的那個 `Write|Edit` 條目。
     ("PostToolUse", "AutoClaude/tools/hooks/check_ps1_encoding.py"): frozenset(
         {"Write", "Edit"}),
