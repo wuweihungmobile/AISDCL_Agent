@@ -1,304 +1,177 @@
 ---
 name: compliance-audit
-description: 執行合規審查，涵蓋 GDPR、HIPAA、PCI-DSS、SOC 2、ISO 27001 等標準
+description: 合規審查，合規需求對應 FRD NFR-COMP，驗收清單對應 RTM TC，SCG-5 閘門依據
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<standard: 合規標準 (gdpr/hipaa/pci-dss/soc2/iso27001/all)> [scope: 審查範圍 (full/data/access/privacy)]"
+argument-hint: "<standard: gdpr|hipaa|pci-dss|soc2|iso27001|all> [scope: full|data|access|privacy]"
 allowed-tools:
   - Read
   - Grep
   - Glob
-  - Bash
 ---
 
-# Compliance Audit Skill
+# Compliance Audit Skill（SDD 原生）
 
-基於 AISDLC Compliance Officer Agent 的合規審查技能，支援多種國際合規標準。
+合規在 SDD 中是規格驅動的：合規需求必須在 FRD 中以 NFR-COMP-XXX 格式量化，每個合規要求必須有對應的 TC（測試案例）在 RTM 中追蹤，合規缺口報告是 SCG-5 閘門的必要依據之一。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/compliance-audit gdpr              # GDPR 合規審查
-/compliance-audit hipaa             # HIPAA 合規審查
-/compliance-audit pci-dss           # PCI-DSS 合規審查
-/compliance-audit soc2              # SOC 2 準備度檢查
-/compliance-audit iso27001          # ISO 27001 準備度檢查
-/compliance-audit all               # 全面合規審查
-/compliance-audit gdpr privacy      # GDPR 隱私專項
+/compliance-audit gdpr
+/compliance-audit pci-dss
+/compliance-audit all
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 FRD NFR-COMP 存在 | 合規需求已量化 | `docs/01_requirements/FRD-{System}.md` 中 NFR-COMP-XXX 節 |
+| RTM 建立 | 合規 TC 已建立 | `docs/03_testing/RTM-{System}.md` 中含 TC-COMP-XXX |
+| STRIDE 完成 | 安全威脅已分析 | `docs/06_quality/security/STRIDE-{System}.md` 存在 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 範圍確定 🔴
+### 階段 1：讀取合規需求（FRD NFR-COMP）
 
-**任務清單**:
-1. 識別適用法規：
-   - 業務所在地域（EU → GDPR、US Healthcare → HIPAA）
-   - 資料類型（個人資料、健康資訊、支付卡資料）
-   - 行業要求（金融、醫療、電商）
+讀取 `docs/01_requirements/FRD-{System}.md` 的合規需求章節：
 
-2. 定義評估範圍：
-   - 涵蓋的系統和應用
-   - 資料流和處理活動
-   - 地理覆蓋範圍
-
-3. 🔴 **確認點**: 向使用者確認：
-   - 適用的合規標準正確嗎？
-   - 評估範圍是否完整？
-   - 是否有即將到來的稽核時程？
-
----
-
-### 階段 2: 自動化掃描
-
-**依賴和配置檢查**:
-```bash
-# 檢查敏感資料處理
-grep -r "password\|secret\|api.key\|token" --include="*.ts" --include="*.js" .
-
-# 檢查加密配置
-grep -r "AES\|RSA\|bcrypt\|argon2\|crypto" --include="*.ts" --include="*.js" .
-
-# 檢查日誌是否包含敏感資料
-grep -r "console\.log.*password\|console\.log.*token" --include="*.ts" --include="*.js" .
-```
-
-**環境變數安全**:
-```bash
-# 檢查 .env 是否被 git 追蹤
-git ls-files | grep -E "\.env$|\.env\."
-
-# 檢查硬編碼的密鑰
-grep -r "sk_live\|pk_live\|AKIA" --include="*.ts" --include="*.js" --include="*.json" .
-```
-
----
-
-### 階段 3: GDPR 檢查清單
-
-#### 資料主體權利實現
-
-- [ ] **存取權 (Art. 15)** - 使用者可匯出個人資料
-- [ ] **更正權 (Art. 16)** - 使用者可更新個人資料
-- [ ] **刪除權 (Art. 17)** - 帳戶刪除功能
-- [ ] **資料可攜權 (Art. 20)** - JSON/CSV 匯出
-- [ ] **反對權 (Art. 21)** - 行銷退出機制
-
-**實作範例**:
-```typescript
-// ✅ DSAR API 端點
-app.get('/api/user/data-export', auth, async (req, res) => {
-  const userData = await collectAllUserData(req.user.id);
-  res.json({
-    format: 'GDPR_EXPORT',
-    generatedAt: new Date().toISOString(),
-    data: userData
-  });
-});
-
-// ✅ 帳戶刪除
-app.delete('/api/user/account', auth, async (req, res) => {
-  await scheduleAccountDeletion(req.user.id, 30); // 30天寬限期
-  res.json({ message: 'Account scheduled for deletion' });
-});
-```
-
-#### 同意管理
-
-- [ ] 明確同意機制（非預勾選）
-- [ ] 同意記錄保存
-- [ ] 撤回同意功能
-- [ ] Cookie 同意橫幅
-
-#### 資料保護
-
-- [ ] 傳輸加密 (TLS 1.2+)
-- [ ] 儲存加密
-- [ ] 最小化資料收集
-- [ ] 資料保留政策
-
----
-
-### 階段 4: HIPAA 檢查清單
-
-#### Administrative Safeguards
-
-- [ ] 指定隱私專員 (Privacy Officer)
-- [ ] 指定安全專員 (Security Officer)
-- [ ] 員工培訓記錄
-- [ ] 業務夥伴協議 (BAA)
-- [ ] 風險評估文件
-
-#### Technical Safeguards
-
-- [ ] 唯一使用者識別
-- [ ] 自動登出機制
-- [ ] 稽核控制 (Audit Logs)
-- [ ] ePHI 加密
-- [ ] 完整性控制
-
-**稽核日誌範例**:
-```typescript
-// ✅ PHI 存取日誌
-const auditLog = {
-  timestamp: new Date().toISOString(),
-  userId: user.id,
-  action: 'VIEW_PHI',
-  resourceType: 'PatientRecord',
-  resourceId: patientId,
-  ipAddress: req.ip,
-  outcome: 'SUCCESS'
-};
-await saveAuditLog(auditLog);
-```
-
-#### Physical Safeguards
-
-- [ ] 設施存取控制
-- [ ] 工作站安全政策
-- [ ] 裝置媒體控制
-
----
-
-### 階段 5: PCI-DSS 檢查清單
-
-#### 網路安全
-
-- [ ] 防火牆配置
-- [ ] 網路區隔 (CDE 隔離)
-- [ ] 變更預設密碼
-
-#### 持卡人資料保護
-
-- [ ] PAN 不明文儲存
-- [ ] 使用加密或 Token 化
-- [ ] 傳輸加密 (TLS 1.2+)
-
-**Token 化範例**:
-```typescript
-// ❌ 不合規 - 儲存完整 PAN
-await db.save({ cardNumber: '4111111111111111' });
-
-// ✅ 合規 - 使用 Stripe Token
-const token = await stripe.tokens.create({ card: cardDetails });
-await db.save({ stripeTokenId: token.id, last4: '1111' });
-```
-
-#### 存取控制
-
-- [ ] 最小權限原則
-- [ ] 唯一使用者 ID
-- [ ] MFA 實施
-
-#### 監控與測試
-
-- [ ] 稽核軌跡
-- [ ] 日誌集中管理
-- [ ] 每季漏洞掃描
-- [ ] 每年滲透測試
-
----
-
-### 階段 6: SOC 2 / ISO 27001 準備度
-
-#### 信任服務準則 (SOC 2)
-
-| 準則 | 狀態 | 證據 |
-|------|------|------|
-| Security | ⬜ | 存取控制、加密、監控 |
-| Availability | ⬜ | SLA、備援、災復 |
-| Processing Integrity | ⬜ | 輸入驗證、錯誤處理 |
-| Confidentiality | ⬜ | 資料分類、加密 |
-| Privacy | ⬜ | 隱私政策、同意 |
-
-#### ISO 27001 ISMS
-
-- [ ] 資訊安全政策
-- [ ] 風險評估文件
-- [ ] 適用性聲明 (SoA)
-- [ ] 內部稽核計畫
-- [ ] 管理審查記錄
-
----
-
-### 階段 7: 缺口分析報告 🔴
-
-**報告結構**:
 ```markdown
-## 合規審查報告
+## 合規需求提取（NFR-COMP）
 
-### 執行摘要
-- 審查日期: YYYY-MM-DD
-- 審查標準: [標準清單]
-- 整體合規狀態: X%
-
-### 缺口摘要
-
-#### 🔴 P0 - 關鍵缺口 (需立即處理)
-| 法規 | 要求 | 現狀 | 缺口 | 補救措施 | 估計工時 |
-|------|------|------|------|----------|---------|
-| GDPR Art.17 | 刪除權 | 無 | 完全缺失 | 實作帳戶刪除 API | 16h |
-
-#### 🟡 P1 - 高優先級 (1-3個月)
-...
-
-#### ⚪ P2 - 中優先級 (6個月)
-...
-
-### 補救路線圖
-1. Week 1-2: 處理 P0 缺口
-2. Month 1-3: 處理 P1 缺口
-3. Month 3-6: 處理 P2 缺口
-
-### 下次稽核準備建議
+| NFR-COMP ID | 合規標準 | 條款 | 需求描述 | TC 覆蓋 |
+|------------|---------|------|---------|---------|
+| NFR-COMP-001 | GDPR | Art.17 | 用戶刪除權：30 天內完成 | TC-COMP-001 |
+| NFR-COMP-002 | GDPR | Art.15 | 資料匯出：JSON 格式，24h 內 | TC-COMP-002 |
+| NFR-COMP-003 | PCI-DSS | Req.3 | PAN 禁止明文儲存 | TC-COMP-003 |
 ```
-
-🔴 **確認點**: 與使用者確認缺口優先級排序
 
 ---
 
-## 產出物
+### 階段 2：Compliance Matrix 產出
 
-| 產出物 | 說明 |
-|--------|------|
-| 合規缺口分析報告 | 完整缺口清單與補救計畫 |
-| 合規檢查清單 | 依標準分類的檢查項目 |
-| 補救路線圖 | 時程與責任分配 |
-| 隱私政策草稿 | GDPR 合規的隱私政策 (如需要) |
-| 稽核證據清單 | 已收集的合規證據 |
+**文件路徑**：`docs/06_quality/security/COMPLIANCE-MATRIX-{SystemName}.md`
+
+```markdown
+# Compliance Matrix — {SystemName}
+
+**適用標準**: {GDPR / PCI-DSS / HIPAA / SOC2 / ISO 27001}
+**版本**: {N}.{N}
+**狀態**: Draft → Validated（SCG-5 前）
+
+## 合規矩陣
+
+| 要求 ID | 條款 | GDPR | PCI-DSS | ISO 27001 | NFR-COMP ID | 實作狀態 | TC ID | 證據 |
+|--------|------|------|---------|-----------|------------|---------|-------|------|
+| CMP-001 | 資料刪除 | Art.17 | — | A.8.3 | NFR-COMP-001 | 已實作 | TC-COMP-001 | API /user DELETE |
+| CMP-002 | 資料加密 | Art.32 | Req.3 | A.10.1 | NFR-COMP-003 | 已實作 | TC-COMP-003 | AES-256 配置 |
+| CMP-003 | 存取日誌 | Art.30 | Req.10 | A.9.4 | NFR-COMP-004 | 進行中 | TC-COMP-004 | Audit Log 設計 |
+```
+
+---
+
+### 階段 3：合規缺口分析
+
+依各標準執行缺口分析，對照 FRD NFR-COMP 清單：
+
+**GDPR 關鍵確認點**：
+- [ ] Art.15 資料主體存取權（對應 NFR-COMP-XXX）
+- [ ] Art.17 刪除權（對應 NFR-COMP-XXX）
+- [ ] Art.20 資料可攜權（對應 NFR-COMP-XXX）
+- [ ] Art.32 安全措施（對應 STRIDE SAD）
+- [ ] 同意管理記錄（對應 FRD 同意功能需求）
+
+**PCI-DSS 關鍵確認點**：
+- [ ] Req.3 PAN 不明文儲存（對應 NFR-COMP-XXX）
+- [ ] Req.6 漏洞管理（對應 security-audit 結果）
+- [ ] Req.10 存取日誌（對應 NFR-COMP-XXX）
+- [ ] Req.12 資訊安全政策文件
+
+---
+
+### 階段 4：合規審查報告產出
+
+**文件路徑**：`docs/06_quality/security/COMPLIANCE-AUDIT-REPORT-{SystemName}-{date}.md`
+
+```markdown
+# 合規審查報告 — {SystemName}
+
+**審查日期**: {YYYY-MM-DD}
+**審查標準**: {標準清單}
+**FRD 合規需求**: {NFR-COMP 總數} 項
+**整體合規率**: {X}%（對應 RTM TC 通過率）
+
+## 缺口摘要
+
+### P0 - 關鍵缺口（阻擋 SCG-5）
+| CMP ID | NFR-COMP | 條款 | 現狀 | 缺口 | RTM TC | 修復負責人 |
+|--------|---------|------|------|------|--------|----------|
+
+### P1 - 高優先（SCG-5 前修復）
+| CMP ID | NFR-COMP | 條款 | 現狀 | 缺口 | RTM TC | 目標日期 |
+|--------|---------|------|------|------|--------|---------|
+
+## RTM 覆蓋率（合規 TC）
+- NFR-COMP 總數: {N}
+- 有 TC 覆蓋: {N}（應達 100%）
+- TC 通過: {N}
+
+## SCG-5 合規閘門結論
+- [ ] 所有 P0 缺口已修復
+- [ ] RTM 合規 TC 100% 覆蓋
+- [ ] Compliance Matrix 已完成
+- → SCG-5 合規部分: **Pass / Fail**
+```
+
+---
+
+### 階段 5：RTM 更新與 SCG-5 準備 🔴
+
+```bash
+/rtm-generate update    # 更新合規 TC 狀態（TC-COMP-XXX）
+/spec-compliance-check docs/06_quality/security/COMPLIANCE-MATRIX-{System}.md
+/sdd-gate SCG-5         # 提交合規驗證證據
+```
+
+🔴 確認點：P0 缺口修復後，Compliance Matrix 100% 覆蓋，才可執行 SCG-5。
+
+---
+
+## 強制產出（SDD 文件）
+
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Compliance Matrix | `docs/06_quality/security/COMPLIANCE-MATRIX-{System}.md` | SCG-5 前 |
+| 合規審查報告 | `docs/06_quality/security/COMPLIANCE-AUDIT-REPORT-{System}.md` | SCG-5 |
+
+---
+
+## 後置動作
+
+```
+/rtm-generate verify    # 確認合規 TC 全部通過
+/sdd-gate SCG-5         # 合規通過後提交閘門
+```
+
+🔷 **本 Skill 協助通過**：SCG-5（合規驗收）
 
 ---
 
 ## 相關 Skill
 
-- `/security` - 安全審計（技術層面）
-- `/integration-oauth` - 認證合規
-- `/documentation-api` - API 文檔合規
+- `/security-audit` — STRIDE 威脅模型（合規的安全基礎）
+- `/sa-analyst` — FRD NFR-COMP 定義（合規需求的規格依據）
+- `/rtm-generate` — 合規 TC 追蹤
+- `/sdd-gate SCG-5` — 交付閘門（合規為必要條件）
 
 ---
 
-## 相關檔案
-
-- Agent 參考: `agent/specialized/compliance-officer-zh.yaml`
-- SOP 參考: `scenarios/security/SOP_QuickRef.md`
-
----
-
-## 支援標準摘要
-
-| 標準 | 全名 | 適用情境 |
-|------|------|---------|
-| GDPR | General Data Protection Regulation | 處理 EU 居民個人資料 |
-| HIPAA | Health Insurance Portability and Accountability Act | 美國醫療資料 |
-| PCI-DSS | Payment Card Industry Data Security Standard | 支付卡資料處理 |
-| SOC 2 | System and Organization Controls | SaaS 服務供應商 |
-| ISO 27001 | Information Security Management System | 資訊安全認證 |
-
----
-
-**基於**: AISDLC v0.09 Compliance Officer Agent
-**維護者**: AISDLC Framework Team
+**基於**: AISDLC-SDD v0.30
+**對應 CI/CD 規格**: `cicd/SDD_SECURITY_CICD.md`
+**SDD Enhancement**: `scenarios/security/SDD_SECURITY_ENHANCEMENT.md`

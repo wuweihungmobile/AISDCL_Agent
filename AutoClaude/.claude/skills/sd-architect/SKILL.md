@@ -1,9 +1,9 @@
 ---
-name: sd-design
-description: 以 System Designer 角色設計系統架構，產出 SRD 和 API 規格
+name: sd-architect
+description: 以 System Designer 角色設計系統架構，產出 SRD、C4 圖和 ADR，準備 SCG-1/SCG-2 架構閘門
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[scope: 設計範圍 (full/api/database/infrastructure)] [source: 來源文件 (frd/requirements/existing-system)]"
+argument-hint: "[scope: full|api|c4|adr] [scenario: greenfield|brownfield|refactoring]"
 allowed-tools:
   - Read
   - Write
@@ -11,274 +11,241 @@ allowed-tools:
   - Glob
 ---
 
-# SD System Architect Skill
+# SD 系統架構設計 Skill（SDD 原生）
 
-基於 AISDLC SD Agent (Marcus) 的系統架構設計技能。
+SD 在 SDD 工作流中負責從 FRD 到可執行架構的轉化。本 Skill 產出 SRD、C4 模型、ADR，以及 API Spec 草稿，分別對應 SCG-1（設計凍結）和 SCG-2（架構凍結）兩個閘門。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/sd-design                     # 開始系統設計
-/sd-design api                 # API 規格設計
-/sd-design database            # 資料庫設計
-/sd-design infrastructure      # 基礎設施架構
+/sd-architect                         # 完整架構設計（Greenfield 全流程）
+/sd-architect api                     # 僅 API 端點設計
+/sd-architect c4                      # 僅 C4 架構圖設計
+/sd-architect adr                     # 補建架構決策 ADR
+/sd-architect brownfield              # Brownfield：As-Is → To-Be 架構設計
+/sd-architect refactoring             # Refactoring：現有架構評估與改善設計
 ```
 
 ---
 
-## SD 角色定義
+## 前置條件（SDD Spec-First）
 
-**角色**: Marcus (SD-Architect)
-**專長**: 系統架構設計、API 規格、資料庫建模、技術選型
-**核心原則**:
-- 架構卓越：設計可擴展、可維護的系統
-- 需求對齊：技術方案直接支援功能需求
-- 安全優先：將安全考量納入所有決策
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-0 通過 | FRD 已凍結，需求明確 | `/sdd-gate SCG-0` 報告存在 |
+
+> Brownfield 情境額外需要：`docs/02_architecture/AS-IS-SRD-{System}.md`（來自 `/brownfield-analysis`）
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求技術分析 🔴
+### 階段 1：技術需求分析
 
-**任務**:
-1. 接收並分析 FRD
-2. 評估技術可行性
-3. 識別技術約束和風險
-4. 確認非功能性需求
+讀取前置文件：
+- `docs/01_requirements/FRD-{SystemName}.md`
+- `docs/03_testing/RTM-{SystemName}.md`（確認 NFR 量化指標）
 
-**技術評估問題**:
+技術評估確認（🔴 確認點）：
+
 ```markdown
-## 技術評估確認
+## 技術評估確認問題
 
-### 功能需求
-- Q1: 核心功能的技術複雜度？
-- Q2: 是否有特殊技術需求（即時、高並發、大數據）？
-
-### 整合需求
-- Q3: 需要整合哪些外部系統？
-- Q4: 資料交換格式和協議？
-
-### 非功能性需求
-- Q5: 效能目標（回應時間、吞吐量）？
-- Q6: 可用性需求（SLA、災難復原）？
-- Q7: 安全性等級要求？
-
-### 技術約束
-- Q8: 現有技術堆疊限制？
-- Q9: 預算和資源約束？
-- Q10: 部署環境限制？
+- Q1: 核心功能的技術複雜度？是否有即時/高並發/大數據需求？
+- Q2: 需整合的外部系統清單（影響整合架構決策）？
+- Q3: NFR 效能目標（P99/吞吐量）？
+- Q4: 可用性 SLA？單點故障容忍度？
+- Q5: 安全等級（資料分類/合規要求）？
+- Q6: 現有技術棧約束（若 Brownfield）？
+- Q7: 部署環境限制（雲/地端/混合）？
 ```
 
-🔴 **必須確認**: 在開始設計前，確保技術需求清晰
+🔴 技術評估問題必須有答案才進入設計。
 
 ---
 
-### 階段 2: 系統架構設計
+### 階段 2：C4 架構圖設計（SCG-2 必要條件）
 
-**架構設計流程**:
+#### C4 Level 1 — Context（系統邊界）
 
 ```markdown
-## 架構設計步驟
+## C4 Context — {SystemName}
 
-### 1. 高層架構 (C4 Level 1: Context)
-- 系統邊界定義
-- 外部系統和使用者識別
-- 主要資料流
+**說明**: 系統與外部角色/系統的關係
 
-### 2. 容器架構 (C4 Level 2: Container)
-- 應用容器（Web、API、Worker）
-- 資料儲存（Database、Cache、Queue）
-- 外部服務依賴
+### 使用者
+- {角色 A}: {如何與系統互動}
+- {角色 B}: {如何與系統互動}
 
-### 3. 元件架構 (C4 Level 3: Component)
-- 模組劃分
-- 元件職責定義
-- 元件間介面
+### 外部系統
+- {外部系統 A}: {整合方式，ADR-XXX}
+- {外部系統 B}: {整合方式，ADR-XXX}
+
+[附 PlantUML/Mermaid 圖表]
 ```
 
-**架構決策記錄 (ADR)**:
+#### C4 Level 2 — Container（主要組件）
+
 ```markdown
-## ADR-001: [決策標題]
+## C4 Container — {SystemName}
 
-### 狀態
-Proposed | Accepted | Deprecated
+| 容器 | 技術 | 說明 | ADR |
+|------|------|------|-----|
+| Web App | {框架} | {用途} | ADR-{NNN} |
+| API Server | {框架} | {用途} | ADR-{NNN} |
+| Database | {DB} | {用途} | ADR-{NNN} |
+| Cache | {Redis/等} | {用途} | ADR-{NNN} |
 
-### 背景
-[為什麼需要做這個決策]
-
-### 決策
-[選擇的方案]
-
-### 考慮的選項
-1. [選項 A] - 優點/缺點
-2. [選項 B] - 優點/缺點
-3. [選項 C] - 優點/缺點
-
-### 後果
-- 正面：[好處]
-- 負面：[代價]
-- 風險：[潛在風險]
+[附容器架構圖]
 ```
 
 ---
 
-### 階段 3: SRD 文檔撰寫
+### 階段 3：架構決策（ADR）產出
 
-**SRD 結構**:
+**每個重大技術選型必須有 ADR**。直接呼叫 `/adr-generate`：
+
+```bash
+/adr-generate "技術棧選型 — Backend Framework"
+/adr-generate "資料庫選型"
+/adr-generate "認證機制選型"
+/adr-generate "部署策略"
+# ... 依決策數量重複
+```
+
+ADR 類型清單（需確認全部覆蓋）：
+- [ ] 後端框架選型 ADR
+- [ ] 資料庫選型 ADR
+- [ ] 認證/授權機制 ADR
+- [ ] 部署策略 ADR
+- [ ] 整合策略 ADR（若有第三方整合）
+- [ ] 安全架構 ADR（Security 情境）
+- [ ] Strangler Fig / Branch by Abstraction ADR（Refactoring 情境）
+
+---
+
+### 階段 4：SRD 文件產出（SCG-1 必要條件）
+
+**文件路徑**：`docs/02_architecture/SRD-{SystemName}.md`
+**範本來源**：`docs_template/core/srd/SRD_Module_Template.md`
 
 ```markdown
-# System Requirements Document
+# System Requirements Document — {SystemName}
 
-## 文件資訊
-- **SRD-ID**: SRD-{{project}}-{{seq}}
-- **版本**: 1.0
-- **狀態**: Draft
-- **來源**: FRD-{{frd_id}}
+**SRD-ID**: SRD-{System}-{seq}
+**版本**: 1.0
+**日期**: {YYYY-MM-DD}
+**狀態**: Draft → Approved
+**來源**: FRD-{SystemName}.md（via SCG-0）
 
 ## 1. 系統概述
-### 1.1 系統目的
-### 1.2 系統範圍
-### 1.3 系統架構圖
+### 1.1 目的與範圍
+### 1.2 架構決策摘要（引用 ADR-XXX）
 
-## 2. 架構設計
-### 2.1 高層架構
-### 2.2 技術堆疊
-| 層級 | 技術 | 版本 | 說明 |
-|------|------|------|------|
-| Frontend | React | 18.x | SPA 框架 |
-| Backend | Node.js | 20.x | API 伺服器 |
-| Database | PostgreSQL | 15.x | 主資料庫 |
+## 2. C4 架構模型
+- [C4 Context 圖](../diagrams/C4-Context-{System}.md)
+- [C4 Container 圖](../diagrams/C4-Container-{System}.md)
 
-### 2.3 部署架構
+## 3. 技術棧
+| 層級 | 技術 | 版本 | ADR |
+|------|------|------|-----|
+| Backend | {框架} | {版本} | ADR-{NNN} |
+| Database | {DB} | {版本} | ADR-{NNN} |
+| Cache | {Redis} | {版本} | ADR-{NNN} |
 
-## 3. 模組設計
-### 3.1 [模組名稱]
-- **職責**: [模組職責]
-- **介面**: [對外介面]
-- **依賴**: [依賴模組]
+## 4. 模組設計
+### {模組 A}
+- **職責**: {說明}
+- **介面**: {對外 API}
+- **依賴**: {依賴模組}
 
-## 4. 資料設計
-### 4.1 資料模型
-### 4.2 資料庫設計
-### 4.3 資料遷移策略
+## 5. 資料模型設計
+{ER 圖或表格}
 
-## 5. API 設計
-- 詳見 API 規格文件
+## 6. API 端點清單（草稿）
+| API-ID | Method | Path | 說明 | 認證 |
+|--------|--------|------|------|------|
+| API-001 | POST | /{resource} | {說明} | Bearer |
 
-## 6. 非功能性設計
-### 6.1 效能設計
-### 6.2 安全設計
-### 6.3 可用性設計
+（詳細規格由 `/contract-generate` 產出）
 
-## 7. 追蹤矩陣
-| SRD 需求 | FRD 來源 | API 規格 |
-|----------|----------|----------|
-| SRD-001 | F-001 | API-001 |
+## 7. NFR 設計對應
+| NFR-ID | 指標 | 設計方案 |
+|--------|------|---------|
+| NFR-001 | P99 < {N}ms | {快取/索引/負載均衡策略} |
+
+## 8. 部署架構
+{部署圖說明}
+
+## 9. Brownfield 情境：Before/After 對比
+（僅 Brownfield/Refactoring 情境填寫）
+| 組件 | As-Is | To-Be | ADR |
+|------|-------|-------|-----|
+
+## 10. 安全設計（Security 情境）
+- Trust Boundary Map（ADR-{NNN}）
+- {STRIDE 威脅模型引用}
 ```
 
 ---
 
-### 階段 4: API 規格設計
+### 階段 5：RTM 更新（嵌入流程）
 
-**API 規格模板 (OpenAPI)**:
+SRD 完成後執行 RTM 更新，加入 API 追溯：
 
-```yaml
-openapi: 3.0.3
-info:
-  title: {{module_name}} API
-  version: 1.0.0
-
-paths:
-  /api/v1/{{resource}}:
-    get:
-      summary: 取得{{resource}}列表
-      operationId: get{{Resource}}List
-      parameters:
-        - name: page
-          in: query
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/{{Resource}}List'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
-components:
-  schemas:
-    {{Resource}}:
-      type: object
-      properties:
-        id:
-          type: string
-          format: uuid
-      required: [id]
+```bash
+/rtm-generate update docs/02_architecture/SRD-{SystemName}.md
 ```
 
-**API 設計原則**:
-- RESTful 設計規範
-- 統一錯誤回應格式
-- 版本控制策略 (v1, v2)
-- 認證和授權機制
+---
+
+### 階段 6：文件驗證與閘門準備 🔴
+
+1. 執行 `/spec-compliance-check docs/02_architecture/SRD-{SystemName}.md`
+2. 執行 `/spec-compliance-check SCG-1`（確認 SRD + API Spec 草稿完整）
+3. 若 SCG-1 通過 → 繼續 C4 + ADR → 執行 `/spec-compliance-check SCG-2`
+4. 🔴 確認點：架構設計必須由開發團隊確認技術可行性
 
 ---
 
-### 階段 5: 驗證與交接 🔴
+## 強制產出（SDD 文件）
 
-**驗證清單**:
-- [ ] 架構涵蓋所有 FRD 需求
-- [ ] 技術選型有明確理由
-- [ ] 非功能性需求已設計
-- [ ] API 規格完整且一致
-- [ ] 資料庫設計完整
-- [ ] 安全設計已納入
-
-🔴 **確認點**:
-1. 與 SA 確認架構滿足功能需求
-2. 與 Dev 確認技術可行性
-3. 確認是否有遺漏的技術考量
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| SRD（Greenfield） | `docs/02_architecture/SRD-{SystemName}.md` | SCG-1 |
+| AS-IS SRD（Brownfield） | `docs/02_architecture/AS-IS-SRD-{SystemName}.md` | SCG-1 |
+| C4 Context 圖 | `docs/02_architecture/diagrams/C4-Context-{System}.md` | SCG-2 |
+| C4 Container 圖 | `docs/02_architecture/diagrams/C4-Container-{System}.md` | SCG-2 |
+| ADR（每個架構決策） | `docs/02_architecture/adr/ADR-{NNN}-{title}.md` | SCG-2 |
+| API 端點清單（草稿） | SRD 第 6 章（正式 Contract 由 /contract-generate 產出） | SCG-1 草稿 |
 
 ---
 
-## 產出物清單
+## 後置動作
 
-| 產出物 | 路徑 | 說明 |
-|--------|------|------|
-| SRD | `docs/02_architecture/SRD_{{module}}.md` | 系統需求文件 |
-| API 規格 | `docs/02_architecture/API_{{module}}.yaml` | OpenAPI 規格 |
-| 架構圖 | `docs/02_architecture/diagrams/` | C4 架構圖 |
-| ADR | `docs/02_architecture/adr/` | 架構決策記錄 |
+```
+/adr-generate                          # 補建任何遺漏的 ADR
+/sdd-gate SCG-1                        # 設計凍結閘門
+/sdd-gate SCG-2                        # 架構凍結閘門（ADR 全部 Accepted 後）
+/contract-generate openapi "{Module}"  # SCG-2 通過後，開始 Contract 設計
+```
 
----
-
-## 協作 Agent
-
-SD 在設計過程中需要：
-- **SA**: 確認功能需求理解正確
-- **Dev**: 評估實作可行性
-- **QA**: 確認可測試性
+🔷 **本 Skill 協助通過**：SCG-1（Architecture Spec Gate）、SCG-2（Architecture Freeze Gate）
 
 ---
 
 ## 相關 Skill
 
-- `/sa-analyze` - SA 需求分析
-- `/qa-test` - QA 測試策略
-- `/performance` - 效能優化
-- `/security` - 安全審查
+- `/sa-analyst` — 需求分析（本 Skill 的前置）
+- `/adr-generate` — 架構決策（在本 Skill 中呼叫）
+- `/contract-generate` — API Contract（SCG-2 通過後接棒）
+- `/brownfield-analysis` — Brownfield 場景 As-Is 分析
+- `/sdd-gate SCG-2` — 架構凍結閘門
 
 ---
 
-
-## 相關檔案
-
-- Agent 定義: `agent/core/05.sd-architect-zh.yaml`
-
-**基於**: AISDLC v0.09 SD Agent
+**基於**: AISDLC-SDD v0.30
+**對應 Agent**: `05.sd-architect-zh.yaml`
+**對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

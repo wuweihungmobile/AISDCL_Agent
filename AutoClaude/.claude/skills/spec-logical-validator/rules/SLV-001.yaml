@@ -1,0 +1,31 @@
+id: SLV-001
+name: "NFR 物理可行性"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified                   # verified | proposed | external（Phase E M4 新增）
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: nfr
+purpose: "確保所有效能 / 容量指標在物理上可達"
+
+scan_targets:
+  - "docs/01_requirements/FRD-*.md"
+  - "docs/02_architecture/SRD-*.md"
+
+required_qualifiers:
+  - "response_time_ms 必須 > 0"
+  - "throughput_rps 必須 > 0"
+  - "availability_percent 必須 ≤ 100"
+  - "error_rate_percent 必須 ≥ 0 且 ≤ 100"
+  - "storage_gb 必須 > 0"
+  - "max_concurrent_users 必須 > 0"
+
+failure_examples:
+  - "response_time_ms: 0"
+  - "availability: 101%"
+
+pass_examples:
+  - "response_time_ms: 200"
+  - "availability: 99.95%"
+
+severity: CRITICAL
+blocks_scg: true

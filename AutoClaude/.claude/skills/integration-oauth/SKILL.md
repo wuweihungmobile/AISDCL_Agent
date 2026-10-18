@@ -1,20 +1,19 @@
 ---
 name: integration-oauth
-description: 設計並實作 OAuth 2.0 認證整合，支援 Google/GitHub/Auth0 等提供者
+description: OAuth 2.0 認證整合，整合設計先行，ADR 記錄 Provider 選型，Consumer Contract 測試，RTM 追蹤
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<provider: OAuth 提供者 (google/github/auth0/custom)> [framework: 使用的框架 (nextjs/express/fastapi/spring)]"
+argument-hint: "<provider: google|github|auth0|custom> [framework: nextjs|express|fastapi|spring]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Integration OAuth Skill
+# Integration OAuth Skill（SDD 原生）
 
-基於 AISDLC Integration 情境的 OAuth 2.0 認證整合技能。
+OAuth 整合在 SDD 中屬於「整合設計先行」範疇：Provider 選型需有 ADR，認證端點需在 Contract 中定義，整合行為需有 Consumer Contract 測試（Pact），整合測試結果需更新 RTM。
 
 ---
 
@@ -24,101 +23,137 @@ allowed-tools:
 /integration-oauth google nextjs
 /integration-oauth github express
 /integration-oauth auth0 fastapi
-/integration-oauth --provider=google --framework=nextjs
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-1 通過 | 認證架構已決定 | `docs/02_architecture/SRD-{System}.md` 認證章節 |
+| FRD 認證需求 | 認證功能已定義為 F-XXX | `docs/01_requirements/FRD-{System}.md` 認證 Feature |
+| NFR-SEC 已定義 | Token 安全 NFR 量化 | NFR-SEC-001 等存在 |
 
 ---
 
 ## 執行流程
 
-### Step 1: API 研究 (10分鐘)
+### 階段 1：Provider 選型 ADR（設計先行）🔴
 
-**任務清單**:
-1. 確認 OAuth Provider 文檔
-2. 識別所需 Scopes
-3. 確認回調 URL 格式
-4. 檢查 Rate Limiting
+呼叫 `/adr-generate "OAuth Provider 選型"`：
 
-**Provider 文檔**:
-| Provider | 文檔 URL | 推薦 Scopes |
-|----------|---------|------------|
-| Google | `developers.google.com/identity` | email, profile |
-| GitHub | `docs.github.com/en/apps/oauth-apps` | user:email, read:user |
-| Auth0 | `auth0.com/docs` | openid, profile, email |
+```markdown
+# ADR-{NNN}: OAuth Provider 選型
 
-🔴 **確認點**: 向使用者確認所需的權限範圍 (Scopes)
+## Decision
+選擇 {Google/GitHub/Auth0/自建} 作為 OAuth Provider
+
+## Rationale
+| Provider | 優點 | 缺點 | 適用情境 |
+|---------|------|------|---------|
+| Google | 用戶接受度高 | 依賴第三方 | B2C 消費者產品 |
+| Auth0 | 企業功能完整 | 授權費用 | B2B/企業系統 |
+| 自建 | 完全控制 | 維護成本高 | 特殊合規需求 |
+
+## Security Considerations（對應 STRIDE）
+- T-001 Spoofing：JWT RS256 簽章，TTL 對應 NFR-SEC-001
+- T-003 Repudiation：所有認證事件記錄 Audit Log
+- PKCE 流程（防 Authorization Code Interception）
+
+## Consequences
+- Token 儲存策略：HTTP-only Cookie（不用 localStorage）
+- Refresh Token Rotation 週期：{NFR-SEC-001 定義值}
+```
+
+🔴 確認點：ADR 確定後才開始整合設計。
 
 ---
 
-### Step 2: 認證設計 (15分鐘)
+### 階段 2：整合規格設計（Integration Spec）
 
-**OAuth 2.0 授權碼流程**:
+**文件路徑**：`docs/02_architecture/INTEGRATION-SPEC-OAuth-{System}.md`
 
+```markdown
+# OAuth Integration Spec — {System}
+
+**Provider**: {Google/GitHub/Auth0}
+**Flow**: Authorization Code + PKCE
+**Token 儲存**: HTTP-only Secure Cookie
+
+## 端點設計（補充至 CONTRACT）
+
+| 端點 | 方法 | 說明 | FRD Feature |
+|------|------|------|------------|
+| /auth/{provider} | GET | 啟動 OAuth Flow | F-XXX 用戶登入 |
+| /auth/{provider}/callback | GET | OAuth 回調 | F-XXX |
+| /auth/logout | POST | 登出 | F-XXX |
+| /auth/me | GET | 取得當前用戶 | F-XXX |
+
+## Security 矩陣
+| 機制 | 實作方式 | 對應 STRIDE | NFR-SEC |
+|------|---------|-----------|---------|
+| CSRF 防護 | state 參數 | T-001 Spoofing | NFR-SEC-001 |
+| Code Injection 防護 | PKCE | T-002 Tampering | NFR-SEC-002 |
+| Token 竊取防護 | HTTP-only Cookie | T-004 Info Disclosure | NFR-SEC-004 |
 ```
-┌──────────┐     ┌─────────────┐     ┌────────────┐
-│  User    │     │  Your App   │     │  Provider  │
-└────┬─────┘     └──────┬──────┘     └─────┬──────┘
-     │   1. Click Login │                   │
-     │──────────────────>                   │
-     │                   │ 2. Redirect      │
-     │                   │──────────────────>
-     │                   │                   │
-     │   3. Auth Screen  │                   │
-     │<──────────────────────────────────────│
-     │                   │                   │
-     │   4. Approve      │                   │
-     │──────────────────────────────────────>│
-     │                   │                   │
-     │                   │ 5. Code callback  │
-     │                   │<──────────────────│
-     │                   │                   │
-     │                   │ 6. Exchange token │
-     │                   │──────────────────>│
-     │                   │                   │
-     │                   │ 7. Access token   │
-     │                   │<──────────────────│
-     │                   │                   │
-     │   8. Logged in    │                   │
-     │<──────────────────│                   │
-```
-
-**Token 儲存策略**:
-- 🔐 Access Token: HTTP-only Cookie 或 Memory
-- 🔐 Refresh Token: HTTP-only Secure Cookie
-- ❌ 絕不存於 localStorage
 
 ---
 
-### Step 3: 框架整合
+### 階段 3：Consumer Contract 測試設計
 
-#### Next.js (App Router) + NextAuth.js
+**文件路徑**：`docs/03_testing/contracts/CONSUMER-CONTRACT-OAuth-{Provider}.md`
 
-**安裝依賴**:
-```bash
-npm install next-auth
+```markdown
+# Consumer Contract — OAuth {Provider}
+
+**Consumer**: {SystemName}
+**Provider**: {Google/GitHub/Auth0}
+**Contract 工具**: Pact
+
+## Consumer 期望的互動
+
+### 互動 1: 用戶資訊端點
+- Request: GET /userinfo
+  - Header: Authorization: Bearer <valid_token>
+- Response: 200
+  - body.email: string（required）
+  - body.name: string（required）
+  - body.sub: string（Provider User ID，required）
+
+### 互動 2: Token 交換
+- Request: POST /token
+  - body.code: string
+  - body.grant_type: authorization_code
+- Response: 200
+  - body.access_token: string（required）
+  - body.token_type: "Bearer"（required）
+
+## Pact 測試路徑
+`tests/contracts/oauth-{provider}.pact.spec.ts`
 ```
 
-**配置檔案**: `app/api/auth/[...nextauth]/route.ts`
+---
+
+### 階段 4：框架實作（SCG-3 後）
+
+依框架產出認證整合代碼（實作遵循 Integration Spec 的端點設計）：
+
+**Next.js（NextAuth.js）核心配置**：
 ```typescript
+// app/api/auth/[...nextauth]/route.ts
+// 實作對應 ADR-NNN 決定的 Provider + Token 策略
 import NextAuth from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
-import GitHubProvider from 'next-auth/providers/github';
 
 const handler = NextAuth({
   providers: [
-    {{#if google}}
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
     }),
-    {{/if}}
-    {{#if github}}
-    GitHubProvider({
-      clientId: process.env.GITHUB_ID!,
-      clientSecret: process.env.GITHUB_SECRET!,
-    }),
-    {{/if}}
   ],
+  session: { strategy: 'jwt' },  // ADR-NNN: JWT 策略
   callbacks: {
     async jwt({ token, account }) {
       if (account) {
@@ -126,240 +161,55 @@ const handler = NextAuth({
       }
       return token;
     },
-    async session({ session, token }) {
-      session.accessToken = token.accessToken;
-      return session;
-    },
   },
 });
 
 export { handler as GET, handler as POST };
 ```
 
-**環境變數**: `.env.local`
-```
-GOOGLE_CLIENT_ID=your-client-id
-GOOGLE_CLIENT_SECRET=your-client-secret
-NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your-secret-key
-```
+---
 
-#### Express.js + Passport.js
+### 階段 5：RTM 更新 🔴
 
-**安裝依賴**:
 ```bash
-npm install passport passport-google-oauth20 express-session
+/rtm-generate update    # 更新認證相關 TC（TC-AUTH-XXX）
+/spec-compliance-check docs/02_architecture/INTEGRATION-SPEC-OAuth-{System}.md
 ```
 
-**配置**: `src/auth/passport.ts`
-```typescript
-import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-
-passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    callbackURL: '/auth/google/callback',
-  },
-  (accessToken, refreshToken, profile, done) => {
-    // 儲存或查詢使用者
-    return done(null, profile);
-  }
-));
-
-// 路由
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login' }),
-  (req, res) => {
-    res.redirect('/');
-  }
-);
-```
-
-#### Spring Boot + Spring Security OAuth2
-
-**安裝依賴** (`build.gradle.kts`):
-```kotlin
-dependencies {
-    implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
-    implementation("org.springframework.boot:spring-boot-starter-security")
-}
-```
-
-**配置**: `application.yml`
-```yaml
-spring:
-  security:
-    oauth2:
-      client:
-        registration:
-          google:
-            client-id: ${GOOGLE_CLIENT_ID}
-            client-secret: ${GOOGLE_CLIENT_SECRET}
-            scope: email, profile
-          github:
-            client-id: ${GITHUB_CLIENT_ID}
-            client-secret: ${GITHUB_CLIENT_SECRET}
-            scope: user:email, read:user
-```
-
-**Security 配置**:
-```java
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig {
-
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/", "/login", "/public/**").permitAll()
-                .anyRequest().authenticated()
-            )
-            .oauth2Login(oauth2 -> oauth2
-                .loginPage("/login")
-                .defaultSuccessUrl("/dashboard")
-                .userInfoEndpoint(userInfo -> userInfo
-                    .userService(customOAuth2UserService())
-                )
-            );
-        return http.build();
-    }
-
-    @Bean
-    public OAuth2UserService<OAuth2UserRequest, OAuth2User> customOAuth2UserService() {
-        DefaultOAuth2UserService delegate = new DefaultOAuth2UserService();
-        return request -> {
-            OAuth2User user = delegate.loadUser(request);
-            // 儲存或查詢使用者
-            return user;
-        };
-    }
-}
-```
-
-#### FastAPI + Authlib
-
-**安裝依賴**:
-```bash
-pip install authlib httpx
-```
-
-**配置**: `src/auth/oauth.py`
-```python
-from authlib.integrations.starlette_client import OAuth
-from starlette.config import Config
-
-config = Config(".env")
-oauth = OAuth(config)
-
-oauth.register(
-    name="google",
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
-
-# FastAPI 路由
-@router.get("/login/google")
-async def login_google(request: Request):
-    redirect_uri = request.url_for("auth_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
-
-@router.get("/auth/callback")
-async def auth_callback(request: Request):
-    token = await oauth.google.authorize_access_token(request)
-    user_info = token.get("userinfo")
-    # 儲存或查詢使用者
-    return RedirectResponse(url="/dashboard")
-```
+🔴 確認點：Consumer Contract 測試通過 + RTM 認證 TC 全部 ✅。
 
 ---
 
-### Step 4: 錯誤處理
+## 強制產出（SDD 文件）
 
-**錯誤分類**:
-| 錯誤類型 | HTTP Code | 處理方式 |
-|---------|-----------|---------|
-| invalid_grant | 400 | 引導重新授權 |
-| access_denied | 403 | 顯示友善訊息 |
-| server_error | 500 | 重試 + 告警 |
-| rate_limit | 429 | 指數退避重試 |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| OAuth Provider ADR | `docs/02_architecture/adr/ADR-{NNN}-oauth-provider.md` | SCG-2 |
+| Integration Spec | `docs/02_architecture/INTEGRATION-SPEC-OAuth-{System}.md` | SCG-1 後 |
+| Consumer Contract | `docs/03_testing/contracts/CONSUMER-CONTRACT-OAuth-{Provider}.md` | SCG-3 後 |
 
-**錯誤處理範例**:
-```typescript
-async function handleOAuthError(error: OAuthError) {
-  switch (error.code) {
-    case 'invalid_grant':
-      // Token 過期，引導重新登入
-      await clearSession();
-      return redirect('/login?reason=session_expired');
+---
 
-    case 'access_denied':
-      // 使用者拒絕授權
-      return redirect('/login?reason=access_denied');
+## 後置動作
 
-    default:
-      // 記錄錯誤並顯示通用訊息
-      logger.error('OAuth error', error);
-      return redirect('/error?code=auth_failed');
-  }
-}
+```
+/rtm-generate update       # 更新認證 TC
+/security-audit api        # 認證端點安全審查
+/sdd-gate SCG-4            # 整合 PR Review
 ```
 
----
-
-### Step 5: 安全檢查清單
-
-🔴 **必須確認**:
-
-- [ ] State 參數已實作（防 CSRF）
-- [ ] PKCE 已啟用（公開客戶端）
-- [ ] Token 不存於 localStorage
-- [ ] Redirect URI 已白名單
-- [ ] HTTPS 在生產環境強制啟用
-- [ ] Token 過期自動更新機制已實作
-
----
-
-## 產出物清單
-
-| 產出物 | 路徑 | 說明 |
-|--------|------|------|
-| Auth 配置 | `app/api/auth/` 或 `src/auth/` | 認證核心邏輯 |
-| 環境變數範本 | `.env.example` | 需要的環境變數 |
-| 安全設定指南 | `docs/AUTH_SETUP.md` | Provider 設定步驟 |
-
----
-
-## Provider 設定快速指南
-
-### Google OAuth 設定
-1. 前往 [Google Cloud Console](https://console.cloud.google.com)
-2. 建立專案 → API 和服務 → 憑證
-3. 建立 OAuth 2.0 用戶端 ID
-4. 新增授權的重新導向 URI
-
-### GitHub OAuth 設定
-1. 前往 GitHub Settings → Developer settings
-2. OAuth Apps → New OAuth App
-3. 設定 Homepage URL 和 Callback URL
+🔷 **本 Skill 對應 SCG**：SCG-2（認證架構凍結）、SCG-4（整合 PR Review）
 
 ---
 
 ## 相關 Skill
 
-- `/integration-stripe` - 支付整合
-- `/security` - 安全審查
-- `/testing` - 認證測試
+- `/adr-generate` — OAuth Provider 選型決策
+- `/security-audit` — STRIDE 認證威脅分析（T-001 Spoofing）
+- `/qa-testing` — Consumer Contract Testing
+- `/integration-api-client` — API Client 整合（認證 Token 使用方）
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/integration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Integration 情境
-**維護者**: AISDLC Framework Team
+**基於**: AISDLC-SDD v0.30
+**對應情境**: Integration 場景

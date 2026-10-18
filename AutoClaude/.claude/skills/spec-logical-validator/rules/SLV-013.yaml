@@ -1,0 +1,28 @@
+id: SLV-013
+name: 時序語義矛盾（N+1 vs N）proposed 重生 — 已由 verified SLV-007 涵蓋，不另行升級
+source: FPL-001 auto-generated 2026-06-15
+superseded_by: SLV-007   # DEF-CLDREV-008：與 verified SLV-007 邏輯/scope/regex 全同之 proposed 重生；保留為學習層審計痕跡，不可升級為第二條 verified
+trust_level: proposed
+reviewed_by: null
+reviewed_at: null
+scope: temporal
+purpose: 'AC 描述「第 N+1 次操作必須比第 N 次快 X%」或「連續呼叫延遲遞減」類型，
+
+  物理可行但未給出穩態條件／比較基準／回退邊界，導致測試永遠找不到穩定通過點。'
+scan_targets:
+- docs/01_requirements/FRD-*.md
+- docs/03_testing/contracts/TCS-*.md
+required_qualifiers:
+- 明確的穩態條件（例：『快取命中時』『連線保持期間』『排除首次冷啟』）
+- 明確的量測統計（P50/P95/mean + 樣本數）
+- 明確的 degradation bound（例：『快取失效時回退至 P95 < 200ms』）
+failure_examples:
+- 第二次相同查詢，回應時間必須比第一次快 30%。
+pass_examples:
+- '在相同 session、相同輸入條件下，快取命中時第二次起 P95 < 50ms；
+
+  快取未命中時回退至 P95 < 200ms。樣本數 ≥ 50。'
+severity: CRITICAL
+blocks_scg: true
+source_fpl: FPL-001
+pattern_regex: (第[一二三四五六七八九十0-9]+次|N\+?1|連續.*?次).*(比|更|快|慢|少).*?[0-9]+\s*%

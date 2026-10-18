@@ -1,9 +1,9 @@
 ---
-name: sa-analyze
-description: 以 System Analyst 角色分析需求，產出 FRD 和 User Stories
+name: sa-analyst
+description: 以 System Analyst 角色分析需求，產出 FRD、User Stories 和 RTM 初版，準備 SCG-0 需求凍結閘門
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[input_type: 輸入類型 (screenshot/text/mixed/prd)]"
+argument-hint: "[input_type: screenshot|text|mixed|prd] [scenario: greenfield|brownfield|refactoring]"
 allowed-tools:
   - Read
   - Write
@@ -11,222 +11,214 @@ allowed-tools:
   - Glob
 ---
 
-# SA Requirements Analyst Skill
+# SA 需求分析 Skill（SDD 原生）
 
-基於 AISDLC SA Agent (Amanda) 的需求分析技能。
+SA 是 SDD 工作流的起點。本 Skill 產出 FRD、User Stories 和 RTM 初版，為 SCG-0 需求凍結閘門提供必要文件。Brownfield 情境下，本 Skill 需在 `/brownfield-analysis` 後執行。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/sa-analyze                    # 開始需求分析
-/sa-analyze screenshot         # 分析截圖需求
-/sa-analyze prd                # 從 PRD 產出 FRD
+/sa-analyst                        # Greenfield：從 PRD 或會議記錄開始
+/sa-analyst screenshot             # 從截圖分析需求
+/sa-analyst prd                    # 從現有 PRD 產出 FRD
+/sa-analyst brownfield             # Brownfield：讀取 As-Is SRD 後分析 Gap
+/sa-analyst refactoring            # Refactoring：讀取 Business Invariants 後分析
 ```
 
 ---
 
-## SA 角色定義
+## 前置條件（SDD Spec-First）
 
-**角色**: Amanda (SA-Analyst)
-**專長**: 需求分析、FRD 撰寫、User Story 設計
-**核心原則**:
-- 零猜測原則：不確定就問
-- 完整性優先：寧可多問，不可遺漏
-- 追蹤性：確保每個需求可追溯
+| 情境 | 前置條件 | 說明 |
+|------|---------|------|
+| Greenfield | 無（本 Skill 是起點） | 確認 PRD 草稿或需求輸入存在 |
+| Brownfield | `/brownfield-analysis` 已完成 | 需要 As-Is SRD 作為基線 |
+| Refactoring | Business Invariants 清單已確認 | INV-XXX 清單是重構邊界 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求收集與理解 🔴
+### 階段 1：情境確認與前置讀取
 
-**任務**:
-1. 確認需求來源類型
-2. 提取核心功能需求
-3. 識別非功能性需求
-4. 標記模糊或衝突點
+**1.1 確認執行情境**（Greenfield / Brownfield / Refactoring）
 
-**確認問題模板**:
+**1.2 Brownfield 情境前置讀取**（若 `scenario: brownfield`）：
+- 讀取 `docs/02_architecture/AS-IS-SRD-{System}.md`
+- 讀取 `docs/04_planning/GAP-ANALYSIS-{System}.md`
+- 確認哪些功能是新增 vs. 修改 vs. 保留
+
+**1.3 Refactoring 情境前置讀取**：
+- 讀取 `docs/01_requirements/INVARIANT-SPEC-{System}.md`
+- 確認 INV-XXX 清單（不可破壞的業務不變量）
+
+🔴 **確認點**：Brownfield/Refactoring 情境，前置文件必須存在才能繼續。
+
+---
+
+### 階段 2：需求收集與澄清 🔴
+
+提出確認問題：
+
 ```markdown
 ## 需求確認問題
 
 ### 功能範圍
-- Q1: 這個功能的主要使用者是誰？
-- Q2: 使用者的主要目標是什麼？
-- Q3: 有哪些必要的功能？哪些是可選的？
+- Q1: 這個功能的主要使用者是誰？（影響 US 設計）
+- Q2: 核心使用流程是什麼？（影響 AC 設計）
+- Q3: 哪些是 Must Have？哪些是 Nice to Have？
 
 ### 業務規則
-- Q4: 有哪些業務規則或限制？
+- Q4: 有哪些業務規則或限制（BR-XXX）？
 - Q5: 例外情況如何處理？
 
-### 整合需求
-- Q6: 需要與哪些現有系統整合？
-- Q7: 資料來源和格式是什麼？
+### 非功能性需求（必須量化）
+- Q6: 回應時間要求（P99）？並發量？
+- Q7: 安全等級要求（認證/授權/加密）？
+- Q8: 可用性 SLA？
 
-### 非功能性需求
-- Q8: 效能要求（回應時間、並發量）？
-- Q9: 安全性要求（認證、權限）？
+### 整合需求
+- Q9: 需要整合哪些現有系統或第三方服務？
+- Q10: 資料來源和格式是什麼？
 ```
 
-🔴 **必須確認**: 在繼續前，確保所有關鍵問題已獲得解答
+🔴 **確認點**：所有 Q1~Q10 必須有明確答案後才繼續。
 
 ---
 
-### 階段 2: 功能需求文件 (FRD)
+### 階段 3：功能需求文件（FRD）產出
 
-**FRD 結構**:
+**文件路徑**：`docs/01_requirements/FRD-{SystemName}.md`
+**範本來源**：`docs_template/core/frd/FRD_Universal_Template.md`
+
+**FRD 必要結構**：
 
 ```markdown
-# Functional Requirements Document
+# Functional Requirements Document — {SystemName}
 
-## 文件資訊
-- **FRD-ID**: FRD-{{project}}-{{seq}}
-- **版本**: 1.0
-- **狀態**: Draft
-- **來源**: PRD-{{prd_id}}
+**FRD-ID**: FRD-{System}-{seq}
+**版本**: 1.0
+**日期**: {YYYY-MM-DD}
+**狀態**: Draft
+**來源**: PRD-{SystemName}.md（或需求來源說明）
 
-## 1. 功能概述
-### 1.1 目的
-[描述此功能解決的問題]
+## 1. 功能需求
 
-### 1.2 範圍
-[明確界定功能邊界]
+### F-001: {功能名稱}
+- **描述**: {詳細描述}
+- **觸發條件**: {何時觸發}
+- **輸入**: {需要的輸入}
+- **處理邏輯**: {業務邏輯步驟}
+- **輸出**: {預期輸出}
+- **例外處理**: {錯誤情況}
+- **來源**: PRD-{Section}
 
-### 1.3 使用者角色
-| 角色 | 說明 | 權限 |
-|------|------|------|
-| Admin | 系統管理員 | 全部 |
-| User | 一般使用者 | 查看、編輯自己的 |
+## 2. 業務規則
 
-## 2. 功能需求
+### BR-001: {規則名稱}
+- **描述**: {規則說明}
+- **適用範圍**: {F-XXX}
+- **違規處理**: {如何處理違規}
 
-### F-001: [功能名稱]
-- **描述**: [詳細描述]
-- **觸發條件**: [何時觸發]
-- **輸入**: [需要的輸入]
-- **處理邏輯**: [處理步驟]
-- **輸出**: [預期輸出]
-- **例外處理**: [錯誤情況]
-
-## 3. 業務規則
-
-### BR-001: [規則名稱]
-- **描述**: [規則說明]
-- **適用範圍**: [適用的功能]
-- **驗證方式**: [如何驗證]
-
-## 4. 非功能性需求
+## 3. 非功能性需求（量化）
 
 ### NFR-001: 效能
-- 回應時間: < 2 秒
-- 並發使用者: 100 人
+- **P50 回應時間**: < {N} ms
+- **P99 回應時間**: < {N} ms
+- **並發使用者**: {N}
+- **吞吐量**: {N} req/s
 
 ### NFR-002: 安全性
-- 認證方式: JWT
-- 權限控制: RBAC
+- **認證方式**: {JWT/OAuth2/API Key}
+- **授權模型**: {RBAC/ABAC}
+- **資料加密**: {傳輸/靜態}
 
-## 5. 追蹤矩陣
-| FRD 需求 | PRD 來源 | User Story |
-|----------|----------|------------|
-| F-001 | PRD-001 | US-001 |
+## 4. User Stories
 
-## 6. 附錄
-- 介面草圖
-- 資料流程圖
+### US-001: {標題}
+**As a** {使用者角色}
+**I want to** {期望功能}
+**So that** {業務價值}
+
+**驗收標準**:
+- **AC-001-1**: Given {前置條件} When {觸發} Then {預期結果}
+- **AC-001-2**: Given {前置條件} When {觸發} Then {預期結果}
+
+**INVEST 原則**: ✅ 獨立 ✅ 可協商 ✅ 有價值 ✅ 可估算 ✅ 夠小 ✅ 可測試
+
+## 5. Invariant Spec（Refactoring 情境必填）
+
+### INV-001: {不變量名稱}
+- **描述**: {業務約束，重構前後不可改變}
+- **驗證方式**: {如何自動驗證}
+- **對應 AC**: {AC-XXX-Y}
 ```
 
 ---
 
-### 階段 3: User Story 設計
+### 階段 4：RTM 初版建立（嵌入流程）
 
-**User Story 格式**:
+FRD 產出後**立即**執行 RTM 初版建立：
 
-```markdown
-## US-001: [簡短標題]
-
-### 故事描述
-**As a** [使用者角色]
-**I want to** [期望的功能]
-**So that** [達成的價值]
-
-### 驗收標準 (Acceptance Criteria)
-
-**AC-001-1**: Given-When-Then
-- **Given**: [前置條件]
-- **When**: [觸發動作]
-- **Then**: [預期結果]
-
-**AC-001-2**: Given-When-Then
-- **Given**: [前置條件]
-- **When**: [觸發動作]
-- **Then**: [預期結果]
-
-### 補充資訊
-- **優先級**: P1 (Must Have)
-- **故事點**: 5
-- **相依**: US-002
-- **技術備註**: [技術考量]
+```bash
+/rtm-generate full docs/01_requirements/FRD-{SystemName}.md
 ```
 
-**INVEST 原則檢查**:
-- [x] **I**ndependent - 獨立可交付
-- [x] **N**egotiable - 可協商調整
-- [x] **V**aluable - 有商業價值
-- [x] **E**stimable - 可估算工作量
-- [x] **S**mall - 足夠小（1個 Sprint 可完成）
-- [x] **T**estable - 可測試驗證
+RTM 初版只填入 EPIC/Feature/US/AC 欄位，API 和 TC 欄位留空（稍後填入）。
 
 ---
 
-### 階段 4: 驗證與交接 🔴
+### 階段 5：文件驗證與 SCG-0 準備 🔴
 
-**驗證清單**:
-- [ ] FRD 涵蓋所有 PRD 需求
-- [ ] 每個需求都有明確的驗收標準
-- [ ] 追蹤矩陣完整
-- [ ] 無模糊或衝突的需求
-- [ ] 非功能性需求已定義
+1. 執行 `/spec-compliance-check docs/01_requirements/FRD-{SystemName}.md`
+2. 確認驗證報告全部通過
+3. 確認清單：
+   - [ ] FRD 涵蓋所有 PRD 需求（無遺漏）
+   - [ ] 每個 US 都有至少 2 個 AC（Given-When-Then 格式）
+   - [ ] NFR 已量化（P99/並發量/SLA）
+   - [ ] RTM 初版建立完成（覆蓋率 > 0%）
+   - [ ] Brownfield：已標注 As-Is → To-Be 差異
+   - [ ] Refactoring：INV-XXX 清單已確認
 
-🔴 **確認點**:
-1. 與使用者確認 FRD 內容正確
-2. 確認 User Story 優先級排序
-3. 確認是否有遺漏的需求
-
----
-
-## 產出物清單
-
-| 產出物 | 路徑 | 說明 |
-|--------|------|------|
-| FRD | `docs/01_requirements/FRD_{{feature}}.md` | 功能需求文件 |
-| User Stories | `docs/01_requirements/US_{{feature}}.md` | 使用者故事 |
-| 追蹤矩陣 | `docs/01_requirements/RTM.md` | 需求追蹤矩陣 |
+🔴 **確認點**：FRD 內容需與使用者/利害關係人確認後才能凍結。
 
 ---
 
-## 協作 Agent
+## 強制產出（SDD 文件）
 
-SA 在分析過程中可能需要：
-- **BA**: 驗證業務邏輯
-- **SD**: 評估技術可行性
-- **QA**: 確認可測試性
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| FRD | `docs/01_requirements/FRD-{SystemName}.md` | SCG-0 |
+| User Stories | FRD 內 US 章節 | SCG-0 |
+| RTM 初版 | `docs/03_testing/RTM-{SystemName}.md` | SCG-0 |
+| Invariant Spec（Refactoring） | `docs/01_requirements/INVARIANT-SPEC-{SystemName}.md` | SCG-0 |
+
+---
+
+## 後置動作
+
+```
+/ba-analyst prd       # BA 驗證需求業務對齊
+/rtm-generate verify   # 確認 RTM 初版完整
+/sdd-gate SCG-0        # 需求凍結閘門
+```
+
+🔷 **本 Skill 協助通過**：SCG-0（Requirement Spec Gate）
 
 ---
 
 ## 相關 Skill
 
-- `/ba-validate` - BA 業務驗證
-- `/sd-design` - SD 架構設計
-- `/qa-testing` - QA 測試策略
+- `/ba-analyst` — 業務驗證（SCG-0 協同）
+- `/brownfield-analysis` — Brownfield 前置（as-is 規格化）
+- `/rtm-generate` — 追溯矩陣（FRD 完成後立即執行）
+- `/sd-architect` — 架構設計（SCG-0 通過後接棒）
+- `/sdd-gate SCG-0` — 需求凍結閘門
 
 ---
 
-
-## 相關檔案
-
-- Agent 定義: `agent/core/04.sa-analyst-zh.yaml`
-
-**基於**: AISDLC v0.09 SA Agent
-**維護者**: AISDLC Framework Team
+**基於**: AISDLC-SDD v0.30
+**對應 Agent**: `04.sa-analyst-zh.yaml`
+**對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

@@ -1,0 +1,27 @@
+id: SLV-006
+name: "API 依賴循環偵測"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: dependency
+purpose: "確保 API 端點之間的呼叫關係不存在循環依賴"
+
+scan_targets:
+  - "docs/02_architecture/api/CONTRACT-*.yaml"
+  - "docs/02_architecture/SRD-*.md"
+
+required_qualifiers:
+  - "建立 API 端點依賴圖（directed graph）"
+  - "執行 DFS cycle detection"
+  - "任何 cycle 都視為 SLV-006 FAIL"
+  - "例外：event-driven 的非同步回呼，需標記為 ASYNC_CALLBACK"
+
+failure_examples:
+  - "POST /orders → GET /inventory → POST /orders 循環依賴"
+
+pass_examples:
+  - "POST /orders emit OrderCreated event → inventory-service subscribe（ASYNC_CALLBACK）"
+
+severity: CRITICAL
+blocks_scg: true

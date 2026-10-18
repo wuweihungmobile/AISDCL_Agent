@@ -64,6 +64,10 @@ desktop.ini
 # post_commit_drift.py 同以 git toplevel＝monorepo 根為 repo_root，write 到根
 # build/reports/drift/ 產生 COMMIT-<sha>.yaml（同 closure 之「輸出非輸入」runtime 產物）
 /build/reports/drift/
+# 整合輪 116 D-116-11（G-116-09）：根層（本專案）當 SDD 外部專案時的 FSM 狀態目錄
+# （FSM-STATE-*.yaml、CONTEXT-LEDGER-*、MONITOR-VIOLATION-* 等執行期產物；子專案的同名目錄
+# 已由各自 .gitignore 的 build/ 排除，只有根層沒人守）；同上兩行以 / 前綴鎖根層
+/build/reports/fsm/
 
 # AutoClaude 測試/執行於 monorepo 根 cwd 落地的 runtime 產物（escalation dumps、
 # checkpoint、kb metrics/goal_progress jsonl、perf 結果等「輸出非輸入」可重生衍生物，

@@ -1,308 +1,244 @@
 ---
-name: qa-test
-description: 以 QA Engineer 角色制定測試策略，產出測試計畫和驗收測試
+name: qa-testing
+description: 以 QA Engineer 角色制定測試策略，產出測試計畫和測試案例，更新 RTM 並準備 SCG-4/SCG-5 閘門
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[test_type: 測試類型 (full/unit/integration/e2e/acceptance)] [scope: 測試範圍 (module/feature/regression/release)]"
+argument-hint: "[test_type: full|unit|integration|e2e|contract|acceptance] [scope: feature|module|regression|release]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# QA Testing Strategy Skill
+# QA 測試策略 Skill（SDD 原生）
 
-基於 AISDLC QA Agent (Quincy) 的測試策略技能。
+QA 在 SDD 工作流中負責從 Contract 凍結（SCG-3）後制定測試策略，確保每個 AC 都有對應的 TC，RTM 達到 100% 覆蓋率（SCG-5 條件）。Contract Testing 是本 Skill 的核心新增能力。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/qa-test                       # 開始測試規劃
-/qa-test acceptance            # 驗收測試設計
-/qa-test integration           # 整合測試規劃
-/qa-test e2e                   # 端到端測試
-/qa-test regression            # 回歸測試計畫
+/qa-testing                           # 完整測試策略（SCG-3 通過後）
+/qa-testing acceptance                # 驗收測試設計（從 AC 產出 TC）
+/qa-testing contract                  # Contract Testing（從 OpenAPI 產出）
+/qa-testing integration               # 整合測試規劃
+/qa-testing e2e                       # 端到端測試
+/qa-testing regression                # 回歸測試計畫
 ```
 
 ---
 
-## QA 角色定義
+## 前置條件（SDD Spec-First）
 
-**角色**: Quincy (QA-Tester)
-**專長**: 測試計劃、驗收測試、品質驗證、缺陷管理
-**核心原則**:
-- 品質優先：確保交付物達到最高品質標準
-- 全面測試：涵蓋所有功能和非功能需求
-- 早期檢測：盡早發現和預防缺陷
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-3 通過 | API Contract 已凍結 | `/sdd-gate SCG-3` 報告存在 |
+| FRD 存在 | 驗收標準（AC-XXX-Y）已定義 | `docs/01_requirements/FRD-{System}.md` |
+| RTM 初版存在 | SA 已建立 RTM 初版 | `docs/03_testing/RTM-{System}.md` |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求可測試性分析 🔴
+### 階段 1：前置讀取與可測試性分析
 
-**任務**:
-1. 分析 FRD 和驗收標準
-2. 評估可測試性
-3. 識別測試風險
-4. 確認測試範圍
+讀取：
+- `docs/01_requirements/FRD-{SystemName}.md`（AC-XXX-Y 清單）
+- `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml`（Contract Testing 依據）
+- `docs/03_testing/RTM-{SystemName}.md`（確認哪些 AC 尚未有 TC）
 
-**可測試性評估**:
+可測試性評估：
 ```markdown
 ## 可測試性分析
 
-### 功能需求檢查
-- [ ] 每個需求都有明確的驗收標準
-- [ ] 驗收標準可量化或可觀察
-- [ ] 邊界條件已定義
-- [ ] 例外情況已說明
+- [ ] 每個 AC 都有明確 Given-When-Then 格式
+- [ ] 驗收標準可量化或可觀察（非模糊描述）
+- [ ] 邊界條件已在 AC 中定義
+- [ ] NFR 測試基準（P99/並發量）已量化
 
 ### 測試風險識別
-| 風險項目 | 等級 | 影響 | 緩解措施 |
-|----------|------|------|----------|
-| [風險1] | 高/中/低 | [影響] | [措施] |
-
-### 測試範圍確認
-- Q1: 哪些功能是高優先級測試項目？
-- Q2: 有哪些測試環境限制？
-- Q3: 測試資料來源和準備方式？
+| 風險 | 等級 | 緩解措施 |
+|------|------|---------|
+| {風險} | 高/中/低 | {措施} |
 ```
 
-🔴 **必須確認**: 確保所有需求可測試
+🔴 確認點：不可測試的 AC 必須退回 SA 修改。
 
 ---
 
-### 階段 2: 測試計劃制定
+### 階段 2：測試策略（Test Pyramid Spec）設計
 
-**測試計劃結構**:
+**文件路徑**：`docs/03_testing/TEST-STRATEGY-{SystemName}.md`
 
 ```markdown
-# 測試計劃
+# Test Strategy Spec — {SystemName}
 
-## 文件資訊
-- **TP-ID**: TP-{{project}}-{{seq}}
-- **版本**: 1.0
-- **來源**: FRD-{{frd_id}}
+## 測試金字塔分層
 
-## 1. 測試範圍
-### 1.1 包含範圍
-- [功能 A]
-- [功能 B]
+| 層級 | 類型 | 目標覆蓋率 | 執行方式 |
+|------|------|-----------|---------|
+| L1 | 單元測試（Unit） | ≥ 80% 代碼覆蓋率 | 自動化 |
+| L2 | 整合測試（Integration） | 核心業務流程 100% | 自動化 |
+| L3 | Contract Testing | 所有 API 端點（SCG-3 Contract） | 自動化 |
+| L4 | E2E 測試 | Happy Path + Critical Edge Cases | 自動化 |
+| L5 | 驗收測試（AT） | 所有 AC-XXX-Y | 手動/自動化 |
 
-### 1.2 排除範圍
-- [不測試項目]
+## 測試環境
+| 環境 | 用途 | 資料策略 |
+|------|------|---------|
+| Dev | 單元/整合測試 | Mock |
+| Staging | Contract/E2E | 測試資料 |
+| UAT | 驗收測試 | 類生產資料（脫敏） |
 
-## 2. 測試策略
-### 2.1 測試層級
-| 層級 | 類型 | 負責 | 自動化 |
-|------|------|------|--------|
-| L1 | 單元測試 | Dev | 100% |
-| L2 | 整合測試 | Dev/QA | 80% |
-| L3 | E2E 測試 | QA | 60% |
-| L4 | 驗收測試 | QA | Manual |
+## 進入/退出條件
 
-### 2.2 測試類型
-- 功能測試
-- 效能測試
-- 安全測試
-- 相容性測試
-
-## 3. 測試環境
-| 環境 | 用途 | 資料 |
-|------|------|------|
-| Dev | 開發測試 | Mock |
-| Staging | 整合測試 | 測試資料 |
-| UAT | 驗收測試 | 類生產 |
-
-## 4. 測試時程
-| 階段 | 開始 | 結束 | 里程碑 |
-|------|------|------|--------|
-| 計劃 | W1 | W1 | 測試計劃完成 |
-| 設計 | W2 | W2 | 測試案例完成 |
-| 執行 | W3 | W4 | 測試執行完成 |
-| 報告 | W4 | W4 | 測試報告交付 |
-
-## 5. 進入/退出條件
-### 進入條件
-- [ ] 功能開發完成
-- [ ] 單元測試通過
+### 進入條件（SCG-3 通過後）
+- [ ] API Contract 已凍結
+- [ ] FRD AC 清單完整
 - [ ] 測試環境就緒
 
-### 退出條件
-- [ ] 所有高優先級測試通過
-- [ ] 無嚴重或高風險缺陷
-- [ ] 測試覆蓋率達標
+### 退出條件（SCG-5 前）
+- [ ] RTM 覆蓋率 = 100%
+- [ ] 無 P1 未修復缺陷
+- [ ] Contract Testing 全部通過
 ```
 
 ---
 
-### 階段 3: 測試案例設計
+### 階段 3：Contract Testing 設計（SDD 新增核心）
 
-**測試案例格式**:
+基於 SCG-3 凍結的 Contract 自動產出 Contract Test Cases：
 
 ```markdown
-## TC-001: [測試案例標題]
+## Contract Test Cases — {Module} API
 
-### 基本資訊
-- **優先級**: P1 (Critical) | P2 (High) | P3 (Medium) | P4 (Low)
-- **類型**: Functional | Integration | E2E | Performance
-- **關聯需求**: US-001, AC-001-1
-- **自動化**: Yes | No | Planned
+**來源 Contract**: docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml
 
-### 前置條件
-1. [前置條件 1]
-2. [前置條件 2]
+| TC-ID | API 端點 | 測試場景 | 對應 AC |
+|-------|---------|---------|--------|
+| TC-CT-001-1 | POST /{resource} | 正常建立 200 | AC-001-1 |
+| TC-CT-001-2 | POST /{resource} | 缺少必填欄位 400 | AC-001-2 |
+| TC-CT-001-3 | POST /{resource} | 未認證 401 | NFR-002 |
+| TC-CT-001-4 | POST /{resource} | 無權限 403 | NFR-002 |
+```
 
-### 測試步驟
-| 步驟 | 動作 | 預期結果 |
-|------|------|----------|
-| 1 | [動作描述] | [預期結果] |
-| 2 | [動作描述] | [預期結果] |
-| 3 | [動作描述] | [預期結果] |
+---
 
-### 測試資料
+### 階段 4：測試案例設計（AC → TC 完整覆蓋）
+
+**文件路徑**：`docs/03_testing/TEST-CASES-{Feature}.md`
+
+```markdown
+## TC-{US序號}-{AC序號}-{測試序號}: {測試案例標題}
+
+**優先級**: P1 (Critical) / P2 (High) / P3 (Medium)
+**測試類型**: Unit / Integration / Contract / E2E / Acceptance
+**對應 AC**: AC-{US序號}-{AC序號}
+**對應 API**: API-{NNN}（若適用）
+**自動化**: Yes / No / Planned
+
+**前置條件**:
+1. {前置條件}
+
+**測試步驟（Given-When-Then）**:
+- **Given**: {系統/資料狀態}
+- **When**: {使用者/系統動作}
+- **Then**: {預期結果，可量化}
+
+**測試資料**:
 ```json
 {
-  "input": { ... },
-  "expected": { ... }
+  "input": {},
+  "expected": {}
 }
 ```
 
-### 後置條件
-- [清理動作]
+**後置清理**: {需要清理的資料/狀態}
 ```
 
-**測試覆蓋矩陣**:
+---
+
+### 階段 5：RTM 更新（嵌入流程）🔴
+
+測試案例產出後，立即更新 RTM：
+
+```bash
+/rtm-generate update docs/03_testing/TEST-CASES-{Feature}.md
+```
+
+RTM 更新後，檢查覆蓋率：
+
+```bash
+/rtm-generate verify
+```
+
+若覆蓋率 < 100%，必須補充缺失的 TC，不可跳過。
+
+---
+
+### 階段 6：Invariant Test Contract（Refactoring 情境）
+
+若為 Refactoring 場景，需額外產出 Invariant Test Contract：
+
+**文件路徑**：`docs/03_testing/contracts/ITC-{SystemName}.md`
+
 ```markdown
-| 需求 ID | 測試案例 | 狀態 | 結果 |
-|---------|----------|------|------|
-| US-001 | TC-001, TC-002 | Executed | Pass |
-| US-002 | TC-003 | Pending | - |
+# Invariant Test Contract — {SystemName}
+
+## 業務不變量測試保護
+
+| INV-ID | 不變量描述 | 測試覆蓋方式 | TC-ID |
+|--------|-----------|-----------|-------|
+| INV-001 | {業務約束} | {自動化測試方案} | TC-{NNN}-{N}-1 |
 ```
 
 ---
 
-### 階段 4: 驗收測試 (AT)
+### 階段 7：文件驗證 🔴
 
-**AT 結構**:
+1. 執行 `/spec-compliance-check docs/03_testing/TEST-STRATEGY-{SystemName}.md`
+2. 執行 `/rtm-generate verify`（確認覆蓋率達標）
+3. 🔴 確認點：測試策略需與 Dev 確認自動化可行性，與 PM 確認發布標準
 
-```markdown
-# Acceptance Test Document
+---
 
-## 文件資訊
-- **AT-ID**: AT-{{project}}-{{module}}
-- **版本**: 1.0
-- **來源**: US-{{us_id}}
+## 強制產出（SDD 文件）
 
-## 1. 測試概述
-### 1.1 測試目的
-### 1.2 驗收標準摘要
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Test Strategy Spec | `docs/03_testing/TEST-STRATEGY-{SystemName}.md` | SCG-3 後 |
+| Test Cases | `docs/03_testing/TEST-CASES-{Feature}.md` | SCG-4 前 |
+| Contract Test Cases | `docs/03_testing/TEST-CASES-CONTRACT-{Module}.md` | SCG-4 前 |
+| Invariant Test Contract（Refactoring） | `docs/03_testing/contracts/ITC-{SystemName}.md` | SCG-4 前 |
+| RTM（更新至 TC 追溯） | `docs/03_testing/RTM-{SystemName}.md` | SCG-5 前 |
 
-## 2. 驗收測試案例
+---
 
-### AT-001: [驗收測試標題]
-**關聯 AC**: AC-001-1
+## 後置動作
 
-**Given**: [前置狀態]
-**When**: [使用者動作]
-**Then**: [預期結果]
-
-**測試步驟**:
-1. [步驟]
-2. [步驟]
-
-**預期結果**: [詳細結果]
-
-## 3. 驗收結果
-| AT ID | 狀態 | 執行者 | 日期 | 備註 |
-|-------|------|--------|------|------|
-| AT-001 | Pass/Fail | QA | YYYY-MM-DD | |
-
-## 4. 缺陷摘要
-| 缺陷 ID | 嚴重度 | 狀態 | 關聯 AT |
-|---------|--------|------|---------|
-| BUG-001 | High | Open | AT-002 |
+```
+/rtm-generate verify               # 確認 RTM 100% 覆蓋
+/spec-compliance-check SCG-5       # 驗證 SCG-5 條件
+/sdd-gate SCG-5                    # 交付閘門（RTM 100% 後執行）
 ```
 
----
-
-### 階段 5: 測試報告與品質評估 🔴
-
-**測試報告結構**:
-```markdown
-## 測試執行報告
-
-### 執行摘要
-- **測試期間**: YYYY-MM-DD ~ YYYY-MM-DD
-- **測試案例總數**: XX
-- **通過**: XX (XX%)
-- **失敗**: XX (XX%)
-- **阻塞**: XX (XX%)
-
-### 品質指標
-| 指標 | 目標 | 實際 | 狀態 |
-|------|------|------|------|
-| 測試覆蓋率 | 80% | 85% | ✅ |
-| 缺陷密度 | <5/KLOC | 3/KLOC | ✅ |
-| 嚴重缺陷 | 0 | 0 | ✅ |
-
-### 缺陷分析
-| 嚴重度 | 數量 | 已修復 | 待修復 |
-|--------|------|--------|--------|
-| Critical | 0 | 0 | 0 |
-| High | 2 | 2 | 0 |
-| Medium | 5 | 3 | 2 |
-| Low | 8 | 4 | 4 |
-
-### 發布建議
-- [ ] ✅ 建議發布
-- [ ] ⚠️ 條件發布（需修復高風險項目）
-- [ ] ❌ 不建議發布
-```
-
-🔴 **確認點**:
-1. 與 Dev 確認缺陷修復狀態
-2. 與 PM/PO 討論發布決策
-3. 確認遺留風險和後續計畫
-
----
-
-## 產出物清單
-
-| 產出物 | 路徑 | 說明 |
-|--------|------|------|
-| 測試計劃 | `docs/03_testing/TP_{{module}}.md` | 測試策略和計劃 |
-| 測試案例 | `docs/03_testing/TC_{{module}}.md` | 詳細測試案例 |
-| AT 文件 | `docs/03_testing/AT_{{module}}.md` | 驗收測試 |
-| 測試報告 | `docs/03_testing/TR_{{module}}.md` | 測試結果報告 |
-
----
-
-## 協作 Agent
-
-QA 在測試過程中需要：
-- **SA**: 確認驗收標準理解正確
-- **Dev**: 討論缺陷和修復
-- **SD**: 確認技術測試方法
+🔷 **本 Skill 協助通過**：SCG-4（Implementation Review）、SCG-5（Delivery Gate）
 
 ---
 
 ## 相關 Skill
 
-- `/sa-analyze` - SA 需求分析
-- `/sd-design` - SD 架構設計
-- `/testing` - 測試策略情境
-- `/security` - 安全測試
+- `/sa-analyst` — 需求分析（AC 來源）
+- `/contract-generate` — API Contract（Contract Testing 的依據）
+- `/rtm-generate` — RTM 追溯（在本 Skill 中呼叫）
+- `/dev-review` — 代碼審查（SCG-4 協同）
+- `/sdd-gate SCG-5` — 交付閘門
 
 ---
 
-
-## 相關檔案
-
-- Agent 定義: `agent/core/07.qa-tester-zh.yaml`
-
-**基於**: AISDLC v0.09 QA Agent
+**基於**: AISDLC-SDD v0.30
+**對應 Agent**: `07.qa-tester-zh.yaml`
+**對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`
+**對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

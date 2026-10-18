@@ -1,20 +1,19 @@
 ---
 name: database-migration
-description: 資料庫平台遷移規劃與執行，支援 Oracle/MySQL/MSSQL → PostgreSQL/MySQL 等遷移
+description: 規劃並執行資料庫平台遷移，整合 MCM Validate 閘門，產出 DB Schema Contract 和 Migration ADR
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<source-db: Oracle/MySQL/MSSQL> <target-db: PostgreSQL/MySQL>"
+argument-hint: "<source-db: Oracle|MySQL|MSSQL> <target-db: PostgreSQL|MySQL>"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Database Migration 資料庫遷移
+# Database Migration Skill（SDD 原生）
 
-規劃並執行資料庫平台遷移，包含 Schema 轉換、SQL 語法改寫、Stored Procedure 遷移、資料搬移與驗證。
+資料庫遷移在 SDD 中屬於 Brownfield/Refactoring 場景的核心動作。本 Skill 引入 MCM（Migration Completeness Milestone）Validate 閘門，確保每個遷移階段有規格依據，DB Schema Contract 在遷移實作前凍結。
 
 ---
 
@@ -28,180 +27,206 @@ allowed-tools:
 
 ---
 
+## 前置條件（SDD Spec-First）
+
+| 閘門/文件 | 說明 | 驗證方式 |
+|---------|------|---------|
+| As-Is SRD 存在 | 現有 DB 架構已文件化 | `docs/02_architecture/AS-IS-SRD-{System}.md`（來自 `/brownfield-analysis`） |
+| DB Schema As-Is 文件 | 現有 Schema 已記錄 | `docs/07_design/DB-SCHEMA-AS-IS-{System}.md` |
+| Migration ADR | 遷移決策已記錄 | `/adr-generate "資料庫平台遷移"` 已執行 |
+
+---
+
+## MCM Validate 閘門定義
+
+資料庫遷移特有的驗證閘門（補充 SCG 之外的遷移專屬檢查點）：
+
+| MCM | 名稱 | 說明 |
+|-----|------|------|
+| MCM-1 | Schema Freeze | DB Schema Contract 凍結（類比 SCG-3） |
+| MCM-2 | Migration Script Validate | 遷移腳本驗證（Staging 環境） |
+| MCM-3 | Data Integrity Check | 資料完整性驗證（遷移後） |
+| MCM-4 | Rollback Validate | 回滾腳本驗證 |
+
+---
+
 ## 執行流程
 
-### 階段 1: 現況分析 🔴
+### 階段 1：現況分析（As-Is DB Schema 確認）
 
-**必要資訊**:
-- [ ] 來源資料庫類型與版本
-- [ ] 目標資料庫類型與版本
-- [ ] Schema DDL 匯出檔案（或存取權限）
-- [ ] 資料量估算（表數量、總行數、總大小）
+讀取現有 As-Is SRD，確認 DB 部分完整：
+- 表格清單（含欄位/型別/約束/索引）
+- Stored Procedure / Function / Trigger 清單
+- View / Materialized View
+- 資料量估算（影響遷移策略選擇）
 
-**分析項目**:
-- [ ] 表/欄位/約束/索引清單
-- [ ] Stored Procedure / Function / Trigger 清單
-- [ ] View / Materialized View 清單
-- [ ] Sequence / 自增機制
-- [ ] 平台特有功能使用清單
-- [ ] 資料型別映射表
+**資料型別映射表**（依來源 DB 不同）：
 
-🔴 **確認點**: 現況分析結果是否完整，是否有遺漏的平台特有功能
+| Oracle/MySQL/MSSQL 型別 | PostgreSQL 映射 | 注意事項 |
+|------------------------|----------------|---------|
+| NUMBER(10) | INTEGER | 精度確認 |
+| VARCHAR2(N) | VARCHAR(N) | 無差異 |
+| CLOB / LONGTEXT | TEXT | 大物件處理 |
+| DATE（含時間）| TIMESTAMP | Oracle DATE 含時間部分 |
+| ROWNUM | ROW_NUMBER() | 需改寫 |
 
----
-
-### 階段 2: Schema 轉換
-
-**資料型別映射**（以 Oracle → PostgreSQL 為例）:
-
-```sql
--- Oracle → PostgreSQL 常見型別映射
-NUMBER(p,s)    → NUMERIC(p,s)
-VARCHAR2(n)    → VARCHAR(n)
-CHAR(n)        → CHAR(n)
-CLOB           → TEXT
-BLOB           → BYTEA
-DATE           → TIMESTAMP    -- Oracle DATE 含時間部分
-LONG           → TEXT
-RAW(n)         → BYTEA
-FLOAT          → DOUBLE PRECISION
-INTEGER        → INTEGER
-```
-
-**約束與索引轉換**:
-```sql
--- Oracle 語法 → PostgreSQL 語法
-CREATE SEQUENCE seq_name START WITH 1 INCREMENT BY 1;  -- 相同
--- Oracle PARTITION → PostgreSQL PARTITION (語法略有差異)
--- Oracle BITMAP INDEX → PostgreSQL 不支援，改用 GIN INDEX
-```
+🔴 確認點：所有平台特有語法已識別（未識別的會導致遷移失敗）。
 
 ---
 
-### 階段 3: SQL 語法轉換
+### 階段 2：DB Schema Contract 設計（MCM-1 前置）
 
-**常見轉換對照表**:
+**文件路徑**：`docs/07_design/DB-SCHEMA-CONTRACT-{SystemName}.md`
 
-| Oracle | PostgreSQL | 說明 |
-|--------|-----------|------|
-| `NVL(a, b)` | `COALESCE(a, b)` | 空值替代 |
-| `DECODE(a,b,c,d)` | `CASE WHEN a=b THEN c ELSE d END` | 條件判斷 |
-| `ROWNUM <= n` | `LIMIT n` | 限制行數 |
-| `SYSDATE` | `NOW()` / `CURRENT_TIMESTAMP` | 當前時間 |
-| `TO_DATE('...','YYYY-MM-DD')` | `TO_DATE('...','YYYY-MM-DD')` | 相同 |
-| `TO_CHAR(date,'YYYY')` | `TO_CHAR(date,'YYYY')` | 相同 |
-| `(+)` | `LEFT JOIN` / `RIGHT JOIN` | 外連接 |
-| `CONNECT BY PRIOR` | `WITH RECURSIVE` | 遞迴查詢 |
-| `SELECT ... FROM DUAL` | `SELECT ...` | 不需 DUAL |
-| `SUBSTR(s,p,l)` | `SUBSTRING(s FROM p FOR l)` | 子字串 |
-| `INSTR(s,sub)` | `POSITION(sub IN s)` | 搜尋位置 |
-| `||` | `||` | 字串串接(相同) |
+```markdown
+# DB Schema Contract — {SystemName}
+
+**版本**: {N}.{N}
+**來源 DB**: {Oracle/MySQL/MSSQL} → **目標 DB**: {PostgreSQL/MySQL}
+**狀態**: Draft → Frozen（MCM-1 後）
+
+## 表格定義
+
+### {TableName}
+| 欄位 | 原始型別 | 目標型別 | 約束 | 索引 | 備註 |
+|------|---------|---------|------|------|------|
+| {col} | {type} | {type} | NOT NULL | INDEX | {說明} |
+
+## 不相容清單（需手動處理）
+| 項目 | 問題描述 | 處理方式 |
+|------|---------|---------|
+| {SP_name} | Oracle 特有語法 | 改寫為 PostgreSQL 函數 |
+```
+
+執行 `/spec-compliance-check docs/07_design/DB-SCHEMA-CONTRACT-{SystemName}.md`
+
+**MCM-1：Schema Freeze 🔴**
+
+```
+MCM-1 通過條件：
+- [ ] 所有表格定義完整
+- [ ] 型別映射確認無誤
+- [ ] 不相容清單已完整識別
+- [ ] 索引策略已確認
+```
+
+🔴 MCM-1 通過前不可開始撰寫遷移腳本。
 
 ---
 
-### 階段 4: Stored Procedure 遷移
+### 階段 3：遷移 ADR 產出
 
-**遷移策略決策**:
+呼叫 `/adr-generate "資料庫平台遷移策略"`：
 
-```
-SP 是否包含業務邏輯？
-├─ 是 → 遷移至應用層 (Java Service / Python Service)
-│       ✅ 可測試、可維護、與 DB 解耦
-└─ 否 → 純資料處理
-        ├─ 邏輯簡單？ → 轉為 PL/pgSQL
-        └─ 不再需要？ → 移除
-```
+```markdown
+# ADR-{NNN}: 資料庫遷移策略
 
-**PL/SQL → PL/pgSQL 語法差異**:
-```sql
--- PL/SQL
-CREATE OR REPLACE PROCEDURE proc_name(p_id IN NUMBER) AS
-  v_name VARCHAR2(100);
-BEGIN
-  SELECT name INTO v_name FROM users WHERE id = p_id;
-  DBMS_OUTPUT.PUT_LINE(v_name);
-EXCEPTION
-  WHEN NO_DATA_FOUND THEN
-    DBMS_OUTPUT.PUT_LINE('Not found');
-END;
+## Decision
+選擇 {Big Bang / 分批遷移 / 雙寫策略} 方式
 
--- PL/pgSQL
-CREATE OR REPLACE FUNCTION proc_name(p_id INTEGER)
-RETURNS VOID AS $$
-DECLARE
-  v_name VARCHAR(100);
-BEGIN
-  SELECT name INTO v_name FROM users WHERE id = p_id;
-  RAISE NOTICE '%', v_name;
-EXCEPTION
-  WHEN NO_DATA_FOUND THEN
-    RAISE NOTICE 'Not found';
-END;
-$$ LANGUAGE plpgsql;
+## Rationale
+- Big Bang：停機遷移，適合小型 DB（< {N}GB）
+- 分批：零停機，適合大型 DB，需雙寫過渡期
+- 雙寫：最安全，成本最高
 ```
 
 ---
 
-### 階段 5: 資料遷移與驗證
+### 階段 4：遷移腳本撰寫
 
-**遷移步驟**:
-1. 建立目標 Schema (DDL)
-2. 遷移靜態資料（主檔/參數檔）
-3. 遷移動態資料（交易資料）
-4. 建立索引與約束
-5. 驗證資料完整性
+**遷移腳本結構**：
 
-**驗證清單**:
-- [ ] 逐表行數比對
-- [ ] 主鍵完整性（無重複、無缺失）
-- [ ] 外鍵參照完整性
-- [ ] 金額欄位加總比對
-- [ ] 日期欄位精度驗證
-- [ ] NULL 值一致性
-- [ ] 抽樣明細比對（隨機 100 筆）
+```
+migrations/
+├── 001_create_tables.sql         # Schema 建立
+├── 002_create_indexes.sql        # 索引建立
+├── 003_data_migration.sql        # 資料搬移
+├── 004_stored_procedures.sql     # SP/Function 改寫
+└── rollback/
+    ├── rollback_003.sql          # 對應回滾腳本
+    └── rollback_004.sql
+```
 
-**推薦工具**:
-- **ora2pg**: Oracle → PostgreSQL 專用遷移工具
-- **pgloader**: 多源 → PostgreSQL 載入工具
-- **AWS DMS**: 雲端資料庫遷移服務
-- **Flyway / Liquibase**: Schema 版本管理
+每個腳本必須有：
+- 冪等性（重複執行安全）
+- 回滾腳本（對應 `rollback/` 目錄）
+- 執行前/後驗證查詢
 
 ---
 
-## 常見陷阱
+### 階段 5：MCM-2 遷移腳本驗證（Staging）
 
-| 問題 | 解決方案 |
-|------|---------|
-| Oracle DATE 含時間，PostgreSQL DATE 不含 | 使用 TIMESTAMP 替代 DATE |
-| Oracle 空字串等同 NULL | PostgreSQL 空字串 ≠ NULL，需檢查相關邏輯 |
-| Oracle SEQUENCE 值不連續 | PostgreSQL SERIAL 也不保證連續，行為一致 |
-| Oracle 大小寫不敏感 | PostgreSQL 預設大小寫敏感，需加 LOWER() 或 citext |
-| PL/SQL PACKAGE 無對應 | 改用 PostgreSQL Schema 或應用層 Service 分組 |
+在 Staging 環境執行遷移，驗證：
+
+```markdown
+## MCM-2 驗證清單
+
+- [ ] 所有遷移腳本在 Staging 執行成功（無錯誤）
+- [ ] 遷移後 Schema 與 DB Schema Contract 一致
+- [ ] 回滾腳本在 Staging 測試通過
+- [ ] 遷移時間估算符合 SLA（停機窗口內）
+```
+
+🔴 MCM-2 未通過 → 修正腳本後重新執行，不可強行進入 Production。
 
 ---
 
-## 產出物
+### 階段 6：MCM-3 資料完整性驗證
 
-| 產出物 | 路徑 |
-|--------|------|
-| 資料型別映射表 | `docs/02_architecture/DB_Type_Mapping.md` |
-| SQL 語法轉換對照表 | `docs/02_architecture/SQL_Syntax_Conversion.md` |
-| SP 遷移計畫 | `docs/02_architecture/SP_Migration_Plan.md` |
-| 資料遷移驗證報告 | `docs/03_testing/DB_Migration_Verification.md` |
+```markdown
+## MCM-3 資料完整性驗證
+
+- [ ] 行數驗證：每個表格的行數與遷移前一致
+- [ ] 關鍵業務資料抽樣驗證（Business Invariants）
+- [ ] 外鍵約束驗證
+- [ ] RTM 更新：資料遷移相關 TC 全部通過
+```
+
+---
+
+### 階段 7：RTM 更新 🔴
+
+```bash
+/rtm-generate update   # 更新與 DB 遷移相關的 TC 狀態
+/spec-compliance-check docs/07_design/DB-SCHEMA-CONTRACT-{SystemName}.md
+```
+
+🔴 確認點：MCM-3 驗證結果需 DBA 確認。
+
+---
+
+## 強制產出（SDD 文件）
+
+| 產出物 | 路徑 | 對應閘門 |
+|--------|------|---------|
+| DB Schema Contract | `docs/07_design/DB-SCHEMA-CONTRACT-{System}.md` | MCM-1 |
+| Migration ADR | `docs/02_architecture/adr/ADR-{NNN}-db-migration.md` | SCG-2 |
+| Migration Scripts | `migrations/` | MCM-2 |
+| Rollback Scripts | `migrations/rollback/` | MCM-4 |
+
+---
+
+## 後置動作
+
+```
+/rtm-generate update      # 更新 DB 遷移相關 TC
+/sdd-gate SCG-4           # 遷移實作後的 PR Review
+/release-management       # 遷移上線（含 MCM Validate）
+```
+
+🔷 **本 Skill 協助通過**：SCG-3（DB Schema Contract 凍結）、SCG-4（遷移實作 Review）
 
 ---
 
 ## 相關 Skill
 
-- `/integration-database` - 資料庫整合服務設定
-- `/sd-architect` - 架構設計（含資料層）
-- `/testing-strategy` - 測試策略（含資料驗證）
+- `/brownfield-analysis` — 提供 As-Is DB 基線（前置）
+- `/adr-generate` — 遷移策略決策 ADR（在本 Skill 中呼叫）
+- `/integration-database` — ORM 層整合（遷移後更新）
+- `/release-management` — 遷移上線流程
 
 ---
 
-## 相關檔案
-
-- SOP 參考: `scenarios/migration/SOP.md`
-- QuickRef: `scenarios/migration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Migration 情境
+**基於**: AISDLC-SDD v0.30
+**對應場景**: `scenarios/brownfield/SDD_BROWNFIELD_ENHANCEMENT.md`
+**對應 CI/CD 規格**: `cicd/SDD_MIGRATION_CICD.md`

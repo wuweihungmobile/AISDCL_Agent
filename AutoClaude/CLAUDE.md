@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: v0.09 | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter kept 數以下方 Snapshot 為準（R82 新增 no-harness-import）、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: AISDLC_SDD LATEST | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter kept 數以下方 Snapshot 為準（R82 新增 no-harness-import）、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -40,7 +40,7 @@
 
 **絕對禁止**：(1) 累積開發多支才編譯；(2) 編譯失敗繼續開發；(3) 跳過單元測試；(4) 測試失敗後註解掉測試。
 
-詳見：[Development_Build_Test_Cycle.md](AISDLC_v0.09/guides/user/process/Development_Build_Test_Cycle.md)。本節為 prompt 層規範由 LLM 自律執行；Hook 層補強仍在下方〈Hook 治理〉的 Backlog（`build_test_cycle.py`）——R82 併行以讓出 Snapshot 增列所需行數（同一件事原本寫在兩處）。
+詳見：`AISDLC_SDD/AISDLC_SDD_v<LATEST>/guides/user/process/Development_Build_Test_Cycle.md`（monorepo 根起算；`<LATEST>` 現查見〈Agent 自動載入〉）。本節為 prompt 層規範由 LLM 自律執行；Hook 層補強仍在下方〈Hook 治理〉的 Backlog（`build_test_cycle.py`）——R82 併行以讓出 Snapshot 增列所需行數（同一件事原本寫在兩處）。
 
 ---
 
@@ -59,7 +59,7 @@
 | UI/UX, Database Design | `docs/07_design/` |
 | CI/CD, Release Notes | `docs/08_deployment/` |
 
-詳見：[DEVELOPMENT_DIRECTORY_STRUCTURE.md](AISDLC_v0.09/DEVELOPMENT_DIRECTORY_STRUCTURE.md)。
+詳見：`AISDLC_SDD/AISDLC_SDD_v<LATEST>/FILE_DIRECTORY_RULES.md`（SDD 版目錄規則；monorepo 根起算，`<LATEST>` 見〈Agent 自動載入〉）。
 
 > **自動化**：`tools/hooks/enforce_docs_path.py` 於 PreToolUse Write 強制白名單目錄（`docs/0[1-8]_*/` + 根層 `CLAUDE.md`/`README.md`），違規即阻斷。
 
@@ -67,25 +67,17 @@
 
 ## 🤖 Agent 自動載入
 
-| Agent | 角色 | 使用時機 | 配置檔 |
-|-------|------|---------|--------|
-| **dev-developer** | 開發 | 程式碼實作、編譯測試 | [06](AISDLC_v0.09/agent/core/06.dev-developer-zh.yaml) |
-| **qa-tester** | 測試 | 測試設計、執行驗證 | [07](AISDLC_v0.09/agent/core/07.qa-tester-zh.yaml) |
-| **sa-analyst** | 系統分析 | 需求分析、功能設計 | [04](AISDLC_v0.09/agent/core/04.sa-analyst-zh.yaml) |
-| **sd-architect** | 架構設計 | 技術架構、系統設計 | [05](AISDLC_v0.09/agent/core/05.sd-architect-zh.yaml) |
-| **pm-po-agent** | 專案管理 | 需求優先級、規劃 | [03](AISDLC_v0.09/agent/core/03.pm-po-agent-zh.yaml) |
-| **ba-business-analyst** | 業務分析 | 業務邏輯驗證 | [02](AISDLC_v0.09/agent/core/02.ba-business-analyst-zh.yaml) |
-
-**自動載入流程**：識別任務類型 → 讀對應 YAML → 載入 core_principles / quality_standards / collaboration_rules → 按 Agent 規範執行。使用 AISDLC workflow 前載入 [AISDLC_INIT.md](AISDLC_v0.09/AISDLC_INIT.md)；情境啟動 `AISDLC [情境代碼] [專案簡述]`，詳見 [SCENARIO_SELECTOR.md](AISDLC_v0.09/guides/user/onboarding/SCENARIO_SELECTOR.md)。
-> ⚠️ 本檔所有 `AISDLC_v0.09/` 連結指向的目錄**未隨 monorepo 入庫**（僅存於原始獨立 AutoClaude repo；R13 DOC-2 查證全 repo 零命中）——在本 monorepo 內點按必失效；方法論資產請改用姊妹專案 [../AISDLC_SDD/](../AISDLC_SDD/)（LATEST 版）。
+- **方法論與 agent YAML 的唯一來源**＝姊妹專案 [../AISDLC_SDD/](../AISDLC_SDD/)（以下路徑以 monorepo 根為基準；LATEST 版號現查 `python AISDLC_SDD/scripts/sdd_version.py`）：入口 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md`（其〈Agent 自動載入配置表〉即載入規則）；agent YAML 住版本目錄下 `agent/core/`（02～07＝ba／pm-po／sa／sd／dev／qa）＋`agent/specialized/`；skills 一律以 `AISDLC_SDD:<skill>` 前綴叫起；本專案 `.claude/skills` 是 LATEST 的機械鏡像。
+- **用 SDD 流程開發 AutoClaude 自身功能**（規格凍結→FSM 閘門→實作→SCG-4 獨立審查→RTM）：走 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §8；三件組 `SDD_ACTIVE_VERSION`／`SDD_STATE_DIR`＝`AutoClaude/build/reports/fsm`／`SDD_PROJECT`＝`autoclaude-<slug>`，一功能一鍵，一律從 monorepo 根啟動 session。
+- **閘門對映**：SCG-0～3＝規格閘（FSM 可驗）、SCG-4～5＝品質閘；本檔的 G0～G6 是交付里程碑簽核，不改名、不取代（整合輪 116 D-116-05；對映表見上條 §8）。
 
 ---
 
 ## 📋 專案開發規範
 
 - **文檔命名**：PascalCase / Snake_Case + 英文 + 類型前綴（`PRD_`, `FRD_`, `Sprint_`）
-- **ID 命名**：`F-XXX` Feature / `NFR-XXX` / `EPIC-XXX` / `US-XXX` / `AC-XXX-Y` / `API-XXX` / `TC-XXX-Y-Z` / `BUG-XXX` / `TECH-XXX`（詳見 [AISDLC_ID_Naming_Convention.md](AISDLC_v0.09/guides/system/naming/AISDLC_ID_Naming_Convention.md)）
-- **品質檢查**：完整性、可讀性、技術文檔專項（詳見 [Document_Quality_Checklist.md](AISDLC_v0.09/guides/system/quality/Document_Quality_Checklist.md)）
+- **ID 命名**：`F-XXX` Feature / `NFR-XXX` / `EPIC-XXX` / `US-XXX` / `AC-XXX-Y` / `API-XXX` / `TC-XXX-Y-Z` / `BUG-XXX` / `TECH-XXX`（詳見 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/guides/system/naming/AISDLC_ID_Naming_Convention.md`）
+- **品質檢查**：完整性、可讀性、技術文檔專項（詳見 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/guides/system/quality/Document_Quality_Checklist.md`）
 
 ---
 
@@ -319,7 +311,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.13 | 建立 2025-01-11 | 最後更新 2026-07-24（權威以 git log 為準） | 適用 AISDLC v0.09+（v7.13：R32 訂正 v7.12 footer 日期少算一天（同構復發，Scan-D 發現），僅訂正日期。v7.12：R31 複審訂正——本 footer 曾落後 R26 實際編修（DEF-101-283）：R26（08ee85c）改了上方 Nightly 連結版本號卻漏同步本行日期/沿革，本次補記並訂正。v7.11：R13 跨平台複審——pytest 基線數字收斂根層 ONBOARDING §7 單一出處（check_pytest_baseline_sites 機械鎖）、AISDLC_v0.09 未入庫註記、ADR 去計數、紀律 8 毀損字樣全中文化。v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。歷史 v7.9 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.14 | 建立 2025-01-11 | 最後更新 2026-10-18（權威以 git log 為準） | 適用 AISDLC_SDD LATEST（v7.14：整合輪 116 方法論改指 AISDLC_SDD LATEST、閘門對映 D-116-05。v7.13：R32 訂正 v7.12 footer 日期少算一天（同構復發，Scan-D 發現），僅訂正日期。v7.12：R31 複審訂正——本 footer 曾落後 R26 實際編修（DEF-101-283）：R26（08ee85c）改了上方 Nightly 連結版本號卻漏同步本行日期/沿革，本次補記並訂正。v7.11：R13 跨平台複審——pytest 基線數字收斂根層 ONBOARDING §7 單一出處（check_pytest_baseline_sites 機械鎖）、AISDLC_v0.09 未入庫註記、ADR 去計數、紀律 8 毀損字樣全中文化。v7.10：R10 跨平台複審——nightly 五變更（sdd-fsm-chaos stage／recall rc [ref] 捕捉／mutmut 驗證失敗 rc=1／Docker 連續 SKIP ≥3 升級 exit 1／END 進度改 unique-sha 分子），紀律完整版連結 v1.6→v1.7；mutation history 壓縮落盤 29→7 筆（DEF-101-148：improving_101 宣稱之方案 A 壓縮實未執行於本機 live 檔）。歷史 v7.9 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

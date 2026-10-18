@@ -1,500 +1,151 @@
 ---
 name: integration-webhook
-description: 建立 Webhook 處理系統，包含驗證、重試、事件處理
+description: Webhook 系統設計，Event Schema Contract 先行，簽章驗證 ADR，冪等性規格，RTM 追蹤
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[provider: Webhook 來源 (stripe/github/custom)] [framework: 框架 (nextjs/express/fastapi/spring)]"
+argument-hint: "<direction: receive|send|both> [provider: stripe|github|custom]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Integration Webhook Skill
+# Integration Webhook Skill（SDD 原生）
 
-建立企業級 Webhook 處理系統。
+Webhook 在 SDD 中必須設計先行：Event Schema Contract 定義事件格式，ADR 記錄安全驗證策略，冪等性設計在實作前凍結。本 Skill 適用於接收外部 Webhook（如 Stripe）和發送 Webhook 給下游消費者。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/integration-webhook                  # 通用 Webhook
-/integration-webhook stripe nextjs    # Stripe + Next.js
-/integration-webhook github express   # GitHub + Express
+/integration-webhook receive stripe
+/integration-webhook send custom
+/integration-webhook both
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-1 通過 | Webhook 架構確定 | `docs/02_architecture/SRD-{System}.md` 事件架構章節 |
+| FRD 事件需求 | Webhook 事件已定義為 F-XXX | 含 AC（事件接收 / 失敗重試 / 冪等）|
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求確認 🔴
+### 階段 1：Webhook 安全策略 ADR
 
-**確認項目**:
-- [ ] Webhook 來源和事件類型
-- [ ] 驗證機制 (簽名/Secret)
-- [ ] 重試和冪等性策略
-- [ ] 事件處理邏輯
-- [ ] 錯誤處理和告警
+呼叫 `/adr-generate "Webhook 安全與冪等策略"`：
 
-🔴 **確認點**: 確認 Webhook 需求
+```markdown
+# ADR-{NNN}: Webhook 安全驗證與冪等性設計
 
----
+## Decision
+使用 HMAC-SHA256 簽章驗證 + event_id 去重（Redis）
 
-### 階段 2: Webhook 處理架構
+## Rationale
+- HMAC 驗證：防止偽造 Webhook（STRIDE T-001）
+- event_id 去重：確保冪等性（Webhook 可能重複發送）
+- 非同步處理：接收立即返回 200，處理邏輯進佇列
 
-```typescript
-// src/lib/webhook/types.ts
-export interface WebhookEvent<T = unknown> {
-  id: string;
-  type: string;
-  timestamp: number;
-  data: T;
-  signature?: string;
-}
-
-export interface WebhookHandler<T = unknown> {
-  eventType: string;
-  handle: (event: WebhookEvent<T>) => Promise<void>;
-}
-
-export interface WebhookConfig {
-  secret: string;
-  toleranceSeconds?: number;
-}
-```
-
-```typescript
-// src/lib/webhook/processor.ts
-import crypto from 'crypto';
-import { WebhookEvent, WebhookHandler, WebhookConfig } from './types';
-
-export class WebhookProcessor {
-  private handlers = new Map<string, WebhookHandler>();
-  private config: WebhookConfig;
-
-  constructor(config: WebhookConfig) {
-    this.config = config;
-  }
-
-  register<T>(handler: WebhookHandler<T>): void {
-    this.handlers.set(handler.eventType, handler as WebhookHandler);
-  }
-
-  verifySignature(payload: string, signature: string): boolean {
-    const expectedSignature = crypto
-      .createHmac('sha256', this.config.secret)
-      .update(payload)
-      .digest('hex');
-
-    return crypto.timingSafeEqual(
-      Buffer.from(signature),
-      Buffer.from(`sha256=${expectedSignature}`)
-    );
-  }
-
-  async process(event: WebhookEvent): Promise<void> {
-    const handler = this.handlers.get(event.type);
-
-    if (!handler) {
-      console.warn(`No handler for event type: ${event.type}`);
-      return;
-    }
-
-    await handler.handle(event);
-  }
-}
+## Consequences
+- 需要儲存已處理的 event_id（TTL = 24h）
+- 重試邏輯：3 次，指數退避
 ```
 
 ---
 
-### 階段 3: Next.js Webhook Endpoint
+### 階段 2：Event Schema Contract
 
-```typescript
-// app/api/webhook/route.ts
-import { headers } from 'next/headers';
-import { NextResponse } from 'next/server';
-import { WebhookProcessor } from '@/lib/webhook/processor';
-import { handleOrderCreated, handlePaymentCompleted } from '@/lib/webhook/handlers';
+**文件路徑**：`docs/03_testing/contracts/WEBHOOK-CONTRACT-{Provider}-{System}.md`
 
-const processor = new WebhookProcessor({
-  secret: process.env.WEBHOOK_SECRET!,
-});
+```markdown
+# Webhook Event Schema Contract — {Provider}
 
-// 註冊處理器
-processor.register(handleOrderCreated);
-processor.register(handlePaymentCompleted);
+**方向**: Receive（接收）/ Send（發送）
+**版本**: 與 API Contract 同步
 
-export async function POST(req: Request) {
-  const body = await req.text();
-  const headersList = headers();
-  const signature = headersList.get('x-webhook-signature');
+## 訂閱事件清單（對應 FRD Feature）
 
-  // 驗證簽名
-  if (!signature || !processor.verifySignature(body, signature)) {
-    return NextResponse.json(
-      { error: 'Invalid signature' },
-      { status: 401 }
-    );
-  }
+| 事件類型 | 說明 | FRD Feature | 業務影響 |
+|---------|------|------------|---------|
+| {event.type} | {說明} | F-XXX | {業務影響} |
 
-  try {
-    const event = JSON.parse(body);
+## 事件 Payload Schema
 
-    // 冪等性檢查
-    const processed = await checkIdempotency(event.id);
-    if (processed) {
-      return NextResponse.json({ status: 'already_processed' });
-    }
-
-    // 處理事件
-    await processor.process(event);
-
-    // 標記為已處理
-    await markAsProcessed(event.id);
-
-    return NextResponse.json({ status: 'success' });
-  } catch (error) {
-    console.error('Webhook processing error:', error);
-    return NextResponse.json(
-      { error: 'Processing failed' },
-      { status: 500 }
-    );
-  }
-}
-
-// 冪等性函數
-async function checkIdempotency(eventId: string): Promise<boolean> {
-  // 使用 Redis 或資料庫檢查
-  // return await redis.exists(`webhook:${eventId}`);
-  return false;
-}
-
-async function markAsProcessed(eventId: string): Promise<void> {
-  // await redis.set(`webhook:${eventId}`, '1', 'EX', 86400 * 7);
-}
-```
-
----
-
-### 階段 4: 事件處理器
-
-```typescript
-// src/lib/webhook/handlers/order.ts
-import { WebhookHandler, WebhookEvent } from '../types';
-import { prisma } from '@/lib/prisma';
-
-interface OrderData {
-  orderId: string;
-  customerId: string;
-  items: Array<{ productId: string; quantity: number }>;
-  total: number;
-}
-
-export const handleOrderCreated: WebhookHandler<OrderData> = {
-  eventType: 'order.created',
-
-  async handle(event: WebhookEvent<OrderData>) {
-    const { orderId, customerId, items, total } = event.data;
-
-    // 1. 儲存訂單
-    await prisma.order.create({
-      data: {
-        externalId: orderId,
-        customerId,
-        total,
-        items: {
-          create: items.map((item) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-          })),
-        },
-        webhookEventId: event.id,
-      },
-    });
-
-    // 2. 發送通知
-    await sendOrderConfirmation(customerId, orderId);
-
-    // 3. 更新庫存
-    for (const item of items) {
-      await updateInventory(item.productId, -item.quantity);
-    }
-
-    console.log(`Order ${orderId} processed successfully`);
+```json
+{
+  "event_id": "string（唯一 ID，用於冪等去重）",
+  "event_type": "string（事件類型）",
+  "timestamp": "string（ISO 8601）",
+  "data": {
+    // 事件特定資料
   },
-};
-
-export const handlePaymentCompleted: WebhookHandler<{ orderId: string; amount: number }> = {
-  eventType: 'payment.completed',
-
-  async handle(event) {
-    const { orderId, amount } = event.data;
-
-    await prisma.order.update({
-      where: { externalId: orderId },
-      data: {
-        paymentStatus: 'COMPLETED',
-        paidAmount: amount,
-        paidAt: new Date(),
-      },
-    });
-
-    console.log(`Payment for order ${orderId} completed`);
-  },
-};
-```
-
----
-
-### 階段 5: 重試佇列
-
-```typescript
-// src/lib/webhook/queue.ts
-import { Queue, Worker, Job } from 'bullmq';
-
-const webhookQueue = new Queue('webhooks', {
-  connection: {
-    host: process.env.REDIS_HOST,
-    port: parseInt(process.env.REDIS_PORT || '6379'),
-  },
-  defaultJobOptions: {
-    attempts: 5,
-    backoff: {
-      type: 'exponential',
-      delay: 1000,
-    },
-  },
-});
-
-// 加入佇列
-export async function enqueueWebhook(event: WebhookEvent) {
-  await webhookQueue.add(event.type, event, {
-    jobId: event.id, // 確保冪等性
-  });
-}
-
-// Worker 處理
-const worker = new Worker(
-  'webhooks',
-  async (job: Job) => {
-    const processor = getProcessor();
-    await processor.process(job.data);
-  },
-  {
-    connection: {
-      host: process.env.REDIS_HOST,
-      port: parseInt(process.env.REDIS_PORT || '6379'),
-    },
-  }
-);
-
-worker.on('completed', (job) => {
-  console.log(`Job ${job.id} completed`);
-});
-
-worker.on('failed', (job, error) => {
-  console.error(`Job ${job?.id} failed:`, error);
-  // 發送告警
-});
-```
-
----
-
-### 階段 5B: Spring Boot Webhook Endpoint
-
-> 當 framework 為 `spring` 時使用
-
-```java
-// src/main/java/com/example/webhook/WebhookController.java
-@RestController
-@RequestMapping("/api/webhooks")
-@Slf4j
-public class WebhookController {
-
-    private final WebhookProcessor webhookProcessor;
-    private final WebhookEventRepository eventRepository;
-
-    @PostMapping("/{provider}")
-    public ResponseEntity<Map<String, String>> handleWebhook(
-            @PathVariable String provider,
-            @RequestBody String payload,
-            @RequestHeader("X-Webhook-Signature") String signature) {
-
-        // 1. 驗證簽名
-        if (!webhookProcessor.verifySignature(provider, payload, signature)) {
-            log.warn("Invalid webhook signature from provider: {}", provider);
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("error", "Invalid signature"));
-        }
-
-        // 2. 解析事件
-        WebhookEvent event = webhookProcessor.parseEvent(payload);
-
-        // 3. 冪等性檢查
-        if (eventRepository.existsByEventId(event.getId())) {
-            return ResponseEntity.ok(Map.of("status", "already_processed"));
-        }
-
-        // 4. 非同步處理
-        webhookProcessor.processAsync(event);
-
-        // 5. 記錄事件
-        eventRepository.save(WebhookEventEntity.from(event));
-
-        return ResponseEntity.ok(Map.of("status", "accepted"));
-    }
+  "signature": "string（HMAC-SHA256，用於驗證）"
 }
 ```
 
-```java
-// src/main/java/com/example/webhook/WebhookProcessor.java
-@Service
-@Slf4j
-public class WebhookProcessor {
+## 安全驗證規格
+- Header: `X-Webhook-Signature: sha256={HMAC}`
+- Secret: 環境變數 `WEBHOOK_SECRET`（不可 hardcode）
+- 驗證失敗返回：400
 
-    @Value("${webhook.secret}")
-    private String webhookSecret;
-
-    private final Map<String, WebhookHandler> handlers = new ConcurrentHashMap<>();
-
-    public boolean verifySignature(String provider, String payload, String signature) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(webhookSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            String expected = "sha256=" + Hex.encodeHexString(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
-            return MessageDigest.isEqual(expected.getBytes(), signature.getBytes());
-        } catch (Exception e) {
-            log.error("Signature verification failed", e);
-            return false;
-        }
-    }
-
-    @Async
-    public void processAsync(WebhookEvent event) {
-        WebhookHandler handler = handlers.get(event.getType());
-        if (handler != null) {
-            handler.handle(event);
-        } else {
-            log.warn("No handler for event type: {}", event.getType());
-        }
-    }
-
-    public void registerHandler(String eventType, WebhookHandler handler) {
-        handlers.put(eventType, handler);
-    }
-}
+## 冪等性規格
+- 去重 Key: `event_id`
+- 去重儲存: Redis SET（TTL = 24h）
+- 重複事件：返回 200（不重複處理）
 ```
 
 ---
 
-### 階段 5C: FastAPI Webhook Endpoint
+### 階段 3：Webhook 端點 Contract 補充
 
-> 當 framework 為 `fastapi` 時使用
+補充至 `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml`：
 
-```python
-# src/webhooks/router.py
-from fastapi import APIRouter, Header, HTTPException, BackgroundTasks, Request
-from typing import Optional
-import hmac
-import hashlib
-import json
-import logging
-
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
-logger = logging.getLogger(__name__)
-
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
-
-def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
-    expected = "sha256=" + hmac.new(
-        secret.encode(), payload, hashlib.sha256
-    ).hexdigest()
-    return hmac.compare_digest(expected, signature)
-
-@router.post("/{provider}")
-async def handle_webhook(
-    provider: str,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    x_webhook_signature: Optional[str] = Header(None),
-):
-    payload = await request.body()
-
-    # 1. 驗證簽名
-    if not x_webhook_signature or not verify_signature(payload, x_webhook_signature, WEBHOOK_SECRET):
-        raise HTTPException(status_code=401, detail="Invalid signature")
-
-    event = json.loads(payload)
-
-    # 2. 冪等性檢查
-    if await is_event_processed(event.get("id")):
-        return {"status": "already_processed"}
-
-    # 3. 非同步處理
-    background_tasks.add_task(process_webhook_event, provider, event)
-
-    # 4. 記錄事件
-    await mark_event_processed(event.get("id"))
-
-    return {"status": "accepted"}
-
-async def process_webhook_event(provider: str, event: dict):
-    event_type = event.get("type", "unknown")
-    handler = HANDLERS.get(event_type)
-    if handler:
-        await handler(event)
-    else:
-        logger.warning(f"No handler for event type: {event_type}")
+```yaml
+/webhooks/{provider}:
+  post:
+    operationId: receive{Provider}Webhook
+    summary: 接收 {Provider} Webhook 事件
+    x-sdd-feature-id: "F-WEBHOOK-001"
+    parameters:
+      - name: X-Webhook-Signature
+        in: header
+        required: true
+        schema: { type: string }
+    responses:
+      '200':
+        description: 事件已接收（非同步處理）
+      '400':
+        description: 簽章驗證失敗
 ```
 
 ---
 
-### 階段 6: 驗證 🔴
+### 階段 4：RTM 更新 🔴
 
-**驗證清單**:
-- [ ] 簽名驗證正確
-- [ ] 事件處理成功
-- [ ] 冪等性機制運作
-- [ ] 重試機制正常
-- [ ] 錯誤告警正確
-
-**測試命令**:
 ```bash
-# 發送測試 Webhook
-curl -X POST http://localhost:3000/api/webhook \
-  -H "Content-Type: application/json" \
-  -H "x-webhook-signature: sha256=..." \
-  -d '{"id": "evt_123", "type": "order.created", "data": {...}}'
+/rtm-generate update
+/spec-compliance-check docs/03_testing/contracts/WEBHOOK-CONTRACT-{Provider}-{System}.md
 ```
 
-🔴 **確認點**: 確認 Webhook 處理正常
+🔴 確認點：冪等性 TC（TC-WH-002）已建立；簽章驗證 TC（TC-WH-001）已建立。
 
 ---
 
-## 產出物
+## 強制產出（SDD 文件）
 
-| 產出物 | 路徑 |
-|--------|------|
-| Webhook 處理器 | `src/lib/webhook/processor.ts` |
-| 事件處理器 | `src/lib/webhook/handlers/*.ts` |
-| API Endpoint | `app/api/webhook/route.ts` |
-| 佇列處理 | `src/lib/webhook/queue.ts` |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Webhook 安全 ADR | `docs/02_architecture/adr/ADR-{NNN}-webhook-security.md` | SCG-2 |
+| Event Schema Contract | `docs/03_testing/contracts/WEBHOOK-CONTRACT-{Provider}-{System}.md` | SCG-3 後 |
 
 ---
 
-## 相關 Skill
-
-- `/integration-stripe` - Stripe Webhook
-- `/integration-api-client` - API 客戶端
-
----
-
-
-## 相關檔案
-
-- SOP 參考: `scenarios/integration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Integration 情境
+**基於**: AISDLC-SDD v0.30
+**CI/CD 規格**: `cicd/SDD_INTEGRATION_CICD.md`

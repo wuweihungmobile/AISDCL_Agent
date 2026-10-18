@@ -1,20 +1,19 @@
 ---
 name: integration-stripe
-description: 整合 Stripe 支付系統，包含結帳流程、Webhook 處理、訂閱管理
+description: Stripe 支付整合，ADR 記錄支付策略，Webhook Contract 定義事件 Schema，RTM 追蹤支付 TC
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<payment_type: 支付類型 (one-time/subscription/both)> [framework: 使用的框架 (nextjs/express/fastapi)]"
+argument-hint: "<payment_type: one-time|subscription|both> [framework: nextjs|express|fastapi]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Integration Stripe Payment Skill
+# Integration Stripe Skill（SDD 原生）
 
-基於 AISDLC Integration 情境的 Stripe 支付整合技能。
+Stripe 整合在 SDD 中屬於「整合設計先行」範疇：支付策略需有 ADR，Webhook 事件需有 Event Schema Contract，支付 API 端點需在 OpenAPI Contract 中定義，每個支付 AC 需有對應 TC。
 
 ---
 
@@ -23,277 +22,187 @@ allowed-tools:
 ```bash
 /integration-stripe one-time nextjs
 /integration-stripe subscription express
-/integration-stripe --payment_type=both
+/integration-stripe both
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-1 通過 | 支付架構已決定 | `docs/02_architecture/SRD-{System}.md` 支付章節 |
+| FRD 支付需求 | 支付功能已定義為 F-XXX | 含 AC（正常支付 / 失敗 / 退款 / 訂閱）|
+| NFR-SEC-PCI 定義 | PCI-DSS 合規需求 | NFR-COMP-XXX 含 PCI 相關條款 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: Stripe 設定確認 🔴
+### 階段 1：支付策略 ADR（設計先行）🔴
 
-**必要資訊**:
-- [ ] Stripe 帳戶已建立
-- [ ] API Keys 已取得 (Publishable + Secret)
-- [ ] Webhook Endpoint 已規劃
-- [ ] 產品/價格已在 Stripe Dashboard 建立
+呼叫 `/adr-generate "支付策略"`：
 
-**環境變數**:
-```env
-STRIPE_SECRET_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+```markdown
+# ADR-{NNN}: 支付策略與 Stripe 整合
+
+## Decision
+使用 Stripe Checkout（Hosted）+ Webhook 事件驅動 → 訂單狀態更新
+
+## Rationale
+- Hosted Checkout：PCI-DSS 合規範圍最小化（NFR-COMP-003）
+- Webhook 非同步處理：確保支付結果可靠傳遞（冪等性）
+- 不儲存 PAN：Token 化（對應 PCI-DSS Req.3）
+
+## Payment Flow 設計
+1. 前端觸發 → 後端建立 Checkout Session
+2. 重導至 Stripe Hosted Page
+3. 支付完成 → Stripe 發送 Webhook
+4. 後端驗證 Webhook 簽章 → 更新訂單狀態
+
+## Consequences
+- Stripe Fee 結構需納入業務成本
+- Webhook 必須冪等（重試安全）
+- Refund 流程需單獨設計（F-XXX）
 ```
-
-🔴 **確認點**: 確認 API Keys 和產品設定
 
 ---
 
-### 階段 2: 後端整合
+### 階段 2：Webhook Event Schema Contract
 
-#### 安裝依賴
+**文件路徑**：`docs/03_testing/contracts/WEBHOOK-CONTRACT-Stripe-{System}.md`
 
-```bash
-npm install stripe
-```
+```markdown
+# Webhook Contract — Stripe
 
-#### Stripe 客戶端初始化
+**Provider**: Stripe API v{N}
+**Consumer**: {SystemName}
 
-```typescript
-// lib/stripe.ts
-import Stripe from 'stripe';
+## 訂閱事件清單（對應 FRD Feature）
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2023-10-16',
-  typescript: true,
-});
-```
+| 事件類型 | 說明 | FRD Feature | 業務影響 |
+|---------|------|------------|---------|
+| payment_intent.succeeded | 支付成功 | F-PAY-001 | 訂單狀態 → 已付款 |
+| payment_intent.payment_failed | 支付失敗 | F-PAY-002 | 通知用戶 + 訂單 → 待付款 |
+| customer.subscription.created | 訂閱建立 | F-SUB-001 | 開通服務 |
+| customer.subscription.deleted | 訂閱取消 | F-SUB-003 | 關閉服務 |
+| charge.refunded | 退款 | F-PAY-005 | 訂單 → 已退款 |
 
-#### 建立 Checkout Session (一次性支付)
-
-```typescript
-// app/api/checkout/route.ts (Next.js)
-import { stripe } from '@/lib/stripe';
-import { NextResponse } from 'next/server';
-
-export async function POST(req: Request) {
-  const { priceId, quantity = 1 } = await req.json();
-
-  try {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: priceId,
-          quantity,
-        },
-      ],
-      success_url: `${process.env.NEXT_PUBLIC_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_URL}/cancel`,
-      metadata: {
-        // 自訂資料
-      },
-    });
-
-    return NextResponse.json({ sessionId: session.id, url: session.url });
-  } catch (error) {
-    return NextResponse.json({ error: 'Checkout failed' }, { status: 500 });
+## Webhook Payload 結構驗證（payment_intent.succeeded）
+```json
+{
+  "id": "evt_xxx",                    // string, required
+  "type": "payment_intent.succeeded", // string, required
+  "data": {
+    "object": {
+      "id": "pi_xxx",                 // PaymentIntent ID, required
+      "amount": 1000,                 // integer, cents, required
+      "currency": "usd",              // string, required
+      "metadata": {
+        "order_id": "ORD-xxx"         // string, 必須含 order_id
+      }
+    }
   }
 }
 ```
 
-#### 建立訂閱 Checkout
-
-```typescript
-// app/api/subscribe/route.ts
-export async function POST(req: Request) {
-  const { priceId, customerId } = await req.json();
-
-  const session = await stripe.checkout.sessions.create({
-    mode: 'subscription',
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    success_url: `${process.env.NEXT_PUBLIC_URL}/subscription/success`,
-    cancel_url: `${process.env.NEXT_PUBLIC_URL}/pricing`,
-  });
-
-  return NextResponse.json({ url: session.url });
-}
+## 安全驗證
+- Webhook 簽章驗證：`Stripe-Signature` header + Secret
+- 冪等性：以 `event.id` 去重（防止重複處理）
 ```
 
 ---
 
-### 階段 3: Webhook 處理
+### 階段 3：API Contract 補充（支付端點）
 
-```typescript
-// app/api/webhook/route.ts
-import { stripe } from '@/lib/stripe';
-import { headers } from 'next/headers';
+補充至 `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml`：
 
-export async function POST(req: Request) {
-  const body = await req.text();
-  const signature = headers().get('stripe-signature')!;
+```yaml
+# 支付相關端點（對應 FRD F-PAY-XXX）
+/payments/checkout:
+  post:
+    operationId: createCheckoutSession
+    summary: 建立 Stripe Checkout Session
+    x-sdd-feature-id: "F-PAY-001"
+    requestBody:
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [order_id, amount, currency]
+            properties:
+              order_id: { type: string }
+              amount: { type: integer, description: "金額（分）" }
+              currency: { type: string, enum: [usd, twd] }
+    responses:
+      '200':
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checkout_url: { type: string, format: uri }
+      '400': { $ref: '#/components/responses/BadRequest' }
+      '500': { $ref: '#/components/responses/InternalError' }
 
-  let event: Stripe.Event;
-
-  try {
-    event = stripe.webhooks.constructEvent(
-      body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    );
-  } catch (err) {
-    return new Response('Webhook signature verification failed', { status: 400 });
-  }
-
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object as Stripe.Checkout.Session;
-      // 處理成功付款
-      await handleSuccessfulPayment(session);
-      break;
-
-    case 'invoice.paid':
-      const invoice = event.data.object as Stripe.Invoice;
-      // 處理訂閱續費
-      await handleSubscriptionRenewal(invoice);
-      break;
-
-    case 'customer.subscription.deleted':
-      const subscription = event.data.object as Stripe.Subscription;
-      // 處理訂閱取消
-      await handleSubscriptionCancellation(subscription);
-      break;
-
-    default:
-      console.log(`Unhandled event type: ${event.type}`);
-  }
-
-  return new Response('OK', { status: 200 });
-}
-
-async function handleSuccessfulPayment(session: Stripe.Checkout.Session) {
-  // 1. 更新資料庫訂單狀態
-  // 2. 發送確認郵件
-  // 3. 開通服務權限
-}
+/payments/webhook:
+  post:
+    operationId: handleStripeWebhook
+    summary: Stripe Webhook 接收端點
+    x-sdd-feature-id: "F-PAY-001 F-PAY-002 F-PAY-005"
+    description: |
+      接收 Stripe Webhook 事件。
+      必須驗證 `Stripe-Signature` header。
+    responses:
+      '200':
+        description: 事件已接收並處理
+      '400':
+        description: 簽章驗證失敗
 ```
 
 ---
 
-### 階段 4: 前端整合
-
-#### 安裝 Stripe.js
+### 階段 4：RTM 更新 🔴
 
 ```bash
-npm install @stripe/stripe-js @stripe/react-stripe-js
+/rtm-generate update    # 更新支付相關 TC（TC-PAY-XXX）
+/spec-compliance-check docs/03_testing/contracts/WEBHOOK-CONTRACT-Stripe-{System}.md
 ```
 
-#### Stripe Provider
-
-```typescript
-// components/StripeProvider.tsx
-'use client';
-
-import { Elements } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
-
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
-
-export function StripeProvider({ children }: { children: React.ReactNode }) {
-  return <Elements stripe={stripePromise}>{children}</Elements>;
-}
-```
-
-#### 結帳按鈕
-
-```typescript
-// components/CheckoutButton.tsx
-'use client';
-
-export function CheckoutButton({ priceId }: { priceId: string }) {
-  const [loading, setLoading] = useState(false);
-
-  const handleCheckout = async () => {
-    setLoading(true);
-    const res = await fetch('/api/checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priceId }),
-    });
-    const { url } = await res.json();
-    window.location.href = url;
-  };
-
-  return (
-    <button onClick={handleCheckout} disabled={loading}>
-      {loading ? '處理中...' : '立即購買'}
-    </button>
-  );
-}
-```
+🔴 確認點：所有支付 AC（正常 / 失敗 / 退款）都有對應 TC，Consumer Contract 測試通過。
 
 ---
 
-### 階段 5: 測試驗證
+## 強制產出（SDD 文件）
 
-**測試卡號**:
-| 卡號 | 情境 |
-|------|------|
-| 4242 4242 4242 4242 | 成功支付 |
-| 4000 0000 0000 9995 | 餘額不足 |
-| 4000 0000 0000 0341 | 卡片被拒 |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| 支付策略 ADR | `docs/02_architecture/adr/ADR-{NNN}-stripe-payment.md` | SCG-2 |
+| Webhook Contract | `docs/03_testing/contracts/WEBHOOK-CONTRACT-Stripe-{System}.md` | SCG-3 後 |
 
-**Webhook 測試**:
-```bash
-# 安裝 Stripe CLI
-stripe listen --forward-to localhost:3000/api/webhook
+---
 
-# 觸發測試事件
-stripe trigger checkout.session.completed
+## 後置動作
+
+```
+/rtm-generate update       # 更新支付 TC
+/compliance-audit pci-dss  # PCI-DSS 合規確認
+/sdd-gate SCG-4            # 支付整合 PR Review
 ```
 
-**驗證清單**:
-- [ ] Checkout 流程正常
-- [ ] 付款成功後正確跳轉
-- [ ] Webhook 正確接收和處理
-- [ ] 訂閱狀態正確更新
-- [ ] 錯誤情況正確處理
-
----
-
-## 常見陷阱
-
-| 問題 | 解決方案 |
-|------|---------|
-| Webhook 驗證失敗 | 確認使用 raw body，非 JSON parsed |
-| 重複處理 | 使用 idempotency key |
-| 價格不匹配 | 使用 Price ID 而非硬編碼金額 |
-
----
-
-## 產出物
-
-| 產出物 | 路徑 |
-|--------|------|
-| Stripe 客戶端 | `lib/stripe.ts` |
-| Checkout API | `app/api/checkout/route.ts` |
-| Webhook 處理 | `app/api/webhook/route.ts` |
-| 前端元件 | `components/CheckoutButton.tsx` |
+🔷 **本 Skill 對應 SCG**：SCG-2（支付架構凍結）、SCG-4（整合 PR Review）
 
 ---
 
 ## 相關 Skill
 
-- `/integration-oauth` - 用戶認證
-- `/security` - 支付安全審查
+- `/adr-generate` — 支付策略 ADR
+- `/compliance-audit pci-dss` — PCI-DSS 合規（Stripe 整合必要）
+- `/integration-webhook` — Webhook 通用設計
+- `/security-audit` — 支付端點安全審查
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/integration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Integration 情境
+**基於**: AISDLC-SDD v0.30
+**對應情境**: Integration 場景
+**CI/CD 規格**: `cicd/SDD_INTEGRATION_CICD.md`

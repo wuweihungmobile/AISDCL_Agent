@@ -1,20 +1,19 @@
 ---
 name: mobile-development
-description: 行動端應用開發規劃與實作，支援 Android/iOS/macOS 跨平台或原生開發
+description: 行動端應用開發規劃與實作，嵌入 SDD SCG 閘門，確保 Mobile API Contract 凍結後才開始實作，App Store 發布對應 SCG-6
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<platform: Android/iOS/macOS/cross-platform> <framework: React Native/Flutter/Kotlin/Swift>"
+argument-hint: "<platform: Android|iOS|macOS|cross-platform> <framework: ReactNative|Flutter|Kotlin|Swift>"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Mobile Development 行動端開發
+# Mobile Development Skill（SDD 原生）
 
-規劃並實作行動端應用，包含架構設計、API 對接、硬體整合（掃碼/NFC）、離線支援與跨平台策略。
+行動端開發在 SDD 框架中有特殊考量：Mobile API Contract 的凍結時機、離線功能的 NFR 量化、App Store 發布作為 SCG-6 的一環。本 Skill 確保 Mobile 開發不繞過 SDD 閘門。
 
 ---
 
@@ -29,18 +28,22 @@ allowed-tools:
 
 ---
 
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-1 通過 | SRD 包含 Mobile 架構說明 | SRD 有 Mobile 平台策略章節 |
+| 🔷 SCG-3 通過 | Mobile API Contract 已凍結 | `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml` |
+
+> Mobile 特有：API Contract 必須包含 Mobile 端所需的所有端點（含離線同步 API）。
+
+---
+
 ## 執行流程
 
-### 階段 1: 需求與平台分析 🔴
+### 階段 1：平台策略決策與 ADR
 
-**必要資訊**:
-- [ ] 目標平台（Android / iOS / macOS / 多平台）
-- [ ] 技術框架選擇（原生 vs 跨平台）
-- [ ] 既有後端 API 規格（REST / GraphQL）
-- [ ] 硬體需求（相機掃碼、NFC、藍牙、GPS）
-- [ ] 離線需求（完全離線 / 弱網路 / 僅線上）
-
-**平台策略決策**:
+**決策框架**：
 
 ```
 需要支援多平台？
@@ -48,212 +51,157 @@ allowed-tools:
 │       ├─ JavaScript/TypeScript → React Native
 │       ├─ Dart → Flutter
 │       └─ Kotlin → Kotlin Multiplatform (KMP)
-└─ 否 → 單一平台
-        ├─ Android → Kotlin + Jetpack Compose
-        ├─ iOS → Swift + SwiftUI
-        └─ macOS → Swift + SwiftUI / Catalyst
+└─ 否 → 原生開發（Android: Kotlin / iOS: Swift）
 ```
 
-🔴 **確認點**: 平台策略、框架選擇、硬體需求是否確認
+**必須記錄 ADR**（呼叫 `/adr-generate`）：
+- ADR：Mobile 平台策略選型（原生 vs 跨平台）
+- ADR：離線策略（Local DB / Cache / 無離線）
+- ADR：認證機制（Biometric / OAuth / API Key）
+
+🔴 確認點：平台選型決策必須在 SCG-2 前確認，並產出 ADR。
 
 ---
 
-### 階段 2: 架構設計
+### 階段 2：Mobile NFR 量化（SCG-0 必填）
 
-**推薦架構模式**:
+Mobile 特有的非功能性需求，必須在 FRD 中量化（NFR-XXX 格式）：
 
-| 模式 | 適用情境 | 框架 |
-|------|---------|------|
-| **MVVM** | 大多數應用 | Android Jetpack / SwiftUI |
-| **Clean Architecture** | 複雜業務邏輯 | 所有框架 |
-| **MVI** | 單向資料流 | Kotlin + Compose |
-| **Redux Pattern** | 狀態管理複雜 | React Native |
+```markdown
+## Mobile 特有 NFR
 
-**分層架構**:
-```
-┌─────────────────────────────┐
-│    Presentation Layer       │
-│  (UI / ViewModel / State)   │
-├─────────────────────────────┤
-│    Domain Layer             │
-│  (Use Cases / Entities)     │
-├─────────────────────────────┤
-│    Data Layer               │
-│  (Repository / DataSource)  │
-├──────────┬──────────────────┤
-│ Local DB │  Remote API      │
-│ (Room /  │  (Retrofit /     │
-│  SQLite) │   URLSession)    │
-└──────────┴──────────────────┘
-```
+### NFR-M001: 離線能力
+- 離線功能範圍: {完全離線/弱網/僅線上}
+- 本地快取策略: {SQLite/Realm/SharedPreferences}
+- 資料同步策略: {最終一致性/即時同步}
 
-**API 對接設計**:
-```
-行動端 ←→ API Gateway ←→ 後端服務
-         │
-         ├─ 認證: JWT / OAuth 2.0
-         ├─ 通訊: REST + JSON
-         ├─ 即時: WebSocket (通知/同步)
-         └─ 檔案: Multipart Upload / S3 Presigned URL
+### NFR-M002: 效能
+- 冷啟動時間: < {N} 秒
+- 畫面切換延遲: < {N} ms
+- API 呼叫超時: {N} ms
+
+### NFR-M003: 安全
+- 認證方式: {Biometric/PIN/OAuth2}
+- 敏感資料儲存: {Keychain/Keystore（非 SharedPreferences）}
+- Root/Jailbreak 偵測: 是/否
+
+### NFR-M004: App Store 發布
+- 目標 Android API Level: {N}+
+- 目標 iOS 版本: {N}+
+- App Size 限制: < {N} MB（OTA 更新限制）
 ```
 
 ---
 
-### 階段 3: 硬體整合
+### 階段 3：架構設計（Mobile 專屬 C4）
 
-**掃碼功能（Barcode/QR Code）**:
+補充 C4 Container 圖的 Mobile 部分：
 
-| 平台 | 推薦方案 | 備註 |
-|------|---------|------|
-| Android | ML Kit Barcode Scanning | Google 官方，免費 |
-| iOS | AVFoundation / Vision | Apple 原生 API |
-| Cross-platform | react-native-camera / mobile_scanner | 社群維護 |
+```markdown
+## Mobile C4 Container
 
-**整合步驟**:
-1. 權限宣告（相機、存儲）
-2. 掃碼畫面 UI（對焦框、閃光燈控制）
-3. 條碼解析（EAN-13 / Code 128 / QR Code）
-4. 掃碼結果處理（查詢商品/觸發操作）
-5. 批次掃碼模式（連續掃碼不中斷）
+### Mobile App Container
+- **框架**: {React Native/Flutter/Kotlin/Swift}
+- **本地儲存**: {SQLite/Realm/CoreData}
+- **狀態管理**: {Redux/Riverpod/ViewModel}
+- **API 通訊**: {Retrofit/Axios/Dio}
 
-**Android 掃碼範例（ML Kit）**:
-```kotlin
-// build.gradle
-implementation("com.google.mlkit:barcode-scanning:17.2.0")
-
-// BarcodeAnalyzer.kt
-class BarcodeAnalyzer(
-    private val onBarcodeDetected: (String) -> Unit
-) : ImageAnalysis.Analyzer {
-    private val scanner = BarcodeScanning.getClient(
-        BarcodeScannerOptions.Builder()
-            .setBarcodeFormats(
-                Barcode.FORMAT_EAN_13,
-                Barcode.FORMAT_CODE_128,
-                Barcode.FORMAT_QR_CODE
-            )
-            .build()
-    )
-
-    override fun analyze(imageProxy: ImageProxy) {
-        val inputImage = InputImage.fromMediaImage(
-            imageProxy.image!!, imageProxy.imageInfo.rotationDegrees
-        )
-        scanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                barcodes.firstOrNull()?.rawValue?.let { onBarcodeDetected(it) }
-            }
-            .addOnCompleteListener { imageProxy.close() }
-    }
-}
+### 離線同步架構（若需要）
+- 本地 DB Schema（對應 SRD 資料模型）
+- 衝突解決策略（ADR-XXX）
+- 同步觸發條件
 ```
-
-**其他硬體**:
-- **NFC**: 讀取 RFID 標籤（Android NfcAdapter / iOS Core NFC）
-- **藍牙**: 連接藍牙印表機/秤（BLE API）
-- **GPS**: 配送路線追蹤（Fused Location / Core Location）
 
 ---
 
-### 階段 4: 離線支援
+### 階段 4：Mobile API Contract 確認（SCG-3）
 
-**離線策略選擇**:
+確認後端 Contract 包含 Mobile 需要的所有端點：
 
-| 策略 | 說明 | 適用情境 |
-|------|------|---------|
-| **Cache-First** | 優先使用本地快取 | 商品目錄、參數檔 |
-| **Network-First** | 優先請求網路 | 庫存即時查詢 |
-| **Offline-First** | 本地操作→排隊同步 | 倉庫掃碼入出庫 |
-| **Write-Through** | 同時寫本地與遠端 | 訂單建立（網路穩定時） |
+- 分頁 API（支援 cursor-based pagination，避免 Mobile 大量載入）
+- 離線同步 API（差異同步端點，若有離線需求）
+- Push Notification 訂閱端點
+- 版本兼容端點（Mobile 版本強制升級機制）
 
-**離線同步架構**:
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  操作佇列    │ ──→ │  同步引擎     │ ──→ │  遠端 API   │
-│ (Room Queue) │     │ (WorkManager) │     │ (REST API)  │
-└─────────────┘     └──────────────┘     └─────────────┘
-       ↑                    │
-       │                    ↓
-┌─────────────┐     ┌──────────────┐
-│  UI 操作     │     │  衝突解決     │
-│ (掃碼/下單)  │     │ (Last-Write   │
-└─────────────┘     │   -Wins /     │
-                    │  Server-Wins) │
-                    └──────────────┘
-```
-
-**衝突解決策略**:
-- **Server-Wins**: 伺服器資料優先（適合庫存數量）
-- **Last-Write-Wins**: 最後寫入優先（適合備註欄位）
-- **Manual Merge**: 人工介入（適合訂單修改）
+執行 `/spec-compliance-check docs/02_architecture/api/CONTRACT-*.yaml` 確認 Mobile 端點完整。
 
 ---
 
-### 階段 5: 測試與部署
+### 階段 5：實作階段
 
-**測試策略**:
-- [ ] 單元測試（ViewModel / UseCase / Repository）
-- [ ] UI 測試（Espresso / XCTest）
-- [ ] 整合測試（API Mock + 本地 DB）
-- [ ] 掃碼功能測試（實機 + 多條碼格式）
-- [ ] 離線同步測試（斷網→操作→恢復→同步）
-- [ ] 效能測試（啟動時間 < 2s、掃碼延遲 < 500ms）
-- [ ] 裝置相容性（不同螢幕尺寸、OS 版本）
+**必須在 SCG-3 通過後才開始實作**。
 
-**部署管道**:
+實作結構範例：
+
 ```
-Git Push → CI Build → Unit Test → UI Test
-    → Sign APK/IPA → Upload to Store
-    → Internal Testing → Staged Rollout → Full Release
+src/
+├── api/          # Contract 對應的 API Client（自動從 OpenAPI 生成）
+├── features/     # 功能模組（對應 FRD F-XXX）
+├── core/         # 共用服務
+└── offline/      # 離線同步邏輯（NFR-M001）
 ```
-
-**推薦 CI/CD 工具**:
-- **Android**: GitHub Actions + Gradle + Firebase App Distribution
-- **iOS**: Xcode Cloud / Fastlane + TestFlight
-- **Cross-platform**: Codemagic / Bitrise / EAS Build
 
 ---
 
-## 常見陷阱
+### 階段 6：App Store 發布（SCG-6 一環）🔴
 
-| 問題 | 解決方案 |
-|------|---------|
-| 掃碼在低光環境失敗 | 啟用閃光燈控制 + 調整對比度 |
-| 離線操作後同步衝突 | 預設 Server-Wins + 衝突佇列通知用戶 |
-| Android 碎片化 | 設定 minSdk 26+ + 多裝置測試矩陣 |
-| iOS 審核被拒 | 遵守 HIG + 提前準備審核說明 |
-| API 回應過慢 | 分頁載入 + 本地快取 + 骨架屏 |
-| 記憶體溢位（圖片） | 使用 Coil/Glide (Android) / SDWebImage (iOS) |
-| 電量消耗過高 | 批次同步 + WorkManager 約束條件 |
+App Store 發布在 SDD 中屬於 SCG-6 Release Gate 的一部分：
+
+```markdown
+## App Store Release Checklist（SCG-6 附加）
+
+### App Store 準備
+- [ ] App 版本號更新（對應 Release Notes）
+- [ ] 隱私政策更新（若有新資料收集）
+- [ ] App Store 截圖/說明更新
+
+### 技術驗證
+- [ ] 目標 API Level/iOS 版本符合要求
+- [ ] App Size 在限制內（NFR-M004）
+- [ ] 無 Critical 安全問題（/security-audit 通過）
+- [ ] Contract Testing 通過（Mobile 端點全部通過）
+
+### RTM 更新
+- [ ] Mobile 功能的 AC 全部對應 TC（RTM 100%）
+```
+
+1. 執行 `/rtm-generate verify`
+2. 執行 `/sdd-gate SCG-6`
+3. 🔴 確認點：App Store 提交前等待 SCG-6 授權
 
 ---
 
-## 產出物
+## 強制產出（SDD 文件）
 
-| 產出物 | 路徑 |
-|--------|------|
-| 行動端架構設計 | `docs/02_architecture/Mobile_Architecture.md` |
-| API 對接規格 | `docs/02_architecture/Mobile_API_Contract.md` |
-| 硬體整合規格 | `docs/02_architecture/Hardware_Integration.md` |
-| 離線同步設計 | `docs/02_architecture/Offline_Sync_Design.md` |
-| 裝置相容性矩陣 | `docs/03_testing/Device_Compatibility_Matrix.md` |
-| 行動端測試報告 | `docs/03_testing/Mobile_Test_Report.md` |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Mobile 平台策略 ADR | `docs/02_architecture/adr/ADR-{NNN}-mobile-platform.md` | SCG-2 |
+| Mobile NFR（補充在 FRD） | `docs/01_requirements/FRD-{System}.md` 的 NFR 章節 | SCG-0 |
+| Mobile C4 Container（補充在 SRD） | `docs/02_architecture/SRD-{System}.md` | SCG-2 |
+
+---
+
+## 後置動作
+
+```
+/adr-generate "Mobile 平台策略"     # 記錄平台選型決策
+/contract-generate openapi          # 確認 Mobile API Contract
+/sdd-gate SCG-3                     # Contract 凍結後才開始 Mobile 實作
+/release-management {version}       # App Store 發布（含 SCG-6）
+```
+
+🔷 **本 Skill 協助通過**：SCG-2（Mobile 架構凍結）、SCG-3（Mobile API Contract 凍結）、SCG-6（App Store 發布）
 
 ---
 
 ## 相關 Skill
 
-- `/sd-architect` - 系統架構設計（含行動端分層）
-- `/integration-api-client` - API 客戶端建立
-- `/testing-strategy` - 測試策略（含行動端測試）
-- `/devops-github-actions` - CI/CD Pipeline 設定
-- `/database-migration` - 資料庫遷移（離線 DB 相關）
+- `/sd-architect` — 系統架構設計（Mobile C4 的上下文）
+- `/contract-generate` — API Contract（Mobile 端點凍結）
+- `/integration-api-client` — Mobile API Client 設計
+- `/release-management` — App Store 發布流程
 
 ---
 
-## 相關檔案
-
-- SOP 參考: `scenarios/migration/SOP.md`（階段 6: 新平台開發）
-- QuickRef: `scenarios/migration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Migration 情境
+**基於**: AISDLC-SDD v0.30
+**對應場景**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

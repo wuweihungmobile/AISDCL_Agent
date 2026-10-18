@@ -1,562 +1,216 @@
 ---
-name: integration-api
-description: 建立通用 API 客戶端，包含錯誤處理、重試機制、型別安全，支援 TypeScript/Python/Java
+name: integration-api-client
+description: API Client 整合，從 OpenAPI Contract 自動生成，Error Contract 定義，RTM 追蹤整合 TC
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[api_type: API 類型 (rest/graphql)] [framework: 框架 (axios/fetch/ky/httpx/requests/webclient/resttemplate)]"
+argument-hint: "[api_type: rest|graphql] [framework: axios|fetch|ky|httpx|webclient]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Integration API Client Skill
+# Integration API Client Skill（SDD 原生）
 
-建立企業級 API 客戶端架構。
+在 SDD 中，API Client 不是手寫的，而是從凍結的 OpenAPI Contract 自動生成。本 Skill 確保 Client 實作與 Contract 一致，Error Contract 定義所有錯誤回應格式，整合測試結果追蹤至 RTM。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/integration-api-client              # 預設 REST + Axios
-/integration-api-client graphql      # GraphQL 客戶端
-/integration-api-client --framework=ky
+/integration-api-client rest axios
+/integration-api-client graphql
+/integration-api-client rest webclient
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-3 通過 | API Contract 已凍結 | `docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml` 存在 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求確認 🔴
+### 階段 1：從 Contract 生成 API Client（Contract-First）
 
-**確認項目**:
-- [ ] API 類型 (REST/GraphQL)
-- [ ] 認證方式 (JWT/API Key/OAuth)
-- [ ] 錯誤處理策略
-- [ ] 重試機制需求
-- [ ] 快取策略
+**SDD 規則**：API Client 從 OpenAPI Contract 自動生成，不手動撰寫端點定義。
 
-🔴 **確認點**: 確認 API 客戶端需求
+```bash
+# TypeScript（openapi-typescript-codegen）
+npx openapi-typescript docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml \
+  -o src/api/generated/{Module}Client.ts
+
+# Python（openapi-python-client）
+openapi-python-client generate \
+  --path docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml
+
+# Java/Spring（openapi-generator）
+openapi-generator-cli generate \
+  -i docs/02_architecture/api/CONTRACT-{Module}-v{N}.yaml \
+  -g java -o src/main/java/client/{Module}
+```
 
 ---
 
-### 階段 2: 基礎架構
+### 階段 2：Error Contract 設計
+
+**文件路徑**：`docs/02_architecture/api/ERROR-CONTRACT-{Module}.md`
+
+SDD 規則：所有錯誤碼格式必須在 Contract 中明確定義（non-2xx responses）。
+
+```markdown
+# Error Contract — {Module}
+
+**版本**: 與 `CONTRACT-{Module}-v{N}.yaml` 同步
+
+## 標準錯誤回應格式
+
+```json
+{
+  "code": "BUSINESS_ERROR_CODE",    // 業務錯誤碼（需在此列出）
+  "message": "human-readable message",
+  "details": {}                     // 可選：額外詳情
+}
+```
+
+## 業務錯誤碼清單
+
+| HTTP | 錯誤碼 | 說明 | 對應 AC |
+|------|--------|------|---------|
+| 400 | VALIDATION_ERROR | 請求格式不符 Contract | AC-XXX |
+| 401 | UNAUTHORIZED | 未認證 | AC-XXX |
+| 403 | FORBIDDEN | 無授權 | AC-XXX |
+| 404 | RESOURCE_NOT_FOUND | 資源不存在 | AC-XXX |
+| 409 | CONFLICT | 資源衝突（如重複建立）| AC-XXX |
+| 429 | RATE_LIMIT_EXCEEDED | 超過 NFR-XXX 限流 | AC-XXX |
+| 500 | INTERNAL_ERROR | 系統錯誤 | — |
+| 503 | SERVICE_UNAVAILABLE | 外部依賴不可用 | — |
+```
+
+---
+
+### 階段 3：API Client 錯誤處理（對應 Error Contract）
 
 ```typescript
-// src/lib/api/client.ts
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
+// src/api/client/{Module}Client.ts
+// 基於生成的 Client 加上錯誤處理層
 
-interface ApiClientConfig {
-  baseURL: string;
-  timeout?: number;
-  headers?: Record<string, string>;
-}
+import { ApiError } from './generated/{Module}Client';
 
-interface ApiResponse<T> {
-  data: T;
-  status: number;
-  message?: string;
-}
+export class ApiClientWrapper {
+  async callWithRetry<T>(
+    fn: () => Promise<T>,
+    options = { maxRetries: 3, retryOn: [429, 503] }
+  ): Promise<T> {
+    let lastError: ApiError;
 
-interface ApiError {
-  code: string;
-  message: string;
-  details?: unknown;
-}
+    for (let attempt = 0; attempt < options.maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as ApiError;
 
-export class ApiClient {
-  private client: AxiosInstance;
-  private retryCount = 3;
-  private retryDelay = 1000;
-
-  constructor(config: ApiClientConfig) {
-    this.client = axios.create({
-      baseURL: config.baseURL,
-      timeout: config.timeout ?? 30000,
-      headers: {
-        'Content-Type': 'application/json',
-        ...config.headers,
-      },
-    });
-
-    this.setupInterceptors();
-  }
-
-  private setupInterceptors(): void {
-    // Request interceptor
-    this.client.interceptors.request.use(
-      (config) => {
-        const token = this.getToken();
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
+        // Error Contract 定義的可重試錯誤
+        if (!options.retryOn.includes(lastError.status)) {
+          throw lastError;
         }
-        return config;
-      },
-      (error) => Promise.reject(error)
-    );
 
-    // Response interceptor
-    this.client.interceptors.response.use(
-      (response) => response,
-      async (error: AxiosError) => {
-        return this.handleError(error);
+        // 指數退避（429 Rate Limit）
+        await this.exponentialBackoff(attempt);
       }
-    );
-  }
-
-  private getToken(): string | null {
-    // 從 localStorage 或其他來源取得 token
-    return typeof window !== 'undefined'
-      ? localStorage.getItem('auth_token')
-      : null;
-  }
-
-  private async handleError(error: AxiosError): Promise<never> {
-    const apiError: ApiError = {
-      code: 'UNKNOWN_ERROR',
-      message: 'An unexpected error occurred',
-    };
-
-    if (error.response) {
-      const { status, data } = error.response;
-
-      switch (status) {
-        case 401:
-          apiError.code = 'UNAUTHORIZED';
-          apiError.message = 'Authentication required';
-          // 可以在這裡處理 token 刷新
-          break;
-        case 403:
-          apiError.code = 'FORBIDDEN';
-          apiError.message = 'Access denied';
-          break;
-        case 404:
-          apiError.code = 'NOT_FOUND';
-          apiError.message = 'Resource not found';
-          break;
-        case 422:
-          apiError.code = 'VALIDATION_ERROR';
-          apiError.message = 'Validation failed';
-          apiError.details = data;
-          break;
-        case 429:
-          apiError.code = 'RATE_LIMITED';
-          apiError.message = 'Too many requests';
-          break;
-        case 500:
-          apiError.code = 'SERVER_ERROR';
-          apiError.message = 'Internal server error';
-          break;
-      }
-    } else if (error.request) {
-      apiError.code = 'NETWORK_ERROR';
-      apiError.message = 'Network error occurred';
     }
 
-    throw apiError;
+    throw lastError!;
   }
 
-  async get<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    const response = await this.client.get<T>(url, config);
-    return { data: response.data, status: response.status };
-  }
-
-  async post<T, D = unknown>(url: string, data?: D, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    const response = await this.client.post<T>(url, data, config);
-    return { data: response.data, status: response.status };
-  }
-
-  async put<T, D = unknown>(url: string, data?: D, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    const response = await this.client.put<T>(url, data, config);
-    return { data: response.data, status: response.status };
-  }
-
-  async delete<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
-    const response = await this.client.delete<T>(url, config);
-    return { data: response.data, status: response.status };
-  }
-}
-
-// 單例導出
-export const apiClient = new ApiClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
-});
-```
-
----
-
-### 階段 3: 重試機制
-
-```typescript
-// src/lib/api/retry.ts
-interface RetryConfig {
-  maxRetries: number;
-  baseDelay: number;
-  maxDelay: number;
-  retryCondition?: (error: unknown) => boolean;
-}
-
-const defaultRetryConfig: RetryConfig = {
-  maxRetries: 3,
-  baseDelay: 1000,
-  maxDelay: 10000,
-  retryCondition: (error: unknown) => {
-    if (error && typeof error === 'object' && 'code' in error) {
-      const code = (error as { code: string }).code;
-      return ['NETWORK_ERROR', 'RATE_LIMITED', 'SERVER_ERROR'].includes(code);
-    }
-    return false;
-  },
-};
-
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  config: Partial<RetryConfig> = {}
-): Promise<T> {
-  const { maxRetries, baseDelay, maxDelay, retryCondition } = {
-    ...defaultRetryConfig,
-    ...config,
-  };
-
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-
-      if (attempt === maxRetries || !retryCondition?.(error)) {
+  // Error Contract 業務錯誤碼轉換
+  handleBusinessError(error: ApiError): never {
+    switch (error.body?.code) {
+      case 'UNAUTHORIZED':
+        // 觸發重新認證流程
+        throw new AuthenticationError(error.message);
+      case 'RATE_LIMIT_EXCEEDED':
+        // 對應 NFR-XXX 限流策略
+        throw new RateLimitError(error.message);
+      default:
         throw error;
-      }
-
-      // Exponential backoff with jitter
-      const delay = Math.min(
-        baseDelay * Math.pow(2, attempt) + Math.random() * 1000,
-        maxDelay
-      );
-
-      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-
-  throw lastError;
 }
 ```
 
 ---
 
-### 階段 4: 型別安全的 API 服務
+### 階段 4：Consumer Contract 測試
 
-```typescript
-// src/api/users.ts
-import { apiClient } from '@/lib/api/client';
-import { withRetry } from '@/lib/api/retry';
+依賴外部 API 的 Consumer Contract（Pact）確保整合行為一致：
 
-// 型別定義
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  createdAt: string;
-}
+**文件路徑**：`docs/03_testing/contracts/CONSUMER-CONTRACT-{ExternalAPI}.md`
 
-export interface CreateUserDto {
-  email: string;
-  name: string;
-  password: string;
-}
+```markdown
+# Consumer Contract — {ExternalAPI}
 
-export interface UpdateUserDto {
-  name?: string;
-  email?: string;
-}
+**Consumer**: {SystemName}
+**Provider**: {ExternalAPI}
 
-export interface PaginatedResponse<T> {
-  data: T[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-  };
-}
+## Consumer 期望的互動
 
-// API 服務
-export const usersApi = {
-  async getAll(params?: { page?: number; limit?: number }) {
-    return withRetry(() =>
-      apiClient.get<PaginatedResponse<User>>('/users', { params })
-    );
-  },
+### 正常回應
+- Request: {method} {endpoint}
+- Response: 200 with schema matching CONTRACT
 
-  async getById(id: string) {
-    return withRetry(() => apiClient.get<User>(`/users/${id}`));
-  },
-
-  async create(data: CreateUserDto) {
-    return apiClient.post<User>('/users', data);
-  },
-
-  async update(id: string, data: UpdateUserDto) {
-    return apiClient.put<User>(`/users/${id}`, data);
-  },
-
-  async delete(id: string) {
-    return apiClient.delete<void>(`/users/${id}`);
-  },
-};
+### 錯誤回應（Error Contract 驗證）
+- Request: {bad request}
+- Response: 400 with `code: "VALIDATION_ERROR"`
 ```
 
 ---
 
-### 階段 5: React Query 整合
+### 階段 5：RTM 更新 🔴
 
-```typescript
-// src/hooks/useUsers.ts
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usersApi, CreateUserDto, UpdateUserDto } from '@/api/users';
-
-export const userKeys = {
-  all: ['users'] as const,
-  lists: () => [...userKeys.all, 'list'] as const,
-  list: (params: { page?: number }) => [...userKeys.lists(), params] as const,
-  details: () => [...userKeys.all, 'detail'] as const,
-  detail: (id: string) => [...userKeys.details(), id] as const,
-};
-
-export function useUsers(params?: { page?: number; limit?: number }) {
-  return useQuery({
-    queryKey: userKeys.list(params ?? {}),
-    queryFn: () => usersApi.getAll(params),
-  });
-}
-
-export function useUser(id: string) {
-  return useQuery({
-    queryKey: userKeys.detail(id),
-    queryFn: () => usersApi.getById(id),
-    enabled: !!id,
-  });
-}
-
-export function useCreateUser() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: CreateUserDto) => usersApi.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
-    },
-  });
-}
-
-export function useUpdateUser() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ id, data }: { id: string; data: UpdateUserDto }) =>
-      usersApi.update(id, data),
-    onSuccess: (_, { id }) => {
-      queryClient.invalidateQueries({ queryKey: userKeys.detail(id) });
-      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
-    },
-  });
-}
+```bash
+/rtm-generate update    # 更新 API 整合 TC（TC-API-XXX）
+/spec-compliance-check docs/02_architecture/api/ERROR-CONTRACT-{Module}.md
 ```
+
+🔴 確認點：生成的 Client 版本與 Contract 版本一致；Consumer Contract 測試通過。
 
 ---
 
-### 階段 5B: Python API 客戶端 (httpx/requests)
+## 強制產出（SDD 文件）
 
-> 當 framework 為 `httpx` 或 `requests` 時使用
-
-```python
-# src/api/client.py
-import httpx
-from typing import TypeVar, Generic, Optional, Any
-from dataclasses import dataclass
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import logging
-
-logger = logging.getLogger(__name__)
-
-T = TypeVar('T')
-
-@dataclass
-class ApiResponse(Generic[T]):
-    data: T
-    status: int
-    message: Optional[str] = None
-
-class ApiError(Exception):
-    def __init__(self, code: str, message: str, status: int = 0, details: Any = None):
-        self.code = code
-        self.message = message
-        self.status = status
-        self.details = details
-        super().__init__(message)
-
-class ApiClient:
-    def __init__(self, base_url: str, timeout: float = 30.0, api_key: Optional[str] = None):
-        self.client = httpx.AsyncClient(
-            base_url=base_url,
-            timeout=timeout,
-            headers={
-                "Content-Type": "application/json",
-                **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
-            },
-        )
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
-    )
-    async def get(self, url: str, params: Optional[dict] = None) -> ApiResponse:
-        response = await self.client.get(url, params=params)
-        return self._handle_response(response)
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((httpx.ConnectError, httpx.ReadTimeout)),
-    )
-    async def post(self, url: str, data: Optional[dict] = None) -> ApiResponse:
-        response = await self.client.post(url, json=data)
-        return self._handle_response(response)
-
-    def _handle_response(self, response: httpx.Response) -> ApiResponse:
-        if response.status_code >= 400:
-            error_map = {
-                401: ("UNAUTHORIZED", "Authentication required"),
-                403: ("FORBIDDEN", "Access denied"),
-                404: ("NOT_FOUND", "Resource not found"),
-                429: ("RATE_LIMITED", "Too many requests"),
-            }
-            code, msg = error_map.get(response.status_code, ("SERVER_ERROR", "Server error"))
-            raise ApiError(code=code, message=msg, status=response.status_code, details=response.json())
-        return ApiResponse(data=response.json(), status=response.status_code)
-
-    async def close(self):
-        await self.client.aclose()
-```
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Error Contract | `docs/02_architecture/api/ERROR-CONTRACT-{Module}.md` | SCG-3 後 |
+| Consumer Contract | `docs/03_testing/contracts/CONSUMER-CONTRACT-{API}.md` | SCG-3 後 |
 
 ---
 
-### 階段 5C: Java/Spring Boot API 客戶端 (WebClient)
+## 後置動作
 
-> 當 framework 為 `webclient` 或 `resttemplate` 時使用
-
-```java
-// src/main/java/com/example/integration/ApiClient.java
-@Component
-public class ApiClient {
-
-    private final WebClient webClient;
-
-    public ApiClient(
-            @Value("${integration.api.base-url}") String baseUrl,
-            @Value("${integration.api.timeout:30}") int timeoutSeconds) {
-        this.webClient = WebClient.builder()
-                .baseUrl(baseUrl)
-                .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
-                .filter(retryFilter())
-                .build();
-    }
-
-    private ExchangeFilterFunction retryFilter() {
-        return (request, next) -> next.exchange(request)
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
-                        .filter(ex -> ex instanceof WebClientResponseException.ServiceUnavailable
-                                || ex instanceof ConnectException));
-    }
-
-    public <T> Mono<T> get(String uri, Class<T> responseType) {
-        return webClient.get()
-                .uri(uri)
-                .retrieve()
-                .onStatus(HttpStatusCode::is4xxClientError, this::handleClientError)
-                .onStatus(HttpStatusCode::is5xxServerError, this::handleServerError)
-                .bodyToMono(responseType);
-    }
-
-    public <T, R> Mono<T> post(String uri, R body, Class<T> responseType) {
-        return webClient.post()
-                .uri(uri)
-                .bodyValue(body)
-                .retrieve()
-                .onStatus(HttpStatusCode::is4xxClientError, this::handleClientError)
-                .onStatus(HttpStatusCode::is5xxServerError, this::handleServerError)
-                .bodyToMono(responseType);
-    }
-
-    private Mono<? extends Throwable> handleClientError(ClientResponse response) {
-        return response.bodyToMono(String.class)
-                .map(body -> new ApiException("CLIENT_ERROR", body, response.statusCode().value()));
-    }
-
-    private Mono<? extends Throwable> handleServerError(ClientResponse response) {
-        return Mono.error(new ApiException("SERVER_ERROR", "Internal server error", response.statusCode().value()));
-    }
-}
+```
+/rtm-generate update       # 更新整合 TC
+/sdd-gate SCG-4            # 整合 PR Review
 ```
 
-```java
-// src/main/java/com/example/integration/ApiException.java
-public class ApiException extends RuntimeException {
-    private final String code;
-    private final int status;
-
-    public ApiException(String code, String message, int status) {
-        super(message);
-        this.code = code;
-        this.status = status;
-    }
-
-    public String getCode() { return code; }
-    public int getStatus() { return status; }
-}
-```
-
----
-
-### 階段 6: 驗證 🔴
-
-**驗證清單**:
-- [ ] API 請求正常發送
-- [ ] 錯誤處理正確
-- [ ] 重試機制運作
-- [ ] 型別安全性
-
-🔴 **確認點**: 確認 API 客戶端運作正常
-
----
-
-## 產出物
-
-| 產出物 | 路徑 |
-|--------|------|
-| API Client | `src/lib/api/client.ts` |
-| 重試機制 | `src/lib/api/retry.ts` |
-| API 服務 | `src/api/*.ts` |
-| React Hooks | `src/hooks/use*.ts` |
+🔷 **本 Skill 對應 SCG**：SCG-3 後（Contract 凍結的 Client 實作）
 
 ---
 
 ## 相關 Skill
 
-- `/integration-oauth` - 認證整合
-- `/integration-webhook` - Webhook 處理
+- `/contract-generate` — OpenAPI Contract（Client 生成的依據）
+- `/integration-oauth` — 認證 Token（API Client 使用）
+- `/qa-testing` — Consumer Contract Testing
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/integration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Integration 情境
+**基於**: AISDLC-SDD v0.30
+**對應情境**: Integration 場景
+**CI/CD 規格**: `cicd/SDD_INTEGRATION_CICD.md`

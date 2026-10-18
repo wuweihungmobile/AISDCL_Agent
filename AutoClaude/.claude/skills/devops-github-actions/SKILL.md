@@ -1,62 +1,59 @@
 ---
-name: devops-github
-description: 建立完整的 GitHub Actions CI/CD Pipeline，包含構建、測試、部署
+name: devops-github-actions
+description: 建立 GitHub Actions CI/CD Pipeline，嵌入 Contract 一致性驗證 Step，對應 SDD_TESTING_CICD 規格
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<project_type: 專案類型 (nodejs/python/java/go/dotnet)> [deploy_target: 部署目標 (aws/gcp/azure/vercel/docker)]"
+argument-hint: "<project_type: nodejs|python|java|go|dotnet> [deploy_target: aws|gcp|azure|vercel|docker]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# DevOps GitHub Actions Skill
+# DevOps GitHub Actions Skill（SDD 原生）
 
-基於 AISDLC DevOps 情境的 GitHub Actions CI/CD 建置技能。
+CI/CD Pipeline 是 SDD 自動化閘門的執行者。本 Skill 在 Pipeline 中嵌入 Contract 一致性驗證、RTM 覆蓋率檢查，對應 `cicd/SDD_TESTING_CICD.md` 規格。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/devops-github nodejs aws
-/devops-github python docker
-/devops-github --project_type=nodejs --deploy_target=vercel
+/devops-github-actions nodejs aws
+/devops-github-actions python docker
+/devops-github-actions java gcp
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-3 通過 | API Contract 已凍結 | `docs/02_architecture/api/CONTRACT-*.yaml` 存在 |
+| SRD 部署架構章節存在 | 部署策略已有 ADR 支撐 | `docs/02_architecture/SRD-{System}.md` 第 8 章 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 現狀評估 🔴
+### 階段 1：讀取規格依據
 
-**任務清單**:
-1. 分析專案結構，識別：
-   - 套件管理器 (npm/yarn/pnpm/pip/maven)
-   - 構建命令
-   - 測試命令
-   - 入口檔案
-
-2. 檢查現有 CI/CD 配置：
-   - `.github/workflows/` 是否存在
-   - 現有 Pipeline 內容
-
-3. 🔴 **確認點**: 向使用者確認：
-   - 專案類型正確嗎？
-   - 部署目標正確嗎？
-   - 需要哪些環境 (staging/production)?
+讀取：
+- `docs/02_architecture/api/CONTRACT-*.yaml`（Pipeline Contract 驗證 Step 依據）
+- `docs/02_architecture/SRD-{System}.md`（部署架構）
+- `cicd/SDD_TESTING_CICD.md`（SDD CI/CD 規格）
 
 ---
 
-### 階段 2: 工具配置
+### 階段 2：GitHub Actions Workflow 產出
 
-**依據專案類型選擇範本**:
+**存放路徑**：`.github/workflows/`
 
-#### Node.js 專案
 ```yaml
-name: CI/CD
+# .github/workflows/ci.yml
+name: SDD CI Pipeline
 
 on:
   push:
@@ -65,379 +62,156 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  # ============================================
+  # Stage 1: 代碼品質檢查
+  # ============================================
+  lint-and-type-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - name: Setup {language}
+        uses: actions/setup-{language}@v4
         with:
-          node-version: '20'
-          cache: '{{package_manager}}'
+          {language}-version: '{version}'
+      - run: {install command}
+      - run: {lint command}
+      - run: {type-check command}
 
-      - name: Install dependencies
-        run: {{install_command}}
-
-      - name: Lint
-        run: {{lint_command}}
-
-      - name: Test
-        run: {{test_command}}
-
-      - name: Build
-        run: {{build_command}}
-
-  deploy:
-    needs: test
-    if: github.ref == 'refs/heads/main'
+  # ============================================
+  # Stage 2: 單元測試
+  # ============================================
+  unit-tests:
     runs-on: ubuntu-latest
+    needs: lint-and-type-check
     steps:
       - uses: actions/checkout@v4
-      # 部署步驟根據 deploy_target 生成
-```
-
-#### Python 專案
-```yaml
-name: CI/CD
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Lint
+      - run: {install}
+      - run: {test command} --coverage
+      - name: Enforce Coverage ≥ 80%（NFR 要求）
         run: |
-          pip install flake8
-          flake8 .
+          COVERAGE=$(cat coverage/coverage-summary.json | jq '.total.lines.pct')
+          if (( $(echo "$COVERAGE < 80" | bc -l) )); then
+            echo "Coverage $COVERAGE% < 80% (NFR-XXX 要求)"
+            exit 1
+          fi
 
-      - name: Test
-        run: pytest --cov
-```
-
-#### Java/Spring Boot 專案
-```yaml
-name: CI/CD
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
+  # ============================================
+  # Stage 3: Contract 一致性驗證（SDD 核心）
+  # ============================================
+  contract-validation:
     runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate API Contract（SCG-3 凍結版本）
+        run: |
+          # 使用 spectral 或 openapi-validator 驗證實作與 Contract 一致
+          npx @stoplight/spectral-cli lint docs/02_architecture/api/CONTRACT-*.yaml
+      - name: Run Contract Tests（Pact 或等效工具）
+        run: {contract test command}
+      - name: Check Contract Version Not Changed（凍結保護）
+        run: |
+          git diff HEAD~1 docs/02_architecture/api/CONTRACT-*.yaml
+          # 若 Contract 被修改，Pipeline 失敗（需重走 SCG-3）
 
+  # ============================================
+  # Stage 4: 整合測試
+  # ============================================
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: contract-validation
     services:
-      postgres:
-        image: postgres:18-alpine
+      db:
+        image: {db-image}
         env:
-          POSTGRES_DB: testdb
-          POSTGRES_USER: testuser
-          POSTGRES_PASSWORD: testpass
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
+          {DB_ENV_VARS}
     steps:
       - uses: actions/checkout@v4
+      - run: {install}
+      - run: {integration test command}
 
-      - name: Setup JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'gradle'
+  # ============================================
+  # Stage 5: 安全掃描（SCG-4 條件）
+  # ============================================
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependency Vulnerability Scan
+        run: {audit command}  # npm audit / safety check / trivy
+      - name: SAST Scan
+        uses: github/codeql-action/analyze@v3
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+  # ============================================
+  # Stage 6: 部署（SCG-3 通過後才執行 Production 部署）
+  # ============================================
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [integration-tests, security-scan]
+    if: github.ref == 'refs/heads/develop'
+    steps:
+      - name: Deploy to Staging
+        run: {staging deploy command}
 
-      - name: Lint & Static Analysis
-        run: ./gradlew checkstyleMain spotbugsMain
-
-      - name: Test
-        run: ./gradlew test
-        env:
-          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/testdb
-          SPRING_DATASOURCE_USERNAME: testuser
-          SPRING_DATASOURCE_PASSWORD: testpass
-
-      - name: Build
-        run: ./gradlew bootJar
-
-      - name: Upload JAR
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-jar
-          path: build/libs/*.jar
-
-  deploy:
-    needs: test
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    environment: production  # 需要手動 Approve（SCG-6 人工確認）
     steps:
-      - uses: actions/checkout@v4
-      # Spring Boot Docker 部署
-      - name: Build Docker image (Layered JAR)
-        run: |
-          ./gradlew bootJar
-          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} .
-```
-
-#### Android 專案
-```yaml
-name: Android CI/CD
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Grant execute permission
-        run: chmod +x gradlew
-
-      - name: Lint
-        run: ./gradlew lint
-
-      - name: Unit Tests
-        run: ./gradlew testDebugUnitTest
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
-
-  build-release:
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Decode Keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/release.keystore
-
-      - name: Build Release AAB
-        run: ./gradlew bundleRelease
-        env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-
-      - name: Upload to Firebase App Distribution
-        uses: wzieba/Firebase-Distribution-Github-Action@v1
-        with:
-          appId: ${{ secrets.FIREBASE_APP_ID }}
-          serviceCredentialsFileContent: ${{ secrets.FIREBASE_CREDENTIALS }}
-          groups: testers
-          file: app/build/outputs/bundle/release/app-release.aab
-```
-
-#### Next.js 專案
-```yaml
-name: CI/CD
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint & Type Check
-        run: |
-          npm run lint
-          npx tsc --noEmit
-
-      - name: Test
-        run: npm test -- --coverage
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload build
-        uses: actions/upload-artifact@v4
-        with:
-          name: nextjs-build
-          path: .next/
+      - name: Deploy to Production
+        run: {production deploy command}
 ```
 
 ---
 
-### 階段 3: CI Pipeline 生成
+### 階段 3：SDD ADR 補充（若部署策略有新決策）
 
-**產出物**: `.github/workflows/ci.yml`
-
-**必要步驟**:
-1. Checkout 代碼
-2. 設定運行環境
-3. 安裝依賴
-4. Lint 檢查
-5. 執行測試
-6. 構建產物
-7. 上傳 Artifact
+若 Pipeline 引入新的部署決策（如 Canary / Blue-Green），呼叫 `/adr-generate`。
 
 ---
 
-### 階段 4: CD Pipeline 生成
+### 階段 4：RTM 更新與文件存放 🔴
 
-**依據 deploy_target 生成**:
+Pipeline 配置存入：`docs/08_deployment/CI-CD-PIPELINE-{System}.md`（說明 Pipeline 設計決策）
 
-#### AWS 部署
-```yaml
-deploy:
-  needs: test
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-northeast-1
-
-    - name: Deploy to AWS
-      run: |
-        # 根據專案類型選擇部署方式
-        # ECS / Lambda / S3 等
+```bash
+/rtm-generate update    # 更新 CI/CD 相關部署驗收 TC 狀態
+/spec-compliance-check docs/08_deployment/CI-CD-PIPELINE-{System}.md
 ```
 
-#### Docker 部署
-```yaml
-deploy:
-  needs: test
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
+🔴 確認點：Contract Validation Step 對應的是 SCG-3 凍結的 Contract 版本。
 
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        push: true
-        tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+---
+
+## 強制產出（SDD 文件）
+
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| GitHub Actions Workflow | `.github/workflows/ci.yml` | SCG-3 後 |
+| Pipeline 設計說明 | `docs/08_deployment/CI-CD-PIPELINE-{System}.md` | SCG-3 後 |
+
+---
+
+## 後置動作
+
+```
+/sdd-gate SCG-4    # Pipeline 設置完成，可開始 PR Review
 ```
 
-#### Vercel 部署
-```yaml
-deploy:
-  needs: test
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-
-    - name: Deploy to Vercel
-      uses: amondnet/vercel-action@v25
-      with:
-        vercel-token: ${{ secrets.VERCEL_TOKEN }}
-        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-```
-
----
-
-### 階段 5: Secret 配置指南
-
-**產出物**: `SECRETS_SETUP.md`
-
-🔴 **確認點**: 提醒使用者設定必要的 GitHub Secrets:
-
-| Secret 名稱 | 用途 | 必要性 |
-|------------|------|--------|
-| AWS_ACCESS_KEY_ID | AWS 存取金鑰 | AWS 部署必要 |
-| AWS_SECRET_ACCESS_KEY | AWS 密鑰 | AWS 部署必要 |
-| VERCEL_TOKEN | Vercel 部署 Token | Vercel 部署必要 |
-| DOCKER_USERNAME | Docker Hub 帳號 | Docker 部署必要 |
-| DOCKER_PASSWORD | Docker Hub 密碼 | Docker 部署必要 |
-
----
-
-### 階段 6: 驗證與測試
-
-**執行驗證**:
-1. 檢查 YAML 語法正確性
-2. 模擬 Push 觸發
-3. 確認 Workflow 可正常啟動
-
----
-
-## 產出物清單
-
-| 產出物 | 路徑 | 說明 |
-|--------|------|------|
-| CI Workflow | `.github/workflows/ci.yml` | 持續整合配置 |
-| CD Workflow | `.github/workflows/cd.yml` | 持續部署配置 |
-| Secret 指南 | `docs/SECRETS_SETUP.md` | Secret 設定說明 |
+🔷 **本 Skill 協助通過**：SCG-4（透過 CI Pipeline 自動驗證 Contract 一致性）
 
 ---
 
 ## 相關 Skill
 
-- `/devops-gitlab` - GitLab CI 版本
-- `/devops-k8s` - Kubernetes 部署
-- `/testing` - 測試策略
+- `/contract-generate` — API Contract（Pipeline Contract 驗證的依據）
+- `/devops-docker` — Docker 配置（Pipeline 使用）
+- `/devops-kubernetes` — K8s 部署（Pipeline 觸發）
+- `/sdd-gate SCG-3` — 必須通過後才建立 Pipeline
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/devops/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 DevOps 情境
-**維護者**: AISDLC Framework Team
+**基於**: AISDLC-SDD v0.30
+**對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

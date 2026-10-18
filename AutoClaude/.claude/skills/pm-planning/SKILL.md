@@ -1,9 +1,9 @@
 ---
 name: pm-planning
-description: 以 PM/PO 角色進行產品規劃，包含 Sprint 規劃和 Backlog 管理
+description: 以 PM/PO 角色進行產品規劃，產出 PRD，協助 SCG-0 需求凍結，確保 Sprint 中每個 Story 有 FRD 追溯
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[task: 任務類型 (sprint/backlog/roadmap/prioritize)]"
+argument-hint: "[task: prd|sprint|backlog|roadmap|prioritize]"
 allowed-tools:
   - Read
   - Write
@@ -11,195 +11,199 @@ allowed-tools:
   - Glob
 ---
 
-# PM Product Planning Skill
+# PM 產品規劃 Skill（SDD 原生）
 
-基於 AISDLC PM/PO Agent (Victoria) 的產品規劃技能。
+PM 是 SDD 需求階段的業務目標定義者。本 Skill 產出 PRD，與 SA 的 FRD 共同構成 SCG-0 的必要文件。在 Sprint 規劃中，每個 Story 必須追溯到 FRD 的 F-XXX，確保所有開發工作有規格依據。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/pm-planning                   # 開始產品規劃
-/pm-planning sprint            # Sprint 規劃
-/pm-planning backlog           # Backlog 整理
-/pm-planning prioritize        # 優先級排序
+/pm-planning prd               # 產出 PRD（SCG-0 前置）
+/pm-planning sprint            # Sprint 規劃（需 SCG-0 通過後）
+/pm-planning backlog           # Backlog 整理與優先級排序
+/pm-planning roadmap           # 產品路線圖
+/pm-planning prioritize        # 需求優先級排序（RICE 模型）
 ```
 
 ---
 
-## PM/PO 角色定義
+## 前置條件（SDD Spec-First）
 
-**角色**: Victoria (PM/PO)
-**專長**: 產品願景、Sprint 規劃、Backlog 管理、優先級排序
-**核心原則**:
-- 業務價值優先：優先交付最大業務價值
-- 用戶為中心：基於用戶需求做決策
-- 數據驅動：使用指標指導產品方向
+| 執行任務 | 前置條件 | 說明 |
+|---------|---------|------|
+| prd | 無（PM 工作流起點） | 業務願景/需求輸入 |
+| sprint | 🔷 SCG-0 通過 | FRD 已凍結，才能確認 Sprint Story |
+| backlog/roadmap/prioritize | PRD 已存在 | 需求已初步定義 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 規劃準備 🔴
+---
 
-**確認項目**:
-- [ ] 規劃類型（Sprint/Roadmap/Backlog）
-- [ ] 團隊容量和 Velocity
-- [ ] 利害關係人需求
-- [ ] 現有 Backlog 狀態
+### 任務 A：PRD 產出（SCG-0 前置）
 
-🔴 **確認點**: 確認規劃範圍和目標
+**文件路徑**：`docs/01_requirements/PRD-{SystemName}.md`
+**範本來源**：`docs_template/core/prd/PRD_Universal_Template.md`
+
+```markdown
+# Product Requirements Document — {SystemName}
+
+**PRD-ID**: PRD-{System}-{seq}
+**版本**: 1.0
+**日期**: {YYYY-MM-DD}
+**狀態**: Draft → Approved
+**作者**: PM Agent (Victoria)
+
+## 1. 產品概述
+
+### 1.1 背景與問題
+{描述當前問題或機會，說明為什麼需要這個產品/功能}
+
+### 1.2 產品目標
+{SMART 目標：具體、可量化、可達成、相關、有時間限制}
+
+### 1.3 成功指標（KPI）
+| 指標 | 基線 | 目標 | 量測方式 |
+|------|------|------|---------|
+| {指標 A} | {現況} | {目標值} | {如何量測} |
+
+## 2. 目標使用者
+
+| Persona | 角色 | 主要痛點 | 主要目標 |
+|---------|------|---------|---------|
+| {Persona A} | {職位/角色} | {痛點} | {目標} |
+
+## 3. 功能範圍
+
+### In Scope
+- {功能 A}（業務語言描述，非技術）
+- {功能 B}
+
+### Out of Scope
+- {明確排除的功能}
+
+## 4. 業務規則（高層）
+- BR-H001: {業務規則（SA 會轉化為 FRD 中的 BR-XXX）}
+
+## 5. 非功能性需求（業務視角）
+- 效能：{業務場景描述，如「1000 人同時下單」}
+- 可用性：{SLA 要求，如「99.9% 可用性」}
+- 安全：{資料敏感度等級}
+
+## 6. 時程與里程碑
+| 里程碑 | 目標日期 | 說明 |
+|--------|---------|------|
+| SCG-0 需求凍結 | {date} | FRD 完成，需求不再變更 |
+| SCG-3 開發啟動 | {date} | Contract 凍結，開始實作 |
+| SCG-6 發布 | {date} | 上線 |
+
+## 7. 利害關係人
+| 利害關係人 | 角色 | 期望 |
+|-----------|------|------|
+
+## 8. 風險評估
+| 風險 | 機率 | 影響 | 緩解策略 |
+|------|------|------|---------|
+```
+
+🔴 確認點：PRD 需利害關係人確認後，才能啟動 SA 分析（`/sa-analyst`）。
 
 ---
 
-### 階段 2: Sprint 規劃
+### 任務 B：Sprint 規劃（SCG-0 通過後）
 
-**Sprint 規劃模板**:
+**前置確認**：讀取 `docs/01_requirements/FRD-{SystemName}.md` 確認 F-XXX/US-XXX 清單。
 
 ```markdown
-# Sprint [N] Planning
+# Sprint {N} Planning
 
 ## Sprint 資訊
-- **Sprint 編號**: Sprint [N]
-- **期間**: [開始日期] - [結束日期]
-- **工作天數**: [N] 天
-- **團隊容量**: [N] Story Points
+- **Sprint 編號**: Sprint {N}
+- **期間**: {開始日期} - {結束日期}（{N} 工作天）
+- **團隊容量**: {N} Story Points
 
 ## Sprint 目標
-> [一句話描述本 Sprint 的核心目標]
+> {一句話說明核心業務目標，需對應 PRD 的功能範圍}
 
-## User Stories
+## User Stories（FRD 追溯）
 
-| ID | 標題 | 優先級 | SP | 狀態 |
-|----|------|--------|----|----- |
-| US-001 | [標題] | P1 | 3 | Ready |
-| US-002 | [標題] | P1 | 5 | Ready |
-| US-003 | [標題] | P2 | 2 | Ready |
+| US-ID | 標題 | FRD Feature | 優先級 | SP | 狀態 |
+|-------|------|------------|--------|----|----- |
+| US-001 | {標題} | F-001 | P1 | 3 | Ready |
+| US-002 | {標題} | F-002 | P1 | 5 | Ready |
 
-**總計**: [N] Story Points
+> 🔴 **SDD 規則**: 每個 US-XXX 必須有對應的 FRD F-XXX，無 F-XXX 的 Story 不可進入 Sprint。
+
+## SCG 確認
+- [ ] 本 Sprint 所有 Story 對應的 FRD Feature 已在 SCG-0 凍結
+- [ ] 若有新需求，必須先更新 FRD 並重新通過 SCG-0
 
 ## 風險與依賴
-- [ ] [風險/依賴描述]
+| 風險/依賴 | 影響 | 緩解措施 |
+|---------|------|---------|
 
-## 驗收標準
-- [ ] [Sprint 驗收條件]
+## Sprint 驗收標準
+- [ ] 所有 Story 的 AC 測試通過（TC-XXX）
+- [ ] RTM 更新完成
 ```
 
 ---
 
-### 階段 3: Backlog 優先級排序
-
-**RICE 評分模型**:
+### 任務 C：Backlog 優先級排序（RICE 模型）
 
 ```markdown
-## Backlog 優先級評估
+## Backlog 優先級評估（RICE 模型）
 
-| User Story | Reach | Impact | Confidence | Effort | RICE Score | Priority |
-|------------|-------|--------|------------|--------|------------|----------|
-| US-001 | 1000 | 3 | 80% | 2 | 1200 | P1 |
-| US-002 | 500 | 2 | 90% | 3 | 300 | P2 |
-
-### 評分說明
-- **Reach**: 影響用戶數 (每季度)
-- **Impact**: 影響程度 (3=高, 2=中, 1=低, 0.5=最低)
-- **Confidence**: 確信度 (100%=高, 80%=中, 50%=低)
-- **Effort**: 人月數
+| US-ID | 標題 | Reach | Impact | Confidence | Effort | RICE Score | Priority |
+|-------|------|-------|--------|------------|--------|------------|----------|
+| US-{N} | {標題} | {用戶數/季} | 3/2/1/0.5 | 100/80/50% | {人月} | {計算} | P1/P2/P3 |
 
 **RICE = (Reach × Impact × Confidence) / Effort**
 ```
 
 ---
 
-### 階段 4: 產品路線圖
+## 強制產出（SDD 文件）
 
-**路線圖模板**:
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| PRD | `docs/01_requirements/PRD-{SystemName}.md` | SCG-0 前 |
+| Sprint 計畫（每 Sprint） | `docs/04_planning/SPRINT-{N}-PLAN.md` | SCG-0 通過後 |
+| Product Backlog | `docs/04_planning/PRODUCT-BACKLOG.md` | 持續維護 |
+| Product Roadmap | `docs/04_planning/PRODUCT-ROADMAP.md` | 季度更新 |
 
-```markdown
-# Product Roadmap
+---
 
-## 願景
-> [產品願景描述]
+## 後置動作
 
-## Q1 目標
-### 主題: [主題名稱]
-- [ ] Epic 1: [描述]
-- [ ] Epic 2: [描述]
-
-## Q2 目標
-### 主題: [主題名稱]
-- [ ] Epic 3: [描述]
-- [ ] Epic 4: [描述]
-
-## Q3-Q4 規劃中
-- [未來功能規劃]
+**PRD 完成後**：
+```
+/sa-analyst prd    # SA 從 PRD 產出 FRD
+/ba-analyst prd   # BA 驗證 PRD 業務對齊
 ```
 
----
-
-### 階段 5: 利害關係人溝通 🔴
-
-**溝通清單**:
-- [ ] Sprint 目標已與團隊對齊
-- [ ] 優先級已獲得確認
-- [ ] 依賴項已協調
-- [ ] 風險已溝通
-
-🔴 **確認點**: 確認規劃結果與利害關係人對齊
-
----
-
-### 階段 6: 產出文檔
-
-**PRD 結構**:
-
-```markdown
-# PRD: [功能名稱]
-
-## 1. 概述
-### 1.1 背景
-### 1.2 目標
-### 1.3 成功指標
-
-## 2. 用戶故事
-### 2.1 目標用戶
-### 2.2 User Stories
-
-## 3. 功能需求
-### 3.1 核心功能
-### 3.2 非功能需求
-
-## 4. 時程
-### 4.1 里程碑
-### 4.2 依賴項
-
-## 5. 風險評估
+**Sprint 規劃後**：
+```
+/sprint-planning   # 完整 Sprint 啟動流程
 ```
 
----
-
-## 產出物
-
-| 產出物 | 路徑 |
-|--------|------|
-| Sprint 計劃 | `docs/04_planning/SPRINT_[N]_PLAN.md` |
-| 產品 Backlog | `docs/04_planning/PRODUCT_BACKLOG.md` |
-| 路線圖 | `docs/04_planning/PRODUCT_ROADMAP.md` |
-| PRD | `docs/01_requirements/PRD_[Feature].md` |
+🔷 **本 Skill 協助通過**：SCG-0（Requirement Spec Gate）— 提供 PRD 作為必要文件
 
 ---
 
 ## 相關 Skill
 
-- `/sa-analyze` - SA 需求分析
-- `/sprint-planning` - Sprint 規劃流程
-- `/release-management` - 發布管理
+- `/sa-analyst` — 需求分析（PRD → FRD 轉化）
+- `/ba-analyst` — 業務驗證（PRD 驗證）
+- `/sprint-planning` — Sprint 啟動（Sprint 規劃的完整流程）
+- `/release-management` — 發布管理（產品路線圖執行）
+- `/sdd-gate SCG-0` — 需求凍結閘門
 
 ---
 
-
-## 相關檔案
-
-- Agent 定義: `agent/core/03.pm-po-agent-zh.yaml`
-
-**基於**: AISDLC v0.09 PM/PO Agent
+**基於**: AISDLC-SDD v0.30
+**對應 Agent**: `03.pm-po-agent-zh.yaml`
+**對應 SDD Enhancement**: `scenarios/greenfield/SDD_GREENFIELD_ENHANCEMENT.md`

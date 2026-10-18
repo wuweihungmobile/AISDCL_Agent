@@ -1,20 +1,19 @@
 ---
 name: release-management
-description: 完整的版本發布流程，包含發布準備、驗證、部署和回滾
+description: 執行完整版本發布流程，驗證 SCG-6 發布閘門條件，產出 Release Notes 和 Runbook，執行部署與回滾
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<version: 版本號 (如 v1.0.0)> [type: 發布類型 (major/minor/patch/hotfix)]"
+argument-hint: "<version: 版本號 如 v1.0.0> [type: major|minor|patch|hotfix]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Release Management Workflow Skill
+# Release Management Workflow Skill（SDD 原生）
 
-完整的版本發布管理流程。
+發布是 SDD 生命週期的最後一道閘門（SCG-6）。本 Skill 確保所有 SCG-0~5 已通過，產出符合 SDD 格式的 Release Notes，並執行部署驗證。未通過 SCG-6 的版本不可發布。
 
 ---
 
@@ -22,246 +21,184 @@ allowed-tools:
 
 ```bash
 /release-management v1.0.0           # 發布 v1.0.0
-/release-management v1.0.1 patch     # Patch 發布
-/release-management v2.0.0 major     # Major 發布
+/release-management v1.0.1 patch     # Patch 版本
+/release-management v2.0.0 major     # Major 版本（需 API-COMPAT 聲明）
 ```
 
 ---
 
-## 參與角色
+## 前置條件（SDD Spec-First）
 
-| 角色 | 職責 |
-|------|------|
-| **PM/PO** | 發布決策、Release Notes 審核 |
-| **QA** | 發布驗證、回歸測試 |
-| **Dev** | 發布準備、技術支援 |
-| **DevOps** | 部署執行、監控 |
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-5 通過 | RTM 100% 覆蓋，所有測試通過 | `/sdd-gate SCG-5` 報告存在 |
+| RTM 覆蓋率 100% | `/rtm-generate verify` 通過 | `docs/03_testing/RTM-{System}.md` |
+| 無 P1 未修復缺陷 | 所有 Critical 問題已關閉 | Code Review 報告 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 發布準備 🔴
+### 階段 1：SCG-6 發布閘門驗證 🔴
 
-**檢查清單**:
-- [ ] 所有計劃功能已完成
-- [ ] 所有 Bug 已修復或延後
-- [ ] 代碼凍結執行
-- [ ] 版本號確認
+執行 `/sdd-gate SCG-6` 並逐一確認：
 
-**版本號規則 (Semantic Versioning)**:
+```markdown
+## SCG-6 發布閘門驗證清單
+
+### SCG-0~5 追蹤
+- [ ] SCG-0 通過（文件：docs/03_testing/SCG-0-REPORT-{System}.md）
+- [ ] SCG-1 通過（文件：docs/03_testing/SCG-1-REPORT-{System}.md）
+- [ ] SCG-2 通過（文件：docs/03_testing/SCG-2-REPORT-{System}.md）
+- [ ] SCG-3 通過（文件：docs/03_testing/SCG-3-REPORT-{System}.md）
+- [ ] SCG-4 通過（文件：docs/03_testing/SCG-4-REPORT-{System}.md）
+- [ ] SCG-5 通過（文件：docs/03_testing/SCG-5-REPORT-{System}.md）
+
+### 發布文件
+- [ ] Release Notes 已撰寫（SDD 格式）
+- [ ] Runbook 已完成
+- [ ] 回滾計畫就緒
+- [ ] API 相容性聲明（Major 版本必填：API-COMPAT-*.md）
+
+### 技術驗證
+- [ ] 所有 Contract Testing 通過（對照凍結 Contract）
+- [ ] RTM 覆蓋率 = 100%（/rtm-generate verify 通過）
+- [ ] STRIDE 威脅模型已執行（Security 情境）
+- [ ] 效能基準（PBS）通過（Performance 情境）
 ```
-MAJOR.MINOR.PATCH
 
-- MAJOR: 不相容的 API 變更
-- MINOR: 新增向下相容的功能
-- PATCH: 向下相容的 Bug 修復
-```
-
-🔴 **確認點**: 確認發布範圍和版本號
+🔴 確認點：SCG-6 需由授權人員明確確認後才繼續。
 
 ---
 
-### 階段 2: 發布驗證
+### 階段 2：Release Notes 產出（SDD 格式）
 
-**QA 驗證清單**:
-
-```markdown
-## Release Validation Checklist
-
-### 功能驗證
-- [ ] 所有新功能測試通過
-- [ ] 回歸測試通過
-- [ ] 效能測試通過
-- [ ] 安全掃描通過
-
-### 環境驗證
-- [ ] Staging 環境驗證
-- [ ] 資料庫遷移測試
-- [ ] 配置檢查
-
-### 文檔驗證
-- [ ] API 文檔更新
-- [ ] 用戶手冊更新
-- [ ] Release Notes 完成
-```
-
----
-
-### 階段 3: Release Notes
-
-**Release Notes 模板**:
+**文件路徑**：`docs/08_deployment/RELEASE-NOTES-{version}.md`
 
 ```markdown
-# Release Notes - v[X.Y.Z]
+# Release Notes — {version}
 
-**發布日期**: [YYYY-MM-DD]
-**發布類型**: [Major/Minor/Patch/Hotfix]
+**發布日期**: {YYYY-MM-DD}
+**版本類型**: Major / Minor / Patch / Hotfix
+**SCG-6 通過日期**: {YYYY-MM-DD}
 
-## 新功能 ✨
-- [功能1描述] (#Issue-ID)
-- [功能2描述] (#Issue-ID)
+## 本版本功能（對應 FRD 追溯）
 
-## 改進 🚀
-- [改進1描述]
-- [改進2描述]
+| 功能 | FRD Feature | US-ID | 描述 |
+|------|------------|-------|------|
+| {功能名稱} | F-{NNN} | US-{NNN} | {業務說明} |
 
-## Bug 修復 🐛
-- [修復1描述] (#Issue-ID)
-- [修復2描述] (#Issue-ID)
+## 改進
+- {改進說明}（F-{NNN}）
 
-## 重大變更 ⚠️
-- [變更描述和遷移指南]
+## Bug 修復
+- {修復說明}（TC-{NNN} 已通過）
+
+## 重大變更（Breaking Changes）
+> Major 版本必填，Minor/Patch 若無則省略
+
+| 變更 | 影響 | 遷移指南 | API-COMPAT 文件 |
+|------|------|---------|---------------|
+| {端點 X 廢棄} | {影響} | {步驟} | API-COMPAT-{Module}.md |
 
 ## 已知問題
-- [問題描述] - 預計 v[X.Y.Z] 修復
+- {問題描述}（預計 {version+1} 修復）
 
 ## 升級指南
-1. [步驟1]
-2. [步驟2]
+1. {步驟}
 
-## 貢獻者
-- @[contributor1]
-- @[contributor2]
+## RTM 覆蓋率
+- 本版本 AC 覆蓋率: 100%（/rtm-generate verify 確認）
 ```
 
 ---
 
-### 階段 4: 部署準備 🔴
+### 階段 3：Runbook 產出
 
-**部署檢查**:
+**文件路徑**：`docs/08_deployment/RUNBOOK-{version}.md`
 
 ```markdown
-## Pre-Deployment Checklist
+# Runbook — {version}
 
-### 代碼準備
-- [ ] Release branch 已建立
-- [ ] 版本號已更新 (package.json, etc.)
-- [ ] CHANGELOG 已更新
-- [ ] Git tag 已建立
+## 前置作業
+1. {環境確認步驟}
+2. {資料庫 migration 確認}
 
-### 環境準備
-- [ ] 環境變數配置確認
-- [ ] 資料庫遷移腳本準備
-- [ ] 回滾腳本準備
-- [ ] 監控告警配置
+## 部署步驟
+1. 🔵 Staging 部署驗證
+2. 🟡 Pre-Production（若有）
+3. 🟢 Production（金絲雀 / 全量）
 
-### 通知準備
-- [ ] 團隊通知
-- [ ] 客戶通知 (如需要)
-- [ ] 維護公告 (如需要)
+## 部署驗證
+- [ ] 健康檢查端點正常
+- [ ] 核心業務流程冒煙測試
+- [ ] 監控指標正常（對照 NFR-XXX 基線）
+
+## 回滾計畫
+### 自動回滾條件
+- 錯誤率 > 5%（超過 NFR-XXX 定義閾值）
+- P99 延遲 > {NFR 定義值}（超過 SLA）
+
+### 手動回滾步驟
+1. {步驟}
 ```
-
-🔴 **確認點**: 確認部署準備完成
 
 ---
 
-### 階段 5: 部署執行
+### 階段 4：部署執行 🔴
 
-**部署流程**:
+部署順序：
+1. 執行 `/sdd-gate SCG-6`（正式確認）
+2. 建立 Git Release Tag
+3. 觸發 CI/CD Pipeline（`/devops-github-actions` 或 `/devops-gitlab-ci`）
+4. 按 Runbook 執行驗證
 
-```bash
-# 1. 建立 Release Tag
-git tag -a v[X.Y.Z] -m "Release v[X.Y.Z]"
-git push origin v[X.Y.Z]
-
-# 2. 觸發部署 (CI/CD)
-# - GitHub Actions / GitLab CI 自動觸發
-# - 或手動執行部署腳本
-
-# 3. 驗證部署
-curl -s https://api.example.com/health
-```
-
-**部署順序**:
-1. 🔵 Staging 環境
-2. 🟡 Pre-Production 環境
-3. 🟢 Production 環境 (分批/金絲雀)
+🔴 確認點：Production 部署必須由授權人員執行，非自動化直接部署。
 
 ---
 
-### 階段 6: 發布驗證 🔴
-
-**Post-Deployment Checklist**:
+### 階段 5：發布後驗證
 
 ```markdown
-## Post-Deployment Verification
+## Post-Release 驗證清單
 
-### 服務健康
-- [ ] 所有服務啟動正常
-- [ ] 健康檢查端點回應正常
-- [ ] 無錯誤日誌
-
-### 功能驗證
-- [ ] 核心功能煙霧測試
-- [ ] 關鍵業務流程驗證
-- [ ] 第三方整合驗證
-
-### 效能監控
-- [ ] 回應時間正常
-- [ ] 錯誤率正常
-- [ ] 資源使用正常
-```
-
-🔴 **確認點**: 確認發布成功
-
----
-
-### 階段 7: 回滾計劃
-
-**回滾決策**:
-
-```markdown
-## Rollback Criteria
-
-### 自動回滾
-- 錯誤率 > 5%
-- P99 延遲 > 5s
-- 核心功能失敗
-
-### 手動回滾
-- 業務決策
-- 重大 Bug 發現
-```
-
-**回滾步驟**:
-
-```bash
-# 1. 確認回滾決策
-# 2. 執行回滾
-git checkout v[PREVIOUS]
-# 或觸發 CI/CD 回滾
-
-# 3. 驗證回滾
-curl -s https://api.example.com/health
-
-# 4. 通知團隊
-# 5. 記錄回滾原因
+- [ ] 所有服務健康檢查通過
+- [ ] 核心 Contract 端點回應符合規格
+- [ ] 監控告警無異常（對照 NFR 閾值）
+- [ ] RTM 全部 ✅（無 🔄 或 ❌）
 ```
 
 ---
 
-## 產出物
+## 強制產出（SDD 文件）
 
-| 產出物 | 路徑 |
-|--------|------|
-| Release Notes | `docs/08_deployment/RELEASE_NOTES_v[X.Y.Z].md` |
-| 部署清單 | `docs/08_deployment/DEPLOYMENT_CHECKLIST.md` |
-| 回滾計劃 | `docs/08_deployment/ROLLBACK_PLAN.md` |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Release Notes | `docs/08_deployment/RELEASE-NOTES-{version}.md` | SCG-6 |
+| Runbook | `docs/08_deployment/RUNBOOK-{version}.md` | SCG-6 |
+| API-COMPAT（Major 版本） | `docs/02_architecture/api/API-COMPAT-{Module}.md` | SCG-6 前 |
+
+---
+
+## 後置動作
+
+```
+/sdd-gate SCG-6    # 正式執行發布閘門
+```
+
+🔷 **本 Skill 協助通過**：SCG-6（Release Gate）
 
 ---
 
 ## 相關 Skill
 
-- `/devops-github` - GitHub Actions CI/CD
-- `/devops-k8s` - Kubernetes 部署
-- `/sprint-planning` - Sprint 規劃
+- `/sdd-gate SCG-6` — 發布閘門（本 Skill 的核心觸發點）
+- `/rtm-generate verify` — RTM 100% 確認（發布前最後檢查）
+- `/devops-github-actions` / `/devops-gitlab-ci` — CI/CD 執行
+- `/contract-generate compat` — Major 版本 API 相容性聲明
 
 ---
 
-
-## 相關檔案
-
-- Workflow 定義: `workflow/scenario-specific/`
-
-**基於**: AISDLC v0.09 Workflow
+**基於**: AISDLC-SDD v0.30
+**對應工作流**: `workflow/scenario-specific/`
+**對應 CI/CD 規格**: `cicd/SDD_TESTING_CICD.md`

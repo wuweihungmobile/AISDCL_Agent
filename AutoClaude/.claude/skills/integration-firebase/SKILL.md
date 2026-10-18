@@ -1,377 +1,147 @@
 ---
 name: integration-firebase
-description: 整合 Firebase 服務，包含 Auth、Firestore、Storage、Cloud Functions
+description: Firebase 整合，ADR 記錄 BaaS 選型，Security Rules Spec 設計先行，RTM 追蹤
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<service: Firebase 服務 (auth/firestore/storage/functions/all)> [framework: 框架 (nextjs/react/vue)]"
+argument-hint: "<services: auth|firestore|storage|functions|all> [framework: nextjs|react|flutter]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Integration Firebase Skill
+# Integration Firebase Skill（SDD 原生）
 
-整合 Firebase 後端即服務 (BaaS)。
+Firebase 整合在 SDD 中必須設計先行：BaaS 選型需有 ADR，Security Rules 必須在實作前以規格形式凍結（SDD 規則：規則先於資料結構），Firestore 資料結構對應 FRD 資料模型。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/integration-firebase auth           # Firebase Auth
-/integration-firebase firestore      # Firestore 資料庫
-/integration-firebase all nextjs     # 全部服務 + Next.js
+/integration-firebase auth nextjs
+/integration-firebase firestore storage
+/integration-firebase all flutter
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-2 通過 | BaaS 架構確定 | `docs/02_architecture/SRD-{System}.md` 含 Firebase 架構 |
+| FRD 資料模型 | 資料結構已定義 | FRD 資料模型章節（對應 Firestore Collection）|
 
 ---
 
 ## 執行流程
 
-### 階段 1: Firebase 設定確認 🔴
+### 階段 1：Firebase BaaS 選型 ADR
 
-**確認項目**:
-- [ ] Firebase 專案已建立
-- [ ] 需要的服務已啟用
-- [ ] 環境變數已配置
-- [ ] 安全規則已規劃
+呼叫 `/adr-generate "Firebase BaaS 選型"`：
 
-**環境變數**:
-```env
-NEXT_PUBLIC_FIREBASE_API_KEY=...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
-NEXT_PUBLIC_FIREBASE_APP_ID=...
-```
+```markdown
+# ADR-{NNN}: Firebase 使用決策
 
-🔴 **確認點**: 確認 Firebase 配置
+## Decision
+使用 Firebase {Auth / Firestore / Storage / Functions}
 
----
+## Rationale（對應需求）
+| 服務 | 用途 | 對應 NFR |
+|------|------|---------|
+| Firebase Auth | 第三方認證 | NFR-SEC-001（認證）|
+| Firestore | 即時資料同步 | NFR-P004（即時更新需求）|
 
-### 階段 2: Firebase 初始化
-
-```typescript
-// src/lib/firebase/config.ts
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
-
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-let app: FirebaseApp;
-let auth: Auth;
-let db: Firestore;
-let storage: FirebaseStorage;
-
-if (typeof window !== 'undefined') {
-  app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-  storage = getStorage(app);
-}
-
-export { app, auth, db, storage };
+## Consequences
+- Vendor Lock-in：重度依賴 Firebase SDK
+- Security Rules 是最後一道防線（必須嚴格設計）
+- Client 端直接存取 Firestore：需 Security Rules 保護
 ```
 
 ---
 
-### 階段 3: Firebase Authentication
+### 階段 2：Security Rules Spec（安全規則設計）🔴
 
-```typescript
-// src/lib/firebase/auth.ts
-import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  signInWithPopup,
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  User,
-  sendPasswordResetEmail,
-  updateProfile,
-} from 'firebase/auth';
-import { auth } from './config';
+**文件路徑**：`docs/02_architecture/INTEGRATION-SPEC-Firebase-SecurityRules-{System}.md`
 
-const googleProvider = new GoogleAuthProvider();
+```markdown
+# Firebase Security Rules Spec — {System}
 
-export const firebaseAuth = {
-  // 郵件登入
-  async signIn(email: string, password: string) {
-    const result = await signInWithEmailAndPassword(auth, email, password);
-    return result.user;
-  },
+**設計原則**: Deny All → 明確允許（白名單）
+**對應 STRIDE**: T-006 Elevation, T-004 Info Disclosure
 
-  // 郵件註冊
-  async signUp(email: string, password: string, displayName?: string) {
-    const result = await createUserWithEmailAndPassword(auth, email, password);
-    if (displayName) {
-      await updateProfile(result.user, { displayName });
+## Firestore Rules 設計
+
+| Collection | 讀取 | 寫入 | 條件 | FRD Feature |
+|-----------|------|------|------|------------|
+| users/{uid} | 僅本人 | 僅本人 | auth.uid == uid | F-USR-001 |
+| posts/{postId} | 所有登入用戶 | 僅作者 | resource.data.authorId == auth.uid | F-POST-001 |
+| admin/{doc} | 無 | 無（僅 Functions）| false | 管理員資料保護 |
+
+## Security Rules 實作
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 預設拒絕所有（SDD: Deny All 原則）
+    match /{document=**} {
+      allow read, write: if false;
     }
-    return result.user;
-  },
 
-  // Google 登入
-  async signInWithGoogle() {
-    const result = await signInWithPopup(auth, googleProvider);
-    return result.user;
-  },
-
-  // 登出
-  async signOut() {
-    await firebaseSignOut(auth);
-  },
-
-  // 重設密碼
-  async resetPassword(email: string) {
-    await sendPasswordResetEmail(auth, email);
-  },
-
-  // 監聽登入狀態
-  onAuthStateChange(callback: (user: User | null) => void) {
-    return onAuthStateChanged(auth, callback);
-  },
-
-  // 取得當前使用者
-  getCurrentUser() {
-    return auth.currentUser;
-  },
-};
-```
-
-```typescript
-// src/hooks/useAuth.ts
-'use client';
-
-import { useState, useEffect } from 'react';
-import { User } from 'firebase/auth';
-import { firebaseAuth } from '@/lib/firebase/auth';
-
-export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const unsubscribe = firebaseAuth.onAuthStateChange((user) => {
-      setUser(user);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
-
-  return { user, loading };
+    // users Collection（對應 F-USR-001）
+    match /users/{uid} {
+      allow read, write: if request.auth != null
+                        && request.auth.uid == uid;
+    }
+  }
 }
 ```
 
----
-
-### 階段 4: Firestore 資料庫
-
-```typescript
-// src/lib/firebase/firestore.ts
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  addDoc,
-  updateDoc,
-  deleteDoc,
-  query,
-  where,
-  orderBy,
-  limit,
-  onSnapshot,
-  Timestamp,
-  DocumentData,
-  QueryConstraint,
-} from 'firebase/firestore';
-import { db } from './config';
-
-export function createFirestoreService<T extends DocumentData>(collectionName: string) {
-  const collectionRef = collection(db, collectionName);
-
-  return {
-    // 取得單一文檔
-    async getById(id: string): Promise<T | null> {
-      const docRef = doc(db, collectionName, id);
-      const docSnap = await getDoc(docRef);
-      return docSnap.exists() ? ({ id: docSnap.id, ...docSnap.data() } as T) : null;
-    },
-
-    // 取得所有文檔
-    async getAll(constraints: QueryConstraint[] = []): Promise<T[]> {
-      const q = query(collectionRef, ...constraints);
-      const snapshot = await getDocs(q);
-      return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as T));
-    },
-
-    // 新增文檔
-    async create(data: Omit<T, 'id'>): Promise<string> {
-      const docRef = await addDoc(collectionRef, {
-        ...data,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      });
-      return docRef.id;
-    },
-
-    // 更新文檔
-    async update(id: string, data: Partial<T>): Promise<void> {
-      const docRef = doc(db, collectionName, id);
-      await updateDoc(docRef, {
-        ...data,
-        updatedAt: Timestamp.now(),
-      });
-    },
-
-    // 刪除文檔
-    async delete(id: string): Promise<void> {
-      const docRef = doc(db, collectionName, id);
-      await deleteDoc(docRef);
-    },
-
-    // 即時監聽
-    subscribe(callback: (data: T[]) => void, constraints: QueryConstraint[] = []) {
-      const q = query(collectionRef, ...constraints);
-      return onSnapshot(q, (snapshot) => {
-        const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as T));
-        callback(data);
-      });
-    },
-  };
-}
-
-// 使用範例
-export interface UserProfile {
-  id: string;
-  displayName: string;
-  email: string;
-  photoURL?: string;
-  createdAt: Timestamp;
-}
-
-export const usersService = createFirestoreService<UserProfile>('users');
+🔴 Security Rules 必須在 Firestore 資料結構實作前凍結。
 ```
 
 ---
 
-### 階段 5: Firebase Storage
+### 階段 3：Firestore 資料結構（對應 FRD 資料模型）
 
-```typescript
-// src/lib/firebase/storage.ts
-import {
-  ref,
-  uploadBytes,
-  uploadBytesResumable,
-  getDownloadURL,
-  deleteObject,
-  listAll,
-} from 'firebase/storage';
-import { storage } from './config';
+```markdown
+# Firestore Data Model Spec
 
-export const firebaseStorage = {
-  // 上傳檔案
-  async upload(path: string, file: File): Promise<string> {
-    const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, file);
-    return getDownloadURL(storageRef);
-  },
+## Collection: users（對應 FRD F-USR-XXX）
 
-  // 上傳並追蹤進度
-  uploadWithProgress(
-    path: string,
-    file: File,
-    onProgress: (progress: number) => void
-  ): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const storageRef = ref(storage, path);
-      const uploadTask = uploadBytesResumable(storageRef, file);
-
-      uploadTask.on(
-        'state_changed',
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          onProgress(progress);
-        },
-        (error) => reject(error),
-        async () => {
-          const url = await getDownloadURL(uploadTask.snapshot.ref);
-          resolve(url);
-        }
-      );
-    });
-  },
-
-  // 取得下載 URL
-  async getUrl(path: string): Promise<string> {
-    const storageRef = ref(storage, path);
-    return getDownloadURL(storageRef);
-  },
-
-  // 刪除檔案
-  async delete(path: string): Promise<void> {
-    const storageRef = ref(storage, path);
-    await deleteObject(storageRef);
-  },
-
-  // 列出檔案
-  async list(path: string) {
-    const storageRef = ref(storage, path);
-    const result = await listAll(storageRef);
-    return result.items;
-  },
-};
+Document ID: {uid}（Firebase Auth UID）
+| 欄位 | 型別 | 必要 | 說明 |
+|------|------|------|------|
+| email | string | ✅ | 用戶 email |
+| displayName | string | ✅ | 顯示名稱 |
+| createdAt | timestamp | ✅ | 建立時間 |
+| role | string | ✅ | 'user' / 'admin' |
 ```
 
 ---
 
-### 階段 6: 驗證 🔴
+### 階段 4：RTM 更新 🔴
 
-**驗證清單**:
-- [ ] Authentication 登入/註冊正常
-- [ ] Firestore CRUD 運作
-- [ ] Storage 上傳/下載正常
-- [ ] 安全規則正確配置
-- [ ] 錯誤處理正確
+```bash
+/rtm-generate update
+/spec-compliance-check docs/02_architecture/INTEGRATION-SPEC-Firebase-SecurityRules-{System}.md
+```
 
-🔴 **確認點**: 確認 Firebase 服務整合正常
+🔴 確認點：Security Rules 測試（Firebase Emulator）通過；所有 Collection 有 Rules 覆蓋。
 
 ---
 
-## 產出物
+## 強制產出（SDD 文件）
 
-| 產出物 | 路徑 |
-|--------|------|
-| Firebase 配置 | `src/lib/firebase/config.ts` |
-| Auth 服務 | `src/lib/firebase/auth.ts` |
-| Firestore 服務 | `src/lib/firebase/firestore.ts` |
-| Storage 服務 | `src/lib/firebase/storage.ts` |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Firebase BaaS ADR | `docs/02_architecture/adr/ADR-{NNN}-firebase-baas.md` | SCG-2 |
+| Security Rules Spec | `docs/02_architecture/INTEGRATION-SPEC-Firebase-SecurityRules-{System}.md` | SCG-2 |
 
 ---
 
-## 相關 Skill
-
-- `/integration-oauth` - OAuth 認證
-- `/integration-api-client` - API 客戶端
-
----
-
-
-## 相關檔案
-
-- SOP 參考: `scenarios/integration/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Integration 情境
+**基於**: AISDLC-SDD v0.30
+**對應情境**: Integration 場景

@@ -332,6 +332,8 @@ python -m alembic upgrade head                                         # 🔴 �
 
 ~85% Markdown（模板／Agent／Workflow／治理規則）＋ ~15% Python runtime；各版目錄結構同構。🔴 **具體版本號與各類資產計數一律見唯一真相源 [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md)**（機械生成、ci-gate `--check` 守新鮮），本檔不重複數字。
 
+- 🔴 **用 SDD 流程開發子專案自身**（AutoClaude／AgentConsole／根層當 SDD 外部專案；整合輪 116）：單一 SOP＝LATEST 的 `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §8——三件組 `SDD_ACTIVE_VERSION`／`SDD_STATE_DIR`／`SDD_PROJECT` 缺一不可、一功能一鍵（`<sub>-<slug>`）、一律從 monorepo 根啟動 claude（子目錄啟動則根 router 靜默 fail-open）、一個 hooks-ON 視窗同時只綁一個功能（規格檔 deny 看路徑子字串，會擋全 repo 的 `docs/01～03`）；阻塞態逃生口＝第二終端跑 `resume-from-escalation`，或關視窗清 `SDD_ACTIVE_VERSION`。預設 hooks-OFF（§7 三徑判準）。
+
 ### 測試 / 形式化驗證 / 本機 CI 閘門
 
 ```bash

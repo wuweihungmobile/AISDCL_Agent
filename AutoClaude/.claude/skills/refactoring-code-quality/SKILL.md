@@ -1,433 +1,140 @@
 ---
-name: refactor
-description: 執行代碼重構，改善代碼品質、降低複雜度、消除技術債
+name: refactoring-code-quality
+description: 代碼重構，As-Is SRD 前置建立基線，Invariants 保護重構安全性，RTM 驗證不破壞 Business Invariants
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "[scope: 重構範圍 (file/module/architecture)] [target: 目標檔案或模組路徑]"
+argument-hint: "[scope: file|module|architecture] [target: 目標路徑]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# Refactoring Code Quality Skill
+# Refactoring Code Quality Skill（SDD 原生）
 
-基於 AISDLC Refactoring 情境的代碼品質重構技能。
+重構在 SDD 中屬於「Refactoring 場景」，有嚴格的規格保護：重構前必須建立 As-Is SRD 基線，Business Invariants（INV-XXX）必須在重構過程中被保護，重構後 RTM 所有 TC 必須維持通過。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/refactor                           # 開始重構流程
-/refactor file src/utils/helper.ts  # 重構指定檔案
-/refactor module src/services/      # 重構整個模組
+/refactoring-code-quality module src/orders
+/refactoring-code-quality architecture
+/refactoring-code-quality file src/utils/payment.ts
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 As-Is SRD 存在 | 現有架構已文件化 | `docs/02_architecture/AS-IS-SRD-{System}.md` |
+| Invariants 清單 | Business Invariants 已識別 | `docs/03_testing/contracts/INVARIANT-CONTRACT-{System}.md` |
+| RTM 基線 | 重構前 TC 全部通過 | RTM 現況為 100% ✅ |
+
+> 若 As-Is SRD 不存在，先執行 `/brownfield-analysis`
 
 ---
 
 ## 執行流程
 
-### 階段 1: 重構評估 (10分鐘) 🔴
+### 階段 1：As-Is 基線確認 🔴
 
-**任務**:
-1. 識別重構目標
-2. 分析現有代碼問題
-3. 評估重構風險
-4. 確認測試覆蓋率
+讀取 `docs/02_architecture/AS-IS-SRD-{System}.md`，確認：
+- 目標重構模組的現有架構
+- 技術債清單（TD-XXX）
+- 依賴關係圖（避免重構引發連鎖反應）
 
-**評估矩陣**:
-| 問題類型 | 優先級 | 風險 | 建議方法 |
-|---------|--------|------|---------|
-| 高複雜度函數 | 🔴 高 | 中 | Extract Method |
-| 重複代碼 | 🟡 中 | 低 | Extract Function |
-| 過長類別 | 🔴 高 | 高 | Extract Class |
-| 深層嵌套 | 🟡 中 | 低 | Guard Clause |
-| 魔術數字 | ⚪ 低 | 低 | Extract Constant |
-
-🔴 **確認點**: 確認重構範圍和預期目標
+🔴 確認點：Business Invariants 清單確認後才開始重構設計。
 
 ---
 
-### 階段 2: 安全網建立
+### 階段 2：Tech Debt Spec 識別
 
-**關鍵步驟**:
-
-#### 2.1 確保測試覆蓋
-```bash
-# 檢查現有測試
-npm test -- --coverage
-
-# 如果覆蓋率不足，先補充測試
-```
-
-**最低要求**:
-- 重構區域覆蓋率 > 80%
-- 關鍵路徑 100% 覆蓋
-
-#### 2.2 建立基準測試
-```typescript
-// 記錄當前行為作為基準
-describe('Refactoring Target - Baseline', () => {
-  it('should maintain current behavior', () => {
-    const result = targetFunction(input);
-    expect(result).toMatchSnapshot();
-  });
-});
-```
-
----
-
-### 階段 3: 重構執行
-
-**常用重構模式**:
-
-#### Pattern 1: Extract Method (提取方法)
-
-**Before**:
-```typescript
-function processOrder(order: Order) {
-  // 驗證訂單
-  if (!order.items || order.items.length === 0) {
-    throw new Error('Empty order');
-  }
-  if (!order.customer) {
-    throw new Error('No customer');
-  }
-
-  // 計算總價
-  let total = 0;
-  for (const item of order.items) {
-    total += item.price * item.quantity;
-  }
-
-  // 套用折扣
-  if (order.discount) {
-    total = total * (1 - order.discount);
-  }
-
-  return { ...order, total };
-}
-```
-
-**After**:
-```typescript
-function processOrder(order: Order) {
-  validateOrder(order);
-  const total = calculateTotal(order);
-  return { ...order, total };
-}
-
-function validateOrder(order: Order): void {
-  if (!order.items || order.items.length === 0) {
-    throw new Error('Empty order');
-  }
-  if (!order.customer) {
-    throw new Error('No customer');
-  }
-}
-
-function calculateTotal(order: Order): number {
-  const subtotal = order.items.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0
-  );
-  return order.discount
-    ? subtotal * (1 - order.discount)
-    : subtotal;
-}
-```
-
-#### Pattern 2: Replace Nested Conditional with Guard Clauses
-
-**Before**:
-```typescript
-function getPayAmount(employee: Employee) {
-  let result: number;
-  if (employee.isSeparated) {
-    result = separatedAmount();
-  } else {
-    if (employee.isRetired) {
-      result = retiredAmount();
-    } else {
-      result = normalPayAmount();
-    }
-  }
-  return result;
-}
-```
-
-**After**:
-```typescript
-function getPayAmount(employee: Employee) {
-  if (employee.isSeparated) return separatedAmount();
-  if (employee.isRetired) return retiredAmount();
-  return normalPayAmount();
-}
-```
-
-#### Pattern 3: Replace Magic Numbers with Constants
-
-**Before**:
-```typescript
-function calculateShipping(weight: number) {
-  if (weight < 5) return weight * 2.5;
-  if (weight < 20) return weight * 3.0;
-  return weight * 3.5 + 10;
-}
-```
-
-**After**:
-```typescript
-const SHIPPING_RATES = {
-  LIGHT: { maxWeight: 5, rate: 2.5 },
-  MEDIUM: { maxWeight: 20, rate: 3.0 },
-  HEAVY: { rate: 3.5, surcharge: 10 },
-} as const;
-
-function calculateShipping(weight: number) {
-  if (weight < SHIPPING_RATES.LIGHT.maxWeight) {
-    return weight * SHIPPING_RATES.LIGHT.rate;
-  }
-  if (weight < SHIPPING_RATES.MEDIUM.maxWeight) {
-    return weight * SHIPPING_RATES.MEDIUM.rate;
-  }
-  return weight * SHIPPING_RATES.HEAVY.rate + SHIPPING_RATES.HEAVY.surcharge;
-}
-```
-
----
-
-### 階段 3B: Java/Spring Boot 重構範例
-
-> 技術棧遷移涉及 Java 時使用
-
-#### Pattern: Extract Service (提取服務層)
-
-**Before** (Python Flask 單檔):
-```python
-@app.route('/orders', methods=['POST'])
-def create_order():
-    data = request.json
-    if not data.get('items'):
-        return jsonify(error='Empty order'), 400
-    total = sum(i['price'] * i['qty'] for i in data['items'])
-    if data.get('discount'):
-        total *= (1 - data['discount'])
-    db.execute("INSERT INTO orders ...", [total])
-    return jsonify(total=total), 201
-```
-
-**After** (Spring Boot 分層):
-```java
-// OrderController.java
-@RestController
-@RequestMapping("/api/orders")
-public class OrderController {
-    private final OrderService orderService;
-
-    @PostMapping
-    public ResponseEntity<OrderResponse> createOrder(@Valid @RequestBody CreateOrderRequest request) {
-        OrderResponse response = orderService.createOrder(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(response);
-    }
-}
-
-// OrderService.java
-@Service
-@Transactional
-public class OrderService {
-    private final OrderRepository orderRepository;
-
-    public OrderResponse createOrder(CreateOrderRequest request) {
-        BigDecimal total = calculateTotal(request.getItems());
-        if (request.getDiscount() != null) {
-            total = applyDiscount(total, request.getDiscount());
-        }
-        Order order = orderRepository.save(Order.of(request, total));
-        return OrderResponse.from(order);
-    }
-
-    private BigDecimal calculateTotal(List<OrderItem> items) {
-        return items.stream()
-            .map(i -> i.getPrice().multiply(BigDecimal.valueOf(i.getQuantity())))
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-}
-```
-
-#### 驗證命令 (Java/Spring Boot):
-```bash
-# 編譯
-./gradlew compileJava
-
-# 測試
-./gradlew test
-
-# Lint (Checkstyle/SpotBugs)
-./gradlew check
-```
-
----
-
-### 階段 3C: Python 重構範例
-
-> 舊系統 Python 代碼重構時使用
-
-#### Pattern: Extract Class + Type Hints
-
-**Before**:
-```python
-def process_inventory(data):
-    results = []
-    for item in data:
-        if item['type'] == 'inbound':
-            item['stock'] = item.get('stock', 0) + item['qty']
-            if item['stock'] > item.get('max_stock', 9999):
-                item['alert'] = 'overstock'
-        elif item['type'] == 'outbound':
-            item['stock'] = item.get('stock', 0) - item['qty']
-            if item['stock'] < item.get('min_stock', 0):
-                item['alert'] = 'understock'
-        results.append(item)
-    return results
-```
-
-**After**:
-```python
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
-
-class TransactionType(Enum):
-    INBOUND = "inbound"
-    OUTBOUND = "outbound"
-
-@dataclass
-class InventoryItem:
-    sku: str
-    stock: int = 0
-    min_stock: int = 0
-    max_stock: int = 9999
-    alert: Optional[str] = None
-
-    def apply_inbound(self, qty: int) -> None:
-        self.stock += qty
-        if self.stock > self.max_stock:
-            self.alert = "overstock"
-
-    def apply_outbound(self, qty: int) -> None:
-        self.stock -= qty
-        if self.stock < self.min_stock:
-            self.alert = "understock"
-```
-
-#### 驗證命令 (Python):
-```bash
-# 型別檢查
-mypy src/
-
-# 測試
-pytest --cov=src/
-
-# Lint
-ruff check src/
-```
-
----
-
-### 階段 4: 驗證 (必須執行)
-
-**驗證步驟**:
-
-```bash
-# 1. 執行所有測試
-npm test
-
-# 2. 檢查類型
-npx tsc --noEmit
-
-# 3. 執行 Lint
-npm run lint
-
-# 4. 比對快照
-npm test -- --updateSnapshot  # 如果行為改變
-```
-
-**驗證清單**:
-- [ ] 所有測試通過
-- [ ] 無類型錯誤
-- [ ] Lint 無警告
-- [ ] 行為與重構前一致
-
----
-
-### 階段 5: 複雜度驗證
-
-**重構前後比對**:
+讀取技術債清單，針對目標模組：
 
 ```markdown
-## 重構成效報告
+## 重構技術債清單
 
-### 複雜度變化
-| 函數 | 重構前 | 重構後 | 改善 |
-|------|--------|--------|------|
-| processOrder | 15 | 5 | ⬇️ 67% |
-| validateOrder | - | 3 | 新增 |
-| calculateTotal | - | 4 | 新增 |
-
-### 代碼行數
-- 重構前: 45 行
-- 重構後: 35 行
-- 淨減少: 22%
-
-### 測試覆蓋率
-- 重構前: 65%
-- 重構後: 95%
+| TD ID | 問題描述 | 影響範圍 | 重構策略 | INV 影響 |
+|-------|---------|---------|---------|---------|
+| TD-001 | 過長函數（> 100 行）| OrderService.createOrder | Extract Method | INV-002（訂單狀態）|
+| TD-002 | 重複的驗證邏輯 | 3 個 Controller | Extract Validator | 無 |
+| TD-003 | 直接 DB 存取（缺 Repository）| Business Layer | Repository Pattern | INV-001 |
 ```
 
 ---
 
-## 重構原則
+### 階段 3：Invariant 保護設計（重構核心）
 
-### DO（應該做）
-- ✅ 小步快跑，每次只改一處
-- ✅ 每次改動後執行測試
-- ✅ 保持 Git commit 粒度小
-- ✅ 使用 IDE 重構工具
+```markdown
+## Business Invariants 保護矩陣
 
-### DON'T（不應該做）
-- ❌ 同時重構多處
-- ❌ 改變行為同時重構
-- ❌ 在沒有測試下重構
-- ❌ 一次性大規模改動
+| INV ID | 不變量描述 | 受影響的重構 | 保護方式 |
+|--------|---------|------------|---------|
+| INV-001 | 訂單金額 > 0 | Repository 重構 | DB CHECK 約束保留 |
+| INV-002 | 狀態轉換：PENDING→CONFIRMED→COMPLETED | Service 重構 | 狀態機測試保留 |
+| INV-003 | 用戶 email 唯一 | DB 結構不變 | UNIQUE INDEX 保留 |
+```
+
+**重構安全策略**：
+- Strangler Fig：逐步替換，新舊並存
+- Branch by Abstraction：先建 Interface，再切換實作
+- 每次重構後立即執行 `/rtm-generate verify`
 
 ---
 
-## 產出物清單
+### 階段 4：重構執行（小步前進）
 
-| 產出物 | 說明 |
-|--------|------|
-| 重構後代碼 | 改善後的代碼 |
-| 重構報告 | 重構成效說明 |
-| 更新的測試 | 新增或調整的測試 |
+每次重構步驟：
+1. 修改代碼
+2. 執行 `{test command}` — 確認所有 Invariant TC 通過
+3. 執行 `{compile command}` — 確認無編譯錯誤
+4. 僅當通過才繼續下一步（不累積）
+
+---
+
+### 階段 5：RTM 驗證 🔴
+
+```bash
+/rtm-generate verify    # 確認重構後 RTM 100% ✅
+/spec-compliance-check docs/02_architecture/AS-IS-SRD-{System}.md
+```
+
+🔴 確認點：重構後所有 INV-XXX TC 維持通過；無 TC 被刪除。
+
+---
+
+## 強制產出（SDD 文件）
+
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Tech Debt 更新 | `docs/06_quality/TECH-DEBT-{System}.md` | 重構後 |
+| To-Be SRD 更新 | `docs/02_architecture/SRD-{System}.md` | 重構後 |
+
+---
+
+## 後置動作
+
+```
+/rtm-generate verify    # 確認 Invariants 未被破壞
+/sdd-gate SCG-4         # 重構 PR Review
+```
+
+🔷 **本 Skill 對應 SCG**：SCG-4（重構 PR Review）
 
 ---
 
 ## 相關 Skill
 
-- `/brownfield` - 系統分析（重構前置）
-- `/testing` - 補充測試
-- `/performance` - 效能優化
+- `/brownfield-analysis` — As-Is SRD 建立（重構前置）
+- `/rtm-generate` — Invariant TC 驗證
+- `/code-review` — 重構 PR 規格一致性審查
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/refactoring/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 Refactoring 情境
-**維護者**: AISDLC Framework Team
+**基於**: AISDLC-SDD v0.30
+**對應場景**: `scenarios/refactoring/SDD_REFACTORING_ENHANCEMENT.md`

@@ -1,51 +1,82 @@
 ---
 name: devops-docker
-description: Docker 容器化配置，包含 Dockerfile、docker-compose、多階段構建
+description: Docker 容器化配置，SCG-2 架構凍結後執行，產出 Dockerfile/Compose 並對應 ADR 決策
 user-invocable: true
 disable-model-invocation: false
-argument-hint: "<app_type: 應用類型 (nodejs/python/java/go/static)> [environment: 環境類型 (dev/production)]"
+argument-hint: "<app_type: nodejs|python|java|go|static> [environment: dev|production]"
 allowed-tools:
   - Read
   - Write
   - Grep
   - Glob
-  - Bash
 ---
 
-# DevOps Docker Skill
+# DevOps Docker Skill（SDD 原生）
 
-建立專業的 Docker 容器化配置。
+Docker 容器化是 SDD 部署架構的實作。本 Skill 在 SCG-2 架構凍結後執行，每個容器化決策（基礎映像選型、多階段構建策略）必須對應 ADR，Dockerfile 設計需符合 SRD 部署架構章節規格。
 
 ---
 
 ## 觸發方式
 
 ```bash
-/devops-docker nodejs           # Node.js 應用
-/devops-docker python production # Python 生產環境
-/devops-docker --app_type=go
+/devops-docker nodejs
+/devops-docker python production
+/devops-docker java
 ```
+
+---
+
+## 前置條件（SDD Spec-First）
+
+| 閘門 | 說明 | 驗證方式 |
+|------|------|---------|
+| 🔷 SCG-2 通過 | 架構凍結，部署策略確定 | `docs/02_architecture/SRD-{System}.md` 第 8 章（部署架構） |
+| ADR 存在 | 容器化決策已記錄 | `/adr-generate "容器化策略"` 已執行，或在本 Skill 中執行 |
 
 ---
 
 ## 執行流程
 
-### 階段 1: 需求評估 🔴
+### 階段 1：讀取 SRD 部署架構
 
-**確認項目**:
-- [ ] 應用類型和運行時版本
-- [ ] 基礎映像選擇
-- [ ] 環境變數需求
-- [ ] 掛載卷需求
-- [ ] 網路配置需求
-
-🔴 **確認點**: 確認容器化需求
+讀取 `docs/02_architecture/SRD-{System}.md` 的部署架構章節，確認：
+- 基礎映像版本要求（對應 NFR 版本要求）
+- 環境變數清單（對應 FRD 設定需求）
+- 服務依賴（DB / Cache / Queue）
+- 健康檢查端點（對應 SRD 或 Contract 定義的 `/health`）
 
 ---
 
-### 階段 2: Dockerfile 配置
+### 階段 2：ADR 建立（容器化決策）🔴
 
-#### Node.js 多階段構建
+若 SRD 尚未記錄容器化 ADR，呼叫 `/adr-generate "容器化策略"` 記錄：
+
+```markdown
+# ADR-{NNN}: Docker 容器化策略
+
+## Decision
+使用多階段構建（Multi-stage Build）+ 非 root 使用者
+
+## Rationale
+- 多階段構建：分離構建/運行環境，減少映像大小
+- 非 root：符合 NFR-SEC-XXX 安全要求
+- Alpine 基礎映像：符合 NFR-XXX 映像大小限制
+
+## Consequences
+- Dockerfile 維護成本增加（多個 Stage）
+- 需確保 Production Stage 不含開發依賴
+```
+
+🔴 確認點：ADR 記錄容器化策略決定後才繼續。
+
+---
+
+### 階段 3：Dockerfile 產出
+
+依 app_type 產出對應 Dockerfile：
+
+**Node.js 多階段構建**:
 
 ```dockerfile
 # Dockerfile
@@ -63,58 +94,33 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# Stage 3: Production
+# Stage 3: Production（對應 SRD 部署架構）
 FROM node:20-alpine AS runner
 WORKDIR /app
-
 ENV NODE_ENV=production
 
-# 安全性：非 root 使用者
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 appuser
+# 安全性：非 root（ADR-NNN 決策）
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 appuser
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./
 
 USER appuser
-
 EXPOSE 3000
+
+# 健康檢查端點（對應 Contract /health）
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+  CMD wget -qO- http://localhost:3000/health || exit 1
 
 CMD ["node", "dist/index.js"]
 ```
 
-#### Python 應用
+**Java/Spring Boot 多階段構建（Layered JAR）**:
 
 ```dockerfile
 # Dockerfile
-FROM python:3.12-slim AS builder
-WORKDIR /app
-
-RUN pip install --no-cache-dir poetry
-COPY pyproject.toml poetry.lock ./
-RUN poetry export -f requirements.txt --output requirements.txt
-
-FROM python:3.12-slim
-WORKDIR /app
-
-RUN useradd --create-home appuser
-COPY --from=builder /app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-USER appuser
-
-EXPOSE 8000
-
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0"]
-```
-
-#### Java/Spring Boot 多階段構建 (Layered JAR)
-
-```dockerfile
-# Dockerfile
-# Stage 1: Build with Gradle
 FROM eclipse-temurin:21-jdk-alpine AS builder
 WORKDIR /app
 COPY gradle gradle
@@ -123,18 +129,16 @@ RUN chmod +x gradlew && ./gradlew dependencies --no-daemon
 COPY src src
 RUN ./gradlew bootJar --no-daemon
 
-# Stage 2: Extract layers
 FROM eclipse-temurin:21-jdk-alpine AS extractor
 WORKDIR /app
 COPY --from=builder /app/build/libs/*.jar app.jar
 RUN java -Djarmode=layertools -jar app.jar extract
 
-# Stage 3: Production
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
-RUN addgroup --system --gid 1001 spring
-RUN adduser --system --uid 1001 appuser
+RUN addgroup --system --gid 1001 spring && \
+    adduser --system --uid 1001 appuser
 
 COPY --from=extractor /app/dependencies/ ./
 COPY --from=extractor /app/spring-boot-loader/ ./
@@ -142,7 +146,6 @@ COPY --from=extractor /app/snapshot-dependencies/ ./
 COPY --from=extractor /app/application/ ./
 
 USER appuser
-
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
@@ -151,54 +154,13 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
 ```
 
-#### Next.js 多階段構建
-
-```dockerfile
-# Dockerfile
-# Stage 1: Dependencies
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-
-# Stage 2: Build
-FROM node:20-alpine AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
-
-# Stage 3: Production
-FROM node:20-alpine AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-
-EXPOSE 3000
-
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-CMD ["node", "server.js"]
-```
-
 ---
 
-### 階段 3: Docker Compose 配置
+### 階段 4：Docker Compose 產出（對應 SRD 服務拓撲）
 
 ```yaml
 # docker-compose.yml
+# 對應 SRD 服務清單（C4 Container 圖）
 version: '3.9'
 
 services:
@@ -215,15 +177,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     restart: unless-stopped
 
   db:
-    image: postgres:18-alpine
+    image: postgres:18-alpine     # 版本對應 SRD/ADR
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -237,7 +194,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine         # 版本對應 SRD/ADR
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes
@@ -245,119 +202,51 @@ services:
 volumes:
   postgres_data:
   redis_data:
-
-networks:
-  default:
-    driver: bridge
 ```
 
 ---
 
-### 階段 4: 開發環境配置
+### 階段 5：RTM 更新與規格確認 🔴
 
-```yaml
-# docker-compose.override.yml (開發環境)
-version: '3.9'
-
-services:
-  app:
-    build:
-      target: builder
-    volumes:
-      - .:/app
-      - /app/node_modules
-    environment:
-      - NODE_ENV=development
-    command: npm run dev
-```
-
----
-
-### 階段 5: .dockerignore 配置
-
-```
-# .dockerignore
-node_modules
-npm-debug.log
-Dockerfile*
-docker-compose*
-.git
-.gitignore
-.env*
-*.md
-.vscode
-.idea
-coverage
-.nyc_output
-```
-
----
-
-### 階段 6: 驗證 🔴
-
-**驗證清單**:
-- [ ] Docker build 成功
-- [ ] 容器正常啟動
-- [ ] 健康檢查通過
-- [ ] 服務間通訊正常
-- [ ] 掛載卷正確
-
-**驗證命令**:
 ```bash
-# 構建
-docker compose build
-
-# 啟動
-docker compose up -d
-
-# 檢查狀態
-docker compose ps
-
-# 查看日誌
-docker compose logs -f app
-
-# 健康檢查
-docker compose exec app curl localhost:3000/health
+/rtm-generate update    # 更新部署相關 NFR 驗收 TC 狀態
+/spec-compliance-check docs/02_architecture/SRD-{System}.md
 ```
 
-🔴 **確認點**: 確認容器運行正常
+🔴 確認點：Dockerfile 中的服務版本、健康檢查端點與 SRD 一致。
 
 ---
 
-## 最佳實踐
+## 強制產出（SDD 文件）
 
-| 項目 | 建議 |
-|------|------|
-| 基礎映像 | 使用 Alpine 減少體積 |
-| 多階段構建 | 分離構建和運行環境 |
-| 非 root 使用者 | 安全性考量 |
-| 健康檢查 | 確保服務可用性 |
-| .dockerignore | 排除不必要文件 |
+| 產出物 | 路徑 | 對應 SCG |
+|--------|------|---------|
+| Dockerfile | `Dockerfile` | SCG-2 後 |
+| Docker Compose | `docker-compose.yml` | SCG-2 後 |
+| 容器化 ADR | `docs/02_architecture/adr/ADR-{NNN}-containerization.md` | SCG-2 |
 
 ---
 
-## 產出物
+## 後置動作
 
-| 產出物 | 路徑 |
-|--------|------|
-| Dockerfile | `Dockerfile` |
-| Docker Compose | `docker-compose.yml` |
-| 開發覆蓋 | `docker-compose.override.yml` |
-| 忽略文件 | `.dockerignore` |
+```
+/devops-github-actions     # 配置 CI/CD Pipeline 使用 Docker
+/devops-kubernetes         # 若需 K8s 部署（參考 SRD 部署架構）
+/sdd-gate SCG-4            # Pipeline 設置完成後進行 PR Review
+```
+
+🔷 **本 Skill 對應 SCG**：SCG-2 後（部署架構凍結的實作）
 
 ---
 
 ## 相關 Skill
 
-- `/devops-k8s` - Kubernetes 部署
-- `/devops-github` - CI/CD Pipeline
-- `/devops-gitlab` - GitLab CI/CD
+- `/sd-architect` — SRD 部署架構（Docker 設計的規格依據）
+- `/adr-generate` — 容器化策略 ADR
+- `/devops-github-actions` — 使用 Docker 的 CI/CD Pipeline
+- `/devops-kubernetes` — K8s 部署（Docker Image 消費方）
 
 ---
 
-
-## 相關檔案
-
-- SOP 參考: `scenarios/devops/SOP_QuickRef.md`
-
-**基於**: AISDLC v0.09 DevOps 情境
+**基於**: AISDLC-SDD v0.30
+**對應架構規格**: `docs/02_architecture/SRD-{System}.md` 第 8 章

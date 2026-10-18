@@ -1,0 +1,31 @@
+id: SLV-009
+name: API endpoint 與 UI 操作不對齊
+source: ACT-031 manual-authored 2026-04-25
+source_fpl: null   # 非 FPL 衍生（manual-authored per ACT-031）；per Rule 9.11.5 審計鏈顯式宣告
+trust_level: proposed
+scope: SCG-1
+purpose: |
+  FRD AC 中宣告 `<!-- anchor:api:<METHOD> <PATH> -->` 的端點，必須存在於
+  docs/02_architecture/api/*.yaml 的 paths 樹中，且 requestBody schema 的
+  required（或 properties）欄位必須有對應 UI widget（同 AC 內 anchor:ui 引用的 mockup）。
+  常見違反：API spec 多了 password 但 UI 缺 password input；UI 有 captcha
+  但 API 未定義 field。
+scan_targets:
+  - docs/01_requirements/FRD-*.md
+  - docs/02_architecture/SRD-*.md
+required_qualifiers:
+  - 每個 anchor:api 必能在 OpenAPI YAML 找到 method+path
+  - request body required field 須在 UI 出現對應 input
+modality:
+  type: api
+  validator_module: tools.fsm_runtime.modality.api_ui_adapter
+  validator_function: validate_anchor
+backend_hint: session   # OpenAPI YAML parse 純規則，不需 LLM
+failure_examples:
+  - "FRD：anchor:api:POST /auth/login；OpenAPI 內無 /auth/login → missing_anchor_target"
+  - "API requestBody required: [email, password]；UI 缺 password input → missing_request_fields"
+pass_examples:
+  - "API requestBody.required=[email,password]；UI 有 input(name=email)/input(name=password)"
+severity: HIGH
+blocks_scg: false       # proposed → advisory only
+anchor_type: api

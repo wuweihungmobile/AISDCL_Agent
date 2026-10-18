@@ -26,7 +26,7 @@ AISDLC Agent Console UI：掌舵者用網頁管理 AI Agent 的開發生命週�
 ```
 AgentConsole/
 ├── CLAUDE.md / README.md / docker-compose.yml / docker-compose.dev.yml / .env.example
-├── docs/{02_architecture,04_planning,06_quality}/
+├── docs/{02_architecture,03_testing,04_planning,06_quality}/   # 03＝SDD 的 TCS（contracts/）
 ├── frontend/   backend/   engine-bridge/   docker/{nginx,postgres/{primary,replica},pgbackrest,redis,prometheus,grafana}/
 ```
 
@@ -111,6 +111,8 @@ Push-Location AgentConsole; docker compose --profile db --profile app --profile 
 
 ## 🚦 閘門清單（各波出口指令與預期輸出：[Implementation_Plan](docs/04_planning/Implementation_Plan.md) §2）
 
+> **閘門對映**（整合輪 116 D-116-05）：SCG-0～3＝規格閘（FSM 可驗）、SCG-4～5＝品質閘；W 波次是交付里程碑簽核，不改名、不取代。對映表見〈文件索引〉開發方法論列（Bridge §8）。
+
 | 服務 | 閘門 |
 |------|------|
 | engine-bridge | `ruff check`（本目錄與 monorepo 根視角各一次）、pytest、`GET /health`、根層 `TestDirEntryPrimitivesAreAccountedFor`、`docker build` |
@@ -130,7 +132,7 @@ ruff check AgentConsole\engine-bridge
 
 ## 🔴 本 repo 鐵律（違反＝push 被擋或 CI 紅）
 
-1. 文件、註解、commit 訊息一律繁體中文；文件寫進 `docs/0[1-8]_*/` 對應子目錄（本專案用 02／04／06）。
+1. 文件、註解、commit 訊息一律繁體中文；文件寫進 `docs/0[1-8]_*/` 對應子目錄（本專案用 02／03／04／06；03 給 SDD 的 TCS：`docs/03_testing/contracts/`）。
 2. 所有文字檔 **LF 行尾**（`.ps1` 例外為 CRLF）；`.sh` 含 CR 會被 hook 擋。
 3. 開發 agent **不准 commit／push**；主控驗證後 commit。
 4. **不准寫真實機密**；`.env.example` 只放 `<YOUR_...>`；pre-commit 有機密掃描。
@@ -162,3 +164,4 @@ ruff check AgentConsole\engine-bridge
 | 需求追溯（回填義務） | [RTM.md](docs/06_quality/RTM.md) |
 | 波次、閘門、Windows 接續、進度帳 | [Implementation_Plan.md](docs/04_planning/Implementation_Plan.md) |
 | 兩個被包裝的引擎 | `AutoClaude/CLAUDE.md`、`AISDLC_SDD/CLAUDE.md`；monorepo 根 `CLAUDE.md` |
+| 開發方法論（SDD 流程開發本專案自身） | `AISDLC_SDD/AISDLC_SDD_v<LATEST>/workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md` §8（LATEST 現查 `python AISDLC_SDD/scripts/sdd_version.py`）；三件組 `SDD_ACTIVE_VERSION`／`SDD_STATE_DIR`＝`AgentConsole/build/reports/fsm`／`SDD_PROJECT`＝`agentconsole-<slug>`，一功能一鍵、一律從 monorepo 根啟動 session；engine-bridge 可走委派迴圈，backend／frontend 走 SDD session-only 路徑（AT 由 `gradlew test --tests`／`vitest run -t` 自跑並逐字貼證據） |

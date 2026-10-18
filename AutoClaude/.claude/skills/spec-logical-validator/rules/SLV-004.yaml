@@ -1,0 +1,27 @@
+id: SLV-004
+name: "API Contract vs FRD 相容性"
+source: "builtin (AISDLC-SDD v0.01 Phase A)"
+trust_level: verified
+reviewed_by: "sa-analyst@aisdlc-sdd"
+reviewed_at: "2026-04-14"
+scope: contract
+purpose: "確保 API Response Schema 的欄位與 FRD Business Rules 邏輯相容"
+
+scan_targets:
+  - "docs/02_architecture/api/CONTRACT-*.yaml"
+  - "docs/01_requirements/FRD-*.md"
+
+required_qualifiers:
+  - "API 回傳欄位類型必須與 FRD 業務邏輯相容（例：FRD 說必填，API 不得設為 nullable）"
+  - "API 錯誤碼必須覆蓋 FRD 定義的所有失敗場景"
+  - "API 端點名稱的業務語意必須與對應 US/AC 相符"
+  - "required 欄位在 FRD 的 AC 中必須有對應驗證邏輯"
+
+failure_examples:
+  - "FRD: email 必填 + API: email nullable=true → 相容性矛盾"
+
+pass_examples:
+  - "email: { type: string, nullable: false }"
+
+severity: CRITICAL
+blocks_scg: true

@@ -1,9 +1,32 @@
 # AISDLC Claude Skill 開發規劃
 # Claude Skill Development Plan
 
-**版本**: v0.09
+**版本**: v0.30-SDD
 **建立日期**: 2025-01-22
+**最後更新**: 2026-04-14
 **用途**: 規劃 AISDLC 九大情境和 Agent 轉化為 Claude Skill 的完整路線圖
+
+---
+
+## ✅ SDD 原生改寫完成（2026-04-14）
+
+**改寫範圍**: 38 個 Skills 全部改寫為 SDD 原生設計
+
+| 改寫 Phase | Skill 數量 | 狀態 |
+|-----------|-----------|------|
+| Phase 01：SDD Core Skills | 5 | ✅ 完成 |
+| Phase 02：Agent Skills | 6 | ✅ 完成 |
+| Phase 03：Scenario/Workflow Skills | 5 | ✅ 完成 |
+| Phase 04：DevOps/Security/Doc Skills | 8 | ✅ 完成 |
+| Phase 05：Integration/Quality Skills | 14 | ✅ 完成 |
+| **總計** | **38** | ✅ **全部完成** |
+
+**改寫核心變化**：
+- SCG 閘門前置條件嵌入每個 Skill（非附加）
+- RTM 更新步驟嵌入執行流程
+- ADR 決策步驟嵌入設計先行階段
+- Consumer Contract / Webhook Event Schema 定義嵌入 Integration Skills
+- NFR 量化值作為 Monitoring/Performance Skill 的閾值依據
 
 ---
 
@@ -35,10 +58,10 @@
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 1 | DevOps GitHub Actions | `/devops-github` | `devops-github-actions/SKILL.md` | ✅ 已建立 |
+| 1 | DevOps GitHub Actions | `/devops-github-actions` | `devops-github-actions/SKILL.md` | ✅ 已建立 |
 | 2 | Integration OAuth | `/integration-oauth` | `scenarios/integration-oauth.md` | ✅ 已建立 |
-| 3 | Brownfield Analysis | `/brownfield` | `scenarios/brownfield-analysis.md` | ✅ 已建立 |
-| 4 | SA Analyst | `/sa-analyze` | `agents/sa-analyst.md` | ✅ 已建立 |
+| 3 | Brownfield Analysis | `/brownfield-analysis` | `scenarios/brownfield-analysis.md` | ✅ 已建立 |
+| 4 | SA Analyst | `/sa-analyst` | `agents/sa-analyst.md` | ✅ 已建立 |
 
 ### 🥈 第二波 - 近期開發（擴展 Skills）
 
@@ -46,20 +69,20 @@
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 5 | Refactoring Code Quality | `/refactor` | `scenarios/refactoring-code-quality.md` | ✅ 已建立 |
-| 6 | Performance Optimization | `/performance` | `scenarios/performance-optimization.md` | ✅ 已建立 |
-| 7 | Testing Strategy | `/testing` | `scenarios/testing-strategy.md` | ✅ 已建立 |
-| 8 | DevOps Kubernetes | `/devops-k8s` | `scenarios/devops-kubernetes.md` | ✅ 已建立 |
+| 5 | Refactoring Code Quality | `/refactoring-code-quality` | `scenarios/refactoring-code-quality.md` | ✅ 已建立 |
+| 6 | Performance Optimization | `/performance-optimization` | `scenarios/performance-optimization.md` | ✅ 已建立 |
+| 7 | Testing Strategy | `/testing-strategy` | `scenarios/testing-strategy.md` | ✅ 已建立 |
+| 8 | DevOps Kubernetes | `/devops-kubernetes` | `scenarios/devops-kubernetes.md` | ✅ 已建立 |
 | 9 | Integration Stripe | `/integration-stripe` | `scenarios/integration-stripe.md` | ✅ 已建立 |
 
 ### 🥉 第三波 - 未來開發（專業 Skills）
 
 | 序號 | Skill 名稱 | 觸發命令 | 檔案路徑 | 狀態 |
 |------|-----------|---------|---------|------|
-| 10 | Security Audit | `/security` | `scenarios/security-audit.md` | ✅ 已建立 |
-| 11 | Documentation API | `/doc-api` | `scenarios/documentation-api.md` | ✅ 已建立 |
-| 12 | SD Architect | `/sd-design` | `agents/sd-architect.md` | ✅ 已建立 |
-| 13 | QA Testing | `/qa-test` | `agents/qa-testing.md` | ✅ 已建立 |
+| 10 | Security Audit | `/security-audit` | `scenarios/security-audit.md` | ✅ 已建立 |
+| 11 | Documentation API | `/documentation-api` | `scenarios/documentation-api.md` | ✅ 已建立 |
+| 12 | SD Architect | `/sd-architect` | `agents/sd-architect.md` | ✅ 已建立 |
+| 13 | QA Testing | `/qa-testing` | `agents/qa-testing.md` | ✅ 已建立 |
 
 ---
 
@@ -214,21 +237,36 @@ allowed-tools:
 
 - [x] 建立 Agents 家族 (dev-review, pm-planning)
 - [x] 建立 Workflow Skills (sprint-planning, release-management, code-review)
-- [ ] 建立 Skill 使用文檔
-- [ ] 收集使用回饋
+
+### 🔴 當前優先任務：SDD 原生改寫（2026-04-14 啟動）
+
+> 計畫文件：`build/planning/archive/Skill_for_SDD_Planning_Phase_01.md`
+
+**問題**：現有 33 個繼承 Skill 採用「AISDLC v0.01 + 附加 SDD 區塊」模式，
+非 SDD 原生設計，SCG 閘門游離、RTM 缺席、前置條件不明。
+
+**目標**：38 個 Skill 全部改寫為 SDD 原生，嵌入 Spec-First/Design-as-Doc/Contract-Driven 三大支柱
+
+| Phase | 範疇 | Skill 數 | 狀態 |
+|-------|------|---------|------|
+| Phase 01 | SDD 核心 Skill 精化 + 新標準建立 | 5 | ⬜ 待執行 |
+| Phase 02 | Agent Skill 全面改寫 | 6 | ⬜ 待執行 |
+| Phase 03 | Scenario + Workflow Skill 改寫 | 5 | ⬜ 待執行 |
+| Phase 04 | DevOps + Security/Docs Skill 改寫 | 8 | ⬜ 待執行 |
+| Phase 05 | Integration + Code Quality Skill 改寫 | 14 | ⬜ 待執行 |
+| Phase 06 | 整合測試 + 文件更新 | - | ⬜ 待執行 |
 
 ### 長期 (季度)
 
-- [ ] 建立 Skill 組合使用指南
-- [ ] 評估新增 Skill 需求
-- [ ] 根據回饋優化現有 Skills
+- [ ] Skill 組合使用指南
+- [ ] 根據改寫後回饋繼續優化
 
 ---
 
 ## 檔案結構 (Claude Code Agent Skills Standard)
 
 ```
-AISDLC_v0.09/.claude/skills/
+AISDLC_SDD_v0.0X/.claude/skills/          # X=當前框架版本，勿寫死（DEF-CLDREV-008）
 ├── README.md                              ✅ 總覽文檔
 ├── SKILL_DEVELOPMENT_PLAN.md              ✅ 本文件
 ├── devops-github-actions/SKILL.md         ✅ GitHub Actions
