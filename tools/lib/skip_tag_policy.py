@@ -490,7 +490,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-12 重釘 230→231（R212 第四列新增 `AutoClaude/tests/execution/
     # test_prd12_permission_bypass_invariant8.py`，收尾實測 289 支，230 低於實測的 80%，
     # 前置掃描逐字指示重釘為 231 ⇒ 照填，零加減推算）。
-    "AutoClaude/tests": 242,  # 116 輪：241→242（DF-A 新增 tests/utils/test_webhook_sender.py 後實測 303、逐字指示；只准往上）  round-label-ok
+    "AutoClaude/tests": 242,  # 241→242（webhook 測試檔後實測 303；逐字指示）  round-label-ok
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行
@@ -504,7 +504,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # test_ruff_root_config_excludes_only_frozen.py` 後該樹實測 **32** 支，24 只剩實測的 75%，
     # 前置掃描逐字指示重釘為 25 ⇒ 照填、零加減推算（上修＝判準更嚴；25 只對 32 支成立，
     # 再新增 1 支即過期——收輪者請在所有包停工後重量一次）。
-    "AISDLC_SDD/scripts/tests": 27,  # 116 輪：26→27（DF-C 新增 test_sdd_env.py 後實測 34，逐字指示）  round-label-ok
+    "AISDLC_SDD/scripts/tests": 27,  # 26→27（sdd_env 測試檔後實測 34；逐字指示）  round-label-ok
     # 🔴 DEF-200-275 第四輪重釘 60 → 62：該樹由 76 支長到 **78**（本包新增
     # `test_context_window.py`／`test_recovery_hint.py`），60 只剩實測的 77%，第三向逐字
     # 指示「重釘為 62」⇒ 照填、零加減推算。
