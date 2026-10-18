@@ -155,7 +155,8 @@
 | AISDLC_SDD ci-gate 三軌 | 同一載具的 `ci-gate.sh` 逐軌計數自證行 | v0.01 `1478`／v0.30 `2149`／scripts `425` passed | test_sdd_env 26 passed；recovery_hint 46 passed（W1 列） |
 | AgentConsole Engine Bridge | `python -m pytest -q`（cwd `AgentConsole/engine-bridge`）＋ `ruff check AgentConsole/engine-bridge` | `1003 passed, 24 skipped, 1 warning in 458.75s`；ruff `All checks passed!` | DF-B 只動 Bridge；frontend／backend 本輪未動 ⇒ lint／tsc／gradlew **未觸發（N/A）**，不是隨全套通過 |
 | SCG-4 突變鑑別力 | QA `mutate_all.py dfa dfc`（`git archive` 匯出 322e1351／90d911e4） | 他包回報：DF-A 殺 50/50、DF-C 殺 29/29、存活 0 | 一審 12 存活者全轉紅；F-03 拿掉修復 3/3 轉紅 |
-| 三鍵 FSM 終態 | QA `show --must-exist` | 他包回報：三鍵皆 RELEASE_READY；框架真狀態檔 `FSM-STATE-AISDLC_SDD.yaml` 未動（2026-07-16、2417 bytes） | RELEASE 轉態在 push＋雲端綠之後由主控做（`transition_rules.py:69` 唯一出邊） |
+| 三鍵 FSM 終態 | QA `show --must-exist` | 他包回報：三鍵皆 RELEASE_READY；框架真狀態檔 `FSM-STATE-AISDLC_SDD.yaml` 未動（2026-07-16、2417 bytes） | RELEASE 轉態在 push＋雲端綠之後由主控做（`transition_rules.py:69` 唯一出邊）；實際轉態結果見收尾 commit 訊息 |
+| 雲端 CI（push `43bb96ee`，六支 workflow） | `gh run list --branch main` ＋ 逐支 `gh run watch --exit-status` | root-infra-ci／aisdlc-sdd-ci／agentconsole-ci／windows-compat-ci／macos-compat-ci 首跑 success；**AutoClaude CI 首跑 failure**（run 39107194160：`1 failed, 5640 passed, 221 skipped`，唯一紅＝`tests/core/test_kernel_limit_retry_prd8_1.py::test_the_backoff_sleeps_in_slices_so_esc_f12_can_cut_it_short`）→ `gh run rerun --failed` 第 2 次 attempt success | 該測試與本輪 diff 無關（退避切片計時；R213 `8f41cc0c` 已記為 Linux runner 假紅型並改過斷言），本機序列 5/5 綠、`tests/core` 平行 472 passed；pre-push 另抓到 `skip_tag_policy.py` 兩行 E501（本輪重釘註解過長，`43bb96ee` 修） |
 
 ## §9 審查閉環・歸格・休眠重評
 
