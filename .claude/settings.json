@@ -134,7 +134,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Read|Bash|NotebookEdit",
+        "matcher": "Write|Edit|Read|Bash|PowerShell|NotebookEdit",
         "hooks": [
           {
             "type": "command",

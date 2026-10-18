@@ -130,6 +130,11 @@
 | W2 DF-C（headless Sonnet，hooks-ON） | `343d583a`、`e73749bf` | test_sdd_env 22 passed；scripts/tests 421 passed；ruff 綠；sdd_env 實跑印五鍵；dedup 鎖 OK | stdio 改走島內共用入口（主控補） | ONBOARDING §7 基線回填於收尾 |
 | W2 DF-A 第一輪（Bridge＋真 haiku） | — | 操作員回報 FAILED（TOKEN_HALT 偽陽性）；主控親跑半成品 `pytest tests -k AT_001_1_1` 1 passed | — | 重跑待 RC-1 修後 |
 | RC-1 修復（主控代 Dev；額度守衛擋下扇出） | `d9dc1ff0` | test_token_regex 39 passed；AutoClaude 全套 5881 passed；lint-imports 9 kept；check_loc_budget rc=0 | — | DF-A 重跑進行中 |
+| W2 DF-A 第二輪（Bridge＋真 haiku，只加 `--allowedTools` PowerShell） | `306dbb2a` | 操作員回報＝他包回報：run `4e6bd6c9` COMPLETED 9/9、peak 14.66%、RTM at 9/9 ac 6/6、越界核對恰白名單三檔；主控親跑 pytest test_webhook_sender 9 passed（見 322e1351 列） | 真實樹鐵律一讓 haiku 拒用 Bash ⇒ 委派批次 `--allowedTools` 須含 PowerShell（BRIDGE §8.6 已補） | Bridge StepTracker 被日誌遮罩漏配 5-1（P3，DEF-AC-038） |
+| W3 QA 一審（SCG-4 三路獨立審查＋C1～C7 真機驗收＋C7 阻塞態演練） | `c716ec17` | 幽靈路徑鎖 OK；crossref 未結 0 | DF-B PASS→RELEASE_READY；DF-A F-01／DF-C F-02（P2，測試鑑別力）PR_REVIEW FAIL 退回 IMPLEMENTATION | F-03／F-05（P3）、G-116-17 暴露證據（兩場 hooks-ON session 各 4 次 PowerShell 未入帳）、QA 建議 G-116-17 升 P2 |
+| DF-A／DF-C 修復棒（hooks-ON headless Sonnet，只動測試檔） | `322e1351` | test_webhook_sender `9 passed, 1 warning in 0.51s`；test_sdd_env `23 passed in 0.34s`；ruff 兩檔 `All checks passed!` | 修復棒未跑突變複測（任務書未要求） | 二審由 QA 以 `mutate_all.py dfa dfc` 判 12 存活者是否全殺 |
+| F-03／F-05 主控單人修復 | `1c802e92` | test_sdd_env `26 passed in 0.60s`；ruff 綠；dedup 鎖 OK；編碼鎖 OK；`--shell bash` 原始位元組 CR 5→0；test_webhook_sender `9 passed, 1 warning in 0.46s` | 不用 `reconfigure(newline)`：根層行內 stdio 複本棘輪只准縮不准長 ⇒ 改經 `sys.stdout.buffer` 寫位元組 | 併入 QA 二審 |
+| W4 收尾文件（API_Contract「原樣」例外、Backlog TD-1、ADR-XPLAT-016 附錄 D、§7.1 改號） | `90d911e4` | — | — | §8／§9 於收尾補 |
 
 ### 7.1 W1 持有面（互斥；§6 D-116 裁決的派工附表，W1 派工時用）
 
