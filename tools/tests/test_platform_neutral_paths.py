@@ -488,7 +488,7 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
       把它們納進來會讓本鎖一上線就紅，而那紅燈反映的是待決策，不是新退化。
     """
     return [
-        (_TESTS_DIR, False, 75),                     # 實測 79（排除 _zzz_ 後本機＝雲端）
+        (_TESTS_DIR, False, 89),                     # 實測 94（含新增 SI P0 檔；排除 _zzz_）
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78

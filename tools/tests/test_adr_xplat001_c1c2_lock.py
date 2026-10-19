@@ -616,7 +616,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8589,
+    "test_adr_xplat001_c1c2_lock.py": 8612,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -686,6 +686,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_schedule_capability_parity.py": 596,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
+    "test_selfimproving_check.py": 2196,
     "test_sentinel_tick_e2e_r145.py": 408,
     "test_session_brief.py": 1321,
     "test_single_venv_identity.py": 162,
@@ -2676,6 +2677,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
     ("R213", 116737, 116735, -2,  # round-label-ok
      "同標籤第二列（掌舵者「做完＝無積欠 BUG 與技術債」；PRD §16.2 ⏸ 列落地）：新鎖以史料搬遷抵銷"
      "至淨減（含本檔本列＋接鏈列＋本檔史料 −3）；逐檔清單＝CrossPlatform_R213_DebtZero_FourParty_Evidence.md〈三-5〉。"),
+    ("R213", 116735, 118954, +2219,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌補申報至軌上限 309（既申報 306，差額 3），餘額歸主軌，由 "
+     "_REPIN_APPROVED_ROUND_OVERAGE 的 R213 名冊列承接，見 _REGRESSION_LANE_LOG 同輪列] "
+     "同標籤第三列（SelfImproving P0 實作收尾；TCS Stage-2 凍結、QA 預審二審 PASS）："
+     "新鎖檔 test_selfimproving_check.py（P0 驗收測試全集）＋本檔自身漂移（本列、同輪列、"
+     "名冊列與名冊上限上修、接鏈列）。逐檔清單見 CrossPlatform_R145_Scan_Findings.md "
+     "尾端 R213 標記行。"),
 )
 
 
@@ -2759,13 +2767,23 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈系列收斂後四方重驗〉與 "
         "docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈附記（R171）〉。"
     )),
+    "R213": (2216, (  # round-label-ok：主控依預先核准範圍裁定的一次性例外，非帳本追蹤輪號
+        "主控依掌舵者預先核准的 P0 實作範圍（TCS Stage-2 已凍結，digest 6c4e28ed…，QA 預審"
+        "二審 PASS）裁定本輪走一次性例外：本筆熄滅的是款(10)[超出每輪上限]與款(11)"
+        "[只升不降]（R211／R212 主軌淨額已連續兩輪為正，本輪為第三輪）——主軌淨額全數為 "
+        "SelfImproving P0 驗收測試新鎖檔 test_selfimproving_check.py（TCS 的 AT 全集，回歸鎖"
+        "性質；同標籤回歸鎖軌已補申報至軌上限）加本檔自身重釘漂移，本輪未做等量淨減法"
+        "搬遷。net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻"
+        "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
+        "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
+    )),
 }
 #: 一次性例外必須真的只有一次——超過這個數字就不再是例外，是變相把整套 cap／streak
 #: 機制改成「寫張條子就能繞過」。名冊筆數只能靠**可見的門檻上修**成長（`test_the_registry_
 #: stays_a_one_time_exception` 的設計：每多一筆都先讓那個斷言失敗，逼下一個人改這個上限＝
 #: 一次可見決策，不得悄悄追加第二個 key）。本值由 1 上修為 2 的兩筆載體如下。
-#: 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§5。
-_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 4
+#: 史料搬至 CrossPlatform_R190_FixRound_Evidence.md〈九-F〉§5。4→5：加入 R213 的可見上修。
+_REPIN_APPROVED_ROUND_OVERAGE_MAX_ENTRIES = 5
 #: 核准理由的最短長度（同 `phase2_review_problems()` 款(4) 的「延期兩個字不是理由」）。
 _REPIN_APPROVED_ROUND_OVERAGE_MIN_REASON_LEN = 20
 
@@ -3175,6 +3193,9 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "sPlatform_R212_WakeChain_EnvLayer_Evidence.md〈二〉。"),
     ("R213", 306,  # round-label-ok
      "DEF-200-528 清倉回歸鎖（test_quota_burndown.py＋幽靈鍵鎖＋本檔）；R213 第二列 −2 併入⇒306。"),
+    ("R213", 3,  # round-label-ok
+     "同標籤第三列補申報至軌上限 309（既申報 306，差額 3）：SelfImproving P0 驗收測試新鎖檔 "
+     "test_selfimproving_check.py 屬回歸鎖，餘額歸主軌，見 CrossPlatform_R145_Scan_Findings.md。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3349,10 +3370,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 340
+_REPIN_LOG_FROZEN_PREFIX_LEN = 341
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "2b7836038cadf2d82e9d9221e03077303034de7203271469a0f0fc725578e50d")
+    "e62fdca93c265c71e3cc562ec6711d7b084a07b269fad87421e592a20b1611ba")
 
 
 def repin_log_history_digest(
@@ -3530,6 +3551,8 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R212", "73b11f302893", "cff55af4647d", "DEF-200-525"),  # round-label-ok
     ("R213", "cff55af4647d", "c72c9866f024", "DEF-200-528"),  # round-label-ok
     ("R213", "c72c9866f024", "2b7836038cad", "DEF-200-530"),  # round-label-ok
+    # SelfImproving P0 無專屬缺陷列（帳本不在本窗口射程）：DEF-200-208 取其一次性例外名冊義。
+    ("R213", "2b7836038cad", "e62fdca93c26", "DEF-200-208"),  # round-label-ok
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
