@@ -57,6 +57,7 @@ def run_open_args(trigger="a", coord="tools/a.py:1", by="main"):
 
 
 def attr_root_args(obs=None, root_cause="docs/stale-note", item="DOC=docs/06_quality/", by="SA"):
+    """`attr --type root` 的 CLI 引數（`tools/lib/selfimproving/writeverbs.py`）。"""
     return [
         "attr",
         "--type",
@@ -578,6 +579,8 @@ class TestRunsAndAttribution(SiTestCase):
 
 
 class TestEventLedger(SiTestCase):
+    """受測：`tools/lib/selfimproving/events.py`／`evwrite.py`（事件帳本列形狀與追加）。"""
+
     def test_AT_141_1_1_event_line_shape(self):
         repo = fx.p1_base()
         sizes: list[tuple[int, int]] = []
@@ -878,6 +881,8 @@ def fx_kinds():
 
 
 class TestCheckReplay(SiTestCase):
+    """受測：`tools/lib/selfimproving/evcheck.py`（check 的事件帳本重放判定碼）。"""
+
     def test_AT_108_4_1_transitions_replay(self):
         def base_with(*extra):
             repo = fx.p1_base()

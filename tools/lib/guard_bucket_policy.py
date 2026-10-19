@@ -366,8 +366,16 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 圍籬鎖（掃 tools/tests/*.py 的 `addCleanup(os.environ.pop` 判準，守測試衛生＝只能是 guard_self
     # 成員）。四方（Architect／QA／SD／SA）本輪皆已覆核且 Trim 棒同輪搬遷 189 行史料；值取自
     # `bucket_ratchet_problems()` 自己印出的普查實測（同一支 census 函式），零加減推算。
-    "prose": 4311,
-    "guard_self": 3176,
+    # 🔴 SelfImproving P1 實作收尾單人窗口（護欄層記帳＝同標籤 R213 第五列）：prose 4311→4350
+    # （+39）、guard_self 3176→3149（−27）——prose 的成長全在 test_selfimproving_research_scan.py
+    # 的 TestResearcherAndTemplateArticles（守 Operations SOP 研究者節與體檢任務書範本的字面，
+    # 受測對象就是散文、無法移出）+75，其餘 −36 為既有鎖檔同批微調；P1 其他測試類別與夾具的
+    # chunk 原落 prose 共 1546 行，於 class／def docstring 指名受測模組 tools/lib/selfimproving/
+    # 之後歸 mixed（正確分類，非繞過；同上「系列收斂後四方重驗」列判例）。guard_self 依本表
+    # 「合法縮小後必須同步下修」紀律釘到實測值。兩值皆取自當回合
+    # `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
+    "prose": 4350,
+    "guard_self": 3149,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

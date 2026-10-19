@@ -1,7 +1,8 @@
 """SelfImproving P1 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；AT-143 系列）。
 
 登記表 `CAPABILITY` 住本檔（24 個鍵：19 `ro`、3 `rw`、2 `net`）；判準函式 `capability_problems`
-取參數（套件目錄、登記表、入口檔），故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
+取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
+故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
 """
 

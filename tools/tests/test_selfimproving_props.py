@@ -713,6 +713,8 @@ class TestProposalLifecycle(PropCase):
 
 
 class TestBodyAndDelta(PropCase):
+    """受測：`tools/lib/selfimproving/props.py`（提案本文形狀與差分）。"""
+
     def test_AT_109_1_1_body_shapes_accepted(self):
         def custom(label):
             fields = body_md("P", retire_when="r", reopen_symptom="s", verify_plan="v")
@@ -1097,6 +1099,7 @@ class TestBodyAndDelta(PropCase):
 
 
 def attr_args(obs, cause):
+    """`attr` 的 CLI 引數（`tools/lib/selfimproving/writeverbs.py`）。"""
     return [
         "attr",
         "--type",
@@ -1312,6 +1315,8 @@ class TestCard(PropCase):
 
 
 class TestDigestAndFiles(PropCase):
+    """受測：`tools/lib/selfimproving/propfiles.py`／`props.py`（提案檔與 digest）。"""
+
     def test_AT_144_1_1_files_and_digest(self):
         outs = []
         for crlf in (True, False):

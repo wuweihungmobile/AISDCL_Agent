@@ -213,6 +213,8 @@ class StatusCase(SiTestCase):
 
 
 class TestStatus(StatusCase):
+    """受測：`tools/lib/selfimproving/status.py`（status 摘要）。"""
+
     def test_AT_103_1_1_status_summary(self):
         repo = self.status_repo()
         snap0 = fx.snap(repo)

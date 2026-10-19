@@ -315,6 +315,7 @@ NON_EVOLVABLE = [
 
 
 def params_dict() -> dict:
+    """`tools/lib/selfimproving/params.py` 讀的參數表（P0 鍵＋P1 五鍵）。"""
     return {
         "row_max_bytes": 700,
         "w_n": 20,
@@ -419,6 +420,7 @@ def defect_log(extra=()) -> str:
 
 
 def _common_p0(repo: Path, prm: dict) -> None:
+    """鋪 `tools/lib/selfimproving/check.py` 需要的 P0 最小樹（參數／指標／PRD／CLAUDE.md）。"""
     put(repo, PARAMS, dump_params(prm))
     put(repo, "docs/06_quality/SelfImproving_Protocol/metrics.md", "metrics\n")
     put(repo, "docs/01_requirements/SelfImproving_PRD.md", MINI_PRD)
@@ -625,6 +627,7 @@ def skip_ev(n: int, **kw) -> dict:
 
 
 def prop_ev(n: int, run: int = 1, **kw) -> dict:
+    """`prop` 事件（`tools/lib/selfimproving/events.py` 的事件列形狀）。"""
     d = {
         "id": pid(n),
         "run": rid(run),
@@ -641,6 +644,7 @@ def dec_ev(n: int, dkind: str, **kw) -> dict:
 
 
 def sc_close() -> list[dict]:
+    """事件情境：run 2 關閉前一核一拒——`tools/lib/selfimproving/fold.py` 的重放輸入。"""
     return [
         run_open_ev(1),
         run_open_ev(2),
@@ -653,6 +657,7 @@ def sc_close() -> list[dict]:
 
 
 def sc_seq() -> tuple[list[dict], list[int]]:
+    """事件情境：run 7 的 attr→prop 鏈——`tools/lib/selfimproving/fold.py` 的重放輸入。"""
     return (
         [
             run_open_ev(7),
@@ -673,6 +678,7 @@ def sc_seq() -> tuple[list[dict], list[int]]:
 
 
 def _chain(n: int, steps: list, **kw) -> list[dict]:
+    """單一提案的事件鏈（prop→決定…）——`tools/lib/selfimproving/fold.py` 的重放輸入。"""
     out = [prop_ev(n, 1, target=[f"docs/notes/n{n}.md"], **kw)]
     for s in steps:
         out.append(s if isinstance(s, dict) else dec_ev(n, s))
@@ -688,6 +694,7 @@ def _verify(n: int, verdict: str) -> list:
 
 
 def sc_legal() -> list[dict]:
+    """事件情境：合法轉移全集——`tools/lib/selfimproving/fold.py`／`evcheck.py` 的重放輸入。"""
     e = [run_open_ev(1), skip_ev(1)]
     full = [
         *_verify(124, "PASS"),
@@ -744,6 +751,7 @@ def sc_legal() -> list[dict]:
 
 
 def sc_rev() -> list[dict]:
+    """事件情境：rev 修訂鏈（return→rev 2／3）——`tools/lib/selfimproving/fold.py` 的重放輸入。"""
     e = [run_open_ev(1), skip_ev(1)]
     e += _chain(124, [])
     e += _chain(125, ["approve"])

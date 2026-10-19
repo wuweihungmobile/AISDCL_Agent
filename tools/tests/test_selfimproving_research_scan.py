@@ -873,6 +873,8 @@ class TestResearcherRows(ResearchCase):
 
 
 class TestBudgetsAndFingerprint(ResearchCase):
+    """受測：`tools/lib/selfimproving/fetch.py`／`research.py`（抓取預算與來源表指紋）。"""
+
     def test_AT_130_5_1_budget_boundaries_pass(self):
         body = b"x" * 500
         srv = self.serving(
