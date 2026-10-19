@@ -29,7 +29,7 @@ ROOT = TOOLS.parent
 sys.path.insert(0, str(TOOLS))
 
 import selfimproving  # noqa: E402
-from lib import si_params  # noqa: E402
+from lib.selfimproving import params as si_params  # noqa: E402
 
 _STRIP = (
     "GIT_DIR",
@@ -262,7 +262,7 @@ def base_rows(c1: str | None = None) -> list[list[str]]:
             "tooling",
             "P4",
             "open",
-            "`python tools/selfimproving.py check` tools/lib/si_check.py:3",
+            "`python tools/selfimproving.py check` tools/lib/selfimproving/check.py:3",
             "面=守衛;暴露=無;外部衍生=是;來源=工具;回報者=si-check",
         ),
     ]
@@ -335,7 +335,7 @@ def dump_params(prm: dict) -> str:
 
 
 def common_files(repo: Path, prm: dict) -> None:
-    """寫入 tools/lib/si_check.py 檢查所需的共用合成檔（params、metrics、PRD、各帳本）。"""
+    """寫入 tools/lib/selfimproving/ 的 check 所需共用合成檔（params、metrics、PRD、各帳本）。"""
     put(repo, PARAMS, dump_params(prm))
     put(repo, "docs/06_quality/SelfImproving_Protocol/metrics.md", "metrics\n")
     put(repo, "docs/01_requirements/SelfImproving_PRD.md", MINI_PRD)
@@ -361,7 +361,7 @@ def init_repo(repo: Path) -> None:
 
 
 def make_valid_repo(dest: Path, rows: int = 10, mutate=None, late_ledger: bool = False) -> Path:
-    """建立 tools/lib/si_check.py 的合法基準 repo：合成帳本與參數，C1、C2 兩個 commit。"""
+    """建立 tools/lib/selfimproving/ 的 check 合法基準 repo：合成帳本與參數，C1、C2 兩個 commit。"""
     ctx = SimpleNamespace(rows=base_rows(), params=params_dict())
     if mutate:
         mutate(ctx)
@@ -697,6 +697,11 @@ def drop_lines(text: str, *needles: str) -> str:
 
 def sop_text() -> str:
     return REAL_SOP.read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
+def si_sources() -> list[Path]:
+    """靜態掃描的受測原始碼：入口 tools/selfimproving.py＋套件 tools/lib/selfimproving/*.py。"""
+    return [TOOLS / "selfimproving.py", *sorted((TOOLS / "lib" / "selfimproving").glob("*.py"))]
 
 
 class TestLedgerRowRules(SiCase):
@@ -1237,7 +1242,7 @@ class TestMigration(SiCase):
 
 
 class TestMarksAndProvenance(SiCase):
-    """AT-002：標記語法與出處判準（tools/lib/si_rows.py 的 row.markers、row.provenance）。"""
+    """AT-002：標記與出處判準（tools/lib/selfimproving/rows.py 的 row.markers、row.provenance）。"""
 
     def test_AT_002_1_1_marks(self):
         edits = {
@@ -1350,8 +1355,7 @@ class TestScopeAndSop(SiCase):
         for s, p in zip(samples, forbidden):
             self.assertEqual(hits(s)[:1], [p], s)
         self.assertEqual(hits("print('clean')"), [])
-        sources = [TOOLS / "selfimproving.py", *sorted((TOOLS / "lib").glob("si_*.py"))]
-        for src in sources:
+        for src in si_sources():
             self.assertEqual(hits(src.read_bytes().decode("utf-8")), [], src.name)
         for verb in ("status", "prop-new"):
             rc, out, _ = self.run_main([verb])
@@ -1428,7 +1432,7 @@ class TestScopeAndSop(SiCase):
             "docs/06_quality/SelfImproving_Protocol/**",
             "docs/01_requirements/SelfImproving_PRD.md",
             "tools/selfimproving.py",
-            "tools/lib/si_*.py",
+            "tools/lib/selfimproving/**",
         ):
             self.assertIn(g, globs)
 
@@ -1458,7 +1462,7 @@ class TestScopeAndSop(SiCase):
 
 
 class TestReferences(SiCase):
-    """AT-004-1：引用解析判準（tools/lib/si_refs.py 的 ref.def、ref.obs、ref.carrier_families）。"""
+    """AT-004-1：引用判準（tools/lib/selfimproving/refs.py 的 ref.* 各項）。"""
 
     def test_AT_004_1_1_existing_references(self):
         repo = baseline()
@@ -1558,7 +1562,7 @@ class TestReferences(SiCase):
 
 
 class TestHistory(SiCase):
-    """AT-004-3：歷史判準（tools/lib/si_history.py 的 history.migration、history.row_mutated）。"""
+    """AT-004-3：歷史判準（tools/lib/selfimproving/history.py 的 history.* 各項）。"""
 
     def test_AT_004_3_1_legal_evolution(self):
         c = chain()
@@ -1680,7 +1684,7 @@ class TestHistory(SiCase):
 
 
 def fingerprint_of(repo: Path, prm: dict) -> tuple[str, dict]:
-    """獨立重算 tools/lib/si_params.py 的 fingerprint（協定目錄清單雜湊），作為測試預言。"""
+    """獨立重算 tools/lib/selfimproving/params.py 的 fingerprint（協定目錄雜湊），作為測試預言。"""
     pdir = repo / "docs/06_quality/SelfImproving_Protocol"
     man = sorted(
         (
@@ -1701,7 +1705,7 @@ def fingerprint_of(repo: Path, prm: dict) -> tuple[str, dict]:
 
 
 class TestCli(SiCase):
-    """AT-030：命令列契約（tools/selfimproving.py 經 tools/lib/si_check.py 輸出判定）。"""
+    """AT-030：命令列契約（tools/selfimproving.py 經 tools/lib/selfimproving/check.py 輸出）。"""
 
     def _red(self) -> Path:
         repo = baseline()
@@ -1951,7 +1955,7 @@ class TestCli(SiCase):
         shell_re = re.compile(r"os\.(?:system|popen)\b")
         self.assertTrue(shell_re.search("os.system('x')") and shell_re.search("os.popen(c)"))
         self.assertIsNone(shell_re.search("print('x')"))
-        for src in [TOOLS / "selfimproving.py", *sorted((TOOLS / "lib").glob("si_*.py"))]:
+        for src in si_sources():
             text = src.read_bytes().decode("utf-8")
             self.assertIsNone(write_re.search(text), src.name)
             self.assertIsNone(shell_re.search(text), src.name)
@@ -1960,13 +1964,9 @@ class TestCli(SiCase):
                 if isinstance(node, ast.Import):
                     mods = [a.name.split(".")[0] for a in node.names]
                 elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-                    mods = [node.module.split(".")[0]]
+                    mods = [node.module.split(".")[0]]  # 相對 import（level>0）是套件內部，不在此列
                 for mod in mods:
-                    ok = (
-                        mod in sys.stdlib_module_names
-                        or mod in ("_stdio_utf8", "lib")
-                        or mod.startswith("si_")
-                    )
+                    ok = mod in sys.stdlib_module_names or mod in ("_stdio_utf8", "lib")
                     self.assertTrue(ok, f"{src.name} imports {mod}")
                     self.assertNotIn(mod, banned)
 
@@ -2061,7 +2061,7 @@ class TestCli(SiCase):
 
 
 class TestParams(SiCase):
-    """AT-031：協定參數判準（tools/lib/si_params.py 的 params.keys／globs／coupling）。"""
+    """AT-031：協定參數判準（tools/lib/selfimproving/params.py 的 params.* 各項）。"""
 
     def test_AT_031_1_1_real_params(self):
         raw = REAL_PARAMS.read_bytes()

@@ -10,10 +10,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from lib import si_history, si_params, si_refs
-from lib.si_git import Git
-from lib.si_ledger import Finding, max_valid_id, parse_ledger, structure_findings
-from lib.si_rows import evaluate_rows
+from . import history as si_history
+from . import params as si_params
+from . import refs as si_refs
+from .git import Git
+from .ledger import Finding, max_valid_id, parse_ledger, structure_findings
+from .rows import evaluate_rows
 
 ITEM_IDS = (
     "ledger.structure", "ledger.time_tz", "row.required", "row.enums", "row.markers",

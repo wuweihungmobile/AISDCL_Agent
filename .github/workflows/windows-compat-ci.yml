@@ -230,7 +230,7 @@ on:
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
-      - "tools/lib/si_*.py"  # SelfImproving P0：`check` 判準庫（si_check／si_ledger／si_rows／si_refs／si_history／si_params／si_git），tools/tests/test_selfimproving_check.py 經 selfimproving.py 消費
+      - "tools/lib/selfimproving/**"  # SelfImproving P0：`check` 判準庫套件（ledger／rows／git／refs／history／params／check），tools/tests/test_selfimproving_check.py 經 selfimproving.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/selfimproving.py"  # SelfImproving P0：CLI 薄殼，tools/tests/test_selfimproving_check.py 直接 import
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
@@ -702,7 +702,7 @@ on:
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
-      - "tools/lib/si_*.py"  # SelfImproving P0：`check` 判準庫（si_check／si_ledger／si_rows／si_refs／si_history／si_params／si_git），tools/tests/test_selfimproving_check.py 經 selfimproving.py 消費
+      - "tools/lib/selfimproving/**"  # SelfImproving P0：`check` 判準庫套件（ledger／rows／git／refs／history／params／check），tools/tests/test_selfimproving_check.py 經 selfimproving.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/selfimproving.py"  # SelfImproving P0：CLI 薄殼，tools/tests/test_selfimproving_check.py 直接 import
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；

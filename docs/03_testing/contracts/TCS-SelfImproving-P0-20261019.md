@@ -45,7 +45,7 @@
 | D1 | 觀察帳本定稿與一次性遷移 | `docs/06_quality/SelfImproving_Observation_Ledger.md`（改）；`docs/05_development/SelfImproving_Observation_Ledger_notes.md`（新，附註檔；被 NFR-SI-02-1 (iv) 既有的實體 glob `docs/05_development/SelfImproving_*.md` 涵蓋，不必改 PRD） | 主控（帳本單一窗口，PRD C1） | 實跑檢核 V1～V3，與 V2 的 `check` |
 | D2 | 遷移豁免 | `docs/06_quality/SelfImproving_Protocol/params.json`（改一個鍵）；帳本（追加一列） | 主控 | 實跑檢核 V4、V5；§2 的遷移鏈 AT |
 | D3 | 協定目錄 | `docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`（新） | Developer | §2 的 AC-031 系列 AT；實跑檢核 V6 |
-| D4 | 檢查器 | `tools/selfimproving.py`、`tools/lib/si_*.py`（新） | Developer | §2 的 AC-001、002、004、030、031 系列 AT |
+| D4 | 檢查器 | `tools/selfimproving.py`（入口薄殼）、`tools/lib/selfimproving/*.py`（套件；2026-10-19 自 `tools/lib/si_*.py` 搬入，見末尾〈搬遷勘誤〉）（新） | Developer | §2 的 AC-001、002、004、030、031 系列 AT |
 | D5 | SOP 骨架 | `docs/05_development/SelfImproving_Operations_SOP.md`（新） | Developer（文件作者） | §2 的 AC-032 與流程型 AT；實跑檢核 V8 |
 | D6 | 測試 | `tools/tests/test_selfimproving_check.py`（新） | Developer | 本檔全部 AT |
 
@@ -156,7 +156,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 - **R24 協定目錄**：`params.json` 為 UTF-8（無 BOM）、換行 LF、結尾有換行、頂層鍵依位元組序遞增（先例 `docs/06_quality/FiveQuestion_Audit_Protocol/params.json` 的扁平排序形態）。`metrics.md`：(a) PRD §1.3 表格中五個指標列（以 `^\| \*\*(?:結果指標|資訊欄)\*\*[^|]* \| \*\*M([1-5]) ` 辨識，M1～M5 各恰一列；SA 預演現查：真 PRD 取得 5 列，判定細則區段有 9 個非空行）逐字出現在 `metrics.md`（CRLF 換成 LF 後以整行比對），且順序為 M1 至 M5；(b) 該表之後自標題行 `**M1 判定細則**` 起、至下一個以 `#### ` 起頭的標題行之前，所有非空行也逐字出現在 `metrics.md`。PRD 凍結，此兩段即指標定義的來源；PRD 經 T1 修訂時 `metrics.md` 須同步，不同步即由 AC-031-2 的 AT 轉紅。
 - **R25 SOP 骨架**（`docs/05_development/SelfImproving_Operations_SOP.md`；測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V8 對照 PRD 檢核）：(1) **角色節**：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節（自其標題至下一個 `## ` 之前）須含 `HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`；其餘四個角色節須存在，P0 可只有標題與一行「P1 定稿」。(2) **啟動條件節**（`## ` 級標題含「啟動條件」，節內以下一個 `## ` 為界）：含 `(a)` 至 `(e)` 五個標籤；標籤 `(a)` 之後到標籤 `(b)` 之前的文字含 `掌舵者指令`，`(b)` 段含 `第二次`，`(c)` 段含 `P≤2`，`(d)` 段含 `再開症狀`，`(e)` 之後的同一行含 `容量事件`；含一行同時有 `日曆`、`版本號`、`覆蓋度`、`每 N 輪`（否定句）；含 `si status`，且同節含 `視窗開場` 與 `收尾`。(3) **無事件條文**：含一行同時有 `無事件` 與 `通過`。(4) **再開條文**：含一行同時有 `產出數量` 與 `T1`。(5) **真缺陷升 DEF**：含一行同時有 `DEF-<id>` 與 `真缺陷`。(6) **外部衍生**：擷取者節含一行同時有 `外部衍生=是` 與 `不得單獨`。(7) **loop-self**：含一行同時有 `loop-self`、`轉交`、`T1`。(8) **流程摩擦入口**：擷取者節含一行同時有 `流程摩擦` 與 `OBS-SI-004`。(9) **M 之後只追加（處置欄 `open`→終值一次除外）**：擷取者節含一行同時有 `追加`、`rel=corrects:`、`ROW-MUTATED`、`open`、`終值`（M 之後帳本的更新——累計次數、狀態、更正——除處置欄 `open`→終值一次〔PRD:211、AC-SI-04-3〕外一律追加列，其餘原地改寫即 `ROW-MUTATED`；M 之前的原地改寫依 AC-SI-01-3 豁免，不在此限）。
-- **R26 範圍守衛（P0 不新增常駐行程、排程或 hook）**：`tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/si_*.py`，原始碼不得出現下列字樣（正規式，區分大小寫）：`schtasks`、`launchctl`、`crontab`、`ScheduleWakeup`、`CronCreate`、`Register-ScheduledTask`、`apscheduler`、`threading\.Timer`、`sched\.scheduler`、`time\.sleep`、`while\s+True`、`daemon\s*=\s*True`、`os\.fork`、`signal\.alarm`；根 `.claude/settings.json` 全文不得含 `selfimproving`（不分大小寫）；`main` 對 `status`、`prop-new` 等非 `check` 的動詞一律 rc 3。（P1 起新增動詞與事件帳本寫入，範圍守衛與 R8(a) 的靜態掃描由 P1 的 TCS 重定。）
+- **R26 範圍守衛（P0 不新增常駐行程、排程或 hook）**：`tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/selfimproving/*.py`（含 `__init__.py`），原始碼不得出現下列字樣（正規式，區分大小寫）：`schtasks`、`launchctl`、`crontab`、`ScheduleWakeup`、`CronCreate`、`Register-ScheduledTask`、`apscheduler`、`threading\.Timer`、`sched\.scheduler`、`time\.sleep`、`while\s+True`、`daemon\s*=\s*True`、`os\.fork`、`signal\.alarm`；根 `.claude/settings.json` 全文不得含 `selfimproving`（不分大小寫）；`main` 對 `status`、`prop-new` 等非 `check` 的動詞一律 rc 3。（P1 起新增動詞與事件帳本寫入，範圍守衛與 R8(a) 的靜態掃描由 P1 的 TCS 重定。）
 
 **〈判定碼表〉**（項序即輸出序；「狀態」欄＝該碼命中時該項的狀態；NE 的 nonblocking 只有一個）
 
@@ -241,7 +241,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | NFR-P0-2 | 效能：真帳本、真 repo 上單次 `check` 牆鐘小於 30 秒（`git grep` 占大宗）；合成 repo 上單次小於 5 秒；整個測試檔在 CI 上小於 180 秒 | SCG-4 實跑量測（3 次取最大值）；不列 AT |
 | NFR-P0-3 | 跨平台（根 `CLAUDE.md` 鐵律三）：路徑一律 `Path` 或 `os.path`，git 的路徑一律 POSIX 斜線；不用單平台 API、不用 `sys.platform` 分支；主控台編碼走 `_stdio_utf8`；換行 LF；測試字面值不含磁碟機代號開頭的路徑 | 根層 `tools/tests/test_platform_neutral_paths.py` 相關鎖；SCG-4 審查；macOS 未實跑項在報告標「未驗」（NFR-SI-06-5） |
 | NFR-P0-4 | 根層護欄相容：測試與工具不新增 skip、skipTest、skipIf、xfail（git 缺席視為環境壞、直接失敗；根層 skip 登記義務見 `tools/lib/skip_tag_policy.py`）；所有 `open`、`read_text`、`write_text` 帶 `encoding="utf-8"`（根層鎖 `TestTextIoDeclaresEncoding`）；測試以 `unittest.TestCase` 撰寫並可被 `python -m pytest` 與根層 `python -m unittest discover -s tools/tests` 兩種方式收集；不得另寫 stdout 重設站點（R1） | 根層 unittest 閘門；SCG-4 |
-| NFR-P0-5 | LOC 分級：`tools/selfimproving.py` 與 `tools/lib/si_*.py` 落在根層護欄層分級內，分級與紅線唯一真相源＝`AutoClaude/tools/check_loc_budget.py`（`python AutoClaude/tools/check_loc_budget.py --json` rc 0；數字現查、本檔不複寫）；單檔逼近分級就拆 `si_*.py` 模組 | SCG-4 實跑 |
+| NFR-P0-5 | LOC 分級：`tools/selfimproving.py` 與 `tools/lib/selfimproving/*.py` 落在根層護欄層分級內，分級與紅線唯一真相源＝`AutoClaude/tools/check_loc_budget.py`（`python AutoClaude/tools/check_loc_budget.py --json` rc 0；數字現查、本檔不複寫）；單檔逼近分級就在套件內依職責拆新模組 | SCG-4 實跑 |
 | NFR-P0-6 | 靜態檢查：`ruff check` 對新增的每個 `.py` 0 錯（規則集以 repo 根的 ruff 設定現查） | SCG-4 實跑 |
 | NFR-P0-7 | 測試 hermetic：全部 AT 只用 tmp 目錄內的合成 repo 與合成帳本，唯讀存取真 repo 的 `params.json`、`metrics.md`、SOP、PRD、根 `CLAUDE.md`、`tools/` 原始碼與 `.claude/settings.json`；不寫真帳本、不連網、git 子行程環境依 §5.5 淨化；不得在測試原始碼或本檔寫出不存在於真帳本與真缺陷帳本的字面 `OBS-SI-` 或 `DEF-` 編號（合成編號於執行期組出，先例 `tools/tests/test_defect_id_reference_integrity.py` 的 `_syn()`） | 實跑檢核 V2（真帳本 `ref.obs`）與既有鎖 `test_defect_id_reference_integrity.py` |
 | NFR-P0-8 | 範圍守衛：T 提交只新增或修改 §5.6 允許集合內的檔案；不改 `.claude/**`（含 `settings*.json`）、不改任何凍結檔（PRD、研究方法 SOP）、不動根層鎖檔；重釘根層棘輪的儀式（檔案數下限、LOC、E501 等；現查 `tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `repin_growth_problems()`、`tools/lib/skip_tag_policy.py` 的 `_TREE_FILE_FLOORS` 與 `tree_floor_problems()`，以及根層全套 unittest 現跑所指出的其餘棘輪）由主控收尾，實作者不碰鎖檔 | 實跑檢核 V7（`git diff --name-only`） |
@@ -252,27 +252,27 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 | 清單項（閘門／項目） | 追溯 ID | 已凍結上位文件（路徑） | 凍結摘要 |
 |---------------------|---------|----------------------|---------|
-| SCG-0／PRD 版本已鎖定（Status: Approved） | PRD 全文（§8.1 P0、§9.6 P0）；Stage-1 凍結＝掌舵者預先核准、主控代為執行 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-0／FRD 覆蓋所有 PRD 功能項目（F-XXX 追溯） | F-001（本檔 FRD-lite）；FR-SI-01～04、29 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-0／NFR 已量化定義 | NFR-P0-1～8（本檔）；最近依據 PRD NFR-SI-02-1、NFR-SI-06、NFR-SI-08、NFR-SI-09 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-0／User Story 已完成 INVEST 檢查 | US-001～US-005（本檔 INVEST 自檢） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-0／利害關係人已確認簽核 | PRD 附錄 C.2（掌舵者授權代決與預先核准凍結；引言座標已於重凍訂正為 line 2476／2525／2581，見實跑檢核 V5） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-0／PRD 版本已鎖定（Status: Approved） | PRD 全文（§8.1 P0、§9.6 P0）；Stage-1 凍結＝掌舵者預先核准、主控代為執行 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-0／FRD 覆蓋所有 PRD 功能項目（F-XXX 追溯） | F-001（本檔 FRD-lite）；FR-SI-01～04、29 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-0／NFR 已量化定義 | NFR-P0-1～8（本檔）；最近依據 PRD NFR-SI-02-1、NFR-SI-06、NFR-SI-08、NFR-SI-09 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-0／User Story 已完成 INVEST 檢查 | US-001～US-005（本檔 INVEST 自檢） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-0／利害關係人已確認簽核 | PRD 附錄 C.2（掌舵者授權代決與預先核准凍結；引言座標已於重凍訂正為 line 2476／2525／2581，見實跑檢核 V5） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-0／RTM 初版已建立 | 本增量自帶：本檔 §1 與 §6（AC 到 AT 映射） | （本檔；隨 Stage-2 凍結，非上位文件） | n/a（自引） |
-| SCG-1／SRD 完成並通過 Review（Status: Approved） | 不適用（功能級增量；設計載於 PRD §9）；最近依據 PRD §9.0～§9.6 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-1／API Spec 草稿完成（所有端點清單） | 不適用（無 HTTP 端點）；命令列介面即契約：本檔 R1～R8 與 PRD §9.3 `check` 列 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-1／資料模型設計完成 | PRD §5.1.1（九欄）、§9.2（OBS 載體與檔頭 tz）；本檔 R9～R21 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-1／NFR 設計對應完成（架構選型對應 NFR 指標） | NFR-P0-1～8 對應 R8（純度）、R1（編碼）；PRD NFR-SI-09-1（量不到＝NE） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-1／整合架構說明完整（第三方服務已識別） | 無第三方服務；僅依賴 git 與既有 `tools/_stdio_utf8.py`、`tools/probe/fivequestion_ledger.py` 的 manifest 算法（先例，不 import） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-2／C4 Context 圖完成（系統邊界清晰） | PRD §9.1 載體對映表（C1、C4、C5、C6、C14）；P0 不新增系統邊界 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI 與 `lib/si_*.py`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-2／所有架構決策有對應 ADR（Status: Accepted） | PRD §9.5：ADR-SI-01（觀察儲存位置）、ADR-SI-05（基線窗）；本增量無新架構決策，ADR 不新開 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-2／Trust Boundary Map 完成（Security 情境） | 不適用（scenario 為 brownfield，非 security）；`check` 無網路、只讀、子行程限 git；不可進化面見 PRD NFR-SI-02-1 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-2／Before／After 架構對比（Brownfield 情境） | 本檔 FRD-lite〈現況與變更〉（八欄暫定版到九欄定稿加檢查器） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-1／SRD 完成並通過 Review（Status: Approved） | 不適用（功能級增量；設計載於 PRD §9）；最近依據 PRD §9.0～§9.6 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-1／API Spec 草稿完成（所有端點清單） | 不適用（無 HTTP 端點）；命令列介面即契約：本檔 R1～R8 與 PRD §9.3 `check` 列 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-1／資料模型設計完成 | PRD §5.1.1（九欄）、§9.2（OBS 載體與檔頭 tz）；本檔 R9～R21 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-1／NFR 設計對應完成（架構選型對應 NFR 指標） | NFR-P0-1～8 對應 R8（純度）、R1（編碼）；PRD NFR-SI-09-1（量不到＝NE） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-1／整合架構說明完整（第三方服務已識別） | 無第三方服務；僅依賴 git 與既有 `tools/_stdio_utf8.py`、`tools/probe/fivequestion_ledger.py` 的 manifest 算法（先例，不 import） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／C4 Context 圖完成（系統邊界清晰） | PRD §9.1 載體對映表（C1、C4、C5、C6、C14）；P0 不新增系統邊界 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI 與 `lib/si_*.py`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／所有架構決策有對應 ADR（Status: Accepted） | PRD §9.5：ADR-SI-01（觀察儲存位置）、ADR-SI-05（基線窗）；本增量無新架構決策，ADR 不新開 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／Trust Boundary Map 完成（Security 情境） | 不適用（scenario 為 brownfield，非 security）；`check` 無網路、只讀、子行程限 git；不可進化面見 PRD NFR-SI-02-1 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／Before／After 架構對比（Brownfield 情境） | 本檔 FRD-lite〈現況與變更〉（八欄暫定版到九欄定稿加檢查器） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-3／OpenAPI 3.1 規格完整（所有端點含完整 Schema） | 不適用（無 HTTP API）；介面為命令列 | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
-| SCG-3／Request／Response Schema 定義完整 | 輸出形態文字與 JSON（本檔 R3、R4）；`params.json` 登記表（R21） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
-| SCG-3／錯誤碼定義（400／401／403／404／500） | rc 表 0、1、2、3（R1）與判定碼表 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-3／Request／Response Schema 定義完整 | 輸出形態文字與 JSON（本檔 R3、R4）；`params.json` 登記表（R21） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-3／錯誤碼定義（400／401／403／404／500） | rc 表 0、1、2、3（R1）與判定碼表 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-3／Consumer Contract 完成（整合情境） | 消費者＝主控與 QA（讀 `check`）；P3 的量測腳本讀 `params.json` 與 `metrics.md`（PRD §9.3 量測腳本列）；SOP 是各角色任務書的上位（研究方法 SOP，本增量不改它） | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
-| SCG-3／API ID 與 RTM 已對應 | 無 API ID；AT 到 RTM 見本檔 §1 與 §6 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-3／API ID 與 RTM 已對應 | 無 API ID；AT 到 RTM 見本檔 §1 與 §6 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-3／Contract 已 Review 通過 | 由未參與規格與實作的 QA 於 SCG-4 獨立審查 | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
 
 > 凍結摘要＝該文件在 `frozen_stages[*].spec_doc_digests` 的值。PRD 的值是**重凍後**的新 digest（PRD 因附錄 C.2 的逐字稿座標訂正〔line 2493／2536 改為 2476／2525／2581〕走 SPEC_DRAFTING→SCG_VALIDATION→HUMAN_PENDING 重凍，主控於 HEAD 7b9c6ba6 交付，SA 以 `Get-FileHash -Algorithm SHA256` 對工作樹現況重算一致）；SOP 的值不變，取自功能鍵 `monorepo-selfimproving` 的 Stage-1 `spec-frozen` 逐字輸出（`docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md` §7），同樣重算一致。**功能鍵 `monorepo-si-p0-ledger` 的 Stage-1 必須採納重凍後的 PRD 與同一份 SOP**（否則「引用不得指向未凍結文件」不成立）；凍結後的實際 digest 以該鍵 `show` 的輸出為準，與本表不符時以 `show` 為準並更正本表。
@@ -681,7 +681,7 @@ Scenario: 來源或回報者缺漏、值空、來源值域外各被標出，五�
 Feature: 迴圈只由事件啟動，P0 無常駐機制
 
 Scenario: 原始碼無常駐或排程字樣、動詞只有 check、未註冊 hook、SOP 載明五類啟動事件
-  Given 真 repo 的 `tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/si_*.py`、根 `.claude/settings.json`、`docs/05_development/SelfImproving_Operations_SOP.md`
+  Given 真 repo 的 `tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/selfimproving/*.py`、根 `.claude/settings.json`、`docs/05_development/SelfImproving_Operations_SOP.md`
   When 以 R26 的禁用字樣正規式逐檔掃描上述原始碼；呼叫 `main(["status"])` 與 `main(["prop-new"])`；讀 `.claude/settings.json` 全文；以 R25 (2) 的判準檢查 SOP
   And 自證：把 R26 的每個禁用字樣各造一個合成字串送進掃描函式，再送一個乾淨字串；對 SOP 文字逐一刪去 R25 (2) 的各片段（`(a)`～`(e)` 標籤之一、否定句那一行、含 `si status` 的行、`視窗開場`、`收尾`）造出副本，各送進 SOP 判準
   Then 原始碼掃描零命中；以動詞 `status` 與動詞 `prop-new` 呼叫 `main` 的 rc 都是 `3`、stdout 為空；`.claude/settings.json` 全文不含 `selfimproving`（不分大小寫）
@@ -933,7 +933,7 @@ Scenario: SOP 載明 loop-self 轉交規則，且迴圈自身檔案列在不可�
   Given 真 SOP 與真 `docs/06_quality/SelfImproving_Protocol/params.json`
   When 以 R25 (7) 判準檢查 SOP；對刪去該行的副本再檢；讀 `params.json` 的 `non_evolvable_globs`
   Then SOP 判準對真 SOP 為合格（含同時有 `loop-self`、`轉交`、`T1` 的一行）、對刪去副本為不合格
-  And `non_evolvable_globs` 含 `docs/06_quality/SelfImproving_Protocol/**`、`docs/01_requirements/SelfImproving_PRD.md`、`tools/selfimproving.py`、`tools/lib/si_*.py` 四項（預算、閘門、停機條件、指標定義與迴圈腳本都在不可進化面內，PRD NFR-SI-02-1 的 iii、iv 兩類）
+  And `non_evolvable_globs` 含 `docs/06_quality/SelfImproving_Protocol/**`、`docs/01_requirements/SelfImproving_PRD.md`、`tools/selfimproving.py`、`tools/lib/selfimproving/**` 四項（預算、閘門、停機條件、指標定義與迴圈腳本都在不可進化面內，PRD NFR-SI-02-1 的 iii、iv 兩類）
   And 流程型：語意（提出時標 `loop-self`、僅經掌舵者 T1 或 PRD 修訂）由實跑檢核 V8 對照 PRD AC-SI-29-2 以文件檢核
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_029_2_1]"
 ```
@@ -998,7 +998,7 @@ Scenario: check 不寫任何檔、不連網、子行程只有環境被淨化的 
   Then 呼叫前後兩份的檔案摘要與 `git status --porcelain` 完全相同（沒有新檔、沒有被改的檔、沒有 `.lock`、沒有被寫的 OBS 帳本）
   And 兩份的結果與未設定 `GIT_DIR` 時完全相同（工具自行把定位用的 `GIT_*` 變數自子行程環境移除）
   And 記錄到至少一次 `subprocess.run` 呼叫，且 `Popen` 的建構次數等於 `run` 的呼叫次數（沒有繞過 `run` 的直接 `Popen`、`check_output` 或 `os.system`）；每次呼叫：argv 的第一個元素去掉目錄與副檔名後是 `git`，第二個元素是 `-C`，第三個元素解析後等於 `--repo` 的路徑，`shell` 不為真，`timeout` 是正數，`encoding` 為 `utf-8`、`errors` 為 `replace`，`env` 是一個字典且不含 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`，且 `GIT_OPTIONAL_LOCKS` 為 `0`
-  And 以 AST 檢視 `tools/selfimproving.py` 與每個 `tools/lib/si_*.py`：每個絕對 import 的頂層模組名屬 `sys.stdlib_module_names`，或是 `_stdio_utf8`、`lib`、以 `si_` 起頭的本地模組（`tools/lib/` 沒有 `__init__.py`，`from lib import …` 靠 `tools/` 在 `sys.path` 上；相對 import 視為本地模組）；沒有 `socket`、`urllib`、`http`、`requests`、`ftplib`、`smtplib`、`asyncio` 的 import
+  And 以 AST 檢視 `tools/selfimproving.py` 與每個 `tools/lib/selfimproving/*.py`：每個絕對 import 的頂層模組名屬 `sys.stdlib_module_names`，或是 `_stdio_utf8`、`lib`（含 `lib.selfimproving.*`；`tools/lib/` 沒有 `__init__.py`，`from lib import …` 靠 `tools/` 在 `sys.path` 上；套件內相對 import 視為本地模組）；沒有 `socket`、`urllib`、`http`、`requests`、`ftplib`、`smtplib`、`asyncio` 的 import
   And 以正規式掃描上述原始碼：沒有寫入形原語（`write_text`、`write_bytes`、`.mkdir(`、`os.remove`、`os.unlink`、`os.rename`、`os.replace`、`shutil.`、以 `w`、`a`、`x` 模式呼叫的 `open(`）；判準函式自證：對含這些原語的合成字串判命中、對乾淨字串判不命中
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_030_2_1]"
 ```
@@ -1389,7 +1389,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 
 ### 5.4 真檔案（唯讀，不得被測試修改）
 
-`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`、`docs/01_requirements/SelfImproving_PRD.md`、根 `CLAUDE.md`、`.claude/settings.json`、`tools/selfimproving.py`、`tools/lib/si_*.py`。測試以 `Path(__file__).resolve().parents[2]` 為 repo 根。**測試不讀真帳本與真附註檔**。
+`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`、`docs/01_requirements/SelfImproving_PRD.md`、根 `CLAUDE.md`、`.claude/settings.json`、`tools/selfimproving.py`、`tools/lib/selfimproving/*.py`。測試以 `Path(__file__).resolve().parents[2]` 為 repo 根。**測試不讀真帳本與真附註檔**。
 
 ### 5.5 hermetic 環境
 
@@ -1397,7 +1397,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 
 ### 5.6 允許變更的檔案集合（T 提交）
 
-新增：`tools/selfimproving.py`、`tools/lib/si_*.py`（模組數自定）、`tools/tests/test_selfimproving_check.py`、`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`。M 與 N 另動：`docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/05_development/SelfImproving_Observation_Ledger_notes.md`（M 新增）、`docs/06_quality/SelfImproving_Protocol/params.json`（N 改一個鍵）。主控收尾另動根層鎖檔（NFR-P0-8）。其餘一律不動；尤其不動 PRD、研究方法 SOP、`.claude/**`、本 TCS。
+新增：`tools/selfimproving.py`、`tools/lib/selfimproving/*.py`（套件，模組數自定；2026-10-19 自 `tools/lib/si_*.py` 搬入）、`tools/tests/test_selfimproving_check.py`、`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`。M 與 N 另動：`docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/05_development/SelfImproving_Observation_Ledger_notes.md`（M 新增）、`docs/06_quality/SelfImproving_Protocol/params.json`（N 改一個鍵）。主控收尾另動根層鎖檔（NFR-P0-8）。其餘一律不動；尤其不動 PRD、研究方法 SOP、`.claude/**`、本 TCS。
 
 ---
 
@@ -1473,3 +1473,12 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | V9 | P0 退出條件 (a)，與 M 之後只追加（預審 F-04、二審 N-03） | 檢視 N 之後新增與變動的 OBS 列與它們的來源；`git log -p -- docs/06_quality/SelfImproving_Observation_Ledger.md` 自 N 起至 SCG-4 前 | 沒有任何「某欄無法填」的觀察（反症狀）；新增列皆通過 `check`；**N 之後至 SCG-4 前，既有列除處置欄 `open`→終值一次外零原地改寫**（`history.row_mutated` 為 PASS 即機械憑證，其放行集合恰為追加列、處置欄 `open`→終值一次、不改格內容的格式整理三種（R20、AT-004-3-1），與此句等價；累計次數、狀態更新與更正一律追加列，R25 (9)）；M 之前的原地改寫（例如 OBS-SI-011 的累計次數）依 AC-SI-01-3 屬遷移基準以前、不在此限 |
 
 **確認人**: ____________  **確認日期**: ____________  **狀態**: □ 通過 / □ 待修訂
+
+---
+
+## 搬遷勘誤（2026-10-19，FSM SPEC_AUDIT；掌舵者裁決，非缺陷）
+
+- **事由**：SCG-4 二審 PASS 後，掌舵者問「這個模組不用規劃獨立的目錄?」並選「現在就搬」，再指令「日後新模組須有系統、有組織地規劃整體專案目錄，不得散落，寫進 CLAUDE.md 與專案規格」（sid f3ead132-29b1-418c-97d9-35868ab11c70 line 5507／5524／5565）。
+- **改了什麼**：程式碼自 `tools/lib/si_*.py` 搬成套件 `tools/lib/selfimproving/{__init__,ledger,rows,git,refs,history,params,check}.py`（`git mv`，套件內相對 import）；指令入口 `tools/selfimproving.py` 與指令字面 `python tools/selfimproving.py check` **不變**；本檔只改路徑字面（D4、R26、NFR-P0-5、AT-003-1-1 Given、AT-029-2-1 四項 glob、R8 (a) 本地模組規則、§5.6）與 18 處 PRD digest（PRD 同日重凍：`sha256:fbca6bc9…`，改 §9 C4 路徑、加模組落點表、NFR-SI-02-1 (iv) glob）；AT id、AT 數（42）、R1～R26 語意、21 項判定碼**一字未動**。落點規範 SSOT＝`docs/02_architecture/Root_Layout_and_Module_Placement.md`。
+- **凍結紀錄**：Stage-2 原凍結 digest `sha256:6c4e28ed…`（2026-10-19T05:43:56Z）保留為歷史；本次修訂走 FSM `PR_REVIEW→（gate PASS）RTM_VERIFY→IMPLEMENTATION→SPEC_AUDIT→PR_REVIEW`，修訂後的本檔 digest 記在 FSM decision_trace（回 PR_REVIEW 的 reason）與 SCG-4 報告 §9 三審。
+- **§5.1 測試資料列 001 的合成座標 `tools/lib/si_demo.py:12–15` 不改**：它是虛構的證據座標（只驗形態），不指向真檔。

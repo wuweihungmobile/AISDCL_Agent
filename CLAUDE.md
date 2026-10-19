@@ -24,6 +24,14 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 - 跑指令前讓工作目錄落在正確子專案——但 **Windows 側禁用裸 `cd`**（鐵律二）：改絕對路徑，或 `Push-Location <絕對路徑>` … `Pop-Location` 在**同一次呼叫內**成對。
 - 🔴 **AISDLC_SDD 數十個版本目錄中只有 LATEST 可原地改**（掌舵者裁決）：`AISDLC_SDD_v0.01`（ci-gate 凍結基線）與其後到 LATEST 之間的中間歷史版一律**不可原地改**（ci-gate 只測「凍結基線 + LATEST」兩軌）。**LATEST 是哪一版一律現查** `python AISDLC_SDD/scripts/sdd_version.py`（本檔刻意不寫版號）。Copy-on-Evolve（`AISDLC_SDD/scripts/copy_on_evolve.sh`）**只**在需要保留可回歸對照快照時開新版，不是每次改動都開新版。
 
+### 🔴 根層模組落點（掌舵者 2026-10-19 指令：新模組不得到處散落）
+
+- SSOT＝[docs/02_architecture/Root_Layout_and_Module_Placement.md](docs/02_architecture/Root_Layout_and_Module_Placement.md)（全 repo 目錄地圖、落點表、既有模組登記表、新模組檢查表）；本節只導航，不複寫規則。
+- 根層新模組一律：函式庫成套件 `tools/lib/<module>/`（兩支以上函式庫檔或已排定後續階段者，第一天就成套件）、指令入口薄殼 `tools/<module>.py`、探針 `tools/probe/<module>_*.py`、測試 `tools/tests/test_<module>_*.py`、執行期協定資料 `docs/06_quality/<Module>_Protocol/`、帳本 `docs/06_quality/<Module>_*_Ledger.md`、規格依編號制（PRD→01、TCS→03/contracts、SOP→05、審查／RTM→06）。
+- PRD §9 元件表**必附模組落點表**（照 SSOT §2 填）；落點對不上就先改 SSOT（含 WHY）再落檔。compat-ci `paths`、`non_evolvable_globs`、`tools/tests` 棘輪重釘、CI paths 覆蓋鎖在同一個 commit 收齊。
+- 子專案內的模組不往根層放（AutoClaude 走〈新增 Plugin 的 SOP〉、AISDLC_SDD 走 Rule 2、AgentConsole 走其 Architecture.md）；根層只放跨專案治理工具。
+- 首例：SelfImproving 於 2026-10-19 自 `tools/lib/si_*.py` 搬成 `tools/lib/selfimproving/`（入口 `tools/selfimproving.py` 不變）。
+
 ---
 
 ## 🔴 三條改進軌道（動工前先用本表對齊「本輪在哪一柱（A/B/C）、下一份檔名」；系列休眠時「下一份」欄無義務）

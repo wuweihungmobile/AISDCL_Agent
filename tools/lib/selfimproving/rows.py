@@ -1,6 +1,6 @@
 """SelfImproving 觀察帳本逐列判準（TCS-SelfImproving-P0 R10～R16）。
 
-輸入是 `si_ledger.parse_ledger` 的列；輸出是「項目 ID → Finding 清單」。
+輸入是 `ledger.parse_ledger` 的列；輸出是「項目 ID → Finding 清單」。
 只判形態：座標指向的檔案是否真的存在、`fixed@` 的 sha 是否解析得到由別處判。
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from lib.si_ledger import COLUMNS, Finding, Ledger, Row
+from .ledger import COLUMNS, Finding, Ledger, Row
 
 _OFF = r"[+-](?:0\d|1[0-4]):[0-5]\d"
 _START = rf"(\d{{4}})-(\d{{2}})-(\d{{2}}) (\d{{2}}):(\d{{2}})(?::(\d{{2}}))?(?: ?({_OFF}))?"

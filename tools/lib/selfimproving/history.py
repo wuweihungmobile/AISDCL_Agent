@@ -5,10 +5,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from lib.si_git import Git
-from lib.si_ledger import Finding, parse_ledger
-from lib.si_refs import git_ne
-from lib.si_rows import disp_token, row_marks
+from .git import Git
+from .ledger import Finding, parse_ledger
+from .refs import git_ne
+from .rows import disp_token, row_marks
 
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 _SID_RE = re.compile(r"sid\s*[:=]?\s*[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)

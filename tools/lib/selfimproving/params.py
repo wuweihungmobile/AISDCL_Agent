@@ -7,7 +7,7 @@ import json
 import re
 from pathlib import Path
 
-from lib.si_ledger import Finding, split_lines
+from .ledger import Finding, split_lines
 
 PROTOCOL_REL = "docs/06_quality/SelfImproving_Protocol"
 CHECK_RULES_REV = 1

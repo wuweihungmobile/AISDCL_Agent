@@ -36,7 +36,7 @@
     "tools/lib/quota_stability.py",
     "tools/lib/sentinel_lifecycle.py",
     "tools/lib/session_brief.py",
-    "tools/lib/si_*.py",
+    "tools/lib/selfimproving/**",
     "tools/probe/selfimproving_measure.py",
     "tools/selfimproving.py",
     "tools/session_resume_planner.py"

@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path, PureWindowsPath
 
-from lib.si_git import Git
-from lib.si_ledger import Finding, Ledger, split_lines
-from lib.si_rows import DEF_ID_RE, FIXED_SHA_RE, ORIG_AT_RE, disp_token, row_marks
+from .git import Git
+from .ledger import Finding, Ledger, split_lines
+from .rows import DEF_ID_RE, FIXED_SHA_RE, ORIG_AT_RE, disp_token, row_marks
 
 _KEY_RE = re.compile(r"^\|\s*(OBS-SI-\d+)\s*\|")
 _DEF_KEY_RE = re.compile(r"^\s*\|\s*(DEF-\d+-\d+)\s*\|")

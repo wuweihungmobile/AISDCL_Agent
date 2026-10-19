@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import _stdio_utf8  # noqa: F401  # stdout／stderr 強制 UTF-8 的唯一實作，本檔不另寫
-from lib import si_check
+from lib.selfimproving import check
 
 _REPO = Path(__file__).resolve().parents[1]
 _USAGE_ERROR_RC = 3
@@ -54,13 +54,13 @@ def _under(repo: Path, value: str | None, default_rel: str) -> Path:
 def _check(args: argparse.Namespace) -> int:
     repo = Path(args.repo) if args.repo else _REPO
     if not repo.is_dir():
-        raise si_check.InputError(f"--repo 不是目錄：{repo}")
-    ledger = _under(repo, args.ledger, si_check.LEDGER_REL)
-    params_path = _under(repo, args.params, si_check.PARAMS_REL)
-    text, size = si_check.read_text(ledger, "ledger")
-    params = si_check.load_params(params_path)
-    res = si_check.run_check(repo, ledger, params, text, size)
-    _emit(si_check.render_json(res) if args.json else si_check.render_text(res))
+        raise check.InputError(f"--repo 不是目錄：{repo}")
+    ledger = _under(repo, args.ledger, check.LEDGER_REL)
+    params_path = _under(repo, args.params, check.PARAMS_REL)
+    text, size = check.read_text(ledger, "ledger")
+    params = check.load_params(params_path)
+    res = check.run_check(repo, ledger, params, text, size)
+    _emit(check.render_json(res) if args.json else check.render_text(res))
     return res.rc
 
 
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         code = exc.code
         return code if isinstance(code, int) else (0 if code is None else _USAGE_ERROR_RC)
-    except si_check.InputError as exc:
+    except check.InputError as exc:
         sys.stderr.write(f"selfimproving: {exc}\n")
         return _USAGE_ERROR_RC
 

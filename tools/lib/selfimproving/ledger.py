@@ -1,7 +1,7 @@
 """SelfImproving 觀察帳本解析與結構判準（TCS-SelfImproving-P0 R9／R10 的 tz 宣告）。
 
 只讀、純標準庫：本檔不開檔、不碰 git，輸入是帳本全文字串。逐列欄位判準住
-`si_rows.py`，歷史比對住 `si_history.py`。
+`rows.py`，歷史比對住 `history.py`。
 """
 
 from __future__ import annotations
