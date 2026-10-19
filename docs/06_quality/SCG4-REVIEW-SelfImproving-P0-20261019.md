@@ -5,7 +5,7 @@
 **基準規格**: `docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md`（Stage-2 凍結 digest `sha256:6c4e28ed30ab3e05ea1acbbf4b8d1a5a5004f5a2aed3fb535abb59cfb420de56`，當回合重算相符）；上游 `docs/01_requirements/SelfImproving_PRD.md`（`sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e`，重算相符）
 **姊妹檔**: `docs/06_quality/RTM-SelfImproving-P0-20261019.md`（FR／AC → AT → 測試方法 → 本次結果 → 證據座標）
 **判定**: **FAIL**（P1＝0、P2＝2、P3＝3、P4＝9）。V1、V2、V4、V5、V6、V7、V9 通過；**V3 的 (9)「座標可重查」未通過（F-02）、V8「SOP 條文語意對照 PRD」未通過（F-01）**。兩個 P2 的補救成本都低（改一段 SOP 文字、追加一列更正列），補救後須由 QA 複驗 V3 (9) 與 V8。
-**現行判定（主控 2026-10-19 補註）**: 上列為一審原文、保留為歷史；修復（Y2 `9fd15796`～Y5 `622c83d2`）後二審複驗 **PASS**（P1／P2／P3＝0，P4 殘餘不阻斷），逐字證據與各 F 結案表見 §8。FSM：`gate --gate PR_REVIEW --result PASS` 於二審後由主控執行。
+**現行判定（主控 2026-10-19 補註）**: 上列為一審原文、保留為歷史；修復（Y2 `9fd15796`～Y5 `622c83d2`）後二審複驗 **PASS**（P1／P2／P3＝0，P4 殘餘不阻斷），逐字證據與各 F 結案表見 §8。FSM：`gate --gate PR_REVIEW --result PASS` 於二審後由主控執行。其後掌舵者裁決程式碼搬成套件 `tools/lib/selfimproving/`（commit `e83ebb14`），三審（搬遷複驗）**PASS**，見 §9；F-16～F-21 的處置入帳 OBS-SI-106 起。
 
 > 方法聲明：本報告凡寫「通過」者，皆附當回合真跑的指令與輸出；做不到的寫「未驗」（見 §7）。稽核腳本全部放在 scratchpad `C:\Users\wuwei\AppData\Local\Temp\claude\D--CursorProject-AISDCL-Agent\f3ead132-29b1-418c-97d9-35868ab11c70\scratchpad\qa_scg4\`，不入庫；repo 內除本檔與姊妹檔外零改動（見 V7）。Windows 上只用 PowerShell／Read／Grep／Glob／Edit／Write（Bash 被 hook 擋，也不用），Python 一律 `D:\CursorProject\AISDCL_Agent\.venv\Scripts\python.exe`。工具輸出若帶表情符號，下文逐字引用時略去行首符號。
 
@@ -762,3 +762,254 @@ TCS 末段〈SCG-4 通過標準〉逐項（二審）：
 ### 8.13 證據檔（scratchpad，不入庫）
 
 `qa_scg4\` 下：`run_cmd.py`、`r2_rows.py/.txt`、`r2_coord_exist.py/.txt`、`r2_transcript.py/.txt`、`r2_transcript2.py/.txt`、`r2_y4_refs.diff`、`r2_y4_tests.diff`、`r2_y4_lock.diff`、`r2_y4_stat.txt`、`r2_sop_run.txt`、`r2_k7_run.txt`、`r2_full_at.txt`、`r2_mut_run.py`、`r2_mut_results_F.txt`、`r2_mut_results_F_names.txt`、`r2_mut_results_G.txt`、`r2_check_json.txt`、`r2_check_text.txt`、`r2_v2_independent.py/.txt`、`r2_root_suite.txt`、`r2_ruff.txt`、`r2_loc.txt`、`r2_defid.txt`、`r2_print_guard.txt`、`r2_v9_logp.txt`、`r2_v9_numstat.txt`、`r2_v9_numstat_fromN.txt`、`each_at.json/.txt`（二審重跑）、`each_at_r1.json`（一審備份）、`rtm_data.json`、`rtm_at_table2.md`、`r2_subtest_diff.txt`。
+
+---
+
+## §9 三審（搬遷複驗）
+
+**三審日期**: 2026-10-19（本節寫入時刻 18:12 +08:00）　**審查者**: 同一位 SCG-4 獨立 QA 棒（Sonnet 5.5；未參與搬遷的實作、規格修訂與落點規範起草）
+**複驗基準**: HEAD `3c94b53381a420ee70cba4dec01598342b124c0c`（＝Z2）；搬遷 commit Z＝`e83ebb14ddb2158df43aab514afa17dccf749861`（17:43:32），入帳 commit Z2（17:45:15）；二審報告 commit `faebb596`（17:25:00）為本輪的追加基準。FSM：P0 鍵 `PR_REVIEW`、PRD 鍵 `SPEC_FROZEN`
+**事由**: 二審 PASS 後，掌舵者裁決「現在就搬」並指令新模組不得散落、規範寫進 CLAUDE.md 與規格。主控與 SD 棒把程式碼自 `tools/lib/si_*.py` 搬成套件 `tools/lib/selfimproving/`（入口 `tools/selfimproving.py` 與指令字面不變），同步修訂 PRD、TCS、`params.json`、兩支 compat-ci 的 `paths`，新增落點規範 SSOT `docs/02_architecture/Root_Layout_and_Module_Placement.md` 與根 `CLAUDE.md`〈根層模組落點〉節，帳本追加 101～105。
+**三審判定**: **PASS**（P1＝0、P2＝0；新發現 1 個 P3〔F-16〕與 5 個 P4〔F-17～F-21〕，皆不阻斷，見 §9.7）。規格修訂只動路徑字面、落點表、勘誤與 18 處 PRD digest，AT 數、R 規則語意、判定碼不變（§9.2 機械證明）；程式搬遷不改行為（§9.4：整檔 42 passed、根層全套 rc 0、鏡像突變全殺）；落點規範與現況、根 `CLAUDE.md`、PRD §9 大體一致（§9.3，不一致處入 F-19）。**一審、二審的結論與內文未改動；§5、§8 的判定是各自當時的歷史判定。**
+
+> 方法聲明同前：凡寫「通過」者皆附本回合真跑的指令與輸出，做不到的寫「未驗」（§9.10）。稽核與突變腳本放在 scratchpad `qa_scg4\`（`r3_` 前綴，不入庫）；repo 內除本檔與姊妹檔外零改動（§9.5 寫入前現查）。Windows 上只用 PowerShell／Read／Grep／Glob／Edit／Write，Python 一律 `.venv`。FSM 只經 `FSMRuntime` 的 `show --must-exist` 唯讀取用（兩個遙測旗標顯式設 0），不直接讀寫 `FSM-STATE-*.yaml`。工具輸出若帶表情符號，下文逐字引用時略去行首符號。已知事項（主控已知、不 amend）：Z2 的 commit 訊息把 OBS-SI-101 稱為「更正列 rel=corrects:OBS-SI-001」，實際該列沒有 `rel=` 標記（是一筆 `decision` 列），以帳本內容為準，`check` 為綠。
+
+### 9.1 輸入快照
+
+```text
+> git rev-parse HEAD                              3c94b53381a420ee70cba4dec01598342b124c0c   rc=0
+> git status --short                              （空；行數 0）   rc=0
+> git diff --name-only ; git diff --cached --name-only        （皆空）
+> git diff --stat faebb596..HEAD -- .claude       （空）；`.github` 只動兩支 compat-ci（見下）
+> git diff --name-status faebb596..HEAD           （20 檔：Z 19 檔＋Z2 帳本 1 檔）
+  M .github/workflows/macos-compat-ci.yml          M docs/01_requirements/SelfImproving_PRD.md
+  M .github/workflows/windows-compat-ci.yml        A docs/02_architecture/Root_Layout_and_Module_Placement.md
+  M CLAUDE.md                                      M docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md
+  M docs/04_planning/AutoSDD_improving_112.md      M docs/06_quality/CrossPlatform_R145_Scan_Findings.md
+  M docs/06_quality/SelfImproving_Observation_Ledger.md   M docs/06_quality/SelfImproving_Protocol/params.json
+  A tools/lib/selfimproving/__init__.py            R097 si_check.py→selfimproving/check.py    R100 si_git.py→git.py
+  R096 si_history.py→history.py                    R098 si_ledger.py→ledger.py                R099 si_params.py→params.py
+  R097 si_refs.py→refs.py                          R098 si_rows.py→rows.py
+  M tools/selfimproving.py                         M tools/tests/test_selfimproving_check.py
+> git diff --shortstat faebb596..HEAD             20 files changed, 176 insertions(+), 80 deletions(-)
+> Get-FileHash -Algorithm SHA256（現檔）
+  PRD  fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de   （1019 行）
+  TCS  6f7e24e73dd29b729933be1a6edb58b11f5d7eb06fc047a02c7bb89acb05996f   （1484 行）
+  SOP  deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2   （研究方法 SOP；與一、二審相同）
+```
+
+範圍判斷：沒有碰 `.claude/**`、研究方法 SOP；`.github` 只動兩支 compat-ci 的 `paths`（四處 `tools/lib/si_*.py`→`tools/lib/selfimproving/**`）；PRD 與 TCS 的修訂走 FSM（§9.2）；`tools/tests/` 只動 `test_selfimproving_check.py`（鎖檔未動）。
+
+### 9.2 規格一致性（任務 1）——通過
+
+**機械證明**（`git show e83ebb14^:<檔>` 對 `e83ebb14:<檔>`，`r3_tcs_invariants.py`）：
+
+```text
+TCS lines before=1475 after=1484 HEAD=1484 (after==HEAD: True)
+AT ids before=42 after=42 same_list=True unique=42
+R bullets before=26 after=26 same_keys=True changed=['R26']
+判定碼表 lines before=49 after=49 identical=True
+判定碼 token 集合 before=50 after=50 same=True
+AT gherkin 區塊 before=42 after=42 changed blocks=['AT-003-1-1', 'AT-029-2-1', 'AT-030-2-1', 'AT-032-1-1']
+TCS hunks=13 ; added=35 removed=26
+old PRD digest occurrences before=18 after=0 ; new digest occurrences after=18
+PRD lines before=1019 after=1019 ; hunks=3 added=3 removed=3
+PRD **AC/FR/NFR-SI** 條目 token 數 before=97 after=97 same=True
+```
+
+「changed blocks」的 AT-032-1-1 是假訊號：該腳本把最後一個 AT 區塊延伸到檔尾，§5.6 的兩行與新增的勘誤節都落在它之後（gherkin 自身未變）；hunk 座標逐一對帳如下，沒有任何 hunk 落在 R1～R25 條文、判定碼表（:161–207）、其餘 39 個 AT 區塊內（真正改到的 gherkin 區塊只有 AT-003-1-1、AT-029-2-1、AT-030-2-1 三個）。
+
+| TCS hunk（舊行號） | 內容 | 性質 |
+|--------------------|------|------|
+| :48 | D4 列：`tools/lib/si_*.py`→`tools/selfimproving.py`（入口薄殼）、`tools/lib/selfimproving/*.py`（套件，見勘誤） | 路徑字面 |
+| :159 | R26：掃描對象改為 `tools/lib/selfimproving/*.py`（含 `__init__.py`）；禁用字樣、rc 3 規則不變 | 路徑字面 |
+| :244 | NFR-P0-5：路徑改套件；「拆 `si_*.py` 模組」改「在套件內依職責拆新模組」 | 路徑字面 |
+| :255～275（5＋10＋2＋1 列） | 增量追溯表的 PRD digest `9c571827…`→`fbca6bc9…`，共 18 處（舊 digest 剩 0 處） | digest 回填 |
+| :684、:936、:1001 | AT-003-1-1 Given、AT-029-2-1 的四項 glob、AT-030-2-1 的 AST 子句（本地模組認 `lib`／`lib.selfimproving.*`、套件內相對 import 視為本地） | 路徑字面（AST 子句是實作 R8 (b) 的判準措辭，R8 條文本身未動） |
+| :1392、:1400 | §5.6 唯讀存取清單與新增清單的路徑 | 路徑字面 |
+| +1476～1484 | 〈搬遷勘誤〉節（事由、改了什麼、凍結紀錄、:1353 合成座標不改） | 勘誤 |
+
+PRD 三個 hunk（`+3／−3`）：NFR-SI-02-1 實體 glob (iv) 的 `tools/lib/si_*.py`→`tools/lib/selfimproving/**`（:415）；§9.1 開頭加「模組落點表」一段（:559）；C4 列的落點改成「入口薄殼＋套件（`ledger`、`rows`、`git`、`refs`、`history`、`params`、`check`）」並引 SSOT §2（:565）。FR／AC／NFR 條目 id 97 個全未動，元件數 15、各階段與閘門欄未動。
+
+**FSM**（只經 `FSMRuntime` 唯讀；`python scripts/sdd_version.py` → `AISDLC_SDD_v0.30`）：
+
+```text
+> $env:SDD_STATE_DIR='<根>\build\reports\fsm'; $env:SDD_ENABLE_RULE_FIRE_TELEMETRY='0'; $env:SDD_ENABLE_RULE_CATCH_TELEMETRY='0'
+> Push-Location AISDLC_SDD\AISDLC_SDD_v0.30
+> python -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project monorepo-si-p0-ledger --must-exist     rc=0   （單一 JSON）
+> python -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --project monorepo-selfimproving --must-exist    rc=0
+  monorepo-si-p0-ledger  : current_state=PR_REVIEW  updated_at=2026-10-19T09:45:21+00:00  decision_trace=21 筆  frozen_stages=2（Stage-1、Stage-2）
+  monorepo-selfimproving : current_state=SPEC_FROZEN updated_at=2026-10-19T09:30:36+00:00  decision_trace=16 筆  frozen_stages=3（皆 Stage-1）
+```
+
+P0 鍵（`monorepo-si-p0-ledger`）decision_trace 末六筆（UTC）：
+
+| # | 時間 | 轉換（trigger） | reason 摘要 |
+|---|------|-----------------|-------------|
+| 15 | 08:04:05 | PR_REVIEW→IMPLEMENTATION（gate_fail） | SCG-4 一審 FAIL（P2 F-01、F-02…），修復分工 |
+| 16 | 08:36:54 | IMPLEMENTATION→PR_REVIEW（cli_manual） | 一審修復完成，Y1～Y5 |
+| 17 | 09:23:22 | PR_REVIEW→RTM_VERIFY（gate_pass） | `PR_REVIEW PASS` |
+| 18 | 09:25:07 | RTM_VERIFY→IMPLEMENTATION（cli_manual） | 掌舵者 2026-10-19 裁決「現在就搬」：程式碼自 `tools/lib/si_*.py` 搬成 `tools/lib/selfimproving/`（入口不變）；SD 棒改 import／測試／重釘，主控改 params、compat-ci paths、落點規範與根 CLAUDE.md；TCS 路徑字面搬遷後進 SPEC_AUDIT 修訂，再回 PR_REVIEW 三審 |
+| 19 | 09:42:13 | IMPLEMENTATION→SPEC_AUDIT（cli_manual） | 規格修訂（非缺陷）：TCS 的路徑字面（D4／R26／NFR-P0-5／AT-003-1-1 Given／AT-029-2-1 四項 glob／R8 (a) 本地模組規則／§5.6）與 18 處 PRD digest 須同步並補搬遷勘誤；AT id、數量、判定碼不變 |
+| 20 | 09:45:21 | SPEC_AUDIT→PR_REVIEW（cli_manual） | 修訂完成回三審：commit Z `e83ebb14`、Z2 `3c94b533`；**修訂後 TCS digest `sha256:6f7e24e73dd29b729933be1a6edb58b11f5d7eb06fc047a02c7bb89acb05996f`（1484 行；Stage-2 原 `6c4e28ed…` 保留為歷史）**、PRD 重凍 `fbca6bc9…`；主控親跑 42 AT、`check` rc 0、+0、全套 rc 0 5426、CI paths 49 passed；QA 三審聚焦搬遷 |
+
+PRD 鍵（`monorepo-selfimproving`）decision_trace 末四筆（UTC）：#12 09:23:22 `SPEC_FROZEN→SPEC_DRAFTING`（掌舵者裁決，sid 與 line 5507 提問、互動選項「現在就搬」、後續指令；PRD §9.1 C4 與 NFR-SI-02-1 實體 glob 改套件路徑並引落點規範；改完 SCG_VALIDATION 單項複核後重凍）；#13 09:30:36 `SPEC_DRAFTING→SCG_VALIDATION`（路徑字面與落點表，語意不變；「QA 三審複核 PRD diff」）；#14 同秒 `SCG_VALIDATION→HUMAN_PENDING`（gate_pass）；#15 同秒 `HUMAN_PENDING→SPEC_FROZEN`（`Stage-1 重凍（第三次）`）。`frozen_stages` 末筆（第 3 筆，`frozen_at` 09:30:36）：
+
+```text
+PRD  sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de   ＝ Get-FileHash 現檔（逐字相同）
+SOP  sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2   ＝ Get-FileHash 現檔
+approved_by：掌舵者（本人互動裁決，sid f3ead132-… line 5507／5524／5565；主控執行）
+```
+
+判斷：兩鍵的 decision_trace 都有對應理由，且與 Z 的 commit 訊息、TCS 勘誤的流程描述（`PR_REVIEW→RTM_VERIFY→IMPLEMENTATION→SPEC_AUDIT→PR_REVIEW`）逐段吻合；P0 鍵 #20 記載的 TCS digest 等於現檔；PRD 鍵末筆 digest 等於現檔。PRD 鍵的 `SCG_VALIDATION PASS`（#14）與進入該態（#13）、重凍（#15）在同一秒記錄，獨立複核落在凍結之後；#13 的 reason 已明載「QA 三審複核 PRD diff」，本節即該複核——PRD diff 只有上列 3 行、語意不變，複核通過。兩項殘餘入 F-16（授權座標）與 F-17（P0 鍵凍結紀錄與現檔不符）。
+
+### 9.3 落點規範（任務 2）——大體通過（不精確處入 F-19）
+
+SSOT `docs/02_architecture/Root_Layout_and_Module_Placement.md`（71 行）§2「根層模組落點表」12 格逐格對 SelfImproving 現況與磁碟（`r3_layout_exist.py`、`Get-ChildItem`、`git ls-files`、`git grep`）：
+
+| §2 格 | SelfImproving 的填寫 | 磁碟核對 |
+|-------|----------------------|----------|
+| 函式庫（成套件、`__init__.py` 一句用途、依職責分檔、套件內相對 import、不互 import 他套件） | `tools/lib/selfimproving/`：`__init__.py`（73 位元組，一句用途的 docstring）＋7 個職責檔（`ledger`、`rows`、`git`、`refs`、`history`、`params`、`check`），皆 `git ls-files` 有追蹤 | 通過：套件內 `from . import`／`from .x import` 全為相對 import；對 `tools/lib/selfimproving` 用 `git grep -E` 搜尋以 `from lib` 或 `import lib` 起頭的行（正規式以 `\b` 收尾）零命中，套件不 import 任何其他 `tools/lib` 模組；`tools/lib/__init__.py` 不存在（與 SSOT §1 敘述相符）；`tools/lib/si_*` 殘留 0 檔 |
+| 指令入口（薄殼、不含判準、指令字面不變） | `tools/selfimproving.py`（80 行：argparse、`_stdio_utf8`、`from lib.selfimproving import check`，呼叫 `check.*`）；`python tools/selfimproving.py check` 照跑，AT-030-1-1 的子行程案（cwd 為誘餌目錄）綠 | 通過 |
+| 量測探針 `tools/probe/<module>_*.py` | P0 無；PRD 與 SSOT §3 皆標 P1 的 `tools/probe/selfimproving_measure.py` | 不存在（已明標 P1，非缺漏） |
+| 測試 `tools/tests/test_<module>_*.py` | `tools/tests/test_selfimproving_check.py` | 通過 |
+| 執行期協定資料 `docs/06_quality/<Module>_Protocol/` | `docs/06_quality/SelfImproving_Protocol/{params.json,metrics.md}` | 通過 |
+| 帳本與附註檔 | `docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/05_development/SelfImproving_Observation_Ledger_notes.md` | 通過 |
+| 需求／設計（PRD §9 必附落點表） | `docs/01_requirements/SelfImproving_PRD.md`，§9.1 已附（散文形態） | 通過（形態與兩格額外項見 F-19） |
+| 測試契約 `TCS-<Module>-<Phase>-<YYYYMMDD>.md` | `docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md`；§5.6 檔案集合與本表一致 | 通過 |
+| 運作 SOP | `docs/05_development/SelfImproving_Operations_SOP.md`、`SelfImproving_Research_Methodology_SOP.md` | 通過 |
+| 審查／RTM | `docs/06_quality/SCG4-REVIEW-SelfImproving-P0-20261019.md`、`RTM-SelfImproving-P0-20261019.md`、`TCS-PREREVIEW-SelfImproving-P0-20261019.md`、`SCG0-REVIEW-SelfImproving-20261019.md` | 存在；但 SSOT 的審查報告樣式 `SCG<n>-REVIEW-<Module>-<YYYYMMDD>.md` 漏 `<Phase>`，`SCG4-REVIEW-…-P0-…` 對不上（F-19） |
+| CI 接線（compat-ci 兩支 `paths`） | 兩支 workflow 的 push 與 pull_request 共四處皆含 `tools/lib/selfimproving/**` 與 `tools/selfimproving.py`，無殘留 `tools/lib/si_*` | 通過（§9.4 獨立解析 YAML） |
+| 不可進化面 | `params.json` 的 `non_evolvable_globs` 含 `tools/lib/selfimproving/**`，PRD NFR-SI-02-1 (iv) 同步 | 通過（`params.globs` PASS；V6 重算 25＝25；鏡像突變 D1～D3 殺） |
+
+§3「既有模組登記表」6 列、§1「目錄地圖」的路徑逐一檢查：§3 全部存在，唯一缺的是已標 P1 的 `tools/probe/selfimproving_measure.py`；§1 有一處路徑錯誤——`tools/git-hooks/`、`tools/act/` 列的權威指引寫 `tools/install_git_hooks.*`，該檔不存在於根層 `tools/`，實檔在 `AutoClaude/tools/install_git_hooks.ps1` 與 `.sh`（F-19）；`build/`、`logs/`、`checkpoints/`、`.act-runs/` 在本機皆存在。
+
+**根 `CLAUDE.md`〈根層模組落點〉（:27–33）對 SSOT**：只導航不複寫——SSOT 路徑連結、新模組落點（函式庫成套件、入口薄殼、探針、測試、協定資料、帳本、規格依編號制）、「PRD §9 必附模組落點表、對不上先改 SSOT」「compat-ci `paths`、`non_evolvable_globs`、棘輪重釘、CI paths 覆蓋鎖同一 commit 收齊」「子專案內的模組不往根層放」「首例＝SelfImproving」逐點對 SSOT §2、§4 第 1 與 3 條、§2 末段，無矛盾；略寫了「架構決策 ADR 放 `docs/02_architecture/`」一項（導航節的省略，不是矛盾）。
+
+**PRD §9.1 落點表對 SSOT §2**：函式庫、入口、探針、測試、協定資料、帳本（附註檔）、規格與 SOP 依編號制、審查與 RTM 皆一致；多出兩格——事件帳本 `docs/06_quality/SelfImproving_Event_Ledger.jsonl`（機器寫的 JSONL，§2 的帳本列是人寫的 `<Module>_<Kind>_Ledger.md`）與提案內容檔 `docs/06_quality/SelfImproving_Proposals/`——在 SSOT §2 沒有對應列，而 SSOT §4 第 1 條要求「PRD 元件表每一列的路徑都能對上 §2 的某一格；對不上＝先改本檔」（F-19）。
+
+### 9.4 程式面（任務 3）——通過
+
+```text
+> python tools/selfimproving.py check --json      rc=0   wall=1.25s
+  overall=PASS rc=0 rows=105 items=21 fingerprint=sha256:751d4c3df047d35ce6164679bbea4884705d3e1f63d95572a5622d734a7503ca
+  fingerprint_parts: manifest=daf2826f…c45b metrics_rev=1 check_rules_rev=1
+  params.globs PASS ; params.keys PASS ; params.coupling PASS ; ref.obs PASS ; ref.def PASS ; ref.orig_notes PASS ; row.fixed_sha PASS
+  history.migration PASS（claim=valid）; history.row_mutated PASS ; ledger.volume PASS ; ledger.vacuity PASS
+  ref.carrier_families NE（nonblocking；CARRIER-NOT-ESTABLISHED families=PROP-SI count=24）
+> python tools/selfimproving.py check             rc=0   wall=1.27s   si-check rows=105 items=21 … overall=PASS rc=0
+> python -m pytest tools/tests/test_selfimproving_check.py -q -p no:xdist -o addopts=      rc=0
+  42 passed, 97 subtests passed in 40.79s          （--collect-only：42 tests collected）
+> … -k "AT_003_1_1 or AT_031 or AT_030_2_1"        rc=0   9 passed, 33 deselected, 30 subtests passed in 10.23s
+> … -k "AT_003_1_1 or AT_029_2_1 or AT_030_2_1"    rc=0   3 passed, 39 deselected in 1.85s
+> python -m ruff check tools/selfimproving.py tools/lib/selfimproving/*.py（8 檔）tools/tests/test_selfimproving_check.py    rc=0   All checks passed!
+> python AutoClaude/tools/check_loc_budget.py --json    rc=0
+  total=18625 baseline=17079 cap=20438 total_violation=False ; absolute／tier／special／root_tools_violations 皆 len=0
+  guard_taxonomy 194 項（二審 193＋新增 `__init__.py`）；selfimproving 相關 9 項（入口＋套件 8 檔）；`tools/lib/` 前綴歸 guardrail_lib ≤ 400
+> Push-Location AISDLC_SDD ; python -m pytest scripts/tests/test_ci_paths_cover_root_consumers.py -q -p no:xdist      rc=0   49 passed in 15.90s
+> python tools/check_ntfs_paths.py                rc=0   NTFS 檔名檢查通過（29269 個 tracked 路徑，0 違規；最長 142 字元）
+> git status --short ; git diff --name-only ; git diff --stat -- .claude     （皆空；每項測試跑完之後再查一次仍為空）
+```
+
+判準指紋由二審的 `87b349b7…` 變為 `751d4c3d…`：協定目錄的 `params.json` 改了一個 glob 鍵，`manifest` 隨之變；`metrics_rev`、`check_rules_rev` 不變，符合「指紋只隨判準變」。
+
+**CI paths 覆蓋鎖不只看綠燈**：(1) 獨立解析兩支 compat-ci 的 YAML（`yaml.safe_load`；`on.push.paths` 與 `on.pull_request.paths`，190／191 條）——四處皆含 `tools/lib/selfimproving/**` 與 `tools/selfimproving.py`，殘留 `tools/lib/si_*` 為 0，入口、套件 8 檔、測試檔皆被某條 pattern 匹配；(2) 匯入該鎖的 `_consumed_root_paths(tools/tests)`：它掃出的 281 個消費檔包含入口與套件全部 8 檔（BFS 能解 dotted from-import 與相對 import），把 `tools/lib/selfimproving/**` 自 paths 拿掉（記憶體內重算，`r3_lock_red.py`）後，兩支 workflow 各列出套件 8 檔未覆蓋（拿掉 `tools/selfimproving.py` 則列出入口），即該鎖的「消費檔 ⊆ paths」斷言會紅——SSOT §2「漏列即紅」對程式碼路徑成立；(3) 但它**看不到**測試以 `ROOT / "docs/…"` 消費的四個資料／文件檔（`params.json`、`metrics.md`、SOP、PRD），兩支 compat-ci 的 `paths` 也沒列它們（先例：`FiveQuestion_Audit_Protocol/params.json` 有列）；`root-infra-ci.yml` 無 `paths` 過濾、恆跑，Linux 側仍覆蓋（F-21 (iii)）。
+
+**鏡像突變**（`r3_mut_run.py`：把測試檔、入口、`_stdio_utf8.py`、套件 8 檔、SOP、`params.json`、`metrics.md`、PRD、根 `CLAUDE.md`、`.claude/settings.json` 複製到 `qa_scg4\mutroot3_<時間戳>_<代號>\`，只在複本上突變；repo 零改動）。複本基線：整檔 `42 passed, 97 subtests passed in 40.75s`；`-k "AT_003_1_1 or AT_029_2_1 or AT_030_2_1 or AT_031"` 為 `10 passed, 32 deselected, 30 subtests passed in 10.21s`。下表 failed 數取後者：
+
+| 突變 | failed | 殺掉它的測試 | 結果 |
+|------|--------|--------------|------|
+| S1 `refs.py` 加 `import socket` | 1 | AT-030-2-1 | 殺 |
+| S2 `check.py` 加 `time.sleep` 引用 | 1 | AT-003-1-1 | 殺 |
+| S3 `git.py` 加 `os.system` 呼叫 | 1 | AT-030-2-1 | 殺 |
+| S4 `rows.py` 加 `write_text` | 1 | AT-030-2-1 | 殺 |
+| S5 `ledger.py` 加 `import yaml`（非標準庫） | 1 | AT-030-2-1 | 殺 |
+| S6 對照：`history.py` 加 stdlib import 與套件內相對 import | 0 | — | 綠（合法寫法不誤殺） |
+| S7 套件新增檔 `extra.py` 含 `import socket` | 1 | AT-030-2-1 | 殺（glob 涵蓋新檔） |
+| S8 子套件 `sub/inner.py` 含 `import socket` | 0 | — | **未偵測**（`*.py` 非遞迴；邊界，見 F-21 (ii)） |
+| D1 `params.json` 拿掉 `tools/lib/selfimproving/**` | 2 | AT-029-2-1、AT-031-1-1 | 殺 |
+| D2 `params.json` 改回舊字面 `tools/lib/si_*.py` | 2 | AT-029-2-1、AT-031-1-1 | 殺 |
+| D3 PRD 的 NFR-SI-02-1 (iv) 改回舊字面（JSON 與 PRD 不一致） | 1 | AT-031-1-1 | 殺 |
+
+與 Z 的 commit 訊息自陳一致（socket、write_text、time.sleep、yaml、os.system 五個皆紅、合法 import 對照綠），另補了新檔涵蓋、JSON↔PRD 耦合與子套件邊界三項。V6 獨立重算（`r3_v6_params.py`，不經 `tools/lib/selfimproving/params.py`）：`params.json` 23 鍵恰為 R21 的 23 鍵、20 個數值初值逐鍵相符、`non_evolvable_globs` 必備集合＝PRD 來源一 18 項加根 `CLAUDE.md` 展開 7 項＝25 項，與 params 清單 25 項集合相等、無重複，AT-029-2 四個迴圈自身 glob 皆在清單內。
+
+**搬遷的程式碼差異**（`git show e83ebb14 -M --unified=2 -- tools/lib tools/selfimproving.py`）：七支檔的相似度 96%～100%，變更只有 import 改寫（`from lib import si_x`→`from . import x as si_x`／`from .x import …`，`check.py` 保留 `si_*` 別名以免遮蔽名為 `params` 的參數）、docstring 內的舊檔名，以及入口的 `from lib.selfimproving import check` 與 `si_check.*`→`check.*`；沒有邏輯變動。測試檔差異（40 行）：`import` 改新路徑、八處 docstring 與一個合成座標字串、靜態掃描檔案集合收成 `si_sources()`（入口＋`tools/lib/selfimproving/*.py`，用於 AT-003-1-1 與 AT-030-2-1）、AT-029-2-1 的 glob 斷言、AST 本地模組規則改成只認 `_stdio_utf8` 與 `lib`（相對 import 視為套件內部）；鎖檔與兩個 guard-total 站點只加搬遷說明。
+
+### 9.5 護欄與寫入前現查（任務 4）——通過
+
+```text
+> $env:AUTOSDD_PARALLEL_TESTS='1'; python tools/run_root_unittests.py      rc=0   wall=138.03s
+unittest 數量下限釘選通過：發現 5426 個測試（下限 5326）
+收集面盤存：92 支 test_*.py 檔／指紋 ec7498398005
+[cpu_budget] root-unittest workers=18 source=cpu_budget
+模組耗時排行（前 5，共 405 模組，平行模式，worker=18）：test_selfimproving_check: 88.8s（第 1）…
+派工摘要：worker=18｜S=2031.2s｜ideal=max(S/W, 最長單位)=112.8s（S/W-bound）｜loss=1.00x｜slot 利用率=99.8%
+[skip census] tools/tests@win32 共 46 支：platform=42／tool-absence=0／env-disabled=4／structural-pair=0／debt=0／untagged=0／欠債型 4 支（目標 0）
+真實 TEMP 圍籬：全套期間真實契約目錄（與 autosdd_quota.json 同目錄）下 autosdd_pace*.json 零變動（前 4／後 4 份；目錄 C:\Users\wuwei）；隔離根已建立並清除。
+孤兒 console 普查：零增長（前 1／後 1）。
+（輸出中以 FAIL／ERROR 開頭的行：0 行）
+> python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines      rc=0
+# 淨額 119056→119056 (+0)
+# 逐檔漂移 0 支（淨額為 0 時本行仍會說話——那正是 R79 補它的理由）
+# _REPIN_LOG_HISTORY_SHA256 = "94b2abd8d962b936ea56e404fcd42cceb92f381a9d23a4199c6c1418e4571c4d"   （與二審相同，鎖檔未動）
+> git log --numstat --format='COMMIT %h' faebb596..HEAD -- <ledger>      rc=0
+COMMIT 3c94b533   5  0
+> git diff -U0 faebb596 HEAD -- <ledger>        單一 hunk  @@ -110,0 +111,5 @@（OBS-SI-101～105 五列純追加）；刪除行數 0
+```
+
+V9：自 `faebb596` 起帳本只有 Z2 一個 commit、單一 hunk、純追加 5 列、0 行刪改；自 N 起合計 54 列（052～105）純追加（X＋11、Y3＋19、Y5＋11、`faebb596`＋8、Z2＋5），`history.row_mutated` 為 PASS。護欄層淨額 +0、逐檔漂移 0，與 Z 的自陳相符；搬遷沒有開新的重釘列，也未再動一次性例外名冊。
+
+### 9.6 逐 AT 單跑（姊妹檔 RTM §2 已更新）
+
+重跑 TCS §2 的 42 個判定指令（`-k <底線形>`）：42/42 皆 `1 passed`、rc＝0、每個 `-k` 恰選到 1 個測試；子測試數與節點名與二審完全相同（整檔仍是 97 個子測試）。測試檔因 `si_sources()` 與 docstring 異動而位移：33/42 個 AT 的行區間改變（AT-001-1-1 到 AT-003-1-1 的起點 +5，其後到 AT-030-2-1 的起點 +4；AT-030-2-1 的結尾行與 AT-030-3-1 之後 0，所以尾端 9 個 AT 不變），TCS 區塊行號 0 個改變（勘誤只加在檔尾）。RTM §2 已全部重抽，座標以 HEAD `3c94b533` 為準。
+
+### 9.7 三審新發現
+
+| 編號 | 嚴重度 | 發現 | 座標 | 建議處置 |
+|------|--------|------|------|----------|
+| F-16 | **P3** | 授權座標偏到衍生記錄，且時間欄是入帳批次時刻：帳本 101 的證據座標、PRD 鍵 `frozen_stages` 末筆的 `approved_by`、TCS 搬遷勘誤、Z 的 commit 訊息都引「逐字稿 line 5507／5524／5565」。實測（`r3_transcript.py`，唯讀 `json.loads` 該實體行，LF 切 6280 段）：5507＝`type=user`、`origin.kind=human`（「所以這個模組不用規劃獨立的目錄? 放實作的目錄或程式是嗎?」）正確；5524＝`type=user` 的 `tool_result`，內容是 AskUserQuestion 的回答「現在就搬」，`origin.kind` 為空——是互動選項的記錄，可接受但不是 human 文字；**5565＝`type=api-request-blob`（請求傾印），不是人工記錄**。第三句指令（「請注意, 請規劃日後有新模組產生時, 可以有系統, 有組織的規劃整體專案系統目錄, 不要到處散落, 請寫在CLAUDE.md及專案規格相關文件中落實! 記住此點」）的原始記錄是 line 5534（`queue-operation enqueue`，09:15:52Z）與 line 5563（`attachment`、`queued_command`、`origin.kind=human`、`humanTurn=true`，09:15:52Z）。同型錯誤（假座標落在 assistant 空記錄）在 PRD 附錄 C.2 已訂正過一次（TCS 預審任務 A）；授權事實本身不受影響（同一句在 5534／5563 逐字可查）。另，帳本 101 的時間欄 17:45 是入帳時刻，事件可由逐字稿追溯到 17:12～17:15（5507：09:12:08Z；5524：09:13:43Z；5534：09:15:52Z），與帳本 077「可追溯者填事件時刻」的決議不符 | 帳本 OBS-SI-101 的證據座標與時間欄；`FSM-STATE-monorepo-selfimproving` 末筆 `approved_by`（經 `show`）；TCS `:1481`（搬遷勘誤〈事由〉）；Z 的 commit 訊息；逐字稿 `f3ead132-….jsonl` line 5507／5524／5534／5563／5565 | 不阻斷。追加更正列（`rel=corrects:OBS-SI-101`），座標改為 line 5507（human）、5524（AskUserQuestion 回答）、5563（queued_command，`origin.kind=human`；入列於 5534），時間改事件時刻；FSM 與 TCS 為凍結紀錄不改，以更正列為準。往後引用人類指令的座標一律取 `origin.kind=human` 的原始記錄（`type=user`、`queued_command` 附件或 `queue-operation`），不取 `api-request-blob` |
+| F-17 | P4 | P0 鍵的凍結紀錄與現檔不符：`frozen_stages`（Stage-1、Stage-2）記的 TCS 摘要是 `6c4e28ed…`、PRD 摘要是 `9c571827…`，現檔已是 `6f7e24e7…` 與 `fbca6bc9…`；修訂後的 TCS digest 只在 decision_trace #20 的自由文字裡。這是已揭露的取捨（TCS 勘誤與 #19、#20 都明載；`transition_rules.py` 的 `SPEC_AUDIT` 只能出邊到 `PR_REVIEW`，IMPLEMENTATION 之後沒有重凍的邊）。實證後果（`r3_check_digest.py`：把 `show` 取得的 `frozen_stages` 餵給 AutoClaude adapter 的凍結閘 `_sdd_frozen_gate.check_digest`，記憶體內、唯讀）：P0 鍵對 TCS 與 PRD 都拋 `SpecDigestMismatchError`（「凍結後改檔須重新核准凍結」），對研究方法 SOP 為 `verified`；PRD 鍵對 PRD、SOP 為 `verified`、對 TCS 拋 `SpecNotFrozenError`（TCS 不在該鍵的凍結清單，預期）。即：日後若以 P0 鍵跑 SDD→Playbook 編譯（A 軌），該閘會 fail-closed。本棒查到的消費者中沒有受影響者（P0 已實作並驗收；AISDLC_SDD v0.30 的 `fsm_runtime`、`state_loader` 只寫入摘要、hooks 不引用它；AgentConsole／Bridge 的消費未查，見 §9.10） | `FSM-STATE-monorepo-si-p0-ledger` 的 `frozen_stages`（經 `show`）；`AutoClaude/autoclaude/infra/adapters/_sdd_frozen_gate.py:179`（`check_digest`）；TCS 搬遷勘誤 | 不動作；請掌舵者知悉。P0 鍵收尾（RELEASE）前若要避免日後誤判，可在證據檔記一句「P0 鍵 frozen_stages 為歷史、現行 digest 以 decision_trace #20 與現檔為準」；P1 另開新鍵時凍結新 TCS 即綁新 digest |
+| F-18 | P4 | TCS 殘留舊路徑字面，且勘誤的標籤不夠精確：(i) 仍有三處 `si_*.py` 字面——現況列 `:36`（「沒有 `tools/lib/si_*.py`…」，描述 P0 前的狀態，尚可讀作歷史）、INVEST 自檢 `:234`（「約 3 個 `si_*.py` 模組」，估算本來就與實況〔7 個模組〕不符）、增量追溯表 SCG-2 Container 列 `:267`（「落點：根層 `tools/`（CLI 與 `lib/si_*.py`）…」，是落點陳述，與同檔 D4 列的新路徑自相矛盾）；`:1353` 的合成座標已於勘誤聲明不改。(ii) 勘誤與 decision_trace #19 寫「R8 (a) 本地模組規則」，實際被改的是 AT-030-2-1 的 AST 子句（`:1001`），R8 條文自身未動，且「本地模組」屬 R8 (b)；(iii) 勘誤的改動清單沒列 `:267` | TCS `:36`、`:234`、`:267`、`:1001`、勘誤節（`:1479` 起） | 不阻斷。下次動 TCS（P1 另開新檔）時一併改；或在勘誤追加一行「`:267` 同改套件路徑」。TCS 已凍結，現階段不為此再走一次 FSM |
+| F-19 | P4 | 落點規範文件三處不精確：(i) §1 `tools/git-hooks/`、`tools/act/` 列的權威指引寫 `tools/install_git_hooks.*`，根層 `tools/` 沒有此檔，實檔是 `AutoClaude/tools/install_git_hooks.ps1`、`.sh`（根 `CLAUDE.md` 的 AutoClaude 快查在 `AutoClaude/` 下執行，SSOT 沿用該相對路徑而漏了前綴）；(ii) §2「審查／RTM」列的審查報告樣式 `SCG<n>-REVIEW-<Module>-<YYYYMMDD>.md` 漏 `<Phase>`，現有 `SCG4-REVIEW-SelfImproving-P0-20261019.md` 對不上，而同列 RTM 與預審樣式都有 `<Phase>`；(iii) PRD §9.1 的落點表是散文、不是表，且含兩格（事件帳本 `.jsonl`、提案內容檔目錄）在 §2 沒有對應列，違反 SSOT §4 第 1 條「PRD 元件表每一列的路徑都能對上 §2 的某一格；對不上＝先改本檔」 | `docs/02_architecture/Root_Layout_and_Module_Placement.md:18`、`:38`、§4 第 1 條；PRD `:559` | 不阻斷。SSOT 不在凍結集合內，可由主控直接改：(i) 路徑補 `AutoClaude/tools/`；(ii) 樣式補 `[-<Phase>]`；(iii) §2 補「機器寫的事件帳本」與「提案內容檔」兩列（P1 才落檔，標 P1），PRD 落點段落可維持散文但註明「填寫版」 |
+| F-20 | P4 | 搬遷對映列不全：帳本 102～104 只為 079、084、090 補了舊→新路徑對映；082（F-03 修復列，座標 `tools/lib/si_refs.py:125`）搬遷後的路徑也已不存在，且其更正列 100 的處置寫「修復後位置以本列與後續搬遷列為準」，後續搬遷列卻沒有 082。101 的處置有通則（「搬遷前的列一律依該列 commit 當時的路徑解讀」），所以資訊不致遺失，只是對映不一致 | 帳本 OBS-SI-082、100、102～104 | 不阻斷。下一批入帳時追加一列 `rel=corrects:OBS-SI-082`（`tools/lib/selfimproving/refs.py` 的 `_escapes_repo`、`orig_findings`），或在 105 之後的列註明「通則涵蓋、不逐列對映」 |
+| F-21 | P4（理論洞，無暴露證據） | 三個邊界，皆為實測、現況無受害者：(i) **同名遮蔽**：SSOT §2 要求入口 `tools/<module>.py` 與套件 `tools/lib/<module>/` 同名；實測 `sys.path` 為 `[tools/lib, tools]` 時 `import selfimproving` 解析到套件 `__init__.py`（`has main=False`），為 `[tools, tools/lib]` 時才是入口（`has main=True`）。唯一 `import selfimproving` 的消費者是測試檔，且先插入 `tools/`，現況安全；(ii) **非遞迴掃描**：AT-003-1-1／AT-030-2-1 與 R26 的掃描集合是 `tools/lib/selfimproving/*.py`，子套件內的檔不在內（S8 實測 0 failed）；SSOT §2 沒禁止子套件；(iii) **CI 覆蓋看不到資料／文件消費**：見 §9.4，測試以變數名 `ROOT`（非 `REPO_ROOT`）消費的 `params.json`、`metrics.md`、SOP、PRD 不在 compat-ci `paths`，覆蓋鎖也掃不到 | `tools/tests/test_selfimproving_check.py:27–28`（`ROOT`）、`si_sources()`；`AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py`；SSOT §2 | 依根 `CLAUDE.md`〈守衛面准入〉的精神：無暴露證據就登記理論洞、不立輪、不同輪修。(i) 可在 SSOT §2 加一句「入口與套件同名；消費入口者須先把 `tools/` 排在 `tools/lib` 之前」；(ii) P1 若加子套件，同批把掃描集合改遞迴；(iii) 想補時，把測試的 `ROOT` 改名 `REPO_ROOT` 或在兩支 compat-ci 加四條 `paths`，覆蓋鎖就會自動要求 |
+
+統計：二審殘餘 P4 六項（F-08、F-10、F-11 (iv)、F-12、F-14、F-15）不變；三審新增 P3 一項（F-16）、P4 五項（F-17～F-21）；P1、P2 為 0。
+
+### 9.8 三審判定
+
+**PASS**——理由：(1) 規格修訂經機械證明只動路徑字面、落點表、勘誤與 18 處 digest，AT 42、R 26、判定碼 50 個 token、PRD 條目 97 個全未變，兩個 FSM 鍵的 decision_trace 有對應理由、PRD 鍵末筆 digest 與現檔相符；(2) 落點規範對 SelfImproving 現況、根 `CLAUDE.md` 與 PRD §9 大體一致，不一致處是文件精確度問題（F-19）；(3) 程式搬遷不改行為：`check` rc 0（`params.globs`、`ref.obs` PASS、105 列）、整檔 42 passed、`-k` 兩組綠、ruff 綠、LOC 綠（入口與套件共 9 檔皆在管轄內）、CI paths 覆蓋鎖 49 passed 且獨立解析證明兩支 compat-ci 涵蓋新套件、鏡像突變 9 個全殺且合法對照不誤殺；(4) 根層全套 rc 0（5426）、護欄淨額 +0、V9 自 `faebb596` 起純追加。
+
+給主控的收尾建議（非阻斷）：
+1. 本檔檔頭的「現行判定」補註目前只提到 §8；建議再補一句「三審（搬遷複驗）見 §9，PASS」。
+2. F-16 的更正列與 F-20 的對映列，連同 §9.9 的流程摩擦，請於 SCG-4 收尾前入帳（本棒不寫帳本）；FSM `gate --gate PR_REVIEW --result PASS` 由主控執行，本棒未碰 FSM。
+3. F-19 的三處是 SSOT 文件的修字，主控可直接改（SSOT 不在凍結集合內）；F-18、F-17 屬已凍結檔與 FSM 紀錄，不建議為此重走 FSM。
+4. 帳本 058 所指的 repo 外殘留檔 `e501_count.py` 仍待掌舵者刪除（二審 §8.9 已提）。
+
+### 9.9 流程摩擦（本棒三審；每項一句症狀加一個座標，請主控於 SCG-4 收尾前入帳）
+
+1. 系統提示（auto mode）本輪開頭再度要求優先用 Bash，與根 `CLAUDE.md`〈鐵律一〉衝突，全程仍用 PowerShell／Read／Grep／Glob／Edit／Write（OBS-SI-011 再復發）；座標：根 `CLAUDE.md`〈鐵律一〉。
+2. PowerShell 工具的安全掃描把 Python 腳本（here-string）裡的 `del sys.modules[k]` 當成 PowerShell 別名 `del`（Remove-Item），回「Remove-Item on system path … is blocked」而整個呼叫被擋；改寫成 `sys.modules.pop(k, None)` 才放行；座標：`qa_scg4\r3_shadow.py`。
+3. `Grep` 對 PRD 的超長行（單行含整段落點表）即使加 `-o` 與 `.{0,900}` 視窗仍回「[Omitted long matching line]」，改讀 `git show` 輸出檔才取得原文（OBS-SI-033 再復發）；座標：PRD `:559`。
+4. 測試檔動了 5 行，RTM §2 有 33/42 列的行區間又全數過期，得重跑 42 個單跑與重抽（OBS-SI-096 再復發）；座標：RTM §2。
+5. 任務書與任務訊息對同一個 `-k` 選測寫了兩種運算式（訊息為 `AT_003_1_1 or AT_029_2_1 or AT_030_2_1`，任務書為 `AT_003_1_1 or AT_031 or AT_030_2_1`），兩種都跑了才無歧義；座標：`qa_scg4_r3_brief.md` 第 3 項。
+6. 取用 FSM 狀態只能經 `FSMRuntime` 的 `show --must-exist`，需手設 `SDD_STATE_DIR`、遙測旗標與版本目錄為 cwd，且 `show` 的輸出是單行 17 KB 的 JSON，要另寫腳本才讀得出 decision_trace 與 `frozen_stages`；座標：`SDD_AUTOCLAUDE_BRIDGE.md` §8.2 (a) 的 `show` 配方。
+
+### 9.10 未查證／未做（三審）
+
+- **macOS／POSIX 與 GitHub Actions 仍未實跑**：compat-ci 的 `paths` 只做了靜態 YAML 解析與覆蓋鎖，沒有在真 CI 上驗證路徑過濾行為；F-21 (i) 的同名遮蔽只在 Windows 實測。
+- **SD 搬遷棒交卷原文未取得**：Z 的 commit 訊息所述 SD 做法（相對 import、`si_*` 別名、鏡像突變五項）只以本棒自己的 diff 讀取與鏡像重放驗證，沒有與 SD 交卷逐項對帳。
+- **`ci-gate.sh`、AISDLC_SDD 全套、`lint-imports`、AutoClaude pytest、AgentConsole／Bridge 對 FSM 摘要的消費** 皆未跑或未查（本輪只跑 CI paths 覆蓋鎖）；F-17 只驗了 AutoClaude adapter 的凍結閘。
+- **`git log --follow` 的改名歷史** 只看了 Z 的相似度（96%～100%），沒有逐檔追蹤。
+- **FSM 路徑的合規性不裁決**：`IMPLEMENTATION→SPEC_AUDIT→PR_REVIEW` 是否為框架對「凍結後規格修訂」的預期用法，我只核對了轉換合法（`transition_rules.py`）與 reason 齊備，沒有評論其設計。
+- **P1 才會有的件不在本輪範圍**：`tools/probe/selfimproving_measure.py` 與候選鎖 `test_root_module_layout.py` 皆未落檔（SSOT §5 與帳本 105 已誠實標示）。
+- **PRD 其他段落的路徑字面**：以全 repo 的字面 grep 確認 PRD 已無 `si_*.py` 殘留，但沒有逐段重讀 PRD 其餘 1000 多行。
+- 一審 §7、二審 §8.11 的其餘未查證項目（`check` 邊界探測、T 之前與 M 之後的紅燈狀態重現等）本輪仍未做。
+
+### 9.11 勘誤（對一、二審內文）
+
+本輪沒有發現一、二審的事實性錯誤。座標需註記：一審 §3、§4 與二審 §8.4 所引測試檔與 `tools/lib/si_*.py` 的行號與路徑是當時版本的座標；搬遷（Z）後 `si_*.py` 已成 `tools/lib/selfimproving/*.py`（`git mv`，相似度 96%～100%），測試檔行號再位移，現行座標見 RTM §2（以 HEAD `3c94b533` 為準）；二審 §8.5 的 `rows=92`、判準指紋 `87b349b7…` 是當時的量測，現行為 105 列與 `751d4c3d…`。
+
+### 9.12 證據檔（scratchpad，不入庫）
+
+`qa_scg4\` 下：`r3_show_faebb596.txt`、`r3_show_Z.txt`、`r3_show_Z2.txt`、`r3_Z_tcs_prd.diff`、`r3_Z_code.diff`、`r3_Z_tests.diff`、`r3_Z_misc.diff`、`r3_tcs_invariants.py/.txt`、`r3_fsm_show_monorepo-si-p0-ledger.txt`、`r3_fsm_show_monorepo-selfimproving.txt`、`r3_fsm_overview.py/.txt`、`r3_fsm_detail.py/.txt`、`r3_check_digest.py/.txt`、`r3_layout_exist.py/.txt`、`r3_check_json.txt`、`r3_check_text.txt`、`r3_k_run.txt`、`r3_k_run2.txt`、`r3_full_file.txt`、`r3_collect.txt`、`r3_ruff.txt`、`r3_loc.txt`、`r3_loc_view.py/.txt`、`r3_ci_paths.txt`、`r3_ci_cover.py/.txt`、`r3_ci_data_cover.py/.txt`、`r3_lock_view.py/.txt`、`r3_mut_run.py`、`r3_mut_results.txt`、`r3_shadow.py/.txt`、`r3_v6_params.py/.txt`、`r3_ntfs.txt`、`r3_print_guard.txt`、`r3_root_suite.txt`、`r3_v9_numstat.txt`、`r3_v9_hunks.txt`、`r3_transcript.py/.txt`、`r3_transcript_find.py/.txt`、`r3_transcript_find2.py/.txt`、`r3_transcript_5534.py/.txt`、`each_at.json/.txt`（三審重跑）、`each_at_r2.json`（二審備份）、`rtm_data.json`、`rtm_data_r2.json`、`rtm_at_table3.md`、`r3_rtm_diff.py/.txt`。

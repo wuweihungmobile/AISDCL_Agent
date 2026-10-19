@@ -1,6 +1,6 @@
 # SelfImproving Operations SOP（P0 骨架）
 
-**狀態**：P0 草稿（Developer 棒起草，待 SCG-4 QA 逐項對照 PRD 檢核）。
+**狀態**：P0 定稿（Developer 棒起草；SCG-4 一審 F-01 依 PRD AC-SI-03-1 改寫〈啟動條件〉、二審與三審 PASS，2026-10-19）；四個角色節於 P1 定稿。
 **上位文件**：`docs/01_requirements/SelfImproving_PRD.md`（FR-SI-01～04、29；§9.1 C6）與 `docs/05_development/SelfImproving_Research_Methodology_SOP.md`（研究方法，已凍結）。本檔是各角色任務書的上位，**不改**研究方法 SOP。
 **P0 範圍**：只有 `python tools/selfimproving.py check` 一個動詞（唯讀）。歸因者、提案者、審查者、凍結者四個角色在 P1 以後定稿，本檔只留位置。
 

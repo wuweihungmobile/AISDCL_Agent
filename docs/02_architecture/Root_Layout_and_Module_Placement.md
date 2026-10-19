@@ -15,7 +15,7 @@
 | `tools/lib/` | 根層可 import 函式庫（`from lib import …`／`from lib.<module> import …`；`tools/` 在 `sys.path` 上、`lib/` 無 `__init__.py`）：單檔共用工具（`platform_utils.py`、`cpu_budget.py`…）＋**模組套件 `<module>/`** | 本檔 §2 |
 | `tools/probe/` | 量測與探針（事後量測、不接任何閘門 rc）；模組專屬探針以 `<module>_*.py` 命名 | 各探針檔頭自述 |
 | `tools/tests/` | 根層 unittest（`run_root_unittests.py` discover；護欄層行數棘輪 `test_adr_xplat001_c1c2_lock.py` 管轄） | `guard-ratchet-repin-ritual`（記憶）／該鎖檔檔頭 |
-| `tools/git-hooks/`、`tools/act/` | git hook dispatcher、本機 act 載具 | `tools/install_git_hooks.*` |
+| `tools/git-hooks/`、`tools/act/` | git hook dispatcher、本機 act 載具 | `AutoClaude/tools/install_git_hooks.ps1`／`.sh`（安裝器住 AutoClaude，裝的是根層 dispatcher） |
 | `.claude/`（hooks、settings、skills） | 守衛面；auto mode 受保護路徑，任何改動走〈權限姿態〉 | 根 `CLAUDE.md`〈機械守衛總表〉 |
 | `.github/workflows/` | 全部 CI（含子專案）；根層消費檔必列入 compat-ci `paths` | `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` |
 | `build/`、`logs/`、`checkpoints/`、`.act-runs/` | 執行期產物（FSM 狀態、日誌、快照）；不入庫或 ignore | `.gitignore` |
@@ -32,10 +32,12 @@
 | 測試 | `tools/tests/test_<module>_*.py` | 進根層全套；新增即撞護欄層棘輪（見記憶 `guard-ratchet-repin-ritual`） |
 | 執行期協定資料（機器讀） | `docs/06_quality/<Module>_Protocol/`（`params.json`、指標副本 `metrics.md`…） | 先例：`FiveQuestion_Audit_Protocol/`、`SelfImproving_Protocol/` |
 | 帳本（人寫、機器驗） | `docs/06_quality/<Module>_<Kind>_Ledger.md`；超長原文附註檔 `docs/05_development/<Module>_<Kind>_Ledger_notes.md` | 列 ≤700 bytes、只追加（各帳本自己的 TCS 定） |
+| 事件帳本（機器寫、JSONL） | `docs/06_quality/<Module>_Event_Ledger.jsonl`（單一檔；寫入鎖與配號由該模組 TCS 定） | 先例：SelfImproving P1 的 ATT／PROP／DEC／APP／MEA／RUN 事件 |
+| 提案／工件內容檔 | `docs/06_quality/<Module>_Proposals/<ID>/`（每提案一目錄，版本檔 `rN.*`） | 先例：SelfImproving `PROP-SI-NNN/rN.{md,patch}` |
 | 需求／設計 | `docs/01_requirements/<Module>_PRD.md`（§9 元件表**必附本表的填寫版**＝「模組落點表」）；架構決策短編於 PRD §9 的 ADR 節，獨立 ADR 檔放 `docs/02_architecture/ADR-<MOD>-NNN-<slug>.md` | 動工前先查本檔；落點與本表不同＝先改本檔（含 WHY）再落檔 |
 | 測試契約 | `docs/03_testing/contracts/TCS-<Module>-<Phase>-<YYYYMMDD>.md` | §5.6 檔案集合必與落點表一致 |
 | 運作 SOP | `docs/05_development/<Module>_Operations_SOP.md`（研究方法類 SOP 同目錄 `<Module>_*_SOP.md`） | — |
-| 審查／RTM | `docs/06_quality/SCG<n>-REVIEW-<Module>-<YYYYMMDD>.md`、`docs/06_quality/RTM-<Module>-<Phase>-<YYYYMMDD>.md`、預審 `TCS-PREREVIEW-<Module>-<Phase>-<YYYYMMDD>.md` | 整合輪 116 D-116-09：SCG 產物一律 06_quality |
+| 審查／RTM | `docs/06_quality/SCG<n>-REVIEW-<Module>-<Phase>-<YYYYMMDD>.md`（PRD 層級的 SCG-0 無 `<Phase>`）、`docs/06_quality/RTM-<Module>-<Phase>-<YYYYMMDD>.md`、預審 `TCS-PREREVIEW-<Module>-<Phase>-<YYYYMMDD>.md` | 整合輪 116 D-116-09：SCG 產物一律 06_quality |
 | CI 接線 | compat-ci 兩支 workflow 的 push／pull_request `paths` 各加 `tools/lib/<module>/**` 與 `tools/<module>.py` | 漏列即 `test_ci_paths_cover_root_consumers.py` 紅 |
 | 不可進化面 | 迴圈／守衛類模組的自身檔案列入 `docs/06_quality/SelfImproving_Protocol/params.json` 的 `non_evolvable_globs`（PRD NFR-SI-02-1 實體 glob 同步） | 由 `python tools/selfimproving.py check` 的 `params.globs` 對表 |
 
