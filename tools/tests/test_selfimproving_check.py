@@ -20,7 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 from unittest import mock
 
@@ -40,9 +40,8 @@ _STRIP = (
     "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
 )
-_TMP = Path(tempfile.mkdtemp(prefix="si_check_"))
-_GCONF = _TMP / "gitconfig"
-_GCONF.write_bytes(b"")
+_TMP: Path  # setUpModule 建、tearDownModule 清；單獨 import 本模組（如探針）不會在 %TEMP% 留目錄
+_GCONF: Path
 _COUNTER = [0]
 HDR = "| ID | 時間 | 情境 | 症狀 | 證據座標 | 分類 | 嚴重度 | 處置 | 標記 |"
 SEP = "|---|---|---|---|---|---|---|---|---|"
@@ -110,6 +109,16 @@ def _rmtree(path: Path) -> None:
         func(p)
 
     shutil.rmtree(path, onerror=fix)
+
+
+def setUpModule() -> None:
+    global _TMP, _GCONF
+    _TMP = Path(tempfile.mkdtemp(prefix="si_check_"))
+    _GCONF = _TMP / "gitconfig"
+    _GCONF.write_bytes(b"")
+    _COUNTER[0] = 0
+    _BASE.clear()  # 快取的基線 repo 住在 _TMP 之下，換目錄就必須一併作廢
+    _CHAIN.clear()
 
 
 def tearDownModule() -> None:
@@ -413,11 +422,12 @@ def confirm_row(m_sha: str, c0_sha: str, mode: str) -> list[str]:
     if mode != "no-line":
         parts.append("line 2581")
     disp = "deferred；掌舵者預先授權" if mode == "not-decided" else "decided：掌舵者預先授權"
+    quote = "完全不是掌舵者說過的話" if mode == "wrong-quote" else "了解，凍結後接著開 P0 實作"
     return [
         "OBS-SI-005",
         "2026-10-19 12:00 +08:00",
         "主控視窗",
-        "掌舵者原句：「了解，凍結後接著開 P0 實作」",
+        f"掌舵者原句：「{quote}」",
         "、".join(parts),
         "decision",
         "P3",
@@ -946,7 +956,10 @@ class TestLedgerRowRules(SiCase):
             (self.S(res, "ledger.volume"), self.codes(res, "ledger.volume")),
             ("PASS", [("-", "VOLUME-WARN")]),
         )
-        self.assertEqual(res["_item"]["ledger.volume"]["findings"][0]["level"], "warn")
+        warn = res["_item"]["ledger.volume"]["findings"][0]
+        self.assertEqual(warn["level"], "warn")
+        self.assertTrue(warn["detail"].startswith("[warn]"), warn["detail"])
+        self.assertIn("\n  - VOLUME-WARN [warn] ", self.run_main(["check", "--repo", str(repo)])[1])
         set_params(repo, ledger_fail_bytes=size, ledger_warn_bytes=size - 1)
         res = self.check(repo)
         self.assertEqual(
@@ -1009,6 +1022,12 @@ class TestLedgerRowRules(SiCase):
             {("OBS-SI-003", "GUARD-P12-NO-EXPOSURE"), ("OBS-SI-004", "GUARD-NO-EXPOSURE")},
         )
         self.assertEqual(self.S(res, "row.coordinates"), "PASS")
+        with self.subTest("P2＋暴露=無"):
+            repo = baseline()
+            set_cell(repo, 9, "標記", "面=守衛;暴露=無;來源=代理;回報者=QA")
+            self.assertEqual(
+                self.F(self.check(repo), "row.markers"), {("OBS-SI-009", "GUARD-P12-NO-EXPOSURE")}
+            )
         repo = baseline()
         set_cell(repo, 7, "標記", "來源=代理;回報者=SD")
         set_cell(repo, 8, "標記", "面=其他;來源=代理;回報者=SA")
@@ -1095,11 +1114,12 @@ class TestMigration(SiCase):
             "wrong-sha",
             "not-decided",
             "valid",
+            "wrong-quote",
         ):
             with self.subTest(mode=mode):
                 c = chain("cf", mode)
                 res = self.check(c.repo)
-                if mode == "valid":
+                if mode in ("valid", "wrong-quote"):  # 後者＝引言故意寫錯：P0 只驗存在與格式
                     self.assertEqual(
                         (self.S(res, "history.migration"), self.S(res, "history.row_mutated")),
                         ("PASS", "PASS"),
@@ -1166,6 +1186,35 @@ class TestMigration(SiCase):
         self.assertEqual(
             self.F(self.check(c.repo), "ref.orig_notes"), {("OBS-SI-004", "ORIG-NOTES-ANCHOR")}
         )
+        # R18 (c)：逃出 repo 的路徑視同不存在。誘餌檔真的放在逃出後會解析到的地方，
+        # 判準一旦放行就會 PASS（只斷言「不存在的路徑報不存在」鑑別不出任何一條）。
+        c = chain()
+        outside = c.repo.parent / "orig_outside.md"
+        for decoy in (outside, c.repo / "orig_inside.md"):
+            decoy.write_bytes(b"## OBS-SI-004\n")
+        drive = PureWindowsPath("C:/orig_outside.md").as_posix()  # 受測的就是磁碟機代號形態
+        if os.name == "posix":  # POSIX 上 `C:/x` 是 repo 內的相對路徑；同一帳本兩平台判決須相同
+            put(c.repo, drive, "## OBS-SI-004\n")
+        absolute = outside.as_posix()
+        rooted = absolute[len(outside.drive) :]
+        paths = {
+            "dotdot": "../orig_outside.md",
+            "absolute": absolute,
+            "rooted": rooted,
+            "rooted-backslash": rooted.replace("/", "\\"),
+            "drive-letter": drive,
+            "inside": "orig_inside.md",
+        }
+        for name, rel in paths.items():
+            with self.subTest(orig=name):
+                self.assertNotRegex(rel, r"[\s#]")
+                set_cell(c.repo, 4, "標記", f"面=流程;來源=代理;回報者=SA;orig=@{rel}#OBS-SI-004")
+                res = self.check(c.repo)
+                miss = {("OBS-SI-004", "ORIG-NOTES-MISSING")}
+                want = ("PASS", set()) if name == "inside" else ("FAIL", miss)
+                self.assertEqual(
+                    (self.S(res, "ref.orig_notes"), self.F(res, "ref.orig_notes")), want
+                )
         c = chain()
         new = _crow(6, "症狀6", "open", '面=流程;來源=代理;回報者=SA;orig="x"')
         append_row(c.repo, new)
@@ -1311,7 +1360,8 @@ class TestScopeAndSop(SiCase):
         self.assertNotIn("selfimproving", settings.lower())
         sop = sop_text()
         self.assertEqual(sop_startup_problems(sop), [])
-        self.assertEqual(sop_roles_problems(sop)[:0], [])
+        for key in ("掌舵者指令", "第二次", "P≤2", "再開症狀", "容量事件"):
+            self.assertNotEqual(sop_startup_problems(sop.replace(key, "")), [], key)
         for label in ("(a)", "(b)", "(c)", "(d)", "(e)"):
             self.assertNotEqual(sop_startup_problems(sop.replace(label, "")), [], label)
         for needles in (("日曆", "版本號", "覆蓋度", "每 N 輪"), ("si status",)):
@@ -1658,6 +1708,45 @@ class TestCli(SiCase):
         set_cell(repo, 3, "分類", "Process")
         return repo
 
+    ITEM_RE = re.compile(
+        r"^(PASS|FAIL|NE) ([a-z_]+\.[a-z_]+)(?: (blocking|nonblocking))?(?: # (.*))?$"
+    )
+    FINDING_RE = re.compile(r"^  (\S+) ([A-Z][A-Z0-9-]+)(?: (.*))?$")
+
+    def assert_text_matches_json(self, repo: Path) -> None:
+        """R3 行文法逐行解析文字形態，並與 `--json` 逐項相等：rc、各項 status、NE 項的
+        blocking／nonblocking 字樣、各項 finding 的 (subject, code) 集合（含縮排的 finding 行）。"""
+        rc, text, _ = self.run_main(["check", "--repo", str(repo)])
+        res = self.check(repo)
+        lines = text.split("\n")
+        self.assertEqual(lines.pop(), "", "文字形態以 LF 結尾")
+        self.assertEqual(lines[0], f"si-check rows={res['rows']} items={len(res['items'])}")
+        at = next(i for i, ln in enumerate(lines) if ln.startswith("overall="))
+        self.assertEqual(
+            lines[at], f"overall={res['overall']} rc={res['rc']} fingerprint={res['fingerprint']}"
+        )
+        self.assertEqual((rc, len(lines[at + 1 :])), (res["rc"], 2 if rc else 0))
+        got = []
+        for ln in lines[1:at]:
+            found = self.FINDING_RE.match(ln)
+            if found:
+                self.assertTrue(got, ln)
+                got[-1][3].add(found.groups()[:2])
+                continue
+            m = self.ITEM_RE.match(ln)
+            self.assertTrue(m, ln)
+            got.append((m.group(1), m.group(2), m.group(3), set()))
+        want = [
+            (
+                it["status"],
+                it["id"],
+                ("blocking" if it["blocking"] else "nonblocking") if it["status"] == "NE" else None,
+                {(f["subject"], f["code"]) for f in it["findings"]},
+            )
+            for it in res["items"]
+        ]
+        self.assertEqual(got, want)
+
     def test_AT_030_1_1_output_contract(self):
         green, red = baseline(), self._red()
         rc_g, text_g, _ = self.run_main(["check", "--repo", str(green)])
@@ -1670,18 +1759,11 @@ class TestCli(SiCase):
         self.assertEqual(tail[at + 1], "obs-draft:")
         self.assertTrue(tail[at + 2].startswith("| OBS-SI-"))
         self.assertEqual(len([ln for ln in tail if ln.startswith("| OBS-SI-")]), 1)
-        item_re = re.compile(
-            r"^(PASS|FAIL|NE) ([a-z_]+\.[a-z_]+)(?: (blocking|nonblocking))?(?: # (.*))?$"
-        )
-        statuses = {}
-        for ln in tail[1:at]:
-            if ln.startswith("  "):
-                self.assertTrue(ln.strip())
-            else:
-                m = item_re.match(ln)
-                self.assertTrue(m, ln)
-                statuses[m.group(2)] = m.group(1)
-        self.assertEqual(statuses, {i["id"]: i["status"] for i in res["items"]})
+        plain = new_dir("nogit")
+        shutil.copytree(green, plain, ignore=shutil.ignore_patterns(".git"))
+        for name, repo in (("green", green), ("red", red), ("no-git", plain)):
+            with self.subTest(text_form=name):
+                self.assert_text_matches_json(repo)
         self.assertNotIn("\x1b", text_r)
         self.assertEqual(self.F(res, "row.enums"), {("OBS-SI-003", "ENUM-CATEGORY")})
         self.assertIn("分類", res["_item"]["row.enums"]["findings"][0]["detail"])
@@ -1794,7 +1876,7 @@ class TestCli(SiCase):
             return git(repo, "status", "--porcelain")
 
         before = {r: (digest(r), porcelain(r)) for r in (green, red)}
-        calls, popens = [], []
+        calls, popens, shells = [], [], []
         real_run, real_popen = subprocess.run, subprocess.Popen
 
         def rec_run(*a, **k):
@@ -1804,6 +1886,10 @@ class TestCli(SiCase):
         def rec_popen(*a, **k):
             popens.append(1)
             return real_popen(*a, **k)
+
+        def rec_shell(*a, **k):  # os.system／os.popen 繞過 subprocess，記錄器看不到，須另行攔截
+            shells.append(a)
+            raise OSError("check 不得經 os.system／os.popen 起行程")
 
         other = new_dir("other")
         init_repo(other)
@@ -1819,6 +1905,8 @@ class TestCli(SiCase):
                     mock.patch.dict(os.environ, env),
                     mock.patch.object(subprocess, "run", rec_run),
                     mock.patch.object(subprocess, "Popen", rec_popen),
+                    mock.patch.object(os, "system", rec_shell),
+                    mock.patch.object(os, "popen", rec_shell),
                 ):
                     for extra in ((), ("--json",)):
                         rc, out, _ = self.run_main(["check", "--repo", str(repo), *extra])
@@ -1833,6 +1921,7 @@ class TestCli(SiCase):
                             if not extra
                             else re.sub(r"\d{4}-\d\d-\d\d \d\d:\d\d [+-]\d\d:\d\d", "T", out),
                         )
+        self.assertEqual(shells, [])
         for key, val in results.items():
             if key[0]:
                 self.assertEqual(val, results[(False, *key[1:])], key)
@@ -1859,9 +1948,13 @@ class TestCli(SiCase):
         )
         self.assertTrue(write_re.search("p.write_text(x)") and write_re.search("open(f, 'w')"))
         self.assertIsNone(write_re.search("print('x')"))
+        shell_re = re.compile(r"os\.(?:system|popen)\b")
+        self.assertTrue(shell_re.search("os.system('x')") and shell_re.search("os.popen(c)"))
+        self.assertIsNone(shell_re.search("print('x')"))
         for src in [TOOLS / "selfimproving.py", *sorted((TOOLS / "lib").glob("si_*.py"))]:
             text = src.read_bytes().decode("utf-8")
             self.assertIsNone(write_re.search(text), src.name)
+            self.assertIsNone(shell_re.search(text), src.name)
             for node in ast.walk(ast.parse(text)):
                 mods = []
                 if isinstance(node, ast.Import):

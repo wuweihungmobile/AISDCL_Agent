@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from lib.si_git import Git
 from lib.si_ledger import Finding, Ledger, split_lines
@@ -114,6 +114,19 @@ def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git
     return obs, carriers
 
 
+def _escapes_repo(rel: str) -> bool:
+    """R18 (c)：絕對路徑、rooted 路徑、含磁碟機代號或含 `..` 者視同逃出 repo（一律當不存在）。
+
+    跨平台自問（鐵律三）：同一份帳本在 Windows 與 POSIX 必須得同一個判決，而 `Path.is_absolute()`
+    依平台而異——Windows 上 `/x`、`\\x`（有根、無磁碟機代號）不算絕對，接到 repo 之下卻解析到
+    磁碟機根（逃出）；POSIX 上 `C:/x` 只是名為 `C:` 的相對目錄、`\\` 不是分隔符。故不用平台的
+    `is_absolute()`，改以 Windows 語法（`/`、`\\` 皆分隔符）一律判：開頭 `/`、`\\`（含 UNC）、
+    有磁碟機代號、任一段是 `..`。
+    """
+    win = PureWindowsPath(rel)
+    return rel.startswith(("/", "\\")) or bool(win.drive) or ".." in win.parts
+
+
 def orig_findings(led: Ledger, repo: Path) -> list[Finding]:
     out = []
     for row in led.rows:
@@ -121,8 +134,7 @@ def orig_findings(led: Ledger, repo: Path) -> list[Finding]:
         if not orig or orig[1] or not ORIG_AT_RE.match(orig[0]):
             continue
         rel, anchor = orig[0][1:].split("#", 1)
-        p = Path(rel)
-        target = None if p.is_absolute() or ".." in p.parts else repo / p
+        target = None if _escapes_repo(rel) else repo / rel
         if target is None or not target.is_file():
             out.append(Finding(row.subject, "ORIG-NOTES-MISSING", "fail", f"附註檔不存在 {rel}"))
             continue
