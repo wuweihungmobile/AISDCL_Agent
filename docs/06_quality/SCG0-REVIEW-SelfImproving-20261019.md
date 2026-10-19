@@ -594,6 +594,45 @@ docs/06_quality/SelfImproving_Observation_Ledger.md  17605 bytes  mtime 10-19 05
 | 7 | 授權 | PASS | C.2 #10～#16 每列有 sid ee6af537… line 13（腳本逐列驗）；該行解析為 type=user、origin.kind=human、2026-10-19T12:21:32.705Z，11 段 T1 引文逐字相符；C.1 有四問→FR 對映；第 3 點預先核准句引用正確 |
 | 8 | 不該動的沒動 | PASS | 三個 commit 只動 PRD、本報告（+70／−0）與 SSOT 一行；其餘 d4b7868f..HEAD 差異屬他 commit；SOP 未變；原 77 條 AC、M1～M5 列、〈M1 判定細則〉、實體 glob 行逐字未動；SD-1 四十列與 SD-2 十二列與舊 PRD 逐字相同；PRD 內無「體積未達標」硬要求殘留（#57 已撤回，措辭尾巴見 F-05） |
 
+## 9. T1 修訂複審二審（2026-10-19；審查對象 5dd24a09..66ad0edd）
+
+審查者：同一 QA（Sonnet 5.5；零信任、全程唯讀），完成時刻 2026-10-19 23:56 +08:00。輸入快照 HEAD＝`be6a6ece`（PRD 與 `66ad0edd` 同 blob）；PRD digest `sha256:248eb6a7f9dd7d6d81ef7dcc840cc62174b0ac946106c9fe6c6d49fa40dab578`（392,624 bytes；一審快照 `770c80cf` 為 `sha256:a7185842…`、378,712 bytes）。差分另含報告 L601 一句（主控改附錄 SD 搬遷說明的 F-05 同型措辭）；SSOT 訂正在 `5dd24a09`。
+
+### 9.1 判定
+
+**判定：PASS（P1＝0、P2＝0；新發現 P3＝1、P4＝3）**。理由：一審 F-01～F-15 十五筆皆已修（F-14 的帳本列依主控裁決待凍結後追加，不算未修），F-01 以我自己的 C19 規則重放為 GREEN；差分沒有引入新的 P1／P2，機械消費行（`check` 的 `params.globs`、metrics、42 AT、原 77 條 AC、M1～M5 列、〈M1 判定細則〉、實體 glob 行）完好。T1 第 3 點預先核准的條件（各方驗證都沒問題）因此成立；凍結的執行不屬 QA。
+
+親跑輸出末行（當回合）：`python tools/selfimproving.py check` → `overall=PASS rc=0 fingerprint=sha256:751d4c3df047d35ce6164679bbea4884705d3e1f63d95572a5622d734a7503ca`（21 項、`params.globs` PASS、前後 `git status --porcelain` 相同）；C19 規則重放 → `RESULT: GREEN`（`rows parsed: 7`、無未配對片段）；pytest → `42 passed, 97 subtests passed in 40.31s`；`metrics_problems`＝空、`required_globs` 25＝`params.json` 25；48 張表 0 欄數不一致；SOP sha256 仍 `deb9716bb56c…`。
+
+### 9.2 一審 F-01～F-15 逐筆對照
+
+| ID | 判定 | 核對座標 | 一句說明 |
+|---|---|---|---|
+| F-01 | 已修 | SSOT:52；PRD:407、:651、:708、:921、:926 | SSOT 該列路徑改為不加反引號的文字；我重放 C19 規則七列全綠；AC-SI-34-1、C19 判準、§9.1 引言、#53、#58 說法一致，不再互斥 |
+| F-02 | 已修 | PRD:417、:497、:786、:788、:802、:1163 | 刪 `--sources`（verb 列只剩 `--run`／`--json`，固定讀 `--repo` 內預設表）；`--fetch` 預檢工作樹表＝HEAD（兩側 CRLF→LF）；`check` 新增 id∈表與 `sources_sha256` 對提交歷史（紅 `SOURCES-SHA-MISMATCH`、NE `SOURCES-HISTORY-NOT-ESTABLISHED`）；NFR-SI-02-4、附錄 B 註明事前登記只對預設 repo 成立；修法適當 |
+| F-03 | 已修 | PRD:417～:420、:478、:526、:684、:748、:786、:827 | 只增不刪＋選用鍵 `retired: true`（`check` 仍認、`fetch` 不抓、筆數只計現役），十處連動一致；「恰五鍵」「來源表筆數」殘留 grep 0 |
+| F-04 | 已修 | PRD:658（C5）對 :786、:920 | C5 補齊五個新鍵並指 #52 |
+| F-05 | 已修 | PRD:618、:894、:925；報告 L601 | 四處改「Read 單次上限 256KB，分段讀即可；NFR-SI-08-1 不管本檔」；#57 位元組標「460d3135 快照值」；舊句對 PRD 與報告 grep 0 命中 |
+| F-06 | 已修 | PRD:497 | NFR-SI-02-4 補〔訂正〕保留原文並指 #41 |
+| F-07 | 已修 | PRD:786 對 :416、:911 | `check` 列補 `QUOTE-VERIFIER-NOT-ESTABLISHED`（另補 `SOURCES-*` 兩碼） |
+| F-08 | 已修 | PRD:915（#47） | 改為主控已裁決：勘誤三（P1 TCS 棒）一併記 AT-030-2-1／AT-003-1-1 靜態段字面被能力登記取代 |
+| F-09 | 已修 | PRD:458 | AC-SI-32-1 加 frontend 純文字渲染（不用 dangerouslySetInnerHTML、不渲染 Markdown／HTML）與 vitest 負控（含 `<script>` 與 Markdown 的候選列原樣顯示） |
+| F-10 | 已修 | PRD:880、:929 | ADR-SI-11 補「已驗」證據句與再開症狀；我獨立重現：Read 讀 `~/.autosdd/traces/` 下檔與 `~/.claude/projects/…/memory/MEMORY.md`（repo 外、非 scratchpad）皆成功 |
+| F-11 | 已修（附新 P3＝N-01） | PRD:520、:881、:900、:929、:1012、:1035 | 改只掛 `.git/` 的 HEAD、refs/、objects/、packed-refs（唯讀），不掛 `.git/config`，要求 remote URL 不得內嵌憑證；註記 `packed-refs` 缺檔的建目錄風險（長語法 `create_host_path: false`）；皆標未實測 |
+| F-12 | 已修 | PRD:459 | AC-SI-32-2 改「Admin 測非 GET 得 405，Viewer 得 403 另測」，與 `SecurityConfig.java`:80–82 相符 |
+| F-13 | 已修 | PRD:20、:98、:523 | 子代理一律 Sonnet；haiku 只指引擎委派與降級；其餘 haiku 字樣只在 :930 的修復紀錄 |
+| F-14 | 已修（PRD 面） | PRD:1164；觀察帳本:115 | 附錄 B 的 FR-SI-34 列加暴露證據（T1 原文第 2 點、sid ee6af537… line 13）；OBS-SI-105 列仍 deferred，依 #62 與主控裁決凍結後追加 |
+| F-15 | 已修 | PRD:208、:465、:586、:872、:889、:891、:950、:1215 | 兩點皆改已裁決；四處一致：C.2 #16（:1215）、ADR-SI-03′（:872）、AC-SI-33-1（:466）、AC-SI-33-2（:467）皆為 console-api 以 `CONSOLE_SI_AUDIT_KEY` 簽章、Bridge 只落檔不驗簽不持有、主機端以 `AUTOSDD_SI_AUDIT_KEY` 驗；「待確認」只剩 #63 的歷史描述 |
+
+### 9.3 新發現（本次差分引入或殘留；無 P1／P2）
+
+| ID | 嚴重度 | 座標 | 症狀 | 建議修法 | 誰修 |
+|---|---|---|---|---|---|
+| N-01 | P3 | PRD:900（FC-b）、:881、:520 | F-11 的修法把 `.git/HEAD`、`packed-refs` 兩個單檔 bind mount 進容器：git 以 lock＋rename 換檔（切分支、pack-refs），Docker 單檔掛載留舊 inode ⇒ `head_sha` 可能靜默過期；`packed-refs` 缺檔時 `create_host_path: false` 使容器起不來 | FC-b 補這兩個風險並留 P1b 真容器驗；或改掛整個 `.git` 並以空檔覆蓋 `.git/config` | Architect |
+| N-02 | P4 | PRD:1163（禁令 26 列） | 該列仍寫「是否另須在 SDD 側登記 OPEN-X.x，本稿未查證，交 SCG-0（QA）審」；QA 一審已判（不字面適用、不須登記），結論只在報告 §8.3 | 補一句「QA 一審判：不須另登記」 | Architect |
+| N-03 | P4 | PRD:417、:786（`sources_sha256` 對提交歷史） | 「該事件 `t` 之前最近一次含該檔的提交」未指明用 committer 或 author 時間；歷史被 rebase／amend 改寫後會永遠紅（與 `ROW-MUTATED` 同型假設） | 寫明取 committer 時間（同 M1 錨規則）與歷史只准追加 | Architect |
+| N-04 | P4 | PRD:926（#58） | 引用 scratchpad 的 `qa_work/c19_probe.py`，收尾刪暫存後成孤兒引用 | 改述為「可由 C19 判準重寫」，或升為 AT-034-1 的正控夾具 | Architect |
+
 ---
 
 ## 附錄 SD　PRD §9.7 審閱紀錄與 §9.0 SD 查證（自 PRD 搬出，逐字）
