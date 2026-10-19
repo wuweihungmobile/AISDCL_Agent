@@ -121,7 +121,7 @@ Claude Code Hook 層的**強制攔截**；Phase E~Y 在其上持續加固，形�
 
 | 機制 | 摘要 |
 |------|------|
-| Retry Budget | SCG 3 / PR 5 / RTM 2 次超限 → ESCALATION |
+| Retry Budget | SCG 3 / PR 5 / RTM 2 / RELEASE_READY 2 次超限 → ESCALATION |
 | Context Budget | 70 / 85 / 90 / 95% 四階；≥95% 停機並產 Context Snapshot |
 | FSM Runtime | 唯一合法 FSM 讀寫入口（atomic write + .bak 輪替） |
 | Runtime Hooks | `.claude/settings.json` 的 SessionStart / PreToolUse / PostToolUse 強制層 |

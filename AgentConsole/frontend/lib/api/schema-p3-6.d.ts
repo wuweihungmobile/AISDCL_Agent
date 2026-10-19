@@ -2567,12 +2567,13 @@ export interface components {
         SddFreezeRequest: {
             /** @description 去前後空白後 1～500 字元，不含控制字元（含換行）；不靜默截斷、不替換；寫進 FSM `decision_trace`（`console-freeze approver=<approver>; reason=<理由>`）與 Console 稽核 */
             reason: string;
-            /** @description 階段名；省略時 Bridge 用 `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1；ADR-XPLAT-016 §4.4）。階段名不要求唯一 */
+            /** @description 階段名；省略時 Bridge 用 `Stage-<n>`（`n`＝`frozen_stages` 中 `kind` 不是 `refreeze` 的條目數＋1，缺 `kind` 視為凍結；ADR-XPLAT-016 §4.4）。階段名不要求唯一 */
             stage?: string;
             /**
              * @description 要凍結並計摘要的規格文件，每項是**相對專案 `executionPath`** 的 POSIX 路徑（不得為絕對路徑、不得含 `..`）；須含至少一份 TCS
              *     （檔名符合 `TEST-CONTRACT-SPEC-*` 或 `TCS-*`，由 Bridge 判定）。省略＝`[sddSpecFile 換算成相對 executionPath 的路徑]`（專案已有 `sddSpecFile` 時）；
-             *     省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下、或專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（`errors[0].field=docs`）
+             *     省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下、或專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（`errors[0].field=docs`）；
+             *     單一項不合（絕對路徑、含 `..` 等）→ 400（`errors[0].field=docs[<索引>]`，例 `docs[0]`；v1.5 訂正，DEF-AC-028）
              */
             docs?: string[];
             /**

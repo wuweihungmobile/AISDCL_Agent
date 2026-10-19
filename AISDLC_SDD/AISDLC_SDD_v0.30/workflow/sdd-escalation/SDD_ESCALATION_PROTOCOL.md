@@ -26,6 +26,7 @@
 | PR_REVIEW 重試耗盡 | retry_count ≥ 5 次仍 FAIL | 🔴 HIGH |
 | PR_REVIEW 異常模式 + SPEC_AUDIT 確認矛盾 | 相同失敗模式 × 3 + 邏輯矛盾確認 | 🔴 HIGH |
 | RTM_VERIFY 重試耗盡 | retry_count ≥ 2 次仍 FAIL | 🟡 MEDIUM |
+| RELEASE_READY 重試耗盡（SCG-6 雲端 CI，OBS-SI-117） | retry_count ≥ 2 次仍 FAIL（不自動恢復，只有人能 `resume-from-escalation`） | 🟡 MEDIUM |
 | HUMAN_PENDING 長期無回應 | 逾時 168 小時 | 🟡 MEDIUM |
 | Token Budget 嚴重不足 | 使用量 > 95% | 🔴 CRITICAL |
 | Spec 邏輯矛盾確認 | SLV 驗證器偵測到不可解矛盾 | 🔴 HIGH |

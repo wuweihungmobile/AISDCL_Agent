@@ -22,7 +22,7 @@ failure_mode: >
   無歧義映射非時序猜測，W-38-2）。**僅涵蓋 record_spec_audit 的 SPEC_AUDIT 耗盡落點**，明文排除：
   (a) check_implementation_budget 的 "implementation budget exceeded" 直接 escalate 分支
   （max_iterations / consecutive_compile_fail 耗盡＝正交失敗模式、目前無規則承載，不搭便車）；
-  (b) 一般 gate retry budget 耗盡（SCG/PR/RTM）歸 R-9.1（record_gate_retry 落點）。
+  (b) 一般 gate retry budget 耗盡（SCG/PR/RTM/RELEASE_READY）歸 R-9.1（record_gate_retry 落點）。
   皆不重複歸因（DEF-18-001 寧缺勿濫）。
 scaffold_roi:
   fire_count: 0

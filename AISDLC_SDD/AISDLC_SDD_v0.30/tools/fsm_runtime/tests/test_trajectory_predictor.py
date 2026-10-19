@@ -24,7 +24,7 @@ from tools.fsm_runtime import trajectory_predictor as tp  # noqa: E402
 from tools.fsm_runtime.fsm_runtime import FSMRuntime  # noqa: E402
 from tools.fsm_runtime.state_loader import load_state, save_state  # noqa: E402
 from tools.fsm_runtime.transition_rules import (  # noqa: E402
-    TransitionError, OBSERVATION_STATES, _HAPPY_PATH,
+    TransitionError, OBSERVATION_STATES, RETRY_LIMITS, _HAPPY_PATH,
 )
 
 
@@ -264,6 +264,51 @@ class FSMRuntimePredictiveTests(unittest.TestCase):
             self.assertTrue(r["executed"])
             self.assertEqual(rt.state.current, "SPEC_AUDIT")
 
+    # ----- OBS-SI-117：RELEASE_READY 有自己的 retry 預算後也是 retry-prone gate -----
+
+    def _release_ready_runtime(self, td: Path) -> FSMRuntime:
+        """RELEASE_READY 第 2 次到訪（先前 CI 紅過一次、退回修過）：retry_count＝1。"""
+        rt = self._runtime(td, current="RELEASE_READY")
+        _seed_retry(rt.state, "RELEASE_READY", count=1, same_pattern=0)
+        return rt
+
+    def test_release_ready_enter_then_every_exit_is_a_legal_edge(self):
+        """進得去就必須出得來：continue 回 RELEASE_READY、switch_to_audit→SPEC_AUDIT、
+        abort_early→ESCALATION。少了 TRAJECTORY_PREDICTED→RELEASE_READY 這條邊，continue 會
+        TransitionError 而卡在觀測態。"""
+        for decision, confidence, expected in (
+            ("continue", 0.0, "RELEASE_READY"),
+            ("switch_to_audit", 0.5, "SPEC_AUDIT"),
+            ("abort_early", 1.0, "ESCALATION"),
+        ):
+            with self.subTest(decision=decision), tempfile.TemporaryDirectory() as td:
+                rt = self._release_ready_runtime(Path(td))
+                rt.enter_trajectory_predicted(
+                    predicted_action={"decision": decision, "confidence": confidence,
+                                      "signals_triggered": ["S3", "S4"], "rationale": "x",
+                                      "next_state_hint": None, "gate": "RELEASE_READY"},
+                    gate="RELEASE_READY",
+                )
+                self.assertEqual(rt.state.current, "TRAJECTORY_PREDICTED")
+                rt.exit_trajectory_predicted(decision)
+                self.assertEqual(rt.state.current, expected)
+
+    def test_consult_predictor_prompts_at_release_ready_with_retry_count_one(self):
+        """預測器對 RELEASE_READY 計數 1 也會提示：S3（decision_trace 有 spec 字樣）＋S4（ledger
+        drift）兩信號 → switch_to_audit 並真的執行（RELEASE_READY 無 same_pattern 計數，S1／S2
+        不會觸發，所以用 S3＋S4）。"""
+        with tempfile.TemporaryDirectory() as td:
+            rt = self._release_ready_runtime(Path(td))
+            _seed_decision_trace(rt.state, reasons=[
+                "SLV-005 FAIL", "AC vs INV conflict", "ok", "ok", "ok",
+            ])
+            ledger = _write_ledger(Path(td), drift_pct=50.0)
+            r = rt.consult_predictor(gate="RELEASE_READY", ledger_path=ledger)
+            self.assertEqual(r["decision"], "switch_to_audit")
+            self.assertEqual(set(r["action"]["signals_triggered"]), {"S3", "S4"})
+            self.assertTrue(r["executed"])
+            self.assertEqual(rt.state.current, "SPEC_AUDIT")
+
 
 # ----------------------------------------------------------------------
 # False-positive log
@@ -376,6 +421,15 @@ class ConstantsTests(unittest.TestCase):
     def test_thresholds_consistent(self):
         self.assertGreater(tp.ABORT_THRESHOLD, tp.SWITCH_THRESHOLD)
         self.assertGreaterEqual(tp.ABORT_CONFIDENCE_FLOOR, 0.7)
+
+    def test_every_retry_budget_gate_is_a_predictor_gate_with_a_resume_edge(self):
+        """有 retry 預算的 gate（RETRY_LIMITS；predict() 本來就讀它）必須同時在預測器 gate 集合、
+        且 continue 的回程邊 TRAJECTORY_PREDICTED→gate 存在——否則 enter 進得去、continue 出不來。
+        OBS-SI-117 讓 RELEASE_READY 成為有預算的 gate，下一個新增預算的 gate 也會被這條擋下。"""
+        for gate in sorted(set(RETRY_LIMITS) | FSMRuntime._PREDICTOR_GATES):
+            with self.subTest(gate=gate):
+                self.assertIn(gate, FSMRuntime._PREDICTOR_GATES)
+                self.assertIn(gate, _HAPPY_PATH["TRAJECTORY_PREDICTED"])
 
 
 if __name__ == "__main__":

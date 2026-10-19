@@ -139,7 +139,7 @@ Console 路徑上 Bridge 對 SDD 的**寫入面**只有三處，全部要標頭 
 - `BRIDGE_SDD_WRITE_TOKEN` 不會進引擎與 FSM CLI 子行程：`_child_env` 先剝除繼承來的 `BRIDGE_SDD_WRITE_TOKEN`／`SDD_STATE_DIR`／`SDD_PROJECT` 再**只對含 `sdd` 區塊的 run** 設 `SDD_PROJECT=<鍵>`；請求層 `env` 也不得設這三個名字（422 `forbidden_name`，大聲而不是靜默覆蓋）。
 - 🔴 誠實劃界：權杖只封住 **Bridge 的 HTTP 寫入面**。引擎子行程內的 AI 步驟仍可自己執行框架的 FSM CLI；縱深在於不注入 `SDD_STATE_DIR`、批次期間 FSM 在 `IMPLEMENTATION`／`AUTOCLAUDE_DELEGATED`（`spec-frozen` 轉態不合法）、凍結綁內容（竄改規格可偵測）。不防禦主動對抗的 AI。
 
-`:freeze` 的檢查順序（固定）：①本文格式（422 `invalid_request`）②權杖（503／403）③`approver`／`reason` 清理（422 `sdd_invalid_argument`）④`root`（422 `sanitization_failed`）⑤專案與狀態檔（404／422）⑥`docs[]` 逐項（`absolute`／`contains_dotdot`／`outside_root`／`not_found`／`duplicate`／`invalid`）加含官方命名的 TCS（`missing_tcs`；422）⑦前置狀態須為 `HUMAN_PENDING`（409 `fsm_state_conflict`）⑧`expected_digests`（核准人當時看到的摘要 vs 現檔；不符 409 `spec_digest_changed`／`pair=expected_vs_file`）⑨CLI 記錄凍結。成功回應＝凍結後重讀的狀態（與 `GET` 同形）加 `stage`（省略＝`Stage-<n>`，n＝已凍結筆數＋1）與 `spec_doc_digests`。
+`:freeze` 的檢查順序（固定）：①本文格式（422 `invalid_request`）②權杖（503／403）③`approver`／`reason` 清理（422 `sdd_invalid_argument`）④`root`（422 `sanitization_failed`）⑤專案與狀態檔（404／422）⑥`docs[]` 逐項（`absolute`／`contains_dotdot`／`outside_root`／`not_found`／`duplicate`／`invalid`）加含官方命名的 TCS（`missing_tcs`；422）⑦前置狀態須為 `HUMAN_PENDING`（409 `fsm_state_conflict`）⑧`expected_digests`（核准人當時看到的摘要 vs 現檔；不符 409 `spec_digest_changed`／`pair=expected_vs_file`）⑨CLI 記錄凍結。成功回應＝凍結後重讀的狀態（與 `GET` 同形）加 `stage`（省略＝`Stage-<n>`，n＝已凍結階段數＋1，`kind: refreeze` 的重記條目不計）與 `spec_doc_digests`。
 
 ```bash
 curl -s -X POST "http://localhost:8081/sdd/fsm/<project>:freeze" -H "X-Bridge-Token: $BRIDGE_SDD_WRITE_TOKEN" -H "Content-Type: application/json" \

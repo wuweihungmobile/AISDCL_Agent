@@ -522,7 +522,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_spec_digest.py`／`test_sdd_state_dir.py`／`test_cli_bridge_verbs.py`／
     # `test_settings_matcher_powershell.py`），65 只剩實測的 76%，第三向逐字指示「重釘為 68」
     # ⇒ 照填、零加減推算（2026-10-17，Windows，全包停工後的收尾單人窗口所量）。
-    LATEST_FSM_TESTS_TREE: 68,
+    # 🔴 SelfImproving P1 輪框架根治（OBS-SI-108／117）收尾重釘 68 → 70：該樹由 86 支長到 **88**
+    # （框架 Developer 新增 `test_spec_refreeze.py`／`test_release_ready_backedge.py`），68 只剩
+    # 實測的 77%，前置掃描逐字指示「重釘為 70」⇒ 照填、零加減推算（2026-10-19，Windows，
+    # 主控收尾單人窗口所量；70 對 88 支成立，再新增 1 支即過期）。
+    LATEST_FSM_TESTS_TREE: 70,
 }
 
 #: 下限相對實測值的目標比例（`floor ≈ actual × 本值`）。兩個方向都由它定義：

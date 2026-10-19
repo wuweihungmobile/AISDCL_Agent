@@ -315,7 +315,7 @@ AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 1. 繞過 `FSMRuntime` 直接讀寫 `FSM-STATE-*.yaml`（R-9.6）
 2. 停用 / 刪除 `.claude/` 的 Phase D·E hooks（R-9.6）
 3. IMPLEMENTATION 期間 Write/Edit `docs/01~03` 規格文件（R-9.6）
-4. SCG/PR/RTM retry 超上限仍重試、不進 ESCALATION（R-9.1）
+4. SCG/PR/RTM/RELEASE_READY retry 超上限仍重試、不進 ESCALATION（R-9.1）
 5. Token ≥ 95% 仍工作、不產 Context Snapshot（R-9.2）
 6. 進入 ESCALATION / ESCALATION_FINAL 後自動恢復（必須等人工）（R-9.5、R-9.14）
 7. 對 `category=structural` 的 ESCALATION 強行 auto-recovery（R-9.14）
@@ -344,7 +344,7 @@ AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 
 | 機制 | 摘要 | 細則 |
 |------|------|------|
-| Retry Budget | SCG 3 / PR 5 / RTM 2 次 → ESCALATION | R-9.1 |
+| Retry Budget | SCG 3 / PR 5 / RTM 2 / RELEASE_READY 2 次 → ESCALATION | R-9.1 |
 | Context Budget | 70 / 85 / 90 / 95% 四階；≥95% 停機 | R-9.2 |
 | 邏輯一致性 | SCG-0/3 前跑 spec-logical-validator | R-9.3 |
 | SPEC_FROZEN | 通過後強制 /stage-compaction | R-9.4 |

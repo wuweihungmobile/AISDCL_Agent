@@ -19,6 +19,7 @@
 | v1.4 | 2026-10-16 | W7 第二批：AISDLC_SDD 接入、深度探針、待審批清單、refresh token 撤銷 | D-16～D-20（§6.7） |
 | v1.5 | 2026-10-17 | 整合輪 115：SDD 迴圈（批次治理、人工閘寫入、FSM 同步、追溯覆蓋、專案綁定） | D-115-01～13（§6.8；`AutoSDD_improving_115.md` §6） |
 | v1.5（ADR 對齊） | 2026-10-17 | v1.5 與 ADR-XPLAT-016 對齊：Console 專案為錨（凍結請求無 `binding`）、委派退出語意與回收點、AT 文法與逆向 RTM 歸屬、摘要／權杖／CLI rc／專案名規則等值落定；D-115-18：SDD run 的 `:resume`／`/restore` 也帶權杖（共四個呼叫）、含 `/` 的專案原名降級為已知邊界 | D-115-14～16、18；ADR-XPLAT-016 附錄 A、B（§6.8.6） |
+| v1.5（勘誤） | 2026-10-19 | SDD `spec-refreeze` 之後 `:freeze` 省略 `stage` 的預設階段名 `Stage-<n>`：`n` 不含 `kind` 為 `refreeze` 的重記條目（§1.10.2、§3.1.4 (d) 兩處與 openapi `SddFreezeRequest.stage` 描述；端點、schema、狀態碼不變） | OBS-SI-108／F-17 |
 
 > **v1.5 變更摘要**（逐條對照見 §6.8；整合輪 115，主控裁決 D-115-01～16、18，契約先行；證據表見 §6.8.2；**已與 ADR-XPLAT-016〔下稱 ADR-016，Proposed〕對齊**，逐項處置與仍待確認的靜默處見 §6.8.6；環境契約、CLI 動詞與 rc、摘要、權杖與最小侵入白名單的完整規格一律以 ADR-016 為唯一真相源，本文只引用位置，並在需要機械斷言處逐字引用其值）：
 > 1. **SDD 批次（G-01、G-06、G-08；D-115-06）**：Bridge `POST /autoclaude/runs` 增選填頂層 `sdd` 區塊——Bridge 伺服端預檢（凍結、三點摘要、FSM 狀態）後注入 `workflow_type`／`workflow_path`（有 `spec_file` 時是檔案路徑）與引擎環境 `SDD_PROJECT`，外部契約仍不開 `workflow_*`；Console 對「範圍內任務全為 SDD 來源」的批次送 `sdd`，step_id 沿用規格的 `sdd-<場景>-<at id 小寫>`，混合批次不啟用並在 execute 的 201 以 `warnings[]` 出聲（§1.10.6、§3.1.6、§3.4.1）。
@@ -1347,7 +1348,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 | 欄位 | 型別 | 必填 | 規則 |
 |------|------|:----:|------|
 | `reason` | string | ✅ | 去前後空白後 1～500 字元，不含控制字元（含換行）；**不靜默截斷、不替換**，違反即 400（Bridge 同規則，違反回 422 `sdd_invalid_argument`；ADR-016 §4.4） |
-| `stage` | string | — | `^[A-Za-z0-9._-]{1,64}$`；省略 → Bridge 以 `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1）。階段名不要求唯一（ADR-016 §4.4） |
+| `stage` | string | — | `^[A-Za-z0-9._-]{1,64}$`；省略 → Bridge 以 `Stage-<n>`（`n`＝`frozen_stages` 中 `kind` 不是 `refreeze` 的條目數＋1，缺 `kind` 視為凍結）。階段名不要求唯一（ADR-016 §4.4）。**v1.5 勘誤**（2026-10-19，OBS-SI-108）：原文寫「`n`＝`frozen_stages` 筆數＋1」；SDD `spec-refreeze` 追加的 `kind: refreeze` 重記條目不是新階段，計入會讓預設名跳號（Stage-1 加一次重記後下一個該是 Stage-2，不是 Stage-3） |
 | `docs` | string[] | 條件 | 1～20 項；每項是**相對專案 `executionPath`** 的 POSIX 路徑（不得為絕對路徑、不得含 `..`）。省略＝`[sddSpecFile 換算成相對 executionPath 的路徑]`（專案已有 `sddSpecFile` 時）；省略而專案沒有 `sddSpecFile`、或規格檔不在 `executionPath` 之下 → 400（`errors[0].field=docs`）；專案已有 `sddSpecFile` 而 `docs` 不含它 → 400（同欄位）。**須含至少一份 TCS**（檔名符合 `TEST-CONTRACT-SPEC-*` 或 `TCS-*`），由 Bridge 判定（ADR-016 §6.3 ①）。**v1.5 訂正**（W5 QA，DEF-AC-028）：**單一項**不合（絕對路徑、含 `..` 等）時 `errors[0].field` 是 `docs[<索引>]`（例 `docs[0]`）；上列「省略」「不含已綁定規格檔」這類整份 `docs` 的錯誤才是 `docs` |
 | `expectedDigests` | object | — | `{<docs 內的相對路徑>: "sha256:<64 位小寫 hex>"}`：核准人當時看到的摘要。有帶＝Bridge 逐一與現檔比對，不符 → 409 `sdd_spec_digest_changed`（`details.pair=expected_vs_file`；防「核准人看的版本不是現在要凍結的版本」，ADR-016 §6.3 ①）。鍵必須都在 `docs` 內，否則 400（`errors[0].field=expectedDigests`）。**v1.5 的畫面不送這欄**（沒有顯示規格摘要的元件）；保留給 API 消費者（§6.8.6 靜默處 #2） |
 
@@ -1866,7 +1867,7 @@ Bridge 基底位址：**管理員在設定頁改過的** `autoclaude.engineUrl`�
 | 欄位 | 型別 | 規則 |
 |------|------|------|
 | `root` | string | 專案根目錄（絕對路徑；同 (a) 的 `check_path`） |
-| `stage` | string | 選填；`^[A-Za-z0-9._-]{1,64}$`；省略 → `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1，Bridge 持互斥鎖時讀狀態檔計得）。階段名不要求唯一（摘要鍵遇重複以後者為準） |
+| `stage` | string | 選填；`^[A-Za-z0-9._-]{1,64}$`；省略 → `Stage-<n>`（`n`＝`frozen_stages` 中 `kind` 不是 `refreeze` 的條目數＋1，缺 `kind` 視為凍結，Bridge 持互斥鎖時讀狀態檔計得；**v1.5 勘誤**〔2026-10-19，OBS-SI-108〕原文寫「筆數＋1」，`spec-refreeze` 的重記條目不計）。階段名不要求唯一（摘要鍵遇重複以後者為準） |
 | `docs` | string[] | 1～20 項；每項是相對 `root` 的 POSIX 路徑，不得為絕對路徑、不得含 `..`，須是 `root` 之下的既有檔案（resolve 後不得跑出 `root`，含 symlink）；**至少一份檔名符合官方 TCS 命名**（`TEST-CONTRACT-SPEC-*` 或 `TCS-*`，與 adapter 的官方命名判準同形） |
 | `approver` | string | 1～100 字元，無控制字元，**不含 `;`**（否則 422 `sdd_invalid_argument`，讓 `--reason` 的 `key=value; …` 組字可無歧義解析） |
 | `reason` | string | 去前後空白後 1～500 字元，無控制字元（含換行）；**不靜默截斷、不替換**，違反即 422 `sdd_invalid_argument` |

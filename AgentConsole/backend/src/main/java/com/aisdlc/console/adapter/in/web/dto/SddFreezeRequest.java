@@ -22,7 +22,8 @@ public record SddFreezeRequest(
                         + "（console-freeze approver=<approver>; reason=<理由>）與 Console 稽核")
         String reason,
         @Schema(pattern = "^[A-Za-z0-9._-]{1,64}$",
-                description = "階段名；省略時 Bridge 用 Stage-<n>（n＝frozen_stages 筆數＋1）。階段名不要求唯一")
+                description = "階段名；省略時 Bridge 用 Stage-<n>（n＝frozen_stages 中 kind 不是 refreeze 的條目數＋1，缺 kind 視為凍結）。"
+                        + "階段名不要求唯一")
         String stage,
         @ArraySchema(minItems = 1, maxItems = 20, schema = @Schema(minLength = 1, maxLength = 500),
                 arraySchema = @Schema(description = "要凍結並計摘要的規格文件，每項是相對專案 executionPath 的 POSIX 路徑（不得為絕對路徑、不得含 ..）；"

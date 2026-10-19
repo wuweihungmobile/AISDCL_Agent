@@ -7,6 +7,7 @@ trigger_states:
   - RTM_VERIFY
   - SCG_VALIDATION
   - SPEC_REGRESSION_CHECK
+  - RELEASE_READY
 severity: high
 maturity: active
 spec: >

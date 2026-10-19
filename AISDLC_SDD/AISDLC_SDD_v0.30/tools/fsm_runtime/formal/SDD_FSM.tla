@@ -219,6 +219,14 @@ T_RtmExhaust     == GateExhaust("RTM_VERIFY")
 
 T_RelReady       == Move("RELEASE_READY", "RELEASE")
 
+(* OBS-SI-117：RELEASE_READY（SCG-6，雲端 CI）才被打回時的有界回邊，結構同 RTM_VERIFY
+   （transition_rules._HAPPY_PATH["RELEASE_READY"] 與 RETRY_LIMITS["RELEASE_READY"]）：
+   retry < MAX_RETRY 退回 IMPLEMENTATION 並 ++retry；retry ≥ MAX_RETRY 即 ESCALATION（Rule 9.1）。
+   不新增 Fairness：RELEASE_READY→IMPLEMENTATION→…→RELEASE_READY 的環，每次到訪 RELEASE_READY 時
+   T_RelReady 皆 enabled（Move 無守衛），既有 SF_vars(T_RelReady) 即迫使它終究發生，與 T_RtmFail 的環同理。 *)
+T_RelReadyFail    == GateRetry("RELEASE_READY", "IMPLEMENTATION")
+T_RelReadyExhaust == GateExhaust("RELEASE_READY")
+
 (***************************************************************************)
 (* Observation states — Phase E~G                                          *)
 (*                                                                         *)
@@ -258,7 +266,10 @@ T_HubExit == \E dst \in HubSources :
 
 (* TRAJECTORY_PREDICTED (Phase G M2 / ACT-035) — Rule 9.15 *)
 TrajSources == {"IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY",
-                "SCG_VALIDATION", "SPEC_REGRESSION_CHECK"}
+                "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "RELEASE_READY"}
+(* OBS-SI-117：RELEASE_READY 有自己的 retry 預算後納入（FSMRuntime._PREDICTOR_GATES、
+   _HAPPY_PATH["TRAJECTORY_PREDICTED"] 的 RELEASE_READY 回程邊同步）。RELEASE_READY↔TRAJECTORY_PREDICTED
+   的 2-cycle 比照 RTM_VERIFY：每次到訪 RELEASE_READY 時 T_RelReady 皆 enabled，既有 SF_vars(T_RelReady) 破環。 *)
 T_EnterTraj == \E src \in TrajSources :
     /\ state = src
     /\ retry >= 1                           \* Rule 9.15.1
@@ -552,7 +563,7 @@ Next ==
     \/ T_PrPass \/ T_PrToAudit \/ T_PrFail \/ T_PrExhaust
     \/ T_AuditBack
     \/ T_RtmPass \/ T_RtmFail \/ T_RtmExhaust
-    \/ T_RelReady
+    \/ T_RelReady \/ T_RelReadyFail \/ T_RelReadyExhaust
     (* Phase E~F observation *)
     \/ T_EnterProdSignal \/ T_ProdSignalRelease \/ T_ProdSignalRespec
     \/ T_EnterLearning_Esc \/ T_EnterLearning_Rel \/ T_EnterLearning_Prod

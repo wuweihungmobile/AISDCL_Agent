@@ -12,7 +12,7 @@ import uuid as _uuid
 from pathlib import Path
 from typing import Optional
 
-from .state_loader import FSMState, REPO_ROOT
+from .state_loader import FREEZE_KIND_FREEZE, FSMState, REPO_ROOT, freeze_entry_kind
 
 SNAPSHOT_DIR = REPO_ROOT / "build" / "reports" / "abort"
 
@@ -62,6 +62,11 @@ def _fmt_frozen_stages(stages) -> str:
     lines = []
     for s in stages:
         stage = s.get("stage", "?")
+        kind = freeze_entry_kind(s)
+        if kind != FREEZE_KIND_FREEZE:
+            # OBS-SI-108：`spec-refreeze` 追加的重記條目與原凍結同 stage；不標註的話，這張「已完成 Stage」表
+            # 會把一次文字勘誤讀成又完成了一個階段。
+            stage = f"{stage}（{kind}）"
         frozen_at = s.get("frozen_at", "?")
         report = s.get("compaction_report") or "—"
         lines.append(f"| {stage} | {frozen_at} | {report} |")

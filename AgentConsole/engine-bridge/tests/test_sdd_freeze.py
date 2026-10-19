@@ -95,7 +95,7 @@ def test_freeze_records_the_stage_with_independently_computed_digests(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["current_state"] == "SPEC_FROZEN"
-    assert body["stage"] == "Stage-1", "省略 stage＝Stage-<n>，n＝已凍結筆數＋1"
+    assert body["stage"] == "Stage-1", "省略 stage＝Stage-<n>，n＝已凍結階段數（不含重記條目）＋1"
     assert body["spec_doc_digests"] == {TCS_REL: _digest(TCS_TEXT)}
     assert body["fsm_project"] == "alpha"
     assert body["phase"] == {"name": "FROZEN", "order": 4, "blocking": False,
@@ -159,6 +159,15 @@ def test_stage_defaults_to_the_next_number_and_an_explicit_valid_stage_is_kept(
     assert _post(live, "alpha", _body(root)).json()["stage"] == "Stage-3"
     seed_state(root / _FSM, "alpha", "HUMAN_PENDING")
     assert _post(live, "alpha", _body(root, stage="A.b_c-1")).json()["stage"] == "A.b_c-1"
+
+
+def test_a_refreeze_entry_does_not_advance_the_default_stage_number(
+        live, fake: Path, root: Path) -> None:
+    """SDD `spec-refreeze`（F-17）只在 `frozen_stages` 追加 `kind: refreeze` 的條目，不是新階段：
+    Stage-1 ＋ 一次重記之後，下一次凍結的預設名是 Stage-2，不是跳號的 Stage-3。"""
+    seed_state(root / _FSM, "alpha", "HUMAN_PENDING",
+               frozen_stages=[{"stage": "Stage-1"}, {"stage": "Stage-1", "kind": "refreeze"}])
+    assert _post(live, "alpha", _body(root)).json()["stage"] == "Stage-2"
 
 
 @pytest.mark.parametrize("stage", ["", "has space", "a/b", "x" * 65, "名稱", "bad!"])

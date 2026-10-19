@@ -25,6 +25,7 @@ from .transition_rules import (
     _HAPPY_PATH,
     MAX_AUTO_COMPACT_PER_STAGE,
     OBSERVATION_STATES,
+    REASON_REQUIRED_ON_FAIL,
     RETRY_LIMITS,
     SPEC_AUDIT_MAX_PER_STAGE,
     TransitionError,
@@ -524,6 +525,12 @@ class FSMRuntime:
 
     def record_gate_result(self, gate: str, result: str, reason: str = "") -> dict:
         result = result.upper()
+        if result != "PASS" and gate in REASON_REQUIRED_ON_FAIL and not (reason or "").strip():
+            # OBS-SI-117：RELEASE_READY FAIL 把已到發布關卡的規格退回實作，理由是唯一的稽核憑證；
+            # 先於任何狀態改動就拒絕（fail-loud），不讓「沒理由的回退」進到 retry 計數與 decision_trace。
+            raise ValueError(
+                f"reason 必填：{gate} FAIL 會把已到發布關卡的規格退回實作，必須留下可稽核的理由（OBS-SI-117）"
+            )
         payload: dict = {"gate": gate, "result": result}
         if result == "PASS":
             self.state.reset_retry(gate)
@@ -579,6 +586,13 @@ class FSMRuntime:
             # 結構化歸因到 R-9.1（無歧義映射，非時序猜測）。v0.24 預設 ON 活體記 catch；
             # 顯式 opt-out（flag=0）＝不記（零退化）。
             self._record_escalation_catches(["R-9.1"])
+            # 🔴 耗盡的 ESCALATION 與這次的計數遞增必須先落盤，不論後面有沒有自動恢復：`record_escalation`
+            # 直接改記憶體裡的 current（繞過 transition()，所以沒有人替它存檔），此前只有 `enter_auto_recovery`
+            # 內的轉態碰巧會存。於是 `SDD_ENABLE_AUTO_RECOVERY=0`、或 gate 不在 `_GATE_RESUMABLE_TARGETS`
+            # （例如 RELEASE_READY，OBS-SI-117）時，CLI 印出 `escalated: true` 但磁碟上的狀態檔原封不動——
+            # 計數沒加、ESCALATION 沒寫，有界停機在磁碟上形同虛設（`record_spec_audit`／
+            # `check_implementation_budget` 的升級落點都有顯式 save_state，唯獨這裡漏了）。
+            save_state(self.state)
             # W-15-1 / B-axis L4：flag-gated 有界自動恢復接入。v0.22 起預設 ON（顯式 opt-out=0
             # 才還原 v0.05 停在 ESCALATION 等人）。ON 時：對「可恢復 gate」自動嘗試既有
             # ESCALATION → AUTO_RECOVERY_ATTEMPT 邊（TLA T_EnterAutoRecover 已模型化、
@@ -587,7 +601,9 @@ class FSMRuntime:
             #   • 任何例外 → fail-closed 停在 ESCALATION（不弱化紅線）
             # gate ∈ _GATE_RESUMABLE_TARGETS 預檢：避免 enter_auto_recovery 先轉態再於
             # record_attempt_start 因 resume_state 非白名單 raise，致 FSM 卡在
-            # AUTO_RECOVERY_ATTEMPT 的撕裂狀態。RETRY_LIMITS 4 gate 全在白名單，此檢為防護。
+            # AUTO_RECOVERY_ATTEMPT 的撕裂狀態。RETRY_LIMITS 的 gate 除 RELEASE_READY 外全在白名單；
+            # RELEASE_READY 刻意不在（OBS-SI-117：發布關卡連續失敗＝結構性，耗盡後停在上面已落盤的
+            # ESCALATION 等人 `resume-from-escalation`，不自動重入——此檢正是在擋它）。
             if _auto_recovery_enabled() and self._gate_is_resumable(gate):
                 # 以「實際失敗 reason」作 diagnose 依據（transient/structural 分類靠它），
                 # 非 gate-exhaust 格式字串；reason 缺時退回 esc_reason（多會診為 structural
@@ -683,6 +699,74 @@ class FSMRuntime:
             spec_refs=list(spec_docs or []),
             trigger="spec_frozen",
         )
+
+    #: OBS-SI-108（F-17）：`spec-refreeze` 的合法狀態＝規格修訂的正規所在（SPEC_AUDIT）＋發布後的文字勘誤
+    #: （RELEASE_READY／RELEASE）。其餘一律拒絕：SPEC_DRAFTING／HUMAN_PENDING 的修訂之後本來就要走 `spec-frozen`
+    #: 人工閘；IMPLEMENTATION 起 R-9.6 禁止改規格，沒有「合法修訂」可重記。不新增狀態、不新增邊
+    #: （SDD_FSM.tla 不受影響：重記是狀態檔內一筆稽核資料，不是狀態轉移）。
+    SPEC_REFREEZE_ALLOWED_STATES = frozenset({"SPEC_AUDIT", "RELEASE_READY", "RELEASE"})
+
+    def check_spec_refreeze_preconditions(self) -> None:
+        """`spec-refreeze` 的前置（只讀）：狀態合法、且有舊凍結可取代；否則拋 `TransitionError`。
+
+        獨立成方法，讓 CLI 能「先驗前置、再算摘要、最後才改狀態」（與 `spec-frozen` 同序）；
+        `record_spec_refreeze` 自己也會再驗一次，所以只呼叫 API 的人同樣安全。"""
+        src = self.state.current
+        if src not in self.SPEC_REFREEZE_ALLOWED_STATES:
+            raise TransitionError(
+                f"spec-refreeze blocked: current={src}, "
+                f"expected one of {sorted(self.SPEC_REFREEZE_ALLOWED_STATES)}"
+            )
+        if self.state.latest_frozen() is None:
+            raise TransitionError(
+                f"spec-refreeze blocked: current={src} but frozen_stages has no entry to supersede "
+                "(a refreeze re-attests an existing freeze; the first freeze goes through spec-frozen)"
+            )
+
+    def record_spec_refreeze(
+        self,
+        spec_docs: list[str],
+        *,
+        spec_doc_digests: dict,
+        reason: str,
+        approved_by: Optional[str] = None,
+    ) -> dict:
+        """OBS-SI-108（F-17）：在不經 HUMAN_PENDING 的前提下，為「已凍結、後來被合法修訂」的規格重記 digest。
+
+        為什麼需要：功能鍵在 `IMPLEMENTATION→SPEC_AUDIT` 修訂規格後只能出邊到 `PR_REVIEW`，而
+        `spec-frozen` 只在 HUMAN_PENDING 合法，所以 `frozen_stages[*].spec_doc_digests` 永遠停在修訂前的值，
+        之後每個消費凍結摘要的面（AutoClaude adapter 的 `check_digest` 實證拋 `SpecDigestMismatchError`、
+        人讀狀態檔）都判不符。本方法**追加**一筆 `kind: refreeze` 條目（細節見
+        `FSMState.record_spec_refreeze`），舊條目不動。
+
+        不轉態：`from`＝`to`＝當前狀態，只追加一筆 `trigger: spec_refreeze` 的 decision_trace（reason 原文）。
+        先驗前置（狀態合法、有舊凍結可取代）才動記憶體，最後才存檔——失敗時狀態檔位元組不變。
+        回傳 `{"refrozen": True, "stage", "supersedes", "spec_doc_digests"}`。
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("reason 必填：重記 digest 必須寫明修訂內容與修訂發生在哪個狀態／commit（OBS-SI-108）")
+        if not spec_doc_digests:
+            raise ValueError("spec_doc_digests 不可為空：重記的目的就是記下修訂後的摘要")
+        self.check_spec_refreeze_preconditions()
+        src = self.state.current
+        entry = self.state.record_spec_refreeze(
+            spec_docs, spec_doc_digests=spec_doc_digests, reason=reason, approved_by=approved_by
+        )
+        # 不包 try/except：decision_trace 是這筆重記唯一的稽核憑證，寫不進去就該大聲失敗，不能靜默少一筆。
+        self.state.append_decision_trace(
+            from_state=src,
+            to_state=src,
+            reason=reason,
+            spec_refs=list(spec_docs or []),
+            trigger="spec_refreeze",
+        )
+        save_state(self.state)
+        return {
+            "refrozen": True,
+            "stage": entry["stage"],
+            "supersedes": entry["supersedes"],
+            "spec_doc_digests": dict(entry["spec_doc_digests"]),
+        }
 
     def reconcile_ci_events(self) -> list[str]:
         return reconcile(self.state)
@@ -1688,9 +1772,12 @@ class FSMRuntime:
 
 
 
+    # OBS-SI-117：RELEASE_READY 自有 retry 預算（RETRY_LIMITS）後即屬 retry-prone gate——第 2 次到訪
+    # （retry_count ≥ 1）時預測器同樣可提示。守則：RETRY_LIMITS 的每個 gate 都必須在此集合、且在
+    # _HAPPY_PATH["TRAJECTORY_PREDICTED"] 有回程邊與 SDD_FSM.tla 的 TrajSources（tests 鎖住前兩者）。
     _PREDICTOR_GATES = frozenset({
         "IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY",
-        "SCG_VALIDATION", "SPEC_REGRESSION_CHECK",
+        "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "RELEASE_READY",
     })
 
     def enter_trajectory_predicted(
@@ -3325,7 +3412,7 @@ class FSMRuntime:
         return {"exited": True, "decision": decision, "to": target}
 
 
-# ===== ADR-XPLAT-016 §4：橋接用 CLI 契約（四個新動詞＋`spec-frozen` 擴充）=====
+# ===== ADR-XPLAT-016 §4：橋接用 CLI 契約（四個新動詞＋`spec-frozen` 擴充；OBS-SI-108 起另含 `spec-refreeze`）=====
 # Bridge（AgentConsole engine-bridge）以子行程呼叫本 CLI 寫 FSM（Rule 9 絕對禁令 #1：一切寫入
 # 只經 FSMRuntime），所以失敗必須有「可程式辨識」的形態：現行 CLI 的非法轉態是 traceback＋rc 1
 # （〔乾跑〕ADR §2.3 #5／#10），Bridge 無從區分「前置狀態不符」與「程式壞了」。新契約：
@@ -3337,6 +3424,11 @@ class FSMRuntime:
 #: 四個新動詞：恆視為已帶 `--must-exist`、輸出單行 JSON、`--reason` 必填且 strip 後非空
 #: （它是寫進 `decision_trace` 的稽核憑證）。
 _BRIDGE_VERBS = ("negotiate-enter", "negotiate-exit", "delegate-enter", "delegate-exit")
+#: 恆走新契約（單行 JSON、恆 `--must-exist`、`--project` 與非空 `--reason` 必填）的五個動詞＝四個橋接動詞＋
+#: `spec-refreeze`（OBS-SI-108；主控／人用，Bridge 不呼叫）。它同樣是「事後補寫稽核憑證」的寫入動詞：缺
+#: `--project` 時會退回 `SDD_PROJECT`／目錄名推導的專案鍵（框架自身的專案鍵也是合法專案），一次手滑就改到別的
+#: 專案，所以比照橋接動詞要求顯式；`--digest`／`--json` 對它沒有意義（摘要恆算、輸出恆為單行 JSON）。
+_STRUCTURED_VERBS = (*_BRIDGE_VERBS, "spec-refreeze")
 _RC_TRANSITION, _RC_INVALID, _RC_STATE = 3, 4, 5
 _CLI_DETAIL_MAX = 200
 _APPROVER_MAX = 100
@@ -3429,8 +3521,11 @@ def _resolve_digest_root(raw_root: Optional[str]) -> Path:
 
 def _structured_usage(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """argparse 層用法錯誤（rc 2、stdout 無 JSON）：缺必填旗標。"""
-    if args.command in _BRIDGE_VERBS and not args.project:
+    if args.command in _STRUCTURED_VERBS and not args.project:
         parser.error(f"{args.command} requires --project")
+    if args.command == "spec-refreeze" and args.stage is not None:
+        # 靜默忽略會讓人以為自己指定了 stage；重記的 stage 一律取最近一筆凍結條目的 stage（fail-loud）。
+        parser.error("spec-refreeze does not take --stage (the stage comes from the latest frozen_stages entry)")
     if args.command == "delegate-exit" and not args.decision:
         parser.error("delegate-exit requires --decision done|failed")
     if args.command == "negotiate-exit" and not args.outcome:
@@ -3441,13 +3536,23 @@ def _structured_usage(parser: argparse.ArgumentParser, args: argparse.Namespace)
 
 def _structured_options(args: argparse.Namespace) -> dict:
     """純參數檢查（rc 4），先於任何 I/O：讓「參數壞」與「狀態檔不存在」的優先序確定。"""
-    if args.command in _BRIDGE_VERBS:
+    if args.command in _STRUCTURED_VERBS:
         if not args.reason.strip():
             raise _CliError(
                 _RC_INVALID, "invalid_argument",
                 f"{args.command} requires a non-blank --reason (audit evidence written to decision_trace)",
             )
-        return {}
+        if args.command != "spec-refreeze":
+            return {}
+        # spec-refreeze：核准人／`--doc`／`--root` 的規則同 `spec-frozen --digest`，只是摘要恆算。
+        refreeze: dict = {"approver": _validate_approver(args.approver)}
+        if not args.doc:
+            raise _CliError(
+                _RC_INVALID, "invalid_argument",
+                "spec-refreeze requires at least one --doc (the revised documents to re-attest)",
+            )
+        refreeze["root"] = _resolve_digest_root(args.root)
+        return refreeze
     options: dict = {"approver": _validate_approver(args.approver)}
     if args.digest:
         if not args.doc:
@@ -3467,6 +3572,16 @@ def _structured_run(args: argparse.Namespace, runtime: FSMRuntime, options: dict
         return runtime.enter_autoclaude_delegated(reason=args.reason, playbook_ref=args.playbook_ref)
     if verb == "delegate-exit":
         return runtime.exit_autoclaude_delegated(args.decision, reason=args.reason)
+    if verb == "spec-refreeze":
+        # 同 spec-frozen：先驗前置（狀態合法、有舊凍結可取代，所以狀態不對時根本不去讀檔）、再算摘要、
+        # 最後才改狀態；任何一份文件有問題（rc 4）時狀態檔位元組不變。
+        from . import spec_digest
+
+        runtime.check_spec_refreeze_preconditions()
+        docs, digests = spec_digest.digest_docs(options["root"], list(args.doc))
+        return runtime.record_spec_refreeze(
+            docs, spec_doc_digests=digests, reason=args.reason, approved_by=options["approver"]
+        )
     # spec-frozen：先驗前置、再算摘要、最後才改狀態（ADR §4.2）
     if not is_transition_allowed(runtime.state.current, "SPEC_FROZEN"):
         raise TransitionError(f"transition not allowed: {runtime.state.current} -> SPEC_FROZEN")
@@ -3493,7 +3608,7 @@ def _cli_structured(parser: argparse.ArgumentParser, args: argparse.Namespace) -
     _structured_usage(parser, args)
     try:
         options = _structured_options(args)
-        runtime = _bootstrap_cli(args.project, must_exist=args.command in _BRIDGE_VERBS or args.must_exist)
+        runtime = _bootstrap_cli(args.project, must_exist=args.command in _STRUCTURED_VERBS or args.must_exist)
     except _CliError as err:
         return _cli_fail(verb, err)
     before = runtime.state.current
@@ -3525,7 +3640,7 @@ def _cli() -> int:
     parser.add_argument("command", choices=[
         "show", "transition", "gate", "reconcile", "spec-audit", "spec-frozen", "check-impl",
         "complete-auto-compact", "reset-ledger", "resume-from-escalation",
-        *_BRIDGE_VERBS,
+        *_STRUCTURED_VERBS,
     ])
     parser.add_argument("--project", default=None)
     parser.add_argument("--to", dest="target", default=None)
@@ -3537,21 +3652,24 @@ def _cli() -> int:
     parser.add_argument("--doc", action="append", default=None)
     # ADR-XPLAT-016 §4（新）：全域旗標與四個新動詞／`spec-frozen` 的專屬旗標
     parser.add_argument("--must-exist", action="store_true",
-                        help="state file missing => rc 5 and no file is created (always on for the Bridge verbs)")
+                        help="state file missing => rc 5 and no file is created "
+                             "(always on for the Bridge verbs and spec-refreeze)")
     parser.add_argument("--decision", choices=["done", "failed"], default=None, help="delegate-exit")
     parser.add_argument("--outcome", choices=["agreed", "underspecified"], default=None, help="negotiate-exit")
     parser.add_argument("--playbook-ref", default="", help="delegate-enter, e.g. run:<run_id>")
     parser.add_argument("--contract-ref", default="", help="negotiate-enter")
     parser.add_argument("--digest", action="store_true",
                         help="spec-frozen: record sha256 digests of the --doc files (frozen_stages[-1].spec_doc_digests)")
-    parser.add_argument("--root", default=None, help="spec-frozen --digest: absolute project root for --doc paths")
-    parser.add_argument("--approver", default=None, help="spec-frozen: written to frozen_stages[-1].approved_by")
+    parser.add_argument("--root", default=None,
+                        help="spec-frozen --digest / spec-refreeze: absolute project root for --doc paths")
+    parser.add_argument("--approver", default=None,
+                        help="spec-frozen / spec-refreeze: written to frozen_stages[-1].approved_by")
     parser.add_argument("--json", action="store_true", help="spec-frozen: single-line JSON result (Bridge contract)")
     args = parser.parse_args()
 
     if args.command == "spec-frozen" and args.root is not None and not args.digest:
         parser.error("--root only applies together with --digest")
-    if args.command in _BRIDGE_VERBS or (args.command == "spec-frozen" and (args.json or args.digest)):
+    if args.command in _STRUCTURED_VERBS or (args.command == "spec-frozen" and (args.json or args.digest)):
         return _cli_structured(parser, args)
 
     if args.must_exist:  # 舊動詞加 `--must-exist`：缺檔 rc 5 且不建檔；不帶則行為與輸出逐字不變
@@ -3575,6 +3693,9 @@ def _cli() -> int:
     elif args.command == "gate":
         if not args.gate or not args.result:
             parser.error("--gate and --result required")
+        if args.gate in REASON_REQUIRED_ON_FAIL and args.result.upper() != "PASS" and not args.reason.strip():
+            # OBS-SI-117：與 `record_gate_result` 同一條規則；CLI 先擋成用法錯誤（rc 2），不印 traceback。
+            parser.error(f"--reason 必填：{args.gate} FAIL 會把已到發布關卡的規格退回實作，須留下可稽核的理由")
         payload = runtime.record_gate_result(args.gate, args.result, args.reason)
         print(json.dumps(payload, ensure_ascii=False))
     elif args.command == "reconcile":

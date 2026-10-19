@@ -24,7 +24,7 @@ rules = rule_loader.load_for_state("IMPLEMENTATION")   # 只載 trigger_states �
 
 | id | 標題 | 觸發狀態 | 嚴重度 | maturity | 規則檔 |
 |----|------|---------|--------|----------|--------|
-| R-9.1 | FSM Retry Budget | SCG_VALIDATION / PR_REVIEW / RTM_VERIFY / SPEC_REGRESSION_CHECK | critical | active | R-9.1-fsm-retry-budget.yaml |
+| R-9.1 | FSM Retry Budget | SCG_VALIDATION / PR_REVIEW / RTM_VERIFY / SPEC_REGRESSION_CHECK / RELEASE_READY | critical | active | R-9.1-fsm-retry-budget.yaml |
 | R-9.2 | Context Budget（Token 預算） | * | high | active | R-9.2-context-budget.yaml |
 | R-9.3 | 邏輯一致性防護（SLV 前置） | SCG_VALIDATION / SPEC_DRAFTING / SPEC_AUDIT / PR_REVIEW | high | active | R-9.3-logical-consistency-guard.yaml |
 | R-9.4 | SPEC_FROZEN 強制壓縮 | SPEC_FROZEN | high | active | R-9.4-spec-frozen-compaction.yaml |
@@ -38,7 +38,7 @@ rules = rule_loader.load_for_state("IMPLEMENTATION")   # 只載 trigger_states �
 | R-9.12 | Phase F M2 Cross-Project Hub | HUB_SYNC | high | active | R-9.12-cross-project-hub.yaml |
 | R-9.13 | Phase F M3+M4 多模態 Spec 驗證 | SCG_VALIDATION / SPEC_DRAFTING | high | active | R-9.13-multimodal-spec-validation.yaml |
 | R-9.14 | Self-Healing 有界復原 | ESCALATION | critical | active | R-9.14-self-healing.yaml |
-| R-9.15 | Phase G M2 Predictive Halt | TRAJECTORY_PREDICTED / IMPLEMENTATION / PR_REVIEW / RTM_VERIFY / SCG_VALIDATION / SPEC_REGRESSION_CHECK | high | active | R-9.15-predictive-halt-m2.yaml |
+| R-9.15 | Phase G M2 Predictive Halt | TRAJECTORY_PREDICTED / IMPLEMENTATION / PR_REVIEW / RTM_VERIFY / SCG_VALIDATION / SPEC_REGRESSION_CHECK / RELEASE_READY | high | active | R-9.15-predictive-halt-m2.yaml |
 | R-9.16 | Phase G M3 Ambiguity Quantifier | SCG_VALIDATION / SPEC_DRAFTING | high | active | R-9.16-ambiguity-quantifier-m3.yaml |
 | R-9.17 | Phase G M4 Continuous Drift Monitor | DRIFT_OBSERVATION / SPEC_FROZEN / IMPLEMENTATION / PR_REVIEW | high | active | R-9.17-continuous-drift-monitor-m4.yaml |
 | R-9.18 | Phase G M5 Formal Halt Verification | * | critical | active | R-9.18-formal-halt-verification-m5.yaml |

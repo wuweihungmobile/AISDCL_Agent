@@ -158,14 +158,25 @@ class FlagOnClosedLoopTests(_Base):
 
 
 class GateResumableGuardTests(_Base):
-    def test_gate_is_resumable_covers_all_retry_gates(self):
-        """RETRY_LIMITS 4 gate 全為合法 resume_state（預檢不誤拒）。"""
-        from tools.fsm_runtime.transition_rules import RETRY_LIMITS
+    def test_gate_is_resumable_matches_the_auto_recovery_edge_for_every_retry_gate(self):
+        """預檢存在的理由是「不撕裂轉態」：gate 可恢復 ⇔ AUTO_RECOVERY_ATTEMPT→gate 是合法邊。
+        對 RETRY_LIMITS 的每個 gate 逐一驗這條等價式（預檢不誤拒、也不誤放）。"""
+        from tools.fsm_runtime.transition_rules import RETRY_LIMITS, is_transition_allowed
         for gate in RETRY_LIMITS:
-            self.assertTrue(
+            self.assertEqual(
                 FSMRuntime._gate_is_resumable(gate),
-                f"gate {gate} 應為合法 resume_state",
+                is_transition_allowed("AUTO_RECOVERY_ATTEMPT", gate),
+                f"gate {gate}：_GATE_RESUMABLE_TARGETS 與 _HAPPY_PATH['AUTO_RECOVERY_ATTEMPT'] 不一致",
             )
+
+    def test_only_release_ready_is_deliberately_not_resumable(self):
+        """OBS-SI-117：RETRY_LIMITS 的 gate 裡，只有 RELEASE_READY 刻意不可自動恢復（發布關卡連續失敗＝
+        結構性，耗盡後停在 ESCALATION 等人）；其餘全是合法 resume_state。多出第二個例外必須是蓄意的。"""
+        from tools.fsm_runtime.transition_rules import RETRY_LIMITS
+        self.assertEqual(
+            {gate for gate in RETRY_LIMITS if not FSMRuntime._gate_is_resumable(gate)},
+            {"RELEASE_READY"},
+        )
 
     def test_non_resumable_gate_rejected(self):
         """非白名單字串不被視為可恢復（防撕裂轉態的預檢）。"""

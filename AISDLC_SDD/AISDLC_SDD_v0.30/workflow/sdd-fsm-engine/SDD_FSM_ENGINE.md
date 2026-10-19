@@ -182,6 +182,11 @@ states:
   RELEASE_READY:
     type: milestone
     description: "SCG-6 發布就緒"
+    # OBS-SI-117：雲端 CI 在此才紅時的有界回邊（此前唯一出邊是 RELEASE，只能以鍵外維護 commit 修）
+    retry_limit: 2
+    retry_counter: true
+    on_fail: IMPLEMENTATION          # `gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`（理由必填）
+    on_retry_exceeded: ESCALATION    # 不自動恢復（auto_recovery 不收 RELEASE_READY）；人工 resume-from-escalation
 
   ESCALATION:
     type: blocking
@@ -320,10 +325,10 @@ states:
     type: observation               # 非阻塞觀測態（同 PRODUCTION_SIGNAL / LEARNING_COMMIT / HUB_SYNC）
     description: "TrajectoryPredictor 從 retry_history + decision_trace + ledger drift 預測「將崩」，提早切換策略"
     entry_rule: "由 retry-prone gate 在 retry_count ≥ 1 時呼叫 enter_trajectory_predicted（Rule 9.15.1）；caller 帶 PredictedAction"
-    entry_allowed_from: ["IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY", "SCG_VALIDATION", "SPEC_REGRESSION_CHECK"]
-    exit_allowed_to: ["IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY", "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "SPEC_AUDIT", "ESCALATION"]
+    entry_allowed_from: ["IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY", "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "RELEASE_READY"]
+    exit_allowed_to: ["IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY", "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "RELEASE_READY", "SPEC_AUDIT", "ESCALATION"]
     constraints:
-      - "Rule 9.15.1：retry_count ≥ 1 才允許進入"
+      - "Rule 9.15.1：retry_count ≥ 1 才允許進入（RELEASE_READY 自 OBS-SI-117 起有自己的 retry 預算，第 2 次到訪時適用）"
       - "Rule 9.15.2：abort_early 必須 confidence ≥ 0.8"
       - "Rule 9.15.3：false-positive 必寫 build/reports/fsm/PREDICTOR-MISS-{date}.yaml"
       - "Rule 9.15.4：同 stage switch_to_audit ≤ 1 次"
@@ -435,6 +440,8 @@ states:
 | SPEC_AUDIT | 無矛盾 | PR_REVIEW（retry_count 重置） |
 | RTM_VERIFY | FAIL，retry_count < 2 | IMPLEMENTATION（retry_count++，補實作） |
 | RTM_VERIFY | FAIL，retry_count ≥ 2 | ESCALATION |
+| RELEASE_READY | SCG-6 失敗（雲端 CI 紅；理由必填，OBS-SI-117），retry_count < 2 | IMPLEMENTATION（retry_count++，退回修；不自動恢復） |
+| RELEASE_READY | SCG-6 失敗，retry_count ≥ 2 | ESCALATION |
 | 任意狀態（非 AUTO_COMPACT_PENDING） | Token Budget ≥ 90% 且 < 95%（分子＝逐字稿實測 usage、分母已確認；見表後註腳） | AUTO_COMPACT_PENDING（記錄 resume_state） |
 | AUTO_COMPACT_PENDING | stage-compaction 完成，或 hook 觀測到 usage 回落 < 85% | resume_state（估算 ledger cumulative 歸零，判定不靠此） |
 | AUTO_COMPACT_PENDING | 單一 stage count_per_stage > 3（ACT-026） | ESCALATION |
@@ -459,6 +466,7 @@ states:
 | TRAJECTORY_PREDICTED | predicted=continue（resume RTM_VERIFY） | RTM_VERIFY |
 | TRAJECTORY_PREDICTED | predicted=continue（resume SCG_VALIDATION） | SCG_VALIDATION |
 | TRAJECTORY_PREDICTED | predicted=continue（resume SPEC_REGRESSION_CHECK） | SPEC_REGRESSION_CHECK |
+| TRAJECTORY_PREDICTED | predicted=continue（resume RELEASE_READY；OBS-SI-117） | RELEASE_READY |
 | TRAJECTORY_PREDICTED | predicted=switch_to_audit（≥2 信號） | SPEC_AUDIT |
 | DRIFT_OBSERVATION | continue（單次 drift, advisory）→ resume IMPLEMENTATION | IMPLEMENTATION |
 | DRIFT_OBSERVATION | continue → resume PR_REVIEW | PR_REVIEW |
@@ -507,8 +515,9 @@ INIT → SCENARIO_DETECT → AGENT_LOAD → SPEC_DRAFTING ◄──────�
           RTM_VERIFY  │ ESCALATION  PR_REVIEW(reset) ESCALATION ─────►┘
                ↓      │
        RELEASE_READY  └──► PR_REVIEW (retry_count++)
-               ↓
-            RELEASE
+          ↓     │
+          │     └──[SCG-6 FAIL ×<2，OBS-SI-117]──► IMPLEMENTATION（retry_count++；×≥2 → ESCALATION）
+       RELEASE
 ```
 
 ---
@@ -521,6 +530,7 @@ INIT → SCENARIO_DETECT → AGENT_LOAD → SPEC_DRAFTING ◄──────�
 | PR_REVIEW | 5次 | → ESCALATION |
 | PR_REVIEW（相同模式） | 3次 | → SPEC_AUDIT |
 | RTM_VERIFY | 2次 | → ESCALATION |
+| RELEASE_READY（SCG-6，OBS-SI-117） | 2次 | → ESCALATION |
 | HUMAN_PENDING | 72h → 提醒；168h → ESCALATION | — |
 
 ---

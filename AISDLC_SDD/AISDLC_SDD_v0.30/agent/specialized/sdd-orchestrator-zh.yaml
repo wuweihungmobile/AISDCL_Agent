@@ -45,7 +45,7 @@ agent:
     step_2_5_predict_trajectory:
       # Phase G M2 / ACT-036：retry-prone gate 在 retry_count ≥ 1 時提早預測
       action: |
-        若 state ∈ {IMPLEMENTATION, PR_REVIEW, RTM_VERIFY, SCG_VALIDATION, SPEC_REGRESSION_CHECK}
+        若 state ∈ {IMPLEMENTATION, PR_REVIEW, RTM_VERIFY, SCG_VALIDATION, SPEC_REGRESSION_CHECK, RELEASE_READY}
         且 retry_count ≥ 1：
           1. action = trajectory_predictor.predict(state, gate=current_gate, ledger_path=...)
           2. 若 action.decision == 'continue' → 不進 TRAJECTORY_PREDICTED，正常 step_3

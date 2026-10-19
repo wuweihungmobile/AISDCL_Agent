@@ -413,6 +413,61 @@ FILE_DIRECTORY_RULES.md（`AISDLC_SDD/AISDLC_SDD_v0.30/FILE_DIRECTORY_RULES.md`�
 - **鏡像與回退**：`sync_exposed_skills.py --check --target parent` 一致（59 檔）；`--check --target autoclaude` 的 stale 檔數 12（`README.md`＋11 支 `SKILL.md`，預期）——收尾窗口再 `--write --target autoclaude`。
   回退＝`git revert` 這批文字改動後 `--write --target parent`；無程式、無狀態檔、無 `*.tla` 影響（形式化驗證同第一棒：零改動，Rule 9.18.1 無重跑義務）。逐檔清單與閘門數字見第二棒交卷，不抄進本檔（數字會過期）。
 
+## LATEST 修改備忘：SelfImproving P1 輪／FSM runtime（OBS-SI-108／F-17、OBS-SI-117、R-9.15 納入 RELEASE_READY；2026-10-19）
+
+> **注意**：本節**不是**凍結基線例外——只動 LATEST v0.30 與共享層 `AISDLC_SDD/scripts/ci-gate.sh`（下限）、`AISDLC_SDD/CLAUDE.md`、父層與 AutoClaude 的 `sdd-gate` skill 鏡像（`sync_exposed_skills.py --write` 重生）；
+> v0.01 與 v0.02～v0.29 一個位元組未碰。**本節動了 `_HAPPY_PATH` 與 `formal/SDD_FSM.tla`**（RELEASE_READY 的回邊與 `TrajSources`），依 Rule 9.18.1 已同步並重跑 TLC。
+> 立節原因：①新增 CLI 動詞 `spec-refreeze` 與 `frozen_stages` 條目的 `kind` 語意（讀端相容規則：缺 `kind`＝凍結）；②新增一條有界回邊並讓 `RELEASE_READY` 成為第 5 個有 retry 預算的 gate；
+> ③修掉 gate 耗盡不落盤的既存缺陷；④讓預測性停機（R-9.15）涵蓋 RELEASE_READY。日後考古「為什麼 frozen_stages 有 kind／supersedes 欄」「為什麼 RELEASE_READY 有 retry_history」
+> 「為什麼 `enter_trajectory_predicted` 能從 RELEASE_READY 進」找的就是這裡。立案：SelfImproving P0 鍵的 OBS-SI-108、OBS-SI-117（兩者都是真機缺口：P0 鍵的 TCS 在 SPEC_AUDIT 改過後摘要兩度不符；
+> P0 鍵在 RELEASE_READY 遇 root-infra-ci 夾具競態，只能以鍵外的維護 commit 修）。
+
+### delta 清單
+
+1. **`spec-refreeze`（F-17）**：`FSMRuntime.record_spec_refreeze` ＋ `check_spec_refreeze_preconditions`（合法狀態只有 `SPEC_AUDIT`／`RELEASE_READY`／`RELEASE`，`frozen_stages` 為空也拒）；
+   `FSMState.record_spec_refreeze` 追加 `kind: refreeze` 條目（欄位：`stage`＝最近一筆凍結條目的 stage、`frozen_at`、`spec_docs`、`spec_doc_digests`、選填 `approved_by`、`supersedes`、`reason`），
+   `decision_trace` 記 `from＝to＝當前狀態`、`trigger: spec_refreeze`、reason 原文；不轉態、不改任何 retry 計數、不增 `total_spec_frozen_count`（否則會變成洗掉 R-9.1 預算的後門）。
+   結構化 CLI 契約同其他 Bridge 動詞（單行 ASCII JSON、rc 0／1／2／3／4／5、恆 `--must-exist`），`--project` 必填、`--reason` 非空白、至少一個 `--doc`、`--stage` 拒收。先驗前置、再算摘要、最後才改狀態。
+2. **RELEASE_READY 回邊（OBS-SI-117）**：`transition_rules._HAPPY_PATH["RELEASE_READY"]={"RELEASE","IMPLEMENTATION"}`、`RETRY_LIMITS["RELEASE_READY"]=2`、`REASON_REQUIRED_ON_FAIL={"RELEASE_READY"}`；
+   `record_gate_result` 對 RELEASE_READY FAIL 要求非空理由（缺＝ValueError／CLI rc 2）、第 1 次退回 IMPLEMENTATION（`retry_history.RELEASE_READY.current_count` ＋1）、第 2 次 `record_escalation`（R-9.1）；
+   `record_spec_frozen` 的歸零迴圈納入 RELEASE_READY；`RELEASE_READY` **刻意不列入** `auto_recovery._GATE_RESUMABLE_TARGETS`（發布關卡連續失敗屬結構性問題，耗盡後停在 ESCALATION 等人）。
+   缺 `retry_history.RELEASE_READY` 區塊的既有狀態檔照常讀（預設 0）——不需要人手改既有狀態檔。
+3. **gate 耗盡落盤（既存缺陷）**：`record_gate_result` 的升級分支補 `save_state`（此前只在可自動恢復的路徑才落盤）。
+4. **預測性停機納入 RELEASE_READY（R-9.15）**：`FSMRuntime._PREDICTOR_GATES`、`_HAPPY_PATH["TRAJECTORY_PREDICTED"]` 加 `RELEASE_READY`（continue 的回程邊；少了它 `enter` 進得去、`exit continue` 出不來＝卡在觀測態）、
+   `SDD_FSM.tla` 的 `TrajSources` 加 `RELEASE_READY`（`T_EnterTraj`／`T_TrajContinue` 共用）。`trajectory_predictor.predict()` 本來就讀 `RETRY_LIMITS`／`retry_history`，不必改。
+   同步面：`SDD_FSM_ENGINE.md` 的 `TRAJECTORY_PREDICTED` 狀態塊與轉換表、`sdd-orchestrator-zh.yaml` 的 step_2_5 gate 集合、`RULES_INDEX.md`／`R-9.15-predictive-halt-m2.yaml` 的 trigger_states；
+   測試鎖：`test_trajectory_predictor.py::ConstantsTests::test_every_retry_budget_gate_is_a_predictor_gate_with_a_resume_edge`（`RETRY_LIMITS` 的每個 gate 必在預測器集合並有回程邊——下一個新增預算的 gate 會被擋下）。
+5. **形式化**：`SDD_FSM.tla` 新增 `T_RelReadyFail`／`T_RelReadyExhaust`（結構同 RTM_VERIFY 的 `GateRetry`／`GateExhaust`）並併入 `Next`；`TrajSources` 加 `RELEASE_READY`。不新增 Fairness：
+   RELEASE_READY 的環（經 IMPLEMENTATION 或 TRAJECTORY_PREDICTED）每次到訪 `T_RelReady` 皆 enabled，既有 `SF_vars(T_RelReady)` 即破環。`test_tla_python_sync` 只比對 (src,dst) 對，管不到「新轉移的形狀」，
+   所以 `test_release_ready_backedge.py` 另有形狀測試。
+6. **模板與文件**：`FSM-STATE-TEMPLATE.yaml` 補 `retry_history.RELEASE_READY` 與 refreeze 條目範例；`tools/fsm_runtime/README.md`（15 個子命令）；`SDD_SPEC_FIRST_GATE.md`（對照表第 13～15 列、〈spec-refreeze〉小節、
+   歸零句由三個 gate 改為四個並註明原句列三個）；`SDD_FSM_ENGINE.md`（RELEASE_READY 狀態塊、錯誤路徑表、狀態圖、Retry Budget 列）；`sdd-gate` skill（gate 表與 retry_policy；`SCG_VALIDATION` 的註解原把 SCG-5／SCG-6 也歸進去，與實況不符，已更正）；
+   `SDD_AUTOCLAUDE_BRIDGE.md` §8.7（CI 紅的處置）與 §8.9；`SDD_ESCALATION_PROTOCOL.md` 觸發表；`R-9.1`／`R-9.3`／`R-9.15` yaml、`RULES_INDEX.md`、`AISDLC_SDD/CLAUDE.md`（Retry Budget 列、絕對禁令 #4）、本版 `README.md`。
+7. **共享層**：`scripts/ci-gate.sh` 的 `MIN_TESTS_LATEST` 2132→2242（實測 − 8；守新鮮度的機械物仍是 `scripts/tests/test_ci_gate_floor_freshness.py`）。
+8. **跨專案連動（Console）**：Bridge `app/sdd_state.py::frozen_stage_count` 不計 `kind: refreeze` 條目（`:freeze` 預設階段名 `Stage-<n>` 不跳號）；契約、openapi（及生成的 d.ts）、Backend 欄位描述與 ADR-XPLAT-016 的對應文字同批改（ADR 附錄 E）。
+   摘要讀端（Bridge `frozen_digest_of`、AutoClaude `check_digest`）本來就是「全部條目聯集、同鍵後者勝出」，不必改。
+
+### 與任務書的差異／任務書未規定而本棒補上的判準（供主控裁決）
+
+- 不引入 `ci_fail`／`cli_manual` 兩個 trigger 字串：trace 的 trigger 沿用 `gate_fail`（沒有任何程式路徑會發出 `ci_fail`；reconcile 驅動的回退不在本輪範圍）。
+- `max_limit=2` 的語意＝**第 2 次失敗即 ESCALATION**（與既有 gate「`limit` 次失敗即升級」一致），不是任務書測試措辭暗示的「第 3 次」。
+- `--project` 必填且 `--stage` 拒收：退回 `SDD_PROJECT`／目錄名推導的專案鍵，一次手滑就改到別的專案（框架自身的專案鍵也是合法專案）；重記條目的 `stage` 取最近一筆凍結條目的 stage，每階段 auto-compact 上限因此不被洗掉。
+- `SDD_FSM_ENGINE.md` 的改動超出任務書清單：`test_md_python_sync::test_core_python_edges_mentioned_in_md` 要求轉換表提及每條 Python 核心邊，新邊不補文件即紅。
+- R-9.15 納入 RELEASE_READY 需要改 `_HAPPY_PATH` 與 `.tla`（原以為只改常數）：continue 的回程邊與 TLA 的 `TrajSources` 都是硬寫集合；已同步並重跑 TLC。
+- 舊測試 `test_auto_recovery_wiring::test_gate_is_resumable_covers_all_retry_gates`（「所有有預算的 gate 都可自動恢復」）與「RELEASE_READY 刻意不可恢復」直接衝突，改述為雙向條件（可恢復 ⇔ `AUTO_RECOVERY_ATTEMPT→gate` 是合法邊）並釘住「只有 RELEASE_READY 例外」。
+
+### 驗證與回退
+
+- **驗證**（本機 Windows，2026-10-19）：`python -m pytest tools/fsm_runtime/tests/ -m "not chaos"`（在 v0.30 下）2250 passed／6 skipped（基準 2149：+77 `test_spec_refreeze`、+20 `test_release_ready_backedge`、
+  +1 `test_auto_recovery_wiring` 淨增、+3 `test_trajectory_predictor`）；`-m chaos` 34 passed；TLC `SDD_FSM` 859 distinct／4786 generated／depth 15 No error（HEAD 基準 855／4706），`FLEET_FSM` 5a／5b No error；
+  對各修法各做突變（還原該修法），對應測試轉紅、還原後全綠。真機狀態檔的拷貝上以 `spec-refreeze` 重記後，AutoClaude 的凍結閘由 `SpecDigestMismatchError` 轉為 verified，未被點名的文件仍判不符（fail-closed）。
+  `ci-gate` 雙軌全閘與逐字 rc 見交卷，不抄進本檔（數字會過期）。
+- **回退**：向後相容——舊動詞輸出與 rc 不變；既有狀態檔不需改（缺 `kind`＝凍結、缺 `retry_history.RELEASE_READY`＝0）。還原 `transition_rules.py`／`state_loader.py`／`fsm_runtime.py`／`snapshot.py`／`SDD_FSM.tla` 即還原行為
+  （兩個新測試檔與 `test_trajectory_predictor.py` 的 3 支一併還原）；skills 鏡像以 `python AISDLC_SDD/scripts/sync_exposed_skills.py --write` 回到 LATEST。已經寫進狀態檔的 refreeze 條目與 `retry_history.RELEASE_READY` 區塊
+  在舊版 runtime 眼中是未知鍵（讀端不報錯、`frozen_stage_count` 之類的計數會把 refreeze 當一筆階段）。
+- **未動（已知邊界）**：裸 `transition --to IMPLEMENTATION`（自 RELEASE_READY）邊合法但不記次數（與其他 gate 同，只用於恢復）；hooks-ON 時 R-9.6 在 RELEASE_READY／RELEASE 擋 `docs/01～03` 的 Write／Edit（CLI 本身不受此擋）；
+  `DRIFT_OBSERVATION` 的 `DriftSources` 不含 RELEASE_READY（漂移觀測的入口集合與 retry 預算無關，本輪不動）。
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |

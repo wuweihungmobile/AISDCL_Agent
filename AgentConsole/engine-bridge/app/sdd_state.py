@@ -70,9 +70,23 @@ def tail(value: Any, count: int = TRAIL) -> list[Any]:
     return value[-count:] if isinstance(value, list) else []
 
 
+#: `spec-refreeze`（SDD F-17）追加的 `frozen_stages` 條目帶 `kind: refreeze`；
+#: 缺 `kind`＝一般凍結（舊狀態檔）。
+REFREEZE_KIND = "refreeze"
+
+
 def frozen_stage_count(state: dict[str, Any]) -> int:
+    """已凍結的**階段**數（`:freeze` 預設階段名 `Stage-<n+1>` 的 n）。
+
+    `kind: refreeze` 的條目（SDD `spec-refreeze`，F-17）只是替既有階段重記摘要，
+    不是新階段，不計入——計入會讓下一次凍結的預設名跳號。缺 `kind`＝凍結（舊狀態檔
+    沒有這個欄位）。摘要查詢 `frozen_digest_of` 則兩種條目都讀：重記的在後，勝出。"""
     stages = state.get("frozen_stages")
-    return len(stages) if isinstance(stages, list) else 0
+    if not isinstance(stages, list):
+        return 0
+    return sum(
+        1 for stage in stages
+        if not (isinstance(stage, dict) and stage.get("kind") == REFREEZE_KIND))
 
 
 def delegation_ref(state: dict[str, Any]) -> str | None:

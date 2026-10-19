@@ -43,7 +43,7 @@ SDD 三大支柱之 **Spec-First Gate**：每個關鍵里程碑前的強制閘�
 
 ```yaml
 retry_policy:
-  SCG_VALIDATION:  # SCG-0 ~ SCG-3 / SCG-5 / SCG-6
+  SCG_VALIDATION:  # SCG-0 ~ SCG-3（四道閘共用一個預算）
     max_retry: 3
     on_exceed: "進入 ESCALATION（見 SDD_ESCALATION_PROTOCOL.md）"
     
@@ -57,6 +57,11 @@ retry_policy:
   RTM_VERIFY:  # SCG-5（特殊）
     max_retry: 2
     on_exceed: "進入 ESCALATION"
+
+  RELEASE_READY:  # SCG-6（雲端 CI；OBS-SI-117）
+    max_retry: 2   # 第 1 次失敗退回 IMPLEMENTATION、第 2 次失敗進 ESCALATION（語意同 RTM_VERIFY）
+    reason_required: true   # gate --result FAIL 必附 --reason（缺＝rc 2、狀態不動）
+    on_exceed: "進入 ESCALATION（不自動恢復，只有人能 resume-from-escalation）"
 ```
 
 ### Retry_count 追蹤規則
@@ -70,7 +75,7 @@ retry_policy:
 
 [SCG Retry State]
   gate: SCG-{N}
-  attempt: {N}/3（或 N/5 for SCG-4）
+  attempt: {N}/3（SCG-4 為 N/5；SCG-5、SCG-6 為 N/2）
   last_failure_reason: {原因摘要}
   failure_pattern_hash: {用於比對是否為重複失敗}
 
@@ -309,7 +314,7 @@ cd "<SDD 版本目錄>" && SDD_STATE_DIR="<專案根>/build/reports/fsm" SDD_PRO
 | 🔴 **人類明確確認之後**（才可執行） | `spec-frozen --stage "Stage-<n>" --doc "<凍結文件相對路徑>" … --digest --root "<專案根>" --reason "<確認依據>" --approver "<人類確認者>" --json`（→ SPEC_FROZEN；`--doc` 須含 TCS；之後執行 `/stage-compaction`）。`--approver` 填人類，不得填 agent |
 | SCG-4 通過／未通過 | `gate --gate PR_REVIEW --result PASS`（→ RTM_VERIFY）／`--result FAIL --reason "<失敗模式>"`（上限 5；同模式 3 次 → SPEC_AUDIT） |
 | SCG-5 通過／未通過 | `gate --gate RTM_VERIFY --result PASS`（→ RELEASE_READY）／`--result FAIL --reason "<缺口>"`（上限 2） |
-| SCG-6 通過 | `transition --to RELEASE --reason "SCG-6 PASS"` |
+| SCG-6 通過／未通過（雲端 CI；OBS-SI-117） | `transition --to RELEASE --reason "SCG-6 PASS"`（或 `gate --gate RELEASE_READY --result PASS --reason "SCG-6 PASS"`）／`gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`（**理由必填**；上限 2：第 1 次退回 IMPLEMENTATION、第 2 次 → ESCALATION，不自動恢復） |
 
 ---
 

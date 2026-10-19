@@ -24,7 +24,7 @@
 | SCG_VALIDATION | SCG-0, SCG-1, SCG-2, SCG-3 驗證 | 最多 **3 次** → ESCALATION |
 | PR_REVIEW | SCG-4 實作審查 | 最多 **5 次**；相同模式 3 次 → SPEC_AUDIT |
 | RTM_VERIFY | SCG-5 RTM 完整性驗證 | 最多 **2 次** → ESCALATION |
-| RELEASE_READY | SCG-6 發布確認 | — |
+| RELEASE_READY | SCG-6 發布確認（雲端 CI 綠才 RELEASE） | 最多 **2 次** → ESCALATION；CI 紅時有界退回 IMPLEMENTATION，耗盡後不自動恢復（OBS-SI-117） |
 | SPEC_FROZEN | SCG 通過後 → 觸發 stage-compaction | — |
 | ESCALATION | retry 耗盡後 → 強制人工介入 | 不可自動退出 |
 
@@ -118,7 +118,8 @@
 > 「retry_count 不重置，待 SPEC_FROZEN 後重置」。
 > **實際行為**（`FSMRuntime.record_gate_result` 的 `reset_retry`、`FSMState.record_spec_frozen`；〔實測〕隔離沙盒中
 > `gate … PASS` 之後 `retry_history.SCG_VALIDATION.current_count` 即為 0）：`gate … PASS` 當下就把**該 gate**
-> 的 `current_count` 歸零；`spec-frozen` 再把 SCG_VALIDATION／PR_REVIEW／RTM_VERIFY 全部歸零；兩者都**不**清除
+> 的 `current_count` 歸零；`spec-frozen` 再把 SCG_VALIDATION／PR_REVIEW／RTM_VERIFY／RELEASE_READY 全部歸零
+> （RELEASE_READY 自 OBS-SI-117 起也有計數，本句原列三個）；兩者都**不**清除
 > `cumulative_history`。全文搜尋同一宣稱：全樹僅此一處（`SDD_FSM_ENGINE.md` 與 `sdd-review` skill 的相關敘述與
 > runtime 一致，未動）。
 
@@ -180,7 +181,8 @@ cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime gate --projec
 ### 閘門結果 → 指令對照表
 
 下表「指令」欄＝填入上面樣板 `<動詞> <旗標>` 的內容（`--project "<鍵>"` 已在樣板內，不再重複）。SCG-0～SCG-3 四道閘共用
-FSM 的 `SCG_VALIDATION` 一個重試預算（上限 3）；SCG-4＝`PR_REVIEW`（上限 5）、SCG-5＝`RTM_VERIFY`（上限 2）。
+FSM 的 `SCG_VALIDATION` 一個重試預算（上限 3）；SCG-4＝`PR_REVIEW`（上限 5）、SCG-5＝`RTM_VERIFY`（上限 2）、
+SCG-6＝`RELEASE_READY`（上限 2；OBS-SI-117，語意同 `RTM_VERIFY`：第 1 次失敗退回 IMPLEMENTATION、第 2 次失敗 → ESCALATION）。
 
 | # | 時機（對應上方流程步驟） | FSM 轉態 | 指令 |
 |---|---|---|---|
@@ -197,12 +199,14 @@ FSM 的 `SCG_VALIDATION` 一個重試預算（上限 3）；SCG-4＝`PR_REVIEW`�
 | 10 | SCG-4 開始 PR 審查 | IMPLEMENTATION → PR_REVIEW | `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"` |
 | 11 | SCG-4 結果 | PASS：PR_REVIEW → RTM_VERIFY；FAIL：→ IMPLEMENTATION（同模式 3 次 → SPEC_AUDIT；耗盡 → ESCALATION） | `gate --gate PR_REVIEW --result PASS --reason "SCG-4 PASS"`；失敗時 `--result FAIL --reason "<失敗模式>"` |
 | 12 | SCG-5 結果 | PASS：RTM_VERIFY → RELEASE_READY；FAIL：→ IMPLEMENTATION（耗盡 → ESCALATION） | `gate --gate RTM_VERIFY --result PASS --reason "SCG-5 PASS"`；失敗時 `--result FAIL --reason "<缺口>"` |
-| 13 | SCG-6 通過 | RELEASE_READY → RELEASE | `transition --to RELEASE --reason "SCG-6 PASS"` |
+| 13 | SCG-6 通過（雲端 CI 綠） | RELEASE_READY → RELEASE | `transition --to RELEASE --reason "SCG-6 PASS"`（等效：`gate --gate RELEASE_READY --result PASS --reason "SCG-6 PASS"`，另歸零 RELEASE_READY 計數並留下 `gate_pass` 軌跡） |
+| 14 | SCG-6 失敗（雲端 CI 紅；OBS-SI-117） | RELEASE_READY → IMPLEMENTATION（累計第 2 次失敗 → ESCALATION，**不自動恢復**，只有人能 `resume-from-escalation`） | `gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要，例：run id／失敗 job>"`：**理由必填**（缺＝rc 2，狀態不動）；修好後照第 10～12 列再走 PR_REVIEW → RTM_VERIFY → RELEASE_READY，計數不被那兩關的 PASS 洗掉（新一輪 `spec-frozen` 才歸零）；不要用裸 `transition --to IMPLEMENTATION`（邊合法但不記次數，只用於恢復） |
+| 15 | 規格在 SPEC_AUDIT 或發布後（RELEASE_READY／RELEASE）被合法修訂，凍結摘要已過期（OBS-SI-108／F-17） | 不轉態（只**追加**一筆 `kind: refreeze` 的 `frozen_stages` 條目與一筆 `trigger: spec_refreeze` 的 trace） | `spec-refreeze --doc "<修訂過的文件相對路徑>" [--doc …] --root "<專案根>" --reason "<修訂內容；發生在哪個狀態／commit>" --approver "<核准者>"`（見下方〈`spec-refreeze`〉；**`--project` 必填**；不歸零任何 retry 計數） |
 
 補充：
 
 - **只認合法邊**：`transition`／`gate` 只走 `tools/fsm_runtime/transition_rules.py` 的合法邊；其他＝TransitionError
-  （舊動詞：traceback＋rc 1；新動詞與帶 `--digest` 或 `--json` 的 `spec-frozen`：rc 3＋單行 JSON）。
+  （舊動詞：traceback＋rc 1；新動詞、`spec-refreeze` 與帶 `--digest` 或 `--json` 的 `spec-frozen`：rc 3＋單行 JSON）。
 - **SPEC_REGRESSION_CHECK**：若 `SDD_FSM_ENGINE.md` 的轉換表要求先過它（本 Stage 有重試歷史，即第 5 列留下的
   `current_count > 0`）：`transition --to SPEC_REGRESSION_CHECK --reason "<原因>"`，通過後仍以 `spec-frozen`
   凍結（SPEC_REGRESSION_CHECK → SPEC_FROZEN 是合法邊）。**不要**用 `gate --gate SPEC_REGRESSION_CHECK --result PASS`
@@ -243,10 +247,55 @@ cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-frozen -
 | `--approver` | 確認凍結的人；寫入 `frozen_stages[-1].approved_by`（只在有值時才出現這個鍵） |
 | `--json` | 輸出恰好一行 JSON（成功含 `spec_doc_digests`；失敗 `{"ok":false,"error":<代碼>,…}`），rc 如下 |
 
-rc 契約（適用四個新動詞與帶 `--digest` 或 `--json` 的 `spec-frozen`；舊動詞不帶新旗標時輸出與 rc 逐字不變）：0 成功（含 `"noop":true`）／
+rc 契約（適用四個新動詞、`spec-refreeze` 與帶 `--digest` 或 `--json` 的 `spec-frozen`；舊動詞不帶新旗標時輸出與 rc 逐字不變）：0 成功（含 `"noop":true`）／
 1 非預期例外／2 argparse 用法錯誤（stdout 無 JSON）／3 前置狀態不符（`transition_not_allowed`，例如 FSM 不在
 HUMAN_PENDING）／4 參數值不合法（`invalid_argument`、`doc_not_found`、`doc_outside_root`、`doc_too_large`、
 `doc_not_utf8`；`SDD_STATE_DIR` 寫成相對路徑）／5 狀態檔不存在（`--must-exist`）或不可讀。
+
+### `spec-refreeze`：規格修訂後重記摘要（OBS-SI-108／F-17）
+
+**為什麼**：規格在 `IMPLEMENTATION → SPEC_AUDIT` 被合法修訂後，FSM 只能出邊到 `PR_REVIEW`，而 `spec-frozen` 只在
+HUMAN_PENDING 合法，於是 `frozen_stages[*].spec_doc_digests` 停在修訂前的值——AutoClaude 的凍結閘（`check_digest`
+拋 `SpecDigestMismatchError`）、Bridge 的 409 比對與人讀狀態檔都會判不符。`spec-refreeze` 在**不經 HUMAN_PENDING** 的
+前提下，以**追加**一筆 `kind: refreeze` 條目重新背書修訂後的文件（舊條目不改、留作歷史）。
+
+🔴 **只重記「已被合法修訂、且你確實審過」的文件**：重記＝把「這份檔的現況」記成新的凍結摘要，不是例行動作；`--approver`
+規格同 `spec-frozen`（非空、≤100 字、不含控制字元），填負責核准這次修訂的人。沒被 `--doc` 點名的文件仍沿用先前條目的
+摘要（它們這次沒被重新檢視——若被改過仍會判不符，這是設計）。**時機**：SPEC_AUDIT 期間改完規格，在離開 SPEC_AUDIT
+（`transition --to PR_REVIEW`）**之前**重記最省事；離開之後到 RELEASE_READY 之前的各態都不合法。
+
+PowerShell：
+
+```powershell
+Push-Location "<SDD 版本目錄>" -ErrorAction Stop; python -m tools.fsm_runtime.fsm_runtime spec-refreeze --project "<鍵>" --doc "docs/03_testing/contracts/TCS-<Feature>-<date>.md" --doc "<其他修訂過的文件相對路徑>" --root "<專案根>" --reason "<修訂內容；發生在哪個狀態／commit>" --approver "<核准者>"; Pop-Location
+```
+
+bash／zsh：
+
+```bash
+cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-refreeze --project "<鍵>" --doc "docs/03_testing/contracts/TCS-<Feature>-<date>.md" --doc "<其他修訂過的文件相對路徑>" --root "<專案根>" --reason "<修訂內容；發生在哪個狀態／commit>" --approver "<核准者>"
+```
+
+| 旗標 | 說明 |
+|---|---|
+| `--project` | **必填**，不退回 `SDD_PROJECT`／目錄名推導（退回的專案鍵一次手滑就改到別的專案，框架自身的專案鍵也是合法專案）；缺＝rc 2 |
+| `--doc`（可重複） | 本次重新背書的文件；路徑規則與摘要演算法同 `spec-frozen --digest`；至少一個（否則 rc 4） |
+| `--root` | 同 `spec-frozen --digest`（省略時由狀態目錄推導；自訂 `SDD_STATE_DIR` 落在慣例之外時請顯式給） |
+| `--reason` | **必填**（strip 後非空，否則 rc 4）；寫明修訂內容與修訂發生在哪個狀態／commit；原文寫進 `decision_trace`（`from`＝`to`＝當前狀態、`trigger: spec_refreeze`） |
+| `--approver` | 選填；寫入新條目的 `approved_by`（只在有值時才出現這個鍵） |
+| 不收 `--stage` | 重記條目的 `stage` 取最近一筆凍結條目的 stage（所以每階段 auto-compact 上限不被洗掉）；給了＝用法錯誤 rc 2。`--digest`／`--json` 不需要（摘要恆算、輸出恆為單行 JSON） |
+
+- **合法狀態只有 `SPEC_AUDIT`、`RELEASE_READY`、`RELEASE`**（後兩者＝發布後的文字勘誤）；其餘狀態 rc 3
+  `transition_not_allowed`（訊息列出合法狀態）。從未凍結過（`frozen_stages` 為空）也是 rc 3：重記是重新背書一次既有的凍結，
+  第一次凍結走 `spec-frozen`。hooks-ON 時 Rule 9.6 在 RELEASE_READY／RELEASE 擋 `docs/01～03` 的 Write／Edit，所以那兩態的
+  文字勘誤要在 hooks-OFF 的視窗改檔；`spec-refreeze` 本身是 CLI，不受此擋。
+- **不轉態、不新增邊**（`SDD_FSM.tla` 不受影響），**不歸零任何 retry 計數**、不增 `total_spec_frozen_count`——它不是新的
+  SPEC_FROZEN 里程碑，否則會變成洗掉 R-9.1 重試預算的後門。
+- **讀端取全部條目的 `spec_doc_digests` 聯集、同鍵後者勝出**（AutoClaude `check_digest`、Bridge 皆然），不要只讀
+  `frozen_stages[-1]`（重記條目只含被點名的文件）。成功輸出：`{"ok":true,"verb":"spec-refreeze",…,"refrozen":true,"stage":…,
+  "supersedes":…,"spec_doc_digests":{…}}`。
+- 先驗前置（狀態與舊凍結，所以狀態不對時根本不讀檔）、再算摘要、最後才改狀態；任何失敗都不動狀態檔位元組。完整欄位與
+  rc 見 `tools/fsm_runtime/README.md`〈規格修訂後重記摘要〉。
 
 ---
 

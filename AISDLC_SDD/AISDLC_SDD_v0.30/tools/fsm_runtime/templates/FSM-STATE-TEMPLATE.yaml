@@ -53,6 +53,15 @@ fsm_state:
       max_limit: 2
       history: []
 
+    # OBS-SI-117：RELEASE_READY（SCG-6，雲端 CI）→ IMPLEMENTATION 的有界回邊計數；入口
+    # `gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`。`max_limit` 只是資訊欄，
+    # 真正的上限是 transition_rules.RETRY_LIMITS["RELEASE_READY"]（累計第 2 次失敗即 ESCALATION）。
+    # 既有狀態檔沒有這個區塊也無妨：讀端預設計數 0，第一次 FAIL 時自動建出，不必手改。
+    RELEASE_READY:
+      current_count: 0
+      max_limit: 2
+      history: []
+
   implementation_budget:
     current_iteration: 0
     max_iterations: 20
@@ -105,6 +114,7 @@ fsm_state:
   #   from: "SPEC_DRAFTING"
   #   to: "SCG_VALIDATION"
   #   trigger: "transition" | "gate_pass" | "gate_fail" | "spec_audit" | "spec_frozen" |
+  #            "spec_refreeze"（OBS-SI-108：from＝to＝當前狀態，不轉態）|
   #            "auto_compact_trigger" | "auto_compact_complete"
   #   reason: "SCG-0 SLV-005 PASS → 進入驗證"
   #   spec_refs: ["docs/01_requirements/FRD-*.md"]
@@ -150,6 +160,19 @@ fsm_state:
   #   spec_doc_digests:                  # {POSIX 相對 root 的路徑: "sha256:<64 位小寫 hex>"}，鍵與 spec_docs 同一組字串；
   #     "docs/01_requirements/FRD-SystemName.md": "sha256:<換行正規化後 UTF-8 bytes 的 sha256>"   # \r\n、\r 先換成 \n，BOM 不剝
   #   approved_by: "alice"               # `--approver`：非空、≤100 字、無控制字元（Console 的核准人／JWT subject）
+  #
+  # **重記條目**（OBS-SI-108／F-17）：規格在 SPEC_AUDIT 或發布後被合法修訂，原凍結條目的摘要就過期了；
+  # `spec-refreeze` 以**追加**一筆新條目重新背書（舊條目不動、留作歷史），多出三個鍵：
+  # - stage: "Stage-1"                   # 取最近一筆凍結條目的 stage（不是新階段）
+  #   frozen_at: "2026-10-19T08:00:00+00:00"
+  #   spec_docs: ["docs/01_requirements/FRD-SystemName.md"]      # 只含這次被重新背書的文件
+  #   spec_doc_digests: {"docs/01_requirements/FRD-SystemName.md": "sha256:<修訂後的摘要>"}
+  #   approved_by: "alice"               # 只在有值時才出現
+  #   kind: "refreeze"                   # 沒有 `kind` 鍵的舊格式條目＝凍結（freeze），讀端相容、不必手改
+  #   supersedes: "2026-04-19T10:00:00Z" # 被取代那一筆的 frozen_at
+  #   reason: "SPEC_AUDIT 期間改了 §3 路徑字面（commit <sha>）"   # 修訂內容與發生在哪個狀態／commit
+  # 讀端取**全部條目的摘要聯集、同鍵後者勝出**（AutoClaude `check_digest`、Bridge 皆然），不要只看 `[-1]`：
+  # 重記條目只含被點名的文件，其餘文件的摘要仍在先前條目裡。
 
   escalation_history: []
   # 格式:

@@ -66,7 +66,15 @@ _HAPPY_PATH: Dict[str, Set[str]] = {
     "PR_REVIEW": {"RTM_VERIFY", "SPEC_AUDIT", "IMPLEMENTATION"},
     "SPEC_AUDIT": {"PR_REVIEW"},
     "RTM_VERIFY": {"RELEASE_READY", "IMPLEMENTATION"},
-    "RELEASE_READY": {"RELEASE"},
+    # OBS-SI-117：雲端 CI 在 RELEASE_READY（SCG-6）才紅時，此前唯一出邊是 RELEASE，沒有任何合法回邊，
+    # 只能以「鍵外的維護 commit」修。加法式新增有界回邊 RELEASE_READY → IMPLEMENTATION：次數由
+    # RETRY_LIMITS["RELEASE_READY"] 把關（累計第 2 次失敗即 ESCALATION，與 RTM_VERIFY 同模式），且必附理由
+    # （REASON_REQUIRED_ON_FAIL）；入口是 `gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`，
+    # 不是裸 `transition`（裸 transition 只檢查邊合法、不記次數，僅用於恢復）。
+    # 🔴 Rule 9.18.1：本邊已同步 formal/SDD_FSM.tla（T_RelReadyFail／T_RelReadyExhaust）與
+    # SDD_FSM_ENGINE.md 狀態轉換表。RELEASE_READY 刻意不列入 auto_recovery 的 _GATE_RESUMABLE_TARGETS：
+    # 發布關卡連續失敗屬結構性問題，耗盡後停在 ESCALATION 等人（`resume-from-escalation`），不自動重入。
+    "RELEASE_READY": {"RELEASE", "IMPLEMENTATION"},
     "RELEASE": set(),
     # Phase E / ACT-027：Production Feedback（非阻塞監測狀態）
     # 入口只能透過 FSMRuntime.enter_production_signal() 明確觸發（RELEASE → PRODUCTION_SIGNAL 不在
@@ -173,9 +181,12 @@ _HAPPY_PATH: Dict[str, Set[str]] = {
     #   - continue        → back to recorded retry gate (resume_state)
     #   - switch_to_audit → SPEC_AUDIT (saves remaining retry budget)
     #   - abort_early     → ESCALATION (covered by _EMERGENCY_TARGETS)
+    # OBS-SI-117：RELEASE_READY 有自己的 retry 預算後納入 retry-prone gate 集合（FSMRuntime._PREDICTOR_GATES），
+    # continue 的回程邊因此要有 TRAJECTORY_PREDICTED → RELEASE_READY（否則進得去、continue 出不來＝卡在觀測態）。
+    # 🔴 Rule 9.18.1：已同步 formal/SDD_FSM.tla 的 TrajSources 與 SDD_FSM_ENGINE.md 轉換表。
     "TRAJECTORY_PREDICTED": {
         "IMPLEMENTATION", "PR_REVIEW", "RTM_VERIFY",
-        "SCG_VALIDATION", "SPEC_REGRESSION_CHECK",
+        "SCG_VALIDATION", "SPEC_REGRESSION_CHECK", "RELEASE_READY",
         "SPEC_AUDIT",
     },
     # Phase G M4 / ACT-040: Continuous Drift Monitor observation state.
@@ -258,7 +269,14 @@ RETRY_LIMITS: Dict[str, int] = {
     "PR_REVIEW": 5,
     "RTM_VERIFY": 2,
     "SPEC_REGRESSION_CHECK": 2,
+    # OBS-SI-117：RELEASE_READY→IMPLEMENTATION 回邊的有界停機（語意同其他 gate：`limit` 次失敗即 ESCALATION，
+    # 所以 2＝第 1 次失敗退回 IMPLEMENTATION、第 2 次失敗升級；與 RTM_VERIFY 同值同語意）。
+    "RELEASE_READY": 2,
 }
+
+# 這些 gate 的 FAIL 必須附非空理由：RELEASE_READY FAIL 是把「已到發布關卡」的規格退回實作，
+# 沒有理由就沒有稽核憑證（OBS-SI-117；其他 gate 維持既有「理由可省」的行為，不被牽連）。
+REASON_REQUIRED_ON_FAIL = frozenset({"RELEASE_READY"})
 
 PR_REVIEW_SAME_PATTERN_THRESHOLD = 3
 SPEC_AUDIT_MAX_PER_STAGE = 2
@@ -290,6 +308,7 @@ def next_state_on_gate_pass(gate: str) -> str:
         "SPEC_REGRESSION_CHECK": "SPEC_FROZEN",
         "PR_REVIEW": "RTM_VERIFY",
         "RTM_VERIFY": "RELEASE_READY",
+        "RELEASE_READY": "RELEASE",   # SCG-6 PASS（OBS-SI-117：RELEASE_READY 成為有 FAIL 就必須有 PASS 的完整 gate）
     }
     if gate not in mapping:
         raise KeyError(f"unknown gate: {gate}")
@@ -310,6 +329,8 @@ def next_state_on_gate_fail(gate: str, current_count: int, *, same_pattern_count
     if gate == "PR_REVIEW":
         return "IMPLEMENTATION", False
     if gate == "RTM_VERIFY":
+        return "IMPLEMENTATION", False
+    if gate == "RELEASE_READY":  # OBS-SI-117：SCG-6（雲端 CI）失敗 → 退回實作修
         return "IMPLEMENTATION", False
     if gate == "SPEC_REGRESSION_CHECK":
         return "HUMAN_PENDING", False

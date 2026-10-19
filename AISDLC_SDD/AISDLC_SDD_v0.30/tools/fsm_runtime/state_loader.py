@@ -33,6 +33,17 @@ DEFAULT_STATE_DIR = REPO_ROOT / "build" / "reports" / "fsm"
 #: 外部專案模式的環境變數（ADR-XPLAT-016 §3）：非空白＝狀態目錄改指向該絕對路徑。
 STATE_DIR_ENV = "SDD_STATE_DIR"
 
+#: `frozen_stages[*].kind` 的兩個值（OBS-SI-108／F-17）。`spec-frozen` 寫的條目**沒有** `kind` 鍵，
+#: 讀端一律視為凍結；只有 `spec-refreeze` 追加的條目才帶 `kind: refreeze`。
+FREEZE_KIND_FREEZE = "freeze"
+FREEZE_KIND_REFREEZE = "refreeze"
+
+
+def freeze_entry_kind(entry: Any) -> str:
+    """`frozen_stages` 單筆條目的種類；沒有 `kind` 鍵的舊格式條目＝`freeze`（讀端相容，狀態檔不必手改）。"""
+    kind = entry.get("kind") if isinstance(entry, dict) else None
+    return kind if kind else FREEZE_KIND_FREEZE
+
 
 def state_dir() -> Path:
     """FSM 狀態目錄的**唯一解析點**（ADR-XPLAT-016 §3.2；狀態檔與同目錄衍生物都走這裡）。
@@ -292,8 +303,53 @@ class FSMState:
         cum = self.cumulative()
         cum["total_spec_frozen_count"] = int(cum.get("total_spec_frozen_count", 0)) + 1
         # Reset current_count for every gate but keep cumulative_history.
-        for gate_name in ("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY"):
+        # OBS-SI-117：RELEASE_READY 也有計數了，新一輪凍結＝新週期，與其他三個 gate 一視同仁地歸零。
+        for gate_name in ("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY", "RELEASE_READY"):
             self.reset_retry(gate_name)
+
+    def latest_frozen(self) -> Optional[Dict[str, Any]]:
+        """`frozen_stages` 的最後一筆映射項（含重記條目）；從未凍結過回 None。"""
+        for entry in reversed(self.root.get("frozen_stages") or []):
+            if isinstance(entry, dict):
+                return entry
+        return None
+
+    def record_spec_refreeze(
+        self,
+        spec_docs: list[str],
+        *,
+        spec_doc_digests: Dict[str, str],
+        reason: str,
+        approved_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """OBS-SI-108（F-17）：為「已凍結、後來被合法修訂」的規格**追加**一筆重記條目，回該條目。
+
+        只追加、不改寫舊條目（舊條目留作歷史）：`stage` 取最近一筆的 stage（所以 `current_stage_key()` 不變、
+        每階段 auto-compact 上限不會被重記洗掉）、`supersedes` 記被取代那筆的 `frozen_at`、`kind` 標
+        `refreeze`、`reason` 寫修訂內容。**不碰**任何 retry 計數與 `total_spec_frozen_count`——重記不是新的
+        SPEC_FROZEN 里程碑，否則它會變成洗掉 R-9.1 重試預算的後門。條目只含這次被重新背書的文件；消費端
+        （AutoClaude `check_digest`、Bridge）取全部條目的摘要聯集、同鍵後者勝出，所以沒被點名的文件仍沿用
+        先前條目的摘要（誠實地：它們這次沒被重新檢視）。
+        """
+        prev = self.latest_frozen()
+        if prev is None:
+            raise ValueError("record_spec_refreeze needs an existing frozen_stages entry to supersede")
+        entry: Dict[str, Any] = {
+            "stage": prev.get("stage"),
+            "frozen_at": _now(),
+            "spec_docs": list(spec_docs),
+            "spec_doc_digests": dict(spec_doc_digests),
+        }
+        if approved_by:
+            entry["approved_by"] = approved_by
+        entry["kind"] = FREEZE_KIND_REFREEZE
+        entry["supersedes"] = prev.get("frozen_at")
+        entry["reason"] = reason
+        stages = self.root.setdefault("frozen_stages", []) or []
+        stages.append(entry)
+        self.root["frozen_stages"] = stages
+        self.root["updated_at"] = _now()
+        return entry
 
     def record_escalation(self, reason: str, *, details: Optional[Dict[str, Any]] = None,
                           rule_id: Optional[str] = None, source: Optional[str] = None) -> None:

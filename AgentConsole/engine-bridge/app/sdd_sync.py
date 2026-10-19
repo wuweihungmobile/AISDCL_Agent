@@ -119,7 +119,8 @@ def playbook_ref(run_id: str) -> str:
 
 
 def default_stage(frozen_count: int) -> str:
-    """`:freeze` 請求省略 `stage` 時的預設階段名：`Stage-<n>`，n＝已凍結筆數＋1。"""
+    """`:freeze` 請求省略 `stage` 時的預設階段名：`Stage-<n>`，n＝已凍結階段數＋1。
+    階段數由 `sdd_state.frozen_stage_count` 數：`kind: refreeze` 的重記條目不是新階段、不計。"""
     return f"Stage-{frozen_count + 1}"
 
 

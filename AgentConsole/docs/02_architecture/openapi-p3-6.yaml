@@ -4528,7 +4528,7 @@ components:
         stage:
           type: string
           pattern: '^[A-Za-z0-9._-]{1,64}$'
-          description: 階段名；省略時 Bridge 用 `Stage-<n>`（`n`＝`frozen_stages` 筆數＋1；ADR-XPLAT-016 §4.4）。階段名不要求唯一
+          description: 階段名；省略時 Bridge 用 `Stage-<n>`（`n`＝`frozen_stages` 中 `kind` 不是 `refreeze` 的條目數＋1，缺 `kind` 視為凍結；ADR-XPLAT-016 §4.4）。階段名不要求唯一
         docs:
           type: array
           minItems: 1

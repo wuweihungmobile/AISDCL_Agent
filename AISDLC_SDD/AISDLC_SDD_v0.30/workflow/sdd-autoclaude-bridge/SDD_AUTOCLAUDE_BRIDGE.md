@@ -549,7 +549,7 @@ sdd spec-frozen --project "$SDD_PROJECT" --must-exist --stage Stage-1 --doc CLAU
 1. `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"`；審查者必須是**未參與規格撰寫與實作**的角色（AI 自寫自驗的補償控制，§6.4 C-3），以 `AISDLC_SDD:sdd-review` 產報告 → `docs/06_quality/SCG4-REVIEW-<Feature>-<日期>.md`。
 2. `gate --gate PR_REVIEW --result PASS --reason "SCG-4 PASS"` → RTM_VERIFY；`AISDLC_SDD:rtm-generate verify` 產 `docs/06_quality/RTM-<System>.md`／`RTM-VERIFY-<System>.md`；`gate --gate RTM_VERIFY --result PASS --reason "SCG-5 PASS"` → RELEASE_READY。
    失敗與重試上限照 GATE〈FSM 寫入指令〉第 11、12 列（PR 5 次、同模式 3 次 → SPEC_AUDIT；RTM 2 次）。
-3. **RELEASE**：功能合併進 main 且雲端 CI 綠之後，由**收尾者**執行一次 `transition --to RELEASE --reason "SCG-6 PASS；已合併 <commit>，雲端 CI 綠"`（終態；`RELEASE: set()`，不重開）。下一個功能用新鍵、新視窗。
+3. **RELEASE**：功能合併進 main 且雲端 CI 綠之後，由**收尾者**執行一次 `transition --to RELEASE --reason "SCG-6 PASS；已合併 <commit>，雲端 CI 綠"`（終態；`RELEASE: set()`，不重開）。下一個功能用新鍵、新視窗。雲端 CI 紅時**不要**直接記 `RELEASE`：`gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`（理由必填；上限 2——第 1 次失敗退回 IMPLEMENTATION 修，修好照步驟 1～2 再走 PR_REVIEW → RTM_VERIFY → RELEASE_READY，第 2 次失敗進 ESCALATION、不自動恢復；OBS-SI-117，GATE〈FSM 寫入指令〉第 14 列）。
 4. 收尾時把 `show --must-exist` 的逐字輸出與 `frozen_stages[*].spec_doc_digests` 引進證據檔（狀態在被忽略的 `build/` 下，不入庫；§8.12）。
 
 ### 8.8 阻塞態三層處置（D-116-08；不改任何 hook）
@@ -574,7 +574,7 @@ SCG 是**單一功能**的閘；AutoClaude 的 G0～G6 與 AgentConsole 的 W �
 | 規格閘 | SCG-0～3 | `gate --gate SCG_VALIDATION`（共用一個重試預算，上限 3）→ HUMAN_PENDING → `spec-frozen` | 一個功能一份 FRD-lite＋TCS，三子專案同一套（FSM 可驗） |
 | 品質閘 | SCG-4 | `PR_REVIEW`（上限 5；同模式 3 次 → SPEC_AUDIT） | 獨立審查：審查者未參與規格與實作 |
 | 品質閘 | SCG-5 | `RTM_VERIFY`（上限 2） | RTM 100% 覆蓋；RTM 與報告落 `docs/06_quality/` |
-| 發布閘 | SCG-6 | RELEASE_READY → `RELEASE`（合併＋雲端 CI 綠後，§8.7） | 以倉內 CI 為憑 |
+| 發布閘 | SCG-6 | `RELEASE_READY`（上限 2）→ `RELEASE`（合併＋雲端 CI 綠後，§8.7）；CI 紅 → `gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"` 有界退回 IMPLEMENTATION（第 2 次 → ESCALATION，不自動恢復；OBS-SI-117） | 以倉內 CI 為憑 |
 | 交付里程碑 | G0～G6（AutoClaude；見 `AutoClaude/docs/05_development/gate_audit.md`）／W1～W5 入口與出口閘（AgentConsole；見 `AgentConsole/docs/04_planning/Implementation_Plan.md` §2） | 不在 FSM 內，人工簽核 | 範圍比單一功能大：一個 G／W 之內可以有多個功能週期（多個鍵）；SCG 的通過紀錄與報告可作為簽核證據引用 |
 
 ### 8.10 skills 與路徑語意（G-116-13）
