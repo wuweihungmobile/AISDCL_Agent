@@ -244,7 +244,11 @@ def test_the_backoff_sleeps_in_slices_so_esc_f12_can_cut_it_short(tmp_path, monk
     kernel = _built(tmp_path, monkeypatch, ex, hotkey=hk)
 
     def _press_during_the_first_slice(seconds):
-        hk.triggered = True
+        # 只在退避切片（≥1 秒）才模擬按鍵：Linux CI 上子行程輪詢以 time.sleep(0.x) 等待，
+        # 若任何 sleep 都算按鍵，hotkey 會在第一片退避之前就於 pre_attempt 觸發，
+        # 切片數變 0 而假紅（雲端 run 39284357343 實況）；按鍵語意＝「第一片退避睡到一半被按」。
+        if float(seconds) >= 1.0:
+            hk.triggered = True
     with patch("time.sleep", side_effect=_press_during_the_first_slice) as slept:
         result = kernel.run(_playbook())
     # 只數退避切片（≥1 秒）：Linux CI 上另有子行程輪詢以 time.sleep(0.x) 等待，
