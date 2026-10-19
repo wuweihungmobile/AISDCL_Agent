@@ -33,16 +33,16 @@
 
 **現況與變更（Before／After；brownfield）**
 
-- Before：(1) `docs/06_quality/SelfImproving_Observation_Ledger.md` 是八欄暫定版（ID、時間、情境、症狀、證據座標、分類、嚴重度、處置），處置為自由文字，時區只靠表頭一句話，沒有來源、回報者、面欄位，沒有機器檢查（撰寫時現查 42 列，不構成契約）；(2) 缺陷帳本家族已有 `tools/check_defect_log_crossref.py` 與 `tools/tests/test_defect_id_reference_integrity.py` 兩把鎖，OBS 帳本不在其射程；(3) 沒有 `tools/selfimproving.py`、`tools/lib/si_*.py`、`docs/06_quality/SelfImproving_Protocol/`、`docs/05_development/SelfImproving_Operations_SOP.md`。
+- Before：(1) `docs/06_quality/SelfImproving_Observation_Ledger.md` 是八欄暫定版（ID、時間、情境、症狀、證據座標、分類、嚴重度、處置），處置為自由文字，時區只靠表頭一句話，沒有來源、回報者、面欄位，沒有機器檢查（HEAD 7b9c6ba6 現查 47 列，數字不構成契約）；(2) 缺陷帳本家族已有 `tools/check_defect_log_crossref.py` 與 `tools/tests/test_defect_id_reference_integrity.py` 兩把鎖，OBS 帳本不在其射程；(3) 沒有 `tools/selfimproving.py`、`tools/lib/si_*.py`、`docs/06_quality/SelfImproving_Protocol/`、`docs/05_development/SelfImproving_Operations_SOP.md`。
 - After：九欄帳本（第 9 欄「標記」，檔頭機器可讀 `tz=`）、處置落入枚舉且原文逐字保全；單一遷移 commit 加掌舵者確認列加 `migration_base_sha` 的一次性豁免；唯讀檢查器 `check`（21 個判定項、四種 rc、判準指紋、可貼入的 OBS 草稿列）；協定目錄（`params.json`、`metrics.md`）；SOP 骨架（五角色任務書位置，擷取者節完整）；`tools/tests/test_selfimproving_check.py`。
 
-**AC 編號規則**（ADR-XPLAT-016 §8.1 的 AC 文法是 `AC-[\d\-]+`，PRD 的 `AC-SI-NN-Y` 不合）：本檔以 `AC-0NN-Y` 對映 PRD（`AC-001-1`＝PRD `AC-SI-01-1`，`AC-029-2`＝`AC-SI-29-2`，其餘類推，共 13 個 PRD AC）。`AC-030-x`、`AC-031-x`、`AC-032-x` 為本檔自增（PRD 的 FR 只編到 29，無編號衝突；來源＝PRD §9.3 `check` 列、§9.4 草稿列規則、§9.1 的 C5／C6 列、NFR-SI-02-1、NFR-SI-09-1），合計 19 個 AC。
+**AC 編號規則**（ADR-XPLAT-016 §8.1 的 AC 文法是 `AC-[\d\-]+`，PRD 的 `AC-SI-NN-Y` 不合）：本檔以 `AC-0NN-Y` 對映 PRD（`AC-001-1`＝PRD `AC-SI-01-1`，`AC-029-2`＝`AC-SI-29-2`，其餘類推，共 13 個 PRD AC）。`AC-030-x`、`AC-031-x`、`AC-032-x` 為本檔自增（PRD 的 FR 只編到 29，無編號衝突），合計 19 個 AC。**自增 AC 的來源逐條標示，並區分「PRD 明文」與「本檔類推」**：AC-030-1 ← PRD §9.3 `check` 列（PRD:635）與 NFR-SI-09-1（PRD:450）；AC-030-2 ← §9.3 `check` 列的「只讀」欄（PRD:635）與 §9.4 的「CLI 不自寫 OBS 帳本」（PRD:676）；AC-030-3 的**草稿列**＝PRD §9.4（PRD:676）與 NFR-SI-09-3（PRD:452）明文，**判準指紋＝本檔類推**（PRD 只在量測腳本列 PRD:646 與五問協定先例 `tools/probe/fivequestion_ledger.py` 定義指紋，`check` 列 PRD:635 沒有此句；任務書 D4 要求 `check` 輸出判準指紋，算法沿用 PRD:646 的「協定目錄各檔 CRLF 轉 LF 後雜湊加 `metrics_rev`」，`check_rules_rev` 為本檔類推，請掌舵者知悉）；AC-031-1 ← §9.1 C5 列（PRD:566）、§9.3 `check` 列的 params 對表句（PRD:635）、NFR-SI-02-1（PRD:413～415）、PRD:697；AC-031-2 ← C5 列的「指標定義」（PRD:566）與 §1.3（PRD:61～65、69～78）；AC-032-1 ← §9.1 C6 列（PRD:567）、NFR-SI-07-2（PRD:444）。
 
 **P0 交付物**（D1～D6）
 
 | 編號 | 交付物 | 路徑（相對 monorepo 根） | 製作者 | 主要驗證 |
 |------|--------|--------------------------|--------|----------|
-| D1 | 觀察帳本定稿與一次性遷移 | `docs/06_quality/SelfImproving_Observation_Ledger.md`（改）；`docs/06_quality/SelfImproving_Observation_Ledger_notes.md`（新，附註檔） | 主控（帳本單一窗口，PRD C1） | 實跑檢核 V1～V3，與 V2 的 `check` |
+| D1 | 觀察帳本定稿與一次性遷移 | `docs/06_quality/SelfImproving_Observation_Ledger.md`（改）；`docs/05_development/SelfImproving_Observation_Ledger_notes.md`（新，附註檔；被 NFR-SI-02-1 (iv) 既有的實體 glob `docs/05_development/SelfImproving_*.md` 涵蓋，不必改 PRD） | 主控（帳本單一窗口，PRD C1） | 實跑檢核 V1～V3，與 V2 的 `check` |
 | D2 | 遷移豁免 | `docs/06_quality/SelfImproving_Protocol/params.json`（改一個鍵）；帳本（追加一列） | 主控 | 實跑檢核 V4、V5；§2 的遷移鏈 AT |
 | D3 | 協定目錄 | `docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`（新） | Developer | §2 的 AC-031 系列 AT；實跑檢核 V6 |
 | D4 | 檢查器 | `tools/selfimproving.py`、`tools/lib/si_*.py`（新） | Developer | §2 的 AC-001、002、004、030、031 系列 AT |
@@ -54,6 +54,7 @@
 - **T**（Developer；D3、D4、D5、D6）→ **M**（主控；D1：單一 commit，只動帳本與附註檔）→ **N**（主控；D2：把 M 的完整 sha 寫入 `params.json` 的 `migration_base_sha`，並於帳本追加一筆掌舵者確認的 `decided` 列）。T 之前真帳本還是八欄、`check` 對真帳本必紅（預期）；M 之後、N 之前 `check` 仍紅（未豁免，預期）；N 之後 `check` 對真帳本須為綠（實跑檢核 V2）。
 - 真帳本只由主控寫（PRD C1「他人只讀」）；Developer 棒不得碰真帳本與真附註檔；遷移腳本若有，放 scratchpad、不入庫。
 - 確認列的引言取自掌舵者逐字稿的人工載體（`type` 為 `user` 且 `origin.kind` 為 `human`，或 `queued_command` 附件；PRD Q11），座標 `sid` 加 `line`（jsonl 的 1 起算實體行號）。P0 只記錄、不機械驗引言（引言回查屬 P2，AC-SI-12-4）；QA 在實跑檢核 V5 以逐字稿現查。
+- **帳本更新慣例**（預審 F-04）：M 之前（遷移基準以前）的原地改寫——例如 OBS-SI-011 的累計次數、時間欄更正——依 AC-SI-01-3 屬遷移豁免涵蓋的歷史，不比對；**M 之後帳本一律追加列**（累計、狀態更新與更正都用追加列，更正列標 `rel=corrects:<ID>`），原地改寫即 `ROW-MUTATED`；SOP 擷取者節須載明（R25 (9)），實跑檢核 V9 於 N 之後至 SCG-4 前驗收。主控宜在 M 之前把 OBS-SI-011 這類累計欄改成追加或「現查」形態，免得 M 之後的慣性原地改寫使 V2 轉紅。
 
 **〈P0 行為規則〉**（R1～R26；各 AT 以 R 編號引用；判定碼見其後的〈判定碼表〉）
 
@@ -62,15 +63,15 @@
 - **R1 介面與 rc**：`python tools/selfimproving.py check [--repo <dir>] [--ledger <file>] [--params <file>] [--json]`。`main(argv: list[str] | None = None) -> int` 回傳 rc、不呼叫 `sys.exit`（argparse 的 `SystemExit` 在 `main` 內攔截並轉成回傳值）；檔尾 `if __name__ == "__main__": sys.exit(main())`；檔首 `import _stdio_utf8  # noqa: F401`（`tools/_stdio_utf8.py` 是 stdout／stderr 強制 UTF-8 的唯一實作，本工具不得另寫 `.reconfigure(` 站點，根層去重鎖 `tools/tests/test_platform_utils_dedup.py` 會紅）。P0 只有 `check` 一個動詞；其他動詞名（含 PRD §9.3 列為後續階段的 `status`、`prop-new` 等）一律視為未知動詞。**rc 表**：`0`＝無 FAIL 且無 blocking NE；`1`＝至少一項 FAIL；`2`＝無 FAIL、至少一項 blocking NE；`3`＝檢查器無法執行（用法錯誤、未知動詞、`--repo` 不是目錄、`--ledger` 或 `--params` 不存在、不是檔案、不可讀、非 UTF-8、`params.json` 不是 JSON 物件），此時 stdout 為空、stderr 至少一行理由。`--help` 與 `check --help`：rc 0，usage 走 stdout 並列出 `check`（`check --help` 另列四個旗標）。rc 3 刻意與 argparse 預設的用法錯誤碼 2 分開：本工具的 2 專指「未判」。
 - **R2 路徑**：`--repo` 預設 `Path(__file__).resolve().parents[1]`；`--ledger` 預設 `<repo>/docs/06_quality/SelfImproving_Observation_Ledger.md`；`--params` 預設 `<repo>/docs/06_quality/SelfImproving_Protocol/params.json`；`--ledger`／`--params` 給相對路徑時相對於 `--repo`（不是 cwd）。其餘固定相對 `--repo` 的路徑為常數、P0 不提供旗標：PRD `docs/01_requirements/SelfImproving_PRD.md`、根 `CLAUDE.md`、缺陷帳本家族與 OBS 附註檔／封存檔（R18）、協定目錄 `docs/06_quality/SelfImproving_Protocol/`（R7）。
 - **R3 文字形態**：stdout（UTF-8、LF）依序為：(1) 首行 `si-check rows=<N> items=21`（N＝R9 解析到的資料列數）；(2) 每個判定項一行 `<PASS|FAIL|NE> <item_id>`，NE 行在項目 ID 之後加一個空白與 `blocking` 或 `nonblocking`，該項的項目層 `detail` 非空時在行尾接 ` # <detail>`（行文法 `^(PASS|FAIL|NE) ([a-z_]+\.[a-z_]+)(?: (blocking|nonblocking))?(?: # (.*))?$`），項序固定（見碼表）；(3) 該項的 finding 逐行縮排兩個空白：`  <subject> <CODE> <detail>`（subject 是列 ID、`L<行號>`、參數名或 `-`；level 為 warn 者 detail 以 `[warn]` 起頭；列層級 finding 的 detail 須含所涉欄的中文欄名，例如 `分類`、`處置`、`證據座標`、`時間`；`ROW-MUTATED` 的 detail 須含 `掌舵者` 字樣，提示要求掌舵者過目）；PASS 項除 warn 外不印 finding；(4) `overall=<PASS|FAIL|NE> rc=<n> fingerprint=sha256:<64 位小寫 hex>`；(5) rc 不為 0 時其後接一行 `obs-draft:` 與一行 OBS 草稿列（R6）。
-- **R4 JSON 形態**：`--json` 時 stdout 只有一個 JSON 物件加換行（`json.dumps(..., ensure_ascii=False)`），鍵序為 `overall`、`rc`、`fingerprint`、`fingerprint_parts`（鍵 `manifest`、`metrics_rev`、`check_rules_rev`）、`rows`、`items`、`obs_draft`。`items` 是 21 個物件，依碼表順序，各含 `id`、`status`、`blocking`、`detail`（項目層的說明字串，多數項為空字串；只有 `history.migration` 與 `history.row_mutated` 另有指定，見 R19、R20）、`findings`；`findings` 的元素含 `subject`、`code`、`level`（`fail`、`warn`、`info` 之一；NE 項的 finding 為 `info`）、`detail`。`blocking` 只有 NE 項可為 true，其餘恆為 false；`obs_draft` 是草稿列字串，rc 為 0 時是 null。文字形態與 JSON 形態的 rc、項狀態、finding 集合必須一致。
+- **R4 JSON 形態**：`--json` 時 stdout 只有一個 JSON 物件加換行（`json.dumps(..., ensure_ascii=False)`），鍵序為 `overall`、`rc`、`fingerprint`、`fingerprint_parts`（鍵 `manifest`、`metrics_rev`、`check_rules_rev`）、`rows`、`items`、`obs_draft`；`fingerprint_parts`、`items` 的元素、`findings` 的元素的鍵序亦依下列所列順序。`items` 是 21 個物件，依碼表順序，各含 `id`、`status`、`blocking`、`detail`（項目層的說明字串，多數項為空字串；只有 `history.migration` 與 `history.row_mutated` 另有指定，見 R19、R20）、`findings`；`findings` 的元素含 `subject`、`code`、`level`（`fail`、`warn`、`info` 之一；NE 項的 finding 為 `info`）、`detail`。`blocking` 只有 NE 項可為 true，其餘恆為 false；`obs_draft` 是草稿列字串，rc 為 0 時是 null。文字形態與 JSON 形態的 rc、項狀態、finding 集合必須一致。
 - **R5 狀態語意**：每項狀態恆為 PASS、FAIL、NE 三者之一：有任一 `fail` 等級的 finding ⇒ FAIL；否則命中碼表的任一 NE 碼 ⇒ NE；否則 PASS。NE 分兩類：**nonblocking**（只有 `ref.carrier_families` 的 `CARRIER-NOT-ESTABLISHED`：PRD AC-SI-04-1 規定載體尚未建立的 ID 家族要印「未判」、不得判通過也不得判不合規，而 P0 退出條件 (b) 要求 `check` 綠，所以這類 NE 不影響 rc）與 **blocking**（其餘 NE 碼）。overall：任一 FAIL ⇒ FAIL、rc 1；否則任一 blocking NE ⇒ NE、rc 2；否則 PASS、rc 0（nonblocking NE 照印）。**取不到判準輸入＝NE，不以內建預設值頂替**：某項所需的 `params.json` 鍵缺失或型別不符時，該項為 blocking NE（碼 `SOURCE-UNAVAILABLE`），並由 `params.keys` 另報 FAIL。
-- **R6 OBS 草稿列**（PRD §9.4：任何階段失敗，CLI 非零 rc 並印可貼入的 OBS 草稿列；CLI 不自寫 OBS 帳本）：rc 不為 0 時印恰一行九欄 Markdown 列——ID＝`OBS-SI-` 接（帳本現有合法 ID 數值最大者加一，至少三位、零補齊；帳本沒有列則 001）；時間＝現在的本機時間，格式 `YYYY-MM-DD HH:MM ±HH:MM`（`datetime.now().astimezone()`，不得持久化或輸出無 offset 的時間）；情境＝`si check（自動草稿）`；症狀＝`si check 判 <overall>（rc=<n>）：` 接至多 5 個非 PASS 項的 item_id（依碼表順序、以「、」連接），超過 5 項尾接 `…等 <k> 項`（k 為非 PASS 項總數）；證據座標＝反引號包住 `python tools/selfimproving.py check` 之後接 ` rc=<n>；判準指紋 sha256:<前 12 位 hex>`；分類＝`tooling`；嚴重度＝`P3`；處置＝`open`；標記＝`面=流程;來源=工具;回報者=si-check`。草稿列本身必須通過 R9～R17 的全部逐列判準，且位元組數不超過 `row_max_bytes`。
-- **R7 判準指紋**：`manifest`＝先例 `tools/probe/fivequestion_ledger.py` 的 `manifest_sha` 算法逐字沿用於協定目錄：該目錄下（遞迴）每個檔名不以 `.` 開頭的檔，取（相對協定目錄的 POSIX 路徑, sha256 十六進位字串〔內容先把 CRLF 換成 LF〕）、依路徑排序成清單，對 `json.dumps(清單, ensure_ascii=False)` 的 UTF-8 位元組取 sha256 的 64 位小寫 hex；`metrics_rev`＝`params.json` 的同名鍵值（缺失或型別不符＝null）；`check_rules_rev`＝工具內的整數常數（初值 1；`check` 判準語意變動時人工 bump，先例：量測碼不入 manifest）。`fingerprint`＝`sha256:` 接 `json.dumps({"check_rules_rev":…, "manifest":…, "metrics_rev":…}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256 hex。指紋只隨「判準」變（協定目錄任一檔內容、`metrics_rev`、`check_rules_rev`），不隨帳本資料、工作樹其他檔或 git 狀態變。
-- **R8 純度與零副作用**：(a) 只讀：不建立、修改、刪除任何檔案或目錄（含暫存檔、`.lock`），不寫 OBS 帳本；(b) 只用標準庫與 repo 內本地模組（`_stdio_utf8`、`lib.*`），不連網；(c) 唯一的子行程是 `git`（`shell=False`、`-C` 指向 `--repo`、`encoding="utf-8"`、`errors="replace"`、每個呼叫帶 timeout；建議 60 秒），子行程環境（以 `env` 引數明給）移除 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES` 並設 `GIT_OPTIONAL_LOCKS=0`；列舉路徑的 git 呼叫一律帶 `-c core.quotepath=false`（根層鎖 `TestGitPathEnumerationIsQuotepathSafe`）；git 不可用（找不到執行檔、`--repo` 不是 git 工作樹、逾時）⇒ 需要 git 的項目為 blocking NE（碼 `GIT-UNAVAILABLE`）；(d) 所有文字檔讀寫帶 `encoding="utf-8"`；(e) 不持久化或輸出 naive 時間戳。
+- **R6 OBS 草稿列**（PRD §9.4：任何階段失敗，CLI 非零 rc 並印可貼入的 OBS 草稿列；CLI 不自寫 OBS 帳本）：rc 不為 0 時印恰一行九欄 Markdown 列——ID＝`OBS-SI-` 接（帳本現有合法 ID 數值最大者加一，至少三位、零補齊；帳本沒有列則 001）；時間＝現在的本機時間，格式 `YYYY-MM-DD HH:MM ±HH:MM`（`datetime.now().astimezone()`，不得持久化或輸出無 offset 的時間）；情境＝`si check（自動草稿）`；症狀＝`si check 判 <overall>（rc=<n>）：` 接至多 5 個非 PASS 項的 item_id（依碼表順序、以「、」連接），超過 5 項尾接 `…等 <k> 項`（k 為非 PASS 項總數）；證據座標＝反引號包住 `python tools/selfimproving.py check` 之後接 ` rc=<n>；判準指紋 sha256:<前 12 位 hex>`；分類＝`bug`（PRD NFR-SI-09-3：迴圈任一階段失敗都留一筆分類 `bug` 的 OBS，見 PRD:452、PRD:868、PRD:309；§9.4 的草稿列規則綁在其上，PRD:676）；嚴重度＝`P3`；處置＝`open`；標記＝`面=流程;來源=工具;回報者=si-check`。草稿列本身必須通過 R9～R17 的全部逐列判準，且位元組數不超過 `row_max_bytes`。
+- **R7 判準指紋**（本檔類推：PRD 只在量測腳本列〔PRD:646〕與五問協定先例定義指紋，`check` 列〔PRD:635〕沒有此句；任務書 D4 要求 `check` 輸出判準指紋，見〈AC 編號規則〉）：`manifest`＝先例 `tools/probe/fivequestion_ledger.py` 的 `manifest_sha` 算法逐字沿用於協定目錄：該目錄下（遞迴）每個檔名不以 `.` 開頭的檔，取（相對協定目錄的 POSIX 路徑, sha256 十六進位字串〔內容先把 CRLF 換成 LF〕）、依路徑排序成清單，對 `json.dumps(清單, ensure_ascii=False)` 的 UTF-8 位元組取 sha256 的 64 位小寫 hex；`metrics_rev`＝`params.json` 的同名鍵值（缺失或型別不符＝null）；`check_rules_rev`＝工具內的整數常數（初值 1；`check` 判準語意變動時人工 bump，先例：量測碼不入 manifest）。`fingerprint`＝`sha256:` 接 `json.dumps({"check_rules_rev":…, "manifest":…, "metrics_rev":…}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256 hex。指紋只隨「判準」變（協定目錄任一檔內容、`metrics_rev`、`check_rules_rev`），不隨帳本資料、工作樹其他檔或 git 狀態變。
+- **R8 純度與零副作用**：(a) 只讀：不建立、修改、刪除任何檔案或目錄（含暫存檔、`.lock`），不寫 OBS 帳本；(b) 只用標準庫與 repo 內本地模組（`_stdio_utf8`、`lib.*`），不連網；(c) 唯一的子行程是 `git`，一律經 `subprocess.run`（不直接用 `Popen`、`check_output`、`os.system`），每個呼叫：`shell` 不為真；argv 以 `git`、`-C`、`<--repo 的解析後路徑>` 起頭；帶 `encoding="utf-8"` 與 `errors="replace"`；帶正數的 `timeout`（建議 60 秒）；子行程環境（以 `env` 引數明給）移除 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES` 並設 `GIT_OPTIONAL_LOCKS=0`；列舉路徑的 git 呼叫一律帶 `-c core.quotepath=false`（根層鎖 `TestGitPathEnumerationIsQuotepathSafe`）；git 不可用（找不到執行檔、`--repo` 不是 git 工作樹、逾時）⇒ 需要 git 的項目為 blocking NE（碼 `GIT-UNAVAILABLE`）；(d) 所有文字檔讀寫帶 `encoding="utf-8"`；(e) 不持久化或輸出 naive 時間戳。
 
 *B. 帳本解析與逐列判準*
 
-- **R9 列識別與切分**：檔案以 UTF-8 讀（開頭 BOM 容許），以 `\n` 切行，每行尾端單一 `\r` 剝除（CRLF 容許）。**檔頭 tz 宣告**：整檔中符合 `^<!--\s*si-ledger:\s*(.*?)\s*-->\s*$` 的行；有效宣告的內容須含 `tz=<offset>`（offset 文法見 R10）；宣告行有兩個以上，或唯一的宣告內容不合法 ⇒ `TZ-HEADER-MALFORMED`，且這兩種情形都視同沒有宣告（宣告行為零個是合法的，此時每列時間都須自帶 offset）。**表頭列**＝第一個符合 `^\|\s*ID\s*\|` 的行，其欄名序列（strip 後）須恰為 `ID`、`時間`、`情境`、`症狀`、`證據座標`、`分類`、`嚴重度`、`處置`、`標記`，找不到或不符 ⇒ `HEADER-COLS`（subject 為 `-`）。**資料列**＝(1) 檔內所有符合 `^\|\s*OBS-SI-` 的行；加上 (2) 表頭列之後連續（直到空行或不以 `|` 起頭的行為止）、以 `|` 起頭、非表頭列、非分隔列的其餘行（subject 記為 `L<1 起算的行號>`，其 ID 欄視為不合法 ⇒ `ROW-ID-FORMAT`）。(1) 類資料列的 subject 取其 ID 儲存格原字串；ID 不合法的資料列，其餘逐列判準照常評估。分隔列＝各格皆符合 `:?-{3,}:?`。**欄切分**：行須以 `|` 起頭並以 `|` 結尾（否則 `ROW-ARITY`），去掉首尾的 `|` 後以「未被反斜線跳脫的 `|`」切開；`\|` 在格內還原為字面 `|` 且不切；各格 strip；未跳脫的 `|` 即使包在反引號內也照切（先例：`tools/check_defect_log_crossref.py` 的 `row_arity_problems`）。欄數須為 9，否則 `ROW-ARITY`；欄數不是 9 的列只報 `ROW-ARITY` 與以整行文字判定的 `ROW-BYTES-OVER`、`CTRL-CHAR`，不做其餘依欄位的判準（無法對齊欄位）。**ID**：須符合 `^OBS-SI-\d{3,}$`，否則 `ROW-ID-FORMAT`；依檔內出現順序逐列判定：ID 已出現過 ⇒ `ROW-ID-DUP`（第二次起每次一筆）；否則數值（`int`）不大於此前出現過的最大數值 ⇒ `ROW-ID-ORDER`；否則更新最大值（可跳號、嚴格遞增）。
+- **R9 列識別與切分**：檔案以 UTF-8 讀（開頭 BOM 容許），以 `\n` 切行，每行尾端單一 `\r` 剝除（CRLF 容許）。**檔頭 tz 宣告**：整檔中符合 `^<!--\s*si-ledger:\s*(.*?)\s*-->\s*$` 的行；有效宣告的內容須含 `tz=<offset>`（offset 文法見 R10）；宣告行有兩個以上，或唯一的宣告內容不合法 ⇒ `TZ-HEADER-MALFORMED`，且這兩種情形都視同沒有宣告（宣告行為零個是合法的，此時每列時間都須自帶 offset）。**表頭列**＝第一個符合 `^\|\s*ID\s*\|` 的行，其欄名序列（strip 後）須恰為 `ID`、`時間`、`情境`、`症狀`、`證據座標`、`分類`、`嚴重度`、`處置`、`標記`，找不到或不符 ⇒ `HEADER-COLS`（subject 為 `-`）。**資料列**＝(1) 檔內所有符合 `^\|\s*OBS-SI-` 的行；加上 (2) 表頭列之後連續（直到空行或不以 `|` 起頭的行為止）、以 `|` 起頭、非表頭列、非分隔列的其餘行（subject 記為 `L<1 起算的行號>`，其 ID 欄視為不合法 ⇒ `ROW-ID-FORMAT`）。(1) 類資料列的 subject 取其 ID 儲存格原字串；ID 不合法的資料列，其餘逐列判準照常評估。分隔列＝各格皆符合 `:?-{3,}:?`。**欄切分**：行須以 `|` 起頭並以 `|` 結尾（否則 `ROW-ARITY`），去掉首尾的 `|` 後以「未被反斜線跳脫的 `|`」切開；`\|` 在格內還原為字面 `|` 且不切；各格 strip；未跳脫的 `|` 即使包在反引號內也照切（先例：`tools/check_defect_log_crossref.py` 的 `row_arity_problems`）。欄數須為 9，否則 `ROW-ARITY`；欄數不是 9 的列只報 `ROW-ARITY` 與以整行文字判定的 `ROW-BYTES-OVER`、`CTRL-CHAR`，不做其餘依欄位的判準（無法對齊欄位）。**ID**：須符合 `^OBS-SI-\d{3,}$`，否則 `ROW-ID-FORMAT`，且該列（含 (2) 類資料列的空或不合法 ID 欄）**不參與**下列 `ROW-ID-DUP`、`ROW-ID-ORDER` 的追蹤——不加入已見集合、不更新最大值、不做整數轉換；格式合法的列依檔內出現順序逐列判定：ID 已出現過 ⇒ `ROW-ID-DUP`（第二次起每次一筆）；否則數值（`int`）不大於此前出現過的最大數值 ⇒ `ROW-ID-ORDER`；否則更新最大值（可跳號、嚴格遞增）。
 - **R10 時間文法**：時間格（strip 後）須整串符合下列正規式，且起點能以 `datetime(年, 月, 日, 時, 分, 秒或0)` 建構（排除 2026-02-30、24:00 這類假日期），否則 `TIME-FORMAT`；起點帶 offset 者列內明示優先於檔頭；起點不帶 offset 且檔頭沒有有效 tz ⇒ `TIME-NO-TZ`；格式不合者不再判 `TIME-NO-TZ`。區間的迄點不帶 offset 時沿用起點。
 
 ```text
@@ -93,7 +94,7 @@ PROPOSED   = ^proposed@PROP-SI-\d{3,}$
 
 - **R14 標記欄**：格內以「引號外的 `;`」切成片段；空片段（含結尾 `;`）略過；每個片段須為 `鍵=值`（以第一個 `=` 分鍵與值，各自 strip），值為空、片段無 `=`、同鍵重複、引號值未以對應的結尾引號收尾 ⇒ `MARK-SYNTAX`；值可為引號字串（`"…"`，內含 `"` 寫 `\"`、`\` 寫 `\\`）或不含 `"` 與 `;` 的裸值；引號字串須逐字元掃描解析（遇 `\` 連同下一字元視為一個跳脫對，以第一個未跳脫的 `"` 為結尾，且它必須是該值的最後一個字元；以跳脫反斜線結尾的字串如 `"…\\"` 是合法的，切分片段時引號內的 `;` 不切）。鍵須屬封閉詞彙 `面`、`暴露`、`來源`、`外部衍生`、`回報者`、`根因`、`rel`、`reopens`、`orig`、`span`，否則 `MARK-UNKNOWN-KEY`。值域：`面`∈{守衛, 產品, 文件, 流程}；`暴露`∈{a, b, c, 無}；`外部衍生` 只能是 `是`；違反 ⇒ `MARK-VALUE`。`orig` 的值須為引號字串，或 `@<路徑>#OBS-SI-<數字>`（路徑不含空白與 `#`），否則 `MARK-ORIG-FORMAT`。`根因`、`rel`、`reopens`、`span`、`回報者` 的值只要求非空。**值空的鍵視為缺鍵**（下游判準同缺鍵）。`面` 為每列必備，缺 ⇒ `MARK-FACE-MISSING`。
 - **R15 面、暴露、來源、回報者**：`面` 為 `守衛` 時 `暴露` 必備，缺 ⇒ `GUARD-NO-EXPOSURE`；`面` 為 `守衛` 且嚴重度為 `P1` 或 `P2` 時 `暴露` 須為 a、b、c 之一，為 `無` ⇒ `GUARD-P12-NO-EXPOSURE`（PRD AC-SI-01-2：這類列應降為 P4 並入理論洞清單；「附座標」由該列證據座標通過 R16 承擔）；`面` 不是守衛者不受暴露規則約束。`來源` 必備且須為 `人`、`代理`、`工具`、`逐字稿`、`帳本` 之一，缺 ⇒ `SOURCE-MISSING`、值不在詞彙 ⇒ `SOURCE-VALUE`；`回報者` 必備，缺 ⇒ `REPORTER-MISSING`。
-- **R16 證據座標可定位形態**（規範性；只驗「形態」，不驗該檔或該行是否真的存在，見 §4 刻意不做）：證據座標格須命中下列九種之一，否則 `COORD-NONE`。
+- **R16 證據座標可定位形態**（規範性；只驗「形態」，不驗該檔或該行是否真的存在，見 §4 刻意不做）：證據座標格須命中下列九種之一，否則 `COORD-NONE`。PRD:208 只列四形態（檔案:行、指令＋rc、sid＋seq、帳本列 ID）；本檔放寬為九形態的理由、真帳本實測與替代見 §7 Q6；其中 `sid` 形態比照 PRD 要求同格帶 `line` 或 `seq`（裸 sid 不算）。
 
 ```text
 path   = (?<![\w.])(?:[A-Za-z0-9_.%\-]+[/\\])+[A-Za-z0-9_.%\-<>*{}\[\]]+\.[A-Za-z0-9]{1,8}(?::\d+(?:[–-]\d+)?)?
@@ -101,7 +102,7 @@ file   = (?<![\w./\\-])[A-Za-z0-9_.\-]+\.(?:md|py|json|jsonl|yaml|yml|ps1|sh|bas
 dir    = (?<![\w./\\-])(?:docs|tools|AutoClaude|AISDLC_SDD|AgentConsole|\.claude|\.github)/[^\s、，；）)`]*
 sha    = (?<![0-9A-Za-z])(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}(?![0-9A-Za-z])
 sha_kw = (?i:commit|sha)\s*[:=]?\s*[0-9a-f]{7,40}(?![0-9A-Za-z])
-sid    = [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+sid    = [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[^；;、\n]{0,40}?(?i:line|seq|行)\s*\d+
 id     = (?<![A-Za-z0-9-])(?:(?:OBS|ATT|PROP|DEC|APP|MEA|RUN)-SI-\d{3,}|DEF-\d+-\d+)(?![0-9A-Za-z])
 cmd    = `(?:python3?|py|git|powershell|pwsh|bash|sh|pytest|ruff|lint-imports|node|npm|npx|docker|gh|claude|uv)\b[^`]*`
 docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*\d
@@ -120,7 +121,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 *E. 協定參數、體積與反空轉*
 
-- **R21 `params.json` 對表**：頂層須為 JSON 物件，鍵集合須恰等於下表（23 鍵，與 PRD 的 `UPPER_SNAKE` 參數一對一，另含 PRD 在 C5 列點名但未取名的三項〔`min_obs_rows`、`ledger_warn_bytes`、`ledger_fail_bytes`〕與 `metrics_rev`、`migration_base_sha`、兩個 glob 清單）。缺鍵 ⇒ `PARAM-MISSING`、多出的鍵 ⇒ `PARAM-UNKNOWN`、型別不符 ⇒ `PARAM-TYPE`（布林不算整數與數值）、超出範圍 ⇒ `PARAM-RANGE`（subject 皆為鍵名）。「初值」欄是 D3 提交當下的值（`check` 與 AT 不斷言值，避免掌舵者調參後測試過期；V6 在提交當下一次性核對）；P1、P2 才用到的參數（沙盒逾時、寫入鎖逾時、事件數下限等）由各階段的 TCS 擴充登記表。
+- **R21 `params.json` 對表**：頂層須為 JSON 物件，必備鍵＝下表 23 鍵（與 PRD 的 `UPPER_SNAKE` 參數一對一，另含 PRD 在 C5 列點名但未取名的三項〔`min_obs_rows`、`ledger_warn_bytes`、`ledger_fail_bytes`〕與 `metrics_rev`、`migration_base_sha`、兩個 glob 清單）。缺鍵 ⇒ `PARAM-MISSING`、型別不符 ⇒ `PARAM-TYPE`（布林不算整數與數值）、超出範圍 ⇒ `PARAM-RANGE`（subject 皆為鍵名）。**多出的鍵不判紅**：PRD:635 只要求「PRD 引用的參數名須存在」，多鍵檢查沒有 PRD 依據、且會擋住 P1、P2 加鍵（須先改本檔），故不設未登記鍵的判定碼；D3 交付當下恰為這 23 鍵，由實跑檢核 V6 核對。「初值」欄是 D3 提交當下的值（`check` 與 AT 不斷言值，避免掌舵者調參後測試過期；V6 在提交當下一次性核對）；P1、P2 才用到的參數（沙盒逾時、寫入鎖逾時、事件數下限等）由各階段的 TCS 擴充登記表。
 
 | 鍵 | 型別 | 範圍 | 初值 | PRD 座標與備註 |
 |----|------|------|------|----------------|
@@ -146,7 +147,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | `ledger_fail_bytes` | 整數 | ≥ 1 | 262144 | 體積警戒線 fail（256 KiB，PRD:447）；名稱由本檔定 |
 | `migration_base_sha` | 字串或 null | 字串時須為 40 位小寫 hex（由 R19 判，非本項） | null（D2 前） | PRD:245、566 |
 | `spec_body_globs` | 字串陣列 | 非空 | `**/docs/01_requirements/**`、`**/docs/02_architecture/**`、`**/docs/03_testing/**` | PRD:697 |
-| `non_evolvable_globs` | 字串陣列 | 非空、無重複 | 由 R22 的規則自 PRD 與根 `CLAUDE.md` 現算 | NFR-SI-02-1（PRD:413–415） |
+| `non_evolvable_globs` | 字串陣列 | 非空（重複項由 R22 判） | 由 R22 的規則自 PRD 與根 `CLAUDE.md` 現算 | NFR-SI-02-1（PRD:413–415） |
 
 - **R22 耦合與 glob 一致性**：(a) `w_opp` 與 `w_min` 皆為有效整數時，`w_opp` 小於 `w_min` ⇒ `COUPLING-W-OPP-LT-W-MIN`（subject 為 `w_opp`；相等或大於放行；PRD §1.3〈M1 判定細則〉(f)）；`ledger_warn_bytes` 不小於 `ledger_fail_bytes` ⇒ `COUPLING-WARN-GE-FAIL`（subject 為 `ledger_warn_bytes`）；任一參與的鍵無效 ⇒ 該耦合項 blocking NE `SOURCE-UNAVAILABLE`。(b) **`non_evolvable_globs` 與 PRD 一致**（PRD 的散文是唯一真相源，不得在檢查器內複寫第二份清單）：必備集合＝兩個來源的聯集。來源一：PRD（`docs/01_requirements/SelfImproving_PRD.md`）中**第一個**含字面 `**實體 glob**` 的行，取該行內所有反引號片段，且片段開頭反引號的緊鄰前文須以 `、` 或 `；` 結尾，或以標籤 `(i) `、`(ii) `、`(iii) `、`(iv) `、`(v) `（小寫羅馬數字加括號加一個空白）結尾；散文片段（如前接「根 」的 `CLAUDE.md`、前接「所列 」的 `tools/lib/`、前接「且 」的 `maturity: active`、前接「（」的指令）因緊鄰前文不符而不納入。來源二：根 `CLAUDE.md` 中**第一個**含字面 `守衛面＝` 的行，取該行內符合 `^(?P<dir>[^{}\s]+/)\{(?P<names>[^{}\s]+)\}(?P<ext>\.[A-Za-z0-9]+)$` 的反引號片段，以逗號展開成 `<dir><name><ext>`（大括號展開）。`params.json` 的 `non_evolvable_globs` 與必備集合比對：集合不等（缺少、多出）或清單內有重複項 ⇒ `GLOBS-SET-MISMATCH`（subject 為 `non_evolvable_globs`，detail 列缺少與多出的項；順序不拘）；PRD 或根 `CLAUDE.md` 讀不到、或找不到其標記行 ⇒ blocking NE `SOURCE-UNAVAILABLE`。（SA 預演現查：真 PRD 取得 18 項、真 `CLAUDE.md` 展開 7 項，合計 25 項；Developer 以規則現算為準，不得抄此數字。）
 - **R23 反空轉與體積**：`ledger.vacuity`：R9 解析到的資料列數小於 `min_obs_rows`（含零列）⇒ blocking NE `LEDGER-BELOW-FLOOR`（subject 為 `-`；等於下限算通過；PRD:601「低於下限＝NOT-EVALUABLE」）。`ledger.volume`：`--ledger` 檔案的位元組數大於等於 `ledger_fail_bytes` ⇒ `VOLUME-FAIL`（fail）；否則大於等於 `ledger_warn_bytes` ⇒ `VOLUME-WARN`（warn 等級，狀態仍 PASS）。兩項所需的參數無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
@@ -154,7 +155,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 *F. 協定目錄、SOP 與範圍守衛*
 
 - **R24 協定目錄**：`params.json` 為 UTF-8（無 BOM）、換行 LF、結尾有換行、頂層鍵依位元組序遞增（先例 `docs/06_quality/FiveQuestion_Audit_Protocol/params.json` 的扁平排序形態）。`metrics.md`：(a) PRD §1.3 表格中五個指標列（以 `^\| \*\*(?:結果指標|資訊欄)\*\*[^|]* \| \*\*M([1-5]) ` 辨識，M1～M5 各恰一列；SA 預演現查：真 PRD 取得 5 列，判定細則區段有 9 個非空行）逐字出現在 `metrics.md`（CRLF 換成 LF 後以整行比對），且順序為 M1 至 M5；(b) 該表之後自標題行 `**M1 判定細則**` 起、至下一個以 `#### ` 起頭的標題行之前，所有非空行也逐字出現在 `metrics.md`。PRD 凍結，此兩段即指標定義的來源；PRD 經 T1 修訂時 `metrics.md` 須同步，不同步即由 AC-031-2 的 AT 轉紅。
-- **R25 SOP 骨架**（`docs/05_development/SelfImproving_Operations_SOP.md`；測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V8 對照 PRD 檢核）：(1) **角色節**：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節（自其標題至下一個 `## ` 之前）須含 `HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`；其餘四個角色節須存在，P0 可只有標題與一行「P1 定稿」。(2) **啟動條件節**（`## ` 級標題含「啟動條件」，節內以下一個 `## ` 為界）：含 `(a)` 至 `(e)` 五個標籤；標籤 `(a)` 之後到標籤 `(b)` 之前的文字含 `掌舵者指令`，`(b)` 段含 `第二次`，`(c)` 段含 `P≤2`，`(d)` 段含 `再開症狀`，`(e)` 之後的同一行含 `容量事件`；含一行同時有 `日曆`、`版本號`、`覆蓋度`、`每 N 輪`（否定句）；含 `si status`，且同節含 `視窗開場` 與 `收尾`。(3) **無事件條文**：含一行同時有 `無事件` 與 `通過`。(4) **再開條文**：含一行同時有 `產出數量` 與 `T1`。(5) **真缺陷升 DEF**：含一行同時有 `DEF-<id>` 與 `真缺陷`。(6) **外部衍生**：擷取者節含一行同時有 `外部衍生=是` 與 `不得單獨`。(7) **loop-self**：含一行同時有 `loop-self`、`轉交`、`T1`。(8) **流程摩擦入口**：擷取者節含一行同時有 `流程摩擦` 與 `OBS-SI-004`。
+- **R25 SOP 骨架**（`docs/05_development/SelfImproving_Operations_SOP.md`；測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V8 對照 PRD 檢核）：(1) **角色節**：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節（自其標題至下一個 `## ` 之前）須含 `HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`；其餘四個角色節須存在，P0 可只有標題與一行「P1 定稿」。(2) **啟動條件節**（`## ` 級標題含「啟動條件」，節內以下一個 `## ` 為界）：含 `(a)` 至 `(e)` 五個標籤；標籤 `(a)` 之後到標籤 `(b)` 之前的文字含 `掌舵者指令`，`(b)` 段含 `第二次`，`(c)` 段含 `P≤2`，`(d)` 段含 `再開症狀`，`(e)` 之後的同一行含 `容量事件`；含一行同時有 `日曆`、`版本號`、`覆蓋度`、`每 N 輪`（否定句）；含 `si status`，且同節含 `視窗開場` 與 `收尾`。(3) **無事件條文**：含一行同時有 `無事件` 與 `通過`。(4) **再開條文**：含一行同時有 `產出數量` 與 `T1`。(5) **真缺陷升 DEF**：含一行同時有 `DEF-<id>` 與 `真缺陷`。(6) **外部衍生**：擷取者節含一行同時有 `外部衍生=是` 與 `不得單獨`。(7) **loop-self**：含一行同時有 `loop-self`、`轉交`、`T1`。(8) **流程摩擦入口**：擷取者節含一行同時有 `流程摩擦` 與 `OBS-SI-004`。(9) **M 之後只追加**：擷取者節含一行同時有 `追加`、`rel=corrects:`、`ROW-MUTATED`（M 之後帳本的任何更新——累計次數、狀態、更正——一律追加列，原地改寫即 `ROW-MUTATED`；M 之前的原地改寫依 AC-SI-01-3 豁免，不在此限）。
 - **R26 範圍守衛（P0 不新增常駐行程、排程或 hook）**：`tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/si_*.py`，原始碼不得出現下列字樣（正規式，區分大小寫）：`schtasks`、`launchctl`、`crontab`、`ScheduleWakeup`、`CronCreate`、`Register-ScheduledTask`、`apscheduler`、`threading\.Timer`、`sched\.scheduler`、`time\.sleep`、`while\s+True`、`daemon\s*=\s*True`、`os\.fork`、`signal\.alarm`；根 `.claude/settings.json` 全文不得含 `selfimproving`（不分大小寫）；`main` 對 `status`、`prop-new` 等非 `check` 的動詞一律 rc 3。（P1 起新增動詞與事件帳本寫入，範圍守衛與 R8(a) 的靜態掃描由 P1 的 TCS 重定。）
 
 **〈判定碼表〉**（項序即輸出序；「狀態」欄＝該碼命中時該項的狀態；NE 的 nonblocking 只有一個）
@@ -193,7 +194,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | `history.migration` | `GIT-UNAVAILABLE` | NE blocking | 有宣稱而 git 不可用（R19） |
 | `history.row_mutated` | `ROW-MUTATED` | FAIL | 已存在列被原地改寫或刪除（R20） |
 | `history.row_mutated` | `GIT-UNAVAILABLE`、`SOURCE-UNAVAILABLE` | NE blocking | git 不可用，或帳本不在 repo 內（R20） |
-| `params.keys` | `PARAM-MISSING`、`PARAM-UNKNOWN`、`PARAM-TYPE`、`PARAM-RANGE` | FAIL | 鍵集合、型別、範圍不符（R21） |
+| `params.keys` | `PARAM-MISSING`、`PARAM-TYPE`、`PARAM-RANGE` | FAIL | 必備鍵缺少、型別、範圍不符（R21） |
 | `params.globs` | `GLOBS-SET-MISMATCH` | FAIL | `non_evolvable_globs` 與 PRD 加根 `CLAUDE.md` 的必備集合不一致（R22） |
 | `params.globs` | `SOURCE-UNAVAILABLE` | NE blocking | PRD 或根 `CLAUDE.md` 讀不到或找不到標記行（R22） |
 | `params.coupling` | `COUPLING-W-OPP-LT-W-MIN`、`COUPLING-WARN-GE-FAIL` | FAIL | 參數耦合被違反（R22） |
@@ -212,7 +213,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | US-001 | 同上 | AC-001-2 | （PRD AC-SI-01-2）Given 面為守衛的列 When 嚴重度標 P1 或 P2 Then 暴露必為 a、b、c 之一，否則 `check` 判不合規（應降 P4）；面不是守衛者依非守衛口徑，不受暴露規則約束 |
 | US-001 | 同上 | AC-002-1 | （PRD AC-SI-02-1）Given 觀察內容源自外部內嵌指示 When 入帳 Then 標記 `外部衍生=是`（詞彙與語法由 `check` 守）；「該列不得單獨充當任何類別提案的證據」屬 P1 的 `prop-new` 前置檢查，P0 以標記詞彙加 SOP 條文代位 |
 | US-001 | 同上 | AC-002-2 | （PRD AC-SI-02-2）Given 任一觀察 When 入帳 Then 來源與回報者皆有值（`check` 守）；觀察本身不自動啟動任何行為（`check` 唯讀、零副作用） |
-| US-002 | 作為掌舵者，我要既有 42 列（現查）一次性遷移到定稿欄位且原文不被靜默覆寫，遷移後任何原地改寫都被偵測，以便帳本可稽核 | AC-001-3 | （PRD AC-SI-01-3）Given 既有各列 When 遷移 Then 單一 commit、ID 不變、處置落入枚舉、原文逐字留 `orig`（超長者搬附註檔）、無「之後再看」；豁免須同時有 `migration_base_sha`（遷移 commit 的 sha，另一個 commit 寫入）與掌舵者確認的 `decided` 列（含 sha、`sid`、`line`）；缺一則遷移視為未豁免、自第一個提交起比對；`orig` 只用於遷移 |
+| US-002 | 作為掌舵者，我要既有各列一次性遷移到定稿欄位且原文不被靜默覆寫，遷移後任何原地改寫都被偵測，以便帳本可稽核 | AC-001-3 | （PRD AC-SI-01-3）Given 既有各列 When 遷移 Then 單一 commit、ID 不變、處置落入枚舉、原文逐字留 `orig`（超長者搬附註檔）、無「之後再看」；豁免須同時有 `migration_base_sha`（遷移 commit 的 sha，另一個 commit 寫入）與掌舵者確認的 `decided` 列（含 sha、`sid`、`line`）；缺一則遷移視為未豁免、自第一個提交起比對；`orig` 只用於遷移 |
 | US-002 | 同上 | AC-004-3 | （PRD AC-SI-04-3）Given 已存在的列 When `check` 自遷移基準起對 HEAD 與歷次提交逐對比較 Then 除處置欄 open 轉終值一次外的原地改寫標 `ROW-MUTATED` 並要求掌舵者過目；基準以前不比；更正走追加更正列；工作樹內多步改寫不可偵測（誠實劃界） |
 | US-003 | 作為維護帳本的主控，我要引用完整性與缺陷／觀察分工有機器檢查，以便懸空引用與真缺陷漏升 DEF 不會靜默存在 | AC-004-1 | （PRD AC-SI-04-1）Given 處置為 `DEF-<id>` 或任何跨檔的 `OBS-SI-` 引用 When `check` Then 被引列存在（含封存檔）；引用不存在的 ID 判不合規；載體尚未建立的家族（`PROP-SI-` 等）印「未判」（NE，nonblocking），不判通過也不判不合規 |
 | US-003 | 同上 | AC-004-2 | （PRD AC-SI-04-2）Given 符合缺陷帳本收錄定義的真缺陷 When 觀察入帳 Then 處置須為 `DEF-<id>`（OBS 不取代 DEF 帳本）；P0 以 DEF 引用的機器檢查（AC-004-1）加 SOP 條文代位，「是否符合收錄定義」屬判斷、不機械化 |
@@ -223,14 +224,14 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | US-004 | 同上 | AC-029-2 | （PRD AC-SI-29-2）Given 對迴圈本身預算、閘門、停機條件、指標定義的改進 When 提出 Then 一律標 `loop-self` 並轉交，僅經掌舵者 T1 或 PRD 修訂，本迴圈不得提案修改自己；P0 以 SOP 條文加 `non_evolvable_globs` 涵蓋迴圈自身檔案代位 |
 | US-005 | 作為主控與 QA，我要一支唯讀檢查器與協定目錄，輸出可機器判讀、可重放、失敗時給出可貼入帳本的草稿列，以便 `check` 綠成為 P0 的驗收憑證 | AC-030-1 | （本檔自增；PRD §9.3 `check` 列、NFR-SI-09-1）Given 任一 repo 與帳本 When 執行 `check` Then 21 個判定項依固定順序輸出 PASS、FAIL、NE，rc 依 0、1、2 表達；用法錯誤與讀不到輸入為 rc 3；文字與 JSON 形態一致；中文輸出在非 UTF-8 管線下不降解 |
 | US-005 | 同上 | AC-030-2 | （本檔自增；PRD §9.3 唯讀、§9.4 CLI 不自寫帳本）Given 任意輸入 When 執行 `check` Then 零副作用、不連網、只用標準庫、唯一子行程是環境被淨化的 `git` |
-| US-005 | 同上 | AC-030-3 | （本檔自增；PRD §9.3 判準指紋、§9.4 草稿列）Given 判準不變 When 重跑 Then 指紋相同且只隨判準變；rc 不為 0 時印一行可貼入且自身零 finding 的 OBS 草稿列 |
+| US-005 | 同上 | AC-030-3 | （本檔自增；草稿列＝PRD §9.4 與 NFR-SI-09-3 明文，判準指紋＝本檔類推，見〈AC 編號規則〉）Given 判準不變 When 重跑 Then 指紋相同且只隨判準變；rc 不為 0 時印一行可貼入且自身零 finding 的 OBS 草稿列 |
 | US-005 | 同上 | AC-031-1 | （本檔自增；PRD §9.1 C5 列、§9.3 `check` 的 params 對表、NFR-SI-02-1）Given 協定目錄的 `params.json` When `check` 對表 Then 鍵集合、型別、範圍、`w_opp` 與 `w_min` 的耦合、`non_evolvable_globs` 與 PRD 及根 `CLAUDE.md` 的一致性任一違反皆判紅；取不到判準輸入判未判 |
 | US-005 | 同上 | AC-031-2 | （本檔自增；PRD §9.1 C5 列「指標定義」）Given PRD §1.3 的 M1～M5 When 建立 `metrics.md` Then 五個指標列與 M1 判定細則逐字存在於 `metrics.md` |
 | US-005 | 同上 | AC-032-1 | （本檔自增；PRD §9.1 C6 列、NFR-SI-07-2）Given P0 的 SOP 骨架 When 檢視 Then 五個角色節的位置齊備，擷取者節完整（輸入快照、文字交卷、`--pace` 現查、Grep 命中 Omitted 必 Read、外部衍生、來源與回報者、`check` 指令） |
 
 > 編譯相容提醒：FRD-lite 表的第一欄用 US ID，不把 AC ID 放第一欄（`sdd_compile` 會把「第一欄形如 AC-…」的表格列當成 AC→AT 映射列掃描）。本檔除 §1 外沒有任何第一欄以 AC 起頭的表格；AT ID 只出現在 §1、§2、§3、§4、§6。
 
-**INVEST 自檢**：獨立（只依賴 git、PRD 與根 `CLAUDE.md` 的現況文字、既有 `tools/_stdio_utf8.py`）、可協商（判定碼、輸出文法、`min_obs_rows` 等未命名參數由本檔定義，掌舵者可於開放問題裁決）、有價值（P0 退出條件 (a)～(d) 全部可由 `check` 與實跑檢核判定，且遷移與豁免有機械憑證）、可估計（約 3 個 `si_*.py` 模組加 1 支 CLI 加 1 個測試檔加 3 份文件）、小（P0 只有 `check` 一個動詞）、可測（39 個 AT；其中 16 個用真 git、其餘為解析層與文件層，皆 tmp 目錄隔離、不碰真帳本）。
+**INVEST 自檢**：獨立（只依賴 git、PRD 與根 `CLAUDE.md` 的現況文字、既有 `tools/_stdio_utf8.py`）、可協商（判定碼、輸出文法、`min_obs_rows` 等未命名參數由本檔定義，掌舵者可於開放問題裁決）、有價值（P0 退出條件 (a)～(d) 全部可由 `check` 與實跑檢核判定，且遷移與豁免有機械憑證）、可估計（約 3 個 `si_*.py` 模組加 1 支 CLI 加 1 個測試檔加 3 份文件）、小（P0 只有 `check` 一個動詞）、可測（42 個 AT；其中 17 個用真 git、其餘為解析層與文件層，皆 tmp 目錄隔離、不碰真帳本）。
 
 **非功能需求（量化）**
 
@@ -251,30 +252,30 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 | 清單項（閘門／項目） | 追溯 ID | 已凍結上位文件（路徑） | 凍結摘要 |
 |---------------------|---------|----------------------|---------|
-| SCG-0／PRD 版本已鎖定（Status: Approved） | PRD 全文（§8.1 P0、§9.6 P0）；Stage-1 凍結＝掌舵者預先核准、主控代為執行 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-0／FRD 覆蓋所有 PRD 功能項目（F-XXX 追溯） | F-001（本檔 FRD-lite）；FR-SI-01～04、29 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-0／NFR 已量化定義 | NFR-P0-1～8（本檔）；最近依據 PRD NFR-SI-02-1、NFR-SI-06、NFR-SI-08、NFR-SI-09 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-0／User Story 已完成 INVEST 檢查 | US-001～US-005（本檔 INVEST 自檢） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-0／利害關係人已確認簽核 | PRD 附錄 C.2（掌舵者授權代決與預先核准凍結，座標見實跑檢核 V5 的訂正註記） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
+| SCG-0／PRD 版本已鎖定（Status: Approved） | PRD 全文（§8.1 P0、§9.6 P0）；Stage-1 凍結＝掌舵者預先核准、主控代為執行 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-0／FRD 覆蓋所有 PRD 功能項目（F-XXX 追溯） | F-001（本檔 FRD-lite）；FR-SI-01～04、29 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-0／NFR 已量化定義 | NFR-P0-1～8（本檔）；最近依據 PRD NFR-SI-02-1、NFR-SI-06、NFR-SI-08、NFR-SI-09 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-0／User Story 已完成 INVEST 檢查 | US-001～US-005（本檔 INVEST 自檢） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-0／利害關係人已確認簽核 | PRD 附錄 C.2（掌舵者授權代決與預先核准凍結；引言座標已於重凍訂正為 line 2476／2525／2581，見實跑檢核 V5） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
 | SCG-0／RTM 初版已建立 | 本增量自帶：本檔 §1 與 §6（AC 到 AT 映射） | （本檔；隨 Stage-2 凍結，非上位文件） | n/a（自引） |
-| SCG-1／SRD 完成並通過 Review（Status: Approved） | 不適用（功能級增量；設計載於 PRD §9）；最近依據 PRD §9.0～§9.6 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-1／API Spec 草稿完成（所有端點清單） | 不適用（無 HTTP 端點）；命令列介面即契約：本檔 R1～R8 與 PRD §9.3 `check` 列 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-1／資料模型設計完成 | PRD §5.1.1（九欄）、§9.2（OBS 載體與檔頭 tz）；本檔 R9～R21 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-1／NFR 設計對應完成（架構選型對應 NFR 指標） | NFR-P0-1～8 對應 R8（純度）、R1（編碼）；PRD NFR-SI-09-1（量不到＝NE） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-1／整合架構說明完整（第三方服務已識別） | 無第三方服務；僅依賴 git 與既有 `tools/_stdio_utf8.py`、`tools/probe/fivequestion_ledger.py` 的 manifest 算法（先例，不 import） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-2／C4 Context 圖完成（系統邊界清晰） | PRD §9.1 載體對映表（C1、C4、C5、C6、C14）；P0 不新增系統邊界 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI 與 `lib/si_*.py`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-2／所有架構決策有對應 ADR（Status: Accepted） | PRD §9.5：ADR-SI-01（觀察儲存位置）、ADR-SI-05（基線窗）；本增量無新架構決策，ADR 不新開 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-2／Trust Boundary Map 完成（Security 情境） | 不適用（scenario 為 brownfield，非 security）；`check` 無網路、只讀、子行程限 git；不可進化面見 PRD NFR-SI-02-1 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-2／Before／After 架構對比（Brownfield 情境） | 本檔 FRD-lite〈現況與變更〉（八欄暫定版到九欄定稿加檢查器） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
+| SCG-1／SRD 完成並通過 Review（Status: Approved） | 不適用（功能級增量；設計載於 PRD §9）；最近依據 PRD §9.0～§9.6 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-1／API Spec 草稿完成（所有端點清單） | 不適用（無 HTTP 端點）；命令列介面即契約：本檔 R1～R8 與 PRD §9.3 `check` 列 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-1／資料模型設計完成 | PRD §5.1.1（九欄）、§9.2（OBS 載體與檔頭 tz）；本檔 R9～R21 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-1／NFR 設計對應完成（架構選型對應 NFR 指標） | NFR-P0-1～8 對應 R8（純度）、R1（編碼）；PRD NFR-SI-09-1（量不到＝NE） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-1／整合架構說明完整（第三方服務已識別） | 無第三方服務；僅依賴 git 與既有 `tools/_stdio_utf8.py`、`tools/probe/fivequestion_ledger.py` 的 manifest 算法（先例，不 import） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-2／C4 Context 圖完成（系統邊界清晰） | PRD §9.1 載體對映表（C1、C4、C5、C6、C14）；P0 不新增系統邊界 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI 與 `lib/si_*.py`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-2／所有架構決策有對應 ADR（Status: Accepted） | PRD §9.5：ADR-SI-01（觀察儲存位置）、ADR-SI-05（基線窗）；本增量無新架構決策，ADR 不新開 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-2／Trust Boundary Map 完成（Security 情境） | 不適用（scenario 為 brownfield，非 security）；`check` 無網路、只讀、子行程限 git；不可進化面見 PRD NFR-SI-02-1 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-2／Before／After 架構對比（Brownfield 情境） | 本檔 FRD-lite〈現況與變更〉（八欄暫定版到九欄定稿加檢查器） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
 | SCG-3／OpenAPI 3.1 規格完整（所有端點含完整 Schema） | 不適用（無 HTTP API）；介面為命令列 | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
-| SCG-3／Request／Response Schema 定義完整 | 輸出形態文字與 JSON（本檔 R3、R4）；`params.json` 登記表（R21） | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
-| SCG-3／錯誤碼定義（400／401／403／404／500） | rc 表 0、1、2、3（R1）與判定碼表 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
+| SCG-3／Request／Response Schema 定義完整 | 輸出形態文字與 JSON（本檔 R3、R4）；`params.json` 登記表（R21） | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
+| SCG-3／錯誤碼定義（400／401／403／404／500） | rc 表 0、1、2、3（R1）與判定碼表 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
 | SCG-3／Consumer Contract 完成（整合情境） | 消費者＝主控與 QA（讀 `check`）；P3 的量測腳本讀 `params.json` 與 `metrics.md`（PRD §9.3 量測腳本列）；SOP 是各角色任務書的上位（研究方法 SOP，本增量不改它） | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
-| SCG-3／API ID 與 RTM 已對應 | 無 API ID；AT 到 RTM 見本檔 §1 與 §6 | docs/01_requirements/SelfImproving_PRD.md | sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513 |
+| SCG-3／API ID 與 RTM 已對應 | 無 API ID；AT 到 RTM 見本檔 §1 與 §6 | docs/01_requirements/SelfImproving_PRD.md | sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e |
 | SCG-3／Contract 已 Review 通過 | 由未參與規格與實作的 QA 於 SCG-4 獨立審查 | docs/05_development/SelfImproving_Research_Methodology_SOP.md | sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2 |
 
-> 凍結摘要＝該文件在 `frozen_stages[*].spec_doc_digests` 的值。兩個值取自功能鍵 `monorepo-selfimproving` 的 Stage-1 `spec-frozen` 逐字輸出（`docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md` §7），並已由本檔 SA 於 HEAD 64f2fc0f 以 `Get-FileHash -Algorithm SHA256` 對兩份檔案現況獨立重算複驗一致。**功能鍵 `monorepo-si-p0-ledger` 的 Stage-1 必須採納同兩份文件**（否則「引用不得指向未凍結文件」不成立）；凍結後的實際 digest 以該鍵 `show` 的輸出為準，與本表不符時以 `show` 為準並更正本表。
+> 凍結摘要＝該文件在 `frozen_stages[*].spec_doc_digests` 的值。PRD 的值是**重凍後**的新 digest（PRD 因附錄 C.2 的逐字稿座標訂正〔line 2493／2536 改為 2476／2525／2581〕走 SPEC_DRAFTING→SCG_VALIDATION→HUMAN_PENDING 重凍，主控於 HEAD 7b9c6ba6 交付，SA 以 `Get-FileHash -Algorithm SHA256` 對工作樹現況重算一致）；SOP 的值不變，取自功能鍵 `monorepo-selfimproving` 的 Stage-1 `spec-frozen` 逐字輸出（`docs/06_quality/SCG0-REVIEW-SelfImproving-20261019.md` §7），同樣重算一致。**功能鍵 `monorepo-si-p0-ledger` 的 Stage-1 必須採納重凍後的 PRD 與同一份 SOP**（否則「引用不得指向未凍結文件」不成立）；凍結後的實際 digest 以該鍵 `show` 的輸出為準，與本表不符時以 `show` 為準並更正本表。
 
 ---
 
@@ -310,6 +311,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | AC-004-3 | 原地改寫偵測（ROW-MUTATED） | AT-004-3-1 | open 轉終值一次、追加新列、追加更正列、格式整理皆放行 | ✅ | Integration | □ |
 | AC-004-3 | 原地改寫偵測（ROW-MUTATED） | AT-004-3-E-1 | 遷移之後的原地改寫：改格、二次改處置、刪列、改號、混改 | ✅ | Integration | □ |
 | AC-004-3 | 原地改寫偵測（ROW-MUTATED） | AT-004-3-E-2 | 工作樹未提交的改寫；誠實劃界 | ✅ | Integration | □ |
+| AC-004-3 | 原地改寫偵測（ROW-MUTATED） | AT-004-3-E-3 | 無歷史可比（`no-history`）與帳本在 repo 外（`SOURCE-UNAVAILABLE`） | ✅ | Integration | □ |
 | AC-029-1 | 流程摩擦當下入帳 | AT-029-1-1 | SOP「流程摩擦」入口與當下入帳條文 | ✅ | Unit | □ |
 | AC-029-2 | `loop-self` 轉交 | AT-029-2-1 | SOP `loop-self` 條文；迴圈自身檔案列入 `non_evolvable_globs` | ✅ | Unit | □ |
 | AC-030-1 | `check` 介面、輸出與 rc 表 | AT-030-1-1 | 輸出形態、rc 0 與 1、文字與 JSON 一致、非 UTF-8 管線下中文不降解 | ✅ | Integration | □ |
@@ -318,15 +320,17 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | AC-030-3 | 判準指紋與 OBS 草稿列 | AT-030-3-1 | 判準指紋：可重放、只隨判準變 | ✅ | Unit | □ |
 | AC-030-3 | 判準指紋與 OBS 草稿列 | AT-030-3-2 | OBS 草稿列：可貼入、自身零 finding、位元組上限 | ✅ | Unit | □ |
 | AC-031-1 | `params.json` 對表 | AT-031-1-1 | 真 `params.json`：格式、鍵集合、型別範圍、與 PRD 及根 `CLAUDE.md` 一致 | ✅ | Unit | □ |
-| AC-031-1 | `params.json` 對表 | AT-031-1-E-1 | 缺鍵、多鍵、型別與範圍錯誤 | ✅ | Unit | □ |
+| AC-031-1 | `params.json` 對表 | AT-031-1-E-1 | 缺鍵（逐鍵）；取不到參數的項目判未判 | ✅ | Unit | □ |
 | AC-031-1 | `params.json` 對表 | AT-031-1-E-2 | `non_evolvable_globs` 與 PRD 不一致：缺少、多出、重複、來源變動、來源讀不到 | ✅ | Unit | □ |
 | AC-031-1 | `params.json` 對表 | AT-031-1-E-3 | 耦合：`w_opp` 小於 `w_min`、warn 不小於 fail | ✅ | Unit | □ |
+| AC-031-1 | `params.json` 對表 | AT-031-1-E-4 | 型別錯誤（字串、浮點、布林、整數、陣列元素）；多出的鍵不判紅 | ✅ | Unit | □ |
+| AC-031-1 | `params.json` 對表 | AT-031-1-E-5 | 範圍錯誤（比例鍵、下限鍵、非空陣列） | ✅ | Unit | □ |
 | AC-031-2 | `metrics.md` 指標定義 | AT-031-2-1 | `metrics.md` 的 M1～M5 與判定細則逐字存在 | ✅ | Unit | □ |
 | AC-032-1 | SOP 骨架 | AT-032-1-1 | SOP 骨架：五角色節、擷取者節完整、外部衍生條文 | ✅ | Unit | □ |
 
 **覆蓋率統計**:
 - 總 AC 數: 19（PRD 的 13 個加本檔自增的 6 個）
-- 已映射 AT 數: 39（其中 E 類 19 個）
+- 已映射 AT 數: 42（其中 E 類 22 個）
 - 映射覆蓋率: 100% （目標: 100%）
 
 ---
@@ -342,6 +346,8 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 > **斷言簡寫**（本節各 AT 共用）：`main`＝`selfimproving.main`（測試以 `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` 後 `import selfimproving`，比照 `tools/tests` 既有風格）；`run_json(repo)`＝以 `contextlib.redirect_stdout` 呼叫 `main(["check", "--repo", str(repo), "--json"])` 並 `json.loads` stdout；`S(項目)`＝該項的 `status`；`F(項目)`＝該項 `findings` 的 `(subject, code)` 集合；「恰為」＝集合相等（不多不少）、「含」＝子集；列號 `003` 等一律指 `OBS-SI-003`。基線有效 repo、遷移鏈 repo、迷你 PRD 與迷你 `CLAUDE.md`、hermetic 環境見 §5。
 >
 > **變異慣例**：預設自基線複製一份（`shutil.copytree`，含 `.git`）、在工作樹改寫、不 commit。因此在變異情境下 `history.row_mutated` 可能為 FAIL（工作樹相對 HEAD 有改寫）；各 AT 只斷言自己指名的項目與集合，**除非該 AT 明文寫 overall 或 rc**——那樣的 AT 一律改用「烘入第一個 commit」的建法（基線的 `mutate` 參數：先改再提交，使歷史比對項為 PASS）。
+>
+> **子情境**：AT 內以「情境一」「情境 (a)」等列舉的子情境，測試一律以 `subTest` 或參數化實作（保留 AT ID 對映），任一子情境失敗時，失敗訊息須指出是哪個情境，不得讓一個紅燈無法定位。
 >
 > **AT 內不引用其他 AT 的 ID**（只有 §1、§3、§4、§6 的表格引用 AT ID），避免編譯器把引用當成宣告。
 
@@ -397,11 +403,11 @@ Scenario: 空欄與佔位值判 FIELD-EMPTY，不可定位的座標判 COORD-NON
   Given 基線有效 repo（§5.1：10 列的證據座標依序覆蓋 R16 的九種形態）；每個情境各自複製一份基線、只做一處變異
   When 七個情境各自把列 003 的 時間、情境、症狀、證據座標、分類、嚴重度、處置 其中一欄清成空白
   And 另一個情境把列 004 的症狀改成 `-`、列 005 的情境改成 `—`、列 006 的症狀改成 `TBD`、列 007 的情境改成 `n/a`
-  And 再一個情境把列 004、005、006 的證據座標分別改成 `本檔時間欄`、`SD 第一支普查腳本實踩`、`PRD 行數`，並把列 007 的證據座標改成 `Claude Code 2.1.283；e.g. 見前述`
+  And 再一個情境把列 004、005、006 的證據座標分別改成 `本檔時間欄`、`SD 第一支普查腳本實踩`、`PRD 行數`，把列 007 的證據座標改成 `Claude Code 2.1.283；e.g. 見前述`，並把列 008 的證據座標改成只有 UUID 的裸 sid（不帶 `line` 或 `seq`）
   Then 七個清空情境各自：`S(row.required)` 為 `FAIL`，`F(row.required)` 恰為 `(OBS-SI-003, FIELD-EMPTY)`，該 finding 的 detail 含被清空的欄名；該列在 `ledger.time_tz`、`row.enums`、`row.coordinates` 不因該欄為空而另生 finding
   And 佔位值情境：`F(row.required)` 恰為列 004、005、006、007 各一筆 `FIELD-EMPTY`
-  And 座標情境：`S(row.coordinates)` 為 `FAIL`，`F(row.coordinates)` 恰為列 004、005、006、007 各一筆 `COORD-NONE`
-  And 基線的 10 列 `S(row.coordinates)` 為 `PASS`（路徑加行號、反引號指令、帳本或缺陷 ID、檔名加行號、repo 根目錄路徑、sid、七位以上含字母的 hex、`commit` 關鍵字加 hex、`§` 或文件別名加章節，九種形態皆被接受）
+  And 座標情境：`S(row.coordinates)` 為 `FAIL`，`F(row.coordinates)` 恰為列 004、005、006、007、008 各一筆 `COORD-NONE`（列 008 是裸 sid）
+  And 基線的 10 列 `S(row.coordinates)` 為 `PASS`（路徑加行號、反引號指令、帳本或缺陷 ID、檔名加行號、repo 根目錄路徑、sid 加 `line` 或 `seq`、七位以上含字母的 hex、`commit` 關鍵字加 hex、`§` 或文件別名加章節，九種形態皆被接受）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_001_1_E_2]"
 ```
 
@@ -446,11 +452,13 @@ Scenario: 欄數、表頭、ID 的錯誤各被標出；跳脫的管線字元不�
   And 情境三：列 005 的 ID 改成只有兩位數字的形態（`OBS-SI-` 接 `12`）、列 007 的 ID 改成第三位是英文字母 O 的形態、並在列 006 之後插入一行 ID 欄為空的九欄資料列（記下該行的行號 n）
   And 情境四：列 008 的 ID 改成與列 002 相同，並把列 009 與列 010 的位置對調
   And 情境五：列 004 的症狀加入一個以反斜線跳脫的管線字元；列 005 的症狀加入一個內含未跳脫管線字元的反引號片段
+  And 情境六：把帳本檔改成以 UTF-8 BOM 開頭、第一行就是表頭列的版本（前言與檔頭 tz 宣告都移到最後一個資料列之後）
   Then 情境一：`F(ledger.structure)` 恰為列 003、004 各一筆 `ROW-ARITY`
   And 情境二：`F(ledger.structure)` 恰為 `(-, HEADER-COLS)`（各資料列欄數仍以固定的九判定，不隨表頭）
-  And 情境三：`F(ledger.structure)` 恰為三筆 `ROW-ID-FORMAT`，subject 分別是兩位數字的 ID、第三位為字母的 ID、`L<n>`
+  And 情境三：`F(ledger.structure)` 恰為三筆 `ROW-ID-FORMAT`，subject 分別是兩位數字的 ID、第三位為字母的 ID、`L<n>`（格式不合的列不參與重複與遞增的追蹤，不另生 `ROW-ID-DUP`、`ROW-ID-ORDER`，R9）
   And 情境四：`F(ledger.structure)` 恰為 `(OBS-SI-002, ROW-ID-DUP)` 與 `(OBS-SI-009, ROW-ID-ORDER)`
   And 情境五：`F(ledger.structure)` 恰為 `(OBS-SI-005, ROW-ARITY)`（跳脫的管線不切欄，反引號內未跳脫的管線照切）
+  And 情境六：`S(ledger.structure)` 與 `S(ledger.time_tz)` 皆為 `PASS`，`rows` 仍為 `10`（BOM 容許，表頭在第 1 行也認得，宣告在表後也有效）
   And 基線 `S(ledger.structure)` 為 `PASS`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_001_1_E_4]"
 ```
@@ -606,7 +614,7 @@ Scenario: 六種無效的 sha 一律判紅，遷移不豁免，不靜默放行
 Feature: orig 的使用規則
 
 Scenario: 附註檔錨點、遷移之外使用、語法錯誤各被標出
-  Given 遷移鏈 repo（§5.2，N 之後；M 之中列 004 的 `orig` 是 `@docs/06_quality/SelfImproving_Observation_Ledger_notes.md#OBS-SI-004`，附註檔有對應標題段落）；每個變體各自複製一份、只做一處變異
+  Given 遷移鏈 repo（§5.2，N 之後；M 之中列 004 的 `orig` 是 `@docs/05_development/SelfImproving_Observation_Ledger_notes.md#OBS-SI-004`，附註檔有對應標題段落）；每個變體各自複製一份、只做一處變異
   When 變體 (a)：刪掉附註檔；(b)：把附註檔中列 004 的標題改成另一個 ID；(c)：把列 004 的錨點改成 `#OBS-SI-003`（附註檔沒有該 ID 的標題）
   And 變體 (d)：新增一個 commit，追加新列 `OBS-SI-006`（M 之後才出現的 ID），其標記含 `orig="…"`
   And 變體 (e)：把列 002 的 `orig` 值改成沒有引號的自由文字
@@ -637,7 +645,7 @@ Scenario: 標記欄採 key=value 語法與封閉詞彙，違規各被標出，�
   Then 情境 (a)～(f)：`F(row.markers)` 依序恰為 `(OBS-SI-003, MARK-VALUE)`、`(OBS-SI-004, MARK-SYNTAX)`、`(OBS-SI-005, MARK-UNKNOWN-KEY)`、`(OBS-SI-006, MARK-SYNTAX)`、`(OBS-SI-007, MARK-SYNTAX)`、`(OBS-SI-008, MARK-SYNTAX)`
   And 情境 (g)：`F(row.markers)` 恰為 `(OBS-SI-009, MARK-FACE-MISSING)`；`F(row.provenance)` 恰為 `(OBS-SI-009, SOURCE-MISSING)` 與 `(OBS-SI-009, REPORTER-MISSING)`
   And 情境 (h)：`F(row.markers)` 恰為 `(OBS-SI-003, MARK-ORIG-FORMAT)`（列 004 的合法跳脫字串與列 005 的 `@` 形態語法通過）
-  And 基線 `S(row.markers)` 為 `PASS`（列 010 的 `外部衍生=是` 通過）；AC 後半「外部衍生列不得單獨充當提案證據」屬 P1 的 `prop-new` 前置檢查，P0 的 SOP 條文由 SOP 骨架的 AT 檢核
+  And 基線 `S(row.markers)` 為 `PASS`（列 010 的 `外部衍生=是` 通過）；AC 後半的外部衍生列不得單獨充當提案證據，屬 P1 的 `prop-new` 前置檢查，P0 的 SOP 條文由 SOP 骨架的 AT 檢核
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_002_1_1]"
 ```
 
@@ -657,7 +665,7 @@ Scenario: 來源或回報者缺漏、值空、來源值域外各被標出，五�
   Then (a)：`F(row.provenance)` 恰為 `(OBS-SI-003, SOURCE-MISSING)`；(b)：恰為 `(OBS-SI-004, REPORTER-MISSING)`
   And (c)：`F(row.provenance)` 恰為 `(OBS-SI-005, SOURCE-MISSING)` 且 `F(row.markers)` 含 `(OBS-SI-005, MARK-SYNTAX)`（值空的鍵視為缺鍵）；(d)：`F(row.provenance)` 恰為 `(OBS-SI-006, REPORTER-MISSING)` 且 `F(row.markers)` 含 `(OBS-SI-006, MARK-SYNTAX)`
   And (e)：`F(row.provenance)` 恰為 `(OBS-SI-007, SOURCE-VALUE)`；(f)：五個情境的 `S(row.provenance)` 皆為 `PASS`
-  And 基線 `S(row.provenance)` 為 `PASS`；「觀察本身不自動啟動任何行為」由 `check` 的零副作用判準承擔（見 AC-030-2 的 AT）
+  And 基線 `S(row.provenance)` 為 `PASS`；觀察本身不自動啟動任何行為，由 `check` 的零副作用判準承擔（見 AC-030-2 的 AT）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_002_2_1]"
 ```
 
@@ -731,7 +739,7 @@ Scenario: 主缺陷帳本、封存檔、兩個姊妹帳本、OBS 封存檔、其
   When 在工作樹把列 004、005、006 的處置分別改成引用封存檔、外部阻塞帳本、結構性長債帳本內的 DEF（列 003 維持引用主帳本內的 DEF）；把列 008 的標記加上 `rel=` 接 OBS 封存檔內那個編號；新增未追蹤檔 `docs/notes/refs.md`，內容提及 `OBS-SI-001` 與 `OBS-SI-005`
   And 呼叫 `main(["check", "--repo", <repo>, "--json"])`
   Then `S(ref.def)` 為 `PASS`、`S(ref.obs)` 為 `PASS`、`S(ref.orig_notes)` 為 `PASS`，三者的 `findings` 皆為空
-  And 帳本與封存檔中「列首格」的定義處不被當成引用；未追蹤但未被忽略的檔案內的提及會被納入掃描且解析得到
+  And 帳本與封存檔中列首格的定義處不被當成引用；未追蹤但未被忽略的檔案內的提及會被納入掃描且解析得到
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_004_1_1]"
 ```
 
@@ -747,10 +755,12 @@ Feature: 懸空的 OBS 引用
 Scenario: 五種位置的不存在 OBS 編號都被標出，同編號多處只報一筆
   Given 基線有效 repo；測試以執行期字串相加組出一個不存在的 OBS 編號（記為 X；同樣組出另一個 Y），使測試原始碼不含字面的不存在編號；每個情境各自複製一份基線、只做一處變異
   When 情境一：列 003 的處置改成 `merged@` 接 X；情境二：列 004 的症狀文字提及 X；情境三：新增未追蹤檔 `docs/notes/readme.md`，提及 X 與存在的 `OBS-SI-001`
-  And 情境四：新增附註檔，其標題為 X 的 `## ` 段落；情境五：列 005 的標記加上 `rel=` 接 X
+  And 情境四：新增附註檔 `docs/05_development/SelfImproving_Observation_Ledger_notes.md`，其中有標題為 X 的 `## ` 段落；情境五：列 005 的標記加上 `rel=` 接 X
   And 情境六：列 004 的症狀與 `docs/notes/readme.md` 兩處都提及 X，另有一處提及 Y
+  And 情境七：X 在七處被提及（列 004 的症狀，加另外六個未追蹤檔 `docs/notes/m1.md`～`docs/notes/m6.md` 各一處）
   Then 情境一到五各自：`S(ref.obs)` 為 `FAIL`，`F(ref.obs)` 恰為 `(X, OBS-REF-DANGLING)`，該 finding 的 detail 含引用處的 `<相對路徑>:<行號>`
   And 情境六：`F(ref.obs)` 恰為 `(X, OBS-REF-DANGLING)` 與 `(Y, OBS-REF-DANGLING)` 兩筆（同編號多處只報一筆），X 那筆的 detail 列出兩處引用位置
+  And 情境七：`F(ref.obs)` 恰為一筆 `(X, OBS-REF-DANGLING)`，其 detail 恰列 5 處 `<相對路徑>:<行號>`，其餘兩處以 `…+2` 表示（R18 (a) 的截斷）
   And 存在的 `OBS-SI-001` 與帳本列首格的定義處都不被報
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_004_1_E_1]"
 ```
@@ -806,7 +816,7 @@ Scenario: SOP 載明符合缺陷帳本收錄定義的真缺陷其處置須為 DE
   Given 真 SOP
   When 以 R25 (5) 判準檢查 SOP；對刪去該行的副本再檢一次
   Then 判準對真 SOP 為合格（含同時有 `DEF-<id>` 與 `真缺陷` 的一行）、對刪去副本為不合格
-  And 機器面的代位已在 DEF 引用的懸空判準承擔（`ref.def`，見 AC-004-1 的 AT）；「某筆觀察是否符合缺陷帳本收錄定義」屬判斷，P0 不機械化，由實跑檢核 V8 以文件檢核
+  And 機器面的代位已在 DEF 引用的懸空判準承擔（`ref.def`，見 AC-004-1 的 AT）；某筆觀察是否符合缺陷帳本收錄定義屬判斷，P0 不機械化，由實跑檢核 V8 以文件檢核
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_004_2_1]"
 ```
 
@@ -826,6 +836,7 @@ Scenario: open 轉終值一次、追加列、追加更正列、空白與換行�
   And 呼叫 `main(["check", "--repo", <repo>, "--json"])`
   Then `S(history.row_mutated)` 為 `PASS` 且 `findings` 為空；`overall` 為 `PASS`、rc 為 `0`
   And K1、K2、K3 各自只動帳本一個檔（`git show --name-only --format=` 驗證）；K1 只改列 001 的處置格
+  And SOP 條文：以 R25 (9) 判準檢查真 SOP（擷取者節含同時有 `追加`、`rel=corrects:`、`ROW-MUTATED` 的一行）為合格；對刪去該行的副本再檢，須判不合格（M 之後帳本只追加的人為慣例以條文代位，機器面由本 AT 的 `history.row_mutated` 判準承擔）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_004_3_1]"
 ```
 
@@ -872,6 +883,25 @@ Scenario: 未提交的改寫與 HEAD 比對；工作樹內的多步改寫只看�
 ```
 
 ```gherkin
+# AT-004-3-E-3
+# 對應 AC: AC-004-3 無歷史可比與帳本在 repo 外
+# 測試類型: Integration
+# 自動化工具: unittest／pytest + tmp 目錄 + 真 git
+# 判定指令: python -m pytest tools/tests/test_selfimproving_check.py -k AT_004_3_E_3 -q
+
+Feature: 歷史比對的兩個邊界
+
+Scenario: 帳本從未被提交時無歷史可比；帳本在 repo 外時判未判
+  Given 基線有效 repo 的兩個變體：(A) 帳本檔只存在於工作樹、從未被 `git add` 或提交（`make_valid_repo` 在兩個 commit 之後才寫入帳本；列 002 的 `fixed@` 仍指向第一個 commit）；(B) 基線原樣，另在 tmp 內、repo 目錄之外放一份內容相同的合規帳本
+  When 對變體 (A) 呼叫 `main(["check", "--repo", <repo>, "--json"])`
+  And 對變體 (B) 呼叫 `main(["check", "--repo", <repo>, "--ledger", <repo 之外那份帳本的絕對路徑>, "--json"])`
+  Then (A)：`S(history.row_mutated)` 為 `PASS`，該項 `detail` 為 `no-history`，`findings` 為空；`S(history.migration)` 為 `PASS` 且 `detail` 為 `claim=none`；rc 為 `0`
+  And (B)：`S(history.row_mutated)` 為 `NE`、`blocking` 為 true，`F(history.row_mutated)` 恰為 `(-, SOURCE-UNAVAILABLE)`；不依賴 git 歷史的逐列項目照常評估（`rows` 為 `10`、`S(row.enums)` 為 `PASS`）
+  And (B) 的 `overall` 為 `NE`、rc 為 `2`（無 FAIL 時）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_004_3_E_3]"
+```
+
+```gherkin
 # AT-029-1-1
 # 對應 AC: AC-029-1 流程不當或 BUG 當下入帳，子代理以「流程摩擦」節為入口（流程型，SOP 條文代位）
 # 測試類型: Unit
@@ -884,7 +914,7 @@ Scenario: SOP 的擷取者節載明文字交卷的流程摩擦入口
   Given 真 SOP
   When 以 R25 (1) 的擷取者節判準與 R25 (8) 判準檢查 SOP；對刪去相關片段的副本（逐一刪去 `文字交卷`、`流程摩擦`、含 `流程摩擦` 與 `OBS-SI-004` 的那一行）再檢
   Then 判準對真 SOP 為合格（擷取者節含 `文字交卷` 與 `流程摩擦`，且含同時有 `流程摩擦` 與 `OBS-SI-004` 的一行）；每個刪去副本皆判不合格
-  And 流程型：本 P0 開發期間 Developer 棒與 QA 棒的文字交卷必含「流程摩擦」節，節內項目於 SCG-4 前已由主控入帳為 OBS 列（實跑檢核 V8）；機器可驗的部分只有「入帳後的列通過 `check`」（實跑檢核 V2）
+  And 流程型：本 P0 開發期間 Developer 棒與 QA 棒的文字交卷必含流程摩擦節，節內項目於 SCG-4 前已由主控入帳為 OBS 列（實跑檢核 V8）；機器可驗的部分只有入帳後的列通過 `check`（實跑檢核 V2）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_029_1_1]"
 ```
 
@@ -908,7 +938,7 @@ Scenario: SOP 載明 loop-self 轉交規則，且迴圈自身檔案列在不可�
 
 ```gherkin
 # AT-030-1-1
-# 對應 AC: AC-030-1 輸出形態、rc 0 與 1、文字與 JSON 一致、非 UTF-8 管線下中文不降解
+# 對應 AC: AC-030-1 輸出形態、rc 0 與 1、文字與 JSON 一致、鍵序、相對路徑語意、非 UTF-8 管線下中文不降解
 # 測試類型: Integration
 # 自動化工具: unittest／pytest + tmp 目錄 + 真 git + 子行程
 # 判定指令: python -m pytest tools/tests/test_selfimproving_check.py -k AT_030_1_1 -q
@@ -919,10 +949,13 @@ Scenario: in-process 與子行程兩條路徑的輸出一致，且在非 UTF-8 �
   Given 基線有效 repo（綠），以及一份紅的變體（列 003 的分類改成 `Process`，其餘不變，仍可解析）
   When in-process：對兩份各呼叫 `main(["check", "--repo", <repo>])` 與 `main(["check", "--repo", <repo>, "--json"])`
   And 子行程：以 `[sys.executable, <repo 根>/tools/selfimproving.py, "check", "--repo", <紅 repo>, "--json"]` 執行，cwd 設為另一個暫存目錄，環境變數 `PYTHONIOENCODING` 設為 `cp950`（其餘沿用 §5.5 的 hermetic 環境），以位元組擷取 stdout 與 stderr
+  And 相對路徑語意（R2）：在另一個暫存目錄（當作 cwd）放兩份誘餌檔，路徑與預設帳本、預設 `params.json` 的 repo 相對路徑相同但內容是壞的（帳本只有表頭、`params.json` 內容為 `{}`），再以 repo 相對路徑 `docs/06_quality/SelfImproving_Observation_Ledger.md` 與 `docs/06_quality/SelfImproving_Protocol/params.json` 當作 `--ledger` 與 `--params`，以該 cwd 子行程呼叫綠 repo 的 `check --json`
   Then 綠：rc 為 `0`；紅：rc 為 `1`，`overall` 為 `FAIL`，文字形態在 `overall=` 行之後有一行 `obs-draft:` 與恰一行以 `| OBS-SI-` 起頭的草稿列
   And 文字形態與 JSON 形態的 rc、各項 `status`、各項 finding 的 `(subject, code)` 集合逐項一致；紅變體的 `F(row.enums)` 恰為 `(OBS-SI-003, ENUM-CATEGORY)`，該 finding 的 detail 含 `分類`
   And 文字形態逐行符合 R3 的行文法（首行、項目行、縮排的 finding 行、`overall=` 行）；沒有任何一行含 ANSI 跳脫序列
   And 子行程的 rc 為 `1`；stdout 位元組可嚴格以 UTF-8 解碼並可 `json.loads`，其中 `ENUM-CATEGORY` 的 detail 解碼後含完整的 `分類` 二字；stderr 沒有 `Traceback`
+  And 相對路徑那一次的 rc 為 `0`、`rows` 為 `10`（相對路徑相對於 `--repo` 而不是 cwd；若誤以 cwd 解析，會讀到誘餌檔而 rc 不為 `0`）
+  And JSON 鍵序（R4）：以 `json.loads` 的 `object_pairs_hook=list` 取得的頂層鍵序恰為 `overall`、`rc`、`fingerprint`、`fingerprint_parts`、`rows`、`items`、`obs_draft`；`fingerprint_parts` 的鍵序為 `manifest`、`metrics_rev`、`check_rules_rev`；`items` 元素的鍵序為 `id`、`status`、`blocking`、`detail`、`findings`；`findings` 元素的鍵序為 `subject`、`code`、`level`、`detail`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_030_1_1]"
 ```
 
@@ -943,7 +976,7 @@ Scenario: 用法錯誤與讀不到輸入一律 rc 3 且 stdout 為空；--help r
   Then 前述十一次的 rc 都是 `3`，stdout 為空字串，stderr 非空
   And 兩次 `--help` 的 rc 都是 `0`，stdout 含 `check`，且 `check --help` 的 stdout 含 `--repo`、`--ledger`、`--params`、`--json`
   And 沒有任何一次拋出例外，`SystemExit` 亦不外洩到呼叫端
-  And rc 2 專屬於「無 FAIL 但有 blocking NE」，用法錯誤不得得到 2（argparse 的預設用法錯誤碼在 `main` 內被改成 3）
+  And rc 2 專屬於無 FAIL 但有 blocking NE 的情形，用法錯誤不得得到 2（argparse 的預設用法錯誤碼在 `main` 內被改成 3）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_030_1_E_1]"
 ```
 
@@ -958,11 +991,11 @@ Feature: check 的純度
 
 Scenario: check 不寫任何檔、不連網、子行程只有環境被淨化的 git
   Given 基線有效 repo（綠）與一份紅的變體（含懸空的 OBS 引用與缺 tz）；記下兩份工作樹的檔案摘要（每個檔的相對路徑與 sha256，不含 `.git/`）與 `git status --porcelain` 的輸出
-  When 設定環境變數 `GIT_DIR` 指向另一個無關的 repo、`GIT_INDEX_FILE` 指向一個不存在的路徑，並以記錄型替身包住 `subprocess.Popen`（`subprocess.run` 與 `check_output` 皆經它），記下每次呼叫的 `args[0]`、`env`、`shell`
+  When 設定環境變數 `GIT_DIR` 指向另一個無關的 repo、`GIT_INDEX_FILE` 指向一個不存在的路徑，並以記錄型替身包住 `subprocess.run`（記下每次呼叫的 argv、`env`、`shell`、`timeout`、`encoding`、`errors`）與 `subprocess.Popen`（只記建構次數）
   And 對兩份各呼叫 `check` 的文字形態與 `--json` 形態各一次；另在未設定 `GIT_DIR` 與 `GIT_INDEX_FILE` 時各呼叫一次作對照
   Then 呼叫前後兩份的檔案摘要與 `git status --porcelain` 完全相同（沒有新檔、沒有被改的檔、沒有 `.lock`、沒有被寫的 OBS 帳本）
   And 兩份的結果與未設定 `GIT_DIR` 時完全相同（工具自行把定位用的 `GIT_*` 變數自子行程環境移除）
-  And 記錄到至少一次子行程呼叫；每次的 `args[0]` 去掉目錄與副檔名後是 `git`，`shell` 不為真，`env` 是一個字典且不含 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`，且 `GIT_OPTIONAL_LOCKS` 為 `0`
+  And 記錄到至少一次 `subprocess.run` 呼叫，且 `Popen` 的建構次數等於 `run` 的呼叫次數（沒有繞過 `run` 的直接 `Popen`、`check_output` 或 `os.system`）；每次呼叫：argv 的第一個元素去掉目錄與副檔名後是 `git`，第二個元素是 `-C`，第三個元素解析後等於 `--repo` 的路徑，`shell` 不為真，`timeout` 是正數，`encoding` 為 `utf-8`、`errors` 為 `replace`，`env` 是一個字典且不含 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES`，且 `GIT_OPTIONAL_LOCKS` 為 `0`
   And 以 AST 檢視 `tools/selfimproving.py` 與每個 `tools/lib/si_*.py`：每個絕對 import 的頂層模組名屬 `sys.stdlib_module_names`，或是 `_stdio_utf8`、`lib`、以 `si_` 起頭的本地模組（`tools/lib/` 沒有 `__init__.py`，`from lib import …` 靠 `tools/` 在 `sys.path` 上；相對 import 視為本地模組）；沒有 `socket`、`urllib`、`http`、`requests`、`ftplib`、`smtplib`、`asyncio` 的 import
   And 以正規式掃描上述原始碼：沒有寫入形原語（`write_text`、`write_bytes`、`.mkdir(`、`os.remove`、`os.unlink`、`os.rename`、`os.replace`、`shutil.`、以 `w`、`a`、`x` 模式呼叫的 `open(`）；判準函式自證：對含這些原語的合成字串判命中、對乾淨字串判不命中
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_030_2_1]"
@@ -1002,7 +1035,7 @@ Scenario: 紅的 check 印出一行草稿列，貼入帳本後該列自身零 fi
   When 對第一份呼叫 `main(["check", "--repo", <repo>, "--json"])` 取 `obs_draft`，再以文字形態呼叫一次取草稿列
   And 把草稿列追加到該 repo 帳本檔的末尾（測試自己寫、不 commit），再呼叫 `check --json`
   And 對第二份變體呼叫 `check --json` 取 `obs_draft`
-  Then rc 為 `1`；`obs_draft` 恰為一行；依 R9 切欄得 9 欄；ID 為基線最大 ID 加一（`OBS-SI-011`，三位零補齊）；時間符合 `YYYY-MM-DD HH:MM ±HH:MM`；情境、分類、嚴重度、處置、標記依 R6 的固定值
+  Then rc 為 `1`；`obs_draft` 恰為一行；依 R9 切欄得 9 欄；ID 為基線最大 ID 加一（`OBS-SI-011`，三位零補齊）；時間符合 `YYYY-MM-DD HH:MM ±HH:MM`；情境、分類（`bug`，PRD NFR-SI-09-3）、嚴重度、處置、標記依 R6 的固定值
   And 症狀含 `rc=1` 與紅項目的 item_id（`row.enums`）；證據座標含反引號包住的 `python tools/selfimproving.py check` 與 `判準指紋 sha256:`
   And 文字形態的草稿列與 JSON 的 `obs_draft` 在時間以外逐字相同
   And 貼入草稿列後再跑的 `check --json`：所有 finding 的 subject 集合不含 `OBS-SI-011`（草稿列在全部逐列判準下零 finding）；列 003、004 的原 finding 仍在
@@ -1025,7 +1058,7 @@ Scenario: 真 params.json 的格式與內容通過 check 的對表
   When 以 UTF-8 位元組讀入並 `json.loads`
   And 另建一個合成 repo（基線檔案配置，帳本與缺陷帳本仍是合成的），但把真 `params.json`、真 PRD、真根 `CLAUDE.md` 的複本放到對應位置，呼叫 `main(["check", "--repo", <該 repo>, "--json"])`；測試不讀真帳本、不跑真 repo 的 `check`
   Then 檔案開頭沒有 BOM、不含 CR、結尾有換行、頂層是物件、鍵依位元組序遞增
-  And 鍵集合恰等於 R21 登記表的 23 個鍵；每個鍵的型別與範圍符合表（整數不是布林；兩個比例鍵大於 0 且不大於 1；`migration_base_sha` 是 null 或 40 位小寫 hex；兩個 glob 清單是非空字串陣列）
+  And 鍵集合含 R21 登記表的 23 個鍵（`check` 不因多出的鍵而紅；D3 交付當下恰為這 23 鍵，由實跑檢核 V6 核對）；每個登記鍵的型別與範圍符合表（整數不是布林；兩個比例鍵大於 0 且不大於 1；`migration_base_sha` 是 null 或 40 位小寫 hex；兩個 glob 清單是非空字串陣列）
   And 合成 repo 的 `S(params.keys)`、`S(params.globs)`、`S(params.coupling)` 皆為 `PASS`（`non_evolvable_globs` 與真 PRD 加真根 `CLAUDE.md` 現算的必備集合相等，`w_opp` 不小於 `w_min`）
   And 初值對 PRD 座標的逐項核對只在 D3 提交當下做一次（實跑檢核 V6），本 AT 不斷言值，避免掌舵者日後調參使測試過期
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_1]"
@@ -1033,24 +1066,19 @@ Scenario: 真 params.json 的格式與內容通過 check 的對表
 
 ```gherkin
 # AT-031-1-E-1
-# 對應 AC: AC-031-1 缺鍵、多鍵、型別與範圍錯誤判紅
+# 對應 AC: AC-031-1 缺鍵判紅；取不到所需參數的項目判未判
 # 測試類型: Unit
 # 自動化工具: unittest／pytest + tmp 目錄
 # 判定指令: python -m pytest tools/tests/test_selfimproving_check.py -k AT_031_1_E_1 -q
 
-Feature: params.json 的鍵集合與型別
+Feature: params.json 的必備鍵
 
-Scenario: 缺鍵、多鍵、型別錯誤、範圍錯誤各被標出
-  Given 基線有效 repo；每個情境各自複製一份基線、只改 `params.json`（情境一每個子情境只刪一個鍵；情境三與情境四在同一份內同時改指名的多個鍵）
-  When 情境一：對登記表的 23 個鍵各刪除一個（23 個子情境）
-  And 情境二：新增未登記的鍵 `foo`
-  And 情境三：`w_evt` 改成字串 `2`、`w_n` 改成 `20.5`、`w_min` 改成布林 `true`、`migration_base_sha` 改成整數 `123`、`non_evolvable_globs` 改成字串、`spec_body_globs` 改成 `["a", 1]`
-  And 情境四：`max_touch_ratio` 改成 `2`、`cap_frac` 改成 `0`、`row_max_bytes` 改成 `0`、`metrics_rev` 改成 `0`、`spec_body_globs` 改成空陣列
-  Then 情境一：每個子情境的 `F(params.keys)` 恰為 `(<被刪的鍵>, PARAM-MISSING)`，且 `S(params.keys)` 為 `FAIL`
-  And 情境二：`F(params.keys)` 恰為 `(foo, PARAM-UNKNOWN)`
-  And 情境三：`F(params.keys)` 恰為六筆 `PARAM-TYPE`，subject 集合為 `w_evt`、`w_n`、`w_min`、`migration_base_sha`、`non_evolvable_globs`、`spec_body_globs`（集合比對，不論順序）
-  And 情境四：`F(params.keys)` 恰為五筆 `PARAM-RANGE`，subject 集合為 `max_touch_ratio`、`cap_frac`、`row_max_bytes`、`metrics_rev`、`spec_body_globs`（集合比對，不論順序）
-  And 取不到所需參數的項目為 `NE`（blocking，碼 `SOURCE-UNAVAILABLE`）而不是以預設值頂替：情境一刪除 `row_max_bytes` 時 `S(row.bytes)` 為 `NE`，刪除 `min_obs_rows` 時 `S(ledger.vacuity)` 為 `NE`
+Scenario: 登記表的每個鍵缺少時各被標出；取不到所需參數的項目判未判，而不是以預設值頂替
+  Given 基線有效 repo；每個子情境各自複製一份基線、只刪 `params.json` 的一個鍵
+  When 對登記表的 23 個鍵各刪除一個（23 個子情境，以 `subTest` 逐鍵）
+  Then 每個子情境：`S(params.keys)` 為 `FAIL`，`F(params.keys)` 恰為 `(<被刪的鍵>, PARAM-MISSING)`
+  And 取不到所需參數的項目為 `NE`（blocking，碼 `SOURCE-UNAVAILABLE`）：刪除 `row_max_bytes` 時 `S(row.bytes)` 為 `NE`；刪除 `min_obs_rows` 時 `S(ledger.vacuity)` 為 `NE`；刪除 `ledger_warn_bytes` 或 `ledger_fail_bytes` 時 `S(ledger.volume)` 與 `S(params.coupling)` 皆為 `NE`；刪除 `w_opp` 或 `w_min` 時 `S(params.coupling)` 為 `NE`；刪除 `non_evolvable_globs` 時 `S(params.globs)` 為 `NE`
+  And 刪除 `migration_base_sha` 時 `S(history.migration)` 為 `PASS` 且該項 `detail` 為 `claim=none`（缺鍵視為沒有宣稱）；其餘每個子情境的 21 個判定項狀態，除上述被點名的 NE 與 `params.keys` 外，與基線相同
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_E_1]"
 ```
 
@@ -1064,14 +1092,14 @@ Scenario: 缺鍵、多鍵、型別錯誤、範圍錯誤各被標出
 Feature: 不可進化面的散文與 JSON 一致
 
 Scenario: 缺少、多出、重複、來源變動各判紅；順序不拘；來源讀不到判未判
-  Given 基線有效 repo（§5.3：迷你 PRD 的 `**實體 glob**` 行含標籤式、頓號式、分號式三種前接的片段，並含前接「根 」「所列 」「且 」「（」的誘餌片段；迷你根 `CLAUDE.md` 的 `守衛面＝` 行含一個大括號展開片段與一個普通片段；必備集合因此為 9 項）；每個情境各自複製一份基線、只做一處變異
+  Given 基線有效 repo（§5.3：迷你 PRD 的 `**實體 glob**` 行含標籤式、頓號式、分號式三種前接的片段，並含緊鄰前文不符的誘餌片段；迷你根 `CLAUDE.md` 的 `守衛面＝` 行含一個大括號展開片段與一個普通片段；必備集合因此為 9 項）；每個情境各自複製一份基線、只做一處變異
   When 情境一：自 `non_evolvable_globs` 移除一項；情境二：新增一項不在必備集合內的 glob；情境三：把某一項重複寫兩次；情境四：把清單順序顛倒
   And 情境五：把迷你根 `CLAUDE.md` 的大括號展開少寫一個名字（必備集合少一項，`params.json` 變成多出一項）；情境六：把迷你 PRD 的某個頓號式片段改寫成另一個 glob（必備集合換了一項）
   And 情境七：刪掉迷你 PRD 中含 `**實體 glob**` 的那一行；情境八：刪掉迷你根 `CLAUDE.md`
   Then 情境一、二、三、五、六：`S(params.globs)` 為 `FAIL`，`F(params.globs)` 恰為 `(non_evolvable_globs, GLOBS-SET-MISMATCH)`，detail 列出缺少與多出的項
   And 情境四：`S(params.globs)` 為 `PASS`（順序不拘）
   And 情境七與八：`S(params.globs)` 為 `NE`、`blocking` 為 true，finding 碼為 `SOURCE-UNAVAILABLE`
-  And 誘餌片段（前接「根 」的 `CLAUDE.md`、前接「所列 」的 `tools/lib/`、前接「且 」的 `maturity: active`、前接「（」的指令）與迷你 `CLAUDE.md` 中不是大括號展開的普通片段都不進必備集合：基線 `S(params.globs)` 為 `PASS` 即證明
+  And 誘餌片段（緊鄰前文為 `根` 加空白的 `CLAUDE.md`、為 `所列` 加空白的 `tools/lib/`、為 `且` 加空白的 `maturity: active`、為全形左括號的指令）與迷你 `CLAUDE.md` 中不是大括號展開的普通片段都不進必備集合：基線 `S(params.globs)` 為 `PASS` 即證明
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_E_2]"
 ```
 
@@ -1095,6 +1123,42 @@ Scenario: w_opp 小於 w_min、warn 不小於 fail 判紅；等號放行；耦�
   And 情境七：`S(params.keys)` 為 `FAIL`（`w_opp` 型別錯），`S(params.coupling)` 為 `NE`、`blocking` 為 true、碼為 `SOURCE-UNAVAILABLE`
   And 基線 `S(params.coupling)` 為 `PASS`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_E_3]"
+```
+
+```gherkin
+# AT-031-1-E-4
+# 對應 AC: AC-031-1 型別錯誤判紅；多出的鍵不判紅
+# 測試類型: Unit
+# 自動化工具: unittest／pytest + tmp 目錄
+# 判定指令: python -m pytest tools/tests/test_selfimproving_check.py -k AT_031_1_E_4 -q
+
+Feature: params.json 的型別
+
+Scenario: 型別錯誤各被標出；多出的鍵不判紅
+  Given 基線有效 repo；每個情境各自複製一份基線、只改 `params.json`（情境一在同一份內同時改指名的六個鍵）
+  When 情境一：`w_evt` 改成字串 `2`、`w_n` 改成 `20.5`、`w_min` 改成布林 `true`、`migration_base_sha` 改成整數 `123`、`non_evolvable_globs` 改成字串、`spec_body_globs` 改成含一個整數元素的陣列
+  And 情境二：新增未登記的鍵 `foo`（值為任意字串）
+  Then 情境一：`S(params.keys)` 為 `FAIL`，`F(params.keys)` 恰為六筆 `PARAM-TYPE`，subject 集合為 `w_evt`、`w_n`、`w_min`、`migration_base_sha`、`non_evolvable_globs`、`spec_body_globs`（集合比對，不論順序）
+  And 情境二：`S(params.keys)` 為 `PASS` 且 `findings` 為空（多出的鍵不判紅，R21）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_E_4]"
+```
+
+```gherkin
+# AT-031-1-E-5
+# 對應 AC: AC-031-1 範圍錯誤判紅；邊界值放行
+# 測試類型: Unit
+# 自動化工具: unittest／pytest + tmp 目錄
+# 判定指令: python -m pytest tools/tests/test_selfimproving_check.py -k AT_031_1_E_5 -q
+
+Feature: params.json 的範圍
+
+Scenario: 範圍錯誤各被標出；邊界值放行
+  Given 基線有效 repo；每個情境各自複製一份基線、只改 `params.json`（各情境在同一份內同時改指名的多個鍵）
+  When 情境一：`max_touch_ratio` 改成 `2`、`cap_frac` 改成 `0`、`row_max_bytes` 改成 `0`、`metrics_rev` 改成 `0`、`spec_body_globs` 改成空陣列、`non_evolvable_globs` 改成空陣列
+  And 情境二（邊界對照）：`max_touch_ratio` 改成 `1`、`cap_frac` 改成 `0.01`、`row_max_bytes` 改成 `1`、`metrics_rev` 改成 `1`
+  Then 情境一：`S(params.keys)` 為 `FAIL`，`F(params.keys)` 恰為六筆 `PARAM-RANGE`，subject 集合為 `max_touch_ratio`、`cap_frac`、`row_max_bytes`、`metrics_rev`、`spec_body_globs`、`non_evolvable_globs`（集合比對，不論順序）
+  And 情境二：`S(params.keys)` 為 `PASS`（比例鍵上界 1 含、下界須大於 0；整數鍵下限 1 含）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_031_1_E_5]"
 ```
 
 ```gherkin
@@ -1127,8 +1191,8 @@ Feature: Operations SOP 骨架
 Scenario: SOP 有五個角色節，擷取者節含全部必備片段
   Given 真 `docs/05_development/SelfImproving_Operations_SOP.md`（P0 交付物 D5；CRLF 先換成 LF，以 `## ` 標題切段）
   When 以 R25 (1) 與 R25 (6) 的判準檢查；並對真 SOP 逐一刪去擷取者節的每個必備片段（`HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`）以及含 `外部衍生=是` 與 `不得單獨` 的那一行，造出副本，各送進判準；另造一份缺少某個角色標題的副本
-  Then 真 SOP 判準合格：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節含上列全部片段；擷取者節含同時有 `外部衍生=是` 與 `不得單獨` 的一行
-  And 其餘四個角色節存在（P0 可只有標題與一行「P1 定稿」）
+  Then 真 SOP 判準合格：有 `## ` 級標題分別含 `擷取者`、`歸因者`、`提案者`、`審查者`、`凍結者`；擷取者節含上列全部片段；擷取者節含同時有 `外部衍生=是` 與 `不得單獨` 的一行
+  And 其餘四個角色節存在（P0 可只有標題與一行 `P1 定稿`）
   And 自證：每個刪去副本與缺角色標題的副本都判不合格（判準函式不是恆真）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_032_1_1]"
 ```
@@ -1142,26 +1206,28 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | AT ID | 對應 AC | 描述 | 測試方法 | 預期結果 |
 |-------|---------|------|---------|---------|
 | AT-001-1-E-1 | AC-001-1 | 時間與 tz | tools/tests/test_selfimproving_check.py::test_AT_001_1_E_1_* | 缺宣告、毀損、格式與日期不合各被標出；列內 offset 與區間通過 |
-| AT-001-1-E-2 | AC-001-1 | 必填欄與座標 | test_AT_001_1_E_2_* | 七欄為空與佔位值 `FIELD-EMPTY`；座標不可定位 `COORD-NONE`；九種形態通過 |
+| AT-001-1-E-2 | AC-001-1 | 必填欄與座標 | test_AT_001_1_E_2_* | 七欄為空與佔位值 `FIELD-EMPTY`；座標不可定位（含裸 sid）`COORD-NONE`；九種形態通過 |
 | AT-001-1-E-3 | AC-001-1 | 枚舉 | test_AT_001_1_E_3_* | 分類、嚴重度、處置各碼；八種合法處置通過 |
-| AT-001-1-E-4 | AC-001-1 | 結構 | test_AT_001_1_E_4_* | 欄數、表頭、ID 格式、重複、遞增；跳脫管線不切欄 |
+| AT-001-1-E-4 | AC-001-1 | 結構 | test_AT_001_1_E_4_* | 欄數、表頭、ID 格式、重複、遞增；格式不合的列不參與重複與遞增追蹤；跳脫管線不切欄；BOM 與表頭在第 1 行 |
 | AT-001-1-E-5 | AC-001-1 | 位元組、控制字元、CRLF、體積 | test_AT_001_1_E_5_* | 700 邊界、CJK 以位元組計、五種控制字元、CRLF 不誤判、warn 與 fail |
 | AT-001-2-1 | AC-001-2 | 守衛面暴露規則 | test_AT_001_2_1_* | `GUARD-*` 與 `MARK-*` 各碼；非守衛面不受約束 |
 | AT-002-1-1 | AC-002-1 | 標記欄語法與詞彙 | test_AT_002_1_1_* | 語法、未知鍵、值域、`orig` 形態各碼；外部衍生只接受「是」 |
 | AT-002-2-1 | AC-002-2 | 來源與回報者 | test_AT_002_2_1_* | `SOURCE-*`、`REPORTER-MISSING`；五個合法來源通過 |
 | AT-003-1-1 | AC-003-1 | 無常駐機制與啟動條件條文 | test_AT_003_1_1_* | 禁用字樣零命中、`status` 與 `prop-new` rc 3、未註冊 hook、SOP 條文合格且自證 |
 | AT-003-2-1 | AC-003-2 | 低於下限判 NE | test_AT_003_2_1_* | `LEDGER-BELOW-FLOOR`、rc 2；等於下限通過；SOP 無事件條文 |
-| AT-003-3-1 | AC-003-3 | 產出數量條文與旗標清單 | test_AT_003_3_1_* | SOP 條文合格；`check --help` 旗標恰四個 |
+| AT-003-3-1 | AC-003-3 | 產出數量條文與旗標清單 | test_AT_003_3_1_* | SOP 條文合格；`check --help` 的旗標集合恰為四個功能旗標加 `--help` |
 | AT-004-2-1 | AC-004-2 | 真缺陷升 DEF 條文 | test_AT_004_2_1_* | SOP 條文合格且自證 |
 | AT-029-1-1 | AC-029-1 | 流程摩擦入口條文 | test_AT_029_1_1_* | 擷取者節條文合格且自證 |
 | AT-029-2-1 | AC-029-2 | loop-self 條文與受保護面 | test_AT_029_2_1_* | SOP 條文合格；四個迴圈自身 glob 在 `non_evolvable_globs` 內 |
 | AT-030-1-E-1 | AC-030-1 | rc 3 與求助 | test_AT_030_1_E_1_* | 十一種輸入錯誤 rc 3、stdout 空；`--help` rc 0 |
 | AT-030-3-1 | AC-030-3 | 判準指紋 | test_AT_030_3_1_* | 可重放、CRLF 等價、只隨協定目錄與兩個 rev 變 |
 | AT-030-3-2 | AC-030-3 | OBS 草稿列 | test_AT_030_3_2_* | 可貼入、自身零 finding、位元組上限、綠時無草稿 |
-| AT-031-1-1 | AC-031-1 | 真 `params.json` | test_AT_031_1_1_* | 格式、23 鍵、型別範圍、三個 params 項皆 PASS |
-| AT-031-1-E-1 | AC-031-1 | 缺鍵、多鍵、型別、範圍 | test_AT_031_1_E_1_* | `PARAM-*` 各碼；取不到參數的項目 NE |
+| AT-031-1-1 | AC-031-1 | 真 `params.json` | test_AT_031_1_1_* | 格式、含 23 鍵、型別範圍、三個 params 項皆 PASS |
+| AT-031-1-E-1 | AC-031-1 | 缺鍵（逐鍵） | test_AT_031_1_E_1_* | `PARAM-MISSING`；取不到參數的項目 NE |
 | AT-031-1-E-2 | AC-031-1 | glob 一致性 | test_AT_031_1_E_2_* | 缺少、多出、重複、來源變動判紅；順序不拘；來源讀不到 NE |
 | AT-031-1-E-3 | AC-031-1 | 參數耦合 | test_AT_031_1_E_3_* | 兩個 `COUPLING-*` 碼；相等放行；耦合鍵無效 NE |
+| AT-031-1-E-4 | AC-031-1 | 型別錯誤；多鍵 | test_AT_031_1_E_4_* | 六筆 `PARAM-TYPE`；多出的鍵不判紅 |
+| AT-031-1-E-5 | AC-031-1 | 範圍錯誤 | test_AT_031_1_E_5_* | 六筆 `PARAM-RANGE`；邊界值放行 |
 | AT-031-2-1 | AC-031-2 | `metrics.md` 逐字 | test_AT_031_2_1_* | 五個指標列與判定細則逐字存在；判準自證 |
 | AT-032-1-1 | AC-032-1 | SOP 骨架 | test_AT_032_1_1_* | 五角色節、擷取者節必備片段、外部衍生條文；判準自證 |
 
@@ -1177,14 +1243,15 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | AT-001-3-E-3 | AC-001-3 | sha 無效 | 同上 | 三種 `MIG-SHA-*`；不豁免 |
 | AT-001-3-E-4 | AC-001-3 | `orig` 使用規則 | 同上 | `ORIG-NOTES-*`、`ORIG-OUTSIDE-MIGRATION`、`MARK-ORIG-FORMAT` |
 | AT-004-1-1 | AC-004-1 | 存在的引用 | `git grep --untracked` | 三個 ref 項 PASS 且 findings 空 |
-| AT-004-1-E-1 | AC-004-1 | 懸空的 OBS 引用 | 同上 | `OBS-REF-DANGLING`，同編號多處只報一筆 |
+| AT-004-1-E-1 | AC-004-1 | 懸空的 OBS 引用 | 同上 | `OBS-REF-DANGLING`，同編號多處只報一筆；七處提及截斷為 5 處加 `…+2` |
 | AT-004-1-E-2 | AC-004-1 | 懸空的 DEF 引用 | 檔案系統（缺陷帳本家族） | `DEF-REF-DANGLING`；家族全缺 NE |
 | AT-004-1-E-3 | AC-004-1 | 載體未建立的家族 | `git grep --untracked` | NE nonblocking；不影響 rc |
-| AT-004-3-1 | AC-004-3 | 合法的帳本演進 | `git log`、`git show` | `history.row_mutated` PASS；rc 0 |
+| AT-004-3-1 | AC-004-3 | 合法的帳本演進 | `git log`、`git show` | `history.row_mutated` PASS；rc 0；SOP「M 之後只追加」條文合格且自證 |
 | AT-004-3-E-1 | AC-004-3 | 遷移之後的原地改寫 | 同上 | 五個列各一筆 `ROW-MUTATED`，cause 與 commit 正確 |
 | AT-004-3-E-2 | AC-004-3 | 工作樹改寫與劃界 | 同上 | `commit=WORKTREE`；淨差異 open 轉終值者放行 |
-| AT-030-1-1 | AC-030-1 | 輸出契約與子行程 | `subprocess` 執行 CLI（`PYTHONIOENCODING=cp950`） | 文字與 JSON 一致；UTF-8 位元組；rc 1 附草稿列 |
-| AT-030-2-1 | AC-030-2 | 純度與零副作用 | `subprocess.Popen` 記錄替身；`GIT_DIR` 污染 | 零副作用；子行程只有環境淨化的 git；純標準庫 |
+| AT-004-3-E-3 | AC-004-3 | 無歷史可比與帳本在 repo 外 | 未追蹤的帳本檔；repo 外的絕對路徑 | `no-history` PASS；`SOURCE-UNAVAILABLE` NE、rc 2 |
+| AT-030-1-1 | AC-030-1 | 輸出契約與子行程 | `subprocess` 執行 CLI（`PYTHONIOENCODING=cp950`；cwd 放誘餌檔） | 文字與 JSON 一致；UTF-8 位元組；rc 1 附草稿列；相對路徑相對於 `--repo`；JSON 鍵序 |
+| AT-030-2-1 | AC-030-2 | 純度與零副作用 | `subprocess.run` 與 `Popen` 記錄替身；`GIT_DIR` 污染 | 零副作用；git 呼叫帶 `-C`、`timeout`、`encoding`；環境淨化；純標準庫 |
 
 ### 3.3 Contract Tests
 
@@ -1227,6 +1294,18 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | 非 UTF-8 輸出管線 | AT-030-1-1 | `PYTHONIOENCODING=cp950` 的子行程 | 環境變數 | stdout 仍為 UTF-8 |
 | 載體未建立 | AT-004-1-E-3 | 六個家族的提及 | 執行期組出的編號 | NE nonblocking |
 | 環境污染 | AT-030-2-1 | `GIT_DIR`、`GIT_INDEX_FILE` 指向別處 | 環境變數 | 結果不變 |
+| BOM 與表頭在第 1 行 | AT-001-1-E-4 | UTF-8 BOM 開頭、表頭列為第 1 行、tz 宣告在表後 | 位元組 | 結構與 tz 判準通過 |
+| 格式不合的 ID | AT-001-1-E-4 | 兩位數字、第三位為字母、空 ID 欄 | 改 ID | 只報 `ROW-ID-FORMAT`，不參與重複與遞增追蹤 |
+| 裸 sid | AT-001-1-E-2 | 只有 UUID、不帶 `line` 或 `seq` | 改座標 | `COORD-NONE` |
+| 相對路徑語意 | AT-030-1-1 | cwd 放誘餌檔；`--ledger`、`--params` 給 repo 相對路徑 | 子行程 | 以 `--repo` 為準（rc 0） |
+| JSON 鍵序 | AT-030-1-1 | 頂層與三層巢狀的鍵序 | `object_pairs_hook=list` | 依 R4 |
+| git 呼叫形態 | AT-030-2-1 | `-C`、`timeout`、`encoding`、`errors`、不繞過 `run` | `subprocess.run` 記錄替身 | 符合 R8 (c) |
+| 提及位置截斷 | AT-004-1-E-1 | 同一不存在編號七處提及 | 七處 | 列 5 處加 `…+2` |
+| 無歷史可比 | AT-004-3-E-3 | 帳本從未被提交 | 工作樹檔 | `no-history`、PASS |
+| 帳本在 repo 外 | AT-004-3-E-3 | `--ledger` 為 repo 外的絕對路徑 | 絕對路徑 | `SOURCE-UNAVAILABLE`、rc 2 |
+| 多出的鍵 | AT-031-1-E-4 | 未登記的鍵 | 加鍵 | 不判紅 |
+| 型別錯誤 | AT-031-1-E-4 | 字串、浮點、布林、整數、陣列元素 | 改值 | `PARAM-TYPE` |
+| 範圍錯誤 | AT-031-1-E-5 | 比例鍵 2 與 0、下限鍵 0、空陣列 | 改值 | `PARAM-RANGE` |
 | 並發衝突 | 不適用 | `check` 唯讀、無共享可變狀態；帳本寫入鎖屬 P1（PRD ADR-SI-10） | — | — |
 
 **刻意不做（附再開症狀）**
@@ -1238,7 +1317,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | 確認列引言的逐字驗證 | P0 只記錄（PRD AC-SI-01-3）；引言回查屬 P2 的 AC-SI-12-4 | 確認列引言被發現與逐字稿不符（SA 已於本輪現查到 PRD 附錄 C.2 的座標與逐字稿不符，見實跑檢核 V5） |
 | 以 `check` 機械驗證 `orig` 保全（遷移 commit 與其親 commit 逐列比對） | PRD §9.3 的 `check` 項目清單不含它；一次性遷移，由 SCG-4 的 V3 以唯讀稽核腳本代位 | 第二次遷移被提出，或 `orig` 保全爭議發生 |
 | 證據座標指向的檔案或行是否真的存在 | P0 只驗形態（R16），存在性驗證會讓 `check` 依賴工作樹其他檔 | 掌舵者回報座標點不到 |
-| 附註檔內容不可變的歷史比對 | PRD 未列；附註檔不在 NFR-SI-02-1 (iv) 的實體 glob 內（開放問題 Q2） | 附註檔原文被改動 |
+| 附註檔內容不可變的歷史比對 | PRD 的 `check` 項目清單未列；附註檔放在 `docs/05_development/` 已被 NFR-SI-02-1 (iv) 的既有 glob 涵蓋（不可成為提案目標），但 P0 的 `check` 不比對其內容不變（開放問題 Q2） | 附註檔原文被改動 |
 | 外部衍生列不得單獨充當提案證據的語意判定 | 屬 P1 `prop-new` 前置檢查（PRD AC-SI-02-1） | 出現以外部衍生列為唯一來源的提案 |
 | 「是否符合缺陷帳本收錄定義」的語意判定 | 判斷題，P0 以 DEF 引用檢查與 SOP 條文代位（AC-SI-04-2） | 真缺陷被登成非 DEF 處置而被掌舵者發現 |
 | 在 CI 或 hook 接 `check` | P0 隨需執行；不新增 hook、排程或 CI 步驟（AC-SI-03-1） | 帳本在無人 `check` 時被改壞並進入主幹 |
@@ -1273,7 +1352,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | 003 | doc、P2 | `DEF-200-` 接主缺陷帳本內那個執行期編號 | id：同一個 DEF 編號 | `面=文件;來源=工具;回報者=QA` |
 | 004 | bug、P3 | `deferred；再開症狀：同一症狀第二次出現` | file：`CLAUDE.md:12` | `面=產品;來源=逐字稿;回報者=主控` |
 | 005 | decision、P4 | `retired；依據 docs/06_quality/notes.md:3` | dir：`docs/06_quality/` | `面=流程;來源=帳本;回報者=主控` |
-| 006 | decision、P3 | `decided：掌舵者裁決採方案甲` | sid：`00000000-0000-4000-8000-000000000006` | `面=流程;來源=人;回報者=掌舵者` |
+| 006 | decision、P3 | `decided：掌舵者裁決採方案甲` | sid 加 line：`sid 00000000-0000-4000-8000-000000000006 line 7` | `面=流程;來源=人;回報者=掌舵者` |
 | 007 | doc、P4 | `merged@OBS-SI-001` | sha：`abcdef0123` | `面=文件;來源=代理;回報者=SD` |
 | 008 | process、P3 | `proposed@PROP-SI-` 接一個執行期組出的三位數編號 | docref：`PRD §9.3` | `面=產品;來源=代理;回報者=SA` |
 | 009 | tooling、P2 | `open` | sha_kw：`commit 1234567`（七位全數字，只有 `commit` 關鍵字形態接受）；時間列內明示 `2026-10-19 01:00 +09:00` | `面=守衛;暴露=a;來源=代理;回報者=QA` |
@@ -1284,7 +1363,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 參數 `confirm`（確認列變體：`valid`、`no-decided`、`no-sha`、`no-sid`、`no-line`、`wrong-sha`、`not-decided`）。檔案配置同 §5.1（協定目錄、迷你 PRD 與根 `CLAUDE.md`、缺陷帳本家族皆自 C0 起存在；`min_obs_rows` 為 3；`migration_base_sha` 自 C0 起為 null），帳本與附註檔依下列三個 commit 演進：
 
 - **C0**：舊版八欄帳本（無 tz 宣告），4 列：`OBS-SI-001`（處置 `open`）、`OBS-SI-002`（處置 `裁決：採方案甲，已回報掌舵者`）、`OBS-SI-003`（處置 `延後；再開症狀：同一症狀第二次出現`）、`OBS-SI-004`（處置為一段超過 450 位元組的自由文字，使加第九欄再複製原文會超過 700）；各列證據座標皆合 R16，時間不帶 offset。
-- **M**（單一 commit，只動帳本與 `docs/06_quality/SelfImproving_Observation_Ledger_notes.md`）：加檔頭 `<!-- si-ledger: tz=+08:00 -->`、第 9 欄「標記」；列 001 處置維持 `open`（標記不含 `orig`）；列 002、003 的處置改成 `decided：…`、`deferred；再開症狀：…`，標記帶內嵌 `orig="<C0 的處置原文>"`；列 004 的處置改成短的 `decided：…`，標記帶 `orig=@docs/06_quality/SelfImproving_Observation_Ledger_notes.md#OBS-SI-004`，附註檔含標題 `## OBS-SI-004` 與其下 C0 處置原文逐字；各列另補 `面`、`來源`、`回報者`。
+- **M**（單一 commit，只動帳本與 `docs/05_development/SelfImproving_Observation_Ledger_notes.md`）：加檔頭 `<!-- si-ledger: tz=+08:00 -->`、第 9 欄「標記」；列 001 處置維持 `open`（標記不含 `orig`）；列 002、003 的處置改成 `decided：…`、`deferred；再開症狀：…`，標記帶內嵌 `orig="<C0 的處置原文>"`；列 004 的處置改成短的 `decided：…`，標記帶 `orig=@docs/05_development/SelfImproving_Observation_Ledger_notes.md#OBS-SI-004`，附註檔含標題 `## OBS-SI-004` 與其下 C0 處置原文逐字；各列另補 `面`、`來源`、`回報者`。
 - **N**：`params.json` 的 `migration_base_sha` 寫入 M 的完整 40 位 sha；帳本追加 `OBS-SI-005`＝確認列：時間 `2026-10-19 12:00 +08:00`、症狀為掌舵者原句的引述、證據座標含 `commit <M 的前 12 位>`、`sid 00000000-0000-4000-8000-000000000001`、`line 2581`，處置 `decided：掌舵者預先授權`，標記 `面=流程;來源=人;回報者=主控`。`confirm` 各變體依名稱改這一列：`no-decided` 不追加此列；`no-sha` 去掉 sha；`no-sid` 去掉 `sid` 與 UUID；`no-line` 去掉 `line` 與整數；`wrong-sha` 改引 C0 的 sha；`not-decided` 把處置改成 `deferred；…`。
 
 ### 5.3 迷你 PRD 與迷你根 `CLAUDE.md`（`params.globs` 的合成來源）
@@ -1315,7 +1394,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 
 ### 5.6 允許變更的檔案集合（T 提交）
 
-新增：`tools/selfimproving.py`、`tools/lib/si_*.py`（模組數自定）、`tools/tests/test_selfimproving_check.py`、`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`。M 與 N 另動：`docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/06_quality/SelfImproving_Observation_Ledger_notes.md`（M 新增）、`docs/06_quality/SelfImproving_Protocol/params.json`（N 改一個鍵）。主控收尾另動根層鎖檔（NFR-P0-8）。其餘一律不動；尤其不動 PRD、研究方法 SOP、`.claude/**`、本 TCS。
+新增：`tools/selfimproving.py`、`tools/lib/si_*.py`（模組數自定）、`tools/tests/test_selfimproving_check.py`、`docs/06_quality/SelfImproving_Protocol/params.json`、`docs/06_quality/SelfImproving_Protocol/metrics.md`、`docs/05_development/SelfImproving_Operations_SOP.md`。M 與 N 另動：`docs/06_quality/SelfImproving_Observation_Ledger.md`、`docs/05_development/SelfImproving_Observation_Ledger_notes.md`（M 新增）、`docs/06_quality/SelfImproving_Protocol/params.json`（N 改一個鍵）。主控收尾另動根層鎖檔（NFR-P0-8）。其餘一律不動；尤其不動 PRD、研究方法 SOP、`.claude/**`、本 TCS。
 
 ---
 
@@ -1327,7 +1406,7 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | F-001 → US-001～US-005 | ☑ 已映射 |
 | US-001～US-005 → 本檔 19 個 AC | ☑ 已映射（FRD-lite） |
 | PRD AC-SI-01-1～01-3、02-1～02-2、03-1～03-3、04-1～04-3、29-1～29-2（13 個）→ 本檔 AC-001-1～AC-029-2 | ☑ 已映射（編號規則見 FRD-lite） |
-| 本檔 AC（19 個）→ AT（39 個） | ☑ 已映射（本檔 §1，覆蓋率 100%） |
+| 本檔 AC（19 個）→ AT（42 個） | ☑ 已映射（本檔 §1，覆蓋率 100%） |
 | PRD §8.1 P0 退出條件 (a) 免追問必填欄 → AT-001-1-1、AT-001-1-E-1～E-5、AT-001-2-1、AT-002-2-1 與實跑檢核 V9 | ☑ |
 | PRD §8.1 P0 退出條件 (b) 自遷移基準起 `check` 綠 → AT-001-3-1、AT-004-3-1 與實跑檢核 V1、V2、V4 | ☑ |
 | PRD §8.1 P0 退出條件 (c) 處置合枚舉且 `orig` 保全 → AT-001-1-E-3、AT-001-3-E-4 與實跑檢核 V3 | ☑ |
@@ -1338,13 +1417,26 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 
 ## 7. 本檔採用的預設裁決與開放問題（掌舵者可推翻；推翻走 T1 或本檔修訂，凍結前由主控回報掌舵者）
 
+### 7.1 開放問題與預設（Q1～Q6）
+
 | 編號 | 問題 | 本檔已採用的預設 | 替代與再開症狀 |
 |------|------|------------------|----------------|
 | Q1 | `check` 的 rc 語意：PRD 只說「`check` 綠」，未定義 NE 與工具錯誤的 rc | rc 0、1、2、3（R1、R5）；nonblocking NE 只有 `CARRIER-NOT-ESTABLISHED`（PRD AC-SI-04-1 要求未判不得判通過、也不得判不合規，而真帳本引用 `PROP-SI-` 家族的列使它必然出現） | 替代：任何 NE 都非綠；代價是 P0 退出條件 (b) 因真帳本的 `PROP-SI-` 引用而不可達，須經 T1 修 PRD。再開症狀：QA 或掌舵者把「綠但帶 NE」讀成未達標 |
-| Q2 | OBS 附註檔的名稱與保護面：PRD 只說「搬附註檔、列上留座標」 | `docs/06_quality/SelfImproving_Observation_Ledger_notes.md`；缺口：它不在 NFR-SI-02-1 (iv) 的實體 glob 內（PRD 凍結，`non_evolvable_globs` 與 PRD 一致規則使本檔也不能私加），且 P0 `check` 不比對附註檔內容不變 | 替代：改放協定目錄（自動被 `docs/06_quality/SelfImproving_Protocol/**` 保護，但進判準指紋的 manifest）。再開症狀：P1 的 `prop-new` 前置檢查把該檔當成可進化目標；或附註檔原文被改動 |
-| Q3 | D1 對既有各列補 `來源`、`回報者`、`面`、`暴露` 的回填規則，與三個座標不合格列的補件 | 回報者＝情境欄的角色詞；來源＝`代理`（掌舵者回報者用 `人`、工具輸出用 `工具`、逐字稿引述用 `逐字稿`、帳本衍生用 `帳本`）；面＝依症狀所涉檔案（`.claude/`、hook、根 `CLAUDE.md` 守衛面清單內的 `tools/lib` 與 `tools/session_resume_planner.py` 為 `守衛`；產品程式為 `產品`；文件為 `文件`；其餘為 `流程`）；守衛面列的暴露＝其座標已有 sid 加行、檔加行或指令加 rc 之一者填 a、b、c 之一，否則填 `無`；座標不合 R16 的列（撰寫時現查為三列：OBS-SI-019、029、034）只准**追加**座標（不改原字，且列位元組仍不得超線）；處置對映原則：裁決、接受、已執行 ⇒ `decided：…`；延後 ⇒ `deferred；再開症狀：…`；`fixed（…）` ⇒ `fixed@<修復 commit 的 sha>`（查不到 sha 則改 `decided` 並保留 `orig`，不得編造 sha）；待議或候選提案 ⇒ `open`；原文一律逐字留 `orig`；SA 現查估算（最短標記約 50 位元組、原文內嵌於 `orig`）：OBS-SI-005、010、016、027、035、038、041、042 共 8 列會超過 700 位元組，這 8 列的原文須搬附註檔，其餘列可內嵌（以 M 提交前現查為準） | 替代：由掌舵者逐列裁決。再開症狀：QA 在 V3 抽查發現回填與症狀語意不符 |
+| Q2 | OBS 附註檔的名稱與保護面：PRD 只說「搬附註檔、列上留座標」 | `docs/05_development/SelfImproving_Observation_Ledger_notes.md`（預審 F-06 的現成解）：被 NFR-SI-02-1 (iv) 既有的實體 glob `docs/05_development/SelfImproving_*.md` 涵蓋，不必改 PRD，也不會成為 P1 `prop-new` 的可進化目標；剩餘缺口：P0 `check` 不比對附註檔內容不變（`orig` 保全只靠 V3 的一次性稽核） | 替代：放 `docs/06_quality/`（不被任何既有 glob 涵蓋，須經 T1 補 PRD）或放協定目錄（受保護，但進判準指紋的 manifest）。再開症狀：附註檔原文被改動而 `check` 沒有紅燈 |
+| Q3 | D1 對既有各列補 `來源`、`回報者`、`面`、`暴露` 的回填規則，與三個座標不合格列的補件 | 回報者＝情境欄的角色詞；來源＝`代理`（掌舵者回報者用 `人`、工具輸出用 `工具`、逐字稿引述用 `逐字稿`、帳本衍生用 `帳本`）；面＝依症狀所涉檔案（`.claude/`、hook、根 `CLAUDE.md` 守衛面清單內的 `tools/lib` 與 `tools/session_resume_planner.py` 為 `守衛`；產品程式為 `產品`；文件為 `文件`；其餘為 `流程`）；守衛面列的暴露＝其座標已有 sid 加行、檔加行或指令加 rc 之一者填 a、b、c 之一，否則填 `無`；座標不合 R16 的列（HEAD 7b9c6ba6 的 47 列現查為三列：OBS-SI-019、029、034；`sid` 形態改要求帶 `line` 或 `seq` 後仍是這三列，沒有列只靠裸 sid）只准**追加**座標（不改原字，且列位元組仍不得超線）；處置對映原則：裁決、接受、已執行 ⇒ `decided：…`；延後 ⇒ `deferred；再開症狀：…`；`fixed（…）` ⇒ `fixed@<修復 commit 的 sha>`（查不到 sha 則改 `decided` 並保留 `orig`，不得編造 sha）；待議或候選提案 ⇒ `open`；原文一律逐字留 `orig`；超線估算（SA 以 HEAD 7b9c6ba6 的 47 列現查重估：新處置約 40 位元組取代舊處置、標記約 60 位元組、`orig` 內嵌舊處置；草稿版曾寫「8 列超線」，那次估算把舊處置重複計入一次，已更正，與預審另估一致）：只有 OBS-SI-043（649 位元組，估計加欄後約 757）會超過 700，須把原文搬附註檔，其餘列可內嵌；以 M 提交前現查為準 | 替代：由掌舵者逐列裁決。再開症狀：QA 在 V3 抽查發現回填與症狀語意不符 |
 | Q4 | PRD C5 列點名但未取名、未給值的參數 | `min_obs_rows`＝10、`ledger_warn_bytes`＝245760、`ledger_fail_bytes`＝262144（先例 `tools/check_defect_log_crossref.py` 的 240 與 256 KiB）、`metrics_rev`＝1；P1 才用的事件數下限等由 P1 的 TCS 擴充登記表 | 替代：反空轉下限拆成 OBS 與事件兩個鍵。再開症狀：下限擋住了合法的小帳本，或掌舵者要求他名 |
 | Q5 | `non_evolvable_globs` 與 NFR-SI-02-1 一致性的機器判準 | R22 的位置式抽取（片段前接頓號、分號或標籤）加根 `CLAUDE.md` 守衛面行的大括號展開；SA 預演為 18 加 7 共 25 項（現算為準） | 替代：PRD 經 T1 加機器可讀區塊；或只比對該行的雜湊（無法指出差異項）。再開症狀：PRD 或根 `CLAUDE.md` 改版使抽取規則假紅或漏判 |
+| Q6 | R16 的證據座標「可定位」形態比 PRD:208 寬（預審 F-05；PRD:208 只列檔案:行、指令加 rc、sid 加 seq、帳本列 ID 四形態） | 九形態（R16）。理由：SA 以真帳本實測（HEAD 7b9c6ba6，47 列）——九形態下只有 OBS-SI-019、029、034 三列不合；若收斂到四形態（以 `路徑:行號`、反引號指令且同格有 `rc`、sid 加 `line` 或 `seq`、帳本列 ID 粗判），SA 粗判有 24 列不合，D1 又只准追加座標，等於逼 D1 對近半數列補件，風險高於收益。已收斂的一處：`sid` 形態須同格帶 `line` 或 `seq`（真帳本零列只靠裸 sid，無代價）。`check` 只驗形態、不驗存在（§4 刻意不做），與一審「座標須可重查」的張力由 V3 的語意抽查承擔 | 替代：收斂到 PRD 四形態並由 D1 補件。再開症狀：掌舵者或 QA 回報座標點不到，或某筆座標只靠目錄、章節別名過關而無法重查 |
+
+### 7.2 預審 P4 登記（TCS-PREREVIEW 的 F-11～F-15；只登記、不改規格）
+
+| 編號 | 預審所述 | 本檔處置 | 再開症狀 |
+|------|----------|----------|----------|
+| F-11 | SOP 骨架以大量字面中文片段與真 ID 做存在判準，措辭一改即紅 | 登記；已以「刪去副本須判不合格」自證判準非恆真 | SOP 因措辭微調使 AT 反覆轉紅 |
+| F-12 | `deferred`、`decided` 只驗附加文字非空，PRD:218 要求一句可觀測再開症狀、裁決者與一句裁決；新列的復發候選提示（PRD:635、AC-SI-06-2，屬 P1）未列入 §4 | 登記；語意判定屬人審（與 AC-004-2 同型），復發候選提示屬 P1 | 處置文字空洞（只有一個詞）而 `check` 綠，被掌舵者發現 |
+| F-13 | 草稿列 ID＝帳本現有最大 ID 加一、不看封存檔，封存若搬走高號列且暫無新列可能撞號（現無封存檔） | 登記；P0 無封存工具 | 出現 OBS 封存檔且草稿撞號 |
+| F-14 | hermetic 環境未設 `GIT_CEILING_DIRECTORIES`，tmp 若落在某 repo 之下，非 git 目錄情境會找到祖先 repo | 登記；一般機器與 CI 不成立 | 開發機的 tmp 位於某 repo 之內而 AT 假綠或假紅 |
+| F-15 | §3 與 §1 重複維護兩份 AT 清單；TCS 體量大（已登記 OBS-SI-045） | 登記；編譯相容檢查以 §1 為準，§3 為閱讀索引 | AT 增減時兩處不同步 |
 
 ---
 
@@ -1367,10 +1459,10 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | V2 | 真帳本 `check` | `python tools/selfimproving.py check --json`（真 repo，N 之後的 HEAD）；貼 JSON | rc 0；`items` 中除 `ref.carrier_families`（可為 nonblocking NE）外皆 PASS；`row.coordinates`、`row.enums` 為 PASS（零無座標列、零「之後再看」）；`ref.obs` 為 PASS（本檔與測試原始碼不含不存在的字面 OBS 編號） |
 | V3 | M 稽核（唯讀；稽核腳本放 scratchpad、不入庫） | 對 `M^` 與 `M` 的帳本逐列比對 | (1) ID 集合與順序不變、無增減列；(2) 時間、情境、症狀、分類、嚴重度逐格相同；(3) 證據座標逐格相同，或僅為「前綴保留的追加」；(4) 處置被改寫的列都有 `orig`，其值（內嵌，或 `@` 附註檔段落）與 `M^` 的處置原文逐字相同，處置未改寫的列沒有 `orig`；(5) 九欄與檔頭 tz 宣告齊備；(6) 每個 `@` 錨點在附註檔有同 ID 的段落；(7) 沒有「之後再看」；(8) 回填語意抽查（開放問題 Q3）合理 |
 | V4 | `migration_base_sha` | `git rev-parse <M>`；讀 `params.json`；`git merge-base --is-ancestor <M> HEAD`（讀 rc 時不接管線） | 值等於 M 的完整 40 位 sha；rc 為 0 |
-| V5 | 確認列引言座標 | 對確認列所引的每個 `line`，唯讀讀取逐字稿 `<sid>.jsonl` 該實體行（`type`、`origin.kind`、文字） | 該行是 `type` 為 `user`、`origin.kind` 為 `human`（或 `queued_command` 附件）的記錄，文字與列內引言逐字相符。SA 預演現查（sid `f3ead132-29b1-418c-97d9-35868ab11c70`）：預先核准句「真正需要你本人的只剩凍結核准 ==> 現在先授權核准! (避免不在機器旁)」在 line 2525、「了解，凍結後接著開 P0 實作」在 line 2581；任務書與 PRD 附錄 C.2、QA 報告 §7、觀察帳本所引的 line 2536 是 assistant 記錄（文字為空），PRD 附錄 C.2 另引的 line 2493 同型（對應的人工句「…我授權幫我決策…」在 line 2476）。確認列須用現查的行號；既有的舊座標以追加更正列處理（凍結的 PRD 不改，修訂走 T1） |
-| V6 | `params.json` 初值 | 逐鍵對照 §2 R21 表的「初值」欄與其 PRD 座標 | D3 提交當下每個初值與 PRD 一致（`min_obs_rows` 等本檔自定者與開放問題 Q4 一致）；`non_evolvable_globs` 由 R22 規則現算 |
+| V5 | 確認列引言座標 | 對確認列所引的每個 `line`，唯讀讀取逐字稿 `<sid>.jsonl` 該實體行（`type`、`origin.kind`、文字） | 該行是 `type` 為 `user`、`origin.kind` 為 `human`（或 `queued_command` 附件）的記錄，文字與列內引言逐字相符。SA 預演現查（sid `f3ead132-29b1-418c-97d9-35868ab11c70`）：預先核准句「真正需要你本人的只剩凍結核准 ==> 現在先授權核准! (避免不在機器旁)」在 line 2525、授權句「…我授權幫我決策…」在 line 2476、「了解，凍結後接著開 P0 實作」在 line 2581；舊座標 line 2536 與 2493 是 assistant 的空文字記錄（緊接在回覆之後的工具呼叫），曾被任務書、PRD 附錄 C.2 初稿、QA 報告 §7、觀察帳本 OBS-SI-042 引用——PRD 附錄 C.2 已於重凍訂正為 2476／2525／2581，QA 報告 §7 已補註，OBS-SI-042 以更正列 OBS-SI-043 處理（凍結檔不改，帳本只追加）。確認列須用現查的行號；本檢核只驗確認列自己所引的行號 |
+| V6 | `params.json` 初值 | 逐鍵對照 §2 R21 表的「初值」欄與其 PRD 座標 | D3 提交當下每個初值與 PRD 一致（`min_obs_rows` 等本檔自定者與開放問題 Q4 一致）；`non_evolvable_globs` 由 R22 規則現算；`params.json` 的鍵恰為 R21 的 23 鍵（`check` 不因多鍵而紅，故由本項核對無多出的鍵） |
 | V7 | 護欄與零退化 | 根層全套 unittest（`python -m unittest discover -s tools/tests`，通過數以實跑為準）；`ruff check` 對新增的每個 `.py`；`python AutoClaude/tools/check_loc_budget.py --json`；`tools/tests/test_defect_id_reference_integrity.py`；`git diff --name-only`；`git diff --stat -- .claude` | 全綠；`git diff --name-only` 只含 §5.6 的集合與主控收尾的重釘檔；`.claude/**` 無變動；凍結檔（PRD、研究方法 SOP）無變動；`check` 真 repo 牆鐘小於 30 秒（NFR-P0-2） |
 | V8 | SOP 與流程型 AC 的文件檢核 | QA 逐項對照 PRD AC-SI-02-1、03-1～03-3、04-2、29-1、29-2 與 SOP 條文；Developer 與 QA 的文字交卷 | SOP 條文語意與 PRD 一致（不只關鍵字在）；Developer 棒與 QA 棒的交卷都含「流程摩擦」節，節內項目於 SCG-4 前已由主控入帳為 OBS 列，且 V2 仍為綠 |
-| V9 | P0 退出條件 (a) | 檢視 N 之後新增的 OBS 列與它們的來源 | 沒有任何「某欄無法填」的觀察（反症狀）；新增列皆通過 `check` |
+| V9 | P0 退出條件 (a)，與 M 之後只追加（預審 F-04） | 檢視 N 之後新增與變動的 OBS 列與它們的來源；`git log -p -- docs/06_quality/SelfImproving_Observation_Ledger.md` 自 N 起至 SCG-4 前 | 沒有任何「某欄無法填」的觀察（反症狀）；新增列皆通過 `check`；**N 之後至 SCG-4 前，既有列零原地改寫**（`history.row_mutated` 為 PASS 即機械憑證；累計次數、狀態更新與更正一律追加列，R25 (9)）；M 之前的原地改寫（例如 OBS-SI-011 的累計次數）依 AC-SI-01-3 屬遷移基準以前、不在此限 |
 
 **確認人**: ____________  **確認日期**: ____________  **狀態**: □ 通過 / □ 待修訂
