@@ -115,7 +115,7 @@ def setUpModule() -> None:
     global _TMP, _GCONF
     _TMP = Path(tempfile.mkdtemp(prefix="si_check_"))
     _GCONF = _TMP / "gitconfig"
-    _GCONF.write_bytes(b"")
+    _GCONF.write_bytes(b"[gc]\n\tauto=0\n[maintenance]\n\tauto=false\n")  # no bg gc
     _COUNTER[0] = 0
     _BASE.clear()  # 快取的基線 repo 住在 _TMP 之下，換目錄就必須一併作廢
     _CHAIN.clear()
