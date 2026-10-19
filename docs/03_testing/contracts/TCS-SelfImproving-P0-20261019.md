@@ -36,7 +36,7 @@
 - Before：(1) `docs/06_quality/SelfImproving_Observation_Ledger.md` 是八欄暫定版（ID、時間、情境、症狀、證據座標、分類、嚴重度、處置），處置為自由文字，時區只靠表頭一句話，沒有來源、回報者、面欄位，沒有機器檢查（HEAD 7b9c6ba6 現查 47 列，數字不構成契約）；(2) 缺陷帳本家族已有 `tools/check_defect_log_crossref.py` 與 `tools/tests/test_defect_id_reference_integrity.py` 兩把鎖，OBS 帳本不在其射程；(3) 沒有 `tools/selfimproving.py`、`tools/lib/si_*.py`、`docs/06_quality/SelfImproving_Protocol/`、`docs/05_development/SelfImproving_Operations_SOP.md`。
 - After：九欄帳本（第 9 欄「標記」，檔頭機器可讀 `tz=`）、處置落入枚舉且原文逐字保全；單一遷移 commit 加掌舵者確認列加 `migration_base_sha` 的一次性豁免；唯讀檢查器 `check`（21 個判定項、四種 rc、判準指紋、可貼入的 OBS 草稿列）；協定目錄（`params.json`、`metrics.md`）；SOP 骨架（五角色任務書位置，擷取者節完整）；`tools/tests/test_selfimproving_check.py`。
 
-**AC 編號規則**（ADR-XPLAT-016 §8.1 的 AC 文法是 `AC-[\d\-]+`，PRD 的 `AC-SI-NN-Y` 不合）：本檔以 `AC-0NN-Y` 對映 PRD（`AC-001-1`＝PRD `AC-SI-01-1`，`AC-029-2`＝`AC-SI-29-2`，其餘類推，共 13 個 PRD AC）。`AC-030-x`、`AC-031-x`、`AC-032-x` 為本檔自增（PRD 的 FR 只編到 29，無編號衝突），合計 19 個 AC。**自增 AC 的來源逐條標示，並區分「PRD 明文」與「本檔類推」**：AC-030-1 ← PRD §9.3 `check` 列（PRD:635）與 NFR-SI-09-1（PRD:450）；AC-030-2 ← §9.3 `check` 列的「只讀」欄（PRD:635）與 §9.4 的「CLI 不自寫 OBS 帳本」（PRD:676）；AC-030-3 的**草稿列**＝PRD §9.4（PRD:676）與 NFR-SI-09-3（PRD:452）明文，**判準指紋＝本檔類推**（PRD 只在量測腳本列 PRD:646 與五問協定先例 `tools/probe/fivequestion_ledger.py` 定義指紋，`check` 列 PRD:635 沒有此句；任務書 D4 要求 `check` 輸出判準指紋，算法沿用 PRD:646 的「協定目錄各檔 CRLF 轉 LF 後雜湊加 `metrics_rev`」，`check_rules_rev` 為本檔類推，請掌舵者知悉）；AC-031-1 ← §9.1 C5 列（PRD:566）、§9.3 `check` 列的 params 對表句（PRD:635）、NFR-SI-02-1（PRD:413～415）、PRD:697；AC-031-2 ← C5 列的「指標定義」（PRD:566）與 §1.3（PRD:61～65、69～78）；AC-032-1 ← §9.1 C6 列（PRD:567）、NFR-SI-07-2（PRD:444）。
+**AC 編號規則**（ADR-XPLAT-016 §8.1 的 AC 文法是 `AC-[\d\-]+`，PRD 的 `AC-SI-NN-Y` 不合）：本檔以 `AC-0NN-Y` 對映 PRD（`AC-001-1`＝PRD `AC-SI-01-1`，`AC-029-2`＝`AC-SI-29-2`，其餘類推，共 13 個 PRD AC）。`AC-030-x`、`AC-031-x`、`AC-032-x` 為本檔自增（PRD 的 FR 只編到 29，無編號衝突），合計 19 個 AC。**自增 AC 的來源逐條標示，並區分「PRD 明文」與「本檔類推」**：AC-030-1 ← PRD §9.3 `check` 列（PRD:786）與 NFR-SI-09-1（PRD:531）；AC-030-2 ← §9.3 `check` 列的「只讀」欄（PRD:786）與 §9.4 的「CLI 不自寫 OBS 帳本」（PRD:836）；AC-030-3 的**草稿列**＝PRD §9.4（PRD:836）與 NFR-SI-09-3（PRD:533）明文，**判準指紋＝本檔類推**（PRD 只在量測腳本列 PRD:800 與五問協定先例 `tools/probe/fivequestion_ledger.py` 定義指紋，`check` 列 PRD:786 沒有此句；任務書 D4 要求 `check` 輸出判準指紋，算法沿用 PRD:800 的「協定目錄各檔 CRLF 轉 LF 後雜湊加 `metrics_rev`」，`check_rules_rev` 為本檔類推，請掌舵者知悉）；AC-031-1 ← §9.1 C5 列（PRD:658）、§9.3 `check` 列的 params 對表句（PRD:786）、NFR-SI-02-1（PRD:491～494）、PRD:857；AC-031-2 ← C5 列的「指標定義」（PRD:658）與 §1.3（PRD:62～66、70～79）；AC-032-1 ← §9.1 C6 列（PRD:659）、NFR-SI-07-2（PRD:524）。
 
 **P0 交付物**（D1～D6）
 
@@ -54,7 +54,7 @@
 - **T**（Developer；D3、D4、D5、D6）→ **M**（主控；D1：單一 commit，只動帳本與附註檔）→ **N**（主控；D2：把 M 的完整 sha 寫入 `params.json` 的 `migration_base_sha`，並於帳本追加一筆掌舵者確認的 `decided` 列）。T 之前真帳本還是八欄、`check` 對真帳本必紅（預期）；M 之後、N 之前 `check` 仍紅（未豁免，預期）；N 之後 `check` 對真帳本須為綠（實跑檢核 V2）。
 - 真帳本只由主控寫（PRD C1「他人只讀」）；Developer 棒不得碰真帳本與真附註檔；遷移腳本若有，放 scratchpad、不入庫。
 - 確認列的引言取自掌舵者逐字稿的人工載體（`type` 為 `user` 且 `origin.kind` 為 `human`，或 `queued_command` 附件；PRD Q11），座標 `sid` 加 `line`（jsonl 的 1 起算實體行號）。P0 只記錄、不機械驗引言（引言回查屬 P2，AC-SI-12-4）；QA 在實跑檢核 V5 以逐字稿現查。
-- **帳本更新慣例**（預審 F-04、二審 N-03）：M 之前（遷移基準以前）的原地改寫——例如 OBS-SI-011 的累計次數、時間欄更正——依 AC-SI-01-3 屬遷移豁免涵蓋的歷史，不比對；**M 之後帳本除處置欄 `open`→終值一次（PRD:211、AC-SI-04-3）外，一律追加列**（累計、狀態更新與更正都用追加列，更正列標 `rel=corrects:<ID>`；處置欄 `open`→終值一次是 PRD 明許的唯一原地改寫，與 R20 的放行集合一致），其餘原地改寫即 `ROW-MUTATED`；SOP 擷取者節須載明（R25 (9)，含此例外），實跑檢核 V9 於 N 之後至 SCG-4 前驗收。主控宜在 M 之前把 OBS-SI-011 這類累計欄改成追加或「現查」形態，免得 M 之後的慣性原地改寫使 V2 轉紅。
+- **帳本更新慣例**（預審 F-04、二審 N-03）：M 之前（遷移基準以前）的原地改寫——例如 OBS-SI-011 的累計次數、時間欄更正——依 AC-SI-01-3 屬遷移豁免涵蓋的歷史，不比對；**M 之後帳本除處置欄 `open`→終值一次（PRD:223、AC-SI-04-3）外，一律追加列**（累計、狀態更新與更正都用追加列，更正列標 `rel=corrects:<ID>`；處置欄 `open`→終值一次是 PRD 明許的唯一原地改寫，與 R20 的放行集合一致），其餘原地改寫即 `ROW-MUTATED`；SOP 擷取者節須載明（R25 (9)，含此例外），實跑檢核 V9 於 N 之後至 SCG-4 前驗收。主控宜在 M 之前把 OBS-SI-011 這類累計欄改成追加或「現查」形態，免得 M 之後的慣性原地改寫使 V2 轉紅。
 
 **〈P0 行為規則〉**（R1～R26；各 AT 以 R 編號引用；判定碼見其後的〈判定碼表〉）
 
@@ -65,8 +65,8 @@
 - **R3 文字形態**：stdout（UTF-8、LF）依序為：(1) 首行 `si-check rows=<N> items=21`（N＝R9 解析到的資料列數）；(2) 每個判定項一行 `<PASS|FAIL|NE> <item_id>`，NE 行在項目 ID 之後加一個空白與 `blocking` 或 `nonblocking`，該項的項目層 `detail` 非空時在行尾接 ` # <detail>`（行文法 `^(PASS|FAIL|NE) ([a-z_]+\.[a-z_]+)(?: (blocking|nonblocking))?(?: # (.*))?$`），項序固定（見碼表）；(3) 該項的 finding 逐行縮排兩個空白：`  <subject> <CODE> <detail>`（subject 是列 ID、`L<行號>`、參數名或 `-`；level 為 warn 者 detail 以 `[warn]` 起頭；列層級 finding 的 detail 須含所涉欄的中文欄名，例如 `分類`、`處置`、`證據座標`、`時間`；`ROW-MUTATED` 的 detail 須含 `掌舵者` 字樣，提示要求掌舵者過目）；PASS 項除 warn 外不印 finding；(4) `overall=<PASS|FAIL|NE> rc=<n> fingerprint=sha256:<64 位小寫 hex>`；(5) rc 不為 0 時其後接一行 `obs-draft:` 與一行 OBS 草稿列（R6）。
 - **R4 JSON 形態**：`--json` 時 stdout 只有一個 JSON 物件加換行（`json.dumps(..., ensure_ascii=False)`），鍵序為 `overall`、`rc`、`fingerprint`、`fingerprint_parts`（鍵 `manifest`、`metrics_rev`、`check_rules_rev`）、`rows`、`items`、`obs_draft`；`fingerprint_parts`、`items` 的元素、`findings` 的元素的鍵序亦依下列所列順序。`items` 是 21 個物件，依碼表順序，各含 `id`、`status`、`blocking`、`detail`（項目層的說明字串，多數項為空字串；只有 `history.migration` 與 `history.row_mutated` 另有指定，見 R19、R20）、`findings`；`findings` 的元素含 `subject`、`code`、`level`（`fail`、`warn`、`info` 之一；NE 項的 finding 為 `info`）、`detail`。`blocking` 只有 NE 項可為 true，其餘恆為 false；`obs_draft` 是草稿列字串，rc 為 0 時是 null。文字形態與 JSON 形態的 rc、項狀態、finding 集合必須一致。
 - **R5 狀態語意**：每項狀態恆為 PASS、FAIL、NE 三者之一：有任一 `fail` 等級的 finding ⇒ FAIL；否則命中碼表的任一 NE 碼 ⇒ NE；否則 PASS。NE 分兩類：**nonblocking**（只有 `ref.carrier_families` 的 `CARRIER-NOT-ESTABLISHED`：PRD AC-SI-04-1 規定載體尚未建立的 ID 家族要印「未判」、不得判通過也不得判不合規，而 P0 退出條件 (b) 要求 `check` 綠，所以這類 NE 不影響 rc）與 **blocking**（其餘 NE 碼）。overall：任一 FAIL ⇒ FAIL、rc 1；否則任一 blocking NE ⇒ NE、rc 2；否則 PASS、rc 0（nonblocking NE 照印）。**取不到判準輸入＝NE，不以內建預設值頂替**：某項所需的 `params.json` 鍵缺失或型別不符時，該項為 blocking NE（碼 `SOURCE-UNAVAILABLE`），並由 `params.keys` 另報 FAIL。
-- **R6 OBS 草稿列**（PRD §9.4：任何階段失敗，CLI 非零 rc 並印可貼入的 OBS 草稿列；CLI 不自寫 OBS 帳本）：rc 不為 0 時印恰一行九欄 Markdown 列——ID＝`OBS-SI-` 接（帳本現有合法 ID 數值最大者加一，至少三位、零補齊；帳本沒有列則 001）；時間＝現在的本機時間，格式 `YYYY-MM-DD HH:MM ±HH:MM`（`datetime.now().astimezone()`，不得持久化或輸出無 offset 的時間）；情境＝`si check（自動草稿）`；症狀＝`si check 判 <overall>（rc=<n>）：` 接至多 5 個非 PASS 項的 item_id（依碼表順序、以「、」連接），超過 5 項尾接 `…等 <k> 項`（k 為非 PASS 項總數）；證據座標＝反引號包住 `python tools/selfimproving.py check` 之後接 ` rc=<n>；判準指紋 sha256:<前 12 位 hex>`；分類＝`bug`（PRD NFR-SI-09-3：迴圈任一階段失敗都留一筆分類 `bug` 的 OBS，見 PRD:452、PRD:868、PRD:309；§9.4 的草稿列規則綁在其上，PRD:676）；嚴重度＝`P3`；處置＝`open`；標記＝`面=流程;來源=工具;回報者=si-check`。草稿列本身必須通過 R9～R17 的全部逐列判準，且位元組數不超過 `row_max_bytes`。
-- **R7 判準指紋**（本檔類推：PRD 只在量測腳本列〔PRD:646〕與五問協定先例定義指紋，`check` 列〔PRD:635〕沒有此句；任務書 D4 要求 `check` 輸出判準指紋，見〈AC 編號規則〉）：`manifest`＝先例 `tools/probe/fivequestion_ledger.py` 的 `manifest_sha` 算法逐字沿用於協定目錄：該目錄下（遞迴）每個檔名不以 `.` 開頭的檔，取（相對協定目錄的 POSIX 路徑, sha256 十六進位字串〔內容先把 CRLF 換成 LF〕）、依路徑排序成清單，對 `json.dumps(清單, ensure_ascii=False)` 的 UTF-8 位元組取 sha256 的 64 位小寫 hex；`metrics_rev`＝`params.json` 的同名鍵值（缺失或型別不符＝null）；`check_rules_rev`＝工具內的整數常數（初值 1；`check` 判準語意變動時人工 bump，先例：量測碼不入 manifest）。`fingerprint`＝`sha256:` 接 `json.dumps({"check_rules_rev":…, "manifest":…, "metrics_rev":…}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256 hex。指紋只隨「判準」變（協定目錄任一檔內容、`metrics_rev`、`check_rules_rev`），不隨帳本資料、工作樹其他檔或 git 狀態變。
+- **R6 OBS 草稿列**（PRD §9.4：任何階段失敗，CLI 非零 rc 並印可貼入的 OBS 草稿列；CLI 不自寫 OBS 帳本）：rc 不為 0 時印恰一行九欄 Markdown 列——ID＝`OBS-SI-` 接（帳本現有合法 ID 數值最大者加一，至少三位、零補齊；帳本沒有列則 001）；時間＝現在的本機時間，格式 `YYYY-MM-DD HH:MM ±HH:MM`（`datetime.now().astimezone()`，不得持久化或輸出無 offset 的時間）；情境＝`si check（自動草稿）`；症狀＝`si check 判 <overall>（rc=<n>）：` 接至多 5 個非 PASS 項的 item_id（依碼表順序、以「、」連接），超過 5 項尾接 `…等 <k> 項`（k 為非 PASS 項總數）；證據座標＝反引號包住 `python tools/selfimproving.py check` 之後接 ` rc=<n>；判準指紋 sha256:<前 12 位 hex>`；分類＝`bug`（PRD NFR-SI-09-3：迴圈任一階段失敗都留一筆分類 `bug` 的 OBS，見 PRD:533、PRD:1040、PRD:321；§9.4 的草稿列規則綁在其上，PRD:836）；嚴重度＝`P3`；處置＝`open`；標記＝`面=流程;來源=工具;回報者=si-check`。草稿列本身必須通過 R9～R17 的全部逐列判準，且位元組數不超過 `row_max_bytes`。
+- **R7 判準指紋**（本檔類推：PRD 只在量測腳本列〔PRD:800〕與五問協定先例定義指紋，`check` 列〔PRD:786〕沒有此句；任務書 D4 要求 `check` 輸出判準指紋，見〈AC 編號規則〉）：`manifest`＝先例 `tools/probe/fivequestion_ledger.py` 的 `manifest_sha` 算法逐字沿用於協定目錄：該目錄下（遞迴）每個檔名不以 `.` 開頭的檔，取（相對協定目錄的 POSIX 路徑, sha256 十六進位字串〔內容先把 CRLF 換成 LF〕）、依路徑排序成清單，對 `json.dumps(清單, ensure_ascii=False)` 的 UTF-8 位元組取 sha256 的 64 位小寫 hex；`metrics_rev`＝`params.json` 的同名鍵值（缺失或型別不符＝null）；`check_rules_rev`＝工具內的整數常數（初值 1；`check` 判準語意變動時人工 bump，先例：量測碼不入 manifest）。`fingerprint`＝`sha256:` 接 `json.dumps({"check_rules_rev":…, "manifest":…, "metrics_rev":…}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256 hex。指紋只隨「判準」變（協定目錄任一檔內容、`metrics_rev`、`check_rules_rev`），不隨帳本資料、工作樹其他檔或 git 狀態變。
 - **R8 純度與零副作用**：(a) 只讀：不建立、修改、刪除任何檔案或目錄（含暫存檔、`.lock`），不寫 OBS 帳本；(b) 只用標準庫與 repo 內本地模組（`_stdio_utf8`、`lib.*`），不連網；(c) 唯一的子行程是 `git`，一律經 `subprocess.run`（不直接用 `Popen`、`check_output`、`os.system`），每個呼叫：`shell` 不為真；argv 以 `git`、`-C`、`<--repo 的解析後路徑>` 起頭；帶 `encoding="utf-8"` 與 `errors="replace"`；帶正數的 `timeout`（建議 60 秒）；子行程環境（以 `env` 引數明給）移除 `GIT_DIR`、`GIT_WORK_TREE`、`GIT_INDEX_FILE`、`GIT_COMMON_DIR`、`GIT_PREFIX`、`GIT_OBJECT_DIRECTORY`、`GIT_ALTERNATE_OBJECT_DIRECTORIES` 並設 `GIT_OPTIONAL_LOCKS=0`；列舉路徑的 git 呼叫一律帶 `-c core.quotepath=false`（根層鎖 `TestGitPathEnumerationIsQuotepathSafe`）；git 不可用（找不到執行檔、`--repo` 不是 git 工作樹、逾時）⇒ 需要 git 的項目為 blocking NE（碼 `GIT-UNAVAILABLE`）；(d) 所有文字檔讀寫帶 `encoding="utf-8"`；(e) 不持久化或輸出 naive 時間戳。
 
 *B. 帳本解析與逐列判準*
@@ -94,7 +94,7 @@ PROPOSED   = ^proposed@PROP-SI-\d{3,}$
 
 - **R14 標記欄**：格內以「引號外的 `;`」切成片段；空片段（含結尾 `;`）略過；每個片段須為 `鍵=值`（以第一個 `=` 分鍵與值，各自 strip），值為空、片段無 `=`、同鍵重複、引號值未以對應的結尾引號收尾 ⇒ `MARK-SYNTAX`；值可為引號字串（`"…"`，內含 `"` 寫 `\"`、`\` 寫 `\\`）或不含 `"` 與 `;` 的裸值；引號字串須逐字元掃描解析（遇 `\` 連同下一字元視為一個跳脫對，以第一個未跳脫的 `"` 為結尾，且它必須是該值的最後一個字元；以跳脫反斜線結尾的字串如 `"…\\"` 是合法的，切分片段時引號內的 `;` 不切）。鍵須屬封閉詞彙 `面`、`暴露`、`來源`、`外部衍生`、`回報者`、`根因`、`rel`、`reopens`、`orig`、`span`，否則 `MARK-UNKNOWN-KEY`。值域：`面`∈{守衛, 產品, 文件, 流程}；`暴露`∈{a, b, c, 無}；`外部衍生` 只能是 `是`；違反 ⇒ `MARK-VALUE`。`orig` 的值須為引號字串，或 `@<路徑>#OBS-SI-<數字>`（路徑不含空白與 `#`），否則 `MARK-ORIG-FORMAT`。`根因`、`rel`、`reopens`、`span`、`回報者` 的值只要求非空。**值空的鍵視為缺鍵**（下游判準同缺鍵）。`面` 為每列必備，缺 ⇒ `MARK-FACE-MISSING`。
 - **R15 面、暴露、來源、回報者**：`面` 為 `守衛` 時 `暴露` 必備，缺 ⇒ `GUARD-NO-EXPOSURE`；`面` 為 `守衛` 且嚴重度為 `P1` 或 `P2` 時 `暴露` 須為 a、b、c 之一，為 `無` ⇒ `GUARD-P12-NO-EXPOSURE`（PRD AC-SI-01-2：這類列應降為 P4 並入理論洞清單；「附座標」由該列證據座標通過 R16 承擔）；`面` 不是守衛者不受暴露規則約束。`來源` 必備且須為 `人`、`代理`、`工具`、`逐字稿`、`帳本` 之一，缺 ⇒ `SOURCE-MISSING`、值不在詞彙 ⇒ `SOURCE-VALUE`；`回報者` 必備，缺 ⇒ `REPORTER-MISSING`。
-- **R16 證據座標可定位形態**（規範性；只驗「形態」，不驗該檔或該行是否真的存在，見 §4 刻意不做）：證據座標格須命中下列九種之一，否則 `COORD-NONE`。PRD:208 只列四形態（檔案:行、指令＋rc、sid＋seq、帳本列 ID）；本檔放寬為九形態的理由、真帳本實測與替代見 §7 Q6；其中 `sid` 形態比照 PRD 要求帶 `line=N` 或 `seq=N`（範圍以下列正規式為準：UUID 之後 40 字元內、不跨 `；`、`;`、`、`；`line`、`seq` 之後可接 `=`、`:` 或空白，與 R19 (d) 的 `line` 語法一致；裸 sid 不算）；`sha` 形態的前後邊界都排除連字號，故 UUID 的任一段（含第一段）不會被當成 sha 放行（二審 N-01）；短 sid 前綴與縮寫 sha 同形，`check` 無從區分，照 `sha` 形態過關。
+- **R16 證據座標可定位形態**（規範性；只驗「形態」，不驗該檔或該行是否真的存在，見 §4 刻意不做）：證據座標格須命中下列九種之一，否則 `COORD-NONE`。PRD:220 只列四形態（檔案:行、指令＋rc、sid＋seq、帳本列 ID）；本檔放寬為九形態的理由、真帳本實測與替代見 §7 Q6；其中 `sid` 形態比照 PRD 要求帶 `line=N` 或 `seq=N`（範圍以下列正規式為準：UUID 之後 40 字元內、不跨 `；`、`;`、`、`；`line`、`seq` 之後可接 `=`、`:` 或空白，與 R19 (d) 的 `line` 語法一致；裸 sid 不算）；`sha` 形態的前後邊界都排除連字號，故 UUID 的任一段（含第一段）不會被當成 sha 放行（二審 N-01）；短 sid 前綴與縮寫 sha 同形，`check` 無從區分，照 `sha` 形態過關。
 
 ```text
 path   = (?<![\w.])(?:[A-Za-z0-9_.%\-]+[/\\])+[A-Za-z0-9_.%\-<>*{}\[\]]+\.[A-Za-z0-9]{1,8}(?::\d+(?:[–-]\d+)?)?
@@ -121,41 +121,41 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 *E. 協定參數、體積與反空轉*
 
-- **R21 `params.json` 對表**：頂層須為 JSON 物件，必備鍵＝下表 23 鍵（與 PRD 的 `UPPER_SNAKE` 參數一對一，另含 PRD 在 C5 列點名但未取名的三項〔`min_obs_rows`、`ledger_warn_bytes`、`ledger_fail_bytes`〕與 `metrics_rev`、`migration_base_sha`、兩個 glob 清單）。缺鍵 ⇒ `PARAM-MISSING`、型別不符 ⇒ `PARAM-TYPE`（布林不算整數與數值）、超出範圍 ⇒ `PARAM-RANGE`（subject 皆為鍵名）。**多出的鍵不判紅**：PRD:635 只要求「PRD 引用的參數名須存在」，多鍵檢查沒有 PRD 依據、且會擋住 P1、P2 加鍵（須先改本檔），故不設未登記鍵的判定碼；D3 交付當下恰為這 23 鍵，由實跑檢核 V6 核對。「初值」欄是 D3 提交當下的值（`check` 與 AT 不斷言值，避免掌舵者調參後測試過期；V6 在提交當下一次性核對）；P1、P2 才用到的參數（沙盒逾時、寫入鎖逾時、事件數下限等）由各階段的 TCS 擴充登記表。
+- **R21 `params.json` 對表**：頂層須為 JSON 物件，必備鍵＝下表 23 鍵（與 PRD 的 `UPPER_SNAKE` 參數一對一，另含 PRD 在 C5 列點名但未取名的三項〔`min_obs_rows`、`ledger_warn_bytes`、`ledger_fail_bytes`〕與 `metrics_rev`、`migration_base_sha`、兩個 glob 清單）。缺鍵 ⇒ `PARAM-MISSING`、型別不符 ⇒ `PARAM-TYPE`（布林不算整數與數值）、超出範圍 ⇒ `PARAM-RANGE`（subject 皆為鍵名）。**多出的鍵不判紅**：PRD:786 只要求「PRD 引用的參數名須存在」，多鍵檢查沒有 PRD 依據、且會擋住 P1、P2 加鍵（須先改本檔），故不設未登記鍵的判定碼；D3 交付當下恰為這 23 鍵，由實跑檢核 V6 核對。「初值」欄是 D3 提交當下的值（`check` 與 AT 不斷言值，避免掌舵者調參後測試過期；V6 在提交當下一次性核對）；P1、P2 才用到的參數（沙盒逾時、寫入鎖逾時、事件數下限等）由各階段的 TCS 擴充登記表。
 
 | 鍵 | 型別 | 範圍 | 初值 | PRD 座標與備註 |
 |----|------|------|------|----------------|
-| `row_max_bytes` | 整數 | ≥ 1 | 700 | PRD:212、554 |
-| `w_n` | 整數 | ≥ 1 | 20 | PRD:61 |
-| `w_min` | 整數 | ≥ 1 | 5 | PRD:61、356 |
-| `w_evt` | 整數 | ≥ 1 | 2 | PRD:38、61、566 |
-| `w_opp` | 整數 | ≥ 1 | 5 | PRD:361；R22 耦合 |
-| `max_proposals_per_run` | 整數 | ≥ 1 | 3 | PRD:290、403 |
-| `max_revisions` | 整數 | ≥ 1 | 2 | PRD:234、403 |
-| `churn_max` | 整數 | ≥ 1 | 2 | PRD:375、408 |
-| `min_heldout` | 整數 | ≥ 1 | 5 | PRD:345 |
-| `max_touch_ratio` | 數值 | 大於 0 且 ≤ 1 | 0.2 | PRD:286 |
-| `max_new_entries` | 整數 | ≥ 1 | 3 | PRD:286 |
-| `stop_after_bad` | 整數 | ≥ 1 | 2 | PRD:365、408 |
-| `cap_frac` | 數值 | 大於 0 且 ≤ 1 | 0.9 | PRD:379 |
-| `max_archive_entries_per_card` | 整數 | ≥ 1 | 50 | PRD:286、566、671 |
-| `card_line_max` | 整數 | ≥ 1 | 100 | PRD:314 |
-| `event_max_bytes` | 整數 | ≥ 1 | 2000 | PRD:447、566 |
-| `metrics_rev` | 整數 | ≥ 1 | 1 | PRD:566、646；PRD 未給值，SA 決定 1 |
-| `min_obs_rows` | 整數 | ≥ 1 | 10 | 反空轉下限，PRD:566、601；名稱與初值由本檔定（開放問題） |
-| `ledger_warn_bytes` | 整數 | ≥ 1 | 245760 | 體積警戒線 warn，PRD:447、566；名稱由本檔定；先例 `tools/check_defect_log_crossref.py` 的 240 KiB |
-| `ledger_fail_bytes` | 整數 | ≥ 1 | 262144 | 體積警戒線 fail（256 KiB，PRD:447）；名稱由本檔定 |
-| `migration_base_sha` | 字串或 null | 字串時須為 40 位小寫 hex（由 R19 判，非本項） | null（D2 前） | PRD:245、566 |
-| `spec_body_globs` | 字串陣列 | 非空 | `**/docs/01_requirements/**`、`**/docs/02_architecture/**`、`**/docs/03_testing/**` | PRD:697 |
-| `non_evolvable_globs` | 字串陣列 | 非空（重複項由 R22 判） | 由 R22 的規則自 PRD 與根 `CLAUDE.md` 現算 | NFR-SI-02-1（PRD:413–415） |
+| `row_max_bytes` | 整數 | ≥ 1 | 700 | PRD:224、646 |
+| `w_n` | 整數 | ≥ 1 | 20 | PRD:62 |
+| `w_min` | 整數 | ≥ 1 | 5 | PRD:62、368 |
+| `w_evt` | 整數 | ≥ 1 | 2 | PRD:38、62、658 |
+| `w_opp` | 整數 | ≥ 1 | 5 | PRD:373；R22 耦合 |
+| `max_proposals_per_run` | 整數 | ≥ 1 | 3 | PRD:302、481 |
+| `max_revisions` | 整數 | ≥ 1 | 2 | PRD:246、481 |
+| `churn_max` | 整數 | ≥ 1 | 2 | PRD:387、486 |
+| `min_heldout` | 整數 | ≥ 1 | 5 | PRD:357 |
+| `max_touch_ratio` | 數值 | 大於 0 且 ≤ 1 | 0.2 | PRD:298 |
+| `max_new_entries` | 整數 | ≥ 1 | 3 | PRD:298 |
+| `stop_after_bad` | 整數 | ≥ 1 | 2 | PRD:377、486 |
+| `cap_frac` | 數值 | 大於 0 且 ≤ 1 | 0.9 | PRD:391 |
+| `max_archive_entries_per_card` | 整數 | ≥ 1 | 50 | PRD:298、658、831 |
+| `card_line_max` | 整數 | ≥ 1 | 100 | PRD:326 |
+| `event_max_bytes` | 整數 | ≥ 1 | 2000 | PRD:528、658 |
+| `metrics_rev` | 整數 | ≥ 1 | 1 | PRD:658、800；PRD 未給值，SA 決定 1 |
+| `min_obs_rows` | 整數 | ≥ 1 | 10 | 反空轉下限，PRD:658、733；名稱與初值由本檔定（開放問題） |
+| `ledger_warn_bytes` | 整數 | ≥ 1 | 245760 | 體積警戒線 warn，PRD:528、658；名稱由本檔定；先例 `tools/check_defect_log_crossref.py` 的 240 KiB |
+| `ledger_fail_bytes` | 整數 | ≥ 1 | 262144 | 體積警戒線 fail（256 KiB，PRD:528）；名稱由本檔定 |
+| `migration_base_sha` | 字串或 null | 字串時須為 40 位小寫 hex（由 R19 判，非本項） | null（D2 前） | PRD:257、658 |
+| `spec_body_globs` | 字串陣列 | 非空 | `**/docs/01_requirements/**`、`**/docs/02_architecture/**`、`**/docs/03_testing/**` | PRD:857 |
+| `non_evolvable_globs` | 字串陣列 | 非空（重複項由 R22 判） | 由 R22 的規則自 PRD 與根 `CLAUDE.md` 現算 | NFR-SI-02-1（PRD:491–494） |
 
 - **R22 耦合與 glob 一致性**：(a) `w_opp` 與 `w_min` 皆為有效整數時，`w_opp` 小於 `w_min` ⇒ `COUPLING-W-OPP-LT-W-MIN`（subject 為 `w_opp`；相等或大於放行；PRD §1.3〈M1 判定細則〉(f)）；`ledger_warn_bytes` 不小於 `ledger_fail_bytes` ⇒ `COUPLING-WARN-GE-FAIL`（subject 為 `ledger_warn_bytes`）；任一參與的鍵無效 ⇒ 該耦合項 blocking NE `SOURCE-UNAVAILABLE`。(b) **`non_evolvable_globs` 與 PRD 一致**（PRD 的散文是唯一真相源，不得在檢查器內複寫第二份清單）：必備集合＝兩個來源的聯集。來源一：PRD（`docs/01_requirements/SelfImproving_PRD.md`）中**第一個**含字面 `**實體 glob**` 的行，取該行內所有反引號片段，且片段開頭反引號的緊鄰前文須以 `、` 或 `；` 結尾，或以標籤 `(i) `、`(ii) `、`(iii) `、`(iv) `、`(v) `（小寫羅馬數字加括號加一個空白）結尾；散文片段（如前接「根 」的 `CLAUDE.md`、前接「所列 」的 `tools/lib/`、前接「且 」的 `maturity: active`、前接「（」的指令）因緊鄰前文不符而不納入。來源二：根 `CLAUDE.md` 中**第一個**含字面 `守衛面＝` 的行，取該行內符合 `^(?P<dir>[^{}\s]+/)\{(?P<names>[^{}\s]+)\}(?P<ext>\.[A-Za-z0-9]+)$` 的反引號片段，以逗號展開成 `<dir><name><ext>`（大括號展開）。`params.json` 的 `non_evolvable_globs` 與必備集合比對：集合不等（缺少、多出）或清單內有重複項 ⇒ `GLOBS-SET-MISMATCH`（subject 為 `non_evolvable_globs`，detail 列缺少與多出的項；順序不拘）；PRD 或根 `CLAUDE.md` 讀不到、或找不到其標記行 ⇒ blocking NE `SOURCE-UNAVAILABLE`。（SA 預演現查：真 PRD 取得 18 項、真 `CLAUDE.md` 展開 7 項，合計 25 項；Developer 以規則現算為準，不得抄此數字。）
-- **R23 反空轉與體積**：`ledger.vacuity`：R9 解析到的資料列數小於 `min_obs_rows`（含零列）⇒ blocking NE `LEDGER-BELOW-FLOOR`（subject 為 `-`；等於下限算通過；PRD:601「低於下限＝NOT-EVALUABLE」）。`ledger.volume`：`--ledger` 檔案的位元組數大於等於 `ledger_fail_bytes` ⇒ `VOLUME-FAIL`（fail）；否則大於等於 `ledger_warn_bytes` ⇒ `VOLUME-WARN`（warn 等級，狀態仍 PASS）。兩項所需的參數無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
+- **R23 反空轉與體積**：`ledger.vacuity`：R9 解析到的資料列數小於 `min_obs_rows`（含零列）⇒ blocking NE `LEDGER-BELOW-FLOOR`（subject 為 `-`；等於下限算通過；PRD:733「低於下限＝NOT-EVALUABLE」）。`ledger.volume`：`--ledger` 檔案的位元組數大於等於 `ledger_fail_bytes` ⇒ `VOLUME-FAIL`（fail）；否則大於等於 `ledger_warn_bytes` ⇒ `VOLUME-WARN`（warn 等級，狀態仍 PASS）。兩項所需的參數無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
 
 *F. 協定目錄、SOP 與範圍守衛*
 
 - **R24 協定目錄**：`params.json` 為 UTF-8（無 BOM）、換行 LF、結尾有換行、頂層鍵依位元組序遞增（先例 `docs/06_quality/FiveQuestion_Audit_Protocol/params.json` 的扁平排序形態）。`metrics.md`：(a) PRD §1.3 表格中五個指標列（以 `^\| \*\*(?:結果指標|資訊欄)\*\*[^|]* \| \*\*M([1-5]) ` 辨識，M1～M5 各恰一列；SA 預演現查：真 PRD 取得 5 列，判定細則區段有 9 個非空行）逐字出現在 `metrics.md`（CRLF 換成 LF 後以整行比對），且順序為 M1 至 M5；(b) 該表之後自標題行 `**M1 判定細則**` 起、至下一個以 `#### ` 起頭的標題行之前，所有非空行也逐字出現在 `metrics.md`。PRD 凍結，此兩段即指標定義的來源；PRD 經 T1 修訂時 `metrics.md` 須同步，不同步即由 AC-031-2 的 AT 轉紅。
-- **R25 SOP 骨架**（`docs/05_development/SelfImproving_Operations_SOP.md`；測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V8 對照 PRD 檢核）：(1) **角色節**：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節（自其標題至下一個 `## ` 之前）須含 `HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`；其餘四個角色節須存在，P0 可只有標題與一行「P1 定稿」。(2) **啟動條件節**（`## ` 級標題含「啟動條件」，節內以下一個 `## ` 為界）：含 `(a)` 至 `(e)` 五個標籤；標籤 `(a)` 之後到標籤 `(b)` 之前的文字含 `掌舵者指令`，`(b)` 段含 `第二次`，`(c)` 段含 `P≤2`，`(d)` 段含 `再開症狀`，`(e)` 之後的同一行含 `容量事件`；含一行同時有 `日曆`、`版本號`、`覆蓋度`、`每 N 輪`（否定句）；含 `si status`，且同節含 `視窗開場` 與 `收尾`。(3) **無事件條文**：含一行同時有 `無事件` 與 `通過`。(4) **再開條文**：含一行同時有 `產出數量` 與 `T1`。(5) **真缺陷升 DEF**：含一行同時有 `DEF-<id>` 與 `真缺陷`。(6) **外部衍生**：擷取者節含一行同時有 `外部衍生=是` 與 `不得單獨`。(7) **loop-self**：含一行同時有 `loop-self`、`轉交`、`T1`。(8) **流程摩擦入口**：擷取者節含一行同時有 `流程摩擦` 與 `OBS-SI-004`。(9) **M 之後只追加（處置欄 `open`→終值一次除外）**：擷取者節含一行同時有 `追加`、`rel=corrects:`、`ROW-MUTATED`、`open`、`終值`（M 之後帳本的更新——累計次數、狀態、更正——除處置欄 `open`→終值一次〔PRD:211、AC-SI-04-3〕外一律追加列，其餘原地改寫即 `ROW-MUTATED`；M 之前的原地改寫依 AC-SI-01-3 豁免，不在此限）。
+- **R25 SOP 骨架**（`docs/05_development/SelfImproving_Operations_SOP.md`；測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V8 對照 PRD 檢核）：(1) **角色節**：有 `## ` 級標題分別含「擷取者」「歸因者」「提案者」「審查者」「凍結者」；擷取者節（自其標題至下一個 `## ` 之前）須含 `HEAD=<sha>`、`文字交卷`、`流程摩擦`、`python tools/session_resume_planner.py --pace`、`Omitted`、`OBS-SI-033`、`OBS-SI-038`、`python tools/selfimproving.py check`、`來源`、`回報者`；其餘四個角色節須存在，P0 可只有標題與一行「P1 定稿」。(2) **啟動條件節**（`## ` 級標題含「啟動條件」，節內以下一個 `## ` 為界）：含 `(a)` 至 `(e)` 五個標籤；標籤 `(a)` 之後到標籤 `(b)` 之前的文字含 `掌舵者指令`，`(b)` 段含 `第二次`，`(c)` 段含 `P≤2`，`(d)` 段含 `再開症狀`，`(e)` 之後的同一行含 `容量事件`；含一行同時有 `日曆`、`版本號`、`覆蓋度`、`每 N 輪`（否定句）；含 `si status`，且同節含 `視窗開場` 與 `收尾`。(3) **無事件條文**：含一行同時有 `無事件` 與 `通過`。(4) **再開條文**：含一行同時有 `產出數量` 與 `T1`。(5) **真缺陷升 DEF**：含一行同時有 `DEF-<id>` 與 `真缺陷`。(6) **外部衍生**：擷取者節含一行同時有 `外部衍生=是` 與 `不得單獨`。(7) **loop-self**：含一行同時有 `loop-self`、`轉交`、`T1`。(8) **流程摩擦入口**：擷取者節含一行同時有 `流程摩擦` 與 `OBS-SI-004`。(9) **M 之後只追加（處置欄 `open`→終值一次除外）**：擷取者節含一行同時有 `追加`、`rel=corrects:`、`ROW-MUTATED`、`open`、`終值`（M 之後帳本的更新——累計次數、狀態、更正——除處置欄 `open`→終值一次〔PRD:223、AC-SI-04-3〕外一律追加列，其餘原地改寫即 `ROW-MUTATED`；M 之前的原地改寫依 AC-SI-01-3 豁免，不在此限）。
 - **R26 範圍守衛（P0 不新增常駐行程、排程或 hook）**：`tools/selfimproving.py` 與 P0 驗收時存在的每個 `tools/lib/selfimproving/*.py`（含 `__init__.py`），原始碼不得出現下列字樣（正規式，區分大小寫）：`schtasks`、`launchctl`、`crontab`、`ScheduleWakeup`、`CronCreate`、`Register-ScheduledTask`、`apscheduler`、`threading\.Timer`、`sched\.scheduler`、`time\.sleep`、`while\s+True`、`daemon\s*=\s*True`、`os\.fork`、`signal\.alarm`；根 `.claude/settings.json` 全文不得含 `selfimproving`（不分大小寫）；`main` 對 `status`、`prop-new` 等非 `check` 的動詞一律 rc 3。（P1 起新增動詞與事件帳本寫入，範圍守衛與 R8(a) 的靜態掃描由 P1 的 TCS 重定。）
 
 **〈判定碼表〉**（項序即輸出序；「狀態」欄＝該碼命中時該項的狀態；NE 的 nonblocking 只有一個）
@@ -1429,20 +1429,20 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 | Q3 | D1 對既有各列補 `來源`、`回報者`、`面`、`暴露` 的回填規則，與三個座標不合格列的補件 | 回報者＝情境欄的角色詞；來源＝`代理`（掌舵者回報者用 `人`、工具輸出用 `工具`、逐字稿引述用 `逐字稿`、帳本衍生用 `帳本`）；面＝依症狀所涉檔案（`.claude/`、hook、根 `CLAUDE.md` 守衛面清單內的 `tools/lib` 與 `tools/session_resume_planner.py` 為 `守衛`；產品程式為 `產品`；文件為 `文件`；其餘為 `流程`）；守衛面列的暴露＝其座標已有 sid 加行、檔加行或指令加 rc 之一者填 a、b、c 之一，否則填 `無`；座標不合 R16 的列（HEAD 7b9c6ba6 的 47 列現查為三列：OBS-SI-019、029、034；`sid` 形態改要求帶 `line` 或 `seq` 後仍是這三列，沒有列只靠裸 sid）只准**追加**座標（不改原字，且列位元組仍不得超線）；處置對映原則：裁決、接受、已執行 ⇒ `decided：…`；延後 ⇒ `deferred；再開症狀：…`；`fixed（…）` ⇒ `fixed@<修復 commit 的 sha>`（查不到 sha 則改 `decided` 並保留 `orig`，不得編造 sha）；待議或候選提案 ⇒ `open`；原文一律逐字留 `orig`；超線估算（SA 以 HEAD 7b9c6ba6 的 47 列現查重估：新處置約 40 位元組取代舊處置、標記約 60 位元組、`orig` 內嵌舊處置；草稿版曾寫「8 列超線」，那次估算把舊處置重複計入一次，已更正，與預審另估一致）：只有 OBS-SI-043（649 位元組，估計加欄後約 757）會超過 700，須把原文搬附註檔，其餘列可內嵌；以 M 提交前現查為準 | 替代：由掌舵者逐列裁決。再開症狀：QA 在 V3 抽查發現回填與症狀語意不符 |
 | Q4 | PRD C5 列點名但未取名、未給值的參數 | `min_obs_rows`＝10、`ledger_warn_bytes`＝245760、`ledger_fail_bytes`＝262144（先例 `tools/check_defect_log_crossref.py` 的 240 與 256 KiB）、`metrics_rev`＝1；P1 才用的事件數下限等由 P1 的 TCS 擴充登記表 | 替代：反空轉下限拆成 OBS 與事件兩個鍵。再開症狀：下限擋住了合法的小帳本，或掌舵者要求他名 |
 | Q5 | `non_evolvable_globs` 與 NFR-SI-02-1 一致性的機器判準 | R22 的位置式抽取（片段前接頓號、分號或標籤）加根 `CLAUDE.md` 守衛面行的大括號展開；SA 預演為 18 加 7 共 25 項（現算為準） | 替代：PRD 經 T1 加機器可讀區塊；或只比對該行的雜湊（無法指出差異項）。再開症狀：PRD 或根 `CLAUDE.md` 改版使抽取規則假紅或漏判 |
-| Q6 | R16 的證據座標「可定位」形態比 PRD:208 寬（預審 F-05；PRD:208 只列檔案:行、指令加 rc、sid 加 seq、帳本列 ID 四形態） | 九形態（R16）。理由：SA 以真帳本實測（HEAD 7b9c6ba6 的 47 列；二審後以 407c945b 的 49 列與 HEAD 96bbd73a 的 50 列重算，結果相同）——九形態下只有 OBS-SI-019、029、034 三列不合；若收斂到四形態（以 `路徑:行號`、反引號指令且同格有 `rc`、sid 加 `line` 或 `seq`、帳本列 ID 粗判），SA 粗判有 24 列不合，D1 又只准追加座標，等於逼 D1 對近半數列補件，風險高於收益。已收斂兩處：(1) `sid` 形態須同格帶 `line=N` 或 `seq=N`（真帳本零列只靠裸 sid，無代價）；(2) `sha` 形態前後邊界排除連字號，UUID 片段不再被當成 sha（二審 N-01；舊新規則對上述 49 列與 50 列的帳本重算，`COORD-NONE` 仍只有 019、029、034，沒有列因此轉紅）。`check` 只驗形態、不驗存在（§4 刻意不做），與一審「座標須可重查」的張力由 V3 (9) 的座標重查抽查承擔（二審 N-02）：只靠單一放寬形態過關的列——`docref` 7、無行號 `file` 3、無行號 `path` 2，共 12 列——在 HEAD 96bbd73a 的 50 列帳本與 407c945b 的 49 列帳本都是同樣這 12 列（SA 以 R16 規則重算，與 QA 二審的 12 列相符；列數隨帳本追加而變，以 V3 現查為準） | 替代：收斂到 PRD 四形態並由 D1 補件。再開症狀：掌舵者或 QA 回報座標點不到，或某筆座標只靠目錄、章節別名過關而無法重查 |
+| Q6 | R16 的證據座標「可定位」形態比 PRD:220 寬（預審 F-05；PRD:220 只列檔案:行、指令加 rc、sid 加 seq、帳本列 ID 四形態） | 九形態（R16）。理由：SA 以真帳本實測（HEAD 7b9c6ba6 的 47 列；二審後以 407c945b 的 49 列與 HEAD 96bbd73a 的 50 列重算，結果相同）——九形態下只有 OBS-SI-019、029、034 三列不合；若收斂到四形態（以 `路徑:行號`、反引號指令且同格有 `rc`、sid 加 `line` 或 `seq`、帳本列 ID 粗判），SA 粗判有 24 列不合，D1 又只准追加座標，等於逼 D1 對近半數列補件，風險高於收益。已收斂兩處：(1) `sid` 形態須同格帶 `line=N` 或 `seq=N`（真帳本零列只靠裸 sid，無代價）；(2) `sha` 形態前後邊界排除連字號，UUID 片段不再被當成 sha（二審 N-01；舊新規則對上述 49 列與 50 列的帳本重算，`COORD-NONE` 仍只有 019、029、034，沒有列因此轉紅）。`check` 只驗形態、不驗存在（§4 刻意不做），與一審「座標須可重查」的張力由 V3 (9) 的座標重查抽查承擔（二審 N-02）：只靠單一放寬形態過關的列——`docref` 7、無行號 `file` 3、無行號 `path` 2，共 12 列——在 HEAD 96bbd73a 的 50 列帳本與 407c945b 的 49 列帳本都是同樣這 12 列（SA 以 R16 規則重算，與 QA 二審的 12 列相符；列數隨帳本追加而變，以 V3 現查為準） | 替代：收斂到 PRD 四形態並由 D1 補件。再開症狀：掌舵者或 QA 回報座標點不到，或某筆座標只靠目錄、章節別名過關而無法重查 |
 
 ### 7.2 預審登記（TCS-PREREVIEW 的 F-11～F-15 為一審 P4，只登記、不改規格；N-01～N-04 為二審 P3，本棒已修）
 
 | 編號 | 預審所述 | 本檔處置 | 再開症狀 |
 |------|----------|----------|----------|
 | F-11 | SOP 骨架以大量字面中文片段與真 ID 做存在判準，措辭一改即紅 | 登記；已以「刪去副本須判不合格」自證判準非恆真 | SOP 因措辭微調使 AT 反覆轉紅 |
-| F-12 | `deferred`、`decided` 只驗附加文字非空，PRD:218 要求一句可觀測再開症狀、裁決者與一句裁決；新列的復發候選提示（PRD:635、AC-SI-06-2，屬 P1）未列入 §4 | 登記；語意判定屬人審（與 AC-004-2 同型），復發候選提示屬 P1 | 處置文字空洞（只有一個詞）而 `check` 綠，被掌舵者發現 |
+| F-12 | `deferred`、`decided` 只驗附加文字非空，PRD:230 要求一句可觀測再開症狀、裁決者與一句裁決；新列的復發候選提示（PRD:786、AC-SI-06-2，屬 P1）未列入 §4 | 登記；語意判定屬人審（與 AC-004-2 同型），復發候選提示屬 P1 | 處置文字空洞（只有一個詞）而 `check` 綠，被掌舵者發現 |
 | F-13 | 草稿列 ID＝帳本現有最大 ID 加一、不看封存檔，封存若搬走高號列且暫無新列可能撞號（現無封存檔） | 登記；P0 無封存工具 | 出現 OBS 封存檔且草稿撞號 |
 | F-14 | hermetic 環境未設 `GIT_CEILING_DIRECTORIES`，tmp 若落在某 repo 之下，非 git 目錄情境會找到祖先 repo | 登記；一般機器與 CI 不成立 | 開發機的 tmp 位於某 repo 之內而 AT 假綠或假紅 |
 | F-15 | §3 與 §1 重複維護兩份 AT 清單；TCS 體量大（已登記 OBS-SI-045） | 登記；編譯相容檢查以 §1 為準，§3 為閱讀索引 | AT 增減時兩處不同步 |
 | N-01 | R16 的 `sha` 形態把 UUID 第一段當 sha 吃掉，裸 sid 靠 `sha` 形態過關；AT-001-1-E-2 的列 008 只在 UUID 全數字時才判 `COORD-NONE`；R16 的 `sid` 形態與 R19 (d) 的 `line=` 語法不一 | 已修（本棒）：`sha` 前後邊界都排除連字號；`sid` 形態改為 `line`、`seq` 之後可接 `=`、`:`（捨去 R19 (d) 沒有的「行」關鍵字）；AT-001-1-E-2 的列 008 改用第一段含 a～f 的真實形 UUID，另加列 009（`line=12`）、010（`seq: 3`）正向對照；SA 以舊新規則對真帳本重算，`COORD-NONE` 仍只有 019、029、034 | 某種真實形 sid 寫法被誤放行或誤擋；或真帳本出現「舊規則過、新規則不過」的列 |
 | N-02 | Q6 把「座標可重查」交給 V3，但 V3 八項沒有抽座標；真帳本有 12 列只靠單一放寬形態過關 | 已修（本棒）：V3 新增 (9)「座標可重查抽查」（≥5 列，優先取只靠 `docref`、無行號 `file`、無行號 `path` 過關者）；Q6 註明該類列數（`docref` 7、無行號 `file` 3、無行號 `path` 2，共 12） | V3 (9) 抽到點不開的座標；或該類列數在 M 之後明顯增加 |
-| N-03 | 慣例、R25 (9)、V9 寫「M 之後一律追加、既有列零原地改寫」，比 R20、AT-004-3-1 的 K1、PRD:211、AC-SI-04-3 窄（後者明許處置欄 `open`→終值一次） | 已修（本棒）：三處改為「除處置欄 `open`→終值一次外，一律追加列」；R25 (9) 的必含片段增 `open`、`終值`，AT-004-3-1 的自證同步；V9 註明 `history.row_mutated` 的放行集合與此句等價 | SOP 條文被讀成連 `open`→終值也禁；或 V9 的字面與機械憑證再度不等價 |
+| N-03 | 慣例、R25 (9)、V9 寫「M 之後一律追加、既有列零原地改寫」，比 R20、AT-004-3-1 的 K1、PRD:223、AC-SI-04-3 窄（後者明許處置欄 `open`→終值一次） | 已修（本棒）：三處改為「除處置欄 `open`→終值一次外，一律追加列」；R25 (9) 的必含片段增 `open`、`終值`，AT-004-3-1 的自證同步；V9 註明 `history.row_mutated` 的放行集合與此句等價 | SOP 條文被讀成連 `open`→終值也禁；或 V9 的字面與機械憑證再度不等價 |
 | N-04 | V2 括註只提本檔與測試原始碼，而 R18 (a) 掃整個 repo（QA 一審報告內的字面反例 ID 曾使 `ref.obs` 轉紅） | 已修（本棒）：V2 括註改為整個 repo 的非忽略檔（含 `docs/06_quality` 的審查報告），字面反例 ID 一律以文字描述或加零寬標記；N 之前先跑一次 `check`、把 `OBS-REF-DANGLING` 清零 | N 之後 V2 因某份文件內字面不存在的 OBS 編號而轉紅 |
 
 ---
@@ -1488,3 +1488,97 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 - **事由**：SCG-4 三審 F-18 指出搬遷後本檔仍殘留舊路徑字面；掌舵者同日指令「任何修復 BUG 或架構修改都要以不留後遺症的方式修復」（根 `CLAUDE.md`〈兩專案共通的工程紀律〉第 5 條），故不等下次 TCS 修訂、即時訂正。
 - **改了什麼**（只改文字，AT id、AT 數、R1～R26 語意、判定碼一字未動）：INVEST 自檢「可估計」句的「約 3 個 `si_*.py` 模組」改為套件現況（保留立案時估值字樣）；SCG-2 Container 列的落點「`lib/si_*.py`」改為「CLI `selfimproving.py` 與套件 `lib/selfimproving/`」；〈搬遷勘誤〉所寫「R8 (a) 本地模組規則」訂正為 R8 (b)（R8 (a) 是只讀，(b) 才是標準庫與本地模組規則，實際改的是 AT-030-2-1 的 AST 子句）。§1 FRD-lite「Before」段刻意保留搬遷前敘述（勘誤一已載明）。
 - **凍結紀錄**：本檔的 Stage-2 凍結 digest 自勘誤一起即與現檔不符（FSM `SPEC_AUDIT` 後無重記 digest 的動詞，OBS-SI-108／SCG-4 三審 F-17）；本次訂正後 digest 再變，待框架補「重記凍結 digest」動詞後由主控重記，不以手改狀態檔代替。
+
+
+## 搬遷勘誤三（PRD v0.9.1 修訂後的行號重對；文字訂正、非缺陷；AT id／R／判定碼一字未動）
+
+- **事由**：PRD 於 v0.8（commit c2aee850，T1 修訂需求面）在 §5.2 等處插入約 165 行，v0.9（460d3135）與 v0.9.1（66ad0edd、2b994518）再增，本檔內以 `PRD:NNN` 形態寫的 PRD 行號座標全數偏移（原座標寫於 PRD 重凍前後：重凍版 `sha256:fbca6bc9…`＝commit e83ebb14 與 7b9c6ba6 版，兩版對下表 39 個行號指向同一列，個別列文字於兩版間有小幅差異、不影響指向）。掌舵者指令「修法不留後遺症」：一次改完、不只改一半、不留「之後再看」。主控 PRD §9.7 #47 裁決：P0 TCS 勘誤三由 P1 TCS 棒一併記。
+- **改了什麼**（只改文字，AT id、AT 數〔42〕、R1～R26 語意、21 項判定碼、各 FRD-lite 表一字未動）：本檔含 `PRD:` 前綴行號座標的行共 34 行（「34」是行數、不是座標數）、56 組座標，一律改為凍結版 PRD（`sha256:e90d8eb388ba739a278c65d8f65cc3d3e8a68213451132e5160fd64aea589c73`，HEAD 2f13bb2b；PRD v0.9.1）的現行行號。**範圍與連串寫法一併處理**：座標寫法是 `PRD:` 接行號；範圍（例：61～65、413～415、413–415）與「第一個數字帶前綴、其後以頓號接的裸行號」（例：61～65、69～78 的後半，或 212、554）皆逐數改；夾在句中的座標（例：「PRD 只在量測腳本列」之後接的那個）亦同。**不屬 PRD 行號、刻意不動（已逐類查證）**：`line 2476／2525／2581／2493／2536／5507`（逐字稿 jsonl 的實體行號，不是 PRD 行）；`§…` 章節座標與 `PRD §…` 節名（以章節號為座標、不受插行影響）；全檔 `file:行號` 形態的座標只有 §5.1 測試資料的三個合成座標（`tools/lib/si_demo.py:12–15`、`CLAUDE.md:12`、`docs/06_quality/notes.md:3`；只驗形態、不指向真檔，勘誤一已載明），無須重對；全檔另無「PRD 第 N 行」「`SelfImproving_PRD.md:N`」之類其他指向 PRD 行號的寫法（Grep 查過）。
+- **核對方法**（逐處，不憑記憶）：舊行取 `git show e83ebb14:docs/01_requirements/SelfImproving_PRD.md` 的第 N 行（另以 `git show 7b9c6ba6:…` 交叉，兩版對下表行號指向同一列）；新行取工作樹 PRD（digest 與凍結版相同）的第 M 行；兩行逐字相等者標 EXACT（34 個行號），v0.8～v0.9.1 改寫過、但列首欄位相同（表格列取前兩格）且人工讀兩邊內容確認仍是同一列者標 FUZZY（5 個：212、554、566、567、635）。範圍座標的末端另以首尾兩行各核一次。改後以腳本重列本檔全部 `PRD:` 組，確認舊號零殘留、新號與下表逐組相符。
+- **「舊→新」逐數對照**（每個被引用的舊行號一列；範圍與連串座標內的每個數字各自查此表）：
+
+| 舊行號 | 新行號 | 核對 | 所指內容 |
+|--------|--------|------|----------|
+| 38 | 38 | EXACT | §1.1「可被反證」段（`W_EVT` 初值） |
+| 61 | 62 | EXACT | §1.3 指標表 M1 列（含 `W_N`、`W_MIN` 先例） |
+| 65 | 66 | EXACT | §1.3 指標表 M5 列 |
+| 69 | 70 | EXACT | §1.3「M1 判定細則」標題行 |
+| 78 | 79 | EXACT | M1 判定細則區段末（其後空行；下一行為 `#### 1.3.1`） |
+| 208 | 220 | EXACT | §5.1.1 欄位表「證據座標」列 |
+| 211 | 223 | EXACT | §5.1.1 欄位表「處置」列 |
+| 212 | 224 | FUZZY | §5.1.1 欄位表「標記」列 |
+| 218 | 230 | EXACT | §5.1.1「處置枚舉」段 |
+| 234 | 246 | EXACT | §5.1.2「狀態機（唯一合法轉移）」段 |
+| 245 | 257 | EXACT | AC-SI-01-3 |
+| 286 | 298 | EXACT | AC-SI-09-2 |
+| 290 | 302 | EXACT | AC-SI-10-1 |
+| 309 | 321 | EXACT | AC-SI-13-3 |
+| 314 | 326 | EXACT | AC-SI-14-3 |
+| 345 | 357 | EXACT | AC-SI-20-2 |
+| 356 | 368 | EXACT | AC-SI-22-1 |
+| 361 | 373 | EXACT | AC-SI-23-1 |
+| 365 | 377 | EXACT | AC-SI-24-1 |
+| 375 | 387 | EXACT | AC-SI-26-1 |
+| 379 | 391 | EXACT | AC-SI-27-1 |
+| 403 | 481 | EXACT | NFR-SI-01 表「提案生成」列 |
+| 408 | 486 | EXACT | NFR-SI-01 表「整體」列 |
+| 413 | 491 | EXACT | NFR-SI-02-1 主條 |
+| 415 | 494 | EXACT | NFR-SI-02-1「實體 glob」行（區塊末行） |
+| 444 | 524 | EXACT | NFR-SI-07-2 |
+| 447 | 528 | EXACT | NFR-SI-08-1 |
+| 450 | 531 | EXACT | NFR-SI-09-1 |
+| 452 | 533 | EXACT | NFR-SI-09-3 |
+| 554 | 646 | FUZZY | §9.0 查證表 Q10（觀察帳本現值 vs 700 bytes） |
+| 566 | 658 | FUZZY | §9.1 元件表 C5 列 |
+| 567 | 659 | FUZZY | §9.1 元件表 C6 列 |
+| 601 | 733 | EXACT | §9.2 事件帳本規約「`si check` 反空轉」條 |
+| 635 | 786 | FUZZY | §9.3 CLI 表 `check` 列 |
+| 646 | 800 | EXACT | §9.3 CLI 表 `selfimproving_measure.py` 列（判準指紋） |
+| 671 | 831 | EXACT | §9.4 預算表「提案（歸檔型）」列 |
+| 676 | 836 | EXACT | §9.4 預算表之後「任何階段失敗…OBS 草稿列」句 |
+| 697 | 857 | EXACT | §9.4「規格本體路徑」條 |
+| 868 | 1040 | EXACT | §12.2「錯誤處理」條（階段失敗留一筆 OBS） |
+
+  註：NFR-SI-02-1 區塊（舊 413～415）的末端 415 對應新 494 而非 493——493 是 v0.9 起新增的「機械消費」HTML 註解行（位於區塊內），新區塊範圍為 491～494；M1 判定細則的末端 78（空行）對應新 79（新 80 起為 `#### 1.3.1`），故舊 69～78 改為 70～79；§1.1 的 38 行號未動（38→38），仍逐處核對過。
+
+- **「舊→新」逐處對照**（本檔行號＝本檔內含該座標的那一行；括號為該行座標組數；本檔行數不變，故行號與勘誤前相同）：
+
+| 本檔行 | 組數 | 舊→新（每組） |
+|--------|------|----------------|
+| L39 | 17 | `635`→`786`；`450`→`531`；`635`→`786`；`676`→`836`；`676`→`836`；`452`→`533`；`646`→`800`；`635`→`786`；`646`→`800`；`566`→`658`；`635`→`786`；`413～415`→`491～494`；`697`→`857`；`566`→`658`；`61～65、69～78`→`62～66、70～79`；`567`→`659`；`444`→`524` |
+| L57 | 1 | `211`→`223` |
+| L68 | 4 | `452`→`533`；`868`→`1040`；`309`→`321`；`676`→`836` |
+| L69 | 2 | `646`→`800`；`635`→`786` |
+| L97 | 1 | `208`→`220` |
+| L124 | 1 | `635`→`786` |
+| L128 | 1 | `212、554`→`224、646` |
+| L129 | 1 | `61`→`62` |
+| L130 | 1 | `61、356`→`62、368` |
+| L131 | 1 | `38、61、566`→`38、62、658` |
+| L132 | 1 | `361`→`373` |
+| L133 | 1 | `290、403`→`302、481` |
+| L134 | 1 | `234、403`→`246、481` |
+| L135 | 1 | `375、408`→`387、486` |
+| L136 | 1 | `345`→`357` |
+| L137 | 1 | `286`→`298` |
+| L138 | 1 | `286`→`298` |
+| L139 | 1 | `365、408`→`377、486` |
+| L140 | 1 | `379`→`391` |
+| L141 | 1 | `286、566、671`→`298、658、831` |
+| L142 | 1 | `314`→`326` |
+| L143 | 1 | `447、566`→`528、658` |
+| L144 | 1 | `566、646`→`658、800` |
+| L145 | 1 | `566、601`→`658、733` |
+| L146 | 1 | `447、566`→`528、658` |
+| L147 | 1 | `447`→`528` |
+| L148 | 1 | `245、566`→`257、658` |
+| L149 | 1 | `697`→`857` |
+| L150 | 1 | `413–415`→`491–494` |
+| L153 | 1 | `601`→`733` |
+| L158 | 1 | `211`→`223` |
+| L1432 | 2 | `208`→`220`；`208`→`220` |
+| L1439 | 2 | `218`→`230`；`635`→`786` |
+| L1445 | 1 | `211`→`223` |
+
+- **一併記**（PRD §9.7 #47 主控裁決）：AT-030-2-1／AT-003-1-1 靜態段的字面「每個 `*.py`」自 P1 起由 PRD §9.4〈能力登記與純度判準〉取代，P0 判準本身不改（P0 R8（唯讀、標準庫與本地模組）與 R26（常駐機制禁字樣）仍是 P0 驗收當時的判準；P1 起套件新增 `evwrite`、`fetch` 等檔，靜態掃描改依「能力登記＋import 閉包」，見 `docs/03_testing/contracts/TCS-SelfImproving-P1-20261020.md` 的 R63（能力登記與純度）、R64（常駐機制禁字樣）與 AT-143-1-1／AT-143-1-E-1／AT-143-1-E-2；`check` 的動態純度〔AT-030-2-1 動態段〕不變）。
+- **凍結紀錄**：本檔的 Stage-2 凍結 digest 自勘誤一起即與現檔不符（見勘誤二）；本次訂正後 digest 再變，仍待框架補「重記凍結 digest」動詞後由主控重記，不以手改狀態檔代替。
