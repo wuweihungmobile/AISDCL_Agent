@@ -11,7 +11,7 @@
   "max_revisions": 2,
   "max_touch_ratio": 0.2,
   "metrics_rev": 1,
-  "migration_base_sha": null,
+  "migration_base_sha": "ab4638c439ad1cc4b8408efcd454c29ef7966d0b",
   "min_heldout": 5,
   "min_obs_rows": 10,
   "non_evolvable_globs": [
