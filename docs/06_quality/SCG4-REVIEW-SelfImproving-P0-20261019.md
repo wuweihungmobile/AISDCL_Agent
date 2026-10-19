@@ -5,6 +5,7 @@
 **基準規格**: `docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md`（Stage-2 凍結 digest `sha256:6c4e28ed30ab3e05ea1acbbf4b8d1a5a5004f5a2aed3fb535abb59cfb420de56`，當回合重算相符）；上游 `docs/01_requirements/SelfImproving_PRD.md`（`sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e`，重算相符）
 **姊妹檔**: `docs/06_quality/RTM-SelfImproving-P0-20261019.md`（FR／AC → AT → 測試方法 → 本次結果 → 證據座標）
 **判定**: **FAIL**（P1＝0、P2＝2、P3＝3、P4＝9）。V1、V2、V4、V5、V6、V7、V9 通過；**V3 的 (9)「座標可重查」未通過（F-02）、V8「SOP 條文語意對照 PRD」未通過（F-01）**。兩個 P2 的補救成本都低（改一段 SOP 文字、追加一列更正列），補救後須由 QA 複驗 V3 (9) 與 V8。
+**現行判定（主控 2026-10-19 補註）**: 上列為一審原文、保留為歷史；修復（Y2 `9fd15796`～Y5 `622c83d2`）後二審複驗 **PASS**（P1／P2／P3＝0，P4 殘餘不阻斷），逐字證據與各 F 結案表見 §8。FSM：`gate --gate PR_REVIEW --result PASS` 於二審後由主控執行。
 
 > 方法聲明：本報告凡寫「通過」者，皆附當回合真跑的指令與輸出；做不到的寫「未驗」（見 §7）。稽核腳本全部放在 scratchpad `C:\Users\wuwei\AppData\Local\Temp\claude\D--CursorProject-AISDCL-Agent\f3ead132-29b1-418c-97d9-35868ab11c70\scratchpad\qa_scg4\`，不入庫；repo 內除本檔與姊妹檔外零改動（見 V7）。Windows 上只用 PowerShell／Read／Grep／Glob／Edit／Write（Bash 被 hook 擋，也不用），Python 一律 `D:\CursorProject\AISDCL_Agent\.venv\Scripts\python.exe`。工具輸出若帶表情符號，下文逐字引用時略去行首符號。
 
@@ -457,3 +458,307 @@ TCS 末段〈SCG-4 通過標準〉逐項：
 ### 證據檔（scratchpad，不入庫）
 
 `qa_scg4\` 下：`run_cmd.py`、`qa_lib.py`、`v2_check_json.txt`、`v2_independent.py/.txt`、`v3_audit.py/.txt`、`v3_fixed_sha.py/.txt`、`v3_coord_exist.py/.txt`、`v3_sid_lines.py/.txt`、`v3_queue_ops.py/.txt`、`v3_queue_kw.py/.txt`、`v3_find_sa_handoff.py/.txt`、`v5_transcript.py/.txt`、`v6_params.py/.txt`、`v6_prd_peek.py/.txt`、`v7_root_suite.txt`（根層全套完整輸出）、`v7_loc.json`、`at_full.txt`、`each_at.json/.txt`、`rtm_data.py/.json/.txt`、`bb_probe.py/.txt`、`mut_run.py`、`mut_results.txt`。
+
+---
+
+## §8 二審（複驗）
+
+**二審日期**: 2026-10-19（本節寫入時刻 17:09 +08:00）　**審查者**: 同一位 SCG-4 獨立 QA 棒（Sonnet 5.5；仍未參與 TCS 撰寫、P0 實作與一審發現的修復）
+**複驗基準**: HEAD `622c83d22675d41c8e85172e95c8af92a6c399f3`（＝Y5；FSM 已回 PR_REVIEW）
+**二審判定**: **PASS**（P1＝0、P2＝0、P3＝0；P4 殘餘 6 項皆不阻斷，見 §8.7、§8.8）。一審兩個阻斷項——V3 (9)（F-02）與 V8（F-01）——複驗通過；一審六個存活突變（M-F、M-F2、M-G、M-H、M-H2、M-N）對新碼重放全數被殺。**§5 的「FAIL」與檔頭的「判定」列是一審歷史原文（依任務書未改動），現行判定以本節為準。**
+
+> 方法聲明同一審：凡寫「通過」者皆附本回合真跑的指令與輸出，做不到的寫「未驗」（§8.11）。稽核與突變腳本放在 scratchpad `qa_scg4\`（`r2_` 前綴，不入庫）；repo 內除本檔與姊妹檔外零改動（§8.5 寫入前現查）。Windows 上只用 PowerShell／Read／Grep／Glob／Edit／Write，Python 一律 `.venv`。工具輸出若帶表情符號，下文逐字引用時略去行首符號。
+
+### 8.1 輸入快照與提交鏈
+
+| 代號 | sha | 本機時間 | 內容 |
+|------|-----|----------|------|
+| Y1 | `6c4a753d` | 16:05:42 | 一審報告與 RTM（本棒；2 檔新增） |
+| Y2 | `9fd15796` | 16:09:22 | SOP〈啟動條件〉(b)～(e)、無事件、再開、外部衍生四處改寫（1 檔，7 增 7 刪） |
+| Y3 | `4eb912d0` | 16:09:53 | 帳本 063～081（19 列純追加） |
+| Y4 | `968e827b` | 16:36:07 | SD 棒修復：`tools/lib/si_refs.py`、測試檔、護欄層重釘（鎖檔與兩個 guard-total 站點；5 檔，146 增 32 刪） |
+| Y5 | `622c83d2` | 16:36:48 | 帳本 082～092（11 列純追加） |
+
+```text
+> git rev-parse HEAD                      622c83d22675d41c8e85172e95c8af92a6c399f3   rc=0
+> git status --short                      （空；行數 0）   rc=0
+> git diff --name-only                    （空）   rc=0
+> git diff --cached --name-only           （空）   rc=0
+> git diff --stat -- .claude              （空）   rc=0
+> git log --oneline 56ef5393..HEAD -- <PRD> <TCS> <研究方法 SOP>        （0 筆）   rc=0
+> git diff --stat 56ef5393..HEAD -- .claude .github                     （空）   rc=0
+> git diff --name-status 56ef5393..HEAD   （9 檔：M 7、A 2〔A＝本棒兩份報告〕）
+  M docs/04_planning/AutoSDD_improving_112.md
+  M docs/05_development/SelfImproving_Operations_SOP.md
+  M docs/06_quality/CrossPlatform_R145_Scan_Findings.md
+  A docs/06_quality/RTM-SelfImproving-P0-20261019.md
+  A docs/06_quality/SCG4-REVIEW-SelfImproving-P0-20261019.md
+  M docs/06_quality/SelfImproving_Observation_Ledger.md
+  M tools/lib/si_refs.py
+  M tools/tests/test_adr_xplat001_c1c2_lock.py
+  M tools/tests/test_selfimproving_check.py
+> Get-FileHash -Algorithm SHA256 <PRD>        9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e   （與一審相同）
+> Get-FileHash -Algorithm SHA256 <TCS>        6c4e28ed30ab3e05ea1acbbf4b8d1a5a5004f5a2aed3fb535abb59cfb420de56   （與一審相同）
+> Get-FileHash -Algorithm SHA256 <研究方法 SOP>  deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2   （與一審相同）
+> git log --first-parent --format='%h parent=%p' -n 9
+  622c83d2 parent=968e827b / 968e827b parent=4eb912d0 / 4eb912d0 parent=9fd15796 / 9fd15796 parent=6c4a753d
+  6c4a753d parent=56ef5393 / 56ef5393 parent=f1d7660f / f1d7660f parent=ab4638c4 / ab4638c4 parent=13e87b74 / 13e87b74 parent=eaed744b
+> git merge-base --is-ancestor <T|M|N|X> HEAD      四個皆 rc=0
+> git diff --stat 56ef5393..HEAD -- docs/06_quality/SelfImproving_Protocol   （空；協定目錄零改動）
+> params.json 的 migration_base_sha = ab4638c439ad1cc4b8408efcd454c29ef7966d0b（＝M 的完整 sha；V4 輸入不變）
+```
+
+範圍判斷：Y2～Y5 只動 SOP 四處、帳本（只追加）、`si_refs.py`、測試檔、護欄層重釘與兩個 guard-total 站點；沒有碰 `.claude/**`、`.github/**`、凍結三檔、協定目錄或 `params.json`。V1（提交鏈）、V4（`migration_base_sha`）、V6（`params.json` 初值）的輸入未變，且 V2 的 `history.migration`（`claim=valid`）、`params.*` 皆 PASS（§8.5），故不重做一審的逐項細查。
+
+### 8.2 V3 (9) 複驗——通過（F-02 結案）
+
+帳本 063～068 是六列更正列（`rel=corrects:<原列>`；M 之後不可原地改，故以追加列更正）。逐一重查新座標：
+
+| 更正列 | 更正對象 | 新座標 | 重查結果 |
+|--------|----------|--------|----------|
+| 063 | 047 | `AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py` | 存在（32034 位元組）且有 git 追蹤；舊路徑 `execution/…` 在 `git log --all` 仍 0 筆 |
+| 064 | 020 | 研究方法 SOP `:340` | 檔共 370 行；第 340 行是 T-1 列（`T-1`、`SA 寫 PRD 時…`） |
+| 065 | 030 | `MEMORY.md:3`（repo 外：`~/.claude/projects/<slug>/memory/`） | 唯讀 Read：第 3 行是檔頭「排序原則」註（見下） |
+| 066 | 043 | sid `f3ead132-…` line 2959 | 實體行 2959：`type=user`、`origin.kind=peer`，寄件者是 SA 代理，內容為 SA 起草 TCS 的交卷；其第 5 節寫明 line 2536、2493 是 assistant 空文字記錄，2525、2476、2581 是人工句——與 043 的主張一致 |
+| 067 | 048 | sid `f3ead132-…` line 3272 | 實體行 3272：同一寄件者的 peer 交卷（TCS 修訂棒）；含「更正聲明」段，內有 Q3「8 列…舊處置重複計入一次」 |
+| 068 | 049 | sid `f3ead132-…` line 3272 | 同一行含「開放問題現況」段，內有 Q6、九形態、`PRD:208` |
+
+```text
+> Test-Path AutoClaude\autoclaude\infra\adapters\sdd_to_playbook_adapter.py      True ; bytes=32034
+> git ls-files -- AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py   AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py   rc=0
+> git log --oneline --all -- AutoClaude/autoclaude/execution/sdd_to_playbook_adapter.py   （0 筆）   rc=0
+> SOP:340（第 340 行前 80 字）     | T-1 | SA 寫 PRD 時，某需求在追溯矩陣找不到 DP 或 S-NN；或 PRD 把候選 CD-NN 當需求採納（§3.2 範圍外把 CD 當反例引
+> MEMORY.md:3（Read；repo 外檔）   > 排序原則（2026-10-19，OBS-SI-030）：索引若被截斷是從尾端吃起，所以常青的〈工作方式教訓〉〈機制與環境事實〉放前面、會一直長的〈近期輪次〉殿後；舊輪次指標歸檔…
+
+> python -I r2_transcript.py     （逐字稿 jsonl：23225777 位元組；以 b"\n" 切為 5488 段，實體行 N＝索引 N-1；唯讀 json.loads）
+--- 實體行 2959 ---
+  type='user' message.role='user' origin.kind='peer' origin.from='a11b56747dc350251' origin.name='general-purpose' handback=True 文字長度=8360
+  前 120 字：'Another Claude session sent a message:\n<agent-message from="a11b56747dc350251">\n[Subagent hand-back] The text below is t'
+  標題：'## 交卷：SA 新棒（P0 功能鍵 monorepo-si-p0-ledger，Stage-2）— 已完成'、'### 5. 給掌舵者與 PRD 的發現（PRD 凍結，未改，建議走 T1 或帳本更正列）' …
+  '2536'／'2493'：命中；上下文＝'… line 2536 與 2493 都是 assistant 的空文字記錄（緊接在 assistant 收到訊息後的工具呼叫），不是人工句 …'
+--- 實體行 3272 ---
+  type='user' message.role='user' origin.kind='peer' origin.from='a11b56747dc350251' origin.name='general-purpose' handback=True 文字長度=8902
+  前 120 字：（同上）
+> python -I r2_transcript2.py
+  【五】區段長度=654；含 Q6=True；含 九形態=True；含 PRD:208=True
+  【六】區段長度=233；含 Q3=True；含 重複計入=True；含 8 列=True
+```
+
+延伸檢查（`r2_coord_exist.py`）：對 063～092 共 30 列的所有檔案座標逐一檢查，檔案皆存在、行號皆未超出檔長；唯一不在 repo 內的 `MEMORY.md` 以上列 Read 驗證；sid 型座標（066～068）以上列逐字稿驗證。節錄：
+
+```text
+OBS-SI-063: AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py -> EXISTS
+OBS-SI-064: docs/05_development/SelfImproving_Research_Methodology_SOP.md:340 -> EXISTS 檔共 370 行；引用 340 OK
+OBS-SI-065: MEMORY.md:3 -> MISSING（repo 外檔；改以 Read 驗，見上）
+OBS-SI-081: docs/05_development/SelfImproving_Operations_SOP.md:11–15 -> EXISTS 檔共 72 行；引用 11–15 OK
+OBS-SI-082: tools/lib/si_refs.py:125 -> EXISTS 檔共 145 行；引用 125 OK        （行號語意見 F-15）
+OBS-SI-084: tools/lib/si_check.py:130 -> OK ; tools/lib/si_rows.py:225 -> OK
+其餘 069～092：皆 EXISTS 且行號在界內
+```
+
+判斷：硬傷（047 的路徑）與一審列出的軟性項（020、030、043、048、049）都已由更正列補上可重查的座標；原列文字依 append-only 保持原樣（`history.row_mutated` 為 PASS，§8.5），讀者須經更正列才見新座標，這是設計取捨，不是缺陷。一審另點名的「新列 058 座標易失」本輪沒有更正，已併入 F-15（P4）。
+
+### 8.3 V8 複驗——通過（F-01 結案；F-11 (i)(ii)(iii) 結案）
+
+Y2 只動 SOP 四處（`git show --stat --format= 9fd15796`：1 檔，7 增 7 刪；hunk＝`@@ -12,4 +12,4 @@`、`@@ -21 +21 @@`、`@@ -23 +23 @@`、`@@ -50 +50 @@`），即 (b)～(e)、無事件條文、再開條文、外部衍生條文；(a) 與其他條文未動。逐句語意對照（PRD 原文：`PRD:252`、`:253`、`:254`、`:248`；範本 T1～T4：`docs/04_planning/AutoSDD_Iteration_Prompt_Template.md:353–356`）：
+
+| PRD AC | PRD 原意 | SOP 現文（座標） | 語意判定 |
+|--------|----------|------------------|----------|
+| AC-SI-03-1 (a) | 掌舵者指令 | 掌舵者明示要求啟動或再開（T1）（SOP:11） | 一致；T1＝範本「掌舵者直接立案新需求」 |
+| AC-SI-03-1 (b) | 同一症狀第二次被記入觀察（經審查者確認相同） | 同一症狀第二次被記入觀察，且經審查者確認相同；P0 尚無 `attr.confirm`，以人工比對；確認者不得是立案者（SOP:12） | 一致；「確認者不得是立案者」有據於 PRD:268–269 的「審查者（≠歸因者／≠立案者）」；`attr.confirm` 為 PRD 內既有動詞 |
+| AC-SI-03-1 (c) | 缺陷帳本新立 P≤2 未結列 | 缺陷帳本（`AutoSDD_Defect_Log.md`）新立 P≤2 未結列，即範本 T2；觀察帳本的 P1／P2 入帳不是本事件源，真缺陷依 AC-SI-04-2 升 DEF 後才成為 (c)（SOP:13） | 一致；事件源是缺陷帳本（範本 :354 的 T2、PRD:575），一審指出的「誤指觀察帳本」已消除，且補上與 AC-SI-04-2 的銜接 |
+| AC-SI-03-1 (d) | 已採納工件的再開症狀命中 | 已採納工件的再開症狀命中；P1 起才有已採納工件，P0 無此事件源；觀察帳本 deferred／retired 列的再開症狀再被觀察到時走 (b)（SOP:14） | 一致；對象是已採納（promoted）工件，與 PRD:636 的 `status` 列（P1 動詞）一致，且把一審誤寫的情形改走 (b) |
+| AC-SI-03-1 (e) | 容量事件（FR-SI-27） | 記憶索引、知識庫或偏好注入等有上限的儲存／載入面，用量達其上限的 `CAP_FRAC`（以 `si capacity` 現查為準，P0 尚無該動詞）；額度與 context 水位是守衛面的事，不是本事件源（SOP:15） | 一致；用語取自 PRD:379（AC-SI-27-1：`CAP_FRAC`、`si capacity`），明確排除額度與 context 水位 |
+| AC-SI-03-1 後半 | 無日曆、版本號、覆蓋度、每 N 輪；`si status` 唯讀按需、視窗開場與收尾各跑一次 | SOP:17、:19（未動） | 一致 |
+| AC-SI-03-2 | 零筆或零提案＝「無事件」；成效宣稱須指向症狀指標（§1.3） | 零事件記為「無事件」，不得寫成通過；…任何成效宣稱仍須指向症狀指標（PRD §1.3 的 M1～M5），觀察筆數、提案筆數不是成效（SOP:21） | 一致；F-11 (iii) 結案 |
+| AC-SI-03-3 | 產出數量不構成再開理由；再開僅依範本 T1～T4 | 產出數量不構成再開理由；再開僅依範本該節 T1～T4，其中 T1 是掌舵者指令、T2～T4 是症狀條件，成立與否各自現查，不是裁決（SOP:23） | 一致；F-11 (i) 結案 |
+| AC-SI-02-1 | 外部衍生不得單獨充當任何類別（M／P／R／D）提案的證據；須另有 ≥1 個內部來源（本 repo 檔案、指令 rc、掌舵者回報） | 此類列不得單獨充當任何類別（M／P／R／D）提案的證據，提案須另有 ≥1 個內部來源（本 repo 檔案、指令 rc、掌舵者回報）佐證（SOP:50） | 一致；F-11 (ii) 結案 |
+
+```text
+> python -m pytest tools/tests/test_selfimproving_check.py -q -p no:xdist -o addopts= -k "AT_003_1_1 or AT_032_1_1 or sop"      rc=0
+.......                                                                  [100%]
+7 passed, 35 deselected in 1.55s
+```
+
+註：`-k` 的 `sop` 子字串同時選中類別 `TestScopeAndSop` 的全部 7 個測試（含 AT-003-1-1 與 AT-032-1-1）。R25 的關鍵字判準仍抓不到語意偏離，這是 TCS 把語意留給 V8 的設計，本節即是該逐句對照；F-11 (iv)（V8 的時序倒置）仍為延後（帳本 078）。
+
+### 8.4 F-03～F-05、F-07 複驗——通過
+
+**生產碼（F-03）**：`git show 968e827b -- tools/lib/si_refs.py`（+15／−3）是一個 import 加上 `PureWindowsPath`、新增一個函式、替換 `orig_findings` 內的兩行判斷。新增 `_escapes_repo(rel)`：`win = PureWindowsPath(rel)`，回傳 `rel.startswith(("/", "\\")) or bool(win.drive) or ".." in win.parts`；`orig_findings` 改為 `target = None if _escapes_repo(rel) else repo / rel`，其餘判定（`target.is_file()`、錨點比對）原樣。審查結論：(1) 以 Windows 語法一律判（`/`、`\` 皆分隔符），同一份帳本在 Windows 與 POSIX 得同一判決，鐵律三的自問答案寫在 docstring；(2) `PureWindowsPath` 是不碰檔案系統的純路徑類別，沒有新增外部依賴；(3) 不誤殺正常路徑——`inside` 對照（repo 內的 `orig_inside.md`）仍 PASS。
+
+**測試碼（F-04、F-05、F-07；現行座標，`tools/tests/test_selfimproving_check.py`）**：
+
+- AT-001-3-E-4（`:1171–1236`）：誘餌檔放在逃出後真會解析到的位置（repo 外 `orig_outside.md`；repo 內 `orig_inside.md` 為正向對照）；六個形態子測試 `dotdot`、`absolute`、`rooted`、`rooted-backslash`、`drive-letter`、`inside`；磁碟機形態以 `PureWindowsPath("C:/…").as_posix()` 顯式建構（避開平台中立鎖對磁碟機字面的擋）；POSIX 分支另在 repo 內放 `C:/orig_outside.md` 誘餌，使同一輸入在兩個平台判決相同。
+- AT-030-1-1（`:1750–1824`）：`assert_text_matches_json`（`:1716–1748`）以 `ITEM_RE`、`FINDING_RE` 逐行解析文字形態，與 `--json` 逐項比對首行、`overall=` 行、rc、各項 status、NE 項的 `blocking`／`nonblocking`、各項 finding 的 (subject, code) 集合；對 green、red、no-git 三種 repo 各一個子測試（F-04，並含 F-05 的 NE 字樣）。
+- AT-001-1-E-5（`:915–972`）：JSON 的 `detail` 須以 `[warn]` 開頭，文字形態須含 `"\n  - VOLUME-WARN [warn] "`（F-05）。
+- AT-001-2-1（`:1009–1044`）：子測試 `P2＋暴露=無`（第 9 列→`GUARD-P12-NO-EXPOSURE`）（F-05）。
+- AT-003-1-1（`:1313–1370`）：恆真斷言換成對真 SOP 逐一刪去五個關鍵字（`掌舵者指令`、`第二次`、`P≤2`、`再開症狀`、`容量事件`）與 (a)～(e) 五個標記，`sop_startup_problems` 都必須非空（F-07 i）。
+- AT-001-3-E-2（`:1108–1134`）：新增 `wrong-quote` 模式（引言故意寫錯）仍 PASS 且 `claim=valid`，直接證明引言不被比對（F-07 ii）。
+- 模組暫存目錄（`:114–125`）：`setUpModule` 建、`tearDownModule` 清，並清空 `_BASE`、`_CHAIN`、歸零 `_COUNTER`；單獨 import 本模組不再於 `%TEMP%` 留 `si_check_*` 目錄（F-07 iii）。
+- AT-030-2-1（`:1862–1971`）：以 `mock.patch.object` 攔截 `os.system`、`os.popen`（命中即拋 `OSError`，並斷言 `shells == []`），再加靜態正規式 `os\.(?:system|popen)` 掃描 `selfimproving.py` 與 `si_*.py`，含正反自證（F-07 iv）。
+
+```text
+> python -m pytest tools/tests/test_selfimproving_check.py -q -p no:xdist -o addopts= -k "AT_001_3_E_4 or AT_030_1_1 or AT_001_1_E_5 or AT_001_2_1 or AT_003_1_1 or AT_001_3_E_2 or AT_030_2_1"      rc=0
+.......                                                [100%]
+7 passed, 35 deselected, 18 subtests passed in 12.55s
+> python -m pytest tools/tests/test_selfimproving_check.py -q -p no:xdist -o addopts=      rc=0
+..........................................      [100%]
+42 passed, 97 subtests passed in 41.54s
+> --collect-only：42 tests collected
+```
+
+**突變重放**（`qa_scg4\r2_mut_run.py`；把測試檔、`tools/selfimproving.py`、`tools/_stdio_utf8.py`、`tools/lib/si_*.py` 與測試唯讀存取的真檔複製到 `qa_scg4\mutroot2_<組別>_<時間戳>\`，只在複本上對 HEAD 碼做單點突變；repo 零改動）。複本基線：`42 passed, 97 subtests passed in 42.18s`（F 組）、`41.72s`（G 組）、`41.36s`（F 組補跑）。下表「七 AT」＝上列 `-k` 七個 AT 的 failed 數，「整檔」＝整個測試檔；failed 數含子測試失敗（pytest 9 以 `SUBFAILED(...)` 列出）。
+
+| 突變 | 七 AT 的 failed | 整檔的 failed | 殺掉它的測試 | 結果 |
+|------|-----------------|---------------|--------------|------|
+| M-F 拿掉 R18 (c) 的「含 `..`」判斷（一審存活） | 1 failed（7 passed、17 subtests passed） | 1 failed（42 passed、96 subtests passed） | AT-001-3-E-4 的 `dotdot` | 殺 |
+| M-F2 拿掉 rooted 與磁碟機代號判斷、只剩 `..`（對應一審「拿掉 is_absolute」；一審存活） | 3 failed（7 passed、15 subtests passed） | 3 failed（42 passed、94 subtests passed） | AT-001-3-E-4 的 `absolute`、`rooted`、`rooted-backslash` | 殺 |
+| M-G 體積 warn 去掉 `[warn]` 前綴（一審存活） | 1 failed（6 passed、18 subtests passed） | 1 failed（41 passed、97 subtests passed） | AT-001-1-E-5 | 殺 |
+| M-H 文字形態不印任何 finding 行（一審存活） | 4 failed（6 passed、15 subtests passed） | 4 failed（41 passed、94 subtests passed） | AT-001-1-E-5；AT-030-1-1 的 `text_form` green／red／no-git | 殺 |
+| M-H2 NE 行不印 `blocking`／`nonblocking`（一審存活） | 3 failed（7 passed、15 subtests passed） | 3 failed（42 passed、94 subtests passed） | AT-030-1-1 的 `text_form` green／red／no-git | 殺 |
+| M-N 守衛面 P1／P2 規則只認 P1（一審存活） | 1 failed（7 passed、17 subtests passed） | 1 failed（42 passed、96 subtests passed） | AT-001-2-1 的 `P2＋暴露=無` | 殺 |
+| M-F2a 只拿掉磁碟機代號判斷（自訂） | 1 failed | 未跑 | AT-001-3-E-4 的 `absolute` | 殺 |
+| M-F2b 只拿掉 rooted（開頭 `/` 或 `\`）判斷（自訂） | 2 failed | 未跑 | `rooted`、`rooted-backslash` | 殺 |
+| M-F3 只拿掉開頭反斜線的 rooted 判斷（自訂） | 1 failed | 未跑 | `rooted-backslash` | 殺 |
+| M-F0 整段還原成修復前的 `Path.is_absolute()`＋`..`（自訂） | 2 failed | 2 failed（42 passed、95 subtests passed） | `rooted`、`rooted-backslash`（即一審的 Windows 洞） | 殺 |
+| M-H3 finding 行的 subject 與 code 對調（自訂） | 4 failed | 未跑 | AT-001-1-E-5；AT-030-1-1 三個 `text_form` | 殺 |
+| M-W `check` 經 `os.system` 起行程（F-07 iv 對照；自訂） | 1 failed（6 passed、18 subtests passed） | 未跑 | AT-030-2-1 | 殺 |
+| M-Q2 確認列改成要求引言含特定文字（F-07 ii 對照；自訂；編號加 2 以免與一審 §3 的 M-Q「retired 缺座標不再判」混淆） | 1 failed（7 passed、17 subtests passed） | 未跑 | AT-001-3-E-2 的 `wrong-quote` | 殺 |
+
+共 13 個突變（一審六個存活突變加七個自訂）全數被殺，無存活（證據檔 `r2_mut_results_G.txt` 內，M-Q2 仍記為 M-Q）。誠實劃界：(1) M-F2a 在 Windows 由 `absolute` 殺，`drive-letter` 子測試對它沒有獨立鑑別力（它的誘餌檔得放在磁碟機根目錄，測試不寫磁碟機根）；POSIX 分支則以 repo 內的 `C:/orig_outside.md` 誘餌鑑別——POSIX 行為依測試設計與 `PureWindowsPath` 語意推斷，未在 POSIX 實跑（§8.11）。(2) 13 個突變是手選、非窮盡。
+
+### 8.5 V2／V7／V9 重跑與寫入前的工作樹現查
+
+```text
+> python tools/selfimproving.py check --json     rc=0   wall=1.42s
+{"overall": "PASS", "rc": 0, "fingerprint": "sha256:87b349b706f38fce6e99255c2a50ddc4f49ea7ba3c283f52451fff18e3bab394", …, "rows": 92, "items": [21 項], …}
+  ref.obs PASS ; ref.def PASS ; ref.orig_notes PASS ; row.fixed_sha PASS ; row.coordinates PASS ; history.migration PASS（detail=claim=valid） ; history.row_mutated PASS ; params.keys／params.globs／params.coupling PASS ; ledger.volume PASS ; ledger.vacuity PASS
+  ref.carrier_families NE（nonblocking；CARRIER-NOT-ESTABLISHED families=PROP-SI count=24）
+> python tools/selfimproving.py check     rc=0   wall=1.17s
+si-check rows=92 items=21 … overall=PASS rc=0 fingerprint=sha256:87b349b706f38fce6e99255c2a50ddc4f49ea7ba3c283f52451fff18e3bab394
+> python -I r2_v2_independent.py（獨立於 tools/lib/si_*.py，依 TCS R9～R16 逐列重判）
+file bytes=48315 lines=103 data_rows=92 CRLF=False BOM=False ; 27 個判定碼全部 0 筆 ; 列位元組 max=689、超過 700 的列數＝0
+> Grep 「之後再看」於帳本：只命中檔頭〈規則〉的第 6 行（禁令敘述）
+```
+
+判準指紋與一審相同（`sha256:87b349b7…b394`），符合協定目錄零改動。`check` 牆鐘 1.42s、1.17s（含直譯器啟動），門檻 < 30s。
+
+```text
+> $env:AUTOSDD_PARALLEL_TESTS='1'; python tools/run_root_unittests.py      rc=0   wall=143.61s
+unittest 數量下限釘選通過：發現 5426 個測試（下限 5326）
+收集面盤存：92 支 test_*.py 檔／指紋 e550e12db2f5
+[cpu_budget] root-unittest workers=18 source=cpu_budget
+模組耗時排行（前 5，共 405 模組，平行模式，worker=18）：… test_selfimproving_check: 88.8s（第 2）…
+派工摘要：worker=18｜S=2055.1s｜ideal=max(S/W, 最長單位)=114.2s（S/W-bound）｜loss=1.00x｜slot 利用率=99.9%
+[skip census] tools/tests@win32 共 46 支：platform=42／tool-absence=0／env-disabled=4／structural-pair=0／debt=0／untagged=0／欠債型 4 支（目標 0）
+真實 TEMP 圍籬：全套期間真實契約目錄（與 autosdd_quota.json 同目錄）下 autosdd_pace*.json 零變動（前 4／後 4 份；目錄 C:\Users\wuwei）；隔離根已建立並清除。
+孤兒 console 普查：零增長（前 1／後 1）。
+（輸出中以 FAIL／ERROR 開頭的行：0 行）
+> python -m ruff check tools/selfimproving.py tools/lib/si_*.py（7 檔） tools/tests/test_selfimproving_check.py      rc=0
+All checks passed!
+> python AutoClaude/tools/check_loc_budget.py --json      rc=0
+total=18625 baseline=17079 cap=20438 total_violation=False ; absolute_violations／tier_violations／special_violations／root_tools_violations 皆 len=0
+> python -m pytest tools/tests/test_defect_id_reference_integrity.py -q -p no:xdist -p no:cacheprovider -o addopts=      rc=0
+11 passed in 2.09s
+> python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines      rc=0
+# 淨額 119056→119056 (+0)
+# 逐檔漂移 0 支（淨額為 0 時本行仍會說話——那正是 R79 補它的理由）
+# _REPIN_LOG_HISTORY_SHA256 = "94b2abd8d962b936ea56e404fcd42cceb92f381a9d23a4199c6c1418e4571c4d"   （與 Y4 的釘值相同）
+> git status --short（根層全套、ruff、LOC、本節各項測試跑完之後）      （空）
+```
+
+V9（M 之後只追加）：
+
+```text
+> git log --numstat --format='COMMIT %h' f1d7660f..HEAD -- <ledger>      rc=0
+COMMIT 622c83d2   11  0
+COMMIT 4eb912d0   19  0
+COMMIT 56ef5393   11  0
+> git log -p --format='COMMIT %h' --unified=0 4eb912d0^..HEAD -- <ledger>      rc=0
+  hunk：@@ -91,0 +92,11 @@（622c83d2）、@@ -72,0 +73,19 @@（4eb912d0）；刪除行數 0
+```
+
+判斷：自 N 起帳本只有三個 commit 動過，皆為單一 hunk 的純追加（11＋19＋11＝41 列，等於 92 減 N 時的 51 列），0 行刪改；`history.row_mutated` 為 PASS（機械憑證）；既有的 001～062 列零原地改寫。V7 其餘：凍結三檔 digest 與一審相同、`.claude` 與 `.github` 零改動、工作樹乾淨（§8.1）。護欄層重釘（Y4）以「根層全套 rc 0」與 `--print-guard-lines` 的 +0／漂移 0 驗證，未獨立重算 sha（§8.11）。NFR-P0-2：整檔 41.54s（本機）；根層平行 worker 內 `test_selfimproving_check` 為 88.8s（一審 81.0s；多了 11 個子測試與較多誘餌檔），門檻 180s，CI 端未驗。
+
+### 8.6 逐 AT 單跑（姊妹檔 RTM §2 已更新）
+
+重跑 TCS §2 的 42 個判定指令（`-k <底線形>`，各加 `-p no:xdist -o addopts=`）：42/42 皆為 `1 passed`、rc＝0、每個 `-k` 恰選到 1 個測試（腳本的非預期清單為空）。與一審相比只有四個 AT 的子測試數改變：AT-001-2-1（0→1）、AT-001-3-E-2（7→8）、AT-001-3-E-4（0→6）、AT-030-1-1（0→3）；子測試合計 86→97，與整檔 `97 subtests passed` 吻合。測試函式的行區間因 Y4 增加 93 行而位移，RTM §2 已全部重抽（座標以 HEAD `622c83d2` 為準）。
+
+### 8.7 各 F 結案表
+
+| 編號 | 一審 | 二審狀態 | 依據 |
+|------|------|----------|------|
+| F-01 | P2 | 已結案 | SOP:12–15 與 :21、:23、:50 逐句語意對照 PRD AC-SI-03-1／-03-2／-03-3 與 AC-SI-02-1 一致（§8.3）；`-k "AT_003_1_1 or AT_032_1_1 or sop"` 7 passed；帳本 081 `fixed@9fd15796` |
+| F-02 | P2 | 已結案 | 063～068 六列更正列座標逐一可定位（§8.2）；`check` 仍綠；原列依 append-only 不動 |
+| F-03 | P3 | 已結案 | `_escapes_repo` 平台中立；AT-001-3-E-4 增六個子測試；M-F、M-F2、M-F2a、M-F2b、M-F3、M-F0 全殺（§8.4）；帳本 082 `fixed@968e827b` |
+| F-04 | P3 | 已結案 | AT-030-1-1 逐行解析並與 `--json` 的 (subject, code) 集合相等；M-H、M-H3 殺；帳本 083 |
+| F-05 | P4 | 已結案 | `[warn]` 前綴、NE 的 `blocking`／`nonblocking`、守衛面 P2＋暴露＝無三處補斷言；M-G、M-H2、M-N 殺；帳本 084 |
+| F-06 | P3 | 依裁決結案（流程） | 帳本 075 decided：Developer 任務書加「逐 AT 驗收字樣」；本輪仍由 QA 逐 AT 單跑補證（42/42）；無程式變更 |
+| F-07 | P4 | 已結案 | (i) 恆真斷言換成關鍵字刪除鑑別；(ii) `wrong-quote` 對照（M-Q2 殺）；(iii) `setUpModule`／`tearDownModule`；(iv) 攔截 `os.system`／`os.popen`（M-W 殺）；帳本 085 |
+| F-08 | P4 | 延後（接受） | 帳本 076 deferred，附可觀測再開症狀；P0 退出不依賴 |
+| F-09 | P4 | 依裁決結案（附殘餘） | 帳本 077 decided：自本批起時間欄填事件實際時刻（可追溯者）。事件即入帳之列（063～068、081～085）的時刻與提交時刻相符；回補列（069～080、086～092）仍是批次入帳時刻，因事件時刻不可追溯，符合「可追溯者」條件；建議流程摩擦的交卷格式附事件時刻 |
+| F-10 | P4 | 不動作（治理，請掌舵者過目） | Y4 的護欄層重釘再度走一次性例外名冊：R213 列精確淨額 2216→2318（名冊上限仍 5）、`_REPIN_LOG_FROZEN_PREFIX_LEN` 341→342、歷史 sha 重釘、接鏈列再度借用既有缺陷列的編號。機制本意即每次增列都得改精確值，但同標籤已連續第四列；屬主控與掌舵者裁決，QA 僅標示 |
+| F-11 | P4 | (i)(ii)(iii) 已結案；(iv) 延後 | (i)(ii)(iii) 見 §8.3（SOP:21、:23、:50）；(iv) 帳本 078 deferred，附再開症狀 |
+| F-12 | P4 | 延後（接受） | 帳本 079 deferred，附再開症狀 |
+| F-13 | P4 | 依裁決結案 | 帳本 080 decided：下一份 TCS 的 §5.6 預留「CI paths 與 guard-total 站點」兩類連動檔；Y4 再度動到兩個 guard-total 站點，印證預留的必要 |
+| F-14 | P4 | 不動作 | 同一審 |
+| F-15（新） | P4 | 新發現，不阻斷 | 見 §8.8 |
+
+統計：P1＝0、P2＝0、P3＝0；P4 殘餘 6 項（F-08、F-10、F-11 (iv)、F-12、F-14、F-15）。
+
+### 8.8 二審新發現
+
+| 編號 | 嚴重度 | 發現 | 座標 | 建議處置 |
+|------|--------|------|------|----------|
+| F-15 | P4 | 新列座標的可重查性殘餘兩處：(i) 帳本 082 的 `tools/lib/si_refs.py:125` 是修復前的行號，修復後該行成了 `_escapes_repo` docstring 的結尾引號（083、085 已標「（修復前）」，082 漏標；以 `fixed@968e827b` 的父提交可還原到原句）；(ii) 帳本 058 的座標含省略號（`D:\Users\wuwei\AppData\...\e501_count.py`），指向待刪的 repo 外殘留檔——一審 F-02 已列為易失，本輪現查該檔仍在 `D:\Users\wuwei\AppData\Local\Temp\claude\D--CursorProject-AISDCL-Agent\f3ead132-29b1-418c-97d9-35868ab11c70\scratchpad\selfimproving\e501_count.py` | 帳本 082、058 的「證據座標」欄；`tools/lib/si_refs.py:125`（現為 docstring 結尾） | 不阻斷。若要補，追加更正列（`rel=corrects:`），把 082 的座標改成以符號命名的形式（`tools/lib/si_refs.py` 的 `_escapes_repo`、`orig_findings`），058 待殘留檔刪除後以更正列註記；往後帶行號的座標一律標「（修復前）」或改用符號名 |
+
+本輪沒有發現 P1～P3；也沒有為找新缺陷而對修復範圍之外的面構造變體（只做一審存活突變的重放，加七個與修復直接對應的對照突變）。
+
+### 8.9 二審判定
+
+**PASS**——理由：一審的兩個阻斷項 V3 (9)（F-02）與 V8（F-01）複驗通過；V2、V7、V9 重跑全綠，V1、V4、V6 的輸入未變且機械憑證仍綠（`history.migration`＝`claim=valid`、`params.*` PASS、判準指紋不變）；一審六個存活突變全數被殺，P3 以上發現全數結案。
+
+TCS 末段〈SCG-4 通過標準〉逐項（二審）：
+
+| 驗證項目 | 二審結果 |
+|---------|----------|
+| AC → AT 100% 映射 | 通過：19/19（TCS 凍結，AT 仍 42 個；`rtm_data.py` 重抽驗證） |
+| AT 格式可自動化 | 通過：42 個測試函式名含其底線形，逐 AT 單跑皆 `1 passed` |
+| 負向測試覆蓋 | 通過：每個 AC 至少一個負向；突變重放 13/13 被殺，一審 22 個手選突變的六個存活者現已全殺 |
+| 邊界值測試 | 通過：一審已驗的邊界不變；新增 R18 (c) 六形態與 R15 的 P2＋暴露＝無 |
+| 測試資料規格完整 | 通過：誘餌檔放在逃出後真會解析到的位置（F-03），測試資料不再只驗「不存在的路徑報不存在」 |
+| 實跑檢核 V1～V9 全部有逐字輸出證據 | 通過：V3 (9)、V8 見 §8.2、§8.3；V2、V7、V9 見 §8.5；V1、V4、V6 見 §8.1、§8.5（輸入不變、憑證仍綠） |
+
+給主控的收尾建議（非阻斷）：
+1. 本檔檔頭「判定: FAIL」與 §5 是一審原文（本棒依任務書不改一審內文）；建議收尾 commit 時於檔頭補一行指向本節。
+2. SOP 檔頭「狀態」列仍寫「P0 草稿（Developer 棒起草，待 SCG-4 QA 逐項對照 PRD 檢核）」；SCG-4 通過後建議改為已通過並附本報告座標（SOP 不在凍結集合內）。
+3. 本節 §8.10 的流程摩擦與 F-15 請於 SCG-4 收尾前入帳（本棒不寫帳本）；FSM 閘門動作（`gate --gate PR_REVIEW --result PASS`）由主控執行，本棒未碰 FSM。
+4. 帳本 058 所指的 repo 外殘留檔 `e501_count.py` 仍待掌舵者刪除。
+
+### 8.10 流程摩擦（本棒二審；每項一句症狀加一個座標，請主控於 SCG-4 收尾前入帳）
+
+1. 系統提示（auto mode）本棒中途再度要求優先用 Bash，與根 `CLAUDE.md`〈鐵律一〉衝突；全程仍用 PowerShell／Read／Grep／Glob／Edit／Write（OBS-SI-011 再復發）；座標：根 `CLAUDE.md`〈鐵律一〉。
+2. `python -I` 腳本的中文 `print`（逐 AT 單跑腳本的結尾訊息）在 PowerShell 主控台以 cp950 顯示成亂碼，需改寫檔再用 Read 讀（OBS-SI-072、OBS-SI-029 再復發）；座標：`qa_scg4\run_each_at.py` 末行。
+3. pytest 9.1.1 內建 subtests：失敗的子測試在 `-rf` 摘要以 `SUBFAILED(...)` 列出而非 `FAILED`，且計入「N failed」；突變重放腳本一開始只收 `FAILED` 前綴而漏列子測試失敗名，補收 `SUBFAIL` 才完整；座標：`qa_scg4\r2_mut_run.py` 的 `pytest()`。
+4. 測試檔每增減行數，RTM §2 的「行區間」就全數過期（Y4 增 93 行使 AT-001-1-1 以下的區間全部位移）；座標：RTM §2；建議 RTM 座標附 commit sha（本棒已註明以 HEAD `622c83d2` 為準）。
+5. `.venv` 是 Python 3.11.9，QA 腳本多次撞「f-string 運算式不得含反斜線」，每次改成先算值再格式化；座標：`qa_scg4\r2_rows.py`。
+6. `Grep` 對含長理由的 skip 明細行回「[Omitted long matching line]」，改用 `-o` 視窗或 Read 取片段（OBS-SI-071、OBS-SI-033 再復發）；座標：`qa_scg4\r2_root_suite.txt` 第 81 行。
+7. `Grep` 的 `glob` 參數帶含目錄分隔符的大括號展開，回無結果的假陰性，改拆成多次單一 glob（OBS-SI-070、OBS-SI-046 再復發）；座標：`docs/06_quality/TCS-PREREVIEW-SelfImproving-P0-20261019.md` 的流程摩擦 #3。
+
+### 8.11 未查證／未做（二審）
+
+- **macOS／POSIX 與 GitHub Actions 仍未實跑**：F-03 的 POSIX 行為依測試的 `os.name` 分支設計與 `PureWindowsPath` 語意推斷，未在 POSIX 實跑；NFR-P0-2 的 CI「整個測試檔小於 180 秒」未驗（本機整檔 41.54s；根層平行 worker 內 88.8s）。
+- **SD 修復棒交卷原文未取得**：086～092 與 SD 交卷七項只驗了列本身通過 `check` 且座標可定位，逐項對帳未驗。
+- **護欄層重釘（Y4）未獨立重算**：`test_adr_xplat001_c1c2_lock.py` 的名冊、前綴長度、歷史 sha 與兩個 guard-total 站點，只以根層全套 rc 0 與 `--print-guard-lines` 的 +0／漂移 0 驗證，未手算 sha。
+- **突變重放為 13 個手選突變，非窮盡**；`drive-letter` 子測試在 Windows 上對 M-F2a 沒有獨立鑑別力（見 §8.4 劃界）。
+- **repo 內符號連結逃逸未探**：本機無建立符號連結的權限（根層全套的 skip 明細有 `[WinError 1314]`），且 R18 (c) 只規範路徑字面。
+- **063～092 的語意只驗到座標可定位與 `check` 綠**，未逐列回溯各列所述事實。
+- 一審 §7 的其餘項目（`lint-imports`、AutoClaude pytest、`ci-gate`、`check` 的邊界探測、T 之前與 M 之後的紅燈狀態重現）本輪仍未做。
+
+### 8.12 勘誤（對一審內文）
+
+本輪沒有發現一審的事實性錯誤。僅座標需註記：一審 §3 抽查表與 §4（F-04、F-05、F-07）所引測試檔行號是一審當時 X 版的座標，Y4 後已位移，現行座標見 RTM §2（`git show 56ef5393:tools/tests/test_selfimproving_check.py` 可還原一審所指的行）；一審 §2 的 `rows=62` 等數字是 X 版的量測，現行為 92 列（§8.5）。
+
+### 8.13 證據檔（scratchpad，不入庫）
+
+`qa_scg4\` 下：`run_cmd.py`、`r2_rows.py/.txt`、`r2_coord_exist.py/.txt`、`r2_transcript.py/.txt`、`r2_transcript2.py/.txt`、`r2_y4_refs.diff`、`r2_y4_tests.diff`、`r2_y4_lock.diff`、`r2_y4_stat.txt`、`r2_sop_run.txt`、`r2_k7_run.txt`、`r2_full_at.txt`、`r2_mut_run.py`、`r2_mut_results_F.txt`、`r2_mut_results_F_names.txt`、`r2_mut_results_G.txt`、`r2_check_json.txt`、`r2_check_text.txt`、`r2_v2_independent.py/.txt`、`r2_root_suite.txt`、`r2_ruff.txt`、`r2_loc.txt`、`r2_defid.txt`、`r2_print_guard.txt`、`r2_v9_logp.txt`、`r2_v9_numstat.txt`、`r2_v9_numstat_fromN.txt`、`each_at.json/.txt`（二審重跑）、`each_at_r1.json`（一審備份）、`rtm_data.json`、`rtm_at_table2.md`、`r2_subtest_diff.txt`。
