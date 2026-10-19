@@ -549,6 +549,51 @@ docs/06_quality/SelfImproving_Observation_Ledger.md  17605 bytes  mtime 10-19 05
 - **訂正（2026-10-19，主控）**：本節與 PRD C.2 初稿、OBS-SI-042 所引 line 2493／2536 為 assistant 空記錄；真人句＝line 2476（授權，「…(不用考量成本)…」）／2525（預先核准）／2581（「了解，凍結後接著開 P0 實作」），主控以 JSON 解析 `type`／`origin.kind` 親驗（SA 起草 P0 TCS 時發現）。PRD C.2 經 SPEC_DRAFTING→SCG_VALIDATION→HUMAN_PENDING 訂正重凍（新 digest 見下列補記）；更正列 OBS-SI-043。
 - **重凍補記（2026-10-19，主控）**：C.2 座標訂正經 QA 複核成立（§A：三行皆 `type=user`／`origin.kind=human`、引文逐字相符、`git diff` 只動 PRD 一個物理行）後，`monorepo-selfimproving` 記 `gate SCG_VALIDATION PASS`（只覆蓋此單一項，SCG-0 二審 PASS 維持）→ HUMAN_PENDING → `spec-frozen --stage Stage-1` 重凍：PRD digest `sha256:9c5718274eb511cc071deb1193ae7eadaaffc3b636826acf8e7935a50754460e`、SOP digest `sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2`（SOP 未變）；approver＝掌舵者預先核准（line 2525），主控代為執行。P0 鍵 `monorepo-si-p0-ledger` 的 Stage-1 採納記錄仍引舊 PRD digest（內容差異只有 C.2 一行座標），TCS 追溯表回填新 digest（預審 F-07）。
 
+## 8. T1 修訂複審（2026-10-19 晚；審查對象 d4b7868f..770c80cf）
+
+審查者：QA（Sonnet 5.5，未參與本輪撰寫），完成時刻 2026-10-19 23:25 +08:00。輸入快照 HEAD＝`770c80cf`；PRD digest `sha256:a718584238f4b9f400bc902deff01de3b3c12579d038ea84efe3d7a3cb4c8633`（378,712 bytes；前一凍結版 `d4b7868f` 為 `sha256:fbca6bc9…`、253,501 bytes）。全程唯讀；探針腳本在 session scratchpad、未入庫。
+
+### 8.1 判定
+
+**判定：FAIL（P1＝0、P2＝1、P3＝4、P4＝10）**。理由：主控 770c80cf 對 SSOT 的訂正沒有達成它宣稱的效果——依 PRD 自己的 C19 判準重放，落點鎖的正控（現行 SSOT §3 七列）仍有 1 處紅（F-01）；其餘為文字、誠實劃界與建議類。
+
+我親跑：`python tools/selfimproving.py check` rc=0（21 項，`params.globs` PASS，前後 `git status --porcelain` 相同）；`metrics_problems`＝空；`test_selfimproving_check.py` 42 passed／97 subtests；研究方法論 SOP 的 sha256 仍是 `deb9716bb56c…`。
+
+複驗建議：F-01 修完後只需重放 C19 規則（SSOT §3 七列應全綠）並再跑一次 `check`；P3、P4 可併入凍結前最後一次 PRD 編修。T1 第 3 點的預先核准以「各方驗證都沒問題」為條件，F-01 未清前條件未成立。
+
+### 8.2 發現表
+
+| ID | 嚴重度 | 座標 | 症狀 | 建議修法 | 誰修 |
+|---|---|---|---|---|---|
+| F-01 | P2 | SSOT `Root_Layout_and_Module_Placement.md`:52；PRD:407、:649、:706、:919 | 770c80cf 只把 SSOT 該列「P1 探針」改「P3 探針」，仍以反引號列未建檔的 `tools/probe/selfimproving_measure.py`；依 C19 判準（:706 自述須改為不加反引號）重放，§3 七列仍 1 處紅，AC-SI-34-1 正控未綠；:649、:919 卻宣稱已訂正、「實作輪直接落鎖」，與 :407、:706 互斥 | SSOT :52 該路徑改為不加反引號的文字；:407、:706 的「須先修」改為已修；複驗＝重放 C19 規則為 GREEN | 主控（SSOT）、Architect（PRD 句） |
+| F-02 | P3 | PRD:786（`research` 列的 `--sources <路徑>`）、:800（共通旗標 `--repo DIR`）、:417、:497、附錄 B 禁令 26 列 | `--sources` 未定義用途；`--repo`／`--sources` 讓來源表由呼叫者指定，`check` 又不比對事件的 `sources_sha256` 是否為提交過的表⇒「對象限來源表」標 M 過強（事前登記只在預設路徑成立） | 刪 `--sources`（測試改函式注入）；附錄 B、:497 註明以預設路徑為準；`check` 加 `sources_sha256` 對 git 歷史來源表雜湊的偵測項 | Architect |
+| F-03 | P3 | PRD:417、:419（`src` ∈ 來源表）、:746（來源表格式） | 來源表只說「增減」，沒定義刪除、改名語意：OBS 列只追加不可改，某 `id` 一旦移出，既有 `src=<id>` 列與歷史 `research.scan` 使 `check` 永遠 `SRC-UNKNOWN` 紅 | 規定只增不刪（退場用 `retired` 標記、`check` 仍認），改名＝新 id | SA |
+| F-04 | P3 | PRD:656（C5 列）對 :784、:918 | 新增五個 `params.json` 鍵，C5 列只列 `research_fetch_max`、`research_bytes_max`；`research_timeout_seconds`、`min_events`、`export_limit_max` 漏列（check 列與 #52 齊全） | C5 補齊五鍵或註「見 #52」 | Architect |
+| F-05 | P3 | PRD:618、:892、:923（#57 第 2 欄） | 主控已撤回 PRD 體積目標、並指 NFR-SI-08-1 只管活躍帳本，三處仍寫「PRD 超過 Read 工具 256KB 上限，NFR-SI-08-1 同型」，讀來像本檔受該 NFR 管轄；#57 的 378,366 bytes 亦非 HEAD 現值 378,712 | 三處改「Read 單次上限 256KB；NFR-SI-08-1 不管本檔」；位元組標快照或改現值 | Architect、主控 |
+| F-06 | P4 | PRD:497（NFR-SI-02-4） | 邊界型由 P 改 M、刪「額度守衛限流不是外聯禁令」句，卻無〔訂正〕保留原文，與 v0.8 列自陳協議不符（改動已記 #41） | 補〔訂正〕 | Architect |
+| F-07 | P4 | PRD:784（`check` 列）對 :416、:909 | 新 NE 碼 `QUOTE-VERIFIER-NOT-ESTABLISHED` 只在 AC-SI-30-1 與 #43 出現，`check` 列的新碼清單漏列 | 補列 | Architect |
+| F-08 | P4 | PRD:913（#47） | 「P0 TCS 勘誤三是否另記」待主控決定，無閘無期限 | 主控現在決定並改寫為已決 | 主控 |
+| F-09 | P4 | PRD:458（AC-SI-32-1） | 研究者候選、PROP 卡面等外部衍生文字會流到瀏覽器，未寫 frontend 須純文字渲染（不用 dangerouslySetInnerHTML、不渲染 Markdown／HTML）與 vitest 負控 | 加入 AC-SI-32-1 | SA |
+| F-10 | P4 | PRD:413、:878（ADR-SI-11） | 研究者以 Read 讀 repo 外 `~/.autosdd/selfimproving/research/` 的檔，樹外路徑是否被 harness 權限放行未驗 | P1 首跑實測並入再開症狀，或改落 repo 內 ignored 目錄 | Architect |
+| F-11 | P4 | PRD:898（FC-b）、:879（ADR-SI-12） | 唯讀掛載整個 `.git/`（含 `.git/config`）進執行使用者指令的 Bridge 容器；remote URL 內嵌權杖即外洩 | 註明 `.git/config` 不得含憑證，或只掛 HEAD／refs／objects | Architect |
+| F-12 | P4 | PRD:459（AC-SI-32-2）；`SecurityConfig.java`:80–82 | 非 GET 期望 404／405，但 Viewer 角色的 POST 先被擋成 403 | AC 指明測試角色或接受 403 | SA |
+| F-13 | P4 | PRD:523（NFR-SI-07-1）、:20 | 「派子代理一律 Sonnet 5」與同句「機械性轉換用 haiku」、Stakeholders「子代理（Sonnet／haiku）」並存 | 釐清 haiku 僅指引擎委派，或刪 | SA |
+| F-14 | P4 | 觀察帳本:115（OBS-SI-105） | 該列仍是 `deferred；P4`，再開症狀「第二個根層模組落檔時落點對不上」未發生；FR-SI-34 的依據只有 T1 問題 2 與授權句 | 凍結後由主控追加列改 `decided`（rel=FR-SI-34），附錄 B 明寫 T1 line 13 即暴露證據 | 主控 |
+| F-15 | P4 | PRD:870（ADR-SI-03′）、:465、:586、:887 | 兩個待主控確認點（金鑰通道、入帳模式）若凍結後才定，PRD 改動須走 SPEC_REGRESSION；460d3135 訊息稱「定案」與 PRD 現文不符 | 凍結前由主控確認，並把 ⚖ 改寫為已裁決 | 主控 |
+
+### 8.3 八項判定
+
+| # | 項目 | 判定 | 一句證據 |
+|---|---|---|---|
+| 1 | T1 覆蓋 | PASS | 1a→FR-SI-31；1b b1→FR-SI-30、b2～b5→C.1 對映表（既有 FR）；1c→FR-SI-32／33（Console 不寫帳本列＝明文劃界）；2→FR-SI-34 與已落地 SSOT／根 CLAUDE.md；3→預先核准句；4→主控收尾 |
+| 2 | 內部一致 | FAIL | F-01（P2）、F-04（P3）；AC 定義 99＝77＋22 且全部引用可解析、FR 34 條、ADR／C／FC／OBS 引用皆存在、P1／P1b／P2b 鍵與 FR 集合在 §3.1、§8.1、§9.6、C.2 #14、附錄 A 一致、48 張表 0 欄數不一致 |
+| 3 | 憲法 | PASS | C-12 新增文字無日曆、版本號、「每 N 輪」；C-13＝AC-SI-31-3；FR-SI-02＝AC-SI-30-4④；純度＝能力登記（§9.4）；鐵律五、七無違；FR-SI-34 不在守衛面清單（附錄 B）。禁令 26 字面針對 R-9.36 具身接地活體 canary 的 HTTP 外聯（OPEN-10.6），`research --fetch` 不在字面範圍，PRD 取其精神自洽（⚖10 結案：不必另在 SDD 側登記）；M 標示過強見 F-02 |
+| 4 | AC 可測性 | PASS | 22 條皆有 Given／When／Then；M 型可寫 pytest／vitest／gradle test（夾具：本機 HTTP、假 CLI、AST 鎖）；P／D 型（AC-SI-30-4①②、31-5）明標無機械物、不得讀成被擋 |
+| 5 | 座標零失真 | PASS | 抽查約 100 個（Architecture §3～§12、engine-bridge、backend、frontend、compose、apply_lock、LOC 八個現值全等、棘輪 516／5、compat-ci paths、params.py、AT 行號、RTM:469、TCS、SOP URL 出處）錯 0 |
+| 6 | 誠實劃界 | PASS | 7 個 URL 皆標「未驗」；NFR-SI-06-6、FC-b 寫明唯讀掛載前置與 `safe.directory` 未實測；AC-SI-34-1～34-4 逐條標形態判準；無「之後再看」句，僅有帶閘的主控待確認（F-15）與 F-08 |
+| 7 | 授權 | PASS | C.2 #10～#16 每列有 sid ee6af537… line 13（腳本逐列驗）；該行解析為 type=user、origin.kind=human、2026-10-19T12:21:32.705Z，11 段 T1 引文逐字相符；C.1 有四問→FR 對映；第 3 點預先核准句引用正確 |
+| 8 | 不該動的沒動 | PASS | 三個 commit 只動 PRD、本報告（+70／−0）與 SSOT 一行；其餘 d4b7868f..HEAD 差異屬他 commit；SOP 未變；原 77 條 AC、M1～M5 列、〈M1 判定細則〉、實體 glob 行逐字未動；SD-1 四十列與 SD-2 十二列與舊 PRD 逐字相同；PRD 內無「體積未達標」硬要求殘留（#57 已撤回，措辭尾巴見 F-05） |
+
 ---
 
 ## 附錄 SD　PRD §9.7 審閱紀錄與 §9.0 SD 查證（自 PRD 搬出，逐字）
