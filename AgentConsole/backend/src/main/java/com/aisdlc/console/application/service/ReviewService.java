@@ -3,7 +3,6 @@ package com.aisdlc.console.application.service;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.application.port.out.CheckpointRepository;
 import com.aisdlc.console.application.port.out.CheckpointRepository.CheckpointRow;
-import com.aisdlc.console.application.port.out.ExecutionRunRepository;
 import com.aisdlc.console.application.port.out.GoalRepository;
 import com.aisdlc.console.application.port.out.ProjectRepository;
 import com.aisdlc.console.application.port.out.ReviewRequestRepository;
@@ -70,7 +69,6 @@ public class ReviewService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ReviewService.class);
 
-    private final ExecutionRunRepository runs;
     private final ProjectRepository projects;
     private final GoalRepository goals;
     private final TaskRepository tasks;
@@ -88,13 +86,12 @@ public class ReviewService {
     private final Clock clock;
 
     @SuppressWarnings("java:S107")
-    public ReviewService(ExecutionRunRepository runs, ProjectRepository projects, GoalRepository goals,
+    public ReviewService(ProjectRepository projects, GoalRepository goals,
                          TaskRepository tasks, ReviewRequestRepository reviews, CheckpointRepository checkpoints,
                          AgentBridge bridge, ExecutionControlService control, RunLauncher launcher,
                          ConfigMaterializer config, SddBatches sddBatches, SettingsReader settings,
                          RuntimeSettings runtime, RunRegistry registry, PlatformTransactionManager transactions,
                          Clock clock) {
-        this.runs = runs;
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;

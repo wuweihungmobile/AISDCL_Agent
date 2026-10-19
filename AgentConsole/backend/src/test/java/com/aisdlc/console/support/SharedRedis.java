@@ -14,6 +14,8 @@ public final class SharedRedis {
     public static final String IMAGE = "redis:7-alpine";
     public static final int PORT = 6379;
 
+    // JVM 壽命單例：容器要活到 JVM 結束、刻意不 close，由 Testcontainers 的 Ryuk 在 JVM 結束時回收（見類別說明）。
+    @SuppressWarnings("resource")
     public static final GenericContainer<?> INSTANCE = new GenericContainer<>(DockerImageName.parse(IMAGE))
             .withExposedPorts(PORT);
 

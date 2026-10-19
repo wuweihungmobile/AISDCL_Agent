@@ -30,6 +30,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -47,6 +48,7 @@ import java.util.UUID;
  * 另開後續批次時 id 放在回應標頭 {@code X-Follow-Up-Run-Id}。
  */
 @RestController
+@RequestMapping("/api/v1")
 @Tag(name = "專案執行", description = "Phase 4；API-EXE／API-AUT／API-DAG")
 public class ExecutionController {
 
@@ -63,7 +65,7 @@ public class ExecutionController {
         this.query = query;
     }
 
-    @PostMapping("/api/v1/projects/{projectId}/execute")
+    @PostMapping("/projects/{projectId}/execute")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "啟動專案執行",
             description = "後端二次硬校驗（前端按鈕禁用只是體驗）。驗證順序固定：404 專案 → 400 欄位驗證 → 409 專案正在執行中 → "
@@ -78,7 +80,7 @@ public class ExecutionController {
                 execute.execute(projectId, request.toCommand(), principal.getName())));
     }
 
-    @GetMapping("/api/v1/projects/{projectId}/executions")
+    @GetMapping("/projects/{projectId}/executions")
     @Operation(summary = "列出專案執行批次（補充端點，ADR-001 G-16）",
             description = "分頁；預設 startedAt,desc。每列帶批次比較所需的 Token／時間／成功率（US-M-06），"
                     + "供執行頁挑選目前批次與監控頁「執行批次」下拉")
@@ -97,7 +99,7 @@ public class ExecutionController {
                 ExecutionRunSummaryResponse::from));
     }
 
-    @GetMapping("/api/v1/executions/{runId}")
+    @GetMapping("/executions/{runId}")
     @Operation(summary = "查詢執行狀態",
             description = "合併 DB 列與 Bridge GET /autoclaude/runs/{id}。Bridge 不可達時仍回 200，bridge.connected=false，"
                     + "進度欄位退回 DB 衍生值（currentStep 缺席），不回 5xx。pendingReviews 只含 PENDING。"
@@ -107,7 +109,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRunDetailResponse.from(query.get(runId)));
     }
 
-    @PostMapping("/api/v1/executions/{runId}/pause")
+    @PostMapping("/executions/{runId}/pause")
     @Operation(summary = "暫停執行（下一個步驟邊界生效）",
             description = "Bridge :pause（只收 RUNNING；PAUSING 時冪等）。回應的 bridgeStatus 為 PAUSING，status 仍是 RUNNING，"
                     + "直到 SSE 送出 status-change（PAUSED）。已在最後一步時暫停來不及，run 照常 COMPLETED")
@@ -115,7 +117,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRunResponse.from(control.pause(runId, principal.getName())));
     }
 
-    @PostMapping("/api/v1/executions/{runId}/resume")
+    @PostMapping("/executions/{runId}/resume")
     @Operation(summary = "恢復執行（PAUSED 同進度接續）",
             description = "Bridge :resume（只收 PAUSED）。後端先重驗範圍內 Goal／Task 皆 signedOff"
                     + "（否則 409「未經人工審批的草案不可執行」）。回應 bridgeStatus=RUNNING")
@@ -123,7 +125,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRunResponse.from(control.resume(runId, principal.getName())));
     }
 
-    @PostMapping("/api/v1/executions/{runId}/cancel")
+    @PostMapping("/executions/{runId}/cancel")
     @Operation(summary = "取消執行（stop）",
             description = "Bridge :stop（RUNNING／PAUSING／PAUSED 可收）。回應 bridgeStatus=CANCELLING；終態 CANCELLED 由 SSE 通知。"
                     + "取消後範圍內 RUNNING／QUEUED 任務轉 CANCELLED（系統重設，US-E-06），專案回 READY")
@@ -131,7 +133,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRunResponse.from(control.cancel(runId, principal.getName())));
     }
 
-    @GetMapping("/api/v1/executions/{runId}/steps")
+    @GetMapping("/executions/{runId}/steps")
     @Operation(summary = "分頁查詢執行步驟（亦為 SSE 斷線的 REST 回補）",
             description = "資料列由 Bridge 寫入 execution_steps（每個 step 事件一列）。stepNumber 等於該 step 事件的 Bridge seq"
                     + "（與 SSE id: 同一個序號空間），所以 afterSeq 直接對 SSE 的 Last-Event-ID 整數部分。"
@@ -149,7 +151,7 @@ public class ExecutionController {
         return ApiResult.ok(PageData.of(query.steps(runId, afterSeq, page, size), ExecutionStepResponse::from));
     }
 
-    @GetMapping("/api/v1/executions/{runId}/dag")
+    @GetMapping("/executions/{runId}/dag")
     @Operation(summary = "查詢 DAG 圖",
             description = "節點與邊在建立批次時凍結於 execution_runs.dag；每個節點的 status 於讀取時疊加目標／任務的現況"
                     + "（歷史批次也是現況，見 statusAsOf）")
@@ -157,7 +159,7 @@ public class ExecutionController {
         return ApiResult.ok(DagResponse.from(query.dag(runId)));
     }
 
-    @GetMapping("/api/v1/executions/{runId}/checkpoints")
+    @GetMapping("/executions/{runId}/checkpoints")
     @Operation(summary = "查詢可用斷點列表",
             description = "由 console.checkpoints 讀取（Bridge 於每個步驟完成時自行記錄歷史快照，append-only），依建立時間舊→新。"
                     + "不含 stateSnapshot 本體；stepIdx／stepId 取自快照內的 step_idx／step_id（＝還原後下一個要跑的步驟）")
@@ -165,7 +167,7 @@ public class ExecutionController {
         return ApiResult.ok(query.checkpoints(runId).stream().map(CheckpointResponse::from).toList());
     }
 
-    @GetMapping("/api/v1/executions/{runId}/rtm")
+    @GetMapping("/executions/{runId}/rtm")
     @Operation(operationId = "getExecutionRtm", summary = "執行追溯覆蓋（諮詢視圖；v1.5 補充端點，G-05）",
             description = "Bridge GET /autoclaude/runs/{id}/rtm 的投影：引擎 RtmWritebackPlugin 在 SDD 批次正常走完時寫的 AT／AC 覆蓋報告。"
                     + "諮詢視圖：AT 通過只代表評估指令與驗收 regex 皆通過，不等於規格被滿足；SCG-4 的人工審查才是真閘，所以回應恆帶 advisory:true。"
@@ -177,7 +179,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRtmResponse.from(query.rtm(runId)));
     }
 
-    @PostMapping("/api/v1/executions/{runId}/restore/{checkpointId}")
+    @PostMapping("/executions/{runId}/restore/{checkpointId}")
     @Operation(summary = "從指定歷史 checkpoint 還原並續跑",
             description = "Bridge POST /autoclaude/runs/{id}/restore（接受 PAUSED 與終態 COMPLETED／FAILED／CANCELLED；終態已放的鎖須重新取得，"
                     + "可能 409）。還原點之後的任務與目標由後端「系統重設」；專案回 EXECUTING。後端先重驗範圍內 signedOff。"
@@ -187,7 +189,7 @@ public class ExecutionController {
         return ApiResult.ok(ExecutionRunResponse.from(control.restore(runId, checkpointId, principal.getName())));
     }
 
-    @PostMapping("/api/v1/executions/{runId}/review/{stepId}")
+    @PostMapping("/executions/{runId}/review/{stepId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @ApiResponse(responseCode = "204", description = "已處理（無內容）",
             headers = @Header(name = FOLLOW_UP_HEADER, description = "後續批次 id（僅 SKIP／無還原點的 RETRY 會出現）",

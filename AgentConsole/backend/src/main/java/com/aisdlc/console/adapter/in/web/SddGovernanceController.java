@@ -29,7 +29,7 @@ import java.util.UUID;
  * （落在非 GET 的既有規則；VIEWER → 403 {@code ACCESS_DENIED}）。
  */
 @RestController
-@RequestMapping("/api/v1/projects")
+@RequestMapping("/api/v1/projects/{id}")
 @Tag(name = "專案管理")
 public class SddGovernanceController {
 
@@ -39,7 +39,7 @@ public class SddGovernanceController {
         this.governance = governance;
     }
 
-    @PostMapping("/{id}/sdd/freeze")
+    @PostMapping("/sdd/freeze")
     @Operation(operationId = "freezeProjectSddSpec", summary = "核准凍結 SDD 規格（人工閘；v1.5，D-115-03）",
             description = "PRD §0.4 把 Console 的 signoff 對映 FSM 的 HUMAN_PENDING：本端點是 Console 對 FSM 唯一的寫入動詞，HUMAN_PENDING→SPEC_FROZEN，"
                     + "帶 approver（一律取 JWT subject，不可由 client 指定）、理由與文件摘要。驗證順序固定：專案存在（404）→ 請求驗證（400）→ "
@@ -54,7 +54,7 @@ public class SddGovernanceController {
         return ApiResult.ok(SddFsmStateDto.from(governance.freeze(id, request.toDomain(), principal.getName())));
     }
 
-    @PutMapping("/{id}/sdd-binding")
+    @PutMapping("/sdd-binding")
     @Operation(operationId = "updateProjectSddBinding", summary = "編輯專案的 FSM 專案（改綁；v1.5，D-115-14）",
             description = "存入去前後空白後的值（非 null 時 1～100 字元、不含控制字元；null＝清除，回到「用預設」＝專案名；鍵缺席 → 400），"
                     + "不檢查狀態檔是否存在、不呼叫 Bridge；先檢查唯一性（同 executionPath 已有未刪除專案以同一個 sddProject 綁定 → 409 "

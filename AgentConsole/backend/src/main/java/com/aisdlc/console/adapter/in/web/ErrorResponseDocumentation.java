@@ -132,8 +132,10 @@ public class ErrorResponseDocumentation {
     @Bean
     OpenApiCustomizer errorEnvelopeCustomizer() {
         return openApi -> {
-            Map<String, Schema> schemas = ModelConverters.getInstance(true).readAll(ApiError.class);
-            schemas.forEach((name, schema) -> openApi.getComponents().addSchemas(name, schema));
+            // swagger-core 的 readAll 回傳型別本身就是 raw 的 Map<String, Schema>（Map<String, Schema<?>> 無法接）：
+            // 不宣告區域變數，原始碼就不必寫出 raw Schema。
+            ModelConverters.getInstance(true).readAll(ApiError.class)
+                    .forEach((name, schema) -> openApi.getComponents().addSchemas(name, schema));
             openApi.getPaths().forEach((path, item) -> item.readOperationsMap().forEach((method, operation) -> {
                 String key = method + " " + path;
                 boolean isPublic = operation.getSecurity() != null && operation.getSecurity().isEmpty();

@@ -261,7 +261,8 @@ class RunConsumersTest {
     void theCatchUpKeepsAskingForTheNextPageUntilItComesBackEmpty() {
         when(runs.findById(runId)).thenReturn(Optional.of(run(RunStatus.RUNNING)));
         stubStream(streams(), streams(event(9)));
-        when(bridge.listEvents(eq(runId), anyInt(), anyInt())).thenReturn(List.of(event(4)), List.of());
+        // 連續兩次回傳以 thenReturn 串接：thenReturn(a, b) 的 varargs 會建出 List<BridgeEvent> 的泛型陣列（unchecked 警告），行為等價
+        when(bridge.listEvents(eq(runId), anyInt(), anyInt())).thenReturn(List.of(event(4))).thenReturn(List.of());
         when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 4))).thenReturn(progress(frame(4)));
         when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 9))).thenReturn(terminal(frame(9)));
 

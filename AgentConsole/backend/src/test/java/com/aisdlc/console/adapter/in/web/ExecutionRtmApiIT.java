@@ -92,7 +92,10 @@ class ExecutionRtmApiIT extends AbstractExecutionIT {
         String runId = finishedRun();
         Map<String, Object> old = MiniBridge.rtmReport("greenfield", 3, 3, 0, 100.0, 1, 1, 100.0, List.of(), List.of(),
                 List.of(), true);
-        ((Map<String, Object>) old.get("at")).remove("unmapped");
+        // MiniBridge.rtmReport 的 at 區塊一定是它自己用 map(...) 組出的可變 Map：就地移除內層鍵來模擬舊版報告缺欄，unchecked 只限這一個宣告
+        @SuppressWarnings("unchecked")
+        Map<String, Object> at = (Map<String, Object>) old.get("at");
+        at.remove("unmapped");
         old.remove("unmapped_at_ids");
         old.remove("weak_regex_at_ids");
         old.remove("scenario");

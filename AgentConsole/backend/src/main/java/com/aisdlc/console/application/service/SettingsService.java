@@ -54,7 +54,6 @@ public class SettingsService implements SettingsUseCase {
 
     private static final String MODEL = "model";
     private static final String API_URL = "apiUrl";
-    private static final String API_KEY = "apiKey";
     private static final int EXPORT_VERSION = 1;
     private static final int MAX_PAGE_SIZE = 100;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);

@@ -13,6 +13,8 @@ public final class SharedPostgres {
 
     public static final String IMAGE = "pgvector/pgvector:pg18";
 
+    // JVM 壽命單例：容器要活到 JVM 結束、刻意不 close，由 Testcontainers 的 Ryuk 在 JVM 結束時回收（見類別說明）。
+    @SuppressWarnings("resource")
     public static final PostgreSQLContainer INSTANCE = new PostgreSQLContainer(
             DockerImageName.parse(IMAGE).asCompatibleSubstituteFor("postgres"))
             .withDatabaseName("aisdlc")

@@ -43,7 +43,7 @@ import java.util.UUID;
  * 三個欄位加空行組成；{@code Spring SseEmitter} 輸出不帶冒號後空白，客戶端一律以解析後的欄位處理（契約 §2.1、AR-03）。
  */
 @RestController
-@RequestMapping("/api/v1/stream")
+@RequestMapping("/api/v1/stream/executions/{runId}")
 @Tag(name = "SSE 推送", description = "Phase 4；API-SSE")
 public class StreamController {
 
@@ -60,7 +60,7 @@ public class StreamController {
         this.streams = streams;
     }
 
-    @GetMapping(path = "/executions/{runId}/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(path = "/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @SecurityRequirement(name = OpenApiNames.BEARER)
     @SecurityRequirement(name = OpenApiNames.QUERY_TOKEN)
     @ApiResponse(responseCode = "200", description = "text/event-stream",
@@ -90,7 +90,7 @@ public class StreamController {
         return open(runId, Kind.LOGS, lastEventId, tail);
     }
 
-    @GetMapping(path = "/executions/{runId}/metrics", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(path = "/metrics", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @SecurityRequirement(name = OpenApiNames.BEARER)
     @SecurityRequirement(name = OpenApiNames.QUERY_TOKEN)
     @ApiResponse(responseCode = "200", description = "text/event-stream",
