@@ -10,6 +10,7 @@ import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.model.task.TaskStatus;
 import com.aisdlc.console.infrastructure.persistence.entity.ProjectEntity;
+import com.aisdlc.console.infrastructure.persistence.entity.ProjectEntity_;
 import com.aisdlc.console.infrastructure.persistence.repository.GoalJpaRepository;
 import com.aisdlc.console.infrastructure.persistence.repository.KeyedCount;
 import com.aisdlc.console.infrastructure.persistence.repository.KeyedTaskCount;
@@ -90,7 +91,7 @@ class ProjectRepositoryAdapter implements ProjectRepository {
     @Override
     public PageResult<Project> search(ListQuery query) {
         Sort.Direction direction = query.ascending() ? Sort.Direction.ASC : Sort.Direction.DESC;
-        Sort sort = Sort.by(direction, sortProperty(query.sortField())).and(Sort.by(Sort.Direction.ASC, "id"));
+        Sort sort = Sort.by(direction, sortProperty(query.sortField())).and(Sort.by(Sort.Direction.ASC, ProjectEntity_.ID));
         Page<ProjectEntity> page = projects.findAll(specification(query),
                 PageRequest.of(query.page(), query.size(), sort));
         return new PageResult<>(page.getContent().stream().map(ProjectMapper::toDomain).toList(),
@@ -119,25 +120,27 @@ class ProjectRepositoryAdapter implements ProjectRepository {
         return result;
     }
 
+    /** 排序屬性名取自 JPA 靜態 metamodel 常數（{@link ProjectEntity_}，編譯期由 Hibernate 註解處理器產生）：欄位更名時編譯即紅，不拖到執行期。 */
     private static String sortProperty(SortField field) {
         return switch (field) {
-            case NAME -> "name";
-            case STATUS -> "status";
-            case CREATED_AT -> "createdAt";
-            case UPDATED_AT -> "updatedAt";
+            case NAME -> ProjectEntity_.NAME;
+            case STATUS -> ProjectEntity_.STATUS;
+            case CREATED_AT -> ProjectEntity_.CREATED_AT;
+            case UPDATED_AT -> ProjectEntity_.UPDATED_AT;
         };
     }
 
     private static Specification<ProjectEntity> specification(ListQuery query) {
         return (root, criteria, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
-            predicates.add(query.deleted() ? cb.isTrue(root.get("deleted")) : cb.isFalse(root.get("deleted")));
+            predicates.add(query.deleted() ? cb.isTrue(root.get(ProjectEntity_.deleted))
+                    : cb.isFalse(root.get(ProjectEntity_.deleted)));
             if (query.nameQuery() != null && !query.nameQuery().isBlank()) {
                 String pattern = "%" + escapeLike(query.nameQuery().strip().toLowerCase(Locale.ROOT)) + "%";
-                predicates.add(cb.like(cb.lower(root.get("name")), pattern, '\\'));
+                predicates.add(cb.like(cb.lower(root.get(ProjectEntity_.name)), pattern, '\\'));
             }
             if (query.status() != null) {
-                predicates.add(cb.equal(root.get("status"), query.status()));
+                predicates.add(cb.equal(root.get(ProjectEntity_.status), query.status()));
             }
             return cb.and(predicates.toArray(new Predicate[0]));
         };

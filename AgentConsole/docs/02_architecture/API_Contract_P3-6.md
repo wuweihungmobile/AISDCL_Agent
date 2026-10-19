@@ -4204,6 +4204,7 @@ v1.4（D-17）：`healthCheckPath` 的預設由 `/health` 改為 `/health/deep`�
 | `com.bucket4j:bucket4j-core` | 限流（記憶體實作，§0.4 第 4 點） | **8.10.1**（Maven Central 上的最後一版，之後改名 `bucket4j_jdk17-core`；同上） | W3-B1 任務書 |
 | `org.apache.httpcomponents.client5:httpclient5` | SSRF 防護的外呼 HTTP 客戶端：自訂 `DnsResolver` 釘 IP、Host／SNI 用原 host、不跟 redirect（§1.5.7；AR-10；D-51） | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控補充裁決（W3-B1 補充節） |
 | `org.springframework.boot:spring-boot-starter-data-redis` | refresh token 撤銷名單的 Redis 實作（§1.9.2；內含 Lettuce 客戶端）；v1.4 以前後端**零 Redis 相依** | 由 Spring Boot BOM 管理，**不自行指定版本** | 主控裁決 D-19（`Implementation_Plan.md` §5.3）；主控已裁決視同核可（§6.7.3 Q6） |
+| `org.hibernate.orm:hibernate-processor` | **編譯期**（只進 `annotationProcessor`，不進 runtimeClasspath 與 boot jar）：產生 JPA 靜態 metamodel（`ProjectEntity_` 等每個 `@Entity` 一個 `<Entity>_`），讓 `ProjectRepositoryAdapter` 的排序與查詢屬性參照型別安全（欄位更名即編譯紅），取代字串屬性名；`ProjectEntity` 維持「公開欄位、無 getter」不動。產物落 `build/generated/sources/annotationProcessor/java/main`，`build/` 已被 `.gitignore` 涵蓋、不入庫 | 由 Spring Boot BOM 管理（＝`hibernate-core` 同版，2026-10-19 解析為 7.4.5.Final），**不自行指定版本** | 掌舵者 2026-10-19 指令（IDE `SPRING_DATA_STRING_PROPERTY_REFERENCE` 提示須真正修、且修法不留後遺症；根 `CLAUDE.md`〈兩專案共通的工程紀律〉第 5 條）＋主控裁決路線 A（靜態 metamodel） |
 
 **字型資源（v1.2，C-4；不是相依）**：PDF 報表需要的 CJK 字型（建議 Noto Sans TC 靜態 Regular，SIL OFL 1.1）與其授權檔放 `backend/src/main/resources/fonts/`；來源網址與檔案雜湊寫在 W5-BE 交卷。
 

@@ -63,6 +63,12 @@ dependencies {
 	// 只被撤銷名單使用（限流計數與 SSE 位移不用 Redis，ADR-001 D16／D23）；沒設 spring.data.redis.host 時不會連線。
 	implementation("org.springframework.boot:spring-boot-starter-data-redis")
 
+	// 型別安全的屬性參照（掌舵者要求、主控裁決）：Hibernate 的 JPA 靜態 metamodel 註解處理器，編譯期替每個 @Entity 產生 <Entity>_ 類別
+	// （ProjectRepositoryAdapter 的排序與查詢條件改用 ProjectEntity_，不再寫字串屬性名；ProjectEntity 仍維持「公開欄位、無 getter」）。
+	// 只進 annotationProcessor（編譯期），不進 runtimeClasspath；版本由 Spring Boot BOM 管理（＝hibernate-core 同版），刻意不在此釘版。
+	// 產物落在 build/generated/sources/annotationProcessor/java/main（build/ 已被 .gitignore 涵蓋，不入庫）。
+	annotationProcessor("org.hibernate.orm:hibernate-processor")
+
 	testImplementation("org.springframework.boot:spring-boot-starter-actuator-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-data-jpa-test")
 	testImplementation("org.springframework.boot:spring-boot-starter-flyway-test")
