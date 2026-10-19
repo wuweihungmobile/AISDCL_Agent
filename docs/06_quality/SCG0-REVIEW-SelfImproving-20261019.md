@@ -537,3 +537,12 @@ docs/06_quality/SelfImproving_Observation_Ledger.md  17605 bytes  mtime 10-19 05
 ---
 
 二審完成時刻：2026-10-19 10:07（+08:00）（報告寫入後終檢：`HEAD=978df84c rc=0`、`git status --short` 只有本報告一個 ` M`、三份受審檔 `git diff --stat HEAD` 無輸出）；QA（Sonnet 5.5，未參與撰寫）；**二審判定 PASS**（P1＝0、P2＝0；新增 P3＝7、P4＝6）。一審判定 FAIL（P1＝0、P2＝3、P3＝18、P4＝7）。
+
+## 7. 凍結紀錄（主控補註，2026-10-19；本節非 QA 所寫）
+
+- 收尾 commit `8d2d5ef0`（SD 收尾棒 P3 F-29～F-34、F-36＋主控 C.2 補記兩則授權座標與 #9 附件載體）後，主控執行：
+  - `gate --gate SCG_VALIDATION --result PASS` → 逐字輸出 `{"gate": "SCG_VALIDATION", "result": "PASS", "next_state": "HUMAN_PENDING"}`（rc=0）；`show` 的 `current_state` 為 `HUMAN_PENDING`。
+  - `spec-frozen --stage Stage-1 --doc docs/01_requirements/SelfImproving_PRD.md --doc docs/05_development/SelfImproving_Research_Methodology_SOP.md --digest --root <repo 根> --approver "掌舵者（預先核准，sid f3ead132-29b1-418c-97d9-35868ab11c70 line 2536；主控代為執行）"` → 逐字輸出：`{"ok":true,"verb":"spec-frozen","project":"monorepo-selfimproving","from_state":"HUMAN_PENDING","current_state":"SPEC_FROZEN","stage":"Stage-1","spec_doc_digests":{"docs/01_requirements/SelfImproving_PRD.md":"sha256:a27bba619c493b2edac12cdd260e889f2b023fc9344c547487d4c4337be3b513","docs/05_development/SelfImproving_Research_Methodology_SOP.md":"sha256:deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2"}}`（rc=0）。
+- 人工閘依據：掌舵者本輪原文（同 sid）line 2493「…(不用考量成本)，我授權幫我決策…」與 line 2536「真正需要你本人的只剩凍結核准 ==> 現在先授權核准! (避免不在機器旁)」；凍結核准由掌舵者預先給出，主控代為執行，不再互動確認。PRD 附錄 C.2 #1～#9 仍可由掌舵者以 T1 推翻（推翻走 HUMAN_PENDING→SPEC_REGRESSION_CHECK→重新凍結）。
+- 狀態檔住根 `build/reports/fsm`（不入庫）；凍結後本 PRD 與 SOP 不得再原地改，修訂走 SPEC_REGRESSION_CHECK 迴路。
+- 掌舵者後續指示（line 見記憶檔）：凍結後接著開 P0 實作（新功能鍵）。
