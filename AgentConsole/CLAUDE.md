@@ -116,7 +116,7 @@ Push-Location AgentConsole; docker compose --profile db --profile app --profile 
 | 服務 | 閘門 |
 |------|------|
 | engine-bridge | `ruff check`（本目錄與 monorepo 根視角各一次）、pytest、`GET /health`、根層 `TestDirEntryPrimitivesAreAccountedFor`、`docker build` |
-| backend | `gradlew clean build` 為 `BUILD SUCCESSFUL`；JaCoCo ≥80%；ArchUnit（domain 不依賴 Spring／JPA）；Flyway＋`ddl-auto=validate` |
+| backend | `gradlew clean build` 為 `BUILD SUCCESSFUL`；JaCoCo ≥80%；ArchUnit（domain 不依賴 Spring／JPA）；Flyway＋`ddl-auto=validate`；IDE 的 JDT 註解式空值分析刻意停用（Architecture §12.1 L-13，不是程式缺陷） |
 | frontend | lint、`tsc --noEmit`、build、vitest（≥70%）、四區塊只在 `app/layout.tsx` 組裝（掃描無輸出） |
 | docs | RTM 列數與 PRD 對帳（US 58）；`CLAUDE.md` ≤200 行、`README.md` ≤80 行；新文件不得有「測試摘要字樣＋4 位數字」同行 |
 
