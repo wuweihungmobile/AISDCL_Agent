@@ -3,6 +3,7 @@
   "card_line_max": 100,
   "churn_max": 2,
   "event_max_bytes": 2000,
+  "export_limit_max": 500,
   "ledger_fail_bytes": 262144,
   "ledger_warn_bytes": 245760,
   "max_archive_entries_per_card": 50,
@@ -12,6 +13,7 @@
   "max_touch_ratio": 0.2,
   "metrics_rev": 1,
   "migration_base_sha": "ab4638c439ad1cc4b8408efcd454c29ef7966d0b",
+  "min_events": 1,
   "min_heldout": 5,
   "min_obs_rows": 10,
   "non_evolvable_globs": [
@@ -41,6 +43,9 @@
     "tools/selfimproving.py",
     "tools/session_resume_planner.py"
   ],
+  "research_bytes_max": 262144,
+  "research_fetch_max": 8,
+  "research_timeout_seconds": 20,
   "row_max_bytes": 700,
   "spec_body_globs": [
     "**/docs/01_requirements/**",

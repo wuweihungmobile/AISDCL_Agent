@@ -49,15 +49,41 @@ _COORD_RES = [re.compile(p) for p in (
     r"§\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*\d",
 )]
 
-MARK_KEYS = {"面", "暴露", "來源", "外部衍生", "回報者", "根因", "rel", "reopens", "orig", "span"}
+MARK_KEYS = {"面", "暴露", "來源", "外部衍生", "回報者", "根因", "rel", "reopens", "orig", "span",
+             "src"}
+_SRC_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 _FACES = {"守衛", "產品", "文件", "流程"}
 _EXPOSURES = {"a", "b", "c", "無"}
 _SOURCES = {"人", "代理", "工具", "逐字稿", "帳本"}
 ORIG_AT_RE = re.compile(r"^@[^\s#]+#OBS-SI-\d+$")
 
 
+def now_cell() -> str:
+    """現在本機時間 `YYYY-MM-DD HH:MM ±HH:MM`（帶 offset；絕不輸出 naive 時間戳）。"""
+    z = datetime.now().astimezone()
+    off = z.strftime("%z")
+    return f"{z.strftime('%Y-%m-%d %H:%M')} {off[:3]}:{off[3:]}"
+
+
+def draft_row(num: int, context: str, symptom: str, evidence: str, who: str) -> str:
+    """OBS 草稿列（九欄；分類 bug、嚴重度 P3、處置 open；供主控入帳，CLI 不自寫帳本）。"""
+    cells = [f"OBS-SI-{num:03d}", now_cell(), context, symptom, evidence, "bug", "P3", "open",
+             f"面=流程;來源=工具;回報者={who}"]
+    return "| " + " | ".join(cells) + " |"
+
+
 def has_coord(text: str) -> bool:
     return any(r.search(text) for r in _COORD_RES)
+
+
+def path_set(cell: str) -> set[str]:
+    """證據座標格中 `path`、`file`、`dir` 三形態命中的片段（去結尾行號、`\\` 換 `/`、casefold）。"""
+    out = set()
+    cell = _COORD_RES[7].sub(" ", cell)  # 反引號包住的指令是第八種座標形態、不是路徑
+    for rx in _COORD_RES[:3]:
+        for m in rx.finditer(cell):
+            out.add(re.sub(r":\d+(?:[–-]\d+)?$", "", m.group(0)).replace("\\", "/").casefold())
+    return out
 
 
 def disp_token(cell: str) -> str | None:
@@ -140,7 +166,9 @@ def row_marks(row: Row) -> dict[str, tuple[str, bool]]:
     return parse_marks(row.cells[8])[0] if row.nine else {}
 
 
-def evaluate_rows(led: Ledger, row_max_bytes: int | None) -> dict[str, list[Finding]]:
+def evaluate_rows(led: Ledger, row_max_bytes: int | None,
+                  src_ids: set[str] | None = None) -> dict[str, list[Finding]]:
+    """`src_ids`＝研究來源表的全部 id（含 retired）；None＝來源表不存在或無法解析。"""
     out: dict[str, list[Finding]] = {k: [] for k in (
         "ledger.time_tz", "row.required", "row.enums", "row.markers", "row.provenance",
         "row.coordinates", "row.bytes", "row.control_chars")}
@@ -177,7 +205,7 @@ def evaluate_rows(led: Ledger, row_max_bytes: int | None) -> dict[str, list[Find
             add("row.enums", row, "ENUM-SEVERITY", "欄「嚴重度」不在 P1～P4")
         if 7 not in empties:
             _disposition(row, cells[7], add)
-        _marks(row, cells, empties, add)
+        _marks(row, cells, empties, add, src_ids)
     return out
 
 
@@ -204,13 +232,30 @@ def _disposition(row: Row, disp: str, add) -> None:
         add("row.enums", row, "DISP-DEFER-LATER", "欄「處置」含「之後再看」")
 
 
-def _marks(row: Row, cells: list[str], empties: set[int], add) -> None:
+def _src_checks(row: Row, marks: dict, src_ids: set[str] | None, add) -> None:
+    """R44：`回報者=研究者` 須帶 外部衍生=是 與 src；任何 src 須屬來源表（含 retired）。"""
+    if marks.get("回報者", ("", False))[0] == "研究者":
+        if "外部衍生" not in marks:
+            add("row.provenance", row, "RESEARCHER-NOT-EXTERNAL", "研究者的列須 外部衍生=是")
+        if "src" not in marks:
+            add("row.provenance", row, "RESEARCHER-NO-SRC", "研究者的列須帶 src")
+    if "src" in marks and _SRC_RE.match(marks["src"][0]):
+        if src_ids is None:
+            add("row.markers", row, "SOURCE-UNAVAILABLE", "來源表不存在或無法解析", "info")
+        elif marks["src"][0] not in src_ids:
+            add("row.markers", row, "SRC-UNKNOWN", f"src {marks['src'][0]} 不在來源表")
+
+
+def _marks(row: Row, cells: list[str], empties: set[int], add,
+           src_ids: set[str] | None = None) -> None:
     marks, problems = parse_marks(cells[8])
     for p in problems:
         add("row.markers", row, "MARK-SYNTAX", f"欄「標記」{p}")
     for key, (value, quoted) in marks.items():
         if key not in MARK_KEYS:
             add("row.markers", row, "MARK-UNKNOWN-KEY", f"欄「標記」未知鍵 {key}")
+        elif key == "src" and not _SRC_RE.match(value):
+            add("row.markers", row, "MARK-VALUE", "欄「標記」src 的值不合 id 形態")
         elif (key == "面" and value not in _FACES) or (key == "暴露" and value not in _EXPOSURES) \
                 or (key == "外部衍生" and value != "是"):
             add("row.markers", row, "MARK-VALUE", f"欄「標記」{key} 的值不在值域")
@@ -230,6 +275,8 @@ def _marks(row: Row, cells: list[str], empties: set[int], add) -> None:
         add("row.provenance", row, "SOURCE-VALUE", "欄「標記」來源不在詞彙")
     if "回報者" not in marks:
         add("row.provenance", row, "REPORTER-MISSING", "欄「標記」缺 回報者")
+    if not problems:
+        _src_checks(row, marks, src_ids, add)
 
 
 __all__ = ["COLUMNS", "evaluate_rows", "has_coord", "parse_marks", "disp_token", "row_marks"]

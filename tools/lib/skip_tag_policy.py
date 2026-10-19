@@ -412,7 +412,11 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 71 只剩實測的 79%，`run_root_unittests.py` 前置掃描逐字指示重釘為 72 ⇒ 照填，零加減推算）。
     # 🔴 2026-10-19 重釘 72→73（SelfImproving P0 新增 `test_selfimproving_check.py`，實測 92 支，
     # 72 只剩實測的 78%，`run_root_unittests.py` 前置掃描逐字指示重釘為 73 ⇒ 照填）。
-    "tools/tests": 73,
+    # 🔴 2026-10-20 重釘 73→78（SelfImproving P1 新增 6 支測試檔——`_selfimproving_fixtures.py`／
+    # `test_selfimproving_{capability,events,props,research_scan,export_status}.py`／
+    # `test_root_module_layout.py`，實測 98 支，73 只剩實測的 74%，前置掃描逐字指示重釘為
+    # 78 ⇒ 照填）。
+    "tools/tests": 78,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -492,7 +496,9 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-12 重釘 230→231（R212 第四列新增 `AutoClaude/tests/execution/
     # test_prd12_permission_bypass_invariant8.py`，收尾實測 289 支，230 低於實測的 80%，
     # 前置掃描逐字指示重釘為 231 ⇒ 照填，零加減推算）。
-    "AutoClaude/tests": 242,  # 241→242（webhook 測試檔後實測 303；逐字指示）  round-label-ok
+    # 🔴 2026-10-20 重釘 242→243（實測 304，前置掃描逐字指示重釘為 243 ⇒ 照填；成長來源含
+    # 工作樹既有的未追蹤 `tests/contract/test_evolution_propose_only.py`，非本包新增）。
+    "AutoClaude/tests": 243,  # 241→242（webhook 測試檔後實測 303；逐字指示）  round-label-ok
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行

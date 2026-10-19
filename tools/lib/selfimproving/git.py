@@ -20,6 +20,26 @@ _TIMEOUT = 60
 _GREP_LINE_RE = re.compile(r"^(.*?):(\d+):(.*)$")
 
 
+def apply_numstat(repo: Path, patch_file: Path) -> list[str]:
+    """`git apply --numstat -z` 看到的路徑（改名／複製兩端皆列）；git 不可用拋 OSError。
+    只能檢查、不能當 `touched` 的來源（R51 (b)）；測試以 mock.patch.object 模擬漏看。"""
+    cp = Git(repo).run("apply", "--numstat", "-z", str(patch_file))
+    if cp is None or cp.returncode != 0:
+        raise OSError("git apply --numstat 失敗或 git 不可用")
+    toks = cp.stdout.split("\0")
+    out, i = [], 0
+    while i < len(toks):
+        parts = toks[i].split("\t", 2)
+        if len(parts) == 3 and parts[2] == "" and i + 2 < len(toks):
+            out += [toks[i + 1], toks[i + 2]]
+            i += 3
+            continue
+        if len(parts) == 3:
+            out.append(parts[2])
+        i += 1
+    return [p for p in out if p]
+
+
 class Git:
     def __init__(self, repo: Path) -> None:
         self.repo = repo.resolve()
@@ -66,6 +86,24 @@ class Git:
     def show(self, commit: str, rel: str) -> str | None:
         cp = self.run("show", f"{commit}:{rel}")
         return cp.stdout if cp is not None and cp.returncode == 0 else None
+
+    def head(self) -> str | None:
+        cp = self.run("rev-parse", "HEAD")
+        sha = cp.stdout.strip() if cp is not None and cp.returncode == 0 else ""
+        return sha if re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+    def log_times(self, rel: str) -> list[tuple[str, int]] | None:
+        """動過 `rel` 的 commit：(sha, committer 時間 epoch)，git 的預設走訪序（新→舊）。"""
+        cp = self.run("-c", "core.quotepath=false", "log", "--format=%H %ct", "--", rel)
+        if cp is None or cp.returncode != 0:
+            return None
+        pairs = [ln.split() for ln in cp.stdout.split("\n") if ln.strip()]
+        return [(a, int(b)) for a, b in pairs]
+
+    def commit_time(self, sha: str) -> int | None:
+        cp = self.run("show", "-s", "--format=%ct", sha)
+        txt = cp.stdout.strip() if cp is not None and cp.returncode == 0 else ""
+        return int(txt) if txt.isdigit() else None
 
     def grep_only(self, pattern: str) -> list[tuple[str, int, str]] | None:
         """整個 repo（含未追蹤但未被忽略的檔）的 `-o` 命中：(相對路徑, 行號, 命中片段)。"""

@@ -1,0 +1,54 @@
+{
+  "schema_rev": 1,
+  "sources": [
+    {
+      "id": "anthropic-engineering",
+      "url": "https://www.anthropic.com/engineering",
+      "kind": "blog",
+      "extract": "最新 5 篇文章的標題與日期（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "cc-changelog",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md",
+      "kind": "changelog",
+      "extract": "最新 5 個版本的編號與各版首行（逐字，不改寫）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "cc-docs-hooks",
+      "url": "https://code.claude.com/docs/en/hooks-guide",
+      "kind": "docs",
+      "extract": "標題清單＋事件名清單（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "cc-docs-memory",
+      "url": "https://code.claude.com/docs/en/memory",
+      "kind": "docs",
+      "extract": "頁面標題清單＋含數字上限的句子（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "cc-docs-skills",
+      "url": "https://code.claude.com/docs/en/skills",
+      "kind": "docs",
+      "extract": "標題清單＋frontmatter 欄位名清單（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "openai-agents-releases",
+      "url": "https://github.com/openai/openai-agents-python/releases.atom",
+      "kind": "release",
+      "extract": "最新 5 個 release 的編號與日期（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    },
+    {
+      "id": "openai-api-changelog",
+      "url": "https://platform.openai.com/docs/changelog",
+      "kind": "changelog",
+      "extract": "最新 5 筆變更的日期與標題（逐字）",
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+    }
+  ]
+}

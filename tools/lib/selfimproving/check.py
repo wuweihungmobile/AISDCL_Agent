@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from . import evcheck as si_evcheck
 from . import history as si_history
 from . import params as si_params
 from . import refs as si_refs
+from . import sources as si_sources
 from .git import Git
 from .ledger import Finding, max_valid_id, parse_ledger, structure_findings
 from .rows import evaluate_rows
@@ -23,10 +25,11 @@ ITEM_IDS = (
     "ref.def", "ref.obs", "ref.orig_notes", "ref.carrier_families", "history.migration",
     "history.row_mutated", "params.keys", "params.globs", "params.coupling", "ledger.volume",
     "ledger.vacuity",
-)
+) + si_evcheck.ITEM_IDS  # 其後追加 7 項（P1，R36）；前 21 項的 id、項序與碼一字不變
 LEDGER_REL = "docs/06_quality/SelfImproving_Observation_Ledger.md"
 PARAMS_REL = f"{si_params.PROTOCOL_REL}/params.json"
-_NONBLOCKING = "CARRIER-NOT-ESTABLISHED"
+_NONBLOCKING = frozenset({"CARRIER-NOT-ESTABLISHED", "SOURCES-HISTORY-NOT-ESTABLISHED",
+                          "QUOTE-VERIFIER-NOT-ESTABLISHED"})
 _LIST_MAX = 5
 
 
@@ -76,12 +79,22 @@ def load_params(path: Path) -> dict:
     return obj
 
 
+def params_for(repo: Path, *keys: str) -> dict:
+    """各動詞只讀它需要的 params 鍵；缺失、無效＝InputError（rc 3），不以預設值頂替。"""
+    params = load_params(repo / PARAMS_REL)
+    bad = [k for k in keys if k not in si_params.valid_keys(params)]
+    if bad:
+        raise InputError("params.json 必要鍵缺失或無效：" + "、".join(bad))
+    return params
+
+
 def _item(item_id: str, findings: list[Finding], detail: str = "") -> Item:
     if any(f.level == "fail" for f in findings):
         return Item(item_id, "FAIL", False, detail, findings)
     infos = [f for f in findings if f.level == "info"]
     if infos:
-        return Item(item_id, "NE", any(f.code != _NONBLOCKING for f in infos), detail, findings)
+        return Item(item_id, "NE", any(f.code not in _NONBLOCKING for f in infos), detail,
+                    findings)
     return Item(item_id, "PASS", False, detail, findings)
 
 
@@ -96,8 +109,11 @@ def build_items(repo: Path, ledger: Path, params: dict, text: str, size: int,
                 git: Git) -> tuple[list[Item], int, int]:
     led = parse_ledger(text)
     valid = si_params.valid_keys(params)
-    ev = evaluate_rows(led, params["row_max_bytes"] if "row_max_bytes" in valid else None)
+    src_path = repo / si_sources.SOURCES_REL
+    src_ids = si_sources.ids_or_none(src_path.read_bytes() if src_path.is_file() else None)
+    ev = evaluate_rows(led, params["row_max_bytes"] if "row_max_bytes" in valid else None, src_ids)
     rel = _rel(repo, ledger)
+    ev["row.markers"] += si_refs.reopen_findings(repo, rel, led, text, git)
     f: dict[str, list[Finding]] = {"ledger.structure": structure_findings(led), **ev}
     if "row_max_bytes" not in valid:
         f["row.bytes"] = si_params.ne_findings("row_max_bytes 無效，無法判定列位元組")
@@ -112,12 +128,15 @@ def build_items(repo: Path, ledger: Path, params: dict, text: str, size: int,
     f["params.coupling"] = si_params.coupling_findings(params, valid)
     f["ledger.volume"] = _volume(params, valid, size)
     f["ledger.vacuity"] = _vacuity(params, valid, len(led.rows))
+    extra = si_evcheck.compute(repo, params, valid, git)
     items = []
     for item_id in ITEM_IDS:
         if item_id == "history.migration":
             items.append(_item(item_id, mig.findings, mig.detail))
         elif item_id == "history.row_mutated":
             items.append(_item(item_id, muts, mut_detail))
+        elif item_id in extra:
+            items.append(_item(item_id, *extra[item_id]))
         else:
             items.append(_item(item_id, f[item_id]))
     return items, len(led.rows), max_valid_id(led)

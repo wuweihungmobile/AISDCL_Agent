@@ -10,7 +10,9 @@ from pathlib import Path
 from .ledger import Finding, split_lines
 
 PROTOCOL_REL = "docs/06_quality/SelfImproving_Protocol"
-CHECK_RULES_REV = 1
+CHECK_RULES_REV = 2  # P1 擴充 check 判準語意（TCS-P1 R46 (c)）
+# 來源表不是指標定義：改它不得改判準指紋（TCS-P1 R46 (b)；只涵蓋這一個檔名）
+FINGERPRINT_EXCLUDED = frozenset({"research_sources.json"})
 
 # 鍵 → 型別規則：int1＝整數 ≥1；ratio＝數值 0<x≤1；sha＝字串或 null；strs＝非空字串陣列
 PARAM_SPECS: dict[str, str] = {
@@ -21,6 +23,8 @@ PARAM_SPECS: dict[str, str] = {
     "card_line_max": "int1", "event_max_bytes": "int1", "metrics_rev": "int1",
     "min_obs_rows": "int1", "ledger_warn_bytes": "int1", "ledger_fail_bytes": "int1",
     "migration_base_sha": "sha", "spec_body_globs": "strs", "non_evolvable_globs": "strs",
+    "research_fetch_max": "int1", "research_bytes_max": "int1", "research_timeout_seconds": "int1",
+    "min_events": "int1", "export_limit_max": "int1",
 }
 _LABEL_RE = re.compile(r"\((?:i|ii|iii|iv|v)\) $")
 _BRACE_RE = re.compile(
@@ -123,7 +127,8 @@ def coupling_findings(params: dict, valid: set[str]) -> list[Finding]:
 def fingerprint(repo: Path, params: dict) -> tuple[str, dict]:
     pdir = repo / PROTOCOL_REL
     found = pdir.rglob("*") if pdir.is_dir() else []
-    files = [p for p in found if p.is_file() and p.name[0] != "."]
+    files = [p for p in found if p.is_file() and p.name[0] != "."
+             and p.relative_to(pdir).as_posix() not in FINGERPRINT_EXCLUDED]
     man = sorted((p.relative_to(pdir).as_posix(),
                   hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest())
                  for p in files)

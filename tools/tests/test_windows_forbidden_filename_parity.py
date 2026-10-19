@@ -649,6 +649,9 @@ _KNOWN_NTFS_ANCHOR_SITES = {
     "AutoClaude/autoclaude/infra/adapters/rtm_file_sink.py": "註解：DEF-101-343 沿革；實作已委派共用函式",
     "AutoClaude/autoclaude/plugins/playbook_persistence_plugin.py": "註解：說明保留名／禁用字元語意",
     "AISDLC_SDD/<LATEST>/tools/fsm_runtime/counterfactual_replay.py": "註解：提醒組檔名前須淨化",
+    # ③ SelfImproving 提案 patch 的路徑別名拒收（TCS-P1 R51 (c)）——只判「含保留裝置名」就拒，
+    # 不做檔名淨化輸出，故為鏡像判準而非第 5 份實作（拒收比淨化更嚴，不會放行 4 份實作會擋的名字）
+    "tools/lib/selfimproving/paths.py": "鏡像：提案 patch 別名拒收；拒收而非淨化，非第 5 份實作",
 }
 
 

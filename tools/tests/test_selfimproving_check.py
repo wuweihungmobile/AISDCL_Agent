@@ -290,6 +290,11 @@ def params_dict() -> dict:
         "max_archive_entries_per_card": 50,
         "card_line_max": 100,
         "event_max_bytes": 2000,
+        "research_fetch_max": 8,  # P1 新增五鍵（TCS-P1 R67）：與 PARAM_SPECS 同步
+        "research_bytes_max": 262144,
+        "research_timeout_seconds": 20,
+        "min_events": 1,
+        "export_limit_max": 500,
         "metrics_rev": 1,
         "min_obs_rows": 10,
         "ledger_warn_bytes": 245760,
@@ -709,7 +714,8 @@ class TestLedgerRowRules(SiCase):
         repo = baseline()
         res = self.check(repo)
         self.assertEqual((res["rc"], res["overall"], res["rows"]), (0, "PASS", 10))
-        self.assertEqual([i["id"] for i in res["items"]], ITEMS21)
+        ids = [i["id"] for i in res["items"]]
+        self.assertEqual((ids[:21], len(ids)), (ITEMS21, 28))  # P1：前 21 項不變、其後追加 7 項
         for item in ITEMS21:
             if item == "ref.carrier_families":
                 self.assertEqual(self.S(res, item), "NE")
@@ -723,7 +729,7 @@ class TestLedgerRowRules(SiCase):
         rc, text, _ = self.run_main(["check", "--repo", str(repo)])
         self.assertEqual(rc, 0)
         lines = text.split("\n")
-        self.assertEqual(lines[0], "si-check rows=10 items=21")
+        self.assertEqual(lines[0], "si-check rows=10 items=28")
         last = [ln for ln in lines if ln.strip()][-1]
         self.assertRegex(last, r"^overall=PASS rc=0 fingerprint=sha256:[0-9a-f]{64}$")
         self.assertNotIn("obs-draft:", text)
@@ -1357,7 +1363,7 @@ class TestScopeAndSop(SiCase):
         self.assertEqual(hits("print('clean')"), [])
         for src in si_sources():
             self.assertEqual(hits(src.read_bytes().decode("utf-8")), [], src.name)
-        for verb in ("status", "prop-new"):
+        for verb in ("decide", "promote"):  # P1 已實作 status／prop-new，改選仍未實作的動詞
             rc, out, _ = self.run_main([verb])
             self.assertEqual((rc, out), (3, ""))
         settings = (ROOT / ".claude/settings.json").read_bytes().decode("utf-8")
@@ -1839,7 +1845,7 @@ class TestCli(SiCase):
         bad_arr.write_bytes(b"[]")
         calls = [
             [],
-            ["status"],
+            ["decide"],
             ["check", "--bogus"],
             ["check", "--repo", str(tmp / "missing")],
             ["check", "--repo", str(afile)],
@@ -1955,7 +1961,12 @@ class TestCli(SiCase):
         shell_re = re.compile(r"os\.(?:system|popen)\b")
         self.assertTrue(shell_re.search("os.system('x')") and shell_re.search("os.popen(c)"))
         self.assertIsNone(shell_re.search("print('x')"))
-        for src in si_sources():
+        from test_selfimproving_capability import CAPABILITY  # P1：靜態段只掃入口加登記為 ro 的檔
+
+        ro_files = sorted(n for n, kind in CAPABILITY.items() if kind == "ro")
+        entry_and_ro = [TOOLS / "selfimproving.py", *(TOOLS / "lib" / "selfimproving" / n
+                                                       for n in ro_files)]
+        for src in entry_and_ro:
             text = src.read_bytes().decode("utf-8")
             self.assertIsNone(write_re.search(text), src.name)
             self.assertIsNone(shell_re.search(text), src.name)

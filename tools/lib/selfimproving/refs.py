@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path, PureWindowsPath
 
+from .defs import CLOSED_CLASSES, load_rows
 from .git import Git
-from .ledger import Finding, Ledger, split_lines
-from .rows import DEF_ID_RE, FIXED_SHA_RE, ORIG_AT_RE, disp_token, row_marks
+from .ledger import Finding, Ledger, Row, parse_ledger, split_lines
+from .rows import DEF_ID_RE, FIXED_SHA_RE, ORIG_AT_RE, disp_token, path_set, row_marks
 
 _KEY_RE = re.compile(r"^\|\s*(OBS-SI-\d+)\s*\|")
 _DEF_KEY_RE = re.compile(r"^\s*\|\s*(DEF-\d+-\d+)\s*\|")
@@ -112,6 +113,88 @@ def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git
         carriers.append(Finding("-", "CARRIER-NOT-ESTABLISHED", "info",
                                 f"families={','.join(sorted(fams))} count={fam_count}"))
     return obs, carriers
+
+
+def obs_ledger_text(repo: Path) -> str | None:
+    p = repo / "docs/06_quality/SelfImproving_Observation_Ledger.md"
+    return _read(p) if p.is_file() else None
+
+
+def obs_rows(repo: Path) -> dict[str, Row]:
+    """OBS 帳本（含 `…_archive*.md`）的合法列：ID → 列。"""
+    out: dict[str, Row] = {}
+    qdir = repo / _QUALITY
+    files = [qdir / "SelfImproving_Observation_Ledger.md"]
+    files += sorted(qdir.glob("SelfImproving_Observation_Ledger_archive*.md")) if qdir.is_dir() \
+        else []
+    for f in files:
+        if f.is_file():
+            for row in parse_ledger(_read(f)).rows:
+                if row.nine and row.kind == 1:
+                    out.setdefault(row.ident, row)
+    return out
+
+
+def def_ids(repo: Path) -> set[str]:
+    """缺陷帳本家族（P0 R18 (b) 所列各檔）的全部 DEF 號。"""
+    qdir = repo / _QUALITY
+    files = sorted(qdir.glob("AutoSDD_Defect_Log*.md")) if qdir.is_dir() else []
+    files += [qdir / n for n in ("AutoSDD_External_Blocked_Log.md",
+                                 "AutoSDD_Structural_Debt_Log.md") if (qdir / n).is_file()]
+    return {m.group(1) for f in files for ln in split_lines(_read(f))
+            if (m := _DEF_KEY_RE.match(ln))}
+
+
+_CLOSED_OBS = ("fixed@", "DEF-", "merged@")
+
+
+def _closed_obs_paths(text: str, out: dict[str, set[str]]) -> None:
+    for row in parse_ledger(text).rows:
+        tok = disp_token(row.cells[7]) if row.nine else None
+        if tok and (tok.startswith(_CLOSED_OBS) or tok in ("retired", "decided")):
+            out.setdefault(row.ident, set()).update(path_set(row.cells[4]))
+
+
+def closed_rows(repo: Path, obs_text: str) -> dict[str, set[str]]:
+    """已結列（ID → 證據路徑集合）：OBS 帳本含 archive 的已結處置，與缺陷帳本家族中分類為
+    fixed／wontfix／closed-by-decision／routed 的 DEF 列（R45）。"""
+    out: dict[str, set[str]] = {}
+    _closed_obs_paths(obs_text, out)
+    qdir = repo / _QUALITY
+    for f in sorted(qdir.glob("SelfImproving_Observation_Ledger_archive*.md")) if qdir.is_dir() \
+            else []:
+        _closed_obs_paths(_read(f), out)
+    files = sorted(qdir.glob("AutoSDD_Defect_Log*.md")) if qdir.is_dir() else []
+    files += [qdir / n for n in ("AutoSDD_External_Blocked_Log.md",
+                                 "AutoSDD_Structural_Debt_Log.md") if (qdir / n).is_file()]
+    for f in files:
+        for r in load_rows(f):
+            if r.status in CLOSED_CLASSES:
+                out.setdefault(r.ident, set()).update(path_set(r.evidence))
+    return out
+
+
+def reopen_findings(repo: Path, ledger_rel: str | None, led: Ledger, obs_text: str,
+                    git: Git) -> list[Finding]:
+    """R45：對新列（不在 HEAD 版、處置 open、無 reopens 標記）列出同證據路徑的已結列（warn）。"""
+    if ledger_rel is None or not git.available:
+        return []
+    head = git.show("HEAD", ledger_rel)
+    known = {r.ident for r in parse_ledger(head).rows} if head else set()
+    closed = closed_rows(repo, obs_text)
+    out = []
+    for row in led.rows:
+        if not row.nine or row.ident in known or disp_token(row.cells[7]) != "open" \
+                or "reopens" in row_marks(row):
+            continue
+        mine = path_set(row.cells[4])
+        hits = sorted((i for i, ps in closed.items() if i != row.ident and ps & mine),
+                      key=lambda s: s.encode("utf-8"))
+        if hits:
+            more = f" …+{len(hits) - _MAX_LOCS}" if len(hits) > _MAX_LOCS else ""
+            out.append(Finding(row.ident, "REOPEN-CANDIDATE", "warn",
+                               f"[warn] 同證據路徑的已結列：{', '.join(hits[:_MAX_LOCS])}{more}"))
+    return out
 
 
 def _escapes_repo(rel: str) -> bool:
