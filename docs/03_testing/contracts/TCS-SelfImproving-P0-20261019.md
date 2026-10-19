@@ -231,7 +231,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 
 > 編譯相容提醒：FRD-lite 表的第一欄用 US ID，不把 AC ID 放第一欄（`sdd_compile` 會把「第一欄形如 AC-…」的表格列當成 AC→AT 映射列掃描）。本檔除 §1 外沒有任何第一欄以 AC 起頭的表格；AT ID 只出現在 §1、§2、§3、§4、§6。
 
-**INVEST 自檢**：獨立（只依賴 git、PRD 與根 `CLAUDE.md` 的現況文字、既有 `tools/_stdio_utf8.py`）、可協商（判定碼、輸出文法、`min_obs_rows` 等未命名參數由本檔定義，掌舵者可於開放問題裁決）、有價值（P0 退出條件 (a)～(d) 全部可由 `check` 與實跑檢核判定，且遷移與豁免有機械憑證）、可估計（約 3 個 `si_*.py` 模組加 1 支 CLI 加 1 個測試檔加 3 份文件）、小（P0 只有 `check` 一個動詞）、可測（42 個 AT；其中 17 個用真 git、其餘為解析層與文件層，皆 tmp 目錄隔離、不碰真帳本）。
+**INVEST 自檢**：獨立（只依賴 git、PRD 與根 `CLAUDE.md` 的現況文字、既有 `tools/_stdio_utf8.py`）、可協商（判定碼、輸出文法、`min_obs_rows` 等未命名參數由本檔定義，掌舵者可於開放問題裁決）、有價值（P0 退出條件 (a)～(d) 全部可由 `check` 與實跑檢核判定，且遷移與豁免有機械憑證）、可估計（套件 `tools/lib/selfimproving/` 加 1 支 CLI 加 1 個測試檔加 3 份文件；立案時估「約 3 個 `si_*.py` 模組」，實作為 7 支套件模組，勘誤二）、小（P0 只有 `check` 一個動詞）、可測（42 個 AT；其中 17 個用真 git、其餘為解析層與文件層，皆 tmp 目錄隔離、不碰真帳本）。
 
 **非功能需求（量化）**
 
@@ -264,7 +264,7 @@ docref = §\s?\d|(?:SOP|PRD|TCS|FRD|SRD|BRIDGE|ADR-[A-Z]+-\d+)\b[ \t]*[§\w.\-]*
 | SCG-1／NFR 設計對應完成（架構選型對應 NFR 指標） | NFR-P0-1～8 對應 R8（純度）、R1（編碼）；PRD NFR-SI-09-1（量不到＝NE） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-1／整合架構說明完整（第三方服務已識別） | 無第三方服務；僅依賴 git 與既有 `tools/_stdio_utf8.py`、`tools/probe/fivequestion_ledger.py` 的 manifest 算法（先例，不 import） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-2／C4 Context 圖完成（系統邊界清晰） | PRD §9.1 載體對映表（C1、C4、C5、C6、C14）；P0 不新增系統邊界 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
-| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI 與 `lib/si_*.py`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
+| SCG-2／C4 Container 圖完成（主要組件識別） | 落點：根層 `tools/`（CLI `selfimproving.py` 與套件 `lib/selfimproving/`）、`docs/06_quality/`（帳本與協定目錄）、`docs/05_development/`（SOP） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-2／所有架構決策有對應 ADR（Status: Accepted） | PRD §9.5：ADR-SI-01（觀察儲存位置）、ADR-SI-05（基線窗）；本增量無新架構決策，ADR 不新開 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-2／Trust Boundary Map 完成（Security 情境） | 不適用（scenario 為 brownfield，非 security）；`check` 無網路、只讀、子行程限 git；不可進化面見 PRD NFR-SI-02-1 | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
 | SCG-2／Before／After 架構對比（Brownfield 情境） | 本檔 FRD-lite〈現況與變更〉（八欄暫定版到九欄定稿加檢查器） | docs/01_requirements/SelfImproving_PRD.md | sha256:fbca6bc905fe85b6555d40b804c2e8adcc373a93f25bf8f06acdf9a0a06f11de |
@@ -1479,6 +1479,12 @@ Scenario: SOP 有五個角色節，擷取者節含全部必備片段
 ## 搬遷勘誤（2026-10-19，FSM SPEC_AUDIT；掌舵者裁決，非缺陷）
 
 - **事由**：SCG-4 二審 PASS 後，掌舵者問「這個模組不用規劃獨立的目錄?」並選「現在就搬」，再指令「日後新模組須有系統、有組織地規劃整體專案目錄，不得散落，寫進 CLAUDE.md 與專案規格」（sid f3ead132-29b1-418c-97d9-35868ab11c70 line 5507／5524／5565）。
-- **改了什麼**：程式碼自 `tools/lib/si_*.py` 搬成套件 `tools/lib/selfimproving/{__init__,ledger,rows,git,refs,history,params,check}.py`（`git mv`，套件內相對 import）；指令入口 `tools/selfimproving.py` 與指令字面 `python tools/selfimproving.py check` **不變**；本檔只改路徑字面（D4、R26、NFR-P0-5、AT-003-1-1 Given、AT-029-2-1 四項 glob、R8 (a) 本地模組規則、§5.6）與 18 處 PRD digest（PRD 同日重凍：`sha256:fbca6bc9…`，改 §9 C4 路徑、加模組落點表、NFR-SI-02-1 (iv) glob）；AT id、AT 數（42）、R1～R26 語意、21 項判定碼**一字未動**。落點規範 SSOT＝`docs/02_architecture/Root_Layout_and_Module_Placement.md`。
+- **改了什麼**：程式碼自 `tools/lib/si_*.py` 搬成套件 `tools/lib/selfimproving/{__init__,ledger,rows,git,refs,history,params,check}.py`（`git mv`，套件內相對 import）；指令入口 `tools/selfimproving.py` 與指令字面 `python tools/selfimproving.py check` **不變**；本檔只改路徑字面（D4、R26、NFR-P0-5、AT-003-1-1 Given、AT-029-2-1 四項 glob、R8 (b) 本地模組規則〔AT-030-2-1 的 AST 子句；原誤寫 R8 (a)，勘誤二訂正〕、§5.6）與 18 處 PRD digest（PRD 同日重凍：`sha256:fbca6bc9…`，改 §9 C4 路徑、加模組落點表、NFR-SI-02-1 (iv) glob）；AT id、AT 數（42）、R1～R26 語意、21 項判定碼**一字未動**。落點規範 SSOT＝`docs/02_architecture/Root_Layout_and_Module_Placement.md`。
 - **凍結紀錄**：Stage-2 原凍結 digest `sha256:6c4e28ed…`（2026-10-19T05:43:56Z）保留為歷史；本次修訂走 FSM `PR_REVIEW→（gate PASS）RTM_VERIFY→IMPLEMENTATION→SPEC_AUDIT→PR_REVIEW`，修訂後的本檔 digest 記在 FSM decision_trace（回 PR_REVIEW 的 reason）與 SCG-4 報告 §9 三審。
 - **§5.1 測試資料列 001 的合成座標 `tools/lib/si_demo.py:12–15` 不改**：它是虛構的證據座標（只驗形態），不指向真檔。
+
+## 搬遷勘誤二（2026-10-19 晚；OBS-SI-109；文字訂正，非缺陷）
+
+- **事由**：SCG-4 三審 F-18 指出搬遷後本檔仍殘留舊路徑字面；掌舵者同日指令「任何修復 BUG 或架構修改都要以不留後遺症的方式修復」（根 `CLAUDE.md`〈兩專案共通的工程紀律〉第 5 條），故不等下次 TCS 修訂、即時訂正。
+- **改了什麼**（只改文字，AT id、AT 數、R1～R26 語意、判定碼一字未動）：INVEST 自檢「可估計」句的「約 3 個 `si_*.py` 模組」改為套件現況（保留立案時估值字樣）；SCG-2 Container 列的落點「`lib/si_*.py`」改為「CLI `selfimproving.py` 與套件 `lib/selfimproving/`」；〈搬遷勘誤〉所寫「R8 (a) 本地模組規則」訂正為 R8 (b)（R8 (a) 是只讀，(b) 才是標準庫與本地模組規則，實際改的是 AT-030-2-1 的 AST 子句）。§1 FRD-lite「Before」段刻意保留搬遷前敘述（勘誤一已載明）。
+- **凍結紀錄**：本檔的 Stage-2 凍結 digest 自勘誤一起即與現檔不符（FSM `SPEC_AUDIT` 後無重記 digest 的動詞，OBS-SI-108／SCG-4 三審 F-17）；本次訂正後 digest 再變，待框架補「重記凍結 digest」動詞後由主控重記，不以手改狀態檔代替。
