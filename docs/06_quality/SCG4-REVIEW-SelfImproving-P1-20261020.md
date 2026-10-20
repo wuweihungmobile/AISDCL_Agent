@@ -130,7 +130,49 @@ QA 的逐條指令與原始輸出住 scratchpad `selfimproving_p1\qa_work\scg4_q
   - 修復棒收棒（10:22，46 分鐘，rc=0）：碼修 DEF-200-556（`fetch.py` 自管 `http.client`、逐次讀取前依剩餘期限 `settimeout`＋`read1`）、DEF-200-557（`events.sound()`／`load_sound_events()` 只放行通過 `validate` 的事件進折疊與唯讀動詞；`evcheck` 的 structure／vacuity 仍吃原始行）、DEF-200-558（`apply_numstat` OSError ⇒ `PATCH-PARSE`）、F-18／F-21／F-22；22 個新 AT 各一個測試函式（夾具 `Srv` 加 `drip`／`stall`／`late-stall` 路由）；Developer 自報 31 個突變全紅（含一審存活清單中可重放者；B3／B5／A18b 沿用一審等價判定）。主控親驗：七檔＋P0 180 passed／292 subtests、鍵 B `-q -n 0` 10 passed、check／status／scan／export rc=0、ruff 17 檔、LOC rc=0、分桶 prose 4350／guard_self 3149 不變 ⇒ commit `ed4a6f9a`；護欄層重釘同標籤 R213 第六列 +720（127446）、名冊 R213 精確淨額 10708、四支守衛測試 783 passed。Developer 報的四項與 TCS 差異（AT-108-4-E-3／AT-140-1-E-2 改行程內執行、AT-130-3-E-4 用 `zero_success()` helper、AT-130-5-E-2 加 `/late-stall` 第三路由、AT-103-1-E-3 (c) slug 測試端獨立算）交二審裁定、採納者列 TCS 下次修訂。
   - 二審（§M）：FAIL（P2 ×3＝556／557 修法殘留；558 修妥）⇒ 流程同一審：P1 鍵 → SPEC_AUDIT（勘誤二）→ refreeze → PR_REVIEW gate FAIL（retry 3）→ 修復棒二 → 三審。DEF-200-558 改 fixed@ed4a6f9a（二審 e2e 為證）。
   - 二審處置執行紀錄：`7fbb73d4` §M 落檔＋DEF-200-558 fixed；`ded5f229` OBS-SI-173～175；TCS 勘誤二（SA 棒續派）`834d9631`——AT 148→157（新增 9：N-1 AT-130-5-E-3、N-4 AT-130-2-E-5、N-2 AT-108-4-E-6／E-7、N-2／N-3 AT-140-1-E-4／E-5、B3 AT-107-3-E-5、B5 AT-107-3-E-6、SA 追查 AT-107-3-E-7＝M 類 `Memory/` 大小寫變體繞過 `TOUCH-RATIO`；R37 擴為所有消費者只吃 sound＋被消費鍵型別表；R58 (c)(d)；AT-130-5-E-2 夾具改 8 位元組；NFR-P1-10 (14)；§5.5 (g) 行程內 run_main 等價；⚖30～33）。主控親驗：verify_tcs 157／PROBLEMS 0、cmp 新增 9 改 4、adapter 無孤兒、冪等重建 sha256 `8bce1978…`、LF、defid 11 passed、Ghost 32 passed。FSM：兩鍵 `spec-refreeze` 記錄 digest `sha256:8bce1978…`；P1 鍵 PR_REVIEW gate FAIL（retry_count 3）→ IMPLEMENTATION；鍵 B 回 PR_REVIEW。修復棒二（headless hooks-ON Sonnet）於 13:10 派出：N-1 逐階段逾時、N-2／N-3 validate 型別判準與消費者只吃 sound、N-4、N-5、N-6、`_mem_text` casefold、9 個新 AT、P4 清理。
-  - 待補：三審結果（§N）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
+  - 修復棒二收棒（13:50，40 分鐘，rc=0）：主控親驗七檔 189 passed／346 subtests、鍵 B 10、動詞四個 rc=0、ruff 12 檔、LOC、腳本模式 Ran 1 test、分桶不變 ⇒ commit `605de382`；重釘同標籤 R213 第七列 +482（127928）、名冊 11190、四支守衛 783 passed、根層全套 rc=0（5573）⇒ `0db61d70`；push `8a8f071d..0db61d70`；P1 鍵 → PR_REVIEW；三審（§N）：FAIL（P2 ×2＝修復棒二新防線未釘、P3 ×1＝初始 URL 逸出）⇒ 兩鍵 → SPEC_AUDIT（勘誤三）→ refreeze → P1 gate FAIL（retry 4）→ 修復棒三 → 四審。
+  - 待補：四審結果（§O）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
+
+## §N 三審（QA 同一代理續審，HEAD `0db61d70`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
+
+**判定：FAIL**　P1／P2／P3／P4 ＝ 0／2／1／5。二審的三個 P2（N-1 標頭階段牆鐘、N-2 `dec.flags`、N-3 三處吃原始事件）**全數修妥**；二審 24 個存活突變歸零（B3、B5 現在被紅）；零退化全綠。FAIL 的原因只有一類：修復棒二新增的邊界防線有兩處沒有測試釘住（存活突變 F2、U3 不接受為等價）；另初始 URL 建構式在 `try` 之外使 5 種畸形 URL 逸出 FetchError 封閉集合（其中 4 種為相對一審 urllib 版的回歸）。真實樹審前審後 `git status --short` 皆空、HEAD 不變；未跑寫入動詞、未派子代理、未連外網（只有 loopback）。
+
+### N.1 缺陷
+
+| 編號 | 內容 | 補法 |
+|------|------|------|
+| P2-1（突變 F2） | `tools/lib/selfimproving/fetch.py:75-80` `_DeadlineRaw.readinto` 的「期限已過即 `TimeoutError`」分支無測試釘住；Developer 自報等價不成立：刪該分支後，單元層期限已過的 `readinto` 變 `ValueError: Timeout value out of range`；整合層標頭在牆鐘上限前約 ±5 ms 才到的 120 次賽跑：原碼 120×`timeout`，突變碼 65×timeout、12×`ValueError` 逸出、43×`FetchError(network)`（`settimeout(0)` 變非阻塞誤判） | 一條單元 AT：建 `_DeadlineRaw(sock, 已過期 deadline)` 斷言 `readinto` 拋 `TimeoutError`（不讀 socket）；加一條整合賽跑或假時鐘案例 |
+| P2-2（突變 U3） | `fetch.py:170` Location 的 `urlsplit(target).port` 哨兵行無測試釘住（AT-130-2-E-5 只餵括號不成對的兩種，在前一行 `urljoin` 就拋出）；刪此行後 `Location: http://127.0.0.1:<5000 位數>/x` 讓 `ValueError: Exceeds the limit (4300 digits)` 逸出（伺服器可控輸入） | AT-130-2-E-5 補超長位數連接埠的 Location 案例（與 `:99999`、`:abc` 同列） |
+| P3-1（D-1） | `fetch.py:132-133` `_conn_class(...)(parts.hostname, parts.port, …)` 在 `_open` 的 `try` 外、`fetch.py:151` `parse_url` 亦然；初始 URL 19 形態中 5 個逸出：`http:///x`、`http://` ⇒ `AttributeError`；`http://exa mple.com/x` ⇒ `http.client.InvalidURL`；`http://:80/x` ⇒ `TypeError`；超長位數連接埠 ⇒ `ValueError`（來自 `sources.parse_url`，既有）。端到端：來源表 url `https://exa mple.com/docs` 被 `validate_table` 放行、`check` PASS，`research --fetch` 以 Traceback 收場（一審 urllib 版為乾淨的 `source … FAIL network`＋`ZERO-SUCCESS`）；回歸起於 `8a8f071d` 自管 `http.client`，二審探針只涵蓋括號形態而漏看（QA 自陳遺漏） | 建構式納入 `try`（或先擋空 host）、捕 `HTTPException`／`ValueError`／`TypeError`；`fetch_source` 開頭的 `parse_url` 納入例外歸類；`validate_table` 的 `SRC-URL-HOST` 擋含空白／控制字元的 host；補 AT（初始 URL 形態批） |
+
+P4（5）：排版（`tools/lib/selfimproving/events.py:192` `def _str` 前缺兩空行、`tools/tests/test_selfimproving_props.py:505` 缺一空行；專案 ruleset 不含 E30x）；`validate_table`（R43）放行 host 含空白／控制字元（D-1 可達性根因）；`sources.parse_url` 對超過 4300 位數的連接埠拋 `ValueError`（T1 可控的表、既有）；重導向目標帶 userinfo 新碼靜默忽略後照跟隨（二審 P4 未處理）；本文被截斷回傳成功（二審 P4 未處理、新舊碼同）。
+
+### N.2 逐項重放
+
+- **(1) N-1 逐階段探針**（`timeout=2`、伺服器持續 10 s）：status-drip／hdr-drip／hdr-many-lines／chunk-size-drip／trailer-drip **皆 2.0 s `FetchError(timeout)`**（二審 10.0 s、chunk-size-drip 誤判成功）；hdr-stall／cl-drip／chunked-drip／late-stall／late-drip／redirect-slow 皆 2.0 s timeout；ok／chunked-ok／chunked-ok-split／ok-slowish／cl-ok-8／short-body 皆成功無假逾時。指令層：標頭階段慢滴 8 秒的來源 → `research --fetch` 2.1 s、`source c-hdrdrip FAIL timeout`（二審 8.1 s、non-text）；原實鏈與一審一致。混沌測試 1,000 案（隨機畸形狀態列／標頭／分塊／停頓／提早關閉、超長位數 Location，`timeout=1`）：例外逸出 0、牆鐘超限 0。https 握手（自簽憑證真 TLS＋每位元組 0.02 s 節流）：2.0 s 歸 `network`。
+- **(2) N-2／N-3 崩潰歸零**：19 案 × 16 動詞矩陣 304 次呼叫崩潰 0（二審 45）；一審三形態 0；損壞 `research.scan` 4 種鎖內追加皆 rc=0（二審 4 種崩潰）；生產組合 fuzz 50 seeds × 20,000＝1,000,000 輪 0（二審 700,000 輪 5）；公開 CLI fuzz 8,800 輪 0（二審 54）；字面 `fuzz2.py` 仍只在 `status.py:43`＝腳本餵原始事件、非生產路徑。
+- **(3) N-4**：Location 17 形態 17/17 FetchError（一審碼 2 逸出）；初始 URL 5/19 逸出（P3-1）。
+- **(4) N-5**：七檔腳本模式 `-k <AT>` 各 `Ran 1 test … OK`；AST 掃描七檔 `if __name__` 守衛各一、其後零 def／class。
+- **(5) 157 AT**：157 條判定指令照字面實跑 157/157 rc=0、各恰 1 passed；`--collect-only` 157 個 id（根層 147＋鍵 B 10）一對一；9 個新 AT 各 rc=0。
+- **(6) 零退化**：七檔＋P0 189 passed／346 subtests（skip 0）；鍵 B 10；check rc=0；ruff 13 檔 rc=0；LOC rc=0；`--check-snapshot` rc=0；根層全套 rc=0（231.7 s，5573）；`--print-guard-lines` +0。
+- **(7)** V8／V10 維持未驗。
+
+### N.3 存活突變表
+
+二審 24 個存活突變全套重放：**24/24 KILLED**（含 B3 → `test_AT_107_3_E_5_diff_git_a_side_enters_the_touched_union`、B5 → `test_AT_107_3_E_6_memory_root_prefix_is_casefolded`＋`test_AT_107_3_E_7_memory_case_variants_obey_touch_ratio`；A24 另被 `test_AT_130_2_E_5_…` 紅）。修復棒二新碼靶向突變：F1 刪逐讀 `settimeout`（Developer 稱綠，**實為紅**：`test_AT_130_5_E_2_…` 的 `/late-stall`）、F3／F4／F5／F6／U1／U2／R1／R2／R4／S1 與 `_CONSUMED` 逐鍵 22 個皆 KILLED；**存活 4**：F2（P2-1）、U3（P2-2）、F7（`_read_body` 改 `read(8192)`，接受為等價：逾時強制已沉到 `readinto`，16 個探針模式輸出逐列相同）、R3（`fold._dec_flags` 回退寬鬆版，接受為等價：`_CONSUMED["dec"]["flags"]` 保證 sound 的 flags 必為字串陣列，舊分支不可達）。FS1／FS2 連線階段僅靶向存活、loopback 不可觀測，不納入判定。
+
+### N.4 裁定與訂正
+
+- 設計決定 1～5 全部接受（`_CONSUMED` 只判被帶入的鍵、PROP 號碼只計通過者、`Conn.close` 空操作＋`shut`、矩陣測試還原帳本位元組、測試端 PROP ID 取自基底末行）；Developer 自報「單獨去掉 settimeout 為綠」駁回（實為紅）、「單獨去掉期限檢查為等價」駁回（F2 不等價）。
+- QA 對二審的訂正：B5「安全方向」判斷不完整（漏看 `_mem_text` 前綴比對區分大小寫，`Memory/demo.md` 刪 15／20 行被受理繞過 `TOUCH-RATIO`；SA 追查 AT-107-3-E-7 與修復棒二已封閉）；初始 URL 逸出漏看（二審探針只涵蓋括號形態）。
+
+### N.5 建議修復棒三（範圍很小）
+
+`fetch.py` `_open` 建構式納入 `try`、`fetch_source` 開頭的 `parse_url` 納入例外歸類、`validate_table` 擋 host 含空白／控制字元；補 AT：① `_DeadlineRaw` 期限已過 ⇒ `TimeoutError`（單元＋整合賽跑）、② 超長位數連接埠的 Location ⇒ `redirect-refused`、③ 初始 URL 形態批 ⇒ `FetchError`；DEF-200-556／557 在修復棒三後再驗。
+
+### N.6 QA 流程摩擦
+
+Bash 守衛衝突同前；每審須重建 `subst Q:` 與複本預置狀態；全套突變重放八行程同跑每筆約 165 s、合計約 40 分鐘，靶向約 15 分鐘；Developer 等價宣稱不實（F1）⇒ 等價宣稱應附實驗輸出；根層全套留 git-ignored 痕跡；靶向與全套結果不一定相同（F2／U3／F7／R3 皆先靶向存活再全套確認）。證據：scratchpad `qa_work\scg4_qa\r3_*.py` 與 `qa_work\scg4_r3\`（收輪即刪）。
 
 ## §M 二審（QA 同一代理續審，HEAD `8a8f071d`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
