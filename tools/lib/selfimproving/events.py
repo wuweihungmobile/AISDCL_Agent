@@ -189,6 +189,8 @@ _SPEC: dict[str, dict] = {
              "proposer": valid_by, "reviewer": lambda v: v is None or valid_by(v),
              "preimage": _preimage},
 }
+
+
 def _str(v) -> bool:
     return isinstance(v, str)
 

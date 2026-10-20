@@ -502,6 +502,7 @@ class TestSourcesAndRoute(PropCase):
                            patch=patch, body=body_md("M", scope="memory 索引"))  # fmt: skip
             self.assertIn("0.750", out, path)
             self.assertEqual(fx.snap(repo), snap0, path)
+
     def test_AT_107_3_E_3_conditions_and_markers(self):
         def rule(n):
             return f"AISDLC_SDD/{VNEW}/governance/rules/R-9.{n}.yaml"

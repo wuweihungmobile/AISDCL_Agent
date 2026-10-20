@@ -54,7 +54,10 @@ def parse_url(url: str) -> tuple[str, str, str, int | None, bool]:
     else:
         host, _, tail = hostport.partition(":")
     if tail.isdigit():
-        port = int(tail)
+        try:
+            port = int(tail)
+        except ValueError:  # 超長位數或上標數字：與 :abc 同，視同無連接埠（不產生碼）
+            port = None
     return scheme.lower(), host.split("%")[0].lower(), authority, port, userinfo
 
 
@@ -74,6 +77,12 @@ def _is_private(host: str, policy: Policy) -> bool:
     return False
 
 
+def _bad_host_chars(host: str) -> bool:
+    """host 含空白或控制字元。連線端的 `urlsplit` 會先刪掉 TAB／CR／LF，使 `127.0.0.1<TAB>` 在
+    驗證端不是私網位址而連線端是；故這些字元一律判為 host 問題（R43）。"""
+    return any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in host)
+
+
 def _url_problems(url: str, subject: str, policy: Policy) -> list[tuple[str, str, str]]:
     out = []
     low = url.lower()
@@ -82,8 +91,9 @@ def _url_problems(url: str, subject: str, policy: Policy) -> list[tuple[str, str
     _, host, _, _, userinfo = parse_url(url)
     if userinfo:
         out.append(("SRC-URL-USERINFO", subject, "url 的 authority 含 userinfo（@）"))
-    if not host or _is_private(host, policy):
-        out.append(("SRC-URL-HOST", subject, f"host {host!r} 為空、localhost 或私網／loopback"))
+    if not host or _bad_host_chars(host) or _is_private(host, policy):
+        out.append(("SRC-URL-HOST", subject,
+                    f"host {host!r} 為空、含空白／控制字元、localhost 或私網／loopback"))
     return out
 
 

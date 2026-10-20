@@ -96,7 +96,7 @@ class _DeadlineSock:
 def _read_body(resp, max_bytes: int) -> bytes:
     """讀本文：逾時由 `_DeadlineRaw` 在每次讀取時強制；這裡只管位元組上界。"""
     length = resp.headers.get("Content-Length", "")
-    if length.isdigit() and int(length) > max_bytes:
+    if length.isascii() and length.isdigit() and int(length) > max_bytes:
         raise FetchError("too-large", f"Content-Length {length} > {max_bytes}")
     buf = bytearray()
     for chunk in iter(lambda: resp.read1(_CHUNK), b""):
@@ -127,10 +127,16 @@ def _conn_class(scheme: str, deadline: float):
 
 def _open(url: str, deadline: float):
     """對單一 URL 送 GET（不帶認證、不走代理、`Connection: close`）；回 (連線, 回應)。
-    建連線與送出請求的錯誤一律 network；等回應逾時才是 timeout。URL 無法剖析拋 ValueError。"""
-    parts = urllib.parse.urlsplit(url)
-    conn = _conn_class(parts.scheme, deadline)(
-        parts.hostname, parts.port, timeout=max(deadline - time.monotonic(), 0.001))
+    建連線與送出請求的錯誤一律 network；等回應逾時才是 timeout。URL 剖析或連線物件建構失敗
+    （空 host、host 含空白、連接埠越界等）同樣歸 network（R58 (c)）。"""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        if not parts.hostname:
+            raise ValueError("host 為空")
+        conn = _conn_class(parts.scheme, deadline)(
+            parts.hostname, parts.port, timeout=max(deadline - time.monotonic(), 0.001))
+    except (ValueError, TypeError, AttributeError, http.client.HTTPException) as exc:
+        raise FetchError("network", "URL 無法解析") from exc
     try:
         conn.request("GET", (parts.path or "/") + (f"?{parts.query}" if parts.query else ""),
                      headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity",
@@ -148,7 +154,10 @@ def _open(url: str, deadline: float):
 def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
                  allowed_hosts) -> Fetched:
     """抓單一來源（含全部重導向跳）的原始位元組；失敗拋 FetchError。"""
-    scheme = parse_url(url)[0]
+    try:
+        scheme = parse_url(url)[0]
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise FetchError("network", "URL 無法解析") from exc
     if scheme != "https" and not (scheme == "http" and policy.allow_http):
         raise FetchError("network", f"scheme {scheme!r} 不被政策允許")
     deadline = time.monotonic() + timeout
@@ -156,10 +165,7 @@ def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
     for _ in range(MAX_REDIRECTS + 2):  # 初始請求加至多 5 跳重導向
         if deadline - time.monotonic() <= 0:
             raise FetchError("timeout")
-        try:
-            conn, resp = _open(cur, deadline)
-        except ValueError as exc:  # 括號不成對、連接埠越界等：連線建不起來
-            raise FetchError("network", "URL 無法解析") from exc
+        conn, resp = _open(cur, deadline)
         try:
             status = resp.status
             loc = resp.headers.get("Location")

@@ -13,6 +13,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import unittest
@@ -43,6 +44,7 @@ from lib.selfimproving import sources as si_sources
 
 TOOLS = fx.TOOLS
 TEXT = {"Content-Type": "text/plain; charset=utf-8"}
+P_BIG = "9" * max(5000, sys.get_int_max_str_digits() + 1)
 
 
 def setUpModule() -> None:
@@ -56,6 +58,28 @@ def tearDownModule() -> None:
 def ledger_bytes(repo: Path):
     p = repo / EVL
     return p.read_bytes() if p.is_file() else None
+
+
+class FakeSock:
+    """只有 settimeout／recv_into 的假 socket；讀取層若改呼叫別的方法即 AttributeError 而紅。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def settimeout(self, value) -> None:
+        self.calls.append(("settimeout", value))
+
+    def recv_into(self, buf) -> int:
+        self.calls.append(("recv_into", len(buf)))
+        buf[:5] = b"hello"
+        return 5
+
+
+def raw_table(url: str) -> bytes:
+    entry = {"id": "a-typo", "url": url, "kind": "docs", "extract": "標題", "added_by": "T1"}
+    return (
+        json.dumps({"schema_rev": 1, "sources": [entry]}, ensure_ascii=False, indent=2) + "\n"
+    ).encode("utf-8")
 
 
 def norm_time(text: str) -> str:
@@ -1150,23 +1174,29 @@ class TestBudgetsAndFingerprint(ResearchCase):
 
     def test_AT_130_2_E_5_unparsable_urls_stay_in_the_closed_failure_set(self):
         """受測 `tools/lib/selfimproving/fetch.py`：無法剖析的 URL 不拋 ValueError。"""
+        locs = ["http://[::1/x", "http://::1]/x", "http://127.0.0.1:99999/x",
+                "http://127.0.0.1:abc/x", f"http://127.0.0.1:{P_BIG}/x", "http://127.0.0.1:²/x"]
         srv = self.serving({
-            "/r1": (302, {"Location": "http://[::1/x", "Content-Length": "0"}, b""),
-            "/r2": (302, {"Location": "http://::1]/x", "Content-Length": "0"}, b""),
+            f"/r{i}": (302, {"Location": loc, "Content-Length": "0"}, b"")
+            for i, loc in enumerate(locs, 1)
         })
         policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
+        here = f"127.0.0.1:{srv.port}"
 
-        def reason(url):
-            with self.assertRaises(si_fetch.FetchError, msg=url) as cm:
+        def reason(url, allowed):
+            with self.assertRaises(si_fetch.FetchError, msg=url[:60]) as cm:
                 si_fetch.fetch_source(
                     url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
                 )
             return cm.exception.reason
 
-        for route in ("r1", "r2"):
-            self.assertEqual(reason(srv.url(f"/{route}")), "redirect-refused", route)
-        self.assertEqual([reason("http://[::1/x"), reason("http://::1]/x")], ["network"] * 2)
+        for allowed in ({here}, {here, "127.0.0.1:80"}):
+            for i in range(1, 7):
+                msg = f"r{i} {sorted(allowed)}"
+                self.assertEqual(reason(srv.url(f"/r{i}"), allowed), "redirect-refused", msg)
+        self.assertEqual(
+            [reason("http://[::1/x", {here}), reason("http://::1]/x", {here})], ["network"] * 2
+        )
         repo = fx.p1_base()
         self.open_only(repo)
         fx.set_params(repo, research_timeout_seconds=2)
@@ -1175,6 +1205,143 @@ class TestBudgetsAndFingerprint(ResearchCase):
         rc, out, err = self.fetch(repo)
         self.zero_success(rc, out)
         self.assertIn("source s-r1 FAIL redirect-refused", out)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(ledger_bytes(repo), before)
+
+    def table_url_repo(self, url: str) -> Path:
+        repo = fx.p1_base()
+        self.open_only(repo)
+        fx.putb(repo, SRC_REL, raw_table(url))
+        fx.commit_all(repo, "sources")
+        return repo
+
+    def test_AT_130_5_E_4_deadline_reader_contract_and_race(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：`_DeadlineRaw` 期限已過不碰 socket。"""
+        for label, delta in (("past", -1.0), ("now", None)):
+            sock = FakeSock()
+            deadline = time.monotonic() + delta if delta is not None else time.monotonic()
+            with self.assertRaises(TimeoutError, msg=label):
+                si_fetch._DeadlineRaw(sock, deadline).readinto(bytearray(16))
+            self.assertEqual(sock.calls, [], label)
+        sock, buf = FakeSock(), bytearray(16)
+        self.assertEqual(si_fetch._DeadlineRaw(sock, time.monotonic() + 5.0).readinto(buf), 5)
+        self.assertEqual(bytes(buf[:5]), b"hello")
+        self.assertEqual([c[0] for c in sock.calls], ["settimeout", "recv_into"])
+        self.assertTrue(0 < sock.calls[0][1] <= 5.0, sock.calls)
+        hdr = {"Content-Type": "text/plain", "Content-Length": "8"}
+        srv = self.serving({
+            f"/d{i}": (200, hdr, b"", {"delay": 0.25 - 0.010 + 0.0004 * i, "stall": True})
+            for i in range(50)
+        })
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+        t0, results = time.monotonic(), []
+        for i in range(50):
+            try:
+                si_fetch.fetch_source(
+                    srv.url(f"/d{i}"), policy=policy, timeout=0.25, max_bytes=100,
+                    allowed_hosts=allowed,
+                )
+                results.append("ok")
+            except si_fetch.FetchError as exc:
+                results.append(exc.reason)
+            except Exception as exc:  # noqa: BLE001  # 逸出的例外型別本身就是失敗證據
+                results.append(type(exc).__name__)
+        self.assertEqual(results, ["timeout"] * 50, results)
+        self.assertLess(time.monotonic() - t0, 30)
+
+    def test_AT_130_5_E_5_unparsable_content_length_counts_as_absent(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：無法解析的 Content-Length 視同未提供。"""
+        text = {"Content-Type": "text/plain"}
+        srv = self.serving({
+            "/sup2": (200, {**text, "Content-Length": "²"}, b"hello"),
+            "/sup1": (200, {**text, "Content-Length": "¹"}, b"hello"),
+            "/mixed": (200, {**text, "Content-Length": "5²"}, b"hello"),
+            "/abc": (200, {**text, "Content-Length": "abc"}, b"hello"),
+            "/ok": (200, {**text, "Content-Length": "5"}, b"hello"),
+            "/big": (200, {**text, "Content-Length": "²"}, b"b" * 101),
+        })
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+
+        def get(path):
+            return si_fetch.fetch_source(
+                srv.url(path), policy=policy, timeout=2, max_bytes=100,
+                allowed_hosts={f"127.0.0.1:{srv.port}"},
+            )
+
+        for path in ("/sup2", "/sup1", "/mixed", "/abc", "/ok"):
+            got = get(path)
+            self.assertEqual((got.raw, got.status), (b"hello", 200), path)
+        with self.assertRaises(si_fetch.FetchError) as cm:
+            get("/big")
+        self.assertEqual(cm.exception.reason, "too-large")
+
+    def test_AT_130_2_E_6_initial_url_failures_are_network(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：初始 URL 的任何失敗只拋 FetchError。"""
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        forms = ["http:///x", "http://", "http://:80/x", "http://exa mple.com/x",
+                 "http://exa\x00mple.com/x", "http://exa\x7fmple.com/x",
+                 f"http://127.0.0.1:{P_BIG}/x", "http://127.0.0.1:99999/x",
+                 "http://127.0.0.1:abc/x", "http://127.0.0.1:²/x"]
+        for url in forms:
+            t0, reason = time.monotonic(), None
+            try:
+                si_fetch.fetch_source(
+                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=set()
+                )
+            except si_fetch.FetchError as exc:
+                reason = exc.reason
+            self.assertEqual(reason, "network", url[:60])
+            self.assertLess(time.monotonic() - t0, 1, url[:60])
+        repo = self.table_url_repo("https://[2001:db8::1/docs")
+        res = self.check(repo)
+        self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
+        before = ledger_bytes(repo)
+        rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
+        self.zero_success(rc, out)
+        self.assertIn("source a-typo FAIL network", out)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(ledger_bytes(repo), before)
+
+    def test_AT_130_2_E_7_host_characters_and_port_text(self):
+        """受測 `tools/lib/selfimproving/sources.py`：host 字元判準與連接埠文字全函式。"""
+        bad, none = ["SRC-URL-HOST"], []
+        cases = [
+            ("https://example.com/docs", none), ("https://exa mple.com/docs", bad),
+            ("https://exa\tmple.com/docs", bad), ("https://exa\nmple.com/docs", bad),
+            ("https://exa\x00mple.com/docs", bad), ("https://exa\x7fmple.com/docs", bad),
+            ("https://exa　mple.com/docs", bad), ("https://example.com /docs", bad),
+            ("https:// example.com/docs", bad), ("https://127.0.0.1\t/x", bad),
+            ("https://localhost\t/x", bad), ("https://10.0.0.1\r/x", bad),
+            ("https://127.0.\t0.1/x", bad), ("https:///docs", bad), ("https://:443/docs", bad),
+            ("https://example.com/a b", none), ("https://[2001:db8::1/docs", none),
+            ("https://example.com:abc/docs", none), ("https://example.com:99999/docs", none),
+            (f"https://example.com:{P_BIG}/docs", none), ("https://example.com:²/docs", none),
+        ]
+        for url, want in cases:
+            problems = si_sources.validate_table(raw_table(url), si_sources.DEFAULT_POLICY)
+            self.assertEqual([c for c, _, _ in problems], want, repr(url[:60]))
+        for url in ("https://exa mple.com/docs", "https://127.0.0.1\t/x"):
+            repo = self.table_url_repo(url)
+            res, before = self.check(repo), ledger_bytes(repo)
+            self.assertEqual((res["_rc"], self.S(res, "research.sources")), (1, "FAIL"), url)
+            self.assertEqual(self.F(res, "research.sources"), {("a-typo", "SRC-URL-HOST")}, url)
+            with mock.patch.object(
+                socket.socket, "connect", side_effect=AssertionError("不得連線")
+            ) as conn:
+                rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
+            self.assertEqual(
+                (rc, fx.codes_of(out), conn.call_count), (1, {"SRC-URL-HOST"}, 0), url
+            )
+            self.assertNotIn("Traceback", err)
+            self.assertEqual(ledger_bytes(repo), before)
+        repo = self.table_url_repo(f"https://example.com:{P_BIG}/docs")
+        res, before = self.check(repo), ledger_bytes(repo)
+        self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
+        with mock.patch.object(socket.socket, "connect", side_effect=OSError("拒絕")):
+            rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
+        self.zero_success(rc, out)
+        self.assertIn("source a-typo FAIL network", out)
         self.assertNotIn("Traceback", err)
         self.assertEqual(ledger_bytes(repo), before)
 
