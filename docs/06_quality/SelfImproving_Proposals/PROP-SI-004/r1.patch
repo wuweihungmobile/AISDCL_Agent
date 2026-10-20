@@ -1,0 +1,13 @@
+diff --git a/memory/guard-ratchet-repin-ritual.md b/memory/guard-ratchet-repin-ritual.md
+--- a/memory/guard-ratchet-repin-ritual.md
++++ b/memory/guard-ratchet-repin-ritual.md
+@@ -28,6 +28,9 @@
+ 
+ 13. **新增 tools/lib/*.py 且被 tools/tests 消費** ⇒ 必須列進 `.github/workflows/windows-compat-ci.yml` 與 `macos-compat-ci.yml` 的 `paths`（push 與 pull_request 兩段各一行），鎖住在 `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py`——只在 SDD ci-gate 跑到，本機 root／AutoClaude 全套都不會抓；新增檔**之後**要重跑一次 `AISDLC_SDD/scripts/ci-gate.ps1`（2026-09-22 f93450e 就是漏了這步，雲端兩支 smoke 翻紅）。
+ 
++14. **新測試檔的 class／def docstring 一開始就指名受測模組路徑**（例 `tools/lib/selfimproving/events.py`）：分桶普查以 chunk 的 `exclusive` 計，只寫帳本／文件路徑的 chunk 整塊落 prose（shrink-only 桶）。P1 七檔共 1546 行因此撞紅，收尾補 14 處 docstring 才收斂（OBS-SI-164）；跨檔匯入的測試基底類別名須含 `TestCase`（`test_schedule_capability_parity` 的 discover 守門不解析跨檔基底鏈，OBS-SI-162）。
++15. **重釘的輪號標籤不得超前帳本當前輪**（`test_check_defect_log_crossref.py::TestR71CodeRoundLabelsNeverExceedLedgerCurrentRound`；當前輪＝`python tools/check_handoff_carriers.py` 首行）：產品輪（如 SelfImproving P1）沒有自己的 R 系列證據檔，就用當前輪同標籤再加一列（`_GUARD_LINES_REPIN_LOG` 同標籤第 N 列），名冊 `_REPIN_APPROVED_ROUND_OVERAGE` 只改該標籤的精確淨額、筆數不動——不要開 R<N+1>、不要上修名冊上限（OBS-SI-163）。
++
+ **量行數陷阱**：PowerShell `Measure-Object -Line` 會忽略空行（dev_start.py 數成 1728，實為 1952）——用 `(Get-Content f).Count` 或 Grep 行號。
+ 
+ 相關：[[windows-20260922-switch-findings]]、[[multicpu-r157-closed]]、[[precommit-ruff-wholefile-vs-loc-tier]]

@@ -136,6 +136,7 @@ QA 的逐條指令與原始輸出住 scratchpad `selfimproving_p1\qa_work\scg4_q
   - 四審：FAIL（§O；P2 ×1＝修復棒三拆掉 `fetch_source` 外層 ValueError 安全網致 UnicodeError 逸出，修法一行＋2 AT）。主控如實記錄第五次 gate FAIL → P1 鍵 **ESCALATION_FINAL**（R-9.1 retry 預算耗盡；auto-recovery 依 R-9.14.3 拒絕）；依 R-9.5 resume 目標由掌舵者裁決，主控不代決。待補：裁決後的勘誤四／修復棒四／五審紀錄、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
   - 掌舵者裁決（約 21:02，AskUserQuestion，逐字稿 line 9396）：A「恢復，走完整四方流程」→ P1 鍵 `resume-from-escalation --to PR_REVIEW`（resolved_at 2026-10-20T13:02:16Z；主控 reason 字串誤寫 18:1x）→ 兩鍵 `transition --to SPEC_AUDIT` → OBS-SI-183。SA 勘誤四（同一代理續派，733k tokens／14 分鐘）：AT 161→163——AT-130-2-E-8 非 ASCII 相對 Location 四形態＋初始 URL 非 ASCII 路徑／查詢（N5／N6）＋ASCII 對照 N0、指令層兩來源一敗一成 rc=2（R57 (d)）；AT-130-2-E-9 IDNA 無效 host 六形態、`DNS_GUARD` 替身（先做與真函式同一步的 `host.encode('idna')`，通過才計「抵達 DNS 分支」）斷言抵達 DNS 分支 0 次與 connect 0 次、指令層 `check` PASS／`research --fetch` FAIL network＋ZERO-SUCCESS；R58 (c) (iv) 送出請求階段 ValueError（含 UnicodeError）歸 network；R43 補句；⚖37 驗證端本輪刻意不判 IDNA；§7.2〈勘誤四〉；AC-130-2 序號已達 9（下次修訂須改規則或另立 AC）。SA 設計決定：任務書「getaddrinfo 呼叫 0 次」與一行修法不能並存（IDNA 編碼在 getaddrinfo 內、DNS 之前失敗），改斷言「抵達 DNS 分支 0 次」——主控接受。主控親驗：verify_tcs 163／58／105、PROBLEMS 0；cmp_blocks 新增 2、改 1（AT-130-2-E-6 Given 引用範圍 U01～U10）；adapter 161→163 無孤兒；冪等重建 sha256 `5e4766a9…`（655,293 bytes、CR 0、BOM 無）；`selfimproving check` overall=PASS；defid 11 passed；Ghost 32 passed；AT 模擬器 `at_sim4.py head` 7 tests failures=1 errors=1（E-8 FAIL、E-9 ERROR＝現行碼為紅）。下一步：兩鍵 refreeze → P1 PR_REVIEW → IMPLEMENTATION（直接邊；四審 FAIL 已於 retry 5 記錄）→ 修復棒四 → 五審（§O.6）。
   - 修復棒四收棒：21:25→21:47 rc=0（交卷 `dev_p1_fix4_handoff.md`）；碼修＝`_open` request 階段 except 加 ValueError（一行，未移除既有捕捉）；新測試 AT-130-2-E-8／E-9 各一個函式。Developer 自陳 [他包回報]：突變（拿掉 ValueError）2 failed；probe3 19 形態 bad=[]、Location 17/17；混沌 seed 201～204 各 250 案 violations 0；首跑 `test_no_posix_abs_literal…` 紅（`"/n0"` 字面被判 POSIX 絕對路徑）改存變數；未重算 digest。主控親驗：TCS sha256 5e4766a9… 與凍結一致、七檔 195 passed／346 subtests（rc=0）、鍵 B 10 passed、check overall=PASS、status／scan／export rc=0、ruff 兩檔 rc=0、LOC rc=0、`--check-snapshot` rc=0、分桶不變 → commit `8f86d0c3`；重釘同標籤 R213 第九列 +97（128106→128203；名冊 11368→11465；接鏈列 DEF-200-556；sha 2f772d58…）；OBS-SI-184（f926272b 的 push 被 pre-push 平行全套 `test_apply_lock…` 偶發 PermissionError 擋下，序列單跑三次 7 passed）。下一步：四支守衛 → 根層全套 → commit 重釘 → push → P1 鍵 `transition --to PR_REVIEW` → QA 五審（§O.6）。
+  - 收尾：四支守衛 783 passed／570 subtests → 根層全套 rc=0（發現 5579）→ 重釘 commit `73ff8e3c` → push `a8df7852..73ff8e3c` → P1 鍵 PR_REVIEW → QA 五審 PASS（§P；889k tokens／21 分鐘）→ 兩鍵 RELEASE_READY → DEF-200-556／557 結案、DEF-200-559 立案 → V8 真實運轉（§P.6）→ OBS-SI-185～189 → commit → push → 兩鍵 `transition --to RELEASE` → scratchpad 清除。
 
 ## §N 三審（QA 同一代理續審，HEAD `0db61d70`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
@@ -208,6 +209,35 @@ F2／U3／D1／CL（Content-Length 不再要求 ASCII）／HC（SRC-URL-HOST 不
 
 ### O.7 主控處置
 如實 `gate --gate PR_REVIEW --result FAIL`（reason 寫實情）→ `retry_count` 5 ≥ 5 觸發 R-9.1 ESCALATION；auto-recovery 依 R-9.14.3 拒絕（diagnostic category=structural）→ **P1 鍵 ESCALATION_FINAL**（`escalation_history` 2026-10-20T09:56:49Z；abort 報告 `AISDLC_SDD/AISDLC_SDD_v0.30/build/reports/abort/ABORT-2026-10-20-auto-recovery-refused.md`，不入庫）。鍵 B 仍 PR_REVIEW。依 R-9.5／Rule 9 禁令 6，ESCALATION 後不得自動恢復 ⇒ 主控不代決 resume，請掌舵者以互動選項裁決：A＝`resume-from-escalation --to PR_REVIEW` → SPEC_AUDIT 勘誤四（兩條 AT）→ refreeze → 修復棒四（一行＋2 測試）→ 五審（O.6 最小清單）；B＝停輪保留 `7d441704`（已知 P2 未修、不進 RELEASE）。OBS-SI-181～182 入帳。
+
+## §P 五審（QA 同一代理續審，HEAD `73ff8e3c`；§O.6 最小重放；文字交卷由主控謄寫；數字皆 `[他包回報]`）
+
+**判定：PASS**（P1 0／P2 0／P3 1／P4 2）。四審 P2-1 已收口：最小重放 (1)～(5) 全數通過、零退化全綠；P3 為既有間歇性失敗、與本次差分無關。真實樹審前審後 `git status --short` 皆空、未派子代理、未連外網；V8／V10 留主控於 RELEASE_READY 執行。
+
+### P.1 逐項重放
+- (1) `r3_url_probe.py`（新 HEAD 複本）rc=0、ESCAPED 0：初始 URL 19/19、Location 17/17 皆 FetchError；四審逸出的第 9 形態（70 字元 label）現為 `FetchError(network)`。
+- (2) `r4_loc_nonascii.py` rc=0：`/文件`、`/é`、`/x?q=文`、`\xff\xfe` 四形態皆 `FetchError(network)`（對照 `/a%E6%96%87` redirect-refused、`/a b` network 不變）；`r4_loc_cli.py` 行程內一個來源 302 到 `/文件` ⇒ `main` 回 rc=1、`source a-redir FAIL network`＋`reject research ZERO-SUCCESS`，無例外（四審為 `main RAISED UnicodeEncodeError`）。
+- (3) `r5_idna_guard.py`（新寫；getaddrinfo 替身先做 IDNA 編碼、成功才計抵達 DNS 並拋 OSError；connect 計數＋拋錯）rc=0：六形態皆 `FetchError(network)`，計數 `{'idna_fail': 5, 'dns_reached': 0, 'connect': 0}`（`a。。b` 在 putrequest 組 Host 標頭時即失敗）；`r4_idna.py` 六形態全 network；`r3_d1_cli.py` 真 CLI `https://docs..example.com/docs` ⇒ `check` PASS、`research --fetch` rc=1 無 Traceback `source a-typo FAIL network`＋ZERO-SUCCESS；含空白 host 路徑不退化（`reject research SRC-URL-HOST`）；`validate_table` 對 IDNA 無效 host 仍 ACCEPTED＝⚖37 不計缺陷。
+- (4) `r3_fetch_chaos.py` seed 201～204 各 250 案、timeout=1、4 行程 130.4 s：違規 0／0／0／0（四審 3/1,000）。
+- (5) TCS 163 AT（正控 58／負控 105）；`run_k.py` 字面判定指令 AT-130-2-E-8／E-9 各 `1 passed, 40 deselected` rc=0；`--collect-only` 根層 153＋鍵 B 10＝163 與 AT 一對一；回退突變（`fetch.py:144` 拿掉 ValueError）`-k AT_130_2_E_8` KILLED、`-k AT_130_2_E_9` KILLED、合跑 2 failed；diff 審視 `94a48f38..HEAD`：碼只有 `fetch.py` 一行純加不減、既有捕捉全在，測試 +88。
+- (6) 零退化：七檔＋P0 四組並行合計 195 passed／346 subtests、skip 0；鍵 B 10 passed；`check` overall=PASS；ruff 三檔 All checks passed（`--preview` E30x 排除既有 lock 檔後 0）；LOC rc=0；`--check-snapshot` rc=0；`--print-guard-lines` 128203→128203（+0）；根層全套第一次 rc=1（227 s，5579 個測試；唯一失敗＝既有間歇性 AT-141-2-1，見 P.2）、重跑 rc=0（226.9 s）。
+- (7) V8／V10 未驗。
+
+### P.2 缺陷
+- **P3（既有、與本次差分無關）**：`test_AT_141_2_1_lock_serialises_writers` 間歇性失敗（`tools/tests/test_selfimproving_events.py:819`；成因推論在 `tools/lib/apply_lock.py:58-61`：`_try_create` 的 `os.open(..., O_CREAT|O_EXCL)` 只把 `FileExistsError` 當忙碌重試，Windows 對「刪除待決」檔名拋 `PermissionError` 直接穿出，`writeverbs.py:105-106` 歸類為「事件追加失敗（PermissionError），帳本未變動」＝fail-safe）。證據：根層全套第一次 rc=1 僅此一筆（`tools/.last_failure_73ff8e3c_20261020T141931Z.log`）；隔離重跑真實樹 HEAD 17 次失敗 1、一審 HEAD `001d3e5e` 複本 12 次失敗 1、二審 HEAD `8a8f071d` 複本 12 次失敗 0（合計 41 次失敗 2）；一審 HEAD 即有。QA 未插樁證實成因。建議另案：`_try_create` 把 Windows `PermissionError` 當忙碌重試（須確認不掩蓋真正權限錯誤）或讓測試容忍。**主控處置：與 OBS-SI-184（pre-push `test_apply_lock` 偶發 PermissionError）同根因，立 DEF-200-559 承接下一輪（本輪不改鎖碼：鎖為全部寫入動詞共用，改動須走完整四方流程）。**
+- **P4 ×2（沿用）**：重導向目標帶 userinfo 靜默忽略後照樣跟隨；本文被截斷回傳成功。
+
+### P.3 對 Developer 交卷的核對
+「未宣稱等價、只加捕捉不移除」屬實（diff 為證）；「G6 探針 19 形態 bad=[]、混沌 201～204 皆 0」QA 以自己的腳本重放得到相同結論；兩方皆未重算三份凍結文件 digest——主控親驗：TCS sha256 `5e4766a9…` 與 refreeze 紀錄一致（修復棒四親驗時實測）。
+
+### P.4 QA 流程摩擦
+系統提示「用 Bash」與 Windows 守衛衝突（全程 PowerShell）；根層全套第一次 rc=1 花約 10 分鐘判定為既有間歇性測試（建議交卷附該測試歷史翻紅率）；審查中途出現「額度停止水位」提醒（週額度，只擋扇出型工具）；`r4_loc_cli.py` 寫死 `RUN-SI-001` 須先 `run-open`、`mut_at.py` 只支援單檔；根層全套在真實樹留下 git-ignored 痕跡。證據：scratchpad `qa_work\scg4_qa\`（新增 `r5_idna_guard.py`、`r5_make_at_spec.py`）與 `qa_work\scg4_r5\`。
+
+### P.5 主控處置
+兩鍵 `gate --gate PR_REVIEW --result PASS` → RTM_VERIFY → `gate --gate RTM_VERIFY --result PASS` → RELEASE_READY（`gate_pass_steps.ps1 -Head 73ff8e3c`；兩鍵皆 rc=0、`current_state` RELEASE_READY）；DEF-200-556 fixed@8f86d0c3、DEF-200-557 fixed@605de382；DEF-200-559 立案（apply_lock PermissionError，承接 R214）；V8 真實運轉見 §P.6。
+
+### P.6 V8 真實運轉（主控於 RELEASE_READY 在真實樹執行；2026-10-20 22:31）
+`real_run.ps1`：`run-open --trigger a`（RUN-SI-001，head_sha 73ff8e3c）→ `research --fetch` rc=2（R57 (d)：事件已寫、有來源失敗）：7 來源 1 成功（anthropic-engineering 141,524 bytes、http 200）、5 too-large（cc-changelog Content-Length 1,057,524、cc-docs-hooks／cc-docs-memory／cc-docs-skills 超過 262144、openai-agents-releases Content-Length 438,564）、1 redirect-refused（openai-api-changelog → `https://developers.openai.com/api/docs/changelog` 不在允許集合）；腳本把 rc=2 當失敗停鏈（OBS 入帳），以 `real_run_resume.ps1` 從 scan 續跑同一 run：`scan` rc=0 → `attr` ATT-SI-001（OBS-SI-162／163／164 → MEMORY_ENTRY=memory/guard-ratchet-repin-ritual.md，root-cause process/task-brief-gap）、ATT-SI-002（OBS-SI-161 → DOC=TCS:312，process/checklist-gap）→ `prop-new` PROP-SI-004（M 類 modify，目標 memory/guard-ratchet-repin-ritual.md，+3／-0 行，digest d21ae6f5，驗證：未驗；卡片核心區＝症狀／改什麼／風險與回滾／決定列）→ `card` rc=0 → `run-close`（outcomes 1）→ `check` overall=PASS（NE ref.carrier_families nonblocking：ATT-SI／PROP-SI／RUN-SI 家族載體未建立，資訊欄）／`status`／`export --kind runs` rc=0。產物：`docs/06_quality/SelfImproving_Event_Ledger.jsonl`（6 事件：run.open／research.scan／attr×2／prop／run.close）、`docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.md`＋`r1.patch`。**出口 (a)「至少一筆真實觀察走到提案卡」達成**；提案只提案不套用，待掌舵者在卡片「決定」列核准／否決／退回。真實觀察回流：來源表 5／7 超過 `research_max_bytes`、1 筆跨 host 重導向（OBS 入帳；P2 修訂來源表與上限）。V10 留 RELEASE 後首次例行 run 驗（本輪未驗）。
 
 ## §M 二審（QA 同一代理續審，HEAD `8a8f071d`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
