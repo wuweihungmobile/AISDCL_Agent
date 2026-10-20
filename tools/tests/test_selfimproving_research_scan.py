@@ -15,6 +15,7 @@ import socket
 import subprocess
 import threading
 import time
+import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -767,6 +768,7 @@ class TestFetching(ResearchCase):
         before = ledger_bytes(repo)
         rc, out, err = self.fetch(repo)
         self.zero_success(rc, out)
+        self.assertTrue(out.split("\n")[0].startswith("source s1 FAIL"), out)  # R57 (e)
         order = [
             out.index(m)
             for m in (
@@ -1075,8 +1077,8 @@ class TestBudgetsAndFingerprint(ResearchCase):
             self.assertEqual(len(srv.requests), n)
 
     def test_AT_130_5_E_2_wallclock_holds_for_drip_and_stall(self):
-        hdr = {**TEXT, "Content-Length": "100000"}
-        body = b"d" * 100000
+        hdr = {**TEXT, "Content-Length": "8"}  # 有限本文：期限機制失效時以斷言紅收場而非掛住
+        body = b"d" * 8
         srv = self.serving(
             {
                 "/drip": (200, hdr, body, {"drip": True}),
@@ -1107,6 +1109,74 @@ class TestBudgetsAndFingerprint(ResearchCase):
         self.assertIn("source s-drip FAIL timeout", out)
         self.assertEqual(ledger_bytes(repo), before)
         self.assertLess(spent, 6, f"整個指令 {spent:.2f}s")
+
+    def test_AT_130_5_E_3_wallclock_holds_in_every_framing_stage(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：框架各階段慢滴皆 timeout。"""
+        srv = self.serving(fx.raw_routes())
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+        for path in ("/status-drip", "/hdr-drip", "/hdr-many-lines", "/chunk-size-drip",
+                     "/trailer-drip"):
+            t0, got = time.monotonic(), None
+            try:
+                got = si_fetch.fetch_source(
+                    srv.url(path), policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
+                )
+            except si_fetch.FetchError as exc:
+                reason = exc.reason
+            spent = time.monotonic() - t0
+            self.assertIsNone(got, f"{path} 不得回傳成功")
+            self.assertEqual(reason, "timeout", path)
+            self.assertTrue(1.5 <= spent <= 2.5, f"{path} {spent:.2f}s")
+        t0 = time.monotonic()
+        ok = si_fetch.fetch_source(
+            srv.url("/chunked-ok"), policy=policy, timeout=2, max_bytes=262144,
+            allowed_hosts=allowed,
+        )
+        self.assertEqual(ok.raw, b"abcde")
+        self.assertLess(time.monotonic() - t0, 1)
+        repo = fx.p1_base()
+        self.open_only(repo)
+        fx.set_params(repo, research_timeout_seconds=2, research_bytes_max=262144)
+        write_table(repo, srv, [("s-hdr", "/hdr-drip")])
+        before = ledger_bytes(repo)
+        t0 = time.monotonic()
+        rc, out, err = self.fetch(repo)
+        spent = time.monotonic() - t0
+        self.zero_success(rc, out)
+        self.assertIn("source s-hdr FAIL timeout", out)
+        self.assertEqual(ledger_bytes(repo), before)
+        self.assertLess(spent, 6, f"整個指令 {spent:.2f}s")
+
+    def test_AT_130_2_E_5_unparsable_urls_stay_in_the_closed_failure_set(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：無法剖析的 URL 不拋 ValueError。"""
+        srv = self.serving({
+            "/r1": (302, {"Location": "http://[::1/x", "Content-Length": "0"}, b""),
+            "/r2": (302, {"Location": "http://::1]/x", "Content-Length": "0"}, b""),
+        })
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+
+        def reason(url):
+            with self.assertRaises(si_fetch.FetchError, msg=url) as cm:
+                si_fetch.fetch_source(
+                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
+                )
+            return cm.exception.reason
+
+        for route in ("r1", "r2"):
+            self.assertEqual(reason(srv.url(f"/{route}")), "redirect-refused", route)
+        self.assertEqual([reason("http://[::1/x"), reason("http://::1]/x")], ["network"] * 2)
+        repo = fx.p1_base()
+        self.open_only(repo)
+        fx.set_params(repo, research_timeout_seconds=2)
+        write_table(repo, srv, [("s-r1", "/r1")])
+        before = ledger_bytes(repo)
+        rc, out, err = self.fetch(repo)
+        self.zero_success(rc, out)
+        self.assertIn("source s-r1 FAIL redirect-refused", out)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(ledger_bytes(repo), before)
 
     def test_AT_130_6_1_sources_excluded_from_fingerprint(self):
         repo = fx.p1_base()
@@ -1614,3 +1684,7 @@ class TestResearcherAndTemplateArticles(SiTestCase):
         before = fx.tree_state(repo)
         fx.put(repo, "ignored/secret.txt", "x\n")
         self.assertEqual(fx.tree_state(repo), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

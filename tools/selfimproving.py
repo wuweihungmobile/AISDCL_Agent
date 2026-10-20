@@ -156,7 +156,7 @@ def _scan(repo: Path, args: argparse.Namespace) -> int:
 
 def _card(repo: Path, args: argparse.Namespace) -> int:
     git = Git(repo)
-    events = si_events.load_events(repo / si_events.LEDGER_REL) or []
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL) or []
     try:
         res = card.build(repo, git, events, si_fold.fold(events), args.prop, check.params_for(repo))
     except card.CardError as exc:

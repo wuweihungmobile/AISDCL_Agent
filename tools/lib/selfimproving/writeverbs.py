@@ -442,7 +442,7 @@ def _obs_files(repo: Path) -> list[str]:
 
 
 def _mem_text(memory_dir: str | None, logical: str) -> str | None:
-    if memory_dir is None or not logical.startswith("memory/"):
+    if memory_dir is None or logical[:7].casefold() != "memory/":  # 合法根比對亦 casefold（R52）
         return None
     p = Path(memory_dir) / logical[len("memory/"):]
     return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None

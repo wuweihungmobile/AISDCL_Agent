@@ -39,6 +39,7 @@ from _selfimproving_fixtures import (
 )
 
 from lib import apply_lock
+from lib.selfimproving import events as si_events
 from lib.selfimproving import evwrite
 
 TOOLS = fx.TOOLS
@@ -896,8 +897,6 @@ class TestCheckReplay(SiTestCase):
         self.assertEqual(
             (self.S(res, "events.transitions"), self.S(res, "events.structure")), ("PASS", "PASS")
         )
-        # TCS 內部不一致：R38 與 AT-108-4-E-2 要求有 dec 時印一則引言回查未建的提示，而本 AT 寫
-        # 「F 為空」；SC-LEGAL 含 dec，故這裡只容許那一則 warn、不容許任何轉移類 finding。
         self.assertEqual(
             self.F(res, "events.transitions"), {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")}
         )
@@ -1858,10 +1857,6 @@ class TestSopArticles(SiTestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 WEIRD_STATUS_KEYS = [
     "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
     "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
@@ -2168,3 +2163,304 @@ class TestSopCriteriaConstants(SiTestCase):
                 changed = tuple(f + "x" if k == j else f for k, f in enumerate(ls[i]))
                 for variant in (dropped, changed):
                     self.assertNotEqual(lines(ls[:i] + [variant] + ls[i + 1:]), want_lines)
+
+
+CORRUPT_T = "2026-10-20T08:00:00+08:00"
+_TY, _MI, _OR = "EVENT-TYPE", "EVENT-KEY-MISSING", "TRANSITION-ORPHAN"
+
+
+def raw_line(seq: int, kind: str, by: str, body: dict) -> str:
+    """手寫損壞事件：原始 JSON 行、不經 `compose`（不補任何預設鍵）。"""
+    obj = {"seq": seq, "t": CORRUPT_T, "kind": kind, "by": by, **body}
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+
+def corrupt_cases(p: str) -> dict[str, tuple]:
+    """TCS §5.3 `CORRUPT-CASES`：案 → (kind, by, 鍵, structure 碼集, transitions 碼集)。"""
+    dec = {"prop": p, "dkind": "approve"}
+    return {
+        "K01": ("dec", "x", {**dec, "flags": ["a", ["b"]]}, {_TY}, set()),
+        "K02": ("dec", "x", {**dec, "flags": ["a", 1]}, {_TY}, set()),
+        "K03": ("dec", "x", {**dec, "flags": [{"k": 1}]}, {_TY}, set()),
+        "K04": ("dec", "x", {"prop": p, "dkind": ["x"]}, {_TY}, set()),
+        "K05": ("dec", "x", {"prop": ["x"], "dkind": "approve"}, {_TY}, set()),
+        "K06": ("mea.amend", "x", {"prop": p, "window": [1], "to": [2]}, {_TY}, set()),
+        "K07": ("app.verify", "x", {"prop": p, "verdict": ["PASS"]}, {_TY}, set()),
+        "K08": ("prop", "x", {"id": p, "rev": 1}, {_MI}, set()),
+        "K09": ("prop", "x", {"rev": 1, "run": rid(1)}, {_MI}, set()),
+        "K10": ("prop", "x", {"id": ["a"], "rev": 1, "run": rid(1)}, {_MI, _TY}, set()),
+        "K11": ("research.scan", "researcher", {"run": rid(1), "sources": 5}, {_MI, _TY}, set()),
+        "K12": ("research.skip", "main", {"run": rid(1), "reason": ["a"], "note": "x"},
+                {_TY}, set()),
+        "K13": ("attr", "x", {"id": aid(99), "type": ["root"]}, {_TY}, set()),
+        "K14": ("attr", "x", {"id": aid(1), "type": "root", "obs": [["x"]],
+                              "items": [["DOC", "a.md"]], "root_cause": "a/b"}, {_TY}, set()),
+        "K15": ("attr.confirm", "x", {"att": ["x"]}, {_TY}, set()),
+        "K16": ("run.open", "x", {"run": ["x"], "trigger": "a", "coords": 5}, {_MI, _TY}, set()),
+        "K17": ("run.close", "x", {"run": rid(1), "outcomes": [1]}, {_TY}, set()),
+        "K18": ("card", "x", {}, set(), {_OR}),
+    }
+
+
+def consumed_keys(p: str) -> dict[str, tuple]:
+    """TCS §5.3 `CONSUMED-KEYS`：列 → (kind, 鍵)；V 列判 EVENT-TYPE、L 列為合法對照。"""
+    bad = ["x"]
+    v = {
+        "V01": ("card", {"prop": bad}), "V02": ("heldout.freeze", {"prop": bad}),
+        "V03": ("app.sandbox", {"prop": bad}),
+        "V04": ("app.verify", {"prop": bad, "verdict": "PASS"}),
+        "V05": ("app.promote", {"prop": bad}), "V06": ("app.rollback", {"prop": bad}),
+        "V07": ("mea.open", {"prop": bad}),
+        "V08": ("mea.close", {"prop": bad, "result": "clean"}),
+        "V09": ("mea.amend", {"prop": bad, "window": 1, "to": "clean"}),
+        "V10": ("mea.report", {"prop": bad}),
+        "V11": ("dec", {"prop": bad, "dkind": "approve"}),
+        "V12": ("dec", {"prop": p, "dkind": bad}),
+        "V13": ("dec", {"dkind": "resume", "run": bad}),
+        "V14": ("app.verify", {"prop": p, "verdict": ["PASS"]}),
+        "V15": ("mea.close", {"prop": p, "result": ["clean"]}),
+        "V16": ("mea.amend", {"prop": p, "window": [1], "to": "clean"}),
+        "V17": ("mea.amend", {"prop": p, "window": 1, "to": ["clean"]}),
+        "V18": ("mea.amend", {"prop": p, "window": True, "to": "clean"}),
+        "V19": ("mea.amend", {"prop": p, "window": 0, "to": "clean"}),
+    }  # fmt: skip
+    legal = {
+        "L01": ("dec", {"dkind": "resume", "run": rid(1)}),
+        "L02": ("mea.amend", {"prop": p, "window": 1, "to": "clean"}),
+        "L03": ("card", {"prop": p}),
+    }
+    return {**v, **legal}
+
+
+class CorruptLedgerTestCase(SiTestCase):
+    """損壞事件測試的共用基底：SC-CORRUPT 基底（每個測試檔快取一份樣板）與案例複本。"""
+
+    def corrupt_base(self) -> Path:
+        key = "corrupt_base"
+        if key not in fx._CACHE:
+            repo = fx.p1_base()
+            self.cli_ok(repo, *run_open_args())
+            self.cli_ok(
+                repo, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "x"
+            )
+            self.cli_ok(repo, *attr_root_args())
+            self.cli_ok(repo, "attr-confirm", "--att", aid(1), "--by", "QA")
+            self.cli_ok(repo, "prop-new", "--run", rid(1), *fx.good_prop_args(repo, "P"))
+            fx.commit_all(repo, "corrupt-base")
+            fx._CACHE[key] = repo
+        return fx._CACHE[key]
+
+    def case_repo(self, event: tuple | None = None) -> Path:
+        dest = fx.new_dir("cc")
+        shutil.copytree(self.corrupt_base(), dest)
+        if event is not None:
+            kind, by, body = event[:3]
+            append_raw(dest, raw_line(6, kind, by, body))
+        return dest
+
+
+class TestDecFlagsAndConsumedKeys(CorruptLedgerTestCase):
+    """受測：`tools/lib/selfimproving/events.py`（P2 起種類被消費的鍵逐鍵判型別，R37）。"""
+
+    def check_case(self, repo: Path):
+        res = self.check(repo)
+        self.assertEqual(len(res["items"]), 28)
+        self.assertTrue(all("status" in i for i in res["items"]))
+        return res
+
+    def test_AT_108_4_E_6_dec_flags_must_be_a_string_array(self):
+        p = base_prop(self.corrupt_base())
+        forms = {
+            "F1": ["a", ["b"]], "F2": ["a", 1], "F3": [{"k": 1}], "F4": "unverified_ack",
+            "F5": ["unverified_ack"], "F6": [],
+        }  # fmt: skip
+        for label, flags in forms.items():
+            with self.subTest(label):
+                repo = self.case_repo(("dec", "x", {"prop": p, "dkind": "approve", "flags": flags}))
+                res = self.check_case(repo)
+                if label in ("F5", "F6"):
+                    self.assertEqual((res["_rc"], self.S(res, "events.structure")), (0, "PASS"))
+                    self.assertEqual(
+                        self.F(res, "events.transitions"),
+                        {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")},
+                    )
+                    continue
+                self.assertEqual(res["_rc"], 1)
+                self.assertEqual(self.S(res, "events.structure"), "FAIL")
+                self.assertEqual(self.F(res, "events.structure"), {("seq=6", "EVENT-TYPE")})
+                self.assertEqual(self.S(res, "events.transitions"), "PASS")
+                self.assertEqual(self.F(res, "events.transitions"), set())
+                for argv in verb16(self.corrupt_base()):
+                    work = fx.new_dir("cw")
+                    shutil.copytree(repo, work)
+                    rc, out, err = self.M(work, *argv)
+                    self.assertIn(rc, (0, 1, 2, 3), (label, argv, out, err))
+                    self.assertNotIn("Traceback", err)
+
+    def test_AT_108_4_E_7_every_consumed_key_is_type_checked(self):
+        for label, (kind, body) in consumed_keys(base_prop(self.corrupt_base())).items():
+            with self.subTest(label):
+                res = self.check_case(self.case_repo((kind, "x", body)))
+                if label.startswith("V"):
+                    self.assertEqual(res["_rc"], 1)
+                    self.assertEqual(self.S(res, "events.structure"), "FAIL")
+                    self.assertEqual(self.F(res, "events.structure"), {("seq=6", "EVENT-TYPE")})
+                    self.assertEqual(self.S(res, "events.transitions"), "PASS")
+                    self.assertEqual(self.F(res, "events.transitions"), set())
+                    continue
+                self.assertEqual((res["_rc"], self.S(res, "events.structure")), (0, "PASS"))
+                want = {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")} if label == "L01" else set()
+                self.assertEqual(self.F(res, "events.transitions"), want)
+
+
+def base_prop(base: Path) -> str:
+    """SC-CORRUPT 基底的 PROP ID（執行期取自帳本末行，不寫死號碼）。"""
+    return fx.EV(base)[-1]["id"]
+
+
+def verb16(base: Path) -> list[list[str]]:
+    """TCS §5.2 `VERB16`：餵 `tools/lib/selfimproving/` 的十六個呼叫（不含 `--repo`）。"""
+    prop_new = fx.good_prop_args(
+        base, "D", target=["docs/notes/other.md"],
+        patch=fx.patch_mod("docs/notes/other.md", {3: "改過三"}), sources=[obs_id(3)],
+    )  # fmt: skip
+    return [
+        ["check", "--json"], ["status"], ["scan"], ["card", base_prop(base)],
+        ["export", "--json", "--kind", "events"], ["export", "--json", "--kind", "proposals"],
+        ["export", "--json", "--kind", "runs"], ["export", "--json", "--kind", "status"],
+        run_open_args(), ["run-close", "--run", rid(1), "--by", "main"],
+        attr_root_args(obs=obs_id(2)),
+        ["attr-confirm", "--att", aid(1), "--by", "zz"],
+        ["attr-reject", "--att", aid(1), "--by", "zz", "--note", "x"],
+        ["research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "x"],
+        ["prop-new", "--run", rid(1), *prop_new],
+        ["prop-revise", "--run", rid(1), "--prop", base_prop(base), *fx.revise_args(base, "P")],
+    ]  # fmt: skip
+
+
+VERB16_K00_RC = [0] * 11 + [1, 1, 1, 0, 1]  # (12)～(14) 與 (16) 對照案即為 rc 1
+_WRITING = (8, 9, 10, 14)  # run-open、run-close、attr、prop-new（0 起算）
+
+
+class TestCorruptEventMatrix(CorruptLedgerTestCase):
+    """受測：`tools/lib/selfimproving/evwrite.py`／`fold.py`／`card.py`／`props.py`（R37、R32）。"""
+
+    def test_AT_140_1_E_4_corrupt_events_times_every_verb(self):
+        base = self.corrupt_base()
+        argvs = verb16(base)
+        protos = base / si_events.PROPOSALS_REL
+        keep = {d.name for d in protos.iterdir()} if protos.is_dir() else set()
+        p = base_prop(base)
+        cases = {"K00": None, **corrupt_cases(p)}
+        k00_out: dict[int, str] = {}
+        for label, case in cases.items():
+            with self.subTest(label):
+                repo = self.case_repo(case)
+                orig = (repo / EVL).read_bytes()
+                for i, argv in enumerate(argvs):
+                    (repo / EVL).write_bytes(orig)
+                    if protos.is_dir():
+                        for d in (repo / si_events.PROPOSALS_REL).iterdir():
+                            if d.name not in keep:
+                                shutil.rmtree(d)
+                    rc, out, err = self.M(repo, *argv)
+                    where = (label, i + 1, argv[0], rc, out, err)
+                    self.assertIn(rc, (0, 1, 2, 3), where)
+                    self.assertNotIn("Traceback", err, where)
+                    if i == 0:
+                        self.assert_check_matches(label, case, rc, out)
+                        continue
+                    self.assertEqual(rc, VERB16_K00_RC[i], where)
+                    if i in (1, 2, 3):
+                        if label == "K00":
+                            k00_out[i] = out
+                        self.assertEqual(out, k00_out[i], where)
+                    if i == 4:
+                        lines = [json.loads(x) for x in orig.decode("utf-8").splitlines()]
+                        self.assertEqual(json.loads(out)["items"], lines, where)
+                    if i in _WRITING and rc == 0:
+                        after = (repo / EVL).read_bytes()
+                        self.assertTrue(after.startswith(orig), where)
+                        self.assertEqual(
+                            json.loads(after[len(orig):].splitlines()[-1])["seq"],
+                            6 if label == "K00" else 7, where)  # R32 (a)：損壞事件即使被忽略也佔號
+                (repo / EVL).write_bytes(orig)
+                for extra in (["status", "--json"], ["card", p, "--json"]):
+                    rc, out, err = self.M(repo, *extra)
+                    self.assertEqual(rc, 0, (label, extra, out, err))
+                    self.assertNotIn("Traceback", err)
+                    key = ("x", extra[0], len(extra))
+                    if label == "K00":
+                        k00_out[key] = out
+                    self.assertEqual(out, k00_out[key], (label, extra))
+
+    def assert_check_matches(self, label, case, rc, out):
+        res = json.loads(out)
+        items = {i["id"]: i for i in res["items"]}
+        got_s = {(f["subject"], f["code"]) for f in items["events.structure"]["findings"]}
+        got_t = {(f["subject"], f["code"]) for f in items["events.transitions"]["findings"]}
+        want_s = {("seq=6", c) for c in case[3]} if case else set()
+        want_t = {("seq=6", c) for c in case[4]} if case else set()
+        self.assertEqual((rc, got_s, got_t), (1 if case else 0, want_s, want_t), (label, out))
+        for key in ("events.mutated", "events.vacuity", "events.prop_files", "events.research"):
+            self.assertEqual(items[key]["status"], "PASS", (label, key))
+
+    def test_AT_140_1_E_5_corrupt_prop_and_scan_do_not_reach_consumers(self):
+        p = base_prop(self.corrupt_base())
+        control = self.case_repo()
+        card0 = [self.M(control, "card", p)[1], self.M(control, "card", p, "--json")[1]]
+        prop_args = verb16(self.corrupt_base())[14][3:]
+        work = fx.new_dir("cw")
+        shutil.copytree(control, work)
+        self.assertEqual(self.M(work, "prop-new", "--run", rid(1), *prop_args)[0], 0)
+        want_new = fx.EV(work)[-1]
+        self.assertEqual(want_new["seq"], 6)
+        for label in ("K08", "K09", "K10"):
+            with self.subTest(label):
+                repo = self.case_repo(corrupt_cases(p)[label])
+                for argv, want in zip((["card", p], ["card", p, "--json"]), card0):
+                    rc, out, err = self.M(repo, *argv)
+                    self.assertEqual((rc, out, err), (0, want, ""), label)
+                rc, out, err = self.M(repo, "prop-new", "--run", rid(1), *prop_args)
+                self.assertEqual(rc, 0, (label, out, err))
+                new = fx.EV(repo)[-1]
+                self.assertEqual((new["id"], new["seq"]), (want_new["id"], 7), label)
+        self.fetch_corrupt_scan()
+
+    def fetch_corrupt_scan(self):
+        srv = fx.serve({"/a": (200, {"Content-Type": "text/plain"}, b"hello")})
+        self.addCleanup(srv.close)
+        tpl = fx.p1_base()
+        self.cli_ok(tpl, *run_open_args())
+        fx.write_table(tpl, srv, [("a-src", "/a")])
+        sources = {"S0": None, "S1": 5, "S2": [1, 2], "S3": [{"id": "a-src"}]}
+        for label, bad in sources.items():
+            with self.subTest(label):
+                repo = fx.new_dir("fc")
+                shutil.copytree(tpl, repo)
+                if bad is not None:
+                    append_raw(repo, raw_line(2, "research.scan", "researcher",
+                                              {"run": rid(1), "sources": bad}))
+                before = (repo / EVL).read_bytes()
+                with fx.relaxed():
+                    rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
+                self.assertEqual(rc, 0, (label, out, err))
+                seq = 2 if label == "S0" else 3
+                self.assertIn("source a-src ok", out)
+                self.assertIn("changed=true", out)
+                self.assertIn(f"ok research.scan seq={seq} run=RUN-SI-001", out)
+                after = (repo / EVL).read_bytes()
+                self.assertTrue(after.startswith(before), label)
+                (new,) = [json.loads(x) for x in after[len(before):].splitlines()]
+                self.assertEqual(len(new["sources"]), 1, label)
+                self.assertIs(new["sources"][0]["changed"], True, label)
+                if label == "S0":
+                    continue
+                res = self.check(repo)
+                self.assertEqual(self.S(res, "events.structure"), "FAIL")
+                self.assertEqual({s for s, _ in self.F(res, "events.structure")}, {"seq=2"})
+                self.assertEqual(self.S(res, "events.research"), "PASS")
+
+
+if __name__ == "__main__":
+    unittest.main()

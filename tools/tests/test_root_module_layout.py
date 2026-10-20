@@ -333,6 +333,7 @@ class TestPackagesAndPrds(unittest.TestCase):
                 self.assertTrue(probs and all("pkg" in p for p in probs), (key, probs))
             else:
                 self.assertEqual(probs, [], key)
+
     def test_AT_134_4_1_prd_must_cite_ssot(self):
         self.assertEqual(prd_problems(ROOT), [])
         root = synth("d1")

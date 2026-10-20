@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -350,6 +351,7 @@ class TestStatus(StatusCase):
             found, {"status": "NOT-EVALUABLE", "reason": "transcript-parser-not-established"}
         )
         self.assertEqual(gone, {"status": "NOT-EVALUABLE", "reason": "transcript-unavailable"})
+
     def test_AT_103_1_E_1_status_edges(self):
         repo = fx.p1_base()
         obj = self.MJ(repo, "status")
@@ -507,6 +509,7 @@ class TestExport(StatusCase):
             obj = self.export(repo, "--kind", "events", "--limit", str(limit))
             got = (len(obj["items"]), obj["truncated"], obj["next_since"])
             self.assertEqual(got, want, limit)
+
     def test_AT_132_5_E_1_usage_pages_and_carriers(self):
         repo = self.sc_export()
         n = len(fx.EV(repo))
@@ -739,3 +742,7 @@ class TestStability(StatusCase):
                 self.assertRegex(text, cjk, label)
             else:
                 self.assertIn(needle.encode("utf-8"), raw, label)
+
+
+if __name__ == "__main__":
+    unittest.main()

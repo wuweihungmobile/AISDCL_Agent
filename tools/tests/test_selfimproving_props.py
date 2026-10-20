@@ -448,6 +448,60 @@ class TestSourcesAndRoute(PropCase):
         n0 = len(fx.EV(repo))
         self.ok(repo, run, "D")
         self.assertEqual(len(fx.EV(repo)), n0 + 1)
+
+    def test_AT_107_3_E_5_diff_git_a_side_enters_the_touched_union(self):
+        """受測 `tools/lib/selfimproving/paths.py`：`diff --git` 標頭 A 側路徑即使 ---／+++ 只列
+        B 側也入 touched 聯集並據以導出 route（R51 (a)）。"""
+        orig = fx.patch_mod("docs/notes/demo.md", {3: "改過三", 4: "改過四"})
+        first, _, rest = orig.partition(b"\n")
+        self.assertEqual(first, b"diff --git a/docs/notes/demo.md b/docs/notes/demo.md")
+        forged = b"diff --git a/CLAUDE.md b/docs/notes/demo.md\n" + rest
+        repo, run = self.fresh_run_repo()
+        self.ok(repo, run, "D", target=["docs/notes/demo.md"], handoff="T1", patch=forged)
+        e = props_of(repo)[0]
+        paths = ["CLAUDE.md", "docs/notes/demo.md"]
+        blob = json.dumps(paths, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        self.assertEqual((e["route"], e["touched_count"]), ("handoff:T1", 2))
+        self.assertEqual(e["touched_sha256"], "sha256:" + hashlib.sha256(blob).hexdigest())
+        repo, run = self.fresh_run_repo()
+        self.ok(repo, run, "D", target=["docs/notes/demo.md"], patch=orig)
+        e = props_of(repo)[0]
+        self.assertEqual((e["route"], e["touched_count"]), ("loop", 1))
+
+    def memory_variants(self):
+        md = fx.memory_dir(fx.new_dir("mem"))
+        old = (md / "demo.md").read_text(encoding="utf-8")
+        return md, old, ("memory/demo.md", "Memory/demo.md", "MEMORY/demo.md")
+
+    def test_AT_107_3_E_6_memory_root_prefix_is_casefolded(self):
+        """受測 `tools/lib/selfimproving/props.py`：M 類合法根的 `memory/` 前綴比對經 casefold。"""
+        md, old, paths = self.memory_variants()
+        pre = {}
+        for path in paths:
+            repo, run = self.fresh_run_repo()
+            patch = fx.patch_mod(path, {3: "改過三", 4: "改過四"}, old=old)
+            self.ok(repo, run, "M", memory_dir=md, target=[path], patch=patch,
+                    body=body_md("M", scope="memory 索引"))  # fmt: skip
+            e = props_of(repo)[0]
+            self.assertEqual((e["cls"], e["route"], e["touched_count"]), ("M", "loop", 1), path)
+            self.assertEqual(e["target"], [path], path)
+            self.assertEqual(set(e["preimage"]), {path}, path)
+            pre[path] = e["preimage"][path]
+        self.assertEqual(len(set(pre.values())), 1)
+
+    def test_AT_107_3_E_7_memory_case_variants_obey_touch_ratio(self):
+        """受測 `tools/lib/selfimproving/writeverbs.py`：M 類大小寫變體不得因找不到 base 內容而
+        繞過 TOUCH-RATIO（`_mem_text` 的前綴比對須 casefold）。"""
+        md, old, paths = self.memory_variants()
+        edits = {n: f"不同的第 {n} 行" for n in range(1, 16)}
+        for path in paths:
+            repo, run = self.fresh_run_repo()
+            snap0 = fx.snap(repo)
+            patch = fx.patch_mod(path, edits, old=old)
+            out = self.rej(repo, run, {"TOUCH-RATIO"}, "M", path, memory_dir=md, target=[path],
+                           patch=patch, body=body_md("M", scope="memory 索引"))  # fmt: skip
+            self.assertIn("0.750", out, path)
+            self.assertEqual(fx.snap(repo), snap0, path)
     def test_AT_107_3_E_3_conditions_and_markers(self):
         def rule(n):
             return f"AISDLC_SDD/{VNEW}/governance/rules/R-9.{n}.yaml"
@@ -1257,6 +1311,7 @@ class TestCard(PropCase):
                 "extra_paths": [], "verdict": "未驗"}  # fmt: skip
         self.assertEqual({k: obj["parsed"][k] for k in want}, want)
         self.assertEqual(obj["text"], out)
+
     def test_AT_114_1_E_1_card_ignores_free_text(self):
         repo, run = self.make(
             "P", body=body_md("P", symptom="+99／-99 行；觸及比例 0.99；觸及檔案數 9")

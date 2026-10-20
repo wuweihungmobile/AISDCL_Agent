@@ -1195,6 +1195,13 @@ class Srv:
                 opts["hold"].wait(30)
             if opts.get("delay"):
                 threading.Event().wait(opts["delay"])
+            if opts.get("raw") is not None:  # 狀態列、標頭、本文全由 raw 逐項寫出；close 可打斷停頓
+                for chunk, pause in opts["raw"]():
+                    h.wfile.write(chunk)
+                    h.wfile.flush()
+                    if pause and self.closing.wait(pause):
+                        break
+                return
             h.send_response(status)
             for k, v in headers.items():
                 h.send_header(k, v)
@@ -1228,6 +1235,37 @@ class Srv:
 
 def serve(routes: dict) -> Srv:
     return Srv(routes)
+
+
+def _byte_drip(piece: bytes, count: int, pause: float = 0.5):
+    return [(piece, pause)] * count
+
+
+_CHUNKED_HEAD = (
+    b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+    b"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+)
+
+
+def raw_routes() -> dict:
+    """TCS §5.4 `RAW-ROUTES`：回應框架各階段慢滴的五條負控路由（總時長 8 至 8.5 秒、皆有限）
+    與一條正常分塊對照路由 `/chunked-ok`。"""
+    status = b"HTTP/1.0 200 OK\r\n"
+    seqs = {
+        "/status-drip": lambda: [*((status[i:i + 1], 0.5) for i in range(len(status))),
+                                 (b"Content-Type: text/plain\r\n\r\nhello", 0)],
+        "/hdr-drip": lambda: [
+            (b"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nX-Slow: ", 0),
+            *_byte_drip(b"a", 16), (b"\r\n\r\nhello", 0)],
+        "/hdr-many-lines": lambda: [
+            (b"HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\n", 0),
+            *((f"X-H{n}: v\r\n".encode(), 0.5) for n in range(16)), (b"\r\nhello", 0)],
+        "/chunk-size-drip": lambda: [(_CHUNKED_HEAD, 0), *_byte_drip(b"0", 16)],
+        "/trailer-drip": lambda: [(_CHUNKED_HEAD + b"3\r\nabc\r\n0\r\nX-T: ", 0),
+                                  *_byte_drip(b"a", 16)],
+        "/chunked-ok": lambda: [(_CHUNKED_HEAD + b"3\r\nabc\r\n2\r\nde\r\n0\r\nX-T: v\r\n\r\n", 0)],
+    }
+    return {path: (200, {}, b"", {"raw": fn}) for path, fn in seqs.items()}
 
 
 def table_bytes(srv: Srv, entries, retired=()) -> bytes:

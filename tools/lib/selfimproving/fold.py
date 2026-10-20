@@ -168,8 +168,7 @@ def _prop_event(f: Folded, ev: dict) -> None:
 
 
 def _dec_flags(ev: dict) -> list:
-    v = ev.get("flags")
-    return [v] if isinstance(v, str) else _lst(v)
+    return _lst(ev.get("flags"))  # `sound()` 已保證元素皆 str（裸字串不是合法形態）
 
 
 def _dec(f: Folded, ev: dict) -> None:

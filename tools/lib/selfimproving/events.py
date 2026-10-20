@@ -189,6 +189,22 @@ _SPEC: dict[str, dict] = {
              "proposer": valid_by, "reviewer": lambda v: v is None or valid_by(v),
              "preimage": _preimage},
 }
+def _str(v) -> bool:
+    return isinstance(v, str)
+
+
+# P2 起種類（無完整欄位表）被折疊／查表讀取的鍵：有帶就須型別合法（缺鍵由 TRANSITION-ORPHAN 判），
+# 使 `sound()` 之後的消費者不必再防禦型別（R37；`from`、`cause` 等不被讀取者不判）。
+_PROP_ONLY = {"prop": _str}
+_CONSUMED: dict[str, dict] = {
+    "card": _PROP_ONLY, "heldout.freeze": _PROP_ONLY, "app.sandbox": _PROP_ONLY,
+    "app.promote": _PROP_ONLY, "app.rollback": _PROP_ONLY, "mea.open": _PROP_ONLY,
+    "mea.report": _PROP_ONLY,
+    "app.verify": {"prop": _str, "verdict": _str},
+    "mea.close": {"prop": _str, "result": _str},
+    "mea.amend": {"prop": _str, "window": lambda v: _int(v, 1), "to": _str},
+    "dec": {"prop": _str, "dkind": _str, "run": _str, "flags": _list_of(_str, 0)},
+}
 _ALWAYS_OPTIONAL = {"run.close": {"outcomes", "no_event"},
                     "research.skip": {"band", "sid", "line"},
                     "attr": {"obs", "items", "root_cause", "from", "reopens"},
@@ -222,7 +238,9 @@ def validate(obj: dict) -> list[tuple[str, str]]:
         out.append(("EVENT-TYPE", "by 須為非空、無空白、≤32 字元的標籤"))
     kind = obj["kind"]
     if kind not in _SPEC:
-        return out
+        consumed = _CONSUMED.get(kind, {})
+        return out + [("EVENT-TYPE", f"{kind}.{key} 型別或值域不合")
+                      for key, ok in consumed.items() if key in obj and not ok(obj[key])]
     spec, body = _SPEC[kind], {k: v for k, v in obj.items() if k not in _COMMON}
     for key in sorted(_required(kind, obj) - set(body)):
         out.append(("EVENT-KEY-MISSING", f"{kind} 缺必備鍵 {key}"))

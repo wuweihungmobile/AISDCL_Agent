@@ -87,7 +87,9 @@ def _read_state(ledger: Path) -> State:
     seq = last.get("seq") if last else None
     if not (isinstance(seq, int) and not isinstance(seq, bool)):
         raise Reject([("LEDGER-TORN", "事件帳本末行無法解析或缺 seq")])
-    return State(seq, [ln.obj for ln in lines if ln.obj is not None])
+    # 配號取原始末行的 seq；其後所有消費者（折疊、查表、card、prop-new、research）只吃通過單事件
+    # 判準的事件（R37），所以型別怪異的手寫事件不會讓寫入動詞崩潰。
+    return State(seq, si_events.sound([ln.obj for ln in lines if ln.obj is not None]))
 
 
 def _append_locked(ledger: Path, build, max_bytes: int | None) -> dict:
