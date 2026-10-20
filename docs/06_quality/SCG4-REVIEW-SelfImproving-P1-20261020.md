@@ -133,7 +133,7 @@ QA 的逐條指令與原始輸出住 scratchpad `selfimproving_p1\qa_work\scg4_q
   - 修復棒二收棒（13:50，40 分鐘，rc=0）：主控親驗七檔 189 passed／346 subtests、鍵 B 10、動詞四個 rc=0、ruff 12 檔、LOC、腳本模式 Ran 1 test、分桶不變 ⇒ commit `605de382`；重釘同標籤 R213 第七列 +482（127928）、名冊 11190、四支守衛 783 passed、根層全套 rc=0（5573）⇒ `0db61d70`；push `8a8f071d..0db61d70`；P1 鍵 → PR_REVIEW；三審（§N）：FAIL（P2 ×2＝修復棒二新防線未釘、P3 ×1＝初始 URL 逸出）⇒ 兩鍵 → SPEC_AUDIT（勘誤三）→ refreeze → P1 gate FAIL（retry 4）→ 修復棒三 → 四審。
   - 三審處置執行紀錄：`21631ee8` §N 落檔；`d825cbe4` OBS-SI-176～177（三審 P3-1 併入 DEF-200-556 殘留承接修復棒三、不另立 DEF——帳本淨額棘輪不允許本輪淨增未結列，立 559 被擋後撤回）；TCS 勘誤三（SA 棒續派）`cadb9d35`——AT 157→161（AT-130-5-E-4 期限已過單元層假 socket＋賽跑層 50 次 ±10 ms；AT-130-2-E-5 擴充六條 Location；AT-130-2-E-6 初始 URL 形態批；AT-130-2-E-7 HOST-CASES 二十一列含 TAB／CR／LF 旁路私網判準；SA 追查 AT-130-5-E-5 Content-Length 非 ASCII 數字致 ValueError 逸出；R43 全函式與 host 字元判準、R58 (c)(d)；⚖34～36；〈刻意不做〉全形數字 host——主控依授權裁定 TCS 下次修訂寫「host 僅限 ASCII」）。主控親驗：verify_tcs 161／PROBLEMS 0、cmp 新增 4 改 1、adapter 無孤兒、冪等重建 sha256 `5acae9f9…`、LF、defid 11 passed、Ghost 32 passed。SA 自陳：探針曾對 example.com 發出 4 次 GET（違反不連外網，已移除並在 §5.3 明寫禁用形態）。FSM：兩鍵 `spec-refreeze` 記錄 digest `sha256:5acae9f9…`；P1 鍵 PR_REVIEW gate FAIL（**retry_count 4**；下一次 FAIL 即 ESCALATION）→ IMPLEMENTATION；鍵 B 回 PR_REVIEW。修復棒三（headless hooks-ON Sonnet）於 16:48 派出。
   - 修復棒三收棒：16:48→17:07 rc=0（交卷 `dev_p1_fix3_handoff.md`）；碼修＝`fetch._open` 建構式與 `fetch_source` 的 parse_url 納入例外歸類（R58 (c)）、Content-Length 只認 ASCII 十進位（AT-130-5-E-5）、`sources.parse_url` 的 `int()` 失敗視同無連接埠（⚖35）、`_bad_host_chars` 併入 SRC-URL-HOST 判準（R43）、P4 排版；新測試＝AT-130-5-E-4／E-5、AT-130-2-E-6／E-7 各一個函式、AT-130-2-E-5 擴為六條 Location × 兩組允許集合。Developer 自陳 [他包回報]：突變 F2／U3／D-1 靶向各 1 failed（未宣稱等價突變）；初始 URL 19 形態全 network、Location 17/17 redirect-refused；鍵 B 未跑（任務書未指名檔名）。主控親驗：七檔 193 passed／346 subtests（rc=0）、鍵 B 10 passed、check overall=PASS、status／scan／export rc=0、ruff 五檔 rc=0、LOC rc=0、`--check-snapshot` rc=0、分桶 prose 4350／guard_self 3149 不變 → commit `7d441704`；重釘同標籤 R213 第八列 +178（127928→128106；名冊 11190→11368；接鏈列 DEF-200-556；sha f6e06df8…）→ 四支守衛 783 passed／569 subtests → 根層全套 rc=0（發現 5577，下限 5542）。下一步：push → P1 鍵 `transition --to PR_REVIEW` → QA 四審（差分審查：三審 P2-1／P2-2／P3-1 重放、五個新／擴充 AT、F2／U3／D-1 突變紅、零退化）。
-  - 待補：四審結果（§O）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
+  - 四審：FAIL（§O；P2 ×1＝修復棒三拆掉 `fetch_source` 外層 ValueError 安全網致 UnicodeError 逸出，修法一行＋2 AT）。主控如實記錄第五次 gate FAIL → P1 鍵 **ESCALATION_FINAL**（R-9.1 retry 預算耗盡；auto-recovery 依 R-9.14.3 拒絕）；依 R-9.5 resume 目標由掌舵者裁決，主控不代決。待補：裁決後的勘誤四／修復棒四／五審紀錄、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
 
 ## §N 三審（QA 同一代理續審，HEAD `0db61d70`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
@@ -175,6 +175,37 @@ P4（5）：排版（`tools/lib/selfimproving/events.py:192` `def _str` 前缺�
 ### N.6 QA 流程摩擦
 
 Bash 守衛衝突同前；每審須重建 `subst Q:` 與複本預置狀態；全套突變重放八行程同跑每筆約 165 s、合計約 40 分鐘，靶向約 15 分鐘；Developer 等價宣稱不實（F1）⇒ 等價宣稱應附實驗輸出；根層全套留 git-ignored 痕跡；靶向與全套結果不一定相同（F2／U3／F7／R3 皆先靶向存活再全套確認）。證據：scratchpad `qa_work\scg4_qa\r3_*.py` 與 `qa_work\scg4_r3\`（收輪即刪）。
+
+## §O 四審（QA 同一代理續審，HEAD `94a48f38`；差分審查；文字交卷由主控謄寫；數字皆 `[他包回報]`）
+
+**判定：FAIL**（P1 0／P2 1／P3 0／P4 3）。三審 P2-1（F2）、P2-2（U3）與 P3-1 主體皆修妥、零退化全綠；FAIL 只因修復棒三移除 `fetch_source` 外層 `except ValueError` 並自報「行為等價」，QA 實證不等價。真實樹審前審後 `git status --short` 皆空、未派子代理、未連外網；V8／V10 維持未驗。QA 用量 839k tokens／21 分鐘。
+
+### O.1 缺陷
+- **P2-1（回歸，相對 `0db61d70`）**：`tools/lib/selfimproving/fetch.py:128-160`。`UnicodeError`／`UnicodeEncodeError` 是 `ValueError` 子類而非 `OSError`，在 `conn.request(...)` 內拋出；`_open` 的 request 階段只捕 `(OSError, HTTPException)`，修復棒三只把建構式納入 try、外層安全網又被拆掉 ⇒ 違反 R58 (c)「`fetch_source` 只准拋 FetchError」。證據一（伺服器可控 Location，`r4_loc_nonascii.py`）：`/文件`、`/é`、`/x?q=文`、非 UTF-8 位元組 Location 四形態在新碼逸出 `UnicodeEncodeError`，三審碼皆 `FetchError(network)`；混沌 `r3_fetch_chaos.py`（4 行程 × 250 案，seed 201～204）3/1,000 逸出；端到端 `r4_loc_cli.py` 一個來源 302 到 `/文件` 即讓整個 `research --fetch` 崩潰（破壞「單一來源失敗不拖垮其他來源」）。證據二（IDNA 無效 host，`r4_idna.py`，送 DNS 前即失敗）：`http://docs..example.com/x`、`http://.example.com/x`、64／70 字元 label、`a。。b` 六形態 `UnicodeError` 逸出，三審碼皆 network；`validate_table` 對雙點與 70 字元 label 判 ACCEPTED；真 CLI `r3_d1_cli.py` 來源表 `https://docs..example.com/docs` ⇒ `check` PASS、`research --fetch` Traceback `UnicodeError: encoding with 'idna' codec failed`。未被任何測試釘住（AT-130-2-E-5／E-6 只列括號不成對、空 host、空白、超長連接埠）。建議修法（QA 複本已驗）：request 階段 `except (OSError, http.client.HTTPException)` 加 `ValueError`（一行）；套用後 4＋6＋19 形態逸出 0、九條相關 AT 9 passed；另補 AT：非 ASCII 相對路徑 Location ⇒ `FetchError(network)`、IDNA 無效 host 初始 URL ⇒ `FetchError(network)`（TCS URL-FORMS 與 AT-130-2-E-5 列表一併加列）。
+- **P4 ×3**：`validate_table` 放行 IDNA 無效 host（雙點、前導點、label > 63；P2-1 可達性根因，擋它是選配縱深防禦）；重導向目標帶 userinfo 靜默忽略後照樣跟隨（二審起沿用）；本文被截斷（Content-Length 100 實給 10 byte）回傳成功（二審起沿用）。
+
+### O.2 逐項重放
+- (1) F2：`r3_f2_race.py` 120 次整合層 120/120 `FetchError(timeout)`（三審突變碼 65 timeout／12 ValueError／43 network）；F2 突變 → `-k AT_130_5_E_4` 1 failed（0.31 s，單元層即殺）。通過。
+- (2) U3：突變 → `-k AT_130_2_E_5` KILLED；Location 17 形態（含 5019 位元組、5000 位數連接埠）17/17 redirect-refused／network。通過。
+- (3) P3-1：`r3_url_probe.py` 19 形態 18/19 FetchError（第 9 形態 70 字元 label 逸出 UnicodeError，見 P2-1）；三審 4 個回歸形態與超長連接埠皆收口；`r3_d1_cli.py` 含空白 host ⇒ `check` FAIL／`research --fetch` `reject research SRC-URL-HOST`、無 Traceback；`r4_hostchars.py` TAB／CR／LF／NUL／DEL／NBSP／全形空白 9/9 判 SRC-URL-HOST（三審碼全 ACCEPTED，`https://1<TAB>27.0.0.1/x` 旁路已封閉）；D-1 回退突變 → `-k AT_130_2_E_6` KILLED。部分通過。
+- (4) 五個新／擴充 AT：TCS 161 AT（正控 58／負控 103）；`run_k.py` 字面判定指令各 `1 passed, 38 deselected` rc=0；`--collect-only` 161 個測試 id（根層 151＋鍵 B 10）與 AT 一對一。通過。
+- (5) 零退化（真實樹唯讀）：七檔＋P0 四組並行合計 193 passed／346 subtests、skip 0；鍵 B 10 passed；`check` overall=PASS；ruff 六檔 All checks passed（`--preview` E30x 只剩既有的 lock 檔）；LOC rc=0；`--check-snapshot` rc=0；根層全套 rc=0（227.8 s，發現 5577）；`--print-guard-lines` +0；`r2_fetch_probe.py` 五條 raw 路由皆 2.0 s timeout、`chunked-ok`／`ok` 成功。通過。
+- (6) V8／V10 未驗。
+
+### O.3 新碼突變表（複本靶向）
+F2／U3／D1／CL（Content-Length 不再要求 ASCII）／HC（SRC-URL-HOST 不判空白／控制字元）／PU（`parse_url` 的 `int()` 失敗不視同無連接埠）／HX（`_open` 例外清單拿掉 HTTPException）／EH+TY（同時拿掉先擋空 host 與 TypeError／AttributeError）八個 KILLED；PF（`fetch_source` 開頭 `parse_url` 不歸類）、EH 單獨、TY 單獨三個 SURVIVED 皆接受為等價（冗餘縱深防禦，成因已由 PU／EH+TY 釘住）。
+
+### O.4 對 Developer 自報的裁定
+「外層 ValueError 捕捉移除，行為等價」駁回（P2-1；交卷的 19 形態探針未涵蓋 70 字元 label 形態，等價宣稱無實驗輸出）；其餘設計決定（空 host 先擋、Content-Length 僅 ASCII 數字、SRC-URL-HOST 納入空白與控制字元、`int()` 失敗視同無連接埠）接受；鍵 B 檔名 `AutoClaude/tests/contract/test_evolution_propose_only.py`（QA 補跑 10 passed）。
+
+### O.5 QA 流程摩擦
+系統提示「用 Bash」與 Windows 守衛衝突（全程 PowerShell）；腳本寫死 `Q:\` 須重建 `subst`；**關鍵發現來自重跑上一審的混沌測試而非任務書列的探針**（窄範圍審查會漏「拆掉安全網」型回歸 ⇒ 建議收斂審查固定附一次混沌測試，約 130 s）；「行為等價」宣稱應附新舊碼對同一批輸入的輸出；根層全套在真實樹留下 git-ignored 痕跡（`tools/.last_failure_*.log`、`tools/.parallel_timings.json`、`AutoClaude/logs/`）。
+
+### O.6 五審最小重放清單（修法落地後）
+`r3_url_probe.py` 19 形態逸出 0；`r4_loc_nonascii.py` 4 形態皆 FetchError；`r4_idna.py` 6 形態皆 FetchError；`r3_fetch_chaos.py` seed 201～204 各 250 案違規 0；新增兩 AT 各自打紅回退突變（移除 request 階段 ValueError 即紅）＋五個 AT 重跑＋全套零退化。證據：scratchpad `qa_work\scg4_qa\`（r4_* 腳本）與 `qa_work\scg4_r4\`。
+
+### O.7 主控處置
+如實 `gate --gate PR_REVIEW --result FAIL`（reason 寫實情）→ `retry_count` 5 ≥ 5 觸發 R-9.1 ESCALATION；auto-recovery 依 R-9.14.3 拒絕（diagnostic category=structural）→ **P1 鍵 ESCALATION_FINAL**（`escalation_history` 2026-10-20T09:56:49Z；abort 報告 `AISDLC_SDD/AISDLC_SDD_v0.30/build/reports/abort/ABORT-2026-10-20-auto-recovery-refused.md`，不入庫）。鍵 B 仍 PR_REVIEW。依 R-9.5／Rule 9 禁令 6，ESCALATION 後不得自動恢復 ⇒ 主控不代決 resume，請掌舵者以互動選項裁決：A＝`resume-from-escalation --to PR_REVIEW` → SPEC_AUDIT 勘誤四（兩條 AT）→ refreeze → 修復棒四（一行＋2 測試）→ 五審（O.6 最小清單）；B＝停輪保留 `7d441704`（已知 P2 未修、不進 RELEASE）。OBS-SI-181～182 入帳。
 
 ## §M 二審（QA 同一代理續審，HEAD `8a8f071d`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
