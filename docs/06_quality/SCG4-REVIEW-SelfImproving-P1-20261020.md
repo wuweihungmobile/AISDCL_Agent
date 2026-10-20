@@ -128,7 +128,86 @@ QA 的逐條指令與原始輸出住 scratchpad `selfimproving_p1\qa_work\scg4_q
   - FSM：P1 鍵 `spec-refreeze --doc <TCS> --digest`（不帶 `--stage`；stage 取自 frozen_stages 末列）記錄 Stage-2 digest `sha256:5f22134c…`（supersedes 2026-10-19T19:14:34+00:00）→ PR_REVIEW gate FAIL（retry_count 2；第二次是 refreeze 補記的代價：首次 refreeze 誤帶 `--stage` rc=2 未記錄）→ **IMPLEMENTATION**；鍵 B 同一 TCS 亦 `spec-refreeze`（supersedes 2026-10-19T19:15:47+00:00）後回 PR_REVIEW，待二審一併 gate。
   - Developer 修復棒（headless hooks-ON Sonnet）於 09:36 派出：碼修 DEF-200-556／557／558＋F-18／F-21／F-22、補 22 個新 AT、既有 AT 對齊勘誤、鍵 B 指令 `-q -n 0`、七條閘門、對 §C 存活突變逐一自證。
   - 修復棒收棒（10:22，46 分鐘，rc=0）：碼修 DEF-200-556（`fetch.py` 自管 `http.client`、逐次讀取前依剩餘期限 `settimeout`＋`read1`）、DEF-200-557（`events.sound()`／`load_sound_events()` 只放行通過 `validate` 的事件進折疊與唯讀動詞；`evcheck` 的 structure／vacuity 仍吃原始行）、DEF-200-558（`apply_numstat` OSError ⇒ `PATCH-PARSE`）、F-18／F-21／F-22；22 個新 AT 各一個測試函式（夾具 `Srv` 加 `drip`／`stall`／`late-stall` 路由）；Developer 自報 31 個突變全紅（含一審存活清單中可重放者；B3／B5／A18b 沿用一審等價判定）。主控親驗：七檔＋P0 180 passed／292 subtests、鍵 B `-q -n 0` 10 passed、check／status／scan／export rc=0、ruff 17 檔、LOC rc=0、分桶 prose 4350／guard_self 3149 不變 ⇒ commit `ed4a6f9a`；護欄層重釘同標籤 R213 第六列 +720（127446）、名冊 R213 精確淨額 10708、四支守衛測試 783 passed。Developer 報的四項與 TCS 差異（AT-108-4-E-3／AT-140-1-E-2 改行程內執行、AT-130-3-E-4 用 `zero_success()` helper、AT-130-5-E-2 加 `/late-stall` 第三路由、AT-103-1-E-3 (c) slug 測試端獨立算）交二審裁定、採納者列 TCS 下次修訂。
-  - 待補：二審結果（§M）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
+  - 二審（§M）：FAIL（P2 ×3＝556／557 修法殘留；558 修妥）⇒ 流程同一審：P1 鍵 → SPEC_AUDIT（勘誤二）→ refreeze → PR_REVIEW gate FAIL（retry 3）→ 修復棒二 → 三審。DEF-200-558 改 fixed@ed4a6f9a（二審 e2e 為證）。
+  - 待補：三審結果（§N）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
+
+## §M 二審（QA 同一代理續審，HEAD `8a8f071d`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
+
+**判定：FAIL**　P1／P2／P3／P4 ＝ 0／3／3／6。三個 P2 都是 DEF-200-556／557 的修法殘留；DEF-200-558 修妥。存活突變 25 → 2（B3、B5，QA 以具名理由接受為非 P2）。§3～§6 全數通過。審前審後真實樹 `git status --short` 皆空、HEAD 不變；未在真實樹跑寫入動詞、未派子代理、未連外網；V8／V10 維持未驗。
+
+### M.1 缺陷清單
+
+**P2（3）**
+
+| 編號 | 內容 | 建議 |
+|------|------|------|
+| N-1（DEF-200-556 殘留） | `fetch.py` 牆鐘只管本文階段：`_open()` 的 `getresponse()` 只受連線時的 socket 逾時，每次 `recv` 只要有資料就不逾時；`resp.read1` 在分塊編碼下讀分塊大小行與 trailer 行時單次呼叫內多次 `recv` 亦逃過（`tools/lib/selfimproving/fetch.py:95-111`、`:62-77`）。逐階段探針（loopback、`timeout=2`、伺服器持續 10 s）：ok／hdr-stall／cl-drip／chunked-drip／late-stall／late-drip／redirect-slow 皆 2.0 s 正確 `timeout`；**status-drip、hdr-drip、hdr-many-lines 10.0 s 才以「non-text 缺 Content-Type」返回、chunk-size-drip 10.0 s 且誤判成功（RETURNED 0 bytes）、trailer-drip 10.0 s**。指令層：標頭階段慢滴 8 秒的來源讓 `research --fetch` 跑 8.1 秒且原因碼不是 `timeout`。違反 R58 (d)「強制點在每一次讀取（含狀態列、標頭與本文）」；AT-130-5-E-2 與 `/late-stall` 只涵蓋本文慢滴與標頭前延遲 | 對 socket 包一層讀取，每次 `recv_into` 前依剩餘期限 `settimeout`、逾時即 `TimeoutError`（不可用 Timer）；補 AT 涵蓋 status-drip、hdr-drip、chunk-size-drip、trailer-drip，夾具本文有限長（N-6） |
+| N-2（DEF-200-557 殘留 A） | P2／P3 種類事件只驗骨架，`fold._dec` 對 `flags` 的元素型別沒防線，`sorted(set(p.flags) \| set(flags))` 拋 TypeError（`fold.py:170-172,188,212`；`events.py:224-225` `kind not in _SPEC` 即早退）。最小重現：合法前 5 筆後加 `{"kind":"dec",…,"flags":["a",["b"]]}` → `unhashable type: 'list'`；端到端 16 個動詞中 14 個 rc=1 帶 Traceback（只有 run-open 與 attr 不受影響）。P1 無 `dec` 動詞，`dec` 事件本就手寫（SC-LEGAL 含 `flags:["unverified_ack"]`），非構造性路徑 | `_dec_flags` 只收 `str` 元素；或 `validate` 對 P2／P3 種類「被消費的鍵」做型別判準，讓 `sound()` 真的擋得住；補 AT |
+| N-3（DEF-200-557 殘留 B） | 三處消費者仍吃**原始**事件：`card.build`（`tools/selfimproving.py:159` 以 `load_events` 取原始事件；`card.py:113` 挑同 id 同 rev 的 prop → 損壞 prop `KeyError: 'cls'`，fuzz 另命中 card.py 八行）、`props._state_codes`（`props.py:195-196`，`writeverbs.py:373` 傳原始事件 → 缺 `id` 的 prop `KeyError`、`id:["a"]` TypeError）、`research._commit.build`（`research.py:152-155` → 損壞 `research.scan` 事件讓抓取落地後才在鎖內崩潰、未寫事件） | 三處一律改吃 `sound` 後事件（`evwrite._read_state` 的 `State.events` 一處收斂）；把「手寫損壞事件 × 全動詞」矩陣（19 案 × 16 動詞）收成 AT |
+
+**P3（3）**：N-4 既有缺陷——重導向 `Location: http://[::1/x` 讓 `urllib.parse.urljoin` 拋 `ValueError: Invalid IPv6 URL`，逸出 `fetch_source`、不屬 FetchError 封閉集合，新舊碼同（順手收進 fetch 修法）；N-5 `tools/tests/test_selfimproving_events.py:1861` 的 `if __name__ == "__main__": unittest.main()` 之後又加了五個新測試類，腳本模式 `python <檔> -k AT_108_4_E_3` 實測 `Ran 0 tests … OK` 靜默略過（pytest／discover 不受影響）；N-6 AT-130-5-E-2 的 `/drip` 夾具 `Content-Length 100000`（TCS 原文如此），牆鐘失效時是約 13.9 小時的掛住而非斷言紅（突變 X11b 300 秒上限被終止），建議 TCS 勘誤改有限本文。
+
+**P4（6）**：B3、B5 存活（接受，見 M.3）；新增測試函式之間缺空行（`test_root_module_layout.py:336`、`test_selfimproving_export_status.py:353,510`、`test_selfimproving_props.py:451,1260`；專案 ruleset 不含 E301）；`test_selfimproving_events.py:899-900` 註解「TCS 內部不一致」勘誤後已不成立；重導向目標帶 userinfo 新碼靜默忽略後照跟隨（無安全影響、TCS 無規定）；本文被截斷（`Content-Length: 100` 實給 10 byte）回傳成功（既有）。
+
+### M.2 三筆 DEF 重放
+
+| 項目 | 結果 |
+|------|------|
+| 556 慢滴（`slowdrip.py`，`timeout=2`） | stall 2.0 s、drip 2.0 s 皆 `FetchError(timeout)`；舊碼 drip 14.0 s。標頭階段五個形態越界（N-1） |
+| 556 指令層（`r2_vfetch.py`） | 原鏈與一審一致：rc=2、`changed` 三態、sha256 相符；標頭慢滴段 8.1 s（N-1） |
+| 557 字面重放（`fuzz2.py` 三 seed × 20,000） | 121／146／139 次崩潰，同一點 `status.py:43`＝腳本把原始事件餵 `status._detect`，生產路徑只餵 `load_sound_events`，**非生產崩潰** |
+| 557 生產組合重放（`r2_fuzz2p.py`，35 seeds × 20,000 ＝ 700,000 輪） | 5 輪崩潰，全在 `fold.py:212`（N-2） |
+| 557 一審三形態（`corrupt_e2e.py`） | 3 案 × 8 動詞 Traceback 0（舊碼 check／status／export 皆 Traceback） |
+| 557 全動詞矩陣（`r2_corrupt_e2e2.py`，19 案 × 16 動詞） | 45 次崩潰：`dec.flags` 三形態各 14（N-2）、card 1、prop-new 2（N-3）；其餘 14 案乾淨 |
+| 557 公開 CLI fuzz（`r2_fuzz3.py`，8,800 輪） | 54 次崩潰：card.py 九行 20 次、props.py:195/196 9 次、research.py:155 3 次、fold.py:212 16 次 |
+| 558（`numstat_probe.py`、`r2_numstat_e2e.py`） | 新碼：損毀 hunk、context-diff、少一行三案皆 rc=1 `PATCH-PARSE`，正控 rc=0；舊碼三案全 rc=0 並寫入事件 ⇒ **fixed** |
+
+### M.3 存活突變重放（一審 25 筆；複本 HEAD 子集＋git init；無突變對照 180／292 全綠）
+
+| 突變 | 結果 | 打紅的測試 |
+|------|------|-----------|
+| E3／E6／E7／E9／C9 | KILLED | `test_AT_108_4_E_4_value_domains` |
+| F2 | KILLED | `test_AT_103_1_E_2_suspended_needs_consecutive_bad_windows` |
+| X2 | KILLED | `test_AT_130_2_E_3_redirect_guard` |
+| C7 | KILLED | `test_AT_108_4_E_5_quote_verifier_warn_boundary` |
+| C12 | KILLED | `test_AT_130_2_E_4_commit_time_equal_to_event_time_passes` |
+| X10 | KILLED | `test_AT_130_3_E_5_content_type_allowlist_is_pinned` |
+| X11a（刪本文逐讀 settimeout）／X11c（settimeout 絕對值） | KILLED | `test_AT_130_5_E_2_wallclock_holds_for_drip_and_stall` |
+| X11b（迴圈不以剩餘期限為界） | HANG（300 s 上限終止；掛住型，N-6） | 無斷言紅 |
+| W11 | KILLED | `test_AT_140_1_E_3_draft_symptom_lists_at_most_five_codes` |
+| S5／S6 | KILLED | `test_AT_103_1_E_3_pending_detection_window_and_friction` |
+| N4 | KILLED | `test_AT_131_2_E_3_commit_at_anchor_is_outside_the_window` |
+| Q2 | KILLED | `test_AT_132_5_E_3_truncated_only_when_more_than_limit` |
+| V4 | KILLED | `test_AT_141_2_E_2_lock_file_is_named_after_the_ledger_realpath` |
+| V5 | KILLED | `test_AT_141_2_E_3_home_exists_but_is_not_writable` |
+| A24 | KILLED | `test_AT_130_3_E_4_zero_success_code_on_both_paths`、`test_AT_130_5_E_2_…` |
+| A33 | KILLED | `test_AT_140_2_E_2_json_is_written_as_utf8_not_escaped` |
+| B10（鍵 B） | KILLED | `test_AT_128_2_E_2_rewrite_fragments_constant_is_pinned_independently` |
+| A63／A64 | KILLED | `test_AT_145_2_E_2_same_line_constants_are_pinned` |
+| **B3**（`paths.py:133` touched 不含 `diff --git` a 側） | SURVIVED（接受，P4） | 差分實驗 1,140 份標頭組合 patch：被 B3 丟掉的路徑 ∩ git 實際會動的路徑＝0，R51 (b)／R49 (b) 超集檢查照樣擋；殘餘＝「touched＝全部標頭路徑聯集」無 AT，補一條即可 |
+| **B5**（`paths.py:224` normalize 不 casefold） | SURVIVED（接受，P4） | 唯一呼叫點 `props.py:154`；`glob_match`／`is_frozen_version_hit` 各自 casefold，結果相同；唯一差異 M 類 `Memory/x.md` 原碼接受、B5 轉 handoff（更嚴格）；殘餘＝無 M 類大小寫路徑 AT |
+
+修復棒自證的修法回退突變另以 AT 靶向重放全數被紅（回退 558 → `AT_107_3_E_4`；`sound()` 不過濾／`_hashable` 不擋 → `AT_108_4_E_3`、`AT_140_1_E_2`；F-21 → `AT_141_1_E_2`；F-22 → `AT_134_3_E_2`；F-10 → `AT_114_1_2`）。
+
+### M.4 22 個新 AT 與 148 條判定指令
+
+148 個 AT 區塊、id 唯一、正控 58／負控 90；148 條判定指令照字面在真實樹實跑（鍵 B `-q -n 0`）：148／148 rc=0、每條恰 1 passed；`--collect-only` 148 個測試 id（根層 138＋鍵 B 10）與 AT 一對一。
+
+### M.5 既有 AT 對齊、F-18／F-21／F-22、零退化
+
+AT-103-2-1／AT-108-4-1／AT-108-4-E-2／AT-130-1-E-1 皆 warn 層級判準、與新 TCS 一致；AT-130-2-E-3 顯式同埠案例齊全（突變 X2 被紅）。F-18 `_NONBLOCKING` 僅剩兩項；F-21 回退為鎖外讀 → `AT_141_1_E_2` 紅；F-22 回退 → `AT_134_3_E_2` 紅。零退化：七檔＋P0 180 passed／292 subtests（skip 0）；鍵 B 10 passed；check rc=0（rows=172、items=28）；ruff 18 檔 rc=0；LOC rc=0；`--check-snapshot` rc=0；根層全套 rc=0（195 s，發現 5564）；`--print-guard-lines` +0；真實樹審前審後皆空。
+
+### M.6 對 Developer 差異與設計決定的裁定
+
+接受：AT-108-4-E-3／AT-140-1-E-2 行程內 `run_main`（未捕捉例外即紅，與「stderr 不含 Traceback」等價；TCS 下次修訂寫明）；AT-130-3-E-4 `zero_success()`（TCS 本文即要求 `source … FAIL` 行先於 `reject research ZERO-SUCCESS`）；AT-130-5-E-2 `/late-stall`（建議納入 TCS）；AT-103-1-E-3 (c) 測試端獨立算 slug；`_next_num`／配號格式判斷。方向接受但不充分：`fold` 只吃 `sound()`（N-2、N-3）。
+
+### M.7 QA 建議處置
+
+返回 IMPLEMENTATION 修復棒二：N-1、N-2、N-3（N-4 順手收進 fetch 修法）；DEF-200-556／557 維持 open、558 改 fixed。TCS 勘誤二：R58 (d) 補標頭／狀態列／chunk 框架逐次逾時 AT；R37 擴為「所有讀事件的消費者只吃 sound，P2／P3 種類被消費的欄位須全函式化」；新增「手寫損壞事件 × 全動詞」矩陣 AT；AT-130-5-E-2 夾具改有限本文；補 B3、B5 各一條單行 AT 使存活歸零。
+
+### M.8 QA 流程摩擦（主控入帳）
+
+系統提示要求用 Bash 但 Windows hook 擋（照用 PowerShell）；`Remove-Item Q:\head2.tar` 被當系統路徑擋（改 `git archive --output` 覆寫）；`subst Q:` 在 `os.path.realpath` 下還原成長路徑致相對路徑計算 ValueError（repo 根也要 realpath）；一審腳本依賴 scratch 預置狀態（新複本須補拷）；字面 fuzz 對「生產不走的路徑」報崩潰易誤讀為殘留（另寫生產組合版才分得出）；突變每筆 76～117 秒、掛住型須自帶牆鐘；根層全套在真實樹留下 git-ignored 痕跡（`tools/.last_failure_*.log`、`tools/.parallel_timings.json`、`AutoClaude/logs/`），「審後為空」只證明受追蹤與未忽略檔未動；`Start-Process … 2>$null` 回傳 null。證據：scratchpad `qa_work\scg4_qa\r2_*.py` 與 `qa_work\scg4_r2\`（收輪即刪）。
 
 ## §B AT 對照表（126 列；QA 機器產生，主控併入）
 
