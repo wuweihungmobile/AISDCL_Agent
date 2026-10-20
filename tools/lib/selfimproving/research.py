@@ -28,7 +28,7 @@ def _precheck(repo: Path, run: str, params: dict, git: Git) -> tuple[list, bytes
     """預檢：回（問題碼, 換行正規化後的來源表位元組, ne 提示）。"""
     codes: list = []
     ne: list = []
-    f = si_fold.fold(si_events.load_events(repo / si_events.LEDGER_REL) or [])
+    f = si_fold.fold(si_events.load_sound_events(repo / si_events.LEDGER_REL) or [])
     r = f.runs.get(run)
     if r is None or r.closed_seq is not None:
         codes.append(("RUN-NOT-OPEN", f"{run} 不是已開未關的運轉"))

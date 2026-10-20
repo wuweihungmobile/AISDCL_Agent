@@ -108,8 +108,9 @@ def append(repo: Path, verb: str, build, params: dict, as_json: bool, render) ->
 
 
 def _next_num(events: list, kind: str, key: str, prefix: str) -> int:
-    nums = [int(e[key].rsplit("-", 1)[1]) for e in events if e.get("kind") == kind
-            and isinstance(e.get(key), str) and e[key].startswith(prefix)]
+    nums = [int(e[key][len(prefix):]) for e in events if e.get("kind") == kind
+            and isinstance(e.get(key), str) and e[key].startswith(prefix)
+            and e[key][len(prefix):].isascii() and e[key][len(prefix):].isdigit()]
     return max(nums, default=0) + 1
 
 
@@ -298,12 +299,13 @@ def _prop_stage1(repo: Path, git: Git, ns, cls: str) -> tuple[list, dict, list, 
     elif blocks:
         try:
             seen = si_git.apply_numstat(repo, Path(ns.patch_file))
-        except OSError:
-            seen = []
-        mine = {p.replace("\\", "/") for b in blocks for p in b.paths}
-        miss = sorted({p.replace("\\", "/") for p in seen} - mine)
-        if miss:
-            codes.append(("PATCH-PATH-MISMATCH", "git 看見而解析器漏掉：" + "、".join(miss)))
+        except OSError:  # git 自己解析不了＝超集檢查無從進行：fail-closed，不當成「git 沒看到路徑」
+            codes.append(("PATCH-PARSE", "git apply --numstat 無法解析此 patch（超集檢查失敗）"))
+        else:
+            mine = {p.replace("\\", "/") for b in blocks for p in b.paths}
+            miss = sorted({p.replace("\\", "/") for p in seen} - mine)
+            if miss:
+                codes.append(("PATCH-PATH-MISMATCH", "git 看見而解析器漏掉：" + "、".join(miss)))
     return codes, fields, blocks, patch, body
 
 
@@ -322,7 +324,7 @@ def prop(repo: Path, ns, as_json: bool, revise: bool) -> Out:
     git = Git(repo)
     cls = ns.cls if not revise else None
     if revise:
-        pre = si_fold.fold(si_events.load_events(repo / si_events.LEDGER_REL) or [])
+        pre = si_fold.fold(si_events.load_sound_events(repo / si_events.LEDGER_REL) or [])
         if ns.prop not in pre.props:
             return reject(repo, verb, [("PROP-NOT-FOUND", f"{ns.prop} 不存在")], as_json)
         cls = pre.props[ns.prop].cls
@@ -331,10 +333,6 @@ def prop(repo: Path, ns, as_json: bool, revise: bool) -> Out:
         return reject(repo, verb, codes, as_json)
     head = git.head()
     obs, defs_known = _known_ids(repo)
-    obs_text = "\n".join(
-        (repo / "docs/06_quality" / n).read_text(encoding="utf-8", errors="replace")
-        for n in _obs_files(repo))
-    obs_prop_max = max((int(m) for m in re.findall(r"PROP-SI-(\d+)", obs_text)), default=0)
     prd = repo / si_params.PRD_REL
     groups = si_props.glob_groups(prd.read_text(encoding="utf-8") if prd.is_file() else "")
     latest = latest_name(repo)
@@ -379,8 +377,9 @@ def prop(repo: Path, ns, as_json: bool, revise: bool) -> Out:
             pid, rev = p0.id, p0.rev + 1
         else:
             nums = [int(e["id"].rsplit("-", 1)[1]) for e in state.events
-                    if e.get("kind") == "prop" and isinstance(e.get("id"), str)]
-            pid, rev = f"PROP-SI-{max([obs_prop_max, *nums]) + 1:03d}", 1
+                    if e.get("kind") == "prop" and isinstance(e.get("id"), str)
+                    and si_events.PROP_RE.match(e["id"])]
+            pid, rev = f"PROP-SI-{max([_obs_prop_max(repo), *nums]) + 1:03d}", 1
         patch_rel, body_rel = propfiles.rel_paths(pid, rev)
         if (repo / patch_rel).exists() or (repo / body_rel).exists():
             out.append(("PROP-FILE-EXISTS", f"{pid} r{rev} 的內容檔已存在，不得覆寫"))
@@ -423,6 +422,14 @@ def prop(repo: Path, ns, as_json: bool, revise: bool) -> Out:
             extra.append(("files", list(propfiles.rel_paths(e["id"], e["rev"]))))
         return ok_text("prop", e["seq"], e["id"], extra, as_json)
     return append(repo, verb, build, params, as_json, render)
+
+
+def _obs_prop_max(repo: Path) -> int:
+    """觀察帳本（含 archive）引用過的最大 PROP 號；配號時在寫入鎖內讀（R32 (c)）。"""
+    obs_text = "\n".join(
+        (repo / "docs/06_quality" / n).read_text(encoding="utf-8", errors="replace")
+        for n in _obs_files(repo))
+    return max((int(m) for m in re.findall(r"PROP-SI-(\d+)", obs_text)), default=0)
 
 
 def _obs_files(repo: Path) -> list[str]:

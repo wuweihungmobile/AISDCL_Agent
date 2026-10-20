@@ -28,8 +28,7 @@ ITEM_IDS = (
 ) + si_evcheck.ITEM_IDS  # 其後追加 7 項（P1，R36）；前 21 項的 id、項序與碼一字不變
 LEDGER_REL = "docs/06_quality/SelfImproving_Observation_Ledger.md"
 PARAMS_REL = f"{si_params.PROTOCOL_REL}/params.json"
-_NONBLOCKING = frozenset({"CARRIER-NOT-ESTABLISHED", "SOURCES-HISTORY-NOT-ESTABLISHED",
-                          "QUOTE-VERIFIER-NOT-ESTABLISHED"})
+_NONBLOCKING = frozenset({"CARRIER-NOT-ESTABLISHED", "SOURCES-HISTORY-NOT-ESTABLISHED"})
 _LIST_MAX = 5
 
 

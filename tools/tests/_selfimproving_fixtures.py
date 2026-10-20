@@ -1152,6 +1152,7 @@ class Srv:
         self._inflight = 0
         self._lock = threading.Lock()
         self._arrived: dict[str, threading.Event] = {}
+        self.closing = threading.Event()
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -1200,14 +1201,24 @@ class Srv:
             if "Content-Length" not in headers:
                 h.send_header("Content-Length", str(len(body)))
             h.end_headers()
-            h.wfile.write(body)
-        except (BrokenPipeError, ConnectionResetError):
+            if opts.get("stall"):  # 送完標頭後不送本文，等伺服器關閉
+                self.closing.wait(30)
+            elif opts.get("drip"):  # 每 0.5 秒滴 1 個位元組，直到本文送完或伺服器關閉
+                for i in range(len(body)):
+                    h.wfile.write(body[i:i + 1])
+                    h.wfile.flush()
+                    if self.closing.wait(0.5):
+                        break
+            else:
+                h.wfile.write(body)
+        except OSError:  # 含 BrokenPipe／ConnectionReset／ConnectionAborted：客戶端先走了
             pass
         finally:
             with self._lock:
                 self._inflight -= 1
 
     def close(self) -> None:
+        self.closing.set()
         for r in self.routes.values():
             if len(r) > 3 and r[3].get("hold") is not None:
                 r[3]["hold"].set()

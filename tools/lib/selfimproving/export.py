@@ -106,7 +106,7 @@ def build(repo: Path, git: Git, params: dict, kind: str, since: int | None,
     head = git.head()
     if head is None:
         ne.append({"field": "head_sha", "reason": "git-unavailable"})
-    events = si_events.load_events(repo / si_events.LEDGER_REL)
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     f = si_fold.fold(events or [], params.get("stop_after_bad"))
     if events is None and kind != "observations":
         ne.append(dict(_CARRIER))

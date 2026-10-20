@@ -287,6 +287,69 @@ class TestStatus(StatusCase):
             self.assertIn(e["subject"], text)
         self.assertEqual(fx.snap(repo), snap0)
 
+    def test_AT_103_1_E_2_suspended_needs_consecutive_bad_windows(self):
+        mixes = {
+            "a": (["clean", "recurred"], None),
+            "b": (["recurred", "clean"], None),
+            "c": (["recurred", "rolled-back"], {"run": rid(1)}),
+            "d": (["recurred", "pending", "rolled-back"], {"run": rid(1)}),
+        }
+        for label, (results, want) in mixes.items():
+            events = [fx.run_open_ev(1), fx.skip_ev(1)]
+            for n, res in zip(range(124, 130), results):
+                events += fx._chain(
+                    n,
+                    [
+                        *fx._verify(n, "PASS"),
+                        fx.dec_ev(n, "promote"),
+                        ev("app.promote", prop=pid(n)),
+                        ev("mea.open", prop=pid(n)),
+                        ev("mea.close", prop=pid(n), result=res),
+                    ],
+                )
+            repo = fx.p1_base()
+            fx.set_params(repo, stop_after_bad=2)
+            fx.write_events(repo, events)
+            self.assertEqual(self.MJ(repo, "status")["suspended"], want, label)
+
+    def test_AT_103_1_E_3_pending_detection_window_and_friction(self):
+        repo = fx.p1_base()
+        fx.write_events(repo, fx.sc_legal())
+        pending = {(p["id"], p["state"]) for p in self.MJ(repo, "status")["pending_props"]}
+        want = {(pid(n), "proposed") for n in (128, 129, 134)}
+        want |= {(pid(n), "verified") for n in (131, 132, 133)}
+        self.assertEqual(pending, want)
+        link = {"type": "link"}
+        window = [
+            fx.run_open_ev(1),
+            fx.skip_ev(1),
+            ev("attr", "SA", id=aid(1), **link, **{"from": obs_id(9)}, reopens=obs_id(2)),
+            ev("attr.confirm", "QA", att=aid(1)),
+            ev("run.close", run=rid(1), no_event=True),
+            fx.run_open_ev(2),
+            fx.skip_ev(2),
+            ev("attr", "SA", id=aid(2), **link, **{"from": obs_id(10)}, reopens=obs_id(6)),
+            ev("attr.confirm", "QA", att=aid(2)),
+        ]
+        repo = fx.p1_base()
+        fx.write_events(repo, window[:5])
+        obj = self.MJ(repo, "status")
+        self.assertEqual((obj["events_detected"], obj["no_event"]), ([], True))
+        fx.append_events(repo, window[5:])
+        obj = self.MJ(repo, "status")
+        got = [(e["trigger"], e["subject"]) for e in obj["events_detected"]]
+        self.assertEqual((got, obj["no_event"]), ([("b", aid(2))], False))
+        slug = re.sub(r"[^A-Za-z0-9]", "-", str(repo.resolve()))
+        config = fx.new_dir("cfg")
+        (config / "projects" / slug).mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(config)}):
+            found = self.MJ(repo, "status")["friction_reconcile"]
+            (config / "projects" / slug).rmdir()
+            gone = self.MJ(repo, "status")["friction_reconcile"]
+        self.assertEqual(
+            found, {"status": "NOT-EVALUABLE", "reason": "transcript-parser-not-established"}
+        )
+        self.assertEqual(gone, {"status": "NOT-EVALUABLE", "reason": "transcript-unavailable"})
     def test_AT_103_1_E_1_status_edges(self):
         repo = fx.p1_base()
         obj = self.MJ(repo, "status")
@@ -429,6 +492,21 @@ class TestExport(StatusCase):
         self.assertEqual(len(objs["status"]["items"]), 1)
         self.assertEqual(fx.snap(repo), snap0)
 
+    def test_AT_132_5_E_3_truncated_only_when_more_than_limit(self):
+        for count in (3, 4):
+            repo = fx.p1_base()
+            fx.write_events(repo, [fx.run_open_ev(i) for i in range(1, count + 1)])
+            obj = self.export(repo, "--kind", "events", "--limit", "3")
+            seqs = [e["seq"] for e in obj["items"]]
+            want = (3, False, None) if count == 3 else (3, True, 3)
+            self.assertEqual((len(seqs), obj["truncated"], obj["next_since"]), want, count)
+            self.assertEqual(seqs, [1, 2, 3])
+        repo = fx.p1_base()
+        fx.write_events(repo, [fx.run_open_ev(i) for i in range(1, 4)])
+        for limit, want in ((4, (3, False, None)), (2, (2, True, 2))):
+            obj = self.export(repo, "--kind", "events", "--limit", str(limit))
+            got = (len(obj["items"]), obj["truncated"], obj["next_since"])
+            self.assertEqual(got, want, limit)
     def test_AT_132_5_E_1_usage_pages_and_carriers(self):
         repo = self.sc_export()
         n = len(fx.EV(repo))
@@ -616,3 +694,48 @@ class TestStability(StatusCase):
             text = a.decode("utf-8")
             for secret in (str(repo), str(self.home), str(repo).replace("\\", "/")):
                 self.assertNotIn(secret, text, argv)
+
+    def test_AT_140_2_E_2_json_is_written_as_utf8_not_escaped(self):
+        env = self.env(PYTHONIOENCODING="cp950")
+        cjk = re.compile("[\u4e00-\u9fff]")
+        review = fx.p1_base()
+        fx.write_events(review, [ev("run.open", "主控", run=rid(1), trigger="a",
+                                    coords=["tools/a.py:1"], head_sha="0" * 40)])  # fmt: skip
+        link = {"type": "link", "from": obs_id(9), "reopens": obs_id(2)}
+        window = fx.p1_base()
+        fx.write_events(window, [
+            fx.run_open_ev(1), fx.skip_ev(1), ev("attr", "SA", id=aid(1), **link),
+            ev("attr.confirm", "QA", att=aid(1)),
+        ])  # fmt: skip
+        edge = self.quiet_repo()
+        ta = datetime.fromisoformat(
+            next(e for e in fx.EV(edge) if e["kind"] == "run.close")["t"]
+        )
+        fx.put(edge, "AISDLC_SDD/z.md", "K\n")
+        fx.commit_all(edge, "K", when=(ta + timedelta(seconds=1)).isoformat(timespec="seconds"))
+        cases = [
+            ("a", review, ["export", "--json", "--kind", "events"], "主控", 0),
+            ("b", fx.p1_base(), ["export", "--json", "--kind", "observations"], None, 0),
+            ("c", window, ["status", "--json"], "同一症狀", 0),
+            ("d", edge, ["scan", "--json"], "自動草稿", 0),
+            ("e", self.sc_export(), ["card", pid(124), "--json"], "一、症狀", 0),
+            ("f", fx.p1_base(), ["run-close", "--run", rid(99), "--by", "main", "--json"],
+             "自動草稿", 1),
+        ]  # fmt: skip
+        for label, repo, argv, needle, rc_want in cases:
+            cp = subprocess.run(
+                [sys.executable, str(ENTRY), *argv, "--repo", str(repo)],
+                capture_output=True, env=env, check=False,
+            )  # fmt: skip
+            raw = cp.stdout
+            err = cp.stderr.decode("utf-8", "replace")
+            self.assertEqual(cp.returncode, rc_want, (label, err))
+            text = raw.decode("utf-8")
+            self.assertFalse(raw.startswith(b"\xef\xbb\xbf") or b"\r" in raw, label)
+            self.assertTrue(raw.endswith(b"\n") and not raw.endswith(b"\n\n"), label)
+            json.loads(text)
+            self.assertNotRegex(text, r"\\u[0-9a-f]{4}", label)
+            if needle is None:
+                self.assertRegex(text, cjk, label)
+            else:
+                self.assertIn(needle.encode("utf-8"), raw, label)

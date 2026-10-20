@@ -403,6 +403,51 @@ class TestSourcesAndRoute(PropCase):
                 msg=target,
             )
 
+    def test_AT_107_3_E_4_numstat_failure_is_patch_parse(self):
+        """受測 `tools/lib/selfimproving/writeverbs.py`：git 解析不了的 patch 一律 PATCH-PARSE。"""
+        broken = "\n".join(
+            [
+                "diff --git a/docs/notes/demo.md b/docs/notes/demo.md",
+                "--- a/docs/notes/demo.md",
+                "+++ b/docs/notes/demo.md",
+                "@@ -3,5 +3,5 @@",
+                "-line 003",
+                "+line 003 changed",
+                "",
+            ]
+        ).encode()
+        context = "\n".join(
+            [
+                "*** a/docs/notes/demo.md",
+                "--- b/docs/notes/demo.md",
+                "***************",
+                "*** 3 ****",
+                "! line 003",
+                "--- 3 ----",
+                "! line 003 changed",
+                "",
+            ]
+        ).encode()
+        for label, patch, fake in (
+            ("損毀 hunk", broken, None),
+            ("context-diff", context, None),
+            ("numstat 拋錯", None, OSError("x")),
+        ):
+            repo, run = self.fresh_run_repo()
+            snap0 = fx.snap(repo)
+            over = {"patch": patch} if patch is not None else {}
+            if fake is not None:
+                with mock.patch.object(si_git, "apply_numstat", side_effect=fake):
+                    rc, out, _ = self.new(repo, run, "D", **over)
+            else:
+                rc, out, _ = self.new(repo, run, "D", **over)
+            self.rejected(rc, out, {"PATCH-PARSE"}, label)
+            self.draft_ok(repo, out, label)
+            self.assertEqual(fx.snap(repo), snap0, label)
+        repo, run = self.fresh_run_repo()
+        n0 = len(fx.EV(repo))
+        self.ok(repo, run, "D")
+        self.assertEqual(len(fx.EV(repo)), n0 + 1)
     def test_AT_107_3_E_3_conditions_and_markers(self):
         def rule(n):
             return f"AISDLC_SDD/{VNEW}/governance/rules/R-9.{n}.yaml"
@@ -1185,6 +1230,33 @@ class TestCard(PropCase):
             "冷卻狀態：無", variant([fx.dec_ev(124, "reject"), fx.dec_ev(124, "unblock")])[-2]
         )
 
+    def test_AT_114_1_2_memory_card_shows_na_ratio(self):
+        repo, run = self.make("M")
+        d8 = props_of(repo)[0]["digest"].split(":")[1][:8]
+        rc, out, err = self.M(repo, "card", pid(124))
+        self.assertEqual(rc, 0, err)
+        self.assertTrue(out.endswith("\n"))
+        lines = out.split("\n")
+        self.assertEqual(len(lines), 8)
+        self.assertEqual(
+            lines[0],
+            f"[{pid(124)}] 記憶條目｜modify｜目標：memory/demo.md｜digest：{d8}｜驗證：未驗",
+        )
+        self.assertEqual(
+            lines[2], "二、改什麼：+2／-2 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0"
+        )
+        self.assertNotRegex(lines[2], r"\d\.\d\d")
+        limit = fx.params_dict()["card_line_max"]
+        self.assertTrue(lines[1].startswith("一、") and lines[4].startswith("決定："))
+        self.assertTrue(all(width(ln) <= limit for ln in lines[1:5]))
+        rc, js, err = self.M(repo, "card", pid(124), "--json")
+        self.assertEqual(rc, 0, err)
+        obj = json.loads(js)
+        self.assertEqual(obj["core_lines"], 5)
+        want = {"digest8": d8, "added": 2, "removed": 2, "touched_count": 1,
+                "extra_paths": [], "verdict": "未驗"}  # fmt: skip
+        self.assertEqual({k: obj["parsed"][k] for k in want}, want)
+        self.assertEqual(obj["text"], out)
     def test_AT_114_1_E_1_card_ignores_free_text(self):
         repo, run = self.make(
             "P", body=body_md("P", symptom="+99／-99 行；觸及比例 0.99；觸及檔案數 9")

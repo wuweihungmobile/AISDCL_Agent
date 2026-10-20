@@ -82,6 +82,23 @@ def load_events(path: Path) -> list[dict] | None:
     return [ln.obj for ln in read_lines(raw) if ln.obj is not None]
 
 
+def sound(events: list[dict]) -> list[dict]:
+    """通過 `validate` 的事件（折疊與各消費者共用）；未通過者只由 `events.structure` 報 EVENT-*，
+    不進折疊、不進任何查表，所以型別怪異的手寫事件不會讓下游崩潰（R37）。"""
+    return [e for e in events if isinstance(e, dict) and not validate(e)]
+
+
+def load_sound_events(path: Path) -> list[dict] | None:
+    """`load_events` 再過 `sound`；檔不存在回 None。"""
+    loaded = load_events(path)
+    return None if loaded is None else sound(loaded)
+
+
+def _hashable(v):
+    """查表鍵一律先過這關：型別怪異（list／dict）的值當成查不到，不讓 `dict.get` 拋 TypeError。"""
+    return v if isinstance(v, str) else None
+
+
 def _int(v, lo: int = 0) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v >= lo
 
@@ -183,7 +200,7 @@ _SKIP_KEYS = {"quota-band": {"band"}, "helmsman": {"sid", "line"}, "offline": se
 def _required(kind: str, obj: dict) -> set[str]:
     req = set(_SPEC[kind]) - _ALWAYS_OPTIONAL.get(kind, set())
     if kind == "attr":
-        req |= _ATTR_KEYS.get(obj.get("type"), set())
+        req |= _ATTR_KEYS.get(_hashable(obj.get("type")), set())
     return req
 
 
@@ -212,7 +229,7 @@ def validate(obj: dict) -> list[tuple[str, str]]:
     for key in sorted(set(body) - set(spec)):
         out.append(("EVENT-KEY-UNKNOWN", f"{kind} 出現表外鍵 {key}"))
     allowed = set(spec)
-    if kind == "attr" and obj.get("type") in _ATTR_KEYS:
+    if kind == "attr" and _hashable(obj.get("type")) in _ATTR_KEYS:
         allowed -= {"obs", "items", "root_cause", "from", "reopens"} - _ATTR_KEYS[obj["type"]]
     for key in sorted(set(body) & allowed):
         if not spec[key](body[key]):
@@ -233,7 +250,7 @@ def _conditional(kind: str, obj: dict, body: dict) -> list[tuple[str, str]]:
     if kind == "research.skip":
         if obj.get("by") != "main":
             out.append(("EVENT-TYPE", "research.skip 的 by 恆為 main"))
-        want = _SKIP_KEYS.get(obj.get("reason"))
+        want = _SKIP_KEYS.get(_hashable(obj.get("reason")))
         if want is not None and {"band", "sid", "line"} & set(body) != want:
             out.append(("EVENT-TYPE", "research.skip 的 reason 與附帶鍵（band／sid／line）不符"))
     if kind == "prop" and "cls" in obj and (("preimage" in body) != (obj["cls"] == "M")):

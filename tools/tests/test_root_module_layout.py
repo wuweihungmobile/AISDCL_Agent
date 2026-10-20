@@ -126,11 +126,14 @@ def prefix_problems(repo_root: Path, roster: set[str], ceiling: int) -> list[str
 
 def package_problems(repo_root: Path) -> list[str]:
     lib = repo_root / "tools" / "lib"
-    registered = " ".join(row[1] for row in registry_rows(repo_root))
+    # 登記＝程式碼欄的反引號片段內含該路徑；片段外的散文不算（R62 (d)）
+    fragments = [f for row in registry_rows(repo_root) for f in re.findall(r"`([^`]*)`", row[1])]
     return [
         f"套件 tools/lib/{p.name}/ 未登記在任何登記列的程式碼欄"
         for p in sorted(lib.iterdir())
-        if p.is_dir() and (p / "__init__.py").exists() and f"tools/lib/{p.name}/" not in registered
+        if p.is_dir()
+        and (p / "__init__.py").exists()
+        and not any(f"tools/lib/{p.name}/" in frag for frag in fragments)
     ]
 
 
@@ -315,6 +318,21 @@ class TestPackagesAndPrds(unittest.TestCase):
         probs = package_problems(root)
         self.assertTrue(len(probs) == 1 and "pkg2" in probs[0], probs)
 
+    def test_AT_134_3_E_2_registration_must_be_a_backtick_fragment(self):
+        cases = {
+            "a": ("tools/lib/pkg/ 尚待登記", True),
+            "b": ("`tools/lib/other/`（相鄰：tools/lib/pkg/ 說明）", True),
+            "c": ("`tools/lib/pkg/`", False),
+        }
+        for key, (code, red) in cases.items():
+            root = synth(f"p{key}")
+            write(root, "tools/lib/pkg/__init__.py")
+            make_ssot(root, [row(code=code)])
+            probs = package_problems(root)
+            if red:
+                self.assertTrue(probs and all("pkg" in p for p in probs), (key, probs))
+            else:
+                self.assertEqual(probs, [], key)
     def test_AT_134_4_1_prd_must_cite_ssot(self):
         self.assertEqual(prd_problems(ROOT), [])
         root = synth("d1")

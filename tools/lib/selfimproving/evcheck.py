@@ -230,13 +230,14 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
     raw = ledger.read_bytes()
     lines = si_events.read_lines(raw)
     events = [ln.obj for ln in lines if ln.obj is not None]
+    sound = si_events.sound(events)
     muts, mut_detail = _mutated(repo, git, raw.decode("utf-8", "replace").lstrip("﻿"))
     out.update({
         "events.structure": (_structure(lines, params, valid), ""),
-        "events.transitions": (_transitions(events), ""),
+        "events.transitions": (_transitions(sound), ""),
         "events.mutated": (muts, mut_detail),
         "events.vacuity": (_vacuity(events, params, valid), ""),
-        "events.prop_files": (_prop_files(repo, events), ""),
-        "events.research": (_research(repo, git, events, src_raw), ""),
+        "events.prop_files": (_prop_files(repo, sound), ""),
+        "events.research": (_research(repo, git, sound, src_raw), ""),
     })
     return out

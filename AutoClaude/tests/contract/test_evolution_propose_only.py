@@ -674,6 +674,19 @@ class TestDefaultAndRewrite:
         assert doc_length_problems(line + "。")
         assert doc_rewrite_problems(line + "。") == []
 
+    def test_AT_128_2_E_2_rewrite_fragments_constant_is_pinned_independently(self):
+        # 期望值以字面獨立寫出（取自 R66；不由常數衍生）：常數被自己的負控迴圈引用，改常數會
+        # 讓負控一起改判而全綠，所以要在常數之外另釘一次。
+        expected = {"Kernel 路徑只提案", "預設放行", "無生產建構點", "無演化重載生產者"}
+        assert len(REWRITE_FRAGMENTS) == 4 and set(REWRITE_FRAGMENTS) == expected
+        frags = list(REWRITE_FRAGMENTS)
+        mutants = [frags[:i] + frags[i + 1 :] for i in range(len(frags))]
+        mutants += [frags[:i] + [frags[i] + "x"] + frags[i + 1 :] for i in range(len(frags))]
+        mutants.append([*frags, "多出來的片段"])
+        assert len(mutants) == 9
+        for mutant in mutants:
+            assert set(mutant) != expected, mutant
+
 
 class TestHumanGate:
     """AC-SI-28-3：①～④ 轉紅的失敗訊息指向人工閘；訊息判準自己不是恆真。"""

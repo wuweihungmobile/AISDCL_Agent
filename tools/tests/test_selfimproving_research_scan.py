@@ -84,6 +84,11 @@ class ResearchCase(SiTestCase):
         write_table(repo, srv, entries, retired=retired, commit=commit)
         return repo
 
+    def zero_success(self, rc, out):
+        """零來源成功的拒收：來源行在前、`reject` 行與碼在後（所以不是 `rejected` 的形態）。"""
+        self.assertEqual((rc, fx.codes_of(out)), (1, {"ZERO-SUCCESS"}), out)
+        self.assertIn("obs-draft:", out.split("\n"))
+
     def fetch(self, repo, run=None, *extra):
         with fx.relaxed():
             return self.M(repo, "research", "--fetch", "--run", run or rid(1), *extra)
@@ -352,7 +357,8 @@ class TestSourceTable(ResearchCase):
 
 
 class TestSourcesHistory(ResearchCase):
-    def scan_event(self, run, table_sha, t, ids=("s-live",)):
+    @staticmethod
+    def scan_event(run, table_sha, t, ids=("s-live",)):
         srcs = [
             {"id": i, "sha256": fx.H(9), "bytes": 3, "changed": True, "http_status": 200}
             for i in ids
@@ -508,17 +514,53 @@ class TestSourcesHistory(ResearchCase):
                 self.assertEqual(rc, 1, (path, out))
                 self.assertIn("source s1 FAIL redirect-refused", out)
                 self.assertEqual(ledger_bytes(repo), before)
-        allowed = {"example.com:443"}
+        # URL 一律帶顯式同埠：預設埠下 https 與 http 的 host:port 本來就不同，會被連接埠判準先拒而
+        # 遮住 scheme 判準（`fetch.check_redirect` 的「scheme 不得改變」）
+        allowed = {"example.com:8443"}
         cr = si_fetch.check_redirect
-        self.assertIsNone(cr("https://example.com/a", "https://example.com/b", allowed))
-        for src, dst, hosts in (
-            ("https://example.com/a", "http://example.com/b", allowed),
-            ("http://example.com/a", "https://example.com/b", {"example.com:80"}),
-            ("https://example.com/a", "https://other.example.org/b", allowed),
-            ("https://example.com/a", "ftp://example.com/b", allowed),
-            ("https://example.com/a", "file:///b", allowed),
+        for src, dst in (
+            ("https://example.com:8443/a", "https://example.com:8443/b"),
+            ("http://example.com:8443/a", "http://example.com:8443/b"),
         ):
-            self.assertEqual(cr(src, dst, hosts), "redirect-refused", dst)
+            self.assertIsNone(cr(src, dst, allowed), (src, dst))
+        for src, dst in (
+            ("https://example.com:8443/a", "http://example.com:8443/b"),
+            ("http://example.com:8443/a", "https://example.com:8443/b"),
+            ("https://example.com:8443/a", "https://other.example:8443/b"),
+            ("https://example.com:8443/a", "ftp://example.com:8443/b"),
+            ("https://example.com:8443/a", "file:///b"),
+        ):
+            self.assertEqual(cr(src, dst, allowed), "redirect-refused", dst)
+
+    def test_AT_130_2_E_4_commit_time_equal_to_event_time_passes(self):
+        """受測 `tools/lib/selfimproving/evcheck.py`：來源表提交時間不晚於事件 t（等號放行）。"""
+        tc = (datetime.now().astimezone() - timedelta(days=1)).replace(microsecond=0)
+        iso = lambda d: d.isoformat(timespec="seconds")  # noqa: E731
+        table = {
+            "schema_rev": 1,
+            "sources": [
+                {
+                    "id": "s-live",
+                    "url": "https://example.com/a.md",
+                    "kind": "docs",
+                    "extract": "讀",
+                    "added_by": "T1",
+                }
+            ],
+        }
+        raw = (json.dumps(table, ensure_ascii=False, indent=2) + "\n").encode()
+        for delta, want in ((0, set()), (-1, {("seq=2", "SOURCES-SHA-MISMATCH")}), (1, set())):
+            repo = fx.p1_base()
+            fx.putb(repo, SRC_REL, raw)
+            t = iso(tc + timedelta(seconds=delta))
+            fx.write_events(
+                repo, [fx.run_open_ev(1), self.scan_event(1, fx.sha(raw), t)]
+            )
+            fx.commit_all(repo, "C", when=iso(tc))
+            res = self.check(repo)
+            self.assertEqual(self.F(res, "events.research"), want, delta)
+            if not want:
+                self.assertEqual(self.S(res, "events.research"), "PASS", delta)
 
 
 class TestFetching(ResearchCase):
@@ -715,6 +757,84 @@ class TestFetching(ResearchCase):
             (obj["kind"], obj["id"], obj["failed"], obj["obs_drafts"]),
             ("research.scan", None, [], []),
         )
+
+    def test_AT_130_3_E_4_zero_success_code_on_both_paths(self):
+        """受測 `tools/lib/selfimproving/research.py`：抓取零成功與預檢零現役皆 ZERO-SUCCESS。"""
+        srv = self.serving({"/a": (404, TEXT, b"no"), "/b": (500, TEXT, b"no")})
+        repo = self.fetch_repo(srv, [("s1", "/a"), ("s2", "/b")])
+        again = fx.new_dir("zs")
+        shutil.copytree(repo, again)
+        before = ledger_bytes(repo)
+        rc, out, err = self.fetch(repo)
+        self.zero_success(rc, out)
+        order = [
+            out.index(m)
+            for m in (
+                "source s1 FAIL http-status 404",
+                "source s2 FAIL http-status 500",
+                "reject research ZERO-SUCCESS",
+            )
+        ]
+        self.assertEqual(order, sorted(order))
+        drafts = [r for r in out.split("\n") if r.startswith("| OBS")]
+        self.assertEqual(len(drafts), 2, out)
+        for row, ident in zip(drafts, ("s1", "s2")):
+            self.assertIn(ident, row)
+            self.assertIn("http-status", row)
+        self.assertEqual(ledger_bytes(repo), before)
+        with fx.relaxed():
+            rc, out, err = self.M(again, "research", "--fetch", "--run", rid(1), "--json")
+        obj = json.loads(out)
+        self.assertEqual((rc, obj["ok"]), (1, False), out)
+        self.assertEqual([c["code"] for c in obj["codes"]], ["ZERO-SUCCESS"])
+        self.assertEqual(
+            [(f["id"], f["reason"]) for f in obj["failed"]],
+            [("s1", "http-status"), ("s2", "http-status")],
+        )
+        repo = self.fetch_repo(srv, [("s1", "/a"), ("s2", "/b")], retired=("s1", "s2"))
+        n, before = len(srv.requests), ledger_bytes(repo)
+        rc, out, err = self.fetch(repo)
+        self.zero_success(rc, out)
+        self.assertEqual((len(srv.requests), ledger_bytes(repo)), (n, before))
+        self.cli_ok(
+            repo, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "離線驗證"
+        )
+
+    def test_AT_130_3_E_5_content_type_allowlist_is_pinned(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：可接受的 Content-Type 集合逐一釘住。"""
+        ok = (
+            "text/plain",
+            "text/html; charset=utf-8",
+            "application/json",
+            "application/xml",
+            "application/atom+xml",
+            "application/rss+xml",
+            "application/xhtml+xml",
+        )
+        bad = (
+            "application/octet-stream",
+            "image/png",
+            "application/pdf",
+            "application/x-ndjson",
+            "application/javascript",
+        )
+        routes = {f"/t{i}": (200, {"Content-Type": c}, b"12345") for i, c in enumerate(ok + bad)}
+        srv = self.serving(routes)
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+
+        def call(i):
+            return si_fetch.fetch_source(
+                srv.url(f"/t{i}"), policy=policy, timeout=5, max_bytes=1000, allowed_hosts=allowed
+            )
+
+        for i, ctype in enumerate(ok):
+            got = call(i)
+            self.assertEqual((got.status, got.raw), (200, b"12345"), ctype)
+        for i, ctype in enumerate(bad, start=len(ok)):
+            with self.assertRaises(si_fetch.FetchError, msg=ctype) as cm:
+                call(i)
+            self.assertEqual((cm.exception.reason, cm.exception.detail), ("non-text", ctype))
 
     def test_AT_130_3_E_3_fetch_outside_lock(self):
         for scenario in (1, 2, 3, 4):
@@ -954,6 +1074,40 @@ class TestBudgetsAndFingerprint(ResearchCase):
             self.assertIn(key, err)
             self.assertEqual(len(srv.requests), n)
 
+    def test_AT_130_5_E_2_wallclock_holds_for_drip_and_stall(self):
+        hdr = {**TEXT, "Content-Length": "100000"}
+        body = b"d" * 100000
+        srv = self.serving(
+            {
+                "/drip": (200, hdr, body, {"drip": True}),
+                "/stall": (200, hdr, body, {"stall": True}),
+                "/late-stall": (200, hdr, body, {"delay": 1.2, "stall": True}),
+            }
+        )
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+        for path in ("/drip", "/stall", "/late-stall"):
+            t0 = time.monotonic()
+            with self.assertRaises(si_fetch.FetchError, msg=path) as cm:
+                si_fetch.fetch_source(
+                    srv.url(path), policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
+                )
+            spent = time.monotonic() - t0
+            self.assertEqual(cm.exception.reason, "timeout", path)
+            self.assertTrue(1.5 <= spent <= 2.5, f"{path} {spent:.2f}s")
+        repo = fx.p1_base()
+        self.open_only(repo)
+        fx.set_params(repo, research_timeout_seconds=2, research_bytes_max=262144)
+        write_table(repo, srv, [("s-drip", "/drip")])
+        before = ledger_bytes(repo)
+        t0 = time.monotonic()
+        rc, out, err = self.fetch(repo)
+        spent = time.monotonic() - t0
+        self.zero_success(rc, out)
+        self.assertIn("source s-drip FAIL timeout", out)
+        self.assertEqual(ledger_bytes(repo), before)
+        self.assertLess(spent, 6, f"整個指令 {spent:.2f}s")
+
     def test_AT_130_6_1_sources_excluded_from_fingerprint(self):
         repo = fx.p1_base()
         f0 = self.check(repo)["fingerprint"]
@@ -1172,6 +1326,28 @@ class TestScan(ScanCase):
             if f["subject"] in ids and f["code"] != "REOPEN-CANDIDATE"
         ]
         self.assertEqual(bad, [])
+        self.assertEqual(fx.snap(repo), snap0)
+
+    def test_AT_131_2_E_3_commit_at_anchor_is_outside_the_window(self):
+        """受測 `tools/lib/selfimproving/scan.py`：committer 時間恰等於起算時刻者不計入窗。"""
+        repo = self.scan_repo(quiet=True)
+        ta = datetime.fromisoformat(
+            next(e for e in fx.EV(repo) if e["kind"] == "run.close")["t"]
+        )
+        fx.put(repo, "AutoClaude/x.py", "K1\n")
+        fx.commit_all(repo, "K1", when=ta.isoformat(timespec="seconds"))
+        fx.put(repo, "AISDLC_SDD/z.md", "K2\n")
+        k2 = fx.commit_all(
+            repo, "K2", when=(ta + timedelta(seconds=1)).isoformat(timespec="seconds")
+        )
+        snap0 = fx.snap(repo)
+        res = self.scan_json(repo)
+        self.assertEqual(res["anchor"]["kind"], "run.close")
+        self.assertEqual(datetime.fromisoformat(res["anchor"]["time"]), ta)
+        self.assertEqual(res["buckets"], {"AISDLC_SDD": 1})
+        (cand,) = res["candidates"]
+        self.assertEqual(cand["bucket"], "AISDLC_SDD")
+        self.assertIn(f"commit {k2[:12]}", cand["row"])
         self.assertEqual(fx.snap(repo), snap0)
 
     def test_AT_131_2_E_1_row_cap_and_header(self):

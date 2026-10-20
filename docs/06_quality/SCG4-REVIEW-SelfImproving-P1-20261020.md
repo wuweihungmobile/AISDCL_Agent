@@ -122,6 +122,12 @@ QA 的逐條指令與原始輸出住 scratchpad `selfimproving_p1\qa_work\scg4_q
 ## §L 主控處置（逐段追加）
 
 - 一審收件（2026-10-20，HEAD `001d3e5e`）：判定 FAIL 成立。處置順序＝(1) 本報告落檔 commit；(2) P1 鍵 `transition --to SPEC_AUDIT` → 主控套用 §K 勘誤（含 F-01～F-08 新 AT）→ `spec-refreeze` → `transition --to PR_REVIEW` → `gate --gate PR_REVIEW --result FAIL`（一審 FAIL，修復棒未派）→ IMPLEMENTATION；(3) 派 Developer 修復棒（碼修 F-01／F-02／F-12／F-18／F-21／F-22；補測 F-03～F-09；鍵 B 判定指令加 `-n 0`）；(4) 主控自修 F-13（SSOT §3 與第 72 行）、F-19（OBS 訂正列）、F-20（compat-ci 註解）；(5) QA 二審（同一 QA 代理續審，重放存活突變清單）。
+- 處置執行紀錄（主控親跑）：
+  - `d53184fb` 本報告落檔；`d7d035ee` F-13／F-19（OBS-SI-168 訂正列）／F-20＋OBS-SI-169～171＋缺陷帳本立案 **DEF-200-556**（F-01，P2）／**DEF-200-557**（F-02，P2）／**DEF-200-558**（F-12，P3），皆 open、承接輪次 R213；`880818da`／`4b39929e` DEF 列補承接輪次與 700 bytes 縮寫（此二筆之前的 commit 訊息把 crossref rc 寫成 0 而實為 1＝鐵律四失誤，OBS-SI-172 於 `0334a114` 入帳）。
+  - TCS 勘誤一（SA 棒，Sonnet）：`fbe14b33`——AT 126→148（正控 57→58、負控 69→90；AC 54 不變；新增 22 個 AT 全掛既有 AC，對應 §G 的 F-01～F-12／F-21／F-22；既有 14 個 gherkin 區塊改內文；R45／R56(a)／R58(c)(d)／R60(c)／R49(b)／R51(b)／R29／R32(c)／R62(d)／V8／NFR-P1-10 (1)(11)～(13) 條文；§7.1 ⚖26～29；§7.2 登記一審處置與勘誤一）。主控親驗：verify_tcs PROBLEMS 0、cmp_blocks 新增 22／既有改 14／無刪除、adapter 148 contracts 無孤兒、冪等重建 sha256 `5f22134c…`、LF 無 BOM、`test_defect_id_reference_integrity` 11 passed、`-k Ghost` 32 passed。
+  - FSM：P1 鍵 `spec-refreeze --doc <TCS> --digest`（不帶 `--stage`；stage 取自 frozen_stages 末列）記錄 Stage-2 digest `sha256:5f22134c…`（supersedes 2026-10-19T19:14:34+00:00）→ PR_REVIEW gate FAIL（retry_count 2；第二次是 refreeze 補記的代價：首次 refreeze 誤帶 `--stage` rc=2 未記錄）→ **IMPLEMENTATION**；鍵 B 同一 TCS 亦 `spec-refreeze`（supersedes 2026-10-19T19:15:47+00:00）後回 PR_REVIEW，待二審一併 gate。
+  - Developer 修復棒（headless hooks-ON Sonnet）於 09:36 派出：碼修 DEF-200-556／557／558＋F-18／F-21／F-22、補 22 個新 AT、既有 AT 對齊勘誤、鍵 B 指令 `-q -n 0`、七條閘門、對 §C 存活突變逐一自證。
+  - 待補：二審結果（§M）、V8／V10 真實樹執行紀錄（主控於 RELEASE_READY 執行）。
 
 ## §B AT 對照表（126 列；QA 機器產生，主控併入）
 

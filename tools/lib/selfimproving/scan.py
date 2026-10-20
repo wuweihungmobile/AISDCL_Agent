@@ -160,7 +160,7 @@ def _bucket_candidates(commits: list, num: int, limit: int) -> list[dict]:
 def run(repo: Path, git: Git, params: dict, since: str | None) -> dict:
     """掃描結果物件（鍵序同 `--json` 輸出：schema_rev、status、unavailable_count、anchor、
     sources、candidates、buckets）。"""
-    events = si_events.load_events(repo / si_events.LEDGER_REL)
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     a = anchor(git, events, params, since)
     text = si_refs.obs_ledger_text(repo)
     num = (max_valid_id(parse_ledger(text)) if text else 0) + 1

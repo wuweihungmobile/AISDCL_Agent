@@ -1,13 +1,15 @@
 """SelfImproving 事件折疊：事件序列 → PROP／RUN／ATT／SUSPENDED／冷卻（TCS-P1 R34、R35）。
 
 純函式、純標準庫：`status`、`card`、`export`、`check` 共用這一份折疊（不得有第二份）。輸入是依檔案
-順序排列的事件 dict（形態問題由 `events.validate` 判；本檔對缺鍵或型別怪異的事件防禦性略過，
+順序排列的事件 dict（形態問題由 `events.validate` 判；`fold` 只吃通過它的事件，其餘略過、
 絕不拋例外），輸出的 `problems` 是 `events.transitions` 的原料（碼, subject, 說明）。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+
+from . import events as si_events
 
 ACTIVE_STATES = ("proposed", "returned", "approved", "sandboxed", "verified")
 _BAD_RESULTS = ("recurred", "rolled-back")
@@ -322,9 +324,8 @@ def _finish(f: Folded, stop_after_bad: int | None) -> None:
 
 def fold(events: list[dict], stop_after_bad: int | None = None) -> Folded:
     f = Folded()
-    for ev in events:
-        if isinstance(ev, dict) and _i(ev.get("seq")) and isinstance(ev.get("kind"), str):
-            _apply(f, ev)
+    for ev in si_events.sound(events):
+        _apply(f, ev)
     _finish(f, stop_after_bad)
     return f
 

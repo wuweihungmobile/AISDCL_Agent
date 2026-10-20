@@ -56,7 +56,7 @@ def _detect(f: si_fold.Folded, window: list[dict], hits: list) -> list[dict]:
 
 def build(repo: Path, git: Git, params: dict) -> dict:
     """狀態物件；鍵序固定（R60）。"""
-    events = si_events.load_events(repo / si_events.LEDGER_REL)
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     f = si_fold.fold(events or [], params.get("stop_after_bad"))
     closes = [e["seq"] for e in events or [] if e.get("kind") == "run.close"]
     window = [e for e in events or [] if not closes or e["seq"] > closes[-1]]

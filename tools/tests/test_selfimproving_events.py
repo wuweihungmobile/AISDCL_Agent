@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -1859,3 +1860,311 @@ class TestSopArticles(SiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+WEIRD_STATUS_KEYS = [
+    "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
+    "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
+    "friction_reconcile", "no_event",
+]  # fmt: skip
+
+
+def weird_events() -> dict[str, dict]:
+    """SC-WEIRD：欄位值為陣列的四型事件（`tools/lib/selfimproving/events.py` 的讀取側防禦）。"""
+    attr = {"id": aid(1), "items": [["DOC", "docs/x"]], "root_cause": "a/b"}
+    return {
+        "W1": fx.skip_ev(1, reason=["a"]),
+        "W2": ev("attr", "SA", type=["root"], obs=[obs_id(1)], **attr),
+        "W3": ev("attr", "SA", type="root", obs=[[obs_id(1)]], **attr),
+        "W4": ev("attr.confirm", "QA", att=["a"]),
+    }
+
+
+class TestWeirdEvents(SiTestCase):
+    """受測：`tools/lib/selfimproving/events.py`／`fold.py`／`evcheck.py`（型別怪異事件不崩潰）。"""
+
+    def weird_repo(self, label: str) -> Path:
+        repo = fx.p1_base()
+        fx.write_events(repo, [fx.run_open_ev(1), weird_events()[label]])
+        return repo
+
+    def test_AT_108_4_E_3_weird_events_are_event_type_only(self):
+        for label in weird_events():
+            with self.subTest(label):
+                repo = self.weird_repo(label)
+                res = self.check(repo)
+                self.assertEqual(res["_rc"], 1, label)
+                self.assertEqual(len(res["items"]), 28)
+                self.assertTrue(all("status" in i for i in res["items"]))
+                self.assertEqual(self.S(res, "events.structure"), "FAIL")
+                self.assertEqual(self.F(res, "events.structure"), {("seq=2", "EVENT-TYPE")})
+                bad = {c for _, c in self.F(res, "events.transitions")}
+                self.assertFalse(bad & {"TRANSITION-ILLEGAL", "TRANSITION-ORPHAN"}, label)
+                self.assertIn("status", res["_item"]["events.research"])
+                self.assertIn("status", res["_item"]["events.vacuity"])
+
+    def test_AT_140_1_E_2_verbs_survive_weird_events(self):
+        for label in weird_events():
+            repo = self.weird_repo(label)
+            lines0 = ledger_bytes(repo).split(b"\n")[:2]
+            att = aid(1)
+            for argv in (["status"], ["status", "--json"]):
+                rc, out, _ = self.M(repo, *argv)
+                self.assertEqual(rc, 0, (label, argv, out))
+                if "--json" in argv:
+                    self.assertEqual(list(json.loads(out)), WEIRD_STATUS_KEYS)
+            for kind in ("events", "runs", "proposals", "status"):
+                rc, out, _ = self.M(repo, "export", "--json", "--kind", kind)
+                self.assertEqual(rc, 0, (label, kind, out))
+                items = json.loads(out)["items"]
+                if kind == "events":
+                    self.assertEqual(items[1], json.loads(lines0[1]), label)
+            copy = fx.new_dir("wc")
+            shutil.copytree(repo, copy)
+            rc, out, _ = self.M(copy, "run-close", "--run", rid(1), "--by", "main")
+            self.assertEqual(
+                (rc, out), (0, "ok run.close seq=3 run=RUN-SI-001 no_event=true\n"), label
+            )
+            self.assertEqual(ledger_bytes(copy).split(b"\n")[:2], lines0)
+            copy = fx.new_dir("wc")
+            shutil.copytree(repo, copy)
+            rc, out, _ = self.M(copy, "attr-confirm", "--att", att, "--by", "QA")
+            self.assertEqual((rc, fx.codes_of(out)), (1, {"ATT-NOT-FOUND"}), (label, out))
+            copy = fx.new_dir("wc")
+            shutil.copytree(repo, copy)
+            rc, out, _ = self.M(
+                copy, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "x"
+            )
+            self.assertEqual(rc, 0, (label, out))
+            self.assertEqual(ledger_bytes(copy).split(b"\n")[:2], lines0)
+
+
+class TestValueDomains(SiTestCase):
+    """受測：`tools/lib/selfimproving/events.py`／`evcheck.py`（值域邊界與引言回查提示）。"""
+
+    def structure(self, events, **prm):
+        repo = fx.p1_base()
+        fx.set_params(repo, **prm)
+        fx.write_events(repo, [fx.run_open_ev(1), *events])
+        res = self.check(repo)
+        return self.S(res, "events.structure"), self.F(res, "events.structure")
+
+    def expect(self, events, want, msg):
+        status, found = self.structure(events)
+        self.assertEqual(found, want, msg)
+        self.assertEqual(status, "FAIL" if want else "PASS", msg)
+
+    def test_AT_108_4_E_4_value_domains(self):
+        bad = {("seq=2", "EVENT-TYPE")}
+        for n, want in ((120, set()), (121, bad)):
+            note = "字" * n
+            self.expect([fx.skip_ev(1, note=note)], want, f"skip note {n}")
+            self.expect([ev("attr.reject", "QA", att=aid(1), note=note)], want, f"reject {n}")
+        when = fx.T0().isoformat(timespec="seconds")
+        for code, want in ((199, bad), (200, set()), (299, set()), (300, bad)):
+            src = {"id": "s-live", "sha256": fx.H(9), "bytes": 3, "changed": True,
+                   "http_status": code}  # fmt: skip
+            scan = ev("research.scan", "researcher", run=rid(1), sources=[src],
+                      sources_sha256=fx.H(5), fetched_at=when)  # fmt: skip
+            self.expect([scan], want, f"http_status {code}")
+        for by, want in (("main", set()), ("researcher", bad), ("SA", bad)):
+            self.expect([fx.ev("research.skip", by, run=rid(1), reason="offline", note="x")],
+                        want, f"skip by {by}")  # fmt: skip
+        sids = (
+            (fx.UUID, set()),
+            (fx.UUID.replace("-", ""), bad),
+            ("{" + fx.UUID + "}", bad),
+            ("urn:uuid:" + fx.UUID, bad),
+        )
+        for sid, want in sids:
+            skip = fx.skip_ev(1, reason="helmsman", sid=sid, line=3)
+            self.expect([skip], want, f"sid {sid}")
+        repo = fx.p1_base()
+        fx.write_events(repo, [fx.run_open_ev(1)])
+        size = len(ledger_bytes(repo).rstrip(b"\n"))
+        for limit, want in ((size, set()), (size - 1, {("seq=1", "EVENT-BYTES-OVER")})):
+            fx.set_params(repo, event_max_bytes=limit)
+            res = self.check(repo)
+            self.assertEqual(self.F(res, "events.structure"), want, limit)
+            self.assertEqual(self.S(res, "events.structure"), "FAIL" if want else "PASS")
+
+    def test_AT_108_4_E_5_quote_verifier_warn_boundary(self):
+        base = [fx.run_open_ev(1), fx.skip_ev(1)]
+        prop = fx.prop_ev(124, 1)
+        cases = {
+            "a": [*base, prop, fx.dec_ev(124, "approve")],
+            "b": [*base, prop],
+            "c": [fx.run_open_ev(1), fx.skip_ev(1, reason="helmsman", sid=fx.UUID, line=3)],
+            "d": [fx.run_open_ev(1), fx.skip_ev(1)],
+        }
+        out = {}
+        for key, events in cases.items():
+            repo = fx.p1_base()
+            fx.write_events(repo, events)
+            out[key] = self.check(repo)
+        quote = ("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")
+        item = out["a"]["_item"]["events.transitions"]
+        self.assertEqual(item["status"], "PASS")
+        self.assertEqual({(f["subject"], f["code"]) for f in item["findings"]}, {quote})
+        (finding,) = item["findings"]
+        self.assertEqual(finding["level"], "warn")
+        self.assertTrue(finding["detail"].startswith("[warn]"))
+        self.assertIn("1", finding["detail"])
+        self.assertIn("引言回查屬 P2", finding["detail"])
+        self.assertEqual(self.F(out["b"], "events.transitions"), set())
+        item = out["c"]["_item"]["events.research"]
+        self.assertEqual(item["status"], "PASS")
+        self.assertEqual({(f["subject"], f["code"]) for f in item["findings"]}, {quote})
+        self.assertEqual(item["findings"][0]["level"], "warn")
+        self.assertEqual(self.F(out["d"], "events.research"), set())
+        self.assertFalse(out["a"]["_item"]["events.transitions"]["blocking"])
+        self.assertFalse(item["blocking"])
+        for key in ("c", "d"):
+            self.assertEqual((out[key]["overall"], out[key]["_rc"]), ("PASS", 0), key)
+
+
+class TestProposalNumberingAndLock(SiTestCase):
+    """受測：`tools/lib/selfimproving/writeverbs.py`／`evwrite.py`（配號在鎖內、鎖檔命名）。"""
+
+    def test_AT_141_1_E_2_prop_number_is_read_inside_the_lock(self):
+        px = "PROP-SI-" + "140"
+        got = {}
+        for label in ("control", "late"):
+            repo, run = self.fresh_run_repo()
+            real = evwrite.append_event
+
+            def wrapper(*a, _repo=repo, **kw):
+                with (_repo / LEDGER).open("ab") as fh:
+                    fh.write(f"| 補記 | {px} |\n".encode())
+                return real(*a, **kw)
+
+            if label == "late":
+                with mock.patch.object(evwrite, "append_event", wrapper):
+                    rc, out, err = self.prop(repo, run, "P")
+            else:
+                rc, out, err = self.prop(repo, run, "P")
+            self.assertEqual(rc, 0, out + err)
+            got[label] = re.search(r"id=(PROP-SI-\d+)", out).group(1)
+            self.assertEqual(fx.EV(repo)[-1]["id"], got[label])
+        self.assertEqual(got, {"control": pid(124), "late": pid(141)})
+        self.assertTrue((repo / fx.PROPS_REL / pid(141)).is_dir())
+
+    def test_AT_141_2_E_2_lock_file_is_named_after_the_ledger_realpath(self):
+        wants = []
+        for _ in range(2):
+            repo = fx.p1_base()
+            seen = []
+            locks = self.home / "locks"
+            hook = lambda: seen.append(sorted(p.name for p in locks.iterdir()))  # noqa: E731
+            with mock.patch.object(evwrite, "PAUSE_HOOK", hook):
+                self.cli_ok(repo, *run_open_args())
+            key = hashlib.sha256(os.path.realpath(repo / EVL).encode("utf-8")).hexdigest()[:16]
+            want = key + ".lock"
+            self.assertEqual(seen, [[want]])
+            self.assertRegex(want, r"^[0-9a-f]{16}\.lock$")
+            self.assertEqual([p.name for p in locks.glob("*.lock")], [])
+            wants.append(want)
+        self.assertNotEqual(*wants)
+
+    def test_AT_141_2_E_3_home_exists_but_is_not_writable(self):
+        repo = fx.p1_base()
+        for sub in ("locks", "research"):
+            (self.home / sub).mkdir()
+        probe = self.home / "locks" / f".probe-{os.getpid()}"
+        probe.mkdir()
+        snap0, home0 = fx.snap(repo), fx.tree_files(self.home)
+        rc, out, err = self.M(repo, *run_open_args())
+        self.usage_error(rc, out, err)
+        self.assertIn("HOME-UNWRITABLE", err)
+        self.assertIsNone(ledger_bytes(repo))
+        self.assertEqual((fx.snap(repo), fx.tree_files(self.home)), (snap0, home0))
+        for argv in (["check"], ["status", "--json"], ["scan"], ["export", "--json", "--kind",
+                                                                 "status"]):
+            rc, out, err = self.M(repo, *argv)
+            self.assertEqual(rc, 0, (argv, out, err))
+        probe.rmdir()
+        self.cli_ok(repo, *run_open_args())
+        self.assertEqual(len(fx.EV(repo)), 1)
+
+
+class TestDraftCodeCap(SiTestCase):
+    """受測：`tools/lib/selfimproving/writeverbs.py`（OBS 草稿列症狀至多 5 個碼）。"""
+
+    def test_AT_140_1_E_3_draft_symptom_lists_at_most_five_codes(self):
+        repo, _ = self.fresh_run_repo()
+        rx, sx = rid(77), obs_id(777)
+        want6 = [
+            "RUN-NOT-OPEN", "RESEARCH-MISSING", "SOURCE-UNRESOLVED", "NO-INTERNAL-SOURCE",
+            "REVIEWER-IS-PROPOSER", "HANDOFF-CHANNEL-UNEXPECTED",
+        ]  # fmt: skip
+        cases = (
+            (dict(reviewer="SA", handoff="T1"), 6),
+            (dict(reviewer="SA"), 5),
+            (dict(), 4),
+        )
+        for over, count in cases:
+            args = fx.good_prop_args(repo, "P", sources=[sx], proposer="SA", **over)
+            rc, out, _ = self.M(repo, "prop-new", "--run", rx, *args)
+            self.assertEqual(rc, 1, out)
+            head = out.split("obs-draft:")[0]
+            names = list(dict.fromkeys(re.findall(r"(?m)^  ([A-Z][A-Z0-9-]+) ", head)))
+            self.assertEqual(len(names), count, out)
+            if count == 6:
+                self.assertEqual(fx.codes_of(out), set(want6))
+            self.draft_ok(repo, out, f"{count} 個碼")
+            (row,) = [r for r in out.split("\n") if r.startswith("| OBS")]
+            symptom = [c.strip() for c in row.strip().strip("|").split("|")][3]
+            tail = "…等 6 項" if count == 6 else ""
+            self.assertEqual(
+                symptom, "si prop-new 拒收（rc=1）：" + "、".join(names[:5]) + tail, count
+            )
+            self.assertEqual("…等" in symptom, count == 6)
+
+
+class TestSopCriteriaConstants(SiTestCase):
+    """受測：夾具常數 `SAME_LINE_GROUPS`／`RESEARCH_EVENT_LINES`（R65 判準常數的獨立釘選）。"""
+
+    def test_AT_145_2_E_2_same_line_constants_are_pinned(self):
+        want_groups = {
+            ("歸因者", frozenset({"理論洞", "P4", "暴露證據", "不立案"})),
+            ("歸因者", frozenset({"evaluator-change", "evaluator_command",
+                                   "expected_output_regex", "OBS", "不得轉送沙盒"})),
+            ("提案者", frozenset({"抽象化", "結果標籤", "原始軌跡全文"})),
+            ("提案者", frozenset({"不得再派", "提案者", "審查者"})),
+        }  # fmt: skip
+        want_lines = {
+            frozenset({"研究事件", "research.scan", "research.skip", "prop-new", "拒收"}),
+            frozenset({"quota-band", "offline", "helmsman"}),
+        }
+
+        def groups(cs):
+            return {(k, frozenset(f)) for k, f in cs}
+
+        def lines(cs):
+            return {frozenset(f) for f in cs}
+
+        self.assertEqual(len(fx.SAME_LINE_GROUPS), 4)
+        self.assertEqual(len(fx.RESEARCH_EVENT_LINES), 2)
+        self.assertEqual(groups(fx.SAME_LINE_GROUPS), want_groups)
+        self.assertEqual(lines(fx.RESEARCH_EVENT_LINES), want_lines)
+        gs, ls = list(fx.SAME_LINE_GROUPS), list(fx.RESEARCH_EVENT_LINES)
+        mutants = []
+        for i in range(len(gs)):
+            mutants.append(gs[:i] + gs[i + 1:])
+            key, frags = gs[i]
+            for j in range(len(frags)):
+                dropped = (key, tuple(f for k, f in enumerate(frags) if k != j))
+                mutants.append(gs[:i] + [dropped] + gs[i + 1:])
+                changed = (key, tuple(f + "x" if k == j else f for k, f in enumerate(frags)))
+                mutants.append(gs[:i] + [changed] + gs[i + 1:])
+            other = "審查者" if key != "審查者" else "提案者"
+            mutants.append(gs[:i] + [(other, frags)] + gs[i + 1:])
+        for mutant in mutants:
+            self.assertNotEqual(groups(mutant), want_groups)
+        for i in range(len(ls)):
+            self.assertNotEqual(lines(ls[:i] + ls[i + 1:]), want_lines)
+            for j in range(len(ls[i])):
+                dropped = tuple(f for k, f in enumerate(ls[i]) if k != j)
+                changed = tuple(f + "x" if k == j else f for k, f in enumerate(ls[i]))
+                for variant in (dropped, changed):
+                    self.assertNotEqual(lines(ls[:i] + [variant] + ls[i + 1:]), want_lines)

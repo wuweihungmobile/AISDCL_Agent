@@ -11,9 +11,7 @@ from __future__ import annotations
 import http.client
 import socket
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 
 from .sources import Policy, parse_url
@@ -41,11 +39,6 @@ class Fetched:
     status: int
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):  # noqa: D401  # 關掉自動跟隨，改手動把關
-        return None
-
-
 def host_port(url: str) -> str:
     scheme, host, _, port, _ = parse_url(url)
     return f"{host}:{port if port is not None else _DEFAULT_PORT.get(scheme, 0)}"
@@ -61,25 +54,61 @@ def check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None:
 
 
 def _reason(exc: BaseException) -> str:
-    """建連線與送出請求階段的任何錯誤（含連線逾時）一律是 network；等回應或讀本文逾時才是 timeout
-    （urllib 把前者包成 URLError、後者以原始 TimeoutError 傳出；Windows 對無人監聽的本機埠要約
-    2 秒才回拒絕，不能因此誤判為逾時）。"""
-    return "timeout" if isinstance(exc, (socket.timeout, TimeoutError)) \
-        and not isinstance(exc, urllib.error.URLError) else "network"
+    """等回應逾時才是 timeout，其餘一律 network（建連線與送出請求階段的錯誤由 `_open` 直接歸
+    network；Windows 對無人監聽的本機埠要約 2 秒才回拒絕，不能因此誤判為逾時）。"""
+    return "timeout" if isinstance(exc, (socket.timeout, TimeoutError)) else "network"
 
 
-def _read_body(resp, deadline: float, max_bytes: int) -> bytes:
+def _read_body(conn, resp, deadline: float, max_bytes: int) -> bytes:
+    """讀本文：每次讀取前依剩餘期限重設 socket 逾時、只做一次 `read1`——慢滴回應（每次只來一點）
+    也無法把牆鐘拖過整個來源的期限。"""
     length = resp.headers.get("Content-Length", "")
     if length.isdigit() and int(length) > max_bytes:
         raise FetchError("too-large", f"Content-Length {length} > {max_bytes}")
     buf = bytearray()
-    for chunk in iter(lambda: resp.read(_CHUNK), b""):
-        if time.monotonic() > deadline:
-            raise FetchError("timeout")
+    while (left := deadline - time.monotonic()) > 0:
+        conn.sock.settimeout(left)
+        chunk = resp.read1(_CHUNK)
+        if not chunk:
+            return bytes(buf)
         buf += chunk
         if len(buf) > max_bytes:
             raise FetchError("too-large", f"超過 {max_bytes} 位元組")
-    return bytes(buf)
+    raise FetchError("timeout")
+
+
+def _conn_class(scheme: str):
+    """`will_close` 的回應會在 `getresponse` 內自動關掉連線物件的 socket 參照，之後就無法依剩餘
+    期限重設逾時；故把 `close` 延後、改由 `shut` 明確收尾。"""
+    base = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+
+    class Conn(base):
+        def close(self) -> None:  # noqa: D401  # getresponse 的自動關閉改成什麼都不做
+            return None
+
+        def shut(self) -> None:
+            base.close(self)
+
+    return Conn
+
+
+def _open(url: str, timeout: float):
+    """對單一 URL 送 GET（不帶認證、不走代理、`Connection: close`）；回 (連線, 回應)。
+    建連線與送出請求的錯誤一律 network；等回應逾時才是 timeout。"""
+    parts = urllib.parse.urlsplit(url)
+    conn = _conn_class(parts.scheme)(parts.hostname, parts.port, timeout=timeout)
+    try:
+        conn.request("GET", (parts.path or "/") + (f"?{parts.query}" if parts.query else ""),
+                     headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity",
+                              "Connection": "close"})
+    except (OSError, http.client.HTTPException) as exc:
+        conn.shut()
+        raise FetchError("network") from exc
+    try:
+        return conn, conn.getresponse()
+    except (OSError, http.client.HTTPException) as exc:
+        conn.shut()
+        raise FetchError(_reason(exc)) from exc
 
 
 def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
@@ -89,22 +118,14 @@ def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
     if scheme != "https" and not (scheme == "http" and policy.allow_http):
         raise FetchError("network", f"scheme {scheme!r} 不被政策允許")
     deadline = time.monotonic() + timeout
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     cur, hops = url, 0
     for _ in range(MAX_REDIRECTS + 2):  # 初始請求加至多 5 跳重導向
         left = deadline - time.monotonic()
         if left <= 0:
             raise FetchError("timeout")
-        req = urllib.request.Request(cur, headers={"User-Agent": USER_AGENT,
-                                                   "Accept-Encoding": "identity"})
+        conn, resp = _open(cur, left)
         try:
-            resp = opener.open(req, timeout=left)
-        except urllib.error.HTTPError as exc:
-            resp = exc
-        except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
-            raise FetchError(_reason(exc)) from exc
-        try:
-            status = resp.status if hasattr(resp, "status") else resp.code
+            status = resp.status
             loc = resp.headers.get("Location")
             if status in _REDIRECT_STATUS and loc:
                 hops += 1
@@ -121,11 +142,11 @@ def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if not (ctype.startswith("text/") or ctype in _TEXT_TYPES):
                 raise FetchError("non-text", ctype or "缺 Content-Type")
-            return Fetched(_read_body(resp, deadline, max_bytes), status)
+            return Fetched(_read_body(conn, resp, deadline, max_bytes), status)
         except TimeoutError as exc:
             raise FetchError("timeout") from exc
         except (OSError, http.client.HTTPException) as exc:
             raise FetchError("network") from exc
         finally:
-            resp.close()
+            conn.shut()
     raise FetchError("redirect-refused", "重導向跳數超過上限")
