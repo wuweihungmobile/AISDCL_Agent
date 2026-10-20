@@ -145,7 +145,7 @@
 - **R40 `events.vacuity`**：事件帳本存在且解析到的事件數（空白行與無法解析的行不計）< `min_events` ⇒ blocking NE `EVENTS-BELOW-FLOOR`（等於下限算通過；空檔＝0 筆）；檔案不存在由 R36 (c) 處理（nonblocking NE），不在此判。`min_events` 無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
 - **R41 `events.prop_files`**：對每個 `prop` 事件，內容檔 `docs/06_quality/SelfImproving_Proposals/<id>/r<rev>.patch` 與 `.md` 須存在（缺 ⇒ `PROP-FILE-MISSING`）；`patch_sha256`＝`sha256:` 接 `.patch` 檔**原位元組**的 sha256（不做 CRLF 正規化，§7.1 ⚖ 16）、`body_sha256`＝`.md` 檔 CRLF 換 LF 後的 sha256，不符 ⇒ `PROP-PATCH-SHA-MISMATCH`、`PROP-BODY-SHA-MISMATCH`；`touched_count`、`touched_sha256` 由 `.patch` 依 R51 重新導出（`touched_sha256`＝`json.dumps(排序去重後的路徑陣列, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256，加 `sha256:` 前綴），不符 ⇒ `PROP-TOUCHED-MISMATCH`（**只在 `patch_sha256` 相符時才判**：`.patch` 已被改動者，導出值不可信，只報 `PROP-PATCH-SHA-MISMATCH` 一碼）。subject＝`<PROP-ID> r<rev>`。內容檔存在但 `git` 不可用不影響本項（重導出走 R51 的自寫解析器；`git apply` 超集檢查只在 `prop-*` 的寫入路徑，不在 `check`）。
 - **R42 `events.research`（PRD AC-SI-30-1、30-2）**：(a) **每運轉研究事件**：對每個運轉 R：研究事件（`research.scan`／`research.skip`，其 `run`＝R）多於 1 筆 ⇒ `RESEARCH-MULTIPLE`（subject＝R，detail 列 `seq`）；R 有 ≥1 筆 `prop` 事件而研究事件為 0 筆 ⇒ `RESEARCH-MISSING`；唯一的研究事件的 `seq` 不介於 R 的 `run.open` 與 R 的第一筆 `prop` 之間 ⇒ `RESEARCH-ORDER`。(b) **來源 id**：每筆 `research.scan` 的 `sources[].id` 須屬來源表所有 `id`（含 `retired: true` 者），否則 `SRC-UNKNOWN`（subject＝`seq=<n> <id>`）；來源表不存在或無法解析而存在 `research.scan` ⇒ blocking NE `SOURCE-UNAVAILABLE`。(c) **`sources_sha256` 對提交歷史**：對每筆 `research.scan`，取來源表檔路徑 `docs/06_quality/SelfImproving_Protocol/research_sources.json` 的 git 提交歷史中、committer 時間不晚於該事件 `t`（**等號放行**：提交時間與 `t` 為同一秒者算不晚於）的**最近一次**提交，其當時內容（CRLF 換 LF）的 sha256（加 `sha256:` 前綴）須等於事件的 `sources_sha256`；不符、或 `t` 之前沒有任何提交含該檔 ⇒ `SOURCES-SHA-MISMATCH`（subject＝`seq=<n>`）；git 不可用 ⇒ nonblocking NE `SOURCES-HISTORY-NOT-ESTABLISHED`（單一 finding、subject `-`）。誠實劃界：來源表的 git 歷史被 rebase／amend 改寫會使既有事件永遠紅（與 `ROW-MUTATED` 同型假設）；工作樹中未提交的來源表改動不被視為歷史。(d) **`helmsman` 免掃**：存在 ≥1 筆 `research.skip`（`reason`＝`helmsman`；單一筆即印）⇒ 一個 warn 層級 finding（碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`、subject `-`、detail 以 `[warn]` 起頭；項目狀態不變、不影響 rc，同 R38）；`reason`、`note`、附帶鍵的形態由 R37 判。
-- **R43 `research.sources` 與來源表檔格式（PRD AC-SI-30-2、§9.2）**：來源表＝`docs/06_quality/SelfImproving_Protocol/research_sources.json`，UTF-8（無 BOM）、換行 LF、結尾換行、頂層 `{"schema_rev": 1, "sources": [...]}`；`sources` 依 `id` 的位元組序遞增；每筆必備 `id`（`^[a-z0-9][a-z0-9-]{0,31}$`、唯一）、`url`、`kind`（`changelog`｜`docs`｜`release`｜`blog`）、`extract`（非空字串）、`added_by`（非空字串），選用 `retired`（值只准 JSON `true`；缺＝現役）。**驗證函式 `sources.validate_table(raw: bytes, policy) -> list[tuple[str, str, str]]`**（回傳〔碼, subject, detail〕三元組串列，無問題＝空串列；`check` 的本項與 `research --fetch` 的預檢共用同一個函式；`sources.Policy` 為 frozen dataclass，欄位 `allow_http: bool`、`allow_loopback: bool`）依序產生下列碼，任一 ⇒ 本項 FAIL：`SRC-FILE-FORMAT`（BOM、CR、結尾無換行、不是 UTF-8 JSON 物件）、`SRC-SCHEMA`（`schema_rev` 缺或不是 1、頂層缺 `sources`、`sources` 不是陣列、元素不是物件或有表外鍵）、`SRC-FIELD-MISSING`（必備鍵缺或空）、`SRC-ID-FORMAT`、`SRC-ID-DUP`、`SRC-ORDER`（未依 `id` 位元組序遞增；`id` 相同者由 `SRC-ID-DUP` 判、不另報本碼）、`SRC-KIND`、`SRC-RETIRED-TYPE`、`SRC-URL-SCHEME`（`url` 不以 `https://` 起頭；`policy.allow_http` 為真時另收 `http://`）、`SRC-URL-USERINFO`（authority 含 `@`）、`SRC-URL-HOST`（host 為 `localhost` 或 `*.localhost`，或字面 IP 落在 `127.0.0.0/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、IPv6 `::1`、`fe80::/10`、`fc00::/7`〔含 IPv4 映射寫法〕；規則集沿 `AgentConsole/docs/02_architecture/Architecture.md` §8.4 的私網段清單，**只驗字串形態**，不做 DNS 解析；`policy.allow_loopback` 為真時 loopback 放行）。`sources.DEFAULT_POLICY`＝嚴格政策（`allow_http` 與 `allow_loopback` 皆為 `False`）；CLI 入口不暴露放寬旗標，測試以 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 放寬（`check` 與 `research` 同取該物件）。表檔不存在 ⇒ R36 (c)。**只增不刪**的偵測由 R42 (b) 的 `SRC-UNKNOWN` 承擔，不另設碼。
+- **R43 `research.sources` 與來源表檔格式（PRD AC-SI-30-2、§9.2）**：來源表＝`docs/06_quality/SelfImproving_Protocol/research_sources.json`，UTF-8（無 BOM）、換行 LF、結尾換行、頂層 `{"schema_rev": 1, "sources": [...]}`；`sources` 依 `id` 的位元組序遞增；每筆必備 `id`（`^[a-z0-9][a-z0-9-]{0,31}$`、唯一）、`url`、`kind`（`changelog`｜`docs`｜`release`｜`blog`）、`extract`（非空字串）、`added_by`（非空字串），選用 `retired`（值只准 JSON `true`；缺＝現役）。**驗證函式 `sources.validate_table(raw: bytes, policy) -> list[tuple[str, str, str]]`**（回傳〔碼, subject, detail〕三元組串列，無問題＝空串列；`check` 的本項與 `research --fetch` 的預檢共用同一個函式；`sources.Policy` 為 frozen dataclass，欄位 `allow_http: bool`、`allow_loopback: bool`）依序產生下列碼，任一 ⇒ 本項 FAIL：`SRC-FILE-FORMAT`（BOM、CR、結尾無換行、不是 UTF-8 JSON 物件）、`SRC-SCHEMA`（`schema_rev` 缺或不是 1、頂層缺 `sources`、`sources` 不是陣列、元素不是物件或有表外鍵）、`SRC-FIELD-MISSING`（必備鍵缺或空）、`SRC-ID-FORMAT`、`SRC-ID-DUP`、`SRC-ORDER`（未依 `id` 位元組序遞增；`id` 相同者由 `SRC-ID-DUP` 判、不另報本碼）、`SRC-KIND`、`SRC-RETIRED-TYPE`、`SRC-URL-SCHEME`（`url` 不以 `https://` 起頭；`policy.allow_http` 為真時另收 `http://`）、`SRC-URL-USERINFO`（authority 含 `@`）、`SRC-URL-HOST`（host 為空，或含空白或控制字元〔`str.isspace()` 為真，或碼位小於 U+0020、等於 U+007F〕，或為 `localhost` 或 `*.localhost`，或字面 IP 落在 `127.0.0.0/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、IPv6 `::1`、`fe80::/10`、`fc00::/7`〔含 IPv4 映射寫法〕；規則集沿 `AgentConsole/docs/02_architecture/Architecture.md` §8.4 的私網段清單，**只驗字串形態**，不做 DNS 解析；`policy.allow_loopback` 為真時 loopback 放行）。**host 字元判準的成因**（SCG-4 三審 P4；§7.1 ⚖ 34；`AT-130-2-E-7`）：驗證端是手寫切分（`sources.py` 屬 `ro` 類、不得 import `urllib`），而抓取層連線用的標準庫 `urlsplit` 會先刪除網址中的 `\t`、`\r`、`\n` 再切分；所以 `https://127.0.0.1` 接一個 TAB 再接 `/x`，在驗證端的 host 是 `127.0.0.1` 加 TAB（`ipaddress` 不認它、私網判準放行），連線端的 host 卻是 `127.0.0.1`——私網判準被旁路繞過（現行碼實測：`validate_table` 回空串列）；host 不得含空白與控制字元即關閉這條旁路。空白出現在 path 或 query 者不屬本判準（抓取層的連線物件拒收，歸 `network`，R58 (c)）；括號不成對的 IPv6 字面（例：`https://[2001:db8::1/docs`）同樣不是本項的判準，通過表驗證、由抓取層歸 `network`。**全函式**（§7.1 ⚖ 35；`AT-130-2-E-7`）：`sources.parse_url` 與 `sources.validate_table` 對任何字串輸入都不得拋例外；連接埠文字無法轉成整數者——含超過整數轉字串位數上限的長數字串（Python 預設 4300 位）、`str.isdigit()` 為真而 `int()` 失敗的上標數字（`²`）——視同無連接埠（`parse_url` 的 `port` 為 `None`），與 `:abc` 同樣不產生任何碼（`:99999` 這類可轉成整數但越界者本來就不產生），通過表驗證、在抓取層以 `network` 失敗（R58 (c)）。誠實劃界：驗證端不做 Unicode 正規化——全形數字寫成的私網字面 IP（例：`https://１２７.0.0.1/x`，`getaddrinfo` 加 `AI_NUMERICHOST` 實測解成 `127.0.0.1`）不被本項判出；PRD 只承諾字串形態判準，來源表僅 T1 增減、host 為廠商網域，本次不收口（§4〈刻意不做〉）。`sources.DEFAULT_POLICY`＝嚴格政策（`allow_http` 與 `allow_loopback` 皆為 `False`）；CLI 入口不暴露放寬旗標，測試以 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 放寬（`check` 與 `research` 同取該物件）。表檔不存在 ⇒ R36 (c)。**只增不刪**的偵測由 R42 (b) 的 `SRC-UNKNOWN` 承擔，不另設碼。
 - **R44 標記欄擴充（PRD §5.1.1、AC-SI-30-4）**：標記鍵詞彙加 `src`（P0 R14 的詞彙由 10 個擴為 11 個；`MARK-UNKNOWN-KEY` 的集合隨之）；`src` 的值須符合 `^[a-z0-9][a-z0-9-]{0,31}$`，否則 `MARK-VALUE`。新增三個判定碼：(a) `回報者` 為 `研究者` 的列，若標記無 `外部衍生=是` ⇒ `RESEARCHER-NOT-EXTERNAL`、若無 `src` ⇒ `RESEARCHER-NO-SRC`（兩碼屬項目 `row.provenance`，subject＝列 ID）；(b) 任何帶 `src` 的列，其值須屬來源表所有 `id`（含 `retired`），否則 `SRC-UNKNOWN`（項目 `row.markers`）；來源表不存在或無法解析而有帶 `src` 的列 ⇒ `row.markers` blocking NE `SOURCE-UNAVAILABLE`。只在標記欄語法合格、鍵值皆已解析的列上判。P0 的其餘列判準不變。（§7.1 ⚖ 17：PRD 寫「`row.provenance`／`row.markers` 加碼」，三碼各屬哪一項為本檔類推。）
 - **R45 復發候選提示（PRD AC-SI-06-2；§7.1 ⚖ 17）**：`check` 對**新列**列出「同證據座標檔案路徑」的已結列供立案者確認。**新列**＝OBS 帳本工作樹內容中、不在 HEAD 版（`git show HEAD:<帳本>`）的列（以 ID 比對；帳本未被追蹤或 HEAD 無該檔＝全部列皆新列；git 不可用＝本提示不產生），且處置首詞為 `open`、標記無 `reopens` 鍵。路徑集合：**先剝除符合 P0 R16 第八形態（`cmd`：反引號包住、以 `python`、`git` 等指令名起頭的指令片段）的片段**——草稿列的證據格就是這種片段（以反引號包住 `python tools/selfimproving.py <verb>`，其後接 ` rc=N`；見 R28 (d)），不剝則每個草稿列都因片段內的 `tools/selfimproving.py` 對已結列觸發 `REOPEN-CANDIDATE`，R28 (d) 的「零 finding」不成立；只剝該形態，反引號包住的普通路徑照取——**再**取證據座標格中 P0 R16 的 `path`、`file`、`dir` 三形態命中的片段，去掉結尾 `:行號` 或 `:行號–行號`，反斜線換成 `/`，以 `casefold` 比對。**已結列**＝(i) OBS 帳本（含 `…_archive*.md`）中處置首詞∈`fixed@…`、`DEF-…`、`merged@…`、`retired`、`decided` 的列（其證據座標格的路徑集合）；(ii) 缺陷帳本主檔與 archive 中狀態欄分類為 `fixed`、`wontfix`、`closed-by-decision`、`routed` 的 DEF 列（其「現象與證據（file:line）」欄的路徑集合；DEF 列無「分類」欄、只比路徑，候選精準度未量）；**分類與解析一律走 `defs.py`**：`defs.classify_status(text: str) -> str | None`（回傳 `open`、`fixed`、`wontfix`、`closed-by-decision`、`routed` 或 `None`）與 `defs.load_ledger_status(path: Path) -> dict[str, str | None]`（{DEF 號: 分類}；以表頭定位 `ID` 與 `狀態` 欄、同號後列覆寫前列、欄數與表頭不符的列記 `None`、無表頭回空 dict），兩者須與 `tools/check_defect_log_crossref.py` 的 `_classify`、`_load_ledger_status()` 逐筆差分一致（PRD §9.1 C4 的 `defs` 列；AC-131-2 的負控）。新列與某已結列的路徑集合有交集 ⇒ 一個 **warn 等級** finding：項目 `row.markers`、碼 `REOPEN-CANDIDATE`、subject＝新列 ID、detail 以 `[warn]` 起頭並列至多 5 個已結列 ID（依 ID 字串的位元組序排序後取前 5 個，餘以 `…+<k>`）。warn 不改項目狀態（P0 R5）、不影響 rc；新列不與自己比。
 - **R46 `params.json` 新鍵、指紋排除與判準版本（PRD AC-SI-30-5／30-6、§9.7 #52）**：(a) `PARAM_SPECS` 加 5 個鍵，型別皆為整數 ≥1：`research_fetch_max`、`research_bytes_max`、`research_timeout_seconds`、`min_events`、`export_limit_max`（P0 R21 的必備鍵由 23 增為 28；缺 ⇒ `PARAM-MISSING`、型別 ⇒ `PARAM-TYPE`、範圍 ⇒ `PARAM-RANGE`）；真 `params.json` 的頂層鍵依位元組序遞增（P0 R24 不變），5 個新鍵的初值（未校準）為 8、262144、20、1、500，`check` 與 AT 不斷言值（V6 於提交當下核對）。(b) **指紋排除**：判準指紋的 manifest（P0 R7）排除相對協定目錄路徑**恰為** `research_sources.json` 的檔；排除清單只涵蓋這一個檔名；改它不改指紋、改 `params.json` 或 `metrics.md` 改指紋。(c) `check_rules_rev` 由 1 改為 2（P1 擴充 `check` 判準語意；本檔類推，§7.1 ⚖ 14）。
@@ -169,7 +169,7 @@
 *F. 研究掃描、模組體檢、`status` 與 `export`（PRD FR-SI-30、31、32 的 AC-SI-32-5、§9.2、§9.3）*
 
 - **R57 `research` 通則與 `--skip`（PRD AC-SI-30-1）**：(a) `research --skip --run <R> --reason <r> --note <一行> [--band <值>｜--sid <UUID> --line <N>]`：格式類錯誤一律 rc 3——`--reason` 不在 `quota-band`、`offline`、`helmsman`；`--note` 為空、超過 120 字元或含換行；`quota-band` 缺 `--band`（或值為 `free`〔不分大小寫〕）；`helmsman` 缺 `--sid`（須為 UUID）或 `--line`（須為整數 ≥1）；與該 reason 不相干的附帶旗標一併出現。狀態類錯誤 rc 1：`RUN-NOT-OPEN`、`RESEARCH-ALREADY`（該運轉已有研究事件；PRD：`--run` 須已 `run.open`、未 `run.close`，且尚無研究事件）。寫 `research.skip`（`by` 恆為 `main`；`quota-band` 帶 `band`、`helmsman` 帶 `sid`＋`line`、`offline` 無附帶鍵）；附加欄 `run`、`reason`；**零網路**（R63 ⑥）。(b) `research --fetch --run <R>` 的**預檢**（全部在發出任何請求之前；任一失敗＝整次拒收 rc 1、不抓、不寫事件、印草稿列）：`RUN-NOT-OPEN`、`RESEARCH-ALREADY`；來源表不存在 ⇒ `SOURCES-ABSENT`；對**工作樹來源表位元組先把 CRLF 換成 LF 之後**呼叫 `sources.validate_table(raw, sources.DEFAULT_POLICY)`（`raw`＝換行正規化後的位元組；任何 `SRC-*` 碼＝拒收，R43；BOM 與其餘格式問題照判，只有 CRLF 由正規化吸收）；現役（未 `retired`）筆數 > `research_fetch_max` ⇒ `FETCH-MAX`（已 `retired` 者不計）；工作樹的來源表（同樣先換成 LF）與 `HEAD` 提交版（同樣先換成 LF）逐位元組比對不同、或該檔不在 `HEAD` ⇒ `SOURCES-UNCOMMITTED`（git 不可用＝略過本項，並於輸出印 NE 提示：文字形態一行 `ne sources-commit-check git-unavailable`、`--json` 的 `ne` 陣列含 `{"field": "sources-commit-check", "reason": "git-unavailable"}`）；現役來源為 0 筆 ⇒ `ZERO-SUCCESS`。**劃界（位元組口徑）**：`check` 的 `research.sources` 與預檢取用的位元組不同——`check` 對工作樹**原位元組**呼叫同一個 `validate_table`，含 CR 即 `SRC-FILE-FORMAT`（R43）；預檢先換 LF，使 Windows 工作樹因 `core.autocrlf` 而帶 CR 的來源表，只要與 `HEAD` 版在換行正規化後相同仍可抓取，而 `check` 仍把 CR 當格式問題提醒；`sources_sha256` 一律以換行正規化後的位元組計（R42 (c)、R58 (f)）。(c) **流程**：預檢 → 依來源表順序**逐一（不併發）**抓取現役來源（R58）→ 取寫入鎖 → 鎖內重驗（運轉仍 open、仍無研究事件、來源表雜湊仍等於抓取開始時，否則依序 `RUN-NOT-OPEN`、`RESEARCH-ALREADY`、`SOURCES-CHANGED`）→ 以鎖內最新事件重算 `changed` → 追加 `research.scan`（行長超 `event_max_bytes` ⇒ `EVENT-BYTES-OVER`、不寫）。抓取在鎖**之外**進行（最壞 `research_fetch_max`×`research_timeout_seconds`，遠大於取鎖逾時）。來源檔先落地、事件後追加；事件追加失敗時來源檔留作快取、不影響帳本。(d) **rc**：0＝事件已寫且每個來源皆成功；2＝事件已寫、≥1 來源失敗（逐一列出，已抓的照記）；1＝未寫（預檢失敗、零來源成功〔改記 `research.skip(offline)` 或經 T1 修表〕、取鎖逾時、鎖內重驗失敗、事件行超長）；3＝用法或輸入錯誤（含家目錄不可寫）。(e) **輸出**：依序每個現役來源一行——成功 `source <id> ok sha256=<前 12 碼> bytes=<n> changed=<true|false>`、失敗 `source <id> FAIL <原因>`；其後成功寫入者接 `ok research.scan seq=<N> run=<R>`；有失敗者接 `obs-draft:` 與每個失敗來源各一行草稿列（R28 (d)；症狀 `si research --fetch 來源 <id> 失敗（<原因>）`、座標的 `rc=` 為本次實際 rc；各列 ID 自帳本最大合法 ID 加一起連號，依來源表順序遞增）。零來源成功而以 `ZERO-SUCCESS` 拒收（rc 1）時，輸出的首行是各現役來源的 `source <id> FAIL <原因>` 行（不是 `reject …`），其後才依 R28 (b) 接 `reject research ZERO-SUCCESS`、`  ZERO-SUCCESS <detail>` 與 `obs-draft:`，草稿列為每個失敗來源各一行（R28 (b) 的首行為 `reject` 與恰一行草稿列，對抓取後零成功的拒收不適用，改依本款；`AT-130-3-E-4`）；沒有來源行的預檢類拒收仍以 `reject …` 為首行。`--json`：`{"ok": …, "kind": "research.scan", "seq": <N 或 null>, "id": null, "run": …, "rc": …, "sources": [事件的 sources 元素…], "failed": [{"id", "reason", "detail"}…], "obs_drafts": […], "ne": […]}`。失敗原因為封閉集合：`timeout`、`http-status`、`too-large`、`non-text`、`encoding`、`redirect-refused`、`network`。
-- **R58 抓取行為與事件（PRD AC-SI-30-3、30-5；`fetch.py` 是整個套件唯一 import `urllib`／`http`／`socket`／`ssl` 的檔）**：(a) `fetch.fetch_source(url, *, policy, timeout, max_bytes, allowed_hosts)` 以標準庫對**單一**來源發 GET（連線層用 `http.client` 自管連線、重導向與逐次讀取的期限——`urllib.request` 的 opener 在這兩點都管不到，見 (c)、(d)），取**原始位元組**；CLI 入口不暴露放寬旗標，測試以政策物件（`allow_loopback`、`allow_http`）與 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 容許本機夾具。(b) **請求形態**：只准 `http`／`https`；`User-Agent` 恆為 `selfimproving-research/1`；`Accept-Encoding` 恆為 `identity`；不帶 `Cookie`、`Authorization`、`Proxy-Authorization` 或任何認證標頭；回應帶 `Content-Encoding` 且不是 `identity` ⇒ 該來源失敗 `encoding`。(c) **重導向**手動處理（連線層自管，不使用任何自動跟隨）：至多 5 跳（第 6 次重導向 ⇒ `redirect-refused`）；每個目標須 scheme∈`http`、`https` 且**不得改變 scheme**（`http`↔`https` 皆拒：`https` 降 `http` 是降級、`http` 升 `https` 亦是 scheme 變更，一律 fail-closed）、目標 `hostname:port`（缺連接埠取該目標 scheme 的預設）須屬允許集合（＝現役表項 `url` 的 `hostname:port`），否則 `redirect-refused`；逐跳判定住純函式 `fetch.check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None`（拒絕時回傳 `redirect-refused`、可放行回傳 `None`；測試直接以字串餵它，覆蓋 loopback 夾具起不了的 https 降 http 與 http 升 https 等情形；**scheme 判準的負控須用顯式同埠的 URL**——預設埠下 `https` 與 `http` 的 `hostname:port` 本來就不同，會被連接埠判準先拒而遮住 scheme 判準，使它無任何測試鎖住）。**無法解析的 URL 歸入封閉集合**：重導向的 `Location`（對目前 URL 做 `urljoin` 或 URL 剖析拋 `ValueError`，例：括號不成對的 `http://[::1/x`、`http://::1]/x`）無法解析 ⇒ 該來源失敗 `redirect-refused`（detail 帶原 `Location` 值）；初始 URL 同類剖析失敗 ⇒ 失敗 `network`；`fetch_source` 只准拋 `FetchError`（原因為封閉集合），不得有 `ValueError` 等其他例外逸出（SCG-4 二審 N-4；`AT-130-2-E-5`；§7.1 ⚖ 31）。(d) **界限**：整個來源（含全部重導向跳）的牆鐘 ≤ `research_timeout_seconds`，超過 ⇒ 中止、失敗 `timeout`；**強制點在每一次讀取**（含狀態列、每一行標頭、分塊編碼的分塊大小行與 trailer 行、本文）：每次對 socket 讀取（`recv` 或 `recv_into`）前以剩餘時間設定該次的逾時，剩餘不足即以 `timeout` 中止；不得只在區塊與區塊之間檢查期限（對持續慢滴 1 位元組的回應，區塊間檢查永遠等不到下一個區塊），亦不得只管本文階段——`http.client` 的 `getresponse()` 讀狀態列與標頭、以及分塊編碼下單次 `read1` 讀分塊大小行與 trailer 行時，單次呼叫內會多次 `recv`，只要每次都有資料就不逾時，所以讀取層須自己包一層（例：包裝 socket 的讀取，在每次系統呼叫前依剩餘期限重設逾時、剩餘不足即拋 `TimeoutError`）；亦不得以 `threading.Timer` 等常駐機制實作（R64）。各階段慢滴（狀態列、標頭值、一行行標頭、分塊大小行、trailer 行、本文、標頭延遲後停滯）皆須在上限加減 0.5 秒內以 `timeout` 返回，不得回傳成功（含 0 位元組）、不得以 `timeout` 以外的原因返回（`AT-130-5-E-2`、`AT-130-5-E-3`；SCG-4 二審 N-1）；已讀位元組（或 `Content-Length`）> `research_bytes_max` ⇒ 中止、失敗 `too-large`（**不截斷**）；`Content-Type` 的主型別（`;` 之前）須屬 `text/*`、`application/json`、`application/xml`、`application/atom+xml`、`application/rss+xml`、`application/xhtml+xml`，缺或不符 ⇒ `non-text`；最終狀態須 2xx，否則 `http-status`（detail 帶狀態碼）；連線或名稱解析錯誤 ⇒ `network`。(e) **成功的來源**：對原始位元組算 `sha256`（不做任何正規化），以二進位原樣寫入 `<si_dir>/research/<id>/<sha256 前 12 碼>.txt`，並維護 `<si_dir>/research/<id>/latest`（內容＝該 12 碼，無副檔名、無換行）；`changed`＝該 `id` 在事件帳本上一筆含它的 `research.scan`（只計通過 R37 單事件判準者）的 `sha256` 與本次不同（無前筆＝`true`）。**失敗的來源**不入 `sources[]`、不得以舊 digest 代填（NFR-SI-09-1）。(f) **事件**：欄位照 R31；`sources_sha256`＝來源表檔位元組 CRLF 換 LF 後的 sha256（加 `sha256:` 前綴，與 R42 (c) 的算法相同）；`fetched_at`＝抓取完成時刻（帶 offset）；**不存 `url`、不存候選數**；`by` 恆為 `researcher`。(g) **預算與純度**：現役來源筆數、單來源位元組、單來源牆鐘三界各由 `params.json` 的 `research_fetch_max`、`research_bytes_max`、`research_timeout_seconds` 供應；`research --skip` 與其餘全部動詞零網路（R63 ⑥）。(h) 誠實劃界：`sha256` 量的是來源**原始位元組**的穩定性、不是語意改版（含伺服器端產生內容的 HTML 會使 `changed` 假陽性，來源表應優先取原始檔或 feed）；不做 DNS 解析後驗 IP；研究者讀檔的牆鐘與 token 無機械物量測。
+- **R58 抓取行為與事件（PRD AC-SI-30-3、30-5；`fetch.py` 是整個套件唯一 import `urllib`／`http`／`socket`／`ssl` 的檔）**：(a) `fetch.fetch_source(url, *, policy, timeout, max_bytes, allowed_hosts)` 以標準庫對**單一**來源發 GET（連線層用 `http.client` 自管連線、重導向與逐次讀取的期限——`urllib.request` 的 opener 在這兩點都管不到，見 (c)、(d)），取**原始位元組**；CLI 入口不暴露放寬旗標，測試以政策物件（`allow_loopback`、`allow_http`）與 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 容許本機夾具。(b) **請求形態**：只准 `http`／`https`；`User-Agent` 恆為 `selfimproving-research/1`；`Accept-Encoding` 恆為 `identity`；不帶 `Cookie`、`Authorization`、`Proxy-Authorization` 或任何認證標頭；回應帶 `Content-Encoding` 且不是 `identity` ⇒ 該來源失敗 `encoding`。(c) **重導向**手動處理（連線層自管，不使用任何自動跟隨）：至多 5 跳（第 6 次重導向 ⇒ `redirect-refused`）；每個目標須 scheme∈`http`、`https` 且**不得改變 scheme**（`http`↔`https` 皆拒：`https` 降 `http` 是降級、`http` 升 `https` 亦是 scheme 變更，一律 fail-closed）、目標 `hostname:port`（缺連接埠取該目標 scheme 的預設）須屬允許集合（＝現役表項 `url` 的 `hostname:port`），否則 `redirect-refused`；逐跳判定住純函式 `fetch.check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None`（拒絕時回傳 `redirect-refused`、可放行回傳 `None`；測試直接以字串餵它，覆蓋 loopback 夾具起不了的 https 降 http 與 http 升 https 等情形；**scheme 判準的負控須用顯式同埠的 URL**——預設埠下 `https` 與 `http` 的 `hostname:port` 本來就不同，會被連接埠判準先拒而遮住 scheme 判準，使它無任何測試鎖住）。**無法解析的 URL 歸入封閉集合**：(i) 重導向的 `Location`——`urljoin` 或剖析連接埠拋 `ValueError`（括號不成對的 `http://[::1/x`、`http://::1]/x`；連接埠為越界的 `99999`、非數字的 `abc`、超過整數轉字串位數上限的長數字串、`str.isdigit()` 為真而 `int()` 失敗的上標數字 `²`）——無法解析 ⇒ 該來源失敗 `redirect-refused`（detail 為固定的說明文字、不帶原值：`Location` 可長達數千位元組）；**對目標做連接埠剖析的哨兵不可由 host:port 比對代替**：連接埠文字無法解析時 `sources.parse_url` 視同無連接埠、取該 scheme 的預設埠（R43），預設埠若恰在允許集合內，`check_redirect` 會放行，此時只有剖析哨兵能把它歸 `redirect-refused`（否則下一跳要到建連線物件時才失敗、被歸 `network`；`AT-130-2-E-5` 的 B 組允許集合鎖這一點）；(ii) 初始 URL 的**任何**剖析或連線物件建構失敗 ⇒ 失敗 `network`——含空 host（`http:///x`、`http://`、`http://:80/x`）、host 含空格、NUL、DEL 等字元（`http.client` 的連線物件拒收；TAB、CR、LF 由 `urlsplit` 先刪除、實際連線的是刪除後的 host，不屬本款，其防線在 R43 的 host 字元判準）、連接埠為超長位數或上標數字，例外型別不限（`ValueError`、`TypeError`、`AttributeError`、`http.client.HTTPException` 等）；(iii) `fetch_source` 對**任何**字串 `url` 只准回傳 `Fetched` 或拋 `FetchError`（原因為封閉集合），不得有其他例外逸出——**含開頭取 scheme 的 `parse_url` 呼叫**；表驗證放行而抓取層無法剖析的 URL（例：括號不成對的 `https://[2001:db8::1/docs`）在指令層乾淨地呈現為 `source <id> FAIL network` 加 `ZERO-SUCCESS` 拒收（SCG-4 二審 N-4、三審 P2-2、P3-1；`AT-130-2-E-5`、`AT-130-2-E-6`；§7.1 ⚖ 31、⚖ 34）。(d) **界限**：整個來源（含全部重導向跳）的牆鐘 ≤ `research_timeout_seconds`，超過 ⇒ 中止、失敗 `timeout`；**強制點在每一次讀取**（含狀態列、每一行標頭、分塊編碼的分塊大小行與 trailer 行、本文）：每次對 socket 讀取（`recv` 或 `recv_into`）前以剩餘時間設定該次的逾時，剩餘時間**不大於 0 即以 `timeout` 中止**——含恰為 0：粗解析度時鐘（例：Python 3.11 於 Windows 的 `time.monotonic()` 每格 0.015625 秒，`time.get_clock_info('monotonic')` 現查）會使剩餘恰為 0，而 `settimeout(0)` 是非阻塞模式、`recv` 立即拋 `BlockingIOError` 而被歸 `network`，傳負值則拋 `ValueError`，兩者都不得發生（SCG-4 三審 P2-1，突變 F2；§7.1 ⚖ 36）；讀取層的契約住 `fetch._DeadlineRaw(sock, deadline)`（`deadline` 為絕對的 `time.monotonic()` 時刻；本檔以此名與簽名釘單元測試）：`readinto(buf)` 在 `deadline` 已過或恰為此刻時拋 `TimeoutError`、**不呼叫** `settimeout` 與 `recv_into`；否則恰一次 `settimeout(剩餘)`（`0 < 剩餘 ≤ deadline − 現在`）後恰一次 `recv_into(buf)`（`AT-130-5-E-4`）；不得只在區塊與區塊之間檢查期限（對持續慢滴 1 位元組的回應，區塊間檢查永遠等不到下一個區塊），亦不得只管本文階段——`http.client` 的 `getresponse()` 讀狀態列與標頭、以及分塊編碼下單次 `read1` 讀分塊大小行與 trailer 行時，單次呼叫內會多次 `recv`，只要每次都有資料就不逾時，所以讀取層須自己包一層（例：包裝 socket 的讀取，在每次系統呼叫前依剩餘期限重設逾時、剩餘不足即拋 `TimeoutError`）；亦不得以 `threading.Timer` 等常駐機制實作（R64）。各階段慢滴（狀態列、標頭值、一行行標頭、分塊大小行、trailer 行、本文、標頭延遲後停滯）皆須在上限加減 0.5 秒內以 `timeout` 返回，不得回傳成功（含 0 位元組）、不得以 `timeout` 以外的原因返回（`AT-130-5-E-2`、`AT-130-5-E-3`；SCG-4 二審 N-1）；已讀位元組（或 `Content-Length`）> `research_bytes_max` ⇒ 中止、失敗 `too-large`（**不截斷**）；`Content-Length` 不是十進位整數者（含 `str.isdigit()` 為真而 `int()` 失敗的上標數字 `²`、`³`、`¹`）視同未提供——與 `abc` 同：不拋例外、回應照常讀取，位元組上界仍由累計讀取量強制（SA 追查，三審後；§7.1 ⚖ 35；`AT-130-5-E-5`）；`Content-Type` 的主型別（`;` 之前）須屬 `text/*`、`application/json`、`application/xml`、`application/atom+xml`、`application/rss+xml`、`application/xhtml+xml`，缺或不符 ⇒ `non-text`；最終狀態須 2xx，否則 `http-status`（detail 帶狀態碼）；連線或名稱解析錯誤 ⇒ `network`。(e) **成功的來源**：對原始位元組算 `sha256`（不做任何正規化），以二進位原樣寫入 `<si_dir>/research/<id>/<sha256 前 12 碼>.txt`，並維護 `<si_dir>/research/<id>/latest`（內容＝該 12 碼，無副檔名、無換行）；`changed`＝該 `id` 在事件帳本上一筆含它的 `research.scan`（只計通過 R37 單事件判準者）的 `sha256` 與本次不同（無前筆＝`true`）。**失敗的來源**不入 `sources[]`、不得以舊 digest 代填（NFR-SI-09-1）。(f) **事件**：欄位照 R31；`sources_sha256`＝來源表檔位元組 CRLF 換 LF 後的 sha256（加 `sha256:` 前綴，與 R42 (c) 的算法相同）；`fetched_at`＝抓取完成時刻（帶 offset）；**不存 `url`、不存候選數**；`by` 恆為 `researcher`。(g) **預算與純度**：現役來源筆數、單來源位元組、單來源牆鐘三界各由 `params.json` 的 `research_fetch_max`、`research_bytes_max`、`research_timeout_seconds` 供應；`research --skip` 與其餘全部動詞零網路（R63 ⑥）。(h) 誠實劃界：`sha256` 量的是來源**原始位元組**的穩定性、不是語意改版（含伺服器端產生內容的 HTML 會使 `changed` 假陽性，來源表應優先取原始檔或 feed）；不做 DNS 解析後驗 IP；研究者讀檔的牆鐘與 token 無機械物量測。
 - **R59 `scan`（PRD AC-SI-31-1～31-4；候選推導為本檔類推，§7.1 ⚖ 9）**：`scan [--json] [--since <commit>] [--repo DIR]`，唯讀、離線、無狀態、不寫事件（R63 ⑥）。(a) **起算點**：給 `--since` ⇒ 該 commit（7～40 位 hex，須可解析為 commit，否則 rc 3）的 committer 時間與 `<commit>..HEAD`；否則取最近一筆 `run.close` 事件的 `t`；無則取 `migration_base_sha` 那個 commit 的 committer 時間（`git show -s --format=%ct`）；皆無 ⇒ 起算點量不到。日精度的 DEF 列以「發現日期對起算時刻的 UTC 日期」比較：早於者排除、同日者納入。(b) **五個證據來源，各印一行**（`source <id> 讀到 <N> 筆` 或 `source <id> 量不到：<原因>`）：`defects`（缺陷帳本主檔 `docs/06_quality/AutoSDD_Defect_Log.md`；以表頭欄名定位 `ID`、`發現日期`、`嚴重度`、`狀態`；列的嚴重度∈`P1`、`P2`、狀態分類為 `open`〔`defs.py`，差分對 `check_defect_log_crossref._classify`；`open` 含 `workaround`、`partial` 字樣〕、發現日期不早於起算日；原因碼 `ledger-missing`、`ledger-header`、`anchor-unavailable`）；`observations`（OBS 帳本中 `時間` 不早於起算時刻的列數，加 `<commit>..HEAD` 或起算時刻之後（committer 時間**嚴格晚於**起算時刻；恰等於者不計）的 commit 依路徑歸桶；原因碼 `git-unavailable`、`anchor-unavailable`）；`event_ledger`（事件帳本的待決 PROP、SUSPENDED、冷卻摘要，是狀態摘要、不是候選；原因碼 `carrier-not-established`）；`build_reports`（repo 內任何路徑含 `build/reports/` 片段、副檔名∈`.xml`、`.json`、`.log`、`.txt` 的檔個數；原因碼 `no-artifacts`）；`probe_outputs`（符合常數 `PROBE_OUTPUT_GLOBS`＝`**/misstep_attribution*.jsonl` 的檔個數；原因碼 `no-artifacts`）。後兩者在 P1 只計數、不產生候選。(c) **候選列**：`defects` 每個符合列一筆（症狀 `缺陷帳本新立 <P1|P2> 未結列 <DEF-ID>`、座標＝該 DEF ID）；`observations` 每個「窗內有 ≥1 個 commit 觸及」的模組桶一筆（症狀 `<桶> 窗內有 <k> 個 commit 觸及（<至多 3 個路徑，以、連接>）`、座標＝`commit <最新 commit 的前 12 位 hex>`）。每筆候選＝P0 九欄格式：ID 自 OBS 帳本現有合法 ID 最大者加一起連號、時間帶 offset、情境 `si scan（自動草稿）`、分類 `bug`、嚴重度 `P3`、處置 `open`、標記 `面=流程;來源=工具;回報者=scan`；每列 ≤ `row_max_bytes`（超長則縮短路徑清單）、自身通過 P0 R9～R17（AT：把全部候選附加到帳本副本後 `check` 對這些列零 finding）；**無座標的候選不印**；草稿不寫入帳本（主控單窗口入帳）。(d) **模組歸桶**（PRD AC-SI-31-4；判定住純函式 `scan.bucket_of(path: str) -> str`，回傳桶名或 `未分類`，測試直接以字串餵它）：依序判 `SelfImproving`（`tools/lib/selfimproving/**`、`tools/selfimproving.py`、`tools/probe/selfimproving_*`、`tools/tests/test_selfimproving_*`、`docs/**` 下檔名含 `SelfImproving` 者）→ `AutoClaude`（`AutoClaude/**`）→ `AISDLC_SDD`（`AISDLC_SDD/**`）→ `AgentConsole`（`AgentConsole/**`）→ `根層`（其餘 repo 內路徑）；絕對路徑、含 `..`、空字串等非 repo 相對形態歸 `未分類`並計數、不丟棄；觸及多桶的 commit 依其觸及的每個路徑各歸一次。(e) **零候選＝無事件**（AC-SI-31-3、NFR-SI-09-1）：零候選時整體印 `無事件`（JSON `status:"no-event"`）；任一來源量不到時改印 `無事件（<K> 個來源量不到）`；**不得**印成「通過」「達標」「綠」；量不到不併入零；候選數只印在資訊欄；`scan` 不接任何閘門 rc。(f) **輸出**：文字形態＝五行來源、（有候選時）`candidates:` 與每筆候選一行、末行（`無事件`｜`無事件（K 個來源量不到）`｜`候選 <M> 筆`）；`--json`＝`{"schema_rev": 1, "status": "no-event"｜"candidates", "unavailable_count": K, "anchor": {"kind": "since"｜"run.close"｜"migration_base_sha"｜null, "time": <ISO 或 null>}, "sources": [{"id", "status": "read"｜"unavailable", "count"｜"reason"}…], "candidates": [{"bucket", "row"}…], "buckets": {<桶>: <候選數>…}}`。rc：0＝已執行（零候選仍 0）、3＝無法執行。(g) 誠實劃界：候選是啟發式（路徑歸桶、P≤2 未結）而非缺陷判定；「量不到」只報告 `scan` 自己讀不到的來源，讀得到但內容殘缺的看不見。
 - **R60 `status`（PRD AC-SI-03-1、AC-SI-06-1、AC-SI-23-1、AC-SI-30-1、NFR-SI-09-2；鍵名與元素形態為本檔類推，§7.1 ⚖ 9）**：`status [--json] [--repo DIR]`，唯讀。物件（`--json` 的輸出；亦是 `export --kind status` 的 `items[0]`，由**同一個函式**產生）鍵序固定：`events_detected`、`unavailable`、`open_runs`、`pending_props`、`suspended`、`cooldowns`、`skip_reasons`、`capacity`、`root_cause_changes`、`reopen_candidates`、`pending_windows`、`friction_reconcile`、`no_event`。(a) **啟動事件偵測**（窗＝最近一筆 `run.close` 之後的事件；無 `run.close` 則為全部）：`events_detected` 的元素 `{"trigger": "b"｜"c"｜"d", "subject": <ID>, "detail": <字串>}`——(b)＝窗內每筆對 `type=link` 的 `attr` 的 `attr.confirm`（subject＝ATT ID，「同一症狀第二次被記入、經審查者確認」）；(c)＝缺陷帳本新立 P≤2 未結列（同 R59 `defects` 的判定與起算點；subject＝DEF ID）；(d)＝窗內已確認的復發連結，其 `reopens` 落在某個折疊狀態∈`promoted`、`measuring`、`closed` 的 PROP 的 `sources`（subject＝PROP ID）。(e)（容量事件）P3 的 `capacity` 動詞建成前**印 NOT-EVALUABLE、不得印成零**：`capacity`＝`{"status": "NOT-EVALUABLE", "reason": "capacity-verb-not-established"}`。起算點量不到（(c) 需要）⇒ `unavailable` 含 `{"trigger": "c", "reason": "anchor-unavailable"}`（正常為空陣列）。`no_event`＝`events_detected` 為空；為真時文字形態印 `無事件`（`unavailable` 非空則 `無事件（<K> 個來源量不到）`），**不得**印成通過。(b) **狀態摘要**：`open_runs`＝`[{"run", "opened_seq", "research": {"kind", "seq"}｜null, "props": [PROP ID…]}]`；`pending_props`＝折疊狀態∈`proposed`、`verified` 者 `[{"id", "rev", "state", "route", "digest8"}]`；`suspended`＝`null` 或 `{"run": <RUN-ID>}`（R35 (c)，即 `恢復` 的綁定值）；`cooldowns`＝R35 (d) 的元素陣列；`skip_reasons`＝`{"quota-band": n, "offline": n, "helmsman": n}`（三鍵恆在，計所有 `research.skip`）；`root_cause_changes`＝R48 (e) 的整數；`reopen_candidates`＝`{"unsettled": <無 confirm／reject 的 type=link 的 attr 筆數>}`；`pending_windows`＝`[{"prop", "close_seq"}…]`（生效結果為 `pending` 的 `mea.close`）。(c) **交卷對帳**（NFR-SI-09-2，只量不閘；**P1 恆為 NOT-EVALUABLE**，`measured` 分支屬 P2 起、P1 不產生，§4〈刻意不做〉）：`friction_reconcile`＝`{"status": "NOT-EVALUABLE", "reason": <下列兩種之一>}`——`transcript-unavailable`（逐字稿目錄取不到，例：容器內或他機。**逐字稿目錄取法**：`lib.platform_utils.claude_home()`〔環境變數 `CLAUDE_CONFIG_DIR` 非空白則取之，否則 `Path.home() / ".claude"`〕下的 `projects/<slug>/`，`<slug>` 由 `--repo` 的解析後絕對路徑推得：`re.sub(r"[^A-Za-z0-9]", "-", <路徑字串>)`（規則同 `tools/probe/audit_session.py` 的 `project_transcript_dir`，是觀察到的編碼、非官方契約；`status` 自行實作、不 import `probe`，守 R63 的 import 範圍），例：`D:\CursorProject\AISDCL_Agent` 對應 `D--CursorProject-AISDCL-Agent`；該目錄不存在或讀不到＝取不到。tmp 目錄下的合成 repo 其 slug 目錄不會存在，再加 §5.5 (b) 的家目錄隔離，AT 中此欄在未特別佈置時必為 `transcript-unavailable`）；`transcript-parser-not-established`（逐字稿目錄存在，但「流程摩擦」節項數的解析器 P1 未建立：目錄存在不等於量得到，不得因此印成 `measured` 或任何數字計數）。量不到不得印成 0。(d) 事件帳本不存在 ⇒ 全部事件類欄位為空狀態、`unavailable` 照常，不是錯誤；rc 0（已執行）或 3。文字形態逐鍵印出（至少含 `無事件`／事件行、`capacity NOT-EVALUABLE`、`suspended`、`skip_reasons` 各字樣）。
 - **R61 `export`（PRD AC-SI-32-5、§9.2〈`export --json` 輸出〉；Console 三層屬 P1b，本檔只定根層的輸出契約與穩定性）**：`export --json --kind <k> [--since N] [--limit N] [--id <ID>] [--repo DIR]`，唯讀、離線、只用標準庫。**用法錯誤＝rc 3**：缺 `--json`；`--kind` 不在 `observations`、`events`、`proposals`、`runs`、`status`；`--limit` <1 或 > `export_limit_max`；`--since` 非非負整數，或與 `status` 併用；`--id` 與 `observations`／`events`／`status` 併用，或格式不合（`proposals` 須 `^PROP-SI-\d{3,}$`、`runs` 須 `^RUN-SI-\d{3,}$`）。**輸出**：單一 JSON 文件加 LF，UTF-8 位元組直寫（`ensure_ascii=False`、無 BOM）；頂層鍵序 `schema_rev`（1）、`kind`、`generated_at`（呼叫時刻、帶 offset）、`head_sha`（`git rev-parse HEAD` 的 40 碼；git 不可用＝`null` 並於 `ne` 列 `{"field": "head_sha", "reason": "git-unavailable"}`）、`items`、`next_since`（整數或 `null`）、`truncated`（布林）、`ne`（`[{"field", "reason"}…]`：量不到的欄位逐一列出、不省略）、`problems`（`[{"subject", "code", "detail"}…]`：帳本結構層問題，例如無法解析的事件行，不是 `check` 的判級）。`items` 依 kind：`observations`＝九欄（鍵 `id`、`time`、`context`、`symptom`、`evidence`、`category`、`severity`、`disposition`、`marks`，值皆字串）加 `marks_kv`（`rows.parse_marks` 的解析：鍵→值）與 `line`（帳本 1 起算實體行號），欄數不是九的列＝`{"line", "raw", "valid": false}`（並於 `problems` 記 `ROW-ARITY`）；`events`＝事件原樣（不加鍵）；`proposals`＝`id`、`state`、`route`、`cls`、`action`、`run`、`rev`、`digest`、`target`、`touched`（自最新 rev 的 `.patch` 現導）、`touched_count`、`sources`、`created_seq`、`last_seq`、`verdict`、`flags`、`cooldown`（物件或 `null`）、`card`（`card` 動詞逐字輸出的文字；內容檔缺或反解析不一致 ⇒ `card: null` 並於 `ne` 列 `{"field": "proposals.<id>.card", "reason": <碼>}`）；`runs`＝`id`、`opened_seq`、`closed_seq`、`trigger`、`head_sha`、`research`（`{"kind", "seq"}` 或 `null`）、`prop_ids`、`outcome`（`"no_event"`、`{PROP: 狀態}` 或未關時 `null`）；`status`＝單元素陣列，元素＝R60 的物件。**游標**：`--since N`＝嚴格大於 N（`events` 取 `seq`；`observations`、`proposals`、`runs` 取 ID 的數字部分）；`--limit N` 預設與上限＝`export_limit_max`；`next_since`＝本頁最後一筆的游標、已無下一頁＝`null`；`truncated`＝是否因 `--limit` 截斷（本頁之後仍有符合游標的項目才為真：筆數恰等於 `--limit` 時為 `false`、`next_since` 為 `null`，多一筆才為 `true`）。`--id` 取單筆，找不到＝`items: []`、rc 0。**事件帳本不存在**：`events`、`proposals`、`runs`＝`items: []`、`status`＝全空狀態的單元素，四者的 `ne` 皆含 `{"field": "events", "reason": "carrier-not-established"}`（不是零筆通過）。**Console 不得見的內容**：`export` 不讀、不印 `<si_dir>/` 下任何檔（AT：把哨兵字串放進 `AUTOSDD_SI_DIR` 的檔後輸出不得含它）。**共用同一組函式**：`export` 與 `status`、`card`、`check` 共用 `fold.py`、`card.py`、`status.py`（R63 ③ 以 import 關係加差分測試驗證，不得有第二份折疊或卡面實作）。**穩定性**：同一狀態下連續兩次輸出，除 `generated_at` 外逐字相同；`PYTHONIOENCODING=cp950` 的子行程輸出仍為 UTF-8。rc：0＝已輸出（`ne`／`problems` 非空不是錯誤）、3＝用法或輸入錯誤。
@@ -437,7 +437,9 @@
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-2 | （RS）`check` 以 sources_sha256 比對提交歷史、來源 id 須在表內（retired 仍認得）、git 不可用的處置、未提交的表不算歷史 | ✅ | Integration | □ |
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-3 | （RS）重導向把關：表外 host 與連接埠、非 http 與 https 的 scheme、https 降 http 與 http 升 https（scheme 不得改變；函式層用顯式同埠 URL）、第 6 跳皆拒；表內重導向至多 5 跳放行 | ✅ | Integration | □ |
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-4 | （RS）來源表提交時間與事件 `t` 同一秒放行、事件早一秒判 `SOURCES-SHA-MISMATCH`、晚一秒放行 | ✅ | Integration | □ |
-| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-5 | （RS）重導向 `Location` 無法解析 ⇒ `redirect-refused`、初始 URL 無法解析 ⇒ `network`，不得有 `ValueError` 逸出 | ✅ | Integration | □ |
+| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-5 | （RS）重導向 `Location` 無法解析（括號不成對、連接埠 `99999`、`abc`、超長位數、上標數字）⇒ `redirect-refused`，兩組允許集合下皆然（連接埠剖析哨兵不可由 host:port 比對代替）；括號不成對的初始 URL ⇒ `network`；不得有 `ValueError` 逸出 | ✅ | Integration | □ |
+| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-6 | （RS）初始 URL 的任何剖析或連線物件建構失敗都歸 `network`、`fetch_source` 只拋 `FetchError`（十種連線前即失敗的形態）；表驗證放行而抓取層無法剖析的 URL，指令層為 `source … FAIL network` 加 `ZERO-SUCCESS` | ✅ | Integration | □ |
+| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-7 | （RS）來源表驗證的 host 字元判準與全函式性：host 含空白或控制字元（含 TAB、CR、LF 旁路）與空 host ⇒ `SRC-URL-HOST`；超長位數與上標數字的連接埠不使 `validate_table`、`check`、`research --fetch` 崩潰 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-1 | （RS）抓原始位元組、自算 sha256 與 changed 三態、原樣落家目錄、事件不存 url、請求形態固定且逐一發出 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-1 | （RS）失敗矩陣：逾時、非 2xx、超位元組（邊界）、非文字、缺 Content-Type、壓縮編碼、連線被拒；失敗來源不入事件 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-2 | （RS）零來源成功 rc 1 不寫事件；事件行超長 rc 1 但來源檔留作快取；零成功後仍可改記 offline 免掃 | ✅ | Integration | □ |
@@ -451,6 +453,8 @@
 | AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-1 | （RS）預算超界：現役多 1 筆整次拒收、位元組多 1 判失敗、牆鐘超過判失敗；retired 不計；三鍵缺失 rc 3 | ✅ | Integration | □ |
 | AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-2 | （RS）牆鐘上限對慢滴回應成立（每 0.5 秒 1 位元組；有限本文 8 位元組）、送完標頭後停滯與標頭延遲後停滯亦在逾時上限附近以 `timeout` 返回 | ✅ | Integration | □ |
 | AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-3 | （RS）牆鐘上限在狀態列、標頭、分塊大小行與 trailer 行各階段皆成立：五種慢滴回應各在逾時上限附近以 `timeout` 返回，不得回傳成功；正常的分塊編碼回應（含 trailer）照常解碼 | ✅ | Integration | □ |
+| AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-4 | （RS）牆鐘期限的讀取層契約與邊界：`_DeadlineRaw` 在期限已過（含恰為此刻）時拋 `TimeoutError` 且不碰 socket、剩餘為正時恰一次 `settimeout` 加一次 `recv_into`；標頭在上限前後才到的 50 次賽跑只得 `timeout` | ✅ | Integration | □ |
+| AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-5 | （RS）回應標頭 `Content-Length` 無法解析為十進位整數（上標數字 `²`、`¹`、`5²`）時視同未提供：不拋例外、照常回傳；位元組上界仍由累計讀取量強制 | ✅ | Integration | □ |
 | AC-130-6 | 來源表變更不改指紋（PRD AC-SI-30-6） | AT-130-6-1 | （RS）改來源表不改判準指紋 | ✅ | Unit | □ |
 | AC-130-6 | 來源表變更不改指紋（PRD AC-SI-30-6） | AT-130-6-E-1 | （RS）改 `params.json` 或 `metrics.md` 指紋變；排除只涵蓋一個檔名 | ✅ | Unit | □ |
 | AC-131-1 | `scan` 唯讀離線（PRD AC-SI-31-1） | AT-131-1-1 | （RS）`scan` 唯讀、離線、無狀態：前後 `git status --porcelain` 與 HEAD 相同、不連網、子行程只有環境淨化的 git、不受 GIT_DIR 污染 | ✅ | Integration | □ |
@@ -512,8 +516,8 @@
 
 **覆蓋率統計**:
 - 總 AC 數: 54（PRD 的 44 個加本檔自增的 10 個）
-- 已映射 AT 數: 157（正控 58 個、負控〔E 類〕99 個；每個 AC 至少一個正控與一個負控）
-- 各測試檔的 AT 數: EV 48；PR 41；RS 35；ES 11；CP 3；LY 9；KB 10
+- 已映射 AT 數: 161（正控 58 個、負控〔E 類〕103 個；每個 AC 至少一個正控與一個負控）
+- 各測試檔的 AT 數: EV 48；PR 41；RS 39；ES 11；CP 3；LY 9；KB 10
 - 映射覆蓋率: 100% （目標: 100%）
 
 ---
@@ -526,7 +530,7 @@
 >
 > **AT 底線形**＝把 AT ID 的連字號換成底線（`AT-110-3-E-1` 的底線形是 `AT_110_3_E_1`）；每個 AT 的測試函式名稱須含其底線形（例 `test_AT_110_3_E_1_usage_and_state_errors`）。每個 AC 內的 AT 序號不超過 9，使 `-k` 的子字串比對不會誤收其他 AT。
 >
-> **判定指令的形態（勘誤一）**：§2 原有 126 個 AT 的判定指令只帶 `-k <AT 底線形> -q`（根層實測可單跑）；SCG-4 一審後新增的 22 個 AT 與二審後新增的 9 個 AT（見〈勘誤〉節）的根層指令另加 `-p no:xdist -o addopts=`（與 NFR-P1-10 (1) 同形，排除全域 `addopts` 與 xdist 對單一 AT 的影響）；鍵 B 的 AT（cwd 為 `AutoClaude/`）一律加 `-n 0`——本機 PG 在場時，AutoClaude 的 conftest 對全域 addopts 的 `-n auto` 回 rc=4（PG 在場但未用 `--dist loadgroup`），故既有九個與新增的鍵 B 指令皆為 `… -q -n 0`（`-p no:xdist` 不能與 `-n` 並用：`unrecognized arguments`，所以鍵 B 不加它；§7.1 ⚖ 29）。每個 `-k` 仍恰收一個測試。
+> **判定指令的形態（勘誤一）**：§2 原有 126 個 AT 的判定指令只帶 `-k <AT 底線形> -q`（根層實測可單跑）；SCG-4 一審後新增的 22 個 AT、二審後新增的 9 個 AT 與三審後新增的 4 個 AT（見〈勘誤〉節）的根層指令另加 `-p no:xdist -o addopts=`（與 NFR-P1-10 (1) 同形，排除全域 `addopts` 與 xdist 對單一 AT 的影響）；鍵 B 的 AT（cwd 為 `AutoClaude/`）一律加 `-n 0`——本機 PG 在場時，AutoClaude 的 conftest 對全域 addopts 的 `-n auto` 回 rc=4（PG 在場但未用 `--dist loadgroup`），故既有九個與新增的鍵 B 指令皆為 `… -q -n 0`（`-p no:xdist` 不能與 `-n` 並用：`unrecognized arguments`，所以鍵 B 不加它；§7.1 ⚖ 29）。每個 `-k` 仍恰收一個測試。
 >
 > **測試檔縮寫**（判定指令的檔名依各 AT 標頭所列；鍵 B 的檔在 `AutoClaude/tests/contract/`）：**EV**＝`test_selfimproving_events.py`、**PR**＝`test_selfimproving_props.py`、**RS**＝`test_selfimproving_research_scan.py`、**ES**＝`test_selfimproving_export_status.py`、**CP**＝`test_selfimproving_capability.py`、**LY**＝`test_root_module_layout.py`（以上六檔皆在 `tools/tests/`）、**KB**＝`test_evolution_propose_only.py`。共用夾具住 `tools/tests/_selfimproving_fixtures.py`（底線開頭、不被收集；§5）。
 >
@@ -2382,20 +2386,60 @@ Scenario: 提交時間等於事件時間放行；事件早一秒判不符；晚�
 
 ```gherkin
 # AT-130-2-E-5
-# 對應 AC: AC-130-2（PRD AC-SI-30-2；R58 (c)）無法解析的 URL 歸入封閉失敗集合：重導向 `Location` 無法解析 ⇒ `redirect-refused`、初始 URL 無法解析 ⇒ `network`，不得有 `ValueError` 等例外逸出 `fetch_source`（SCG-4 二審 N-4）
+# 對應 AC: AC-130-2（PRD AC-SI-30-2；R58 (c)）無法解析的 URL 歸入封閉失敗集合：重導向 `Location` 無法解析（括號不成對、連接埠為 `99999`、`abc`、超長位數或上標數字）⇒ `redirect-refused`，且連接埠剖析哨兵不可由 host:port 比對代替；初始 URL 括號不成對 ⇒ `network`；不得有 `ValueError` 等例外逸出 `fetch_source`（SCG-4 二審 N-4、三審 P2-2 突變 U3）
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具
 # 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_2_E_5 -q -p no:xdist -o addopts=
 
 Feature: 無法解析的 URL 不使抓取崩潰
 
-Scenario: Location 與初始 URL 括號不成對時，以封閉集合內的原因失敗
-  Given §5.4 `serve` 路由：`/r1`（狀態 302、`Location` 為 `http://[::1/x`）、`/r2`（狀態 302、`Location` 為 `http://::1]/x`）；兩者都是括號不成對、標準庫的 URL 剖析會拋 `ValueError` 的形態；`relaxed()`；`research_timeout_seconds` 為 2
-  When 函式層：對 `/r1`、`/r2` 各呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=2, max_bytes=262144, allowed_hosts={<該伺服器的 host:port>})`；另對初始 URL `http://[::1/x` 與 `http://::1]/x` 各呼叫一次（`allowed_hosts` 任取）
+Scenario: Location 無法解析時一律 redirect-refused（兩組允許集合），初始 URL 括號不成對時 network
+  Given §5.4 `serve` 路由，皆為狀態 302、`Content-Length` 為 0，`Location` 依序為：`/r1`＝`http://[::1/x`、`/r2`＝`http://::1]/x`（括號不成對）、`/r3`＝`http://127.0.0.1:99999/x`（連接埠越界）、`/r4`＝`http://127.0.0.1:abc/x`（連接埠非數字）、`/r5`＝`http://127.0.0.1:` 接 §5.3 的 `P_BIG` 再接 `/x`（超過整數轉字串位數上限的長數字串）、`/r6`＝`http://127.0.0.1:²/x`（上標數字 U+00B2，`str.isdigit()` 為真而 `int()` 失敗）；六者的括號或連接埠，標準庫的 URL 剖析都會拋 `ValueError`；`relaxed()`；`research_timeout_seconds` 為 2
+  When 函式層，兩組允許集合：A 組 `allowed_hosts` 為 `{<該伺服器的 host:port>}`；B 組為 `{<該伺服器的 host:port>, 127.0.0.1:80}`（80 是 http 缺連接埠時的預設埠：連接埠文字無法解析而被視同無連接埠時，`check_redirect` 的 host:port 比對會放行，此時只有對目標做連接埠剖析的哨兵擋得住）；對 `/r1` 至 `/r6` 各以兩組呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=2, max_bytes=262144, allowed_hosts=<該組>)`（共 12 次）；另對初始 URL `http://[::1/x` 與 `http://::1]/x` 各呼叫一次（`allowed_hosts` 任取）
   And 指令層：已開運轉 `RUN-SI-001`；以 `write_table` 提交單一來源（`/r1`）；呼叫 `research --fetch --run RUN-SI-001`
-  Then 函式層：`/r1`、`/r2` 皆拋 `FetchError` 且 `reason` 為 `redirect-refused`；兩個初始 URL 皆拋 `FetchError` 且 `reason` 為 `network`；四次都沒有 `FetchError` 以外的例外逸出
+  Then 函式層：12 次都拋 `FetchError` 且 `reason` 為 `redirect-refused`；兩個初始 URL 皆拋 `FetchError` 且 `reason` 為 `network`；14 次都沒有 `FetchError` 以外的例外逸出
   And 指令層：rc 為 `1`、輸出含 `source <id> FAIL redirect-refused`、`codes(out)` 恰為 `ZERO-SUCCESS`、stderr 不含 `Traceback`、事件帳本位元組不變
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_2_E_5]"
+```
+
+```gherkin
+# AT-130-2-E-6
+# 對應 AC: AC-130-2（PRD AC-SI-30-2；R58 (c)、R43、R57 (b)(e)）初始 URL 的任何剖析或連線物件建構失敗都歸 `network`，`fetch_source` 只准拋 `FetchError`：空 host、host 含空格／NUL／DEL、超長位數或上標數字的連接埠皆不得讓例外逸出；表驗證放行而抓取層無法剖析的 URL，`research --fetch` 乾淨地呈現為 `source … FAIL network` 加 `ZERO-SUCCESS`（SCG-4 三審 P3-1）
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + 行程內 `main()`（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_2_E_6 -q -p no:xdist -o addopts=
+
+Feature: 初始 URL 的全函式性
+
+Scenario: 連線之前即失敗的十種初始 URL 一律歸 network；表驗證放行的無法剖析 URL 在指令層乾淨失敗
+  Given §5.3 案例表 `URL-FORMS` 的十列初始 URL（皆為連線之前即失敗的形態：不連任何主機、不發 DNS）；放寬政策物件
+  And 指令層：依 §5.2 `SC-TABLE-URL` 建一份複本，來源表的 `url` 為 `https://[2001:db8::1/docs`（括號不成對的 IPv6 字面；R43 不把它判為表驗證問題）；`research_timeout_seconds` 為 2
+  When 函式層：對 `URL-FORMS` 的每一列呼叫 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=2, max_bytes=262144, allowed_hosts=<空集合>)` 一次，記下每次的結果與牆鐘
+  And 指令層：呼叫 `check --json`；再於嚴格政策下（不加 `relaxed()`）呼叫 `research --fetch --run RUN-SI-001`
+  Then 函式層：十列都拋 `FetchError` 且 `reason` 為 `network`；沒有 `FetchError` 以外的例外逸出；每次牆鐘小於 1 秒
+  And 指令層 `check --json`：rc 為 `0`、`S(research.sources)` 為 `PASS`（括號不成對不是表驗證的判準）
+  And 指令層 `research --fetch`：rc 為 `1`、輸出含 `source a-typo FAIL network`、`codes(out)` 恰為 `ZERO-SUCCESS`、stderr 不含 `Traceback`、事件帳本位元組不變
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_2_E_6]"
+```
+
+```gherkin
+# AT-130-2-E-7
+# 對應 AC: AC-130-2（PRD AC-SI-30-2；R43、R57 (b)）來源表驗證的 host 字元判準與全函式性：host 含空白或控制字元（含標準庫連線時會被刪掉的 TAB、CR、LF，使私網判準被繞過的旁路）與空 host ⇒ `SRC-URL-HOST`；超長位數與上標數字的連接埠不使 `validate_table`、`check`、`research --fetch` 崩潰（SCG-4 三審 P4；SA 追查旁路）
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + 行程內 `main()`（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_2_E_7 -q -p no:xdist -o addopts=
+
+Feature: 來源表 host 的字元與連接埠文字
+
+Scenario: host 的空白與控制字元被判出；無法轉成整數的連接埠不使任何動詞崩潰
+  Given §5.3 案例表 `HOST-CASES` 的二十一列單筆來源表 `url`（各列附預期的碼序列）；`validate_table` 取 `sources.validate_table(raw, sources.DEFAULT_POLICY)`，`raw` 為 §5.3 `raw_table(<url>)` 的位元組
+  And 指令層三份複本，各依 §5.2 `SC-TABLE-URL` 建立：C1 的 `url` 為 `https://exa mple.com/docs`（host 內一個空格）；C2 的 `url` 為 `https://127.0.0.1` 接一個 TAB 字元再接 `/x`（旁路）；C3 的 `url` 為 `https://example.com:` 接 `P_BIG` 再接 `/docs`
+  When 函式層：對 `HOST-CASES` 每一列呼叫 `validate_table`，記下回傳的碼序列或逸出的例外
+  And 指令層：C1、C2、C3 各呼叫 `check --json`，再於嚴格政策下呼叫 `research --fetch --run RUN-SI-001`；C2 的 `research --fetch` 在以 `mock.patch.object` 把 `socket.socket.connect` 換成拋 `AssertionError` 的替身之下進行，並記下替身被呼叫的次數
+  Then 函式層：每列的碼序列等於 `HOST-CASES` 所列；沒有例外逸出（含 `P_BIG` 與上標數字兩列）
+  And C1、C2：`check` 的 rc 為 `1`、`S(research.sources)` 為 `FAIL`、`F(research.sources)` 恰為 `(a-typo, SRC-URL-HOST)`；`research --fetch` 的 rc 為 `1`、`codes(out)` 恰為 `SRC-URL-HOST`、stderr 不含 `Traceback`、事件帳本位元組不變；C2 的替身被呼叫 0 次（私網判準未被旁路，預檢拒收於任何連線之前）
+  And C3：`check` 的 rc 為 `0`、`S(research.sources)` 為 `PASS`；`research --fetch` 的 rc 為 `1`、輸出含 `source a-typo FAIL network`、`codes(out)` 恰為 `ZERO-SUCCESS`、stderr 不含 `Traceback`、事件帳本位元組不變
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_2_E_7]"
 ```
 
 ```gherkin
@@ -2635,6 +2679,43 @@ Scenario: 狀態列、標頭、分塊大小行與 trailer 行的慢滴各在逾�
   And 對照 `/chunked-ok`：不拋例外、回傳值的 `raw` 恰為 5 個位元組 `abcde`（分塊與 trailer 照常解碼：逐次依剩餘期限讀取的機制不得改變正常回應）、牆鐘小於 1 秒
   And 指令層：rc 為 `1`、輸出含 `source <id> FAIL timeout`、`codes(out)` 恰為 `ZERO-SUCCESS`、事件帳本位元組不變；整個指令的牆鐘小於 6 秒（含預檢與 git；不得等到伺服器停手）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_5_E_3]"
+```
+
+```gherkin
+# AT-130-5-E-4
+# 對應 AC: AC-130-5（PRD AC-SI-30-5；R58 (d)）牆鐘期限的讀取層契約與邊界：讀取層 `_DeadlineRaw` 在期限已過（含恰為此刻）時拋 `TimeoutError`、不呼叫 `settimeout` 與 `recv_into`，剩餘為正時恰一次 `settimeout` 加一次 `recv_into`；標頭在牆鐘上限前後各約 10 毫秒才到的 50 次重複，結果只准 `timeout`（SCG-4 三審 P2-1，突變 F2）
+# 測試類型: Integration
+# 自動化工具: pytest + 假 socket（單元層）+ 本機 loopback HTTP 夾具（賽跑層）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_5_E_4 -q -p no:xdist -o addopts=
+
+Feature: 牆鐘期限的讀取層契約
+
+Scenario: 期限已過的讀取不碰 socket；標頭在上限前後才到的賽跑只得 timeout
+  Given 單元層：§5.3 假 socket `FakeSock`；讀取層 `fetch._DeadlineRaw(sock, deadline)`，`deadline` 為絕對的 `time.monotonic()` 時刻
+  And 賽跑層：§5.3 `RACE-SWEEP`——§5.4 `serve` 起一台伺服器，路由 `/d0` 至 `/d49` 各回 200、`Content-Length` 為 8、本文為空、選項 `stall`，第 `i` 條的 `delay` 為 `0.25 − 0.010 + 0.0004 × i` 秒（標頭在伺服器收到請求後 0.2400 至 0.2596 秒才送出，掃過牆鐘上限 0.25 秒前後各約 10 毫秒）；放寬政策物件；測試結束必關伺服器
+  When 單元層：各以新的 `FakeSock` 與 16 位元組的緩衝呼叫 `readinto` 三次：(a) `deadline` 為 `time.monotonic() − 1.0`；(b) `deadline` 為呼叫前剛取的 `time.monotonic()`（剩餘不大於 0：細解析度時鐘為負、粗解析度時鐘為恰 0）；(c) `deadline` 為 `time.monotonic() + 5.0`
+  And 賽跑層：對 `/d0` 至 `/d49` 依序各呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=0.25, max_bytes=100, allowed_hosts={<該伺服器的 host:port>})`，記下每次的結果（回傳值、`FetchError` 的 `reason`，或其他例外的型別）
+  Then 單元層 (a) 與 (b)：`readinto` 拋 `TimeoutError`；`FakeSock` 的呼叫序列為空（沒有 `settimeout(0)` 或負值，也沒有 `recv_into`）
+  And 單元層 (c)：回傳 5、緩衝前 5 個位元組為 `hello`；呼叫序列恰為先一次 `settimeout(值)`（`0 < 值 ≤ 5.0`）再一次 `recv_into`
+  And 賽跑層：50 次全部拋 `FetchError` 且 `reason` 為 `timeout`（本文永不到，不可能成功；`ValueError` 等其他例外、`network`、成功回傳都算失敗）；整段賽跑的牆鐘小於 30 秒
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_5_E_4]"
+```
+
+```gherkin
+# AT-130-5-E-5
+# 對應 AC: AC-130-5（PRD AC-SI-30-5；R58 (d)）回應標頭 `Content-Length` 無法解析為十進位整數時視同未提供：`str.isdigit()` 為真而 `int()` 失敗的上標數字不得使 `fetch_source` 拋例外，位元組上界仍由累計讀取量強制（SA 追查，三審後）
+# 測試類型: Integration
+# 自動化工具: pytest + 本機 loopback HTTP 夾具
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_5_E_5 -q -p no:xdist -o addopts=
+
+Feature: Content-Length 的數字形態
+
+Scenario: 上標數字的 Content-Length 視同未提供，位元組上界照常強制
+  Given §5.4 `serve` 路由，皆回 200、`Content-Type` 為 `text/plain`：`/sup2`（`Content-Length` 為 `²`，U+00B2）、`/sup1`（`¹`，U+00B9）、`/mixed`（`5²`）、`/abc`（`abc`，對照：現行即視同未提供）、`/ok`（`5`，對照），本文皆為 `hello`；`/big`（`Content-Length` 為 `²`，本文為 101 個位元組 `b`）；標頭值以 latin-1 送出（§5.4），上標數字由 `routes` 的標頭 dict 直接給；放寬政策物件
+  When 函式層：對六條路由各呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=2, max_bytes=100, allowed_hosts={<該伺服器的 host:port>})`
+  Then `/sup2`、`/sup1`、`/mixed`、`/abc`、`/ok`：回傳 `Fetched` 且 `raw` 為 `hello`；沒有任何例外逸出
+  And `/big`：拋 `FetchError` 且 `reason` 為 `too-large`（`Content-Length` 無法解析時，位元組上界仍由累計讀取量強制，不截斷）；沒有 `FetchError` 以外的例外逸出
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_5_E_5]"
 ```
 
 ```gherkin
@@ -3595,6 +3676,8 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-130-2-E-3 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_3_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-2-E-4 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_4_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-130-2-E-5 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_5_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
+| AT-130-2-E-6 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_6_* | pytest + tmp 目錄 + 真 git + 行程內 `main()`（hermetic） |
+| AT-130-2-E-7 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_7_* | pytest + tmp 目錄 + 真 git + 行程內 `main()`（hermetic） |
 | AT-130-3-1 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-3-E-1 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-3-E-2 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_2_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
@@ -3607,6 +3690,8 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-130-5-E-1 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-5-E-2 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_2_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-5-E-3 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_3_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具（raw 路由） |
+| AT-130-5-E-4 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_4_* | pytest + 假 socket（單元層）+ 本機 loopback HTTP 夾具（賽跑層） |
+| AT-130-5-E-5 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_5_* | pytest + 本機 loopback HTTP 夾具 |
 | AT-131-1-1 | AC-131-1 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-131-2-1 | AC-131-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_2_1_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-131-2-E-1 | AC-131-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_2_E_1_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
@@ -3685,7 +3770,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | 非 UTF-8 輸入 | AT-109-1-E-1 | 本文檔含非 UTF-8 位元組 | 位元組 | rc 3 |
 | 路徑別名形態 | AT-107-3-E-2、AT-107-3-E-1 | 逃逸、絕對、磁碟機代號、資料流、尾端點與空白、保留裝置名、控制字元、反斜線；大小寫變體 | 合成 patch | 整張轉交；git 看見而解析器漏掉者拒收 |
 | 中文顯示寬度 | AT-114-3-1、AT-114-3-E-1 | 全形字算 2 | CJK 字串 | 以寬度而非字元數判定 |
-| 網路失敗 | AT-130-3-E-1、AT-130-3-E-2、AT-130-2-E-3、AT-130-2-E-5 | 逾時、非 2xx、超界、非文字、缺 Content-Type、壓縮編碼、連線被拒、重導向被拒、重導向與初始 URL 無法解析 | loopback 夾具 | 固定原因字串；失敗來源不入事件 |
+| 網路失敗 | AT-130-3-E-1、AT-130-3-E-2、AT-130-2-E-3、AT-130-2-E-5、AT-130-2-E-6 | 逾時、非 2xx、超界、非文字、缺 Content-Type、壓縮編碼、連線被拒、重導向被拒、重導向與初始 URL 無法解析 | loopback 夾具 | 固定原因字串；失敗來源不入事件 |
 | 環境污染 | AT-131-1-1 | `GIT_DIR`、`GIT_INDEX_FILE` 指向他處 | 環境變數 | 輸出不變 |
 | 家目錄不可寫 | AT-141-2-E-1 | `AUTOSDD_SI_DIR` 建不出 `locks/` | 其上層為普通檔案 | 寫入動詞 rc 3 `HOME-UNWRITABLE`、不退回暫存目錄；唯讀動詞照常 |
 | 載體缺席 | AT-142-1-1、AT-132-5-E-1、AT-103-1-E-1、AT-131-3-E-1 | 無事件帳本、無來源表 | 檔案不存在 | nonblocking NE 或 `ne` 標示或空狀態；不是零筆通過 |
@@ -3700,9 +3785,12 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | 慢滴與停滯回應 | AT-130-5-E-2、AT-130-5-E-3 | 每 0.5 秒送 1 位元組的本文；送完標頭後不送本文；標頭延遲 1.2 秒後停滯；狀態列、標頭值、一行行標頭、分塊大小行、trailer 行各階段每 0.5 秒送出一點 | loopback 夾具的 `drip`、`stall`、`delay`、`raw`（皆有限，§5.4） | 在 `research_timeout_seconds` 上限（2 秒加減 0.5 秒）內以 `timeout` 返回，不得回傳成功 |
 | 外部工具失敗的 fail-closed | AT-107-3-E-4、AT-130-3-E-4 | `git apply --numstat` 失敗；全部來源失敗與零現役 | 損毀的 patch、404 與 500 路由 | `PATCH-PARSE`；`ZERO-SUCCESS`（rc 1、不寫事件） |
 | 輸出編碼 | AT-140-2-E-2 | 含中文的 `--json` 輸出 | `PYTHONIOENCODING=cp950` 的子行程 | UTF-8 原字、沒有 u 跳脫序列 |
-| 無法解析的 URL | AT-130-2-E-5 | 重導向 `Location` 與初始 URL 為括號不成對的 `http://[::1/x`、`http://::1]/x` | loopback 路由與函式層直呼 | 重導向歸 `redirect-refused`、初始 URL 歸 `network`；不得有 `ValueError` 逸出 |
+| 無法解析的 URL | AT-130-2-E-5、AT-130-2-E-6 | 重導向 `Location` 為括號不成對（`http://[::1/x`、`http://::1]/x`）、連接埠 `99999`、`abc`、超長位數、上標數字；初始 URL 為括號不成對、空 host（`http:///x`、`http://`、`http://:80/x`）、host 含空格／NUL／DEL、連接埠為超長位數或上標數字 | loopback 路由（兩組允許集合）與函式層直呼 | `Location` 歸 `redirect-refused`、初始 URL 歸 `network`；`fetch_source` 只拋 `FetchError`；表驗證放行的括號不成對 URL 在指令層為 `source … FAIL network` 加 `ZERO-SUCCESS` |
 | 標頭夾帶的路徑 | AT-107-3-E-5 | `diff --git` 的 A 側為 `CLAUDE.md`、`---`／`+++` 只列乾淨檔 | 改過標頭的 patch | A 側入聯集：`touched_count` 為 2、`route` 為 `handoff:T1`；A、B 相同的對照為 `loop` |
 | M 類路徑的大小寫變體 | AT-107-3-E-6、AT-107-3-E-7 | `memory/demo.md` 的變體 `Memory/demo.md`、`MEMORY/demo.md`；少量修改與改 15／20 行 | 記憶目錄夾具 | 少量修改放行且 `route` 為 `loop`；改 15／20 行（觸及比例 0.75）與小寫者同為 `TOUCH-RATIO` |
+| 牆鐘期限的剩餘邊界 | AT-130-5-E-4 | 讀取層的期限已過 1 秒、恰為此刻、剩餘 5 秒；標頭在 0.25 秒上限前後各約 10 毫秒才到的 50 次重複 | 假 socket；`delay` 加 `stall` 的 loopback 路由 | 已過與恰為此刻拋 `TimeoutError` 且不碰 socket；剩餘為正時一次 `settimeout` 加一次 `recv_into`；賽跑 50 次皆 `timeout` |
+| 來源表的 host 字元與連接埠文字 | AT-130-2-E-7 | host 含空格、TAB、LF、NUL、DEL、U+3000、首尾空白；私網位址後接 TAB 或 CR；空 host；path 內空白；括號不成對；連接埠為 `abc`、`99999`、超長位數、上標數字 | 單筆來源表（`raw_table`）與 `SC-TABLE-URL` | host 含空白或控制字元與空 host 皆 `SRC-URL-HOST`（含 TAB、CR 旁路）；其餘形態不判、不拋例外；`check` 與 `research --fetch` 不崩潰 |
+| 回應標頭的數字形態 | AT-130-5-E-5 | `Content-Length` 為 `²`、`¹`、`5²`、`abc`、`5`；`²` 加超界本文 | loopback 路由（latin-1 標頭） | 無法解析者視同未提供：照常回傳、不拋例外；超界本文仍 `too-large` |
 
 **刻意不做（附再開症狀）**
 
@@ -3723,6 +3811,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | 在 CI 或 hook 接 `check`、`scan`、`status` | P1 隨需執行，不新增 hook、排程或 CI 步驟（PRD AC-SI-03-1；PRD §9.7 #47 不新增守衛碼） | 事件帳本在無人 `check` 時被改壞並進入主幹 |
 | 跨機器 macOS 實跑與跨機器回查 | 未驗（NFR-SI-06-5）；報告標「未驗」 | macOS 上路徑別名、保留裝置名或鎖語意與 Windows 不同 |
 | P1b 的 Console 三層（Bridge、backend、frontend） | 另一份 TCS（AgentConsole 子專案流程） | P1b 開工 |
+| 驗證端的 Unicode 正規化（全形數字等經 IDNA 編碼後成為私網字面 IP 的 host） | PRD 只承諾字串形態判準；來源表僅 T1 增減、host 為廠商網域；收口須先裁決是「host 僅限 ASCII」還是「正規化後再比對」（SA 追查實測：`https://１２７.0.0.1/x` 通過 `validate_table`，`getaddrinfo` 加 `AI_NUMERICHOST`〔不發 DNS〕解成 `127.0.0.1`；§7.1 ⚖ 34） | 來源表出現非 ASCII 的 host，或有人以此繞過私網判準而被回報 |
 
 **需同步的既有測試**：`tools/tests/test_selfimproving_check.py` 的 R67 五處站點（`test_AT_001_1_1_baseline_is_green`、`test_AT_003_1_1_no_resident_mechanism`、`test_AT_030_1_E_1_usage_errors`、`params_dict()`、`test_AT_030_2_1_purity`），其餘一字不動；根層護欄的重釘由主控收尾（NFR-P1-8、NFR-P1-9）。
 
@@ -3814,6 +3903,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 - **`SC-CORRUPT`**（`AT-140-1-E-4`、`AT-108-4-E-6`、`AT-140-1-E-5`；SCG-4 二審 N-2、N-3）：基底＝`SC-EXPORT` 的前五步——以 CLI 依序 `run-open`（`RUN-SI-001`）、`research --skip`（offline）、`attr`（root，`ATT-SI-001`，`by` 為 `SA`，`--obs` 取 OBS 列 001）、`attr-confirm`（`by` 為 `QA`）、`prop-new`（P 類、loop，得**基底 PROP**，號碼於執行期取自帳本末行）；最後提交，工作樹乾淨。事件帳本恰五行（`run.open`、`research.skip`、`attr`、`attr.confirm`、`prop`），末行 `seq` 為 5，`RUN-SI-001` 仍開。每個案例各自複製一份基底，再於事件帳本末尾追加手寫事件：只含案例所列的鍵（共通鍵 `seq`、`t`、`kind`、`by` 之外不補任何預設鍵；夾具 `compose` 對 `prop` 等種類會補預設鍵，故損壞事件一律以原始 JSON 行〔`json.dumps(…, ensure_ascii=False, separators=(",", ":"))` 加 LF〕直接附加、不經 `compose`）；`seq` 自 6 起、`t` 取 `2026-10-20T08:00:00+08:00`。
 - **`VERB16`**（讀取事件帳本的十六個呼叫；`--repo <複本>` 由夾具補）：依序 (1) `check --json`；(2) `status`；(3) `scan`；(4) `card <基底 PROP>`；(5)～(8) `export --json --kind events`、`proposals`、`runs`、`status`；(9) `run-open --trigger a --coord tools/a.py:1 --by main`；(10) `run-close --run RUN-SI-001 --by main`；(11) `attr --type root --by SA --obs <OBS 列 002> --item DOC=docs/06_quality/ --root-cause docs/stale-note`；(12) `attr-confirm --att ATT-SI-001 --by zz`；(13) `attr-reject --att ATT-SI-001 --by zz --note x`；(14) `research --skip --run RUN-SI-001 --reason offline --note x`；(15) `prop-new --run RUN-SI-001`，旗標取 `good_prop_args(R, "D", target=["docs/notes/other.md"], patch=patch_mod("docs/notes/other.md", {3: "改過三"}), sources=[<OBS 列 003>])`；(16) `prop-revise --run RUN-SI-001 --prop <基底 PROP>`，旗標取 `revise_args(R, "P")`。對照案 `K00` 下各呼叫的 rc：(1)～(11) 與 (15) 為 `0`；(12)（ATT 已落定）、(13)（同）、(14)（運轉已有研究事件）、(16)（PROP 非 `returned`）為 `1`。
 - **`SC-FETCH-CORRUPT`**（`AT-140-1-E-5`；SCG-4 二審 N-3）：基底＝`p1_base`；`run-open` 得 `RUN-SI-001`（**不**記研究事件）；`write_table` 提交單一來源 `a-src`（路由 `/a`：200、`text/plain`、本文 `hello`）；提交。損壞形態三型：`S1`＝`sources` 為整數 5、`S2`＝`sources` 為 `[1, 2]`、`S3`＝`sources` 為 `[{"id": "a-src"}]`（物件缺其餘鍵）；各於事件帳本末尾以原始 JSON 行追加一筆 `seq` 為 2 的 `research.scan`（`by` 為 `researcher`、`run` 為 `RUN-SI-001`，除共通鍵外只含 `sources`）；對照 `S0` 不追加。
+- **`SC-TABLE-URL`**（`AT-130-2-E-6`、`AT-130-2-E-7`；SCG-4 三審）：基底＝`p1_base`；`run-open` 得 `RUN-SI-001`（**不**記研究事件）；以 §5.3 `raw_table(<url>)` 的位元組寫入來源表路徑並提交（單筆來源 `a-typo`）；工作樹乾淨。`<url>` 由各 AT 指定；`check` 與 `research --fetch` 都在這份複本上呼叫（`research --fetch` 不放寬政策時只收 `https://`）。
 
 ### 5.3 迷你 PRD、patch 與本文建構器、記憶目錄、案例表
 
@@ -3934,6 +4024,57 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | L02 | `mea.amend`：`prop`＝基底 PROP、`window` 為 1、`to` 為 `clean` | 0 | 空 | 空 |
 | L03 | `card`：`prop`＝基底 PROP | 0 | 空 | 空 |
 
+**常數 `P_BIG`**（`AT-130-2-E-5`、`AT-130-2-E-6`、`AT-130-2-E-7`；SCG-4 三審）：字串 `9` 重複 `max(5000, sys.get_int_max_str_digits() + 1)` 次（預設上限 4300 位 ⇒ 5000 位；環境調高上限時隨之加長，使它恆超過 `int()` 的字串轉換上限）。
+
+**建構器 `raw_table(url) -> bytes`**（`AT-130-2-E-6`、`AT-130-2-E-7`）：單筆來源表（`id` 為 `a-typo`、`kind` 為 `docs`、`extract` 為 `標題`、`added_by` 為 `T1`、`url` 取參數），格式同 `write_table`（`json.dumps(…, ensure_ascii=False, indent=2)` 加結尾換行的 UTF-8 位元組，無 BOM、LF）；`url` 內的 TAB、LF、NUL 等控制字元由 `json.dumps` 轉成 JSON 跳脫序列，故檔內沒有真正的換行或控制字元。
+
+**假 socket `FakeSock`**（`AT-130-5-E-4` 單元層）：屬性 `calls`（串列，初始為空）；`settimeout(v)` 追加 `(settimeout, v)`；`recv_into(buf)` 追加 `(recv_into, len(buf))`、把 `hello` 寫入 `buf` 的前 5 個位元組並回傳 5；沒有其他方法（讀取層若改呼叫別的方法，測試以 `AttributeError` 紅，即契約被改）。
+
+**賽跑掃描 `RACE-SWEEP`**（`AT-130-5-E-4` 賽跑層）：路由 `/d<i>`（`i` 為 0 至 49）各為〔200、標頭 `Content-Type: text/plain` 與 `Content-Length: 8`、本文為空位元組、選項 `{delay: 0.25 − 0.010 + 0.0004 × i, stall: 真}`〕（標頭在伺服器收到請求後 0.2400 至 0.2596 秒送出；本文永不送，故唯一合法的結果是 `timeout`）；`fetch_source` 的 `timeout` 為 `0.25`。**`timeout` 取 0.25 的理由**：Windows 上 Python 3.11 的 `time.monotonic()` 是 `GetTickCount64`，每格 0.015625 秒（`time.get_clock_info('monotonic')` 現查），0.25 恰為 16 格；牆鐘期限落在時鐘格線上時，「Python 層的剩餘期限已不大於 0、但底層 socket 逾時尚未觸發」的區間最寬，突變碼才逸出得出來。SA 本輪真跑（Windows、Python 3.11.9、本檔 `serve` 夾具、各 50 次、標頭延遲掃 ±10 毫秒）：`timeout` 為 0.25 ⇒ 現行碼 50 次全為 `timeout`、突變 F2 為 41 次 `timeout` 加 9 次 `FetchError(network)`；`timeout` 為 0.5 ⇒ 43 加 7；`timeout` 為 0.3（不是格寬的整數倍）⇒ 突變碼 50 次全為 `timeout`，賽跑層失去鑑別力。細解析度時鐘的平台（Linux、macOS）上賽跑層的鑑別力低，**確定性的殺傷由單元層承擔**；賽跑層只是統計性補充，不得單獨充當 F2 的防線。若某次結果為 `network`，先查連線階段是否被餓死超過 0.25 秒（機器負載）；規格不放寬該斷言。
+
+**案例表 `URL-FORMS`**（`AT-130-2-E-6` 函式層；每列以 `fetch.fetch_source(<初始 URL>, policy=<放寬政策>, timeout=2, max_bytes=262144, allowed_hosts=<空集合>)` 呼叫一次；全部是**連線之前即失敗**的形態，不連任何主機、不發 DNS，每次牆鐘應小於 1 秒；預期一律拋 `FetchError` 且 `reason` 為 `network`；`<NUL>`、`<DEL>` 各為單一字元〔U+0000、U+007F〕；「現行碼」欄是 SA 對 HEAD `0db61d70` 的探針結果，供自證，不另立判準）：
+
+| 列 | 初始 URL | 現行碼的結果（自證） |
+|----|----------|----------------------|
+| U01 | `http:///x` | 逸出 `AttributeError`（空 host） |
+| U02 | `http://` | 逸出 `AttributeError`（空 host） |
+| U03 | `http://:80/x` | 逸出 `TypeError`（host 為 `None`） |
+| U04 | `http://exa mple.com/x`（host 內一個空格） | 逸出 `http.client.InvalidURL` |
+| U05 | `http://exa<NUL>mple.com/x` | 逸出 `http.client.InvalidURL` |
+| U06 | `http://exa<DEL>mple.com/x` | 逸出 `http.client.InvalidURL` |
+| U07 | `http://127.0.0.1:<P_BIG>/x` | 逸出 `ValueError`（`parse_url` 的 `int()` 超過位數上限） |
+| U08 | `http://127.0.0.1:99999/x` | 已是 `network`（對照） |
+| U09 | `http://127.0.0.1:abc/x` | 已是 `network`（對照） |
+| U10 | `http://127.0.0.1:²/x`（上標數字 U+00B2） | 逸出 `ValueError`（`parse_url` 的 `int()` 認不得上標數字） |
+
+**禁用形態**：初始 URL 的 host 內**不得**含 TAB、CR、LF——標準庫 `urlsplit` 先刪除這三個字元再剖析，`http://exa<TAB>mple.com/x` 實際連線的 host 是 `example.com`，它不屬於連線之前即失敗的形態、而且會對外連線；這三個字元只出現在驗證層的 `HOST-CASES`（純字串判準、不連線）。
+
+**案例表 `HOST-CASES`**（`AT-130-2-E-7`；每列把該 `url` 放進 §5.3 `raw_table(<url>)` 的單筆來源表，呼叫 `sources.validate_table(raw, sources.DEFAULT_POLICY)`；「預期」欄為回傳的碼序列〔三元組的第一個元素，依序〕；`<TAB>`、`<LF>`、`<CR>`、`<NUL>`、`<DEL>`、`<U+3000>` 各為單一字元；「現行碼」欄是 SA 對 HEAD `0db61d70` 的探針結果，供自證）：
+
+| 列 | `url` | 預期 | 說明 | 現行碼的結果（自證） |
+|----|-------|------|------|----------------------|
+| H01 | `https://example.com/docs` | 空串列 | 對照 | 空串列 |
+| H02 | `https://exa mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內一個空格 | 空串列（放行） |
+| H03 | `https://exa<TAB>mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內 TAB | 空串列（放行） |
+| H04 | `https://exa<LF>mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內 LF | 空串列（放行） |
+| H05 | `https://exa<NUL>mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內 NUL | 空串列（放行） |
+| H06 | `https://exa<DEL>mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內 DEL（U+007F） | 空串列（放行） |
+| H07 | `https://exa<U+3000>mple.com/docs` | `SRC-URL-HOST`（恰一個） | host 內全形空白（`str.isspace()` 為真） | 空串列（放行） |
+| H08 | `https://example.com /docs` | `SRC-URL-HOST`（恰一個） | host 末尾空白 | 空串列（放行） |
+| H09 | `https:// example.com/docs` | `SRC-URL-HOST`（恰一個） | host 開頭空白 | 空串列（放行） |
+| H10 | `https://127.0.0.1<TAB>/x` | `SRC-URL-HOST`（恰一個） | 旁路：連線端的 host 是 `127.0.0.1`（R43） | 空串列（放行） |
+| H11 | `https://localhost<TAB>/x` | `SRC-URL-HOST`（恰一個） | 旁路：連線端的 host 是 `localhost` | 空串列（放行） |
+| H12 | `https://10.0.0.1<CR>/x` | `SRC-URL-HOST`（恰一個） | 旁路：連線端的 host 是 `10.0.0.1` | 空串列（放行） |
+| H13 | `https://127.0.<TAB>0.1/x` | `SRC-URL-HOST`（恰一個） | 旁路：TAB 在位址中間 | 空串列（放行） |
+| H14 | `https:///docs` | `SRC-URL-HOST`（恰一個） | 空 host（既有判準，明寫） | `SRC-URL-HOST`（已判） |
+| H15 | `https://:443/docs` | `SRC-URL-HOST`（恰一個） | 空 host 帶連接埠（既有判準，明寫） | `SRC-URL-HOST`（已判） |
+| H16 | `https://example.com/a b` | 空串列 | 空白在 path：不判（抓取層的連線物件拒收、歸 `network`） | 空串列 |
+| H17 | `https://[2001:db8::1/docs` | 空串列 | 括號不成對的 IPv6 字面：不判（抓取層歸 `network`） | 空串列 |
+| H18 | `https://example.com:abc/docs` | 空串列 | 連接埠非數字：不判（抓取層歸 `network`） | 空串列 |
+| H19 | `https://example.com:99999/docs` | 空串列 | 連接埠越界：不判（抓取層歸 `network`） | 空串列 |
+| H20 | `https://example.com:<P_BIG>/docs` | 空串列（不得拋例外） | 超長位數連接埠視同無連接埠 | 拋 `ValueError` |
+| H21 | `https://example.com:²/docs` | 空串列（不得拋例外） | 上標數字連接埠視同無連接埠 | 拋 `ValueError` |
+
 **狀態字串母體 `STATUS-CORPUS`**（`AT-131-2-E-2`；兩個解析器對每個字串的分類須相等；下表「預期」欄是對既有 `_classify` 實測的分類，供自證，不另立判準）：
 
 | 狀態字串 | 預期分類 |
@@ -3947,7 +4088,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 
 ### 5.4 本機 HTTP 夾具、來源表與真檔案
 
-- **`serve(routes)`**：以標準庫 `http.server.ThreadingHTTPServer` 綁 `127.0.0.1`、連接埠 0（系統配），守護執行緒；回傳物件 `srv`：`srv.url(path)`、`srv.port`、`srv.requests`（每筆含 `path` 與全小寫鍵的 `headers`）、`srv.max_inflight`（同時在途請求的最大值）、`srv.arrived(path)`（請求到達時被設定的 `threading.Event`）、`srv.closing`（`srv.close()` 時被設定的 `threading.Event`；慢滴與停滯路由的等待都以它為準，使關伺服器時處理執行緒立即收尾）、`srv.close()`（測試結束必關）。`routes` 的值為〔狀態碼, 標頭 dict, 本文位元組〕，另可帶第四個元素＝選項 dict：`delay`（秒）或 `hold`（等待測試放行的 `threading.Event`），兩者都在送出狀態列**之前**等待；`drip`（真值：送完狀態列與標頭後，每 0.5 秒送出本文的 1 個位元組，直到本文送完、連線中斷或 `srv.close()`）；`stall`（真值：送完狀態列與標頭後不送本文，直到 `srv.close()`、連線中斷或 30 秒）；`raw`（可呼叫物，呼叫後回傳 `(位元組, 其後停頓秒數)` 的迭代器：設了 `raw` 的路由**不呼叫 `send_response`**，狀態列、標頭與本文全由 `raw` 逐項寫出並 `flush`，停頓以 `srv.closing.wait(秒數)` 進行，`srv.close()` 或連線中斷即終止，迭代結束後處理執行緒返回、連線關閉）。`drip`、`stall` 與 `delay` 供 R58 (d) 的牆鐘強制點負控使用（`Content-Length` 取路由標頭或本文長度）；`raw` 供回應框架階段（狀態列、標頭、分塊大小行、trailer 行）的慢滴負控使用，配方見下表 `RAW-ROUTES`；既有的 `/late-stall`＝`delay` 為 1.2 加 `stall`（`AT-130-5-E-2` 使用）。**有限原則**（SCG-4 二審 N-6、突變 X11b）：凡「被測機制失效時會無限進行」的負控路由一律有限——慢滴路由的本文只有 8 個位元組（`Content-Length` 為 8，失效時約 4 秒自行結束）、`stall` 至多等 30 秒、`raw` 序列總時長不超過 10 秒——使機制失效以斷言紅收場，而不是掛住（舊夾具的 `Content-Length` 為 100000，期限機制失效時要滴約 13.9 小時）。重導向路由為狀態 302 加 `Location`。
+- **`serve(routes)`**：以標準庫 `http.server.ThreadingHTTPServer` 綁 `127.0.0.1`、連接埠 0（系統配），守護執行緒；回傳物件 `srv`：`srv.url(path)`、`srv.port`、`srv.requests`（每筆含 `path` 與全小寫鍵的 `headers`）、`srv.max_inflight`（同時在途請求的最大值）、`srv.arrived(path)`（請求到達時被設定的 `threading.Event`）、`srv.closing`（`srv.close()` 時被設定的 `threading.Event`；慢滴與停滯路由的等待都以它為準，使關伺服器時處理執行緒立即收尾）、`srv.close()`（測試結束必關）。`routes` 的值為〔狀態碼, 標頭 dict, 本文位元組〕，另可帶第四個元素＝選項 dict：`delay`（秒）或 `hold`（等待測試放行的 `threading.Event`），兩者都在送出狀態列**之前**等待；`drip`（真值：送完狀態列與標頭後，每 0.5 秒送出本文的 1 個位元組，直到本文送完、連線中斷或 `srv.close()`）；`stall`（真值：送完狀態列與標頭後不送本文，直到 `srv.close()`、連線中斷或 30 秒）；`raw`（可呼叫物，呼叫後回傳 `(位元組, 其後停頓秒數)` 的迭代器：設了 `raw` 的路由**不呼叫 `send_response`**，狀態列、標頭與本文全由 `raw` 逐項寫出並 `flush`，停頓以 `srv.closing.wait(秒數)` 進行，`srv.close()` 或連線中斷即終止，迭代結束後處理執行緒返回、連線關閉）。`drip`、`stall` 與 `delay` 供 R58 (d) 的牆鐘強制點負控使用（`Content-Length` 取路由標頭或本文長度）；`raw` 供回應框架階段（狀態列、標頭、分塊大小行、trailer 行）的慢滴負控使用，配方見下表 `RAW-ROUTES`；既有的 `/late-stall`＝`delay` 為 1.2 加 `stall`（`AT-130-5-E-2` 使用）。**有限原則**（SCG-4 二審 N-6、突變 X11b）：凡「被測機制失效時會無限進行」的負控路由一律有限——慢滴路由的本文只有 8 個位元組（`Content-Length` 為 8，失效時約 4 秒自行結束）、`stall` 至多等 30 秒、`raw` 序列總時長不超過 10 秒——使機制失效以斷言紅收場，而不是掛住（舊夾具的 `Content-Length` 為 100000，期限機制失效時要滴約 13.9 小時）。重導向路由為狀態 302 加 `Location`。標頭值由 `BaseHTTPRequestHandler.send_header` 以 latin-1 編碼送出：碼位不超過 U+00FF 的字元（例：上標數字 `²`，U+00B2）可由 `routes` 的標頭 dict 直接給，超過者送不出（伺服器端拋 `UnicodeEncodeError`、連線被關，用戶端看到 `network`）；`Content-Length` 取標頭 dict 所給的字面值，與本文長度無關（`AT-130-5-E-5` 以此送出不合法的長度字面值）。
 
 | 路由 | 送出的位元組序列（依序；「停頓」＝該項送出並 `flush` 後以 `srv.closing.wait(秒數)` 等待的秒數；`\r\n` 為兩個位元組） |
 |------|------------------------------------------------------------------------------------------------|
@@ -3995,7 +4136,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | US-101～US-109 → 本檔 54 個 AC | ☑ 已映射（FRD-lite） |
 | PRD 的 44 個 P1 AC（鍵 A 41 個、鍵 B 3 個）→ 本檔 `AC-102-1`～`AC-134-4` 與 `AC-128-1`～`AC-128-3` | ☑ 已映射（編號規則見 FRD-lite 與 §7.1 ⚖ 1） |
 | 本檔自增的 10 個 AC（`AC-140-1`、`AC-140-2`、`AC-141-1`、`AC-141-2`、`AC-142-1`、`AC-142-2`、`AC-143-1`、`AC-144-1`、`AC-145-1`、`AC-145-2`）→ AT | ☑ 已映射 |
-| 本檔 AC（54 個）→ AT（157 個：正控 58、負控 99） | ☑ 已映射（本檔 §1，覆蓋率 100%；每個 AC 至少一個正控與一個負控） |
+| 本檔 AC（54 個）→ AT（161 個：正控 58、負控 103） | ☑ 已映射（本檔 §1，覆蓋率 100%；每個 AC 至少一個正控與一個負控） |
 | PRD §8.1 P1 出口 (a) 真實觀察端到端走到提案卡，且至少一筆屬 M／P／R／D 類 → AT-103-2-1、AT-106-1-1、AT-108-1-1、AT-114-1-1、AT-144-1-1 與實跑檢核 V8 | ☑ |
 | PRD §8.1 P1 出口 (b) 零提案觸及正式面 → AT-107-1-1、AT-108-1-1、AT-108-3-1 與實跑檢核 V8、V9 | ☑ |
 | PRD §8.1 P1 出口 (c) 卡面不清的退回為零 → AT-114-1-1、AT-114-1-2、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1 與實跑檢核 V8 | ☑ |
@@ -4026,7 +4167,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | R40 | `events.vacuity` | AT-108-4-E-2 |
 | R41 | `events.prop_files` | AT-142-1-E-1、AT-144-1-1 |
 | R42 | `events.research` | AT-130-1-1、AT-130-2-1、AT-130-2-E-2、AT-108-4-E-5、AT-130-2-E-4 |
-| R43 | `research.sources` 與來源表檔格式 | AT-142-1-E-1、AT-145-1-1、AT-130-2-1、AT-130-2-E-1 |
+| R43 | `research.sources` 與來源表檔格式 | AT-142-1-E-1、AT-145-1-1、AT-130-2-1、AT-130-2-E-1、AT-130-2-E-6、AT-130-2-E-7 |
 | R44 | 標記欄擴充 | AT-142-1-E-2、AT-130-4-1、AT-130-4-E-1 |
 | R45 | 復發候選提示 | AT-106-2-E-2、AT-131-2-E-2 |
 | R46 | `params.json` 新鍵、指紋排除與判準版本 | AT-142-1-1、AT-145-1-1、AT-145-1-E-1、AT-130-6-1、AT-130-6-E-1 |
@@ -4040,8 +4181,8 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | R54 | 觸及比例、新增條目、歸檔型豁免與 M 類 pre-image | AT-109-2-1、AT-109-2-E-1、AT-109-3-1、AT-107-3-E-6、AT-107-3-E-7 |
 | R55 | digest 與內容檔落地 | AT-108-1-1、AT-144-1-1、AT-144-1-E-1 |
 | R56 | `card` | AT-110-2-1、AT-114-1-1、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1、AT-140-2-1、AT-114-1-2、AT-140-2-E-2、AT-140-1-E-5 |
-| R57 | `research` 通則與 `--skip` | AT-130-1-1、AT-130-1-E-1、AT-130-2-1、AT-130-2-E-1、AT-130-3-E-1、AT-130-3-E-2、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-4、AT-130-5-E-3、AT-140-1-E-5 |
-| R58 | 抓取行為與事件 | AT-130-2-E-3、AT-130-3-1、AT-130-3-E-1、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-5、AT-130-5-E-2、AT-130-2-E-5、AT-130-5-E-3、AT-140-1-E-5 |
+| R57 | `research` 通則與 `--skip` | AT-130-1-1、AT-130-1-E-1、AT-130-2-1、AT-130-2-E-1、AT-130-3-E-1、AT-130-3-E-2、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-4、AT-130-5-E-3、AT-140-1-E-5、AT-130-2-E-6、AT-130-2-E-7 |
+| R58 | 抓取行為與事件 | AT-130-2-E-3、AT-130-3-1、AT-130-3-E-1、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-5、AT-130-5-E-2、AT-130-2-E-5、AT-130-5-E-3、AT-140-1-E-5、AT-130-2-E-6、AT-130-5-E-4、AT-130-5-E-5 |
 | R59 | `scan` | AT-131-1-1、AT-131-1-E-1、AT-131-2-1、AT-131-2-E-1、AT-131-2-E-2、AT-131-3-1、AT-131-3-E-1、AT-131-4-1、AT-131-4-E-1、AT-140-2-1、AT-131-2-E-3、AT-140-2-E-2 |
 | R60 | `status` | AT-103-1-1、AT-103-1-E-1、AT-140-2-1、AT-103-1-E-2、AT-103-1-E-3、AT-140-2-E-2 |
 | R61 | `export` | AT-132-5-1、AT-132-5-E-1、AT-132-5-E-2、AT-140-2-1、AT-140-2-E-1、AT-132-5-E-3、AT-140-2-E-2 |
@@ -4078,7 +4219,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | ⚖ 16 | PRD 對 `rN.patch` 的雜湊口徑說法不一：digest 段寫 CRLF 正規化，AC-SI-07-3 要求 patch 以位元組導出路徑 | `.patch` 以原位元組存檔與雜湊（不做 CRLF 正規化）；`.md` 與來源表先換 LF（R41、R55）；`AT-142-1-E-1` 的 (e)(f) 釘住 | 替代：patch 也先換 LF。再開症狀：Windows 工作樹的 autocrlf 改變 `.patch` 位元組、使 `PROP-PATCH-SHA-MISMATCH` 假紅 |
 | ⚖ 17 | PRD 寫「`row.provenance`／`row.markers` 加碼」，未指三個新碼各屬哪一項；AC-SI-06-2 的「新列」與已結列未定義 | R44（`RESEARCHER-*` 屬 `row.provenance`、`SRC-UNKNOWN` 屬 `row.markers`）、R45（新列＝工作樹有而 HEAD 無、處置首詞 `open`、無 `reopens` 標記；已結列的定義；候選為 warn，不影響 rc） | 替代：另設獨立判定項。再開症狀：候選提示對 DEF 列的精準度過低（DEF 列無分類欄，只比路徑；未量） |
 | ⚖ 18 | 測試檔清單：任務書列 5 個測試檔；本檔另增 `test_selfimproving_capability.py`（PRD §9.4 判準的承載面）與共用夾具模組 | 7 個測試檔（含鍵 B）加夾具模組（§5.6） | 替代：併入 `events`。再開症狀：新增測試檔的重釘稅超出預期（NFR-P1-9） |
-| ⚖ 19 | 任務書估 AT 60～90 條，同時要求每條 PRD AC 至少一正控一負控；PRD 有 44 條 AC、本檔自增 10 條，下限即 108 條 | 以覆蓋規則為準：原 126 條（正控 57、負控 69），SCG-4 一審後補測至 148 條（正控 58、負控 90），二審後再補至 157 條（正控 58、負控 99）；每個 AC 皆有至少一個負控（流程型 AC 的負控＝SOP 片段刪去自證） | 替代：把部分 AC 的負向變體併入正控（P0 體例）。再開症狀：實作量或 CI 時間超出預期 |
+| ⚖ 19 | 任務書估 AT 60～90 條，同時要求每條 PRD AC 至少一正控一負控；PRD 有 44 條 AC、本檔自增 10 條，下限即 108 條 | 以覆蓋規則為準：原 126 條（正控 57、負控 69），SCG-4 一審後補測至 148 條（正控 58、負控 90），二審後再補至 157 條（正控 58、負控 99），三審後再補至 161 條（正控 58、負控 103）；每個 AC 皆有至少一個負控（流程型 AC 的負控＝SOP 片段刪去自證） | 替代：把部分 AC 的負向變體併入正控（P0 體例）。再開症狀：實作量或 CI 時間超出預期 |
 | ⚖ 20 | PRD 只命名模組，未命名測試需要的函式與物件 | 本檔補定義：`evwrite.append_event`、`evwrite.PAUSE_HOOK`、`evwrite.LOCK_TIMEOUT_SECONDS`、`evwrite.LOCK_STALE_SECONDS`（R33）；`sources.validate_table`、`sources.Policy`、`sources.DEFAULT_POLICY`（R43）；`fetch.fetch_source`、`fetch.check_redirect`（R58）；`scan.bucket_of`（R59 (d)）；`git.apply_numstat`（R51 (b)）；`defs.classify_status`、`defs.load_ledger_status`（R45 (ii)） | 替代：Developer 另名並回寫本檔。再開症狀：實作與本檔的介面名不一致 |
 | ⚖ 21 | PRD ADR-SI-10 併發負控 ① 寫「雙行程」加「測試鉤子」；鉤子須在同一行程內設定 | 以雙執行緒做確定性交錯（`AT-141-2-1` 情境一、二），跨行程由 8 行程×10 筆壓力承擔（情境三） | 替代：以環境變數驅動子行程內的鉤子（需在生產碼加讀環境變數的分支，與不新增守衛碼精神相左）。再開症狀：跨行程的交錯只靠壓力測試覆蓋而漏判 |
 | ⚖ 22 | 流程型 AC（AC-SI-07-2、09-1 的語意半、10-2 的零遞迴、11-2、30-4 ①②、31-5、08-3 的不得阻塞 SCG）無機械物，PRD 已標邊界型 P | 以 SOP 條文片段的存在判準代位（R65），語意由實跑檢核 V7 對照 PRD；每個代位 AT 含刪去自證 | 再開症狀：SOP 措辭微調使 AT 反覆轉紅（P0 預審 F-11 同型） |
@@ -4090,18 +4231,22 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | ⚖ 28 | SCG-4 一審 F-08 (f)：R29 要求家目錄不可寫 ⇒ rc 3，但「目錄存在而寫不進」在 Windows 與 POSIX 沒有共通的測試法（唯讀權限語意不同） | R29 規定可寫性探測檔名 `.probe-<行程號>`，AT 以同名目錄在兩平台一致地使建檔失敗（`AT-141-2-E-3`） | 替代：AT 於 POSIX 用 `chmod`、於 Windows 用 ACL（需平台分支，違反 NFR-P1-3）。再開症狀：探測檔改名而該 AT 不再能製造失敗 |
 | ⚖ 29 | 判定指令形態：原 126 個 AT 只帶 `-k <底線形> -q`；鍵 B 指令在本機 PG 在場時 rc=4（SCG-4 一審 §F ⑤） | 新增 AT 的根層指令另加 `-p no:xdist -o addopts=`；鍵 B 全部（含既有九個）加 `-n 0`（`-p no:xdist` 不能與 `-n` 並用，實測 `unrecognized arguments`）；既有根層指令不改（實測可單跑） | 替代：把既有 117 個根層指令一併補旗標（機械改寫、無行為差）。再開症狀：根層出現全域 xdist 設定而使單一 AT 的 `-k` 指令行為不同 |
 | ⚖ 30 | SCG-4 二審 N-2、N-3：R37 的讀取側防禦只擋住 `fold`；P2 起種類（`dec`、`mea.*`、`app.*` 等）只驗骨架，`dec` 的 `flags` 元素型別怪異讓折疊拋 `TypeError`（十六個動詞中十四個崩潰）；`card.build`、`prop-new` 的鎖內狀態判定、`research --fetch` 的 `changed` 重算仍吃原始事件，損壞的 `prop`、`research.scan` 使它們崩潰 | R37 擴充：所有讀事件的消費者一律只吃通過單事件判準的事件（`events.sound()` 一處收斂，`evwrite` 的 `state.events` 同）；P2 起種類被折疊讀取的鍵納入型別判準（`prop`、`dkind`、`run`、`verdict`、`result`、`to` 為字串；`window` 為整數 ≥1；`flags` 為字串陣列，裸字串亦判 `EVENT-TYPE`）；缺鍵仍為 `TRANSITION-ORPHAN`；配號取原始末行的 `seq`（`AT-108-4-E-6`、`AT-108-4-E-7`、`AT-140-1-E-4`、`AT-140-1-E-5`） | 替代：只在各消費端防禦（例：`_dec_flags` 只收字串）——規則會分歧、`check` 看不到被忽略的怪異事件；或 `flags` 容忍裸字串（視為單元素）——與 PRD 的 `flags[]` 不符且多一條分支。再開症狀：P2 的 `dec` 寫入動詞上線後，合法事件被型別判準誤擋；或 `flags` 需要非字串元素（物件）而須再擴型別 |
-| ⚖ 31 | SCG-4 二審 N-4：重導向 `Location` 無法解析時，`urljoin` 拋 `ValueError`（括號不成對的 IPv6 形態），逸出 `fetch_source`、不屬 `FetchError` 的封閉集合；初始 URL 同形的剖析失敗亦然；R58 未規定歸類 | `Location` 無法解析 ⇒ `redirect-refused`（無法證明目標合規即 fail-closed，與目標被政策否決同類）；初始 URL 無法解析 ⇒ `network`（連線建不起來）；`fetch_source` 只准拋 `FetchError`（`AT-130-2-E-5`） | 替代：兩者都歸 `network`（連線層錯誤）——可疑跳轉的語意被稀釋；或都歸 `redirect-refused`。再開症狀：OBS 草稿列或 Console 的來源失敗分群因歸類而誤導（例：把來源表手誤判成重導向攻擊） |
+| ⚖ 31 | SCG-4 二審 N-4：重導向 `Location` 無法解析時，`urljoin` 拋 `ValueError`（括號不成對的 IPv6 形態），逸出 `fetch_source`、不屬 `FetchError` 的封閉集合；初始 URL 同形的剖析失敗亦然；R58 未規定歸類 | `Location` 無法解析 ⇒ `redirect-refused`（無法證明目標合規即 fail-closed，與目標被政策否決同類）；初始 URL 無法解析 ⇒ `network`（連線建不起來）；`fetch_source` 只准拋 `FetchError`（`AT-130-2-E-5`；三審擴充見 ⚖ 34、⚖ 35） | 替代：兩者都歸 `network`（連線層錯誤）——可疑跳轉的語意被稀釋；或都歸 `redirect-refused`。再開症狀：OBS 草稿列或 Console 的來源失敗分群因歸類而誤導（例：把來源表手誤判成重導向攻擊） |
 | ⚖ 32 | SCG-4 二審突變 B5 與 SA 追查：R52 (c) 的 M 類合法根比對經 `casefold`（`Memory/demo.md` 視為 `memory/` 之下），但 R54 (a) 對映記憶目錄用區分大小寫的 `memory/` 前綴，使大小寫變體找不到 base 內容、觸及比例的分母為 0 而繞過 `TOUCH-RATIO`（現行碼實測：改 15／20 行的 `Memory/demo.md` 受理為 `loop`，小寫者被拒） | 兩處一律經 `casefold` 比對前綴（`<名>` 保留原大小寫；`target` 與 digest 存原大小寫）：大小寫變體仍在合法根之下、`route` 為 `loop`，且與小寫者受同一組 R54 判準約束（`AT-107-3-E-6`、`AT-107-3-E-7`） | 替代：大小寫變體不在合法根之下 ⇒ 整張 `handoff`（更嚴，兩平台一致）——`AT-107-3-E-6` 改判 `handoff:T1`、`AT-107-3-E-7` 失去意義。再開症狀：掌舵者要求記憶路徑區分大小寫（例：POSIX 上 `Memory/` 與 `memory/` 是不同檔） |
 | ⚖ 33 | SCG-4 二審 N-1、N-6：夾具只有 `drip`（本文慢滴）與 `stall`（本文停滯），產生不出狀態列、標頭、分塊大小行與 trailer 行階段的慢滴；慢滴路由的 `Content-Length` 為 100000，期限機制失效時掛住而不是斷言紅 | §5.4 `serve` 加 `raw` 選項與表 `RAW-ROUTES` 的五條路由配方，並規定負控路由一律有限（慢滴本文 8 位元組、`stall` 至多 30 秒、`raw` 序列不超過 10 秒）；`drip`、`stall` 記為真值旗標（與既有實作一致）（`AT-130-5-E-2`、`AT-130-5-E-3`） | 替代：每個 AT 各自手寫真 socket 伺服器（配方會分歧）；或不設有限原則、靠 harness 逾時殺測試（掛住不是斷言，二審突變 X11b 即此）。再開症狀：慢滴路由因 0.5 秒間隔對 CI 負載敏感而時序不穩 |
+| ⚖ 34 | SCG-4 三審 P3-1、P4 與 SA 追查：驗證端的 `parse_url` 是手寫切分，抓取層連線用的標準庫 `urlsplit` 先刪除網址中的 `\t`、`\r`、`\n` 再切分；`https://127.0.0.1<TAB>/x`、`https://localhost<TAB>/x`、`https://10.0.0.1<CR>/x` 在 `validate_table` 回空串列（現行碼實測），連線端的 host 卻是私網位址——私網判準被繞過；R43 未規定 host 的字元，三審只把「host 含空白或控制字元被放行」列為 P4；初始 URL 的連線物件建構式與開頭的 `parse_url` 在 `try` 之外，使畸形形態逸出 `FetchError`（三審的 19 個形態中 5 個；本檔 `URL-FORMS` 十列中 8 列），R58 (c) 沒有涵蓋 | R43：host 為空、或含空白（`str.isspace()` 為真）或控制字元（碼位小於 U+0020、等於 U+007F）⇒ `SRC-URL-HOST`；空白在 path 或 query 者、括號不成對的 IPv6 字面不在判準內（由抓取層歸 `network`）。R58 (c)：初始 URL 的任何剖析或連線物件建構失敗 ⇒ `network`，`fetch_source` 對任何字串只拋 `FetchError`（含開頭取 scheme 的 `parse_url`）；`Location` 的 detail 改為固定說明文字（`AT-130-2-E-5`、`AT-130-2-E-6`、`AT-130-2-E-7`） | 替代：驗證端與連線端改用同一個剖析器（需 `sources.py` import `urllib`，破壞 `ro` 類登記與 R63 的能力判準）；或抓取層連線前比對兩個剖析器的 host（縱深防禦，host 字元判準關閉已知旁路後非必要）。再開症狀：出現另一個兩剖析器分歧的形態（例：Unicode 正規化，見 §4〈刻意不做〉），或掌舵者要求抓取層自身也驗私網（不依賴驗證端） |
+| ⚖ 35 | SCG-4 三審 P4 與 SA 追查：`parse_url` 對連接埠文字做 `int()`——超過整數轉字串位數上限的長數字串與 `str.isdigit()` 為真的上標數字（`²`）使它拋 `ValueError`，`validate_table`、`check`、`research --fetch` 預檢與 `fetch_source` 開頭全部崩潰；回應標頭 `Content-Length` 為上標數字時，`_read_body` 的 `isdigit()` 加 `int()` 同樣拋 `ValueError`（可由伺服器遠端觸發，現行碼以 loopback 實測）；R58 (c) 的「`fetch_source` 只准拋 `FetchError`」沒有涵蓋這些 | R43 全函式：`parse_url`、`validate_table` 對任何字串都不拋例外；無法轉成整數的連接埠文字視同無連接埠、不產生碼（與 `:abc` 同，通過表驗證、在抓取層以 `network` 失敗）；R58 (d)：無法解析為十進位整數的 `Content-Length` 視同未提供（與 `abc` 同），位元組上界由累計讀取量強制（`AT-130-2-E-7`、`AT-130-2-E-6`、`AT-130-5-E-5`） | 替代：連接埠文字不合 ⇒ `SRC-URL-HOST`（驗證階段擋掉永遠抓不到的表項；但須精確定義連接埠文法〔全形數字、前導零、`:0`、空連接埠〕並改變 `:abc`、`:99999` 的既有放行行為，超出三審範圍）；無法解析的 `Content-Length` ⇒ `network`（較嚴，但與 `abc` 的既有放行不一致）。再開症狀：掌舵者要求來源表在驗證階段擋連接埠手誤，或出現以標頭數字形態誘發的其他崩潰 |
+| ⚖ 36 | SCG-4 三審 P2-1（突變 F2）：`_DeadlineRaw.readinto` 的「期限已過即 `TimeoutError`」分支沒有任何測試鎖住；只靠整合層賽跑抓不到它（Windows 上 Python 3.11 的 `time.monotonic()` 每格 15.625 毫秒，牆鐘期限不落在格線上時突變碼的逸出區間幾乎為零：`timeout` 取 0.3 秒實測 100 次逸出 0 次；細解析度平台的區間更窄） | `AT-130-5-E-4`：單元層直接釘讀取層契約（`fetch._DeadlineRaw(sock, deadline)`：期限已過〔含恰為此刻〕⇒ `TimeoutError`、不碰 socket；否則一次 `settimeout(剩餘)` 加一次 `recv_into`）——確定性的殺傷；賽跑層取 `timeout` 為 0.25 秒（時鐘格寬的整數倍）、50 次標頭延遲掃過期限前後各約 10 毫秒，只准 `timeout`——統計性補充。讀取層類別名與建構式簽名因此成為本檔對單元測試的契約，改名須同步改本檔 | 替代：只做整合層賽跑（鑑別力依平台時鐘而定，細解析度平台上近乎為零）；或以假時鐘取代賽跑（須把 `fetch.time` 抽成可注入點，多一個被測碼介面）。再開症狀：讀取層重構（例：不再用 `RawIOBase` 子類）使單元層契約不適用，或賽跑層因 CI 負載出現非 `timeout` 結果（連線階段被餓死超過 0.25 秒） |
 
 ### 7.2 預審登記
 
-（預審與審查的發現登記於此，只登記、不改規格，凍結後的訂正走下方勘誤節；已登記 SCG-4 一審與二審。）
+（預審與審查的發現登記於此，只登記、不改規格，凍結後的訂正走下方勘誤節；已登記 SCG-4 一審、二審與三審。）
 
 | 編號 | 預審所述 | 本檔處置 | 再開症狀 |
 |------|----------|----------|----------|
 | SCG-4 一審（FAIL；P1／P2／P3／P4＝0／8／6／8） | 報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md` 的 F-01～F-22 與 §K 的八項勘誤建議 | 見〈勘誤一〉：條文訂正、補條文與 22 個新 AT；碼修歸 Developer 修復棒、`F-13`、`F-19`、`F-20` 歸主控 | 二審 QA 重放存活突變清單仍有未被打紅者，或新 AT 的期望值與修復後的實作不符 |
 | SCG-4 二審（FAIL；P1／P2／P3／P4＝0／3／3／6） | 報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md` §M 的 N-1～N-6、P4 與 M.6、M.7 | 見〈勘誤二〉：R58 (d)、(c) 補條文，R37 擴為所有消費者只吃通過單事件判準的事件，R52 (c)、R54 (a) 補 M 類大小寫，§5.4 夾具補 `raw` 路由與有限原則，NFR-P1-10 (14)；新增 9 個 AT；二審接受的 Developer 差異寫入 §5.5 (g) 與各 AT；碼修歸 Developer 修復棒二、N-5 與 P4 清理歸其交卷 | 三審 QA 重放存活突變仍有未被打紅者、五條 `raw` 路由在 CI 上時序不穩，或新 AT 的期望值與修復後的實作不符 |
+| SCG-4 三審（FAIL；P1／P2／P3／P4＝0／2／1／5） | 報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md` §N 的 N.1（P2-1 突變 F2、P2-2 突變 U3、P3-1 初始 URL 逸出）、P4 與 N.5 | 見〈勘誤三〉：R58 (d) 補剩餘不大於 0 的明文與讀取層契約、R58 (c) 補初始 URL 的全函式性與連接埠剖析哨兵、R43 補 host 字元判準與全函式性；新增 4 個 AT（`AT-130-2-E-6`、`AT-130-2-E-7`、`AT-130-5-E-4`、`AT-130-5-E-5`）並擴充 `AT-130-2-E-5`；SA 追查補 host 字元旁路與 `Content-Length` 上標數字；碼修歸 Developer 修復棒三 | 四審 QA 重放存活突變仍有未被打紅者（尤其 F2 在細解析度平台）、賽跑層因 CI 負載出現非 `timeout`，或新 AT 的期望值與修復後的實作不符 |
 
 ---
 
@@ -4112,7 +4257,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AC → AT 100% 映射 | 54 個 AC 無未映射者（§1） | □ |
 | AT 格式可自動化 | 使用 Given-When-Then 格式；每個 AT 有判定指令與驗收字樣；判定指令的 `-k` 字串等於 AT 底線形 | □ |
 | 負向測試覆蓋 | 每個 AC 有至少一個負向 AT（E 類；流程型 AC 的負向＝對 SOP 條文逐一刪去的副本須判不合格） | □ |
-| 邊界值測試 | 關鍵欄位有邊界值測試（事件行位元組恰等於與少 1、觸及比例恰 0.2、新增條目恰 3、歸檔 50 與 51、核心區 12 行與寬度 100、運轉預算第 4 個、修訂上限、事件數下限、匯出上限、抓取三界、重導向 5 與 6 跳、check 層的事件行位元組 L 與 L－1、`note` 120 與 121、`http_status` 299 與 300、來源表提交時間與事件 `t` 同一秒、`scan` 起算時刻同一秒、`export` 筆數恰等於 `--limit`、慢滴回應的牆鐘、狀態列與標頭與分塊大小行與 trailer 行各階段慢滴的牆鐘、被消費的鍵（`flags` 的元素、`window`、`to` 等）的型別、`memory/` 路徑的大小寫變體、`diff --git` 的 A 側路徑） | □ |
+| 邊界值測試 | 關鍵欄位有邊界值測試（事件行位元組恰等於與少 1、觸及比例恰 0.2、新增條目恰 3、歸檔 50 與 51、核心區 12 行與寬度 100、運轉預算第 4 個、修訂上限、事件數下限、匯出上限、抓取三界、重導向 5 與 6 跳、check 層的事件行位元組 L 與 L－1、`note` 120 與 121、`http_status` 299 與 300、來源表提交時間與事件 `t` 同一秒、`scan` 起算時刻同一秒、`export` 筆數恰等於 `--limit`、慢滴回應的牆鐘、狀態列與標頭與分塊大小行與 trailer 行各階段慢滴的牆鐘、被消費的鍵（`flags` 的元素、`window`、`to` 等）的型別、`memory/` 路徑的大小寫變體、`diff --git` 的 A 側路徑、牆鐘期限已過與恰為此刻的讀取、Location 與初始 URL 的連接埠文字形態與空 host、host 的空白與控制字元、`Content-Length` 的上標數字） | □ |
 | 併發負控 | 無鎖對照組撞號、有鎖後者得加一、8 行程×10 筆、陳舊鎖回收、新鮮鎖逾時（AT-141-2-1、AT-141-2-E-1） | □ |
 | 純度與常駐機制 | 能力登記判準與其合成樹自證、動態載入面、零網路、14 個禁字樣樣本自證（AT-143-1-1、E-1、E-2） | □ |
 | 測試資料規格完整 | 資料來源明確定義（§5；情境表、案例表、夾具函式） | □ |
@@ -4208,3 +4353,26 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 - **數量**：AT 由 148 條增為 157 條（正控 58 不變、負控 90→99）；各測試檔：EV 44→48、PR 38→41、RS 33→35、ES 11、CP 3、LY 9、KB 10。新 AT 的根層判定指令與勘誤一的新 AT 同形（`-q -p no:xdist -o addopts=`）；本次沒有新的鍵 B AT。
 - **本檔未改的二審發現**：P4 的測試函式間缺空行與過期註解（`test_selfimproving_events.py` 內「TCS 內部不一致」的註解）屬 Developer 修復棒二的清理，不入規格；重導向目標帶 userinfo 時靜默忽略後照跟隨（無安全影響）、`Content-Length` 宣稱 100 而實給 10 位元組仍回傳成功（既有行為）均屬二審 P4，TCS 無規定、本次不增規定。
 - **凍結紀錄**：勘誤一版 digest `sha256:5f22134c00092df0f665c2a0650cde914780c084793e79dec4c9cfcaa67cc40d`（Stage-2 原凍結 `d7555681…`）保留為歷史；本次訂正使檔案內容再度改變，修訂後的 digest 由主控以 `spec-refreeze` 重記（FSM `SPEC_AUDIT` 路徑），不以手改狀態檔代替。增量追溯表的 PRD 與研究方法 SOP 凍結摘要未動（兩份上位文件本次皆未改）。
+
+### 勘誤三（SCG-4 三審 FAIL 後的規格訂正；既有 AT 的 id 與判定碼名稱一字未改、一個 AT 也未刪）
+
+- **事由**：SCG-4 三審（報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md` §N，審 HEAD `0db61d70`；判定 FAIL，P1／P2／P3／P4＝0／2／1／5）的 N.1 三項缺陷（P2-1 突變 F2、P2-2 突變 U3、P3-1 初始 URL 逸出）、P4 與 N.5。二審的 24 個存活突變全數被打紅、二審 N-1～N-3 全數修妥；FAIL 的成因只有一類：修復棒二新加的防線沒有測試釘住（期限已過的分支、`Location` 連接埠剖析哨兵），以及初始 URL 的連線物件建構式在 `try` 之外（修復棒一自管 `http.client` 之後的回歸，DEF-200-556 殘留；R58 (c) 只寫了 `Location` 與括號形態，沒有涵蓋初始 URL 的其他畸形，也沒有 AT）。本次由 SA 棒套用；碼修由 Developer 修復棒三依本檔進行。
+- **文字訂正與補條文**：
+  1. **R58 (d)**（P2-1；§7.1 ⚖ 36）：每次讀取前剩餘時間不大於 0（含恰為 0）即以 `timeout` 中止，不得呼叫 `settimeout(0)` 或傳負值；寫明讀取層契約 `fetch._DeadlineRaw(sock, deadline)`（`deadline` 為絕對的 `time.monotonic()` 時刻）；補 `AT-130-5-E-4`（單元層確定性地殺傷 F2，賽跑層為統計性補充）。
+  2. **R58 (c)**（P2-2、P3-1；§7.1 ⚖ 34）：重導向 `Location` 的連接埠無法解析歸 `redirect-refused`，且剖析哨兵不可由 host:port 比對代替——`AT-130-2-E-5` 擴為六條路由乘兩組允許集合，B 組含預設埠 80，使突變 U3 在 `parse_url` 修成全函式之後仍被打紅（只靠超長位數案例時，`parse_url` 一修好，host:port 不在允許集合即歸 `redirect-refused`，U3 會再度等價）；初始 URL 的任何剖析或建構失敗歸 `network`、`fetch_source` 對任何字串只拋 `FetchError`（含開頭取 scheme 的 `parse_url`）；`Location` 的 detail 改為固定說明文字（二審版寫「帶原 `Location` 值」，與已受理的實作不符，且 `Location` 可長達數千位元組）；補 `AT-130-2-E-6`。
+  3. **R43**（P4；SA 追查旁路；§7.1 ⚖ 34、⚖ 35）：`SRC-URL-HOST` 增列 host 為空（現行即判）與 host 含空白或控制字元；寫明成因——`urlsplit` 先刪 `\t`、`\r`、`\n` 再切分，使 `https://127.0.0.1<TAB>/x` 在驗證端的 host 不是私網位址而連線端是（現行碼實測 `validate_table` 回空串列）：這不只是三審列的 P4 健壯性問題，而是私網判準的旁路；`parse_url` 與 `validate_table` 改為全函式（連接埠文字無法轉成整數者視同無連接埠）；括號不成對的 IPv6 字面與 path 內空白明寫為不判；誠實劃界補 Unicode 正規化旁路（不收口）；補 `AT-130-2-E-7`。
+  4. **R58 (d) 的位元組上界**（SA 追查；§7.1 ⚖ 35）：`Content-Length` 為 `str.isdigit()` 為真而 `int()` 失敗的上標數字（`²`、`³`、`¹`）時，`_read_body` 拋 `ValueError` 逸出 `fetch_source`（伺服器遠端可觸發；現行碼以 loopback 實測）。寫明無法解析的 `Content-Length` 視同未提供（與 `abc` 同）、位元組上界由累計讀取量強制；補 `AT-130-5-E-5`。
+  5. **§5.4 夾具**：`serve` 的標頭值以 latin-1 送出，寫入規格（`Content-Length` 的上標數字由此給；超過 U+00FF 的字元送不出）。
+  6. **§4、SCG-4 通過標準**：§4 改一列（無法解析的 URL）、增三列，〈刻意不做〉增一列（Unicode 正規化旁路）；「邊界值測試」列增列期限已過與恰為此刻的讀取、連接埠文字形態與空 host、host 的空白與控制字元、`Content-Length` 的上標數字。
+- **資料規格**：§5.2 新增 `SC-TABLE-URL`；§5.3 新增常數 `P_BIG`、建構器 `raw_table`、假 socket `FakeSock`、賽跑掃描 `RACE-SWEEP`、案例表 `URL-FORMS`、`HOST-CASES`。§7.1 新增 ⚖ 34～⚖ 36；§7.2 登記三審的處置。
+- **新增 4 個 AT（AC 總數仍為 54；括號內為所屬 AC、測試檔縮寫、`-k` 底線形、對應三審編號）**：
+  - `AT-130-2-E-6`（AC-130-2；RS；`-k AT_130_2_E_6`；P3-1）：初始 URL 的任何剖析或連線物件建構失敗都歸 `network`、`fetch_source` 只拋 `FetchError`（十種連線前即失敗的形態）；表驗證放行而抓取層無法剖析的 URL，指令層為 `source … FAIL network` 加 `ZERO-SUCCESS`
+  - `AT-130-2-E-7`（AC-130-2；RS；`-k AT_130_2_E_7`；P4、SA 追查旁路）：來源表驗證的 host 字元判準與全函式性：host 含空白或控制字元（含 TAB、CR、LF 旁路）與空 host ⇒ `SRC-URL-HOST`；超長位數與上標數字的連接埠不使 `validate_table`、`check`、`research --fetch` 崩潰
+  - `AT-130-5-E-4`（AC-130-5；RS；`-k AT_130_5_E_4`；P2-1／突變 F2）：牆鐘期限的讀取層契約與邊界：`_DeadlineRaw` 在期限已過（含恰為此刻）時拋 `TimeoutError` 且不碰 socket、剩餘為正時恰一次 `settimeout` 加一次 `recv_into`；標頭在上限前後才到的 50 次賽跑只得 `timeout`
+  - `AT-130-5-E-5`（AC-130-5；RS；`-k AT_130_5_E_5`；SA 追查）：回應標頭 `Content-Length` 無法解析為十進位整數（上標數字 `²`、`¹`、`5²`）時視同未提供：不拋例外、照常回傳；位元組上界仍由累計讀取量強制
+- **擴充 1 個既有 AT（id 與判定指令不變）**：`AT-130-2-E-5`（AC-130-2；RS；`-k AT_130_2_E_5`；P2-2）：`Location` 由 2 條增為 6 條路由（加連接埠 `99999`、`abc`、`P_BIG`、`²`），每條乘兩組允許集合（B 組含 `127.0.0.1:80`），共 12 次皆 `redirect-refused`；指令層與初始 URL 部分不變。
+- **數量**：AT 由 157 條增為 161 條（正控 58 不變、負控 99→103）；各測試檔：EV 48、PR 41、RS 35→39、ES 11、CP 3、LY 9、KB 10。新 AT 的根層判定指令與勘誤一、二的新 AT 同形（`-q -p no:xdist -o addopts=`）；本次沒有新的鍵 B AT。
+- **現行碼預期紅綠（SA 本輪 loopback 與純函式探針的推論，不是 Developer 或 QA 的實跑）**：`AT-130-5-E-4` 與擴充後的 `AT-130-2-E-5` 在現行碼為綠（它們鎖的是已存在的防線，突變 F2、U3 才會紅）；`AT-130-2-E-6`（八列拋未攔例外）、`AT-130-2-E-7`（`validate_table` 對 H02～H13 回空串列而非 `SRC-URL-HOST`、對 H20 與 H21 拋 `ValueError`；`check` 與預檢崩潰）、`AT-130-5-E-5`（`²`、`¹`、`5²` 拋 `ValueError`）在現行碼為紅。
+- **本檔未改的三審發現**：P4 的排版（`events.py` 與 `test_selfimproving_props.py` 的空行）屬 Developer 修復棒三的清理；重導向目標帶 userinfo 時靜默忽略後照跟隨、本文被截斷（`Content-Length` 宣稱大於實給）仍回傳成功，均為二審起的 P4，TCS 無規定、本次不增規定。
+- **SA 追查而本檔未收口者**：驗證端不做 Unicode 正規化——`https://１２７.0.0.1/x` 通過 `validate_table`，`getaddrinfo`（加 `AI_NUMERICHOST`，不發 DNS）解成 `127.0.0.1`；是否收緊為 host 僅限 ASCII 或正規化後再比對，須掌舵者裁決，已列 §4〈刻意不做〉與 ⚖ 34 的再開症狀。
+- **凍結紀錄**：勘誤二版 digest `sha256:8bce1978ce42351131ab15159253628b5a3e51b6d8780cb53a058169c2f5ed8a`（勘誤一版 `5f22134c…`、Stage-2 原凍結 `d7555681…`）保留為歷史；本次訂正使檔案內容再度改變，修訂後的 digest 由主控以 `spec-refreeze` 重記（FSM `SPEC_AUDIT` 路徑），不以手改狀態檔代替。增量追溯表的 PRD 與研究方法 SOP 凍結摘要未動（兩份上位文件本次皆未改）。
