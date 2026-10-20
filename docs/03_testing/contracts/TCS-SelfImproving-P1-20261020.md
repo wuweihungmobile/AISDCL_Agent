@@ -91,8 +91,8 @@
 | `prop-revise` | `--run`＊ `--prop <PROP-ID>`＊ `--patch-file`＊ `--body-file`＊ `--proposer`＊ `--reviewer --handoff --memory-dir`（`cls`、`action`、`target`、`source` 沿用前一版、不收旗標） | `prop` | R49～R55 |
 | `research` | `--fetch`｜`--skip`（互斥、必其一）＊ `--run`＊ `--json --repo`；`--skip`：`--reason {quota-band,offline,helmsman}`＊ `--note <一行>`＊ `--band <值>`（`quota-band` 必帶）、`--sid <UUID> --line <N>`（`helmsman` 必帶） | `research.scan`／`research.skip` | R57、R58 |
 
-- **R28 成功、拒收與草稿列的輸出文法（寫入動詞）**：(a) **成功**（rc 0；`research --fetch` 的 rc 2 同）：文字形態＝單行 `ok <kind> seq=<N>`，指派了 ID 者接 ` id=<ID>`，再接該動詞規則列出的 ` <鍵>=<值>` 附加欄（值不含空白）；`--json` 形態＝單一 JSON 物件加換行（`ensure_ascii=False`），鍵序為 `ok`（`true`）、`kind`、`seq`、`id`（無則 `null`）、其後附加欄。(b) **拒收**（rc 1；未寫）：stdout 依序為 `reject <verb> <CODE>[,<CODE>…]`（一行）、每個碼一行 `  <CODE> <detail>`、`obs-draft:`、恰一行 OBS 草稿列；`--json` 形態＝`{"ok": false, "rc": 1, "verb": …, "codes": [{"code": …, "detail": …}, …], "obs_draft": "<列>"}`。拒收時**不得**留下任何殘留：事件帳本位元組不變、`SelfImproving_Proposals/` 無新檔、家目錄除鎖檔（已釋放）外無新檔。(c) **用法錯誤**（rc 3）：stdout 空、stderr 至少一行且以 `selfimproving:` 起頭、零寫入。(d) **OBS 草稿列**（沿 P0 R6，供主控入帳，CLI 不自寫 OBS 帳本）：ID＝`--ledger` 預設帳本現有合法 ID 最大者加一（至少三位；帳本不存在則 001）、時間＝現在本機時間 `YYYY-MM-DD HH:MM ±HH:MM`、情境＝`si <verb>（自動草稿）`、症狀＝`si <verb> 拒收（rc=1）：` 接至多 5 個碼（以「、」連接，超過尾接 `…等 <k> 項`）、證據座標＝反引號包住 `python tools/selfimproving.py <verb>` 接 ` rc=1`、分類 `bug`、嚴重度 `P3`、處置 `open`、標記 `面=流程;來源=工具;回報者=si-<verb>`；草稿列本身須通過 P0 R9～R17 全部逐列判準、位元組數不超過 `row_max_bytes`（AT 以 `check` 對「附加該列後的帳本」零 finding 驗證）。(e) 唯讀動詞的 stdout 形態各見其規則；一律位元組直寫、UTF-8、LF。
-- **R29 路徑常數、家目錄與 params 依賴**：以下路徑一律相對 `--repo`、為常數、P1 不提供旗標（`check` 的 `--ledger`／`--params` 為 P0 既有）：OBS 帳本 `docs/06_quality/SelfImproving_Observation_Ledger.md`（含 `…_archive*.md`）、事件帳本 `docs/06_quality/SelfImproving_Event_Ledger.jsonl`、提案內容檔目錄 `docs/06_quality/SelfImproving_Proposals/`、協定目錄 `docs/06_quality/SelfImproving_Protocol/`（`params.json`、`research_sources.json`）、缺陷帳本家族（P0 R18 (b) 所列各檔）。**家目錄**＝`si_dir()`：環境變數 `AUTOSDD_SI_DIR` 非空則取之，否則 `<使用者家目錄>/.autosdd/selfimproving`；寫入動詞需要其下 `locks/`、`research/`（可建立、可寫），不可寫＝rc 3（detail `HOME-UNWRITABLE`），**不退回系統暫存目錄**。唯讀動詞（`check`、`status`、`scan`、`card`、`export`）不建立、不寫入家目錄下任何檔，也不要求它可寫；`export` 不讀家目錄下任何檔（R61）。**`params.json` 依賴**：每個動詞只讀它需要的鍵（R29 之後各規則逐條點名）；所需鍵缺失、型別不符或超出範圍＝rc 3（stderr 點名該鍵），不以內建預設值頂替（P0 R5 同精神）。
+- **R28 成功、拒收與草稿列的輸出文法（寫入動詞）**：(a) **成功**（rc 0；`research --fetch` 的 rc 2 同）：文字形態＝單行 `ok <kind> seq=<N>`，指派了 ID 者接 ` id=<ID>`，再接該動詞規則列出的 ` <鍵>=<值>` 附加欄（值不含空白）；`--json` 形態＝單一 JSON 物件加換行（`ensure_ascii=False`），鍵序為 `ok`（`true`）、`kind`、`seq`、`id`（無則 `null`）、其後附加欄。(b) **拒收**（rc 1；未寫）：stdout 依序為 `reject <verb> <CODE>[,<CODE>…]`（一行）、每個碼一行 `  <CODE> <detail>`、`obs-draft:`、恰一行 OBS 草稿列；`--json` 形態＝`{"ok": false, "rc": 1, "verb": …, "codes": [{"code": …, "detail": …}, …], "obs_draft": "<列>"}`。拒收時**不得**留下任何殘留：事件帳本位元組不變、`SelfImproving_Proposals/` 無新檔、家目錄除鎖檔（已釋放）外無新檔。(c) **用法錯誤**（rc 3）：stdout 空、stderr 至少一行且以 `selfimproving:` 起頭、零寫入。(d) **OBS 草稿列**（沿 P0 R6，供主控入帳，CLI 不自寫 OBS 帳本）：ID＝`--ledger` 預設帳本現有合法 ID 最大者加一（至少三位；帳本不存在則 001）、時間＝現在本機時間 `YYYY-MM-DD HH:MM ±HH:MM`、情境＝`si <verb>（自動草稿）`、症狀＝`si <verb> 拒收（rc=1）：` 接至多 5 個碼（以「、」連接，超過尾接 `…等 <k> 項`；`<k>` 為不重複碼的總數，碼依拒收輸出中的出現順序，恰好 5 個不加尾綴）、證據座標＝反引號包住 `python tools/selfimproving.py <verb>` 接 ` rc=1`、分類 `bug`、嚴重度 `P3`、處置 `open`、標記 `面=流程;來源=工具;回報者=si-<verb>`；草稿列本身須通過 P0 R9～R17 全部逐列判準、位元組數不超過 `row_max_bytes`（AT 以 `check` 對「附加該列後的帳本」零 finding 驗證）。(e) 唯讀動詞的 stdout 形態各見其規則；一律位元組直寫、UTF-8、LF。
+- **R29 路徑常數、家目錄與 params 依賴**：以下路徑一律相對 `--repo`、為常數、P1 不提供旗標（`check` 的 `--ledger`／`--params` 為 P0 既有）：OBS 帳本 `docs/06_quality/SelfImproving_Observation_Ledger.md`（含 `…_archive*.md`）、事件帳本 `docs/06_quality/SelfImproving_Event_Ledger.jsonl`、提案內容檔目錄 `docs/06_quality/SelfImproving_Proposals/`、協定目錄 `docs/06_quality/SelfImproving_Protocol/`（`params.json`、`research_sources.json`）、缺陷帳本家族（P0 R18 (b) 所列各檔）。**家目錄**＝`si_dir()`：環境變數 `AUTOSDD_SI_DIR` 非空則取之，否則 `<使用者家目錄>/.autosdd/selfimproving`；寫入動詞需要其下 `locks/`、`research/`（可建立、可寫），不可寫＝rc 3（detail `HOME-UNWRITABLE`），**不退回系統暫存目錄**。**可寫性探測**：於 `locks/` 內建立再刪除一個名為 `.probe-<行程號>` 的空檔（建不出或寫不進即不可寫；與「建不出 `locks/` 或 `research/` 目錄」是兩條不同的失敗路徑；探測檔名入規格，使測試能以同名目錄跨平台地製造「目錄在、但寫不進」，§7.1 ⚖ 28）。唯讀動詞（`check`、`status`、`scan`、`card`、`export`）不建立、不寫入家目錄下任何檔，也不要求它可寫；`export` 不讀家目錄下任何檔（R61）。**`params.json` 依賴**：每個動詞只讀它需要的鍵（R29 之後各規則逐條點名）；所需鍵缺失、型別不符或超出範圍＝rc 3（stderr 點名該鍵），不以內建預設值頂替（P0 R5 同精神）。
 
 *B. 事件帳本、寫入鎖、配號與折疊（PRD §9.2、ADR-SI-10；事件欄位名中標「本檔類推」者見 §7.1 ⚖ 15）*
 
@@ -111,7 +111,7 @@
 | `prop` | `id`（`^PROP-SI-\d{3,}$`）、`rev`（整數 ≥1）、`run`、`base`（40 位小寫 hex）、`cls`（`M`、`P`、`R`、`D`、`evaluator-change`、`loop-self`）、`action`（`add`、`modify`、`delete`、`retire`）、`route`（`loop`｜`handoff:DEF`｜`handoff:R`｜`handoff:T1`｜`handoff:PRD`）、`target`（排序、去重的路徑陣列 ≥1）、`touched_count`（整數 ≥0）、`touched_sha256`、`patch_sha256`、`body_sha256`、`digest`（四者皆 `sha256:` 形態）、`sources`（ID 陣列 ≥1）、`proposer`（標籤）、`reviewer`（標籤或 `null`）；`cls` 為 `M` 時另必備 `preimage`（物件：鍵為邏輯路徑、值為 `sha256:` 形態），其餘類別不得有此鍵 |
 
   **P2 起的 kind**（`card`、`dec`、`heldout.freeze`、`app.*`、`mea.*`）在 P1 只驗共通鍵與詞彙，其餘鍵不判（各階段 TCS 擴充欄位表）；R34、R35 的折疊讀取其中的 `prop`（PROP ID）、`dkind`、`verdict`、`flags`、`result`、`window`、`from`、`to`、`cause`、`run`（本檔類推，缺鍵＝該事件對折疊無貢獻並由 `events.transitions` 判 `TRANSITION-ORPHAN`；§7.1 ⚖ 15）。
-- **R32 配號**：(a) `seq`＝鎖內讀到的**末行** `seq` 加一（檔案不存在或為空＝1；末行無法解析＝rc 1 碼 `LEDGER-TORN`）。(b) `RUN-SI-NNN`、`ATT-SI-NNN`：`NNN`＝該家族已出現於 `run.open`／`attr` 事件 `id` 欄的最大數值加一，三位零補齊（超過三位則自然加寬）。(c) `PROP-SI-NNN`：`NNN`＝max（事件帳本中 `prop` 事件的 `id` 數值、**OBS 帳本內任何 `PROP-SI-<數字>` 出現處**的數值）加一，於寫入鎖內計算（P0 已有的 OBS 引用佔用了低號；AT 的合成 OBS 帳本以執行期組出的 PROP 引用驗證）。(d) 修訂號 `rN`：同一 PROP 的 `rev` 自 1 起連號（`prop-revise` 為前一版加一）。配號只在鎖內進行；一次成功寫入恰追加一行。
+- **R32 配號**：(a) `seq`＝鎖內讀到的**末行** `seq` 加一（檔案不存在或為空＝1；末行無法解析＝rc 1 碼 `LEDGER-TORN`）。(b) `RUN-SI-NNN`、`ATT-SI-NNN`：`NNN`＝該家族已出現於 `run.open`／`attr` 事件 `id` 欄的最大數值加一，三位零補齊（超過三位則自然加寬）。(c) `PROP-SI-NNN`：`NNN`＝max（事件帳本中 `prop` 事件的 `id` 數值、**OBS 帳本內任何 `PROP-SI-<數字>` 出現處**的數值）加一，於寫入鎖內計算——**含 archive 檔在內的 OBS 帳本讀取亦在鎖內（`build` 內）進行**，不得於取鎖前讀取後帶入（取鎖前讀到的值可能被取鎖之間他人新增的引用蓋過而撞號）（P0 已有的 OBS 引用佔用了低號；AT 的合成 OBS 帳本以執行期組出的 PROP 引用驗證）。(d) 修訂號 `rN`：同一 PROP 的 `rev` 自 1 起連號（`prop-revise` 為前一版加一）。配號只在鎖內進行；一次成功寫入恰追加一行。
 - **R33 寫入鎖與鎖內判定**：所有寫事件的動詞（`run-open`、`run-close`、`attr*`、`prop-new`、`prop-revise`、`research`）一律在**寫入鎖**內完成「讀事件帳本最新內容 → 依該內容做全部依帳本狀態的前置檢查 → 配號 → 寫內容檔（僅 `prop-*`）→ 單次完整行追加」。鎖＝獨佔建檔鎖（`lib.apply_lock.acquire`，不用 `msvcrt.locking`／`fcntl.flock`，不單靠 `O_APPEND`），鎖檔 `<si_dir>/locks/<事件帳本 realpath 的 sha256 前 16 位 hex>.lock`（檔名算法：`hashlib.sha256(os.path.realpath(ledger).encode("utf-8")).hexdigest()[:16]`，`ledger` 為事件帳本路徑）；`LOCK_TIMEOUT_SECONDS`＝60、`LOCK_STALE_SECONDS`＝300 為 `evwrite.py` 的**模組常數**（初值未校準，先例 `tools/archive_apply_locked.py`；測試以 `mock.patch.object` 改小）。**寫入核心與測試鉤子**（沿 PRD §9.2〈多寫入者與配號〉併發負控 ①）：`evwrite.append_event(ledger: Path, lock_path: Path | None, build)` 是全部寫事件動詞的唯一追加路徑——`lock_path` 非 `None` 時先取鎖（逾時拋 `LockBusyError`）；為 `None` 時不取鎖（**僅供測試的無鎖對照組**，`writeverbs` 一律傳鎖檔路徑）；取得後讀事件帳本最新內容、以該狀態呼叫 `build(state)`（`state` 至少有兩個屬性：`last_seq`〔末行 `seq`，空檔或不存在＝0〕與 `events`〔已解析的事件 dict 串列〕；`build` 回傳要追加的事件 dict〔含 `kind`、`by` 與該 kind 的欄位，不含 `seq`、`t`，二者由 `append_event` 補在前端〕，或拋 `Reject`〔帶碼集合〕使本次拒收）、配 `seq`、呼叫模組屬性 `evwrite.PAUSE_HOOK`（預設 `None`＝不做事；有值時以無參數呼叫，位置在「讀末行並配號之後、單次追加之前」）、單次完整行追加、釋放鎖；測試以 `mock.patch.object(evwrite, "PAUSE_HOOK", <可暫停的函式>)` 設鉤子。取鎖逾時（`LockBusyError`）＝rc 1、碼 `LOCK-BUSY`、拒收輸出的 detail 逐字帶持鎖者（pid 與取得時間）、帳本與內容檔零變動；陳舊鎖（mtime 超過 `LOCK_STALE_SECONDS`）被回收後寫入成功；`prop-*` 若在追加事件失敗後已寫出內容檔，須刪除該次寫出的檔（尚未被事件指向的孤兒檔不得留下）。`research --fetch` 的抓取在鎖**之外**進行、鎖內只重驗與追加（R58）。
 - **R34 PROP 狀態折疊表（PRD §5.1.2 的唯一合法轉移，§9.2；P1 的 `fold.py` 實作，`status`、`card`、`export`、`check` 共用）**：狀態名＝`proposed`、`approved`、`rejected`、`returned`、`handed-off`、`sandboxed`、`verified`、`promoted`、`measuring`、`closed`（`retired` 的折疊屬 P3，P1 不產生）。對該 PROP 的事件依 `seq` 折疊；不合下表任一列者為非法轉移（`events.transitions` 判 `TRANSITION-ILLEGAL`，R38）：
 
@@ -138,16 +138,16 @@
 
 *C. `check` 的 P1 追加項與既有項擴充（PRD §9.3 `check` 列、§9.7 #48；AC-SI-08-4、AC-SI-30-1／30-2／30-4、AC-SI-06-2）*
 
-- **R36 追加項總則**：(a) P0 的 21 個判定項的 id、項序、語意與判定碼**一字不變**。(b) 其後依序追加 7 項：`events.structure`、`events.transitions`、`events.mutated`、`events.vacuity`、`events.prop_files`、`events.research`、`research.sources`（共 28 項；P0 R3 的項目行文法 `[a-z_]+\.[a-z_]+` 照收）；首行 `si-check rows=<N> items=28`；JSON 的 `items` 為 28 個物件、鍵序同 P0 R4。(c) **載體缺席**：事件帳本檔不存在 ⇒ 前六項（`events.*`）各為 NE nonblocking、碼 `CARRIER-NOT-ESTABLISHED`；`research_sources.json` 不存在 ⇒ `research.sources` 為 NE nonblocking、同碼。因此 P0 基線 repo（無事件帳本、無來源表）的 `overall`、rc 與前 21 項的狀態皆與 P0 相同（`overall=PASS`、rc 0；28 項中 `ref.carrier_families` 與新增 7 項為 NE nonblocking）。(d) **nonblocking NE 的碼集合**由 P0 的單一碼擴為三個：`CARRIER-NOT-ESTABLISHED`、`SOURCES-HISTORY-NOT-ESTABLISHED`、`QUOTE-VERIFIER-NOT-ESTABLISHED`；其餘 NE 碼一律 blocking。(e) 追加項所需的 `params.json` 鍵無效 ⇒ 該項 blocking NE `SOURCE-UNAVAILABLE`（P0 R5）；事件帳本存在而需要 git 的比對（`events.mutated`）遇 git 不可用 ⇒ blocking NE `GIT-UNAVAILABLE`（`events.research` 的 git 依賴見 R42）。(f) OBS 草稿列規則（P0 R6）不變：非 PASS 項（含 nonblocking NE）依項序列入。(g) **P0 R8 的純度對追加項照樣成立**：`check` 零副作用、不連網、唯一子行程是環境淨化的 `git`；且 `check` 行程**不載入** `evwrite`、`propfiles`、`writeverbs`、`fetch`、`research` 五個模組（R63 ③）。(h) `ref.carrier_families`（P0 R18 (d)）語意**不變**：任何 `(ATT|PROP|DEC|APP|MEA|RUN)-SI-<數字>` 的提及仍印 NE nonblocking（§7.1 ⚖ 2）。
-- **R37 `events.structure`**：對事件帳本逐行（先剝 BOM 與行尾單一 CR）判：空白行、或非 JSON 物件的行 ⇒ `EVENT-PARSE`；共通鍵缺 ⇒ `EVENT-KEY-MISSING`；`kind` 不在詞彙 ⇒ `EVENT-KIND`；其餘型別或值域不合（`seq` 為布林或 <1、`t` naive 或不合形態、`by` 不合標籤、R31 各列的型別與值域，含 `run.close` 的 `outcomes`／`no_event` 非恰一個、`research.skip` 的 `reason` 與附帶鍵不符、`prop` 的 `preimage` 與 `cls` 不符）⇒ `EVENT-TYPE`；P1 欄位表 kind 的必備鍵缺 ⇒ `EVENT-KEY-MISSING`、表外鍵 ⇒ `EVENT-KEY-UNKNOWN`；`seq` 非嚴格遞增（重複或遞減；可跳號）⇒ `EVENT-SEQ`；整行位元組數 > `event_max_bytes` ⇒ `EVENT-BYTES-OVER`。subject＝`seq=<n>`（`seq` 可解析時）或 `L<行號>`。P2 起的 kind 只驗共通鍵與詞彙（R31）。`event_max_bytes` 無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
-- **R38 `events.transitions`**：依 R34 折疊；非法轉移 ⇒ `TRANSITION-ILLEGAL`（subject＝PROP ID，detail 含 `seq=<n>`、事件 kind 與前置狀態）；事件的 `prop`／`att` 鍵（與 `dec`〔`dkind`＝`resume`〕的 `run` 鍵）指向不存在的對象 ⇒ `TRANSITION-ORPHAN`（subject＝該事件的 `seq=<n>`）；下列三類**不走孤兒判定**、一律 `TRANSITION-ILLEGAL`（detail 含 `seq=<n>` 與事件 kind）：`attr.confirm`／`attr.reject` 對已落定（已有 confirm 或 reject）的 ATT 再落定（subject＝ATT ID）、`run.close` 的 `run` 為未開（尚無 `run.open`）或已關的運轉（subject＝RUN ID）、`prop` 事件的 `run` 在該事件的 `seq` 時並非 open 運轉（subject＝PROP ID）；`attr.confirm`／`attr.reject` 的 `by` 等於被引 `attr` 的 `by` ⇒ `CONFIRMER-IS-PROPOSER`（subject＝被引的 ATT ID；PRD AC-SI-06-1：確認者≠提出者）。**AC-SI-08-4 ⑤**：事件帳本含 ≥1 筆 `dec` 時，本項另印**一個** nonblocking NE finding（碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`、subject `-`、detail 含 `dec` 筆數與「引言回查屬 P2」），不判紅（§7.1 ⚖ 3）；`dec` 的 `dkind` 轉移照 R34 判。
+- **R36 追加項總則**：(a) P0 的 21 個判定項的 id、項序、語意與判定碼**一字不變**。(b) 其後依序追加 7 項：`events.structure`、`events.transitions`、`events.mutated`、`events.vacuity`、`events.prop_files`、`events.research`、`research.sources`（共 28 項；P0 R3 的項目行文法 `[a-z_]+\.[a-z_]+` 照收）；首行 `si-check rows=<N> items=28`；JSON 的 `items` 為 28 個物件、鍵序同 P0 R4。(c) **載體缺席**：事件帳本檔不存在 ⇒ 前六項（`events.*`）各為 NE nonblocking、碼 `CARRIER-NOT-ESTABLISHED`；`research_sources.json` 不存在 ⇒ `research.sources` 為 NE nonblocking、同碼。因此 P0 基線 repo（無事件帳本、無來源表）的 `overall`、rc 與前 21 項的狀態皆與 P0 相同（`overall=PASS`、rc 0；28 項中 `ref.carrier_families` 與新增 7 項為 NE nonblocking）。(d) **nonblocking NE 的碼集合**由 P0 的單一碼擴為兩個：`CARRIER-NOT-ESTABLISHED`、`SOURCES-HISTORY-NOT-ESTABLISHED`；其餘 NE 碼一律 blocking。`QUOTE-VERIFIER-NOT-ESTABLISHED` **不是 NE 碼**：它是 `PASS` 項目上的 **warn 層級 finding**（`level` 為 `warn`，沿 R45 `REOPEN-CANDIDATE` 的形態：detail 以 `[warn]` 起頭；P0 R5：warn 不改項目狀態、不影響 rc；R38、R42 (d)）。(e) 追加項所需的 `params.json` 鍵無效 ⇒ 該項 blocking NE `SOURCE-UNAVAILABLE`（P0 R5）；事件帳本存在而需要 git 的比對（`events.mutated`）遇 git 不可用 ⇒ blocking NE `GIT-UNAVAILABLE`（`events.research` 的 git 依賴見 R42）。(f) OBS 草稿列規則（P0 R6）不變：非 PASS 項（含 nonblocking NE）依項序列入。(g) **P0 R8 的純度對追加項照樣成立**：`check` 零副作用、不連網、唯一子行程是環境淨化的 `git`；且 `check` 行程**不載入** `evwrite`、`propfiles`、`writeverbs`、`fetch`、`research` 五個模組（R63 ③）。(h) `ref.carrier_families`（P0 R18 (d)）語意**不變**：任何 `(ATT|PROP|DEC|APP|MEA|RUN)-SI-<數字>` 的提及仍印 NE nonblocking（§7.1 ⚖ 2）。
+- **R37 `events.structure`**：對事件帳本逐行（先剝 BOM 與行尾單一 CR）判：空白行、或非 JSON 物件的行 ⇒ `EVENT-PARSE`；共通鍵缺 ⇒ `EVENT-KEY-MISSING`；`kind` 不在詞彙 ⇒ `EVENT-KIND`；其餘型別或值域不合（`seq` 為布林或 <1、`t` naive 或不合形態、`by` 不合標籤、R31 各列的型別與值域，含 `run.close` 的 `outcomes`／`no_event` 非恰一個、`research.skip` 的 `reason` 與附帶鍵不符、`prop` 的 `preimage` 與 `cls` 不符）⇒ `EVENT-TYPE`；P1 欄位表 kind 的必備鍵缺 ⇒ `EVENT-KEY-MISSING`、表外鍵 ⇒ `EVENT-KEY-UNKNOWN`；`seq` 非嚴格遞增（重複或遞減；可跳號）⇒ `EVENT-SEQ`；整行位元組數 > `event_max_bytes` ⇒ `EVENT-BYTES-OVER`。subject＝`seq=<n>`（`seq` 可解析時）或 `L<行號>`。P2 起的 kind 只驗共通鍵與詞彙（R31）。`event_max_bytes` 無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。**讀取側防禦（折疊的入口）**：折疊（R34、R35；`status`、`export`、`card`、`check` 與全部寫入動詞的鎖內折疊共用同一份）**只納入通過上述單事件判準的事件**——未通過者對折疊沒有貢獻（不開運轉、不登記 PROP 或 ATT、不算研究事件、不計入 `skip_reasons` 與窗），其問題只由本項以 `EVENT-*` 報；對事件欄位值做集合或字典查表前，先確認其為字串（型別怪異的值＝該事件未通過，例：`reason`、`type`、`att` 為陣列，或 `obs` 的元素為陣列，一律判 `EVENT-TYPE`，不得拋 `TypeError`，§7.1 ⚖ 26）。`export --kind events` 仍原樣輸出全部可解析的事件（R61）；`check` 的其餘追加項照常產出。
+- **R38 `events.transitions`**：依 R34 折疊；非法轉移 ⇒ `TRANSITION-ILLEGAL`（subject＝PROP ID，detail 含 `seq=<n>`、事件 kind 與前置狀態）；事件的 `prop`／`att` 鍵（與 `dec`〔`dkind`＝`resume`〕的 `run` 鍵）指向不存在的對象 ⇒ `TRANSITION-ORPHAN`（subject＝該事件的 `seq=<n>`）；下列三類**不走孤兒判定**、一律 `TRANSITION-ILLEGAL`（detail 含 `seq=<n>` 與事件 kind）：`attr.confirm`／`attr.reject` 對已落定（已有 confirm 或 reject）的 ATT 再落定（subject＝ATT ID）、`run.close` 的 `run` 為未開（尚無 `run.open`）或已關的運轉（subject＝RUN ID）、`prop` 事件的 `run` 在該事件的 `seq` 時並非 open 運轉（subject＝PROP ID）；`attr.confirm`／`attr.reject` 的 `by` 等於被引 `attr` 的 `by` ⇒ `CONFIRMER-IS-PROPOSER`（subject＝被引的 ATT ID；PRD AC-SI-06-1：確認者≠提出者）。**AC-SI-08-4 ⑤**：事件帳本含 ≥1 筆 `dec`（**單一 `dec` 即印**）時，本項另印**一個 warn 層級 finding**（碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`、subject `-`、detail 以 `[warn]` 起頭並含 `dec` 筆數與「引言回查屬 P2」），項目狀態不變（沒有其他問題時仍為 `PASS`）、不影響 rc（§7.1 ⚖ 3）；零筆 `dec` 不印；`dec` 的 `dkind` 轉移照 R34 判。
 - **R39 `events.mutated`**：帳本相對於 `--repo` 的 POSIX 路徑記為 P。基準＝`git log --first-parent --reverse --format=%H -- <P>` 的第一個 commit（事件帳本無遷移，P0 R20 的遷移豁免不適用）；沒有任何 commit 動過 P ⇒ 本項 PASS（項目層 `detail` 為 `no-history`）。版本序列＝基準版內容、其後各 commit 的內容、工作樹內容（與 HEAD 不同時）；各版先把 CRLF 換成 LF、以 `\n` 切行。**逐對比較**（相鄰版）：前版的**每一行**須與後版同位置的行逐字相等（即前版必為後版的行前綴）；後版較短 ⇒ `ROW-MUTATED`（cause＝`deleted`）、位置上內容不同 ⇒ `ROW-MUTATED`（cause＝`changed`）；後版只在尾端多出行＝追加、放行。每筆 finding 的 subject＝**前版該位置的行**之 `seq=<n>`（`cause=changed` 與 `cause=deleted` 皆然；例：前版有 `seq` 為 3、4、5 的三行，後版刪去 3 號行而變成 4、5 兩行，則位置 3 判 `changed`（subject `seq=3`）、位置 4 判 `changed`（subject `seq=4`）、位置 5 判 `deleted`（subject `seq=5`）；前版該行無法解析則 `L<行號>`），detail 含 `commit=<短 sha 或 WORKTREE>`、`cause=<deleted|changed>` 與字樣 `掌舵者`（要求過目；與 P0 R20 同）。誠實劃界：未提交工作樹內的多步改寫無歷史可比，只看工作樹與 HEAD 的淨差異。git 不可用 ⇒ blocking NE `GIT-UNAVAILABLE`。
 - **R40 `events.vacuity`**：事件帳本存在且解析到的事件數（空白行與無法解析的行不計）< `min_events` ⇒ blocking NE `EVENTS-BELOW-FLOOR`（等於下限算通過；空檔＝0 筆）；檔案不存在由 R36 (c) 處理（nonblocking NE），不在此判。`min_events` 無效 ⇒ blocking NE `SOURCE-UNAVAILABLE`。
 - **R41 `events.prop_files`**：對每個 `prop` 事件，內容檔 `docs/06_quality/SelfImproving_Proposals/<id>/r<rev>.patch` 與 `.md` 須存在（缺 ⇒ `PROP-FILE-MISSING`）；`patch_sha256`＝`sha256:` 接 `.patch` 檔**原位元組**的 sha256（不做 CRLF 正規化，§7.1 ⚖ 16）、`body_sha256`＝`.md` 檔 CRLF 換 LF 後的 sha256，不符 ⇒ `PROP-PATCH-SHA-MISMATCH`、`PROP-BODY-SHA-MISMATCH`；`touched_count`、`touched_sha256` 由 `.patch` 依 R51 重新導出（`touched_sha256`＝`json.dumps(排序去重後的路徑陣列, ensure_ascii=False, separators=(",", ":"))` 的 UTF-8 位元組之 sha256，加 `sha256:` 前綴），不符 ⇒ `PROP-TOUCHED-MISMATCH`（**只在 `patch_sha256` 相符時才判**：`.patch` 已被改動者，導出值不可信，只報 `PROP-PATCH-SHA-MISMATCH` 一碼）。subject＝`<PROP-ID> r<rev>`。內容檔存在但 `git` 不可用不影響本項（重導出走 R51 的自寫解析器；`git apply` 超集檢查只在 `prop-*` 的寫入路徑，不在 `check`）。
-- **R42 `events.research`（PRD AC-SI-30-1、30-2）**：(a) **每運轉研究事件**：對每個運轉 R：研究事件（`research.scan`／`research.skip`，其 `run`＝R）多於 1 筆 ⇒ `RESEARCH-MULTIPLE`（subject＝R，detail 列 `seq`）；R 有 ≥1 筆 `prop` 事件而研究事件為 0 筆 ⇒ `RESEARCH-MISSING`；唯一的研究事件的 `seq` 不介於 R 的 `run.open` 與 R 的第一筆 `prop` 之間 ⇒ `RESEARCH-ORDER`。(b) **來源 id**：每筆 `research.scan` 的 `sources[].id` 須屬來源表所有 `id`（含 `retired: true` 者），否則 `SRC-UNKNOWN`（subject＝`seq=<n> <id>`）；來源表不存在或無法解析而存在 `research.scan` ⇒ blocking NE `SOURCE-UNAVAILABLE`。(c) **`sources_sha256` 對提交歷史**：對每筆 `research.scan`，取來源表檔路徑 `docs/06_quality/SelfImproving_Protocol/research_sources.json` 的 git 提交歷史中、committer 時間不晚於該事件 `t` 的**最近一次**提交，其當時內容（CRLF 換 LF）的 sha256（加 `sha256:` 前綴）須等於事件的 `sources_sha256`；不符、或 `t` 之前沒有任何提交含該檔 ⇒ `SOURCES-SHA-MISMATCH`（subject＝`seq=<n>`）；git 不可用 ⇒ nonblocking NE `SOURCES-HISTORY-NOT-ESTABLISHED`（單一 finding、subject `-`）。誠實劃界：來源表的 git 歷史被 rebase／amend 改寫會使既有事件永遠紅（與 `ROW-MUTATED` 同型假設）；工作樹中未提交的來源表改動不被視為歷史。(d) **`helmsman` 免掃**：存在 ≥1 筆 `research.skip`（`reason`＝`helmsman`）⇒ 一個 nonblocking NE finding（碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`、subject `-`）；`reason`、`note`、附帶鍵的形態由 R37 判。
+- **R42 `events.research`（PRD AC-SI-30-1、30-2）**：(a) **每運轉研究事件**：對每個運轉 R：研究事件（`research.scan`／`research.skip`，其 `run`＝R）多於 1 筆 ⇒ `RESEARCH-MULTIPLE`（subject＝R，detail 列 `seq`）；R 有 ≥1 筆 `prop` 事件而研究事件為 0 筆 ⇒ `RESEARCH-MISSING`；唯一的研究事件的 `seq` 不介於 R 的 `run.open` 與 R 的第一筆 `prop` 之間 ⇒ `RESEARCH-ORDER`。(b) **來源 id**：每筆 `research.scan` 的 `sources[].id` 須屬來源表所有 `id`（含 `retired: true` 者），否則 `SRC-UNKNOWN`（subject＝`seq=<n> <id>`）；來源表不存在或無法解析而存在 `research.scan` ⇒ blocking NE `SOURCE-UNAVAILABLE`。(c) **`sources_sha256` 對提交歷史**：對每筆 `research.scan`，取來源表檔路徑 `docs/06_quality/SelfImproving_Protocol/research_sources.json` 的 git 提交歷史中、committer 時間不晚於該事件 `t`（**等號放行**：提交時間與 `t` 為同一秒者算不晚於）的**最近一次**提交，其當時內容（CRLF 換 LF）的 sha256（加 `sha256:` 前綴）須等於事件的 `sources_sha256`；不符、或 `t` 之前沒有任何提交含該檔 ⇒ `SOURCES-SHA-MISMATCH`（subject＝`seq=<n>`）；git 不可用 ⇒ nonblocking NE `SOURCES-HISTORY-NOT-ESTABLISHED`（單一 finding、subject `-`）。誠實劃界：來源表的 git 歷史被 rebase／amend 改寫會使既有事件永遠紅（與 `ROW-MUTATED` 同型假設）；工作樹中未提交的來源表改動不被視為歷史。(d) **`helmsman` 免掃**：存在 ≥1 筆 `research.skip`（`reason`＝`helmsman`；單一筆即印）⇒ 一個 warn 層級 finding（碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`、subject `-`、detail 以 `[warn]` 起頭；項目狀態不變、不影響 rc，同 R38）；`reason`、`note`、附帶鍵的形態由 R37 判。
 - **R43 `research.sources` 與來源表檔格式（PRD AC-SI-30-2、§9.2）**：來源表＝`docs/06_quality/SelfImproving_Protocol/research_sources.json`，UTF-8（無 BOM）、換行 LF、結尾換行、頂層 `{"schema_rev": 1, "sources": [...]}`；`sources` 依 `id` 的位元組序遞增；每筆必備 `id`（`^[a-z0-9][a-z0-9-]{0,31}$`、唯一）、`url`、`kind`（`changelog`｜`docs`｜`release`｜`blog`）、`extract`（非空字串）、`added_by`（非空字串），選用 `retired`（值只准 JSON `true`；缺＝現役）。**驗證函式 `sources.validate_table(raw: bytes, policy) -> list[tuple[str, str, str]]`**（回傳〔碼, subject, detail〕三元組串列，無問題＝空串列；`check` 的本項與 `research --fetch` 的預檢共用同一個函式；`sources.Policy` 為 frozen dataclass，欄位 `allow_http: bool`、`allow_loopback: bool`）依序產生下列碼，任一 ⇒ 本項 FAIL：`SRC-FILE-FORMAT`（BOM、CR、結尾無換行、不是 UTF-8 JSON 物件）、`SRC-SCHEMA`（`schema_rev` 缺或不是 1、頂層缺 `sources`、`sources` 不是陣列、元素不是物件或有表外鍵）、`SRC-FIELD-MISSING`（必備鍵缺或空）、`SRC-ID-FORMAT`、`SRC-ID-DUP`、`SRC-ORDER`（未依 `id` 位元組序遞增；`id` 相同者由 `SRC-ID-DUP` 判、不另報本碼）、`SRC-KIND`、`SRC-RETIRED-TYPE`、`SRC-URL-SCHEME`（`url` 不以 `https://` 起頭；`policy.allow_http` 為真時另收 `http://`）、`SRC-URL-USERINFO`（authority 含 `@`）、`SRC-URL-HOST`（host 為 `localhost` 或 `*.localhost`，或字面 IP 落在 `127.0.0.0/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、IPv6 `::1`、`fe80::/10`、`fc00::/7`〔含 IPv4 映射寫法〕；規則集沿 `AgentConsole/docs/02_architecture/Architecture.md` §8.4 的私網段清單，**只驗字串形態**，不做 DNS 解析；`policy.allow_loopback` 為真時 loopback 放行）。`sources.DEFAULT_POLICY`＝嚴格政策（`allow_http` 與 `allow_loopback` 皆為 `False`）；CLI 入口不暴露放寬旗標，測試以 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 放寬（`check` 與 `research` 同取該物件）。表檔不存在 ⇒ R36 (c)。**只增不刪**的偵測由 R42 (b) 的 `SRC-UNKNOWN` 承擔，不另設碼。
 - **R44 標記欄擴充（PRD §5.1.1、AC-SI-30-4）**：標記鍵詞彙加 `src`（P0 R14 的詞彙由 10 個擴為 11 個；`MARK-UNKNOWN-KEY` 的集合隨之）；`src` 的值須符合 `^[a-z0-9][a-z0-9-]{0,31}$`，否則 `MARK-VALUE`。新增三個判定碼：(a) `回報者` 為 `研究者` 的列，若標記無 `外部衍生=是` ⇒ `RESEARCHER-NOT-EXTERNAL`、若無 `src` ⇒ `RESEARCHER-NO-SRC`（兩碼屬項目 `row.provenance`，subject＝列 ID）；(b) 任何帶 `src` 的列，其值須屬來源表所有 `id`（含 `retired`），否則 `SRC-UNKNOWN`（項目 `row.markers`）；來源表不存在或無法解析而有帶 `src` 的列 ⇒ `row.markers` blocking NE `SOURCE-UNAVAILABLE`。只在標記欄語法合格、鍵值皆已解析的列上判。P0 的其餘列判準不變。（§7.1 ⚖ 17：PRD 寫「`row.provenance`／`row.markers` 加碼」，三碼各屬哪一項為本檔類推。）
-- **R45 復發候選提示（PRD AC-SI-06-2；§7.1 ⚖ 17）**：`check` 對**新列**列出「同證據座標檔案路徑」的已結列供立案者確認。**新列**＝OBS 帳本工作樹內容中、不在 HEAD 版（`git show HEAD:<帳本>`）的列（以 ID 比對；帳本未被追蹤或 HEAD 無該檔＝全部列皆新列；git 不可用＝本提示不產生），且處置首詞為 `open`、標記無 `reopens` 鍵。路徑集合：取證據座標格中 P0 R16 的 `path`、`file`、`dir` 三形態命中的片段，去掉結尾 `:行號` 或 `:行號–行號`，反斜線換成 `/`，以 `casefold` 比對。**已結列**＝(i) OBS 帳本（含 `…_archive*.md`）中處置首詞∈`fixed@…`、`DEF-…`、`merged@…`、`retired`、`decided` 的列（其證據座標格的路徑集合）；(ii) 缺陷帳本主檔與 archive 中狀態欄分類為 `fixed`、`wontfix`、`closed-by-decision`、`routed` 的 DEF 列（其「現象與證據（file:line）」欄的路徑集合；DEF 列無「分類」欄、只比路徑，候選精準度未量）；**分類與解析一律走 `defs.py`**：`defs.classify_status(text: str) -> str | None`（回傳 `open`、`fixed`、`wontfix`、`closed-by-decision`、`routed` 或 `None`）與 `defs.load_ledger_status(path: Path) -> dict[str, str | None]`（{DEF 號: 分類}；以表頭定位 `ID` 與 `狀態` 欄、同號後列覆寫前列、欄數與表頭不符的列記 `None`、無表頭回空 dict），兩者須與 `tools/check_defect_log_crossref.py` 的 `_classify`、`_load_ledger_status()` 逐筆差分一致（PRD §9.1 C4 的 `defs` 列；AC-131-2 的負控）。新列與某已結列的路徑集合有交集 ⇒ 一個 **warn 等級** finding：項目 `row.markers`、碼 `REOPEN-CANDIDATE`、subject＝新列 ID、detail 以 `[warn]` 起頭並列至多 5 個已結列 ID（依 ID 字串的位元組序排序後取前 5 個，餘以 `…+<k>`）。warn 不改項目狀態（P0 R5）、不影響 rc；新列不與自己比。
+- **R45 復發候選提示（PRD AC-SI-06-2；§7.1 ⚖ 17）**：`check` 對**新列**列出「同證據座標檔案路徑」的已結列供立案者確認。**新列**＝OBS 帳本工作樹內容中、不在 HEAD 版（`git show HEAD:<帳本>`）的列（以 ID 比對；帳本未被追蹤或 HEAD 無該檔＝全部列皆新列；git 不可用＝本提示不產生），且處置首詞為 `open`、標記無 `reopens` 鍵。路徑集合：**先剝除符合 P0 R16 第八形態（`cmd`：反引號包住、以 `python`、`git` 等指令名起頭的指令片段）的片段**——草稿列的證據格就是這種片段（以反引號包住 `python tools/selfimproving.py <verb>`，其後接 ` rc=N`；見 R28 (d)），不剝則每個草稿列都因片段內的 `tools/selfimproving.py` 對已結列觸發 `REOPEN-CANDIDATE`，R28 (d) 的「零 finding」不成立；只剝該形態，反引號包住的普通路徑照取——**再**取證據座標格中 P0 R16 的 `path`、`file`、`dir` 三形態命中的片段，去掉結尾 `:行號` 或 `:行號–行號`，反斜線換成 `/`，以 `casefold` 比對。**已結列**＝(i) OBS 帳本（含 `…_archive*.md`）中處置首詞∈`fixed@…`、`DEF-…`、`merged@…`、`retired`、`decided` 的列（其證據座標格的路徑集合）；(ii) 缺陷帳本主檔與 archive 中狀態欄分類為 `fixed`、`wontfix`、`closed-by-decision`、`routed` 的 DEF 列（其「現象與證據（file:line）」欄的路徑集合；DEF 列無「分類」欄、只比路徑，候選精準度未量）；**分類與解析一律走 `defs.py`**：`defs.classify_status(text: str) -> str | None`（回傳 `open`、`fixed`、`wontfix`、`closed-by-decision`、`routed` 或 `None`）與 `defs.load_ledger_status(path: Path) -> dict[str, str | None]`（{DEF 號: 分類}；以表頭定位 `ID` 與 `狀態` 欄、同號後列覆寫前列、欄數與表頭不符的列記 `None`、無表頭回空 dict），兩者須與 `tools/check_defect_log_crossref.py` 的 `_classify`、`_load_ledger_status()` 逐筆差分一致（PRD §9.1 C4 的 `defs` 列；AC-131-2 的負控）。新列與某已結列的路徑集合有交集 ⇒ 一個 **warn 等級** finding：項目 `row.markers`、碼 `REOPEN-CANDIDATE`、subject＝新列 ID、detail 以 `[warn]` 起頭並列至多 5 個已結列 ID（依 ID 字串的位元組序排序後取前 5 個，餘以 `…+<k>`）。warn 不改項目狀態（P0 R5）、不影響 rc；新列不與自己比。
 - **R46 `params.json` 新鍵、指紋排除與判準版本（PRD AC-SI-30-5／30-6、§9.7 #52）**：(a) `PARAM_SPECS` 加 5 個鍵，型別皆為整數 ≥1：`research_fetch_max`、`research_bytes_max`、`research_timeout_seconds`、`min_events`、`export_limit_max`（P0 R21 的必備鍵由 23 增為 28；缺 ⇒ `PARAM-MISSING`、型別 ⇒ `PARAM-TYPE`、範圍 ⇒ `PARAM-RANGE`）；真 `params.json` 的頂層鍵依位元組序遞增（P0 R24 不變），5 個新鍵的初值（未校準）為 8、262144、20、1、500，`check` 與 AT 不斷言值（V6 於提交當下核對）。(b) **指紋排除**：判準指紋的 manifest（P0 R7）排除相對協定目錄路徑**恰為** `research_sources.json` 的檔；排除清單只涵蓋這一個檔名；改它不改指紋、改 `params.json` 或 `metrics.md` 改指紋。(c) `check_rules_rev` 由 1 改為 2（P1 擴充 `check` 判準語意；本檔類推，§7.1 ⚖ 14）。
 
 *D. 運轉與歸因（PRD §9.2、AC-SI-10-3、AC-SI-03-2、AC-SI-05、AC-SI-06）*
@@ -157,26 +157,26 @@
 
 *E. 提案物件與前置檢查（PRD §9.4〈`si prop-new`／`si prop-revise` 前置檢查〉、AC-SI-07～11、14）*
 
-- **R49 `prop-new`／`prop-revise` 流程**：(a) **輸入**：`--patch-file`（unified diff，以**位元組**讀入並原樣存為 `rN.patch`；不得空、不得含 `GIT binary patch`）；`--body-file`（Markdown，須為 UTF-8；CRLF 換 LF 後存為 `rN.md`）；`--target` 與 `--source` 可重複；`--target` 須為 repo 相對 POSIX 路徑（M 類為 `memory/<檔名>`），語法不合 R51 (c) 的別名形態 ⇒ rc 3；去重並排序後入 `target`。(b) **兩階段**：階段一（輸入類，鎖內、收到即回，不進階段二）：`PATCH-EMPTY`、`PATCH-BINARY`、`PATCH-PARSE`（無可辨識標頭、C-style 引號解碼失敗、非 UTF-8 路徑）、`PATCH-PATH-MISMATCH`（`git apply --numstat -z` 看到的路徑不全在自寫解析器的聯集內，R51 (b)）、`GIT-UNAVAILABLE`、`BODY-SKELETON`、`BODY-FIELD-MISSING`、`BODY-FIELD-VALUE`（R50）；階段二（政策與狀態類，**全部收集後一併回報**）：R52～R54 與卡面高寬（R56）的碼。任一碼 ⇒ 拒收（R28 (b)），否則依序：配 `PROP-SI-NNN`／`rev`（R32）→ 寫內容檔（R55）→ 追加 `prop` 事件。(c) **`prop-revise`**：`--prop` 須存在（碼 `PROP-NOT-FOUND`）、目前折疊狀態須為 `returned`（否則 `TRANSITION-ILLEGAL`，與 `check` 的 R38 同碼；PRD AC-SI-08-2：跳級被拒並印 OBS 草稿列）、新 `rev`＝目前 `rev`＋1 須 ≤ `max_revisions`＋1（否則 `REV-LIMIT`）；`cls`、`action`、`target`、`sources` 取自該 PROP 最近一筆 `prop` 事件；`DUPLICATE-TYPE` 判定排除其自身；不計入 `BUDGET-PROPOSALS`。(d) **成功附加欄**（R28 (a) 的 `id` 即 PROP ID）：`rev`、`route`、`cls`、`digest`（文字形態印前 8 碼、`--json` 印全值）、`touched_count`；`--json` 另有 `files`（兩個內容檔的 repo 相對路徑）。(e) **誠實劃界**（PRD §9.4）：以上只擋經 SI CLI 建立的 PROP；直接用 Edit／Write 改正式面不經 SI，不在本契約的射程。**修訂超限的後果（P1）**：`REV-LIMIT` 只拒收、不寫事件、PROP 維持 `returned`；PRD 所稱「超限＝rejected＋冷卻」需要人決定事件（`dec`，P2），P1 不代寫（§7.1 ⚖ 10）。
+- **R49 `prop-new`／`prop-revise` 流程**：(a) **輸入**：`--patch-file`（unified diff，以**位元組**讀入並原樣存為 `rN.patch`；不得空、不得含 `GIT binary patch`）；`--body-file`（Markdown，須為 UTF-8；CRLF 換 LF 後存為 `rN.md`）；`--target` 與 `--source` 可重複；`--target` 須為 repo 相對 POSIX 路徑（M 類為 `memory/<檔名>`），語法不合 R51 (c) 的別名形態 ⇒ rc 3；去重並排序後入 `target`。(b) **兩階段**：階段一（輸入類，鎖內、收到即回，不進階段二）：`PATCH-EMPTY`、`PATCH-BINARY`、`PATCH-PARSE`（無可辨識標頭、C-style 引號解碼失敗、非 UTF-8 路徑、`git apply --numstat -z` 自身失敗〔R51 (b)〕）、`PATCH-PATH-MISMATCH`（`git apply --numstat -z` 看到的路徑不全在自寫解析器的聯集內，R51 (b)）、`GIT-UNAVAILABLE`、`BODY-SKELETON`、`BODY-FIELD-MISSING`、`BODY-FIELD-VALUE`（R50）；階段二（政策與狀態類，**全部收集後一併回報**）：R52～R54 與卡面高寬（R56）的碼。任一碼 ⇒ 拒收（R28 (b)），否則依序：配 `PROP-SI-NNN`／`rev`（R32）→ 寫內容檔（R55）→ 追加 `prop` 事件。(c) **`prop-revise`**：`--prop` 須存在（碼 `PROP-NOT-FOUND`）、目前折疊狀態須為 `returned`（否則 `TRANSITION-ILLEGAL`，與 `check` 的 R38 同碼；PRD AC-SI-08-2：跳級被拒並印 OBS 草稿列）、新 `rev`＝目前 `rev`＋1 須 ≤ `max_revisions`＋1（否則 `REV-LIMIT`）；`cls`、`action`、`target`、`sources` 取自該 PROP 最近一筆 `prop` 事件；`DUPLICATE-TYPE` 判定排除其自身；不計入 `BUDGET-PROPOSALS`。(d) **成功附加欄**（R28 (a) 的 `id` 即 PROP ID）：`rev`、`route`、`cls`、`digest`（文字形態印前 8 碼、`--json` 印全值）、`touched_count`；`--json` 另有 `files`（兩個內容檔的 repo 相對路徑）。(e) **誠實劃界**（PRD §9.4）：以上只擋經 SI CLI 建立的 PROP；直接用 Edit／Write 改正式面不經 SI，不在本契約的射程。**修訂超限的後果（P1）**：`REV-LIMIT` 只拒收、不寫事件、PROP 維持 `returned`；PRD 所稱「超限＝rejected＋冷卻」需要人決定事件（`dec`，P2），P1 不代寫（§7.1 ⚖ 10）。
 - **R50 `rN.md` 形態（沿 SPEC-PATCH 三節骨架，PRD §9.2；欄位名為本檔類推，§7.1 ⚖ 6）**：(a) **骨架**：須有 `## ` 級標題，其文字分別含 `反例證據`、`Before`、`After`、`影響面`、`欄位`（順序不拘；缺任一 ⇒ `BODY-SKELETON`，detail 列缺者）。(b) **欄位表**：標題含 `欄位` 的節下的第一個 Markdown 表（`| 欄位 | 內容 |` 表頭加分隔列）；每列第一格為鍵、第二格為單行值（strip）。可識別的鍵：`symptom`、`risk`、`rollback`、`retire_when`、`reopen_symptom`、`budget`、`verify_plan`、`result_label`、`scope`、`source_obs`。(c) **必備**：`symptom`、`risk`、`rollback`、`budget`、`result_label`、`scope` 對**所有類別**必備（缺或空 ⇒ `BODY-FIELD-MISSING`，detail 列欄名；PRD AC-SI-09-1：輸入帶結果標籤與適用範圍、每提案宣告預算〔AC-SI-10-2〕、一個動作的回滾配方）；`result_label` 的值須∈`失敗`、`成功`、`升級`（否則 `BODY-FIELD-VALUE`）。(d) **M 類四欄**（PRD AC-SI-09-3）＝`result_label`、`scope`、`source_obs`、`retire_when`：`cls` 為 `M` 時此四欄缺或空 ⇒ `M-FIELD-MISSING`（detail 列欄名；M 類的這四欄不另報 `BODY-FIELD-MISSING`）；`source_obs` 的每個以頓號或逗號分隔的記號須是 OBS ID 且屬 `--source`，否則同碼。(e) **誠實劃界**：「輸入須是抽象化摘要、不得以原始軌跡全文充當條目」（PRD AC-SI-09-1）只能由本節的形態判準（骨架、標籤、範圍、單行欄位）近似，無機械物判定語意，流程面由 SOP 條文代位（R65）。
-- **R51 `touched` 導出與別名形態拒收（PRD AC-SI-07-3、§9.4、§9.2〈鐵律三自問〉）**：(a) **自寫解析器**逐行取：`diff --git <A> <B>` 的兩個路徑（去掉各自一層 `a/`、`b/` 前綴）、`--- <路徑>` 與 `+++ <路徑>`（去前綴；`/dev/null` 視為無路徑；結尾的 TAB 與其後時間戳不計）、`rename from`／`rename to`、`copy from`／`copy to`（無前綴）；**須實作 git 的 C-style 引號解碼**（以雙引號包住的路徑內，`\"`、`\\`、`\n`、`\t`、`\ooo` 八進位位元組皆解碼，位元組序列以 UTF-8 解讀）；新增、刪除、改名兩端皆算；各處路徑取**聯集**、排序、去重，檔數即 `touched_count`（寧多勿漏；`diff --git` 與 `---`／`+++` 不一致不另判，聯集已涵蓋兩者）。(b) **超集檢查**：以 `git apply --numstat -z <patch>` 列出 git 看到的路徑（經 `git.py` 的 `apply_numstat(repo: Path, patch_file: Path) -> list[str]`、環境淨化、帶 timeout；測試以 `mock.patch.object(git, "apply_numstat", …)` 模擬「git 看見而解析器漏掉」），每一條都須在 (a) 的聯集內（比較前反斜線換 `/`），否則拒收 `PATCH-PATH-MISMATCH`；它只能檢查、不能當 `touched` 的來源（改名與複製只列目的端）。(c) **別名形態**（fail-closed→整張 PROP `route=handoff`，不是拒收）：先把 `\` 換成 `/`，再判——任一段為 `..`；以 `/` 起頭（含 UNC `//`）；含 `:`（磁碟機代號、NTFS 資料流）；任一段（單獨的 `.` 除外）以 `.` 或空白結尾；任一段（取第一個 `.` 之前、`casefold`）屬 Windows 保留裝置名 `con`、`prn`、`aux`、`nul`、`com1`～`com9`、`lpt1`～`lpt9`；含 NUL 或任何控制字元（<0x20、0x7f）。(d) 兩平台對同一 patch 必須導出同一個 `touched`（macOS 未驗）；digest 內存原大小寫的正規化 POSIX 路徑（R55）。
+- **R51 `touched` 導出與別名形態拒收（PRD AC-SI-07-3、§9.4、§9.2〈鐵律三自問〉）**：(a) **自寫解析器**逐行取：`diff --git <A> <B>` 的兩個路徑（去掉各自一層 `a/`、`b/` 前綴）、`--- <路徑>` 與 `+++ <路徑>`（去前綴；`/dev/null` 視為無路徑；結尾的 TAB 與其後時間戳不計）、`rename from`／`rename to`、`copy from`／`copy to`（無前綴）；**須實作 git 的 C-style 引號解碼**（以雙引號包住的路徑內，`\"`、`\\`、`\n`、`\t`、`\ooo` 八進位位元組皆解碼，位元組序列以 UTF-8 解讀）；新增、刪除、改名兩端皆算；各處路徑取**聯集**、排序、去重，檔數即 `touched_count`（寧多勿漏；`diff --git` 與 `---`／`+++` 不一致不另判，聯集已涵蓋兩者）。(b) **超集檢查**：以 `git apply --numstat -z <patch>` 列出 git 看到的路徑（經 `git.py` 的 `apply_numstat(repo: Path, patch_file: Path) -> list[str]`、環境淨化、帶 timeout；測試以 `mock.patch.object(git, "apply_numstat", …)` 模擬「git 看見而解析器漏掉」），每一條都須在 (a) 的聯集內（比較前反斜線換 `/`），否則拒收 `PATCH-PATH-MISMATCH`；它只能檢查、不能當 `touched` 的來源（改名與複製只列目的端）。**`git apply --numstat -z` 自身失敗**（rc 非 0：損毀的 hunk、context-diff 等 git 不收的格式）＝拒收 `PATCH-PARSE`（fail-closed）：不得把失敗當成「git 沒看到任何路徑」而放行超集檢查（失敗時自寫解析器的導出值不可信，例：context-diff 會被導出垃圾路徑）；git 不可用的整體處置仍為 `GIT-UNAVAILABLE`（R49 (b)；§7.1 ⚖ 27）。(c) **別名形態**（fail-closed→整張 PROP `route=handoff`，不是拒收）：先把 `\` 換成 `/`，再判——任一段為 `..`；以 `/` 起頭（含 UNC `//`）；含 `:`（磁碟機代號、NTFS 資料流）；任一段（單獨的 `.` 除外）以 `.` 或空白結尾；任一段（取第一個 `.` 之前、`casefold`）屬 Windows 保留裝置名 `con`、`prn`、`aux`、`nul`、`com1`～`com9`、`lpt1`～`lpt9`；含 NUL 或任何控制字元（<0x20、0x7f）。(d) 兩平台對同一 patch 必須導出同一個 `touched`（macOS 未驗）；digest 內存原大小寫的正規化 POSIX 路徑（R55）。
 - **R52 不可進化面、合法根、規格本體路徑與 `route`／`cls` 判定（PRD AC-SI-07-1／07-3／11-1、NFR-SI-02-1、§9.4）**：(a) **比對對象＝`touched` 的每一條**（不只 `target`）：通過 R51 (c) 的路徑先以 `os.path.realpath`（解符號連結）正規化為 repo 相對 POSIX 形（結果在 repo 之外＝逃逸＝命中），再 `normcase` 加 `casefold`，與 `params.json` 的 `non_evolvable_globs`（同法正規化）比對；glob 語意＝相對 repo 根、`**` 可吃零段至多段、不帶 `**/` 前綴者只錨定 repo 根。(b) **LATEST**：`AISDLC_SDD/AISDLC_SDD_v*/**` 的語意是「去掉 LATEST」——LATEST 名取 `lib.sdd_latest.resolve_latest_name_fast(<repo>/AISDLC_SDD)`，解析失敗（`AssertionError`）＝`None`＝整個 `AISDLC_SDD_v*/**` 視為凍結（fail-closed）；LATEST 目錄內的路徑只由其他 glob 判（例：其下的 `.claude/**`、`docs_template/**`）。純函式層以參數 `latest_name` 注入（`props`／`paths` 為 `ro` 類、不起子行程；呼叫 `sdd_latest` 的組裝在 `writeverbs`）。(c) **合法根**：`cls` 為 `M` ⇒ 每條路徑須以 `memory/` 起頭；其餘類別＝repo 根；逃出者視同命中。(d) **`R-*.yaml` 內容條件式**：命中 `AISDLC_SDD/*/governance/rules/R-*.yaml` 這個 glob 者分兩種：**base 已存在者**，只在 base 快照（`git show <base>:<路徑>`）的該檔含 `maturity: active`、或讀不出 `maturity` 時才算命中（fail-closed，§7.1 ⚖ 25）；**base 不存在（`--- /dev/null` 的純新增 `R-*.yaml`）一律不算命中不可進化面，其政策判準只有 `R-NOT-PROPOSED`**：`cls` 為 `R` 而新增的 `R-*.yaml` 不含 `trust_level: proposed` ⇒ 拒收 `R-NOT-PROPOSED`，含者受理為 `loop`（PRD AC-SI-08-3；「不得阻塞 SCG」的 FSM 面無機械物，流程面由 SOP 代位）。此款只管這個 glob：同一路徑若另落在其他 glob（例：凍結版本目錄），照該 glob 另判。(e) **規格本體路徑**：`touched` 任一條落在 `spec_body_globs` ⇒ handoff，**除了**「`cls`＝`D`、`action`＝`add`、且 `touched` 恰為一條且符合 `**/docs/01_requirements/SPEC-PATCH-*.md`」。(f) **`cls` 標記**：命中的 `non_evolvable_globs` 項若屬 PRD NFR-SI-02-1 的 (iii) 群組 ⇒ `cls` 改記 `evaluator-change`；屬 (iv) 群組 ⇒ `loop-self`（兩者皆命中取 `evaluator-change`）；群組歸屬**不另存第二份清單**，取自 PRD 該「實體 glob」行的標籤位置（與 P0 R22 `required_globs` 同一抽取、追蹤最近的 `(i)`～`(v)` 標籤；對不上的 glob 不改 `cls`，§7.1 ⚖ 8）；提案者自填的 `evaluator-change`／`loop-self` 保持。(g) **`route`**：當且僅當 `cls`（標記後）∉{`M`,`P`,`R`,`D`}、或存在別名形態、或任一 `touched` 命中 (a)／(c)／(d)／(e) ⇒ `handoff:<通道>`（整張，不得只轉交命中的檔）；否則 `loop`。**提案者不得自填 `loop`**（沒有 `--route` 旗標）；導出為 handoff 時 `--handoff {DEF,R,T1,PRD}` 必備（缺 ⇒ `HANDOFF-CHANNEL-MISSING`），導出為 loop 而給了 `--handoff` ⇒ `HANDOFF-CHANNEL-UNEXPECTED`。(h) 邊界型 M（SI CLI 前置檢查）；誠實劃界：只擋經 SI CLI 建立的 PROP。
 - **R53 前置檢查：來源、運轉、研究事件、預算、SUSPENDED、同型、修訂**（全部在鎖內讀最新事件帳本後判；PRD AC-SI-02-1、10-1～10-3、30-1、17-2 的 M 半）：(a) `RUN-NOT-OPEN`：`--run` 不是 open 運轉（AC-SI-10-3：無 `run.open` 的提案不受理）。(b) `RESEARCH-MISSING`：該運轉內沒有研究事件（`research.scan`／`research.skip`；`seq` 必介於其 `run.open` 與本次寫入之間，AC-SI-30-1）。(c) `SUSPENDED`：R35 (c) 的結果非空（AC-SI-17-2 的 M 半）。(d) `BUDGET-PROPOSALS`（僅 `prop-new`）：該運轉內 `rev`＝1 的不同 PROP 數已 ≥ `max_proposals_per_run`（AC-SI-10-1；退役 PROP 同計）。(e) `DUPLICATE-TYPE`（僅 `prop-new`）：已有**活躍** PROP（折疊狀態∈`proposed`、`returned`、`approved`、`sandboxed`、`verified`）與其同型：`cls` 相同、`target` 集合相等，且兩者的根因鍵集合相交或皆為空；PROP 的根因鍵集合＝所有 `attr`（`type`＝`root`）事件中 `obs` 與該 PROP `sources` 有交集者的 `root_cause`（排序、去重；§7.1 ⚖ 7）。(f) **來源**：每個 `--source` 須可解析——`OBS-SI-<n>` 為 OBS 帳本（含 archive）的列、`DEF-<a>-<b>` 為缺陷帳本家族（P0 R18 (b) 所列檔）的列，否則 `SOURCE-UNRESOLVED`；**內部來源**＝DEF 列與標記無 `外部衍生=是` 的 OBS 列，外部衍生列（含 `回報者=研究者` 的候選）不算；解析成功的來源中內部來源為 0 ⇒ `NO-INTERNAL-SOURCE`（**任何類別**，M／P／R／D 與標記後的 `evaluator-change`／`loop-self` 皆然；PRD AC-SI-02-1、30-4 ④）。(g) `REVIEWER-IS-PROPOSER`：給了 `--reviewer` 且等於 `--proposer`。(h) `EVENT-BYTES-OVER`：組出的 `prop` 事件行超過 `event_max_bytes`（要求拆分，PRD §9.7 #49）。(i) 使用的 `params.json` 鍵：`max_proposals_per_run`、`max_revisions`、`stop_after_bad`、`event_max_bytes`、`non_evolvable_globs`、`spec_body_globs`、`max_touch_ratio`、`max_new_entries`、`max_archive_entries_per_card`、`card_line_max`。
 - **R54 觸及比例、新增條目、歸檔型豁免與 M 類 pre-image（PRD AC-SI-09-2、ADR-SI-06；量法為本檔類推，§7.1 ⚖ 5）**：自 patch 的各檔 hunk 計：`removed`＝以 `-` 起頭的行（不含 `---` 標頭）、`added`＝以 `+` 起頭的行（不含 `+++`）。(a) **觸及比例**＝（所有在 base 已存在的被觸及檔的 `removed` 總和）÷（這些檔在 base 的總行數）；base 內容取 `git show <base>:<路徑>`，M 類改取 `--memory-dir` 下對應檔（`memory/<名>`→`<目錄>/<名>`；不在 `memory/` 之下的路徑已依 R52 (c) 視同命中、整張轉交，不計入比例的分子與分母）；分母為 0（全為新檔）＝比例 0；`ratio > max_touch_ratio` ⇒ `TOUCH-RATIO`（恰等於放行）。(b) **新增條目數**＝新增行中非空白且符合 `^\s*([-*+]\s|\d+[.)]\s|#{1,6}\s)` 者的個數，加新檔（`--- /dev/null`）的個數；`> max_new_entries` ⇒ `NEW-ENTRIES`。(c) **歸檔型**（僅 `cls`＝`M`）：同時成立才算——被觸及檔為索引檔（檔名 `MEMORY.md`）與歸檔檔（檔名 `archive-index-*.md`）；索引檔只有刪行與（至多）新增指標行；歸檔檔只有新增行；索引檔每一條被刪行都以**逐字**（整行相同）出現在歸檔檔的新增行中（重數一致），零內容修改。歸檔型**不受** `max_touch_ratio` 約束，改受 `max_archive_entries_per_card`（被搬移行數 > 上限 ⇒ `ARCHIVE-ENTRIES`）；歸檔型的 (b) 只計索引檔新增的指標行（歸檔檔上逐字搬移而來的新增行不計入 (b)）；任一行被改寫＝非歸檔型、回到 (a)。(d) **`--memory-dir`**：`cls` 為 `M` 而未給 ⇒ 拒收 `MEMORY-DIR-MISSING`；不是目錄 ⇒ rc 3。(e) **pre-image**（`cls`＝`M` 才有，入 `preimage`）：對 `touched` 的每個邏輯路徑（含 base 不存在的新檔），鍵＝該邏輯路徑、值＝`sha256:` 接「該檔被刪除行（依序以 `\n` 連接、結尾加 `\n`）的 UTF-8 位元組」的 sha256；只新增行的檔（含新檔）的值＝空位元組的 sha256。非 M 類無 `preimage` 鍵、digest 內以 `base` 代之（R55）。
 - **R55 digest 與內容檔落地（PRD §9.2〈digest〉、AC-SI-07-3）**：(a) `digest`＝`sha256:` 接 `sha256(canonical(core))` 的 64 位小寫 hex；`canonical(x)`＝`json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` 的 UTF-8 位元組；`core` 的鍵恰為：`id`、`rev`、`cls`、`action`、`target`（排序去重的路徑陣列）、`touched`（自 `.patch` 導出的全部路徑，排序去重，**保留原大小寫**、正規化後的 repo 相對 POSIX 形）、`touched_count`、`base`、`preimage`（M 類為物件，其餘為 `base` 的值）、`patch_sha256`、`body_sha256`、`rollback`、`retire_when`、`reopen_symptom`、`budget`（後四者取自欄位表，缺的選用欄為 `null`；文字先 CRLF 換 LF）。`target` 與 `touched` 都在 digest 內。重算 digest 時 `touched` 由 `.patch` 重新導出、不信任事件裡存的值。(b) **內容檔**：`docs/06_quality/SelfImproving_Proposals/<PROP-ID>/r<rev>.patch` 與 `r<rev>.md`（目錄與檔由 `propfiles` 在鎖內建立；寫入一律 `newline="\n"`／二進位模式；已存在的 `r<rev>.*` 不得覆寫，撞名＝rc 1 碼 `PROP-FILE-EXISTS`）。(c) `patch_sha256`、`body_sha256`、`touched_sha256` 的算法同 R41。(d) 卡面顯示 digest 前 8 碼；`--json` 的 `digest` 為全值。
-- **R56 `card`（PRD AC-SI-14-1～14-3、§7.3；格式為本檔據線框定義）**：`card <PROP-ID> [--json]`，唯讀。(a) **文字形態**（LF、UTF-8、位元組直寫）；`route` 為 `loop` 的 PROP：第 1 行 `[<PROP-ID>] <類別名>｜<action>｜目標：<target 以「、」連接>｜digest：<前 8 碼>｜驗證：<驗證狀態>`；第 2 行 `一、症狀：<symptom>`；第 3 行 `二、改什麼：+<added>／-<removed> 行；觸及比例 <比例，小數兩位>；觸及檔案數 <touched_count>；不在 target 內的路徑：<k>`，其後若 k>0，**逐筆各一行** `  - <路徑>`（觸及但不在 `target` 內者，排序）；第 4 行 `三、風險與回滾：<risk>｜回滾：<rollback>｜驗證：<驗證狀態>`；第 5 行 `決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求`；第 6 行 `--- 以下不計入核心區 ---`；第 7 行 `證據座標：<sources 以「、」連接>｜預算宣告：<budget>｜完整 diff 座標：<該 rev 的 .patch repo 相對路徑>｜冷卻狀態：<無｜冷卻中>｜轉交通道：<通道或 無>`。`route` 為 `handoff:*`：第 1 行尾加 `｜僅轉交，本迴圈不套用`，第 5 行改為 `決定：轉交 ／ 不轉交＋一句理由`。類別名：`M`→`記憶條目`、`P`→`Playbook 片段`、`R`→`SDD 規則草案`、`D`→`非治理文件`、`evaluator-change`→`評估器變更`、`loop-self`→`迴圈自身`；驗證狀態＝R34 折疊出的最近 `app.verify` 的 `verdict`（`PASS`／`FAIL`／`NE`），無則 `未驗`。(b) **核心區**＝第 1～5 行加其間逐筆列出的路徑行（不含第 6 行起）：行數須 ≤ 12（k 超過 7 ⇒ `CARD-TOO-TALL`）；**第 2～5 行與每個路徑行**的**顯示寬度**須 ≤ `card_line_max`（CJK 全形算 2：以 `unicodedata.east_asian_width` 為 `W`／`F` 者算 2、其餘算 1，同根層 E501 量法；超過 ⇒ `CARD-LINE-TOO-WIDE`，恰等於放行）；**第 1 行是標題行（含 `目標：` 的路徑，轉交卡另加轉交標記），長度隨目標而定、不受寬度限制**——PRD AC-SI-14-3 的「每項單行」讀作一、二、三、決定四項與其路徑行；若把標題行也算入，`R` 類提案（目標路徑已逾 50 個字元，標題行除目標外已佔約 65 欄）與轉交卡（標題行再多 22 欄）幾乎必然超限（§7.1 ⚖ 4）。`prop-new`／`prop-revise` 以**同一個渲染函式**對候選 PROP 預判，超限即拒收（R49 階段二）。(c) **確定性**：同一事件帳本與內容檔的內容下，輸出逐字相同；`symptom`、`risk`、`rollback`、`budget` 取自 `rN.md` 欄位表，`+added／-removed`、觸及比例、觸及檔案數與路徑行取自 `rN.patch` 與 `prop` 事件，**提案者自由撰寫的摘要不取代 diff 本文**（卡尾只給 diff 的座標）。(d) **反解析一致性**（AC-SI-14-2）：輸出前把卡面反解析回（digest 前 8 碼、`added`、`removed`、觸及檔案數、不在 `target` 內的路徑清單、驗證狀態），與重算值逐欄比對（重算值：`digest` 前 8 碼取 R55 (a) 由事件欄位與兩個內容檔**現算**的 digest 的前 8 碼——卡面第 1 行印的是事件所存的 `digest`，兩者相比；`added`、`removed`、觸及檔案數與路徑清單取自 `.patch`；驗證狀態取自 R34 折疊）；任一不符（例：`.patch` 於 `prop-new` 之後被改動）⇒ rc 3、stdout 空、stderr 含 `CARD-INCONSISTENT` 與不符欄名（不一致的卡不得送達）；PROP 不存在、內容檔缺 ⇒ rc 3（stderr 含 `PROP-NOT-FOUND`／`PROP-FILE-MISSING`）。(e) `--json`：`{"schema_rev": 1, "prop": …, "rev": …, "digest": "<全值>", "core_lines": <n>, "text": "<卡面全文含結尾 LF>", "parsed": {"digest8": …, "added": …, "removed": …, "touched_count": …, "extra_paths": […], "verdict": …}}`（鍵序如列）。
+- **R56 `card`（PRD AC-SI-14-1～14-3、§7.3；格式為本檔據線框定義）**：`card <PROP-ID> [--json]`，唯讀。(a) **文字形態**（LF、UTF-8、位元組直寫）；`route` 為 `loop` 的 PROP：第 1 行 `[<PROP-ID>] <類別名>｜<action>｜目標：<target 以「、」連接>｜digest：<前 8 碼>｜驗證：<驗證狀態>`；第 2 行 `一、症狀：<symptom>`；第 3 行 `二、改什麼：+<added>／-<removed> 行；觸及比例 <比例，小數兩位；`M` 類印 `n/a`>；觸及檔案數 <touched_count>；不在 target 內的路徑：<k>`，其後若 k>0，**逐筆各一行** `  - <路徑>`（觸及但不在 `target` 內者，排序）；第 4 行 `三、風險與回滾：<risk>｜回滾：<rollback>｜驗證：<驗證狀態>`；第 5 行 `決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求`；第 6 行 `--- 以下不計入核心區 ---`；第 7 行 `證據座標：<sources 以「、」連接>｜預算宣告：<budget>｜完整 diff 座標：<該 rev 的 .patch repo 相對路徑>｜冷卻狀態：<無｜冷卻中>｜轉交通道：<通道或 無>`。`route` 為 `handoff:*`：第 1 行尾加 `｜僅轉交，本迴圈不套用`，第 5 行改為 `決定：轉交 ／ 不轉交＋一句理由`。類別名：`M`→`記憶條目`、`P`→`Playbook 片段`、`R`→`SDD 規則草案`、`D`→`非治理文件`、`evaluator-change`→`評估器變更`、`loop-self`→`迴圈自身`；驗證狀態＝R34 折疊出的最近 `app.verify` 的 `verdict`（`PASS`／`FAIL`／`NE`），無則 `未驗`。**`M` 類的觸及比例**：`M` 類的 base 是 `--memory-dir` 下的記憶檔（在 repo 之外，`card`／`export` 不帶該旗標，沒有 base 快照可重算），故卡面第 3 行的觸及比例一律印 `n/a`（比例判準只在 `prop-new`／`prop-revise` 以 `--memory-dir` 計算，R54 (a)）；其餘各行與非 `M` 類相同。(b) **核心區**＝第 1～5 行加其間逐筆列出的路徑行（不含第 6 行起）：行數須 ≤ 12（k 超過 7 ⇒ `CARD-TOO-TALL`）；**第 2～5 行與每個路徑行**的**顯示寬度**須 ≤ `card_line_max`（CJK 全形算 2：以 `unicodedata.east_asian_width` 為 `W`／`F` 者算 2、其餘算 1，同根層 E501 量法；超過 ⇒ `CARD-LINE-TOO-WIDE`，恰等於放行）；**第 1 行是標題行（含 `目標：` 的路徑，轉交卡另加轉交標記），長度隨目標而定、不受寬度限制**——PRD AC-SI-14-3 的「每項單行」讀作一、二、三、決定四項與其路徑行；若把標題行也算入，`R` 類提案（目標路徑已逾 50 個字元，標題行除目標外已佔約 65 欄）與轉交卡（標題行再多 22 欄）幾乎必然超限（§7.1 ⚖ 4）。`prop-new`／`prop-revise` 以**同一個渲染函式**對候選 PROP 預判，超限即拒收（R49 階段二）。(c) **確定性**：同一事件帳本與內容檔的內容下，輸出逐字相同；`symptom`、`risk`、`rollback`、`budget` 取自 `rN.md` 欄位表，`+added／-removed`、觸及比例、觸及檔案數與路徑行取自 `rN.patch` 與 `prop` 事件，**提案者自由撰寫的摘要不取代 diff 本文**（卡尾只給 diff 的座標）。(d) **反解析一致性**（AC-SI-14-2）：輸出前把卡面反解析回（digest 前 8 碼、`added`、`removed`、觸及檔案數、不在 `target` 內的路徑清單、驗證狀態），與重算值逐欄比對（重算值：`digest` 前 8 碼取 R55 (a) 由事件欄位與兩個內容檔**現算**的 digest 的前 8 碼——卡面第 1 行印的是事件所存的 `digest`，兩者相比；`added`、`removed`、觸及檔案數與路徑清單取自 `.patch`；驗證狀態取自 R34 折疊）；任一不符（例：`.patch` 於 `prop-new` 之後被改動）⇒ rc 3、stdout 空、stderr 含 `CARD-INCONSISTENT` 與不符欄名（不一致的卡不得送達）；PROP 不存在、內容檔缺 ⇒ rc 3（stderr 含 `PROP-NOT-FOUND`／`PROP-FILE-MISSING`）。(e) `--json`：`{"schema_rev": 1, "prop": …, "rev": …, "digest": "<全值>", "core_lines": <n>, "text": "<卡面全文含結尾 LF>", "parsed": {"digest8": …, "added": …, "removed": …, "touched_count": …, "extra_paths": […], "verdict": …}}`（鍵序如列）。
 
 *F. 研究掃描、模組體檢、`status` 與 `export`（PRD FR-SI-30、31、32 的 AC-SI-32-5、§9.2、§9.3）*
 
 - **R57 `research` 通則與 `--skip`（PRD AC-SI-30-1）**：(a) `research --skip --run <R> --reason <r> --note <一行> [--band <值>｜--sid <UUID> --line <N>]`：格式類錯誤一律 rc 3——`--reason` 不在 `quota-band`、`offline`、`helmsman`；`--note` 為空、超過 120 字元或含換行；`quota-band` 缺 `--band`（或值為 `free`〔不分大小寫〕）；`helmsman` 缺 `--sid`（須為 UUID）或 `--line`（須為整數 ≥1）；與該 reason 不相干的附帶旗標一併出現。狀態類錯誤 rc 1：`RUN-NOT-OPEN`、`RESEARCH-ALREADY`（該運轉已有研究事件；PRD：`--run` 須已 `run.open`、未 `run.close`，且尚無研究事件）。寫 `research.skip`（`by` 恆為 `main`；`quota-band` 帶 `band`、`helmsman` 帶 `sid`＋`line`、`offline` 無附帶鍵）；附加欄 `run`、`reason`；**零網路**（R63 ⑥）。(b) `research --fetch --run <R>` 的**預檢**（全部在發出任何請求之前；任一失敗＝整次拒收 rc 1、不抓、不寫事件、印草稿列）：`RUN-NOT-OPEN`、`RESEARCH-ALREADY`；來源表不存在 ⇒ `SOURCES-ABSENT`；對**工作樹來源表位元組先把 CRLF 換成 LF 之後**呼叫 `sources.validate_table(raw, sources.DEFAULT_POLICY)`（`raw`＝換行正規化後的位元組；任何 `SRC-*` 碼＝拒收，R43；BOM 與其餘格式問題照判，只有 CRLF 由正規化吸收）；現役（未 `retired`）筆數 > `research_fetch_max` ⇒ `FETCH-MAX`（已 `retired` 者不計）；工作樹的來源表（同樣先換成 LF）與 `HEAD` 提交版（同樣先換成 LF）逐位元組比對不同、或該檔不在 `HEAD` ⇒ `SOURCES-UNCOMMITTED`（git 不可用＝略過本項，並於輸出印 NE 提示：文字形態一行 `ne sources-commit-check git-unavailable`、`--json` 的 `ne` 陣列含 `{"field": "sources-commit-check", "reason": "git-unavailable"}`）；現役來源為 0 筆 ⇒ `ZERO-SUCCESS`。**劃界（位元組口徑）**：`check` 的 `research.sources` 與預檢取用的位元組不同——`check` 對工作樹**原位元組**呼叫同一個 `validate_table`，含 CR 即 `SRC-FILE-FORMAT`（R43）；預檢先換 LF，使 Windows 工作樹因 `core.autocrlf` 而帶 CR 的來源表，只要與 `HEAD` 版在換行正規化後相同仍可抓取，而 `check` 仍把 CR 當格式問題提醒；`sources_sha256` 一律以換行正規化後的位元組計（R42 (c)、R58 (f)）。(c) **流程**：預檢 → 依來源表順序**逐一（不併發）**抓取現役來源（R58）→ 取寫入鎖 → 鎖內重驗（運轉仍 open、仍無研究事件、來源表雜湊仍等於抓取開始時，否則依序 `RUN-NOT-OPEN`、`RESEARCH-ALREADY`、`SOURCES-CHANGED`）→ 以鎖內最新事件重算 `changed` → 追加 `research.scan`（行長超 `event_max_bytes` ⇒ `EVENT-BYTES-OVER`、不寫）。抓取在鎖**之外**進行（最壞 `research_fetch_max`×`research_timeout_seconds`，遠大於取鎖逾時）。來源檔先落地、事件後追加；事件追加失敗時來源檔留作快取、不影響帳本。(d) **rc**：0＝事件已寫且每個來源皆成功；2＝事件已寫、≥1 來源失敗（逐一列出，已抓的照記）；1＝未寫（預檢失敗、零來源成功〔改記 `research.skip(offline)` 或經 T1 修表〕、取鎖逾時、鎖內重驗失敗、事件行超長）；3＝用法或輸入錯誤（含家目錄不可寫）。(e) **輸出**：依序每個現役來源一行——成功 `source <id> ok sha256=<前 12 碼> bytes=<n> changed=<true|false>`、失敗 `source <id> FAIL <原因>`；其後成功寫入者接 `ok research.scan seq=<N> run=<R>`；有失敗者接 `obs-draft:` 與每個失敗來源各一行草稿列（R28 (d)；症狀 `si research --fetch 來源 <id> 失敗（<原因>）`、座標的 `rc=` 為本次實際 rc；各列 ID 自帳本最大合法 ID 加一起連號，依來源表順序遞增）。`--json`：`{"ok": …, "kind": "research.scan", "seq": <N 或 null>, "id": null, "run": …, "rc": …, "sources": [事件的 sources 元素…], "failed": [{"id", "reason", "detail"}…], "obs_drafts": […], "ne": […]}`。失敗原因為封閉集合：`timeout`、`http-status`、`too-large`、`non-text`、`encoding`、`redirect-refused`、`network`。
-- **R58 抓取行為與事件（PRD AC-SI-30-3、30-5；`fetch.py` 是整個套件唯一 import `urllib`／`http`／`socket`／`ssl` 的檔）**：(a) `fetch.fetch_source(url, *, policy, timeout, max_bytes, allowed_hosts)` 以標準庫 `urllib.request` 對**單一**來源發 GET，取**原始位元組**；CLI 入口不暴露放寬旗標，測試以政策物件（`allow_loopback`、`allow_http`）與 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 容許本機夾具。(b) **請求形態**：只准 `http`／`https`；`User-Agent` 恆為 `selfimproving-research/1`；`Accept-Encoding` 恆為 `identity`；不帶 `Cookie`、`Authorization`、`Proxy-Authorization` 或任何認證標頭；回應帶 `Content-Encoding` 且不是 `identity` ⇒ 該來源失敗 `encoding`。(c) **重導向**手動處理（關掉 `urllib` 自動跟隨）：至多 5 跳（第 6 次重導向 ⇒ `redirect-refused`）；每個目標須 scheme∈`http`、`https`、`https` 不得降為 `http`、目標 `hostname:port`（缺連接埠取 scheme 預設）須屬允許集合（＝現役表項 `url` 的 `hostname:port`），否則 `redirect-refused`；逐跳判定住純函式 `fetch.check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None`（拒絕時回傳 `redirect-refused`、可放行回傳 `None`；測試直接以字串餵它，覆蓋 loopback 夾具起不了的 https 降 http 等情形）。(d) **界限**：整個來源（含全部重導向跳）的牆鐘 ≤ `research_timeout_seconds`，超過 ⇒ 中止、失敗 `timeout`；已讀位元組（或 `Content-Length`）> `research_bytes_max` ⇒ 中止、失敗 `too-large`（**不截斷**）；`Content-Type` 的主型別（`;` 之前）須屬 `text/*`、`application/json`、`application/xml`、`application/atom+xml`、`application/rss+xml`、`application/xhtml+xml`，缺或不符 ⇒ `non-text`；最終狀態須 2xx，否則 `http-status`（detail 帶狀態碼）；連線或名稱解析錯誤 ⇒ `network`。(e) **成功的來源**：對原始位元組算 `sha256`（不做任何正規化），以二進位原樣寫入 `<si_dir>/research/<id>/<sha256 前 12 碼>.txt`，並維護 `<si_dir>/research/<id>/latest`（內容＝該 12 碼，無副檔名、無換行）；`changed`＝該 `id` 在事件帳本上一筆含它的 `research.scan` 的 `sha256` 與本次不同（無前筆＝`true`）。**失敗的來源**不入 `sources[]`、不得以舊 digest 代填（NFR-SI-09-1）。(f) **事件**：欄位照 R31；`sources_sha256`＝來源表檔位元組 CRLF 換 LF 後的 sha256（加 `sha256:` 前綴，與 R42 (c) 的算法相同）；`fetched_at`＝抓取完成時刻（帶 offset）；**不存 `url`、不存候選數**；`by` 恆為 `researcher`。(g) **預算與純度**：現役來源筆數、單來源位元組、單來源牆鐘三界各由 `params.json` 的 `research_fetch_max`、`research_bytes_max`、`research_timeout_seconds` 供應；`research --skip` 與其餘全部動詞零網路（R63 ⑥）。(h) 誠實劃界：`sha256` 量的是來源**原始位元組**的穩定性、不是語意改版（含伺服器端產生內容的 HTML 會使 `changed` 假陽性，來源表應優先取原始檔或 feed）；不做 DNS 解析後驗 IP；研究者讀檔的牆鐘與 token 無機械物量測。
-- **R59 `scan`（PRD AC-SI-31-1～31-4；候選推導為本檔類推，§7.1 ⚖ 9）**：`scan [--json] [--since <commit>] [--repo DIR]`，唯讀、離線、無狀態、不寫事件（R63 ⑥）。(a) **起算點**：給 `--since` ⇒ 該 commit（7～40 位 hex，須可解析為 commit，否則 rc 3）的 committer 時間與 `<commit>..HEAD`；否則取最近一筆 `run.close` 事件的 `t`；無則取 `migration_base_sha` 那個 commit 的 committer 時間（`git show -s --format=%ct`）；皆無 ⇒ 起算點量不到。日精度的 DEF 列以「發現日期對起算時刻的 UTC 日期」比較：早於者排除、同日者納入。(b) **五個證據來源，各印一行**（`source <id> 讀到 <N> 筆` 或 `source <id> 量不到：<原因>`）：`defects`（缺陷帳本主檔 `docs/06_quality/AutoSDD_Defect_Log.md`；以表頭欄名定位 `ID`、`發現日期`、`嚴重度`、`狀態`；列的嚴重度∈`P1`、`P2`、狀態分類為 `open`〔`defs.py`，差分對 `check_defect_log_crossref._classify`；`open` 含 `workaround`、`partial` 字樣〕、發現日期不早於起算日；原因碼 `ledger-missing`、`ledger-header`、`anchor-unavailable`）；`observations`（OBS 帳本中 `時間` 不早於起算時刻的列數，加 `<commit>..HEAD` 或起算時刻之後的 commit 依路徑歸桶；原因碼 `git-unavailable`、`anchor-unavailable`）；`event_ledger`（事件帳本的待決 PROP、SUSPENDED、冷卻摘要，是狀態摘要、不是候選；原因碼 `carrier-not-established`）；`build_reports`（repo 內任何路徑含 `build/reports/` 片段、副檔名∈`.xml`、`.json`、`.log`、`.txt` 的檔個數；原因碼 `no-artifacts`）；`probe_outputs`（符合常數 `PROBE_OUTPUT_GLOBS`＝`**/misstep_attribution*.jsonl` 的檔個數；原因碼 `no-artifacts`）。後兩者在 P1 只計數、不產生候選。(c) **候選列**：`defects` 每個符合列一筆（症狀 `缺陷帳本新立 <P1|P2> 未結列 <DEF-ID>`、座標＝該 DEF ID）；`observations` 每個「窗內有 ≥1 個 commit 觸及」的模組桶一筆（症狀 `<桶> 窗內有 <k> 個 commit 觸及（<至多 3 個路徑，以、連接>）`、座標＝`commit <最新 commit 的前 12 位 hex>`）。每筆候選＝P0 九欄格式：ID 自 OBS 帳本現有合法 ID 最大者加一起連號、時間帶 offset、情境 `si scan（自動草稿）`、分類 `bug`、嚴重度 `P3`、處置 `open`、標記 `面=流程;來源=工具;回報者=scan`；每列 ≤ `row_max_bytes`（超長則縮短路徑清單）、自身通過 P0 R9～R17（AT：把全部候選附加到帳本副本後 `check` 對這些列零 finding）；**無座標的候選不印**；草稿不寫入帳本（主控單窗口入帳）。(d) **模組歸桶**（PRD AC-SI-31-4；判定住純函式 `scan.bucket_of(path: str) -> str`，回傳桶名或 `未分類`，測試直接以字串餵它）：依序判 `SelfImproving`（`tools/lib/selfimproving/**`、`tools/selfimproving.py`、`tools/probe/selfimproving_*`、`tools/tests/test_selfimproving_*`、`docs/**` 下檔名含 `SelfImproving` 者）→ `AutoClaude`（`AutoClaude/**`）→ `AISDLC_SDD`（`AISDLC_SDD/**`）→ `AgentConsole`（`AgentConsole/**`）→ `根層`（其餘 repo 內路徑）；絕對路徑、含 `..`、空字串等非 repo 相對形態歸 `未分類`並計數、不丟棄；觸及多桶的 commit 依其觸及的每個路徑各歸一次。(e) **零候選＝無事件**（AC-SI-31-3、NFR-SI-09-1）：零候選時整體印 `無事件`（JSON `status:"no-event"`）；任一來源量不到時改印 `無事件（<K> 個來源量不到）`；**不得**印成「通過」「達標」「綠」；量不到不併入零；候選數只印在資訊欄；`scan` 不接任何閘門 rc。(f) **輸出**：文字形態＝五行來源、（有候選時）`candidates:` 與每筆候選一行、末行（`無事件`｜`無事件（K 個來源量不到）`｜`候選 <M> 筆`）；`--json`＝`{"schema_rev": 1, "status": "no-event"｜"candidates", "unavailable_count": K, "anchor": {"kind": "since"｜"run.close"｜"migration_base_sha"｜null, "time": <ISO 或 null>}, "sources": [{"id", "status": "read"｜"unavailable", "count"｜"reason"}…], "candidates": [{"bucket", "row"}…], "buckets": {<桶>: <候選數>…}}`。rc：0＝已執行（零候選仍 0）、3＝無法執行。(g) 誠實劃界：候選是啟發式（路徑歸桶、P≤2 未結）而非缺陷判定；「量不到」只報告 `scan` 自己讀不到的來源，讀得到但內容殘缺的看不見。
-- **R60 `status`（PRD AC-SI-03-1、AC-SI-06-1、AC-SI-23-1、AC-SI-30-1、NFR-SI-09-2；鍵名與元素形態為本檔類推，§7.1 ⚖ 9）**：`status [--json] [--repo DIR]`，唯讀。物件（`--json` 的輸出；亦是 `export --kind status` 的 `items[0]`，由**同一個函式**產生）鍵序固定：`events_detected`、`unavailable`、`open_runs`、`pending_props`、`suspended`、`cooldowns`、`skip_reasons`、`capacity`、`root_cause_changes`、`reopen_candidates`、`pending_windows`、`friction_reconcile`、`no_event`。(a) **啟動事件偵測**（窗＝最近一筆 `run.close` 之後的事件；無 `run.close` 則為全部）：`events_detected` 的元素 `{"trigger": "b"｜"c"｜"d", "subject": <ID>, "detail": <字串>}`——(b)＝窗內每筆對 `type=link` 的 `attr` 的 `attr.confirm`（subject＝ATT ID，「同一症狀第二次被記入、經審查者確認」）；(c)＝缺陷帳本新立 P≤2 未結列（同 R59 `defects` 的判定與起算點；subject＝DEF ID）；(d)＝窗內已確認的復發連結，其 `reopens` 落在某個折疊狀態∈`promoted`、`measuring`、`closed` 的 PROP 的 `sources`（subject＝PROP ID）。(e)（容量事件）P3 的 `capacity` 動詞建成前**印 NOT-EVALUABLE、不得印成零**：`capacity`＝`{"status": "NOT-EVALUABLE", "reason": "capacity-verb-not-established"}`。起算點量不到（(c) 需要）⇒ `unavailable` 含 `{"trigger": "c", "reason": "anchor-unavailable"}`（正常為空陣列）。`no_event`＝`events_detected` 為空；為真時文字形態印 `無事件`（`unavailable` 非空則 `無事件（<K> 個來源量不到）`），**不得**印成通過。(b) **狀態摘要**：`open_runs`＝`[{"run", "opened_seq", "research": {"kind", "seq"}｜null, "props": [PROP ID…]}]`；`pending_props`＝折疊狀態∈`proposed`、`verified` 者 `[{"id", "rev", "state", "route", "digest8"}]`；`suspended`＝`null` 或 `{"run": <RUN-ID>}`（R35 (c)，即 `恢復` 的綁定值）；`cooldowns`＝R35 (d) 的元素陣列；`skip_reasons`＝`{"quota-band": n, "offline": n, "helmsman": n}`（三鍵恆在，計所有 `research.skip`）；`root_cause_changes`＝R48 (e) 的整數；`reopen_candidates`＝`{"unsettled": <無 confirm／reject 的 type=link 的 attr 筆數>}`；`pending_windows`＝`[{"prop", "close_seq"}…]`（生效結果為 `pending` 的 `mea.close`）。(c) **交卷對帳**（NFR-SI-09-2，只量不閘）：`friction_reconcile`＝`{"status": "NOT-EVALUABLE", "reason": "transcript-unavailable"}`（逐字稿目錄取不到，例：容器內或他機。**逐字稿目錄取法**：`lib.platform_utils.claude_home()`〔環境變數 `CLAUDE_CONFIG_DIR` 非空白則取之，否則 `Path.home() / ".claude"`〕下的 `projects/<slug>/`，`<slug>` 由 `--repo` 的解析後絕對路徑推得：`re.sub(r"[^A-Za-z0-9]", "-", <路徑字串>)`（規則同 `tools/probe/audit_session.py` 的 `project_transcript_dir`，是觀察到的編碼、非官方契約；`status` 自行實作、不 import `probe`，守 R63 的 import 範圍），例：`D:\CursorProject\AISDCL_Agent` 對應 `D--CursorProject-AISDCL-Agent`；該目錄不存在或讀不到＝取不到。tmp 目錄下的合成 repo 其 slug 目錄不會存在，再加 §5.5 (b) 的家目錄隔離，AT 中此欄必為 NOT-EVALUABLE）或 `{"status": "measured", "reported": <逐字稿 Agent 回傳的「流程摩擦」節項數>, "recorded": <同窗新增 OBS 列數>}`；量不到不得印成 0。(d) 事件帳本不存在 ⇒ 全部事件類欄位為空狀態、`unavailable` 照常，不是錯誤；rc 0（已執行）或 3。文字形態逐鍵印出（至少含 `無事件`／事件行、`capacity NOT-EVALUABLE`、`suspended`、`skip_reasons` 各字樣）。
-- **R61 `export`（PRD AC-SI-32-5、§9.2〈`export --json` 輸出〉；Console 三層屬 P1b，本檔只定根層的輸出契約與穩定性）**：`export --json --kind <k> [--since N] [--limit N] [--id <ID>] [--repo DIR]`，唯讀、離線、只用標準庫。**用法錯誤＝rc 3**：缺 `--json`；`--kind` 不在 `observations`、`events`、`proposals`、`runs`、`status`；`--limit` <1 或 > `export_limit_max`；`--since` 非非負整數，或與 `status` 併用；`--id` 與 `observations`／`events`／`status` 併用，或格式不合（`proposals` 須 `^PROP-SI-\d{3,}$`、`runs` 須 `^RUN-SI-\d{3,}$`）。**輸出**：單一 JSON 文件加 LF，UTF-8 位元組直寫（`ensure_ascii=False`、無 BOM）；頂層鍵序 `schema_rev`（1）、`kind`、`generated_at`（呼叫時刻、帶 offset）、`head_sha`（`git rev-parse HEAD` 的 40 碼；git 不可用＝`null` 並於 `ne` 列 `{"field": "head_sha", "reason": "git-unavailable"}`）、`items`、`next_since`（整數或 `null`）、`truncated`（布林）、`ne`（`[{"field", "reason"}…]`：量不到的欄位逐一列出、不省略）、`problems`（`[{"subject", "code", "detail"}…]`：帳本結構層問題，例如無法解析的事件行，不是 `check` 的判級）。`items` 依 kind：`observations`＝九欄（鍵 `id`、`time`、`context`、`symptom`、`evidence`、`category`、`severity`、`disposition`、`marks`，值皆字串）加 `marks_kv`（`rows.parse_marks` 的解析：鍵→值）與 `line`（帳本 1 起算實體行號），欄數不是九的列＝`{"line", "raw", "valid": false}`（並於 `problems` 記 `ROW-ARITY`）；`events`＝事件原樣（不加鍵）；`proposals`＝`id`、`state`、`route`、`cls`、`action`、`run`、`rev`、`digest`、`target`、`touched`（自最新 rev 的 `.patch` 現導）、`touched_count`、`sources`、`created_seq`、`last_seq`、`verdict`、`flags`、`cooldown`（物件或 `null`）、`card`（`card` 動詞逐字輸出的文字；內容檔缺或反解析不一致 ⇒ `card: null` 並於 `ne` 列 `{"field": "proposals.<id>.card", "reason": <碼>}`）；`runs`＝`id`、`opened_seq`、`closed_seq`、`trigger`、`head_sha`、`research`（`{"kind", "seq"}` 或 `null`）、`prop_ids`、`outcome`（`"no_event"`、`{PROP: 狀態}` 或未關時 `null`）；`status`＝單元素陣列，元素＝R60 的物件。**游標**：`--since N`＝嚴格大於 N（`events` 取 `seq`；`observations`、`proposals`、`runs` 取 ID 的數字部分）；`--limit N` 預設與上限＝`export_limit_max`；`next_since`＝本頁最後一筆的游標、已無下一頁＝`null`；`truncated`＝是否因 `--limit` 截斷。`--id` 取單筆，找不到＝`items: []`、rc 0。**事件帳本不存在**：`events`、`proposals`、`runs`＝`items: []`、`status`＝全空狀態的單元素，四者的 `ne` 皆含 `{"field": "events", "reason": "carrier-not-established"}`（不是零筆通過）。**Console 不得見的內容**：`export` 不讀、不印 `<si_dir>/` 下任何檔（AT：把哨兵字串放進 `AUTOSDD_SI_DIR` 的檔後輸出不得含它）。**共用同一組函式**：`export` 與 `status`、`card`、`check` 共用 `fold.py`、`card.py`、`status.py`（R63 ③ 以 import 關係加差分測試驗證，不得有第二份折疊或卡面實作）。**穩定性**：同一狀態下連續兩次輸出，除 `generated_at` 外逐字相同；`PYTHONIOENCODING=cp950` 的子行程輸出仍為 UTF-8。rc：0＝已輸出（`ne`／`problems` 非空不是錯誤）、3＝用法或輸入錯誤。
+- **R58 抓取行為與事件（PRD AC-SI-30-3、30-5；`fetch.py` 是整個套件唯一 import `urllib`／`http`／`socket`／`ssl` 的檔）**：(a) `fetch.fetch_source(url, *, policy, timeout, max_bytes, allowed_hosts)` 以標準庫 `urllib.request` 對**單一**來源發 GET，取**原始位元組**；CLI 入口不暴露放寬旗標，測試以政策物件（`allow_loopback`、`allow_http`）與 `mock.patch.object(sources, "DEFAULT_POLICY", …)` 容許本機夾具。(b) **請求形態**：只准 `http`／`https`；`User-Agent` 恆為 `selfimproving-research/1`；`Accept-Encoding` 恆為 `identity`；不帶 `Cookie`、`Authorization`、`Proxy-Authorization` 或任何認證標頭；回應帶 `Content-Encoding` 且不是 `identity` ⇒ 該來源失敗 `encoding`。(c) **重導向**手動處理（關掉 `urllib` 自動跟隨）：至多 5 跳（第 6 次重導向 ⇒ `redirect-refused`）；每個目標須 scheme∈`http`、`https` 且**不得改變 scheme**（`http`↔`https` 皆拒：`https` 降 `http` 是降級、`http` 升 `https` 亦是 scheme 變更，一律 fail-closed）、目標 `hostname:port`（缺連接埠取該目標 scheme 的預設）須屬允許集合（＝現役表項 `url` 的 `hostname:port`），否則 `redirect-refused`；逐跳判定住純函式 `fetch.check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None`（拒絕時回傳 `redirect-refused`、可放行回傳 `None`；測試直接以字串餵它，覆蓋 loopback 夾具起不了的 https 降 http 與 http 升 https 等情形；**scheme 判準的負控須用顯式同埠的 URL**——預設埠下 `https` 與 `http` 的 `hostname:port` 本來就不同，會被連接埠判準先拒而遮住 scheme 判準，使它無任何測試鎖住）。(d) **界限**：整個來源（含全部重導向跳）的牆鐘 ≤ `research_timeout_seconds`，超過 ⇒ 中止、失敗 `timeout`；**強制點在每一次讀取**（含狀態列、標頭與本文）：每次讀取前以剩餘時間設定該次的逾時，不得只在區塊與區塊之間檢查期限（對持續慢滴 1 位元組的回應，區塊間檢查永遠等不到下一個區塊；亦不得以 `threading.Timer` 等常駐機制實作，R64）；已讀位元組（或 `Content-Length`）> `research_bytes_max` ⇒ 中止、失敗 `too-large`（**不截斷**）；`Content-Type` 的主型別（`;` 之前）須屬 `text/*`、`application/json`、`application/xml`、`application/atom+xml`、`application/rss+xml`、`application/xhtml+xml`，缺或不符 ⇒ `non-text`；最終狀態須 2xx，否則 `http-status`（detail 帶狀態碼）；連線或名稱解析錯誤 ⇒ `network`。(e) **成功的來源**：對原始位元組算 `sha256`（不做任何正規化），以二進位原樣寫入 `<si_dir>/research/<id>/<sha256 前 12 碼>.txt`，並維護 `<si_dir>/research/<id>/latest`（內容＝該 12 碼，無副檔名、無換行）；`changed`＝該 `id` 在事件帳本上一筆含它的 `research.scan` 的 `sha256` 與本次不同（無前筆＝`true`）。**失敗的來源**不入 `sources[]`、不得以舊 digest 代填（NFR-SI-09-1）。(f) **事件**：欄位照 R31；`sources_sha256`＝來源表檔位元組 CRLF 換 LF 後的 sha256（加 `sha256:` 前綴，與 R42 (c) 的算法相同）；`fetched_at`＝抓取完成時刻（帶 offset）；**不存 `url`、不存候選數**；`by` 恆為 `researcher`。(g) **預算與純度**：現役來源筆數、單來源位元組、單來源牆鐘三界各由 `params.json` 的 `research_fetch_max`、`research_bytes_max`、`research_timeout_seconds` 供應；`research --skip` 與其餘全部動詞零網路（R63 ⑥）。(h) 誠實劃界：`sha256` 量的是來源**原始位元組**的穩定性、不是語意改版（含伺服器端產生內容的 HTML 會使 `changed` 假陽性，來源表應優先取原始檔或 feed）；不做 DNS 解析後驗 IP；研究者讀檔的牆鐘與 token 無機械物量測。
+- **R59 `scan`（PRD AC-SI-31-1～31-4；候選推導為本檔類推，§7.1 ⚖ 9）**：`scan [--json] [--since <commit>] [--repo DIR]`，唯讀、離線、無狀態、不寫事件（R63 ⑥）。(a) **起算點**：給 `--since` ⇒ 該 commit（7～40 位 hex，須可解析為 commit，否則 rc 3）的 committer 時間與 `<commit>..HEAD`；否則取最近一筆 `run.close` 事件的 `t`；無則取 `migration_base_sha` 那個 commit 的 committer 時間（`git show -s --format=%ct`）；皆無 ⇒ 起算點量不到。日精度的 DEF 列以「發現日期對起算時刻的 UTC 日期」比較：早於者排除、同日者納入。(b) **五個證據來源，各印一行**（`source <id> 讀到 <N> 筆` 或 `source <id> 量不到：<原因>`）：`defects`（缺陷帳本主檔 `docs/06_quality/AutoSDD_Defect_Log.md`；以表頭欄名定位 `ID`、`發現日期`、`嚴重度`、`狀態`；列的嚴重度∈`P1`、`P2`、狀態分類為 `open`〔`defs.py`，差分對 `check_defect_log_crossref._classify`；`open` 含 `workaround`、`partial` 字樣〕、發現日期不早於起算日；原因碼 `ledger-missing`、`ledger-header`、`anchor-unavailable`）；`observations`（OBS 帳本中 `時間` 不早於起算時刻的列數，加 `<commit>..HEAD` 或起算時刻之後（committer 時間**嚴格晚於**起算時刻；恰等於者不計）的 commit 依路徑歸桶；原因碼 `git-unavailable`、`anchor-unavailable`）；`event_ledger`（事件帳本的待決 PROP、SUSPENDED、冷卻摘要，是狀態摘要、不是候選；原因碼 `carrier-not-established`）；`build_reports`（repo 內任何路徑含 `build/reports/` 片段、副檔名∈`.xml`、`.json`、`.log`、`.txt` 的檔個數；原因碼 `no-artifacts`）；`probe_outputs`（符合常數 `PROBE_OUTPUT_GLOBS`＝`**/misstep_attribution*.jsonl` 的檔個數；原因碼 `no-artifacts`）。後兩者在 P1 只計數、不產生候選。(c) **候選列**：`defects` 每個符合列一筆（症狀 `缺陷帳本新立 <P1|P2> 未結列 <DEF-ID>`、座標＝該 DEF ID）；`observations` 每個「窗內有 ≥1 個 commit 觸及」的模組桶一筆（症狀 `<桶> 窗內有 <k> 個 commit 觸及（<至多 3 個路徑，以、連接>）`、座標＝`commit <最新 commit 的前 12 位 hex>`）。每筆候選＝P0 九欄格式：ID 自 OBS 帳本現有合法 ID 最大者加一起連號、時間帶 offset、情境 `si scan（自動草稿）`、分類 `bug`、嚴重度 `P3`、處置 `open`、標記 `面=流程;來源=工具;回報者=scan`；每列 ≤ `row_max_bytes`（超長則縮短路徑清單）、自身通過 P0 R9～R17（AT：把全部候選附加到帳本副本後 `check` 對這些列零 finding）；**無座標的候選不印**；草稿不寫入帳本（主控單窗口入帳）。(d) **模組歸桶**（PRD AC-SI-31-4；判定住純函式 `scan.bucket_of(path: str) -> str`，回傳桶名或 `未分類`，測試直接以字串餵它）：依序判 `SelfImproving`（`tools/lib/selfimproving/**`、`tools/selfimproving.py`、`tools/probe/selfimproving_*`、`tools/tests/test_selfimproving_*`、`docs/**` 下檔名含 `SelfImproving` 者）→ `AutoClaude`（`AutoClaude/**`）→ `AISDLC_SDD`（`AISDLC_SDD/**`）→ `AgentConsole`（`AgentConsole/**`）→ `根層`（其餘 repo 內路徑）；絕對路徑、含 `..`、空字串等非 repo 相對形態歸 `未分類`並計數、不丟棄；觸及多桶的 commit 依其觸及的每個路徑各歸一次。(e) **零候選＝無事件**（AC-SI-31-3、NFR-SI-09-1）：零候選時整體印 `無事件`（JSON `status:"no-event"`）；任一來源量不到時改印 `無事件（<K> 個來源量不到）`；**不得**印成「通過」「達標」「綠」；量不到不併入零；候選數只印在資訊欄；`scan` 不接任何閘門 rc。(f) **輸出**：文字形態＝五行來源、（有候選時）`candidates:` 與每筆候選一行、末行（`無事件`｜`無事件（K 個來源量不到）`｜`候選 <M> 筆`）；`--json`＝`{"schema_rev": 1, "status": "no-event"｜"candidates", "unavailable_count": K, "anchor": {"kind": "since"｜"run.close"｜"migration_base_sha"｜null, "time": <ISO 或 null>}, "sources": [{"id", "status": "read"｜"unavailable", "count"｜"reason"}…], "candidates": [{"bucket", "row"}…], "buckets": {<桶>: <候選數>…}}`。rc：0＝已執行（零候選仍 0）、3＝無法執行。(g) 誠實劃界：候選是啟發式（路徑歸桶、P≤2 未結）而非缺陷判定；「量不到」只報告 `scan` 自己讀不到的來源，讀得到但內容殘缺的看不見。
+- **R60 `status`（PRD AC-SI-03-1、AC-SI-06-1、AC-SI-23-1、AC-SI-30-1、NFR-SI-09-2；鍵名與元素形態為本檔類推，§7.1 ⚖ 9）**：`status [--json] [--repo DIR]`，唯讀。物件（`--json` 的輸出；亦是 `export --kind status` 的 `items[0]`，由**同一個函式**產生）鍵序固定：`events_detected`、`unavailable`、`open_runs`、`pending_props`、`suspended`、`cooldowns`、`skip_reasons`、`capacity`、`root_cause_changes`、`reopen_candidates`、`pending_windows`、`friction_reconcile`、`no_event`。(a) **啟動事件偵測**（窗＝最近一筆 `run.close` 之後的事件；無 `run.close` 則為全部）：`events_detected` 的元素 `{"trigger": "b"｜"c"｜"d", "subject": <ID>, "detail": <字串>}`——(b)＝窗內每筆對 `type=link` 的 `attr` 的 `attr.confirm`（subject＝ATT ID，「同一症狀第二次被記入、經審查者確認」）；(c)＝缺陷帳本新立 P≤2 未結列（同 R59 `defects` 的判定與起算點；subject＝DEF ID）；(d)＝窗內已確認的復發連結，其 `reopens` 落在某個折疊狀態∈`promoted`、`measuring`、`closed` 的 PROP 的 `sources`（subject＝PROP ID）。(e)（容量事件）P3 的 `capacity` 動詞建成前**印 NOT-EVALUABLE、不得印成零**：`capacity`＝`{"status": "NOT-EVALUABLE", "reason": "capacity-verb-not-established"}`。起算點量不到（(c) 需要）⇒ `unavailable` 含 `{"trigger": "c", "reason": "anchor-unavailable"}`（正常為空陣列）。`no_event`＝`events_detected` 為空；為真時文字形態印 `無事件`（`unavailable` 非空則 `無事件（<K> 個來源量不到）`），**不得**印成通過。(b) **狀態摘要**：`open_runs`＝`[{"run", "opened_seq", "research": {"kind", "seq"}｜null, "props": [PROP ID…]}]`；`pending_props`＝折疊狀態∈`proposed`、`verified` 者 `[{"id", "rev", "state", "route", "digest8"}]`；`suspended`＝`null` 或 `{"run": <RUN-ID>}`（R35 (c)，即 `恢復` 的綁定值）；`cooldowns`＝R35 (d) 的元素陣列；`skip_reasons`＝`{"quota-band": n, "offline": n, "helmsman": n}`（三鍵恆在，計所有 `research.skip`）；`root_cause_changes`＝R48 (e) 的整數；`reopen_candidates`＝`{"unsettled": <無 confirm／reject 的 type=link 的 attr 筆數>}`；`pending_windows`＝`[{"prop", "close_seq"}…]`（生效結果為 `pending` 的 `mea.close`）。(c) **交卷對帳**（NFR-SI-09-2，只量不閘；**P1 恆為 NOT-EVALUABLE**，`measured` 分支屬 P2 起、P1 不產生，§4〈刻意不做〉）：`friction_reconcile`＝`{"status": "NOT-EVALUABLE", "reason": <下列兩種之一>}`——`transcript-unavailable`（逐字稿目錄取不到，例：容器內或他機。**逐字稿目錄取法**：`lib.platform_utils.claude_home()`〔環境變數 `CLAUDE_CONFIG_DIR` 非空白則取之，否則 `Path.home() / ".claude"`〕下的 `projects/<slug>/`，`<slug>` 由 `--repo` 的解析後絕對路徑推得：`re.sub(r"[^A-Za-z0-9]", "-", <路徑字串>)`（規則同 `tools/probe/audit_session.py` 的 `project_transcript_dir`，是觀察到的編碼、非官方契約；`status` 自行實作、不 import `probe`，守 R63 的 import 範圍），例：`D:\CursorProject\AISDCL_Agent` 對應 `D--CursorProject-AISDCL-Agent`；該目錄不存在或讀不到＝取不到。tmp 目錄下的合成 repo 其 slug 目錄不會存在，再加 §5.5 (b) 的家目錄隔離，AT 中此欄在未特別佈置時必為 `transcript-unavailable`）；`transcript-parser-not-established`（逐字稿目錄存在，但「流程摩擦」節項數的解析器 P1 未建立：目錄存在不等於量得到，不得因此印成 `measured` 或任何數字計數）。量不到不得印成 0。(d) 事件帳本不存在 ⇒ 全部事件類欄位為空狀態、`unavailable` 照常，不是錯誤；rc 0（已執行）或 3。文字形態逐鍵印出（至少含 `無事件`／事件行、`capacity NOT-EVALUABLE`、`suspended`、`skip_reasons` 各字樣）。
+- **R61 `export`（PRD AC-SI-32-5、§9.2〈`export --json` 輸出〉；Console 三層屬 P1b，本檔只定根層的輸出契約與穩定性）**：`export --json --kind <k> [--since N] [--limit N] [--id <ID>] [--repo DIR]`，唯讀、離線、只用標準庫。**用法錯誤＝rc 3**：缺 `--json`；`--kind` 不在 `observations`、`events`、`proposals`、`runs`、`status`；`--limit` <1 或 > `export_limit_max`；`--since` 非非負整數，或與 `status` 併用；`--id` 與 `observations`／`events`／`status` 併用，或格式不合（`proposals` 須 `^PROP-SI-\d{3,}$`、`runs` 須 `^RUN-SI-\d{3,}$`）。**輸出**：單一 JSON 文件加 LF，UTF-8 位元組直寫（`ensure_ascii=False`、無 BOM）；頂層鍵序 `schema_rev`（1）、`kind`、`generated_at`（呼叫時刻、帶 offset）、`head_sha`（`git rev-parse HEAD` 的 40 碼；git 不可用＝`null` 並於 `ne` 列 `{"field": "head_sha", "reason": "git-unavailable"}`）、`items`、`next_since`（整數或 `null`）、`truncated`（布林）、`ne`（`[{"field", "reason"}…]`：量不到的欄位逐一列出、不省略）、`problems`（`[{"subject", "code", "detail"}…]`：帳本結構層問題，例如無法解析的事件行，不是 `check` 的判級）。`items` 依 kind：`observations`＝九欄（鍵 `id`、`time`、`context`、`symptom`、`evidence`、`category`、`severity`、`disposition`、`marks`，值皆字串）加 `marks_kv`（`rows.parse_marks` 的解析：鍵→值）與 `line`（帳本 1 起算實體行號），欄數不是九的列＝`{"line", "raw", "valid": false}`（並於 `problems` 記 `ROW-ARITY`）；`events`＝事件原樣（不加鍵）；`proposals`＝`id`、`state`、`route`、`cls`、`action`、`run`、`rev`、`digest`、`target`、`touched`（自最新 rev 的 `.patch` 現導）、`touched_count`、`sources`、`created_seq`、`last_seq`、`verdict`、`flags`、`cooldown`（物件或 `null`）、`card`（`card` 動詞逐字輸出的文字；內容檔缺或反解析不一致 ⇒ `card: null` 並於 `ne` 列 `{"field": "proposals.<id>.card", "reason": <碼>}`）；`runs`＝`id`、`opened_seq`、`closed_seq`、`trigger`、`head_sha`、`research`（`{"kind", "seq"}` 或 `null`）、`prop_ids`、`outcome`（`"no_event"`、`{PROP: 狀態}` 或未關時 `null`）；`status`＝單元素陣列，元素＝R60 的物件。**游標**：`--since N`＝嚴格大於 N（`events` 取 `seq`；`observations`、`proposals`、`runs` 取 ID 的數字部分）；`--limit N` 預設與上限＝`export_limit_max`；`next_since`＝本頁最後一筆的游標、已無下一頁＝`null`；`truncated`＝是否因 `--limit` 截斷（本頁之後仍有符合游標的項目才為真：筆數恰等於 `--limit` 時為 `false`、`next_since` 為 `null`，多一筆才為 `true`）。`--id` 取單筆，找不到＝`items: []`、rc 0。**事件帳本不存在**：`events`、`proposals`、`runs`＝`items: []`、`status`＝全空狀態的單元素，四者的 `ne` 皆含 `{"field": "events", "reason": "carrier-not-established"}`（不是零筆通過）。**Console 不得見的內容**：`export` 不讀、不印 `<si_dir>/` 下任何檔（AT：把哨兵字串放進 `AUTOSDD_SI_DIR` 的檔後輸出不得含它）。**共用同一組函式**：`export` 與 `status`、`card`、`check` 共用 `fold.py`、`card.py`、`status.py`（R63 ③ 以 import 關係加差分測試驗證，不得有第二份折疊或卡面實作）。**穩定性**：同一狀態下連續兩次輸出，除 `generated_at` 外逐字相同；`PYTHONIOENCODING=cp950` 的子行程輸出仍為 UTF-8。rc：0＝已輸出（`ne`／`problems` 非空不是錯誤）、3＝用法或輸入錯誤。
 
 *G. 落點鎖、純度、SOP、鍵 B 與既有測試同步（PRD FR-SI-34、§9.4、FR-SI-28、§9.7 #47／#48）*
 
-- **R62 落點鎖 `tools/tests/test_root_module_layout.py`（PRD AC-SI-34-1～34-4、§9.1〈C19 判準〉）**：判準函式以 `repo_root: Path` 為參數（真樹與 AT 的合成樹用同一份碼）。(a) **登記表解析**：取 SSOT `docs/02_architecture/Root_Layout_and_Module_Placement.md` 中標題含 `## 3.` 的節內、欄數為六的資料列；取第 2～5 欄的反引號片段；含空白者（指令字串）、以 `~` 或 `$` 起頭者（repo 外）不判；含 `/`、結尾為 `.py`、`.md`、`.json`、`.jsonl`、`.yml`、`.yaml`、`.ps1`、`.sh` 之一、或含 `*` 者為**路徑候選**（`ledger`、`_hook_launcher` 這類裸詞不判）；無目錄前綴的檔名片段承繼**同欄前一個帶目錄的片段**為基底（**只承繼其前方**：同欄中位於該檔名片段之前、最近的一個帶目錄片段，其後的片段不影響它；候選基底＝該片段本身〔若為目錄〕與其上一層，任一處命中即過）；含 `*` 者 glob 展開至少命中一檔，目錄片段須存在且含檔。(b) **AC-SI-34-1**：每個路徑候選在磁碟至少命中一檔；缺一 ⇒ 紅並印列名與路徑；解析不到登記表或解析出 0 列 ⇒ 紅（不得 0 列通過）。(c) **AC-SI-34-2**：`tools/lib/` 的扁平 `.py` 檔（不含 `__init__.py`）取檔名第一個底線之前為前綴，同前綴 ≥3 支且 `tools/lib/<前綴>/` 套件目錄不存在 ⇒ 紅；存量以 **shrink-only 名冊**豁免（名冊住測試檔常數、初值＝以本規則對真樹現查的結果；名冊內前綴若已成套件須自名冊移除，否則紅；名冊另受天花板常數雙邊相等釘住：長大或縮短而不下修天花板皆紅）；新增檔使一個未入名冊的前綴達 3 支 ⇒ 紅。(d) **AC-SI-34-3**：`tools/lib/` 下每個含 `__init__.py` 的套件目錄，其名須出現在某一列「程式碼」欄的某個片段（形如 `tools/lib/<套件>/`）內，未登記 ⇒ 紅。(e) **AC-SI-34-4**：`docs/01_requirements/*_PRD.md` 中含字樣「模組落點表」者，必含字串 `docs/02_architecture/Root_Layout_and_Module_Placement.md`，缺 ⇒ 紅。(f) 邊界型 M（形態判準）；誠實劃界：只驗路徑存在與登記，不驗路徑「該不該在那裡」；只看檔名前綴，同一模組換前綴命名的散落看不見；只判含該字樣的 PRD。新增 `tools/tests/` 檔須付重釘稅（NFR-P1-9）。
+- **R62 落點鎖 `tools/tests/test_root_module_layout.py`（PRD AC-SI-34-1～34-4、§9.1〈C19 判準〉）**：判準函式以 `repo_root: Path` 為參數（真樹與 AT 的合成樹用同一份碼）。(a) **登記表解析**：取 SSOT `docs/02_architecture/Root_Layout_and_Module_Placement.md` 中標題含 `## 3.` 的節內、欄數為六的資料列；取第 2～5 欄的反引號片段；含空白者（指令字串）、以 `~` 或 `$` 起頭者（repo 外）不判；含 `/`、結尾為 `.py`、`.md`、`.json`、`.jsonl`、`.yml`、`.yaml`、`.ps1`、`.sh` 之一、或含 `*` 者為**路徑候選**（`ledger`、`_hook_launcher` 這類裸詞不判）；無目錄前綴的檔名片段承繼**同欄前一個帶目錄的片段**為基底（**只承繼其前方**：同欄中位於該檔名片段之前、最近的一個帶目錄片段，其後的片段不影響它；候選基底＝該片段本身〔若為目錄〕與其上一層，任一處命中即過）；含 `*` 者 glob 展開至少命中一檔，目錄片段須存在且含檔。(b) **AC-SI-34-1**：每個路徑候選在磁碟至少命中一檔；缺一 ⇒ 紅並印列名與路徑；解析不到登記表或解析出 0 列 ⇒ 紅（不得 0 列通過）。(c) **AC-SI-34-2**：`tools/lib/` 的扁平 `.py` 檔（不含 `__init__.py`）取檔名第一個底線之前為前綴，同前綴 ≥3 支且 `tools/lib/<前綴>/` 套件目錄不存在 ⇒ 紅；存量以 **shrink-only 名冊**豁免（名冊住測試檔常數、初值＝以本規則對真樹現查的結果；名冊內前綴若已成套件須自名冊移除，否則紅；名冊另受天花板常數雙邊相等釘住：長大或縮短而不下修天花板皆紅）；新增檔使一個未入名冊的前綴達 3 支 ⇒ 紅。(d) **AC-SI-34-3**：`tools/lib/` 下每個含 `__init__.py` 的套件目錄，其名須出現在某一列「程式碼」欄的某個**反引號片段**內（片段為 `tools/lib/<套件>/`，或以它起頭的路徑；該欄片段之外的散文字串不算登記、其他欄的片段亦不算），未登記 ⇒ 紅。(e) **AC-SI-34-4**：`docs/01_requirements/*_PRD.md` 中含字樣「模組落點表」者，必含字串 `docs/02_architecture/Root_Layout_and_Module_Placement.md`，缺 ⇒ 紅。(f) 邊界型 M（形態判準）；誠實劃界：只驗路徑存在與登記，不驗路徑「該不該在那裡」；只看檔名前綴，同一模組換前綴命名的散落看不見；只判含該字樣的 PRD。新增 `tools/tests/` 檔須付重釘稅（NFR-P1-9）。
 - **R63 能力登記與純度（PRD §9.4〈能力登記與純度判準〉；取代 P0 AT-030-2-1／AT-003-1-1 靜態段的「每個 `tools/lib/selfimproving/*.py`」字面）**：登記表常數 `CAPABILITY`（鍵＝`tools/lib/selfimproving/` 下的檔名，值＝類別 `ro`／`rw`／`net`）住 `tools/tests/test_selfimproving_capability.py`，共 24 個：`ro`＝`__init__`、`ledger`、`rows`、`git`、`refs`、`history`、`params`、`check`、`events`、`fold`、`evcheck`、`paths`、`props`、`defs`、`sources`、`card`、`status`、`scan`、`export`（19）；`rw`＝`evwrite`、`propfiles`、`writeverbs`（3）；`net`＝`fetch`、`research`（2）。**判準**：① 套件內每個 `*.py` 都在登記表、登記表的每個檔都存在（新檔未登記 ⇒ 紅）；② 逐檔掃描符合所登類別——`ro`：不得有 P0 的寫入形原語（正規式 `write_text|write_bytes|\.mkdir\(|os\.remove|os\.unlink|os\.rename|os\.replace|shutil\.|open\([^)]*['"][wax]b?\+?['"]`）、`os.system`／`os.popen`、網路模組 import，且 `subprocess` 字樣只准出現在 `git.py`；`rw`：不得 import 網路模組、不得有 `subprocess` 字樣；`net`：網路模組（`socket`、`urllib`、`http`、`ssl`、`ftplib`、`smtplib`、`asyncio`、`requests`）的 import 只准出現在 `fetch.py`（`research.py` 因 `import` 它而歸 `net`，自身不直接 import 網路模組）；所有類別的 import 只准標準庫、`_stdio_utf8`、`lib`（含 `lib.apply_lock`、`lib.sdd_latest`）與套件內相對 import；③ `check.py`、`status.py`、`scan.py`、`export.py`、`card.py` 的**相對 import 閉包**（經 AST 取 `from . import x`、`from .x import y`、`import lib.selfimproving.x`）⊆ `ro` 檔（唯讀動詞在結構上碰不到寫入或網路碼）；④ 常駐機制禁字樣（R64）仍掃全套件與入口；⑤ **動態**：在乾淨直譯器行程中 import `lib.selfimproving.check` 並跑一次 `check`，`sys.modules` 內不得出現 `lib.selfimproving.evwrite`、`.propfiles`、`.writeverbs`、`.fetch`、`.research`（`check` 行程不載入寫入與網路碼）；入口 `tools/selfimproving.py` 的模組層級 import 只含 `ro` 類模組，`writeverbs`、`research` 等一律在 handler 內延遲 import；⑥ **動態零網路**：對 `status`、`scan`、`card`、`export`、`check`、`run-open`、`run-close`、`attr*`、`prop-*`、`research --skip` 各跑一次，期間 `socket.socket.connect` 被替換為會拋例外者，皆不得觸發。`check` 自身的動態純度（P0 AT-030-2-1 的動態段：檔案摘要與 `git status --porcelain` 前後相同、子行程只有環境淨化的 `git`）不變，且涵蓋追加的 7 項。這不是新增守衛碼：測試檔在 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
 - **R64 常駐機制禁字樣（P0 R26 的 P1 重定）**：`tools/selfimproving.py` 與 `tools/lib/selfimproving/` 下**每個** `*.py`（含 `__init__.py` 與全部 `ro`／`rw`／`net` 檔；`apply_lock` 的輪詢睡眠在 `tools/lib/apply_lock.py`、不在套件內），原始碼不得出現 P0 R26 的 14 個正規式（`schtasks`、`launchctl`、`crontab`、`ScheduleWakeup`、`CronCreate`、`Register-ScheduledTask`、`apscheduler`、`threading\.Timer`、`sched\.scheduler`、`time\.sleep`、`while\s+True`、`daemon\s*=\s*True`、`os\.fork`、`signal\.alarm`；區分大小寫）；根 `.claude/settings.json` 全文不得含 `selfimproving`（不分大小寫）；P2／P3 動詞（R27）一律 rc 3。P0 R26 中「`status`、`prop-new` 等非 `check` 動詞一律 rc 3」的字面隨 P1 動詞落地而被取代（P0 測試改選仍未實作的動詞，R67）。
 - **R65 Operations SOP 定稿（PRD §9.1 C6、AC-SI-30-4／31-5 的任務書範本；`docs/05_development/SelfImproving_Operations_SOP.md`）**：測試以 LF 正規化全文與「`## ` 標題切段」判定，只判關鍵片段是否存在，語意由實跑檢核 V7 對照 PRD。(a) **P0 條文不退化**：P0 R25 的全部關鍵片段（擷取者節、啟動條件節、無事件、再開、真缺陷升 DEF、外部衍生、loop-self、流程摩擦入口、M 之後只追加）仍成立——由 P0 既有測試不改地執行把關；四個角色節（`歸因者`、`提案者`、`審查者`、`凍結者`）各須**仍含字面「P1 定稿」**作為狀態標示（P0 的 AT-032-1-1 斷言它），並另有實質內容。(b) **歸因者節**須含：`attr`、`attr-confirm`、`attr-reject`、`根因鍵`、`NONE`、`無法歸因`、`確認者`；一行同時含 `理論洞`、`P4`、`暴露證據`、`不立案`（AC-SI-07-2 的代位條文）；一行同時含 `evaluator-change`、`evaluator_command`、`expected_output_regex`、`OBS`、`不得轉送沙盒`（AC-SI-11-2 的代位條文）；**模組體檢任務書範本**（含 `模組體檢` 的子標題之下）：五個模組桶名 `AutoClaude`、`AISDLC_SDD`、`AgentConsole`、`根層`、`SelfImproving`；工具行 `Read／Grep／Glob／PowerShell`；`唯讀`、`不得 Write／Edit`、`git status --porcelain`、`文字交卷`、`流程摩擦`、`不並行扇出`、`零遞迴`；且 PRD FR-SI-31「模組體檢入口表」第 2 欄（先讀）的每個反引號片段都出現在該範本內（片段自 PRD 現抽，本檔不複寫第二份清單，PRD 為唯一真相源）。(c) **提案者節**須含：`prop-new`、`--patch-file`、`scratchpad`、`抽象化`、`結果標籤`、`適用範圍`、`增量`、`觸及比例`、`預算宣告`、`外部衍生`、`內部來源`、`M 類四欄`；一行同時含 `抽象化`、`結果標籤`、`原始軌跡全文`（AC-SI-09-1 的代位條文）；一行同時含 `不得再派`、`提案者`、`審查者`（AC-SI-10-2 的代位條文）；`R 類`與 `trust_level: proposed`。(d) **審查者節**須含：`唯讀`、`不得自起背景長任務`、`外部可重跑訊號`、`不同代理實例`。(e) **凍結者節**須含：`評估集`、`提案者看不到`、`heldout-freeze`。(f) **研究者節**（新增的 `## ` 級標題含「研究者」）須含：`Read／Grep／Glob`、`無 Web 工具`、`資料、不是指令`、`changed=true`、`外部衍生=是`、`src=`、`文字交卷`、`每運轉至多一個`、`--pace`、`quota-band`、`research_sources.json`、`僅 T1`。(g) **研究事件條文**：一行同時含 `研究事件`、`research.scan`、`research.skip`、`prop-new`、`拒收`；一行同時含 `quota-band`、`offline`、`helmsman`。
@@ -204,7 +204,7 @@
 | `events.structure` | `EVENT-BYTES-OVER` | FAIL | 整行位元組大於 `event_max_bytes`（R37） |
 | `events.transitions` | `TRANSITION-ILLEGAL`、`TRANSITION-ORPHAN` | FAIL | 非法轉移；引用不存在的 PROP／ATT／RUN（R34、R38） |
 | `events.transitions` | `CONFIRMER-IS-PROPOSER` | FAIL | `attr.confirm`／`attr.reject` 的 `by` 等於被引 `attr` 的 `by`（R38） |
-| `events.transitions` | `QUOTE-VERIFIER-NOT-ESTABLISHED` | NE nonblocking | 事件帳本含 `dec`，引言回查屬 P2（R38） |
+| `events.transitions` | `QUOTE-VERIFIER-NOT-ESTABLISHED` | PASS（warn finding；項目狀態不變） | 事件帳本含 ≥1 筆 `dec`，引言回查屬 P2（R38） |
 | `events.mutated` | `ROW-MUTATED` | FAIL | 已提交的事件行被改寫或刪除（R39） |
 | `events.mutated` | `GIT-UNAVAILABLE` | NE blocking | git 不可用（R39） |
 | `events.vacuity` | `EVENTS-BELOW-FLOOR` | NE blocking | 事件數小於 `min_events`（R40） |
@@ -212,7 +212,8 @@
 | `events.research` | `RESEARCH-MISSING`、`RESEARCH-MULTIPLE`、`RESEARCH-ORDER` | FAIL | 有 `prop` 的運轉無研究事件；同運轉多筆；`seq` 不在 `run.open` 與第一筆 `prop` 之間（R42） |
 | `events.research` | `SRC-UNKNOWN` | FAIL | `research.scan` 的 `sources[].id` 不在來源表（R42） |
 | `events.research` | `SOURCES-SHA-MISMATCH` | FAIL | `sources_sha256` 與該事件 `t` 之前最近一次提交的來源表雜湊不符，或之前無提交（R42） |
-| `events.research` | `SOURCES-HISTORY-NOT-ESTABLISHED`、`QUOTE-VERIFIER-NOT-ESTABLISHED` | NE nonblocking | git 不可用而無法比對提交歷史；存在 `helmsman` 免掃（R42） |
+| `events.research` | `SOURCES-HISTORY-NOT-ESTABLISHED` | NE nonblocking | git 不可用而無法比對提交歷史（R42） |
+| `events.research` | `QUOTE-VERIFIER-NOT-ESTABLISHED` | PASS（warn finding；項目狀態不變） | 存在 `helmsman` 免掃（R42） |
 | `research.sources` | `SRC-FILE-FORMAT`、`SRC-SCHEMA`、`SRC-FIELD-MISSING`、`SRC-ID-FORMAT`、`SRC-ID-DUP`、`SRC-ORDER`、`SRC-KIND`、`SRC-RETIRED-TYPE`、`SRC-URL-SCHEME`、`SRC-URL-USERINFO`、`SRC-URL-HOST` | FAIL | 來源表驗證失敗（R43） |
 | 六個 `events.*` 與 `research.sources` | `CARRIER-NOT-ESTABLISHED` | NE nonblocking | 事件帳本或來源表檔不存在（R36） |
 | 六個 `events.*` 與 `research.sources`、`row.markers` | `SOURCE-UNAVAILABLE` | NE blocking | 該項所需 `params.json` 鍵無效，或需驗證而來源表讀不到（R36、R42、R44） |
@@ -281,7 +282,7 @@
 | US-108 | 同上 | AC-134-2 | （PRD AC-SI-34-2；R62 (c)）Given `tools/lib/` 的扁平檔 When 同前綴 ≥3 支且無套件目錄 Then 紅；存量以 shrink-only 名冊豁免，名冊內前綴已成套件須移除 |
 | US-108 | 同上 | AC-134-3 | （PRD AC-SI-34-3；R62 (d)）Given `tools/lib/` 下含 `__init__.py` 的套件目錄 When 比對登記表 Then 每個套件名都出現在某一列「程式碼」欄，未登記＝紅 |
 | US-108 | 同上 | AC-134-4 | （PRD AC-SI-34-4；R62 (e)）Given 含「模組落點表」字樣的 PRD When 掃描 Then 必含 SSOT 路徑，缺＝紅 |
-| US-109 | 作為主控與 QA，我要事件帳本的重放、介面與純度可被機器驗證，且 P0 的成果不退化，以便 P1 的 `check` 綠成為驗收憑證 | AC-108-4 | （PRD AC-SI-08-4 ①～④；⑤ 屬 P2；R37～R40）Given 事件帳本 When `check` 重放 Then ① 每個 PROP 的事件序列皆為合法轉移；② 已提交的既有行不得被改寫或刪除；③ ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙；④ 事件數低於 `min_events` 印 NE；⑤ `dec` 引言回查印 NE（P2 承接） |
+| US-109 | 作為主控與 QA，我要事件帳本的重放、介面與純度可被機器驗證，且 P0 的成果不退化，以便 P1 的 `check` 綠成為驗收憑證 | AC-108-4 | （PRD AC-SI-08-4 ①～④；⑤ 屬 P2；R37～R40）Given 事件帳本 When `check` 重放 Then ① 每個 PROP 的事件序列皆為合法轉移；② 已提交的既有行不得被改寫或刪除；③ ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙；④ 事件數低於 `min_events` 印 NE；⑤ `dec` 引言回查印 warn 層級提示（P2 承接） |
 | US-109 | 同上 | AC-140-1 | （本檔自增，PRD 階段前綴形 `AC-P1-040-1`；PRD §9.3 動詞表與 rc 通則，R27、R28）Given 13 個動詞 When 呼叫 Then 旗標、rc（0／1／2／3）、成功與拒收輸出文法依表；P2／P3 動詞與未知旗標一律 rc 3 |
 | US-109 | 同上 | AC-141-1 | （本檔自增，`AC-P1-041-1`；PRD §9.2〈事件帳本規約〉〈事件欄位表〉，R30～R32）Given 任一寫入動詞 When 成功 Then 追加恰一行：UTF-8 無 BOM、LF、`ensure_ascii=False`、共通鍵齊備、`t` 帶 offset、`kind` 在詞彙、行長 ≤ `event_max_bytes`；配號依規則 |
 | US-109 | 同上 | AC-141-2 | （本檔自增，`AC-P1-041-2`；PRD ADR-SI-10 的併發負控 ①～④，R33）Given 多個行程寫同一事件帳本 When 同時寫入 Then 鎖內「讀末行→配號→單次追加」使 `seq` 唯一連續、行行完整；陳舊鎖被回收、新鮮鎖逾時 fail-loud |
@@ -309,7 +310,7 @@
 | NFR-P1-7 | 測試 hermetic：全部 AT 只用 tmp 目錄內的合成 repo、合成帳本與以 `AUTOSDD_SI_DIR` 指向 tmp 的家目錄；唯讀存取真 repo 的 `params.json`、PRD、SOP、SSOT、`tools/` 原始碼、`.claude/settings.json`、`AutoClaude/` 原始碼與 `CLAUDE.md`；不寫真帳本、真事件帳本、真 `SelfImproving_Proposals/`；不連外網（本機 loopback 夾具除外）；不得在測試原始碼或本檔寫出不存在於真帳本與真缺陷帳本的字面 `OBS-SI-<數字>` 或 `DEF-<數字>` 編號（合成編號於執行期組出，先例 `tools/tests/test_defect_id_reference_integrity.py` 的 `_syn()`；R18 (a) 的 `git grep` 會掃整個 repo 的非忽略檔） | 實跑檢核 V2（真帳本 `ref.obs`）與既有鎖 `test_defect_id_reference_integrity.py` |
 | NFR-P1-8 | 範圍守衛：實作者只新增或修改 §5.6 允許集合內的檔案；不改 `.claude/**`、不改任何凍結檔（PRD、研究方法 SOP、P0 TCS）、不改 `autoclaude/` 引擎原始碼；重釘根層棘輪（檔案數下限、LOC、E501；現查 `tools/tests/test_adr_xplat001_c1c2_lock.py` 的 `repin_growth_problems()`、`tools/lib/skip_tag_policy.py` 的 `_TREE_FILE_FLOORS` 與 `tree_floor_problems()`、`tools/tests/test_platform_neutral_paths.py` 的 `_tmpdir_scan_roots` 檔數雙邊帶）與 SSOT 登記列同步由主控收尾，實作者不碰鎖檔 | 實跑檢核 V1（`git diff --name-only`） |
 | NFR-P1-9 | CI 與棘輪：P1 新增 `tools/` 估 3,700 斷言行與 6 個新測試檔，遠超護欄層單輪淨額上限，須由主控以具名一次性例外重釘（`_REPIN_APPROVED_ROUND_OVERAGE`，名冊上限的上修須可見）；compat-ci 兩支 `paths` 已含 `tools/lib/selfimproving/**` 與 `tools/selfimproving.py`，新測試檔在 `tools/tests/` 不必另加；若新測試檔唯讀消費新的根層資料檔（`research_sources.json`、SSOT），以 `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` 現查是否須列入 `paths`，同一個 commit 收齊；鍵 B 的新測試檔在 `AutoClaude/tests/contract/`，走 autoclaude-ci，並使 ONBOARDING §7 基線數字與 `_tmpdir_scan_roots` 的 `AutoClaude/tests` 檔數雙邊帶移動，須現查重釘 | 實跑檢核 V5；根層全套 unittest |
-| NFR-P1-10 | **Developer 交卷前閘門清單（缺一即不得交卷；輸出逐字貼入交卷）**：(1) 本檔 AT 與 P0 的 42 個 AT 全綠（`python -m pytest tools/tests/test_selfimproving_check.py tools/tests/test_selfimproving_events.py tools/tests/test_selfimproving_props.py tools/tests/test_selfimproving_research_scan.py tools/tests/test_selfimproving_export_status.py tools/tests/test_selfimproving_capability.py tools/tests/test_root_module_layout.py -q -p no:xdist -o addopts=`；鍵 B 另在 `AutoClaude/` 下跑 `python -m pytest tests/contract/test_evolution_propose_only.py -q`）；(2) `python tools/selfimproving.py check` 對真 repo rc 0（28 項）；(3) `ruff check` 對新增與改動的每個 `.py` 為 0 錯；(4) `python AutoClaude/tools/check_loc_budget.py --json` rc 0；(5) `python tools/sync_onboarding_baselines.py --check-snapshot` rc 0；(6) 官方 `python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`）rc 0；(7) 護欄層重釘儀式做到 `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines` 的淨差額為 +0（由主控收尾）；(8) 文件引用子專案檔案一律寫 monorepo 根起算路徑（`TestR81GhostPathClaims` 會判相對路徑為幽靈）；(9) 大檔（>100KB）編修先備自 pristine 的冪等重建腳本、交卷即退役；(10) 交卷含「流程摩擦」節（根 `CLAUDE.md` 與 SOP 擷取者節） | SCG-4 實跑檢核 V2、V3、V4、V5（讀 rc 先存變數再讀，不接管線） |
+| NFR-P1-10 | **Developer 交卷前閘門清單（缺一即不得交卷；輸出逐字貼入交卷）**：(1) 本檔 AT 與 P0 的 42 個 AT 全綠（`python -m pytest tools/tests/test_selfimproving_check.py tools/tests/test_selfimproving_events.py tools/tests/test_selfimproving_props.py tools/tests/test_selfimproving_research_scan.py tools/tests/test_selfimproving_export_status.py tools/tests/test_selfimproving_capability.py tools/tests/test_root_module_layout.py -q -p no:xdist -o addopts=`；鍵 B 另在 `AutoClaude/` 下跑 `python -m pytest tests/contract/test_evolution_propose_only.py -q -n 0`；加 `-n 0` 的原因：本機 PG 在場時，AutoClaude 的 conftest 對全域 addopts 的 `-n auto` 回 rc=4〔PG 在場但未用 `--dist loadgroup`〕；`-p no:xdist` 不能與 `-n` 並用，實測 `unrecognized arguments`）；(2) `python tools/selfimproving.py check` 對真 repo rc 0（28 項）；(3) `ruff check` 對新增與改動的每個 `.py` 為 0 錯；(4) `python AutoClaude/tools/check_loc_budget.py --json` rc 0；(5) `python tools/sync_onboarding_baselines.py --check-snapshot` rc 0；(6) 官方 `python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`）rc 0；(7) 護欄層重釘儀式做到 `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines` 的淨差額為 +0（由主控收尾）；(8) 文件引用子專案檔案一律寫 monorepo 根起算路徑（`TestR81GhostPathClaims` 會判相對路徑為幽靈）；(9) 大檔（>100KB）編修先備自 pristine 的冪等重建腳本、交卷即退役；(10) 交卷含「流程摩擦」節（根 `CLAUDE.md` 與 SOP 擷取者節）；(11) **新增 `tools/tests/` 檔會撞的根層鎖，逐項過**（OBS-SI-161：七支新檔一次撞 23 筆紅；本清單是規格來源，各鎖的判準以其所在檔為準，修法一律是「重釘為現查值」或「改正成因」、不得壓制）：① `tools/lib/skip_tag_policy.py` 的 `_TREE_FILE_FLOORS`（`tools/tests` 與 `AutoClaude/tests` 的檔數掃描下限）；② `tools/tests/test_platform_neutral_paths.py` 的腐化上界（`_tmpdir_scan_roots` 檔數雙邊帶，`tools/tests` 與 `tools/lib`）；③ E501 存量棘輪（`tools/tests/test_subprocess_encoding_hygiene.py` 的 `test_e501_debt_only_shrinks`；ruff 量**東亞寬度**、CJK 算 2；找新長行：`ruff check --isolated --select E501 --line-length 100 --output-format concise <檔>`）；④ 同檔的編碼衛生掃描下限；⑤ POSIX 絕對路徑字面（`tools/tests/test_platform_neutral_paths.py` 的 `TestNoPosixAbsPathLiteralInAsserts`：測試字面值不得含 `/etc/…` 之類整串 POSIX 絕對路徑，需要時於執行期拆開組出）；⑥ 死信引用（repo 內路徑形態的字面須指向存在的檔，合成路徑拆開寫，先例 `TESTS_A`；文件側 `TestR81GhostPathClaims`）；⑦ NTFS 錨站點登記（`tools/tests/test_windows_forbidden_filename_parity.py`：新增處理 NTFS 保留名、尾端點的原始碼站點須登記）；⑧ `unittest discover` 靜態守門（`tools/tests/test_schedule_capability_parity.py`：**跨檔基底鏈不解析，自夾具檔匯入的測試基底類別，其名稱須含 `TestCase`**，OBS-SI-162）；⑨ `tools/run_root_unittests.py` 的 `MIN_TESTS` 下限；(12) **測試 class 與夾具 def 的 docstring 指名受測模組**（`tools/lib/selfimproving/<x>.py`）：分桶棘輪（`tools/lib/guard_bucket_policy.py`）以頂層 class／def 為單位，chunk 文字只參照 `docs/`、`ONBOARDING.md` 這類文件 token 就整塊算 prose（shrink-only）；docstring 指名受測模組即歸 mixed（正確分類，不是繞過）；交卷前現查 `python tools/probe/guard_layer_bucket_census.py --grain chunk`，看 `prose` 桶的 `exclusive`（OBS-SI-164：未指名時 1,546 行落 prose）；僅守文件字面的 class（例：SOP 條文判準）歸 prose 是正確分類，其增量由主控於重釘儀式併記；(13) **`--print-guard-lines` 住 `tools/tests/test_adr_xplat001_c1c2_lock.py`、不是分桶探針的旗標**：取護欄層淨額與逐檔表一律 `python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`；對 `tools/probe/guard_layer_bucket_census.py` 傳它回 rc=2（unrecognized arguments；OBS-SI-160）；該探針的 `--jsonl` 是**輸出路徑**（會覆寫該檔）、不是輸入檔 | SCG-4 實跑檢核 V2、V3、V4、V5（讀 rc 先存變數再讀，不接管線） |
 | NFR-P1-11 | 失效可偵測（NFR-SI-09）：量不到＝NOT-EVALUABLE、不得印成零或綠——`status` 的 (e) 與 `friction_reconcile`、`scan` 的來源行與「無事件（K 個來源量不到）」、`export` 的 `ne`、`research` 失敗來源（不入 `sources[]`、不以舊 digest 代填、印 OBS 草稿列）、`check` 載體缺席的 NE | §2 對應各 AT |
 
 **追溯矩陣**：F-002 ← PRD FR-SI-05～11、14、28、30、31、34（§5.2）、FR-SI-32 的 AC-SI-32-5、AC-SI-02-1／03-1／03-2 的 P1 機械半，與 §9.1 的 C3、C4、C6、C7、C13、C14、C16、C17、C18 根層半、C19、§9.2、§9.3、§9.4、§9.5 的 ADR-SI-07／10／11、§9.6 P1 列、§8.1 P1 出口 (a)～(h)；US-101～US-109 → AC-103-1～AC-145-2（本檔 FRD-lite）→ AT（本檔 §1）。
@@ -355,6 +356,8 @@
 | AC-102-1 | `prop-new` 內部來源前置檢查（任何類別至少一個內部來源）（PRD AC-SI-02-1） | AT-102-1-E-1 | （PR）外部衍生列（含研究者候選）不得單獨充當任何類別提案的證據；來源須可解析 | ✅ | Integration | □ |
 | AC-103-1 | `status` 啟動事件偵測與狀態摘要（PRD AC-SI-03-1） | AT-103-1-1 | （ES）唯讀按需偵測啟動事件 (b)(c)(d)、印待決 PROP、運轉、冷卻、免掃分佈與根因鍵更改次數；(e) 印 NOT-EVALUABLE | ✅ | Integration | □ |
 | AC-103-1 | `status` 啟動事件偵測與狀態摘要（PRD AC-SI-03-1） | AT-103-1-E-1 | （ES）零事件印無事件而不印通過；起算點量不到；SUSPENDED 折疊與恢復；冷卻解除；pending 窗；事件帳本缺席與壞行 | ✅ | Integration | □ |
+| AC-103-1 | `status` 啟動事件偵測與狀態摘要（PRD AC-SI-03-1） | AT-103-1-E-2 | （ES）SUSPENDED 的連續判準：兩窗只有一壞不暫停、連續兩壞才暫停、`pending` 窗不打斷連續 | ✅ | Integration | □ |
+| AC-103-1 | `status` 啟動事件偵測與狀態摘要（PRD AC-SI-03-1） | AT-103-1-E-3 | （ES）`pending_props` 含 `verified`；偵測窗以最近 `run.close` 為界、已處理者不重複偵測；`friction_reconcile` 兩種 NOT-EVALUABLE 原因 | ✅ | Integration | □ |
 | AC-103-2 | `run-close` 無事件記錄（PRD AC-SI-03-2） | AT-103-2-1 | （EV）零 `prop` 的運轉記 `no_event`、有 `prop` 的運轉記 `outcomes`（各 PROP 折疊狀態） | ✅ | Integration | □ |
 | AC-103-2 | `run-close` 無事件記錄（PRD AC-SI-03-2） | AT-103-2-E-1 | （EV）未開、已關、查無的運轉不得關閉；同一運轉不可二次關閉 | ✅ | Integration | □ |
 | AC-105-1 | 歸因清單（種類、座標；`NONE` 須寫明無法歸因）（PRD AC-SI-05-1） | AT-105-1-1 | （EV）`attr --type root` 七種種類皆受理；事件鍵恰為欄位表；`NONE` 須以「無法歸因」起頭 | ✅ | Integration | □ |
@@ -374,15 +377,19 @@
 | AC-107-3 | `touched` 全路徑導出與不可進化面、合法根比對（PRD AC-SI-07-3） | AT-107-3-E-1 | （PR）patch 的任一路徑命中不可進化面（含大小寫變體、純改名來源端）即整張 handoff | ✅ | Unit | □ |
 | AC-107-3 | `touched` 全路徑導出與不可進化面、合法根比對（PRD AC-SI-07-3） | AT-107-3-E-2 | （PR）路徑別名形態（逃逸、絕對、磁碟機代號、資料流、尾端點與空白、保留裝置名、控制字元、反斜線）整張轉交；git 看見而解析器漏掉者拒收；`--target` 別名形態 rc 3 | ✅ | Unit | □ |
 | AC-107-3 | `touched` 全路徑導出與不可進化面、合法根比對（PRD AC-SI-07-3） | AT-107-3-E-3 | （PR）`R-*.yaml` 內容條件式、LATEST 注入與解析失敗 fail-closed、規格本體路徑與 SPEC-PATCH 草案例外、`cls` 自動標記、M 類合法根 | ✅ | Integration | □ |
+| AC-107-3 | `touched` 全路徑導出與不可進化面、合法根比對（PRD AC-SI-07-3） | AT-107-3-E-4 | （PR）`git apply --numstat` 自身失敗（損毀 hunk、context-diff）⇒ 拒收 `PATCH-PARSE`，不放行 | ✅ | Unit | □ |
 | AC-108-1 | PROP 登記（只產 proposed、不寫正式面）（PRD AC-SI-08-1） | AT-108-1-1 | （PR）任何來源的改進一律登記為 `PROP-SI-NNN`、初始 `proposed`；R 類 `target` 為草案座標；產生者不寫正式面 | ✅ | Integration | □ |
 | AC-108-1 | PROP 登記（只產 proposed、不寫正式面）（PRD AC-SI-08-1） | AT-108-1-E-1 | （PR）輸入類錯誤（階段一）收到即回；旗標缺漏 rc 3；審查者不得等於提案者；拒收零殘留 | ✅ | Unit | □ |
 | AC-108-2 | 狀態轉移合法性（跳級被拒）（PRD AC-SI-08-2） | AT-108-2-1 | （PR）`prop-revise` 只在 returned 狀態受理；沿用前一版的類別、動作、目標與來源；不計入運轉預算 | ✅ | Integration | □ |
 | AC-108-2 | 狀態轉移合法性（跳級被拒）（PRD AC-SI-08-2） | AT-108-2-E-1 | （PR）跳級被拒並印 OBS 草稿列；修訂超限、查無 PROP 的拒收碼 | ✅ | Integration | □ |
 | AC-108-3 | R 類 `trust_level: proposed`（PRD AC-SI-08-3） | AT-108-3-1 | （PR）R 類新增規則候選檔含 `trust_level: proposed` 即受理，且不碰 FSM 狀態檔 | ✅ | Integration | □ |
 | AC-108-3 | R 類 `trust_level: proposed`（PRD AC-SI-08-3） | AT-108-3-E-1 | （PR）R 類新增檔缺 `trust_level: proposed` 拒收；觸及既有 active 規則本體者整張轉交而非拒收 | ✅ | Integration | □ |
-| AC-108-4 | `check` 事件重放（①～④；⑤ 印未判）（PRD AC-SI-08-4） | AT-108-4-1 | （EV）事件序列的合法轉移與跳級、孤兒的判定 | ✅ | Integration | □ |
-| AC-108-4 | `check` 事件重放（①～④；⑤ 印未判）（PRD AC-SI-08-4） | AT-108-4-E-1 | （EV）已提交的事件行不得被改寫或刪除；追加與 CRLF 轉換放行；無歷史與 git 不可用的處置 | ✅ | Integration | □ |
-| AC-108-4 | `check` 事件重放（①～④；⑤ 印未判）（PRD AC-SI-08-4） | AT-108-4-E-2 | （EV）結構判準（ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙）、反空轉下限、`dec` 引言回查印 NE | ✅ | Unit | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-1 | （EV）事件序列的合法轉移與跳級、孤兒的判定 | ✅ | Integration | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-E-1 | （EV）已提交的事件行不得被改寫或刪除；追加與 CRLF 轉換放行；無歷史與 git 不可用的處置 | ✅ | Integration | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-E-2 | （EV）結構判準（ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙）、反空轉下限、`dec` 引言回查印 warn 層級提示 | ✅ | Unit | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-E-3 | （EV）型別怪異的手寫事件（欄位值為陣列）恰報 `EVENT-TYPE`，`check` 其餘項目照常產出、不拋例外 | ✅ | Unit | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-E-4 | （EV）事件欄位值域的 check 層負控：`note` 120／121、`http_status` 199～300、`research.skip` 的 `by`、`sid` 正規形、事件行位元組 L 與 L－1 | ✅ | Unit | □ |
+| AC-108-4 | `check` 事件重放（①～④；⑤ 以 warn 層級提示未建）（PRD AC-SI-08-4） | AT-108-4-E-5 | （EV）引言回查未建的 warn 提示邊界：單一 `dec`、單一 `helmsman` 免掃即印，零筆不印；warn 不改狀態與 rc | ✅ | Unit | □ |
 | AC-109-1 | 提案輸入限定（形態判準加流程型條文）（PRD AC-SI-09-1） | AT-109-1-1 | （PR）提案本文的形態判準：五節骨架、欄位表、必備欄與結果標籤三值 | ✅ | Integration | □ |
 | AC-109-1 | 提案輸入限定（形態判準加流程型條文）（PRD AC-SI-09-1） | AT-109-1-2 | （代位）（PR）輸入限於抽象化摘要、不得以原始軌跡全文充當條目——SOP 提案者節的條文（機械判準只能近似，語意由實跑檢核對照 PRD） | ✅ | Unit | □ |
 | AC-109-1 | 提案輸入限定（形態判準加流程型條文）（PRD AC-SI-09-1） | AT-109-1-E-1 | （PR）骨架缺節、必備欄缺或空、結果標籤值域外各拒收；非 UTF-8 本文 rc 3 | ✅ | Unit | □ |
@@ -402,6 +409,7 @@
 | AC-111-2 | 引擎演化提案涉及評估器（流程型）（PRD AC-SI-11-2） | AT-111-2-1 | （代位）（EV）引擎演化提案涉及評估器者標 `evaluator-change`、記一筆 OBS、不得轉送沙盒——SOP 歸因者節的條文 | ✅ | Unit | □ |
 | AC-111-2 | 引擎演化提案涉及評估器（流程型）（PRD AC-SI-11-2） | AT-111-2-E-1 | （代位）（EV）evaluator-change 條文判準的自證 | ✅ | Unit | □ |
 | AC-114-1 | 卡面確定性轉換（PRD AC-SI-14-1） | AT-114-1-1 | （PR）卡面由 PROP 欄位與 `rN.patch` 確定性轉換：逐行格式、轉交變體、驗證狀態與冷卻狀態的顯示、連續兩次輸出逐字相同 | ✅ | Integration | □ |
+| AC-114-1 | 卡面確定性轉換（PRD AC-SI-14-1） | AT-114-1-2 | （PR）`M` 類卡面（正控）：七行、觸及比例印 `n/a`、核心區不超限；`--json` 的 `parsed` 與文字形態一致 | ✅ | Integration | □ |
 | AC-114-1 | 卡面確定性轉換（PRD AC-SI-14-1） | AT-114-1-E-1 | （PR）提案者自由撰寫的摘要不取代 diff 本文；查無 PROP 與內容檔缺失 rc 3 | ✅ | Integration | □ |
 | AC-114-2 | 卡面反解析一致（PRD AC-SI-14-2） | AT-114-2-1 | （PR）卡面反解析與由事件、patch、本文重算的值逐欄一致；`--json` 形態 | ✅ | Integration | □ |
 | AC-114-2 | 卡面反解析一致（PRD AC-SI-14-2） | AT-114-2-E-1 | （PR）內容檔於 `prop-new` 之後被改動，卡不得送達（rc 3、stdout 空、印 CARD-INCONSISTENT 與不符欄名） | ✅ | Integration | □ |
@@ -414,23 +422,28 @@
 | AC-128-1 | 演化只提案不套用的五格檢查（PRD AC-SI-28-1） | AT-128-1-E-4 | （KB）文件宣稱釘住：缺字樣、帶 `main.py:<行號>` 形態、main.py 缺註解字樣皆判紅 | ✅ | Contract | □ |
 | AC-128-2 | 文件改述與預設值零退化（PRD AC-SI-28-2） | AT-128-2-1 | （KB）`require_evolution_signoff` 預設值仍為 False；文件演化敘述含四個改述片段且該行不超過 800 個碼位 | ✅ | Contract | □ |
 | AC-128-2 | 文件改述與預設值零退化（PRD AC-SI-28-2） | AT-128-2-E-1 | （KB）預設值被改成 True、任一改述片段被刪、行長超過 800 皆判紅 | ✅ | Contract | □ |
+| AC-128-2 | 文件改述與預設值零退化（PRD AC-SI-28-2） | AT-128-2-E-2 | （KB）判準常數 `REWRITE_FRAGMENTS` 的獨立釘選：與 R66 的四個片段相等，改任一元素即紅 | ✅ | Contract | □ |
 | AC-128-3 | 轉紅時升為缺陷列並走人工閘（訊息）（PRD AC-SI-28-3） | AT-128-3-1 | （KB）①～④ 任一格轉紅時，失敗訊息指向立即升為缺陷列並走 FR-SI-12 的人工閘 | ✅ | Contract | □ |
 | AC-128-3 | 轉紅時升為缺陷列並走人工閘（訊息）（PRD AC-SI-28-3） | AT-128-3-E-1 | （KB）訊息判準自證：缺任一片段的訊息被判不合格；格 ⑤ 的訊息不要求含該三片段 | ✅ | Contract | □ |
 | AC-130-1 | 研究事件必有（PRD AC-SI-30-1） | AT-130-1-1 | （RS）同運轉產生 `prop` 前須恰有一筆研究事件，序位介於 `run.open` 與第一筆 `prop` 之間；`prop-new` 拒收與 `check` 重放同判 | ✅ | Integration | □ |
-| AC-130-1 | 研究事件必有（PRD AC-SI-30-1） | AT-130-1-E-1 | （RS）`research --skip` 的 reason 封閉集合與附帶旗標；同運轉第二筆研究事件拒收；helmsman 免掃印引言回查未建 | ✅ | Integration | □ |
+| AC-130-1 | 研究事件必有（PRD AC-SI-30-1） | AT-130-1-E-1 | （RS）`research --skip` 的 reason 封閉集合與附帶旗標；同運轉第二筆研究事件拒收；helmsman 免掃印 warn 層級的引言回查未建提示 | ✅ | Integration | □ |
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-1 | （RS）已提交的合規來源表通過預檢；請求只發給表內現役來源；表內 host 的重導向放行；`check` 的表驗證與 sources_sha256 比對皆 PASS | ✅ | Integration | □ |
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-1 | （RS）來源表驗證碼逐一命中；預檢失敗整次拒收（零請求、零事件）；表與 HEAD 提交版不同即拒收 | ✅ | Integration | □ |
 | AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-2 | （RS）`check` 以 sources_sha256 比對提交歷史、來源 id 須在表內（retired 仍認得）、git 不可用的處置、未提交的表不算歷史 | ✅ | Integration | □ |
-| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-3 | （RS）重導向把關：表外 host 與連接埠、非 http 與 https 的 scheme、https 降 http、第 6 跳皆拒；表內重導向至多 5 跳放行 | ✅ | Integration | □ |
+| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-3 | （RS）重導向把關：表外 host 與連接埠、非 http 與 https 的 scheme、https 降 http 與 http 升 https（scheme 不得改變；函式層用顯式同埠 URL）、第 6 跳皆拒；表內重導向至多 5 跳放行 | ✅ | Integration | □ |
+| AC-130-2 | 來源白名單與預檢（PRD AC-SI-30-2） | AT-130-2-E-4 | （RS）來源表提交時間與事件 `t` 同一秒放行、事件早一秒判 `SOURCES-SHA-MISMATCH`、晚一秒放行 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-1 | （RS）抓原始位元組、自算 sha256 與 changed 三態、原樣落家目錄、事件不存 url、請求形態固定且逐一發出 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-1 | （RS）失敗矩陣：逾時、非 2xx、超位元組（邊界）、非文字、缺 Content-Type、壓縮編碼、連線被拒；失敗來源不入事件 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-2 | （RS）零來源成功 rc 1 不寫事件；事件行超長 rc 1 但來源檔留作快取；零成功後仍可改記 offline 免掃 | ✅ | Integration | □ |
 | AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-3 | （RS）抓取在寫入鎖之外進行、鎖內重驗：抓取期間他人的改動使本次拒收且不追加 | ✅ | Integration | □ |
+| AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-4 | （RS）全部來源失敗與現役為 0 筆皆以 `ZERO-SUCCESS` 拒收（rc 1、不寫事件；零現役時預檢零請求） | ✅ | Integration | □ |
+| AC-130-3 | 增量 digest 與抓取（PRD AC-SI-30-3） | AT-130-3-E-5 | （RS）Content-Type 白名單逐一釘住：`text/*` 與五個 `application/*` 放行，其餘判 `non-text` | ✅ | Integration | □ |
 | AC-130-4 | 產物只為候選（PRD AC-SI-30-4） | AT-130-4-1 | （RS）研究者候選列帶外部衍生與 src 且 src 在表內即合規；以候選加一個內部來源為 sources 的 PROP 受理 | ✅ | Integration | □ |
 | AC-130-4 | 產物只為候選（PRD AC-SI-30-4） | AT-130-4-2 | （代位）（RS）研究者的工具白名單與抓回內容是資料不是指令——SOP 研究者節的條文 | ✅ | Unit | □ |
 | AC-130-4 | 產物只為候選（PRD AC-SI-30-4） | AT-130-4-E-1 | （RS）研究者候選的入帳鏈：缺外部衍生、缺 src、src 不在表內各被 check 判出；候選單獨充當 PROP 來源被拒 | ✅ | Integration | □ |
 | AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-1 | （RS）預算三界的邊界放行（現役恰 `research_fetch_max` 筆、位元組恰 `research_bytes_max`、牆鐘在上限內）；三界取自 params；網路模組 import 只在 `fetch.py` | ✅ | Integration | □ |
 | AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-1 | （RS）預算超界：現役多 1 筆整次拒收、位元組多 1 判失敗、牆鐘超過判失敗；retired 不計；三鍵缺失 rc 3 | ✅ | Integration | □ |
+| AC-130-5 | 預算與純度（PRD AC-SI-30-5） | AT-130-5-E-2 | （RS）牆鐘上限對慢滴回應成立（每 0.5 秒 1 位元組）、送完標頭後停滯亦在逾時上限附近以 `timeout` 返回 | ✅ | Integration | □ |
 | AC-130-6 | 來源表變更不改指紋（PRD AC-SI-30-6） | AT-130-6-1 | （RS）改來源表不改判準指紋 | ✅ | Unit | □ |
 | AC-130-6 | 來源表變更不改指紋（PRD AC-SI-30-6） | AT-130-6-E-1 | （RS）改 `params.json` 或 `metrics.md` 指紋變；排除只涵蓋一個檔名 | ✅ | Unit | □ |
 | AC-131-1 | `scan` 唯讀離線（PRD AC-SI-31-1） | AT-131-1-1 | （RS）`scan` 唯讀、離線、無狀態：前後 `git status --porcelain` 與 HEAD 相同、不連網、子行程只有環境淨化的 git、不受 GIT_DIR 污染 | ✅ | Integration | □ |
@@ -438,6 +451,7 @@
 | AC-131-2 | 候選列有座標且自驗（PRD AC-SI-31-2） | AT-131-2-1 | （RS）候選列為九欄、至少一個座標、不超過列位元組上限，附加到帳本副本後 `check` 對這些列零 finding；草稿不寫入帳本 | ✅ | Integration | □ |
 | AC-131-2 | 候選列有座標且自驗（PRD AC-SI-31-2） | AT-131-2-E-1 | （RS）過長的路徑清單被縮短以守住列上限；缺陷帳本欄位不全時該來源量不到、不產生候選 | ✅ | Integration | □ |
 | AC-131-2 | 候選列有座標且自驗（PRD AC-SI-31-2） | AT-131-2-E-2 | （RS）缺陷帳本的狀態分類與表格解析對既有解析器差分一致：同一批狀態字串與同一份合成帳本，兩邊輸出逐筆相同 | ✅ | Unit | □ |
+| AC-131-2 | 候選列有座標且自驗（PRD AC-SI-31-2） | AT-131-2-E-3 | （RS）`scan` 起算時刻的 commit 時間邊界：committer 時間等於起算時刻者不計入窗、晚一秒者計入 | ✅ | Integration | □ |
 | AC-131-3 | 零候選＝無事件、量不到不併入（PRD AC-SI-31-3） | AT-131-3-1 | （RS）每個來源各印一行；零候選整體印無事件，不印成通過 | ✅ | Integration | □ |
 | AC-131-3 | 零候選＝無事件、量不到不併入（PRD AC-SI-31-3） | AT-131-3-E-1 | （RS）量不到的來源不併入零：整體改印無事件加量不到個數；有候選時仍列出量不到者 | ✅ | Integration | □ |
 | AC-131-4 | 模組歸桶（PRD AC-SI-31-4） | AT-131-4-1 | （RS）模組歸桶依序為 SelfImproving、AutoClaude、AISDLC_SDD、AgentConsole、根層 | ✅ | Unit | □ |
@@ -447,22 +461,30 @@
 | AC-132-5 | `export` 動詞（PRD AC-SI-32-5） | AT-132-5-1 | （ES）`export --json` 五個 kind 的頂層鍵序與 items 形態；唯讀離線；`schema_rev` 起於 1 | ✅ | Contract | □ |
 | AC-132-5 | `export` 動詞（PRD AC-SI-32-5） | AT-132-5-E-1 | （ES）用法錯誤 rc 3；游標與截斷；`--id` 找不到回空；事件帳本缺席的 ne 標示 | ✅ | Unit | □ |
 | AC-132-5 | `export` 動詞（PRD AC-SI-32-5） | AT-132-5-E-2 | （ES）與 `status`、`card` 差分一致；不讀不印家目錄；壞列與壞行入 problems；被竄改的內容檔使 card 為 null 並標 ne | ✅ | Integration | □ |
+| AC-132-5 | `export` 動詞（PRD AC-SI-32-5） | AT-132-5-E-3 | （ES）`truncated` 的邊界：筆數恰等於 `--limit` 不截斷、多一筆才截斷 | ✅ | Unit | □ |
 | AC-134-1 | 登記表與磁碟一致（PRD AC-SI-34-1） | AT-134-1-1 | （LY）真登記表可解析出至少一列，每個 repo 內路徑在磁碟至少命中一檔；兩種檔名承繼寫法與不判的片段 | ✅ | Unit | □ |
 | AC-134-1 | 登記表與磁碟一致（PRD AC-SI-34-1） | AT-134-1-E-1 | （LY）登記路徑在磁碟缺一即紅並印列名與路徑；解析出 0 列或缺登記表節即紅 | ✅ | Unit | □ |
 | AC-134-2 | 前綴散落（PRD AC-SI-34-2） | AT-134-2-1 | （LY）前綴散落鎖的合規情形：真樹以現查名冊為綠；同前綴不足 3 支、已成套件、名冊豁免皆綠 | ✅ | Unit | □ |
 | AC-134-2 | 前綴散落（PRD AC-SI-34-2） | AT-134-2-E-1 | （LY）前綴散落鎖的紅燈情形：同前綴 3 支無套件、名冊內前綴已成套件、新前綴達 3 支、名冊與天花板不一致 | ✅ | Unit | □ |
 | AC-134-3 | 套件須登記（PRD AC-SI-34-3） | AT-134-3-1 | （LY）真樹每個含 `__init__.py` 的套件目錄都登記在某一列的程式碼欄 | ✅ | Unit | □ |
 | AC-134-3 | 套件須登記（PRD AC-SI-34-3） | AT-134-3-E-1 | （LY）未登記的套件即紅 | ✅ | Unit | □ |
+| AC-134-3 | 套件須登記（PRD AC-SI-34-3） | AT-134-3-E-2 | （LY）套件登記以程式碼欄的反引號片段為準：片段之外的散文字串不算登記 | ✅ | Unit | □ |
 | AC-134-4 | 新模組 PRD 須引落點 SSOT（PRD AC-SI-34-4） | AT-134-4-1 | （LY）含「模組落點表」字樣的 PRD 必含 SSOT 路徑；真 PRD 為綠；不含字樣的 PRD 不判 | ✅ | Unit | □ |
 | AC-134-4 | 新模組 PRD 須引落點 SSOT（PRD AC-SI-34-4） | AT-134-4-E-1 | （LY）含「模組落點表」字樣而缺 SSOT 路徑的 PRD 即紅 | ✅ | Unit | □ |
 | AC-140-1 | CLI 介面、動詞集合與 rc 表（本檔自增） | AT-140-1-1 | （EV）13 個動詞皆可呼叫，求助輸出、`--repo` 檢查與 rc 0 路徑 | ✅ | Integration | □ |
 | AC-140-1 | CLI 介面、動詞集合與 rc 表（本檔自增） | AT-140-1-E-1 | （EV）P2 與 P3 的動詞、`card --issue`、未知旗標與未知動詞一律 rc 3；拒收輸出文法（文字與 JSON）與 OBS 草稿列內容 | ✅ | Unit | □ |
+| AC-140-1 | CLI 介面、動詞集合與 rc 表（本檔自增） | AT-140-1-E-2 | （EV）帳本含型別怪異事件時，讀取與寫入動詞不拋未捕捉例外，rc 與輸出依既有規則；怪異事件不被折疊 | ✅ | Integration | □ |
+| AC-140-1 | CLI 介面、動詞集合與 rc 表（本檔自增） | AT-140-1-E-3 | （EV）OBS 草稿列的症狀至多顯示 5 個碼，超過尾接 `…等 k 項`；恰好 5 個不加尾綴 | ✅ | Unit | □ |
 | AC-140-2 | 輸出 schema 穩定（本檔自增） | AT-140-2-1 | （ES）`status`、`scan`、`card`、`export` 連續兩次輸出除 generated_at 外逐字相同；UTF-8、LF、無 BOM、JSON 鍵序固定 | ✅ | Contract | □ |
 | AC-140-2 | 輸出 schema 穩定（本檔自增） | AT-140-2-E-1 | （ES）輸出不得含不穩定來源：雜湊種子、cwd、時區、絕對路徑、行程號 | ✅ | Integration | □ |
+| AC-140-2 | 輸出 schema 穩定（本檔自增） | AT-140-2-E-2 | （ES）含中文的 `--json` 輸出為 UTF-8 原字、沒有 u 跳脫序列（`PYTHONIOENCODING=cp950` 管線下亦然） | ✅ | Integration | □ |
 | AC-141-1 | 事件帳本形態與配號（本檔自增） | AT-141-1-1 | （EV）各寫入動詞成功時恰追加一行，行形態與鍵序合規 | ✅ | Contract | □ |
 | AC-141-1 | 事件帳本形態與配號（本檔自增） | AT-141-1-E-1 | （EV）`seq` 與各家族編號的配法、行長上限邊界、撕裂帳本拒寫 | ✅ | Integration | □ |
+| AC-141-1 | 事件帳本形態與配號（本檔自增） | AT-141-1-E-2 | （EV）PROP 配號的 OBS 帳本部分在寫入鎖內讀取：取鎖之前才出現的 PROP 引用不被漏算 | ✅ | Integration | □ |
 | AC-141-2 | 寫入鎖與併發（本檔自增） | AT-141-2-1 | （EV）鎖內重讀末行與配號：確定性交錯（無鎖對照組撞同一 seq）與多行程壓力 | ✅ | Integration | □ |
 | AC-141-2 | 寫入鎖與併發（本檔自增） | AT-141-2-E-1 | （EV）陳舊鎖被回收；新鮮鎖逾時 fail-loud 並印持鎖者；家目錄不可寫拒寫 | ✅ | Integration | □ |
+| AC-141-2 | 寫入鎖與併發（本檔自增） | AT-141-2-E-2 | （EV）鎖檔名為事件帳本 realpath 的 sha256 前 16 位 hex 加 `.lock`；持鎖期間存在、寫入完成後已釋放 | ✅ | Integration | □ |
+| AC-141-2 | 寫入鎖與併發（本檔自增） | AT-141-2-E-3 | （EV）家目錄與其 locks、research 皆存在但寫不進（可寫性探測失敗）⇒ 寫入動詞 rc 3 `HOME-UNWRITABLE` | ✅ | Integration | □ |
 | AC-142-1 | `check` 的 P1 追加項（本檔自增） | AT-142-1-1 | （EV）`check` 在 21 項之後追加 7 項（共 28），載體缺席一律 nonblocking NE，合法事件帳本使追加項轉 PASS | ✅ | Integration | □ |
 | AC-142-1 | `check` 的 P1 追加項（本檔自增） | AT-142-1-E-1 | （EV）`events.prop_files` 抓出內容檔缺失與雜湊不符；`research.sources` 接上來源表驗證；CRLF 的正規化規則（`.md` 換行不計、`.patch` 位元組原樣） | ✅ | Integration | □ |
 | AC-142-1 | `check` 的 P1 追加項（本檔自增） | AT-142-1-E-2 | （EV）標記鍵詞彙加 `src`；`回報者=研究者` 的列須帶外部衍生與 `src`；`src` 須在來源表內（含 retired） | ✅ | Unit | □ |
@@ -477,11 +499,12 @@
 | AC-145-1 | 協定目錄（params 新鍵、來源表初值）（本檔自增） | AT-145-1-E-1 | （EV）五個新鍵逐鍵缺失、型別錯、範圍錯各被判出；取不到鍵的動詞 rc 3 | ✅ | Unit | □ |
 | AC-145-2 | SOP 定稿（本檔自增） | AT-145-2-1 | （代位）（EV）Operations SOP 定稿：四個角色節仍含「P1 定稿」並有實質內容、研究者節、研究事件條文與各代位條文的必備片段齊備 | ✅ | Unit | □ |
 | AC-145-2 | SOP 定稿（本檔自增） | AT-145-2-E-1 | （代位）（EV）SOP 判準的自證：每個必備片段刪去的副本須判不合格，同行條件被拆行、標題被改名也判不合格 | ✅ | Unit | □ |
+| AC-145-2 | SOP 定稿（本檔自增） | AT-145-2-E-2 | （EV）SOP 判準常數的獨立釘選：`SAME_LINE_GROUPS` 與 `RESEARCH_EVENT_LINES` 和 R65 相等，改任一元素即紅 | ✅ | Unit | □ |
 
 **覆蓋率統計**:
 - 總 AC 數: 54（PRD 的 44 個加本檔自增的 10 個）
-- 已映射 AT 數: 126（正控 57 個、負控〔E 類〕69 個；每個 AC 至少一個正控與一個負控）
-- 各測試檔的 AT 數: EV 35；PR 36；RS 28；ES 7；CP 3；LY 8；KB 9
+- 已映射 AT 數: 148（正控 58 個、負控〔E 類〕90 個；每個 AC 至少一個正控與一個負控）
+- 各測試檔的 AT 數: EV 44；PR 38；RS 33；ES 11；CP 3；LY 9；KB 10
 - 映射覆蓋率: 100% （目標: 100%）
 
 ---
@@ -493,6 +516,8 @@
 > - `python -m unittest discover -s tools/tests -p <檔名> -k <AT 底線形>`
 >
 > **AT 底線形**＝把 AT ID 的連字號換成底線（`AT-110-3-E-1` 的底線形是 `AT_110_3_E_1`）；每個 AT 的測試函式名稱須含其底線形（例 `test_AT_110_3_E_1_usage_and_state_errors`）。每個 AC 內的 AT 序號不超過 9，使 `-k` 的子字串比對不會誤收其他 AT。
+>
+> **判定指令的形態（勘誤一）**：§2 原有 126 個 AT 的判定指令只帶 `-k <AT 底線形> -q`（根層實測可單跑）；SCG-4 一審後新增的 22 個 AT（見〈勘誤〉節）的根層指令另加 `-p no:xdist -o addopts=`（與 NFR-P1-10 (1) 同形，排除全域 `addopts` 與 xdist 對單一 AT 的影響）；鍵 B 的 AT（cwd 為 `AutoClaude/`）一律加 `-n 0`——本機 PG 在場時，AutoClaude 的 conftest 對全域 addopts 的 `-n auto` 回 rc=4（PG 在場但未用 `--dist loadgroup`），故既有九個與新增的鍵 B 指令皆為 `… -q -n 0`（`-p no:xdist` 不能與 `-n` 並用：`unrecognized arguments`，所以鍵 B 不加它；§7.1 ⚖ 29）。每個 `-k` 仍恰收一個測試。
 >
 > **測試檔縮寫**（判定指令的檔名依各 AT 標頭所列；鍵 B 的檔在 `AutoClaude/tests/contract/`）：**EV**＝`test_selfimproving_events.py`、**PR**＝`test_selfimproving_props.py`、**RS**＝`test_selfimproving_research_scan.py`、**ES**＝`test_selfimproving_export_status.py`、**CP**＝`test_selfimproving_capability.py`、**LY**＝`test_root_module_layout.py`（以上六檔皆在 `tools/tests/`）、**KB**＝`test_evolution_propose_only.py`。共用夾具住 `tools/tests/_selfimproving_fixtures.py`（底線開頭、不被收集；§5）。
 >
@@ -560,7 +585,7 @@ Scenario: 零提案的運轉記無事件，有提案的運轉記各 PROP 的折�
   Then 兩次 rc 皆為 `0`；第一次 stdout 為單行 `ok run.close seq=<n> run=RUN-SI-001 no_event=true`
   And 第一個 `run.close` 事件的鍵集合恰為 `seq`、`t`、`kind`、`by`、`run`、`no_event`，`no_event` 為 JSON `true`、沒有 `outcomes` 鍵
   And 第二次的 JSON 含 `outcomes` 筆數 2；第二個 `run.close` 事件的鍵集合恰為 `seq`、`t`、`kind`、`by`、`run`、`outcomes`，`outcomes` 恰為 PROP-SI-124 對 `approved`、PROP-SI-125 對 `rejected`，沒有 `no_event` 鍵
-  And 兩次 `run.close` 後 `MJ(status)` 的 `open_runs` 為空；`MJ(check)` 的 `events.structure` 與 `events.transitions` 皆為 `PASS`
+  And 兩次 `run.close` 後 `MJ(status)` 的 `open_runs` 為空；`MJ(check)` 的 `events.structure` 與 `events.transitions` 皆為 `PASS`（`SC-CLOSE` 含 `dec`，`events.transitions` 另帶 warn 層級的引言回查提示，不改狀態）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_103_2_1]"
 ```
 
@@ -796,6 +821,25 @@ Scenario: seq 取末行加一、編號家族取最大值加一、行長恰等於
 ```
 
 ```gherkin
+# AT-141-1-E-2
+# 對應 AC: AC-141-1（本檔自增；R32 (c)、R33）`PROP-SI-NNN` 配號的 OBS 帳本部分在寫入鎖內讀取：取鎖之前才出現的 PROP 引用不得被漏算
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_141_1_E_2 -q -p no:xdist -o addopts=
+
+Feature: PROP 配號的鎖內判定
+
+Scenario: 於取鎖之前才附加到 OBS 帳本的 PROP 引用仍被配號納入；對照組不改帳本
+  Given 基線 `R`（OBS 帳本列 008 引用執行期組出的 `PROP-SI-123`、事件帳本沒有 PROP）；已開運轉 `RUN-SI-001`（夾具 `open_run`）；執行期組出 `PX`＝`PROP-SI-` 接 `140`；兩份複本各自進行
+  When 情境一（對照）：呼叫 `prop-new --run RUN-SI-001`（旗標取 §5.3 `good_prop_args(R)`，類別 `P`）
+  And 情境二：先以 `mock.patch.object(evwrite, "append_event", <包裝函式>)` 包住追加路徑——包裝函式在以原引數轉呼叫真實 `append_event` 之前，把一行含 `PX` 的文字附加到該複本的 OBS 帳本檔尾（模擬他人在本動詞開始執行之後、取得寫入鎖之前改動 OBS 帳本）——再呼叫同一個 `prop-new`
+  Then 情境一：rc 為 `0`、新 PROP 號為 `PROP-SI-124`（OBS 帳本的引用 123 加一；事件帳本沒有 PROP）
+  And 情境二：rc 為 `0`、新 PROP 號為 `PROP-SI-141`（鎖內讀到的 OBS 帳本最大 PROP 引用 140 加一）
+  And 情境二的 `prop` 事件 `id` 與內容檔目錄 `docs/06_quality/SelfImproving_Proposals/PROP-SI-141/` 一致，該複本的事件帳本恰多一行
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_141_1_E_2]"
+```
+
+```gherkin
 # AT-141-2-1
 # 對應 AC: AC-141-2（本檔自增；PRD ADR-SI-10 併發負控 ①②；R33）鎖內重讀末行與配號：確定性交錯（無鎖對照組撞同一 seq）與多行程壓力
 # 測試類型: Integration
@@ -836,6 +880,41 @@ Scenario: 陳舊鎖回收後寫入成功；新鮮鎖不放時逾時 rc 1；家�
 ```
 
 ```gherkin
+# AT-141-2-E-2
+# 對應 AC: AC-141-2（本檔自增；R33）鎖檔名為事件帳本 realpath 的 sha256 前 16 位 hex 加 `.lock`：持鎖期間存在、寫入完成後已釋放
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_141_2_E_2 -q -p no:xdist -o addopts=
+
+Feature: 鎖檔命名
+
+Scenario: 持鎖期間 HOME 的 locks 目錄恰有一個依事件帳本 realpath 雜湊命名的鎖檔
+  Given 基線 `R` 與 `HOME`（兩份不同的 `R` 複本 `R1`、`R2`，其事件帳本 realpath 不同）；測試端獨立算出各自的 `want`＝`hashlib.sha256(os.path.realpath(<事件帳本路徑>).encode("utf-8")).hexdigest()[:16]` 接 `.lock`（不呼叫 `evwrite.lock_path_for`）
+  When 以 `mock.patch.object(evwrite, "PAUSE_HOOK", <鉤子>)` 設鉤子（讀末行並配號之後、單次追加之前被呼叫），鉤子記下 `HOME/locks` 內的檔名清單；對 `R1` 與 `R2` 各呼叫一次 `run-open --trigger a --coord tools/a.py:1 --by main`
+  Then 兩次 rc 皆為 `0`；兩次鉤子記到的清單各恰為單一元素 `[want]`（16 位小寫 hex 加 `.lock`），且兩個 `want` 互不相同
+  And 每次呼叫結束後，`HOME/locks` 內沒有任何 `.lock` 檔（已釋放）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_141_2_E_2]"
+```
+
+```gherkin
+# AT-141-2-E-3
+# 對應 AC: AC-141-2（本檔自增；R29）家目錄與其 `locks/`、`research/` 都已存在但寫不進（可寫性探測失敗）⇒ 寫入動詞 rc 3、`HOME-UNWRITABLE`；與「建不出目錄」是兩條不同的失敗路徑
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_141_2_E_3 -q -p no:xdist -o addopts=
+
+Feature: 家目錄存在但不可寫
+
+Scenario: 探測檔建不出時寫入動詞拒寫，唯讀動詞照常
+  Given 基線 `R` 與 `HOME`；預先建好 `HOME/locks` 與 `HOME/research` 兩個目錄；於 `HOME/locks` 內預先建一個名為 `.probe-<本測試行程的行程號>` 的**目錄**（與 R29 的可寫性探測檔同名；同名目錄使建檔在 Windows 與 POSIX 皆失敗，免用平台專屬的唯讀權限）；`snap0＝snap(R)`、`home0＝HOME` 的檔案清單
+  When 在同一行程內呼叫 `run-open --trigger a --coord tools/a.py:1 --by main`；另對同一環境呼叫 `check`、`status --json`、`scan`、`export --json --kind status`
+  Then `run-open`：rc 為 `3`、stdout 空、stderr 以 `selfimproving:` 起頭且含 `HOME-UNWRITABLE`；事件帳本不存在、`snap(R)` 等於 `snap0`、`HOME` 檔案清單等於 `home0`（沒有鎖檔殘留）
+  And 其餘四個唯讀動詞 rc 皆為 `0`
+  And 對照：移除那個同名目錄後，同一環境呼叫 `run-open` 的 rc 為 `0`、事件帳本多一行
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_141_2_E_3]"
+```
+
+```gherkin
 # AT-108-4-1
 # 對應 AC: AC-108-4（PRD AC-SI-08-4 ①；R34、R38）事件序列的合法轉移與跳級、孤兒的判定
 # 測試類型: Integration
@@ -850,10 +929,10 @@ Scenario: 合法序列通過，各種跳級與孤兒各被判出
   And 情境二（各自在 `SC-LEGAL` 之後加一筆違規事件，逐一呼叫 `check --json`；PROP 號取自該表的終態）：(a) 對 `proposed` 的 `PROP-SI-129` 做 `app.sandbox`；(b) 對 `handoff:T1` 的 `PROP-SI-134` 做 `dec approve`；(c) 對 `returned` 的 `PROP-SI-135`（`rev` 為 1）追加 `rev` 為 3 的 `prop`，另一案對 `proposed` 的 `PROP-SI-129` 追加 `rev` 為 2 的 `prop`；(d) 對 `verified`（`PASS`）而尚無 `dec promote` 的 `PROP-SI-131` 做 `app.promote`；(e) 對 `verdict` 為 `FAIL` 的 `PROP-SI-132`、對 `verdict` 為 `NE` 而無 `unverified_ack` 的 `PROP-SI-133` 各做 `dec promote`；(f) 對 `approved` 的 `PROP-SI-130` 做 `mea.open`；(g) 對 `PROP-SI-124` 追加第二筆 `rev` 為 1 的 `prop`
   And 情境三（孤兒；各自一筆）：對執行期組出的不存在 PROP 號做 `dec approve`、對不存在的 ATT 號 `attr.confirm`、對不存在的 PROP 號 `card`、`dec resume` 指向不存在的運轉
   And 情境四：對未開的運轉 `run.close`、對已關的運轉再 `run.close`、`prop` 事件的 `run` 在該事件當時並非 open
-  Then 情境一：`S(events.transitions)` 為 `PASS`、`F(events.transitions)` 為空；`S(events.structure)` 為 `PASS`
-  And 情境二的九個變異（(a)、(b)、(c) 的兩個子情境、(d)、(e) 的兩個子情境、(f)、(g)）：`S(events.transitions)` 皆為 `FAIL`，`F(events.transitions)` 恰含一筆 `TRANSITION-ILLEGAL`，subject 為被違規的 PROP 號、detail 含 `seq=<該事件的 seq>`、事件 kind 與前置狀態
-  And 情境三：四組各恰一筆 `TRANSITION-ORPHAN`，subject 為 `seq=<該事件的 seq>`
-  And 情境四：三組各恰一筆 `TRANSITION-ILLEGAL`，detail 含 `seq=<該事件的 seq>`
+  Then 情境一：`S(events.transitions)` 為 `PASS`、`F(events.transitions)` 恰為單一 `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)`（`SC-LEGAL` 含 `dec`，故帶 warn 層級的引言回查提示，R38）；`S(events.structure)` 為 `PASS`
+  And 情境二的九個變異（(a)、(b)、(c) 的兩個子情境、(d)、(e) 的兩個子情境、(f)、(g)）：`S(events.transitions)` 皆為 `FAIL`，`F(events.transitions)` 去掉上述引言回查提示後恰含一筆 `TRANSITION-ILLEGAL`，subject 為被違規的 PROP 號、detail 含 `seq=<該事件的 seq>`、事件 kind 與前置狀態
+  And 情境三：四組各（同樣去掉該提示後）恰一筆 `TRANSITION-ORPHAN`，subject 為 `seq=<該事件的 seq>`
+  And 情境四：三組各（同樣去掉該提示後）恰一筆 `TRANSITION-ILLEGAL`，detail 含 `seq=<該事件的 seq>`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_108_4_1]"
 ```
 
@@ -883,14 +962,14 @@ Scenario: 改寫與刪除判 ROW-MUTATED，追加與格式轉換放行
 
 ```gherkin
 # AT-108-4-E-2
-# 對應 AC: AC-108-4（PRD AC-SI-08-4 ③④⑤；R37、R40、R38）結構判準（ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙）、反空轉下限、`dec` 引言回查印 NE
+# 對應 AC: AC-108-4（PRD AC-SI-08-4 ③④⑤；R37、R40、R38）結構判準（ID 唯一遞增、`t` 帶 offset、`kind` 在封閉詞彙）、反空轉下限、`dec` 引言回查印 warn 層級提示
 # 測試類型: Unit
 # 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
 # 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_108_4_E_2 -q
 
 Feature: 事件行結構、下限與回查未建
 
-Scenario: 各結構碼逐一命中；事件數低於下限判未判；有 dec 時印引言回查未建
+Scenario: 各結構碼逐一命中；事件數低於下限判未判；有 dec 時印 warn 層級的引言回查未建提示
   Given 基線 `R`（`min_events` 為 1）；每個情境各自在乾淨的事件帳本寫入合規事件加一個變異行
   When 情境一（EVENT-PARSE）：夾一個空白行、一行 `[1]`、一行不是 JSON 的字串
   And 情境二（EVENT-KEY-MISSING）：缺 `by`；`run.open` 缺 `head_sha`；情境三（EVENT-KIND）：`kind` 為不在 19 個詞彙內的字串
@@ -902,8 +981,68 @@ Scenario: 各結構碼逐一命中；事件數低於下限判未判；有 dec �
   Then 情境一至五與七：`S(events.structure)` 皆為 `FAIL`，`F(events.structure)` 各恰為對應碼（subject 為 `seq=<n>`，`seq` 不可解析時為 `L<行號>`；情境一的三個變異各自一筆 `EVENT-PARSE`、情境四的每個變異各自一筆 `EVENT-TYPE`）；P2 起的 kind（`card`、`mea.report` 等）只含共通鍵時 `S(events.structure)` 為 `PASS`
   And 情境六：`seq` 為 1、2、2、1 時 `F(events.structure)` 恰為 `(seq=2, EVENT-SEQ)` 與 `(seq=1, EVENT-SEQ)`；為 1、3、7 時 `S(events.structure)` 為 `PASS`
   And 情境八：`S(events.structure)` 為 `PASS`（容忍 BOM 與 CR）；情境九：事件數 2 時 `S(events.vacuity)` 為 NE、`blocking` 為 true、碼 `EVENTS-BELOW-FLOOR`，事件數 3 時為 `PASS`，空檔為 NE（碼同上）
-  And 情境十：`S(events.transitions)` 為 `PASS`（nonblocking NE 不改狀態）、含單一 finding `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)` 且 detail 含 `dec` 筆數 2 與字樣 `引言回查屬 P2`；`overall` 為 `PASS`、rc 為 `0`
+  And 情境十：`S(events.transitions)` 為 `PASS`（warn 層級，不改狀態）、含單一 finding `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)`，其 `level` 為 `warn`、detail 以 `[warn]` 起頭並含 `dec` 筆數 2 與字樣 `引言回查屬 P2`；`overall` 為 `PASS`、rc 為 `0`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_108_4_E_2]"
+```
+
+```gherkin
+# AT-108-4-E-3
+# 對應 AC: AC-108-4（PRD AC-SI-08-4 ③；R37 讀取側防禦、R38）型別怪異的手寫事件（欄位值為陣列）使 `events.structure` 恰報 `EVENT-TYPE`，`check` 其餘項目照常產出、不得拋例外
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git + subprocess（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_108_4_E_3 -q -p no:xdist -o addopts=
+
+Feature: 型別怪異的事件不使 check 崩潰
+
+Scenario: 欄位值為陣列的四型事件各被判 EVENT-TYPE，其餘項目照常產出
+  Given 依 §5.2 情境 `SC-WEIRD` 建四份事件帳本複本 `W1`～`W4`：`seq` 為 1 的合規 `run.open`（`RUN-SI-001`），其後 `seq` 為 2 的一筆怪異事件——`W1` 為 `reason` 是 JSON 陣列的 `research.skip`、`W2` 為 `type` 是 JSON 陣列的 `attr`、`W3` 為 `obs` 的元素是陣列的 `attr`、`W4` 為 `att` 是 JSON 陣列的 `attr.confirm`
+  When 對四份各以子行程（§5.5 (d)）呼叫 `check --json`，擷取 rc、stdout 與 stderr
+  Then 四份：rc 皆為 `1`、stderr 不含 `Traceback`；stdout 為單一 JSON 文件，`items` 為 28 項且每項都有 `status`
+  And 四份：`S(events.structure)` 為 `FAIL`，`F(events.structure)` 恰為 `(seq=2, EVENT-TYPE)`
+  And 四份：怪異事件對折疊沒有貢獻——`F(events.transitions)` 不含 `TRANSITION-ILLEGAL` 與 `TRANSITION-ORPHAN`，`events.research` 與 `events.vacuity` 兩項的 `status` 皆已產出
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_108_4_E_3]"
+```
+
+```gherkin
+# AT-108-4-E-4
+# 對應 AC: AC-108-4（PRD AC-SI-08-4 ③；R31、R37）事件欄位值域的 check 層負控：`note` 長度、`http_status` 範圍、`research.skip` 的 `by`、`sid` 正規形、事件行位元組上限的邊界
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_108_4_E_4 -q -p no:xdist -o addopts=
+
+Feature: 事件欄位值域的負控
+
+Scenario: 值域邊界內放行，越界判 EVENT-TYPE 或 EVENT-BYTES-OVER
+  Given 基線 `R`（`min_events` 為 1、`event_max_bytes` 為 §5.1 初值）；除 (e) 外，每個案例各自在乾淨的事件帳本寫入 `seq` 為 1 的合規 `run.open`（`RUN-SI-001`）加 `seq` 為 2 的一筆案例事件
+  When (a) `research.skip`（`offline`）的 `note` 為 120 字元、121 字元；`attr.reject` 的 `note` 同樣各一案
+  And (b) `research.scan`（`by` 為 `researcher`，其餘鍵合規）的 `sources[0].http_status` 為 199、200、299、300
+  And (c) `research.skip` 的 `by` 為 `main`、`researcher`、`SA`
+  And (d) `research.skip`（`reason` 為 `helmsman`、`line` 為 3）的 `sid` 為小寫正規形 UUID、去掉連字號的 32 位 hex、以大括號包住的正規形、加 `urn:uuid:` 前綴的正規形
+  And (e) 事件帳本只有 `seq` 為 1 的 `run.open`；測試端量得該行的位元組數 `L`（不含結尾 LF）；兩份 `R` 的 `event_max_bytes` 分別設為 `L` 與 `L－1`（行長比上限多 1）
+  Then 對各案例呼叫 `check --json`：(a) 的 `note` 為 120 字元時 `S(events.structure)` 為 `PASS`、為 121 字元時 `F(events.structure)` 恰為 `(seq=2, EVENT-TYPE)`（`research.skip` 與 `attr.reject` 兩種事件各同）
+  And (b) 的 199 與 300 各恰為 `(seq=2, EVENT-TYPE)`，200 與 299 為 `PASS`；(c) 的 `main` 為 `PASS`，`researcher` 與 `SA` 各恰為 `(seq=2, EVENT-TYPE)`
+  And (d) 的小寫正規形 UUID 為 `PASS`，其餘三種各恰為 `(seq=2, EVENT-TYPE)`
+  And (e)：`event_max_bytes` 為 `L` 時 `S(events.structure)` 為 `PASS`，為 `L－1` 時 `F(events.structure)` 恰為 `(seq=1, EVENT-BYTES-OVER)`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_108_4_E_4]"
+```
+
+```gherkin
+# AT-108-4-E-5
+# 對應 AC: AC-108-4（PRD AC-SI-08-4 ⑤；R38、R42 (d)）引言回查未建的 warn 層級提示之邊界：單一 `dec`、單一 `helmsman` 免掃即印，零筆不印；warn 不改項目狀態、不影響 rc
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_108_4_E_5 -q -p no:xdist -o addopts=
+
+Feature: 引言回查未建提示的邊界
+
+Scenario: 一筆即印、零筆不印，warn 不改狀態與 rc
+  Given 基線 `R`；四份事件帳本複本各自手寫：(a) `run.open`、`research.skip`（`offline`）、一個 `proposed` 的 `prop`、恰一筆 `dec`（`dkind` 為 `approve`）；(b) 同 (a) 但沒有 `dec`；(c) `run.open` 加一筆 `research.skip`（`reason` 為 `helmsman`、`sid` 為正規形 UUID、`line` 為 3）；(d) `run.open` 加一筆 `research.skip`（`offline`）
+  When 對四份各呼叫 `check --json`
+  Then (a)：`S(events.transitions)` 為 `PASS`，`F(events.transitions)` 恰為 `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)`；該 finding 的 `level` 為 `warn`，detail 以 `[warn]` 起頭、含 `dec` 筆數 1 與字樣 `引言回查屬 P2`
+  And (b)：`F(events.transitions)` 為空
+  And (c)：`S(events.research)` 為 `PASS`，`F(events.research)` 恰為 `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)` 且其 `level` 為 `warn`；(d)：`F(events.research)` 為空
+  And (a) 的 `events.transitions` 與 (c) 的 `events.research` 皆不是 NE（`blocking` 為 false）；(c) 與 (d) 的 `overall` 皆為 `PASS`、rc 皆為 `0`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_108_4_E_5]"
 ```
 
 ```gherkin
@@ -1046,6 +1185,44 @@ Scenario: 後續階段的動詞 rc 3；拒收輸出的行文法與草稿列欄�
 ```
 
 ```gherkin
+# AT-140-1-E-2
+# 對應 AC: AC-140-1（本檔自增；R27、R37 讀取側防禦）帳本含型別怪異事件時，讀取與寫入動詞皆不得以未捕捉的例外結束，rc 與輸出依各動詞既有規則
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + subprocess（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_140_1_E_2 -q -p no:xdist -o addopts=
+
+Feature: 怪異事件之下的動詞不崩潰
+
+Scenario: 四型怪異事件之下，各動詞照規格回 rc、stderr 不含 Traceback
+  Given 依 §5.2 情境 `SC-WEIRD` 的四份複本 `W1`～`W4`（各含 `seq` 為 1 的 `run.open` `RUN-SI-001` 與 `seq` 為 2 的怪異事件）；`HOME` 為 tmp 家目錄；每個呼叫各自在一份新複本上進行（寫入動詞互不影響）；記下複本事件帳本的原位元組 `b0`
+  When 以子行程（§5.5 (d)）逐一呼叫：`status`；`status --json`；`export --json --kind events`、`runs`、`proposals`、`status` 各一次；`run-close --run RUN-SI-001 --by main`；`attr-confirm --att <A> --by QA`（`<A>` 取怪異 `attr` 事件自己的 `id`，`W1` 與 `W4` 取 `ATT-SI-001`）；`research --skip --run RUN-SI-001 --reason offline --note x`
+  Then 每個呼叫：stderr 不含 `Traceback`；`status`、`status --json` 與四個 `export` 的 rc 皆為 `0`，JSON 形態的 stdout 可被 `json.loads` 解析（`status --json` 的頂層鍵序同 R60）
+  And `export --json --kind events`：`items` 含該怪異事件，且與帳本該行逐行 `json.loads` 的結果相等（事件原樣輸出，R61）
+  And `run-close`：rc 為 `0`、stdout 為單行 `ok run.close seq=3 run=RUN-SI-001 no_event=true`（怪異事件不是該運轉的 `prop`）；`research --skip`：rc 為 `0`（怪異事件不算研究事件，即使 `W1` 本身是 `research.skip`）
+  And `attr-confirm`：rc 為 `1`、`codes(out)` 恰為 `ATT-NOT-FOUND`（怪異事件不被折疊成 ATT，`W2` 與 `W3` 自己的 `id` 亦然）
+  And 兩個寫入動詞成功之後，各自複本的事件帳本前兩行位元組逐字等於 `b0` 的兩行（只增不減）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_140_1_E_2]"
+```
+
+```gherkin
+# AT-140-1-E-3
+# 對應 AC: AC-140-1（本檔自增；R28 (d)）OBS 草稿列的症狀至多顯示 5 個碼，超過尾接 `…等 <k> 項`（k 為不重複碼的總數）；恰好 5 個不加尾綴
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_140_1_E_3 -q -p no:xdist -o addopts=
+
+Feature: 草稿列的碼數上限
+
+Scenario: 六個不同碼的拒收截為前五個加尾綴；五個碼全列、不加尾綴
+  Given 基線 `R`（已提交）；執行期組出不存在的運轉號 `RX` 與不存在的 OBS 號 `SX`；旗標取 §5.3 `good_prop_args(R)`，另把 `--source` 覆寫為 `SX`、`--proposer` 為標籤 `SA`
+  When 情境一（6 個碼）：`prop-new --run RX`，`--reviewer SA`（與提案者相同）並另帶 `--handoff T1`（導出為 `loop` 而給了通道）；情境二（5 個碼）：同情境一但不帶 `--handoff`；情境三（4 個碼）：再去掉 `--reviewer`
+  Then 三個情境：rc 皆為 `1`；各自取拒收輸出首行 `reject prop-new` 之後所列的碼（依出現順序）為 `names`，三者長度依序為 6、5、4 且各自不重複；情境一的 `codes(out)` 恰為 `RUN-NOT-OPEN`、`RESEARCH-MISSING`、`SOURCE-UNRESOLVED`、`NO-INTERNAL-SOURCE`、`REVIEWER-IS-PROPOSER`、`HANDOFF-CHANNEL-UNEXPECTED`
+  And `obs-draft:` 之下的草稿列，其症狀欄：情境一恰為 `si prop-new 拒收（rc=1）：` 接 `names` 的前 5 個（以頓號連接）再接 `…等 6 項`；情境二為同一前綴接全部 5 個碼、不含 `…等`；情境三接全部 4 個碼、不含 `…等`
+  And 三個草稿列的 `draft_ok` 皆成立
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_140_1_E_3]"
+```
+
+```gherkin
 # AT-145-1-1
 # 對應 AC: AC-145-1（本檔自增；PRD §9.1 C5、C16；R43、R46）真 `params.json` 含五個新鍵且合規；真來源表通過來源表驗證
 # 測試類型: Unit
@@ -1118,6 +1295,23 @@ Scenario: 刪去任一片段、拆開同行條件或改名標題都使判準回�
   Then 每個副本的 `sop_problems` 都非空，且回報內容點名被動過的節與片段（子情境失敗訊息須指出是哪個片段）
   And 對真 SOP 全文本身 `sop_problems` 為空（正控）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_145_2_E_1]"
+```
+
+```gherkin
+# AT-145-2-E-2
+# 對應 AC: AC-145-2（本檔自增；R65 (b)(c)(g)）判準常數的獨立釘選：夾具的「同一行」片段組與 R65 的條文相等，改常數的任一元素即紅
+# 測試類型: Unit
+# 自動化工具: pytest（唯讀存取夾具常數；以常數的突變副本自證）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_events.py -k AT_145_2_E_2 -q -p no:xdist -o addopts=
+
+Feature: SOP 判準常數的釘選
+
+Scenario: 同一行片段組常數與 R65 逐組相等，突變副本比對不相等
+  Given 夾具常數 `SAME_LINE_GROUPS`（〔節名, 片段元組〕串列）與 `RESEARCH_EVENT_LINES`（片段元組串列）；期望值於測試內以字面獨立寫出（不由常數衍生、不呼叫 `line_has_all`），取自本檔 R65：歸因者節 `理論洞`、`P4`、`暴露證據`、`不立案`；歸因者節 `evaluator-change`、`evaluator_command`、`expected_output_regex`、`OBS`、`不得轉送沙盒`；提案者節 `抽象化`、`結果標籤`、`原始軌跡全文`；提案者節 `不得再派`、`提案者`、`審查者`；全文 `研究事件`、`research.scan`、`research.skip`、`prop-new`、`拒收`；全文 `quota-band`、`offline`、`helmsman`
+  When 以集合語意（組與組之間、組內片段之間的順序不拘）比對常數與期望值；另對常數各產生突變副本：刪去任一組、刪去任一組內的任一片段、把任一片段改掉一個字、把某一組的節名換成另一節——各比對一次
+  Then 原常數與期望值相等：`SAME_LINE_GROUPS` 恰四組、`RESEARCH_EVENT_LINES` 恰兩組
+  And 每個突變副本與期望值比對皆為不相等
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_145_2_E_2]"
 ```
 
 ```gherkin
@@ -1343,6 +1537,25 @@ Scenario: 條件式命中、LATEST 現查、規格本體、cls 標記與合法�
   And 情境四：事件的 `cls` 依序為 `evaluator-change`、`loop-self`、`evaluator-change`（兩群皆命中取前者）、`loop-self`（自填值保持），`route` 皆為 `handoff:T1`
   And 情境五：第一案 `route` 為 `loop`；第二案（逃出合法根 `memory/`）為 `handoff:T1`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_107_3_E_3]"
+```
+
+```gherkin
+# AT-107-3-E-4
+# 對應 AC: AC-107-3（PRD AC-SI-07-3；R51 (b)、R49 (b)）`git apply --numstat -z` 自身失敗（損毀的 hunk、context-diff 等 git 不收的格式）⇒ 拒收 `PATCH-PARSE`（fail-closed），不得把失敗當成 git 沒看到路徑而放行
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_props.py -k AT_107_3_E_4 -q -p no:xdist -o addopts=
+
+Feature: 超集檢查失敗即拒收
+
+Scenario: git 無法解析的 patch 一律 PATCH-PARSE，合法 patch 不受影響
+  Given 基線 `R`（已開運轉 `RUN-SI-001`、含研究事件；每個情境各自複製一份）；兩份 git 會以 rc 非 0 拒絕、而自寫解析器仍導出路徑的 patch（位元組以 `\n` 分行）：(a) 損毀的 hunk——`diff --git a/docs/notes/demo.md b/docs/notes/demo.md`、`--- a/docs/notes/demo.md`、`+++ b/docs/notes/demo.md`、`@@ -3,5 +3,5 @@`（宣告各 5 行）、`-line 003`、`+line 003 changed`（只給各 1 行）；(b) context-diff 格式——`*** a/docs/notes/demo.md`、`--- b/docs/notes/demo.md`、`***************`、`*** 3 ****`、`! line 003`、`--- 3 ----`、`! line 003 changed`
+  When 情境一：對 (a)、(b) 各呼叫 `prop-new --run RUN-SI-001`（類別 `D`、`--target docs/notes/demo.md`，其餘旗標取 §5.3 `good_prop_args(R, "D")`，patch 檔內容換成該份位元組）
+  And 情境二：在 `mock.patch.object(git, "apply_numstat", side_effect=OSError("x"))` 之下，以 §5.3 `T01` 的合規 patch 呼叫同一個 `prop-new`
+  And 情境三（對照）：不 mock，以 §5.3 `T01` 的合規 patch 呼叫同一個 `prop-new`
+  Then 情境一的兩案與情境二：rc 皆為 `1`、`codes(out)` 恰為 `PATCH-PARSE`、事件帳本位元組不變、`SelfImproving_Proposals/` 下沒有新檔（零殘留）、`draft_ok` 成立
+  And 情境三：rc 為 `0`，事件帳本多一筆 `prop`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_107_3_E_4]"
 ```
 
 ```gherkin
@@ -1739,6 +1952,25 @@ Scenario: loop 卡與轉交卡的七行格式逐字等於測試端獨立組出�
 ```
 
 ```gherkin
+# AT-114-1-2
+# 對應 AC: AC-114-1（PRD AC-SI-14-1；R56 (a)(b)）`M` 類卡面（正控）：觸及比例印 `n/a`（無 base 快照），其餘各行形態與非 `M` 類相同，核心區不超限
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_props.py -k AT_114_1_2 -q -p no:xdist -o addopts=
+
+Feature: M 類卡面
+
+Scenario: M 類提案的卡面為七行，第三行的觸及比例為 n/a
+  Given 基線 `R`（已開運轉 `RUN-SI-001`、含研究事件）；記憶目錄夾具 `memory_dir`；以 §5.3 `good_prop_args(R, "M")` 呼叫 `prop-new --run RUN-SI-001`，得 `PROP-SI-124`（`M` 類、`target` 為 `memory/demo.md`、patch 取代 `demo.md` 第 3、4 行）
+  When 呼叫 `card PROP-SI-124` 與 `card PROP-SI-124 --json`
+  Then 兩次 rc 皆為 `0`；文字形態恰 7 行（結尾 LF）；第 1 行為 `[PROP-SI-124] 記憶條目｜modify｜目標：memory/demo.md｜digest：<前 8 碼>｜驗證：未驗`
+  And 第 3 行恰為 `二、改什麼：+2／-2 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0`（不含小數比例）
+  And 核心區（第 1～5 行）為 5 行；第 2～5 行的顯示寬度皆不大於 `card_line_max`（CJK 算 2，測試端獨立以 `unicodedata.east_asian_width` 算出）
+  And `--json`：`core_lines` 為 `5`；`parsed` 的 `digest8` 等於 digest 前 8 碼、`added` 為 `2`、`removed` 為 `2`、`touched_count` 為 `1`、`extra_paths` 為空陣列、`verdict` 為 `未驗`；`text` 等於文字形態的輸出
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_114_1_2]"
+```
+
+```gherkin
 # AT-114-1-E-1
 # 對應 AC: AC-114-1（PRD AC-SI-14-1；R56 (c)(d)）提案者自由撰寫的摘要不取代 diff 本文；查無 PROP 與內容檔缺失 rc 3
 # 測試類型: Integration
@@ -1889,7 +2121,7 @@ Scenario: 無研究事件時提案被拒，補研究事件後受理；check 重�
 
 ```gherkin
 # AT-130-1-E-1
-# 對應 AC: AC-130-1（PRD AC-SI-30-1；R57 (a)）`research --skip` 的 reason 封閉集合與附帶旗標；同運轉第二筆研究事件拒收；helmsman 免掃印引言回查未建
+# 對應 AC: AC-130-1（PRD AC-SI-30-1；R57 (a)）`research --skip` 的 reason 封閉集合與附帶旗標；同運轉第二筆研究事件拒收；helmsman 免掃印 warn 層級的引言回查未建提示
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
 # 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_1_E_1 -q
@@ -1905,7 +2137,7 @@ Scenario: 三種 reason 各自合規受理；格式錯誤 rc 3、狀態錯誤 rc
   Then 情境一：三次 rc 皆為 `0`、stdout 各為 `ok research.skip seq=<n> run=<運轉> reason=<reason>`；三個事件的 `by` 皆為 `main`；共通鍵之後的鍵序依序為（`quota-band`）`run`、`reason`、`note`、`band`，（`helmsman`）`run`、`reason`、`note`、`sid`、`line`（`line` 為整數 12），（`offline`）`run`、`reason`、`note`
   And 情境二的 15 次呼叫（逐項計）：rc 皆為 `3`、stdout 空、stderr 以 `selfimproving:` 起頭
   And 情境三：重複者 rc `1`、`codes(out)` 恰為 `RESEARCH-ALREADY`；已關與不存在的運轉 rc `1`、碼 `RUN-NOT-OPEN`；`draft_ok` 成立；情境二與三沒有改變事件帳本的行數（相對 `n0`，事件帳本只多情境一的 3 行）
-  And 情境四：`F(events.research)` 恰為 `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)`（nonblocking NE，來自 `helmsman`）；`overall` 為 `PASS`、rc 為 `0`
+  And 情境四：`F(events.research)` 恰為 `(-, QUOTE-VERIFIER-NOT-ESTABLISHED)`（warn 層級，來自 `helmsman`；項目狀態不變）；`overall` 為 `PASS`、rc 為 `0`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_1_E_1]"
 ```
 
@@ -1972,7 +2204,7 @@ Scenario: 事件的來源表雜湊須等於其時間點之前最近一次提交�
 
 ```gherkin
 # AT-130-2-E-3
-# 對應 AC: AC-130-2（PRD AC-SI-30-2；R58 (c)）重導向把關：表外 host 與連接埠、非 http 與 https 的 scheme、https 降 http、第 6 跳皆拒；表內重導向至多 5 跳放行
+# 對應 AC: AC-130-2（PRD AC-SI-30-2；R58 (c)）重導向把關：表外 host 與連接埠、非 http 與 https 的 scheme、https 降 http 與 http 升 https（scheme 不得改變；函式層用顯式同埠 URL）、第 6 跳皆拒；表內重導向至多 5 跳放行
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具
 # 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_2_E_3 -q
@@ -1982,11 +2214,29 @@ Feature: 重導向把關
 Scenario: 重導向目標須屬允許集合；跳數有上限
   Given 基線 `R`；§5.4 `serve` 起伺服器（連接埠 `P`），路由：`/to-ok`（302 到本 host 同埠 `/ok`）、`/ok`（200 文字）、`/to-localhost`（302 到 `localhost` 同埠 `/ok`）、`/to-otherport`（302 到另一個連接埠）、`/to-ftp`（302 到 `ftp://` 目標）、`/to-file`（302 到 `file://` 目標）、`/c0`～`/c5`（`/cK` 302 到 `/c(K+1)`，`/c5` 回 200）、`/d0`～`/d6`（同型，`/d6` 回 200，故需 6 次重導向）；每個案例各自複製一份已開運轉的 `R`、以 `write_table` 提交單一來源（`url` 指向該案例的入口路由），並以 `relaxed()` 放寬政策
   When 對 `/to-ok`、`/to-localhost`、`/to-otherport`、`/to-ftp`、`/to-file`、`/c0`、`/d0` 各呼叫 `research --fetch --run RUN-SI-001`
-  And 函式層：以字串直接呼叫 `fetch.check_redirect(from_url, to_url, allowed_hosts)`，`allowed_hosts` 為由來源表 url 推得的 `hostname:port` 集合：https 同 host 同埠、https 到 http（同 host）、http 到 https（同 host）、https 到另一 host、`ftp://` 目標、`file://` 目標
+  And 函式層：以字串直接呼叫 `fetch.check_redirect(from_url, to_url, allowed_hosts)`，`allowed_hosts` 為單一元素集合 `{example.com:8443}`，**URL 一律帶顯式連接埠 8443**（預設埠下 https 與 http 的 `hostname:port` 本來就不同，會被連接埠判準先拒、遮住 scheme 判準；原案例因此使「scheme 不得改變」沒有任何測試鎖住）：`https://example.com:8443/a` 到 `https://example.com:8443/b`；`https://example.com:8443/a` 到 `http://example.com:8443/b`（降級）；`http://example.com:8443/a` 到 `https://example.com:8443/b`（升級，反向）；`http://example.com:8443/a` 到 `http://example.com:8443/b`；`https://example.com:8443/a` 到 `https://other.example:8443/b`（另一 host）；`https://example.com:8443/a` 到 `ftp://example.com:8443/b`；`https://example.com:8443/a` 到 `file:///b`
   Then `/to-ok` 與 `/c0`（5 次重導向）：rc `0`、輸出含 `source s1 ok`
   And `/to-localhost`、`/to-otherport`、`/to-ftp`、`/to-file`、`/d0`（第 6 次重導向）：rc `1`（零來源成功）、輸出含 `source s1 FAIL redirect-refused`、事件帳本不變
-  And 函式層：僅 https 同 host 同埠回傳 `None`；其餘五種皆回傳 `redirect-refused`
+  And 函式層：同 scheme 同埠的兩案（https 到 https、http 到 http）回傳 `None`；其餘五案（https 降 http、http 升 https、另一 host、`ftp://`、`file://`）皆回傳 `redirect-refused`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_2_E_3]"
+```
+
+```gherkin
+# AT-130-2-E-4
+# 對應 AC: AC-130-2（PRD AC-SI-30-2；R42 (c)）`sources_sha256` 對提交歷史的時間邊界：來源表的提交時間與事件 `t` 為同一秒放行（不晚於）、事件 `t` 早一秒即 `SOURCES-SHA-MISMATCH`
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_2_E_4 -q -p no:xdist -o addopts=
+
+Feature: 來源表提交時間邊界
+
+Scenario: 提交時間等於事件時間放行；事件早一秒判不符；晚一秒放行
+  Given 基線 `R`；以執行期組出的時間點 `Tc`（現在減一日，秒精度，帶 offset 的 ISO 字串與對應的 `GIT_COMMITTER_DATE`）；來源表 v1（單一現役來源 `s-live`；`write_table` 時 `commit` 為假）；每個情境各自複製一份 `R`，手寫事件帳本為 `run.open`（`RUN-SI-001`）加一筆 `research.scan`（`sources` 為 `s-live`、`sources_sha256` 為 v1 的雜湊、`fetched_at` 同該事件的 `t`）
+  When 情境一：事件 `t` 為 `Tc`；情境二：事件 `t` 為 `Tc` 減 1 秒；情境三：事件 `t` 為 `Tc` 加 1 秒
+  And 三個情境皆以 `commit_all(R, …, when=Tc)` 把來源表與事件帳本提交於同一個 commit（committer 時間恰為 `Tc`）後呼叫 `check --json`
+  Then 情境一與情境三：`S(events.research)` 為 `PASS`、`F(events.research)` 為空（提交時間不晚於事件 `t`，等號放行）
+  And 情境二：`F(events.research)` 恰為 `(seq=2, SOURCES-SHA-MISMATCH)`（事件 `t` 之前沒有任何提交含來源表）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_2_E_4]"
 ```
 
 ```gherkin
@@ -2065,6 +2315,42 @@ Scenario: 抓取進行中可取得寫入鎖；抓取結束時依鎖內最新狀�
   And 情境二：抓取結束 rc 為 `1`、`codes(out)` 含 `RESEARCH-ALREADY`、事件帳本只多測試追加的那一筆（沒有 `research.scan`）
   And 情境三：rc 為 `1`、碼含 `RUN-NOT-OPEN`，沒有 `research.scan`；情境四：rc 為 `1`、碼含 `SOURCES-CHANGED`，沒有 `research.scan`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_3_E_3]"
+```
+
+```gherkin
+# AT-130-3-E-4
+# 對應 AC: AC-130-3（PRD AC-SI-30-3；R57 (b)(d)）全部來源皆失敗與現役來源為 0 筆，皆以碼 `ZERO-SUCCESS` 拒收（rc 1、不寫事件）；碼名與兩條路徑被釘住
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_3_E_4 -q -p no:xdist -o addopts=
+
+Feature: ZERO-SUCCESS 拒收碼
+
+Scenario: 抓取後零成功與預檢零現役各以 ZERO-SUCCESS 拒收
+  Given 基線 `R` 與已提交的單純運轉：僅 `run-open` 得 `RUN-SI-001`（**未**記研究事件）；§5.4 `serve` 路由 `/a`（404）、`/b`（500）；`relaxed()`；事件帳本位元組 `before`；每個情境各自複製一份
+  When 情境一：以 `write_table` 提交兩個現役來源 `s1`（`/a`）與 `s2`（`/b`），呼叫 `research --fetch --run RUN-SI-001`；另在一份新複本以 `--json` 呼叫
+  And 情境二：新複本，來源表的兩個來源皆 `retired`，呼叫 `research --fetch --run RUN-SI-001`；其後呼叫 `research --skip --run RUN-SI-001 --reason offline --note 離線驗證`
+  Then 情境一：rc 為 `1`、`codes(out)` 恰為 `ZERO-SUCCESS`；輸出依序含 `source s1 FAIL http-status 404`、`source s2 FAIL http-status 500`、`reject research ZERO-SUCCESS`；`obs-draft:` 之下有兩行草稿列（每個失敗來源各一，症狀含來源 id 與原因 `http-status`）；事件帳本位元組等於 `before`
+  And 情境一的 `--json`：rc 為 `1`、`ok` 為 false、`codes` 恰一個元素且其 `code` 為 `ZERO-SUCCESS`、`failed` 恰兩個元素（`id` 為 `s1` 與 `s2`，`reason` 皆為 `http-status`）
+  And 情境二：抓取 rc 為 `1`、`codes(out)` 恰為 `ZERO-SUCCESS`、伺服器收到的請求數為 0（預檢即拒）、事件帳本位元組等於 `before`；其後的 `--skip` rc 為 `0`（沒有留下研究事件，不會 `RESEARCH-ALREADY`）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_3_E_4]"
+```
+
+```gherkin
+# AT-130-3-E-5
+# 對應 AC: AC-130-3（PRD AC-SI-30-3；R58 (d)）可接受的 Content-Type 集合被逐一釘住：`text/*` 與五個 `application/*` 形態放行，白名單外判 `non-text`
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 本機 loopback HTTP 夾具
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_3_E_5 -q -p no:xdist -o addopts=
+
+Feature: Content-Type 白名單
+
+Scenario: 六種可接受形態各自放行，白名單外的型別判 non-text
+  Given §5.4 `serve`，每個路由回 200 與 5 位元組文字、各帶一個 `Content-Type`：可接受組七個——`text/plain`、`text/html; charset=utf-8`、`application/json`、`application/xml`、`application/atom+xml`、`application/rss+xml`、`application/xhtml+xml`；白名單外組五個——`application/octet-stream`、`image/png`、`application/pdf`、`application/x-ndjson`、`application/javascript`；放寬政策物件（`allow_loopback` 與 `allow_http` 皆為真）
+  When 函式層：對每個路由各呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=5, max_bytes=1000, allowed_hosts={<該伺服器的 host:port>})`
+  Then 可接受組的七個：皆回傳 `Fetched`（`status` 為 `200`、原始位元組為 5 個）
+  And 白名單外組的五個：皆拋 `FetchError`，其 `reason` 為 `non-text`、`detail` 為該 Content-Type 的主型別
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_3_E_5]"
 ```
 
 ```gherkin
@@ -2153,6 +2439,24 @@ Scenario: 超界各依規則拒收或判失敗；退場來源不計入
   And (c)：rc `1`（零成功）、輸出含 `source <id> FAIL too-large`、不截斷落地（家目錄無該來源檔）；(d)：rc `1`、輸出含 `source <id> FAIL timeout`
   And (e) 的三案：rc 皆為 `3`、stdout 空、stderr 點名缺的鍵、請求數 0
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_5_E_1]"
+```
+
+```gherkin
+# AT-130-5-E-2
+# 對應 AC: AC-130-5（PRD AC-SI-30-5；R58 (d)）牆鐘上限對慢滴回應成立：每 0.5 秒滴 1 位元組的本文在 `research_timeout_seconds` 內以 `timeout` 歸類返回；送完標頭後停滯的既有行為不變
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_130_5_E_2 -q -p no:xdist -o addopts=
+
+Feature: 牆鐘上限（慢滴與停滯）
+
+Scenario: 慢滴與停滯兩型回應皆在逾時上限附近返回並歸類 timeout
+  Given §5.4 `serve` 路由：`/drip`（200、`text/plain`、`Content-Length` 為 100000，送完標頭後每 0.5 秒送出本文的 1 個位元組，選項 `drip`）、`/stall`（200、`text/plain`、`Content-Length` 為 100000，送完標頭後不送本文，選項 `stall`）；`research_timeout_seconds` 為 2、`research_bytes_max` 為 262144；測試結束必關伺服器（兩條路由的處理執行緒隨之結束）
+  When 函式層：對 `/drip`、`/stall` 各呼叫一次 `fetch.fetch_source(<url>, policy=<放寬政策>, timeout=2, max_bytes=262144, allowed_hosts={<該伺服器的 host:port>})`，以 `time.monotonic()` 量呼叫前後的牆鐘
+  And 指令層：`params.json` 的 `research_timeout_seconds` 為 2；以 `write_table` 提交單一來源（`/drip`）、已開運轉 `RUN-SI-001`、`relaxed()`；呼叫 `research --fetch --run RUN-SI-001`，量整個指令的牆鐘
+  Then 函式層：兩次皆拋 `FetchError` 且 `reason` 為 `timeout`；兩次牆鐘皆落在 1.5 秒至 2.5 秒之間（上限 2 秒加減 0.5 秒）
+  And 指令層：rc 為 `1`、輸出含 `source <id> FAIL timeout`、`codes(out)` 恰為 `ZERO-SUCCESS`、事件帳本位元組不變；整個指令的牆鐘小於 6 秒（含預檢與 git；不得等到伺服器停手）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_130_5_E_2]"
 ```
 
 ```gherkin
@@ -2277,6 +2581,25 @@ Scenario: 狀態字串母體與合成缺陷帳本在兩個解析器下的結果�
   Then 母體內每個字串：兩邊的回傳值相等（含 `None`），且等於 §5.3 表中的預期分類
   And 五份帳本：兩邊回傳的 dict 相等（鍵為 DEF 號、值為分類或 `None`）；(a) 的四個鍵依序對應 `open`、`fixed`、`wontfix`、`routed`；(b) 只有一個鍵、值為 `fixed`（後列覆寫前列）；(c) 與 (d) 的該列值為 `None`；(e) 為空 dict
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_131_2_E_2]"
+```
+
+```gherkin
+# AT-131-2-E-3
+# 對應 AC: AC-131-2（PRD AC-SI-31-2；R59 (a)(b)）起算點的 commit 時間邊界：committer 時間恰等於起算時刻的 commit 不計入窗、晚一秒者計入
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_research_scan.py -k AT_131_2_E_3 -q -p no:xdist -o addopts=
+
+Feature: scan 的窗邊界
+
+Scenario: 起算時刻恰好的 commit 不產生候選，晚一秒的 commit 產生候選
+  Given 依 §5.2 情境 `SC-SCAN-EDGE` 建 `R`：事件帳本為 `run.open`（`RUN-SI-001`）加 `run.close`（`no_event`，`t` 為錨點 `Ta`＝現在減 1 日、秒精度）；缺陷帳本只含不符合 (c) 的列；錨點之後的兩個 commit：`K1` 於 `Ta` 提交、觸及 `AutoClaude/x.py`；`K2` 於 `Ta` 加 1 秒提交、觸及 `AISDLC_SDD/z.md`；`snap0＝snap(R)`
+  When 呼叫 `scan --json`（不帶 `--since`）
+  Then rc 為 `0`；`anchor` 的 `kind` 為 `run.close`、`time` 等於 `Ta`
+  And `buckets` 恰為 `AISDLC_SDD` 一個且計 1，沒有 `AutoClaude` 桶（`K1` 的 committer 時間等於起算時刻，不在窗內）
+  And `candidates` 恰一筆，其 `bucket` 為 `AISDLC_SDD`、`row` 的證據座標為 `commit ` 接 `K2` 的前 12 位 hex
+  And `snap(R)` 等於 `snap0`（唯讀）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_131_2_E_3]"
 ```
 
 ```gherkin
@@ -2426,6 +2749,43 @@ Scenario: 無事件、量不到、SUSPENDED、冷卻解除、pending 窗各依�
 ```
 
 ```gherkin
+# AT-103-1-E-2
+# 對應 AC: AC-103-1（PRD AC-SI-17-2、AC-SI-03-1；R35 (c)、R60）SUSPENDED 折疊的連續判準：兩個窗只有一個壞窗不暫停，連續兩個壞窗才暫停；`pending` 的窗不計入也不打斷連續
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_export_status.py -k AT_103_1_E_2 -q -p no:xdist -o addopts=
+
+Feature: SUSPENDED 的連續判準
+
+Scenario: 好壞混合的兩窗不暫停，連續兩壞窗才暫停
+  Given 依 §5.2 情境 `SC-SUSP-MIX` 的建法（`stop_after_bad` 為 2）：`RUN-SI-001` 內各 PROP 走到 `promoted` 後 `mea.open`、`mea.close`，依序的 `result` 依情境取——(a) `clean`、`recurred`；(b) `recurred`、`clean`；(c) `recurred`、`rolled-back`；(d) `recurred`、`pending`、`rolled-back`；每個情境各自建一份 `R`
+  When 對各情境呼叫 `status --json`
+  Then (a) 與 (b)：`suspended` 為 `null`
+  And (c) 與 (d)：`suspended` 為 `{run: RUN-SI-001}`（(d) 的 `pending` 窗不計入也不打斷連續）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_103_1_E_2]"
+```
+
+```gherkin
+# AT-103-1-E-3
+# 對應 AC: AC-103-1（PRD AC-SI-03-1、NFR-SI-09-2；R60）`pending_props` 含 `verified` 狀態；啟動事件偵測窗以最近一筆 `run.close` 為界、已處理的事件不重複偵測；`friction_reconcile` 的兩種 NOT-EVALUABLE 原因
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_export_status.py -k AT_103_1_E_3 -q -p no:xdist -o addopts=
+
+Feature: status 的待決、偵測窗與對帳
+
+Scenario: verified 也算待決；run.close 之前已處理的確認不重複偵測；逐字稿目錄存在時原因為 parser-not-established
+  Given 環境變數 `HOME` 與 `USERPROFILE` 指向空的 tmp 目錄並移除 `CLAUDE_CONFIG_DIR`（§5.5 (b)；情境 (c) 另行佈置）
+  When 情境 (a)：對 §5.2 `SC-LEGAL` 建的 `R` 呼叫 `status --json`
+  And 情境 (b)：依 §5.2 `SC-STATUS-WIN` 的前五筆事件建 `R` 呼叫 `status --json`；再追加第 6～9 筆事件後再呼叫一次
+  And 情境 (c)：事件帳本為任一合規者；把 `CLAUDE_CONFIG_DIR` 指向 tmp 內的目錄 `C`，並在 `C/projects/<slug>/` 建出空目錄（`<slug>` 依 R60 (c) 的規則，由測試端獨立以 `re.sub` 自 `R` 的解析後絕對路徑算出）；呼叫 `status --json`；再移除該 `<slug>` 目錄後呼叫一次
+  Then (a)：`pending_props` 的 `(id, state)` 集合恰為 `(PROP-SI-128, proposed)`、`(PROP-SI-129, proposed)`、`(PROP-SI-131, verified)`、`(PROP-SI-132, verified)`、`(PROP-SI-133, verified)`、`(PROP-SI-134, proposed)`；`approved` 的 `PROP-SI-130` 與 `returned` 的 `PROP-SI-135` 等其餘狀態皆不在內
+  And (b)：前五筆之後 `events_detected` 為空陣列、`no_event` 為 true（`ATT-SI-001` 的確認發生在該 `run.close` 之前，不重複偵測）；追加後 `events_detected` 的 `(trigger, subject)` 恰為 `(b, ATT-SI-002)`、`no_event` 為 false
+  And (c)：`<slug>` 目錄存在時 `friction_reconcile` 為 `status` 是 `NOT-EVALUABLE`、`reason` 是 `transcript-parser-not-established`；移除後 `reason` 為 `transcript-unavailable`；兩者皆不是 `measured`、不含任何數字計數
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_103_1_E_3]"
+```
+
+```gherkin
 # AT-132-5-1
 # 對應 AC: AC-132-5（PRD AC-SI-32-5；R61）`export --json` 五個 kind 的頂層鍵序與 items 形態；唯讀離線；`schema_rev` 起於 1
 # 測試類型: Contract
@@ -2489,6 +2849,24 @@ Scenario: export 與 status、card 逐字一致；家目錄內容不外洩；壞
 ```
 
 ```gherkin
+# AT-132-5-E-3
+# 對應 AC: AC-132-5（PRD AC-SI-32-5；R61）`truncated` 的邊界：筆數恰等於 `--limit` 不是截斷，多一筆才是
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_export_status.py -k AT_132_5_E_3 -q -p no:xdist -o addopts=
+
+Feature: export 的截斷邊界
+
+Scenario: 筆數恰等於 limit 時不截斷，多一筆時截斷
+  Given 基線 `R`（`export_limit_max` 為 500）；兩份事件帳本複本：(a) 恰 3 筆合規事件（`seq` 為 1～3）；(b) 恰 4 筆（`seq` 為 1～4）
+  When 對 (a)、(b) 各呼叫 `export --json --kind events --limit 3`；另對 (a) 呼叫 `--limit 4` 與 `--limit 2`
+  Then (a) 的 `--limit 3`：`items` 為 3 筆、`truncated` 為 false、`next_since` 為 `null`
+  And (b) 的 `--limit 3`：`items` 為 3 筆（`seq` 為 1～3）、`truncated` 為 true、`next_since` 為 `3`
+  And (a) 的 `--limit 4`：`items` 為 3 筆、`truncated` 為 false、`next_since` 為 `null`；(a) 的 `--limit 2`：`items` 為 2 筆、`truncated` 為 true、`next_since` 為 `2`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_132_5_E_3]"
+```
+
+```gherkin
 # AT-140-2-1
 # 對應 AC: AC-140-2（本檔自增；PRD §9.2〈export 輸出〉；R61 穩定性）`status`、`scan`、`card`、`export` 連續兩次輸出除 generated_at 外逐字相同；UTF-8、LF、無 BOM、JSON 鍵序固定
 # 測試類型: Contract
@@ -2520,6 +2898,23 @@ Scenario: 改變雜湊種子、工作目錄與時區，輸出不變；輸出不�
   Then 兩組環境的輸出（`export` 去掉 `generated_at` 的值後）逐字相同
   And 各輸出不含 `R` 與 `HOME` 的絕對路徑字串、不含行程號；除 `generated_at` 與事件自帶的 `t` 之外沒有以呼叫當下時鐘產生的時間值
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_140_2_E_1]"
+```
+
+```gherkin
+# AT-140-2-E-2
+# 對應 AC: AC-140-2（本檔自增；R28 (a)、R56 (e)、R59 (f)、R60、R61）含非 ASCII 內容的 `--json` 輸出以 UTF-8 位元組直寫、不跳脫（`ensure_ascii=False`），在 `PYTHONIOENCODING=cp950` 的管線下亦然
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git + subprocess（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_export_status.py -k AT_140_2_E_2 -q -p no:xdist -o addopts=
+
+Feature: JSON 輸出的 UTF-8 直寫
+
+Scenario: 含中文的 JSON 輸出為 UTF-8 原字，沒有 \uXXXX 跳脫
+  Given 環境變數 `PYTHONIOENCODING` 為 `cp950`；測試端為每個呼叫備一份含中文內容的狀態：(a) 事件帳本含 `by` 為 `主控` 的 `run.open`；(b) 基線 `R` 的 OBS 帳本（九欄含中文）；(c) `SC-STATUS-WIN` 的前四筆事件，使 `status` 偵測到一筆 (b) 事件（detail 含中文）；(d) `SC-SCAN-EDGE`，使 `scan` 產生候選列（含 `自動草稿`）；(e) 以 CLI 建好一個 PROP，使 `card --json` 的 `text` 含中文；(f) 對不存在的運轉號呼叫 `run-close` 得拒收（`obs_draft` 含中文）
+  When 以子行程（`[sys.executable, <入口絕對路徑>, …]`，§5.5 (d)）逐一呼叫：(a) `export --json --kind events`；(b) `export --json --kind observations`；(c) `status --json`；(d) `scan --json`；(e) `card <PROP> --json`；(f) `run-close --run <不存在的運轉號> --by main --json`
+  Then 六個呼叫的 stdout 位元組皆能以嚴格 UTF-8 解碼、開頭沒有 BOM、不含 CR、結尾為單一 LF，且 `json.loads` 成功
+  And 各 stdout 位元組含對應的中文原字（(a) 為 `主控` 的 UTF-8 位元組；(c) 為 `同一症狀`；(d) 與 (f) 為 `自動草稿`；(e) 為 `一、症狀`；(b) 為任一 OBS 列的中文欄位內容），且不含反斜線加小寫 `u` 的跳脫序列
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_140_2_E_2]"
 ```
 
 ```gherkin
@@ -2681,6 +3076,23 @@ Scenario: 新套件目錄未出現在任何登記列的程式碼欄即判紅
 ```
 
 ```gherkin
+# AT-134-3-E-2
+# 對應 AC: AC-134-3（PRD AC-SI-34-3；R62 (d)）套件登記以「程式碼」欄的反引號片段為準：片段之外的散文字串不算登記
+# 測試類型: Unit
+# 自動化工具: pytest + tmp 目錄（合成 repo）
+# 判定指令: python -m pytest tools/tests/test_root_module_layout.py -k AT_134_3_E_2 -q -p no:xdist -o addopts=
+
+Feature: 套件須登記（片段判準）
+
+Scenario: 套件名只出現在程式碼欄的散文中即判紅，登記為片段才為綠
+  Given 合成 repo：`tools/lib/pkg/__init__.py` 存在；SSOT 的登記表（§3 節、六欄）依情境各一份——(a) 程式碼欄只有散文 `tools/lib/pkg/ 尚待登記`（沒有反引號）；(b) 程式碼欄含片段 `tools/lib/other/`，另有散文 `（相鄰：tools/lib/pkg/ 說明）`；(c) 對照：程式碼欄含片段 `tools/lib/pkg/`
+  When 對三份各呼叫 `package_problems`
+  Then (a) 與 (b)：回傳非空清單，訊息點名 `pkg`
+  And (c)：回傳空清單
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_134_3_E_2]"
+```
+
+```gherkin
 # AT-134-4-1
 # 對應 AC: AC-134-4（PRD AC-SI-34-4；R62 (e)）含「模組落點表」字樣的 PRD 必含 SSOT 路徑；真 PRD 為綠；不含字樣的 PRD 不判
 # 測試類型: Unit
@@ -2717,7 +3129,7 @@ Scenario: 有字樣無路徑的 PRD 被判紅
 # 對應 AC: AC-128-1（PRD AC-SI-28-1；R66）鍵 B：真 AutoClaude 原始碼上五格皆綠，且每格的掃描器自帶對照組證明看得見生產站點
 # 測試類型: Contract
 # 自動化工具: pytest + AST（唯讀存取 AutoClaude 原始碼；cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_1 -q -n 0
 
 Feature: 演化只提案不套用（真樹）
 
@@ -2737,7 +3149,7 @@ Scenario: 引用格、apply_evolution 呼叫點、演化重載生產者、signof
 # 對應 AC: AC-128-1（PRD AC-SI-28-1 ①②；R66）引用格缺函式、apply_evolution 呼叫點多或少、execution/ 外的呼叫與 import 皆判紅（合成樹）
 # 測試類型: Contract
 # 自動化工具: pytest + AST + tmp 目錄（合成 `autoclaude/` 樹；cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_1 -q -n 0
 
 Feature: 引用格與呼叫點的注入負控
 
@@ -2755,7 +3167,7 @@ Scenario: 注入違規的合成樹使格 ① ② 轉紅，合法合成樹為對�
 # 對應 AC: AC-128-1（PRD AC-SI-28-1 ③；R66）plugins 與 core 內出現演化重載生產者即判紅；排除檔豁免；掃描器在 execution 內看得見生產者
 # 測試類型: Contract
 # 自動化工具: pytest + AST + tmp 目錄（合成 `autoclaude/` 樹；cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_2 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_2 -q -n 0
 
 Feature: 演化重載生產者的注入負控
 
@@ -2772,7 +3184,7 @@ Scenario: 注入生產者使格 ③ 轉紅；排除檔內的同形態不判；�
 # 對應 AC: AC-128-1（PRD AC-SI-28-1 ④；R66）require_evolution_signoff 的讀取點多出一處即判紅；Store 語境不算讀取
 # 測試類型: Contract
 # 自動化工具: pytest + AST + tmp 目錄（合成 `autoclaude/` 樹；cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_3 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_3 -q -n 0
 
 Feature: signoff 讀取點的注入負控
 
@@ -2789,7 +3201,7 @@ Scenario: 讀取點只准在 execution/playbook_runner.py
 # 對應 AC: AC-128-1（PRD AC-SI-28-1 ⑤；R66）文件宣稱釘住：缺字樣、帶 `main.py:<行號>` 形態、main.py 缺註解字樣皆判紅
 # 測試類型: Contract
 # 自動化工具: pytest + 合成文字（cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_4 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_1_E_4 -q -n 0
 
 Feature: 文件宣稱的注入負控
 
@@ -2806,7 +3218,7 @@ Scenario: 引註解字樣而不引行號；缺字樣或帶行號即紅
 # 對應 AC: AC-128-2（PRD AC-SI-28-2；R66）`require_evolution_signoff` 預設值仍為 False；文件演化敘述含四個改述片段且該行不超過 800 個碼位
 # 測試類型: Contract
 # 自動化工具: pytest + AST（唯讀存取 AutoClaude 原始碼與 CLAUDE.md；cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_2_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_2_1 -q -n 0
 
 Feature: 預設值零退化與文件改述
 
@@ -2823,7 +3235,7 @@ Scenario: 預設值未變，文件已改述為只提案、預設放行、無生�
 # 對應 AC: AC-128-2（PRD AC-SI-28-2；R66）預設值被改成 True、任一改述片段被刪、行長超過 800 皆判紅
 # 測試類型: Contract
 # 自動化工具: pytest + 合成文字與合成 config 原始碼（cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_2_E_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_2_E_1 -q -n 0
 
 Feature: 預設值與改述的注入負控
 
@@ -2836,11 +3248,28 @@ Scenario: 退化與缺片段與超長行各被判出
 ```
 
 ```gherkin
+# AT-128-2-E-2
+# 對應 AC: AC-128-2（PRD AC-SI-28-2；R66）判準常數的獨立釘選：`REWRITE_FRAGMENTS` 與 R66 的四個改述片段相等，改常數的任一元素即紅
+# 測試類型: Contract
+# 自動化工具: pytest（常數的字面比對與突變副本自證；cwd 為 AutoClaude/）
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_2_E_2 -q -n 0
+
+Feature: 改述片段常數的釘選
+
+Scenario: 常數內容與 R66 的四個片段相等，突變副本比對不相等
+  Given 測試檔常數 `REWRITE_FRAGMENTS`；期望值於測試內以字面獨立寫出（不由常數衍生），取自本檔 R66：`Kernel 路徑只提案`、`預設放行`、`無生產建構點`、`無演化重載生產者`
+  When 以集合語意（順序不拘）比對常數與期望值；另對常數各產生突變副本：刪去任一元素（四個副本）、把任一元素改掉一個字（四個副本）、多加一個元素——各比對一次
+  Then 常數與期望值相等（恰四個元素、無重複）
+  And 九個突變副本與期望值比對皆為不相等
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_128_2_E_2]"
+```
+
+```gherkin
 # AT-128-3-1
 # 對應 AC: AC-128-3（PRD AC-SI-28-3；R66）①～④ 任一格轉紅時，失敗訊息指向立即升為缺陷列並走 FR-SI-12 的人工閘
 # 測試類型: Contract
 # 自動化工具: pytest + 合成樹（cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_3_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_3_1 -q -n 0
 
 Feature: 轉紅訊息指向人工閘
 
@@ -2857,7 +3286,7 @@ Scenario: 四個格各以合成注入轉紅，訊息含 OBS-SI-010、升為缺�
 # 對應 AC: AC-128-3（PRD AC-SI-28-3；R66）訊息判準自證：缺任一片段的訊息被判不合格；格 ⑤ 的訊息不要求含該三片段
 # 測試類型: Contract
 # 自動化工具: pytest + 合成訊息（cwd 為 AutoClaude/）
-# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_3_E_1 -q
+# 判定指令: python -m pytest tests/contract/test_evolution_propose_only.py -k AT_128_3_E_1 -q -n 0
 
 Feature: 訊息判準非恆真
 
@@ -2887,8 +3316,12 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-107-3-1 | AC-107-3 | tools/tests/test_selfimproving_props.py | test_AT_107_3_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-107-3-E-1 | AC-107-3 | tools/tests/test_selfimproving_props.py | test_AT_107_3_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-107-3-E-2 | AC-107-3 | tools/tests/test_selfimproving_props.py | test_AT_107_3_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-107-3-E-4 | AC-107-3 | tools/tests/test_selfimproving_props.py | test_AT_107_3_E_4_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-108-1-E-1 | AC-108-1 | tools/tests/test_selfimproving_props.py | test_AT_108_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-108-4-E-2 | AC-108-4 | tools/tests/test_selfimproving_events.py | test_AT_108_4_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-108-4-E-3 | AC-108-4 | tools/tests/test_selfimproving_events.py | test_AT_108_4_E_3_* | pytest + tmp 目錄 + 真 git + subprocess（hermetic） |
+| AT-108-4-E-4 | AC-108-4 | tools/tests/test_selfimproving_events.py | test_AT_108_4_E_4_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-108-4-E-5 | AC-108-4 | tools/tests/test_selfimproving_events.py | test_AT_108_4_E_5_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-109-1-2 | AC-109-1 | tools/tests/test_selfimproving_props.py | test_AT_109_1_2_* | pytest（唯讀存取真 SOP；含刪去自證） |
 | AT-109-1-E-1 | AC-109-1 | tools/tests/test_selfimproving_props.py | test_AT_109_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-109-3-E-1 | AC-109-3 | tools/tests/test_selfimproving_props.py | test_AT_109_3_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
@@ -2905,15 +3338,18 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-131-4-1 | AC-131-4 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_4_1_* | pytest（純函式） |
 | AT-131-5-1 | AC-131-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_5_1_* | pytest（唯讀存取真 SOP 與真 PRD） |
 | AT-132-5-E-1 | AC-132-5 | tools/tests/test_selfimproving_export_status.py | test_AT_132_5_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-132-5-E-3 | AC-132-5 | tools/tests/test_selfimproving_export_status.py | test_AT_132_5_E_3_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-134-1-1 | AC-134-1 | tools/tests/test_root_module_layout.py | test_AT_134_1_1_* | pytest（唯讀存取真 SSOT；合成 SSOT 驗解析規則） |
 | AT-134-1-E-1 | AC-134-1 | tools/tests/test_root_module_layout.py | test_AT_134_1_E_1_* | pytest + tmp 目錄（合成 repo） |
 | AT-134-2-1 | AC-134-2 | tools/tests/test_root_module_layout.py | test_AT_134_2_1_* | pytest + tmp 目錄（合成 `tools/lib/`） |
 | AT-134-2-E-1 | AC-134-2 | tools/tests/test_root_module_layout.py | test_AT_134_2_E_1_* | pytest + tmp 目錄（合成 `tools/lib/`） |
 | AT-134-3-1 | AC-134-3 | tools/tests/test_root_module_layout.py | test_AT_134_3_1_* | pytest（唯讀存取真樹；合成樹驗合規形態） |
 | AT-134-3-E-1 | AC-134-3 | tools/tests/test_root_module_layout.py | test_AT_134_3_E_1_* | pytest + tmp 目錄（合成 repo） |
+| AT-134-3-E-2 | AC-134-3 | tools/tests/test_root_module_layout.py | test_AT_134_3_E_2_* | pytest + tmp 目錄（合成 repo） |
 | AT-134-4-1 | AC-134-4 | tools/tests/test_root_module_layout.py | test_AT_134_4_1_* | pytest（唯讀存取真 PRD；合成 PRD 驗合規形態） |
 | AT-134-4-E-1 | AC-134-4 | tools/tests/test_root_module_layout.py | test_AT_134_4_E_1_* | pytest + tmp 目錄（合成 repo） |
 | AT-140-1-E-1 | AC-140-1 | tools/tests/test_selfimproving_events.py | test_AT_140_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-140-1-E-3 | AC-140-1 | tools/tests/test_selfimproving_events.py | test_AT_140_1_E_3_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-142-1-E-2 | AC-142-1 | tools/tests/test_selfimproving_events.py | test_AT_142_1_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-143-1-1 | AC-143-1 | tools/tests/test_selfimproving_capability.py | test_AT_143_1_1_* | pytest（AST 與正規式靜態掃描；唯讀存取真原始碼） |
 | AT-143-1-E-1 | AC-143-1 | tools/tests/test_selfimproving_capability.py | test_AT_143_1_E_1_* | pytest + tmp 目錄（合成套件樹） |
@@ -2921,6 +3357,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-145-1-E-1 | AC-145-1 | tools/tests/test_selfimproving_events.py | test_AT_145_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-145-2-1 | AC-145-2 | tools/tests/test_selfimproving_events.py | test_AT_145_2_1_* | pytest（唯讀存取真 SOP；以 `## ` 標題切段的關鍵片段判準） |
 | AT-145-2-E-1 | AC-145-2 | tools/tests/test_selfimproving_events.py | test_AT_145_2_E_1_* | pytest（以真 SOP 全文的變異副本） |
+| AT-145-2-E-2 | AC-145-2 | tools/tests/test_selfimproving_events.py | test_AT_145_2_E_2_* | pytest（唯讀存取夾具常數；以常數的突變副本自證） |
 
 ### 3.2 Integration Tests
 
@@ -2930,6 +3367,8 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-102-1-E-1 | AC-102-1 | tools/tests/test_selfimproving_props.py | test_AT_102_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-103-1-1 | AC-103-1 | tools/tests/test_selfimproving_export_status.py | test_AT_103_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-103-1-E-1 | AC-103-1 | tools/tests/test_selfimproving_export_status.py | test_AT_103_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-103-1-E-2 | AC-103-1 | tools/tests/test_selfimproving_export_status.py | test_AT_103_1_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-103-1-E-3 | AC-103-1 | tools/tests/test_selfimproving_export_status.py | test_AT_103_1_E_3_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-103-2-1 | AC-103-2 | tools/tests/test_selfimproving_events.py | test_AT_103_2_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-103-2-E-1 | AC-103-2 | tools/tests/test_selfimproving_events.py | test_AT_103_2_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-105-1-1 | AC-105-1 | tools/tests/test_selfimproving_events.py | test_AT_105_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
@@ -2960,6 +3399,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-111-1-1 | AC-111-1 | tools/tests/test_selfimproving_props.py | test_AT_111_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-111-1-E-1 | AC-111-1 | tools/tests/test_selfimproving_props.py | test_AT_111_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-114-1-1 | AC-114-1 | tools/tests/test_selfimproving_props.py | test_AT_114_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-114-1-2 | AC-114-1 | tools/tests/test_selfimproving_props.py | test_AT_114_1_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-114-1-E-1 | AC-114-1 | tools/tests/test_selfimproving_props.py | test_AT_114_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-114-2-1 | AC-114-2 | tools/tests/test_selfimproving_props.py | test_AT_114_2_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-114-2-E-1 | AC-114-2 | tools/tests/test_selfimproving_props.py | test_AT_114_2_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
@@ -2970,27 +3410,37 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-130-2-E-1 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-2-E-2 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_2_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-130-2-E-3 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_3_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
+| AT-130-2-E-4 | AC-130-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_2_E_4_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-130-3-1 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-3-E-1 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-3-E-2 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_2_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-3-E-3 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_3_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 + threading |
+| AT-130-3-E-4 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_4_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
+| AT-130-3-E-5 | AC-130-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_3_E_5_* | pytest + tmp 目錄 + 本機 loopback HTTP 夾具 |
 | AT-130-4-1 | AC-130-4 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_4_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-130-4-E-1 | AC-130-4 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_4_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-130-5-1 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-130-5-E-1 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_1_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
+| AT-130-5-E-2 | AC-130-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_130_5_E_2_* | pytest + tmp 目錄 + 真 git + 本機 loopback HTTP 夾具 |
 | AT-131-1-1 | AC-131-1 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-131-2-1 | AC-131-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_2_1_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-131-2-E-1 | AC-131-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_2_E_1_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
+| AT-131-2-E-3 | AC-131-2 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_2_E_3_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-131-3-1 | AC-131-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_3_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-131-3-E-1 | AC-131-3 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_3_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-131-4-E-1 | AC-131-4 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_4_E_1_* | pytest + tmp 目錄 + 真 git（以環境變數固定各 commit 的提交時間） |
 | AT-131-5-E-1 | AC-131-5 | tools/tests/test_selfimproving_research_scan.py | test_AT_131_5_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-132-5-E-2 | AC-132-5 | tools/tests/test_selfimproving_export_status.py | test_AT_132_5_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-140-1-1 | AC-140-1 | tools/tests/test_selfimproving_events.py | test_AT_140_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-140-1-E-2 | AC-140-1 | tools/tests/test_selfimproving_events.py | test_AT_140_1_E_2_* | pytest + tmp 目錄 + 真 git + subprocess（hermetic） |
 | AT-140-2-E-1 | AC-140-2 | tools/tests/test_selfimproving_export_status.py | test_AT_140_2_E_1_* | pytest + tmp 目錄 + 真 git + subprocess（hermetic） |
+| AT-140-2-E-2 | AC-140-2 | tools/tests/test_selfimproving_export_status.py | test_AT_140_2_E_2_* | pytest + tmp 目錄 + 真 git + subprocess（hermetic） |
 | AT-141-1-E-1 | AC-141-1 | tools/tests/test_selfimproving_events.py | test_AT_141_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-141-1-E-2 | AC-141-1 | tools/tests/test_selfimproving_events.py | test_AT_141_1_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-141-2-1 | AC-141-2 | tools/tests/test_selfimproving_events.py | test_AT_141_2_1_* | pytest + tmp 目錄 + 真 git + threading 與 subprocess |
 | AT-141-2-E-1 | AC-141-2 | tools/tests/test_selfimproving_events.py | test_AT_141_2_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-141-2-E-2 | AC-141-2 | tools/tests/test_selfimproving_events.py | test_AT_141_2_E_2_* | pytest + tmp 目錄 + 真 git（hermetic） |
+| AT-141-2-E-3 | AC-141-2 | tools/tests/test_selfimproving_events.py | test_AT_141_2_E_3_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-142-1-1 | AC-142-1 | tools/tests/test_selfimproving_events.py | test_AT_142_1_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-142-1-E-1 | AC-142-1 | tools/tests/test_selfimproving_events.py | test_AT_142_1_E_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
 | AT-142-2-1 | AC-142-2 | tools/tests/test_selfimproving_events.py | test_AT_142_2_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
@@ -3010,6 +3460,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AT-128-1-E-4 | AC-128-1 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_1_E_4_* | pytest + 合成文字（cwd 為 AutoClaude/） |
 | AT-128-2-1 | AC-128-2 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_2_1_* | pytest + AST（唯讀存取 AutoClaude 原始碼與 CLAUDE.md；cwd 為 AutoClaude/） |
 | AT-128-2-E-1 | AC-128-2 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_2_E_1_* | pytest + 合成文字與合成 config 原始碼（cwd 為 AutoClaude/） |
+| AT-128-2-E-2 | AC-128-2 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_2_E_2_* | pytest（常數的字面比對與突變副本自證；cwd 為 AutoClaude/） |
 | AT-128-3-1 | AC-128-3 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_3_1_* | pytest + 合成樹（cwd 為 AutoClaude/） |
 | AT-128-3-E-1 | AC-128-3 | AutoClaude/tests/contract/test_evolution_propose_only.py | test_AT_128_3_E_1_* | pytest + 合成訊息（cwd 為 AutoClaude/） |
 | AT-132-5-1 | AC-132-5 | tools/tests/test_selfimproving_export_status.py | test_AT_132_5_1_* | pytest + tmp 目錄 + 真 git（hermetic） |
@@ -3055,6 +3506,13 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | 零事件 | AT-131-3-1、AT-103-1-E-1、AT-103-2-1 | 沒有候選、沒有事件、零提案的運轉 | 見 AT | 印無事件、不印通過；`run-close` 記 `no_event` |
 | 純度 | AT-143-1-1、AT-143-1-E-1、AT-143-1-E-2、AT-131-1-1 | 能力登記、閉包、載入面、零網路、常駐禁字樣 | 靜態與動態 | 見 AT |
 | 差分（既有解析器） | AT-131-2-E-2 | `defs` 的狀態分類與表格解析對 `check_defect_log_crossref` 的 `_classify`、`_load_ledger_status` | `STATUS-CORPUS` 與五份合成缺陷帳本 | 兩邊輸出逐筆相同 |
+| 型別怪異的事件 | AT-108-4-E-3、AT-140-1-E-2 | 欄位值為陣列的手寫事件：`reason`、`type`、`obs` 的元素、`att` | 手寫事件帳本（`SC-WEIRD`） | `check` rc 1 且恰報 `EVENT-TYPE`；各動詞不拋例外、怪異事件不被折疊 |
+| 值域邊界（check 層） | AT-108-4-E-4 | `note` 120 與 121；`http_status` 199、200、299、300；`research.skip` 的 `by`；`sid` 正規形；事件行位元組 L 與 L－1 | 手寫事件帳本與 `event_max_bytes` | 邊界內放行；越界 `EVENT-TYPE`、`EVENT-BYTES-OVER` |
+| 時間邊界（等號） | AT-130-2-E-4、AT-131-2-E-3 | 來源表提交時間等於事件 `t`；commit 時間等於 `scan` 起算時刻 | 以環境變數固定 commit 的提交時間 | 提交時間不晚於事件 `t` 放行、早一秒 `SOURCES-SHA-MISMATCH`；等於起算時刻的 commit 不計入窗 |
+| 筆數與窗的邊界 | AT-132-5-E-3、AT-103-1-E-2 | `export` 筆數恰等於 `--limit`；兩個窗一好一壞 | `export --limit`、`mea.close` 的 `result` | 恰整頁不截斷、多一筆才截斷；一壞不暫停、連續兩壞才暫停 |
+| 慢滴與停滯回應 | AT-130-5-E-2 | 每 0.5 秒送 1 位元組；送完標頭後不送本文 | loopback 夾具的 `drip`、`stall` | 在 `research_timeout_seconds` 上限（2 秒加減 0.5 秒）內以 `timeout` 返回 |
+| 外部工具失敗的 fail-closed | AT-107-3-E-4、AT-130-3-E-4 | `git apply --numstat` 失敗；全部來源失敗與零現役 | 損毀的 patch、404 與 500 路由 | `PATCH-PARSE`；`ZERO-SUCCESS`（rc 1、不寫事件） |
+| 輸出編碼 | AT-140-2-E-2 | 含中文的 `--json` 輸出 | `PYTHONIOENCODING=cp950` 的子行程 | UTF-8 原字、沒有 u 跳脫序列 |
 
 **刻意不做（附再開症狀）**
 
@@ -3062,12 +3520,12 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 |------|-----------|----------|
 | `attr-confirm`／`attr-reject` 落定時於同一把鎖內重折疊採納窗並追加 `mea.amend`（PRD §9.3 `attr` 列） | 採納窗與量測事件屬 P3（AC-SI-23-1）；P1 的 `attr*` 只寫 `attr.confirm`／`attr.reject` | P3 開工，或事件帳本出現 `mea.*` 而 `attr` 落定未連動窗結果 |
 | `decide`、`heldout-freeze`、`sandbox`、`verify`、`promote`、`rollback`、`capacity` 與 `card --issue` | 屬 P2、P3；P1 以 rc 3 釘住「未實作」（AT-140-1-E-1） | 掌舵者要求 P1 就能在 CLI 內核准提案 |
-| `dec` 事件的引言回查（AC-SI-08-4 ⑤）與 `helmsman` 免掃座標回查 | 屬 P2（與 AC-SI-12-4 共用驗證函式）；P1 印 nonblocking NE `QUOTE-VERIFIER-NOT-ESTABLISHED` | 出現偽造的 `dec` 或 `helmsman` 座標被發現與逐字稿不符 |
+| `dec` 事件的引言回查（AC-SI-08-4 ⑤）與 `helmsman` 免掃座標回查 | 屬 P2（與 AC-SI-12-4 共用驗證函式）；P1 印 warn 層級 finding `QUOTE-VERIFIER-NOT-ESTABLISHED`（項目狀態不變） | 出現偽造的 `dec` 或 `helmsman` 座標被發現與逐字稿不符 |
 | `status` 的 (e) 容量事件偵測、`retired` 狀態的折疊（R34） | 屬 P3；P1 印 NOT-EVALUABLE 或不產生 | P3 開工 |
 | `REV-LIMIT` 的「rejected 加冷卻」後果（PRD AC-SI-08-2 的修訂上限說明） | 需要人決定事件 `dec`（P2）；P1 只拒收、PROP 維持 returned（§7.1 ⚖ 10） | 掌舵者要求修訂超限自動轉 rejected |
 | 冷卻的 (b)「新證據解除」 | 屬 P2 的 FR-SI-13；P1 只折疊 (a) `unblock` | P2 開工 |
 | `scan` 的 (iv) `build/reports/` 與 (v) 探針輸出只計數、不產生候選 | PRD 只要求逐來源印讀到筆數；候選來源為缺陷帳本與 commit | 掌舵者要求由測試報告產生候選 |
-| `status` 的 `friction_reconcile` measured 分支（解析逐字稿中的流程摩擦項數） | 逐字稿格式依賴 harness、AT 不碰真逐字稿；AT 只驗 NOT-EVALUABLE 分支 | 掌舵者回報對帳數字與真實不符 |
+| `status` 的 `friction_reconcile` measured 分支（解析逐字稿中的流程摩擦項數） | 逐字稿格式依賴 harness、AT 不碰真逐字稿；AT 只驗 NOT-EVALUABLE 分支（兩種原因） | 掌舵者回報對帳數字與真實不符 |
 | https 降 http 的實連線重導向測試 | loopback 夾具只有 http；以純函式 `fetch.check_redirect` 覆蓋（AT-130-2-E-3） | 上線後出現降級重導向被放行 |
 | 研究來源 URL 的可達性與內容真偽、`sha256` 的語意改版偵測 | 字串形態判準不證明可達；`sha256` 量原始位元組穩定性（PRD AC-SI-30-2、30-3 誠實劃界） | 首跑發現來源失效或高噪音，經 T1 改表 |
 | `getattr`、`importlib` 等動態建構（鍵 B 與能力登記的 AST 判準） | AST 是形態判準，看不到動態形態（PRD 誠實劃界） | 發現以動態形態繞過登記或演化只提案鎖 |
@@ -3159,6 +3617,10 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 - **`SC-SCAN`**（AC-131-1～131-4 的 AT）：事件帳本只有 `run.open` 為 `RUN-SI-001` 與 `run.close`（`no_event`）；`run.close` 的 `t` 為錨點 `Ta`（現在減 1 日）；缺陷帳本含 `Q1`～`Q5`；錨點之後（提交時間為現在）有五個 commit：K1 觸及 `AutoClaude/x.py` 與 `AutoClaude/y.py`、K2 觸及 `AISDLC_SDD/z.md`、K3 觸及 `tools/lib/selfimproving/w.py`、K4 觸及 `tools/other.py` 與 `AgentConsole/c.ts`、K5 觸及 `docs/06_quality/SelfImproving_Foo.md`。預期桶：`AutoClaude`、`AISDLC_SDD`、`SelfImproving`（K3 與 K5）、`根層`、`AgentConsole` 各一個候選。
 - **`SC-SCAN-QUIET`**：同 `SC-SCAN` 的事件帳本，缺陷帳本只含 `Q3`、`Q4`、`Q5`（皆不符合），錨點之後沒有 commit。
 - **`SC-EXPORT`**（AC-132-5 與 AC-140-2 的 AT，及 `AT-143-1-E-2`）：以 CLI 依序：`run-open`（`RUN-SI-001`）、`research --skip`（offline）、`attr`（root，`ATT-SI-001`）、`attr-confirm`（`by` 為 `QA`）、`prop-new` 得 `PROP-SI-124`（P、loop）、`prop-new` 得 `PROP-SI-125`（新增 `.claude/hooks/new_guard_e.py` 與 `docs/notes/clean_e.md`，`--handoff T1`）、`run-open`（`RUN-SI-002`）、`run-close`（`RUN-SI-002`，得 `no_event`）；最後提交，工作樹乾淨。
+- **`SC-WEIRD`**（`AT-108-4-E-3`、`AT-140-1-E-2`；SCG-4 一審 F-02）：每份複本的事件帳本恰兩行——`seq` 為 1 的合規 `run.open`（`RUN-SI-001`），與 `seq` 為 2 的一筆怪異事件（`t` 取 `T0` 加 2 分鐘）。怪異事件共四型，皆為「某個欄位值的型別怪異、其餘合規」：`W1`＝`research.skip`（`by` 為 `main`、`run` 為 `RUN-SI-001`、`reason` 為 JSON 陣列 `["a"]`、`note` 為 `x`）；`W2`＝`attr`（`by` 為 `x`、`id` 為 `ATT-SI-099`、`type` 為 JSON 陣列 `["root"]`，除共通鍵與 `id`、`type` 外無其他鍵）；`W3`＝`attr`（`by` 為 `x`、`id` 為 `ATT-SI-098`、`type` 為 `root`、`obs` 為 `[["x"]]`、`items` 為 `[["DOC", "a.md"]]`、`root_cause` 為 `a/b`）；`W4`＝`attr.confirm`（`by` 為 `QA`、`att` 為 JSON 陣列 `["ATT-SI-001"]`）。四型皆使 `events.structure` 恰報 `(seq=2, EVENT-TYPE)`（R37）。夾具以 `ev(…)` 手寫，欄位值原樣寫入、不經任何型別檢查。
+- **`SC-SUSP-MIX`**（`AT-103-1-E-2`；`stop_after_bad` 為 2）：`RUN-SI-001` 與其研究事件在最前（同 `SC-SUSP`）；其後依情境逐個建 `PROP-SI-124`、`PROP-SI-125`（情境 (d) 另加 `PROP-SI-126`），每個 PROP 走 `prop`、`dec approve`、`app.sandbox`、`app.verify`（`PASS`）、`dec promote`、`app.promote`、`mea.open`、`mea.close`；各 `mea.close` 的 `result` 依 `AT-103-1-E-2` 所列的順序取值；不含 `run.close` 與 `dec resume`。
+- **`SC-STATUS-WIN`**（`AT-103-1-E-3`、`AT-140-2-E-2`；事件的 `t` 取 `T0` 加（`seq` 分鐘））：(1) `run.open` `RUN-SI-001`；(2) `research.skip`（`offline`）屬 `RUN-SI-001`；(3) `attr`（link，`from` 為 OBS 列 009、`reopens` 為 OBS 列 002，得 `ATT-SI-001`，`by` 為 `SA`）；(4) `attr.confirm` 為 `ATT-SI-001`（`by` 為 `QA`）；(5) `run.close` 為 `RUN-SI-001`（`no_event`）；(6) `run.open` `RUN-SI-002`；(7) `research.skip`（`offline`）屬 `RUN-SI-002`；(8) `attr`（link，`from` 為 OBS 列 010、`reopens` 為 OBS 列 006，得 `ATT-SI-002`，`by` 為 `SA`）；(9) `attr.confirm` 為 `ATT-SI-002`（`by` 為 `QA`）。缺陷帳本只含 §5.1 的 `D1`（不符合 (c)）。
+- **`SC-SCAN-EDGE`**（`AT-131-2-E-3`、`AT-140-2-E-2`）：事件帳本只有 `run.open`（`RUN-SI-001`）與 `run.close`（`no_event`），後者的 `t` 為錨點 `Ta`（現在減 1 日，秒精度、帶 offset）；缺陷帳本含 `D1`；基線與事件帳本先提交（提交時間為 §5.1 的固定時間）；其後兩個 commit：`K1` 於 `Ta` 提交（新增 `AutoClaude/x.py`）、`K2` 於 `Ta` 加 1 秒提交（新增 `AISDLC_SDD/z.md`）；以 `commit_all(R, …, when=<帶 offset 的 ISO 字串>)` 取得精確的 committer 時間。
 
 ### 5.3 迷你 PRD、patch 與本文建構器、記憶目錄、案例表
 
@@ -3241,7 +3703,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 
 ### 5.4 本機 HTTP 夾具、來源表與真檔案
 
-- **`serve(routes)`**：以標準庫 `http.server.ThreadingHTTPServer` 綁 `127.0.0.1`、連接埠 0（系統配），守護執行緒；回傳物件 `srv`：`srv.url(path)`、`srv.port`、`srv.requests`（每筆含 `path` 與全小寫鍵的 `headers`）、`srv.max_inflight`（同時在途請求的最大值）、`srv.arrived(path)`（請求到達時被設定的 `threading.Event`）、`srv.close()`（測試結束必關）。`routes` 的值為〔狀態碼, 標頭 dict, 本文位元組〕，另可帶 `delay`（秒）或 `hold`（等待測試放行的 `threading.Event`）；重導向路由為狀態 302 加 `Location`。
+- **`serve(routes)`**：以標準庫 `http.server.ThreadingHTTPServer` 綁 `127.0.0.1`、連接埠 0（系統配），守護執行緒；回傳物件 `srv`：`srv.url(path)`、`srv.port`、`srv.requests`（每筆含 `path` 與全小寫鍵的 `headers`）、`srv.max_inflight`（同時在途請求的最大值）、`srv.arrived(path)`（請求到達時被設定的 `threading.Event`）、`srv.close()`（測試結束必關）。`routes` 的值為〔狀態碼, 標頭 dict, 本文位元組〕，另可帶 `delay`（秒）或 `hold`（等待測試放行的 `threading.Event`），兩者都在送出狀態列**之前**等待；另可帶 `drip`（秒數：送完狀態列與標頭後，每隔該秒數送出本文的 1 個位元組，直到本文送完、連線中斷或 `srv.close()`）或 `stall`（`threading.Event`：送完狀態列與標頭後不送本文，直到該 Event 被設定、連線中斷或 `srv.close()`）——這兩個選項供 R58 (d) 的牆鐘強制點負控使用（`Content-Length` 取路由標頭或本文長度，故路由本文須長於逾時內可滴完的量）；重導向路由為狀態 302 加 `Location`。
 - **`write_table(R, srv, entries, *, retired=(), commit=True)`**：把來源表寫到協定目錄並（`commit` 為真時）提交；`entries` 的每個元素為〔`id`, 路由路徑〕，`url` 取 `srv.url(路徑)`、`kind` 為 `docs`、`extract` 為 `讀標題`、`added_by` 為 `夾具`；`retired` 內的 `id` 加 `"retired": true`；`sources` 依 `id` 位元組序排序。表檔為 UTF-8 無 BOM、LF、結尾換行。
 - **`relaxed()`**：context manager，以 `mock.patch.object(sources, "DEFAULT_POLICY", sources.Policy(allow_http=True, allow_loopback=True))` 暫時放寬政策（`research --fetch` 的 in-process 呼叫須在其內進行）。
 - **真檔案（唯讀，測試不得修改）**：`docs/06_quality/SelfImproving_Protocol/params.json`、`metrics.md`、`research_sources.json`、`docs/05_development/SelfImproving_Operations_SOP.md`、`docs/01_requirements/SelfImproving_PRD.md`、`docs/02_architecture/Root_Layout_and_Module_Placement.md`、根 `CLAUDE.md`、`.claude/settings.json`、`tools/selfimproving.py`、`tools/lib/selfimproving/*.py`、`AISDLC_SDD/scripts/sdd_version.py`、`AutoClaude/autoclaude/**`、`AutoClaude/CLAUDE.md`、`AutoClaude/tests/core/test_kernel_unhandled_mutation_failloud_r85.py`。測試以 `Path(__file__).resolve().parents[2]` 為 repo 根（鍵 B 的檔以 `parents[2]` 為 `AutoClaude/`、其上一層為 monorepo 根）。**測試不讀真帳本、真事件帳本與真提案目錄。**
@@ -3279,74 +3741,74 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | US-101～US-109 → 本檔 54 個 AC | ☑ 已映射（FRD-lite） |
 | PRD 的 44 個 P1 AC（鍵 A 41 個、鍵 B 3 個）→ 本檔 `AC-102-1`～`AC-134-4` 與 `AC-128-1`～`AC-128-3` | ☑ 已映射（編號規則見 FRD-lite 與 §7.1 ⚖ 1） |
 | 本檔自增的 10 個 AC（`AC-140-1`、`AC-140-2`、`AC-141-1`、`AC-141-2`、`AC-142-1`、`AC-142-2`、`AC-143-1`、`AC-144-1`、`AC-145-1`、`AC-145-2`）→ AT | ☑ 已映射 |
-| 本檔 AC（54 個）→ AT（126 個：正控 57、負控 69） | ☑ 已映射（本檔 §1，覆蓋率 100%；每個 AC 至少一個正控與一個負控） |
+| 本檔 AC（54 個）→ AT（148 個：正控 58、負控 90） | ☑ 已映射（本檔 §1，覆蓋率 100%；每個 AC 至少一個正控與一個負控） |
 | PRD §8.1 P1 出口 (a) 真實觀察端到端走到提案卡，且至少一筆屬 M／P／R／D 類 → AT-103-2-1、AT-106-1-1、AT-108-1-1、AT-114-1-1、AT-144-1-1 與實跑檢核 V8 | ☑ |
 | PRD §8.1 P1 出口 (b) 零提案觸及正式面 → AT-107-1-1、AT-108-1-1、AT-108-3-1 與實跑檢核 V8、V9 | ☑ |
-| PRD §8.1 P1 出口 (c) 卡面不清的退回為零 → AT-114-1-1、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1 與實跑檢核 V8 | ☑ |
-| PRD §8.1 P1 出口 (d) FR-SI-28 的可重跑檢查存在且綠 → AT-128-1-1、AT-128-1-E-1～E-4、AT-128-2-1、AT-128-2-E-1、AT-128-3-1、AT-128-3-E-1 | ☑ |
+| PRD §8.1 P1 出口 (c) 卡面不清的退回為零 → AT-114-1-1、AT-114-1-2、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1 與實跑檢核 V8 | ☑ |
+| PRD §8.1 P1 出口 (d) FR-SI-28 的可重跑檢查存在且綠 → AT-128-1-1、AT-128-1-E-1～E-4、AT-128-2-1、AT-128-2-E-1、AT-128-2-E-2、AT-128-3-1、AT-128-3-E-1 | ☑ |
 | PRD §8.1 P1 出口 (e) 每個有 `prop` 的運轉都有研究事件 → AT-130-1-1、AT-130-1-E-1、AT-110-1-E-1 | ☑ |
 | PRD §8.1 P1 出口 (f) 至少一次體檢子代理交卷入帳 ≥1 列（真實） → AT-131-5-1、AT-131-5-E-1（任務書與前後對照）與實跑檢核 V8 | ☑ |
-| PRD §8.1 P1 出口 (g) 落點鎖存在且綠 → AT-134-1-1～AT-134-4-E-1（共 8 個） | ☑ |
-| PRD §8.1 P1 出口 (h) `si export` 存在且 AC-SI-32-5 綠 → AT-132-5-1、AT-132-5-E-1、AT-132-5-E-2、AT-140-2-1、AT-140-2-E-1 | ☑ |
+| PRD §8.1 P1 出口 (g) 落點鎖存在且綠 → AT-134-1-1～AT-134-4-E-1（共 9 個，含 AT-134-3-E-2） | ☑ |
+| PRD §8.1 P1 出口 (h) `si export` 存在且 AC-SI-32-5 綠 → AT-132-5-1、AT-132-5-E-1、AT-132-5-E-2、AT-132-5-E-3、AT-140-2-1、AT-140-2-E-1、AT-140-2-E-2 | ☑ |
 | AT → CI Pipeline | □ 未整合（測試檔入庫後由根層 unittest 閘門一併執行；鍵 B 走 autoclaude-ci；根層重釘由主控收尾） |
 
 **R 規則覆蓋表**（R27～R67 各至少由一個 AT 引用；本表由 §2 各 AT 的標頭與本文所引用的 R 編號自動產生，不手工維護；R1～R26 屬 P0、由 P0 的 42 個 AT 覆蓋，P1 對其的重定見 R36、R63、R64、R67）：
 
 | 規則 | 主題 | 引用該規則的 AT |
 |------|------|-----------------|
-| R27 | 動詞、旗標與 rc 表 | AT-110-3-E-1、AT-140-1-1、AT-140-1-E-1、AT-107-1-E-1、AT-111-1-E-1 |
-| R28 | 成功、拒收與草稿列的輸出文法 | AT-110-3-E-1、AT-140-1-E-1、AT-108-1-E-1 |
-| R29 | 路徑常數、家目錄與 params 依賴 | AT-141-2-E-1、AT-145-1-E-1、AT-130-5-E-1 |
+| R27 | 動詞、旗標與 rc 表 | AT-110-3-E-1、AT-140-1-1、AT-140-1-E-1、AT-107-1-E-1、AT-111-1-E-1、AT-140-1-E-2 |
+| R28 | 成功、拒收與草稿列的輸出文法 | AT-110-3-E-1、AT-140-1-E-1、AT-108-1-E-1、AT-140-1-E-3、AT-140-2-E-2 |
+| R29 | 路徑常數、家目錄與 params 依賴 | AT-141-2-E-1、AT-145-1-E-1、AT-130-5-E-1、AT-141-2-E-3 |
 | R30 | 事件行規約 | AT-141-1-1、AT-141-1-E-1 |
-| R31 | 事件欄位表 | AT-141-1-1、AT-108-1-1 |
-| R32 | 配號 | AT-141-1-1、AT-141-1-E-1 |
-| R33 | 寫入鎖與鎖內判定 | AT-141-2-1、AT-141-2-E-1、AT-144-1-E-1 |
+| R31 | 事件欄位表 | AT-141-1-1、AT-108-1-1、AT-108-4-E-4 |
+| R32 | 配號 | AT-141-1-1、AT-141-1-E-1、AT-141-1-E-2 |
+| R33 | 寫入鎖與鎖內判定 | AT-141-2-1、AT-141-2-E-1、AT-144-1-E-1、AT-141-1-E-2、AT-141-2-E-2 |
 | R34 | PROP 狀態折疊表 | AT-108-4-1、AT-108-2-1 |
-| R35 | 運轉、SUSPENDED 與冷卻折疊 | AT-110-1-E-1、AT-103-1-E-1 |
+| R35 | 運轉、SUSPENDED 與冷卻折疊 | AT-110-1-E-1、AT-103-1-E-1、AT-103-1-E-2 |
 | R36 | 追加項總則 | AT-142-1-1、AT-142-1-E-1、AT-142-2-1、AT-142-2-E-1、AT-143-1-E-2 |
-| R37 | `events.structure` | AT-105-2-E-1、AT-108-4-E-2 |
-| R38 | `events.transitions` | AT-106-1-E-1、AT-108-4-1、AT-108-4-E-2 |
+| R37 | `events.structure` | AT-105-2-E-1、AT-108-4-E-2、AT-108-4-E-3、AT-108-4-E-4、AT-140-1-E-2 |
+| R38 | `events.transitions` | AT-106-1-E-1、AT-108-4-1、AT-108-4-E-2、AT-108-4-E-3、AT-108-4-E-5 |
 | R39 | `events.mutated` | AT-108-4-E-1 |
 | R40 | `events.vacuity` | AT-108-4-E-2 |
 | R41 | `events.prop_files` | AT-142-1-E-1、AT-144-1-1 |
-| R42 | `events.research` | AT-130-1-1、AT-130-2-1、AT-130-2-E-2 |
+| R42 | `events.research` | AT-130-1-1、AT-130-2-1、AT-130-2-E-2、AT-108-4-E-5、AT-130-2-E-4 |
 | R43 | `research.sources` 與來源表檔格式 | AT-142-1-E-1、AT-145-1-1、AT-130-2-1、AT-130-2-E-1 |
 | R44 | 標記欄擴充 | AT-142-1-E-2、AT-130-4-1、AT-130-4-E-1 |
 | R45 | 復發候選提示 | AT-106-2-E-2、AT-131-2-E-2 |
 | R46 | `params.json` 新鍵、指紋排除與判準版本 | AT-142-1-1、AT-145-1-1、AT-145-1-E-1、AT-130-6-1、AT-130-6-E-1 |
 | R47 | `run-open`／`run-close` | AT-110-3-1、AT-110-3-E-1、AT-103-2-1、AT-103-2-E-1 |
 | R48 | `attr`／`attr-confirm`／`attr-reject` | AT-105-1-1、AT-105-1-E-1、AT-105-2-1、AT-105-2-E-1、AT-106-1-1、AT-106-1-E-1、AT-106-2-1、AT-106-2-E-1 |
-| R49 | `prop-new`／`prop-revise` 流程 | AT-107-3-E-2、AT-108-1-1、AT-108-1-E-1、AT-108-2-1、AT-108-2-E-1、AT-114-3-E-1 |
+| R49 | `prop-new`／`prop-revise` 流程 | AT-107-3-E-2、AT-108-1-1、AT-108-1-E-1、AT-108-2-1、AT-108-2-E-1、AT-114-3-E-1、AT-107-3-E-4 |
 | R50 | `rN.md` 形態 | AT-109-1-1、AT-109-1-E-1、AT-109-3-1、AT-109-3-E-1、AT-110-2-1、AT-110-2-E-1 |
-| R51 | `touched` 導出與別名形態拒收 | AT-107-3-1、AT-107-3-E-2 |
+| R51 | `touched` 導出與別名形態拒收 | AT-107-3-1、AT-107-3-E-2、AT-107-3-E-4 |
 | R52 | 不可進化面、合法根、規格本體路徑與 `route`／`cls` 判定 | AT-107-1-1、AT-107-1-E-1、AT-107-3-E-1、AT-107-3-E-3、AT-108-3-1、AT-108-3-E-1、AT-111-1-1、AT-111-1-E-1 |
 | R53 | 前置檢查：來源、運轉、研究事件、預算、SUSPENDED、同型、修訂 | AT-102-1-1、AT-102-1-E-1、AT-110-1-1、AT-110-1-E-1、AT-130-1-1、AT-130-4-1、AT-130-4-E-1 |
 | R54 | 觸及比例、新增條目、歸檔型豁免與 M 類 pre-image | AT-109-2-1、AT-109-2-E-1、AT-109-3-1 |
 | R55 | digest 與內容檔落地 | AT-108-1-1、AT-144-1-1、AT-144-1-E-1 |
-| R56 | `card` | AT-110-2-1、AT-114-1-1、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1、AT-140-2-1 |
-| R57 | `research` 通則與 `--skip` | AT-130-1-1、AT-130-1-E-1、AT-130-2-1、AT-130-2-E-1、AT-130-3-E-1、AT-130-3-E-2、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1 |
-| R58 | 抓取行為與事件 | AT-130-2-E-3、AT-130-3-1、AT-130-3-E-1、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1 |
-| R59 | `scan` | AT-131-1-1、AT-131-1-E-1、AT-131-2-1、AT-131-2-E-1、AT-131-2-E-2、AT-131-3-1、AT-131-3-E-1、AT-131-4-1、AT-131-4-E-1、AT-140-2-1 |
-| R60 | `status` | AT-103-1-1、AT-103-1-E-1、AT-140-2-1 |
-| R61 | `export` | AT-132-5-1、AT-132-5-E-1、AT-132-5-E-2、AT-140-2-1、AT-140-2-E-1 |
-| R62 | 落點鎖 `tools/tests/test_root_module_layout.py` | AT-134-1-1、AT-134-1-E-1、AT-134-2-1、AT-134-2-E-1、AT-134-3-1、AT-134-3-E-1、AT-134-4-1、AT-134-4-E-1 |
+| R56 | `card` | AT-110-2-1、AT-114-1-1、AT-114-1-E-1、AT-114-2-1、AT-114-2-E-1、AT-114-3-1、AT-114-3-E-1、AT-140-2-1、AT-114-1-2、AT-140-2-E-2 |
+| R57 | `research` 通則與 `--skip` | AT-130-1-1、AT-130-1-E-1、AT-130-2-1、AT-130-2-E-1、AT-130-3-E-1、AT-130-3-E-2、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-4 |
+| R58 | 抓取行為與事件 | AT-130-2-E-3、AT-130-3-1、AT-130-3-E-1、AT-130-3-E-3、AT-130-5-1、AT-130-5-E-1、AT-130-3-E-5、AT-130-5-E-2 |
+| R59 | `scan` | AT-131-1-1、AT-131-1-E-1、AT-131-2-1、AT-131-2-E-1、AT-131-2-E-2、AT-131-3-1、AT-131-3-E-1、AT-131-4-1、AT-131-4-E-1、AT-140-2-1、AT-131-2-E-3、AT-140-2-E-2 |
+| R60 | `status` | AT-103-1-1、AT-103-1-E-1、AT-140-2-1、AT-103-1-E-2、AT-103-1-E-3、AT-140-2-E-2 |
+| R61 | `export` | AT-132-5-1、AT-132-5-E-1、AT-132-5-E-2、AT-140-2-1、AT-140-2-E-1、AT-132-5-E-3、AT-140-2-E-2 |
+| R62 | 落點鎖 `tools/tests/test_root_module_layout.py` | AT-134-1-1、AT-134-1-E-1、AT-134-2-1、AT-134-2-E-1、AT-134-3-1、AT-134-3-E-1、AT-134-4-1、AT-134-4-E-1、AT-134-3-E-2 |
 | R63 | 能力登記與純度 | AT-131-1-1、AT-143-1-1、AT-143-1-E-1、AT-143-1-E-2 |
 | R64 | 常駐機制禁字樣 | AT-143-1-E-2 |
-| R65 | Operations SOP 定稿 | AT-145-2-1、AT-145-2-E-1、AT-107-2-1、AT-107-2-E-1、AT-111-2-1、AT-111-2-E-1、AT-109-1-2、AT-110-2-2、AT-130-4-2、AT-131-5-1、AT-131-5-E-1 |
-| R66 | 鍵 B：「演化只提案不套用」可重跑檢查 | AT-128-1-1、AT-128-1-E-1、AT-128-1-E-2、AT-128-1-E-3、AT-128-1-E-4、AT-128-2-1、AT-128-2-E-1、AT-128-3-1、AT-128-3-E-1 |
+| R65 | Operations SOP 定稿 | AT-145-2-1、AT-145-2-E-1、AT-107-2-1、AT-107-2-E-1、AT-111-2-1、AT-111-2-E-1、AT-109-1-2、AT-110-2-2、AT-130-4-2、AT-131-5-1、AT-131-5-E-1、AT-145-2-E-2 |
+| R66 | 鍵 B：「演化只提案不套用」可重跑檢查 | AT-128-1-1、AT-128-1-E-1、AT-128-1-E-2、AT-128-1-E-3、AT-128-1-E-4、AT-128-2-1、AT-128-2-E-1、AT-128-3-1、AT-128-3-E-1、AT-128-2-E-2 |
 | R67 | 既有 P0 測試與鎖的連動同步 | AT-142-2-E-1 |
 
 ---
 
 ## 7. 本檔採用的預設裁決與開放問題（掌舵者可推翻；推翻走 T1 或本檔修訂，凍結前由主控回報掌舵者）
 
-### 7.1 開放問題與預設（⚖ 1～⚖ 25）
+### 7.1 開放問題與預設（⚖ 1～⚖ 29）
 
 | 編號 | 問題（PRD 內部矛盾或不可測處） | 本檔已採用的預設 | 替代與再開症狀 |
 |------|--------------------------------|------------------|----------------|
 | ⚖ 1 | AC 編號：PRD 的 `AC-SI-NN-Y` 與 PRD §5〈編號注意〉的 `AC-P1-001-1` 皆含字母，不合 ADR-XPLAT-016 §8.1 的 `AC-[\d\-]+`；任務書要求自 `AC-033` 起編自增 AC，與 PRD 的 `AC-SI-33-x`（P2b）、`AC-SI-34-x`（FR-SI-34）同號 | 百位 `1` 承載階段前綴：`AC-SI-NN-Y`＝`AC-1NN-Y`；自增 AC 自 FR 號位 40 起（`AC-140-1`…）；任務書與 PRD 不一致以 PRD 為準 | 替代：保留 PRD 全名並加編譯前置轉換（框架改動）。再開症狀：`sdd_compile` 對本檔回報 `unmapped_at_ids` 非空，或 RTM 對不上 PRD AC。建議：PRD 下次修訂把 AC 編號文法與 ADR-XPLAT-016 §8.1 對齊 |
 | ⚖ 2 | `ref.carrier_families` 語意：P1 起事件帳本與提案內容檔已建立，P0 的「載體尚未建立」NE 對 `RUN-SI`、`ATT-SI`、`PROP-SI` 提及仍會印出（P0 R18 (d) 字面） | 不變：仍印 nonblocking NE（R36 (h)）；不影響 rc | 替代：P1 起依事件帳本與提案目錄現況判該家族載體已建立而 PASS。再開症狀：掌舵者或 QA 把「帳本已建立而仍印未判」讀成假訊號。建議：P1 修訂時把判準改為對三個已建立的家族查事件帳本 |
-| ⚖ 3 | PRD AC-SI-08-4 ⑤（`dec` 引言回查）屬 P2、P1 要求印 NOT-EVALUABLE，但未說印在哪一項、用哪個碼 | 印在 `events.transitions`，nonblocking NE，碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`（R38），單一 finding | 替代：新增第 29 個判定項。再開症狀：P2 落地時引言回查找不到掛接點 |
+| ⚖ 3 | PRD AC-SI-08-4 ⑤（`dec` 引言回查）屬 P2、P1 要求印 NOT-EVALUABLE（未建），但未說印在哪一項、用哪個碼、什麼層級 | 印在 `events.transitions`，warn 層級 finding（項目狀態不變、不影響 rc），碼 `QUOTE-VERIFIER-NOT-ESTABLISHED`（R38），單一 finding；`helmsman` 免掃同形（R42 (d)）。原採 nonblocking NE，與 AT 要求的 `PASS` 不能並存，SCG-4 一審 §F ① 裁定採納實作 | 替代：新增第 29 個判定項。再開症狀：P2 落地時引言回查找不到掛接點 |
 | ⚖ 4 | PRD §9.3 只給 `check`／`status`／`research`／`scan`／`export` 與 `prop-new --patch-file` 的旗標，未給其餘旗標、成功與拒收輸出文法、OBS 草稿列欄位細節、卡面逐行格式（只有 §7.3 線框）；AC-SI-14-3 的「每項單行且寬度 ≤ CARD_LINE_MAX」未說標題行（第 1 行，含目標路徑）算不算一項 | R27、R28、R56 的定義（本檔類推）；拒收碼表見判定碼表；標題行不受寬度限制、第 2～5 行與路徑行受限（R56 (b)）——標題行若受限，`R` 類（目標路徑逾 50 個字元，標題行除目標外已佔約 65 欄）與轉交卡（標題行再多 22 欄）幾乎必然超限 | 替代：掌舵者逐項裁決。再開症狀：SOP 角色任務書或 Console 需要不同旗標名或輸出行文法，或掌舵者要求標題行也限寬（則 `R` 類與轉交卡須改以縮寫座標顯示目標）。建議：PRD AC-SI-14-3 明寫哪幾行受寬度限制 |
 | ⚖ 5 | PRD AC-SI-09-2 只給門檻與歸檔型豁免，未定義觸及比例的分子分母、新增條目的樣式，以及歸檔型下歸檔檔新增行是否計入條目 | R54：比例＝被刪行數總和÷被觸及既有檔在 base 的總行數；條目＝符合清單、編號、標題樣式的新增行加新檔個數；歸檔型只計索引檔新增的指標行 | 替代：以行數差、字元數或 token 估算。再開症狀：合法的小改被擋或大改被放行，被掌舵者回報 |
 | ⚖ 6 | PRD 要求提案帶結果標籤與適用範圍、每提案宣告預算、一個動作的回滾配方、M 類四欄，但未給 `rN.md` 的欄位名與載體 | R50：`## 欄位` 節的 Markdown 表，鍵為 `symptom`、`risk`、`rollback`、`retire_when`、`reopen_symptom`、`budget`、`verify_plan`、`result_label`、`scope`、`source_obs` | 替代：改用 YAML frontmatter。再開症狀：提案者子代理反覆寫錯格式、被拒收率高 |
@@ -3362,13 +3824,17 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | ⚖ 16 | PRD 對 `rN.patch` 的雜湊口徑說法不一：digest 段寫 CRLF 正規化，AC-SI-07-3 要求 patch 以位元組導出路徑 | `.patch` 以原位元組存檔與雜湊（不做 CRLF 正規化）；`.md` 與來源表先換 LF（R41、R55）；`AT-142-1-E-1` 的 (e)(f) 釘住 | 替代：patch 也先換 LF。再開症狀：Windows 工作樹的 autocrlf 改變 `.patch` 位元組、使 `PROP-PATCH-SHA-MISMATCH` 假紅 |
 | ⚖ 17 | PRD 寫「`row.provenance`／`row.markers` 加碼」，未指三個新碼各屬哪一項；AC-SI-06-2 的「新列」與已結列未定義 | R44（`RESEARCHER-*` 屬 `row.provenance`、`SRC-UNKNOWN` 屬 `row.markers`）、R45（新列＝工作樹有而 HEAD 無、處置首詞 `open`、無 `reopens` 標記；已結列的定義；候選為 warn，不影響 rc） | 替代：另設獨立判定項。再開症狀：候選提示對 DEF 列的精準度過低（DEF 列無分類欄，只比路徑；未量） |
 | ⚖ 18 | 測試檔清單：任務書列 5 個測試檔；本檔另增 `test_selfimproving_capability.py`（PRD §9.4 判準的承載面）與共用夾具模組 | 7 個測試檔（含鍵 B）加夾具模組（§5.6） | 替代：併入 `events`。再開症狀：新增測試檔的重釘稅超出預期（NFR-P1-9） |
-| ⚖ 19 | 任務書估 AT 60～90 條，同時要求每條 PRD AC 至少一正控一負控；PRD 有 44 條 AC、本檔自增 10 條，下限即 108 條 | 以覆蓋規則為準：126 條（正控 57、負控 69）；每個 AC 皆有至少一個負控（流程型 AC 的負控＝SOP 片段刪去自證） | 替代：把部分 AC 的負向變體併入正控（P0 體例）。再開症狀：實作量或 CI 時間超出預期 |
+| ⚖ 19 | 任務書估 AT 60～90 條，同時要求每條 PRD AC 至少一正控一負控；PRD 有 44 條 AC、本檔自增 10 條，下限即 108 條 | 以覆蓋規則為準：原 126 條（正控 57、負控 69），SCG-4 一審後補測至 148 條（正控 58、負控 90）；每個 AC 皆有至少一個負控（流程型 AC 的負控＝SOP 片段刪去自證） | 替代：把部分 AC 的負向變體併入正控（P0 體例）。再開症狀：實作量或 CI 時間超出預期 |
 | ⚖ 20 | PRD 只命名模組，未命名測試需要的函式與物件 | 本檔補定義：`evwrite.append_event`、`evwrite.PAUSE_HOOK`、`evwrite.LOCK_TIMEOUT_SECONDS`、`evwrite.LOCK_STALE_SECONDS`（R33）；`sources.validate_table`、`sources.Policy`、`sources.DEFAULT_POLICY`（R43）；`fetch.fetch_source`、`fetch.check_redirect`（R58）；`scan.bucket_of`（R59 (d)）；`git.apply_numstat`（R51 (b)）；`defs.classify_status`、`defs.load_ledger_status`（R45 (ii)） | 替代：Developer 另名並回寫本檔。再開症狀：實作與本檔的介面名不一致 |
 | ⚖ 21 | PRD ADR-SI-10 併發負控 ① 寫「雙行程」加「測試鉤子」；鉤子須在同一行程內設定 | 以雙執行緒做確定性交錯（`AT-141-2-1` 情境一、二），跨行程由 8 行程×10 筆壓力承擔（情境三） | 替代：以環境變數驅動子行程內的鉤子（需在生產碼加讀環境變數的分支，與不新增守衛碼精神相左）。再開症狀：跨行程的交錯只靠壓力測試覆蓋而漏判 |
 | ⚖ 22 | 流程型 AC（AC-SI-07-2、09-1 的語意半、10-2 的零遞迴、11-2、30-4 ①②、31-5、08-3 的不得阻塞 SCG）無機械物，PRD 已標邊界型 P | 以 SOP 條文片段的存在判準代位（R65），語意由實跑檢核 V7 對照 PRD；每個代位 AT 含刪去自證 | 再開症狀：SOP 措辭微調使 AT 反覆轉紅（P0 預審 F-11 同型） |
-| ⚖ 23 | `status` 的 `friction_reconcile` measured 分支依賴逐字稿格式 | AT 只驗 NOT-EVALUABLE 分支（`AT-103-1-1`）；measured 分支由實跑檢核 V8 驗 | 再開症狀：掌舵者回報對帳數字與真實不符 |
+| ⚖ 23 | `status` 的 `friction_reconcile` measured 分支依賴逐字稿格式 | P1 不實作 measured 分支（§4〈刻意不做〉）；AT 驗兩種 NOT-EVALUABLE 原因（`AT-103-1-1` 驗 `transcript-unavailable`、`AT-103-1-E-3` 驗 `transcript-parser-not-established`），V8 於真逐字稿環境對照原因 | 再開症狀：掌舵者回報對帳數字與真實不符 |
 | ⚖ 24 | 鍵 B 第 ⑤ 格依賴主控改寫 `AutoClaude/CLAUDE.md`：改述前 `AT-128-1-1` 為紅 | 改述與測試同輪落地（PRD AC-SI-28-2、D13；§1 的交付順序） | 替代：⑤ 先標 expected failure（違反 NFR-P1-4 不新增 xfail）。再開症狀：鍵 B 測試先於改述入庫而使 autoclaude-ci 紅 |
 | ⚖ 25 | 讀不出 `maturity` 的既有 `R-*.yaml` 是否算命中不可進化面：PRD 只寫「既有且 `maturity: active` 者」 | 讀不出視同命中（fail-closed，R52 (d)；`AT-107-3-E-3` 的 `R-9.3.yaml`） | 替代：視為不命中。再開症狀：規則檔格式演進使合法提案被轉交 |
+| ⚖ 26 | SCG-4 一審 F-02：R37 要求型別不合 ⇒ `EVENT-TYPE`，`fold` 檔頭要求絕不拋例外，但本檔未定義型別怪異的事件在折疊與各動詞中的處置——實作對陣列型欄位值（`reason`、`type`、`obs`、`att`）拋 `TypeError`，`check`、`status`、`export` 與多數寫入動詞整體崩潰 | R37 末段新增讀取側防禦：折疊只納入通過單事件判準的事件，未通過者對折疊沒有貢獻、其問題只由 `events.structure` 報；查表前先確認型別；怪異事件不算研究事件、不被折疊成運轉、ATT 或 PROP（`AT-108-4-E-3`、`AT-140-1-E-2`） | 替代：怪異事件仍納入折疊而各查表處各自防禦（規則會分歧）；或帳本含結構問題時寫入動詞一律拒寫（要新增拒收碼，行為面更大）。再開症狀：怪異事件被忽略使流程重複或漏做（例：某運轉的唯一研究事件是怪異事件），而 `check` 的 `EVENT-TYPE` 提醒被忽略；掌舵者要求結構問題時寫入動詞拒寫；或 Console 需要在 `export` 的 `problems` 看到型別怪異的事件（P1 只在 `check` 報） |
+| ⚖ 27 | SCG-4 一審 F-12：R51 (b) 只寫 git 看到的路徑須在聯集內，未定義 `git apply --numstat` 自身失敗（損毀 hunk、context-diff）；實作把失敗吞成空集合（fail-open），且自寫解析器對 context-diff 導出垃圾路徑 | 失敗 ⇒ 拒收 `PATCH-PARSE`（R51 (b)、R49 (b)；`AT-107-3-E-4`） | 替代：失敗時改信自寫解析器（fail-open，與寧多勿漏的精神相左）。再開症狀：合法的 patch 因 git 版本差異被 `numstat` 拒收而大量 `PATCH-PARSE` |
+| ⚖ 28 | SCG-4 一審 F-08 (f)：R29 要求家目錄不可寫 ⇒ rc 3，但「目錄存在而寫不進」在 Windows 與 POSIX 沒有共通的測試法（唯讀權限語意不同） | R29 規定可寫性探測檔名 `.probe-<行程號>`，AT 以同名目錄在兩平台一致地使建檔失敗（`AT-141-2-E-3`） | 替代：AT 於 POSIX 用 `chmod`、於 Windows 用 ACL（需平台分支，違反 NFR-P1-3）。再開症狀：探測檔改名而該 AT 不再能製造失敗 |
+| ⚖ 29 | 判定指令形態：原 126 個 AT 只帶 `-k <底線形> -q`；鍵 B 指令在本機 PG 在場時 rc=4（SCG-4 一審 §F ⑤） | 新增 AT 的根層指令另加 `-p no:xdist -o addopts=`；鍵 B 全部（含既有九個）加 `-n 0`（`-p no:xdist` 不能與 `-n` 並用，實測 `unrecognized arguments`）；既有根層指令不改（實測可單跑） | 替代：把既有 117 個根層指令一併補旗標（機械改寫、無行為差）。再開症狀：根層出現全域 xdist 設定而使單一 AT 的 `-k` 指令行為不同 |
 
 ### 7.2 預審登記
 
@@ -3376,7 +3842,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 
 | 編號 | 預審所述 | 本檔處置 | 再開症狀 |
 |------|----------|----------|----------|
-| （空） | | | |
+| SCG-4 一審（FAIL；P1／P2／P3／P4＝0／8／6／8） | 報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md` 的 F-01～F-22 與 §K 的八項勘誤建議 | 見〈勘誤一〉：條文訂正、補條文與 22 個新 AT；碼修歸 Developer 修復棒、`F-13`、`F-19`、`F-20` 歸主控 | 二審 QA 重放存活突變清單仍有未被打紅者，或新 AT 的期望值與修復後的實作不符 |
 
 ---
 
@@ -3387,7 +3853,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | AC → AT 100% 映射 | 54 個 AC 無未映射者（§1） | □ |
 | AT 格式可自動化 | 使用 Given-When-Then 格式；每個 AT 有判定指令與驗收字樣；判定指令的 `-k` 字串等於 AT 底線形 | □ |
 | 負向測試覆蓋 | 每個 AC 有至少一個負向 AT（E 類；流程型 AC 的負向＝對 SOP 條文逐一刪去的副本須判不合格） | □ |
-| 邊界值測試 | 關鍵欄位有邊界值測試（事件行位元組恰等於與少 1、觸及比例恰 0.2、新增條目恰 3、歸檔 50 與 51、核心區 12 行與寬度 100、運轉預算第 4 個、修訂上限、事件數下限、匯出上限、抓取三界、重導向 5 與 6 跳） | □ |
+| 邊界值測試 | 關鍵欄位有邊界值測試（事件行位元組恰等於與少 1、觸及比例恰 0.2、新增條目恰 3、歸檔 50 與 51、核心區 12 行與寬度 100、運轉預算第 4 個、修訂上限、事件數下限、匯出上限、抓取三界、重導向 5 與 6 跳、check 層的事件行位元組 L 與 L－1、`note` 120 與 121、`http_status` 299 與 300、來源表提交時間與事件 `t` 同一秒、`scan` 起算時刻同一秒、`export` 筆數恰等於 `--limit`、慢滴回應的牆鐘） | □ |
 | 併發負控 | 無鎖對照組撞號、有鎖後者得加一、8 行程×10 筆、陳舊鎖回收、新鮮鎖逾時（AT-141-2-1、AT-141-2-E-1） | □ |
 | 純度與常駐機制 | 能力登記判準與其合成樹自證、動態載入面、零網路、14 個禁字樣樣本自證（AT-143-1-1、E-1、E-2） | □ |
 | 測試資料規格完整 | 資料來源明確定義（§5；情境表、案例表、夾具函式） | □ |
@@ -3400,11 +3866,11 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 | V1 | 範圍守衛 | `git diff --name-only <Developer 棒起點>..HEAD`；`git diff --stat -- .claude`；`git status --porcelain` | 只含 §5.6 的集合與主控收尾檔；`.claude/**`、PRD、研究方法 SOP、P0 TCS、`autoclaude/` 引擎原始碼無變動；真事件帳本與真 `SelfImproving_Proposals/` 不在 Developer 棒的 diff 內 |
 | V2 | 真 repo `check` | `python tools/selfimproving.py check --json`（讀 rc 先存變數）；貼 JSON | rc 0；`items` 為 28 項；`research.sources` 為 PASS；`events.*` 六項為 PASS 或 nonblocking NE；`ref.obs` 為 PASS（字面反例 ID 一律以文字描述，不得寫成 `ref.obs` 抓得到的字面編號）；牆鐘小於 30 秒（取 3 次最大值） |
 | V3 | P0 回歸與同步範圍 | `python -m pytest tools/tests/test_selfimproving_check.py -q -p no:xdist -o addopts=`（逐字貼末行）；`git diff -U0 -- tools/tests/test_selfimproving_check.py` | 「42 passed」（子測試數以實跑為準）；diff 的 hunk 只落在 R67 列出的五處站點 |
-| V4 | P1 新 AT 全套 | 對每個測試檔跑 `python -m pytest tools/tests/<檔> -q -p no:xdist -o addopts=`（六個）與鍵 B 的 `python -m pytest tests/contract/test_evolution_propose_only.py -q`（cwd＝`AutoClaude/`）；另對 §2 的每個 AT 以 `-k <底線形>` 各跑一次 | 全綠；每個 `-k` 至少收到一個測試且不誤收其他 AT；每個 AT 的驗收字樣已在交卷逐項列出 |
+| V4 | P1 新 AT 全套 | 對每個測試檔跑 `python -m pytest tools/tests/<檔> -q -p no:xdist -o addopts=`（六個）與鍵 B 的 `python -m pytest tests/contract/test_evolution_propose_only.py -q -n 0`（cwd＝`AutoClaude/`；`-n 0` 的原因見 NFR-P1-10 (1)）；另對 §2 的每個 AT 以 `-k <底線形>` 各跑一次 | 全綠；每個 `-k` 至少收到一個測試且不誤收其他 AT；每個 AT 的驗收字樣已在交卷逐項列出 |
 | V5 | 護欄與零退化 | `ruff check` 對新增與改動的每個 `.py`；`python AutoClaude/tools/check_loc_budget.py --json`；`python tools/sync_onboarding_baselines.py --check-snapshot`；`python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`）；`python tools/tests/test_adr_xplat001_c1c2_lock.py --print-guard-lines`（主控）；`tools/tests/test_defect_id_reference_integrity.py` | 皆 rc 0；護欄層重釘後淨差額 +0；根層全套 unittest 通過數以實跑為準；`git grep` 本檔與測試原始碼無不存在於真帳本的字面 `OBS-SI-<數字>` 或 `DEF-<數字>` |
 | V6 | params 與來源表初值 | 逐鍵對照 PRD C5 與 §5.1；讀 `research_sources.json` | `params.json` 的五個新鍵初值為 8、262144、20、1、500（PRD C5），合計 28 鍵；來源表 7 筆逐字對照 PRD 初始研究來源表；`check` 對兩者皆 PASS |
 | V7 | SOP 與流程型 AC | QA 逐項對照 PRD AC-SI-07-2、09-1、10-2、11-2、30-4 ①②、31-5 與 SOP 條文語意（不只關鍵字在）；Developer 與 QA 的文字交卷 | SOP 條文語意與 PRD 一致；Developer 棒與 QA 棒的交卷都含「流程摩擦」節，節內項目於 SCG-4 前已由主控入帳為 OBS 列，且 V2 仍為綠 |
-| V8 | P1 出口 (a)(f) 與 `friction_reconcile` 真實檢核（主控執行；非構造） | (a) 對真實觀察走完 `run-open`、`attr`、`prop-new`、`card`，貼 `card` 輸出與 `git status --porcelain`；(f) 派一次體檢子代理，貼其交卷與入帳列（附 sid 與 OBS 座標）；另在真逐字稿環境跑 `status --json` 看 `friction_reconcile` | (a) 至少一筆屬 M／P／R／D 類（PROP-SI-001、002 屬轉交，不能充當）；(b) 正式面逐字相同；(f) 入帳 ≥1 列，零候選＝無事件而 (f) 不達、不得以構造候選充當；`friction_reconcile` 為 measured 且與人工計數相符 |
+| V8 | P1 出口 (a)(f) 與 `friction_reconcile` 真實檢核（主控執行；非構造） | (a) 對真實觀察走完 `run-open`、`attr`、`prop-new`、`card`，貼 `card` 輸出與 `git status --porcelain`；(f) 派一次體檢子代理，貼其交卷與入帳列（附 sid 與 OBS 座標）；另在真逐字稿環境跑 `status --json` 看 `friction_reconcile` | (a) 至少一筆屬 M／P／R／D 類（PROP-SI-001、002 屬轉交，不能充當）；(b) 正式面逐字相同；(f) 入帳 ≥1 列，零候選＝無事件而 (f) 不達、不得以構造候選充當；`friction_reconcile` 為 NOT-EVALUABLE（P1：measured 分支屬 P2；真逐字稿環境下 `reason` 為 `transcript-parser-not-established`、目錄取不到時為 `transcript-unavailable`；不得印成 0 或 measured） |
 | V9 | 提案不觸及正式面 | 對 V8 的每筆 PROP：`git status --porcelain` 與 HEAD 前後對照 | 只多事件帳本與 `SelfImproving_Proposals/` 下的檔；正式面零變更 |
 | V10 | 首跑研究掃描（主控；掌舵者授權外聯後） | `python tools/selfimproving.py research --fetch --run <運轉>`（讀 rc 先存變數）；貼輸出 | 有成功來源則 rc 為 0 或 2 且事件已寫；失敗來源以 OBS 候選回報，來源失效經 T1 修表；不列為 AT（外網） |
 | V11 | 效能與 CI 時間 | 真 repo 上 `check` 三次取最大；新測試檔在 CI 上的單檔時間 | 真 repo `check` 小於 30 秒；每個新測試檔小於 300 秒（NFR-P1-2） |
@@ -3415,5 +3881,43 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
-（空）
+### 勘誤一（SCG-4 一審 FAIL 後的規格訂正；既有 AT 的 id 與判定碼名稱一字未改、一個 AT 也未刪）
+
+- **事由**：SCG-4 一審（報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P1-20261020.md`；判定 FAIL，P1／P2／P3／P4＝0／8／6／8）的 §F 五項 TCS 內部不一致裁定、§G 的 F-01～F-22 與 §K 的八項勘誤建議。本次由 SA 棒套用；實作面的修復（F-01、F-02、F-12、F-18、F-21、F-22 的碼修）由 Developer 修復棒依本檔進行。
+- **文字訂正（採納實作，條文對齊）**：
+  1. **判定碼層級**（§K 1、2；F-18）：`QUOTE-VERIFIER-NOT-ESTABLISHED` 是 `PASS` 項目上的 warn 層級 finding、不是 NE 碼——R36 (d)（nonblocking NE 碼集合由三個縮為兩個）、R38 末句、R42 (d)、判定碼表（`events.transitions` 列改 `PASS（warn finding；項目狀態不變）`，`events.research` 列拆成兩列）、§4〈刻意不做〉、FRD-lite 的 AC-108-4 列、§1 的 AC-108-4 三列與兩個 AT 描述列、`AT-108-4-1` 情境一至四（`SC-LEGAL` 含 `dec`，故情境一的 `F(events.transitions)` 恰為該提示、情境二至四先去掉它再判）、`AT-108-4-E-2`、`AT-130-1-E-1` 情境四、`AT-103-2-1` 註記、§7.1 ⚖ 3。
+  2. **R45**（§K 3）：先剝除符合 P0 R16 第八形態的反引號指令片段，再取 `path`／`file`／`dir` 三形態（否則每個草稿列都觸發復發候選提示）。
+  3. **R58 (c)**（§K 4；F-03）：scheme 不得改變（`http`↔`https` 皆拒）；`AT-130-2-E-3` 的函式層案例改為顯式同埠 URL 並加反向與同 scheme 同埠對照（原案例因預設埠遮住 scheme 判準，使該判準沒有任何測試鎖住）。
+  4. **鍵 B 指令**（§K 5）：九個鍵 B 判定指令、NFR-P1-10 (1) 與 V4 加 `-n 0`，§2 前言新增〈判定指令的形態〉。PRD 的 ADR-SI-07 漏列 `_TREE_FILE_FLOORS` 屬凍結的 PRD 文字，本檔 NFR-P1-8 已列名、不改，留 PRD 下次修訂。
+  5. **`friction_reconcile`**（§K 6；F-11）：R60 (c) 補第三種原因 `transcript-parser-not-established`，P1 恆為 NOT-EVALUABLE；V8、§7.1 ⚖ 23、§4〈刻意不做〉同步。
+  6. **R56 (a)**（§K 7；F-10）：`M` 類無 base 快照，觸及比例印 `n/a`，並補正控 `AT-114-1-2`。
+  7. **NFR-P1-10 (11)～(13)**（F-15；OBS-SI-160、OBS-SI-161、OBS-SI-164）：新增 `tools/tests/` 檔會撞的根層鎖逐項過；測試 class 與夾具 def 的 docstring 指名受測模組；`--print-guard-lines` 的所在。
+- **補條文（對應新增 AT，條文與 AT 同步）**：R37 讀取側防禦（F-02；折疊只納入通過單事件判準的事件）；R58 (d) 牆鐘強制點在每一次讀取（F-01）；R51 (b) 與 R49 (b) 的 `git apply --numstat` 失敗 ⇒ `PATCH-PARSE`（F-12）；R32 (c) 鎖內讀 OBS 帳本（F-21）；R29 可寫性探測檔名（F-08 (f)）；R62 (d) 片段判準（F-22）；R28 (d) 的 `k` 定義（F-08 (d)）；R42 (c) 等號放行（F-05）；R59 (b) 嚴格晚於（F-07）；R61 `truncated` 邊界（F-07）。
+- **資料規格**：§5.2 新增情境 `SC-WEIRD`、`SC-SUSP-MIX`、`SC-STATUS-WIN`、`SC-SCAN-EDGE`；§5.4 的 `serve` 路由新增選項 `drip`、`stall`。§7.1 新增 ⚖ 26～⚖ 29；§7.2 登記一審的處置。
+- **新增 22 個 AT（AC 總數仍為 54；括號內為所屬 AC、測試檔縮寫、`-k` 底線形）**：
+  - `AT-103-1-E-2`（AC-103-1；ES；`-k AT_103_1_E_2`）：SUSPENDED 的連續判準：兩窗只有一壞不暫停、連續兩壞才暫停、`pending` 窗不打斷連續
+  - `AT-103-1-E-3`（AC-103-1；ES；`-k AT_103_1_E_3`）：`pending_props` 含 `verified`；偵測窗以最近 `run.close` 為界、已處理者不重複偵測；`friction_reconcile` 兩種 NOT-EVALUABLE 原因
+  - `AT-107-3-E-4`（AC-107-3；PR；`-k AT_107_3_E_4`）：`git apply --numstat` 自身失敗（損毀 hunk、context-diff）⇒ 拒收 `PATCH-PARSE`，不放行
+  - `AT-108-4-E-3`（AC-108-4；EV；`-k AT_108_4_E_3`）：型別怪異的手寫事件（欄位值為陣列）恰報 `EVENT-TYPE`，`check` 其餘項目照常產出、不拋例外
+  - `AT-108-4-E-4`（AC-108-4；EV；`-k AT_108_4_E_4`）：事件欄位值域的 check 層負控：`note` 120／121、`http_status` 199～300、`research.skip` 的 `by`、`sid` 正規形、事件行位元組 L 與 L－1
+  - `AT-108-4-E-5`（AC-108-4；EV；`-k AT_108_4_E_5`）：引言回查未建的 warn 提示邊界：單一 `dec`、單一 `helmsman` 免掃即印，零筆不印；warn 不改狀態與 rc
+  - `AT-114-1-2`（AC-114-1；PR；`-k AT_114_1_2`）：`M` 類卡面（正控）：七行、觸及比例印 `n/a`、核心區不超限；`--json` 的 `parsed` 與文字形態一致
+  - `AT-128-2-E-2`（AC-128-2；KB；`-k AT_128_2_E_2`）：判準常數 `REWRITE_FRAGMENTS` 的獨立釘選：與 R66 的四個片段相等，改任一元素即紅
+  - `AT-130-2-E-4`（AC-130-2；RS；`-k AT_130_2_E_4`）：來源表提交時間與事件 `t` 同一秒放行、事件早一秒判 `SOURCES-SHA-MISMATCH`、晚一秒放行
+  - `AT-130-3-E-4`（AC-130-3；RS；`-k AT_130_3_E_4`）：全部來源失敗與現役為 0 筆皆以 `ZERO-SUCCESS` 拒收（rc 1、不寫事件；零現役時預檢零請求）
+  - `AT-130-3-E-5`（AC-130-3；RS；`-k AT_130_3_E_5`）：Content-Type 白名單逐一釘住：`text/*` 與五個 `application/*` 放行，其餘判 `non-text`
+  - `AT-130-5-E-2`（AC-130-5；RS；`-k AT_130_5_E_2`）：牆鐘上限對慢滴回應成立（每 0.5 秒 1 位元組）、送完標頭後停滯亦在逾時上限附近以 `timeout` 返回
+  - `AT-131-2-E-3`（AC-131-2；RS；`-k AT_131_2_E_3`）：`scan` 起算時刻的 commit 時間邊界：committer 時間等於起算時刻者不計入窗、晚一秒者計入
+  - `AT-132-5-E-3`（AC-132-5；ES；`-k AT_132_5_E_3`）：`truncated` 的邊界：筆數恰等於 `--limit` 不截斷、多一筆才截斷
+  - `AT-134-3-E-2`（AC-134-3；LY；`-k AT_134_3_E_2`）：套件登記以程式碼欄的反引號片段為準：片段之外的散文字串不算登記
+  - `AT-140-1-E-2`（AC-140-1；EV；`-k AT_140_1_E_2`）：帳本含型別怪異事件時，讀取與寫入動詞不拋未捕捉例外，rc 與輸出依既有規則；怪異事件不被折疊
+  - `AT-140-1-E-3`（AC-140-1；EV；`-k AT_140_1_E_3`）：OBS 草稿列的症狀至多顯示 5 個碼，超過尾接 `…等 k 項`；恰好 5 個不加尾綴
+  - `AT-140-2-E-2`（AC-140-2；ES；`-k AT_140_2_E_2`）：含中文的 `--json` 輸出為 UTF-8 原字、沒有 u 跳脫序列（`PYTHONIOENCODING=cp950` 管線下亦然）
+  - `AT-141-1-E-2`（AC-141-1；EV；`-k AT_141_1_E_2`）：PROP 配號的 OBS 帳本部分在寫入鎖內讀取：取鎖之前才出現的 PROP 引用不被漏算
+  - `AT-141-2-E-2`（AC-141-2；EV；`-k AT_141_2_E_2`）：鎖檔名為事件帳本 realpath 的 sha256 前 16 位 hex 加 `.lock`；持鎖期間存在、寫入完成後已釋放
+  - `AT-141-2-E-3`（AC-141-2；EV；`-k AT_141_2_E_3`）：家目錄與其 locks、research 皆存在但寫不進（可寫性探測失敗）⇒ 寫入動詞 rc 3 `HOME-UNWRITABLE`
+  - `AT-145-2-E-2`（AC-145-2；EV；`-k AT_145_2_E_2`）：SOP 判準常數的獨立釘選：`SAME_LINE_GROUPS` 與 `RESEARCH_EVENT_LINES` 和 R65 相等，改任一元素即紅
+- **數量**：AT 由 126 條增為 148 條（正控 57→58、負控 69→90）；各測試檔：EV 35→44、PR 36→38、RS 28→33、ES 7→11、CP 3、LY 8→9、KB 9→10。
+- **本檔未改的一審發現**：F-13（SSOT §3 列與第 72 行）、F-19（OBS 訂正列）、F-20（compat-ci 註解）屬主控自修項；F-16（近等價突變）與 F-17（URL 字串過濾的理論洞）為 P4 登記項（無暴露證據）。
+- **凍結紀錄**：Stage-2 原凍結 digest `sha256:d7555681d94c143b71d8a35050a08b4da99eaefa8ed7f3e1f400b54e1f32c92c` 保留為歷史；本次訂正使檔案內容改變，修訂後的 digest 由主控以 `spec-refreeze` 重記（FSM `SPEC_AUDIT` 路徑），不以手改狀態檔代替。增量追溯表的 PRD 與研究方法 SOP 凍結摘要未動（兩份上位文件本次皆未改）。
 
