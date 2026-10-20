@@ -1345,6 +1345,94 @@ class TestBudgetsAndFingerprint(ResearchCase):
         self.assertNotIn("Traceback", err)
         self.assertEqual(ledger_bytes(repo), before)
 
+    def test_AT_130_2_E_8_non_ascii_targets_and_initial_urls_are_network(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：非 ASCII 的下一跳與初始 URL 歸 network。"""
+
+        def loc(value: bytes):
+            head = b"HTTP/1.0 302 Found\r\nLocation: " + value + b"\r\nContent-Length: 0\r\n\r\n"
+            return (302, {}, b"", {"raw": lambda: [(head, 0)]})
+
+        routes = {
+            "/n0": loc(b"/ok"), "/n1": loc("/文件".encode()), "/n2": loc("/é".encode()),
+            "/n3": loc("/x?q=文".encode()), "/n4": loc(b"\xff\xfe"),
+            "/ok": (200, TEXT, b"hello"),
+        }
+        srv = self.serving(routes)
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        allowed = {f"127.0.0.1:{srv.port}"}
+
+        def get(url):
+            t0 = time.monotonic()
+            try:
+                got = si_fetch.fetch_source(
+                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
+                )
+                result = ("ok", got.raw)
+            except si_fetch.FetchError as exc:
+                result = ("FetchError", exc.reason)
+            self.assertLess(time.monotonic() - t0, 1, url[:60])
+            return result
+
+        control = get(srv.url("/n0"))
+        self.assertEqual(control, ("ok", b"hello"))
+        for url in (srv.url("/n1"), srv.url("/n2"), srv.url("/n3"), srv.url("/n4"),
+                    srv.url("/文件"), srv.url("/x?q=文")):
+            self.assertEqual(get(url), ("FetchError", "network"), url[:60])
+        repo = fx.p1_base()
+        self.open_only(repo)
+        fx.set_params(repo, research_timeout_seconds=2)
+        write_table(repo, srv, [("a-bad", "/n1"), ("b-ok", "/ok")])
+        n0 = len(fx.EV(repo))
+        rc, out, err = self.fetch(repo)
+        self.assertEqual(rc, 2, out)
+        lines = out.split("\n")
+        pos = [next(i for i, ln in enumerate(lines) if ln.startswith(p)) for p in
+               ("source a-bad FAIL network", "source b-ok ok", "ok research.scan")]
+        self.assertEqual(pos, sorted(pos), out)
+        self.assertIn("obs-draft:", lines)
+        self.assertNotIn("Traceback", err)
+        scans = self.scan_events(repo)
+        self.assertEqual(len(fx.EV(repo)) - n0, 1)
+        self.assertEqual([s["id"] for s in scans[-1]["sources"]], ["b-ok"])
+
+    def test_AT_130_2_E_9_idna_invalid_hosts_fail_before_dns_as_network(self):
+        """受測 `tools/lib/selfimproving/fetch.py`：IDNA 無效 host 不查 DNS、不連線、歸 network。"""
+        hits = []
+
+        def dns_guard(host, *args, **kwargs):
+            if isinstance(host, str):
+                host.encode("idna")  # 與真函式同一步；失敗拋同一個 UnicodeError
+            hits.append(host)
+            raise AssertionError("不得查 DNS")
+
+        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        forms = ["http://docs..example.com/x", "http://.example.com/x",
+                 f"http://{'a' * 64}.example.com/x", f"http://{'a' * 70}.example.com/x",
+                 "http://a。。b/x", "https://docs..example.com/x"]
+        repo = self.table_url_repo("https://docs..example.com/docs")
+        with mock.patch("socket.getaddrinfo", side_effect=dns_guard), mock.patch.object(
+            socket.socket, "connect", side_effect=AssertionError("不得連線")
+        ) as conn:
+            for url in forms:
+                t0, reason = time.monotonic(), None
+                try:
+                    si_fetch.fetch_source(
+                        url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=set()
+                    )
+                except si_fetch.FetchError as exc:
+                    reason = exc.reason
+                self.assertEqual(reason, "network", url[:60])
+                self.assertLess(time.monotonic() - t0, 1, url[:60])
+            res = self.check(repo)
+            self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
+            before = ledger_bytes(repo)
+            rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
+        self.assertEqual((hits, conn.call_count), ([], 0))
+        self.zero_success(rc, out)
+        self.assertIn("source a-typo FAIL network", out)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(ledger_bytes(repo), before)
+
     def test_AT_130_6_1_sources_excluded_from_fingerprint(self):
         repo = fx.p1_base()
         f0 = self.check(repo)["fingerprint"]

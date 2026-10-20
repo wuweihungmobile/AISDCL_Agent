@@ -141,7 +141,7 @@ def _open(url: str, deadline: float):
         conn.request("GET", (parts.path or "/") + (f"?{parts.query}" if parts.query else ""),
                      headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity",
                               "Connection": "close"})
-    except (OSError, http.client.HTTPException) as exc:
+    except (OSError, ValueError, http.client.HTTPException) as exc:  # ValueError 含 UnicodeError
         conn.shut()
         raise FetchError("network") from exc
     try:
