@@ -615,9 +615,9 @@ _GUARD_LINE_STALE_SLACK = 0.02
 _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
-    "_selfimproving_fixtures.py": 1500,
+    "_selfimproving_fixtures.py": 1538,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8653,
+    "test_adr_xplat001_c1c2_lock.py": 8664,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -682,7 +682,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_resume_cost.py": 197,
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
-    "test_root_module_layout.py": 354,
+    "test_root_module_layout.py": 355,
     "test_run_root_unittests.py": 5372,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
     "test_schedule_capability_parity.py": 596,
@@ -690,10 +690,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sdd_hook_router_r158.py": 189,
     "test_selfimproving_capability.py": 465,
     "test_selfimproving_check.py": 2300,
-    "test_selfimproving_events.py": 2170,
-    "test_selfimproving_export_status.py": 741,
-    "test_selfimproving_props.py": 1494,
-    "test_selfimproving_research_scan.py": 1616,
+    "test_selfimproving_events.py": 2466,
+    "test_selfimproving_export_status.py": 748,
+    "test_selfimproving_props.py": 1549,
+    "test_selfimproving_research_scan.py": 1690,
     "test_sentinel_tick_e2e_r145.py": 408,
     "test_session_brief.py": 1321,
     "test_single_venv_identity.py": 162,
@@ -2717,6 +2717,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_root_module_layout.py／_selfimproving_fixtures.py 擴充＋本檔自身漂移（本列、"
      "名冊 R213 的理由文字與精確淨額、接鏈列）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"),
+    ("R213", 127446, 127928, +482,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的 "
+     "R213 名冊列承接（精確淨額已更新）] 同標籤第七列（SelfImproving P1 SCG-4 二審 FAIL "
+     "修復棒二：TCS 勘誤二 digest 8bce1978…、DEF-200-556／557 殘留碼修、新增 AT 的測試）："
+     "test_selfimproving_events.py／test_selfimproving_research_scan.py／"
+     "test_selfimproving_props.py／test_selfimproving_export_status.py／"
+     "test_root_module_layout.py／_selfimproving_fixtures.py 擴充＋本檔自身漂移（本列、"
+     "名冊 R213 的理由文字與精確淨額、接鏈列）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"),
 )
 
 
@@ -2800,7 +2809,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "CrossPlatform_DEF200274_Parallel_Tests_Evidence_2.md〈系列收斂後四方重驗〉與 "
         "docs/06_quality/CrossPlatform_R145_Scan_Findings.md〈附記（R171）〉。"
     )),
-    "R213": (10708, (  # round-label-ok：主控依預先核准範圍裁定的一次性例外，非帳本追蹤輪號
+    "R213": (11190, (  # round-label-ok：主控依預先核准範圍裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者預先核准的 P0 實作範圍（TCS Stage-2 已凍結，digest 6c4e28ed…，QA 預審"
         "二審 PASS）裁定本輪走一次性例外：本筆熄滅的是款(10)[超出每輪上限]與款(11)"
         "[只升不降]（R211／R212 主軌淨額已連續兩輪為正，本輪為第三輪）——主軌淨額全數為 "
@@ -2810,7 +2819,8 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "同標籤第五列（SelfImproving P1 實作收尾：TCS Stage-2 digest d7555681…、"
         "QA 預審 PASS、headless hooks-ON Developer 交卷後主控親驗）再 +7670，"
         "精確淨額改為 9988；同標籤第六列（SCG-4 一審修復棒：DEF 三筆碼修＋新 AT 測試）"
-        "再 +720，精確淨額改為 10708。"
+        "再 +720，精確淨額改為 10708；同標籤第七列（SCG-4 二審修復棒二：556／557 殘留碼修＋新 AT "
+        "測試）再 +482，精確淨額改為 11190。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻"
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
@@ -3408,10 +3418,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 344
+_REPIN_LOG_FROZEN_PREFIX_LEN = 345
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "1595ba4e48b16e671784faed8db77573b85ec8ef5c590837e991adb846dce555")
+    "0934d5458c986cf614c7defdfc0bd3113db60c41cd4a546b31f21a858124db90")
 
 
 def repin_log_history_digest(
@@ -3594,6 +3604,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R213", "e62fdca93c26", "94b2abd8d962", "DEF-200-208"),  # round-label-ok：同上借用
     ("R213", "94b2abd8d962", "e9d42da53f64", "DEF-200-208"),  # round-label-ok：同上借用（P1）
     ("R213", "e9d42da53f64", "1595ba4e48b1", "DEF-200-556"),  # round-label-ok：P1 SCG-4 修復棒
+    ("R213", "1595ba4e48b1", "0934d5458c98", "DEF-200-557"),  # round-label-ok：P1 SCG-4 修復棒二
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
