@@ -617,7 +617,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_ps_engine.py": 83,
     "_selfimproving_fixtures.py": 1538,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8703,
+    "test_adr_xplat001_c1c2_lock.py": 8711,
     "test_apply_lock.py": 167,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -637,7 +637,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 15273,
+    "test_context_budget_guard.py": 15633,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -694,7 +694,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_export_status.py": 748,
     "test_selfimproving_props.py": 1550,
     "test_selfimproving_research_scan.py": 1945,
-    "test_sentinel_tick_e2e_r145.py": 410,
+    "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1364,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
@@ -2750,6 +2750,10 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "到期兌現列 (214, 515) 並重新武裝 216／514、_PHASE2_REVIEW_LOG 新列、接鏈列）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔 "
      "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md。"),
+    ("R214", 128652, 129076, +424,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌申報 309，主軌 564＞515 超額 49 待主控名冊例外] 同標籤第二列：哨兵雙駕駛"
+     "（DEF-200-564／565）回歸鎖＋QA 修復棒二＋QA 複審 R2 一格＋本檔自身漂移；逐檔清單見 "
+     "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md。"),
 )
 
 
@@ -3273,6 +3277,9 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R214", 0,  # round-label-ok
      "哨兵自願停機後不續跑三根因（DEF-200-560／561／562）回歸鎖：部分申報 0、全額歸主軌"
      "（主軌淨額未逾每輪上限）；見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 309,  # round-label-ok
+     "DEF-200-564／565 雙駕駛回歸鎖：test_context_budget_guard.py／test_sentinel_tick_e2e_r145.py "
+     "擴充，申報至軌上限；見 CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md〈八〉。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3448,10 +3455,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 348
+_REPIN_LOG_FROZEN_PREFIX_LEN = 349
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "85c3fe9ea0f88670871f6f8abb81009fcba5074ce5eeef6736e207a098a37ad1")
+    "7606583b3f194684b555872d7045dc45edc3503c6a5c2b74defef75053a890a2")
 
 
 def repin_log_history_digest(
@@ -3638,6 +3645,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R213", "0934d5458c98", "f6e06df858ee", "DEF-200-556"),  # round-label-ok：P1 SCG-4 修復棒三
     ("R213", "f6e06df858ee", "2f772d5818a4", "DEF-200-556"),  # round-label-ok：P1 SCG-4 修復棒四
     ("R214", "2f772d5818a4", "85c3fe9ea0f8", "DEF-200-560"),  # round-label-ok：哨兵自願停機後不續跑
+    ("R214", "85c3fe9ea0f8", "7606583b3f19", "DEF-200-564"),  # round-label-ok：哨兵雙駕駛
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

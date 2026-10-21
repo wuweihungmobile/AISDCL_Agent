@@ -375,6 +375,47 @@ def latest_success_at(paths: list[Path]) -> str:
     return best
 
 
+#: harness 續接記錄（`type=user`）的兩個真機形態（harness 2.1.303／304）：`origin.kind` 為
+#: `auto-continuation`（它自己把被切斷的回合接上），以及其後 9～18 ms 附上的
+#: `usageLimitNote` 為 `release`（「[Earlier usage-limit notes no longer apply…]」）。寬限提示
+#: （`wrap_up`）是警告、不是續接，其餘值一律不認（寧可不叫醒）。本檔是這兩個字面的**唯一的家**：
+#: `transcript_activity` 的辨識與活性判準都 import 這裡，不留第二份。
+RESUME_ORIGIN, NOTE_RELEASE = "auto-continuation", "release"
+
+
+def is_resume_record(record: dict) -> bool:
+    """`record` 是不是 harness 的續接記錄（`type=user` ＋ 見上方兩個形態之一）。"""
+    origin = record.get("origin")
+    return record.get("type") == "user" and (
+        record.get("usageLimitNote") == NOTE_RELEASE
+        or (isinstance(origin, dict) and origin.get("kind") == RESUME_ORIGIN))
+
+
+def latest_resume_at(paths: list[Path]) -> str:
+    """這批逐字稿裡 harness 續接記錄的最新 ISO 時間戳（沒有就回空字串）。
+
+    harness 寫出續接記錄的前提＝它判額度已回、且互動視窗有駕駛接手 ⇒ 與「事件之後有成功回應」同
+    等的復原證據，而且比後者早：續接後首則 assistant 回應要等一整個 turn（數分鐘）才落檔。
+    """
+    best = ""
+    for path in paths:
+        try:
+            with path.open(encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    if '"usageLimitNote"' not in line and RESUME_ORIGIN not in line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+                    stamp = record.get("timestamp") if isinstance(record, dict) else None
+                    if isinstance(stamp, str) and stamp > best and is_resume_record(record):
+                        best = stamp
+        except OSError:
+            continue
+    return best
+
+
 def unhandled_limit_event(transcript: Path, max_age_seconds: float = 86400.0,
                           now: float | None = None) -> dict | None:
     """**還沒被解決的**限額事件裡最早的那一筆；`None`＝沒有（正常情況）。
@@ -382,6 +423,10 @@ def unhandled_limit_event(transcript: Path, max_age_seconds: float = 86400.0,
     判準 D：事件的時間戳 > 全域最後一次成功回應 ⇒ 那之後 API 再也沒通過 ⇒ 未處理。
     取**最早**一筆而不是最後一筆，是因為要拿它的 reset 時刻去排程——同一次停機裡
     每個 subagent 都會留一筆，最早那筆才是真正的撞線時刻（其餘離 reset 更近）。
+
+    🔴 DEF-200-564：復原證據另認 harness 的續接記錄（`latest_resume_at`）——`recovered_at` 取它與
+    最後成功回應的較晚者。只看成功回應時，續接後首則回應落檔前事件仍判未處理 ⇒ 哨兵與
+    互動視窗雙駕駛。
 
     🔴 為何不沿用 `latest_limit_event`：那支只看**最後一筆**，而本次事故裡主逐字稿的
     最後一筆是 `quota_spend`（月度上限），把更早、仍未解決的 `quota_session` 整個蓋掉。
@@ -402,7 +447,7 @@ def unhandled_limit_event(transcript: Path, max_age_seconds: float = 86400.0,
     paths = session_transcripts(transcript, max_age_seconds, now)
     if not paths:
         return None
-    recovered_at = latest_success_at(paths)
+    recovered_at = max(latest_success_at(paths), latest_resume_at(paths))
     best: dict | None = None
     for path in paths:
         for stamp, message in _assistant_records(path):

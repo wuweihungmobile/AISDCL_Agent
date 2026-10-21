@@ -264,9 +264,10 @@ def record_unattended_outcome(session_id: str, reason: str, *,
                               reset_returned: bool, handback_path: str) -> bool:
     """(a) 無人續跑在 no_progress／exhausted 停下時，append 一行持久結局；回「寫了沒」。
 
-    `reason`＝no_progress／exhausted（呼叫端 `relay_machine.settle_window` 只在 _LOUD_STATES
-    ——需要人知道的兩個停止次態——才呼叫本函式）。寫不進去不得升級為失敗（同 `_durable_dir_status`
-    退化紀律、`quota_escalation._write`）——最壞是這次沒留痕，不能反過來變成續航故障源。
+    `reason`＝no_progress／exhausted／other_driver（呼叫端 `relay_machine.settle_window` 只在
+    _LOUD_STATES——需要人知道的三個停止次態——才呼叫本函式）。寫不進去不得升級為失敗（同
+    `_durable_dir_status` 退化紀律、`quota_escalation._write`）——最壞是這次沒留痕，不能反過來
+    變成續航故障源。
     """
     record = {"event": "unattended_stop", "session": str(session_id or ""),
               "reason": str(reason or ""), "reset_returned": bool(reset_returned),

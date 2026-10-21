@@ -400,6 +400,7 @@ def _isolated_env(tmp: Path, *, real_scheduler: bool = False) -> dict[str, str]:
     env.update({
         "TMPDIR": str(tmp), "TEMP": str(tmp), "TMP": str(tmp),
         "USERPROFILE": str(tmp), "HOME": str(tmp), "HOMEPATH": str(tmp),
+        "AUTOSDD_PLAN_DIR": str(tmp),  # DEF-200-566：hook 把任務書寫進 `plan_dir()`；沙箱＝tmp 本身
         "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
         # APPDATA／LOCALAPPDATA 為何要一起隔離（R96／B-5）：沿革已搬至
         # CrossPlatform_R127_Guard_Prose_Migration.md〈_isolated_env〉。
@@ -3817,6 +3818,19 @@ class RelayStateMachineTruthTableTest(unittest.TestCase):
         self.assertNotEqual(wrong, correct, "判定序打亂後應與正確實作分岔，鎖才有鑑別力")
         self.assertEqual(correct, relay_machine.STATE_QUOTA_STOP)
 
+    def test_another_driver_overrides_every_one_of_the_sixteen_cells(self) -> None:
+        """DEF-200-565：⓪ other_driver 優先 ⇒ 32 格：為假（省略即假）16 格不變，為真 16 格全停。"""
+        cells = [(a, b, c, d) for a in (True, False) for b in (True, False)
+                 for c in (True, False) for d in (True, False)]
+        self.assertEqual(len(self._TABLE) + len(cells), 32, "真值表不是 32 格")
+        for cell in cells:
+            kwargs = dict(zip(("has_remaining", "streak_ok", "band_is_ok", "under_cap"), cell))
+            with self.subTest(**kwargs):
+                self.assertEqual(relay_machine.next_state(**kwargs, other_driver=True),
+                                 relay_machine.STATE_OTHER_DRIVER_STOP)
+                self.assertEqual(relay_machine.next_state(**kwargs, other_driver=False),
+                                 relay_machine.next_state(**kwargs), "省略引數必須等於假")
+
 
 class RelayProgressAndCapTest(unittest.TestCase):
     """判準②③④各自的取數面：band、files_changed 差集、handback 完工判定、streak。"""
@@ -3913,6 +3927,13 @@ class RelayProgressAndCapTest(unittest.TestCase):
                                         max_spawns=2, no_progress_limit=5)
         self.assertEqual(outcome["next_state"], relay_machine.STATE_RELAY_EXHAUSTED)
         self.assertEqual(outcome["relay_seq"], 2, "被擋下時 seq 不得繼續累加")
+
+    def test_files_changed_is_not_progress_when_another_driver_also_wrote(self) -> None:
+        state = {"handback_verdict": "written", "files_changed": 5, "other_driver": True}
+        out = relay_machine.resolve(state, quota_policy.BAND_FREE, max_spawns=2,
+                                    no_progress_limit=5)
+        self.assertEqual((out["next_state"], out["relay_no_progress_streak"]),
+                         (relay_machine.STATE_OTHER_DRIVER_STOP, 1))
 
 
 class HandbackHeadingIsOneRuleTest(unittest.TestCase):
@@ -4807,6 +4828,7 @@ class RelaySettleWindowTest(unittest.TestCase):
                 side_effect=lambda a, transcript, pl: (arm_calls.append(transcript), 0)[1]))
             def _fake_register(pl, st, at, tick):
                 registered.append((st.get("relay_seq"), tick))
+                self.registered_state = dict(st)  # 排程當下的狀態塊（DEF-200-564 錨的落盤檢查）
                 return 0, "已回讀（測試）"
 
             stack.enter_context(unittest.mock.patch.object(
@@ -4857,6 +4879,8 @@ class RelaySettleWindowTest(unittest.TestCase):
         self.assertTrue(any(e["event"] == "relay_spawned" for e in events))
         self.assertEqual(registered, [(1, planner.RESUME_TICK)], "RELAY_NEXT 必須重排下一窗")
         self.assertEqual(arm_calls, [], "RELAY_NEXT 不該重掛哨兵——下一窗自己會接手")
+        self.assertIsNotNone(ta._epoch(self.registered_state.get("relay_prev_end")),
+                             "排下一窗前必須寫入 relay_prev_end（下一窗 D5 閘的錨）")
 
     def test_done_state_fires_relay_done_and_rearms_the_sentinel(self) -> None:
         hb = self._handback(_tmpdir(self, "relay-hb-"), next_step="")
@@ -4957,6 +4981,23 @@ class RelaySettleWindowTest(unittest.TestCase):
         self.assertFalse(outcome.is_file(),
                          "QUOTA_STOP 落了結局檔 ⇒ 每次額度收緊都會在 --pace 洗版")
 
+    def test_another_driver_stops_the_relay_loudly_and_hands_back_to_the_sentinel(self) -> None:
+        """DEF-200-565：另有駕駛 ⇒ relay_stopped(other_driver)、不續棒、loud 一次、重掛哨兵。"""
+        trace = _tmpdir(self, "od-trace-")
+        hb = self._handback(_tmpdir(self, "relay-hb-od-"), next_step="還有第 4 步")
+        with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace)}):
+            _rc, _written, events, alert_calls, arm_calls, registered = self._run(
+                run_resume_result={"handback_verdict": "written", "handback_path": str(hb),
+                                   "files_changed": 3, "other_driver": True,
+                                   "route_strategy": planner.STRATEGY_RESUME},
+                band=quota_policy.BAND_FREE)
+        stopped = [e for e in events if e["event"] == "relay_stopped"]
+        self.assertEqual([e.get("why") for e in stopped], ["other_driver"], events)
+        self.assertEqual((registered, len(arm_calls)), ([], 1), "不續棒、仍重掛哨兵（G4 判準1）")
+        self.assertEqual(len([c for c in alert_calls if c["loud"]]), 1, "loud 必須恰一次")
+        recs = [json.loads(ln) for ln in (trace / endurance_env.UNATTENDED_OUTCOME_NAME)
+                .read_text(encoding="utf-8").splitlines() if ln.strip()]
+        self.assertEqual([r["reason"] for r in recs], ["other_driver"])
 
     def test_relay_exhausted_stops_loudly_and_leaves_the_plan_for_a_human(self) -> None:
         """① 假格：`relay_seq` 已在上限 ⇒ 不再續排，loud 告警＋仍重掛哨兵。"""
@@ -5838,6 +5879,155 @@ class RelaySnapshotBeforeIsLoggedTest(unittest.TestCase):
         idx_before = events.index(before)
         idx_resumed = next(i for i, e in enumerate(events) if e["event"] == "resumed")
         self.assertLess(idx_before, idx_resumed, "前快照事件必須先於 resumed 事件落地")
+
+
+class RunResumeOtherDriverTest(unittest.TestCase):
+    """DEF-200-564／565：`_run_resume()`（不 mock）的兩道新閘——spawn 前最後一道（有人在開車 ⇒
+    不 spawn、REFUSE、other_driver 為真）與 spawn 後的事實（≥2 條鏈頭 ⇒ other_driver、停棒）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "od-run-")
+        (self.tmp / "p.md").write_text("# 任務書", encoding="utf-8")
+        self.transcript, self.spawned, self.during_leg = self.tmp / "sid-od.jsonl", [], lambda: None
+        real = planner.subprocess.run
+
+        def _fake_run(argv, **kwargs):
+            if isinstance(argv, list) and argv[:1] == ["git"]:
+                return real(argv, **kwargs)
+            self.spawned.append(argv)
+            self.during_leg()  # leg 執行期間逐字稿裡發生的事
+            return unittest.mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        self.enterContext(unittest.mock.patch.object(planner.subprocess, "run", _fake_run))
+
+    @staticmethod
+    def _rec(ago: float = 0.0, **extra: object) -> dict:
+        stamp = (datetime.now(UTC) - timedelta(seconds=ago)).isoformat().replace("+00:00", "Z")
+        return {"type": "assistant", "timestamp": stamp, **extra}
+
+    def _write(self, *records: dict, mode: str = "w") -> None:
+        with self.transcript.open(mode, encoding="utf-8", newline="\n") as handle:
+            handle.write("".join(json.dumps(r) + "\n" for r in records))
+
+    def _run(self, **extra: object) -> tuple:
+        args = planner.build_parser().parse_args(["--probe-command", "claude"])
+        state = {"plan_path": str(self.tmp / "p.md"), "session_id": "sid-od",
+                 "transcript": str(self.transcript), **extra}
+        self.spawned.clear()  # 每次呼叫一份新帳（subTest 之間不累積）
+        log = self.tmp / "log.jsonl"
+        log.unlink(missing_ok=True)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = planner._run_resume(args, state, log)
+        lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+        return rc, state, [json.loads(ln)["event"] for ln in lines]
+
+    def test_a_live_driver_refuses_the_spawn_but_a_stale_or_limit_only_one_does_not(self) -> None:
+        human, stale = {"type": "user", "origin": {"kind": "human"}}, qm.HALT_QUIESCE_SECONDS + 600
+        for label, records, refused in (
+                ("近期有人打字", [self._rec(30, **human)], True),
+                ("靜止的人類記錄", [self._rec(stale, **human)], False),
+                ("僅限額記錄", [self._rec(30, message={"model": guard.SYNTHETIC_MODEL})], False)):
+            with self.subTest(label):
+                self._write(*records)
+                rc, state, events = self._run()
+                self.assertEqual((rc, len(self.spawned), state["other_driver"]),
+                                 (1, 0, True) if refused else (0, 1, False))
+                self.assertEqual("resume_refused_other_driver" in events, refused, events)
+                self.assertEqual(state["route_strategy"] == planner.STRATEGY_REFUSE, refused)
+
+    def test_the_anchor_keeps_the_relays_own_previous_leg_from_being_another_driver(self) -> None:
+        """修復棒二（QA P2-1／P3-1）：錨＝relay_prev_end ＞ 未處理撞線事件。前一棒自己的記錄、撞線前
+        緊貼限額記錄的最後一則真回應不算別人；錨之後有人打字才拒，痕跡帶錨的來源。"""
+        real = {"message": {"model": "claude-opus-5", "usage": {"input_tokens": 1}}}
+        limit = {"model": guard.SYNTHETIC_MODEL, "content": [{"text": _REAL_SESSION_LIMIT}]}
+        hit, human = {"message": limit}, {"type": "user", "origin": {"kind": "human"}}
+        prev = {"relay_prev_end": self._rec(125)["timestamp"]}
+        for label, records, extra, src, refused in (
+                ("relay 第二棒", [self._rec(126, **real)], prev, "relay_prev_end", False),
+                ("relay 第二棒＋prev_end 後有人打字",
+                 [self._rec(126, **real), self._rec(60, **human)], prev, "relay_prev_end", True),
+                ("首棒：撞線前 5 秒的最後真回應",
+                 [self._rec(605, **real), self._rec(600, **hit)], {}, "limit_event", False),
+                ("首棒＋撞線後有人打字", [self._rec(605, **real), self._rec(600, **hit),
+                                         self._rec(60, **human)], {}, "limit_event", True),
+                ("過期 prev_end 不遮較新撞線（QA 複審 R2：兩錨取較晚者）", [self._rec(605, **real),
+                 self._rec(600, **hit)], {"relay_prev_end": self._rec(3000)["timestamp"]}, "limit_event", False)):
+            with self.subTest(label):
+                self._write(*records)
+                rc, state, _events = self._run(**extra)
+                self.assertEqual((rc, len(self.spawned), state["other_driver"]),
+                                 (1, 0, True) if refused else (0, 1, False))
+                rows = (self.tmp / "log.jsonl").read_text(encoding="utf-8").splitlines()
+                self.assertEqual([r["anchor"]["source"] for r in map(json.loads, rows)
+                                  if r["event"] == "resume_refused_other_driver"],
+                                 [src] if refused else [])
+
+    def test_two_chains_after_the_spawn_set_the_other_driver_fact(self) -> None:
+        """leg 期間互動視窗也在寫（兩鏈從 spawn 前分岔）⇒ 為真；單鏈為假；時間戳在 leg 當下產生。"""
+        pre = self._rec(3600, uuid="pre", parentUuid=None)
+
+        def chain(prefix: str, count: int) -> list[dict]:
+            ids = ["pre"] + [f"{prefix}{i}" for i in range(1, count + 1)]
+            return [self._rec(uuid=cur, parentUuid=par) for par, cur in zip(ids, ids[1:])]
+
+        for label, make, want in (("單駕駛", lambda: chain("L", 3), False),
+                                  ("雙駕駛", lambda: chain("L", 3) + chain("H", 2), True)):
+            with self.subTest(label):
+                self._write(pre)
+                self.during_leg = lambda make=make: self._write(*make(), mode="a")
+                rc, state, _events = self._run()
+                self.assertEqual((rc, len(self.spawned), state["other_driver"]), (0, 1, want))
+
+
+class ArmedPlanStepThreeTest(unittest.TestCase):
+    """DEF-200-567：武裝時同 sid 的 handback 有「## 下一步指令」就填進任務書 §3（標來源）。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "step3-")
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {endurance_env.HANDBACK_DIR_ENV: str(self.tmp / "hb")}))
+        self.transcript = _write_jsonl(self.tmp / "sid-s3.jsonl", [1000])
+        self.hb = resume_route.handback_report("sid-s3")
+
+    def _main(self, *flags: str) -> tuple[str, str]:  # 回 (任務書 §3, stdout)；排程註冊以替身代之
+        plan, buf = self.tmp / "plan.md", io.StringIO()
+        with unittest.mock.patch.object(planner, "_arm_sentinel", lambda a, t, p: 0), \
+                contextlib.redirect_stdout(buf):
+            self.assertEqual(planner.main(["--transcript", str(self.transcript), "--out", str(plan),
+                                           *flags]), 0)
+        text = plan.read_text(encoding="utf-8").split("## 3. 下一步的確切指令", 1)[1]
+        return text.split("## 4. 禁止事項", 1)[0], buf.getvalue()
+
+    def test_section_three_is_filled_only_when_arming_with_a_non_empty_next_step(self) -> None:
+        head = "## 做了什麼\n測試\n\n## 驗了什麼\nrc=0\n\n## 卡在哪\n無\n\n## 下一步指令（視窗）\n"
+        steps = "1. 先重驗 DEF-200-564\n2. 再跑 root unittests"
+        for label, nxt, arm in (("填入", steps, True), ("沒有 handback", None, True),
+                                ("下一步節為空", "", True), ("不武裝（人填的欄位）", steps, False)):
+            with self.subTest(label):
+                self.hb.unlink(missing_ok=True)
+                if nxt is not None:
+                    self.hb.parent.mkdir(parents=True, exist_ok=True)
+                    self.hb.write_text(f"{head}{nxt}\n", encoding="utf-8", newline="\n")
+                sec, out = self._main(*(["--arm-sentinel"] if arm else []))
+                filled = arm and bool(nxt)
+                self.assertEqual("TODO: 重啟後要跑的第一組指令" in sec, not filled, sec)
+                self.assertEqual("§3 仍是 TODO" in out, arm and not filled, out)
+                for want in (("先重驗 DEF-200-564", "再跑 root unittests", str(self.hb), "mtime ",
+                              "claude -r sid-s3") if filled else ()):
+                    self.assertIn(want, sec)
+
+    def test_the_resume_prompt_points_a_todo_section_three_at_the_handback_and_memory(self) -> None:
+        """只加一句指引、不含指令內容；兩條路共用同一常數（2026-09-07：不注入 Workflow 續跑）。"""
+        plan = self.tmp / "plan.md"
+        plan.write_text("# 任務書", encoding="utf-8")
+        self.assertIn("任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動",
+                      planner._RESUME_RULES)
+        for cap, strategy in ((None, planner.STRATEGY_RESUME), (1, planner.STRATEGY_FRESH)):
+            route = planner.choose_resume_route("claude", "sid-s3", self.transcript, str(plan),
+                                                max_bytes=cap)
+            argv = " ".join(route["argv"])
+            self.assertEqual(route["strategy"], strategy)
+            self.assertTrue(planner._RESUME_RULES in argv and "Workflow(" not in argv, argv)
 
 
 class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):
@@ -6812,6 +7002,28 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
         self.assertEqual(event["timestamp"], "2026-08-07T18:40:00Z",
                          "取到的是被濾掉的那筆 transient，而不是真的撞線")
 
+    def _resume(self, ts: str, **extra: object) -> str:  # DEF-200-564：harness 續接記錄（§2.11）
+        return json.dumps({"type": "user", "timestamp": ts, "isMeta": True, **extra})
+
+    def test_only_a_harness_resume_record_marks_the_event_handled(self) -> None:
+        """事故：auto-continuation／release 已寫、首則回應未落檔仍判未處理 ⇒ 雙駕駛；五格負控。"""
+        t0, t1, t2 = "2026-08-07T18:36:53Z", "2026-08-07T19:00:00Z", "2026-08-07T20:00:00Z"
+        hit, again = self._limit(t0, _REAL_SESSION_LIMIT), self._limit(t2, _REAL_SESSION_LIMIT)
+        auto, release = {"origin": {"kind": "auto-continuation"}}, {"usageLimitNote": "release"}
+        result = {"message": {"content": [{"type": "tool_result"}]}}
+        for label, lines, want in (
+                ("auto-continuation", [hit, self._resume(t1, **auto)], None),
+                ("release", [hit, self._resume(t1, **release)], None),
+                ("tool_result", [hit, self._resume(t1, **result)], t0),
+                ("人類打字", [hit, self._resume(t1, origin={"kind": "human"})], t0),
+                ("寬限提示", [hit, self._resume(t1, usageLimitNote="wrap_up")], t0),
+                ("續接早於事件", [self._resume("2026-08-07T18:00:00Z", **auto), hit], t0),
+                ("續接後又撞線", [hit, self._resume(t1, **auto), again], t2)):
+            with self.subTest(label):
+                self._write(self.main, [self._ok("2026-08-07T18:00:00Z"), *lines])
+                event = guard.unhandled_limit_event(self.main)
+                self.assertEqual(event and event["timestamp"], want, label)
+
 
 class HarnessUsageLimitSignalsTest(unittest.TestCase):
     """DEF-200-562：`tools/lib/transcript_activity.py` 辨識 harness 2.1.303 的三種限額記錄
@@ -7008,6 +7220,127 @@ class HarnessUsageLimitSignalsTest(unittest.TestCase):
 
     def test_the_grace_allowance_is_one_patrol_interval(self) -> None:
         self.assertEqual(ta.GRACE_ALLOWANCE_SECONDS, qm.HALT_QUIESCE_SECONDS)
+
+    def _human(self, stamp: str) -> dict:  # DEF-200-564：driver_after／live_driver（§2.11）
+        return self._rec("user", stamp, origin={"kind": "human"}, message={"content": "繼續"})
+
+    def _hit(self, stamp: str) -> dict:  # 撞線的 `<synthetic>` 記錄不是任何人在動的證據
+        return self._rec("assistant", stamp, message={"model": guard.SYNTHETIC_MODEL})
+
+    def _ago(self, s: float) -> str:
+        return (self.now - timedelta(seconds=s)).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_driver_after_is_the_first_non_synthetic_conversation_record(self) -> None:
+        since = ta._epoch(self.NOTE)
+        for label, records, want in (
+                ("人類打字", [self._hit(self._after(5)), self._human(self._after(60)),
+                             self._asst(self._after(90))],
+                 {"timestamp": self._after(60), "kind": "human"}),
+                ("harness 自動續接", [self._auto(self._after(60)), self._asst(self._after(90))],
+                 {"timestamp": self._after(60), "kind": "auto-continuation"}),
+                ("真 model 的 assistant", [self._hit(self._after(5)), self._asst(self._after(30))],
+                 {"timestamp": self._after(30), "kind": "assistant"})):
+            with self.subTest(label):
+                self._write(*records)
+                self.assertEqual(ta.driver_after(self.main, since, self.now), want)
+        sub = self.main.with_suffix("") / "subagents" / "agent-a.jsonl"  # 忙碌的 subagent 也算
+        sub.parent.mkdir(parents=True)
+        sub.write_text(json.dumps(self._asst(self._after(60))) + "\n", encoding="utf-8")
+        self._write(self._hit(self._after(5)))
+        self.assertEqual(ta.driver_after(self.main, since, self.now)["kind"], "assistant")
+
+    def test_what_is_not_a_driver_and_the_time_bounds(self) -> None:
+        """負控：限額記錄、tool_result、peer、task-notification、system、attachment、窗外皆非。"""
+        since, rec = ta._epoch(self.NOTE), self._rec
+        result = rec("user", self._after(60), message={"content": [{"type": "tool_result"}]})
+        for label, records in (
+                ("只有限額記錄", [self._hit(self._after(60))]),
+                ("tool_result 型 user", [result]),
+                ("peer／task-notification", [rec("user", self._after(60), origin={"kind": "peer"}),
+                                             rec("user", self._after(61),
+                                                 origin={"kind": "task-notification"})]),
+                ("system／attachment", [rec("system", self._after(60), subtype="away_summary"),
+                                        rec("attachment", self._after(61))]),
+                ("早於／恰等於 since", [self._human(self.NOTE), self._asst(self._after(-30))]),
+                ("晚於 now", [self._human(self._after(3600))])):
+            with self.subTest(label):
+                self._write(*records)
+                self.assertIsNone(ta.driver_after(self.main, since, self.now), label)
+        self.assertIsNone(ta.driver_after(self.tmp / "nope.jsonl", since, self.now))
+        self.assertIsNone(ta.driver_after(None, since, self.now))
+
+    def test_live_driver_is_recent_and_after_the_event(self) -> None:
+        """有人在開車＝一個巡邏間隔內且在撞線之後；戳了死視窗就走（靜止超過一個間隔）必須放行。"""
+        quiesce, event = qm.HALT_QUIESCE_SECONDS, {"timestamp": self._ago(7200)}
+        for label, records, ev, alive in (
+                ("事件後 60s 前有人打字", [self._human(self._ago(60))], event, True),
+                ("事件後打過字但已靜止", [self._human(self._ago(quiesce + 60))], event, False),
+                ("近期記錄早於事件（撞線前的正常活動）", [self._asst(self._ago(300))],
+                 {"timestamp": self._ago(60)}, False)):
+            with self.subTest(label):
+                self._write(*records)
+                got = ta.live_driver(self.main, self.now, ev)
+                self.assertEqual(got is not None, alive, f"{label}：{got}")
+
+    def test_sentinel_decide_defers_to_another_driver_and_keeps_the_old_branches(self) -> None:
+        stamp = "2026-10-19T15:44:00Z"  # 23:44 +08；訊息 resets 9am ⇒ reset 在隔天 09:00
+        event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT, stamp)
+        driver = {"timestamp": "2026-10-19T15:50:00Z", "kind": "human"}
+        late = datetime(2026, 10, 20, 9, 30, tzinfo=_TAIPEI)  # reset 已過 ⇒ 原本是 probe
+        got = planner.sentinel_decide(event, "", 24.0, late, driver=driver)
+        self.assertEqual((got["action"], got["at"], set(got)), ("patrol", late + timedelta(
+            seconds=qm.HALT_QUIESCE_SECONDS), {"action", "at", "reason"}))
+        for needle in ("另一駕駛", "360s", "human"):
+            self.assertIn(needle, got["reason"])
+        for now, want in ((self.now, "arm_reset"), (late, "probe")):  # 沒有駕駛 ⇒ 逐位元組同舊行為
+            self.assertEqual(planner.sentinel_decide(event, "", 24.0, now, driver=None),
+                             planner.sentinel_decide(event, "", 24.0, now))
+            self.assertEqual(planner.sentinel_decide(event, "", 24.0, now)["action"], want)
+        self.assertEqual(planner.sentinel_decide(event, "", 24.0, self.now,
+                                                 driver=driver)["action"], "patrol")
+        spend = _sentinel_event(guard.LIMIT_SPEND, _REAL_SPEND_LIMIT, stamp)  # 錢的事人才能解
+        self.assertEqual(planner.sentinel_decide(spend, "", 24.0, late,
+                                                 driver=driver)["action"], "escalate")
+        odd = _sentinel_event(guard.LIMIT_SESSION, "session limit, no time given", stamp)
+        self.assertEqual(planner.sentinel_decide(odd, "", 24.0, late)["action"], "escalate")
+        self.assertEqual(planner.sentinel_decide(odd, "", 24.0, late, driver=driver)["action"],
+                         "patrol", "有人在動卻因解不出 reset 時刻而自拆哨兵")
+
+
+class OtherDriverChainHeadsTest(unittest.TestCase):
+    """DEF-200-565：spawn 後逐字稿出現 ≥2 條鏈頭＝另有駕駛也在寫（鏈頭＝parentUuid 不指向 spawn 後
+    任何記錄者，compact 邊界取 logicalParentUuid）。真機 118 段單駕駛 leg 皆 1 條。"""
+
+    T0 = datetime(2026, 10, 21, 6, 2, 0, tzinfo=UTC)  # spawn 時刻
+
+    def _rec(self, uid: str, parent: str | None, offset: float, kind="assistant", **extra) -> dict:
+        stamp = (self.T0 + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z")
+        return {"type": kind, "uuid": uid, "parentUuid": parent, "timestamp": stamp, **extra}
+
+    def test_heads_count_one_per_driver_however_long_or_tangled(self) -> None:
+        r, path = self._rec, _tmpdir(self, "heads-") / "sid.jsonl"
+        compact = r("c1", None, 2, "system", subtype="compact_boundary", logicalParentUuid="a1")
+        for label, want, records in (
+                ("單鏈", 1, [r("a1", "pre", 1), r("a2", "a1", 2, "user"), r("a3", "a2", 3)]),
+                ("同一 leg 的平行 tool 結果先分岔再收攏", 1, [
+                    r("a1", "pre", 1), r("a2", "a1", 2), r("r1", "a1", 3, "user"),
+                    r("r2", "a2", 3, "user"), r("a3", "r2", 4)]),
+                ("compact 邊界（parentUuid 為空、logicalParentUuid 接回鏈內）", 1, [
+                    r("a1", "pre", 1), compact, r("a2", "c1", 3)]),
+                ("sidechain、無 uuid、spawn 之前的記錄不算", 1, [
+                    r("old", None, -60), r("a1", "old", 1), r("s1", "ghost", 2, isSidechain=True),
+                    {"type": "queue-operation", "timestamp": r("q", "", 2)["timestamp"]}]),
+                ("兩條鏈從同一個 spawn 前記錄分岔", 2, [
+                    r("L1", "pre", 1), r("H1", "pre", 14), r("L2", "L1", 20), r("H2", "H1", 30)]),
+                ("互動視窗從更晚的 spawn 前記錄續寫", 2, [
+                    r("L1", "pre-a", 1), r("H1", "pre-b", 14), r("L2", "L1", 20)]),
+                ("另一條鏈無父（全新起頭）", 2, [r("L1", "pre", 1), r("H1", None, 14)])):
+            with self.subTest(label):
+                path.write_text("\n".join(map(json.dumps, records)) + "\n", encoding="utf-8")
+                self.assertEqual(ta.chain_heads_after(path, self.T0.timestamp()), want, label)
+                self.assertIs(relay_machine.other_driver(path, self.T0.timestamp()), want >= 2)
+        self.assertIs(relay_machine.other_driver(None, 0.0), False)  # 量不到≠有人
+        self.assertIs(relay_machine.other_driver(path.with_name("nope.jsonl"), 0.0), False)
 
 
 # ═══════ R81：續航協定的兩個**設計缺口**（R80 四次真實撞線的驗屍，improving_104 §4.5）
@@ -11926,28 +12259,55 @@ class SentinelReapVerdictTest(unittest.TestCase):
 
     def test_the_hook_arms_and_the_gc_reads_plans_in_the_same_directory(self) -> None:
         """DEF-200-465：武裝端寫任務書的目錄＝GC 預設掃的目錄；任一邊改家另一邊沒跟，GC 會靜默變成
-        永遠量不到（保守側＝不收，外觀與「沒有殘骸」相同）。看行為：兩邊各自算出的路徑對帳。
-        已知不在鎖內：planner 手動 `--arm-sentinel` 預設另一個家（GC 量不到＝保守側）。"""
+        永遠量不到（保守側＝不收，外觀與「沒有殘骸」相同）。看行為：兩邊各自算出的路徑對帳。"""
         tmp, seen = _tmpdir(self, "plan-home-"), []
         fake = unittest.mock.Mock(
             maybe_arm=lambda transcript, sid, spawn, plan_path: seen.append(plan_path))
-        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp)), \
+        home = {endurance_env.PLAN_DIR_ENV: str(tmp)}
+        (tmp / "sys").mkdir()  # 系統暫存與 plan_dir() 分開：gc() 預設若退回只讀 TEMP 就量不到
+        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp / "sys")), \
                 unittest.mock.patch.object(guard, "_has_carrier", return_value=True), \
                 unittest.mock.patch.object(guard, "sentinel_lifecycle", fake), \
-                unittest.mock.patch.dict(os.environ, {guard.SENTINEL_OFF_ENV: ""}):
+                unittest.mock.patch.dict(os.environ, {guard.SENTINEL_OFF_ENV: "", **home}):
             guard.arm_when_earned(tmp / "sid-465.jsonl")
         plan = tmp / "autosdd_resume_plan_sid-465.md"
         relay = planner.render_relay({"state": "disarmed", "transcript": str(tmp / "gone.jsonl")})
         plan.write_text(relay, encoding="utf-8", newline="\n")
-        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp)), \
+        with unittest.mock.patch.object(tempfile, "tempdir", str(tmp / "sys")), \
+                unittest.mock.patch.dict(os.environ, home), \
                 unittest.mock.patch.object(
                     sentinel_lifecycle, "sentinel_task_names",
                     return_value=[sentinel_lifecycle.TASK_PREFIX + "sid-465"]), \
                 unittest.mock.patch.object(sentinel_lifecycle, "_transcript_dir",
                                            return_value=_tmpdir(self, "tx-")):
-            row = sentinel_lifecycle.gc()[0]  # 預設 tmp_dir＝tempfile.gettempdir()
+            row = sentinel_lifecycle.gc()[0]  # 預設讀 plan_dir()（TEMP 在 tmp/sys，兩處不同目錄）
         self.assertEqual(Path(seen[0]), plan, "武裝端寫的任務書路徑不是 GC 預設會讀的那個")
         self.assertTrue(row["reap"], f"GC 讀不到武裝端寫的任務書 ⇒ 量不到：{row}")
+
+    def test_the_hook_and_the_cli_arm_the_plan_in_the_same_directory(self) -> None:
+        """DEF-200-566：hook 自動武裝的任務書路徑與 planner CLI 預設落點必須是同一個檔。"""
+        tmp, hook_seen, cli_seen = _tmpdir(self, "plan-one-home-"), [], []
+        live = _write_jsonl(tmp / "sid-566.jsonl", [1000])
+        fake = unittest.mock.Mock(maybe_arm=lambda transcript, sid, spawn, plan_path:
+                                  hook_seen.append(plan_path))
+        env = {guard.SENTINEL_OFF_ENV: "", endurance_env.PLAN_DIR_ENV: str(tmp / "plans")}
+        (tmp / "sys").mkdir()  # 系統暫存與 plan_dir() 分成兩個目錄，退回 gettempdir() 的站點才現形
+        with unittest.mock.patch.dict(os.environ, env), \
+                unittest.mock.patch.object(tempfile, "tempdir", str(tmp / "sys")), \
+                unittest.mock.patch.object(guard, "_has_carrier", return_value=True), \
+                unittest.mock.patch.object(guard, "sentinel_lifecycle", fake), \
+                unittest.mock.patch.object(planner, "_arm_sentinel",
+                                           lambda a, t, plan: cli_seen.append(plan) or 0), \
+                contextlib.redirect_stdout(io.StringIO()):
+            guard.arm_when_earned(live)
+            with unittest.mock.patch.object(guard.subprocess, "run") as run:
+                guard.write_resume_plan(live)  # hook 的另一個落點（:750）
+            self.assertEqual(planner.main(["--transcript", str(live), "--arm-sentinel"]), 0)
+        argv = run.call_args.args[0]
+        self.assertEqual((Path(hook_seen[0]), len(cli_seen)), (cli_seen[0], 1))
+        self.assertEqual({cli_seen[0].parent, Path(hook_seen[0]).parent,
+                          Path(argv[argv.index("--out") + 1]).parent}, {tmp / "plans"},
+                         "任務書沒落在 plan_dir() 之下（三個入口：hook 武裝、hook 骨架、CLI）")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

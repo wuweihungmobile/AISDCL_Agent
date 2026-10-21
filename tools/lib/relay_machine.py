@@ -13,7 +13,11 @@ WHY 住這裡而不是 `tools/session_resume_planner.py`：`guardrail_cli` 餘�
 而不是模組層 `import`——planner 模組層已 `import relay_machine`，模組層互相 import
 會成環；理由與手法逐字同 `tools/lib/sentinel_lifecycle.py::_planner_module()`。
 
-判定序＝③→④→②→①（自上而下短路，施工圖 §3(c) 表列）：
+判定序＝⓪→③→④→②→①（自上而下短路，施工圖 §3(c) 表列＋DEF-200-565 的第五判準⓪）：
+  ⓪ 同一份逐字稿另有駕駛？—— `state["other_driver"]`＝`other_driver()`：spawn 之後出現 ≥2 條
+     鏈頭（互動視窗也在寫同一份檔；`_run_resume` spawn 前閘拒 spawn 時亦置真）。真 ⇒ 一律
+     OTHER_DRIVER_STOP（loud、不續棒、重掛哨兵）；`files_changed` 無從分辨是誰改的，不得單獨
+     構成進度。判準本體＝`transcript_activity.chain_heads_after`（單一家，本檔只取數）。
   ③ 任務書仍有未完項？—— `resolve()` 讀 handback 交接檔（G2 批 (b) 落地的同一份文件）
      的「## 下一步指令」節；`handback_verdict != written`（含 REFUSE／rc=None／
      resume_failed 三種失敗態）保守回 `True`（無正面完工證據，不得判 DONE——量不到
@@ -27,10 +31,10 @@ WHY 住這裡而不是 `tools/session_resume_planner.py`：`guardrail_cli` 餘�
      _idle_prepare_watch()` 既有手法）；`unmeasured` 視同不合格（保守向收斂）。
   ① `relay_seq < AUTOSDD_RELAY_MAX_SPAWNS`？
 
-四個判準全真 ⇒ RELAY_NEXT（重排下一窗）；否則依判定序落 DONE／NO_PROGRESS_STOP／
-QUOTA_STOP／RELAY_EXHAUSTED 四個停止次態之一——**除「RELAY_NEXT 且排程成功」外，全部
-重掛哨兵**（G4 判準1，含失敗路徑；RELAY_NEXT 排程失敗＝喚醒鏈斷線，視同停止次態同樣
-重掛，SD-4）：`_rearm_after_stop()` 沿用既有 PATROL_HANDBACK 手法
+五個判準（⓪ 為假、其餘四個全真）⇒ RELAY_NEXT（重排下一窗）；否則依判定序落 DONE／
+NO_PROGRESS_STOP／QUOTA_STOP／RELAY_EXHAUSTED／OTHER_DRIVER_STOP 五個停止次態之一——
+**除「RELAY_NEXT 且排程成功」外，全部重掛哨兵**（G4 判準1，含失敗路徑；RELAY_NEXT 排程
+失敗＝喚醒鏈斷線，視同停止次態同樣重掛，SD-4）：`_rearm_after_stop()` 沿用既有 PATROL_HANDBACK 手法
 （`session_resume_planner._resume_tick` 內同型邏輯的第二個呼叫點，本檔不重寫第二份）。
 重掛失敗 ⇒ 清 arm latch（`sentinel_lifecycle_arm.clear_arm_latch`）＋loud——讓下一次
 SessionStart 的武裝評估重新來過，不留一個「宣稱已重掛」的假閂鎖（R112 §3-5 同型）。round-label-ok
@@ -51,6 +55,7 @@ import quota_gate
 import quota_policy
 import resume_cost  # improving_113 W2：喚醒成本落帳（純函式模組；本檔是唯一接線點）
 import resume_route  # DEF-200-516 7-A：handback 標題比對規則的唯一家（`heading_hit`）
+import transcript_activity  # DEF-200-565：「另有駕駛」＝同一份逐字稿的鏈頭數（判準⓪的取數）
 import unattended_authz  # INV1/INV4：無人看管旗標名的 SSOT（不在本檔開第三個字面家）
 
 #: 每 reset 視窗 spawn 上限；出廠 2（施工圖 §3(c) 常數表）。
@@ -66,6 +71,8 @@ STATE_DONE = "DONE"
 STATE_NO_PROGRESS_STOP = "NO_PROGRESS_STOP"
 STATE_QUOTA_STOP = "QUOTA_STOP"
 STATE_RELAY_EXHAUSTED = "RELAY_EXHAUSTED"
+#: DEF-200-565：第五個停止次態——同一份逐字稿另有駕駛（互動視窗也在寫）。
+STATE_OTHER_DRIVER_STOP = "OTHER_DRIVER_STOP"
 
 #: band 判準②：`--pace` 現查 band 必須落在這兩帶才續燒（unmeasured／收緊皆不合格）。
 _BAND_OK = frozenset({quota_policy.BAND_FREE, quota_policy.BAND_NOTICE})
@@ -77,22 +84,26 @@ _NEXT_STEP_HEADING = "## 下一步指令"
 
 #: 停止次態 → 事件名／why／叫人與否／人話理由（施工圖 §4 V-c1：每個次態唯一一組）。
 _STOP_EVENT = {STATE_DONE: "relay_done", STATE_NO_PROGRESS_STOP: "relay_stopped",
-              STATE_QUOTA_STOP: "relay_stopped", STATE_RELAY_EXHAUSTED: "relay_stopped"}
+              STATE_QUOTA_STOP: "relay_stopped", STATE_RELAY_EXHAUSTED: "relay_stopped",
+              STATE_OTHER_DRIVER_STOP: "relay_stopped"}
 _STOP_WHY = {STATE_NO_PROGRESS_STOP: "no_progress", STATE_QUOTA_STOP: "band",
-            STATE_RELAY_EXHAUSTED: "cap"}
+            STATE_RELAY_EXHAUSTED: "cap", STATE_OTHER_DRIVER_STOP: "other_driver"}
 _STOP_REASON = {
     STATE_DONE: "接力工作已完成（handback「## 下一步指令」節已清空，判定無未完項）",
     STATE_NO_PROGRESS_STOP: "接力已連續無新進度達停止門檻，停止自動續跑",
     STATE_QUOTA_STOP: "額度帶已收緊（非 free/notice），交回哨兵巡邏",
     STATE_RELAY_EXHAUSTED: "接力已達每視窗 spawn 上限，停止自動續跑，留任務書給人",
+    STATE_OTHER_DRIVER_STOP: "同一份逐字稿另有駕駛（互動視窗也在動）：本窗不續棒，交回哨兵巡邏，請確認誰在開車",  # noqa: E501
 }
-#: 恰兩個停止次態需要「叫人」（loud）：無新進度（故障訊號）與達 spawn 上限（人工決策）。
-#: DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵：仍呼叫 `escalation.alert()` 收超齡殘骸，
-#: 但不點名本窗任務書（`settle_window` 隨後要寫它、哨兵要站在它上面；DEF-200-516 7-B）。
-_LOUD_STATES = frozenset({STATE_NO_PROGRESS_STOP, STATE_RELAY_EXHAUSTED})
-#: FIX3(a)：持久結局檔記的 reason 字面（恰對應 _LOUD_STATES 兩個「需要人知道」的停止次態）。
+#: 恰三個停止次態需要「叫人」（loud）：無新進度（故障訊號）、達 spawn 上限（人工決策）與同 session
+#: 另有駕駛（雙駕駛，人得知道發生過）。DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵：
+#: 仍呼叫 `escalation.alert()` 收超齡殘骸，但不點名本窗任務書（`settle_window` 隨後要寫它、哨兵要
+#: 站在它上面；DEF-200-516 7-B）。
+_LOUD_STATES = frozenset({STATE_NO_PROGRESS_STOP, STATE_RELAY_EXHAUSTED, STATE_OTHER_DRIVER_STOP})
+#: FIX3(a)：持久結局檔記的 reason 字面（恰對應 _LOUD_STATES 三個「需要人知道」的停止次態）。
 #: 刻意與 `_STOP_WHY` 分開（後者 exhausted＝"cap"；本檔結局檔對外語意用 "exhausted"）。
-_OUTCOME_REASON = {STATE_NO_PROGRESS_STOP: "no_progress", STATE_RELAY_EXHAUSTED: "exhausted"}
+_OUTCOME_REASON = {STATE_NO_PROGRESS_STOP: "no_progress", STATE_RELAY_EXHAUSTED: "exhausted",
+                   STATE_OTHER_DRIVER_STOP: "other_driver"}
 
 
 def _int_env(name: str, default: int) -> int:
@@ -269,6 +280,26 @@ def _read_text(path: Path) -> str:
         return ""
 
 
+def handback_next_steps(session_id: str) -> str:
+    """武裝任務書時要填進 §3 的內容（DEF-200-567）：同 sid 的 handback 存在且「## 下一步指令」節
+    非空 ⇒ 該節原文（前置一行來源與 handback mtime 的標註）；否則回 `""`（§3 留 TODO，呼叫端出聲）。
+
+    喚醒 prompt 要 leg「照任務書第 3 節做」，而骨架的 §3 只有 `claude -r` 與 TODO——leg 只能讀
+    記憶檔自救（2026-10-21 兩支 leg 的 handback 都這樣記）。取節沿用 `_section_text`（與
+    `resolve()` 判未完項同一條規則）；不另立 SSOT：填進去的是 handback 這份文件**當下**的
+    原文，下次武裝重填。
+    """
+    path = resume_route.handback_report(session_id)
+    body = _section_text(_read_text(path), _NEXT_STEP_HEADING)
+    try:
+        mtime = datetime.fromtimestamp(path.stat().st_mtime).astimezone()
+    except OSError:
+        return ""
+    return (f"> 以下取自上一窗 handback（`{path}`，mtime {mtime.isoformat(timespec='seconds')}）"
+            f"的「{_NEXT_STEP_HEADING}」節原文——宣稱不是證據，重啟後第一件事仍是重驗。\n\n{body}"
+            ) if body else ""
+
+
 def plan_has_remaining_work(handback_verdict: str, handback_text: str) -> bool:
     """判準③：`handback_verdict != "written"`（含三種失敗態）保守回 `True`；
     `"written"` 時看 handback 的「## 下一步指令」節是否非空。
@@ -370,12 +401,25 @@ def no_progress_ok(streak: int, limit: int) -> bool:
     return streak < limit
 
 
-def next_state(*, has_remaining: bool, streak_ok: bool, band_is_ok: bool,
-               under_cap: bool) -> str:
-    """接力狀態機的純判定（施工圖 §3(c) 表；判定序 ③→④→②→①，自上而下短路）。
+def other_driver(transcript: Path | None, spawn_at: float) -> bool:
+    """判準⓪的取數：`spawn_at`（epoch 秒）之後，同一份逐字稿出現 ≥2 條鏈頭＝另有駕駛也在寫它
+    （`transcript_activity.chain_heads_after`；DEF-200-565）。逐字稿缺席／讀不動 ⇒ `False`：量不到
+    ≠ 有人，且無人看管的 spawn 後檢不得因此拋例外。"""
+    return transcript is not None and (
+        transcript_activity.chain_heads_after(transcript, spawn_at)
+        >= transcript_activity.OTHER_DRIVER_HEADS)
 
-    十六格真值表的唯一入口：僅全真格回 `RELAY_NEXT`，其餘依此序落四個停止次態之一。
+
+def next_state(*, has_remaining: bool, streak_ok: bool, band_is_ok: bool,
+               under_cap: bool, other_driver: bool = False) -> str:
+    """接力狀態機的純判定（施工圖 §3(c) 表；判定序 ⓪→③→④→②→①，自上而下短路）。
+
+    三十二格真值表的唯一入口：`other_driver` 為假（省略即假）的十六格逐格不變——僅全真格回
+    `RELAY_NEXT`，其餘依序落四個停止次態之一；為真的十六格一律 `OTHER_DRIVER_STOP`（⓪ 排在
+    ③ 之前：雙駕駛的事實比「已完工」「有進度」都優先，`files_changed` 無從分辨是誰改的）。
     """
+    if other_driver:
+        return STATE_OTHER_DRIVER_STOP
     if not has_remaining:
         return STATE_DONE
     if not streak_ok:
@@ -388,8 +432,8 @@ def next_state(*, has_remaining: bool, streak_ok: bool, band_is_ok: bool,
 
 
 def resolve(state: dict, band: str, *, max_spawns: int, no_progress_limit: int) -> dict:
-    """把 `state` 目前已知的本窗欄位（`handback_verdict`／`handback_path`／
-    `files_changed`／`relay_seq`／`relay_no_progress_streak`）換算成四個判準輸入，
+    """把 `state` 目前已知的本窗欄位（`handback_verdict`／`handback_path`／`files_changed`／
+    `relay_seq`／`relay_no_progress_streak`／`other_driver`）換算成五個判準輸入，
     跑狀態機，回**要合併回 state 的欄位**（含 `next_state`，呼叫端 `pop()` 取用）。
 
     純函式（不寫檔、不呼叫排程器）：副作用（重排下一窗／重掛哨兵／寫痕跡）留給
@@ -400,13 +444,16 @@ def resolve(state: dict, band: str, *, max_spawns: int, no_progress_limit: int) 
     hb_text = _read_text(Path(hb_path)) if hb_path and verdict == "written" else ""
     remaining = plan_has_remaining_work(verdict, hb_text)
     changed = int(state.get("files_changed") or 0)
-    progressed = made_progress(verdict, changed)
+    other = bool(state.get("other_driver"))
+    # DEF-200-565：有別的駕駛時 `files_changed` 無從分辨是誰改的 ⇒ 不得單獨構成進度。
+    progressed = made_progress(verdict, changed) and not other
     seq = int(state.get("relay_seq") or 0)
     streak = advance_no_progress_streak(int(state.get("relay_no_progress_streak") or 0),
                                        progressed)
     outcome = next_state(has_remaining=remaining,
                         streak_ok=no_progress_ok(streak, no_progress_limit),
-                        band_is_ok=band_ok(band), under_cap=seq < max_spawns)
+                        band_is_ok=band_ok(band), under_cap=seq < max_spawns,
+                        other_driver=other)
     # 2026-09-07：`last_window_made_progress` 落盤鍵一併移除——它唯一的讀者是已拆除的
     # INV3 gate（`followup_allowed`）。`progressed` 本身仍在用：它是判準④（streak）的輸入。
     return {"next_state": outcome, "relay_no_progress_streak": streak, "files_changed": changed,
@@ -566,7 +613,8 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
         next_st = outcome.pop("next_state")
         state.update(outcome)
         if next_st == STATE_RELAY_NEXT:
-            state.update(planner._cleared_credentials())
+            # DEF-200-564：收窗時刻隨狀態塊落盤，下一窗 D5 閘以它為錨（前一棒自己的記錄不算別人）。
+            state.update(planner._cleared_credentials(), relay_prev_end=now.isoformat())
             at = now + timedelta(seconds=planner.RESET_SKEW_SECONDS)
             rc, moment = planner._register_and_record(plan, state, at, planner.RESUME_TICK)
             if rc == 0:

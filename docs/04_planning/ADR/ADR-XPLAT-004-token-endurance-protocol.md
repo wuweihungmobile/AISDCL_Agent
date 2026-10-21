@@ -449,6 +449,39 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 **已知邊界**：① harness 自動續接與哨兵探測之間有至多一個巡邏間隔的競態窗；② 寬限期是挑的、不是量出來的（實測收尾 40 s／91 s，無契約值）；③ `continuing automatically at` 無日期無時區（以切斷記錄當下的時刻、`now` 的時區解成下一個未發生者）；④ 寬限提示通道不看 `superseded_by`（他 session 接手）；⑤ harness 於 auto-continuation 之後 9～18 ms 再附一筆 `usageLimitNote:"release"` 記錄（isMeta、無 origin；內文「Earlier usage-limit notes no longer apply」），視為續接訊號、不是提示——`note_at` 只認 `wrap_up`，未知值一律忽略（寧可不叫醒）；此前把它當提示是 P1 誤判（QA 鏡審 F-1，已修）。逐項與真機重放證據見 `docs/06_quality/CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md`。
 
+### 2.11 雙駕駛：harness 已續接 ⇒ 事件已處理；同 sid 另有駕駛 ⇒ 不 spawn、不續棒（R214；DEF-200-564／565／566／567）
+
+2026-10-21 14:01～14:23（真實 sid `e9f8e2cb-c1fd-4234-8f8a-f1c546529cf1`，非構造痕跡）：harness 2.1.305 於 14:01:35 把被切斷的互動視窗自動續接（`origin.kind=auto-continuation`，9 ms 後附 `usageLimitNote=release`；名目 reset 14:00、實際晚 95 秒），哨兵 14:02:00 醒來（reset＋`RESET_SKEW_SECONDS` 120 s）、對話僅靜止 24 秒，卻判「未處理撞線」走 probe → `SESSION_RESUME`：第一支無頭 leg（14:02～14:09）與互動視窗**共用同一份逐字稿與工作樹**；leg 改了 1 個檔，relay 把它算成進度（`relay_spawned seq=1 files_changed_prev=1`），14:11 又起第二支 leg（～14:23）。兩支 leg 的 PowerShell 全被拒（DEF-200-563）。五小時額度 14:11→14:20 升 18 pp（每支 leg 以 Fable 重載 8～11 MB 逐字稿）。
+
+兩根因（碼位為修前）：
+- **RC-D（DEF-200-564）**：`sentinel_decide` 撞線分支不讀對話活性；「已處理」判準 `quota_limits.unhandled_limit_event` 只認事件後**帶 `usage` 的真 model assistant 記錄**，harness 的 auto-continuation／release user 記錄不算 ⇒ 續接後首則回應落檔前（長 turn 可達數分鐘）事件仍判未處理。
+- **RC-E（DEF-200-565）**：`relay_machine` 四判準沒有「同 sid 另有駕駛」；`files_changed`（spawn 前後 `git status` 差集）把互動視窗與它的子代理改的檔也算成 leg 的進度 ⇒ 互動視窗越忙 relay 越停不下來；`--resume-tick` 路徑不經 `sentinel_decide`，`_run_resume` spawn 前沒有任何「有人在開車」的閘。
+
+**判準（單一家＝`tools/lib/transcript_activity.py`；各層只取數、不自帶第二份）**
+
+| 層 | 判準 | 落點 |
+| --- | --- | --- |
+| D2 事件已處理 | harness 續接記錄（`type=user` 且 `origin.kind=auto-continuation` 或 `usageLimitNote=release`）晚於撞線事件 ⇒ 已處理；`recovered_at = max(最後成功回應, 最新續接記錄)`。字面只有一個家＝`quota_limits.RESUME_ORIGIN`／`NOTE_RELEASE`／`is_resume_record`（`transcript_activity` 的對話判準與 `usage_limit_signals` 皆取用，不留複本） | `quota_limits.unhandled_limit_event`／`latest_resume_at` |
+| D1 有沒有別的駕駛 | `driver_after(逐字稿, since, now)`＝since 之後、now 之前**第一筆非合成**對話記錄 `{timestamp, kind}`（真 model 的 assistant，或 `origin.kind ∈ {human, auto-continuation}` 的 user；`<synthetic>` 限額記錄本身、tool_result、peer／task-notification、system、attachment 都不算；含近 24 小時的 subagent 檔）。`live_driver(逐字稿, now, 事件)`＝`since` 取「事件時刻」與「一個巡邏間隔前」的較晚者 | `transcript_activity.driver_after`／`live_driver` |
+| D3 哨兵 | 撞線分支在月度上限 escalate 之後、reset 判斷**之前**問 `live_driver`；有 ⇒ `patrol`（理由寫明另一駕駛與距撞線秒數）；`driver=None` 時既有五分支逐位元組同行為；痕跡 `sentinel_decided.driver_after` | `planner.sentinel_decide(driver=)`／`transcript_activity.driver_verdict` |
+| D5 spawn 前閘 | `_run_resume` 在 A-PRE 之後、spawn 之前問同一個 `live_driver`，**帶錨**（`spawn_anchor`：`state["relay_prev_end"]`〔`settle_window` 排下一窗前寫入、隨狀態塊落盤，另給 2 s 收尾落盤寬容〕與逐字稿現算的未處理撞線事件時刻**兩者取較晚者**（QA 複審 R2：過期的 prev_end 不得遮住較新的撞線）；皆無 ⇒ 近期窗〔寬限／halt 路徑，以及修前武裝、狀態塊沒有 prev_end 的進行中 relay〕；痕跡 `anchor` 帶值與來源）；有 ⇒ 不 spawn、痕跡 `resume_refused_other_driver`、`route_strategy=REFUSE`、`other_driver=true`、回 1（與 A-PRE 同型，`_resume_tick` 現有三元式判 `resume_failed`） | `planner._run_resume` |
+| D4 relay 第五判準⓪ | spawn 後同一份逐字稿出現 ≥2 條**鏈頭** ⇒ `state["other_driver"]`；`next_state(other_driver=)` 排在③之前（判定序 ⓪→③→④→②→①），真值表 16→32 格；新次態 `OTHER_DRIVER_STOP`：`relay_stopped why=other_driver`、loud、持久結局 `other_driver`、不續棒、重掛哨兵；`files_changed` 保留但有 other_driver 時不構成進度 | `transcript_activity.chain_heads_after`／`relay_machine.other_driver`／`next_state`／`resolve` |
+
+**與任務書的兩處偏離（理由＝防雙保險反過來造成永不續跑）**
+1. D3／D5 的「有人在開車」不是單看「事件之後有記錄」，而是**再加一個巡邏間隔的近期窗**（`HALT_QUIESCE_SECONDS`，與寬限提示「不叫醒」同一把尺）。只看事件之後：使用者撞線後戳了一下死視窗就走，那筆人類記錄永遠在事件之後 ⇒ 哨兵永遠 patrol、reset 後再也不替走掉的人續跑。D5 的 `since` 不採 `state["reset_at"]`（狀態塊的 `reset_at` 可能是上一個視窗的殘值，直接 probe 的路徑上更是空的 ⇒ 殘值會讓每次 spawn 被永久拒絕）。**修復棒二（QA 鏡審 P2-1／P3-1）**：D5 光有近期窗不夠——無頭 leg 與互動視窗寫同一份逐字稿，relay 下一窗在收窗後 `RESET_SKEW_SECONDS`（120 s）起、遠小於一個巡邏間隔，前一棒自己的記錄會被當成另一駕駛（第二棒必被拒並報假的雙駕駛警報；真實事故兩棒間隔 156 s）；首棒撞線前緊貼限額記錄的最後一則真回應同理。故 D5 帶錨（見上表 D5 列；兩錨取較晚者）；退路「now − 窗」只在寬限／halt 路徑，與修前武裝、狀態塊沒有 `relay_prev_end` 的進行中 relay 走到——後者的第二棒仍可能被近期窗誤拒（多拒不多開；下一次武裝即有錨），列為已登記殘留。
+2. 鏈頭判準字面修正：任務書寫「`uuid` 不是 spawn 後任何記錄的 `parentUuid`」描述的是鏈**尾**；實測成立的是鏈**頭**＝`parentUuid`（compact 邊界取 `logicalParentUuid`）不指向 spawn 後任何記錄者。compact 邊界的 `parentUuid` 為空，不取 `logicalParentUuid` 會把單一駕駛的 compact 誤算成第二條鏈。
+
+**實測依據（本機逐字稿，唯讀）**：把全部 155 支逐字稿中 `entrypoint=sdk-cli` 的連續段（＝無頭 leg，記錄間隔 ≤300 s 併為一段）逐一算鏈頭——119 段裡 **118 段單駕駛恰 1 條**（最長 5,152 秒；其中 bf8f13ee 含 1 次 compact 邊界，不取 `logicalParentUuid` 會算成 2 條＝把單一駕駛誤判成雙駕駛）、**1 段＝事故 e9f8e2cb 的兩支 leg（間隔不足 300 s 併為一段）恰 2 條**（一條 `sdk-cli`、一條 `cli`；不取 `logicalParentUuid` 為 4 條）。重放探針 `tools/probe/sentinel_decide_replay.py --sid e9f8e2cb-… --now 2026-10-21T14:02:01+08:00`：舊判準 `probe`（花探測＋spawn 第二個駕駛），新判準 `patrol`（D2：事件已被 14:01:35 的續接記錄處理）；把 D2 關掉、只留 D3 閘同樣 `patrol`（理由「撞線後 9772s 已有另一駕駛的對話記錄（auto-continuation）」）——雙保險各自擋得住。逐項輸出見 `docs/06_quality/CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md`〈八〉。
+
+**〈邊界〉誠實劃界**
+- 視窗開著但靜止 ≥ 一個巡邏間隔、人回來才打字的那種雙駕駛仍是 §2.10 設計面接受的風險，本輪不解（D4 只在那支 leg 跑完後停棒，最多重疊一棒）。
+- D5 看不到「互動視窗在一個巡邏間隔以上都沒寫任何記錄」（例如單一長工具呼叫）的雙駕駛；D4 事後以鏈頭補。
+- `uuid`／`parentUuid`／`logicalParentUuid`／`isSidechain`／`origin.kind` 皆為 harness 2.1.30x 的**實測欄位、不是契約**；任一改名 ⇒ 鏈頭數退回 0／續接記錄不辨識＝退回修前行為（fail-safe 方向：不誤停、不誤判處理）。`entrypoint`（`cli`／`sdk-cli`／`claude-vscode`）亦是實測值，故判準**不讀**它（被否決的「以 entrypoint 分辨互動與無頭」）。
+- harness 自動續接時刻與名目 reset 有差（本例 95 秒）；哨兵 `+120 s` skew 剛好晚於它，窗口只有 25 秒——這是 D2 必須存在的原因，不是巧合可以仰賴。
+- **`~/.autosdd/context_feed/<sid>.json` 的 `ts`（statusLine 信標，D6）不作第二訊號**。三態實測（本機，唯讀）：busy＝`ts` 與最後一筆 assistant 記錄相差 ≤1 s（14:48:54 對 06:48:54Z）；開著但無對話（本窗 19:07:52 起）＝`ts` 凍結 9 分 32 秒、至 19:17:24 才被背景任務通知事件推動一次（19:17:41 的 task-notification），**事件驅動、不是心跳**；視窗關閉＝凍結在最後一次渲染（d6dfce97 於 05:04:49 後凍結，視窗 07:54 才關，其間兩小時五十分 `ts` 不動）。結論：開著的閒置視窗與已關閉的視窗在信標上分不開，信標證不了「有人活著」，只證「某事件觸發過渲染」——不用，只登記邊界。「idle 10 分鐘」無法由子代理受控構造（主控窗須閒置），以上為自然樣本。
+- **D9（DEF-200-566）hook 自動武裝的任務書落點**：hook 的 `write_resume_plan`／`arm_when_earned` 此前用 `tempfile.gettempdir()`，planner CLI 預設與 `reap_plans` 早在 2026-09-05 事故後改住 `endurance_env.plan_dir()`（持久：等額度期間系統暫存會被清）⇒ 同 sid 兩份任務書、排程 Action 各指一份（事故當日 hook 武裝指 `%TEMP%`、主控手動 `--arm-sentinel` 把 Action 改指 `~/.autosdd/plans`）。修法＝甲：hook 以 `from endurance_env import plan_dir` 取同一個家（不留第二份目錄解析；hook raw 行數 1089 不變）；`sentinel_lifecycle.gc` 預設讀 `plan_dir()`（顯式 `tmp_dir` 仍同一格，其餘痕跡仍在系統暫存）；測試圍籬 `fence_enter` 把 `AUTOSDD_PLAN_DIR` 釘進隔離根（`<root>/plans`），免得全套 in-process 的 hook 路徑把 fixture 任務書寫進真實 `~/.autosdd/plans`；`test_the_hook_and_the_cli_arm_the_plan_in_the_same_directory` 釘「兩個入口武裝出來的是同一個檔」。**舊任務書處置**：修前已武裝的 session 在該 session 內仍用 `%TEMP%` 那份（排程 Action 指它）——tick 照常讀它、**不自動搬、不砸**（免得無人回合動檔），只在痕跡 `sentinel_decided.plan_in_temp` 出聲；下一次武裝（新 session 的 hook 武裝，或任何一次 `--arm-sentinel`）以 `-Force` 用新路徑重註冊同名排程，Action 從此指向 `plan_dir()`；`%TEMP%` 舊檔不再被讀、也不被自動收（`reap_plans` 只掃 `plan_dir()`），交系統暫存清理（一次性、量有限）。已知殘留窗：修前武裝的 session 在被重新武裝之前若有人手動 `--arm-sentinel`，同事故形態仍會重現一次（兩份任務書）——量有限、不再擴大。
+- **D10（DEF-200-567）任務書 §3 填入**：喚醒 prompt 要 leg「照任務書第 3 節做」，而骨架 §3 只有 `claude -r` 與 TODO（事故兩支 leg 的 handback 都記這件事，只能讀記憶檔自救）。`--arm-sentinel`／`--arm-endurance` 武裝時，同 sid 的 handback（`resume_route.handback_report`）存在且「## 下一步指令」節非空 ⇒ `relay_machine.handback_next_steps` 把該節原文填進 §3 的 TODO 位置（同一份文件、標明來源路徑與 handback mtime，並重申「宣稱不是證據」）；否則 §3 留 TODO（與修前逐字相同），武裝成功時在憑證旁印一行「⚠️ 任務書 §3 仍是 TODO…」；喚醒 prompt（`_RESUME_RULES`，SESSION_RESUME 與 FRESH 兩條路共用的唯一常數）加一句「任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動」——只有指引、不含任何指令內容（2026-09-07 裁決「不注入 Workflow 續跑提示」仍由 `test_the_resume_prompt_never_names_a_workflow_resume_call` 釘住）。解析邊界：handback 原文若含 relay 狀態塊定界字串（`RELAY_BEGIN`），`parse_relay` 的 `text.find` 會先命中注入處——現 `~/.autosdd/handback/*.md` 命中 0 筆（理論，不加守衛）。骨架（不帶武裝旗標）一律不代填：那是人要填的欄位。
+
 ---
 
 ## 3. 被否決的方案（各記為何否決）

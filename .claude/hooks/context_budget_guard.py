@@ -155,6 +155,7 @@ SENTINEL_OFF_ENV = "AUTOSDD_SENTINEL_OFF"
 #: ——四者關掉的是四件不同的事，共用一個會讓「我只是不想看到那則 JSON」順手把阻斷或續航
 #: 一起關掉。已登記進 `quota_policy.ENV_SPEC`（⇒ `.env` 也到得了，R82／C2 那條路）。
 SIGNAL_OFF_ENV = "AUTOSDD_CONTEXT_SIGNAL_OFF"
+from endurance_env import plan_dir  # noqa: E402  # 任務書居所 SSOT（DEF-200-566）：hook 不留第二份
 
 #: 無 console 父行程下 spawn 子行程的**防彈窗**兩層防線（`NO_WINDOW` 旗標 ＋
 #: `quiet_python()` 載具）唯一的家＝`tools/lib/win_spawn.py`（刻意沒有 try/except：
@@ -746,7 +747,7 @@ def write_resume_plan(transcript: Path) -> str:
     planner = repo_root() / "tools" / "session_resume_planner.py"
     if not planner.is_file():
         return ""
-    out = Path(tempfile.gettempdir()) / f"{PLAN_PREFIX}{session_id_of(transcript)}.md"
+    out = plan_dir() / f"{PLAN_PREFIX}{session_id_of(transcript)}.md"
     try:
         subprocess.run(
             [quiet_python(), str(planner), "--transcript", str(transcript),
@@ -835,9 +836,8 @@ def arm_when_earned(transcript: Path) -> str:
         return "disabled"
     sid = session_id_of(transcript)
     try:
-        return sentinel_lifecycle.maybe_arm(
-            transcript, sid, spawn=spawn_sentinel,
-            plan_path=str(Path(tempfile.gettempdir()) / f"{PLAN_PREFIX}{sid}.md"))
+        return sentinel_lifecycle.maybe_arm(transcript, sid, spawn=spawn_sentinel,
+                                            plan_path=str(plan_dir() / f"{PLAN_PREFIX}{sid}.md"))
     except Exception:  # noqa: BLE001 — 見上
         return "error"
 

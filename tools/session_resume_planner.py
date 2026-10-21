@@ -607,7 +607,7 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: float | None,
-                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None) -> dict:  # noqa: E501
+                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None, driver: dict | None = None) -> dict:  # noqa: E501
     """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
 
     🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
@@ -622,10 +622,14 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
     DEF-200-560／562：`idle_seconds` 一律是**對話**靜止秒數（`transcript_activity`，
     非檔案 mtime）；`grace`＝未處理的 harness 寬限提示（`unhandled_grace_note`）。優先序＝
     撞線事件 ＞ halt 標記 ＞ 寬限提示 ＞ idle；`grace=None` 時既有五分支逐位元組同行為。
+    DEF-200-564：`driver`＝撞線事件之後另一駕駛的對話記錄（`transcript_activity.live_driver`，
+    一個巡邏間隔內仍有動靜）；有 ⇒ 撞線分支在 reset 判斷**之前**先 patrol（由它接手，不花探測、
+    不 spawn 第二個駕駛）；月度上限仍 escalate（錢的事人才能解）；`driver=None` 逐位元組同舊行為。
     """
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
             return {"action": "escalate", "at": None, "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}  # noqa: E501
+        if (v := transcript_activity.driver_verdict(event, driver, now)) is not None: return v  # noqa: E501,E701 — DEF-200-564
         reset_at = guard.parse_reset_at(event["text"], local_time(event["timestamp"], now.tzinfo) or now)  # noqa: E501
         if reset_at is None:
             return {"action": "escalate", "at": None, "reason": f"偵測到撞線但訊息裡解不出 reset 時刻 ⇒ 拒絕用猜的重排（猜出來的會醒在錯的時間）。逐字：{event['text'][:80]}"}  # noqa: E501
@@ -824,10 +828,16 @@ def _alert_on_rearm_failure(state: dict, plan: Path, rc: int, context: str) -> N
     escalation.alert(f"{context}（rc={rc}）：喚醒鏈斷線，已清 arm latch 供下次 SessionStart 重新評估", state, loud=True, plan=plan)  # noqa: E501
 
 
-def render_plan(data: dict, now: str) -> str:
-    """任務書骨架。四項欄位齊備；無法自動得知的一律 `TODO:`，本檔不代填。"""
+def render_plan(data: dict, now: str, next_steps: str = "") -> str:
+    """任務書骨架。四項欄位齊備；無法自動得知的一律 `TODO:`，本檔不代填。
+
+    DEF-200-567：`next_steps`＝武裝時從同 sid 的 handback 取得的「下一步指令」原文
+    （`relay_machine.handback_next_steps`）；有 ⇒ 填進 §3 的 TODO 位置（標明來源與 mtime，不是本檔
+    自己生成的宣稱），沒有 ⇒ §3 仍是 TODO。
+    """
     used = f"{data['used']:,}" if data["used"] is not None else "（量不到）"
     ratio = f"{data['ratio']:.1%}" if data["ratio"] is not None else "（量不到）"
+    step3 = next_steps or "TODO: 重啟後要跑的第一組指令，**寫絕對路徑**（PowerShell 工具的 cwd 會跨呼叫持續，\n相對路徑會找錯地方）。"  # noqa: E501 — 無 handback 時與修前逐字相同
     return f"""# 可重啟點任務書 — session `{data['session_id']}`
 
 > 由 `tools/session_resume_planner.py` 產生於 {now}。
@@ -862,8 +872,7 @@ TODO: 逐條列，含「為什麼還沒做」（被什麼擋住／等誰）。
 claude -r {data['session_id']}
 ```
 
-TODO: 重啟後要跑的第一組指令，**寫絕對路徑**（PowerShell 工具的 cwd 會跨呼叫持續，
-相對路徑會找錯地方）。
+{step3}
 
 ## 4. 禁止事項
 
@@ -905,19 +914,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", help="--pace 用：目標模型名（不給則先從逐字稿自動推導；解不出時模型分軌軸不進 cap、只出聲）")  # noqa: E501
     parser.add_argument("--check-autocompact", action="store_true", dest="check_autocompact", help="只印 harness 的 autocompact 姿態；**被關掉時 rc=1**" "（不需要逐字稿，可單獨跑）")  # noqa: E501
     parser.add_argument("--print-schtasks-command", action="store_true", dest="print_schtasks", help="只印離線排程指令與取證指令，**不執行、不註冊**" "（會一併產生任務書：排程起來的那一跑要吃它）")  # noqa: E501
-    parser.add_argument("--register-schtasks", action="store_true", dest="register_schtasks",
-                        help="真的註冊排程並當場取證；拿不到 NextRunTime 一律 rc=1")
-    parser.add_argument("--verify-schtasks", action="store_true", dest="verify_schtasks",
-                        help="只取證既有排程（Get-ScheduledTask + NextRunTime）")
-    parser.add_argument("--remove-schtasks", action="store_true", dest="remove_schtasks",
-                        help="移除排程並驗證它真的不見了")
-    parser.add_argument("--task-name", default=DEFAULT_TASK_NAME,
-                        help=f"排程工作名稱（預設 {DEFAULT_TASK_NAME}）")
+    parser.add_argument("--register-schtasks", action="store_true", dest="register_schtasks", help="真的註冊排程並當場取證；拿不到 NextRunTime 一律 rc=1")  # noqa: E501
+    parser.add_argument("--verify-schtasks", action="store_true", dest="verify_schtasks", help="只取證既有排程（Get-ScheduledTask + NextRunTime）")  # noqa: E501
+    parser.add_argument("--remove-schtasks", action="store_true", dest="remove_schtasks", help="移除排程並驗證它真的不見了")  # noqa: E501
+    parser.add_argument("--task-name", default=DEFAULT_TASK_NAME, help=f"排程工作名稱（預設 {DEFAULT_TASK_NAME}）")  # noqa: E501
     parser.add_argument("--at", default=None,
                         help="觸發時刻（PowerShell 運算式／時間字串）；省略＝取額度快取的實測 resets_at＋緩衝，解不出即拒絕")  # noqa: E501
     parser.add_argument("--arm-endurance", action="store_true", dest="arm_endurance", help="額度耗盡續航武裝：從逐字稿觀測 reset 時刻 → 寫任務書＋狀態塊 → " "註冊一次性 schtasks → 取證。月度支出上限一律拒絕武裝（等待無效）")  # noqa: E501
-    parser.add_argument("--probe-quota", action="store_true", dest="probe_quota",
-                        help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")
+    parser.add_argument("--probe-quota", action="store_true", dest="probe_quota", help="花一次最便宜的呼叫問「額度回來了沒」；額度通時 rc=0、耗盡時 rc=1")  # noqa: E501
     parser.add_argument("--pace", action="store_true", help="**現在能派幾個 agent**（R84／6b）：一行印出 可派數／cap／band／" "最緊那一軸與它距 reset 幾分鐘。只讀額度快取＝零 token；" "快取不可用時每 TTL 至多補量一次（那個端點不是模型呼叫）")  # noqa: E501
     # 🔴 R100：**輸入面**的出處守衛（唯讀、零 token）。既有守衛全裝在輸出面（宣稱要出處），
     # 而一份外部貼進來的額度讀數此前沒有任何東西問它「這是現值嗎」——2026-08-23 22:53 的
@@ -997,12 +1001,7 @@ def _cleared_credentials() -> dict:
 # 少一個鍵就會被 `relay_problems()` 判紅——那個判準只有在鍵真的來自同一個家時才對得上。
 def _base_state(session_id: str, plan: Path, args, kind: str, task: str) -> dict:
     """武裝時寫進任務書的狀態塊骨架（各路再各自覆寫自己那幾格）。"""
-    return {"schema": RELAY_SCHEMA, "session_id": session_id, "plan_path": str(plan),
-            "state": "armed", "kind": kind, "reset_at": "", "reset_source": "operator",
-            "attempts": 0, "max_attempts": MAX_PROBE_ATTEMPTS, "task_name": task,
-            "allow_resume": bool(args.allow_resume), **_cleared_credentials(),
-            "carrier": schedule_backend.select().name,
-            "log_path": str(endurance_log_path(plan))}
+    return {"schema": RELAY_SCHEMA, "session_id": session_id, "plan_path": str(plan), "state": "armed", "kind": kind, "reset_at": "", "reset_source": "operator", "attempts": 0, "max_attempts": MAX_PROBE_ATTEMPTS, "task_name": task, "allow_resume": bool(args.allow_resume), **_cleared_credentials(), "carrier": schedule_backend.select().name, "log_path": str(endurance_log_path(plan))}  # noqa: E501 — DEF-200-564／565：折成單行騰出 LOC（本檔 guardrail_cli 750／750 餘裕 0；鍵集合與順序一字未動）
 
 
 # 武裝／重排的共同尾段。三條路走同一份，是因為「拿不到 `NextRunTime` 卻仍把 state
@@ -1105,7 +1104,7 @@ STRATEGY_FRESH = "FRESH_SESSION_WITH_STATE"
 STRATEGY_REFUSE = "REFUSE"
 #: 兩條路共用的護欄尾段（重驗＋禁 commit/push）。住常數而不是兩處各自內嵌：降級路
 #: 少帶護欄句＝FRESH 那一跑比 RESUME 少一層約束，而漏帶是靜默的。
-_RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。"
+_RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動。"  # noqa: E501 — DEF-200-567：只加一句指引，不含任何指令內容
                  "🔴 本回合無人看管，禁止 commit／push"
                  "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。🔴 收窗前必寫 handback 檔（路徑由 prompt 注入），四節齊備：## 做了什麼／## 驗了什麼（附實測 rc）／## 卡在哪／## 下一步指令。")  # noqa: E501 — v2.1.13 G2 批 (b)：收尾義務句行內擴寫（planner LOC 餘裕 1，不開新行）
 
@@ -1183,7 +1182,7 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 # `_resume_tick` 必須據此判斷，`None` 時不得把狀態塊寫成 `"resumed"`。
 def _run_resume(args, state: dict, log: Path) -> int | None:
     """額度回來且已授權時，真的把工作續跑起來（帶無人看管訊號）。"""
-    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); state["handback_verdict"], state["files_changed"] = "missing", 0  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值
+    sid = str(state.get("session_id") or ""); spawn_at = datetime.now().timestamp(); state["handback_verdict"], state["files_changed"], state["other_driver"] = "missing", 0, False  # noqa: E501,E702 — G2 後檢的 mtime 錨；v2.1.13 G3：本窗乾淨初值；DEF-200-565：`other_driver` 同為本窗事實（狀態塊跨窗持久，不得沿用上一窗的真值）
     transcript = (Path(str(state["transcript"])) if state.get("transcript")
                   else resolve_transcript(sid) if sid else None)
     route = choose_resume_route(args.probe_command, sid, transcript,
@@ -1202,6 +1201,19 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     if (bad := resume_route.preflight_problem()) is not None:
         append_log(log, "resume_authz_preflight_failed", strategy=route["strategy"], why=bad)
         print(f"❌ A-PRE 拒 spawn：{bad}", file=sys.stderr); state["route_strategy"] = STRATEGY_REFUSE; return 1  # noqa: E501,E702 — R115 修復 F2：A-PRE 拒絕視同 REFUSE，供 :1322 三元式判 resume_failed（拒絕≠跑過） round-label-ok
+    # 🔴 DEF-200-565（RC-E，2026-10-21 14:02～14:23 事故）：spawn 前**最後一道**——此刻同 session
+    # 另有駕駛（互動視窗一個巡邏間隔內仍在動；判準＝`transcript_activity.live_driver` 單一家，與
+    # 哨兵撞線分支同一把尺）⇒ 不 spawn：兩個行程共用同一份逐字稿與工作樹，誰也分不清誰改了什麼。
+    # 與 A-PRE 同型（REFUSE＋回 1，`_resume_tick` 現有三元式判 resume_failed）；`other_driver` 置真
+    # ⇒ `settle_window` 以 OTHER_DRIVER_STOP 收窗（loud、不續棒、重掛哨兵），不誤記成 no_progress。
+    # 這條路徑不經 `sentinel_decide`（`-Once` 續航排程與 relay 下一窗直接進 `_resume_tick`），
+    # 所以這裡是它們唯一的閘。🔴 修復棒二（QA P2-1／P3-1）：閘要**帶錨**——relay 前一棒自己的
+    # 記錄（下一窗在收窗後 120 s 起）與首棒撞線前緊貼限額記錄的最後一則真回應都不是另一駕駛；
+    # 錨＝`relay_prev_end`＞未處理撞線事件時刻＞無（近期窗），見 `transcript_activity.spawn_anchor`
+    anchor = transcript_activity.spawn_anchor(transcript, state)
+    if (other := transcript_activity.live_driver(transcript, datetime.now().astimezone(), anchor)) is not None:  # noqa: E501
+        append_log(log, "resume_refused_other_driver", strategy=route["strategy"], driver_after=other, anchor=anchor)  # noqa: E501
+        print(f"❌ 拒 spawn：同 session 另有駕駛（{other['kind']}，{other['timestamp']}）", file=sys.stderr); state["route_strategy"], state["other_driver"] = STRATEGY_REFUSE, True; return 1  # noqa: E501,E702
     # 🔴 R80 P0 的第二層（兩層都補才算修好，缺任一層續跑那一跑都做不了事）。
     # · `cwd=_REPO_ROOT`：沒有它時 cwd 繼承自排程行程＝system32，而 Claude Code 用 cwd
     #   決定「本 session 允許的工作目錄」⇒ 續跑碰不到 repo 一個檔。**排程 Action 的
@@ -1233,7 +1245,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
     # v2.1.13 G2 批 (b)：spawn 返回後的交接後檢（不依賴模型合作；判準本體住 resume_route，
     # 非 written ⇒ `handback_missing` 事件＋alert loud——痕跡與叫人載體由本檔注入）。
-    after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照
+    after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after); state["other_driver"] = relay_machine.other_driver(transcript, spawn_at)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照；DEF-200-565：spawn 後逐字稿鏈頭 ≥2＝另有駕駛（判準⓪的取數）
     hbv = resume_route.handback_postcheck(route, spawn_at, state, log, append_log, escalation.alert); state["handback_verdict"] = hbv  # noqa: E501,E702 — v2.1.13 G3
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
     # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
@@ -1491,10 +1503,10 @@ def _sentinel_tick(args) -> int:
     # 的 `guardrail_cli` tier——新邏輯放不進本檔，只能在既有呼叫點換一個更胖的被呼叫端）。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
     fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
-    idle, grace = transcript_activity.conversation_view(transcript, now)  # DEF-200-560／562
+    idle, grace = transcript_activity.conversation_view(transcript, now); driver = transcript_activity.live_driver(transcript, now, event) if event else None  # noqa: E501,E702 — DEF-200-560／562；DEF-200-564：撞線事件之後另一駕駛（一個巡邏間隔內仍在動）
     halt = quota_gate.read_halt_marker(sid := state.get("session_id") or "")
-    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace)  # noqa: E501
-    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, **fan)  # noqa: E501
+    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver)  # noqa: E501
+    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, driver_after=driver, anchor={"timestamp": event["timestamp"], "source": "limit_event"} if event else None, plan_in_temp=plan.parent.resolve() == Path(tempfile.gettempdir()).resolve(), **fan)  # noqa: E501 — DEF-200-566：修前武裝的哨兵任務書仍在系統暫存 ⇒ 痕跡出聲（不自動搬）
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
@@ -1646,7 +1658,8 @@ def main(argv: list[str]) -> int:
         # 2026-08-16 00:42 它整檔覆寫任務書砸掉哨兵狀態塊（事故時間線＝Resume 證據檔 §L-4）。
         relic = parse_relay(out.read_text(encoding="utf-8")) if out.is_file() else None
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(render_plan(data, now), encoding="utf-8", newline="\n")
+        steps = relay_machine.handback_next_steps(data["session_id"]) if args.arm_sentinel or args.arm_endurance else ""  # noqa: E501 — DEF-200-567：武裝時把同 sid handback 的「下一步指令」填進 §3
+        out.write_text(render_plan(data, now, steps), encoding="utf-8", newline="\n")
         if relic is not None:
             write_relay(out, relic)
     except (OSError, ValueError) as exc:
@@ -1663,8 +1676,9 @@ def main(argv: list[str]) -> int:
     # `--arm-sentinel` 仍優先於 `--arm-endurance`。
     if args.arm_sentinel or args.arm_endurance:
         print()
-        arm = _arm_sentinel if args.arm_sentinel else _arm_endurance
-        return arm(args, transcript, out)
+        rc = (_arm_sentinel if args.arm_sentinel else _arm_endurance)(args, transcript, out)
+        if rc == 0 and not steps: print(f"⚠️ 任務書 §3 仍是 TODO（沒有可用的 handback「下一步指令」）⇒ 喚醒窗只能靠 prompt 指引去讀 handback 與記憶檔〈可重啟點〉；有空先填：{out}")  # noqa: E501,E701 — DEF-200-567：憑證旁出聲
+        return rc
     # 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：per-session 命名（同 `_arm_endurance`）——兩條路共用同一個算法，讓  # noqa: E501
     # `--print-schtasks-command` 印出的指令與 `--register-schtasks` 真的註冊的是同一份。
     if args.print_schtasks or args.register_schtasks:

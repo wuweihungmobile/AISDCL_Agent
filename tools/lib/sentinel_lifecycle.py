@@ -337,7 +337,7 @@ def _remove_task(task: str) -> int:
     return schedule_backend.select().disarm(task)
 
 
-def _sweep_artifacts(session_id: str, tmp: Path) -> list[str]:
+def _sweep_artifacts(session_id: str, tmp: Path, plans: Path | None = None) -> list[str]:
     """把該 session 的哨兵痕跡一起收掉（任務書／閂鎖／boot log／水位 state）。
 
     🔴 **R84／ARCH-06 已收（此前是本函式自陳的「兩個家」）**：任務書那一件現在交給
@@ -352,7 +352,7 @@ def _sweep_artifacts(session_id: str, tmp: Path) -> list[str]:
     """
     from quota_escalation import reap_plans  # noqa: PLC0415 — 見 docstring（成環）
 
-    gone = list(reap_plans(session_id=session_id, root=tmp, age=None))
+    gone = list(reap_plans(session_id=session_id, root=plans or tmp, age=None))
     for name in (f"{ARM_MARKER_PREFIX}{session_id}.json",
                  f"autosdd_sentinel_boot_{session_id}.log",
                  f"autosdd_ctxguard_{session_id}.json"):
@@ -421,12 +421,15 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
     if tasks is None:
         return None
     tmp = Path(tmp_dir or tempfile.gettempdir())
+    # DEF-200-566：任務書住 `endurance_env.plan_dir()`（hook 自動武裝與 planner CLI 同一個家）；
+    # 其餘痕跡（閂鎖／boot log／水位 state）仍在系統暫存。顯式給 `tmp_dir`（測試）＝全部同一格。
+    plans = tmp if tmp_dir else endurance_env.plan_dir()
     protected_ids = set(keep) | {_newest_session(_transcript_dir())}
     now = time.time()
     rows: list[dict] = []
     for task in tasks:
         sid = session_of(task)
-        plan = tmp / f"autosdd_resume_plan_{sid}.md"
+        plan = plans / f"autosdd_resume_plan_{sid}.md"
         recorded, state = plan_evidence(plan)
         transcript = Path(recorded) if recorded else None
         # 🔴 沒記／非絕對路徑一律傳 `None`（＝量不到），**不得**塌成 `False`：那個塌陷正是本檔第一版
@@ -441,7 +444,7 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
                "state": state, "idle_hours": None if idle is None else round(idle / 3600, 2)}
         if reap and apply:
             row["unregister_rc"] = _remove_task(task)
-            row["swept"] = _sweep_artifacts(sid, tmp)
+            row["swept"] = _sweep_artifacts(sid, tmp, plans)
             # 痕跡**最後**寫：這一行要能同時交代排程與殘骸兩件事的結果，而它的落檔路徑
             # 只由任務書**路徑字串**推導（不讀那個檔）⇒ 殘骸已被刪掉不影響它。
             row["trace"] = _record_reap(plan, task=task, session_id=sid, why=why,
@@ -610,7 +613,11 @@ TEMP_FENCE_ENV = ("TEMP", "TMP", "TMPDIR")
 #: 第五個變數：持久痕跡目錄（`endurance_env.TRACE_DIR_ENV`）。卸載痕跡 `record_unload` 刻意以
 #: passwd 家目錄落點、不吃隔離 HOME（DEF-200-455：隔離正是讓證據消失的原因），所以圍籬
 #: 必須顯式把它指進隔離根，否則全套與單模組直跑會把 fixture 卸載列寫進真實 traces。
-CACHE_FENCE_ENV = (quota_meter.CACHE_DIR_ENV, endurance_env.TRACE_DIR_ENV)
+#: 第六個變數：持久任務書目錄（`endurance_env.PLAN_DIR_ENV`，DEF-200-566）。hook 自動武裝與 planner
+#: CLI 同一個家（`plan_dir()`，跟 `$HOME` 走）之後，圍籬不指進隔離根的話，全套 in-process 跑的
+#: hook 路徑會把 fixture 任務書寫進開發者真實 `~/.autosdd/plans`。
+CACHE_FENCE_ENV = (quota_meter.CACHE_DIR_ENV, endurance_env.TRACE_DIR_ENV,
+                   endurance_env.PLAN_DIR_ENV)
 
 #: 隔離根前綴。刻意**不以 `autosdd_` 開頭**：`leak_fence` 的輔助訊號 glob 就是 `autosdd_*`，
 #: 隔離根自己不得被它算成「新增的洩漏」。
@@ -659,6 +666,8 @@ def fence_enter(parent: Path | None = None) -> dict:
         traces = endurance_env.fence_trace_dir(handle["root"].name)
         traces.mkdir(parents=True, exist_ok=True)
         os.environ[endurance_env.TRACE_DIR_ENV] = str(traces)
+        os.environ[endurance_env.PLAN_DIR_ENV] = str(
+            endurance_env.fence_trace_dir(handle["root"].name, "plans"))  # 同上：不與 TEMP 同一格
         tempfile.tempdir = handle["root"].name
     return handle
 
@@ -674,6 +683,7 @@ def fence_exit(handle: dict) -> None:
     if root is not None:
         want = {n: root.name for n in handle["saved"]}
         want[endurance_env.TRACE_DIR_ENV] = str(endurance_env.fence_trace_dir(root.name))
+        want[endurance_env.PLAN_DIR_ENV] = str(endurance_env.fence_trace_dir(root.name, "plans"))
         held = [(tempfile.tempdir, root.name),
                 *((os.environ.get(n), want[n]) for n in handle["saved"]
                   if os.environ.get(n) is not None)]  # 被測試清掉的變數不算亂序（複審鏡 A N-11）

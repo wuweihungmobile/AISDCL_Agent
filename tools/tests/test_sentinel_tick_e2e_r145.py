@@ -160,6 +160,62 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
         (done,) = [e for e in map(json.loads, log.splitlines()) if e["event"] == "sentinel_disarm"]
         self.assertTrue(done["cleared_halt"] and "接手" in done["why"], done)
 
+    # ── DEF-200-564（RC-D，2026-10-21 14:02:01 事故）：另一駕駛仍在動 ⇒ 不 probe、不 spawn
+    _HIT = "You've hit your session limit · resets 9am (Asia/Taipei)"
+
+    @staticmethod
+    def _ago(seconds: float) -> str:
+        return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+    def _tick_with(self, sid: str, *tail: dict, plans: Path | None = None):
+        """事件錨 2026-08-07（reset 早已過⇒原本 probe）＋ tail；回 (rc, 註冊, resume, 末筆決策)。"""
+        head = [{"type": "assistant", "timestamp": "2026-08-07T00:30:00Z",
+                 "message": {"model": "claude-opus-5", "usage": {"input_tokens": 5}}},
+                {"type": "assistant", "timestamp": "2026-08-07T00:44:01.000Z",
+                 "message": {"model": guard.SYNTHETIC_MODEL, "content": [{"text": self._HIT}]}}]
+        transcript = self.tmp / f"{sid}.jsonl"
+        transcript.write_text("\n".join(map(json.dumps, [*head, *tail])) + "\n", encoding="utf-8")
+        plan, (registers, resumes) = self._write_plan(sid, transcript, f"T-{sid}"), ([], [])
+        if plans is not None:
+            plans.mkdir(parents=True, exist_ok=True)
+            (plans / plan.name).write_text(plan.read_text(encoding="utf-8"), encoding="utf-8")
+            plan = plans / plan.name  # 讀寫複本而非 Path.replace：不新增 Windows 目錄項原語站點
+        mock_patch = unittest.mock.patch.object
+        with mock_patch(planner, "_register_and_record", lambda p, s, at, tick: (
+                registers.append(tick), (0, "cred-e2e-stub"))[1]), \
+                mock_patch(planner, "_resume_tick", lambda a: resumes.append(a) or 7):
+            rc = planner._sentinel_tick(self._args(plan, f"T-{sid}"))
+        rows = [json.loads(ln) for ln in
+                planner.endurance_log_path(plan).read_text(encoding="utf-8").splitlines()]
+        return rc, registers, resumes, [r for r in rows if r["event"] == "sentinel_decided"][-1]
+
+    def test_a_live_driver_makes_the_real_tick_patrol_and_the_trail_names_them(self) -> None:
+        """事故重放：auto-continuation 剛寫、首則回應未落檔 ⇒ 事件已處理；人類剛打字 ⇒ 另一駕駛
+        （痕跡記下是誰）。都 patrol 不 probe；DEF-200-566：任務書在暫存只在 `plan_in_temp` 出聲。"""
+        auto = {"type": "user", "timestamp": self._ago(25), "isMeta": True,
+                "origin": {"kind": "auto-continuation"}}
+        human = {"type": "user", "timestamp": self._ago(60), "origin": {"kind": "human"}}
+        for sid, rec, kind, plans in (("auto", auto, None, None), ("human", human, "human", None),
+                                      ("plans", human, "human", self.tmp / "plans")):
+            with self.subTest(sid):
+                rc, registers, resumes, row = self._tick_with(f"sid-rcd-{sid}", rec, plans=plans)
+                self.assertEqual((rc, resumes, registers), (0, [], [planner.SENTINEL_TICK]))
+                self.assertEqual((row["action"], (row["driver_after"] or {}).get("kind"),
+                                  row["plan_in_temp"], "另一駕駛" in row["reason"]),
+                                 ("patrol", kind, plans is None, kind is not None), row)
+
+    def test_no_live_driver_after_the_event_still_gets_the_old_probe(self) -> None:
+        """負控：事件之後只有重試的限額記錄、或戳了死視窗就走（靜止逾一個巡邏間隔）⇒ 照舊 probe。"""
+        again = {"type": "assistant", "timestamp": self._ago(30),
+                 "message": {"model": guard.SYNTHETIC_MODEL, "content": [{"text": self._HIT}]}}
+        stale = {"type": "user", "origin": {"kind": "human"},
+                 "timestamp": self._ago(planner.SENTINEL_INTERVAL_SECONDS + 600)}
+        for sid, rec in (("limit", again), ("stale", stale)):
+            with self.subTest(sid):
+                rc, _registers, resumes, row = self._tick_with(f"sid-rcd-{sid}", rec)
+                self.assertEqual((rc, len(resumes), row["action"], row["driver_after"]),
+                                 (7, 1, "probe", None))
+
 
 _AT = "'2099-01-01 00:00:00'"  # 顯式 --at：避開額度快取（全程不碰網路）
 

@@ -51,7 +51,8 @@ GRACE_ALLOWANCE_SECONDS = 900
 RESET_SOURCE = "harness-cutoff-notice"
 
 #: 算「對話」的 user 記錄來源。`peer`／`task-notification` 等其餘來源不是續跑證據。
-_CONVERSATION_ORIGINS = frozenset({"human", "auto-continuation"})
+#: `auto-continuation` 的字面只有一個家：`quota_limits.RESUME_ORIGIN`。
+_CONVERSATION_ORIGINS = frozenset({"human", quota_limits.RESUME_ORIGIN})
 
 #: 切斷通知的內文標記；「Usage limit reset · continuing automatically」（沒有 `at`）是續接通知。
 _CUTOFF_MARK = "continuing automatically at"
@@ -59,8 +60,12 @@ _RESET_NOTICE_PREFIX = "Usage limit reset"
 
 #: `usageLimitNote` 的兩個真機值（harness 2.1.303／304；語料 15 筆＝8＋7）：`wrap_up`＝寬限提示；
 #: `release`＝harness 在 auto-continuation 之後 9～18 ms 附上的續接訊號（isMeta、turnCompanion、
-#: 無 origin）。其餘值一律忽略（寧可不叫醒）。
-_NOTE_WRAP_UP, _NOTE_RELEASE = "wrap_up", "release"
+#: 無 origin；字面住 `quota_limits.NOTE_RELEASE`，判準＝`quota_limits.is_resume_record`）。
+#: 其餘值一律忽略（寧可不叫醒）。
+_NOTE_WRAP_UP = "wrap_up"
+
+#: 判「另有駕駛」的鏈頭門檻：spawn 之後同一份逐字稿出現幾條以上的鏈頭（見 `chain_heads_after`）。
+OTHER_DRIVER_HEADS = 2
 
 
 def _epoch(raw: object) -> float | None:
@@ -122,6 +127,114 @@ def newest_conversation_at(paths: list[Path]) -> float | None:
     return best
 
 
+def _driver_kind(record: dict) -> str:
+    """非合成的對話記錄回其種類（`assistant`／`human`／`auto-continuation`）；其餘回 `""`。
+
+    限額記錄（`<synthetic>` assistant）本身不算有人在動：它是 harness 對撞線的回應，不是誰的作為。
+    """
+    if record.get("type") == "assistant":
+        message = record.get("message")
+        model = message.get("model") if isinstance(message, dict) else None
+        return "" if model == quota_limits.SYNTHETIC_MODEL else "assistant"
+    origin = _origin_kind(record)
+    human = record.get("type") == "user" and isinstance(origin, str)
+    return origin if human and origin in _CONVERSATION_ORIGINS else ""
+
+
+def driver_after(transcript: Path | None, since_epoch: float, now: datetime) -> dict | None:
+    """`since_epoch` 之後（至 `now` 為止）第一筆**非合成**的對話記錄 `{"timestamp", "kind"}`；
+    沒有回 `None`。
+
+    「有沒有別的駕駛」的**單一判準**（DEF-200-564；哨兵 `sentinel_decide`、`_run_resume` 的 spawn
+    前閘、重放探針共用）。掃描面與 `newest_conversation_at` 同一批檔（主檔＋近 24 小時的 subagent
+    檔：互動視窗把活派給 subagent 時主檔可能數分鐘不動）。`now` 是觀察時刻上界（生產路徑傳現在；
+    重放探針傳 `--now`）。`kind`＝`assistant`（真 model）／`human`／`auto-continuation`。
+    """
+    if transcript is None or not transcript.is_file():
+        return None
+    upper, best = now.timestamp(), None
+    for path in quota_limits.session_transcripts(transcript):
+        for record in _records(path, '"assistant"', '"origin"'):
+            kind, stamp = _driver_kind(record), _epoch(record.get("timestamp"))
+            if kind and stamp is not None and since_epoch < stamp <= upper and (
+                    best is None or stamp < best[0]):
+                best = (stamp, str(record["timestamp"]), kind)
+    return None if best is None else {"timestamp": best[1], "kind": best[2]}
+
+
+def live_driver(transcript: Path | None, now: datetime, event: dict | None = None) -> dict | None:
+    """「此刻有別的駕駛」＝一個巡邏間隔內（`HALT_QUIESCE_SECONDS`，與寬限提示「不叫醒」同一把尺）、
+    且在撞線事件（有給才算）之後有非合成對話記錄（`driver_after`）。
+
+    只看「事件之後」不夠：戳了死視窗就走的人類記錄會永遠擋住哨兵的續跑。只看「近期」也不夠：撞線前
+    的正常活動不是事件之後的駕駛。兩條取交集（`since`＝兩者較晚者）。`event` 也可傳 `spawn_anchor`
+    的錨（帶 `grace_s` 時錨再往後挪那麼多秒）。
+    """
+    floor, anchor = now.timestamp() - quota_messages.HALT_QUIESCE_SECONDS, event or {}
+    stamp = _epoch(anchor.get("timestamp"))
+    since = floor if stamp is None else max(floor, stamp + float(anchor.get("grace_s") or 0))
+    return driver_after(transcript, since, now)
+
+
+#: relay 前一棒收窗後仍可能落盤的尾巴（秒）：錨之後這麼短的記錄屬 leg 自己，不算另一駕駛。
+RELAY_TAIL_GRACE_SECONDS = 2.0
+
+
+def spawn_anchor(transcript: Path | None, state: dict) -> dict | None:
+    """D5（`_run_resume` spawn 前閘）的錨 `{timestamp, source[, grace_s]}`（DEF-200-564 修復棒二）。
+
+    兩個候選取**較晚者**（QA 複審 R2：過期的 prev_end 不得遮住較新的撞線）：
+    ① `state["relay_prev_end"]`（relay 前一棒收窗時刻，`settle_window` 在排下一窗前寫入、
+    隨狀態塊落盤；`grace_s` 讓 leg 收尾落盤的尾巴不算別人）；
+    ② 未處理撞線事件的 timestamp（與哨兵撞線分支同一把錨）。
+    兩者皆無 ⇒ `None`（退回「近一個巡邏間隔」窗：寬限／halt 路徑，以及修前武裝、
+    狀態塊沒有 prev_end 的進行中 relay）。
+
+    為何要錨：無頭 leg 與互動視窗寫同一份逐字稿，relay 下一窗在收窗後 `RESET_SKEW_SECONDS`（120 s）
+    起、遠小於一個巡邏間隔 ⇒ 無錨時前一棒自己的記錄被當成另一駕駛，第二棒必被拒；首棒撞線前緊貼
+    限額記錄的最後一則真回應同理。
+    """
+    prev = state.get("relay_prev_end")
+    event = quota_limits.unhandled_limit_event(transcript) if transcript is not None and transcript.is_file() else None  # noqa: E501
+    cands = [a for a in (
+        {"timestamp": prev, "source": "relay_prev_end", "grace_s": RELAY_TAIL_GRACE_SECONDS} if _epoch(prev) is not None else None,  # noqa: E501
+        {"timestamp": event["timestamp"], "source": "limit_event"} if event else None) if a]
+    return max(cands, key=lambda a: _epoch(a["timestamp"]) or 0.0) if cands else None
+
+
+def driver_verdict(event: dict | None, driver: dict | None, now: datetime) -> dict | None:
+    """撞線事件之後另有駕駛 ⇒ `patrol`（由它接手、續巡；鍵集合與 `grace_verdict` 同形）；
+    `None`＝沒有，呼叫端照舊（`sentinel_decide` 撞線分支在 reset 判斷之前先問它）。"""
+    if driver is None:
+        return None
+    seen, hit = _epoch(driver.get("timestamp")), _epoch((event or {}).get("timestamp"))
+    after = f"撞線後 {seen - hit:.0f}s " if seen is not None and hit is not None else "撞線後"
+    return {"action": "patrol", "at": now + timedelta(seconds=quota_messages.HALT_QUIESCE_SECONDS),
+            "reason": f"{after}已有另一駕駛的對話記錄（{driver['kind']}，{driver['timestamp']}）"
+                      "⇒ 由它接手，續巡、不叫醒（防雙駕駛；本次零 token）"}
+
+
+def chain_heads_after(transcript: Path, since_epoch: float) -> int:
+    """`since_epoch` 之後新增的**鏈頭**數；一條鏈＝一個駕駛的對話接續（DEF-200-565）。
+
+    鏈頭＝該時刻後的 uuid 記錄裡，`parentUuid`（compact 邊界的 `parentUuid` 為空、改取
+    `logicalParentUuid`）不指向「該時刻後任何記錄」者。單一駕駛從 spawn 前的最後一筆接續寫
+    ⇒ 恰 1 條；互動視窗也在寫同一份檔 ⇒ 兩條從 spawn 前記錄分岔、各自續寫 ⇒ ≥2 條
+    （`OTHER_DRIVER_HEADS`）。
+    只看主檔（subagent 檔有自己的鏈與 `isSidechain`）。真機佐證：事故 e9f8e2cb 兩支 leg 窗各 2 條，
+    本機 117 支單駕駛無頭 leg 一律 1 條。檔案缺席／讀不動 ⇒ 0（量不到≠有人）。
+    """
+    parents: dict[str, object] = {}
+    for record in _records(transcript, '"uuid"'):
+        uid, stamp = record.get("uuid"), _epoch(record.get("timestamp"))
+        if isinstance(uid, str) and stamp is not None and stamp > since_epoch and (
+                record.get("isSidechain") is not True):
+            parent = record.get("parentUuid")
+            parents[uid] = record.get("logicalParentUuid") if parent is None else parent
+    return sum(1 for parent in parents.values()
+               if not isinstance(parent, str) or parent not in parents)
+
+
 def usage_limit_signals(main_transcript: Path) -> dict:
     """主逐字稿裡 harness 2.1.303 的三種限額記錄（只讀**主**檔：寬限提示自述 subagent 收不到）。
 
@@ -146,8 +259,7 @@ def usage_limit_signals(main_transcript: Path) -> dict:
         note = record.get("usageLimitNote")
         if kind == "user" and note == _NOTE_WRAP_UP:
             keep("note_at", record)
-        elif kind == "user" and (
-                note == _NOTE_RELEASE or _origin_kind(record) == "auto-continuation"):
+        elif quota_limits.is_resume_record(record):
             keep("reset_notice_at", record)
         elif kind == "system" and isinstance(content, str):
             if _CUTOFF_MARK in content:
