@@ -213,13 +213,13 @@ AgentConsole/
 | `frontend/components/charts/` | 圖表封裝（Tremor Raw 或 shadcn chart，ADR-001 D3） | W4 |
 | `frontend/components/markdown/` | Markdown 編輯器與渲染器（PRD §5.1.4 八項功能） | W3 |
 | `frontend/components/domain/` | 領域元件（ProjectCard、StatusDot、SignoffBanner、DagView…） | W3／W4 |
-| `frontend/lib/` | `api/`（client、endpoints、`schema.d.ts`）、`auth/`、`domain/status.ts`、`sse/`（fetch 串流客戶端）、`nav/`（導覽輔助；**〔P1b 規劃〕`nav/registry.ts`＝導覽登記表，Tools 區入口的單一來源，§5.2、§5.4**） | W3；登記表 P1b |
+| `frontend/lib/` | `api/`（client、endpoints、`schema.d.ts`）、`auth/`、`domain/status.ts`、`sse/`（fetch 串流客戶端）、`nav/`（導覽輔助；**〔P1b 已落地 2026-10-22〕`nav/registry.ts`＝導覽登記表，Tools 區入口的單一來源，§5.2、§5.4**） | W3；登記表 P1b |
 | `frontend/styles/` | `tokens.css`（設計稿 token 逐字搬入）與全域樣式 | W3 |
 | `frontend/tests/` | vitest 單元測試與 `e2e/`（Playwright，含 `__screenshots__/`） | W3／W4 |
 | `backend/src/main/java/com/aisdlc/console/` | Clean Architecture 四層（§4） | W2／W3 |
 | `backend/src/main/resources/db/migration/` | Flyway 遷移 V1～V5（ADR-001 D5） | W2／W3 |
 | `backend/src/test/` | 單元、ArchUnit、Testcontainers 整合測試 | W2／W3 |
-| `engine-bridge/app/` | `main.py`、`settings.py`、`runner.py`、`events.py`、`locks.py`、`db.py`、`security.py`、`models.py`、`routers/{autoclaude,sdd}.py`（**〔P1b 規劃〕另有 `routers/si.py`、`si_cli.py`；〔P2b 規劃〕另有 `si_audit.py`，§10.3**） | W1-B；SI P1b／P2b |
+| `engine-bridge/app/` | `main.py`、`settings.py`、`runner.py`、`events.py`、`locks.py`、`db.py`、`security.py`、`models.py`、`routers/{autoclaude,sdd}.py`（**〔P1b 已落地 2026-10-22〕另有 `routers/si.py`、`si_cli.py`；〔P2b 規劃〕另有 `si_audit.py`，§10.3**） | W1-B；SI P1b／P2b |
 | `engine-bridge/tests/` | pytest（生命週期、pause、stop、restore、409、422、SSE 重播、孤兒回收、decompose、sdd） | W1-B |
 | `engine-bridge/.venv/` | **已廢止**：Bridge 改裝進根層 `.venv`（ADR-001 D6 補記；pre-commit stray_venv 閘禁止其他 venv） | — |
 | `docker/nginx/` | `nginx.conf`、`conf.d/default.conf`（含 SSE 設定） | W2-B |
@@ -326,7 +326,7 @@ app/
 │       └── monitor/page.tsx        # 專案監控儀表板（UI-SCR-08）
 ├── import/page.tsx                 # BRD/PRD 匯入解析（UI-SCR-06）
 ├── settings/page.tsx               # 系統參數設定（UI-SCR-09）
-├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 規劃〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
+├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
 └── api/health/route.ts             # 前端健康檢查（API-HLT-03）；PRD §4.2 的 BFF 層不實作
 ```
 
@@ -351,7 +351,7 @@ app/
 | 區塊 | 唯一元件檔 | 對應設計稿 | 內容 |
 |------|-----------|------------|------|
 | Top | `frontend/components/layout/TopRegion.tsx` | Topbar＋Masthead | 公告列（說明文件、下載 CLI、GitHub、Bridge 狀態、通知、幫助、語言、使用者徽章）；logo；搜尋列與 recent chips；通知鈴；signoff 佇列鈕（draftCount badge） |
-| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 完成後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化；**〔P1b 規劃〕**——落地前實際為六項，且仍由 `ToolsRegion.tsx` 的 `NAV` 常數決定）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
+| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
 | Content | `frontend/components/layout/ContentRegion.tsx` | Main | 路由內容容器；`children` 由 `app/layout.tsx` 傳入 |
 | Bottom | `frontend/components/layout/BottomRegion.tsx` | （設計稿無；依掌舵者四區塊要求新增） | Engine Bridge 連線狀態點、版本號、Toast 宿主；不得放任何新功能 |
 
@@ -369,7 +369,7 @@ grep -rnE "TopRegion|ToolsRegion|BottomRegion" AgentConsole/frontend/app --inclu
 Get-ChildItem AgentConsole\frontend\app -Recurse -Filter *.tsx | Where-Object { $_.FullName -notlike '*\app\layout.tsx' } | Select-String -Pattern 'TopRegion|ToolsRegion|BottomRegion'
 ```
 
-5. **導覽項目的單一來源＝登記表**（SelfImproving PRD ADR-SI-13；T1：sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）：新導覽項只准加 `frontend/lib/nav/registry.ts` 的 `NAV_REGISTRY` 一列；`ToolsRegion.tsx` 不得再出現硬編的 NAV 清單，也不得出現以路徑字串分支決定 active／href 的邏輯（那些都搬進各列的 `match`／`href`）。機械檢查（期望無輸出）：**〔P1b 規劃〕**——P1b 落地前 `ToolsRegion.tsx` 仍持有 `const NAV`，此檢查會有輸出；落地後必須為空，並由 `registry.test.ts` 的讀檔斷言釘住（SelfImproving PRD §9.1 C20）：
+5. **導覽項目的單一來源＝登記表**（SelfImproving PRD ADR-SI-13；T1：sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）：新導覽項只准加 `frontend/lib/nav/registry.ts` 的 `NAV_REGISTRY` 一列；`ToolsRegion.tsx` 不得再出現硬編的 NAV 清單，也不得出現以路徑字串分支決定 active／href 的邏輯（那些都搬進各列的 `match`／`href`）。機械檢查（期望無輸出）：**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 不再持有 `const NAV`，此檢查為空，並由 `registry.test.ts` 的讀檔斷言（`AT_932_6_4`）釘住（SelfImproving PRD §9.1 C20）：
 
 ```bash
 grep -n 'const NAV' AgentConsole/frontend/components/layout/ToolsRegion.tsx
@@ -395,12 +395,12 @@ Select-String -Path AgentConsole\frontend\components\layout\ToolsRegion.tsx -Pat
 
 ### 5.4 新功能接入規範（檢查表；SelfImproving PRD ADR-SI-13、AC-SI-32-6；T1：sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）
 
-> **狀態：〔P1b 規劃〕**——登記表與其測試在 P1b 鍵（`agentconsole-si-mirror`）落地；落地前 `ToolsRegion.tsx` 仍持有 `NAV` 常數。本節是之後每個新功能（含 SelfImproving 的「自我進化」頁）的接入規範：**任一項缺＝該功能未接入完成**；全部在**同一個 commit** 收齊（根 `CLAUDE.md` 第 5 條「修復不留後遺症」：連動面不分批）。
+> **狀態：〔P1b 已落地 2026-10-22〕**——登記表 `frontend/lib/nav/registry.ts` 與其測試已在 P1b 鍵（`agentconsole-si-mirror`，commit `0596cfec`）落地；`ToolsRegion.tsx` 只消費登記表。本節是之後每個新功能（含 SelfImproving 的「自我進化」頁）的接入規範：**任一項缺＝該功能未接入完成**；全部在**同一個 commit** 收齊（根 `CLAUDE.md` 第 5 條「修復不留後遺症」：連動面不分批）。
 
 導覽登記表的形狀（唯一來源；元件只消費、不持有清單）：
 
 ```ts
-// frontend/lib/nav/registry.ts（〔P1b 規劃〕）
+// frontend/lib/nav/registry.ts（〔P1b 已落地 2026-10-22〕；實作以 repo 檔為準，本段為設計示意）
 export type NavCtx = { currentProjectId: string | null };
 export interface NavEntry {
   id: string;                               // 唯一；穩定鍵（key、測試選取）
@@ -940,13 +940,13 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | 失敗之後 | `failed`⇒ESCALATION（阻塞態）；恢復**只有人**（`resume-from-escalation --to IMPLEMENTATION`，R-9.5），Bridge 與 Console 不提供恢復動詞，只顯示狀態與可複製的恢復指令 |
 | SI 寫入只落稽核 JSON（SelfImproving PRD §9.3、ADR-SI-03′；**〔P2b 規劃〕**；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13） | Bridge 對 SelfImproving 帳本的寫入**只有一條**：把 console-api 簽好的稽核 JSON **原始位元組**以獨佔建檔（同名不覆寫）寫進稽核目錄 `<BRIDGE_SI_AUDIT_DIR>/<audit_ref>.json`；Bridge **不驗簽、只解外層鍵（`audit_ref`、`subject` 等）而不解 `body`、不開帳本檔、不呼叫任何寫入型 CLI 動詞**（`/si/*` 的子行程只呼叫唯讀的 `export`，以及唯讀預檢 `obs-add --dry-run`）；入帳由主機端 `si decide`／`obs-add`／`obs-close --carrier console --audit-ref` 在寫入鎖內完成；三個寫入端點須帶 `X-Bridge-Token`（`BRIDGE_SI_WRITE_TOKEN`，未設或 `BRIDGE_SI_AUDIT_DIR` 未設＝503 `si_write_disabled`、缺或錯＝403 `si_write_forbidden`；規則同 SDD 權杖，佔位字串或短於 32 字元＝兩端啟動即失敗）；Bridge 原始碼寫入形態開啟 SI 相關路徑只准出現在 `si_audit.py`，且 `si_cli.py` 組出的 argv 動詞只准 `export` 與 `obs-add --dry-run`（同一 AST 測試 `tests/test_si_readonly_lock.py` 釘住；SelfImproving PRD AC-SI-35-1 ②、QA 複審 F-09）；無 DELETE／PUT／PATCH〔訂正（SA 修復棒；SelfImproving PRD v0.10 的 QA 複審 F-12）：原文「不驗簽、不解 `body`」；稽核 JSON 外層加 `audit_ref`、`subject`，Bridge 只解外層鍵以比對 `{id}`，`body` 內一致性由 backend 與 CLI 驗〕 |
 
-### 10.3 SelfImproving 鏡像與寫入載體（**〔P1b 規劃〕**唯讀鏡像、**〔P2b 規劃〕**寫入載體；形狀的唯一細節來源＝`docs/01_requirements/SelfImproving_PRD.md` §9.3，本節只是簡表）
+### 10.3 SelfImproving 鏡像與寫入載體（**〔P1b 已落地 2026-10-22〕**唯讀鏡像、**〔P2b 規劃〕**寫入載體；形狀的唯一細節來源＝`docs/01_requirements/SelfImproving_PRD.md` §9.3，本節只是簡表）
 
 Bridge 回 snake_case、backend 轉 camelCase；SI 資料面取不到一律明確失敗、不回空表（PRD AC-SI-32-3）。
 
 | 端點 | 階段 | 說明 | 成功 | 失敗（`reason`） |
 |------|------|------|------|-------------------|
-| `GET /si/status`、`/si/observations`、`/si/events`、`/si/proposals`、`/si/proposals/{id}`、`/si/runs` | P1b | 查詢參數只有 `since`（整數游標）與 `limit`；Bridge 以子行程呼叫根層 `tools/selfimproving.py export --json --kind <k>`（逾時 15 秒、環境白名單、不繼承任何機密）；`{id}` 為 `PROP-SI-NNN` | 200：`schema_rev`、`kind`、`generated_at`、`head_sha`、`items[]`、`next_since`、`truncated`、`ne[]`、`problems[]` | 503 `si_unavailable`、404 `si_not_found`（單筆查無）、422 `invalid_request` |
+| `GET /si/status`、`/si/observations`、`/si/events`、`/si/proposals`、`/si/proposals/{id}`、`/si/runs` | P1b | 查詢參數只有 `since`（整數游標）與 `limit`；Bridge 以子行程呼叫根層 `tools/selfimproving.py export --json --kind <k>`（逾時 15 秒、環境白名單、不繼承任何機密）；`{id}` 為 `PROP-SI-NNN`；backend 回應型別＝單一 `SiExportResponse`（`@JsonValue` 無型別樹，保住缺鍵≠null 與未知鍵透傳）＋`SiKeyNames` 深層欄名對映，**取代** PRD §9.1 C18 列示的四個具型別 DTO（⚖-A；TCS 勘誤 1；契約 `API_Contract_SelfImproving_P1b.md` §0.2） | 200：`schema_rev`、`kind`、`generated_at`、`head_sha`、`items[]`、`next_since`、`truncated`、`ne[]`、`problems[]` | 503 `si_unavailable`（`cause` 九值、先中者定案：`si_root_unset`／`si_script_missing`／`spawn_failed`／`timeout`／`stdout_too_large`／`nonzero_rc`／`bad_json`／`schema_rev_mismatch`／`bad_shape`；契約 §2.3）、404 `si_not_found`（單筆查無）、422 `invalid_request` |
 | `POST /si/proposals/{id}:decide` | P2b | 落稽核 JSON（`kind=decide`）；`{id}` 為 `PROP-SI-NNN`，`resume` 為 `RUN-SI-NNN`，且須等於稽核外層 `subject` | 201：`{"audit_ref","stored":true}` | 503 `si_write_disabled`、403 `si_write_forbidden`、409 `si_audit_exists`、422 `invalid_request`、503 `si_unavailable`（稽核落檔 I/O 失敗，§11.1；二審 N-4） |
 | `POST /si/observations` | P2b | 落稽核 JSON（`kind=obs-add`） | 同上 | 同上 |
 | `POST /si/observations/{id}:close` | P2b | 落稽核 JSON（`kind=obs-close`）；`{id}` 為 `OBS-SI-NNN` 且須等於稽核外層 `subject`（Bridge 只解外層鍵；`body.obs_id` 的一致性由 backend 與 CLI 驗）〔訂正（SA 修復棒；SelfImproving PRD v0.10 的 QA 複審 F-12）：原文「須等於稽核 `body.obs_id`」；Bridge 不解 `body` 無從比對〕 | 同上 | 同上 |
@@ -1206,7 +1206,7 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 | L-11 | **有金鑰的批次一律多出外呼，與旗標和等級無關**：最後一步之後一次目標驗證（`GoalSynthesisPlugin`，POST_RUN，fail-open，結果在 Kernel 路徑不套用）、每次失敗型 ESCALATION 一次演化提案；Brain 開啟時另加每個失敗且尚有重試次數的 attempt 一次校正。Docker 全棧的 `engine-bridge` 服務本身必填 `MINIMAX_API_KEY`，所以那種部署裡引擎**永遠有金鑰** | 外呼失敗時每個請求被引擎重試 3 次（退避 2＋4 秒），拉長完成時間但不改變結果；Console 只認 `model.apiKey`，Bridge 環境金鑰它看不到，`engineCapabilities` 因此是低估（契約 §3.4.2 劃界 1） |
 | L-12 | **Console 的斷點清單與步驟時間軸依賴 Bridge 的 DB 模式**（W7，完整性審查 I-07）：`GET /executions/{runId}/checkpoints`、審核 `RETRY` 找還原點、事件時間軸（`steps`）都讀 `console` schema 的 `checkpoints`／`execution_steps`，而這兩張表**完全由 Bridge 寫入**（`engine-bridge/app/db.py`，§7）；`AgentBridge.listCheckpoints`（Bridge 的 `GET …/checkpoints`）在 `backend/src/main` 沒有呼叫者，只有 adapter 測試〔**已處理（2026-10-21 現查；回寫自體檢子代理 OBS-SI-203）**：`listCheckpoints` 已自 `AgentBridge` 刪除（完整性審查 I-07），`AgentConsole/backend/src` 全樹僅剩 `src/test/java/com/aisdlc/minibridge/MiniRun.java`:95 的註記句說明其刪除；原文「在 `backend/src/main` 沒有呼叫者，只有 adapter 測試」為刪除前的現況〕 | Bridge 以純檔案模式啟動（沒設 `BRIDGE_DB_DSN`）時，這兩個畫面會是空的（純檔案模式下的實際表現：**已由 W7-QA 實測取代**——兩個畫面確為空，結論見 `AgentConsole/CLAUDE.md`:108〈環境變數〉`BRIDGE_DB_DSN` 列；2026-10-21 回寫；〔訂正：原文「純檔案模式下的實際表現**待驗**」〕）。compose 與 e2e README 都有設 DSN，標準部署不受影響；本機開發跑 Console 時必須同時給 Bridge 一個 DSN——`AgentConsole/CLAUDE.md` 所載的純檔案模式只適用於單獨驗 Bridge。`listCheckpoints` 的死碼由 BE 另案刪除或補用途（完整性審查 V-11④；**已刪**，見上） |
 | L-13 | **backend 不採用 JDT 註解式空值分析**（2026-10-19 掌舵者 IDE 診斷清單：VS Code Java 擴充的 `java.compile.nullAnalysis.mode` 預設 `automatic`，偵測到 classpath 上 Spring Framework 7／JSpecify 的空值註解即自動開啟，對每個未標註型別的方法參照報「Null type safety … needs unchecked conversion」，實測 185 筆；backend 原始碼沒有任何 `@NullMarked`／`@NonNull`，Gradle 編譯與測試不報、不是程式缺陷） | 開發機設定：在 VS Code 使用者或工作區設定把 `java.compile.nullAnalysis.mode` 設為 `disabled`（根 `.vscode/` 被 `.gitignore` 排除，無法隨 repo 分發，故以本列為唯一依據）。若日後要採用 JSpecify，須另立 ADR、逐 package 加 `@NullMarked` 並補齊可空標註，不得只開分析不標註 |
-| L-14 | **SelfImproving 鏡像要求 Bridge 容器唯讀掛載 repo 的一部分**（SelfImproving PRD §9.7 FC-b；**〔P1b 規劃〕**前置條件，尚未落地；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：Bridge 映像（`engine-bridge/Dockerfile`:33–34）只 COPY `AutoClaude/` 與 `engine-bridge/`、無 `.git`（`:27–30` 只安裝 `git` 執行檔並冒煙 `git --version`），現行 compose 只掛 `../AISDLC_SDD:/sdd:ro`、`engine_workspace`、`app_logs`（`docker-compose.yml`:217–219）；`/si/*` 以子行程呼叫根層 `tools/selfimproving.py export`，須由 compose 以**長語法**（`bind.create_host_path: false`）唯讀掛載六條到 `<SI_ROOT>`（`SI_ROOT=/repo`）：`../tools`、`../docs/06_quality`、`../.git/HEAD`、`../.git/refs`、`../.git/objects`、`../.git/packed-refs`；**不掛 `.git/config`**（remote URL 可能內嵌憑證，且 repo 的 remote URL 不得內嵌憑證）、**不掛 repo 根**（根下被忽略的 `AgentConsole/.env` 含 `JWT_SECRET`、`CONSOLE_ENCRYPTION_KEY`，而 Bridge 容器內跑的是引擎執行的使用者指令） | 未掛載或 `SI_ROOT` 未設＝`/si/*` 回 503 `si_unavailable`（不是空表）；`.git/packed-refs` 於主機不存在時，短語法會讓 Docker 在主機建立同名目錄而破壞 repo（故用長語法、來源不存在即啟動失敗）；單檔 bind mount（`HEAD`、`packed-refs`）在 git 以 lock＋rename 換檔（切分支、`pack-refs`）後，容器可能保留舊 inode ⇒ `head_sha` 靜默過期（**未實測**；備案＝掛整個 `.git` 唯讀並以空檔覆蓋 `.git/config`，P1b 以真容器二擇一）；`git` 對 bind mount 的擁有者檢查見 V-12；**〔P2b 規劃〕**另需一個**可寫** bind mount：`BRIDGE_SI_AUDIT_DIR`（容器內稽核檔目錄）↔ 主機 `<AUTOSDD_SI_DIR>/console_audit`，只掛這個子目錄、不連帶掛家目錄其餘部分；缺＝寫入面 503 `si_write_disabled` |
+| L-14 | **SelfImproving 鏡像要求 Bridge 容器唯讀掛載 repo 的一部分**（SelfImproving PRD §9.7 FC-b；**〔P1b 已落地 2026-10-22：採設計 A，`docker-compose.yml` 六條長語法唯讀 bind＋`SI_ROOT=/repo`，`AT-932-4-4`／`AT-940-3-1` 靜態鎖；真容器掛載行為未實測（V3）〕**；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：Bridge 映像（`engine-bridge/Dockerfile`:33–34）只 COPY `AutoClaude/` 與 `engine-bridge/`、無 `.git`（`:27–30` 只安裝 `git` 執行檔並冒煙 `git --version`），現行 compose 只掛 `../AISDLC_SDD:/sdd:ro`、`engine_workspace`、`app_logs`（`docker-compose.yml`:217–219）；`/si/*` 以子行程呼叫根層 `tools/selfimproving.py export`，須由 compose 以**長語法**（`bind.create_host_path: false`）唯讀掛載六條到 `<SI_ROOT>`（`SI_ROOT=/repo`）：`../tools`、`../docs/06_quality`、`../.git/HEAD`、`../.git/refs`、`../.git/objects`、`../.git/packed-refs`；**不掛 `.git/config`**（remote URL 可能內嵌憑證，且 repo 的 remote URL 不得內嵌憑證）、**不掛 repo 根**（根下被忽略的 `AgentConsole/.env` 含 `JWT_SECRET`、`CONSOLE_ENCRYPTION_KEY`，而 Bridge 容器內跑的是引擎執行的使用者指令） | 未掛載或 `SI_ROOT` 未設＝`/si/*` 回 503 `si_unavailable`（不是空表）；`.git/packed-refs` 於主機不存在時，短語法會讓 Docker 在主機建立同名目錄而破壞 repo（故用長語法、來源不存在即啟動失敗）；單檔 bind mount（`HEAD`、`packed-refs`）在 git 以 lock＋rename 換檔（切分支、`pack-refs`）後，容器可能保留舊 inode ⇒ `head_sha` 靜默過期（**未實測**；備案＝掛整個 `.git` 唯讀並以空檔覆蓋 `.git/config`，P1b 以真容器二擇一）；`git` 對 bind mount 的擁有者檢查見 V-12；**〔P2b 規劃〕**另需一個**可寫** bind mount：`BRIDGE_SI_AUDIT_DIR`（容器內稽核檔目錄）↔ 主機 `<AUTOSDD_SI_DIR>/console_audit`，只掛這個子目錄、不連帶掛家目錄其餘部分；缺＝寫入面 503 `si_write_disabled` |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）
 
@@ -1223,4 +1223,4 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 | V-9 | Bridge 草案（`draft_id`）存放方式：W1-B 實作為 `<workspace>/_drafts/<draft_id>.json`（檔頭自述），重啟後仍可 approve。**結論（2026-10-21 現查；已驗）**：實作與自述一致——`engine-bridge/app/main.py`:80 以 `DraftStore(cfg.engine_workspace / "_drafts")` 建構、`app/decompose.py`:9 檔頭自述；`tests/test_decompose.py`:157–165 `test_a_draft_survives_a_bridge_restart`：第一個 Bridge 分解後停止，第二個 Bridge 對同一 `draft_id` `:approve` 回 200 且 playbook 逐項相同 | 待其測試與交卷確認 | W1-B |
 | V-10 | `pgbackrest_*` 指標的產出方式（G-04）。**結論（2026-10-21 現查；已驗）**：產出方式＝pgbackrest sidecar 的 `pgbackrest-metrics.sh` 每 60 秒以 `pgbackrest info --output=json` 產生 Prometheus 文字格式，busybox httpd 在 `:9854/metrics` 提供（`AgentConsole/docker/README.md`:387；Prometheus 目標 `pgbackrest:9854`，`docker/prometheus/prometheus.yml`:33）；W7-QA 實測（`QA_W7_Closure.md` §8.3）：該目標 up，備份後 `pgbackrest_stanza_status`＝0、`pgbackrest_backup_since_last_full_seconds` 與 `pgbackrest_backup_last_status` 皆有序列；新部署尚無備份時這兩個序列不存在，屬預期（`alerts.yml` 註解） | Prometheus targets 與指標查詢 | W2-B |
 | V-11 | Bridge 與 SSOT 對「SDD LATEST」的判定可能分歧（完整性審查 I-04）：Bridge 取 `engine-bridge/app/settings.py` 的「目錄名數字最大的 `AISDLC_SDD_v<M>.<N>`」（不看 git），SSOT `tools/lib/sdd_latest.py` 以 `git ls-files` 判定；兩者在「工作樹有未入庫的版本目錄」時**實驗確認分歧**（W7-QA 以拋棄式 git repo 比對：v9.99 只在工作樹時 SSOT 回 v0.30 並警告未 tracked、Bridge 回 v9.99；`git add` 後兩者一致；`.bak` 與「- Copy」兩者都排除；登 DEF-AC-012，P4，主控裁決保留——分歧只在有未入庫版本目錄的開發機出現，正式部署的 `SDD_ROOT` 掛載面沒有未入庫目錄）。CI 路徑過濾已於 W7 補 `AISDLC_SDD/scripts/**` 與 `AISDLC_SDD/*/tools/fsm_runtime/**` | 若要消除分歧，Bridge `settings.py` 改呼叫 SSOT（需 git 可用；Docker 映像內沒有 `.git`，所以要另定無 git 時的退路）；暫以文件登記 | 主控（保留） |
-| V-12 | **〔P1b 規劃〕**容器內 `git` 的 `safe.directory` 環境變數式放行對唯讀 bind mount 是否足夠（SelfImproving PRD §9.2 鐵律三自問表、§9.7 FC-b；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：映像使用者 uid 10001 與主機擁有者不同，`git` 會報 `dubious ownership`；放行法＝`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory`、`GIT_CONFIG_VALUE_0=<SI_ROOT>`（只對該路徑，不用 `*`），映像 `git --version` 須 ≥ 2.31。**結論（2026-10-21）：未實測**；再開症狀＝容器內 `export` 的 `head_sha` 回 `null` 並於 `ne` 列 `git`（附 stderr 的 `dubious ownership` 字樣） | P1b 實作輪以真容器驗：`docker compose exec -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo engine-bridge git -C /repo rev-parse HEAD`（bash 與 PowerShell 同形） | P1b 開發（鍵 `agentconsole-si-mirror`） |
+| V-12 | **〔P1b 已落地 2026-10-22；真容器未實測〕**容器內 `git` 的 `safe.directory` 環境變數式放行對唯讀 bind mount 是否足夠（SelfImproving PRD §9.2 鐵律三自問表、§9.7 FC-b；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：映像使用者 uid 10001 與主機擁有者不同，`git` 會報 `dubious ownership`；放行法＝`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory`、`GIT_CONFIG_VALUE_0=<SI_ROOT>`（只對該路徑，不用 `*`），映像 `git --version` 須 ≥ 2.31。**結論（2026-10-22）：未實測**——P1b 實作已把環境變數式放行寫進 `engine-bridge/app/si_cli.py`（`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory`、`GIT_CONFIG_VALUE_0=<SI_ROOT>`，單元測試釘住），真容器行為待 V3；再開症狀＝容器內 `export` 的 `head_sha` 回 `null` 並於 `ne` 列 `git`（附 stderr 的 `dubious ownership` 字樣） | P1b 實作輪以真容器驗：`docker compose exec -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo engine-bridge git -C /repo rev-parse HEAD`（bash 與 PowerShell 同形） | P1b 開發（鍵 `agentconsole-si-mirror`） |

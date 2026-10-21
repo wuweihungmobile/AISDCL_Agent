@@ -1969,3 +1969,16 @@ Push-Location AgentConsole; docker compose exec engine-bridge sh -c 'touch /repo
 ---
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
+
+| # | 日期 | 位置 | 原文（摘） | 訂正 | 依據 |
+|---|------|------|-----------|------|------|
+| 1 | 2026-10-22 | D4 檔名表（PRD §9.1 C18） | `SiObservationDto`／`SiProposalDto`／`SiRunDto`／`SiStatusDto` 四個具型別 DTO | 未建；改以單一 `SiExportResponse`（`@JsonValue` 無型別樹，`additionalProperties: true`）＋`SiKeyNames` 深層欄名對映取代。理由：保住「缺鍵≠null」語意與未知鍵透傳（R9）；具型別 DTO 會把兩者都變 null、等於替 Bridge 補話 | ⚖-A（主控追認，SCG-4 §A AC-932-1）；PRD 凍結檔走〈修訂建議〉 |
+| 2 | 2026-10-22 | AT-940-1-1 (a) | 「各子情境的 `allowed_path_roots` 都不含 `si_root`」 | 改述為「有無 `SI_ROOT` 都不改變 `allowed_path_roots`；明列 `BRIDGE_ALLOWED_PATH_ROOTS` 時 `si_root` 不會溜進去」——(a) 未設 `SI_ROOT` 且 REPO_ROOT 像 monorepo 時既有預設白名單本就含 REPO_ROOT，而此時 `si_root` 即該根，原字面自相矛盾 | ⚖-B |
+| 3 | 2026-10-22 | AT-932-3-E-2；§4「逾時」列 | 逾時縮小為 0.5 秒 | 2.0 秒（孫行程未出生時改 6.0 秒重試並斷言孫行程 pid 檔存在）；0.5 秒在慢機器上會在孫行程出生前就殺掉假 CLI，鑑別力歸零；仍遠小於假 CLI 的 30 秒睡眠 | ⚖-C |
+| 4 | 2026-10-22 | AT-932-3-4 | `detailObject()` | 既有 `BridgeRejectedException` 的實際存取器為 `body()`／`detail()`／`violations()`；`SiBridgeErrors` 以 `body().get("cause")`／`get("id")` 取值 | ⚖-F |
+| 5 | 2026-10-22 | AT-932-2-5（ArchUnit） | 類名判準 `Si*Controller` | `Si(?![a-z]).*Controller`（避開既有 `SignoffController`） | ⚖-G |
+| 6 | 2026-10-22 | D5；§5.1 | 黃金檔 `golden-*.json` 字樣 | 定為 `{A,B}.{snake,camel}.json`（Bridge `tests/fixtures/si_golden/` 四檔、backend `src/test/resources/si/` 四檔、frontend `tests/fixtures/si/` 兩檔 camel） | ⚖-E |
+| 7 | 2026-10-22 | R23／AC-940-3 設計 A／B | 設計 B 的空檔 `AgentConsole/docker/si/git-config.empty` | 採設計 A，空檔未建；設計 B 解讀為「設計 A 的 tools 與 docs/06_quality 兩條 bind＋整個 `../.git` 唯讀＋空檔覆蓋 `/repo/.git/config`」；V3 真容器結果決定是否轉 B | ⚖-D；Architecture §12.1 L-14 |
+| 8 | 2026-10-22 | AT-940-4-1；檔頭「補前預期紅」 | 主控補 D11 前預期紅 | 事實記錄：D11（`agentconsole-ci.yml` push／pull_request 各五行）由主控於 2026-10-21 補上後轉綠；QA 2026-10-22 重跑為綠 | SCG-4 §A AC-940-4 |
+| 9 | 2026-10-22 | V4 冷啟動三個中位數 | 待量 | 尚未量測；量到後記於此（本輪 V1～V10 皆未驗，見 SCG-4 報告〈未驗〉） | SCG-4 §E |
+| 10 | 2026-10-22 | 其餘登記（不改規格） | — | OBS-SI-259（⚖-H `PageTitle` h2 債）、OBS-SI-260（P3-6 契約「唯一例外」字樣）、OBS（根層 `export` 的 `touched` null 無 `ne` 項，SCG-4 P3-1）、OBS（`schema.d.ts` 無路徑集合對拍鎖，SCG-4 P4-3）；P3-1 前端側已於修復棒二改為 NE 顯示並補 vitest（掛 AC-932-3 之下，不另編 AT） | SCG-4 判決檔 §三 |
