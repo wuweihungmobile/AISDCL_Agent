@@ -1148,17 +1148,16 @@ jobs:
     name: Windows smoke（實際執行關鍵腳本，非僅語法解析）
     if: github.event_name != 'schedule'
     runs-on: windows-latest
-    # R57 修正（Scan C2）：原 25 分鐘。本 job 與 macos-compat-ci.yml 的 macos-smoke 是
-    # 刻意鏡射的一對（同為 22 步、同一批被驗腳本、同款 concurrency），該對的另兩個 job
-    # （nightly-full 60／nightly-alert 10）兩平台數字皆相同，唯獨 smoke 25 vs 35 不對稱，
-    # 且較緊的那個 cap 落在較慢的平台：ONBOARDING.md §5 疑難排解自己就記載「Windows 上
-    # 首次 pip install／pytest 異常緩慢——Windows Defender 即時掃描大量小型 Python 檔案
-    # （.venv、__pycache__）」，而本 job 正是連跑 bootstrap.ps1 建 .venv ×2 + 三組
-    # pip install + ci-gate.ps1 雙軌 pytest。方向與實際速度差相反的 cap 會讓阻斷式 push
-    # 閘門偶發性 timeout 誤紅 → 對齊為 35（timeout 是上限不是預約，未逾時不多花額度；
-    # DEF-101-081 帳務停擺期間本 workflow 從未真正跑起來過，無實測時長可佐證，故取
-    # 「與鏡射對象一致」這個不需臆測的判準）。
-    timeout-minutes: 35
+    # R57 修正（Scan C2）：原 25 分鐘，當時無實測時長，對齊鏡射對象 macos-smoke 的 35。
+    # 2026-10-22 實測（SelfImproving P2 落地後，run 39685501209）：tools/tests 步驟 1796 s、
+    # ci-gate.ps1 約 200 s、bootstrap.ps1 建 .venv ×2 + 三組 pip install 約 3 分鐘 ⇒ 整個
+    # job 逾 35 分鐘被 GitHub 取消（上一次綠 run 39553755434 為 29 分鐘；同 commit 的
+    # macos-smoke 為 20 分鐘）。慢的是 Windows runner 上以真 git 跑的 SelfImproving
+    # 沙盒／驗證測試，加上 ONBOARDING.md §5 記載的 Windows Defender 即時掃描大量小型
+    # Python 檔案。timeout 是上限不是預約，未逾時不多花額度 ⇒ 本 job 改 60；鏡射對象
+    # macos-smoke 維持 35（實測 20 分鐘仍有餘裕）——這一對鏡射的是步驟與被驗腳本，
+    # 不再要求 timeout 數字對稱（較緊的 cap 不得落在較慢的平台）。
+    timeout-minutes: 60
     concurrency:
       group: windows-compat-ci-smoke-${{ github.ref }}
       cancel-in-progress: true
