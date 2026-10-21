@@ -1740,7 +1740,7 @@ class EscapeHatchAndNoProliferationTest(unittest.TestCase):
         env.update({"HOME": str(tmp / "home"), "USERPROFILE": str(tmp / "home"),
                     "TMPDIR": str(tmp / "tmp"), "AUTOSDD_TRACE_DIR": str(tmp / "traces"),
                     "AUTOSDD_QUOTA_CACHE_DIR": str(tmp / "tmp"),
-                    "CLAUDE_PROJECT_DIR": str(_REPO_ROOT),
+                    "CLAUDE_PROJECT_DIR": str(_REPO_ROOT), "AUTOSDD_PLAN_DIR": str(tmp / "tmp"),
                     "PATH": f"{tmp / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"})
         if projects_dir:
             env["CLAUDE_CONFIG_DIR"] = str(tmp / "cfg")

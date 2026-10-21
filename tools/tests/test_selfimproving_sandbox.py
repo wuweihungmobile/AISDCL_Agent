@@ -175,7 +175,7 @@ class TestSandbox(P2TestCase):
         real = os.path.realpath
 
         def fake(path, *a, **kw):
-            return str(R / "docs") if Path(path) == self.home / "sandbox" else real(path, *a, **kw)
+            return real(R / "docs") if Path(path) == self.home / "sandbox" else real(path, *a, **kw)
         with mock.patch.object(si_sandbox.os.path, "realpath", fake):
             rc, out, err = self.M(R, "sandbox", p)
         self.assertEqual((rc, out), (3, ""), err)

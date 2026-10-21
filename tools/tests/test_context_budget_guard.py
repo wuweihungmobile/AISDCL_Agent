@@ -15612,10 +15612,10 @@ class SimulationProbeSelftestTest(unittest.TestCase):
                ("engine_resume_job_sim.py", ["--selftest"], "自證：13/13"))
 
     def test_each_simulation_probe_selftest_passes(self) -> None:
-        for probe, flags, phrase in self._PROBES:
+        for probe, flags, phrase in self._PROBES:  # 900 s：GH Windows runner 曾逾 300 s；本機 43 s
             argv = [sys.executable, str(_REPO_ROOT / "tools" / "probe" / probe), *flags]
             done = subprocess.run(
-                argv, capture_output=True, encoding="utf-8", errors="replace", timeout=300,
+                argv, capture_output=True, encoding="utf-8", errors="replace", timeout=900,
                 check=False, env={**os.environ, "AUTOSDD_SENTINEL_OFF": "1"})
             self.assertEqual(done.returncode, 0, probe + done.stdout[-1500:] + done.stderr[-500:])
             if phrase:
