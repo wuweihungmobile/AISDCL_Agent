@@ -28,6 +28,13 @@
                               字元或仍是 `<…>` 佔位＝啟動即 SettingsError（不靜默退回停用）。
                               只有 backend 與 Bridge 持有；引擎子行程與 FSM CLI 子行程的環境一律
                               不含它。repo 內不放真值
+  SI_ROOT                     SelfImproving 的 repo 根（其下 `tools/` 有根層 CLI，`docs/06_quality/`
+                              有帳本）：`/si/*` 以子行程在此目錄呼叫唯讀 `export`（P1b）。
+                              未設時，本機直跑且 `REPO_ROOT` 像 monorepo 就取 monorepo 根，否則
+                              （例如容器內）為 None；不檢查存在性與內容——缺 CLI 在請求時回 503
+                              `si_unavailable`（cause 為 si_script_missing）。不可是檔案系統根；
+                              不併入 BRIDGE_ALLOWED_PATH_ROOTS（那是引擎 execution_path 的閘）。
+                              docker compose 設 /repo 並以唯讀 bind 掛入必要子集
 """
 from __future__ import annotations
 
@@ -71,6 +78,9 @@ class Settings:
     log_dir: Path | None = None
     #: SDD 寫入權杖；repr=False 讓 `print(settings)`／日誌不會把它帶出去。None＝寫入面停用。
     sdd_write_token: str | None = field(default=None, repr=False)
+    #: SelfImproving 的 repo 根（R1）；None＝SI 面不可用（請求時回 503 `si_unavailable`，
+    #: cause 為 `si_root_unset`）。
+    si_root: Path | None = None
 
 
 def _looks_like_monorepo(root: Path) -> bool:
@@ -92,10 +102,11 @@ def discover_sdd_root(sdd_parent: Path) -> Path | None:
     return best[1].resolve() if best else None
 
 
-def _anchor_guard(path: Path, var: str) -> Path:
+def _anchor_guard(path: Path, var: str,
+                  why: str = "白名單根等於整個磁碟都放行") -> Path:
     resolved = path.resolve()
     if resolved == Path(resolved.anchor):
-        raise SettingsError(f"{var} 不可是檔案系統根（{resolved}）：白名單根等於整個磁碟都放行")
+        raise SettingsError(f"{var} 不可是檔案系統根（{resolved}）：{why}")
     return resolved
 
 
@@ -183,6 +194,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     raw_log_dir = e.get("BRIDGE_LOG_DIR", "").strip()
 
+    raw_si = e.get("SI_ROOT", "").strip()
+    if raw_si:
+        si_root: Path | None = _anchor_guard(
+            Path(raw_si), "SI_ROOT", "子行程的 cwd 與 git safe.directory 都會放行整個磁碟")
+    else:
+        si_root = REPO_ROOT.resolve() if _looks_like_monorepo(REPO_ROOT) else None
+
     return Settings(
         host=e.get("BRIDGE_HOST", "").strip() or "127.0.0.1",
         port=port,
@@ -197,4 +215,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         outbound_allowlist=allowlist,
         log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
         sdd_write_token=_parse_sdd_write_token(e),
+        si_root=si_root,
     )

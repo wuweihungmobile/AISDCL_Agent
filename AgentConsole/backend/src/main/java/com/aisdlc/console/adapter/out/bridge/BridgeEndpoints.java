@@ -39,6 +39,14 @@ public class BridgeEndpoints {
         return base("sdd");
     }
 
+    /**
+     * {@code /si/*} 的基底位址（不含結尾斜線）：解析規則與 {@link #sddBase()} 相同（自訂的 {@code sdd.engineUrl} 優先，否則
+     * {@code ENGINE_BRIDGE_URL}）。SelfImproving 沒有自己的 engineUrl 設定鍵——同一個 Bridge 服務所有路徑前綴（TCS-P1b ⚖14）。
+     */
+    public String siBase() {
+        return base("sdd");
+    }
+
     /** 健康探測路徑（{@code autoclaude.healthCheckPath}，預設 {@code /health/deep}）。 */
     public String healthPath() {
         String path = settings.find("autoclaude", "healthCheckPath").orElse(DEFAULT_HEALTH_PATH);

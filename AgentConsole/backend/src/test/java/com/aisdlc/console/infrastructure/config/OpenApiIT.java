@@ -25,6 +25,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code POST /auth/logout}（D-19）＝58（操作數 64→67）。
  * 整合輪 115（契約 v1.5）再加 {@code POST /projects/{id}/sdd/freeze}（API-SGN-06）、{@code PUT /projects/{id}/sdd-binding}（API-PRJ-08）、
  * {@code GET /executions/{runId}/rtm}（API-EXE-16）＝61（操作數 67→70）。
+ * SelfImproving P1b（TCS-SelfImprovingMirror-P1b）再加六個 SI GET（{@code /api/v1/si/} 的 status、observations、events、proposals、
+ * proposals/{id}、runs；路徑 61→67、操作 70→76；只增不減）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -98,7 +100,14 @@ class OpenApiIT extends AbstractApiIT {
             // ── 整合輪 115（契約 v1.5）：核准凍結、SDD 綁定編輯、執行追溯覆蓋 ──
             Map.entry("/api/v1/projects/{id}/sdd/freeze", List.of("post")),
             Map.entry("/api/v1/projects/{id}/sdd-binding", List.of("put")),
-            Map.entry("/api/v1/executions/{runId}/rtm", List.of("get"))));
+            Map.entry("/api/v1/executions/{runId}/rtm", List.of("get")),
+            // ── SelfImproving P1b：唯讀鏡像（六個 GET；沒有任何寫入端點）──
+            Map.entry("/api/v1/si/status", List.of("get")),
+            Map.entry("/api/v1/si/observations", List.of("get")),
+            Map.entry("/api/v1/si/events", List.of("get")),
+            Map.entry("/api/v1/si/proposals", List.of("get")),
+            Map.entry("/api/v1/si/proposals/{id}", List.of("get")),
+            Map.entry("/api/v1/si/runs", List.of("get"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -110,7 +119,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(61).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(67).containsExactlyElementsOf(EXPECTED.keySet());
         int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
@@ -118,7 +127,7 @@ class OpenApiIT extends AbstractApiIT {
                     .containsExactlyElementsOf(expected.getValue());
             operationCount += operations.size();
         }
-        assertThat(operationCount).as("契約 v1.5 的操作總數").isEqualTo(70);
+        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET").isEqualTo(76);
     }
 
     @Test

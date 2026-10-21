@@ -125,6 +125,14 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
     "GET",
     "/api/v1/monitor/projects/P/logs?level=ERROR&q=%E5%A4%B1%E6%95%97&order=desc&page=0&size=50",
   ],
+
+  // ── SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R11）：六個 GET，沒有任何寫入函式；`since`、`limit` 為 undefined 時不進網址 ──
+  ["getSiStatus", () => api.getSiStatus(), "GET", "/api/v1/si/status"],
+  ["getSiObservations", () => api.getSiObservations({ since: 7, limit: 100 }), "GET", "/api/v1/si/observations?since=7&limit=100"],
+  ["getSiEvents", () => api.getSiEvents({ limit: 100 }), "GET", "/api/v1/si/events?limit=100"],
+  ["getSiProposals", () => api.getSiProposals(), "GET", "/api/v1/si/proposals"],
+  ["getSiProposal", () => api.getSiProposal("PROP-SI-004"), "GET", "/api/v1/si/proposals/PROP-SI-004"],
+  ["getSiRuns", () => api.getSiRuns({ since: 3 }), "GET", "/api/v1/si/runs?since=3"],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -145,10 +153,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 68 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 74 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(68);
+    expect(names).toHaveLength(74);
   });
 
   it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project 也不帶 projectId）", async () => {

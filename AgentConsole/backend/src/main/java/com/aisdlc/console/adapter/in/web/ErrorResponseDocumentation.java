@@ -54,9 +54,20 @@ public class ErrorResponseDocumentation {
 
     /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
     private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
-            // v1.5（契約 §1.10.3）：本端點是「404 的 reason 省略」慣例的唯一例外
+            // v1.5（契約 §1.10.3）：本端點是「404 的 reason 省略」慣例的例外之一（另一個是下面的 si_not_found）
             "GET /api/v1/executions/{runId}/rtm", "批次不存在（訊息「執行批次不存在或已刪除：<id>」，無 reason），或批次存在但沒有追溯報告"
-                    + "（reason rtm_not_found；本端點是「404 的 reason 省略」慣例的唯一例外）");
+                    + "（reason rtm_not_found；本端點是「404 的 reason 省略」慣例的例外之一）",
+            // P1b（契約後繼檔 API_Contract_SelfImproving_P1b）：第二個例外——格式合法而查無此提案（與 503 si_unavailable 語意分離）
+            "GET /api/v1/si/proposals/{id}", "查無此提案（reason si_not_found，details.id 為請求的 id；「404 的 reason 省略」慣例的"
+                    + "例外之一）。不是「資料面壞了」——那是 503 si_unavailable");
+
+    /** SelfImproving 唯讀鏡像的上游失敗（Bridge 的其他 4xx 與 5xx、連線失敗、讀取逾時）與 Bridge 明確回報的 503 si_unavailable。 */
+    private static final Map<String, String> SI_UPSTREAM = Map.of(
+            "502", "引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件）",
+            "503", "si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、"
+                    + "timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 "
+                    + "1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料",
+            "504", "引擎橋接服務逾時（讀取 20 秒、不重試）");
 
     /** pause／resume／cancel 的上游錯誤：Bridge 無法連線、逾時（DB 狀態不變）。 */
     private static final Map<String, String> BRIDGE_UPSTREAM = Map.of(
@@ -80,6 +91,15 @@ public class ErrorResponseDocumentation {
                     "422", "報告檔存在但壞掉（引擎拒絕此請求；details.bridgeReason=rtm_unreadable）",
                     "502", "引擎橋接服務無法連線／回了非預期的錯誤",
                     "504", "引擎橋接服務逾時")),
+            // P1b：SelfImproving 唯讀鏡像（TCS-P1b R8、R10）——只有 GET；單筆另有 Bridge 的 422 invalid_request（id 格式）
+            Map.entry("GET /api/v1/si/status", SI_UPSTREAM),
+            Map.entry("GET /api/v1/si/observations", SI_UPSTREAM),
+            Map.entry("GET /api/v1/si/events", SI_UPSTREAM),
+            Map.entry("GET /api/v1/si/proposals", SI_UPSTREAM),
+            Map.entry("GET /api/v1/si/proposals/{id}", Map.of(
+                    "422", "引擎拒絕此請求（details.bridgeReason=invalid_request；id 不符 PROP-SI-<三位以上數字>）",
+                    "502", SI_UPSTREAM.get("502"), "503", SI_UPSTREAM.get("503"), "504", SI_UPSTREAM.get("504"))),
+            Map.entry("GET /api/v1/si/runs", SI_UPSTREAM),
             Map.entry("POST /api/v1/import/upload", Map.of(
                     "413", "上傳超過 10MB 上限（reason：檔案超過 10MB 上限）",
                     "415", "副檔名不在 .md／.pdf／.docx（reason：只支援 .md／.pdf／.docx 檔案）",

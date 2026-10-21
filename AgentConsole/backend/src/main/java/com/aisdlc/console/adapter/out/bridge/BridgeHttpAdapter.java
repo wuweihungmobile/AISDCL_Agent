@@ -12,6 +12,7 @@ import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.ExecutionRtm;
 import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
+import com.aisdlc.console.domain.model.si.SiExport;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -53,6 +54,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -76,6 +78,8 @@ class BridgeHttpAdapter implements AgentBridge {
     static final String TOKEN_HEADER = "X-Bridge-Token";
     /** Bridge 在「SDD 寫入面停用」時回的 503 reason（它的 {@code BRIDGE_SDD_WRITE_TOKEN} 沒設）：不是 5xx 故障，而是設定決定的停用。 */
     private static final String SDD_WRITE_DISABLED = "sdd_write_disabled";
+    /** Bridge 在「SelfImproving 資料面不可用」時回的 503 reason（TCS-P1b R4、R8）：與 4xx 同走 {@code BridgeRejectedException}，由用例轉成 503。 */
+    private static final String SI_UNAVAILABLE = "si_unavailable";
     private static final String TRACE_MDC_KEY = "traceId";
     private static final Logger LOG = LoggerFactory.getLogger(BridgeHttpAdapter.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -88,6 +92,12 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final Duration HEALTH_READ_TIMEOUT = Duration.ofSeconds(8);
     /** 引擎狀態查詢（{@code /sdd/version}、{@code /sdd/fsm}、{@code /sdd/fsm/{project}}）：連線 2 秒、讀取 3 秒、不重試（契約 §3.1）。 */
     private static final Duration SDD_READ_TIMEOUT = Duration.ofSeconds(3);
+    /**
+     * SelfImproving 唯讀鏡像（{@code /si/*}）：連線 2 秒、讀取 20 秒、不重試（TCS-P1b R8；ADR-SI-12）。Bridge 的 {@code export} 子行程逾時
+     * 15 秒（{@code SI_CLI_TIMEOUT_SECONDS}）必須小於這個值，否則 Bridge 的 503 會被這裡的 504 蓋掉。
+     */
+    private static final Duration SI_READ_TIMEOUT = Duration.ofSeconds(20);
+    private static final char[] HEX = "0123456789ABCDEF".toCharArray();
     private static final Duration APPROVE_READ_TIMEOUT = Duration.ofSeconds(10);
     private static final Duration COMPILE_READ_TIMEOUT = Duration.ofSeconds(15);
     // 契約 §3.1 呼叫總表：連線 2s，讀取逾時依呼叫而定
@@ -333,6 +343,56 @@ class BridgeHttpAdapter implements AgentBridge {
                         decimalOrZero(ac.get("pct"))),
                 strings(doc.get("failed_at_ids")), strings(doc.get("weak_regex_at_ids")),
                 strings(doc.get("unmapped_at_ids")), Boolean.TRUE.equals(doc.get("fully_covered")));
+    }
+
+    // ── P1b：SelfImproving 唯讀鏡像（TCS-SelfImprovingMirror-P1b R7、R8、R10；連線 2s／讀取 20s、不重試）────────────
+
+    @Override
+    public SiExport siExport(String kind, Integer since, Integer limit, String id) {
+        StringBuilder url = new StringBuilder(endpoints.siBase()).append("/si/").append(kind);
+        if (id != null) {
+            // 單筆：不帶 since／limit（Bridge 對 /si/proposals/{id} 的任何查詢參數一律 422）
+            url.append('/').append(pathSegment(id));
+        } else if (!"status".equals(kind)) {
+            // /si/status 同樣不收任何查詢參數；清單類依序帶 since、limit（null 不進網址）
+            String separator = "?";
+            if (since != null) {
+                url.append(separator).append("since=").append(since);
+                separator = "&";
+            }
+            if (limit != null) {
+                url.append(separator).append("limit=").append(limit);
+            }
+        }
+        // 網址已是完整、已編碼的 URI：不再交給範本引擎（它會把已編好的 % 再編一次，也無法表達「整段為 .／.. 時點字元編成 %2E」）
+        URI uri = URI.create(url.toString());
+        Object doc = getJson(rest -> rest.get().uri(uri), SI_READ_TIMEOUT, 0);
+        if (!(doc instanceof Map<?, ?>)) {
+            throw malformed("GET /si/" + kind);
+        }
+        return new SiExport(asMap(doc));
+    }
+
+    /**
+     * 把任意字串嚴格 percent-encode 成<b>單一路徑段</b>：只有 RFC 3986 的非保留字元（{@code A-Z a-z 0-9 - . _ ~}）原樣，其餘位元組（UTF-8）
+     * 一律 {@code %XX}（大寫十六進位）——所以 {@code /}、{@code ?}、{@code #}、{@code ;}、{@code \}、{@code %} 與空白都不可能改變路徑結構。
+     * 整段恰為 {@code .} 或 {@code ..} 時，點字元也編成 {@code %2E}：非保留字元的編碼等價於原字元，HTTP 堆疊可能把 {@code ..} 當路徑穿越
+     * 正規化掉（TCS-P1b R7、⚖ 29）。
+     */
+    static String pathSegment(String raw) {
+        StringBuilder out = new StringBuilder();
+        for (byte b : raw.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 0xFF;
+            boolean unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                    || c == '-' || c == '.' || c == '_' || c == '~';
+            if (unreserved) {
+                out.append((char) c);
+            } else {
+                out.append('%').append(HEX[c >> 4]).append(HEX[c & 0xF]);
+            }
+        }
+        String encoded = out.toString();
+        return ".".equals(encoded) || "..".equals(encoded) ? encoded.replace(".", "%2E") : encoded;
     }
 
     private static List<String> strings(Object value) {
@@ -617,6 +677,15 @@ class BridgeHttpAdapter implements AgentBridge {
      * （{@code {project}}、{@code {root}}）：變數值嚴格 percent-encode，所以 CJK、空白、{@code :} 與路徑分隔符都能安全定址。
      */
     private Object getJson(String urlTemplate, Map<String, Object> variables, Duration readTimeout, int retries) {
+        return getJson(rest -> rest.get().uri(urlTemplate, variables), readTimeout, retries);
+    }
+
+    /**
+     * 上面兩個的共同核心：{@code request} 決定請求的目標（範本加變數，或已編碼好的 {@link URI}）；重試與錯誤分流相同。
+     * 重試行為不變：連線失敗與讀取逾時重試 {@code retries} 次，4xx／5xx 不重試。
+     */
+    private Object getJson(Function<RestClient, RestClient.RequestHeadersSpec<?>> request, Duration readTimeout,
+                           int retries) {
         String trace = traceId();
         // 至少嘗試一次；最後一次失敗（連線失敗或讀取逾時）就把它丟出去，其餘錯誤（4xx／5xx）在 handle 內直接丟出、不重試
         for (int attempt = 0;; attempt++) {
@@ -630,7 +699,7 @@ class BridgeHttpAdapter implements AgentBridge {
             }
             UpstreamException failure;
             try {
-                return client(readTimeout, trace).get().uri(urlTemplate, variables).exchange((req, response) -> {
+                return request.apply(client(readTimeout, trace)).exchange((req, response) -> {
                     HttpStatusCode status = response.getStatusCode();
                     String body = readBody(response.getBody());
                     if (status.is2xxSuccessful()) {
@@ -798,7 +867,9 @@ class BridgeHttpAdapter implements AgentBridge {
         String reason = text(error.get("reason"));
         // 503 sdd_write_disabled 是「明確拒絕」（權杖沒設＝這個動詞停用），與 4xx 同走 BridgeRejectedException，由用例轉成 503；其餘 5xx 才是故障
         boolean writeDisabled = status.value() == 503 && SDD_WRITE_DISABLED.equals(reason);
-        if (status.is4xxClientError() || writeDisabled) {
+        // 503 si_unavailable 同理：SelfImproving 資料面不可用是 Bridge 明確回報的狀態（帶 cause 與 detail），不是上游故障
+        boolean siUnavailable = status.value() == 503 && SI_UNAVAILABLE.equals(reason);
+        if (status.is4xxClientError() || writeDisabled || siUnavailable) {
             List<Map<String, Object>> violations = new ArrayList<>();
             for (Object item : asList(error.get("violations"))) {
                 violations.add(asMap(item));

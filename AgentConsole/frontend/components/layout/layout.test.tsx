@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RootLayout from "@/app/layout";
 import { clearSession, resetSessionCache, saveSession } from "@/lib/auth/store";
+import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries } from "@/lib/nav/registry";
 
 // ── Next 路由相關：測試環境沒有 App Router，換成可控的替身 ───────────────────────
 let pathname = "/";
@@ -129,15 +130,25 @@ describe("RootLayout 渲染：四區塊各一份", () => {
     expect(screen.getAllByRole("navigation", { name: "主導覽" })).toHaveLength(1);
     expect(within(screen.getByRole("main")).getByText("頁面內容")).toBeInTheDocument();
 
-    // 導覽六項（設計稿 Sidebar）
+    // 導覽入口全部取自登記表（lib/nav/registry.ts；R22）：對「目前角色可見的登記表項」逐項斷言標籤與 href，增刪登記表一列即增刪斷言，不寫死標籤清單
     const nav = within(screen.getByRole("navigation", { name: "主導覽" }));
-    for (const label of ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定"]) {
-      expect(nav.getByRole("link", { name: label })).toBeInTheDocument();
+    const entries = visibleNavEntries(NAV_REGISTRY, "OPERATOR");
+    expect(entries.length, "登記表沒有任何對 OPERATOR 可見的項：斷言會空轉").toBeGreaterThan(0);
+    expect(nav.getAllByRole("link")).toHaveLength(entries.length);
+    for (const entry of entries) {
+      const link = nav.getByRole("link", { name: entry.label });
+      expect(link).toBeInTheDocument();
+      // href 為字串的項與專案無關，立即可斷言；函式型 href（執行、監控）要等專案資料到齊後再斷言（見下）
+      if (typeof entry.href === "string") expect(link).toHaveAttribute("href", entry.href);
     }
-    expect(nav.getByRole("link", { name: "儀表板" })).toHaveAttribute("aria-current", "page");
-    expect(nav.getByRole("link", { name: "儀表板" })).toHaveAttribute("href", "/");
-    expect(nav.getByRole("link", { name: "BRD/PRD 匯入" })).toHaveAttribute("href", "/import");
-    expect(nav.getByRole("link", { name: "系統設定" })).toHaveAttribute("href", "/settings");
+    // 路徑 / 時 active 的項恰為登記表依序第一個 match 的項，其餘都不是
+    const activeEntry = activeNavEntry(entries, "/");
+    expect(activeEntry, "路徑 / 應命中登記表的某一項").not.toBeNull();
+    for (const entry of entries) {
+      const link = nav.getByRole("link", { name: entry.label });
+      if (entry.id === activeEntry?.id) expect(link).toHaveAttribute("aria-current", "page");
+      else expect(link).not.toHaveAttribute("aria-current");
+    }
 
     // 專案資料到齊後：「我的專案」rail、頂列 chips；徽章取自通知摘要——
     // signoff 佇列鈕＝pendingSignoffs（7，不是專案算出的 1），通知鈴＝pendingReviews＋unacknowledgedAlerts（2＋3）
@@ -145,9 +156,12 @@ describe("RootLayout 渲染：四區塊各一份", () => {
     expect(screen.getByTestId("bell-badge")).toHaveTextContent("5");
     const rail = within(screen.getByTestId("project-rail"));
     expect(rail.getByRole("link", { name: "專案甲" })).toHaveAttribute("href", "/projects/p1");
-    // 「執行中心」「監控中心」從目前專案（列表第一筆）進入
-    expect(nav.getByRole("link", { name: "執行中心" })).toHaveAttribute("href", "/projects/p1/execute");
-    expect(nav.getByRole("link", { name: "監控中心" })).toHaveAttribute("href", "/projects/p1/monitor");
+    // 函式型 href（執行中心、監控中心）從目前專案（列表第一筆）進入
+    const projectBound = entries.filter((entry) => typeof entry.href === "function");
+    expect(projectBound.length, "登記表沒有函式型 href 的項：專案進入斷言會空轉").toBeGreaterThan(0);
+    for (const entry of projectBound) {
+      expect(nav.getByRole("link", { name: entry.label })).toHaveAttribute("href", navHref(entry, { currentProjectId: "p1" }));
+    }
 
     // 底部列：連線狀態與版本
     expect(screen.getByTestId("status-console-api")).toBeInTheDocument();

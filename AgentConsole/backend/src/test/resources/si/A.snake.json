@@ -1,0 +1,504 @@
+{
+  "observations": {
+    "schema_rev": 1,
+    "kind": "observations",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "id": "OBS-SI-001",
+        "time": "2026-10-18 22:46",
+        "context": "主控視窗・T1 受理",
+        "symptom": "需求原文要求檔名 `SelfImproving.prd`，repo 的 PRD 慣例是 `*_PRD.md`（文件工具鏈與 docs 守門只認 `.md`）",
+        "evidence": "`docs/01_requirements/Agent_ConsoleUI_PRD.md`、`AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`",
+        "category": "decision",
+        "severity": "P4",
+        "disposition": "decided：寫成 `docs/01_requirements/SelfImproving_PRD.md`，回報掌舵者",
+        "marks": "面=文件;來源=代理;回報者=主控;orig=\"裁決：寫成 `docs/01_requirements/SelfImproving_PRD.md`，回報掌舵者\"",
+        "marks_kv": {
+          "面": "文件",
+          "來源": "代理",
+          "回報者": "主控",
+          "orig": "裁決：寫成 `docs/01_requirements/SelfImproving_PRD.md`，回報掌舵者"
+        },
+        "line": 11
+      },
+      {
+        "id": "OBS-SI-002",
+        "time": "2026-10-18 22:46",
+        "context": "主控視窗・派工前",
+        "symptom": "額度守衛 `--pace` 回 cap=1（週額 87%、準備帶），四方專家無法並行，只能一次一個依序派",
+        "evidence": "`python tools/session_resume_planner.py --pace`（量測於 21:34）",
+        "category": "process",
+        "severity": "P3",
+        "disposition": "decided：研究員→SA→SD／Architect→QA 串行",
+        "marks": "面=守衛;暴露=無;來源=代理;回報者=主控;orig=\"裁決：研究員→SA→SD／Architect→QA 串行；每棒交卷後主控親驗再派下一棒\"",
+        "marks_kv": {
+          "面": "守衛",
+          "暴露": "無",
+          "來源": "代理",
+          "回報者": "主控",
+          "orig": "裁決：研究員→SA→SD／Architect→QA 串行；每棒交卷後主控親驗再派下一棒"
+        },
+        "line": 12
+      },
+      {
+        "id": "OBS-SI-003",
+        "time": "2026-10-18 21:20",
+        "context": "操作員（Sonnet）・G-116-17 探針",
+        "symptom": "`sdd_env.py --sub monorepo` 給的 `SDD_STATE_DIR` 恆為根 `build/reports/fsm`，無覆寫選項；探針要用拋棄式狀態目錄只能手動改兩項",
+        "evidence": "操作員回報；`AISDLC_SDD/scripts/sdd_env.py` 參數面",
+        "category": "tooling",
+        "severity": "P4",
+        "disposition": "deferred；再開症狀：第二次有人為探針手改三件組而寫錯真狀態目錄",
+        "marks": "面=流程;來源=代理;回報者=操作員;orig=\"延後；再開症狀：第二次有人為探針手改三件組而寫錯真狀態目錄\"",
+        "marks_kv": {
+          "面": "流程",
+          "來源": "代理",
+          "回報者": "操作員",
+          "orig": "延後；再開症狀：第二次有人為探針手改三件組而寫錯真狀態目錄"
+        },
+        "line": 13
+      },
+      {
+        "id": "OBS-SI-004",
+        "time": "2026-10-18 21:25",
+        "context": "操作員（Sonnet）・交卷",
+        "symptom": "子代理的 Write 工具拒寫 `REPORT.md`（harness 回「Subagents should return findings as text, not write report files」），任務書要求的報告檔寫不出來",
+        "evidence": "操作員回報原文（sid f3ead132-29b1-418c-97d9-35868ab11c70 line 435）",
+        "category": "tooling",
+        "severity": "P4",
+        "disposition": "decided：任務書一律改「文字交卷」，不再要求子代理寫報告檔",
+        "marks": "面=流程;來源=代理;回報者=操作員;orig=\"裁決：任務書一律改「文字交卷」，不再要求子代理寫報告檔\"",
+        "marks_kv": {
+          "面": "流程",
+          "來源": "代理",
+          "回報者": "操作員",
+          "orig": "裁決：任務書一律改「文字交卷」，不再要求子代理寫報告檔"
+        },
+        "line": 14
+      },
+      {
+        "id": "OBS-SI-005",
+        "time": "2026-10-21 08:15",
+        "context": "主控・夾具",
+        "symptom": "夾具負控：症狀含腳本字樣 <script>window.__si_xss=1</script> 與 <img src=x onerror=alert(1)>，頁面必須原樣顯示為文字",
+        "evidence": "`AgentConsole/engine-bridge/tests/fixtures/si_repo/docs/06_quality/SelfImproving_Observation_Ledger.md`",
+        "category": "tooling",
+        "severity": "P3",
+        "disposition": "open",
+        "marks": "面=產品;來源=工具;回報者=主控",
+        "marks_kv": {
+          "面": "產品",
+          "來源": "工具",
+          "回報者": "主控"
+        },
+        "line": 15
+      },
+      {
+        "id": "OBS-SI-006",
+        "time": "2026-10-20 23:40",
+        "context": "主控・夾具",
+        "symptom": "夾具負控：症狀含 **粗體**、[連結](https://example.invalid/x)、`inline code` 與 &lt;b&gt;實體&lt;/b&gt; 字樣，頁面不得轉格式、不得二次解碼",
+        "evidence": "`docs/06_quality/SelfImproving_Protocol/params.json`",
+        "category": "doc",
+        "severity": "P4",
+        "disposition": "decided：夾具列，不改任何檔",
+        "marks": "面=文件;來源=人;回報者=掌舵者",
+        "marks_kv": {
+          "面": "文件",
+          "來源": "人",
+          "回報者": "掌舵者"
+        },
+        "line": 16
+      },
+      {
+        "id": "OBS-SI-007",
+        "time": "2026-10-19 14:05",
+        "context": "研究員・外部文獻",
+        "symptom": "外部文章建議以多代理互審降低誤判（外部衍生，僅供參考）",
+        "evidence": "`anthropic-engineering`；`docs/06_quality/SelfImproving_Protocol/research_sources.json`",
+        "category": "process",
+        "severity": "P4",
+        "disposition": "open",
+        "marks": "面=流程;來源=代理;回報者=研究者;外部衍生=是;src=anthropic-engineering",
+        "marks_kv": {
+          "面": "流程",
+          "來源": "代理",
+          "回報者": "研究者",
+          "外部衍生": "是",
+          "src": "anthropic-engineering"
+        },
+        "line": 17
+      },
+      {
+        "id": "OBS-SI-008",
+        "time": "2026-10-14 10:30",
+        "context": "SA・架構審閱",
+        "symptom": "提案生效路徑缺少獨立複核關卡，裁決權限與落地手段分屬兩處",
+        "evidence": "`docs/02_architecture/Root_Layout_and_Module_Placement.md`",
+        "category": "decision",
+        "severity": "P1",
+        "disposition": "decided：維持現行規範，另列觀察",
+        "marks": "面=流程;來源=人;回報者=掌舵者",
+        "marks_kv": {
+          "面": "流程",
+          "來源": "人",
+          "回報者": "掌舵者"
+        },
+        "line": 18
+      },
+      {
+        "id": "OBS-SI-009",
+        "time": "2026-10-21 00:05",
+        "context": "操作員・主控台",
+        "symptom": "以 Console 面板決定提案時，決定載體需帶審計參照；此列模擬載體標記，證據座標指向 AutoClaude 檔（模組桶不得由前端推算）",
+        "evidence": "`AutoClaude/autoclaude/plugins/evolution_plugin.py`",
+        "category": "bug",
+        "severity": "P2",
+        "disposition": "open",
+        "marks": "面=產品;來源=工具;回報者=操作員;carrier=console;audit_ref=5b0e6d7a-3c1f-4c8e-9a52-7d1b2f6e0a11",
+        "marks_kv": {
+          "面": "產品",
+          "來源": "工具",
+          "回報者": "操作員",
+          "carrier": "console",
+          "audit_ref": "5b0e6d7a-3c1f-4c8e-9a52-7d1b2f6e0a11"
+        },
+        "line": 19
+      },
+      {
+        "id": "OBS-SI-010",
+        "time": "2026-10-05 09:00",
+        "context": "主控・夾具",
+        "symptom": "夾具列：處置為 deferred 並帶再開症狀",
+        "evidence": "`docs/06_quality/SelfImproving_Protocol/params.json`",
+        "category": "process",
+        "severity": "P3",
+        "disposition": "deferred；再開症狀：同一症狀於另一輪再現",
+        "marks": "面=流程;來源=人;回報者=主控",
+        "marks_kv": {
+          "面": "流程",
+          "來源": "人",
+          "回報者": "主控"
+        },
+        "line": 20
+      },
+      {
+        "id": "OBS-SI-011",
+        "time": "2026-09-12 16:20",
+        "context": "主控・夾具",
+        "symptom": "夾具列：與 OBS-SI-001 同一症狀，已併入",
+        "evidence": "`docs/01_requirements/Agent_ConsoleUI_PRD.md`",
+        "category": "doc",
+        "severity": "P4",
+        "disposition": "merged@OBS-SI-001",
+        "marks": "面=文件;來源=人;回報者=主控",
+        "marks_kv": {
+          "面": "文件",
+          "來源": "人",
+          "回報者": "主控"
+        },
+        "line": 21
+      },
+      {
+        "line": 22,
+        "raw": "| OBS-SI-012 | 2026-10-21 09:00 | 主控・夾具 | 欄數不足的壞列（只有八欄） | `docs/06_quality/SelfImproving_Protocol/params.json` | bug | P3 | open |",
+        "valid": false
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": [
+      {
+        "subject": "OBS-SI-012",
+        "code": "ROW-ARITY",
+        "detail": "欄數不是 9 或行未以 | 結尾"
+      }
+    ]
+  },
+  "events": {
+    "schema_rev": 1,
+    "kind": "events",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "seq": 1,
+        "t": "2026-10-20T22:31:25+08:00",
+        "kind": "run.open",
+        "by": "主控",
+        "run": "RUN-SI-001",
+        "trigger": "a",
+        "coords": [
+          "ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+          "docs/06_quality/SelfImproving_Observation_Ledger.md"
+        ],
+        "head_sha": "73ff8e3cdefeb993f9d4213ef88e3c184055a60a"
+      },
+      {
+        "seq": 2,
+        "t": "2026-10-20T22:31:32+08:00",
+        "kind": "research.scan",
+        "by": "researcher",
+        "run": "RUN-SI-001",
+        "sources": [
+          {
+            "id": "anthropic-engineering",
+            "sha256": "sha256:1e6835add260810a92ca68dd140b4fca30547b9eaa686231574b137f1e2990c0",
+            "bytes": 141524,
+            "changed": true,
+            "http_status": 200
+          }
+        ],
+        "sources_sha256": "sha256:842bdcb5cd6243158f90a4231525bdc3aeae36d6816bdeedf740bf42a7ab2698",
+        "fetched_at": "2026-10-20T22:31:32+08:00"
+      },
+      {
+        "seq": 3,
+        "t": "2026-10-20T22:32:44+08:00",
+        "kind": "attr",
+        "by": "主控",
+        "id": "ATT-SI-001",
+        "type": "root",
+        "obs": [
+          "OBS-SI-164",
+          "OBS-SI-162",
+          "OBS-SI-163"
+        ],
+        "items": [
+          [
+            "MEMORY_ENTRY",
+            "memory/guard-ratchet-repin-ritual.md"
+          ]
+        ],
+        "root_cause": "process/task-brief-gap"
+      },
+      {
+        "seq": 4,
+        "t": "2026-10-20T22:32:44+08:00",
+        "kind": "attr",
+        "by": "主控",
+        "id": "ATT-SI-002",
+        "type": "root",
+        "obs": [
+          "OBS-SI-161"
+        ],
+        "items": [
+          [
+            "DOC",
+            "docs/03_testing/contracts/TCS-SelfImproving-P1-20261020.md:312"
+          ]
+        ],
+        "root_cause": "process/checklist-gap"
+      },
+      {
+        "seq": 5,
+        "t": "2026-10-20T22:32:44+08:00",
+        "kind": "prop",
+        "by": "主控",
+        "id": "PROP-SI-004",
+        "rev": 1,
+        "run": "RUN-SI-001",
+        "base": "73ff8e3cdefeb993f9d4213ef88e3c184055a60a",
+        "cls": "M",
+        "action": "modify",
+        "route": "loop",
+        "target": [
+          "memory/guard-ratchet-repin-ritual.md"
+        ],
+        "touched_count": 1,
+        "touched_sha256": "sha256:d1c7596468d057607dafa491d59cd7a0ba9d99a66d68d71349a0c1ea1111e565",
+        "patch_sha256": "sha256:d12012b2bcde059ae9495b76b3a4d34023333a55d770411c56a338c2499848cd",
+        "body_sha256": "sha256:7f6e7ad3f8b9f6129901a9b239f4a6d233d01440b156f8937bdf0b6daded75d5",
+        "digest": "sha256:d21ae6f5a48de71266479e0a7f6278786764f9a52bbb0a7c6d82b7f1419cec9c",
+        "sources": [
+          "OBS-SI-162",
+          "OBS-SI-163",
+          "OBS-SI-164"
+        ],
+        "proposer": "主控",
+        "reviewer": null,
+        "preimage": {
+          "memory/guard-ratchet-repin-ritual.md": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "seq": 6,
+        "t": "2026-10-20T22:32:45+08:00",
+        "kind": "run.close",
+        "by": "主控",
+        "run": "RUN-SI-001",
+        "outcomes": {
+          "PROP-SI-004": "proposed"
+        }
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": []
+  },
+  "proposals": {
+    "schema_rev": 1,
+    "kind": "proposals",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "id": "PROP-SI-004",
+        "state": "proposed",
+        "route": "loop",
+        "cls": "M",
+        "action": "modify",
+        "run": "RUN-SI-001",
+        "rev": 1,
+        "digest": "sha256:d21ae6f5a48de71266479e0a7f6278786764f9a52bbb0a7c6d82b7f1419cec9c",
+        "target": [
+          "memory/guard-ratchet-repin-ritual.md"
+        ],
+        "touched": [
+          "memory/guard-ratchet-repin-ritual.md"
+        ],
+        "touched_count": 1,
+        "sources": [
+          "OBS-SI-162",
+          "OBS-SI-163",
+          "OBS-SI-164"
+        ],
+        "created_seq": 5,
+        "last_seq": 5,
+        "verdict": null,
+        "flags": [],
+        "cooldown": null,
+        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n"
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": []
+  },
+  "proposal_one": {
+    "schema_rev": 1,
+    "kind": "proposals",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "id": "PROP-SI-004",
+        "state": "proposed",
+        "route": "loop",
+        "cls": "M",
+        "action": "modify",
+        "run": "RUN-SI-001",
+        "rev": 1,
+        "digest": "sha256:d21ae6f5a48de71266479e0a7f6278786764f9a52bbb0a7c6d82b7f1419cec9c",
+        "target": [
+          "memory/guard-ratchet-repin-ritual.md"
+        ],
+        "touched": [
+          "memory/guard-ratchet-repin-ritual.md"
+        ],
+        "touched_count": 1,
+        "sources": [
+          "OBS-SI-162",
+          "OBS-SI-163",
+          "OBS-SI-164"
+        ],
+        "created_seq": 5,
+        "last_seq": 5,
+        "verdict": null,
+        "flags": [],
+        "cooldown": null,
+        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n"
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": []
+  },
+  "runs": {
+    "schema_rev": 1,
+    "kind": "runs",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "id": "RUN-SI-001",
+        "opened_seq": 1,
+        "closed_seq": 6,
+        "trigger": "a",
+        "head_sha": "73ff8e3cdefeb993f9d4213ef88e3c184055a60a",
+        "research": {
+          "kind": "research.scan",
+          "seq": 2
+        },
+        "prop_ids": [
+          "PROP-SI-004"
+        ],
+        "outcome": {
+          "PROP-SI-004": "proposed"
+        }
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": []
+  },
+  "status": {
+    "schema_rev": 1,
+    "kind": "status",
+    "generated_at": "2026-10-21T00:00:00+08:00",
+    "head_sha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "events_detected": [],
+        "unavailable": [
+          {
+            "trigger": "c",
+            "reason": "ledger-missing"
+          }
+        ],
+        "open_runs": [],
+        "pending_props": [
+          {
+            "id": "PROP-SI-004",
+            "rev": 1,
+            "state": "proposed",
+            "route": "loop",
+            "digest8": "d21ae6f5"
+          }
+        ],
+        "suspended": null,
+        "cooldowns": [],
+        "skip_reasons": {
+          "quota-band": 0,
+          "offline": 0,
+          "helmsman": 0
+        },
+        "capacity": {
+          "status": "NOT-EVALUABLE",
+          "reason": "capacity-verb-not-established"
+        },
+        "root_cause_changes": 0,
+        "reopen_candidates": {
+          "unsettled": 0
+        },
+        "pending_windows": [],
+        "friction_reconcile": {
+          "status": "NOT-EVALUABLE",
+          "reason": "transcript-unavailable"
+        },
+        "no_event": true
+      }
+    ],
+    "next_since": null,
+    "truncated": false,
+    "ne": [],
+    "problems": []
+  }
+}

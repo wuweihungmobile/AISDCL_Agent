@@ -88,6 +88,9 @@ public final class MiniBridge implements AutoCloseable {
     /** {@code /sdd/version}、{@code /sdd/fsm}、{@code /sdd/fsm/{project}} 的夾具（契約 §3.1.3；測試直接改它的欄位）。 */
     public final Sdd sdd = new Sdd();
 
+    /** {@code /si/*} 六個唯讀 GET 的夾具（TCS-SelfImprovingMirror-P1b §5.3；測試直接改它的欄位）。預設回放狀態 A 的 snake_case 黃金檔。 */
+    public final Si si = new Si();
+
     /**
      * AISDLC_SDD 唯讀查詢的假資料（欄位名與型別同真 Bridge 的 {@code routers/sdd.py}：snake_case 的本文、404 {@code fsm_not_found}、
      * 422 {@code fsm_state_unreadable}、503 {@code sdd_unavailable}）。{@link #reset()} 回到預設夾具：兩個專案
@@ -213,6 +216,72 @@ public final class MiniBridge implements AutoCloseable {
                                 + "resume-from-escalation --project \"" + key + "\" --to IMPLEMENTATION --reason \"<人工原因>\""));
             }
             states.put(key, state);
+        }
+    }
+
+    /**
+     * SelfImproving 唯讀鏡像的假資料（欄位名與型別同真 Bridge 的 {@code routers/si.py}：snake_case 的本文、404 {@code si_not_found}、
+     * 422 {@code invalid_request}、503 {@code si_unavailable}）。{@link #reset()} 回到預設：回放狀態 A 的黃金檔
+     * （{@code src/test/resources/si/A.snake.json}，真 CLI 輸出的凍結複本），沒有任何失敗旋鈕開著。
+     */
+    public static final class Si {
+
+        /** 回應本文（Bridge 形狀）：鍵為 {@code observations}、{@code events}、{@code proposals}、{@code runs}、{@code status} 與 {@code proposal:<id>}。 */
+        public final Map<String, Map<String, Object>> payloads = new ConcurrentHashMap<>();
+        /** 非空（鍵 {@code cause}、{@code detail}）＝全部 {@code /si/*} 回 503 {@code si_unavailable}。 */
+        public volatile Map<String, String> unavailable = Map.of();
+        /** 對這些 id 的 {@code GET /si/proposals/{id}} 回 404 {@code si_not_found}（帶 {@code id}）。 */
+        public final Set<String> notFoundIds = ConcurrentHashMap.newKeySet();
+        /** 非空＝全部 {@code /si/*} 回 422 {@code invalid_request} 並帶這些 {@code violations}。 */
+        public volatile List<Map<String, Object>> invalid = List.of();
+        /** true＝全部 {@code /si/*} 回 500。 */
+        public volatile boolean status500;
+        /** 非 null＝回 200 但本文為這個純文字。 */
+        public volatile String garbage;
+        /** true＝回 200 但本文為 JSON 陣列。 */
+        public volatile boolean arrayBody;
+        /** 每個 {@code /si/*} 回應前先睡這麼久（毫秒）：用來造讀取逾時（console-api 的讀取逾時 20 秒）。 */
+        public volatile long delayMillis;
+        /** 每個收到的請求的<b>原始</b> URI（未解碼的路徑）與原始查詢字串（null＝沒帶）：供 id 編碼與參數轉發的斷言。 */
+        public final List<Seen> seen = new CopyOnWriteArrayList<>();
+
+        /** 一個收到的 {@code /si/*} 請求：原始路徑與原始查詢字串。 */
+        public record Seen(String uri, String query) {
+        }
+
+        Si() {
+            reset();
+        }
+
+        public void reset() {
+            unavailable = Map.of();
+            notFoundIds.clear();
+            invalid = List.of();
+            status500 = false;
+            garbage = null;
+            arrayBody = false;
+            delayMillis = 0;
+            seen.clear();
+            payloads.clear();
+            Map<String, Map<String, Object>> golden = golden("A.snake");
+            payloads.put("observations", golden.get("observations"));
+            payloads.put("events", golden.get("events"));
+            payloads.put("proposals", golden.get("proposals"));
+            payloads.put("runs", golden.get("runs"));
+            payloads.put("status", golden.get("status"));
+            payloads.put("proposal:PROP-SI-004", golden.get("proposal_one"));
+        }
+
+        /** 黃金檔 {@code src/test/resources/si/<name>.json}（{@code A.snake}｜{@code B.snake}）：鍵為各端點名稱，值為完整回應物件。 */
+        public static Map<String, Map<String, Object>> golden(String name) {
+            try (java.io.InputStream in = MiniBridge.class.getResourceAsStream("/si/" + name + ".json")) {
+                if (in == null) {
+                    throw new IllegalStateException("找不到黃金檔 si/" + name + ".json");
+                }
+                return JSON.readValue(in, new tools.jackson.core.type.TypeReference<Map<String, Map<String, Object>>>() { });
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
         }
     }
 
@@ -366,6 +435,7 @@ public final class MiniBridge implements AutoCloseable {
         resourcesMode = ResourcesMode.SAMPLE;
         deepHealthMode = DeepHealthMode.HEALTHY;
         sdd.reset();
+        si.reset();
         dropStreams();
     }
 

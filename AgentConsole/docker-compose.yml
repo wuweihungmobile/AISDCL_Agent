@@ -213,10 +213,56 @@ services:
       MINIMAX_API_KEY: ${MINIMAX_API_KEY:?MINIMAX_API_KEY is required}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.chat}
       MINIMAX_MODEL: ${MINIMAX_MODEL:-abab6.5-chat}
+      # SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R23）：Bridge 以子行程在 /repo 呼叫根層 CLI 的
+      # `export`。映像沒有 tools/ 與 .git，所以下面的唯讀 bind 掛入「CLI 與帳本」這個必要子集。
+      SI_ROOT: /repo
     volumes:
       - ../AISDLC_SDD:/sdd:ro
       - engine_workspace:/workspace
       - app_logs:/app/logs
+      # 🔴 設計 A（六條長語法唯讀 bind）：不掛 repo 根（會暴露被忽略的 .env）、不掛真的 .git/config（內含 remote 與
+      # 憑證設定）；`create_host_path: false` 讓來源缺席時 compose 明確失敗，而不是在主機上憑空建出空目錄。
+      # 🔴 未實測的兩個風險（Architecture §12.1 L-14、§12.2 V-12，由 V3 真容器實測決定採 A 或備案 B）：
+      #    (1) HEAD 與 packed-refs 是單檔 bind，主機端 git 以 lock＋rename 換檔後，容器可能仍握著舊 inode，
+      #        使 headSha 靜默過期；(2) 主機沒有 packed-refs 時 create_host_path: false 讓容器起不來。
+      #    備案 B＝`../.git` 整個唯讀掛到 /repo/.git，另以空檔 AgentConsole/docker/si/git-config.empty 唯讀覆蓋
+      #    /repo/.git/config（兩個設計擇一，不可混用；AT-940-3-1 只接受恰好其中之一）。
+      - type: bind
+        source: ../tools
+        target: /repo/tools
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../docs/06_quality
+        target: /repo/docs/06_quality
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.git/HEAD
+        target: /repo/.git/HEAD
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.git/refs
+        target: /repo/.git/refs
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.git/objects
+        target: /repo/.git/objects
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../.git/packed-refs
+        target: /repo/.git/packed-refs
+        read_only: true
+        bind:
+          create_host_path: false
     healthcheck:
       # 映像為 python:3.11-slim、沒有 curl：用 Python 標準庫探測（與映像內建 HEALTHCHECK 同形）。
       # 🔴 探 /health/deep（git／autoclaude／工作區可寫／DB 逐項實測，契約 §3.1.1）而不是 /health：

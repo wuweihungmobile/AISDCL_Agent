@@ -111,6 +111,16 @@ public final class ErrorReasons {
     public static final String SDD_BINDING_CONFLICT = "sdd_binding_conflict";
     /** backend 或 Bridge 沒有設定寫入權杖（{@code BRIDGE_SDD_WRITE_TOKEN}）：SDD 寫入面整個停用（503）。 */
     public static final String SDD_WRITE_DISABLED = "sdd_write_disabled";
-    /** {@code GET /executions/{runId}/rtm}：批次存在但沒有追溯報告（404；<b>「404 的 reason 省略」慣例的唯一例外</b>）。 */
+    /**
+     * {@code GET /executions/{runId}/rtm}：批次存在但沒有追溯報告（404；「404 的 reason 省略」慣例的例外之一，另一個是
+     * {@link #SI_NOT_FOUND}）。
+     */
     public static final String RTM_NOT_FOUND = "rtm_not_found";
+
+    // ── SelfImproving 唯讀鏡像（P1b；Architecture §11.1〈SelfImproving 相關的 reason〉；前端住 lib/domain/si.ts 的 SI_REASONS）──
+    // 🔴 前端 REASONS 與凍結契約附錄 B 雙向鎖，所以這兩個常數不進 lib/api/reasons.ts；兩邊各一份、逐字相同。
+    /** Bridge 的 {@code /si/*} 不可用（503）：{@code details.cause}、{@code details.detail} 逐字取自 Bridge（原因與 stderr 末 1,000 字元）。 */
+    public static final String SI_UNAVAILABLE = "si_unavailable";
+    /** 單筆提案不存在（404，帶 {@code details.id}）：「404 的 reason 省略」慣例的例外之一，另一個是 {@link #RTM_NOT_FOUND}。 */
+    public static final String SI_NOT_FOUND = "si_not_found";
 }

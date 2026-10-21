@@ -1,7 +1,7 @@
 # Engine Bridge（FastAPI 旁車）
 
 把兩個**純 CLI** 引擎（`AutoClaude/`、`AISDLC_SDD/`）包成 REST + SSE，給 Spring Boot 後端呼叫（PRD §0.2）。
-單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/health`、`/health/deep`。**最小侵入白名單**（ADR-XPLAT-016 §11；2026-10-17 整合輪 115 取代原「零侵入」）：兩個引擎只准改該 ADR 列出的檔，其餘仍由本旁車包裝；SDD FSM 的寫入一律經 `FSMRuntime` CLI 子行程，Bridge 原始碼不開寫 `FSM-STATE-*.yaml`（見〈SDD 整合〉）。
+單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/si/*`、`/health`、`/health/deep`。**最小侵入白名單**（ADR-XPLAT-016 §11；2026-10-17 整合輪 115 取代原「零侵入」）：兩個引擎只准改該 ADR 列出的檔，其餘仍由本旁車包裝；SDD FSM 的寫入一律經 `FSMRuntime` CLI 子行程，Bridge 原始碼不開寫 `FSM-STATE-*.yaml`（見〈SDD 整合〉）。
 
 ```
 app/main.py        FastAPI app／lifespan（啟動做孤兒回收、起資源取樣器）／/health／/health/deep
@@ -13,8 +13,9 @@ app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆�
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
 app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
 app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔      app/resources.py 引擎行程樹資源取樣（`resources`；D-12）
-app/routers/       autoclaude.py、sdd.py
+app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 六個唯讀 GET）
 app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固定環境、動詞白名單、20 秒逾時、rc→HTTP、`(狀態目錄, 專案鍵)` 互斥鎖）
+app/si_cli.py      唯一的 SelfImproving 出口：根層 CLI 的唯讀 `export` 子行程（白名單環境、15 秒逾時、8 MiB 輸出上限、失敗一律 503 `si_unavailable`）
 app/sdd_state.py   FSM 狀態檔唯讀存取（tail／凍結階段／委派引用／恢復指令）   app/sdd_sync.py  委派同步純函式（reason 組字、終態對映、預檢表、回收點判定）
 app/sdd_run.py     批次的 SDD 側（路徑閘、三點摘要預檢、FSM 寫入、補償、`resume`／`restore` 重驗）    app/sdd_adapter.py AutoClaude adapter 的呼叫接縫
 app/fsm_names.py   FSM 專案名規則（`sanitize_component` 的逐字鏡像＋輸出域判準）    app/spec_digest.py 規格摘要（換行正規化的 UTF-8 sha256）    app/rtm.py `GET …/rtm`
@@ -78,6 +79,7 @@ Invoke-RestMethod http://localhost:8081/health
 | `ENGINE_WORKSPACE` | `<engine-bridge>/.workspace` | 每個 run 一個子目錄（見〈資料落地〉）；已 gitignore |
 | `AUTOCLAUDE_ROOT` | `<monorepo>/AutoClaude` | 只供 `/health` 顯示 |
 | `SDD_ROOT` | `<monorepo>/AISDLC_SDD` 下 `AISDLC_SDD_v*` 數字最大者 | `/sdd/*` 讀取的版本目錄，**或含多個版本的父目錄**（取數字最大者；Docker 把整個 `AISDLC_SDD` 唯讀掛成 `/sdd` 並設 `SDD_ROOT=/sdd` 即可）；找不到時 `/sdd/version`、`/sdd/fsm` 回 503 |
+| `SI_ROOT` | 本機直跑且 `<monorepo>` 像 monorepo 時＝monorepo 根；否則（例如容器內）未設 | SelfImproving 的 repo 根：其下 `tools/` 有根層 CLI、`docs/06_quality/` 有帳本；`/si/*` 以子行程在此目錄呼叫唯讀 `export`。解析後須為絕對路徑且**不可是檔案系統根**（啟動即 `SettingsError`）；不檢查存在性與內容——缺 CLI 在請求時回 503 `si_unavailable`（`cause` 為 `si_script_missing`）。**不併入 `BRIDGE_ALLOWED_PATH_ROOTS`**（那是引擎 `execution_path` 的閘）。docker compose 設 `/repo` 並以唯讀 bind 掛入必要子集（見 `docker-compose.yml`） |
 | `BRIDGE_DB_DSN` | （未設＝純檔案模式） | PostgreSQL DSN；設了才寫 DB、鎖才跨實例 |
 | `BRIDGE_DB_SCHEMA` | `console` | **Console 九張表所在的 schema**。DB 模式的 SQL 一律用 schema 限定名（`console.execution_runs`、`console.execution_steps`、`console.checkpoints`），以 `psycopg.sql.Identifier` 引用；AutoClaude 自己的 alembic 在 `public` 有同名表，所以不可用 `public`。advisory lock 不是表，不受影響 |
 | `BRIDGE_INSTANCE` | `<hostname>-<pid>-<uuid8>` | 本實例識別（≤100 字，寫進 `execution_runs.bridge_instance`） |
@@ -93,7 +95,17 @@ Invoke-RestMethod http://localhost:8081/health
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422；本文含 `sdd` 區塊時另要 `X-Bridge-Token`，201 多 `warnings[]`）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202；`:resume` 對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `GET /autoclaude/runs/{id}`、`GET …/rtm`（追溯覆蓋，唯讀；見下）、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`（對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm`、`GET /sdd/fsm/{project}`（兩者皆認選填 `root`）、`POST /sdd/fsm/{project}:freeze`（人工閘寫入，要 `X-Bridge-Token`）、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
+另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下）。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
+
+### SelfImproving 唯讀鏡像：`GET /si/*`（P1b；TCS-SelfImprovingMirror-P1b R1～R6）
+
+Console 是顯示面、不是資料來源：每個請求恰啟動一次根層 CLI 的 `export --json --kind <k>` 子行程（`app/si_cli.py`；無快取、不寫任何檔、`argv` 動詞只有 `export`），200 時本文是輸出**解析後的 export 物件逐值透傳**（含 `generated_at`、`head_sha`、`ne`、`problems`；鍵序保留、非 ASCII 不跳脫，Bridge 不增刪改任何鍵）。沒有任何非 GET 方法。
+
+- 六個端點：`/si/status`、`/si/observations`、`/si/events`、`/si/proposals`、`/si/proposals/{id}`、`/si/runs`。清單類收 `since`（整數 ≥0；游標，嚴格大於）與 `limit`（整數 ≥1，上限住協定參數檔 `export_limit_max`、不在此複製）；`/si/status` 與 `/si/proposals/{id}` 不收任何查詢參數。
+- 輸入驗證在子行程**之前**：未知查詢參數、型別或範圍不合、`{id}` 不符 `PROP-SI-<三位以上數字>` 一律 422 `invalid_request`（未知參數的 `violations[0].rule` 為 `unknown_parameter`）；格式合法而 export 回空＝404 `si_not_found`（本文 `{"code":404,"reason":"si_not_found","id":…}`）。
+- 失敗一律 503 `si_unavailable`，本文 `{"code":503,"reason":"si_unavailable","cause":<碼>,"detail":"rc=<n|none>; stderr=<尾 1,000 字元>"}`；`cause` 九值依序為 `si_root_unset`、`si_script_missing`、`spawn_failed`、`timeout`、`stdout_too_large`、`nonzero_rc`、`bad_json`、`schema_rev_mismatch`、`bad_shape`。**合法輸出不是錯誤**（空 `items`、非空 `ne`／`problems`、stderr 雜訊都原樣 200）；缺 `.git` 或家目錄時真 CLI 自己回 NOT-EVALUABLE（`head_sha` 為 `null`、`ne` 逐欄列出），仍是 200。SI 不可用**不影響** `/health` 與 `/health/deep`。
+- 子行程環境是白名單（`PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`）加固定鍵（`PYTHONUTF8`、`PYTHONDONTWRITEBYTECODE`、只放行 `SI_ROOT` 的環境變數式 `safe.directory`）；`BRIDGE_*`、`MINIMAX_API_KEY`、`AUTOSDD_*` 等一律不繼承。逾時（15 秒）與輸出超過 8 MiB 都以行程樹終止。
 
 ### 資源取樣：`GET /autoclaude/runs/{id}` 的 `resources`（契約 v1.3 §3.1.2；W7 D-12）
 

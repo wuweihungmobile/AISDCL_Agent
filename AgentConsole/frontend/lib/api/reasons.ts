@@ -91,7 +91,10 @@ export const REASONS = {
   SDD_BINDING_CONFLICT: "sdd_binding_conflict",
   /** backend（或 Bridge）沒有設定 SDD 寫入權杖 */
   SDD_WRITE_DISABLED: "sdd_write_disabled",
-  /** GET /executions/{runId}/rtm：批次存在但沒有追溯報告（404 的 reason 省略慣例的唯一例外；details.runId） */
+  /**
+   * GET /executions/{runId}/rtm：批次存在但沒有追溯報告（404 的 reason 省略慣例的例外之一；details.runId）。
+   * 另一個例外是 SelfImproving 單筆提案查無的 404：它的 reason 常數住 lib/domain/si.ts 的 SI_REASONS，不進這張與凍結契約雙向鎖的表。
+   */
   RTM_NOT_FOUND: "rtm_not_found",
 
   // ── B.2 監控 ─────────────────────────────────────────────────────────

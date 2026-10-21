@@ -1,13 +1,15 @@
 "use client";
 
 /**
- * Tools 區（UI-LAY-02）＝設計稿 Sidebar：導航六項＋「我的專案」rail。全站唯一一份，由 app/layout.tsx 組裝。
+ * Tools 區（UI-LAY-02）＝設計稿 Sidebar：導覽入口＋「我的專案」rail。全站唯一一份，由 app/layout.tsx 組裝。
+ * 導覽入口一律取自 lib/nav/registry.ts 的登記表（本檔只消費：可見項、排序、active、href、<768 是否顯示都由登記表與其純函式決定）——
+ * 新增功能的入口只加登記表一列，不改這個元件。
  * 響應式（PRD §8.3，三種形態都在本檔切換，不另開元件檔）：
  *   ≥1280：240px 完整側欄；768～1279：64px 圖示側欄（標籤改 title／aria-label，rail 隱藏）；
- *   <768：底部 Tab 導航（由 app/layout.tsx 的 flex-col-reverse 把本區塊排到內容下方）。
+ *   <768：底部 Tab 導航（由 app/layout.tsx 的 flex-col-reverse 把本區塊排到內容下方；登記表 mobile 為 false 的入口以 max-md:hidden 隱藏）。
  * 側欄背景透明、無卡片無邊框（融入頁面底色）；active 項＝左側 4px 主色條＋tertiary 底。
  */
-import { Activity, FolderOpen, LayoutDashboard, LayoutGrid, Play, Settings, Upload, type LucideIcon } from "lucide-react";
+import { LayoutGrid } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -16,31 +18,12 @@ import { useCurrentProjectId } from "@/hooks/useCurrentProjectId";
 import { useAllProjects } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { projectStatus } from "@/lib/domain/status";
+import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries } from "@/lib/nav/registry";
 import { cn } from "@/lib/utils";
-
-type NavId = "dashboard" | "projects" | "import" | "execute" | "monitor" | "settings";
-
-const NAV: ReadonlyArray<{ id: NavId; label: string; icon: LucideIcon }> = [
-  { id: "dashboard", label: "儀表板", icon: LayoutDashboard },
-  { id: "projects", label: "專案管理", icon: FolderOpen },
-  { id: "import", label: "BRD/PRD 匯入", icon: Upload },
-  { id: "execute", label: "執行中心", icon: Play },
-  { id: "monitor", label: "監控中心", icon: Activity },
-  { id: "settings", label: "系統設定", icon: Settings },
-];
-
-function activeNav(pathname: string): NavId {
-  if (pathname === "/") return "dashboard";
-  if (pathname.startsWith("/import")) return "import";
-  if (pathname.startsWith("/settings")) return "settings";
-  if (/^\/projects\/[^/]+\/execute/.test(pathname)) return "execute";
-  if (/^\/projects\/[^/]+\/monitor/.test(pathname)) return "monitor";
-  return "projects";
-}
 
 export function ToolsRegion() {
   const pathname = usePathname();
-  const { status } = useAuth();
+  const { status, role } = useAuth();
   const all = useAllProjects();
   const currentId = useCurrentProjectId();
 
@@ -50,23 +33,8 @@ export function ToolsRegion() {
     return <aside data-region="tools" aria-hidden className="w-60 shrink-0 max-xl:w-16 max-md:hidden" />;
   }
 
-  const active = activeNav(pathname);
-  const hrefFor = (id: NavId): string => {
-    switch (id) {
-      case "dashboard":
-        return "/";
-      case "projects":
-        return "/projects";
-      case "import":
-        return "/import";
-      case "settings":
-        return "/settings";
-      case "execute":
-      case "monitor":
-        // 執行／監控都從專案進入；沒有任何專案時退回專案列表
-        return currentId ? `/projects/${currentId}/${id}` : "/projects";
-    }
-  };
+  const entries = visibleNavEntries(NAV_REGISTRY, role);
+  const active = activeNavEntry(entries, pathname);
   const rail = (all.data?.content ?? []).slice(0, 6);
 
   return (
@@ -85,24 +53,27 @@ export function ToolsRegion() {
       <hr className="mb-2 h-px border-0 bg-wg-line max-xl:hidden" />
 
       <nav aria-label="主導覽" className="max-md:flex max-md:justify-around">
-        {NAV.map(({ id, label, icon: Icon }) => {
-          const isActive = active === id;
+        {entries.map((entry) => {
+          const isActive = active?.id === entry.id;
+          const Icon = entry.icon;
           return (
             <Link
-              key={id}
-              href={hrefFor(id)}
-              aria-label={label}
+              key={entry.id}
+              href={navHref(entry, { currentProjectId: currentId })}
+              aria-label={entry.label}
               aria-current={isActive ? "page" : undefined}
-              title={label}
+              title={entry.label}
               className={cn(
                 "flex w-full items-center gap-2.5 border-l-4 px-3 py-[11px] text-left text-base font-medium text-wg-text transition-colors",
                 "hover:bg-wg-tertiary max-xl:justify-center max-xl:px-0",
                 "max-md:flex-1 max-md:flex-col max-md:gap-0.5 max-md:border-l-0 max-md:border-t-4 max-md:px-1 max-md:py-2",
                 isActive ? "border-wg-primary bg-wg-tertiary" : "border-transparent bg-transparent",
+                // 登記表 mobile 為 false 的入口：<768 的底部 Tab 不顯示（DOM 內仍在，768 以上兩種形態照常顯示）
+                !entry.mobile && "max-md:hidden",
               )}
             >
               <Icon size={18} aria-hidden className="max-md:size-5" />
-              <span className="max-xl:hidden max-md:inline max-md:text-[10px] max-md:leading-tight">{label}</span>
+              <span className="max-xl:hidden max-md:inline max-md:text-[10px] max-md:leading-tight">{entry.label}</span>
             </Link>
           );
         })}

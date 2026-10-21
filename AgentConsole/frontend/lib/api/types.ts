@@ -250,3 +250,107 @@ export type ListSettingsHistoryParams = {
   page?: number;
   size?: number;
 };
+
+// ── SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R9、R11）──────────────────────
+// 後端 `GET /api/v1/si/**` 原樣轉出根層 `si export` 的物件（只經欄名 snake_case→camelCase 對映；值一律不動，null 保留），
+// 所以 schema.d.ts 只有「任意物件」，欄位形狀以這裡為準（出處：SelfImproving PRD §9.2〈export --json 輸出〉與入庫的黃金檔）。
+// 日後根層加欄位時：已知欄位不受影響，不認得的欄位原樣保留在物件上（狀態橫幅的 `si-status-extra` 會顯示）。
+/** `export --kind` 的五個值（Bridge 封閉集合）。 */
+export type SiKind = "observations" | "events" | "proposals" | "runs" | "status";
+
+/** `ne[]` 的一項：該欄位量不到（NOT-EVALUABLE）與原因，不得顯示成 0、無或通過。 */
+export type SiNeEntry = { field: string; reason: string };
+/** `problems[]` 的一項（例：壞列 ROW-ARITY）。 */
+export type SiProblem = { subject: string; code: string; detail: string };
+
+/** 每個 `export` 回應的外層；`items` 的元素形狀依 kind 而異。 */
+export type SiPage<T> = {
+  schemaRev: number;
+  kind: SiKind;
+  /** 子行程的產生時間（Bridge 的值，不是 backend 或瀏覽器時鐘）；時間窗的錨點 */
+  generatedAt: string;
+  /** git 不可用時為 null（同時 `ne` 有 `head_sha` 一項） */
+  headSha: string | null;
+  items: T[];
+  /** 游標：下一頁的 `since`（嚴格大於）；末頁為 null */
+  nextSince: number | null;
+  truncated: boolean;
+  ne: SiNeEntry[];
+  problems: SiProblem[];
+};
+
+/** 觀察帳本的一列（九欄；`marks` 是原字串，`marksKv` 是解析後的鍵值，`line` 是帳本檔的行號）。 */
+export type SiObservation = {
+  id: string;
+  time: string;
+  context: string;
+  symptom: string;
+  evidence: string;
+  category: string;
+  severity: string;
+  disposition: string;
+  marks: string;
+  marksKv: Record<string, string>;
+  line: number;
+  /** 模組桶：根層 P2 才有；缺席時前端不得自行推算（R17） */
+  buckets?: string[];
+  valid?: true;
+};
+/** 無法解析的帳本列（例：欄數不足）：只有行號與原文，永遠顯示、不受篩選影響。 */
+export type SiInvalidRow = { line: number; raw: string; valid: false };
+export type SiObservationRow = SiObservation | SiInvalidRow;
+
+/** 事件帳本的一筆：`seq`／`t`／`kind`／`by` 是共同欄，其餘依 `kind` 而異（原樣保留）。 */
+export type SiEvent = { seq: number; t: string; kind: string; by: string } & Record<string, unknown>;
+
+export type SiProposal = {
+  id: string;
+  state: string;
+  route: string;
+  cls: string;
+  action: string;
+  run: string;
+  rev: number;
+  digest: string;
+  target: string[];
+  /** 本提案的 rN.patch 觸及的檔案；patch 讀不到或無法解析時為 null（量不到，根層 export 不附 ne 項），不是空集合 `[]`（R16） */
+  touched: string[] | null;
+  /** touched 的個數；touched 為 null 時同為 null（不是 0） */
+  touchedCount: number | null;
+  sources: string[];
+  createdSeq: number;
+  lastSeq: number;
+  verdict: unknown;
+  flags: unknown[];
+  cooldown: unknown;
+  /** `si card` 的逐字輸出；量不到時為 null（同時 `ne` 有對應項） */
+  card: string | null;
+};
+
+export type SiRun = {
+  id: string;
+  openedSeq: number;
+  closedSeq: number | null;
+  trigger: string;
+  headSha: string | null;
+  research: { kind: string; seq: number } | null;
+  propIds: string[];
+  outcome: Record<string, string>;
+};
+
+/** `status` 的單一項（`items[0]`）；已知鍵見 SI_STATUS_KNOWN_KEYS，其餘鍵（如日後的 consolePending）原樣保留。 */
+export type SiStatusItem = {
+  eventsDetected: Array<{ trigger: string; subject: string; detail: string }>;
+  unavailable: Array<{ trigger: string; reason: string }>;
+  openRuns: unknown[];
+  pendingProps: Array<{ id: string; rev: number; state: string; route: string; digest8: string }>;
+  suspended: unknown;
+  cooldowns: unknown[];
+  skipReasons: Record<string, unknown>;
+  /** 量不到時是 `{ status: "NOT-EVALUABLE", reason }` 物件 */
+  capacity: unknown;
+  frictionReconcile: unknown;
+} & Record<string, unknown>;
+
+/** 清單查詢的參數：`since` 為嚴格大於的游標（整數 ≥0）、`limit` 為整數 ≥1；undefined 不進網址。 */
+export type SiListParams = { since?: number; limit?: number };

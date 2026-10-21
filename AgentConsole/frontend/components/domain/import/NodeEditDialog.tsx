@@ -7,7 +7,7 @@
  */
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useId, useMemo, type ReactNode } from "react";
 import { Controller, useForm, type Control, type FieldValues, type Path } from "react-hook-form";
 
 import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
@@ -18,6 +18,7 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { goalNodeSchema, parseMaxRetries, projectNodeSchema, taskNodeSchema, type GoalNodeValues, type ProjectNodeValues, type TaskNodeValues } from "./nodeSchemas";
+import { EXECUTION_PATH_HINT } from "./sourceRules";
 import { blankGoal, blankTask, type Tree, type TreeAction } from "./tree";
 
 export type NodeTarget = { kind: "project" } | { kind: "goal"; mode: "create" | "edit"; key: string } | { kind: "task"; mode: "create" | "edit"; goalKey: string; uid: string };
@@ -97,6 +98,7 @@ type BodyProps = {
 
 function ProjectBody({ tree, dispatch, onClose }: BodyProps) {
   const p = tree.project;
+  const pathHintId = useId();
   const {
     register,
     control,
@@ -130,9 +132,15 @@ function ProjectBody({ tree, dispatch, onClose }: BodyProps) {
       <Field label="專案名稱" error={errors.name?.message}>
         <Input aria-invalid={errors.name ? true : undefined} {...register("name")} />
       </Field>
-      <Field label="執行路徑" error={errors.executionPath?.message}>
-        <Input className="font-mono text-sm" aria-invalid={errors.executionPath ? true : undefined} {...register("executionPath")} />
-      </Field>
+      {/* 本機與 Docker 全棧的寫法不同（Architecture §12.1 L-8）：說明與匯入頁、專案表單共用 sourceRules 的同一個常數；放在 Field 外（不進標籤的可及名稱），以 aria-describedby 連到輸入框（OBS-SI-230） */}
+      <div>
+        <Field label="執行路徑" error={errors.executionPath?.message}>
+          <Input className="font-mono text-sm" aria-invalid={errors.executionPath ? true : undefined} aria-describedby={pathHintId} {...register("executionPath")} />
+        </Field>
+        <p id={pathHintId} className="mt-1.5 text-xs leading-relaxed text-wg-muted">
+          {EXECUTION_PATH_HINT}
+        </p>
+      </div>
       <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" error={errors.description?.message} />
       <MarkdownField control={control} name="passCriteria" label="通過標準" placeholder="- 所有單元測試通過…" error={errors.passCriteria?.message} />
       <Field label="自治等級" hint="(1-10)" error={errors.autonomyLevel?.message}>

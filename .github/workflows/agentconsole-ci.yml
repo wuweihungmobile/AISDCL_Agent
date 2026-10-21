@@ -26,6 +26,11 @@ on:
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
       - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
       - "AISDLC_SDD/*/tools/fsm_runtime/**"
+      - "tools/selfimproving.py"          # engine-bridge /si/* 以子行程執行 si export（P1b；TCS D11，AT-940-4-1）
+      - "tools/_stdio_utf8.py"
+      - "tools/lib/platform_utils.py"
+      - "tools/lib/selfimproving/**"
+      - "docs/06_quality/SelfImproving_Protocol/params.json"
   pull_request:
     branches: [main]
     paths:
@@ -36,6 +41,11 @@ on:
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
       - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
       - "AISDLC_SDD/*/tools/fsm_runtime/**"
+      - "tools/selfimproving.py"          # engine-bridge /si/* 以子行程執行 si export（P1b；TCS D11，AT-940-4-1）
+      - "tools/_stdio_utf8.py"
+      - "tools/lib/platform_utils.py"
+      - "tools/lib/selfimproving/**"
+      - "docs/06_quality/SelfImproving_Protocol/params.json"
   workflow_dispatch:
 
 concurrency:

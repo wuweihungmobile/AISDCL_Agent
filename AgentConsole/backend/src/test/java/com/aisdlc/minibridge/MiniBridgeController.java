@@ -1,5 +1,6 @@
 package com.aisdlc.minibridge;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -202,6 +203,77 @@ class MiniBridgeController {
             return error(404, "fsm_not_found", "project", project);
         }
         return ResponseEntity.ok(state);
+    }
+
+    // ── /si/*：SelfImproving 唯讀鏡像（TCS-SelfImprovingMirror-P1b §5.3；對照 routers/si.py）─────────────────────
+
+    /**
+     * 六個路由共用的回應邏輯。記錄：{@code MINI.requests()} 記 {@code GET /si/<路徑>}（路徑為解碼後、不含查詢字串）；{@code si.seen} 記
+     * <b>原始</b> URI 與查詢字串。失敗旋鈕的優先序：逾時延遲 → 503 → 500 → 純文字 → 陣列 → 422 → 404（單筆）→ 回放 {@code si.payloads}。
+     */
+    private ResponseEntity<Object> si(HttpServletRequest http, String logged, String payloadKey, String id) {
+        bridge.record("GET " + logged);
+        bridge.si.seen.add(new MiniBridge.Si.Seen(http.getRequestURI(), http.getQueryString()));
+        long delay = bridge.si.delayMillis;
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (!bridge.si.unavailable.isEmpty()) {
+            return error(503, "si_unavailable", "cause", bridge.si.unavailable.get("cause"), "detail",
+                    bridge.si.unavailable.get("detail"));
+        }
+        if (bridge.si.status500) {
+            return error(500, "internal_error");
+        }
+        if (bridge.si.garbage != null) {
+            return ResponseEntity.ok().contentType(MediaType.TEXT_PLAIN).body(bridge.si.garbage);
+        }
+        if (bridge.si.arrayBody) {
+            return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(List.of(1, 2, 3));
+        }
+        if (!bridge.si.invalid.isEmpty()) {
+            return error(422, "invalid_request", "violations", bridge.si.invalid);
+        }
+        Map<String, Object> payload = id != null && bridge.si.notFoundIds.contains(id) ? null
+                : bridge.si.payloads.get(payloadKey);
+        if (payload == null && id != null) {
+            return error(404, "si_not_found", "id", id);
+        }
+        return payload == null ? error(404, "not_found") : ResponseEntity.ok(payload);
+    }
+
+    @GetMapping("/si/status")
+    ResponseEntity<Object> siStatus(HttpServletRequest http) {
+        return si(http, "/si/status", "status", null);
+    }
+
+    @GetMapping("/si/observations")
+    ResponseEntity<Object> siObservations(HttpServletRequest http) {
+        return si(http, "/si/observations", "observations", null);
+    }
+
+    @GetMapping("/si/events")
+    ResponseEntity<Object> siEvents(HttpServletRequest http) {
+        return si(http, "/si/events", "events", null);
+    }
+
+    @GetMapping("/si/proposals")
+    ResponseEntity<Object> siProposals(HttpServletRequest http) {
+        return si(http, "/si/proposals", "proposals", null);
+    }
+
+    @GetMapping("/si/proposals/{id}")
+    ResponseEntity<Object> siProposal(HttpServletRequest http, @PathVariable String id) {
+        return si(http, "/si/proposals/" + id, "proposal:" + id, id);
+    }
+
+    @GetMapping("/si/runs")
+    ResponseEntity<Object> siRuns(HttpServletRequest http) {
+        return si(http, "/si/runs", "runs", null);
     }
 
     // ── 寫入面（契約 §3.1.4 (d)、共通規則 2）：權杖、:freeze、RTM ──────────────────────────────────

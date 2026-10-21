@@ -7,6 +7,7 @@ import com.aisdlc.console.domain.model.execution.BridgeStatus;
 import com.aisdlc.console.domain.model.execution.ExecutionRtm;
 import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
+import com.aisdlc.console.domain.model.si.SiExport;
 
 import java.time.Duration;
 import java.util.List;
@@ -351,4 +352,22 @@ public interface AgentBridge {
      * （皆為 {@link BridgeRejectedException}，由呼叫端依端點語意轉譯）。
      */
     ExecutionRtm getRunRtm(UUID runId);
+
+    // ── P1b：SelfImproving 唯讀鏡像（TCS-SelfImprovingMirror-P1b R7、R8、R10）──────────────────────────
+    // 本介面上名稱以 si 起頭的方法恰為 siExport（ArchUnit 鎖住）；沒有任何寫入呼叫。
+
+    /**
+     * {@code GET /si/<kind>[/<id>]}（連線 2 秒／讀取 20 秒、<b>不重試</b>、不帶 {@code X-Bridge-Token}）：回 Bridge 的 export 物件原樣
+     * （snake_case 鍵、值未動）。Bridge 的 15 秒子行程逾時小於這裡的 20 秒，所以 Bridge 的 503 不會被 504 蓋掉。
+     *
+     * <p>錯誤約定同本介面其餘方法：503 {@code si_unavailable}（帶 {@code cause}、{@code detail}）、404 {@code si_not_found}（帶 {@code id}）
+     * 與其他 4xx 以 {@link BridgeRejectedException} 丟出（由用例依 R8 的對映表轉譯）；其餘 5xx、200 但本文不是 JSON 物件 →
+     * {@code UpstreamException.Failure}；連線失敗 → {@code UpstreamException.Unavailable}；讀取逾時 → {@code UpstreamException.TimedOut}。
+     *
+     * @param kind  {@code status}｜{@code observations}｜{@code events}｜{@code proposals}｜{@code runs}
+     * @param since 清單類的游標（嚴格大於）；null＝不帶。{@code id} 非 null 或 kind 為 {@code status} 時不送出
+     * @param limit 清單類的頁大小；null＝不帶（Bridge 依協定參數檔的上限）。同上不送出
+     * @param id    單筆提案的 id：<b>原樣</b>嚴格 percent-encode 成單一路徑段（{@code /si/proposals/<id>}）；backend 不驗格式，格式的單一真相在 Bridge
+     */
+    SiExport siExport(String kind, Integer since, Integer limit, String id);
 }

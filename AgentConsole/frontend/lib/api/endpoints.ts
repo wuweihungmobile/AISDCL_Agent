@@ -54,6 +54,13 @@ import type {
   SddEngineStatus,
   SddFreezeRequest,
   SddFsmState,
+  SiEvent,
+  SiListParams,
+  SiObservationRow,
+  SiPage,
+  SiProposal,
+  SiRun,
+  SiStatusItem,
   StartExecutionRequest,
   TaskDetail,
   TaskResponse,
@@ -510,4 +517,36 @@ export function downloadProjectReport(projectId: string, params: ReportParams = 
     query: { ...params },
     accept: `${fileType},application/json;q=0.9,*/*;q=0.8`,
   });
+}
+
+// ── SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R11）──────────────────────────────
+// 恰六個 GET、沒有任何寫入函式：Console 是顯示面，頁面資料＝根層 `si export` 的輸出（backend 只改欄名）。
+// 瀏覽器只呼叫 console-api 的 /api/v1/si/**，從不直連 Bridge（Architecture §10.1）。
+type SiOpts = SiListParams & Opts;
+
+/** 狀態橫幅：不收任何查詢參數（`since`、`limit` 會被 Bridge 以 422 擋下）。 */
+export function getSiStatus(opts: Opts = {}): Promise<SiPage<SiStatusItem>> {
+  return apiRequest<SiPage<SiStatusItem>>("/api/v1/si/status", { signal: opts.signal });
+}
+
+/** 觀察帳本：`since` 為嚴格大於的游標（取自上一頁的 `nextSince`），`limit` 為單頁筆數；undefined 不進網址。 */
+export function getSiObservations(opts: SiOpts = {}): Promise<SiPage<SiObservationRow>> {
+  return apiRequest<SiPage<SiObservationRow>>("/api/v1/si/observations", { query: { since: opts.since, limit: opts.limit }, signal: opts.signal });
+}
+
+export function getSiEvents(opts: SiOpts = {}): Promise<SiPage<SiEvent>> {
+  return apiRequest<SiPage<SiEvent>>("/api/v1/si/events", { query: { since: opts.since, limit: opts.limit }, signal: opts.signal });
+}
+
+export function getSiProposals(opts: SiOpts = {}): Promise<SiPage<SiProposal>> {
+  return apiRequest<SiPage<SiProposal>>("/api/v1/si/proposals", { query: { since: opts.since, limit: opts.limit }, signal: opts.signal });
+}
+
+/** 單筆提案：`id` 以 encodeURIComponent 編成單一路徑段；不收查詢參數；查無回 404 `si_not_found`。 */
+export function getSiProposal(id: string, opts: Opts = {}): Promise<SiPage<SiProposal>> {
+  return apiRequest<SiPage<SiProposal>>(`/api/v1/si/proposals/${seg(id)}`, { signal: opts.signal });
+}
+
+export function getSiRuns(opts: SiOpts = {}): Promise<SiPage<SiRun>> {
+  return apiRequest<SiPage<SiRun>>("/api/v1/si/runs", { query: { since: opts.since, limit: opts.limit }, signal: opts.signal });
 }

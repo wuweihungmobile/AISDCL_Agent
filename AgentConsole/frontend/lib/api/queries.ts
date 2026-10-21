@@ -6,10 +6,11 @@
  *  - 專案／目標／任務三層的計數互相牽動（goalsCount、tasksDone…），任何寫入成功就把三層快取全部標為過期，
  *    資料量小，換取「不會顯示過期計數」的簡單正確性。
  */
-import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
+import { SI_PAGE_LIMIT } from "@/lib/domain/si";
 import { isRunTerminal } from "@/lib/domain/status";
 import {
   acknowledgeAlert,
@@ -36,6 +37,11 @@ import {
   getProject,
   getProjectMetrics,
   getSddEngineStatus,
+  getSiEvents,
+  getSiObservations,
+  getSiProposals,
+  getSiRuns,
+  getSiStatus,
   getTask,
   getTaskTotals,
   getTaskTrend,
@@ -104,6 +110,8 @@ import type {
   ReviewDecision,
   SddEngineStatus,
   SddFreezeRequest,
+  SiListParams,
+  SiPage,
   StartExecutionRequest,
   TestConnectionRequest,
   TextImportRequest,
@@ -152,6 +160,13 @@ export const qk = {
   alerts: (projectId: string, params: ListAlertsParams) => ["monitor", "alerts", projectId, params] as const,
   logs: (projectId: string, q: LogQuery) => ["monitor", "logs", projectId, q] as const,
   taskTotals: (weekStartIso: string) => ["dashboard", "task-totals", weekStartIso] as const,
+  /** SelfImproving 唯讀鏡像（P1b）：全部掛在 ["si"] 底下，頁首的「重新整理」以 siAll 重抓目前顯示的面板（type: active） */
+  siAll: ["si"] as const,
+  siStatus: ["si", "status"] as const,
+  siObservations: ["si", "observations"] as const,
+  siProposals: ["si", "proposals"] as const,
+  siEvents: ["si", "events"] as const,
+  siRuns: ["si", "runs"] as const,
 };
 
 const POLL_MS = 30_000;
@@ -950,3 +965,44 @@ export function useLatestRuns(projectIds: readonly string[]) {
   });
   return { byProject, loading: enabled && results.some((r) => r.isPending) };
 }
+
+// ══ SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R11、R12、R15）══════════════════════════
+/**
+ * SI 查詢的共同設定，覆寫 Providers 的預設（5 秒 staleTime、5xx 重試一次）：
+ *  - retry: false——失敗只呼叫一次，原因要讓人看到，不靠重試把錯誤藏起來；
+ *  - staleTime: 0、gcTime: 0——不留過期快取：面板卸載即丟，重掛先顯示載入中，不先顯示上一次的資料；
+ *  - 不輪詢、不因視窗聚焦重抓：資料只在「重新整理」或「重試」時更新（帳本是人與 agent 手動推進的，沒有即時串流）。
+ */
+export const SI_QUERY_OPTIONS = { retry: false, staleTime: 0, gcTime: 0, refetchInterval: false, refetchOnWindowFocus: false } as const;
+
+/** 狀態橫幅：`status` 單頁。 */
+export function useSiStatus() {
+  const enabled = useEnabled();
+  return useQuery({
+    queryKey: qk.siStatus,
+    queryFn: ({ signal }) => getSiStatus({ signal }),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+/**
+ * 游標分頁的清單查詢：第一頁只帶 `limit`，之後每頁帶 `since=<上一頁的 nextSince>` 與同一個 `limit`（R15）。
+ * 只有「回應 truncated 為真且 nextSince 是數字」才有下一頁；合併（依身分鍵去重）由呼叫端用 lib/domain/si.ts 的 mergePages 做。
+ */
+function useSiPages<T>(queryKey: readonly string[], fetchPage: (opts: SiListParams & { signal?: AbortSignal }) => Promise<SiPage<T>>) {
+  const enabled = useEnabled();
+  return useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam, signal }) => fetchPage({ since: pageParam ?? undefined, limit: SI_PAGE_LIMIT, signal }),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => (last.truncated && typeof last.nextSince === "number" ? last.nextSince : undefined),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+export const useSiObservations = () => useSiPages(qk.siObservations, getSiObservations);
+export const useSiProposals = () => useSiPages(qk.siProposals, getSiProposals);
+export const useSiEvents = () => useSiPages(qk.siEvents, getSiEvents);
+export const useSiRuns = () => useSiPages(qk.siRuns, getSiRuns);
