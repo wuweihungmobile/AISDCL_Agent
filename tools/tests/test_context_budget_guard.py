@@ -1290,6 +1290,7 @@ import quota_escalation as escalation  # noqa: E402
 import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家
 import sentinel_lifecycle_arm  # noqa: E402  # armed stamp 存取的家
+import transcript_activity as ta  # noqa: E402  # DEF-200-562：寬限提示／切斷通知的辨識
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -1554,12 +1555,13 @@ class RelayStateTest(unittest.TestCase):
         self.assertTrue(planner.relay_problems({**self.GOOD, "next_run_time": "   "}))
 
     def test_a_guessed_reset_may_not_arm(self) -> None:
-        """白名單＝6 個字面，逐字釘死（ADR-XPLAT-014 約束 2：不得新造第三個字面）。"""
+        """白名單＝7 個字面，逐字釘死（ADR-XPLAT-014 約束 2：不得新造第三個字面；第 7 格
+        `harness-cutoff-notice` 是 harness 自報的續接時刻，DEF-200-562，ADR-XPLAT-004 §2.10）。"""
         for guess in ("assumed-5h", "quota-cache", "meter-observed"):
             with self.subTest(guess=guess):
                 self.assertTrue(planner.relay_problems({**self.GOOD, "reset_source": guess}))
         pinned = ("transcript-verbatim", "probe-verbatim", "operator", "halt-marker",
-                  "operator-asserted", "endpoint-authoritative")
+                  "operator-asserted", "endpoint-authoritative", "harness-cutoff-notice")
         self.assertEqual(set(relay_machine.RESET_SOURCES), set(pinned))
         for source in pinned:
             with self.subTest(source=source):
@@ -2510,7 +2512,7 @@ class SentinelDecisionTest(unittest.TestCase):
         且告警注入點必須被叫到（修前直接自我解除＝事故 00:55——哨兵是「主 session
         活著但帳號級撞線」那一格唯一的機械物，它下班＝整格失效）。"""
         tmp = _tmpdir(self, "selfheal-")
-        live = _transcript(tmp, "sess-heal.jsonl", 40, 900.0)
+        live = _fresh_transcript(tmp, "sess-heal.jsonl")
         plan = tmp / f"{guard.PLAN_PREFIX}sess-heal.md"
         plan.write_text("# 骨架（halt 覆寫後：狀態塊沒了）\n", encoding="utf-8", newline="\n")
         calls = self._tick(plan, live, tmp)
@@ -2524,7 +2526,7 @@ class SentinelDecisionTest(unittest.TestCase):
     def test_the_three_read_failures_and_the_heal_leave_distinct_traces(self) -> None:
         """A5＋R-4.5.6-4c：三種讀不出與自癒／解除在痕跡檔各自可辨（事故當晚同形）。"""
         tmp = _tmpdir(self, "trace-forms-")
-        live = _transcript(tmp, "sess-forms.jsonl", 40, 900.0)
+        live = _fresh_transcript(tmp, "sess-forms.jsonl")
         plan = tmp / f"{guard.PLAN_PREFIX}sess-forms.md"
         for content in (None, "# 只有骨架\n",
                         planner.RELAY_BEGIN + "\n{壞掉}\n" + planner.RELAY_END + "\n"):
@@ -2546,7 +2548,7 @@ class SentinelDecisionTest(unittest.TestCase):
     def test_a_torn_multibyte_plan_self_heals_as_the_fourth_fault(self) -> None:
         """M2：撕裂多位元組任務書＝第四分形（UnicodeDecodeError ⊂ ValueError；原文＝§L-4.29）。"""
         tmp = _tmpdir(self, "torn-")
-        live = _transcript(tmp, "sess-torn.jsonl", 40, 900.0)
+        live = _fresh_transcript(tmp, "sess-torn.jsonl")
         plan = tmp / f"{guard.PLAN_PREFIX}sess-torn.md"
         plan.write_bytes("# 任務書\n中".encode()[:-1])  # 砍尾 byte＝撕裂多位元組
         calls = self._tick(plan, live, tmp)
@@ -6744,8 +6746,8 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
         self.assertIsNotNone(guard.unhandled_limit_event(self.main))
 
     def test_liveness_looks_at_subagent_activity_too(self) -> None:
-        """存活判準：扇出時主逐字稿可能很久沒被寫，只看它會把狂跑中的 session 誤判成
-        閒置，而閒置到門檻就會**自我解除**（哨兵在最忙的時候把自己拆掉）。"""
+        """mtime 版掃描面（存活判準已改對話記錄，DEF-200-560）：扇出時主逐字稿可能很久沒被寫，
+        只看它會把狂跑中的 session 誤判成閒置，而閒置到門檻就會**自我解除**（哨兵最忙時拆自己）。"""
         self._write(self.main, [self._ok("2026-08-07T18:00:00Z")])
         sub = self.main.with_suffix("") / "subagents" / "agent-y.jsonl"
         self._write(sub, [self._ok("2026-08-07T18:10:00Z")])
@@ -6809,6 +6811,203 @@ class UnhandledLimitDetectionTest(unittest.TestCase):
         self.assertEqual(event["kind"], guard.LIMIT_SESSION)
         self.assertEqual(event["timestamp"], "2026-08-07T18:40:00Z",
                          "取到的是被濾掉的那筆 transient，而不是真的撞線")
+
+
+class HarnessUsageLimitSignalsTest(unittest.TestCase):
+    """DEF-200-562：`tools/lib/transcript_activity.py` 辨識 harness 2.1.303 的三種限額記錄
+    （寬限提示／切斷通知／續接記錄）；記錄形狀逐字取自真機逐字稿（sid ee6af537、d6dfce97）。
+    `usageLimitNote` 兩值：`wrap_up`＝寬限提示、`release`＝續接訊號（F-1）。"""
+
+    NOTE, CUT, RESET, AUTO = ("2026-10-19T15:56:40.850Z", "2026-10-19T15:58:11.134Z",
+                              "2026-10-19T16:11:11.173Z", "2026-10-19T16:11:11.206Z")
+    REL = "2026-10-19T16:11:11.215Z"  # release：auto-continuation 之後 9 ms
+    LAST = "2026-10-19T16:18:11.215Z"  # 續跑 7 分鐘後的最後一筆 assistant
+    TEXT = "Usage limit reached · continuing automatically at 12:10am · esc to cancel"
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self, "grace-")
+        self.main = self.tmp / "sid.jsonl"
+        self.now = datetime(2026, 10, 19, 23, 59, tzinfo=_TAIPEI)  # 切斷（23:58:11）後一分鐘
+
+    def _write(self, *records: dict) -> None:
+        self.main.write_text("\n".join(map(json.dumps, records)) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _rec(kind: str, stamp: str, **extra: object) -> dict:
+        return {"type": kind, "timestamp": stamp, **extra}
+
+    def _note(self, stamp: str) -> dict:
+        return self._rec("user", stamp, isMeta=True, turnCompanion=True, usageLimitNote="wrap_up",
+                         message={"role": "user", "content": "[Usage limit reached; grace]"})
+
+    def _cut(self, stamp: str) -> dict:
+        return self._rec("system", stamp, subtype="informational", level="notice",
+                         content=self.TEXT)
+
+    def _reset(self, stamp: str) -> dict:
+        return self._rec("system", stamp, subtype="informational",
+                         content="Usage limit reset · continuing automatically")
+
+    def _auto(self, stamp: str) -> dict:
+        return self._rec("user", stamp, isMeta=True, origin={"kind": "auto-continuation"},
+                         message={"role": "user", "content": "Your usage limit has reset."})
+
+    def _asst(self, stamp: str) -> dict:
+        return self._rec("assistant", stamp, message={"model": "claude-opus-5", "usage": {"x": 1}})
+
+    def _release(self, stamp: str) -> dict:
+        return self._rec("user", stamp, isMeta=True, turnCompanion=True, usageLimitNote="release",
+                         message={"role": "user", "content": "[Earlier usage-limit notes]"})
+
+    def _after(self, seconds: float) -> str:
+        base = datetime.fromisoformat(self.NOTE.replace("Z", "+00:00"))
+        return (base + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+    def test_the_three_record_kinds_are_recognised_and_decoys_are_not(self) -> None:
+        """誘餌＝tool_result 與 assistant 內文裡出現同樣的字面：結構不符一律不算。"""
+        decoy = self._rec("user", self.AUTO, message={"role": "user", "content": [{
+            "type": "tool_result", "content": f"usageLimitNote {self.TEXT} Usage limit reset"}]})
+        talk = self._rec("assistant", self.AUTO, message={"content": [{"text": self.TEXT}]})
+        self._write(self._note(self.NOTE), self._cut(self.CUT), self._reset(self.RESET), decoy,
+                    talk)
+        self.assertEqual(ta.usage_limit_signals(self.main), {
+            "note_at": self.NOTE, "cutoff_text": self.TEXT, "cutoff_at": self.CUT,
+            "reset_notice_at": self.RESET})
+        self._write(self._note(self.NOTE), self._auto(self.AUTO), self._reset(self.RESET))
+        self.assertEqual(ta.usage_limit_signals(self.main)["reset_notice_at"], self.AUTO,
+                         "auto-continuation 記錄（isMeta、帶 origin）沒被當成續接記錄")
+
+    def test_a_release_after_the_auto_continuation_is_not_a_new_note(self) -> None:
+        """F-1：harness 於 auto-continuation 之後 9 ms 再附 `usageLimitNote:"release"`（真機
+        ee6af537 L2614）＝續接訊號、不是寬限提示；續跑回合在寬限期內結束、靜止 3000 s 也不得
+        判 probe。"""
+        self._write(self._note(self.NOTE), self._cut(self.CUT), self._reset(self.RESET),
+                    self._auto(self.AUTO), self._release(self.REL), self._asst(self.LAST))
+        now = datetime.fromisoformat(self.LAST.replace("Z", "+00:00")) + timedelta(seconds=3000)
+        self.assertIsNone(ta.unhandled_grace_note(self.main, [self.main], now))
+        idle, grace = ta.conversation_view(self.main, now)
+        self.assertEqual((round(idle), grace), (3000, None))
+        got = planner.sentinel_decide(None, "", idle, now, grace=grace)
+        self.assertEqual(got["action"], "patrol", got)
+        signals = ta.usage_limit_signals(self.main)
+        self.assertEqual((signals["note_at"], signals["reset_notice_at"]), (self.NOTE, self.REL))
+
+    def test_a_release_alone_after_a_note_counts_as_handled(self) -> None:
+        """wrap_up 之後只出現 release（沒有 reset／auto-continuation 記錄）＝harness 已解除提示；
+        release 早於提示＝舊事件，不能把後來的提示取消。"""
+        self._write(self._note(self.NOTE), self._release(self._after(120)))
+        self.assertIsNone(ta.unhandled_grace_note(self.main, [self.main], self.now))
+        self._write(self._release(self._after(-60)), self._note(self.NOTE))
+        self.assertIsNotNone(ta.unhandled_grace_note(self.main, [self.main], self.now))
+
+    def test_unknown_usage_limit_note_values_are_ignored(self) -> None:
+        """未知值既不是提示也不是續接訊號（寧可不叫醒）：單獨出現＝四欄皆空；落在 wrap_up 之後
+        ＝提示仍未處理。"""
+        other = self._rec("user", self._after(60), isMeta=True, turnCompanion=True,
+                          usageLimitNote="other")
+        self._write(other)
+        self.assertEqual(ta.usage_limit_signals(self.main), {
+            "note_at": "", "cutoff_text": "", "cutoff_at": "", "reset_notice_at": ""})
+        self._write(self._note(self.NOTE), other)
+        signals = ta.usage_limit_signals(self.main)
+        self.assertEqual((signals["note_at"], signals["reset_notice_at"]), (self.NOTE, ""))
+        self.assertIsNotNone(ta.unhandled_grace_note(self.main, [self.main], self.now))
+
+    def test_the_cutoff_notice_parses_like_a_reset_literal(self) -> None:
+        """`_RESET_RE` 另認 `continuing automatically at`：解成「下一個尚未發生的」00:10。"""
+        cut = datetime(2026, 10, 19, 23, 58, 11, tzinfo=_TAIPEI)
+        self.assertEqual(guard.parse_reset_at(self.TEXT, cut),
+                         datetime(2026, 10, 20, 0, 10, tzinfo=_TAIPEI))
+        late = datetime(2026, 10, 20, 0, 20, tzinfo=_TAIPEI)
+        self.assertEqual(guard.parse_reset_at(self.TEXT, late),
+                         datetime(2026, 10, 21, 0, 10, tzinfo=_TAIPEI))
+        self.assertIsNone(guard.parse_reset_at("Usage limit reset · continuing automatically",
+                                               cut), "沒有時刻的續接通知不得被解出時刻")
+
+    def test_an_unhandled_note_has_states_and_an_exact_boundary(self) -> None:
+        grace = ta.GRACE_ALLOWANCE_SECONDS
+        for label, records, want in (
+                ("寬限期內只有收尾", [self._note(self.NOTE), self._asst(self._after(40))], True),
+                ("恰在寬限期邊界仍未處理", [self._note(self.NOTE),
+                                          self._asst(self._after(grace))], True),
+                ("寬限期後仍有對話＝已續跑", [self._note(self.NOTE),
+                                         self._asst(self._after(grace + 1))], False),
+                ("harness 切斷後自行續接", [self._note(self.NOTE), self._cut(self.CUT),
+                                       self._reset(self.RESET), self._auto(self.AUTO)], False),
+                ("人在寬限期後回來", [self._note(self.NOTE), self._rec(
+                    "user", self._after(grace + 60), origin={"kind": "human"})], False)):
+            with self.subTest(label):
+                self._write(*records)
+                got = ta.unhandled_grace_note(self.main, [self.main], self.now)
+                self.assertEqual(got is not None, want, got)
+        self._write(self._note(self.NOTE), self._cut(self.CUT))
+        got = ta.unhandled_grace_note(self.main, [self.main], self.now)
+        self.assertEqual(got["continue_at"], datetime(2026, 10, 20, 0, 10, tzinfo=_TAIPEI))
+        self._write(self._cut(self.CUT), self._note(self._after(5000)))  # 切斷早於提示＝舊事件
+        self.assertIsNone(ta.unhandled_grace_note(self.main, [self.main], self.now)["continue_at"])
+
+    def test_grace_verdict_has_three_branches_in_the_existing_shape(self) -> None:
+        now, skew, quiesce = self.now, qm.HALT_RESET_SKEW_SECONDS, qm.HALT_QUIESCE_SECONDS
+        note = {"timestamp": self.NOTE, "continue_at": None, "source": "x"}
+        self.assertIsNone(ta.grace_verdict(None, 5000.0, now))
+        soon = {**note, "continue_at": now + timedelta(seconds=600)}
+        armed = ta.grace_verdict(soon, 5000.0, now)
+        self.assertEqual((armed["action"], armed["reset_source"], armed["reset_at"], armed["at"]),
+                         ("arm_reset", "harness-cutoff-notice", soon["continue_at"],
+                          soon["continue_at"] + timedelta(seconds=skew)))
+        past = now - timedelta(seconds=skew + 1)
+        for label, idle, resume_at, want in (
+                ("對話靜止未滿一個巡邏間隔", quiesce - 1, None, "patrol"),
+                ("恰靜止一個巡邏間隔", quiesce, None, "probe"), ("量不到靜止", None, None, "probe"),
+                ("續接時刻已過、對話仍在動", 60.0, past, "patrol"),
+                ("續接時刻已過、對話靜止", 5000.0, past, "probe")):
+            verdict = ta.grace_verdict({**note, "continue_at": resume_at}, idle, now)
+            self.assertEqual(verdict["action"], want, label)
+            self.assertEqual(set(verdict), {"action", "at", "reason"}, label)
+        self.assertEqual(ta.grace_verdict(note, 1.0, now)["at"], now + timedelta(seconds=quiesce))
+
+    def test_sentinel_decide_ranks_event_then_halt_then_grace_then_idle(self) -> None:
+        now, grace = self.now, {"timestamp": self.NOTE, "continue_at": None, "source": "x"}
+        event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT, "2026-10-19T15:44:00Z")
+        marker = {"at": now.isoformat(), "reset_at": (now + timedelta(seconds=600)).isoformat()}
+        got = planner.sentinel_decide(event, "", 5000.0, now, halt=marker, grace=grace)
+        self.assertEqual(got["reset_source"], "transcript-verbatim")
+        got = planner.sentinel_decide(None, "", 5000.0, now, halt=marker, grace=grace)
+        self.assertEqual(got["reset_source"], "halt-marker")
+        self.assertEqual(planner.sentinel_decide(None, "", 5000.0, now, grace=grace)["action"],
+                         "probe", "寬限提示沒有被 idle 的 patrol 蓋掉？")
+        quiet = planner.sentinel_decide(None, "", 100.0, now, grace=grace)
+        self.assertEqual(quiet["action"], "patrol")
+        self.assertIn("寬限提示", quiet["reason"])
+        old = planner.sentinel_decide(None, "", 60.0, now, grace=None)
+        self.assertEqual(old, {"action": "patrol", "at": now + timedelta(
+            seconds=planner.SENTINEL_INTERVAL_SECONDS), "reason": "無未處理撞線；逐字稿 60s 前"
+            "仍有更新 ⇒ session 還活著，續巡（本次零 token）"}, "grace=None 時既有輸出必須逐字不變")
+        self.assertEqual(planner.sentinel_decide(None, "", planner.SENTINEL_IDLE_SECONDS + 1, now,
+                                                 grace=None)["action"], "disarm")
+
+    def test_the_cutoff_reset_source_is_on_the_relay_whitelist(self) -> None:
+        soon = {"timestamp": self.NOTE, "continue_at": self.now + timedelta(seconds=600)}
+        source = ta.grace_verdict(soon, 5000.0, self.now)["reset_source"]
+        self.assertIn(source, relay_machine.RESET_SOURCES)
+        state = {**RelayStateTest.GOOD, "reset_source": source}
+        self.assertEqual(planner.relay_problems(state), [])
+        self.assertEqual(ta.RESET_SOURCE, relay_machine.SOURCE_HARNESS_CUTOFF)
+
+    def test_conversation_view_is_the_planners_single_entry(self) -> None:
+        def ago(seconds: float) -> str:
+            return (self.now - timedelta(seconds=seconds)).astimezone(UTC).isoformat().replace(
+                "+00:00", "Z")
+        self._write(self._note(ago(1540)), self._asst(ago(1500)))
+        idle, grace = ta.conversation_view(self.main, self.now)
+        self.assertAlmostEqual(idle, 1500.0, delta=1)
+        self.assertEqual(grace["timestamp"], ago(1540))
+        self.assertEqual(ta.conversation_view(self.tmp / "nope.jsonl", self.now), (None, None))
+        self._write({"type": "cost-state", "totalCostUSD": 1})  # 只有 housekeeping＝從沒有對話
+        self.assertEqual(ta.conversation_view(self.main, self.now), (None, None))
+
+    def test_the_grace_allowance_is_one_patrol_interval(self) -> None:
+        self.assertEqual(ta.GRACE_ALLOWANCE_SECONDS, qm.HALT_QUIESCE_SECONDS)
 
 
 # ═══════ R81：續航協定的兩個**設計缺口**（R80 四次真實撞線的驗屍，improving_104 §4.5）
@@ -7310,13 +7509,13 @@ class ControllerIdlePrepareWatchTest(unittest.TestCase):
         self.assertEqual(self.notified, [], "已經 halt 卻仍發了『即將見底』的預防性提醒")
 
 
-def _fresh_transcript(tmp: Path, name: str) -> Path:
-    """一支剛剛才動過的逐字稿（最後一筆 assistant 事件＝現在往前 5 秒）。
+def _fresh_transcript(tmp: Path, name: str, age: float = 5.0) -> Path:
+    """一支剛剛才動過的逐字稿（最後一筆 assistant 事件＝現在往前 `age` 秒，預設 5 秒）。
     史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§44。"""
     path = tmp / name
     path.write_text(json.dumps({
         "type": "assistant",
-        "timestamp": (datetime.now(UTC) - timedelta(seconds=5)).isoformat().replace(
+        "timestamp": (datetime.now(UTC) - timedelta(seconds=age)).isoformat().replace(
             "+00:00", "Z"),
         "message": {"model": "claude-opus-5", "usage": {"input_tokens": 1}}}) + "\n",
         encoding="utf-8", newline="\n")
@@ -7331,7 +7530,7 @@ class PatrolNoticeIsDesktopNotHookTest(unittest.TestCase):
 
     def test_the_prepare_notice_fires_from_the_patrol_tick_alone(self) -> None:
         tmp = _tmpdir(self, "b3-patrol-")
-        live = _transcript(tmp, "sess-b3.jsonl", 40, 900.0)
+        live = _fresh_transcript(tmp, "sess-b3.jsonl", age=1000.0)  # 主控已閒置 >900s、仍未滿 6h
         task = "AutoSDD_Sentinel_sess-b3"
         plan = tmp / f"{guard.PLAN_PREFIX}sess-b3.md"
         plan.write_text("# 任務書\n", encoding="utf-8", newline="\n")

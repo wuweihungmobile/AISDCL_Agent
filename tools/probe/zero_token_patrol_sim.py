@@ -172,7 +172,7 @@ def read_jsonl(path: Path) -> list[dict]:
 
 
 def write_transcript(root: Path) -> Path:
-    """一份假逐字稿（5 筆 assistant、帶 usage）；最後活動＝T0（`os.utime` 設 mtime）。"""
+    """一份假逐字稿（5 筆 assistant、帶 usage）；最後活動＝T0−1 分（最後一筆的 timestamp）。"""
     rows = [{"type": "assistant", "timestamp": (T0 - timedelta(minutes=5 - i)).isoformat()
              .replace("+00:00", "Z"), "message": {"model": "claude-sim-1", "usage": {
                  "input_tokens": 1000 + i, "output_tokens": 200 + i,
@@ -280,8 +280,10 @@ def run_scenario(mutate: str | None = None) -> dict:
                                    encoding="utf-8", errors="replace", check=False)
                 if mutate == "append-transcript" and len(ticks) == 6:
                     with transcript.open("a", encoding="utf-8", newline="\n") as handle:
-                        handle.write(json.dumps({"type": "assistant", "message": {
-                            "model": "claude-sim-1", "usage": {"output_tokens": 9}}}) + "\n")
+                        stamp = clock.now.isoformat().replace("+00:00", "Z")
+                        row = {"type": "assistant", "timestamp": stamp, "message": {
+                            "model": "claude-sim-1", "usage": {"output_tokens": 9}}}
+                        handle.write(json.dumps(row) + "\n")
                     os.utime(transcript, (clock.now.timestamp(), clock.now.timestamp()))
                 seen = len(endpoint.calls)
                 with contextlib.redirect_stdout(io.StringIO()):
@@ -348,9 +350,10 @@ def judge(trace: dict) -> list[tuple[str, str, bool, str]]:
 
 
 # 控制組：刻意注入缺陷 ⇒ 對應斷言**必須**轉紅（缺了它斷言可能只是裝飾）。逐字稿被寫＝工作發生
-# ⇒ 除了 b，哨兵也不再閒置（p 的「第 24 拍 disarm」不成立）。late-probe：探針花在末拍（最後一次
-# 取數之後，快取讀數看不見）⇒ e 只剩伺服器帳增量 `delta` 能轉紅；jitter-tick：件數不變、僅某一拍
-# 晚到 60 秒 ⇒ p 只剩重排間隔 `gaps` 能轉紅——各讓一個子句單獨有鑑別力。
+# ⇒ 除了 b，哨兵也不再閒置（p 的「第 24 拍 disarm」不成立）；DEF-200-560：存活判準是對話記錄
+# 的 timestamp（不是 mtime），故注入的 assistant 記錄帶模擬時刻的 timestamp。late-probe：探針花
+# 在末拍（最後一次取數之後，快取讀數看不見）⇒ e 只剩伺服器帳增量 `delta` 能轉紅；jitter-tick：
+# 件數不變、僅某一拍晚到 60 秒 ⇒ p 只剩重排間隔 `gaps` 能轉紅——各讓一個子句單獨有鑑別力。
 CONTROLS = {"spawn-claude": {"a", "e"}, "append-transcript": {"b", "p"}, "post": {"c"},
             "fast-poll": {"c"}, "never-recover": {"d"}, "late-probe": {"a", "e"},
             "jitter-tick": {"p"}}

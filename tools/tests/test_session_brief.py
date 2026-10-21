@@ -755,6 +755,49 @@ class SessionstartBriefTest(unittest.TestCase):
         self.assertIn("statusLine：已安裝", brief, "G1 的 statusLine 那一句沒有進最終簡報")
 
 
+class EscapeHatchNoteTest(unittest.TestCase):
+    """DEF-200-561：續跑逃生口有設就說話（`session_brief.escape_hatch_note`，簡報與 `--pace`
+    共用）。此前 `.env` 的 `AUTOSDD_RESUME_OFF=1` 讓哨兵醒來只探測、不續跑，兩個出口都不說。"""
+
+    BOTH = {"AUTOSDD_RESUME_OFF": "1", "AUTOSDD_SENTINEL_OFF": "1"}
+
+    def test_each_flag_speaks_and_nothing_set_is_silent(self) -> None:
+        for label, env, says in (("RESUME_OFF", {"AUTOSDD_RESUME_OFF": "1"}, "只探測"),
+                                 ("SENTINEL_OFF", {"AUTOSDD_SENTINEL_OFF": "1"}, "不武裝"),
+                                 ("都沒設", {}, ""),
+                                 ("空白值不算有設", {"AUTOSDD_RESUME_OFF": " ",
+                                                    "AUTOSDD_SENTINEL_OFF": ""}, "")):
+            note = sb.escape_hatch_note(env)
+            with self.subTest(label):
+                for phrase in ("只探測", "不武裝"):
+                    self.assertEqual(phrase in note, phrase == says, note)
+        self.assertEqual(len(sb.escape_hatch_note(self.BOTH).splitlines()), 2, "兩個都設＝各一行")
+
+    def test_the_flag_names_are_the_ssot_names(self) -> None:
+        """字面對齊：說出口的鍵名必須是 `quota_policy.ENV_SPEC` 登記的鍵（本檔不 import 它）。"""
+        spoken = set(re.findall(r"AUTOSDD_[A-Z_]+", sb.escape_hatch_note(self.BOTH)))
+        self.assertEqual(len(spoken), 2)
+        self.assertLessEqual(spoken, {spec.name for spec in quota_policy.ENV_SPEC})
+
+    def _brief(self, policy_env) -> str:
+        gate = _fake_quota_gate(read_quota=lambda now, path=None: _cache_hit_state(),
+                                policy_env=policy_env)
+        with mock.patch.object(sb.platform_utils, "is_windows", return_value=False):
+            return sb.sessionstart_brief(
+                {"transcript_path": None}, gate, scan_transcript=None, resolve_window=None,
+                window_evidence=None, read_context_feed=None, now=_NOW,
+                check_statusline=lambda: {"installed": True})
+
+    def test_the_sessionstart_brief_carries_the_note_and_survives_a_broken_env(self) -> None:
+        self.assertIn("只探測", self._brief(lambda: {"AUTOSDD_RESUME_OFF": "1"}))
+        self.assertNotIn("只探測", self._brief(lambda: {}), "沒設逃生口卻說了")
+
+        def boom() -> dict:
+            raise OSError("env 讀不出來")
+        self.assertEqual(sb._hatch_note(types.SimpleNamespace(policy_env=boom)), "")
+        self.assertEqual(sb._hatch_note(types.SimpleNamespace()), "", "缺 policy_env 也不得擋簡報")
+
+
 class QuotaLineActiveModelTest(unittest.TestCase):
     """DEF-200-432（受測：`session_brief.quota_line`）：額度行的 `decide()` 此前沒帶
     `active_model` ⇒ 簡報 `cap=8 band=notice`、`--pace` 卻是 `cap=1 band=prepare`（Fable）。

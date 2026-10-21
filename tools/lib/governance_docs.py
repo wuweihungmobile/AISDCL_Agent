@@ -697,6 +697,8 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W5.md",
     # R213 第六窗姊妹檔：S5 再評（他機）＋DEF-200-533（壓縮後重設態）  round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W6.md",
+    # R214：哨兵自願停機後不續跑三根因（DEF-200-560～562）  round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

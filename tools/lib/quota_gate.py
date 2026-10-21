@@ -101,6 +101,7 @@ import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性�
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
 import quota_policy  # noqa: E402
 import quota_stability  # noqa: E402  # R102／PRD §4.2.4(b)(c)(d)：死區／變化率／最小停留時間  round-label-ok
+import session_brief  # noqa: E402  # DEF-200-561：`--pace` 的續跑逃生口出聲（純函式 escape_hatch_note，單向相依）
 
 # 🔴 R91：「送進模型 context」這件事的唯一發射口搬到 `platform_utils`（hook I/O 的既有
 # SSOT，它已經住著 `read_payload`）。本檔此前自己 `print(json.dumps(...))`，而同一輪
@@ -930,11 +931,13 @@ def pace_report(now: datetime | None = None, model: str | None = None,
     D23（SD-07）：本 sid 的 halt 標記未過期時短路，**不**進 `pace_state()`（它在快取不可用時
     可能補打一次 `/api/oauth/usage`）——halt 期間不需要再花一次 API。DEF-200-435：短路仍**讀**
     快取（只讀檔、不打 API）：新鮮 ⇒ 標記行之後印逐軸真實讀數；不可用才說沒有讀數。
+    DEF-200-561：兩個回傳面（halt 短路／完整報告）尾端都附續跑逃生口說明（`hatch`，有設才有字）。
     """
     now = now or datetime.now().astimezone()
     policy, problems = quota_policy.load_policy(policy_env())
+    hatch = session_brief.escape_hatch_note(policy_env())  # DEF-200-561：逃生口有設就出聲
     if (halted := halted_band_line(read_halt_marker(sid or ""), now)):
-        return halted_pace_text(halted, read_quota(now), now, policy, model)
+        return halted_pace_text(halted, read_quota(now), now, policy, model) + hatch
     state = pace_state(now)
     bd = quota_burndown.active(state, now, policy_env(), core_signature)  # DEF-200-528
     # 🔴 `live` 落款進去是為了**下一輪**：per-agent 燃燒率＝Δpct ÷（Δ分鐘 × 併發數），
@@ -995,7 +998,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
             f"  {posture_line(quota_cache_path())}\n"
             f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
             f"{horizon}{quota_messages.model_lines(decision, policy_env())}"
-            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}")
+            f"  來源={state.source} 量測於={state.measured_at or '(無)'}{tail}\n{plan_note}{hatch}")
 
 
 def quota_throttle_message(decision: quota_policy.Decision, tool: str, live: int,

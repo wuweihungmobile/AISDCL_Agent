@@ -105,6 +105,7 @@ R107 只能寫到「在 11:51~14:57 之間死亡、死因未知」。本輪取�
 > 已整支刪除（程式碼零引用）；`--at` 的 default 現為 `None`；`--register-schtasks` 缺 `--at` 時改走
 > `session_brief.schtasks_trigger()` 取額度快取實測 `resets_at`（解不出即拒絕）；白名單現住
 > `relay_machine.RESET_SOURCES`（6 格）。座標一律現查，不沿用上表的行號。
+> R214 起第 7 格 `harness-cutoff-notice`（DEF-200-562；ADR-XPLAT-004 §2.10）。
 
 ⇒ 這不是「有人忘了」，是**設計上被留下的一條猜測路**，而 R107 那一窗剛好走了它兩次。
 它與根 CLAUDE.md〈額度哨兵〉逐字要求的「解不出時刻一律**拒絕武裝**，不准退回『假設 5 小時』」
@@ -171,6 +172,7 @@ L3 快取」並給快取一個新字面 `meter-observed`。兩處都撤回：**�
    `halt-marker`（`DEF-200-278`）＋`operator-asserted`（L0）／`endpoint-authoritative`（L1）；
    單一定義住 `relay_machine.RESET_SOURCES`，消費端是 `relay_problems()`。兩個新字面此前在程式碼裡
    0 命中（只在本 ADR），手動路徑狀態塊落地後才首次出現。上段座標已漂移，以現查為準。〕
+   〔R214 起第 7 格 `harness-cutoff-notice`（DEF-200-562；ADR-XPLAT-004 §2.10）；上段「6 格」是帶日期的歷史陳述，保留。〕
    🔴 **兩份 ADR 指的是同一格，落地時只加一次**：005 §2.7 與本節不是兩件待辦，
    哪一份先落地就由它加，另一份的該項隨即視為已落地（避免同一格被加兩次或加成兩個字面）。
    （附註：005 §2.7 把座標記成 `planner:476-477`，本輪實讀已漂到 `:488-489`——
@@ -981,7 +983,7 @@ ADR-XPLAT-004 §6；`next_run_time()` 的實作註解 `:414-422`〔實讀〕）�
 | A2 | 額度快取內有**未來且 6 小時內**的 `resets_at` 時，`--register-schtasks` 排出的時刻 ＝ 該值＋skew | 注入一份合成快取（`AUTOSDD_QUOTA_CACHE_DIR` 逃生口，`quota_meter.py:161`〔實讀〕），修前排出的是 now+5h＝紅 | 兩者相等（比較前兩邊都截到分鐘，見 A8） |
 | A3 | 額度快取內的 `resets_at` **已過去**（F1 綠、F2 紅）時，**拒絕武裝**且 rc≠0 | 注入死窗快取；修前照排＝紅 | rc≠0 且訊息不含 clock-skew 措辭（DEF-200-200 ② 的方向） |
 | A4 | `reset_source` 白名單＝既有三格 ＋ `endpoint-authoritative`（L1）＋ `operator-asserted`（L0）；L1 的狀態塊**不得**寫成 `transcript-verbatim`、L0 **不得**寫成 `operator` | 把 L1 的來源字面改成 `transcript-verbatim`、把 L0 改成 `operator` ⇒ **兩者都必須有東西轉紅** | 逐字 assert 五格白名單；🔴 並 assert 白名單**不含** `meter-observed`（那個字面已被否決，見 §8） |
-| | 🔴 **2026-10-02 現況**：白名單現為 **6 格**（含 `halt-marker`，`DEF-200-278`），單一定義＝`relay_machine.RESET_SOURCES`。逐字 assert＝`test_context_budget_guard.py::RelayStateTest::test_a_guessed_reset_may_not_arm`（6 格正向＋`assumed-5h`／`quota-cache`／`meter-observed` 三個負向）；兩條紅面（L1 塊不得寫 `transcript-verbatim`、L0 塊不得寫 `operator`）＝`test_sentinel_tick_e2e_r145.py::ManualRegisterThenWakeE2ETest::test_explicit_and_observed_at_write_distinct_honest_sources`（突變兩個字面皆被抓到）。 | | |
+| | 🔴 **2026-10-02 現況**：白名單現為 **6 格**（含 `halt-marker`，`DEF-200-278`），單一定義＝`relay_machine.RESET_SOURCES`。逐字 assert＝`test_context_budget_guard.py::RelayStateTest::test_a_guessed_reset_may_not_arm`（6 格正向＋`assumed-5h`／`quota-cache`／`meter-observed` 三個負向）；兩條紅面（L1 塊不得寫 `transcript-verbatim`、L0 塊不得寫 `operator`）＝`test_sentinel_tick_e2e_r145.py::ManualRegisterThenWakeE2ETest::test_explicit_and_observed_at_write_distinct_honest_sources`（突變兩個字面皆被抓到）。R214 起第 7 格 `harness-cutoff-notice`（DEF-200-562；ADR-XPLAT-004 §2.10），`test_a_guessed_reset_may_not_arm` 的正向釘同步為 7 格。 | | |
 | A5 | 全庫不存在 in-place mutate 排程觸發器的呼叫（`schtasks /change`、`Set-ScheduledTask -Trigger`） | 種一個進 tracked `.py`／`.ps1` ⇒ 必紅 | 掃描零命中；例外須行內具名豁免 |
 | | 🔴 **2026-10-02 現況**：`schtasks /change` 與 `Set-ScheduledTask -Trigger` 在 tracked `.py`／`.ps1` 零命中；`AutoClaude/tools/fix_nightly_catchup.ps1:29` 的 `Set-ScheduledTask -Settings`（非 `-Trigger`）不在判準內。🔴 **機械物不存在**（`tools/tests` 零命中）⇒ 本列標「**判準成立、尚無掃描器**」。 | | |
 | **A6** | 🔴 **L4-a 觸發後，排程器現查必須真的有一支哨兵工作、且憑證非空**：不成立時**先武裝哨兵**再回 rc≠0（憑證＝Windows 的 `NextRunTime` **值**／mac 的 `CRED_KEY_LAUNCHD`，**不是任何指令的 rc**） | 注入「解不出時刻 ＋ 哨兵不在（`jobs=[]`）」⇒ 修前 L4 直接失敗退出、什麼都沒排＝紅（**這是立案情境**：R107 那一窗哨兵已死＋解不出時刻，L4 若只拒絕武裝就是**淨退化**——今天至少排一支晚的，L4 之後什麼都沒有） | 現查回出非空憑證值；`jobs=[task]` 時**不重複武裝**（控制組）；`jobs is None`（量不到）⇒ **不得**判成「沒有哨兵」而狂武裝，須另給一句「量不到」 |

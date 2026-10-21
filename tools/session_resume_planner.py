@@ -96,6 +96,7 @@ import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-P
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析＋--check 末行 FSM（lib）
+import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活＝對話記錄（非 mtime）＋harness 寬限提示
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from probe.audit_session import project_transcript_dir  # noqa: E402
@@ -606,7 +607,7 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: float | None,
-                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None) -> dict:  # noqa: E501
+                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None) -> dict:  # noqa: E501
     """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
 
     🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
@@ -618,6 +619,9 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
     標記在兌現時刻（reset＋skew）後仍有活動才過期；到點須靜止≥HALT_QUIESCE_SECONDS 才 probe。
     DEF-200-532：`superseded_by`＝同專案另一 session 已接手（見 `superseding_session`），交
     `halt_verdict` 判成 `disarm`＋清標記；撞線事件分支（上面那支）仍優先、語意不變。
+    DEF-200-560／562：`idle_seconds` 一律是**對話**靜止秒數（`transcript_activity`，
+    非檔案 mtime）；`grace`＝未處理的 harness 寬限提示（`unhandled_grace_note`）。優先序＝
+    撞線事件 ＞ halt 標記 ＞ 寬限提示 ＞ idle；`grace=None` 時既有五分支逐位元組同行為。
     """
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
@@ -636,7 +640,7 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
             # 在 mac 上會明說「有 / 沒有 StartCalendarInterval」與「重載是否仍待完成」。
             return {"action": "arm_reset", "at": at, "reset_at": reset_at, "reset_source": "transcript-verbatim", "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 尚未到 ⇒ " "要求排程器改在那個時刻醒（本次零 token；載具實際做到什麼" "看同一筆痕跡的 credential 欄）"}  # noqa: E501
         return {"action": "probe", "at": None, "reason": f"偵測到未處理的撞線；觀測 reset={reset_at} 已過 ⇒ " "花一次探測確認額度回來了沒"}  # noqa: E501
-    if (v := quota_gate.halt_verdict(halt, idle_seconds, now, superseded_by)) is not None:
+    if (v := quota_gate.halt_verdict(halt, idle_seconds, now, superseded_by) or transcript_activity.grace_verdict(grace, idle_seconds, now)) is not None:  # noqa: E501
         return v
     if idle_seconds is not None and idle_seconds < SENTINEL_IDLE_SECONDS:
         return {"action": "patrol", "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS), "reason": f"無未處理撞線；逐字稿 {idle_seconds:.0f}s 前仍有更新 ⇒ " "session 還活著，續巡（本次零 token）"}  # noqa: E501
@@ -1468,7 +1472,8 @@ def _sentinel_tick(args) -> int:
     #  · `handled_through` 傳 `""`：那個欄位的立案理由（「我跑得動武裝指令 ⇒ 額度是通的」）
     #    **是假的**——武裝是零 API 呼叫的本機 subprocess。實證它把撞線後兩分鐘就標成已解決。
     #    「已處理」現在由復原證據判定，不再由一個推論判定。欄位保留只作稽核用。
-    #  · 閒置秒數改用**全 session 最新** mtime：扇出時主逐字稿可能很久沒被寫，只看它會把
+    #  · 閒置秒數改用**全 session 最新**時刻（DEF-200-560 起是對話記錄，原為檔案 mtime——harness 的
+    #    housekeeping 把 mtime 蓋成永遠活著）：扇出時主逐字稿可能很久沒被寫，只看它會把
     #    正在狂跑的 session 誤判成閒置，而閒置到門檻就會自我解除。
     # 🔴 R81 缺口 B：`event` 此前是內嵌實參、用完即棄，於是「哪一個 workflow run、哪幾個
     # agent 被這次撞線打死」這件**寫在磁碟上、讀檔即知、成本為零**的事從來沒有被記下來。
@@ -1486,10 +1491,10 @@ def _sentinel_tick(args) -> int:
     # 的 `guardrail_cli` tier——新邏輯放不進本檔，只能在既有呼叫點換一個更胖的被呼叫端）。
     event = guard.unhandled_limit_event(transcript) if transcript.is_file() else None
     fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
-    idle = (now.timestamp() - guard.newest_activity_at(guard.session_transcripts(transcript)) if transcript.is_file() else None)  # noqa: E501
+    idle, grace = transcript_activity.conversation_view(transcript, now)  # DEF-200-560／562
     halt = quota_gate.read_halt_marker(sid := state.get("session_id") or "")
-    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt))  # noqa: E501
-    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], **fan)  # noqa: E501
+    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace)  # noqa: E501
+    append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, **fan)  # noqa: E501
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
@@ -1514,8 +1519,7 @@ def _sentinel_tick(args) -> int:
     if decision["action"] == "arm_reset":
         relay_machine.apply_reset_at(state, decision["reset_at"].isoformat()); state.update(state="waiting", reset_source=decision["reset_source"])  # noqa: E501,E702 — R115 修復 F4：歸零邊界（同 _resume_tick rearm 分支） round-label-ok
     rc, moment = _register_and_record(plan, state, decision["at"], SENTINEL_TICK)
-    append_log(log, "sentinel_rearmed", action=decision["action"],
-               fire_at=decision["at"].isoformat(), credential=moment)
+    append_log(log, "sentinel_rearmed", action=decision["action"], fire_at=decision["at"].isoformat(), credential=moment)  # noqa: E501
     _alert_on_rearm_failure(state, plan, rc, "哨兵重掛失敗")
     return rc
 

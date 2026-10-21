@@ -191,7 +191,7 @@ L1 是**手動**的，而本輪在協定落地的**同一天又撞了一次額�
 | --- | --- | --- |
 | 事件來源 | `latest_limit_event`：只掃**主逐字稿**、只取**最後一筆** | `unhandled_limit_event`：主檔＋`<sid>/**/*.jsonl`（subagent），取**最早一筆未處理** |
 | 「已處理」 | 與 `handled_through` 比時間戳（來自上面那個假推論） | 與**全域最後一次成功回應**比（判準 D，假陽性實測 0.0%） |
-| 存活判準 | 只看主逐字稿 mtime | 取全 session 最新 mtime（扇出時主檔可能很久沒被寫 ⇒ 忙碌 session 會被誤判閒置而**自我解除**） |
+| 存活判準 | 只看主逐字稿 mtime | 取全 session 最新 mtime（扇出時主檔可能很久沒被寫 ⇒ 忙碌 session 會被誤判閒置而**自我解除**）。🔴 R214 訂正：mtime 判準已由 §2.10 取代為對話記錄 timestamp（DEF-200-560；此列為 R80 當時的歷史對照，原文保留） |
 
 **為何取最早而不是最後一筆**：同一次停機裡每個 subagent 都會留一筆，最早那筆才是真正的
 撞線時刻（其餘離 reset 更近）；而要拿它的 reset 時刻去排程，取錯就排錯時間。
@@ -430,6 +430,24 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - 00:42 觸發面歸因依據是排除法＋鍵名普查（上表下方那段），不是直接痕跡（halt 閂鎖
   不記 session 與觸發工具）；修 4 實作時應讓閂鎖多記 `session_id` 與 `tool`，把這種
   歸因從推理變成讀檔。
+
+### 2.10 自願停機後的喚醒：活動判準＝對話記錄；harness 2.1.303 的三種限額記錄（R214；DEF-200-560～562）
+
+2026-10-21 03:55 主控依 harness 寬限提示自願收尾，額度 04:00 回來，哨兵 04:10～07:55 巡邏 16 次全判 `patrol`（「逐字稿 N 秒前仍有更新」），沒有人叫醒它。三根因：
+
+- **RC-A（DEF-200-560，P1）**：「還活著」讀檔案 mtime；harness 閒置時每小時追加無 timestamp 的 `cost-state`／`last-prompt`／`file-history-snapshot`、收尾後寫 `system/away_summary` ⇒ mtime 永遠新。`halt_verdict` 的「兌現時刻後仍有活動 ⇒ 已自行續跑」與 6 小時自我解除同病。
+- **RC-B（DEF-200-561，P2）**：repo 根 `.env` 的 `AUTOSDD_RESUME_OFF=1` 讓本機每支哨兵都寫 `allow_resume:false`（額度回來只探測、不續跑），簡報與 `--pace` 都不說。
+- **RC-C（DEF-200-562，P2）**：偵測面只認 `type=assistant`＋`<synthetic>` 與 `resets 9am`；寬限提示（user，`usageLimitNote:"wrap_up"`）、切斷通知（system，`continuing automatically at <時刻>`）、續接記錄（`auto-continuation`／`Usage limit reset`／`usageLimitNote:"release"`）都不在偵測面。
+
+**判準**（`tools/lib/transcript_activity.py`）：活動＝**對話記錄**＝`type=assistant`（含 subagent 檔）的 timestamp，或 `type=user` 且 `origin.kind` 為 `human`／`auto-continuation` 者的 timestamp。不算：寬限提示（`isMeta`、無 `origin`）、tool_result 型 user、`type=system`（含 `away_summary`）、`attachment`、無 timestamp 的 `cost-state`／`last-prompt`／`file-history-snapshot`、`queue-operation`。⚠ `isMeta` 不是判準：auto-continuation 自己就是 `isMeta:true`。
+
+**優先序**：真撞線事件 ＞ halt 標記 ＞ 寬限提示（`grace_verdict`）＞ idle。寬限提示通道獨立於既有事件那條路（它沒有 reset 時刻，塞進去會走到「解不出 ⇒ escalate ⇒ 哨兵自拆」）。新 `reset_source` 值 `harness-cutoff-notice`（harness 切斷通知自報的續接時刻，是觀測值不是猜的）登記為 `relay_machine.RESET_SOURCES` 的第 7 格。
+
+**與 harness 自動續接共存**：harness 只在「turn 被切斷且視窗仍開」時自動續接（切斷通知→`Usage limit reset`→`auto-continuation`）；自願收尾不會。⇒ 兌現時刻之後有對話記錄＝已續跑；對話靜止不滿一個巡邏間隔不叫醒（防雙窗）；切斷通知自報的時刻未到 ⇒ `arm_reset` 排到那一刻。寬限提示之後出現續接記錄（`auto-continuation`／`release`／`Usage limit reset`）、或寬限期（`GRACE_ALLOWANCE_SECONDS`，與巡邏間隔同值）之後仍有對話＝已處理。
+
+**落點**：新檔 `tools/lib/transcript_activity.py`（只 import `quota_limits`／`quota_messages`，不被它們、`quota_gate` 或 hook import；消費者＝planner 與測試）。`session_resume_planner.py` 與 `quota_messages.py` 皆已滿載，`quota_limits.py` 被 hook 再匯出，放進去會擴大 hook 的 import 面。逃生口說明（RC-B）住 `session_brief.escape_hatch_note`，簡報與 `--pace` 共用。
+
+**已知邊界**：① harness 自動續接與哨兵探測之間有至多一個巡邏間隔的競態窗；② 寬限期是挑的、不是量出來的（實測收尾 40 s／91 s，無契約值）；③ `continuing automatically at` 無日期無時區（以切斷記錄當下的時刻、`now` 的時區解成下一個未發生者）；④ 寬限提示通道不看 `superseded_by`（他 session 接手）；⑤ harness 於 auto-continuation 之後 9～18 ms 再附一筆 `usageLimitNote:"release"` 記錄（isMeta、無 origin；內文「Earlier usage-limit notes no longer apply」），視為續接訊號、不是提示——`note_at` 只認 `wrap_up`，未知值一律忽略（寧可不叫醒）；此前把它當提示是 P1 誤判（QA 鏡審 F-1，已修）。逐項與真機重放證據見 `docs/06_quality/CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md`。
 
 ---
 

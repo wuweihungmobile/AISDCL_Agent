@@ -545,6 +545,36 @@ def _unattended_note() -> str:
         return ""
 
 
+#: DEF-200-561：續跑的兩個逃生口有設時，簡報與 `--pace` 要出聲——此前整條鏈靜默：repo 根
+#: `.env` 的 `AUTOSDD_RESUME_OFF=1` 讓本機每支哨兵都寫 `allow_resume:false`、額度回來只探測
+#: 不續跑，而簡報與 `--pace` 都不說（2026-10-21 事故的次因）。鍵名與語意的 SSOT＝
+#: `quota_policy_env.ENV_SPEC`；字面對齊由 `test_session_brief.py::EscapeHatchNoteTest` 釘住
+#: （本檔不 import quota_policy，維持呼叫端注入慣例）。
+_HATCH_RESUME = ("🔴 續跑逃生口 AUTOSDD_RESUME_OFF 有設（值={value}）⇒ 哨兵醒來只探測、不會以 "
+                 "claude -p -r 續跑；要全自動續跑請清掉它（repo 根 .env 或使用者層環境變數；"
+                 "SSOT＝tools/lib/quota_policy_env.py ENV_SPEC）。")
+_HATCH_SENTINEL = ("🔴 AUTOSDD_SENTINEL_OFF 有設 ⇒ 本機不武裝哨兵，"
+                   "額度撞線後沒有任何東西會自動續跑。")
+
+
+def escape_hatch_note(env: Mapping[str, str]) -> str:
+    """續跑逃生口有設就說話：每條一行、以換行結尾；都沒設回 `""`。`env` 由呼叫端注入——一律
+    `quota_gate.policy_env()`（env.shared／.env／os.environ 的合併；**不得**直讀 `os.environ`，
+    否則 `.env` 裡的那一格看不見）。判準＝值非空白，與 `apply_env_defaults` 的填充判準一致。"""
+    resume = str(env.get("AUTOSDD_RESUME_OFF", "")).strip()
+    return ((_HATCH_RESUME.format(value=resume) + "\n" if resume else "")
+            + (_HATCH_SENTINEL + "\n" if str(env.get("AUTOSDD_SENTINEL_OFF", "")).strip() else ""))
+
+
+def _hatch_note(quota_gate: object) -> str:
+    """簡報尾端的逃生口說明（單行段落：換行換成空格）；失敗＝不印，不得反過來擋 SessionStart。"""
+    try:
+        note = " ".join(escape_hatch_note(quota_gate.policy_env()).splitlines())
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return ""
+    return f" {note}" if note else ""
+
+
 def _models_note(quota_gate: object) -> str:
     """improving_113 W1：三個模型角色的設定行（`.env` 管不到互動視窗自己的模型，簡報只印設定值，
     供主控派工時明寫 `model:`）。env 取呼叫端注入的 `quota_gate.policy_env()`（與額度行同一個
@@ -569,7 +599,8 @@ def sessionstart_brief(
     guard: object = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
-    （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句）。
+    （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
+    續跑逃生口 AUTOSDD_RESUME_OFF／AUTOSDD_SENTINEL_OFF 有設時另附 🔴 一句，DEF-200-561）。
 
     `check_statusline` 是新增的 keyword-only 參數、帶預設值：`context_budget_guard.py`
     既有的六個位置引數呼叫（未傳這個新參數）逐字相容，不需要跟著改那一行呼叫。
@@ -595,4 +626,5 @@ def sessionstart_brief(
     lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。{_models_note(quota_gate)}"
-           f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}")
+           f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}"
+           f"{_hatch_note(quota_gate)}")

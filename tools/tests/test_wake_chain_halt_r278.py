@@ -40,6 +40,7 @@ import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402  # DEF-200-446：模組級圍籬原語
 import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析／`--check` FSM 行
 import test_context_budget_guard as _cbg  # noqa: E402  # 出廠政策 pin 的唯一的家
+import transcript_activity as ta  # noqa: E402  # DEF-200-560：對話記錄判準
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -335,6 +336,155 @@ class HaltVerdictTest(unittest.TestCase):
         self.assertEqual(qg.halt_verdict(marker, 1000.0, now, peer)["action"], "disarm", "對照")
 
 
+class ConversationActivityReplayTest(unittest.TestCase):
+    """DEF-200-560：哨兵「還活著」讀對話記錄（`tools/lib/transcript_activity.py`），不讀檔案 mtime。
+    夾具逐字沿事故 sid d6dfce97：寬限提示→主控收尾→recap，其後只剩無 timestamp 的 housekeeping。"""
+
+    NOTE, LAST, RECAP = ("2026-10-20T19:59:37.024Z", "2026-10-20T20:00:17.405Z",
+                         "2026-10-20T20:03:32.854Z")
+    MARKER = {"sid": "d6dfce97", "band": "halt", "binding": "five_hour",
+              "reset_at": "2026-10-20T19:59:59.530201+00:00",
+              "at": "2026-10-21T03:55:27.695912+08:00"}
+    NOW = datetime.fromisoformat("2026-10-21T04:25:31+08:00")
+
+    def setUp(self) -> None:
+        self.tmp = _cbg._tmpdir(self, "def560_")
+        self.path = self.tmp / "d6dfce97.jsonl"
+
+    @staticmethod
+    def _incident(note: str, last: str, recap: str) -> list[dict]:
+        return [
+            {"type": "user", "isMeta": True, "usageLimitNote": "wrap_up", "timestamp": note,
+             "message": {"role": "user", "content": "[Usage limit reached; a short grace]"}},
+            {"type": "assistant", "timestamp": last, "message": {"model": "claude-fable-5-1",
+                                                                 "usage": {"input_tokens": 1}}},
+            {"type": "system", "subtype": "away_summary", "timestamp": recap, "content": "recap"},
+            {"type": "cost-state", "totalCostUSD": 1.0}, {"type": "last-prompt", "lastPrompt": "x"},
+            {"type": "cost-state", "totalCostUSD": 1.0}, {"type": "file-history-snapshot"}]
+
+    def _write(self, rows: list[dict], mtime: float | None = None) -> None:
+        self.path.write_text("\n".join(map(json.dumps, rows)) + "\n", encoding="utf-8")
+        if mtime is not None:
+            os.utime(self.path, (mtime, mtime))
+
+    def test_only_conversation_records_move_the_activity_clock(self) -> None:
+        def at(hour: int, minute: int) -> str:
+            return f"2026-10-20T{hour:02d}:{minute:02d}:00Z"
+        talk = [{"type": "assistant", "timestamp": at(19, 0)},
+                {"type": "user", "timestamp": at(19, 10), "origin": {"kind": "human"}},
+                {"type": "user", "timestamp": at(19, 20), "isMeta": True,
+                 "origin": {"kind": "auto-continuation"}}]
+        noise = [{"type": "user", "timestamp": at(20, 0), "isMeta": True, "usageLimitNote": "x"},
+                 {"type": "user", "timestamp": at(20, 10),
+                  "message": {"content": [{"type": "tool_result"}]}},
+                 {"type": "user", "timestamp": at(20, 15), "isMeta": True,
+                  "origin": {"kind": "peer"}},
+                 {"type": "system", "subtype": "away_summary", "timestamp": at(20, 20)},
+                 {"type": "attachment", "timestamp": at(20, 25)}, {"type": "cost-state"}]
+        self._write(talk + noise)
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write('{"type":"assistant","timestamp":\n')  # 半截尾行：跳過、不崩
+        self.assertEqual(ta.newest_conversation_at([self.path]),
+                         datetime(2026, 10, 20, 19, 20, tzinfo=UTC).timestamp())
+        self._write(noise)
+        self.assertIsNone(ta.newest_conversation_at([self.path]), "雜訊被當成對話活動")
+        self.assertIsNone(ta.newest_conversation_at([self.tmp / "missing.jsonl"]))
+
+    def test_a_busy_subagent_keeps_the_session_alive(self) -> None:
+        """扇出時主逐字稿可能很久沒被寫：subagent 檔的 assistant 記錄同樣算對話活動。"""
+        self._write([{"type": "assistant", "timestamp": "2026-10-20T19:00:00Z"}])
+        sub = self.path.with_suffix("") / "subagents" / "agent-x.jsonl"
+        sub.parent.mkdir(parents=True)
+        sub.write_text('{"type":"assistant","timestamp":"2026-10-20T20:00:00Z"}\n',
+                       encoding="utf-8")
+        paths = guard.session_transcripts(self.path)
+        self.assertEqual(ta.newest_conversation_at([self.path]),
+                         datetime(2026, 10, 20, 19, 0, tzinfo=UTC).timestamp())
+        self.assertEqual(ta.newest_conversation_at(paths),
+                         datetime(2026, 10, 20, 20, 0, tzinfo=UTC).timestamp())
+
+    def test_the_incident_replay_mtime_said_alive_conversation_says_probe(self) -> None:
+        """真機重放（記錄舊病）：housekeeping 讓 mtime 永遠新鮮 ⇒ 舊判準 idle=70s ⇒ halt 標記被判
+        「已自行續跑」回 None ⇒ patrol；對話判準 idle=1514s ⇒ probe（靜止 ≥ 900s）。"""
+        now, marker = self.NOW, self.MARKER
+        self._write(self._incident(self.NOTE, self.LAST, self.RECAP), mtime=now.timestamp() - 70)
+        mtime_idle = now.timestamp() - guard.newest_activity_at([self.path])
+        convo_idle = now.timestamp() - ta.newest_conversation_at([self.path])
+        self.assertAlmostEqual(mtime_idle, 70, delta=1)
+        self.assertGreater(convo_idle, quota_messages.HALT_QUIESCE_SECONDS)
+        self.assertIsNone(quota_messages.halt_verdict(marker, mtime_idle, now), "舊病已不再重現？")
+        self.assertEqual(quota_messages.halt_verdict(marker, convo_idle, now)["action"], "probe")
+        self.assertEqual(planner.sentinel_decide(None, "", mtime_idle, now, halt=marker)["action"],
+                         "patrol", "事故當晚 16 次巡邏的判決")
+        self.assertEqual(planner.sentinel_decide(None, "", convo_idle, now, halt=marker)["action"],
+                         "probe")
+        early = datetime.fromisoformat("2026-10-21T04:10:32+08:00")  # 靜止 614s < 900s ⇒ 仍在觀望
+        early_idle = early.timestamp() - ta.newest_conversation_at([self.path])
+        self.assertEqual(planner.sentinel_decide(None, "", early_idle, early,
+                                                 halt=marker)["action"], "patrol")
+
+    def test_without_a_halt_marker_the_grace_note_alone_wakes_the_sentinel(self) -> None:
+        """RC-C：statusLine 快取過期、連 halt 標記都沒有時，寬限提示是唯一的線索。"""
+        self._write(self._incident(self.NOTE, self.LAST, self.RECAP))
+        idle, grace = ta.conversation_view(self.path, self.NOW)
+        self.assertEqual(planner.sentinel_decide(None, "", idle, self.NOW, grace=grace)["action"],
+                         "probe")
+        self.assertEqual(planner.sentinel_decide(None, "", idle, self.NOW)["action"], "patrol",
+                         "沒有寬限通道時 idle 1514s < 6h ⇒ patrol＝改前的空洞")
+
+    def _tick(self, last_age: float, halt: bool = True) -> tuple[int, list, list, list[dict]]:
+        """真 `_sentinel_tick`（只替身排程註冊與 `_resume_tick`）。夾具時刻相對真牆鐘；mtime 刻意
+        設成「剛剛」（housekeeping 讓它永遠新鮮）。回 `(rc, 排程註冊, 喚醒呼叫, 痕跡列)`。"""
+        now, sid = datetime.now(UTC), f"sid-def560-{int(last_age)}-{int(halt)}"
+
+        def ago(seconds: float) -> str:
+            return (now - timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+        self.path = self.tmp / f"{sid}.jsonl"
+        self._write(self._incident(ago(1554), ago(last_age), ago(1400)), mtime=now.timestamp())
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
+        self.enterContext(unittest.mock.patch("tempfile.gettempdir", return_value=str(self.tmp)))
+        if halt:
+            qg.write_halt_marker(sid, {"sid": sid, "band": "halt", "binding": "five_hour",
+                                       "reset_at": ago(1532), "at": ago(1804)})
+        plan = self.tmp / f"plan-{sid}.md"
+        state = {"schema": planner.RELAY_SCHEMA, "session_id": sid, "plan_path": str(plan),
+                 "state": "patrolling", "kind": "sentinel", "reset_at": "",
+                 "reset_source": "operator", "attempts": 0, "max_attempts": 5,
+                 "allow_resume": False, "task_name": f"T-{sid}", "carrier": "test",
+                 "log_path": str(planner.endurance_log_path(plan)), "transcript": str(self.path)}
+        plan.write_text("# 任務書\n\n" + planner.render_relay(state), encoding="utf-8")
+        registers, resumes = [], []
+        mock_patch = unittest.mock.patch.object
+        with mock_patch(planner, "_register_and_record", lambda p, s, at, tick: (
+                registers.append(at), (0, "cred-stub"))[1]), \
+                mock_patch(planner, "_resume_tick", lambda a: resumes.append(a) or 7):
+            rc = planner._sentinel_tick(planner.build_parser().parse_args(
+                ["--sentinel-tick", "--plan", str(plan), "--task-name", f"T-{sid}"]))
+        rows = [json.loads(line) for line in
+                planner.endurance_log_path(plan).read_text(encoding="utf-8").splitlines()]
+        return rc, registers, resumes, [r for r in rows if r["event"] == "sentinel_decided"]
+
+    def test_the_real_tick_probes_a_stopped_session_and_leaves_a_working_one_alone(self) -> None:
+        """整合：`allow_resume:false`＋mtime 永遠新鮮的事故形態，真 tick 判 probe 並交棒；對照組最後
+        一筆換成 30 秒前 ⇒ patrol、不叫醒（防雙窗）。痕跡要分得出新舊判準（提示時刻、靜止秒數）。"""
+        rc, registers, resumes, (decided,) = self._tick(1514.0)
+        self.assertEqual((rc, decided["action"], len(resumes), registers), (7, "probe", 1, []))
+        self.assertAlmostEqual(decided["conversation_idle_seconds"], 1514.0, delta=5)
+        self.assertTrue(decided["grace_note_at"], "痕跡沒有記下未處理的寬限提示時刻")
+        rc, registers, resumes, (decided,) = self._tick(30.0)
+        self.assertEqual((rc, decided["action"], resumes), (0, "patrol", []))
+        self.assertEqual(len(registers), 1, "patrol 必須重掛下一次巡邏")
+        self.assertAlmostEqual(decided["conversation_idle_seconds"], 30.0, delta=5)
+        self.assertEqual(decided["grace_note_at"], "", "寬限期後仍有對話＝提示已處理，不該再記")
+        rc, _registers, resumes, (decided,) = self._tick(1514.0, halt=False)  # RC-C：連標記都沒有
+        self.assertEqual((rc, decided["action"], len(resumes)), (7, "probe", 1))
+        self.assertIn("寬限提示", decided["reason"], "判決不是來自寬限提示通道（grace 沒傳入）")
+
+    def test_the_grace_allowance_is_one_patrol_interval(self) -> None:
+        self.assertEqual(ta.GRACE_ALLOWANCE_SECONDS, quota_messages.HALT_QUIESCE_SECONDS)
+
+
 class SupersedingSessionEvidenceTest(unittest.TestCase):
     """DEF-200-532：`superseding_session` 沿用武裝門檻、只算標記之後、量不到一律 `None`。"""
 
@@ -475,6 +625,41 @@ class PaceReportShortCircuitsDuringHaltTest(unittest.TestCase):
         self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
         report = qg.pace_report(now=now, sid="sid-never-halted-d23")
         self.assertNotIn("halted", report)
+
+
+class PaceReportSaysTheEscapeHatchesTest(unittest.TestCase):
+    """DEF-200-561：`--pace` 的兩個回傳面（halt 短路／完整報告）尾端都說出續跑逃生口。此前
+    `.env` 的 `AUTOSDD_RESUME_OFF=1` 讓哨兵醒來只探測、不續跑，`--pace` 一個字都不說。"""
+
+    def setUp(self) -> None:
+        self.tmp = _cbg._tmpdir(self, "def561_pace_")
+        self.enterContext(unittest.mock.patch.dict(
+            os.environ, {"AUTOSDD_TRACE_DIR": str(self.tmp / "traces")}))
+        self.now = datetime.now(UTC).astimezone()
+        later = (self.now + timedelta(seconds=600)).isoformat()
+        cache = self.tmp / "autosdd_quota.json"
+        cache.write_text(json.dumps({
+            "schema": qg.quota_schema(), "axes": [{"kind": "session", "pct": 10.0,
+                                                   "resets_at": later}],
+            "source": "endpoint", "measured_at": self.now.isoformat(timespec="seconds")}),
+            encoding="utf-8")
+        self.enterContext(unittest.mock.patch.object(qg, "quota_cache_path", lambda: cache))
+        qg.write_halt_marker("sid-def561-halted", {"sid": "sid-def561-halted", "reset_at": later,
+                                                   "at": self.now.isoformat(), "band": "halt",
+                                                   "binding": "session"})
+
+    def test_both_return_paths_say_it_only_when_a_flag_is_set(self) -> None:
+        for label, env, says in (("RESUME_OFF", {"AUTOSDD_RESUME_OFF": "1"}, "只探測"),
+                                 ("SENTINEL_OFF", {"AUTOSDD_SENTINEL_OFF": "1"}, "不武裝"),
+                                 ("都沒設", {}, "")):
+            with unittest.mock.patch.object(qg, "policy_env", return_value=env):
+                for path, sid, marker in (("halt 短路", "sid-def561-halted", True),
+                                          ("完整報告", "sid-def561-live", False)):
+                    text = qg.pace_report(now=self.now, sid=sid)
+                    with self.subTest(label, path=path):
+                        self.assertEqual("halted" in text, marker, "兩條回傳面沒各走一次")
+                        for phrase in ("只探測", "不武裝"):
+                            self.assertEqual(phrase in text, phrase == says, (phrase, text))
 
 
 class RelayProblemsCatchesEmptySessionIdTest(unittest.TestCase):

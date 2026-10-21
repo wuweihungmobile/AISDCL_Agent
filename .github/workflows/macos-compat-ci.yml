@@ -129,6 +129,7 @@ on:
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
+      - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊
@@ -616,6 +617,7 @@ on:
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
+      - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
       # tools/tests/test_platform_neutral_paths.py 讀 .editorconfig 的 .ps1 區塊

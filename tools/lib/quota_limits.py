@@ -103,7 +103,7 @@ _LIMIT_MARKS: tuple[tuple[str, tuple[str, ...]], ...] = (
 #: （`3:50am` `4am` `9am` `11pm` `12:20pm` `12:30pm` `6pm`），**沒有一個落在 5 小時的
 #: 固定格點上** ⇒ reset 時刻是滾動視窗、錨在該區塊第一次用量，只能**觀測**不能算。
 #: 這就是「假設 reset 固定在 5 小時後」是缺陷的證據（該預設已整支刪除）。
-_RESET_RE = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)
+_RESET_RE = re.compile(r"(?:resets|continuing automatically at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)", re.IGNORECASE)  # noqa: E501 — DEF-200-562：另認 harness 切斷通知
 
 #: 訊息自報的 IANA 時區，例：`… resets 9am (Asia/Taipei)`。全庫語料實測**每一筆**
 #: session limit 訊息都帶這個括號，所以「9am 是哪個時區的 9am」是**資料自己回答的**，
@@ -422,7 +422,7 @@ def unhandled_limit_event(transcript: Path, max_age_seconds: float = 86400.0,
 
 
 def newest_activity_at(paths: list[Path]) -> float:
-    """這批逐字稿裡最新的 mtime（給存活判準用）；空清單回 0.0。
+    """這批逐字稿裡最新的 mtime（⚠ 非存活判準：見 transcript_activity）；空清單回 0.0。
 
     🔴 為何不只看主逐字稿：扇出模式下主逐字稿可能好一陣子沒被寫，而 subagent 正在狂跑
     ⇒ 只看主檔會把一個很忙的 session 誤判成閒置，而閒置到門檻就會**自我解除**。

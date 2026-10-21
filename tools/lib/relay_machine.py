@@ -455,8 +455,10 @@ def reset_not_reached(state: dict, now: datetime, skew_seconds: int) -> dict | N
 #: L1 不借 `transcript-verbatim`。史料見本輪證據檔〈九〉。
 SOURCE_ASSERTED = "operator-asserted"  # L0：操作者顯式 --at 宣稱的時刻（不是觀測值）
 SOURCE_AUTHORITATIVE = "endpoint-authoritative"  # L1：額度端點實測的 resets_at
+#: DEF-200-562：harness 切斷通知自報的續接時刻是觀測值，不是猜的。
+SOURCE_HARNESS_CUTOFF = "harness-cutoff-notice"
 RESET_SOURCES = ("transcript-verbatim", "probe-verbatim", "operator", "halt-marker",
-                 SOURCE_ASSERTED, SOURCE_AUTHORITATIVE)
+                 SOURCE_ASSERTED, SOURCE_AUTHORITATIVE, SOURCE_HARNESS_CUTOFF)
 
 
 def manual_state(session_id: str, plan: Path, args, task: str, transcript: Path,

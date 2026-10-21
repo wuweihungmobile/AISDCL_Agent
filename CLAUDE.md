@@ -92,7 +92,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### 守衛面准入（R197 裁決：量、不挖）
 
-- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle}.py`、`tools/session_resume_planner.py`。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq 或畫面字樣／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
+- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle,transcript_activity}.py`、`tools/session_resume_planner.py`。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq 或畫面字樣／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
 - 審查角色「量、不挖」：跑既有指標與重測（Q1′～Q4′、答案表兩引擎、語料重放），不構造變體去找新缺陷；構造性命中 NEW_P_LE_2 計 0。WHY：R179～R196 十八輪有 17 輪守衛面淨增（合計 +10,139 行）、74/80 筆缺陷同輪修，審查對擴張中的面做對抗搜尋 ⇒ 發現率約 0.8 P2／輪、結構上無不動點（DEF-200-481→483→484 連三輪即此型：後兩者在 9,646 筆真實指令自然寫法命中 0）。
 - 收斂宣告看症狀閘、不看發現率：判定式與指令住 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉；家族計數降為資訊欄。再評（再開四方）的觸發條件以上述 README〈窗口規則與收斂判定〉的 S1～S6（症狀驅動）為唯一真相源、本檔只引用；時間型的 T3／T7／兜底已於 R207 退役；守衛面准入的反轉（README S5）照舊：動到守衛面 ⇒ 先附暴露證據，而不是擴大搜尋。
 
@@ -134,6 +134,7 @@ claude -p --model haiku --debug hooks --debug-file h.log "ok"; grep 'Hook Sessio
 
 - **額度 ≠ context 水位**：撞額度那一刻水位可能很低，context 守衛全數放行。「額度耗盡」是 API 層失敗，**hook 體系沒有任何觸發點** ⇒ 只能**預防性**武裝：SessionStart 清閂鎖、PostToolUse 累積夠工作量即自動 `--arm-sentinel`（Windows schtasks／macOS launchd，巡邏**只讀逐字稿、零 token**；讀到未處理撞線才轉續航排程）。「撞了沒」寫在逐字稿裡讀檔即知；「額度回來了沒」只能問伺服器——這個不對稱是哨兵成立的原因。
 - **reset 時刻是滾動視窗，只能觀測不能算**：解不出時刻一律**拒絕武裝**，不准退回「假設 5 小時」；分佈現查 `python tools/probe/reset_window_distribution.py`。
+- **哨兵的「session 還活著」判準＝對話記錄（`assistant`／人類或 `auto-continuation` 的 `user` 記錄時間戳），不是檔案 mtime**（DEF-200-560：harness 的 `away_summary`／每小時 `cost-state` 會讓 mtime 一直在動，2026-10-21 哨兵因此空巡 16 次）；harness 2.1.303 的寬限提示（`usageLimitNote:"wrap_up"`；其後的 `"release"` 是續接訊號、不是提示）／切斷通知（`continuing automatically at`）／`auto-continuation` 記錄由 `tools/lib/transcript_activity.py` 辨識（DEF-200-562）：自願收尾後靜止一個巡邏間隔即探測續跑、被切斷且視窗仍開時由 harness 自己續接；`AUTOSDD_RESUME_OFF`／`AUTOSDD_SENTINEL_OFF` 有設時 SessionStart 簡報與 `--pace` 會印 🔴（DEF-200-561）。設計全文 ADR-XPLAT-004 §2.10。
 - 兩條閾值的方向鎖具名測試：`test_the_patrol_interval_bounds_the_post_reset_dead_time`（巡邏間隔＝reset 後最壞死等時間的上界，只准調小）／`test_the_idle_threshold_outlives_a_whole_quota_window`（自我解除門檻須大於一個完整額度視窗）。註冊面與四分支判定＝`tools/tests/test_context_budget_guard.py::SentinelWiringTest`／`tools/tests/test_context_budget_guard.py::SentinelDecisionTest`。
 - 現查哨兵（**平台各一條，不要照抄另一邊**）：Windows 用 `Get-ScheduledTask`（見下方取證規則，憑證＝NextRunTime 值）；macOS 用 `launchctl list` 過濾 AutoSDD_Sentinel_（**憑證是 rc，不是時間值**——launchd 從不報下次幾點跑）。
 - 痕跡兩處、壽命不同：事件檔 `autosdd_resume_log_*.jsonl` 住系統暫存（重開機即消失，「查不到」≠「沒發生」）；分支／等待痕跡落持久目錄 `~/.autosdd/traces`（逃生口 `AUTOSDD_TRACE_DIR`，唯讀時退回暫存；SSOT＝`tools/lib/endurance_env.py`）。兩處皆「沒觸發＝檔不長大」，可偵測。

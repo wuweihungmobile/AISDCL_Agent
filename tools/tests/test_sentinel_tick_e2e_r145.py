@@ -55,10 +55,12 @@ class SentinelTickConsumesHaltMarkerE2ETest(unittest.TestCase):
             planner, "project_transcript_dir", lambda _root: self.tmp / "slug"))
 
     def _transcript(self, sid: str, mtime: float | None = None) -> Path:
-        """`mtime`＝None 用現在；給定值模擬最後活動時刻，供 `halt_verdict()` 判過期。"""
+        """`mtime`＝None 用現在；給定值模擬最後活動時刻，供 `halt_verdict()` 判過期。
+        DEF-200-560：存活判準是對話記錄的 timestamp（非 mtime）⇒ 記錄 timestamp 與 mtime 同值。"""
         ts = self.tmp / f"{sid}.jsonl"
-        ts.write_text('{"type":"assistant","message":{"model":"claude-opus-5",'
-                      '"usage":{"input_tokens":10}}}\n', encoding="utf-8")
+        at = datetime.fromtimestamp(mtime, UTC) if mtime is not None else datetime.now(UTC)
+        ts.write_text(json.dumps({"type": "assistant", "timestamp": at.isoformat(), "message": {
+            "model": "claude-opus-5", "usage": {"input_tokens": 10}}}) + "\n", encoding="utf-8")
         if mtime is not None:
             os.utime(ts, (mtime, mtime))
         return ts
