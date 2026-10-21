@@ -1,6 +1,6 @@
 # CLAUDE.md — AgentConsole 專案指引
 
-**Last Updated**: 2026-10-14 | **PRD**: v1.1.0（`docs/01_requirements/Agent_ConsoleUI_PRD.md`，§0 權威）| **狀態**: W1（架構文件＋Engine Bridge）；後續波次見 [Implementation_Plan](docs/04_planning/Implementation_Plan.md)
+**Last Updated**: 一律現查 `git log -1 --format='%h %ci' -- AgentConsole/CLAUDE.md` | **PRD**: v1.1.0（`docs/01_requirements/Agent_ConsoleUI_PRD.md`，§0 權威）| **狀態**: 一律現查 [Implementation_Plan](docs/04_planning/Implementation_Plan.md) §5 進度帳（本檔不寫波次號——快照必 stale）
 
 > **🔴 Important Notice 🔴** 本檔指令 OVERRIDE 預設行為，必須嚴格遵守。monorepo 根層 `CLAUDE.md` 的鐵律（尤其 Windows 側「PowerShell 單一載具、禁裸 cd」）同樣適用；本檔只補本子專案的規定，不得違反根層鐵律。
 
@@ -140,7 +140,7 @@ ruff check AgentConsole\engine-bridge
 6. 新 Python：`open()`／`read_text()`／`write_text()` 一律帶 `encoding="utf-8"`；`os.replace`／`os.rename`／`shutil.move`／`Path.rename`／`Path.replace` 呼叫點須包 `try/except OSError`；平台專屬 API 罩 `sys.platform`；時間戳一律帶 tz（`datetime.now(timezone.utc)`）；`ruff check` 必須 0 錯。
 7. 不准動根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`；`AutoClaude/` 與 `AISDLC_SDD/` 只准改 ADR-XPLAT-016 §11 白名單列出的檔（AISDLC_SDD 只准 LATEST 原地改，凍結版一律不碰），白名單外仍禁止、以 `git diff --name-only` 機械核對。
 8. 暫存檔放 session 提供的暫存目錄，不放 repo；不自架背景等待後交卷；不再派子 agent。
-9. Write 被擋（例如檔名含 report）就改用 Bash heredoc 落檔。
+9. 子代理交卷一律純文字（harness 拒寫報告類檔名是設計，不得以 heredoc 或換檔名繞過）；報告落檔由主控做。
 10. 「根因是 X」只是待驗假設，實證後才寫成結論；宣稱「已驗證／通過」必附當回合真跑的輸出。
 11. 每完成一支程式立即編譯並跑單元測試，**絕不累積開發**；失敗立即停下修復，禁止跳過或註解掉失敗測試。
 12. 完成一項需求就回填 [RTM](docs/06_quality/RTM.md) 該列四格（實作檔／自動測試／E2E 驗證／狀態）；不得刪列、改號、合併列。

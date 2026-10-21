@@ -239,6 +239,18 @@ F2／U3／D1／CL（Content-Length 不再要求 ASCII）／HC（SRC-URL-HOST 不
 ### P.6 V8 真實運轉（主控於 RELEASE_READY 在真實樹執行；2026-10-20 22:31）
 `real_run.ps1`：`run-open --trigger a`（RUN-SI-001，head_sha 73ff8e3c）→ `research --fetch` rc=2（R57 (d)：事件已寫、有來源失敗）：7 來源 1 成功（anthropic-engineering 141,524 bytes、http 200）、5 too-large（cc-changelog Content-Length 1,057,524、cc-docs-hooks／cc-docs-memory／cc-docs-skills 超過 262144、openai-agents-releases Content-Length 438,564）、1 redirect-refused（openai-api-changelog → `https://developers.openai.com/api/docs/changelog` 不在允許集合）；腳本把 rc=2 當失敗停鏈（OBS 入帳），以 `real_run_resume.ps1` 從 scan 續跑同一 run：`scan` rc=0 → `attr` ATT-SI-001（OBS-SI-162／163／164 → MEMORY_ENTRY=memory/guard-ratchet-repin-ritual.md，root-cause process/task-brief-gap）、ATT-SI-002（OBS-SI-161 → DOC=TCS:312，process/checklist-gap）→ `prop-new` PROP-SI-004（M 類 modify，目標 memory/guard-ratchet-repin-ritual.md，+3／-0 行，digest d21ae6f5，驗證：未驗；卡片核心區＝症狀／改什麼／風險與回滾／決定列）→ `card` rc=0 → `run-close`（outcomes 1）→ `check` overall=PASS（NE ref.carrier_families nonblocking：ATT-SI／PROP-SI／RUN-SI 家族載體未建立，資訊欄）／`status`／`export --kind runs` rc=0。產物：`docs/06_quality/SelfImproving_Event_Ledger.jsonl`（6 事件：run.open／research.scan／attr×2／prop／run.close）、`docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.md`＋`r1.patch`。**出口 (a)「至少一筆真實觀察走到提案卡」達成**；提案只提案不套用，待掌舵者在卡片「決定」列核准／否決／退回。真實觀察回流：來源表 5／7 超過 `research_max_bytes`、1 筆跨 host 重導向（OBS 入帳；P2 修訂來源表與上限）。V10 留 RELEASE 後首次例行 run 驗（本輪未驗）。
 
+### P.7 主控補記：P1 出口 (a)～(h) 逐項證據表（2026-10-21 00:5x +08:00；體檢子代理 OBS-SI-216 指出本報告原無此表）
+| 出口 | 判定 | 證據 |
+|---|---|---|
+| (a) 真實觀察端到端走到提案卡，且 ≥1 筆屬 M／P／R／D | 達成 | §P.6；事件帳本 seq 3～6；PROP-SI-004 為 M 類（OBS-SI-188） |
+| (b) 零提案觸及正式面（`git status`／HEAD 逐字對照） | 部分 | 只能由 commit `8a0860d8` 的檔案集合（事件帳本、`SelfImproving_Proposals/`、文件）推得，RELEASE 前未留前後 `git status --porcelain` 逐字對照；P2 起每次運轉逐字入帳（P2 TCS） |
+| (c) 掌舵者回饋中無 `reason_class=卡面不清` 的退回 | NOT-EVALUABLE | PROP-SI-004 仍 `proposed`（`si status` 2026-10-21 00:0x 親跑：`pending_props: PROP-SI-004=proposed`）；待掌舵者決定 |
+| (d) FR-SI-28 可重跑檢查存在且綠 | 達成［他包回報］ | §P.1 鍵 B 10 passed；`AutoClaude/tests/contract/test_evolution_propose_only.py` 存在（體檢子代理現查） |
+| (e) 每個有 `prop` 的運轉都有研究事件 | 達成 | 事件帳本 seq 2 `research.scan` 先於 seq 5 `prop`；`si check` 的 `events.research` PASS（主控 2026-10-21 親跑 rc=0） |
+| (f) 至少一次體檢子代理交卷入帳 ≥1 列（真實、非構造） | **RELEASE 後補證（2026-10-21）** | P1 RELEASE 當時無此證據（誠實登記，OBS-SI-216）；本輪體檢子代理（Sonnet、唯讀、任務書＝Operations SOP 範本）交卷＝sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 841，32 筆候選（零 ≤P2、9 筆 P3）由主控單窗口入帳 OBS-SI-191～222，`si check` rc=0 |
+| (g) 落點鎖存在且綠 | 達成 | `tools/tests/test_root_module_layout.py` 存在；主控 2026-10-21 親跑七檔（含 layout）195 passed／346 subtests |
+| (h) `si export` 存在且 AC-SI-32-5 綠 | 達成 | §P.6 `export --kind runs` rc=0；`test_selfimproving_export_status.py` 在上列七檔內 |
+
 ## §M 二審（QA 同一代理續審，HEAD `8a8f071d`；文字交卷由主控謄寫；數字皆 `[他包回報]`）
 
 **判定：FAIL**　P1／P2／P3／P4 ＝ 0／3／3／6。三個 P2 都是 DEF-200-556／557 的修法殘留；DEF-200-558 修妥。存活突變 25 → 2（B3、B5，QA 以具名理由接受為非 P2）。§3～§6 全數通過。審前審後真實樹 `git status --short` 皆空、HEAD 不變；未在真實樹跑寫入動詞、未派子代理、未連外網；V8／V10 維持未驗。

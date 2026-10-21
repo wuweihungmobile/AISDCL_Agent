@@ -44,7 +44,7 @@
 7. 不准動 `AutoClaude/`、`AISDLC_SDD/`、根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`。
 8. 暫存檔一律放 `/private/tmp/claude-501/-Users-wuweihong-Antigravity-AISDCL-Agent/6445bb47-f3aa-487f-98d0-691e7fd29e14/scratchpad/<你的角色>/`。
 9. **不要**自己架背景等待（Monitor／sleep 迴圈）後就交卷——所有驗證在你交卷前同步跑完。**不要**再派子 agent。
-10. 若 Write 工具對某檔名被擋（例如檔名含 report），改用 Bash heredoc 落檔。
+10. 子代理交卷一律純文字——harness 拒寫報告類檔名是設計，不得以 heredoc 或換檔名繞過（Windows 上 Bash 工具另被鐵律一禁用）；報告落檔由主控做（OBS-SI-004／OBS-SI-200；原句「改用 Bash heredoc 落檔」於 2026-10-21 訂正）。
 11. 工作中任何「我認為根因是 X」只是**待驗假設**，要用指令實證後才能寫成結論。
 
 ## 交卷格式（純文字，不要 JSON）

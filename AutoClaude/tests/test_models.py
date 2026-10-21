@@ -11,7 +11,7 @@ from autoclaude.models import (
     Playbook,
     PlaybookTask,
 )
-from autoclaude.models.escalation import EscalationDump
+from autoclaude.models.escalation import EscalationDump, resume_command
 from autoclaude.utils.logger import _WIN_FORBIDDEN_CHARS
 
 # ──────────────────────────────────────────────
@@ -180,6 +180,44 @@ def test_escalation_dump_is_stuck_true_in_markdown():
     dump = _make_escalation_dump(is_stuck=True)
     md = dump.to_markdown()
     assert "錯誤卡死（特徵相同）: ✅ 是" in md
+
+
+# ──────────────────────────────────────────────
+# OBS-SI-193（DEF-200-518 後續）：Kernel 路徑的 dump 沒有 playbook 路徑與 log 目錄
+# （Kernel 是純 DAG、不持有它們）。缺資訊時要說「未記錄／未取得」，不得印空白欄位、
+# 看似可跑的 `autoclaude ""`、或猜出來的 log 檔名——猜的檔名看起來可信卻指向不存在的檔案，
+# 比空白更糟。路徑已知時（舊 facade 路徑）一切維持原樣。
+# ──────────────────────────────────────────────
+
+_PLACEHOLDER = "python -m autoclaude <playbook.yaml> --config <config.yaml>"
+
+
+def test_escalation_dump_markdown_says_unknown_when_playbook_path_and_log_are_missing():
+    dump = _make_escalation_dump(
+        playbook_path="", last_log_path="", is_stuck=True,
+        checkpoint_resume_hint=resume_command(""),
+    )
+    md = dump.to_markdown()
+    assert "**Playbook**: （Kernel 路徑未記錄 playbook 路徑）" in md
+    assert "## 最後執行 Log\n未取得" in md
+    assert 'autoclaude ""' not in md, "空路徑指令看似可跑，照抄只會報錯"
+    assert "cat ''" not in md, "對空字串路徑下 cat 沒有意義"
+    # 重啟指令的單一出處：接手清單與「## 繼續執行指令」節各一份，寫法必須相同
+    assert md.count(_PLACEHOLDER) == 2
+
+
+def test_escalation_dump_markdown_keeps_known_playbook_and_log_paths_verbatim():
+    """正控：路徑資訊齊備時輸出與修前一致（只有重啟指令後的註解措辭更正）。"""
+    dump = _make_escalation_dump(
+        playbook_path="scripts/x.yaml", last_log_path="logs/playbook_T01_attempt3.log",
+        is_stuck=True, checkpoint_resume_hint=resume_command("scripts/x.yaml"),
+    )
+    md = dump.to_markdown()
+    assert "**Playbook**: scripts/x.yaml" in md
+    assert "## 最後執行 Log\n`logs/playbook_T01_attempt3.log`" in md
+    assert "cat 'logs/playbook_T01_attempt3.log' | tail -50" in md
+    assert md.count('autoclaude "scripts/x.yaml"') == 2
+    assert _PLACEHOLDER not in md and "未取得" not in md
 
 
 # ──────────────────────────────────────────────

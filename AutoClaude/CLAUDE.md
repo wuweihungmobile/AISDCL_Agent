@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Project Guidance
 
-**Last Updated**: 2026-07-19（權威以 git log 為準） | **AISDLC Version**: AISDLC_SDD LATEST | **Status**: **Improving_012 完成（三能力 A/B/C 全交付）**。Phase 3 F-A1 GoalDecomposer 收尾：`IBrain.decide_decomposition` + `supports_decomposition`（additive，capability 守門不靜默降級）+ `execution/goal_decomposer.py`（三道有界閘 ≤24 硬上限／Kahn 無環／非空 prompt，超限拒絕不重試、1 次 Brain 呼叫非遞迴）+ 🔴 signoff 硬閘 + `wiring.build_goal_decomposer` 注入 F-A2 ToolInvocationAdapter（消費 allowlist）。三方 zero-trust audit OVERALL PASS（P0=0/P1=0）。full pytest 🔴 基線數字唯一出處＝根層 ONBOARDING.md §7（出廠環境定義、選配與巢狀 session 變因、歷史校正記事均收斂該節，本檔不重複數字——R13 收斂＋`tools/check_pytest_baseline_sites.py` 機械鎖）、coverage 100%、importlinter kept 數以下方 Snapshot 為準（R82 新增 no-harness-import）、LOC=0。詳見 [AutoClaude_Improving_012.md](docs/04_planning/AutoClaude_Improving_012.md) §5 Phase 3。
+**Last Updated**: 一律現查 `git log -1 --format='%h %ci' -- AutoClaude/CLAUDE.md`（本行與檔尾〈文檔元數據〉都不寫死日期——兩處曾互相矛盾，OBS-SI-194） | **AISDLC Version**: AISDLC_SDD LATEST | **Status**: 一律現查 `AutoClaude/docs/04_planning/` 現存最大號 `AutoClaude_Improving_0NN.md`（C 軌工作流帳本，見根 `CLAUDE.md`〈三條改進軌道〉③），本檔不快照進度（快照必 stale：此行原是 Improving_012 收尾當時的快照）。測試基線數字唯一出處＝根層 ONBOARDING.md §7（`tools/check_pytest_baseline_sites.py` 機械鎖）；importlinter kept 數與 Plugin／Port 計數以下方 Snapshot 為準；LOC 現查 `python tools/check_loc_budget.py --json`。
 
 > **🔴 Important Notice 🔴** This file provides critical guidance for Claude Code (claude.ai/code). All instructions here OVERRIDE default behavior and must be followed exactly.
 
@@ -188,7 +188,7 @@ DSN 解析優先級：`AUTOCLAUDE_DB_DSN` > `AUTOCLAUDE_PG_DSN`（deprecated）>
 
 - **`dry_run=True`**：跳過 Claude Code 執行，以 regex keyword 合成輸出
 - **ANSI strip**：regex 比對前自動 `strip_ansi()`
-- **ESCALATION**（Kernel 正式路徑；DEF-200-518）：「收斂判 escalate」與「重試耗盡」兩型失敗升級先發 `ON_ESCALATION_DUMP_REQUEST` 落 `<checkpoint_dir>/escalation_<step>_<時間>.md`（`EscalationDump`，含 shell 行動清單；不受通知開關影響；🔴 Kernel 路徑 dump 已知四處不精確：Playbook 欄空白、重啟指令 `autoclaude ""` 不可照抄、最後 log 檔名與實際不符、「從 checkpoint 繼續」措辭不準），再發 `ON_ESCALATION`：桌面通知（`notification.enabled=true` 才發並寫 `escalation_alert.log`）＋演化**提案**（只寫 log，不套用、不重載；有 `MINIMAX_API_KEY` 時會同步打 Minimax——`_call_with_retry` 逾時 30s×最多 3 次＋退避，最壞約 96s）。veto／Brain 故障型升級只留 log marker 與 `KernelResult.reason`；舊 `PlaybookRunner` 的「自動演化重載」無生產建構點、無演化重載生產者；`require_evolution_signoff` 預設 False 只被該不可達路徑讀取（SelfImproving PRD AC-SI-28-2 改述：Kernel 路徑只提案、預設放行但不可達；依據＝`main.py` 註解字樣「舊 PlaybookRunner 直連模式已於 W6 拔除」，由 `tests/contract/test_evolution_propose_only.py` 釘住、刻意不引行號）
+- **ESCALATION**（Kernel 正式路徑；DEF-200-518）：「收斂判 escalate」與「重試耗盡」兩型失敗升級先發 `ON_ESCALATION_DUMP_REQUEST` 落 `<checkpoint_dir>/escalation_<step>_<時間>.md`（`EscalationDump`，含 shell 行動清單；不受通知開關影響；Kernel 不持有 playbook 路徑與 log 目錄，缺資訊時誠實降級而非留空或猜（OBS-SI-193 已修）：Playbook 欄印「未記錄」、重啟指令印註解佔位符、最後 log 印「未取得」），再發 `ON_ESCALATION`：桌面通知（`notification.enabled=true` 才發並寫 `escalation_alert.log`）＋演化**提案**（只寫 log，不套用、不重載；有 `MINIMAX_API_KEY` 時會同步打 Minimax——`_call_with_retry` 逾時 30s×最多 3 次＋退避，最壞約 96s）。veto／Brain 故障型升級只留 log marker 與 `KernelResult.reason`；舊 `PlaybookRunner` 的「自動演化重載」無生產建構點、無演化重載生產者；`require_evolution_signoff` 預設 False 只被該不可達路徑讀取（SelfImproving PRD AC-SI-28-2 改述：Kernel 路徑只提案、預設放行但不可達；依據＝`main.py` 註解字樣「舊 PlaybookRunner 直連模式已於 W6 拔除」，由 `tests/contract/test_evolution_propose_only.py` 釘住、刻意不引行號）
 - **Token Guard**：≥ 80% `/compact`、≥ 90% 儲存 checkpoint 並排程恢復
 - **Checkpoint 續跑**：原子寫入；`--fresh` 忽略 checkpoint 重跑
 - **Hotkey 中斷**：ESC+F12 全域安全停止
@@ -311,7 +311,7 @@ tasks:
 
 ---
 
-**文檔元數據**：v7.15 | 建立 2025-01-11 | 最後更新 2026-10-20（權威以 git log 為準） | 適用 AISDLC_SDD LATEST（v7.15：SelfImproving P1 鍵 B AC-SI-28-2 改述——〈PlaybookRunner 關鍵行為〉ESCALATION 列改引 `main.py` 註解字樣「舊 PlaybookRunner 直連模式已於 W6 拔除」、不引行號，由 `tests/contract/test_evolution_propose_only.py` 釘住。v7.14：整合輪 116 方法論改指 AISDLC_SDD LATEST、閘門對映 D-116-05。歷史 v7.13 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
+**文檔元數據**：v7.16 | 建立 2025-01-11 | 最後更新 見檔頭 Last Updated 的現查配方（權威以 git log 為準，本行不寫死日期） | 適用 AISDLC_SDD LATEST（v7.16：OBS-SI-193／194——ESCALATION 列的 Kernel dump 降級敘述改為已修、檔頭與本行日期改現查配方。v7.15：SelfImproving P1 鍵 B AC-SI-28-2 改述——〈PlaybookRunner 關鍵行為〉ESCALATION 列改引 `main.py` 註解字樣「舊 PlaybookRunner 直連模式已於 W6 拔除」、不引行號，由 `tests/contract/test_evolution_propose_only.py` 釘住。v7.14：整合輪 116 方法論改指 AISDLC_SDD LATEST、閘門對映 D-116-05。歷史 v7.13 以前明細見 [sprint_history.md §1.7.3](docs/05_development/sprint_history.md)）。
 
 <!-- ARCH_SNAPSHOT_BEGIN -->
 ## [Architecture Snapshot] — 由 tools/snapshot_sync.py 自動生成（請勿手動編輯本區段；以 `python tools/snapshot_sync.py` 重新生成）

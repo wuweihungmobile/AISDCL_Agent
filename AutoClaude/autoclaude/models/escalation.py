@@ -17,10 +17,26 @@ from pathlib import Path
 from ..utils.logger import _sanitize_log_filename, write_text_with_fallback
 
 
+# ESCALATION「重啟指令」的單一出處：`EscalationDump.generate_handover_checklist()` 與落盤的
+# 「## 繼續執行指令」（`plugins/checkpoint/_escalation.py` 經本函式組 `checkpoint_resume_hint`）
+# 共用，避免同一份 dump 出現兩種寫法（R56 DEF-101-432 第 5 處就是兩處各組一份而漏改）。
+# 🔴 Kernel（core/）是純 DAG、不持有 playbook 路徑（持有路徑的是 core/services/auto_resume.py），
+# ON_ESCALATION_DUMP_REQUEST 的 payload 因此不帶它，Kernel 路徑的 dump 拿到 `playbook_path==""`。
+# 明確決策：缺資訊時印「未記錄」與帶佔位符的註解形態（不可被誤執行），不猜、也不印出
+# `autoclaude ""` 這種看似可跑的空參數指令；讓 Kernel 簽名改帶路徑是另一個架構變更，非本函式職責。
+# 措辭只講事實：重跑會不會續跑取決於「先前是否已有 checkpoint」（ESCALATION 本身不存 checkpoint；
+# 只有 TOKEN_HALT／中斷／演化重載會存），沒有就從第一步重來。
+def resume_command(playbook_path: str) -> str:
+    if playbook_path:
+        return f'autoclaude "{playbook_path}"  # 有 checkpoint 才續跑，否則從頭；--fresh 強制從頭'
+    return ("# python -m autoclaude <playbook.yaml> --config <config.yaml>\n"
+            "# Kernel 路徑由呼叫端持有 playbook 路徑，請以原指令重啟")
+
+
 @dataclass
 class EscalationDump:
     """ESCALATION 或強制中斷時儲存的完整診斷快照。"""
-    playbook_path: str
+    playbook_path: str  # "" ＝未記錄（Kernel 路徑不持有它；見 resume_command）
     step_id: str
     step_name: str
     total_attempts: int
@@ -34,7 +50,7 @@ class EscalationDump:
     suspect_assertion_mismatch: bool = False  # Gap-008-C：測試期望值疑似寫錯
     saved_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
     human_hint: str = ""
-    last_log_path: str = ""
+    last_log_path: str = ""  # "" ＝未取得（to_markdown 印「未取得」，不猜檔名）
     checkpoint_resume_hint: str = ""
     # AutoSDD_improving_14 A 軌（W-14-2）：meta⁸ 互遞迴拓樸審批儀表板（已過 SDD 端 PY-2
     # 拓樸防偽 + AutoClaude 端 fail-closed 稽核的 Markdown）。空字串＝非 SDD recursion
@@ -106,7 +122,8 @@ class EscalationDump:
             actions += [
                 "",
                 "# 3. 卡死診斷（is_stuck=True，相同錯誤反覆出現）",
-                f"cat '{self.last_log_path}' | tail -50  # 看 log, Windows: Get-Content -Tail 50",
+                (f"cat '{self.last_log_path}' | tail -50  # 看 log, Windows: Get-Content -Tail 50"
+                 if self.last_log_path else "# 最後 log 未取得（見上方「最後執行 Log」節）"),
                 "# 手動執行 evaluator_command 確認根本原因",
             ]
 
@@ -118,12 +135,18 @@ class EscalationDump:
                 "# 請人工確認：assert 的期望值是否符合業務邏輯",
             ]
 
+        # 🔴 OBS-SI-192：本節只給「唯讀診斷＋保全」，不得再建議毀滅性 git。原文曾列裸
+        # `git stash` 與 `git checkout HEAD -- .`——前者是 monorepo 根 CLAUDE.md 鐵律五點名
+        # 的共用工作樹事故源，後者會不可逆清掉全部未提交內容；兩者在本 repo 都由 PreToolUse
+        # 守衛阻斷，照抄只會被擋或毀資料。`git stash create` 只建 commit 物件、不動工作樹，
+        # 是鐵律五指定的保全手法。回歸鎖＝tests/test_gap010.py（全旗標掃毀滅形態）。
         if self.is_worsening:
             actions += [
                 "",
                 "# 5. 失敗數遞增診斷（is_worsening=True，修改越多失敗越多）",
-                "git stash  # 暫存當前修改，從乾淨狀態診斷",
-                "# 或：git checkout HEAD -- . # 危險！還原所有未 commit 的修改",
+                "git status --short  # 先看工作樹現況（唯讀）",
+                "git diff --stat  # 累積修改的檔案與行數（唯讀）",
+                "git stash create  # 只印 sha，不動工作樹；再 git tag <輪次>-wip-preserved <sha>",
             ]
 
         if self.is_oscillating:
@@ -137,8 +160,8 @@ class EscalationDump:
         actions += [
             "",
             "# 7. 手動修正後，恢復執行",
-            f'autoclaude "{self.playbook_path}"  # 從 checkpoint 繼續',
-            "# 若步驟已手動完成，可直接繼續下一步",
+            *resume_command(self.playbook_path).splitlines(),
+            "# 若步驟已手動完成：重跑不會自動跳過它，需自行調整 playbook 或 checkpoint",
         ]
 
         return actions
@@ -149,7 +172,7 @@ class EscalationDump:
             f"**步驟**: {self.step_id} — {self.step_name}",
             f"**時間**: {self.saved_at}",
             f"**重試次數**: {self.total_attempts}",
-            f"**Playbook**: {self.playbook_path}",
+            f"**Playbook**: {self.playbook_path or '（Kernel 路徑未記錄 playbook 路徑）'}",
             "",
             "## 失敗鏈",
         ]
@@ -188,8 +211,8 @@ class EscalationDump:
             lines += ["", "## 🧭 meta⁸ 互遞迴拓樸審批儀表板（指揮官端可審批）",
                       "> SDD 渲染、已過拓樸防偽 + fail-closed 稽核；🔴=耗 fuel、⛔=強制打斷。",
                       "", self.topology_dashboard]
-        if self.last_log_path:
-            lines += ["", "## 最後執行 Log", f"`{self.last_log_path}`"]
+        lines += ["", "## 最後執行 Log",
+                  f"`{self.last_log_path}`" if self.last_log_path else "未取得（未提供 log 目錄）"]
         if self.checkpoint_resume_hint:
             lines += ["", "## 繼續執行指令", "```", self.checkpoint_resume_hint, "```"]
         # Gap-010-D：自動生成可執行的接手行動清單

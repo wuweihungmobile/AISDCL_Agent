@@ -90,6 +90,10 @@ _SCAN_FILES = [
     #      quota_meter.py 的合成注入回歸測試——R100 只納管了受測模組本身，漏了它自己
     #      的測試檔，未納管站點棘輪因此由 114 上升為 115。正解同上，一併納管。
     "AutoClaude/tests/test_r100_quota_refusal_false_positive.py",
+    # SelfImproving P2 輪（2026-10-21；DEF-200-105 同型第四例）：AgentConsole Architecture.md
+    #      V-4 列把狀態字 `SKIPPED` 與現查日期寫同一行，被 `_line_is_claim()` 判成基線宣稱；
+    #      單靠行內豁免對站點數棘輪無效 ⇒ 沿用「納管 ＋ 行內豁免」，該列已帶 `baseline-ok:`。
+    "AgentConsole/docs/02_architecture/Architecture.md",
     "CLAUDE.md",
     "ONBOARDING.md",
     "useMacWin.md",

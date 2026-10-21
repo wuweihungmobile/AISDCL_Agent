@@ -59,7 +59,8 @@ class CrossStepStateValidator:
             return (
                 f"⚠️ 跨步驟污染警告：偵測到 {modified_count} 個已修改但未確認的檔案（git status）。"
                 f"前一步驟 [{prev_id}] 可能未完成清理。"
-                f"請先確認這些修改是預期的（或 git stash 後），"
+                "請先確認這些修改是預期的（要保全可先 git stash create 取快照並打 tag；"
+                "不要用 git stash／checkout -- 丟棄），"
                 f"再繼續當前步驟 [{current_step.step_id}]。"
             )
 

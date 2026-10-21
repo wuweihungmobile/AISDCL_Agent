@@ -107,7 +107,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 > v0.13 起皆此形，v0.05～v0.12 為 `build/reports/*` 並只放行 `fsm/FSM-STATE-TEMPLATE.yaml` 一檔），
 > 照原表寫的分析／階段報告 clone 後就消失；LATEST 被追蹤的 build 內容只有 `planning/` 與 `logs/README.md`。
 > `build/reports/` 只放工具自動寫的執行期產物。同一宣稱的其他站點：`FILE_DIRECTORY_RULES.md` 〈報告寫入位置〉表（已同步訂正）；
-> `tools/AISDLC_CLAUDE_RULES.md` 第 103～104 行同寫法（不在本輪文件白名單，未動，已登記交卷）。
+> LATEST 的 `tools/AISDLC_CLAUDE_RULES.md` 已於整合輪 116 同步訂正（:103-108；錨＝該檔〈115／S-15 訂正（整合輪 116 於本檔補做）〉註記）。
 
 **專案層（Layer 3）— 寫入 `AISDLC_SDD_v<LATEST>/docs/` 子目錄**：
 

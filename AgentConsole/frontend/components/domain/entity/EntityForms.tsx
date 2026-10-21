@@ -7,7 +7,7 @@
  */
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Controller, useForm, type Control, type FieldValues, type Path } from "react-hook-form";
 
 import { DialogBody, DialogFooter } from "@/components/ui/dialog";
@@ -17,6 +17,7 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { StatusLabel } from "@/components/ui/status-dot";
 import { useToast } from "@/components/ui/toast";
+import { EXECUTION_PATH_HINT } from "@/components/domain/import/sourceRules";
 import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
 import { ApiError } from "@/lib/api/client";
 import { useGoals } from "@/lib/api/queries";
@@ -155,6 +156,7 @@ export function ProjectForm({
   lockedToNameAndDescription?: boolean;
 }) {
   const [formError, setFormError] = useState<string | null>(null);
+  const pathHintId = useId();
   const {
     register,
     control,
@@ -179,9 +181,15 @@ export function ProjectForm({
       <Field label="專案名稱" error={errors.name?.message}>
         <Input placeholder="輸入名稱…" aria-invalid={errors.name ? true : undefined} {...register("name")} />
       </Field>
-      <Field label="執行路徑" error={errors.executionPath?.message}>
-        <Input placeholder="/home/user/projects/…" disabled={locked} aria-invalid={errors.executionPath ? true : undefined} {...register("executionPath")} />
-      </Field>
+      {/* 兩種模式的寫法不同（Architecture §12.1 L-8）：說明文字與匯入頁共用同一份 EXECUTION_PATH_HINT；放在 Field 外（不進標籤的可及名稱），以 aria-describedby 連到輸入框 */}
+      <div>
+        <Field label="執行路徑" error={errors.executionPath?.message}>
+          <Input placeholder="/home/user/projects/…" disabled={locked} aria-invalid={errors.executionPath ? true : undefined} aria-describedby={pathHintId} {...register("executionPath")} />
+        </Field>
+        <p id={pathHintId} className="mt-1.5 text-xs leading-relaxed text-wg-muted">
+          {EXECUTION_PATH_HINT}
+        </p>
+      </div>
       <MarkdownField control={control} name="description" label="說明描述" placeholder="## 概述…" exportName="專案說明" variant={variant} error={errors.description?.message} />
       <MarkdownField
         control={control}

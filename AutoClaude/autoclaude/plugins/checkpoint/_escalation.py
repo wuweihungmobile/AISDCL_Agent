@@ -16,7 +16,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from ...models.escalation import EscalationDump
+from ...models.escalation import EscalationDump, resume_command
 from ...utils.logger import _sanitize_log_filename
 
 logger = logging.getLogger("autoclaude.plugins.checkpoint")
@@ -51,13 +51,20 @@ def save_escalation_dump_impl(
     last_log_filename = _sanitize_log_filename(
         f"playbook_{task.step_id}_attempt{last_attempt}.log"
     )
-    last_log_path = str(Path(log_dir) / last_log_filename)
+    # OBS-SI-193（DEF-200-518 後續）：只有呼叫端真的給了 log 目錄才組路徑；缺席就留空，由
+    # EscalationDump 印「未取得」，不得猜檔名。上面這個 `playbook_{step}_attempt{n}.log` 命名只對
+    # 舊 facade 路徑成立（prompt_dispatcher 的 step_label）；Kernel 路徑的 dump 請求 payload 不帶
+    # log_dir（Kernel 不持有 infra 設定），且 Kernel 的執行器實際寫 `playbook_{step_id}.log`
+    # （kernel.py `label=task.step_id`，無 `_attempt{n}`）——目錄缺席時硬組的相對檔名既不存在、
+    # 命名也不對，修前 dump 就是印這個假檔名。
+    last_log_path = str(Path(log_dir) / last_log_filename) if log_dir else ""
     # R56 修正（DEF-101-432 第 5 處）：本字串經 EscalationDump.to_markdown() 渲染成
     # 「## 繼續執行指令」+ ``` 圍欄落盤，人類會在自己的平台原樣複製執行；Windows 使用者
     # 路徑常含空白（C:\Users\John Smith\My Projects\pb.yaml），未加引號會被殼切成多個
     # 引數。雙引號是 POSIX sh 與 cmd.exe 唯一共通的引用字元（單引號在 cmd.exe 不是引號
-    # 字元）——與 models/escalation.py 接手清單同一政策，避免同一份 dump 出現兩種寫法。
-    checkpoint_resume_hint = f'autoclaude "{playbook_path}"'
+    # 字元）。OBS-SI-193：改由 models/escalation.py 的 `resume_command()` 單一出處組字串
+    # ——接手清單與本節共用同一份，且 playbook 路徑缺席（Kernel 路徑）時不再印 `autoclaude ""`。
+    checkpoint_resume_hint = resume_command(playbook_path)
     dump = EscalationDump(
         playbook_path=playbook_path,
         step_id=task.step_id,

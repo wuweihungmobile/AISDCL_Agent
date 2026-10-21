@@ -90,6 +90,29 @@ def test_c4_shape_escalation_leaves_a_dump_under_checkpoint_dir(tmp_path, monkey
     assert list(elsewhere.iterdir()) == [], "dump 不得落進 cwd"
 
 
+def test_kernel_path_dump_says_unknown_instead_of_blank_or_guessed_fields(tmp_path):
+    """OBS-SI-193：真 Kernel 路徑的 dump 不持有 playbook 路徑與 log 目錄（Kernel 是純 DAG）。
+
+    使用者讀到的就是這份檔：修前 `**Playbook**:` 空白、重啟指令 `autoclaude ""`、最後 log 是
+    不存在的相對檔名、措辭說「從 checkpoint 繼續」（ESCALATION 不存 checkpoint）。缺資訊時
+    必須明說「未記錄／未取得」並給帶佔位符的註解形態。同簽名評估讓 is_stuck 為真，才會走到
+    清單裡的 `cat <log>` 分支。
+    """
+    cfg = _cfg(tmp_path)
+    kernel = build_kernel(cfg, executor=_Exec(), evaluator=_SameSignatureEval())
+
+    kernel.run(_pb(max_retries=5))
+
+    (dump,) = _dumps(cfg)
+    md = dump.read_text(encoding="utf-8")
+    assert "錯誤卡死（特徵相同）: ✅ 是" in md          # 對照：stuck 分支確實被走到
+    assert "**Playbook**: （Kernel 路徑未記錄 playbook 路徑）" in md
+    assert "## 最後執行 Log\n未取得" in md
+    assert "python -m autoclaude <playbook.yaml> --config <config.yaml>" in md
+    for forbidden in ('autoclaude ""', "cat ''", "playbook_T01_attempt", "從 checkpoint 繼續"):
+        assert forbidden not in md, f"{forbidden!r} 不得出現在 Kernel 路徑 dump：\n{md}"
+
+
 def test_notification_enabled_alert_log_points_at_the_dump(tmp_path):
     cfg = _cfg(tmp_path, notify=True)
     with patch("autoclaude.utils.notifier._deliver"):          # 不真的彈窗

@@ -9,32 +9,78 @@
       "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
     },
     {
+      "id": "anthropic-sdk-python-releases",
+      "url": "https://github.com/anthropics/anthropic-sdk-python/releases.atom",
+      "kind": "release",
+      "extract": "最新 5 個 release 的編號與日期，以及其中提到的新模型 ID 或 API 參數名（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（主控探針 2026-10-21 實測 39,170 bytes application/atom+xml）"
+    },
+    {
       "id": "cc-changelog",
       "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md",
       "kind": "changelog",
       "extract": "最新 5 個版本的編號與各版首行（逐字，不改寫）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
     },
     {
       "id": "cc-docs-hooks",
       "url": "https://code.claude.com/docs/en/hooks-guide",
       "kind": "docs",
       "extract": "標題清單＋事件名清單（逐字）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
+    },
+    {
+      "id": "cc-docs-hooks-md",
+      "url": "https://code.claude.com/docs/en/hooks-guide.md",
+      "kind": "docs",
+      "extract": "標題清單＋事件名清單（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（取代 cc-docs-hooks：HTML 頁 1,095,349 bytes 超界，.md 版 63,237 bytes）"
+    },
+    {
+      "id": "cc-docs-index",
+      "url": "https://code.claude.com/docs/llms.txt",
+      "kind": "docs",
+      "extract": "與上次相比新增或改名的頁面標題清單（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（主控探針 2026-10-21 實測 63,682 bytes text/plain）"
     },
     {
       "id": "cc-docs-memory",
       "url": "https://code.claude.com/docs/en/memory",
       "kind": "docs",
       "extract": "頁面標題清單＋含數字上限的句子（逐字）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
+    },
+    {
+      "id": "cc-docs-memory-md",
+      "url": "https://code.claude.com/docs/en/memory.md",
+      "kind": "docs",
+      "extract": "頁面標題清單＋含數字上限的句子（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（取代 cc-docs-memory：HTML 頁 801,204 bytes 超界，.md 版 51,243 bytes）"
     },
     {
       "id": "cc-docs-skills",
       "url": "https://code.claude.com/docs/en/skills",
       "kind": "docs",
       "extract": "標題清單＋frontmatter 欄位名清單（逐字）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
+    },
+    {
+      "id": "cc-docs-skills-md",
+      "url": "https://code.claude.com/docs/en/skills.md",
+      "kind": "docs",
+      "extract": "標題清單＋frontmatter 欄位名清單（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（取代 cc-docs-skills：HTML 頁 1,218,247 bytes 超界，.md 版 110,002 bytes）"
+    },
+    {
+      "id": "cc-releases",
+      "url": "https://github.com/anthropics/claude-code/releases.atom",
+      "kind": "release",
+      "extract": "最新 5 個 release 的編號、日期與各版首行（逐字，不改寫）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（取代 cc-changelog：raw CHANGELOG.md 實測 1,057,524 bytes 超界）"
     },
     {
       "id": "openai-agents-releases",
@@ -48,7 +94,15 @@
       "url": "https://platform.openai.com/docs/changelog",
       "kind": "changelog",
       "extract": "最新 5 筆變更的日期與標題（逐字）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
+    },
+    {
+      "id": "openai-api-changelog-md",
+      "url": "https://developers.openai.com/api/docs/changelog.md",
+      "kind": "changelog",
+      "extract": "最新 5 筆變更的日期與標題（逐字）",
+      "added_by": "T1 sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13（取代 openai-api-changelog：舊網址 301 跨站到 developers.openai.com 被拒；.md 版 75,753 bytes）"
     }
   ]
 }

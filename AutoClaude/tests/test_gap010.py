@@ -12,6 +12,7 @@ Gap-010 實作驗證測試（P0 ~ P2 全量）。
 """
 from __future__ import annotations
 
+import re
 from unittest.mock import MagicMock, patch
 
 # ──────────────────────────────────────────────
@@ -216,6 +217,21 @@ def _make_escalation_dump(**overrides):
     return EscalationDump(**defaults)
 
 
+# 毀滅性 git 形態（根 CLAUDE.md 鐵律五的列舉；放行 `git stash create`／`list`／`show`）。
+# autoclaude 是可獨立 pip 安裝的套件，importlinter 契約 #9 禁止它 import monorepo 根層守衛碼
+# （.claude/hooks/block_destructive_git.py），所以判準在此自帶一份文字版；兩邊的同步義務由
+# 失敗訊息指回鐵律五，而不是靠 import。刻意比守衛嚴（連 `git clean -n` 也判中）：接手清單
+# 沒有理由建議任何 clean／restore／reset 形態。
+_DESTRUCTIVE_GIT = re.compile(
+    r"git\s+(?:stash(?!\s+(?:create|list|show)\b)"       # 裸 stash／push／pop／apply／drop…
+    r"|checkout\s+(?:-f\b|--(?:\s|$)|\S+\s+--(?:\s|$))"  # -f／-- <path>／<ref> -- <path>
+    r"|restore\s+(?!--staged\b)"                          # restore <path>（--staged 只動 index）
+    r"|reset\s+--(?:hard|merge|keep)\b"
+    r"|clean\b"
+    r"|switch\s+(?:-f\b|--discard-changes\b))"
+)
+
+
 class TestEscalationDumpHandoverChecklist:
     def test_checklist_always_has_git_commands(self):
         """接手清單必含 git log 和 git diff 基本診斷指令。"""
@@ -248,12 +264,81 @@ class TestEscalationDumpHandoverChecklist:
         assert "grep" in joined
         assert "assert" in joined
 
-    def test_is_worsening_adds_stash_or_restore_cmd(self):
-        """is_worsening=True 時應包含 git stash 或還原指令。"""
+    def test_is_worsening_offers_readonly_diagnosis_and_stash_create_preservation(self):
+        """OBS-SI-192：is_worsening=True 的處置只准「唯讀診斷＋保全」。
+
+        WHY：舊清單建議裸 `git stash` 與 `git checkout HEAD -- .`——前者是根 CLAUDE.md 鐵律五
+        點名的共用工作樹事故源，後者不可逆清掉全部未提交內容，兩者在本 repo 都被 PreToolUse
+        守衛阻斷，接手者照抄不是被擋就是毀掉未提交的工作。`git stash create` 只建 commit 物件、
+        不動工作樹，才是指定的保全手法，且要提示再打 tag（否則 sha 只存在於終端捲動紀錄）。
+        舊測試只斷言 "stash" in joined or "checkout" in joined——對毀滅形態零鑑別力。
+        """
         dump = _make_escalation_dump(is_worsening=True)
-        actions = dump.generate_handover_checklist()
+        joined = "\n".join(dump.generate_handover_checklist())
+        for expected in ("git status --short", "git diff --stat", "git stash create",
+                         "wip-preserved"):
+            assert expected in joined, f"is_worsening 處置缺 {expected!r}：\n{joined}"
+
+    def test_no_flag_combination_ever_advises_destructive_git(self):
+        """OBS-SI-192：全旗標同時為 True（＝清單的所有分支都展開）時，整份接手清單
+        （含說明行）不得出現鐵律五列舉的毀滅性 git 形態。"""
+        dump = _make_escalation_dump(
+            suspect_test_file=True, is_stuck=True, suspect_assertion_mismatch=True,
+            is_worsening=True, is_oscillating=True,
+        )
+        joined = "\n".join(dump.generate_handover_checklist())
+        hit = _DESTRUCTIVE_GIT.search(joined)
+        assert hit is None, (
+            f"接手清單建議了毀滅性 git 形態 {hit.group(0)!r}（根 CLAUDE.md 鐵律五：該形態在本 repo "
+            f"由 PreToolUse 守衛阻斷，照抄會被擋或毀掉未提交內容）：\n{joined}"
+        )
+
+    def test_destructive_git_pattern_flags_the_old_advice_and_spares_the_preservation_form(self):
+        """上一支測試的判準本身要能紅（Rule 9）：舊建議必須被判中、保全／唯讀形態必須放行，
+        否則「清單沒有毀滅 git」可能只是正規式太鬆。"""
+        for old in ("git stash  # 暫存當前修改，從乾淨狀態診斷",
+                    "# 或：git checkout HEAD -- . # 危險！還原所有未 commit 的修改",
+                    "git stash pop", "git checkout -- tests/", "git checkout -f",
+                    "git reset --hard HEAD", "git clean -fd", "git restore tests/x.py",
+                    "git switch -f main"):
+            assert _DESTRUCTIVE_GIT.search(old), f"判準漏接毀滅形態：{old!r}"
+        for ok in ("git stash create", "git stash list", "git restore --staged x.py",
+                   "git status --short", "git diff --stat", "git reset", "git checkout -b x",
+                   "git log --oneline -3", "git diff HEAD~3 HEAD"):
+            assert not _DESTRUCTIVE_GIT.search(ok), f"判準誤擋放行形態：{ok!r}"
+
+    def test_resume_wording_never_claims_to_continue_from_checkpoint(self):
+        """OBS-SI-193：ESCALATION 本身不存 checkpoint，重跑只有「先前已有 checkpoint」才續跑，
+        否則從第一步重來。舊措辭「從 checkpoint 繼續」讓接手者以為失敗當下的進度被存下來——
+        它沒有。路徑已知與未知兩種形態都必須說實話。"""
+        for path in ("scripts/my.yaml", ""):
+            dump = _make_escalation_dump(playbook_path=path)
+            joined = "\n".join(dump.generate_handover_checklist())
+            assert "從 checkpoint 繼續" not in joined, f"playbook_path={path!r}：\n{joined}"
+        known = "\n".join(_make_escalation_dump(playbook_path="scripts/my.yaml")
+                          .generate_handover_checklist())
+        assert "有 checkpoint 才續跑，否則從頭" in known and "--fresh" in known
+
+    def test_missing_playbook_path_prints_inert_placeholder_not_an_empty_command(self):
+        """OBS-SI-193：Kernel 是純 DAG、不持有 playbook 路徑，Kernel 路徑的 dump 因此拿到空路徑。
+        修前清單印 `autoclaude ""`——看似可跑，實際以空路徑啟動只會報錯；修後印帶佔位符的
+        **註解**形態（整份清單貼進終端也不會執行它），並說明由呼叫端以原指令重啟。"""
+        actions = _make_escalation_dump(playbook_path="").generate_handover_checklist()
         joined = "\n".join(actions)
-        assert "stash" in joined or "checkout" in joined
+        assert 'autoclaude ""' not in joined
+        assert "python -m autoclaude <playbook.yaml> --config <config.yaml>" in joined
+        assert "Kernel 路徑由呼叫端持有 playbook 路徑，請以原指令重啟" in joined
+        for line in actions:
+            if "autoclaude" in line:
+                assert line.startswith("#"), f"佔位符必須是註解行，否則貼進終端會被執行：{line!r}"
+
+    def test_missing_last_log_path_never_emits_cat_of_an_empty_path(self):
+        """OBS-SI-193：last_log_path 缺席（Kernel 路徑不帶 log 目錄）時，is_stuck 的
+        `cat '' | tail -50` 是對空字串路徑下指令；改印註解並指回「最後執行 Log」節。"""
+        dump = _make_escalation_dump(is_stuck=True, last_log_path="")
+        joined = "\n".join(dump.generate_handover_checklist())
+        assert "cat ''" not in joined
+        assert "最後 log 未取得" in joined
 
     def test_resume_hint_includes_autoclaude_cmd(self):
         """恢復指令必含 autoclaude 指令（供接手人員繼續執行）。"""

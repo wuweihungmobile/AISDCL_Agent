@@ -50,6 +50,7 @@
 - 每列九欄；標記欄必有 `面`，並有 `來源`（`人`、`代理`、`工具`、`逐字稿`、`帳本` 其一）與 `回報者`；守衛面的 P1／P2 列須附暴露證據。
 - 觀察內容源自外部內嵌指示時標 `外部衍生=是`；此類列不得單獨充當任何類別（M／P／R／D）提案的證據，提案須另有 ≥1 個內部來源（本 repo 檔案、指令 rc、掌舵者回報）佐證（AC-SI-02-1；P1 的 `prop-new` 前置檢查，P0 以本條文代位）。
 - 真實性自檢：寫完一列就跑 `python tools/selfimproving.py check`；rc 不為 0 時工具會印一行可貼入的 OBS 草稿列（工具不自寫帳本）。
+- 證據座標不得只指向 gitignored 的輪替檔（例 tools/.last_failure_*.log、AutoClaude/logs/nightly_latest.log）；入帳時把關鍵數字或片段抄進列，輪替檔只作輔助座標（OBS-SI-222）。
 
 ### 帳本演進
 
@@ -108,7 +109,7 @@ P1 定稿。
 
 P1 定稿。
 
-凍結者負責 held-out 評估集：評估集於提案產生前由主控與凍結者以 `heldout-freeze` 凍結（該動詞屬 P2，P1 呼叫即 rc 3）；提案者看不到評估集內容，只在事件帳本留 digest。
+凍結者負責 held-out 評估集：評估集於 `prop-new` 之後、`sandbox` 之前由凍結者（≠該 PROP 提案者）以 `heldout-freeze` 凍結（以 `prop` 為鍵；該動詞屬 P2，P1 呼叫即 rc 3）；提案者看不到評估集內容，只在事件帳本留 digest。〔訂正（AC-SI-20-1）：原文「評估集於提案產生前由主控與凍結者以 `heldout-freeze` 凍結」〕
 
 ## 研究者
 
@@ -122,3 +123,93 @@ P1 定稿。
 
 研究事件條文：每個要產生提案的運轉必須先有恰一筆研究事件（`research.scan` 或 `research.skip`），`prop-new` 在同運轉無研究事件時拒收；`check` 重放同判。
 免掃的原因為封閉集合：`quota-band`（附當時 band 值）、`offline`（附一句現象）、`helmsman`（掌舵者明示，附 sid 與 line 座標）。
+研究來源表 sources[] 必須依 id 的位元組序遞增（check 的 SRC-ORDER 判準）；新增或改名來源後一律以腳本排序寫回，不手插（OBS-SI-224）。
+
+## 運轉配方
+
+本節是把一個運轉從頭跑到尾的最小配方：動詞的 rc 契約表與 PowerShell、bash 兩形態的最小序列。動詞語意與判準的唯一真相源是 PRD（§7.2、§9.3）與各階段 TCS；本節只收操作順序與 rc 處置，不複寫判準。表內動詞與 rc 取自 `tools/selfimproving.py` 檔頭與寫入動詞原始碼的現況（SA 讀碼取得，未實跑寫入動詞）。
+
+### rc 契約表（先存 rc 再判停）
+
+判停一律依本表，**不用「非 0 即停」**：`research --fetch` 的 rc 2 是合法的部分成功、要繼續（OBS-SI-187：運轉腳本曾把 rc 2 當失敗停鏈，`scan` 之後沒跑）。每個指令跑完先把 `$LASTEXITCODE`（PowerShell）或 `$?`（bash）存進變數再讀，不接管線（鐵律一、四）；腳本不開 `set -e`（rc 2 不是錯誤）。寫入動詞通則：0＝已寫、1＝拒收（**未寫**，印可貼入的 OBS 草稿列，工具不自寫帳本）、3＝用法或輸入錯誤（含家目錄 `~/.autosdd/selfimproving/` 不可寫，不退回暫存）；唯讀非閘門動詞：0＝已執行、3＝無法執行。
+
+| 動詞 | rc 0 | rc 1 | rc 2 | rc 3 | 下一步 |
+|---|---|---|---|---|---|
+| `run-open` | 已寫，印 `RUN-SI-NNN` | 拒收：座標不可定位、git 不可用 | — | 用法錯誤 | 取回 `RUN-SI-NNN`，其後各動詞顯式帶 `--run` |
+| `research --fetch` | 全部來源成功，事件已寫 | 整次未寫：來源表驗證失敗、工作樹的來源表有未提交的改動、現役來源超界、零來源成功、運轉不合、取鎖逾時 | 部分成功：事件已寫、至少一個來源失敗（逐一印出，並各附一列 OBS 草稿） | 用法錯誤 | rc 0 與 2 都**繼續**（rc 2 的失敗來源草稿列入帳，來源表的修正經 T1）；rc 1 → 記 `research --skip --reason offline`，或經 T1 修表後重跑 |
+| `research --skip` | 已寫 | 拒收：運轉不合、該運轉已有研究事件 | — | 附帶旗標不符（免掃原因見〈研究者〉節） | 繼續 |
+| `scan` | 已執行（零候選印「無事件」，不是綠） | — | — | 無法執行 | 候選草稿列先過 `check` 再由主控入帳；`scan` 不接閘門 |
+| `attr`、`attr-confirm`、`attr-reject` | 已寫 | 拒收：OBS 不在帳本、座標不可定位、根因鍵格式不合、確認者等於提出者、已落定 | — | 用法或輸入錯誤 | 依拒收碼修正後重送 |
+| `prop-new`、`prop-revise` | 已寫，印 `PROP-SI-NNN`、`route`、`digest` 前 8 碼 | 前置檢查拒收（未寫）：例如同運轉無研究事件、無內部來源、觸及比例超界、事件行過長、SUSPENDED | — | 用法或輸入錯誤 | 依拒收碼修 patch 或本文後重送（`prop-revise` 受 `max_revisions` 限制），不原封重試 |
+| `card` | 已輸出（核心區 ≤ 12 行） | — | — | 無法執行：PROP 不存在、卡面反解析不一致等 | 卡面原樣貼給掌舵者 |
+| `run-close` | 已寫（有提案時記 `outcomes`，否則 `no_event`） | 拒收：該運轉不是已開未關 | — | 用法錯誤 | 結束該運轉 |
+| `status`、`export` | 已執行 | — | — | 無法執行 | `status` 於視窗開場與收尾各跑一次 |
+| `check` | 綠 | 不合規 | 未判 | 無法執行 | 收尾必跑；rc 不為 0 時依印出的草稿列入帳 |
+
+### 最小序列（有提案的運轉）
+
+運轉內的固定順序：`run-open` → 研究事件（`research --fetch`，或 `research --skip`）→ 體檢與歸因 → `prop-new` → `card` → `run-close`；有提案的運轉在 `prop-new` 之前必須已有恰一筆研究事件（見〈研究者〉節）。零提案的運轉只走 `run-open`、研究事件、`scan` 與 `run-close`（記 `no_event`）。派工前先現查 `python tools/session_resume_planner.py --pace`（不沿用上次的值）；band 非 free 時研究事件改記 `research --skip --reason quota-band --band <值> --note <一句>`。下列占位符（`<…>`）須換成真值；座標須是可定位形態（例：`DEF-200-559`、`docs/06_quality/檔名.md:行`、sid 加 line）；根因鍵須是 ASCII 小寫連字號的 `<面>/<機制>`（例 `process/short-lived-coordinate`）。
+
+PowerShell 形態（Windows；只用 PowerShell 工具、一律絕對路徑、不裸 `cd`）：
+
+```powershell
+$root = (git rev-parse --show-toplevel)          # 各機器 checkout 路徑不同，現查
+$py   = Join-Path $root '.venv\Scripts\python.exe'
+$si   = Join-Path $root 'tools\selfimproving.py'
+
+$out = & $py $si run-open --trigger a --coord 'sid <UUID> line <N>' --by main --json
+$rc  = $LASTEXITCODE                             # 0 才往下
+$run = ($out | ConvertFrom-Json).id              # RUN-SI-NNN
+
+& $py $si research --fetch --run $run
+$rc = $LASTEXITCODE                              # 0 或 2 都繼續；1 → 改記 research --skip（見上表）
+& $py $si scan
+$rc = $LASTEXITCODE                              # 0；3＝無法執行
+
+$out = & $py $si attr --type root --by attributor --obs OBS-SI-NNN --item 'DOC=<座標>' --root-cause 'process/<mechanism>' --json
+$rc  = $LASTEXITCODE
+$att = ($out | ConvertFrom-Json).id              # ATT-SI-NNN
+& $py $si attr-confirm --att $att --by reviewer  # 確認者須不同於提出者
+$rc = $LASTEXITCODE
+
+$out = & $py $si prop-new --run $run --cls M --action modify --target 'memory/<檔名>' --source OBS-SI-NNN --proposer proposer --patch-file '<絕對路徑 .patch>' --body-file '<絕對路徑 .md>' --memory-dir '<記憶目錄>' --json
+$rc  = $LASTEXITCODE                             # 1＝拒收、未寫：依拒收碼修正後重送
+$prop = ($out | ConvertFrom-Json).id             # PROP-SI-NNN
+
+& $py $si card $prop
+$rc = $LASTEXITCODE
+& $py $si run-close --run $run --by main
+$rc = $LASTEXITCODE
+& $py $si check
+$rc = $LASTEXITCODE                              # 0 綠／1 不合規／2 未判／3 無法執行
+```
+
+bash 形態（macOS／Linux；Windows 不用 Bash 工具）：
+
+```bash
+root="$(git rev-parse --show-toplevel)"
+py="$root/.venv/bin/python"
+si="$root/tools/selfimproving.py"
+getid() { "$py" -c 'import json,sys; print(json.load(sys.stdin)["id"])'; }
+
+out="$("$py" "$si" run-open --trigger a --coord 'sid <UUID> line <N>' --by main --json)"; rc=$?   # 0 才往下
+run="$(printf '%s' "$out" | getid)"              # RUN-SI-NNN
+
+"$py" "$si" research --fetch --run "$run"; rc=$?  # 0 或 2 都繼續；1 → 改記 research --skip（見上表）
+"$py" "$si" scan; rc=$?                           # 0；3＝無法執行
+
+out="$("$py" "$si" attr --type root --by attributor --obs OBS-SI-NNN --item 'DOC=<座標>' --root-cause 'process/<mechanism>' --json)"; rc=$?
+att="$(printf '%s' "$out" | getid)"               # ATT-SI-NNN
+"$py" "$si" attr-confirm --att "$att" --by reviewer; rc=$?   # 確認者須不同於提出者
+
+out="$("$py" "$si" prop-new --run "$run" --cls M --action modify --target 'memory/<檔名>' --source OBS-SI-NNN --proposer proposer --patch-file '<絕對路徑 .patch>' --body-file '<絕對路徑 .md>' --memory-dir '<記憶目錄>' --json)"; rc=$?   # 1＝拒收、未寫
+prop="$(printf '%s' "$out" | getid)"              # PROP-SI-NNN
+
+"$py" "$si" card "$prop"; rc=$?
+"$py" "$si" run-close --run "$run" --by main; rc=$?
+"$py" "$si" check; rc=$?                          # 0 綠／1 不合規／2 未判／3 無法執行
+```
+
+### P2 動詞（待補）
+
+`decide`、`sandbox`、`verify`、`promote`（另有 `heldout-freeze`、`rollback`）的 rc 契約與序列待 P2 TCS 定稿後補入本節；補入之前呼叫它們一律 rc 3（`tools/selfimproving.py` 檔頭），不得當成運轉的一步。

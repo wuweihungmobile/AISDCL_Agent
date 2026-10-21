@@ -209,7 +209,7 @@ class TestRealRepoConfigPinning(unittest.TestCase):
                 "AutoClaude/autoclaude/core/ports/quota_meter.py",
                 # R100 收尾（R102 補漏）：同一反例引文也在其回歸測試裡。  round-label-ok
                 "AutoClaude/tests/test_r100_quota_refusal_false_positive.py",
-                "CLAUDE.md",
+                "CLAUDE.md", "AgentConsole/docs/02_architecture/Architecture.md",
                 "ONBOARDING.md",
                 "useMacWin.md",
                 "AutoClaude/CLAUDE.md",
