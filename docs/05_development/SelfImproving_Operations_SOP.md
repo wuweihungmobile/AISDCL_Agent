@@ -62,7 +62,7 @@ P1 定稿。
 
 歸因者（Sonnet 子代理，唯讀；產物只落事件帳本）把一個觀察或觀察群歸成「（種類，座標）」清單，並提出根因鍵。
 
-- 動詞：`attr`（`--type root` 記歸因清單與根因鍵；`--type link` 記復發連結，`--reopens` 須是已結列）、`attr-confirm`（審查者確認）、`attr-reject`（駁回，須附一句理由）。事件只進事件帳本，不改被指向的任何檔，也沒有任何自評分數或信心數值的旗標。
+- 動詞：`attr`（`--type root` 記歸因清單與根因鍵；`--type link` 記復發連結，`--reopens` 須是已結列，或處置首詞為 `deferred` 的列（P2 R110））、`attr-confirm`（審查者確認）、`attr-reject`（駁回，須附一句理由）。事件只進事件帳本，不改被指向的任何檔，也沒有任何自評分數或信心數值的旗標。
 - 種類與座標：`DEF`、`OBS`、`RULE`、`PLAYBOOK_STEP`、`DOC`、`MEMORY_ENTRY`、`NONE`；`NONE` 的值必須以「無法歸因」起頭並寫明缺什麼證據，不得以猜測補位。
 - 根因鍵格式為 `<面>/<機制>`（小寫、連字號），由歸因者提出；確認者必須不同於提出者（確認者≠提出者，`CONFIRMER-IS-PROPOSER` 會被拒收與 `check` 判紅）；鍵事後被更改的次數記入 `status` 的資訊欄。
 - 守衛面轉交且無暴露證據者，一律登記為理論洞（P4）、不立案修復：無暴露證據不立案，先補暴露證據再談提案（理論洞清單住觀察帳本，不另起 PROP）。
@@ -96,13 +96,14 @@ P1 定稿。
 
 ## 審查者
 
-P1 定稿。
+P1 定稿，P2 補條。
 
 審查者是不同於提案者的另一個不同代理實例，只讀卡面與內容檔、不寫任何檔。
 
-- 唯讀：只讀 `card` 輸出與 `SelfImproving_Proposals/` 下的 `rN.patch`、`rN.md`，不改任何檔。
-- 審查期間不得自起背景長任務；審查窗口內主控不動工作樹，審查者的背景子任務未確認全部結束前視同窗口未關。
-- 結論須附外部可重跑訊號（指令與 rc、CLI 輸出），不採信提案者自述；審查者不得等於提案者（`prop-new` 會拒收）。
+- 審查者≠提案者，且須是不同代理實例與不同 context（`prop-new` 對 `--reviewer` 等於 `--proposer` 拒收 `REVIEWER-IS-PROPOSER`；凍結者同理，`heldout-freeze` 拒收 `FROZEN-BY-PROPOSER`）。
+- 全程唯讀：只讀 `card` 輸出與 `SelfImproving_Proposals/` 下的 `rN.patch`、`rN.md`，不改任何檔。
+- 審查者不得自起背景長任務；審查窗口內主控不動工作樹，審查者的背景子任務未確認全部結束前視同窗口未關。
+- 判定的主依據為外部可重跑訊號（指令與 rc、CLI 輸出、`verify` 的 verdict 與 `verify<K>.json`），不採信提案者自述；LLM 意見不得單獨把 FAIL 改成 PASS。
 - 退回時附一句修改要求，提案者以 `prop-revise` 修訂（只收 returned 狀態，修訂有上限）。
 
 ## 凍結者
@@ -210,6 +211,58 @@ prop="$(printf '%s' "$out" | getid)"              # PROP-SI-NNN
 "$py" "$si" check; rc=$?                          # 0 綠／1 不合規／2 未判／3 無法執行
 ```
 
-### P2 動詞（待補）
+### P2 動詞
 
-`decide`、`sandbox`、`verify`、`promote`（另有 `heldout-freeze`、`rollback`）的 rc 契約與序列待 P2 TCS 定稿後補入本節；補入之前呼叫它們一律 rc 3（`tools/selfimproving.py` 檔頭），不得當成運轉的一步。
+本節收 P2 九個寫入形態（`decide`、`heldout-freeze`、`sandbox`、`verify`、`promote`、`rollback`、`card --issue`、`obs-add`、`obs-close`）的 rc 契約與最小序列；判準的唯一真相源仍是 PRD（§7.2、§9.3）與 P2 TCS，本節只收操作順序與 rc 處置。寫入動詞通則同上節：先把 rc 存進變數再判停、不接管線；rc 1 的輸出末尾有 `obs-draft:` 與一行可貼入的 OBS 草稿列，由主控單一窗口入帳。
+
+| 動詞 | 契約（rc 0／rc 1／rc 3） | 下一步 |
+|---|---|---|
+| `decide` | rc 0：DEC 已寫；rc 1：拒收（引言文法、卡面未送達、前提態不符、無人值守等，未寫）；rc 3：用法或輸入錯誤 | 把掌舵者的決定原文逐字貼進 `--sid`／`--line` 座標，不自擬 |
+| `heldout-freeze` | rc 0：已凍結；rc 1：拒收（凍結者等於提案者、已凍結、已有沙盒、manifest 不合）；rc 3：用法錯誤 | 凍結後才可 `sandbox` |
+| `sandbox` | rc 0：已寫 `app.sandbox`（rc 0 涵蓋 applied=false，另印 OBS 草稿列）；rc 1：前置拒收（態、凍結、DEC 回查、digest）；rc 3：用法、家目錄不可寫、沙盒根在 repo 內 | 讀輸出的 `applied` 與 `fail_code`，再決定是否 `verify` |
+| `verify` | rc 0 不論 verdict（讀 verdict 不讀 rc；PASS、FAIL、NE 皆 rc 0，非 PASS 另印 OBS 草稿列）；rc 1：前置拒收（態、凍結、`VERIFY-RUNS-EXCEEDED` 即超過 `verify_runs_max`，須升級人工，不原封重試）；rc 3：用法或參數鍵無效 | 把 verdict 與 `reasons` 原樣呈報掌舵者，不得自行改判 |
+| `promote` | rc 0：已把 patch 合入正式面工作樹（不 commit）；rc 1：拒收（無晉升決定、式與 verdict 不符、DEC 回查失敗、`NON-EVOLVABLE-NOW`、前像不符，樹零變更）；rc 3：用法錯誤 | 由主控 commit，訊息引 DEC-ID |
+| `rollback` | rc 0：已反向還原（不 commit）；rc 1：拒收（態、無回滾決定、樹已被改動 `TREE-CHANGED`、還原不精確，樹零變更）；rc 3：用法錯誤 | 由主控 commit，訊息引 DEC-ID |
+| `card --issue` | rc 0：已記 `card` 事件並輸出卡面；rc 1：拒收（態不在卡面前提態）；rc 3：PROP 不存在、卡面無法重算 | 把卡面核心區逐字貼給掌舵者，之後才 `decide` |
+| `obs-add` | rc 0：已入帳一列加一筆 `obs.add`；rc 1：稽核檔驗證失敗、欄位規則不合、重複入帳；rc 3：用法錯誤（`--dry-run` 唯讀預檢，rc 0 會被收、rc 1 會被拒） | 主機端單窗口入帳，入帳期間不手編 OBS 帳本 |
+| `obs-close` | rc 0：只改該列處置欄並記 `obs.close`；rc 1：拒收（不存在、非 open、終值不合、帳本在預檢後被改動 `LEDGER-CHANGED`）；rc 3：用法錯誤 | 同上 |
+
+有提案要走到晉升的最小序列（PowerShell 與 bash 兩形態只差變數語法；`<…>` 換成真值，座標一律現查）：
+
+```powershell
+$root = (git rev-parse --show-toplevel)
+$py = Join-Path $root '.venv\Scripts\python.exe'
+$si = Join-Path $root 'tools\selfimproving.py'
+& $py $si card --issue $prop --by main                         # 卡面逐字貼給掌舵者
+& $py $si decide --kind approve $prop --sid <UUID> --line <N>   # 引言取自掌舵者原話
+& $py $si heldout-freeze $prop --from '<held-out 目錄>' --by <凍結者>
+& $py $si sandbox $prop --by main
+& $py $si verify $prop --by main                                # 讀 verdict，不讀 rc
+& $py $si decide --kind promote $prop --sid <UUID> --line <N>   # 晉升決定的原話
+& $py $si promote $prop --by main                               # 合入工作樹，不 commit
+```
+
+```bash
+si="$(git rev-parse --show-toplevel)/tools/selfimproving.py"
+py="$(git rev-parse --show-toplevel)/.venv/bin/python"
+"$py" "$si" card --issue "$prop" --by main
+"$py" "$si" decide --kind approve "$prop" --sid <UUID> --line <N>
+"$py" "$si" heldout-freeze "$prop" --from '<held-out 目錄>' --by <凍結者>
+"$py" "$si" sandbox "$prop" --by main
+"$py" "$si" verify "$prop" --by main
+"$py" "$si" decide --kind promote "$prop" --sid <UUID> --line <N>
+"$py" "$si" promote "$prop" --by main
+```
+
+序列條文：
+
+- 決定一律取自掌舵者的原話：不寫引言、不寫 `--reason`（理由由引言的尾隨句帶入）；卡面核心區須先貼給掌舵者，`decide` 才驗得過送達。
+- 凍結者≠提案者；`heldout-freeze` 在 `prop-new` 之後、`sandbox` 之前做；提案者看不到評估集。
+- PASS 用前式（`晉升 <PROP>`），NE 用未驗採納式（`晉升 <PROP> 未驗採納`）；FAIL 一律不收。
+- `promote` 與 `rollback` 都不 commit：由主控 commit，commit 訊息引 DEC-ID。
+- 回滾僅在掌舵者打字「回滾」後，以 `decide --kind rollback` 與 `rollback` 執行。
+- Console 載體：`decide --carrier console --audit-ref <UUID>`、`obs-add`、`obs-close` 的稽核檔由 Console 寫、CLI 只讀；這些動詞在主機端單窗口執行，金鑰環 `AUTOSDD_SI_AUDIT_KEY` 只在該主機。
+- 無人值守：`AUTOSDD_UNATTENDED` 有設時寫入動詞一律 rc 1（零寫入）；入帳期間不手編 OBS 帳本，更正走新列（`corrects`）。
+- 遇 R-9.6 擋寫或 harness 分類器拒絕時，不得以改派子代理或換路徑繞過：改由符合條件的視窗處理或走轉交。
+- 證據逐字入帳：每個探針記指令、rc、`out_sha256`、`out_bytes` 與遮蔽末段；轉述他包回報者標 `[他包回報]`；主控親跑後才升格為已驗證；貼不出輸出者改寫為未驗證。
+- 流程摩擦與本節補條的 SCG-4 收尾前覆核：SCG-4 收尾前由審查者對照 TCS 的〈SOP-P2-REQ〉逐項重跑。

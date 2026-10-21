@@ -42,6 +42,20 @@ def write(repo: Path, pid: str, rev: int, patch: bytes, body_text: str) -> list[
     return created
 
 
+def verify_rel(pid: str, k: int) -> str:
+    return f"{PROPOSALS_REL}/{pid}/verify{k}.json"
+
+
+def write_verify(repo: Path, pid: str, k: int, text: str) -> Path:
+    """寫出第 `k` 份驗證檔（R90 (a)；只新建、不改寫；UTF-8 無 BOM、LF），回其路徑供失敗時刪回。"""
+    path = repo / verify_rel(pid, k)
+    if path.exists():
+        raise FileExistsError(str(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
+    return path
+
+
 def remove(created: list[Path]) -> None:
     """刪除先前 `write` 回報的新建檔與目錄（檔先、目錄後；目錄非空則留）。"""
     for p in reversed(created):

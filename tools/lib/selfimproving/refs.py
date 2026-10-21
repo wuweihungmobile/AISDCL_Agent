@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PureWindowsPath
 
+from . import events as si_events
 from .defs import CLOSED_CLASSES, load_rows
 from .git import Git
 from .ledger import Finding, Ledger, Row, parse_ledger, split_lines
@@ -74,9 +75,10 @@ def _definitions(text: str, rel: str | None, keys: set[str],
                 defs[(rel, i)] = m.group(1)
 
 
-def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git
-                 ) -> tuple[list[Finding], list[Finding]]:
-    """回（ref.obs 的 findings, ref.carrier_families 的 findings）。"""
+def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git,
+                 established: bool = False) -> tuple[list[Finding], list[Finding]]:
+    """回（ref.obs 的 findings, ref.carrier_families 的 findings）。`established`＝事件帳本在場：
+    ATT、PROP、RUN 三族改由指標存在性判（R104），不再印 CARRIER-NOT-ESTABLISHED。"""
     if not git.available:
         return [git_ne()], [git_ne()]
     keys: set[str] = set()
@@ -101,6 +103,8 @@ def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git
             if token not in keys and loc not in mentions.setdefault(token, []):
                 mentions[token].append(loc)
         elif _FAMILY_RE.match(token):
+            if established and token.startswith(_ESTABLISHED_FAMILIES):
+                continue
             fam_count += 1
             fams.add(token.rsplit("-", 1)[0])
     obs = []
@@ -113,6 +117,60 @@ def obs_findings(ledger_text: str, ledger_rel: str | None, repo: Path, git: Git
         carriers.append(Finding("-", "CARRIER-NOT-ESTABLISHED", "info",
                                 f"families={','.join(sorted(fams))} count={fam_count}"))
     return obs, carriers
+
+
+_ESTABLISHED_FAMILIES = ("ATT-SI-", "PROP-SI-", "RUN-SI-")
+_POINTERS = {  # 事件 kind → (ID 型欄位, 指向的族)
+    "dec": (("prop", "PROP"), ("run", "RUN")), "card": (("prop", "PROP"),),
+    "heldout.freeze": (("prop", "PROP"),), "app.sandbox": (("prop", "PROP"),),
+    "app.verify": (("prop", "PROP"),), "app.promote": (("prop", "PROP"),),
+    "app.rollback": (("prop", "PROP"),), "mea.open": (("prop", "PROP"),),
+    "mea.close": (("prop", "PROP"),), "mea.amend": (("prop", "PROP"),),
+    "mea.report": (("prop", "PROP"),), "attr.confirm": (("att", "ATT"),),
+    "attr.reject": (("att", "ATT"),), "research.scan": (("run", "RUN"),),
+    "research.skip": (("run", "RUN"),), "run.close": (("run", "RUN"),),
+    "prop": (("run", "RUN"),),
+}
+_PROPOSED_REF_RE = re.compile(r"^proposed@(PROP-SI-\d{3,})")
+
+
+def event_ledger(repo: Path) -> list[dict] | None:
+    """事件帳本在場（檔存在且可解析至少一行事件）時回其通過單事件判準的事件，否則 None。"""
+    loaded = si_events.load_events(repo / si_events.LEDGER_REL)
+    return si_events.sound(loaded) if loaded else None
+
+
+def family_findings(repo: Path, events: list[dict], obs_texts: list[str]) -> list[Finding]:
+    """R104 (b)：ATT、PROP、RUN 三族的指標形態引用存在性判。事件帳本內與提案目錄的懸空指標＝FAIL；
+    OBS 列處置的懸空 `proposed@PROP-SI-N`＝warn（歷史列與夾具的合成指標不致使項目轉紅）。
+    散文提及、規格與報告類文件不判。"""
+    ids = {"PROP": {e["id"] for e in events if e["kind"] == "prop"},
+           "RUN": {e["run"] for e in events if e["kind"] == "run.open"},
+           "ATT": {e["id"] for e in events if e["kind"] == "attr"}}
+    out = []
+    for e in events:
+        for key, fam in _POINTERS.get(e["kind"], ()):
+            if key in e and e[key] not in ids[fam]:
+                out.append(Finding(f"seq={e['seq']}", "FAMILY-REF-DANGLING", "fail",
+                                   f"{e['kind']}.{key}={e[key]} 不在事件帳本內"))
+    pdir = repo / si_events.PROPOSALS_REL
+    if pdir.is_dir():
+        out += [Finding(d.name, "PROP-DIR-ORPHAN", "fail", "提案目錄沒有對應的 prop 事件")
+                for d in sorted(pdir.iterdir())
+                if d.is_dir() and si_events.PROP_RE.match(d.name) and d.name not in ids["PROP"]]
+    for text in obs_texts:
+        for row in parse_ledger(text).rows:
+            m = _PROPOSED_REF_RE.match(row.cells[7]) if row.nine else None
+            if m and m.group(1) not in ids["PROP"]:
+                out.append(Finding(row.ident, "FAMILY-REF-DANGLING", "warn",
+                                   f"[warn] 處置 {m.group(1)} 不在事件帳本內"))
+    return out
+
+
+def archive_texts(repo: Path) -> list[str]:
+    qdir = repo / _QUALITY
+    return [_read(f) for f in sorted(qdir.glob("SelfImproving_Observation_Ledger_archive*.md"))
+            ] if qdir.is_dir() else []
 
 
 def obs_ledger_text(repo: Path) -> str | None:
@@ -145,6 +203,15 @@ def def_ids(repo: Path) -> set[str]:
             if (m := _DEF_KEY_RE.match(ln))}
 
 
+def def_evidence(repo: Path) -> dict[str, str]:
+    """缺陷帳本家族各 DEF 列的「現象與證據」欄文字（同冷卻的證據座標來源，R82 (c)）。"""
+    qdir = repo / _QUALITY
+    files = sorted(qdir.glob("AutoSDD_Defect_Log*.md")) if qdir.is_dir() else []
+    files += [qdir / n for n in ("AutoSDD_External_Blocked_Log.md",
+                                 "AutoSDD_Structural_Debt_Log.md") if (qdir / n).is_file()]
+    return {r.ident: r.evidence for f in files for r in load_rows(f)}
+
+
 _CLOSED_OBS = ("fixed@", "DEF-", "merged@")
 
 
@@ -171,6 +238,25 @@ def closed_rows(repo: Path, obs_text: str) -> dict[str, set[str]]:
         for r in load_rows(f):
             if r.status in CLOSED_CLASSES:
                 out.setdefault(r.ident, set()).update(path_set(r.evidence))
+    return out
+
+
+def _deferred_obs_paths(text: str, out: dict[str, set[str]]) -> None:
+    for row in parse_ledger(text).rows:
+        if row.nine and disp_token(row.cells[7]) == "deferred":
+            out.setdefault(row.ident, set()).update(path_set(row.cells[4]))
+
+
+def reopenable_rows(repo: Path, obs_text: str) -> dict[str, set[str]]:
+    """`attr --type link --reopens` 的目標（R110）：已結列（`closed_rows`）加處置首詞為 `deferred`
+    的 OBS 列（含封存檔；`deferred` 必附再開症狀、被再開即其語意）。`closed_rows` 與 R45 復發候選
+    提示判準不變（`deferred` 的再開由立案者明示連結，不是路徑相交的推測）。"""
+    out = closed_rows(repo, obs_text)
+    _deferred_obs_paths(obs_text, out)
+    qdir = repo / _QUALITY
+    for f in sorted(qdir.glob("SelfImproving_Observation_Ledger_archive*.md")) if qdir.is_dir() \
+            else []:
+        _deferred_obs_paths(_read(f), out)
     return out
 
 

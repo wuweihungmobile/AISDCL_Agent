@@ -15,6 +15,10 @@ ACTIVE_STATES = ("proposed", "returned", "approved", "sandboxed", "verified")
 _BAD_RESULTS = ("recurred", "rolled-back")
 _NEEDS_PROP = ("card", "app.rollback", "mea.amend", "mea.report", "heldout.freeze", "app.sandbox",
                "app.verify", "app.promote", "mea.open", "mea.close")
+_RETURN_NE = ("SANDBOX-NOT-APPLIED", "TOUCHED-SUPERSET", "SANDBOX-EXPORT-FAILED",
+              "SANDBOX-APPLY-TIMEOUT")
+_DIGEST_KINDS = ("approve", "reject", "return", "promote", "decline-promote", "ack-handoff")
+_POST_PROMOTE = ("promoted", "measuring", "closed")
 
 
 @dataclass
@@ -36,6 +40,19 @@ class Prop:
     last_dec: str | None = None
     rejected_seq: int | None = None
     unblocked: bool = False
+    reasons: list = field(default_factory=list)
+    rollback_ok: bool | None = None
+    touched_ok: bool | None = None
+    proposer: str = ""
+    bases: dict = field(default_factory=dict)
+    reject_class: str | None = None
+    pending_promote: list | None = None
+    pending_rollbacks: int = 0
+    promote_pre: str | None = None
+    promote_post: str | None = None
+    freeze_seq: int | None = None
+    sandbox_seq: int | None = None
+    verify_counts: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -67,6 +84,7 @@ class Folded:
     runs: dict = field(default_factory=dict)
     atts: dict = field(default_factory=dict)
     problems: list = field(default_factory=list)
+    warns: list = field(default_factory=list)
     windows: list = field(default_factory=list)
     amends: dict = field(default_factory=dict)
     resumes: list = field(default_factory=list)
@@ -157,14 +175,53 @@ def _prop_event(f: Folded, ev: dict) -> None:
     fields = dict(rev=rev, state="proposed", route=str(ev.get("route")), cls=str(ev.get("cls")),
                   action=str(ev.get("action")), target=_lst(ev.get("target")),
                   sources=_lst(ev.get("sources")), run=str(ev.get("run")),
-                  digest=str(ev.get("digest")), last_seq=ev["seq"], verdict=None, flags=[])
+                  digest=str(ev.get("digest")), last_seq=ev["seq"], verdict=None, flags=[],
+                  reasons=[], rollback_ok=None, touched_ok=None,
+                  proposer=str(ev.get("proposer")))
     if cur is None:
-        f.props[pid] = Prop(id=pid, created_seq=ev["seq"], **fields)
+        _cooldown_bypass(f, pid, fields)
+        cur = f.props[pid] = Prop(id=pid, created_seq=ev["seq"], **fields)
     else:
         for k, v in fields.items():
             setattr(cur, k, v)
+    cur.bases[rev] = str(ev.get("base"))
     if run is not None and pid not in run.prop_ids:
         run.prop_ids.append(pid)
+
+
+def _cooldown_bypass(f: Folded, pid: str, fields: dict) -> None:
+    """R82 (f)：新 `prop`（rev 1）之前已有同型（cls、target、根因鍵相交）且冷卻中的 PROP。"""
+    roots = set(_prop_root_causes(f, fields["sources"]))
+    for q in f.props.values():
+        if (q.state == "rejected" and not q.unblocked and q.cls == fields["cls"]
+                and sorted(set(q.target)) == sorted(set(fields["target"]))
+                and roots & set(_prop_root_causes(f, q.sources))):
+            f.warns.append(("COOLDOWN-BYPASS-SUSPECT", pid,
+                            f"與冷卻中的 {q.id} 同型（cls、target、根因鍵相交）而再出現"))
+
+
+def transition_of(p: Prop, dk: str, flags: list) -> str | None:
+    """R75 的 `dec` 前提判定（唯一實作；`decide` 寫入端與重放共用）：回結果態，不合回 None。"""
+    ack = "unverified_ack" in flags
+    st, form_ok = p.state, (p.verdict == "PASS" and not ack) or (p.verdict == "NE" and ack)
+    if dk == "approve" and st == "proposed" and p.route == "loop":
+        return "approved"
+    if st == "proposed" and dk in ("reject", "return"):
+        return "rejected" if dk == "reject" else "returned"
+    if dk == "ack-handoff" and st == "proposed" and p.route.startswith("handoff:"):
+        return "handed-off"
+    if dk == "return" and st == "verified" and (
+            p.verdict == "FAIL" or (p.verdict == "NE" and set(p.reasons) & set(_RETURN_NE))):
+        return "returned"
+    if dk == "decline-promote" and st == "verified":
+        return "rejected"
+    if dk == "unblock" and st == "rejected" and not p.unblocked:
+        return "rejected"
+    if dk == "promote" and st == "verified" and form_ok:
+        return "verified" if p.rollback_ok is True and p.touched_ok is True else None
+    if dk == "rollback" and st in _POST_PROMOTE:
+        return st
+    return None
 
 
 def _dec_flags(ev: dict) -> list:
@@ -183,30 +240,23 @@ def _dec(f: Folded, ev: dict) -> None:
     p = f.props.get(_str(ev, "prop") or "")
     if p is None or dk is None:
         return _orphan(f, ev, "prop" if p is None else "dkind")
-    st, seq = p.state, ev["seq"]
-    flags = _dec_flags(ev)
-    new = None
-    if dk == "approve" and st == "proposed" and p.route == "loop":
-        new = "approved"
-    elif dk == "reject" and st == "proposed":
-        new = "rejected"
-    elif dk == "decline-promote" and st == "verified":
-        new = "rejected"
-    elif dk == "return" and (st == "proposed" or (st == "verified" and p.verdict == "FAIL")):
-        new = "returned"
-    elif dk == "ack-handoff" and st == "proposed" and p.route.startswith("handoff:"):
-        new = "handed-off"
-    elif dk == "unblock" and st == "rejected":
-        new, p.unblocked = "rejected", True
-    elif dk == "promote" and st == "verified" and (
-            p.verdict == "PASS" or (p.verdict == "NE" and "unverified_ack" in flags)):
-        new = "verified"
-    elif dk == "rollback" and st in ("promoted", "measuring", "closed"):
-        new = st
+    seq, flags = ev["seq"], _dec_flags(ev)
+    if dk in _DIGEST_KINDS and ev.get("digest") != p.digest:
+        f.problems.append(("DEC-TARGET-MISMATCH", p.id, f"seq={seq} dec 的 digest 不等於當時 PROP"))
+    new = transition_of(p, dk, flags)
     if new is None:
-        return _illegal(f, p.id, ev, st)
+        return _illegal(f, p.id, ev, p.state)
     if new == "rejected" and dk != "unblock":
         p.rejected_seq, p.unblocked = seq, False
+        p.reject_class = ev.get("reason_class") if isinstance(ev.get("reason_class"), str) else None
+    if dk == "unblock":
+        p.unblocked = True
+    if dk == "promote":
+        p.pending_promote = flags
+    elif dk == "rollback":
+        p.pending_rollbacks += 1
+    else:
+        p.pending_promote = None
     p.state, p.last_dec, p.last_seq = new, dk, seq
     p.flags = sorted(set(p.flags) | set(flags))
 
@@ -223,7 +273,7 @@ def _step(f: Folded, ev: dict, want: str, new: str | None) -> Prop | None:
     return p
 
 
-def _apply(f: Folded, ev: dict) -> None:
+def _apply(f: Folded, ev: dict, vmax: int | None = None) -> None:
     kind = ev["kind"]
     if kind == "run.open":
         _open_run(f, ev)
@@ -245,22 +295,73 @@ def _apply(f: Folded, ev: dict) -> None:
     elif kind == "dec":
         _dec(f, ev)
     elif kind in _NEEDS_PROP:
-        _prop_transition(f, ev, kind)
+        _prop_transition(f, ev, kind, vmax)
 
 
-def _prop_transition(f: Folded, ev: dict, kind: str) -> None:
-    table = {"app.sandbox": ("approved", "sandboxed"), "app.verify": ("sandboxed", "verified"),
-             "app.promote": ("verified", "promoted"), "mea.open": ("promoted", "measuring")}
-    if kind in table:
+def _bad(f: Folded, p: Prop, ev: dict, code: str, why: str) -> None:
+    f.problems.append((code, p.id, f"seq={ev.get('seq')} {why}"))
+
+
+def _sandbox(f: Folded, ev: dict, p: Prop) -> None:
+    if p.freeze_seq is None:
+        _bad(f, p, ev, "HELDOUT-AFTER-SANDBOX", "app.sandbox 之前沒有 heldout.freeze")
+    if p.bases.get(ev.get("rev")) != ev.get("base"):
+        _bad(f, p, ev, "SANDBOX-BASE-MISMATCH", "app.sandbox.base 不等於該 rev 的 prop.base")
+    p.rollback_ok, p.touched_ok = ev.get("rollback_ok"), ev.get("touched_ok")
+    p.sandbox_seq = p.sandbox_seq if p.sandbox_seq is not None else ev["seq"]
+
+
+def _verify(f: Folded, ev: dict, p: Prop, vmax: int | None) -> None:
+    n = p.verify_counts[ev.get("rev")] = p.verify_counts.get(ev.get("rev"), 0) + 1
+    if _i(vmax) and n > vmax:
+        _bad(f, p, ev, "VERIFY-RUNS-EXCEEDED", f"同 (prop, rev) 的 app.verify 第 {n} 筆 > {vmax}")
+    p.verdict, p.reasons = ev["verdict"], _lst(ev.get("reasons"))
+
+
+def _promote(f: Folded, ev: dict, p: Prop) -> bool:
+    if p.pending_promote is None:
+        _illegal(f, p.id, ev, p.state)
+        return False
+    if bool(ev.get("unverified_ack")) != ("unverified_ack" in p.pending_promote):
+        _bad(f, p, ev, "PROMOTE-ACK-MISMATCH", "unverified_ack 不等於所消費 dec(promote) 的 flags")
+    p.pending_promote, p.promote_pre, p.promote_post = None, ev.get("pre_sha256"), ev.get(
+        "post_sha256")
+    return True
+
+
+def _rollback(f: Folded, ev: dict, p: Prop) -> None:
+    if p.state not in _POST_PROMOTE or p.pending_rollbacks < 1:
+        return _illegal(f, p.id, ev, p.state)
+    p.pending_rollbacks -= 1
+    if ev.get("pre_sha256") != p.promote_post or ev.get("post_sha256") != p.promote_pre:
+        _bad(f, p, ev, "ROLLBACK-MANIFEST-MISMATCH", "pre／post 與 app.promote 的 post／pre 不符")
+
+
+def _freeze(f: Folded, ev: dict, p: Prop) -> None:
+    if ev.get("frozen_by") == p.proposer:
+        _bad(f, p, ev, "FROZEN-BY-PROPOSER", "凍結者等於該 PROP 的提案者")
+    if p.freeze_seq is not None:
+        _bad(f, p, ev, "HELDOUT-DUP", "同一 PROP 已有 heldout.freeze")
+    if p.sandbox_seq is not None:
+        _bad(f, p, ev, "HELDOUT-AFTER-SANDBOX", "heldout.freeze 晚於 app.sandbox")
+    p.freeze_seq = p.freeze_seq if p.freeze_seq is not None else ev["seq"]
+
+
+def _prop_transition(f: Folded, ev: dict, kind: str, vmax: int | None = None) -> None:
+    table = {"app.sandbox": ("approved", "sandboxed"), "app.promote": ("verified", "promoted"),
+             "mea.open": ("promoted", "measuring")}
+    if kind == "app.verify":
+        p = _step(f, ev, "", None)
+        if p is None or p.state not in ("sandboxed", "verified"):
+            return None if p is None else _illegal(f, p.id, ev, p.state)
+        _verify(f, ev, p, vmax)
+        p.state = "verified"
+    elif kind in table:
         p = _step(f, ev, *table[kind])
-        if p is None:
+        if p is None or (kind == "app.promote" and not _promote(f, ev, p)):
             return
-        if kind == "app.promote" and p.last_dec != "promote":
-            return _illegal(f, p.id, ev, p.state)
-        if kind == "app.verify":
-            if ev.get("verdict") not in ("PASS", "FAIL", "NE"):
-                return _illegal(f, p.id, ev, p.state)
-            p.verdict = ev["verdict"]
+        if kind == "app.sandbox":
+            _sandbox(f, ev, p)
         p.state = table[kind][1]
     elif kind == "mea.close":
         p = _step(f, ev, "measuring", "closed")
@@ -273,8 +374,14 @@ def _prop_transition(f: Folded, ev: dict, kind: str) -> None:
         p.state = "measuring" if res == "pending" else "closed"
     else:
         p = _step(f, ev, "", None)
-        if p is not None and kind == "mea.amend" and _i(ev.get("window")):
+        if p is None:
+            return
+        if kind == "mea.amend" and _i(ev.get("window")):
             f.amends[ev["window"]] = ev.get("to")
+        elif kind == "app.rollback":
+            _rollback(f, ev, p)
+        elif kind == "heldout.freeze":
+            _freeze(f, ev, p)
 
 
 def _effective_windows(f: Folded) -> list[dict]:
@@ -310,7 +417,8 @@ def _finish(f: Folded, stop_after_bad: int | None) -> None:
         if p.state == "rejected" and not p.unblocked and p.rejected_seq is not None:
             f.cooldowns.append({"prop": p.id, "cls": p.cls, "target": list(p.target),
                                 "root_cause": _prop_root_causes(f, p.sources),
-                                "rejected_seq": p.rejected_seq})
+                                "rejected_seq": p.rejected_seq,
+                                "reason_class": p.reject_class})
     by_obs: dict[str, list] = {}
     for a in f.atts.values():
         if a.type == "root" and isinstance(a.ev.get("root_cause"), str):
@@ -321,10 +429,11 @@ def _finish(f: Folded, stop_after_bad: int | None) -> None:
         f.root_cause_changes += sum(1 for x, y in zip(causes, causes[1:]) if x != y)
 
 
-def fold(events: list[dict], stop_after_bad: int | None = None) -> Folded:
+def fold(events: list[dict], stop_after_bad: int | None = None,
+         verify_runs_max: int | None = None) -> Folded:
     f = Folded()
     for ev in si_events.sound(events):
-        _apply(f, ev)
+        _apply(f, ev, verify_runs_max)
     _finish(f, stop_after_bad)
     return f
 

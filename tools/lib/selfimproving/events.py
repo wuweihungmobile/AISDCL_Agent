@@ -14,25 +14,31 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+OBS_ID_RE = re.compile(r"^OBS-SI-\d{3,}$")
+DEF_ID_RE = re.compile(r"^DEF-\d+-\d+$")
+RUN_RE = re.compile(r"^RUN-SI-\d{3,}$")
+PROP_RE = re.compile(r"^PROP-SI-\d{3,}$")
+ATT_RE = re.compile(r"^ATT-SI-\d{3,}$")
+DEC_RE = re.compile(r"^DEC-SI-\d{3,}$")
+APP_RE = re.compile(r"^APP-SI-\d{3,}$")
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+KEY_ID_RE = re.compile(r"^[0-9a-f]{8}$")
+ACCOUNT_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_T_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
+
 LEDGER_REL = "docs/06_quality/SelfImproving_Event_Ledger.jsonl"
 PROPOSALS_REL = "docs/06_quality/SelfImproving_Proposals"
 KINDS = (
     "run.open", "run.close", "research.scan", "research.skip", "attr", "attr.confirm",
     "attr.reject", "prop", "card", "dec", "heldout.freeze", "app.sandbox", "app.verify",
     "app.promote", "app.rollback", "mea.open", "mea.close", "mea.amend", "mea.report",
+    "obs.add", "obs.close",
 )
 PROP_STATES = ("proposed", "approved", "rejected", "returned", "handed-off", "sandboxed",
                "verified", "promoted", "measuring", "closed")
-OBS_ID_RE = re.compile(r"^OBS-SI-\d{3,}$")
-DEF_ID_RE = re.compile(r"^DEF-\d+-\d+$")
-RUN_RE = re.compile(r"^RUN-SI-\d{3,}$")
-PROP_RE = re.compile(r"^PROP-SI-\d{3,}$")
-ATT_RE = re.compile(r"^ATT-SI-\d{3,}$")
 ROOT_CAUSE_RE = re.compile(r"^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$")
-SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
-SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SRC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
-_T_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$")
 ITEM_KINDS = ("DEF", "OBS", "RULE", "PLAYBOOK_STEP", "DOC", "MEMORY_ENTRY", "NONE")
 CLS_VALUES = ("M", "P", "R", "D", "evaluator-change", "loop-self")
 ACTIONS = ("add", "modify", "delete", "retire")
@@ -128,15 +134,27 @@ def valid_t(v) -> bool:
         return False
 
 
-def _note(v) -> bool:
-    return isinstance(v, str) and 1 <= len(v) <= 120 and "\n" not in v and "\r" not in v
-
-
 def valid_uuid(v) -> bool:
     try:
         return isinstance(v, str) and str(uuid.UUID(v)) == v.lower()
     except ValueError:
         return False
+
+
+def _line1(v) -> bool:
+    return isinstance(v, str) and bool(v) and "\n" not in v and "\r" not in v
+
+
+def _bool_or_null(v) -> bool:
+    return v is None or isinstance(v, bool)
+
+
+def _sha_or_null(v) -> bool:
+    return v is None or (isinstance(v, str) and bool(SHA256_RE.match(v)))
+
+
+def _note(v) -> bool:
+    return isinstance(v, str) and 1 <= len(v) <= 120 and "\n" not in v and "\r" not in v
 
 
 def _item(v) -> bool:
@@ -195,17 +213,13 @@ def _str(v) -> bool:
     return isinstance(v, str)
 
 
-# P2 起種類（無完整欄位表）被折疊／查表讀取的鍵：有帶就須型別合法（缺鍵由 TRANSITION-ORPHAN 判），
+# mea.*（P3 才有完整欄位表）被折疊／查表讀取的鍵：有帶就須型別合法（缺鍵由 TRANSITION-ORPHAN 判），
 # 使 `sound()` 之後的消費者不必再防禦型別（R37；`from`、`cause` 等不被讀取者不判）。
 _PROP_ONLY = {"prop": _str}
 _CONSUMED: dict[str, dict] = {
-    "card": _PROP_ONLY, "heldout.freeze": _PROP_ONLY, "app.sandbox": _PROP_ONLY,
-    "app.promote": _PROP_ONLY, "app.rollback": _PROP_ONLY, "mea.open": _PROP_ONLY,
-    "mea.report": _PROP_ONLY,
-    "app.verify": {"prop": _str, "verdict": _str},
+    "mea.open": _PROP_ONLY, "mea.report": _PROP_ONLY,
     "mea.close": {"prop": _str, "result": _str},
     "mea.amend": {"prop": _str, "window": lambda v: _int(v, 1), "to": _str},
-    "dec": {"prop": _str, "dkind": _str, "run": _str, "flags": _list_of(_str, 0)},
 }
 _ALWAYS_OPTIONAL = {"run.close": {"outcomes", "no_event"},
                     "research.skip": {"band", "sid", "line"},
@@ -213,6 +227,159 @@ _ALWAYS_OPTIONAL = {"run.close": {"outcomes", "no_event"},
                     "prop": {"preimage"}}
 _ATTR_KEYS = {"root": {"obs", "items", "root_cause"}, "link": {"from", "reopens"}}
 _SKIP_KEYS = {"quota-band": {"band"}, "helmsman": {"sid", "line"}, "offline": set()}
+
+
+DKINDS = ("approve", "reject", "return", "promote", "decline-promote", "rollback", "unblock",
+          "resume", "ack-handoff")
+REASON_CLASSES = ("證據不足", "風險過高", "工件類別錯", "已被涵蓋", "範圍外", "卡面不清", "未說明")
+VERIFY_REASONS = (
+    "SANDBOX-NOT-APPLIED", "SANDBOX-EXPORT-FAILED", "SANDBOX-APPLY-TIMEOUT", "TOUCHED-SUPERSET",
+    "ROLLBACK-DRYRUN-FAILED", "NO-PROBES", "CARRIER-PROOF-FAILED", "HELDOUT-DIGEST-MISMATCH",
+    "HELDOUT-TOO-SMALL", "HELDOUT-EXPOSED", "EXPOSURE-UNKNOWN", "PROBE-TIMEOUT",
+    "BASELINE-NOT-RED", "PATCHED-NOT-GREEN", "MUTATION-NOT-RED", "MUTATION-ABSENT",
+)
+TRANSCRIPT_QUOTE_ONLY = ("quote", "sid", "line")  # `console` 載體不得有
+_CONSOLE_ONLY = ("audit_ref", "audit_sha256", "key_id")  # `transcript` 載體不得有
+_WITH_DIGEST = ("approve", "reject", "return", "promote", "decline-promote", "ack-handoff")
+_WITH_REASON = ("reject", "decline-promote", "return", "rollback", "resume")
+_WITH_CLASS = ("reject", "decline-promote", "return")
+_Issues = list[tuple[str, str]]
+
+
+# P2 九種 kind：鍵 → 型別判準（必備與否由 `required`／`conditional` 定）
+_SPEC2: dict[str, dict] = {
+    "card": {"prop": _re(PROP_RE), "rev": lambda v: _int(v, 1), "digest": _SHA,
+             "card_sha256": _SHA},
+    "dec": {"id": _re(DEC_RE), "dkind": lambda v: v in DKINDS, "decider": _s,
+            "decided_at": valid_t, "prop": _re(PROP_RE), "run": _re(RUN_RE), "digest": _SHA,
+            "reason": _line1, "reason_class": lambda v: v in REASON_CLASSES,
+            "flags": _list_of(lambda x: x == "unverified_ack", 0),
+            "carrier": lambda v: v in ("transcript", "console"), "quote": _line1,
+            "sid": valid_uuid, "line": lambda v: _int(v, 1), "card_seq": lambda v: _int(v, 1),
+            "audit_ref": valid_uuid, "audit_sha256": _SHA, "key_id": _re(KEY_ID_RE)},
+    "heldout.freeze": {"prop": _re(PROP_RE), "digest": _SHA, "n": lambda v: _int(v, 1),
+                       "frozen_by": valid_by},
+    "app.sandbox": {"id": _re(APP_RE), "prop": _re(PROP_RE), "rev": lambda v: _int(v, 1),
+                    "base": _re(SHA40_RE), "sandbox_sha256": _sha_or_null,
+                    "applied": lambda v: isinstance(v, bool), "touched_ok": _bool_or_null,
+                    "rollback_ok": _bool_or_null,
+                    "fail_code": lambda v: v in (None, "SANDBOX-EXPORT-FAILED",
+                                                 "SANDBOX-APPLY-TIMEOUT")},
+    "app.verify": {"id": _re(APP_RE), "prop": _re(PROP_RE), "rev": lambda v: _int(v, 1),
+                   "verdict": lambda v: v in ("PASS", "FAIL", "NE"),
+                   "baseline_red": _bool_or_null, "patched_green": _bool_or_null,
+                   "mutated_red": _bool_or_null, "carrier_proof": _bool_or_null,
+                   "probes_n": lambda v: _int(v, 0), "verify_sha256": _sha_or_null,
+                   "heldout_digest": _sha_or_null,
+                   "reasons": _list_of(lambda x: x in VERIFY_REASONS, 0)},
+    "app.promote": {"id": _re(APP_RE), "prop": _re(PROP_RE), "rev": lambda v: _int(v, 1),
+                    "head_sha": _re(SHA40_RE), "pre_sha256": _SHA, "post_sha256": _SHA,
+                    "unverified_ack": lambda v: isinstance(v, bool)},
+    "app.rollback": {"id": _re(APP_RE), "prop": _re(PROP_RE), "rev": lambda v: _int(v, 1),
+                     "pre_sha256": _SHA, "post_sha256": _SHA},
+    "obs.add": {"obs": _re(OBS_ID_RE), "audit_ref": valid_uuid, "audit_sha256": _SHA,
+                "key_id": _re(KEY_ID_RE), "decider": _re(ACCOUNT_RE),
+                "carrier": lambda v: v == "console"},
+    "obs.close": {"obs": _re(OBS_ID_RE), "audit_ref": valid_uuid, "audit_sha256": _SHA,
+                  "key_id": _re(KEY_ID_RE), "decider": _re(ACCOUNT_RE),
+                  "carrier": lambda v: v == "console", "disposition": _line1},
+}
+_DEC_OPTIONAL = {"prop", "run", "digest", "reason", "reason_class", "flags", "carrier", "quote",
+                 "sid", "line", "card_seq", "audit_ref", "audit_sha256", "key_id"}
+
+
+def _dec_carrier(obj: dict) -> str:
+    return obj["carrier"] if obj.get("carrier") in ("transcript", "console") else "transcript"
+
+
+def _required2(kind: str, obj: dict) -> set[str]:
+    """P2 kind 的必備鍵（條件必備依 `dkind` 與 `carrier`；值不合法時不推導其條件鍵）。"""
+    req = set(_SPEC2[kind])
+    if kind != "dec":
+        return req
+    req -= _DEC_OPTIONAL
+    dk = obj.get("dkind")
+    if dk not in DKINDS:
+        return req
+    req.add("run" if dk == "resume" else "prop")
+    req |= {"digest"} if dk in _WITH_DIGEST else set()
+    req |= {"reason"} if dk in _WITH_REASON else set()
+    req |= {"reason_class"} if dk in _WITH_CLASS else set()
+    if _dec_carrier(obj) == "transcript":
+        req |= {"quote", "sid", "line"} | (set() if dk == "resume" else {"card_seq"})
+    else:
+        req |= set(_CONSOLE_ONLY)
+    return req
+
+
+def _forbidden2(kind: str, obj: dict) -> set[str]:
+    """條件上「不得有」的鍵（出現＝EVENT-KEY-UNKNOWN）。"""
+    if kind != "dec":
+        return set()
+    dk = obj.get("dkind")
+    if dk not in DKINDS:
+        return set()
+    out = set()
+    out |= {"digest"} if dk not in _WITH_DIGEST else set()
+    out |= {"reason"} if dk not in _WITH_REASON else set()
+    out |= {"reason_class"} if dk not in _WITH_CLASS else set()
+    out |= {"flags"} if dk != "promote" else set()
+    out |= {"prop"} if dk == "resume" and "run" in obj else set()
+    out |= {"card_seq"} if dk == "resume" else set()
+    out |= set(TRANSCRIPT_QUOTE_ONLY) | {"card_seq"} if _dec_carrier(obj) == "console" else set()
+    out |= set(_CONSOLE_ONLY) if _dec_carrier(obj) == "transcript" else set()
+    return out
+
+
+def _conditional2(kind: str, obj: dict) -> _Issues:
+    """P2 kind 的條件規則與互斥（碼皆 EVENT-TYPE）。"""
+    fn = {"dec": _dec_rules, "app.sandbox": _sandbox_rules, "app.verify": _verify_rules}.get(kind)
+    return fn(obj) if fn else []
+
+
+def _dec_rules(obj: dict) -> _Issues:
+    out: _Issues = []
+    if "prop" in obj and "run" in obj:
+        out.append(("EVENT-TYPE", "dec 的 prop 與 run 須恰一"))
+    if _dec_carrier(obj) == "transcript":
+        if "decider" in obj and obj["decider"] != "掌舵者":
+            out.append(("EVENT-TYPE", "transcript 載體的 decider 恆為「掌舵者」"))
+        cs = obj.get("card_seq")
+        if _int(cs, 1) and _int(obj.get("seq"), 1) and cs >= obj["seq"]:
+            out.append(("EVENT-TYPE", "card_seq 須小於本筆 seq"))
+    elif "decider" in obj and not ACCOUNT_RE.match(str(obj["decider"])):
+        out.append(("EVENT-TYPE", "console 載體的 decider 須合 ^[A-Za-z0-9_.-]{1,64}$"))
+    return out
+
+
+def _sandbox_rules(obj: dict) -> _Issues:
+    out: _Issues = []
+    applied, fc, sha = obj.get("applied"), obj.get("fail_code"), obj.get("sandbox_sha256")
+    ok, rb = obj.get("touched_ok"), obj.get("rollback_ok")
+    if applied is True:
+        if not (isinstance(ok, bool) and isinstance(rb, bool)) or fc is not None or sha is None:
+            out.append(("EVENT-TYPE", "applied 為真須 touched_ok／rollback_ok 皆布林、"
+                        "fail_code 為 null、sandbox_sha256 非 null"))
+    elif applied is False and (ok is not None or rb is not None):
+        out.append(("EVENT-TYPE", "applied 為假時 touched_ok 與 rollback_ok 皆須為 null"))
+    if (fc == "SANDBOX-EXPORT-FAILED") != (sha is None) and "sandbox_sha256" in obj:
+        out.append(("EVENT-TYPE", "fail_code 為 SANDBOX-EXPORT-FAILED ⇔ sandbox_sha256 為 null"))
+    if fc == "SANDBOX-APPLY-TIMEOUT" and (applied is not False or sha is None):
+        out.append(("EVENT-TYPE", "SANDBOX-APPLY-TIMEOUT 須 applied 為假且 sandbox_sha256 非 null"))
+    return out
+
+
+def _verify_rules(obj: dict) -> _Issues:
+    out: _Issues = []
+    rs, verdict = obj.get("reasons"), obj.get("verdict")
+    known = verdict in ("PASS", "FAIL", "NE")
+    if isinstance(rs, list) and known and (not rs) != (verdict == "PASS"):
+        out.append(("EVENT-TYPE", "reasons 為空陣列 ⇔ verdict 為 PASS"))
+    n, vs = obj.get("probes_n"), obj.get("verify_sha256")
+    if _int(n, 0) and "verify_sha256" in obj and (n == 0) != (vs is None):
+        out.append(("EVENT-TYPE", "probes_n 為 0 ⇔ verify_sha256 為 null"))
+    return out
+
 
 
 def _required(kind: str, obj: dict) -> set[str]:
@@ -235,20 +402,24 @@ def validate(obj: dict) -> list[tuple[str, str]]:
     if not valid_t(obj["t"]):
         out.append(("EVENT-TYPE", "t 須帶 offset 且合 ISO 形態"))
     if obj["kind"] not in KINDS:
-        return out + [("EVENT-KIND", f"kind {obj['kind']!r} 不在 19 個詞彙內")]
+        return out + [("EVENT-KIND", f"kind {obj['kind']!r} 不在 21 個詞彙內")]
     if not valid_by(obj["by"]):
         out.append(("EVENT-TYPE", "by 須為非空、無空白、≤32 字元的標籤"))
     kind = obj["kind"]
-    if kind not in _SPEC:
+    p2 = kind in _SPEC2
+    if kind not in _SPEC and not p2:
         consumed = _CONSUMED.get(kind, {})
         return out + [("EVENT-TYPE", f"{kind}.{key} 型別或值域不合")
                       for key, ok in consumed.items() if key in obj and not ok(obj[key])]
-    spec, body = _SPEC[kind], {k: v for k, v in obj.items() if k not in _COMMON}
-    for key in sorted(_required(kind, obj) - set(body)):
+    spec, body = (_SPEC2 if p2 else _SPEC)[kind], {k: v for k, v in obj.items()
+                                                       if k not in _COMMON}
+    need = _required2(kind, obj) if p2 else _required(kind, obj)
+    forb = _forbidden2(kind, obj) if p2 else set()
+    for key in sorted(need - set(body)):
         out.append(("EVENT-KEY-MISSING", f"{kind} 缺必備鍵 {key}"))
-    for key in sorted(set(body) - set(spec)):
-        out.append(("EVENT-KEY-UNKNOWN", f"{kind} 出現表外鍵 {key}"))
-    allowed = set(spec)
+    for key in sorted((set(body) - set(spec)) | (set(body) & forb)):
+        out.append(("EVENT-KEY-UNKNOWN", f"{kind} 出現表外或不得有的鍵 {key}"))
+    allowed = set(spec) - forb
     if kind == "attr" and _hashable(obj.get("type")) in _ATTR_KEYS:
         allowed -= {"obs", "items", "root_cause", "from", "reopens"} - _ATTR_KEYS[obj["type"]]
     for key in sorted(set(body) & allowed):
@@ -257,7 +428,7 @@ def validate(obj: dict) -> list[tuple[str, str]]:
     if kind == "attr":
         out += [("EVENT-KEY-UNKNOWN", f"attr（{obj.get('type')}）不得有鍵 {k}")
                 for k in sorted((set(body) & set(spec)) - allowed)]
-    out += _conditional(kind, obj, body)
+    out += _conditional2(kind, obj) if p2 else _conditional(kind, obj, body)
     return out
 
 

@@ -44,6 +44,7 @@
     "tools/selfimproving.py",
     "tools/session_resume_planner.py"
   ],
+  "probe_timeout_seconds": 600,
   "research_bytes_max": 524288,
   "research_fetch_max": 10,
   "research_timeout_seconds": 20,
@@ -54,6 +55,7 @@
     "**/docs/03_testing/**"
   ],
   "stop_after_bad": 2,
+  "verify_runs_max": 2,
   "w_evt": 2,
   "w_min": 5,
   "w_n": 20,

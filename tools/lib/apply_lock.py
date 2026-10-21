@@ -30,15 +30,30 @@ R81 已實測：Windows 上 `os.O_APPEND` 單次 `os.write()` 不是原子的（
     嘗試刪除後重新嘗試取鎖。刪除本身也可能與另一個回收者競爭（TOCTOU）——刪除失敗
     （`FileNotFoundError`）視為對方已經清理，不視為錯誤，直接進入下一輪重試（有界：
     仍受 `timeout` 總時限管，不會無限迴圈）。
+
+## Windows 的刪除待決與共享違規（DEF-200-559；TCS-SelfImproving-P2 R100）
+
+Windows 對「被另一行程開著的檔」有兩種拒絕：**刪除待決**（已刪、但對方的控制代碼未關，此時重建
+同名檔拋 `PermissionError`）與**共享違規**（`unlink` 時對方開著而未授 `FILE_SHARE_DELETE`）——在
+Python 都映成 `PermissionError`（errno 13），POSIX 兩者皆無。修法（消除成因類別、不壓制）：取鎖遇它
+視同忙碌、納入既有有界重試，**逾時改拋最後一次的原始例外**（真正的「目錄不可寫」不被誤報成「別的
+行程持有」）；回收遇它是「這輪沒收成」；釋放遇它有界重試（`RELEASE_RETRIES`），用盡後**不改 rc、
+不拋例外**、只印警告並讓鎖檔殘留交陳舊回收——釋放發生在呼叫端已追加事件之後，若此處拋例外，呼叫端
+會誤報「帳本未變動」而重送重複寫入。
 """
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+
+# 釋放時 `unlink` 遇 PermissionError 的重試次數上限（初次嘗試之後最多再試這麼多次；
+# 初值未校準、不得無界）
+RELEASE_RETRIES = 5
 
 
 class LockBusyError(RuntimeError):
@@ -54,32 +69,50 @@ def _read_holder(lock_path: Path) -> str:
     return text.replace("\n", " / ") if text else "（鎖檔為空）"
 
 
-def _try_acquire(lock_path: Path) -> bool:
-    """獨佔建檔：成功回 `True`；鎖已被別人持有（`FileExistsError`）回 `False`。"""
+def _try_acquire(lock_path: Path) -> OSError | None:
+    """獨佔建檔：成功回 `None`；忙碌回該例外——`FileExistsError`（鎖已被別人持有），或 Windows 的刪除
+    待決／共享違規（`PermissionError`）。其他 `OSError` 立即穿出、不納入重試。"""
     try:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return False
+    except (FileExistsError, PermissionError) as exc:
+        return exc
     try:
         payload = f"{os.getpid()}\n{datetime.now(UTC).isoformat()}\n"
         os.write(fd, payload.encode("utf-8"))
     finally:
         os.close(fd)
-    return True
+    return None
 
 
 def _reap_if_stale(lock_path: Path, stale_after: float) -> None:
     """鎖檔 mtime 超過 `stale_after` 秒即視為持鎖行程已死，嘗試刪除以便下一輪重試。"""
     try:
         age = time.time() - lock_path.stat().st_mtime
-    except FileNotFoundError:
-        return  # 鎖已被持有者釋放或被另一個回收者清掉，屬正常狀態
+    except (FileNotFoundError, PermissionError):
+        return  # 鎖已被持有者釋放、被另一個回收者清掉，或處於刪除待決，屬正常狀態
     if age <= stale_after:
         return
     try:
         lock_path.unlink()
-    except FileNotFoundError:
-        pass  # TOCTOU：已被另一個回收者搶先清掉，不是錯誤
+    except (FileNotFoundError, PermissionError):
+        pass  # TOCTOU 已被搶先清掉，或 Windows 刪除待決／共享違規：這輪沒收成，下一輪有界重試
+
+
+def _release(lock_path: Path, poll_interval: float) -> None:
+    """釋放：`unlink` 遇 PermissionError 有界重試；用盡後印警告、鎖檔殘留交陳舊回收，不拋例外。"""
+    last: PermissionError | None = None
+    for attempt in range(RELEASE_RETRIES + 1):
+        try:
+            lock_path.unlink()
+            return
+        except FileNotFoundError:
+            return  # 已被自己刪過或被回收器清掉（不應發生於正常路徑，但不視為致命）
+        except PermissionError as exc:
+            last = exc
+            if attempt < RELEASE_RETRIES:
+                time.sleep(poll_interval)
+    sys.stderr.write(f"apply_lock: 釋放鎖檔失敗（{type(last).__name__}），{lock_path} 殘留，"
+                     "交陳舊回收\n")
 
 
 @contextmanager
@@ -88,9 +121,11 @@ def acquire(
 ) -> Iterator[None]:
     """取得 `lock_path` 這把鎖；逾時拋 `LockBusyError`，成功則離開區塊時自動釋放。"""
     deadline = time.monotonic() + timeout
-    while not _try_acquire(lock_path):
+    while (busy := _try_acquire(lock_path)) is not None:
         _reap_if_stale(lock_path, stale_after)
         if time.monotonic() >= deadline:
+            if isinstance(busy, PermissionError):
+                raise busy  # 原始例外：真正的「不可寫」不被誤報成「別的行程持有」
             raise LockBusyError(
                 f"取得鎖逾時（{timeout}s）：{lock_path} 目前由另一個行程持有 —— "
                 f"持鎖者資訊（pid / 取得時間）：{_read_holder(lock_path)}。"
@@ -102,7 +137,4 @@ def acquire(
     try:
         yield
     finally:
-        try:
-            lock_path.unlink()
-        except FileNotFoundError:
-            pass  # 已被自己刪過或被回收器清掉（不應發生於正常路徑，但不視為致命）
+        _release(lock_path, poll_interval)

@@ -1071,8 +1071,10 @@ class TestBodyAndDelta(PropCase):
         self.rej(r, run, {"DUPLICATE-TYPE"}, "D", "a", **f2)
         r, run = dup_repo()
         self.ok(r, run, "D", **f2)
-        fx.append_events(r, [fx.dec_ev(124, "reject")])
-        self.ok(r, run, "D", **f2)
+        fx.append_events(r, [fx.dec_ev(124, "reject"), fx.dec_ev(124, "unblock")])
+        # P2 R82：被否決（含已解除）的同型再提案須附 reject_response；已解除才不被冷卻擋
+        reply = fx.body_md("P", reject_response="已逐項回應否決理由")
+        self.ok(r, run, "D", **{**f2, "body": reply})
         r, run = dup_repo()
         self.ok(r, run, "D", **f2)
         self.ok(

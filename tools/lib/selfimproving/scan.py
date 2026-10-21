@@ -150,7 +150,8 @@ def _bucket_candidates(commits: list, num: int, limit: int) -> list[dict]:
             tail = f"（{'、'.join(paths[:n])}）" if n else ""
             text = si_rows.draft_row(num + len(out), "si scan（自動草稿）",
                                      f"{b} 窗內有 {k} 個 commit 觸及{tail}", f"commit {sha[:12]}",
-                                     "scan")
+                                     "scan", category="process", severity="P4",
+                                     disposition="decided：僅計數")
             if len(text.encode("utf-8")) <= limit:
                 break
         out.append({"bucket": b, "row": text})
@@ -201,9 +202,19 @@ def run(repo: Path, git: Git, params: dict, since: str | None) -> dict:
             "candidates": cands, "buckets": buckets}
 
 
+_COUNT_ONLY = ("observations", "build_reports", "probe_outputs")  # 只計數、未解析內容（R103）
+
+
+def _source_line(s: dict) -> str:
+    if s["status"] != "read":
+        return f"source {s['id']} 量不到：{s['reason']}"
+    if s["id"] in _COUNT_ONLY:
+        return f"source {s['id']} 計 {s['count']} 筆（未解析內容）"
+    return f"source {s['id']} 讀到 {s['count']} 筆"
+
+
 def render_text(res: dict) -> str:
-    lines = [f"source {s['id']} 讀到 {s['count']} 筆" if s["status"] == "read"
-             else f"source {s['id']} 量不到：{s['reason']}" for s in res["sources"]]
+    lines = [_source_line(s) for s in res["sources"]]
     k = res["unavailable_count"]
     if res["candidates"]:
         lines += ["candidates:", *[c["row"] for c in res["candidates"]],

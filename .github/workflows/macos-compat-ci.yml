@@ -101,6 +101,8 @@ on:
       - "docs/01_requirements/SelfImproving_PRD.md"
       - "docs/05_development/SelfImproving_*.md"
       - "docs/06_quality/SelfImproving_Protocol/**"
+      - "docs/06_quality/SelfImproving_Event_Ledger.jsonl"  # P2：事件帳本，check／測試直接讀
+      - "docs/06_quality/SelfImproving_Observation_Ledger.md"  # P2：觀察帳本，obs-add／obs-close 與測試直接讀
       - "docs/03_testing/contracts/TCS-SelfImproving-*.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
@@ -589,6 +591,8 @@ on:
       - "docs/01_requirements/SelfImproving_PRD.md"
       - "docs/05_development/SelfImproving_*.md"
       - "docs/06_quality/SelfImproving_Protocol/**"
+      - "docs/06_quality/SelfImproving_Event_Ledger.jsonl"  # P2：事件帳本，check／測試直接讀
+      - "docs/06_quality/SelfImproving_Observation_Ledger.md"  # P2：觀察帳本，obs-add／obs-close 與測試直接讀
       - "docs/03_testing/contracts/TCS-SelfImproving-*.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，

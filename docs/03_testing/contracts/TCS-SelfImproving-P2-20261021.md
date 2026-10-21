@@ -3584,4 +3584,36 @@ Scenario: 明示的錯誤值保持錯誤
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
-（無。凍結後若有 SCG-4 審查發現或實作中須改名的 seam，依 P1 TCS 勘誤節的體例逐次登記：事由、被改的 R 與 AT、既有 AT 的 id 與判定碼名稱一字未改、一個 AT 也未刪。）
+### 勘誤一（SCG-4 一審 FAIL 後的規格訂正；既有 AT 的 id 與判定碼名稱一字未改、一個 AT 也未刪）
+
+- **事由**：SCG-4 一審（報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P2-20261022.md`；判定 FAIL，P1／P2／P3／P4＝0／1／5／4）§E 的 E-01～E-21、修復棒二交卷 §6 的 E-22～E-26、追加項 E-27。實作面的修復（D-01～D-10、`verify --json`）由修復棒一／二依本檔進行；本節只登記條文訂正，條文本體不回改（凍結檔以本節為準）。全部訂正與 PRD v0.10 一致，PRD 不動。
+- **字面對齊 PRD**：
+  1. **E-01 REQ-26**（R108 (d)、AT-218-1-1 Then、§5.6 REQ-24～28 列）：「不自起背景長任務」→「不得自起背景長任務」（PRD AC-SI-18-1、P1 TCS 同字面；第 263 行已是「不得」）。
+- **TCS 內部字面互相衝突或漏列的訂正**：
+  2. **E-02 R75 表 `dec` `promote` 列**：「`verdict` 為 `PASS`，或 `verdict` 為 `NE` 且 `flags` 含 `unverified_ack`」→「(`verdict` 為 `PASS` 且 `flags` 不含 `unverified_ack`)，或 (`verdict` 為 `NE` 且 `flags` 含 `unverified_ack`)；式與 verdict 不符者非法，與 R80 (e) `PROMOTE-FORM-MISMATCH`、R91 同判準」。
+  3. **E-03 R107 (c) 同步站點**：補 `test_selfimproving_events.py` 的 `TestCheckReplay.test_AT_108_4_1_transitions_replay`、`test_AT_108_4_E_2_structure_floor_and_dec_note`、`TestValueDomains.test_AT_108_4_E_5_quote_verifier_warn_boundary`、`TestInterface.test_AT_140_1_1_thirteen_verbs`（更名 `…twenty_one_verbs`，`-k AT_140_1_1` 判準不受影響）、`WEIRD_STATUS_KEYS`、`TestProposalNumberingAndLock.test_AT_141_2_E_3_home_exists_but_is_not_writable`、`corrupt_cases`（K01～K03 的 `dec` 基底改 `promote`，R72 `flags` 只准 promote；K18 `card` 缺 `prop`＝`EVENT-KEY-MISSING`）、`CorruptLedgerTestCase.case_repo`、`TestDecFlagsAndConsumedKeys.test_AT_108_4_E_6…`／`…E_7…`；`test_selfimproving_props.py::TestBodyAndDelta.test_AT_110_1_1_budget_and_duplicates`；`test_selfimproving_research_scan.py::TestResearchEvents.test_AT_130_1_E_1_skip_reasons_and_rejections`、`TestScan.test_AT_131_2_1_candidate_rows`、`test_AT_131_3_1_zero_candidates`；`test_selfimproving_export_status.py` 的 `test_AT_103_1_1_status_summary`、`test_AT_132_5_1_five_kinds`、`test_AT_132_5_E_2_differential_and_isolation`；清單中 `test_AT_003_1_1_no_resident_mechanism`、`test_AT_030_1_E_1_usage_errors` 實測無須改動。
+  4. **E-04 R69 `digest8`**：「`digest8`（`resume` 無此欄）」→「`digest8`（取該 PROP 當下 digest 的前 8 碼；`rollback`、`unblock` 的 `dec` 事件無 `digest` 欄仍印；`resume` 無此欄）」。
+  5. **E-05 R80 (f) `CARD-CHANGED`**：→「最近一筆 `card` 的 `card_sha256` 不等於以該 `card` 事件之前的前綴重建的卡面雜湊，或卡面核心區（`--- 以下不計入核心區 ---` 之前各行）與當下重算者不同；核心區之外的尾段（冷卻狀態等）不納入（AT-212-1-E-3 (k)）」。
+  6. **E-06 R78 (c)／AT-212-3-E-1**：補「首詞含 `*` 的整批用語（例：`核准 PROP-SI-*`）不是決定行，落 `GRAMMAR-NO-DECISION`，不落 `GRAMMAR-ID-FORMAT`」；AT 期望碼不變。
+  7. **E-07 R74 (e)／R98 (c)／AT-240-4-E-1**：`verify_runs_max` 無效時的 `SOURCE-UNAVAILABLE` NE 於 `events.transitions` 與 `events.verdict` 兩項皆印。
+  8. **E-08 R98 首段與〈判定碼表〉**：`_NONBLOCKING` 「增三碼」→「增五碼：`CONSOLE-AUDIT-MISSING`、`CONSOLE-KEY-MISSING`、`TRANSCRIPT-UNAVAILABLE`、`ORIGIN-MISSING`、`ATTACHMENT-TIME-UNKNOWN`」；AT-240-3-E-1 末段同改。
+  9. **E-09 AT-213-3-E-1 Then**：「該項狀態仍為 `PASS`、rc 為 `0`」→「該項狀態仍為 `PASS`（warn 不影響該項狀態）；手寫 `prop` 事件無 `rN.patch`／`rN.md` 時 `events.prop_files` 另紅，`check` 的 rc 不在本 AT 斷言內」。
+  10. **E-10 AT-213-2-E-1 Given (d)**：→「新提案的 `sources` 為（與 `A` 同證據的 OBS 列、缺陷帳本新立的 DEF 列）；同型由該 OBS 列的證據座標成立，DEF 列不相交、無根因而不構成 (b-2)」。
+  11. **E-11 判定碼優先序（R91、R86、R92）**：純帳本類先於引言回查——R91 把 `DEC-VERIFY-FAILED`／`TRANSCRIPT-UNAVAILABLE`／`CONSOLE-AUDIT-MISSING`／`CONSOLE-KEY-MISSING` 整段移到 `NON-EVOLVABLE-NOW` 之後、`MEMORY-DIR-MISSING` 之前（理由：卡面重建依賴同一份事件前綴，AT-216-1-E-1 (g)、AT-216-2-E-1 (a2)）；R86 為 `HELDOUT-NOT-FROZEN`→`MEMORY-DIR-MISSING`→`DIGEST-MISMATCH`→其後才回查；R92 的 `MEMORY-DIR-MISSING` 置於 `TREE-CHANGED` 之前。
+  12. **E-12 AT-219-2-E-1 最後一個 And**：「把 `probes_n` 改為 `2`」→「把 `probes_n` 改為 `2` 並同時把 `verify_sha256` 改為合法 `sha256:` 值（R72：`probes_n` 為 0 ⇔ `verify_sha256` 為 `null`）」。
+  13. **E-13 AT-215-2-1 Given 與 R105 允許集合**：git 子命令允許集合加 `ls-files`（`lib.sdd_latest` 經 `sdd_version.py` 發出，唯讀）。
+  14. **E-14 AT-215-2-1 第一個 And**：「`surface(R)` 不變」補「`verify` 於 `SelfImproving_Proposals/<PROP>/verify<K>.json` 落地一個新檔屬 R90 (a) 的預期產物，不在比對內」。
+  15. **E-15 R98 首段**：補「`obs.console_audit` 例外：OBS 帳本存在而事件帳本缺席時仍評估帶 `carrier=console` 標記的列（無對應 `obs.add`＝FAIL `CONSOLE-EVENT-MISSING`）」。
+  16. **E-16 §5.7 與 R107 (c)**：`evwrite.py` 只改 `ensure_home` 的探針檔名（加 `threading.get_ident()`，AT-235-1-E-2 (c) 同行程執行緒競態）；R107 (c) 補 `test_AT_141_2_E_3_home_exists_but_is_not_writable` 的探針名同步。
+  17. **E-17 R96 (c)、R97、〈P2 拒收碼表〉`obs-add`／`obs-close` 列**：寫 tmp／`os.replace`／flush／fsync／tmp 清理的 `OSError` ＝ rc 1、碼 `LEDGER-WRITE-FAILED`（detail＝例外類名）；事件追加失敗後的還原寫入本身失敗＝盡力而為、不遮蔽原例外（rc 3 `事件追加失敗`），孤列由 `check` 的 `obs.console_audit` 標紅。
+  18. **E-18 R88**：補「態不符時只回 `STATE-NOT-VERIFIABLE`（其後各碼對該態無意義，不收集）」。
+  19. **E-19 D4 列、R83 (c)、§5.7**：`heldout_freeze` 住 `sandbox.py`（rw；`decwrite.py` 因 LOC 上限不再含它）；能力類別與 40 鍵計數不變。
+  20. **E-20 R100 (2)**：`_reap_if_stale` 的 `stat()` 與 `unlink` 遇 `PermissionError`＝「這輪沒收成」（Windows 刪除待決時 `os.stat` 同樣回 `PermissionError`）；其他 `OSError` 仍立即穿出。
+  21. **E-21 R70 與 R80 (a)(b)**：`decide` 依 R80 明文順序（用法錯誤 rc 3 先於 `UNATTENDED-REFUSED`）；`heldout-freeze` 依 R70（`UNATTENDED-REFUSED` 先於全部其他前置檢查），實作已照此（修復棒二 D-08，回歸鎖 `test_d08_heldout_freeze_unattended_precedes_usage_checks`）。
+- **補條文（對應修復棒二新增的非 AT 回歸鎖；條文與測試同步）**：
+  22. **E-22 `SANDBOX-SWAP-FAILED`（純新增碼）**：R85 補「`<si>/sandbox/<PROP>` 的換入（含舊沙盒搬出）失敗＝rc 1、碼 `SANDBOX-SWAP-FAILED`（detail＝例外類名）、單次嘗試不重試；第一次換入成功而第二次失敗時舊沙盒須搬回，呼叫後與呼叫前位元組相同」；R86 與〈P2 拒收碼表〉`sandbox` 列、R83 (c) 與表 `heldout-freeze` 列（暫名目錄零殘留）、R88 與表 `verify` 列（重新匯出後換入失敗；與 `SANDBOX-TREE-DRIFT` 的區別：前者成因在檔案系統、後者在他機／git 版本差異）各加此碼；R71 「若呼叫前已存在則維持呼叫前的狀態」補一句涵蓋半換入。回歸鎖：`test_d02_sandbox_swap_failure_restores_the_old_box`、`test_d02_heldout_freeze_swap_failure_leaves_no_residue`、`test_d02_verify_swap_failure_is_a_coded_reject_without_traceback`、`test_d02_obs_add_write_failure_is_a_coded_reject`、`test_d02_obs_restore_failure_does_not_mask_the_append_failure`（`test_selfimproving_sandbox.py`）。
+  23. **E-23 AT-240-3-E-1 Given (b)**：加註「`reasons` 須非空（R72：空陣列⇔PASS，空陣列的事件在 `events.structure` 即被排除）；例：⓪ 層 `touched_ok`、`rollback_ok` 皆假而 `reasons` 只記 `TOUCHED-SUPERSET`」。
+  24. **E-24 AT-217-1-E-2／AT-219-2-E-1 的 `MJ` 與 stdout 末尾**：Then「stdout 末尾為 `obs-draft:` 加恰一行草稿列」在 `MJ`（JSON）形態對應鍵 `obs_draft`（恰一列）；文字形態須另呼叫一次。
+  25. **E-25 AT-240-13-E-1 (b)**：「回〈審查者〉項問題」→「被點名的項恰為 `REQ-24`～`REQ-28` 五項」。
+  26. **E-26 NFR-P2-10 (14)／V4 的機械物**：由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestMainGuardIsTheLastTopLevelStatement` 守（掃 `tools/tests/test_*.py` 全數檔，不只本檔的測試檔；首跑另抓到 `test_smoke_ci_sync.py`、`test_schedule_capability_parity.py` 兩支既有違反檔，已移到檔尾）。
+  27. **E-27 R69**：補註「`verify` 於樹重建階段的拒收在 `--json` 下同為 JSON 拒收物件（鍵序同 `PROP-NOT-FOUND` 閘門拒收）」；回歸鎖 `test_d11_verify_json_rejection_is_json`（`test_selfimproving_verify.py`）。

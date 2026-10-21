@@ -50,10 +50,12 @@ _COORD_RES = [re.compile(p) for p in (
 )]
 
 MARK_KEYS = {"面", "暴露", "來源", "外部衍生", "回報者", "根因", "rel", "reopens", "orig", "span",
-             "src"}
+             "src", "carrier", "audit_ref"}
 _SRC_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _FACES = {"守衛", "產品", "文件", "流程"}
 _EXPOSURES = {"a", "b", "c", "無"}
+FACES = _FACES
 _SOURCES = {"人", "代理", "工具", "逐字稿", "帳本"}
 ORIG_AT_RE = re.compile(r"^@[^\s#]+#OBS-SI-\d+$")
 
@@ -65,10 +67,12 @@ def now_cell() -> str:
     return f"{z.strftime('%Y-%m-%d %H:%M')} {off[:3]}:{off[3:]}"
 
 
-def draft_row(num: int, context: str, symptom: str, evidence: str, who: str) -> str:
-    """OBS 草稿列（九欄；分類 bug、嚴重度 P3、處置 open；供主控入帳，CLI 不自寫帳本）。"""
-    cells = [f"OBS-SI-{num:03d}", now_cell(), context, symptom, evidence, "bug", "P3", "open",
-             f"面=流程;來源=工具;回報者={who}"]
+def draft_row(num: int, context: str, symptom: str, evidence: str, who: str, *,
+              category: str = "bug", severity: str = "P3", disposition: str = "open") -> str:
+    """OBS 草稿列（九欄；預設分類 bug、嚴重度 P3、處置 open；供主控入帳，CLI 不自寫帳本）。
+    `scan` 的計數資訊列改 `process`／`P4`／`decided：僅計數`（R103；P1 的拒收草稿列不變）。"""
+    cells = [f"OBS-SI-{num:03d}", now_cell(), context, symptom, evidence, category, severity,
+             disposition, f"面=流程;來源=工具;回報者={who}"]
     return "| " + " | ".join(cells) + " |"
 
 
@@ -84,6 +88,25 @@ def path_set(cell: str) -> set[str]:
         for m in rx.finditer(cell):
             out.add(re.sub(r":\d+(?:[–-]\d+)?$", "", m.group(0)).replace("\\", "/").casefold())
     return out
+
+
+def path_fragments(cell: str) -> list[str]:
+    """證據座標格 `path`、`file`、`dir` 三形態的路徑片段原文（保留大小寫、去結尾行號、`\\` 換 `/`；
+    不 casefold；R99 (c) 的歸桶輸入），依出現順序、去重。"""
+    out: list[str] = []
+    cell = _COORD_RES[7].sub(" ", cell)
+    for rx in _COORD_RES[:3]:
+        for m in rx.finditer(cell):
+            frag = re.sub(r":\d+(?:[–-]\d+)?$", "", m.group(0)).replace("\\", "/")
+            if frag not in out:
+                out.append(frag)
+    return out
+
+
+def coord_set(cell: str) -> set[str]:
+    """證據座標格中九形態命中的全部片段（`\\` 換 `/`、casefold；R82 (c) 的證據座標集合）。"""
+    return {m.group(0).replace("\\", "/").casefold() for rx in _COORD_RES
+            for m in rx.finditer(cell)}
 
 
 def disp_token(cell: str) -> str | None:
@@ -179,6 +202,7 @@ def evaluate_rows(led: Ledger, row_max_bytes: int | None,
     if led.tz_malformed:
         out["ledger.time_tz"].append(
             Finding("-", "TZ-HEADER-MALFORMED", "fail", "檔頭 tz 宣告不合法或超過一個"))
+    seen_refs: set[str] = set()
     for row in led.rows:
         text = row.raw
         if row_max_bytes is not None and len(text.encode("utf-8")) > row_max_bytes:
@@ -205,7 +229,7 @@ def evaluate_rows(led: Ledger, row_max_bytes: int | None,
             add("row.enums", row, "ENUM-SEVERITY", "欄「嚴重度」不在 P1～P4")
         if 7 not in empties:
             _disposition(row, cells[7], add)
-        _marks(row, cells, empties, add, src_ids)
+        _marks(row, cells, empties, add, src_ids, seen_refs)
     return out
 
 
@@ -246,16 +270,31 @@ def _src_checks(row: Row, marks: dict, src_ids: set[str] | None, add) -> None:
             add("row.markers", row, "SRC-UNKNOWN", f"src {marks['src'][0]} 不在來源表")
 
 
+def _console_marks(row: Row, marks: dict, add, seen_refs: set[str]) -> None:
+    """R76：carrier／audit_ref 成對、audit_ref 全帳本唯一（只驗形態，不讀家目錄）。"""
+    if ("carrier" in marks) != ("audit_ref" in marks):
+        add("row.markers", row, "CONSOLE-MARK-PAIR", "欄「標記」carrier 與 audit_ref 須成對")
+    ref = marks.get("audit_ref", ("", False))[0]
+    if _UUID_RE.match(ref):
+        if ref in seen_refs:
+            add("row.markers", row, "CONSOLE-AUDIT-DUP", "欄「標記」audit_ref 與較早的列重複")
+        seen_refs.add(ref)
+
+
 def _marks(row: Row, cells: list[str], empties: set[int], add,
-           src_ids: set[str] | None = None) -> None:
+           src_ids: set[str] | None = None, seen_refs: set[str] | None = None) -> None:
     marks, problems = parse_marks(cells[8])
     for p in problems:
         add("row.markers", row, "MARK-SYNTAX", f"欄「標記」{p}")
+    _console_marks(row, marks, add, seen_refs if seen_refs is not None else set())
     for key, (value, quoted) in marks.items():
         if key not in MARK_KEYS:
             add("row.markers", row, "MARK-UNKNOWN-KEY", f"欄「標記」未知鍵 {key}")
         elif key == "src" and not _SRC_RE.match(value):
             add("row.markers", row, "MARK-VALUE", "欄「標記」src 的值不合 id 形態")
+        elif (key == "carrier" and value != "console") or (
+                key == "audit_ref" and not _UUID_RE.match(value)):
+            add("row.markers", row, "MARK-VALUE", f"欄「標記」{key} 的值不在值域")
         elif (key == "面" and value not in _FACES) or (key == "暴露" and value not in _EXPOSURES) \
                 or (key == "外部衍生" and value != "是"):
             add("row.markers", row, "MARK-VALUE", f"欄「標記」{key} 的值不在值域")

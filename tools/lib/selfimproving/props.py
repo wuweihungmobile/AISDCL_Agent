@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from fractions import Fraction
 
+from . import cooldown
 from . import fold as si_fold
 from . import paths as si_paths
 from .events import DEF_ID_RE, OBS_ID_RE
@@ -131,6 +132,8 @@ class Ctx:
     memory_dir_ok: bool = True
     self_prop: str | None = None
     events: list = field(default_factory=list)
+    obs_rows: dict | None = None  # OBS ID → 列；None＝不判同型冷卻（P1 單元測試的合成輸入）
+    def_evidence: dict | None = None  # DEF ID → 「現象與證據」欄文字
 
 
 @dataclass
@@ -172,6 +175,13 @@ def _hits(c: Ctx, touched: list[str]) -> tuple[bool, list[str], list[Code]]:
                     and not TRUST_RE.search("\n".join(b.added)):
                 codes.append(("R-NOT-PROPOSED", f"新增規則檔 {p} 不含 trust_level: proposed"))
     return hit, globs, codes
+
+
+def reverify_paths(c: Ctx, touched: list[str]) -> tuple[bool, list[str]]:
+    """`promote` 的 `NON-EVOLVABLE-NOW`（TCS-P2 R91）：以當下參數與 LATEST、與 `prop-new` 同一函式
+    重驗全部路徑；回（是否命中, 命中的 glob）。"""
+    hit, globs, _ = _hits(c, touched)
+    return hit, globs
 
 
 def _rule_hit(c: Ctx, path: str) -> bool:
@@ -273,7 +283,8 @@ def evaluate(c: Ctx) -> Decision:
     d = Decision(touched=sorted({p for b in c.blocks for p in b.paths}))
     hit, globs, codes = _hits(c, d.touched)
     d.cls = mark_cls(c.cls, globs, c.groups)
-    d.codes += codes + _state_codes(c) + _dup_code(c, d.cls) + _source_codes(c)
+    d.codes += codes + _state_codes(c) + _dup_code(c, d.cls) + cooldown.codes(c, d.cls)
+    d.codes += _source_codes(c)
     if c.reviewer is not None and c.reviewer == c.proposer:
         d.codes.append(("REVIEWER-IS-PROPOSER", "審查者不得等於提案者"))
     handoff = hit or d.cls not in ("M", "P", "R", "D")
@@ -309,4 +320,5 @@ def compute_digest(*, pid: str, rev: int, cls: str, action: str, target: list[st
     return sha256_of(_canon(core))
 
 
-__all__ = ["DEF_ID_RE", "OBS_ID_RE", "evaluate", "input_problems", "compute_digest"]
+__all__ = ["DEF_ID_RE", "OBS_ID_RE", "evaluate", "input_problems", "compute_digest",
+           "reverify_paths"]

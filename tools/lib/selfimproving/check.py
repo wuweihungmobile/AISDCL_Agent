@@ -25,10 +25,13 @@ ITEM_IDS = (
     "ref.def", "ref.obs", "ref.orig_notes", "ref.carrier_families", "history.migration",
     "history.row_mutated", "params.keys", "params.globs", "params.coupling", "ledger.volume",
     "ledger.vacuity",
-) + si_evcheck.ITEM_IDS  # 其後追加 7 項（P1，R36）；前 21 項的 id、項序與碼一字不變
+) + si_evcheck.ITEM_IDS  # 其後追加 7 項（P1，R36）與 4 項（P2，R98）；前 21 項一字不變
 LEDGER_REL = "docs/06_quality/SelfImproving_Observation_Ledger.md"
 PARAMS_REL = f"{si_params.PROTOCOL_REL}/params.json"
-_NONBLOCKING = frozenset({"CARRIER-NOT-ESTABLISHED", "SOURCES-HISTORY-NOT-ESTABLISHED"})
+_NONBLOCKING = frozenset({
+    "CARRIER-NOT-ESTABLISHED", "SOURCES-HISTORY-NOT-ESTABLISHED", "CONSOLE-AUDIT-MISSING",
+    "CONSOLE-KEY-MISSING", "TRANSCRIPT-UNAVAILABLE", "ORIGIN-MISSING", "ATTACHMENT-TIME-UNKNOWN",
+})
 _LIST_MAX = 5
 
 
@@ -118,7 +121,12 @@ def build_items(repo: Path, ledger: Path, params: dict, text: str, size: int,
         f["row.bytes"] = si_params.ne_findings("row_max_bytes 無效，無法判定列位元組")
     f["row.fixed_sha"] = si_refs.fixed_sha_findings(led, git)
     f["ref.def"] = si_refs.def_findings(led, repo)
-    f["ref.obs"], f["ref.carrier_families"] = si_refs.obs_findings(text, rel, repo, git)
+    events = si_refs.event_ledger(repo)
+    f["ref.obs"], f["ref.carrier_families"] = si_refs.obs_findings(
+        text, rel, repo, git, established=events is not None)
+    if events is not None and git.available:
+        f["ref.carrier_families"] += si_refs.family_findings(
+            repo, events, [text, *si_refs.archive_texts(repo)])
     f["ref.orig_notes"] = si_refs.orig_findings(led, repo)
     mig = si_history.evaluate_migration(params.get("migration_base_sha"), led, git, rel)
     muts, mut_detail = si_history.evaluate_mutations(git, rel, text, mig)

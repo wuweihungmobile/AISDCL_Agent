@@ -23,7 +23,7 @@ _GREP_LINE_RE = re.compile(r"^(.*?):(\d+):(.*)$")
 def apply_numstat(repo: Path, patch_file: Path) -> list[str]:
     """`git apply --numstat -z` 看到的路徑（改名／複製兩端皆列）；git 不可用拋 OSError。
     只能檢查、不能當 `touched` 的來源（R51 (b)）；測試以 mock.patch.object 模擬漏看。"""
-    cp = Git(repo).run("apply", "--numstat", "-z", str(patch_file))
+    cp = Git(repo).run("-c", "core.autocrlf=false", "apply", "--numstat", "-z", str(patch_file))
     if cp is None or cp.returncode != 0:
         raise OSError("git apply --numstat 失敗或 git 不可用")
     toks = cp.stdout.split("\0")
@@ -44,18 +44,25 @@ class Git:
     def __init__(self, repo: Path) -> None:
         self.repo = repo.resolve()
         self._ok: bool | None = None
+        self.timed_out = False  # 最近一次 `run` 是否因逾時而回 None（分辨逾時與 git 不可用）
 
     def _env(self) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items() if k not in _STRIP_ENV}
         env["GIT_OPTIONAL_LOCKS"] = "0"
         return env
 
-    def run(self, *args: str) -> subprocess.CompletedProcess | None:
+    def run(self, *args: str, timeout: int | None = None) -> subprocess.CompletedProcess | None:
+        """`timeout` 選用（牆鐘秒數；預設仍為 60 秒，P1 的呼叫不變）。"""
         argv = ["git", "-C", str(self.repo), *args]
+        self.timed_out = False
         try:
             return subprocess.run(
                 argv, capture_output=True, encoding="utf-8", errors="replace",
-                timeout=_TIMEOUT, shell=False, env=self._env(), check=False)
+                timeout=_TIMEOUT if timeout is None else timeout, shell=False, env=self._env(),
+                check=False)
+        except subprocess.TimeoutExpired:
+            self.timed_out = True
+            return None
         except (OSError, subprocess.SubprocessError):
             return None
 

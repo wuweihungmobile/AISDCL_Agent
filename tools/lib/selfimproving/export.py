@@ -17,6 +17,7 @@ from . import fold as si_fold
 from . import paths as si_paths
 from . import refs as si_refs
 from . import rows as si_rows
+from . import scan as si_scan
 from . import status as si_status
 from .git import Git
 from .ledger import parse_ledger
@@ -45,6 +46,8 @@ def _observations(repo: Path, problems: list) -> list[dict]:
         item = dict(zip(keys, row.cells))
         item["marks_kv"] = {k: v for k, (v, _) in si_rows.row_marks(row).items()}
         item["line"] = row.lineno
+        found = {si_scan.bucket_of(p) for p in si_rows.path_fragments(row.cells[4])}
+        item["buckets"] = [b for b in (*si_scan.BUCKETS, "未分類") if b in found] or ["未分類"]
         item["_cursor"] = _num(row.ident)
         out.append(item)
     return out
@@ -72,8 +75,10 @@ def _proposals(repo: Path, git: Git, events: list[dict], f: si_fold.Folded,
         patch = repo / si_events.PROPOSALS_REL / p.id / f"r{p.rev}.patch"
         try:
             touched = si_paths.touched_of(patch.read_bytes())
-        except (OSError, si_paths.PatchError):
+        except (OSError, si_paths.PatchError) as exc:
             touched = None
+            why = "PATCH-UNREADABLE" if isinstance(exc, OSError) else "PATCH-INVALID"
+            ne.append({"field": f"proposals.{p.id}.touched", "reason": why})
         try:
             card = si_card.build(repo, git, events, f, p.id, params).text
         except si_card.CardError as exc:
@@ -119,7 +124,7 @@ def build(repo: Path, git: Git, params: dict, kind: str, since: int | None,
     elif kind == "runs":
         items = _runs(f)
     else:
-        items = [si_status.build(repo, git, params)]
+        items = [si_status.build(repo, git, params, read_home=False)]
     nxt, truncated = None, False
     if kind != "status":
         items.sort(key=lambda i: i["_cursor"])

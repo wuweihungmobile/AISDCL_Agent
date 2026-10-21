@@ -533,8 +533,6 @@ class TestUnittestDiscoverConformance(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
 # ── smoke 家族雙平台 CLI 契約對等（DEF-101-810 同型缺口，本輪補上）─────────
 # 為何住這一檔：本檔主題就是「兩平台排程腳本的能力必須對等」，而兩支 smoke 正是
 # install_mac_nightly.sh／install_windows_nightly.ps1 註冊的排程對象之一。
@@ -594,3 +592,7 @@ class TestSmokeCliContractParity(unittest.TestCase):
             "exit 2", src[args_idx:transcript_idx],
             "未知引數分支必須 exit 2 中止，不得只印訊息後落下去",
         )
+
+
+if __name__ == "__main__":
+    unittest.main()

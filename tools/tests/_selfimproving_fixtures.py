@@ -78,6 +78,7 @@ P1_ITEMS7 = [
     "events.research",
     "research.sources",
 ]
+P2_ITEMS4 = ["events.dec_quote", "events.dec_console", "events.verdict", "obs.console_audit"]
 LEDGER = "docs/06_quality/SelfImproving_Observation_Ledger.md"
 PARAMS = "docs/06_quality/SelfImproving_Protocol/params.json"
 EVL = "docs/06_quality/SelfImproving_Event_Ledger.jsonl"
@@ -88,6 +89,7 @@ REAL_PARAMS = ROOT / PARAMS
 REAL_SOP = ROOT / "docs/05_development/SelfImproving_Operations_SOP.md"
 REAL_PRD = ROOT / "docs/01_requirements/SelfImproving_PRD.md"
 UUID = "0a1b2c3d-4e5f-4a6b-8c7d-9e8f0a1b2c3d"
+UUID2 = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 LONG_ID = "0000"
 
 TMP: Path
@@ -349,6 +351,8 @@ def params_dict() -> dict:
         "research_timeout_seconds": 20,
         "min_events": 1,
         "export_limit_max": 500,
+        "probe_timeout_seconds": 600,
+        "verify_runs_max": 2,
     }
 
 
@@ -529,7 +533,99 @@ _ORDER = {
         "reviewer",
         "preimage",
     ],
+    "card": ["prop", "rev", "digest", "card_sha256"],
+    "dec": [
+        "id", "prop", "run", "dkind", "digest", "reason", "reason_class", "flags", "carrier",
+        "quote", "sid", "line", "card_seq", "audit_ref", "audit_sha256", "key_id", "decider",
+        "decided_at",
+    ],
+    "heldout.freeze": ["prop", "digest", "n", "frozen_by"],
+    "app.sandbox": ["id", "prop", "rev", "base", "sandbox_sha256", "applied", "touched_ok",
+                    "rollback_ok", "fail_code"],
+    "app.verify": ["id", "prop", "rev", "verdict", "baseline_red", "patched_green", "mutated_red",
+                   "carrier_proof", "probes_n", "verify_sha256", "heldout_digest", "reasons"],
+    "app.promote": ["id", "prop", "rev", "head_sha", "pre_sha256", "post_sha256",
+                    "unverified_ack"],
+    "app.rollback": ["id", "prop", "rev", "pre_sha256", "post_sha256"],
 }
+_WITH_DIGEST = ("approve", "reject", "return", "promote", "decline-promote", "ack-handoff")
+_WITH_REASON = ("reject", "decline-promote", "return", "rollback", "resume")
+_WITH_CLASS = ("reject", "decline-promote", "return")
+
+
+def std_quote(dkind: str, target: str, flags=()) -> str:
+    """決定行的標準引言（`dec` 夾具預設；`target` 為 PROP 號，`resume` 為 RUN 號）。"""
+    verb = {"approve": "核准", "reject": "否決", "decline-promote": "否決", "return": "退回",
+            "promote": "晉升", "ack-handoff": "轉交", "rollback": "回滾", "unblock": "解除",
+            "resume": "恢復"}.get(str(dkind), "核准")
+    tail = " 夾具理由" if dkind in _WITH_REASON else (" 未驗採納" if flags else "")
+    return f"{verb} {target}{tail}"
+
+
+def _dec_defaults(e: dict, seq: int, t: str) -> dict:
+    dk, car = e.get("dkind"), e.get("carrier", "transcript")
+    out: dict = {"id": f"DEC-SI-{seq:03d}", "decided_at": t}
+    if car == "console":
+        out.update(decider="ops_admin", audit_ref=UUID2, audit_sha256=H(6), key_id="00000000")
+    else:
+        target = e.get("run") if dk == "resume" else e.get("prop")
+        out.update(decider="掌舵者", quote=std_quote(dk, str(target), e.get("flags") or ()),
+                   sid=UUID, line=1)
+        if dk != "resume":
+            out["card_seq"] = 1
+    if dk in _WITH_DIGEST:
+        out["digest"] = H(4)
+    if dk in _WITH_REASON:
+        out["reason"] = "夾具理由"
+    if dk in _WITH_CLASS:
+        out["reason_class"] = "未說明"
+    return out
+
+
+def _sandbox_defaults(e: dict, seq: int, head_sha: str) -> dict:
+    failed = e.get("applied") is False
+    out = {"id": f"APP-SI-{seq:03d}", "rev": 1, "base": head_sha, "applied": True,
+           "sandbox_sha256": H(8), "touched_ok": True, "rollback_ok": True, "fail_code": None}
+    if failed:
+        out.update(touched_ok=None, rollback_ok=None)
+    if e.get("fail_code") == "SANDBOX-EXPORT-FAILED":
+        out["sandbox_sha256"] = None
+    return out
+
+
+def _verify_defaults(e: dict, seq: int) -> dict:
+    verdict = e.get("verdict", "PASS")
+    out = {"id": f"APP-SI-{seq:03d}", "rev": 1}
+    if verdict == "NE":
+        return {**out, "probes_n": 0, "baseline_red": None, "patched_green": None,
+                "mutated_red": None, "carrier_proof": None, "verify_sha256": None,
+                "heldout_digest": None, "reasons": ["NO-PROBES"]}
+    return {**out, "probes_n": 1, "baseline_red": True, "patched_green": verdict == "PASS",
+            "mutated_red": True, "carrier_proof": True, "verify_sha256": H(9),
+            "heldout_digest": H(7),
+            "reasons": [] if verdict == "PASS" else ["PATCHED-NOT-GREEN"]}
+
+
+def _p2_defaults(e: dict, seq: int, t: str, head_sha: str) -> dict:
+    """九種 P2 kind 的確定性預設（R107 (a)；呼叫端明示的鍵優先、逐位元保留）。"""
+    kind = e["kind"]
+    app = f"APP-SI-{seq:03d}"
+    return {
+        "card": {"rev": 1, "digest": H(4), "card_sha256": H(5)},
+        "heldout.freeze": {"digest": H(7), "n": 5, "frozen_by": "FZ"},
+        "app.promote": {"id": app, "rev": 1, "head_sha": head_sha, "pre_sha256": H(10),
+                        "post_sha256": H(11), "unverified_ack": False},
+        "app.rollback": {"id": app, "rev": 1, "pre_sha256": H(11), "post_sha256": H(10)},
+        "obs.add": {"obs": obs_id(1), "audit_ref": UUID2, "audit_sha256": H(6),
+                    "key_id": "00000000", "decider": "ops_admin", "carrier": "console"},
+        "obs.close": {"obs": obs_id(1), "audit_ref": UUID2, "audit_sha256": H(6),
+                      "key_id": "00000000", "decider": "ops_admin", "carrier": "console",
+                      "disposition": "decided：夾具"},
+    }.get(kind) or {
+        "dec": lambda: _dec_defaults(e, seq, t),
+        "app.sandbox": lambda: _sandbox_defaults(e, seq, head_sha),
+        "app.verify": lambda: _verify_defaults(e, seq),
+    }.get(kind, lambda: {})()
 
 
 def T0() -> datetime:
@@ -568,21 +664,36 @@ def compose(events, repo_head: str, seqs=None, t0: datetime | None = None) -> li
     out = []
     for i, e in enumerate(events):
         seq = seqs[i] if seqs else i + 1
+        t = e.get("t") or (t0 + timedelta(minutes=seq)).isoformat(timespec="seconds")
         body = {
             **_defaults(e["kind"], repo_head),
+            **_p2_defaults(e, seq, t, repo_head),
             **{k: v for k, v in e.items() if k not in ("kind", "by", "t")},
         }
         order = _ORDER.get(e["kind"], [])
         keys = [k for k in order if k in body] + [k for k in body if k not in order]
         obj = {
             "seq": seq,
-            "t": e.get("t") or (t0 + timedelta(minutes=seq)).isoformat(timespec="seconds"),
+            "t": t,
             "kind": e["kind"],
             "by": e["by"],
         }
         obj.update({k: body[k] for k in keys})
         out.append(obj)
     return out
+
+
+P2_FULL_KINDS = ("card", "dec", "heldout.freeze", "app.sandbox", "app.verify", "app.promote",
+                 "app.rollback", "obs.add", "obs.close")
+
+
+def fill_p2(kind: str, by: str, body: dict, seq: int = 6) -> dict:
+    """手寫損壞事件的 P2 完整欄位補齊：只補呼叫端沒給的必備鍵，明示的（含錯誤的）值逐位元保留，
+    使「只有那一個鍵壞」的損壞案例在完整欄位表下仍只觸發那一個碼（R107 (a)）。"""
+    if kind not in P2_FULL_KINDS:
+        return body
+    obj = compose([{"kind": kind, "by": by, **body}], "0" * 40, [seq])[0]
+    return {k: v for k, v in obj.items() if k not in ("seq", "t", "kind", "by")}
 
 
 def dumps_line(obj: dict) -> str:
@@ -643,6 +754,38 @@ def dec_ev(n: int, dkind: str, **kw) -> dict:
     return ev("dec", "掌舵者", prop=pid(n), dkind=dkind, **kw)
 
 
+def card_ev(n: int, **kw) -> dict:
+    return ev("card", "main", prop=pid(n), **kw)
+
+
+def freeze_ev(n: int, **kw) -> dict:
+    return ev("heldout.freeze", kw.pop("by", "FZ"), prop=pid(n), **kw)
+
+
+def sandbox_ev(n: int, **kw) -> dict:
+    return ev("app.sandbox", "main", prop=pid(n), **kw)
+
+
+def verify_ev(n: int, verdict: str = "PASS", **kw) -> dict:
+    return ev("app.verify", "main", prop=pid(n), verdict=verdict, **kw)
+
+
+def promote_ev(n: int, **kw) -> dict:
+    return ev("app.promote", "main", prop=pid(n), **kw)
+
+
+def rollback_ev(n: int, **kw) -> dict:
+    return ev("app.rollback", "main", prop=pid(n), **kw)
+
+
+def obs_add_ev(**kw) -> dict:
+    return ev("obs.add", "main", **kw)
+
+
+def obs_close_ev(**kw) -> dict:
+    return ev("obs.close", "main", **kw)
+
+
 def sc_close() -> list[dict]:
     """事件情境：run 2 關閉前一核一拒——`tools/lib/selfimproving/fold.py` 的重放輸入。"""
     return [
@@ -688,6 +831,7 @@ def _chain(n: int, steps: list, **kw) -> list[dict]:
 def _verify(n: int, verdict: str) -> list:
     return [
         dec_ev(n, "approve"),
+        ev("heldout.freeze", "FZ", prop=pid(n)),
         ev("app.sandbox", "main", prop=pid(n)),
         ev("app.verify", "main", prop=pid(n), verdict=verdict),
     ]
@@ -715,7 +859,7 @@ def sc_legal() -> list[dict]:
         [
             *_verify(127, "NE"),
             dec_ev(127, "promote", flags=["unverified_ack"]),
-            ev("app.promote", "main", prop=pid(127)),
+            ev("app.promote", "main", prop=pid(127), unverified_ack=True),
         ],
     )
     e += _chain(128, [*_verify(128, "FAIL"), "return"]) + [

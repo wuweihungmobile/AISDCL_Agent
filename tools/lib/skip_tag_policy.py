@@ -416,7 +416,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # `test_selfimproving_{capability,events,props,research_scan,export_status}.py`／
     # `test_root_module_layout.py`，實測 98 支，73 只剩實測的 74%，前置掃描逐字指示重釘為
     # 78 ⇒ 照填）。
-    "tools/tests": 78,
+    "tools/tests": 84,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

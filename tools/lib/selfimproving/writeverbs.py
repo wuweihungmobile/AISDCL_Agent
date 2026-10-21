@@ -199,7 +199,7 @@ def attr(repo: Path, ns, as_json: bool) -> Out:
     else:
         if ns.obs or ns.item or ns.root_cause or not (ns.from_obs and ns.reopens):
             raise UsageError("attr link 須帶 --from／--reopens，不得帶 --obs／--item／--root-cause")
-        closed = si_refs.closed_rows(repo, si_refs.obs_ledger_text(repo) or "")
+        closed = si_refs.reopenable_rows(repo, si_refs.obs_ledger_text(repo) or "")
         if ns.from_obs not in obs:
             codes.append(("OBS-NOT-FOUND", f"{ns.from_obs} 不在 OBS 帳本"))
         if ns.reopens not in closed:
@@ -370,7 +370,8 @@ def prop(repo: Path, ns, as_json: bool, revise: bool) -> Out:
             latest_name=latest, groups=groups, base_lines=base_lines(),
             base_text=lambda path: git.show(head, path), resolve=resolve,
             memory_dir_ok=(ns.memory_dir is not None) or cur_cls != "M",
-            self_prop=ns.prop if revise else None, events=state.events)
+            self_prop=ns.prop if revise else None, events=state.events, obs_rows=obs,
+            def_evidence=si_refs.def_evidence(repo))
         d = si_props.evaluate(ctx)
         out += d.codes
         if revise:

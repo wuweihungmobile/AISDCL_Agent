@@ -11,6 +11,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from . import decheck
 from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
@@ -22,15 +23,25 @@ from .refs import git_ne
 
 EVENT_ITEMS = ("events.structure", "events.transitions", "events.mutated", "events.vacuity",
                "events.prop_files", "events.research")
-ITEM_IDS = EVENT_ITEMS + ("research.sources",)
+ITEM_IDS = EVENT_ITEMS + ("research.sources",) + decheck.P2_ITEMS
 _CARRIER = "CARRIER-NOT-ESTABLISHED"
-_QUOTE = "QUOTE-VERIFIER-NOT-ESTABLISHED"
 Result = dict[str, tuple[list[Finding], str]]
 
 
 def _subject(ln: si_events.Line) -> str:
     seq = ln.obj.get("seq") if ln.obj else None
     return f"seq={seq}" if isinstance(seq, int) and not isinstance(seq, bool) else f"L{ln.no}"
+
+
+def _disposition_bytes(sub: str, obj: dict, params: dict, valid: set[str]) -> list[Finding]:
+    """R72：`obs.close.disposition` 位元組數 ≤ `row_max_bytes`（單事件判準讀不到參數）。"""
+    disp = obj.get("disposition")
+    if obj.get("kind") != "obs.close" or not isinstance(disp, str) or "row_max_bytes" not in valid:
+        return []
+    size = len(disp.encode("utf-8"))
+    if size <= params["row_max_bytes"]:
+        return []
+    return [Finding(sub, "EVENT-TYPE", "fail", f"disposition {size} 位元組 > row_max_bytes")]
 
 
 def _structure(lines: list[si_events.Line], params: dict, valid: set[str]) -> list[Finding]:
@@ -45,6 +56,7 @@ def _structure(lines: list[si_events.Line], params: dict, valid: set[str]) -> li
             out.append(Finding(sub, "EVENT-PARSE", "fail", "空白行或非 JSON 物件的行"))
             continue
         out += [Finding(sub, code, "fail", detail) for code, detail in si_events.validate(ln.obj)]
+        out += _disposition_bytes(sub, ln.obj, params, valid)
         if limit is not None and ln.nbytes > limit:
             out.append(Finding(sub, "EVENT-BYTES-OVER", "fail", f"{ln.nbytes} 位元組 > {limit}"))
         seq = ln.obj.get("seq")
@@ -55,12 +67,13 @@ def _structure(lines: list[si_events.Line], params: dict, valid: set[str]) -> li
     return out
 
 
-def _transitions(events: list[dict]) -> list[Finding]:
-    f = si_fold.fold(events)
+def _transitions(events: list[dict], params: dict, valid: set[str]) -> list[Finding]:
+    vmax = params["verify_runs_max"] if "verify_runs_max" in valid else None
+    f = si_fold.fold(events, None, vmax)
     out = [Finding(sub, code, "fail", detail) for code, sub, detail in f.problems]
-    if f.dec_count:
-        note = f"[warn] 帳本含 {f.dec_count} 筆 dec；引言回查屬 P2"
-        out.append(Finding("-", _QUOTE, "warn", note))
+    out += [Finding(sub, code, "warn", f"[warn] {detail}") for code, sub, detail in f.warns]
+    if vmax is None:
+        out += si_params.ne_findings("verify_runs_max 無效，無法判定 VERIFY-RUNS-EXCEEDED")
     return out
 
 
@@ -128,6 +141,25 @@ def _prop_files(repo: Path, events: list[dict]) -> list[Finding]:
             sha = "sha256:" + hashlib.sha256(body.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
             if sha != ev.get("body_sha256"):
                 out.append(Finding(sub, "PROP-BODY-SHA-MISMATCH", "fail", ".md 雜湊與事件不符"))
+    return out + _verify_files(repo, events)
+
+
+def _verify_files(repo: Path, events: list[dict]) -> list[Finding]:
+    """R90 (a)：`verify_sha256` 非 null 的 `app.verify`（該 PROP 的第 K 筆）須有 `verify<K>.json`，
+    且位元組雜湊相符（缺檔沿 `PROP-FILE-MISSING`；不符＝`PROP-VERIFY-SHA-MISMATCH`）。"""
+    out, count = [], {}
+    for e in events:
+        if e.get("kind") != "app.verify":
+            continue
+        count[e["prop"]] = k = count.get(e["prop"], 0) + 1
+        if e.get("verify_sha256") is None:
+            continue
+        sub = f"{e['prop']} verify{k}"
+        path = repo / si_events.PROPOSALS_REL / e["prop"] / f"verify{k}.json"
+        if not path.is_file():
+            out.append(Finding(sub, "PROP-FILE-MISSING", "fail", f"內容檔缺：{path.name}"))
+        elif "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest() != e["verify_sha256"]:
+            out.append(Finding(sub, "PROP-VERIFY-SHA-MISMATCH", "fail", "驗證檔雜湊與事件不符"))
     return out
 
 
@@ -165,10 +197,7 @@ def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None) -
                                    f"研究事件 seq={rs[0]} 不介於 run.open 與第一筆 prop 之間"))
     scans = [ev for _, k, _, ev in f.research_events if k == "research.scan"]
     out += _scan_findings(git, scans, src_raw)
-    if any(ev.get("reason") == "helmsman" for _, k, _, ev in f.research_events
-           if k == "research.skip"):
-        out.append(Finding("-", _QUOTE, "warn", "[warn] 存在 helmsman 免掃，座標回查屬 P2"))
-    return out
+    return out + decheck.helmsman_refs(repo, events)
 
 
 def _scan_findings(git: Git, scans: list[dict], src_raw: bytes | None) -> list[Finding]:
@@ -225,7 +254,10 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
     out: Result = {"research.sources": (_sources_item(src_raw), "")}
     if not ledger.is_file():
         carrier = [Finding("-", _CARRIER, "info", "事件帳本不存在")]
-        out.update({item: (list(carrier), "") for item in EVENT_ITEMS})
+        out.update({item: (list(carrier), "") for item in EVENT_ITEMS + decheck.P2_ITEMS})
+        orphans = decheck.obs_console_audit(repo, [])  # 帶 carrier=console 的列本身就是待對帳的證據
+        if orphans:
+            out["obs.console_audit"] = (orphans, "")
         return out
     raw = ledger.read_bytes()
     lines = si_events.read_lines(raw)
@@ -234,10 +266,14 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
     muts, mut_detail = _mutated(repo, git, raw.decode("utf-8", "replace").lstrip("﻿"))
     out.update({
         "events.structure": (_structure(lines, params, valid), ""),
-        "events.transitions": (_transitions(sound), ""),
+        "events.transitions": (_transitions(sound, params, valid), ""),
         "events.mutated": (muts, mut_detail),
         "events.vacuity": (_vacuity(events, params, valid), ""),
         "events.prop_files": (_prop_files(repo, sound), ""),
         "events.research": (_research(repo, git, sound, src_raw), ""),
+        "events.dec_quote": (decheck.dec_quote(repo, sound, params, git), ""),
+        "events.dec_console": (decheck.dec_console(repo, sound, params, git), ""),
+        "events.verdict": (decheck.verdict_item(sound, params, valid), ""),
+        "obs.console_audit": (decheck.obs_console_audit(repo, sound), ""),
     })
     return out

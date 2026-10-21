@@ -77,6 +77,13 @@ def _is_private(host: str, policy: Policy) -> bool:
     return False
 
 
+def _non_ascii_form(host: str) -> bool:
+    """R101：host 含任何非 ASCII 字元（含全形數字、U+3000、全形句點），或任一 label 以 `xn--` 起頭
+    （不分大小寫）。不做正規化後比對：`https://１２７.0.0.1/x` 以 ASCII 規則在表驗證即紅。"""
+    return any(ord(c) > 127 for c in host) or any(
+        label.casefold().startswith("xn--") for label in host.split("."))
+
+
 def _bad_host_chars(host: str) -> bool:
     """host 含空白或控制字元。連線端的 `urlsplit` 會先刪掉 TAB／CR／LF，使 `127.0.0.1<TAB>` 在
     驗證端不是私網位址而連線端是；故這些字元一律判為 host 問題（R43）。"""
@@ -91,9 +98,10 @@ def _url_problems(url: str, subject: str, policy: Policy) -> list[tuple[str, str
     _, host, _, _, userinfo = parse_url(url)
     if userinfo:
         out.append(("SRC-URL-USERINFO", subject, "url 的 authority 含 userinfo（@）"))
-    if not host or _bad_host_chars(host) or _is_private(host, policy):
+    if not host or _bad_host_chars(host) or _is_private(host, policy) or _non_ascii_form(host):
         out.append(("SRC-URL-HOST", subject,
-                    f"host {host!r} 為空、含空白／控制字元、localhost 或私網／loopback"))
+                    f"host {host!r} 為空、含空白／控制字元、localhost、私網／loopback，"
+                    "或為非 ASCII 或 IDNA 形態"))
     return out
 
 

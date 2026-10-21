@@ -38,6 +38,7 @@ STATUS_KEYS = [
     "pending_windows",
     "friction_reconcile",
     "no_event",
+    "console_pending",
 ]
 EXPORT_KEYS = [
     "schema_rev",
@@ -265,6 +266,7 @@ class TestStatus(StatusCase):
                     "target": ["docs/notes/other.md"],
                     "root_cause": ["tools/a-b", "tools/c-d"],
                     "rejected_seq": 17,
+                    "reason_class": "未說明",  # P2 R75：冷卻欄末鍵（夾具 dec 預設）
                 }
             ],
         )
@@ -439,6 +441,7 @@ class TestExport(StatusCase):
                 "marks",
                 "marks_kv",
                 "line",
+                "buckets",
             ],
         )
         lines = fx.read(repo, LEDGER).split("\n")
@@ -567,7 +570,9 @@ class TestExport(StatusCase):
         outs = []
         st = self.export(repo, "--kind", "status")
         outs.append(json.dumps(st))
-        self.assertEqual(st["items"][0], self.MJ(repo, "status"))
+        same = lambda o: {k: v for k, v in o.items() if k != "console_pending"}  # noqa: E731
+        self.assertEqual(same(st["items"][0]), same(self.MJ(repo, "status")))  # R99 (b)
+        self.assertEqual(st["items"][0]["console_pending"]["reason"], "export-reads-no-home")
         props = self.export(repo, "--kind", "proposals")
         outs.append(json.dumps(props))
         for p in props["items"]:

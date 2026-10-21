@@ -30,6 +30,7 @@ from _selfimproving_fixtures import (
     LEDGER,
     P0_ITEMS21,
     P1_ITEMS7,
+    P2_ITEMS4,
     SiTestCase,
     aid,
     ev,
@@ -485,7 +486,6 @@ class TestRunsAndAttribution(SiTestCase):
         link = ["attr", "--type", "link", "--by", "SA"]
         cases = [
             ([*link, "--from", obs_id(9), "--reopens", obs_id(1)], "REOPENS-NOT-CLOSED"),
-            ([*link, "--from", obs_id(9), "--reopens", obs_id(4)], "REOPENS-NOT-CLOSED"),
             ([*link, "--from", obs_id(9), "--reopens", ox], "REOPENS-NOT-FOUND"),
             ([*link, "--from", obs_id(9), "--reopens", dx], "REOPENS-NOT-FOUND"),
             ([*link, "--from", ox, "--reopens", obs_id(2)], "OBS-NOT-FOUND"),
@@ -498,6 +498,13 @@ class TestRunsAndAttribution(SiTestCase):
         for extra in ([], ["--note", ""], ["--note", "x" * 121], ["--note", "第一行\n第二行"]):
             self.usage_error(*self.M(repo, *base, *extra), msg=str(extra))
         self.assertEqual(fx.snap(repo), snap0)
+        # P2 R110（⚖ 39）：處置首詞為 deferred 的列（baseline 第 4 列）可被連結 ⇒ rc 0、多一筆 link
+        n0 = len(fx.EV(repo))
+        rc, out, _ = self.M(repo, *link, "--from", obs_id(9), "--reopens", obs_id(4))
+        self.assertEqual(rc, 0, out)
+        got = fx.EV(repo)
+        self.assertEqual((len(got) - n0, got[-1]["kind"], got[-1]["type"], got[-1]["reopens"]),
+                         (1, "attr", "link", obs_id(4)))
 
     def test_AT_106_2_E_2_reopen_candidate_hint(self):
         closed = [
@@ -897,9 +904,7 @@ class TestCheckReplay(SiTestCase):
         self.assertEqual(
             (self.S(res, "events.transitions"), self.S(res, "events.structure")), ("PASS", "PASS")
         )
-        self.assertEqual(
-            self.F(res, "events.transitions"), {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")}
-        )
+        self.assertEqual(self.F(res, "events.transitions"), set())  # P2 R98：QUOTE warn 移除
         illegal = {
             "a": ev("app.sandbox", prop=pid(129)),
             "b": fx.dec_ev(134, "approve"),
@@ -1140,7 +1145,7 @@ class TestCheckReplay(SiTestCase):
             (self.S(res, "events.vacuity"), res["_item"]["events.vacuity"]["blocking"]),
             ("NE", True),
         )
-        res = self.check(self._events_repo([ev("card"), ev("mea.report")]))
+        res = self.check(self._events_repo([ev("card", prop=pid(1)), ev("mea.report")]))
         self.assertEqual(self.S(res, "events.structure"), "PASS")
         repo = fx.p1_base()
         run = self.open_run(repo)
@@ -1148,17 +1153,16 @@ class TestCheckReplay(SiTestCase):
         self.cli_ok(
             repo, "prop-new", "--run", run, *fx.good_prop_args(repo, "D", sources=[obs_id(3)])
         )
-        fx.append_events(repo, [fx.dec_ev(124, "approve"), fx.dec_ev(125, "approve")])
+        digests = {e["id"]: e["digest"] for e in fx.EV(repo) if e["kind"] == "prop"}
+        fx.append_events(
+            repo,
+            [fx.dec_ev(n, "approve", digest=digests[pid(n)]) for n in (124, 125)],
+        )
         res = self.check(repo)
         item = res["_item"]["events.transitions"]
-        self.assertEqual(item["status"], "PASS")  # nonblocking 提示不改狀態（AT-108-4-E-2）
-        self.assertEqual(
-            [(f["subject"], f["code"]) for f in item["findings"]],
-            [("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")],
-        )
-        self.assertIn("2", item["findings"][0]["detail"])
-        self.assertIn("引言回查屬 P2", item["findings"][0]["detail"])
-        self.assertEqual((res["overall"], res["_rc"]), ("PASS", 0))
+        self.assertEqual(item["status"], "PASS")
+        # P2 R98：P1 的 QUOTE-VERIFIER-NOT-ESTABLISHED warn 移除（引言回查由 events.dec_quote 承接）
+        self.assertEqual([(f["subject"], f["code"]) for f in item["findings"]], [])
 
     def _seq_repo(self, seqs):
         repo = fx.p1_base()
@@ -1178,7 +1182,7 @@ class TestCheckAdditions(SiTestCase):
         res = self.check(repo)
         self.assertEqual((res["_rc"], res["overall"], res["rows"]), (0, "PASS", 10))
         ids = [i["id"] for i in res["items"]]
-        self.assertEqual((ids[:21], ids[21:]), (P0_ITEMS21, P1_ITEMS7))
+        self.assertEqual((ids[:21], ids[21:28], ids[28:]), (P0_ITEMS21, P1_ITEMS7, P2_ITEMS4))
         for item in res["items"][21:]:
             self.assertEqual((item["status"], item["blocking"]), ("NE", False))
             self.assertEqual([f["code"] for f in item["findings"]], ["CARRIER-NOT-ESTABLISHED"])
@@ -1187,12 +1191,12 @@ class TestCheckAdditions(SiTestCase):
                 self.assertEqual((item["status"], item["blocking"]), ("NE", False))
             else:
                 self.assertEqual((item["status"], item["findings"]), ("PASS", []), item["id"])
-        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 2)
+        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 3)
         keys = list(res["items"][0])
         self.assertTrue(all(list(i) == keys for i in res["items"]))
         rc, text, _ = self.M(repo, "check")
         lines = text.split("\n")
-        self.assertEqual(lines[0], "si-check rows=10 items=28")
+        self.assertEqual(lines[0], "si-check rows=10 items=32")
         self.assertRegex(
             [x for x in lines if x.strip()][-1], r"^overall=PASS rc=0 fingerprint=sha256:"
         )
@@ -1218,7 +1222,8 @@ class TestCheckAdditions(SiTestCase):
             )
         item = res["_item"]["research.sources"]
         self.assertEqual((item["status"], item["blocking"]), ("NE", False))
-        self.assertEqual(self.S(res, "ref.carrier_families"), "NE")
+        # P2 R104：事件帳本在場而無 DEC／APP／MEA 提及時，ref.carrier_families 由 NE 改 PASS
+        self.assertEqual(self.S(res, "ref.carrier_families"), "PASS")
 
     def test_AT_142_1_E_1_prop_files_and_sources_table(self):
         base = fx.p1_base()
@@ -1481,7 +1486,7 @@ class TestCheckAdditions(SiTestCase):
                 if isinstance(c, ast.Constant) and isinstance(c.value, str)
             }
 
-        self.assertTrue(any("items=28" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
+        self.assertTrue(any("items=32" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
         self.assertFalse(any("items=21" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
         s3 = strings("test_AT_003_1_1_no_resident_mechanism")
         self.assertTrue({"decide", "promote"} <= s3 and "prop-new" not in s3)
@@ -1520,12 +1525,21 @@ class TestInterface(SiTestCase):
         "prop-new",
         "prop-revise",
         "research",
+        "decide",
+        "heldout-freeze",
+        "sandbox",
+        "verify",
+        "promote",
+        "rollback",
+        "obs-add",
+        "obs-close",
     ]
 
-    def test_AT_140_1_1_thirteen_verbs(self):
+    def test_AT_140_1_1_twenty_one_verbs(self):
         repo = fx.p1_base()
         rc, out, _ = self.run_main(["--help"])
         self.assertEqual(rc, 0)
+        self.assertEqual(len(self.VERBS), 21)
         self.assertTrue(all(v in out for v in self.VERBS))
         for verb in self.VERBS:
             rc, out, _ = self.run_main([verb, "--help"])
@@ -1552,7 +1566,8 @@ class TestInterface(SiTestCase):
         )
         self.cli_ok(repo, "attr-reject", "--att", aid(2), "--by", "QA", "--note", "證據不足")
         self.cli_ok(repo, "prop-new", "--run", run, *fx.good_prop_args(repo, "P"))
-        fx.append_events(repo, [fx.dec_ev(124, "return")])
+        real = [e for e in fx.EV(repo) if e["kind"] == "prop" and e["id"] == pid(124)][0]
+        fx.append_events(repo, [fx.dec_ev(124, "return", digest=real["digest"])])  # R107 (c)
         self.cli_ok(
             repo, "prop-revise", "--run", run, "--prop", pid(124), *fx.revise_args(repo, "P")
         )
@@ -1601,6 +1616,14 @@ class TestInterface(SiTestCase):
                 "--note",
                 "x",
             ],
+            "decide": ["decide", pid(124), "--kind", "approve", "--sid", fx.UUID, "--line", "1"],
+            "heldout-freeze": ["heldout-freeze", pid(124), "--from", str(plain), "--by", "FZ"],
+            "sandbox": ["sandbox", pid(124)],
+            "verify": ["verify", pid(124)],
+            "promote": ["promote", pid(124)],
+            "rollback": ["rollback", pid(124)],
+            "obs-add": ["obs-add", "--dry-run", "--body-file", str(plain)],
+            "obs-close": ["obs-close", "--carrier", "console", "--audit-ref", fx.UUID],
         }
         for verb, argv in flags.items():
             for bad in (plain, missing):
@@ -1613,16 +1636,7 @@ class TestInterface(SiTestCase):
         today = datetime.now().strftime("%Y-%m-%d")
         calls = [
             [v]
-            for v in (
-                "decide",
-                "heldout-freeze",
-                "sandbox",
-                "verify",
-                "promote",
-                "rollback",
-                "capacity",
-                "frobnicate",
-            )
+            for v in ("capacity", "frobnicate")  # P3 動詞與非動詞（P2 的八個動詞已建成）
         ]
         calls += [
             ["card", pid(124), "--issue"],
@@ -1860,7 +1874,7 @@ class TestSopArticles(SiTestCase):
 WEIRD_STATUS_KEYS = [
     "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
     "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
-    "friction_reconcile", "no_event",
+    "friction_reconcile", "no_event", "console_pending",
 ]  # fmt: skip
 
 
@@ -1889,7 +1903,7 @@ class TestWeirdEvents(SiTestCase):
                 repo = self.weird_repo(label)
                 res = self.check(repo)
                 self.assertEqual(res["_rc"], 1, label)
-                self.assertEqual(len(res["items"]), 28)
+                self.assertEqual(len(res["items"]), 32)
                 self.assertTrue(all("status" in i for i in res["items"]))
                 self.assertEqual(self.S(res, "events.structure"), "FAIL")
                 self.assertEqual(self.F(res, "events.structure"), {("seq=2", "EVENT-TYPE")})
@@ -1997,23 +2011,13 @@ class TestValueDomains(SiTestCase):
             repo = fx.p1_base()
             fx.write_events(repo, events)
             out[key] = self.check(repo)
+        # P2 R98：引言回查改由 events.dec_quote 與 events.research 的 helmsman 回查承接，
+        # P1 的 QUOTE-VERIFIER-NOT-ESTABLISHED warn 在兩處皆不再出現
         quote = ("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")
-        item = out["a"]["_item"]["events.transitions"]
-        self.assertEqual(item["status"], "PASS")
-        self.assertEqual({(f["subject"], f["code"]) for f in item["findings"]}, {quote})
-        (finding,) = item["findings"]
-        self.assertEqual(finding["level"], "warn")
-        self.assertTrue(finding["detail"].startswith("[warn]"))
-        self.assertIn("1", finding["detail"])
-        self.assertIn("引言回查屬 P2", finding["detail"])
-        self.assertEqual(self.F(out["b"], "events.transitions"), set())
-        item = out["c"]["_item"]["events.research"]
-        self.assertEqual(item["status"], "PASS")
-        self.assertEqual({(f["subject"], f["code"]) for f in item["findings"]}, {quote})
-        self.assertEqual(item["findings"][0]["level"], "warn")
-        self.assertEqual(self.F(out["d"], "events.research"), set())
-        self.assertFalse(out["a"]["_item"]["events.transitions"]["blocking"])
-        self.assertFalse(item["blocking"])
+        for key in ("a", "b"):
+            self.assertNotIn(quote, self.F(out[key], "events.transitions"), key)
+        for key in ("c", "d"):
+            self.assertNotIn(quote, self.F(out[key], "events.research"), key)
         for key in ("c", "d"):
             self.assertEqual((out[key]["overall"], out[key]["_rc"]), ("PASS", 0), key)
 
@@ -2065,7 +2069,7 @@ class TestProposalNumberingAndLock(SiTestCase):
         repo = fx.p1_base()
         for sub in ("locks", "research"):
             (self.home / sub).mkdir()
-        probe = self.home / "locks" / f".probe-{os.getpid()}"
+        probe = self.home / "locks" / f".probe-{os.getpid()}-{threading.get_ident()}"
         probe.mkdir()
         snap0, home0 = fx.snap(repo), fx.tree_files(self.home)
         rc, out, err = self.M(repo, *run_open_args())
@@ -2177,7 +2181,7 @@ def raw_line(seq: int, kind: str, by: str, body: dict) -> str:
 
 def corrupt_cases(p: str) -> dict[str, tuple]:
     """TCS §5.3 `CORRUPT-CASES`：案 → (kind, by, 鍵, structure 碼集, transitions 碼集)。"""
-    dec = {"prop": p, "dkind": "approve"}
+    dec = {"prop": p, "dkind": "promote"}  # P2 R72：flags 只准出現在 promote
     return {
         "K01": ("dec", "x", {**dec, "flags": ["a", ["b"]]}, {_TY}, set()),
         "K02": ("dec", "x", {**dec, "flags": ["a", 1]}, {_TY}, set()),
@@ -2198,7 +2202,7 @@ def corrupt_cases(p: str) -> dict[str, tuple]:
         "K15": ("attr.confirm", "x", {"att": ["x"]}, {_TY}, set()),
         "K16": ("run.open", "x", {"run": ["x"], "trigger": "a", "coords": 5}, {_MI, _TY}, set()),
         "K17": ("run.close", "x", {"run": rid(1), "outcomes": [1]}, {_TY}, set()),
-        "K18": ("card", "x", {}, set(), {_OR}),
+        "K18": ("card", "x", {}, {_MI}, set()),  # P2 R72：card 的 prop 為必備鍵
     }
 
 
@@ -2255,7 +2259,7 @@ class CorruptLedgerTestCase(SiTestCase):
         shutil.copytree(self.corrupt_base(), dest)
         if event is not None:
             kind, by, body = event[:3]
-            append_raw(dest, raw_line(6, kind, by, body))
+            append_raw(dest, raw_line(6, kind, by, fx.fill_p2(kind, by, body)))
         return dest
 
 
@@ -2264,7 +2268,7 @@ class TestDecFlagsAndConsumedKeys(CorruptLedgerTestCase):
 
     def check_case(self, repo: Path):
         res = self.check(repo)
-        self.assertEqual(len(res["items"]), 28)
+        self.assertEqual(len(res["items"]), 32)
         self.assertTrue(all("status" in i for i in res["items"]))
         return res
 
@@ -2276,14 +2280,11 @@ class TestDecFlagsAndConsumedKeys(CorruptLedgerTestCase):
         }  # fmt: skip
         for label, flags in forms.items():
             with self.subTest(label):
-                repo = self.case_repo(("dec", "x", {"prop": p, "dkind": "approve", "flags": flags}))
+                repo = self.case_repo(("dec", "x", {"prop": p, "dkind": "promote", "flags": flags}))
                 res = self.check_case(repo)
-                if label in ("F5", "F6"):
-                    self.assertEqual((res["_rc"], self.S(res, "events.structure")), (0, "PASS"))
-                    self.assertEqual(
-                        self.F(res, "events.transitions"),
-                        {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")},
-                    )
+                if label in ("F5", "F6"):  # 合法形態：結構 PASS（promote 對 proposed 另判 ILLEGAL）
+                    self.assertEqual(self.S(res, "events.structure"), "PASS")
+                    self.assertIn((p, "TRANSITION-ILLEGAL"), self.F(res, "events.transitions"))
                     continue
                 self.assertEqual(res["_rc"], 1)
                 self.assertEqual(self.S(res, "events.structure"), "FAIL")
@@ -2309,8 +2310,7 @@ class TestDecFlagsAndConsumedKeys(CorruptLedgerTestCase):
                     self.assertEqual(self.F(res, "events.transitions"), set())
                     continue
                 self.assertEqual((res["_rc"], self.S(res, "events.structure")), (0, "PASS"))
-                want = {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")} if label == "L01" else set()
-                self.assertEqual(self.F(res, "events.transitions"), want)
+                self.assertEqual(self.F(res, "events.transitions"), set())
 
 
 def base_prop(base: Path) -> str:

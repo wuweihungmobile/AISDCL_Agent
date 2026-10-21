@@ -7095,5 +7095,102 @@ class TestDef200133TrackedImportsDoNotPointAtUntrackedFiles(unittest.TestCase):
         self.assertEqual(python_import_targets("def broken(:\n", "a/b.py"), [])
 
 
+def _is_main_guard(node: ast.stmt) -> bool:
+    """`if __name__ == "__main__":`（含 `"__main__" == __name__` 的反序寫法）。"""
+    return isinstance(node, ast.If) and ast.unparse(node.test) in (
+        "__name__ == '__main__'", "'__main__' == __name__")
+
+
+def main_guard_sites(source: str) -> list[tuple[int, int, int]]:
+    """模組層每個腳本入口的 (行號, 其後的頂層敘述數, 其後首個敘述的行號)；語法錯誤的檔回空
+    （收集期自會紅）。"""
+    try:
+        body = ast.parse(source).body
+    except SyntaxError:
+        return []
+    return [(node.lineno, len(body) - 1 - i, body[i + 1].lineno if i + 1 < len(body) else 0)
+            for i, node in enumerate(body) if _is_main_guard(node)]
+
+
+def _guard_problem(rel: str, site: tuple[int, int, int]) -> str:
+    line, after, first = site
+    return f"{rel}:{line} 腳本入口之後還有 {after} 個頂層敘述（首個在第 {first} 行）"
+
+
+def main_guard_problems(source: str, rel: str) -> list[str]:
+    """判準（純函式，供紅綠自證共用）：腳本入口須為 `module.body` 的最後一個元素；回違反描述
+    （空＝合規）。"""
+    return [_guard_problem(rel, s) for s in main_guard_sites(source) if s[1]]
+
+
+def main_guard_scan(tests_dir: Path) -> tuple[int, int, list[str]]:
+    """(掃描檔數, 含腳本入口的檔數, 違反清單)；`_zzz_*` 為合成暫存模組，不掃。"""
+    scanned = guarded = 0
+    problems: list[str] = []
+    for path in sorted(tests_dir.glob("test_*.py")):
+        if path.name.startswith("_zzz_"):
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:  # 並行測試的暫存檔可能在列舉後消失
+            continue
+        scanned += 1
+        if b"__main__" in data:  # 快篩：沒有這個字面就不可能有腳本入口
+            sites = main_guard_sites(data.decode("utf-8"))
+            guarded += bool(sites)
+            problems += [_guard_problem(path.name, s) for s in sites if s[1]]
+    return scanned, guarded, problems
+
+
+class TestMainGuardIsTheLastTopLevelStatement(unittest.TestCase):
+    """TCS-SelfImproving-P2 NFR-P2-10 (14)／V4 的機械物（SCG-4 一審 D-01、D-10）：測試檔的腳本入口
+    `if __name__ == "__main__":` 須為該檔最後一個頂層敘述。
+
+    WHY：守衛之後才定義的測試類別，在**腳本模式**（`python tools/tests/<檔>`）執行 `unittest.main()`
+    時尚不存在，被靜默略過卻仍印 `OK`、rc 0（實例：`test_apply_lock.py` 腳本模式只跑 7／14、
+    `-k AT_240_8_1_` 得 `Ran 0 tests … OK`；本掃描首次執行另抓到 `test_smoke_ci_sync.py`、
+    `test_schedule_capability_parity.py` 同型）。pytest、`unittest discover`、根層全套都不觸發
+    `__main__`，根層全套 rc 0 看不到它；此前這條判準只住在 TCS 散文裡，靠人記得（Rule 12）。
+    """
+
+    _GOOD = ('import unittest\n\n\nclass A(unittest.TestCase):\n    pass\n\n\n'
+             'class B(unittest.TestCase):\n    pass\n\n\n'
+             'if __name__ == "__main__":\n    unittest.main()\n')
+    _BAD = ('import unittest\n\n\nclass A(unittest.TestCase):\n    pass\n\n\n'
+            'if __name__ == "__main__":\n    unittest.main()\n\n\n'
+            'class B(unittest.TestCase):\n    pass\n')
+
+    def test_every_test_file_keeps_its_script_entry_last(self) -> None:
+        scanned, guarded, problems = main_guard_scan(_TESTS_DIR)
+        # 非空轉：落地時實測 105 支皆含腳本入口；掃描面縮小（改名、列舉壞掉）時先紅在這裡
+        self.assertGreaterEqual(scanned, 90, f"只掃到 {scanned} 支 ⇒ 掃描面疑似縮小")
+        self.assertGreaterEqual(guarded, 90, f"只有 {guarded} 支含腳本入口 ⇒ 判準疑似失效")
+        self.assertEqual(problems, [], "\n  ".join(problems))
+
+    def test_a_guard_followed_by_statements_is_flagged(self) -> None:
+        hits = main_guard_problems(self._BAD, "x.py")
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("x.py:8", hits[0])
+        self.assertIn("1 個頂層敘述", hits[0])
+        reversed_form = self._BAD.replace('__name__ == "__main__"', '"__main__" == __name__')
+        self.assertEqual(len(main_guard_problems(reversed_form, "x.py")), 1)
+
+    def test_a_guard_at_the_tail_or_no_guard_is_clean(self) -> None:
+        self.assertEqual(main_guard_problems(self._GOOD, "x.py"), [])
+        self.assertEqual(main_guard_problems("import unittest\n", "x.py"), [])
+        self.assertEqual(main_guard_problems("def broken(:\n", "x.py"), [])
+        nested = "def f():\n    if __name__ == '__main__':\n        pass\n    return 1\n"
+        self.assertEqual(main_guard_problems(nested, "x.py"), [])  # 非模組層不判
+
+    def test_the_scan_goes_red_on_a_real_file_with_the_guard_in_the_middle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "test_bad.py").write_text(self._BAD, encoding="utf-8")
+            Path(tmp, "test_good.py").write_text(self._GOOD, encoding="utf-8")
+            scanned, guarded, problems = main_guard_scan(Path(tmp))
+        self.assertEqual((scanned, guarded), (2, 2))
+        self.assertEqual(len(problems), 1, problems)
+        self.assertTrue(problems[0].startswith("test_bad.py:"), problems)
+
+
 if __name__ == "__main__":
     unittest.main()

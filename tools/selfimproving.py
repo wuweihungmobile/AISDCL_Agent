@@ -1,8 +1,9 @@
 """SelfImproving 命令列入口（薄殼：只組 argparse 與分派，判準全在 `lib/selfimproving/`）。
 
-用法：python tools/selfimproving.py <動詞> [旗標]。13 個動詞：`check`（唯讀檢查帳本與協定）、
+用法：python tools/selfimproving.py <動詞> [旗標]。P1 的 13 個動詞：`check`（唯讀檢查帳本與協定）、
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
-`attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本）。其餘動詞（P2、P3）一律 rc 3。
+`attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
+與 `card --issue`。尚未建的動詞（P3）一律 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -31,6 +32,14 @@ _HELP = {
     "export": "唯讀匯出（JSON）", "run-open": "開運轉", "run-close": "關運轉",
     "attr": "歸因", "attr-confirm": "確認歸因", "attr-reject": "駁回歸因",
     "prop-new": "新增提案", "prop-revise": "修訂被退回的提案", "research": "研究掃描或免掃",
+    "decide": "把掌舵者的決定記成 DEC（自逐字稿或 Console 稽核檔驗證）",
+    "heldout-freeze": "凍結 held-out 評估集（提案者以外的角色）",
+    "sandbox": "核准後的提案套用到樹外的隔離沙盒",
+    "verify": "三步對照驗證（RED→GREEN→突變 RED）與三態判定",
+    "promote": "把已驗證且已獲晉升決定的提案合入正式面（不 commit）",
+    "rollback": "把已晉升的提案逐位元還原（不 commit）",
+    "obs-add": "Console 稽核檔入帳為一列 OBS（或 --dry-run 預檢）",
+    "obs-close": "Console 稽核檔把一個 open 的 OBS 列關成終值",
 }
 
 
@@ -58,7 +67,10 @@ def _build_parser() -> argparse.ArgumentParser:
     chk.add_argument("--params", help="params.json（相對路徑相對於 repo）")
     _verb(sub, "status")
     _verb(sub, "scan").add_argument("--since", help="起算 commit（7～40 位 hex）")
-    _verb(sub, "card").add_argument("prop", help="PROP-SI-NNN")
+    cd = _verb(sub, "card")
+    cd.add_argument("prop", help="PROP-SI-NNN")
+    cd.add_argument("--issue", action="store_true", help="記 card 事件（寫入）")
+    cd.add_argument("--by", default="main")
     exp = _verb(sub, "export")
     exp.add_argument("--kind", choices=export.KINDS, required=True)
     exp.add_argument("--since", type=int)
@@ -99,6 +111,40 @@ def _build_parser() -> argparse.ArgumentParser:
     pn.add_argument("--target", action="append", required=True)
     pn.add_argument("--source", action="append", required=True)
     sub.choices["prop-revise"].add_argument("--prop", required=True)
+    dc = _verb(sub, "decide")
+    dc.add_argument("id", help="PROP-SI-NNN 或 RUN-SI-NNN")
+    dc.add_argument("--kind", choices=si_events.DKINDS)
+    dc.add_argument("--sid")
+    dc.add_argument("--line", type=int)
+    dc.add_argument("--reason-class", dest="reason_class", choices=si_events.REASON_CLASSES)
+    dc.add_argument("--carrier", choices=("console",))
+    dc.add_argument("--audit-ref", dest="audit_ref")
+    dc.add_argument("--by", default="main")
+    hf = _verb(sub, "heldout-freeze")
+    hf.add_argument("prop", help="PROP-SI-NNN")
+    hf.add_argument("--from", dest="src", required=True)
+    hf.add_argument("--by", required=True)
+    sb = _verb(sub, "sandbox")
+    sb.add_argument("prop", help="PROP-SI-NNN")
+    sb.add_argument("--memory-dir", dest="memory_dir")
+    sb.add_argument("--by", default="main")
+    vf = _verb(sub, "verify")
+    vf.add_argument("prop", help="PROP-SI-NNN")
+    vf.add_argument("--mutation")
+    vf.add_argument("--by", default="main")
+    for name in ("promote", "rollback"):
+        pr = _verb(sub, name)
+        pr.add_argument("prop", help="PROP-SI-NNN")
+        pr.add_argument("--memory-dir", dest="memory_dir")
+        pr.add_argument("--by", default="main")
+    for name in ("obs-add", "obs-close"):
+        ob = _verb(sub, name)
+        ob.add_argument("--carrier", choices=("console",))
+        ob.add_argument("--audit-ref", dest="audit_ref")
+        ob.add_argument("--by", default="main")
+    oa = sub.choices["obs-add"]
+    oa.add_argument("--dry-run", dest="dry_run", action="store_true")
+    oa.add_argument("--body-file", dest="body_file")
     rs = _verb(sub, "research")
     mode = rs.add_mutually_exclusive_group(required=True)
     mode.add_argument("--fetch", action="store_true")
@@ -155,6 +201,13 @@ def _scan(repo: Path, args: argparse.Namespace) -> int:
 
 
 def _card(repo: Path, args: argparse.Namespace) -> int:
+    if args.issue:
+        from lib.selfimproving import decwrite
+
+        out = decwrite.issue_card(repo, args, args.json)
+        _emit(out.text)
+        sys.stderr.write(out.err)
+        return out.rc
     git = Git(repo)
     events = si_events.load_sound_events(repo / si_events.LEDGER_REL) or []
     try:
@@ -201,9 +254,26 @@ def _write(repo: Path, args: argparse.Namespace) -> int:
                              getattr(args, "note", None), js)
     elif verb in ("prop-new", "prop-revise"):
         out = wv.prop(repo, args, js, verb == "prop-revise")
+    elif verb == "decide":
+        from lib.selfimproving import decwrite
+
+        out = decwrite.decide(repo, args, js)
+    elif verb in ("sandbox", "heldout-freeze"):
+        from lib.selfimproving import sandbox
+
+        out = (sandbox.run if verb == "sandbox" else sandbox.heldout_freeze)(repo, args, js)
+    elif verb == "verify":
+        from lib.selfimproving import verify
+
+        out = verify.run(repo, args, js)
+    elif verb in ("promote", "rollback"):
+        from lib.selfimproving import promote
+
+        out = getattr(promote, verb)(repo, args, js)
     else:
         out = _research(repo, args, wv)
     _emit(out.text)
+    sys.stderr.write(getattr(out, "err", ""))
     return out.rc
 
 
@@ -218,7 +288,48 @@ def _research(repo: Path, args: argparse.Namespace, wv):
     return research.run_fetch(repo, args.run, args.json)
 
 
-_HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export}
+def _obs_dry_run(repo: Path, args: argparse.Namespace) -> int:
+    """`obs-add --dry-run`：唯讀預檢，只走 `ro` 模組（不載入寫入類、runner、fetch、research）。"""
+    from lib.selfimproving import obsrows
+
+    if args.carrier or args.audit_ref or not args.body_file:
+        raise check.InputError("--dry-run 須搭 --body-file，且不收 --carrier／--audit-ref")
+    try:
+        raw = (sys.stdin.buffer.read() if args.body_file == "-"
+               else Path(args.body_file).read_bytes())
+        body = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise check.InputError(f"--body-file 讀不到或不是 JSON（{type(exc).__name__}）") from exc
+    res = obsrows.preview(repo, body, check.params_for(repo, "row_max_bytes")["row_max_bytes"])
+    if args.json:
+        _emit(json.dumps(res, ensure_ascii=False) + "\n")
+    else:
+        lines = ["dry-run ok" if res["ok"] else "dry-run reject", f"row: {res['row']}",
+                 f"row_bytes={res['row_bytes']} row_max_bytes={res['row_max_bytes']}"]
+        lines += [f"  {f['code']} {f['detail']}" for f in res["findings"]]
+        _emit("\n".join(lines) + "\n")
+    return 0 if res["ok"] else 1
+
+
+def _obs_write(repo: Path, args: argparse.Namespace) -> int:
+    if args.verb == "obs-add" and args.dry_run:
+        return _obs_dry_run(repo, args)
+    if args.verb == "obs-add" and args.body_file:
+        raise check.InputError("--body-file 只配 --dry-run")
+    if args.carrier != "console" or not args.audit_ref or not si_events.valid_uuid(args.audit_ref):
+        raise check.InputError(f"{args.verb} 須帶 --carrier console 與 --audit-ref（UUID）")
+    if not si_events.valid_by(args.by):
+        raise check.InputError("--by 須為非空、無空白、≤32 字元的標籤")
+    from lib.selfimproving import obswrite
+
+    fn = obswrite.add_console_row if args.verb == "obs-add" else obswrite.close_console_row
+    rc, text = fn(repo, args.audit_ref, args.by, args.json)
+    _emit(text)
+    return rc
+
+
+_HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
+             "obs-add": _obs_write, "obs-close": _obs_write}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -374,8 +374,16 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 之後歸 mixed（正確分類，非繞過；同上「系列收斂後四方重驗」列判例）。guard_self 依本表
     # 「合法縮小後必須同步下修」紀律釘到實測值。兩值皆取自當回合
     # `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
+    # 🔴 SelfImproving P2 收尾單人窗口（護欄層記帳＝同標籤 R214 第三～六列）：guard_self
+    # 3149→3197（+48）——成長全在 QA SCG-4 一審 D-10 指名的框架缺口機械物
+    # test_doc_loc_baseline_freshness_r60.py::TestMainGuardIsTheLastTopLevelStatement（掃
+    # tools/tests/test_*.py 的 `__main__` 守衛須為最後一個頂層敘述；立案＝test_apply_lock.py
+    # 腳本模式靜默略過一半測試仍印 OK，首跑另抓到兩支既有違反檔），守測試衛生＝只能是
+    # guard_self 成員（同上 DEF-200-476 圍籬鎖判例），判準邏輯本身無法移出散文；QA 一審提出、
+    # 修復棒二落地、QA 二審驗收。值取自當回合 `guard_layer_bucket_census.py --grain chunk`
+    # 實測（exclusive），零加減推算；prose 4350 實測未動。
     "prose": 4350,
-    "guard_self": 3149,
+    "guard_self": 3197,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

@@ -247,7 +247,10 @@ class TestResearchEvents(ResearchCase):
             self.draft_ok(repo, out)
         self.assertEqual(len(fx.EV(repo)), n1)
         res = self.check(repo)
-        self.assertEqual(self.F(res, "events.research"), {("-", "QUOTE-VERIFIER-NOT-ESTABLISHED")})
+        # P2 R98：QUOTE warn 移除；helmsman 免掃改由座標回查（逐字稿取不到＝nonblocking NE）
+        found = self.F(res, "events.research")
+        self.assertNotIn(("-", "QUOTE-VERIFIER-NOT-ESTABLISHED"), found)
+        self.assertEqual({c for _, c in found}, {"TRANSCRIPT-UNAVAILABLE"})
         self.assertEqual((res["overall"], res["_rc"]), ("PASS", 0))
         self.assertTrue(snap0 and n0)
 
@@ -267,6 +270,40 @@ class TestSourceTable(ResearchCase):
     def raw(self, obj=None, **kw):
         obj = obj if obj is not None else {"schema_rev": 1, "sources": [self.good_entry(**kw)]}
         return (json.dumps(obj, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+    def table_of(self, urls):
+        entries = [self.good_entry(id=f"s{i}", url=u) for i, u in enumerate(urls)]
+        return self.raw({"schema_rev": 1, "sources": entries})
+
+    def test_AT_230_2_1_ascii_hosts_are_accepted(self):
+        urls = ["https://example.org/a", "https://docs.example.co.uk/b",
+                "https://a-b.example.net/c", "https://example.org:8443/d",
+                "https://axn--b.example/e", "https://xn-b.example/f", "https://EXAMPLE.ORG/g"]
+        got = si_sources.validate_table(self.table_of(urls), si_sources.DEFAULT_POLICY)
+        self.assertEqual([x for x in got if x[0] == "SRC-URL-HOST"], [])
+        real = fx.REAL_PARAMS.parent / "research_sources.json"
+        if real.is_file():
+            self.assertEqual(si_sources.validate_table(real.read_bytes(),
+                                                       si_sources.DEFAULT_POLICY), [])
+
+    def test_AT_230_2_E_1_non_ascii_hosts_are_rejected(self):
+        bad = ["https://１２７.0.0.1/x", "https://ｅｘａｍｐｌｅ.org/", "https://example。org/x",
+               "https://例え.jp/", "https://xn--e1afmkfd.xn--p1ai/", "https://XN--abc.example/",
+               "https://a.Xn--b.example/", "https://sub.xn--x.example.org/"]
+        with mock.patch("socket.getaddrinfo", side_effect=AssertionError("連線")), \
+                mock.patch("socket.create_connection", side_effect=AssertionError("連線")):
+            for url in bad:
+                with self.subTest(url):
+                    raw = self.table_of([url, "https://example.org/ok"])
+                    got = si_sources.validate_table(raw, si_sources.DEFAULT_POLICY)
+                    self.assertEqual({(c, s) for c, s, _ in got}, {("SRC-URL-HOST", "s0")})
+                    self.assertTrue(any("非 ASCII 或 IDNA 形態" in d for _, _, d in got))
+        repo = fx.p1_base()
+        fx.put(repo, fx.SRC_REL, self.table_of([bad[0]]).decode("utf-8"))
+        res = self.check(repo)
+        self.assertEqual(self.S(res, "research.sources"), "FAIL")
+        self.assertIn(("s0", "SRC-URL-HOST"), self.F(res, "research.sources"))
+        self.assertEqual(res["_rc"], 1)
 
     def test_AT_130_2_E_1_table_codes_and_preflight(self):
         policy = si_sources.DEFAULT_POLICY
@@ -1629,14 +1666,17 @@ class TestScan(ScanCase):
             sorted(["AutoClaude", "AISDLC_SDD", "SelfImproving", "根層", "AgentConsole"]),
         )
         rows = [c["row"] for c in res["candidates"]]
-        for i, row in enumerate(rows):
+        for i, (cand, row) in enumerate(zip(res["candidates"], rows, strict=True)):
             cells = [c.strip() for c in row.strip().strip("|").split("|")]
             self.assertEqual(len(cells), 9)
             self.assertLessEqual(len(row.encode("utf-8")), 700)
             self.assertEqual(cells[0], obs_id(11 + i))
+            # P2 R103：模組桶候選列是計數資訊（process／P4／decided：僅計數）；缺陷候選列維持原樣
+            want = (("bug", "P3", "open") if cand["bucket"] == "defects"
+                    else ("process", "P4", "decided：僅計數"))
             self.assertEqual(
                 (cells[2], cells[5], cells[6], cells[7], cells[8]),
-                ("si scan（自動草稿）", "bug", "P3", "open", "面=流程;來源=工具;回報者=scan"),
+                ("si scan（自動草稿）", *want, "面=流程;來源=工具;回報者=scan"),
             )
         self.assertTrue(all(re.search(r"commit [0-9a-f]{12}", c["row"]) for c in by_src["obs"]))
         copy = fx.new_dir("cp")
@@ -1761,7 +1801,13 @@ class TestScan(ScanCase):
             [ln.split(" ")[1] for ln in lines[:5]],
             ["defects", "observations", "event_ledger", "build_reports", "probe_outputs"],
         )
-        self.assertTrue(all(re.match(r"^source \S+ 讀到 \d+ 筆$", ln) for ln in lines[:5]), lines)
+        # P2 R103：只計數、未解析內容的三個來源改「計 N 筆（未解析內容）」
+        want = [r"^source defects 讀到 \d+ 筆$", r"^source observations 計 \d+ 筆（未解析內容）$",
+                r"^source event_ledger 讀到 \d+ 筆$",
+                r"^source build_reports 計 \d+ 筆（未解析內容）$",
+                r"^source probe_outputs 計 \d+ 筆（未解析內容）$"]
+        self.assertTrue(all(re.match(rx, ln) for rx, ln in zip(want, lines[:5], strict=True)),
+                        lines)
         self.assertEqual(lines[5:], ["無事件"])
         res = self.scan_json(repo)
         self.assertEqual(
@@ -1939,6 +1985,83 @@ class TestResearcherAndTemplateArticles(SiTestCase):
         before = fx.tree_state(repo)
         fx.put(repo, "ignored/secret.txt", "x\n")
         self.assertEqual(fx.tree_state(repo), before)
+
+
+class TestP2Closures(ResearchCase):
+    def test_AT_230_2_E_2_bad_host_means_zero_connections(self):
+        srv = self.serving({"/ok": (200, TEXT, b"ok")})
+        repo = self.fetch_repo(srv, [("s-ok", "/ok")])
+        raw = json.loads(fx.read(repo, fx.SRC_REL))
+        good = list(raw["sources"])
+        raw["sources"] = [*good, {"id": "s-zz-bad", "url": "https://１２７.0.0.1/x", "kind": "docs",
+                                  "extract": "x", "added_by": "夾具"}]
+        fx.put(repo, fx.SRC_REL, json.dumps(raw, ensure_ascii=False, indent=2) + "\n")
+        fx.commit_all(repo, "bad host")
+        ev0, snap0 = (repo / fx.EVL).read_bytes(), fx.snap(repo)
+        rc, out, err = self.fetch(repo)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("SRC-URL-HOST", fx.codes_of(out))
+        self.assertEqual(len(srv.requests), 0)
+        self.assertEqual(((repo / fx.EVL).read_bytes(), fx.snap(repo)), (ev0, snap0))
+        lines = out.split("\n")
+        self.assertTrue(lines[lines.index("obs-draft:") + 1].startswith("| OBS"))
+        raw["sources"] = good
+        fx.put(repo, fx.SRC_REL, json.dumps(raw, ensure_ascii=False, indent=2) + "\n")
+        fx.commit_all(repo, "good only")
+        rc, out, err = self.fetch(repo)
+        self.assertEqual(rc, 0, out + err)
+        self.assertGreater(len(srv.requests), 0)
+        self.assertEqual(len(self.scan_events(repo)), 1)
+
+
+class TestScanP2(ScanCase):
+    # 受測面：tools/lib/selfimproving/sandbox.py（程式碼鎖，非散文）
+    def _candidates(self, repo):
+        obj = self.scan_json(repo)
+        return obj, [c["row"] for c in obj["candidates"]]
+
+    def test_AT_240_10_1_informational_drafts(self):
+        repo = self.scan_repo()
+        rc, text, err = self.M(repo, "scan")
+        self.assertEqual(rc, 0, err)
+        for sid in ("observations", "build_reports", "probe_outputs"):
+            self.assertRegex(text, rf"source {sid} 計 \d+ 筆（未解析內容）")
+        self.assertRegex(text, r"source defects 讀到 \d+ 筆")
+        obj, rows = self._candidates(repo)
+        self.assertEqual(obj["status"], "candidates")
+        self.assertEqual(sorted({k for s in obj["sources"] for k in s}),
+                         sorted({k for s in self.scan_json(repo)["sources"] for k in s}))
+        module_rows = [c["row"] for c in obj["candidates"] if c["bucket"] != "defects"]
+        defect_rows = [c["row"] for c in obj["candidates"] if c["bucket"] == "defects"]
+        self.assertTrue(module_rows)
+        for row in module_rows:
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            self.assertEqual((cells[5], cells[6], cells[7]), ("process", "P4", "decided：僅計數"))
+            self.assertEqual(cells[8], "面=流程;來源=工具;回報者=scan")
+        for row in defect_rows:
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            self.assertEqual((cells[5], cells[6], cells[7]), ("bug", "P3", "open"))
+        copy = fx.new_dir("scancopy")
+        shutil.copytree(repo, copy)
+        ledger = fx.read(copy, "docs/06_quality/SelfImproving_Observation_Ledger.md")
+        fx.put(copy, "docs/06_quality/SelfImproving_Observation_Ledger.md",
+               ledger.rstrip("\n") + "\n" + "\n".join(rows) + "\n")
+        res = self.check(copy)
+        for item in ("row.required", "row.enums", "row.markers", "row.provenance", "row.bytes",
+                     "row.coordinates", "row.control_chars", "ledger.time_tz"):
+            self.assertEqual(self.S(res, item), "PASS", (item, self.F(res, item)))
+
+    def test_AT_240_10_E_1_defaults_unchanged(self):
+        repo = self.scan_repo(quiet=True)
+        rc, out, _ = self.M(repo, "scan")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.scan_json(repo)["status"], "no-event")
+        self.assertTrue(out.strip().split("\n")[-1].startswith("無事件"))
+        rc, out, _ = self.M(repo, "run-close", "--run", fx.rid(900 + 3), "--by", "main")
+        self.assertEqual(rc, 1)
+        row = out.split("obs-draft:\n")[1].strip()
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        self.assertEqual(cells[5:8], ["bug", "P3", "open"])
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -49,7 +50,8 @@ def ensure_home(si: Path) -> Path:
     try:
         for sub in ("locks", "research"):
             (si / sub).mkdir(parents=True, exist_ok=True)
-        probe = si / "locks" / f".probe-{os.getpid()}"
+        tag = f"{os.getpid()}-{threading.get_ident()}"  # 同行程多執行緒不互踩
+        probe = si / "locks" / f".probe-{tag}"
         probe.write_bytes(b"")
         probe.unlink()
     except OSError as exc:

@@ -41,7 +41,7 @@ _TESTS_DIR = Path(__file__).resolve().parent / "tests"
 # 下限釘選：低於此數＝測試大規模靜默消失（目錄/pattern/路徑壞掉），紅燈。
 # 刻意刪減測試時同步下修；新增測試累積到吃掉**零相依鑑別力餘裕**的一半即被提醒重釘、
 # 吃掉四分之三即讓閘門變紅（判準＝`tools/lib/min_tests_margin.py`，見下方 DEF-200-170 段）。
-MIN_TESTS = 5542  # 🔴 重釘 5326 → 5542（方向＝收緊；2026-10-20，SelfImproving P1 新增 6 支測試檔、158 個測試方法；discovery 實測直接填入、零加減推算）。上一次 5273 → 5326（方向＝收緊；2026-10-11，DEF-200-516 家族與 DEF-200-520 收尾單人窗口：test_quota_env_layers 31＋喚醒鏈回歸鎖與讀者鎖擴充；discovery 實測直接填入、零加減推算）。上一次：improving_113 收尾單人窗口（W1 test_model_roles 60＋W2 test_resume_cost 6＋讀者鎖擴充；discovery 實測直接填入、零加減推算）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+MIN_TESTS = 5755  # 🔴 重釘 5542 → 5755（方向＝收緊；2026-10-22，SelfImproving P2 新增測試檔與擴充；discovery 實測直接填入）。上一次 🔴 重釘 5326 → 5542（方向＝收緊；2026-10-20，SelfImproving P1 新增 6 支測試檔、158 個測試方法；discovery 實測直接填入、零加減推算）。上一次 5273 → 5326（方向＝收緊；2026-10-11，DEF-200-516 家族與 DEF-200-520 收尾單人窗口：test_quota_env_layers 31＋喚醒鏈回歸鎖與讀者鎖擴充；discovery 實測直接填入、零加減推算）。上一次：improving_113 收尾單人窗口（W1 test_model_roles 60＋W2 test_resume_cost 6＋讀者鎖擴充；discovery 實測直接填入、零加減推算）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 
 # R57「人工 ratchet 自己會腐化」（R15 釘完連續 11 輪沒人重釘）的兩層解：① WARN 只印不擋、
 # ② 保鮮期斷言會紅，且兩層門檻刻意不同，否則 WARN 一響閘門已紅、①毫無意義。立意成立，

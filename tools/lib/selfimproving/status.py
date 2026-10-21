@@ -8,29 +8,23 @@ P3 的 `capacity` 動詞建成前印 NOT-EVALUABLE、不得印成零。
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
-from lib.platform_utils import claude_home
-
+from . import consoleaudit
 from . import events as si_events
 from . import fold as si_fold
 from . import scan as si_scan
+from . import transcript as si_transcript
 from .git import Git
 
 _REOPENED_STATES = ("promoted", "measuring", "closed")
-
-
-def _transcript_dir(repo: Path) -> Path:
-    slug = re.sub(r"[^A-Za-z0-9]", "-", str(repo.resolve()))
-    return claude_home() / "projects" / slug
 
 
 def _friction(repo: Path) -> dict:
     """交卷對帳（NFR-SI-09-2）：逐字稿目錄取不到＝transcript-unavailable；取得到而 P1 未建解析器
     （「流程摩擦」節項數的解析屬刻意不做，TCS §4）＝transcript-parser-not-established。
     兩者皆 NOT-EVALUABLE、絕不印成 0。"""
-    found = _transcript_dir(repo).is_dir()
+    found = si_transcript.transcript_dir(repo).is_dir()
     return {"status": "NOT-EVALUABLE",
             "reason": "transcript-parser-not-established" if found else "transcript-unavailable"}
 
@@ -54,8 +48,32 @@ def _detect(f: si_fold.Folded, window: list[dict], hits: list) -> list[dict]:
     return sorted(out, key=lambda e: (e["trigger"], e["subject"]))
 
 
-def build(repo: Path, git: Git, params: dict) -> dict:
-    """狀態物件；鍵序固定（R60）。"""
+def console_pending(events: list[dict], read_home: bool = True) -> dict:
+    """R99 (a)：`<si>/console_audit/<uuid>.json` 中尚無對應事件者（只列檔名與 `kind`）；
+    目錄不存在或讀不到＝NOT-EVALUABLE；`export` 不讀家目錄，恆為 `export-reads-no-home`。"""
+    if not read_home:
+        return {"status": "NOT-EVALUABLE", "reason": "export-reads-no-home"}
+    box = si_events.si_dir() / consoleaudit.AUDIT_DIR
+    try:
+        names = sorted(p for p in box.iterdir() if p.is_file())
+    except OSError:
+        return {"status": "NOT-EVALUABLE", "reason": "home-unavailable"}
+    used = {e.get("audit_ref") for e in events if e["kind"] in ("dec", "obs.add", "obs.close")}
+    items = []
+    for p in names:
+        if p.suffix != ".json" or not si_events.valid_uuid(p.stem) or p.stem in used:
+            continue
+        try:
+            kind = json.loads(p.read_bytes().decode("utf-8")).get("kind")
+        except (OSError, ValueError, AttributeError):
+            kind = None
+        items.append({"audit_ref": p.stem, "kind": kind if kind in consoleaudit.KINDS else None})
+    items.sort(key=lambda i: i["audit_ref"])
+    return {"status": "read", "count": len(items), "items": items}
+
+
+def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
+    """狀態物件；鍵序固定（R60；其後附加末鍵 `console_pending`，R99）。"""
     events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     f = si_fold.fold(events or [], params.get("stop_after_bad"))
     closes = [e["seq"] for e in events or [] if e.get("kind") == "run.close"]
@@ -84,6 +102,7 @@ def build(repo: Path, git: Git, params: dict) -> dict:
         "pending_windows": f.pending_windows,
         "friction_reconcile": _friction(repo),
         "no_event": not detected,
+        "console_pending": console_pending(events or [], read_home),
     }
 
 
@@ -109,6 +128,9 @@ def render_text(obj: dict) -> str:
               f"reopen_candidates: unsettled={obj['reopen_candidates']['unsettled']}",
               f"pending_windows: {len(obj['pending_windows'])}",
               f"friction_reconcile: {fr['status']}（{fr.get('reason', '')}）"]
+    cp = obj["console_pending"]
+    lines.append(f"console_pending: {cp['count']}" if cp["status"] == "read"
+                 else f"console_pending: NOT-EVALUABLE（{cp['reason']}）")
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

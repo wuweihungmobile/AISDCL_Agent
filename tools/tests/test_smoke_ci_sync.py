@@ -964,10 +964,6 @@ class TestCiStepLocalCarrierCoverage(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestMacSmokeCliContract(unittest.TestCase):
     """R69（DEF-101-702／R68-19＋R68-21）：`macos_smoke_local.sh` 的兩道入口守門。
 
@@ -1568,3 +1564,7 @@ class TestMacZshSourceStepAssertsOutOfProcess(unittest.TestCase):
         old = ("zsh -c '\n  source tools/dev_start.sh --no-sync\n  rc=$?\n"
                '  [ -n "$VIRTUAL_ENV" ] || { echo "::error::x"; exit 1; }\n' "'\necho done\n")
         self.assertTrue(_zsh_source_problems(old), "helper 對斷言在引號內的舊形狀判綠")
+
+
+if __name__ == "__main__":
+    unittest.main()

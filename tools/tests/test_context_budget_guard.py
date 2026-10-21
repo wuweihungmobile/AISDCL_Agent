@@ -5950,8 +5950,9 @@ class RunResumeOtherDriverTest(unittest.TestCase):
                  [self._rec(605, **real), self._rec(600, **hit)], {}, "limit_event", False),
                 ("首棒＋撞線後有人打字", [self._rec(605, **real), self._rec(600, **hit),
                                          self._rec(60, **human)], {}, "limit_event", True),
-                ("過期 prev_end 不遮較新撞線（QA 複審 R2：兩錨取較晚者）", [self._rec(605, **real),
-                 self._rec(600, **hit)], {"relay_prev_end": self._rec(3000)["timestamp"]}, "limit_event", False)):
+                ("過期 prev_end 不遮較新撞線（QA 複審 R2：兩錨取較晚者）",
+                 [self._rec(605, **real), self._rec(600, **hit)],
+                 {"relay_prev_end": self._rec(3000)["timestamp"]}, "limit_event", False)):
             with self.subTest(label):
                 self._write(*records)
                 rc, state, _events = self._run(**extra)

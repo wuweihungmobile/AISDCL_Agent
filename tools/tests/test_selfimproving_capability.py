@@ -1,6 +1,8 @@
-"""SelfImproving P1 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；AT-143 系列）。
+"""SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
+AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（24 個鍵：19 `ro`、3 `rw`、2 `net`）；判準函式 `capability_problems`
+登記表 `CAPABILITY` 住本檔（40 個鍵：29 `ro`、7 `rw`、2 `net`、2 `exec`）；判準函式
+`capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
 故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
@@ -48,11 +50,27 @@ CAPABILITY: dict[str, str] = {
             "status",
             "scan",
             "export",
+            "transcript",
+            "decgrammar",
+            "decverify",
+            "cooldown",
+            "heldout",
+            "manifest",
+            "verdict",
+            "consoleaudit",
+            "obsrows",
+            "decheck",
         )
     },
-    **{f"{n}.py": "rw" for n in ("evwrite", "propfiles", "writeverbs")},
+    **{
+        f"{n}.py": "rw"
+        for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
+            "obswrite")
+    },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
+    **{f"{n}.py": "exec" for n in ("runner", "verify")},
 }
+CATEGORIES = ("ro", "rw", "net", "exec")
 CLOSURE_ONLY_RO = ("check.py", "status.py", "scan.py", "export.py", "card.py")
 NET_MODULES = {"socket", "urllib", "http", "ssl", "ftplib", "smtplib", "asyncio", "requests"}
 WRITE_RE = re.compile(
@@ -147,6 +165,7 @@ def capability_problems(
     *,
     net_file: str = "fetch.py",
     git_file: str = "git.py",
+    runner_file: str = "runner.py",
     closure=CLOSURE_ONLY_RO,
 ) -> list[str]:
     out: list[str] = []
@@ -154,9 +173,9 @@ def capability_problems(
     out += [f"{n}：未登記（新檔須先登記類別）" for n in sorted(files - set(registry))]
     out += [f"{n}：登記表有鍵而檔不存在" for n in sorted(set(registry) - files)]
     out += [
-        f"{n}：類別 {k!r} 不在 ro／rw／net"
+        f"{n}：類別 {k!r} 不在 ro／rw／net／exec"
         for n, k in registry.items()
-        if k not in ("ro", "rw", "net")
+        if k not in CATEGORIES
     ]
     for name in sorted(files & set(registry)):
         text = (pkg_dir / name).read_bytes().decode("utf-8")
@@ -178,12 +197,40 @@ def capability_problems(
                 out.append(f"{name}（ro）：含寫入形原語")
             if SHELL_RE.search(text):
                 out.append(f"{name}（ro）：含 os.system／os.popen")
-        if "subprocess" in text and (kind == "rw" or (kind == "ro" and name != git_file)):
-            out.append(f"{name}（{kind}）：subprocess 字樣只准出現在 {git_file}")
-        if kind == "rw" and nets:
-            out.append(f"{name}（rw）：不得 import 網路模組")
+        if "subprocess" in text and name not in (git_file, runner_file):
+            out.append(f"{name}（{kind}）：subprocess 字樣只准出現在 {git_file} 與 {runner_file}")
+        if "runner" in _rel_imports(text, pkg_dir.name) and kind != "exec":
+            out.append(f"{name}（{kind}）：②′ import runner 的檔須登記為 exec")
+        if kind in ("rw", "exec") and nets:
+            out.append(f"{name}（{kind}）：不得 import 網路模組")
+    for name in sorted(files):
+        text = (pkg_dir / name).read_bytes().decode("utf-8")
+        out += [f"{name}：④ 禁字樣 {pat.replace(chr(92), '')}" for pat in forbidden_hits(text)]
+        out += [f"{name}：平台守衛 {site} 須在 sys.platform 守衛內"
+                for site in unguarded_sites(text)]
     out += _closure_problems(pkg_dir, registry, files, closure)
     out += _entry_problems(pkg_dir, registry, entry_file)
+    return out
+
+
+def unguarded_sites(text: str) -> list[str]:
+    """`taskkill` 字面與 `os.killpg` 呼叫須落在條件含 `sys.platform` 的 `if` 作用域內。"""
+    tree = ast.parse(text)
+    parent = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+
+    def guarded(node) -> bool:
+        while node in parent:
+            node = parent[node]
+            if isinstance(node, ast.If) and "sys.platform" in ast.unparse(node.test):
+                return True
+        return False
+    out = []
+    for node in ast.walk(tree):
+        is_kill = (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                   and node.func.attr == "killpg")
+        is_taskkill = isinstance(node, ast.Constant) and node.value == "taskkill"
+        if (is_kill or is_taskkill) and not guarded(node):
+            out.append("os.killpg" if is_kill else "taskkill")
     return out
 
 
@@ -243,8 +290,11 @@ LEGAL_FILES = {
     "f.py": "import urllib\n",
     "r.py": "from . import f\n",
     "check.py": "from . import a\n",
+    "runner.py": "import subprocess\n",
+    "v.py": "from . import runner\n",
 }
-LEGAL_REG = {"a.py": "ro", "w.py": "rw", "f.py": "net", "r.py": "net", "check.py": "ro"}
+LEGAL_REG = {"a.py": "ro", "w.py": "rw", "f.py": "net", "r.py": "net", "check.py": "ro",
+             "runner.py": "exec", "v.py": "exec"}
 LEGAL_ENTRY = (
     "from lib.mypkg import check\n\n\ndef handler():\n    from lib.mypkg import w\n    return w\n"
 )
@@ -261,8 +311,10 @@ class TestCapabilityRegistry(unittest.TestCase):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
-        counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in ("ro", "rw", "net")}
-        self.assertEqual(counts, {"ro": 19, "rw": 3, "net": 2})
+        counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
+        self.assertEqual(counts, {"ro": 29, "rw": 7, "net": 2, "exec": 2})
+        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
+            "verify.py"})
         net_importers, subproc = set(), set()
         for n in names:
             text = (PKG / n).read_bytes().decode("utf-8")
@@ -271,7 +323,10 @@ class TestCapabilityRegistry(unittest.TestCase):
             if "subprocess" in text:
                 subproc.add(n)
         self.assertEqual(net_importers, {"fetch.py"})
-        self.assertEqual(subproc, {"git.py"})
+        self.assertEqual(subproc, {"git.py", "runner.py"})
+        runner_users = {n for n in names if "runner" in _rel_imports(
+            (PKG / n).read_bytes().decode("utf-8"), "selfimproving")}
+        self.assertTrue(all(CAPABILITY[n] == "exec" for n in runner_users), runner_users)
         for start in CLOSURE_ONLY_RO:
             seen, todo = set(), [start]
             while todo:
@@ -315,12 +370,110 @@ class TestCapabilityRegistry(unittest.TestCase):
             "k 入口模組層級 import rw": dict(entry="from lib.mypkg import w\n"),
             "l import 第三方 yaml": dict(files={"a.py": "import yaml\n"}),
             "m 類別值為 xx": dict(registry={**LEGAL_REG, "a.py": "xx"}),
+            "n ro 檔 import runner（②′）": dict(files={"a.py": "from . import runner\n"}),
+            "o rw 檔 import runner": dict(files={"w.py": "from . import runner\n"}),
+            "p exec 檔 import socket": dict(files={"v.py": "import socket\n"}),
+            "q exec 的 v.py 含 subprocess（只准 runner）":
+                dict(files={"v.py": "import subprocess\n"}),
+            "r check 的 import 閉包含 exec": dict(files={"check.py": "from . import v\n"}),
+            "s 入口模組層級 import exec": dict(entry="from lib.mypkg import v\n"),
         }
         for label, kw in mutations.items():
             with self.subTest(label):
                 problems = synth(**kw)
                 self.assertTrue(problems, label)
                 self.assertTrue(any(re.search(r"\.py|入口|登記", p) for p in problems), problems)
+
+
+class TestExecRegistry(unittest.TestCase):
+    P2_RO = ("transcript", "decgrammar", "decverify", "cooldown", "heldout", "manifest", "verdict",
+             "consoleaudit", "obsrows", "decheck")
+
+    def test_AT_240_5_1_exec_registry(self):
+        self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
+        self.assertEqual(len(CAPABILITY), 40)
+        self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
+        self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
+                                                          "obswrite")}, {"rw"})
+        self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("runner", "verify")}, {"exec"})
+        texts = {p.name: p.read_bytes().decode("utf-8") for p in PKG.glob("*.py")}
+        self.assertEqual({n for n, t in texts.items() if "subprocess" in t}, {"git.py",
+            "runner.py"})
+        self.assertEqual({n for n, t in texts.items() if "runner" in _rel_imports(t,
+            "selfimproving")},
+                         {"verify.py"})
+        self.assertTrue(all(not forbidden_hits(t) for t in texts.values()))
+        self.assertEqual(unguarded_sites(texts["runner.py"]), [])
+        self.assertIn('getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)', texts["runner.py"])
+        self.assertNotIn("subprocess.CREATE_NEW_PROCESS_GROUP", texts["runner.py"].replace(
+            'getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)', ""))
+
+    def test_AT_240_5_E_1_injections_are_caught(self):
+        import shutil
+        control = fx.new_dir("pkgc")
+        shutil.copytree(PKG, control)
+        self.assertEqual(capability_problems(control, CAPABILITY, ENTRY), [])
+
+        def copy_with(**edits):
+            dest = fx.new_dir("pkgi")
+            shutil.copytree(PKG, dest)
+            for name, fn in edits.items():
+                path = dest / f"{name}.py"
+                old = path.read_text(encoding="utf-8") if path.exists() else ""
+                path.write_text(fn(old), encoding="utf-8")
+            return dest
+        add = lambda line: (lambda t: t.rstrip("\n") + "\n" + line + "\n")  # noqa: E731
+        cases = [
+            ("a", dict(newmod=lambda t: "X = 1\n"), "newmod.py", "未登記", None),
+            ("b", dict(manifest=add("import subprocess")), "manifest.py", "subprocess", None),
+            ("c", dict(decverify=add("from . import runner")), "decverify.py", "②′", None),
+            ("d", dict(promote=add("from . import runner")), "promote.py", "②′", None),
+            ("e", dict(check=add("from . import sandbox")), "check.py", "import 閉包", None),
+            ("f", dict(runner=add("import urllib.request")), "runner.py", "網路模組", None),
+            ("g", dict(runner=add("time.sleep(1)")), "runner.py", "time.sleep", None),
+            ("h", dict(verify=add("while True:\n    break")), "verify.py", "while", None),
+            ("i", dict(runner=add('subprocess.run(["taskkill", "/F"])')), "runner.py", "taskkill",
+            None),
+            ("j", dict(runner=add("os.killpg(1, 9)")), "runner.py", "os.killpg", None),
+            ("k", {}, "verify.py", "②′", {**CAPABILITY, "verify.py": "rw"}),
+        ]
+        for label, edits, name, needle, registry in cases:
+            with self.subTest(label):
+                pkg = copy_with(**edits)
+                problems = capability_problems(pkg, registry or CAPABILITY, ENTRY)
+                hit = [p for p in problems if name in p and needle in p]
+                self.assertTrue(hit, (label, problems))
+
+    def test_AT_240_5_E_2_runner_static_invariants(self):
+        import io
+        texts = {n: (PKG / f"{n}.py").read_text(encoding="utf-8") for n in ("runner", "verify")}
+        tree = ast.parse(texts["runner"])
+        popens = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                  and ast.unparse(n.func).endswith("Popen")]
+        self.assertTrue(popens)
+        for call in popens:
+            shell = [k.value for k in call.keywords if k.arg == "shell"]
+            self.assertTrue(not shell or (isinstance(shell[0],
+                ast.Constant) and shell[0].value is False))
+        comms = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and ast.unparse(n.func).endswith("communicate")]
+        self.assertTrue(any(k.arg == "timeout" for c in comms for k in c.keywords))
+        for name, text in texts.items():
+            consts = {n.value for n in ast.walk(ast.parse(text)) if isinstance(n, ast.Constant)
+                      and isinstance(n.value, str)}
+            self.assertFalse({"-I", "-P"} & consts, name)
+            self.assertNotIn("dict(os.environ)", text)
+            self.assertNotIn("os.environ.copy()", text)
+        import test_platform_neutral_paths as root_tests
+        suite = unittest.TestSuite()
+        for cls in ("TestForeignExecutableArgvIsGuarded", "TestForeignPlatformApiIsGuarded",
+                    "TestForeignApiVocabularyOnlyGrows"):
+            suite.addTests(unittest.TestLoader().loadTestsFromTestCase(getattr(root_tests, cls)))
+        result = unittest.TextTestRunner(stream=io.StringIO()).run(suite)
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        for table in ("_FOREIGN_EXE_ARGV_DEBT", "_FOREIGN_API_SCOPE_DEBT"):
+            keys = getattr(root_tests, table)
+            self.assertFalse([k for k in keys if "selfimproving" in str(k).lower()], table)
 
 
 class TestDynamicPurity(SiTestCase):
@@ -422,7 +575,8 @@ class TestDynamicPurity(SiTestCase):
             self.cli_ok(repo, "attr-reject", "--att", aid(3), "--by", "QA", "--note", "證據不足")
             args = fx.good_prop_args(repo, "D", sources=[obs_id(1)])
             self.cli_ok(repo, "prop-new", "--run", rid2, *args)
-            fx.append_events(repo, [fx.dec_ev(124, "return")])
+            real = [e for e in fx.EV(repo) if e["kind"] == "prop" and e["id"] == pid(124)][0]
+            fx.append_events(repo, [fx.dec_ev(124, "return", digest=real["digest"])])  # R107 (c)
             self.cli_ok(
                 repo, "prop-revise", "--run", rid2, "--prop", pid(124), *fx.revise_args(repo, "P")
             )
@@ -448,7 +602,7 @@ class TestDynamicPurity(SiTestCase):
         self.assertEqual((before, st0), (after, st1))
         res = self.check(repo)
         self.assertEqual(res["_rc"], 0)
-        self.assertEqual(len(res["items"]), 28)
+        self.assertEqual(len(res["items"]), 32)
         calls: list[list[str]] = []
         real_run = subprocess.run
 
