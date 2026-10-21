@@ -690,19 +690,16 @@ class TestObsAdd(ObsCase):
             self.assertEqual(self.S(res, "obs.console_audit"), "FAIL")
             self.assertIn("CONSOLE-EVENT-MISSING", {c for _, c in self.F(res, "obs.console_audit")})
         with self.subTest("c"):
-            import threading
+            import concurrent.futures
             R = self.obs_repo()
             refs_ = [new_uuid(), new_uuid()]
             for r in refs_:
                 self.audit("obs-add", fx2.body_obs_add(r), None)
-            results = {}
-
-            def go(r):
-                results[r] = obswrite.add_console_row(R, r, "ops1")
-            ts = [threading.Thread(target=go, args=(r,)) for r in refs_]
-            [t.start() for t in ts]
-            [t.join() for t in ts]
-            self.assertEqual([results[r][0] for r in refs_], [0, 0])
+            # 執行緒內的例外由 future.result() 重新拋出（pre-push 18 worker 下曾只見 KeyError）
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                futs = {r: pool.submit(obswrite.add_console_row, R, r, "ops1") for r in refs_}
+            results = {r: f.result() for r, f in futs.items()}
+            self.assertEqual([results[r][0] for r in refs_], [0, 0], results)
             adds = [e for e in fx.EV(R) if e["kind"] == "obs.add"]
             self.assertEqual(len({e["obs"] for e in adds}), 2)
             ids = [ROW_RE.match(ln).group(1) for ln in obs_ledger(R).decode().splitlines()
