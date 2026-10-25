@@ -640,7 +640,7 @@ class TestVerifyPreconditionsAndCarrier(VerifyHelpers, P2TestCase):
         R88 的答案是 `carrier_proof=False`（測在主樹上＝無效），不是 traceback。"""
         from lib.selfimproving import runner
         from lib.selfimproving import verify as si_verify
-        tail = "X:\\elsewhere\\probe_mod.py\n"
+        tail = str(fx.new_dir("elsewhere") / "probe_mod.py") + "\n"  # 磁碟機差異由替身的例外表現
         fake = runner.ProbeResult(0, False, "sha256:" + "0" * 64, 20, tail)
         boom = mock.patch.object(os.path, "commonpath", side_effect=ValueError("different drives"))
         with mock.patch.object(runner, "run_probe", return_value=fake), boom:
