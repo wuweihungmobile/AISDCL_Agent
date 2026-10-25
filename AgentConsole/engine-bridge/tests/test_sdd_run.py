@@ -41,6 +41,7 @@ from tests.sdd_run_support import (
     sdd_body,
     seed_frozen,
     verbs,
+    wait_audit,
     wait_fsm,
     wait_sync,
     workspace_has,
@@ -582,7 +583,8 @@ def test_a_run_request_is_audited_as_a_decision_without_the_token(
     rid = resp.json()["run_id"]
     sdd_live.wait_status(rid, TERMINAL)
     wait_fsm(sdd_proj, "IMPLEMENTATION")
-    entries = audit_entries(sdd_live)
+    # delegate-exit 的稽核列在 CLI 子行程結束後才追加：FSM 已回 IMPLEMENTATION 時它可能還沒落地
+    entries = wait_audit(sdd_live, lambda es: sum(e["event"] == "sdd_cli" for e in es) >= 2)
     (summary,) = [e for e in entries if e["event"] == "sdd_write" and e["verb"] == "run"]
     assert (summary["result"], summary["project"], summary["approver"], summary["run_id"]) == (
         "ok", "alpha", "operator", rid)

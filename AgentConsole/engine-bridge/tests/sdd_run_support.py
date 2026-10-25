@@ -214,6 +214,23 @@ def audit_entries(live) -> list[dict[str, Any]]:
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
 
 
+def wait_audit(live, ready, *, timeout: float = 20.0) -> list[dict[str, Any]]:
+    """輪詢 `_audit.jsonl` 直到 `ready(entries)` 為真，回傳當時的全部稽核列。
+
+    `sdd_cli` 稽核列在 CLI 子行程**結束之後**才追加，而 FSM 狀態檔是子行程在跑的時候就寫好：
+    `wait_fsm` 回到 IMPLEMENTATION 的那一刻，`delegate-exit` 那一列可能還沒落地（雲端 runner
+    2026-10-26 真的讀到只剩 `delegate-enter` 一列），所以稽核斷言不能緊接著單次讀。"""
+    deadline = time.monotonic() + timeout
+    entries: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        entries = audit_entries(live)
+        if ready(entries):
+            return entries
+        time.sleep(0.1)
+    raise AssertionError(f"稽核檔在 {timeout:g}s 內沒有到齊；現有事件："
+                         f"{[(e.get('event'), e.get('verb')) for e in entries]}")
+
+
 def trace_calls(trace: Path) -> list[dict[str, Any]]:
     import json
 
