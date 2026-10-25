@@ -615,10 +615,11 @@ _GUARD_LINE_STALE_SLACK = 0.02
 _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
-    "_selfimproving_fixtures.py": 1682,
+    "_selfimproving_fixtures.py": 1702,
     "_selfimproving_p2_fixtures.py": 879,
+    "_selfimproving_p3_fixtures.py": 518,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8791,
+    "test_adr_xplat001_c1c2_lock.py": 8816,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -666,7 +667,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5748,
+    "test_platform_neutral_paths.py": 5752,
     "test_platform_utils_dedup.py": 1168,
     "test_pre_commit_dispatcher_sigpipe.py": 954,
     "test_pre_push_dispatcher.py": 1205,
@@ -689,16 +690,21 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
-    "test_selfimproving_capability.py": 619,
-    "test_selfimproving_check.py": 2302,
-    "test_selfimproving_console_obs.py": 1243,
+    "test_selfimproving_capability.py": 740,
+    "test_selfimproving_capacity_retire.py": 621,
+    "test_selfimproving_check.py": 2304,
+    "test_selfimproving_console_obs.py": 1462,
     "test_selfimproving_decide.py": 879,
-    "test_selfimproving_events.py": 2466,
+    "test_selfimproving_events.py": 2468,
     "test_selfimproving_events_p2.py": 1217,
-    "test_selfimproving_export_status.py": 753,
-    "test_selfimproving_p2_meta.py": 508,
+    "test_selfimproving_export_status.py": 757,
+    "test_selfimproving_measure.py": 746,
+    "test_selfimproving_measure_probe.py": 514,
+    "test_selfimproving_measure_verb.py": 551,
+    "test_selfimproving_p2_meta.py": 510,
+    "test_selfimproving_p3_meta.py": 423,
     "test_selfimproving_promote.py": 724,
-    "test_selfimproving_props.py": 1552,
+    "test_selfimproving_props.py": 1556,
     "test_selfimproving_research_scan.py": 2068,
     "test_selfimproving_sandbox.py": 823,
     "test_selfimproving_verify.py": 1053,
@@ -2796,6 +2802,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "ThreadPoolExecutor 使例外可見，test_selfimproving_console_obs.py −3＋本檔自身漂移）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔 "
      "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md。"),
+    ("R214", 137320, 141096, +3776,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第八列（SelfImproving P3 實作＋SCG-4 修復棒：TCS Stage-2"
+     "digest f7150d4a…、QA 一審 FAIL→修復棒→二審 PASS）：新鎖檔 _selfimproving_p3_fixtures.py／"
+     "test_selfimproving_measure.py／test_selfimproving_measure_verb.py／"
+     "test_selfimproving_measure_probe.py／test_selfimproving_capacity_retire.py／"
+     "test_selfimproving_p3_meta.py（TCS 的 AT 全集，回歸鎖性質）、既有 SI 測試的 R134 同步站點"
+     "（capability／console_obs／check／events／export_status／p2_meta／props／夾具）"
+     "＋本檔自身漂移。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔"
+     "docs/06_quality/SCG4-REVIEW-SelfImproving-P3-20261024.md。"),
 )
 
 
@@ -2897,7 +2914,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (8808, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (12584, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -2906,7 +2923,10 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "（收尾單人窗口：ruff／E501 存量行修、名冊列與上限上修）再 +24，精確淨額 8319；同標籤"
         "第五列（修復棒一：AT-240-2-E-3 CLI 抽樣與 OBS-SI-261 測試）再 +110，精確淨額 8429；"
         "同標籤第六列（一審修復棒二：D-01～D-10、verify --json）再 +371，精確淨額 8800；"
-        "第七列（push 後收斂：執行緒競態子案改 ThreadPoolExecutor）再 +8，精確淨額為 8808。"
+        "第七列（push 後收斂：執行緒競態子案改 ThreadPoolExecutor）再 +8，精確淨額為 8808；"
+        "同標籤第八列（SelfImproving P3 實作＋SCG-4 修復棒：TCS Stage-2 digest "
+        "f7150d4a…、六支新鎖檔與 R134 同步站點）再 +3776，"
+        "精確淨額為 12584。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3355,6 +3375,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
     ("R214", 0,  # round-label-ok
      "P2 push 後收斂（AT-235-1-E-2 (c) 執行緒競態子案）：回歸鎖軌本輪已申報至上限，本列申報 0、"
      "全額歸主軌（由 R214 名冊列承接）；見 CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md。"),
+    ("R214", 0,  # round-label-ok
+     "SelfImproving P3 實作與 SCG-4 修復棒（新鎖檔與 R134 同步站點）："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3530,10 +3554,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 354
+_REPIN_LOG_FROZEN_PREFIX_LEN = 355
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "705f496e6a81cec3538a23d3c4a34b1e06463717617ac8c2c8b3258ecdc127c3")
+    "5b01176be001cdff6f355148020bab57725b377ce3e2a96b9ab827c80c691c28")
 
 
 def repin_log_history_digest(
@@ -3726,6 +3750,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "b60babae5d35", "c76955d381f9", "DEF-200-559"),  # round-label-ok：P2 收尾修復棒一
     ("R214", "c76955d381f9", "e8a68d165d9b", "DEF-200-559"),  # round-label-ok：P2 一審修復棒二
     ("R214", "e8a68d165d9b", "705f496e6a81", "DEF-200-559"),  # round-label-ok：P2 push 後收斂
+    ("R214", "705f496e6a81", "5b01176be001", "DEF-200-568"),  # round-label-ok：SelfImproving P3
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

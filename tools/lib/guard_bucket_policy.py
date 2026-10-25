@@ -382,8 +382,14 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # guard_self 成員（同上 DEF-200-476 圍籬鎖判例），判準邏輯本身無法移出散文；QA 一審提出、
     # 修復棒二落地、QA 二審驗收。值取自當回合 `guard_layer_bucket_census.py --grain chunk`
     # 實測（exclusive），零加減推算；prose 4350 實測未動。
-    "prose": 4350,
-    "guard_self": 3197,
+    # 🔴 SelfImproving P3 收尾單人窗口（護欄層記帳＝同標籤 R214 第八列；主控依凍結常態規則＋
+    # SCG-4 二審 PASS 裁定）：prose 4350→5060（+710）、guard_self 3197→3250（+53）——成長全在
+    # TCS 的 AT 全集新鎖檔：`test_selfimproving_p3_meta.py` 守 SOP〈P3 動詞〉條文（守散文＝
+    # 只能是 prose）與 AT 錨定／能力登記自證（守自己＝只能是 guard_self），判準邏輯本身無法
+    # 移出散文；QA 一審 P2-3 指名、修復棒落地、QA 二審驗收。兩值取自棘輪自己印出的普查實測
+    # （`bucket_ratchet_problems()`，exclusive），零加減推算。
+    "prose": 5060,
+    "guard_self": 3250,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種

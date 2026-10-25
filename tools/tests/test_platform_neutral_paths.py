@@ -122,7 +122,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。
         # 🔴 2026-10-20 重釘 70→98（SelfImproving P1 `tools/lib/selfimproving/` 新增 16 支，
         # 實測 103，過腐化上界；腐化上界逐字指示，照填不推算）。
-        (_REPO_ROOT / "tools" / "lib", True, 98),
+        # 🔴 2026-10-25 重釘 98→122（SelfImproving P3 `tools/lib/selfimproving/` 新增 8 支，
+        # 實測 128，過腐化上界 122；腐化上界逐字指示，照填不推算）。
+        (_REPO_ROOT / "tools" / "lib", True, 122),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -492,7 +494,9 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
       把它們納進來會讓本鎖一上線就紅，而那紅燈反映的是待決策，不是新退化。
     """
     return [
-        (_TESTS_DIR, False, 89),                     # 實測 94（含新增 SI P0 檔；排除 _zzz_）
+        # 🔴 2026-10-25 重釘 89→109（SelfImproving P3 六支新檔，實測 115，過腐化上界 111；
+        # 腐化上界逐字指示，照填不推算）。
+        (_TESTS_DIR, False, 109),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78
