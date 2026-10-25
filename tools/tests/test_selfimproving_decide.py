@@ -624,7 +624,8 @@ class TestDecideBoundaries(P2TestCase):
             R, p = carried()
             core = self.core_of(R, p)
             sid = fx2.new_sid()
-            q = [{"type": "image", "source": {}}, {"type": "text", "text": f"核准 {p}"}] if blocks else f"核准 {p}"
+            q = f"核准 {p}"
+            q = [{"type": "image", "source": {}}, {"type": "text", "text": q}] if blocks else q
             fx2.make_transcript(R, sid, [fx2.rec_assistant_text(core, fx2.ts(0)),
                                          fx2.rec_attachment(q, typed, "human", write)])
             before = ledger(R)
@@ -643,7 +644,7 @@ class TestDecideBoundaries(P2TestCase):
                 self.assertEqual(ledger(R), before)
         R, p, before, rc, out, err = run("對照", fx2.ts(1), fx2.ts(5))
         self.assertEqual(rc, 0, out + err)
-        R, p, before, rc, out, err = run("區塊清單", fx2.ts(1), fx2.ts(5), blocks=True)  # 含圖片的附件
+        R, p, before, rc, out, err = run("區塊清單", fx2.ts(1), fx2.ts(5), blocks=True)
         self.assertEqual(rc, 0, out + err)
 
     def test_AT_212_4_E_2_card_not_delivered(self):
