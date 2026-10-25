@@ -110,7 +110,7 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
           目前沒有任何提案。
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table data-testid="si-prop-table" className="w-full min-w-[52rem] border-collapse text-left text-sm">
             <caption className="sr-only">提案</caption>
             <thead>

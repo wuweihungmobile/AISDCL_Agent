@@ -154,7 +154,7 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
           帳本目前沒有觀察列。
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="relative overflow-x-auto">
           <table data-testid="si-obs-table" className="w-full min-w-[56rem] table-fixed border-collapse text-left text-sm">
             <caption className="sr-only">觀察帳本</caption>
             <thead>

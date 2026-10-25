@@ -50,11 +50,12 @@ cat > "$policy_file" <<JSON
 JSON
 
 # policy create／user add 對已存在的名稱是更新（覆寫），所以可重複執行
-"${mc_cmd[@]}" admin policy create local "$policy_name" "$policy_file"
-"${mc_cmd[@]}" admin user add local "$S3_ACCESS_KEY" "$S3_SECRET_KEY"
+# mc 的成功訊息會回印帳號名（access key id）；容器日誌不該帶任何金鑰對的片段（OBS-SI-311），stdout 一律丟棄、失敗仍由 set -e 擋
+"${mc_cmd[@]}" admin policy create local "$policy_name" "$policy_file" > /dev/null
+"${mc_cmd[@]}" admin user add local "$S3_ACCESS_KEY" "$S3_SECRET_KEY" > /dev/null
 user_info="$("${mc_cmd[@]}" admin user info local "$S3_ACCESS_KEY")"
 if [[ "$user_info" != *"$policy_name"* ]]; then
-  "${mc_cmd[@]}" admin policy attach local "$policy_name" --user "$S3_ACCESS_KEY"
+  "${mc_cmd[@]}" admin policy attach local "$policy_name" --user "$S3_ACCESS_KEY" > /dev/null
 fi
 rm -f "$policy_file"
 
@@ -65,4 +66,4 @@ echo "ok" | "${mc_cmd[@]}" pipe "backupuser/${S3_BUCKET}/${probe}" > /dev/null
 "${mc_cmd[@]}" cat "backupuser/${S3_BUCKET}/${probe}" > /dev/null
 "${mc_cmd[@]}" rm "backupuser/${S3_BUCKET}/${probe}" > /dev/null
 
-echo "init-bucket: bucket ${S3_BUCKET} 與專用帳號 ${S3_ACCESS_KEY} 就緒（已實際寫入／讀取／刪除驗證）"
+echo "init-bucket: bucket ${S3_BUCKET} 與專用備份帳號就緒（已實際寫入／讀取／刪除驗證；帳號名不印，見 OBS-SI-311）"
