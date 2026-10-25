@@ -123,4 +123,18 @@ public final class ErrorReasons {
     public static final String SI_UNAVAILABLE = "si_unavailable";
     /** 單筆提案不存在（404，帶 {@code details.id}）：「404 的 reason 省略」慣例的例外之一，另一個是 {@link #RTM_NOT_FOUND}。 */
     public static final String SI_NOT_FOUND = "si_not_found";
+
+    // ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W15；Architecture §11.1；前端住 lib/domain/si.ts 的 SI_REASONS）──
+    /**
+     * SelfImproving 寫入面停用（503）：backend 沒有設定稽核簽章金鑰或 Bridge 寫入權杖（{@code details.cause}＝{@code audit_key_unset}｜
+     * {@code bridge_token_unset}，先中者），或 Bridge 回報它沒設權杖或稽核目錄（{@code details.detail} 逐字）。
+     */
+    public static final String SI_WRITE_DISABLED = "si_write_disabled";
+    /**
+     * 沒有資格寫入（403）：JWT 帳號名不在 {@code console.si.deciders} 名單內（區分大小寫），或 Bridge 拒絕 backend 附的權杖
+     * （兩端權杖設定不一致）。與 {@link #ACCESS_DENIED}（角色非 ADMIN）是兩件事。
+     */
+    public static final String SI_WRITE_FORBIDDEN = "si_write_forbidden";
+    /** 稽核檔已存在（409）：Bridge 以獨佔建檔拒絕覆寫同名 {@code <audit_ref>.json}（每次新 ref，正常情況不會發生）。 */
+    public static final String SI_AUDIT_EXISTS = "si_audit_exists";
 }

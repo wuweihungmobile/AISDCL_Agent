@@ -249,6 +249,51 @@ public final class MiniBridge implements AutoCloseable {
         public record Seen(String uri, String query) {
         }
 
+        // ── P2b：稽核檔落地與預檢（TCS-SelfImprovingDecide-P2b §5.4；對照 routers/si.py 的三個寫入 POST 與 :validate）──
+
+        /** 每個收到的寫入請求（依到達順序；含預檢）：原始路徑、{@code X-Bridge-Token} 標頭（null＝沒帶）與請求本文位元組。 */
+        public final List<Write> writes = new CopyOnWriteArrayList<>();
+
+        /** 一個收到的 {@code POST /si/...}：原始（未解碼）路徑、權杖標頭與請求本文位元組。 */
+        public record Write(String path, String token, byte[] raw) {
+
+            /** 請求本文的 UTF-8 文字。 */
+            public String text() {
+                return new String(raw, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        }
+
+        /**
+         * 寫入端點回應的覆蓋；{@code null}＝預設 201 與兩鍵本文（audit_ref 取自請求本文、stored 恆為 true）。{@code body} 逐字送出
+         * （以左大括號或左中括號起頭視為 JSON，其餘為純文字）。
+         */
+        public volatile WriteReply writeReply;
+        /** 預檢（{@code :validate}）失敗時的回應；{@code null}＝回 {@link #validateReply}（200）。 */
+        public volatile WriteReply validateFailure;
+        /** 每個寫入請求回應前先睡這麼久（毫秒）：造讀取逾時。 */
+        public volatile long writeDelayMillis;
+        /** 收到寫入請求的<b>當下</b>（回應之前）的回呼：AT-933-2-1 在這裡以 JDBC 讀稽核列。 */
+        public volatile java.util.function.Consumer<Write> onWrite;
+        /** 預檢成功的回應物件（Bridge 形狀）：預設 ok 為 true、row_bytes 287、row_max_bytes 700、findings 空。 */
+        public volatile Map<String, Object> validateReply;
+
+        /** 一個固定的回應：狀態碼與逐字本文。 */
+        public record WriteReply(int status, String body) {
+
+            /** Bridge 的錯誤封包 {@code {code, reason, …extra}}。 */
+            public static WriteReply error(int status, String reason, Object... extra) {
+                Map<String, Object> body = map("code", status, "reason", reason);
+                for (int i = 0; i < extra.length; i += 2) {
+                    body.put((String) extra[i], extra[i + 1]);
+                }
+                return new WriteReply(status, JSON.writeValueAsString(body));
+            }
+        }
+
+        public static Map<String, Object> defaultValidateReply() {
+            return map("ok", true, "row", "| 預覽列（測試替身）|", "row_bytes", 287, "row_max_bytes", 700, "findings", List.of());
+        }
+
         Si() {
             reset();
         }
@@ -262,6 +307,12 @@ public final class MiniBridge implements AutoCloseable {
             arrayBody = false;
             delayMillis = 0;
             seen.clear();
+            writes.clear();
+            writeReply = null;
+            validateFailure = null;
+            writeDelayMillis = 0;
+            onWrite = null;
+            validateReply = defaultValidateReply();
             payloads.clear();
             Map<String, Map<String, Object>> golden = golden("A.snake");
             payloads.put("observations", golden.get("observations"));

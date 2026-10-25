@@ -228,6 +228,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/si/proposals/{id}/decide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 對待決提案或暫停的運轉下決定（P2b；僅 ADMIN）
+         * @description 九種動詞（approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；沒有批次核准）；路徑 id 為 PROP 號（resume 為 RUN 號）。各動詞必填與禁止的欄位見 SiDecideRequest；多帶或缺帶一律 422。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiDecide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * SelfImproving 觀察帳本（唯讀；P1b）
+         * @description Bridge GET /si/observations 的原樣轉遞：帳本逐列（九欄、marksKv、line）；無法解析的壞列以 {line, raw, valid:false} 出現，problems 逐項說明。游標分頁：truncated 為 true 時以 nextSince 取下一頁。失敗沒有 data。VIEWER 以上可讀。
+         */
+        get: operations["getSiObservations"];
+        put?: never;
+        /**
+         * 新增觀察列（P2b；僅 ADMIN）
+         * @description 新增一列處置為 open 的觀察；corrects 帶被更正列的 OBS 號時產生 rel=corrects 標記。建議先呼叫 observations/validate 預檢。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiObservation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/observations/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 關閉處置為 open 的觀察列（P2b；僅 ADMIN）
+         * @description 把處置為 open 的觀察列一次關成七個終值之一（沒有 open）；路徑 id 為 OBS 號。是否存在、是否仍為 open 由根層 CLI 入帳時判（不成立＝入帳被拒，稽核檔與 Console 稽核列原地不動，持續顯示待入帳）。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiObservationClose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/observations/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 新增觀察列的唯讀預檢（P2b；僅 ADMIN）
+         * @description 根層 obs-add --dry-run：回預覽列、位元組數與根層的拒收原因（ok=false 仍是 200）。不取 auditRef、不簽章、不寫 Console 稽核列、不落檔、不寫帳本。與新增觀察同一關（授權、停用、輸入閘）；Bridge 回 503 si_unavailable 時原因逐字轉出。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiObservationValidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/{category}/{key}/reset": {
         parameters: {
             query?: never;
@@ -940,26 +1024,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/si/observations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * SelfImproving 觀察帳本（唯讀；P1b）
-         * @description Bridge GET /si/observations 的原樣轉遞：帳本逐列（九欄、marksKv、line）；無法解析的壞列以 {line, raw, valid:false} 出現，problems 逐項說明。游標分頁：truncated 為 true 時以 nextSince 取下一頁。失敗沒有 data。VIEWER 以上可讀。
-         */
-        get: operations["getSiObservations"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/si/events": {
         parameters: {
             query?: never;
@@ -972,6 +1036,26 @@ export interface paths {
          * @description Bridge GET /si/events 的原樣轉遞：事件帳本逐行（多型事件，鍵依 kind 而異，原樣轉 camelCase）。游標分頁同 observations。失敗沒有 data。VIEWER 以上可讀。
          */
         get: operations["getSiEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/console-writes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Console 稽核列與 SelfImproving 帳本的對帳（P2b；VIEWER 以上可讀）
+         * @description 回 Console 自己的稽核列（時間新到舊；不含 body 與 mac）與每列是否已入帳（ingested）、帳本中 carrier 為 console 而本表沒有對應列的項（orphans，紅色警示來源）。對帳在 backend 一次全量做：以 Bridge 的 observations 與 events 各自 limit=500 迴圈取頁（上限各 20 頁）。讀路徑唯一的副作用是把 obs-add 列的 subjectId（NULL）依帳本新列號回填（冪等）；Bridge 永遠只被呼叫 GET。量不到（Bridge 失敗、逾時、頁數超限）＝reconcile.status 為 NOT-EVALUABLE（reason：si_unavailable、bridge_unreachable、bridge_timeout、scan_cap_exceeded），items 照回、ingested 與 orphans 為 null——不回空陣列、不冒充無待入帳。
+         */
+        get: operations["getSiConsoleWrites"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1789,6 +1873,116 @@ export interface components {
         SignoffRequest: {
             approver: string;
         };
+        /** @description 對待決提案（或暫停的運轉）下決定。九種動詞：approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；各動詞必填與禁止的欄位見表 M-D（多帶或缺帶一律 422，一次全列）。沒有批次核准 */
+        SiDecideRequest: {
+            /**
+             * @description 動詞
+             * @enum {string}
+             */
+            dkind: "approve" | "reject" | "return" | "promote" | "decline-promote" | "rollback" | "unblock" | "resume" | "ack-handoff";
+            /** @description 開啟決定當下看到的卡面 digest（綁定它，過期由根層 CLI 以 STALE-CARD 拒收）。approve、reject、return、promote、decline-promote、ack-handoff 必填；rollback、unblock、resume 不可帶 */
+            digest?: string;
+            /** @description 理由（1～500 個 code point 的單行字串，不含控制字元）。reject、decline-promote、return、rollback、resume 必填；其餘不可帶 */
+            reason?: string;
+            /**
+             * @description 理由類別。reject、decline-promote、return 必填；其餘不可帶
+             * @enum {string}
+             */
+            reasonClass?: "證據不足" | "風險過高" | "工件類別錯" | "已被涵蓋" | "範圍外" | "卡面不清" | "未說明";
+            /** @description 晉升後式（verdict 為 NE 的晉升）的勾選；true 只准 promote，稽核 body 的 flags 因此帶 unverified_ack */
+            unverifiedAck?: boolean;
+        };
+        ApiResultSiWriteReceipt: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["SiWriteReceipt"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 稽核檔已落地的收據；待入帳，由主機端根層 CLI 驗簽入帳 */
+        SiWriteReceipt: {
+            /**
+             * Format: uuid
+             * @description 稽核編號（小寫正規 UUID；入帳指令的 --audit-ref）
+             */
+            auditRef: string;
+            /** @enum {string} */
+            kind: "decide" | "obs-add" | "obs-close";
+            /** @description decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝null（入帳後才知道新列號） */
+            subject?: string | null;
+            /** @description 稽核 body 的 time（秒精度、±HH:MM，UTC 為 +00:00） */
+            time: string;
+            /** @description 簽章金鑰的 sha256 前 8 碼 */
+            keyId: string;
+        };
+        /** @description 新增觀察列（或預檢）。三個字串欄各 1～300 個 code point、UTF-8 位元組和不得超過 700（必要條件；權威是預檢與根層 CLI 的列位元組上限），且不得含豎線與控制字元（觀察列是 Markdown 九欄表） */
+        SiObservationRequest: {
+            /** @description 情境 */
+            context: string;
+            /** @description 症狀 */
+            symptom: string;
+            /** @description 證據座標（須含可定位座標，由根層 CLI 判） */
+            evidence: string;
+            /** @enum {string} */
+            category: "process" | "bug" | "tooling" | "doc" | "decision";
+            /** @enum {string} */
+            severity: "P1" | "P2" | "P3" | "P4";
+            /** @enum {string} */
+            face: "守衛" | "產品" | "文件" | "流程";
+            /**
+             * @description face 為守衛時必填、否則不可帶
+             * @enum {string}
+             */
+            exposure?: "a" | "b" | "c" | "無";
+            /** @description 是否外部衍生（表單預設 false） */
+            externalDerived: boolean;
+            /** @description 被更正的觀察列（選填；是否存在由根層 CLI 判） */
+            corrects?: string;
+        };
+        /** @description 關閉觀察列。七個終值（沒有 open）：fixed（ref＝7～40 碼小寫十六進位提交編號）、def（ref＝DEF-<n>-<n>）、merged（ref＝OBS 號）、proposed（ref＝PROP 號）、deferred／retired／decided（text＝1～120 個字元，不含豎線、控制字元與「之後再看」） */
+        SiCloseRequest: {
+            /**
+             * @description 終值
+             * @enum {string}
+             */
+            terminal: "fixed" | "def" | "deferred" | "retired" | "decided" | "merged" | "proposed";
+            /** @description fixed、def、merged、proposed 必填（格式依終值）；其餘不可帶 */
+            ref?: string;
+            /** @description deferred、retired、decided 必填；其餘不可帶。與終值以全形冒號相接成處置終值 */
+            text?: string;
+        };
+        ApiResultSiValidation: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["SiValidation"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 觀察列預檢結果（obs-add --dry-run）：預覽列、位元組數與根層的拒收原因 */
+        SiValidation: {
+            ok: boolean;
+            /** @description 預覽列全文（通過才有；否則空字串）；audit_ref 以等長的全零 UUID 佔位 */
+            row: string;
+            /**
+             * Format: int64
+             * @description 預覽列的 UTF-8 位元組數（等於入帳列的位元組數）
+             */
+            rowBytes: number;
+            /**
+             * Format: int64
+             * @description 根層協定參數檔的列位元組上限；根層量不到時為 null
+             */
+            rowMaxBytes?: number | null;
+            findings: components["schemas"]["SiValidationFinding"][];
+        };
+        SiValidationFinding: {
+            code: string;
+            detail: string;
+        };
         TestConnectionRequest: {
             /** @description 完整的 chat-completions 端點 URL（與系統參數 model.apiUrl 同義；後端不補路徑） */
             apiUrl?: string;
@@ -2327,6 +2521,67 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
             traceId: string;
+        };
+        ApiResultSiConsoleWrites: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["SiConsoleWrites"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        SiConsoleWriteItem: {
+            /** Format: uuid */
+            auditRef: string;
+            /** @enum {string} */
+            kind: "decide" | "obs-add" | "obs-close";
+            user: string;
+            role: string;
+            /**
+             * Format: date-time
+             * @description 稽核 body 的 time（同一瞬間；以 UTC 表示）
+             */
+            time: string;
+            /** @description decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 null） */
+            subjectId?: string | null;
+            /** @description 卡面 digest（只有六種決定動詞才有） */
+            digest?: string | null;
+            /** @description 簽章金鑰的 sha256 前 8 碼 */
+            keyId: string;
+            /** @description 帳本是否已有同 auditRef 的 dec／obs.add／obs.close 事件或觀察列標記；量不到時為 null */
+            ingested?: boolean | null;
+        };
+        SiConsoleWriteOrphan: {
+            auditRef: string;
+            /** @enum {string} */
+            kind: "decide" | "obs-add" | "obs-close";
+            /** @description dec 的 prop（resume 為 run）、觀察列的 id、obs.close 的 obs */
+            subject?: string | null;
+        };
+        /** @description Console 稽核列與 SelfImproving 帳本的對帳結果 */
+        SiConsoleWrites: {
+            /** @description 稽核列（時間新到舊、同刻依 auditRef 升冪） */
+            items: components["schemas"]["SiConsoleWriteItem"][];
+            /** @description 表內還有更舊的列（以 limit 取回更多） */
+            truncated: boolean;
+            /** @description 帳本中 carrier 為 console、Console 表內卻沒有對應列的項（紅色警示來源）；量不到時為 null */
+            orphans?: components["schemas"]["SiConsoleWriteOrphan"][] | null;
+            reconcile: components["schemas"]["SiReconcile"];
+        };
+        SiReconcile: {
+            /** @enum {string} */
+            status: "ok" | "NOT-EVALUABLE";
+            /**
+             * @description 量不到的原因；ok 時為 null
+             * @enum {string|null}
+             */
+            reason?: "si_unavailable" | "bridge_unreachable" | "bridge_timeout" | "scan_cap_exceeded" | null;
+            /**
+             * Format: int32
+             * @description 本次回填 subject_id 的筆數（量不到時為 0）
+             */
+            backfilled: number;
         };
         ApiResultMapStringListConfigResponse: {
             /** Format: int32 */
@@ -4473,6 +4728,502 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postSiDecide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 提案 ID（例：PROP-SI-004）；resume 為運轉 ID（例：RUN-SI-001） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiDecideRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiWriteReceipt"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getSiObservations: {
+        parameters: {
+            query?: {
+                /** @description 游標（選填；整數 ≥0）：只回「ID 的數字部分」嚴格大於它的項目；取自上一頁回應的 nextSince。不合 → 400 */
+                since?: number;
+                /** @description 頁大小（選填；整數 ≥1）：不合 → 400；超過根層協定參數檔的上限時，CLI 失敗而回 503 si_unavailable（cause=nonzero_rc） */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiExportResponse"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postSiObservation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiObservationRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiWriteReceipt"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postSiObservationClose: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 觀察列 ID（例：OBS-SI-005） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiWriteReceipt"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postSiObservationValidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiObservationRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiValidation"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations 一次全列）或 Bridge 拒絕此請求（reason 引擎拒絕此請求） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設，details.cause 說明）或 si_unavailable（根層 CLI 不可用；details.cause、details.detail 逐字） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7398,7 +8149,7 @@ export interface operations {
             };
         };
     };
-    getSiObservations: {
+    getSiEvents: {
         parameters: {
             query?: {
                 /** @description 游標（選填；整數 ≥0）：只回「ID 的數字部分」嚴格大於它的項目；取自上一頁回應的 nextSince。不合 → 400 */
@@ -7477,12 +8228,10 @@ export interface operations {
             };
         };
     };
-    getSiEvents: {
+    getSiConsoleWrites: {
         parameters: {
             query?: {
-                /** @description 游標（選填；整數 ≥0）：只回「ID 的數字部分」嚴格大於它的項目；取自上一頁回應的 nextSince。不合 → 400 */
-                since?: number;
-                /** @description 頁大小（選填；整數 ≥1）：不合 → 400；超過根層協定參數檔的上限時，CLI 失敗而回 503 si_unavailable（cause=nonzero_rc） */
+                /** @description 回傳的稽核列數（選填；整數 1～500，預設 100）：不合 → 400 */
                 limit?: number;
             };
             header?: never;
@@ -7497,7 +8246,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApiResultSiExportResponse"];
+                    "application/json": components["schemas"]["ApiResultSiConsoleWrites"];
                 };
             };
             /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
@@ -7520,33 +8269,6 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
-            502: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
-            504: {
                 headers: {
                     [name: string]: unknown;
                 };

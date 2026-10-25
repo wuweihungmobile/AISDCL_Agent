@@ -146,6 +146,15 @@ services:
       # 必須是同一個值。預設空＝SDD 寫入面整個停用（SDD 是選用引擎，不像 JWT_SECRET 設成必填）；設了就要 ≥32 字元，
       # 短於 32 字或仍是 <…> 佔位，Bridge 啟動即失敗（不靜默退回停用）。產生方式見 .env.example。
       BRIDGE_SDD_WRITE_TOKEN: ${BRIDGE_SDD_WRITE_TOKEN:-}
+      # 🔴 SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W9、W24）：三個變數皆預設空＝SI 寫入面整個停用
+      # （四個寫入 POST 回 503 si_write_disabled，details.cause 為 audit_key_unset 或 bridge_token_unset）。
+      #   BRIDGE_SI_WRITE_TOKEN  backend 發送（X-Bridge-Token）、engine-bridge 驗證，兩邊同值；≥32 字元（與上面的 SDD 權杖是兩個獨立的值）
+      #   CONSOLE_SI_AUDIT_KEY   稽核簽章金鑰環（逗號分隔，第一把簽章、其餘保留供輪替；每把 ≥32 字元）；只在 console-api 與主機端
+      #                          （主機端以同一把設 AUTOSDD_SI_AUDIT_KEY 入帳），**Bridge 不持有**
+      #   CONSOLE_SI_DECIDERS    可寫入的帳號名單（逗號分隔；須是 Admin 且 JWT 帳號名逐字在名單內；預設空＝無人可寫）
+      BRIDGE_SI_WRITE_TOKEN: ${BRIDGE_SI_WRITE_TOKEN:-}
+      CONSOLE_SI_DECIDERS: ${CONSOLE_SI_DECIDERS:-}
+      CONSOLE_SI_AUDIT_KEY: ${CONSOLE_SI_AUDIT_KEY:-}
       # 使用者密碼雜湊：未在 .env 設定時「不傳入」（用 application.yml 的開發預設）；正式環境必須覆寫
       # （.env 內的 $ 要寫成 $$，見 .env.example）。
       CONSOLE_ADMIN_PASSWORD_HASH:
@@ -216,6 +225,11 @@ services:
       # SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R23）：Bridge 以子行程在 /repo 呼叫根層 CLI 的
       # `export`。映像沒有 tools/ 與 .git，所以下面的唯讀 bind 掛入「CLI 與帳本」這個必要子集。
       SI_ROOT: /repo
+      # 🔴 SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W1、W24）：Bridge 把 backend 簽好的稽核 JSON 原樣落成
+      # ${BRIDGE_SI_AUDIT_DIR}/<audit_ref>.json（容器內路徑；下面那條**唯一**可寫的 bind），再由主機端 CLI 以 --carrier console 入帳。
+      # 權杖與 backend 的 BRIDGE_SI_WRITE_TOKEN 同值；預設空＝SI 寫入面停用（寫入端點回 503 si_write_disabled）。Bridge 不持有簽章金鑰。
+      BRIDGE_SI_WRITE_TOKEN: ${BRIDGE_SI_WRITE_TOKEN:-}
+      BRIDGE_SI_AUDIT_DIR: /si-audit
     volumes:
       - ../AISDLC_SDD:/sdd:ro
       - engine_workspace:/workspace
@@ -261,6 +275,17 @@ services:
         source: ../.git/packed-refs
         target: /repo/.git/packed-refs
         read_only: true
+        bind:
+          create_host_path: false
+      # 🔴 唯一一條可寫的 SI bind（P2b 稽核檔落地；TCS-SelfImprovingDecide-P2b W24、⚖17）：主機的 <AUTOSDD_SI_DIR>/console_audit
+      # → 容器的 BRIDGE_SI_AUDIT_DIR。AUTOSDD_SI_DIR（與根層 CLI 同一個變數）未設時預設 ~/.autosdd/selfimproving——Windows 以
+      # %USERPROFILE%、macOS 與 Linux 以 $HOME 展開（所以不寫死任何磁碟路徑）。長語法才不會被來源路徑裡的冒號（磁碟機代號）搞混；
+      # `create_host_path: false`＝主機目錄缺席時 `docker compose up` 明確失敗（要先建好，且 Linux 主機須讓 uid 10001 可寫），
+      # 不在主機上憑空建出 root 擁有的目錄。其餘 SI bind（上面六條）全部維持唯讀；不得再加第二條可寫 bind。
+      - type: bind
+        source: ${AUTOSDD_SI_DIR:-${USERPROFILE:-${HOME}}/.autosdd/selfimproving}/console_audit
+        target: /si-audit
+        read_only: false
         bind:
           create_host_path: false
     healthcheck:

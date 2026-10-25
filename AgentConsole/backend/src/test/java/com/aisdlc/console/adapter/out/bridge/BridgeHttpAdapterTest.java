@@ -80,7 +80,7 @@ class BridgeHttpAdapterTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         // 回 null＝沿用 Builder 自己的（被 MockRestServiceServer 接手的）請求工廠；順便記下每次要求的逾時
-        adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, null)),
+        adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, null, null)),
                 (connect, read) -> {
                     requestedTimeouts.add(new Duration[] {connect, read});
                     return null;
@@ -646,20 +646,20 @@ class BridgeHttpAdapterTest {
     void anAdminCustomizedEngineUrlWinsOverTheEnvironmentDefaultAndEachPrefixUsesItsOwnSetting() {
         settings.customized.put("autoclaude.engineUrl", "http://custom-bridge:9000/");
         settings.customized.put("sdd.engineUrl", "http://sdd-bridge:9100");
-        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties(BASE, null));
+        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties(BASE, null, null));
         assertThat(endpoints.autoclaudeBase()).isEqualTo("http://custom-bridge:9000");
         assertThat(endpoints.sddBase()).isEqualTo("http://sdd-bridge:9100");
     }
 
     @Test
     void withoutACustomizedSettingTheEnvironmentValueIsUsedAndTheLocalDefaultIsTheLastResort() {
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties("http://engine-bridge:8081/", null)).autoclaudeBase())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties("http://engine-bridge:8081/", null, null)).autoclaudeBase())
                 .isEqualTo("http://engine-bridge:8081");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties("", null)).sddBase())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties("", null, null)).sddBase())
                 .isEqualTo("http://localhost:8081");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null)).healthPath())
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null, null)).healthPath())
                 .as("設定缺席時的兜底：v1.4 起是深度探針").isEqualTo("/health/deep");
         settings.values.put("autoclaude.healthCheckPath", "custom/health");
-        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null)).healthPath()).isEqualTo("/custom/health");
+        assertThat(new BridgeEndpoints(settings, new BridgeProperties(null, null, null)).healthPath()).isEqualTo("/custom/health");
     }
 }

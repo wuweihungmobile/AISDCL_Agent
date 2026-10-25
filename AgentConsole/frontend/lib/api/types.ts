@@ -354,3 +354,22 @@ export type SiStatusItem = {
 
 /** 清單查詢的參數：`since` 為嚴格大於的游標（整數 ≥0）、`limit` 為整數 ≥1；undefined 不進網址。 */
 export type SiListParams = { since?: number; limit?: number };
+
+// ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W16）──────────────────────────────────
+// 與上面的鏡像型別不同：寫入端點的請求與回應在 backend 是有型別的 DTO（不是「任意物件」），所以直接取 schema.d.ts 的產生型別（單一出處）——
+// 日後後端改欄位，這裡與 lib/domain/si.ts 會在 tsc 紅燈，而不是到執行期才錯。稽核簽章在 backend、落檔在 Bridge，前端沒有任何金鑰、不組稽核 JSON。
+export type SiDecideRequest = S["SiDecideRequest"];
+/** 決定動詞（九個＝根層 `decide --carrier console` 實際受理的 dkind；resume 綁 RUN 號，其餘綁 PROP 號）。 */
+export type SiDecideKind = SiDecideRequest["dkind"];
+/** 新增觀察與預檢共用同一個請求本文。 */
+export type SiObservationRequest = S["SiObservationRequest"];
+export type SiCloseRequest = S["SiCloseRequest"];
+/** 稽核檔已落地的收據（待入帳）：`subject` 對 obs-add 為 null（入帳後才知道新列號）。 */
+export type SiWriteReceipt = S["SiWriteReceipt"];
+export type SiWriteKind = SiWriteReceipt["kind"];
+export type SiValidation = S["SiValidation"];
+export type SiValidationFinding = S["SiValidationFinding"];
+/** `GET /si/console-writes` 的一項（不含 body 與 mac）：`ingested` 為 null＝對帳量不到，不是「已入帳」也不是「待入帳」。 */
+export type SiConsoleWrite = S["SiConsoleWriteItem"];
+export type SiConsoleWriteOrphan = S["SiConsoleWriteOrphan"];
+export type SiConsoleWrites = S["SiConsoleWrites"];

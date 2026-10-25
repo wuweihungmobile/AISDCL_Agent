@@ -5,12 +5,15 @@
  * 自成一個查詢、一個 loading／error／ok 三態：error 時只顯示錯誤（絕不渲染成「無事件」），ok 時橫幅**每個**頂層鍵都至少有一個可見呈現——
  * 已知九個鍵各有固定位置，其餘鍵（例：日後根層加的 consolePending）以「鍵：緊湊 JSON」純文字列在 si-status-extra，不丟欄位。
  * 量不到（NOT-EVALUABLE）一律以「量不到」加原因呈現，不顯示成 0、無或通過；帳本字串全部以文字節點渲染。
+ * P2b：給了 `onResume`（只有 ADMIN）且 `suspended` 帶運轉號時，暫停狀態旁多一個「恢復運轉」鈕（`si-resume-open`），把該運轉號交給呼叫端開啟決定對話框
+ * （恢復綁 `suspended.run`）；沒給＝與 P1b 逐位元組相同的唯讀畫面。
  */
 import type { ReactNode } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useSiStatus } from "@/lib/api/queries";
 import type { SiStatusItem } from "@/lib/api/types";
-import { SI_STATUS_KNOWN_KEYS, compactJson, describeValue, noEventText, notEvaluableText } from "@/lib/domain/si";
+import { SI_STATUS_KNOWN_KEYS, compactJson, describeValue, noEventText, notEvaluableText, suspendedRun } from "@/lib/domain/si";
 import { SiError, SiLoading, SiNotes } from "./siParts";
 
 const KNOWN: ReadonlySet<string> = new Set(SI_STATUS_KNOWN_KEYS);
@@ -60,7 +63,8 @@ function openRunLine(entry: unknown): string {
   return `${typeof run === "string" ? run : describeValue(run)}${detail ? `（${detail}）` : ""}`;
 }
 
-function StatusItem({ item }: { item: SiStatusItem }) {
+function StatusItem({ item, onResume }: { item: SiStatusItem; onResume?: (run: string) => void }) {
+  const resumable = onResume ? suspendedRun(item.suspended) : null;
   const detected = listOf<SiStatusItem["eventsDetected"][number]>(item.eventsDetected);
   const unavailable = listOf<SiStatusItem["unavailable"][number]>(item.unavailable);
   const openRuns = listOf<unknown>(item.openRuns);
@@ -95,6 +99,11 @@ function StatusItem({ item }: { item: SiStatusItem }) {
       </Field>
       <Field statusKey="suspended" title="暫停狀態">
         <span data-testid="si-suspended">{valueText(item.suspended)}</span>
+        {onResume && resumable ? (
+          <Button variant="ghost" size="sm" className="ml-2" aria-label={`恢復運轉 ${resumable}`} data-testid="si-resume-open" onClick={() => onResume(resumable)}>
+            恢復運轉
+          </Button>
+        ) : null}
       </Field>
       <Field statusKey="cooldowns" title="冷卻中">
         <BulletList testId="si-cooldowns" lines={cooldowns && cooldowns.map(describeValue)} />
@@ -124,7 +133,7 @@ function StatusItem({ item }: { item: SiStatusItem }) {
   );
 }
 
-export function SiStatusBanner() {
+export function SiStatusBanner({ onResume }: { onResume?: (run: string) => void } = {}) {
   const q = useSiStatus();
   const shell = "mb-5 rounded-lg border border-wg-line bg-wg-surface px-5 py-4";
   if (q.isError) {
@@ -158,7 +167,7 @@ export function SiStatusBanner() {
         </span>
       </div>
       <SiNotes ne={page.ne} problems={page.problems} />
-      {item ? <StatusItem item={item} /> : <p className="mt-3 text-sm text-wg-accent">{notEvaluableText("status 回應沒有任何項目")}</p>}
+      {item ? <StatusItem item={item} onResume={onResume} /> : <p className="mt-3 text-sm text-wg-accent">{notEvaluableText("status 回應沒有任何項目")}</p>}
     </section>
   );
 }

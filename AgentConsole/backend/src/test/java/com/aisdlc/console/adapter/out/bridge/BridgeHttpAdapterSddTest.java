@@ -82,7 +82,7 @@ class BridgeHttpAdapterSddTest {
                     return Optional.empty();
                 }
             };
-            adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, token)),
+            adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, token, null)),
                     (connect, read) -> {
                         timeouts.add(new Duration[] {connect, read});
                         return null;

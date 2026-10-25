@@ -8,6 +8,8 @@ import com.aisdlc.console.domain.model.execution.ExecutionRtm;
 import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import com.aisdlc.console.domain.model.si.SiExport;
+import com.aisdlc.console.domain.model.si.SiValidation;
+import com.aisdlc.console.domain.model.si.SiWriteAck;
 
 import java.time.Duration;
 import java.util.List;
@@ -353,8 +355,9 @@ public interface AgentBridge {
      */
     ExecutionRtm getRunRtm(UUID runId);
 
-    // ── P1b：SelfImproving 唯讀鏡像（TCS-SelfImprovingMirror-P1b R7、R8、R10）──────────────────────────
-    // 本介面上名稱以 si 起頭的方法恰為 siExport（ArchUnit 鎖住）；沒有任何寫入呼叫。
+    // ── SelfImproving（P1b 唯讀鏡像；P2b 加稽核檔落地與預檢）────────────────────────────────────────────
+    // 本介面上名稱以 si 接大寫字母起頭的方法恰五個（ArchUnit 鎖住）：siExport（P1b，唯讀）、三個 siWrite…（P2b，只落稽核檔、不寫帳本）
+    // 與 siValidateObservation（P2b，唯讀預檢）。呼叫三個 siWrite… 的類別只有 SiConsoleWriteService。
 
     /**
      * {@code GET /si/<kind>[/<id>]}（連線 2 秒／讀取 20 秒、<b>不重試</b>、不帶 {@code X-Bridge-Token}）：回 Bridge 的 export 物件原樣
@@ -370,4 +373,34 @@ public interface AgentBridge {
      * @param id    單筆提案的 id：<b>原樣</b>嚴格 percent-encode 成單一路徑段（{@code /si/proposals/<id>}）；backend 不驗格式，格式的單一真相在 Bridge
      */
     SiExport siExport(String kind, Integer since, Integer limit, String id);
+
+    /**
+     * {@code POST /si/proposals/<id>:decide}（P2b；TCS-SelfImprovingDecide-P2b W3、W11）：把<b>已簽章的稽核 JSON 全文</b>原樣送出
+     * （位元組＝字串的 UTF-8，不經 JSON 重新序列化——它是 {@code audit_sha256} 的對象）。附 {@code X-Bridge-Token}（SelfImproving 寫入權杖），
+     * 連線 2 秒／讀取 20 秒、<b>不重試</b>；Bridge 只把這份位元組落成 {@code <audit_ref>.json}，不寫帳本。
+     * 沒有設定權杖時<b>不發出請求</b>、直接丟 503 {@code si_write_disabled}（呼叫端本來就該先檢查）。
+     *
+     * <p>錯誤約定：4xx（含 403 {@code si_write_forbidden}、409 {@code si_audit_exists}、422）與 503 {@code si_write_disabled}／
+     * {@code si_unavailable} 以 {@link BridgeRejectedException} 丟出（確定未落檔）；其他 5xx → {@code UpstreamException.Failure}
+     * （{@code bridgeStatus}≥500，確定未落檔）；連線階段失敗 → {@code UpstreamException.Unavailable}（確定未送達）；送出後的通訊失敗
+     * → {@code Unavailable}（{@code deliveryUncertain}＝結果不明）；讀取逾時 → {@code TimedOut}（結果不明）；2xx 但本文不是
+     * {@code {audit_ref, stored}} → {@code Failure}（{@code bridgeStatus}＝200，結果不明）。
+     *
+     * @param id    PROP 號；resume 為 RUN 號：<b>原樣</b>嚴格 percent-encode 成單一路徑段
+     * @param audit 稽核 JSON 全文（外層字串）
+     */
+    SiWriteAck siWriteDecide(String id, String audit);
+
+    /** {@code POST /si/observations}（新增觀察列的稽核檔落地）；其餘同 {@link #siWriteDecide}。 */
+    SiWriteAck siWriteObservation(String audit);
+
+    /** {@code POST /si/observations/<id>:close}（關閉觀察列的稽核檔落地）；其餘同 {@link #siWriteDecide}。 */
+    SiWriteAck siWriteObservationClose(String id, String audit);
+
+    /**
+     * {@code POST /si/observations:validate}（P2b；W4、W11）：唯讀預檢＝根層 {@code obs-add --dry-run}。<b>不帶權杖</b>、不落檔；
+     * 本文是<b>未簽</b>的觀察 body（無 {@code audit_ref}、{@code key_id}、{@code mac}）。連線 2 秒／讀取 20 秒、不重試。
+     * 錯誤約定同 {@link #siExport}（503 {@code si_unavailable} 與 4xx 為 {@link BridgeRejectedException}）。
+     */
+    SiValidation siValidateObservation(String body);
 }

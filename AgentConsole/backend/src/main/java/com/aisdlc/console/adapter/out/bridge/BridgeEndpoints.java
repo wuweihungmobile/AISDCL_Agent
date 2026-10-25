@@ -61,6 +61,15 @@ public class BridgeEndpoints {
         return Optional.ofNullable(properties.sddWriteToken());
     }
 
+    /**
+     * SelfImproving 寫入權杖（{@code console.bridge.si-write-token}；TCS-SelfImprovingDecide-P2b W9）：只給 Bridge 出站介面卡附
+     * {@code X-Bridge-Token} 標頭用（三個稽核檔落地的 POST；預檢不帶），未設為空。與 SDD 權杖是兩個獨立的值。
+     * 🔴 值絕不進日誌、錯誤封包或 {@code details}。
+     */
+    public Optional<String> siWriteToken() {
+        return Optional.ofNullable(properties.siWriteToken());
+    }
+
     private String base(String category) {
         String url = settings.findCustomized(category, "engineUrl").orElse(properties.url());
         return url.replaceAll("/+$", "");

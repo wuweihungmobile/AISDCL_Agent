@@ -133,6 +133,37 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["getSiProposals", () => api.getSiProposals(), "GET", "/api/v1/si/proposals"],
   ["getSiProposal", () => api.getSiProposal("PROP-SI-004"), "GET", "/api/v1/si/proposals/PROP-SI-004"],
   ["getSiRuns", () => api.getSiRuns({ since: 3 }), "GET", "/api/v1/si/runs?since=3"],
+
+  // ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W16）：四個 POST（僅 ADMIN）加一個對帳讀面；本文逐位元組等於呼叫端給的 JSON ──
+  [
+    "postSiDecide",
+    () => api.postSiDecide("PROP-SI-004", { dkind: "reject", digest: `sha256:${"a".repeat(64)}`, reason: "證據不足以判定", reasonClass: "證據不足" }),
+    "POST",
+    "/api/v1/si/proposals/PROP-SI-004/decide",
+    { dkind: "reject", digest: `sha256:${"a".repeat(64)}`, reason: "證據不足以判定", reasonClass: "證據不足" },
+  ],
+  [
+    "postSiObservation",
+    () => api.postSiObservation({ context: "情境", symptom: "症狀", evidence: "docs/x.md:1", category: "bug", severity: "P3", face: "產品", externalDerived: false }),
+    "POST",
+    "/api/v1/si/observations",
+    { context: "情境", symptom: "症狀", evidence: "docs/x.md:1", category: "bug", severity: "P3", face: "產品", externalDerived: false },
+  ],
+  [
+    "postSiObservationClose",
+    () => api.postSiObservationClose("OBS-SI-005", { terminal: "decided", text: "夾具關閉" }),
+    "POST",
+    "/api/v1/si/observations/OBS-SI-005/close",
+    { terminal: "decided", text: "夾具關閉" },
+  ],
+  [
+    "postSiObservationValidate",
+    () => api.postSiObservationValidate({ context: "情境", symptom: "症狀", evidence: "docs/x.md:1", category: "bug", severity: "P3", face: "產品", externalDerived: false }),
+    "POST",
+    "/api/v1/si/observations/validate",
+    { context: "情境", symptom: "症狀", evidence: "docs/x.md:1", category: "bug", severity: "P3", face: "產品", externalDerived: false },
+  ],
+  ["getSiConsoleWrites", () => api.getSiConsoleWrites({ limit: 100 }), "GET", "/api/v1/si/console-writes?limit=100"],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -153,10 +184,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 74 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 79 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(74);
+    expect(names).toHaveLength(79);
   });
 
   it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project 也不帶 projectId）", async () => {

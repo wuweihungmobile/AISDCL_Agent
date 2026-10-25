@@ -10,12 +10,14 @@
   rc          離開碼（預設 0）
   stderr      要寫到 stderr 的文字（原樣、不加換行）
   sleep       先睡這麼多秒
-  raw_stdout  原樣輸出的字串（優先於 export）
+  raw_stdout  原樣輸出的字串（優先於 export、dry_run）
   huge        持續寫出無換行資料，並把累計位元組數逐行追加進 `<R>/fake_written.txt`
   grandchild  先啟動一個睡 30 秒的孫行程，把兩個 pid 寫進 `<R>/fake_pids.json`
   export      要輸出的物件（預設：對請求 kind 合法的最小 export 物件）
   schema_rev／kind／items  覆寫預設物件的對應鍵（`schema_rev` 給 null＝不輸出該鍵）
   by_id       `--id` 值 → 該次輸出的 `items`（沒列到的 id 輸出空 `items`）
+  dry_run     `obs-add --dry-run` 要輸出的物件（預設最小合法物件；P2b）。argv 含 `--body-file` 時
+              整份 stdin 以位元組讀完並以 base64 記進呼叫紀錄的 `stdin_b64`（其餘呼叫該欄為空字串）
 
 這支檔本身不是測試（檔名不以 test_ 開頭）；它被測試 import 來造樹與讀紀錄。
 """
@@ -27,6 +29,7 @@ from typing import Any
 
 _FAKE_CLI = r'''
 """fake SelfImproving CLI（測試替身）。"""
+import base64
 import json
 import os
 import subprocess
@@ -37,6 +40,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CALLS = ROOT / "fake_calls.jsonl"
 CONTROL = ROOT / "fake_control.json"
+DEFAULT_DRY_RUN = {"ok": True, "row": "| fake dry-run row |", "row_bytes": 20,
+                   "row_max_bytes": 700, "findings": []}
 
 args = sys.argv[1:]
 flags = {}
@@ -44,9 +49,15 @@ for i, tok in enumerate(args):
     if tok in ("--kind", "--since", "--limit", "--id") and i + 1 < len(args):
         flags[tok] = args[i + 1]
 kind = flags.get("--kind", "")
+is_dry_run = "--dry-run" in args
 
+stdin_b64 = ""
 try:
-    stdin_eof = sys.stdin.read(1) == ""
+    if "--body-file" in args:
+        stdin_b64 = base64.b64encode(sys.stdin.buffer.read()).decode("ascii")
+        stdin_eof = True
+    else:
+        stdin_eof = sys.stdin.read(1) == ""
 except (OSError, ValueError):
     stdin_eof = True
 
@@ -54,7 +65,8 @@ with CALLS.open("a", encoding="utf-8") as fh:
     fh.write(json.dumps({
         "args": args, "script": str(Path(sys.argv[0]).resolve()), "cwd": os.getcwd(),
         "executable": sys.executable, "safe_path": bool(sys.flags.safe_path), "pid": os.getpid(),
-        "stdin_eof": stdin_eof, "env": dict(os.environ)}, ensure_ascii=False) + "\n")
+        "stdin_eof": stdin_eof, "stdin_b64": stdin_b64, "env": dict(os.environ)},
+        ensure_ascii=False) + "\n")
 
 control = json.loads(CONTROL.read_text(encoding="utf-8")) if CONTROL.is_file() else {}
 
@@ -79,6 +91,12 @@ if control.get("huge"):
 if "raw_stdout" in control:
     sys.stdout.buffer.write(control["raw_stdout"].encode("utf-8"))
     sys.stdout.buffer.flush()
+    sys.exit(int(control.get("rc", 0)))
+if is_dry_run:
+    if "dry_run" in control or int(control.get("rc", 0)) in (0, 1):
+        obj = control["dry_run"] if "dry_run" in control else DEFAULT_DRY_RUN
+        sys.stdout.buffer.write((json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
     sys.exit(int(control.get("rc", 0)))
 if "export" in control:
     obj = control["export"]

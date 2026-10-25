@@ -13,9 +13,10 @@ app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆�
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
 app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
 app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔      app/resources.py 引擎行程樹資源取樣（`resources`；D-12）
-app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 六個唯讀 GET）
+app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 六個唯讀 GET、三個稽核檔落地 POST 與一個 `:validate` 預檢 POST）
 app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固定環境、動詞白名單、20 秒逾時、rc→HTTP、`(狀態目錄, 專案鍵)` 互斥鎖）
-app/si_cli.py      唯一的 SelfImproving 出口：根層 CLI 的唯讀 `export` 子行程（白名單環境、15 秒逾時、8 MiB 輸出上限、失敗一律 503 `si_unavailable`）
+app/si_cli.py      唯一的 SelfImproving 子行程出口：根層 CLI 的唯讀 `export` 與 `obs-add --dry-run`（白名單環境、15 秒逾時、8 MiB 輸出上限、失敗一律 503 `si_unavailable`）
+app/si_audit.py    整個 `app/` 唯一以寫入形態開 SelfImproving 路徑者：把 backend 簽好的稽核 JSON 原樣落成 `<audit_ref>.json`（獨佔建檔、不覆寫；P2b）
 app/sdd_state.py   FSM 狀態檔唯讀存取（tail／凍結階段／委派引用／恢復指令）   app/sdd_sync.py  委派同步純函式（reason 組字、終態對映、預檢表、回收點判定）
 app/sdd_run.py     批次的 SDD 側（路徑閘、三點摘要預檢、FSM 寫入、補償、`resume`／`restore` 重驗）    app/sdd_adapter.py AutoClaude adapter 的呼叫接縫
 app/fsm_names.py   FSM 專案名規則（`sanitize_component` 的逐字鏡像＋輸出域判準）    app/spec_digest.py 規格摘要（換行正規化的 UTF-8 sha256）    app/rtm.py `GET …/rtm`
@@ -80,6 +81,8 @@ Invoke-RestMethod http://localhost:8081/health
 | `AUTOCLAUDE_ROOT` | `<monorepo>/AutoClaude` | 只供 `/health` 顯示 |
 | `SDD_ROOT` | `<monorepo>/AISDLC_SDD` 下 `AISDLC_SDD_v*` 數字最大者 | `/sdd/*` 讀取的版本目錄，**或含多個版本的父目錄**（取數字最大者；Docker 把整個 `AISDLC_SDD` 唯讀掛成 `/sdd` 並設 `SDD_ROOT=/sdd` 即可）；找不到時 `/sdd/version`、`/sdd/fsm` 回 503 |
 | `SI_ROOT` | 本機直跑且 `<monorepo>` 像 monorepo 時＝monorepo 根；否則（例如容器內）未設 | SelfImproving 的 repo 根：其下 `tools/` 有根層 CLI、`docs/06_quality/` 有帳本；`/si/*` 以子行程在此目錄呼叫唯讀 `export`。解析後須為絕對路徑且**不可是檔案系統根**（啟動即 `SettingsError`）；不檢查存在性與內容——缺 CLI 在請求時回 503 `si_unavailable`（`cause` 為 `si_script_missing`）。**不併入 `BRIDGE_ALLOWED_PATH_ROOTS`**（那是引擎 `execution_path` 的閘）。docker compose 設 `/repo` 並以唯讀 bind 掛入必要子集（見 `docker-compose.yml`） |
+| `BRIDGE_SI_WRITE_TOKEN` | （未設＝SI 寫入面停用） | SelfImproving 寫入面權杖（P2b；backend 與 Bridge 同值，HTTP 標頭 `X-Bridge-Token`；**與 SDD 的權杖是兩個獨立的值**）。規則同 `BRIDGE_SDD_WRITE_TOKEN`：未設＝停用，設了但**短於 32 字元或仍是 `<…>` 佔位＝啟動即 `SettingsError`**（訊息不含值）。`POST /si/observations:validate` 是唯讀預檢，不需權杖。repo 內不放任何真值；產生方式見 `AgentConsole/.env.example`。Bridge **不持有**稽核簽章金鑰（金鑰只在 console-api 與主機端 CLI） |
+| `BRIDGE_SI_AUDIT_DIR` | （未設＝SI 寫入面停用） | 稽核檔落地目錄（**容器內路徑**；P2b）。解析後須為絕對路徑且**不可是檔案系統根**；不檢查存在性（目錄缺席在請求時回 503 `si_unavailable`，`cause` 為 `audit_write_failed`；Bridge 從不建立它）、**不併入 `BRIDGE_ALLOWED_PATH_ROOTS`**。docker compose 設 `/si-audit` 並以**唯一一條可寫 bind** 掛到主機的 `<AUTOSDD_SI_DIR>/console_audit`（見〈SelfImproving 寫入載體〉；其餘 SI bind 皆唯讀）。寫入面啟用＝本變數與 `BRIDGE_SI_WRITE_TOKEN` 皆有設 |
 | `BRIDGE_DB_DSN` | （未設＝純檔案模式） | PostgreSQL DSN；設了才寫 DB、鎖才跨實例 |
 | `BRIDGE_DB_SCHEMA` | `console` | **Console 九張表所在的 schema**。DB 模式的 SQL 一律用 schema 限定名（`console.execution_runs`、`console.execution_steps`、`console.checkpoints`），以 `psycopg.sql.Identifier` 引用；AutoClaude 自己的 alembic 在 `public` 有同名表，所以不可用 `public`。advisory lock 不是表，不受影響 |
 | `BRIDGE_INSTANCE` | `<hostname>-<pid>-<uuid8>` | 本實例識別（≤100 字，寫進 `execution_runs.bridge_instance`） |
@@ -95,17 +98,33 @@ Invoke-RestMethod http://localhost:8081/health
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422；本文含 `sdd` 區塊時另要 `X-Bridge-Token`，201 多 `warnings[]`）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202；`:resume` 對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `GET /autoclaude/runs/{id}`、`GET …/rtm`（追溯覆蓋，唯讀；見下）、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`（對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm`、`GET /sdd/fsm/{project}`（兩者皆認選填 `root`）、`POST /sdd/fsm/{project}:freeze`（人工閘寫入，要 `X-Bridge-Token`）、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
-另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下）。
+另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下），與 P2b 的寫入載體：`POST /si/proposals/{id}:decide`、`POST /si/observations`、`POST /si/observations/{id}:close`（稽核檔落地，要 `X-Bridge-Token`）、`POST /si/observations:validate`（唯讀預檢）（見〈SelfImproving 寫入載體〉）。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
 
 ### SelfImproving 唯讀鏡像：`GET /si/*`（P1b；TCS-SelfImprovingMirror-P1b R1～R6）
 
-Console 是顯示面、不是資料來源：每個請求恰啟動一次根層 CLI 的 `export --json --kind <k>` 子行程（`app/si_cli.py`；無快取、不寫任何檔、`argv` 動詞只有 `export`），200 時本文是輸出**解析後的 export 物件逐值透傳**（含 `generated_at`、`head_sha`、`ne`、`problems`；鍵序保留、非 ASCII 不跳脫，Bridge 不增刪改任何鍵）。沒有任何非 GET 方法。
+Console 是顯示面、不是資料來源：每個請求恰啟動一次根層 CLI 的 `export --json --kind <k>` 子行程（`app/si_cli.py`；無快取、不寫任何檔、`argv` 動詞只有 `export`），200 時本文是輸出**解析後的 export 物件逐值透傳**（含 `generated_at`、`head_sha`、`ne`、`problems`；鍵序保留、非 ASCII 不跳脫，Bridge 不增刪改任何鍵）。這六個路徑只有 GET；DELETE、PUT、PATCH 對**全部** `/si/` 路徑（含下節的寫入端點）一律 405。
 
 - 六個端點：`/si/status`、`/si/observations`、`/si/events`、`/si/proposals`、`/si/proposals/{id}`、`/si/runs`。清單類收 `since`（整數 ≥0；游標，嚴格大於）與 `limit`（整數 ≥1，上限住協定參數檔 `export_limit_max`、不在此複製）；`/si/status` 與 `/si/proposals/{id}` 不收任何查詢參數。
 - 輸入驗證在子行程**之前**：未知查詢參數、型別或範圍不合、`{id}` 不符 `PROP-SI-<三位以上數字>` 一律 422 `invalid_request`（未知參數的 `violations[0].rule` 為 `unknown_parameter`）；格式合法而 export 回空＝404 `si_not_found`（本文 `{"code":404,"reason":"si_not_found","id":…}`）。
 - 失敗一律 503 `si_unavailable`，本文 `{"code":503,"reason":"si_unavailable","cause":<碼>,"detail":"rc=<n|none>; stderr=<尾 1,000 字元>"}`；`cause` 九值依序為 `si_root_unset`、`si_script_missing`、`spawn_failed`、`timeout`、`stdout_too_large`、`nonzero_rc`、`bad_json`、`schema_rev_mismatch`、`bad_shape`。**合法輸出不是錯誤**（空 `items`、非空 `ne`／`problems`、stderr 雜訊都原樣 200）；缺 `.git` 或家目錄時真 CLI 自己回 NOT-EVALUABLE（`head_sha` 為 `null`、`ne` 逐欄列出），仍是 200。SI 不可用**不影響** `/health` 與 `/health/deep`。
 - 子行程環境是白名單（`PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`）加固定鍵（`PYTHONUTF8`、`PYTHONDONTWRITEBYTECODE`、只放行 `SI_ROOT` 的環境變數式 `safe.directory`）；`BRIDGE_*`、`MINIMAX_API_KEY`、`AUTOSDD_*` 等一律不繼承。逾時（15 秒）與輸出超過 8 MiB 都以行程樹終止。
+
+### SelfImproving 寫入載體：稽核檔落地與預檢（P2b；TCS-SelfImprovingDecide-P2b W1～W6）
+
+Console 的決定與帳本寫入**不直接寫帳本**：backend 簽好稽核 JSON（HMAC-SHA256，金鑰只在 console-api 與主機端），Bridge 只把這份位元組**原樣**落成 `BRIDGE_SI_AUDIT_DIR/<audit_ref>.json`，再由主機端根層 CLI 以 `--carrier console` 驗簽入帳（pull 模式）。Bridge **不解內層 `body`、不驗簽、不呼叫任何寫入型 CLI 動詞**（`si_cli.py` 的 argv 動詞只有 `export` 與 `obs-add --dry-run`，由 `tests/test_si_readonly_lock.py` 的 AST 鎖釘住）。
+
+| 路徑 | 用途 | 權杖 |
+|------|------|------|
+| `POST /si/proposals/{id}:decide` | 決定（`{id}` 為 `PROP-SI-<三位以上數字>`；resume 為 `RUN-SI-<三位以上數字>`） | 要 |
+| `POST /si/observations` | 新增觀察列（外層 `subject` 須為 `null`） | 要 |
+| `POST /si/observations/{id}:close` | 關閉觀察列（`{id}` 為 `OBS-SI-<三位以上數字>`） | 要 |
+| `POST /si/observations:validate` | 唯讀預檢（子行程 `obs-add --dry-run --body-file - --json`；不需權杖、不看寫入設定、不落檔） | 不要 |
+
+- **三個寫入端點的檢查順序**（先中者定案）：①寫入面停用（權杖或稽核目錄任一未設）＝503 `si_write_disabled`（先於權杖與本文）②`X-Bridge-Token` 缺或錯＝403 `si_write_forbidden`（缺與錯同一個回應；`hmac.compare_digest` 比 bytes；被拒也記稽核，不含任何權杖值）③本文須為單一 UTF-8 JSON 物件且 ≤ 65536 位元組（超過即 422，不讀完）④外層鍵集合恰 `schema_rev`、`kind`、`audit_ref`、`subject`、`body`、`key_id`、`mac`，`schema_rev` 為整數 1（非布林）、`kind` 等於端點、`audit_ref` 為小寫正規 UUID、`subject` 與路徑 `{id}` 相同（obs-add 為 `null`）、`body`／`key_id`／`mac` 為字串，違規一律 422 `invalid_request`（`violations[{field,rule,message}]`，一次全列）⑤落檔：獨佔建檔（`O_EXCL`）、`fsync`、關閉；同名已存在＝409 `si_audit_exists`（不覆寫）；其他 I/O 失敗＝503 `si_unavailable`（`cause` 為 `audit_write_failed`，`detail` 只有 `errno=<n>; <例外類名>`，不含任何路徑，寫到一半失敗會刪除半成品）⑥201 `{"audit_ref":"<ref>","stored":true}`（鍵序固定、不回路徑）。三個新 reason：`si_write_disabled`、`si_write_forbidden`、`si_audit_exists`（與 Architecture §11.1 逐字一致）。
+- **validate**：本文須為單一 JSON 物件且 ≤ 65536 位元組（否則 422，且不啟動子行程）；rc 0 與 1 都是合法輸出（`ok` 為 false 仍回 200）、本文為 CLI 預覽物件**逐值透傳**（`ok`、`row`、`row_bytes`、`row_max_bytes`、`findings`）；失敗形態同 `export`（503 `si_unavailable`，`cause`：`si_root_unset`、`si_script_missing`、`spawn_failed`、`timeout`、`stdout_too_large`、`nonzero_rc`〔含 rc 3〕、`bad_json`、`bad_shape`）。
+- **稽核目錄與主機端**：compose 把主機的 `<AUTOSDD_SI_DIR>/console_audit`（`AUTOSDD_SI_DIR` 未設時預設 `~/.autosdd/selfimproving`，與根層 CLI 的預設同處）以長語法**可寫** bind 到容器內的 `BRIDGE_SI_AUDIT_DIR`（`/si-audit`），`create_host_path: false`——**主機目錄必須先存在**，缺席時 `docker compose up` 會明確失敗（不在主機上憑空建目錄）。Bridge 容器以非 root（uid 10001）執行：Linux 主機上該目錄須讓此 uid 可寫（例如 `chmod o+w`），Docker Desktop（Windows／macOS）由檔案共用層處理。主機端入帳用同一把金鑰：`AUTOSDD_SI_AUDIT_KEY` 須含 console-api 的 `CONSOLE_SI_AUDIT_KEY` 簽章用的那一把（輪替期間含全部舊金鑰）。
+- 這個目錄是**整個 compose 唯一可寫的 SI bind**；`/repo` 下的 SI 掛載仍全為唯讀。檔案只增不減（Bridge 不輪替、不清理）。真容器的寫入權限與主機端 CLI 讀得到同一目錄，只由 TCS 的 V3 真機驗證承擔。
 
 ### 資源取樣：`GET /autoclaude/runs/{id}` 的 `resources`（契約 v1.3 §3.1.2；W7 D-12）
 

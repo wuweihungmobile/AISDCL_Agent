@@ -16,8 +16,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Providers } from "@/components/providers/Providers";
 import { ApiError } from "@/lib/api/client";
 import { SI_QUERY_OPTIONS } from "@/lib/api/queries";
-import type { SiEvent, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
-import { GA, GB, clone, renderSi, signInAs, siUnavailable, stubSiApi, type SiStub } from "@/tests/helpers/si";
+import type { SiConsoleWrites, SiEvent, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
+import { ingestCommands } from "@/lib/domain/si";
+import { GA, GB, clone, renderSi, signInAs, siUnavailable, stubSiApi, writeItem, type SiStub } from "@/tests/helpers/si";
 import { SiView } from "./SiView";
 import { SiError } from "./siParts";
 
@@ -319,7 +320,12 @@ describe("AT_932_1_E_6 篩選控制項與模組桶降級（R17）", () => {
 
   it("AT_932_1_E_6 選項取自已載入資料的相異值；壞列不被篩除；模組桶缺席時停用、說明且不由證據文字推算", async () => {
     const user = userEvent.setup();
-    renderSi();
+    // 真 CLI 自根層 P2 起每列都帶 buckets（黃金檔 2026-10-25 重產後亦然）：降級路徑以去掉該欄的狀態 A 複本驗
+    const fixture = clone(GA);
+    fixture.observations.items.forEach((o) => {
+      delete (o as { buckets?: unknown }).buckets;
+    });
+    renderSi({ fixture });
     await waitForObservations();
     const obs = panel("observations");
     const sorted = (values: string[]) => [...new Set(values)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -356,7 +362,7 @@ describe("AT_932_1_E_6 篩選控制項與模組桶降級（R17）", () => {
     await user.selectOptions(within(obs).getByLabelText("時間窗"), "all");
     expect(obsOrder(obs)).toHaveLength(12);
 
-    // 模組桶：狀態 A 沒有 buckets 欄 → 停用、說明，選項只有「全部」；證據含 AutoClaude/ 路徑的列不被歸桶
+    // 模組桶：去掉 buckets 欄的狀態 A 複本 → 停用、說明，選項只有「全部」；證據含 AutoClaude/ 路徑的列不被歸桶
     const bucket = within(obs).getByLabelText("模組桶");
     expect(bucket).toBeDisabled();
     expect(optionValues(bucket)).toEqual([""]);
@@ -967,5 +973,279 @@ describe("SiView 補充：骨架、分頁標籤與狀態橫幅各欄", () => {
     await waitForObservations();
     expect(urls().filter((u) => u.includes("/si/observations"))).toHaveLength(2);
     expect(urls().filter((u) => u.includes("/si/proposals"))).toHaveLength(1);
+  });
+});
+
+// ══ P2b：寫入入口與對帳面板（TCS-SelfImprovingDecide-P2b：AT-935-3-2／4-2／4-E-3／5-3／5-E-4；W21）═══════════════════════════════════
+// 為什麼重要：寫入入口只該給 ADMIN——非 ADMIN 多看到一個「決定」鈕，就多一條會被 403 的路、也多一個誤按的風險；而對帳面板若把「量不到」顯示成「無待入帳」，
+// 掌舵者會以為所有決定都已入帳。所以這裡逐角色驗控件與請求，並釘住「量不到不是沒有」。控件的 testid 前綴＝W21：si-decide-open-、si-resume-open、si-obs-new、si-obs-correct-、si-close-open-。
+
+const WRITE_TESTID = /^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-)/;
+const FORBIDDEN_NAME = /刪除|移除|清除|delete|remove/i;
+const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === "/api/v1/si/console-writes");
+const AUDIT_A = "b2000000-0000-4000-8000-00000000000a";
+const AUDIT_B = "b2000000-0000-4000-8000-00000000000b";
+const AUDIT_C = "b2000000-0000-4000-8000-00000000000c";
+
+/** console-writes 的回應物件（預設：已對帳、沒有 orphans）；測試以 overrides 回它。 */
+function writesData(patch: Partial<SiConsoleWrites> = {}): { data: SiConsoleWrites } {
+  return { data: { items: [], truncated: false, orphans: [], reconcile: { status: "ok", reason: null, backfilled: 0 }, ...patch } };
+}
+
+describe("AT_935_4_2 ADMIN 看得到全部寫入控件並發出 console-writes 查詢", () => {
+  it("AT_935_4_2 觀察分頁：有 si-obs-new、每個有效列的 si-obs-correct-<ID>、處置為 open 的列的 si-close-open-<ID>；另有 si-writes-panel；請求集合含恰一個 console-writes GET", async () => {
+    const user = userEvent.setup();
+    const { stub } = renderSi({ role: "ADMIN", username: "admin" });
+    const table = await waitForObservations();
+    expect(screen.getByTestId("si-obs-new")).toBeInTheDocument();
+    for (const o of GOLDEN_OBS) expect(within(table).getByTestId(`si-obs-correct-${o.id}`), o.id).toBeInTheDocument();
+    const open = GOLDEN_OBS.filter((o) => o.disposition === "open").map((o) => o.id);
+    expect(open.length).toBeGreaterThan(0);
+    expect(Array.from(table.querySelectorAll<HTMLElement>('[data-testid^="si-close-open-"]')).map((el) => el.dataset.testid?.replace("si-close-open-", ""))).toEqual(open);
+    expect(await screen.findByTestId("si-writes-panel")).toBeInTheDocument();
+
+    // 提案分頁：待決卡有 si-decide-open-<ID>（面板常駐，切分頁不重取對帳）
+    await user.click(tabButton(/^提案/));
+    await screen.findByTestId("si-prop-table");
+    expect(screen.getByTestId("si-decide-open-PROP-SI-004")).toBeInTheDocument();
+    expect(consoleWriteCalls(stub)).toHaveLength(1);
+    expect(consoleWriteCalls(stub)[0].method).toBe("GET");
+    expect(consoleWriteCalls(stub)[0].query.get("limit")).toBe("100");
+  });
+
+  it("AT_935_4_2 橫幅 suspended 帶運轉號時有 si-resume-open（綁該運轉）；suspended 為 null 時沒有", async () => {
+    const withRun = clone(GA);
+    withRun.status.items[0].suspended = { run: "RUN-SI-001" };
+    const view = renderSi({ role: "ADMIN", username: "admin", fixture: withRun });
+    expect(await screen.findByTestId("si-resume-open")).toHaveAccessibleName("恢復運轉 RUN-SI-001");
+    view.unmount();
+    renderSi({ role: "ADMIN", username: "admin" });
+    await screen.findByTestId("si-head-sha");
+    expect(screen.queryByTestId("si-resume-open")).toBeNull();
+  });
+
+  it("AT_935_4_2 沒有可下決定的提案（狀態為 approved）沒有決定鈕；每個決定鈕的 testid 都帶該列的提案號", async () => {
+    const user = userEvent.setup();
+    const approved = clone(GA);
+    approved.proposals.items[0].state = "approved";
+    renderSi({ role: "ADMIN", username: "admin", fixture: approved });
+    await user.click(await screen.findByRole("tab", { name: /^提案/ }));
+    await screen.findByTestId("si-prop-table");
+    expect(screen.queryByTestId("si-decide-open-PROP-SI-004")).toBeNull();
+  });
+});
+
+describe("AT_935_4_E_3 非 ADMIN 沒有寫入面：VIEWER 與 OPERATOR 零控件、零 POST、零 console-writes 請求", () => {
+  it.each(["VIEWER", "OPERATOR"] as const)(
+    "AT_935_4_E_3 %s 完整操作（切分頁、篩選、展開、重新整理）後：DOM 沒有任何寫入控件與對帳面板，全部請求為不帶本文的 GET 且不含 console-writes，沒有待入帳或警示字樣",
+    async (role) => {
+      const user = userEvent.setup();
+      const withRun = clone(GA);
+      withRun.status.items[0].suspended = { run: "RUN-SI-001" };
+      const { stub, container } = renderSi({ role, fixture: withRun });
+      const sweep = () => {
+        expect(
+          container.querySelector(
+            "[data-testid^='si-decide-open-'], [data-testid='si-resume-open'], [data-testid='si-obs-new'], [data-testid^='si-obs-correct-'], [data-testid^='si-close-open-'], [data-testid='si-writes-panel']",
+          ),
+        ).toBeNull();
+        expect(container.querySelector("form")).toBeNull();
+        expect(document.body.textContent ?? "").not.toMatch(/待入帳|對帳警示|無待入帳/);
+      };
+      await waitForObservations();
+      await screen.findByTestId("si-suspended");
+      sweep();
+      await user.selectOptions(screen.getByLabelText("嚴重度"), "P3");
+      const shownRow = GOLDEN_OBS.find((o) => o.severity === "P3") as SiObservation; // 篩選之後仍看得到的第一列
+      await user.click(screen.getByRole("button", { name: `展開 ${shownRow.id}` }));
+      sweep();
+      await user.click(tabButton(/^提案/));
+      await screen.findByTestId("si-prop-table");
+      await user.click(screen.getByRole("button", { name: "展開 PROP-SI-004" }));
+      sweep();
+      await user.click(tabButton(/^事件/));
+      await screen.findByTestId("si-events-table");
+      await user.click(screen.getByTestId("si-refresh"));
+      sweep();
+
+      expect(stub.calls.length).toBeGreaterThan(5);
+      for (const call of stub.calls) {
+        expect(call.method, call.url).toBe("GET");
+        expect(call.hasBody, `${call.url} 不得帶本文`).toBe(false);
+        expect(call.path, "零 console-writes 請求").not.toBe("/api/v1/si/console-writes");
+      }
+    },
+  );
+});
+
+describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除類控件，操作只有決定、新增、更正、關閉", () => {
+  it("AT_935_3_2 三分頁與狀態橫幅（含 suspended 變體）與對帳面板的全部按鈕與連結：名稱與 testid 不含刪除、移除、清除、delete、remove；寫入類控件的 testid 前綴恰為五個", async () => {
+    const user = userEvent.setup();
+    const withRun = clone(GA);
+    withRun.status.items[0].suspended = { run: "RUN-SI-001" };
+    const { container } = renderSi({
+      role: "ADMIN",
+      username: "admin",
+      fixture: withRun,
+      overrides: { "console-writes": () => writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide" })] }) },
+    });
+    const seenPrefixes = new Set<string>();
+    const READ_ONLY_TESTIDS = new Set(["si-refresh", "si-retry", "si-load-more"]);
+    const sweep = () => {
+      for (const el of Array.from(container.querySelectorAll<HTMLElement>("button, a"))) {
+        const name = `${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`;
+        const testId = el.dataset.testid ?? "";
+        expect(name, `按鈕名稱：${name}`).not.toMatch(FORBIDDEN_NAME);
+        expect(testId, `testid：${testId}`).not.toMatch(FORBIDDEN_NAME);
+        if (el.tagName === "BUTTON" && testId.startsWith("si-") && !READ_ONLY_TESTIDS.has(testId)) {
+          expect(testId, `未列名的 si- 按鈕 testid：${testId}`).toMatch(WRITE_TESTID);
+          seenPrefixes.add(/^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-)/.exec(testId)?.[1] as string);
+        }
+      }
+    };
+    await waitForObservations();
+    await screen.findByTestId("si-resume-open");
+    await within(await screen.findByTestId("si-writes-panel")).findByTestId(`si-pending-${AUDIT_A}`);
+    sweep();
+    await user.click(tabButton(/^提案/));
+    await screen.findByTestId("si-prop-table");
+    sweep();
+    await user.click(tabButton(/^事件/));
+    await screen.findByTestId("si-events-table");
+    sweep();
+    // 防反空轉：五個前綴都真的出現過
+    expect([...seenPrefixes].sort()).toEqual(["close-open-", "decide-open-", "obs-correct-", "obs-new", "resume-open"].sort());
+    // 對帳面板只有「入帳指令」展開鈕（沒有刪除、移除、清除）
+    const panel = screen.getByTestId("si-writes-panel");
+    expect(
+      within(panel)
+        .getAllByRole("button")
+        .map((b) => b.textContent),
+    ).toEqual(["入帳指令"]);
+  });
+});
+
+describe("AT_935_5_3 待入帳面板：項目、三種 kind 的入帳指令、入帳後消失", () => {
+  const T1 = "2026-10-24T14:30:10Z";
+  const T2 = "2026-10-24T14:30:12Z";
+  const T3 = "2026-10-24T14:30:15Z";
+  const items = (ingested: boolean) => [
+    writeItem({ auditRef: AUDIT_C, kind: "obs-close", subjectId: "OBS-SI-005", time: T3, ingested }),
+    writeItem({ auditRef: AUDIT_A, kind: "decide", subjectId: "PROP-SI-004", time: T1, ingested }),
+    writeItem({ auditRef: AUDIT_B, kind: "obs-add", subjectId: null, time: T2, ingested }),
+  ];
+
+  it("AT_935_5_3 三個待入帳項（decide、obs-add、obs-close）依 time 升冪列出 kind、對象（obs-add 為破折號）與 time；展開後指令逐字等於 ingestCommands；改為已入帳後重新整理，si-writes-empty 顯示無待入帳且沒有警示", async () => {
+    const user = userEvent.setup();
+    let ingested = false;
+    const { stub } = renderSi({ role: "ADMIN", username: "admin", overrides: { "console-writes": () => writesData({ items: items(ingested) }) } });
+    const panel = await screen.findByTestId("si-writes-panel");
+    const list = await within(panel).findByTestId("si-pending-list");
+    expect(Array.from(list.querySelectorAll<HTMLElement>('[data-testid^="si-pending-"]')).map((li) => li.dataset.testid)).toEqual([AUDIT_A, AUDIT_B, AUDIT_C].map((r) => `si-pending-${r}`));
+
+    const expected: Array<[string, "decide" | "obs-add" | "obs-close", string | null, string, string]> = [
+      [AUDIT_A, "decide", "PROP-SI-004", T1, "PROP-SI-004"],
+      [AUDIT_B, "obs-add", null, T2, "—"],
+      [AUDIT_C, "obs-close", "OBS-SI-005", T3, "OBS-SI-005"],
+    ];
+    for (const [auditRef, kind, subject, time, shownSubject] of expected) {
+      const row = within(panel).getByTestId(`si-pending-${auditRef}`);
+      expect(row).toHaveTextContent(kind);
+      expect(row).toHaveTextContent("待入帳");
+      expect(row).toHaveTextContent(`對象：${shownSubject}`);
+      expect(row).toHaveTextContent(time);
+      expect(within(row).queryByTestId("sdd-recovery-command-posix"), "預設收合").toBeNull();
+      await user.click(within(row).getByRole("button", { name: "入帳指令" }));
+      const commands = ingestCommands(kind, subject, auditRef);
+      expect(within(row).getByTestId("sdd-recovery-command-powershell").textContent).toBe(commands.powershell);
+      expect(within(row).getByTestId("sdd-recovery-command-posix").textContent).toBe(commands.posix);
+    }
+    expect(within(panel).queryByTestId("si-writes-empty")).toBeNull();
+    expect(within(panel).queryByTestId("si-write-alerts")).toBeNull();
+
+    ingested = true;
+    await user.click(screen.getByTestId("si-refresh"));
+    const empty = await within(panel).findByTestId("si-writes-empty");
+    expect(empty).toHaveTextContent("無待入帳");
+    expect(within(panel).queryByTestId("si-pending-list")).toBeNull();
+    expect(within(panel).queryByTestId("si-write-alerts")).toBeNull();
+    expect(consoleWriteCalls(stub).length, "初次加重新整理各一個").toBe(2);
+  });
+
+  it("AT_935_5_3 已入帳（true）與量不到（null）的列不算待入帳；回傳 truncated 時說明只涵蓋最新一百筆", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: {
+        "console-writes": () =>
+          writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide", ingested: true }), writeItem({ auditRef: AUDIT_B, kind: "obs-add", ingested: null })], truncated: true }),
+      },
+    });
+    const panel = await screen.findByTestId("si-writes-panel");
+    expect(await within(panel).findByTestId("si-writes-empty")).toHaveTextContent("無待入帳（僅涵蓋最新 100 筆稽核列）");
+    expect(within(panel).queryByTestId("si-pending-list")).toBeNull();
+    expect(within(panel).getByTestId("si-writes-truncated")).toBeInTheDocument();
+  });
+});
+
+describe("AT_935_5_E_4 紅色警示與量不到：orphans 顯示警示，NOT-EVALUABLE 時不顯示無待入帳", () => {
+  it("AT_935_5_E_4 兩個 orphans：si-write-alerts 為 role alert 並逐項顯示 auditRef、kind、對象（null 為破折號）；有警示時不顯示無待入帳", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            orphans: [
+              { auditRef: AUDIT_A, kind: "decide", subject: "PROP-SI-004" },
+              { auditRef: AUDIT_B, kind: "obs-add", subject: null },
+            ],
+          }),
+      },
+    });
+    const alerts = await screen.findByTestId("si-write-alerts");
+    expect(alerts).toHaveAttribute("role", "alert");
+    expect(within(alerts).getByTestId(`si-orphan-${AUDIT_A}`)).toHaveTextContent(`${AUDIT_A}｜decide｜PROP-SI-004`);
+    expect(within(alerts).getByTestId(`si-orphan-${AUDIT_B}`)).toHaveTextContent(`${AUDIT_B}｜obs-add｜—`);
+    expect(screen.queryByTestId("si-writes-empty"), "有警示就不是「無」").toBeNull();
+  });
+
+  it("AT_935_5_E_4 reconcile 為 NOT-EVALUABLE（reason 為 si_unavailable）：顯示 si-reconcile-ne 與 reason 逐字，整頁沒有「無待入帳」、沒有待入帳清單與警示——量不到不是沒有", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            items: [writeItem({ auditRef: AUDIT_A, kind: "decide", ingested: null })],
+            orphans: null,
+            reconcile: { status: "NOT-EVALUABLE", reason: "si_unavailable", backfilled: 0 },
+          }),
+      },
+    });
+    const ne = await screen.findByTestId("si-reconcile-ne");
+    expect(ne).toHaveTextContent("量不到（NOT-EVALUABLE）：si_unavailable");
+    expect(screen.queryByTestId("si-writes-empty")).toBeNull();
+    expect(screen.queryByTestId("si-pending-list")).toBeNull();
+    expect(screen.queryByTestId("si-write-alerts")).toBeNull();
+    expect(document.body.textContent ?? "").not.toContain("無待入帳");
+  });
+
+  it.each(["bridge_unreachable", "bridge_timeout", "scan_cap_exceeded"] as const)("AT_935_5_E_4 NOT-EVALUABLE 的原因 %s 逐字顯示", async (reason) => {
+    renderSi({ role: "ADMIN", username: "admin", overrides: { "console-writes": () => writesData({ orphans: null, reconcile: { status: "NOT-EVALUABLE", reason, backfilled: 0 } }) } });
+    expect(await screen.findByTestId("si-reconcile-ne")).toHaveTextContent(reason);
+    expect(screen.queryByTestId("si-writes-empty")).toBeNull();
+  });
+
+  it("AT_935_5_E_4 reconcile 為 ok 且沒有待入帳與 orphans 時才顯示 si-writes-empty；對帳查詢本身失敗（503 si_unavailable）顯示錯誤態與 reason，不顯示無待入帳", async () => {
+    const ok = renderSi({ role: "ADMIN", username: "admin" });
+    expect(await within(await screen.findByTestId("si-writes-panel")).findByTestId("si-writes-empty")).toHaveTextContent("無待入帳");
+    ok.unmount();
+
+    renderSi({ role: "ADMIN", username: "admin", overrides: { "console-writes": () => siUnavailable("bridge_down", "connect refused") } });
+    const panel = await screen.findByTestId("si-writes-panel");
+    const error = await within(panel).findByTestId("si-error");
+    expect(error).toHaveTextContent("si_unavailable");
+    expect(within(panel).queryByTestId("si-writes-empty")).toBeNull();
   });
 });

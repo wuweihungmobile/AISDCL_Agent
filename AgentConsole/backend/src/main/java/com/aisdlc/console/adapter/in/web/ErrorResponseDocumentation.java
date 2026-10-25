@@ -50,7 +50,16 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/projects/{projectId}/execute", "POST /api/v1/executions/{runId}/pause",
             "POST /api/v1/executions/{runId}/resume", "POST /api/v1/executions/{runId}/cancel",
             "POST /api/v1/executions/{runId}/restore/{checkpointId}",
-            "POST /api/v1/executions/{runId}/review/{stepId}");
+            "POST /api/v1/executions/{runId}/review/{stepId}",
+            // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）
+            "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close");
+
+    /**
+     * 路徑含 {@code {id}} 卻<b>不會回 404</b> 的端點（預設規則「路徑含變數＝可能 404」不適用）：SelfImproving 的 id 是寫進稽核簽章的資料，
+     * 「提案或觀察列是否存在」由主機端根層 CLI 入帳時判，Console 寫入端點不查（TCS-SelfImprovingDecide-P2b 已知邊界 1）。
+     */
+    private static final Set<String> NEVER_NOT_FOUND = Set.of("POST /api/v1/si/proposals/{id}/decide",
+            "POST /api/v1/si/observations/{id}/close");
 
     /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
     private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
@@ -67,6 +76,26 @@ public class ErrorResponseDocumentation {
             "503", "si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、"
                     + "timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 "
                     + "1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料",
+            "504", "引擎橋接服務逾時（讀取 20 秒、不重試）");
+
+    /**
+     * SelfImproving 三個寫入 POST 的失敗（TCS-SelfImprovingDecide-P2b W10、W15）：輸入閘 422、Bridge 的 422、各種 502／503／504。結果不明的三種
+     * （504、送出後連線重設的 502、2xx 本文無法解析的 502）保留 Console 稽核列並在 details.outcomeUnknown 標明；其餘補償刪除。
+     */
+    private static final Map<String, String> SI_WRITE_FAILURES = Map.of(
+            "422", "輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容）或 Bridge 拒絕此請求"
+                    + "（reason 引擎拒絕此請求；details.bridgeReason、violations）",
+            "502", "引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，"
+                    + "稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致）",
+            "503", "si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）"
+                    + "或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除",
+            "504", "引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true");
+
+    /** 預檢的失敗：同一關（授權、停用、輸入閘），沒有稽核列也不落檔，所以沒有補償或結果不明的問題。 */
+    private static final Map<String, String> SI_VALIDATE_FAILURES = Map.of(
+            "422", "輸入閘未通過（reason invalid_request；details.violations 一次全列）或 Bridge 拒絕此請求（reason 引擎拒絕此請求）",
+            "502", "引擎橋接服務無法連線／回了非預期的錯誤",
+            "503", "si_write_disabled（backend 的金鑰或權杖未設，details.cause 說明）或 si_unavailable（根層 CLI 不可用；details.cause、details.detail 逐字）",
             "504", "引擎橋接服務逾時（讀取 20 秒、不重試）");
 
     /** pause／resume／cancel 的上游錯誤：Bridge 無法連線、逾時（DB 狀態不變）。 */
@@ -100,6 +129,11 @@ public class ErrorResponseDocumentation {
                     "422", "引擎拒絕此請求（details.bridgeReason=invalid_request；id 不符 PROP-SI-<三位以上數字>）",
                     "502", SI_UPSTREAM.get("502"), "503", SI_UPSTREAM.get("503"), "504", SI_UPSTREAM.get("504"))),
             Map.entry("GET /api/v1/si/runs", SI_UPSTREAM),
+            // P2b：寫入載體（僅 ADMIN）與對帳讀面——對帳永遠回 200（Bridge 失敗＝reconcile.status 為 NOT-EVALUABLE），沒有 502／503／504
+            Map.entry("POST /api/v1/si/proposals/{id}/decide", SI_WRITE_FAILURES),
+            Map.entry("POST /api/v1/si/observations", SI_WRITE_FAILURES),
+            Map.entry("POST /api/v1/si/observations/{id}/close", SI_WRITE_FAILURES),
+            Map.entry("POST /api/v1/si/observations/validate", SI_VALIDATE_FAILURES),
             Map.entry("POST /api/v1/import/upload", Map.of(
                     "413", "上傳超過 10MB 上限（reason：檔案超過 10MB 上限）",
                     "415", "副檔名不在 .md／.pdf／.docx（reason：只支援 .md／.pdf／.docx 檔案）",
@@ -172,7 +206,7 @@ public class ErrorResponseDocumentation {
                     add(operation, "403", "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；"
                             + "已刪除專案清單需 OPERATOR 以上）");
                 }
-                if (path.contains("{") || path.endsWith("/reorder")) {
+                if ((path.contains("{") || path.endsWith("/reorder")) && !NEVER_NOT_FOUND.contains(key)) {
                     add(operation, "404", NOT_FOUND_DESCRIPTION.getOrDefault(key, "資源不存在或已軟刪除"));
                 }
                 if (CONFLICT_ENDPOINTS.contains(key)) {

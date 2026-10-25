@@ -83,7 +83,7 @@ class BridgeHttpAdapterSiTest {
                     return Optional.empty();
                 }
             };
-            adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, null)),
+            adapter = new BridgeHttpAdapter(builder, new BridgeEndpoints(settings, new BridgeProperties(BASE, null, null)),
                     (connect, read) -> {
                         timeouts.add(new Duration[] {connect, read});
                         return null;
@@ -295,7 +295,7 @@ class BridgeHttpAdapterSiTest {
                         : Optional.empty();
             }
         };
-        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties("http://env.test:8081/", null));
+        BridgeEndpoints endpoints = new BridgeEndpoints(settings, new BridgeProperties("http://env.test:8081/", null, null));
 
         assertThat(endpoints.siBase()).as("(a) 只有 ENGINE_BRIDGE_URL：去尾斜線").isEqualTo("http://env.test:8081")
                 .isEqualTo(endpoints.sddBase());

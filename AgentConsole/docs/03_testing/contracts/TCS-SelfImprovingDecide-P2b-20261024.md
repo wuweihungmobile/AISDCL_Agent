@@ -1766,3 +1766,19 @@ Push-Location AgentConsole; docker compose exec engine-bridge sh -c 'touch "$BRI
 
 | # | 日期 | 位置 | 原文（摘） | 訂正 | 依據 |
 |---|------|------|-----------|------|------|
+| 1 | 2026-10-25 | §4〈需同步的既有測試〉 | 19 項 | 補第 20 項 `engine-bridge/tests/test_si_cli.py::test_AT_940_1_1`（`fields(Settings)[-3:]` 因 W1 加兩欄改 `[-5:]`）與第 21 項 `frontend/lib/domain/si.test.ts::AT_932_1_7`（`SI_REASONS` 恰兩鍵改恰五鍵；與 AT-950-9-2 同判）；兩者皆只增不減 | Developer 交卷勘誤 1；SCG-4 QA 意見 1 |
+| 2 | 2026-10-25 | W5 判準 1′ 與 W4 | 「寫入形態只准出現在 `si_audit.py`」 | 補「唯一精確例外＝validate 對子行程 stdin 的 `_feed_stdin`（函式名＋receiver 為 stream＋`Thread(target=…, args=(proc.stdin, …))` 接線）；AST 鎖對此例外以形態判準釘住並附負控樣本，其餘寫入形態仍紅」 | Developer 交卷勘誤 2；QA 意見 2 |
+| 3 | 2026-10-25 | W13；AT-950-8-E-2 | `key_id CHAR(8)`、`mac CHAR(64)` 長度約束 | 補 regex CHECK（`^[0-9a-f]{8}$`、`^[0-9a-f]{64}$`）：`CHAR(n)` 補空白使「7 字元被拒」靠長度會假綠 | Developer 交卷勘誤 3；QA 意見 3 |
+| 4 | 2026-10-25 | W12 位元組和；W15 | 三欄位元組和違規的標示欄未定；`invalid_request` 落點 | 位元組和違規標在 `context`、`symptom`、`evidence` 三欄（一併；前端同）；W15 只新增三個 reason，`invalid_request` 於 backend 以 `SiWriteGates` 區域常數存在、不進 `ErrorReasons` | Developer 交卷勘誤 4；QA 意見 4 |
+| 5 | 2026-10-25 | W16 括號 | 「mutation 成功後使 SI 查詢與 console-writes 失效重取」 | 預檢（validate）不失效（零副作用）；失效不等待重取完成（收據立刻顯示）；失敗（含 `outcomeUnknown`）時不重取，對帳面板須手動重新整理（QA P4-6，UX） | Developer 交卷勘誤 5；⚖26 |
+| 6 | 2026-10-25 | AT-935-1-E-1 | 「貼上換行與 TAB」 | 三個字串欄為多行輸入框（單行 input 會靜默吞換行，擋不到）；第一次輸入前不鋪必填紅字，停用原因寫在送出鈕旁（`si-obs-blocked`／`si-decide-blocked`／`si-close-blocked`） | Developer 交卷勘誤 6 |
+| 7 | 2026-10-25 | §5.7 允許集合 | backend 列與黃金檔 | 補 `backend/src/test/java/com/aisdlc/support/ApiClient.java`（加 `headers()`）、新檔 `support/AbruptCloseServer.java`（AT-950-6-E-3）、`adapter/in/web/ErrorResponseDocumentation.java`、`adapter/out/bridge/BridgeEndpoints.java`、`domain/model/si/` 九個 record、`SiAuditJson`、`SiWriteSettings`（D5 隱含者逐項列出）；另補「P1b 差分黃金檔三處副本（Bridge 4、backend 4、frontend 2）由主控依根層 `status`／`export` 增量以 `tests/si_golden_regen.py` 重產，不屬開發 agent」 | Developer 交卷勘誤 7；QA P4-7 |
+| 8 | 2026-10-25 | §4 第 6 項；§6.1 | `SchemaMigrationIT` 方法名 | 改名 `flywayAppliedVersionsOneToThirteenSuccessfully`；RTM 引用該方法名的六處同 commit 更新 | Developer 交卷勘誤 8；QA 意見 8 |
+| 9 | 2026-10-25 | D8；提交順序 | 「`schema.d.ts` 重產需要後端在線（`npm run gen:api`）」 | 事實記錄：以拋棄式 IT 在 Spring 測試 context 倒 `/v3/api-docs` 後餵 `scripts/gen-api.mjs` 重產（同一 springdoc 來源）；QA 以 repo 的 openapi-typescript 對傾印檔重產與入庫檔逐位元組相同、`OpenApiIT` 活釘選 71／81 親跑通過；V7 以真後端複核 | Developer 交卷十三 (3)；QA 意見 9 |
+| 10 | 2026-10-25 | AT-950-11-2；檔頭「補前預期紅」 | 主控補 D10 前預期紅 | 事實記錄：D10（`agentconsole-ci.yml` push／pull_request 各補 `tools/lib/apply_lock.py`、`tools/lib/sdd_latest.py`）由主控於 2026-10-25 補上後 `test_si_deploy_config.py` 重跑為綠 | 主控親驗 |
+| 11 | 2026-10-25 | §6.2 V 系列；已知邊界 | — | 外部因素登記：Next.js 16.4.0 被 registry 安全公告標記，`next build` 在偵測到 AI 代理的環境先以 `SecurityFatalError` 停一次、重跑續跑（`lib/upgrade/nudge.js`；CI 無 TTY 不觸發）；是否升級由掌舵者決定，不在本鍵 | 主控親驗 |
+| 12 | 2026-10-25 | AT-950-1-2；W2 | 「`os.open(O_WRONLY\|O_CREAT\|O_EXCL)` 旗標」（只驗旗標） | 判定字樣補「`os.fsync` 對稽核檔 fd 恰呼叫一次，於寫入全部位元組之後、關閉之前」（QA 突變 B-M2：拿掉 fsync 仍全綠 ⇒ 修復棒加 spy） | SCG-4 QA P3-1 |
+| 13 | 2026-10-25 | AT-935-5-E-2；W14 | 「上限各 20 頁」只斷言 reason 為 `scan_cap_exceeded` | 判定字樣補「MiniBridge 對 observations 與 events 各恰收到 20 次分頁請求」（QA 突變 K-M4：`PAGE_CAP` 改 40 仍全綠 ⇒ 修復棒加計數斷言） | SCG-4 QA P4-1 |
+| 14 | 2026-10-25 | AT-950-10-E-1 | 測試標題含 `AT_932_6_4` 字樣 | 標題不得含其他 AT 的 ID（§2 規則）；改為文字描述，斷言不變（修復棒） | SCG-4 QA P4-2 |
+| 15 | 2026-10-25 | §2「每個 AT 恰一個測試」字面 | — | 事實記錄：98 個 AT 中 47 個以參數化或多個 it 實作（每個宣告都帶底線形），單跑篩選選到整個 AT，符合「子情境以參數化保留底線形」；字面不改、不構成缺陷 | SCG-4 QA P4-3 |
+| 16 | 2026-10-25 | W21；AT-935-5-1 | 對帳面板「無待入帳」字樣 | 事實記錄：`truncated` 為 true 時面板顯示「無待入帳（僅涵蓋最新 100 筆稽核列）」，較舊待入帳列不可見；已加註、符合 W21，列為 UX 候選（OBS） | SCG-4 QA P4-4 |

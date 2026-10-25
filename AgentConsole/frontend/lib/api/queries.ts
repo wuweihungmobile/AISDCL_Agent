@@ -10,7 +10,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, 
 
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
-import { SI_PAGE_LIMIT } from "@/lib/domain/si";
+import { SI_CONSOLE_WRITES_LIMIT, SI_PAGE_LIMIT } from "@/lib/domain/si";
 import { isRunTerminal } from "@/lib/domain/status";
 import {
   acknowledgeAlert,
@@ -37,6 +37,7 @@ import {
   getProject,
   getProjectMetrics,
   getSddEngineStatus,
+  getSiConsoleWrites,
   getSiEvents,
   getSiObservations,
   getSiProposals,
@@ -62,6 +63,10 @@ import {
   listTasks,
   parseImport,
   pauseExecution,
+  postSiDecide,
+  postSiObservation,
+  postSiObservationClose,
+  postSiObservationValidate,
   rejectImport,
   reorderGoals,
   resetCategory,
@@ -110,7 +115,10 @@ import type {
   ReviewDecision,
   SddEngineStatus,
   SddFreezeRequest,
+  SiCloseRequest,
+  SiDecideRequest,
   SiListParams,
+  SiObservationRequest,
   SiPage,
   StartExecutionRequest,
   TestConnectionRequest,
@@ -167,6 +175,8 @@ export const qk = {
   siProposals: ["si", "proposals"] as const,
   siEvents: ["si", "events"] as const,
   siRuns: ["si", "runs"] as const,
+  /** P2b 的對帳讀面也掛在 ["si"] 底下：頁首的「重新整理」與寫入成功後的失效都以 siAll 一併重抓它（只有 ADMIN 有這個查詢）。 */
+  siConsoleWrites: ["si", "console-writes"] as const,
 };
 
 const POLL_MS = 30_000;
@@ -1006,3 +1016,40 @@ export const useSiObservations = () => useSiPages(qk.siObservations, getSiObserv
 export const useSiProposals = () => useSiPages(qk.siProposals, getSiProposals);
 export const useSiEvents = () => useSiPages(qk.siEvents, getSiEvents);
 export const useSiRuns = () => useSiPages(qk.siRuns, getSiRuns);
+
+// ══ SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W16、W21）══════════════════════════════════
+/**
+ * 對帳讀面（Console 稽核列與帳本的對帳）：**只有 ADMIN 啟用**——非 ADMIN 零 `console-writes` 請求（W21；後端雖允許 VIEWER 以上讀，
+ * Console 不給非 ADMIN 看，也不替他們多打一個請求）。沿用 SI_QUERY_OPTIONS：不重試、不留快取、不輪詢（頁首「重新整理」與寫入成功後才重抓）。
+ */
+export function useSiConsoleWrites() {
+  const { role } = useAuth();
+  const enabled = useEnabled(role === "ADMIN");
+  return useQuery({
+    queryKey: qk.siConsoleWrites,
+    queryFn: ({ signal }) => getSiConsoleWrites({ limit: SI_CONSOLE_WRITES_LIMIT, signal }),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+/**
+ * 寫入載體的 mutation：成功後使全部 SI 查詢（觀察、提案、事件、運轉、狀態、對帳）失效重取，**不碰** `["notifications"]` 家族——
+ * SelfImproving 的寫入不改變待簽核數，不該連帶重抓頂列徽章與 Dashboard。失效不等待重取完成（不回傳 promise）：收據要立刻顯示給使用者，
+ * 不能被 Bridge 的 export 子行程拖慢；重取失敗各面板自己顯示錯誤態。
+ * `invalidate: false` 給預檢：它零副作用（不寫 DB、不落檔），成功不代表任何資料變了，重取只是白白多打一輪請求。
+ */
+function useSiWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>, opts: { invalidate?: boolean } = {}) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      if (opts.invalidate !== false) void qc.invalidateQueries({ queryKey: qk.siAll });
+    },
+  });
+}
+
+export const useSiDecide = () => useSiWrite((v: { id: string; body: SiDecideRequest }) => postSiDecide(v.id, v.body));
+export const useSiAddObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservation(body));
+export const useSiCloseObservation = () => useSiWrite((v: { id: string; body: SiCloseRequest }) => postSiObservationClose(v.id, v.body));
+export const useSiValidateObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservationValidate(body), { invalidate: false });

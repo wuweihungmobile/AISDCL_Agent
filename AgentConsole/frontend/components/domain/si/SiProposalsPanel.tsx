@@ -5,14 +5,18 @@
  * 每筆一列（ID／狀態／類別／route／rev／digest 前 8 碼／verdict／cooldown）；待決（proposed、verified）預設展開、其餘可展開。
  * 展開區的卡面 `<pre data-testid="si-card-<ID>">` 的 textContent 逐位元組等於 export 的 `card`（`si card` 的 stdout）：
  * 前端不渲染、不重排行、不裁切、不加前後綴，單一文字節點；card 為 null 時顯示「卡面量不到」並指向對應的 ne 項，不渲染空的卡面區。
+ * P2b：給了 `onDecide`（只有 ADMIN）時，每個**此刻可下決定**的提案列多一個「決定」鈕（`si-decide-open-<ID>`；可下哪些決定由 `decideVerbOptions` 依表 M-V 判，
+ * 沒有可下的決定就沒有鈕）；點擊時把該列的提案快照交給呼叫端（決定綁定的是點擊當下的卡面 digest）。沒給＝與 P1b 逐位元組相同的唯讀畫面。
  */
 import { Fragment, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useSiProposals } from "@/lib/api/queries";
 import type { SiProposal } from "@/lib/api/types";
 import {
   EMPTY_PROPOSAL_FILTERS,
   cardNeEntries,
+  decideVerbOptions,
   describeTouched,
   describeValue,
   digest8,
@@ -27,7 +31,7 @@ import {
 } from "@/lib/domain/si";
 import { ExpandToggle, FilterSelect, SiError, SiLoadMore, SiLoading, SiNotes, SiScopeNote, countText, useReportTabCount, withAll } from "./siParts";
 
-const COLUMNS = 9;
+const BASE_COLUMNS = 9;
 /** 待決提案：等人看卡面的狀態，預設展開。 */
 const PENDING_STATES: ReadonlySet<string> = new Set(["proposed", "verified"]);
 
@@ -67,7 +71,8 @@ function ProposalDetail({ p, id }: { p: SiProposal; id: string }) {
   );
 }
 
-export function SiProposalsPanel({ onCount }: { onCount: (text: string | null) => void }) {
+export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string | null) => void; onDecide?: (proposal: SiProposal) => void }) {
+  const columns = onDecide ? BASE_COLUMNS + 1 : BASE_COLUMNS;
   const q = useSiProposals();
   const [filters, setFilters] = useState<ProposalFilters>(EMPTY_PROPOSAL_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -118,6 +123,11 @@ export function SiProposalsPanel({ onCount }: { onCount: (text: string | null) =
                     {h}
                   </th>
                 ))}
+                {onDecide ? (
+                  <th scope="col" className="py-2">
+                    <span className="sr-only">決定</span>
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -148,10 +158,19 @@ export function SiProposalsPanel({ onCount }: { onCount: (text: string | null) =
                       </td>
                       <td className="py-2 pr-3 break-all">{describeValue(p.verdict)}</td>
                       <td className="py-2 break-all">{describeValue(p.cooldown)}</td>
+                      {onDecide ? (
+                        <td className="py-1.5">
+                          {decideVerbOptions(p).length > 0 ? (
+                            <Button variant="ghost" size="sm" aria-label={`決定 ${p.id}`} data-testid={`si-decide-open-${p.id}`} onClick={() => onDecide(p)}>
+                              決定
+                            </Button>
+                          ) : null}
+                        </td>
+                      ) : null}
                     </tr>
                     {expanded ? (
                       <tr className="border-b border-wg-line bg-wg-base">
-                        <td colSpan={COLUMNS} className="px-4 py-3">
+                        <td colSpan={columns} className="px-4 py-3">
                           <ProposalDetail p={p} id={detailId} />
                         </td>
                       </tr>

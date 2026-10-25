@@ -12,17 +12,40 @@ public abstract class UpstreamException extends DomainException {
         super(message, reason, details);
     }
 
-    /** 連線失敗（拒絕連線、DNS、連線逾時）→ 502 {@code 引擎橋接服務無法連線}。 */
+    /**
+     * 連線失敗（拒絕連線、DNS、連線逾時）→ 502 {@code 引擎橋接服務無法連線}。
+     *
+     * <p>另帶 {@link #deliveryUncertain()}（SelfImproving 寫入的補償判準，TCS-SelfImprovingDecide-P2b W11）：<b>連線階段</b>的失敗
+     * （請求不可能被 Bridge 收到）為 {@code false}；<b>送出之後</b>的通訊失敗（連線被重設、提前 EOF）為 {@code true}——Bridge 可能已處理
+     * 請求，結果不明。預設（單參數建構）為 {@code false}。
+     */
     public static final class Unavailable extends UpstreamException {
+
+        private final boolean deliveryUncertain;
+
         public Unavailable(String message) {
-            super(message, ErrorReasons.BRIDGE_UNREACHABLE, Map.of());
+            this(message, false, Map.of());
+        }
+
+        public Unavailable(String message, boolean deliveryUncertain, Map<String, Object> details) {
+            super(message, ErrorReasons.BRIDGE_UNREACHABLE, details);
+            this.deliveryUncertain = deliveryUncertain;
+        }
+
+        /** {@code true}＝請求可能已送達（送出後的通訊失敗）；{@code false}＝確定沒有送達（連線階段失敗）。 */
+        public boolean deliveryUncertain() {
+            return deliveryUncertain;
         }
     }
 
-    /** 讀取逾時 → 504 {@code 引擎橋接服務逾時}。 */
+    /** 讀取逾時 → 504 {@code 引擎橋接服務逾時}（請求已送出，結果不明）。 */
     public static final class TimedOut extends UpstreamException {
         public TimedOut(String message) {
-            super(message, ErrorReasons.BRIDGE_TIMEOUT, Map.of());
+            this(message, Map.of());
+        }
+
+        public TimedOut(String message, Map<String, Object> details) {
+            super(message, ErrorReasons.BRIDGE_TIMEOUT, details);
         }
     }
 

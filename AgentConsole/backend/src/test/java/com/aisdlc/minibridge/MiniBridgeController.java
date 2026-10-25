@@ -276,6 +276,90 @@ class MiniBridgeController {
         return si(http, "/si/runs", "runs", null);
     }
 
+    // ── /si/*：P2b 稽核檔落地與預檢（TCS-SelfImprovingDecide-P2b §5.4；對照 routers/si.py 的三個寫入 POST 與 :validate）────────
+
+    private static boolean looksLikeJson(String body) {
+        String t = body.stripLeading();
+        return t.startsWith("{") || t.startsWith("[");
+    }
+
+    private static ResponseEntity<Object> reply(MiniBridge.Si.WriteReply reply) {
+        MediaType type = looksLikeJson(reply.body()) ? MediaType.APPLICATION_JSON : MediaType.TEXT_PLAIN;
+        return ResponseEntity.status(reply.status()).contentType(type).body(reply.body());
+    }
+
+    /** 請求本文裡的 {@code audit_ref}（預設成功回應原樣回報它）；本文不是 JSON 物件或沒有該鍵時為 null。 */
+    private static String auditRefOf(byte[] raw) {
+        try {
+            Object parsed = JSON.readValue(raw, Object.class);
+            return parsed instanceof Map<?, ?> map && map.get("audit_ref") instanceof String ref ? ref : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 寫入端點的共同邏輯：記錄（{@code MINI.requests()} 記 {@code POST /si/<解碼後路徑>}；{@code si.writes} 記原始路徑、權杖標頭與本文位元組）→
+     * 回呼 {@code si.onWrite}（收到請求的當下）→ 延遲 → 回應（{@code si.writeReply} 覆蓋，否則 201 回報請求本文的 {@code audit_ref}）。
+     * 迷你 Bridge 不驗權杖（真 Bridge 的 403／503 以 {@code si.writeReply} 模擬），只忠實記下 backend 附了什麼。
+     */
+    private ResponseEntity<Object> siWrite(HttpServletRequest http, String logged, String token, byte[] raw, boolean validate) {
+        bridge.record("POST " + logged);
+        bridge.recordToken("POST " + logged, token);
+        MiniBridge.Si.Write write = new MiniBridge.Si.Write(http.getRequestURI(), token, raw);
+        bridge.si.writes.add(write);
+        java.util.function.Consumer<MiniBridge.Si.Write> hook = bridge.si.onWrite;
+        if (hook != null) {
+            hook.accept(write);
+        }
+        long delay = bridge.si.writeDelayMillis;
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (validate) {
+            MiniBridge.Si.WriteReply failure = bridge.si.validateFailure;
+            return failure != null ? reply(failure) : ResponseEntity.ok(bridge.si.validateReply);
+        }
+        MiniBridge.Si.WriteReply custom = bridge.si.writeReply;
+        if (custom != null) {
+            return reply(custom);
+        }
+        String ref = auditRefOf(raw);
+        Map<String, Object> ack = map("audit_ref", ref, "stored", true);
+        return ResponseEntity.status(201).contentType(MediaType.APPLICATION_JSON).body(ack);
+    }
+
+    @PostMapping("/si/proposals/{idAction}")
+    ResponseEntity<Object> siDecide(HttpServletRequest http, @PathVariable String idAction, @RequestBody byte[] raw,
+                                    @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
+        return idAction.endsWith(":decide") ? siWrite(http, "/si/proposals/" + idAction, token, raw, false)
+                : error(404, "not_found");
+    }
+
+    @PostMapping("/si/observations")
+    ResponseEntity<Object> siObservationAdd(HttpServletRequest http, @RequestBody byte[] raw,
+                                            @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
+        return siWrite(http, "/si/observations", token, raw, false);
+    }
+
+    @PostMapping("/si/observations/{idAction}")
+    ResponseEntity<Object> siObservationClose(HttpServletRequest http, @PathVariable String idAction, @RequestBody byte[] raw,
+                                              @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
+        return idAction.endsWith(":close") ? siWrite(http, "/si/observations/" + idAction, token, raw, false)
+                : error(404, "not_found");
+    }
+
+    @PostMapping("/si/{segment}")
+    ResponseEntity<Object> siValidate(HttpServletRequest http, @PathVariable String segment, @RequestBody byte[] raw,
+                                      @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
+        return "observations:validate".equals(segment) ? siWrite(http, "/si/observations:validate", token, raw, true)
+                : error(404, "not_found");
+    }
+
     // ── 寫入面（契約 §3.1.4 (d)、共通規則 2）：權杖、:freeze、RTM ──────────────────────────────────
 
     /**

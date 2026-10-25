@@ -29,7 +29,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * SelfImproving 唯讀鏡像的 backend 面（{@code GET /api/v1/si/**}；TCS-SelfImprovingMirror-P1b：AT-932-1-3、AT-932-1-E-3／E-4、
- * AT-932-2-4、AT-932-3-5、AT-932-4-1、AT-932-4-E-1、AT-940-5-2、AT-940-8-1），對<b>真的 HTTP</b> 迷你 Bridge（{@code MINI.si}）驗映射的每一列。
+ * AT-932-2-4、AT-932-3-5、AT-932-4-1、AT-932-4-E-1、AT-940-5-2；P2b 起 AT-940-8-1 由 {@code OpenApiIT} 的 AT-950-10-1 取代），對<b>真的 HTTP</b> 迷你 Bridge
+ * （{@code MINI.si}）驗映射的每一列。
  * 為什麼重要：差分（AC-SI-32-1）的 backend 這一棒只准做一件事——把 Bridge 的 export 物件換個欄名風格原樣轉出。若這裡替 Bridge「補一句話」
  * （缺鍵補 null、空陣列當錯誤、快取舊資料、用自己的時鐘填 generatedAt）或「吞一句話」（503 的原因被改寫成 502），畫面上的
  * 「量不到」與「資料面壞了」就會說謊；而權限（401／403／405）與 id 編碼（單一路徑段）是安全面的底線。
@@ -226,9 +227,10 @@ class SiMirrorApiIT extends AbstractExecutionIT {
         return builder.contentType(MediaType.APPLICATION_JSON).content("{}");
     }
 
+    /** PUT、PATCH、DELETE：SelfImproving 沒有任何這三種方法的對映（P2b 起 POST 另有四個寫入端點，不在這個矩陣）。 */
     private static List<MockHttpServletRequestBuilder> writes(String url) {
-        return List.of(withBody(MockMvcRequestBuilders.post(url)), withBody(MockMvcRequestBuilders.put(url)),
-                withBody(MockMvcRequestBuilders.patch(url)), MockMvcRequestBuilders.delete(url));
+        return List.of(withBody(MockMvcRequestBuilders.put(url)), withBody(MockMvcRequestBuilders.patch(url)),
+                MockMvcRequestBuilders.delete(url));
     }
 
     @Test
@@ -248,9 +250,9 @@ class SiMirrorApiIT extends AbstractExecutionIT {
                 }
             }
         }
-        assertThat(checked).isEqualTo(72);
+        assertThat(checked).as("PUT、PATCH、DELETE 乘六路徑乘三種角色").isEqualTo(54);
         for (String path : SIX) {
-            assertThat(send(null, withBody(MockMvcRequestBuilders.post(SI + path))).status()).as("無 token POST %s", path)
+            assertThat(send(null, withBody(MockMvcRequestBuilders.put(SI + path))).status()).as("無 token PUT %s", path)
                     .isEqualTo(401);
         }
         for (String token : List.of(viewer(), operator(), admin())) {
@@ -260,6 +262,23 @@ class SiMirrorApiIT extends AbstractExecutionIT {
         for (String path : SIX) {
             assertThat(get(admin(), path).status()).as("對照組：%s 本身可用", path).isEqualTo(200);
         }
+    }
+
+    /**
+     * P2b（TCS-SelfImprovingDecide-P2b §4 第 9 項）：{@code SecurityConfig} 對 {@code POST /api/v1/si/**} 要求 ADMIN，所以 POST 自上面的矩陣移出。
+     * 五個沒有 POST 映射的讀路徑（{@code /observations} 同時是寫入路徑，不在這裡）：無 token 401、Viewer 與 Operator 403（被安全層擋下）、Admin 405（沒有對映）。
+     */
+    @Test
+    void AT_932_2_4_postOnTheFiveReadOnlyPathsIs401ForAnonymous403ForViewerAndOperatorAnd405ForAdmin() {
+        List<String> readOnly = SIX.stream().filter(p -> !p.equals("/observations")).toList();
+        assertThat(readOnly).hasSize(5);
+        for (String path : readOnly) {
+            assertThat(send(null, withBody(MockMvcRequestBuilders.post(SI + path))).status()).as("無 token %s", path).isEqualTo(401);
+            assertThat(send(viewer(), withBody(MockMvcRequestBuilders.post(SI + path))).status()).as("Viewer %s", path).isEqualTo(403);
+            assertThat(send(operator(), withBody(MockMvcRequestBuilders.post(SI + path))).status()).as("Operator %s", path).isEqualTo(403);
+            assertThat(send(admin(), withBody(MockMvcRequestBuilders.post(SI + path))).status()).as("Admin %s", path).isEqualTo(405);
+        }
+        assertThat(MINI.requests()).as("全程不觸 Bridge").isEmpty();
     }
 
     // ── AT-932-3-5：Bridge 失敗逐列對映，原因逐字，失敗沒有 data ─────────────────────────────────
@@ -448,40 +467,5 @@ class SiMirrorApiIT extends AbstractExecutionIT {
         assertThat(notFoundSource).contains("si_not_found");
         assertThat(docSource).contains("si_not_found");
         assertThat(reasonsSource).contains("SI_NOT_FOUND = \"si_not_found\"").contains("SI_UNAVAILABLE = \"si_unavailable\"");
-    }
-
-    // ── AT-940-8-1：OpenAPI 文件只有六個 SI 路徑、各只有 get ───────────────────────────────────────
-
-    @Test
-    void AT_940_8_1_theOpenApiDocumentHasExactlySixSiPathsEachWithOnlyGet() {
-        Resp docs = api.get(null, "/v3/api-docs");
-        assertThat(docs.status()).isEqualTo(200);
-        Map<String, Object> paths = docs.read("$.paths");
-        List<String> siPaths = paths.keySet().stream().filter(p -> p.startsWith("/api/v1/si/")).sorted().toList();
-        assertThat(siPaths).containsExactlyInAnyOrder(SIX.stream().map(p -> SI + p.replace("PROP-SI-004", "{id}")).toArray(String[]::new));
-        Map<String, String> operationIds = Map.of("/status", "getSiStatus", "/observations", "getSiObservations",
-                "/events", "getSiEvents", "/proposals", "getSiProposals", "/proposals/{id}", "getSiProposal", "/runs", "getSiRuns");
-        for (Map.Entry<String, String> entry : operationIds.entrySet()) {
-            String path = SI + entry.getKey();
-            Map<String, Object> operations = docs.read("$.paths['" + path + "']");
-            assertThat(operations.keySet()).as(path).containsExactly("get");
-            assertThat(docs.<String>read("$.paths['" + path + "'].get.operationId")).isEqualTo(entry.getValue());
-            Map<String, Object> responses = docs.read("$.paths['" + path + "'].get.responses");
-            assertThat(responses.keySet()).as("%s 的回應", path).contains("200", "401", "503");
-            if (entry.getKey().equals("/proposals/{id}")) {
-                assertThat(responses.keySet()).contains("404", "422");
-            }
-        }
-        for (String list : List.of("/observations", "/events", "/proposals", "/runs")) {
-            for (String name : List.of("since", "limit")) {
-                List<Map<String, Object>> found = docs.read("$.paths['" + SI + list + "'].get.parameters[?(@.name=='" + name + "')]");
-                assertThat(found).as("%s 的 %s", list, name).hasSize(1);
-                assertThat(found.get(0)).containsEntry("in", "query");
-                assertThat(((Map<?, ?>) found.get(0).get("schema")).get("type")).isEqualTo("integer");
-            }
-        }
-        List<Map<String, Object>> idParam = docs.read("$.paths['" + SI + "/proposals/{id}'].get.parameters[?(@.name=='id')]");
-        assertThat(idParam).hasSize(1);
-        assertThat(idParam.get(0)).containsEntry("in", "path");
     }
 }

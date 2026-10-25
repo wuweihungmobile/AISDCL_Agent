@@ -132,6 +132,15 @@ public final class ApiClient {
             return result.getResponse().getHeader(name);
         }
 
+        /** 全部回應標頭（名稱→值；多值以逗號相接）：機密外洩的掃描用。 */
+        public Map<String, String> headers() {
+            Map<String, String> out = new java.util.LinkedHashMap<>();
+            for (String name : result.getResponse().getHeaderNames()) {
+                out.put(name, String.join(",", result.getResponse().getHeaders(name)));
+            }
+            return out;
+        }
+
         /** 讀 JsonPath（例：{@code "$.data.id"}、{@code "$.errors[*].field"}）。 */
         public <T> T read(String path) {
             if (json == null) {

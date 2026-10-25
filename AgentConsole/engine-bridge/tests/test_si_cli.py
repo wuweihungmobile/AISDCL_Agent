@@ -1,17 +1,20 @@
 """`app/si_cli.py` 與 `SI_ROOT` 設定的測試（TCS-SelfImprovingMirror-P1b：AT-932-3-1、
-AT-932-3-E-1／E-2／E-3、AT-940-1-1、AT-940-2-1、AT-940-2-E-1）。
+AT-932-3-E-1／E-2／E-3、AT-940-1-1、AT-940-2-1、AT-940-2-E-1；TCS-SelfImprovingDecide-P2b：
+AT-950-3-1、AT-950-3-E-1）。
 
 全部以假 CLI 樹（tests/fake_si.py）真起子行程：斷言 argv、cwd、環境集合、各失敗形態的 `cause` 與
 `detail`、逾時殺整棵行程樹、stdout 上限；不依賴真 CLI。AT 內不引用其他 AT 的 ID。
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import fields, replace
 from pathlib import Path
@@ -292,8 +295,12 @@ def test_AT_940_1_1_si_root_settings_resolution(
         "127.0.0.1", 9001, workspace.resolve(), None, "console", "inst-1", 30.0, None, None)
     assert base.allowed_path_roots == (workspace.resolve(), mono.resolve())
     assert base.outbound_allowlist == settings_module.DEFAULT_OUTBOUND_ALLOWLIST
-    assert [f.name for f in fields(Settings)][-3:] == ["log_dir", "sdd_write_token", "si_root"]
+    # P2b 起 Settings 末尾另增 si_write_token（repr=False）與 si_audit_dir；既有欄位的相對順序不變
+    assert [f.name for f in fields(Settings)][-5:] == [
+        "log_dir", "sdd_write_token", "si_root", "si_write_token", "si_audit_dir"]
     assert "si_root" in repr(base) and "sdd_write_token" not in repr(base)
+    assert "si_write_token" not in repr(base) and "si_audit_dir" in repr(base)
+    assert (base.si_write_token, base.si_audit_dir) == (None, None), "兩個新設定預設為停用"
 
 
 # ── AT-940-2-1：argv、cwd、環境與預設常數 ─────────────────────────────────────────────────
@@ -410,3 +417,152 @@ def test_AT_932_3_1_a_bridge_without_si_root_answers_503_not_an_empty_list(
     assert body["reason"] == "si_unavailable" and body["cause"] == "si_root_unset"
     assert "items" not in body
     assert isinstance(httpx.get(f"{live.base_url}/health").json(), dict), "SI 不可用不影響健康"
+
+
+# ── AT-950-3-1：`run_validate` 的子行程契約（P2b W4）─────────────────────────────────────────
+VALIDATE_ARGS = ["obs-add", "--dry-run", "--body-file", "-", "--json"]
+# 與 tests/fake_si.py 的預設預覽物件相同（刻意不寫 OBS 號字面：根層 ref.obs 只准帳本上真有的號）
+DEFAULT_DRY_RUN = {"ok": True, "row": "| fake dry-run row |", "row_bytes": 20,
+                   "row_max_bytes": 700, "findings": []}
+
+
+def test_AT_950_3_1_run_validate_feeds_stdin_and_spawns_with_the_whitelisted_environment(
+        fake: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    secrets = {"BRIDGE_SI_WRITE_TOKEN": "tok-sentinel-" + "z" * 24,
+               "AUTOSDD_SI_AUDIT_KEY": "key-sentinel", "AUTOSDD_SI_DIR": "/x/autosdd-sentinel",
+               "BRIDGE_DB_DSN": "postgresql://u:pw@h/db", "PYTHONPATH": "/x/pythonpath-sentinel"}
+    for name, value in secrets.items():
+        monkeypatch.setenv(name, value)
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    seen: list[dict[str, Any]] = []
+    real = subprocess.Popen
+
+    def recorder(argv: Any, **kwargs: Any) -> Any:
+        seen.append({"argv": list(argv), **kwargs})
+        return real(argv, **kwargs)
+
+    monkeypatch.setattr(si_cli.subprocess, "Popen", recorder)
+    raw = '{"context":"中文 CJK 內容・含各種字元 \\"引號\\"","symptom":"x"}'.encode()
+    assert si_cli.build_validate_argv(fake) == [
+        sys.executable, str(fake / "tools" / "selfimproving.py"), *VALIDATE_ARGS]
+    result = si_cli.run_validate(fake, raw)
+    assert result == DEFAULT_DRY_RUN
+    assert len(seen) == 1
+    kw = seen[0]
+    assert kw["argv"][2:] == VALIDATE_ARGS and kw["stdin"] is subprocess.PIPE
+    assert kw["stdout"] is subprocess.PIPE and kw["stderr"] is subprocess.PIPE
+    assert kw.get("shell", False) is False and Path(kw["cwd"]) == fake
+    call = read_calls(fake)[-1]
+    assert call["args"] == VALIDATE_ARGS, "不帶 --repo、-I、-P"
+    assert "--repo" not in call["args"] and "-I" not in call["args"] and "-P" not in call["args"]
+    assert call["safe_path"] is False
+    assert base64.b64decode(call["stdin_b64"]) == raw, "stdin 位元組必須等於 raw"
+    assert os.path.normcase(call["executable"]) == os.path.normcase(sys.executable)
+    assert Path(call["script"]) == (fake / "tools" / "selfimproving.py").resolve()
+    assert Path(call["cwd"]).resolve() == fake.resolve(), "cwd 為 si_root"
+    env = call["env"]
+    names = {n.upper() for n in env}
+    assert not [n for n in names if n.startswith(("BRIDGE_", "AUTOSDD_"))], sorted(names)
+    extra = names - ALLOWED_ENV - FIXED_ENV - INTERPRETER_ADDED
+    assert not extra, f"環境出現白名單與固定鍵以外的變數 {sorted(extra)}"
+    blob = json.dumps(env, ensure_ascii=False)
+    for name, value in secrets.items():
+        assert value not in blob, f"{name} 的值洩入子行程環境"
+    assert (env["GIT_CONFIG_COUNT"], env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == (
+        "1", "safe.directory", str(fake))
+
+
+def test_AT_950_3_1_a_large_body_reaches_the_child_intact(fake: Path) -> None:
+    raw = ('{"pad":"' + "壹貳參" * 7000 + '"}').encode()          # 約 63 KB：遠大於管道緩衝
+    assert 60000 < len(raw) <= 65536
+    si_cli.run_validate(fake, raw)
+    assert base64.b64decode(read_calls(fake)[-1]["stdin_b64"]) == raw
+
+
+# ── AT-950-3-E-1：validate 失敗形態 ───────────────────────────────────────────────────────────
+VALIDATE_FAILURES: list[tuple[str, Any, str, str]] = [
+    # (名稱, 準備函式, 期望 cause, 期望 detail 的 rc 段)
+    ("a-nonzero-rc-3", _control(rc=3, stderr=STDERR_G), "nonzero_rc", "3"),
+    ("a2-nonzero-rc-2", _control(rc=2, dry_run=DEFAULT_DRY_RUN), "nonzero_rc", "2"),
+    ("b-garbage-stdout", _control(raw_stdout="這不是 JSON"), "bad_json", "0"),
+    ("b2-garbage-stdout-rc1", _control(raw_stdout="還是垃圾", rc=1), "bad_json", "1"),
+    ("b3-array", _control(raw_stdout="[1, 2]\n"), "bad_json", "0"),
+    ("b4-two-documents", _control(raw_stdout='{"ok": true}{"ok": false}'), "bad_json", "0"),
+    ("c-missing-ok", _control(dry_run={k: v for k, v in DEFAULT_DRY_RUN.items() if k != "ok"}),
+     "bad_shape", "0"),
+    ("c2-findings-not-array", _control(dry_run={**DEFAULT_DRY_RUN, "findings": "x"}),
+     "bad_shape", "0"),
+    ("c3-ok-not-bool", _control(dry_run={**DEFAULT_DRY_RUN, "ok": "yes"}), "bad_shape", "0"),
+    ("c4-row-bytes-bool", _control(dry_run={**DEFAULT_DRY_RUN, "row_bytes": True}),
+     "bad_shape", "0"),
+    ("c5-row-max-bytes-missing",
+     _control(dry_run={k: v for k, v in DEFAULT_DRY_RUN.items() if k != "row_max_bytes"}),
+     "bad_shape", "0"),
+    ("c6-row-not-string", _control(dry_run={**DEFAULT_DRY_RUN, "row": 5}), "bad_shape", "0"),
+    ("d-stdout-too-large", _too_large, "stdout_too_large", "none"),
+    ("e-si-root-none", _no_root, "si_root_unset", "none"),
+    ("f-dir-missing", _missing_dir, "si_script_missing", "none"),
+    ("g-script-missing", _no_script, "si_script_missing", "none"),
+    ("h-spawn-error", _spawn_error, "spawn_failed", "none"),
+]
+
+
+@pytest.mark.parametrize("name,prepare,cause,rc_text", VALIDATE_FAILURES,
+                         ids=[c[0] for c in VALIDATE_FAILURES])
+def test_AT_950_3_E_1_every_validate_failure_form_maps_to_503_with_a_fixed_cause(
+        name: str, prepare: Any, cause: str, rc_text: str, tmp_path: Path, fake: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    root = prepare(tmp_path, fake, monkeypatch)
+    err = fail_of(lambda: si_cli.run_validate(root, b'{"user":"admin"}'))
+    assert (err.status_code, err.body["reason"]) == (503, "si_unavailable"), name
+    assert err.body["cause"] == cause, f"{name}：{err.body}"
+    detail = err.body["detail"]
+    assert DETAIL_FORMAT.match(detail), f"{name}：detail 格式不合 {detail!r}"
+    assert detail.startswith(f"rc={rc_text}; stderr="), f"{name}：{detail!r}"
+    if cause == "nonzero_rc" and name.startswith("a-"):
+        assert detail == f"rc=3; stderr={STDERR_G}"
+
+
+def test_AT_950_3_E_1_a_timeout_kills_the_whole_process_tree(
+        fake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pids_file = fake / "fake_pids.json"
+    for timeout in (2.0, 6.0):            # 同 export 的逾時測試：孫行程沒出生就換較長的逾時重試
+        pids_file.unlink(missing_ok=True)
+        set_control(fake, sleep=30, grandchild=True)
+        monkeypatch.setattr(si_cli, "SI_CLI_TIMEOUT_SECONDS", timeout)
+        started = time.monotonic()
+        err = fail_of(lambda: si_cli.run_validate(fake, b'{"user":"admin"}'))
+        elapsed = time.monotonic() - started
+        if pids_file.is_file():
+            break
+    assert pids_file.is_file(), "假 CLI 在逾時內沒能生出孫行程：環境太慢，無法驗證殺樹"
+    assert err.body["cause"] == "timeout" and err.body["detail"].startswith("rc=none; stderr=")
+    assert elapsed < 10, f"呼叫必須在有界時間內返回（實際 {elapsed:.1f} 秒）"
+    pids = json.loads(pids_file.read_text(encoding="utf-8"))
+    recorded = read_calls(fake)[-1]["pid"]
+    for label, pid in (("假 CLI", recorded), ("孫行程", pids["grandchild"])):
+        assert _gone(pid, 3.0), f"{label}（pid={pid}）逾時後仍存活＝孤兒行程"
+
+
+def test_AT_950_3_E_1_a_child_that_never_reads_stdin_cannot_block_the_timeout(
+        fake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """子行程睡著不讀 stdin、本文又遠大於管道緩衝：餵 stdin 的寫入會卡住，但逾時仍必須準時生效，
+    且行程樹被收掉、沒有孤兒。（換掉假 CLI 腳本：標準假 CLI 會先把 stdin 讀完。）"""
+    script = fake / "tools" / "selfimproving.py"
+    script.write_text("import time\ntime.sleep(60)\n", encoding="utf-8", newline="\n")
+    monkeypatch.setattr(si_cli, "SI_CLI_TIMEOUT_SECONDS", 1.5)
+    raw = ('{"pad":"' + "x" * 300000 + '"}').encode()      # 遠大於任何平台的管道緩衝
+    started = time.monotonic()
+    err = fail_of(lambda: si_cli.run_validate(fake, raw))
+    elapsed = time.monotonic() - started
+    assert err.body["cause"] == "timeout" and err.body["detail"].startswith("rc=none; stderr=")
+    assert elapsed < 10, f"餵 stdin 的寫入不得拖住逾時（實際 {elapsed:.1f} 秒）"
+    stdin_writers = [t for t in threading.enumerate() if t.name == "si-stdin" and t.is_alive()]
+    deadline = time.monotonic() + 5
+    while stdin_writers and time.monotonic() < deadline:
+        time.sleep(0.05)
+        stdin_writers = [t for t in threading.enumerate() if t.name == "si-stdin" and t.is_alive()]
+    assert not stdin_writers, "子行程被殺後，卡住的 stdin 寫入執行緒必須隨管道關閉而結束"

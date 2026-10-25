@@ -13,6 +13,8 @@ import com.aisdlc.console.domain.model.execution.ExecutionRtm;
 import com.aisdlc.console.domain.model.execution.ExecutionWarning;
 import com.aisdlc.console.domain.model.execution.ResourceUsage;
 import com.aisdlc.console.domain.model.si.SiExport;
+import com.aisdlc.console.domain.model.si.SiValidation;
+import com.aisdlc.console.domain.model.si.SiWriteAck;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -80,6 +82,11 @@ class BridgeHttpAdapter implements AgentBridge {
     private static final String SDD_WRITE_DISABLED = "sdd_write_disabled";
     /** Bridge 在「SelfImproving 資料面不可用」時回的 503 reason（TCS-P1b R4、R8）：與 4xx 同走 {@code BridgeRejectedException}，由用例轉成 503。 */
     private static final String SI_UNAVAILABLE = "si_unavailable";
+    /**
+     * Bridge 在「SelfImproving 寫入面停用」時回的 503 reason（它的 {@code BRIDGE_SI_WRITE_TOKEN} 或 {@code BRIDGE_SI_AUDIT_DIR} 沒設；
+     * TCS-SelfImprovingDecide-P2b W3、W15）：同 {@code sdd_write_disabled}，是設定決定的明確拒絕、不是 5xx 故障。
+     */
+    private static final String SI_WRITE_DISABLED = "si_write_disabled";
     private static final String TRACE_MDC_KEY = "traceId";
     private static final Logger LOG = LoggerFactory.getLogger(BridgeHttpAdapter.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -93,8 +100,9 @@ class BridgeHttpAdapter implements AgentBridge {
     /** 引擎狀態查詢（{@code /sdd/version}、{@code /sdd/fsm}、{@code /sdd/fsm/{project}}）：連線 2 秒、讀取 3 秒、不重試（契約 §3.1）。 */
     private static final Duration SDD_READ_TIMEOUT = Duration.ofSeconds(3);
     /**
-     * SelfImproving 唯讀鏡像（{@code /si/*}）：連線 2 秒、讀取 20 秒、不重試（TCS-P1b R8；ADR-SI-12）。Bridge 的 {@code export} 子行程逾時
-     * 15 秒（{@code SI_CLI_TIMEOUT_SECONDS}）必須小於這個值，否則 Bridge 的 503 會被這裡的 504 蓋掉。
+     * SelfImproving（{@code /si/*}：P1b 唯讀鏡像，P2b 的稽核檔落地與預檢沿用同一組逾時）：連線 2 秒、讀取 20 秒、不重試（TCS-P1b R8；
+     * ADR-SI-12；TCS-SelfImprovingDecide-P2b W11）。Bridge 的 {@code export}／{@code validate} 子行程逾時 15 秒
+     * （{@code SI_CLI_TIMEOUT_SECONDS}）必須小於這個值，否則 Bridge 的 503 會被這裡的 504 蓋掉。
      */
     private static final Duration SI_READ_TIMEOUT = Duration.ofSeconds(20);
     private static final char[] HEX = "0123456789ABCDEF".toCharArray();
@@ -345,7 +353,8 @@ class BridgeHttpAdapter implements AgentBridge {
                 strings(doc.get("unmapped_at_ids")), Boolean.TRUE.equals(doc.get("fully_covered")));
     }
 
-    // ── P1b：SelfImproving 唯讀鏡像（TCS-SelfImprovingMirror-P1b R7、R8、R10；連線 2s／讀取 20s、不重試）────────────
+    // ── SelfImproving：P1b 唯讀鏡像（TCS-SelfImprovingMirror-P1b R7、R8、R10）與 P2b 稽核檔落地、預檢（TCS-SelfImprovingDecide-P2b W3、W4、W11）；
+    //    全部連線 2s／讀取 20s、不重試 ────────────────────────────────────────────────────────────────────
 
     @Override
     public SiExport siExport(String kind, Integer since, Integer limit, String id) {
@@ -371,6 +380,57 @@ class BridgeHttpAdapter implements AgentBridge {
             throw malformed("GET /si/" + kind);
         }
         return new SiExport(asMap(doc));
+    }
+
+    @Override
+    public SiWriteAck siWriteDecide(String id, String audit) {
+        return siWrite("/si/proposals/" + pathSegment(id) + ":decide", audit);
+    }
+
+    @Override
+    public SiWriteAck siWriteObservation(String audit) {
+        return siWrite("/si/observations", audit);
+    }
+
+    @Override
+    public SiWriteAck siWriteObservationClose(String id, String audit) {
+        return siWrite("/si/observations/" + pathSegment(id) + ":close", audit);
+    }
+
+    /**
+     * 稽核檔落地的共同路徑：附 {@code X-Bridge-Token}（沒有權杖就不發出請求）、本文為稽核 JSON 全文的 UTF-8 位元組、不重試。
+     * 2xx 但本文不是 {@code {audit_ref, stored:true}} → {@link UpstreamException.Failure}（{@code bridgeStatus}＝200：檔可能已落地，結果不明）。
+     */
+    private SiWriteAck siWrite(String path, String audit) {
+        Map<String, String> auth = siWriteToken();
+        if (auth.isEmpty()) {
+            // 呼叫端（SiConsoleWriteService）本來就該先檢查；這裡是最後一道網：沒有權杖就不發出請求（發了也只會被 Bridge 回 503／403）
+            throw new ServiceUnavailableException("backend 沒有設定 SelfImproving 寫入權杖（BRIDGE_SI_WRITE_TOKEN），寫入面已停用",
+                    ErrorReasons.SI_WRITE_DISABLED, Map.of("cause", "bridge_token_unset"));
+        }
+        Map<String, Object> doc = postRaw(URI.create(endpoints.siBase() + path), audit, SI_READ_TIMEOUT, auth);
+        String ref = text(doc.get("audit_ref"));
+        if (ref == null || ref.isBlank() || !Boolean.TRUE.equals(doc.get("stored"))) {
+            throw malformed("POST /si 稽核檔落地");
+        }
+        return new SiWriteAck(ref, true);
+    }
+
+    @Override
+    public SiValidation siValidateObservation(String body) {
+        Map<String, Object> doc = postRaw(URI.create(endpoints.siBase() + "/si/observations:validate"), body, SI_READ_TIMEOUT,
+                Map.of());
+        if (!(doc.get("ok") instanceof Boolean ok) || !(doc.get("row") instanceof String row)
+                || !(doc.get("row_bytes") instanceof Number rowBytes)) {
+            throw malformed("POST /si/observations:validate");
+        }
+        List<SiValidation.Finding> findings = new ArrayList<>();
+        for (Object item : asList(doc.get("findings"))) {
+            Map<String, Object> finding = asMap(item);
+            findings.add(new SiValidation.Finding(text(finding.get("code")), text(finding.get("detail"))));
+        }
+        Long rowMax = doc.get("row_max_bytes") instanceof Number max ? Long.valueOf(max.longValue()) : null;
+        return new SiValidation(ok, row, rowBytes.longValue(), rowMax, findings);
     }
 
     /**
@@ -412,6 +472,11 @@ class BridgeHttpAdapter implements AgentBridge {
     /** 權杖標頭（backend 有設才有）：空 map＝沒設。 */
     private Map<String, String> writeToken() {
         return endpoints.sddWriteToken().map(token -> Map.of(TOKEN_HEADER, token)).orElse(Map.of());
+    }
+
+    /** SelfImproving 寫入權杖標頭（與 SDD 權杖是兩個獨立的值）：空 map＝沒設。 */
+    private Map<String, String> siWriteToken() {
+        return endpoints.siWriteToken().map(token -> Map.of(TOKEN_HEADER, token)).orElse(Map.of());
     }
 
     private static SddFsmState.HumanPending humanPendingOf(Object value) {
@@ -859,6 +924,21 @@ class BridgeHttpAdapter implements AgentBridge {
         }
     }
 
+    /**
+     * POST 一份<b>原樣</b>的 JSON 文字（SelfImproving 稽核檔與預檢本文）：位元組＝字串的 UTF-8，不經 Jackson 重新序列化——稽核 JSON 是
+     * {@code audit_sha256} 與 HMAC 的對象，多一個空白或換個鍵序都會讓主機端 CLI 以 AUDIT-MAC-MISMATCH 拒收。{@code uri} 是已編碼好的完整網址
+     * （不交給範本引擎，同 {@link #siExport}）。🔴 標頭值（權杖）只放進請求，不進日誌、例外訊息或錯誤封包。
+     */
+    private Map<String, Object> postRaw(URI uri, String payload, Duration readTimeout, Map<String, String> headers) {
+        try {
+            return client(readTimeout, traceId()).post().uri(uri).headers(h -> headers.forEach(h::set))
+                    .contentType(MediaType.APPLICATION_JSON).body(payload.getBytes(StandardCharsets.UTF_8))
+                    .exchange((request, response) -> handle(response.getStatusCode(), readBody(response.getBody())));
+        } catch (ResourceAccessException e) {
+            throw translate(e);
+        }
+    }
+
     private static Map<String, Object> handle(HttpStatusCode status, String body) {
         if (status.is2xxSuccessful()) {
             return parseObject(body, "Bridge 回了無法解析的成功本文");
@@ -866,7 +946,8 @@ class BridgeHttpAdapter implements AgentBridge {
         Map<String, Object> error = parseErrorBody(body);
         String reason = text(error.get("reason"));
         // 503 sdd_write_disabled 是「明確拒絕」（權杖沒設＝這個動詞停用），與 4xx 同走 BridgeRejectedException，由用例轉成 503；其餘 5xx 才是故障
-        boolean writeDisabled = status.value() == 503 && SDD_WRITE_DISABLED.equals(reason);
+        boolean writeDisabled = status.value() == 503
+                && (SDD_WRITE_DISABLED.equals(reason) || SI_WRITE_DISABLED.equals(reason));
         // 503 si_unavailable 同理：SelfImproving 資料面不可用是 Bridge 明確回報的狀態（帶 cause 與 detail），不是上游故障
         boolean siUnavailable = status.value() == 503 && SI_UNAVAILABLE.equals(reason);
         if (status.is4xxClientError() || writeDisabled || siUnavailable) {
@@ -886,6 +967,11 @@ class BridgeHttpAdapter implements AgentBridge {
                 + (reason == null || reason.isEmpty() ? "" : "，" + reason) + "）", details);
     }
 
+    /**
+     * 連線階段的失敗（拒絕、DNS、連線逾時）→ {@code Unavailable}，<b>確定沒有送達</b>；讀取逾時 → {@code TimedOut}（請求已送出）；
+     * 其餘通訊失敗（送出後連線被重設、提前 EOF…）→ {@code Unavailable} 並標 {@link UpstreamException.Unavailable#deliveryUncertain()}：
+     * Bridge 可能已處理請求（SelfImproving 寫入據此決定保留或補償刪除稽核列，TCS-SelfImprovingDecide-P2b W11）。
+     */
     private static UpstreamException translate(ResourceAccessException e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             if (t instanceof HttpConnectTimeoutException || t instanceof ConnectException
@@ -896,7 +982,7 @@ class BridgeHttpAdapter implements AgentBridge {
                 return new UpstreamException.TimedOut("Engine Bridge 逾時：" + t.getClass().getSimpleName());
             }
         }
-        return new UpstreamException.Unavailable("與 Engine Bridge 通訊失敗：" + e.getClass().getSimpleName());
+        return new UpstreamException.Unavailable("與 Engine Bridge 通訊失敗：" + e.getClass().getSimpleName(), true, Map.of());
     }
 
     private static String readBody(InputStream stream) throws IOException {

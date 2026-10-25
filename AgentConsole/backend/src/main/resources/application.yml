@@ -129,6 +129,17 @@ console:
     # 🔴 有設但短於 32 字元，或仍是 <…> 佔位＝backend 啟動即失敗（BridgeProperties 驗證；不靜默退回停用）。repo 內不放任何真值，值只進環境變數；
     # 權杖值絕不進日誌、錯誤封包或 details。
     sdd-write-token: ${BRIDGE_SDD_WRITE_TOKEN:}
+    # SelfImproving 寫入權杖（P2b；TCS-SelfImprovingDecide-P2b W9）：與 Bridge 同名同值的環境變數 BRIDGE_SI_WRITE_TOKEN（與 SDD 權杖是兩個獨立的值），
+    # 同一個 X-Bridge-Token 標頭，只用於三個稽核檔落地的 POST（決定、新增觀察、關閉觀察；預檢不帶）。規則同 sdd-write-token：
+    # 空＝SelfImproving 寫入面停用；有設但短於 32 字元或仍是 <…> 佔位＝backend 啟動即失敗；值絕不進日誌、錯誤封包或 details。
+    si-write-token: ${BRIDGE_SI_WRITE_TOKEN:}
+  si:
+    # SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W9）：Console 不寫帳本，只簽稽核 JSON 並經 Bridge 落檔，由主機端根層 CLI 驗簽入帳。
+    # deciders：可寫入的帳號名單（逗號分隔；須是 ADMIN 且 JWT 帳號名逐字在名單內、區分大小寫）；空＝無人可寫（預設）。
+    deciders: ${CONSOLE_SI_DECIDERS:}
+    # audit-key：稽核簽章金鑰環（逗號分隔，第一把簽章、其餘保留供輪替；每把至少 32 字元；主機端以同一把設 AUTOSDD_SI_AUDIT_KEY 才能入帳）。
+    # 空＝寫入面停用；有設而過短或仍是 <…> 佔位＝backend 啟動即失敗。🔴 金鑰只進環境變數，repo 內不放任何真值。
+    audit-key: ${CONSOLE_SI_AUDIT_KEY:}
   execution:
     # 事件消費者（每個活躍 run 一條虛擬執行緒，契約 §3.5.4）：事件串流閒置逾 idle-timeout 視為斷線（Bridge 每 15 秒送 keep-alive），
     # 以指數退避 backoff-initial→backoff-max 重連，位移用 DB 的 console_last_seq。

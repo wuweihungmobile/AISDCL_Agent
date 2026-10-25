@@ -54,13 +54,19 @@ import type {
   SddEngineStatus,
   SddFreezeRequest,
   SddFsmState,
+  SiCloseRequest,
+  SiConsoleWrites,
+  SiDecideRequest,
   SiEvent,
   SiListParams,
+  SiObservationRequest,
   SiObservationRow,
   SiPage,
   SiProposal,
   SiRun,
   SiStatusItem,
+  SiValidation,
+  SiWriteReceipt,
   StartExecutionRequest,
   TaskDetail,
   TaskResponse,
@@ -520,7 +526,7 @@ export function downloadProjectReport(projectId: string, params: ReportParams = 
 }
 
 // ── SelfImproving 唯讀鏡像（P1b；TCS-SelfImprovingMirror-P1b R11）──────────────────────────────
-// 恰六個 GET、沒有任何寫入函式：Console 是顯示面，頁面資料＝根層 `si export` 的輸出（backend 只改欄名）。
+// 六個 GET（P1b 的鏡像讀面；P2b 另加一個對帳讀面與四個 POST，見本節之後）：Console 是顯示面，頁面資料＝根層 `si export` 的輸出（backend 只改欄名）。
 // 瀏覽器只呼叫 console-api 的 /api/v1/si/**，從不直連 Bridge（Architecture §10.1）。
 type SiOpts = SiListParams & Opts;
 
@@ -549,4 +555,33 @@ export function getSiProposal(id: string, opts: Opts = {}): Promise<SiPage<SiPro
 
 export function getSiRuns(opts: SiOpts = {}): Promise<SiPage<SiRun>> {
   return apiRequest<SiPage<SiRun>>("/api/v1/si/runs", { query: { since: opts.since, limit: opts.limit }, signal: opts.signal });
+}
+
+// ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W16）──────────────────────────────
+// 四個 POST（僅 ADMIN；帳號是否在 deciders 名單由 backend 判，403 `si_write_forbidden`）加一個對帳讀面。瀏覽器仍只呼叫 console-api：
+// 稽核簽章在 backend、落檔在 Bridge，前端沒有任何金鑰。本文原樣 `JSON.stringify`（鍵集合＝呼叫端給的，不補預設值、不丟 undefined 以外的欄位）。
+
+/** 決定：`id` 為 PROP 號（動詞 resume 為 RUN 號）；以 encodeURIComponent 編成單一路徑段。 */
+export function postSiDecide(id: string, body: SiDecideRequest): Promise<SiWriteReceipt> {
+  return apiRequest<SiWriteReceipt>(`/api/v1/si/proposals/${seg(id)}/decide`, { method: "POST", body });
+}
+
+/** 新增觀察（含更正：本文帶 `corrects`）。 */
+export function postSiObservation(body: SiObservationRequest): Promise<SiWriteReceipt> {
+  return apiRequest<SiWriteReceipt>("/api/v1/si/observations", { method: "POST", body });
+}
+
+/** 關閉觀察：`id` 為 OBS 號；本文為終值加 `ref` 或 `text`（恰擇一，依終值）。 */
+export function postSiObservationClose(id: string, body: SiCloseRequest): Promise<SiWriteReceipt> {
+  return apiRequest<SiWriteReceipt>(`/api/v1/si/observations/${seg(id)}/close`, { method: "POST", body });
+}
+
+/** 新增觀察的預檢（`obs-add --dry-run`）：零副作用，不寫 DB、不落檔；回預覽列與位元組數，或根層的拒收原因。 */
+export function postSiObservationValidate(body: SiObservationRequest): Promise<SiValidation> {
+  return apiRequest<SiValidation>("/api/v1/si/observations/validate", { method: "POST", body });
+}
+
+/** Console 稽核列與帳本的對帳（VIEWER 以上可讀，Console 只讓 ADMIN 看見）；`limit` 為 1～500，undefined 不進網址（backend 預設 100）。 */
+export function getSiConsoleWrites(opts: { limit?: number } & Opts = {}): Promise<SiConsoleWrites> {
+  return apiRequest<SiConsoleWrites>("/api/v1/si/console-writes", { query: { limit: opts.limit }, signal: opts.signal });
 }

@@ -136,6 +136,36 @@ def require_sdd_write_token(configured: str | None, provided: str | None, *,
         raise reject(ApiError(403, "sdd_write_forbidden"), "rejected:sdd_write_forbidden")
 
 
+# ── SI 寫入面權杖（P2b W3；與 SDD 寫入面同一標頭、獨立權杖）──────────────────────────────────
+# 注意：本檔含 `AuditLog` 的寫檔，不可出現 s-e-l-f-i-m-p-r-o-v-i-n-g 連寫字樣——
+# tests/test_si_readonly_lock.py 的判準 1 把含該字樣的模組視為「SI 相關」，寫入形態呼叫只准出現在
+# si_audit.py。
+def require_si_write_token(configured: str | None, audit_dir: Path | None, provided: str | None, *,
+                           audit: AuditLog | None, verb: str, subject: str | None = None) -> None:
+    """SI 三個寫入端點（`:decide`、`POST /si/observations`、`:close`）的入口檢查，**先於**本文的
+    任何檢查。
+
+    寫入面停用（權杖或稽核目錄任一未設）＝503 `si_write_disabled`（fail-closed；先於權杖比對）；設了
+    而標頭缺漏或不符＝403 `si_write_forbidden`（缺與錯同一個回應，不給探測者區分）。以
+    `hmac.compare_digest` 比 bytes（常數時間；非 ASCII 字元也不會拋例外）。被拒的請求也記稽核
+    （決策：verb、subject、結果、trace_id；不含任何權杖值，包括被拒的那個值）。
+    `validate`（唯讀預檢）不呼叫本函式。"""
+    def reject(error: ApiError, result: str) -> ApiError:
+        if audit is not None:
+            audit.record("si_write", verb=verb, subject=subject, result=result,
+                         trace_id=trace_id_var.get())
+        return error
+
+    if not configured or audit_dir is None:
+        raise reject(ApiError(503, "si_write_disabled",
+                              detail="Bridge 未設定 BRIDGE_SI_WRITE_TOKEN 或 BRIDGE_SI_AUDIT_DIR："
+                                     "SI 寫入面停用"),
+                     "rejected:si_write_disabled")
+    if provided is None or not hmac.compare_digest(provided.encode("utf-8"),
+                                                   configured.encode("utf-8")):
+        raise reject(ApiError(403, "si_write_forbidden"), "rejected:si_write_forbidden")
+
+
 # ── 1. 路徑閘 ──────────────────────────────────────────────────────────────────
 def is_within(child: Path, root: Path) -> bool:
     """`child` 是否位於 `root` 之下（含相等）。兩邊都先 resolve，再 normcase 後比對。

@@ -1,17 +1,20 @@
-"""SelfImproving 差分測試的夾具建構器與真 CLI 輔助（TCS-SelfImprovingMirror-P1b §5.1、R25）。
+"""SelfImproving 差分測試的夾具建構器與真 CLI 輔助（TCS-SelfImprovingMirror-P1b §5.1、R25；
+TCS-SelfImprovingDecide-P2b W6、§5.6：寫入閉包、真 CLI 入帳、稽核檔變形）。
 
 不是測試（檔名不以 test_ 開頭）；被 test_si_*.py 與 si_golden_regen.py import。
 
 「真 CLI」＝把 `CLI_CLOSURE`（根層 `export` 的 import 閉包）自 monorepo 複製進 tmp 倉，加
 `tests/fixtures/si_repo/` 的帳本複本與取自真 repo 的 `params.json`，`git init` 並以固定作者與
 日期提交一次＝狀態 A；追加一筆觀察列與一筆事件再提交一次＝狀態 B。閉包不完備時建構器直接大聲
-失敗（`SiFixtureError`，訊息含 `CLI_CLOSURE` 與 CLI 的 stderr），絕不退回假 CLI。
+失敗（`SiFixtureError`，訊息含 `CLI_CLOSURE`／`WRITE_CLOSURE` 與缺的檔名），絕不退回假 CLI。
+寫入動詞（P2b 入帳）要 `WRITE_CLOSURE`：它比 `CLI_CLOSURE` 多兩個只被寫入動詞 import 的檔。
 
 建倉所得的 HEAD 隨複製進倉的閉包與夾具內容而變（樹內容進雜湊），所以**不被當作常數、不進黃金檔**。
 """
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -29,6 +32,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 MONOREPO = TESTS_DIR.parents[2]
 FIXTURE_REPO = TESTS_DIR / "fixtures" / "si_repo"
 GOLDEN_DIR = TESTS_DIR / "fixtures" / "si_golden"
+#: 稽核檔黃金檔 G1～G5（P2b §5.3；與 backend/src/test/resources/si/audit/ 逐位元組相同）。
+AUDIT_GOLDEN_DIR = TESTS_DIR / "fixtures" / "si_audit"
 
 #: 根層 `export` 的 import 閉包（現查：以真 CLI 在複本倉實跑五個 kind 皆 rc 0、無 `__pycache__`）。
 #: 日後變動時，本常數、`.github/workflows/agentconsole-ci.yml` 的 `paths` 與 AT-940-4-1 同一個
@@ -39,6 +44,21 @@ CLI_CLOSURE: tuple[str, ...] = (
     "tools/lib/platform_utils.py",
     "tools/lib/selfimproving/",
 )
+#: 只被寫入動詞 import 的根層檔（SA 實測：缺任一個，寫入動詞即 `ImportError`——`evwrite` 要
+#: `apply_lock`、`writeverbs` 頂層要 `sdd_latest`）。
+WRITE_ONLY_FILES: tuple[str, ...] = ("tools/lib/apply_lock.py", "tools/lib/sdd_latest.py")
+#: 寫入閉包（P2b W6）。日後變動時，本常數、`.github/workflows/agentconsole-ci.yml` 的 `paths` 與
+#: AT-950-11-2 同一個 commit 收齊。
+WRITE_CLOSURE: tuple[str, ...] = (*CLI_CLOSURE, *WRITE_ONLY_FILES)
+#: 公開的測試金鑰與權杖（字面刻意不用 `sk-` 前綴；不是機密）。K0＝§5.1 向量金鑰。
+K0 = "si-p2-vector-key-0123456789-abcdefghijklmnopqrstuvwxyz"
+K0_ID = "f076edf0"
+T0 = "si-write-token-for-tests-0123456789-abcdef"
+#: 黃金檔 G1～G5 的檔名（§5.3 的順序）。
+GOLDEN_AUDIT_FILES: dict[str, str] = {
+    "G1": "decide-approve.json", "G2": "decide-reject.json", "G3": "obs-add.json",
+    "G4": "obs-add-corrects.json", "G5": "obs-close.json"}
+_PLACEHOLDER_REF = "00000000-0000-4000-8000-000000000000"
 #: 建倉時自真 repo 複製（使 `params.json` 的結構演進會讓 Bridge 測試誠實變紅）。
 PARAMS_SRC = "docs/06_quality/SelfImproving_Protocol/params.json"
 
@@ -92,6 +112,74 @@ def cli_card(root: Path, prop: str) -> str:
     return done.stdout.decode("utf-8")
 
 
+# ── P2b：真 CLI 入帳與稽核檔變形 ────────────────────────────────────────────────────────────
+def ingest_run(root: Path, home: Path, key: str | None, *args: str,
+               timeout: float = 120.0) -> tuple[int, str, str]:
+    """在倉 `root` 跑真 CLI 的一個動詞（`decide`、`obs-add`、`obs-close`…），環境＝`cli_env` 加
+    `AUTOSDD_SI_DIR`＝`home`（稽核檔住 `home/console_audit/`；真家目錄不被碰）與
+    `AUTOSDD_SI_AUDIT_KEY`＝`key`（`None`＝不設，驗簽會得 AUDIT-KEY-MISSING）。
+    回 `(rc, stdout, stderr)`。"""
+    env = cli_env(root)
+    env["AUTOSDD_SI_DIR"] = str(home)
+    if key is not None:
+        env["AUTOSDD_SI_AUDIT_KEY"] = key
+    done = subprocess.run([sys.executable, str(root / SCRIPT_REL), *args], cwd=str(root), env=env,
+                          stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout,
+                          check=False)
+    return (done.returncode, done.stdout.decode("utf-8", errors="replace"),
+            done.stderr.decode("utf-8", errors="replace"))
+
+
+def read_audit_golden(code: str) -> bytes:
+    """黃金檔 G1～G5 的位元組（`code` 為 `G1`～`G5`）。"""
+    return (AUDIT_GOLDEN_DIR / GOLDEN_AUDIT_FILES[code]).read_bytes()
+
+
+def hmac_hex(key: str, text: str) -> str:
+    """HMAC-SHA256(金鑰的 UTF-8 位元組, 文字的 UTF-8 位元組) 小寫 hex（簽章對象是 body 字串本身）。
+    """
+    return hmac.new(key.encode("utf-8"), text.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def key_id_of(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def signed_audit(kind: str, subject: str | None, body: dict[str, Any], key: str = K0) -> bytes:
+    """由 body 物件造一份**簽好**的稽核檔位元組（測試自造情境用；格式同黃金檔：緊湊 JSON、非
+    ASCII 原樣、無結尾換行）。外層 `audit_ref` 取 `body["audit_ref"]`；body 的鍵序即傳入順序。"""
+    text = json.dumps(body, ensure_ascii=False, separators=(",", ":"))
+    outer = {"schema_rev": 1, "kind": kind, "audit_ref": body["audit_ref"], "subject": subject,
+             "body": text, "key_id": key_id_of(key), "mac": hmac_hex(key, text)}
+    return json.dumps(outer, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def audit_variant(raw: bytes, *, body_replace: tuple[str, str] | None = None,
+                  sign_with: str | None = None, key_id: str | None = None,
+                  extra_outer: dict[str, Any] | None = None,
+                  outer_replace: dict[str, Any] | None = None) -> bytes:
+    """由稽核檔位元組造**單點**變形（AT-933-1-E-4 等）：
+      `body_replace=(舊, 新)`  取代 body 字串中的第一個子字串（舊字串不在 body 內＝大聲失敗，
+                               免得變形其實什麼都沒改）；
+      `sign_with=<金鑰>`        變形後以該金鑰字面重算 `mac`（`key_id` 不動）；不給＝保留原 mac；
+      `key_id=<8 碼>`           直接覆寫外層 `key_id`；
+      `extra_outer={…}`         外層多加鍵；`outer_replace={…}` 覆寫外層既有鍵的值。
+    輸出格式同黃金檔：緊湊 JSON、UTF-8、非 ASCII 原樣、無結尾換行。"""
+    outer = json.loads(raw.decode("utf-8"))
+    if body_replace is not None:
+        old, new = body_replace
+        if old not in outer["body"]:
+            raise SiFixtureError(f"變形無效：body 內沒有 {old!r}")
+        outer["body"] = outer["body"].replace(old, new, 1)
+    if sign_with is not None:
+        outer["mac"] = hmac_hex(sign_with, outer["body"])
+    if key_id is not None:
+        outer["key_id"] = key_id
+    outer.update(outer_replace or {})
+    outer.update(extra_outer or {})
+    return json.dumps(outer, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
 # ── git 與建倉 ─────────────────────────────────────────────────────────────────────────────
 def git(root: Path, *args: str, date: str | None = None) -> str:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
@@ -130,13 +218,45 @@ def _copy_closure(dest: Path, closure: Iterable[str]) -> None:
 
 
 def _verify_closure(root: Path, closure: Iterable[str]) -> None:
-    """閉包完備性自檢：真 CLI 必須跑得起來（缺檔會在 import 就死，stderr 指出缺哪個）。"""
+    """閉包完備性自檢：真 CLI 必須跑得起來（缺檔會在 import 就死，stderr 指出缺哪個）。閉包含
+    `WRITE_ONLY_FILES` 任一個＝這是個寫入閉包，另驗兩個入帳動詞在 import 階段不死（W6、
+    AT-950-11-E-2）。"""
+    closure = tuple(closure)
     done = cli_run(root, "export", "--json", "--kind", "status")
     if done.returncode != 0:
         tail = done.stderr.decode("utf-8", errors="replace")[-800:]
         raise SiFixtureError(
             f"CLI_CLOSURE 不完備，真 CLI 跑不起來（rc={done.returncode}；閉包＝{list(closure)}）："
             f"{tail}")
+    if any(item in closure for item in WRITE_ONLY_FILES):
+        _verify_write_closure(root, closure)
+
+
+def _missing_file_of(stderr: str) -> str:
+    """由 ImportError 的訊息推出缺的根層檔：`No module named 'lib.x'`（模組不存在）或
+    `cannot import name 'x' from 'lib'`（`from lib import x` 而 `lib/x.py` 不存在）。"""
+    named = re.search(r"No module named '([\w.]+)'", stderr)
+    if named:
+        return f"tools/{named.group(1).replace('.', '/')}.py"
+    imported = re.search(r"cannot import name '(\w+)' from '([\w.]+)'", stderr)
+    if imported:
+        return f"tools/{imported.group(2).replace('.', '/')}/{imported.group(1)}.py"
+    return "（無法判讀缺哪個檔）"
+
+
+def _verify_write_closure(root: Path, closure: tuple[str, ...]) -> None:
+    """以不存在的稽核檔呼叫兩個入帳動詞：期待被 CLI「拒收」（rc 1），而不是在 import 階段死掉。
+    ImportError 的訊息帶缺的模組名，據以指出缺哪個檔。"""
+    probes = (("obs-add", "--carrier", "console", "--audit-ref", _PLACEHOLDER_REF, "--json"),
+              ("decide", "PROP-SI-004", "--carrier", "console", "--audit-ref", _PLACEHOLDER_REF,
+               "--json"))
+    for args in probes:
+        rc, _out, err = ingest_run(root, root.parent / f"{root.name}-probe-home", "x" * 40, *args)
+        if "No module named" in err or "ImportError" in err:
+            name = _missing_file_of(err)
+            raise SiFixtureError(
+                f"WRITE_CLOSURE 不完備：寫入動詞 {args[0]} 載入失敗，缺 {name}"
+                f"（rc={rc}；閉包＝{list(closure)}）：{err[-800:]}")
 
 
 def make_si_repo(tmp_path: Path, state: str = "A", *, name: str | None = None,

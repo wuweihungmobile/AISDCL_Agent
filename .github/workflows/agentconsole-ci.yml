@@ -30,6 +30,8 @@ on:
       - "tools/_stdio_utf8.py"
       - "tools/lib/platform_utils.py"
       - "tools/lib/selfimproving/**"
+      - "tools/lib/apply_lock.py"         # P2b 寫入動詞閉包（evwrite 要 apply_lock；TCS W6、W24，AT-950-11-2）
+      - "tools/lib/sdd_latest.py"         # P2b 寫入動詞閉包（writeverbs 頂層要 sdd_latest）
       - "docs/06_quality/SelfImproving_Protocol/params.json"
   pull_request:
     branches: [main]
@@ -45,6 +47,8 @@ on:
       - "tools/_stdio_utf8.py"
       - "tools/lib/platform_utils.py"
       - "tools/lib/selfimproving/**"
+      - "tools/lib/apply_lock.py"         # P2b 寫入動詞閉包（evwrite 要 apply_lock；TCS W6、W24，AT-950-11-2）
+      - "tools/lib/sdd_latest.py"         # P2b 寫入動詞閉包（writeverbs 頂層要 sdd_latest）
       - "docs/06_quality/SelfImproving_Protocol/params.json"
   workflow_dispatch:
 

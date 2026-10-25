@@ -34,17 +34,28 @@ def live_with(make_bridge: Any, settings: Settings, root: Path | None) -> Any:
     return make_bridge(replace(settings, si_root=root))
 
 
-# ── AT-932-2-3：只有 GET；非 GET 一律 405、未定義路徑 404、不啟動子行程 ──────────────────────
+# ── AT-932-2-3：六個讀路徑只有 GET；其餘方法 405、未定義路徑 404、不啟動子行程 ──────────────────
+# P2b 起 `POST /si/observations` 是寫入端點，故：PUT／PATCH／DELETE 乘六個讀路徑皆 405；POST 乘其餘
+# 五個讀路徑皆 405。全部九個 `/si/` 路徑（含 `:decide`、`:close`、`:validate`）的三方法矩陣由
+# test_si_write_routes.py 的 405 矩陣承擔。
+READ_PATHS_WITHOUT_POST = [p for p in SIX_PATHS if p != "/si/observations"]
+
+
 def test_AT_932_2_3_non_get_methods_are_405_and_undefined_paths_are_404(
         fake: Path, settings: Settings, make_bridge: Any) -> None:
     live = live_with(make_bridge, settings, fake)
     wrong = []
     for path in SIX_PATHS:
-        for method in ("POST", "PUT", "PATCH", "DELETE"):
+        for method in ("PUT", "PATCH", "DELETE"):
             resp = live.client.request(method, path, json={})
             if resp.status_code != 405:
                 wrong.append((method, path, resp.status_code))
-    assert wrong == [], f"六路徑乘四種非 GET 方法必須全是 405：{wrong}"
+    for path in READ_PATHS_WITHOUT_POST:
+        resp = live.client.request("POST", path, json={})
+        if resp.status_code != 405:
+            wrong.append(("POST", path, resp.status_code))
+    assert wrong == [], f"六路徑乘 PUT／PATCH／DELETE 與五路徑乘 POST 必須全是 405：{wrong}"
+    assert len(READ_PATHS_WITHOUT_POST) == 5
     undefined = ["/si/nothing", "/si/proposals/PROP-SI-004/extra", "/si/status/x",
                  "/si/observations/OBS-SI-001"]
     codes = {path: live.client.get(path).status_code for path in undefined}

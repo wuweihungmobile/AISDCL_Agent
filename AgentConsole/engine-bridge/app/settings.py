@@ -35,6 +35,22 @@
                               `si_unavailable`（cause 為 si_script_missing）。不可是檔案系統根；
                               不併入 BRIDGE_ALLOWED_PATH_ROOTS（那是引擎 execution_path 的閘）。
                               docker compose 設 /repo 並以唯讀 bind 掛入必要子集
+  BRIDGE_SI_WRITE_TOKEN       SI 寫入面權杖（P2b；W1）：`POST /si/proposals/{id}:decide`、
+                              `POST /si/observations`、`POST /si/observations/{id}:close`
+                              須帶標頭 `X-Bridge-Token`，值與此相同（`.../observations:validate`
+                              是唯讀預檢，不需權杖）。規則同 BRIDGE_SDD_WRITE_TOKEN：未設＝停用；
+                              有設但短於 32 字元或仍是 `<…>` 佔位＝啟動即 SettingsError。只有
+                              backend 與 Bridge 持有；Bridge 不持有稽核簽章金鑰（金鑰只在
+                              console-api 與主機端 CLI）。repo 內不放真值
+  BRIDGE_SI_AUDIT_DIR         稽核檔落地目錄（容器內路徑；P2b；W1）：寫入端點把 backend 簽好的
+                              稽核 JSON 以 `<audit_ref>.json` 原樣寫在這裡（`app/si_audit.py` 是
+                              整個 `app/` 唯一以寫入形態開 SI 路徑者），主機端 CLI 再以
+                              `--carrier console` 入帳。未設＝寫入面停用；不檢查存在性（目錄缺席在
+                              請求時回 503 `si_unavailable`，cause 為 audit_write_failed）、不併入
+                              BRIDGE_ALLOWED_PATH_ROOTS，不可是檔案系統根。寫入面啟用＝本變數與
+                              BRIDGE_SI_WRITE_TOKEN 皆有設（未啟用時三個寫入端點一律 503
+                              `si_write_disabled`）。docker compose 把它以可寫 bind 掛到主機的
+                              `<AUTOSDD_SI_DIR>/console_audit`（其餘 SI bind 皆唯讀）
 """
 from __future__ import annotations
 
@@ -49,8 +65,9 @@ from pathlib import Path
 DEFAULT_OUTBOUND_ALLOWLIST = ("api.minimax.io", "api.minimax.chat", "localhost", "127.0.0.1")
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _SDD_DIR_RE = re.compile(r"^AISDLC_SDD_v(\d+)\.(\d+)$")
-#: 寫入權杖的最短長度（≥32 字元隨機；`openssl rand -hex 32` 得 64 字元）。
+#: 寫入權杖的最短長度（≥32 字元隨機；`openssl rand -hex 32` 得 64 字元）。SDD 與 SI 兩個寫入面共用。
 SDD_WRITE_TOKEN_MIN_LEN = 32
+SI_WRITE_TOKEN_MIN_LEN = SDD_WRITE_TOKEN_MIN_LEN
 
 # <monorepo>/AgentConsole/engine-bridge
 BRIDGE_DIR = Path(__file__).resolve().parents[1]
@@ -81,6 +98,16 @@ class Settings:
     #: SelfImproving 的 repo 根（R1）；None＝SI 面不可用（請求時回 503 `si_unavailable`，
     #: cause 為 `si_root_unset`）。
     si_root: Path | None = None
+    #: SelfImproving 寫入面權杖（P2b W1）；repr=False 同 sdd_write_token。None＝寫入面停用。
+    si_write_token: str | None = field(default=None, repr=False)
+    #: 稽核檔落地目錄（P2b W1；已 resolve、不檢查存在性、不併入 allowed_path_roots）。
+    #: None＝寫入面停用。
+    si_audit_dir: Path | None = None
+
+    @property
+    def si_write_enabled(self) -> bool:
+        """SI 寫入面啟用＝權杖與稽核目錄兩者皆已設定（W1）；任一缺＝三個寫入端點一律 503。"""
+        return self.si_write_token is not None and self.si_audit_dir is not None
 
 
 def _looks_like_monorepo(root: Path) -> bool:
@@ -118,20 +145,29 @@ def _parse_roots(raw: str) -> tuple[Path, ...]:
     return tuple(roots)
 
 
-def _parse_sdd_write_token(env: Mapping[str, str]) -> str | None:
+def _parse_write_token(env: Mapping[str, str], name: str, surface: str) -> str | None:
     """未設（含全空白）＝None；有設但太短或是 `<…>` 佔位＝SettingsError。
     佔位當真值等於公開密鑰、太短的權杖擋不住猜測，所以啟動即大聲失敗，不退回「停用」。
-    錯誤訊息不含值本身（連佔位也不回印，免得把真值寫進日誌）。"""
-    raw = env.get("BRIDGE_SDD_WRITE_TOKEN", "").strip()
+    錯誤訊息不含值本身（連佔位也不回印，免得把真值寫進日誌）。`name`＝環境變數名、
+    `surface`＝被停用的寫入面名稱（只進訊息）。"""
+    raw = env.get(name, "").strip()
     if not raw:
         return None
     if (raw.startswith("<") and raw.endswith(">")) or "<YOUR_" in raw.upper():
-        raise SettingsError("BRIDGE_SDD_WRITE_TOKEN 仍是 <…> 佔位符：請換成 ≥32 字元的隨機值，"
-                            "或整個移除以停用 SDD 寫入面")
+        raise SettingsError(f"{name} 仍是 <…> 佔位符：請換成 ≥32 字元的隨機值，"
+                            f"或整個移除以停用 {surface}")
     if len(raw) < SDD_WRITE_TOKEN_MIN_LEN:
-        raise SettingsError(f"BRIDGE_SDD_WRITE_TOKEN 太短（{len(raw)} 字元）：至少 "
-                            f"{SDD_WRITE_TOKEN_MIN_LEN} 字元，或整個移除以停用 SDD 寫入面")
+        raise SettingsError(f"{name} 太短（{len(raw)} 字元）：至少 "
+                            f"{SDD_WRITE_TOKEN_MIN_LEN} 字元，或整個移除以停用 {surface}")
     return raw
+
+
+def _parse_sdd_write_token(env: Mapping[str, str]) -> str | None:
+    return _parse_write_token(env, "BRIDGE_SDD_WRITE_TOKEN", "SDD 寫入面")
+
+
+def _parse_si_write_token(env: Mapping[str, str]) -> str | None:
+    return _parse_write_token(env, "BRIDGE_SI_WRITE_TOKEN", "SI 寫入面")
 
 
 def _parse_float(env: Mapping[str, str], name: str, default: float) -> float:
@@ -201,6 +237,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     else:
         si_root = REPO_ROOT.resolve() if _looks_like_monorepo(REPO_ROOT) else None
 
+    raw_audit = e.get("BRIDGE_SI_AUDIT_DIR", "").strip()
+    si_audit_dir: Path | None = _anchor_guard(
+        Path(raw_audit), "BRIDGE_SI_AUDIT_DIR",
+        "稽核檔會寫在這個目錄之下，檔案系統根等於整個磁碟都可寫") if raw_audit else None
+
     return Settings(
         host=e.get("BRIDGE_HOST", "").strip() or "127.0.0.1",
         port=port,
@@ -216,4 +257,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
         sdd_write_token=_parse_sdd_write_token(e),
         si_root=si_root,
+        si_write_token=_parse_si_write_token(e),
+        si_audit_dir=si_audit_dir,
     )

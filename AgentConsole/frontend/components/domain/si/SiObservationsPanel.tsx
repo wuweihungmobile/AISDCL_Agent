@@ -4,9 +4,12 @@
  * 觀察分頁（P1b；TCS-SelfImprovingMirror-P1b R14、R15、R17、R18）：`GET /api/v1/si/observations` 的游標分頁清單。
  * 每筆一列（ID／時間／分類／嚴重度／處置／症狀；DOM 文字是完整字串，截斷只靠 CSS），可展開看九欄原文與 marksKv、行號、模組桶；
  * 無法解析的壞列永遠顯示（原文逐字）、不受任何篩選影響。篩選只作用於已載入的頁；模組桶只讀資料自帶的 `buckets`，缺席時停用並說明。
+ * P2b：給了寫入回呼（只有 ADMIN）時多出三個入口——工具列的「新增觀察」（`si-obs-new`）、每個**有效列**的「更正」（`si-obs-correct-<ID>`；壞列沒有 id、不提供）、
+ * 以及處置**恰為 open** 的有效列的「關閉」（`si-close-open-<ID>`）。沒給＝與 P1b 逐位元組相同的唯讀畫面。
  */
 import { Fragment, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { useSiObservations } from "@/lib/api/queries";
 import type { SiObservation, SiObservationRow } from "@/lib/api/types";
 import {
@@ -27,7 +30,10 @@ import {
 } from "@/lib/domain/si";
 import { ExpandToggle, FilterSelect, SiError, SiLoadMore, SiLoading, SiNotes, SiScopeNote, countText, useReportTabCount, withAll } from "./siParts";
 
-const COLUMNS = 7;
+const BASE_COLUMNS = 7;
+
+/** P2b 的寫入入口回呼（只有 ADMIN 才會傳）：新增一列、更正某列、關閉某列（只對處置恰為 open 的有效列）。 */
+export type ObservationWriteActions = { onNew: () => void; onCorrect: (id: string) => void; onCloseObservation: (id: string) => void };
 
 /** 展開後的九欄：標籤逐字取自帳本表頭（ID、時間、情境、症狀、證據座標、分類、嚴重度、處置、標記）。 */
 const NINE_FIELDS: ReadonlyArray<{ key: keyof SiObservation & string; label: string }> = [
@@ -82,7 +88,8 @@ function ObservationFields({ row, id }: { row: SiObservation; id: string }) {
   );
 }
 
-export function SiObservationsPanel({ onCount }: { onCount: (text: string | null) => void }) {
+export function SiObservationsPanel({ onCount, actions }: { onCount: (text: string | null) => void; actions?: ObservationWriteActions }) {
+  const columns = actions ? BASE_COLUMNS + 1 : BASE_COLUMNS;
   const q = useSiObservations();
   const [filters, setFilters] = useState<ObsFilters>(EMPTY_OBS_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -134,6 +141,11 @@ export function SiObservationsPanel({ onCount }: { onCount: (text: string | null
             此版本的 export 尚無模組桶欄（待根層 P2 交付）
           </span>
         )}
+        {actions ? (
+          <Button size="sm" className="ml-auto" data-testid="si-obs-new" onClick={actions.onNew}>
+            新增觀察
+          </Button>
+        ) : null}
       </div>
       {last.truncated ? <SiScopeNote loaded={items.length} /> : null}
 
@@ -168,6 +180,11 @@ export function SiObservationsPanel({ onCount }: { onCount: (text: string | null
                 <th scope="col" className="py-2">
                   症狀
                 </th>
+                {actions ? (
+                  <th scope="col" className="w-36 py-2 pl-3">
+                    <span className="sr-only">寫入操作</span>
+                  </th>
+                ) : null}
               </tr>
             </thead>
             <tbody>
@@ -175,7 +192,7 @@ export function SiObservationsPanel({ onCount }: { onCount: (text: string | null
                 if (isInvalidRow(row)) {
                   return (
                     <tr key={identityKey(row)} data-testid={`si-obs-invalid-${row.line}`} className="border-b border-wg-line align-top">
-                      <td colSpan={COLUMNS} className="py-2">
+                      <td colSpan={columns} className="py-2">
                         <p className="font-medium text-wg-accent">{`無法解析的列（第 ${row.line} 行）`}</p>
                         <pre className="mt-1 overflow-x-auto font-mono text-xs break-all whitespace-pre-wrap">{row.raw}</pre>
                       </td>
@@ -208,10 +225,24 @@ export function SiObservationsPanel({ onCount }: { onCount: (text: string | null
                       <td className="truncate py-2" title={row.symptom}>
                         {row.symptom}
                       </td>
+                      {actions ? (
+                        <td className="py-1.5 pl-3">
+                          <div className="flex gap-1">
+                            <Button variant="ghost" size="sm" aria-label={`更正 ${row.id}`} data-testid={`si-obs-correct-${row.id}`} onClick={() => actions.onCorrect(row.id)}>
+                              更正
+                            </Button>
+                            {row.disposition === "open" ? (
+                              <Button variant="ghost" size="sm" aria-label={`關閉 ${row.id}`} data-testid={`si-close-open-${row.id}`} onClick={() => actions.onCloseObservation(row.id)}>
+                                關閉
+                              </Button>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : null}
                     </tr>
                     {expanded ? (
                       <tr className="border-b border-wg-line bg-wg-base">
-                        <td colSpan={COLUMNS} className="px-4 py-3">
+                        <td colSpan={columns} className="px-4 py-3">
                           <ObservationFields row={row} id={fieldsId} />
                         </td>
                       </tr>

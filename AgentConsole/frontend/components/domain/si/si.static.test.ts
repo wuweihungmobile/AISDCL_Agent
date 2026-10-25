@@ -4,9 +4,10 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 /**
- * SelfImproving 鏡像頁的靜態守衛（TCS-SelfImprovingMirror-P1b R11、R18）：
+ * SelfImproving 頁的靜態守衛（P1b：TCS-SelfImprovingMirror-P1b R11、R18；P2b：TCS-SelfImprovingDecide-P2b W22）：
  *  - AT_932_1_E_8：純文字渲染——沒有 dangerouslySetInnerHTML、沒有任何 Markdown／HTML 渲染器；
- *  - AT_932_2_8：零寫入——沒有表單、mutation hook、非 GET 方法字樣；
+ *  - AT_950_9_E_2：寫入形態收斂——`<form`、mutation hook 與非 GET 字樣只准出現在三個寫入元件（取代 P1b 的 AT_932_2_8「零寫入」）；
+ *    全樹（含三個寫入元件）無直接 `fetch(`、無 PUT／PATCH／DELETE 方法字樣；
  *  - AT_932_4_3：瀏覽器不直連 Bridge——前端原始碼沒有 Bridge 路徑字面（以 /si/ 起頭）、沒有 8081、沒有 BRIDGE 環境變數讀取。
  * 每個掃描器都是純函式（輸入原始碼文字、輸出違規清單），各有負控樣本；掃描範圍有防反空轉斷言。
  */
@@ -104,7 +105,7 @@ describe("AT_932_1_E_8 SI 原始碼無 dangerouslySetInnerHTML 與 Markdown 渲�
   });
 });
 
-// ── AT_932_2_8：零寫入 ───────────────────────────────────────────────────────
+// ── AT_950_9_E_2：寫入形態只准在三個寫入元件（P2b W22；取代 P1b 的 AT_932_2_8）────────────
 
 function importedNames(source: string, fromPattern: RegExp): string[] {
   const names: string[] = [];
@@ -117,51 +118,106 @@ function importedNames(source: string, fromPattern: RegExp): string[] {
   return names;
 }
 
-const WRITE_HOOK = /^use(Create|Update|Delete|Post|Put|Patch|Retry|Approve|Signoff|Execute)/;
+/** 三個寫入元件：`<form`、mutation hook 與非 GET 字樣只准出現在它們（W22）。 */
+const WRITE_COMPONENTS: ReadonlyArray<string> = ["components/domain/si/SiDecideDialog.tsx", "components/domain/si/SiObsForm.tsx", "components/domain/si/SiObsCloseDialog.tsx"];
+/** 各寫入元件預期 import 的寫入 hook（防反空轉：掃描器看得到 import；少了＝元件不再走這條路）。 */
+const EXPECTED_WRITE_HOOKS: Readonly<Record<string, string[]>> = {
+  "components/domain/si/SiDecideDialog.tsx": ["useSiDecide"],
+  "components/domain/si/SiObsForm.tsx": ["useSiAddObservation", "useSiValidateObservation"],
+  "components/domain/si/SiObsCloseDialog.tsx": ["useSiCloseObservation"],
+};
+/** 寫入型 query hook：P1b 的「寫入動詞開頭」加 P2b 的四個 useSi 寫入 hook（`useSiConsoleWrites` 是讀取，不在內）。 */
+const WRITE_HOOK = /^(use(Create|Update|Delete|Post|Put|Patch|Retry|Approve|Signoff|Execute)|useSi(Decide|AddObservation|CloseObservation|ValidateObservation))/;
 
-function writeViolations(source: string): string[] {
+/** 只准在三個寫入元件出現的形態。 */
+function writeFormViolations(source: string): string[] {
   const found: string[] = [];
   if (/<form[\s>]/.test(source)) found.push("<form");
   if (/type\s*[=:]\s*["']submit["']/.test(source)) found.push("type submit");
   if (/\buseMutation\b/.test(source)) found.push("useMutation");
   if (/\buseWrite\b/.test(source)) found.push("useWrite");
+  if (/\buseSiWrite\b/.test(source)) found.push("useSiWrite");
   const method = /method\s*:\s*["'](POST|PUT|PATCH|DELETE)["']/i.exec(source);
   if (method) found.push(`method: ${method[1]}`);
   for (const name of importedNames(source, /(^|\/)queries$/)) if (WRITE_HOOK.test(name)) found.push(`import ${name}`);
   return found;
 }
 
-describe("AT_932_2_8 SI 前端原始碼無寫入形態（R11）", () => {
-  it("AT_932_2_8 components/domain/si/** 與 app/self-improving/** 沒有表單、mutation hook、非 GET 方法字樣，也不 import 寫入型 query hook", () => {
+/** 全樹（含三個寫入元件）一律不准的形態：直接 fetch、PUT／PATCH／DELETE 方法字樣（刪除、覆寫、局部更新在 SelfImproving 沒有任何用途）。 */
+function everywhereViolations(source: string): string[] {
+  const found: string[] = [];
+  if (/\bfetch\s*\(/.test(source)) found.push("fetch(");
+  const method = /method\s*:\s*["'](PUT|PATCH|DELETE)["']/i.exec(source);
+  if (method) found.push(`method: ${method[1]}`);
+  const literal = /["'`](PUT|PATCH|DELETE)["'`]/.exec(source);
+  if (literal) found.push(`方法字樣：${literal[1]}`);
+  return found;
+}
+
+describe("AT_950_9_E_2 SI 前端寫入形態只在三個寫入元件，全樹無直接 fetch 與 PUT／PATCH／DELETE（W22）", () => {
+  it("AT_950_9_E_2 `<form`、mutation hook 呼叫與非 GET 字樣只出現在 SiDecideDialog、SiObsForm、SiObsCloseDialog；其餘檔案（SiView、各面板、對帳面板、共用小件）一個都沒有，也不 import 寫入型 query hook", () => {
     const sources = siSources();
-    expect(sources.length, "掃描範圍太小：防反空轉").toBeGreaterThanOrEqual(6);
-    // 防反空轉：這批原始碼確實 import 了 queries 的 SI 讀取 hook（掃描器看得到 import）
-    const imported = sources.flatMap((s) => importedNames(s.text, /(^|\/)queries$/));
-    expect(imported).toEqual(expect.arrayContaining(["useSiStatus", "useSiObservations", "useSiProposals", "useSiEvents", "useSiRuns"]));
-    for (const { file, text } of sources) expect(writeViolations(text), file).toEqual([]);
+    expect(sources.length, "掃描範圍太小：防反空轉").toBeGreaterThanOrEqual(10);
+    expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([...WRITE_COMPONENTS, "components/domain/si/SiWritesPanel.tsx", "components/domain/si/SiView.tsx"]));
+    for (const { file, text } of sources) {
+      if (WRITE_COMPONENTS.includes(file)) continue;
+      expect(writeFormViolations(text), `${file} 不得有寫入形態`).toEqual([]);
+    }
+    // 防反空轉：掃描器在三個寫入元件上確實看得到寫入形態——有 <form、import 了預期的寫入 hook，且整棵樹只有這四個寫入 hook
+    const allWriteHooks = new Set<string>();
+    for (const file of WRITE_COMPONENTS) {
+      const { text } = sources.find((s) => s.file === file) as { text: string };
+      const imported = importedNames(text, /(^|\/)queries$/).filter((n) => WRITE_HOOK.test(n));
+      expect(imported.sort(), `${file} import 的寫入 hook`).toEqual([...EXPECTED_WRITE_HOOKS[file]].sort());
+      expect(writeFormViolations(text), `${file} 應被掃描器看見寫入形態`).toEqual(expect.arrayContaining(["<form", ...EXPECTED_WRITE_HOOKS[file].map((h) => `import ${h}`)]));
+      imported.forEach((n) => allWriteHooks.add(n));
+    }
+    expect([...allWriteHooks].sort()).toEqual(["useSiAddObservation", "useSiCloseObservation", "useSiDecide", "useSiValidateObservation"]);
+    // 讀取 hook 不受限：對帳面板與 SiView 照常 import 讀取型的 useSiConsoleWrites 等
+    const reads = sources.flatMap((s) => importedNames(s.text, /(^|\/)queries$/)).filter((n) => !WRITE_HOOK.test(n));
+    expect(reads).toEqual(expect.arrayContaining(["useSiStatus", "useSiObservations", "useSiProposals", "useSiEvents", "useSiRuns", "useSiConsoleWrites"]));
   });
 
-  it("AT_932_2_8 掃描器的負控：各種寫入形態的樣本逐一回非空，唯讀樣本回空", () => {
-    const bad = [
+  it("AT_950_9_E_2 全樹（含三個寫入元件）無直接 fetch(、無 PUT／PATCH／DELETE 方法字樣、無 dangerouslySetInnerHTML 與 Markdown 渲染器", () => {
+    const sources = siSources();
+    for (const { file, text } of sources) {
+      expect(everywhereViolations(text), file).toEqual([]);
+      expect(rendererViolations(text), file).toEqual([]);
+    }
+  });
+
+  it("AT_950_9_E_2 掃描器的負控：各種寫入形態與全樹禁止形態的樣本逐一回非空，唯讀樣本回空", () => {
+    const badForm = [
       "<form onSubmit={go}>",
       '<button type="submit">x</button>',
       "const t = { type: 'submit' };",
       "const m = useMutation({ mutationFn });",
       "const w = useWrite(fn);",
+      "const w = useSiWrite(fn);",
       'fetch(u, { method: "POST" })',
       "fetch(u, { method: 'delete' })",
       'import { useCreateProject } from "@/lib/api/queries";',
       'import { useSignoffTask as s } from "@/lib/api/queries";',
       'import { useExecuteX, useSiStatus } from "./queries";',
+      'import { useSiDecide } from "@/lib/api/queries";',
+      'import { useSiAddObservation } from "@/lib/api/queries";',
+      'import { useSiCloseObservation as c } from "@/lib/api/queries";',
+      'import { useSiValidateObservation, useSiStatus } from "./queries";',
     ];
-    for (const sample of bad) expect(writeViolations(sample), sample).not.toEqual([]);
-    const good = [
+    for (const sample of badForm) expect(writeFormViolations(sample), sample).not.toEqual([]);
+    const goodForm = [
       'import { useSiStatus, useSiRuns } from "@/lib/api/queries";',
+      'import { useSiConsoleWrites } from "@/lib/api/queries";',
       'fetch(u, { method: "GET" })',
       '<button type="button">重試</button>',
       'import { useAllProjects } from "@/lib/api/queries";',
     ];
-    for (const sample of good) expect(writeViolations(sample), sample).toEqual([]);
+    for (const sample of goodForm) expect(writeFormViolations(sample), sample).toEqual([]);
+
+    const badEverywhere = ['const r = await fetch("/api/v1/x");', "fetch (url)", 'send({ method: "DELETE" })', "send({ method: 'put' })", 'const verb = "PATCH";', "const verb = `DELETE`;"];
+    for (const sample of badEverywhere) expect(everywhereViolations(sample), sample).not.toEqual([]);
+    const goodEverywhere = ['import { postSiDecide } from "@/lib/api/endpoints";', "const prefetch = 1;", 'const label = "Deleted rows";', "<p>PUT 是方法名</p>", 'send({ method: "POST" })'];
+    for (const sample of goodEverywhere) expect(everywhereViolations(sample), sample).toEqual([]);
   });
 });
 
@@ -203,7 +259,19 @@ describe("AT_932_4_3 前端原始碼不含 Bridge 路徑字面（R11）", () => 
       if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) literals.push(n.text);
       else if (ts.isTemplateExpression(n)) literals.push(n.head.text);
     });
-    expect(literals).toEqual(expect.arrayContaining(["/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events", "/api/v1/si/proposals", "/api/v1/si/proposals/", "/api/v1/si/runs"]));
+    expect(literals).toEqual(
+      expect.arrayContaining([
+        "/api/v1/si/status",
+        "/api/v1/si/observations",
+        "/api/v1/si/events",
+        "/api/v1/si/proposals",
+        "/api/v1/si/proposals/",
+        "/api/v1/si/runs",
+        "/api/v1/si/observations/validate",
+        "/api/v1/si/observations/",
+        "/api/v1/si/console-writes",
+      ]),
+    );
     for (const { file, text } of sources) expect(bridgeLeaks(text), file).toEqual([]);
   });
 

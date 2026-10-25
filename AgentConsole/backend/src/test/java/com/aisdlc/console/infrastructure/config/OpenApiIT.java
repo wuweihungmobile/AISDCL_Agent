@@ -27,6 +27,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * {@code GET /executions/{runId}/rtm}（API-EXE-16）＝61（操作數 67→70）。
  * SelfImproving P1b（TCS-SelfImprovingMirror-P1b）再加六個 SI GET（{@code /api/v1/si/} 的 status、observations、events、proposals、
  * proposals/{id}、runs；路徑 61→67、操作 70→76；只增不減）。
+ * SelfImproving P2b（TCS-SelfImprovingDecide-P2b）再加四個路徑——{@code /si/proposals/{id}/decide}、{@code /si/observations/{id}/close}、
+ * {@code /si/observations/validate} 的 POST 與 {@code /si/console-writes} 的 GET——並讓 {@code /si/observations} 多一個 POST
+ * （路徑 67→71、操作 76→81；只增不減）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -103,11 +106,16 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/executions/{runId}/rtm", List.of("get")),
             // ── SelfImproving P1b：唯讀鏡像（六個 GET；沒有任何寫入端點）──
             Map.entry("/api/v1/si/status", List.of("get")),
-            Map.entry("/api/v1/si/observations", List.of("get")),
+            Map.entry("/api/v1/si/observations", List.of("get", "post")),
             Map.entry("/api/v1/si/events", List.of("get")),
             Map.entry("/api/v1/si/proposals", List.of("get")),
             Map.entry("/api/v1/si/proposals/{id}", List.of("get")),
-            Map.entry("/api/v1/si/runs", List.of("get"))));
+            Map.entry("/api/v1/si/runs", List.of("get")),
+            // ── SelfImproving P2b：寫入載體（僅 ADMIN）與對帳讀面 ──
+            Map.entry("/api/v1/si/proposals/{id}/decide", List.of("post")),
+            Map.entry("/api/v1/si/observations/{id}/close", List.of("post")),
+            Map.entry("/api/v1/si/observations/validate", List.of("post")),
+            Map.entry("/api/v1/si/console-writes", List.of("get"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -119,7 +127,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(67).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(71).containsExactlyElementsOf(EXPECTED.keySet());
         int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
@@ -127,7 +135,67 @@ class OpenApiIT extends AbstractApiIT {
                     .containsExactlyElementsOf(expected.getValue());
             operationCount += operations.size();
         }
-        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET").isEqualTo(76);
+        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET 與 P2b 的五個新操作").isEqualTo(81);
+    }
+
+    /**
+     * SelfImproving P2b（TCS-SelfImprovingDecide-P2b AT-950-10-1；W16、W23）：SI 路徑與操作的精確集合與五個新 operationId，且 SI 路徑沒有 delete、put、patch。
+     * 為什麼重要：前端以 /v3/api-docs 產生型別——多出一個沒規劃的寫入端點，前端就有了不該有的呼叫；operationId 變了，產生的函式名跟著變，
+     * 前端的 API 層與測試就一起斷；而「SI 沒有刪除能力」是 PRD AC-SI-35-3 的結構承諾。
+     */
+    @Test
+    void AT_950_10_1_theSiPathsAreExactlyTheElevenOnesWithTheFiveNewOperationIds() {
+        Resp docs = docs();
+        Map<String, Object> paths = docs.read("$.paths");
+        List<String> si = paths.keySet().stream().filter(p -> p.startsWith("/api/v1/si/")).sorted().toList();
+        assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
+                "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
+                "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes");
+        assertThat(paths).hasSize(71);
+        for (String path : si) {
+            Map<String, Object> operations = docs.read("$.paths['" + path + "']");
+            assertThat(operations.keySet()).as(path).doesNotContain("delete", "put", "patch");
+        }
+        assertThat(new TreeSet<>(docs.<Map<String, Object>>read("$.paths['/api/v1/si/observations']").keySet()))
+                .containsExactly("get", "post");
+        for (String path : List.of("/api/v1/si/proposals/{id}/decide", "/api/v1/si/observations/{id}/close",
+                "/api/v1/si/observations/validate")) {
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']").keySet()).as(path).containsExactly("post");
+        }
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/si/console-writes']").keySet()).containsExactly("get");
+
+        Map<String, String> operationIds = new java.util.LinkedHashMap<>();
+        operationIds.put("$.paths['/api/v1/si/proposals/{id}/decide'].post.operationId", "postSiDecide");
+        operationIds.put("$.paths['/api/v1/si/observations'].post.operationId", "postSiObservation");
+        operationIds.put("$.paths['/api/v1/si/observations/{id}/close'].post.operationId", "postSiObservationClose");
+        operationIds.put("$.paths['/api/v1/si/observations/validate'].post.operationId", "postSiObservationValidate");
+        operationIds.put("$.paths['/api/v1/si/console-writes'].get.operationId", "getSiConsoleWrites");
+        operationIds.forEach((path, id) -> assertThat(docs.<String>read(path)).as(path).isEqualTo(id));
+    }
+
+    /** SelfImproving P2b 的錯誤狀態碼集合（W10、W15）：寫入端點有 201、輸入閘 422、結果不明的 504 與寫入面停用的 503；id 端點不會回 404。 */
+    @Test
+    void AT_950_10_1_theSiWriteEndpointsDocumentTheirOwnStatusCodes() {
+        Resp docs = docs();
+        Map<String, Set<String>> codes = Map.of(
+                "post /api/v1/si/proposals/{id}/decide", Set.of("201", "400", "401", "403", "409", "422", "429", "502", "503", "504"),
+                "post /api/v1/si/observations", Set.of("201", "400", "401", "403", "409", "422", "429", "502", "503", "504"),
+                "post /api/v1/si/observations/{id}/close", Set.of("201", "400", "401", "403", "409", "422", "429", "502", "503", "504"),
+                "post /api/v1/si/observations/validate", Set.of("200", "400", "401", "403", "422", "429", "502", "503", "504"),
+                "get /api/v1/si/console-writes", Set.of("200", "400", "401", "429"));
+        for (Map.Entry<String, Set<String>> expected : codes.entrySet()) {
+            String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
+            String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet())
+                    .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
+        }
+        assertThat(docs.<Boolean>read("$.paths['/api/v1/si/observations/validate'].post.requestBody.required")).isTrue();
+        assertThat(docs.<String>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.requestBody.content['application/json']"
+                + ".schema['$ref']")).endsWith("/SiDecideRequest");
+        assertThat(docs.<String>read("$.paths['/api/v1/si/observations'].post.requestBody.content['application/json'].schema['$ref']"))
+                .endsWith("/SiObservationRequest");
+        assertThat(docs.<String>read("$.paths['/api/v1/si/observations/{id}/close'].post.requestBody.content['application/json']"
+                + ".schema['$ref']")).endsWith("/SiCloseRequest");
     }
 
     @Test

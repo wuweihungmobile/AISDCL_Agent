@@ -1,18 +1,20 @@
 "use client";
 
 /**
- * SelfImproving 鏡像頁的共用小件（P1b；TCS-SelfImprovingMirror-P1b R12、R14～R17）：載入態、錯誤態、ne／problems 清單、載入更多、
- * 篩選下拉、展開鈕、分頁標籤筆數回報。全部只輸出 React 文字節點（R18：帳本字串不經 HTML 或 Markdown 渲染），沒有任何寫入控制項（R11）。
+ * SelfImproving 頁的共用小件（P1b；TCS-SelfImprovingMirror-P1b R12、R14～R17）：載入態、錯誤態、ne／problems 清單、載入更多、
+ * 篩選下拉、展開鈕、分頁標籤筆數回報；P2b 另加稽核檔收據與入帳指令（三個寫入元件與對帳面板共用）。
+ * 全部只輸出 React 文字節點（R18：帳本字串不經 HTML 或 Markdown 渲染），**沒有任何寫入控制項、表單或 mutation**（寫入形態只住三個寫入元件，W22）。
  */
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect } from "react";
 
+import { CopyCommand } from "@/components/domain/sdd/CopyCommand";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Select } from "@/components/ui/select";
 import { ErrorState } from "@/components/ui/states";
-import type { SiNeEntry, SiProblem } from "@/lib/api/types";
-import { formatNe, formatProblem, siErrorParts, siErrorSummary } from "@/lib/domain/si";
+import type { SiNeEntry, SiProblem, SiWriteKind, SiWriteReceipt } from "@/lib/api/types";
+import { formatNe, formatProblem, ingestCommands, siErrorParts, siErrorSummary } from "@/lib/domain/si";
 
 /** 面板載入中：`role="status"`、文字含「載入中」（R12）。 */
 export function SiLoading({ what }: { what: string }) {
@@ -216,4 +218,41 @@ export function useReportTabCount(report: (text: string | null) => void, text: s
 /** 分頁標籤的筆數字樣：`(12)`；尚有未載入的頁時 `(5+)`。 */
 export function countText(loaded: number, truncated: boolean): string {
   return `(${loaded}${truncated ? "+" : ""})`;
+}
+
+/**
+ * 入帳指令（P2b；W17、W18）：PowerShell 與 POSIX 各一個 CopyCommand，兩段字串相同（`ingestCommands`）。Console 不執行它、也不替換任何佔位：
+ * 入帳只有掌舵者在主機端（monorepo 根、已設 `AUTOSDD_SI_AUDIT_KEY` 的 shell）用根層 CLI 做——pull 模式，金鑰不出現在指令。
+ * 頁面可同時有多組（對話框的收據與對帳面板的各待入帳列），CopyCommand 的 testid 沿用 `sdd-recovery-*`，測試以 `within(對話框或列)` 取。
+ */
+export function SiIngestCommands({ kind, subject, auditRef }: { kind: SiWriteKind; subject: string | null | undefined; auditRef: string }) {
+  const commands = ingestCommands(kind, subject, auditRef);
+  return (
+    <div data-testid="si-ingest-commands" className="flex flex-col gap-3">
+      <CopyCommand shell="powershell" label="PowerShell" command={commands.powershell} />
+      <CopyCommand shell="posix" label="POSIX（bash／zsh）" command={commands.posix} />
+    </div>
+  );
+}
+
+/**
+ * 寫入成功的收據（待入帳）：稽核編號、說明與入帳指令。對話框不自動關閉——掌舵者要先複製指令（關掉＝收據消失，只能到對帳面板再找）。
+ * `testId` 是各對話框自己的結果容器（`si-decide-result`、`si-obs-result`、`si-close-result`）。
+ */
+export function SiWriteResult({ testId, receipt }: { testId: string; receipt: SiWriteReceipt }) {
+  return (
+    <div data-testid={testId} className="rounded-md border border-wg-line bg-wg-base px-4 py-3">
+      <p className="font-semibold">稽核檔已落地，待入帳</p>
+      <p className="mt-1 text-sm">
+        {"稽核編號："}
+        <code data-testid="si-audit-ref" className="font-mono break-all">
+          {receipt.auditRef}
+        </code>
+      </p>
+      <p className="mt-1 text-[13px] text-wg-muted">Console 不寫帳本：請在 monorepo 根、已設主機端 AUTOSDD_SI_AUDIT_KEY 的 shell 執行下列指令入帳（金鑰不出現在指令；入帳前這筆寫入尚未生效）。</p>
+      <div className="mt-3">
+        <SiIngestCommands kind={receipt.kind} subject={receipt.subject} auditRef={receipt.auditRef} />
+      </div>
+    </div>
+  );
 }

@@ -341,3 +341,36 @@ describe("登記表的純函式（R21）", () => {
     expect(navHref(entry({ id: "f", order: 1, href: (ctx) => `/p/${String(ctx.currentProjectId)}` }), { currentProjectId: "p9" })).toBe("/p/p9");
   });
 });
+
+// ── P2b（TCS-SelfImprovingDecide-P2b AT-950-10-E-1；W21）：新增四個寫入元件與對帳面板**沒有**動導覽登記表 ───────────────────────────────
+// 為什麼重要：寫入入口是自我進化頁「裡面」的對話框與面板，不是新頁面——登記表多一列或少一列、第七項的欄位值變了，都代表 P2b 偷偷動了導覽（那是 P1b 的凍結面）。
+// 零變更的最終證據是 V8 的 git diff --name-only；這裡是自動化的那一半。
+describe("AT_950_10_E_1 導覽登記表未改：仍七列，ToolsRegion 無入口常數，新元件沒有新增導覽列", () => {
+  it("AT_950_10_E_1 NAV_REGISTRY 恰七項且各欄與 P1b 的值相同（id、label、order、href、mobile、roles、enabled）；self-improving 的 mobile 仍為 false", () => {
+    expect(NAV_REGISTRY).toHaveLength(7);
+    expect(NAV_REGISTRY.map((e) => [e.id, e.label, e.order, e.mobile, e.enabled, e.roles ?? null])).toEqual([
+      ["dashboard", "儀表板", 10, true, true, null],
+      ["projects", "專案管理", 20, true, true, null],
+      ["import", "BRD/PRD 匯入", 30, true, true, null],
+      ["execute", "執行中心", 40, true, true, null],
+      ["monitor", "監控中心", 50, true, true, null],
+      ["settings", "系統設定", 60, true, true, null],
+      ["self-improving", "自我進化", 70, false, true, null],
+    ]);
+    expect(NAV_REGISTRY[6].href).toBe("/self-improving");
+  });
+
+  it("AT_950_10_E_1 ToolsRegion.tsx 不含入口常數（與 P1b 登記表測試共用 toolsRegionViolations 檢查函式）；自我進化的元件目錄沒有引用導覽登記表，也沒有自己的入口定義", () => {
+    const tools = readFileSync(path.join(ROOT, "components", "layout", "ToolsRegion.tsx"), "utf-8");
+    expect(toolsRegionViolations(tools)).toEqual([]);
+    const dir = path.join(ROOT, "components", "domain", "si");
+    const sources = readdirSync(dir).filter((n) => /\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n));
+    expect(sources, "新元件都在這個目錄裡（防反空轉）").toEqual(expect.arrayContaining(["SiDecideDialog.tsx", "SiObsForm.tsx", "SiObsCloseDialog.tsx", "SiWritesPanel.tsx"]));
+    for (const name of sources) {
+      const text = readFileSync(path.join(dir, name), "utf-8");
+      expect(text, `${name} 不得引用導覽登記表`).not.toMatch(/lib\/nav\/registry|NAV_REGISTRY/);
+    }
+    // layout.test.tsx 仍在（它對七個入口的版面行為有自己的斷言，本檔不複寫）
+    expect(statSync(path.join(ROOT, "components", "layout", "layout.test.tsx")).isFile()).toBe(true);
+  });
+});

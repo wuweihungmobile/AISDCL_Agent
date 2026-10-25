@@ -21,7 +21,7 @@ class BridgePropertiesTest {
     @NullAndEmptySource
     @ValueSource(strings = {"   ", "\t"})
     void aBlankTokenMeansTheWriteSurfaceIsDisabled(String blank) {
-        BridgeProperties properties = new BridgeProperties("http://bridge:8081", blank);
+        BridgeProperties properties = new BridgeProperties("http://bridge:8081", blank, null);
 
         assertThat(properties.sddWriteToken()).isNull();
         assertThat(properties.sddWriteTokenConfigured()).isFalse();
@@ -29,8 +29,8 @@ class BridgePropertiesTest {
 
     @Test
     void aTokenOfAtLeastThirtyTwoCharactersIsAcceptedAndStripped() {
-        assertThat(new BridgeProperties(null, "x".repeat(32)).sddWriteTokenConfigured()).isTrue();
-        BridgeProperties padded = new BridgeProperties(null, "  " + TOKEN_64 + "\n");
+        assertThat(new BridgeProperties(null, "x".repeat(32), null).sddWriteTokenConfigured()).isTrue();
+        BridgeProperties padded = new BridgeProperties(null, "  " + TOKEN_64 + "\n", null);
 
         assertThat(padded.sddWriteToken()).isEqualTo(TOKEN_64);
     }
@@ -39,9 +39,9 @@ class BridgePropertiesTest {
     void aTokenShorterThanThirtyTwoCharactersFailsStartupWithoutLeakingIt() {
         String shortToken = "s3cr3t-short-token-0123456789";   // 29 字元
 
-        assertThatThrownBy(() -> new BridgeProperties(null, shortToken)).isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> new BridgeProperties(null, shortToken, null)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("29").hasMessageContaining("32").hasMessageNotContaining(shortToken);
-        assertThatThrownBy(() -> new BridgeProperties(null, "x".repeat(31))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new BridgeProperties(null, "x".repeat(31), null)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @ParameterizedTest(name = "佔位第 {index} 組啟動即失敗")
@@ -49,21 +49,21 @@ class BridgePropertiesTest {
     void anExampleEnvPlaceholderFailsStartupEvenWhenLongEnough(String placeholder) {
         assertThat(placeholder.length()).as("佔位本身夠長，不能只靠長度檢查擋下它").isGreaterThanOrEqualTo(32);
 
-        assertThatThrownBy(() -> new BridgeProperties(null, placeholder)).isInstanceOf(IllegalArgumentException.class)
+        assertThatThrownBy(() -> new BridgeProperties(null, placeholder, null)).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("佔位").hasMessageNotContaining(placeholder);
     }
 
     @Test
     void toStringNeverShowsTheTokenValue() {
-        String shown = new BridgeProperties("http://bridge:8081", TOKEN_64).toString();
+        String shown = new BridgeProperties("http://bridge:8081", TOKEN_64, null).toString();
 
         assertThat(shown).doesNotContain(TOKEN_64).contains("http://bridge:8081").contains("<set>");
-        assertThat(new BridgeProperties("http://bridge:8081", null).toString()).contains("<unset>");
+        assertThat(new BridgeProperties("http://bridge:8081", null, null).toString()).contains("<unset>");
     }
 
     @Test
     void theUrlFallsBackToTheLocalDefaultWhenBlank() {
-        assertThat(new BridgeProperties(" ", null).url()).isEqualTo(BridgeProperties.LOCAL_DEFAULT);
-        assertThat(new BridgeProperties(" http://x:1 ", null).url()).isEqualTo("http://x:1");
+        assertThat(new BridgeProperties(" ", null, null).url()).isEqualTo(BridgeProperties.LOCAL_DEFAULT);
+        assertThat(new BridgeProperties(" http://x:1 ", null, null).url()).isEqualTo("http://x:1");
     }
 }
