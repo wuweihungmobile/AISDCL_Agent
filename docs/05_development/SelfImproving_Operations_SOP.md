@@ -323,7 +323,7 @@ py="$(git rev-parse --show-toplevel)/.venv/bin/python"
 
 - 否決／退回／不轉交的 `decide` 另帶 `--reason-class`（七值：證據不足、風險過高、工件類別錯、已被涵蓋、範圍外、卡面不清、未說明）；理由句由引言尾隨帶入，不寫 `--reason`。
 - 整則訊息含卡面引用（分界線「--- 以下不計入核心區 ---」或「決定：核准 ／」字樣）＝`GRAMMAR-CARD-QUOTED`；裸「核准」沒有 ID 不是決定行。
-- 卡面送達：掌舵者那則訊息之前**最近一則含 text 的 assistant 訊息**須逐字含卡面核心區（分界線之前各行）；新 session、壓縮後或中間插了別的回覆，就在請掌舵者決定的那則回覆重貼核心區（`card <PROP>` 不帶 `--issue` 可重印，digest 不變）。
+- 卡面送達：掌舵者那則訊息之前**最近一則含 text 的 assistant 訊息**須逐字含卡面核心區（分界線之前各行）；新 session、壓縮後或中間插了別的回覆，就在請掌舵者決定的那則回覆重貼核心區（`card <PROP>` 不帶 `--issue` 可重印，digest 不變）。**驗證之後卡面核心區會變**（「驗證：未驗」→ PASS／NE）：請掌舵者晉升之前必須先 `card --issue <PROP> --by main` 重發、再重貼**新**核心區，否則 `decide --kind promote` 拒收 `CARD-CHANGED`（RUN-SI-002 首次晉升即撞到，OBS-SI-325）。
 - 互動選項（AskUserQuestion）的回答在逐字稿是 `tool_result`、無 `origin`，**不是**決定載體；要「點選」就走 Console 決定對話框（P2b），再 `decide --carrier console --audit-ref <UUID>`。
 
 ### 座標取得（`--sid`／`--line`）

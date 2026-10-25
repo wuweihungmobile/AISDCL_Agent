@@ -454,6 +454,7 @@ Push-Location AgentConsole; docker compose --profile db --profile app --profile 
 | 2026-10-16（W6 DEF-AC-011 修復後，主控 Grep 現查；🟡 剩 API-AUT-06、US-M-10、INF-VOL-07、NFR-9.3-01、NFR-9.1-05） | 364 | 0 | 5 | 0 | 359 | 0 | 0 |
 | 2026-10-17（W7-QA 單線合併後，主控 Grep 現查；新列 API-ENG-01／API-SGN-05／API-AUTH-03／INF-SVC-16／INF-VOL-09～12／設定鍵追溯列等 10 列） | 374 | 0 | 0 | 0 | 374 | 0 | 0 |
 | 2026-10-17（W8 QA 第二輪複驗後，主控 Grep 現查；UI-MD-01／API-SSE-01／API-SSE-02 三列 E2E 欄加註 DEF-AC-013／014 已修證據，列數與狀態不變） | 374 | 0 | 0 | 0 | 374 | 0 | 0 |
+| 2026-10-24（整合輪 115／116 與 SelfImproving P1b 合併後，主控依 §3.4 指令現查；整合輪 115 新增 18 列；RTM §2.1／§2.2 本地編號子表不計入總列數；狀態欄以列尾 `<狀態> |` 計） | 392 | 0 | 0 | 0 | 392 | 0 | 0 |
 
 ### 5.3 待裁決事項
 
