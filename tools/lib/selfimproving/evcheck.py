@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import decheck
+from . import decheck, meacheck
 from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
@@ -23,7 +23,8 @@ from .refs import git_ne
 
 EVENT_ITEMS = ("events.structure", "events.transitions", "events.mutated", "events.vacuity",
                "events.prop_files", "events.research")
-ITEM_IDS = EVENT_ITEMS + ("research.sources",) + decheck.P2_ITEMS
+MEA_ITEM = "events.mea"
+ITEM_IDS = EVENT_ITEMS + ("research.sources",) + decheck.P2_ITEMS + (MEA_ITEM,)
 _CARRIER = "CARRIER-NOT-ESTABLISHED"
 Result = dict[str, tuple[list[Finding], str]]
 
@@ -254,7 +255,8 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
     out: Result = {"research.sources": (_sources_item(src_raw), "")}
     if not ledger.is_file():
         carrier = [Finding("-", _CARRIER, "info", "事件帳本不存在")]
-        out.update({item: (list(carrier), "") for item in EVENT_ITEMS + decheck.P2_ITEMS})
+        out.update({item: (list(carrier), "") for item in
+                    EVENT_ITEMS + decheck.P2_ITEMS + (MEA_ITEM,)})
         orphans = decheck.obs_console_audit(repo, [])  # 帶 carrier=console 的列本身就是待對帳的證據
         if orphans:
             out["obs.console_audit"] = (orphans, "")
@@ -275,5 +277,6 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
         "events.dec_console": (decheck.dec_console(repo, sound, params, git), ""),
         "events.verdict": (decheck.verdict_item(sound, params, valid), ""),
         "obs.console_audit": (decheck.obs_console_audit(repo, sound), ""),
+        MEA_ITEM: (meacheck.findings(sound), ""),
     })
     return out

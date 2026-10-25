@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from fractions import Fraction
 
-from . import cooldown
+from . import churn, cooldown, retire
 from . import fold as si_fold
 from . import paths as si_paths
 from .events import DEF_ID_RE, OBS_ID_RE
@@ -75,7 +75,7 @@ def input_problems(patch: bytes, body_text: str, cls: str) -> tuple[list[Code], 
     label = fields.get("result_label", "").strip()
     if label and label not in LABELS:
         out.append(("BODY-FIELD-VALUE", f"result_label 須為 {'、'.join(LABELS)}，收到 {label!r}"))
-    return out, fields, blocks
+    return out + retire.field_codes(fields, cls), fields, blocks
 
 
 def m_field_problems(fields: dict, sources: list[str]) -> list[Code]:
@@ -284,7 +284,7 @@ def evaluate(c: Ctx) -> Decision:
     hit, globs, codes = _hits(c, d.touched)
     d.cls = mark_cls(c.cls, globs, c.groups)
     d.codes += codes + _state_codes(c) + _dup_code(c, d.cls) + cooldown.codes(c, d.cls)
-    d.codes += _source_codes(c)
+    d.codes += _source_codes(c) + retire.target_codes(c) + churn.codes(c)
     if c.reviewer is not None and c.reviewer == c.proposer:
         d.codes.append(("REVIEWER-IS-PROPOSER", "審查者不得等於提案者"))
     handoff = hit or d.cls not in ("M", "P", "R", "D")

@@ -64,7 +64,7 @@ def body_problems(body: dict, known_ids: set[str]) -> list[Code]:
             out.append(("REL-CONFLICT", "有 corrects 時 marks_extra 不得再含 rel"))
         if not ID_RE.match(body["corrects"]) or body["corrects"] not in known_ids:
             out.append(("CORRECTS-NOT-FOUND", "被更正的 OBS ID 不在 OBS 帳本（含封存檔）"))
-    return out
+    return out + consoleaudit.body_guard("obs-add", body)  # R136 (a)
 
 
 def compose(body: dict, ident: str, ref: str, when_cell: str) -> str:

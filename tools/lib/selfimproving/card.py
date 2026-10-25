@@ -21,6 +21,7 @@ from .git import Git
 CLASS_NAMES = {"M": "記憶條目", "P": "Playbook 片段", "R": "SDD 規則草案", "D": "非治理文件",
                "evaluator-change": "評估器變更", "loop-self": "迴圈自身"}
 CORE_MAX = 12
+R_RETIRE_HINT = "SDD 規則退役須經 set_maturity(reviewed_by=<人>)；本迴圈不呼叫 SDD 碼"
 _PARSED_KEYS = ("digest8", "added", "removed", "touched_count", "extra_paths", "verdict")
 Code = tuple[str, str]
 
@@ -74,6 +75,8 @@ def render(v: dict) -> tuple[str, int, list[str]]:
         f"{v['patch_rel']}｜冷卻狀態：{'冷卻中' if v['cooldown'] else '無'}"
         f"｜轉交通道：{v['route'].split(':', 1)[1] if handoff else '無'}",
     ]
+    if v["cls"] == "R" and v["action"] == "retire":  # R127 (f)：SDD 規則退役須經人工 set_maturity
+        tail.append(R_RETIRE_HINT)
     return "\n".join(core + tail) + "\n", len(core), core
 
 

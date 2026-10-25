@@ -14,6 +14,7 @@ from pathlib import Path
 from . import card as si_card
 from . import events as si_events
 from . import fold as si_fold
+from . import meaplan as si_meaplan
 from . import paths as si_paths
 from . import refs as si_refs
 from . import rows as si_rows
@@ -91,7 +92,7 @@ def _proposals(repo: Path, git: Git, events: list[dict], f: si_fold.Folded,
                     "touched_count": len(touched) if touched is not None else None,
                     "sources": p.sources, "created_seq": p.created_seq, "last_seq": p.last_seq,
                     "verdict": p.verdict, "flags": p.flags, "cooldown": cool, "card": card,
-                    "_cursor": _num(p.id)})
+                    "window": si_meaplan.export_window(events, f, p.id), "_cursor": _num(p.id)})
     return out
 
 

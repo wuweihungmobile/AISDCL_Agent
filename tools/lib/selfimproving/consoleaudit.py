@@ -139,6 +139,32 @@ def _valid_time(text: str) -> bool:
     return True
 
 
+def _c0(text) -> bool:
+    return isinstance(text, str) and any(ord(ch) < 0x20 for ch in text)
+
+
+def body_guard(kind: str, body: dict) -> list[tuple[str, str]]:
+    """R136：Console 三動詞的寫入前本文判準（純函式；在取鎖與組列之前呼叫）。回（碼, 說明）清單：
+    (a) `CTRL-CHAR`（自由文字欄含 C0 控制字元）、(b) `EVENT-KEY-UNKNOWN`／`EVENT-TYPE`
+    （與 `events.validate` 同源）、(c) `REASON-EMPTY`、(d) `DISPOSITION-INVALID`（含換行）。"""
+    out: list[tuple[str, str]] = []
+    if kind == "decide":
+        dkind = body.get("dkind")
+        if _c0(body.get("reason")):
+            out.append(("CTRL-CHAR", "decide 的 reason 含控制字元"))
+        if dkind in si_events._WITH_REASON and body.get("reason") == "":
+            out.append(("REASON-EMPTY", f"{dkind} 的 reason 不得為空字串"))
+        out += si_events.dec_key_problems(dkind, body)
+    elif kind == "obs-add":
+        texts = [body.get(k) for k in ("context", "symptom", "evidence", "exposure")]
+        texts += list((body.get("marks_extra") or {}).values())
+        if any(_c0(t) for t in texts):
+            out.append(("CTRL-CHAR", "obs-add 的自由文字欄含控制字元（含換行）"))
+    elif kind == "obs-close" and "\n" in str(body.get("disposition", "")):
+        out.append(("DISPOSITION-INVALID", "disposition 含換行"))
+    return out
+
+
 def check_mac(audit: Audit, ring: list[bytes]) -> None:
     """金鑰環與 HMAC：環空＝KEY-MISSING（入帳不是回查，不降為 NE）；key_id 不在環＝KEY-UNKNOWN。"""
     if not ring:
@@ -158,4 +184,4 @@ def verify(path: Path, ring: list[bytes] | None = None) -> Audit:
 
 
 __all__ = ["Audit", "AuditError", "audit_path", "key_ring", "key_id_of", "parse", "check_mac",
-           "verify", "row_time", "KEY_ENV", "AUDIT_DIR", "KINDS"]
+           "verify", "row_time", "body_guard", "KEY_ENV", "AUDIT_DIR", "KINDS"]

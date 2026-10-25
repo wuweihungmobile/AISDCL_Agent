@@ -268,10 +268,13 @@ def _console_body_codes(body: dict, dkind) -> list:
     rc = body.get("reason_class")
     if dkind in _NEEDS_CLASS:
         if rc is None:
-            return [("REASON-CLASS-MISSING", f"{dkind} 須帶 reason_class")]
-        return [] if rc in si_events.REASON_CLASSES else [
-            ("REASON-CLASS-INVALID", f"reason_class {rc} 不在詞彙")]
-    return [("REASON-CLASS-UNEXPECTED", f"{dkind} 不收 reason_class")] if rc is not None else []
+            out = [("REASON-CLASS-MISSING", f"{dkind} 須帶 reason_class")]
+        else:
+            out = [] if rc in si_events.REASON_CLASSES else [
+                ("REASON-CLASS-INVALID", f"reason_class {rc} 不在詞彙")]
+    else:
+        out = [("REASON-CLASS-UNEXPECTED", f"{dkind} 不收 reason_class")] if rc is not None else []
+    return out + consoleaudit.body_guard("decide", body)  # R136：寫入前判準與其他本文碼一併收集
 
 
 def _decide_console(repo: Path, ns, params: dict, as_json: bool) -> wv.Out:

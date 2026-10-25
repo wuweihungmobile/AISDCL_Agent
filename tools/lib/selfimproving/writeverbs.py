@@ -32,7 +32,7 @@ from .ledger import max_valid_id, parse_ledger
 _EVENT_KEY = "event_max_bytes"
 PROP_KEYS = ("max_proposals_per_run", "max_revisions", "stop_after_bad", _EVENT_KEY,
              "non_evolvable_globs", "spec_body_globs", "max_touch_ratio", "max_new_entries",
-             "max_archive_entries_per_card", "card_line_max")
+             "max_archive_entries_per_card", "card_line_max", "churn_max")
 _MAX_CODES = 5
 
 
@@ -236,7 +236,13 @@ def attr_settle(repo: Path, kind: str, att: str, by: str, note: str | None, as_j
             codes.append(("CONFIRMER-IS-PROPOSER", "確認者不得等於提出者"))
         if codes:
             raise evwrite.Reject(codes)
-        return {"kind": kind, "by": by, "att": att, **({"note": note} if note else {})}
+        ev = {"kind": kind, "by": by, "att": att, **({"note": note} if note else {})}
+        if a.type != "link":
+            return ev
+        from . import meawrite  # 延遲 import：只有 link 型落定才同鎖追加 mea.amend（R121 (e)）
+
+        sim = {**ev, "seq": state.last_seq + 1, "t": evwrite.now_iso()}
+        return [ev, *({**x, "by": by} for x in meawrite.plan_amends(repo, [*state.events, sim]))]
     return append(repo, "attr-" + kind.split(".")[1], build, params, as_json,
                   lambda e: ok_text(kind, e["seq"], None, [("att", att)], as_json))
 

@@ -1182,7 +1182,8 @@ class TestCheckAdditions(SiTestCase):
         res = self.check(repo)
         self.assertEqual((res["_rc"], res["overall"], res["rows"]), (0, "PASS", 10))
         ids = [i["id"] for i in res["items"]]
-        self.assertEqual((ids[:21], ids[21:28], ids[28:]), (P0_ITEMS21, P1_ITEMS7, P2_ITEMS4))
+        self.assertEqual((ids[:21], ids[21:28], ids[28:32], ids[32:]),
+                         (P0_ITEMS21, P1_ITEMS7, P2_ITEMS4, ["events.mea"]))
         for item in res["items"][21:]:
             self.assertEqual((item["status"], item["blocking"]), ("NE", False))
             self.assertEqual([f["code"] for f in item["findings"]], ["CARRIER-NOT-ESTABLISHED"])
@@ -1191,12 +1192,12 @@ class TestCheckAdditions(SiTestCase):
                 self.assertEqual((item["status"], item["blocking"]), ("NE", False))
             else:
                 self.assertEqual((item["status"], item["findings"]), ("PASS", []), item["id"])
-        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 3)
+        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 4)
         keys = list(res["items"][0])
         self.assertTrue(all(list(i) == keys for i in res["items"]))
         rc, text, _ = self.M(repo, "check")
         lines = text.split("\n")
-        self.assertEqual(lines[0], "si-check rows=10 items=32")
+        self.assertEqual(lines[0], "si-check rows=10 items=33")
         self.assertRegex(
             [x for x in lines if x.strip()][-1], r"^overall=PASS rc=0 fingerprint=sha256:"
         )
@@ -1486,7 +1487,7 @@ class TestCheckAdditions(SiTestCase):
                 if isinstance(c, ast.Constant) and isinstance(c.value, str)
             }
 
-        self.assertTrue(any("items=32" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
+        self.assertTrue(any("items=33" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
         self.assertFalse(any("items=21" in s for s in strings("test_AT_001_1_1_baseline_is_green")))
         s3 = strings("test_AT_003_1_1_no_resident_mechanism")
         self.assertTrue({"decide", "promote"} <= s3 and "prop-new" not in s3)
@@ -1636,7 +1637,7 @@ class TestInterface(SiTestCase):
         today = datetime.now().strftime("%Y-%m-%d")
         calls = [
             [v]
-            for v in ("capacity", "frobnicate")  # P3 動詞與非動詞（P2 的八個動詞已建成）
+            for v in ("frobnicate",)  # 非動詞（P3 的 `capacity` 已建成，R134 (c)）
         ]
         calls += [
             ["card", pid(124), "--issue"],
@@ -1874,7 +1875,7 @@ class TestSopArticles(SiTestCase):
 WEIRD_STATUS_KEYS = [
     "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
     "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
-    "friction_reconcile", "no_event", "console_pending",
+    "friction_reconcile", "no_event", "console_pending", "measure",
 ]  # fmt: skip
 
 
@@ -1903,7 +1904,7 @@ class TestWeirdEvents(SiTestCase):
                 repo = self.weird_repo(label)
                 res = self.check(repo)
                 self.assertEqual(res["_rc"], 1, label)
-                self.assertEqual(len(res["items"]), 32)
+                self.assertEqual(len(res["items"]), 33)
                 self.assertTrue(all("status" in i for i in res["items"]))
                 self.assertEqual(self.S(res, "events.structure"), "FAIL")
                 self.assertEqual(self.F(res, "events.structure"), {("seq=2", "EVENT-TYPE")})
@@ -2230,7 +2231,8 @@ def consumed_keys(p: str) -> dict[str, tuple]:
     }  # fmt: skip
     legal = {
         "L01": ("dec", {"dkind": "resume", "run": rid(1)}),
-        "L02": ("mea.amend", {"prop": p, "window": 1, "to": "clean"}),
+        # L02（最小 `mea.amend`）於 P3 起退役：R113／R114 要求 `from`、`cause` 且 PROP 須已晉升，
+        # 最小形不再是合法對照（P3 TCS 勘誤一補入 R134 (g)）。
         "L03": ("card", {"prop": p}),
     }
     return {**v, **legal}
@@ -2268,7 +2270,7 @@ class TestDecFlagsAndConsumedKeys(CorruptLedgerTestCase):
 
     def check_case(self, repo: Path):
         res = self.check(repo)
-        self.assertEqual(len(res["items"]), 32)
+        self.assertEqual(len(res["items"]), 33)
         self.assertTrue(all("status" in i for i in res["items"]))
         return res
 

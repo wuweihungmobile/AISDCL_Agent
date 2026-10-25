@@ -36,6 +36,7 @@ class DefRow:
     severity: str
     status: str | None
     evidence: str
+    status_text: str = ""  # 狀態欄原文（M2、M3 取 `fixed@<sha>`；P3 增，R116／D1）
 
 
 def classify_status(text: str) -> str | None:
@@ -96,7 +97,7 @@ def load_rows(path: Path) -> list[DefRow]:
 
         status = classify_status(cell(_STATUS_HEADER)) if ok else None
         out.append(DefRow(cells[i_id], cell("發現日期"), cell("嚴重度"), status,
-                          cell("現象與證據（file:line）")))
+                          cell("現象與證據（file:line）"), cell(_STATUS_HEADER)))
     return out
 
 

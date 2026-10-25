@@ -297,6 +297,8 @@ def params_dict() -> dict:
         "export_limit_max": 500,
         "probe_timeout_seconds": 600,  # P2 新增兩鍵（TCS-P2 R106）：與 PARAM_SPECS 同步
         "verify_runs_max": 2,
+        "memory_index_max_lines": 200,  # P3 新增兩鍵（TCS-P3 R131）：與 PARAM_SPECS 同步
+        "memory_index_max_bytes": 25600,
         "metrics_rev": 1,
         "min_obs_rows": 10,
         "ledger_warn_bytes": 245760,
@@ -717,7 +719,7 @@ class TestLedgerRowRules(SiCase):
         res = self.check(repo)
         self.assertEqual((res["rc"], res["overall"], res["rows"]), (0, "PASS", 10))
         ids = [i["id"] for i in res["items"]]
-        self.assertEqual((ids[:21], len(ids)), (ITEMS21, 32))  # P1 追加 7、P2 再追加 4；前 21 不變
+        self.assertEqual((ids[:21], len(ids)), (ITEMS21, 33))  # P1 追加 7、P2 再追加 4、P3 追加 1
         for item in ITEMS21:
             if item == "ref.carrier_families":
                 self.assertEqual(self.S(res, item), "NE")
@@ -731,7 +733,7 @@ class TestLedgerRowRules(SiCase):
         rc, text, _ = self.run_main(["check", "--repo", str(repo)])
         self.assertEqual(rc, 0)
         lines = text.split("\n")
-        self.assertEqual(lines[0], "si-check rows=10 items=32")
+        self.assertEqual(lines[0], "si-check rows=10 items=33")
         last = [ln for ln in lines if ln.strip()][-1]
         self.assertRegex(last, r"^overall=PASS rc=0 fingerprint=sha256:[0-9a-f]{64}$")
         self.assertNotIn("obs-draft:", text)

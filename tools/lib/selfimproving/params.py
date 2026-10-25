@@ -10,7 +10,7 @@ from pathlib import Path
 from .ledger import Finding, split_lines
 
 PROTOCOL_REL = "docs/06_quality/SelfImproving_Protocol"
-CHECK_RULES_REV = 3  # P2 追加 4 項並移除 P1 的 QUOTE warn（TCS-P2 R98）
+CHECK_RULES_REV = 4  # P3 追加 events.mea 一項（TCS-P3 R115）；P2 追加 4 項並移除 QUOTE warn
 # 來源表不是指標定義：改它不得改判準指紋（TCS-P1 R46 (b)；只涵蓋這一個檔名）
 FINGERPRINT_EXCLUDED = frozenset({"research_sources.json"})
 
@@ -25,7 +25,7 @@ PARAM_SPECS: dict[str, str] = {
     "migration_base_sha": "sha", "spec_body_globs": "strs", "non_evolvable_globs": "strs",
     "research_fetch_max": "int1", "research_bytes_max": "int1", "research_timeout_seconds": "int1",
     "min_events": "int1", "export_limit_max": "int1", "probe_timeout_seconds": "int1",
-    "verify_runs_max": "int1",
+    "verify_runs_max": "int1", "memory_index_max_lines": "int1", "memory_index_max_bytes": "int1",
 }
 _LABEL_RE = re.compile(r"\((?:i|ii|iii|iv|v)\) $")
 _BRACE_RE = re.compile(

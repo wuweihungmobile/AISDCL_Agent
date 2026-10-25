@@ -10,9 +10,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from . import consoleaudit
+from . import capacity as si_capacity
+from . import consoleaudit, meaplan
 from . import events as si_events
 from . import fold as si_fold
+from . import mea as si_mea
+from . import params as si_params
 from . import scan as si_scan
 from . import transcript as si_transcript
 from .git import Git
@@ -72,8 +75,31 @@ def console_pending(events: list[dict], read_home: bool = True) -> dict:
     return {"status": "read", "count": len(items), "items": items}
 
 
+MEASURE_KEYS = ("w_opp", "w_evt", "w_min", "w_n", "stop_after_bad")
+
+
+def measure_value(repo: Path, git: Git, params: dict, events: list[dict] | None) -> dict:
+    """R130 (c)：採納窗摘要；量不到（載體缺席、錨或帳本不可用）＝NOT-EVALUABLE 並帶理由。"""
+    if events is None:
+        return {"status": "NOT-EVALUABLE", "reason": "carrier-not-established"}
+    if not set(MEASURE_KEYS) <= si_params.valid_keys(params):
+        return {"status": "NOT-EVALUABLE", "reason": "params-invalid"}
+    ctx = si_mea.build_ctx(repo, git, params, events)
+    if ctx.bad:
+        return {"status": "NOT-EVALUABLE", "reason": si_mea.INVALID}
+    plan = meaplan.plan(ctx)
+    bad = meaplan.input_problems(ctx, plan)
+    if bad:
+        return {"status": "NOT-EVALUABLE", "reason": bad[0].lower()}
+    keep = ("prop", "state", "result", "n_opp")
+    return {"status": "read", "due": len(plan),
+            "windows": [{k: w[k] for k in keep} for w in meaplan.window_rows(ctx)],
+            "candidates_unsettled": meaplan.unsettled_candidates(ctx),
+            "rollback_pending": meaplan.rollback_pending(ctx)}
+
+
 def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
-    """狀態物件；鍵序固定（R60；其後附加末鍵 `console_pending`，R99）。"""
+    """狀態物件；鍵序固定（R60；其後附加 `console_pending`〔R99〕與末鍵 `measure`〔R130〕）。"""
     events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     f = si_fold.fold(events or [], params.get("stop_after_bad"))
     closes = [e["seq"] for e in events or [] if e.get("kind") == "run.close"]
@@ -81,7 +107,10 @@ def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
     a = si_scan.anchor(git, events, params, None)
     hits, why = si_scan.defect_hits(repo, a)
     unavailable = [{"trigger": "c", "reason": why}] if why else []
-    detected = _detect(f, window, hits)
+    cap, cap_events = (si_capacity.default_summary(repo, params) if read_home else (
+        {"status": "NOT-EVALUABLE", "reason": "export-reads-no-home"}, []))
+    detected = sorted(_detect(f, window, hits) + cap_events,
+                      key=lambda e: (e["trigger"], e["subject"]))
     link_ids = {a_.id for a_ in f.atts.values() if a_.type == "link"}
     return {
         "events_detected": detected,
@@ -96,18 +125,25 @@ def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
         "suspended": f.suspended,
         "cooldowns": f.cooldowns,
         "skip_reasons": dict(f.skip_reasons),
-        "capacity": {"status": "NOT-EVALUABLE", "reason": "capacity-verb-not-established"},
+        "capacity": cap,
         "root_cause_changes": f.root_cause_changes,
         "reopen_candidates": {"unsettled": sum(1 for i in link_ids if f.atts[i].settled is None)},
         "pending_windows": f.pending_windows,
         "friction_reconcile": _friction(repo),
         "no_event": not detected,
         "console_pending": console_pending(events or [], read_home),
+        "measure": measure_value(repo, git, params, events),
     }
 
 
 def render_json(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False) + "\n"
+
+
+def _capacity_line(cap: dict) -> str:
+    if cap["status"] != "read":
+        return f"capacity NOT-EVALUABLE（{cap['reason']}）"
+    return "capacity read over_cap=" + ("、".join(cap["over_cap"]) or "無")
 
 
 def render_text(obj: dict) -> str:
@@ -122,8 +158,7 @@ def render_text(obj: dict) -> str:
     skips = " ".join(f"{k_}={v}" for k_, v in obj["skip_reasons"].items())
     fr = obj["friction_reconcile"]
     lines += [f"open_runs: {runs}", f"pending_props: {pend}", f"suspended: {sus}",
-              f"cooldowns: {cools}", f"skip_reasons: {skips}", "capacity NOT-EVALUABLE "
-              f"（{obj['capacity']['reason']}）",
+              f"cooldowns: {cools}", f"skip_reasons: {skips}", _capacity_line(obj["capacity"]),
               f"root_cause_changes: {obj['root_cause_changes']}",
               f"reopen_candidates: unsettled={obj['reopen_candidates']['unsettled']}",
               f"pending_windows: {len(obj['pending_windows'])}",
@@ -131,6 +166,11 @@ def render_text(obj: dict) -> str:
     cp = obj["console_pending"]
     lines.append(f"console_pending: {cp['count']}" if cp["status"] == "read"
                  else f"console_pending: NOT-EVALUABLE（{cp['reason']}）")
+    m = obj["measure"]
+    lines.append(f"measure: due={m['due']} measuring="
+                 f"{sum(1 for w in m['windows'] if w['state'] == 'measuring')} "
+                 f"candidates_unsettled={m['candidates_unsettled']}" if m["status"] == "read"
+                 else f"measure: NOT-EVALUABLE（{m['reason']}）")
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

@@ -1,8 +1,8 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（40 個鍵：29 `ro`、7 `rw`、2 `net`、2 `exec`）；判準函式
-`capability_problems`
+登記表 `CAPABILITY` 住本檔（48 個鍵：36 `ro`、8 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
+1 `rw`）；判準函式 `capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
 故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
@@ -60,12 +60,19 @@ CAPABILITY: dict[str, str] = {
             "consoleaudit",
             "obsrows",
             "decheck",
+            "mea",
+            "meaplan",
+            "meastat",
+            "meacheck",
+            "capacity",
+            "retire",
+            "churn",
         )
     },
     **{
         f"{n}.py": "rw"
         for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
-            "obswrite")
+            "obswrite", "meawrite")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
     **{f"{n}.py": "exec" for n in ("runner", "verify")},
@@ -203,6 +210,13 @@ def capability_problems(
             out.append(f"{name}（{kind}）：②′ import runner 的檔須登記為 exec")
         if kind in ("rw", "exec") and nets:
             out.append(f"{name}（{kind}）：不得 import 網路模組")
+        if kind == "ro" and name not in closure:  # P3 R132：ro 檔不得相對 import 非 ro 檔
+            out += [f"{name}（ro）：相對 import 非 ro 檔 {d}.py（{registry[f'{d}.py']}）"
+                    for d in sorted(_rel_imports(text, pkg_dir.name))
+                    if registry.get(f"{d}.py") not in ("ro", None)]
+        if "set_maturity" in {ast.unparse(n.func).split(".")[-1] for n in ast.walk(
+                ast.parse(text)) if isinstance(n, ast.Call)}:
+            out.append(f"{name}：含對 set_maturity 的呼叫（SDD 規則退役只經人工）")
     for name in sorted(files):
         text = (pkg_dir / name).read_bytes().decode("utf-8")
         out += [f"{name}：④ 禁字樣 {pat.replace(chr(92), '')}" for pat in forbidden_hits(text)]
@@ -247,6 +261,8 @@ def _closure_problems(
             if cur in seen or cur not in files:
                 continue
             seen.add(cur)
+            if cur != start:
+                continue  # 只判起點的直接 import；ro 中繼檔的相對 import 由 ro 直接 import 規則判
             deps = _rel_imports((pkg_dir / cur).read_bytes().decode("utf-8"), pkg)
             todo += [f"{d}.py" for d in deps]
         out += [
@@ -312,7 +328,7 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 29, "rw": 7, "net": 2, "exec": 2})
+        self.assertEqual(counts, {"ro": 36, "rw": 8, "net": 2, "exec": 2})
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
             "verify.py"})
         net_importers, subproc = set(), set()
@@ -391,7 +407,7 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 40)
+        self.assertEqual(len(CAPABILITY), 48)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
@@ -602,7 +618,7 @@ class TestDynamicPurity(SiTestCase):
         self.assertEqual((before, st0), (after, st1))
         res = self.check(repo)
         self.assertEqual(res["_rc"], 0)
-        self.assertEqual(len(res["items"]), 32)
+        self.assertEqual(len(res["items"]), 33)
         calls: list[list[str]] = []
         real_run = subprocess.run
 
@@ -614,6 +630,111 @@ class TestDynamicPurity(SiTestCase):
             self.check(repo)
         self.assertTrue(calls and all(c[0] == "git" for c in calls), calls[:3])
 
+
+
+
+class TestP3Registry(unittest.TestCase):
+    """P3 的能力登記（TCS-P3 R132；AT-340-4-2、AT-340-4-E-2）。"""
+
+    P3_RO = ("mea", "meastat", "meacheck", "capacity", "retire", "churn")
+
+    def test_AT_340_4_2_p3_registry_closure_and_load_surface(self):
+        self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
+        names = {p.name for p in PKG.glob("*.py")}
+        self.assertEqual(names, set(CAPABILITY))
+        counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
+        optional = (PKG / "meaplan.py").exists()
+        self.assertEqual((len(CAPABILITY), counts),
+                         (48, (36, 8, 2, 2)) if optional else (47, (35, 8, 2, 2)))
+        for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
+            self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
+        self.assertEqual(CAPABILITY["meawrite.py"], "rw")
+        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
+                                                                              "verify.py"})
+        self.assertEqual(sorted(p for p, _ in forbid_calls(PKG, ENTRY)), [])
+        loaded = {
+            "status": ["status", "--repo"], "export": ["export", "--kind", "events", "--json",
+                                                       "--repo"],
+            "check": ["check", "--repo"], "card": ["card", fx.pid(1), "--repo"],
+            "scan": ["scan", "--repo"], "capacity": ["capacity", "--repo"],
+        }
+        tmp = fx.new_dir("surf")
+        tmp.mkdir()
+        for label, argv in loaded.items():
+            mods = importtime_modules([*argv, str(tmp)], ENTRY)
+            self.assertFalse(mods & {"meawrite", "runner", "verify"}, (label, mods))
+        probe = fx.ROOT / "tools" / "probe" / "selfimproving_measure.py"
+        mods = importtime_modules(["--repo", str(tmp)], probe)
+        self.assertFalse(mods & {"meawrite", "runner", "verify"}, mods)
+        for path in [*PKG.glob("*.py"), ENTRY]:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for fn_or_mod in [tree, *[n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]]:
+                if fn_or_mod is tree:
+                    for node in tree.body:
+                        if isinstance(node, (ast.Import, ast.ImportFrom)):
+                            self.assertNotIn("meawrite", ast.unparse(node), path.name)
+
+    def test_AT_340_4_E_2_registry_check_has_teeth(self):
+        def copy_pkg(**edits):
+            root = fx.new_dir("q")
+            pkg = root / "lib" / "selfimproving"
+            pkg.mkdir(parents=True)
+            for p in PKG.glob("*.py"):
+                text = p.read_text(encoding="utf-8")
+                pkg.joinpath(p.name).write_text(edits.get(p.stem, text) if p.stem not in edits
+                                                else text + edits[p.stem], encoding="utf-8")
+            for k, v in edits.items():
+                if not (pkg / f"{k}.py").exists():
+                    (pkg / f"{k}.py").write_text(v, encoding="utf-8")
+            entry = root / "entry.py"
+            entry.write_bytes(ENTRY.read_bytes())
+            return pkg, entry
+
+        reg = dict(CAPABILITY)
+        pkg, entry = copy_pkg()
+        self.assertEqual(capability_problems(pkg, reg, entry), [])
+        injections = {
+            "mea": ("\nfrom . import meawrite\n", "mea.py", "meawrite"),
+            "capacity": ("\nimport subprocess\n", "capacity.py", "subprocess"),
+            "retire": ("\n\ndef _x():\n    set_maturity('a')\n", "retire.py", "set_maturity"),
+            "extra": ("X = 1\n", "extra.py", "未登記"),
+            "status": ("\nfrom . import meawrite\n", "status.py", "meawrite"),
+            "churn": ("\nimport rule_loader\n", "churn.py", "rule_loader"),
+        }
+        for key, (code, fname, cause) in injections.items():
+            with self.subTest(key):
+                pkg, entry = copy_pkg(**{key: code})
+                got = capability_problems(pkg, reg, entry)
+                self.assertEqual(len(got), 1, got)
+                self.assertIn(fname, got[0])
+                self.assertIn(cause, got[0])
+
+
+def forbid_calls(pkg: Path, entry: Path) -> list[tuple[str, str]]:
+    """套件與入口對 `set_maturity` 的呼叫、對 `rule_loader`／`fsm_runtime` 的 import（AST）。"""
+    out = []
+    for p in [*pkg.glob("*.py"), entry]:
+        for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+            if isinstance(n, ast.Call) and ast.unparse(n.func).split(".")[-1] == "set_maturity":
+                out.append((p.name, "set_maturity"))
+            mods = ([a.name for a in n.names] if isinstance(n, ast.Import)
+                    else [n.module or ""] if isinstance(n, ast.ImportFrom) else [])
+            out += [(p.name, m) for m in mods if m.split(".")[0] in ("rule_loader", "fsm_runtime")]
+    return out
+
+
+def importtime_modules(argv: list[str], script: Path) -> set[str]:
+    """`python -X importtime <script> <argv>` 載入的 `selfimproving.<名>` 模組集合。"""
+    cp = subprocess.run([sys.executable, "-X", "importtime", str(script), *argv],
+                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                        env={**__import__("os").environ, **fx.hermetic(), "PYTHONUTF8": "1"})
+    names = set()
+    for ln in cp.stderr.splitlines():
+        if ln.startswith("import time:") and "|" in ln:
+            parts = ln.rsplit("|", 1)[1].strip().split(".")
+            if len(parts) >= 2 and parts[-2] == "selfimproving":
+                names.add(parts[-1])
+    return names
 
 if __name__ == "__main__":
     unittest.main()

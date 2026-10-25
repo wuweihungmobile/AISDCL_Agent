@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 import _selfimproving_fixtures as fx
+import _selfimproving_p3_fixtures as f3
 from _selfimproving_fixtures import (
     EVL,
     PROPS_REL,
@@ -1143,8 +1144,9 @@ class TestBodyAndDelta(PropCase):
         patch = fx.patch_join(
             fx.patch_del("docs/notes/tiny.md"), fx.patch_mod("docs/notes/demo.md", {1: "x"})
         )
+        f3.promoted(repo, target="docs/notes/tiny.md")  # R127 (c)：退役目標須在役
         self.ok(repo, run, "D", action="retire", target=["docs/notes/tiny.md"], patch=patch)
-        e = props_of(repo)[0]
+        e = props_of(repo)[-1]
         self.assertEqual((e["cls"], e["action"], e["route"]), ("D", "retire", "loop"))
         params = "docs/06_quality/SelfImproving_Protocol/params.json"
         for moved, want in ((False, "evaluator-change"), (True, "loop-self")):
@@ -1463,7 +1465,9 @@ class TestDigestAndFiles(PropCase):
             touched = ["playbooks/demo.yaml"]
             blob = json.dumps(touched, ensure_ascii=False, separators=(",", ":")).encode()
             self.assertEqual(e["touched_sha256"], fx.sha(blob))
-            fields = {"rollback": "git revert 該 patch", "budget": "1 次子代理、約 3000 token"}
+            fields = {"rollback": "git revert 該 patch", "budget": "1 次子代理、約 3000 token",
+                      "retire_when": "該段連續兩個運轉無人引用",
+                      "reopen_symptom": "同一條提示再度被研究者重寫"}
             core = {
                 "id": e["id"],
                 "rev": 1,
@@ -1477,8 +1481,8 @@ class TestDigestAndFiles(PropCase):
                 "patch_sha256": e["patch_sha256"],
                 "body_sha256": e["body_sha256"],
                 "rollback": fields["rollback"],
-                "retire_when": None,
-                "reopen_symptom": None,
+                "retire_when": fields["retire_when"],
+                "reopen_symptom": fields["reopen_symptom"],
                 "budget": fields["budget"],
             }
             canon = json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)

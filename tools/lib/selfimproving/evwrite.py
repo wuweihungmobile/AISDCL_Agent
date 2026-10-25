@@ -97,19 +97,20 @@ def _read_state(ledger: Path) -> State:
 def _append_locked(ledger: Path, build, max_bytes: int | None) -> dict:
     state = _read_state(ledger)
     try:
-        event = build(state)
-        seq = state.last_seq + 1
-        line = render_line(seq, event)
-        if max_bytes is not None and len(line.encode("utf-8")) > max_bytes:
-            raise Reject([("EVENT-BYTES-OVER", f"事件行 {len(line.encode('utf-8'))} 位元組超過 "
-                                               f"{max_bytes}")])
+        built = build(state)
+        events = built if isinstance(built, list) else [built]  # R122 (g)：全有或全無的多事件追加
+        lines = [render_line(state.last_seq + 1 + i, e) for i, e in enumerate(events)]
+        for line in lines:
+            if max_bytes is not None and len(line.encode("utf-8")) > max_bytes:
+                raise Reject([("EVENT-BYTES-OVER", f"事件行 {len(line.encode('utf-8'))} 位元組超過 "
+                                                   f"{max_bytes}")])
         if PAUSE_HOOK is not None:
             PAUSE_HOOK()
         ledger.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
         fd = os.open(str(ledger), flags, 0o644)
         try:
-            os.write(fd, (line + "\n").encode("utf-8"))
+            os.write(fd, "".join(line + "\n" for line in lines).encode("utf-8"))
         finally:
             os.close(fd)
     except BaseException:
@@ -119,7 +120,7 @@ def _append_locked(ledger: Path, build, max_bytes: int | None) -> dict:
             except OSError:
                 pass
         raise
-    return json.loads(line)
+    return json.loads(lines[0])
 
 
 def append_event(ledger: Path, lock_path: Path | None, build, *,

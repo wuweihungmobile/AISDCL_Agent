@@ -331,6 +331,17 @@ def _forbidden2(kind: str, obj: dict) -> set[str]:
     return out
 
 
+def dec_key_problems(dkind: str, body: dict) -> _Issues:
+    """R136 (b)：Console `decide` 的 body 之於該 `dkind` 的不收鍵（`reason`、非空 `flags`）
+    與 `flags` 元素型別；與 `validate` 對 `dec` 同源（同一組 `_forbidden2`、`_SPEC2`）。"""
+    forb = _forbidden2("dec", {"dkind": dkind, "carrier": "console"})
+    out = [("EVENT-KEY-UNKNOWN", f"dec 的 {k} 對 {dkind} 不收") for k in ("reason", "flags")
+           if k in body and k in forb and body[k] != []]
+    if "flags" in body and not out and not _SPEC2["dec"]["flags"](body["flags"]):
+        out.append(("EVENT-TYPE", "dec.flags 型別或值域不合"))
+    return out
+
+
 def _conditional2(kind: str, obj: dict) -> _Issues:
     """P2 kind 的條件規則與互斥（碼皆 EVENT-TYPE）。"""
     fn = {"dec": _dec_rules, "app.sandbox": _sandbox_rules, "app.verify": _verify_rules}.get(kind)

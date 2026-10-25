@@ -871,8 +871,8 @@ class TestP2Checks(P2TestCase):
         self.assertEqual(items(R0), want0)
         self.assertEqual(items(R1), want1)
         res0, res1 = self.check(R0), self.check(R1)
-        self.assertEqual(self.M(R0, "check")[1].splitlines()[0], "si-check rows=10 items=32")
-        self.assertEqual([i["id"] for i in res0["items"][28:]],
+        self.assertEqual(self.M(R0, "check")[1].splitlines()[0], "si-check rows=10 items=33")
+        self.assertEqual([i["id"] for i in res0["items"][28:32]],
                          ["events.dec_quote", "events.dec_console", "events.verdict",
                           "obs.console_audit"])
         for k in ("events.dec_quote", "events.dec_console", "events.verdict", "obs.console_audit"):
@@ -880,7 +880,7 @@ class TestP2Checks(P2TestCase):
                               codes_set(res0, k)), ("NE", False, set(cne)))
             self.assertEqual(self.S(res1, k), "PASS")
         self.assertEqual((res0["overall"], res0["_rc"]), ("PASS", 0))
-        self.assertEqual(self.MJ(R1, "check")["fingerprint_parts"]["check_rules_rev"], 3)
+        self.assertEqual(self.MJ(R1, "check")["fingerprint_parts"]["check_rules_rev"], 4)
 
     def test_AT_240_3_E_1_new_items_fail_and_ne(self):
         def run_check(chain, rows=()):
@@ -988,7 +988,7 @@ class TestP2Checks(P2TestCase):
         self.assertEqual(self.S(self.check(R), "params.keys"), "PASS")
         real = json.loads(fx.REAL_PARAMS.read_text(encoding="utf-8"))
         self.assertEqual((real["probe_timeout_seconds"], real["verify_runs_max"]), (600, 2))
-        self.assertEqual(len(real), 30)
+        self.assertEqual(len(real), 32)
         p = fx2.drive_to(R, "sandboxed")
         fx.set_params(R, verify_runs_max=1)
         self.assertEqual(self.M(R, "verify", p)[0], 0)

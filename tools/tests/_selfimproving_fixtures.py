@@ -91,6 +91,7 @@ REAL_PRD = ROOT / "docs/01_requirements/SelfImproving_PRD.md"
 UUID = "0a1b2c3d-4e5f-4a6b-8c7d-9e8f0a1b2c3d"
 UUID2 = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 LONG_ID = "0000"
+DROP = object()  # `ev()` 的哨兵：值為 DROP 的鍵不入事件（明示刪除預設鍵；P3 R134）
 
 TMP: Path
 _GCONF: Path
@@ -353,6 +354,8 @@ def params_dict() -> dict:
         "export_limit_max": 500,
         "probe_timeout_seconds": 600,
         "verify_runs_max": 2,
+        "memory_index_max_lines": 200,
+        "memory_index_max_bytes": 25600,
     }
 
 
@@ -606,6 +609,16 @@ def _verify_defaults(e: dict, seq: int) -> dict:
             "reasons": [] if verdict == "PASS" else ["PATCHED-NOT-GREEN"]}
 
 
+def _mea_report_defaults(e: dict) -> dict:
+    """`mea.report` 的合規預設（P3 R113；`report` 為 `check` 者不帶 `prop`）。"""
+    if e.get("report") == "check":
+        return {"fingerprint": H(7), "metrics_rev": 1, "windows": 0, "m1_n": 0, "m1": None,
+                "m4": None, "m5_main": None, "m5_all": None, "m5_n": 0, "falsified": None,
+                "missing": ["no-evaluable-window"]}
+    return {"report": "baseline", "promote_seq": 1, "opp": [], "events": 2, "pending": 0,
+            "w_opp": 5, "w_evt": 2, "w_min": 5, "anchor": None}
+
+
 def _p2_defaults(e: dict, seq: int, t: str, head_sha: str) -> dict:
     """九種 P2 kind 的確定性預設（R107 (a)；呼叫端明示的鍵優先、逐位元保留）。"""
     kind = e["kind"]
@@ -616,6 +629,10 @@ def _p2_defaults(e: dict, seq: int, t: str, head_sha: str) -> dict:
         "app.promote": {"id": app, "rev": 1, "head_sha": head_sha, "pre_sha256": H(10),
                         "post_sha256": H(11), "unverified_ack": False},
         "app.rollback": {"id": app, "rev": 1, "pre_sha256": H(11), "post_sha256": H(10)},
+        "mea.open": {"w_opp": 5, "promote_seq": 1},
+        "mea.close": {"result": "clean", "n_opp": 5, "at": "2026-10-25T00:00:00+00:00"},
+        "mea.amend": {"window": 1, "cause": 1, "from": "pending", "to": "clean"},
+        "mea.report": _mea_report_defaults(e),
         "obs.add": {"obs": obs_id(1), "audit_ref": UUID2, "audit_sha256": H(6),
                     "key_id": "00000000", "decider": "ops_admin", "carrier": "console"},
         "obs.close": {"obs": obs_id(1), "audit_ref": UUID2, "audit_sha256": H(6),
@@ -670,6 +687,7 @@ def compose(events, repo_head: str, seqs=None, t0: datetime | None = None) -> li
             **_p2_defaults(e, seq, t, repo_head),
             **{k: v for k, v in e.items() if k not in ("kind", "by", "t")},
         }
+        body = {k: v for k, v in body.items() if v is not DROP}
         order = _ORDER.get(e["kind"], [])
         keys = [k for k in order if k in body] + [k for k in body if k not in order]
         obj = {
@@ -1047,6 +1065,8 @@ def body_md(cls: str = "P", *, drop=(), skeleton_drop=(), extra_heads=False, **f
         "budget": "1 次子代理、約 3000 token",
         "result_label": "失敗",
         "scope": "夾具範圍",
+        "retire_when": "該段連續兩個運轉無人引用",
+        "reopen_symptom": "同一條提示再度被研究者重寫",
     }
     if cls == "M":
         vals.update(source_obs=obs_id(1), retire_when="該症狀不再出現")

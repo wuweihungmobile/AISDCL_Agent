@@ -39,6 +39,7 @@ STATUS_KEYS = [
     "friction_reconcile",
     "no_event",
     "console_pending",
+    "measure",
 ]
 EXPORT_KEYS = [
     "schema_rev",
@@ -272,7 +273,7 @@ class TestStatus(StatusCase):
         )
         self.assertEqual(obj["skip_reasons"], {"quota-band": 1, "offline": 1, "helmsman": 0})
         self.assertEqual(
-            obj["capacity"], {"status": "NOT-EVALUABLE", "reason": "capacity-verb-not-established"}
+            obj["capacity"], {"status": "NOT-EVALUABLE", "reason": "no-axis-evaluable"}
         )
         self.assertEqual(
             (obj["root_cause_changes"], obj["reopen_candidates"], obj["pending_windows"]),
@@ -471,6 +472,7 @@ class TestExport(StatusCase):
                 "flags",
                 "cooldown",
                 "card",
+                "window",
             ],
         )
         for p in props:
@@ -570,7 +572,9 @@ class TestExport(StatusCase):
         outs = []
         st = self.export(repo, "--kind", "status")
         outs.append(json.dumps(st))
-        same = lambda o: {k: v for k, v in o.items() if k != "console_pending"}  # noqa: E731
+        same = lambda o: {  # noqa: E731
+            k: v for k, v in o.items() if k not in ("console_pending", "capacity")
+        }
         self.assertEqual(same(st["items"][0]), same(self.MJ(repo, "status")))  # R99 (b)
         self.assertEqual(st["items"][0]["console_pending"]["reason"], "export-reads-no-home")
         props = self.export(repo, "--kind", "proposals")

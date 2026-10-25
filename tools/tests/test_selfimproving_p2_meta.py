@@ -277,8 +277,9 @@ class TestSopP2(unittest.TestCase):
         self.assertTrue(any(p.startswith("REQ-15") for p in sop_p2_problems(swapped)))
         self.assertTrue(any(p.startswith("REQ-01") for p in sop_p2_problems(
             text.replace("### P2 動詞", "### P2 動詞（待補）", 1))))
+        # P3 起 SOP 尾端是〈P3 動詞〉節：探針句改插在〈P2 動詞〉標題之後（P3 TCS 勘誤一 R134 (h)）
         self.assertTrue(any(p.startswith("REQ-02") for p in sop_p2_problems(
-            text + "\n呼叫它們一律 rc 3\n")))
+            text.replace("### P2 動詞\n", "### P2 動詞\n呼叫它們一律 rc 3\n", 1))))
         self.assertTrue(any(p.startswith("REQ-36") for p in sop_p2_problems(
             text.replace("SCG-4 收尾前", "SCG-4 前"))))
         self.assertTrue(any(p.startswith("REQ-12") for p in sop_p2_problems(
@@ -475,7 +476,8 @@ class TestZeroRegression(P2TestCase):
         missing = [a for a in ids if underscore_form(a) not in names]
         self.assertEqual(missing, [])
         self.assertEqual(set(si_params.PARAM_SPECS), {*P1_PARAMS, "probe_timeout_seconds",
-                                                      "verify_runs_max"})
+                                                      "verify_runs_max", "memory_index_max_lines",
+                                                      "memory_index_max_bytes"})
         prm = fx.params_dict()
         self.assertEqual(prm["non_evolvable_globs"], P1_NON_EVOLVABLE)
         self.assertEqual(prm["spec_body_globs"], P1_SPEC_BODY)

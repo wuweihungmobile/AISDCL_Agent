@@ -11,6 +11,8 @@
   "max_proposals_per_run": 3,
   "max_revisions": 2,
   "max_touch_ratio": 0.2,
+  "memory_index_max_bytes": 25600,
+  "memory_index_max_lines": 200,
   "metrics_rev": 1,
   "migration_base_sha": "ab4638c439ad1cc4b8408efcd454c29ef7966d0b",
   "min_events": 1,

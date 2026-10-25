@@ -53,6 +53,9 @@ class Prop:
     freeze_seq: int | None = None
     sandbox_seq: int | None = None
     verify_counts: dict = field(default_factory=dict)
+    promote_seq: int | None = None
+    promote_t: str | None = None
+    ack: bool = False
 
 
 @dataclass
@@ -294,7 +297,7 @@ def _apply(f: Folded, ev: dict, vmax: int | None = None) -> None:
         _prop_event(f, ev)
     elif kind == "dec":
         _dec(f, ev)
-    elif kind in _NEEDS_PROP:
+    elif kind in _NEEDS_PROP and not (kind == "mea.report" and ev.get("report") == "check"):
         _prop_transition(f, ev, kind, vmax)
 
 
@@ -326,6 +329,7 @@ def _promote(f: Folded, ev: dict, p: Prop) -> bool:
         _bad(f, p, ev, "PROMOTE-ACK-MISMATCH", "unverified_ack 不等於所消費 dec(promote) 的 flags")
     p.pending_promote, p.promote_pre, p.promote_post = None, ev.get("pre_sha256"), ev.get(
         "post_sha256")
+    p.promote_seq, p.promote_t, p.ack = ev["seq"], ev["t"], bool(ev.get("unverified_ack"))
     return True
 
 
@@ -345,6 +349,23 @@ def _freeze(f: Folded, ev: dict, p: Prop) -> None:
     if p.sandbox_seq is not None:
         _bad(f, p, ev, "HELDOUT-AFTER-SANDBOX", "heldout.freeze 晚於 app.sandbox")
     p.freeze_seq = p.freeze_seq if p.freeze_seq is not None else ev["seq"]
+
+
+_AMEND_OK = {("pending", "clean"), ("pending", "recurred"), ("clean", "recurred"),
+             ("rolled-back", "recurred")}
+
+
+def _amend(f: Folded, ev: dict, p: Prop) -> None:
+    """R114 (b)(c)：`window` 須是同一 PROP 的 `mea.close`、`from` 等於該窗當時的生效結果、
+    （from, to）屬合法四對；不合者不生效並記 TRANSITION-ILLEGAL。"""
+    win = next((w for w in f.windows if w["seq"] == ev.get("window") and w["prop"] == p.id), None)
+    frm, to = ev.get("from"), ev.get("to")
+    if win is None or not isinstance(frm, str) or frm != f.amends.get(win["seq"], win["result"]) \
+            or (frm, to) not in _AMEND_OK:
+        return _illegal(f, p.id, ev, p.state)
+    f.amends[win["seq"]] = to
+    if frm == "pending" and p.state == "measuring":
+        p.state = "closed"
 
 
 def _prop_transition(f: Folded, ev: dict, kind: str, vmax: int | None = None) -> None:
@@ -370,14 +391,15 @@ def _prop_transition(f: Folded, ev: dict, kind: str, vmax: int | None = None) ->
             if p is not None:
                 _illegal(f, p.id, ev, p.state)
             return
-        f.windows.append({"prop": p.id, "seq": ev["seq"], "result": res})
+        f.windows.append({"prop": p.id, "seq": ev["seq"], "result": res,
+                          "n_opp": ev.get("n_opp"), "at": ev.get("at")})
         p.state = "measuring" if res == "pending" else "closed"
     else:
         p = _step(f, ev, "", None)
         if p is None:
             return
-        if kind == "mea.amend" and _i(ev.get("window")):
-            f.amends[ev["window"]] = ev.get("to")
+        if kind == "mea.amend":
+            _amend(f, ev, p)
         elif kind == "app.rollback":
             _rollback(f, ev, p)
         elif kind == "heldout.freeze":
@@ -398,6 +420,14 @@ def _prop_root_causes(f: Folded, sources: list) -> list[str]:
 def prop_root_causes(f: Folded, sources: list) -> list[str]:
     """PROP 的根因鍵集合：obs 與該 PROP sources 有交集的 attr（root）事件的 root_cause。"""
     return _prop_root_causes(f, sources)
+
+
+def confirmed_root_causes(f: Folded, sources: list, cutoff: int | None = None) -> set[str]:
+    """R118 (c)：只認已被 `attr.confirm` 確認（`cutoff` 給定時須早於該 seq）的 root attr 之鍵。"""
+    return {a.ev["root_cause"] for a in f.atts.values()
+            if a.type == "root" and set(_lst(a.ev.get("obs"))) & set(sources)
+            and isinstance(a.ev.get("root_cause"), str) and a.settled is not None
+            and a.settled[0] == "attr.confirm" and (cutoff is None or a.settled[1] < cutoff)}
 
 
 def _finish(f: Folded, stop_after_bad: int | None) -> None:

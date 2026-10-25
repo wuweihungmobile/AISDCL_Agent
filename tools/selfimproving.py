@@ -3,7 +3,7 @@
 用法：python tools/selfimproving.py <動詞> [旗標]。P1 的 13 個動詞：`check`（唯讀檢查帳本與協定）、
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
-與 `card --issue`。尚未建的動詞（P3）一律 rc 3。
+與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀），共 23 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -40,6 +40,8 @@ _HELP = {
     "rollback": "把已晉升的提案逐位元還原（不 commit）",
     "obs-add": "Console 稽核檔入帳為一列 OBS（或 --dry-run 預檢）",
     "obs-close": "Console 稽核檔把一個 open 的 OBS 列關成終值",
+    "measure": "採納後量測窗：基線、開窗、關窗、更正與回滾提案卡（只追加 mea.* 事件）",
+    "capacity": "有上限載入面的容量與截斷風險（唯讀）",
 }
 
 
@@ -145,6 +147,13 @@ def _build_parser() -> argparse.ArgumentParser:
     oa = sub.choices["obs-add"]
     oa.add_argument("--dry-run", dest="dry_run", action="store_true")
     oa.add_argument("--body-file", dest="body_file")
+    ms = _verb(sub, "measure")
+    ms.add_argument("--by", default="main")
+    ms.add_argument("--record-check", dest="record_check", action="store_true")
+    cp = _verb(sub, "capacity")
+    cp.add_argument("--memory-index", dest="memory_index")
+    cp.add_argument("--kb-metrics", dest="kb_metrics")
+    cp.add_argument("--prefs")
     rs = _verb(sub, "research")
     mode = rs.add_mutually_exclusive_group(required=True)
     mode.add_argument("--fetch", action="store_true")
@@ -184,7 +193,10 @@ def _check(repo: Path, args: argparse.Namespace) -> int:
 
 
 def _status(repo: Path, args: argparse.Namespace) -> int:
-    obj = status.build(repo, Git(repo), check.params_for(repo))
+    from lib.selfimproving import capacity  # ro：status 的 capacity 軸只讀所需鍵（R131）
+
+    params = check.params_for(repo, *capacity.PARAM_KEYS, *status.MEASURE_KEYS)
+    obj = status.build(repo, Git(repo), params)
     _emit(status.render_json(obj) if args.json else status.render_text(obj))
     return 0
 
@@ -328,8 +340,24 @@ def _obs_write(repo: Path, args: argparse.Namespace) -> int:
     return rc
 
 
+def _measure(repo: Path, args: argparse.Namespace) -> int:
+    from lib.selfimproving import meawrite
+
+    res = meawrite.measure(repo, by=args.by, record_check=args.record_check, as_json=args.json)
+    _emit(res.text)
+    return res.rc
+
+
+def _capacity(repo: Path, args: argparse.Namespace) -> int:
+    from lib.selfimproving import capacity
+
+    _emit(capacity.run(repo, args.memory_index, args.kb_metrics, args.prefs, args.json))
+    return 0
+
+
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
-             "obs-add": _obs_write, "obs-close": _obs_write}
+             "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
+             "capacity": _capacity}
 
 
 def main(argv: list[str] | None = None) -> int:

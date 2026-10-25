@@ -4,6 +4,7 @@
 **上位文件**：`docs/01_requirements/SelfImproving_PRD.md`（FR-SI-01～04、29；§9.1 C6）與 `docs/05_development/SelfImproving_Research_Methodology_SOP.md`（研究方法，已凍結）。本檔是各角色任務書的上位，**不改**研究方法 SOP。
 **P0 範圍**：只有 `python tools/selfimproving.py check` 一個動詞（唯讀）。歸因者、提案者、審查者、凍結者四個角色在 P1 以後定稿，本檔只留位置。
 **P1 定稿**：歸因者、提案者、審查者、凍結者四個角色節與研究者節已於 P1 定稿（2026-10-20）；關鍵片段由 `tools/tests/test_selfimproving_events.py` 以標題切段判準釘住（只判片段是否存在，語意由實跑檢核對照 PRD）。
+**P3 定稿**：〈P3 動詞〉節（`measure`、`capacity`、退役配方、回滾序列、讀值紀律與提案者隔離）已於 P3 定稿；關鍵片段由 `tools/tests/test_selfimproving_p3_meta.py` 以標題切段判準釘住。
 
 ## 啟動條件
 
@@ -13,11 +14,11 @@
 - (b) 同一症狀第二次被記入觀察，且經審查者確認相同（P0 尚無 `attr.confirm`，以人工比對；確認者不得是立案者）。
 - (c) 缺陷帳本（`docs/06_quality/AutoSDD_Defect_Log.md`）新立 P≤2 未結列（即範本〈🏁 終止條件・休眠・再開〉的 T2）；觀察帳本的 P1／P2 入帳不是本事件源（真缺陷依 AC-SI-04-2 升 DEF 後才成為 (c)）。
 - (d) 已採納工件的再開症狀命中（P1 起才有已採納工件；P0 無此事件源，觀察帳本 deferred／retired 列的再開症狀被再次觀察到時走 (b)）。
-- (e) 容量事件（FR-SI-27）：記憶索引、知識庫或偏好注入等有上限的儲存／載入面，用量達其上限的 `CAP_FRAC`（以 `si capacity` 現查為準，P0 尚無該動詞）；額度與 context 水位是守衛面的事，不是本事件源。
+- (e) 容量事件（FR-SI-27）：記憶索引、知識庫或偏好注入等有上限的儲存／載入面，用量達其上限的 `CAP_FRAC`（以 `si capacity` 現查為準）；額度與 context 水位是守衛面的事，不是本事件源。
 
 啟動條件**不是**日曆、版本號、覆蓋度、每 N 輪這類排程式觸發（否定句：沒有日曆觸發、沒有版本號觸發、沒有覆蓋度觸發、沒有每 N 輪觸發）。
 
-事件偵測（後續階段的 `si status`）是唯讀、按需執行的指令，不新增常駐行程、排程或 hook；視窗開場與收尾各跑一次即可，P0 尚無該動詞（呼叫即 rc 3）。
+事件偵測（`si status`）是唯讀、按需執行的指令，不新增常駐行程、排程或 hook；視窗開場與收尾各跑一次即可。
 
 **無事件條文**：零事件記為「無事件」，不得寫成通過；觀察筆數低於 `min_obs_rows` 時 `check` 回 rc 2（未判），同樣不是通過；任何成效宣稱仍須指向症狀指標（PRD §1.3 的 M1～M5），觀察筆數、提案筆數不是成效（AC-SI-03-2）。
 
@@ -266,3 +267,41 @@ py="$(git rev-parse --show-toplevel)/.venv/bin/python"
 - 遇 R-9.6 擋寫或 harness 分類器拒絕時，不得以改派子代理或換路徑繞過：改由符合條件的視窗處理或走轉交。
 - 證據逐字入帳：每個探針記指令、rc、`out_sha256`、`out_bytes` 與遮蔽末段；轉述他包回報者標 `[他包回報]`；主控親跑後才升格為已驗證；貼不出輸出者改寫為未驗證。
 - 流程摩擦與本節補條的 SCG-4 收尾前覆核：SCG-4 收尾前由審查者對照 TCS 的〈SOP-P2-REQ〉逐項重跑。
+
+### P3 動詞
+
+本節收 P3 的兩個動詞（`measure`、`capacity`）、`prop-new`／`prop-revise` 的退役欄位與目標判準、回滾序列與讀值紀律；判準的唯一真相源仍是 PRD（§1.3、§9.3）與 P3 TCS，本節只收操作順序與 rc 處置。通則同上節：先把 rc 存進變數再判停、不接管線；rc 1 的輸出末尾有 `obs-draft:` 與一行可貼入的 OBS 草稿列，由主控單一窗口入帳。
+
+| 動詞 | 契約（rc 0／rc 1／rc 3） | 下一步 |
+|---|---|---|
+| `measure` | rc 0：已重算（有無新事件皆 0；只追加 `mea.*` 事件、絕不下決定）；rc 1：拒收（`AUTOSDD_UNATTENDED` 有設時一律 rc 1 且零寫入；錨、OBS 帳本或缺陷帳本不可用；鎖被占；`MEASURE-NOT-CONVERGING`；`EVENT-BYTES-OVER`；`LEDGER-TORN`；`mea.*` 事件欄位不合時沿用 `check` 的 `MEA-TYPE`／`MEA-ENUM`／`MEA-KEY-MISSING` 且零寫入）；rc 3：用法、家目錄不可寫或 `params.json` 鍵無效 | 輸出含回滾提案卡時依下列回滾序列處置；`--record-check` 另留一筆反證條件紀錄 |
+| `capacity` | rc 0：已執行（NOT-EVALUABLE 與觸發都是 rc 0，量不到不是 rc 3；觸發時印歸檔候選與 OBS 草稿列，唯讀、不寫任何檔）；rc 3：用法錯誤或 `params.json` 鍵無效 | 候選只提議：記憶索引走 M 類歸檔型 PROP；KB 與偏好只印容量報告 |
+
+序列條文：
+
+- 採納後的固定順序：`promote` → 主控 `commit` → `measure`（開窗與關窗）。
+- `run-close` 之前跑一次 `measure` 作補記（`attr-confirm`、`attr-reject` 已於同一把鎖內追加 `mea.amend`；`measure` 補記未追加者並負責開窗與關窗）。
+- 回滾序列：`measure` 印出回滾提案卡 ⇒ 卡面逐字貼給掌舵者 ⇒ 掌舵者打字回滾 ⇒ `decide --kind rollback` ⇒ `rollback`；`measure` 絕不自動回滾，也不寫任何決定。
+- 壞 `mea.*` 事件逃生口：任一 `mea.*` 事件欄位不合（`check` 的 `events.mea` 報 `MEA-KEY-MISSING`／`MEA-TYPE`／`MEA-ENUM`）即使 `status`／探針的窗指標全部 NOT-EVALUABLE（理由 `mea-events-invalid`）、`measure` 一律 rc 1 零寫入——這是安全側取捨（不在不可評估的帳本上追加）。壞事件尚未 commit 時直接修回該行再跑 `check`；已 commit 時事件帳本 append-only 無更正路徑，由主控單一窗口處置（修法與理由寫進缺陷帳本）。
+
+```powershell
+$root = (git rev-parse --show-toplevel)
+$py = Join-Path $root '.venv\Scripts\python.exe'
+$si = Join-Path $root 'tools\selfimproving.py'
+& $py $si measure                                                # 印回滾提案卡時：逐字貼給掌舵者
+& $py $si decide --kind rollback $prop --sid <UUID> --line <N>   # 引言取自掌舵者打字的「回滾 <PROP> <理由>」
+& $py $si rollback $prop --by main                               # 還原工作樹，不 commit；由主控 commit
+```
+
+```bash
+si="$(git rev-parse --show-toplevel)/tools/selfimproving.py"
+py="$(git rev-parse --show-toplevel)/.venv/bin/python"
+"$py" "$si" measure
+"$py" "$si" decide --kind rollback "$prop" --sid <UUID> --line <N>
+"$py" "$si" rollback "$prop" --by main
+```
+
+- 退役配方：容量候選（記憶索引軸）走 M 類歸檔型 PROP（`--cls M`），不用 `--action retire`；`--action retire` 只用於已被 promoted PROP 採納的工件（`prop-new` 判「目標在役」，`scan` 候選須先確認其目標在役）；本文欄位表須填 `retire_when` 與 `reopen_symptom`（各一句，不含輪號、日期、待排程）；退役走同一 K=1 閘，序列同〈P2 動詞〉，系統只提議、不自動退役。
+- R 類退役：SDD 規則退役須經 `set_maturity(reviewed_by=<人>)`，本迴圈不呼叫 SDD 碼。
+- 讀值紀律：NOT-EVALUABLE 不得改寫為達標；M1 不得單獨宣稱成效；反證條件成立只列為 T1 決策項（不自動下線）。
+- 提案者隔離：提案者任務書不含指標目標值、計算細節與 params.json 路徑；量測腳本與指標只對掌舵者與量測者（主控、QA）呈現。

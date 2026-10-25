@@ -14,6 +14,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -917,7 +918,7 @@ class TestObsClose(ObsCase):
     def test_AT_235_3_1_no_delete_or_renumber(self):
         import selfimproving
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 21)
+        self.assertEqual(len(verbs), 23)
         self.assertEqual({v for v in verbs if "obs" in v}, {"obs-add", "obs-close"})
         R = self.obs_repo(extra=open_rows(11, 1))
         snap0, l0 = fx.snap(R), obs_ledger(R)
@@ -1162,10 +1163,10 @@ class TestExportStatus(ObsCase):
         self.assertTrue(bad and all("buckets" not in i for i in bad))
         self.assertEqual(scan.bucket_of("autoclaude/tests/a.py"), "根層")
         keys = list(self.MJ(R, "status"))
-        self.assertEqual(keys[-1], "console_pending")
-        self.assertEqual(len(keys), 14)
+        self.assertEqual((keys[-2], keys[-1]), ("console_pending", "measure"))
+        self.assertEqual(len(keys), 15)
         st = self.MJ(R, "export", "--kind", "status")["items"][0]
-        self.assertEqual(list(st)[-1], "console_pending")
+        self.assertEqual(list(st)[-1], "measure")
         self.assertEqual(st["console_pending"], {"status": "NOT-EVALUABLE",
                                                  "reason": "export-reads-no-home"})
 
@@ -1214,6 +1215,224 @@ class TestExportStatus(ObsCase):
             self.assertEqual(self.M(R, "export", "--kind", "runs", "--json")[0], 0)
             self.assertEqual(self.MJ(R, "status")["console_pending"],
                              {"status": "NOT-EVALUABLE", "reason": "home-unavailable"})
+
+
+class TestPreWriteGuards(ObsCase):
+    """P3 D12（承接 DEF-200-568）：Console 載體三動詞的寫入前判準（TCS-P3 R136；AT-340-10 系）。
+
+    受測：`tools/lib/selfimproving/consoleaudit.py` 的 `body_guard` 與其三個呼叫點（`decwrite`、
+    `obsrows`、`obswrite`）；`events.dec_key_problems` 與 `check` 的 `dec` 判準同源。
+    """
+
+    def ev_bytes(self, R) -> bytes:
+        return (R / fx.EVL).read_bytes() if (R / fx.EVL).exists() else b""
+
+    def home_minus(self, ref) -> dict:
+        return {k: v for k, v in home_state(self.home).items() if k != f"{ref}.json"}
+
+    def snapshot(self, R) -> tuple:
+        status = {i["id"]: i["status"] for i in self.check(R)["items"]}
+        return (self.ev_bytes(R), obs_ledger(R), home_state(self.home), status)
+
+    def guarded(self, R, call, codes, snap0, label=""):
+        """呼叫一次被拒收的動詞：rc 1、碼恰為 `codes`、草稿列、零殘留、check 仍綠。"""
+        rc, out, err = call()
+        self.guard(R, rc, out, codes, label)
+        self.assertEqual((self.ev_bytes(R), obs_ledger(R)), snap0[:2], label)
+        self.assertEqual({i["id"]: i["status"] for i in self.check(R)["items"]}, snap0[3], label)
+
+    def proposed_repo(self, state="proposed", **kw):
+        self.new_home()
+        R = fx2.make_p2_repo(fx.new_dir("pw"))
+        p = fx2.drive_to(R, state, **kw)
+        return R, p
+
+    def decide_call(self, R, p, dkind, **kw):
+        ref = new_uuid()
+        body = fx2.body_decide(ref, p, self.digest_of(R, p), dkind, **kw)
+        return lambda: self.decide_c(R, p, body)
+
+    def test_AT_340_10_1_valid_audit_files_are_still_booked(self):
+        R = self.obs_repo()
+        p1 = fx2.drive_to(R, "proposed", target=fx2.DEMO)
+        p2 = fx2.drive_to(R, "proposed", target=fx2.OTHER)
+        fx.commit_all(R, "props")
+        l0, n0 = obs_ledger(R).decode("utf-8"), len(fx.EV(R))
+        rc, out, err = self.decide_call(R, p1, "approve")()
+        self.assertEqual(rc, 0, out + err)
+        rc, out, err = self.decide_call(R, p2, "reject", reason_class="證據不足", reason="a")()
+        self.assertEqual(rc, 0, out + err)
+        ref_add = new_uuid()
+        body = fx2.body_obs_add(ref_add, face="守衛", exposure="a", marks_extra={"根因": "docs/x"})
+        rc, out, err = self.add_c(R, body)
+        self.assertEqual(rc, 0, out + err)
+        (rc, out, err), ref_close = self.close_c(R, fx.obs_id(1), "decided：掌舵者裁決，已修復")
+        self.assertEqual(rc, 0, out + err)
+        new = fx.EV(R)[n0:]
+        self.assertEqual([e["kind"] for e in new], ["dec", "dec", "obs.add", "obs.close"])
+        self.assertEqual((new[1]["dkind"], new[1]["reason"]), ("reject", "a"))
+        self.assertFalse({"reason", "flags"} & set(new[0]))
+        l1 = obs_ledger(R).decode("utf-8")
+        old_rows, new_rows = l0.splitlines(), l1.splitlines()
+        added = [r for r in new_rows if r not in old_rows]
+        marks = [r for r in added if f"audit_ref={ref_add}" in r]
+        self.assertEqual(len(marks), 1)
+        self.assertIn("carrier=console", marks[0])
+        res = self.check(R)
+        self.assertEqual(res["overall"], "PASS")
+        for item in ("events.structure", "events.dec_console", "obs.console_audit"):
+            self.assertEqual(self.S(res, item), "PASS", item)
+        self.assertIn(ref_close, "".join(e.get("audit_ref", "") for e in new))
+
+    def test_AT_340_10_E_1_control_characters_are_refused_before_writing(self):
+        R, p = self.proposed_repo()
+        R2 = self.obs_repo()
+        variants = []
+        for ch in ("\n", "\r", "\x00", "\x1f", "\t"):
+            variants.append((f"decide{ord(ch)}", R, lambda ch=ch: self.decide_call(
+                R, p, "reject", reason_class="證據不足", reason=f"a{ch}b")()))
+        specs = {"context": "\n", "symptom": "\r", "evidence": "\x00"}
+        for key, ch in specs.items():
+            body = fx2.body_obs_add(new_uuid(), **{key: f"a{ch}b"})
+            variants.append((f"add-{key}", R2, lambda body=body: self.add_c(R2, body)))
+        body = fx2.body_obs_add(new_uuid(), face="守衛", exposure="a\nb")
+        variants.append(("add-exposure", R2, lambda body=body: self.add_c(R2, body)))
+        body = fx2.body_obs_add(new_uuid(), marks_extra={"根因": "a\nb"})
+        variants.append(("add-extra", R2, lambda body=body: self.add_c(R2, body)))
+        snaps = {id(R): self.snapshot(R), id(R2): self.snapshot(R2)}
+        for label, repo, call in variants:
+            with self.subTest(label):
+                self.guarded(repo, call, {"CTRL-CHAR"}, snaps[id(repo)], label)
+                self.assertEqual(self.snapshot(repo)[:2], snaps[id(repo)][:2])
+        Rc, pc = self.proposed_repo()
+        rc, out, err = self.decide_call(Rc, pc, "reject", reason_class="證據不足",
+                                        reason="a b")()
+        self.assertEqual(rc, 0, out + err)
+        Rd = self.obs_repo()
+        rc, out, err = self.add_c(Rd, fx2.body_obs_add(new_uuid(), context="a b"))
+        self.assertEqual(rc, 0, out + err)
+
+    def test_AT_340_10_E_2_keys_the_dkind_does_not_take_are_refused(self):
+        def rej(R, p):
+            return self.decide_call(R, p, "reject", reason_class="證據不足", reason="x",
+                                    flags=["x"])
+
+        cases = []
+        R, p = self.proposed_repo()
+        cases += [("a", R, self.decide_call(R, p, "approve", reason="x"), "EVENT-KEY-UNKNOWN"),
+                  ("b", R, self.decide_call(R, p, "approve", flags=["unverified_ack"]),
+                   "EVENT-KEY-UNKNOWN"),
+                  ("c", R, rej(R, p), "EVENT-KEY-UNKNOWN"),
+                  ("d", R, self.decide_call(R, p, "return", reason_class="證據不足", reason="x",
+                                            flags=["unverified_ack"]), "EVENT-KEY-UNKNOWN")]
+        Rh, ph = self.proposed_repo(route="handoff:T1")
+        cases.append(("e", Rh, self.decide_call(Rh, ph, "ack-handoff", reason="x"),
+                      "EVENT-KEY-UNKNOWN"))
+        Rv, pv = self.proposed_repo("verified")
+        cases.append(("f", Rv, self.decide_call(Rv, pv, "promote", reason="x"),
+                      "EVENT-KEY-UNKNOWN"))
+        cases.append(("h", Rv, self.decide_call(Rv, pv, "promote", flags=["x"]), "EVENT-TYPE"))
+        Ru, pu = self.proposed_repo()
+        rc, out, err = self.decide_call(Ru, pu, "reject", reason_class="證據不足", reason="x")()
+        self.assertEqual(rc, 0, out + err)
+        cases.append(("g", Ru, self.decide_call(Ru, pu, "unblock", reason="x"),
+                      "EVENT-KEY-UNKNOWN"))
+        for label, repo, call, code in cases:
+            with self.subTest(label):
+                snap0 = self.snapshot(repo)
+                self.guarded(repo, call, {code}, snap0, label)
+        Rw, pw = self.proposed_repo()
+        rc, out, err = self.decide_call(Rw, pw, "approve", flags=[])()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(self.check(Rw)["overall"], "PASS")
+        rc, out, err = self.decide_call(Rv, pv, "promote")()
+        self.assertEqual(rc, 0, out + err)
+        events = {"approve": (Rw, "reason", "x", "EVENT-KEY-UNKNOWN"),
+                  "promote": (Rv, "flags", ["x"], "EVENT-TYPE")}
+        for dkind, (repo, key, value, code) in events.items():
+            copy = fx.new_dir("cp")
+            shutil.copytree(repo, copy)
+            ev = next(e for e in reversed(fx.EV(copy)) if e["kind"] == "dec"
+                      and e["dkind"] == dkind)
+            fx2.rewrite_event(copy, ev["seq"], **{key: value})
+            res = self.check(copy)
+            self.assertEqual(self.S(res, "events.structure"), "FAIL")
+            self.assertEqual({c for _, c in self.F(res, "events.structure")}, {code})
+
+    def test_AT_340_10_E_3_empty_reasons_are_refused(self):
+        specs = []
+        R, p = self.proposed_repo()
+        specs += [("a", R, p, "reject", {"reason_class": "證據不足", "reason": ""}),
+                  ("c", R, p, "return", {"reason_class": "證據不足", "reason": ""})]
+        Rv, pv = self.proposed_repo("verified")
+        specs.append(("b", Rv, pv, "decline-promote", {"reason_class": "風險過高", "reason": ""}))
+        Rp, pp = self.proposed_repo("promoted")
+        specs.append(("d", Rp, pp, "rollback", {"reason": ""}))
+        self.new_home()
+        Rs = fx2.make_p2_repo(fx.new_dir("susp"), events=fx.sc_susp())
+        specs.append(("e", Rs, fx.rid(1), "resume", {"reason": ""}))
+        for label, repo, ident, dkind, kw in specs:
+            with self.subTest(label):
+                ref = new_uuid()
+                digest = None if dkind in ("rollback", "resume") else self.digest_of(repo, ident)
+                body = fx2.body_decide(ref, ident, digest, dkind, **kw)
+                snap0 = self.snapshot(repo)
+                self.guarded(repo, lambda: self.decide_c(repo, ident, body), {"REASON-EMPTY"},
+                             snap0, label)
+        ref = new_uuid()
+        body = fx2.body_decide(ref, p, self.digest_of(R, p), "reject", reason_class="證據不足")
+        rc, out, err = self.decide_c(R, p, body)
+        self.rejected(rc, out, {"AUDIT-BODY-INVALID"})
+        Rx, px = self.proposed_repo()
+        rc, out, err = self.decide_call(Rx, px, "reject", reason_class="證據不足", reason="a")()
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(fx2.last_event(Rx, "dec")["reason"], "a")
+
+    def test_AT_340_10_E_4_disposition_with_a_newline_or_a_bad_first_word(self):
+        R = self.obs_repo()
+        sha12 = fx.head(R)[:12]
+        ox = fx.obs_id(1)
+        snap0 = self.snapshot(R)
+        cases = {"a": "decided：甲\n乙", "b": "decided：甲\r\n乙", "c": "decided：甲\n",
+                 "d": f"fixed@{sha12}\n文字", "e": "bogus", "f": "open"}
+        for label, disp in cases.items():
+            with self.subTest(label):
+                self.guarded(R, lambda disp=disp: self.close_c(R, ox, disp)[0],
+                             {"DISPOSITION-INVALID"}, snap0, label)
+        with self.subTest("g"):
+            self.guarded(R, lambda: self.close_c(R, ox, "decided：甲\t乙")[0], {"CTRL-CHAR"},
+                         snap0, "g")
+
+    def test_AT_340_10_E_5_rejected_files_leave_no_trace(self):
+        R = self.obs_repo()
+        ox = fx.obs_id(1)
+        l0, e0 = obs_ledger(R), self.ev_bytes(R)
+        a1_ref, a3_ref = new_uuid(), new_uuid()
+        body1 = fx2.body_obs_close(a1_ref, ox, "decided：甲\n乙")
+        self.audit("obs-close", body1, ox)
+        rc, out, err = self.M(R, "obs-close", "--carrier", "console", "--audit-ref", a1_ref)
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual((obs_ledger(R), self.ev_bytes(R)), (l0, e0))
+        rc, out, err = self.add_c(R, fx2.body_obs_add(a3_ref, symptom="a\nb"))
+        self.assertEqual(rc, 1, out + err)
+        self.assertEqual((obs_ledger(R), self.ev_bytes(R)), (l0, e0))
+        text = obs_ledger(R).decode("utf-8") + self.ev_bytes(R).decode("utf-8")
+        self.assertNotIn(a1_ref, text)
+        self.assertNotIn(a3_ref, text)
+        res = self.check(R)
+        self.assertEqual(self.S(res, "history.row_mutated"), "PASS")
+        self.assertIn(self.S(res, "obs.console_audit"), ("PASS", "NE"))
+        self.assertEqual(res["overall"], "PASS")
+        (rc, out, err), _ = self.close_c(R, ox, "decided：掌舵者裁決，已修復")
+        self.assertEqual(rc, 0, out + err)
+        old, new = l0.decode("utf-8").splitlines(), obs_ledger(R).decode("utf-8").splitlines()
+        self.assertEqual(len(old), len(new))
+        diff = [(a, b) for a, b in zip(old, new) if a != b]
+        self.assertEqual(len(diff), 1)
+        self.assertEqual(cells_of(diff[0][0])[:7], cells_of(diff[0][1])[:7])
+        self.assertEqual(cells_of(diff[0][1])[7], "decided：掌舵者裁決，已修復")
+        self.assertEqual([e["kind"] for e in fx.EV(R)[len(e0.splitlines()):]], ["obs.close"])
+        self.assertEqual(self.check(R)["overall"], "PASS")
 
 
 FORBIDDEN = {"obswrite", "decwrite", "sandbox", "promote", "runner", "verify", "fetch", "research",

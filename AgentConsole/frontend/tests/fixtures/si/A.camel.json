@@ -21,7 +21,10 @@
           "回報者": "主控",
           "orig": "裁決：寫成 `docs/01_requirements/SelfImproving_PRD.md`，回報掌舵者"
         },
-        "line": 11
+        "line": 11,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "id": "OBS-SI-002",
@@ -40,7 +43,10 @@
           "回報者": "主控",
           "orig": "裁決：研究員→SA→SD／Architect→QA 串行；每棒交卷後主控親驗再派下一棒"
         },
-        "line": 12
+        "line": 12,
+        "buckets": [
+          "未分類"
+        ]
       },
       {
         "id": "OBS-SI-003",
@@ -58,7 +64,10 @@
           "回報者": "操作員",
           "orig": "延後；再開症狀：第二次有人為探針手改三件組而寫錯真狀態目錄"
         },
-        "line": 13
+        "line": 13,
+        "buckets": [
+          "AISDLC_SDD"
+        ]
       },
       {
         "id": "OBS-SI-004",
@@ -76,7 +85,10 @@
           "回報者": "操作員",
           "orig": "裁決：任務書一律改「文字交卷」，不再要求子代理寫報告檔"
         },
-        "line": 14
+        "line": 14,
+        "buckets": [
+          "未分類"
+        ]
       },
       {
         "id": "OBS-SI-005",
@@ -93,7 +105,10 @@
           "來源": "工具",
           "回報者": "主控"
         },
-        "line": 15
+        "line": 15,
+        "buckets": [
+          "AgentConsole"
+        ]
       },
       {
         "id": "OBS-SI-006",
@@ -110,7 +125,10 @@
           "來源": "人",
           "回報者": "掌舵者"
         },
-        "line": 16
+        "line": 16,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "id": "OBS-SI-007",
@@ -129,7 +147,10 @@
           "外部衍生": "是",
           "src": "anthropic-engineering"
         },
-        "line": 17
+        "line": 17,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "id": "OBS-SI-008",
@@ -146,7 +167,10 @@
           "來源": "人",
           "回報者": "掌舵者"
         },
-        "line": 18
+        "line": 18,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "id": "OBS-SI-009",
@@ -165,7 +189,10 @@
           "carrier": "console",
           "auditRef": "5b0e6d7a-3c1f-4c8e-9a52-7d1b2f6e0a11"
         },
-        "line": 19
+        "line": 19,
+        "buckets": [
+          "AutoClaude"
+        ]
       },
       {
         "id": "OBS-SI-010",
@@ -182,7 +209,10 @@
           "來源": "人",
           "回報者": "主控"
         },
-        "line": 20
+        "line": 20,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "id": "OBS-SI-011",
@@ -199,7 +229,10 @@
           "來源": "人",
           "回報者": "主控"
         },
-        "line": 21
+        "line": 21,
+        "buckets": [
+          "根層"
+        ]
       },
       {
         "line": 22,
@@ -372,7 +405,8 @@
         "verdict": null,
         "flags": [],
         "cooldown": null,
-        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n"
+        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n",
+        "window": null
       }
     ],
     "nextSince": null,
@@ -412,7 +446,8 @@
         "verdict": null,
         "flags": [],
         "cooldown": null,
-        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n"
+        "card": "[PROP-SI-004] 記憶條目｜modify｜目標：memory/guard-ratchet-repin-ritual.md｜digest：d21ae6f5｜驗證：未驗\n一、症狀：新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯\n二、改什麼：+3／-0 行；觸及比例 n/a；觸及檔案數 1；不在 target 內的路徑：0\n三、風險與回滾：低，只影響派工提示｜回滾：刪第 14、15 點｜驗證：未驗\n決定：核准 ／ 否決＋一句理由 ／ 退回＋一句修改要求\n--- 以下不計入核心區 ---\n證據座標：OBS-SI-162、OBS-SI-163、OBS-SI-164｜預算宣告：兩行條目、約 600 字元；零 repo 變更｜完整 diff 座標：docs/06_quality/SelfImproving_Proposals/PROP-SI-004/r1.patch｜冷卻狀態：無｜轉交通道：無\n",
+        "window": null
       }
     ],
     "nextSince": null,
@@ -482,7 +517,7 @@
         },
         "capacity": {
           "status": "NOT-EVALUABLE",
-          "reason": "capacity-verb-not-established"
+          "reason": "export-reads-no-home"
         },
         "rootCauseChanges": 0,
         "reopenCandidates": {
@@ -493,7 +528,18 @@
           "status": "NOT-EVALUABLE",
           "reason": "transcript-unavailable"
         },
-        "noEvent": true
+        "noEvent": true,
+        "consolePending": {
+          "status": "NOT-EVALUABLE",
+          "reason": "export-reads-no-home"
+        },
+        "measure": {
+          "status": "read",
+          "due": 0,
+          "windows": [],
+          "candidatesUnsettled": 0,
+          "rollbackPending": []
+        }
       }
     ],
     "nextSince": null,

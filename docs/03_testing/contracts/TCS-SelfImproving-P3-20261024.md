@@ -1792,3 +1792,30 @@ AT-340-8-E-1 的 P2 負控取自 `tools/tests/test_selfimproving_events_p2.py` �
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
 （凍結前無勘誤；凍結後的訂正逐條寫於此，既有 AT 的 id 與判定碼名稱不改、不刪 AT，函式名改名的對照亦登記於此。）
+
+### 勘誤一（Developer 棒 ⚖ 回報、SCG-4 一審 FAIL 與修復棒後的規格訂正；既有 AT 的 id 與判定碼名稱一字未改、一個 AT 也未刪）
+
+- **事由**：headless Developer 棒（2026-10-25 04:59～06:21）交卷的 ⚖／勘誤建議 1～8 與主控親驗；SCG-4 一審（報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P3-20261024.md`；判定 FAIL，P1／P2／P3／P4＝0／3／3／9）的 D-01～D-06 與 P4-1～P4-9；修復棒（10:47～11:09）交卷；二審 PASS（P4 2：N-1、N-2）。本節只登記條文訂正，條文本體不回改（凍結檔以本節為準）；PRD v0.10 不動。
+- **R134 同步站點補列（主控裁決；「本表外若有既有函式而紅，Developer 以 ⚖ 回報、主控裁決後補入本表」）**：
+  1. **(g)** `tools/tests/test_selfimproving_events.py` 的 `consumed_keys`：刪 L02（最小 `mea.amend`，只帶 `prop`／`window`／`to`）——R113／R114 要求 `from`、`cause` 且 PROP 須已晉升，最小形自 P3 起不再是合法對照；L01、L03 與 V 列不變；`test_AT_108_4_E_7` 斷言不變。
+  2. **(h)** `tools/tests/test_selfimproving_p2_meta.py::test_AT_240_13_E_1`：REQ-02 探針句「呼叫它們一律 rc 3」由「附加在 SOP 尾端」改為「插在 `### P2 動詞` 標題之後」（SOP 尾端自 P3 起是〈P3 動詞〉節）；斷言不變。
+  3. **(i)** `_selfimproving_fixtures.py` 的 `DROP` 哨兵、`_p2_defaults` 的 `mea.*` 預設、`compose` 的 DROP 過濾（§5.2 要求的 `DROP`；QA P4-3）。
+- **TCS 內部未定或漏註的訂正（Developer ⚖）**：
+  4. **§5.4 MEA-NEG 表 N7**（`mea.close.result` 表外值）：補註「P1 既有 fold 對 `result` 表外值連帶 `TRANSITION-ILLEGAL`，`events.transitions` 亦 FAIL；AT-340-1-E-1 對 N7 只斷言 `events.mea` 的碼、不斷言 `events.transitions`」；**N12 只准放過 `events.transitions`，不放過 `events.mutated`**（QA P4-2）。
+  5. **§5.2 CR 情境表**：補「手寫 promoted PROP 皆屬運轉 1，會撞 `BUDGET-PROPOSALS`（`max_proposals_per_run` 3）；CR 測試以 `set_params(max_proposals_per_run=50)` 隔離，預算判準與容量判準正交」。
+  6. **§5.2 `cap_index(trail=k)`**：精確定義為「對記憶索引最後 5 個條目行各補 k 個尾端空白」。
+  7. **AT-340-6-* 探針 `ne` 欄位名**：定為 `success.m1`、`success.m4`、`success.m5.main`、`success.m5.all`、`info.m2`、`info.m3`、`info.global_m1`（`--json` 輸出鍵；文字形態不變）。
+  8. **R130 (c)／AT-340-4-E-1 `status` 的 rc 3 驗證鍵**：`status` 入口驗 `capacity` 四鍵加 `measure` 五鍵（`w_opp`、`w_evt`、`w_min`、`w_n`、`stop_after_bad`）不合法即 rc 3；`export` 不驗、`measure` 值回 `{"status":"NOT-EVALUABLE","reason":"params-invalid"}`（R130 (c) 四個 NE 理由之外的第五個）。
+  9. **§5.6 `capability_problems`（測試自有判準）**：新增兩條——`ro` 檔相對 import 非 `ro` 檔即問題；任何檔含 `set_maturity` 呼叫即問題；閉包規則改為只判起點的直接 import（AT-340-4-E-2 每份注入副本恰回一筆）。
+  10. **R132 兩態**：實作採可選 `meaplan.py` ⇒ `CAPABILITY` 48 鍵（36 ro／8 rw／2 net／2 exec）；V21 以 48 鍵態驗。**R114 (f) 後備**：實作未用，條文保留為允許、不強制。
+- **SCG-4 一審後的行為訂正（D-04～D-06；修復棒落地、二審驗收）**：
+  11. **R118 (c)／R128 (a)(c) 群鍵集合**：`churn` 與 `mea.prop_keys` 共用 `fold.confirmed_root_causes(f, sources, cutoff)`（只認 `attr.confirm` 的 root attr）；`fold.prop_root_causes` 與 `cooldown.py`、`props.py` 的 P1 語意不變；新 AT **AT-326-1-E-3**（未確認的 root attr 鍵不屬同群、兩個抖動碼皆不觸發）。
+  12. **型別壞 `mea.*` 的消費端行為（R126 (a)、R130 (c)(e)、R122 (c)）**：`meacheck.field_problems`（缺鍵、型別、列舉三類致命碼，與 `check` 共用 `_field_codes`；`MEA-KEY-UNKNOWN` 不算）使 `build_ctx` 設 `ctx.bad`；`status`／`export --kind status` 的 `measure` 回 `{"status":"NOT-EVALUABLE","reason":"mea-events-invalid"}`（R130 (c) 的**第六個** NE 理由）；`export --kind proposals` 受影響 PROP 的 `window` 為 null（R130 (e) 補「`mea.*` 欄位不合 ⇒ null」，QA N-1 (a)）；探針 rc 0、M1／M5／反證條件印 `mea-events-invalid`；`measure` 與 `--record-check` 於 `build` 開頭 rc 1、碼沿 `check` 的 `MEA-KEY-MISSING`／`MEA-TYPE`／`MEA-ENUM`、零寫入（R122 (c) 補此情形，QA N-1 (b)）；`plan_amends` 遇 `ctx.bad` 回空清單（`attr-confirm`／`attr-reject` 仍 rc 0、不追加 amend）；新 AT **AT-340-5-E-3**、**AT-340-6-E-4**、**AT-340-2-E-6**。**設計註記（QA N-2）**：`ctx.bad` 是全帳本旗標——任一壞 `mea.*` 事件即使全部窗指標 NE、全部 PROP 的 `window` 為 null、`measure` 一律 rc 1；這是安全側取捨（不在不可評估的帳本上追加），與 P1 R32／R37「壞事件被忽略、其餘照常」刻意不同；逃生口寫在 SOP〈P3 動詞〉：壞事件尚未 commit 時直接修回、已 commit 時由主控處置（帳本 append-only，無更正路徑）。
+  13. **R122 (d) 不可解析的定義**：「主檔不存在、非 UTF-8 可解碼（容 BOM／CRLF）、或無合法表頭（`parse_ledger().header_ok`，即 P0 `ledger.structure` 的 `HEADER-COLS` 判準）⇒ `OBS-LEDGER-UNAVAILABLE`、rc 1、零寫入；表頭在而零列＝合法空帳本（基線 `opp=[]`）」；新 AT **AT-340-2-E-5**。
+- **§6.2 條文→AT 對帳缺口（QA P4-1，12 個存活突變）補 AT**：**AT-323-1-E-6**（R120 (a) 同刻優先序）、**AT-323-1-E-7**（R121 (e) root 型落定不產 amend）、**AT-323-1-E-8**（R121 (e) amend 的 `by`）、**AT-323-1-E-9**（R121 (b) 多候選 `cause`）、**AT-340-2-E-3**（R122 (b) `MEASURE-NOT-CONVERGING`；「零寫入」解為「零額外追加」——上限內已追加者留在帳本、超過上限起零追加）、**AT-340-2-E-4**（R122 (g) 多事件逐行位元組）、**AT-340-1-E-3**（R113 `missing` 排序去重）、**AT-340-1-E-4**（R113 `MEA-NOT-PROMOTED` 先後）、**AT-322-1-E-4**（R124 (b) NE 理由先後）、**AT-326-1-E-2**（R128 (b)）、**AT-326-2-E-2**（R128 (d)）、**AT-327-2-E-2**（R129 (f)）、**AT-340-5-E-2**（R130 (e)）。各新 AT 的測試函式名含錨定底線形，所在檔：`test_selfimproving_measure.py`（AT-323-1-E-6～E-9）、`test_selfimproving_measure_verb.py`（AT-340-1-E-3／E-4、AT-340-2-E-3～E-6、AT-340-5-E-2／E-3）、`test_selfimproving_measure_probe.py`（AT-322-1-E-4、AT-340-6-E-4）、`test_selfimproving_capacity_retire.py`（AT-326-1-E-2／E-3、AT-326-2-E-2、AT-327-2-E-2）；判定指令與既有 AT 同形（`-k <錨定名>_ -q -p no:xdist -o addopts=`）；二審以突變重放 R1～R18 逐一驗證各 AT 殺掉所述突變。
+- **測試寫法訂正（D-01～D-03，根層鎖）**：E501 以東亞寬度折行、`tools/tests/` 過長行維持 136；DEF-EDGE「ID 欄含空白」無效列以夾具 `d(99)` 執行期組出、不寫字面 DEF 編號；AT-340-8-1 對 `test_AT_140_1_E_1` 的斷言改以 `ast.get_source_segment` 取函式本身、不對整份活文件做缺席斷言。
+- **SOP 訂正**：〈提案者隔離〉「只由主控與 QA 讀取」→「只對掌舵者與量測者（主控、QA）呈現」（PRD AC-SI-22-3；QA P4-7）；`measure` 列 rc 1 清單補 `MEASURE-NOT-CONVERGING`、`EVENT-BYTES-OVER`、`LEDGER-TORN` 並註明欄位不合時沿用 `check` 的碼且零寫入（QA P4-8）；逃生口一句（第 12 項）。
+- **理論洞登記（不改碼）**：`mea.py` 依 PROP 號排序用字串序（破千時與 `export` 數字序不符，QA P4-5）；`meawrite.measure` 收斂上限在取鎖前算（並行晉升偽 `MEASURE-NOT-CONVERGING`，QA P4-6）；`meaplan.py` 頂層函式間單空行（QA P4-9）；`meaplan.py` 拆出而 `mea.py`＋`meaplan.py` 未達 ⚖15 的 380 條件（無害，QA P4-4）。
+- **事實記錄（不改規格）**：Developer 棒工作樹內曾見 `ref.obs` FAIL，成因為並行 P2b 棒測試檔內「`OBS-SI-` 接 000／999」形的壞號字面（已改執行期組字串），與本鍵無關；`run_root_unittests.py` 於 `tools/tests` 檔數下限與 tools/lib 掃描檔數上界兩處棘輪早退／紅、護欄層行數棘輪與 shrink-only 分桶（`prose`、`guard_self`）成長，皆為收尾單人窗口重釘（NFR-P3-8），不是缺陷；Developer 閘門 (6) 的官方 runner 早退而未退而跑 pytest 子集，使三個真紅遲至 SCG-4 才現形（OBS-SI-298）。
+- **數量**：AT 由 78 條增為 96 條（正控 35 不變、負控 43→61）；各測試檔：measure 21→25、measure_verb 10→18、measure_probe 12→14、capacity_retire 17→21、p3_meta 10、capability +2、console_obs +6；`test_AT_340_9_1` 以 `EXTRA_ATS` 同時容許本檔為 78 與 96 兩態（兩態皆綠、95 與 97 皆紅，二審驗證）。
+- **凍結紀錄**：Stage-2 原凍結 `sha256:f7150d4a54e9439fd26585753d5b42f13a4dcb2d03eebe9a17d625ea8a1af170` 保留為歷史；本次訂正使檔案內容再度改變，修訂後的 digest 由主控以 `spec-refreeze` 重記，不以手改狀態檔代替。PRD 與研究方法 SOP 凍結摘要未動（兩份上位文件本次皆未改）。

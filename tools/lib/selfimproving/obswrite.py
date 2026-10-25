@@ -166,6 +166,8 @@ def _close_codes(body: dict, params: dict, line: str, tz: str | None) -> list:
         return [("AUDIT-BODY-INVALID", "obs-close 的 body 須有字串 obs_id 與 disposition")]
     if "|" in disp:
         return [("PIPE-IN-FIELD", "disposition 含 |（會破壞九欄表）")]
+    if guard := consoleaudit.body_guard("obs-close", body):  # R136 (d)：先於組列後自驗
+        return guard
     if si_rows.disp_token(disp) == "open":
         return [("DISPOSITION-INVALID", "open 不是終值")]
     new = _replace_disposition(line, disp)
