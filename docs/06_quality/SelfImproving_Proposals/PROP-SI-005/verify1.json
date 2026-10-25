@@ -1,0 +1,59 @@
+{
+  "schema_rev": 1,
+  "prop": "PROP-SI-005",
+  "rev": 1,
+  "k": 1,
+  "base": "23b1afb1b6d1afe63fdd1687462f106db44544af",
+  "heldout_digest": "sha256:26781f8fc00418946b994e68fedcb4895fd46f418a4179f9708e69c90a15036e",
+  "carrier": {},
+  "steps": {
+    "baseline": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_rtm_snapshot.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:d6bdf3431cfb12caffae43e0664bb79d3bc96cf5ebc7c61d90731d1e5099b2f3",
+        "out_bytes": 206,
+        "n_pop": 1,
+        "tail": "rtm  total=392 todo=0 partial=0 impl_tested=0 verified=392 defect=0 out_of_scope=0\r\nplan total=374 todo=0 partial=0 impl_tested=0 verified=374 defect=0 out_of_scope=0\r\ndiff=total,verified\r\nsymptom=present\r\n"
+      }
+    ],
+    "patched": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_rtm_snapshot.py",
+          "{sandbox}"
+        ],
+        "rc": 0,
+        "timed_out": false,
+        "out_sha256": "sha256:9217f51ebeca5ac2cc017cbba2a82d138b7b99cdc3793839d11cf9127d767219",
+        "out_bytes": 195,
+        "n_pop": 1,
+        "tail": "rtm  total=392 todo=0 partial=0 impl_tested=0 verified=392 defect=0 out_of_scope=0\r\nplan total=392 todo=0 partial=0 impl_tested=0 verified=392 defect=0 out_of_scope=0\r\ndiff=none\r\nsymptom=absent\r\n"
+      }
+    ],
+    "mutated": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_rtm_snapshot.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:8f69181ae161d9e271dfccc963e6bb179f9e5731b00a793a2b862d7f229a6eec",
+        "out_bytes": 197,
+        "n_pop": 1,
+        "tail": "rtm  total=392 todo=0 partial=0 impl_tested=0 verified=392 defect=0 out_of_scope=0\r\nplan total=391 todo=0 partial=0 impl_tested=0 verified=392 defect=0 out_of_scope=0\r\ndiff=total\r\nsymptom=present\r\n"
+      }
+    ]
+  }
+}

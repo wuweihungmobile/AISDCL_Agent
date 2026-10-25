@@ -462,6 +462,18 @@ class TestSandbox(P2TestCase):
         self.assertEqual(rc, 0, out + err)
         self.assertTrue((self.home / "sandbox" / pm / "memory" / "MEMORY.md").is_file())
 
+    def test_d21_sandbox_root_on_another_drive_is_outside_the_repo(self):
+        """OBS-SI-324（RUN-SI-002 首次真實 sandbox 撞到）：Windows 上家目錄（C:）與 repo（D:）
+        不同磁碟機時 `os.path.commonpath` 拋 ValueError；R85 (a) 的「沙盒根在 repo 樹內」判準
+        此時答案是「不在」，不是 traceback。"""
+        self.new_home()
+        R = fx2.p2_base()
+        err = ValueError("Paths don't have the same drive")
+        boom = mock.patch.object(os.path, "commonpath", side_effect=err)
+        with boom:
+            final = si_sandbox._root_guard(R, self.home, "PROP-SI-001")
+        self.assertEqual(final, self.home / "sandbox" / "PROP-SI-001")
+
     def test_AT_215_2_1_only_whitelisted_git_forms(self):
         pkg = Path(si_sandbox.__file__).parent
         static: list[str] = []

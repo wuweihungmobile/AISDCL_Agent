@@ -3636,3 +3636,8 @@ Scenario: 明示的錯誤值保持錯誤
   4. **R88**：`verify` 新增選用 `--memory-dir`（語意同 `sandbox`／`promote`）；沙盒樹需重建且 PROP 為 M 類而未給 ⇒ rc 1 `MEMORY-DIR-MISSING`（不借 `SANDBOX-TREE-DRIFT`）；給了則自記憶目錄組裝（`sandbox.assemble` 的 `memory_dir`）。AT-218-2-1 的 `verify` 旗標集合加 `--memory-dir`；回歸鎖 `test_d20_verify_rebuilds_m_class_tree_only_with_memory_dir`（`test_selfimproving_sandbox.py`）。
   5. **R96／事件追加（G-14）**：`evwrite._append_locked` 寫到全部位元組落地並 `fsync` 後才關閉（短寫不再靜默）；判準與碼不變。
   6. 本訂正不改 PRD（AC-SI-20-4 ② 字面即「提案者逐字稿」）；觀察入帳＝OBS 帳本 2026-10-25 的完備性稽核列。
+
+### 勘誤四（RELEASE 後的訂正：RUN-SI-002 首次真實 `sandbox` 撞到的跨磁碟機缺陷；判準與碼一字未改）
+
+- **事由**：2026-10-25 掌舵者核准 PROP-SI-004（DEC-SI-001）後，主控在 Windows 真機跑 `sandbox`：家目錄（`C:\…\.autosdd\selfimproving\sandbox`）與 repo（`D:\…`）在不同磁碟機，R85 (a) 的「沙盒根是否在 repo 樹內」以 `os.path.commonpath` 判，Windows 對不同磁碟機拋 `ValueError: Paths don't have the same drive` ⇒ traceback、零事件（`app.sandbox` 未寫）；`verify` 的載具自證（R88）是同一形態。合成 AT 的 repo 與家目錄都落在同一磁碟機的暫存目錄，所以看不到。鐵律三自問表「路徑分隔符」列的同族：磁碟機代號。
+- **訂正**：R85 (a) 補「不同磁碟機（`commonpath` 拋 `ValueError`）＝不在 repo 樹內」；R88 載具自證補「模組 `__file__` 落在另一磁碟機＝`carrier_proof` 為 `false`，不是 traceback」。回歸鎖：`test_d21_sandbox_root_on_another_drive_is_outside_the_repo`（`test_selfimproving_sandbox.py`）、`test_d22_carrier_proof_on_another_drive_is_false_not_a_traceback`（`test_selfimproving_verify.py`）；觀察入帳＝OBS 帳本同日主控列（真實運轉首次 `sandbox`）。修後真實重跑：PROP-SI-004 `app.sandbox` applied／touched_ok／rollback_ok 皆 true、`app.verify` NE（`NO-PROBES`，M 類預期）、held-out digest 相符、無暴露。

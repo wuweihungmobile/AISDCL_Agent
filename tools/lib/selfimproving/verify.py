@@ -61,7 +61,11 @@ def _carrier(probes: list[dict], root: Path, timeout: int) -> tuple[bool, dict]:
                                cwd=root, sandbox_root=root, timeout=timeout)
         lines = [ln for ln in res.tail.splitlines() if ln.strip()]
         path = os.path.realpath(lines[-1]) if res.rc == 0 and lines else ""
-        if not path or os.path.commonpath([path, real_root]) != real_root:
+        try:
+            under = bool(path) and os.path.commonpath([path, real_root]) == real_root
+        except ValueError:  # Windows：模組落在另一個磁碟機 ⇒ 不在沙盒樹根之下
+            under = False
+        if not under:
             return False, {}
         out[mod] = Path(path).relative_to(real_root).as_posix()
     return True, out

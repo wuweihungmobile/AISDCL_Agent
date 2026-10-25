@@ -635,6 +635,19 @@ class TestVerifyPreconditionsAndCarrier(VerifyHelpers, P2TestCase):
         self.assertEqual((fx.snap(R), ledger(R)), (s0, e0))
         self.assertEqual(self.M(R, "verify", p, "--by", "VF1")[0], 0)
 
+    def test_d22_carrier_proof_on_another_drive_is_false_not_a_traceback(self):
+        """OBS-SI-324 同型：載具自證的 `__file__` 落在另一個磁碟機時 `commonpath` 拋 ValueError，
+        R88 的答案是 `carrier_proof=False`（測在主樹上＝無效），不是 traceback。"""
+        from lib.selfimproving import runner
+        from lib.selfimproving import verify as si_verify
+        tail = "X:\\elsewhere\\probe_mod.py\n"
+        fake = runner.ProbeResult(0, False, "sha256:" + "0" * 64, 20, tail)
+        boom = mock.patch.object(os.path, "commonpath", side_effect=ValueError("different drives"))
+        with mock.patch.object(runner, "run_probe", return_value=fake), boom:
+            got = si_verify._carrier([{"id": "p", "argv": ["{python}"], "module": "probe_mod",
+                                       "n_pop": 1}], fx.new_dir("box"), 5)
+        self.assertEqual(got, (False, {}))
+
     def test_AT_218_2_1_verdict_follows_rerunnable_signal(self):
         import selfimproving
         self.new_home()

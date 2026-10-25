@@ -706,8 +706,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_promote.py": 724,
     "test_selfimproving_props.py": 1556,
     "test_selfimproving_research_scan.py": 2068,
-    "test_selfimproving_sandbox.py": 838,
-    "test_selfimproving_verify.py": 1053,
+    "test_selfimproving_sandbox.py": 850,
+    "test_selfimproving_verify.py": 1066,
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1364,
     "test_single_venv_identity.py": 162,
@@ -2813,13 +2813,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔"
      "docs/06_quality/SCG4-REVIEW-SelfImproving-P3-20261024.md。"),
-    ("R214", 141113, 141150, +37,  # round-label-ok
+    ("R214", 141113, 141175, +62,  # round-label-ok
      "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
      "R214 名冊列承接] 同標籤第九列（SelfImproving 收尾單人窗口 2026-10-25：完備性稽核"
-     "G-01／G-02／G-06／G-12 修法，P2 TCS 勘誤三）：test_selfimproving_sandbox.py +15"
-     "（G-06 回歸鎖 test_d20，M 類樹重建須 --memory-dir）、test_selfimproving_decide.py"
-     "（AT-212-1-E-2 新增 sdk-no-origin 情境、AT-212-4-E-1 區塊清單對照）、verify 夾具改"
-     "提案者判準與 context_budget_guard 的 V-a4 期望皆行數不變、本檔自身漂移。"
+     "G-01／G-02／G-06／G-12 修法與勘誤四跨磁碟機）：test_selfimproving_sandbox.py +28"
+     "（G-06 回歸鎖 test_d20、跨磁碟機 test_d21）、test_selfimproving_decide.py +5"
+     "（AT-212-1-E-2 新增 sdk-no-origin 情境、AT-212-4-E-1 區塊清單對照）、"
+     "test_selfimproving_verify.py +13（夾具改提案者判準、跨磁碟機 test_d22）、本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔"
      "docs/06_quality/SCG4-REVIEW-SelfImprovingDecide-P2b-20261024.md〈真機驗證結果〉。"),
 )
@@ -2923,7 +2923,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (12638, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (12663, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -2937,8 +2937,8 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "f7150d4a…、六支新鎖檔與 R134 同步站點）再 +3793，"
         "精確淨額為 12601；"
         "同標籤第九列（SelfImproving 收尾：完備性稽核 G-06 回歸鎖與 R77 sdk 標記、"
-        "附件區塊清單情境，P2 TCS 勘誤三）再 +37，"
-        "精確淨額為 12638。"
+        "附件區塊清單情境，P2 TCS 勘誤三）再 +62，"
+        "精確淨額為 12663。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3573,7 +3573,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 356
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "fd789a35f298713ca5e538f289f4c9cedee43535dcc6a94d93c8f1567dbc811e")
+    "90753ed79493e90b9aca480758fa98926a18ba52c863da75dad8f13a3bb29708")
 
 
 def repin_log_history_digest(
@@ -3767,7 +3767,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "c76955d381f9", "e8a68d165d9b", "DEF-200-559"),  # round-label-ok：P2 一審修復棒二
     ("R214", "e8a68d165d9b", "705f496e6a81", "DEF-200-559"),  # round-label-ok：P2 push 後收斂
     ("R214", "705f496e6a81", "e5c7b6f0ee13", "DEF-200-568"),  # round-label-ok：SelfImproving P3
-    ("R214", "e5c7b6f0ee13", "fd789a35f298", "DEF-200-563"),  # round-label-ok：SI 收尾
+    ("R214", "e5c7b6f0ee13", "90753ed79493", "DEF-200-563"),  # round-label-ok：SI 收尾
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -182,7 +182,10 @@ def _root_guard(repo: Path, si: Path, prop: str) -> Path:
     """R85 (a)：沙盒根不得在 repo 樹內或 `.claude/worktrees/` 之下；清理目標本身不得是連結。"""
     box = si / "sandbox"
     real_box, real_repo = os.path.realpath(box), os.path.realpath(repo)
-    inside = os.path.commonpath([real_box, real_repo]) == real_repo
+    try:
+        inside = os.path.commonpath([real_box, real_repo]) == real_repo
+    except ValueError:  # Windows：家目錄與 repo 在不同磁碟機 ⇒ 沒有共同路徑，當然不在 repo 內
+        inside = False
     frag = ".claude/worktrees/"
     if inside or any(frag in str(x).replace("\\", "/") + "/" for x in (box, real_box)):
         raise UsageError("SANDBOX-ROOT-IN-REPO 沙盒根在 repo 樹內或 .claude/worktrees/ 之下")
