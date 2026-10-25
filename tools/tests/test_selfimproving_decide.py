@@ -292,6 +292,7 @@ class TestDecide(P2TestCase):
             "peer": ([{**h(q, fx2.ts(20)), "origin": {"kind": "peer"}}], "NOT-HUMAN-UTTERANCE"),
             "origin-str": ([{**h(q, fx2.ts(20)), "origin": "human"}], "NOT-HUMAN-UTTERANCE"),
             "no-origin": ([no_origin], "ORIGIN-MISSING"),
+            "sdk-no-origin": ([{**no_origin, "turnOrigin": "sdk"}], "NOT-HUMAN-UTTERANCE"),
             "other-prop": ([h(f"核准 {other}", fx2.ts(20))], "ID-MISMATCH"),
             "text-empty": ([text_empty], "TEXT-EMPTY"),
         }
@@ -619,12 +620,13 @@ class TestDecideBoundaries(P2TestCase):
         self.assertNotEqual(res["_rc"], 1)
 
     def test_AT_212_4_E_1_attachment_timing(self):
-        def run(label, typed, write):
+        def run(label, typed, write, blocks=False):
             R, p = carried()
             core = self.core_of(R, p)
             sid = fx2.new_sid()
+            q = [{"type": "image", "source": {}}, {"type": "text", "text": f"核准 {p}"}] if blocks else f"核准 {p}"
             fx2.make_transcript(R, sid, [fx2.rec_assistant_text(core, fx2.ts(0)),
-                                         fx2.rec_attachment(f"核准 {p}", typed, "human", write)])
+                                         fx2.rec_attachment(q, typed, "human", write)])
             before = ledger(R)
             rc, out, err = self.decide(R, p, sid, 2)
             return R, p, before, rc, out, err
@@ -640,6 +642,8 @@ class TestDecideBoundaries(P2TestCase):
                 self.rejected(rc, out, {code}, label)
                 self.assertEqual(ledger(R), before)
         R, p, before, rc, out, err = run("對照", fx2.ts(1), fx2.ts(5))
+        self.assertEqual(rc, 0, out + err)
+        R, p, before, rc, out, err = run("區塊清單", fx2.ts(1), fx2.ts(5), blocks=True)  # 含圖片的附件
         self.assertEqual(rc, 0, out + err)
 
     def test_AT_212_4_E_2_card_not_delivered(self):

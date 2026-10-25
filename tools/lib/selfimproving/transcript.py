@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from lib.platform_utils import claude_home
@@ -115,7 +115,7 @@ def human_of(rec: Record) -> Human:
             raise TranscriptError("NOT-HUMAN-UTTERANCE", "不是 queued_command 附件")
         if _origin_kind(att) != "human":
             raise TranscriptError("NOT-HUMAN-UTTERANCE", "附件的 origin.kind 不是 human")
-        text = att.get("prompt") if isinstance(att.get("prompt"), str) else ""
+        text = _text_of(att.get("prompt"))  # 字串或區塊清單（含圖片的附件只取 text 區塊）
         carrier, ts = "attachment", att.get("timestamp")
     elif obj.get("type") == "user":
         msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
@@ -124,6 +124,9 @@ def human_of(rec: Record) -> Human:
             raise TranscriptError("NOT-HUMAN-UTTERANCE", "isMeta 為 true")
         if "origin" not in obj and any(b.get("type") == "tool_result" for b in _blocks(content)):
             raise TranscriptError("NOT-HUMAN-UTTERANCE", "tool_result 不是人類發言")
+        sdk_marked = any(obj.get(k) == "sdk" for k in ("turnOrigin", "promptSource"))
+        if "origin" not in obj and sdk_marked:  # `claude -p` 的提示：無 origin，但 harness 另標 sdk
+            raise TranscriptError("NOT-HUMAN-UTTERANCE", "無 origin 且標記為 sdk")
         if _origin_kind(obj) != "human":
             raise TranscriptError("NOT-HUMAN-UTTERANCE", "origin.kind 不是 human")
         text, carrier, ts = _text_of(content), "user", obj.get("timestamp")
@@ -162,32 +165,67 @@ def _norm(text: str) -> str:
     return text.replace("\\", "/").casefold()
 
 
-def exposure(repo: Path, needles: list[str], since: datetime) -> str | None:
-    """R90 (b) 暴露掃描：`projects/<slug>/subagents/**/*.jsonl`（子代理逐字稿）中，凍結時刻之後的
-    assistant `tool_use` 輸入是否含針。命中＝`HELDOUT-EXPOSED`；目錄不存在＝`EXPOSURE-UNKNOWN`；
+def _subagent_transcripts(base: Path) -> list[Path]:
+    """`projects/<slug>/` 之下任何深度的 `subagents/**/*.jsonl`（R90 (b) 的掃描面）。
+    真實 harness 佈局＝`<slug>/<sid>/subagents/agent-*.jsonl`（workflow 再深一層
+    `subagents/workflows/<run>/`）；`<slug>/subagents/**` 只是其中一種形態。主控逐字稿
+    `<slug>/<sid>.jsonl` 與 `tool-results/` 不在內。此前只掃 `<slug>/subagents/`（真機不存在）
+    ⇒ 真實子代理的暴露永遠判不到（P2 TCS 勘誤二）。"""
+    return sorted(p for p in base.rglob("*.jsonl") if "subagents" in p.relative_to(base).parts)
+
+
+PROPOSER_WINDOW_SECONDS = 600  # `prop-new` 工具呼叫與 `prop` 事件時刻的最大間隔（R90 (b) 勘誤三）
+
+
+def _tool_inputs(rec: Record):
+    """assistant 記錄的每個 `tool_use` 區塊 → (aware UTC 時刻或 None, 正規化後的輸入字串)。"""
+    obj = rec.obj
+    if obj is None or obj.get("type") != "assistant":
+        return
+    when = parse_ts(obj.get("timestamp"))
+    msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
+    for block in _blocks(msg.get("content")):
+        if block.get("type") == "tool_use":
+            yield when, " ".join(_norm(s) for s in _strings(block.get("input")))
+
+
+def _is_proposer(records: list[Record], prop_id: str, t_prop: datetime) -> bool:
+    """提案者逐字稿判準（AC-SI-20-4 ② 的「提案者逐字稿」；R90 (b) 勘誤三）：含 `prop-new` 工具
+    呼叫且時刻落在 `prop` 事件前 `PROPOSER_WINDOW_SECONDS` 秒內（缺時刻視為命中），或含
+    `prop-revise … --prop <該 PROP>` 的呼叫且時刻不早於 `prop` 事件（只提到 id 的文件編修不算——
+    真機實測：寫 TCS 條文的 SA 子代理同一筆輸入含兩個字樣）。提案者為主控（主控逐字稿不掃）或經
+    包裝腳本呼叫者找不到提案者逐字稿＝B 組針不評估。"""
+    lo, pid = t_prop - timedelta(seconds=PROPOSER_WINDOW_SECONDS), prop_id.casefold()
+    for when, text in (pair for rec in records for pair in _tool_inputs(rec)):
+        if "prop-new" in text and (when is None or lo <= when <= t_prop):
+            return True
+        if "prop-revise" in text and f"--prop {pid}" in text and (when is None or when >= t_prop):
+            return True
+    return False
+
+
+def exposure(repo: Path, held: str, metric: list[str], since: datetime, prop_id: str,
+             t_prop: datetime) -> str | None:
+    """R90 (b) 暴露掃描：`projects/<slug>/` 下遞迴全部 `subagents/**/*.jsonl`（子代理逐字稿）中，
+    凍結時刻 `since` 之後的 assistant `tool_use` 輸入是否含針。A 組針（held-out 目錄絕對路徑）掃全部
+    子代理逐字稿；B 組針（`params.json`、量測腳本）只掃提案者逐字稿（`_is_proposer`）——通用 repo 檔
+    被與提案無關的代理讀過不是暴露。命中＝`HELDOUT-EXPOSED`；目錄不存在＝`EXPOSURE-UNKNOWN`；
     無子代理逐字稿＝未命中（可評估）。缺頂層 `timestamp` 或不可解析者視為落在窗口內（保守）。"""
     base = transcript_dir(repo)
     if not base.is_dir():
         return "EXPOSURE-UNKNOWN"
-    keys = [_norm(n) for n in needles]
-    subdir = base / "subagents"
-    for path in sorted(subdir.rglob("*.jsonl")) if subdir.is_dir() else []:
+    group_a, group_b = _norm(held), [_norm(n) for n in metric]
+    for path in _subagent_transcripts(base):
         if path.stat().st_mtime < since.timestamp():
             continue
         try:
             records = load(path)
         except TranscriptError:
             continue
-        for rec in records:
-            obj = rec.obj
-            when = parse_ts(obj.get("timestamp")) if obj else None
-            if obj is None or obj.get("type") != "assistant" or (when and when < since):
-                continue
-            msg = obj.get("message") if isinstance(obj.get("message"), dict) else {}
-            for block in _blocks(msg.get("content")):
-                if block.get("type") == "tool_use" and any(
-                        k in _norm(s) for s in _strings(block.get("input")) for k in keys):
-                    return "HELDOUT-EXPOSED"
+        keys = [group_a, *group_b] if _is_proposer(records, prop_id, t_prop) else [group_a]
+        for when, text in (pair for rec in records for pair in _tool_inputs(rec)):
+            if (when is None or when >= since) and any(k in text for k in keys):
+                return "HELDOUT-EXPOSED"
     return None
 
 

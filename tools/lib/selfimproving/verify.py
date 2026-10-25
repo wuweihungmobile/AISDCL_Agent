@@ -130,13 +130,17 @@ def _tree_problems(repo, ns, si: Path, ev: dict, sb: dict, params: dict, tree: P
     if tree.is_dir() and manifest.tree_manifest(tree) == sb["sandbox_sha256"]:
         return []
     patch, touched = si_sandbox.prop_context(repo, ev)
+    memory_dir = getattr(ns, "memory_dir", None)
+    if ev.get("cls") == "M" and not memory_dir:  # M 類樹自記憶目錄組裝，重建同樣要它（R88 勘誤三）
+        return [("MEMORY-DIR-MISSING", "M 類沙盒樹重建須給 --memory-dir")]
     tmp = si / "sandbox" / f".tmp-{ev['id']}-{os.getpid()}"
     tar = tmp.with_suffix(".tar")
     if tmp.exists():
         si_sandbox.rmtree(tmp)
     (si / "sandbox").mkdir(parents=True, exist_ok=True)
     try:
-        res = si_sandbox.assemble(repo, ev, patch, touched, None, tmp, tar,
+        res = si_sandbox.assemble(repo, ev, patch, touched,
+                                  Path(memory_dir) if memory_dir else None, tmp, tar,
                                   params["probe_timeout_seconds"])
         if res.sha != sb["sandbox_sha256"]:
             return [("SANDBOX-TREE-DRIFT", "沙盒樹與 sandbox_sha256 不符，重新匯出後仍不符"
@@ -203,8 +207,8 @@ def _measure(repo, ns, si, params, ev, sb, freeze, held, as_json):
     mutation = _mutation(ns, held, data)
     recorded: list[str] = []
     when = datetime.fromisoformat(freeze["t"])
-    needles = [str(held), *_NEEDLES]
-    hit = si_transcript.exposure(repo, needles, when)
+    hit = si_transcript.exposure(repo, str(held), list(_NEEDLES), when, ev["id"],
+                                 datetime.fromisoformat(ev["t"]))
     recorded += [hit] if hit else []
     probes = (data or {}).get("probes") or []
     out = dict(empty, probes_n=len(probes), heldout_digest=digest)

@@ -3236,15 +3236,15 @@ class UnattendedPermissionPostureTest(unittest.TestCase):
         self.assertTrue(resume_route.handback_dir().is_dir())
 
     def test_va4_allow_set_is_exactly_l2_times_both_carriers(self) -> None:
-        """V-a4：allow 集合＝L2 清單 × {Bash, PowerShell}，**雙向**對齊（缺一紅、多一紅）。
-
-        缺 PowerShell 孿生＝L2 在 Windows 無頭窗口零可執行（Bash 工具被 PreToolUse
-        硬擋，鐵律一）；多一條＝白名單被靜默加寬——收窄的放行才是這份姿態檔的語意。
+        """V-a4：allow＝L2×{Bash} ∪ {PowerShell}（工具層），雙向對齊（缺一紅、多一紅）。
+        DEF-200-563（真機 e2e sid 069c4ab4 五次 is_error）：`PowerShell(<pattern>)` allow 規則在
+        `claude -p` 評估時 pwsh 解析器失敗「命令列太長。」⇒ PowerShell 改工具層放行、deny 全留
+        （commit／push 仍由 UNATTENDED hook 擋）；Bash 孿生維持 L2 收窄的放行、多一條仍紅。
         """
         allow = self._posture()["allow"]
-        expected = {f"{c}({p})" for c in ("Bash", "PowerShell") for p in self._L2}
+        expected = {f"Bash({p})" for p in self._L2} | {"PowerShell"}
         self.assertEqual(set(allow), expected,
-                         "allow 集合與 L2×{Bash,PowerShell} 不對齊（缺或多都不行）")
+                         "allow 集合與 L2×{Bash} ∪ {PowerShell} 不對齊（缺或多都不行）")
         self.assertEqual(len(allow), len(expected), f"allow 有重複條目：{allow}")
 
     def test_va3_static_deny_covers_l3_files_via_edit_rules(self) -> None:

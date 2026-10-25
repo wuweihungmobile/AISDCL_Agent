@@ -109,8 +109,11 @@ def _append_locked(ledger: Path, build, max_bytes: int | None) -> dict:
         ledger.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
         fd = os.open(str(ledger), flags, 0o644)
-        try:
-            os.write(fd, "".join(line + "\n" for line in lines).encode("utf-8"))
+        try:  # 寫到全部位元組落地再 fsync；短寫只會發生在極端情況，但不檢回傳值就是靜默撕裂
+            view = memoryview("".join(line + "\n" for line in lines).encode("utf-8"))
+            while view:
+                view = view[os.write(fd, view):]
+            os.fsync(fd)
         finally:
             os.close(fd)
     except BaseException:

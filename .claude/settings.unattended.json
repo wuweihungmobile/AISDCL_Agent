@@ -13,14 +13,7 @@
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
-      "PowerShell(python tools/session_resume_planner.py --pace*)",
-      "PowerShell(python tools/session_resume_planner.py --check*)",
-      "PowerShell(python tools/check_defect_log_crossref.py*)",
-      "PowerShell(python -m unittest*)",
-      "PowerShell(python -m pytest*)",
-      "PowerShell(git status*)",
-      "PowerShell(git diff*)",
-      "PowerShell(git log*)"
+      "PowerShell"
     ],
     "deny": [
       "Bash(git commit*)",

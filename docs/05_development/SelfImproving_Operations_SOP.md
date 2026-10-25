@@ -305,3 +305,85 @@ py="$(git rev-parse --show-toplevel)/.venv/bin/python"
 - R 類退役：SDD 規則退役須經 `set_maturity(reviewed_by=<人>)`，本迴圈不呼叫 SDD 碼。
 - 讀值紀律：NOT-EVALUABLE 不得改寫為達標；M1 不得單獨宣稱成效；反證條件成立只列為 T1 決策項（不自動下線）。
 - 提案者隔離：提案者任務書不含指標目標值、計算細節與 params.json 路徑；量測腳本與指標只對掌舵者與量測者（主控、QA）呈現。
+
+## 從零走一輪的補遺（2026-10-25 完備性稽核後補；只補操作細節，判準的唯一真相源仍是 PRD 與各 TCS）
+
+### 決定語法（PRD §7.2 九列；一則訊息只含一個決定、決定行在整則開頭、動詞與 ID 之間恰一個 ASCII 空格）
+
+| 動詞 | 掌舵者打字 | 尾隨 | `decide --kind` |
+|---|---|---|---|
+| 核准 | `核准 PROP-SI-NNN` | 無 | approve |
+| 否決 | `否決 PROP-SI-NNN <一句理由>` | 必填 | reject（PROP 為 `verified` 時＝decline-promote） |
+| 退回 | `退回 PROP-SI-NNN <一句修改要求>` | 必填 | return |
+| 晉升 | `晉升 PROP-SI-NNN`（verdict PASS）／`晉升 PROP-SI-NNN 未驗採納`（verdict NE） | 只准這兩式 | promote |
+| 轉交／不轉交 | `轉交 PROP-SI-NNN`／`不轉交 PROP-SI-NNN <一句理由>` | 後者必填 | ack-handoff／reject |
+| 回滾 | `回滾 PROP-SI-NNN <一句理由>` | 必填 | rollback |
+| 解除 | `解除 PROP-SI-NNN` | 無 | unblock |
+| 恢復 | `恢復 RUN-SI-NNN <一句理由>` | 必填 | resume |
+
+- 否決／退回／不轉交的 `decide` 另帶 `--reason-class`（七值：證據不足、風險過高、工件類別錯、已被涵蓋、範圍外、卡面不清、未說明）；理由句由引言尾隨帶入，不寫 `--reason`。
+- 整則訊息含卡面引用（分界線「--- 以下不計入核心區 ---」或「決定：核准 ／」字樣）＝`GRAMMAR-CARD-QUOTED`；裸「核准」沒有 ID 不是決定行。
+- 卡面送達：掌舵者那則訊息之前**最近一則含 text 的 assistant 訊息**須逐字含卡面核心區（分界線之前各行）；新 session、壓縮後或中間插了別的回覆，就在請掌舵者決定的那則回覆重貼核心區（`card <PROP>` 不帶 `--issue` 可重印，digest 不變）。
+- 互動選項（AskUserQuestion）的回答在逐字稿是 `tool_result`、無 `origin`，**不是**決定載體；要「點選」就走 Console 決定對話框（P2b），再 `decide --carrier console --audit-ref <UUID>`。
+
+### 座標取得（`--sid`／`--line`）
+
+- `--sid`＝掌舵者打字所在互動視窗的 session id：主控視窗內 `$env:CLAUDE_CODE_SESSION_ID`（bash：`$CLAUDE_CODE_SESSION_ID`）；逐字稿檔＝`claude_home()/projects/<slug>/<sid>.jsonl`（`<slug>`＝repo 絕對路徑每個非英數字元換 `-`；Windows 預設家目錄下 `.claude`）。決定須在 **repo 根**啟動的視窗打字（子目錄啟動的視窗 slug 不同，`TRANSCRIPT-UNAVAILABLE`）。
+- `--line`＝該訊息的實體行號（自 1 起）。唯讀現查（存成 scratchpad 腳本以 `python -I` 執行；只印行號與前 80 字）：
+
+```python
+import json, sys
+for no, raw in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
+    try:
+        o = json.loads(raw)
+    except ValueError:
+        continue
+    att = o.get("attachment") or {}
+    human = ((o.get("type") == "user" and (o.get("origin") or {}).get("kind") == "human")
+             or (att.get("type") == "queued_command" and (att.get("origin") or {}).get("kind") == "human"))
+    text = att.get("prompt") if att else (o.get("message") or {}).get("content")
+    text = text if isinstance(text, str) else "".join(b.get("text", "") for b in (text or []) if isinstance(b, dict))
+    if human and sys.argv[2] in text:
+        print(no, text[:80].replace("\n", " "))
+```
+
+用法：`python -I find_line.py <逐字稿.jsonl> "核准 PROP-SI-004"`；一個決定一行，取最新一筆。
+
+### held-out 目錄（`heldout-freeze --from <dir>`；凍結者≠提案者；提案者看不到）
+
+- `<dir>/manifest.json`（UTF-8 無 BOM、LF）：`{"schema_rev": 1, "cases": [{"id": "<唯一>", "ref": "OBS-SI-NNN 或 DEF-…"}], "probes": [{"id": "<唯一>", "argv": ["{python}", "{heldout}/probe_x.py", "{sandbox}"], "module": "<選用>", "n_pop": 0}], "mutation": "<選用的相對檔名>"}`；`argv[0]` 恰為 `{python}`；`probes` 可為空（M／D 類多無確定性探針 ⇒ verdict NE，掌舵者以「未驗採納」晉升）；沒有突變檔就**省略** `mutation` 鍵（不是 null）；探針慣例 rc 0＝症狀不在、非 0＝症狀在；凍結無 dry-run、每 PROP 只能凍結一次。
+- 範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/`（`verify<K>.json` 內 `cmd` 保留未展開佔位）。
+
+### 提案檔（`prop-new --patch-file <r.patch> --body-file <r.md>`）
+
+- `r1.patch`：git diff 格式（`git diff --no-index <before> <after>` 或 `git diff`），路徑相對 repo 根；M 類以 `memory/<檔名>` 為前綴（對應 `claude_home()/projects/<slug>/memory/<檔名>`）。
+- `r1.md`：五個 `## ` 骨架標題（反例證據、Before、After、影響面、欄位）；〈欄位〉節的第一個表至少有 `symptom`、`risk`、`rollback`、`budget`、`result_label`（失敗／成功／升級）、`scope`，M 類另有 `source_obs`、`retire_when`；退役提案本文另填 `retire_when` 與 `reopen_symptom`。範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/r1.md`。
+- 提案者**直接呼叫** `prop-new`（不經包裝腳本），暴露掃描才找得到提案者逐字稿（P2 TCS 勘誤三）；凍結後提案者不得再讀 `params.json` 與量測腳本。
+
+### M 類旗標
+
+`sandbox`、`verify`、`promote`、`rollback` 對 M 類一律帶 `--memory-dir <claude_home()/projects/<slug>/memory>`；少了＝`MEMORY-DIR-MISSING` 拒收（`verify` 在沙盒樹遺失需重建時同判）。
+
+### Console 載體的主機金鑰（P2b）
+
+主機端入帳（`decide --carrier console`、`obs-add`、`obs-close`）與 `check` 的 MAC 驗證讀 `AUTOSDD_SI_AUDIT_KEY`，值＝`AgentConsole/.env` 的 `CONSOLE_SI_AUDIT_KEY` 第一把（金鑰只住 `.env` 與行程環境：不入 repo、不印、不寫任務書、不存持久環境變數）：
+
+```powershell
+$line = Get-Content (Join-Path $root 'AgentConsole\.env') -Encoding utf8 | Where-Object { $_ -like 'CONSOLE_SI_AUDIT_KEY=*' }
+$env:AUTOSDD_SI_AUDIT_KEY = (($line -split '=', 2)[1] -split ',')[0].Trim()
+& $py $si obs-add --carrier console --audit-ref <UUID>
+$rc = $LASTEXITCODE
+Remove-Item Env:AUTOSDD_SI_AUDIT_KEY
+```
+
+```bash
+export AUTOSDD_SI_AUDIT_KEY="$(grep -m1 '^CONSOLE_SI_AUDIT_KEY=' "$root/AgentConsole/.env" | cut -d= -f2- | cut -d, -f1)"
+"$py" "$si" obs-add --carrier console --audit-ref <UUID>; rc=$?
+unset AUTOSDD_SI_AUDIT_KEY
+```
+
+沒設金鑰時：`check` 對 Console 載體列印 `CONSOLE-KEY-MISSING`（nonblocking NE）、入帳 `AUDIT-KEY-MISSING`（零寫入）、`promote` 拒絕 Console 載體的 DEC（fail-closed）。
+
+### 體檢子代理任務書（最小骨架；文字交卷）
+
+角色＝唯讀體檢（Sonnet）；輸入快照＝HEAD sha 與 `si status` 摘要；五個入口（〈模組體檢任務書範本〉）各至少一項正向證據；每項候選＝九欄 OBS 列草稿（座標可定位、無 `|`、≤700 bytes）＋「怎麼確認」；禁止：改 repo、寫帳本、派子代理、上網、跑根層全套；交卷＝純文字，含〈流程摩擦〉節與〈指令與 rc 清單〉。

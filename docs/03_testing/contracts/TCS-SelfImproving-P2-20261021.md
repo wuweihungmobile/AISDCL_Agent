@@ -3617,3 +3617,22 @@ Scenario: 明示的錯誤值保持錯誤
   25. **E-25 AT-240-13-E-1 (b)**：「回〈審查者〉項問題」→「被點名的項恰為 `REQ-24`～`REQ-28` 五項」。
   26. **E-26 NFR-P2-10 (14)／V4 的機械物**：由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestMainGuardIsTheLastTopLevelStatement` 守（掃 `tools/tests/test_*.py` 全數檔，不只本檔的測試檔；首跑另抓到 `test_smoke_ci_sync.py`、`test_schedule_capability_parity.py` 兩支既有違反檔，已移到檔尾）。
   27. **E-27 R69**：補註「`verify` 於樹重建階段的拒收在 `--json` 下同為 JSON 拒收物件（鍵序同 `PROP-NOT-FOUND` 閘門拒收）」；回歸鎖 `test_d11_verify_json_rejection_is_json`（`test_selfimproving_verify.py`）。
+
+### 勘誤二（RELEASE 後的訂正：R90 (b) 暴露掃描的掃描面落地錯誤；AT id、判定碼與期望 verdict 一字未改、一個 AT 也未刪）
+
+- **事由**：主控 2026-10-25 真機現查（sid `b3527987-a61b-4f3e-a4f6-5daab2206347`）：`claude_home()/projects/<slug>/` 之下的子代理逐字稿真實佈局是 `<slug>/<sid>/subagents/agent-*.jsonl`（workflow 再深一層 `subagents/workflows/<run>/`；本機現查 357 檔，相對深度 3 與 5），`<slug>/subagents/` 目錄不存在；`transcript.exposure` 卻只掃 `<slug>/subagents/**` ⇒ 真實子代理的暴露永遠判不到（靜默假陰性）。R90 (b) 條文「之下遞迴的全部 `subagents/**/*.jsonl`」本身正確，是實作把它窄化；AT-220-4-* 的夾具只鋪 `<slug>/subagents/` 形態，所以 P2 SCG-4 的綠燈看不到這個落差。
+- **訂正**：
+  1. **R90 (b) 掃描面補明文**：「`claude_home()/projects/<slug>/` 之下**任何深度**的 `subagents/**/*.jsonl`——真實 harness 佈局 `<slug>/<sid>/subagents/…`（含 `subagents/workflows/<run>/…`）與 `<slug>/subagents/…` 皆算；`<slug>/<sid>.jsonl`（主控逐字稿）與 `<slug>/<sid>/tool-results/` 不在內」。實作＝`transcript._subagent_transcripts(base)`（`base.rglob("*.jsonl")` 取相對路徑含 `subagents` 片段者）。
+  2. **AT-220-4-1／AT-220-4-E-1／AT-220-4-E-2 的夾具**（`test_selfimproving_verify.py::TestExposureAndEvidence.sub`）：預設鋪真實佈局 `<slug>/sid-1/subagents/<nested>/<name>`；AT-220-4-E-1 案例 (c) 以 `sid=""` 保留 `<slug>/subagents/` 形態，兩種形態都有命中案例；AT-220-4-1 第二段改清 `<slug>/sid-1/subagents/`。檔案行數不變。
+  3. 本訂正不改 PRD（AC-SI-20-4 ② 字面「含 `subagents/`」本就涵蓋兩種形態）；觀察入帳見 OBS 帳本本訂正日期的主控列。
+
+### 勘誤三（RELEASE 後的訂正：完備性稽核 2026-10-25 的 G-01／G-02／G-06／G-12／G-14；AT id 與判定碼一字未改、一個 AT 也未刪）
+
+- **事由**：QA 完備性稽核（Sonnet、唯讀；主控親驗複核）對真機語料的發現——G-01：勘誤二之後掃描面是「全部子代理逐字稿」，凍結之後任何與提案無關的代理讀過 `params.json`（5 檔）或量測腳本（3 檔）都使 PROP-SI-004／005 的 `verify` 判 `HELDOUT-EXPOSED`（NE）、PASS 結構上不可達，與 PRD AC-SI-20-4 ② 字面「提案者逐字稿」不符（只是把永遠假陰性換成近乎必然假陽性）；G-02：`claude -p` 的提示記錄無 `origin` 但帶 `turnOrigin`／`promptSource`＝`sdk`（真機 117 筆），R77 判 `ORIGIN-MISSING`（NE、nonblocking），手寫 `dec` 指向這類記錄可逃過 `check` 而被折疊採用；G-06：M 類 `verify` 在沙盒樹遺失時以 `git archive` 重建（無記憶目錄）必得 `SANDBOX-TREE-DRIFT`，且 `sandboxed` 態無恢復路徑；G-12：真人附件 `prompt` 為區塊清單（含圖片）時判 `TEXT-EMPTY`；G-14：事件追加的 `os.write` 不檢回傳長度、不 `fsync`。
+- **訂正**：
+  1. **R90 (b)（接勘誤二）針分兩組**：A 組＝該 PROP 的 held-out 凍結目錄絕對路徑，掃描面不變（全部子代理逐字稿、凍結時刻之後）；B 組＝`selfimproving_protocol/params.json`、`tools/probe/selfimproving_measure.py`，掃描面改為**提案者逐字稿**＝含 `prop-new` 工具呼叫且其記錄時刻落在該 PROP `prop` 事件前 600 秒內（`transcript.PROPOSER_WINDOW_SECONDS`；缺時刻視為命中），或含 `prop-revise … --prop <該 PROP>` 呼叫且其記錄時刻不早於 `prop` 事件的子代理逐字稿（只在文件編修輸入裡同時提到 `prop-revise` 與 PROP id 不算：真機實測寫 P3 TCS 條文的 SA 子代理即此型）；提案者為主控（`prop.by` 為 `main`／`主控`，主控逐字稿本就不掃）或經包裝腳本呼叫而找不到提案者逐字稿 ⇒ B 組不評估（未命中）。WHY：通用 repo 檔被與提案無關的代理讀過不是暴露；提案者隔離（AC-SI-22-3）只約束提案者。實作＝`transcript._is_proposer`、`exposure(repo, held, metric, since, prop_id, t_prop)`；`verify._measure` 傳入 `prop` 事件的 `id` 與 `t`。夾具：`sub()` 預設在逐字稿開頭注入該 PROP 的 `prop-new` 呼叫（提案者），`proposer=False` 鋪非提案者——AT-220-4-E-1 案例 (b) 改以非提案者命中 A 組針，AT-220-4-1 新增「非提案者讀 B 組針＝不暴露」；期望 verdict 一字未改。SOP〈提案者〉補「直接呼叫 `prop-new`，不經包裝腳本」。
+  2. **R77 (c)**：`type=user` 記錄無 `origin` 而 `turnOrigin` 或 `promptSource` 為 `sdk` ⇒ `NOT-HUMAN-UTTERANCE`（判紅，不再是 NE `ORIGIN-MISSING`）；仍無任何出處欄位者維持 `ORIGIN-MISSING`（NE）。AT-212-1-E-2 新增情境 `sdk-no-origin`。
+  3. **R77 (b) 附件載體**：`attachment.prompt` 為區塊清單時取其 `text` 區塊以 LF 連接（含圖片的附件不再判 `TEXT-EMPTY`）；AT-212-4-E-1 新增「區塊清單」對照（rc 0）。
+  4. **R88**：`verify` 新增選用 `--memory-dir`（語意同 `sandbox`／`promote`）；沙盒樹需重建且 PROP 為 M 類而未給 ⇒ rc 1 `MEMORY-DIR-MISSING`（不借 `SANDBOX-TREE-DRIFT`）；給了則自記憶目錄組裝（`sandbox.assemble` 的 `memory_dir`）。AT-218-2-1 的 `verify` 旗標集合加 `--memory-dir`；回歸鎖 `test_d20_verify_rebuilds_m_class_tree_only_with_memory_dir`（`test_selfimproving_sandbox.py`）。
+  5. **R96／事件追加（G-14）**：`evwrite._append_locked` 寫到全部位元組落地並 `fsync` 後才關閉（短寫不再靜默）；判準與碼不變。
+  6. 本訂正不改 PRD（AC-SI-20-4 ② 字面即「提案者逐字稿」）；觀察入帳＝OBS 帳本 2026-10-25 的完備性稽核列。

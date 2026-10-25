@@ -658,7 +658,7 @@ class TestVerifyPreconditionsAndCarrier(VerifyHelpers, P2TestCase):
         subs = selfimproving._build_parser()._subparsers._group_actions[0]
         verify_parser = subs.choices["verify"]
         flags = {o for a in verify_parser._actions for o in a.option_strings} - {"-h", "--help"}
-        self.assertEqual(flags, {"--mutation", "--by", "--json", "--repo"})
+        self.assertEqual(flags, {"--mutation", "--memory-dir", "--by", "--json", "--repo"})
 
     def _replay(self, R, p, doc) -> dict:
         """依 verify1.json 的 rec 在全新獨立沙盒重跑三步，回逐步 rc。"""
@@ -765,20 +765,19 @@ class TestVerifyPreconditionsAndCarrier(VerifyHelpers, P2TestCase):
                     self.assertEqual(fx.snap(R), s0)
 
 
-def surf(R: Path):
-    return fx.snap(R)
-
-
 class TestExposureAndEvidence(VerifyHelpers, P2TestCase):
     def t_of(self, R, p) -> datetime:
         return datetime.fromisoformat([e for e in fx.EV(R) if e["kind"] == "heldout.freeze"
                                        and e["prop"] == p][0]["t"])
 
-    def sub(self, R, name, records, *, mtime=None, nested=""):
-        path = fx2.transcript_dir(R) / "subagents" / nested / name
+    def sub(self, R, name, records, *, mtime=None, nested="", sid="sid-1", proposer=True):
+        tp = datetime.fromisoformat([e for e in fx.EV(R) if e["kind"] == "prop"][-1]["t"])
+        mark = [self.tool(tp - timedelta(seconds=5), command="selfimproving.py prop-new --cls M")]
+        rows = (mark if proposer else []) + records  # 提案者逐字稿＝含該 PROP 的 prop-new 呼叫
+        path = fx2.transcript_dir(R) / sid / "subagents" / nested / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("".join((r if isinstance(r, str) else json.dumps(r, ensure_ascii=False))
-                                + "\n" for r in records), encoding="utf-8")
+                                + "\n" for r in rows), encoding="utf-8")
         if mtime is not None:
             os.utime(path, (mtime.timestamp(), mtime.timestamp()))
         return path
@@ -797,11 +796,12 @@ class TestExposureAndEvidence(VerifyHelpers, P2TestCase):
             fx2.rec_user_human("SelfImproving_Protocol/params.json", later.isoformat())])
         top = fx2.transcript_dir(R) / "top-level.jsonl"
         top.write_text(json.dumps(self.tool(later, command=held)) + "\n", encoding="utf-8")
-        other = "PROP-SI-" + f"{int(p.rsplit('-', 1)[1]) + 900:03d}"  # 他 PROP：執行期組出
-        self.sub(R, "agent-other.jsonl", [self.tool(later,
-            command=str(self.home / "heldout" / other))])
-        early = t - timedelta(hours=1)
         needle = "docs/06_quality/SelfImproving_Protocol/params.json"
+        other = "PROP-SI-" + f"{int(p.rsplit('-', 1)[1]) + 900:03d}"  # 他 PROP：執行期組出
+        self.sub(R, "agent-other.jsonl", [  # 非提案者：他 PROP 的 held-out 路徑與 B 組針都不算暴露
+            self.tool(later, command=str(self.home / "heldout" / other)),
+            self.tool(later, file_path=needle)], proposer=False)
+        early = t - timedelta(hours=1)
         self.sub(R, "agent-2.jsonl", [self.tool(early, file_path=needle)], mtime=early)
         self.sub(R, "agent-3.jsonl", [self.tool(early, file_path=needle),
                                       self.tool(later, file_path="docs/notes/demo.md")],
@@ -811,7 +811,7 @@ class TestExposureAndEvidence(VerifyHelpers, P2TestCase):
         self.assertEqual(fx2.last_event(R, "app.verify")["heldout_digest"],
                          fx2.last_event(R, "heldout.freeze")["digest"])
         R2, p2 = self.fresh(heldout=self.held())
-        shutil.rmtree(fx2.transcript_dir(R2) / "subagents", ignore_errors=True)
+        shutil.rmtree(fx2.transcript_dir(R2) / "sid-1" / "subagents", ignore_errors=True)
         fx2.transcript_dir(R2).mkdir(parents=True, exist_ok=True)
         self.assertEqual(self.run_json(R2, p2)["verdict"], "PASS")
 
@@ -841,10 +841,10 @@ class TestExposureAndEvidence(VerifyHelpers, P2TestCase):
         R, p, obj = case("a", lambda R, t, h: None, ["HELDOUT-DIGEST-MISMATCH"], touch_script)
         self.assertNotEqual(fx2.last_event(R, "app.verify")["heldout_digest"],
                             fx2.last_event(R, "heldout.freeze")["digest"])
-        case("b", lambda R, t, h: self.sub(R, "a.jsonl", [self.tool(plus(t), command=f"ls {h}")]),
-             ["HELDOUT-EXPOSED"])
+        case("b", lambda R, t, h: self.sub(R, "a.jsonl", [self.tool(plus(t), command=f"ls {h}")],
+                                           proposer=False), ["HELDOUT-EXPOSED"])
         case("c", lambda R, t, h: self.sub(R, "a.jsonl", [self.tool(
-            plus(t), file_path="docs\\06_quality\\SelfImproving_PROTOCOL\\params.json")]),
+            plus(t), file_path="docs\\06_quality\\SelfImproving_PROTOCOL\\params.json")], sid=""),
             ["HELDOUT-EXPOSED"])
         case("d", lambda R, t, h: self.sub(R, "a.jsonl", [self.tool(
             plus(t), patterns=[{"x": ["tools/probe/selfimproving_measure.py"]}])]),

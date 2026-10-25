@@ -133,6 +133,7 @@ def _build_parser() -> argparse.ArgumentParser:
     vf = _verb(sub, "verify")
     vf.add_argument("prop", help="PROP-SI-NNN")
     vf.add_argument("--mutation")
+    vf.add_argument("--memory-dir", dest="memory_dir")  # M 類沙盒樹重建用（R88 勘誤三）
     vf.add_argument("--by", default="main")
     for name in ("promote", "rollback"):
         pr = _verb(sub, name)

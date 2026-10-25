@@ -447,6 +447,21 @@ class TestSandbox(P2TestCase):
         self.assertEqual(fx2.snapshot_tree(self.home / "sandbox" / pd), fx2.snapshot_tree(twin))
         self.assertEqual(surface(R), surf0)
 
+    def test_d20_verify_rebuilds_m_class_tree_only_with_memory_dir(self):
+        """G-06（P2 TCS 勘誤三 R88）：M 類沙盒樹遺失時 `verify` 的重建須自記憶目錄組裝——沒給
+        `--memory-dir` 是明碼拒收 `MEMORY-DIR-MISSING`（不再是無解的 `SANDBOX-TREE-DRIFT`）、
+        給了就重建成功並照常驗證（rc 0 不論 verdict）。"""
+        self.new_home()
+        R = fx2.p2_base()
+        mem = fx2.make_memdir(fx.new_dir("mem"))
+        pm = fx2.drive_to(R, "sandboxed", cls="M", memory=mem)
+        shutil.rmtree(self.home / "sandbox" / pm)
+        rc, out, err = self.M(R, "verify", pm, "--by", "VF1")
+        self.assertEqual((rc, "MEMORY-DIR-MISSING" in fx.codes_of(out)), (1, True), out + err)
+        rc, out, err = self.M(R, "verify", pm, "--by", "VF1", "--memory-dir", str(mem))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue((self.home / "sandbox" / pm / "memory" / "MEMORY.md").is_file())
+
     def test_AT_215_2_1_only_whitelisted_git_forms(self):
         pkg = Path(si_sandbox.__file__).parent
         static: list[str] = []
