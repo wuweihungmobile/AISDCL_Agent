@@ -690,6 +690,23 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
             "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
         ),
+        # 2026-10-25：windows-latest 的 py launcher 失去 3.7～3.10 登錄（run 40161349494），
+        # 兩步替 TestRealSubMinInterpreterPrelude 備一支 3.10；本機由 pyenv-win／py 自備。
+        (
+            "舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；"
+            "不動 PATH）"
+        ): (
+            f"{_INFRA}: 環境設定，非驗證步——本機開發機自備舊直譯器（pyenv-win、"
+            "py launcher 或 PATH 上的 python3.x）；該鎖有沒有真跑由 skip census 的 "
+            "[TOOL-ABSENCE] 落款集合機械看守（tools/tests@win32 live≠落款即紅）"
+        ),
+        (
+            "以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；"
+            "junction、不複製檔案）"
+        ): (
+            f"{_INFRA}: 環境設定，非驗證步——同上；候選掃描路徑＝"
+            "tools/tests/test_dev_start.py::_sub_min_interpreter_candidates 的 pyenv 佈局"
+        ),
         "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.ps1（掛在 local-ci-gate stage 內的第二道檢查）＋ pre-push root-infra leg",
         "失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）": (
             f"{_NO_CARRIER}: 同 macOS 側——actions/upload-artifact 是 GitHub Actions "

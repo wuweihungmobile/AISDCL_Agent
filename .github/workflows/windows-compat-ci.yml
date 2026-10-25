@@ -148,8 +148,9 @@
 #     step 後該 job 多一格 `powershell: 1`，R76 新增「AutoClaude 平台敏感測試子集」
 #     pwsh step 後由 21 → 22；windows-nightly-full 於 2026-10-13 新增 6 個 pwsh step（census
 #     腿／孤兒行程探針／根 .venv 重建／smoke 實跑／.env 同步 E2E／engine_resume）後 pwsh
-#     由 3 → 9，本表隨之更新）
-#   windows-smoke         windows-latest {'pwsh': 22, 'bash': 1, 'powershell': 1}
+#     由 3 → 9，本表隨之更新；2026-10-25 windows-smoke 新增「以 pyenv 佈局把 3.10 暴露給
+#     候選掃描」pwsh step（同時新增的 setup-python 3.10 是 uses 步、不計入）後由 22 → 23）
+#   windows-smoke         windows-latest {'pwsh': 23, 'bash': 1, 'powershell': 1}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 9}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -1267,6 +1268,36 @@ jobs:
         # 這裡要的只是「跑 runner 的環境前置一致」，不是把 lint 閘門複製三份。
         run: python -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
 
+      - name: 舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；不動 PATH）
+        # 2026-10-25（run 40161349494）：windows-latest 映像的 Python Launcher 對 `py -3.7`～`-3.10`
+        # 全部回 rc=103「No suitable Python runtime found」（launcher 在、舊 runtime 的登錄不在），
+        # 該 class 兩支測試改以 [TOOL-ABSENCE] skip ⇒ tools/tests@win32 live skip 集合（45）≠
+        # 落款（43）而本 job 紅。修法照 skip 紀律「tool-absence＝裝上該裝的東西」：由
+        # setup-python 裝一個 3.10（< dev_start._MIN_PY），`update-environment: false` 使它
+        # 不進 PATH、不改 `python`（下方各步仍是 3.11）；只以輸出 `python-path` 供下一步使用。
+        id: submin-py
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          update-environment: false
+
+      - name: 以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；junction、不複製檔案）
+        shell: pwsh
+        # `_sub_min_interpreter_candidates()` 的發現路徑之一＝`$PYENV_ROOT/versions/<ver>/python.exe`
+        # （pyenv-win 佈局）。junction 不需管理員權限；先自驗該直譯器真能印出 3.10 再放行，
+        # 否則本 step 自己紅（fail-loud，不讓下一步再回到靜默 skip）。
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'submin-pyenv'
+          $versions = Join-Path $root 'versions'
+          New-Item -ItemType Directory -Force -Path $versions | Out-Null
+          $target = Split-Path -Parent '${{ steps.submin-py.outputs.python-path }}'
+          New-Item -ItemType Junction -Path (Join-Path $versions '3.10') -Target $target | Out-Null
+          $exe = Join-Path $versions '3.10\python.exe'
+          $ver = & $exe -c "import sys;print('%d.%d' % sys.version_info[:2])"
+          $rc = $LASTEXITCODE
+          Write-Output "submin interpreter: $exe -> $ver (rc=$rc)"
+          if ($rc -ne 0 -or $ver -ne '3.10') { throw "舊直譯器未就緒：rc=$rc ver=$ver" }
+
       - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
         shell: pwsh
         # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
@@ -1277,8 +1308,10 @@ jobs:
         # runner）跑到，六輪以來記載的「Windows 真機驗證未解」缺口由此第一次
         # 有機械訊號（非人工驗證，僅是自動化路徑第一次真的被執行）。worker 數
         # 沿用 `parallel_shard.worker_count()` 出廠公式，不寫死數字。
+        # PYENV_ROOT 只在本 step 生效（上兩步備好的 3.10 佈局），不進 GITHUB_ENV。
         env:
           AUTOSDD_PARALLEL_TESTS: "1"
+          PYENV_ROOT: ${{ runner.temp }}\submin-pyenv
         run: python tools/run_root_unittests.py
 
       - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）

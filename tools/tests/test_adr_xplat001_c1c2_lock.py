@@ -713,7 +713,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
-    "test_smoke_ci_sync.py": 1570,
+    "test_smoke_ci_sync.py": 1587,
     "test_statusline_context_feed.py": 230,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1519,
@@ -2802,7 +2802,7 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "ThreadPoolExecutor 使例外可見，test_selfimproving_console_obs.py −3＋本檔自身漂移）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據檔 "
      "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md。"),
-    ("R214", 137320, 141096, +3776,  # round-label-ok
+    ("R214", 137320, 141113, +3793,  # round-label-ok
      "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
      "R214 名冊列承接] 同標籤第八列（SelfImproving P3 實作＋SCG-4 修復棒：TCS Stage-2"
      "digest f7150d4a…、QA 一審 FAIL→修復棒→二審 PASS）：新鎖檔 _selfimproving_p3_fixtures.py／"
@@ -2914,7 +2914,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (12584, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (12601, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -2925,8 +2925,8 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "同標籤第六列（一審修復棒二：D-01～D-10、verify --json）再 +371，精確淨額 8800；"
         "第七列（push 後收斂：執行緒競態子案改 ThreadPoolExecutor）再 +8，精確淨額為 8808；"
         "同標籤第八列（SelfImproving P3 實作＋SCG-4 修復棒：TCS Stage-2 digest "
-        "f7150d4a…、六支新鎖檔與 R134 同步站點）再 +3776，"
-        "精確淨額為 12584。"
+        "f7150d4a…、六支新鎖檔與 R134 同步站點）再 +3793，"
+        "精確淨額為 12601。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3557,7 +3557,7 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 _REPIN_LOG_FROZEN_PREFIX_LEN = 355
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "5b01176be001cdff6f355148020bab57725b377ce3e2a96b9ab827c80c691c28")
+    "e5c7b6f0ee130f7e0e41b6ad9285952772b9c753dbb1b0bd4dee6a9f0b29a806")
 
 
 def repin_log_history_digest(
@@ -3750,7 +3750,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "b60babae5d35", "c76955d381f9", "DEF-200-559"),  # round-label-ok：P2 收尾修復棒一
     ("R214", "c76955d381f9", "e8a68d165d9b", "DEF-200-559"),  # round-label-ok：P2 一審修復棒二
     ("R214", "e8a68d165d9b", "705f496e6a81", "DEF-200-559"),  # round-label-ok：P2 push 後收斂
-    ("R214", "705f496e6a81", "5b01176be001", "DEF-200-568"),  # round-label-ok：SelfImproving P3
+    ("R214", "705f496e6a81", "e5c7b6f0ee13", "DEF-200-568"),  # round-label-ok：SelfImproving P3
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
