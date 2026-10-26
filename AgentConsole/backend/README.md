@@ -247,7 +247,7 @@ docker run --rm httpd:2.4-alpine htpasswd -nbBC 10 x '<YOUR_NEW_PASSWORD>' | cut
 | `build.gradle.kts` | 關閉 `jar` 任務，只產生 boot jar | 否則 `build/libs` 同時有 `*-plain.jar`，PRD §11.4.2 的 `COPY build/libs/*.jar app.jar` 會因多來源檔而失敗 |
 | `Dockerfile` | runner 階段加 `apk add curl`、加 `LOGGING_STRUCTURED_FORMAT_CONSOLE` | `eclipse-temurin:21-jre-alpine` 沒有 curl，PRD 的 HEALTHCHECK 會永遠 unhealthy；容器內需 JSON 日誌（PRD §9.4） |
 | 資料表數 | V1 建 10 張（含 `goal_dependencies`），加 V3／V4 共 12 張 | 任務書寫「九張」，PRD §6.2 實為十張 |
-| 版本 | Spring Boot 4.1.1、springdoc 3.1.1、jjwt 0.12.7、ArchUnit 1.5.1、Checkstyle 13.11.0、JaCoCo 0.8.15 | PRD §3 授權鎖定時取當時 stable；jjwt 經 Jackson 2 與 Spring Boot 的 Jackson 3 並存，實測無衝突 |
+| 版本 | Spring Boot 4.1.2（2026-10-26 自 4.1.1 升 patch：IDE `BOOT_VERSION_VALIDATION_CODE` 提示；`gradlew clean build` BUILD SUCCESSFUL、JaCoCo 驗證通過）、springdoc 3.1.1、jjwt 0.12.7、ArchUnit 1.5.1、Checkstyle 13.11.0、JaCoCo 0.8.15 | PRD §3 授權鎖定時取當時 stable；jjwt 經 Jackson 2 與 Spring Boot 的 Jackson 3 並存，實測無衝突 |
 | 檔案日誌（W5，C-16） | 以 `FileLoggingEnvironmentPostProcessor`（`META-INF/spring.factories`）補 Boot 的檔案日誌屬性，**沒有** `logback-spring.xml` | 「`LOG_DIR` 有值才加 appender」在 Logback 1.5 只能用 `<if>`，那需要 Janino（不新增相依）；`application.yml` 又算不出「有值才加 `/console.log`」。行為與任務書相同（JSON 行、`${LOG_DIR}/console.log`、每日切檔保留 7 天、沒設＝不變），`FileLoggingProcessTest` 在獨立 JVM 端到端驗證 |
 | 測試報告位置（W7-BE） | HTML 測試報告輸出到 `build/rt/`，不是預設的 `build/reports/tests/test/` | 見〈測試〉：Gradle 9.8 新版報告的逐方法檔案讓最長路徑逼近 Windows 的 260 字元上限；全 repo 沒有任何文件或 CI 引用舊路徑（已搜尋確認）。非本棒寫的長名測試因 RTM 以方法名引用而不改名 |
 | 登出審計的匿名主體（W7-BE） | 契約 §1.9.1 寫「匿名請求的 `subject` 為 `-`」，實作維持 `NULL` | 與既有慣例一致：V6 的欄位註解、`AuditLogIT`／`AuditPersistenceApiIT` 對 login 等免認證請求都斷言 `NULL`；只讓 logout 寫 `-` 會讓兩種匿名列用不同寫法。待 SA 訂正契約，或另案統一改寫法 |
