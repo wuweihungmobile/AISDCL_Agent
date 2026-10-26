@@ -63,9 +63,11 @@ FORBIDDEN_NAMES = frozenset({"expanduser", "environ", "getenv", "getenvb"})
 NEVER_IN_AUDIT_MODULE = frozenset({
     "writelines", "dump", "safe_dump", "write_json_atomic", "replace", "rename", "move", "copy",
     "copy2", "copyfile", "copytree", "rmtree"})
-KINDS = ("observations", "events", "proposals", "runs", "status")
+KINDS = ("observations", "events", "proposals", "runs", "status", "issues")
 FLAG_COMBOS: list[dict[str, Any]] = [
-    {}, {"since": 3}, {"limit": 7}, {"since": 3, "limit": 7}, {"ident": "PROP-SI-004"}]
+    {}, {"since": 3}, {"limit": 7}, {"since": 3, "limit": 7}, {"ident": "PROP-SI-004"},
+    {"status": "待處理"}, {"source": "系統缺陷"},
+    {"since": 3, "limit": 7, "status": "待解,延後", "source": "使用者提案"}]
 FUNC_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
 
@@ -596,7 +598,7 @@ SI_CLI_TEMPLATE = textwrap.dedent('''\
     import sys
 
 
-    def build_argv(root, kind, *, since=None, limit=None, ident=None):
+    def build_argv(root, kind, *, since=None, limit=None, status=None, source=None, ident=None):
         return [sys.executable, str(root / "tools" / "x.py"), {export_verb}, "--json", "--kind",
                 kind, *(["--since", str(since)] if since is not None else []){export_tail}]
 

@@ -164,6 +164,17 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
     { context: "情境", symptom: "症狀", evidence: "docs/x.md:1", category: "bug", severity: "P3", face: "產品", externalDerived: false },
   ],
   ["getSiConsoleWrites", () => api.getSiConsoleWrites({ limit: 100 }), "GET", "/api/v1/si/console-writes?limit=100"],
+
+  // ── 議題中心（TCS-IssueCenter-20261027 §C4）：兩個唯讀 GET 與僅 ADMIN 的優先順序寫入（PUT 設定、DELETE 清除）；中文篩選別名逐字編碼 ──
+  [
+    "getIssues",
+    () => api.getIssues({ status: "待處理", source: "系統缺陷,研究提案", since: 7, limit: 100 }),
+    "GET",
+    `/api/v1/issues?status=${encodeURIComponent("待處理")}&source=${encodeURIComponent("系統缺陷,研究提案")}&since=7&limit=100`,
+  ],
+  ["getIssue", () => api.getIssue("PROP-SI-004"), "GET", "/api/v1/issues/PROP-SI-004"],
+  ["putIssuePriority", () => api.putIssuePriority("PROP-SI-004", { rank: 3, note: "先做" }), "PUT", "/api/v1/issues/PROP-SI-004/priority", { rank: 3, note: "先做" }],
+  ["deleteIssuePriority", () => api.deleteIssuePriority("PROP-SI-004"), "DELETE", "/api/v1/issues/PROP-SI-004/priority"],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -184,10 +195,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 79 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 83 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority；不多不少）", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(79);
+    expect(names).toHaveLength(83);
   });
 
   it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project 也不帶 projectId）", async () => {

@@ -46,6 +46,7 @@ import java.util.List;
  *   <li>{@code POST /api/v1/si/**}：僅 ADMIN（SelfImproving 寫入載體，TCS-SelfImprovingDecide-P2b W10；<b>置於通用 POST 規則之前</b>，
  *       否則 OPERATOR 會通過安全層）。帳號名單由用例入口另判（403 {@code si_write_forbidden}）。{@code /si/**} 的 PUT／PATCH／DELETE
  *       沒有對映：落在通用規則——VIEWER 403、OPERATOR／ADMIN 405。</li>
+ *   <li>{@code PUT}、{@code DELETE /api/v1/issues/**}：僅 ADMIN（議題中心的優先順序，TCS-IssueCenter-20261027 R-IC-58；各一條規則，同樣<b>置於通用規則之前</b>）。</li>
  *   <li>{@code /api/v1/settings/**} 的<b>非 GET</b>：僅 ADMIN（含 {@code POST /settings/export｜import｜test-connection}：
  *       它們是 POST，但屬 ADMIN 專用）；{@code GET …?reveal=true} 由 Controller 檢查角色。</li>
  *   <li>其餘 {@code /api/v1/**}（POST／PUT／DELETE）：OPERATOR／ADMIN（VIEWER 只能讀）。</li>
@@ -83,6 +84,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/**").hasAnyRole("VIEWER", "OPERATOR", "ADMIN")
                         // SelfImproving 寫入載體（P2b）：只有 ADMIN；必須在下面通用的 /api/v1/** 規則之前（先中者定案）
                         .requestMatchers(HttpMethod.POST, "/api/v1/si/**").hasRole("ADMIN")
+                        // 議題中心的優先順序寫入（TCS-IssueCenter-20261027 R-IC-58）：PUT、DELETE 各一條，只有 ADMIN；同樣必須在通用規則之前，
+                        // 否則 OPERATOR 會通過安全層
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/issues/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/issues/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasAnyRole("OPERATOR", "ADMIN")
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

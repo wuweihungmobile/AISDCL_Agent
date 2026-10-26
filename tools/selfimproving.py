@@ -3,7 +3,8 @@
 用法：python tools/selfimproving.py <動詞> [旗標]。P1 的 13 個動詞：`check`（唯讀檢查帳本與協定）、
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
-與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀），共 23 個；未列動詞 rc 3。
+與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀），
+共 24 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -18,7 +19,7 @@ import sys
 from pathlib import Path
 
 import _stdio_utf8  # noqa: F401  # stdout／stderr 強制 UTF-8 的唯一實作，本檔不另寫
-from lib.selfimproving import card, check, export, scan, status
+from lib.selfimproving import card, check, export, issues, scan, status
 from lib.selfimproving import events as si_events
 from lib.selfimproving import fold as si_fold
 from lib.selfimproving.git import Git
@@ -42,6 +43,7 @@ _HELP = {
     "obs-close": "Console 稽核檔把一個 open 的 OBS 列關成終值",
     "measure": "採納後量測窗：基線、開窗、關窗、更正與回滾提案卡（只追加 mea.* 事件）",
     "capacity": "有上限載入面的容量與截斷風險（唯讀）",
+    "issues": "議題中心：三類帳本的中文議題清單（唯讀）",
 }
 
 
@@ -78,6 +80,13 @@ def _build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--since", type=int)
     exp.add_argument("--limit", type=int)
     exp.add_argument("--id")
+    exp.add_argument("--status", help="只配 --kind issues：狀態名或「待處理」，逗號取聯集")
+    exp.add_argument("--source", help="只配 --kind issues：來源名，逗號取聯集")
+    iss = _verb(sub, "issues")
+    iss.add_argument("--status", help="狀態名或「待處理」，逗號取聯集")
+    iss.add_argument("--source", help="來源名，逗號取聯集")
+    iss.add_argument("--since", type=int)
+    iss.add_argument("--limit", type=int)
     ro = _verb(sub, "run-open")
     ro.add_argument("--trigger", choices=list("abcde"), required=True)
     ro.add_argument("--coord", action="append", required=True)
@@ -242,13 +251,36 @@ def _export(repo: Path, args: argparse.Namespace) -> int:
            or (args.since is not None and (args.since < 0 or args.kind == "status"))
            or (args.limit is not None and not 1 <= args.limit <= params["export_limit_max"]))
     if args.id is not None:
-        pat = {"proposals": si_events.PROP_RE, "runs": si_events.RUN_RE}.get(args.kind)
+        pat = {"proposals": si_events.PROP_RE, "runs": si_events.RUN_RE,
+               "issues": issues.ID_RE}.get(args.kind)
         bad = bad or pat is None or not pat.match(args.id)
-    if bad:
+    filtered = args.status is not None or args.source is not None
+    if bad or (filtered and (args.kind != "issues" or args.id is not None)):
         raise check.InputError("export 旗標不合：須 --json、--kind；--since ≥0 且不與 status 併用；"
-                               "--limit 介於 1 與上限；--id 只配 proposals／runs")
-    obj = export.build(repo, Git(repo), params, args.kind, args.since, args.limit, args.id)
+                               "--limit 介於 1 與上限；--id 只配 proposals／runs／issues；"
+                               "--status／--source 只配 --kind issues 且不與 --id 併用")
+    try:
+        statuses, sources = issues.parse_filters(args.status, args.source)
+    except ValueError as exc:
+        raise check.InputError(str(exc)) from exc
+    obj = export.build(repo, Git(repo), params, args.kind, args.since, args.limit, args.id,
+                       statuses, sources)
     _emit(export.render(obj))
+    return 0
+
+
+def _issues(repo: Path, args: argparse.Namespace) -> int:
+    params = check.params_for(repo, "export_limit_max")
+    if (args.since is not None and args.since < 0) or (
+            args.limit is not None and not 1 <= args.limit <= params["export_limit_max"]):
+        raise check.InputError("issues 旗標不合：--since ≥0；--limit 介於 1 與上限")
+    try:
+        statuses, sources = issues.parse_filters(args.status, args.source)
+    except ValueError as exc:
+        raise check.InputError(str(exc)) from exc
+    obj = issues.build(repo, Git(repo), params, since=args.since, limit=args.limit,
+                       statuses=statuses, sources=sources)
+    _emit(export.render(obj) if args.json else issues.render_text(obj, statuses))
     return 0
 
 
@@ -358,7 +390,7 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
-             "capacity": _capacity}
+             "capacity": _capacity, "issues": _issues}
 
 
 def main(argv: list[str] | None = None) -> int:

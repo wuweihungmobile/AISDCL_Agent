@@ -14,6 +14,7 @@ from pathlib import Path
 from . import card as si_card
 from . import events as si_events
 from . import fold as si_fold
+from . import issues as si_issues
 from . import meaplan as si_meaplan
 from . import paths as si_paths
 from . import refs as si_refs
@@ -23,7 +24,7 @@ from . import status as si_status
 from .git import Git
 from .ledger import parse_ledger
 
-KINDS = ("observations", "events", "proposals", "runs", "status")
+KINDS = ("observations", "events", "proposals", "runs", "status", "issues")
 _CARRIER = {"field": "events", "reason": "carrier-not-established"}
 
 
@@ -105,8 +106,12 @@ def _runs(f: si_fold.Folded) -> list[dict]:
 
 
 def build(repo: Path, git: Git, params: dict, kind: str, since: int | None,
-          limit: int | None, ident: str | None) -> dict:
-    """匯出物件（鍵序固定）。用法錯誤由呼叫端先擋（rc 3）。"""
+          limit: int | None, ident: str | None, statuses=None, sources=None) -> dict:
+    """匯出物件（鍵序固定）。用法錯誤由呼叫端先擋（rc 3）。`issues` 轉呼叫議題中心的同一個
+    `issues.build`（`statuses`、`sources` 只配該 kind）。"""
+    if kind == "issues":
+        return si_issues.build(repo, git, params, since=since, limit=limit, ident=ident,
+                               statuses=statuses, sources=sources)
     problems: list[dict] = []
     ne: list[dict] = []
     head = git.head()

@@ -19,6 +19,10 @@
   dry_run     `obs-add --dry-run` 要輸出的物件（預設最小合法物件；P2b）。argv 含 `--body-file` 時
               整份 stdin 以位元組讀完並以 base64 記進呼叫紀錄的 `stdin_b64`（其餘呼叫該欄為空字串）
 
+議題中心（TCS-IssueCenter-20261027）：旗標解析另認 `--status=<值>`、`--source=<值>`（單一 argv
+元素，值取 `=` 之後的全部）；`--kind issues` 且無 `--id` 的預設物件另帶罐頭的 `legend`、`summary`
+（單筆沒有這兩個鍵，與真 CLI 同形；內容只是占位，不是真輸出）。
+
 這支檔本身不是測試（檔名不以 test_ 開頭）；它被測試 import 來造樹與讀紀錄。
 """
 from __future__ import annotations
@@ -48,6 +52,9 @@ flags = {}
 for i, tok in enumerate(args):
     if tok in ("--kind", "--since", "--limit", "--id") and i + 1 < len(args):
         flags[tok] = args[i + 1]
+    elif tok.startswith(("--status=", "--source=")):
+        name, _, value = tok.partition("=")
+        flags[name] = value
 kind = flags.get("--kind", "")
 is_dry_run = "--dry-run" in args
 
@@ -106,6 +113,9 @@ else:
     obj = {"schema_rev": control.get("schema_rev", 1), "kind": control.get("kind", kind),
            "generated_at": "2026-10-21T00:00:00+08:00", "head_sha": None, "items": items,
            "next_since": None, "truncated": False, "ne": [], "problems": []}
+    if kind == "issues" and "--id" not in flags:
+        obj["legend"] = {"statuses": [], "unmapped_label": "未歸類"}
+        obj["summary"] = {"total": len(items), "unmapped": 0}
     if obj["schema_rev"] is None:
         del obj["schema_rev"]
 if control.get("rc", 0) == 0 or "export" in control:
@@ -128,7 +138,9 @@ def read_calls(root: Path) -> list[dict[str, Any]]:
     path = root / "fake_calls.jsonl"
     if not path.is_file():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+    # 只以 "\n" 切行：`str.splitlines()` 也會在 U+0085、U+2028 等字元處斷行，而紀錄裡的 argv 可能
+    # 帶有這類字元（議題中心的篩選值測試，TCS-IssueCenter-20261027 AT-IC-07-2-1）。
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line]
 
 
 def set_control(root: Path, **control: Any) -> None:

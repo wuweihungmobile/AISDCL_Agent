@@ -21,7 +21,10 @@ from tests import si_repo_support as sup
 from tests.fake_si import make_fake_si, read_calls, set_control
 
 SINGLE = "/si/proposals/PROP-SI-004"
-SIX_PATHS = ["/si/status", "/si/observations", "/si/events", "/si/proposals", SINGLE, "/si/runs"]
+#: 路徑表：P1b 的六個讀路徑加議題中心的兩個（名稱沿用「SIX」，只增不改；TCS-IssueCenter-20261027
+#: §5.7 的同步鎖）。
+SIX_PATHS = ["/si/status", "/si/observations", "/si/events", "/si/proposals", SINGLE, "/si/runs",
+             "/si/issues", "/si/issues/OBS-SI-001"]
 ONE_ITEM = [{"id": "PROP-SI-004"}]
 
 
@@ -34,10 +37,10 @@ def live_with(make_bridge: Any, settings: Settings, root: Path | None) -> Any:
     return make_bridge(replace(settings, si_root=root))
 
 
-# ── AT-932-2-3：六個讀路徑只有 GET；其餘方法 405、未定義路徑 404、不啟動子行程 ──────────────────
-# P2b 起 `POST /si/observations` 是寫入端點，故：PUT／PATCH／DELETE 乘六個讀路徑皆 405；POST 乘其餘
-# 五個讀路徑皆 405。全部九個 `/si/` 路徑（含 `:decide`、`:close`、`:validate`）的三方法矩陣由
-# test_si_write_routes.py 的 405 矩陣承擔。
+# ── AT-932-2-3：讀路徑只有 GET；其餘方法 405、未定義路徑 404、不啟動子行程 ────────────────────
+# P2b 起 `POST /si/observations` 是寫入端點，故：PUT／PATCH／DELETE 乘全部（現為八個，含議題中心
+# 的兩個）讀路徑皆 405；POST 乘其餘（七個）讀路徑皆 405。全部九個 P1b／P2b 的 `/si/` 路徑（含
+# `:decide`、`:close`、`:validate`）的三方法矩陣由 test_si_write_routes.py 的 405 矩陣承擔。
 READ_PATHS_WITHOUT_POST = [p for p in SIX_PATHS if p != "/si/observations"]
 
 
@@ -54,8 +57,8 @@ def test_AT_932_2_3_non_get_methods_are_405_and_undefined_paths_are_404(
         resp = live.client.request("POST", path, json={})
         if resp.status_code != 405:
             wrong.append(("POST", path, resp.status_code))
-    assert wrong == [], f"六路徑乘 PUT／PATCH／DELETE 與五路徑乘 POST 必須全是 405：{wrong}"
-    assert len(READ_PATHS_WITHOUT_POST) == 5
+    assert wrong == [], f"八路徑乘 PUT／PATCH／DELETE 與七路徑乘 POST 必須全是 405：{wrong}"
+    assert len(READ_PATHS_WITHOUT_POST) == 7
     undefined = ["/si/nothing", "/si/proposals/PROP-SI-004/extra", "/si/status/x",
                  "/si/observations/OBS-SI-001"]
     codes = {path: live.client.get(path).status_code for path in undefined}
@@ -63,7 +66,7 @@ def test_AT_932_2_3_non_get_methods_are_405_and_undefined_paths_are_404(
     assert read_calls(fake) == [], "非 GET 與未定義路徑都不得啟動子行程"
 
 
-# ── AT-932-3-2：六個端點乘六種失敗形態 ───────────────────────────────────────────────────
+# ── AT-932-3-2：（八個）端點乘六種失敗形態 ───────────────────────────────────────────────
 HEAD_MARK, TAIL_MARK = "HEAD-MARK", "TAIL-MARK"
 BIG_STDERR = HEAD_MARK + "x" * (5000 - len(HEAD_MARK) - len(TAIL_MARK)) + TAIL_MARK
 FAILURES = [
@@ -110,7 +113,7 @@ def test_AT_932_3_2_every_endpoint_fails_loudly_with_a_fixed_503_body(
                 assert TAIL_MARK in body["detail"] and HEAD_MARK not in body["detail"], label
         for health in ("/health", "/health/deep"):
             assert live.client.get(health).status_code == 200, f"{name}：{health} 不得受 SI 影響"
-    assert total == 36
+    assert total == 48
 
 
 # ── AT-940-9-1：只收 since、limit 與合格的 id；其餘 422 且不啟動子行程 ──────────────────────────

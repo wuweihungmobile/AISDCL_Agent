@@ -333,7 +333,12 @@ def test_AT_940_2_1_argv_cwd_env_and_default_constants(
                ("runs", {"since": 3, "limit": 2}, ["--since", "3", "--limit", "2"]),
                ("proposals", {"ident": "PROP-SI-004"}, ["--id", "PROP-SI-004"]),
                ("proposals", {"since": 1, "limit": 9, "ident": "PROP-SI-004"},
-                ["--since", "1", "--limit", "9", "--id", "PROP-SI-004"])]
+                ["--since", "1", "--limit", "9", "--id", "PROP-SI-004"]),
+               ("issues", {"status": "待處理"}, ["--status=待處理"]),
+               ("issues", {"source": "系統 缺陷"}, ["--source=系統 缺陷"]),
+               ("issues", {"since": 1, "limit": 9, "status": "a=b", "source": "-x"},
+                ["--since", "1", "--limit", "9", "--status=a=b", "--source=-x"]),
+               ("issues", {"ident": "OBS-SI-001"}, ["--id", "OBS-SI-001"])]
     for kind, kwargs, flags in combos:
         si_cli.run_export(fake, kind, **kwargs)
     calls = read_calls(fake)
@@ -364,7 +369,7 @@ def test_AT_940_2_1_argv_cwd_env_and_default_constants(
     assert si_cli.SI_EXPORT_SCHEMA_REV == 1
     assert si_cli.SI_STDOUT_MAX_BYTES == 8 * 1024 * 1024 == 8388608
     assert si_cli.SI_STDERR_TAIL_CHARS == 1000
-    assert si_cli.SI_KINDS == ("observations", "events", "proposals", "runs", "status")
+    assert si_cli.SI_KINDS == ("observations", "events", "proposals", "runs", "status", "issues")
 
 
 def test_AT_940_2_1_the_popen_call_uses_devnull_stdin_and_pipes(

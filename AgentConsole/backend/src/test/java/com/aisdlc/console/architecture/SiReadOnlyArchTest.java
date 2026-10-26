@@ -98,7 +98,8 @@ class SiReadOnlyArchTest {
                         "siValidateObservation");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).extracting(JavaClass::getName)
-                .containsExactly(String.class.getName(), Integer.class.getName(), Integer.class.getName(), String.class.getName());
+                .containsExactly(String.class.getName(), Integer.class.getName(), Integer.class.getName(), String.class.getName(),
+                        String.class.getName(), String.class.getName());
         assertThat(siExport.getRawReturnType().getName()).isEqualTo(SiExport.class.getName());
 
         // 呼叫（或以方法參照取用）三個 siWrite… 的類別只有 SiConsoleWriteService；寫入埠、對帳讀埠各只有一個使用者

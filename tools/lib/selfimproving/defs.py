@@ -37,6 +37,8 @@ class DefRow:
     status: str | None
     evidence: str
     status_text: str = ""  # 狀態欄原文（M2、M3 取 `fixed@<sha>`；P3 增，R116／D1）
+    lineno: int = 0  # 該列在 `text.splitlines()` 的 1 起算序號（議題中心 D-R7）
+    arity_ok: bool = True  # 欄數與表頭相符；假＝該列各欄皆讀不出（議題中心 D-R7）
 
 
 def classify_status(text: str) -> str | None:
@@ -83,7 +85,7 @@ def load_rows(path: Path) -> list[DefRow]:
         return []
     idx = {name: head.index(name) for name in head if name}
     out = []
-    for line in text.splitlines():
+    for lineno, line in enumerate(text.splitlines(), start=1):
         if not _ROW_RE.match(line):
             continue
         cells = _row_cells(line)
@@ -97,7 +99,7 @@ def load_rows(path: Path) -> list[DefRow]:
 
         status = classify_status(cell(_STATUS_HEADER)) if ok else None
         out.append(DefRow(cells[i_id], cell("發現日期"), cell("嚴重度"), status,
-                          cell("現象與證據（file:line）"), cell(_STATUS_HEADER)))
+                          cell("現象與證據（file:line）"), cell(_STATUS_HEADER), lineno, ok))
     return out
 
 

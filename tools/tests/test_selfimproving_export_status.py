@@ -14,12 +14,14 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 import _selfimproving_fixtures as fx
+import test_selfimproving_issues as ti
 from _selfimproving_fixtures import EVL, LEDGER, PROPS_REL, SiTestCase, aid, ev, obs_id, pid, rid
 
 TOOLS = fx.TOOLS
@@ -751,6 +753,89 @@ class TestStability(StatusCase):
                 self.assertRegex(text, cjk, label)
             else:
                 self.assertIn(needle.encode("utf-8"), raw, label)
+
+
+class TestIssuesExport(StatusCase):
+    """`tools/lib/selfimproving/issues.py` 的 `export --kind issues` 出口（TCS 的 RX 組：
+    AC-IC-01-5、04-6、06-2；夾具建構函式取自 `test_selfimproving_issues.py`，TCS D-R11）。"""
+
+    def ic_repo(self) -> Path:
+        events = [*ti.run_events(), *ti.prop_events(1, "proposed", sources=[obs_id(2)])]
+        return ti.issue_repo(
+            fx.new_dir("icx"),
+            obs=[ti.obs_row(1), ti.obs_row(2)],
+            defs=[ti.def_row(1)],
+            events=events,
+        )
+
+    def ic_export(self, repo, *argv) -> str:
+        with ti.card_ok():
+            rc, out, err = self.M(repo, "export", "--json", "--kind", "issues", *argv)
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    def ic_cli(self, repo) -> str:
+        with ti.card_ok():
+            rc, out, err = self.M(repo, "issues", "--json")
+        self.assertEqual(rc, 0, out + err)
+        return out
+
+    @staticmethod
+    def mask(text: str) -> str:
+        return re.sub(r'"generated_at": "[^"]*"', '"generated_at": ""', text)
+
+    def test_AT_IC_01_5_E_1_a_single_entry_has_no_legend_or_summary(self):
+        repo = self.ic_repo()
+        single = json.loads(self.ic_export(repo, "--id", obs_id(1)))
+        self.assertEqual([i["id"] for i in single["items"]], [obs_id(1)])
+        self.assertNotIn("legend", single)
+        self.assertNotIn("summary", single)
+        listing = json.loads(self.ic_export(repo))
+        self.assertEqual(len(listing["legend"]["statuses"]), 7)  # 不是兩邊同為空的假相等
+        self.assertEqual(listing["legend"], json.loads(self.ic_cli(repo))["legend"])
+
+    def test_AT_IC_04_6_1_a_single_entry_carries_raw_and_a_chinese_timeline(self):
+        repo = self.ic_repo()
+        def_labels = [c.strip() for c in fx.DEF_HDR.strip().strip("|").split("|")]
+        prop_labels = ["提案卡", "狀態", "路由", "類別", "動作", "修訂", "摘要碼", "來源項目"]
+        want = {
+            obs_id(1): fx.COLS,
+            obs_id(2): fx.COLS,
+            ti.def999(1): def_labels,
+            pid(1): prop_labels,
+        }
+        for ident, labels in want.items():
+            with self.subTest(ident):
+                items = json.loads(self.ic_export(repo, "--id", ident))["items"]
+                self.assertEqual(len(items), 1)
+                self.assertEqual([r["label"] for r in items[0]["raw"]], labels)
+                seqs = [t["seq"] for t in items[0]["timeline"]]
+                self.assertEqual(seqs, sorted(seqs))
+                self.assertEqual(bool(seqs), ident in (obs_id(2), pid(1)))  # 有事件者才有時間線
+                for t in items[0]["timeline"]:
+                    self.assertRegex(t["action"], r"^[^A-Za-z]*[一-鿿][^A-Za-z]*$")
+
+    def test_AT_IC_04_6_E_1_the_list_is_lean_and_an_unknown_id_is_an_empty_success(self):
+        repo = self.ic_repo()
+        listing = json.loads(self.ic_export(repo))
+        self.assertEqual(len(listing["items"]), 4)
+        for item in listing["items"]:
+            self.assertFalse({"raw", "timeline", "priority"} & set(item), item["id"])
+        gone = json.loads(self.ic_export(repo, "--id", obs_id(77)))
+        self.assertEqual(gone["items"], [])
+        self.assertTrue("legend" not in gone and "summary" not in gone)
+
+    def test_AT_IC_06_2_1_both_entries_agree_and_ignore_the_wall_clock(self):
+        repo = self.ic_repo()
+        first = (self.ic_cli(repo), self.ic_export(repo))
+        time.sleep(1.1)  # 跨過秒界：generated_at 必不同，遮罩之後仍須逐位元相同
+        second = (self.ic_cli(repo), self.ic_export(repo))
+        for before, after in zip(first, second):
+            self.assertNotEqual(before, after)
+            self.assertEqual(self.mask(before), self.mask(after))
+        cli, exported = (json.loads(text) for text in second)
+        for key in ("items", "legend", "summary"):
+            self.assertEqual(cli[key], exported[key], key)
 
 
 if __name__ == "__main__":

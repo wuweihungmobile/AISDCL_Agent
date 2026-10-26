@@ -52,14 +52,18 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/executions/{runId}/restore/{checkpointId}",
             "POST /api/v1/executions/{runId}/review/{stepId}",
             // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）
-            "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close");
+            "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close",
+            // 議題中心（TCS-IssueCenter-20261027 D-C14）：設定順位時議題的狀態不可排（issue_not_rankable）
+            "PUT /api/v1/issues/{id}/priority");
 
     /**
      * 路徑含 {@code {id}} 卻<b>不會回 404</b> 的端點（預設規則「路徑含變數＝可能 404」不適用）：SelfImproving 的 id 是寫進稽核簽章的資料，
      * 「提案或觀察列是否存在」由主機端根層 CLI 入帳時判，Console 寫入端點不查（TCS-SelfImprovingDecide-P2b 已知邊界 1）。
      */
     private static final Set<String> NEVER_NOT_FOUND = Set.of("POST /api/v1/si/proposals/{id}/decide",
-            "POST /api/v1/si/observations/{id}/close");
+            "POST /api/v1/si/observations/{id}/close",
+            // 議題中心：清除順位是冪等的刪列（不呼叫 Bridge；列不存在也是 204），不會回 404（TCS-IssueCenter-20261027 D-C14）
+            "DELETE /api/v1/issues/{id}/priority");
 
     /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
     private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
@@ -68,7 +72,11 @@ public class ErrorResponseDocumentation {
                     + "（reason rtm_not_found；本端點是「404 的 reason 省略」慣例的例外之一）",
             // P1b（契約後繼檔 API_Contract_SelfImproving_P1b）：第二個例外——格式合法而查無此提案（與 503 si_unavailable 語意分離）
             "GET /api/v1/si/proposals/{id}", "查無此提案（reason si_not_found，details.id 為請求的 id；「404 的 reason 省略」慣例的"
-                    + "例外之一）。不是「資料面壞了」——那是 503 si_unavailable");
+                    + "例外之一）。不是「資料面壞了」——那是 503 si_unavailable",
+            // 議題中心（TCS-IssueCenter-20261027 §C4.2、§C4.3）：同一個 reason，訊息為「查無此議題」
+            "GET /api/v1/issues/{id}", "查無此議題（reason si_not_found，訊息「查無此議題」，details.id 為請求的 id；「404 的 reason 省略」慣例的"
+                    + "例外之一）。不是「資料面壞了」——那是 503 si_unavailable",
+            "PUT /api/v1/issues/{id}/priority", "查無此議題（reason si_not_found，訊息「查無此議題」，details.id；先取該議題才寫入，查無＝零寫入）");
 
     /** SelfImproving 唯讀鏡像的上游失敗（Bridge 的其他 4xx 與 5xx、連線失敗、讀取逾時）與 Bridge 明確回報的 503 si_unavailable。 */
     private static final Map<String, String> SI_UPSTREAM = Map.of(
@@ -97,6 +105,12 @@ public class ErrorResponseDocumentation {
             "502", "引擎橋接服務無法連線／回了非預期的錯誤",
             "503", "si_write_disabled（backend 的金鑰或權杖未設，details.cause 說明）或 si_unavailable（根層 CLI 不可用；details.cause、details.detail 逐字）",
             "504", "引擎橋接服務逾時（讀取 20 秒、不重試）");
+
+    /** 議題中心三個會呼叫 Bridge 的端點共用的上游失敗（與 SI 唯讀端點同一組：502／503／504）；各端點另有自己的 422。 */
+    private static Map<String, String> issueFailures(String unprocessable) {
+        return Map.of("422", unprocessable, "502", SI_UPSTREAM.get("502"), "503", SI_UPSTREAM.get("503"),
+                "504", SI_UPSTREAM.get("504"));
+    }
 
     /** pause／resume／cancel 的上游錯誤：Bridge 無法連線、逾時（DB 狀態不變）。 */
     private static final Map<String, String> BRIDGE_UPSTREAM = Map.of(
@@ -134,6 +148,15 @@ public class ErrorResponseDocumentation {
             Map.entry("POST /api/v1/si/observations", SI_WRITE_FAILURES),
             Map.entry("POST /api/v1/si/observations/{id}/close", SI_WRITE_FAILURES),
             Map.entry("POST /api/v1/si/observations/validate", SI_VALIDATE_FAILURES),
+            // 議題中心（TCS-IssueCenter-20261027 D-C14）：兩個 GET 與 PUT 呼叫 Bridge（422／502／503／504）；DELETE 不呼叫 Bridge，只有 id 格式的 422
+            Map.entry("GET /api/v1/issues", issueFailures("引擎拒絕此請求（details.bridgeReason=invalid_request；status、source 超過 64 字元、以 - 起頭"
+                    + "或含控制字元）。篩選值本身不認得（含空字串）不是 422，而是 503 si_unavailable（cause=nonzero_rc）")),
+            Map.entry("GET /api/v1/issues/{id}", issueFailures("引擎拒絕此請求（details.bridgeReason=invalid_request；id 不符 OBS-SI-<三位以上數字>、"
+                    + "PROP-SI-<三位以上數字>、DEF-<數字>-<數字>）")),
+            Map.entry("PUT /api/v1/issues/{id}/priority", issueFailures("輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，"
+                    + "errors[] 同內容；欄位 id、rank、note）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason）")),
+            Map.entry("DELETE /api/v1/issues/{id}/priority", Map.of(
+                    "422", "輸入閘未通過（reason invalid_request；details.violations 的 id 欄：id 不符議題編號格式；不碰資料庫）")),
             Map.entry("POST /api/v1/import/upload", Map.of(
                     "413", "上傳超過 10MB 上限（reason：檔案超過 10MB 上限）",
                     "415", "副檔名不在 .md／.pdf／.docx（reason：只支援 .md／.pdf／.docx 檔案）",

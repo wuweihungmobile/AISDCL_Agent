@@ -137,4 +137,9 @@ public final class ErrorReasons {
     public static final String SI_WRITE_FORBIDDEN = "si_write_forbidden";
     /** 稽核檔已存在（409）：Bridge 以獨佔建檔拒絕覆寫同名 {@code <audit_ref>.json}（每次新 ref，正常情況不會發生）。 */
     public static final String SI_AUDIT_EXISTS = "si_audit_exists";
+
+    // ── 議題中心（TCS-IssueCenter-20261027 D-C5；契約 API_Contract_IssueCenter.md 的〈issue 類 reason 表〉；前端住 lib/domain/issues.ts 的 ISSUE_REASONS）──
+    // 🔴 與 SI 類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 ISSUE_REASONS、本類別的 ISSUE_ 前綴常數與契約表三方雙向鎖。
+    /** 設定優先順序的議題狀態不是可排的三種之一（409；{@code details.id}、{@code details.status}）：PUT 不寫入。 */
+    public static final String ISSUE_NOT_RANKABLE = "issue_not_rankable";
 }

@@ -554,5 +554,500 @@
     "truncated": false,
     "ne": [],
     "problems": []
+  },
+  "issues": {
+    "schemaRev": 1,
+    "kind": "issues",
+    "generatedAt": "2026-10-21T00:00:00+08:00",
+    "headSha": "0000000000000000000000000000000000000000",
+    "items": [
+      {
+        "id": "OBS-SI-001",
+        "source": "系統改善",
+        "title": "需求原文要求檔名 SelfImproving.prd，repo 的 PRD 慣例是 *_PRD.md（文件工具鏈與 docs 守門只認 .md）",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "已完成",
+        "result": "已裁決",
+        "updatedAt": "2026-10-18",
+        "nextStep": "已結案（已裁決）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 11
+        },
+        "links": [
+          "OBS-SI-011"
+        ],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-002",
+        "source": "系統改善",
+        "title": "額度守衛 --pace 回 cap=1（週額 87%、準備帶），四方專家無法並行，只能一次一個依序派",
+        "severity": "中",
+        "severityRank": 3,
+        "status": "已完成",
+        "result": "已裁決",
+        "updatedAt": "2026-10-18",
+        "nextStep": "已結案（已裁決）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 12
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-003",
+        "source": "系統改善",
+        "title": "sdd_env.py --sub monorepo 給的 SDD_STATE_DIR 恆為根 build/reports/fsm，無覆寫選項；探針要用拋棄式狀態…",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "延後",
+        "result": null,
+        "updatedAt": "2026-10-18",
+        "nextStep": "等再開症狀出現：第二次有人為探針手改三件組而寫錯真狀態目錄",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 13
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-004",
+        "source": "系統改善",
+        "title": "子代理的 Write 工具拒寫 REPORT.md（harness 回「Subagents should return findings as text, no…",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "已完成",
+        "result": "已裁決",
+        "updatedAt": "2026-10-18",
+        "nextStep": "已結案（已裁決）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 14
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-005",
+        "source": "系統改善",
+        "title": "夾具負控：症狀含腳本字樣 <script>window.si_xss=1</script> 與 <img src=x onerror=alert(1)>，頁面必…",
+        "severity": "中",
+        "severityRank": 3,
+        "status": "候選",
+        "result": null,
+        "updatedAt": "2026-10-21",
+        "nextStep": "等歸因確認（歸因者提出、審查者確認），或由掌舵者簽核成立",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 15
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-006",
+        "source": "使用者提案",
+        "title": "夾具負控：症狀含 粗體、[連結](https://example.invalid/x)、inline code 與 &lt;b&gt;實體&lt;/b&gt; …",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "已完成",
+        "result": "已裁決",
+        "updatedAt": "2026-10-20",
+        "nextStep": "已結案（已裁決）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 16
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-007",
+        "source": "研究提案",
+        "title": "外部文章建議以多代理互審降低誤判（外部衍生，僅供參考）",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "候選",
+        "result": null,
+        "updatedAt": "2026-10-19",
+        "nextStep": "等歸因確認（歸因者提出、審查者確認），或由掌舵者簽核成立",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 17
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-008",
+        "source": "使用者提案",
+        "title": "提案生效路徑缺少獨立複核關卡，裁決權限與落地手段分屬兩處",
+        "severity": "緊急",
+        "severityRank": 1,
+        "status": "已完成",
+        "result": "已裁決",
+        "updatedAt": "2026-10-14",
+        "nextStep": "已結案（已裁決）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 18
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-009",
+        "source": "使用者提案",
+        "title": "以 Console 面板決定提案時，決定載體需帶審計參照；此列模擬載體標記，證據座標指向 AutoClaude 檔（模組桶不得由前端推算）",
+        "severity": "高",
+        "severityRank": 2,
+        "status": "待解",
+        "result": null,
+        "updatedAt": "2026-10-21",
+        "nextStep": "已成立，尚無人接手",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 19
+        },
+        "links": [],
+        "rankable": true,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-010",
+        "source": "使用者提案",
+        "title": "夾具列：處置為 deferred 並帶再開症狀",
+        "severity": "中",
+        "severityRank": 3,
+        "status": "延後",
+        "result": null,
+        "updatedAt": "2026-10-05",
+        "nextStep": "等再開症狀出現：同一症狀於另一輪再現",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 20
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-011",
+        "source": "使用者提案",
+        "title": "夾具列：與 OBS-SI-001 同一症狀，已併入",
+        "severity": "低",
+        "severityRank": 4,
+        "status": "已完成",
+        "result": "已合併",
+        "updatedAt": "2026-09-12",
+        "nextStep": "已結案（已合併）",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 21
+        },
+        "links": [
+          "OBS-SI-001"
+        ],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "OBS-SI-013",
+        "source": "系統缺陷",
+        "title": "狀態 B 追加的一般觀察列（差分負控）",
+        "severity": "中",
+        "severityRank": 3,
+        "status": "候選",
+        "result": null,
+        "updatedAt": "2026-10-21",
+        "nextStep": "等歸因確認（歸因者提出、審查者確認），或由掌舵者簽核成立",
+        "origin": {
+          "ledger": "觀察帳本",
+          "file": "docs/06_quality/SelfImproving_Observation_Ledger.md",
+          "line": 23
+        },
+        "links": [],
+        "rankable": false,
+        "action": null
+      },
+      {
+        "id": "PROP-SI-004",
+        "source": "未歸類：OBS-SI-162、OBS-SI-163、OBS-SI-164",
+        "title": "新測試檔撞 prose 棘輪 +1546、discover 守門誤判、重釘輪號走錯",
+        "severity": null,
+        "severityRank": null,
+        "status": "待您決定",
+        "result": null,
+        "updatedAt": "2026-10-20",
+        "nextStep": "等掌舵者決定：核准、否決或退回",
+        "origin": {
+          "ledger": "事件帳本",
+          "file": "docs/06_quality/SelfImproving_Event_Ledger.jsonl",
+          "seq": 5
+        },
+        "links": [
+          "OBS-SI-162",
+          "OBS-SI-163",
+          "OBS-SI-164"
+        ],
+        "rankable": true,
+        "action": "decide-proposal"
+      }
+    ],
+    "nextSince": null,
+    "truncated": false,
+    "ne": [
+      {
+        "field": "ledger.sibling.AutoSDD_External_Blocked_Log.md",
+        "reason": "SIBLING-LEDGER-UNAVAILABLE"
+      },
+      {
+        "field": "ledger.sibling.AutoSDD_Structural_Debt_Log.md",
+        "reason": "SIBLING-LEDGER-UNAVAILABLE"
+      },
+      {
+        "field": "ledger.defect",
+        "reason": "DEFECT-LEDGER-UNAVAILABLE"
+      },
+      {
+        "field": "issues.PROP-SI-004.severity",
+        "reason": "SEVERITY-UNAVAILABLE"
+      }
+    ],
+    "problems": [
+      {
+        "subject": "OBS-SI-012",
+        "code": "ROW-ARITY",
+        "detail": "欄數與表頭不符"
+      },
+      {
+        "subject": "PROP-SI-004",
+        "code": "UNMAPPED",
+        "detail": "來源：OBS-SI-162、OBS-SI-163、OBS-SI-164"
+      }
+    ],
+    "legend": {
+      "statuses": [
+        {
+          "name": "候選",
+          "meaning": "剛記下來，還沒成立，不會成為待辦",
+          "tab": null,
+          "rankable": false
+        },
+        {
+          "name": "待您決定",
+          "meaning": "等掌舵者按一下：決定提案（含復發後是否回滾），或裁決一個決定類觀察；若決定不回滾，目前沒有動詞可消去，會留在此狀態",
+          "tab": "待您決定",
+          "rankable": true
+        },
+        {
+          "name": "待解",
+          "meaning": "已成立的缺陷或觀察，還沒人在處理",
+          "tab": "待處理",
+          "rankable": true
+        },
+        {
+          "name": "進行中",
+          "meaning": "有人在做：修復、沙盒、驗證、修訂、回滾",
+          "tab": "待處理",
+          "rankable": true
+        },
+        {
+          "name": "觀察中",
+          "meaning": "已採納，量測窗內看會不會復發",
+          "tab": "待處理",
+          "rankable": false
+        },
+        {
+          "name": "延後",
+          "meaning": "刻意先放著，寫明「什麼情況再回來」；下一步欄是帳本原文節錄，可能含英文片段",
+          "tab": null,
+          "rankable": false
+        },
+        {
+          "name": "已完成",
+          "meaning": "結案；「結果」欄寫明怎麼結的",
+          "tab": "已完成",
+          "rankable": false
+        }
+      ],
+      "results": [
+        {
+          "name": "已修復",
+          "meaning": "問題已改好"
+        },
+        {
+          "name": "已採納",
+          "meaning": "提案已晉升並走完量測窗、窗內未復發"
+        },
+        {
+          "name": "已否決",
+          "meaning": "決定不做（提案被否決、缺陷不修）"
+        },
+        {
+          "name": "已退役",
+          "meaning": "觀察列不再相關（附依據座標）"
+        },
+        {
+          "name": "已裁決",
+          "meaning": "由掌舵者或主控裁決結案、不改程式"
+        },
+        {
+          "name": "已轉交",
+          "meaning": "已轉到別處追蹤：觀察轉成缺陷或提案、提案轉交其他通道；「下一步」寫明去向"
+        },
+        {
+          "name": "已合併",
+          "meaning": "併入另一筆觀察"
+        },
+        {
+          "name": "已回滾",
+          "meaning": "提案採納後被回滾"
+        }
+      ],
+      "sources": [
+        {
+          "name": "使用者提案",
+          "meaning": "您自己提的（含經 Console 簽章入帳的）"
+        },
+        {
+          "name": "系統缺陷",
+          "meaning": "測試、CI、體檢或主控發現的缺陷"
+        },
+        {
+          "name": "研究提案",
+          "meaning": "研究掃描外部來源產生；外部內容須另有內部佐證才能成提案"
+        },
+        {
+          "name": "系統改善",
+          "meaning": "流程、工具、文件的改善"
+        }
+      ],
+      "severities": [
+        {
+          "name": "緊急",
+          "rank": 1,
+          "meaning": "各帳本的最高級（缺陷帳本的 P0 與 P1、觀察帳本的 P1），原值在詳情的原列區"
+        },
+        {
+          "name": "高",
+          "rank": 2,
+          "meaning": "次高級（P2）"
+        },
+        {
+          "name": "中",
+          "rank": 3,
+          "meaning": "中級（P3）"
+        },
+        {
+          "name": "低",
+          "rank": 4,
+          "meaning": "最低級（P4）"
+        }
+      ],
+      "problemCodes": [
+        {
+          "code": "ROW-ARITY",
+          "meaning": "帳本列欄數不符（觀察列另含 ID 格式不合），該列不成議題；編號或行號過大而無法編入游標者同樣不成議題"
+        },
+        {
+          "code": "ID-DUP",
+          "meaning": "同編號多列、只收第一列"
+        },
+        {
+          "code": "UNMAPPED",
+          "meaning": "帳本值不在對照表"
+        },
+        {
+          "code": "EVENT-PARSE",
+          "meaning": "事件帳本有讀不懂的行"
+        },
+        {
+          "code": "EVENT-UNSOUND",
+          "meaning": "事件帳本有不合格事件、已略過"
+        }
+      ],
+      "neReasons": [
+        {
+          "reason": "OBS-LEDGER-UNAVAILABLE",
+          "meaning": "觀察帳本讀不到"
+        },
+        {
+          "reason": "DEFECT-LEDGER-UNAVAILABLE",
+          "meaning": "缺陷帳本讀不到"
+        },
+        {
+          "reason": "SIBLING-LEDGER-UNAVAILABLE",
+          "meaning": "姊妹軌檔讀不到"
+        },
+        {
+          "reason": "EVENT-LEDGER-UNAVAILABLE",
+          "meaning": "事件帳本讀不到"
+        },
+        {
+          "reason": "SEVERITY-UNAVAILABLE",
+          "meaning": "嚴重度量不到"
+        },
+        {
+          "reason": "TIME-UNPARSEABLE",
+          "meaning": "時間欄解不出"
+        },
+        {
+          "reason": "CARD-UNAVAILABLE",
+          "meaning": "提案卡面建不出"
+        },
+        {
+          "reason": "MEASURE-UNAVAILABLE",
+          "meaning": "量測窗進度量不到"
+        },
+        {
+          "reason": "git-unavailable",
+          "meaning": "git 取不到版本"
+        }
+      ],
+      "unmappedLabel": "未歸類",
+      "updatedAtNote": "已完成議題的日期是帳本上的「最後已知動靜」，不是結案日（帳本沒有記結案時間）"
+    },
+    "summary": {
+      "total": 13,
+      "byStatus": {
+        "候選": 3,
+        "待您決定": 1,
+        "待解": 1,
+        "進行中": 0,
+        "觀察中": 0,
+        "延後": 2,
+        "已完成": 6
+      },
+      "byTab": {
+        "待處理": null,
+        "待您決定": 1,
+        "已完成": null
+      },
+      "unmapped": 0
+    }
   }
 }

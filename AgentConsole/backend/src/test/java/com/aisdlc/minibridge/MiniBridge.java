@@ -226,7 +226,11 @@ public final class MiniBridge implements AutoCloseable {
      */
     public static final class Si {
 
-        /** 回應本文（Bridge 形狀）：鍵為 {@code observations}、{@code events}、{@code proposals}、{@code runs}、{@code status} 與 {@code proposal:<id>}。 */
+        /**
+         * 回應本文（Bridge 形狀）：鍵為 {@code observations}、{@code events}、{@code proposals}、{@code runs}、{@code status} 與 {@code proposal:<id>}；
+         * 議題中心（TCS-IssueCenter-20261027 D-C12）另有 {@code issues}（清單，預設為黃金檔的 {@code issues} 鍵）與 {@code issue:<id>}（單筆；
+         * 預設沒有，測試自己放——沒有放的 id 回 404 {@code si_not_found}）。
+         */
         public final Map<String, Map<String, Object>> payloads = new ConcurrentHashMap<>();
         /** 非空（鍵 {@code cause}、{@code detail}）＝全部 {@code /si/*} 回 503 {@code si_unavailable}。 */
         public volatile Map<String, String> unavailable = Map.of();
@@ -321,6 +325,7 @@ public final class MiniBridge implements AutoCloseable {
             payloads.put("runs", golden.get("runs"));
             payloads.put("status", golden.get("status"));
             payloads.put("proposal:PROP-SI-004", golden.get("proposal_one"));
+            payloads.put("issues", golden.get("issues"));
         }
 
         /** 黃金檔 {@code src/test/resources/si/<name>.json}（{@code A.snake}｜{@code B.snake}）：鍵為各端點名稱，值為完整回應物件。 */

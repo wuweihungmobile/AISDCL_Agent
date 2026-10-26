@@ -73,14 +73,14 @@ beforeEach(() => {
 });
 
 describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變", () => {
-  it("AT_932_6_5 多出一個名稱為示範功能、href 為 /demo 的連結，位置依 order 在監控中心與系統設定之間，其餘七個連結不變；/demo 時它為 active", () => {
-    const demo = extra({ id: "demo", label: "示範功能", href: "/demo", order: 55, mobile: false, match: (p) => p === "/demo" });
+  it("AT_932_6_5 多出一個名稱為示範功能、href 為 /demo 的連結，位置依 order 在議題中心與系統設定之間，其餘八個連結不變；/demo 時它為 active", () => {
+    const demo = extra({ id: "demo", label: "示範功能", href: "/demo", order: 56, mobile: false, match: (p) => p === "/demo" });
     state.registry = [...REAL(), demo];
     renderTools("OPERATOR", "/");
-    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "示範功能", "系統設定", "自我進化"]);
+    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "示範功能", "系統設定", "自我進化"]);
     const links = navLinks();
-    expect(links[5]).toHaveAttribute("href", "/demo");
-    // 其餘七個連結不變（標籤與 href）
+    expect(links[6]).toHaveAttribute("href", "/demo");
+    // 其餘八個連結不變（標籤與 href）
     const others = links.filter((a) => a.getAttribute("aria-label") !== "示範功能");
     expect(others.map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")])).toEqual([
       ["儀表板", "/"],
@@ -88,6 +88,7 @@ describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變",
       ["BRD/PRD 匯入", "/import"],
       ["執行中心", "/projects"],
       ["監控中心", "/projects"],
+      ["議題中心", "/issues"],
       ["系統設定", "/settings"],
       ["自我進化", "/self-improving"],
     ]);
@@ -111,13 +112,13 @@ describe("AT_932_6_6 enabled 為假或角色不符的項目不渲染", () => {
     extra({ id: "admin-only", label: "僅管理員", order: 72, roles: ["ADMIN"] }),
     extra({ id: "op-admin", label: "操作員以上", order: 73, roles: ["OPERATOR", "ADMIN"] }),
   ];
-  const original = ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定", "自我進化"];
+  const original = ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "系統設定", "自我進化"];
 
   it.each([
     ["VIEWER", []],
     ["OPERATOR", ["操作員以上"]],
     ["ADMIN", ["僅管理員", "操作員以上"]],
-  ] as Array<[Role, string[]]>)("AT_932_6_6 %s 看得到的額外項：%j；roles 缺的既有七項三種角色都看得到；被隱藏的項目不在 DOM（不是 CSS 隱藏）", (role, visibleExtras) => {
+  ] as Array<[Role, string[]]>)("AT_932_6_6 %s 看得到的額外項：%j；roles 缺的既有八項三種角色都看得到；被隱藏的項目不在 DOM（不是 CSS 隱藏）", (role, visibleExtras) => {
     state.registry = registry();
     renderTools(role);
     expect(labels()).toEqual([...original, ...visibleExtras]);
@@ -143,21 +144,21 @@ describe("AT_932_6_7 入口依 order 升冪，同序依登記表原序", () => {
     state.registry = REAL().map((e) => (e.id === "settings" ? { ...e, order: 1 } : e));
     renderTools();
     expect(labels()[0]).toBe("系統設定");
-    expect(labels()).toHaveLength(7);
+    expect(labels()).toHaveLength(8);
   });
 });
 
 describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
   const classOf = (label: string) => (within(screen.getByRole("navigation", { name: "主導覽" })).getByRole("link", { name: label }).className ?? "").split(/\s+/);
 
-  it("AT_932_6_8 七個連結都在 DOM；只有 mobile 為 false 的自我進化帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
+  it("AT_932_6_8 八個連結都在 DOM；只有 mobile 為 false 的自我進化與議題中心帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
     renderTools();
-    expect(navLinks()).toHaveLength(7);
+    expect(navLinks()).toHaveLength(8);
     for (const link of navLinks()) {
       const label = link.getAttribute("aria-label");
       expect(link.getAttribute("title")).toBe(label);
       expect(link.textContent).toBe(label);
-      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(label === "自我進化");
+      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(label === "自我進化" || label === "議題中心");
     }
   });
 

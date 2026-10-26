@@ -241,6 +241,12 @@ on:
       - "docs/06_quality/SelfImproving_Event_Ledger.jsonl"  # P2：事件帳本，check／測試直接讀
       - "docs/06_quality/SelfImproving_Observation_Ledger.md"  # P2：觀察帳本，obs-add／obs-close 與測試直接讀
       - "docs/03_testing/contracts/TCS-SelfImproving-*.md"
+      # 議題中心（monorepo-issue-center）：test_root_module_layout.py 以 glob 讀所有 *_PRD.md 的〈模組落點表〉；
+      # tools/tests/test_selfimproving_issues.py 對真帳本（含兩姊妹軌）驗 issues／si check
+      - "docs/01_requirements/Issue_Center_PRD.md"
+      - "docs/03_testing/contracts/TCS-IssueCenter-*.md"
+      - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
+      - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
@@ -723,6 +729,12 @@ on:
       - "docs/06_quality/SelfImproving_Event_Ledger.jsonl"  # P2：事件帳本，check／測試直接讀
       - "docs/06_quality/SelfImproving_Observation_Ledger.md"  # P2：觀察帳本，obs-add／obs-close 與測試直接讀
       - "docs/03_testing/contracts/TCS-SelfImproving-*.md"
+      # 議題中心（monorepo-issue-center）：test_root_module_layout.py 以 glob 讀所有 *_PRD.md 的〈模組落點表〉；
+      # tools/tests/test_selfimproving_issues.py 對真帳本（含兩姊妹軌）驗 issues／si check
+      - "docs/01_requirements/Issue_Center_PRD.md"
+      - "docs/03_testing/contracts/TCS-IssueCenter-*.md"
+      - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
+      - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；

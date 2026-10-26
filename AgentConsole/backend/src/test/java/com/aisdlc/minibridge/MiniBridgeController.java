@@ -276,6 +276,17 @@ class MiniBridgeController {
         return si(http, "/si/runs", "runs", null);
     }
 
+    // 議題中心（TCS-IssueCenter-20261027 D-C12；對照 routers/si.py 的兩個議題 GET）：失敗旋鈕與回放規則同上
+    @GetMapping("/si/issues")
+    ResponseEntity<Object> siIssues(HttpServletRequest http) {
+        return si(http, "/si/issues", "issues", null);
+    }
+
+    @GetMapping("/si/issues/{id}")
+    ResponseEntity<Object> siIssue(HttpServletRequest http, @PathVariable String id) {
+        return si(http, "/si/issues/" + id, "issue:" + id, id);
+    }
+
     // ── /si/*：P2b 稽核檔落地與預檢（TCS-SelfImprovingDecide-P2b §5.4；對照 routers/si.py 的三個寫入 POST 與 :validate）────────
 
     private static boolean looksLikeJson(String body) {

@@ -5,7 +5,8 @@
 Console 是顯示面、不是資料來源：頁面資料＝`export --json` 的輸出，Bridge 不重算、不快取、
 不寫任何檔。
   · export 的 argv 恆為 `[sys.executable, <si_root>/tools/<CLI 腳本>, "export", "--json", "--kind",
-    <kind>]`，之後依序可接 `--since`、`--limit`、`--id`；validate 的 argv 恆為
+    <kind>]`，之後依序可接 `--since`、`--limit`、`--status=<值>`、`--source=<值>`（議題中心的篩選，
+    各為**單一** argv 元素，值不經 shell、不拆字）、`--id`；validate 的 argv 恆為
     `[sys.executable, <si_root>/tools/<CLI 腳本>, "obs-add", "--dry-run", "--body-file", "-",
     "--json"]`（本文走 stdin）。**不帶 `--repo`**（預設值＝腳本所在 repo＝`si_root`）、
     **不帶 `-I`／`-P`**（3.11 起 `-I` 蘊含 `-P`，腳本目錄不進 `sys.path`，CLI 自己的相對匯入會失
@@ -49,8 +50,8 @@ SI_CLI_TIMEOUT_SECONDS = 15.0
 SI_EXPORT_SCHEMA_REV = 1
 SI_STDOUT_MAX_BYTES = 8 * 1024 * 1024
 SI_STDERR_TAIL_CHARS = 1000
-#: 封閉集合：路由只能傳這五值。
-SI_KINDS = ("observations", "events", "proposals", "runs", "status")
+#: 封閉集合：路由只能傳這六值（`issues`＝議題中心，TCS-IssueCenter-20261027 R-IC-47）。
+SI_KINDS = ("observations", "events", "proposals", "runs", "status", "issues")
 
 #: CLI 腳本相對 `si_root` 的路徑。
 _SCRIPT_REL = Path("tools") / "selfimproving.py"
@@ -81,12 +82,17 @@ def build_env(source: Mapping[str, str], si_root: Path) -> dict[str, str]:
 
 
 def build_argv(si_root: Path, kind: str, *, since: int | None = None, limit: int | None = None,
+               status: str | None = None, source: str | None = None,
                ident: str | None = None) -> list[str]:
     """`export` 的子行程 argv。**唯二**組 argv 的函式之一（AST 鎖：唯一的 `return` 是列表字面值，
-    索引 2 為動詞常數 `export`）。"""
+    索引 2 為動詞常數 `export`）。`status`、`source` 以 `--status=<值>`、`--source=<值>` 單一 argv
+    元素傳入（位於 `--limit` 之後、`--id` 之前）：值內的空白、`=`、非 ASCII 都不拆字，開頭的 `-` 也
+    不會被 argparse 當成旗標。"""
     return [sys.executable, str(si_root / _SCRIPT_REL), "export", "--json", "--kind", kind,
             *(["--since", str(since)] if since is not None else []),
             *(["--limit", str(limit)] if limit is not None else []),
+            *([f"--status={status}"] if status is not None else []),
+            *([f"--source={source}"] if source is not None else []),
             *(["--id", ident] if ident is not None else [])]
 
 
@@ -282,10 +288,12 @@ def _execute(argv: list[str], root: Path, label: str,
 
 
 def run_export(si_root: Path | None, kind: str, *, since: int | None = None,
-               limit: int | None = None, ident: str | None = None) -> dict[str, Any]:
+               limit: int | None = None, status: str | None = None, source: str | None = None,
+               ident: str | None = None) -> dict[str, Any]:
     """跑一次 `export` 並回傳解析後的 export 物件（逐值透傳，不增刪改任何鍵）。
 
     失敗一律拋 `ApiError(503, "si_unavailable", cause=…, detail=…)`；不寫任何檔、不快取。
+    CLI 不認得的篩選值（含空字串）＝CLI 回 rc 3＝`nonzero_rc`（不在這裡特判）。
     `kind` 不在 `SI_KINDS`、`ident` 為空或以 `-` 起頭＝呼叫端（Bridge 自己）的 bug，拋 `ValueError`
     （`ident` 若以 `-` 起頭會被 argparse 當成旗標）。
     """
@@ -294,7 +302,8 @@ def run_export(si_root: Path | None, kind: str, *, since: int | None = None,
     if ident is not None and (not ident or ident.startswith("-")):
         raise ValueError(f"ident 不合法：{ident!r}")
     root = _require_script_root(si_root, kind)
-    argv = build_argv(root, kind, since=since, limit=limit, ident=ident)
+    argv = build_argv(root, kind, since=since, limit=limit, status=status, source=source,
+                      ident=ident)
     rc, stdout, stderr = _execute(argv, root, kind, None)
     if rc != 0:
         raise _fail(kind, "nonzero_rc", rc, stderr)

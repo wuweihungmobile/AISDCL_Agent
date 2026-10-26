@@ -13,7 +13,7 @@ app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆�
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
 app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
 app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔      app/resources.py 引擎行程樹資源取樣（`resources`；D-12）
-app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 六個唯讀 GET、三個稽核檔落地 POST 與一個 `:validate` 預檢 POST）
+app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 八個唯讀 GET〔含議題中心兩個〕、三個稽核檔落地 POST 與一個 `:validate` 預檢 POST）
 app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固定環境、動詞白名單、20 秒逾時、rc→HTTP、`(狀態目錄, 專案鍵)` 互斥鎖）
 app/si_cli.py      唯一的 SelfImproving 子行程出口：根層 CLI 的唯讀 `export` 與 `obs-add --dry-run`（白名單環境、15 秒逾時、8 MiB 輸出上限、失敗一律 503 `si_unavailable`）
 app/si_audit.py    整個 `app/` 唯一以寫入形態開 SelfImproving 路徑者：把 backend 簽好的稽核 JSON 原樣落成 `<audit_ref>.json`（獨佔建檔、不覆寫；P2b）
@@ -98,7 +98,7 @@ Invoke-RestMethod http://localhost:8081/health
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422；本文含 `sdd` 區塊時另要 `X-Bridge-Token`，201 多 `warnings[]`）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202；`:resume` 對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `GET /autoclaude/runs/{id}`、`GET …/rtm`（追溯覆蓋，唯讀；見下）、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`（對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm`、`GET /sdd/fsm/{project}`（兩者皆認選填 `root`）、`POST /sdd/fsm/{project}:freeze`（人工閘寫入，要 `X-Bridge-Token`）、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
-另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下），與 P2b 的寫入載體：`POST /si/proposals/{id}:decide`、`POST /si/observations`、`POST /si/observations/{id}:close`（稽核檔落地，要 `X-Bridge-Token`）、`POST /si/observations:validate`（唯讀預檢）（見〈SelfImproving 寫入載體〉）。
+另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下），加議題中心的兩個：`GET /si/issues`、`GET /si/issues/{id}`（見〈議題中心〉），與 P2b 的寫入載體：`POST /si/proposals/{id}:decide`、`POST /si/observations`、`POST /si/observations/{id}:close`（稽核檔落地，要 `X-Bridge-Token`）、`POST /si/observations:validate`（唯讀預檢）（見〈SelfImproving 寫入載體〉）。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
 
 ### SelfImproving 唯讀鏡像：`GET /si/*`（P1b；TCS-SelfImprovingMirror-P1b R1～R6）
@@ -109,6 +109,14 @@ Console 是顯示面、不是資料來源：每個請求恰啟動一次根層 CL
 - 輸入驗證在子行程**之前**：未知查詢參數、型別或範圍不合、`{id}` 不符 `PROP-SI-<三位以上數字>` 一律 422 `invalid_request`（未知參數的 `violations[0].rule` 為 `unknown_parameter`）；格式合法而 export 回空＝404 `si_not_found`（本文 `{"code":404,"reason":"si_not_found","id":…}`）。
 - 失敗一律 503 `si_unavailable`，本文 `{"code":503,"reason":"si_unavailable","cause":<碼>,"detail":"rc=<n|none>; stderr=<尾 1,000 字元>"}`；`cause` 九值依序為 `si_root_unset`、`si_script_missing`、`spawn_failed`、`timeout`、`stdout_too_large`、`nonzero_rc`、`bad_json`、`schema_rev_mismatch`、`bad_shape`。**合法輸出不是錯誤**（空 `items`、非空 `ne`／`problems`、stderr 雜訊都原樣 200）；缺 `.git` 或家目錄時真 CLI 自己回 NOT-EVALUABLE（`head_sha` 為 `null`、`ne` 逐欄列出），仍是 200。SI 不可用**不影響** `/health` 與 `/health/deep`。
 - 子行程環境是白名單（`PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`）加固定鍵（`PYTHONUTF8`、`PYTHONDONTWRITEBYTECODE`、只放行 `SI_ROOT` 的環境變數式 `safe.directory`）；`BRIDGE_*`、`MINIMAX_API_KEY`、`AUTOSDD_*` 等一律不繼承。逾時（15 秒）與輸出超過 8 MiB 都以行程樹終止。
+
+### 議題中心：`GET /si/issues`、`GET /si/issues/{id}`（TCS-IssueCenter-20261027 R-IC-45～R-IC-48、§C3）
+
+同一條唯讀透傳路徑：每請求恰啟動一次 `export --json --kind issues` 子行程、無快取，200 本文＝輸出解析後的物件逐值透傳（清單含 `legend`、`summary`；單筆含 `raw`、`timeline`、無 `legend`／`summary`）。議題的歸類、排序、中文對照全在根層 CLI，Bridge 不判斷、不展開篩選別名。
+
+- 清單收 `since`、`limit`、`status`、`source`（其餘 422 `unknown_parameter`）；單筆不收任何查詢參數。`status`、`source` 的值（議題中心的中文別名，例：`待處理`、`系統缺陷`；逗號取聯集）以**單一 argv 元素** `--status=<值>`、`--source=<值>` 傳入（位於 `--limit` 之後、`--id` 之前）。
+- 輸入驗證在子行程**之前**（422 `invalid_request`，`violations[{field,rule,message}]` 一次全列）：`status`／`source` 超過 64 字元＝`too_long`、以 `-` 起頭＝`leading_dash`、含 U+0000～U+001F 或 U+007F＝`control_char`（NUL 會讓啟動子行程拋例外而回 500）；`{id}` 須符 `OBS-SI-<三位以上數字>`、`PROP-SI-<三位以上數字>` 或 `DEF-<數字>-<數字>`，不符＝`invalid_format`；合法而查無＝404 `si_not_found`（`id`）。
+- CLI 不認得的篩選值（含空字串 `status=`，不特判）＝rc 3＝503 `si_unavailable`（`cause=nonzero_rc`，`detail` 逐字），不是 422。其餘失敗形態（`cause` 九值）沿 P1b；其他 HTTP 方法 405。
 
 ### SelfImproving 寫入載體：稽核檔落地與預檢（P2b；TCS-SelfImprovingDecide-P2b W1～W6）
 

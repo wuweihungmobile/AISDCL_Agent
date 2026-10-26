@@ -373,3 +373,87 @@ export type SiValidationFinding = S["SiValidationFinding"];
 export type SiConsoleWrite = S["SiConsoleWriteItem"];
 export type SiConsoleWriteOrphan = S["SiConsoleWriteOrphan"];
 export type SiConsoleWrites = S["SiConsoleWrites"];
+
+// ── 議題中心（TCS-IssueCenter-20261027 §C1、§C4；PRD §5）──────────────────────────────────────────────
+// `GET /api/v1/issues*` 原樣轉出根層 `si export --kind issues` 的物件（只經欄名 snake_case→camelCase 對映；值一律不動，null 保留），
+// 所以 schema.d.ts 只有「任意物件」，欄位形狀以這裡為準（出處：契約 API_Contract_IssueCenter.md §C1 與入庫的黃金檔 `issues` 鍵）。
+// 日後根層加欄位時：已知欄位不受影響，不認得的欄位原樣保留在物件上。PUT 優先順序的請求與回應在 backend 是有型別的 DTO，直接取產生型別。
+/** 議題的動作別：畫面依它決定按鈕（待您決定的提案、待您決定的觀察）；其餘為 null。 */
+export type IssueAction = "decide-proposal" | "close-observation";
+/** 議題在原帳本的座標：觀察與缺陷帶 `line`，提案帶 `seq`（事件帳本）。 */
+export type IssueOrigin = { ledger: string; file: string; line?: number; seq?: number };
+/** 單筆才有的「原列」：標籤是中文（帳本表頭），值逐字（唯一可見英文原值的地方）。 */
+export type IssueRawField = { label: string; value: string };
+/** 單筆才有的事件時間線（依 `seq` 升冪；`action` 已是中文）。 */
+export type IssueTimelineEntry = { seq: number; t: string; by: string; action: string };
+
+export type Issue = {
+  id: string;
+  /** 四來源之一或「未歸類：<原值>」；null＝所屬帳本讀不到（`ne` 並列） */
+  source: string | null;
+  title: string;
+  /** 四個中文或「未歸類：<原值>」；null＝量不到 */
+  severity: string | null;
+  /** 1～4；量不到或表外值為 null */
+  severityRank: number | null;
+  /** 七狀態之一或「未歸類：<原值>」 */
+  status: string;
+  /** 僅已結案的議題有值，其餘 null */
+  result: string | null;
+  /** `YYYY-MM-DD`；解不出為 null。已結案議題的日期是「最後已知動靜」，不是結案日 */
+  updatedAt: string | null;
+  nextStep: string;
+  origin: IssueOrigin;
+  links: string[];
+  /** 狀態可排優先順序 */
+  rankable: boolean;
+  action: IssueAction | null;
+  raw?: IssueRawField[];
+  timeline?: IssueTimelineEntry[];
+  /** console-api 加的兩欄（Console 自有資料）：僅 `rankable` 為真且有順位列才有值，其餘 null */
+  priority: number | null;
+  priorityNote: string | null;
+};
+
+export type IssueLegendStatus = { name: string; meaning: string; tab: string | null; rankable: boolean };
+export type IssueLegendTerm = { name: string; meaning: string };
+export type IssueLegendSeverity = { name: string; rank: number; meaning: string };
+/** 清單回應每次都帶的圖例：畫面上所有中文說明與 pill 文字都取自這裡，前端不持有第二份（單筆回應沒有）。 */
+export type IssueLegend = {
+  statuses: IssueLegendStatus[];
+  results: IssueLegendTerm[];
+  sources: IssueLegendTerm[];
+  severities: IssueLegendSeverity[];
+  problemCodes: Array<{ code: string; meaning: string }>;
+  neReasons: Array<{ reason: string; meaning: string }>;
+  unmappedLabel: string;
+  updatedAtNote: string;
+};
+/** 整本帳的計數（不受篩選、游標影響）；`byTab` 某格所依賴的帳本讀不到時為 null（畫面顯示「—」）。 */
+export type IssueSummary = {
+  total: number;
+  byStatus: Record<string, number>;
+  byTab: Record<string, number | null>;
+  unmapped: number;
+};
+
+/** 單筆回應（`GET /issues/{id}`）：沒有 `legend`、`summary`。 */
+export type IssuePage = {
+  schemaRev: number;
+  kind: "issues";
+  generatedAt: string;
+  headSha: string | null;
+  items: Issue[];
+  nextSince: number | null;
+  truncated: boolean;
+  ne: SiNeEntry[];
+  problems: SiProblem[];
+};
+export type IssueListPage = IssuePage & { legend: IssueLegend; summary: IssueSummary };
+
+/** 清單查詢的參數：`status`、`source` 為中文別名（逗號分隔）；`since` 為嚴格大於的游標（整數 ≥0）、`limit` 為整數 ≥1；undefined 不進網址。 */
+export type IssueListParams = { status?: string; source?: string; since?: number; limit?: number };
+
+/** `PUT /issues/{id}/priority` 的請求（rank 1～9999 必填；note 選填、≤200 code point）與回應（寫入的那一列）。 */
+export type IssuePriorityRequest = S["IssuePriorityRequest"];
+export type IssuePriorityResponse = S["IssuePriority"];

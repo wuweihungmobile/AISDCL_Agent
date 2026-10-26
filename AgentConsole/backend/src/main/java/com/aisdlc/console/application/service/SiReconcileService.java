@@ -155,7 +155,7 @@ public class SiReconcileService implements SiReconcileUseCase {
         List<Map<String, Object>> all = new ArrayList<>();
         Integer since = null;
         for (int page = 0; page < PAGE_CAP; page++) {
-            Map<String, Object> raw = bridge.siExport(kind, since, PAGE_SIZE, null).raw();
+            Map<String, Object> raw = bridge.siExport(kind, since, PAGE_SIZE, null, null, null).raw();
             if (raw.get("items") instanceof List<?> items) {
                 for (Object item : items) {
                     if (item instanceof Map<?, ?> map) {

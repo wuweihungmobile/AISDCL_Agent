@@ -120,6 +120,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/issues/{id}/priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 設定議題的優先順序（議題中心；僅 ADMIN）
+         * @description 設定或更新該議題的順位與備註（Console 自有資料；不寫帳本，也不要求 console.si.deciders 名單）。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 本文不是 JSON 物件（400 MALFORMED_REQUEST_BODY）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列，Bridge 零呼叫）→ 取該議題（Bridge 失敗 503／502／504；查無 404 si_not_found）→ 議題狀態不可排（409 issue_not_rankable；details.id、details.status）→ UPSERT。任一前序失敗都零寫入。成功 200：寫入的那一列。後者生效（setBy、setAt 為後者）。
+         */
+        put: operations["putIssuePriority"];
+        post?: never;
+        /**
+         * 清除議題的優先順序（議題中心；僅 ADMIN）
+         * @description 刪除該議題的順位列。冪等：列不存在也是 204。不呼叫 Bridge，所以議題已結案或已不存在時仍清得掉遺留的列。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ id 格式（422 invalid_request）→ 刪除。沒有本文。
+         */
+        delete: operations["deleteIssuePriority"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/import/{id}/result": {
         parameters: {
             query?: never;
@@ -1304,6 +1328,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 議題清單（唯讀；議題中心）
+         * @description Bridge GET /si/issues（根層 si export --kind issues）的原樣轉遞，每筆另有 Console 自有的 priority、priorityNote（僅 rankable 為真且有順位列才有值，其餘 null）。回應含 legend（狀態、結果、來源、嚴重度的中文與說明）與 summary（整本帳的計數，不受篩選、游標影響）。status、source 是中文篩選別名（逗號取聯集、兩者取交集），原樣轉給根層判（含空字串；不認得的值＝503 si_unavailable，不是 422）。每個請求恰一次 Bridge 呼叫與一次順位表讀取（連線 2 秒、讀取 20 秒、不重試），不快取。失敗一律沒有 data：Bridge 的 503 si_unavailable→503（details.cause、details.detail 逐字）、連線失敗或 Bridge 的其他 5xx→502、讀取逾時（20 秒、不重試）→504；順位表讀取失敗→5xx。VIEWER 以上可讀。
+         */
+        get: operations["getIssues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/issues/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 單筆議題（唯讀；議題中心）
+         * @description Bridge GET /si/issues/{id} 的原樣轉遞（items 恰一筆，含 raw、timeline、links 與 priority、priorityNote；沒有 legend、summary）。id 原樣嚴格 percent-encode 成單一路徑段後交給 Bridge；格式（OBS-SI-<三位以上數字>、PROP-SI-<三位以上數字>、DEF-<數字>-<數字>）的單一真相在 Bridge：不合 → 422（details.bridgeReason=invalid_request）。格式合法而查無 → 404（reason si_not_found，訊息「查無此議題」，details.id）。不收查詢參數。失敗一律沒有 data：Bridge 的 503 si_unavailable→503（details.cause、details.detail 逐字）、連線失敗或 Bridge 的其他 5xx→502、讀取逾時（20 秒、不重試）→504；順位表讀取失敗→5xx。VIEWER 以上可讀。
+         */
+        get: operations["getIssue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/import": {
         parameters: {
             query?: never;
@@ -1716,6 +1780,44 @@ export interface components {
             /** @description v1.5：規格檔（絕對路徑）；尚未用路徑 A 匯入為 null */
             sddSpecFile?: string | null;
             goals: components["schemas"]["GoalBrief"][];
+        };
+        /** @description 設定議題的優先順序（僅 ADMIN）。rank 必填、整數 1～9999（null、缺鍵、0、負數、小數、字串、布林、陣列、物件、超過 9999 一律 422，不當清除）；note 選填（缺鍵＝空字串；null 與數字 422）、至多 200 個字元（code point）、不含控制字元。要清除順位請用 DELETE */
+        IssuePriorityRequest: {
+            /**
+             * Format: int32
+             * @description 順位（1 最先；可與其他議題重複）
+             */
+            rank: number;
+            /** @description 備註（缺鍵＝空字串） */
+            note?: string;
+        };
+        ApiResultIssuePriority: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["IssuePriority"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 議題的優先順序（Console 自有；一個議題最多一列） */
+        IssuePriority: {
+            /** @description 議題編號 */
+            id: string;
+            /**
+             * Format: int32
+             * @description 順位（1 最先）
+             */
+            rank: number;
+            /** @description 備註（可為空字串） */
+            note: string;
+            /** @description 設定者（JWT 帳號） */
+            setBy: string;
+            /**
+             * Format: date-time
+             * @description 設定時間（伺服器時間，ISO-8601 帶 offset）
+             */
+            setAt: string;
         };
         EditParsedResultRequest: {
             parsedResult: components["schemas"]["ParsedResult"];
@@ -3016,6 +3118,17 @@ export interface components {
             timestamp: string;
             traceId: string;
         };
+        ApiResultIssueExportResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
         ApiResultPageDataImportRecordResponse: {
             /** Format: int32 */
             code: number;
@@ -4204,6 +4317,189 @@ export interface operations {
             };
             /** @description 與目前狀態衝突（reason 說明原因） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    putIssuePriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 議題編號（例：PROP-SI-004） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssuePriorityRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultIssuePriority"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 查無此議題（reason si_not_found，訊息「查無此議題」，details.id；先取該議題才寫入，查無＝零寫入） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容；欄位 id、rank、note）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    deleteIssuePriority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 議題編號（例：PROP-SI-004） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations 的 id 欄：id 不符議題編號格式；不碰資料庫） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9010,6 +9306,193 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getIssues: {
+        parameters: {
+            query?: {
+                /** @description 狀態篩選（選填；七個狀態名或分頁名「待處理」，逗號分隔）。值以 64 字元、不以 - 起頭、不含控制字元為限，不合 → 422（引擎拒絕此請求） */
+                status?: string;
+                /** @description 來源篩選（選填；四個來源名，逗號分隔）。規則同 status */
+                source?: string;
+                /** @description 游標（選填；整數 ≥0）：只回游標嚴格大於它的項目；取自上一頁回應的 nextSince。不合 → 400（不觸及 Bridge） */
+                since?: number;
+                /** @description 頁大小（選填；整數 ≥1）：不合 → 400；超過根層協定參數檔的上限時，CLI 失敗而回 503 si_unavailable（cause=nonzero_rc） */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultIssueExportResponse"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎拒絕此請求（details.bridgeReason=invalid_request；status、source 超過 64 字元、以 - 起頭或含控制字元）。篩選值本身不認得（含空字串）不是 422，而是 503 si_unavailable（cause=nonzero_rc） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getIssue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 議題編號（例：PROP-SI-004） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultIssueExportResponse"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 查無此議題（reason si_not_found，訊息「查無此議題」，details.id 為請求的 id；「404 的 reason 省略」慣例的例外之一）。不是「資料面壞了」——那是 503 si_unavailable */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎拒絕此請求（details.bridgeReason=invalid_request；id 不符 OBS-SI-<三位以上數字>、PROP-SI-<三位以上數字>、DEF-<數字>-<數字>） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };

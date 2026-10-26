@@ -113,8 +113,8 @@ class BridgeHttpAdapterSiTest {
                 .andExpect(headerDoesNotExist("X-Bridge-Token"))
                 .andRespond(withSuccess(PROPOSAL, MediaType.APPLICATION_JSON));
 
-        SiExport list = rig.adapter.siExport("observations", 5, 10, null);
-        SiExport single = rig.adapter.siExport("proposals", null, null, "PROP-SI-004");
+        SiExport list = rig.adapter.siExport("observations", 5, 10, null, null, null);
+        SiExport single = rig.adapter.siExport("proposals", null, null, "PROP-SI-004", null, null);
 
         rig.server.verify();
         assertThat(list.raw()).as("snake_case 鍵與 null、未知鍵逐值原樣").isEqualTo(asMap(OBSERVATIONS));
@@ -142,14 +142,84 @@ class BridgeHttpAdapterSiTest {
                     .andRespond(withSuccess(OBSERVATIONS, MediaType.APPLICATION_JSON));
 
             rig.adapter.siExport(c[0], c[1] == null ? null : Integer.valueOf(c[1]),
-                    c[2] == null ? null : Integer.valueOf(c[2]), null);
+                    c[2] == null ? null : Integer.valueOf(c[2]), null, null, null);
 
             rig.server.verify();
         }
         rig.server.reset();
         rig.server.expect(requestTo(BASE + "/si/proposals/PROP-SI-004")).andRespond(withSuccess(PROPOSAL,
                 MediaType.APPLICATION_JSON));
-        rig.adapter.siExport("proposals", 5, 10, "PROP-SI-004");              // 單筆：since 與 limit 都不送
+        rig.adapter.siExport("proposals", 5, 10, "PROP-SI-004", null, null);   // 單筆：since 與 limit 都不送
+        rig.server.verify();
+    }
+
+    // ── 議題中心（TCS-IssueCenter-20261027）：status、source 的查詢值嚴格 percent-encode ─────────────────────────
+
+    /**
+     * AT-IC-07-2-E-2：{@code status}、{@code source} 的值先嚴格 percent-encode（UTF-8、僅非保留字元原樣、大寫十六進位）再組網址。
+     * 為什麼重要：完整網址交給 {@code URI.create}，漏編的空白或豎線會使它拋例外而回 500；而 {@code &}、{@code =}、{@code #} 若不編，值就會
+     * 改變查詢字串的結構（例如把 {@code a&limit=1} 變成兩個參數）。解碼後等於原值的對拍留在 {@code IssueApiIT}。
+     */
+    @Test
+    void AT_IC_07_2_E_2_issueFiltersAreStrictlyPercentEncodedAndKeepTheFixedParameterOrder() {
+        List<String> values = List.of("待處理", "a b", "a|b", "100%", "a&b=c#d", "a+b", "x*y~z", ".", "..", "", "待解,延後",
+                "'q\"", "a%20b", "表情😀", "a\tb");
+        for (String value : values) {
+            for (String field : List.of("status", "source")) {
+                String encoded = oracle(value);
+                String expectedQuery = "since=3&limit=7&" + (field.equals("status") ? "status=" + encoded : "status=x&source=" + encoded);
+                List<URI> seen = new ArrayList<>();
+                RequestMatcher capture = request -> seen.add(request.getURI());
+                rig.server.reset();
+                rig.server.expect(requestTo(BASE + "/si/issues?" + expectedQuery)).andExpect(capture)
+                        .andRespond(withSuccess(OBSERVATIONS, MediaType.APPLICATION_JSON));
+
+                SiExport export = field.equals("status")
+                        ? rig.adapter.siExport("issues", 3, 7, null, value, null)
+                        : rig.adapter.siExport("issues", 3, 7, null, "x", value);
+
+                rig.server.verify();
+                assertThat(export.raw()).as(value).isNotEmpty();
+                URI uri = seen.get(0);
+                assertThat(uri.getRawQuery()).as("%s=%s：原始查詢字串", field, value).isEqualTo(expectedQuery);
+                assertThat(uri.getRawFragment()).as(value).isNull();
+                assertThat(uri.getRawPath()).isEqualTo("/si/issues");
+                Map<String, String> decoded = new LinkedHashMap<>();
+                for (String pair : uri.getRawQuery().split("&", -1)) {
+                    int eq = pair.indexOf('=');
+                    decoded.put(pair.substring(0, eq), java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+                }
+                assertThat(decoded.get(field)).as("解碼後等於原值（%s）", field).isEqualTo(value);
+                assertThat(decoded.keySet()).as("值沒有改變查詢字串的結構").containsExactlyElementsOf(
+                        field.equals("status") ? List.of("since", "limit", "status") : List.of("since", "limit", "status", "source"));
+            }
+        }
+        assertThat(BridgeHttpAdapter.queryValue(".")).as("查詢值沒有「整段為點」的特例（點是非保留字元）").isEqualTo(".");
+        assertThat(BridgeHttpAdapter.queryValue("a b")).isEqualTo("a%20b");
+    }
+
+    @Test
+    void AT_IC_07_2_E_2_aNullFilterIsOmittedAnEmptyOneIsSentAndSingleOrStatusKindsNeverCarryThem() {
+        Map<String, String[]> cases = new LinkedHashMap<>();
+        cases.put("/si/issues", new String[] {null, null});
+        cases.put("/si/issues?status=", new String[] {"", null});
+        cases.put("/si/issues?source=", new String[] {null, ""});
+        cases.put("/si/issues?status=a&source=b", new String[] {"a", "b"});
+        for (Map.Entry<String, String[]> entry : cases.entrySet()) {
+            rig.server.reset();
+            rig.server.expect(requestTo(BASE + entry.getKey())).andRespond(withSuccess(OBSERVATIONS, MediaType.APPLICATION_JSON));
+
+            rig.adapter.siExport("issues", null, null, null, entry.getValue()[0], entry.getValue()[1]);
+
+            rig.server.verify();
+        }
+        rig.server.reset();
+        rig.server.expect(requestTo(BASE + "/si/issues/PROP-SI-004")).andRespond(withSuccess(PROPOSAL, MediaType.APPLICATION_JSON));
+        rig.adapter.siExport("issues", 5, 10, "PROP-SI-004", "待處理", "系統缺陷");          // 單筆：任何查詢參數都不送
+        rig.server.verify();
+        rig.server.reset();
+        rig.server.expect(requestTo(BASE + "/si/status")).andRespond(withSuccess(OBSERVATIONS, MediaType.APPLICATION_JSON));
+        rig.adapter.siExport("status", 5, 10, null, "待處理", "系統缺陷");                  // /si/status 不收任何查詢參數
         rig.server.verify();
     }
 
@@ -181,7 +251,7 @@ class BridgeHttpAdapterSiTest {
             String label = entry.getKey();
             expectOneRequest("/si/proposals/PROP-SI-004", entry.getValue());
 
-            Throwable thrown = catchThrowable(() -> rig.adapter.siExport("proposals", null, null, "PROP-SI-004"));
+            Throwable thrown = catchThrowable(() -> rig.adapter.siExport("proposals", null, null, "PROP-SI-004", null, null));
 
             rig.server.verify();                    // 恰好一次請求：重試會在第二次請求時被 MockRestServiceServer 拒絕
             assertThat(thrown).as(label).isNotNull();
@@ -262,7 +332,7 @@ class BridgeHttpAdapterSiTest {
             rig.server.expect(requestTo(BASE + "/si/proposals/" + entry.getValue())).andExpect(capture)
                     .andRespond(withSuccess(PROPOSAL, MediaType.APPLICATION_JSON));
 
-            assertThat(rig.adapter.siExport("proposals", null, null, id).raw()).as(label).isNotEmpty();
+            assertThat(rig.adapter.siExport("proposals", null, null, id, null, null).raw()).as(label).isNotEmpty();
 
             rig.server.verify();
             URI uri = seen.get(0);

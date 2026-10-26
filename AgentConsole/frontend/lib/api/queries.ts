@@ -6,7 +6,7 @@
  *  - 專案／目標／任務三層的計數互相牽動（goalsCount、tasksDone…），任何寫入成功就把三層快取全部標為過期，
  *    資料量小，換取「不會顯示過期計數」的簡單正確性。
  */
-import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
@@ -20,6 +20,7 @@ import {
   createProject,
   createTask,
   deleteGoal,
+  deleteIssuePriority,
   deleteProject,
   deleteTask,
   downloadProjectReport,
@@ -32,6 +33,8 @@ import {
   getExecutionRtm,
   getGoal,
   getImport,
+  getIssue,
+  getIssues,
   getNotificationSummary,
   getPendingSignoffs,
   getProject,
@@ -67,6 +70,7 @@ import {
   postSiObservation,
   postSiObservationClose,
   postSiObservationValidate,
+  putIssuePriority,
   rejectImport,
   reorderGoals,
   resetCategory,
@@ -101,6 +105,10 @@ import type {
   ExecutionRunSummary,
   ExecutionStep,
   ImportRecordDetail,
+  Issue,
+  IssueListPage,
+  IssuePage,
+  IssuePriorityRequest,
   ListAlertsParams,
   ListExecutionsParams,
   ListImportsParams,
@@ -177,6 +185,10 @@ export const qk = {
   siRuns: ["si", "runs"] as const,
   /** P2b 的對帳讀面也掛在 ["si"] 底下：頁首的「重新整理」與寫入成功後的失效都以 siAll 一併重抓它（只有 ADMIN 有這個查詢）。 */
   siConsoleWrites: ["si", "console-writes"] as const,
+  /** 議題中心：全部掛在 ["issues"] 底下，頁首的「重新整理」以 issuesAll 重抓目前顯示的清單與詳情（type: active）；清單依 status 各一份，詳情依議題編號。 */
+  issuesAll: ["issues"] as const,
+  issueList: (status: string | null) => ["issues", "list", status ?? ""] as const,
+  issue: (id: string) => ["issues", "detail", id] as const,
 };
 
 const POLL_MS = 30_000;
@@ -1053,3 +1065,76 @@ export const useSiDecide = () => useSiWrite((v: { id: string; body: SiDecideRequ
 export const useSiAddObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservation(body));
 export const useSiCloseObservation = () => useSiWrite((v: { id: string; body: SiCloseRequest }) => postSiObservationClose(v.id, v.body));
 export const useSiValidateObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservationValidate(body), { invalidate: false });
+
+// ══ 議題中心（TCS-IssueCenter-20261027 R-IC-67、R-IC-70；PRD §6.6）══════════════════════════════════════
+/**
+ * 議題清單：沿用 SI_QUERY_OPTIONS（不重試、不留快取、不輪詢：進頁與「重新整理」才重取，失敗原因要讓人看到），游標分頁同 SI 清單——
+ * 第一頁只帶 `limit`（與分頁的 `status`；全部分頁 `status` 為 null＝不帶），之後每頁帶 `since=<上一頁的 nextSince>` 與同一個 `limit`。
+ * 「逐頁自動載完」由面板負責（useAutoLoadRemaining，上限 SI_AUTO_LOAD_MAX_PAGES）。
+ */
+export function useIssues(status: string | null) {
+  const enabled = useEnabled();
+  return useInfiniteQuery({
+    queryKey: qk.issueList(status),
+    queryFn: ({ pageParam, signal }) => getIssues({ status: status ?? undefined, since: pageParam ?? undefined, limit: SI_PAGE_LIMIT, signal }),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last: IssueListPage) => (last.truncated && typeof last.nextSince === "number" ? last.nextSince : undefined),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+/** 單筆議題（詳情側面板與關聯的存在性查詢）：`id` 為 null 時不啟用。 */
+export function useIssue(id: string | null) {
+  const enabled = useEnabled(id !== null);
+  return useQuery({
+    queryKey: qk.issue(id ?? ""),
+    queryFn: ({ signal }) => getIssue(id as string, { signal }),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+/** 關聯各議題的存在性（一個編號一個單筆查詢；查無＝404 `si_not_found`）：回傳與 `ids` 同序的查詢結果。 */
+export function useIssueLookups(ids: readonly string[]) {
+  const enabled = useEnabled();
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.issue(id),
+      queryFn: ({ signal }: { signal: AbortSignal }) => getIssue(id, { signal }),
+      enabled,
+      ...SI_QUERY_OPTIONS,
+    })),
+  });
+}
+
+/** 把優先順序寫進已快取的清單與詳情（只改那一個議題的 `priority`、`priorityNote`；其餘不動、不重抓）。 */
+function patchIssuePriority(qc: QueryClient, id: string, priority: number | null, priorityNote: string | null): void {
+  const patch = (issue: Issue): Issue => (issue.id === id ? { ...issue, priority, priorityNote } : issue);
+  qc.setQueriesData<InfiniteData<IssueListPage>>({ queryKey: ["issues", "list"] }, (data) => data && { ...data, pages: data.pages.map((page) => ({ ...page, items: page.items.map(patch) })) });
+  qc.setQueryData<IssuePage>(qk.issue(id), (page) => page && { ...page, items: page.items.map(patch) });
+}
+
+/**
+ * 設定優先順序（PUT；僅 ADMIN）：**以回應為準**——不做樂觀更新，成功後才把回應的順位與備註寫進快取（列依新順位重排），失敗什麼都不動。
+ * 不碰 `["notifications"]`、`["si"]` 家族：優先順序是 Console 自有資料，不是帳本決定，不影響待簽核數與自我進化頁。
+ */
+export function useSetIssuePriority() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: IssuePriorityRequest }) => putIssuePriority(v.id, v.body),
+    onSuccess: (row) => patchIssuePriority(qc, row.id, row.rank, row.note),
+  });
+}
+
+/** 清除優先順序（DELETE，冪等；僅 ADMIN）：成功後把該議題的順位與備註清成 null（以伺服器的 204 為準，不樂觀）。 */
+export function useClearIssuePriority() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await deleteIssuePriority(id);
+      return id;
+    },
+    onSuccess: (id) => patchIssuePriority(qc, id, null, null),
+  });
+}

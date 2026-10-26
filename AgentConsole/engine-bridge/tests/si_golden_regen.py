@@ -26,9 +26,11 @@ from tests import si_repo_support as sup  # noqa: E402
 
 BACKEND_COPY = sup.MONOREPO / "AgentConsole" / "backend" / "src" / "test" / "resources" / "si"
 FRONTEND_COPY = sup.MONOREPO / "AgentConsole" / "frontend" / "tests" / "fixtures" / "si"
-#: B 版只涵蓋會變的 kind 加不變的 proposals（不含單筆）。
-STATE_KEYS = {"A": ("observations", "events", "proposals", "proposal_one", "runs", "status"),
-              "B": ("observations", "events", "proposals", "runs", "status")}
+#: B 版只涵蓋會變的 kind 加不變的 proposals（不含單筆）。`issues`（議題中心）A、B 兩態都有
+#: （TCS-IssueCenter-20261027 D-C7）：夾具倉不增帳本檔，故其 `ne` 含缺陷主檔與姊妹軌讀不到的聲明。
+STATE_KEYS = {"A": ("observations", "events", "proposals", "proposal_one", "runs", "status",
+                    "issues"),
+              "B": ("observations", "events", "proposals", "runs", "status", "issues")}
 
 
 def render_all(work: Path) -> dict[str, bytes]:

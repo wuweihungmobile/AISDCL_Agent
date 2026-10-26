@@ -367,12 +367,17 @@ public interface AgentBridge {
      * 與其他 4xx 以 {@link BridgeRejectedException} 丟出（由用例依 R8 的對映表轉譯）；其餘 5xx、200 但本文不是 JSON 物件 →
      * {@code UpstreamException.Failure}；連線失敗 → {@code UpstreamException.Unavailable}；讀取逾時 → {@code UpstreamException.TimedOut}。
      *
-     * @param kind  {@code status}｜{@code observations}｜{@code events}｜{@code proposals}｜{@code runs}
-     * @param since 清單類的游標（嚴格大於）；null＝不帶。{@code id} 非 null 或 kind 為 {@code status} 時不送出
-     * @param limit 清單類的頁大小；null＝不帶（Bridge 依協定參數檔的上限）。同上不送出
-     * @param id    單筆提案的 id：<b>原樣</b>嚴格 percent-encode 成單一路徑段（{@code /si/proposals/<id>}）；backend 不驗格式，格式的單一真相在 Bridge
+     * @param kind   {@code status}｜{@code observations}｜{@code events}｜{@code proposals}｜{@code runs}｜{@code issues}
+     * @param since  清單類的游標（嚴格大於）；null＝不帶。{@code id} 非 null 或 kind 為 {@code status} 時不送出
+     * @param limit  清單類的頁大小；null＝不帶（Bridge 依協定參數檔的上限）。同上不送出
+     * @param id     單筆的 id（提案或議題）：<b>原樣</b>嚴格 percent-encode 成單一路徑段（{@code /si/proposals/<id>}、{@code /si/issues/<id>}）；
+     *               backend 不驗格式，格式的單一真相在 Bridge
+     * @param status 議題清單的狀態篩選（議題中心的中文別名，逗號分隔；TCS-IssueCenter-20261027 R-IC-51）：<b>原樣</b>嚴格 percent-encode 後依序接在
+     *               {@code limit} 之後；null＝不帶、空字串照送（CLI 回 rc 3，經 Bridge 變成 503，不特判）。與 {@code since}、{@code limit}
+     *               同一組規則：{@code id} 非 null 或 kind 為 {@code status} 時不送出；只有 {@code issues} 清單的呼叫端會傳它（其餘 kind 傳 null）
+     * @param source 議題清單的來源篩選：規則同 {@code status}，接在它之後
      */
-    SiExport siExport(String kind, Integer since, Integer limit, String id);
+    SiExport siExport(String kind, Integer since, Integer limit, String id, String status, String source);
 
     /**
      * {@code POST /si/proposals/<id>:decide}（P2b；TCS-SelfImprovingDecide-P2b W3、W11）：把<b>已簽章的稽核 JSON 全文</b>原樣送出

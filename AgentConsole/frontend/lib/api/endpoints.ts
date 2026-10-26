@@ -27,6 +27,11 @@ import type {
   ImportRecord,
   ImportRecordDetail,
   ImportSettingsResult,
+  IssueListPage,
+  IssueListParams,
+  IssuePage,
+  IssuePriorityRequest,
+  IssuePriorityResponse,
   ListAlertsParams,
   ListExecutionsParams,
   ListImportsParams,
@@ -584,4 +589,35 @@ export function postSiObservationValidate(body: SiObservationRequest): Promise<S
 /** Console 稽核列與帳本的對帳（VIEWER 以上可讀，Console 只讓 ADMIN 看見）；`limit` 為 1～500，undefined 不進網址（backend 預設 100）。 */
 export function getSiConsoleWrites(opts: { limit?: number } & Opts = {}): Promise<SiConsoleWrites> {
   return apiRequest<SiConsoleWrites>("/api/v1/si/console-writes", { query: { limit: opts.limit }, signal: opts.signal });
+}
+
+// ── 議題中心（TCS-IssueCenter-20261027 §C4；API-IC-01～04）──────────────────────────────────────────
+// 兩個唯讀 GET（Bridge 原樣轉遞，每筆另有 Console 自有的 priority、priorityNote）加兩個僅 ADMIN 的優先順序寫入（PUT 設定、DELETE 清除）。
+// 瀏覽器只呼叫 console-api 的 /api/v1/issues/**；議題中心不寫帳本，唯一的寫入是 Console 自有的優先順序。
+type IssueOpts = IssueListParams & Opts;
+
+/**
+ * 議題清單（游標分頁）：`status`、`source` 是中文別名（逗號取聯集）；`since` 為嚴格大於的游標（取自上一頁的 `nextSince`），`limit` 為單頁筆數；
+ * undefined 與空字串不進網址（所以「全部」分頁不帶 `status`）。回應含 `legend`、`summary`（整本帳計數，不受篩選與游標影響）。
+ */
+export function getIssues(opts: IssueOpts = {}): Promise<IssueListPage> {
+  return apiRequest<IssueListPage>("/api/v1/issues", {
+    query: { status: opts.status, source: opts.source, since: opts.since, limit: opts.limit },
+    signal: opts.signal,
+  });
+}
+
+/** 單筆議題（含 `raw`、`timeline`；沒有 `legend`、`summary`）：`id` 以 encodeURIComponent 編成單一路徑段；不收查詢參數；查無回 404 `si_not_found`。 */
+export function getIssue(id: string, opts: Opts = {}): Promise<IssuePage> {
+  return apiRequest<IssuePage>(`/api/v1/issues/${seg(id)}`, { signal: opts.signal });
+}
+
+/** 設定或更新優先順序（僅 ADMIN）：本文 `{ rank, note }` 原樣 `JSON.stringify`；成功回寫入的那一列。 */
+export function putIssuePriority(id: string, body: IssuePriorityRequest): Promise<IssuePriorityResponse> {
+  return apiRequest<IssuePriorityResponse>(`/api/v1/issues/${seg(id)}/priority`, { method: "PUT", body });
+}
+
+/** 清除優先順序（僅 ADMIN）：204、冪等（列不存在也 204）；不呼叫 Bridge，所以議題已結案或已不存在時仍清得掉遺留的列。 */
+export function deleteIssuePriority(id: string): Promise<void> {
+  return apiRequest<void>(`/api/v1/issues/${seg(id)}/priority`, { method: "DELETE" });
 }

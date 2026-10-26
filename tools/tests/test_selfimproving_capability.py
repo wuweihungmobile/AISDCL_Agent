@@ -1,8 +1,8 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（48 個鍵：36 `ro`、8 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
-1 `rw`）；判準函式 `capability_problems`
+登記表 `CAPABILITY` 住本檔（51 個鍵：39 `ro`、8 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
+1 `rw`；議題中心增 3 `ro`）；判準函式 `capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
 故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
@@ -67,6 +67,9 @@ CAPABILITY: dict[str, str] = {
             "capacity",
             "retire",
             "churn",
+            "issuemap",
+            "issues",
+            "issues_items",
         )
     },
     **{
@@ -328,7 +331,7 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 36, "rw": 8, "net": 2, "exec": 2})
+        self.assertEqual(counts, {"ro": 39, "rw": 8, "net": 2, "exec": 2})
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
             "verify.py"})
         net_importers, subproc = set(), set()
@@ -407,7 +410,7 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 48)
+        self.assertEqual(len(CAPABILITY), 51)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
@@ -645,7 +648,7 @@ class TestP3Registry(unittest.TestCase):
         counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
         optional = (PKG / "meaplan.py").exists()
         self.assertEqual((len(CAPABILITY), counts),
-                         (48, (36, 8, 2, 2)) if optional else (47, (35, 8, 2, 2)))
+                         (51, (39, 8, 2, 2)) if optional else (50, (38, 8, 2, 2)))
         for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
             self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
         self.assertEqual(CAPABILITY["meawrite.py"], "rw")

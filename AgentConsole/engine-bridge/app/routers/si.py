@@ -3,7 +3,9 @@
 
 **六個 GET**（P1b），每個請求恰啟動一次 `si_cli.run_export` 子行程（無快取、不寫任何檔）；200 時
 本文是子行程輸出**解析後的 export 物件逐值透傳**（鍵序保留、非 ASCII 不跳脫，Bridge 不增刪改任何
-鍵）。SI 不可用只影響 `/si/*`，不影響 `/health` 與 `/health/deep`。
+鍵）。SI 不可用只影響 `/si/*`，不影響 `/health` 與 `/health/deep`。**再加兩個議題中心的 GET**
+（`/si/issues`、`/si/issues/{id}`；TCS-IssueCenter-20261027 R-IC-45～R-IC-48）：同一條透傳路徑，
+清單另收 `status`、`source` 兩個篩選（本檔最末〈議題中心〉節）。
 
 輸入驗證在**子行程之前**：清單類只收 `since`（整數 ≥0）與 `limit`（整數 ≥1），其餘任何查詢參數
 （含 `/si/status` 與 `/si/proposals/{id}` 上的這兩個）一律 422 `invalid_request`
@@ -47,25 +49,34 @@ router = APIRouter(prefix="/si", tags=["si"])
 _PROP_ID = re.compile(r"PROP-SI-[0-9]{3,}")
 _DECIDE_ID = re.compile(r"(?:PROP|RUN)-SI-[0-9]{3,}")
 _OBS_ID = re.compile(r"OBS-SI-[0-9]{3,}")
+#: 議題 ID 三種格式（觀察、提案、缺陷；ASCII 數字、整串比對，與 backend 的 DB CHECK 同式）。
+_ISSUE_ID = re.compile(r"(?:OBS-SI-[0-9]{3,}|PROP-SI-[0-9]{3,}|DEF-[0-9]+-[0-9]+)")
 _LIST_PARAMS = frozenset({"since", "limit"})
+_ISSUE_LIST_PARAMS = frozenset({"since", "limit", "status", "source"})
+#: 議題中心 `status`／`source` 篩選值的長度上限（字元＝code point）。
+SI_FILTER_MAX_CHARS = 64
 #: 寫入類與預檢請求本文的上限（位元組）。
 SI_WRITE_BODY_MAX_BYTES = 65536
 #: 稽核 JSON 的外層鍵集合（恰此七個；W3、W7）。
 _OUTER_KEYS = ("schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac")
 
 
+def _unknown_param_violations(request: Request, allowed: frozenset[str]) -> list[dict[str, str]]:
+    return [{"field": name, "rule": "unknown_parameter", "message": f"不收查詢參數 {name!r}"}
+            for name in request.query_params if name not in allowed]
+
+
 def _reject_unknown_params(request: Request, allowed: frozenset[str]) -> None:
-    unknown = [name for name in request.query_params if name not in allowed]
+    unknown = _unknown_param_violations(request, allowed)
     if unknown:
-        raise ApiError(422, "invalid_request", violations=[
-            {"field": name, "rule": "unknown_parameter", "message": f"不收查詢參數 {name!r}"}
-            for name in unknown])
+        raise ApiError(422, "invalid_request", violations=unknown)
 
 
 def _export(request: Request, kind: str, *, since: int | None = None,
-            limit: int | None = None, ident: str | None = None) -> dict[str, Any]:
+            limit: int | None = None, status: str | None = None, source: str | None = None,
+            ident: str | None = None) -> dict[str, Any]:
     return si_cli.run_export(request.app.state.settings.si_root, kind, since=since, limit=limit,
-                             ident=ident)
+                             status=status, source=source, ident=ident)
 
 
 @router.get("/status")
@@ -249,3 +260,59 @@ async def si_observation_validate(request: Request) -> JSONResponse:
     _parse_object(raw)
     result = await run_in_threadpool(si_cli.run_validate, request.app.state.settings.si_root, raw)
     return JSONResponse(result)
+
+
+# ── 議題中心：兩個唯讀 GET（TCS-IssueCenter-20261027 R-IC-45～R-IC-48、§C3）────────────────────
+def _filter_violations(field: str, value: str | None) -> list[dict[str, str]]:
+    """`status`／`source` 的輸入衛生（D-C1）：值要變成單一 argv 元素 `--<field>=<值>`，不合就在
+    子行程**之前**擋下。三條規則各自獨立、一次列全：超過 64 字元（`too_long`）、以 `-` 起頭
+    （`leading_dash`）、含 U+0000～U+001F 或 U+007F（`control_char`；NUL 會讓啟動子行程拋例外而回
+    500）。U+0080 以上的控制類字元（U+0085、U+009F…）不在拒絕範圍。空字串不特判：照傳給 CLI（rc 3
+    →503）。"""
+    if value is None:
+        return []
+    out: list[dict[str, str]] = []
+    if len(value) > SI_FILTER_MAX_CHARS:
+        out.append(_violation(field, "too_long", f"{field} 不得超過 {SI_FILTER_MAX_CHARS} 個字元"))
+    if value.startswith("-"):
+        out.append(_violation(field, "leading_dash", f"{field} 不得以 - 起頭"))
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        out.append(_violation(field, "control_char",
+                              f"{field} 不得含控制字元（U+0000～U+001F、U+007F）"))
+    return out
+
+
+@router.get("/issues")
+def si_issues(request: Request, since: int | None = Query(default=None, ge=0),
+              limit: int | None = Query(default=None, ge=1),
+              status: str | None = Query(default=None),
+              source: str | None = Query(default=None)) -> JSONResponse:
+    """議題清單＝子行程 `export --json --kind issues` 的逐值透傳（含 `legend`、`summary`）。
+
+    `status`、`source` 的值是議題中心的中文篩選別名（根層 CLI 判準；這裡不驗成員、不展開別名），
+    CLI 不認得（含空字串）＝rc 3＝503 `si_unavailable`（`cause=nonzero_rc`）。"""
+    violations = (_unknown_param_violations(request, _ISSUE_LIST_PARAMS)
+                  + _filter_violations("status", status) + _filter_violations("source", source))
+    if violations:
+        raise ApiError(422, "invalid_request", violations=violations)
+    return JSONResponse(_export(request, "issues", since=since, limit=limit, status=status,
+                                source=source))
+
+
+@router.get("/issues/{id}",
+            responses={404: {"description": "格式合法但查無此議題（si_not_found）"}})
+def si_issue(request: Request, id: str) -> JSONResponse:
+    """單筆議題（`items` 恰一筆，含 `raw`、`timeline`；無 `legend`、`summary`）。
+    不收任何查詢參數。"""
+    ident = id                          # 參數名必須是路徑模板的 `id`；內文改用 ident 免遮蔽內建
+    violations = _unknown_param_violations(request, frozenset())
+    if not _ISSUE_ID.fullmatch(ident):
+        violations.append(_violation(
+            "id", "invalid_format", "id 須為 OBS-SI-<三位以上數字>、PROP-SI-<三位以上數字>"
+            " 或 DEF-<數字>-<數字>"))
+    if violations:
+        raise ApiError(422, "invalid_request", violations=violations)
+    obj = _export(request, "issues", ident=ident)
+    if not obj["items"]:
+        raise ApiError(404, "si_not_found", id=ident)
+    return JSONResponse(obj)

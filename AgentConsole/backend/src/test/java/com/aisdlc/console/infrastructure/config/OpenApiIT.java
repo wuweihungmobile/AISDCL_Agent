@@ -30,6 +30,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * SelfImproving P2b（TCS-SelfImprovingDecide-P2b）再加四個路徑——{@code /si/proposals/{id}/decide}、{@code /si/observations/{id}/close}、
  * {@code /si/observations/validate} 的 POST 與 {@code /si/console-writes} 的 GET——並讓 {@code /si/observations} 多一個 POST
  * （路徑 67→71、操作 76→81；只增不減）。
+ * 議題中心（TCS-IssueCenter-20261027）再加三個路徑——{@code /issues}（GET）、{@code /issues/{id}}（GET）、{@code /issues/{id}/priority}（PUT、DELETE）
+ * （路徑 71→74、操作 81→85；只增不減）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -115,7 +117,11 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/si/proposals/{id}/decide", List.of("post")),
             Map.entry("/api/v1/si/observations/{id}/close", List.of("post")),
             Map.entry("/api/v1/si/observations/validate", List.of("post")),
-            Map.entry("/api/v1/si/console-writes", List.of("get"))));
+            Map.entry("/api/v1/si/console-writes", List.of("get")),
+            // ── 議題中心：兩個唯讀 GET 與僅 ADMIN 的優先順序寫入（PUT、DELETE）──
+            Map.entry("/api/v1/issues", List.of("get")),
+            Map.entry("/api/v1/issues/{id}", List.of("get")),
+            Map.entry("/api/v1/issues/{id}/priority", List.of("delete", "put"))));
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -127,7 +133,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(71).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(74).containsExactlyElementsOf(EXPECTED.keySet());
         int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
@@ -135,7 +141,7 @@ class OpenApiIT extends AbstractApiIT {
                     .containsExactlyElementsOf(expected.getValue());
             operationCount += operations.size();
         }
-        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET 與 P2b 的五個新操作").isEqualTo(81);
+        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET、P2b 的五個新操作與議題中心的四個操作").isEqualTo(85);
     }
 
     /**
@@ -151,7 +157,7 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
                 "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
                 "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes");
-        assertThat(paths).hasSize(71);
+        assertThat(paths).hasSize(74);
         for (String path : si) {
             Map<String, Object> operations = docs.read("$.paths['" + path + "']");
             assertThat(operations.keySet()).as(path).doesNotContain("delete", "put", "patch");

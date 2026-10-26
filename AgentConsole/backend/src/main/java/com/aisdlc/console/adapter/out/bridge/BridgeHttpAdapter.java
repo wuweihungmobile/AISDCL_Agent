@@ -357,13 +357,15 @@ class BridgeHttpAdapter implements AgentBridge {
     //    全部連線 2s／讀取 20s、不重試 ────────────────────────────────────────────────────────────────────
 
     @Override
-    public SiExport siExport(String kind, Integer since, Integer limit, String id) {
+    public SiExport siExport(String kind, Integer since, Integer limit, String id, String status, String source) {
         StringBuilder url = new StringBuilder(endpoints.siBase()).append("/si/").append(kind);
         if (id != null) {
-            // 單筆：不帶 since／limit（Bridge 對 /si/proposals/{id} 的任何查詢參數一律 422）
+            // 單筆：不帶 since／limit／status／source（Bridge 對 /si/proposals/{id}、/si/issues/{id} 的任何查詢參數一律 422）
             url.append('/').append(pathSegment(id));
         } else if (!"status".equals(kind)) {
-            // /si/status 同樣不收任何查詢參數；清單類依序帶 since、limit（null 不進網址）
+            // /si/status 同樣不收任何查詢參數；清單類依序帶 since、limit、status、source（null 不進網址；空字串照送）。
+            // status／source 是議題中心的中文篩選別名：值先嚴格 percent-encode 再組網址——完整網址交給 URI.create，
+            // 漏編的空白、豎線、`%` 會使它拋例外而回 500，`&`、`=`、`#` 則會改變查詢字串的結構
             String separator = "?";
             if (since != null) {
                 url.append(separator).append("since=").append(since);
@@ -371,6 +373,14 @@ class BridgeHttpAdapter implements AgentBridge {
             }
             if (limit != null) {
                 url.append(separator).append("limit=").append(limit);
+                separator = "&";
+            }
+            if (status != null) {
+                url.append(separator).append("status=").append(queryValue(status));
+                separator = "&";
+            }
+            if (source != null) {
+                url.append(separator).append("source=").append(queryValue(source));
             }
         }
         // 網址已是完整、已編碼的 URI：不再交給範本引擎（它會把已編好的 % 再編一次，也無法表達「整段為 .／.. 時點字元編成 %2E」）
@@ -440,6 +450,21 @@ class BridgeHttpAdapter implements AgentBridge {
      * 正規化掉（TCS-P1b R7、⚖ 29）。
      */
     static String pathSegment(String raw) {
+        String encoded = strictPercentEncode(raw);
+        return ".".equals(encoded) || "..".equals(encoded) ? encoded.replace(".", "%2E") : encoded;
+    }
+
+    /**
+     * 把任意字串嚴格 percent-encode 成<b>單一查詢值</b>（議題清單的 {@code status}／{@code source}；TCS-IssueCenter-20261027 R-IC-51）：規則同
+     * {@link #pathSegment} 的編碼，只是沒有「整段為點」的特例（查詢值不會被當路徑穿越正規化）。非保留字元原樣、其餘 UTF-8 位元組一律 {@code %XX}，
+     * 所以 {@code &}、{@code =}、{@code #}、{@code +}、{@code %} 與空白都不會改變查詢字串的結構，也不會讓 {@code URI.create} 拋例外。
+     */
+    static String queryValue(String raw) {
+        return strictPercentEncode(raw);
+    }
+
+    /** RFC 3986 嚴格編碼：僅非保留字元（{@code A-Z a-z 0-9 - . _ ~}）原樣，其餘 UTF-8 位元組一律 {@code %XX}（大寫十六進位）。 */
+    private static String strictPercentEncode(String raw) {
         StringBuilder out = new StringBuilder();
         for (byte b : raw.getBytes(StandardCharsets.UTF_8)) {
             int c = b & 0xFF;
@@ -451,8 +476,7 @@ class BridgeHttpAdapter implements AgentBridge {
                 out.append('%').append(HEX[c >> 4]).append(HEX[c & 0xF]);
             }
         }
-        String encoded = out.toString();
-        return ".".equals(encoded) || "..".equals(encoded) ? encoded.replace(".", "%2E") : encoded;
+        return out.toString();
     }
 
     private static List<String> strings(Object value) {

@@ -66,7 +66,7 @@ public class SiMirrorQueryService implements SiMirrorUseCase {
             throw ValidationException.of("limit", "limit 須為 1 以上的整數");
         }
         try {
-            return bridge.siExport(kind, since, limit, id);
+            return bridge.siExport(kind, since, limit, id, null, null);
         } catch (BridgeRejectedException e) {
             throw SiBridgeErrors.map(e);
         }
