@@ -1662,12 +1662,7 @@ class TestR67CliFailsLoud(unittest.TestCase):
             )
 
     def test_prefix_abbreviation_is_rejected(self) -> None:
-        """`allow_abbrev=False`：打錯字不得被「好心地」補全成正確旗標。
-
-        WHY 這條要單獨測：argparse **預設**接受唯一前綴縮寫，於是少打一個字母會被解讀成
-        原旗標——看似無害，實則保留了一條「靠運氣正確」的路，與本檔「拼錯就要當場知道」
-        的主張自相矛盾。
-        """
+        """allow_abbrev=False：打錯字不得被補全成正確旗標（WHY 在史料檔）。"""
         self.assertEqual(SYNC.main(["--check-snapsho"]), 2)
         self.assertEqual(SYNC.main(["--check-snap"]), 2)
 
@@ -1847,11 +1842,7 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
     doc_loc TestR67SlowMeasurementWindowIsFingerprintBracketed WHY〉節。"""
 
     def test_mutation_inside_window_fails_loud_and_writes_nothing(self) -> None:
-        """窗口內樹變動 ⇒ 拋 `BaselineToolError`，且 ONBOARDING **一個 byte 都沒被改**。
-
-        「未寫入」與「有拋例外」要一起斷言：只擋不寫、卻靜默 rc=0，等於把「這次量測作廢」
-        這件事藏起來；只拋例外卻已寫了半份文件，則留下一份跨兩棵樹的紀錄。
-        """
+        """窗口內樹變動 ⇒ 拋 BaselineToolError 且文件零 byte 改動（WHY 在史料檔）。"""
         with _slow_window_sandbox(mutate_during_window=True) as (sandbox, _trees, state):
             doc = sandbox / "ONBOARDING.md"
             before_bytes = doc.read_bytes()
@@ -1868,11 +1859,7 @@ class TestR67SlowMeasurementWindowIsFingerprintBracketed(unittest.TestCase):
             )
 
     def test_guard_refuses_to_produce_the_false_green_artifact(self) -> None:
-        """先證明「假綠」確實可構造（fixture 有牙），再證明生產路徑拒絕產出它。
-
-        兩半缺一不可：只斷言「生產路徑會拋例外」的話，若哪天 fixture 漂移成「窗口內
-        其實沒改到樹」，測試會靜默轉成永遠綠——那正是本輪一直在治的病。
-        """
+        """先證明假綠可構造（fixture 有牙），再證生產路徑拒絕產出它（WHY 在史料檔）。"""
         with _slow_window_sandbox(mutate_during_window=True) as (sandbox, trees, _state):
             text = (sandbox / "ONBOARDING.md").read_text(encoding="utf-8-sig")
             # ── 前半：手工複製「壞形態」的產物（計數取自改動前的樹、指紋取自改動後的樹）──
@@ -6509,12 +6496,7 @@ class TestR78HandoffClaimsCarryLiveCommands(unittest.TestCase):
         )
 
     def test_the_newest_handoff_carries_its_own_lower_bound(self) -> None:
-        """最新一份交棒書必須**自己**收得到宣稱，不准靠舊輪的命中數補貼（第②道牙）。
-
-        🔴 跨文件加總會被舊輪的命中數永久撐綠（實測＝R89 收尾證據檔）。逐文件判準補上
-        之後，還必須擋住「把最新一份加進豁免表」這條最省力的關法——否則崩塌只是換個
-        位置重演。
-        """
+        """最新交棒書須自己收得到宣稱，不准靠舊輪補貼（第②道牙；WHY 在史料檔）。"""
         docs = self._docs()
         rel, text = max(docs, key=lambda pair: _handoff_round(pair[0]))
         self.assertNotIn(

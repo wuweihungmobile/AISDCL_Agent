@@ -3334,3 +3334,19 @@ if not blocking and transcript is not None and transcript.is_file():
 該分支結構上到不了。`arm_when_earned()` 改由原本就在的「早退之前、每次 PostToolUse 都走」
 那一處負責（`QuotaGateIsWiredToTheBurnPathTest.test_quota_halt_does_not_preempt_the_context_sentinel`
 仍鎖「halt 期間哨兵每一次都被武裝」）。
+
+### R214 doc_loc TestR67SlowMeasurementWindowIsFingerprintBracketed.test_mutation_inside_window_fails_loud_and_writes_nothing WHY
+
+（2026-10-26 收尾單人窗口自 `tools/tests/test_doc_loc_baseline_freshness_r60.py` 方法 docstring 搬入；分桶棘輪 shrink-only 桶 `prose` 以同檔史料搬遷抵銷 OBS-SI-206 回歸鎖的 +11。）「未寫入」與「有拋例外」要一起斷言：只擋不寫、卻靜默 rc=0，等於把「這次量測作廢」這件事藏起來；只拋例外卻已寫了半份文件，則留下一份跨兩棵樹的紀錄。
+
+### R214 doc_loc TestR67SlowMeasurementWindowIsFingerprintBracketed.test_guard_refuses_to_produce_the_false_green_artifact WHY
+
+兩半缺一不可：只斷言「生產路徑會拋例外」的話，若哪天 fixture 漂移成「窗口內其實沒改到樹」，測試會靜默轉成永遠綠——那正是該輪一直在治的病。
+
+### R214 doc_loc TestR67CliFailsLoud.test_prefix_abbreviation_is_rejected WHY
+
+這條要單獨測：argparse **預設**接受唯一前綴縮寫，於是少打一個字母會被解讀成原旗標——看似無害，實則保留了一條「靠運氣正確」的路，與該檔「拼錯就要當場知道」的主張自相矛盾。
+
+### R214 doc_loc TestR78HandoffClaimsCarryLiveCommands.test_the_newest_handoff_carries_its_own_lower_bound WHY
+
+🔴 跨文件加總會被舊輪的命中數永久撐綠（實測＝R89 收尾證據檔）。逐文件判準補上之後，還必須擋住「把最新一份加進豁免表」這條最省力的關法——否則崩塌只是換個位置重演。

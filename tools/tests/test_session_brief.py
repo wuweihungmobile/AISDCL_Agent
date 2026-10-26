@@ -843,9 +843,9 @@ class SiStatusLineTest(unittest.TestCase):
             check_statusline=lambda: {"installed": True}, **extra)
 
     def test_events_are_named_and_the_brief_only_detects(self) -> None:
-        got = self._line(_si_build_obj([("c", "DEF-200-901"), ("e", "memory_index")]))
+        got = self._line(_si_build_obj([("c", "defect-row-x"), ("e", "memory_index")]))
         self.assertIn("事件 2", got)
-        self.assertIn("有啟動事件（c DEF-200-901、e memory_index）", got)
+        self.assertIn("有啟動事件（c defect-row-x、e memory_index）", got)
         self.assertIn("run-open", got)
         self.assertIn("只偵測不自動開", got)
         self.assertNotIn("帳本自由文字", got, "detail 是帳本自由文字，不進簡報")
@@ -853,10 +853,10 @@ class SiStatusLineTest(unittest.TestCase):
         self.assertNotIn("\n", got)
 
     def test_at_most_five_events_are_listed(self) -> None:
-        got = self._line(_si_build_obj([("c", f"DEF-200-9{n:02d}") for n in range(7)]))
+        got = self._line(_si_build_obj([("c", f"defect-row-{n:02d}") for n in range(7)]))
         self.assertIn("事件 7", got)
-        self.assertIn("c DEF-200-904…）", got)
-        self.assertNotIn("DEF-200-905", got)
+        self.assertIn("c defect-row-04…）", got)
+        self.assertNotIn("defect-row-05", got)
 
     def test_zero_events_say_no_event_and_point_at_the_closing_run(self) -> None:
         got = self._line(_si_build_obj())
@@ -865,7 +865,7 @@ class SiStatusLineTest(unittest.TestCase):
         self.assertTrue(got.startswith("事件 0｜運轉 0｜待決提案 0｜Console 待入帳 0｜"), got)
 
     def test_unavailable_sources_are_counted_not_hidden(self) -> None:
-        for events, says in (((), "無事件"), ((("c", "DEF-200-901"),), "有啟動事件")):
+        for events, says in (((), "無事件"), ((("c", "defect-row-x"),), "有啟動事件")):
             with self.subTest(says=says):
                 got = self._line(_si_build_obj(events, unavailable=["ledger-missing"]))
                 self.assertIn(says, got)
