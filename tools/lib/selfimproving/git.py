@@ -3,6 +3,8 @@
 每個呼叫一律 `subprocess.run`、`shell` 不為真、argv 以 `git -C <repo>` 起頭、帶 timeout
 與 UTF-8 解碼；列舉路徑的呼叫另帶 `-c core.quotepath=false`。git 不可用（找不到執行檔、
 不是工作樹、逾時）一律回 None／False，由呼叫端判成 blocking NE，不以預設值頂替。
+console-free：SessionStart 簡報（`session_brief.si_status_line`）在 pythonw 載具下呼叫本類，
+spawn 不帶 `CREATE_NO_WINDOW` 時 Windows 每次開視窗都閃一個黑框；POSIX 上該常數不存在、取 0。
 """
 
 from __future__ import annotations
@@ -59,7 +61,7 @@ class Git:
             return subprocess.run(
                 argv, capture_output=True, encoding="utf-8", errors="replace",
                 timeout=_TIMEOUT if timeout is None else timeout, shell=False, env=self._env(),
-                check=False)
+                check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired:
             self.timed_out = True
             return None

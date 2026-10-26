@@ -76,7 +76,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `block_bash_on_windows.py` | PreToolUse／Bash | Windows 上禁用 Bash 工具（鐵律一）；非 Windows 一律 exit 0 | 無（掌舵者直接指令） |
 | `lint_powershell_command.py` | PreToolUse／PowerShell | 擋「上游原生指令 × 提前結束的管線（`Select-Object`／`select` 的 `-First`／`-Index`）或原生消費者 × 之後讀 `$LASTEXITCODE`」（DEF-200-481 精準化：裸原生指令會重設 rc、函式／別名定義時停用重設；非截斷 cmdlet 消費者不再被擋；真機答案表＝`tools/lib/rc_after_pipe_real.py`；DEF-200-483 補洞：元素頭先剝賦值前綴、左段只取最近未閉合括號之後——`$o = git …`／`$(…)`／`(…)` 包住的上游一樣擋，已閉合分組 `(git x) | select -First 1` 放行；DEF-200-484 封閉左值族：型別標註／`${}`／逗號列／成員／索引賦值一樣剝、`${LASTEXITCODE}`／`$global:` 讀法與模組限定 `Select-Object` 一樣認、括號／`$( )` 內的裸原生視為重設 rc）、行首裸 `cd`／`Set-Location`（不論帶絕對／相對路徑或不帶參數；`Push-Location`／`Pop-Location` 不在此列）、裸 `bash` + `.sh`（鐵律一、二） | 行尾 `# ps-lint-ok: <WHY>`（獨立註解行無效） |
 | `block_destructive_git.py` | PreToolUse／Bash、PowerShell、Write、Edit、NotebookEdit | 毀滅性 git 形態阻斷（鐵律五）＋等待壞形態 `waitform_hits()`（鐵律六）＋治理檔禁寫（PRD §15.5 紅線 10：`AUTOSDD_UNATTENDED` 下保護面唯讀） | `AUTOSDD_GIT_GUARD_OFF`（模型碰不到，須在啟動 claude 前設）；`AUTOSDD_GOVWRITE_GUARD_OFF`（治理面唯讀專屬，與 git 族開關互不相通）；行內 `# git-guard-ok: <理由>`／`# waitform-ok: <WHY>`（`AUTOSDD_UNATTENDED` 有設時行內豁免無效） |
-| `context_budget_guard.py` | SessionStart（清哨兵閂鎖＋真實水位簡報；武裝延後到 PostToolUse 累積夠工作量）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；**PreToolUse** matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們；額度 halt 帶的 PostToolUse 只提醒一次（非錯誤樣式），Agent／Task 帶 `model` 時依目標模型判額度軸 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
+| `context_budget_guard.py` | SessionStart（清哨兵閂鎖＋真實水位簡報；武裝延後到 PostToolUse 累積夠工作量）；PostToolUse（Read／Task／Grep／Glob／WebFetch／WebSearch／Bash／PowerShell：水位出聲）；PreToolUse（Task／WebFetch／WebSearch／Agent／Workflow：高水位**真的擋下**展開型工具） | context 三段式水位的機械物（見下節）；SessionStart 簡報末段另帶自我精進 `si status` 摘要（`tools/lib/session_brief.py::si_status_line`，唯讀、≤0.5 s、只出聲不開迴圈；有啟動事件時由主控依 Operations SOP〈啟動條件〉`run-open`；掌舵者 2026-10-26 問題 3「如何自動啟動」）；**PreToolUse** matcher 刻意不含 Read／Edit／PowerShell——收斂本身需要它們；額度 halt 帶的 PostToolUse 只提醒一次（非錯誤樣式），Agent／Task 帶 `model` 時依目標模型判額度軸 | `AUTOSDD_CONTEXT_GUARD_OFF`（context 阻斷）／`AUTOSDD_SENTINEL_OFF`（額度哨兵）——**刻意兩個開關**，關掉的是不同的東西 |
 | `check_claim_provenance.py` | Stop | 鐵律四的機械物：量化判決宣稱（`N passed`／`rc=N`…）必須在本場自己的 tool_result 出現過；**只出聲、永不阻斷**；轉述別包交件標 `[他包回報]` | `AUTOSDD_CLAIM_GUARD_OFF`；`AUTOSDD_UNATTENDED` 有設時詞表縮到只認方括號標記 |
 | `check_ps1_encoding.py` | PostToolUse／Write、Edit | `.ps1` 寫入當下就地補回 CRLF（橋接自 AutoClaude tools/hooks） | 無 |
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
@@ -395,6 +395,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | AISDLC_SDD 版本／資產計數 | [AISDLC_SDD/FRAMEWORK_STATUS.md](AISDLC_SDD/FRAMEWORK_STATUS.md) |
 | AutoClaude Plugin／Port 計數 | AutoClaude/CLAUDE.md 的 `[Architecture Snapshot]` |
 | CI／本機 xdist worker 數（多 CPU 預算） | `python tools/lib/cpu_budget.py --legs 1`（SSOT＝`tools/lib/cpu_budget.py`；見〈GitHub CI/CD 一律多 CPU 模式〉） |
+| 自我精進（SelfImproving）啟動事件——迴圈只由五類事件啟動、沒有排程 | `python tools/selfimproving.py status`（視窗開場那次由 SessionStart 簡報機械代跑、收尾由主控手跑一次；印「無事件」＝不開運轉；有事件＝依 `docs/05_development/SelfImproving_Operations_SOP.md`〈啟動條件〉判定後 `run-open`；帳本現況 `python tools/selfimproving.py check`） |
 
 ---
 

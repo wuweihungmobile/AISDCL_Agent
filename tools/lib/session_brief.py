@@ -52,6 +52,10 @@ SDD FSM 行八格＋SA-01 查證指令安全形態三格＋SA-02 人看得到的
 阻斷——Read 目標在 cwd 外、planner 現查也常要核准）；`rc2_clarify()` 的收斂型工具清單句只呼叫
 `quota_messages.convergent_tools_clause()`；`AUTOSDD_UNATTENDED` 有設時簡報追加治理檔唯讀一句。
 回歸鎖：`test_session_brief.py` 的 `ConvergentToolsClauseSingleHomeTest`／`ReadFallbackHintTest`。
+
+自我精進開場偵測（掌舵者問題 3「該如何自動啟動」；PRD AC-SI-03-1）：`si_status_line()` 在簡報尾端
+代跑 `si status`（唯讀、0.5 秒內）——只偵測、只出聲，不開運轉、不寫檔，也不新增 hook 條目、排程或
+常駐行程；任何例外收成「量不到」。回歸鎖：`test_session_brief.py` 的 `SiStatusLineTest`。
 """
 from __future__ import annotations
 
@@ -586,6 +590,65 @@ def _models_note(quota_gate: object) -> str:
         return ""
 
 
+#: 自我精進迴圈只由事件啟動（PRD AC-SI-03-1），事件偵測是 `si status`；視窗開場那一次由本檔機械
+#: 代跑、收尾那一次仍由主控手跑。以下三個函式只偵測、只出聲：不開運轉、不寫檔、不重試、不等待，
+#: 也不得長出常駐機制（禁字樣的判準見 `test_selfimproving_check.py` 的 AT-003-1-1）。
+_SI_MANUAL = "python tools/selfimproving.py status"
+
+
+def _si_build(repo: Path) -> dict:
+    """`si status` 的唯讀取數，寫法同 `tools/selfimproving.py::_status`。套件在呼叫當下才 import
+    （其餘時候 SessionStart 不付這個成本）：`tools/` 掛上 `sys.path` 後以 `lib.selfimproving`
+    解析，與入口 `selfimproving.py`、各測試同一條路；`tools.lib.…` 需要 repo 根在 `sys.path`
+    上，hook 行程沒有。"""
+    _tools_on_path()
+    from lib.selfimproving import capacity, check, status  # noqa: PLC0415 — 見上：刻意延遲
+    from lib.selfimproving.git import Git  # noqa: PLC0415 — 見上
+    params = check.params_for(repo, *capacity.PARAM_KEYS, *status.MEASURE_KEYS)
+    return status.build(repo, Git(repo), params)
+
+
+def _si_cells(obj: dict) -> str:
+    """統計那一行。`status` 不是 `read` 的來源印 NE、不寫成 0（NOT-EVALUABLE 不得印成零，見
+    `lib/selfimproving/status.py` 檔頭）。"""
+    def cell(block: dict, pick: Callable[[dict], object]) -> object:
+        return pick(block) if block["status"] == "read" else "NE"
+    measuring = cell(obj["measure"], lambda m: sum(w["state"] == "measuring" for w in m["windows"]))
+    over = cell(obj["capacity"], lambda c: "、".join(c["over_cap"]) or "無")
+    return (f"事件 {len(obj['events_detected'])}｜運轉 {len(obj['open_runs'])}"
+            f"｜待決提案 {len(obj['pending_props'])}"
+            f"｜Console 待入帳 {cell(obj['console_pending'], lambda c: c['count'])}"
+            f"｜量測窗 measuring={measuring}｜容量 over_cap={over}")
+
+
+def si_status_line(root: Path | None = None, *,
+                   build: Callable[[Path], dict] | None = None) -> str:
+    """自我精進的開場事件偵測：一行（不含換行）統計加一句指引；唯讀、不寫檔、不重試、不等待。
+
+    `build` 是測試注入縫（缺席＝`_si_build`，真的取 `si status` 的數）；`root` 缺席時取
+    `CLAUDE_PROJECT_DIR`（Claude Code 注入），再缺席取本檔所在的 checkout。**任何例外**（import
+    失敗、帳本缺席、git 不可用、取數結果形狀不符…）一律收成「量不到」加手跑指令、絕不拋出——
+    簡報失敗不得反過來擋 SessionStart（檔頭 fail-open 紀律）。有事件時只列 `trigger subject`
+    （最多 5 筆），不引 `detail`（那是帳本自由文字）；要不要開運轉仍是主控依 SOP〈啟動條件〉的判斷。
+    """
+    try:
+        repo = root or Path(os.environ.get("CLAUDE_PROJECT_DIR")
+                            or Path(__file__).resolve().parents[2])
+        obj = (build or _si_build)(repo)
+        events, missing = obj["events_detected"], len(obj["unavailable"])
+        if events:
+            shown = "、".join(f"{e['trigger']} {e['subject']}" for e in events[:5])
+            guide = (f"⇒ 有啟動事件（{shown}{'…' if len(events) > 5 else ''}）：主控依 Operations "
+                     "SOP〈啟動條件〉開運轉（python tools/selfimproving.py run-open …）；"
+                     "本簡報只偵測不自動開")
+        else:
+            guide = f"無事件（收尾前主控再跑一次 {_SI_MANUAL}）"
+        return f"{_si_cells(obj)}；{guide}" + (f"（{missing} 個來源量不到）" if missing else "")
+    except Exception as exc:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不重試、不等待
+        why = (str(exc).splitlines() or [""])[0][:80]
+        return f"量不到（{type(exc).__name__}：{why}）——主控請手跑 {_SI_MANUAL}"
+
+
 def sessionstart_brief(
     payload: dict,
     quota_gate: object,
@@ -597,10 +660,15 @@ def sessionstart_brief(
     now: datetime | None = None,
     check_statusline: Callable[[], dict] = _default_check_statusline,
     guard: object = None,
+    si_status: Callable[[], str] | None = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
-    續跑逃生口 AUTOSDD_RESUME_OFF／AUTOSDD_SENTINEL_OFF 有設時另附 🔴 一句，DEF-200-561）。
+    續跑逃生口 AUTOSDD_RESUME_OFF／AUTOSDD_SENTINEL_OFF 有設時另附 🔴 一句，DEF-200-561；
+    末尾追加一段自我精進開場偵測 `si_status_line()`——只偵測、只出聲，見該函式）。
+
+    `si_status` 同為 keyword-only、帶預設：缺席＝呼叫當下的 `si_status_line`（真的取 `si status`
+    的數），測試注入替身以免依賴真帳本與真 git；既有呼叫逐字相容（只在尾端多一段）。
 
     `check_statusline` 是新增的 keyword-only 參數、帶預設值：`context_budget_guard.py`
     既有的六個位置引數呼叫（未傳這個新參數）逐字相容，不需要跟著改那一行呼叫。
@@ -623,8 +691,9 @@ def sessionstart_brief(
             window_evidence=window_evidence, read_context_feed=read_context_feed)
         quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
         statusline = statusline_line(check_statusline)
+        si_line = (si_status or si_status_line)()  # 與上同一個 stderr 吞噬區（DEF-200-344）
     lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。{_models_note(quota_gate)}"
            f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}"
-           f"{_hatch_note(quota_gate)}")
+           f"{_hatch_note(quota_gate)}；自我精進（si status，唯讀）：{si_line}")

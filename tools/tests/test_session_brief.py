@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import fnmatch
+import inspect
 import io
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -103,6 +105,20 @@ def _decided(active_model: str | None) -> tuple[str, ...]:
     policy, _problems = quota_policy.load_policy({})
     d = quota_policy.decide(_scoped_state(), _NOW, policy, active_model=active_model)
     return (str(d.cap), str(d.recommended_fanout), d.band, d.binding.kind if d.binding else "-")
+
+
+#: 真函式的參照，趕在 `setUpModule` 換成替身之前存下：`SiStatusLineTest` 直接測它。
+_REAL_SI_STATUS_LINE = sb.si_status_line
+
+
+def setUpModule() -> None:
+    """既有各格只關心簡報的其他段落，而 `sessionstart_brief` 的預設會真的讀帳本、真的 spawn git：
+    全檔換成固定替身，維持本檔的零 I/O 紀律，也免得兩次呼叫之間帳本被改而誤判不等（如
+    `test_nothing_known_is_byte_identical_to_the_legacy_call`）。真函式只在 `SiStatusLineTest`
+    以注入的 `build` 與一格 hook 載具煙測跑。"""
+    patcher = mock.patch.object(sb, "si_status_line", return_value="（測試替身：未讀帳本）")
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
 
 
 class QuotaLineTest(unittest.TestCase):
@@ -796,6 +812,170 @@ class EscapeHatchNoteTest(unittest.TestCase):
             raise OSError("env 讀不出來")
         self.assertEqual(sb._hatch_note(types.SimpleNamespace(policy_env=boom)), "")
         self.assertEqual(sb._hatch_note(types.SimpleNamespace()), "", "缺 policy_env 也不得擋簡報")
+
+
+def _si_build_obj(events=(), *, unavailable=(), console=None, measure=None, capacity=None) -> dict:
+    """`status.build` 回傳物件的最小仿品：只帶 `si_status_line` 讀的鍵（形狀由
+    `test_the_real_build_chain_is_reachable_from_the_hooks_import_path` 對真物件對帳）。"""
+    return {
+        "events_detected": [{"trigger": t, "subject": s, "detail": "帳本自由文字"}
+                            for t, s in events],
+        "unavailable": [{"trigger": "c", "reason": r} for r in unavailable],
+        "open_runs": [], "pending_props": [],
+        "console_pending": console or {"status": "read", "count": 0, "items": []},
+        "measure": measure or {"status": "read", "due": 0, "windows": []},
+        "capacity": capacity or {"status": "read", "axes": {}, "over_cap": []},
+    }
+
+
+class SiStatusLineTest(unittest.TestCase):
+    """掌舵者問題 3「自我精進該如何自動啟動」：迴圈只由事件啟動（PRD AC-SI-03-1），事件偵測
+    `si status` 的開場那一次由 SessionStart 簡報機械代跑（`si_status_line`）。只偵測、只出聲：
+    不開運轉、不寫檔、不重試、不等待。`build` 一律注入；真帳本與真 git 只在一格 hook 載具煙測。"""
+
+    def _line(self, obj: dict) -> str:
+        return _REAL_SI_STATUS_LINE(Path("."), build=lambda _repo: obj)
+
+    def _brief(self, **extra: object) -> str:
+        return sb.sessionstart_brief(
+            {"transcript_path": None}, _cache_miss_gate(), scan_transcript=None,
+            resolve_window=None, window_evidence=None, read_context_feed=None, now=_NOW,
+            check_statusline=lambda: {"installed": True}, **extra)
+
+    def test_events_are_named_and_the_brief_only_detects(self) -> None:
+        got = self._line(_si_build_obj([("c", "DEF-200-901"), ("e", "memory_index")]))
+        self.assertIn("事件 2", got)
+        self.assertIn("有啟動事件（c DEF-200-901、e memory_index）", got)
+        self.assertIn("run-open", got)
+        self.assertIn("只偵測不自動開", got)
+        self.assertNotIn("帳本自由文字", got, "detail 是帳本自由文字，不進簡報")
+        self.assertNotIn("無事件", got)
+        self.assertNotIn("\n", got)
+
+    def test_at_most_five_events_are_listed(self) -> None:
+        got = self._line(_si_build_obj([("c", f"DEF-200-9{n:02d}") for n in range(7)]))
+        self.assertIn("事件 7", got)
+        self.assertIn("c DEF-200-904…）", got)
+        self.assertNotIn("DEF-200-905", got)
+
+    def test_zero_events_say_no_event_and_point_at_the_closing_run(self) -> None:
+        got = self._line(_si_build_obj())
+        self.assertIn("無事件（收尾前主控再跑一次 python tools/selfimproving.py status）", got)
+        self.assertNotIn("有啟動事件", got)
+        self.assertTrue(got.startswith("事件 0｜運轉 0｜待決提案 0｜Console 待入帳 0｜"), got)
+
+    def test_unavailable_sources_are_counted_not_hidden(self) -> None:
+        for events, says in (((), "無事件"), ((("c", "DEF-200-901"),), "有啟動事件")):
+            with self.subTest(says=says):
+                got = self._line(_si_build_obj(events, unavailable=["ledger-missing"]))
+                self.assertIn(says, got)
+                self.assertTrue(got.endswith("（1 個來源量不到）"), got)
+        self.assertNotIn("來源量不到", self._line(_si_build_obj()))
+
+    def test_not_evaluable_prints_ne_never_a_zero(self) -> None:
+        ne = {"status": "NOT-EVALUABLE", "reason": "home-unavailable"}
+        got = self._line(_si_build_obj(console=ne, measure=ne, capacity=ne))
+        for cell in ("Console 待入帳 NE", "measuring=NE", "over_cap=NE"):
+            self.assertIn(cell, got)
+        windows = [{"state": "measuring"}, {"state": "measuring"}, {"state": "closed"}]
+        read = self._line(_si_build_obj(
+            console={"status": "read", "count": 3, "items": []},
+            measure={"status": "read", "due": 0, "windows": windows},
+            capacity={"status": "read", "axes": {}, "over_cap": ["memory_index", "prefs"]}))
+        for cell in ("Console 待入帳 3", "measuring=2", "over_cap=memory_index、prefs"):
+            self.assertIn(cell, read)
+
+    def test_any_exception_becomes_a_manual_hint_and_never_propagates(self) -> None:
+        def boom(_repo: Path) -> dict:
+            raise RuntimeError("boom")
+        got = _REAL_SI_STATUS_LINE(Path("."), build=boom)
+        self.assertIn("量不到（RuntimeError：boom）", got)
+        self.assertIn("主控請手跑 python tools/selfimproving.py status", got)
+        for exc in (OSError("帳本缺席"), ImportError("lib"), ValueError("長" * 500 + "\n第二行")):
+            def raiser(_repo: Path, exc: Exception = exc) -> dict:
+                raise exc
+            with self.subTest(exc=type(exc).__name__):
+                one = _REAL_SI_STATUS_LINE(Path("."), build=raiser)
+                self.assertIn(f"量不到（{type(exc).__name__}：", one)
+                self.assertNotIn("\n", one)
+                self.assertLess(len(one), 200)
+        self.assertIn("量不到（KeyError", self._line({}), "取數結果形狀不符也是例外，不得拋出")
+
+    def test_the_root_comes_from_the_arg_then_the_env_then_this_checkout(self) -> None:
+        seen: list[Path] = []
+
+        def spy(repo: Path) -> dict:
+            seen.append(repo)
+            return _si_build_obj()
+        fake = _REPO_ROOT / "no-such-project"
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(fake)}):
+            _REAL_SI_STATUS_LINE(build=spy)
+            _REAL_SI_STATUS_LINE(_REPO_ROOT / "explicit", build=spy)
+            os.environ.pop("CLAUDE_PROJECT_DIR")
+            _REAL_SI_STATUS_LINE(build=spy)
+        self.assertEqual(seen, [fake, _REPO_ROOT / "explicit", _REPO_ROOT])
+
+    def test_the_brief_carries_the_line_as_its_last_segment(self) -> None:
+        stub = "事件 0｜（測試替身）"
+        got = self._brief(si_status=lambda: stub)
+        self.assertTrue(got.endswith(f"；自我精進（si status，唯讀）：{stub}"), got[-200:])
+        for kept in ("[SDD-CTX-GUARD]", "--check", "--pace", "rc=2", "statusLine：已安裝"):
+            self.assertIn(kept, got)
+
+    def test_without_an_injection_the_default_is_si_status_line(self) -> None:
+        with mock.patch.object(sb, "si_status_line", return_value="預設路徑的替身") as spy:
+            got = self._brief()
+        spy.assert_called_once_with()
+        self.assertTrue(got.endswith("；自我精進（si status，唯讀）：預設路徑的替身"), got[-200:])
+
+    def test_a_builds_stderr_noise_does_not_leak_to_the_caller(self) -> None:
+        """比照 `test_a_dependencys_stderr_noise_does_not_leak_to_the_caller`（DEF-200-344）：
+        `si_status_line` 的呼叫必須在 `sessionstart_brief` 的 stderr 吞噬區內。"""
+        calls: list[int] = []
+
+        def noisy(_repo: Path) -> dict:
+            calls.append(1)
+            sys.stderr.write("selfimproving fail-open: synthetic noise\n")
+            return _si_build_obj()
+        outer = io.StringIO()
+        with contextlib.redirect_stderr(outer):
+            got = self._brief(si_status=lambda: _REAL_SI_STATUS_LINE(Path("."), build=noisy))
+        self.assertEqual(len(calls), 1, "夾具沒有真的跑到 build，本案例是空轉")
+        self.assertEqual(outer.getvalue(), "", "build 的 stderr 噪音外洩到呼叫端")
+        self.assertIn("自我精進（si status，唯讀）：事件 0", got)
+
+    def test_the_real_build_chain_is_reachable_from_the_hooks_import_path(self) -> None:
+        """注入的 `build` 看不到 import 路徑與取數形狀的壞：`si_status_line` 把一切例外收成
+        「量不到」，真鏈壞了只會靜默變成那一句。這一格以 hook 的載入形態（`-I` 隔離，`sys.path`
+        只有 `tools/lib`）跑真的 `_si_build` 與 `si_status_line`，並以真物件的鍵對帳仿品。"""
+        probe = ("import json, sys\n"
+                 "sys.path.insert(0, sys.argv[1])\n"
+                 "import session_brief as sb\n"
+                 "from pathlib import Path\n"
+                 "root = Path(sys.argv[2])\n"
+                 "obj = sb._si_build(root)\n"
+                 "print(json.dumps({'line': sb.si_status_line(root), 'obj': obj}))\n")
+        cp = subprocess.run(
+            [sys.executable, "-I", "-c", probe, str(_REPO_ROOT / "tools" / "lib"),
+             str(_REPO_ROOT)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=120, check=False)
+        self.assertEqual(cp.returncode, 0, cp.stderr)
+        got = json.loads(cp.stdout)
+        self.assertTrue(got["line"].startswith("事件 "), "真鏈落到了「量不到」：" + got["line"])
+        self.assertLessEqual(set(_si_build_obj()), set(got["obj"]), "仿品的鍵超出真 build 的鍵")
+        for key in ("console_pending", "measure", "capacity"):
+            self.assertIn(got["obj"][key]["status"], ("read", "NOT-EVALUABLE"), key)
+
+    def test_the_new_functions_grow_no_resident_mechanism(self) -> None:
+        """AT-003-1-1 的禁字樣表只掃 SI 套件、不含本檔；開場偵測的三個函式同守（只偵測、不長常駐
+        機制）。完整禁表以該測試為準，這裡只列與「等待、排程、常駐」直接相關的字樣。"""
+        banned = re.compile(
+            r"schtasks|launchctl|crontab|ScheduleWakeup|CronCreate|Register-ScheduledTask|"
+            r"apscheduler|threading|sched\.scheduler|time\.sleep|while\s+True|"
+            r"daemon\s*=\s*True|os\.fork|signal\.alarm")
+        self.assertTrue(banned.search("time.sleep(1)"), "掃描式自己要能紅")
+        for fn in (sb._si_build, sb._si_cells, _REAL_SI_STATUS_LINE):
+            self.assertIsNone(banned.search(inspect.getsource(fn)), fn.__name__)
 
 
 class QuotaLineActiveModelTest(unittest.TestCase):

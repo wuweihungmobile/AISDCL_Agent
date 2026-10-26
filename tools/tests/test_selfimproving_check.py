@@ -1985,6 +1985,25 @@ class TestCli(SiCase):
                     self.assertTrue(ok, f"{src.name} imports {mod}")
                     self.assertNotIn(mod, banned)
 
+    def test_Git_run_is_console_free_on_windows(self):
+        """SessionStart 簡報在 pythonw 載具下跑 `si status`（`session_brief.si_status_line`）：
+        git 的 spawn 不帶 `CREATE_NO_WINDOW`，Windows 每次開視窗都閃一個黑框。判準＝每個 git
+        呼叫都帶 `creationflags`＝`getattr(subprocess, "CREATE_NO_WINDOW", 0)`（POSIX 為 0）。"""
+        want = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        seen = []
+
+        def rec(argv, **kw):
+            seen.append(kw)
+            return subprocess.CompletedProcess(argv, 0, "true\n", "")
+
+        git = selfimproving.Git(ROOT)
+        with mock.patch.object(subprocess, "run", rec):
+            self.assertTrue(git.available)
+            self.assertTrue(git.is_commit("HEAD"))
+        self.assertEqual(len(seen), 2)
+        for kw in seen:  # 只比 creationflags 一個值：失敗訊息不得把整包 kwargs（含 env）印進日誌
+            self.assertEqual(kw.get("creationflags"), want, "git spawn 沒帶 CREATE_NO_WINDOW")
+
     def test_AT_030_3_1_fingerprint(self):
         repo = baseline()
         r1 = self.run_main(["check", "--repo", str(repo), "--json"])[1]
