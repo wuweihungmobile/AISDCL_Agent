@@ -63,7 +63,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### 🔴 派工模型與凍結常態規則（掌舵者 2026-10-20 直接指令，sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）
 
-- **模型角色**：主控＝互動視窗啟動時選的模型（掌舵者現行 Fable 5.1，原文「Fable當用則用」）；**子代理一律 Sonnet**（原文「請派Subagent時, 使用Sonnet 5！」）。機械物＝`.claude/settings.json` 的 `env.CLAUDE_CODE_SUBAGENT_MODEL=sonnet`（Claude Code 官方環境變數：未明寫 `model` 的 Agent 呼叫一律落 Sonnet，掌舵者不必每輪重述；無人喚醒窗口另由 `env.shared` 的 `AUTOSDD_MODEL_SUBAGENT` 經 `tools/lib/model_roles.py` 注入同一變數，要換模型改這兩處）。主控派工時仍**明寫 `model: sonnet`** 作第二道（官方文件對 `inherit` 值與逐次參數的優先序有爭議紀錄，不賭）；只有掌舵者明示某一棒要用別的模型才改。
+- **模型角色**：主控＝互動視窗啟動時選的模型（掌舵者現行 Fable 5.1，原文「Fable當用則用」）；**子代理一律 Sonnet**（原文「請派Subagent時, 使用Sonnet 5！」）。機械物＝`.claude/settings.json` 的 `env.CLAUDE_CODE_SUBAGENT_MODEL=sonnet`（Claude Code 官方環境變數：未明寫 `model` 的 Agent 呼叫一律落 Sonnet，掌舵者不必每輪重述；無人喚醒窗口另由 `env.shared` 的 `AUTOSDD_MODEL_SUBAGENT` 經 `tools/lib/model_roles.py` 注入同一變數，要換模型改這兩處）。主控派工時仍**明寫 `model: sonnet`** 作第二道（官方文件對 `inherit` 值與逐次參數的優先序有爭議紀錄，不賭）；只有掌舵者明示某一棒要用別的模型才改。🔴 **不用 `subagent_type: fork`**：fork 一律跑主控模型、`model` 覆寫被忽略（Agent 工具說明逐字；OBS-SI-293），要續棒用 SendMessage、要給上下文就寫進任務書。
 - **凍結常態規則**（原文「若SelfImproving.prd各方驗證都沒問題, 即可凍結實作! ==> 改成常態規則」；此前兩輪是逐輪預先核准）：SDD 流程（BRIDGE §8）的 `spec-frozen` 人工閘，在「該階段 SCG／QA 獨立審查 PASS，且主控親驗（指令 rc 真跑）無 P1／P2 未結」時由主控代執行，`--approver` 填 `掌舵者（常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13；主控執行）`、`--reason` 引該審查報告座標與親驗摘要；掌舵者可隨時以 T1 推翻或要求回問。**不適用**（仍只准人解）：ESCALATION／ESCALATION_FINAL 的恢復（R-9.5、禁令 6）、守衛面准入、SelfImproving 的 K=1 PROP 決定（DEC 只認掌舵者真人發言）。
 
 ---
@@ -87,7 +87,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 ### 權限姿態（harness 層，不是 hook；R196 裁決）
 
 - 互動視窗自 Claude Code 2.1.283 起**內建起始模式＝auto**（changelog 原文：2.1.283 先限第三方供應商／關閉遙測者，2.1.284 擴及所有方案與供應商；R197 文件查證）。官方文件（permission-modes#protected-paths）：auto 下寫入 `.claude/**` 等受保護路徑一律交分類器、`permissions.allow` 不能預先放行；分類器不可用時**拒絕而非詢問**。這不是 hook 阻斷——拒絕文字開頭是 `Permission for this action was denied by the Claude Code auto mode classifier`。
-- **常態維持 auto**（唯一能無人看管的互動姿態）。要套 `.claude/` 批次（hook／settings）時：Shift+Tab 兩下切到 acceptEdits、在 `.claude` 詢問框選「allow … .claude folder for this session」，套完切回 auto；auto 下被拒一次 ⇒ `/permissions` → Recently denied → 按 `r` 人工核准重試。**不要**改派子代理或換路徑繞過；子代理成品一律 staged 到 scratchpad 交主控。
+- **常態維持 auto**（唯一能無人看管的互動姿態）。要套 `.claude/` 批次（hook／settings）時：Shift+Tab 兩下切到 acceptEdits、在 `.claude` 詢問框選「allow … .claude folder for this session」，套完切回 auto；auto 下被拒一次 ⇒ `/permissions` → Recently denied → 按 `r` 人工核准重試（需 Claude Code ≥ 2.1.307：更早版本 Recently denied 不顯示被拒的 shell 指令，分類器重試時也忽略該處核准；`claude --version` 現查；OBS-SI-285）。**不要**改派子代理或換路徑繞過；子代理成品一律 staged 到 scratchpad 交主控。
 - 否決兩案：寫 hook 對 `.claude/hooks/**` 回 allow（守衛層自己改自己，正是分類器 `[Self-Modification]` 要擋的事）；專案 `settings.json` 設 `defaultMode`（改變全隊預設姿態，且設 auto／bypassPermissions 不生效）。本機母體（近 21 天 41 個互動視窗、6,613 次呼叫）的 98 筆 `toolDenialKind`：hook 90／路徑保護 6／分類器 2，分類器 2 筆皆為主控改 `.claude/` 時。
 
 ### 守衛面准入（R197 裁決：量、不挖）
@@ -134,7 +134,7 @@ claude -p --model haiku --debug hooks --debug-file h.log "ok"; grep 'Hook Sessio
 
 - **額度 ≠ context 水位**：撞額度那一刻水位可能很低，context 守衛全數放行。「額度耗盡」是 API 層失敗，**hook 體系沒有任何觸發點** ⇒ 只能**預防性**武裝：SessionStart 清閂鎖、PostToolUse 累積夠工作量即自動 `--arm-sentinel`（Windows schtasks／macOS launchd，巡邏**只讀逐字稿、零 token**；讀到未處理撞線才轉續航排程）。「撞了沒」寫在逐字稿裡讀檔即知；「額度回來了沒」只能問伺服器——這個不對稱是哨兵成立的原因。
 - **reset 時刻是滾動視窗，只能觀測不能算**：解不出時刻一律**拒絕武裝**，不准退回「假設 5 小時」；分佈現查 `python tools/probe/reset_window_distribution.py`。
-- **哨兵的「session 還活著」判準＝對話記錄（`assistant`／人類或 `auto-continuation` 的 `user` 記錄時間戳），不是檔案 mtime**（DEF-200-560：harness 的 `away_summary`／每小時 `cost-state` 會讓 mtime 一直在動，2026-10-21 哨兵因此空巡 16 次）；harness 2.1.303 的寬限提示（`usageLimitNote:"wrap_up"`；其後的 `"release"` 是續接訊號、不是提示）／切斷通知（`continuing automatically at`）／`auto-continuation` 記錄由 `tools/lib/transcript_activity.py` 辨識（DEF-200-562）：自願收尾後靜止一個巡邏間隔即探測續跑、被切斷且視窗仍開時由 harness 自己續接；`AUTOSDD_RESUME_OFF`／`AUTOSDD_SENTINEL_OFF` 有設時 SessionStart 簡報與 `--pace` 會印 🔴（DEF-200-561）。設計全文 ADR-XPLAT-004 §2.10。
+- **哨兵的「session 還活著」判準＝對話記錄（`assistant`／人類或 `auto-continuation` 的 `user` 記錄時間戳），不是檔案 mtime**（DEF-200-560：harness 的 `away_summary`／每小時 `cost-state` 會讓 mtime 一直在動，2026-10-21 哨兵因此空巡 16 次）；harness 2.1.303 的寬限提示（`usageLimitNote:"wrap_up"`；其後的 `"release"` 是續接訊號、不是提示）／切斷通知（`continuing automatically at`）／`auto-continuation` 記錄由 `tools/lib/transcript_activity.py` 辨識（DEF-200-562）：自願收尾後靜止一個巡邏間隔即探測續跑、被切斷且視窗仍開時由 harness 自己續接（例外：電腦睡眠逾約 30 分＝官方 Notification `quota_auto_resume_stale`，harness 改等 Enter、不自動續跑，此時沒有續接記錄，由 `transcript_activity.grace_verdict` 的 probe 分支兜底；OBS-SI-283）；`AUTOSDD_RESUME_OFF`／`AUTOSDD_SENTINEL_OFF` 有設時 SessionStart 簡報與 `--pace` 會印 🔴（DEF-200-561）。設計全文 ADR-XPLAT-004 §2.10。
 - **雙駕駛（DEF-200-564／565，ADR-XPLAT-004 §2.11）**：harness 自動續接記錄（`auto-continuation`／`release`）＝撞線事件已處理；一個巡邏間隔內另有人在動 ⇒ 哨兵 patrol、`_run_resume` 拒 spawn；spawn 後同一份逐字稿 ≥2 條鏈頭 ⇒ relay `OTHER_DRIVER_STOP`。判準單一家＝`tools/lib/transcript_activity.py`；重放＝`tools/probe/sentinel_decide_replay.py --sid <sid> --now <ISO>`。
 - 兩條閾值的方向鎖具名測試：`test_the_patrol_interval_bounds_the_post_reset_dead_time`（巡邏間隔＝reset 後最壞死等時間的上界，只准調小）／`test_the_idle_threshold_outlives_a_whole_quota_window`（自我解除門檻須大於一個完整額度視窗）。註冊面與四分支判定＝`tools/tests/test_context_budget_guard.py::SentinelWiringTest`／`tools/tests/test_context_budget_guard.py::SentinelDecisionTest`。
 - 現查哨兵（**平台各一條，不要照抄另一邊**）：Windows 用 `Get-ScheduledTask`（見下方取證規則，憑證＝NextRunTime 值）；macOS 用 `launchctl list` 過濾 AutoSDD_Sentinel_（**憑證是 rc，不是時間值**——launchd 從不報下次幾點跑）。
@@ -197,7 +197,7 @@ Get-ScheduledTask | Where-Object TaskName -like 'AutoSDD_Sentinel_*' | Get-Sched
 - **引擎差異**：PowerShell 工具跑的是 pwsh 7.x（Core）；凡標的是 **PS 5.1 語意**者（`tools/windows_smoke_local.ps1`、`tools/install_windows_nightly.ps1`、任何 schtasks Action）**一律顯式外呼** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <絕對路徑>`。
 - **讀 rc 不接管線**：提前結束管線的元素會污染 `$LASTEXITCODE`，且污染值隨引擎而異（pwsh 7.x 保留前值＝真紅讀成綠；5.1 寫入 -1）——沒有一個方向可以靠記憶避開。要看輸出就先接到變數，或讓 Python 用 `subprocess.run(...).returncode` 取。機械物＝`lint_powershell_command.py`。
 - **執行 `.sh`**：PowerShell 內用 repo SSOT 解析 Git Bash ＋ 正斜線路徑：`. "$(git rev-parse --show-toplevel)/tools/lib/Find-GitBash.ps1"; & (Find-GitBash) '<正斜線腳本路徑>'`。❌ 不可帶 bash 的 `-n` 旗標（noexec＝只檢查語法不執行，rc=0 是假綠——本檔曾教錯此形態，2026-09-01 實測踩坑後訂正）；❌ 不可裸 `bash <script>`（`Get-Command bash` 解析到 system32 的 WSL 佔位版、反斜線分隔符會被吃掉）；❌ 不可寫死安裝路徑（一台機器的偶然事實不得成為本檔常數，`Find-GitBash` 才是 SSOT）。
-- **讀檔／搜尋／算行數用 Read／Grep 工具**，不經 shell：編碼邊界**雙向**都會出錯（CP950↔UTF-8 兩向皆有實證假數字）；要在 shell 內讀就必須指名 `-Encoding utf8`。
+- **讀檔／搜尋／算行數用 Read／Grep 工具**，不經 shell：編碼邊界**雙向**都會出錯（CP950↔UTF-8 兩向皆有實證假數字）；要在 shell 內讀就必須指名 `-Encoding utf8`；原生指令輸出含中文要落檔時，由 Python 以 `encoding="utf-8"` 自己寫，或同一次呼叫內先 `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)` 再重導向；不要靠 `>`／`Out-File`（它們只管寫出端，管不到先前已依主控台 codepage 解碼成亂碼的字串；OBS-SI-305）。
 
 ### 鐵律二：一律絕對路徑，禁用裸 `cd`
 
@@ -441,9 +441,9 @@ Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.
 - Do NOT use me for: routing, retries, deterministic transforms.
 - If code can answer, code answers.
 
-### Rule 6 — Token budgets are not advisory
-- Per-task: 4,000 tokens. Per-session: 30,000 tokens.
-- If approaching budget, summarize and start fresh.
+### Rule 6 — Token budgets are declared per task, not fixed constants
+- 預算（回合・牆鐘・token）由**任務書宣告**；任務書沒宣告＝不另設 token 硬上限，但仍受 `python tools/session_resume_planner.py --pace` 的額度帶節制，實耗於交卷揭露。（OBS-SI-012：原本寫死的「每任務 4,000／每 session 30,000 tokens」與文獻查證、四方審查結構性不相容，2026-10-26 改為宣告制。）
+- If approaching the declared budget, summarize and start fresh.
 - Surface the breach. Do not silently overrun.
 
 ### Rule 7 — Surface conflicts, don't average them
