@@ -64,7 +64,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 ### 🔴 派工模型與凍結常態規則（掌舵者 2026-10-20 直接指令，sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）
 
 - **模型角色**：主控＝互動視窗啟動時選的模型（掌舵者現行 Fable 5.1，原文「Fable當用則用」）；**子代理一律 Sonnet**（原文「請派Subagent時, 使用Sonnet 5！」）。機械物＝`.claude/settings.json` 的 `env.CLAUDE_CODE_SUBAGENT_MODEL=sonnet`（Claude Code 官方環境變數：未明寫 `model` 的 Agent 呼叫一律落 Sonnet，掌舵者不必每輪重述；無人喚醒窗口另由 `env.shared` 的 `AUTOSDD_MODEL_SUBAGENT` 經 `tools/lib/model_roles.py` 注入同一變數，要換模型改這兩處）。主控派工時仍**明寫 `model: sonnet`** 作第二道（官方文件對 `inherit` 值與逐次參數的優先序有爭議紀錄，不賭）；只有掌舵者明示某一棒要用別的模型才改。🔴 **不用 `subagent_type: fork`**：fork 一律跑主控模型、`model` 覆寫被忽略（Agent 工具說明逐字；OBS-SI-293），要續棒用 SendMessage、要給上下文就寫進任務書。
-- **凍結常態規則**（原文「若SelfImproving.prd各方驗證都沒問題, 即可凍結實作! ==> 改成常態規則」；此前兩輪是逐輪預先核准）：SDD 流程（BRIDGE §8）的 `spec-frozen` 人工閘，在「該階段 SCG／QA 獨立審查 PASS，且主控親驗（指令 rc 真跑）無 P1／P2 未結」時由主控代執行，`--approver` 填 `掌舵者（常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13；主控執行）`、`--reason` 引該審查報告座標與親驗摘要；掌舵者可隨時以 T1 推翻或要求回問。**不適用**（仍只准人解）：ESCALATION／ESCALATION_FINAL 的恢復（R-9.5、禁令 6）、守衛面准入、SelfImproving 的 K=1 PROP 決定（DEC 只認掌舵者真人發言）。
+- **凍結常態規則**（原文「若SelfImproving.prd各方驗證都沒問題, 即可凍結實作! ==> 改成常態規則」；此前兩輪是逐輪預先核准）：SDD 流程（BRIDGE §8）的 `spec-frozen` 人工閘，在「該階段 SCG／QA 獨立審查 PASS，且主控親驗（指令 rc 真跑）無 P1／P2 未結」時由主控代執行，`--approver` 填 `掌舵者（常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13；主控執行）`、`--reason` 引該審查報告座標與親驗摘要；掌舵者可隨時以 T1 推翻或要求回問；範圍＝整個 SDD 流程（三個子專案），掌舵者 2026-10-26 以互動選項確認（OBS-SI-240）。**不適用**（仍只准人解）：ESCALATION／ESCALATION_FINAL 的恢復（R-9.5、禁令 6）、守衛面准入、SelfImproving 的 K=1 PROP 決定（DEC 只認掌舵者真人發言）。
 
 ---
 

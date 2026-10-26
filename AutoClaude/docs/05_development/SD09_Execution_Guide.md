@@ -388,8 +388,8 @@ tail -1 logs/nightly_latest.log                                # 期望 END obse
 [  ] T0-9 (**新增 — SA M5**) gate_audit.md §1-septies 骨架建立（SD09-G0~G6 簽核紀錄空表）
 
 # C 議題群：AC4 labeled PR 啟用（dormant trigger 開啟）
-[  ] T0-C1 確認 tools/ac4_progress_check.py --json 回報 ready_for_labeled_pr=true（觀察期 #2 通過）
-[  ] T0-C2 將 .github/workflows/autoclaude-pg-e2e-on-label.yml 由 dormant 切為 active（`on: pull_request labeled` trigger 啟用）
+[  ] T0-C1 確認 tools/ac4_progress_check.py --json 回報 ready_for_labeled_pr=true（觀察期 #2 通過）（**2026-10-26 完成**：主控現跑 `status=ready`、`ready_for_labeled_pr=true`、green_streak 109／14、caveats 兩條見核准紀錄）
+[  ] T0-C2 將 .github/workflows/autoclaude-pg-e2e-on-label.yml 由 dormant 切為 active（`on: pull_request labeled` trigger 啟用）（**2026-10-26 完成**：workflow 自 W2 即為 labeled trigger、無開關可翻；啟用＝PM（掌舵者，互動選項）核准開始貼 `needs-pg-e2e`，紀錄 [docs/06_quality/SD09_AC4_Activation_Approval.md](../06_quality/SD09_AC4_Activation_Approval.md)；nightly ALERT 依掌舵者選項不消音）
 [  ] T0-C3 SD08_AC_Matrix.md AC4-1/AC4-2 升級為「實測 recall ≥ 0.95 + p95 < 50ms + cb_open=0」
 [  ] T0-C4（可選）新建 tools/ac4_dashboard.py — 視 PD 預算決定
 
