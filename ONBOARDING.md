@@ -452,6 +452,7 @@ powershell -ExecutionPolicy Bypass -File scripts\ci-gate.ps1   # 偵測到 Git B
 > | `aisdlc-sdd-ci.yml` | ✅ success | `2206a3a` | 2026-09-21 現查：push run `35487889168`，本次有觸發（headSha 即 HEAD），conclusion=success |
 > | `autoclaude-mutation-on-change.yml` | ✅ success | `be53ff0` | 2026-09-21 現查：本次 HEAD 因 `paths:` 過濾未觸發（源碼未變動，見 `ADR-SD09-011`）；最近一次觸發的 push run `31840901824`（commit `be53ff0e`）conclusion=success，commit 欄照實記該次 run 的 sha、不得填 HEAD |
 > | `shellcheck-ci.yml` | ✅ success | `2206a3a` | 2026-09-21 現查：push run `35487889179`，headSha 即 HEAD 本身，conclusion=success。**本機仍未接線**：唯一執行者＝`python tools/run_shellcheck.py`（載具缺席時 fail-loud），尚未接進 pre-push（見 `DEF-101-938`，接線層級待拍板） |
+> | `agentconsole-ci.yml` | ✅ success | `e040eaf` | 2026-10-26 現查（本列為 OBS-SI-206 補列：判準① 舊版只查全文包含，本檔在 §6.1 出現過即放行，故此前漏列仍綠）：最近一次 push run `40214861656`，headSha `e040eaf0`，conclusion=success；commit 欄照實記該次 run 的 sha、不得填 HEAD（`paths:` 過濾，非每次 push 都觸發）。時點與錨的 `checked-at`／`head-sha`（2026-09-21 那批七列）不同，錨欄位未動 |
 >
 > ⚠️ **本表刻意不含 `conclusion` 之外的判定**：一個 run 的 `conclusion=success` **不代表**它裡面
 > 每個 job 都綠——兩支 compat-CI 的 `*-nightly-full` 帶 job 層 `continue-on-error: true`，紅了

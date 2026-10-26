@@ -1982,10 +1982,12 @@ class CollectionIntegrityTest(unittest.TestCase):
         """跑 run_with_floor 並吞掉輸出——fixture 的假檔名不該印進真實終端混淆複審者
         （沿用本檔 `windows_native_skips` 一系列測試已建立的紀律）。
 
-        R100：真表非空，隔離它避免合成樹被 stale 自檢誤判 rc=1。
+        R100：真表非空，隔離它避免合成樹被 stale 自檢誤判 rc=1；失敗明細目錄同理（OBS-SI-208）。
         """
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+             tempfile.TemporaryDirectory(prefix="p8_flog_") as flog, \
+             mock.patch.object(run_root_unittests, "_FAILURE_LOG_DIR", Path(flog)), \
              mock.patch.dict(run_root_unittests._WINDOWS_SKIP_TAG_EXEMPT, {}, clear=True):
             rc = run_root_unittests.run_with_floor(start_dir, min_tests=min_tests)
         return rc, out.getvalue() + err.getvalue()
@@ -2091,6 +2093,16 @@ class CollectionIntegrityTest(unittest.TestCase):
         rc, output = self._quiet_run(d, min_tests=1)
         self.assertEqual(rc, 1)
         self.assertIn(broken, output, "必須指名是哪一支檔 import 失敗")
+
+    def test_synthetic_failures_never_touch_the_real_failure_log_dir(self) -> None:
+        """OBS-SI-208：合成失敗的明細不得寫進真目錄（輪替 keep=8 會擠掉真明細）。"""
+        d = self._sandbox()
+        self._write_raw(d, "import a_module_that_does_not_exist_p8\n")
+        real = run_root_unittests._FAILURE_LOG_DIR
+        before = sorted(real.glob(".last_failure_*.log"))
+        _, output = self._quiet_run(d, min_tests=1)
+        self.assertIn("p8_flog_", output, "明細須落在隔離目錄，否則本鎖空轉")
+        self.assertEqual(sorted(real.glob(".last_failure_*.log")), before, "真明細被動到")
 
     def test_placeholder_run_still_yields_traceback(self) -> None:
         """佔位測試刻意**不**提早 return：提早 return 會丟掉唯一的 ImportError

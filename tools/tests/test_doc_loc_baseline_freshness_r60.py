@@ -5084,9 +5084,9 @@ def cloud_status_problems(onboarding_text: str, workflows_dir: Path) -> list[str
         if required not in fields:
             problems.append(f"表③ 錨缺 `{required}=`——少了它就無法判斷這份雲端結論是"
                             "什麼時候、對哪個 commit 查的")
-    # 判準①：掃描面完整性。帶 push: 觸發的每一支都必須在表③ 出現。
+    # 判準①：掃描面完整性。帶 push: 觸發的每一支都必須在表③ 標頭之後出現（§6.1 同名列不算）。
     for wf in push_triggered_workflows(workflows_dir):
-        if f"`{wf}`" not in onboarding_text:
+        if f"`{wf}`" not in onboarding_text.partition("| workflow（push 軌）")[2]:
             problems.append(
                 f"{wf} 帶 `push:` 觸發但 §7 表③ 無對應列 ⇒ 它在雲端紅掉時本機沒有任何"
                 "東西會顯形（本輪 P0 的形態）。處置：跑表③ 上方那條 gh 指令補一列")
@@ -5238,6 +5238,17 @@ class TestR74CloudCiStatusIsRecorded(unittest.TestCase):
             problems = cloud_status_problems(
                 _ONBOARDING.read_text(encoding="utf-8-sig"), d)
         self.assertTrue(any("brand-new-push-ci.yml" in p for p in problems), problems)
+
+    def test_a_mention_before_the_push_table_header_does_not_count(self) -> None:
+        """OBS-SI-206：只在表③ 標頭之前（如 §6.1）出現的檔名不算已記帳；原文為正控。"""
+        wf, mark = "agentconsole-ci.yml", "| workflow（push 軌）"
+        text = _ONBOARDING.read_text(encoding="utf-8-sig")
+        before, _, after = text.partition(mark)
+        only_before = f"`{wf}`\n{before}{mark}" + after.replace(f"`{wf}`", "")
+        red = cloud_status_problems(only_before, _WORKFLOWS_DIR)
+        self.assertTrue(any(wf in p for p in red), f"標頭之前的提及不該算記帳：{red}")
+        ok = cloud_status_problems(text, _WORKFLOWS_DIR)
+        self.assertFalse(any(wf in p for p in ok), f"正控：原文不得點名該檔：{ok}")
 
     #: 合成語料要用**真** sha，否則 QA-R74-01 補的形態／存在性判準會把它判紅，
     #: 反向對照組就永遠紅而失去意義。git 不在時退回一個合形態的假值（此時 ④⑤⑥a
