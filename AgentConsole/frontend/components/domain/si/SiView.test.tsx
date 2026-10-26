@@ -1090,13 +1090,28 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
       overrides: { "console-writes": () => writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide" })] }) },
     });
     const seenPrefixes = new Set<string>();
-    const READ_ONLY_TESTIDS = new Set(["si-refresh", "si-retry", "si-load-more"]);
+    const seenReadOnly = new Set<string>();
+    const READ_ONLY_TESTIDS = new Set([
+      "si-refresh",
+      "si-retry",
+      "si-load-more",
+      // 狀態快篩的 pill（觀察與提案各四顆）：只改畫面上的篩選條件，不送寫入請求、不落檔；以封閉集合逐個列名，不放寬成 si-status- 前綴
+      "si-status-observations-all",
+      "si-status-observations-open",
+      "si-status-observations-deferred",
+      "si-status-observations-done",
+      "si-status-proposals-all",
+      "si-status-proposals-pending",
+      "si-status-proposals-active",
+      "si-status-proposals-done",
+    ]);
     const sweep = () => {
       for (const el of Array.from(container.querySelectorAll<HTMLElement>("button, a"))) {
         const name = `${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`;
         const testId = el.dataset.testid ?? "";
         expect(name, `按鈕名稱：${name}`).not.toMatch(FORBIDDEN_NAME);
         expect(testId, `testid：${testId}`).not.toMatch(FORBIDDEN_NAME);
+        if (READ_ONLY_TESTIDS.has(testId)) seenReadOnly.add(testId);
         if (el.tagName === "BUTTON" && testId.startsWith("si-") && !READ_ONLY_TESTIDS.has(testId)) {
           expect(testId, `未列名的 si- 按鈕 testid：${testId}`).toMatch(WRITE_TESTID);
           seenPrefixes.add(/^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-)/.exec(testId)?.[1] as string);
@@ -1113,8 +1128,20 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
     await user.click(tabButton(/^事件/));
     await screen.findByTestId("si-events-table");
     sweep();
-    // 防反空轉：五個前綴都真的出現過
+    // 防反空轉：五個前綴都真的出現過；狀態快篩的八顆 pill 也都真的被掃到（觀察分頁四顆、提案分頁四顆）——否則上面的封閉集合是死名單
     expect([...seenPrefixes].sort()).toEqual(["close-open-", "decide-open-", "obs-correct-", "obs-new", "resume-open"].sort());
+    expect([...seenReadOnly].filter((id) => id.startsWith("si-status-")).sort()).toEqual(
+      [
+        "si-status-observations-all",
+        "si-status-observations-open",
+        "si-status-observations-deferred",
+        "si-status-observations-done",
+        "si-status-proposals-all",
+        "si-status-proposals-pending",
+        "si-status-proposals-active",
+        "si-status-proposals-done",
+      ].sort(),
+    );
     // 對帳面板只有「入帳指令」展開鈕（沒有刪除、移除、清除）
     const panel = screen.getByTestId("si-writes-panel");
     expect(

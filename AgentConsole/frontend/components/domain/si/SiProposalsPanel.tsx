@@ -2,7 +2,9 @@
 
 /**
  * 提案分頁（P1b；TCS-SelfImprovingMirror-P1b R14、R16、R18）：`GET /api/v1/si/proposals` 的游標分頁清單。
- * 每筆一列（ID／狀態／類別／route／rev／digest 前 8 碼／verdict／cooldown）；待決（proposed、verified）預設展開、其餘可展開。
+ * 每筆一列（ID／狀態／類別／route／rev／digest 前 8 碼／verdict／cooldown）；待決（`propStatusClass` 為 pending：proposed、verified）預設展開、其餘可展開。
+ * 篩選列最前面是「狀態快篩」pill（全部／待決／進行中／已完成）：選了「全部」以外就自動把其餘的頁載完再篩（上限 `SI_AUTO_LOAD_MAX_PAGES` 頁，到上限仍有未載入的列則說結果不完整），
+ * 並在旁邊顯示「符合 N／已載入 M」；狀態不在 `propStatusClass` 表內的提案在任何快篩下都照常顯示（另註筆數），不會被悄悄藏起來。
  * 展開區的卡面 `<pre data-testid="si-card-<ID>">` 的 textContent 逐位元組等於 export 的 `card`（`si card` 的 stdout）：
  * 前端不渲染、不重排行、不裁切、不加前後綴，單一文字節點；card 為 null 時顯示「卡面量不到」並指向對應的 ne 項，不渲染空的卡面區。
  * P2b：給了 `onDecide`（只有 ADMIN）時，每個**此刻可下決定**的提案列多一個「決定」鈕（`si-decide-open-<ID>`；可下哪些決定由 `decideVerbOptions` 依表 M-V 判，
@@ -15,25 +17,41 @@ import { useSiProposals } from "@/lib/api/queries";
 import type { SiProposal } from "@/lib/api/types";
 import {
   EMPTY_PROPOSAL_FILTERS,
+  PROPOSAL_STATUS_OPTIONS,
   cardNeEntries,
   decideVerbOptions,
   describeTouched,
   describeValue,
   digest8,
   distinctValues,
+  filterCounts,
+  filterCountText,
   filterProposals,
   formatNe,
   identityKey,
   mergeNotes,
   mergePages,
   notEvaluableText,
+  propStatusClass,
   type ProposalFilters,
 } from "@/lib/domain/si";
-import { ExpandToggle, FilterSelect, SiError, SiLoadMore, SiLoading, SiNotes, SiScopeNote, countText, useReportTabCount, withAll } from "./siParts";
+import {
+  ExpandToggle,
+  FilterSelect,
+  SiError,
+  SiLoadMore,
+  SiLoading,
+  SiNotes,
+  SiScopeNote,
+  SiStatusLoadNote,
+  StatusFilter,
+  countText,
+  useAutoLoadRemaining,
+  useReportTabCount,
+  withAll,
+} from "./siParts";
 
 const BASE_COLUMNS = 9;
-/** 待決提案：等人看卡面的狀態，預設展開。 */
-const PENDING_STATES: ReadonlySet<string> = new Set(["proposed", "verified"]);
 
 /** `nullIsNe`：該欄的 null 是「量不到」而不是「無」（R16）——touched／touchedCount 在 rN.patch 讀不到時為 null，空集合是 `[]` 與 `0`。 */
 const OTHER_FIELDS: ReadonlyArray<{ key: keyof SiProposal & string; label: string; nullIsNe?: boolean }> = [
@@ -87,22 +105,42 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
     : [];
   const ready = !q.isError && last !== undefined;
   useReportTabCount(onCount, ready ? countText(items.length, last.truncated) : null);
+  // 快篩開著（不是「全部」）就把其餘的頁自動載完：篩選只作用於已載入的頁，不載完，「已完成」會被讀成「帳本裡只有這些」
+  const statusActive = filters.status !== "";
+  const autoLoading = useAutoLoadRemaining({
+    active: statusActive,
+    hasNext: q.hasNextPage,
+    fetching: q.isFetching,
+    failed: q.isError,
+    loadedPages: pages?.length ?? 0,
+    fetchNextPage: q.fetchNextPage,
+  });
 
   if (q.isError) return <SiError error={q.error} onRetry={() => void q.refetch()} />;
   if (!pages || !last) return <SiLoading what="提案" />;
 
   const ne = mergeNotes(pages.map((p) => p.ne));
   const shown = filterProposals(items, filters);
-  const set = <K extends keyof ProposalFilters>(key: K, value: string) => setFilters((prev) => ({ ...prev, [key]: value }));
+  const set = <K extends keyof ProposalFilters>(key: K, value: ProposalFilters[K]) => setFilters((prev) => ({ ...prev, [key]: value }));
+  // 狀態未登記的提案在快篩下照常顯示：只有快篩開著時才算「照常顯示」（沒開快篩時它與其他列一樣依正常規則顯示）
+  const pinned = (p: SiProposal) => statusActive && propStatusClass(p.state) === "unknown";
 
   return (
     <div>
       <SiNotes ne={ne} problems={mergeNotes(pages.map((p) => p.problems))} />
 
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <StatusFilter
+          tab="proposals"
+          options={PROPOSAL_STATUS_OPTIONS}
+          value={filters.status}
+          onChange={(v) => set("status", v)}
+          counts={filterCountText(filterCounts(items, shown, pinned), "狀態未登記的提案")}
+        />
         <FilterSelect label="狀態" testId="si-filter-state" value={filters.state} options={withAll(distinctValues(items, (p) => p.state))} onChange={(v) => set("state", v)} />
         <FilterSelect label="類別" testId="si-filter-cls" value={filters.cls} options={withAll(distinctValues(items, (p) => p.cls))} onChange={(v) => set("cls", v)} />
       </div>
+      <SiStatusLoadNote tab="proposals" what="其餘提案" loading={autoLoading} incomplete={statusActive && last.truncated} />
       {last.truncated ? <SiScopeNote loaded={items.length} /> : null}
 
       {items.length === 0 ? (
@@ -132,7 +170,7 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
             </thead>
             <tbody>
               {shown.map((p) => {
-                const expanded = open[p.id] ?? PENDING_STATES.has(p.state);
+                const expanded = open[p.id] ?? propStatusClass(p.state) === "pending";
                 const detailId = `si-prop-detail-panel-${p.id}`;
                 const cardNe = p.card === null ? cardNeEntries(ne, p.id) : [];
                 return (
@@ -183,9 +221,11 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
         </div>
       )}
 
-      {shown.length === 0 && items.length > 0 ? <p className="py-3 text-sm text-wg-muted">沒有符合目前篩選的提案。</p> : null}
+      {/* 快篩還在載其餘頁時不說「沒有符合」：那是「到目前為止沒有」，不是「沒有」 */}
+      {!autoLoading && shown.length === 0 && items.length > 0 ? <p className="py-3 text-sm text-wg-muted">沒有符合目前篩選的提案。</p> : null}
 
-      <SiLoadMore hasNext={q.hasNextPage} truncated={last.truncated} fetching={q.isFetchingNextPage} onLoadMore={() => void q.fetchNextPage()} />
+      {/* 快篩正在自動載其餘頁時不放手動的「載入更多」：兩個入口並存，會讓人以為還要自己按；載到上限停下後它才回來（人仍可手動繼續） */}
+      {autoLoading ? null : <SiLoadMore hasNext={q.hasNextPage} truncated={last.truncated} fetching={q.isFetchingNextPage} onLoadMore={() => void q.fetchNextPage()} />}
     </div>
   );
 }

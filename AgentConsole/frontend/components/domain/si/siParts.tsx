@@ -2,7 +2,8 @@
 
 /**
  * SelfImproving 頁的共用小件（P1b；TCS-SelfImprovingMirror-P1b R12、R14～R17）：載入態、錯誤態、ne／problems 清單、載入更多、
- * 篩選下拉、展開鈕、分頁標籤筆數回報；P2b 另加稽核檔收據與入帳指令（三個寫入元件與對帳面板共用）。
+ * 篩選下拉、展開鈕、分頁標籤筆數回報；P2b 另加稽核檔收據與入帳指令（三個寫入元件與對帳面板共用）；
+ * 狀態快篩另加 pill 篩選鈕（`StatusFilter`）、快篩開著時自動載完其餘頁（`useAutoLoadRemaining`）與載入中／結果不完整的說明（`SiStatusLoadNote`）。
  * 全部只輸出 React 文字節點（R18：帳本字串不經 HTML 或 Markdown 渲染），**沒有任何寫入控制項、表單或 mutation**（寫入形態只住三個寫入元件，W22）。
  */
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -14,12 +15,13 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Select } from "@/components/ui/select";
 import { ErrorState } from "@/components/ui/states";
 import type { SiNeEntry, SiProblem, SiWriteKind, SiWriteReceipt } from "@/lib/api/types";
-import { formatNe, formatProblem, ingestCommands, siErrorParts, siErrorSummary } from "@/lib/domain/si";
+import { SI_AUTO_LOAD_MAX_PAGES, formatNe, formatProblem, ingestCommands, siErrorParts, siErrorSummary } from "@/lib/domain/si";
+import { cn } from "@/lib/utils";
 
-/** 面板載入中：`role="status"`、文字含「載入中」（R12）。 */
-export function SiLoading({ what }: { what: string }) {
+/** 面板載入中：`role="status"`、文字含「載入中」（R12）。`compact`＝夾在內容之間的一行小字（狀態快篩載其餘頁時用），不是整塊空白的初次載入。 */
+export function SiLoading({ what, compact = false }: { what: string; compact?: boolean }) {
   return (
-    <div role="status" data-testid="si-loading" className="px-1 py-6 text-sm text-wg-muted">
+    <div role="status" data-testid="si-loading" className={compact ? "mb-2 px-1 text-xs text-wg-muted" : "px-1 py-6 text-sm text-wg-muted"}>
       {`${what}載入中…`}
     </div>
   );
@@ -197,6 +199,103 @@ export function FilterSelect({
       </Select>
     </div>
   );
+}
+
+/** 狀態快篩的一顆 pill：`id` 空字串＝全部（不篩）。 */
+export type StatusPillOption<T extends string> = { id: T; label: string };
+
+/**
+ * 狀態快篩（觀察、提案各一組）：pill 式單選，`aria-pressed` 標示目前選的那顆（第一顆「全部」＝不篩），旁邊顯示「符合 N／已載入 M」（`counts` 由呼叫端依
+ * `filterCountText` 組好）。pill 的 testid＝`si-status-<分頁>-<值>`（值為空字串時寫 `all`）；整組的可及名稱是「狀態快篩」——刻意不叫「狀態」：
+ * 提案分頁已有一個 aria-label 為「狀態」的下拉（依狀態字串精確篩），兩個控制項不能同名。
+ * 這是篩選、不是分頁籤（沒有對應的面板），所以用 button 加 aria-pressed，不用 PillTabs 的 tablist／tab 語意；外觀與 PillTabs 一致、尺寸小一號。
+ */
+export function StatusFilter<T extends string>({
+  tab,
+  options,
+  value,
+  onChange,
+  counts,
+}: {
+  tab: string;
+  options: ReadonlyArray<StatusPillOption<T>>;
+  value: T;
+  onChange: (value: T) => void;
+  counts: string;
+}) {
+  return (
+    <div data-testid={`si-status-filter-${tab}`} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+      <span aria-hidden className="text-wg-muted">
+        狀態快篩
+      </span>
+      <div role="group" aria-label="狀態快篩" className="flex flex-wrap gap-1.5">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            type="button"
+            aria-pressed={o.id === value}
+            data-testid={`si-status-${tab}-${o.id === "" ? "all" : o.id}`}
+            onClick={() => onChange(o.id)}
+            className={cn(
+              "inline-flex cursor-pointer items-center rounded-md border px-3 py-1 text-sm font-medium whitespace-nowrap transition-colors",
+              o.id === value ? "border-wg-primary bg-wg-primary text-white" : "border-wg-line bg-wg-surface text-wg-text hover:text-wg-primary",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <span data-testid={`si-status-count-${tab}`} className="text-xs text-wg-muted">
+        {counts}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 狀態快篩開著時，自動把其餘的頁一頁頁載完。清單是游標分頁、篩選只作用於已載入的頁：不載完，「已完成」只是已載入範圍內的已完成，
+ * 人會把「沒有符合」讀成「帳本沒有」。一次一頁（上一頁回來才要下一頁，不並行），直到沒有下一頁或已載入 `SI_AUTO_LOAD_MAX_PAGES` 頁（含原本已載入的）為止；
+ * 取頁失敗（`failed`）就停、交給錯誤態的重試，不自動重打；快篩關掉（`active` 為假）立刻停，已載入的頁留著。
+ * 回傳 true＝還在載（含兩頁之間的空檔），供面板顯示載入中；false＝已載完、已到上限、失敗或快篩沒開。
+ * 必須在面板的 early return 之前呼叫（hooks 次序）；`fetchNextPage` 帶 `cancelRefetch: false`：已有請求在飛時重複呼叫不會取消它。
+ */
+export function useAutoLoadRemaining({
+  active,
+  hasNext,
+  fetching,
+  failed,
+  loadedPages,
+  fetchNextPage,
+}: {
+  active: boolean;
+  hasNext: boolean;
+  /** 任何請求在飛（含取下一頁與整批重抓）：在飛時不再要下一頁，結束後再續載 */
+  fetching: boolean;
+  failed: boolean;
+  loadedPages: number;
+  fetchNextPage: (options?: { cancelRefetch?: boolean }) => Promise<unknown>;
+}): boolean {
+  const loading = active && !failed && hasNext && loadedPages < SI_AUTO_LOAD_MAX_PAGES;
+  useEffect(() => {
+    if (loading && !fetching) void fetchNextPage({ cancelRefetch: false });
+  }, [loading, fetching, loadedPages, fetchNextPage]);
+  return loading;
+}
+
+/**
+ * 狀態快篩載其餘頁的說明：還在載＝一行「<what>載入中…」；載完停下卻仍有未載入的列（到頁數上限，或回應標示 truncated 卻沒有游標）＝「尚有未載入的列，結果不完整」。
+ * 兩者互斥，都不成立時不渲染。不完整的結果不得被讀成「帳本就只有這些」，所以一定要說。
+ */
+export function SiStatusLoadNote({ tab, what, loading, incomplete }: { tab: string; what: string; loading: boolean; incomplete: boolean }) {
+  if (loading) return <SiLoading what={what} compact />;
+  if (incomplete) {
+    return (
+      <p role="status" data-testid={`si-status-incomplete-${tab}`} className="mb-2 text-xs text-wg-warning-text">
+        尚有未載入的列，結果不完整
+      </p>
+    );
+  }
+  return null;
 }
 
 /** 展開／收合鈕：名稱固定為 `展開 <名>`（狀態用 aria-expanded 表達，名稱不隨狀態改變）。 */

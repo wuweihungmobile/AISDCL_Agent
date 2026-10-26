@@ -4,6 +4,8 @@
  * 觀察分頁（P1b；TCS-SelfImprovingMirror-P1b R14、R15、R17、R18）：`GET /api/v1/si/observations` 的游標分頁清單。
  * 每筆一列（ID／時間／分類／嚴重度／處置／症狀；DOM 文字是完整字串，截斷只靠 CSS），可展開看九欄原文與 marksKv、行號、模組桶；
  * 無法解析的壞列永遠顯示（原文逐字）、不受任何篩選影響。篩選只作用於已載入的頁；模組桶只讀資料自帶的 `buckets`，缺席時停用並說明。
+ * 篩選列最前面是「狀態快篩」pill（全部／未結／延後／已完成；`obsStatusClass`）：選了「全部」以外就自動把其餘的頁載完再篩（上限 `SI_AUTO_LOAD_MAX_PAGES` 頁，
+ * 到上限仍有未載入的列則說結果不完整），並在旁邊顯示「符合 N／已載入 M」——「已完成」要一鍵查得到，也不能因為只載了第一頁而查成「沒有」。
  * P2b：給了寫入回呼（只有 ADMIN）時多出三個入口——工具列的「新增觀察」（`si-obs-new`）、每個**有效列**的「更正」（`si-obs-correct-<ID>`；壞列沒有 id、不提供）、
  * 以及處置**恰為 open** 的有效列的「關閉」（`si-close-open-<ID>`）。沒給＝與 P1b 逐位元組相同的唯讀畫面。
  */
@@ -15,9 +17,12 @@ import type { SiObservation, SiObservationRow } from "@/lib/api/types";
 import {
   EMPTY_OBS_FILTERS,
   DATE_WINDOW_OPTIONS,
+  OBS_STATUS_OPTIONS,
   bucketOptions,
   dispositionKey,
   distinctValues,
+  filterCounts,
+  filterCountText,
   filterObservations,
   hasBucketData,
   identityKey,
@@ -28,7 +33,21 @@ import {
   type DateWindow,
   type ObsFilters,
 } from "@/lib/domain/si";
-import { ExpandToggle, FilterSelect, SiError, SiLoadMore, SiLoading, SiNotes, SiScopeNote, countText, useReportTabCount, withAll } from "./siParts";
+import {
+  ExpandToggle,
+  FilterSelect,
+  SiError,
+  SiLoadMore,
+  SiLoading,
+  SiNotes,
+  SiScopeNote,
+  SiStatusLoadNote,
+  StatusFilter,
+  countText,
+  useAutoLoadRemaining,
+  useReportTabCount,
+  withAll,
+} from "./siParts";
 
 const BASE_COLUMNS = 7;
 
@@ -104,6 +123,16 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
     : [];
   const ready = !q.isError && last !== undefined;
   useReportTabCount(onCount, ready ? countText(items.length, last.truncated) : null);
+  // 快篩開著（不是「全部」）就把其餘的頁自動載完：篩選只作用於已載入的頁，不載完，「已完成」會被讀成「帳本裡只有這些」
+  const statusActive = filters.status !== "";
+  const autoLoading = useAutoLoadRemaining({
+    active: statusActive,
+    hasNext: q.hasNextPage,
+    fetching: q.isFetching,
+    failed: q.isError,
+    loadedPages: pages?.length ?? 0,
+    fetchNextPage: q.fetchNextPage,
+  });
 
   if (q.isError) return <SiError error={q.error} onRetry={() => void q.refetch()} />;
   if (!pages || !last) return <SiLoading what="觀察" />;
@@ -119,6 +148,13 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
       <SiNotes ne={mergeNotes(pages.map((p) => p.ne))} problems={mergeNotes(pages.map((p) => p.problems))} />
 
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <StatusFilter
+          tab="observations"
+          options={OBS_STATUS_OPTIONS}
+          value={filters.status}
+          onChange={(v) => set("status", v)}
+          counts={filterCountText(filterCounts(items, shown, isInvalidRow), "無法解析的列")}
+        />
         <FilterSelect label="分類" testId="si-filter-category" value={filters.category} options={withAll(distinctValues(valid, (r) => r.category))} onChange={(v) => set("category", v)} />
         <FilterSelect label="嚴重度" testId="si-filter-severity" value={filters.severity} options={withAll(distinctValues(valid, (r) => r.severity))} onChange={(v) => set("severity", v)} />
         <FilterSelect
@@ -147,6 +183,7 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
           </Button>
         ) : null}
       </div>
+      <SiStatusLoadNote tab="observations" what="其餘觀察列" loading={autoLoading} incomplete={statusActive && last.truncated} />
       {last.truncated ? <SiScopeNote loaded={items.length} /> : null}
 
       {items.length === 0 ? (
@@ -255,10 +292,11 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
         </div>
       )}
 
-      {/* 壞列永遠顯示、不算「符合」：有效列一筆都不符合時要說，否則只剩壞列的畫面看不出有效列為什麼不見了 */}
-      {valid.length > 0 && !shown.some((row) => !isInvalidRow(row)) ? <p className="py-3 text-sm text-wg-muted">沒有符合目前篩選的觀察列。</p> : null}
+      {/* 壞列永遠顯示、不算「符合」：有效列一筆都不符合時要說，否則只剩壞列的畫面看不出有效列為什麼不見了；快篩還在載其餘頁時不說（那是「到目前為止沒有」，不是「沒有」） */}
+      {!autoLoading && valid.length > 0 && !shown.some((row) => !isInvalidRow(row)) ? <p className="py-3 text-sm text-wg-muted">沒有符合目前篩選的觀察列。</p> : null}
 
-      <SiLoadMore hasNext={q.hasNextPage} truncated={last.truncated} fetching={q.isFetchingNextPage} onLoadMore={() => void q.fetchNextPage()} />
+      {/* 快篩正在自動載其餘頁時不放手動的「載入更多」：兩個入口並存，會讓人以為還要自己按；載到上限停下後它才回來（人仍可手動繼續） */}
+      {autoLoading ? null : <SiLoadMore hasNext={q.hasNextPage} truncated={last.truncated} fetching={q.isFetchingNextPage} onLoadMore={() => void q.fetchNextPage()} />}
     </div>
   );
 }

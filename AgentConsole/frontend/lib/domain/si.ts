@@ -27,6 +27,12 @@ import type {
  */
 export const SI_PAGE_LIMIT = 100;
 
+/**
+ * 狀態快篩自動載入的頁數上限（含已載入的頁）：清單是游標分頁、篩選只作用於已載入的頁，所以選了「全部」以外的快篩時面板會把其餘的頁一頁頁載完；
+ * 上限擋住「帳本長到數千列」或「游標失控、永遠有下一頁」時的無限請求，超過就停下並說結果不完整（人仍可按「載入更多」繼續）。
+ */
+export const SI_AUTO_LOAD_MAX_PAGES = 20;
+
 /** 對帳面板一次取回的稽核列筆數（backend 預設 100、上限 500；回應 `truncated` 為真時面板說明尚有更舊的列未載入）。 */
 export const SI_CONSOLE_WRITES_LIMIT = 100;
 
@@ -151,15 +157,75 @@ export function inDateWindow(dateText: string | null | undefined, anchorIso: str
   return day <= anchor && day >= anchor - (WINDOW_DAYS[win] - 1) ? "in" : "out";
 }
 
+// ── 狀態快篩（觀察、提案各一組 pill；把處置／狀態的細枚舉折成「未結、延後、已完成」這種一眼看懂的幾類）────────────
+
+/** 觀察的狀態類別：`open`＝未結、`deferred`＝延後、`done`＝已完成（其餘所有終值）。 */
+export type ObsStatusClass = "open" | "deferred" | "done";
+
+/**
+ * 觀察處置→狀態類別，依 `dispositionKey` 的首詞：`open`→未結、`deferred`→延後，其餘終值（fixed、DEF-*、retired、decided、merged、proposed…）→已完成。
+ * 首詞為空字串（處置欄空白）不是終值：歸未結，不得算成已完成——「已完成」只放真的有終值的列，寧可多列一筆在未結，也不宣稱一筆沒處置的列已完成。
+ */
+export function obsStatusClass(disposition: string): ObsStatusClass {
+  const key = dispositionKey(disposition);
+  if (key === "" || key === "open") return "open";
+  return key === "deferred" ? "deferred" : "done";
+}
+
+/** 提案的狀態類別：`pending`＝待決（等人決定）、`active`＝進行中、`done`＝已完成；`unknown`＝不在已登記的狀態字串內。 */
+export type PropStatusClass = "pending" | "active" | "done" | "unknown";
+
+/** 待決＝等人看卡面下決定；進行中＝已有決定、流程還在走（退回待改、已核准、沙盒中、已晉升、量測採納中）；已完成＝已有終局。 */
+const PROP_STATUS_BY_STATE: Readonly<Record<string, Exclude<PropStatusClass, "unknown">>> = {
+  proposed: "pending",
+  verified: "pending",
+  returned: "active",
+  approved: "active",
+  sandboxed: "active",
+  promoted: "active",
+  measuring: "active",
+  rejected: "done",
+  "handed-off": "done",
+  closed: "done",
+  retired: "done",
+};
+
+/**
+ * 提案狀態→類別。表外的字串回 `unknown`，而 `filterProposals` 讓 `unknown` 在任何快篩下都照常顯示：根層日後多一個狀態而這張表還沒跟上時，
+ * 那筆提案要看得到（連同它的狀態字串），不能因為沒歸類就被快篩悄悄藏起來。
+ */
+export function propStatusClass(state: string): PropStatusClass {
+  return Object.prototype.hasOwnProperty.call(PROP_STATUS_BY_STATE, state) ? PROP_STATUS_BY_STATE[state] : "unknown";
+}
+
+/** 快篩的值：空字串＝全部（不篩）。提案沒有「unknown」這顆 pill——它只作歸類結果，不是可選的篩選條件。 */
+export type ObsStatusFilter = "" | ObsStatusClass;
+export type PropStatusFilter = "" | Exclude<PropStatusClass, "unknown">;
+
+/** pill 選項（順序＝顯示順序；第一顆「全部」＝不篩）。 */
+export const OBS_STATUS_OPTIONS: ReadonlyArray<{ id: ObsStatusFilter; label: string }> = [
+  { id: "", label: "全部" },
+  { id: "open", label: "未結" },
+  { id: "deferred", label: "延後" },
+  { id: "done", label: "已完成" },
+];
+export const PROPOSAL_STATUS_OPTIONS: ReadonlyArray<{ id: PropStatusFilter; label: string }> = [
+  { id: "", label: "全部" },
+  { id: "pending", label: "待決" },
+  { id: "active", label: "進行中" },
+  { id: "done", label: "已完成" },
+];
+
 // ── 篩選（R17；多個條件為「且」，先分頁後篩選）──────────────────────────────────
 
-/** 空字串＝該條件不篩（控制項的「全部」）。 */
-export type ObsFilters = { category: string; severity: string; disposition: string; bucket: string; window: DateWindow };
-export const EMPTY_OBS_FILTERS: ObsFilters = { category: "", severity: "", disposition: "", bucket: "", window: "all" };
+/** 空字串＝該條件不篩（控制項的「全部」）。`status` 是狀態快篩（pill），其餘是下拉。 */
+export type ObsFilters = { category: string; severity: string; disposition: string; bucket: string; window: DateWindow; status: ObsStatusFilter };
+export const EMPTY_OBS_FILTERS: ObsFilters = { category: "", severity: "", disposition: "", bucket: "", window: "all", status: "" };
 
 /**
  * 觀察列篩選：無法解析的壞列（valid 為 false）在任何篩選下都保留；時間無法解析者不被時間窗篩掉；
  * 模組桶只認資料自帶的 `buckets`（含所選值才符合），沒有 `buckets` 欄的列不符合任何選定的桶——前端不自證據座標文字歸桶。
+ * 狀態快篩依 `obsStatusClass`，與其他條件取交集。
  */
 export function filterObservations(items: ReadonlyArray<SiObservationRow>, filters: Partial<ObsFilters>, anchorIso: string | null | undefined): SiObservationRow[] {
   const f = { ...EMPTY_OBS_FILTERS, ...filters };
@@ -168,6 +234,7 @@ export function filterObservations(items: ReadonlyArray<SiObservationRow>, filte
     if (f.category && row.category !== f.category) return false;
     if (f.severity && row.severity !== f.severity) return false;
     if (f.disposition && dispositionKey(row.disposition) !== f.disposition) return false;
+    if (f.status && obsStatusClass(row.disposition) !== f.status) return false;
     if (f.bucket && !(Array.isArray(row.buckets) && row.buckets.includes(f.bucket))) return false;
     return inDateWindow(row.time, anchorIso, f.window) !== "out";
   });
@@ -199,13 +266,44 @@ export function distinctValues<T>(items: ReadonlyArray<T>, pick: (item: T) => st
   return [...set].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-export type ProposalFilters = { state: string; cls: string };
-export const EMPTY_PROPOSAL_FILTERS: ProposalFilters = { state: "", cls: "" };
+/** `state` 是依狀態字串精確篩的下拉，`status` 是狀態快篩（pill；依 `propStatusClass` 的類別）。 */
+export type ProposalFilters = { state: string; cls: string; status: PropStatusFilter };
+export const EMPTY_PROPOSAL_FILTERS: ProposalFilters = { state: "", cls: "", status: "" };
 
-/** 提案篩選：`狀態`（state）與 `類別`（cls）；提案沒有時間窗。 */
+/**
+ * 提案篩選：`狀態`（state）、`類別`（cls）與狀態快篩（status），取交集；提案沒有時間窗。
+ * 狀態不在 `propStatusClass` 表內（`unknown`）的提案不受狀態快篩影響、照常顯示（見 `propStatusClass` 的說明）；它仍受 `state` 與 `cls` 兩個下拉篩選。
+ */
 export function filterProposals(items: ReadonlyArray<SiProposal>, filters: Partial<ProposalFilters>): SiProposal[] {
   const f = { ...EMPTY_PROPOSAL_FILTERS, ...filters };
-  return items.filter((p) => (!f.state || p.state === f.state) && (!f.cls || p.cls === f.cls));
+  return items.filter((p) => {
+    if (f.state && p.state !== f.state) return false;
+    if (f.cls && p.cls !== f.cls) return false;
+    if (f.status) {
+      const status = propStatusClass(p.state);
+      if (status !== "unknown" && status !== f.status) return false;
+    }
+    return true;
+  });
+}
+
+// ── 快篩旁的筆數（「符合 N／已載入 M」）──────────────────────────────────────────
+
+/**
+ * `loaded`＝已載入的全部列（與分頁標籤的筆數同數）；`pinned`＝目前顯示、但不論篩選都照常顯示而無法歸類的列（壞列、狀態未登記的提案）；
+ * `matched`＝顯示的列扣掉 `pinned`，也就是真的符合篩選的列。三者分開算，所以「符合 N」不會把照常顯示的壞列算成符合。
+ */
+export type FilterCounts = { matched: number; pinned: number; loaded: number };
+
+export function filterCounts<T>(loaded: ReadonlyArray<T>, shown: ReadonlyArray<T>, isPinned: (item: T) => boolean): FilterCounts {
+  const pinned = shown.filter(isPinned).length;
+  return { matched: shown.length - pinned, pinned, loaded: loaded.length };
+}
+
+/** 「符合 N／已載入 M」；有照常顯示的列時加註一句（`pinnedLabel`＝那一類列的說法，例「無法解析的列」）。 */
+export function filterCountText(counts: FilterCounts, pinnedLabel: string): string {
+  const base = `符合 ${counts.matched}／已載入 ${counts.loaded}`;
+  return counts.pinned > 0 ? `${base}（另有 ${counts.pinned} 筆${pinnedLabel}照常顯示）` : base;
 }
 
 export type EventFilters = { kind: string; window: DateWindow };

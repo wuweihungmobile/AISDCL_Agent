@@ -4,13 +4,17 @@ import { describe, expect, it } from "vitest";
 
 import { REASONS } from "@/lib/api/reasons";
 import { ApiError } from "@/lib/api/client";
-import type { SiConsoleWrite, SiInvalidRow, SiNeEntry, SiObservation, SiObservationRow } from "@/lib/api/types";
+import type { SiConsoleWrite, SiInvalidRow, SiNeEntry, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
 import {
   BUCKET_DISPLAY_ORDER,
   DATE_WINDOW_OPTIONS,
   DECIDE_FIELDS,
   EMPTY_OBS_FILTERS,
   EMPTY_OBSERVATION_FORM,
+  EMPTY_PROPOSAL_FILTERS,
+  OBS_STATUS_OPTIONS,
+  PROPOSAL_STATUS_OPTIONS,
+  SI_AUTO_LOAD_MAX_PAGES,
   SI_PAGE_LIMIT,
   SI_REASONS,
   SI_STATUS_KNOWN_KEYS,
@@ -27,6 +31,8 @@ import {
   dispositionKey,
   distinctValues,
   estimateRowBytes,
+  filterCounts,
+  filterCountText,
   filterEvents,
   filterObservations,
   filterProposals,
@@ -42,8 +48,10 @@ import {
   mergePages,
   noEventText,
   notEvaluableText,
+  obsStatusClass,
   pendingWrites,
   prettyJson,
+  propStatusClass,
   siErrorParts,
   siErrorSummary,
   siWriteErrorText,
@@ -326,6 +334,190 @@ describe("lib/domain/si.ts 的補充單元（身分鍵、選項、提案與事�
 
   it("SI_STATUS_KNOWN_KEYS 恰為 R13 列的九個已知鍵（其餘鍵走 si-status-extra）", () => {
     expect([...SI_STATUS_KNOWN_KEYS]).toEqual(["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile"]);
+  });
+});
+
+/** 提案的最小夾具：狀態快篩只看 state（其餘欄位給固定值，cls 可帶）。 */
+function prop(id: string, state: string, cls = "M"): SiProposal {
+  return { id, state, cls } as SiProposal;
+}
+
+// 為什麼重要：掌舵者要「一鍵看已完成／未結」，不必懂處置與提案狀態的細枚舉。快篩若把沒處置的列算成「已完成」、或把還沒歸類的新狀態悄悄藏起來，
+// 這個頁面就從「如實鏡像帳本」變成「替人下結論」——所以這裡逐類釘死歸類，並用反例（空處置、表外狀態、壞列）釘住「寧可多顯示、不可誤宣稱」。
+describe("狀態快篩的純函式（obsStatusClass、propStatusClass、篩選與筆數）", () => {
+  const ANCHOR = "2026-10-21T09:30:00+08:00";
+  const obsIds = (list: SiObservationRow[]) => list.map((r) => (isInvalidRow(r) ? `line:${r.line}` : r.id));
+  const propIds = (list: SiProposal[]) => list.map((p) => p.id);
+
+  it.each([
+    ["open", "open"],
+    ["open；補充說明", "open"],
+    ["  open", "open"],
+    ["deferred；再開症狀：同一症狀於另一輪再現", "deferred"],
+    ["deferred：先擱著", "deferred"],
+    ["decided：寫成某檔", "done"],
+    ["fixed@abc1234", "done"],
+    ["DEF-AC-003", "done"],
+    ["DEF-200-551", "done"],
+    ["retired：座標", "done"],
+    ["merged@OBS-SI-001", "done"],
+    ["proposed@PROP-SI-004", "done"],
+  ] as const)("obsStatusClass(%j) → %s（open 未結、deferred 延後、其餘終值已完成）", (disposition, expected) => {
+    expect(obsStatusClass(disposition)).toBe(expected);
+  });
+
+  it("obsStatusClass：空處置（空字串、全空白、只有分隔符）不是終值，歸未結而不是已完成——「已完成」不得宣稱一筆沒處置的列", () => {
+    for (const blank of ["", "   ", "：只有分隔符", "；"]) expect(obsStatusClass(blank), JSON.stringify(blank)).toBe("open");
+  });
+
+  it.each([
+    ["proposed", "pending"],
+    ["verified", "pending"],
+    ["returned", "active"],
+    ["approved", "active"],
+    ["sandboxed", "active"],
+    ["promoted", "active"],
+    ["measuring", "active"],
+    ["rejected", "done"],
+    ["handed-off", "done"],
+    ["closed", "done"],
+    ["retired", "done"],
+  ] as const)("propStatusClass(%j) → %s（待決＝等人決定、進行中＝流程還在走、已完成＝已有終局）", (state, expected) => {
+    expect(propStatusClass(state)).toBe(expected);
+  });
+
+  it("propStatusClass：表外字串一律 unknown（含空字串、大小寫不同、帶空白、原型鏈上的鍵名），不猜類別", () => {
+    for (const odd of ["", "Proposed", "archived", "proposed ", "constructor", "toString", "__proto__", "hasOwnProperty"]) expect(propStatusClass(odd), JSON.stringify(odd)).toBe("unknown");
+  });
+
+  it("根層 tools/lib/selfimproving/events.py 的 PROP_STATES（十個）全都已歸類、沒有落到 unknown；待決恰為 proposed 與 verified（提案面板預設展開的就是這兩個）", () => {
+    // 期望值抄自該常數（events.py 的 PROP_STATES）：根層多一個狀態而這張表沒跟上時，頁面以 unknown 兜底（照常顯示）；要不要歸類由人在這裡補，補完這個測試才綠
+    const ROOT_PROP_STATES = ["proposed", "approved", "rejected", "returned", "handed-off", "sandboxed", "verified", "promoted", "measuring", "closed"];
+    for (const state of ROOT_PROP_STATES) expect(propStatusClass(state), state).not.toBe("unknown");
+    expect(ROOT_PROP_STATES.filter((s) => propStatusClass(s) === "pending")).toEqual(["proposed", "verified"]);
+  });
+
+  it("快篩的選項與預設：觀察＝全部、未結、延後、已完成；提案＝全部、待決、進行中、已完成；預設都是全部（空字串）；自動載入上限為 20 頁", () => {
+    expect(OBS_STATUS_OPTIONS.map((o) => [o.id, o.label])).toEqual([
+      ["", "全部"],
+      ["open", "未結"],
+      ["deferred", "延後"],
+      ["done", "已完成"],
+    ]);
+    expect(PROPOSAL_STATUS_OPTIONS.map((o) => [o.id, o.label])).toEqual([
+      ["", "全部"],
+      ["pending", "待決"],
+      ["active", "進行中"],
+      ["done", "已完成"],
+    ]);
+    expect(EMPTY_OBS_FILTERS.status).toBe("");
+    expect(EMPTY_PROPOSAL_FILTERS.status).toBe("");
+    expect(SI_AUTO_LOAD_MAX_PAGES).toBe(20);
+  });
+
+  describe("filterObservations 的 status", () => {
+    const rows: SiObservationRow[] = [
+      obs("OBS-SI-001", { disposition: "open", severity: "P1" }),
+      obs("OBS-SI-002", { disposition: "decided：x", severity: "P3" }),
+      obs("OBS-SI-003", { disposition: "deferred；再開症狀：y", severity: "P3" }),
+      obs("OBS-SI-004", { disposition: "DEF-AC-003", severity: "P3" }),
+      obs("OBS-SI-005", { disposition: "fixed@abc1234", severity: "P1" }),
+      obs("OBS-SI-006", { disposition: "open", severity: "P3", time: "2026-10-01 08:00" }),
+      BAD_ROW,
+    ];
+
+    it("未結只留 open、延後只留 deferred、已完成留其餘終值；空條件與空字串全留", () => {
+      expect(obsIds(filterObservations(rows, { status: "open" }, ANCHOR))).toEqual(["OBS-SI-001", "OBS-SI-006", "line:22"]);
+      expect(obsIds(filterObservations(rows, { status: "deferred" }, ANCHOR))).toEqual(["OBS-SI-003", "line:22"]);
+      expect(obsIds(filterObservations(rows, { status: "done" }, ANCHOR))).toEqual(["OBS-SI-002", "OBS-SI-004", "OBS-SI-005", "line:22"]);
+      expect(filterObservations(rows, { status: "" }, ANCHOR)).toHaveLength(rows.length);
+      expect(filterObservations(rows, {}, ANCHOR)).toHaveLength(rows.length);
+    });
+
+    it("與其他條件取交集；壞列在任何快篩下都保留（反例：沒有任何有效列符合時只剩壞列，而不是空）", () => {
+      expect(obsIds(filterObservations(rows, { status: "done", severity: "P1" }, ANCHOR))).toEqual(["OBS-SI-005", "line:22"]);
+      expect(obsIds(filterObservations(rows, { status: "open", window: "today" }, ANCHOR))).toEqual(["OBS-SI-001", "line:22"]);
+      expect(obsIds(filterObservations(rows, { status: "open", severity: "P9" }, ANCHOR))).toEqual(["line:22"]);
+      expect(obsIds(filterObservations(rows, { status: "deferred", severity: "P1" }, ANCHOR))).toEqual(["line:22"]);
+    });
+
+    it("空處置的有效列只出現在未結，不出現在已完成（寧可多列一筆未結，不宣稱沒處置的列已完成）", () => {
+      const withBlank = [...rows.slice(0, 2), obs("OBS-SI-007", { disposition: "" })];
+      expect(obsIds(filterObservations(withBlank, { status: "open" }, ANCHOR))).toEqual(["OBS-SI-001", "OBS-SI-007"]);
+      expect(obsIds(filterObservations(withBlank, { status: "done" }, ANCHOR))).toEqual(["OBS-SI-002"]);
+    });
+  });
+
+  describe("filterProposals 的 status", () => {
+    const props = [
+      prop("PROP-SI-001", "proposed"),
+      prop("PROP-SI-002", "verified", "C"),
+      prop("PROP-SI-003", "approved"),
+      prop("PROP-SI-004", "measuring"),
+      prop("PROP-SI-005", "rejected"),
+      prop("PROP-SI-006", "closed", "C"),
+      prop("PROP-SI-007", "archived-x", "C"), // 狀態不在表內：任何快篩下都顯示
+    ];
+
+    it("待決＝proposed、verified；進行中＝approved、measuring 等；已完成＝rejected、closed 等；表外狀態在每個快篩下都在；空條件與空字串全留", () => {
+      expect(propIds(filterProposals(props, { status: "pending" }))).toEqual(["PROP-SI-001", "PROP-SI-002", "PROP-SI-007"]);
+      expect(propIds(filterProposals(props, { status: "active" }))).toEqual(["PROP-SI-003", "PROP-SI-004", "PROP-SI-007"]);
+      expect(propIds(filterProposals(props, { status: "done" }))).toEqual(["PROP-SI-005", "PROP-SI-006", "PROP-SI-007"]);
+      expect(filterProposals(props, { status: "" })).toHaveLength(props.length);
+      expect(filterProposals(props, {})).toHaveLength(props.length);
+    });
+
+    it("與狀態下拉、類別下拉取交集：表外狀態只躲過狀態快篩，躲不過另兩個條件；快篩不會凌駕狀態下拉", () => {
+      expect(propIds(filterProposals(props, { status: "done", cls: "C" }))).toEqual(["PROP-SI-006", "PROP-SI-007"]);
+      expect(propIds(filterProposals(props, { status: "done", cls: "M" }))).toEqual(["PROP-SI-005"]);
+      expect(propIds(filterProposals(props, { status: "pending", state: "verified" }))).toEqual(["PROP-SI-002"]);
+      expect(propIds(filterProposals(props, { status: "pending", state: "archived-x" }))).toEqual(["PROP-SI-007"]);
+      expect(propIds(filterProposals(props, { status: "active", state: "rejected" }))).toEqual([]);
+    });
+  });
+
+  describe("filterCounts 與 filterCountText（快篩旁的「符合 N／已載入 M」）", () => {
+    const rows: SiObservationRow[] = [
+      obs("OBS-SI-001", { disposition: "open" }),
+      obs("OBS-SI-002", { disposition: "decided：x" }),
+      obs("OBS-SI-003", { disposition: "fixed@abc1234" }),
+      obs("OBS-SI-004", { disposition: "deferred：y" }),
+      BAD_ROW,
+    ];
+
+    it("符合＝顯示的列扣掉照常顯示的列，已載入＝全部列；壞列照常顯示、另註、不算符合", () => {
+      const shown = filterObservations(rows, { status: "done" }, ANCHOR);
+      expect(filterCounts(rows, shown, isInvalidRow)).toEqual({ matched: 2, pinned: 1, loaded: 5 });
+      expect(filterCountText(filterCounts(rows, shown, isInvalidRow), "無法解析的列")).toBe("符合 2／已載入 5（另有 1 筆無法解析的列照常顯示）");
+    });
+
+    it("沒有照常顯示的列就不加註；一筆都不符合是「符合 0」，不是空字串或不顯示", () => {
+      const props = [prop("PROP-SI-001", "proposed"), prop("PROP-SI-002", "verified")];
+      const none = filterProposals(props, { status: "done" });
+      expect(
+        filterCountText(
+          filterCounts(props, none, (p) => propStatusClass(p.state) === "unknown"),
+          "狀態未登記的提案",
+        ),
+      ).toBe("符合 0／已載入 2");
+      const all = filterProposals(props, {});
+      expect(
+        filterCountText(
+          filterCounts(props, all, () => false),
+          "狀態未登記的提案",
+        ),
+      ).toBe("符合 2／已載入 2");
+    });
+
+    it("提案：表外狀態的提案在快篩下照常顯示，另註、不算符合", () => {
+      const props = [prop("PROP-SI-001", "proposed"), prop("PROP-SI-002", "verified"), prop("PROP-SI-003", "closed"), prop("PROP-SI-004", "archived-x")];
+      const shown = filterProposals(props, { status: "pending" });
+      const text = filterCountText(
+        filterCounts(props, shown, (p) => propStatusClass(p.state) === "unknown"),
+        "狀態未登記的提案",
+      );
+      expect(text).toBe("符合 2／已載入 4（另有 1 筆狀態未登記的提案照常顯示）");
+    });
   });
 });
 
