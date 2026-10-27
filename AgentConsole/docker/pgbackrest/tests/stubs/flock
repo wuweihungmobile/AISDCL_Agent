@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# docker/pgbackrest/tests/stubs/flock — 測試替身（TCS-SysAdminBackup-20261027 §5.4；AT-BK-09-5-5；只在 Linux 容器內用）
+# 排在 PATH 前面：把 argv 記到 flock.log，再轉呼叫真的 flock。用來證明 runner 與 export 不以取鎖探測維護鎖
+# （對維護鎖零筆 flock 呼叫）——判準是 log 裡有沒有以維護鎖為目標的呼叫，不靠副作用偵測。
+#   STUB_FLOCK_LOG  記錄檔路徑（預設 /tmp/flock.log）
+set -u
+
+printf '%s\n' "$*" >> "${STUB_FLOCK_LOG:-/tmp/flock.log}"
+real="$(PATH=/usr/bin:/bin command -v flock)"
+exec "$real" "$@"

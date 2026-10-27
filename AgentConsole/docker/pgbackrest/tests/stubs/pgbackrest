@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# docker/pgbackrest/tests/stubs/pgbackrest — 測試替身（TCS-SysAdminBackup-20261027 §5.4；只在 Linux 容器內用）
+# 排在 PATH 前面取代真的 pgbackrest；只認 backup-ctl-export.sh 與 pgbackrest-metrics.sh 會呼叫的兩種形態：
+#   pgbackrest [--stanza=…] --output=json [--log-level-console=off] info
+#   pgbackrest [--log-level-console=off] help expire repo-retention-full|repo-retention-diff
+# 其餘子命令一律 rc 0。輸出形態對照真 pgBackRest 2.59.3 的實測（含 help 前後兩行 INFO 日誌）。
+#
+# 環境變數（皆選填）：
+#   STUB_FIXTURE_DIR   夾具目錄（預設 <本檔目錄>/../fixtures）
+#   STUB_INFO_FIXTURE  info 的 JSON 夾具（預設 $STUB_FIXTURE_DIR/info-2repo.json）
+#   STUB_INFO_MODE     ok（預設）｜fail（rc 1、無輸出）｜nonjson｜notarray（頂層是物件而非陣列）
+#   STUB_INFO_SLEEP    info 先睡這麼多秒再回
+#   STUB_HELP_FORM     a（預設：full 單值「current: 4」，diff 逐 repo 只有 repo1＝本專案實況）
+#                      b（兩者皆逐 repo 兩列：full 4／6、diff 7／3）
+#                      c（full 逐 repo 兩列 4／4，diff 只有 repo1 的 7）
+#                      empty（兩者皆無輸出）｜nonnumeric（current: abc）｜conflict（兩個互相矛盾的 current）
+#                      ｜fail（rc 1）
+#   STUB_HELP_NOISE    1＝即使帶 --log-level-console=off 也印前後兩行 INFO 日誌
+#   STUB_CALL_LOG      有設就把每次 info 呼叫追加兩行「<毫秒> start|end <引數>」（驗證匯出不重疊、只呼叫一次）
+set -u
+
+dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+fixtures="${STUB_FIXTURE_DIR:-$dir/../fixtures}"
+
+log_call() {
+  if [ -n "${STUB_CALL_LOG:-}" ]; then
+    printf '%s %s %s\n' "$(date +%s%3N)" "$1" "${*:2}" >> "$STUB_CALL_LOG"
+  fi
+}
+
+cmd=""
+quiet=0
+words=()
+for arg in "$@"; do
+  case "$arg" in
+    --log-level-console=off) quiet=1 ;;
+    --*) ;;
+    *)
+      if [ -z "$cmd" ]; then cmd="$arg"; else words+=("$arg"); fi
+      ;;
+  esac
+done
+
+help_body_full() {
+  cat <<'EOF'
+pgBackRest 2.59.3 - 'expire' command - 'repo-retention-full' option help
+
+Full backup retention count/time.
+
+When a full backup expires, all differential and incremental backups associated
+with the full backup will also expire. When the option is not defined a warning
+will be issued. If indefinite retention is desired then set the option to the
+max value.
+
+EOF
+}
+
+help_body_diff() {
+  cat <<'EOF'
+pgBackRest 2.59.3 - 'expire' command - 'repo-retention-diff' option help
+
+Number of differential backups to retain.
+
+When a differential backup expires, all incremental backups associated with the
+differential backup will also expire. When not defined all differential backups
+will be kept until the full backups they depend on expire.
+
+Note that full backups are included in the count of differential backups for
+the purpose of expiration. This slightly reduces the number of differential
+backups that need to be retained in most cases.
+
+EOF
+}
+
+# $1＝full｜diff：依 STUB_HELP_FORM 印出 current 區段與其後的 deprecated 行
+help_current() {
+  local option="$1" form="${STUB_HELP_FORM:-a}"
+  case "$form:$option" in
+    a:full) printf 'current: 4\n' ;;
+    a:diff | c:diff) printf 'current:\n  repo1: 7\n' ;;
+    b:full) printf 'current:\n  repo1: 4\n  repo2: 6\n' ;;
+    b:diff) printf 'current:\n  repo1: 7\n  repo2: 3\n' ;;
+    c:full) printf 'current:\n  repo1: 4\n  repo2: 4\n' ;;
+    nonnumeric:*) printf 'current: abc\n' ;;
+    conflict:full) printf 'current: 4\n\ncurrent:\n  repo1: 9\n' ;;
+    conflict:diff) printf 'current:\n  repo1: 7\n' ;;
+    *) return 1 ;;
+  esac
+  printf '\ndeprecated name: retention-%s\n' "$option"
+}
+
+case "$cmd" in
+  info)
+    log_call start "$@"
+    # 被 timeout 終止時也記一行 end（驗證匯出不重疊：被殺的呼叫也要有完整的起迄區間）
+    trap 'log_call end "$@"; exit 143' TERM
+    sleep "${STUB_INFO_SLEEP:-0}"
+    rc=0
+    case "${STUB_INFO_MODE:-ok}" in
+      ok) cat -- "${STUB_INFO_FIXTURE:-$fixtures/info-2repo.json}" ;;
+      fail) rc=1 ;;
+      nonjson) echo 'this is not json' ;;
+      notarray) echo '{"name":"aisdlc","status":{"code":0,"message":"ok"}}' ;;
+      *) rc=2 ;;
+    esac
+    log_call end "$@"
+    exit "$rc"
+    ;;
+  help)
+    if [ "${words[0]:-}" != "expire" ]; then exit 0; fi
+    option="${words[1]:-}"
+    case "$option" in
+      repo-retention-full) kind="full" ;;
+      repo-retention-diff) kind="diff" ;;
+      *) exit 0 ;;
+    esac
+    form="${STUB_HELP_FORM:-a}"
+    [ "$form" = "fail" ] && exit 1
+    [ "$form" = "empty" ] && exit 0
+    noisy=0
+    if [ "$quiet" = "0" ] || [ "${STUB_HELP_NOISE:-0}" = "1" ]; then noisy=1; fi
+    if [ "$noisy" = "1" ]; then
+      printf '2026-10-27 20:36:10.814 P00   INFO: expire command begin 2.59.3: [%s] --exec-id=1-bd4f0c14 --log-level-console=info --repo1-path=/var/lib/pgbackrest\n' "$option"
+    fi
+    case "$kind" in
+      full) help_body_full ;;
+      diff) help_body_diff ;;
+    esac
+    help_current "$kind" || true
+    if [ "$noisy" = "1" ]; then
+      printf '2026-10-27 20:36:10.816 P00   INFO: expire command end: completed successfully (3ms)\n'
+    fi
+    exit 0
+    ;;
+  *)
+    exit 0
+    ;;
+esac

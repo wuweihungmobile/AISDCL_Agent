@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# docker/pgbackrest/tests/stubs/mv — 測試替身（TCS-SysAdminBackup-20261027 §5.4；AT-BK-09-3-7；只在 Linux 容器內用）
+# 排在 PATH 前面：目的為 jobs/*.json 或 results/*.json 的改名先睡一下再轉呼叫真的 mv，放大「終態寫入」的視窗，
+# 讓「終態在鎖釋放之後才寫」的實作在清掃的空窗內被誤判成 interrupted 而轉紅。腳本內的改名一律經 mv 命令名才攔得到。
+#   STUB_MV_DELAY  睡眠秒數（預設 1.5）
+set -u
+
+last="${*: -1}"
+case "$last" in
+  */jobs/*.json | */results/*.json) sleep "${STUB_MV_DELAY:-1.5}" ;;
+esac
+real="$(PATH=/usr/bin:/bin command -v mv)"
+exec "$real" "$@"

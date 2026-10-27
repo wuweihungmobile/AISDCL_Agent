@@ -6,6 +6,8 @@
 #     crontab 維持 PRD 的 Alpine crond 格式
 #   · 加 mc（MinIO client，pg_dump 離站用）、jq（指標／驗證腳本）、curl
 #   · ENTRYPOINT 改為 bootstrap 腳本：等 PG → stanza-create → 指標端點 → crond（PRD 直接 exec crond）
+#   · 備份控制面（PRD §9.3；README〈4.6〉）：job-run.sh／backup-ctl-export.sh／backup-ctl-runner.sh 隨 scripts/
+#     一起 COPY（tests/ 不進映像）；輸出卷掛載點 /backup-out 與維護鎖目錄 /run/backup-ctl 在下方 RUN 建好
 ARG BUSYBOX_IMAGE=busybox:1.38.0-musl
 ARG MC_IMAGE=pgsty/mc:RELEASE.2026-09-16T00-00-00Z
 
@@ -39,7 +41,10 @@ RUN chmod 0755 /usr/local/bin/*.sh \
  && install -d -o postgres -g postgres -m 0750 \
       /var/lib/pgbackrest /var/log/pgbackrest /var/lib/postgresql/wal_archive \
  # 指標目錄要讓 busybox httpd（降權成 nobody）讀得到 ⇒ 0755
- && install -d -m 0755 /run/pgbackrest-metrics
+ && install -d -m 0755 /run/pgbackrest-metrics \
+ # 備份控制面（README〈4.6〉）：/backup-out 是輸出卷的掛載點（寫入端映像定義卷根的擁有者：postgres），
+ # backend 是另一個 uid、只讀它 ⇒ 0755（🔴 不可照抄上面 0750）；/run/backup-ctl 放維護鎖（sidecar 本地、不在共享卷）
+ && install -d -o postgres -g postgres -m 0755 /backup-out /run/backup-ctl
 
 ENTRYPOINT ["/usr/local/bin/pgbackrest-entrypoint.sh"]
 CMD ["daemon"]

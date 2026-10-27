@@ -160,6 +160,10 @@ services:
       CONSOLE_ADMIN_PASSWORD_HASH:
       CONSOLE_OPERATOR_PASSWORD_HASH:
       CONSOLE_VIEWER_PASSWORD_HASH:
+      # 備份控制面（PRD §9.1 B′）兩個目錄在容器內的固定路徑（字面常數、不含機密）；console-api 對 sidecar
+      # 只有這兩個卷上的檔案 I/O，不持有 MinIO 金鑰與 cipher 密碼（AT-BK-10-4-2 鎖）。
+      CONSOLE_BACKUP_OUT_DIR: /backup-out
+      CONSOLE_BACKUP_REQ_DIR: /backup-req
     healthcheck:
       # eclipse-temurin alpine 映像沒有 curl 但有 busybox wget；兩者擇一
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/actuator/health || curl -fsS -o /dev/null http://127.0.0.1:8080/actuator/health"]
@@ -173,6 +177,10 @@ services:
       # Bridge 就寫不進 /app/logs（實測：Permission denied，bridge.log 沒有檔）。backend 這邊關掉複製，卷根的擁有者與權限
       # 就只由 Bridge 映像決定（1777：兩個 uid 都能寫）。順序不再有影響——backend 從不參與複製。
       - app_logs:/app/logs:nocopy
+      # 🔴 備份控制面（PRD §9.1 B′；README〈4.6〉）：輸出卷是 sidecar 寫、本服務唯讀（ro,nocopy）；
+      # 請求卷是本服務寫（不帶 ro／nocopy：卷根擁有者由 backend 映像的 /backup-req 決定）、sidecar 唯讀。
+      - backup_out:/backup-out:ro,nocopy
+      - backup_req:/backup-req
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -562,6 +570,12 @@ services:
       - pg_backup:/var/lib/pgbackrest
       - pg_wal_archive:/var/lib/postgresql/wal_archive
       - ./docker/pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      # 🔴 備份控制面（PRD §9.1 B′；README〈4.6〉）：兩個具名卷，方向由 mount 旗標強制。
+      # backup_out 由本服務寫（不帶 ro／nocopy：卷根的擁有者由本映像的 /backup-out 決定）、backend 唯讀；
+      # backup_req 由 backend 寫、本服務 ro,nocopy。讀取端一律 ro,nocopy（同 app_logs 的 nocopy 教訓：
+      # 卷還空著時每個容器 create 都會把映像目錄的擁有者複製進卷根，讀取端不該參與複製）。
+      - backup_out:/backup-out
+      - backup_req:/backup-req:ro,nocopy
     healthcheck:
       # crond 活著、stanza 已建立、指標端點有回應。busybox 的行程名是 busybox（applet 名不在 comm 裡），所以用 -f 比對
       # 命令列；[c]rond 的括號寫法避免 sh -c 自己的命令列也被比對到。
@@ -816,4 +830,8 @@ volumes:
   minio_certs:          # MinIO 自簽 TLS 憑證（minio-certs job 產生）
     driver: local
   prometheus_data:      # Prometheus 時序資料（W7：可用性 SLO 的 30 天歷史要跨 down／容器重建存活；PRD §11.3 未列）
+    driver: local
+  backup_out:           # 備份控制面輸出卷：sidecar 寫狀態與匯出、backend 唯讀（備份頁；README〈4.6〉）
+    driver: local
+  backup_req:           # 備份控制面請求卷：backend 寫手動觸發請求、sidecar 唯讀（階段二才有請求）
     driver: local

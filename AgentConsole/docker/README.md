@@ -18,10 +18,10 @@ AgentConsole/
     ├── nginx/                    nginx.conf、conf.d/{default.conf,console-locations.inc,https-redirect.inc,https.conf.example}
     ├── postgres/primary/         Dockerfile、postgresql.conf、pg_hba.conf、pgbackrest-archive-wal.sh、init/{01-init-db.sql,02-replication.sh}
     ├── postgres/replica/         postgresql.conf、entrypoint.sh
-    ├── pgbackrest/               Dockerfile、pgbackrest.conf、crontab、scripts/{backup-full,backup-incr,pg_dump-offsite,restore,verify-backup,setup-replica,pgbackrest-entrypoint,pgbackrest-metrics,pgbackrest-as-postgres}.sh
+    ├── pgbackrest/               Dockerfile、pgbackrest.conf、crontab、scripts/{backup-full,backup-incr,pg_dump-offsite,restore,verify-backup,setup-replica,pgbackrest-entrypoint,pgbackrest-metrics,pgbackrest-as-postgres,job-run,backup-ctl-export,backup-ctl-runner}.sh、tests/{stubs,fixtures}（控制面的測試替身與夾具，不進映像；〈4.6〉）
     ├── minio/                    gen-cert.sh、init-bucket.sh
     ├── redis/redis.conf
-    ├── prometheus/               prometheus.yml、alerts.yml、slo.yml（可用性 SLO）、tests/slo_test.yml（promtool 單元測試）
+    ├── prometheus/               prometheus.yml、alerts.yml、slo.yml（可用性 SLO）、tests/{slo_test,backup_alerts_test}.yml（promtool 單元測試）
     ├── grafana/                  provisioning/{datasources,dashboards}、dashboards/{postgres-overview,app-overview}.json
     └── pgadmin/servers.json
 ```
@@ -67,6 +67,8 @@ AgentConsole/
 | prometheus_data | Prometheus 時序資料（掛 `/prometheus`，保留期 35 天）；可用性 SLO 的 30 天歷史靠它跨 `down`／重建存活，`down -v` 才會清掉（PRD §11.3 未列，見〈9〉#34、〈7〉） |
 | redis_data、nginx_certs、engine_workspace | PRD §11.3 原有 |
 | app_logs | PRD §11.3 原有；backend（`console.log`）與 engine-bridge（`bridge.log`）各自把滾動檔案日誌寫在這裡（〈15〉） |
+| backup_out | 備份控制面的**輸出卷**（Console「系統管理／資料庫備份」；〈4.6〉、〈9〉#35）：sidecar 寫（掛 `/backup-out`：`export/` 的 info／logical／schedule／heartbeat／jobs 與 `results/`）、backend 唯讀（`:ro,nocopy`）；PRD §11.3 未列 |
+| backup_req | 備份控制面的**請求卷**：backend 寫（手動觸發的請求檔，階段二）、sidecar 唯讀（掛 `/backup-req`，`:ro,nocopy`）；PRD §11.3 未列 |
 
 ## 2. 啟動與停止
 
@@ -229,6 +231,7 @@ cron 輸出在 sidecar 的 `/var/log/pgbackrest/cron.log`：`docker compose exec
 
 - 排程已實測會觸發：探針工作以 `postgres` 身分執行、看得到 `PGBACKREST_*` 環境變數、時區為 CST（busybox crond 會把容器環境傳給工作；Debian 的 `cron` 不會）。
 - 🔴 busybox crond **只在 crontab 目錄的 mtime 改變時重讀排程**：在執行中的容器內原地修改 `/etc/crontabs/postgres` 不會生效，要先寫成新檔再 `mv` 蓋過去（重建映像／容器則一律生效）。
+- 全備、差異、pg_dump、驗證四條工作經 `job-run.sh` 包裝（〈4.6〉）：它只加維護鎖、狀態檔與遮罩後的輸出尾段，rc、stdout、stderr 原樣透傳，`>> cron.log` 照舊；備份腳本本體零修改。排程時間與 expire、WAL 清理兩列不變。要退回：把 `crontab` 四行改回直接呼叫 `backup-full.sh`、`backup-incr.sh`、`pg_dump-offsite.sh`、`verify-backup.sh`，重建映像。
 
 ### 4.2 首次部署後立刻做全備
 
@@ -295,6 +298,48 @@ Push-Location AgentConsole; docker compose exec pgbackrest bash -c 'export MC_HO
 ### 4.5 離站儲存改用真 S3
 
 只改 `.env`：`PGBACKREST_S3_ENDPOINT=s3.amazonaws.com`、`PGBACKREST_S3_REGION=<region>`、`PGBACKREST_S3_URI_STYLE=host`、`PGBACKREST_S3_VERIFY_TLS=y`、`PGBACKREST_S3_BUCKET`、`AWS_ACCESS_KEY_ID`／`AWS_SECRET_ACCESS_KEY`（IAM 使用者；需有該 bucket 的讀寫與列舉權限）。bucket 要先自己建好。minio 相關服務仍會被帶起但不再被使用（要省資源就用 override 檔把它們從 `db` profile 拿掉）。**`PGBACKREST_CIPHER_PASS` 遺失＝所有備份無法還原**，請另行保管。
+
+### 4.6 控制面（Console「系統管理／資料庫備份」；PRD `Console_SysAdmin_Backup_PRD.md` §9）
+
+Console 的備份頁**看**得到清單、排程、最近四種工作的結果與資料新鮮度，靠的是 sidecar 把狀態寫成檔案、console-api 以**唯讀**方式讀。兩者之間**沒有網路、沒有 docker socket**，只有兩個具名卷（方向由 mount 旗標強制，不靠權限位元約定）：
+
+| 卷（容器內路徑） | 寫入者 → 讀取者 | 掛載旗標 | 內容 |
+|------------------|------------------|----------|------|
+| `backup_out`（`/backup-out`） | sidecar → backend | sidecar 無旗標（寫入端）；backend `:ro,nocopy` | `export/{info,logical,schedule}.json`、`export/heartbeat`、`export/jobs/<job>.json`（job＝full／diff／dump／verify）、`results/<uuid>.json`（手動請求的結果，階段二） |
+| `backup_req`（`/backup-req`） | backend → sidecar | backend 無旗標（寫入端）；sidecar `:ro,nocopy` | `<uuid>.json` 手動觸發請求（階段二；階段一沒有請求，只是掛著） |
+
+- 🔴 **權限**：卷由**寫入端映像**定義擁有者（sidecar 映像把 `/backup-out` 建成 `postgres` 0755；entrypoint 的 root 階段再 `install -d -m 0755` 建 `export`、`export/jobs`、`results`），讀取端一律 `:ro,nocopy`（同 `app_logs` 的 `nocopy` 教訓：卷還空著時，每個容器 create 都會把映像內該目錄的擁有者複製進卷根，讀取端不該參與）。目錄 0755、檔 0644——讀取端是另一個 uid，**不可照抄 `Dockerfile` 其他目錄的 0750**。compose 旗標有 PyYAML 鎖（`engine-bridge/tests/test_backup_ctl_deploy_config.py`）。
+- 寫檔一律「寫同目錄的 `.tmp` → `mv` 改名」，讀取端永遠看不到半個檔；所有檔含 `schema_rev: 1`，不含任何金鑰、密碼或 cipher。
+- **三支新腳本**（`docker/pgbackrest/scripts/`，只在容器內執行；shellcheck 全嚴重度乾淨）：
+  - `job-run.sh <full|diff|dump|verify> <scheduled|manual> [<uuid>]`：crontab 四條工作的包裝。以**命令形** `flock -o` 取維護鎖（`/run/backup-ctl/maintenance.lock`，sidecar 本地、不在共享卷；🔴 不用 fd 形持鎖：`/proc/locks` 看不到、verify 起的暫存 PG 會繼承鎖 fd）。排程等待至 `JOB_LOCK_WAIT_SECONDS`（7200）、逾時＝不執行腳本、記 `failed`／`lock_timeout`／rc 75；手動不等待，拿不到＝立即 rc 75（`busy`）。持鎖期間寫 `jobs/<job>.json`（running → 終態；終態一定在鎖釋放前寫完，否則清掃會把正常結束的工作誤判成中斷）、輸出尾段先遮罩（`pass`／`secret`／`key`／`token` 的值、AWS 金鑰 id、連線字串密碼）再取最後 2000 字元。結束碼＝備份腳本的 rc 原樣（75 專指 busy 與 lock_timeout）。🔴 它在每一條排程備份的路徑上，所以每一步都有退路：鎖檔開不了、狀態檔寫不了、擷取失敗一律 WARN 後照常執行。
+  - `backup-ctl-runner.sh`：迴圈（背景、`postgres` 身分、每 ≤5 秒），**永不等待子行程**：每輪清掃（進行中但維護鎖沒有持有者＝容器重啟中斷，改記 `interrupted`）、更新 `export/heartbeat`＝`{schema_rev, ts, lock_held}`（`lock_held` 只讀 `/proc/locks` 比對鎖檔 dev:ino，**不取鎖探測**）、必要時在背景啟動匯出。Console 以 30 秒判斷它是否離線。階段二加請求處理。
+  - `backup-ctl-export.sh`：每 60 秒與每次工作結束後由 runner 以 `timeout 120` 啟動一輪（前一個未結束就略過）：`export/info.json`＝`pgbackrest info` 的**原輸出**（逐字嵌入）加 `retention`（問 pgBackRest 自報的有效值：`pgbackrest help expire repo-retention-full`／`-diff` 的 `current:`；不自己讀 `pgbackrest.conf`，解析不到＝`null`、不填預設值）與 `repos`（repo2 端點主機名不含 `.`、或為 `localhost`／回送位址／`host.docker.internal` ⇒ `local: true`，Console 會標「與主機同碟」）；`export/logical.json`＝離站 `logical/` 的 `mc ls`（至多每 300 秒）。失敗只寫 `ok:false`（不寫部分清單、不保留舊內容冒充新鮮），結束碼仍為 0。`export/schedule.json` 在 entrypoint 的 root 階段由 crontab 產生一次（crontab 是 `root:root 0600`）。
+- **對照指標與規則**：`pgbackrest-metrics.sh` 另輸出 `aisdlc_backup_job_last_status{backup_job}`（0 成功、1 失敗或中斷）、`aisdlc_backup_job_last_finished_timestamp_seconds{backup_job}`、`aisdlc_backup_ctl_heartbeat_timestamp_seconds`；`alerts.yml` 新增 `PgBackRestJobFailed`（只管 dump 與 verify；全備與差異由 `PgBackRestLastBackupFailed` 管）與 `PgBackRestControlHeartbeatStale`（心跳超過 120 秒）。🔴 標籤名是 `backup_job`、**不是 `job`**：抓取目標標籤 `job="pgbackrest"`（`prometheus.yml` 未設 `honor_labels`）會把曝光的 `job` 改名成 `exported_job`，用 `{job=~…}` 的規則就永遠匹配不到（promtool 的人造序列看不出這個，只有真抓取看得出）。執行中（`running`）的 job 不輸出序列。
+- **看狀態**（唯讀；PowerShell 形態＝`Push-Location AgentConsole; <同一段 docker compose …>; Pop-Location`）：
+
+  ```bash
+  (cd AgentConsole && docker compose exec pgbackrest cat /backup-out/export/heartbeat)
+  (cd AgentConsole && docker compose exec pgbackrest cat /backup-out/export/jobs/full.json)
+  (cd AgentConsole && docker compose exec pgbackrest bash -c 'jq -c "{generated_at, ok, retention, repos}" /backup-out/export/info.json')
+  ```
+
+  ```powershell
+  Push-Location AgentConsole; docker compose exec pgbackrest cat /backup-out/export/heartbeat; Pop-Location
+  Push-Location AgentConsole; docker compose exec pgbackrest cat /backup-out/export/jobs/full.json; Pop-Location
+  Push-Location AgentConsole; docker compose exec pgbackrest bash -c 'jq -c "{generated_at, ok, retention, repos}" /backup-out/export/info.json'; Pop-Location
+  ```
+
+- **測試**：控制面腳本的契約測試用 `docker/pgbackrest/tests/` 的替身（`stubs/` 的 `pgbackrest`、`mc`、`flock`、`mv` 與四支 stub 工作腳本；行為由 `STUB_*` 環境變數決定，用法見各檔檔頭）與夾具（`fixtures/info-2repo.json`、`logical-2.json`、`mask-probes.txt`；遮罩探針與 console-api 的 `BackupMasker` 共讀同一檔）。`flock`、`mv` 兩支替身與真命令同名，只准在需要它們的情境放進 `PATH`。靜態旗標鎖與規則的 promtool 測試：
+
+  ```bash
+  (cd AgentConsole/engine-bridge && . ../../.venv/bin/activate && python -m pytest -q tests/test_backup_ctl_deploy_config.py)
+  docker run --rm -v "$PWD/AgentConsole/docker/prometheus:/etc/prometheus" --entrypoint promtool prom/prometheus:v3.15.0 test rules /etc/prometheus/tests/backup_alerts_test.yml
+  ```
+
+  ```powershell
+  Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; python -m pytest -q tests/test_backup_ctl_deploy_config.py; Pop-Location
+  docker run --rm -v "${PWD}\AgentConsole\docker\prometheus:/etc/prometheus" --entrypoint promtool prom/prometheus:v3.15.0 test rules /etc/prometheus/tests/backup_alerts_test.yml
+  ```
 
 ## 5. 重建 Replica
 
@@ -381,7 +426,7 @@ Push-Location AgentConsole; docker compose exec pgbackrest bash /usr/local/bin/b
 |------|------|------|
 | Prometheus | `http://localhost:9090` | 目標：`spring-boot`（backend）、`postgres-primary`、`postgres-replica`（postgres_exporter）、`pgbackrest`（備份指標）、`prometheus` |
 | Grafana | `http://localhost:3001` | 帳密＝`.env` 的 `GRAFANA_USER`／`GRAFANA_PASSWORD`（**沒有預設密碼**）；資料來源 `Prometheus`（uid `prometheus`）與兩個 dashboard 皆由 provisioning 載入 |
-| 告警規則 | Prometheus UI 的 Alerts 頁 | `docker/prometheus/alerts.yml`：PRD §12.6.2 的 9 項閾值＋WAL 歸檔失敗、stanza 異常、指標過期（共 12 條）；`docker/prometheus/slo.yml`：Console 可用性 SLO（3 條 recording rules＋`ConsoleDown`、`ConsoleAvailabilityBelowTarget` 兩條告警，見下方〈可用性 SLO〉）；沒有 Alertmanager，不會對外通知 |
+| 告警規則 | Prometheus UI 的 Alerts 頁 | `docker/prometheus/alerts.yml`：PRD §12.6.2 的 9 項閾值＋WAL 歸檔失敗、stanza 異常、指標過期，另加備份控制面兩條（`PgBackRestJobFailed`、`PgBackRestControlHeartbeatStale`，〈4.6〉；共 14 條）；`docker/prometheus/slo.yml`：Console 可用性 SLO（3 條 recording rules＋`ConsoleDown`、`ConsoleAvailabilityBelowTarget` 兩條告警，見下方〈可用性 SLO〉）；沒有 Alertmanager，不會對外通知 |
 
 - **PostgreSQL Overview**（38 個面板，六列對應 PRD §12.6.3）：PG 總覽、複製狀態、查詢效能、備份狀態、鎖與等待、儲存空間。**Application Overview**（19 個面板）：抓取目標狀態＋可用性 SLO（30 天可用率 stat、1／7／30 天趨勢）＋ Spring Boot（Micrometer）面板；backend 沒起時 Spring Boot 面板顯示 No data。
 - **pgBackRest 指標**（ADR-001 G-04：PRD §12.6.2 的 `pgbackrest_*` 沒有現成 exporter）：sidecar 的 `pgbackrest-metrics.sh` 每 60 秒用 `pgbackrest info --output=json` 產生 Prometheus 文字格式，busybox httpd 在 `:9854/metrics` 提供。含 `pgbackrest_backup_since_last_full_seconds`、`pgbackrest_backup_last_status`（PRD 兩個指名指標）、備份份數／大小／耗時、stanza 與 repo 狀態碼，以及 `aisdlc_storage_*`（備份 repo／WAL 歸檔目錄用量、資料卷磁碟使用率）。失敗的備份不會出現在 `pgbackrest info`，所以 `last_status` 由備份腳本寫狀態檔（`pg_backup` 卷內 `.last_backup_status`）後轉出。
@@ -483,6 +528,7 @@ docker run --rm -v "${PWD}\AgentConsole\docker\prometheus:/etc/prometheus" --ent
 | 32 | §11.3 `app_logs` 卷掛在 backend／Bridge，但沒有任何東西寫進去 | backend 設 `LOG_DIR=/app/logs`（`console.log`）、Bridge 設 `BRIDGE_LOG_DIR=/app/logs`（`bridge.log`），各自每日切檔、保留 7 份；Bridge 映像把 `/app/logs` 設為 `1777`（兩個容器用不同 uid 寫同一個卷），且 backend 掛載該卷時加 `:nocopy` | **INF-VOL-06／C-16**：此前「掛載成功但卷內為空」；每行日誌帶 trace_id 的規格見〈15〉。🔴 實測陷阱：具名卷「還空著」時，Docker 在**每個**容器 create 時都把映像內該目錄的擁有者與權限複製進卷根，compose 先 create engine-bridge、後 create backend，最後一個 create 的 backend（`spring:spring 0755`）蓋掉 Bridge 映像的 `1777`，Bridge 寫 `bridge.log` 得 `Permission denied`（日誌只在 stderr 留警告）。backend 加 `:nocopy` 後卷根只由 Bridge 映像決定，與 create 順序無關（實測：`drwxrwxrwt`、uid 10001 與 1001 皆可寫） |
 | 33 | §11.5 只留 443 區塊的註解範例 | 提供 `https.conf.example`（443、憑證取自 `nginx_certs` 卷）與 `https-redirect.inc`（80 轉址到 443、保留 `/nginx-health`）；預設不啟用，步驟見〈14〉 | **INF-VOL-07**：此前「憑證實際放入與 HTTPS 區塊」缺 |
 | 34 | §11.3 卷清單沒有 Prometheus 的卷（時序資料落在映像宣告的匿名卷） | 增具名卷 `prometheus_data` 掛 `/prometheus`（頂層 `volumes:` 宣告，`driver: local`） | **NFR-9.3-01**：可用性 SLO 的 30 天可用率要跨 `down`／容器重建存活（〈7〉）。不掛卷時資料在匿名卷，`down` 之後重起接到的是新卷（Docker 對匿名卷的一般行為；W7 沒有做不掛卷的負向實測）。實測（Windows 11＋Docker Desktop，用獨立專案名 `w7probe` 只起 prometheus，免得污染 `aisdlc_*` 卷）：掛載型態 `volume`、`/prometheus` 屬 `nobody`（uid 65534）且可寫（`wal`、`chunks_head` 在卷內）；`down`（不帶 `-v`）後卷仍在，重起後同一時段的 3 筆 `up{job="prometheus"}` 樣本逐筆相同。`down -v` 會清掉它（〈2〉清場） |
+| 35 | §11.3 卷清單 12 個；§12.3.3 crontab 直接呼叫四支備份腳本；sidecar 沒有狀態輸出，Console 看不到備份狀態 | 增具名卷 `backup_out`（sidecar 寫、backend `:ro,nocopy`）與 `backup_req`（backend 寫、sidecar `:ro,nocopy`）；crontab 四條備份與驗證工作改經 `job-run.sh` 包裝；sidecar 增 `job-run.sh`、`backup-ctl-runner.sh`、`backup-ctl-export.sh`；`pgbackrest-metrics.sh` 增三個指標；`alerts.yml` 增兩條規則（共 14 條）；entrypoint 增 root 階段建目錄、產生 `schedule.json`、背景啟 runner（細節見〈4.6〉） | Console「系統管理／資料庫備份」（`Console_SysAdmin_Backup_PRD.md`）：頁面要「看」清單、排程與最近結果，並（階段二）讓 ADMIN 手動觸發。console-api 與 sidecar 之間只准有檔案 I/O——無新埠、無 docker socket（ADR-BK-1 的 B′ 方案：兩卷、方向由 mount 旗標強制）。包裝只加鎖、寫狀態、透傳 rc，鎖檔開不了與狀態檔寫不了都 fail-open（PRD §10 R1：包裝出錯＝排程備份失敗）；各備份腳本本體零修改，`.last_backup_status` 與 `pgbackrest_backup_last_status` 的語意與值不變。真輸出實測（pgBackRest 2.59.3）：`help expire repo-retention-full` 在兩個 repo 同值時印單值 `current: 4`、各自不同時印縮排的逐 repo 列，`repo-retention-diff` 只列有設定的 repo（本專案只有 `repo1: 7`）；`--log-level-console=off` 可去掉前後各一行 INFO 日誌 |
 
 ## 10. 已知限制
 
@@ -497,6 +543,9 @@ docker run --rm -v "${PWD}\AgentConsole\docker\prometheus:/etc/prometheus" --ent
 - pgAdmin 9 閒置時常駐記憶體約 220MiB，PRD 的上限是 256M（`docker stats` 實測 221.7MiB／256MiB）：開幾個連線就可能被 OOM kill（`restart: unless-stopped` 會拉起）。沿用 PRD 數值；實際使用若頻繁重啟，把該服務的 `memory` 上限調到 512M。
 - 回歸驗證範圍：`db`、`app`、`full` 三個 profile 都以真實映像實跑過（frontend／backend 使用其負責人建好的 `aisdlc-frontend:dev`／`aisdlc-backend:dev`，以 `up -d --no-build --wait` 啟動；**compose 的 `build:` 區段本輪沒有實際執行**，避免與他們的建置互踩）。實測內容：14 個長駐服務皆 healthy、經 nginx 登入並建立專案／目標／任務、Flyway 建出 13 張表並串流到 replica、對含應用資料的資料庫做全備與還原演練、failover 與切回（6.1～6.3）含真實 backend。尚未驗：Windows 的其餘項目（〈11〉；HTTPS 自簽流程與可用性 SLO 已在 W7 於 Windows 11 實跑）、CA 簽發的真憑證與續期（不在本專案範圍）、`frontend`／`backend` 由 compose `build:` 重建的路徑。
 - 告警盲區（沿用 PRD「值 > 閾值」的寫法）：序列不存在時規則不會觸發。從未做成任何完整備份時，`pgbackrest_backup_since_last_full_seconds` 缺席，`PgBackRestNoRecentFullBackup` 不會亮（`pgbackrest_backup_count{type="full"}` 為 0、儀表板「距上次完整備份」顯示 No data）；exporter 或 sidecar 整個停掉時，`PostgresDown`（`pg_up == 0`）與 `PgBackRestMetricsStale` 同樣沒有序列可比。`Application Overview` 第一列四個 `up` 面板（`DOWN` 紅色）是目前唯一會亮的地方；要補 `absent()`／`up == 0` 類規則，應連同 Alertmanager 一起規劃。
+- **備份控制面新規則的盲區**（沿用上一條「值 > 閾值」的寫法）：`PgBackRestJobFailed` 與 `PgBackRestControlHeartbeatStale` 在序列不存在時不會觸發——某個工作**從未執行**（沒有 `jobs/<job>.json`）、執行中（`running` 不輸出序列，規則只看上一次終態）、或 sidecar／runner 從來沒起來（沒有心跳檔）都不會亮；`PgBackRestJobFailed` 只管 dump 與 verify（全備與差異的失敗由 `pgbackrest_backup_last_status` 與 `PgBackRestLastBackupFailed` 管）。Console 備份頁的「從未執行」「逾期」「備份控制面無回應」標記是目前唯一覆蓋這些情形的地方；規則的 promtool 測試把盲區釘成案例（`backup_alerts_test.yml` 的「序列缺席」），日後補 `absent()` 規則時要連同這裡一起改。promtool 測試**本機限定**：`.github/workflows` 沒有 promtool 步驟。
+- **runner 死掉不會被重啟**：它是 entrypoint 的背景行程，沒有監督迴圈；死掉時心跳過期（Console 紅橫幅、`PgBackRestControlHeartbeatStale`），但備份排程（crond 與 `job-run.sh`）不受影響。`docker compose restart pgbackrest` 即可恢復。`/backup-req` 在 sidecar 是唯讀掛載：runner 啟動時對逾 24 小時的殘留請求檔只能記 WARN（刪不掉，由寫入端 console-api 清理）。
+- **`job-run.sh` 的 75**：結束碼 75 專指「手動拿不到鎖」與「排程等鎖逾時」；備份腳本自己若以 75 結束會與之混淆（現有四支不會）。擷取輸出的 `tee` 在工作腳本結束後最多再等 3 秒——若有子行程（例如 verify 的暫存 PG 異常殘留）仍握著管線寫端，包裝不再等它、結束 `tee` 並照常釋放鎖。
 - nginx 的 `upstream` 在 nginx 啟動時解析一次主機名稱：backend／frontend 容器若換了 IP，nginx 會繼續打舊位址（502）直到重新載入。實測 `stop`／`start` 反序、`up -d --no-deps` 重建都拿回同一個 IP，未能重現；理論上別的容器佔走該位址才會發生。補救：`docker compose exec nginx nginx -s reload`。
 - `app_logs` 卷：backend（`LOG_DIR=/app/logs` → `console.log`）與 engine-bridge（`BRIDGE_LOG_DIR=/app/logs` → `bridge.log`）各自寫滾動檔案日誌，stdout 的日誌（`docker compose logs`）照舊。檔案日誌的寫入失敗（舊卷權限不對、卷唯讀）不會讓服務起不來，只在該服務自己的日誌留一則警告；**既有的舊 `app_logs` 卷**（W5 之前建立）的擁有者與權限由當初第一個掛載它的映像決定（Bridge 映像當時沒有 `/app/logs` 目錄＝`root:root 0755`，或 backend 的 `spring` 0755），另一個服務因此寫不進去——`docker compose down -v` 重建，或 `docker run --rm -v aisdlc_app_logs:/l busybox chmod 1777 /l` 就地修（〈15〉）。
 - **資源上限貼近實用量（QA O-19，僅記錄、本輪不調）**：全棧實跑時 backend 實用 928MiB／1GiB、pgAdmin 242MiB／256MiB（`docker stats`）。JVM 以 `MaxRAMPercentage=75` 依容器上限自行調整堆積，短期不會因此失敗；若 `docker compose ps` 看到服務反覆重啟、`docker inspect <容器> --format '{{.State.OOMKilled}}'` 為 `true`，把該服務在 `docker-compose.yml` 的 `deploy.resources.limits.memory` 調高（backend 建議 2G、pgAdmin 512M）。

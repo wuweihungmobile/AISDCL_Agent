@@ -5,8 +5,9 @@
 #   1. 等 primary 就緒（共用 socket）
 #   2. stanza-create（冪等；MinIO 剛啟動等短暫失敗會重試）——此後 primary 的 pgbackrest-archive-wal.sh 才會真的歸檔
 #   3. pgbackrest check（只供診斷，失敗不終止）
-#   4. 背景：每 METRICS_INTERVAL 秒更新指標檔；busybox httpd 在 9854 提供 /metrics
-#   5. 前景：busybox crond（PRD §12.3.3 的排程）
+#   4. 備份控制面（PRD §9.3；README〈4.6〉）：root 階段建輸出卷目錄與 schedule.json，再以 postgres 身分背景啟動 runner
+#   5. 背景：每 METRICS_INTERVAL 秒更新指標檔；busybox httpd 在 9854 提供 /metrics
+#   6. 前景：busybox crond（PRD §12.3.3 的排程）
 # 其他參數（例如 `docker compose run --rm --no-deps pgbackrest bash restore.sh`）原樣 exec，不做上述準備。
 #
 # 🔴 不自動做第一次全備：PRD 排程的第一份全備要等週日 02:00；首次部署後請手動 backup-full.sh
@@ -52,6 +53,18 @@ log "pgbackrest check（診斷用，失敗不終止）…"
 if ! pgbackrest --stanza="$stanza" check; then
   log "WARN: check 失敗：WAL 歸檔或備份設定有問題，請檢視上方輸出"
 fi
+
+# 備份控制面。root 階段（gosu 之前）：建輸出卷的目錄（屬 postgres、0755——backend 是另一個 uid、只讀它；卷剛建好時
+# 卷根的擁有者來自映像的 /backup-out，卷若曾被別的擁有者建立也在這裡校正）、由 crontab（root:root 0600，只有 root
+# 讀得到）產生 export/schedule.json；之後以 postgres 身分背景啟動 runner（清掃、心跳、匯出）。
+# 🔴 控制面是附加功能：任何一步失敗只 WARN，絕不能讓備份排程起不來（PRD §10 R1）。
+install -d -o postgres -g postgres -m 0755 /backup-out /run/backup-ctl \
+  || log "WARN: 建立 /backup-out、/run/backup-ctl 失敗（備份控制面可能不可用）"
+install -d -o postgres -g postgres -m 0755 /backup-out/export /backup-out/export/jobs /backup-out/results \
+  || log "WARN: 建立控制面輸出目錄失敗（備份控制面可能不可用）"
+backup-ctl-export.sh schedule \
+  || log "WARN: schedule.json 產生失敗（Console 備份頁的排程區會顯示讀不到）"
+gosu postgres backup-ctl-runner.sh &
 
 metrics_dir="/run/pgbackrest-metrics"
 mkdir -p "$metrics_dir"

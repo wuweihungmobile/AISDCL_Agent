@@ -1,0 +1,9 @@
+[{"name":"aisdlc","cipher":"aes-256-cbc","db":[{"id":1,"repo-key":1,"system-id":7420000000000000001,"version":"18"}],
+  "archive":[{"database":{"id":1,"repo-key":1},"id":"18-1","min":"000000010000000000000001","max":"000000010000000000000009"}],
+  "repo":[{"cipher":"aes-256-cbc","key":1,"status":{"code":0,"message":"ok"}},{"cipher":"aes-256-cbc","key":2,"status":{"code":0,"message":"ok"}}],
+  "status":{"code":0,"message":"ok","lock":{"backup":{"held":false}}},
+  "backup":[
+   {"label":"20261026-020000F","type":"full","prior":null,"error":false,"database":{"id":1,"repo-key":1},"timestamp":{"start":1792951200,"stop":1792951800},"info":{"size":33554432,"delta":33554432,"repository":{"size":4194304,"delta":4194304}}},
+   {"label":"20261026-020002F","type":"full","prior":null,"error":false,"database":{"id":1,"repo-key":2},"timestamp":{"start":1792951202,"stop":1792951920},"info":{"size":33554432,"delta":33554432,"repository":{"size":4194816,"delta":4194816}}},
+   {"label":"20261026-020000F_20261027-020000D","type":"diff","prior":"20261026-020000F","error":false,"database":{"id":1,"repo-key":1},"timestamp":{"start":1793037600,"stop":1793037720},"info":{"size":33619968,"delta":65536,"repository":{"size":524288,"delta":65536}}},
+   {"label":"20261026-020002F_20261027-020001D","type":"diff","prior":"20261026-020002F","error":false,"database":{"id":1,"repo-key":2},"timestamp":{"start":1793037601,"stop":1793037780},"info":{"size":33619968,"delta":65536,"repository":{"size":524544,"delta":65536}}}]}]

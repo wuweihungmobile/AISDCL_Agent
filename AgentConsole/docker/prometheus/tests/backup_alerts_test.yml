@@ -1,0 +1,118 @@
+# docker/prometheus/tests/backup_alerts_test.yml — alerts.yml 兩條備份控制面規則的 promtool 單元測試
+# （TCS-SysAdminBackup-20261027 AT-BK-09-7-3；規則見 alerts.yml 群組 aisdlc-backup 末尾）
+# 跑法（PowerShell 與 bash 同一條；在 monorepo 根執行，不需要先起任何容器；<monorepo> 換成自己的路徑）：
+#   docker run --rm -v <monorepo>/AgentConsole/docker/prometheus:/etc/prometheus --entrypoint promtool prom/prometheus:v3.15.0 test rules /etc/prometheus/tests/backup_alerts_test.yml
+# 本機限定：.github/workflows 沒有 promtool 步驟（已知缺口，docker/README.md〈10〉）。
+# 這裡驗的是「規則算對、會在對的時候響」；抓取層的標籤相撞（job 被改名成 exported_job）promtool 的人造序列看不出來，
+# 那一項只有真機看得出（TCS 真機 V10）：人造序列這裡刻意帶上抓取目標標籤 job="pgbackrest"，貼近真實曝光。
+#
+# 寫法備註（同 slo_test.yml）
+#   · 告警的 annotations 也是逐字比對（含 {{ $labels.backup_job }} 展開後的字），改 alerts.yml 的文案時要同步改這裡。
+#   · `aXn` 展開成 n+1 個樣本；`a+bXn` 是等差數列。pending 的告警不算 exp_alerts（只比對 firing）。
+#   · evaluation_interval 取 1 秒：驗 for: 1m 與 120 秒門檻的前後一秒（119／121），間隔太粗就量不到邊界。
+rule_files:
+  - ../alerts.yml
+
+evaluation_interval: 1s
+
+tests:
+  # ── PgBackRestJobFailed：只管 dump 與 verify；值 1 持續超過 for: 1m 才響 ───────────────────────────────
+  # 取樣間隔 15 秒。case-dump：0～45 秒為 0，60 秒起為 1 ⇒ 60 秒 pending、120 秒 firing。
+  # case-verify：120 秒起為 1 ⇒ 120 秒 pending、180 秒 firing（兩個工作各自獨立）。
+  # case-full：全備的值也是 1，但規則只管 dump 與 verify（全備由既有的 PgBackRestLastBackupFailed 管）⇒ 永不響。
+  # case-ok：dump 的值一直是 0 ⇒ 永不響。
+  - name: AT_BK_09_7_3 dump 與 verify 失敗經 for 後各自響，全備與成功的不響
+    interval: 15s
+    input_series:
+      - series: 'aisdlc_backup_job_last_status{backup_job="dump", job="pgbackrest", instance="case-dump"}'
+        values: '0x3 1x30'
+      - series: 'aisdlc_backup_job_last_status{backup_job="verify", job="pgbackrest", instance="case-verify"}'
+        values: '0x7 1x26'
+      - series: 'aisdlc_backup_job_last_status{backup_job="full", job="pgbackrest", instance="case-full"}'
+        values: '0x3 1x30'
+      - series: 'aisdlc_backup_job_last_status{backup_job="dump", job="pgbackrest", instance="case-ok"}'
+        values: '0x33'
+    alert_rule_test:
+      # 60～119 秒：case-dump 只是 pending（for 1m 還沒滿）
+      - eval_time: 119s
+        alertname: PgBackRestJobFailed
+        exp_alerts: []
+      # 120 秒：case-dump 剛滿 1 分鐘 ⇒ firing（帶 severity=critical 與 backup_job 標籤）；case-verify 才 pending
+      - eval_time: 120s
+        alertname: PgBackRestJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: dump
+              job: pgbackrest
+              instance: case-dump
+            exp_annotations:
+              summary: "備份工作最近一次失敗或中斷（dump）"
+              description: "job-run.sh 記錄的最近一次執行以失敗或中斷結束；輸出尾段看 Console 的備份頁（ADMIN）或 sidecar 的 cron.log。"
+      # 180 秒：case-verify 也滿 1 分鐘 ⇒ 兩者 firing；case-full 與 case-ok 始終沒有
+      - eval_time: 3m
+        alertname: PgBackRestJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              backup_job: dump
+              job: pgbackrest
+              instance: case-dump
+            exp_annotations:
+              summary: "備份工作最近一次失敗或中斷（dump）"
+              description: "job-run.sh 記錄的最近一次執行以失敗或中斷結束；輸出尾段看 Console 的備份頁（ADMIN）或 sidecar 的 cron.log。"
+          - exp_labels:
+              severity: critical
+              backup_job: verify
+              job: pgbackrest
+              instance: case-verify
+            exp_annotations:
+              summary: "備份工作最近一次失敗或中斷（verify）"
+              description: "job-run.sh 記錄的最近一次執行以失敗或中斷結束；輸出尾段看 Console 的備份頁（ADMIN）或 sidecar 的 cron.log。"
+
+  # ── PgBackRestControlHeartbeatStale：心跳的值是 runner 寫下的時間（epoch 秒）；time() - 值 > 120 才算過期 ──
+  # 取樣間隔 15 秒。case-fresh：值＝取樣時間（0, 15, 30…）⇒ 一直新鮮。
+  # case-stale：值也隨取樣時間增加，但 300 秒（值 300）之後不再有新樣本（runner 停了），Prometheus 以最後一個值
+  # 往後回看 5 分鐘 ⇒ 過期 120 秒的邊界在 420 秒：421 秒（121 秒）才 pending、481 秒滿 for: 1m 才 firing；
+  # 419 秒（119 秒）連 pending 都不是。
+  - name: AT_BK_09_7_3 心跳過期 121 秒後經 for 才響，119 秒不響，新鮮的不響
+    interval: 15s
+    input_series:
+      - series: 'aisdlc_backup_ctl_heartbeat_timestamp_seconds{job="pgbackrest", instance="case-fresh"}'
+        values: '0+15x38'
+      - series: 'aisdlc_backup_ctl_heartbeat_timestamp_seconds{job="pgbackrest", instance="case-stale"}'
+        values: '0+15x20'
+    alert_rule_test:
+      - eval_time: 419s
+        alertname: PgBackRestControlHeartbeatStale
+        exp_alerts: []
+      # 421 秒起 pending；480 秒（pending 59 秒）仍不響
+      - eval_time: 480s
+        alertname: PgBackRestControlHeartbeatStale
+        exp_alerts: []
+      - eval_time: 481s
+        alertname: PgBackRestControlHeartbeatStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: pgbackrest
+              instance: case-stale
+            exp_annotations:
+              summary: "備份控制面心跳超過 120 秒沒更新"
+              description: "sidecar 的 backup-ctl-runner.sh 可能已停止；Console 備份頁會顯示「備份控制面無回應」（runner 離線時手動觸發會被擋）。"
+
+  # ── 序列缺席（從未執行、或 sidecar 整個沒起）：兩條規則都不會亮——README〈10〉記載的盲區 ──────────────────
+  # 值 > 閾值的寫法在沒有序列時沒有東西可比；頁面的「從未執行」「逾期」標記與 Application Overview 的 up 面板是目前
+  # 唯一覆蓋它的地方。這個案例把盲區釘成測試：它改變時（例如日後補了 absent() 規則）要連同 README 一起改。
+  - name: AT_BK_09_7_3 序列缺席時兩條規則都不響（README 盲區）
+    interval: 15s
+    input_series:
+      - series: 'up{job="pgbackrest", instance="case-absent"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PgBackRestJobFailed
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PgBackRestControlHeartbeatStale
+        exp_alerts: []

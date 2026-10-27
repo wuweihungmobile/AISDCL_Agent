@@ -116,3 +116,25 @@ groups:
         annotations:
           summary: "pgBackRest 指標超過 5 分鐘沒更新"
           description: "sidecar 的 pgbackrest-metrics.sh 迴圈可能卡住或 pgbackrest info 失敗（pgbackrest_exporter_info_ok）。"
+
+      # 備份控制面（job-run.sh 的狀態檔與 runner 心跳；docker/README.md〈4.6〉）。標籤名是 backup_job、不是 job：
+      # 抓取目標標籤 job="pgbackrest"（prometheus.yml 未設 honor_labels）會把曝光的 job 改名成 exported_job，
+      # 規則裡的 {job=~…} 就永遠匹配不到。只管 dump 與 verify：全備與增備由 PgBackRestLastBackupFailed 管。
+      # 盲區：從未執行＝沒有序列＝規則不會亮（README〈10〉）。
+      - alert: PgBackRestJobFailed
+        expr: aisdlc_backup_job_last_status{backup_job=~"dump|verify"} != 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "備份工作最近一次失敗或中斷（{{ $labels.backup_job }}）"
+          description: "job-run.sh 記錄的最近一次執行以失敗或中斷結束；輸出尾段看 Console 的備份頁（ADMIN）或 sidecar 的 cron.log。"
+
+      - alert: PgBackRestControlHeartbeatStale
+        expr: time() - aisdlc_backup_ctl_heartbeat_timestamp_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "備份控制面心跳超過 120 秒沒更新"
+          description: "sidecar 的 backup-ctl-runner.sh 可能已停止；Console 備份頁會顯示「備份控制面無回應」（runner 離線時手動觸發會被擋）。"

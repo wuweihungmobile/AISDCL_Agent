@@ -1,18 +1,20 @@
 # docker/pgbackrest/crontab — 備份排程（PRD §12.3.3）
 # 格式：busybox crond（與 PRD 的 Alpine crond 同一格式；檔名＝執行身分，映像內放在 /etc/crontabs/postgres）。
 # 時區由容器的 TZ 決定（compose：BACKUP_TZ，預設 Asia/Taipei）。
+# 備份與驗證四條工作改經 job-run.sh 包裝（Console 備份頁的控制面，PRD §9.3；README〈4.6〉）：它只加維護鎖、
+# 狀態檔與遮罩後的輸出尾段，rc、stdout、stderr 原樣透傳，各備份腳本本體零修改。
 
 # ── 完整備份：每週日 02:00 ──
-0 2 * * 0  /usr/local/bin/backup-full.sh >> /var/log/pgbackrest/cron.log 2>&1
+0 2 * * 0  /usr/local/bin/job-run.sh full scheduled >> /var/log/pgbackrest/cron.log 2>&1
 
 # ── 差異備份：每日 02:00（週一至週六）──
-0 2 * * 1-6  /usr/local/bin/backup-incr.sh >> /var/log/pgbackrest/cron.log 2>&1
+0 2 * * 1-6  /usr/local/bin/job-run.sh diff scheduled >> /var/log/pgbackrest/cron.log 2>&1
 
 # ── pg_dump 邏輯離站備份：每日 02:30（防 pgBackRest 物理備份邏輯損壞單點）──
-30 2 * * *  /usr/local/bin/pg_dump-offsite.sh >> /var/log/pgbackrest/cron.log 2>&1
+30 2 * * *  /usr/local/bin/job-run.sh dump scheduled >> /var/log/pgbackrest/cron.log 2>&1
 
 # ── 備份驗證 + 真實 restore 演練：每週三 04:00 ──
-0 4 * * 3  /usr/local/bin/verify-backup.sh >> /var/log/pgbackrest/cron.log 2>&1
+0 4 * * 3  /usr/local/bin/job-run.sh verify scheduled >> /var/log/pgbackrest/cron.log 2>&1
 
 # ── 清理過期備份：每日 03:00（本地 repo1 + 離站 repo2）──
 0 3 * * *  pgbackrest --stanza=aisdlc expire >> /var/log/pgbackrest/cron.log 2>&1

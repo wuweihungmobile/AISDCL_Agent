@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# docker/pgbackrest/tests/stubs/mc — 測試替身（TCS-SysAdminBackup-20261027 §5.4；只在 Linux 容器內用）
+# 排在 PATH 前面取代真的 mc；只認 `[--insecure] ls --json <路徑>`，印出夾具 logical-2.json 的 objects，
+# 形態對照 mc 的 `ls --json`（每個物件一行 JSON；status／type／lastModified／size／key…）。
+#
+# 環境變數（皆選填）：
+#   STUB_FIXTURE_DIR    夾具目錄（預設 <本檔目錄>/../fixtures）
+#   STUB_MC_FIXTURE     物件清單夾具（預設 $STUB_FIXTURE_DIR/logical-2.json）
+#   STUB_MC_MODE        ok（預設）｜fail（rc 1，印一行 status:error 的 JSON）
+#   STUB_MC_TIME_FORM   z（預設：…Z）｜frac（帶小數秒：…05.1234Z）｜offset（+08:00，同一瞬間）——mc 真實輸出兩種都出現過
+#   STUB_CALL_LOG       有設就把每次呼叫追加一行「<毫秒> mc <引數>」
+set -u
+
+dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+fixtures="${STUB_FIXTURE_DIR:-$dir/../fixtures}"
+
+if [ -n "${STUB_CALL_LOG:-}" ]; then
+  printf '%s mc %s\n' "$(date +%s%3N)" "$*" >> "$STUB_CALL_LOG"
+fi
+
+is_ls=0
+for arg in "$@"; do
+  if [ "$arg" = "ls" ]; then is_ls=1; fi
+done
+[ "$is_ls" = "1" ] || exit 0
+
+if [ "${STUB_MC_MODE:-ok}" = "fail" ]; then
+  echo '{"status":"error","error":{"message":"Unable to list folder.","cause":{"message":"stub failure"}}}'
+  exit 1
+fi
+
+jq -c --arg form "${STUB_MC_TIME_FORM:-z}" '
+  def shown: if $form == "frac" then sub("Z$"; ".1234Z")
+             elif $form == "offset" then ((fromdateiso8601 + 28800) | todate | sub("Z$"; ".12+08:00"))
+             else . end;
+  .objects[]
+  | {status: "success", type: "file", lastModified: (.modified | shown), size: .size, key: .name,
+     etag: "stub", url: "offsite/logical/", versionOrdinal: 1}
+' "${STUB_MC_FIXTURE:-$fixtures/logical-2.json}"

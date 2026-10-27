@@ -16,6 +16,13 @@
 #   pgbackrest_backup_last_repo_size_bytes{stanza,repo}        最近一份備份在 repo 內的大小（壓縮＋加密後）
 #   pgbackrest_backup_last_status{stanza,type}       最近一次「備份腳本」執行結果（0=成功 1=失敗；PRD §12.6.2；≠0 告警）
 #   pgbackrest_backup_last_run_timestamp_seconds{stanza,type}  該次執行時間
+#   aisdlc_backup_job_last_status{backup_job}        四個備份工作（full／diff／dump／verify）最近一次的結果（0=成功 1=失敗或中斷）；
+#                                                    來源＝job-run.sh 的狀態檔（BACKUP_CTL_OUT_DIR/export/jobs/<job>.json）；
+#                                                    無狀態檔、或正在執行（running）的 job 不輸出序列（PRD §9.3、TCS §C6）
+#   aisdlc_backup_job_last_finished_timestamp_seconds{backup_job}  該次結束時間（unix 秒；running 中不輸出）
+#   aisdlc_backup_ctl_heartbeat_timestamp_seconds    runner 最近一次心跳（unix 秒；export/heartbeat 的 ts；無檔不輸出）
+#   🔴 上面三個新指標的標籤名是 backup_job、不是 job：抓取目標標籤 job="pgbackrest"（prometheus.yml 未設 honor_labels）
+#      會把曝光的 job 改名成 exported_job，alerts.yml 的 {backup_job=~"dump|verify"} 才匹配得到。
 #   aisdlc_storage_bytes{path}                       目錄實際用量（repo1、WAL 歸檔）
 #   aisdlc_storage_used_ratio{path}                  該路徑所在檔案系統的使用率（0~1）
 # 失敗的備份不會出現在 `pgbackrest info`，所以 last_status 由 backup-full.sh／backup-incr.sh 寫入狀態檔
@@ -32,6 +39,43 @@ data_path="/var/lib/postgresql/data"
 now="$(date +%s)"
 tmp="${out}.tmp.$$"
 trap 'rm -f "$tmp"' EXIT
+
+# 備份控制面指標（job-run.sh 的狀態檔與 runner 心跳）。🔴 附加在既有指標之後：這個函式的任何失敗都不得影響
+# 既有 14 個指標的輸出，所以每一步自己兜底（狀態檔壞掉、日期解析不了＝跳過該序列，不是整支腳本失敗）。
+ctl_out_dir="${BACKUP_CTL_OUT_DIR:-/backup-out}"
+emit_backup_ctl_metrics() {
+  local job f line st fin epoch hb statuses="" finishes=""
+  for job in full diff dump verify; do
+    f="$ctl_out_dir/export/jobs/$job.json"
+    [ -f "$f" ] || continue
+    line="$(jq -r '[.last.status // "", .last.finished_at // ""] | join("|")' "$f" 2> /dev/null)" || continue
+    st="${line%%|*}"
+    fin="${line#*|}"
+    case "$st" in
+      succeeded) statuses+="aisdlc_backup_job_last_status{backup_job=\"${job}\"} 0"$'\n' ;;
+      failed | interrupted) statuses+="aisdlc_backup_job_last_status{backup_job=\"${job}\"} 1"$'\n' ;;
+      *) continue ;; # running（上一次終態不冒充這一次）或不認得的值：不輸出序列
+    esac
+    epoch="$(date -u -d "$fin" +%s 2> /dev/null)" || epoch=""
+    if [ -n "$epoch" ]; then
+      finishes+="aisdlc_backup_job_last_finished_timestamp_seconds{backup_job=\"${job}\"} ${epoch}"$'\n'
+    fi
+  done
+  echo '# HELP aisdlc_backup_job_last_status 備份工作最近一次的結果（0=成功 1=失敗或中斷；執行中不輸出）'
+  echo '# TYPE aisdlc_backup_job_last_status gauge'
+  printf '%s' "$statuses"
+  echo '# HELP aisdlc_backup_job_last_finished_timestamp_seconds 備份工作最近一次結束時間（unix 秒；執行中不輸出）'
+  echo '# TYPE aisdlc_backup_job_last_finished_timestamp_seconds gauge'
+  printf '%s' "$finishes"
+  echo '# HELP aisdlc_backup_ctl_heartbeat_timestamp_seconds 備份控制面 runner 最近一次心跳（unix 秒）'
+  echo '# TYPE aisdlc_backup_ctl_heartbeat_timestamp_seconds gauge'
+  hb="$(jq -r '.ts // empty' "$ctl_out_dir/export/heartbeat" 2> /dev/null)" || hb=""
+  if [ -n "$hb" ]; then
+    epoch="$(date -u -d "$hb" +%s 2> /dev/null)" || epoch=""
+    if [ -n "$epoch" ]; then echo "aisdlc_backup_ctl_heartbeat_timestamp_seconds ${epoch}"; fi
+  fi
+  return 0
+}
 
 info_ok=1
 if ! info_json="$(pgbackrest --stanza="$stanza" --output=json --log-level-console=off info 2>/dev/null)" \
@@ -103,6 +147,8 @@ fi
       echo "pgbackrest_backup_last_run_timestamp_seconds{stanza=\"${stanza}\",type=\"${run_type}\"} ${run_ts}"
     fi
   fi
+
+  emit_backup_ctl_metrics || true
 
   echo '# HELP aisdlc_storage_bytes 目錄實際用量（bytes）'
   echo '# TYPE aisdlc_storage_bytes gauge'

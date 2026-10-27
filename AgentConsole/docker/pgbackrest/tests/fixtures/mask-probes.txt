@@ -1,0 +1,22 @@
+# 遮罩探針（TCS-SysAdminBackup-20261027 §5.1；R-BK-42；單一來源，兩邊測試共讀這一個檔）
+# 兩道遮罩：sidecar 的 job-run.sh（perl）與 console-api 的 BackupMasker 各遮罩一次，規格相同，
+# 對下面每一行都必須產出逐字相同的期望輸出。
+# 格式：UTF-8、LF；`#` 起頭為註解；三欄以單一 TAB 分隔——輸入行、機密片段（負向探針此欄為空）、期望輸出。
+# 🔴 探針值一律含 example 或 fake 佔位詞：否則 pre-commit 的 tools/lib/secret_scan.py 會擋 commit；
+#    遮罩器只認形狀，不因 example／fake 放行。
+pass=fake-pass-example-1	fake-pass-example-1	pass=***
+PGBACKREST_REPO1_CIPHER_PASS=fake-cipher-example-2	fake-cipher-example-2	PGBACKREST_REPO1_CIPHER_PASS=***
+secret=fake-secret-example-3	fake-secret-example-3	secret=***
+AWS_SECRET_ACCESS_KEY=fake/secret+example/4	fake/secret+example/4	AWS_SECRET_ACCESS_KEY=***
+key=fake-key-example-5	fake-key-example-5	key=***
+using access key AKIAIOSFODNN7EXAMPLE for repo2	AKIAIOSFODNN7EXAMPLE	using access key *** for repo2
+postgres://aisdlc:fake-dsn-example-7@postgres-primary:5432/aisdlc	fake-dsn-example-7	postgres://aisdlc:***@postgres-primary:5432/aisdlc
+token: fake-token-example-8	fake-token-example-8	token: ***
+password="fake pass with spaces example 9"	fake pass with spaces example 9	password=***
+"secret_key":"fake-json-example-10"	fake-json-example-10	"secret_key":***
+status=ok		status=ok
+rc=0		rc=0
+label=20261026-020000F		label=20261026-020000F
+duration=12s		duration=12s
+repo2: 100% done		repo2: 100% done
+Backup completed successfully		Backup completed successfully
