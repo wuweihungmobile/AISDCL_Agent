@@ -419,7 +419,9 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 🔴 2026-10-25 重釘 84→88（SelfImproving P3 新增 `_selfimproving_p3_fixtures.py` 與五支
     # `test_selfimproving_{measure,measure_verb,measure_probe,capacity_retire,p3_meta}.py`，實測
     # 110 支，84 只剩實測的 76%，`run_root_unittests.py` 前置掃描逐字指示重釘為 88 ⇒ 照填）。
-    "tools/tests": 88,
+    # 議題中心 2026-10-27（SCG-4 二審 PASS 收尾）：新增 `test_selfimproving_{issues,issuemap}.py`
+    # 後實測 112 支，`run_root_unittests.py` 前置掃描指示重釘為 89 ⇒ 照填（只升不降）。
+    "tools/tests": 89,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。

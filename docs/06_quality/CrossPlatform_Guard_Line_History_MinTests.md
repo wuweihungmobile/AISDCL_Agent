@@ -49,3 +49,13 @@ test_install_statusline.py CLAUDE_CONFIG_DIR 五格）；觸發＝runner 自檢�
 ```text
 MIN_TESTS = 5058  # 🔴 重釘 5046 → 5058（方向＝收緊；2026-10-03，五問驗證輪收尾單人窗口）：discovery 探針實測直接填入、零加減推算；成長來源＝DEF-200-460／461／462 回歸鎖（test_mac_endurance_r83.py／test_session_brief.py／test_block_destructive_git_r83.py／test_context_budget_guard.py）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 ```
+
+### 5755 → 5996（2026-10-27，議題中心階段一＋二收尾單人窗口）
+
+成長來源＝`test_selfimproving_issues.py` 104＋`test_selfimproving_issuemap.py` 7＋SCG-4 修復棒對既有檔的擴充（discovery 實測 5996、零加減推算）；觸發＝`min_tests_margin.headroom_message` 回報零相依餘裕 −18（223 支、門檻 55），floor 探針在零相依沙箱不再塌縮而逾時 600 s（DEF-200-170 同型）。本行自此只保留最近兩次「上一次」，更早的 5273 → 5326（2026-10-11）與 improving_113 兩段原文見下方被取代原行。
+
+被取代的原行（逐字）：
+
+```text
+MIN_TESTS = 5755  # 🔴 重釘 5542 → 5755（方向＝收緊；2026-10-22，SelfImproving P2 新增測試檔與擴充；discovery 實測直接填入）。上一次 🔴 重釘 5326 → 5542（方向＝收緊；2026-10-20，SelfImproving P1 新增 6 支測試檔、158 個測試方法；discovery 實測直接填入、零加減推算）。上一次 5273 → 5326（方向＝收緊；2026-10-11，DEF-200-516 家族與 DEF-200-520 收尾單人窗口：test_quota_env_layers 31＋喚醒鏈回歸鎖與讀者鎖擴充；discovery 實測直接填入、零加減推算）。上一次：improving_113 收尾單人窗口（W1 test_model_roles 60＋W2 test_resume_cost 6＋讀者鎖擴充；discovery 實測直接填入、零加減推算）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+```
