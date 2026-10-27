@@ -303,3 +303,25 @@ console-api 與 sidecar 之間只有網路可達性（同在 db-net，F-10；`:9
 ## 14. 變更記錄
 
 - **v0.2～v0.4**（2026-10-27）：一審 R-01～R-15、二審 N-01～N-05、三審 RS-1～RS-4 已處理。
+
+## 勘誤（本檔凍結之後的訂正；正文不改，只在本節追加）
+
+### 勘誤一（2026-10-28；Stage-2 TCS 起草與 SCG-3 獨立審查後；條號與 `AgentConsole/docs/03_testing/contracts/TCS-SysAdminBackup-20261027.md` §7.3 相同；掌舵者裁決座標 sid c61e3847-c8bf-4694-962f-93a657a7bf35 line 4437；主控依凍結常態規則執行，Stage-2 凍結記新 digest）
+
+| 條 | 位置 | 原文 | 訂正 | 理由（WHY） |
+|---|---|---|---|---|
+| 1-1 | §5 FR-BK-04 表尾（`:87` 之後）、§8.3 `GET /backups` 列（`:200`） | （無對應 AC；§13 Q7 欄寫「只多一個 AC」`:298`） | 新增 `AC-BK-04-6`：Given 任一角色開頁 When 顯示 Then 一行唯讀「WAL 歸檔：最近 <時間>・失敗 N 次」（console-api 以一條唯讀 SELECT 讀 `pg_stat_archiver`；`GET /backups` 新增 `walArchive:{lastArchivedAt, failedCount, lastFailedAt}`）；`failedCount>0` 且最近失敗晚於最近歸檔＝警示色；查不到顯示「WAL 歸檔：—」、不當 0，且不影響 `canTrigger`、`activeJob` 與其他區塊。§8.3 該列補 `walArchive` | 掌舵者 Q7 裁決（`:301`）已採，§5 與 §8.3 漏列 |
+| 1-2 | AC-BK-09-7（`:121`） | 「追加 `aisdlc_backup_job_last_status{job}`、`aisdlc_backup_job_last_finished_timestamp_seconds{job}`、`aisdlc_backup_ctl_heartbeat_timestamp_seconds`」…「且每條規則名都出現在 promtool 測試檔」 | 標籤改 `backup_job`（規則 expr 同改 `backup_job=~"dump\|verify"`）；「每條**新增**規則名」（既有 12 條不要求） | Prometheus 目標標籤 `job="pgbackrest"`（`prometheus.yml:30-33`，未設 `honor_labels`）與曝光的 `job` 相撞，曝光值被改名 `exported_job`，`{job=~…}` 永不匹配；既有 12 條沒有 promtool 測試 |
+| 1-3 | §8.2 heartbeat 列（`:193`） | `{ts, lock_held}` | `{schema_rev:1, ts, lock_held}` | AC-BK-05-3 以 `schema_rev` 判必讀檔；heartbeat 是必讀檔之一（§6 `:133`），無版本欄就無判準 |
+| 1-4 | §9.4 console-api 新增列（`:235`） | 「`application/{port/{in,out}/Backup*,service/{BackupQueryService,BackupJobService,BackupJobReconciler}}`」…「`domain/model/backup/`（cron 前後時刻、逾期、遮罩純函式）」…「`infrastructure/config/BackupProperties`」 | `application/port/out/` 加 `BackupSettings`、`BackupClock`；`application/service/` 加 `BackupCron`、`BackupOverdue`；`domain/model/backup/` 只留遮罩函式與工作理由列舉；`infrastructure/config/` 加 `BackupSettingsAdapter`（`BackupProperties` 只作綁定） | `ArchitectureRulesTest.java:23-28`（A1）禁 domain 依賴 `org.springframework..`，而 `BackupCron` 用 Spring `CronExpression`（AC-BK-03-3）；`:32`、`:52`（A2、A5）禁 application、domain 依賴 infrastructure，設定須經 port.out（先例 `RuntimeSettings`、`SiWriteSettings`） |
+| 1-5 | AC-BK-02-6（`:76`） | 『端點主機名不含 `.`（compose 服務名，例 `minio`）或為 `localhost` 者標「本機 MinIO・與主機同碟，主機損毀時一併消失」』 | 並含回送位址（`127.0.0.0/8`、`::1`）與 `host.docker.internal` | 這些位址只可能指向同一台主機；不加嚴會把本機儲存顯示成「外部 S3」，與 Q8 裁決（`:299`）的目的相反 |
+| 1-6 | AC-BK-04-3（`:85`） | 「…最近成功時間缺席或早於 `lastDueAt`…；從未成功＝`never:true`、不稱逾期」 | 「…最近成功時間早於 `lastDueAt`（缺席＝從未成功＝`never:true`、`overdue:false`）…；寬限比較嚴格大於（恰 30 分整不逾期）」 | 兩句字面互斥（缺席即逾期 vs 從未成功不稱逾期）；寬限邊界未寫 |
+| 1-7 | AC-BK-08-1（`:111`） | 「bash 與 PowerShell 雙形態」；「UI 的每條指令都須逐字出現在該節 code block」 | 雙形態限還原三步；核對三項只有 bash 形態、UI 另以一句話說明 PowerShell 前後綴；比對時 code block 每行去前後空白 | README 核對三項的 PowerShell 形態只是一句說明（`docker/README.md:270`），沒有指令行；code block 縮排兩格（`:272-279`） |
+| 1-8 | AC-BK-08-3（`:113`） | 「自 `^volumes:$` 到下一個頂格鍵」 | 「到下一個頂格鍵或檔尾」 | `volumes:` 是 compose 最後一個頂層鍵（`docker-compose.yml:795`），其後只有檔尾 |
+| 1-9 | AC-BK-05-3（`:91`） | 「`schema_rev` 不是 1 或 JSON 損毀」 | 另加：匯出行程自報失敗（`ok:false`，檔案合法）＝該來源的衍生區塊缺席並加 `info_unavailable`／`logical_unavailable`、`reason` 仍 null、其餘照常；兩類損毀並存 `schema_mismatch` 優先；`not_configured` 優先於一切 | 處置未寫；MinIO 掛掉時最需要看狀態卡 |
+| 1-10 | AC-BK-06-6（`:100`） | 「runner 離線（心跳過期）時才由 console-api 標 EXPIRED」 | 另加兜底：QUEUED 逾 2×`request-ttl-seconds` 且仍無 results 時，不論心跳 console-api 條件式標 EXPIRED | results 不可寫時 runner 不執行請求（R-BK-47）而心跳照常，列會永遠 QUEUED，部分唯一索引使其後的觸發全部 409 |
+| 1-11 | AC-BK-09-6（`:120`） | 『「進行中但鎖未持有」者改記 `interrupted`』 | 含 `results/<id>.json` 為 running 且鎖無持有者（距撿起逾 6×輪詢間隔＝30 秒） | runner 寫 results 後、`job-run.sh` 取鎖並寫狀態檔前被殺，列會永遠 RUNNING（心跳新鮮，`timeout` 不成立） |
+| 1-12 | §8.2 各列內容欄（`:188-194`） | （摘錄）`retention:{…}`、`repos:[…]`、results 的 reason、schedule 的 job 名等未寫死 | 以 TCS §C1 欄位表為準（含 `retention` 內 null 兩種語意、results reason 詞彙、job 值域） | 欄型與詞彙 PRD 未寫死，TCS 已定案 |
+| 1-13 | §9.4 條件列（`:239`） | 『AC-PH-03-1（撰寫時 `:90` 路由集合＝`HELP_ROUTES` 鍵）、AC-PH-03-2（`:91` enabled 導覽項皆有說明）、AC-PH-03-4（`:93` 頁檔 id＝`HELP_PAGES`∪`PENDING_HELP_PAGES`）』 | `:89`／`:90`／`:92`（2026-10-27 重核） | 行號隨稿漂移（PRD 已自述） |
+| 1-14 | §11 階段一出口與真機 V 系列（`:262`、`:271-274`） | 階段一：「真機 V1、V2、V3、V6」 | 加 V10：Prometheus `/api/v1/query` 取得的 `aisdlc_backup_job_last_status{backup_job="dump"}` 帶目標標籤 `job="pgbackrest"`、無 `exported_job`；人造一次 dump 失敗後 `PgBackRestJobFailed` firing | promtool 的人造序列看不出抓取層的標籤相撞，只有真抓取驗得出（勘誤 1-2） |
+| 1-15 | AC-BK-09-2（`:116`） | 「非法請求（檔名非 UUID、非常規檔或符號連結、>4 KB、非 JSON、未知 type、已過期、目錄內檔數 >16）When 掃描 Then 不執行任何命令；可寫時寫 `rejected` 結果（封閉詞彙理由），否則只記 WARN」 | 於該句後加：「目錄內檔數 >16 者為目錄級拒絕：不執行任何請求、不寫任何 results、只記 WARN；被漏處理的合法請求由 AC-BK-06-6 的 2×`request-ttl-seconds` 兜底標 EXPIRED（勘誤 1-10）」 | 檔數超限時無從判斷哪一份是合法請求，沒有單一請求可對應一份 `rejected` results；也不該把擠爆目錄放大成十六份以上的寫入 |
