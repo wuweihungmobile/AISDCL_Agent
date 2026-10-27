@@ -108,6 +108,11 @@ on:
       # tools/tests/test_selfimproving_issues.py 對真帳本（含兩姊妹軌）驗 issues／si check
       - "docs/01_requirements/Issue_Center_PRD.md"
       - "docs/03_testing/contracts/TCS-IssueCenter-*.md"
+      # 2026-10-27 三案（agentconsole-page-help／agentconsole-sysadmin-backup／monorepo-si-ledgerdb-p0）的 PRD：同一支 glob 讀其〈模組落點表〉，
+      # 只改 PRD 的 push 此前不觸發本 workflow（TCS-PageHelp §5.7 末列、主控待辦 (f)）
+      - "docs/01_requirements/Console_PageHelp_PRD.md"
+      - "docs/01_requirements/Console_SysAdmin_Backup_PRD.md"
+      - "docs/01_requirements/SelfImproving_Ledger_DB_PRD.md"
       - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
       - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
@@ -604,6 +609,11 @@ on:
       # tools/tests/test_selfimproving_issues.py 對真帳本（含兩姊妹軌）驗 issues／si check
       - "docs/01_requirements/Issue_Center_PRD.md"
       - "docs/03_testing/contracts/TCS-IssueCenter-*.md"
+      # 2026-10-27 三案（agentconsole-page-help／agentconsole-sysadmin-backup／monorepo-si-ledgerdb-p0）的 PRD：同一支 glob 讀其〈模組落點表〉，
+      # 只改 PRD 的 push 此前不觸發本 workflow（TCS-PageHelp §5.7 末列、主控待辦 (f)）
+      - "docs/01_requirements/Console_PageHelp_PRD.md"
+      - "docs/01_requirements/Console_SysAdmin_Backup_PRD.md"
+      - "docs/01_requirements/SelfImproving_Ledger_DB_PRD.md"
       - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
       - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
