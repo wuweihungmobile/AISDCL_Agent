@@ -15,6 +15,7 @@
 | `tools/lib/` | 根層可 import 函式庫（`from lib import …`／`from lib.<module> import …`；`tools/` 在 `sys.path` 上、`lib/` 無 `__init__.py`）：單檔共用工具（`platform_utils.py`、`cpu_budget.py`…）＋**模組套件 `<module>/`** | 本檔 §2 |
 | `tools/probe/` | 量測與探針（事後量測、不接任何閘門 rc）；模組專屬探針以 `<module>_*.py` 命名 | 各探針檔頭自述 |
 | `tools/tests/` | 根層 unittest（`run_root_unittests.py` discover；護欄層行數棘輪 `test_adr_xplat001_c1c2_lock.py` 管轄） | `guard-ratchet-repin-ritual`（記憶）／該鎖檔檔頭 |
+| `tools/tests_pg/` | PG 專屬契約測試（需真 PostgreSQL；`tools/tests/` 的兄弟目錄，**不進 runner discover 根**，由專屬 CI 工作另跑；規範先於目錄，目錄隨 SelfImproving 帳本改 DB 案 P1 的首個 PG 測試檔建立） | 本檔 §2〈PG 專屬契約測試〉列 |
 | `tools/git-hooks/`、`tools/act/` | git hook dispatcher、本機 act 載具 | `AutoClaude/tools/install_git_hooks.ps1`／`.sh`（安裝器住 AutoClaude，裝的是根層 dispatcher） |
 | `.claude/`（hooks、settings、skills） | 守衛面；auto mode 受保護路徑，任何改動走〈權限姿態〉 | 根 `CLAUDE.md`〈機械守衛總表〉 |
 | `.github/workflows/` | 全部 CI（含子專案）；根層消費檔必列入 compat-ci `paths` | `AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py` |
@@ -27,9 +28,11 @@
 | 內容 | 落點 | 規則 |
 |------|------|------|
 | 函式庫（判準、解析、I/O） | `tools/lib/<module>/`（套件：`__init__.py` 寫一句用途；依職責分檔，例 `ledger.py`、`rows.py`、`check.py`） | 🔴 **兩支以上函式庫檔、或 PRD 已排定後續階段會長**的模組，第一天就成套件；單檔共用工具才准扁平放 `tools/lib/<name>.py`。套件內用相對 import；跨模組只准 import `tools/lib/` 的共用單檔，不得互相 import 對方套件（走資料檔／帳本） |
+| 套件內 SQL 遷移資料目錄 | `tools/lib/<module>/sql/`（檔名 `V<NNN>__<slug>.sql`；資料目錄，不是子套件，不放 `__init__.py`） | **WHY**：遷移檔是資料不是程式；套件的能力登記鎖只掃套件根層 `*.py`，子套件會成鎖的盲區，資料目錄則不造成盲區。規則：檔名 `V<NNN>__<slug>.sql`、`UTF-8` 無 BOM、`LF` 行尾（根 `.gitattributes` 使 sha256 跨平台一致）；**只追加**：已發佈的檔不得改寫，改寫即讓執行器回 `MIGRATION-CHECKSUM`；**不含密碼**：連線憑證只走 `SI_DB_DSN` 與 `PGPASSFILE`；`sql/` 隨套件 glob（SelfImproving 為 `tools/lib/selfimproving/**`）一併列入 `non_evolvable_globs`，不另加 glob（改 `params.json` 即判準指紋變動） |
 | 指令入口 | `tools/<module>.py`（薄殼：argparse、stdio UTF-8、輸出格式；**不含判準**） | 指令字面 `python tools/<module>.py <verb>` 是對外契約，寫進 PRD／TCS／SOP 後不得因搬遷改變 |
 | 量測探針 | `tools/probe/<module>_*.py` | 不接閘門 rc；檔頭自述 |
 | 測試 | `tools/tests/test_<module>_*.py` | 進根層全套；新增即撞護欄層棘輪（見記憶 `guard-ratchet-repin-ritual`） |
+| PG 專屬契約測試（需真 PostgreSQL 的測試） | `tools/tests_pg/`（`tools/tests/` 的兄弟目錄；檔名 `test_<module>_<topic>.py`） | **WHY**：`tools/tests/` 是 `run_root_unittests` 的 discover 根——`SKIP-M6` 只在該根評、skip 政策與檔數下限皆以它為鍵，無 PG 的機器會把真 PG 測試全判成 skip；故 PG 測試住兄弟目錄、**不在 discover 根內**，由專屬 CI 工作以 `SI_TEST_PG_DSN` 連線執行，`SI_TEST_PG_REQUIRED=1` 時缺 DSN＝失敗而非略過。**代價**：仍受 LOC 分級管轄（只有名為 `tests` 的目錄豁免；落 `guardrail_cli`，單檔 ≤750 斷言行）與 ruff 全規則管轄（`tools/ruff.toml` 的 E501 豁免只涵蓋目錄名 `tests`，每行顯示寬度須 ≤100、CJK 算 2）；**不受**行數棘輪管轄（只數 `tools/tests/*.py`）、**不受** skip 政策管轄。**上限**：每階段 ≤4 檔，不計入 `tools/tests` 的每階段 ≤3 檔 |
 | 執行期協定資料（機器讀） | `docs/06_quality/<Module>_Protocol/`（`params.json`、指標副本 `metrics.md`…） | 先例：`FiveQuestion_Audit_Protocol/`、`SelfImproving_Protocol/` |
 | 帳本（人寫、機器驗） | `docs/06_quality/<Module>_<Kind>_Ledger.md`；超長原文附註檔 `docs/05_development/<Module>_<Kind>_Ledger_notes.md` | 列 ≤700 bytes、只追加（各帳本自己的 TCS 定） |
 | 事件帳本（機器寫、JSONL） | `docs/06_quality/<Module>_Event_Ledger.jsonl`（單一檔；寫入鎖與配號由該模組 TCS 定） | 先例：SelfImproving P1 的 ATT／PROP／DEC／APP／MEA／RUN 事件 |
