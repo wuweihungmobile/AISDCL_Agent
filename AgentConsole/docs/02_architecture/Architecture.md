@@ -214,6 +214,8 @@ AgentConsole/
 | `frontend/components/markdown/` | Markdown 編輯器與渲染器（PRD §5.1.4 八項功能） | W3 |
 | `frontend/components/domain/` | 領域元件（ProjectCard、StatusDot、SignoffBanner、DagView…） | W3／W4 |
 | `frontend/lib/` | `api/`（client、endpoints、`schema.d.ts`）、`auth/`、`domain/status.ts`、`sse/`（fetch 串流客戶端）、`nav/`（導覽輔助；**〔P1b 已落地 2026-10-22〕`nav/registry.ts`＝導覽登記表，Tools 區入口的單一來源，§5.2、§5.4**） | W3；登記表 P1b |
+| `frontend/lib/help/` | **〔PageHelp 已落地 2026-10-28〕**每頁說明的內容層（PRD `docs/01_requirements/Console_PageHelp_PRD.md`；只有資料與純函式，不 import 元件）：`registry.ts`＝**說明登記表**（`HELP_PAGES`：路由樣板→說明項的單一來源；`PENDING_HELP_PAGES`：分輪過渡清單，收輪後為空）、`states.ts`（全站狀態釋義表，一份；頁檔只引用表 id）、`common.ts`（全站共通段）、`lint.ts`（繁中／英文白名單／數字與句長判準）、`types.ts`、每條路由一個頁檔 `<page>.ts`；鎖＝`registry.test.ts`（路由雙向鎖、`PENDING_CEILING` 棘輪）、`content.test.ts`、`lint.test.ts` | PageHelp 輪 1a～3 |
+| `frontend/components/domain/help/` | **〔PageHelp 已落地 2026-10-28〕**「本頁說明」鈕與對話框：`PageHelpButton.tsx`（全站一顆、`data-testid="page-help-open"`、`key={pathname}` 隨路由重掛載；路由無說明項或仍在 `PENDING_HELP_PAGES` 者不渲染）、`PageHelpDialog.tsx`（建於共用 `DialogContent`，四段：這頁做什麼、怎麼用、欄位說明、狀態說明，其後「全站共通」收合段；議題中心頁的狀態說明改向 `GET /api/v1/issues?limit=1` 取 API 詞表）、`IssuesLegendGroups.tsx`、`stateSources.ts`（狀態名稱來源＝既有常數表，不寫死狀態詞）；由 `TopRegion.tsx` 以 `next/dynamic` 接入（§5.2） | PageHelp 輪 1a～1b |
 | `frontend/styles/` | `tokens.css`（設計稿 token 逐字搬入）與全域樣式 | W3 |
 | `frontend/tests/` | vitest 單元測試與 `e2e/`（Playwright，含 `__screenshots__/`） | W3／W4 |
 | `backend/src/main/java/com/aisdlc/console/` | Clean Architecture 四層（§4） | W2／W3 |
@@ -350,7 +352,7 @@ app/
 
 | 區塊 | 唯一元件檔 | 對應設計稿 | 內容 |
 |------|-----------|------------|------|
-| Top | `frontend/components/layout/TopRegion.tsx` | Topbar＋Masthead | 公告列（說明文件、下載 CLI、GitHub、Bridge 狀態、通知、幫助、語言、使用者徽章）；logo；搜尋列與 recent chips；通知鈴；signoff 佇列鈕（draftCount badge） |
+| Top | `frontend/components/layout/TopRegion.tsx` | Topbar＋Masthead | 公告列（說明文件、下載 CLI、GitHub、Bridge 狀態、通知、幫助、語言、使用者徽章）；logo；搜尋列與 recent chips；通知鈴；signoff 佇列鈕（draftCount badge）；**本頁說明鈕**（**〔PageHelp 已落地 2026-10-28〕**右側群組末端、`showTools` 分支內，`components/domain/help/PageHelpButton.tsx` 以 `next/dynamic` 載入，說明本體不進首屏；顯示與內容由 `frontend/lib/help/registry.ts` 的說明登記表決定——路由無說明項或仍在 `PENDING_HELP_PAGES` 者不渲染；§5.4） |
 | Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
 | Content | `frontend/components/layout/ContentRegion.tsx` | Main | 路由內容容器；`children` 由 `app/layout.tsx` 傳入 |
 | Bottom | `frontend/components/layout/BottomRegion.tsx` | （設計稿無；依掌舵者四區塊要求新增） | Engine Bridge 連線狀態點、版本號、Toast 宿主；不得放任何新功能 |
@@ -425,6 +427,7 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 - [ ] API 條目：`frontend/lib/api/endpoints.ts`（每端點一函式）、`queries.ts`（查詢鍵與 hook）、`types.ts`；`schema.d.ts` 由 `openapi-typescript` 重產並**入庫**（§5.3；建置不依賴後端在線）
 - [ ] 純函式：`frontend/lib/domain/<feature>.ts`（可單測的轉換；不碰 React、不碰 fetch）＋同名 `.test.ts`
 - [ ] 導覽登記表一列：`frontend/lib/nav/registry.ts`（欄位如上）；**不改 `ToolsRegion.tsx`**；`registry.test.ts` 通過（`id`／`order` 唯一、`href` 解析結果對應一個存在的 `app/**/page.tsx`、`mobile: true` 項數 ≤ 6、各項 `match` 對代表路徑互斥、`ToolsRegion.tsx` 不含 `const NAV`）；**消費端測試**（`ToolsRegion` 的 vitest，PRD AC-SI-32-6 (a)～(c)、C20）：登記表加一列即出現入口且元件原始碼不變、`enabled` 為假或角色不在 `roles` 者不渲染、入口依 `order` 排序
+- [ ] 說明登記表一列（**〔PageHelp 已落地 2026-10-28〕**；PRD `docs/01_requirements/Console_PageHelp_PRD.md` FR-PH-03、FR-PH-08）：每條新路由（含 `NAV_REGISTRY` 新項的 `href` 解析結果）都要有說明項——寫 `frontend/lib/help/<page>.ts`（`title`、`purpose`、`steps`、`fields`、`states`（只引用 `lib/help/states.ts` 的表 id，不自持狀態詞）、`sourceFiles`）並登記進 `frontend/lib/help/registry.ts` 的 `HELP_PAGES`；文字須過 `lib/help/lint.ts`（繁中、英文白名單、句長）；路由鎖由 `lib/help/registry.test.ts` 守（新增 `app/**/page.tsx` 或導覽項而沒說明，`npx vitest run` 即紅並印修法）；來不及寫完只准放 `PENDING_HELP_PAGES` 且同 commit 上修 `registry.test.ts` 的 `PENDING_CEILING`（棘輪只准縮；後落地的姊妹案例外，PRD D-12）；**不改 `TopRegion.tsx`**（鈕全站一顆，§5.2）
 - [ ] `layout.test.tsx`：導覽斷言由登記表驅動，**不需手改**；新項若有特殊 `roles`／`enabled` 規則，在消費端元件測試加一個「不渲染」斷言（登記表自身的唯一性與路由存在性仍由 `registry.test.ts` 守；二審 N-5）
 - [ ] RTM：`docs/06_quality/RTM.md` 的本地編號子表加一列（先例 RTM.md:469 的 FsmTrail 子表；ID 加反引號故不計入總列數，不往計數列加列——該檔有「US 58」對帳）
 - [ ] 本文同步：§5.1 路由樹加一行；有新端點時 §10（Bridge）、§11（後端）；有新限制或待驗項時 §12

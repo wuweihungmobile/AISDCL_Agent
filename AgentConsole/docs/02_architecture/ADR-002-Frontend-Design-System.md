@@ -135,6 +135,7 @@ Dialog 為 560px，Split View 只有約 250px 一欄；工具列右側有全螢�
 | 13 | 新的階段進度條（`SddPhaseProgress.tsx`，監控頁 SDD 卡與專案詳情治理卡共用）：八個步驟（立案、規格撰寫、人工確認、規格凍結、實作、審查、追溯驗證、發布）以「目前／已過／未到」的形狀加文字表示（不只靠顏色）；觀測態另有「觀測中」標籤與虛線外框；阻塞態八步全灰並在上方放紅色橫幅 | 設計稿沒有；契約 §4.7.3（UI-SDD-03）。形狀與文字並用是為了符合 PRD 可及性要求；只用既有 token |
 | 14 | 新的「複製」鈕（`CopyCommand.tsx`）與恢復指令的呈現：ESCALATION 的恢復指令以 PowerShell 與 POSIX 兩段**上下堆疊**顯示，每段各有等寬字指令與「複製」鈕，**不是**契約 §4.7.3 字面的「兩個分頁」。複製先用 Clipboard API，失敗退回選取暫存 textarea，再失敗就老實顯示「複製失敗，請手動選取」；指令以文字節點顯示（不經 innerHTML），Console 不替換 `<人工原因>` 佔位、不提供執行鈕 | 設計稿沒有；偏離契約字面，主控採實況（improving_115 §7 Dev-Frontend 列）：兩種殼同時可見才不會複製錯殼（Windows 主機上的 POSIX 形帶 Windows 路徑，只供複製到別台機器），且指令區不設捲動容器、長指令以 `break-all` 攤開，免去另一層鍵盤可及性處理。建議契約 §4.7.3 該句的「分頁」改為「兩段」 |
 | 15 | 核准凍結對話框（`SddFreezeDialog.tsx`）以共用 `dialog.tsx` 自組，不用 `ConfirmDialog`：理由欄必填並即時顯示字數、多一個收在「進階」的選填階段名（留白不送，由 Bridge 用 Stage-n）、核准人一列唯讀（取自登入身分，不由畫面指定）、規格文件欄預填已綁定的規格檔 | 設計稿沒有；契約 §1.10.2、§4.7.1。核准人不可由畫面指定是人工閘的要求（approver 一律取 JWT subject） |
+| 16 | 「本頁說明」鈕（Masthead 右側群組末端）與說明對話框（`components/domain/help/PageHelpButton.tsx`、`PageHelpDialog.tsx`）：每條路由一份繁中說明（這頁做什麼、怎麼用、欄位說明、狀態說明，再加「全站共通」收合段），狀態釋義全站一份（`lib/help/states.ts`），議題中心的詞表開啟時向 API 取；不自動彈出、不加「新」標記；對話框建於共用 `DialogContent`，只用既有 token | 設計稿沒有；掌舵者 2026-10-27 要求所有頁面加入類似議題中心「狀態說明」的功能（PRD `docs/01_requirements/Console_PageHelp_PRD.md`，F-16）。走頂列單一入口而不逐頁加鈕（PRD Q1、D-3）：`layout.test.tsx` 的四元件鎖與議題中心既有「狀態說明」鈕都不動；鈕以 `next/dynamic` 載入，說明本體不進首屏（TCS D-PH-17） |
 
 ## 5. 驗證證據
 
