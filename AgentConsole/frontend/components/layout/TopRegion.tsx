@@ -4,12 +4,13 @@
  * Top 區（UI-LAY-01）＝設計稿 Topbar 公告列＋Masthead 主導覽列。
  * 全站唯一一份：由 app/layout.tsx 組裝，任何頁面不得自帶（Architecture §5.2 硬規則）。
  *  - 公告列：說明文件／下載 CLI／GitHub／Engine Bridge 狀態；通知總覽／幫助中心／語言／使用者（含登出）。
- *  - Masthead：logo、搜尋列（Enter 或按鈕 → /projects?q=）、最近專案 chips、通知鈴、signoff 佇列鈕。
+ *  - Masthead：logo、搜尋列（Enter 或按鈕 → /projects?q=）、最近專案 chips、通知鈴、signoff 佇列鈕、「本頁說明」鈕（右側群組末端，只在已登入的分支內；見 PageHelpButton）。
  *    鈴與 signoff 鈕的徽章都來自 GET /notifications/summary（每 30 秒輪詢）：
  *    pendingSignoffs → signoff 鈕；pendingReviews＋unacknowledgedAlerts → 鈴（點開看三個數字，見 NotificationBell）。
  *  - 未登入（/login）只顯示品牌列，不顯示搜尋與動作。
  */
 import { Bell, Bot, CircleHelp, ClipboardCheck, Globe, LogOut, Search } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -20,6 +21,9 @@ import { SERVICE_LABEL, useBridgeStatus } from "@/hooks/useServiceStatus";
 import { useAllProjects, useNotificationSummary } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { cn } from "@/lib/utils";
+
+// 「本頁說明」鈕以 next/dynamic 載入（TCS-PageHelp D-PH-17）：說明文字本體、狀態釋義與對話框不進每條路由的首屏
+const PageHelpButton = dynamic(() => import("@/components/domain/help/PageHelpButton").then((m) => m.PageHelpButton));
 
 const SEP = <span className="opacity-35 max-md:hidden">|</span>;
 
@@ -154,6 +158,7 @@ export function TopRegion() {
                   <ClipboardCheck size={26} aria-hidden />
                   {pendingSignoffs > 0 ? <CountBadge count={pendingSignoffs} size="lg" floating className="-top-0.5 -right-1" data-testid="signoff-badge" /> : null}
                 </Link>
+                <PageHelpButton />
               </div>
             </>
           ) : null}

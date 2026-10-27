@@ -16,6 +16,13 @@ import type { HelpId, PageHelp } from "@/lib/help/types";
  *  - AT-PH-05-7-1、7-2：表單欄位清單鎖——`entity/EntityForms.tsx` 的 ProjectForm、GoalForm（含 DependsOnField）、TaskForm 內
  *    `<Field>`、`<MarkdownField>` 的 label 字串屬性，須都在對應說明項（project-form、goal-form、task-form）的欄位名集合內。
  *    表單頁於輪 2 才寫：輪 1 它們在 PENDING_HELP_PAGES，這支先斷言「它們在 pending 內、抽取結果非空」，頁一寫完就自動轉為真正的涵蓋鎖（所以輪 2 不必改測試邏輯）。
+ * 輪 1b 補的元件靜態鎖（R-PH-24、R-PH-26、R-PH-27、R-PH-29、R-PH-31、R-PH-11、R-PH-12）：
+ *  - AT-PH-01-1-E-2：`<PageHelpButton />` 全 repo 恰一個使用處、在 TopRegion 的 showTools 為真的分支內（JSX 標籤名比對，不看 import 形態——TopRegion 以 next/dynamic 載入）；
+ *  - AT-PH-02-3-2、02-3-E-1：lib/help/** 與 components/domain/help/** 非測試檔沒有 dangerouslySetInnerHTML 與 Markdown 渲染器 import（含負控）；
+ *  - AT-PH-04-4-3、04-4-E-1：議題中心不持有狀態詞清單——只掃 lib/help/issues.ts 與 components/domain/help/**，每檔含不到 4 個不同的議題狀態名（詞表現讀黃金檔）；
+ *  - AT-PH-04-5-E-3：IssuesLegendGroups 的取數面（getIssues、SI_QUERY_OPTIONS、query key 不掛 issues 家族、不 import useIssues）；
+ *  - AT-PH-07-2-1、07-2-E-1：對話框建於 DialogContent，不自刻、不傳 onCloseAutoFocus、不覆寫尺寸類別；
+ *  - AT-PH-07-5-1、07-5-E-1：說明鈕的圖示與顏色（BookOpen、白底主色字；不得半透明底白字、不得 outline-none）。
  * 掃描器全部住本檔（不進生產碼）、以既有 devDependency `typescript` 的 AST 實作，沿 issues.static.test.ts 的 walk／parse／walkAst／literalTexts 並另加 JSX 文字（B-13）；
  * 每個掃描器是純函式並各有負控樣本，掃描範圍有防反空轉斷言。
  * 判定指令：npx vitest run components/domain/help/help.static.test.ts -t "<AT 底線形>"
@@ -352,5 +359,377 @@ describe("AT_PH_05_7 表單欄位清單鎖（R-PH-19）", () => {
     // GoalForm 的「前置依賴」只在 DependsOnField 內：不傳 DependsOnField 就抽不到
     expect(formLabels(source, ["GoalForm"])).not.toContain("前置依賴");
     expect(formLabels(source, ["GoalForm", "DependsOnField"])).toContain("前置依賴");
+  });
+});
+
+// ══ 輪 1b：元件靜態鎖 ═══════════════════════════════════════════════════════════════════
+
+/** import／export from、動態 import()、require() 的模組位址（字面值）。 */
+function moduleNames(source: string): string[] {
+  const names: string[] = [];
+  walkAst(parse(source), (n) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier && ts.isStringLiteralLike(n.moduleSpecifier)) names.push(n.moduleSpecifier.text);
+    if (
+      ts.isCallExpression(n) &&
+      n.arguments.length > 0 &&
+      ts.isStringLiteralLike(n.arguments[0]) &&
+      (n.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(n.expression) && n.expression.text === "require"))
+    )
+      names.push(n.arguments[0].text);
+  });
+  return names;
+}
+
+/** 自「位址符合 fromPattern 的 import」引入的具名成員（取原名，不看 as 別名）。 */
+function importedNames(source: string, fromPattern: RegExp): string[] {
+  const names: string[] = [];
+  walkAst(parse(source), (n) => {
+    if (ts.isImportDeclaration(n) && ts.isStringLiteral(n.moduleSpecifier) && fromPattern.test(n.moduleSpecifier.text)) {
+      const bindings = n.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) for (const el of bindings.elements) names.push((el.propertyName ?? el.name).text);
+    }
+  });
+  return names;
+}
+
+const readRel = (file: string): string => readFileSync(path.join(ROOT, file), "utf-8");
+
+// ── AC-PH-01-1：說明鈕只有一個使用處 ────────────────────────────────────────────────────
+
+const TOP_REGION = "components/layout/TopRegion.tsx";
+
+type ButtonUsage = { file: string; inShowToolsBranch: boolean };
+
+/** `<PageHelpButton …/>` 的 JSX 使用處（比對標籤名，不看 import 形態）；`inShowToolsBranch`＝元素在「條件為識別字 showTools 的三元運算式」為真的那一側。 */
+function pageHelpButtonUsages(file: string, source: string): ButtonUsage[] {
+  const sf = parse(source);
+  const usages: ButtonUsage[] = [];
+  walkAst(sf, (n) => {
+    const tag = ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n) ? n.tagName.getText(sf) : null;
+    if (tag !== "PageHelpButton") return;
+    let inBranch = false;
+    let child: ts.Node = n;
+    for (let parent: ts.Node | undefined = n.parent; parent; parent = parent.parent) {
+      if (ts.isConditionalExpression(parent) && ts.isIdentifier(parent.condition) && parent.condition.text === "showTools" && parent.whenTrue === child) inBranch = true;
+      child = parent;
+    }
+    usages.push({ file, inShowToolsBranch: inBranch });
+  });
+  return usages;
+}
+
+/** 使用處必須恰 1 個、在 TopRegion、且在 showTools 為真的分支內；回違規清單（空陣列＝合規）。 */
+function buttonUsageProblems(sources: ReadonlyArray<{ file: string; source: string }>): string[] {
+  const usages = sources.flatMap(({ file, source }) => pageHelpButtonUsages(file, source));
+  const problems: string[] = [];
+  if (usages.length !== 1) problems.push(`<PageHelpButton /> 應恰有 1 個使用處，實際 ${usages.length} 個：${usages.map((usage) => usage.file).join("、")}`);
+  for (const usage of usages) {
+    if (usage.file !== TOP_REGION) problems.push(`使用處不在 ${TOP_REGION}：${usage.file}`);
+    else if (!usage.inShowToolsBranch) problems.push("TopRegion 的 <PageHelpButton /> 不在 showTools 為真的分支內");
+  }
+  return problems;
+}
+
+describe("AT_PH_01_1 說明鈕全站只有一個使用處、在 showTools 分支內（R-PH-24）", () => {
+  it("AT_PH_01_1_E_2 components/** 與 app/** 非測試檔：<PageHelpButton /> 恰 1 個使用處，在 TopRegion 的 showTools 為真的分支內", () => {
+    const files = [...walkDir(path.join(ROOT, "components")), ...walkDir(path.join(ROOT, "app"))];
+    expect(files.length, "防反空轉：掃描檔數").toBeGreaterThan(50);
+    expect(files.map(rel)).toContain(TOP_REGION);
+    const sources = files.map((file) => ({ file: rel(file), source: readFileSync(file, "utf-8") }));
+    expect(buttonUsageProblems(sources)).toEqual([]);
+    expect(
+      sources.flatMap(({ file, source }) => pageHelpButtonUsages(file, source)).map((usage) => usage.file),
+      "防反空轉：掃描器看得到那一個使用處",
+    ).toEqual([TOP_REGION]);
+  });
+
+  it("AT_PH_01_1_E_2 掃描器負控（合成樣本）：寫在分支外、寫在為假的一側、寫在 app 某頁、寫兩處、沒有使用處者各回非空；合規樣本（含 next/dynamic 載入的寫法）回空", () => {
+    const top = (body: string, head = "") => ({ file: TOP_REGION, source: `${head}export function TopRegion() { const showTools = true; return (<header>${body}</header>); }` });
+    const dynamicHead = 'const PageHelpButton = dynamic(() => import("@/components/domain/help/PageHelpButton").then((m) => m.PageHelpButton));\n';
+    const compliant = top("{showTools ? (<><A /><PageHelpButton /></>) : null}", dynamicHead);
+    expect(buttonUsageProblems([compliant, { file: "components/other/A.tsx", source: "export const A = () => <div />;" }])).toEqual([]);
+    expect(buttonUsageProblems([top("{showTools ? <PageHelpButton /> : null}")]), "不用括號的寫法也合規").toEqual([]);
+
+    expect(buttonUsageProblems([top("<PageHelpButton />{showTools ? <A /> : null}")]), "寫在分支外").not.toEqual([]);
+    expect(buttonUsageProblems([top("{showTools ? null : <PageHelpButton />}")]), "寫在為假的一側").not.toEqual([]);
+    expect(buttonUsageProblems([top("{other ? <PageHelpButton /> : null}")]), "條件不是 showTools").not.toEqual([]);
+    expect(buttonUsageProblems([compliant, { file: "app/x/page.tsx", source: "export default function P() { return <PageHelpButton />; }" }]), "app 某頁多一個").not.toEqual([]);
+    expect(buttonUsageProblems([{ file: "app/x/page.tsx", source: "export default function P() { return <PageHelpButton />; }" }]), "只寫在 app 某頁").not.toEqual([]);
+    expect(buttonUsageProblems([top("{showTools ? (<><PageHelpButton /><PageHelpButton /></>) : null}")]), "寫兩處").not.toEqual([]);
+    expect(buttonUsageProblems([top("{showTools ? <A /> : null}")]), "沒有使用處").not.toEqual([]);
+  });
+});
+
+// ── AC-PH-02-3：純文字（沒有 HTML 與 Markdown 渲染器）────────────────────────────────────
+
+/** Markdown 與 HTML 渲染器：react-markdown、rehype*、remark*、@uiw/react-md-editor、本專案 components/markdown/*（含相對路徑引用）。 */
+function isRendererModule(spec: string): boolean {
+  if (/^(react-markdown|rehype|remark|@uiw\/react-md-editor)/.test(spec)) return true;
+  return (spec.startsWith("@/") || spec.startsWith(".")) && /(^|\/)markdown(\/|$)/.test(spec);
+}
+
+function rendererViolations(source: string): string[] {
+  const found: string[] = [];
+  if (source.includes("dangerouslySetInnerHTML")) found.push("dangerouslySetInnerHTML");
+  for (const spec of moduleNames(source)) if (isRendererModule(spec)) found.push(`import ${spec}`);
+  return found;
+}
+
+/** 說明相關的非測試原始碼：lib/help/** 與 components/domain/help/**。 */
+function helpSources(root = ROOT): Array<{ file: string; text: string }> {
+  const dirs = [path.join(root, "lib", "help"), path.join(root, "components", "domain", "help")];
+  return dirs.flatMap((dir) => (existsSync(dir) ? walkDir(dir) : [])).map((file) => ({ file: path.relative(root, file).split(path.sep).join("/"), text: readFileSync(file, "utf-8") }));
+}
+
+describe("AT_PH_02_3 說明一律以文字節點渲染（R-PH-31）", () => {
+  it("AT_PH_02_3_2 lib/help/** 與 components/domain/help/** 的非測試檔沒有 dangerouslySetInnerHTML，也沒有任何 Markdown 或 HTML 渲染器的 import", () => {
+    const sources = helpSources();
+    const files = sources.map((source) => source.file);
+    expect(files.length, "防反空轉：掃描檔數").toBeGreaterThanOrEqual(8);
+    expect(files).toEqual(expect.arrayContaining(["lib/help/registry.ts", "components/domain/help/PageHelpDialog.tsx"]));
+    for (const { file, text } of sources) expect(rendererViolations(text), file).toEqual([]);
+  });
+
+  it("AT_PH_02_3_E_1 掃描器負控：dangerouslySetInnerHTML、react-markdown、rehype-raw、remark-gfm、@uiw/react-md-editor、@/components/markdown、相對路徑的 markdown、動態 import 逐一回非空；一般寫法回空", () => {
+    const bad = [
+      "<div dangerouslySetInnerHTML={{ __html: x }} />",
+      'import ReactMarkdown from "react-markdown";',
+      'import rehypeRaw from "rehype-raw";',
+      'import remarkGfm from "remark-gfm";',
+      'import MDEditor from "@uiw/react-md-editor";',
+      'import { MarkdownView } from "@/components/markdown/MarkdownView";',
+      'import { MarkdownView } from "../../markdown/MarkdownView";',
+      'const m = await import("react-markdown");',
+    ];
+    for (const sample of bad) expect(rendererViolations(sample), sample).not.toEqual([]);
+    const good = ['import { Button } from "@/components/ui/button";', "const html = '<b>字面文字</b>';", 'import { markdownLike } from "./markdownLike";'];
+    for (const sample of good) expect(rendererViolations(sample), sample).toEqual([]);
+  });
+});
+
+// ── AC-PH-04-4：議題中心不持有狀態詞清單 ─────────────────────────────────────────────────
+
+/** 黃金檔的議題狀態名（現讀；不在測試裡另抄）。 */
+function statusWords(): string[] {
+  const golden = JSON.parse(readRel("tests/fixtures/si/A.camel.json")) as { issues: { legend: { statuses: Array<{ name: string }> } } };
+  return golden.issues.legend.statuses.map((status) => status.name);
+}
+
+/** 該檔含幾個不同的狀態名；≥ 4 即違規（回非空清單）。含註解（註解裡寫出一份詞表也算持有）；同一個詞出現幾次都只算一個。 */
+function stateKeyViolations(file: string, source: string, words: ReadonlyArray<string>): string[] {
+  const present = words.filter((word) => source.includes(word));
+  return present.length >= 4 ? [`${file} 含 ${present.length} 個不同的狀態名：${present.join("、")}`] : [];
+}
+
+/** 狀態詞鎖的掃描範圍（AC-PH-04-4）：lib/help/issues.ts（含 issues.* 同名族）與 components/domain/help/** 的非測試檔；**不含** lib/help/states.ts 與其他頁檔。 */
+function stateWordScope(root: string): string[] {
+  const files: string[] = [];
+  const helpDir = path.join(root, "components", "domain", "help");
+  if (existsSync(helpDir)) files.push(...walkDir(helpDir));
+  const libDir = path.join(root, "lib", "help");
+  if (existsSync(libDir)) {
+    for (const name of readdirSync(libDir).sort()) if (/^issues(\..+)?\.tsx?$/.test(name) && isScannedFile(name)) files.push(path.join(libDir, name));
+  }
+  return files.map((file) => path.relative(root, file).split(path.sep).join("/")).sort();
+}
+
+describe("AT_PH_04_4 議題中心說明不持有狀態詞清單（R-PH-11）", () => {
+  it("AT_PH_04_4_3 lib/help/issues.ts 與 components/domain/help/** 的每個非測試檔都含不到 4 個不同的議題狀態名（詞表現讀黃金檔）；不掃 states.ts 與其他頁檔", () => {
+    const words = statusWords();
+    expect(words, "詞表現讀黃金檔：恰七個狀態名").toHaveLength(7);
+    const scope = stateWordScope(ROOT);
+    expect(scope, "防反空轉：必掃的三個檔").toEqual(expect.arrayContaining(["lib/help/issues.ts", "components/domain/help/PageHelpDialog.tsx", "components/domain/help/IssuesLegendGroups.tsx"]));
+    expect(scope, "states.ts 與其他頁檔不掃（「進行中」「已完成」「延後」是一般詞）").not.toContain("lib/help/states.ts");
+    expect(scope).not.toContain("lib/help/projects.ts");
+    const violations = scope.flatMap((file) => stateKeyViolations(file, readRel(file), words));
+    expect(violations).toEqual([]);
+  });
+
+  it("AT_PH_04_4_E_1 掃描器負控：含 4 個不同詞者回非空、含 3 個者回空、同一詞重複 4 次者回空；範圍規則——states.ts 不被掃進，issues.* 與 components/domain/help/** 的樣本被掃進", () => {
+    const words = statusWords();
+    expect(stateKeyViolations("樣本.ts", words.slice(0, 4).join(" "), words)).not.toEqual([]);
+    expect(stateKeyViolations("樣本.ts", words.slice(0, 3).join(" "), words)).toEqual([]);
+    expect(stateKeyViolations("樣本.ts", `${words[0]} `.repeat(4), words)).toEqual([]);
+    expect(stateKeyViolations("樣本.ts", `// ${words.join("、")}`, words), "註解裡列出一份詞表也算").not.toEqual([]);
+
+    const tmp = mkdtempSync(path.join(tmpdir(), "help-statewords-"));
+    try {
+      const body = `export const WORDS = ${JSON.stringify(words)};\n`;
+      for (const name of ["lib/help/states.ts", "lib/help/issues.statusWords.sample.ts", "lib/help/projects.ts", "components/domain/help/X.sample.ts", "components/domain/help/X.test.ts"]) {
+        mkdirSync(path.dirname(path.join(tmp, name)), { recursive: true });
+        writeFileSync(path.join(tmp, name), body, "utf-8");
+      }
+      const scope = stateWordScope(tmp);
+      expect(scope).toEqual(["components/domain/help/X.sample.ts", "lib/help/issues.statusWords.sample.ts"]);
+      const hits = scope.flatMap((file) => stateKeyViolations(file, readFileSync(path.join(tmp, file), "utf-8"), words));
+      expect(hits).toHaveLength(2);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── AC-PH-04-5：詞表的取數面 ────────────────────────────────────────────────────────────
+
+/** `queryKey:` 屬性的初始值若是陣列字面值，回它的元素文字（字串字面值）；不是陣列字面值回 null。 */
+function queryKeyHeads(source: string): string[][] {
+  const sf = parse(source);
+  const keys: string[][] = [];
+  walkAst(sf, (n) => {
+    if (ts.isPropertyAssignment(n) && n.name.getText(sf) === "queryKey" && ts.isArrayLiteralExpression(n.initializer)) {
+      keys.push(n.initializer.elements.map((el) => (ts.isStringLiteralLike(el) ? el.text : "")));
+    }
+  });
+  return keys;
+}
+
+/** IssuesLegendGroups 的取數面：getIssues、SI_QUERY_OPTIONS，query key 含 "help" 與 "issuesLegend"、不以 "issues" 起頭，不 import useIssues、useIssue、useIssueLookups、qk。 */
+function legendQueryProblems(source: string): string[] {
+  const problems: string[] = [];
+  const endpoints = importedNames(source, /(^|\/)endpoints$/);
+  const queries = importedNames(source, /(^|\/)queries$/);
+  if (!endpoints.includes("getIssues")) problems.push("沒有自 endpoints import getIssues");
+  if (!queries.includes("SI_QUERY_OPTIONS")) problems.push("沒有自 queries import SI_QUERY_OPTIONS");
+  for (const banned of ["useIssues", "useIssue", "useIssueLookups", "qk"]) if (queries.includes(banned)) problems.push(`不得自 queries import ${banned}`);
+  const texts = collectTexts(source);
+  if (!texts.includes("help") || !texts.includes("issuesLegend")) problems.push('字面值須含 "help" 與 "issuesLegend"');
+  for (const key of queryKeyHeads(source)) if (key[0] === "issues") problems.push(`query key 不得掛在 ["issues"] 家族：${JSON.stringify(key)}`);
+  return problems;
+}
+
+describe("AT_PH_04_5 詞表查詢不掛議題家族、不用議題清單 hook（R-PH-12）", () => {
+  it("AT_PH_04_5_E_3 components/domain/help/IssuesLegendGroups.tsx：自 endpoints import getIssues、自 queries import SI_QUERY_OPTIONS；不 import useIssues、useIssue、useIssueLookups、qk；字面值含 help 與 issuesLegend", () => {
+    const source = readRel("components/domain/help/IssuesLegendGroups.tsx");
+    expect(legendQueryProblems(source)).toEqual([]);
+    expect(queryKeyHeads(source), "防反空轉：掃描器看得到 query key").toContainEqual(["help", "issuesLegend"]);
+  });
+
+  it("AT_PH_04_5_E_3 掃描器負控：import useIssues 者、query key 為 [issues, …] 者各回非空；合規樣本回空", () => {
+    const good = [
+      'import { getIssues } from "@/lib/api/endpoints";',
+      'import { SI_QUERY_OPTIONS } from "@/lib/api/queries";',
+      'const q = useQuery({ queryKey: ["help", "issuesLegend"], queryFn: () => getIssues({ limit: 1 }), ...SI_QUERY_OPTIONS });',
+    ].join("\n");
+    expect(legendQueryProblems(good)).toEqual([]);
+    expect(legendQueryProblems(good.replace("import { SI_QUERY_OPTIONS }", "import { SI_QUERY_OPTIONS, useIssues }")), "import useIssues").not.toEqual([]);
+    expect(legendQueryProblems(good.replace("import { SI_QUERY_OPTIONS }", "import { SI_QUERY_OPTIONS, qk }")), "import qk").not.toEqual([]);
+    expect(legendQueryProblems(good.replace('["help", "issuesLegend"]', '["issues", "legend"]')), 'query key 為 ["issues", …]').not.toEqual([]);
+    expect(legendQueryProblems(good.replace('import { getIssues } from "@/lib/api/endpoints";', "")), "沒有 getIssues").not.toEqual([]);
+    expect(legendQueryProblems(good.replace('import { SI_QUERY_OPTIONS } from "@/lib/api/queries";', "").replace("...SI_QUERY_OPTIONS", "")), "沒有 SI_QUERY_OPTIONS").not.toEqual([]);
+  });
+});
+
+// ── AC-PH-07-2：對話框沿用 DialogContent ─────────────────────────────────────────────────
+
+/** 一個 JSX 屬性的初始值內的全部字串（字串字面值、樣板片段、巢狀的 cn(...) 引數），逐個分開回傳。 */
+function attributeStrings(attr: ts.JsxAttribute): string[] {
+  const out: string[] = [];
+  if (attr.initializer) {
+    walkAst(attr.initializer, (m) => {
+      if (ts.isStringLiteral(m) || ts.isNoSubstitutionTemplateLiteral(m)) out.push(m.text);
+      else if (ts.isTemplateExpression(m)) {
+        out.push(m.head.text);
+        for (const span of m.templateSpans) out.push(span.literal.text);
+      }
+    });
+  }
+  return out;
+}
+
+/** 全部 JSX `className` 屬性內的字串，逐個分開回傳。 */
+function classNameLiterals(source: string): string[] {
+  const sf = parse(source);
+  const out: string[] = [];
+  walkAst(sf, (n) => {
+    if (ts.isJsxAttribute(n) && n.name.getText(sf) === "className") out.push(...attributeStrings(n));
+  });
+  return out;
+}
+
+/** 對話框的違規：傳 onCloseAutoFocus 或呼叫 preventDefault、自刻 role="dialog"、直接 import radix-ui、<DialogContent> 的 className 覆寫 max-h-／max-w-／overflow-。回空＝合規。 */
+function dialogViolations(source: string): string[] {
+  const sf = parse(source);
+  const found: string[] = [];
+  walkAst(sf, (n) => {
+    if (ts.isIdentifier(n) && (n.text === "onCloseAutoFocus" || n.text === "preventDefault")) found.push(`含 ${n.text}`);
+    if (ts.isJsxAttribute(n) && n.name.getText(sf) === "role" && n.initializer && ts.isStringLiteral(n.initializer) && n.initializer.text === "dialog") found.push('自刻 role="dialog"');
+    if ((ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText(sf) === "DialogContent") {
+      for (const attr of n.attributes.properties) {
+        if (!ts.isJsxAttribute(attr) || attr.name.getText(sf) !== "className") continue;
+        for (const literal of attributeStrings(attr)) if (/(^|\s)(max-h-|max-w-|overflow-)/.test(literal)) found.push(`<DialogContent> 的 className 覆寫尺寸類別：${literal}`);
+      }
+    }
+  });
+  for (const spec of moduleNames(source)) if (spec === "radix-ui" || spec.startsWith("@radix-ui/")) found.push(`直接 import ${spec}`);
+  return found;
+}
+
+describe("AT_PH_07_2 對話框建於 DialogContent，不自刻（R-PH-26）", () => {
+  it("AT_PH_07_2_1 components/domain/help/PageHelpDialog.tsx：自 @/components/ui/dialog import DialogContent（含 Dialog 或 DialogBody 之一）並以 <DialogContent 渲染；不傳 onCloseAutoFocus、不呼叫 preventDefault、不 import radix-ui、不含字面 role=dialog、不覆寫尺寸類別", () => {
+    const source = readRel("components/domain/help/PageHelpDialog.tsx");
+    const fromDialog = importedNames(source, /^@\/components\/ui\/dialog$/);
+    expect(fromDialog).toContain("DialogContent");
+    expect(fromDialog.some((name) => name === "Dialog" || name === "DialogBody")).toBe(true);
+    const sf = parse(source);
+    let renders = 0;
+    walkAst(sf, (n) => {
+      if ((ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) && n.tagName.getText(sf) === "DialogContent") renders += 1;
+    });
+    expect(renders, "以 <DialogContent 渲染").toBeGreaterThanOrEqual(1);
+    expect(dialogViolations(source)).toEqual([]);
+  });
+
+  it("AT_PH_07_2_E_1 掃描器負控：onCloseAutoFocus 搭 preventDefault、自刻 role=dialog、import radix-ui、覆寫 max-w 與 overflow 的 className 各回非空；只用 DialogContent 者回空", () => {
+    const base = 'import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog";\n';
+    const wrap = (props: string) => `${base}export const X = () => (<Dialog open><DialogContent title="t" ${props}><DialogBody>內容</DialogBody></DialogContent></Dialog>);`;
+    expect(dialogViolations(wrap('data-testid="x"'))).toEqual([]);
+    expect(dialogViolations(wrap("onCloseAutoFocus={(e) => e.preventDefault()}")), "onCloseAutoFocus 與 preventDefault").not.toEqual([]);
+    expect(dialogViolations(`${base}export const X = () => <div role="dialog">自刻</div>;`), '自刻 role="dialog"').not.toEqual([]);
+    expect(dialogViolations('import { Dialog } from "radix-ui";\nexport const X = Dialog.Root;'), "import radix-ui").not.toEqual([]);
+    expect(dialogViolations('import * as D from "@radix-ui/react-dialog";'), "import @radix-ui/*").not.toEqual([]);
+    expect(dialogViolations(wrap('className="w-[640px] max-w-none"')), "覆寫 max-w-（R-PH-27 的寫死寬度）").not.toEqual([]);
+    expect(dialogViolations(wrap('className="overflow-hidden"')), "覆寫 overflow-").not.toEqual([]);
+    expect(dialogViolations(wrap('className={cn("max-h-[50vh]", x)}')), "cn(...) 內覆寫 max-h-").not.toEqual([]);
+    expect(dialogViolations(wrap('className="gap-2"')), "不涉及尺寸類別的 className").toEqual([]);
+  });
+});
+
+// ── AC-PH-07-5：說明鈕的圖示與顏色 ───────────────────────────────────────────────────────
+
+/** 說明鈕的違規：import CircleHelp（與公告列的「幫助中心」區別）、className 含 outline-none／outline-hidden、同一個 className 字面值內「半透明白底」與「text-white」並存。回空＝合規。 */
+function buttonStyleViolations(source: string): string[] {
+  const found: string[] = [];
+  if (importedNames(source, /^lucide-react$/).includes("CircleHelp")) found.push("import CircleHelp");
+  for (const literal of classNameLiterals(source)) {
+    const tokens = literal.split(/\s+/);
+    if (tokens.some((token) => token === "outline-none" || token === "outline-hidden")) found.push(`className 含 outline-none：${literal}`);
+    if (tokens.some((token) => /^bg-white\/(\d|\[)/.test(token)) && tokens.includes("text-white")) found.push(`半透明白底搭白字：${literal}`);
+  }
+  return found;
+}
+
+describe("AT_PH_07_5 說明鈕：Lucide BookOpen、白底主色字（R-PH-25、R-PH-28、R-PH-29）", () => {
+  it("AT_PH_07_5_1 PageHelpButton.tsx：自 lucide-react import BookOpen 而非 CircleHelp；className 含 bg-white、text-wg-primary、font-medium、rounded-full；沒有 outline-none，也沒有半透明底搭白字；BookOpen 在安裝版真的存在", async () => {
+    const source = readRel("components/domain/help/PageHelpButton.tsx");
+    expect(importedNames(source, /^lucide-react$/)).toContain("BookOpen");
+    expect(buttonStyleViolations(source)).toEqual([]);
+    const literals = classNameLiterals(source);
+    expect(
+      literals.some((literal) => ["bg-white", "text-wg-primary", "font-medium", "rounded-full"].every((token) => literal.split(/\s+/).includes(token))),
+      "同一個 className 字面值含四個類別",
+    ).toBe(true);
+    const lucide = await import("lucide-react");
+    expect(lucide.BookOpen, "安裝版有 BookOpen").toBeDefined();
+  });
+
+  it("AT_PH_07_5_E_1 掃描器負控：import CircleHelp、半透明底搭白字、含 outline-none 各回非空；BookOpen 搭 bg-white text-wg-primary 回空；單獨出現的 text-white（例如 hover 換深色底）回空", () => {
+    expect(buttonStyleViolations('import { CircleHelp } from "lucide-react";')).not.toEqual([]);
+    expect(buttonStyleViolations('const a = <button className="bg-white/[0.14] text-white" />;'), "半透明底（方括號）搭白字").not.toEqual([]);
+    expect(buttonStyleViolations('const a = <button className="bg-white/20 text-white" />;'), "半透明底（數字）搭白字").not.toEqual([]);
+    expect(buttonStyleViolations('const a = <button className="bg-white text-wg-primary outline-none" />;'), "outline-none").not.toEqual([]);
+    expect(buttonStyleViolations('const a = <button className="bg-white text-wg-primary outline-hidden" />;'), "outline-hidden").not.toEqual([]);
+    expect(buttonStyleViolations('import { BookOpen } from "lucide-react";\nconst a = <button className="bg-white text-wg-primary" />;')).toEqual([]);
+    expect(buttonStyleViolations('const a = <button className="bg-white text-wg-primary hover:bg-wg-primary hover:text-white" />;'), "單獨出現的 hover:text-white").toEqual([]);
+    expect(buttonStyleViolations('const a = <button className={cn("bg-white/50", flag && "text-white")} />;'), "分在兩個字面值：不是同一個 className 字面值內的組合").toEqual([]);
   });
 });
