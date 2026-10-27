@@ -104,7 +104,7 @@
 | **FR-LD-06** | **寫入路徑：單一寫入者與新動詞（P3a）** |
 | `AC-LD-06-1` | Given `db` 模式 When 任一寫入動詞（現 17 個，另 `card --issue`）Then 只寫 DB、不寫帳本檔、不取檔案鎖；`git status --porcelain -- docs/06_quality/` 對帳本檔零變更 |
 | `AC-LD-06-2` | Given 表下〈手寫能力對照〉When 逐列比對 Then 每項皆有動詞且**不擴大**能力（不能改既有 DEF 的 ID、不能刪列、觀察處置只能 `open`→終值一次）；`--carrier operator` 不帶 `audit_ref`、不寫 `obs.*` 事件、列標記同今天手寫列（出處記 `si.audit.actor`）；更新類必帶 `--reason`；新動詞於 `file`／`shadow` 模式 rc 3 並指路「手改檔案如今天」（D-15） |
-| `AC-LD-06-3` | Given DEF 編號規則 When `def-add` Then 取家族 200 下一號（現 DEF-200-571）、滿 998 開下一族、不落入保留帶 102～199 與 999（`AutoSDD_Defect_Log.md:11-30`） |
+| `AC-LD-06-3` | Given DEF 編號規則 When `def-add` Then 取家族 200 下一號（＝帳本現最大號 +1；撰寫時最大號 DEF-200-570，本檔不寫未登記的編號——`test_defect_id_reference_integrity` 會紅）、滿 998 開下一族、不落入保留帶 102～199 與 999（`AutoSDD_Defect_Log.md:11-30`） |
 | `AC-LD-06-4` | Given `AUTOSDD_UNATTENDED` 有設 When 各動詞 Then 以「今天主控手寫在該姿態下的實際行為」為判準（`_GOV_EXACT` 不含帳本檔、手寫不被擋 `[C-8]`）逐動詞釘於 TCS「動詞×姿態」表：`def-*`、`debt-*`、`--carrier operator` 與手寫同級；Console 載體動詞與既有九個需人工動詞維持 rc 1；新增 `db flip`、`db unflip`、`db import` 為需人工 |
 | `AC-LD-06-5` | Given 能力登記 When 掃 `tools/lib/selfimproving/*.py`（只掃本層、非遞迴，`test_selfimproving_capability.py:182`）Then 每個新 `dal_*.py` 皆登記；`ro` 檔不相對 import 非 `ro` 檔（`:216-219`）；`psycopg` 只在 `dal_pg_conn.py`（明列例外，`:195-201`）；DAL 無 `time.sleep`／`while True` 等禁字樣（`:91-106`；取鎖逾時用 DB 端 `lock_timeout`） |
 | **FR-LD-07** | **讀取路徑與 fail-loud** |
