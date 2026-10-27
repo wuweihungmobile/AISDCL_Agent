@@ -361,3 +361,23 @@ ledger_head=#1287  chain=intact(1287/1287)  replay=ok  last_sync=2026-10-27T14:4
 | C-18 | 暫存 repo（scratchpad）：對 `git log --since='2026-10-13 00:00'` 觸及三本帳的 80 個 commit，各取當時六類帳本檔成一份快照目錄並 commit；`git gc --aggressive`、`git count-objects -v` | 首份 1,123 KiB；80 份合計 1,251 KiB（其後 79 份增 128 KiB，≈1.6 KiB／份）；每日一份（11 份）1,218 KiB |
 | C-19 | `docker exec autoclaude_pg psql -U autoclaude -d postgres -tAc "select encode(sha256('abc'::bytea),'hex'), current_setting('server_version')"`（唯讀） | `ba7816bf…15ad`（標準 SHA-256 向量）、`18.4`；rc 0 |
 | C-20 | Grep `items=33｜all_33_items｜\b33\b.{0,30}items｜items.{0,30}\b33\b`（`tools/tests`，`*selfimproving*.py`）；Grep `CHECK_RULES_REV`（`tools`，`*.py`） | `items=33` 釘 10 處＝Grep 10 行扣 `test_selfimproving_issues.py:1859`（測試名）、加 `test_selfimproving_check.py:722`（`(ITEMS21, 33)`），分布於 `check`／`events`／`issues`／`measure_verb`／`capability`／`events_p2` 六支 `test_selfimproving_*.py`；`CHECK_RULES_REV`＝4 釘於 `test_selfimproving_p3_meta.py:292`（`params.py:13,139`） |
+
+## 勘誤（本檔凍結之後的訂正；正文不改，只在本節追加）
+
+### 勘誤一（2026-10-28；P0 Stage-2 TCS 起草與 SCG-3 獨立審查後；條號與 `docs/03_testing/contracts/TCS-SelfImprovingLedgerDb-P0-20261027.md` §7.2 相同；掌舵者裁決座標 sid c61e3847-c8bf-4694-962f-93a657a7bf35 line 4437；主控依凍結常態規則執行，鍵 `monorepo-si-ledgerdb-p0` 於 Stage-2 凍結記新 digest；後續階段鍵各自以當時 digest 凍結）
+
+| 條 | 位置 | 原文（逐字） | 訂正 | 理由 |
+|---|---|---|---|---|
+| 1-1 | AC-LD-02-6（`:86`） | **file 模式 `si check` 位元組同 P0（items=33）** | file 模式 `si check` 的 rc、`items=33`、尾行指紋同 P0 基準；首行 `rows=<N>` 隨帳本成長、`CONSOLE-KEY-MISSING` 警示隨環境而變，兩者不釘；比對在含歷史的 clone 並清除 `SI_*`／`AUTOSDD_*` 後進行 | 對真 repo「位元組同 P0」不可達；`git archive` 副本無 `.git`，`si check` 有 7 項依 git 歷史而 FAIL（P0 乾跑實測 rc 1） |
+| 1-2 | §11 P1 列（`:264`） | （P0 基準取自 `git archive` 匯出的 P0 commit） | （夾具 repo 的差分取自 `git archive` 匯出的 P0 commit，夾具 repo 自帶 `git init`；真 repo 的 `si check` 比對取含歷史的 `git clone --no-local` 副本）；同列「file 模式 `si check` 位元組同 P0」依 1-1 | 同 1-1 |
+| 1-3 | AC-LD-11-4（`:133`） | **不受**行數棘輪（只數 `tools/tests/*.py`，`test_adr_xplat001_c1c2_lock.py:554,595`）、M6、skip 政策管轄 | 句末補：但 `tools/tests_pg/*.py` **受** ruff 全規則管轄（`tools/ruff.toml`：E,F,I,UP,W,S102；`"tests/*.py"` 的 E501 豁免只涵蓋目錄名 `tests`、不涵蓋 `tests_pg`），每行顯示寬度須 ≤100（CJK 算 2），`ruff check tools/ .claude/hooks/`（root-infra-ci 第 16 道、pre-push）照常判紅 | P0 乾跑實測：152 寬行在 `tests_pg` 回 E501、在 `tests` 不回 |
+| 1-4 | §8.3（`:191`） | P2、P3b 各 ≤ +515 | 此上限只在輪號前進（S-B）時適用且逐輪遞減：款(12) 到期義務使 R216 起單輪上限為 514、513、512，故 P2 須 ≤ +514、P3b 須 ≤ +513，否則各入名冊（名冊上限 6→10）；同標籤續列（S-A，預設）下 R214 淨額本已超限，每個有測試行變動的階段（含 P4 淨減）都重登 R214 名冊精確淨額，515 不是約束 | P0 棘輪預演（P0 TCS §5.5；`repin_growth_problems()`、`repin_cost_ratchet_problems()` 實跑） |
+| 1-5 | §8.1（`:187`） | **M 類**——M1 對帳恆等式（彩排庫與真庫） | §8.1 機器閘 M1～M7 改稱 G-SIDB-1～G-SIDB-7（AC-LD-10-1 的「§8.1 M1～M7」同；H 類不變） | PRD 內 M 編號三處撞名：§8.1 的 M1～M7、AC-LD-13-6 與 R-10 的 M1～M5、AC-LD-11-1 的 M6 |
+| 1-6 | AC-LD-13-6（`:144`） | 與 M1～M5 的兩個 measuring 窗 | M1～M5（SelfImproving 的量測窗）改稱 MEAS-M1～MEAS-M5；R-10（`:257`）同 | 同 1-5 |
+| 1-7 | AC-LD-11-1（`:130`） | 故**不進 M6「全世界沒跑過」判準** | M6 改稱 SKIP-M6（同列「M6 只在 `start_dir` 為 `tools/tests` 時評」、AC-LD-11-4 的「M6」、D-18 的「避開 M6」同） | 同 1-5 |
+| 1-8 | §9.4（`:234`）、§9.5（`:237`） | `docs/02_architecture/ADR-SIDB-NNN-*.md` | ADR 檔名一律三位數 `ADR-SIDB-00N-<slug>.md`（N＝1～8；沿 Root_Layout §2 的 `ADR-<MOD>-NNN-<slug>.md`）；全文的「ADR-SIDB-01」「ADR-SIDB-01～08」為簡稱，指 `ADR-SIDB-001`～`008` | §9.5 與全文用二位數、§9.4 寫三位數，自相不一 |
+| 1-9 | §11 P3a 列（`:266`） | AC-LD-06、09、12、13-1～13-6 綠 | AC-LD-06、09、12、13-1、13-2、13-3、13-5（處置落地）、13-6 綠（13-4 於 P4 出口驗） | 13-4 本文為「Given P4 出口」，與 P4 列重複歸屬 |
+| 1-10 | A.4 第 1 列（`:326`） | 快照不入 git（OQ-1 選 d）則 CI 內 NE、本機以 DB 驗 | OQ-1 已裁決採 (b)（快照固定單一目錄入 git）：一律「改讀快照」，不採 NE；快照缺席時 fail-loud 而非放行 | 掌舵者 2026-10-27 對 OQ-1 採建議值（PRD §13.2） |
+| 1-11 | §3.3 #5（`:40`） | 能力測試明列該檔為唯一可 import `psycopg` 者 | 現況 `test_selfimproving_capability.py:195-201` 是「不得 import 第三方」判準，尚無例外清單；P1 於該判準新增分支把 `psycopg` 限於 `dal_pg_conn.py` 並加紅綠自證；AC-LD-06-5（`:109`）與 §9.4（`:229`）的「明列例外，`:195-201`」同此訂正 | P0 重核座標（P0 TCS §5.8） |
+| 1-12 | AC-LD-02-5（`:85`） | 測試碼 17 處依附錄 A.4 | 測試碼 17 處／6 檔為路徑常數依附，逐檔列於 P0 TCS §5.4.1b；附錄 A.4 只列「讀真實內容」的測試 | A.4 沒逐檔列出 `LEDGER_REL`／`PROPOSALS_REL` 的 6 檔 |
+| 1-13 | A.4 第 2 列（`:327`） | 凍結檔不再長新輪次，「最新輪」判準失去輸入 | 該鎖對 ID＞`_BASELINE_ID_CEILING` 的新列做家族全檔硬擋；P3b 後新 DEF 只在 DB、鎖只看得到凍結檔，新列零命中＝**靜默 fail-open**（不只是失去最新輪判準）；改讀快照時輸入缺新列或為空須 fail-loud | P0 查明判準語意（P0 TCS §5.4.1 第 2 列） |
