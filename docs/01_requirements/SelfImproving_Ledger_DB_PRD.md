@@ -301,6 +301,8 @@ ledger_head=#1287  chain=intact(1287/1287)  replay=ok  last_sync=2026-10-27T14:4
 | **OQ-5** | 範圍：五問輪帳本與 `skip_id_ledger.json` 納入嗎？ | **不納入**（§3.2）；本案＝自我進化三類帳本 |
 | **OQ-6** | 哪一階段可以先停？ | **P2（含 `FILE-DRIFT` 偵測；條件＝其負控綠）是第一個長期停靠點**：Console 直讀 DB、檔案仍為真相、零不可逆動作、手改造成的落後 Console 會明說（AC-LD-08-4）；P3a 之後停也安全，但新動詞僅 `db` 模式（D-15），習慣沒換、價值有限；**P3b 是不易回頭的點（單份、無遠端副本）**，進場須過 §8.1 與您簽核 |
 
+**掌舵者裁決（2026-10-27，本窗互動選項；Stage-1 凍結依據）**：對 OQ-1～OQ-6（主控回報編號 L-1＝OQ-1、L-2＝OQ-2、L-3＝OQ-6、L-4＝OQ-5、L-5＝OQ-4、L-6＝OQ-3）裁決「全部採建議值」——OQ-1 舊檔永遠保留，採 (b)＋(c)：固定單一目錄覆寫快照、pre-commit 快照閘（含逃生口 `AUTOSDD_SNAPSHOT_GATE_OFF`）、每日 `pg_dump -n si`；OQ-2 P1～P2 各機自建影子、P3 前定案、預設 A 單一主力機為真相、他機唯讀（掌舵者未另答「Mac 是否仍寫帳」，依預設處理；若要在 Mac 寫帳改走 B，P3 進場前再確認）；OQ-3 核准 `--carrier operator`、`def-*`、`debt-*`，`AUTOSDD_UNATTENDED` 與手寫同級；OQ-4 P3a 沿用 `--unresolved-count`，P4 前兩口徑並行一輪再改驅動器；OQ-5 不納入五問輪帳本與 `skip_id_ledger.json`；OQ-6 P2（含 `FILE-DRIFT` 負控綠）為第一個長期停靠點，P3b 進場須過 §8.1 與掌舵者簽核。鍵 `monorepo-si-ledgerdb-p0` 據此 Stage-1 凍結（後續階段鍵各自以當時的 PRD digest 凍結）；凍結後修訂只走〈勘誤〉節（不改正文）。
+
 ## 附錄 A　盤點細表
 
 **A.1 帳本欄位格式**：觀察九欄＋檔頭 `tz`、標記鍵 13 種（`ledger.py:12`、`rows.py:52`）`[C-5]`；缺陷七欄（`AutoSDD_Defect_Log.md:8-11`），主檔與歸檔共 1,680 個相異 ID、62 個族、無重疊 ID `[C-4]`；外部阻塞／結構債五欄＋〈複查記錄〉（`AutoSDD_External_Blocked_Log.md:9-22`、`AutoSDD_Structural_Debt_Log.md:11-27`）；事件 21 種 kind（`events.py:32-37`）；其餘欄位與列規則以 `SelfImproving_PRD.md` §5.1.1／§9.2 為準。
