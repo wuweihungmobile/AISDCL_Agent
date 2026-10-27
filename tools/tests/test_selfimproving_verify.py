@@ -297,7 +297,7 @@ class TestVerify(P2TestCase):
                 (src / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
                 R, p = self.fresh(heldout=src)
                 fx.set_params(R, probe_timeout_seconds=2)
-                self.addCleanup(self._reap, pidfile)
+                self.addCleanup(self._reap, pidfile, hb)
                 t0 = time.monotonic()
                 rc, out, err = self.M(R, "verify", p, "--json")
                 self.assertEqual(rc, 0, out + err)
@@ -337,10 +337,10 @@ class TestVerify(P2TestCase):
                     self.assertEqual(lines[-2], "obs-draft:")
                     self.assertTrue(lines[-1].startswith("| OBS") and "PROBE-TIMEOUT" in lines[-1])
 
-    @staticmethod
-    def _reap(pidfile: Path) -> None:
+    def _reap(self, pidfile: Path, hb: Path) -> None:
         try:
-            os.kill(int(pidfile.read_text(encoding="utf-8")), 15)
+            if time.time() - hb.stat().st_mtime < 1.0:  # 心跳 1 s 內才砍（PID 重用會誤砍，rc=15）
+                os.kill(int(pidfile.read_text(encoding="utf-8")), 15)
         except (OSError, ValueError):
             pass
 
