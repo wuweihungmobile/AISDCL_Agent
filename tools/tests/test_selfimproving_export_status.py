@@ -759,6 +759,9 @@ class TestIssuesExport(StatusCase):
     """`tools/lib/selfimproving/issues.py` 的 `export --kind issues` 出口（TCS 的 RX 組：
     AC-IC-01-5、04-6、06-2；夾具建構函式取自 `test_selfimproving_issues.py`，TCS D-R11）。"""
 
+    # 鍵序取自 `ti`（TCS 契約節 C1.1～C1.4 的逐字抄本；與舊五種 kind 的 EXPORT_KEYS 各自獨立）
+    STATUS_NAMES = ["候選", "待您決定", "待解", "進行中", "觀察中", "延後", "已完成"]
+
     def ic_repo(self) -> Path:
         events = [*ti.run_events(), *ti.prop_events(1, "proposed", sources=[obs_id(2)])]
         return ti.issue_repo(
@@ -783,6 +786,29 @@ class TestIssuesExport(StatusCase):
     @staticmethod
     def mask(text: str) -> str:
         return re.sub(r'"generated_at": "[^"]*"', '"generated_at": ""', text)
+
+    def ic_wide_repo(self) -> Path:
+        """一個提案帶 5 個來源（links 有 5 個目標）、共 8 個議題：序若洩漏雜湊序，各種子必不同。"""
+        sources = [obs_id(n) for n in range(2, 7)]
+        events = [*ti.run_events(), *ti.prop_events(1, "proposed", sources=sources)]
+        return ti.issue_repo(
+            fx.new_dir("icw"),
+            obs=[ti.obs_row(n) for n in range(1, 7)],
+            defs=[ti.def_row(1)],
+            events=events,
+        )
+
+    def ic_seeded(self, repo, seed, *argv) -> str:
+        """子行程以指定的 PYTHONHASHSEED 跑 `selfimproving.py`；回遮掉 generated_at 的標準輸出。"""
+        env = {**os.environ, "PYTHONHASHSEED": str(seed), "PYTHONUTF8": "1"}
+        cp = subprocess.run(
+            [sys.executable, str(ENTRY), *argv, "--repo", str(repo)],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        self.assertEqual(cp.returncode, 0, cp.stderr.decode("utf-8", "replace"))
+        return self.mask(cp.stdout.decode("utf-8"))
 
     def test_AT_IC_01_5_E_1_a_single_entry_has_no_legend_or_summary(self):
         repo = self.ic_repo()
@@ -814,6 +840,16 @@ class TestIssuesExport(StatusCase):
                 self.assertEqual(bool(seqs), ident in (obs_id(2), pid(1)))  # 有事件者才有時間線
                 for t in items[0]["timeline"]:
                     self.assertRegex(t["action"], r"^[^A-Za-z]*[一-鿿][^A-Za-z]*$")
+        # 單筆回應的形狀絕對釘（C1.1、C1.2）：頂層缺 legend、summary；raw、timeline 置於 action 之後
+        single = json.loads(self.ic_export(repo, "--id", pid(1)))
+        self.assertEqual(list(single), ti.TOP_KEYS)
+        self.assertEqual((single["schema_rev"], single["kind"]), (1, "issues"))
+        self.assertIsNotNone(datetime.fromisoformat(single["generated_at"]).utcoffset())
+        entry = single["items"][0]
+        self.assertEqual(list(entry), ti.ITEM_KEYS + ["raw", "timeline"])
+        self.assertEqual(list(entry["origin"]), ["ledger", "file", "seq"])
+        self.assertEqual({tuple(r) for r in entry["raw"]}, {("label", "value")})
+        self.assertEqual({tuple(t) for t in entry["timeline"]}, {("seq", "t", "by", "action")})
 
     def test_AT_IC_04_6_E_1_the_list_is_lean_and_an_unknown_id_is_an_empty_success(self):
         repo = self.ic_repo()
@@ -824,6 +860,27 @@ class TestIssuesExport(StatusCase):
         gone = json.loads(self.ic_export(repo, "--id", obs_id(77)))
         self.assertEqual(gone["items"], [])
         self.assertTrue("legend" not in gone and "summary" not in gone)
+        # 清單回應的形狀絕對釘（C1.1～C1.4）：頂層鍵序（legend 先於 summary）、(schema_rev, kind)、
+        # generated_at 帶 offset、議題物件與其 origin 的鍵序、legend 與 summary 的鍵序
+        self.assertEqual(list(listing), ti.TOP_KEYS + ["legend", "summary"])
+        self.assertEqual((listing["schema_rev"], listing["kind"]), (1, "issues"))
+        self.assertIsNotNone(datetime.fromisoformat(listing["generated_at"]).utcoffset())
+        for item in listing["items"]:
+            self.assertEqual(list(item), ti.ITEM_KEYS, item["id"])
+            origin = ["ledger", "file", "seq" if item["id"] == pid(1) else "line"]
+            self.assertEqual(list(item["origin"]), origin, item["id"])
+        self.assertEqual(list(listing["legend"]), ti.LEGEND_KEYS)
+        for key, want in ti.LEGEND_ENTRY_KEYS.items():
+            for entry in listing["legend"][key]:
+                self.assertEqual(list(entry), want, key)
+        self.assertEqual(list(listing["summary"]), ["total", "by_status", "by_tab", "unmapped"])
+        self.assertEqual(list(listing["summary"]["by_status"]), self.STATUS_NAMES)
+        self.assertEqual(list(listing["summary"]["by_tab"]), ["待處理", "待您決定", "已完成"])
+        # ne 與 problems 的條目鍵序（C1.5）：一個表外處置值（problems）加一個解不出的時間（ne）
+        noisy = ti.issue_repo(fx.new_dir("icn"), obs=[ti.obs_row(1, disp="later", time="昨天")])
+        out = json.loads(self.ic_export(noisy))
+        self.assertEqual([list(n) for n in out["ne"]], [["field", "reason"]])
+        self.assertEqual([list(p) for p in out["problems"]], [["subject", "code", "detail"]])
 
     def test_AT_IC_06_2_1_both_entries_agree_and_ignore_the_wall_clock(self):
         repo = self.ic_repo()
@@ -836,6 +893,20 @@ class TestIssuesExport(StatusCase):
         cli, exported = (json.loads(text) for text in second)
         for key in ("items", "legend", "summary"):
             self.assertEqual(cli[key], exported[key], key)
+        # R-IC-42：雜湊種子不同的行程輸出逐位元相同。同一行程連跑兩次種子相同，看不到 set／dict 序
+        # 的洩漏；這裡以 PYTHONHASHSEED 0～3 各跑一個子行程（清單與單筆各一），序必須處處等於游標序
+        wide = self.ic_wide_repo()
+        one = ("export", "--json", "--kind", "issues", "--id", pid(1))
+        listing = [self.ic_seeded(wide, seed, "issues", "--json") for seed in range(4)]
+        single = [self.ic_seeded(wide, seed, *one) for seed in range(4)]
+        for outs in (listing, single):
+            self.assertEqual(len(set(outs)), 1, "PYTHONHASHSEED 0～3 的輸出出現不同版本")
+        ids = [i["id"] for i in json.loads(listing[0])["items"]]
+        self.assertEqual(ids, [*(obs_id(n) for n in range(1, 7)), ti.def999(1), pid(1)])
+        links = [obs_id(n) for n in range(2, 7)]
+        for text in (listing[0], single[0]):
+            prop = json.loads(text)["items"][-1]
+            self.assertEqual((prop["id"], prop["links"]), (pid(1), links))
 
 
 if __name__ == "__main__":

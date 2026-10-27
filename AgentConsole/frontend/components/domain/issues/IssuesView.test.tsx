@@ -184,6 +184,37 @@ describe("AT_IC_05_7 全部分頁待您決定的列置頂", () => {
     for (const id of DECIDE) expect(within(row(id)).getByRole("img", { name: "置頂" })).toBeInTheDocument();
   });
 
+  it("AT_IC_05_7_1 置頂群內依第一條（順位優先）、其餘依第二條（最後更新降冪）：夾具讓兩條規則對置頂列給出相反次序，置頂群改用第二條或與其餘混排都會紅", async () => {
+    // 置頂列（待您決定）：第一條（順位升冪、無順位最後）＝301、302、303；第二條（最後更新降冪）＝303、302、301——兩條規則的次序完全相反，
+    // 嚴重度也刻意與順位反向，所以「順位」是唯一能排出 301、302、303 的鍵。
+    // 其餘列：第二條＝312、313、311；第一條（311 有順位）＝311、312、313——兩條規則的次序也不同。
+    // 312 的最後更新比所有置頂列都新：不置頂的話它會排第一；置頂列一律先於它。
+    const stub = stubOf([
+      makeIssue("DEF-999-301", { status: "待您決定", severity: "低", severityRank: 4, updatedAt: "2026-10-12" }),
+      makeIssue("DEF-999-302", { status: "待您決定", severity: "中", severityRank: 3, updatedAt: "2026-10-18" }),
+      makeIssue("DEF-999-303", { status: "待您決定", severity: "緊急", severityRank: 1, updatedAt: "2026-10-24" }),
+      makeIssue("DEF-999-311", { severity: "低", severityRank: 4, updatedAt: "2026-10-02" }),
+      makeIssue("DEF-999-312", { severity: "緊急", severityRank: 1, updatedAt: "2026-10-26" }),
+      makeIssue("DEF-999-313", { status: "已完成", result: "已修復", rankable: false, updatedAt: "2026-10-15" }),
+    ]);
+    stub.priorities.set("DEF-999-301", { rank: 1, note: "" });
+    stub.priorities.set("DEF-999-302", { rank: 2, note: "" });
+    stub.priorities.set("DEF-999-311", { rank: 1, note: "" });
+    const pinnedByQueueRule = ["DEF-999-301", "DEF-999-302", "DEF-999-303"];
+    const restByHistoryRule = ["DEF-999-312", "DEF-999-313", "DEF-999-311"];
+
+    const { user } = await open({ stub });
+    await goTo(user, "待您決定");
+    expect(rowIds()).toEqual(pinnedByQueueRule); // 待您決定分頁本身就是第一條
+    await goTo(user, "全部");
+    await waitFor(() => expect(rowIds()).toHaveLength(6));
+    // 順位真的上畫面了（夾具不是空轉）：301＝1、302＝2、311＝1
+    expect(["DEF-999-301", "DEF-999-302", "DEF-999-311"].map((id) => screen.getByTestId(`issue-priority-${id}`).textContent)).toEqual(["1", "2", "1"]);
+    expect(screen.getAllByTestId("issue-top-pinned")).toHaveLength(3);
+    // 置頂群＝第一條的序（順位：301、302、303），其後才是其餘的列＝第二條的序（最後更新降冪：312、313、311）
+    expect(rowIds()).toEqual([...pinnedByQueueRule, ...restByHistoryRule]);
+  });
+
   it("AT_IC_05_7_E_1 置頂只改顯示序：summary 數字與各分頁件數不變；待處理與已完成分頁沒有該元素", async () => {
     const { user } = await open();
     const counts: Record<string, number> = {};

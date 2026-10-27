@@ -20,6 +20,7 @@ import sys
 import time
 import unicodedata
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -66,6 +67,18 @@ LEGAL_VERBS = (
     "attr-reject", "prop-new", "prop-revise", "research", "decide", "heldout-freeze", "sandbox",
     "verify", "promote", "rollback", "obs-add", "obs-close", "measure", "capacity",
 )
+# TCS 契約節 C1.1～C1.4 的鍵序（逐字抄自規格）：議題匯出形狀的絕對釘；RX 組（議題匯出類別）同引
+TOP_KEYS = ["schema_rev", "kind", "generated_at", "head_sha", "items", "next_since", "truncated",
+            "ne", "problems"]
+ITEM_KEYS = ["id", "source", "title", "severity", "severity_rank", "status", "result",
+             "updated_at", "next_step", "origin", "links", "rankable", "action"]
+LEGEND_KEYS = ["statuses", "results", "sources", "severities", "problem_codes", "ne_reasons",
+               "unmapped_label", "updated_at_note"]
+LEGEND_ENTRY_KEYS = {
+    "statuses": ["name", "meaning", "tab", "rankable"], "results": ["name", "meaning"],
+    "sources": ["name", "meaning"], "severities": ["name", "rank", "meaning"],
+    "problem_codes": ["code", "meaning"], "ne_reasons": ["reason", "meaning"],
+}
 
 
 def setUpModule() -> None:
@@ -1000,6 +1013,16 @@ class TestNextStepAndFields(IssueCase):
             self.assertEqual(english_hits(step), [], (ident, step))
         self.assertNotIn("通過", got[pid(3)]["next_step"])  # verified 句型不預設驗證結果
         self.assertEqual(sorted(got), sorted(self.NEXT))
+        # N17 的解鎖條件截 40 個 code point（PRD §5.2；全形與 ASCII 混合，不是位元組、不是 41）
+        long_unlock = "全形字" * 10 + "abcdefghij" + "◆尾"
+        self.assertEqual((len(long_unlock), long_unlock[40]), (42, "◆"))
+        blocked = [sib_row(1, unlock=long_unlock), sib_row(2, unlock="字" * 40)]
+        deferred = by_id(build_obj(self.new(defs=[def_row(1), def_row(2)], sib_blocked=blocked)))
+        for n, unlock in ((1, long_unlock[:40]), (2, "字" * 40)):
+            step = deferred[def999(n)]["next_step"]
+            self.assertEqual(step, f"等解鎖條件：{unlock}（最近複查 2026-10-20）", n)
+            self.assertLessEqual(len(step), 80)
+        self.assertNotIn("◆", deferred[def999(1)]["next_step"])
 
     def test_AT_IC_04_1_E_1_the_english_word_detector_has_teeth(self):
         for word in ("open", "fixed@abc", "measuring", "closed-by-decision", "handed-off"):
@@ -1071,6 +1094,15 @@ class TestNextStepAndFields(IssueCase):
         symptom = next(r["value"] for r in item["raw"] if r["label"] == "症狀")
         self.assertEqual(symptom, raw.replace("\\|", "|"))  # 原文逐字在單筆的 raw
         self.assertEqual(by_id(build_obj(repo))[obs_id(2)]["title"], "短 標題")
+        # 邊界：去記號後恰 80 個 code point（全形、代理對）不加「…」；81 個取前 80 再加「…」
+        edge = [("全" * 40 + "x" * 40, None), ("😀" * 80, None),
+                ("**" + "字" * 80 + "`", "字" * 80),
+                ("全" * 40 + "x" * 41, "全" * 40 + "x" * 40 + "…"),
+                ("😀" * 81, "😀" * 80 + "…")]
+        rows = [obs_row(n, symptom=text) for n, (text, _) in enumerate(edge, start=1)]
+        got = self.items_of(self.new(obs=rows))
+        for n, (text, want) in enumerate(edge, start=1):
+            self.assertEqual(got[obs_id(n)]["title"], want or text, n)
 
     def test_AT_IC_04_3_2_updated_at_takes_the_date_part_of_the_last_known_sign(self):
         obs = [obs_row(1, time="2026-10-18 22:47～10-19 02:20"),
@@ -1109,6 +1141,15 @@ class TestNextStepAndFields(IssueCase):
         asked = got[pid(4)]
         self.assertEqual((asked["status"], asked["action"]), ("待您決定", "decide-proposal"))
         self.assertEqual(got[obs_id(2)]["action"], "close-observation")
+        # R-IC-20：提案各態的（狀態, rankable, action）逐一對照，不從狀態反推：proposed、verified
+        # 才待您決定；approved、returned、sandboxed 已被決定而在途＝進行中；rejected、handed-off
+        # 已結案
+        decide = ("待您決定", True, "decide-proposal")
+        moving, done = ("進行中", True, None), ("已完成", False, None)
+        table = {pid(1): decide, pid(2): decide, pid(3): decide, pid(5): moving, pid(6): moving,
+                 pid(7): moving, pid(11): done, pid(12): done, pid(13): done}
+        self.assertEqual({i: (got[i]["status"], got[i]["rankable"], got[i]["action"])
+                          for i in table}, table)
 
     def test_AT_IC_04_10_E_1_the_rest_are_neither_rankable_nor_actionable(self):
         got = by_id(self.stubbed(self.next_step_repo()))
@@ -1223,6 +1264,11 @@ class TestLinksOriginAndRows(IssueCase):
         self.assertEqual(got[bad]["title"], f"（提案 {bad}：卡面量不到）")
         self.assertIn((f"issues.{bad}.title", "CARD-UNAVAILABLE"), notes(obj))
         self.assertNotIn((f"issues.{good}.title", "CARD-UNAVAILABLE"), notes(obj))
+        # R-IC-29：單筆 raw 的提案卡是全文逐字（與 `card` 動詞同一份、遠長於 20 字），不截斷
+        card_raw = next(r["value"] for r in build_obj(repo, ident=good)["items"][0]["raw"]
+                        if r["label"] == "提案卡")
+        self.assertEqual(card_raw, self.M(repo, "card", good)[1])
+        self.assertGreater(len(card_raw), 100)
 
     def test_AT_IC_04_7_E_1_an_unbuildable_card_affects_nothing_else(self):
         repo, good, bad = self.two_card_repo()
@@ -1244,6 +1290,14 @@ class TestLinksOriginAndRows(IssueCase):
         labels = [r["label"] for r in single["raw"]]
         self.assertNotIn("提案卡", labels)
         self.assertEqual(labels, ["狀態", "路由", "類別", "動作", "修訂", "摘要碼", "來源項目"])
+        # R-IC-29：其餘各項的值逐字（摘要碼是 71 字的 sha256，截斷才會現形）、來源項目為原值
+        prop = next(e for e in fx.EV(repo) if e["kind"] == "prop" and e["id"] == bad)
+        values = {r["label"]: r["value"] for r in single["raw"]}
+        self.assertGreater(len(prop["digest"]), 20)
+        self.assertEqual(values["摘要碼"], prop["digest"])
+        self.assertEqual(values["來源項目"], "、".join(prop["sources"]))
+        self.assertEqual([values[k] for k in ("狀態", "路由", "類別", "動作", "修訂")],
+                         ["proposed", prop["route"], prop["cls"], prop["action"], str(prop["rev"])])
 
     def test_AT_IC_04_8_1_origin_points_at_the_row_the_issue_came_from(self):
         events = [*run_events(), *prop_events(1, "proposed", sources=[obs_id(2)])]
@@ -1439,6 +1493,20 @@ class TestOrderPagingFilters(IssueCase):
         page = self.cli_json(repo, "--limit", "7", "--since", "14")
         self.assertEqual([i["id"] for i in page["items"]], [obs_id(n) for n in range(15, 22)])
         self.assertEqual((page["truncated"], page["next_since"]), (True, 21))
+        # 整除：28 件、每頁 7 件 ⇒ 恰 4 頁；末頁剛好滿，仍是 truncated＝false、next_since＝null
+        fit = self.new(obs=[obs_row(n) for n in range(1, 29)])
+        pages, since = [], None
+        for _ in range(6):
+            pages.append(build_obj(fit, since=since, limit=7))
+            if not pages[-1]["truncated"]:
+                break
+            since = pages[-1]["next_since"]
+        self.assertEqual([len(p["items"]) for p in pages], [7, 7, 7, 7])
+        self.assertEqual([p["truncated"] for p in pages], [True, True, True, False])
+        self.assertEqual([p["next_since"] for p in pages], [7, 14, 21, None])
+        last = self.cli_json(fit, "--limit", "7", "--since", "21")
+        self.assertEqual([i["id"] for i in last["items"]], [obs_id(n) for n in range(22, 29)])
+        self.assertEqual((last["truncated"], last["next_since"]), (False, None))
 
     def test_AT_IC_05_2_E_1_range_errors_are_usage_errors_and_the_edges_are_accepted(self):
         repo = self.new(obs=[obs_row(1), obs_row(2)])
@@ -1493,6 +1561,25 @@ class TestOrderPagingFilters(IssueCase):
         self.assertEqual(problems(build_obj(repo), "ROW-ARITY"),
                          [(big, "ROW-ARITY", "編號或行號過大，游標無法編碼")])
         self.assertIn("游標", legend["problem_codes"][0]["meaning"])
+        # 結構缺陷（姊妹軌）孤列的游標＝4S＋行號（TCS C1.6）：差一的兩側各釘一次
+        debt_base = 4 * s + line_of(repo, SIB_DEBT, def999(8))
+        with card_ok():
+            edge = build_obj(repo, since=debt_base - 1)["items"]
+            past = build_obj(repo, since=debt_base)["items"]
+        self.assertEqual(([i["id"] for i in edge], past), ([def999(8)], []))
+        # 提案號恰＝S：2S＋S 會落進孤列的 3S 段，故不成議題並記 ROW-ARITY；S−1 仍成議題（游標 3S−1）
+        events = [*run_events(), fx.prop_ev(s - 1, 1, sources=[obs_id(5)]),
+                  fx.prop_ev(s, 1, sources=[obs_id(5)])]
+        top = self.new(obs=[obs_row(5)], sib_blocked=[sib_row(7)], events=events)
+        with card_ok():
+            whole = build_obj(top)
+            tail = build_obj(top, since=3 * s - 2)["items"]
+            below = build_obj(top, since=3 * s - 1)["items"]
+        self.assertEqual(list(by_id(whole)), [obs_id(5), pid(s - 1), def999(7)])
+        self.assertEqual([i["id"] for i in tail], [pid(s - 1), def999(7)])
+        self.assertEqual([i["id"] for i in below], [def999(7)])
+        self.assertEqual(problems(whole, "ROW-ARITY"),
+                         [(pid(s), "ROW-ARITY", "編號或行號過大，游標無法編碼")])
 
     def filter_repo(self) -> Path:
         research = "面=產品;來源=工具;回報者=研究者;外部衍生=是;src=demo-src"
@@ -1527,6 +1614,15 @@ class TestOrderPagingFilters(IssueCase):
             self.assertEqual(len(pending), 3)
             self.assertEqual([i["id"] for i in page["items"]], [obs_id(2)])
             self.assertEqual((page["truncated"], page["next_since"]), (True, 2))  # 取自篩選後
+            # R-IC-40、R-IC-22：清單物件的形狀絕對釘（C1.1～C1.4）：頂層鍵序（legend 先於
+            # summary）、(schema_rev, kind)、generated_at 帶 offset、議題物件與 legend 與 summary
+            # 的鍵序
+            self.assertEqual(list(page), [*TOP_KEYS, "legend", "summary"])
+            self.assertEqual((page["schema_rev"], page["kind"]), (1, "issues"))
+            self.assertIsNotNone(datetime.fromisoformat(page["generated_at"]).utcoffset())
+            self.assertEqual([list(i) for i in page["items"]], [ITEM_KEYS])
+            self.assertEqual(list(page["legend"]), LEGEND_KEYS)
+            self.assertEqual(list(page["summary"]), ["total", "by_status", "by_tab", "unmapped"])
 
     def test_AT_IC_05_4_E_1_bad_filter_values_are_usage_errors_listing_the_legal_ones(self):
         repo = self.filter_repo()
@@ -1617,6 +1713,21 @@ class TestOrderPagingFilters(IssueCase):
             self.assertEqual(english_hits(line.split("  ")[-1].split("→", 1)[1]), [], line)
         self.assertEqual(self.cli(repo, "--limit", "2")[1].split("\n")[-2],
                          "共 2 件；問題 0 筆；尚有更多，--since 2")
+        # D-R6：所選各值「皆屬」待處理一族才用第一條；混合（待處理加已完成）仍走第二條。本夾具的
+        # 兩條規則次序處處不同：第一條＝[缺陷 3, 2, 1, 觀察 2, 1]；第二條＝[觀察 1, 2, 缺陷 2, 1, 3]
+        rc, mixed, err = self.cli(repo, "--status", "待處理,已完成")
+        self.assertEqual(rc, 0, err)
+        self.assertEqual(mixed.split("\n")[:-2], self.expected_lines([full[i] for i in order]))
+        rc, both, err = self.cli(repo, "--status", "待您決定,待處理")  # 兩值皆屬 ⇒ 第一條
+        self.assertEqual(rc, 0, err)
+        first = [def999(3), def999(2), def999(1)]
+        self.assertEqual(both.split("\n")[:-2], self.expected_lines([pending[i] for i in first]))
+        # `--json` 的 items 永遠依游標升冪（觀察號 → 缺陷行號），不套頁內顯示序
+        defects = [def999(n) for n in (1, 2, 3)]
+        by_flag = {"待處理": defects, "待處理,已完成": [obs_id(1), obs_id(2), *defects]}
+        for flt, want in by_flag.items():
+            got = [i["id"] for i in self.cli_json(repo, "--status", flt)["items"]]
+            self.assertEqual(got, want, flt)
 
     def test_AT_IC_05_6_E_1_complete_pages_empty_pages_and_null_columns(self):
         repo = self.table_repo()

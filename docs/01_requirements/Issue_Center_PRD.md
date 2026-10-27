@@ -476,3 +476,15 @@ CREATE TABLE console.issue_priority (
 4. 要排優先順序：在「待處理」或「待您決定」的列按「排序」，填 1（最先）與備註後儲存；按「清除」就回到未排。
 5. 要查以前：點「已完成」，用來源、結果或關鍵字篩。「全部」可看到候選與延後的議題（待您決定的排在最前）。
 6. 看不懂某個狀態或結果：按右上「狀態說明」。
+
+---
+
+## 勘誤（本檔 Stage-1 凍結之後的訂正；依 TCS〈凍結後修訂路由〉第 4 點，由 `monorepo-issue-center` 先 refreeze、`agentconsole-issue-center` 隨後；正文保留、讀者以本表覆蓋對應行）
+
+### 勘誤一（2026-10-27；SCG-4 獨立審查一審 Q-09／⚖(a) 後）
+
+| 條 | 位置 | 原文 | 訂正 | 理由（WHY） |
+|---|---|---|---|---|
+| P-1 | §9 模組落點表（「聚合」列之後） | 只有 `issuemap.py`、`issues.py` 兩支新檔 | 加一列：件＝「議題物件建構」；落點＝`tools/lib/selfimproving/issues_items.py`；職責＝`Ctx` 與議題物件建構函式（標題、下一步、links、時間線、游標等純函式；不讀檔、不呼叫 git／fold／card／status，注入縫仍全住 `issues.py`）；測試＝同 `tools/tests/test_selfimproving_issues.py`；同步鎖＝`CAPABILITY` 登記第三支 `ro` | 「聚合」一支實作後 641 行，超過 `tools/lib` guardrail_lib 分級 400 行上限，依 `AutoClaude/tools/check_loc_budget.py` 的分級處置（`:161`、`:263`「先拆職責／抽共用模組」）拆出；零寫入判準、AC、匯出形狀不變 |
+| P-2 | §9「根層既有鎖」列（`p3_meta:294-298`、`capability:4`、`:410`、`:647-648`） | `CAPABILITY` 47／48→49／50，分項 `(37／38,8,2,2)`；檔頭「48 個鍵：36 `ro`」；`:410` 48→50；`:647-648` 同兩組分項 | 47／48→50／51，分項 `(38／39,8,2,2)`；檔頭改「51 個鍵：39 `ro`」；`:410` 48→51；`:647-648` 同兩組分項 →`(38／39,8,2,2)` | 同 P-1：多一個 `ro` 鍵。對應 TCS 勘誤一 1-1 |
+| P-3 | AC-IC-07-8（§6 AC 表）；§9「文件（規格）」列（:404） | Then 不含 `reasons.ts`、`API_Contract_P3-6.md`、`Architecture.md`；:404「不改 `Architecture.md` 與 `reasons.ts`」 | Then 不含 `reasons.ts`、`API_Contract_P3-6.md`，且 `Architecture.md` 的 §10 Bridge 契約節與 §11.1 reason 表一字不改；§7.2 資料所有權表由主控於發布階段加 `issue_priority` 一列（純文件連動，不由開發棒做）；:404 改「不改 `reasons.ts`；`Architecture.md` 只准主控在 §7.2 資料所有權表加 `issue_priority` 一列」 | 本 AC 的目的（括號）是 issue 類 reason 不進既有雙向鎖檔；Architecture §7 是資料所有權唯一真相源，新表 `console.issue_priority` 不登記＝架構文件失真。對應 TCS 勘誤一 1-6 |

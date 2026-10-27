@@ -28,7 +28,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.sql.Timestamp;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -163,7 +165,22 @@ class IssueApiIT extends AbstractSiWriteIT {
     }
 
     private List<Map<String, Object>> priorityRows() {
-        return jdbc.queryForList("select issue_id, rank, note, set_by from console.issue_priority order by issue_id");
+        return jdbc.queryForList("select issue_id, rank, note, set_by, set_at from console.issue_priority order by issue_id");
+    }
+
+    /**
+     * 等到系統時鐘確實走過 {@code instant} 至少一毫秒才回來（有界輪詢；不是 sleep 賭運氣）。服務的時間來源是 {@code Clock.systemUTC()}，
+     * 本類別沿用共用的 Spring context、不能為了控制時間換掉 Clock Bean（換了會另開容器），所以改在兩次寫入之間確認「時鐘已走過第一次的時戳」：
+     * 這之後第二次寫入取到的時戳必然更晚（資料庫是微秒精度，一毫秒的餘裕遠大於進位誤差）。時鐘 5 秒內不前進＝環境壞了，直接失敗而不是無限等。
+     */
+    private static void awaitClockPast(Instant instant) {
+        long startedAt = System.nanoTime();
+        while (!Instant.now().isAfter(instant.plusMillis(1))) {
+            if (System.nanoTime() - startedAt > Duration.ofSeconds(5).toNanos()) {
+                throw new AssertionError("系統時鐘 5 秒內沒有走過 " + instant + "：測試環境的時鐘不前進，無法區分先後兩次寫入");
+            }
+            Thread.onSpinWait();
+        }
     }
 
     private List<Map<String, Object>> auditRows() {
@@ -280,6 +297,16 @@ class IssueApiIT extends AbstractSiWriteIT {
         assertThat(get(viewer(), "?since=2147483647").status()).as("int 上界").isEqualTo(200);
         assertThat(MINI.si.seen.get(0).query()).isEqualTo("since=2147483647");
         MINI.si.seen.clear();
+
+        // 接受側的下界：since＝0、limit＝1 是合法的最小值（PRD AC-IC-07-4：since<0 或 limit<1 才是 400）——200，Bridge 見到同值
+        for (String query : List.of("?since=0", "?limit=1", "?since=0&limit=1")) {
+            Resp edge = get(viewer(), query);
+
+            assertThat(edge.status()).as("%s 是合法的最小值", query).isEqualTo(200);
+            assertThat(MINI.si.seen).as("%s：恰一次 Bridge 請求", query).hasSize(1);
+            assertThat(MINI.si.seen.get(0).query()).as("%s：原樣轉發", query).isEqualTo(query.substring(1));
+            MINI.si.seen.clear();
+        }
 
         List<String> tricky = List.of("待處理", "a b", "a|b", "100%", "a&b=c#d", "a+b", "x*y~z", "待解,延後", "表情😀", "'q\"", "a%20b", "");
         for (String value : tricky) {
@@ -762,6 +789,8 @@ class IssueApiIT extends AbstractSiWriteIT {
         bridgeKnows(PROP, "待您決定", true);
 
         Resp first = put(adminAs("chief"), PROP, map("rank", 3, "note", "第一個管理員"));
+        Instant firstAt = OffsetDateTime.parse(first.read("$.data.setAt")).toInstant();
+        awaitClockPast(firstAt); // 兩次的時戳必須可分辨，否則「資料庫列的 set_at 是後者」與「還是前者」無從區別
         Resp second = put(adminAs("ops_admin"), PROP, map("rank", 4, "note", "第二個管理員"));
 
         assertThat(first.status()).isEqualTo(200);
@@ -770,6 +799,14 @@ class IssueApiIT extends AbstractSiWriteIT {
                 .containsEntry("set_by", "ops_admin"));
         assertThat(OffsetDateTime.parse(second.read("$.data.setAt"))).as("setAt 為後者").isAfterOrEqualTo(OffsetDateTime.parse(first.read("$.data.setAt")));
         assertThat(second.<String>read("$.data.setBy")).isEqualTo("ops_admin");
+
+        // setAt 也要落到資料庫列：回應的 setAt 來自服務的時鐘、不是資料庫列，只比回應會放過「UPSERT 衝突時沒更新 set_at」（資料庫留著第一位的時間）
+        Instant secondAt = OffsetDateTime.parse(second.read("$.data.setAt")).toInstant();
+        assertThat(secondAt).as("回應的 setAt 晚於第一次").isAfter(firstAt);
+        Instant stored = ((Timestamp) priorityRows().get(0).get("set_at")).toInstant();
+        assertThat(stored).as("資料庫列的 set_at 晚於第一次（不是第一位管理員留下的時間）").isAfter(firstAt);
+        assertThat(Duration.between(stored, secondAt).abs()).as("資料庫列的 set_at＝第二次回應的 setAt（資料庫為微秒精度，容許進位的一微秒）")
+                .isLessThanOrEqualTo(Duration.ofNanos(1_000));
     }
 
     @Test

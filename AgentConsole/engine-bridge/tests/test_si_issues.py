@@ -75,6 +75,10 @@ def test_AT_IC_07_1_1_responses_equal_the_real_cli_export_and_only_get_is_served
         # (路徑, 查詢參數, 基準 CLI 的額外旗標, 預期 Bridge 子行程 argv 的旗標尾段)
         (LIST_PATH, {}, (), []),
         (LIST_PATH, {"limit": 4}, ("--limit", "4"), ["--limit", "4"]),
+        # 接受側下界（PRD AC-IC-07-4：since 0 以上、limit 1 以上）：
+        # 最小合法值照樣 200，並原樣成為 argv
+        (LIST_PATH, {"since": 0}, ("--since", "0"), ["--since", "0"]),
+        (LIST_PATH, {"limit": 1}, ("--limit", "1"), ["--limit", "1"]),
         (LIST_PATH, {"since": 3, "limit": 4}, ("--since", "3", "--limit", "4"),
          ["--since", "3", "--limit", "4"]),
         (LIST_PATH, {"status": "待處理"}, ("--status=待處理",), ["--status=待處理"]),

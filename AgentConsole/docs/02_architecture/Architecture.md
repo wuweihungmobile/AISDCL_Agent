@@ -615,6 +615,7 @@ console-api 對 Bridge 欄位**只讀**；Bridge 對 console 欄位**只讀**（
 |----|--------|--------|
 | `execution_steps`、`checkpoints` | **Bridge**（INSERT；`task_id`＝playbook 的 `goal_task_id`） | console-api（唯讀） |
 | `projects`、`goals`、`tasks`、`goal_dependencies`、`import_records`、`system_configs`、`system_config_history`、`review_requests`、`alerts` | **console-api**（唯一） | Bridge 不寫；僅 `execution_steps.task_id` 的外鍵檢查會觸及 `tasks` |
+| `issue_priority`（V14；議題中心的順位，PRD `docs/01_requirements/Issue_Center_PRD.md` §6.5、TCS-IssueCenter R-IC-59） | **console-api**（唯一；JDBC 配接器只有 UPSERT 與 DELETE 兩條敘述，經 `PUT／DELETE /api/v1/issues/{id}/priority`、僅 ADMIN；無 JPA 實體，`ddl-auto=validate` 不檢查本表；不存歷史，變更軌跡在 `audit_log`） | Bridge 不讀不寫（議題本身住根層 SelfImproving 帳本，Bridge 只經 `GET /si/issues` 唯讀鏡像）；順位只在 console-api 合併進 `GET /api/v1/issues` 回應 |
 
 W5（契約 v1.2）增補的欄位，同樣只由 console-api 寫：`import_records.warnings`（JSONB，預設 `[]`）、`import_records.parse_options`（JSONB，可 NULL）——重開匯入記錄時還原黃色解析提示與解析選項（V8，主控裁決 C-10）；`projects.deleted_at`／`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`——軟刪除保留期與復原（V9，主控裁決 C-3，ADR-001 D19；刪除專案時專案與連帶軟刪的目標、任務寫同一個 `deleted_at`）。欄位定義見 §11.3 與契約 §0.5。
 

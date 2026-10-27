@@ -205,7 +205,7 @@ export function IssuesView() {
   const [rankTarget, setRankTarget] = useState<PriorityTarget | null>(null);
   const [decideTarget, setDecideTarget] = useState<DecideTarget | null>(null);
   const [closeTarget, setCloseTarget] = useState<CloseTarget | null>(null);
-  /** 正在取提案快照的議題編號（同一時間只取一個；該列的「決定」鈕停用） */
+  /** 正在取提案快照的議題編號（同一時間只取一個：`startDecide` 以它擋連點；該列的「決定」鈕只標 aria-busy 並改字、不停用——停用會讓焦點掉出去，見 IssueTable 的 ActionCell） */
   const [snapshotId, setSnapshotId] = useState<string | null>(null);
   /** 開啟詳情的那個編號按鈕：關閉詳情時把焦點還給它 */
   const opener = useRef<HTMLElement | null>(null);
