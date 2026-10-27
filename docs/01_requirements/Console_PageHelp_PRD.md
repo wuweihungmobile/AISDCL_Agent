@@ -288,3 +288,22 @@ export type CommonHelp = Pick<PageHelp, "fields" | "states" | "sourceFiles">;   
 | F-16 | 新畫面元件的登記慣例：`ADR-002-Frontend-Design-System.md` §4「與設計稿的已知差異」表（`:119-137`，現列 1～15）是設計稿沒有的新元件的登記處；「本頁說明」鈕與對話框屬此類 | 登記、不處理：由主控發布階段補一列，與 `Architecture.md` 同步同一個 commit（§9） |
 | F-17 | 議題中心表頭八欄的字面值在 `issues/IssueTable.tsx:22`（`HEADERS`），`:99-102` 只是 `HEADERS.map` | 登記；§4 `issues` 列因同列改寫已順手更正座標，不涉設計 |
 | F-18 | (1) §6 的「開啟對話框 ≤ 100 ms」「詞表請求 ≤ 2 秒」沒有對應 AC；(2) `PROP_STATE_KEYS` 新匯出（`si.ts:191` 後）與 `si.test.ts:393-398`（釘根層 `PROP_STATES` 的歸類）相鄰：該測試不釘 `si.ts` 的匯出清單，加一行匯出不會使它轉紅 | 登記、不處理：(1) 由真機 V1 目測；(2) TCS 階段真跑確認 |
+
+## 勘誤（本檔凍結之後的訂正；正文不改，只在本節追加）
+
+### 勘誤一（2026-10-28；Stage-2 TCS 起草與 SCG-3 獨立審查後；條號與 `AgentConsole/docs/03_testing/contracts/TCS-PageHelp-20261027.md` §7.3 相同；掌舵者裁決座標 sid c61e3847-c8bf-4694-962f-93a657a7bf35 line 4437；主控依凍結常態規則執行，鍵 `agentconsole-page-help` 於 Stage-2 凍結記新 digest）
+
+| 條 | PRD 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 1-1 | AC-PH-06-1、AC-PH-06-2（L112、L113） | 06-2：「既有測試檔的 diff 只含 §9 所列檔、不刪斷言」；06-1：「只含 §9 表列路徑」 | 兩條各加：「唯一例外：`AgentConsole/frontend/components/domain/si/si.static.test.ts`——其 `bridgeLeaks` 的 `checkText` 第二分支限縮為 URL 形：只判以 `/` 或 `scheme://` 起頭的字串，以及樣板運算式之後的每個片段（一律視為 URL 形）；相對檔案路徑形（如 `components/domain/si/**`）不判；並補負控（`components/domain/si/**` 回空、`${base}/si/x` 回非空，另三個只靠第二分支才紅的樣本）；§9 表加此檔一列」 | 既有鎖 AT_932_4_3 把全樹非測試原始碼中含 `/si/` 路徑段的字串字面值一律判紅；`self-improving` 頁的 `sourceFiles` 必含 `components/domain/si/**`（AC-PH-05-5），副本實測整檔 rc 1；「只在字串開頭或樣板運算式後判」等於刪掉第二分支，不可 |
+| 1-2 | §9 後的「已複核不需改」（L219） | 「`components/domain/si/si.static.test.ts:83`（只掃 `app/self-improving/page.tsx`）」 | 補「；`:249-276`（AT_932_4_3：掃 `app`、`components`、`lib`、`hooks` 全部非測試原始碼）**需同步改**，見 AC-PH-06-2 的例外」 | PRD 只複核了 `:83`，漏了 `:249-276` |
+| 1-3 | §4 定義「狀態表」的說明句（L34；表頭在 L36）、AC-PH-03-5（L93） | 「『狀態表』＝該頁要列的狀態表 id（§8.2）」；AC-PH-03-5 沒有鎖「頁登記了該頁該列的表」 | AC-PH-03-5 補一句：「每個已寫的 PRD 十六頁，其 `states` 的表 id 集合與名稱模式（`label`／`raw`）須等於 §4 的『狀態表』欄」 | 欄位標題明定是逐頁必列的出處，卻沒有 AC 鎖它；開發棒漏列一張表沒有任何測試紅（TCS D-PH-15、AT-PH-03-5-2） |
+| 1-4 | AC-PH-05-3（L106）、AC-PH-05-2（L105）、AC-PH-05-6（L109） | 05-3：「連續 ≥ 3 位半形數字」（未說先剔除 ID 形態）；05-6：「4 位數字」 | 05-3 加「（先剔除 `OBS-SI-NNN`、`PROP-SI-NNN`、`DEF-N-N` 形態，再判英文詞與數字）」；05-6 的「4 位數字」改「3 位數字（2 位不命中）」 | `OBS-SI-001` 本身含三位數字，不先剔除則說明文字連引用一個真編號都違規；05-2 的剔除只寫在英文詞規則；兩條門檻對齊並補邊界（TCS D-PH-10） |
+| 1-5 | AC-PH-03-5（L93） | 「`purpose` 1～3 句」 | 加「（以 `lint.ts` 的 `splitSentences` 對全部 `purpose` 項切句，合計 1～3 句）」 | `purpose` 是陣列，「句」與「項」不同；與 AC-PH-05-1「每頁 `purpose` 合計 ≤ 3 句」同一判準（TCS AT-PH-03-5-1） |
+| 1-6 | AC-PH-04-5（L100） | 「取 `siErrorParts`」 | 加「；三項皆空（網路失敗、無詳情）時改接 `describeError`；`200` 但回應沒有 `legend` 或四群缺席同樣走失敗句，原因寫『回應沒有詞表』」 | 網路失敗時 `siErrorParts` 三項皆空，句子會斷在冒號；空表不是成功（TCS D-PH-8） |
+| 1-7 | AC-PH-03-5（L93） | 「`states` 為空者必在 `NO_STATE_PAGES`」 | 改雙向：「`states` 為空者必在 `NO_STATE_PAGES`，且 `NO_STATE_PAGES` 內者必為空」 | 單向則名單可無限陳舊（TCS AT-PH-03-5-1） |
+| 1-8 | AC-PH-02-1（L82）、AC-PH-02-5（L86） | 02-1：「四個 `h3`」；02-5：「每表有小標題」 | 02-5 加「小標題與詞表群標題一律 `h4`」 | 小標題若用 `h3` 會違反「恰四個 `h3`」（TCS D-PH-5） |
+| 1-9 | AC-PH-06-3（L114） | 「頁面自身的輪詢以網址白名單排除，細節由 TCS 定」 | 改「以新穎性規則排除：點擊後才出現、且（方法, 路徑）在點擊前沒出現過的請求才算新增；`/api/v1/issues` 另含查詢串」 | 逐頁列舉輪詢網址脆弱易漏（TCS D-PH-13） |
+| 1-10 | AC-PH-06-1（L112） | 「`git diff --name-only <Stage-2 凍結 commit>..HEAD`」 | 改「以本功能自己的 commit 範圍（`<base>..<本功能最後 commit>`）；共用分支上姊妹案 commit 交錯者不計」 | 範圍在共用分支上不明（TCS G-C1） |
+| 1-11 | §8.1（L149 起） | （描述）型別小節只列型別，未定公共面簽章 | 加一句「`helpForPath` 回 `HelpId` 或 `null`、`PageHelpDialog` 的 props、`STATE_SOURCES` 欄名（`title`、`keys`、`labelOf`）、`lint.ts` 匯出名、`SHARED` 型別、`HelpId`／`StateTableId` 聯集，以 TCS 的 D 表與〈契約節〉為準」 | PRD 未定的公共面由 TCS 補齊，避免兩處各寫一份 |
+| 1-12 | §7 測試 id 清單（L145） | 「議題詞表群 `page-help-legend-statuses｜results｜sources｜severities｜note`。」 | 補「；詞表載入中 `page-help-legend-loading`（`role="status"`）、詞表失敗 `page-help-legend-error`（`role="alert"`）」 | AC-PH-04-5 要求載入中與失敗各一句固定文字，需要測試鉤而清單沒列；加法、不改既有 id（TCS D-PH-7、C4） |
