@@ -1,4 +1,79 @@
+import { SHARED } from "./common";
 import type { PageHelp } from "./types";
 
-/** 佔位（輪 1a）：BRD/PRD 匯入（`/import`）的說明尚未撰寫，列在 registry.ts 的 PENDING_HELP_PAGES；輪 2 寫實並登記進 HELP_PAGES。路由鎖已涵蓋它的路由。 */
-export const importPage: PageHelp = { id: "import", title: "BRD/PRD 匯入", purpose: [], steps: [], fields: [], states: [], sourceFiles: [] };
+/**
+ * BRD/PRD 匯入（`/import`）的說明（TCS-PageHelp-20261027；PRD §4）：輪 2 寫實，自 registry.ts 的 PENDING_HELP_PAGES 移進 HELP_PAGES。
+ * 狀態段兩張表：匯入記錄狀態（標題右側的狀態、歷史記錄的「狀態」欄）、匯入有界閘（解析失敗清單的閘別標籤；畫面另印閘的原名，說明用標籤）。
+ * 畫面私有字樣（`ParsePath` 的標籤表 PATH_LABEL 在 StructureCard.tsx、`ImportSourceType` 的標籤表 SOURCE_TYPE_LABEL 在 SourceCard.tsx，兩者都沒有匯出，不進狀態表，PRD §4 發現 5）
+ * 改寫在這裡的欄位表：解析路徑的三個標籤各一列；來源格式（Markdown、PDF、Word、純文字）併入「上傳檔案」「格式」兩列的說明。
+ * 欄位名是畫面字樣的逐字引用（出處鎖會到 sourceFiles 展開的 import 目錄找它）；解析失敗面板的標題「SDD 規格檢查未通過」是後端 reason 的逐字常數，住在 lib/api/reasons.ts，所以它也列入 sourceFiles；
+ * 兩個字的欄位名（格式、放棄）免掃，由 SCG-4 人讀把關。
+ * 數字寫成中文（二百萬、四千）：lint 規則不允許連續三位以上的半形數字（PRD AC-PH-05-3）；檔案大小上限寫在拖放區裡，這裡不重抄數字與單位（MB 不在英文詞白名單）。
+ */
+export const importPage: PageHelp = {
+  id: "import",
+  title: "BRD/PRD 匯入",
+  purpose: ["這一頁把 BRD 或 PRD 這類需求文件，交給 AI 自動拆成專案、目標與任務三層。", "拆解的結果只是草案，要經過您檢查、編輯與 signoff 審批，才會成為正式專案。"],
+  steps: [
+    "先在步驟一選來源：上傳檔案、貼上文字，或從歷史記錄開啟舊的記錄。",
+    "設定自治等級與執行路徑，需要時再寫補充說明，或選擇併入既有專案。",
+    "按「開始解析」，請耐心等 AI 解析完，期間不要關閉這一頁。",
+    "解析成功後進入步驟二，展開樹狀結構檢查目標與任務，必要時直接編輯。",
+    "改動後按「儲存編輯」，儲存會撤銷既有的 signoff。",
+    "確認內容沒問題，按「signoff 審批」，由有權限的人審批這份草案。",
+    "審批完成後按「確認匯入」，系統才會建立專案、目標與任務。",
+    "不想要這份草案，就按「放棄」，不會建立任何專案。",
+  ],
+  fields: [
+    { name: "上傳檔案", meaning: "選擇或拖放一份需求文件，支援 Markdown、PDF 與 DOCX 三種格式。檔案大小有上限，不合格的原因會顯示在拖放區下方。", source: "您填寫或選擇" },
+    { name: "貼上文字", meaning: "直接貼上需求文字，不用先存成檔案。下方可以另外取來源名稱與選格式。", source: "您填寫或選擇" },
+    { name: "需求文字", meaning: "貼上 BRD 或 PRD 的內容，必填，支援 Markdown，最多二百萬個字元。", source: "您填寫或選擇" },
+    { name: "來源名稱", meaning: "選填，替這段文字取個名字，之後在歷史記錄裡比較好認。", source: "您填寫或選擇" },
+    { name: "格式", meaning: "貼上的文字是純文字還是 Markdown，預設是純文字。", source: "您填寫或選擇" },
+    {
+      name: "歷史記錄",
+      meaning: "列出過去的匯入記錄，有匯入時間、來源、狀態、產生的專案與使用的 AI 模型。已上傳、已解析、審核中的記錄可以按「開啟」，原本填的選項也會還原。",
+      source: "系統自動產生",
+    },
+    { name: "匯入到既有專案", meaning: "選填，選了專案就把規格編出的目標與任務併入它，不建立新專案。不選時會建立新專案，要併入的專案須已用 SDD 凍結規格。", source: "您填寫或選擇" },
+    { ...SHARED.autonomy, sourceNote: "預設值取自系統參數" },
+    { name: "執行路徑", meaning: "新專案要工作的資料夾，必填，要填絕對路徑。選了既有專案時會直接取自該專案，不能修改。", source: "您填寫或選擇" },
+    { name: "補充說明", meaning: "選填，寫給 AI 的提示，用來引導它怎麼拆解，最多四千個字元。", source: "您填寫或選擇" },
+    { name: "開始解析", meaning: "把來源送去解析，新來源會先建立匯入記錄。解析會等 AI 做完才回來，請不要關閉這一頁。", source: "您填寫或選擇" },
+    {
+      name: "AI 解析中…",
+      meaning: "解析進行時顯示的畫面，會同時套用有界閘檢查，例如步驟不能太多、依賴不能成環、任務內容不能是空的。有界閘的名稱與意思，見下方的「匯入有界閘」表。",
+      source: "系統自動產生",
+    },
+    {
+      name: "未通過有界閘",
+      meaning: "解析被有界閘擋下時出現的提示，會逐項列出違規的閘、位置與原因，不會截斷。重新整理或從歷史重開後，這份清單仍會還原。",
+      source: "系統自動產生",
+    },
+    {
+      name: "SDD 規格檢查未通過",
+      meaning: "規格驅動的解析被擋下時的標題，畫面會附上引擎回報的原因。常見原因是規格還沒凍結，或凍結之後又被改動。",
+      source: "系統自動產生",
+    },
+    { name: "結構預覽與編輯", meaning: "步驟二，解析成功後出現，用樹狀列出專案、目標與任務三層。每個節點都能展開、編輯與刪除，目標與任務還能拖曳調整順序。", source: "系統自動產生" },
+    { name: "規格驅動（SDD）", meaning: "標題右側的小標籤，表示這份結果直接由專案裡已凍結的規格編成。", source: "系統自動產生" },
+    { name: "AI 解析（LLM）", meaning: "標題右側的小標籤，表示由 AI 閱讀需求文件，拆成專案、目標與任務。", source: "系統自動產生" },
+    { name: "高階目標拆解", meaning: "標題右側的小標籤，表示需求只是高階目標，由引擎拆成一串任務步驟。", source: "系統自動產生" },
+    { name: "tokens", meaning: "這次解析用掉的 Token 數，前面是使用的 AI 模型名稱。最右邊是這份記錄目前的狀態。", source: "系統自動產生" },
+    {
+      name: "解析提示",
+      meaning: "黃色提示列，逐項列出解析時發現的小問題，例如驗證命令被清空、通過標準只是佔位字。不會擋住儲存，請在審批前決定要不要處理。",
+      source: "系統自動產生",
+    },
+    { name: "規格資訊（規格驅動 SDD）", meaning: "只有規格驅動的結果才有，列出規格格式版本、FSM 專案、規格目錄與規格檔。這些要確認匯入成功後才會寫進專案。", source: "系統自動產生" },
+    { name: "新增目標", meaning: "在樹上加一個目標，每個目標底下也有「新增任務」可以加任務。唯讀的角色看不到編輯用的按鈕。", source: "您填寫或選擇" },
+    { name: "儲存編輯", meaning: "改動只存在畫面上，按下才會寫回。儲存會撤銷既有的 signoff，需要重新審批。", source: "您填寫或選擇" },
+    { name: "AI 草案 — 待人工 signoff 硬閘", meaning: "解析結果還沒有人審批時出現的橫幅。審批前不能確認匯入，後端也會擋下。", source: "系統自動產生" },
+    { name: "signoff 審批", meaning: "按下去開啟簽核視窗，確認後這份草案才能確認匯入。有未儲存的編輯時按不了。", source: "您填寫或選擇" },
+    { name: "已 signoff", meaning: "審批完成後取代橫幅，寫明審批者與時間，這時就可以確認匯入。", source: "系統自動產生" },
+    { name: "放棄", meaning: "不要這份草案時按它。放棄後記錄會變成「已放棄」，不會建立任何專案。", source: "您填寫或選擇" },
+    { name: "確認匯入", meaning: "把草案正式建成專案、目標與任務，選了既有專案時改成併入它。未審批或有未儲存的編輯時按不了。", source: "您填寫或選擇" },
+  ],
+  states: [{ table: "importStatus" }, { table: "gateName" }],
+  sourceFiles: ["components/domain/import/**", "lib/api/reasons.ts"],
+};

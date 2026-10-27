@@ -22,7 +22,7 @@ import type { HelpId } from "./types";
  * 分輪棘輪（D-PH-14）：`PENDING_HELP_PAGES.length` 不得超過它。初值＝PRD 十六頁中尚未寫的頁數（輪 1a：13）＋姊妹案暫列的 pending 頁數（0）。
  * 只准下修：每一棒把寫好的頁移出 pending 時同 commit 下修；輪 2 → 3、輪 3 出口 → 0（G-F8）；上修只有姊妹案重填 pending 且同 commit 於 PR 說明 WHY。
  */
-const PENDING_CEILING = 13;
+const PENDING_CEILING = 3;
 
 const ROOT = process.cwd();
 const HELP_DIR = path.join(ROOT, "lib", "help");

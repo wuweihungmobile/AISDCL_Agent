@@ -8,32 +8,43 @@
  *
  * 分輪：輪 1a 只寫 issues、projects、settings 三頁，其餘 13 頁的頁檔是佔位並列在 `PENDING_HELP_PAGES`（路由鎖在所有輪次都成立，所以 `HELP_ROUTES` 含它們的路由；
  * 沒有已寫內容的頁不渲染「本頁說明」鈕——由按鈕以 `HELP_PAGES[id]` 判，缺＝不渲染）。每一棒把寫好的頁自 `PENDING_HELP_PAGES` 移進 `HELP_PAGES`，
- * 並同 commit 下修 registry.test.ts 的 `PENDING_CEILING`；輪 3 出口為空（G-F8）。
+ * 並同 commit 下修 registry.test.ts 的 `PENDING_CEILING`；輪 3 出口為空（G-F8）。輪 2 已寫 dashboard、project-detail、goals、goal-detail、tasks、task-detail、
+ * 三個表單頁與 import（天花板 13→3），現存 pending 只剩 execute、monitor、self-improving 三頁，留待輪 3。
  */
+import { dashboard } from "./dashboard";
+import { goalDetail } from "./goal-detail";
+import { goalForm } from "./goal-form";
+import { goals } from "./goals";
+import { importPage } from "./import";
 import { issues } from "./issues";
+import { projectDetail } from "./project-detail";
+import { projectForm } from "./project-form";
 import { projects } from "./projects";
 import { settings } from "./settings";
+import { taskDetail } from "./task-detail";
+import { taskForm } from "./task-form";
+import { tasks } from "./tasks";
 import type { HelpId, PageHelp } from "./types";
 
 /** 已寫頁（不含 `PENDING_HELP_PAGES`）；鍵＝`PageHelp.id`。 */
-export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = { issues, projects, settings };
+export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = {
+  dashboard,
+  projects,
+  "project-detail": projectDetail,
+  goals,
+  "goal-detail": goalDetail,
+  tasks,
+  "task-detail": taskDetail,
+  "project-form": projectForm,
+  "goal-form": goalForm,
+  "task-form": taskForm,
+  import: importPage,
+  settings,
+  issues,
+};
 
 /** 尚未寫的頁（頁檔為佔位）；每輪只准縮小，輪 3 為空。 */
-export const PENDING_HELP_PAGES: readonly HelpId[] = [
-  "dashboard",
-  "project-detail",
-  "goals",
-  "goal-detail",
-  "tasks",
-  "task-detail",
-  "project-form",
-  "goal-form",
-  "task-form",
-  "execute",
-  "monitor",
-  "import",
-  "self-improving",
-];
+export const PENDING_HELP_PAGES: readonly HelpId[] = ["execute", "monitor", "self-improving"];
 
 /** `states` 為空的頁（沒有會變動的狀態；對話框的狀態段只顯示固定一句）。與頁內容雙向相等：states 為空者必在這裡，這裡的頁 states 必為空。 */
 export const NO_STATE_PAGES: readonly HelpId[] = ["project-form", "task-form", "settings"];

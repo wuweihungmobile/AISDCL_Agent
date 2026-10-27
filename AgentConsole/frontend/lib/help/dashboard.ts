@@ -1,4 +1,92 @@
 import type { PageHelp } from "./types";
 
-/** 佔位（輪 1a）：總覽儀表板（`/`）的說明尚未撰寫，列在 registry.ts 的 PENDING_HELP_PAGES；輪 2 寫實並登記進 HELP_PAGES。路由鎖已涵蓋它的路由。 */
-export const dashboard: PageHelp = { id: "dashboard", title: "總覽儀表板", purpose: [], steps: [], fields: [], states: [], sourceFiles: [] };
+/**
+ * 總覽儀表板（`/`）的說明（TCS-PageHelp-20261027；PRD §4、D-13）：輪 2 寫實，自 registry.ts 的 PENDING_HELP_PAGES 移進 HELP_PAGES。
+ * 四張 KPI 卡的算法是白話寫明的（D-13：這些數字的算法一望不知、最容易被誤讀），算法取自 DashboardView.tsx 的程式與註解：
+ * 活躍專案＝狀態不是完成、失敗、封存；待審批草案數＝通知摘要的 pendingSignoffs（與頂列待審批鈕同一個數字）；本週完成任務數＝本週一零點起的完成任務總數；
+ * 執行中 run 數＝各「執行中」專案最新批次仍在跑的個數。
+ * 欄位名是畫面字樣的逐字引用（出處鎖會到 sourceFiles 找它）：KPI 標題與卡片標題來自 DashboardView.tsx，圖表標題來自 ProjectStatusChart.tsx。
+ */
+export const dashboard: PageHelp = {
+  id: "dashboard",
+  title: "總覽儀表板",
+  purpose: [
+    "這是您登入後的第一頁，用四個數字和兩張清單，讓您一眼看出整體的健康度與待辦。",
+    "上方四張卡是統計數字，下方依序是進行中的執行、待您簽核的草案和專案狀態圖。",
+    "數字會自動更新，不需要手動重新整理。",
+  ],
+  steps: [
+    "先看上方四張卡，掌握活躍專案、待審批草案、本週完成與執行中的數量。",
+    "待審批草案數大於零時，到「待人工審批」卡處理那些草案。",
+    "在「待人工審批」卡按草案標題，可以前往它所在的頁面。",
+    "按列尾的「審批」，確認後那份草案才可以執行。",
+    "在「進行中的執行」卡按專案名稱，前往該專案的執行頁。",
+    "按「查看全部專案」，到專案管理頁看全部專案。",
+    "按右上的「匯入 BRD / PRD」，讓 AI 把需求文件拆成專案。",
+    "看最下方的圖，比較各種狀態的專案各有幾個。",
+  ],
+  fields: [
+    {
+      name: "活躍專案數",
+      meaning: "還沒結束的專案有幾個，也就是草稿、就緒與執行中三種。下方小字另外寫出專案總數與執行中的個數。",
+      source: "系統自動產生",
+      sourceNote: "每 30 秒更新一次",
+    },
+    {
+      name: "待審批草案數",
+      meaning: "還等著您簽核的草案有幾份，專案、目標、任務與匯入草案都算，與頂列待審批鈕的數字相同。下方小字會提醒有草案時需要 signoff 才可執行。",
+      source: "系統自動產生",
+      sourceNote: "每 30 秒更新一次",
+    },
+    {
+      name: "本週完成任務數",
+      meaning: "從本週一零點起算（依您電腦的時區），到現在為止，所有專案完成的任務總數。下方小字寫出這個數字跨了幾個專案，取不到時會寫明無法載入。",
+      source: "系統自動產生",
+      sourceNote: "每 60 秒更新一次",
+    },
+    {
+      name: "執行中 run 數",
+      meaning: "正在跑的執行批次有幾個。只算狀態是執行中的專案，而且它最新的批次還在跑，批次資料還沒回來時先當作在跑。",
+      source: "執行引擎回報",
+      sourceNote: "每 30 秒更新一次",
+    },
+    {
+      name: "進行中的執行",
+      meaning: "列出狀態是執行中的專案，和它最新批次的進度。進度前面的 Run 編號，是這個專案的第幾次執行批次。",
+      source: "執行引擎回報",
+    },
+    {
+      name: "任務完成度",
+      meaning: "進度條與旁邊的數字，左邊是已完成的任務數，右邊是全部的任務數，最右邊是完成的百分比。",
+      source: "執行引擎回報",
+    },
+    {
+      name: "查看全部專案",
+      meaning: "前往專案管理頁，看全部的專案。",
+      source: "您填寫或選擇",
+    },
+    {
+      name: "待人工審批",
+      meaning: "等著您簽核的草案清單，專案、目標、任務與匯入草案都會列在這裡。標題旁的數字是草案總數，清單最多列出最早的五十筆。",
+      source: "系統自動產生",
+      sourceNote: "每 30 秒更新一次",
+    },
+    {
+      name: "審批",
+      meaning: "按下去會開啟簽核視窗，確認後會記下審批者與時間。唯讀的角色不能按。",
+      source: "您填寫或選擇",
+    },
+    {
+      name: "專案狀態分佈",
+      meaning: "橫軸是六種專案狀態，高度是處在該狀態的專案數。每種狀態的意思見下方的狀態表。",
+      source: "系統自動產生",
+    },
+    {
+      name: "匯入 BRD / PRD",
+      meaning: "前往匯入頁，讓 AI 把需求文件拆成專案、目標與任務。",
+      source: "您填寫或選擇",
+    },
+  ],
+  states: [{ table: "projectStatus" }],
+  sourceFiles: ["components/domain/views/DashboardView.tsx", "components/charts/ProjectStatusChart.tsx"],
+};
