@@ -213,9 +213,9 @@ _SHELL_SHEBANG_RE = re.compile(r"^#!.*\b(?:ba|z|da|k)?sh\b")
 # 接進根層 dispatcher 的扇出段？是否走了 Copy-on-Evolve 該排除？），而不是靜默被
 # 涵蓋。順序無意義，比對走 set。
 _KNOWN_HOOK_DIRS: frozenset[str] = frozenset({
-    "tools/git-hooks",
-    "AutoClaude/tools/git-hooks",
-    "AISDLC_SDD/.githooks", "AgentConsole/backend",  # gradlew: Gradle wrapper, not a hook
+    "tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/.githooks",
+    "AgentConsole/backend",  # gradlew: Gradle wrapper, not a hook
+    "AgentConsole/docker/pgbackrest/tests/stubs",  # 備份案 sidecar 契約測試的命令替身（非 hook）
 })
 
 
