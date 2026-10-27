@@ -69,6 +69,10 @@ export default defineConfig({
         // 議題中心（TCS-IssueCenter-20261027 Q10；先例 lib/domain/sdd.ts）：顯示序、計件、篩選、提示條文字、優先順序表單驗證、英文詞偵測、reason 與錯誤文案的純邏輯層；
         // 畫面本體（components/domain/issues）由元件測試與 mock e2e 驗證。門檻不動
         "lib/domain/issues.ts",
+        // 每頁說明（TCS-PageHelp-20261027；先例 lib/domain/issues.ts）：登記表與路由解析、白話檢查的純函式、狀態名稱來源（鍵與標籤現讀既有常數表）；說明文字本身與對話框元件不計入。門檻不動
+        "lib/help/registry.ts",
+        "lib/help/lint.ts",
+        "components/domain/help/stateSources.ts",
       ],
       thresholds: { lines: 70, statements: 70, functions: 70, branches: 60 },
     },

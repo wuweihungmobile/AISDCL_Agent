@@ -189,6 +189,7 @@ const PROP_STATUS_BY_STATE: Readonly<Record<string, Exclude<PropStatusClass, "un
   closed: "done",
   retired: "done",
 };
+export const PROP_STATE_KEYS = Object.keys(PROP_STATUS_BY_STATE);
 
 /**
  * 提案狀態→類別。表外的字串回 `unknown`，而 `filterProposals` 讓 `unknown` 在任何快篩下都照常顯示：根層日後多一個狀態而這張表還沒跟上時，

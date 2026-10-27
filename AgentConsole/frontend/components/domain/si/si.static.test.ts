@@ -227,9 +227,12 @@ function bridgeLeaks(source: string): string[] {
   const sf = parse(source);
   const specs = moduleSpecifierNodes(sf);
   const found: string[] = [];
-  const checkText = (text: string) => {
+  // 第二分支只判 URL 形（TCS-PageHelp-20261027 D-PH-18、R-PH-37；B 式）：(i) 以 `/` 或 `scheme://` 起頭的字串；(ii) 樣板運算式之後的每個片段（afterExpression，一律視為 URL 形，不論是否以 `/` 起頭）。
+  // 相對檔案路徑形（例：說明項 sourceFiles 寫的 `components/domain/si/**`）不是 Bridge 路徑字面，不判。「`/si/` 在字串開頭或緊接樣板運算式後才判」的 A 式等於刪掉第二分支，不可。
+  const checkText = (text: string, afterExpression = false) => {
+    const urlForm = afterExpression || text.startsWith("/") || /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text);
     if (text.startsWith("/si/")) found.push(`Bridge 路徑字面：${text}`);
-    else if (/\/si\//.test(text) && !text.startsWith("/api/v1/si/")) found.push(`含 /si/ 路徑段但不是 /api/v1/si/ 起頭：${text}`);
+    else if (urlForm && /\/si\//.test(text) && !text.startsWith("/api/v1/si/")) found.push(`含 /si/ 路徑段但不是 /api/v1/si/ 起頭：${text}`);
     if (text.includes("8081")) found.push(`8081：${text}`);
   };
   walkAst(sf, (n) => {
@@ -237,7 +240,7 @@ function bridgeLeaks(source: string): string[] {
     if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) checkText(n.text);
     else if (ts.isTemplateExpression(n)) {
       checkText(n.head.text);
-      for (const span of n.templateSpans) checkText(span.literal.text);
+      for (const span of n.templateSpans) checkText(span.literal.text, true);
     } else if (ts.isNumericLiteral(n) && n.text === "8081") found.push("8081：數字字面");
     else if (ts.isPropertyAccessExpression(n) && /BRIDGE/i.test(n.name.text) && n.expression.getText(sf).includes("process.env")) found.push(`環境變數讀取：${n.getText(sf)}`);
     else if (ts.isElementAccessExpression(n) && n.expression.getText(sf).includes("process.env") && ts.isStringLiteralLike(n.argumentExpression) && /BRIDGE/i.test(n.argumentExpression.text))
@@ -293,5 +296,21 @@ describe("AT_932_4_3 前端原始碼不含 Bridge 路徑字面（R11）", () => 
       "const base = process.env.NEXT_PUBLIC_API_URL;",
     ];
     for (const sample of good) expect(bridgeLeaks(sample), sample).toEqual([]);
+  });
+
+  it("AT_PH_06_2_3 相對檔案路徑形的字面（說明項的 sourceFiles 寫 components/domain/si/**）不是 Bridge 路徑字面：bridgeLeaks 回空（TCS-PageHelp-20261027 D-PH-18）", () => {
+    const sourceFiles = 'export const sourceFiles = ["components/domain/si/**", "components/domain/si/SiView.tsx", "lib/domain/si.ts"];';
+    expect(bridgeLeaks(sourceFiles)).toEqual([]);
+    // 對照：同樣的檔案名若是以 / 起頭的 URL 形就紅（第二分支只是縮小、沒有被放空）
+    expect(bridgeLeaks('const u = "/components/domain/si/SiView.tsx";')).not.toEqual([]);
+  });
+
+  it("AT_PH_06_2_E_2 URL 形樣本逐一回非空（既有負控保留；只靠第二分支才紅的三個；只有「樣板片段一律視為 URL 形」才紅的兩個）；/api/v1/si/ 起頭與模組位址回空", () => {
+    const keptFromOriginal = ['const u = "/si/status";', "const u = `/si/runs?limit=${n}`;", "const u = `${base}/si/x`;"];
+    const secondBranchOnly = ['const u = "https://x.example/si/status";', 'const u = "/v1/si/x";', "const u = `${base}/v1/si/x`;"];
+    const templateFragmentOnly = ["const u = `http://${h}:9000/si/x`;", "const u = `${base}api/si/x`;"];
+    for (const sample of [...keptFromOriginal, ...secondBranchOnly, ...templateFragmentOnly]) expect(bridgeLeaks(sample), sample).not.toEqual([]);
+    const clean = ['const u = "/api/v1/si/status";', 'import { SiView } from "@/components/domain/si/SiView";'];
+    for (const sample of clean) expect(bridgeLeaks(sample), sample).toEqual([]);
   });
 });
