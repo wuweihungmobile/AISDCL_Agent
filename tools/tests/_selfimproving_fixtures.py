@@ -1345,14 +1345,10 @@ class Srv:
             self.requests.append(
                 {"path": h.path, "headers": {k.lower(): v for k, v in h.headers.items()}}
             )
+        done = False
         try:
             self.arrived(h.path).set()
-            route = self.routes.get(h.path)
-            if route is None:
-                h.send_response(404)
-                h.send_header("Content-Length", "0")
-                h.end_headers()
-                return
+            route = self.routes.get(h.path) or (404, {}, b"")  # 未登記路徑＝404 空本文
             status, headers, body = route[:3]
             opts = route[3] if len(route) > 3 else {}
             if opts.get("hold") is not None:
@@ -1381,12 +1377,16 @@ class Srv:
                     if self.closing.wait(0.5):
                         break
             else:
+                with self._lock:  # 寫本文前先減：finally 才減會把序列客戶端判成重疊（DEF-200-572）
+                    self._inflight -= 1
+                done = True
                 h.wfile.write(body)
         except OSError:  # 含 BrokenPipe／ConnectionReset／ConnectionAborted：客戶端先走了
             pass
         finally:
-            with self._lock:
-                self._inflight -= 1
+            if not done:
+                with self._lock:
+                    self._inflight -= 1
 
     def close(self) -> None:
         self.closing.set()
