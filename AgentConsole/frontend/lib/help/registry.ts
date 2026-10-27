@@ -9,17 +9,21 @@
  * 分輪：輪 1a 只寫 issues、projects、settings 三頁，其餘 13 頁的頁檔是佔位並列在 `PENDING_HELP_PAGES`（路由鎖在所有輪次都成立，所以 `HELP_ROUTES` 含它們的路由；
  * 沒有已寫內容的頁不渲染「本頁說明」鈕——由按鈕以 `HELP_PAGES[id]` 判，缺＝不渲染）。每一棒把寫好的頁自 `PENDING_HELP_PAGES` 移進 `HELP_PAGES`，
  * 並同 commit 下修 registry.test.ts 的 `PENDING_CEILING`；輪 3 出口為空（G-F8）。輪 2 已寫 dashboard、project-detail、goals、goal-detail、tasks、task-detail、
- * 三個表單頁與 import（天花板 13→3），現存 pending 只剩 execute、monitor、self-improving 三頁，留待輪 3。
+ * 三個表單頁與 import（天花板 13→3）；輪 3 寫完 execute、monitor、self-improving，`PENDING_HELP_PAGES` 清空、天花板 3→0，十六頁全數已寫。
+ * 清空之後，姊妹案新增頁面若先列 pending，須同 commit 上修天花板並於 PR 說明 WHY（D-PH-14）。
  */
 import { dashboard } from "./dashboard";
+import { execute } from "./execute";
 import { goalDetail } from "./goal-detail";
 import { goalForm } from "./goal-form";
 import { goals } from "./goals";
 import { importPage } from "./import";
 import { issues } from "./issues";
+import { monitor } from "./monitor";
 import { projectDetail } from "./project-detail";
 import { projectForm } from "./project-form";
 import { projects } from "./projects";
+import { selfImproving } from "./self-improving";
 import { settings } from "./settings";
 import { taskDetail } from "./task-detail";
 import { taskForm } from "./task-form";
@@ -38,13 +42,16 @@ export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = {
   "project-form": projectForm,
   "goal-form": goalForm,
   "task-form": taskForm,
+  execute,
+  monitor,
   import: importPage,
   settings,
+  "self-improving": selfImproving,
   issues,
 };
 
-/** 尚未寫的頁（頁檔為佔位）；每輪只准縮小，輪 3 為空。 */
-export const PENDING_HELP_PAGES: readonly HelpId[] = ["execute", "monitor", "self-improving"];
+/** 尚未寫的頁（頁檔為佔位）；每輪只准縮小，輪 3 為空（十六頁全數已寫）。 */
+export const PENDING_HELP_PAGES: readonly HelpId[] = [];
 
 /** `states` 為空的頁（沒有會變動的狀態；對話框的狀態段只顯示固定一句）。與頁內容雙向相等：states 為空者必在這裡，這裡的頁 states 必為空。 */
 export const NO_STATE_PAGES: readonly HelpId[] = ["project-form", "task-form", "settings"];

@@ -8,6 +8,7 @@ import { LEGEND, clone, newStub, renderIssues, unavailable, type IssuesStub } fr
 import { SERVICE_LABEL } from "@/hooks/useServiceStatus";
 import type { Role } from "@/lib/api/types";
 import { clearSession, resetSessionCache } from "@/lib/auth/store";
+import { PROP_STATE_KEYS } from "@/lib/domain/si";
 import { HELP_COMMON } from "@/lib/help/common";
 import { HELP_PAGES } from "@/lib/help/registry";
 import { STATE_HELP } from "@/lib/help/states";
@@ -25,6 +26,7 @@ import { STATE_SOURCES } from "./stateSources";
  *  - AT-PH-02-5-1：多張狀態表各有 h4 小標題與自己的表，順序＝登記順序；
  *  - AT-PH-02-6-1、02-6-E-1：全站共通只寫一份、位於四段之後；
  *  - AT-PH-04-3-2：狀態名稱模式（label／raw）；
+ *  - AT-PH-04-6-2：自我進化頁的三張狀態表（輪 3 綁定：頁寫完才有真內容可驗）；
  *  - AT-PH-04-4-1、04-4-2：議題詞表四群取自 API 的 legend，缺註記不顯示；
  *  - AT-PH-04-5-1、04-5-2、04-5-3、04-5-4、04-5-E-1、04-5-E-2：詞表失敗句、載入中、每次開啟重取、失敗不重試、query key 與回收；
  *  - AT-PH-07-2-2：對話框沿用 DialogContent 的尺寸類別。
@@ -555,6 +557,38 @@ describe("AT_PH_04_3 狀態名稱模式（R-PH-10）", () => {
     expect(firstColumn(stepLabel)).toEqual(Object.keys(STATE_HELP.stepStatus).map((key) => STATE_SOURCES.stepStatus.labelOf?.(key)));
     expect(firstColumn(stepLabel)).not.toContain("STARTED");
     expect(head(stepLabel)).toBe("狀態");
+  });
+});
+
+// ── AC-PH-04-6：自我進化的三張狀態表 ─────────────────────────────────────────────
+
+describe("AT_PH_04_6 自我進化頁的三張狀態表（R-PH-13）", () => {
+  it("AT_PH_04_6_2 自我進化頁：觀察分類首欄＝未結、延後、已完成，提案分類首欄＝待決、進行中、已完成；提案狀態首欄＝PROP_STATE_KEYS 的畫面原值且欄標題「畫面上的原值」、列鍵集合＝PROP_STATE_KEYS；retired 列寫明畫面預留", () => {
+    const page = HELP_PAGES["self-improving"];
+    expect(page, "輪 3 起自我進化頁已寫，不在 PENDING_HELP_PAGES").toBeDefined();
+    show(page as PageHelp);
+
+    const states = sectionEl("page-help-states");
+    expect(textsOf(states.querySelectorAll("h4"))).toEqual(["obsClass", "propClass", "propState"].map((id) => STATE_SOURCES[id as StateTableId].title));
+    expect(states.querySelectorAll("table"), "三張表，沒有議題詞表群").toHaveLength(3);
+
+    const firstColumn = (container: HTMLElement) => textsOf(container.querySelectorAll("tbody tr td:first-child"));
+    const head = (container: HTMLElement) => container.querySelector("thead th")?.textContent;
+
+    const obs = sectionEl("page-help-states-obsClass");
+    expect(firstColumn(obs)).toEqual(["未結", "延後", "已完成"]);
+    expect(head(obs)).toBe("狀態");
+
+    const proposals = sectionEl("page-help-states-propClass");
+    expect(firstColumn(proposals)).toEqual(["待決", "進行中", "已完成"]);
+    expect(head(proposals)).toBe("狀態");
+
+    const raw = sectionEl("page-help-states-propState");
+    const keys = firstColumn(raw);
+    expect(keys, "首欄是畫面上的原值，不是中文標籤").toEqual(expect.arrayContaining(["proposed", "handed-off"]));
+    expect([...keys].sort()).toEqual([...PROP_STATE_KEYS].sort());
+    expect(head(raw)).toBe("畫面上的原值");
+    expect(within(raw).getByText("retired").closest("tr")?.textContent).toContain("根層目前不會產生這個狀態，畫面為日後預留");
   });
 });
 
