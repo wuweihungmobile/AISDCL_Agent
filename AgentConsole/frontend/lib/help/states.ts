@@ -135,7 +135,7 @@ export const STATE_HELP = {
     RELEASE: { meaning: "流程已經走到發布，成果可以交付了。", next: "這是主要流程的最後一步。" },
     BLOCKED: { meaning: "流程被擋住了，必須由人工處理才能繼續。", next: "請到專案詳情查看原因，並照畫面上的恢復指令處理。" },
     TRANSIENT: { meaning: "流程正處在兩個階段之間的短暫過渡。", next: "稍後重新整理，通常就會進入下一個階段。" },
-    OBSERVATION: { meaning: "這是背景觀測用的狀態，不是主要流程的步驟。", next: "不用處理，回歸點確定前不會畫階段步驟，請看「目前狀態」的原文。" },
+    OBSERVATION: { meaning: "這是背景觀測用的狀態，不是主要流程的步驟。", next: "不用處理，這個狀態還不知道會回到哪個階段，所以不畫階段步驟，請看「目前狀態」的原文。" },
     UNKNOWN: { meaning: "系統認不得目前的狀態，無法判斷流程走到哪裡。", next: "請看旁邊顯示的原始狀態文字，必要時回報給維護者。" },
   } satisfies Readonly<Record<string, StateRow>>,
 

@@ -707,7 +707,13 @@ describe("AT_PH_04_5 詞表的載入、失敗與重取（R-PH-12）", () => {
       { name: "200 但 legend 缺 results", override: brokenLegend({ results: undefined }), reason: "回應沒有詞表" },
       { name: "200 但 legend 缺 sources", override: brokenLegend({ sources: undefined }), reason: "回應沒有詞表" },
       { name: "200 但 legend 缺 severities", override: brokenLegend({ severities: undefined }), reason: "回應沒有詞表" },
-      { name: "200 但 legend 的 severities 不是陣列", override: brokenLegend({ severities: "x" }), reason: "回應沒有詞表" },
+      // 非陣列四群各一例（SCG-4 二審 e-2：只給 severities 一例時，其餘三群把 Array.isArray 放寬成 !== undefined 仍綠）；legend 為 null 另一例（物件守衛）
+      ...(["statuses", "results", "sources", "severities"] as const).map((group) => ({
+        name: `200 但 legend 的 ${group} 不是陣列`,
+        override: brokenLegend({ [group]: "x" }),
+        reason: "回應沒有詞表",
+      })),
+      { name: "200 但 legend 是 null", override: () => ({ data: { items: [], legend: null } }), reason: "回應沒有詞表" },
     ];
     for (const { name, override, reason } of cases) {
       const view = show(issuesPage(), { role: "VIEWER", stub: newStub({ overrides: { list: override } }) });

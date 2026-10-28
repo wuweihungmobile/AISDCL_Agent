@@ -307,3 +307,9 @@ export type CommonHelp = Pick<PageHelp, "fields" | "states" | "sourceFiles">;   
 | 1-10 | AC-PH-06-1（L112） | 「`git diff --name-only <Stage-2 凍結 commit>..HEAD`」 | 改「以本功能自己的 commit 範圍（`<base>..<本功能最後 commit>`）；共用分支上姊妹案 commit 交錯者不計」 | 範圍在共用分支上不明（TCS G-C1） |
 | 1-11 | §8.1（L149 起） | （描述）型別小節只列型別，未定公共面簽章 | 加一句「`helpForPath` 回 `HelpId` 或 `null`、`PageHelpDialog` 的 props、`STATE_SOURCES` 欄名（`title`、`keys`、`labelOf`）、`lint.ts` 匯出名、`SHARED` 型別、`HelpId`／`StateTableId` 聯集，以 TCS 的 D 表與〈契約節〉為準」 | PRD 未定的公共面由 TCS 補齊，避免兩處各寫一份 |
 | 1-12 | §7 測試 id 清單（L145） | 「議題詞表群 `page-help-legend-statuses｜results｜sources｜severities｜note`。」 | 補「；詞表載入中 `page-help-legend-loading`（`role="status"`）、詞表失敗 `page-help-legend-error`（`role="alert"`）」 | AC-PH-04-5 要求載入中與失敗各一句固定文字，需要測試鉤而清單沒列；加法、不改既有 id（TCS D-PH-7、C4） |
+
+### 勘誤二（2026-10-28；SCG-4 獨立審查後；報告 `AgentConsole/docs/06_quality/SCG4-REVIEW-PageHelp-20261028.md`；主控依凍結常態規則於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | PRD 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 2-1 | AC-PH-06-4 | 首屏增量 ≤100,000 B | 補「量測口徑＝`route-bundle-stats` 的 `firstLoadUncompressedJsBytes`，不含 `next/dynamic` 的非同步 chunk（說明本體單一 chunk 約 102,777 B，頁面載入後即預取；要零成本須改成按下才 `import()`，另案）」 | 一審 F-08 |

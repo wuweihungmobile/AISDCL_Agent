@@ -1,7 +1,7 @@
 # Test Contract Specification — Console 每頁說明（Page Help）：頂列單一「本頁說明」鈕、每頁說明項與全站共通、狀態詞登記表與鍵鎖、白話檢查、路由與導覽三道鎖
 # 測試契約規格文件（新功能；FRD-lite 併入檔頭；一份 TCS 涵蓋一把 SDD 鍵 `agentconsole-page-help`）
 
-> **上位 PRD digest**：`sha256:945d79176ce13c98e9b2d07618c444fddaab01b4208bc06b76b8331ba521b46f`（`docs/01_requirements/Console_PageHelp_PRD.md` v0.3＋〈勘誤一〉1-1～1-12；LF-only，62,015 bytes；2026-10-28 由主控追加勘誤節後重算，與本檔同於 Stage-2 凍結記入鍵 `agentconsole-page-help` 的 FSM `frozen_stages`；Stage-1 凍結值為 `sha256:76768d1bf8d4a34deb22acb79e30b548acf6ffed6e03e69fc43b5389641a7a77`（56,565 bytes，commit `000a217b`）；FSM 狀態檔不由本檔作者直讀〔R-9.6〕）。本檔不改 PRD 正文；PRD 的問題一律寫 §7.3（已寫成可貼進 PRD 檔尾〈勘誤〉節的條文），凍結後走 PRD〈勘誤〉。
+> **上位 PRD digest**：`sha256:cf1e97a9e5b666daef3024b13bc15a6903a6097f63a8dd8a24051813c899e3d0`（`docs/01_requirements/Console_PageHelp_PRD.md` v0.3＋〈勘誤一〉1-1～1-12＋〈勘誤二〉2-1；LF-only，62,607 bytes；2026-10-28 SCG-4 二審 PASS 後依〈凍結後修訂路由〉第 4 點同步更新；Stage-2 原值 `sha256:945d79176ce13c98e9b2d07618c444fddaab01b4208bc06b76b8331ba521b46f`（62,015 bytes，含〈勘誤一〉）；Stage-1 凍結值為 `sha256:76768d1bf8d4a34deb22acb79e30b548acf6ffed6e03e69fc43b5389641a7a77`（56,565 bytes，commit `000a217b`）；FSM 狀態檔不由本檔作者直讀〔R-9.6〕）。本檔不改 PRD 正文；PRD 的問題一律寫 §7.3（已寫成可貼進 PRD 檔尾〈勘誤〉節的條文），凍結後走 PRD〈勘誤〉。
 > **範圍**：PRD 的 8 個 FR、43 條 AC 全覆蓋；零 API、後端、Bridge、契約檔與 ADR；唯一新增的網路請求是議題中心詞表的唯讀 `GET /api/v1/issues?limit=1`（AC-PH-06-3）。**不含**登入頁（`/login`）說明、即時數字、50 個系統參數逐鍵說明、FSM 原始狀態全表（PRD §3）。
 > **與姊妹案的關係**：`Console_SysAdmin_Backup_PRD.md`（鍵 `agentconsole-sysadmin-backup`）會加導覽項 `sysadmin` 與兩條路由；先落地者占號、後落地者補說明項與欄位列（PRD D-12、備份案 D-BK-10 (i)）。**本檔所有 AT 的斷言一律由登記表、路由表、導覽登記表推導，不寫死件數**；唯一的釘值是 §5.3 的必備子集（只准增不准減）與 PRD 明寫的白名單、六類資料來源、四個議題狀態詞門檻，兩案落地先後都綠。
 
@@ -1044,3 +1044,27 @@ function Compare-RouteBundle([string]$before, [string]$after, [int]$limit = 1000
 自證（AT-PH-06-4-E-1，以兩份合成 JSON 在 scratchpad 跑）：增量恰 100,000→無輸出；100,001→`超過`；缺一條路由→`缺`；多一條→`多`；欄位缺→`欄位缺`；兩份相同→無輸出。
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
+
+### 勘誤一（2026-10-28；SCG-4 獨立審查一審 FAIL→修復棒→二審 PASS；報告 `AgentConsole/docs/06_quality/SCG4-REVIEW-PageHelp-20261028.md`；主控依凍結常態規則於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 1-1 | §3.2 AT-PH-04-5-2 (c) | 「或 statuses 缺」 | 「或 statuses／results／sources／severities 任一缺或非陣列」 | F-01：D-PH-8／PRD 勘誤 1-6 要求四群之一缺席＝失敗句；一審突變 X29（去 severities 檢查）、X30（去 results、sources 檢查）倖存，修復棒補四例後殺 |
+| 1-2 | G-C2、R-PH-37、AT-PH-06-2-E-1 | 既有檔 `si.static.test.ts` 的 hunk 只准在 `checkText` 第二分支與兩個新 it | 補「`checkText` 簽章與註解（:230-233）、樣板片段呼叫處（:243）」 | B 式 (ii) 的必要連動；一審 G-C2 裁決准許 |
+| 1-3 | R-PH-21 突變欄 | 「`useParams`…」 | 改「`PageHelpButton` 改用 `useRouter().refresh()` 之類會在 layout 重掛載的寫法；殺手＝`layout.test`」 | `next/dynamic` 後 `DashboardView.test` 不渲染該鈕，原突變 M21a 不重現 |
+| 1-4 | R-PH-23 突變欄 | 「`PageHelpDialog` 靜態 import recharts」 | 改「`TopRegion` 改回靜態 import `PageHelpButton`」 | 原突變 B23a 落在動態 chunk 內、Compare-RouteBundle 0 違規；B23b 21／21 路由超標（+102,746～+123,152 B） |
+| 1-5 | R-PH-13 對照句 | 「對照（應存活）：…」 | 改寫為「輪 3 起由 AT-PH-04-6-2 殺（M13d 改「未結」label 即紅）」 | 輪 3 綁定後對照失效 |
+| 1-6 | R-PH-09 突變欄 | 「放寬成 `Record<string,…>`」 | 改「改回型別註記（拿掉 `satisfies`）」 | `satisfies` 形態下原突變是等價突變（M09a、M09e 倖存）；M09d 由 tsc TS2344＋TS2578 殺 |
+| 1-7 | R-PH-24 突變欄 | 「（`/login` 出現鈕）」 | 改「未登入於 `/projects` 出現鈕（殺手 AT-PH-01-2-1 (b)）」 | `helpForPath('/login')`＝null，原突變不重現 |
+| 1-8 | §3.2 AT-PH-04-2-E-1 | 第二個 `@ts-expect-error` 字面 | 以 `Omit` 在合成型別上演示，實際鎖是 `keyof` 等式 | 實作揭露（輪 1a） |
+| 1-9 | D-PH-3 | `StateSource` 住 `PageHelpDialog.tsx` | `StateSource` 定義在 `stateSources.ts`、由 `PageHelpDialog.tsx` re-export | 實作揭露（輪 1a／1b） |
+| 1-10 | D-PH-17 | `ssr` 設定 | `ssr` 保持 `next/dynamic` 預設 true；hydration 無警告（AT-PH-07-1-2 主控台零錯誤） | 實作揭露（輪 1b） |
+| 1-11 | G-F3 判準 | 「文字表含三列」 | 改用 `json-summary`（`lint.ts`、`stateSources.ts`、`registry.ts` 皆在 include） | text reporter 不列 100% 檔（F-10） |
+| 1-12 | G-D1 判準 | `Select-String '本頁說明'` | 錨定「\| Top \|」列再判 | §3 目錄列也命中（F-09） |
+| 1-13 | §3.2／§6.4 AT-PH-05-7-1 | 輪 2 綁定 | 註記「輪 1a 已建、輪 2 三個表單頁寫完才咬」 | 提早無害 |
+| 1-14 | §2（:144）、§3.2 突變規格（:451） | 「frontend 副本以 junction 把 `node_modules` 指回工作樹」 | 補「junction 只夠 vitest／tsc；Playwright（dev）與 build 類突變須實體複製 `node_modules`」 | Turbopack 在 junction 副本 ENOENT build-manifest（OBS-SI-337） |
+| 1-15 | §6.4 輪 3 | 綁定 AT 清單 | 補「AT-PH-04-6-2 由輪 3 在 `PageHelpDialog.test.tsx` 補 it（1b 交 HD 20 個，§3.1 預期 21）」 | 輪 3 偏離，一審裁決准許 |
+| 1-16 | D-PH-8（:86）、§3.2 AT-PH-04-5-2 (c)（:550） | 「四群之一缺席」／「或 statuses 缺」 | 補「或任一群不是陣列、或 legend 不是物件」，並寫明例數：缺席四例、非陣列四例、legend 為 null 一例 | 二審 e-2：非陣列只給一例時其餘三群把 `Array.isArray` 放寬成 `!== undefined` 仍綠（Y01～Y03、Y05 倖存）；主控補例後 Y01 轉紅 |
+| 1-17 | D-PH-13（:91）、§3.2 AT-PH-06-3-1／06-3-E-1 | 請求計數只寫新穎性規則 | 加註「詞表請求另以每路由自進路由起的全程計數判（含頁面載入；議題中心恰一、其餘零；VIEWER 每次開啟各一），不套新穎性規則」；反空轉改「clicked＋pending＝HELP_ROUTES 數、clicked＝已寫路由數；E-1 visited＝已寫路由數」 | 一審 F-05：單靠新穎性規則，非 issues 路由載入時預取只在排最後的 /issues 間接現形；二審 P22b 第一條路由即紅、Pskip3s／3e 證明新門檻嚴於 ≥3 |
+| 1-18 | R-PH-18、R-PH-34、AT-PH-05-5-E-1 | 名稱 2 個 code point 免掃 | 明定「全站共通的名詞定義列（如「唯讀」＝VIEWER）可無逐字出處、取兩字名免掃是有意設計；此類列 `source` 寫「系統自動產生」並在 `common.ts` 檔頭寫 WHY；不得用來繞過有畫面字樣的欄位名」 | 二審 e-4／N04：該列的綠完全靠免鎖，需明文以免日後複製此手法繞過出處鎖 |
+| 1-19 | §3.2 AC-PH-06-3（:383） | 載具只列 E2 | 註記「vitest 層無 AT、M22b（非 issues 路由 render 時預取）在 vitest 倖存為設計，由 e2e 的 P22b／P22e 殺」 | 二審 e-3；可選補 AT-PH-01-2-E-1「非 issues 路由 fetch 計數 0」另案 |
