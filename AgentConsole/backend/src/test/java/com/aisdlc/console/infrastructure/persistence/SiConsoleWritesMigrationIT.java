@@ -126,7 +126,7 @@ class SiConsoleWritesMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14");
+                "11", "12", "13", "14", "15");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

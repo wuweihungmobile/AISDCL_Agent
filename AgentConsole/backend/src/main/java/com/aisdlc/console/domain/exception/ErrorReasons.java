@@ -142,4 +142,19 @@ public final class ErrorReasons {
     // 🔴 與 SI 類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 ISSUE_REASONS、本類別的 ISSUE_ 前綴常數與契約表三方雙向鎖。
     /** 設定優先順序的議題狀態不是可排的三種之一（409；{@code details.id}、{@code details.status}）：PUT 不寫入。 */
     public static final String ISSUE_NOT_RANKABLE = "issue_not_rankable";
+
+    // ── 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C4；契約 API_Contract_SysAdminBackup.md 的〈backup 類 reason 表〉；前端住 lib/domain/sysadminBackup.ts 的 BACKUP_REASONS）──
+    // 🔴 與 SI、議題類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 BACKUP_REASONS、本類別的 BACKUP_ 前綴常數
+    // 與契約表三方雙向鎖。這五個是「有狀態碼的 API reason」；契約表另有八個工作理由（狀態碼欄為「—」），住 BackupJobReason 列舉。
+    // 入口閘的 invalid_request（422）以區域常數持有（BackupJobService.INVALID_REQUEST）、不入本類別與契約表（先例 SiWriteGates）。
+    /** 控制面不可用（503）：目錄未設定、心跳過期、匯出檔不可讀、資料庫讀取失敗，或寫請求檔失敗（該列已補償為 FAILED）。 */
+    public static final String BACKUP_CONTROL_UNAVAILABLE = "backup_control_unavailable";
+    /** POST 缺 {@code confirm:true}（400；字串 "true"、數字 1 都不算）。 */
+    public static final String BACKUP_CONFIRM_REQUIRED = "backup_confirm_required";
+    /** 已有 QUEUED 或 RUNNING 的工作（409；含部分唯一索引的衝突）。 */
+    public static final String BACKUP_JOB_IN_PROGRESS = "backup_job_in_progress";
+    /** 距離上一份同類備份過近（409；{@code details.type}、{@code details.nextAllowedAt}）。 */
+    public static final String BACKUP_TOO_FREQUENT = "backup_too_frequent";
+    /** 單筆工作不存在或 id 不是 UUID（404）。 */
+    public static final String BACKUP_JOB_NOT_FOUND = "backup_job_not_found";
 }

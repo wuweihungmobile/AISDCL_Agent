@@ -47,6 +47,8 @@ import java.util.List;
  *       否則 OPERATOR 會通過安全層）。帳號名單由用例入口另判（403 {@code si_write_forbidden}）。{@code /si/**} 的 PUT／PATCH／DELETE
  *       沒有對映：落在通用規則——VIEWER 403、OPERATOR／ADMIN 405。</li>
  *   <li>{@code PUT}、{@code DELETE /api/v1/issues/**}：僅 ADMIN（議題中心的優先順序，TCS-IssueCenter-20261027 R-IC-58；各一條規則，同樣<b>置於通用規則之前</b>）。</li>
+ *   <li>{@code POST /api/v1/sysadmin/**}：僅 ADMIN（系統管理／資料庫備份的手動觸發，TCS-SysAdminBackup-20261027 R-BK-57；<b>置於通用規則之前</b>）。
+ *       所有 GET 為 VIEWER 以上；{@code /sysadmin/**} 的 PUT、PATCH、DELETE 沒有對映（VIEWER 403、OPERATOR／ADMIN 404 或 405）。</li>
  *   <li>{@code /api/v1/settings/**} 的<b>非 GET</b>：僅 ADMIN（含 {@code POST /settings/export｜import｜test-connection}：
  *       它們是 POST，但屬 ADMIN 專用）；{@code GET …?reveal=true} 由 Controller 檢查角色。</li>
  *   <li>其餘 {@code /api/v1/**}（POST／PUT／DELETE）：OPERATOR／ADMIN（VIEWER 只能讀）。</li>
@@ -88,6 +90,9 @@ public class SecurityConfig {
                         // 否則 OPERATOR 會通過安全層
                         .requestMatchers(HttpMethod.PUT, "/api/v1/issues/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/issues/**").hasRole("ADMIN")
+                        // 系統管理／資料庫備份的手動觸發（TCS-SysAdminBackup-20261027 R-BK-57）：POST 只有 ADMIN；同樣必須在通用規則之前，
+                        // 否則 OPERATOR 會通過安全層。保留與排程沒有任何可寫面：PUT、PATCH、DELETE 沒有對映（落在通用規則）
+                        .requestMatchers(HttpMethod.POST, "/api/v1/sysadmin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasAnyRole("OPERATOR", "ADMIN")
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

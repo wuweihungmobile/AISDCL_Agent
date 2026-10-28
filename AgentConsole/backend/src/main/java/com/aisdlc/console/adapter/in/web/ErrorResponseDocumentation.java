@@ -54,7 +54,9 @@ public class ErrorResponseDocumentation {
             // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）
             "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close",
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：設定順位時議題的狀態不可排（issue_not_rankable）
-            "PUT /api/v1/issues/{id}/priority");
+            "PUT /api/v1/issues/{id}/priority",
+            // 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.4）：已有進行中的工作、頻率上限
+            "POST /api/v1/sysadmin/backups/jobs");
 
     /**
      * 路徑含 {@code {id}} 卻<b>不會回 404</b> 的端點（預設規則「路徑含變數＝可能 404」不適用）：SelfImproving 的 id 是寫進稽核簽章的資料，
@@ -76,7 +78,9 @@ public class ErrorResponseDocumentation {
             // 議題中心（TCS-IssueCenter-20261027 §C4.2、§C4.3）：同一個 reason，訊息為「查無此議題」
             "GET /api/v1/issues/{id}", "查無此議題（reason si_not_found，訊息「查無此議題」，details.id 為請求的 id；「404 的 reason 省略」慣例的"
                     + "例外之一）。不是「資料面壞了」——那是 503 si_unavailable",
-            "PUT /api/v1/issues/{id}/priority", "查無此議題（reason si_not_found，訊息「查無此議題」，details.id；先取該議題才寫入，查無＝零寫入）");
+            "PUT /api/v1/issues/{id}/priority", "查無此議題（reason si_not_found，訊息「查無此議題」，details.id；先取該議題才寫入，查無＝零寫入）",
+            // 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.3）：id 非 UUID 同樣是 404（不是 422、不是 500）
+            "GET /api/v1/sysadmin/backups/jobs/{id}", "查無此備份工作（reason backup_job_not_found，訊息「查無此備份工作」；id 不是 UUID 亦同）");
 
     /** SelfImproving 唯讀鏡像的上游失敗（Bridge 的其他 4xx 與 5xx、連線失敗、讀取逾時）與 Bridge 明確回報的 503 si_unavailable。 */
     private static final Map<String, String> SI_UPSTREAM = Map.of(
@@ -157,6 +161,15 @@ public class ErrorResponseDocumentation {
                     + "errors[] 同內容；欄位 id、rank、note）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason）")),
             Map.entry("DELETE /api/v1/issues/{id}/priority", Map.of(
                     "422", "輸入閘未通過（reason invalid_request；details.violations 的 id 欄：id 不符議題編號格式；不碰資料庫）")),
+            // 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3、§C4）
+            Map.entry("GET /api/v1/sysadmin/backups/jobs", Map.of(
+                    "422", "參數未通過檢查（reason invalid_request；details.violations[{field,message}]：limit 須為 1～100 的整數、before 須為 ISO-8601 時間）",
+                    "503", "backup_control_unavailable：控制面未設定或資料庫讀取失敗")),
+            Map.entry("GET /api/v1/sysadmin/backups/jobs/{id}", Map.of(
+                    "503", "backup_control_unavailable：控制面未設定或資料庫讀取失敗")),
+            Map.entry("POST /api/v1/sysadmin/backups/jobs", Map.of(
+                    "422", "type 缺、非字串或不在 full／diff／verify（reason invalid_request；details.violations[{field,message}]）",
+                    "503", "backup_control_unavailable：控制面未設定、心跳逾 30 秒、匯出檔不可讀、資料庫讀取失敗，或寫請求檔失敗（該列已補償為 FAILED）")),
             Map.entry("POST /api/v1/import/upload", Map.of(
                     "413", "上傳超過 10MB 上限（reason：檔案超過 10MB 上限）",
                     "415", "副檔名不在 .md／.pdf／.docx（reason：只支援 .md／.pdf／.docx 檔案）",

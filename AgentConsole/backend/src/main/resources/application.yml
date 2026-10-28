@@ -140,6 +140,23 @@ console:
     # audit-key：稽核簽章金鑰環（逗號分隔，第一把簽章、其餘保留供輪替；每把至少 32 字元；主機端以同一把設 AUTOSDD_SI_AUDIT_KEY 才能入帳）。
     # 空＝寫入面停用；有設而過短或仍是 <…> 佔位＝backend 啟動即失敗。🔴 金鑰只進環境變數，repo 內不放任何真值。
     audit-key: ${CONSOLE_SI_AUDIT_KEY:}
+  backup:
+    # 系統管理／資料庫備份的控制面（TCS-SysAdminBackup-20261027 §C3.5；契約 API_Contract_SysAdminBackup.md）：console-api 與 pgBackRest sidecar 之間只有兩個
+    # 具名卷（檔案 I/O，沒有網路、沒有行程啟動）。🔴 未設＝停用：不在 Docker 全棧時備份頁顯示「備份控制面未設定」，不是靜默回空。
+    # export-dir：輸出卷根（容器內 /backup-out，唯讀掛載；其下 export/、results/）；GET 只依它。request-dir：請求卷根（容器內 /backup-req，可寫）；POST 另依它。
+    # compose 把兩者設成字面常數（不含機密）；本機 bootRun 沒有 sidecar，保持空即可。
+    export-dir: ${CONSOLE_BACKUP_OUT_DIR:}
+    request-dir: ${CONSOLE_BACKUP_REQ_DIR:}
+    # 請求存活秒數：expires_at＝requested_at＋此值；runner 離線時 QUEUED 逾此值由 console-api 標 EXPIRED，不論心跳逾 2 倍此值同樣標（絕對上限）。
+    request-ttl-seconds: 120
+    # RUNNING 工作的逾時上限：逾此值「且」心跳過期才標 timeout（控制面有回應＝長驗證不算逾時）。
+    job-max-seconds: 21600
+    # 手動工作的終態對帳週期（毫秒；每次 GET 另順帶對帳）。
+    reconcile-interval-ms: 5000
+    # 逾期的寬限分鐘（嚴格大於才算逾期）與手動觸發的頻率上限（伺服器端；verify 不設上限）。
+    overdue-grace-minutes: 30
+    min-full-interval-seconds: 86400
+    min-diff-interval-seconds: 3600
   execution:
     # 事件消費者（每個活躍 run 一條虛擬執行緒，契約 §3.5.4）：事件串流閒置逾 idle-timeout 視為斷線（Bridge 每 15 秒送 keep-alive），
     # 以指數退避 backoff-initial→backoff-max 重連，位移用 DB 的 console_last_seq。
