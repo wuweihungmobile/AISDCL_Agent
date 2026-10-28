@@ -182,8 +182,10 @@
 | minio_data | minio（`/data`） | 離站備份物件（W2-B 追加） |
 | minio_certs | minio-certs 寫入、minio 唯讀（`/certs`） | MinIO 自簽 TLS 憑證（W2-B 追加） |
 | prometheus_data | prometheus（`/prometheus`） | Prometheus 時序資料（W7 D-14 追加；PRD §11.3 未列，登記於 ADR-001 §4）：可用性 SLO 的 30 天歷史要跨 `down`／容器重建存活；保留期由 15d 改 35d（`--storage.tsdb.retention.time=35d`，大於 30d 才使 `ratio_30d` 有完整 30 天樣本）；`down -v` 才會清掉它 |
+| backup_out | pgbackrest 寫（`/backup-out`，不帶 ro）、backend 唯讀（`/backup-out:ro,nocopy`） | 備份控制面輸出卷（**〔SysAdminBackup S1 已落地 2026-10-28〕**）：sidecar 寫 `export/`（heartbeat、schedule、info、logical、jobs）與 `results/`，backend 的備份頁只依它（`CONSOLE_BACKUP_OUT_DIR`）；`docker/README.md`〈4.6 控制面〉 |
+| backup_req | backend 寫（`/backup-req`）、pgbackrest 唯讀（`/backup-req:ro,nocopy`） | 備份控制面請求卷（S1 已掛）：手動觸發請求檔由 console-api 寫、sidecar runner 階段二才撿取（`CONSOLE_BACKUP_REQ_DIR`） |
 
-> 清單以 `docker compose config --volumes` 輸出為準（共 12 個）。
+> 清單以 `docker compose config --volumes` 輸出為準（共 14 個；SysAdminBackup S1 自 12 加 `backup_out`、`backup_req`）。
 
 ## 3. 目錄地圖
 
@@ -619,6 +621,7 @@ console-api 對 Bridge 欄位**只讀**；Bridge 對 console 欄位**只讀**（
 | `execution_steps`、`checkpoints` | **Bridge**（INSERT；`task_id`＝playbook 的 `goal_task_id`） | console-api（唯讀） |
 | `projects`、`goals`、`tasks`、`goal_dependencies`、`import_records`、`system_configs`、`system_config_history`、`review_requests`、`alerts` | **console-api**（唯一） | Bridge 不寫；僅 `execution_steps.task_id` 的外鍵檢查會觸及 `tasks` |
 | `issue_priority`（V14；議題中心的順位，PRD `docs/01_requirements/Issue_Center_PRD.md` §6.5、TCS-IssueCenter R-IC-59） | **console-api**（唯一；JDBC 配接器只有 UPSERT 與 DELETE 兩條敘述，經 `PUT／DELETE /api/v1/issues/{id}/priority`、僅 ADMIN；無 JPA 實體，`ddl-auto=validate` 不檢查本表；不存歷史，變更軌跡在 `audit_log`） | Bridge 不讀不寫（議題本身住根層 SelfImproving 帳本，Bridge 只經 `GET /si/issues` 唯讀鏡像）；順位只在 console-api 合併進 `GET /api/v1/issues` 回應 |
+| `backup_jobs`（V15；手動備份工作，PRD `docs/01_requirements/Console_SysAdmin_Backup_PRD.md` §6、TCS-SysAdminBackup §C5；**〔K1 已落地 2026-10-28〕**） | **console-api**（唯一；`BackupJobService` 先插列後寫請求檔、寫檔失敗補償為 FAILED；`BackupJobReconciler` 把 sidecar `results/` 對帳回終態、QUEUED 逾 2×`request-ttl-seconds` 標 EXPIRED、RUNNING 逾 `job-max-seconds` 且心跳過期標 timeout；只有 ADMIN 經 `POST /api/v1/sysadmin/backups/jobs` 建列；無 JPA 實體，`ddl-auto=validate` 不檢查本表；變更軌跡在 `audit_log`） | Bridge 不讀不寫；sidecar 不碰 DB（只經兩個具名卷的檔案協定，§2.5） |
 
 W5（契約 v1.2）增補的欄位，同樣只由 console-api 寫：`import_records.warnings`（JSONB，預設 `[]`）、`import_records.parse_options`（JSONB，可 NULL）——重開匯入記錄時還原黃色解析提示與解析選項（V8，主控裁決 C-10）；`projects.deleted_at`／`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`——軟刪除保留期與復原（V9，主控裁決 C-3，ADR-001 D19；刪除專案時專案與連帶軟刪的目標、任務寫同一個 `deleted_at`）。欄位定義見 §11.3 與契約 §0.5。
 
@@ -671,6 +674,8 @@ JWT（HS256）；access 30 分鐘、refresh 7 天；`POST /api/v1/auth/login`、
 | 匯入 upload／text／parse／編輯／confirm | — | — | ✅ | ✅ |
 | 執行 execute／pause／resume／cancel／restore／review | — | — | ✅ | ✅ |
 | 告警確認 | — | — | ✅ | ✅ |
+| 讀取系統管理／資料庫備份總覽與工作紀錄（`GET /api/v1/sysadmin/backups`、`…/backups/jobs`、`…/backups/jobs/{id}`；**〔K1 已落地 2026-10-28〕**ADMIN 另見 `detailTail`／`requestedBy`／`detail`，其餘角色該欄為 null） | — | ✅ | ✅ | ✅ |
+| 手動觸發備份工作（`POST /api/v1/sysadmin/backups/jobs`；`SecurityConfig` 規則置於通用規則之前；sidecar runner 階段二落地前真機不可用） | — | — | — | ✅ |
 | 修改系統參數（單鍵、token-guard、reset、匯入設定） | — | — | — | ✅ |
 | 測試模型連線、匯出設定（不含敏感明文） | — | — | — | ✅ |
 | 揭露敏感參數明文（US-S-04「顯示」；每次寫審計） | — | — | — | ✅ |
@@ -864,6 +869,7 @@ Push-Location AgentConsole; docker compose -f docker-compose.dev.yml down; Pop-L
 | `SPRING_DATASOURCE_URL`／`_USERNAME`／`_PASSWORD` | backend | 本機：`jdbc:postgresql://localhost:5432/aisdlc`；容器：`…@postgres-primary:5432/…` |
 | `SPRING_DATA_REDIS_HOST`／`_PORT` | backend | **選填**（W7 D-19）：容器：`redis`／`6379`；本機未起 Redis 則不設（refresh token 撤銷名單退回單實例記憶體）。**只有撤銷名單使用 Redis**（限流計數與 SSE 位移不用，ADR-001 D16／D23；契約附錄 D.2） |
 | `ENGINE_BRIDGE_URL` | backend | 本機 `http://localhost:8081`；容器 `http://engine-bridge:8081` |
+| `CONSOLE_BACKUP_OUT_DIR`／`CONSOLE_BACKUP_REQ_DIR` | backend | **〔K1 已落地 2026-10-28〕**備份控制面兩個卷根（容器 `/backup-out` 唯讀、`/backup-req` 可寫；compose 字面常數，不含機密）；**未設＝備份頁顯示「控制面未設定」**（`control.reason=not_configured`），本機 bootRun 保持空即可。其餘 `console.backup.*`（`request-ttl-seconds` 120、`job-max-seconds` 21600、`reconcile-interval-ms` 5000、`overdue-grace-minutes` 30、`min-full-interval-seconds` 86400、`min-diff-interval-seconds` 3600）為 `application.yml` 預設、不經環境變數 |
 | `BRIDGE_HOST`／`BRIDGE_PORT`／`ENGINE_WORKSPACE`／`AUTOCLAUDE_ROOT`／`SDD_ROOT` | Bridge | 預設 `127.0.0.1`（Docker CMD 另帶 `0.0.0.0`）、8081、`engine-bridge/.workspace`、monorepo 內的 `AutoClaude`、`AISDLC_SDD` 下數字最大的版本目錄（以 `engine-bridge/app/settings.py` 為準） |
 | `BRIDGE_DB_DSN`／`BRIDGE_DB_SCHEMA` | Bridge | 無 DSN＝純檔案模式；schema 預設 `console`。**Console 需要 Bridge 的 DB 模式**（W7，完整性審查 I-07）：斷點清單與步驟時間軸讀的 `checkpoints`／`execution_steps` 只由 Bridge 寫入，純檔案模式下這兩個畫面會是空的（§12.1 L-12）；本機開發跑 Console 時務必給 Bridge 一個 DSN（上方步驟 2 的指令已帶） |
 | `BRIDGE_INSTANCE`／`BRIDGE_STOP_GRACE_SECONDS` | Bridge | 預設 hostname＋pid＋uuid4／30 |
@@ -962,7 +968,7 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 
 ### 11.1 端點與狀態碼語意
 
-端點表以 **PRD §7.1.1～§7.1.8 為 SSOT**，本文不重抄。補充端點（PRD 缺口，ADR-001 G-16／G-17）：`POST /api/v1/auth/login`、`/api/v1/auth/refresh`、`GET /actuator/health`、`GET /actuator/prometheus`、`GET /api/v1/projects/{projectId}/executions`（列出專案執行批次，`API-EXE-14`）、`GET /api/v1/notifications/summary`（`API-NTF-01`，回 `NotificationSummaryResponse{pendingSignoffs, pendingReviews, unacknowledgedAlerts}`，供頂列通知鈴與 signoff 佇列徽章）；監控端點補充查詢參數 `runId`、`from`、`to`（對應設計稿「執行批次」「時間範圍」選單）。W5（契約 v1.2）再增補：`GET /api/v1/monitor/task-totals`（全域任務總計，`API-MON-08`，儀表板「本週完成」用，取代前端對各專案扇出 `task-trend`）、`POST /api/v1/projects/{id}/restore` 與 `GET /api/v1/projects?deleted=true`（軟刪除復原，`API-PRJ-06`，ADR-001 D19）。W7（契約 v1.4）再增補三條：`GET /api/v1/engines/sdd`（AISDLC_SDD 引擎狀態，`API-ENG-01`；Bridge 不可達也回 200、以 `available`／`reason` 表達，ADR-001 D22）、`GET /api/v1/signoffs/pending`（待審批清單，`API-SGN-05`；與通知摘要的 `pendingSignoffs` 同一判準，`counts.total` 恆等於它）、`POST /api/v1/auth/logout`（登出並撤銷 refresh token，`API-AUTH-03`，免認證、一律 204，ADR-001 D16／D23）。回應格式依 PRD §7.2。狀態碼語意：
+端點表以 **PRD §7.1.1～§7.1.8 為 SSOT**，本文不重抄。補充端點（PRD 缺口，ADR-001 G-16／G-17）：`POST /api/v1/auth/login`、`/api/v1/auth/refresh`、`GET /actuator/health`、`GET /actuator/prometheus`、`GET /api/v1/projects/{projectId}/executions`（列出專案執行批次，`API-EXE-14`）、`GET /api/v1/notifications/summary`（`API-NTF-01`，回 `NotificationSummaryResponse{pendingSignoffs, pendingReviews, unacknowledgedAlerts}`，供頂列通知鈴與 signoff 佇列徽章）；監控端點補充查詢參數 `runId`、`from`、`to`（對應設計稿「執行批次」「時間範圍」選單）。W5（契約 v1.2）再增補：`GET /api/v1/monitor/task-totals`（全域任務總計，`API-MON-08`，儀表板「本週完成」用，取代前端對各專案扇出 `task-trend`）、`POST /api/v1/projects/{id}/restore` 與 `GET /api/v1/projects?deleted=true`（軟刪除復原，`API-PRJ-06`，ADR-001 D19）。W7（契約 v1.4）再增補三條：`GET /api/v1/engines/sdd`（AISDLC_SDD 引擎狀態，`API-ENG-01`；Bridge 不可達也回 200、以 `available`／`reason` 表達，ADR-001 D22）、`GET /api/v1/signoffs/pending`（待審批清單，`API-SGN-05`；與通知摘要的 `pendingSignoffs` 同一判準，`counts.total` 恆等於它）、`POST /api/v1/auth/logout`（登出並撤銷 refresh token，`API-AUTH-03`，免認證、一律 204，ADR-001 D16／D23）。**〔SysAdminBackup K1 已落地 2026-10-28〕**再增補 `GET /api/v1/sysadmin/backups`（備份總覽，`API-BK-01`）、`GET …/backups/jobs`（工作紀錄分頁，`API-BK-02`）、`GET …/backups/jobs/{id}`（`API-BK-03`）、`POST …/backups/jobs`（手動觸發，`API-BK-04`；202）；OpenAPI 77 路徑／89 操作（`OpenApiIT`）；形狀以 `docs/02_architecture/API_Contract_SysAdminBackup.md` 為準。回應格式依 PRD §7.2。狀態碼語意：
 
 | 碼 | 語意 |
 |----|------|
@@ -983,6 +989,17 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 | 403 | `si_write_forbidden` | 缺或錯 `X-Bridge-Token`（Bridge）；或 backend 端帳號不在 `console.si.deciders`（P2b；角色不足者先被 `SecurityConfig` 擋成一般 403） |
 | 409 | `si_audit_exists` | 稽核目錄已有同名 `<audit_ref>.json`（P2b；不覆寫） |
 | 422 | `invalid_request` | `{id}` 或 `audit_ref` 形態不符、`{id}` 與稽核外層 `subject` 不符、`kind` 與端點不符、請求非單一 JSON 物件或超過 64KB、`schema_rev` 不符（P1b／P2b） |
+
+**系統管理／資料庫備份的 `reason`**（〔K1 已落地 2026-10-28〕；TCS-SysAdminBackup §C4；不進 `lib/api/reasons.ts`，前端 `BACKUP_REASONS`、backend `ErrorReasons` 的 `BACKUP_` 五常數與契約表三方雙向鎖）：
+
+| HTTP | `reason` | 何時 |
+|------|----------|------|
+| 503 | `backup_control_unavailable` | 目錄未設定（`not_configured`）、心跳過期、匯出檔不可讀或 schema 不符、資料庫讀取失敗、寫請求檔失敗（該列已補償為 FAILED） |
+| 400 | `backup_confirm_required` | POST 缺 `confirm:true`（JSON 布林；字串 "true"、數字 1 不算） |
+| 409 | `backup_job_in_progress` | 已有 QUEUED 或 RUNNING 的工作（含部分唯一索引衝突） |
+| 409 | `backup_too_frequent` | 距上一份同類備份過近（`details.type`、`details.nextAllowedAt`；full 86400 秒、diff 3600 秒、verify 不設） |
+| 404 | `backup_job_not_found` | 單筆工作不存在或 id 不是 UUID |
+| 422 | `invalid_request` | `limit` 不在 1..100、`before` 非 ISO-8601、`type` 不是 full／diff／verify（區域常數，不入契約表） |
 
 ### 11.2 DTO 欄位表（camelCase；取自 PRD §5／§6）
 
