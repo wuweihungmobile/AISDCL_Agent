@@ -78,7 +78,7 @@ V1～V4 待排（前置與步驟見輪 3 交卷 (h)3：全棧 Docker、三種角
 
 - 二審 PASS 後主控親驗（本機 Windows 11）：全套 vitest 95 檔 1620 測試全綠（含 e-1／e-2 補做）；tsc、lint rc 0；`python tools/selfimproving.py check` overall=PASS（OBS-SI-336～338 入帳：Claude Code safetyCheck 誤擋 `Remove-Item Env:`、junction 只夠 vitest／tsc、CI 形態 e2e 重寫 43 張截圖）。
 - 勘誤套用（主控，路由第 4 點）：TCS 檔尾〈勘誤一〉1-1～1-19（一審候選 1～11＋G-C2 :243＋junction 實體複製＋輪 3 AT-PH-04-6-2 綁定＋二審 12～15）；PRD 檔尾〈勘誤二〉2-1（AC-PH-06-4 量測口徑）；TCS 檔頭 PRD digest 同步、§1 增量追溯表依議題中心先例保留 Stage-2 快照。新 digest（`Get-FileHash`）：PRD `sha256:cf1e97a9e5b666daef3024b13bc15a6903a6097f63a8dd8a24051813c899e3d0`（62,607 bytes）、TCS `sha256:c58035bb00e63978b8693a5f192d8a57ef7a7a930702db000fa9e5bea8a67b6e`（197,189 bytes）。
-- FSM 鍵 `agentconsole-page-help`：IMPLEMENTATION → `transition --to PR_REVIEW` → `gate PR_REVIEW PASS`（→ RTM_VERIFY）→ RTM 子表回填（`AgentConsole/docs/06_quality/RTM.md` §2.5）→ `gate RTM_VERIFY PASS`（→ RELEASE_READY）→ `spec-refreeze --doc PRD --doc TCS`（記上列兩個 digest）；RELEASE 待掌舵者真機 V1～V4（§F）。各步 commit 見 git log（`SCG-4` 字樣）。
+- FSM 鍵 `agentconsole-page-help`（2026-10-28 11:0x～11:3x，主控依凍結常態規則執行）：IMPLEMENTATION → `transition --to PR_REVIEW` → `gate PR_REVIEW PASS`（→ RTM_VERIFY；勘誤與報告 commit `e37e5dfc`）→ RTM §2.5 回填（文件棒，170 列＝F 1／US 8／AC 43／AT 118；commit `ad237aa4`）→ `gate RTM_VERIFY PASS`（→ RELEASE_READY）→ `spec-refreeze --doc PRD --doc TCS` rc 0：`refrozen: true`、`stage: Stage-2`、`supersedes: 2026-10-27T20:04:56+00:00`，記入 PRD `sha256:cf1e97a9…e3d0`、TCS `sha256:c58035bb…7b6e`（與上列 `Get-FileHash` 相同）。RELEASE 待掌舵者真機 V1～V4（§F）後 `transition --to RELEASE`。
 
 ### G. 流程摩擦（審查者七項；主控處置）
 
