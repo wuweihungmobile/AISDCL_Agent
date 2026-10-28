@@ -30,6 +30,9 @@ const PATHS: Array<[pathname: string, expected: string]> = [
   ["/self-improving/x", "self-improving"],
   ["/issues", "issues"],
   ["/issues/x", "issues"],
+  ["/sysadmin", "sysadmin"],
+  ["/sysadmin/backup", "sysadmin"],
+  ["/sysadmin-x", "none"],
   ["/self-improving-x", "none"],
   ["/projects-x", "none"],
   ["/unknown", "none"],
@@ -97,19 +100,19 @@ function registryProblems(registry: ReadonlyArray<NavEntry>, pathProbes: Readonl
   return out;
 }
 
-describe("AT_932_6_1 登記表恰八項且欄位值符合 R20", () => {
+describe("AT_932_6_1 登記表恰九項且欄位值符合 R20", () => {
   it("AT_932_6_1 id、label、order、mobile 依序相符，id 與 order 各自唯一，mobile 為 true 的項數不超過 6", () => {
-    expect(NAV_REGISTRY).toHaveLength(8);
-    expect(ids(NAV_REGISTRY)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings", "self-improving", "issues"]);
-    expect(NAV_REGISTRY.map((e) => e.label)).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定", "自我進化", "議題中心"]);
-    expect(NAV_REGISTRY.map((e) => e.order)).toEqual([10, 20, 30, 40, 50, 60, 70, 55]);
-    expect(new Set(ids(NAV_REGISTRY)).size).toBe(8);
-    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(8);
-    expect(NAV_REGISTRY.map((e) => e.mobile)).toEqual([true, true, true, true, true, true, false, false]);
+    expect(NAV_REGISTRY).toHaveLength(9);
+    expect(ids(NAV_REGISTRY)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings", "self-improving", "issues", "sysadmin"]);
+    expect(NAV_REGISTRY.map((e) => e.label)).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定", "自我進化", "議題中心", "系統管理"]);
+    expect(NAV_REGISTRY.map((e) => e.order)).toEqual([10, 20, 30, 40, 50, 60, 70, 55, 65]);
+    expect(new Set(ids(NAV_REGISTRY)).size).toBe(9);
+    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(9);
+    expect(NAV_REGISTRY.map((e) => e.mobile)).toEqual([true, true, true, true, true, true, false, false, false]);
     expect(NAV_REGISTRY.filter((e) => e.mobile).length).toBeLessThanOrEqual(6);
   });
 
-  it("AT_932_6_1 每項的型別：enabled 為布林、roles 缺或只含三種角色、match 為函式、href 為字串或函式、icon 為 React 元件且八項互異", () => {
+  it("AT_932_6_1 每項的型別：enabled 為布林、roles 缺或只含三種角色、match 為函式、href 為字串或函式、icon 為 React 元件且九項互異", () => {
     const roles: Role[] = ["ADMIN", "OPERATOR", "VIEWER"];
     for (const e of NAV_REGISTRY) {
       expect(typeof e.enabled, `${e.id}.enabled`).toBe("boolean");
@@ -119,7 +122,7 @@ describe("AT_932_6_1 登記表恰八項且欄位值符合 R20", () => {
       const icon = e.icon as unknown;
       expect(typeof icon === "function" || (typeof icon === "object" && icon !== null && "$$typeof" in icon), `${e.id}.icon 不是 React 元件`).toBe(true);
     }
-    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(8);
+    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(9);
   });
 
   it("AT_932_6_1 第七項（自我進化）：href 為 /self-improving、roles 缺、enabled 為 true；execute 與 monitor 的 href(ctx) 無專案時回 /projects、有專案時帶專案 id；其餘六項為字串", () => {
@@ -135,7 +138,7 @@ describe("AT_932_6_1 登記表恰八項且欄位值符合 R20", () => {
       expect(navHref(entry, { currentProjectId: "p1" })).toBe(`/projects/p1/${id}`);
     }
     const strings = NAV_REGISTRY.filter((e) => !["execute", "monitor"].includes(e.id));
-    expect(strings.map((e) => e.href)).toEqual(["/", "/projects", "/import", "/settings", "/self-improving", "/issues"]);
+    expect(strings.map((e) => e.href)).toEqual(["/", "/projects", "/import", "/settings", "/self-improving", "/issues", "/sysadmin"]);
   });
 });
 
@@ -347,9 +350,9 @@ describe("登記表的純函式（R21）", () => {
 // ── P2b（TCS-SelfImprovingDecide-P2b AT-950-10-E-1；W21）：新增四個寫入元件與對帳面板**沒有**動導覽登記表 ───────────────────────────────
 // 為什麼重要：寫入入口是自我進化頁「裡面」的對話框與面板，不是新頁面——登記表多一列或少一列、第七項的欄位值變了，都代表 P2b 偷偷動了導覽（那是 P1b 的凍結面）。
 // 零變更的最終證據是 V8 的 git diff --name-only；這裡是自動化的那一半。
-describe("AT_950_10_E_1 導覽登記表：原七列各欄不變（另加議題中心一列），ToolsRegion 無入口常數，新元件沒有新增導覽列", () => {
-  it("AT_950_10_E_1 NAV_REGISTRY 恰八項：原七列各欄與 P1b 的值相同（id、label、order、href、mobile、roles、enabled），第八列是議題中心；self-improving 的 mobile 仍為 false", () => {
-    expect(NAV_REGISTRY).toHaveLength(8);
+describe("AT_950_10_E_1 導覽登記表：原八列不變，另加系統管理（第九列），ToolsRegion 無入口常數，新元件沒有新增導覽列", () => {
+  it("AT_950_10_E_1 NAV_REGISTRY 恰九項：原八列各欄與先前的值相同（id、label、order、href、mobile、roles、enabled），第九列是系統管理；self-improving 的 mobile 仍為 false", () => {
+    expect(NAV_REGISTRY).toHaveLength(9);
     expect(NAV_REGISTRY.map((e) => [e.id, e.label, e.order, e.mobile, e.enabled, e.roles ?? null])).toEqual([
       ["dashboard", "儀表板", 10, true, true, null],
       ["projects", "專案管理", 20, true, true, null],
@@ -359,6 +362,7 @@ describe("AT_950_10_E_1 導覽登記表：原七列各欄不變（另加議題�
       ["settings", "系統設定", 60, true, true, null],
       ["self-improving", "自我進化", 70, false, true, null],
       ["issues", "議題中心", 55, false, true, null],
+      ["sysadmin", "系統管理", 65, false, true, null],
     ]);
     expect(NAV_REGISTRY[6].href).toBe("/self-improving");
   });

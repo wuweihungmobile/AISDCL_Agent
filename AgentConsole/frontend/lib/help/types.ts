@@ -3,7 +3,7 @@
  * 不 import 任何元件、hooks 或其他模組：說明內容全在 lib/help/**，經 PR 修改；名稱解析（需要引用既有常數表）放在 components/domain/help/stateSources.ts。
  */
 
-/** 說明項 id（PRD §4 的十六頁）；姊妹案日後加成員（PRD D-12）。 */
+/** 說明項 id（PRD §4 的十六頁，加姊妹案「系統管理／資料庫備份」的 sysadmin、sysadmin-backup；PRD D-12）；姊妹案日後加成員。 */
 export type HelpId =
   | "dashboard"
   | "projects"
@@ -20,7 +20,9 @@ export type HelpId =
   | "import"
   | "settings"
   | "self-improving"
-  | "issues";
+  | "issues"
+  | "sysadmin"
+  | "sysadmin-backup";
 
 /** 狀態表 id（PRD §8.2 的十八張）。 */
 export type StateTableId =

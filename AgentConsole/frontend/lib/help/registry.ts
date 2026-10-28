@@ -50,8 +50,12 @@ export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = {
   issues,
 };
 
-/** 尚未寫的頁（頁檔為佔位）；每輪只准縮小，輪 3 為空（十六頁全數已寫）。 */
-export const PENDING_HELP_PAGES: readonly HelpId[] = [];
+/**
+ * 尚未寫的頁（頁檔為佔位）；每輪只准縮小，輪 3 為空（十六頁全數已寫）。
+ * 2026-10-28 姊妹案「系統管理／資料庫備份」（TCS-SysAdminBackup-20261027 AT-BK-01-2-4、D-PH-14）新增 /sysadmin、/sysadmin/backup 兩頁，先以佔位列入 pending
+ * （同 commit 上修 registry.test.ts 的 PENDING_CEILING 0→2）；由每頁說明補頁棒寫實、移進 HELP_PAGES 並把天花板下修回 0。
+ */
+export const PENDING_HELP_PAGES: readonly HelpId[] = ["sysadmin", "sysadmin-backup"];
 
 /** `states` 為空的頁（沒有會變動的狀態；對話框的狀態段只顯示固定一句）。與頁內容雙向相等：states 為空者必在這裡，這裡的頁 states 必為空。 */
 export const NO_STATE_PAGES: readonly HelpId[] = ["project-form", "task-form", "settings"];
@@ -77,6 +81,8 @@ export const HELP_ROUTES: Readonly<Record<string, HelpId>> = {
   "/settings": "settings",
   "/self-improving": "self-improving",
   "/issues": "issues",
+  "/sysadmin": "sysadmin",
+  "/sysadmin/backup": "sysadmin-backup",
 };
 
 const DYNAMIC_SEGMENT = /^\[[^\]]+\]$/;

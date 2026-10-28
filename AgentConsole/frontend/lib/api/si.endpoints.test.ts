@@ -40,9 +40,9 @@ describe("AT_950_9_E_1 endpoints.ts 的 SI 匯出受限：get 加 Si 恰七個�
     expect(names).toHaveLength(SI_READ_FUNCTIONS.length + SI_WRITE_FUNCTIONS.length);
   });
 
-  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選為 83（P2b 由 74 加五個 SI 函式成 79，議題中心再加四個）、EXPECTED 的 SI 十一列只增不減：讀原始碼逐項核對，不靠記憶", () => {
+  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選為 84（P2b 由 74 加五個 SI 函式成 79，議題中心再加四個，備份總覽再加一個）、EXPECTED 的 SI 十一列只增不減：讀原始碼逐項核對，不靠記憶", () => {
     const source = readFileSync(path.join(ROOT, "lib", "api", "endpoints.test.ts"), "utf-8");
-    expect(source, "總數釘選必須是 83").toContain("expect(names).toHaveLength(83);");
+    expect(source, "總數釘選必須是 84").toContain("expect(names).toHaveLength(84);");
     expect(source, "總數釘選不得還留著 79").not.toContain("toHaveLength(79)");
     for (const fn of [...SI_READ_FUNCTIONS.filter((n) => n !== "getSiConsoleWrites"), "getSiConsoleWrites", ...SI_WRITE_FUNCTIONS]) {
       expect(source, `EXPECTED 缺 ${fn}`).toContain(`"${fn}"`);

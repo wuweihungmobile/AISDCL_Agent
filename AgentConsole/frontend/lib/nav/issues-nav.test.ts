@@ -8,29 +8,31 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
  * 議題中心的導覽接入（TCS-IssueCenter-20261027 R-IC-62；AT-IC-11-1-1、11-1-E-1、11-3-1）：登記表第八項 `issues` 加在陣列末尾、原七列的各欄與位置不變、
  * 顯示序由 order 決定（55 介於監控中心與系統設定之間）、href 對應存在的 app/issues/page.tsx、match 只命中 /issues 與其子路徑。
  * 既有導覽測試的釘值（registry.test.ts、ToolsRegion.test.tsx）隨之同步，不在本檔。
+ * 2026-10-28（TCS-SysAdminBackup-20261027 R-BK-01）登記表加第九項 sysadmin：本檔的長度、id 清單、顯示序與 order／icon 集合大小隨之上修（8→9），
+ * `NAV_REGISTRY[7]` 仍是 issues 的斷言與原七列的逐欄快照不動；第九項本身的斷言在 sysadmin-nav.test.ts。
  */
 const ROOT = process.cwd();
 const byId = (id: string) => NAV_REGISTRY.find((e) => e.id === id) as NavEntry;
 const ids = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.id);
 
 describe("AT_IC_11_1 登記表第八項與顯示序", () => {
-  it("AT_IC_11_1_1 NAV_REGISTRY 恰八項、id 依陣列序 dashboard、projects、import、execute、monitor、settings、self-improving、issues；issues 各欄符規格；顯示序完整八項；mobile 為 true 的項數 6", () => {
-    expect(NAV_REGISTRY).toHaveLength(8);
-    expect(ids(NAV_REGISTRY)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings", "self-improving", "issues"]);
+  it("AT_IC_11_1_1 NAV_REGISTRY 恰九項（原八項加 sysadmin）、id 依陣列序 dashboard、projects、import、execute、monitor、settings、self-improving、issues、sysadmin；issues 各欄符規格；顯示序完整九項；mobile 為 true 的項數 6", () => {
+    expect(NAV_REGISTRY).toHaveLength(9);
+    expect(ids(NAV_REGISTRY)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings", "self-improving", "issues", "sysadmin"]);
     const issues = byId("issues");
     expect(issues).toMatchObject({ id: "issues", label: "議題中心", order: 55, href: "/issues", mobile: false, enabled: true });
     expect(issues.roles, "roles 缺＝所有已登入角色皆可見").toBeUndefined();
     expect(NAV_REGISTRY[7]).toBe(issues); // 加在陣列末尾
     expect(typeof issues.match).toBe("function");
-    // 顯示序（依 order 升冪）：議題中心排在監控中心之後、系統設定之前，自我進化仍在最後
+    // 顯示序（依 order 升冪）：議題中心排在監控中心之後、系統設定之前，系統管理排在系統設定之後，自我進化仍在最後
     for (const role of ["ADMIN", "OPERATOR", "VIEWER", undefined] as const) {
-      expect(ids(visibleNavEntries(NAV_REGISTRY, role)), String(role)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "issues", "settings", "self-improving"]);
+      expect(ids(visibleNavEntries(NAV_REGISTRY, role)), String(role)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "issues", "settings", "sysadmin", "self-improving"]);
     }
     expect(NAV_REGISTRY.filter((e) => e.mobile)).toHaveLength(6);
     expect(NAV_REGISTRY.filter((e) => e.mobile).map((e) => e.id)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings"]);
-    // order 與 id 各自唯一；圖示與原七個互異
-    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(8);
-    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(8);
+    // order 與 id 各自唯一；圖示與原八個互異
+    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(9);
+    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(9);
   });
 
   it("AT_IC_11_1_E_1 原七列逐欄快照：各欄與陣列位置全不變；self-improving 的 label「自我進化」、order 70、mobile false 不變", () => {

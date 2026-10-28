@@ -28,6 +28,7 @@ import {
   executeProject,
   exportSettings,
   freezeProjectSddSpec,
+  getBackupOverview,
   getExecution,
   getExecutionDag,
   getExecutionRtm,
@@ -189,6 +190,8 @@ export const qk = {
   issuesAll: ["issues"] as const,
   issueList: (status: string | null) => ["issues", "list", status ?? ""] as const,
   issue: (id: string) => ["issues", "detail", id] as const,
+  /** 系統管理／資料庫備份（TCS-SysAdminBackup-20261027）：總覽掛在 ["backup"] 底下，階段二的工作紀錄與單筆工作也會掛在這裡。 */
+  backupOverview: ["backup", "overview"] as const,
 };
 
 const POLL_MS = 30_000;
@@ -200,6 +203,14 @@ const POLL_MS = 30_000;
  */
 export const NOTIFICATION_POLL_FLOOR_MS = 10_000;
 export const NOTIFICATION_POLL_MS = 30_000;
+
+/**
+ * 備份頁的輪詢節奏（TCS-SysAdminBackup-20261027 AC-BK-06-11、R-BK-39）：總覽每 30 秒、進行中的工作每 10 秒（階段二才會輪詢工作），
+ * 單一分頁每分鐘至多 8 次；兩個間隔都**取自既有常數**、不另寫數字，所以永遠不會低於契約地板（`NOTIFICATION_POLL_FLOOR_MS`，10 秒）。
+ * 分頁不可見時 TanStack Query 預設停止輪詢（refetchIntervalInBackground＝false）。
+ */
+export const BACKUP_OVERVIEW_POLL_MS = POLL_MS;
+export const BACKUP_JOB_POLL_MS = NOTIFICATION_POLL_FLOOR_MS;
 
 /** 寫入成功後：三層快取全部標為過期（進行中的查詢會自動重抓）。 */
 export function invalidateTree(qc: QueryClient): Promise<unknown> {
@@ -1136,5 +1147,21 @@ export function useClearIssuePriority() {
       return id;
     },
     onSuccess: (id) => patchIssuePriority(qc, id, null, null),
+  });
+}
+
+// ══ 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 R-BK-39；PRD §7「載入與錯」）═══════════════════════════════════
+/**
+ * 備份總覽：每 30 秒重抓（`BACKUP_OVERVIEW_POLL_MS`；分頁不可見時停止）。🔴 fail-loud：失敗不重用舊資料頂替——呼叫端以 `isError` 整片顯示原因；
+ * 控制面未設定、匯出檔不可讀等「資料量不到」是 200 回應（`control.reason`），不是這裡的錯誤。
+ */
+export function useBackupOverview() {
+  const enabled = useEnabled();
+  return useQuery({
+    queryKey: qk.backupOverview,
+    queryFn: ({ signal }) => getBackupOverview({ signal }),
+    enabled,
+    staleTime: NOTIFICATION_POLL_FLOOR_MS,
+    refetchInterval: BACKUP_OVERVIEW_POLL_MS,
   });
 }

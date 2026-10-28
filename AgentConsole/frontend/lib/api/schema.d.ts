@@ -252,6 +252,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sysadmin/backups/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 備份工作紀錄（唯讀；Console 發起的手動工作）
+         * @description requested_at 嚴格新到舊；排程工作不在此表（看總覽的狀態卡）。limit 預設 20、1～100；before 為 ISO-8601 時間（嚴格小於 requested_at）；參數非法 → 422 invalid_request（details.violations[{field,message}]）。回 {items, nextBefore}。requestedBy、detail 僅 ADMIN。控制面未設定或資料庫讀取失敗 → 503 backup_control_unavailable。VIEWER 以上可讀。
+         */
+        get: operations["getBackupJobs"];
+        put?: never;
+        /**
+         * 手動觸發備份（全備、增備、驗證；僅 ADMIN）
+         * @description body {type:"full|diff|verify", confirm:true}。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 本文不是 JSON 物件（400 MALFORMED_REQUEST_BODY）→ type 缺、非字串或不合（422 invalid_request；details.violations）→ confirm 不是 JSON 布林 true（400 backup_confirm_required）→ 控制面不可用（503 backup_control_unavailable：目錄未設、心跳過期、匯出不可讀、資料庫讀取失敗）→ 已有 QUEUED 或 RUNNING（409 backup_job_in_progress）→ 頻率上限（409 backup_too_frequent；full 86400 秒、diff 3600 秒、verify 不設；details.type、details.nextAllowedAt）→ 建列並寫請求檔；寫檔失敗該列補償為 FAILED（control_write_failed）並回 503。任一前序失敗都零列、零檔。成功 202：工作已排入佇列（QUEUED），多餘的鍵忽略、id 由伺服器產生。
+         */
+        post: operations["postBackupJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/si/proposals/{id}/decide": {
         parameters: {
             query?: never;
@@ -902,6 +926,46 @@ export interface paths {
          * @description 帳密正確回 accessToken（30 分鐘）與 refreshToken（7 天）；失敗一律 401
          */
         post: operations["login"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sysadmin/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 備份總覽（唯讀；系統管理／資料庫備份）
+         * @description 備份清單、四張最近狀態卡（全備、增備、離站 pg_dump、驗證）、排程與保留、各 repo 狀態、WAL 歸檔健康與進行中的工作。每個請求讀 sidecar 匯出的 8 個控制面檔案（不快取）。🔴 fail-loud：控制面未設定（control.reason=not_configured）、匯出檔不可讀（export_unreadable）、格式版本不符（schema_mismatch）時仍回 200，但所有資料區塊為 null（不是空陣列或 0）；runner_offline（心跳逾 30 秒）時資料照回但 canTrigger=false。個別來源失敗（info／logical 的 ok:false、cron 解析不了、資料庫讀取失敗）只降級該區塊並加 control.warnings。時間一律 UTC 帶 Z；排程時區取自 schedule.json。輸出尾段與觸發者僅 ADMIN。VIEWER 以上可讀。
+         */
+        get: operations["getBackupOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sysadmin/backups/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 單筆備份工作（唯讀）
+         * @description 查無或 id 不是 UUID → 404 backup_job_not_found（不是 500、不是 422）。detail（已遮罩、最後 ≤2000 字元）與 requestedBy 僅 ADMIN。控制面未設定或資料庫讀取失敗 → 503 backup_control_unavailable。VIEWER 以上可讀。
+         */
+        get: operations["getBackupJob"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1975,6 +2039,26 @@ export interface components {
         SignoffRequest: {
             approver: string;
         };
+        ApiResultBackupJobAccepted: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["BackupJobAccepted"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 手動觸發已受理：工作已排入佇列（QUEUED），由 sidecar 撿取後執行 */
+        BackupJobAccepted: {
+            /** @description 工作 id（UUID；伺服器產生） */
+            id: string;
+            /** @enum {string} */
+            type: "full" | "diff" | "verify";
+            /** @enum {string} */
+            status: "QUEUED";
+            /** @description 要求時間（UTC，ISO-8601 帶 Z） */
+            requestedAt: string;
+        };
         /** @description 對待決提案（或暫停的運轉）下決定。九種動詞：approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；各動詞必填與禁止的欄位見表 M-D（多帶或缺帶一律 422，一次全列）。沒有批次核准 */
         SiDecideRequest: {
             /**
@@ -2555,6 +2639,72 @@ export interface components {
             startedAt?: string;
             /** Format: date-time */
             completedAt?: string;
+        };
+        ApiResultBackupOverviewResponse: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        ApiResultBackupJobPage: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["BackupJobPage"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description Console 發起的備份工作（手動觸發；排程工作不在此表） */
+        BackupJob: {
+            /** @description 工作 id（UUID） */
+            id: string;
+            /** @enum {string} */
+            type: "full" | "diff" | "verify";
+            /** @enum {string} */
+            status: "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "REJECTED" | "EXPIRED";
+            /** @description 要求時間（UTC，ISO-8601 帶 Z） */
+            requestedAt: string;
+            /** @description runner 撿起請求的時間；尚未開始為 null */
+            startedAt?: string | null;
+            /** @description 終態時間；進行中為 null */
+            finishedAt?: string | null;
+            /**
+             * Format: int32
+             * @description 耗時（秒）
+             */
+            durationSeconds?: number | null;
+            /**
+             * Format: int32
+             * @description 工作腳本的結束碼；被拒、逾時、中斷者為 null
+             */
+            exitCode?: number | null;
+            /** @description 封閉詞彙（契約〈backup 類 reason 表〉的工作理由）；成功為 null */
+            reason?: string | null;
+            /** @description 觸發者；僅 ADMIN */
+            requestedBy?: string | null;
+            /** @description 已遮罩的輸出尾段（≤2000 字元）；僅 ADMIN */
+            detail?: string | null;
+        };
+        /** @description 工作紀錄的一頁（新到舊）；nextBefore 是續取游標（尚有更多時為本頁最後一筆的 requestedAt，否則 null） */
+        BackupJobPage: {
+            items: components["schemas"]["BackupJob"][];
+            /** @description 續取游標：下一頁以 before=<nextBefore> 請求（嚴格小於） */
+            nextBefore?: string | null;
+        };
+        ApiResultBackupJob: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["BackupJob"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
         };
         ApiResultPendingSignoffsResponse: {
             /** Format: int32 */
@@ -5024,6 +5174,163 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getBackupJobs: {
+        parameters: {
+            query?: {
+                /** @description 頁大小（選填；整數 1～100，預設 20）；不合 → 422 invalid_request */
+                limit?: number;
+                /** @description 游標（選填；ISO-8601 時間）：只回 requested_at 嚴格早於它的工作；取自上一頁的 nextBefore；不合 → 422 invalid_request */
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultBackupJobPage"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 參數未通過檢查（reason invalid_request；details.violations[{field,message}]：limit 須為 1～100 的整數、before 須為 ISO-8601 時間） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description backup_control_unavailable：控制面未設定或資料庫讀取失敗 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postBackupJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultBackupJobAccepted"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description type 缺、非字串或不在 full／diff／verify（reason invalid_request；details.violations[{field,message}]） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description backup_control_unavailable：控制面未設定、心跳逾 30 秒、匯出檔不可讀、資料庫讀取失敗，或寫請求檔失敗（該列已補償為 FAILED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7920,6 +8227,112 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getBackupOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultBackupOverviewResponse"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getBackupJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 工作 id（UUID） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultBackupJob"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 查無此備份工作（reason backup_job_not_found，訊息「查無此備份工作」；id 不是 UUID 亦同） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description backup_control_unavailable：控制面未設定或資料庫讀取失敗 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

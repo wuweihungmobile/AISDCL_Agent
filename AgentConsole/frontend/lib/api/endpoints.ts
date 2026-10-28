@@ -7,6 +7,7 @@
 import { apiDownload, apiRequest, apiRequestWithHeaders, type DownloadResult } from "./client";
 import type {
   Alert,
+  BackupOverview,
   Checkpoint,
   Config,
   ConfigCategory,
@@ -620,4 +621,14 @@ export function putIssuePriority(id: string, body: IssuePriorityRequest): Promis
 /** 清除優先順序（僅 ADMIN）：204、冪等（列不存在也 204）；不呼叫 Bridge，所以議題已結案或已不存在時仍清得掉遺留的列。 */
 export function deleteIssuePriority(id: string): Promise<void> {
   return apiRequest<void>(`/api/v1/issues/${seg(id)}/priority`, { method: "DELETE" });
+}
+
+// ── 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.1；API-BK-01）──────────────────────────────────────────────
+/**
+ * 備份總覽（唯讀；VIEWER 以上；operationId `getBackupOverview`）：備份清單、四張最近狀態卡、排程與保留、各 repo 狀態、WAL 歸檔健康與進行中的工作。
+ * 不收查詢參數。控制面未設定、匯出檔不可讀、格式版本不符時仍回 200，但資料區塊全為 null（`control.reason` 說明原因）；本函式不替它們轉成空陣列或 0。
+ * 階段二另有工作紀錄與手動觸發三個端點，尚未加入。
+ */
+export function getBackupOverview(opts: Opts = {}): Promise<BackupOverview> {
+  return apiRequest<BackupOverview>("/api/v1/sysadmin/backups", { signal: opts.signal });
 }

@@ -8,9 +8,9 @@
  *    PRD AC-SI-32-6 (f)；所以 `projects` 必須明寫自己的判斷式，並排除 execute／monitor 以免被它吃掉）；
  *  - `mobile` 為 false 的項在 <768 的底部 Tab 不顯示（元件以 `max-md:hidden` 隱藏，DOM 內仍在）；`mobile` 為 true 的項數不得超過 6；
  *  - `href` 為字串直取、為函式則以 `{ currentProjectId }` 呼叫（執行／監控都從專案進入，沒有專案時退回專案列表）。
- * registry.test.ts 鎖：八項內容、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變。
+ * registry.test.ts 鎖：九項內容、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變。
  */
-import { Activity, Dna, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
+import { Activity, Database, Dna, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
 
 import type { Role } from "@/lib/api/types";
 
@@ -89,6 +89,19 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     href: "/issues",
     match: (pathname) => pathname === "/issues" || pathname.startsWith("/issues/"),
     order: 55,
+    enabled: true,
+    mobile: false,
+  },
+  // 第九項：系統管理（TCS-SysAdminBackup-20261027 R-BK-01）。同樣加在陣列**末尾**（原八列的陣列位置與索引不變，`NAV_REGISTRY[6]` 仍是 self-improving、`[7]` 仍是 issues）；
+  // 顯示序由 order 決定：65 介於系統設定 60 與自我進化 70，所以排在系統設定之後、自我進化之前。底部 Tab 已有六項，所以 mobile 為 false（先例同 self-improving、issues）。
+  // 圖示 Database（與 DatabaseBackup 互異；九個圖示皆不重複）。
+  {
+    id: "sysadmin",
+    label: "系統管理",
+    icon: Database,
+    href: "/sysadmin",
+    match: (pathname) => pathname === "/sysadmin" || pathname.startsWith("/sysadmin/"),
+    order: 65,
     enabled: true,
     mobile: false,
   },

@@ -73,14 +73,14 @@ beforeEach(() => {
 });
 
 describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變", () => {
-  it("AT_932_6_5 多出一個名稱為示範功能、href 為 /demo 的連結，位置依 order 在議題中心與系統設定之間，其餘八個連結不變；/demo 時它為 active", () => {
+  it("AT_932_6_5 多出一個名稱為示範功能、href 為 /demo 的連結，位置依 order 在議題中心與系統設定之間，其餘九個連結不變；/demo 時它為 active", () => {
     const demo = extra({ id: "demo", label: "示範功能", href: "/demo", order: 56, mobile: false, match: (p) => p === "/demo" });
     state.registry = [...REAL(), demo];
     renderTools("OPERATOR", "/");
-    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "示範功能", "系統設定", "自我進化"]);
+    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "示範功能", "系統設定", "系統管理", "自我進化"]);
     const links = navLinks();
     expect(links[6]).toHaveAttribute("href", "/demo");
-    // 其餘八個連結不變（標籤與 href）
+    // 其餘九個連結不變（標籤與 href）
     const others = links.filter((a) => a.getAttribute("aria-label") !== "示範功能");
     expect(others.map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")])).toEqual([
       ["儀表板", "/"],
@@ -90,6 +90,7 @@ describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變",
       ["監控中心", "/projects"],
       ["議題中心", "/issues"],
       ["系統設定", "/settings"],
+      ["系統管理", "/sysadmin"],
       ["自我進化", "/self-improving"],
     ]);
   });
@@ -112,13 +113,13 @@ describe("AT_932_6_6 enabled 為假或角色不符的項目不渲染", () => {
     extra({ id: "admin-only", label: "僅管理員", order: 72, roles: ["ADMIN"] }),
     extra({ id: "op-admin", label: "操作員以上", order: 73, roles: ["OPERATOR", "ADMIN"] }),
   ];
-  const original = ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "系統設定", "自我進化"];
+  const original = ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "系統設定", "系統管理", "自我進化"];
 
   it.each([
     ["VIEWER", []],
     ["OPERATOR", ["操作員以上"]],
     ["ADMIN", ["僅管理員", "操作員以上"]],
-  ] as Array<[Role, string[]]>)("AT_932_6_6 %s 看得到的額外項：%j；roles 缺的既有八項三種角色都看得到；被隱藏的項目不在 DOM（不是 CSS 隱藏）", (role, visibleExtras) => {
+  ] as Array<[Role, string[]]>)("AT_932_6_6 %s 看得到的額外項：%j；roles 缺的既有九項三種角色都看得到；被隱藏的項目不在 DOM（不是 CSS 隱藏）", (role, visibleExtras) => {
     state.registry = registry();
     renderTools(role);
     expect(labels()).toEqual([...original, ...visibleExtras]);
@@ -144,22 +145,40 @@ describe("AT_932_6_7 入口依 order 升冪，同序依登記表原序", () => {
     state.registry = REAL().map((e) => (e.id === "settings" ? { ...e, order: 1 } : e));
     renderTools();
     expect(labels()[0]).toBe("系統設定");
-    expect(labels()).toHaveLength(8);
+    expect(labels()).toHaveLength(9);
   });
 });
 
 describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
   const classOf = (label: string) => (within(screen.getByRole("navigation", { name: "主導覽" })).getByRole("link", { name: label }).className ?? "").split(/\s+/);
 
-  it("AT_932_6_8 八個連結都在 DOM；只有 mobile 為 false 的自我進化與議題中心帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
+  it("AT_932_6_8 九個連結都在 DOM；只有 mobile 為 false 的自我進化、議題中心與系統管理帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
     renderTools();
-    expect(navLinks()).toHaveLength(8);
+    expect(navLinks()).toHaveLength(9);
     for (const link of navLinks()) {
       const label = link.getAttribute("aria-label");
       expect(link.getAttribute("title")).toBe(label);
       expect(link.textContent).toBe(label);
-      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(label === "自我進化" || label === "議題中心");
+      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(label === "自我進化" || label === "議題中心" || label === "系統管理");
     }
+  });
+
+  // TCS-SysAdminBackup-20261027 AT-BK-01-3-1（R-BK-03）：真登記表的九個連結；<768 的底部 Tab 不顯示的恰為三項，ToolsRegion.tsx 本身不認得任何特定入口（G-C3 另以 git diff 零差異鎖住）
+  it("AT_BK_01_3_1 真登記表渲染 Tools 區：九個連結皆在 DOM；帶 max-md:hidden 的恰為自我進化、議題中心、系統管理三項，其餘六項不帶；每個連結的 aria-label 與 title 恆等於其 label；元件原始碼不含系統管理的任何字樣", () => {
+    renderTools("VIEWER");
+    const links = navLinks();
+    expect(links).toHaveLength(9);
+    const hidden = links.filter((a) => classOf(a.getAttribute("aria-label") as string).includes("max-md:hidden")).map((a) => a.getAttribute("aria-label"));
+    expect(hidden.sort()).toEqual(["自我進化", "議題中心", "系統管理"].sort());
+    const shown = links.filter((a) => !classOf(a.getAttribute("aria-label") as string).includes("max-md:hidden")).map((a) => a.getAttribute("aria-label"));
+    expect(shown).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定"]);
+    for (const link of links) {
+      expect(link.getAttribute("title")).toBe(link.getAttribute("aria-label"));
+      expect(link.textContent).toBe(link.getAttribute("aria-label"));
+    }
+    expect(within(screen.getByRole("navigation", { name: "主導覽" })).getByRole("link", { name: "系統管理" })).toHaveAttribute("href", "/sysadmin");
+    const source = readFileSync(path.join(process.cwd(), "components", "layout", "ToolsRegion.tsx"), "utf-8");
+    expect(source.includes("系統管理") || source.includes("sysadmin"), "ToolsRegion.tsx 是登記表驅動：不得針對新入口寫任何字樣").toBe(false);
   });
 
   it("AT_932_6_8 替身登記表把自我進化的 mobile 改為 true 後它不再帶 max-md:hidden；把既有項改為 false 後它帶；aria-label 與 title 不隨 mobile 改變", () => {

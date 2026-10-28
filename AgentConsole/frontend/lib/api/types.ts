@@ -457,3 +457,114 @@ export type IssueListParams = { status?: string; source?: string; since?: number
 /** `PUT /issues/{id}/priority` 的請求（rank 1～9999 必填；note 選填、≤200 code point）與回應（寫入的那一列）。 */
 export type IssuePriorityRequest = S["IssuePriorityRequest"];
 export type IssuePriorityResponse = S["IssuePriority"];
+
+// ── 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3；契約 API_Contract_SysAdminBackup.md C3.1；API-BK-01）──────────────────
+// `GET /api/v1/sysadmin/backups` 的 `data` 在 backend 是「保序 Map」（缺鍵與 null 的語意不同、資料區塊 null 不得以空陣列或 0 代替），
+// 所以 schema.d.ts 只有「任意物件」，欄位形狀以這裡為準（出處：契約 C3.1 與 backend `BackupQueryService`）。
+// 日後 backend 加欄位時：已知欄位不受影響；值域日後新增的值（reason、warnings、狀態）要原樣顯示、不崩潰，所以值域欄位型別一律放寬成 string。
+/** `control`：控制面健康。`reason` 的已知值與優先序＝not_configured＞schema_mismatch＞export_unreadable＞runner_offline＞null（D-BK-T5）。 */
+export type BackupControl = {
+  /** `reason` 不是 not_configured 即為 true */
+  available: boolean;
+  canTrigger: boolean;
+  reason: string | null;
+  /** 相對 console-api 時鐘的整數秒（無條件捨去）；心跳檔缺席為 null */
+  heartbeatAgeSeconds: number | null;
+  exportAgeSeconds: number | null;
+  exportGeneratedAt: string | null;
+  /** 封閉詞彙：db_unavailable、retention_unavailable、info_unavailable、logical_unavailable、cron_unparsable:<job>；日後新增的值原樣顯示 */
+  warnings: string[];
+};
+
+/** 四個備份工作（卡片依序 full、diff、dump、verify）。 */
+export type BackupJobName = "full" | "diff" | "dump" | "verify";
+/** 卡片狀態（D-BK-T9）：succeeded、failed、running、interrupted、no_run；日後新增的值原樣顯示。 */
+export type BackupCardStatus = "succeeded" | "failed" | "running" | "interrupted" | "no_run";
+/** 全備卡取最近全備、增備卡取最近差異或全備；`source` 恆為 pgbackrest。 */
+export type BackupLatest = { label: string; finishedAt: string | null; source: string };
+
+export type BackupCard = {
+  job: string;
+  status: string;
+  /** scheduled、manual；無狀態檔時為 null */
+  trigger: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationSeconds: number | null;
+  lastSuccessAt: string | null;
+  /** cron 在 now 之前最近一次應跑時刻；cron 解析不了為 null */
+  lastDueAt: string | null;
+  /** 只顯示，前端不重算（無 cron 函式庫、無寬限識別字） */
+  overdue: boolean;
+  /** 最近成功時間缺席（從未成功）；與 no_run（無任何執行記錄）不同 */
+  never: boolean;
+  reason: string | null;
+  /** 僅 full、diff 卡有此鍵 */
+  latestBackup?: BackupLatest | null;
+  /** 僅 ADMIN 有；已遮罩、最後 ≤2000 字元 */
+  detailTail?: string | null;
+  requestedBy?: string | null;
+};
+
+/** `activeJob`：進行中的工作（手動者取自資料庫列，排程者取自匯出的鎖狀態，`id` 為 null）。 */
+export type BackupActiveJob = {
+  id: string | null;
+  type: string;
+  status: string;
+  trigger: string;
+  requestedAt: string | null;
+  startedAt: string | null;
+  requestedBy?: string | null;
+};
+
+/** `backups[]` 的一列（新到舊；kind 為 full、diff、incr、logical；location 為 repo<N> 或 logical）。 */
+export type BackupRow = {
+  kind: string;
+  label: string;
+  location: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationSeconds: number | null;
+  databaseSizeBytes: number | null;
+  repoSizeBytes: number | null;
+  /** 差異備份的前一份全備標籤，其餘 null */
+  baseLabel: string | null;
+  /** ok、ok_with_errors（頁校驗錯誤）；日後新增的值原樣顯示 */
+  result: string;
+};
+
+export type BackupScheduleEntry = { job: string; cron: string; nextRunAt: string | null };
+/** 一個 repo 的保留份數；欄內 null＝該設定未設。 */
+export type BackupRepoRetention = { full: number | null; diff: number | null };
+/** `retention` 的鍵是 `repo<N>`（各取各的）加 `logicalDays`；整個為 null＝解析不到（不填預設值）。 */
+export type BackupRetention = { [repo: `repo${number}`]: BackupRepoRetention } & { logicalDays: number | null };
+export type BackupSchedule = { entries: BackupScheduleEntry[]; retention: BackupRetention | null };
+
+/** `repos[]`：`endpointHost` 為 null＝本機磁碟（posix）；`local` 由匯出端判定，console-api 不重算。 */
+export type BackupRepo = { repo: number; endpointHost: string | null; local: boolean; statusCode: number; statusMessage: string };
+
+/** `walArchive`：讀 `pg_stat_archiver` 的一行唯讀統計；讀不到時整個為 null（不是 0 計數的物件）。 */
+export type BackupWalArchive = { lastArchivedAt: string | null; failedCount: number; lastFailedAt: string | null };
+
+/**
+ * 備份總覽。`control.reason` 為 not_configured、schema_mismatch、export_unreadable 時，其餘區塊全為 null；runner_offline 時資料照回。
+ * 區塊為 null＝量不到（不是空、不是 0）。
+ */
+export type BackupOverview = {
+  control: BackupControl;
+  timezone: string | null;
+  activeJob: BackupActiveJob | null;
+  cards: BackupCard[] | null;
+  backups: BackupRow[] | null;
+  schedule: BackupSchedule | null;
+  repos: BackupRepo[] | null;
+  walArchive: BackupWalArchive | null;
+};
+
+// 階段二（工作紀錄與手動觸發；本版只備型別、不做畫面）：這三個在 backend 是有型別的 DTO，直接取 schema.d.ts 的產生型別（單一出處）——
+// 日後後端改欄位，這裡會在 tsc 紅燈，而不是到執行期才錯。`requestedBy`、`detail` 僅 ADMIN。
+export type BackupJob = S["BackupJob"];
+export type BackupJobPage = S["BackupJobPage"];
+/** `POST /backups/jobs` 的 202 回應；請求本文是 `{ type: "full" | "diff" | "verify", confirm: true }`。 */
+export type BackupJobAccepted = S["BackupJobAccepted"];
+export type BackupJobStatus = BackupJob["status"];
