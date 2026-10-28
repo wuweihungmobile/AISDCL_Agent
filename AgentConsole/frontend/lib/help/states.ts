@@ -135,7 +135,7 @@ export const STATE_HELP = {
     RELEASE: { meaning: "流程已經走到發布，成果可以交付了。", next: "這是主要流程的最後一步。" },
     BLOCKED: { meaning: "流程被擋住了，必須由人工處理才能繼續。", next: "請到專案詳情查看原因，並照畫面上的恢復指令處理。" },
     TRANSIENT: { meaning: "流程正處在兩個階段之間的短暫過渡。", next: "稍後重新整理，通常就會進入下一個階段。" },
-    OBSERVATION: { meaning: "這是背景觀測用的狀態，不是主要流程的步驟。", next: "不用處理，主要流程的位置請看旁邊的步驟。" },
+    OBSERVATION: { meaning: "這是背景觀測用的狀態，不是主要流程的步驟。", next: "不用處理，回歸點確定前不會畫階段步驟，請看「目前狀態」的原文。" },
     UNKNOWN: { meaning: "系統認不得目前的狀態，無法判斷流程走到哪裡。", next: "請看旁邊顯示的原始狀態文字，必要時回報給維護者。" },
   } satisfies Readonly<Record<string, StateRow>>,
 
@@ -159,7 +159,7 @@ export const STATE_HELP = {
   // ── 自我進化 ────────────────────────────────────────────────────────────
   obsClass: {
     open: { meaning: "這筆觀察還沒有結論，正等著處理。", next: "請決定要修復、要延後，還是直接結案。" },
-    deferred: { meaning: "這筆觀察先擱置，等指定的條件出現再處理。", next: "條件出現時，請把它重新打開來處理。" },
+    deferred: { meaning: "這筆觀察先擱置，等指定的條件出現再處理。", next: "指定的條件出現時，由主機端重新處理，要補充資料可以用「更正」再記一列。" },
     done: { meaning: "這筆觀察已經處理完畢，或已經有結論。", next: "不需要再處理，除非日後問題又出現。" },
   } satisfies Record<"open" | "deferred" | "done", StateRow>,
 
@@ -172,11 +172,11 @@ export const STATE_HELP = {
   propState: {
     proposed: { meaning: "提案剛提出，還沒有人下決定。", next: "請看過卡面，決定核准、退回、轉交或否決。" },
     returned: { meaning: "提案被退回了，需要提案者修改後重新提出。", next: "修改完成後，會回到剛提出的狀態再審一次。" },
-    approved: { meaning: "您已核准這個提案，接下來會在沙盒試套用。", next: "系統會自動試套用，不需要您操作。" },
+    approved: { meaning: "您已核准這個提案，接下來會在沙盒（與正式內容隔離的副本）試套用。", next: "系統會自動試套用，不需要您操作。" },
     sandboxed: { meaning: "提案已在沙盒試套用過，正在等驗證。", next: "驗證完成後會出現結果，再由您決定。" },
     verified: { meaning: "提案驗證完成，結果已經出來。", next: "請決定要不要晉升，沒通過的可以退回或否決。" },
     promoted: { meaning: "提案已經正式採納，進入量測期。", next: "接著會量測採納後的效果，期間不需要您操作。" },
-    measuring: { meaning: "系統正在量測提案採納後的效果。", next: "量測結束後會結案，結果可能是乾淨、再現或被回滾。" },
+    measuring: { meaning: "系統正在量測提案採納後的效果。", next: "量測期結束後會結案，結果是三種之一：沒再出問題、問題又出現，或採納被撤銷。" },
     closed: { meaning: "提案的量測期已經結束，並且有了結論。", next: "不會再變動，日後可以經審核後退役。" },
     rejected: { meaning: "提案已被否決，不會被採納。", next: "不會再變動，同型的提案要先解除冷卻才能再提。" },
     "handed-off": { meaning: "這個提案不能由自動流程處理，已轉交給人工。", next: "請由人工接手處理，不需要再走自動流程。" },

@@ -17,6 +17,8 @@ import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, 
  * 請求計數用**新穎性規則**（D-PH-13）：「新增請求」＝點擊之後出現、且鍵在點擊之前沒出現過的請求；鍵＝（方法, 路徑），唯一例外是 `/api/v1/issues`，其鍵再含排序後的查詢串
  * （否則議題中心頁自己的清單請求會把詞表請求「吃掉」）；頁面自己的輪詢與頂列輪詢因路徑在點擊前已出現過而自然排除。點擊前的基線＝頁面載入、鈕可見後固定再等 1,000 毫秒（不用 networkidle：多數路由到不了），
  * 點擊後的觀察窗＝對話框出現後再等 500 毫秒。
+ * 詞表請求另按**路由獨立**計（SCG-4 一審 F-05）：從進路由前的 `calls.length` 起算、涵蓋頁面載入到對話框關閉的全程；議題中心恰一個、其餘路由零個。新穎性規則的鍵跨路由累積（為了把頂列輪詢排除），
+ * 單靠它，某路由「載入時預取詞表」會被點擊前的基線吃掉、只在排最後的 /issues 路由間接現形；逐路由計才讓每條路由自己守住自己。
  * 本機重跑：`$env:E2E_MODE="standalone"; npm run build; npx playwright test tests/e2e/page-help.mock.spec.ts --output <各自目錄>`（CI 以 standalone 產物跑：`playwright test mock.spec`）。
  */
 
@@ -56,6 +58,10 @@ function noveltyKey(call: MockCall): string {
 /** 詞表請求：`GET /api/v1/issues`，查詢串恰 `limit=1`（頁面自己的清單請求帶 limit=100）。 */
 const isLegendCall = (call: MockCall): boolean => call.method === "GET" && call.path === "/api/v1/issues" && call.query.toString() === "limit=1";
 const describeCall = (call: MockCall): string => `${call.method} ${call.path}${call.query.toString() ? `?${call.query.toString()}` : ""}`;
+
+/** 這條路由自己的詞表請求：從 `since`（進路由前的 calls.length）起算、含頁面載入的全程，不與別的路由累積。議題中心恰一個，其餘路由零個。 */
+const legendCallsSince = (calls: MockCall[], since: number): string[] => calls.slice(since).filter(isLegendCall).map(describeCall);
+const expectedLegendCalls = (id: keyof typeof HELP_PAGES): string[] => (id === "issues" ? ["GET /api/v1/issues?limit=1"] : []);
 
 /** 一路按 Tab 直到焦點落在符合選擇器的元素上（最多 80 次；找不到就失敗，不空轉；沿 issues.mock.spec.ts）。 */
 async function tabUntil(page: Page, selector: string): Promise<void> {
@@ -111,7 +117,7 @@ const writtenRoutes = (): Array<[template: string, id: keyof typeof HELP_PAGES]>
 test.describe("每頁說明（route mock）", () => {
   test.setTimeout(180_000);
 
-  test("AT_PH_06_3_1 每條路由各點一次：待寫頁的路由無鈕；已寫頁的路由議題中心恰一個新增請求 GET /api/v1/issues?limit=1、其餘零個；對話框名稱＝<頁名>・本頁說明；點擊到對話框出現期間無 pageerror", async ({
+  test("AT_PH_06_3_1 每條路由各點一次：待寫頁的路由無鈕；已寫頁的路由議題中心恰一個新增請求 GET /api/v1/issues?limit=1、其餘零個；每條路由自己的詞表請求（含頁面載入的全程）也是議題中心恰一個、其餘零個；對話框名稱＝<頁名>・本頁說明；點擊到對話框出現期間無 pageerror", async ({
     page,
   }) => {
     test.setTimeout(180_000);
@@ -119,27 +125,31 @@ test.describe("每頁說明（route mock）", () => {
     await signInAs(page, "OPERATOR");
     const { calls } = await installApiMock(page, BACKEND);
     let clicked = 0;
+    let pendingRoutes = 0;
     for (const [template, id] of Object.entries(HELP_ROUTES)) {
+      const routeStart = calls.length;
       await page.goto(concretePath(template));
       await expect(page.locator('[data-region="top"]'), `${template} 載入`).toBeVisible({ timeout: 60_000 });
       if (HELP_PAGES[id] === undefined) {
         await page.waitForTimeout(1000);
         await expect(helpButton(page), `${template}（${id}）是待寫頁：不渲染鈕`).toHaveCount(0);
+        pendingRoutes += 1;
         continue;
       }
       await expect(helpButton(page), `${template}（${id}）已寫：渲染鈕`).toBeVisible({ timeout: 60_000 });
       const { added, fresh } = await clickAndObserve(page, calls, errors, id);
-      if (id === "issues") expect(added.map(describeCall), `${template} 的新增請求`).toEqual(["GET /api/v1/issues?limit=1"]);
-      else expect(added.map(describeCall), `${template} 的新增請求`).toEqual([]);
+      expect(added.map(describeCall), `${template} 的新增請求`).toEqual(expectedLegendCalls(id));
       expect(
         fresh.filter((message) => message.startsWith("pageerror")),
         `${template} 點擊期間的 pageerror`,
       ).toEqual([]);
       await page.keyboard.press("Escape");
       await expect(helpDialog(page)).toHaveCount(0);
+      expect(legendCallsSince(calls, routeStart), `${template} 全程（含頁面載入）的詞表請求：不得在非議題中心路由預取`).toEqual(expectedLegendCalls(id));
       clicked += 1;
     }
-    expect(clicked, "防反空轉：至少三條已寫頁的路由真的點過").toBeGreaterThanOrEqual(3);
+    expect(clicked + pendingRoutes, "防反空轉：HELP_ROUTES 的每條路由都走過（已寫頁點過、待寫頁驗證無鈕）").toBe(Object.keys(HELP_ROUTES).length);
+    expect(clicked, "防反空轉：每一條已寫頁的路由都真的點過").toBe(writtenRoutes().length);
   });
 
   test("AT_PH_06_3_2 VIEWER 在 /issues：開啟→Esc 關閉→開啟→關閉→開啟（三次開啟）：詞表請求共 3 個、查詢串皆恰 limit=1；VIEWER 的請求不被前端擋；每次開啟後四群詞表皆出現", async ({ page }) => {
@@ -157,19 +167,26 @@ test.describe("每頁說明（route mock）", () => {
     expect(calls.filter(isLegendCall).map(describeCall)).toEqual(Array(3).fill("GET /api/v1/issues?limit=1"));
   });
 
-  test("AT_PH_06_3_E_1 新增請求（點擊後才出現的新鍵，不含頁面載入時自己發的請求）全程：沒有非 GET、沒有 /si/ 路徑、除議題詞表請求外沒有其他新增請求", async ({ page }) => {
+  test("AT_PH_06_3_E_1 新增請求（點擊後才出現的新鍵，不含頁面載入時自己發的請求）全程：沒有非 GET、沒有 /si/ 路徑、除議題詞表請求外沒有其他新增請求；每條路由自己的詞表請求（含頁面載入的全程）議題中心恰一個、其餘零個，VIEWER 每次開啟各恰一個", async ({
+    page,
+  }) => {
     const errors = collectConsoleErrors(page);
     await signInAs(page, "OPERATOR");
     const { calls } = await installApiMock(page, BACKEND);
     const novel: MockCall[] = [];
+    let visited = 0;
     for (const [template, id] of writtenRoutes()) {
+      const routeStart = calls.length;
       await page.goto(concretePath(template));
       await expect(helpButton(page), `${template} 有鈕`).toBeVisible({ timeout: 60_000 });
       const { added } = await clickAndObserve(page, calls, errors, id);
       novel.push(...added);
       await page.keyboard.press("Escape");
       await expect(helpDialog(page)).toHaveCount(0);
+      expect(legendCallsSince(calls, routeStart), `${template} 全程（含頁面載入）的詞表請求：不得在非議題中心路由預取`).toEqual(expectedLegendCalls(id));
+      visited += 1;
     }
+    expect(visited, "防反空轉：每一條已寫頁的路由都走過").toBe(writtenRoutes().length);
     // VIEWER 三次開啟（這一輪的新增請求另累計）
     const viewer = await page.context().newPage();
     const viewerErrors = collectConsoleErrors(viewer);
@@ -178,10 +195,12 @@ test.describe("每頁說明（route mock）", () => {
     await viewer.goto("/issues");
     await expect(helpButton(viewer)).toBeVisible({ timeout: 60_000 });
     for (let round = 1; round <= 3; round += 1) {
+      const roundStart = viewerMock.calls.length;
       const { added } = await clickAndObserve(viewer, viewerMock.calls, viewerErrors, "issues");
       novel.push(...added);
       await viewer.keyboard.press("Escape");
       await expect(helpDialog(viewer)).toHaveCount(0);
+      expect(legendCallsSince(viewerMock.calls, roundStart), `VIEWER 第 ${round} 次開啟的詞表請求（每次開啟各自重取，不被前一次的鍵吃掉）`).toEqual(["GET /api/v1/issues?limit=1"]);
     }
     expect(novel.length, "防反空轉：確實觀察到新增請求（議題中心的詞表請求）").toBeGreaterThanOrEqual(1);
     expect(novel.filter((call) => call.method !== "GET").map(describeCall), "沒有任何非 GET").toEqual([]);

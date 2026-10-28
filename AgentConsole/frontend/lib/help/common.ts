@@ -5,6 +5,9 @@
  *    公告列的「說明文件」「下載 CLI」「GitHub」「通知總覽」「幫助中心」「繁體中文」目前都只是靜態字樣、不能點（契約 G-G5），「幫助中心」特別寫明，免得與頂列的「本頁說明」鈕混淆（PRD R-5）。
  *  - `SHARED`：跨頁共用的欄位釋義，頁檔放進自己的 `fields`（畫面上的字樣不同時，頁檔以 `{ ...SHARED.xxx, name: "畫面字樣" }` 換掉名稱，釋義仍共用一份）。
  * 欄位名是畫面字樣的逐字引用，出處鎖（AC-PH-05-5）會到 `sourceFiles` 的原始碼裡找它；釋義文字受 lint.ts 白話規則約束。
+ * SCG-4 一審補兩列（F-07）：底部版本字樣「Console v」（逐字取自 BottomRegion 的 JSX 文字，v 後面是版本號）；「唯讀」——各頁多處寫到「唯讀的角色」卻沒有定義，這裡說明它就是 VIEWER。
+ * 角色不是任何畫面上的字樣、layout 原始碼裡也沒有它，所以這一列沒有可被出處鎖掃描的逐字出處；名稱刻意取兩個字（鎖只掃 ≥ 3 個 code point 的名稱），
+ * 不為它擴充 `sourceFiles`（TCS R-PH-34 把全站共通的出處限定在 layout 目錄與連線狀態 hook）。
  */
 import type { CommonHelp, HelpField } from "./types";
 
@@ -29,6 +32,7 @@ export const HELP_COMMON: CommonHelp = {
       sourceNote: "每 30 秒檢查一次",
     },
     { name: "console-api", meaning: "底部的連線點，顯示 Console 連不連得上後端服務。狀態詞見下方的表。", source: "系統自動產生", sourceNote: "每 30 秒檢查一次" },
+    { name: "Console v", meaning: "底部狀態列中間的版本字樣，v 後面接的就是這個 Console 的版本號。", source: "系統自動產生" },
     { name: "通知總覽", meaning: "公告列上的靜態字樣，目前不能點。要看通知，請按頂列的鈴。", source: "系統自動產生" },
     { name: "幫助中心", meaning: "公告列上的靜態字樣，目前不能點。要看這一頁的說明，請按頂列的「本頁說明」。", source: "系統自動產生" },
     { name: "繁體中文", meaning: "公告列上的靜態字樣，只表示介面使用繁體中文，目前不能切換語言。", source: "系統自動產生" },
@@ -39,6 +43,7 @@ export const HELP_COMMON: CommonHelp = {
     { name: "主導覽", meaning: "左側（手機在底部）的功能入口，亮起來的是您現在所在的功能。", source: "系統自動產生" },
     { name: "我的專案", meaning: "左側導覽下方的專案清單，圓點的顏色代表專案的狀態，沒有文字。螢幕不夠寬時，這個清單會被收起來。", source: "系統自動產生" },
     { name: "登出", meaning: "頂列右上角顯示您的帳號，按「登出」就會結束這次登入。", source: "系統自動產生" },
+    { name: "唯讀", meaning: "各頁寫的「唯讀的角色」指 VIEWER：看得到畫面，但不能新增、修改或執行。設定頁的修改另外只限 ADMIN。", source: "系統自動產生", sourceNote: "由您登入的帳號決定" },
   ],
   states: [{ table: "serviceState" }],
   sourceFiles: ["components/layout/**", "hooks/useServiceStatus.ts"],

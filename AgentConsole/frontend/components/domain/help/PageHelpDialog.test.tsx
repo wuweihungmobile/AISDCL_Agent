@@ -687,7 +687,13 @@ describe("AT_PH_04_5 詞表的載入、失敗與重取（R-PH-12）", () => {
     for (const [testId] of LEGEND_GROUPS) expect(screen.queryByTestId(testId), testId).toBeNull();
   });
 
-  it("AT_PH_04_5_2 三種失敗各渲染一次（504、網路失敗、回應沒有詞表）：都顯示「狀態詞表暫時取不到：」且冒號後非空；前三段照常；不顯示空表與詞表群", async () => {
+  it("AT_PH_04_5_2 三種失敗各渲染一次（504、網路失敗、回應沒有詞表）：都顯示「狀態詞表暫時取不到：」且冒號後非空；前三段照常；不顯示空表與詞表群；「回應沒有詞表」含 legend 四群任一群缺席或不是陣列（D-PH-8、PRD 勘誤 1-6）", async () => {
+    // 200 但 legend 四群之一壞掉：值設 undefined＝JSON 序列化時鍵被丟掉（缺席）；"x"＝有鍵但不是陣列。四群各一例，usableLegend 的四個 Array.isArray 才各自有人守
+    const brokenLegend =
+      (patch: Partial<Record<"statuses" | "results" | "sources" | "severities", unknown>>): NonNullable<IssuesStub["overrides"]["list"]> =>
+      () => ({
+        data: { items: [], legend: { ...clone(LEGEND), ...patch } },
+      });
     const cases: Array<{ name: string; override: NonNullable<IssuesStub["overrides"]["list"]>; reason?: string }> = [
       { name: "504", override: () => failure(504, { message: "上游逾時" }) },
       {
@@ -697,7 +703,11 @@ describe("AT_PH_04_5 詞表的載入、失敗與重取（R-PH-12）", () => {
         },
       },
       { name: "200 但沒有 legend", override: () => ({ data: { items: [] } }), reason: "回應沒有詞表" },
-      { name: "200 但 legend 缺 statuses", override: () => ({ data: { items: [], legend: { ...clone(LEGEND), statuses: undefined } } }), reason: "回應沒有詞表" },
+      { name: "200 但 legend 缺 statuses", override: brokenLegend({ statuses: undefined }), reason: "回應沒有詞表" },
+      { name: "200 但 legend 缺 results", override: brokenLegend({ results: undefined }), reason: "回應沒有詞表" },
+      { name: "200 但 legend 缺 sources", override: brokenLegend({ sources: undefined }), reason: "回應沒有詞表" },
+      { name: "200 但 legend 缺 severities", override: brokenLegend({ severities: undefined }), reason: "回應沒有詞表" },
+      { name: "200 但 legend 的 severities 不是陣列", override: brokenLegend({ severities: "x" }), reason: "回應沒有詞表" },
     ];
     for (const { name, override, reason } of cases) {
       const view = show(issuesPage(), { role: "VIEWER", stub: newStub({ overrides: { list: override } }) });
