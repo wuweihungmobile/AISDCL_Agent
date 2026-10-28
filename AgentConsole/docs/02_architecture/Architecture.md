@@ -331,6 +331,9 @@ app/
 ├── import/page.tsx                 # BRD/PRD 匯入解析（UI-SCR-06）
 ├── settings/page.tsx               # 系統參數設定（UI-SCR-09）
 ├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
+├── sysadmin/
+│   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、order 65 介於系統設定與自我進化之間、底部 Tab 不顯示）
+│   └── backup/page.tsx             # 資料庫備份：狀態卡、備份清單、排程與保留、控制面健康與資料新鮮度、還原與涵蓋範圍說明（唯讀；階段二加手動觸發與工作紀錄）
 └── api/health/route.ts             # 前端健康檢查（API-HLT-03）；PRD §4.2 的 BFF 層不實作
 ```
 
