@@ -14,6 +14,8 @@ import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, 
  *  - AT-PH-07-3-1、07-3-2、07-3-E-1：窄螢幕（390×844 對話框不超出視窗、頂列不橫向捲動、< 768 文字隱藏、兩張表逐列堆疊）；
  *  - AT-PH-07-4-1、07-4-2、07-4-3：axe（關閉態、開啟態、展開「全站共通」後；1440×900 與 390×844；WCAG 2.0／2.1 A／AA 零違規）。
  * 後端以本檔自帶的 `GET /api/v1/issues` 處理器代替（不改 mockApi.ts、不改既有 spec）：回黃金檔的 legend（真 CLI 輸出）；頂列的兩個輪詢端點由 `shellHandler` 供給，其餘 `/api/v1/**` 由 `installApiMock` 回 404。
+ * 2026-10-31 每頁說明補頁棒寫實 /sysadmin、/sysadmin/backup 兩頁後，路由迴圈也會走訪它們；這兩頁自己會取 `GET /api/v1/sysadmin/backups`，所以本檔另自帶一個同路徑的處理器（同樣不改 mockApi.ts），
+ * 回最小的健康總覽（形狀沿 sysadmin-backup.mock.spec.ts 的 OVERVIEW），讓兩頁正常渲染、而不是落到整頁失敗；它是頁面載入時自己發的請求（鍵在點擊前已出現），不影響「點擊後新增請求」的新穎性判定。
  * 請求計數用**新穎性規則**（D-PH-13）：「新增請求」＝點擊之後出現、且鍵在點擊之前沒出現過的請求；鍵＝（方法, 路徑），唯一例外是 `/api/v1/issues`，其鍵再含排序後的查詢串
  * （否則議題中心頁自己的清單請求會把詞表請求「吃掉」）；頁面自己的輪詢與頂列輪詢因路徑在點擊前已出現過而自然排除。點擊前的基線＝頁面載入、鈕可見後固定再等 1,000 毫秒（不用 networkidle：多數路由到不了），
  * 點擊後的觀察窗＝對話框出現後再等 500 毫秒。
@@ -44,7 +46,40 @@ const issuesLegend: MockHandler = (call) => {
   };
 };
 
-const BACKEND = compose(shellHandler(), issuesLegend);
+/** 備份總覽的一張卡（API 形）：排程、成功、十分鐘；全備與增備另帶 `latestBackup`（只有這兩張有此鍵，與 API 一致）。 */
+const backupCard = (job: string) => ({
+  job,
+  status: "succeeded",
+  trigger: "scheduled",
+  startedAt: "2026-10-26T18:00:00Z",
+  finishedAt: "2026-10-26T18:10:00Z",
+  durationSeconds: 600,
+  lastSuccessAt: "2026-10-26T18:10:00Z",
+  lastDueAt: "2026-10-26T18:00:00Z",
+  overdue: false,
+  never: false,
+  reason: null,
+  ...(job === "full" || job === "diff" ? { latestBackup: { label: "20261026-020002F", finishedAt: "2026-10-25T18:12:00Z", source: "pgbackrest" } } : {}),
+});
+
+/** `GET /api/v1/sysadmin/backups` 回最小的健康總覽：四張成功的卡、空備份清單、空排程、沒有備份庫、歸檔沒有失敗（全是假值，沒有任何機密）。 */
+const sysadminBackups: MockHandler = (call) => {
+  if (call.method !== "GET" || call.path !== "/api/v1/sysadmin/backups") return undefined;
+  return {
+    data: {
+      control: { available: true, canTrigger: false, reason: null, heartbeatAgeSeconds: 5, exportAgeSeconds: 12, exportGeneratedAt: "2026-10-27T06:39:08Z", warnings: [] },
+      timezone: "Asia/Taipei",
+      activeJob: null,
+      cards: ["full", "diff", "dump", "verify"].map(backupCard),
+      backups: [],
+      schedule: { entries: [], retention: null },
+      repos: [],
+      walArchive: { lastArchivedAt: "2026-10-27T02:15:00Z", failedCount: 0, lastFailedAt: null },
+    },
+  };
+};
+
+const BACKEND = compose(shellHandler(), issuesLegend, sysadminBackups);
 const concretePath = (template: string): string => template.replace("[projectId]", "p1").replace("[goalId]", "g1").replace("[taskId]", "t1");
 const titleOf = (id: keyof typeof HELP_PAGES): string => `${HELP_PAGES[id]?.title}・本頁說明`;
 
