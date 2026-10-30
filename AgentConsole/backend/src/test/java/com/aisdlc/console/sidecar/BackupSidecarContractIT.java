@@ -492,6 +492,61 @@ class BackupSidecarContractIT {
                 .noneMatch(line -> line.contains(".last_backup_status"));
     }
 
+    /**
+     * 階一的遮罩對拍（SCG-4 一審 F4／R-BK-42／D-BK-T15；TCS 的 AT-BK-07-3-1 經 runner 走、屬階二，這條是不需要 runner 的 sidecar 道等價物，編號 S-2）：
+     * 工作腳本逐行印出 {@code mask-probes.txt} 的每一條輸入，經 {@code job-run.sh} 寫出的 {@code detail_tail} 必須與探針檔的「期望輸出」欄逐行相同、
+     * 且不含任何「機密片段」。為什麼重要：console-api 端的 {@code BackupMasker} 是第二道，第一道（perl）若失效，機密就會先寫進共享卷的狀態檔，
+     * 對 sidecar 道沒有任何 AT 時第二道會把它掩蓋成「看起來沒洩漏」。stdout 依契約原樣透傳給 cron／docker 日誌（只有狀態檔尾段遮罩），所以此處另斷言它逐行等於探針的輸入欄，鎖住兩條路徑的差異。
+     */
+    @Test
+    void AT_BK_09_3_S_2_theWrapperMasksEveryProbeInTheStateFileTailExactlyAsTheProbeFileSpecifies() {
+        List<String[]> probes = new ArrayList<>();
+        for (String line : fixture("mask-probes.txt").lines().toList()) {
+            if (line.isEmpty() || line.startsWith("#")) {
+                continue;
+            }
+            String[] columns = line.split("\t", -1);
+            assertThat(columns).as("探針三欄（輸入、機密片段、期望輸出）：%s", line).hasSize(3);
+            probes.add(columns);
+        }
+        assertThat(probes.size()).as("防反空轉：探針檔有內容且含正負兩種").isGreaterThanOrEqualTo(15);
+        assertThat(probes.stream().filter(p -> !p[1].isEmpty()).count()).isGreaterThanOrEqualTo(8);
+        assertThat(probes.stream().filter(p -> p[1].isEmpty()).count()).isGreaterThanOrEqualTo(4);
+
+        Out out = run("at_bk_09_3_s_2", "STUB_JOB_PROBE_FILE=/opt/sidecar/fixtures/mask-probes.txt STUB_JOB_RC=1 bash $S/job-run.sh diff scheduled > stdout.txt 2> stderr.txt; echo rc=$?");
+
+        assertThat(out.out().strip()).isEqualTo("rc=1");
+        List<String> rawLines = new ArrayList<>(probes.stream().map(p -> p[0]).toList());
+        rawLines.add("stub diff done");
+        assertThat(readFile("at_bk_09_3_s_2", "stdout.txt").lines().toList())
+                .as("stdout 原樣透傳給 cron／docker 日誌（契約 C2、AT-BK-09-4-3：只有狀態檔尾段遮罩）：每條輸出逐行等於探針的輸入欄").isEqualTo(rawLines);
+        String tail = (String) map(json(cat("at_bk_09_3_s_2", "export/jobs/diff.json")).get("last")).get("detail_tail");
+        List<String> tailLines = tail.lines().toList();
+        List<String> expected = new ArrayList<>(probes.stream().map(p -> p[2]).toList());
+        expected.add("stub diff done");
+        assertThat(tailLines).as("每個探針的期望輸出整行依序出現（敏感段變 ***、非敏感段保留）").isEqualTo(expected);
+        for (String[] probe : probes) {
+            if (!probe[1].isEmpty()) {
+                assertThat(tail).as("機密片段不得留在狀態檔尾段：%s", probe[1]).doesNotContain(probe[1]);
+            }
+        }
+    }
+
+    /**
+     * 檔案與目錄模式（SCG-4 一審 U13）：讀取端（console-api）是另一個 uid，狀態檔必須 0644、目錄 0755。
+     * 測試先 {@code umask 077}，使「沒明確 chmod」就會得到 0600／0700——否則預設 umask 022 會讓移除 chmod 的缺陷偽裝成正確。
+     */
+    @Test
+    void AT_BK_09_3_S_3_theStateAndResultsFilesAreWorldReadableAndTheDirectoriesTraversableEvenUnderAStrictUmask() {
+        String script = "umask 077; STUB_JOB_OUT=OUT-LINE bash $S/job-run.sh full manual " + UUID_A + " > /dev/null 2>&1; echo rc=$?; "
+                + "stat -c '%a %n' out/export out/export/jobs out/export/jobs/full.json out/results out/results/" + UUID_A + ".json";
+
+        Out out = run("at_bk_09_3_s_3", script);
+
+        assertThat(out.out().lines().toList()).containsExactly("rc=0", "755 out/export", "755 out/export/jobs", "644 out/export/jobs/full.json",
+                "755 out/results", "644 out/results/" + UUID_A + ".json");
+    }
+
     // ══════════════════════════════════════════════════════════════════════════════════════════
     // 指標（pgbackrest-metrics.sh）
     // ══════════════════════════════════════════════════════════════════════════════════════════

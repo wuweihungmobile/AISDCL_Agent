@@ -114,7 +114,7 @@ public class BackupQueryService implements BackupQueryUseCase {
             active = jobs.findActive();
         } catch (RuntimeException e) {
             jobsDbFailed = true;
-            LOG.warn("備份工作表讀取失敗，總覽降級（activeJob 只取匯出的鎖狀態）：{}", e.toString());
+            LOG.warn("備份工作表讀取失敗，總覽降級（activeJob 只取匯出的鎖狀態）：{}", BackupMasker.mask(e.toString()));
         }
         WalArchiveStatsPort.Stats wal = null;
         boolean walFailed = false;
@@ -122,7 +122,7 @@ public class BackupQueryService implements BackupQueryUseCase {
             wal = walArchive.read();
         } catch (RuntimeException e) {
             walFailed = true;
-            LOG.warn("WAL 歸檔統計讀取失敗，walArchive 降級為 null：{}", e.toString());
+            LOG.warn("WAL 歸檔統計讀取失敗，walArchive 降級為 null：{}", BackupMasker.mask(e.toString()));
         }
 
         if (!export.infoOk) {
@@ -412,7 +412,7 @@ public class BackupQueryService implements BackupQueryUseCase {
     }
 
     private static ServiceUnavailableException dbUnavailable(RuntimeException cause) {
-        LOG.warn("備份工作表讀取失敗：{}", cause.toString());
+        LOG.warn("備份工作表讀取失敗：{}", BackupMasker.mask(cause.toString()));
         return new ServiceUnavailableException(BackupJobService.CONTROL_UNAVAILABLE_MESSAGE,
                 ErrorReasons.BACKUP_CONTROL_UNAVAILABLE);
     }

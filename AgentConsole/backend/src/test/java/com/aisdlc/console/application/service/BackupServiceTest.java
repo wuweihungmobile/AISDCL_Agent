@@ -1,5 +1,9 @@
 package com.aisdlc.console.application.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxyUtil;
+import ch.qos.logback.core.read.ListAppender;
 import com.aisdlc.console.application.port.in.BackupJobUseCase;
 import com.aisdlc.console.application.port.out.AuditTrail;
 import com.aisdlc.console.application.port.out.BackupControlPort;
@@ -14,6 +18,7 @@ import com.aisdlc.console.domain.exception.ServiceUnavailableException;
 import com.aisdlc.console.support.FakeBackupRunner;
 import com.aisdlc.console.support.MutableClock;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DuplicateKeyException;
@@ -65,6 +70,7 @@ class BackupServiceTest {
     private static final class FakeSettings implements BackupSettings {
         Path exportDir = Path.of("fake-export");
         Path requestDir = Path.of("fake-request");
+        long reconcileMs = 5000;
 
         @Override
         public Path exportDir() {
@@ -88,7 +94,7 @@ class BackupServiceTest {
 
         @Override
         public long reconcileIntervalMs() {
-            return 5000;
+            return reconcileMs;
         }
 
         @Override
@@ -112,6 +118,7 @@ class BackupServiceTest {
         final AtomicInteger reads = new AtomicInteger();
         final List<String> calls;
         final List<UUID> deleted = new CopyOnWriteArrayList<>();
+        final List<Instant> staleCutoffs = new CopyOnWriteArrayList<>();
         final List<Request> written = new CopyOnWriteArrayList<>();
         Runnable beforeWriteFails;
         boolean writeFails;
@@ -150,6 +157,7 @@ class BackupServiceTest {
 
         @Override
         public int deleteStaleRequests(Instant olderThan) {
+            staleCutoffs.add(olderThan);
             return 0;
         }
     }
@@ -159,6 +167,9 @@ class BackupServiceTest {
         final List<String> calls;
         final List<String> statements = new ArrayList<>();
         int findActiveFailures;
+        String failureText = "模擬資料庫失敗";
+        /** 非 null ＝所有 UPDATE 類操作（標 RUNNING、標終態、標 EXPIRED）都丟它（模擬資料庫在寫入時壞掉）。 */
+        RuntimeException updateFault;
         boolean duplicateOnInsert;
 
         FakeRepo(List<String> calls) {
@@ -170,7 +181,7 @@ class BackupServiceTest {
             calls.add("findActive");
             if (findActiveFailures > 0) {
                 findActiveFailures--;
-                throw new DataAccessResourceFailureException("模擬資料庫失敗");
+                throw new DataAccessResourceFailureException(failureText);
             }
             return rows.values().stream().filter(job -> job.status().isActive()).toList();
         }
@@ -187,6 +198,9 @@ class BackupServiceTest {
         @Override
         public synchronized boolean markRunningIfQueued(UUID id, Instant startedAt) {
             statements.add("markRunningIfQueued WHERE status='QUEUED'");
+            if (updateFault != null) {
+                throw updateFault;
+            }
             Job job = rows.get(id);
             if (job == null || job.status() != Status.QUEUED) {
                 return false;
@@ -199,6 +213,9 @@ class BackupServiceTest {
         public synchronized boolean markTerminalIfActive(UUID id, Status status, Integer exitCode, String reason, Instant startedAt,
                                                          Instant finishedAt, String detail) {
             statements.add("markTerminalIfActive WHERE status IN ('QUEUED','RUNNING')");
+            if (updateFault != null) {
+                throw updateFault;
+            }
             Job job = rows.get(id);
             if (job == null || !job.status().isActive()) {
                 return false;
@@ -211,6 +228,9 @@ class BackupServiceTest {
         @Override
         public synchronized boolean markExpiredIfQueued(UUID id, Instant finishedAt) {
             statements.add("markExpiredIfQueued WHERE status='QUEUED'");
+            if (updateFault != null) {
+                throw updateFault;
+            }
             Job job = rows.get(id);
             if (job == null || job.status() != Status.QUEUED) {
                 return false;
@@ -869,5 +889,113 @@ class BackupServiceTest {
         Map<String, Object> noConfirm = new LinkedHashMap<>(Map.of("type", "full", "confirm", "true"));
         assertThatThrownBy(() -> f.jobs.trigger("admin", noConfirm)).as("字串 \"true\" 不是布林 true").hasMessage(BackupJobService.CONFIRM_REQUIRED_MESSAGE);
         assertThat(f.calls).isEmpty();
+    }
+
+    // ── F6(c)(d)：對帳排程與啟動接線（SCG-4 一審 U7、U9）──────────────────────────────────────
+
+    @Test
+    void AT_BK_06_8_4_startRegistersAPeriodicReconcileThatKeepsRunningAtTheConfiguredInterval() throws InterruptedException {
+        Fixture f = new Fixture();
+        f.settings.reconcileMs = 20;
+        try {
+            assertThat(f.reconciler.start()).as("兩個目錄都設了 ⇒ 註冊").isTrue();
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (f.calls.stream().filter("findActive"::equals).count() < 3 && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(f.calls.stream().filter("findActive"::equals).count()).as("排程自行反覆對帳（不靠 GET 順帶）").isGreaterThanOrEqualTo(3);
+        } finally {
+            f.reconciler.stop();
+        }
+        f.settings.requestDir = null;
+        assertThat(new BackupJobReconciler(f.settings, f.control, f.repo, f.clock, f.audit).start()).as("請求目錄未設 ⇒ 不註冊").isFalse();
+    }
+
+    @Test
+    void AT_BK_06_3_S_2_onReadyCleansStaleRequestsOnceWith24hCutoffThenRegistersTheSchedule() throws InterruptedException {
+        Fixture f = new Fixture();
+        f.settings.reconcileMs = 20;
+        try {
+            f.reconciler.onReady();
+
+            assertThat(f.control.staleCutoffs).as("啟動呼叫一次殘檔清理，門檻＝現在減 24 小時").containsExactly(T0.minus(Duration.ofHours(24)));
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (!f.calls.contains("findActive") && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            assertThat(f.calls).as("清殘檔之後排程也註冊了：排程自行對帳一輪（呼叫 findActive）").contains("findActive");
+        } finally {
+            f.reconciler.stop();
+        }
+    }
+
+    // ── F3：資料庫例外的訊息夾帶連線字串與密碼時，WARN 日誌也不得外洩（SCG-4 一審 F3／R-BK-58 的日誌面）──────────────
+    // 為什麼重要：Spring 的 DataAccessException 訊息常含 jdbc URL（連同密碼參數）；八處降級／補償日誌原本以 e.toString() 原樣寫出，
+    // 機密就進了集中式日誌。八處都改為經 BackupMasker 遮罩；其中 GET /jobs、GET /jobs/{id}、POST 的兩處與對帳本輪失敗由 BackupApiIT 鎖，
+    // 以下三個單元測試鎖其餘四處（總覽的工作表降級與 WAL 降級、補償 UPDATE 失敗、逐列對帳失敗），任一處還原成 e.toString() 即轉紅。
+
+    private static final String LEAKED_URL = "jdbc:postgresql://db/x?password=fake-pass-example"; // secret-scan-ok: 遮罩測試的合成探針
+    private static final String LEAKED_SECRET = "fake-pass-example"; // secret-scan-ok: 遮罩測試的合成探針
+
+    /** 擷取 action 執行期間的全部日誌（格式化訊息加例外鏈）；失敗路徑的 WARN 都會經 root 的 appender。 */
+    private static List<String> logsDuring(Runnable action) {
+        Logger root = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        root.addAppender(appender);
+        try {
+            action.run();
+        } finally {
+            root.detachAppender(appender);
+        }
+        List<String> rendered = appender.list.stream().map(event -> event.getFormattedMessage()
+                + (event.getThrowableProxy() == null ? "" : "\n" + ThrowableProxyUtil.asString(event.getThrowableProxy()))).toList();
+        appender.stop();
+        return rendered;
+    }
+
+    @Test
+    void AT_BK_10_4_1_theOverviewDegradationLogsNeverCarryTheDatabaseOrWalErrorText() {
+        Fixture f = new Fixture();
+        f.repo.failureText = "連線失敗：" + LEAKED_URL;
+        f.repo.findActiveFailures = 2; // 第一次給 GET 順帶的對帳、第二次給總覽自己的讀取
+        f.wal = () -> {
+            throw new IllegalStateException("統計讀取失敗：" + LEAKED_URL);
+        };
+
+        List<String> logs = logsDuring(() -> f.overview(true));
+
+        assertThat(logs).as("防反空轉：對帳、總覽的工作表讀取、WAL 統計三條降級日誌都有出現")
+                .anyMatch(line -> line.contains("對帳本輪失敗")).anyMatch(line -> line.contains("總覽降級"))
+                .anyMatch(line -> line.contains("walArchive 降級"));
+        assertThat(logs).as("日誌不含連線字串中的密碼（遮罩後只剩 ***）").noneMatch(line -> line.contains(LEAKED_SECRET));
+    }
+
+    @Test
+    void AT_BK_10_4_1_theCompensationFailureLogNeverCarriesTheDatabaseErrorText() {
+        Fixture f = new Fixture();
+        f.control.writeFails = true; // 請求檔寫不進去 ⇒ 走補償
+        f.repo.updateFault = new DataAccessResourceFailureException("補償失敗：" + LEAKED_URL); // 補償的條件式 UPDATE 也壞
+
+        List<String> logs = logsDuring(() -> assertThatThrownBy(() -> f.jobs.trigger("admin", triggerBody("verify")))
+                .as("補償失敗只記 WARN，503 照回").isInstanceOf(ServiceUnavailableException.class));
+
+        assertThat(logs).as("防反空轉：補償失敗有被記錄").anyMatch(line -> line.contains("補償 UPDATE 失敗"));
+        assertThat(logs).as("日誌不含連線字串中的密碼").noneMatch(line -> line.contains(LEAKED_SECRET));
+    }
+
+    @Test
+    void AT_BK_10_4_1_thePerRowReconcileFailureLogNeverCarriesTheDatabaseErrorText() {
+        Fixture f = new Fixture();
+        Job queued = row(Status.QUEUED, T0, null);
+        f.repo.rows.put(queued.id(), queued);
+        f.clock.set(T0.plusSeconds(241)); // 逾 2 倍 TTL ⇒ 對帳要標 EXPIRED
+        f.heartbeat(3, false);
+        f.repo.updateFault = new DataAccessResourceFailureException("更新失敗：" + LEAKED_URL);
+
+        List<String> logs = logsDuring(() -> assertThat(f.reconciler.reconcileOnce()).as("該列更新失敗＝本輪無變更").isZero());
+
+        assertThat(logs).as("防反空轉：逐列失敗有被記錄（帶該列 id）").anyMatch(line -> line.contains("對帳工作 " + queued.id()));
+        assertThat(logs).as("日誌不含連線字串中的密碼").noneMatch(line -> line.contains(LEAKED_SECRET));
     }
 }

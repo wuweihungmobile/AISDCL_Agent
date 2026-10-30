@@ -15,6 +15,7 @@ import com.aisdlc.console.domain.exception.UnprocessableException;
 import com.aisdlc.console.domain.exception.ValidationException;
 import com.aisdlc.console.domain.exception.Violation;
 import com.aisdlc.console.domain.model.backup.BackupJobReason;
+import com.aisdlc.console.domain.model.backup.BackupMasker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
@@ -92,7 +93,7 @@ public class BackupJobService implements BackupJobUseCase {
                 throw new ConflictException(IN_PROGRESS_MESSAGE, ErrorReasons.BACKUP_JOB_IN_PROGRESS);
             }
         } catch (DataAccessException e) {
-            LOG.warn("備份工作表讀取失敗，POST 回 503：{}", e.toString());
+            LOG.warn("備份工作表讀取失敗，POST 回 503：{}", BackupMasker.mask(e.toString()));
             throw controlUnavailable();
         }
         checkFrequency(type, export);
@@ -106,7 +107,7 @@ public class BackupJobService implements BackupJobUseCase {
             // 併發的輸家：部分唯一索引拒絕了第二個進行中的列
             throw new ConflictException(IN_PROGRESS_MESSAGE, ErrorReasons.BACKUP_JOB_IN_PROGRESS);
         } catch (DataAccessException e) {
-            LOG.warn("備份工作列建立失敗，POST 回 503：{}", e.toString());
+            LOG.warn("備份工作列建立失敗，POST 回 503：{}", BackupMasker.mask(e.toString()));
             throw controlUnavailable();
         }
         audit.note("backup.trigger", "backup", id.toString());
@@ -170,7 +171,7 @@ public class BackupJobService implements BackupJobUseCase {
             jobs.markTerminalIfActive(id, Status.FAILED, null, BackupJobReason.CONTROL_WRITE_FAILED.value(), null,
                     clock.instant(), "");
         } catch (RuntimeException e) {
-            LOG.warn("補償 UPDATE 失敗（該列可能停在 QUEUED，由對帳的過期兜底收回）：{}", e.toString());
+            LOG.warn("補償 UPDATE 失敗（該列可能停在 QUEUED，由對帳的過期兜底收回）：{}", BackupMasker.mask(e.toString()));
         }
     }
 

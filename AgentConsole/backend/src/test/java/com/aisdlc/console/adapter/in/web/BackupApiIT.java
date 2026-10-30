@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.TimeZone;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -331,6 +332,7 @@ class BackupApiIT extends AbstractApiIT {
             Map<String, Object> incr = new LinkedHashMap<>(backups.get(0));
             incr.put("label", "20261026-020000F_20261027-100000I");
             incr.put("type", "incr");
+            incr.put("prior", "20261026-020002F"); // 刻意帶 prior：baseLabel 對 incr 仍須為 null（F6a）
             backups.add(incr);
             // 平手：repo1 全備與 repo2 全備的 stop 相同
             Map<String, Object> repo2Full = backups.stream().filter(b -> "20261026-020002F".equals(b.get("label"))).findFirst().orElseThrow();
@@ -351,6 +353,12 @@ class BackupApiIT extends AbstractApiIT {
         assertThat(labels.get(0)).as("新到舊：最新的是邏輯備份").isEqualTo("aisdlc-20261026-183000.dump");
         assertThat(first.<List<String>>read("$.data.backups[?(@.label=='20261026-020000F_20261027-100000I')].kind")).as("incr 不被歸成 diff")
                 .containsExactly("incr");
+        // F6(a)：baseLabel 只給 diff 列（取其 prior）；incr 的夾具刻意帶 prior，仍須為 null；全備無 prior 亦 null
+        assertThat(first.<List<String>>read("$.data.backups[?(@.label=='20261026-020000F_20261027-100000I')].baseLabel"))
+                .as("incr 帶 prior 也不給 baseLabel").hasSize(1).containsNull();
+        assertThat(first.<List<String>>read("$.data.backups[?(@.label=='20261026-020000F_20261027-020000D')].baseLabel"))
+                .as("diff 的 baseLabel＝其 prior").containsExactly("20261026-020000F");
+        assertThat(first.<List<String>>read("$.data.backups[?(@.label=='20261026-020000F')].baseLabel")).as("全備無 prior").hasSize(1).containsNull();
     }
 
     @Test
@@ -759,7 +767,14 @@ class BackupApiIT extends AbstractApiIT {
             assertThat(opt(resp, "$.data.activeJob.requestedBy")).isNull();
             assertThat(resp.body()).doesNotContain("CANARY-REQ-9c1e").doesNotContain("CANARY-DET-4b2d");
         }
-        assertThat(overview(admin()).<String>read("$.data.activeJob.requestedBy")).isEqualTo("CANARY-REQ-9c1e");
+        Resp adminView = overview(admin());
+        assertThat(adminView.<String>read("$.data.activeJob.requestedBy")).isEqualTo("CANARY-REQ-9c1e");
+        // F6(b)：cards[].requestedBy 只在進行中的那個 job 對應的卡有值，其他卡（含同為 ADMIN 視角）一律 null
+        assertThat(adminView.<List<String>>read("$.data.cards[?(@.job=='diff')].requestedBy")).containsExactly("CANARY-REQ-9c1e");
+        for (String other : List.of("full", "dump", "verify")) {
+            assertThat(adminView.<List<Object>>read("$.data.cards[?(@.job=='" + other + "')].requestedBy")).as(other + " 非進行中").hasSize(1)
+                    .containsOnlyNulls();
+        }
     }
 
     @Test
@@ -909,6 +924,57 @@ class BackupApiIT extends AbstractApiIT {
             for (String block : List.of("cards", "backups", "schedule", "repos", "walArchive", "activeJob")) {
                 assertThat(resp.<Object>read("$.data." + block)).as("%s：%s 必須為 null（不顯示部分資料）", fault.getKey(), block).isNull();
             }
+        }
+    }
+
+    /**
+     * AT-BK-05-3-1 的「缺席」faults（D-BK-T6／R-BK-25；SCG-4 一審 F1）：sidecar 首次啟動的窗口真會遇到匯出檔尚未產生。
+     * info／logical／schedule 缺席＝控制面資料不完整 ⇒ export_unreadable 且資料區塊全 null（含 schedule 缺席不得因時區為 null 而 500）；
+     * 心跳缺席＝runner_offline、資料照回；單一 job 狀態檔缺席＝該卡 no_run（工作從未跑過是合法狀態）。
+     */
+    @Test
+    void AT_BK_05_3_1_aMissingExportFileIsClassifiedByItsRoleAndNeverFailsTheRequest() throws IOException {
+        for (String file : List.of("export/info.json", "export/logical.json", "export/schedule.json")) {
+            runner.clearDirectories();
+            seed();
+            deleteExport(file);
+
+            Resp resp = overview();
+
+            assertThat(resp.status()).as(file + " 缺席").isEqualTo(200);
+            assertThat(resp.<String>read("$.data.control.reason")).as(file + " 缺席").isEqualTo("export_unreadable");
+            assertThat(resp.<Boolean>read("$.data.control.canTrigger")).as(file + " 缺席").isFalse();
+            for (String block : List.of("timezone", "cards", "backups", "schedule", "repos", "walArchive", "activeJob")) {
+                assertThat(resp.<Object>read("$.data." + block)).as("%s 缺席：%s 必須為 null", file, block).isNull();
+            }
+        }
+
+        runner.clearDirectories();
+        seed();
+        runnerHeartbeatAbsent();
+        Resp offline = overview();
+        assertThat(offline.status()).isEqualTo(200);
+        assertThat(offline.<String>read("$.data.control.reason")).as("心跳缺席").isEqualTo("runner_offline");
+        assertThat(offline.<Object>read("$.data.cards")).as("心跳缺席：資料照回").isNotNull();
+        assertThat(offline.<Object>read("$.data.backups")).isNotNull();
+
+        runner.clearDirectories();
+        seed();
+        job("full", FakeBackupRunner.jobJson("full", "scheduled", "succeeded", 0, null, "2026-10-26T18:00:00Z", "2026-10-26T18:10:00Z", "ok",
+                "2026-10-26T18:10:00Z"));
+        assertThat(overview().<List<String>>read("$.data.cards[?(@.job=='full')].status")).as("有檔時不是 no_run").doesNotContain("no_run");
+        deleteExport("export/jobs/full.json");
+        Resp noRun = overview();
+        assertThat(noRun.status()).isEqualTo(200);
+        assertThat(noRun.<Object>read("$.data.control.reason")).as("單一 job 檔缺席不是控制面故障").isNull();
+        assertThat(noRun.<List<String>>read("$.data.cards[?(@.job=='full')].status")).containsExactly("no_run");
+    }
+
+    private void deleteExport(String relativePath) {
+        try {
+            Files.deleteIfExists(exportRoot.resolve(relativePath));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -1760,6 +1826,57 @@ class BackupApiIT extends AbstractApiIT {
         corpus.addAll(files);
         assertThat(leakProblems(corpus, secrets)).as("植入值只可能以遮罩形 *** 出現").isEmpty();
         assertThat(responses.get(0)).as("ADMIN 看到的是遮罩後的尾段").contains("AWS_SECRET_ACCESS_KEY=***").contains("pass=***");
+    }
+
+    /**
+     * AT-BK-10-4-1 的 503 路徑洩漏鎖（SCG-4 一審 F3）：資料庫例外的訊息可能夾帶連線字串與密碼；
+     * GET /jobs、GET /jobs/{id}、POST /jobs 三條 503 路徑的回應本文與日誌（訊息、參數、例外鏈）都不得含該字串，reason 一律 backup_control_unavailable。
+     */
+    @Test
+    void AT_BK_10_4_1_aDatabaseFailureCarryingAConnectionStringNeverReachesTheResponseOrTheLogs() {
+        String leaked = "jdbc:postgresql://db/x?password=fake-pass-example"; // secret-scan-ok: 遮罩測試的合成探針
+        String secretOnly = "fake-pass-example"; // secret-scan-ok: 遮罩測試的合成探針
+        seed();
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.list = new CopyOnWriteArrayList<>(); // HTTP 執行緒與對帳排程的執行緒也會寫日誌：換成並行安全的清單（同 ExecutionSecretLeakApiIT）
+        appender.start();
+        ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        root.addAppender(appender);
+        Map<String, Resp> responses = new LinkedHashMap<>();
+        try {
+            BackupSeam.failJobRepository(null, new org.springframework.dao.DataAccessResourceFailureException("連線失敗：" + leaked));
+            responses.put("GET /jobs", api.get(admin(), JOBS));
+            responses.put("GET /jobs/{id}", api.get(admin(), JOBS + "/" + UUID.randomUUID()));
+            responses.put("POST /jobs（findActive 失敗）", post(admin(), request("verify")));
+            BackupSeam.failJobRepository("insertQueued", new org.springframework.dao.DataAccessResourceFailureException("寫入失敗：" + leaked));
+            responses.put("POST /jobs（insertQueued 失敗）", post(admin(), request("verify")));
+        } finally {
+            BackupSeam.healJobRepository();
+            root.detachAppender(appender);
+        }
+        List<String> logs = new ArrayList<>();
+        appender.list.forEach(event -> {
+            logs.add(event.getFormattedMessage());
+            if (event.getArgumentArray() != null) {
+                for (Object argument : event.getArgumentArray()) {
+                    logs.add(String.valueOf(argument));
+                }
+            }
+            if (event.getThrowableProxy() != null) {
+                logs.add(String.valueOf(event.getThrowableProxy().getMessage()));
+            }
+        });
+
+        assertThat(responses).hasSize(4);
+        for (Map.Entry<String, Resp> entry : responses.entrySet()) {
+            Resp resp = entry.getValue();
+            assertThat(resp.status()).as(entry.getKey()).isEqualTo(503);
+            assertThat(resp.<String>read("$.reason")).as(entry.getKey()).isEqualTo("backup_control_unavailable");
+            assertThat(resp.body()).as(entry.getKey() + " 回應本文").doesNotContain(secretOnly).doesNotContain("jdbc:");
+        }
+        assertThat(logs).as("防反空轉：失敗確實被記錄").anyMatch(line -> line.contains("備份工作"));
+        assertThat(logs).as("日誌不含連線字串中的密碼").noneMatch(line -> line.contains(secretOnly));
+        assertThat(jobRows()).as("insertQueued 失敗後不留列").isZero();
     }
 
     @Test

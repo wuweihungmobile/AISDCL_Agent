@@ -1,16 +1,21 @@
 package com.aisdlc.console.support;
 
 import com.aisdlc.console.application.port.out.AuditTrail;
+import com.aisdlc.console.application.port.out.BackupJobRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 備份整合測試的接縫（TCS-SysAdminBackup-20261027 §5.2、D-BK-T3）。兩件事，全部以 {@code @Primary} 換掉同型的正式 Bean——
@@ -37,6 +42,48 @@ public class BackupSeam {
     @Primary
     ObservedAuditTrail observedAuditTrail(@Qualifier("requestAuditTrail") AuditTrail real, JdbcTemplate jdbc) {
         return new ObservedAuditTrail(real, jdbc);
+    }
+
+    private record Fault(String methodName, RuntimeException exception) {
+    }
+
+    private static final AtomicReference<Fault> JOB_REPOSITORY_FAULT = new AtomicReference<>();
+
+    /** 讓備份工作表的指定方法（{@code null}＝每個方法）丟出指定例外（模擬 DB 失敗且訊息夾帶機密）；測試結束必須 {@link #healJobRepository()}。 */
+    public static void failJobRepository(String methodName, RuntimeException fault) {
+        JOB_REPOSITORY_FAULT.set(new Fault(methodName, fault));
+    }
+
+    public static void healJobRepository() {
+        JOB_REPOSITORY_FAULT.set(null);
+    }
+
+    /**
+     * 把正式的 {@link BackupJobRepository}（package-private 的 JDBC 實作，測試包拿不到型別）包成「平時全委派、被指定時丟例外」的 JDK 代理——
+     * 用 BeanPostProcessor 而不是 {@code @Primary} 替身，所以不必認得實作類別，其餘行為與正式 Bean 逐位元相同。
+     */
+    @Bean
+    static BeanPostProcessor failableJobRepository() {
+        return new BeanPostProcessor() {
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) {
+                if (!(bean instanceof BackupJobRepository real)) {
+                    return bean;
+                }
+                return Proxy.newProxyInstance(BackupJobRepository.class.getClassLoader(), new Class<?>[] {BackupJobRepository.class},
+                        (proxy, method, args) -> {
+                            Fault fault = JOB_REPOSITORY_FAULT.get();
+                            if (fault != null && (fault.methodName() == null || fault.methodName().equals(method.getName()))) {
+                                throw fault.exception();
+                            }
+                            try {
+                                return method.invoke(real, args);
+                            } catch (InvocationTargetException e) {
+                                throw e.getCause();
+                            }
+                        });
+            }
+        };
     }
 
     /** 委派給正式實作的審計包裝；記錄 {@code backup.finished} 被呼叫當下的資料列狀態。 */

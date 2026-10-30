@@ -135,7 +135,7 @@ public class BackupJobReconciler {
         try {
             reconcileOnce();
         } catch (RuntimeException e) {
-            LOG.warn("備份工作對帳本輪失敗（下一輪會再試）：{}", e.toString());
+            LOG.warn("備份工作對帳本輪失敗（下一輪會再試）：{}", BackupMasker.mask(e.toString()));
         }
     }
 
@@ -159,7 +159,7 @@ public class BackupJobReconciler {
             try {
                 changed += reconcile(row, now, heartbeat);
             } catch (RuntimeException e) {
-                LOG.warn("對帳工作 {} 失敗（其他工作照常）：{}", row.id(), e.toString());
+                LOG.warn("對帳工作 {} 失敗（其他工作照常）：{}", row.id(), BackupMasker.mask(e.toString()));
             }
         }
         return changed;

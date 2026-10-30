@@ -10,9 +10,11 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -115,6 +117,65 @@ class FileBackupControlAdapterTest {
         assertThatThrownBy(() -> adapter.writeRequest(request(occupied))).as("改名失敗").isInstanceOf(IOException.class);
         assertThat(names(requests)).as("沒有任何殘留的 .tmp").noneMatch(name -> name.endsWith(".tmp"));
         assertThat(Files.isDirectory(blocker)).as("占用者原封不動").isTrue();
+    }
+
+    /**
+     * F6(e)（SCG-4 一審 U12）：同一請求檔被第二次寫入時覆蓋成功、目錄無 {@code .tmp} 殘留。另以原始碼鎖「改名一律 ATOMIC_MOVE」：
+     * REPLACE_EXISTING 與 ATOMIC_MOVE 在單執行緒行為上無法區分（兩者都覆寫），但前者在 Linux 非原子——runner 可能讀到半個檔，
+     * 這是行為測試抓不到、卻是本設計的根本理由，所以以字面鎖住（改法必須連同本測試一起改並寫 WHY）。
+     */
+    @Test
+    void AT_BK_06_9_2_aSecondWriteOverwritesInPlaceLeavesNoTmpAndTheRenameIsDeclaredAtomic(@TempDir Path root) throws IOException {
+        Path requests = Files.createDirectory(root.resolve("req"));
+        FileBackupControlAdapter adapter = new FileBackupControlAdapter(new Settings(root.resolve("out"), requests));
+        UUID id = UUID.randomUUID();
+        adapter.writeRequest(request(id));
+        adapter.writeRequest(new BackupControlPort.Request(id, "full", T0.plusSeconds(60), T0.plusSeconds(180)));
+
+        assertThat(names(requests)).as("覆蓋後仍只有一個檔、沒有 .tmp").containsExactly(id + ".json");
+        assertThat(Files.readString(requests.resolve(id + ".json"), StandardCharsets.UTF_8)).contains("\"type\":\"full\"")
+                .contains("2026-10-27T02:01:00Z");
+
+        String source = Files.readString(Path.of("src/main/java/com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java"),
+                StandardCharsets.UTF_8);
+        assertThat(source).as("寫檔改名必須宣告 ATOMIC_MOVE").contains("StandardCopyOption.ATOMIC_MOVE").doesNotContain("REPLACE_EXISTING");
+    }
+
+    /**
+     * F6(f)（SCG-4 一審 U13，Java 側）：請求檔必須讓另一個 uid（sidecar 的 runner）讀得到——POSIX 系統上 0644，且在改名<b>之前</b>就設好
+     * （先改名、後改權限，runner 可能在空窗讀到 0600 的檔）。兩層鎖，因為單靠任一層都有盲區：
+     * (1) 行為（只在支援 posix 檔案屬性的系統上斷言）：預先放一個 0600 的 {@code <id>.json.tmp}，{@code writeRequest} 覆寫它時檔案模式不變，
+     * 所以只有「明確設 0644」才會讓成品是 0644——不依賴行程的 umask（預設 022 下新檔本來就是 0644，直接斷言會變成永遠綠的空測試）；
+     * (2) 原始碼（Windows 沒有 posix 屬性，行為層在那裡不跑）：設權限的呼叫必須存在、先於 ATOMIC_MOVE 改名、且權限字串為 rw-r--r--
+     * （改法必須連同本測試一起改並寫 WHY；同 U12 的字面鎖理由）。
+     */
+    @Test
+    void AT_BK_06_9_3_theRequestFileIsReadableByOthersAndTheModeIsSetBeforeTheAtomicRename(@TempDir Path root) throws IOException {
+        Path requests = Files.createDirectory(root.resolve("req"));
+        FileBackupControlAdapter adapter = new FileBackupControlAdapter(new Settings(root.resolve("out"), requests));
+        UUID id = UUID.randomUUID();
+        boolean posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+        if (posix) {
+            Path stale = requests.resolve(id + ".json.tmp");
+            Files.writeString(stale, "stale", StandardCharsets.UTF_8);
+            Files.setPosixFilePermissions(stale, PosixFilePermissions.fromString("rw-------"));
+        }
+
+        adapter.writeRequest(request(id));
+
+        if (posix) {
+            assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(requests.resolve(id + ".json"))))
+                    .as("POSIX：請求檔 0644（預放的 0600 暫存檔被覆寫後仍須變成 0644）").isEqualTo("rw-r--r--");
+        }
+        String source = Files.readString(Path.of("src/main/java/com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java"),
+                StandardCharsets.UTF_8);
+        int setMode = source.indexOf("allowOthersToRead(temporary)");
+        int rename = source.indexOf("Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE)");
+        assertThat(setMode).as("寫檔流程必須呼叫 allowOthersToRead").isNotNegative();
+        assertThat(rename).as("改名一律 ATOMIC_MOVE").isNotNegative();
+        assertThat(setMode).as("設權限先於改名").isLessThan(rename);
+        assertThat(source).as("權限字串與設定方式").contains("READABLE_BY_OTHERS = \"rw-r--r--\"")
+                .contains("Files.setPosixFilePermissions(file, PosixFilePermissions.fromString(READABLE_BY_OTHERS))");
     }
 
     // ── 讀取：缺席與讀不出來是兩件事 ────────────────────────────────────────────────────────
