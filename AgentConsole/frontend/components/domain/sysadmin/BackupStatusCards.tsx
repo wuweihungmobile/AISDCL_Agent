@@ -85,7 +85,14 @@ function StatusCard({ card, repos, isAdmin }: { card: BackupCard; repos: Readonl
         </p>
       ) : null}
       {tail !== null ? (
-        <pre data-testid={`bk-tail-${card.job}`} className="max-h-48 overflow-auto rounded-md border border-wg-line bg-white px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-wg-text">
+        // 可捲動容器（max-h-48）要能用鍵盤抵達：tabIndex 0＋role region＋名稱（帶工作名，三張卡互不相同）；焦點環由全域 :focus-visible 提供（axe scrollable-region-focusable，SCG-4 F11）
+        <pre
+          data-testid={`bk-tail-${card.job}`}
+          tabIndex={0}
+          role="region"
+          aria-label={`${scheduleJobLabel(card.job)} 輸出尾段（可捲動）`}
+          className="max-h-48 overflow-auto rounded-md border border-wg-line bg-white px-3 py-2 font-mono text-xs break-all whitespace-pre-wrap text-wg-text"
+        >
           {tail}
         </pre>
       ) : null}

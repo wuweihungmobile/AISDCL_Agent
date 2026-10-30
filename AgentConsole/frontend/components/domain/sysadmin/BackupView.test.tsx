@@ -108,6 +108,14 @@ describe("AT_BK_02_1 清單新到舊十欄", () => {
       expect(text(c[8]), `${b.label} 基準`).toBe(b.kind === "diff" ? (b.baseLabel as string) : "—");
     }
   });
+
+  it("AT_BK_02_1_3 十欄表的外層容器是可用鍵盤捲動的區域（窄螢幕橫向溢出；axe scrollable-region-focusable，SCG-4 F11）：role=region、tabindex=0、名稱「備份清單（可橫向捲動）」，且恰好包著 bk-table", async () => {
+    await open();
+    const region = screen.getByRole("region", { name: "備份清單（可橫向捲動）" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toContainElement(testId("bk-table"));
+    expect(region.querySelectorAll("table")).toHaveLength(1);
+  });
 });
 
 describe("AT_BK_02_2 校驗錯誤警示色", () => {
@@ -432,6 +440,27 @@ describe("AT_BK_04_2 失敗色與最近成功", () => {
     expect(tail.querySelector("img, script")).toBeNull();
     expect((window as unknown as Record<string, unknown>).__xss).toBeUndefined();
   });
+
+  it("AT_BK_04_2_3 ADMIN 的輸出尾段（max-h-48 的可捲動 pre）可用鍵盤抵達（axe scrollable-region-focusable，SCG-4 F11）：60 行長尾段時仍是 role=region、tabindex=0，名稱帶工作名且三張卡互不相同、不含尾段內容；非 ADMIN 沒有任何輸出尾段區域", async () => {
+    const longTail = Array.from({ length: 60 }, (_, i) => `輸出第 ${i + 1} 行`).join("\n");
+    const overview = makeOverview({ cards: makeCards({ full: { detailTail: longTail }, diff: { detailTail: longTail }, dump: { detailTail: longTail } }) });
+    const admin = await open({ overview, role: "ADMIN" });
+    const regions = screen.getAllByRole("region", { name: /輸出尾段（可捲動）$/ });
+    expect(regions, "full、diff、dump 三張卡各一個（verify 從未執行、沒有尾段）").toEqual([testId("bk-tail-full"), testId("bk-tail-diff"), testId("bk-tail-dump")]);
+    for (const region of regions) {
+      expect(region.tagName).toBe("PRE");
+      expect(region).toHaveAttribute("tabindex", "0");
+      expect(region).toHaveTextContent("輸出第 60 行");
+    }
+    const names = regions.map((region) => region.getAttribute("aria-label"));
+    expect(names).toEqual(["全備 輸出尾段（可捲動）", "增備（差異） 輸出尾段（可捲動）", "離站 pg_dump 輸出尾段（可捲動）"]);
+    expect(new Set(names).size, "三個名稱互不相同").toBe(3);
+    for (const name of names) expect(name, "名稱是固定字串，不夾帶輸出內容").not.toContain("輸出第");
+    admin.unmount();
+
+    await open({ overview, role: "OPERATOR" });
+    expect(screen.queryAllByRole("region", { name: /輸出尾段/ }), "非 ADMIN 的 DOM 內沒有任何輸出尾段區域").toHaveLength(0);
+  });
 });
 
 describe("AT_BK_04_3 逾期只顯示 card.overdue", () => {
@@ -652,5 +681,16 @@ describe("AT_BK_08_2 涵蓋範圍表", () => {
     expect(note).toHaveTextContent("PGBACKREST_CIPHER_PASS 遺失＝備份無法還原");
     expect(note).toHaveTextContent("CONSOLE_ENCRYPTION_KEY 遺失＝敏感參數無法解密，請另行保管");
     expect(text(note)).toBe(KEY_LOSS_NOTE);
+  });
+
+  it("AT_BK_08_2_2 涵蓋範圍表的外層容器是可用鍵盤捲動的區域（窄螢幕橫向溢出；axe scrollable-region-focusable，SCG-4 F11）：role=region、tabindex=0、名稱「涵蓋範圍表（可橫向捲動）」且包著 bk-coverage；說明分頁唯一帶 tabindex 的元素就是它（仍沒有按鈕、連結、輸入）", async () => {
+    const { user } = await open({ role: "ADMIN" });
+    await goTo(user, "還原與說明");
+    const panel = testId("bk-panel-help");
+    const region = within(panel).getByRole("region", { name: "涵蓋範圍表（可橫向捲動）" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toContainElement(testId("bk-coverage"));
+    expect(Array.from(panel.querySelectorAll<HTMLElement>("[tabindex]")), "說明分頁唯一可聚焦的是這個捲動區域").toEqual([region]);
+    expect(panel.querySelectorAll("a[href], input, select, textarea, button")).toHaveLength(0);
   });
 });

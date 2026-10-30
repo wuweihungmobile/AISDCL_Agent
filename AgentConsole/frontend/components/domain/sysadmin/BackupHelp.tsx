@@ -2,7 +2,8 @@
 
 /**
  * 「還原與說明」分頁（TCS-SysAdminBackup-20261027 FR-BK-08、R-BK-43～45；PRD §5 AC-BK-08-1～08-3）：**只有說明，沒有按鈕**——不提供還原按鈕、不送任何請求（明寫原因：還原要先停 primary、
- * `restore.sh` 在 primary 運作時拒絕、replica 的時間軸會分岔須重建），所以這一頁的 DOM 裡沒有任何可聚焦的控制項。
+ * `restore.sh` 在 primary 運作時拒絕、replica 的時間軸會分岔須重建），所以這一頁的 DOM 裡沒有任何控制項（按鈕、連結、輸入）；
+ * 唯一可聚焦的是涵蓋表的橫向捲動區域（tabIndex 0 的 region，只為讓鍵盤使用者在窄螢幕也能捲動溢出的表格，axe scrollable-region-focusable）。
  * 三塊內容：還原三步（停 primary → 容器內 restore.sh → 啟動並核對；bash 與 PowerShell 兩種形態）、還原後的核對三項（只有 bash 形態，PowerShell 以一句前後綴說明）、
  * 涵蓋範圍表（逐卷分類，並提醒兩把金鑰遺失就救不回來）。
  *
@@ -66,7 +67,8 @@ export function BackupHelp() {
         <h3 id="bk-help-coverage" className="text-base font-semibold">
           涵蓋範圍：哪些資料有備份
         </h3>
-        <div className="relative overflow-x-auto">
+        {/* 窄螢幕下涵蓋表橫向溢出：容器要能用鍵盤抵達並捲動（tabIndex 0＋role region＋名稱；焦點環由全域 :focus-visible 提供；axe scrollable-region-focusable，SCG-4 F11） */}
+        <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="涵蓋範圍表（可橫向捲動）">
           <table data-testid="bk-coverage" className="w-full min-w-[40rem] border-collapse text-left text-sm">
             <caption className="sr-only">各資料卷的備份涵蓋範圍</caption>
             <thead>

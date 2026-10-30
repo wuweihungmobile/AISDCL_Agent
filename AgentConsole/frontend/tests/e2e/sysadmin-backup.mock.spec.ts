@@ -1,6 +1,6 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 
-import { expectNoA11yViolations } from "./a11y";
+import { axeViolations, expectNoA11yViolations, formatViolations } from "./a11y";
 import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, type MockHandler } from "./mockApi";
 
 /**
@@ -93,7 +93,30 @@ const OVERVIEW = {
   walArchive: { lastArchivedAt: "2026-10-27T02:15:00Z", failedCount: 0, lastFailedAt: null },
 };
 
-const backupBackend = (): MockHandler => (call) => (call.method === "GET" && call.path === "/api/v1/sysadmin/backups" ? { data: OVERVIEW } : undefined);
+/**
+ * 48 行的輸出尾段：遠超過 `max-h-48`（12rem＝192px）的可見高度，輸出尾段的 pre 才真的「可捲」。
+ * 為什麼要長資料：axe 的 scrollable-region-focusable 只檢查真的可捲的容器；短資料（VIEWER 沒有尾段、清單在 1440 寬放得下）掃不到它們，
+ * SCG-4 一審後的真機掃描才發現（F11）。
+ */
+const LONG_TAIL = Array.from({ length: 48 }, (_, i) => `第 ${String(i + 1).padStart(2, "0")} 行：pgbackrest 備份輸出（假資料，用來撐出可捲動的輸出尾段）`).join("\n");
+
+/** ADMIN 看到的總覽：full、diff、dump 三張卡帶長輸出尾段（verify 從未執行，沒有尾段）；其餘同 VIEWER 的 OVERVIEW。 */
+const ADMIN_OVERVIEW = {
+  ...OVERVIEW,
+  cards: OVERVIEW.cards.map((c) => ({ ...c, detailTail: c.job === "verify" ? "" : LONG_TAIL, requestedBy: null })),
+};
+
+const backupBackend =
+  (overview: unknown = OVERVIEW): MockHandler =>
+  (call) =>
+    call.method === "GET" && call.path === "/api/v1/sysadmin/backups" ? { data: overview } : undefined;
+
+/** 可捲動區域必須能用鍵盤抵達：tabindex=0（axe 的 scrollable-region-focusable），聚焦後確實成為 activeElement。 */
+async function expectKeyboardRegion(region: Locator, label: string): Promise<void> {
+  await expect(region, `${label}：有 tabindex=0`).toHaveAttribute("tabindex", "0");
+  await region.focus();
+  await expect(region, `${label}：聚焦後為 activeElement`).toBeFocused();
+}
 
 test.describe("系統管理／資料庫備份（route mock）", () => {
   test.setTimeout(180_000);
@@ -149,6 +172,62 @@ test.describe("系統管理／資料庫備份（route mock）", () => {
       "頁面沒有任何 POST、PUT、DELETE",
     ).toEqual([]);
     expect(calls.some((c) => c.path === "/api/v1/sysadmin/backups")).toBe(true);
+    expect(errors, "瀏覽器主控台沒有 React 警告、被擋的請求或未捕捉例外").toEqual([]);
+  });
+
+  test("AT_BK_01_2_E_3 ADMIN 長資料（三張卡的輸出尾段超過 12rem、390 寬時清單與涵蓋表橫向溢出）：1440 與 390 寬、三個分頁 axe 皆無違規；三個可捲動區域都能用鍵盤聚焦（tabindex=0、role=region、有名稱）", async ({
+    page,
+  }) => {
+    const errors = collectConsoleErrors(page);
+    await signInAs(page, "ADMIN");
+    await installApiMock(page, compose(shellHandler(), backupBackend(ADMIN_OVERVIEW)));
+    const tabs = ["備份清單", "排程與保留", "還原與說明"] as const;
+    const summary: string[] = [];
+
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/sysadmin/backup");
+      await expect(page.getByTestId("bk-cards")).toBeVisible({ timeout: 60_000 });
+
+      // 前置（防反空轉）：資料真的讓可捲動區域「可捲」；否則 axe 根本不檢查它們，綠燈就什麼也沒證明
+      const tails = page.locator('[data-testid^="bk-tail-"]');
+      await expect(tails, "ADMIN 的 full、diff、dump 三張卡各有輸出尾段").toHaveCount(3);
+      for (const [i, tail] of (await tails.all()).entries()) {
+        expect(await tail.evaluate((el) => el.scrollHeight > el.clientHeight), `${viewport.width} 寬：第 ${i + 1} 個輸出尾段超出可見高度（可捲）`).toBe(true);
+      }
+
+      for (const name of tabs) {
+        await page.getByRole("tab", { name }).click();
+        const label = `ADMIN ${viewport.width} 寬「${name}」`;
+        const wide = name === "備份清單" ? page.getByTestId("bk-table") : name === "還原與說明" ? page.getByTestId("bk-coverage") : null;
+        if (wide !== null) {
+          await expect(wide).toBeVisible();
+          // 390 寬：十欄表（min 56rem）與涵蓋表（min 40rem）必橫向溢出，外層容器才是可捲動區域
+          if (viewport.width === 390) {
+            expect(await wide.locator("xpath=..").evaluate((el) => el.scrollWidth > el.clientWidth), `${label}：外層容器橫向溢出（可捲）`).toBe(true);
+          }
+        }
+        // soft：六次掃描都跑完、各自列出規則與節點，失敗訊息不會只停在第一個
+        const findings = await axeViolations(page);
+        summary.push(`${label}：${findings.length === 0 ? "0 違規" : findings.map((f) => `${f.id}×${f.nodes.length}`).join("、")}`);
+        expect.soft(findings, `${label}：無障礙違規\n${formatViolations(findings)}`).toEqual([]);
+      }
+    }
+    console.log(`axe 掃描結果（規則×節點數）：\n  ${summary.join("\n  ")}`);
+
+    // 三個可捲動區域（此時為 390 寬、停在「還原與說明」）：有名稱的 region，tabindex=0、聚焦後是 activeElement；三個輸出尾段的名稱互不相同（各帶工作名）
+    const tailRegions = page.getByRole("region", { name: /輸出尾段（可捲動）$/ });
+    await expect(tailRegions, "三個輸出尾段各是一個有名稱的 region").toHaveCount(3);
+    const tailNames = await tailRegions.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+    expect(new Set(tailNames).size, `三個輸出尾段的名稱互不相同：${tailNames.join("｜")}`).toBe(3);
+    for (const [i, region] of (await tailRegions.all()).entries()) await expectKeyboardRegion(region, `輸出尾段 ${i + 1}`);
+    await expectKeyboardRegion(page.getByRole("region", { name: "涵蓋範圍表（可橫向捲動）" }), "涵蓋範圍表");
+    await page.getByRole("tab", { name: "備份清單" }).click();
+    await expectKeyboardRegion(page.getByRole("region", { name: "備份清單（可橫向捲動）" }), "備份清單");
+
     expect(errors, "瀏覽器主控台沒有 React 警告、被擋的請求或未捕捉例外").toEqual([]);
   });
 });

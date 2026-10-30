@@ -47,7 +47,8 @@ function RepoStatus({ repo }: { repo: BackupRepo }) {
 
 function BackupTable({ backups }: { backups: ReadonlyArray<BackupRow> }) {
   return (
-    <div className="relative overflow-x-auto">
+    // 窄螢幕下十欄表橫向溢出：容器要能用鍵盤抵達並捲動（tabIndex 0＋role region＋名稱；焦點環由全域 :focus-visible 提供；axe scrollable-region-focusable，SCG-4 F11）
+    <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="備份清單（可橫向捲動）">
       <table data-testid="bk-table" className="w-full min-w-[56rem] border-collapse text-left text-sm">
         <caption className="sr-only">備份清單</caption>
         <thead>
