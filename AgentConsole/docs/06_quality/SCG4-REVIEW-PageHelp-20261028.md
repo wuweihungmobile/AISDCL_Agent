@@ -72,7 +72,9 @@
 
 ### F. SCG-5 真機（PRD §11 出口；掌舵者親驗）
 
-V1～V4 待排（前置與步驟見輪 3 交卷 (h)3：全棧 Docker、三種角色帳號、一個跑過批次的專案）。
+- **2026-10-31 06:0x～06:4x 代驗證據（兩支獨立真機棒，Docker 全棧 `http://localhost`、映像建於 01:47 含補頁 `fdd9a738`；Chromium）**：V1 ADMIN 21／21 路由開啟成功，對話框名稱＝頁名・本頁說明、h3 恰四、13 頁狀態表／議題中心 API 四群／7 頁固定句、全站共通預設收合、pageerror 0；開啟耗時 21 路由單次 41～82 ms、重複量測中位數 47～48 ms（p90 ≤66 ms）；六個抽查狀態列（execute 暫停中／待人工、monitor Token 預算警告／Agent 連線燈、self-improving handed-off／retired）釋義與畫面一致。V2 390×844 21／21：鈕 44×44 只剩圖示、對話框無橫向溢出、可捲到底。V3 ADMIN 與 VIEWER：四群 7／8／4／4 列與既有「狀態說明」對話框及 `GET /api/v1/issues?limit=1` 逐項相同，VIEWER 詞表 1,042 ms 出現。V4 execute／self-improving：Tab→Enter→對話框內焦點不外洩→Esc→焦點回「本頁說明」鈕（`:focus-visible` 2px）。axe（wcag2a／2aa／21a／21aa）開啟態 21×2＝42 次 0 違規。證據：scratchpad `qa-real\`（99 張截圖、逐路由 JSON）與對方續跑端 `C:\Users\wuwei\.autosdd\handback\tmp_rm\shots\`。
+- 未涵蓋：未啟動執行批次（暫停中／待人工等只驗釋義文字、無實景）；僅 Chromium；「不看英文就能說出用途」屬主觀，purpose／steps 內英文詞皆在白名單。
+- **RELEASE 放行方式待掌舵者裁示**（依代驗證據放行，或親走 V1～V4）。
 
 ### H. 凍結與放行紀錄
 
