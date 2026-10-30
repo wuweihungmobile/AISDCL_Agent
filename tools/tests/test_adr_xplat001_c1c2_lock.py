@@ -619,7 +619,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p2_fixtures.py": 879,
     "_selfimproving_p3_fixtures.py": 518,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8869,
+    "test_adr_xplat001_c1c2_lock.py": 8882,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -700,6 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_export_status.py": 913,
     "test_selfimproving_issuemap.py": 173,
     "test_selfimproving_issues.py": 1985,
+    "test_selfimproving_ledgerdb_p0.py": 550,
     "test_selfimproving_measure.py": 746,
     "test_selfimproving_measure_probe.py": 514,
     "test_selfimproving_measure_verb.py": 551,
@@ -2842,6 +2843,14 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_selfimproving_capability.py +3（同步鎖）＋本檔自身漂移。逐檔清單見"
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝"
      "docs/06_quality/SCG4-REVIEW-IssueCenter-20261027.md、RTM-IssueCenter-20261027.md。"),
+    ("R214", 143732, 144295, +563,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第十二列（帳本改 DB P0 收尾單人窗口 2026-10-31：TCS-"
+     "SelfImprovingLedgerDb-P0 Stage-2 已凍結，十二份規格階段文件已先行 commit）："
+     "新測試檔 test_selfimproving_ledgerdb_p0.py（TCS 的 DT 全集，文件結構謂詞與判準函式"
+     "自證）入基準表＋本檔自身漂移（本列、名冊 R214 的理由文字與精確淨額、接鏈列）。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝"
+     "docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md。"),
 )
 
 
@@ -2943,7 +2952,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (15220, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (15783, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -2964,7 +2973,10 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "精確淨額為 12884；"
         "同標籤第十一列（議題中心階段一＋二 2026-10-27：test_selfimproving_issues.py、"
         "issuemap.py 兩支新檔＋同步鎖與 SCG-4 修復棒補斷言）再 +2336，"
-        "精確淨額為 15220。"
+        "精確淨額為 15220；"
+        "同標籤第十二列（帳本改 DB P0 收尾單人窗口 2026-10-31：新測試檔 "
+        "test_selfimproving_ledgerdb_p0.py 入基準表＋本檔自身漂移）再 +563，"
+        "精確淨額為 15783。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3604,10 +3616,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 358
+_REPIN_LOG_FROZEN_PREFIX_LEN = 359
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "b7ba67f703cf549683f755ad16b4a384e6fb14d44a2cff99f71a147d3d78d898")
+    "852fb93487023a5ddc546bdd7faa7f11821dfcddc205575e82d31c3262aa107e")
 
 
 def repin_log_history_digest(
@@ -3804,6 +3816,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "e5c7b6f0ee13", "90753ed79493", "DEF-200-563"),  # round-label-ok：SI 收尾
     ("R214", "90753ed79493", "84c9045eab47", "DEF-200-569"),  # round-label-ok：SI 收尾二
     ("R214", "84c9045eab47", "b7ba67f703cf", "DEF-200-570"),  # round-label-ok：議題中心收尾
+    ("R214", "b7ba67f703cf", "852fb9348702", "DEF-200-573"),  # round-label-ok：帳本改 DB P0 收尾
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

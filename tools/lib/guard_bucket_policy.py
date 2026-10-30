@@ -388,7 +388,15 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 只能是 prose）與 AT 錨定／能力登記自證（守自己＝只能是 guard_self），判準邏輯本身無法
     # 移出散文；QA 一審 P2-3 指名、修復棒落地、QA 二審驗收。兩值取自棘輪自己印出的普查實測
     # （`bucket_ratchet_problems()`，exclusive），零加減推算。
-    "prose": 5060,
+    # 🔴 帳本改 DB P0 收尾單人窗口（護欄層記帳＝同標籤 R214 第十二列）：prose 5060→5234（+174）、
+    # guard_self 3250 實測未動——成長全在新鎖檔 test_selfimproving_ledgerdb_p0.py 的各測試類別，
+    # 守 ADR、Architecture 草稿、勘誤案、基準檔、預演檔與 Root_Layout 的文件結構（受測對象就是
+    # 散文、無法移出）；判準函式與合成夾具的 chunk 歸 selfcontained 不計。
+    # 這是 TCS-SelfImprovingLedgerDb-P0 §5.9 #5 預告的出口：DT 已依 SCG-4 一審 F-04 瘦身
+    # （只留時間穩定謂詞、一次性驗收移審查閘）後仍成長，由收尾單人窗口重釘；裁決依據＝該條
+    # （主控 2026-10-31 收尾裁定甲案：接受重釘；乙案改 docstring 只少 89 行卻要再收斂一輪）。
+    # 值取自當回合 `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
+    "prose": 5234,
     "guard_self": 3250,
 }
 

@@ -253,6 +253,11 @@ on:
       - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
       - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
+      # 帳本改 DB P0（monorepo-si-ledgerdb-p0）：tools/tests/test_selfimproving_ledgerdb_p0.py 直接讀下列 ADR、Architecture 草稿與三份證據檔
+      # （結構判準、基準檔活值對表），只改這些檔的 push 此前不觸發本 workflow（TCS-SelfImprovingLedgerDb-P0 §5.7.1）
+      - "docs/02_architecture/ADR-SIDB-*.md"
+      - "docs/02_architecture/SelfImproving_LedgerDb_Architecture_Draft.md"
+      - "docs/06_quality/SelfImproving_LedgerDb_P0_*.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
       # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
@@ -746,6 +751,11 @@ on:
       - "docs/06_quality/AutoSDD_External_Blocked_Log.md"
       - "docs/06_quality/AutoSDD_Structural_Debt_Log.md"
       - "docs/02_architecture/Root_Layout_and_Module_Placement.md"
+      # 帳本改 DB P0（monorepo-si-ledgerdb-p0）：tools/tests/test_selfimproving_ledgerdb_p0.py 直接讀下列 ADR、Architecture 草稿與三份證據檔
+      # （結構判準、基準檔活值對表），只改這些檔的 push 此前不觸發本 workflow（TCS-SelfImprovingLedgerDb-P0 §5.7.1）
+      - "docs/02_architecture/ADR-SIDB-*.md"
+      - "docs/02_architecture/SelfImproving_LedgerDb_Architecture_Draft.md"
+      - "docs/06_quality/SelfImproving_LedgerDb_P0_*.md"
       # R94：tools/tests/test_context_budget_guard.py 直接讀取本檔內容做驗證，
       # 而該測試由本 workflow 執行（tools/tests/ ↔ windows-compat-ci.yml）；
       # 只改 PRD 不改測試檔時，本 workflow 此前不會被觸發（DEF-101-042 同構）。
