@@ -18,3 +18,6 @@
 | skip 摘要（win32） | NE（P0 收尾單人窗口以 `python tools/run_root_unittests.py` 全套實跑後追加新列，貼 `[skip census]` 行原文）；TCS §5.6 的參考值（開發機同日全套日誌，非契約依據）：`tools/tests@win32` 共 46 支，其中 env-disabled 4 支為本機無建立 symlink 權限之環境因素 | `python tools/run_root_unittests.py`（不接管線） | NE |
 | SKIP-M6（win32） | NE（同上，收尾追加；記該 id 集合行去掉方括號標籤後的文字，形如 `tools/tests@win32：集合關係成立（本次 skip <N> 支）`）；他平台剖面（darwin、linux）標 NE（P1 前由該平台補錄），不得填猜測值 | 同上 | NE |
 | skip_id_ledger.json | 23705 bytes；sha256 `212c15925ae286e630ba23373706a57e048fa292815bb8f597d8bf62782dc909`（AC-LD-11-1：落款不需變動；僅作「P0 不動」的雜湊記錄） | `Get-FileHash -Algorithm SHA256 docs/06_quality/skip_id_ledger.json` | `fdd9a738` |
+| 基準 commit | `3784f88c9d1c6c9070bc51f0ea5b5adfbebc98d0`（P0 出口基準：`tools/` 程式面與 P0 文件皆含在內，含包⑤ `781700bc`；基準檔本身由緊接其後的獨立 commit 入庫，故不含自身） | `git rev-parse HEAD`（取代上方 `fdd9a738` 列；收尾單人窗口於全套 rc 0 後現取） | `3784f88c` |
+| skip 摘要（win32） | `[skip census] tools/tests@win32 共 46 支：platform=42／tool-absence=0／env-disabled=4／structural-pair=0／debt=0／untagged=0／欠債型 4 支（目標 0）`；同次全套 rc 0、發現 6010 個測試（下限 5996）；env-disabled 4 支為本機無建立 symlink 權限之環境因素 | `python tools/run_root_unittests.py`（不接管線、rc 先存變數；取代上方 NE 列；日誌留於主控 scratchpad `r3_helm/root_full_3784f88c.txt`） | `3784f88c` |
+| SKIP-M6（win32） | `tools/tests@win32：集合關係成立（本次 skip 46 支）`；darwin、linux 仍 NE（P1 前由該平台補錄，不得填猜測值） | 同上（取代上方 NE 列） | `3784f88c` |
