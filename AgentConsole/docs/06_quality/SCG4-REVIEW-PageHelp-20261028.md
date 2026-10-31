@@ -74,13 +74,13 @@
 
 - **2026-10-31 06:0x～06:4x 代驗證據（兩支獨立真機棒，Docker 全棧 `http://localhost`、映像建於 01:47 含補頁 `fdd9a738`；Chromium）**：V1 ADMIN 21／21 路由開啟成功，對話框名稱＝頁名・本頁說明、h3 恰四、13 頁狀態表／議題中心 API 四群／7 頁固定句、全站共通預設收合、pageerror 0；開啟耗時 21 路由單次 41～82 ms、重複量測中位數 47～48 ms（p90 ≤66 ms）；六個抽查狀態列（execute 暫停中／待人工、monitor Token 預算警告／Agent 連線燈、self-improving handed-off／retired）釋義與畫面一致。V2 390×844 21／21：鈕 44×44 只剩圖示、對話框無橫向溢出、可捲到底。V3 ADMIN 與 VIEWER：四群 7／8／4／4 列與既有「狀態說明」對話框及 `GET /api/v1/issues?limit=1` 逐項相同，VIEWER 詞表 1,042 ms 出現。V4 execute／self-improving：Tab→Enter→對話框內焦點不外洩→Esc→焦點回「本頁說明」鈕（`:focus-visible` 2px）。axe（wcag2a／2aa／21a／21aa）開啟態 21×2＝42 次 0 違規。證據：scratchpad `qa-real\`（99 張截圖、逐路由 JSON）與對方續跑端 `C:\Users\wuwei\.autosdd\handback\tmp_rm\shots\`。
 - 未涵蓋：未啟動執行批次（暫停中／待人工等只驗釋義文字、無實景）；僅 Chromium；「不看英文就能說出用途」屬主觀，purpose／steps 內英文詞皆在白名單。
-- **RELEASE 放行方式待掌舵者裁示**（依代驗證據放行，或親走 V1～V4）。
+- **RELEASE 放行**：掌舵者 2026-10-31 裁示「依代驗證據放行」（交棒第 4 項）；主控 `transition --to RELEASE` rc 0、鍵狀態 RELEASE（§H）。
 
 ### H. 凍結與放行紀錄
 
 - 二審 PASS 後主控親驗（本機 Windows 11）：全套 vitest 95 檔 1620 測試全綠（含 e-1／e-2 補做）；tsc、lint rc 0；`python tools/selfimproving.py check` overall=PASS（OBS-SI-336～338 入帳：Claude Code safetyCheck 誤擋 `Remove-Item Env:`、junction 只夠 vitest／tsc、CI 形態 e2e 重寫 43 張截圖）。
 - 勘誤套用（主控，路由第 4 點）：TCS 檔尾〈勘誤一〉1-1～1-19（一審候選 1～11＋G-C2 :243＋junction 實體複製＋輪 3 AT-PH-04-6-2 綁定＋二審 12～15）；PRD 檔尾〈勘誤二〉2-1（AC-PH-06-4 量測口徑）；TCS 檔頭 PRD digest 同步、§1 增量追溯表依議題中心先例保留 Stage-2 快照。新 digest（`Get-FileHash`）：PRD `sha256:cf1e97a9e5b666daef3024b13bc15a6903a6097f63a8dd8a24051813c899e3d0`（62,607 bytes）、TCS `sha256:c58035bb00e63978b8693a5f192d8a57ef7a7a930702db000fa9e5bea8a67b6e`（197,189 bytes）。
-- FSM 鍵 `agentconsole-page-help`（2026-10-28 11:0x～11:3x，主控依凍結常態規則執行）：IMPLEMENTATION → `transition --to PR_REVIEW` → `gate PR_REVIEW PASS`（→ RTM_VERIFY；勘誤與報告 commit `e37e5dfc`）→ RTM §2.5 回填（文件棒，170 列＝F 1／US 8／AC 43／AT 118；commit `ad237aa4`）→ `gate RTM_VERIFY PASS`（→ RELEASE_READY）→ `spec-refreeze --doc PRD --doc TCS` rc 0：`refrozen: true`、`stage: Stage-2`、`supersedes: 2026-10-27T20:04:56+00:00`，記入 PRD `sha256:cf1e97a9…e3d0`、TCS `sha256:c58035bb…7b6e`（與上列 `Get-FileHash` 相同）。RELEASE 待掌舵者真機 V1～V4（§F）後 `transition --to RELEASE`。
+- FSM 鍵 `agentconsole-page-help`（2026-10-28 11:0x～11:3x，主控依凍結常態規則執行）：IMPLEMENTATION → `transition --to PR_REVIEW` → `gate PR_REVIEW PASS`（→ RTM_VERIFY；勘誤與報告 commit `e37e5dfc`）→ RTM §2.5 回填（文件棒，170 列＝F 1／US 8／AC 43／AT 118；commit `ad237aa4`）→ `gate RTM_VERIFY PASS`（→ RELEASE_READY）→ `spec-refreeze --doc PRD --doc TCS` rc 0：`refrozen: true`、`stage: Stage-2`、`supersedes: 2026-10-27T20:04:56+00:00`，記入 PRD `sha256:cf1e97a9…e3d0`、TCS `sha256:c58035bb…7b6e`（與上列 `Get-FileHash` 相同）。RELEASE：2026-10-31 13:5x 掌舵者裁示依 §F 兩支獨立真機棒的 V1～V4 代驗證據放行，主控 `fsm.ps1 -Key agentconsole-page-help transition --to RELEASE`（reason 引 §F）rc 0，`show --json` 的 `current_state`＝`RELEASE`。
 
 ### G. 流程摩擦（審查者七項；主控處置）
 
