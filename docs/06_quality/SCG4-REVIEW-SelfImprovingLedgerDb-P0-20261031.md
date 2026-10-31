@@ -19,7 +19,7 @@
 
 | # | 級別 | 座標 | 問題與證據 | 建議修法 |
 |---|------|------|------------|----------|
-| F-01 | P3 | TCS §5.9#9、`781700bc` 兩支 compat-ci paths | 「漏列即 ci-gate 紅」不成立：拿掉 ADR glob／草稿／證據檔 glob 共 6 種變體，`test_ci_paths_cover_root_consumers` 仍 49 passed；只有單邊拿掉才被 `test_push_and_pr_paths_symmetric` 殺。消費者偵測看不到 DT 以 f-string 組出的 docs 路徑 | P1 起登記 `_KNOWN_LITERAL_PATH_CONSUMERS`（屬 AISDLC_SDD，非 P0 可動）或 TCS 改述為人工義務 |
+| F-01 | P3 | TCS §5.9#9、`781700bc` 兩支 compat-ci paths | 「漏列即 ci-gate 紅」不成立：拿掉 ADR glob／草稿／證據檔 glob 共 6 種變體，`test_ci_paths_cover_root_consumers` 仍 49 個全通過；只有單邊拿掉才被 `test_push_and_pr_paths_symmetric` 殺。消費者偵測看不到 DT 以 f-string 組出的 docs 路徑 | P1 起登記 `_KNOWN_LITERAL_PATH_CONSUMERS`（屬 AISDLC_SDD，非 P0 可動）或 TCS 改述為人工義務 |
 | F-02 | P3 | TCS G-P0-9／AT-LD-02-6-2 稀疏集 | 原配方缺 `/CLAUDE.md` ⇒ `si check` rc 2、overall=NE（SOURCE-UNAVAILABLE）；加 `/CLAUDE.md` 後 rc 0、指紋等於基準 | 配方加 `/CLAUDE.md`（TCS 勘誤） |
 | F-03 | P3 | TCS G-P0-2 的 `<base>` | `e847ee48` 之後四個非 P0 commit 動過 Architecture.md／docker README；P0 四個 commit 都不動這兩檔；以 fdd9a738 為 base 兩檔 rc 0，以 e847ee48 則非零；si-decide／mirror 兩列必 DIFF，與 P0 無關 | 判準改「本鍵 commit 集合不動這兩檔」，MATCH 只在 P0 起點成立 |
 | F-04 | P3 | TCS G-P0-1／D9-1／02-6-E-2 的 `<base>..<tip>` | 共用線性 main 夾雜他鍵 commit，字面區間不可算；改用四個本鍵 commit 逐 commit diff 聯集：21 檔全 ⊆ §5.7.1、§5.7.2 零命中 | TCS 寫明用逐 commit 聯集 |
