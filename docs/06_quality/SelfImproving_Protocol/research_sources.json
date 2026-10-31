@@ -87,7 +87,15 @@
       "url": "https://github.com/openai/openai-agents-python/releases.atom",
       "kind": "release",
       "extract": "最新 5 個 release 的編號與日期（逐字）",
-      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13"
+      "added_by": "T1 sid ee6af537-7091-4f0e-842c-0d091085f77b line 13",
+      "retired": true
+    },
+    {
+      "id": "openai-agents-tags",
+      "url": "https://github.com/openai/openai-agents-python/tags.atom",
+      "kind": "release",
+      "extract": "最新 5 個 release 的編號與日期（逐字）",
+      "added_by": "T1 sid 655d9777-cfd0-4478-b2b3-b8245313b24c line 4001（取代 openai-agents-releases：releases.atom 含完整 release notes 無界成長 438,564 bytes、OBS-SI-323；tags.atom 主控探針 2026-10-31 實測 6,385 bytes application/atom+xml）"
     },
     {
       "id": "openai-api-changelog",

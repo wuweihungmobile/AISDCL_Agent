@@ -606,10 +606,11 @@ session id 還躺在沒讀的狀態塊裡 ⇒ 痕跡分裂成兩個檔，早期�
 6. **探測預算上界 5 × 31,847 ≈ 16 萬 tokens**。`MAX_PROBE_ATTEMPTS = 5` 是挑的、不是量出來的。
 7. **醒來後可能二次撞線**：reset 是滾動視窗，醒來只要一動就重新起算。
    故任務書第 3 節的第一條恆為「重驗＋收斂」，不是「繼續展開」。
-8. **無人窗口的產出率沒有機械帳**（§2.12 起登記）：每窗的 `resumed.bg_ceiling_kill`、handback 四節齊備
-   與否、燒掉的 pp 數，今天仍只能人工從 `autosdd_resume_log_*.jsonl`／`autosdd_resume_cost.jsonl`／
-   `autosdd_unattended_outcome.jsonl` 三處對讀。要不要接成 `--pace` 的一欄，等 §2.12 修法後累積 ≥5 窗
-   再決定（2026-10-31 起算；此前 5 窗 DONE 1）。
+8. **無人窗口的產出率帳**（§2.12 起登記；2026-10-31 晚補機械物）：每窗的 `resumed.bg_ceiling_kill`、
+   handback 四節齊備與否、燒掉的 pp 數原本只能人工從 `autosdd_resume_log_*.jsonl`／`autosdd_resume_cost.jsonl`／
+   `autosdd_unattended_outcome.jsonl` 三處對讀；現由 `python tools/probe/unattended_yield.py`（唯讀、零 token、
+   不接閘門 rc）把三處依 session 對起來，每個結局印一列並彙總。**要不要接成 `--pace` 的一欄**仍等 §2.12
+   修法後累積 ≥5 窗（探針末行自報是否達門檻）再決定（2026-10-31 起算；此前 5 窗 DONE 1）。
 9. **無人窗口的主控模型**＝Sonnet（掌舵者 2026-10-31 互動選項裁決「改 Sonnet」；`env.shared`
    `AUTOSDD_MODEL_HELMSMAN=sonnet`，只管無人喚醒窗口，互動視窗主控不受影響）。理由：無人窗口的
    工作面＝重驗、跑全套、派唯讀 QA 鏡、寫 handback，Sonnet 可勝任、單窗固定成本約為 Fable 的五分

@@ -73,10 +73,12 @@
 - **AT-IC-09-6-2**（同法 `-g "AT_IC_09_6_2"`）：**前置未成立**——rc 1，判定式於 `issues-docker.stack.ts:90` 大聲失敗：「全棧的帳本沒有任何可排的議題（待您決定、待解、進行中）：無法驗證順位的持久性——請先讓帳本有一筆可排的議題」。真帳本此刻 604 件＝候選 1（OBS-SI-329 open）、觀察中 2（PROP-SI-004／005，不可排）、延後 51、已完成 550；候選不可排（PRD §4／R-IC-28）、缺陷帳本零未結列、無 proposed／verified／approved 提案。主控刻意**不**為了過 AT 而開假缺陷或假提案（缺陷帳本另有淨額棘輪：本輪新增未結不得多於結案，逃生口只准掌舵者決定）。處置＝待真帳本出現可排議題時重跑此 AT（OBS-SI-333）；PRD §11 階段二 (d) 本輪只有 backend `IssueApiIT`（Testcontainers 真 PG，順位 UPSERT 與資料庫列 `set_at`）與 Flyway V14 的證據，容器重啟後持久性尚未真機驗。
 - **掌舵者真機走查（PRD §11 階段一 (a)、階段二 (a)～(c)）**：待掌舵者開 `http://localhost` 左列「議題中心」四分頁、狀態說明、篩選；設一次順位同樣受上項限制（無可排議題時「排序」鈕不會出現）。完成後由主控把 sid＋line 補進本節並 `transition --to RELEASE`。
 
+- **放行紀錄（2026-10-31）**：掌舵者於互動視窗裁示「放行」（sid `655d9777-cfd0-4478-b2b3-b8245313b24c` line 4067），上項真機走查免做；兩鍵轉 RELEASE，見 §H。
+
 ### H. 凍結與放行紀錄
 - 兩鍵 `monorepo-issue-center`／`agentconsole-issue-center`：2026-10-27 13:1x `transition --to PR_REVIEW` → `gate PR_REVIEW PASS` → `gate RTM_VERIFY PASS`（RTM `docs/06_quality/RTM-IssueCenter-20261027.md` 根層 116 AT、`AgentConsole/docs/06_quality/RTM.md` §2.4 Console 107 AT）→ RELEASE_READY → `spec-refreeze`（TCS 勘誤一 1-1～1-12、PRD 勘誤一 P-1～P-3）。兩鍵 digest 相同：TCS `sha256:9cd3286051ecda44c12187334954e944024135a275bb9393fdbd44d74850412d`、PRD `sha256:9765a825973f75722b79268dd827047a712a6db6a694f62f31e9fb90655a9eba`（Stage-2 原值 TCS `bc6a9493…`、Stage-1 PRD `a162a104…`）。
 - 兩把 SI 鍵 `agentconsole-si-mirror`／`agentconsole-si-decide` 同日 refreeze（Architecture §7.2 加 `issue_priority` 列；Architecture 新 digest `sha256:dbdbd5f97d4bbfea91b5877ae121c36471455e4a0154d046e84b3261781c3ac5`，兩鍵相同）。
-- `transition --to RELEASE`：待掌舵者真機走查（§F）。
+- `transition --to RELEASE`：2026-10-31 掌舵者互動放行（sid `655d9777-cfd0-4478-b2b3-b8245313b24c` line 4067，原文「放行」；§F 的真機走查由掌舵者裁示免做）；主控對兩鍵 `agentconsole-issue-center`／`monorepo-issue-center` 執行 `transition --to RELEASE` 皆 rc 0，`show` 現為 RELEASE。
 
 ### G. 流程摩擦（審查者八項；主控處置）
 1. 任務書原寫「在工作樹突變」與 TCS :678（匯出副本）衝突——主控中途更正；副本三個坑（不含 AISDLC_SDD 須單補 `scripts`、無 `.git` 使 06-4-1 恆紅、node_modules 以 junction 指回工作樹）⇒ 入觀察帳本。
