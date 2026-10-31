@@ -40,7 +40,7 @@ Accepted（2026-10-31；決定者＝主控依 `docs/01_requirements/SelfImprovin
 
 **自舉順序**：首次遷移先建 `audit` 與其觸發器，再建其他表與觸發器，最後才有任何受約束表的首筆寫入；`schema_migrations`、`meta`、`import_runs` 三表本身不受「同交易 audit 列」約束（遷移記錄寫入發生在 audit 可用之前，匯入批次是 audit 的上游），由權限與下表的守衛保護。
 
-### SQL 草稿（沿 V13 的形態；以下三個區塊依序餵 `psql -v ON_ERROR_STOP=1`）
+### SQL 草稿（沿 V13 的形態；以下三個區塊**串成同一個 psql session** 依序執行——`SET ROLE` 跨區塊生效；分三個 session 各跑雖 rc 0，14 張表會落在 `postgres` 而非 `si_owner` 名下。SCG-4 一審 F-09）
 
 ```sql
 -- 區塊一：角色、schema 與共用函式（以超級使用者執行；角色為叢集級物件，NOLOGIN）
@@ -324,7 +324,7 @@ RESET ROLE;
 
 ### 烟測摘要（一次性容器；指令與輸出存於審查報告，此處只記判準）
 
-1. 三個區塊依序餵 `psql -v ON_ERROR_STOP=1` 須 rc 0。
+1. 三個區塊串成同一個 psql session（同一次 `psql -v ON_ERROR_STOP=1` 輸入）須 rc 0，且 14 張表 owner 皆為 `si_owner`。
 2. 正控：`si_writer` 同一交易寫 `defects` 與對應 audit 列、寫 `events` 與對應 audit 列，COMMIT 成功。
 3. 負控：(i) `si_writer` 對 `events` UPDATE 被拒（第一道＝權限，訊息含 `events`；表擁有者 `si_owner` 同一 UPDATE 與對 `audit` 的 DELETE 被第二道觸發器拒，訊息含 `si.events`、`si.audit`）；(ii) 對 `defects` INSERT 而無同交易 audit 列，COMMIT 失敗，訊息含 `si.defects`；(iii) `si_writer` 執行 `ALTER TABLE si.events DISABLE TRIGGER ALL` 被拒（非擁有者）；另驗 `seq` 不連續、`si_reader` 寫入、觀察列二次處置皆被拒。
 4. 收尾：`DROP SCHEMA si CASCADE` 與 `DROP ROLE` 後 `pg_roles` 無 `si_%`，容器自毀。

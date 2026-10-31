@@ -964,3 +964,20 @@ sys.exit(1 if bad else 0)
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
 （凍結前留空；凍結後依〈凍結後修訂路由〉走 `monorepo-si-ledgerdb-p0` 的 `spec-refreeze`，並於此逐條附新 digest。）
+
+### 勘誤一（2026-10-31；P0 SCG-4 獨立審查一審 PASS〔P1 0／P2 0／P3 9／P4 6〕；報告 `docs/06_quality/SCG4-REVIEW-SelfImprovingLedgerDb-P0-20261031.md`；主控依凍結常態規則於 RELEASE_READY 以 `spec-refreeze` 記新 digest；PRD 無勘誤。本節只記訂正，正文不改）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 1-1 | §5.1.3 E-4 | 「AC-SI-35-1 ⑤」 | 「AC-SI-35-1 ③」（`SelfImproving_PRD.md:491` 該句在 ③；案文 E-4 寫 ③ 正確） | 一審 F-05 |
+| 1-2 | G-P0-1、AT-LD-00-D9-1、AT-LD-02-6-E-2 的 `<base>..<tip>` | 字面區間 | 本鍵四個 commit（`e3723880`、`d3d751d6`、`781700bc`、`d4aeab5b`）逐 commit `git diff --name-only <c>^..<c>` 的聯集（共用線性 main 夾雜他鍵 commit，字面區間不可算） | 一審 F-04 |
+| 1-3 | G-P0-2、AT-LD-00-D4-2 | `git diff --exit-code <base> <tip> -- Architecture.md docker/README.md`；兩列 MATCH | base 取 P0 起點 `fdd9a738`；判準改「本鍵 commit 集合不動這兩檔」；`agentconsole-si-decide`／`-mirror` 的 Architecture.md 與 ADR-002 列因他鍵漂移為 DIFF，不計 P0（主控 G-P0-8 真跑：其餘各列全 MATCH、`monorepo-selfimproving` 已知） | 一審 F-03、F-14 |
+| 1-4 | G-P0-9、AT-LD-02-6-2 稀疏集 | `/tools/ /docs/06_quality/ /docs/05_development/ /docs/01_requirements/SelfImproving_PRD.md /.gitattributes` | 另加 `/CLAUDE.md`（缺它 `si check` rc 2、params.globs blocking SOURCE-UNAVAILABLE） | 一審 F-02 |
+| 1-5 | §5.9#9、AT-LD-00-D9-3 | 「漏列即 ci-gate 紅」 | 改「兩支 compat-ci 的 push 與 pull_request paths 須對稱（`test_push_and_pr_paths_symmetric` 守單邊漏列）；消費者偵測看不到 DT 以 f-string 組出的 docs 路徑，P1 起登記 `_KNOWN_LITERAL_PATH_CONSUMERS`（AISDLC_SDD/scripts，非 P0 允許集合）」 | 一審 F-01 |
+| 1-6 | §5.3.1 A4、§5.3.2 | A4 關鍵字 `"tools/tests": 89`；ctrl 對照四項 | A4 關鍵字去數字（`"tools/tests": `，重釘後數字會變）；ctrl 對照另補 `test_schedule_capability_parity.test_scan_surface_is_not_silently_empty` | 一審 F-12 |
+| 1-7 | R-LD0-14、AT-LD-00-D4-1、AT-LD-00-D4-E-1 | 只驗 `生效階段：` 行首字樣在 | 補「值 ∈ {P1,P2,P3} 且逐塊等於 §7.1#2（§7.2＝P3、§9.4＝P1、§10.3＝P2）」；DT 以 `PATCH_STAGES` 實作，D4-E-1 加「值錯」變體 | 一審 F-06（本輪已補） |
+| 1-8 | §3.2、§6.1、R-LD0-16 | 無反向 AT | 新增 AT-LD-00-D5-E-1（D5、DT；以真實案文為對照組，六變體：少一節、欄值清空、套用階段值域、E-4 無座標、E-6 目標、無不勘誤節 ⇒ `errata_problems` 各點名）；§6.1 FR-LD-00 反向 2→3、合計 AT 37→38（正 28／反 10；DT 15／GT 23）；R-LD0-16 AT 欄加 D5-E-1 | 一審 F-07（本輪已補） |
+| 1-9 | G-P0-10、AT-LD-11-1-1 | 「去掉方括號標籤後的原文」 | 明寫含 `✅ `：`tools/tests@win32：✅ 集合關係成立（本次 skip <N> 支）`；基準檔 `3784f88c` 列已補 | 一審 F-08 |
+| 1-10 | §5.5 P0 估量 | +420／+515 | 實測 +563（R214 名冊精確淨額 15220→15783）；S-A 結論不變 | 一審 F-13 |
+| 1-11 | AT-LD-00-D3-5、G-P0-7 | 「依序餵 `psql`」 | 「三個區塊串成同一個 psql session 依序執行（`SET ROLE` 跨區塊）」且 14 張表 owner 皆為 `si_owner`；ADR-SIDB-003 標題與執行方式第 1 條同步改字 | 一審 F-09 |
+| 1-12 | G-P0-8 | 在 clone 或 `git archive` 副本跑時須先複製兩個 `build/reports/fsm` 目錄 | 補「審查者在副本／worktree 無法讀主 repo 未追蹤的 `build/` 時，FSM 半由主控在主 repo 補跑並把逐列輸出貼進報告 §D」 | 一審 F-14 |
