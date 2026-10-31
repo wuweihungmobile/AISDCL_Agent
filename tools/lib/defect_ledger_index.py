@@ -760,7 +760,7 @@ OVERSIZE_ROW_CEILING = 24
 #: 走的是本判準訊息自己指定的合法出口（結案與瘦身同一動作）。
 #: 🔴 帳本可寫性修復輪（round-label-ok）重釘 **25520 → 20027**：同上六列瘦身，超標總量
 #: 隨之下降；`--repin-oversize` 機械收緊，當回合實測值直接填入、零推算。
-OVERSIZE_ROW_EXCESS_CEILING = 14638
+OVERSIZE_ROW_EXCESS_CEILING = 14635
 
 
 def oversize_row_problems(ledger_text: str) -> list[str]:

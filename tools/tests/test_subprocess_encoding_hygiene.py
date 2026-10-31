@@ -119,7 +119,7 @@ def _scan_roots() -> list[tuple[Path, int]]:
         # per-tree 下限＝`tree_count_verdict()` 腐化上界逐字給出的數字（實測 × 0.95，方向＝收緊，
         # 照填不推算）；逐輪重釘沿革（77→92→110→131→156→186）搬至
         # Guard_Line_History_2.md〈R186 淨減法搬遷〉§64。  round-label-ok
-        (_REPO_ROOT / "tools", 241),
+        (_REPO_ROOT / "tools", 287),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
         (_REPO_ROOT / "AutoClaude" / "tests", 268),
