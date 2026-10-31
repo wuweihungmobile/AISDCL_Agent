@@ -30,11 +30,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 備份功能的結構鎖（TCS-SysAdminBackup-20261027 R-BK-12、R-BK-17、R-BK-22、R-BK-36、R-BK-55、R-BK-57、R-BK-58、R-BK-14；BA 載具七個 AT：
- * AT-BK-04-3-E-2、04-6-E-1、06-8-E-1、10-1-E-1、10-3-2、10-3-E-2、10-4-3）。為什麼用 ArchUnit 與原始碼掃描：這七件事「寫壞了編譯得過、整合測試也許沒測到」，
+ * AT-BK-04-3-E-2、04-6-E-1、06-8-E-1、10-1-E-1、10-3-2、10-3-E-2、10-4-3；SCG-4 二審另補 AT-BK-10-4-S-1，TCS 無此編號、勘誤納入）。為什麼用 ArchUnit 與原始碼掃描：
+ * 這幾件事「寫壞了編譯得過、整合測試也許沒測到」，
  * 卻都是資料或安全的承重牆——服務層若偷用系統時鐘或 JVM 預設時區，逾期判定就隨機器而變；{@code backup_jobs} 若出現第二個寫入者或無條件 UPDATE，
  * 單工與對帳的「只有一方生效」保證就破功；{@code POST /sysadmin/**} 的 ADMIN 規則若排在通用規則之後，OPERATOR 就能觸發備份；console-api 若出現行程啟動或網路呼叫，
- * 控制面「只有檔案 I/O」的信任邊界就破了。掃描函式是純函式（輸入原始碼文字、輸出違規清單）：對真原始碼必須回空、對合成的違規樣本必須回非空（各 AT 的負控，
- * 鎖不得空過）。
+ * 控制面「只有檔案 I/O」的信任邊界就破了；日誌若把例外文字原樣寫出，連線字串與檔案內容就繞過遮罩進了集中式日誌。掃描函式是純函式（輸入原始碼文字、輸出違規清單）：
+ * 對真原始碼必須回空、對合成的違規樣本必須回非空（各 AT 的負控，鎖不得空過）。
  */
 class BackupArchTest {
 
@@ -42,6 +43,13 @@ class BackupArchTest {
     private static final String WAL_ADAPTER = "com/aisdlc/console/adapter/out/persistence/WalArchiveStatsAdapter.java";
     private static final String CONTROLLER = "com/aisdlc/console/adapter/in/web/BackupController.java";
     private static final String SECURITY = "com/aisdlc/console/infrastructure/config/SecurityConfig.java";
+
+    // 日誌行的例外外洩掃描（AT-BK-10-4-S-1）所用的樣式
+    private static final Pattern LOG_CALL = Pattern.compile("\\b(?:LOG|LOGGER|log|logger)\\s*\\.\\s*(?:trace|debug|info|warn|error)\\s*\\(");
+    private static final Pattern MASK_CALL = Pattern.compile("BackupMasker\\s*\\.\\s*mask\\s*\\(");
+    private static final Pattern EXCEPTION_TEXT = Pattern.compile("\\.\\s*(?:toString|getMessage|getLocalizedMessage)\\s*\\(");
+    private static final Pattern CATCH_PARAMETER = Pattern.compile("\\bcatch\\s*\\(([^)]*)\\)");
+    private static final Pattern EXCEPTION_DECLARATION = Pattern.compile("\\b\\w*(?:Exception|Error|Throwable)\\s+(\\w+)\\s*[,;)=:?&|]");
 
     // ── 原始碼讀取（去註解；沿 IssuePriorityArchTest 的做法）─────────────────────────────────
 
@@ -249,6 +257,120 @@ class BackupArchTest {
         return path.contains("/backup/") || file.contains("Backup") || file.startsWith("WalArchive");
     }
 
+    /** 一個 LOG 呼叫：text＝原文（空白收斂，供失敗訊息點名站點）；arguments＝括號內的參數文字（字串常值的內容已遮成空白），括號不成對時為 null。 */
+    record LogCall(String text, String arguments) {
+    }
+
+    /** 把字串與字元常值的內容換成空白（長度不變、引號保留）：之後的字樣與括號比對不會被常值裡的文字誤導。 */
+    private static String blankLiterals(String source) {
+        StringBuilder out = new StringBuilder(source);
+        int i = 0;
+        int n = source.length();
+        while (i < n) {
+            char c = source.charAt(i);
+            if (c == '"' || c == '\'') {
+                int j = i + 1;
+                while (j < n && source.charAt(j) != c) {
+                    int step = source.charAt(j) == '\\' ? 2 : 1;
+                    for (int k = j; k < Math.min(n, j + step); k++) {
+                        out.setCharAt(k, ' ');
+                    }
+                    j += step;
+                }
+                i = j + 1;
+            } else {
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    /** from（左括號之後）起對應的右括號位置；不成對回 -1。傳入的必須是 {@code blankLiterals} 之後的文字。 */
+    private static int closingParenthesis(String code, int from) {
+        int depth = 1;
+        for (int i = from; i < code.length(); i++) {
+            char c = code.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /** 去掉所有 {@code BackupMasker.mask(…)} 群組（含巢狀括號）；剩下的才是「沒經過遮罩就進日誌」的部分。傳入 {@code blankLiterals} 之後的文字。 */
+    private static String withoutMasked(String code) {
+        StringBuilder out = new StringBuilder();
+        Matcher mask = MASK_CALL.matcher(code);
+        int from = 0;
+        while (mask.find(from)) {
+            int close = closingParenthesis(code, mask.end());
+            out.append(code, from, mask.start()).append(' ');
+            if (close < 0) {
+                return out.toString();
+            }
+            from = close + 1;
+        }
+        return out.append(code, from, code.length()).toString();
+    }
+
+    /** 宣告為例外的變數名：catch 參數，以及型別名以 Exception／Error／Throwable 結尾的參數、區域變數與樣式變數。傳入 {@code blankLiterals} 之後的文字。 */
+    private static List<String> exceptionVariableNames(String code) {
+        List<String> names = new ArrayList<>();
+        Matcher caught = CATCH_PARAMETER.matcher(code);
+        while (caught.find()) {
+            String[] parts = caught.group(1).trim().split("\\s+");
+            names.add(parts[parts.length - 1]);
+        }
+        Matcher declared = EXCEPTION_DECLARATION.matcher(code);
+        while (declared.find()) {
+            names.add(declared.group(1));
+        }
+        return names.stream().distinct().toList();
+    }
+
+    /** 原始碼（已去註解）裡所有的 {@code LOG.<level>(…)} 呼叫（logger 變數名認 LOG、LOGGER、log、logger；level 認 trace／debug／info／warn／error）。 */
+    static List<LogCall> logCalls(String strippedSource) {
+        String code = blankLiterals(strippedSource);
+        List<LogCall> out = new ArrayList<>();
+        Matcher call = LOG_CALL.matcher(code);
+        while (call.find()) {
+            int close = closingParenthesis(code, call.end());
+            int end = close < 0 ? strippedSource.length() : close + 1;
+            out.add(new LogCall(strippedSource.substring(call.start(), end).replaceAll("\\s+", " "),
+                    close < 0 ? null : code.substring(call.end(), close)));
+        }
+        return out;
+    }
+
+    /**
+     * backup 相關類別的日誌行不得外洩例外文字（R-BK-58 的日誌面）：每個 LOG 呼叫在去掉所有 {@code BackupMasker.mask(…)} 群組之後，參數裡不得還剩
+     * {@code .toString()}／{@code .getMessage()}／{@code .getLocalizedMessage()}（不分接收者），也不得直接帶例外變數（SLF4J 會把它的訊息與堆疊整份印出）；
+     * 括號不成對、解析不了的呼叫同樣回報（掃描不得默默略過讀不懂的東西）。
+     */
+    static List<String> logLeakViolations(String strippedSource) {
+        List<String> exceptionNames = exceptionVariableNames(blankLiterals(strippedSource));
+        List<String> out = new ArrayList<>();
+        for (LogCall call : logCalls(strippedSource)) {
+            if (call.arguments() == null) {
+                out.add("LOG 呼叫的括號不成對、無法檢查：" + call.text());
+                continue;
+            }
+            String unmasked = withoutMasked(call.arguments());
+            boolean carriesText = EXCEPTION_TEXT.matcher(unmasked).find();
+            boolean carriesThrowable = exceptionNames.stream()
+                    .anyMatch(name -> Pattern.compile("\\b" + Pattern.quote(name) + "\\b").matcher(unmasked).find());
+            if (carriesText || carriesThrowable) {
+                out.add("例外沒經 BackupMasker.mask 就進了日誌：" + call.text());
+            }
+        }
+        return out;
+    }
+
     // ── AT-BK-04-3-E-2 ────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -408,5 +530,66 @@ class BackupArchTest {
             assertThat(trustBoundaryViolations("class X { Object o = \"" + bad + "\"; " + bad + " }")).as("合成樣本 " + bad).isNotEmpty();
         }
         assertThat(trustBoundaryViolations("class X { Path p = Files.createTempFile(); }")).isEmpty();
+    }
+
+    // ── AT-BK-10-4-S-1 ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * AT-BK-10-4-S-1（TCS 無此編號的補 AT，SCG-4 勘誤納入；對應 AC-BK-10-4／R-BK-58 的「任何日誌行不含機密」）。測試類型：ArchUnit 同檔的原始碼掃描（BA 載具）。
+     *
+     * <p>WHY（SCG-4 二審 R2-01）：一審 F3 只把八處資料庫例外日誌改成經 {@code BackupMasker.mask}，二審實查另有十處（{@code BackupJobService}、
+     * {@code BackupJobReconciler}、{@code BackupQueryService}、{@code FileBackupControlAdapter}）仍把 {@code e.toString()}／{@code e.getMessage()}
+     * 直接寫進日誌——例外訊息可能夾帶被解析內容的片段、檔案路徑或連線字串，集中式日誌就成了遮罩的旁路。逐處補行為測試是「再漏一處就再補一次」，
+     * 所以改成結構鎖，任何新的或被還原的站點一律轉紅。
+     *
+     * <p>掃描範圍＝{@code isBackupRelated}（路徑含 /backup/、檔名含 Backup、或檔名以 WalArchive 起頭；與 AT-BK-10-4-3 同一判準），現況有 LOG 呼叫的是
+     * 上述四個類別；範圍外的類別（含全域例外處理器）不在此鎖，所以既有非 backup 類別不會被牽連。判準：每個 {@code LOG.<level>(…)} 呼叫在去掉所有
+     * {@code BackupMasker.mask(…)} 群組之後，參數裡不得還剩 {@code .toString()}／{@code .getMessage()}／{@code .getLocalizedMessage()}（不分接收者：
+     * 免得「這個是不是例外」變成人工判斷），也不得直接帶例外變數（catch 參數與型別名以 Exception／Error／Throwable 結尾的變數）。
+     * 誠實劃界：只看 LOG 呼叫的參數文字——先存進區域變數再傳入、或經其他輔助方法再傳入的例外文字掃不到；也不涵蓋 {@code printStackTrace}
+     * 與 SLF4J 的 fluent API（backup 類別現況皆不用）。
+     *
+     * <p>判定指令：{@code .\gradlew.bat test --tests "*BackupArchTest.AT_BK_10_4_S_1_*"}。負控：各種違規寫法的合成樣本必須回非空、合規寫法必須回空。
+     */
+    @Test
+    void AT_BK_10_4_S_1_everyBackupLogCallThatCarriesAnExceptionMasksItWithBackupMaskerFirst() {
+        Map<String, String> scanned = new TreeMap<>();
+        mainSources().forEach((path, text) -> {
+            if (isBackupRelated(path)) {
+                scanned.put(path, text);
+            }
+        });
+        assertThat(scanned.keySet()).as("防反空轉：有 LOG 呼叫的四個類別都在掃描範圍")
+                .contains("com/aisdlc/console/application/service/BackupJobService.java", "com/aisdlc/console/application/service/BackupJobReconciler.java",
+                        "com/aisdlc/console/application/service/BackupQueryService.java", "com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java");
+        List<String> violations = new ArrayList<>();
+        scanned.forEach((path, text) -> logLeakViolations(text).forEach(violation -> violations.add(path + "：" + violation)));
+        assertThat(violations).as("backup 相關類別的 LOG 呼叫不得讓例外文字繞過 BackupMasker（一次列出全部站點）").isEmpty();
+        // 防反空轉（違規為空時才有意義，所以排在違規斷言之後：真有外洩站點時，失敗訊息先點名站點）：掃描器真的認得出這些呼叫
+        List<LogCall> calls = scanned.values().stream().flatMap(text -> logCalls(text).stream()).toList();
+        assertThat(calls.size()).as("防反空轉：掃到的 LOG 呼叫數（下限＝現況 21）").isGreaterThanOrEqualTo(21);
+        assertThat(calls.stream().filter(call -> call.arguments() != null && EXCEPTION_TEXT.matcher(call.arguments()).find()).count())
+                .as("防反空轉：其中帶例外文字的呼叫數（下限＝現況 18）").isGreaterThanOrEqualTo(18);
+
+        // 負控：各種違規寫法的合成樣本都回非空（catch 內的 e、方法參數的 cause 兩種例外變數來源）
+        String inCatch = "class X { void f() { try { run(); } catch (IOException e) { %s } } }";
+        for (String bad : List.of("LOG.warn(\"x {}\", e.toString());", "LOG.warn(\"x {}\", e.getMessage());", "LOG.warn(\"x\", e);",
+                "LOG.warn(\"x {} {}\", id, e.toString());", "LOG.warn(\"x {}\", String.valueOf(e));",
+                "LOG.error(\"x {} {}\", BackupMasker.mask(e.toString()), e.getMessage());", "log.info(\"x {}\", e.getLocalizedMessage());",
+                "LOG.info(\"p {}\", path.toString());")) {
+            assertThat(logLeakViolations(inCatch.formatted(bad))).as("違規樣本 " + bad).isNotEmpty();
+        }
+        assertThat(logLeakViolations(inCatch.formatted("LOG.warn(\"x {}\", BackupMasker.mask(e.toString());"))).as("括號不成對：讀不懂也要回報").isNotEmpty();
+        for (String bad : List.of("LOG.warn(\"x {}\", cause.toString());", "LOG.warn(\"x\", cause);")) {
+            assertThat(logLeakViolations("class X { static void f(RuntimeException cause) { " + bad + " } }")).as("違規樣本 " + bad).isNotEmpty();
+        }
+        assertThat(logLeakViolations("class X { void f() { try { run(); } catch (SchemaProblem p) { LOG.warn(\"x\", p); } } }"))
+                .as("型別名不像例外的 catch 參數（BackupQueryService 的 SchemaProblem 就是這型）直接進日誌").isNotEmpty();
+        // 合規樣本都回空（遮罩群組含巢狀括號；不含例外的日誌；字串常值裡寫到 e.toString() 不算）
+        for (String good : List.of("LOG.warn(\"x {}\", BackupMasker.mask(e.toString()));", "LOG.warn(\"x {} {}\", id, BackupMasker.mask(e.getMessage()));",
+                "LOG.warn(\"x {}\", BackupMasker.mask(String.valueOf(e)));", "LOG.info(\"不含例外的日誌 {}\", removed);",
+                "LOG.warn(\"字串裡寫 e.toString() 與 e 都不算：{}\", id);")) {
+            assertThat(logLeakViolations(inCatch.formatted(good))).as("合規樣本 " + good).isEmpty();
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.aisdlc.console.adapter.out.control;
 
 import com.aisdlc.console.application.port.out.BackupControlPort;
 import com.aisdlc.console.application.port.out.BackupSettings;
+import com.aisdlc.console.domain.model.backup.BackupMasker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -107,7 +108,7 @@ class FileBackupControlAdapter implements BackupControlPort {
         try {
             Files.deleteIfExists(file);
         } catch (IOException e) {
-            LOG.warn("殘留的暫存檔刪除失敗：{}", e.toString());
+            LOG.warn("殘留的暫存檔刪除失敗：{}", BackupMasker.mask(e.toString()));
         }
     }
 
@@ -121,7 +122,7 @@ class FileBackupControlAdapter implements BackupControlPort {
             Files.deleteIfExists(directory.resolve(id + ".json"));
             return true;
         } catch (IOException e) {
-            LOG.warn("請求檔刪除失敗（不影響對帳）：{}.json：{}", id, e.toString());
+            LOG.warn("請求檔刪除失敗（不影響對帳）：{}.json：{}", id, BackupMasker.mask(e.toString()));
             return false;
         }
     }
@@ -142,11 +143,11 @@ class FileBackupControlAdapter implements BackupControlPort {
                         removed++;
                     }
                 } catch (IOException e) {
-                    LOG.warn("殘留請求檔刪除失敗：{}", e.toString());
+                    LOG.warn("殘留請求檔刪除失敗：{}", BackupMasker.mask(e.toString()));
                 }
             }
         } catch (IOException e) {
-            LOG.warn("請求卷目錄無法列舉，略過殘檔清理：{}", e.toString());
+            LOG.warn("請求卷目錄無法列舉，略過殘檔清理：{}", BackupMasker.mask(e.toString()));
         }
         return removed;
     }

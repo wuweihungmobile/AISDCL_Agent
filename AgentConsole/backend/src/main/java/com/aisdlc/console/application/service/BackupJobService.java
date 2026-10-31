@@ -115,7 +115,7 @@ public class BackupJobService implements BackupJobUseCase {
             control.writeRequest(new BackupControlPort.Request(id, type, requestedAt,
                     requestedAt.plusSeconds(settings.requestTtlSeconds())));
         } catch (IOException | RuntimeException e) {
-            LOG.warn("請求檔寫入失敗，該列補償為 FAILED（{}）：{}", BackupJobReason.CONTROL_WRITE_FAILED.value(), e.toString());
+            LOG.warn("請求檔寫入失敗，該列補償為 FAILED（{}）：{}", BackupJobReason.CONTROL_WRITE_FAILED.value(), BackupMasker.mask(e.toString()));
             compensate(id);
             throw controlUnavailable();
         }

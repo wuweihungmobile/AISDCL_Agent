@@ -325,3 +325,11 @@ console-api 與 sidecar 之間只有網路可達性（同在 db-net，F-10；`:9
 | 1-13 | §9.4 條件列（`:239`） | 『AC-PH-03-1（撰寫時 `:90` 路由集合＝`HELP_ROUTES` 鍵）、AC-PH-03-2（`:91` enabled 導覽項皆有說明）、AC-PH-03-4（`:93` 頁檔 id＝`HELP_PAGES`∪`PENDING_HELP_PAGES`）』 | `:89`／`:90`／`:92`（2026-10-27 重核） | 行號隨稿漂移（PRD 已自述） |
 | 1-14 | §11 階段一出口與真機 V 系列（`:262`、`:271-274`） | 階段一：「真機 V1、V2、V3、V6」 | 加 V10：Prometheus `/api/v1/query` 取得的 `aisdlc_backup_job_last_status{backup_job="dump"}` 帶目標標籤 `job="pgbackrest"`、無 `exported_job`；人造一次 dump 失敗後 `PgBackRestJobFailed` firing | promtool 的人造序列看不出抓取層的標籤相撞，只有真抓取驗得出（勘誤 1-2） |
 | 1-15 | AC-BK-09-2（`:116`） | 「非法請求（檔名非 UUID、非常規檔或符號連結、>4 KB、非 JSON、未知 type、已過期、目錄內檔數 >16）When 掃描 Then 不執行任何命令；可寫時寫 `rejected` 結果（封閉詞彙理由），否則只記 WARN」 | 於該句後加：「目錄內檔數 >16 者為目錄級拒絕：不執行任何請求、不寫任何 results、只記 WARN；被漏處理的合法請求由 AC-BK-06-6 的 2×`request-ttl-seconds` 兜底標 EXPIRED（勘誤 1-10）」 | 檔數超限時無從判斷哪一份是合法請求，沒有單一請求可對應一份 `rejected` results；也不該把擠爆目錄放大成十六份以上的寫入 |
+
+### 勘誤二（2026-10-31；階一 SCG-4 獨立審查後；報告 `AgentConsole/docs/06_quality/SCG4-REVIEW-SysAdminBackup-20261031.md`；主控依凍結常態規則於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | PRD 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 2-1 | §5 FR-BK-05／§7 總覽回應 | （無 `exportGeneratedAt`） | 補 `control.exportGeneratedAt`（匯出產生時刻，備份頁「資料更新於」據此） | 決策 6（原預留 PRD 勘誤 1-16） |
+| 2-2 | §5 FR-BK-06 階段欄 | 「`canTrigger` 階一恆 false」 | 階一即可為 true；手動觸發的可用性以 S 階二落地為準，階一真機不得宣稱可用 | 一審 F5；決策 14 |
+| 2-3 | §11 真機 V 系列 | （無前置） | 補前置：全棧以含 K1／F1 的映像重建；sidecar 先跑一次 `job-run.sh full manual` 讓 `jobs/*.json` 有值；ES 以 `tests/e2e/docker.config.ts -g "AT_BK_"` 跑 | 一審 (h) |

@@ -80,6 +80,41 @@ class FileBackupControlAdapterTest {
         }
     }
 
+    /** 去掉 Java 的行註解與區塊註解；字串與字元常值內的雙斜線、斜線星號不算註解（沿 {@code BackupArchTest.stripComments} 的做法，另補字元常值）。 */
+    private static String codeOnly(String source) {
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        int n = source.length();
+        while (i < n) {
+            char c = source.charAt(i);
+            if (c == '"' || c == '\'') {
+                int j = i + 1;
+                while (j < n && source.charAt(j) != c) {
+                    j += source.charAt(j) == '\\' ? 2 : 1;
+                }
+                out.append(source, i, Math.min(n, j + 1));
+                i = j + 1;
+            } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '/') {
+                while (i < n && source.charAt(i) != '\n') {
+                    i++;
+                }
+            } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '*') {
+                int end = source.indexOf("*/", i + 2);
+                i = end < 0 ? n : end + 2;
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    /** 生產碼 {@code FileBackupControlAdapter} 的<b>程式碼行</b>（註解已去掉）：字面鎖只認程式碼，說明文字裡提到某個字樣不算違規也不算滿足。 */
+    private static String productionCode() throws IOException {
+        return codeOnly(Files.readString(Path.of("src/main/java/com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java"),
+                StandardCharsets.UTF_8));
+    }
+
     // ── AT-BK-06-9-2：寫入的成功與三種失敗 ───────────────────────────────────────────────────
 
     @Test
@@ -120,9 +155,12 @@ class FileBackupControlAdapterTest {
     }
 
     /**
-     * F6(e)（SCG-4 一審 U12）：同一請求檔被第二次寫入時覆蓋成功、目錄無 {@code .tmp} 殘留。另以原始碼鎖「改名一律 ATOMIC_MOVE」：
-     * REPLACE_EXISTING 與 ATOMIC_MOVE 在單執行緒行為上無法區分（兩者都覆寫），但前者在 Linux 非原子——runner 可能讀到半個檔，
-     * 這是行為測試抓不到、卻是本設計的根本理由，所以以字面鎖住（改法必須連同本測試一起改並寫 WHY）。
+     * F6(e)（SCG-4 一審 U12；二審 R2-03 改寫 WHY）：同一請求檔被第二次寫入時覆蓋成功、目錄無 {@code .tmp} 殘留。另以原始碼鎖「改名一律
+     * ATOMIC_MOVE、程式碼行不得出現 REPLACE_EXISTING」。為什麼只能鎖原始碼：兩者在單執行緒下<b>語意相同</b>（都覆寫成功），行為測試分辨不出來；
+     * 差別是別的行程看到的中間狀態——JDK 的 {@code UnixCopyFile.move} 處理 REPLACE_EXISTING 是「先 unlink 目標、再 rename」，兩步之間目標檔
+     * <b>不存在</b>（讀者可能看到檔案消失，不是讀到半個檔；rename 失敗時舊檔也已經沒了）；ATOMIC_MOVE 直接一次 rename(2)，目標名稱在任一時刻
+     * 不是舊檔就是新檔。sidecar 的 runner 輪詢請求目錄，空窗期會把已寫成的請求當成不存在。鎖只看<b>程式碼行</b>（註解已去掉，
+     * 說明文字提到該字樣不算違規）；改法必須連同本測試一起改並寫 WHY。
      */
     @Test
     void AT_BK_06_9_2_aSecondWriteOverwritesInPlaceLeavesNoTmpAndTheRenameIsDeclaredAtomic(@TempDir Path root) throws IOException {
@@ -136,9 +174,12 @@ class FileBackupControlAdapterTest {
         assertThat(Files.readString(requests.resolve(id + ".json"), StandardCharsets.UTF_8)).contains("\"type\":\"full\"")
                 .contains("2026-10-27T02:01:00Z");
 
-        String source = Files.readString(Path.of("src/main/java/com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java"),
-                StandardCharsets.UTF_8);
-        assertThat(source).as("寫檔改名必須宣告 ATOMIC_MOVE").contains("StandardCopyOption.ATOMIC_MOVE").doesNotContain("REPLACE_EXISTING");
+        assertThat(productionCode()).as("寫檔改名必須宣告 ATOMIC_MOVE（程式碼行）").contains("StandardCopyOption.ATOMIC_MOVE")
+                .doesNotContain("REPLACE_EXISTING");
+        // 負控（掃描器自證，鎖不得空過）：註解裡的字樣不算；字串常值裡的雙斜線不會吞掉同一行後面的程式碼；程式碼行裡的才算
+        assertThat(codeOnly("// 不是 REPLACE_EXISTING\n/* REPLACE_EXISTING */ Files.move(a, b, ATOMIC_MOVE);")).as("註解不算")
+                .doesNotContain("REPLACE_EXISTING");
+        assertThat(codeOnly("String u = \"http://x\"; Files.move(a, b, REPLACE_EXISTING); // 註解")).as("程式碼行才算").contains("REPLACE_EXISTING");
     }
 
     /**
@@ -146,8 +187,8 @@ class FileBackupControlAdapterTest {
      * （先改名、後改權限，runner 可能在空窗讀到 0600 的檔）。兩層鎖，因為單靠任一層都有盲區：
      * (1) 行為（只在支援 posix 檔案屬性的系統上斷言）：預先放一個 0600 的 {@code <id>.json.tmp}，{@code writeRequest} 覆寫它時檔案模式不變，
      * 所以只有「明確設 0644」才會讓成品是 0644——不依賴行程的 umask（預設 022 下新檔本來就是 0644，直接斷言會變成永遠綠的空測試）；
-     * (2) 原始碼（Windows 沒有 posix 屬性，行為層在那裡不跑）：設權限的呼叫必須存在、先於 ATOMIC_MOVE 改名、且權限字串為 rw-r--r--
-     * （改法必須連同本測試一起改並寫 WHY；同 U12 的字面鎖理由）。
+     * (2) 原始碼（Windows 沒有 posix 屬性，行為層在那裡不跑；單執行緒下「先改權限或先改名」的最終狀態相同，行為層也看不出順序）：設權限的呼叫必須存在、
+     * 先於 ATOMIC_MOVE 改名、且權限字串為 rw-r--r--；只認程式碼行（註解已去掉，說明文字提到呼叫名不算）。改法必須連同本測試一起改並寫 WHY。
      */
     @Test
     void AT_BK_06_9_3_theRequestFileIsReadableByOthersAndTheModeIsSetBeforeTheAtomicRename(@TempDir Path root) throws IOException {
@@ -167,8 +208,7 @@ class FileBackupControlAdapterTest {
             assertThat(PosixFilePermissions.toString(Files.getPosixFilePermissions(requests.resolve(id + ".json"))))
                     .as("POSIX：請求檔 0644（預放的 0600 暫存檔被覆寫後仍須變成 0644）").isEqualTo("rw-r--r--");
         }
-        String source = Files.readString(Path.of("src/main/java/com/aisdlc/console/adapter/out/control/FileBackupControlAdapter.java"),
-                StandardCharsets.UTF_8);
+        String source = productionCode();
         int setMode = source.indexOf("allowOthersToRead(temporary)");
         int rename = source.indexOf("Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE)");
         assertThat(setMode).as("寫檔流程必須呼叫 allowOthersToRead").isNotNegative();

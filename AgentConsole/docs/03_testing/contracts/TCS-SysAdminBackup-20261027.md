@@ -10,7 +10,7 @@
 
 ---
 
-> **上位 PRD digest**：`sha256:848c2acfae30d3034205d647effd5000189c776f29db743629d4a4bdb1d0800a`（`docs/01_requirements/Console_SysAdmin_Backup_PRD.md` v0.4＋〈勘誤一〉1-1～1-15；68,126 bytes；2026-10-28 由主控追加勘誤節後重算，與本檔同於 Stage-2 凍結；Stage-1 凍結值為 `sha256:f61fd7cbd2f1e6d100b6f1f41d0bc04ec7589065346ea088c33dbe3883cd7287`（60,936 bytes，commit `000a217b`，鍵 `agentconsole-sysadmin-backup`））。🔴 **查證基準＝commit `000a217b`**（撰寫期間 HEAD 前進為 `99c9a868`，只動根層 `tools/tests` 與缺陷帳本，`AgentConsole/**` 與 `docs/01_requirements/` 零差異，現況座標仍成立）。本檔不改 PRD 正文；PRD 的問題一律寫成 §7.3 的〈勘誤〉草稿，凍結後走 PRD〈勘誤〉（PRD 目前沒有〈勘誤〉節，須新建）。
+> **上位 PRD digest**：`sha256:1eeb770758738b7f260ee4656243d5b46e71cbf59fb985b10ad9aec356632841`（`docs/01_requirements/Console_SysAdmin_Backup_PRD.md`＋〈勘誤一〉1-1～1-15＋〈勘誤二〉2-1～2-3；LF-only，69,073 bytes；2026-10-31 階一 SCG-4 二審 PASS 後依〈凍結後修訂路由〉第 4 點同步更新；Stage-2 原值 `sha256:848c2acfae30d3034205d647effd5000189c776f29db743629d4a4bdb1d0800a`（68,126 bytes，含〈勘誤一〉）；原檔頭其餘說明：`docs/01_requirements/Console_SysAdmin_Backup_PRD.md` v0.4＋〈勘誤一〉1-1～1-15；68,126 bytes；2026-10-28 由主控追加勘誤節後重算，與本檔同於 Stage-2 凍結；Stage-1 凍結值為 `sha256:f61fd7cbd2f1e6d100b6f1f41d0bc04ec7589065346ea088c33dbe3883cd7287`（60,936 bytes，commit `000a217b`，鍵 `agentconsole-sysadmin-backup`））。🔴 **查證基準＝commit `000a217b`**（撰寫期間 HEAD 前進為 `99c9a868`，只動根層 `tools/tests` 與缺陷帳本，`AgentConsole/**` 與 `docs/01_requirements/` 零差異，現況座標仍成立）。本檔不改 PRD 正文；PRD 的問題一律寫成 §7.3 的〈勘誤〉草稿，凍結後走 PRD〈勘誤〉（PRD 目前沒有〈勘誤〉節，須新建）。
 > **範圍**：階段一（看）加階段二（控）合訂一份（PRD §11）。PRD §5 的 AC 共 53 條（本檔機械計算；PRD 檔頭沒有計數宣稱）；另依掌舵者 Q7 裁決（PRD §13：「顯示 WAL 歸檔健康一行」）補 1 條 TCS 增量 AC（`AC-BK-04-6`，PRD §5 沒有對應條文，勘誤 1-1）。每條 AC 至少一個 AT，需要負控、邊界或錯誤路徑者另有反向 AT。
 
 ## 文件資訊
@@ -1202,3 +1202,39 @@ $snap = Get-Content -LiteralPath <snap 檔> -Encoding utf8; $o = git -C <repo> s
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
 （凍結前留空；凍結後依〈凍結後修訂路由〉由 `agentconsole-sysadmin-backup` `spec-refreeze`，並於此逐條附新 digest；原文座標以 Stage-2 凍結版的行號為準，本節只追加、不改正文。）
+
+### 勘誤一（2026-10-31；階一 SCG-4 獨立審查一審 FAIL→修復棒→二審 PASS；報告 `AgentConsole/docs/06_quality/SCG4-REVIEW-SysAdminBackup-20261031.md`；主控依凍結常態規則於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 1-1 | §C0 時間列 | ISO-8601 `Z` 約束全部時間欄 | 只約束 Console 自有欄位（D-BK-T7 六欄＋API 回應）；pgBackRest `info` 原樣輸出（`timestamp.start/stop` epoch 秒）不轉換 | 決策 1 |
+| 1-2 | §C3.5、C3.1 `canTrigger`、FRD-lite 階段欄 | 「`/backup-out`（階二）」「`canTrigger` 階一恆 false」「`CONSOLE_BACKUP_REQ_DIR`（階二）」 | 兩卷與兩個環境變數階一皆掛／已設；`canTrigger`＝requestDir≠null∧reason=null∧DB 正常，階一部署即為 true，但 POST 在 S 階二（`/backup-req` 卷根屬 spring）前實機 503 並補償 FAILED；階一前端不讀 `canTrigger` | 決策 2、14；一審 F5 |
+| 1-3 | §C1 L298／C3.4 | 「啟動時清逾 24 小時殘檔」歸 sidecar | 歸 console-api（啟動時清 `/backup-req` 內 mtime 逾 24 小時請求檔、只 WARN）；sidecar 清理只作測試保險（EROFS 靜默略過）；新 AT 06-3-S-1、09-2-S-1 編入 §3.2 | 決策 3、8、16 |
+| 1-4 | §C6 `aisdlc_backup_job_last_status` | 未定 running | `last.status=running` 時不輸出該序列（與 `finished_timestamp` 一致）；`PgBackRestJobFailed` 只看上一次終態 | 決策 4 |
+| 1-5 | §C3.4 驗證序第 6 | 「匯出不可讀」含 `ok:false` | 只指 `export_unreadable`／`schema_mismatch`／心跳過期；`info.json` 合法但 `ok:false`（`info_unavailable`）不擋 POST | 決策 5 |
+| 1-6 | §C3.1 | （欄位表） | 保留 `control.exportGeneratedAt`（PRD 勘誤二 2-1 同步） | 決策 6 |
+| 1-7 | §C3 | 端點未編號 | `API-BK-01`＝C3.1 `GET /backups`、`API-BK-02`＝C3.2、`API-BK-03`＝C3.3、`API-BK-04`＝C3.4 `POST …/jobs` | 決策 7 |
+| 1-8 | R-BK-?（鎖持有者）、AT-BK-09-6-3 | 單一維護鎖多 job 未定持有者 | `status=running` 的 job 以 `started_at` 最新者為持有者、其餘為殘留；被清掃 job 同名的 running results 一併改 failed／interrupted；新 AT 04-5-S-1 編入 §3.2 | 決策 9、16 |
+| 1-9 | §C2 匯出 `retention` | `pgbackrest help` 解析未定雜訊 | 匯出帶 `--log-level-console=off` 並容忍前後 INFO 行；`diff` 只列有設定的 repo（repo2 的 diff＝null）；K 以 `info.json` 的 `retention` 結構為準、解析不到＝null | 決策 10 |
+| 1-10 | §C2 `job-run.sh` rc | 未定 busy 路徑 | rc 75（busy）不改狀態檔、不寫 results；工作腳本不得自回 75 | 決策 11 |
+| 1-11 | §5.7 S 包 | 「`0755`」 | 新 `.sh` 索引模式 100644（同既有腳本），Dockerfile `chmod 0755` 補 | 決策 12 |
+| 1-12 | R-BK-44／45、FRD-lite、AT-BK-08-2-1／08-3-1／08-3-2、`backup-docs.test.ts` | 「階一 13 卷」 | 階一卷數 14（含 `backup_req`）；`VOLUME_COVERAGE` 與 README 卷表雙向相等 | 決策 13；一審 PY 08-3-2 與 G-S7 |
+| 1-13 | §5.7 第 1034 列 | `BackupSidecarContractIT` 列為 S 包檔 | 由 K 包棒寫（路徑不變）；S 包階一 24 個 BS 的證據落在 K commit | 決策 15 |
+| 1-14 | §3.2 AT-BK-07-2-E-1 | 例 `../x` | 改「路徑穿越字樣（`..%2Fx`、`%2e%2e%2fx`、`..%5Cx`）4xx 且無 data、不為 500；其餘非 UUID 404 `backup_job_not_found`」 | 決策 17 |
+| 1-15 | §3.2 AT-BK-10-4-1、04-6-2、06-9-2、06-8-4 | （判準字面） | 10-4-1 排除植入機密的 `jobs/dump.json` 與 `results/`；04-6-2 以反射建構 package-private adapter；06-9-2「領域結果」＝宣告的受檢 IOException；06-8-4 以 `runOnceQuietly()` 直呼，輪詢註冊另由新斷言守（一審 F6 U7） | 決策 18；一審 F6 |
+| 1-16 | §C3.1 `cards[].requestedBy`、`backups` | 未定 | `requestedBy` 只在進行中列對應該 job 時取值、否則 null（僅 ADMIN）；`backups` 在 info 與 logical 皆 `ok:false` 時為 null；`requestedAt` 截到秒 | 決策 19；新斷言（一審 F6 U6） |
+| 1-17 | R-BK-25、D-BK-T6、AT-BK-05-3-1 | 缺席情境未列 | faults 表補：`info`／`logical`／`schedule` 缺席 ⇒ `export_unreadable`（資料區塊全 null）；`heartbeat` 缺席 ⇒ `runner_offline`；`jobs/<job>.json` 缺席 ⇒ 該卡 `no_run`；實況：原碼不 NPE（`export.blocked()` 早退、缺席歸 `export_unreadable` 且 HTTP 200；拿掉守門才回 500——二審探針與突變 U2c 證實），只補 AT-BK-05-3-1 五個缺席情境（info／logical／schedule、heartbeat、單一 job 檔）判準 | 一審 F1（P2）；二審 F1 事實核對成立 |
+| 1-18 | R-BK-62、AT-BK-09-3-E-2、G-S1 | 「注入 SC2086 ⇒ G-S1 轉紅」 | `tools/run_shellcheck.py` 以 `-S warning` 跑，info 級不紅；G-S1 另加 `docker run --rm -v <scripts>:/s koalaman/shellcheck -S style /s/job-run.sh /s/backup-ctl-export.sh /s/backup-ctl-runner.sh` 專驗三支新腳本（不改根層工具） | 一審 F2（P2） |
+| 1-19 | R-BK-58、AT-BK-10-4-1 | 洩漏掃描只列總覽 | 補 `GET /backups/jobs`、`GET /backups/jobs/{id}`、`POST /backups/jobs` 三個 503 路徑：假 repo 丟含連線字串密碼段的例外，回應本文與日誌不含該字串；實作面：`BackupQueryService`×3、`BackupJobService`×3、`BackupJobReconciler`×2 共八處 DB 例外 WARN 經 `BackupMasker.mask(e.toString())`，任一還原 ⇒ AT-BK-10-4-1（ApiIT 一、ServiceTest 三）轉紅（二審八處逐一還原皆 killed）；入 R-BK-58 突變欄 | 一審 F3（P2）；二審 G-C1 判為 R-BK-58 日誌行條款下的正當消除成因修法 |
+| 1-20 | R-BK-42、R-BK-48 階欄、§3.2 | 遮罩只列階二 BS（07-3-1） | 階欄拆「一（sidecar 道 `mask_output`：新 AT 09-3-S-2，mask-probes 逐行對拍，不需 runner）／二（runner 道 07-3-1）」 | 一審 F4（P2） |
+| 1-21 | §3.2 AT-BK-02-1-E-1、04-5-3；R-BK-36；決策 8；`FileBackupControlAdapter` | （無反例） | 補：帶 prior 的 incr 夾具斷言 `baseLabel`（加強既有 AT-BK-02-1-E-1）；`requestedBy` 非進行中 job 為 null（加強既有 AT-BK-04-5-3）；`Reconciler.start()` 以 `reconcile-interval-ms` 註冊週期排程；啟動呼叫一次 `cleanStaleRequests()`；寫請求檔 `ATOMIC_MOVE` 且無 `.tmp` 殘留——`ATOMIC_MOVE` 為原始碼字面鎖（單執行緒語意相同、無確定性行為鎖；只掃程式碼行）；請求檔 0644＝POSIX 主機以行為斷言（預放 0600 暫存檔、覆寫後須 0644；Windows 靜默不跑行為半）＋所有平台原始碼字面鎖（`allowOthersToRead` 先於 `ATOMIC_MOVE`）；sidecar 狀態檔 0644／目錄 0755 另由 AT-BK-09-3-S-3（容器內、umask 077）守 | 一審 F6（P3）；二審 R2-03／R2-04 訂正字面 |
+| 1-22 | §5.7 F 包／條件列、R-BK-61 | （允許集合） | 補 `frontend/lib/help/types.ts`（`HelpId` 兩鍵）、`components/domain/sysadmin/tone.ts`、`components/domain/sysadmin/tests/withProviders.tsx`；R-BK-61／G-C4 例外註明 `39accaa3`（S 包 stubs 觸發的根層名冊登記，必要且最小）、`bb67692d`（compat-ci paths） | 一審 F7 |
+| 1-23 | §2「零測試視為失敗」 | 以 rc 判 | 改「以測試名清單比對 ≥1 個以 AT 編號起頭者」（Gradle `--tests` 無匹配仍 rc 0、vitest `-t` 無匹配 rc 0） | 一審 F8 |
+| 1-24 | R-BK-59、FRD-lite 階一數字 | 階一 75／86 | K 載具全做：階一 OpenAPI 77 路徑／89 操作，`schema.d.ts` 含三個階二函式型別；`endpoints.ts` 階一 84 | 一審 F9 |
+| 1-25 | §5.7 F 包 `vitest.config.mts` | 「只加 include」 | 另准 coverage text reporter `skipFull:false`（G-F3 要列出 100% 檔） | 一審 F10 |
+| 1-26 | §2〈突變規格〉 | （無） | 補「sidecar 腳本不是 Gradle test 任務輸入，重放每批前 `cleanTest`，否則 UP-TO-DATE 假綠」 | 一審 (i)1 |
+| 1-27 | §3.2 AT 表、§2 命名表、§5.2 注入縫、§5.7 F 包 | （無） | 新增 AT 編入：AT_BK_10_4_1 ×4（總覽降級／補償失敗／逐列對帳失敗日誌遮罩＋BackupApiIT 503 回應本文）、AT_BK_06_9_3（請求檔 0644 且 chmod 先於原子改名；對應改掛 C1 檔案協定與 AT-BK-06-9-2 成功段，非 AC-BK-06-9 寫入失敗補償）、AT_BK_09_3_S_2／S_3（sidecar 遮罩道與 0644／0755）、AT_BK_06_8_4_startRegisters…、AT_BK_06_3_S_2（方法名縮短以守 Windows 路徑上限）、AT_BK_06_9_2；S 系列命名（09_3_S_2／S_3、06_3_S_2）補入 §2 命名表（沿決策 16 的四個 S AT 先例）；`BackupSeam` 新增 `failJobRepository`／`healJobRepository`＋`BeanPostProcessor` JDK 代理（行為中立）補入 §5.2 注入縫；F4 事實：stdout 原樣透傳、只有狀態檔尾段遮罩（TCS :312、AT-BK-09-4-3，二審核對成立） | 修復棒 (d)2／(d)7；二審 R2-06／R2-07 |
+| 1-28 | 無障礙列（約 :1105）、§3.1／§4 E2 掃描、§3.2 | （E2 只掃 VIEWER 1440 短資料） | 補「可捲動區域可用鍵盤聚焦（role=region、tabindex=0、有名稱）」；E2 axe 須含 ADMIN、390 寬與長資料；新 AT：AT-BK-02-1-3（清單容器 region）、AT-BK-04-2-3（三個輸出尾段 region 名稱互異、非 ADMIN 無）、AT-BK-08-2-2（涵蓋表 region；斷言 help 分頁 button＝0，比 AT-BK-08-1-E-2 容許「複製」鈕更嚴，兩者不衝突）、AT-BK-01-2-E-3（ADMIN 48 行尾段 1440／390 三分頁 axe 0 違規、前置防反空轉；二審 VIEWER 390 探針同為 0 違規、等價覆蓋）；help 分頁因涵蓋表 region 多一個 tabindex 元素，AT-BK-08-1-E-2「全部可聚焦元素」清單含它 | 真機 F11（P2）；F11 棒 (d)；二審 R2-05／R2-06 |
+| 1-29 | R-BK-58、§3.2 | 遮罩射程只寫 DB 例外 | 射程改「backup 類別所有把例外（`Throwable`／`toString()`／`getMessage()`）寫進 LOG 的站點皆經 `BackupMasker.mask`」：二審 R2-01 十處非 DB 站點（`BackupJobService:118`；`BackupJobReconciler:124／261／275`；`BackupQueryService:663／673`；`FileBackupControlAdapter:110／124／145／149`）同形補遮罩；新增靜態掃描 AT-BK-10-4-S-1（`BackupArchTest.AT_BK_10_4_S_1_everyBackupLogCallThatCarriesAnExceptionMasksItWithBackupMaskerFirst`；編號取 `_S_n` 先例，因 AT-BK-10-4-2 已是 PY 載具的 compose 靜態鎖；BA 載具 7→8）：掃 backup 類別所有帶例外文字的 `LOG.*` 呼叫須先經 `BackupMasker.mask`；紅綠自證＝任一站點還原即紅（修復棒十處未遮時恰 10 筆、主控單點還原探針 1 筆）；誠實劃界（先存區域變數再傳、經輔助方法、printStackTrace、fluent API 掃不到）寫在 AT 檔頭；R-BK-58 突變欄補「十處日誌還原 ⇒ AT-BK-10-4-S-1 轉紅」 | 二審 R2-01（P3）；修復棒 2026-10-31 |
+| 1-30 | §3.2 AT-BK-06-8-4 | 只斷言「20 ms 設定下 10 秒內 ≥3 次」 | 加第二情境：`reconcileMs=600_000`、等待 3.5 秒、`findActive` 零次（間隔改常數 1000／2500、初始延遲改 0 三個突變皆轉紅；原碼綠）；同一測試 `BackupServiceTest.AT_BK_06_8_4_startRegistersAPeriodicReconcileThatKeepsRunningAtTheConfiguredInterval`，Javadoc 寫明兩情境缺一不可 | 二審 R2-02（P3）；修復棒 2026-10-31 |
+| 1-31 | §3.2 AT-BK-05-2-R-1 | 「≤60 秒」 | 語意釐清：**驗收門檻**＝停 sidecar 後離線橫幅與 `runner_offline` 於 ≤60 秒出現（真機 2026-10-31 實測約 30 秒，報告 §H）；stack 測試標題的「≤90 秒」是等待**上限**（timeout，容忍 CI 負載），不是門檻——測試在 60～90 秒才出現時仍應視為門檻未達，RM 真機回填時以實測秒數為準 | RTM §2.6 文件棒核對（2026-10-31）發現三處字面不一致 |

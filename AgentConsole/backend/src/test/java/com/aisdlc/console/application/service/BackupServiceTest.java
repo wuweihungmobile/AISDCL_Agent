@@ -893,6 +893,11 @@ class BackupServiceTest {
 
     // ── F6(c)(d)：對帳排程與啟動接線（SCG-4 一審 U7、U9）──────────────────────────────────────
 
+    /**
+     * 兩個情境缺一不可（SCG-4 二審 R2-02）：情境一（20 ms 間隔、10 秒內 ≥3 次）只證明「排程有在跑」——把間隔改成常數 1000 或 2500 毫秒，
+     * 10 秒內照樣 ≥3 次，突變會倖存；情境二（10 分鐘間隔、等 3.5 秒、零次）才證明「間隔取自設定、第一輪也要等滿一個間隔」——
+     * 任何小於 3.5 秒的常數間隔，或把初始延遲改成 0，3.5 秒內都會輪詢至少一次而轉紅。
+     */
     @Test
     void AT_BK_06_8_4_startRegistersAPeriodicReconcileThatKeepsRunningAtTheConfiguredInterval() throws InterruptedException {
         Fixture f = new Fixture();
@@ -909,6 +914,17 @@ class BackupServiceTest {
         }
         f.settings.requestDir = null;
         assertThat(new BackupJobReconciler(f.settings, f.control, f.repo, f.clock, f.audit).start()).as("請求目錄未設 ⇒ 不註冊").isFalse();
+
+        // 情境二：間隔 10 分鐘 ⇒ 3.5 秒內一次輪詢都不該發生（間隔取自設定，不是常數）
+        Fixture slow = new Fixture();
+        slow.settings.reconcileMs = 600_000;
+        try {
+            assertThat(slow.reconciler.start()).as("間隔再長也註冊").isTrue();
+            Thread.sleep(3500);
+            assertThat(slow.calls.stream().filter("findActive"::equals).count()).as("10 分鐘間隔 ⇒ 3.5 秒內零次輪詢（第一輪也等滿一個間隔）").isZero();
+        } finally {
+            slow.reconciler.stop();
+        }
     }
 
     @Test

@@ -121,7 +121,7 @@ public class BackupJobReconciler {
                 LOG.warn("已清除請求卷內 {} 份逾 24 小時的殘留請求檔", removed);
             }
         } catch (RuntimeException e) {
-            LOG.warn("清除請求卷殘檔失敗（不影響啟動）：{}", e.toString());
+            LOG.warn("清除請求卷殘檔失敗（不影響啟動）：{}", BackupMasker.mask(e.toString()));
         }
     }
 
@@ -258,7 +258,7 @@ public class BackupJobReconciler {
         try {
             text = control.read("results/" + row.id() + ".json");
         } catch (UncheckedIOException e) {
-            LOG.warn("results/{}.json 讀取失敗：{}", row.id(), e.toString());
+            LOG.warn("results/{}.json 讀取失敗：{}", row.id(), BackupMasker.mask(e.toString()));
             return Optional.empty();
         }
         if (text.isEmpty() || text.get().isBlank()) {
@@ -272,7 +272,7 @@ public class BackupJobReconciler {
                 return Optional.of(object);
             }
         } catch (RuntimeException e) {
-            LOG.warn("results/{}.json 不是合法 JSON：{}", row.id(), e.toString());
+            LOG.warn("results/{}.json 不是合法 JSON：{}", row.id(), BackupMasker.mask(e.toString()));
         }
         return Optional.empty();
     }

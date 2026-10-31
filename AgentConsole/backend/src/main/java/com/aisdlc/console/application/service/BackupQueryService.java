@@ -660,7 +660,7 @@ public class BackupQueryService implements BackupQueryUseCase {
                 action.run();
                 return false;
             } catch (SchemaProblem e) {
-                LOG.warn("控制面匯出檔內容不合（歸 schema_mismatch）：{}", e.getMessage());
+                LOG.warn("控制面匯出檔內容不合（歸 schema_mismatch）：{}", BackupMasker.mask(e.getMessage()));
                 return true;
             }
         }
@@ -670,7 +670,7 @@ public class BackupQueryService implements BackupQueryUseCase {
             try {
                 text = control.read(relativePath);
             } catch (UncheckedIOException e) {
-                LOG.warn("控制面檔案讀取失敗（歸 export_unreadable）：{}：{}", relativePath, e.toString());
+                LOG.warn("控制面檔案讀取失敗（歸 export_unreadable）：{}：{}", relativePath, BackupMasker.mask(e.toString()));
                 return new Loaded(Kind.CORRUPT, null);
             }
             if (text.isEmpty()) {
