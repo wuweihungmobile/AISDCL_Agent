@@ -29,9 +29,9 @@ from app.settings import Settings, load_settings
 from tests.fake_sdd import make_fake_sdd
 from tests.sdd_run_support import TOKEN as SDD_TOKEN
 from tests.sdd_run_support import make_project
+from tests.timing import STALL_TIMEOUT, WAIT_CAP
 
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
-STEP_TIMEOUT = 60.0
 
 
 def find_mock_claude() -> str:
@@ -135,16 +135,30 @@ class LiveBridge:
         assert resp.status_code == 200, resp.text
         return resp.json()
 
-    def wait_status(self, run_id: str, statuses: set[str], timeout: float = STEP_TIMEOUT
-                    ) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
-        last: dict[str, Any] = {}
-        while time.monotonic() < deadline:
+    def wait_status(self, run_id: str, statuses: set[str], timeout: float = STALL_TIMEOUT,
+                    cap: float = WAIT_CAP) -> dict[str, Any]:
+        """等 run 進入 `statuses` 之一。`timeout` 是**停滯**上限（status 與事件序號都沒動的秒
+        數），不是牆鐘：引擎行程樹的啟動成本隨機器負載膨脹 10～30 倍（數字見 tests/timing.py），
+        固定牆鐘在超載時只會把「慢」誤判成「壞」。`cap` 是總上限，擋活鎖。
+        已經是**別的**終態（想等 COMPLETED 卻 FAILED）就立刻失敗並帶出原因，不再空等到逾時。"""
+        began = moved_at = time.monotonic()
+        mark: tuple[Any, Any] | None = None
+        while True:
             last = self.get_run(run_id)
             if last["status"] in statuses:
                 return last
+            if last["status"] in TERMINAL:
+                raise AssertionError(
+                    f"run 結束 {last['status']}（想等 {sorted(statuses)}）：{last.get('reason')}；"
+                    f"最後狀態：{last}")
+            now = time.monotonic()
+            if (last["status"], last["last_event_seq"]) != mark:
+                mark, moved_at = (last["status"], last["last_event_seq"]), now
+            if now - moved_at > timeout or now - began > cap:
+                raise AssertionError(
+                    f"停滯 {now - moved_at:g}s（總計 {now - began:g}s）仍沒有到達 "
+                    f"{sorted(statuses)}；最後狀態：{last}")
             time.sleep(0.05)
-        raise AssertionError(f"{timeout:g}s 內沒有到達 {sorted(statuses)}；最後狀態：{last}")
 
     def events(self, run_id: str, after: int = 0) -> list[dict[str, Any]]:
         assert self.client is not None
@@ -161,7 +175,7 @@ class LiveBridge:
         out: list[dict[str, Any]] = []
         cur: dict[str, Any] = {}
         with httpx.stream("GET", f"{self.base_url}/autoclaude/runs/{run_id}/stream",
-                          params=params, headers=headers, timeout=STEP_TIMEOUT) as resp:
+                          params=params, headers=headers, timeout=STALL_TIMEOUT) as resp:
             assert resp.status_code == 200
             assert resp.headers["content-type"].startswith("text/event-stream")
             for line in resp.iter_lines():

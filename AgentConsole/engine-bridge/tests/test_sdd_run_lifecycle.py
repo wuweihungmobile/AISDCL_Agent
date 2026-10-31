@@ -44,9 +44,10 @@ from tests.sdd_run_support import (
     wait_sync,
     workspace_has,
 )
+from tests.timing import SPAWN_TIMEOUT
 
 
-def _wait_trace(trace: Path, n: int = 1, timeout: float = 40.0) -> None:
+def _wait_trace(trace: Path, n: int = 1, timeout: float = SPAWN_TIMEOUT) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if len(trace_calls(trace)) >= n:

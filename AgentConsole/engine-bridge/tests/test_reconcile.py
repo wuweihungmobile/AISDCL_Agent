@@ -14,6 +14,7 @@ import psutil
 from app.locks import make_lock_key
 from app.runstate import RunPaths, RunRecord, save_record
 from tests.conftest import TERMINAL, mock_playbook, read_trace
+from tests.timing import SPAWN_TIMEOUT, wait_until
 
 SLEEPER = [sys.executable, "-c", "import time; time.sleep(120)"]
 
@@ -144,14 +145,14 @@ def test_shutting_the_bridge_down_terminates_running_engines(
     bridge = make_bridge()
     body = run_body(trace=trace, delay="60", playbook=mock_playbook())
     info = bridge.post_run(body).json()
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + SPAWN_TIMEOUT
     while not [t for t in read_trace(trace) if t["keywords"]]:
         assert time.monotonic() < deadline
         time.sleep(0.05)
     child_pid = [t for t in read_trace(trace) if t["keywords"]][0]["pid"]
     bridge.stop()
-    assert not psutil.pid_exists(info["pid"])
-    assert not psutil.pid_exists(child_pid)
+    assert wait_until(lambda: not psutil.pid_exists(info["pid"]))
+    assert wait_until(lambda: not psutil.pid_exists(child_pid))
     saved = json.loads((Path(info["workspace"]) / "run.json").read_text(encoding="utf-8"))
     assert saved["status"] == "FAILED"
     assert "Bridge 關閉" in saved["reason"]

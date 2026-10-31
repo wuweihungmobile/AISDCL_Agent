@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from tests.fake_sdd import read_calls, read_state, seed_state
+from tests.timing import SPAWN_TIMEOUT
 
 TOKEN = "run-sdd-token-" + "r" * 32
 FSM_REL = Path("build") / "reports" / "fsm"
@@ -169,7 +170,7 @@ def fsm_state(root: Path, key: str = "alpha") -> dict[str, Any]:
 
 
 def wait_fsm(root: Path, wanted: set[str] | str, *, key: str = "alpha",
-             timeout: float = 45.0) -> dict[str, Any]:
+             timeout: float = SPAWN_TIMEOUT) -> dict[str, Any]:
     """輪詢到 FSM 的 current_state 屬於 wanted（終態同步在終態事件之後約 0.1～0.5 秒，不能單次
     讀）。"""
     targets = {wanted} if isinstance(wanted, str) else set(wanted)
@@ -184,7 +185,7 @@ def wait_fsm(root: Path, wanted: set[str] | str, *, key: str = "alpha",
                          f"{state.get('current_state')}")
 
 
-def wait_sync(run_dir: Path, *, timeout: float = 20.0) -> dict[str, Any]:
+def wait_sync(run_dir: Path, *, timeout: float = SPAWN_TIMEOUT) -> dict[str, Any]:
     """輪詢 `<run_dir>/run.json` 到 `sdd.sync` 落盤，回傳整份紀錄。
 
     終態同步在終態事件**之後**，而且 Bridge 的順序是「CLI 寫完 FSM → 記 sync → persist」
@@ -214,7 +215,7 @@ def audit_entries(live) -> list[dict[str, Any]]:
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
 
 
-def wait_audit(live, ready, *, timeout: float = 20.0) -> list[dict[str, Any]]:
+def wait_audit(live, ready, *, timeout: float = SPAWN_TIMEOUT) -> list[dict[str, Any]]:
     """輪詢 `_audit.jsonl` 直到 `ready(entries)` 為真，回傳當時的全部稽核列。
 
     `sdd_cli` 稽核列在 CLI 子行程**結束之後**才追加，而 FSM 狀態檔是子行程在跑的時候就寫好：

@@ -10,6 +10,7 @@ from pathlib import Path
 import psutil
 
 from tests.conftest import TERMINAL, mock_playbook, read_trace
+from tests.timing import SPAWN_TIMEOUT, wait_until
 
 
 def test_lifecycle_three_steps_complete_and_stream_is_finite(bridge, run_body, tmp_path) -> None:
@@ -63,7 +64,7 @@ def _count(trace: Path, keyword: str) -> int:
     return sum(keyword in t["keywords"] for t in _calls(trace))
 
 
-def _wait_trace(trace: Path, n: int, timeout: float = 30.0) -> list[dict]:
+def _wait_trace(trace: Path, n: int, timeout: float = SPAWN_TIMEOUT) -> list[dict]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         calls = _calls(trace)
@@ -91,7 +92,7 @@ def test_pause_stops_at_the_step_boundary_and_resume_continues_from_the_checkpoi
     paused = bridge.wait_status(rid, {"PAUSED"})
     assert paused["completed_steps"] == 1, "邊界＝第一步完成之後、第二步開始之前"
     assert paused["pid"] is None
-    assert not psutil.pid_exists(engine_pid), "PAUSED 時引擎行程必須已退出"
+    assert wait_until(lambda: not psutil.pid_exists(engine_pid)), "PAUSED 時引擎行程必須已退出"
     seen = _statuses(bridge.events(rid))
     assert seen.index("PAUSING") < seen.index("PAUSED")
 
@@ -132,8 +133,9 @@ def test_stop_cancels_and_leaves_no_child_processes(bridge, run_body, tmp_path) 
     assert (resp.status_code, resp.json()) == (202, {"status": "CANCELLING"})
     final = bridge.wait_status(rid, {"CANCELLED"})
     assert final["completed_at"] and final["pid"] is None
-    assert not psutil.pid_exists(engine_pid)
-    assert not psutil.pid_exists(child_pid), "引擎把 claude 放在自己的 session：只殺引擎會留下孤兒"
+    assert wait_until(lambda: not psutil.pid_exists(engine_pid))
+    assert wait_until(lambda: not psutil.pid_exists(child_pid)), \
+        "引擎把 claude 放在自己的 session：只殺引擎會留下孤兒"
     seen = _statuses(bridge.events(rid))
     assert seen.index("CANCELLING") < seen.index("CANCELLED")
 
@@ -150,7 +152,7 @@ def test_a_child_that_ignores_sigterm_is_force_killed_after_the_grace_period(
     bridge.client.post(f"/autoclaude/runs/{rid}:stop")
     bridge.wait_status(rid, {"CANCELLED"})
     elapsed = time.monotonic() - began
-    assert not psutil.pid_exists(child_pid)
+    assert wait_until(lambda: not psutil.pid_exists(child_pid))
     alerts = [e for e in bridge.events(rid) if e["event"] == "alert"]
     if sys.platform != "win32":
         # POSIX 行為＝SIGTERM 被忽略，必須等滿寬限期（測試設 3s）後升級 SIGKILL，並留下 alert。

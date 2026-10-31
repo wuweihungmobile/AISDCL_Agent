@@ -101,7 +101,9 @@ def test_pid_alive_checks_identity_not_just_existence() -> None:
     finally:
         proc.kill()
         proc.wait()
-    assert not procutil.pid_alive(proc.pid)
+    # Windows 行為＝wait() 回來後 pid 仍可能在行程表上短暫存在（見 tests/timing.py 檔頭），所以是
+    # 有界輪詢，不是立即斷言（2026-10-31 `-n auto` 第三次全套在這一行紅過一次）。
+    assert _wait_until(lambda: not procutil.pid_alive(proc.pid))
     assert not procutil.pid_alive(None)
     assert not procutil.pid_alive(0)
     assert not procutil.pid_alive(-5)
