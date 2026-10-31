@@ -1,0 +1,67 @@
+diff --git a/memory/MEMORY.md b/memory/MEMORY.md
+--- a/memory/MEMORY.md
++++ b/memory/MEMORY.md
+@@ -69,26 +69,5 @@
+ - [2026-10-17 整合輪 115：AISDLC_SDD 接成系統迴圈（T1 再開）](windows-20261017-integration-115-sdd-loop-round.md) — 問題 1 判定＝部分、問題 2 體檢 S-01～S-20；D-115 裁決（CLI 窄寫、SDD_STATE_DIR、核准凍結唯一人工閘、委派同步與回收點、最小侵入白名單、Console 專案是錨、T-G dogfood）；五 Sonnet 並行 4 小時燒滿 5h 窗；幽靈路徑鎖／帳本 `\|`／NTFS 站點表行數釘 928 的機械教訓；結案＝問題 1「是」（Windows／haiku／單機／Unit AT）、問題 2 完成；雲端 POSIX-only 三根因、xdist 參數化 id 要固定、mock spec 賭 SSE 先於去抖重抓＝flaky、Bridge 讀 run.json 的 sdd.sync 要輪詢、關假引擎前先導離頁面、v0.30 ledger 掛鐘粗線在 GitHub Windows runner 偽陽性（DEF-200-543）、跑 execute.mock 會覆寫已追蹤截圖、載具跑時 pre-commit 會擋 commit
+ - [2026-10-16 AgentConsole W7 收斂波（五列 🟡＋ARCH 整合缺口）](windows-20261016-agentconsole-w7-closure-round.md) — 掌舵者授權代決 D-11～D-20；同 agent 分批 SendMessage 續派；引擎唯一有讀者的鍵＝enable_kernel_brain、演化只提案不套用；20KB 預覽根因＝rehype-prism-plus 逐行 O(n²)；分類器擋下的 down -v 不代跑
+ - [2026-10-15 Windows 切換＋AgentConsole P3～6 契約先行輪](windows-20261015-agentconsole-p3-6-round.md) — venv 啟動器多一層行程樹；nvm use 刪 symlink 用 junction 修；Node 22 硬性；EOL 棘輪走重存不重釘；基線站點鎖吃日期；開發者走 rtm_backfill 檔；W4-QA 10 缺陷用 test.fail 釘住、Bridge 映像缺 git 只有全棧真跑才現形；W5 用 OVERVIEW＋持有面表派五棒；W5-QA 全棧結案 10 缺陷、W6 修 Radix 焦點歸還；並行 Playwright 必帶 `--output` 各自目錄（共用 test-results 會被清空）、E2E_ROOT 要短、專案名不含導覽字樣
+-- [R205 2026-10-06 宣告後首次再評（T3 2.1.291；只量不審 streak 3）](windows-20261006-r205-t3-recheck-streak3.md) — 結案載體列必補後繼列（504 載有期限義務：Q4′ JSON 10-17／10-19、nightly 錨 10-20）；700 bytes 牆自己量（估 +4 實 +14）；修法後真實新窗 0 支的 Q1′b 限定口徑；起草員備套用腳本＋濃縮到 ≤150 行再讀；dev_start「排程軌已死」是結構宣告
+-- [R204 2026-10-06 守衛面輪：修 Stop hook 否定句誤報（DEF-200-501）](windows-20261006-r204-stophook-negation-fix.md) — staged hook 要鏡像樹＋junction 驗否則 fail-open 假綠；結案載體列必同 commit 補下一棒（503 承接 R205＝T3 只量不審）；docstring `\s` 撞 W605；Edit 可直接改 .claude/hooks；不需交棒 Mac
+-- [R203 2026-10-06 五問第二十五次（宣告收斂 streak 2）](windows-20261006-r203-converged-streak2.md) — 淨額棘輪逼 499 closed-by-decision；carriers 不遮「」要用反引號；「新真實窗」讀法 X；700 bytes 真牆；QA 任務書帶 AUTOSDD_SENTINEL_OFF；R204＝守衛面輪修 SA-201-01（DEF-200-501）
+-- [R202 2026-10-06 五問第二十四次（Windows 首次達標 streak 1）](windows-20261006-r202-first-pass-streak1.md) — 同切換窗完成；三項 PASS、490 結案、499 承接 R203、500 鏡稽核訂正；R203 必須換視窗（--exclude-self 剔除量測者、新真實窗＝R202 主控窗）；Q1′c 餘裕 0 視窗機制；--json 不列 sid；gh --template 印浮點 run id
+-- [2026-10-05 深夜 Mac→Windows 切換輪（R201 後、R202 前）](windows-20261005-r201-to-win-switch-round.md) — 情境 A 全綠（root 5176／SDD 1478-1979-363／AutoClaude 4932）零 agent 背景序列化跑法；R203 需 R202 後的新 Windows 真實窗；R202 不必等 10-06；掌舵者 R202 提示詞「只派一個 全套四方」是亂碼，正確＝只量不審＋QA 單方鏡稽核；perf baseline 髒檔留給掌舵者
+-- [R200 2026-10-05 五問第二十二次（Windows）](windows-20261005-r200-probe-slot-schedule-r203.md) — 症狀閘 NOT-EVALUABLE／streak 0 但真實層 Q2′ 首次 PASS、只差 Mac Q4′；DEF-200-494 探針 Bash 字面在評估機自造 Q1′c 命中 ⇒ `<shell_read>` 槽位 reset；495 鏡稽核訂正、496 README 四處補強；排程改 R200 Win／R201 Mac ⇒ 最早宣告 R203；Mac 任務書必用 .venv/bin/python；過期 Q4′ JSON＝FAIL 歸零 ⇒ R202 先重產；490 只在評估機 R202 結案
+-- [R199 2026-10-05 五問第二十一次](windows-20261005-r199-crossmachine-gate-darwin-q4.md) — Q4′ 九格對 darwin 恆 FAIL（491 量測器平台感知）、協定跨機不可執行（492 README reset）、鏡稽核 R198 五處（493）；改 tools/tests 不喚醒棘輪唯一路＝同檔行數不變；ConvertFrom-Json 轉 DateTime 炸 --record-since；結案 490 會讓 db4a542 承接句失去載體
+-- [R198 2026-10-05 五問第二十次](windows-20261005-r198-symptom-gate-first-eval.md) — 症狀閘首評 NOT-EVALUABLE；鏡稽核抓到 R197 174 筆紅字歸因錯；協定可執行性 reset（488）；fivequestion_ledger.py 是函式庫不是 CLI；結案文先量 bytes；nightly 錨 14 天日曆鎖
+-- [R197 2026-10-05 五問第十九次](windows-20261005-r197-convergence-criterion-v2.md) — 協定 v2：症狀閘／暴露度／守衛面准入；判準要量症狀不量審查產出；先證偽再修
+-- [R196 2026-10-04 五問第十八次](windows-20261004-r196-lvalue-closure-permission-posture.md) — DEF-200-484 lint 左值族封閉；權限姿態（auto 常態、套 .claude/ 用 acceptEdits、被拒走 /permissions→r）；三方獨立命中仍要主控親驗
+-- [R195 2026-10-04 五問第十七次](windows-20261004-r195-automode-window-lint-assign-gap.md) — 真實 auto mode 新視窗首筆樣本；483 lint 賦值／括號漏攔；受保護路徑交分類器、allow 擋不住 ⇒ 改 hook 用 default 模式開窗
+-- [R194 2026-10-03 五問第十六次](windows-20261003-r194-permission-allow-lint-precision.md) — 476 permissions.allow、481 lint 精準化 177→7、482 協定批次重置；子代理碰 .claude/ 一律 staged 交主控
+-- [R193 2026-10-03 五問首次 Windows 執行輪](windows-20261003-r193-five-questions-windows-first-run.md) — 17 筆歷史 MISBLOCK 皆 R185 已修；headless 探針被權限層拒；量 ②′ 一律 --record-since；帳本列 700 bytes 先量再跑
+-- [R186 2026-09-30 五問第八次（主控首次 Opus）](windows-20260930-r186-five-questions-recheck8-model-axis.md) — Q4 真因＝提問框蓋住 statusLine；`--pace` 會寫守衛遲滯檔；hook 只認 0／2
+-- [R185 2026-09-30 五問第七次](windows-20260930-r185-five-questions-recheck7-waitform-call-operator.md) — 429 waitform `; & exe` 假紅；claim guard 認 toolDenialKind；+976 塞不進棘輪 ⇒ Trim＋搬史料
+-- [R184 2026-09-29 五問第六次](windows-20260929-r184-five-questions-recheck6-claim-guard-boundary.md) — 423 claim guard 把 harness role=user 當真人；款(11) 三連升出口＝搬史料；inline python 引號炸→here-string 腳本檔
+-- [R183 2026-09-29 五問第五次＋Mac 交棒](windows-20260929-r183-five-questions-recheck5-mac-handoff.md) — 420 --pace 推導 active_model、421 claude_home() SSOT；notice 帶逐個 Agent；statusLine 只在互動 TUI 啟動時呼叫
+-- [R182 2026-09-28 五問第四次](windows-20260928-r182-five-questions-recheck4.md) — 帳本時鐘住「發現情境」欄；Win11 可見黑框簽名＝WindowsTerminal 視窗（SetWinEventHook）；發現輪用 AUTOSDD_NET_RATCHET_OFF=1
+-- [R181 2026-09-28 五問第三次](windows-20260928-r181-five-questions-recheck3.md) — ctypes 探針把機率變結構；擋點判準用結構化 hookName；新證據檔登記 governance_docs.py
+-- [R180 2026-09-28 五問第二次](windows-20260928-r180-five-questions-recheck2.md) — 裸 python＝pyenv 讓 --status 假紅（釘根層 .venv）；綠燈靠 sys.modules 快取；SPECIAL_FILES 餘裕 0 ⇒ 常數放 lib
+-- [R179 2026-09-28 五問四方覆核首輪](windows-20260928-five-questions-recheck-r179.md) — R177 假設鏈被真機牴觸；差=15,580 是 feed 先一則的時序；band=free 時 Workflow 可派
+-- [R178 2026-09-27 Windows 切換＋根治輪](windows-20260927-switch-chaos-latest-yaml-writeback.md) — nightly chaos_runner 寫回治理 yaml ⇒ telemetry_writeback_disabled＋沙盒鎖；`isolation: worktree` 建在 repo 樹內會汙染掃描鎖；print-guard-lines PREFIX_LEN 是「再加一列後」值
++- [2026-09-27～10-06 五問系列輪次索引（R178～R205 等 22 條）](archive-index-2026-09-27-to-10-06-fivequestion-rounds.md) — 2026-10-31 自本檔歸檔（OBS-SI-340：索引 23,593 bytes 達 cap_frac 0.9）；查五問輪次先翻它
+ - [2026-07～09 舊輪次索引（多 CPU／單一 .venv／R10～R128／技術債循環令等 41 條）](archive-index-2026-07-to-09-rounds.md) — 2026-10-19 自本檔歸檔（OBS-SI-016：索引逼近載入上限）；查舊輪次先翻它
+diff --git a/memory/archive-index-2026-09-27-to-10-06-fivequestion-rounds.md b/memory/archive-index-2026-09-27-to-10-06-fivequestion-rounds.md
+new file mode 100644
+--- /dev/null
++++ b/memory/archive-index-2026-09-27-to-10-06-fivequestion-rounds.md
+@@ -0,0 +1,31 @@
++---
++name: archive-index-2026-09-27-to-10-06-fivequestion-rounds
++description: 2026-09-27～2026-10-06 的 22 條輪次記憶指標（R178 Windows 切換輪、R179～R205 五問四方覆核系列、Mac→Windows 切換輪），自 MEMORY.md 歸檔以守住索引載入上限；各指向的記憶檔仍在
++metadata:
++  type: reference
++---
++
++歸檔自 `MEMORY.md`〈近期輪次〉（2026-10-31，OBS-SI-340：索引 23,593 bytes 達 cap_frac 0.9 的 25,600 bytes 載入上限）。只搬指標，記憶檔本身不動；要查五問系列輪次先讀本檔。更早的輪次見 [[archive-index-2026-07-to-09-rounds]]。
++
++- [R205 2026-10-06 宣告後首次再評（T3 2.1.291；只量不審 streak 3）](windows-20261006-r205-t3-recheck-streak3.md) — 結案載體列必補後繼列（504 載有期限義務：Q4′ JSON 10-17／10-19、nightly 錨 10-20）；700 bytes 牆自己量（估 +4 實 +14）；修法後真實新窗 0 支的 Q1′b 限定口徑；起草員備套用腳本＋濃縮到 ≤150 行再讀；dev_start「排程軌已死」是結構宣告
++- [R204 2026-10-06 守衛面輪：修 Stop hook 否定句誤報（DEF-200-501）](windows-20261006-r204-stophook-negation-fix.md) — staged hook 要鏡像樹＋junction 驗否則 fail-open 假綠；結案載體列必同 commit 補下一棒（503 承接 R205＝T3 只量不審）；docstring `\s` 撞 W605；Edit 可直接改 .claude/hooks；不需交棒 Mac
++- [R203 2026-10-06 五問第二十五次（宣告收斂 streak 2）](windows-20261006-r203-converged-streak2.md) — 淨額棘輪逼 499 closed-by-decision；carriers 不遮「」要用反引號；「新真實窗」讀法 X；700 bytes 真牆；QA 任務書帶 AUTOSDD_SENTINEL_OFF；R204＝守衛面輪修 SA-201-01（DEF-200-501）
++- [R202 2026-10-06 五問第二十四次（Windows 首次達標 streak 1）](windows-20261006-r202-first-pass-streak1.md) — 同切換窗完成；三項 PASS、490 結案、499 承接 R203、500 鏡稽核訂正；R203 必須換視窗（--exclude-self 剔除量測者、新真實窗＝R202 主控窗）；Q1′c 餘裕 0 視窗機制；--json 不列 sid；gh --template 印浮點 run id
++- [2026-10-05 深夜 Mac→Windows 切換輪（R201 後、R202 前）](windows-20261005-r201-to-win-switch-round.md) — 情境 A 全綠（root 5176／SDD 1478-1979-363／AutoClaude 4932）零 agent 背景序列化跑法；R203 需 R202 後的新 Windows 真實窗；R202 不必等 10-06；掌舵者 R202 提示詞「只派一個 全套四方」是亂碼，正確＝只量不審＋QA 單方鏡稽核；perf baseline 髒檔留給掌舵者
++- [R200 2026-10-05 五問第二十二次（Windows）](windows-20261005-r200-probe-slot-schedule-r203.md) — 症狀閘 NOT-EVALUABLE／streak 0 但真實層 Q2′ 首次 PASS、只差 Mac Q4′；DEF-200-494 探針 Bash 字面在評估機自造 Q1′c 命中 ⇒ `<shell_read>` 槽位 reset；495 鏡稽核訂正、496 README 四處補強；排程改 R200 Win／R201 Mac ⇒ 最早宣告 R203；Mac 任務書必用 .venv/bin/python；過期 Q4′ JSON＝FAIL 歸零 ⇒ R202 先重產；490 只在評估機 R202 結案
++- [R199 2026-10-05 五問第二十一次](windows-20261005-r199-crossmachine-gate-darwin-q4.md) — Q4′ 九格對 darwin 恆 FAIL（491 量測器平台感知）、協定跨機不可執行（492 README reset）、鏡稽核 R198 五處（493）；改 tools/tests 不喚醒棘輪唯一路＝同檔行數不變；ConvertFrom-Json 轉 DateTime 炸 --record-since；結案 490 會讓 db4a542 承接句失去載體
++- [R198 2026-10-05 五問第二十次](windows-20261005-r198-symptom-gate-first-eval.md) — 症狀閘首評 NOT-EVALUABLE；鏡稽核抓到 R197 174 筆紅字歸因錯；協定可執行性 reset（488）；fivequestion_ledger.py 是函式庫不是 CLI；結案文先量 bytes；nightly 錨 14 天日曆鎖
++- [R197 2026-10-05 五問第十九次](windows-20261005-r197-convergence-criterion-v2.md) — 協定 v2：症狀閘／暴露度／守衛面准入；判準要量症狀不量審查產出；先證偽再修
++- [R196 2026-10-04 五問第十八次](windows-20261004-r196-lvalue-closure-permission-posture.md) — DEF-200-484 lint 左值族封閉；權限姿態（auto 常態、套 .claude/ 用 acceptEdits、被拒走 /permissions→r）；三方獨立命中仍要主控親驗
++- [R195 2026-10-04 五問第十七次](windows-20261004-r195-automode-window-lint-assign-gap.md) — 真實 auto mode 新視窗首筆樣本；483 lint 賦值／括號漏攔；受保護路徑交分類器、allow 擋不住 ⇒ 改 hook 用 default 模式開窗
++- [R194 2026-10-03 五問第十六次](windows-20261003-r194-permission-allow-lint-precision.md) — 476 permissions.allow、481 lint 精準化 177→7、482 協定批次重置；子代理碰 .claude/ 一律 staged 交主控
++- [R193 2026-10-03 五問首次 Windows 執行輪](windows-20261003-r193-five-questions-windows-first-run.md) — 17 筆歷史 MISBLOCK 皆 R185 已修；headless 探針被權限層拒；量 ②′ 一律 --record-since；帳本列 700 bytes 先量再跑
++- [R186 2026-09-30 五問第八次（主控首次 Opus）](windows-20260930-r186-five-questions-recheck8-model-axis.md) — Q4 真因＝提問框蓋住 statusLine；`--pace` 會寫守衛遲滯檔；hook 只認 0／2
++- [R185 2026-09-30 五問第七次](windows-20260930-r185-five-questions-recheck7-waitform-call-operator.md) — 429 waitform `; & exe` 假紅；claim guard 認 toolDenialKind；+976 塞不進棘輪 ⇒ Trim＋搬史料
++- [R184 2026-09-29 五問第六次](windows-20260929-r184-five-questions-recheck6-claim-guard-boundary.md) — 423 claim guard 把 harness role=user 當真人；款(11) 三連升出口＝搬史料；inline python 引號炸→here-string 腳本檔
++- [R183 2026-09-29 五問第五次＋Mac 交棒](windows-20260929-r183-five-questions-recheck5-mac-handoff.md) — 420 --pace 推導 active_model、421 claude_home() SSOT；notice 帶逐個 Agent；statusLine 只在互動 TUI 啟動時呼叫
++- [R182 2026-09-28 五問第四次](windows-20260928-r182-five-questions-recheck4.md) — 帳本時鐘住「發現情境」欄；Win11 可見黑框簽名＝WindowsTerminal 視窗（SetWinEventHook）；發現輪用 AUTOSDD_NET_RATCHET_OFF=1
++- [R181 2026-09-28 五問第三次](windows-20260928-r181-five-questions-recheck3.md) — ctypes 探針把機率變結構；擋點判準用結構化 hookName；新證據檔登記 governance_docs.py
++- [R180 2026-09-28 五問第二次](windows-20260928-r180-five-questions-recheck2.md) — 裸 python＝pyenv 讓 --status 假紅（釘根層 .venv）；綠燈靠 sys.modules 快取；SPECIAL_FILES 餘裕 0 ⇒ 常數放 lib
++- [R179 2026-09-28 五問四方覆核首輪](windows-20260928-five-questions-recheck-r179.md) — R177 假設鏈被真機牴觸；差=15,580 是 feed 先一則的時序；band=free 時 Workflow 可派
++- [R178 2026-09-27 Windows 切換＋根治輪](windows-20260927-switch-chaos-latest-yaml-writeback.md) — nightly chaos_runner 寫回治理 yaml ⇒ telemetry_writeback_disabled＋沙盒鎖；`isolation: worktree` 建在 repo 樹內會汙染掃描鎖；print-guard-lines PREFIX_LEN 是「再加一列後」值
