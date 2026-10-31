@@ -482,6 +482,26 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - **D9（DEF-200-566）hook 自動武裝的任務書落點**：hook 的 `write_resume_plan`／`arm_when_earned` 此前用 `tempfile.gettempdir()`，planner CLI 預設與 `reap_plans` 早在 2026-09-05 事故後改住 `endurance_env.plan_dir()`（持久：等額度期間系統暫存會被清）⇒ 同 sid 兩份任務書、排程 Action 各指一份（事故當日 hook 武裝指 `%TEMP%`、主控手動 `--arm-sentinel` 把 Action 改指 `~/.autosdd/plans`）。修法＝甲：hook 以 `from endurance_env import plan_dir` 取同一個家（不留第二份目錄解析；hook raw 行數 1089 不變）；`sentinel_lifecycle.gc` 預設讀 `plan_dir()`（顯式 `tmp_dir` 仍同一格，其餘痕跡仍在系統暫存）；測試圍籬 `fence_enter` 把 `AUTOSDD_PLAN_DIR` 釘進隔離根（`<root>/plans`），免得全套 in-process 的 hook 路徑把 fixture 任務書寫進真實 `~/.autosdd/plans`；`test_the_hook_and_the_cli_arm_the_plan_in_the_same_directory` 釘「兩個入口武裝出來的是同一個檔」。**舊任務書處置**：修前已武裝的 session 在該 session 內仍用 `%TEMP%` 那份（排程 Action 指它）——tick 照常讀它、**不自動搬、不砸**（免得無人回合動檔），只在痕跡 `sentinel_decided.plan_in_temp` 出聲；下一次武裝（新 session 的 hook 武裝，或任何一次 `--arm-sentinel`）以 `-Force` 用新路徑重註冊同名排程，Action 從此指向 `plan_dir()`；`%TEMP%` 舊檔不再被讀、也不被自動收（`reap_plans` 只掃 `plan_dir()`），交系統暫存清理（一次性、量有限）。已知殘留窗：修前武裝的 session 在被重新武裝之前若有人手動 `--arm-sentinel`，同事故形態仍會重現一次（兩份任務書）——量有限、不再擴大。
 - **D10（DEF-200-567）任務書 §3 填入**：喚醒 prompt 要 leg「照任務書第 3 節做」，而骨架 §3 只有 `claude -r` 與 TODO（事故兩支 leg 的 handback 都記這件事，只能讀記憶檔自救）。`--arm-sentinel`／`--arm-endurance` 武裝時，同 sid 的 handback（`resume_route.handback_report`）存在且「## 下一步指令」節非空 ⇒ `relay_machine.handback_next_steps` 把該節原文填進 §3 的 TODO 位置（同一份文件、標明來源路徑與 handback mtime，並重申「宣稱不是證據」）；否則 §3 留 TODO（與修前逐字相同），武裝成功時在憑證旁印一行「⚠️ 任務書 §3 仍是 TODO…」；喚醒 prompt（`_RESUME_RULES`，SESSION_RESUME 與 FRESH 兩條路共用的唯一常數）加一句「任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動」——只有指引、不含任何指令內容（2026-09-07 裁決「不注入 Workflow 續跑提示」仍由 `test_the_resume_prompt_never_names_a_workflow_resume_call` 釘住）。解析邊界：handback 原文若含 relay 狀態塊定界字串（`RELAY_BEGIN`），`parse_relay` 的 `text.find` 會先命中注入處——現 `~/.autosdd/handback/*.md` 命中 0 筆（理論，不加守衛）。骨架（不帶武裝旗標）一律不代填：那是人要填的欄位。
 
+### 2.12 無人窗口是 print 模式：harness 背景等待上限、牆鐘同源、無人窗口能做什麼（R214；DEF-200-574／575；掌舵者 2026-10-31「找出根因避免、檢討架構」）
+
+2026-10-31 11:02～11:32（真實 sid `e4142f11-9540-4830-bd1f-a8188dd9b35a`，非構造痕跡）：哨兵自 `c61e3847` 的 halt 標記於 reset 後喚醒，因該逐字稿 35 MB 超上限走 FRESH_SESSION_WITH_STATE；無頭主 agent 重驗（git／digest／docker／全套）後派兩支 Sonnet QA 鏡（任務書預算 120／150 分鐘）、寫 handback 初版、**收尾回合等完成通知**——在互動視窗這是正確形態。harness 2.1.314 在 print 模式於最後一個回合後只等背景任務 **10 分鐘**，然後把兩支鏡與一支背景 shell 全部停掉並結束行程（stderr 逐字 `Background tasks still running 10m after the last turn (…); stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.`）。relay 見 `files_changed=0` 判 no_progress（INV4 正確地沒有再 spawn），五小時額度軸 0% → 約 20%、零落地（沒有 commit／push／報告）。同一窗另發現根層全套對 `AUTOSDD_UNATTENDED` 不密閉（七紅，DEF-200-574）：無人窗口連「重驗全套綠」都拿不到，只能靠子行程清變數的隔離跑法自救。
+
+**根因（三層，皆結構性）**
+1. spawn 環境從未設 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`；§2.5 與 `resume_route` 檔頭的「三層界住」（`max_spawns`＋1 小時牆鐘＋INV4）從未把 harness 自己的上限算進去，而它比我們的牆鐘短六倍。
+2. 牆鐘 `timeout=3600` 與任務書給 QA 鏡的 120～150 分鐘預算自相矛盾：即使 harness 不殺，第 60 分鐘 `subprocess.run` 也會砍——同一個「續航救 session、死的是扇出」形態（memory `endurance-saves-session-but-fanout-dies`）。
+3. 進度判準 `files_changed>0` 對無人窗口**合法能做的事**（唯讀 QA、測試證據、handback）結構上為 0：INV4 的停是對的，但痕跡上與「主 agent 沒起來」分不開，修法會被導向錯的地方。
+
+**決策**
+- 常數**單一家** `tools/lib/unattended_authz.py`：`RESUME_BG_WAIT_CEILING_SECONDS`＝4 h（注入 spawn 環境，harness 自己有序收掉）、`RESUME_HARD_WALL_SECONDS`＝4.5 h（planner `subprocess.run` 的外層硬牆，只在 harness 自己掛死時動用）、`schedule_backend.DEFER_WAIT_CAP_SECONDS`＝硬牆＋300 s（macOS 延後 bootout 上界）。三者方向鎖＝`test_context_budget_guard.py::PrintModeBgCeilingTest`、`test_mac_endurance_r83.py::…outlives_the_longest_thing…`（planner 的 timeout 必須是具名常數的參照、不是字面）。數值 WHY：QA 鏡 150 分鐘＋主 agent 前後各約 15 分鐘 ≈ 3 h，取 4 h 留裕度、仍短於一個五小時額度窗（額度耗盡由額度守衛與哨兵管，牆鐘只防掛死）。
+- 喚醒 prompt（`_RESUME_RULES`，兩路共用）把預算講給醒來的主 agent：本回合是 print 模式、harness 最多再等 N 分鐘、派棒總預算必須小於它、每棒邊做邊把成果寫進 handback 目錄（被殺時成果不歸零）、等待期間不自造輪詢迴圈。
+- 叫人的理由點名成因：spawn stderr 帶 harness 標記 ⇒ `state["harness_bg_kill"]`、痕跡 `resumed.bg_ceiling_kill`／`relay_stopped.harness_bg_kill`、AUTOSDD_ATTENTION.md 的理由附 `relay_machine.HARNESS_KILL_NOTE`（`stop_reason()` 純函式）。
+- 全套姿態圍籬（DEF-200-574）：runner 在 `console_orphan_census.wrap` 之內、`leak_fence` 之外包 `unattended_authz.posture_fence`（剝 `AUTOSDD_UNATTENDED`、worker 子行程同享、結束還原）；`ProbeOpennessIsAPositiveVerdictTest.setUp`／`_probe()` 與 `SiTestCase._STRIP` 自釘。鎖＝`test_run_root_unittests.py::UnattendedPostureFenceTest`、同檔兩道 AST 接線鎖不變。
+- **刻意不改**：INV4（一次沒進度就停——無人窗口沒有「下一窗再來一次」的理由，人回來看 handback）；`files_changed` 判準（唯讀工作不算進度是保守方向，改寬會讓 relay 多燒一窗）；模型角色（主控 fable／子代理 sonnet；**無人窗口主控是否降為 Sonnet**＝掌舵者裁決事項，見 §7 第 9 項）。
+
+**被否決**：(a) `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` 無限等——掛死的子代理會讓 tick 行程卡到硬牆才死，而硬牆是 `TerminateProcess`、扇出與 shell 孤兒無人收；有限上限讓 harness 自己有序收。(b) 牆鐘拉到整個五小時窗——牆鐘不是額度煞車，額度煞車在額度守衛；牆鐘只防掛死。(c) 要主 agent 在 print 模式用前景輪詢等棒——鐵律六禁止的形態，且 PowerShell 工具單次上限 10 分鐘。(d) 關掉自動 spawn 只留巡邏——掌舵者 2026-10-31 明示「完成續跑機制、不是拆掉；Token 監控不能壞」。(e) 把常數塞進 `resume_route`／`schedule_backend` 其一再互相 import——`schedule_backend` 在 hook import 面上，拖進 `resume_route` 會把 `model_roles`／`quota_*` 一起拉進 hook；`unattended_authz` 是兩支 hook 已在用的葉模組，零新增 import 面。
+
+**量測（本次事故，非估計）**：五小時軸 11:02 0% → 11:46 21%（本互動窗自己約 2 pp）；無人 spawn 歷史 5 窗（2026-10-21 起）：DONE 1、no_progress 2（含本事故）、other_driver 1（DEF-200-573）、另 1 窗 no_progress（10-21 haiku 窗）。修法後要盯的是**產出率**，不是發現率——見 §7 第 8 項。
+
 ---
 
 ## 3. 被否決的方案（各記為何否決）
@@ -586,3 +606,12 @@ session id 還躺在沒讀的狀態塊裡 ⇒ 痕跡分裂成兩個檔，早期�
 6. **探測預算上界 5 × 31,847 ≈ 16 萬 tokens**。`MAX_PROBE_ATTEMPTS = 5` 是挑的、不是量出來的。
 7. **醒來後可能二次撞線**：reset 是滾動視窗，醒來只要一動就重新起算。
    故任務書第 3 節的第一條恆為「重驗＋收斂」，不是「繼續展開」。
+8. **無人窗口的產出率沒有機械帳**（§2.12 起登記）：每窗的 `resumed.bg_ceiling_kill`、handback 四節齊備
+   與否、燒掉的 pp 數，今天仍只能人工從 `autosdd_resume_log_*.jsonl`／`autosdd_resume_cost.jsonl`／
+   `autosdd_unattended_outcome.jsonl` 三處對讀。要不要接成 `--pace` 的一欄，等 §2.12 修法後累積 ≥5 窗
+   再決定（2026-10-31 起算；此前 5 窗 DONE 1）。
+9. **無人窗口的主控模型**＝Sonnet（掌舵者 2026-10-31 互動選項裁決「改 Sonnet」；`env.shared`
+   `AUTOSDD_MODEL_HELMSMAN=sonnet`，只管無人喚醒窗口，互動視窗主控不受影響）。理由：無人窗口的
+   工作面＝重驗、跑全套、派唯讀 QA 鏡、寫 handback，Sonnet 可勝任、單窗固定成本約為 Fable 的五分
+   之一；風險有界（守衛硬擋 commit／push、治理檔唯讀）。再開症狀：連續兩窗 handback 四節不齊或
+   把任務書誤讀成可 commit——屆時回頭看第 8 項的產出率帳再裁。

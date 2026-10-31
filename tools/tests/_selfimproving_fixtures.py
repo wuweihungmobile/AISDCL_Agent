@@ -41,6 +41,7 @@ _STRIP = (
     "GIT_PREFIX",
     "GIT_OBJECT_DIRECTORY",
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "AUTOSDD_UNATTENDED",  # DEF-200-574：無人視窗會帶它；要測拒收的案自己 patch.dict 設值
 )
 FIXED_DATE = "1700000000 +0000"  # 基線 commit 的固定時間（相同輸入建出的 repo 其 HEAD 相同）
 HDR = "| ID | 時間 | 情境 | 症狀 | 證據座標 | 分類 | 嚴重度 | 處置 | 標記 |"

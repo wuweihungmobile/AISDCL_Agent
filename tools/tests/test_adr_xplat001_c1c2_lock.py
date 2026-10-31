@@ -615,11 +615,11 @@ _GUARD_LINE_STALE_SLACK = 0.02
 _FROZEN_GUARD_LINES: dict[str, int] = {
     "_platform_helpers.py": 393,
     "_ps_engine.py": 83,
-    "_selfimproving_fixtures.py": 1702,
+    "_selfimproving_fixtures.py": 1703,
     "_selfimproving_p2_fixtures.py": 879,
     "_selfimproving_p3_fixtures.py": 518,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8882,
+    "test_adr_xplat001_c1c2_lock.py": 8903,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -639,7 +639,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
-    "test_context_budget_guard.py": 15634,
+    "test_context_budget_guard.py": 15717,
     "test_context_window_parity.py": 325,
     "test_cpu_budget.py": 428,
     "test_defect_id_reference_integrity.py": 276,
@@ -657,7 +657,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1335,
-    "test_mac_endurance_r83.py": 2387,
+    "test_mac_endurance_r83.py": 2391,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -685,7 +685,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
     "test_root_module_layout.py": 355,
-    "test_run_root_unittests.py": 5384,
+    "test_run_root_unittests.py": 5446,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
@@ -700,7 +700,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_export_status.py": 913,
     "test_selfimproving_issuemap.py": 173,
     "test_selfimproving_issues.py": 1985,
-    "test_selfimproving_ledgerdb_p0.py": 550,
+    "test_selfimproving_ledgerdb_p0.py": 576,
     "test_selfimproving_measure.py": 746,
     "test_selfimproving_measure_probe.py": 514,
     "test_selfimproving_measure_verb.py": 551,
@@ -2851,6 +2851,19 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "自證）入基準表＋本檔自身漂移（本列、名冊 R214 的理由文字與精確淨額、接鏈列）。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝"
      "docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md。"),
+    ("R214", 144295, 144492, +197,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第十三列（無人續跑扇出被 harness 停掉 2026-10-31："
+     "DEF-200-574／575 回歸鎖）：test_context_budget_guard.py +83（PrintModeBgCeilingTest"
+     "六條：spawn 環境注入上限、三上界方向鎖、planner timeout／env 同源 AST、stderr 標記、"
+     "prompt 預算句、stop_reason 點名；ProbeOpenness setUp／_probe 自釘＋hermetic 案）、"
+     "test_run_root_unittests.py +62（UnattendedPostureFenceTest 五條）、"
+     "test_mac_endurance_r83.py +4（牆鐘同源參照）、"
+     "_selfimproving_fixtures.py +1（_STRIP 加鍵）、test_selfimproving_ledgerdb_p0.py +26"
+     "（P0 SCG-4 一審 F-06／F-07：生效階段值域、案文檢查器反例）＋本檔自身漂移（本列、"
+     "回歸鎖軌同輪列、"
+     "接鏈列、名冊句）。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md §2.12。"),
 )
 
 
@@ -2952,7 +2965,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (15783, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (15980, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -2976,7 +2989,10 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "精確淨額為 15220；"
         "同標籤第十二列（帳本改 DB P0 收尾單人窗口 2026-10-31：新測試檔 "
         "test_selfimproving_ledgerdb_p0.py 入基準表＋本檔自身漂移）再 +563，"
-        "精確淨額為 15783。"
+        "精確淨額為 15783；"
+        "同標籤第十三列（無人續跑扇出被 harness 停掉 2026-10-31：DEF-200-574／575 回歸鎖，"
+        "test_context_budget_guard、test_run_root_unittests 等四檔＋本檔自身漂移）再 +197，"
+        "精確淨額為 15980。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3441,6 +3457,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "議題中心 SCG-4 收尾單人窗口 2026-10-27（兩支新測試檔入基準表）："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok
+     "無人續跑 harness 上限修復 2026-10-31（DEF-200-574／575 回歸鎖）："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3616,10 +3636,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 359
+_REPIN_LOG_FROZEN_PREFIX_LEN = 360
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "852fb93487023a5ddc546bdd7faa7f11821dfcddc205575e82d31c3262aa107e")
+    "1399f078d45e195736eedd0db8d71536b8aa798defb72424d57409af36b40158")
 
 
 def repin_log_history_digest(
@@ -3817,6 +3837,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "90753ed79493", "84c9045eab47", "DEF-200-569"),  # round-label-ok：SI 收尾二
     ("R214", "84c9045eab47", "b7ba67f703cf", "DEF-200-570"),  # round-label-ok：議題中心收尾
     ("R214", "b7ba67f703cf", "852fb9348702", "DEF-200-573"),  # round-label-ok：帳本改 DB P0 收尾
+    ("R214", "852fb9348702", "1399f078d45e", "DEF-200-575"),  # round-label-ok：harness 上限
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -95,6 +95,12 @@ _STOP_REASON = {
     STATE_RELAY_EXHAUSTED: "接力已達每視窗 spawn 上限，停止自動續跑，留任務書給人",
     STATE_OTHER_DRIVER_STOP: "同一份逐字稿另有駕駛（互動視窗也在動）：本窗不續棒，交回哨兵巡邏，請確認誰在開車",  # noqa: E501
 }
+#: DEF-200-575：spawn 的 stderr 帶 harness 停扇出標記時，叫人的理由要點名成因——它在痕跡上與
+#: 「主 agent 沒起來」的 no_progress 長得一樣，修法卻完全不同（派棒總預算 vs. 權限牆／任務書）。
+HARNESS_KILL_NOTE = (
+    "；🔴 這一窗的扇出是被 harness 的背景等待上限停掉的（spawn stderr 帶 "
+    f"`{unattended_authz.HARNESS_BG_KILL_MARK}`）——主 agent 派出的棒總預算超過 spawn 環境注入的 "
+    f"{unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60} 分鐘上限，不是主 agent 沒起來")
 #: 恰三個停止次態需要「叫人」（loud）：無新進度（故障訊號）、達 spawn 上限（人工決策）與同 session
 #: 另有駕駛（雙駕駛，人得知道發生過）。DONE（正常結束）與 QUOTA_STOP（交回既有哨兵巡邏）不吵：
 #: 仍呼叫 `escalation.alert()` 收超齡殘骸，但不點名本窗任務書（`settle_window` 隨後要寫它、哨兵要
@@ -318,7 +324,7 @@ def made_progress(handback_verdict: str, files_changed_count: int) -> bool:
 # ＝INV3 判準本體（`last_window_made_progress ∧ relay_seq≥1` 才准 fan-out），連同 INV2
 # （第一無人視窗禁呼叫 Task／Agent／Workflow）一併**移除**。掌舵者原話：「若是主 Agent 是
 # 活的，主 Agent 要執行啥都可以，要呼叫朋友的可以」——訂閱制帳號，額度風險已由
-# `max_spawns()`（每視窗 spawn 上限）＋1 小時牆鐘 timeout＋INV4（`no_progress_limit()` 在
+# `max_spawns()`（每視窗 spawn 上限）＋牆鐘 timeout（`unattended_authz.RESUME_HARD_WALL_SECONDS`）＋INV4（`no_progress_limit()` 在  # noqa: E501
 # 無人回合夾到 1）三層界住，不需要再加一層分階段信任機制。
 # 🔴 保留不動：INV1（無人等額度時零付費探測）與 INV4（一次沒進度就停）——後者的判準本體
 # 就在上面的 `no_progress_limit()`，其「鍵存在性而非真值測試」的空字串繞過修補不得回退。
@@ -573,6 +579,11 @@ def _rearm_after_stop(planner, args, state: dict, plan: Path, log: Path) -> int:
     return rc
 
 
+def stop_reason(next_st: str, state: dict) -> str:
+    """停止次態給人看的理由（純函式）：`state["harness_bg_kill"]` 為真時附 `HARNESS_KILL_NOTE`。"""
+    return _STOP_REASON[next_st] + (HARNESS_KILL_NOTE if state.get("harness_bg_kill") else "")
+
+
 def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | None) -> int:
     """v2.1.13 G3+G4：`_resume_tick()` resume 分支收尾——rc 落定＋handback 後檢之後，
     接力狀態機判定 → `RELAY_NEXT` 重排下一窗，或四個停止次態之一重掛哨兵。
@@ -638,10 +649,10 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
         # DEF-200-516 順帶發現 7-B：不點名 `plan`——非 loud 的 `alert` 會 GC 點名的任務書，
         # 而本函式緊接著 `write_relay(plan)`，且重掛的哨兵要站在同一份任務書上（`arm` 拒絕
         # 註冊不存在的任務書）。這裡的非 loud `alert` 只收超齡殘骸，`gc_plans` 不再含本窗任務書。
-        told = planner.escalation.alert(_STOP_REASON[next_st], state,
+        told = planner.escalation.alert(stop_reason(next_st, state), state,
                                         loud=next_st in _LOUD_STATES)
         planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
-                           band=band, **told)
+                           band=band, harness_bg_kill=bool(state.get("harness_bg_kill")), **told)
         if next_st in _LOUD_STATES:
             # FIX3(a)：無人需知的停止次態（no_progress／exhausted）落一行持久結局到
             # trace_dir()——alert 的桌面通知在 dead_agents==0 時不敲、AUTOSDD_ATTENTION.md

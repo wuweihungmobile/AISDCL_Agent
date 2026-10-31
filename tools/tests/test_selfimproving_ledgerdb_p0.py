@@ -84,6 +84,8 @@ BARE_M = re.compile(r"(?<![-\w])M[1-7](?!\d)")  # 命名紀律：裸 M 編號（
 # TCS C3、C4、C6：草稿補丁、勘誤欄位、預演證據檔的必要結構
 PATCHES = (("§7.2", "Architecture.md:612"), ("§9.4", ":854"), ("§10.3", ":944"))
 PATCH_LABELS = ("目標檔：", "插入文：", "生效階段：", "路由：")
+# TCS §7.1#2／§7.3：三塊補丁各自的生效階段（SCG-4 一審 F-06：此前只驗行首字樣在、不驗值）
+PATCH_STAGES = {"§7.2": "P3", "§9.4": "P1", "§10.3": "P2"}
 E_FIELDS = ("目標文件", "原文座標", "原文", "訂正文", "生效階段", "套用階段", "理由")
 PRERUN_PARTS = ("預演腳本", "輸出表", "標籤規則", "結論", "乾跑選檔名單")
 PRERUN_WORDS = (
@@ -237,6 +239,10 @@ def draft_problems(text: str) -> list[str]:
         out += [f"補丁 {key}：缺行首字樣 {lab}" for lab in PATCH_LABELS
                 if not re.search(f"^{lab}", hit[0], flags=re.M)]
         out += [f"補丁 {key}：目標檔座標字樣缺 {coord}"] if coord not in hit[0] else []
+        stage = re.search(r"^生效階段：(P\w+)", hit[0], flags=re.M)
+        if stage and stage.group(1) != PATCH_STAGES[key]:
+            out.append(f"補丁 {key}：生效階段 {stage.group(1)} 應為 "
+                       f"{PATCH_STAGES[key]}（TCS §7.1#2）")
         if key == "§7.2":
             out += [f"補丁 §7.2：缺小標 ### {v} 方案" for v in "BC"
                     if not re.search(f"^### {v} 方案", hit[0], flags=re.M)]
@@ -344,7 +350,8 @@ def synth_sql_doc() -> str:
 
 
 def synth_draft() -> str:
-    blocks = [f"## 補丁 {k} 標題\n\n目標檔：{c}-9\n插入文：x\n生效階段：P1\n路由：甲、乙\n"
+    blocks = [f"## 補丁 {k} 標題\n\n目標檔：{c}-9\n插入文：x\n"
+              f"生效階段：{PATCH_STAGES[k]}\n路由：甲、乙\n"
               for k, c in PATCHES]
     return ("# 草稿\n\n" + blocks[0] + "\n### B 方案（x）\n\n### C 方案（y）\n\n"
             + "\n".join(blocks[1:]) + "\ndocker/README.md〈4.3〉\n")
@@ -459,6 +466,7 @@ class TestArchitectureDraft(unittest.TestCase):
         for label, text, want in (
             ("缺一塊補丁", good.replace("## 補丁 §10.3", "## 其他 §10.3"), "補丁 §10.3：標題"),
             ("缺生效階段", good.replace("生效階段：P1", "x"), "生效階段："),
+            ("生效階段值錯", good.replace("生效階段：P3", "生效階段：P9"), "生效階段 P9 應為 P3"),
             ("缺 B 方案", good.replace("### B 方案", "### Z 方案"), "### B 方案"),
             ("座標被改", good.replace(":854", ":000"), "目標檔座標字樣缺 :854"),
             ("整檔空", "", "補丁 §7.2：標題"),
@@ -473,6 +481,24 @@ class TestErrataCase(unittest.TestCase):
     def test_AT_LD_00_D5_1_errata_case_has_seven_complete_entries(self):
         problems = errata_problems(read_doc(ERRATA))
         self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_AT_LD_00_D5_E_1_errata_checker_names_each_broken_variant(self):
+        """SCG-4 一審 F-07：`errata_problems` 此前無反例（弱化成 `return []` 全門存活）。以真實案文
+        為對照組，六種變體各須被點名。"""
+        good = read_doc(ERRATA)
+        self.assertEqual(errata_problems(good), [])
+        coord = "sid c61e3847-c8bf-4694-962f-93a657a7bf35 line 4437"
+        self.assertIn(coord, good, "對照組已不含 E-4 核准座標，本測試的變體失去意義")
+        for label, text, want in (
+            ("少一節", good.replace("### E-3\n", "### E-30\n"), "應恰含 E-1～E-7"),
+            ("欄值清空", re.sub(r"(?m)^(- 理由：).*$", r"\1", good, count=1), "欄值為空：理由"),
+            ("套用階段值域", good.replace("套用階段：P", "套用階段：X"), "套用階段須以"),
+            ("E-4 無座標", good.replace(coord, "sid 待填"), "E-4 缺核准座標欄"),
+            ("E-6 目標", good.replace("Issue_Center_PRD.md", "Other_PRD.md"), "目標文件須為"),
+            ("無不勘誤節", good.replace("## 不勘誤", "## 不勘"), "## 不勘誤 節缺"),
+        ):
+            with self.subTest(label):
+                self.assertTrue(any(want in p for p in errata_problems(text)), want)
 
 
 class TestBaselineAndFingerprint(unittest.TestCase):

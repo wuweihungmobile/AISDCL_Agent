@@ -33,6 +33,7 @@ import endurance_env
 import model_roles
 import quota_pace  # §4.5.4：週窗長度的桶名文法（純函式、零 I/O）
 import quota_policy  # 保險軸清單 `FALLBACK_KINDS`（零 I/O 判讀層）
+import unattended_authz  # DEF-200-575：無人回合時間邊界（harness 背景等待上限／硬牆）的唯一家
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -44,7 +45,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 #: `Agent`／`Workflow`）給「第一窗」用，配一支 `posture_settings_path(allow_followup=…)`
 #: 選檔——連同 INV2／INV3 一併移除、檔案已刪。理由＝訂閱制風險模型下，主 agent 一旦確認
 #: 喚醒即與互動 session 同等信任，不分窗次；額度風險由 `relay_machine.max_spawns()`
-#: ＋1 小時牆鐘 timeout＋INV4（無人回合一次沒進度就停）三層界住。
+#: ＋牆鐘 timeout（`unattended_authz.RESUME_HARD_WALL_SECONDS`；DEF-200-575 起與 harness 背景等待
+#: 上限同源，此前寫死 1 小時）＋INV4（無人回合一次沒進度就停）三層界住。
 UNATTENDED_SETTINGS = _REPO_ROOT / ".claude" / "settings.unattended.json"
 
 
@@ -135,8 +137,25 @@ def _roles() -> model_roles.ModelRoles:
 
 
 def role_env() -> dict[str, str]:
-    """併進喚醒窗口子行程環境的鍵（子代理預設模型）；planner `_run_resume` 的唯一接線點。"""
+    """併進喚醒窗口子行程環境的鍵（子代理預設模型）；由 `spawn_env()` 併入，planner 不直接取用。"""
     return model_roles.child_env(_roles())
+
+
+def spawn_env() -> dict[str, str]:
+    """併進喚醒窗口子行程環境的**全部**鍵——planner `_run_resume` 的唯一接線點。
+
+    `role_env()`（子代理預設模型）＋ harness 背景等待上限（DEF-200-575）：值＝
+    `unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS` 換算毫秒。沒有這個鍵時 `claude -p` 在主
+    agent 收尾回合 10 分鐘後把還在跑的子代理全部停掉（真機 stderr 逐字見該常數上方），無人窗口
+    派出的任何長棒都活不過它。
+    """
+    return {**role_env(), unattended_authz.HARNESS_BG_WAIT_ENV:
+            str(unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS * 1000)}
+
+
+def harness_bg_kill(stderr: str | None) -> bool:
+    """spawn 返回後判「harness 因背景等待上限把扇出停掉」（stderr 逐字標記；缺席＝False）。"""
+    return unattended_authz.HARNESS_BG_KILL_MARK in (stderr or "")
 
 
 def weekly_forces_fresh(axes, converge_pct: float) -> str | None:

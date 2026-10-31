@@ -97,6 +97,7 @@ import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析＋--check 末行 FSM（lib）
 import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活＝對話記錄（非 mtime）＋harness 寬限提示
+import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from probe.audit_session import project_transcript_dir  # noqa: E402
@@ -1106,7 +1107,7 @@ STRATEGY_REFUSE = "REFUSE"
 #: 少帶護欄句＝FRESH 那一跑比 RESUME 少一層約束，而漏帶是靜默的。
 _RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動。"  # noqa: E501 — DEF-200-567：只加一句指引，不含任何指令內容
                  "🔴 本回合無人看管，禁止 commit／push"
-                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。🔴 收窗前必寫 handback 檔（路徑由 prompt 注入），四節齊備：## 做了什麼／## 驗了什麼（附實測 rc）／## 卡在哪／## 下一步指令。")  # noqa: E501 — v2.1.13 G2 批 (b)：收尾義務句行內擴寫（planner LOC 餘裕 1，不開新行）
+                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。🔴 收窗前必寫 handback 檔（路徑由 prompt 注入），四節齊備：## 做了什麼／## 驗了什麼（附實測 rc）／## 卡在哪／## 下一步指令。" f"🔴 本回合是無頭 print 模式（claude -p）：收尾回合後 harness 最多再等背景任務（子代理／背景 shell）{unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60} 分鐘，逾時全部停掉、成果歸零 ⇒ 派棒總預算必須小於它、每棒邊做邊把成果寫進 handback 目錄；等待期間不要自造輪詢迴圈。")  # noqa: E501 — v2.1.13 G2 批 (b)：收尾義務句行內擴寫（planner LOC 餘裕 1，不開新行）；DEF-200-575：背景等待上限告知句（數字取同源常數，同行不開新行）
 
 
 # m5（R95 修復包）：ENV 病態值（非整數字串／零／負值）此前直接 `int()` 炸在喚醒路徑上
@@ -1239,19 +1240,19 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
     try:
-        lock = relay_machine.stale_index_lock(_REPO_ROOT, datetime.now().astimezone()); before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before, lock)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=3600, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.role_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文）；§8-3：快照前先處置陳舊 index.lock（改名可逆）並留痕 round-label-ok
+        lock = relay_machine.stale_index_lock(_REPO_ROOT, datetime.now().astimezone()); before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before, lock)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=unattended_authz.RESUME_HARD_WALL_SECONDS, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.spawn_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文）；§8-3：快照前先處置陳舊 index.lock（改名可逆）並留痕 round-label-ok；DEF-200-575：timeout 與 env 的 harness 背景等待上限同源（unattended_authz），不再寫死 3600、不再只帶 role_env
     except (OSError, subprocess.SubprocessError) as exc:
         append_log(log, "resume_spawn_failed", strategy=route["strategy"], error=str(exc))
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
     # v2.1.13 G2 批 (b)：spawn 返回後的交接後檢（不依賴模型合作；判準本體住 resume_route，
     # 非 written ⇒ `handback_missing` 事件＋alert loud——痕跡與叫人載體由本檔注入）。
-    after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after); state["other_driver"] = relay_machine.other_driver(transcript, spawn_at)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照；DEF-200-565：spawn 後逐字稿鏈頭 ≥2＝另有駕駛（判準⓪的取數）
+    after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after); state["other_driver"] = relay_machine.other_driver(transcript, spawn_at); state["harness_bg_kill"] = resume_route.harness_bg_kill(proc.stderr)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照；DEF-200-565：spawn 後逐字稿鏈頭 ≥2＝另有駕駛（判準⓪的取數）；DEF-200-575：harness 停扇出標記落 state（settle_window 叫人時點名成因）
     hbv = resume_route.handback_postcheck(route, spawn_at, state, log, append_log, escalation.alert); state["handback_verdict"] = hbv  # noqa: E501,E702 — v2.1.13 G3
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
     # 「rc=1、stdout 全空」⇒ 稽核痕跡看得到「失敗了」卻看不到**為什麼**，我是靠手工
     # 重跑一次才找出原因的。無人看管的那一跑沒有人在看 stderr，它只有這一個家。
     append_log(log, "resumed", rc=proc.returncode, strategy=route["strategy"], handback_path=str(route.get("handback") or ""), handback_written=hbv == "written",  # noqa: E501 — G2 增欄
-               err=(proc.stderr or "")[:300], out=(proc.stdout or "")[:400])
+               bg_ceiling_kill=state["harness_bg_kill"], err=(proc.stderr or "")[:300], out=(proc.stdout or "")[:400])  # noqa: E501 — DEF-200-575：痕跡要分得開「主 agent 沒起來」與「扇出被 harness 停掉」
     print((proc.stdout or "")[:2000])
     return proc.returncode
 

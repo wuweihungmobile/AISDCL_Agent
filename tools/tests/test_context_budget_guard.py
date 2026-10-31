@@ -1292,6 +1292,7 @@ import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵�
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家
 import sentinel_lifecycle_arm  # noqa: E402  # armed stamp 存取的家
 import transcript_activity as ta  # noqa: E402  # DEF-200-562：寬限提示／切斷通知的辨識
+import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界常數的家
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -1759,6 +1760,14 @@ class ProbeOpennessIsAPositiveVerdictTest(unittest.TestCase):
     """WHY 全文搬至 CrossPlatform_Guard_Line_History.md〈R115 round-label-ok
     cbg ProbeOpennessIsAPositiveVerdictTest WHY〉節。"""
 
+    def setUp(self) -> None:
+        # DEF-200-574：本類量的是**有人姿態**的計算面。無人視窗跑全套時行程環境帶
+        # `AUTOSDD_UNATTENDED=1`，`probe_quota()` 走 INV1 不付費分支 ⇒ 修前六支直接紅
+        # （含兩支自己 patch `subprocess.run` 的）；在這裡釘一次，`_probe()` 再釘一次是給
+        # 「測試自己刻意設值」的那條路用的。
+        self.enterContext(unittest.mock.patch.dict(os.environ))
+        os.environ.pop(planner.UNATTENDED_ENV, None)
+
     def _probe(self, rc: int, text: str, stderr: str = "") -> dict:
         """打真的 `probe_quota()`，只把它的 `subprocess.run` 換掉（＝計算面全程真跑）。
 
@@ -1771,10 +1780,20 @@ class ProbeOpennessIsAPositiveVerdictTest(unittest.TestCase):
 
         _Done.stderr = stderr
 
-        with unittest.mock.patch.object(planner.quota_gate, "endpoint_probe_verdict",
+        with unittest.mock.patch.dict(os.environ), \
+             unittest.mock.patch.object(planner.quota_gate, "endpoint_probe_verdict",
                                         create=True, return_value=None), \
              unittest.mock.patch.object(planner.subprocess, "run", return_value=_Done()):
+            os.environ.pop(planner.UNATTENDED_ENV, None)  # DEF-200-574：量有人姿態的計算面
             return planner.probe_quota()
+
+    def test_the_probe_helper_is_hermetic_to_an_inherited_unattended_posture(self) -> None:
+        """DEF-200-574：無人視窗跑全套時行程環境帶 `AUTOSDD_UNATTENDED=1`，修前本類六支直接紅
+        （`probe_quota()` 走 INV1 不付費分支、`run` 根本沒被叫）——helper 自己釘環境，
+        外面怎麼設都量同一個計算面。"""
+        with unittest.mock.patch.dict(os.environ, {planner.UNATTENDED_ENV: "1"}):
+            verdict = self._probe(0, self._REAL_ENVELOPE)
+        self.assertTrue(verdict["open"], f"繼承到無人姿態就翻紅：{verdict}")
 
     #: 2.1.x `claude -p --output-format json` 的 **result 信封**（欄位形狀取自 2026-09-05
     #: 探針自身逐字稿：真 model、真 usage）。`duration_ms=3429` 刻意讓裸子字串 `"429"` 命中
@@ -6029,6 +6048,70 @@ class ArmedPlanStepThreeTest(unittest.TestCase):
             argv = " ".join(route["argv"])
             self.assertEqual(route["strategy"], strategy)
             self.assertTrue(planner._RESUME_RULES in argv and "Workflow(" not in argv, argv)
+
+
+class PrintModeBgCeilingTest(unittest.TestCase):
+    """DEF-200-575：無人窗口是 `claude -p`——harness 在主 agent 收尾回合後只等背景任務 10 分鐘
+    就全部停掉（2026-10-31 11:32 真機 stderr，sid e4142f11：兩支 QA 鏡第 23 分鐘被殺、relay
+    判 no_progress、五小時窗燒約 20pp 零落地）。五條鎖：spawn 環境注入上限、硬牆嚴格大於上限
+    （延後 bootout 上界又大於硬牆）、planner 的 timeout 與 env 走同一份常數、stderr 標記判得
+    出來、prompt 把預算講給醒來的主 agent、叫人理由點名成因。"""
+
+    _REAL_STDERR = ('Background tasks still running 10m after the last turn (subagent "P0 帳本改 '
+                    'DB SCG-4 QA 鏡", subagent "備份階一 SCG-4 二審 QA 鏡", shell "$r=…"); '
+                    "stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait "
+                    "indefinitely.\n")
+
+    def test_the_spawn_env_carries_the_ceiling_in_milliseconds_on_top_of_the_role_env(self) -> None:
+        env = resume_route.spawn_env()
+        self.assertEqual(env.get(unattended_authz.HARNESS_BG_WAIT_ENV),
+                         str(unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS * 1000))
+        for key, value in resume_route.role_env().items():
+            self.assertEqual(env.get(key), value, "spawn_env 吞掉了 role_env 的鍵")
+
+    def test_the_ceiling_fits_a_qa_mirror_and_the_hard_wall_strictly_outlives_it(self) -> None:
+        """方向鎖：上限 ≥ 3 小時（任務書給 QA 鏡 120～150 分鐘＋主 agent 前後各 15 分鐘）、
+        ≤ 5 小時（一個額度窗；更長的等待由額度守衛管）；硬牆嚴格大於上限；macOS 延後 bootout
+        的上界又嚴格大於硬牆（三者同源，`DEFER_WAIT_CAP_SECONDS` 不再是第二個數字）。"""
+        ceiling = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS
+        wall = unattended_authz.RESUME_HARD_WALL_SECONDS
+        self.assertGreaterEqual(ceiling, 3 * 3600)
+        self.assertLessEqual(ceiling, 5 * 3600)
+        self.assertGreater(wall, ceiling)
+        self.assertGreater(sb.DEFER_WAIT_CAP_SECONDS, wall)
+
+    def test_run_resume_spawns_with_the_shared_wall_and_env_not_a_literal(self) -> None:
+        """planner 的 `subprocess.run` 站點：`timeout=` 取同源常數（不是字面 3600）、`env` 走
+        `spawn_env()`（不是只帶 role_env）——走 AST，字串比對對格式重排敏感。"""
+        tree = ast.parse(_PLANNER.read_text(encoding="utf-8"))
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.FunctionDef) and n.name == "_run_resume")
+        runs = [c for c in ast.walk(fn)
+                if isinstance(c, ast.Call) and getattr(c.func, "attr", None) == "run"]
+        kws = {kw.arg: kw.value for c in runs for kw in c.keywords}
+        self.assertEqual(getattr(kws.get("timeout"), "attr", None), "RESUME_HARD_WALL_SECONDS",
+                         f"timeout 不是同源常數：{ast.dump(kws.get('timeout'))}")
+        self.assertIn("spawn_env", ast.dump(kws["env"]), "spawn 環境沒走 spawn_env()")
+        self.assertNotIn("role_env", ast.dump(kws["env"]), "spawn 環境退回只帶 role_env")
+
+    def test_the_real_stderr_is_recognised_and_silence_is_not(self) -> None:
+        self.assertTrue(resume_route.harness_bg_kill(self._REAL_STDERR))
+        self.assertFalse(resume_route.harness_bg_kill(""))
+        self.assertFalse(resume_route.harness_bg_kill(None))
+
+    def test_the_resume_prompt_tells_the_main_agent_its_background_budget(self) -> None:
+        """醒來的主 agent 只讀 prompt 與任務書；它不知道 print 模式會殺扇出 ⇒ 預算要講給它聽。"""
+        minutes = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60
+        self.assertIn(f"{minutes} 分鐘", planner._RESUME_RULES)
+        self.assertIn("背景任務", planner._RESUME_RULES)
+
+    def test_the_stop_reason_names_the_harness_kill_only_when_the_state_says_so(self) -> None:
+        plain = relay_machine.stop_reason(relay_machine.STATE_NO_PROGRESS_STOP, {})
+        killed = relay_machine.stop_reason(relay_machine.STATE_NO_PROGRESS_STOP,
+                                           {"harness_bg_kill": True})
+        self.assertNotIn(unattended_authz.HARNESS_BG_KILL_MARK, plain)
+        self.assertTrue(killed.startswith(plain))
+        self.assertIn(unattended_authz.HARNESS_BG_KILL_MARK, killed)
 
 
 class RelayCountsResetOnResetAtChangeTest(unittest.TestCase):

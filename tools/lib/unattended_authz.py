@@ -28,13 +28,38 @@ headless 代理，R83 已裁定「該做的是把 headless 代理的能力面**�
 """
 from __future__ import annotations
 
+import os
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 #: 訊號本身。由 `tools/session_resume_planner.py` 的 `_run_resume()` 在 spawn 那一刻注入
 #: 子行程環境（hook 是那個 `claude` 行程的子行程 ⇒ 一路繼承得到，含子代理派工）。
 #: **正常互動 session 一律沒有這個變數**，整段不參與判定＝零附帶面。
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+
+#: 無人回合的**時間邊界**（DEF-200-575；2026-10-31 11:02～11:32 真機事故，sid e4142f11）。
+#: harness print mode（`claude -p`）在主 agent 收尾回合後若仍有背景任務（子代理／背景 shell／
+#: Monitor），只等 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（預設 10 分鐘）就把它們全部停掉並結束
+#: 行程——stderr 逐字 `Background tasks still running 10m after the last turn (…); stopping them.
+#: Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.`（2.1.314 本體字串現查）。
+#: 互動視窗「派棒→收尾回合→等完成通知」的正確形態，在無人窗口因此結構上必死：兩支 QA 鏡跑到
+#: 第 23 分鐘被殺、relay 判 no_progress、五小時窗燒約 20 個百分點、零落地。spawn 環境從未設過
+#: 這個鍵，而 `_run_resume` 的 `timeout=3600` 又與任務書給鏡的 120～150 分鐘預算自相矛盾。
+#: ⇒ 兩個上界同住這裡、只此一家（resume_route 注入、planner 的 timeout、schedule_backend 的延後
+#: bootout 上界三個消費端都從這裡取值，不留第二個數字）：
+#:   · `RESUME_BG_WAIT_CEILING_SECONDS`：注入 spawn 環境的 harness 背景等待上限（harness 有序收）；
+#:   · `RESUME_HARD_WALL_SECONDS`：`subprocess.run(timeout=…)` 的外層硬牆（harness 自己掛死才動
+#:     用），**嚴格大於**前者；macOS 延後 bootout 的 `schedule_backend.DEFER_WAIT_CAP_SECONDS`
+#:     又須大於它。
+#: 數值 WHY：QA 鏡任務書預算 120～150 分鐘＋主 agent 前置與收尾各約 15 分鐘 ≈ 3 小時；取 4 小時留
+#: 裕度，仍短於一個五小時額度窗（額度耗盡由額度守衛與哨兵另管，不靠牆鐘）。方向鎖與 spawn 注入
+#: 由 `tools/tests/test_context_budget_guard.py::PrintModeBgCeilingTest` 釘住。
+RESUME_BG_WAIT_CEILING_SECONDS = 4 * 3600
+RESUME_HARD_WALL_SECONDS = RESUME_BG_WAIT_CEILING_SECONDS + 30 * 60
+#: harness 讀的環境變數名，與它停掉扇出時的 stderr 標記（皆為 2.1.314 本體實測字面，不是契約；
+#: 改名的失效方向＝退回修前行為：上限不生效、標記認不出——fail-safe 是「多等」不是「誤殺」）。
+HARNESS_BG_WAIT_ENV = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
+HARNESS_BG_KILL_MARK = "Background tasks still running"
 
 #: 會動到 git 歷史／把改動送出去的子指令。刻意**只有這兩個**：那一跑要做的事正是
 #: 「把狀態寫下來然後停」，擋到它讀 git、寫任務書、留稽核痕跡等於逼它什麼都不留就死掉。
@@ -105,3 +130,21 @@ def waiver_void_note(marker: str, why: str) -> str:
     """
     return (f"\n  🔴 這一跑是**被排程叫起來的無人看管回合**（環境變數 {UNATTENDED_ENV} "
             f"有設），\n     行內豁免 `# {marker}:` 對本回合**無效**——{why}\n")
+
+
+def posture_fence(run: Callable[[], int]) -> int:
+    """根層全套的姿態圍籬（DEF-200-574）：進入前剝掉 `AUTOSDD_UNATTENDED`，結束後原值還原。
+
+    WHY：哨兵 `claude -p` 喚醒的無人視窗行程環境帶 `AUTOSDD_UNATTENDED=1`，根層全套在裡面跑會被
+    兩族測試讀到（`probe_quota()` 走 INV1 不付費分支、`selfimproving` 動詞拒收）⇒ 七紅 rc 1
+    （2026-10-31 11:12 真機；同一樹在有人視窗／CI 綠）。全套的期望姿態＝有人／CI；要測無人行為的
+    測試本就自己 `patch.dict` 設值、不受本圍籬影響。在 runner 層剝一次，平行 worker 子行程繼承到的
+    也是剝過的環境。回傳 `run()` 的 rc；還原放 finally，圍籬不吞例外。
+    """
+    had, kept = UNATTENDED_ENV in os.environ, os.environ.get(UNATTENDED_ENV)
+    os.environ.pop(UNATTENDED_ENV, None)
+    try:
+        return run()
+    finally:
+        if had:
+            os.environ[UNATTENDED_ENV] = str(kept)

@@ -396,7 +396,12 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # （只留時間穩定謂詞、一次性驗收移審查閘）後仍成長，由收尾單人窗口重釘；裁決依據＝該條
     # （主控 2026-10-31 收尾裁定甲案：接受重釘；乙案改 docstring 只少 89 行卻要再收斂一輪）。
     # 值取自當回合 `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
-    "prose": 5234,
+    # 🔴 帳本改 DB P0 SCG-4 一審後補強（護欄層記帳＝同標籤 R214 第十三列）：prose 5234→5253（+19）、
+    # guard_self 3250 實測未動——成長全在 test_selfimproving_ledgerdb_p0.py 的 F-06（生效階段值域
+    # 與塊對階段）與 F-07（案文檢查器六變體反例）兩項偵測力補強，受測對象仍是散文、無法移出；
+    # 由獨立 QA 鏡一審指名（報告 SCG4-REVIEW-SelfImprovingLedgerDb-P0-20261031.md §B／§C），主控依
+    # 凍結常態規則裁定重釘。值取自當回合 census 實測（exclusive 5253），零加減推算。
+    "prose": 5253,
     "guard_self": 3250,
 }
 

@@ -724,7 +724,7 @@ def main() -> int:
     #      `python tools/run_root_unittests.py` 傳到 pre-push root-infra leg 與三支 CI。
     if report_untagged_windows_skip_decorators(_TESTS_DIR, _PATTERN):
         return _bail("靜態標籤掃描（不分平台）")
-    import console_orphan_census; return console_orphan_census.wrap(lambda: sentinel_lifecycle.leak_fence(lambda: sentinel_lifecycle.temp_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS))))  # noqa: E402,E501,E702,I001,PLC0415 — console_qa 事故輪：孤兒 console 全套層普查抽到 tools/lib/console_orphan_census.py（本檔 special tier 零餘裕棘輪，DEF-200-162），import 移函式內＋分號同行＝單行取代單行零行數成本；DEF-200-444：leak_fence 內層再包 sentinel_lifecycle.temp_fence（真實 TEMP 圍籬，同行內加一層仍零行數成本）
+    import console_orphan_census, unattended_authz; return console_orphan_census.wrap(lambda: unattended_authz.posture_fence(lambda: sentinel_lifecycle.leak_fence(lambda: sentinel_lifecycle.temp_fence(lambda: run_with_floor(_TESTS_DIR, MIN_TESTS)))))  # noqa: E401,E402,E501,E702,I001,PLC0415 — console_qa 事故輪：孤兒 console 全套層普查抽到 tools/lib/console_orphan_census.py（本檔 special tier 零餘裕棘輪，DEF-200-162），import 移函式內＋分號同行＝單行取代單行零行數成本；DEF-200-444：leak_fence 內層再包 sentinel_lifecycle.temp_fence（真實 TEMP 圍籬，同行內加一層仍零行數成本）；DEF-200-574：wrap 內、leak_fence 外再包 unattended_authz.posture_fence（全套期間剝離 AUTOSDD_UNATTENDED、worker 子行程同享；同行內加一層仍零行數成本）
 
 
 #: 本 runner 的 CLI 契約＝**零旗標**（呼叫端實查：`tools/git-hooks/pre-push` root-infra

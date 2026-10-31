@@ -147,6 +147,7 @@ from pathlib import Path
 # 理由是本檔 `count_loc` 落地當回合為 395/400（餘裕 5），而那正是 ROOT-TOOLS
 # `override_reason` 指定的動作（「破線後不是調高預算，而是拆職責／抽共用模組」）。
 import endurance_env
+import unattended_authz  # DEF-200-575：`DEFER_WAIT_CAP_SECONDS` 與 planner 牆鐘同源（無第二個數字）
 from schedule_backend_calendar import (
     _append_trace,
     _calendar_of,
@@ -188,17 +189,19 @@ _SELF_DISARMED: dict[str, Path] = {}
 #: 🔴 這個常數取代的是一個**寫死的 3 秒 sleep**，而那 3 秒是 R83-B 這個 P0 的根因：
 #: `disarm()` 之後主行程還要做多久，隨**呼叫端**而異——`_sentinel_tick` 的 disarm／
 #: escalate 分支只再寫一行 log（3 秒夠），而 `_resume_tick` 的 resume 分支在 disarm 之後
-#: 才跑 `_run_resume`（`subprocess.run(..., timeout=3600)`）⇒ 3 秒後 bootout 把整個 job
+#: 才跑 `_run_resume`（`subprocess.run(..., timeout=<牆鐘>)`）⇒ 3 秒後 bootout 把整個 job
 #: 連同那一跑一起殺掉。真機合成實驗逐字重現（R83-B，本機 macOS 25.5.0）：長工作寫到
 #: `t+2s` 就沒有下一行，`bootout rc=0` 落在 4 秒後，代表 `append_log(resumed)` 的那一行
 #: **永遠寫不出來**。它與本輪真實撞線語料逐字同形（`probed` 23:06:37 → `bootout rc=0`
 #: 23:06:41 → 沒有任何 `resumed` 事件）。
 #: ⇒ 修法不是「把 3 改大一點」（那只是換一個會過期的猜測），而是讓那句原本就寫在
 #: `disarm` 上方的話**變成真的**：「主行程把該寫的都寫完、正常退場，然後才 bootout」。
-#: 上界必須大於 `_run_resume` 的 `timeout=3600`，否則最長的那一跑仍會被砍。
-#: 誠實劃界：等的是 pid，pid 在一小時內被回收再指到別的行程理論上可能——後果只是
+#: 上界必須大於 `_run_resume` 的 timeout，否則最長的那一跑仍會被砍。DEF-200-575 起不再各寫
+#: 一個數字：牆鐘住 `unattended_authz.RESUME_HARD_WALL_SECONDS`（與 harness 背景等待上限同源），
+#: 本上界＝它再加 300 s（方向鎖 `test_mac_endurance_r83.py::…outlives_the_longest_thing…`）。
+#: 誠實劃界：等的是 pid，pid 在牆鐘內被回收再指到別的行程理論上可能——後果只是
 #: bootout 晚一點（等到那個無關行程也退場或撞上界），不是失效。
-DEFER_WAIT_CAP_SECONDS = 3900
+DEFER_WAIT_CAP_SECONDS = unattended_authz.RESUME_HARD_WALL_SECONDS + 300
 
 #: 無視窗旗標。語意的唯一的家＝`.claude/hooks/context_budget_guard.NO_WINDOW`；本檔
 #: **複製同一個表達式**而不 import 它——依賴方向是 `tools → .claude/hooks`，而本檔正是

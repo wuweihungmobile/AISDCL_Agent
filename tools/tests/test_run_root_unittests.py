@@ -41,6 +41,7 @@ from lib import windows_skip_tags  # noqa: E402  # R72：skip 標籤家族的 SS
 import console_orphan_census  # noqa: E402
 import pace_contract  # noqa: E402  # DEF-200-444：TempFenceTest 的字面相等鎖對端
 import quota_meter  # noqa: E402  # DEF-200-445：圍籬要隔離的快取目錄變數名 SSOT
+import unattended_authz  # noqa: E402  # DEF-200-574：runner 姿態圍籬 `posture_fence` 的家
 
 #: DEF-200-170：刻意取 **runner 手上的那一個** module 物件。`tools/lib` 同時也在 `sys.path`
 #: 上（runner 自己插的），改寫成 `from lib import min_tests_margin` 會拿到**第二個副本**，
@@ -5378,6 +5379,67 @@ class ReportModuleTimingsPrintsWorkerCountTest(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             run_root_unittests.report_module_timings(result)
         self.assertIn("worker=None", buf.getvalue())
+
+
+class UnattendedPostureFenceTest(unittest.TestCase):
+    """DEF-200-574：無人視窗（哨兵 `claude -p` 喚醒，行程環境 `AUTOSDD_UNATTENDED=1`）跑全套
+    必七紅（ProbeOpenness 六支＋AT_140_1_E_1 的 `card` 拒收）；同一樹有人視窗／CI 綠。runner 在
+    `console_orphan_census.wrap` 之內、`leak_fence` 之外包 `unattended_authz.posture_fence`：
+    全套的期望姿態＝有人／CI，要測無人行為的測試本就自己 `patch.dict` 設值。"""
+
+    _KEY = unattended_authz.UNATTENDED_ENV
+
+    def test_the_fence_strips_the_key_for_the_run_and_restores_it_after(self) -> None:
+        seen: dict[str, object] = {}
+
+        def _run() -> int:
+            seen["inside"] = self._KEY in os.environ
+            return 7
+
+        with mock.patch.dict(os.environ, {self._KEY: "1"}):
+            self.assertEqual(unattended_authz.posture_fence(_run), 7, "rc 必須原樣穿透")
+            self.assertEqual(os.environ.get(self._KEY), "1", "離開圍籬後原值要還原")
+        self.assertFalse(seen["inside"], "圍籬內仍看得到無人姿態鍵 ⇒ 全套還是會七紅")
+
+    def test_the_fence_is_a_no_op_when_the_key_was_never_set(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop(self._KEY, None)
+            self.assertEqual(unattended_authz.posture_fence(lambda: 0), 0)
+            self.assertNotIn(self._KEY, os.environ, "沒設過的鍵不得被圍籬無中生有")
+
+    def test_the_fence_restores_even_when_the_run_raises(self) -> None:
+        def _boom() -> int:
+            raise RuntimeError("x")
+
+        with mock.patch.dict(os.environ, {self._KEY: ""}):
+            with self.assertRaises(RuntimeError):
+                unattended_authz.posture_fence(_boom)
+            self.assertEqual(os.environ.get(self._KEY), "",
+                             "空字串值也要原樣還原（無人判準是鍵存在性）")
+
+    def test_main_wraps_the_fenced_suite_in_the_posture_fence(self) -> None:
+        """接線鎖（AST，同 `test_main_is_wrapped_by_the_leak_fence`）：`posture_fence` 在
+        `console_orphan_census.wrap` 之內、`leak_fence` 之外——剝鍵要發生在任何測試模組被
+        import 之前。"""
+        tree = ast.parse(Path(run_root_unittests.__file__).read_text(encoding="utf-8"))
+        main_fn = next(n for n in ast.walk(tree)
+                       if isinstance(n, ast.FunctionDef) and n.name == "main")
+        last = main_fn.body[-1]
+        fences = [n for n in ast.walk(last) if isinstance(n, ast.Call)
+                  and getattr(n.func, "attr", None) == "posture_fence"]
+        self.assertTrue(fences, "main() 的最終 return 找不到 unattended_authz.posture_fence(...)")
+        self.assertEqual(getattr(getattr(fences[0].func, "value", None), "id", None),
+                         "unattended_authz")
+        self.assertTrue(
+            any(isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "leak_fence"
+                for n in ast.walk(fences[0])),
+            "leak_fence 必須在 posture_fence 內層（剝鍵要先於任何測試模組的 import）")
+
+    def test_the_selfimproving_fixture_strips_the_key_at_setup(self) -> None:
+        """乙案的 selfimproving 那一半：`SiTestCase.setUp` 的 `_STRIP` 含該鍵（`run_main()` 同行程
+        叩 `selfimproving.main()`，繼承值會讓 `card` 等動詞直接拒收）。"""
+        import _selfimproving_fixtures as fx  # noqa: PLC0415 — 只在本測試需要，隨用隨載
+        self.assertIn(self._KEY, fx._STRIP)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ import hook_wiring  # noqa: E402
 import quota_escalation as escalation  # noqa: E402
 import schedule_backend as sb  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
+import unattended_authz  # noqa: E402  # DEF-200-575：牆鐘常數的家（延後 bootout 上界的方向鎖對端）
 
 import session_resume_planner as planner  # noqa: E402
 
@@ -1461,15 +1462,18 @@ class DeferredActionWaitsForTheParentTest(unittest.TestCase):
 
         抄一份就會有兩個家：把 `timeout` 調大而不動這個上界，最長的那一跑又會被砍，而
         表徵與修好之前一模一樣（痕跡少一行、沒有例外）。這一條讓那件事當場紅。
+        DEF-200-575 起三者同源（`unattended_authz.RESUME_HARD_WALL_SECONDS`）：改釘「planner 的
+        timeout 是那個具名常數的屬性參照、不是字面」＋「本上界嚴格大於它」。
         """
         tree = ast.parse(Path(planner.__file__).read_text(encoding="utf-8"))
-        found = [kw.value.value for node in ast.walk(tree)
+        found = [kw.value for node in ast.walk(tree)
                  if isinstance(node, (ast.FunctionDef,)) and node.name == "_run_resume"
                  for call in ast.walk(node) if isinstance(call, ast.Call)
-                 for kw in call.keywords
-                 if kw.arg == "timeout" and isinstance(kw.value, ast.Constant)]
-        self.assertEqual(len(found), 1, "`_run_resume` 的 timeout 不是唯一一個字面常數")
-        self.assertGreater(sb.DEFER_WAIT_CAP_SECONDS, found[0])
+                 for kw in call.keywords if kw.arg == "timeout"]
+        self.assertEqual(len(found), 1, "`_run_resume` 的 timeout 站點不是恰一個")
+        self.assertEqual(getattr(found[0], "attr", None), "RESUME_HARD_WALL_SECONDS",
+                         f"timeout 不是同源常數的參照（寫死數字＝第二個家）：{ast.dump(found[0])}")
+        self.assertGreater(sb.DEFER_WAIT_CAP_SECONDS, unattended_authz.RESUME_HARD_WALL_SECONDS)
 
     def test_the_relaunch_records_all_three_return_codes(self) -> None:
         """自我重載的三個 rc（bootout／bootstrap／print）都要落在痕跡檔裡。
