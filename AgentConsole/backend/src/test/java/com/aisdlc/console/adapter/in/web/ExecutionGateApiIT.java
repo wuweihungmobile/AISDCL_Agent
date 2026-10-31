@@ -359,11 +359,14 @@ class ExecutionGateApiIT extends AbstractExecutionIT {
 
     // ── E2E-05：ESCALATED ─────────────────────────────────────────────────────────
 
-    /** 在 G1-T2 失敗的 Level 4 批次（引擎重試 1 次後升級）；回傳已投影到 FAILED 的 runId。 */
+    /**
+     * 在 G1-T2 失敗的 Level 4 批次（引擎重試 1 次後升級）；回傳已投影到 FAILED、且事件消費者已離場的 runId
+     * （RETRY 的 restore 才會重啟新的消費者，見 {@link #awaitTerminalSettled}）。
+     */
     private String failingRun(Fixture f) {
         MINI.failStepIds.add("G1-T2");
         String run = startRun(f.projectId());
-        assertThat(awaitProjected(run, "FAILED")).isTrue();
+        assertThat(awaitTerminalSettled(run, "FAILED")).isTrue();
         return run;
     }
 

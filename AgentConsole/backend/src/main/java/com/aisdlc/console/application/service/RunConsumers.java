@@ -17,10 +17,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
@@ -54,7 +54,8 @@ public class RunConsumers {
     private final RuntimeSettings settings;
     private final Clock clock;
     private final TransactionTemplate tx;
-    private final Map<UUID, Consumer> consumers = new ConcurrentHashMap<>();
+    /** 型別是 {@link ConcurrentMap}：{@link #start} 的登記／取代靠它的 {@code compute} 對同一個 key 原子執行。 */
+    private final ConcurrentMap<UUID, Consumer> consumers = new ConcurrentHashMap<>();
 
     @SuppressWarnings("java:S107")
     public RunConsumers(AgentBridge bridge, ExecutionRunRepository runs, RunEventProcessor processor, RunEventHub hub,
@@ -93,6 +94,14 @@ public class RunConsumers {
 
         /** 只在持有該 run 鎖的處理步驟內設為 true：終態事件已處理完。 */
         private final AtomicBoolean terminalSeen = new AtomicBoolean(false);
+
+        /**
+         * 已不會再為這個 run 處理新事件：已結束，或已處理完終態事件（loop 條件已成立，只剩串流 EOF 與收尾，{@code ended} 要等收尾完才設）。
+         * {@link RunConsumers#start} 以此判斷「可以被取代」。
+         */
+        boolean finished() {
+            return ended || terminalSeen.get();
+        }
 
         /** 在 {@link #work} 鎖內做會碰資料庫的事；已要求停止就不開始（丟 {@link StopRequested}）。 */
         private <T> T working(Supplier<T> action) {
@@ -272,15 +281,37 @@ public class RunConsumers {
 
     // ── 對外 ────────────────────────────────────────────────────────────────────
 
-    /** 啟動某個 run 的消費者（已有活著的就不重複啟動）。{@code afterSeq} 僅供日誌；位移一律以 DB 的 {@code console_last_seq} 為準。 */
+    /**
+     * 啟動某個 run 的消費者。{@code afterSeq} 僅供日誌；位移一律以 DB 的 {@code console_last_seq} 為準。
+     *
+     * <ul>
+     *   <li><b>還在處理事件的消費者不重複啟動</b>。</li>
+     *   <li><b>已處理完終態事件的舊消費者視同已結束</b>（{@code finished()}）：它只剩串流 EOF 與收尾，之後不會再處理任何事件，卻要等收尾完才設
+     *       {@code ended}。restore 落在這段期間時若沿用它，還原後的事件就沒有任何消費者投影（OBS-SI-334）。這個判斷不會取代「正在處理終態事件」
+     *       的消費者：restore 路徑（{@code ExecutionControlService.afterRestore}）在該 run 的 per-run 鎖內呼叫本方法，而 {@code terminalSeen}
+     *       是 {@code handle} 在同一把鎖內處理完終態事件之後才設的——看到 true ＝終態事件已完整處理完。被取代者設 {@code stopping}：它下一次
+     *       {@code working()} 丟 {@link StopRequested} 乾淨退出，不與新消費者重複處理事件；位移存在 DB，新消費者從 {@code console_last_seq}
+     *       接著讀，不漏事件。</li>
+     *   <li><b>登記與取代是同一個 {@code compute} 的原子操作</b>：舊消費者收尾時的 {@code remove(runId, this)} 對同一個 key 與它互斥，
+     *       不會有「remove 搶在 replace 之前、新消費者跑著卻沒進表」的空檔（舊寫法是 putIfAbsent＋replace 兩步且忽略 replace 的回傳值；
+     *       沒進表的消費者，{@link #stopAll}、{@link #awaitIdle} 都看不到它）。</li>
+     * </ul>
+     */
     public void start(UUID runId, int afterSeq) {
         Consumer fresh = new Consumer(runId);
-        Consumer existing = consumers.putIfAbsent(runId, fresh);
-        if (existing != null && !existing.ended) {
+        Consumer[] superseded = new Consumer[1];
+        Consumer registered = consumers.compute(runId, (id, existing) -> {
+            if (existing != null && !existing.finished()) {
+                return existing;
+            }
+            superseded[0] = existing;
+            return fresh;
+        });
+        if (registered != fresh) {
             return;
         }
-        if (existing != null) {
-            consumers.replace(runId, existing, fresh);
+        if (superseded[0] != null) {
+            superseded[0].stopping.set(true);
         }
         LOG.info("啟動批次 {} 的事件消費者（after={}）", runId, afterSeq);
         fresh.thread.start();

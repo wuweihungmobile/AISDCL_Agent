@@ -155,7 +155,10 @@ public abstract class AbstractExecutionIT extends AbstractApiIT {
         return awaitUntil(Duration.ofSeconds(30), () -> status.equals(runStatus(runId)));
     }
 
-    /** 批次狀態達 {@code status} 且事件消費者已把該批次已鏡射的事件處理完（console_last_seq ＝ Bridge 最後一則 seq）。 */
+    /**
+     * 批次狀態達 {@code status} 且事件消費者已把該批次已鏡射的事件處理完（console_last_seq ＝ Bridge 最後一則 seq）。
+     * 只保證「事件處理完」，不保證消費者已離場；接著要 restore／審核 RETRY（同批次還原）時用 {@link #awaitTerminalSettled}。
+     */
     protected boolean awaitProjected(String runId, String status) {
         return awaitUntil(Duration.ofSeconds(30), () -> {
             if (!status.equals(runStatus(runId))) {
@@ -164,6 +167,20 @@ public abstract class AbstractExecutionIT extends AbstractApiIT {
             MiniRun run = mini(runId);
             return run != null && consoleLastSeq(runId) >= run.lastSeq();
         });
+    }
+
+    /**
+     * 終態（{@code FAILED}／{@code COMPLETED}／{@code CANCELLED}）已投影，且<b>該批次的事件消費者已離場</b>（已從消費者表移除）。
+     *
+     * <p>restore／審核 {@code RETRY}（同批次還原）之前要等這個，不能只等 {@link #awaitProjected}（OBS-SI-334）：{@code console_last_seq}
+     * 追上之後，舊消費者還要收尾（{@code terminalSeen} → 串流 EOF → {@code announceRecovered} 要拿 per-run 鎖，而 restore 整段持著
+     * 同一把鎖）。restore 若落在這段收尾期間，{@code RunConsumers.start} 看到「還沒結束」的舊消費者就直接略過、不啟動新的，舊消費者隨後
+     * 依 {@code terminalSeen} 退出——還原之後的事件沒有任何消費者投影，{@code awaitProjected(run, "COMPLETED")} 只能等到逾時。
+     */
+    protected boolean awaitTerminalSettled(String runId, String status) {
+        UUID id = UUID.fromString(runId);
+        return awaitProjected(runId, status) && awaitUntil(Duration.ofSeconds(30),
+                () -> consumers.endedState(id).isEmpty());
     }
 
     protected String runStatus(String runId) {

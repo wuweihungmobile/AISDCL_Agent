@@ -1,5 +1,9 @@
 package com.aisdlc.console.application.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.AlertEventData;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Frame;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Kind;
@@ -17,6 +21,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.stubbing.Answer;
+import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -496,6 +501,122 @@ class RunConsumersTest {
 
         assertThat(consumers.activeCount()).isEqualTo(1);
         verify(bridge, times(1)).streamEvents(eq(runId), anyInt(), any(), any());
+    }
+
+    // ── 終態之後的重啟（restore）：取代「已處理完終態事件、還沒收尾完」的舊消費者（OBS-SI-334）────────────────────
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("latch not released in time");
+            }
+        } catch (InterruptedException e) {
+            throw new IllegalStateException("interrupted", e);
+        }
+    }
+
+    @Test
+    void aRestartWhileTheOldConsumerIsStillLeavingItsStreamAfterTheTerminalEventTakesOverWithAFreshOne() {
+        CountDownLatch oldHandledTerminal = new CountDownLatch(1);
+        CountDownLatch releaseOldStream = new CountDownLatch(1);
+        CountDownLatch oldStreamDone = new CountDownLatch(1);
+        stubStream(invocation -> {
+            // 舊消費者：終態事件處理完（terminalSeen＝true）之後串流遲遲不 EOF；最後才又送來一則事件
+            Consumer<BridgeEvent> handler = invocation.getArgument(3);
+            handler.accept(event(1));
+            oldHandledTerminal.countDown();
+            awaitLatch(releaseOldStream);
+            try {
+                handler.accept(event(2));
+            } finally {
+                oldStreamDone.countDown();
+            }
+            return null;
+        }, streams(event(3)));
+        when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 1))).thenReturn(terminal(frame(1)));
+        when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 2))).thenReturn(progress(frame(2)));
+        when(processor.process(eq(runId), argThat(e -> e != null && e.seq() == 3))).thenReturn(terminal(frame(3)));
+        consumers.start(runId, 0);
+        awaitLatch(oldHandledTerminal);
+        assertThat(consumers.endedState(runId)).as("前提：舊消費者處理完終態事件但還沒結束（舊寫法就在這裡略過 start）")
+                .contains(false);
+
+        consumers.start(runId, 1);
+
+        assertThat(eventually(() -> front.frames.stream().anyMatch(f -> f.seq() == 3)))
+                .as("新消費者接手並投影還原後的事件").isTrue();
+        verify(bridge, times(2)).streamEvents(eq(runId), anyInt(), any(), any());
+        releaseOldStream.countDown();
+        awaitLatch(oldStreamDone);
+        assertThat(front.frames).extracting(Frame::seq).as("被取代的舊消費者標了 stopping：它的 working() 丟 StopRequested，不再處理事件")
+                .containsExactly(1, 3);
+        verify(processor, never()).process(eq(runId), argThat(e -> e != null && e.seq() == 2));
+        assertThat(consumers.awaitIdle(WAIT)).isTrue();
+    }
+
+    @Test
+    void theConsumerThatTookOverIsInTheTableSoStopAllSeesItAndTheOldOnesExitDoesNotEvictIt() {
+        ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        Logger logger = (Logger) LoggerFactory.getLogger(RunConsumers.class);
+        Level before = logger.getLevel();
+        logger.setLevel(Level.INFO);
+        logs.start();
+        logger.addAppender(logs);
+        try {
+            CountDownLatch oldHandledTerminal = new CountDownLatch(1);
+            CountDownLatch releaseOldStream = new CountDownLatch(1);
+            CountDownLatch freshStreaming = new CountDownLatch(1);
+            CountDownLatch freshInterrupted = new CountDownLatch(1);
+            stubStream(invocation -> {
+                Consumer<BridgeEvent> handler = invocation.getArgument(3);
+                handler.accept(event(1));
+                oldHandledTerminal.countDown();
+                awaitLatch(releaseOldStream);
+                return null;                                       // 舊消費者的串流 EOF
+            }, invocation -> {
+                freshStreaming.countDown();
+                try {
+                    Thread.sleep(60_000);
+                } catch (InterruptedException e) {
+                    freshInterrupted.countDown();
+                    throw new IllegalStateException("interrupted by stopAll", e);
+                }
+                return null;
+            });
+            when(processor.process(eq(runId), any())).thenReturn(terminal(frame(1)));
+            consumers.start(runId, 0);
+            awaitLatch(oldHandledTerminal);
+            consumers.start(runId, 1);
+            awaitLatch(freshStreaming);
+
+            releaseOldStream.countDown();
+            String oldLeft = "批次 " + runId + " 的事件消費者結束";
+            assertThat(eventually(() -> {
+                synchronized (logs) {
+                    return logs.list.stream().anyMatch(e -> e.getFormattedMessage().contains(oldLeft));
+                }
+            })).as("舊消費者收尾完（它的 finally 已做過 remove(runId, this)）").isTrue();
+
+            assertThat(consumers.endedState(runId)).as("舊消費者的 remove 不得把接手的新消費者踢出表").contains(false);
+            assertThat(consumers.activeCount()).isEqualTo(1);
+            assertThat(consumers.awaitIdle(Duration.ofMillis(50))).as("新消費者在表內：awaitIdle 看得到它").isFalse();
+            consumers.stopAll();
+            assertThat(awaitQuietly(freshInterrupted)).as("新消費者在表內：stopAll 停得到它").isTrue();
+            assertThat(consumers.awaitIdle(WAIT)).isTrue();
+        } finally {
+            logger.detachAppender(logs);
+            logger.setLevel(before);
+            logs.stop();
+        }
+    }
+
+    private static boolean awaitQuietly(CountDownLatch latch) {
+        try {
+            return latch.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     @Test

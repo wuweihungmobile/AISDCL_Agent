@@ -575,7 +575,7 @@ class ExecuteSddBatchApiIT extends AbstractExecutionIT {
         SddProject p = sddProject("sdd-retry", 3, true);
         MINI.failStepIds.add(p.stepIds().get(1));
         String run = execute(p.projectId(), Map.of()).id();
-        assertThat(awaitProjected(run, "FAILED")).isTrue();
+        assertThat(awaitTerminalSettled(run, "FAILED")).as("RETRY 的 restore 之前，舊消費者要先離場（OBS-SI-334）").isTrue();
         String item = (String) pendingReviews(run).get(0).get("id");
         MINI.failStepIds.clear();
 

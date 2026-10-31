@@ -179,7 +179,8 @@ public class ExecutionControlService {
 
     /**
      * restore 被 Bridge 接受之後：不在快照 {@code completed_step_ids} 內的範圍任務重設為 QUEUED（SKIPPED 不重設；已花的 Token 保留）、
-     * 目標依 R-goal 重算、專案回 EXECUTING、待決的 gate 審核項自動 REJECTED（decided_by＝system）；終態 run 的消費者已結束，重新啟動。
+     * 目標依 R-goal 重算、專案回 EXECUTING、待決的 gate 審核項自動 REJECTED（decided_by＝system）；終態 run 的消費者已處理完終態事件
+     * （可能還在收尾、尚未結束），由 {@code RunConsumers.start} 取代並重新啟動。
      */
     List<UUID> afterRestore(ExecutionRun run, CheckpointRow checkpoint, String actor) {
         Instant now = clock.instant();

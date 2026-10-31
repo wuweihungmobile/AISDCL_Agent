@@ -2507,11 +2507,11 @@ hasKey           = model.apiKey 解密後非空
 
 #### 3.5.4 消費者生命週期（`RunEventConsumer`）
 
-- **啟動時機**：① execute 成功（`after=0`）；② restore 被 Bridge 接受（終態 run 被 restore 後，原消費者已結束，須重啟；`PAUSED` 的 resume 沿用現有消費者）；③ **console-api 啟動時**，對每個 DB 狀態非終態的批次（`RUNNING`、`PAUSED`；`INITIALIZING` 見 §3.4.5 第 6 點）各啟一條，`after=console_last_seq`。
+- **啟動時機**：① execute 成功（`after=0`）；② restore 被 Bridge 接受（終態 run 被 restore 後，原消費者已處理完終態事件、**可能仍在收尾**（SSE EOF、`announceRecovered` 等鎖），由 `RunConsumers.start` 以原子 `compute` 取代並重啟〔2026-10-31 DEF-200-577 訂正：原文「原消費者已結束，須重啟」正是成因——RETRY 落在收尾窗內時 `start` 見既有消費者未 ended 便不啟新者，還原後事件無人投影〕；`PAUSED` 的 resume 沿用現有消費者）；③ **console-api 啟動時**，對每個 DB 狀態非終態的批次（`RUNNING`、`PAUSED`；`INITIALIZING` 見 §3.4.5 第 6 點）各啟一條，`after=console_last_seq`。
 - **啟動掃描的對帳**：③ 先問 Bridge `GET /autoclaude/runs/{id}`：回 404 `run_not_found` → 不啟動消費者、DB 不動（狀態欄由 Bridge 擁有）、寫 WARN 日誌；`GET /executions/{runId}` 以 `bridge.runKnown=false` 表達，SSE 依 §2.3 第 5 點處理。Bridge 不可達 → 仍啟動消費者（由連線層重試，§3.1）。**另補一種情形（B2-3；`MonitorTicker.reconcile`）**：批次在 DB 已是終態（Bridge 已把 `execution_runs.status` 寫成 `COMPLETED`／`FAILED`／`CANCELLED`），但**專案仍是 `EXECUTING`**——console-api 停機期間漏掉了終態事件。此時同樣啟一條消費者，依 `console_last_seq` 從其後補處理（終態 `status` 事件連帶的專案／任務／審核項更新照常發生），處理完即結束。
 - **重連**：連線失敗或閒置逾 45 秒視為斷線，指數退避 1→30 秒，以最後已處理的 Bridge seq 作 `after`（Bridge 的 stream 會先重播 `after` 之後的事件再接即時，毋須另外回補；缺口很大時可改以 `GET …/events?after=&limit=` 分頁取回）。
 - **冪等與順序**：每則事件依 `seq` 處理，`seq ≤ console_last_seq` 一律略過（§3.5.2）；同一 run 的事件處理與控制操作以 per-run 互斥鎖序列化（§1.2）。
-- **結束**：處理完終態 `status` 事件（含其衍生的審核項、告警、專案與任務狀態）後結束消費者，並依 §2.4 關閉該 run 的 SSE 訂閱連線；之後若 restore，由第 ② 點重啟。
+- **結束**：處理完終態 `status` 事件（含其衍生的審核項、告警、專案與任務狀態）後結束消費者，並依 §2.4 關閉該 run 的 SSE 訂閱連線；之後若 restore，由第 ② 點取代重啟（已見終態者視同已結束，即使尚未離場；DEF-200-577）。
 - **位移持久化**：`console_last_seq` 存在 DB（V7），console-api 重啟不丟事件、不靠記憶體位移。
 
 ---
