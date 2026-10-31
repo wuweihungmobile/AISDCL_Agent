@@ -6,7 +6,8 @@
 ``~/.autosdd/traces/autosdd_unattended_outcome.jsonl``（結局檔）。本探針把三處
 依 session 對起來，每個結局一列，末尾印彙總；累積 ≥5 窗後拿這張表裁「要不要接成 `--pace` 的一欄」。
 
-用法：``python tools/probe/unattended_yield.py [--json]``（兩平台同一條；stdout 由 ``_stdio_utf8`` 釘 UTF-8）。
+用法：``python tools/probe/unattended_yield.py [--json]``（兩平台同一條指令；
+stdout／stderr 由 ``_stdio_utf8`` 釘成 UTF-8）。
 不接任何閘門的 rc：量測值會漂，恆 rc 0；三處任一缺席就在該欄印 ``-``，不猜。
 """
 from __future__ import annotations
@@ -19,8 +20,9 @@ from pathlib import Path
 _TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_TOOLS))
 sys.path.insert(0, str(_TOOLS / "lib"))
-import _stdio_utf8  # noqa: E402,F401  # 非 UTF-8 終端 print（中文／→）防崩潰保護
 import endurance_env  # noqa: E402
+
+import _stdio_utf8  # noqa: E402,F401  # 非 UTF-8 終端 print（中文／→）防崩潰保護
 
 HANDBACK_SECTIONS = ("## 做了什麼", "## 驗了什麼", "## 卡在哪", "## 下一步")
 RESUME_LOG_GLOB = "autosdd_resume_log_*.jsonl"

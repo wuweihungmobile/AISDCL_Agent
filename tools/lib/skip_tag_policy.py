@@ -505,7 +505,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 前置掃描逐字指示重釘為 231 ⇒ 照填，零加減推算）。
     # 🔴 2026-10-20 重釘 242→243（實測 304，前置掃描逐字指示重釘為 243 ⇒ 照填；成長來源含
     # 工作樹既有的未追蹤 `tests/contract/test_evolution_propose_only.py`，非本包新增）。
-    "AutoClaude/tests": 243,  # 241→242（webhook 測試檔後實測 303；逐字指示）  round-label-ok
+    "AutoClaude/tests": 244,  # 243→244（TTY 判定測試檔後實測 305；逐字指示）  round-label-ok
     # 🔴 R84 包 W5：23 → 24。**非本包造成**——`AISDLC_SDD/scripts/tests` 由 29 支長到 30
     # （並行包新增鎖檔），下限只剩實測的 77%、低於 `TREE_FLOOR_RATIO` 的 80% ⇒
     # `tree_floor_problems()` 的第三向（下限已過期）當場判紅並**逐字**指示重釘為 24，本行
