@@ -1189,7 +1189,7 @@
 | `AT-BK-04-1-2` | TCS AC-BK-04-1 | `bk-badge-<job>` 文字依序為「成功」「失敗」「進行中」「中斷」「從未執行」，`data-status` 為對應值… | frontend | 3 | 見 AC 列（frontend） | BackupView.test.tsx::AT_BK_04_1_2 | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-04-1-E-1` | TCS AC-BK-04-1 | F-04 形：jobs/full.json 缺席但清單有全備：cards[0] 為 no_run… | backend | 3 | 見 AC 列（backend） | BackupApiIT.AT_BK_04_1_E_1_…、BackupView.test.tsx::AT_BK_04_1_E_1 | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-04-1-E-2` | TCS AC-BK-04-1 | 沒有 `dangerouslySetInnerHTML`… | frontend | 3 | 見 AC 列（frontend） | sysadmin.static.test.ts::AT_BK_04_1_E_2（2 個 it） | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
-| `AT-BK-04-1-R-1` | TCS AC-BK-04-1 | 不開終端機、不看英文，答得出四題：昨晚備份成功了嗎、最近一份全備是何時、離站有沒有備到、備份真的還原得起來嗎（驗證卡）… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | 未驗（RM 真機未跑，報告 §H） | ⬜ 未開始（RM 真機未跑；不計入自動 AT） |
+| `AT-BK-04-1-R-1` | TCS AC-BK-04-1 | 不開終端機、不看英文，答得出四題：昨晚備份成功了嗎、最近一份全備是何時、離站有沒有備到、備份真的還原得起來嗎（驗證卡）… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | ✅ 真機 PASS（2026-10-31 16:0x 真機棒：ADMIN 1440 四題皆只憑畫面答出並與 `pgbackrest info`／`jobs/*.json` 真值一致；第 4 題畫面答「從未驗證」為真實狀態；報告 §H RM 段） | ✅ 真機已驗（RM；不計入自動 AT） |
 | `AT-BK-04-2-1` | TCS AC-BK-04-2 | `cards[2]`：`status=failed`、`reason=script_failed`… | backend | 3 | 見 AC 列（backend） | BackupApiIT.AT_BK_04_2_1_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-04-2-2` | TCS AC-BK-04-2 | 失敗卡（ADMIN 與 OPERATOR 各渲染）：徽章 data-tone=danger、顯示「最近一次成功：`<時間>`」… | frontend | 3 | 見 AC 列（frontend） | BackupView.test.tsx::AT_BK_04_2_2 | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-04-2-3` | TCS 勘誤一 1-28 補 AT（AC-BK-04-2；SCG-4 F11） | ADMIN 的輸出尾段（可捲動 pre）可用鍵盤抵達：60 行長尾段仍是 role=region、tabindex=0，名稱帶工作名且三張卡互不相同… | frontend | 3 | 見 AC 列（frontend） | BackupView.test.tsx::AT_BK_04_2_3 | 未驗 | ✅ 實作+測試（一審修復 3784f88c 新增；［二審］新 AT 全綠） |
@@ -1333,7 +1333,7 @@
 | `AT-BK-09-4-3` | TCS AC-BK-09-4 | 結束碼 3；stdout 恰含 `OUT-LINE`（不含 `ERR-LINE`）、stderr 恰含 `ERR-LINE`（串流不混）… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_4_3_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-4-E-1` | TCS AC-BK-09-4 | pgbackrest-metrics.sh 輸出仍含既有 14 個指標名… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_4_E_1_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-4-E-2` | TCS AC-BK-09-4 | 審查閘 G-C1／G-C4：變更路徑皆在 §5.7 內；根層與引擎零差異 | 審查閘 | 3 | （審查閘，無實作檔） | 審查閘 G-C1、G-C4（無測試函式） | 未驗 | ✅ 審查閘（一審 G-C1 ⊆ §5.7（除 F7 三檔）、G-C4 六 commit 0 命中；［二審］PASS） |
-| `AT-BK-09-4-R-1` | TCS AC-BK-09-4 | 真機 V6：隔日 02:00 排程經 job-run.sh 照常成功… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | 未驗（RM 真機未跑，報告 §H） | ⬜ 未開始（RM 真機未跑；不計入自動 AT） |
+| `AT-BK-09-4-R-1` | TCS AC-BK-09-4 | 真機 V6：隔日 02:00 排程經 job-run.sh 照常成功… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | ✅ 真機 PASS（2026-10-31 16:0x 真機棒：部署後首個 02:00 增備兩 repo 完成、`jobs/diff.json` scheduled／succeeded、指標 last_status 0、`cron.log` 無 WARN；`.last_backup_status` 已被 06:15 手動全備覆寫，以 jobs／指標／cron.log 佐證；報告 §H RM 段） | ✅ 真機已驗（RM；不計入自動 AT） |
 | `AT-BK-09-5-1` | TCS AC-BK-09-5 | 匯出 info.json 原子寫入… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_5_1_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-5-2` | TCS AC-BK-09-5 | `export/logical.json`＝… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_5_2_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-5-3` | TCS AC-BK-09-5 | 後啟動者立即結束（結束碼 0、不等待、不碰 `.tmp`）… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_5_3_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
@@ -1347,12 +1347,12 @@
 | `AT-BK-09-6-4` | TCS AC-BK-09-6 | umask 077 下匯出與 runner 各跑一輪：目錄為 755、檔為 644（讀取端是另一個 uid） | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_6_4_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-6-5` | TCS AC-BK-09-6 | results 為 running 而無任何 jobs 為 running、鎖無持有者… | sidecar | 3（階二） | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_6_5_… | 未驗 | ✅ 實作+測試（K 載具已做、綠（階二）；［二審］PASS） |
 | `AT-BK-09-6-E-1` | TCS AC-BK-09-6 | (a)～(g) 每一項各使函式回非空問題清單並點名該服務與卷… | sidecar | 3 | 見 AC 列（sidecar） | test_backup_ctl_deploy_config.py::test_AT_BK_09_6_E_1_… | 未驗 | ✅ 實作+測試（一審〔G-S4〕綠；二審未列此閘重跑） |
-| `AT-BK-09-6-R-1` | TCS AC-BK-09-6 | 重建後 `export/jobs/*.json` 仍在（卷 `backup_out`），頁面卡片與最近結果仍在… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | 未驗（RM 真機未跑，報告 §H） | ⬜ 未開始（RM 真機未跑；不計入自動 AT） |
+| `AT-BK-09-6-R-1` | TCS AC-BK-09-6 | 重建後 `export/jobs/*.json` 仍在（卷 `backup_out`），頁面卡片與最近結果仍在… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | ✅ 真機 PASS（階一半；2026-10-31 16:10 真機棒：`up -d --force-recreate --no-deps pgbackrest` 後 jobs 三檔 sha256 不變、頁面逐字相同、backend `touch /backup-out/x` 唯讀失敗、`ls /backup-out/export` 列得出；`down -v`＋首次 POST 屬階二 NE；報告 §H RM 段） | ✅ 真機已驗（RM 階一半；階二項 NE） |
 | `AT-BK-09-7-1` | TCS AC-BK-09-7 | 指標新增三個（帶 HELP 與 TYPE gauge，標籤 backup_job）… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_7_1_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-7-2` | TCS AC-BK-09-7 | alerts.yml 規則總數 14（原 12 條逐字不變）… | sidecar | 3 | 見 AC 列（sidecar） | test_backup_ctl_deploy_config.py::test_AT_BK_09_7_2_… | 未驗 | ✅ 實作+測試（一審〔G-S4〕綠；二審未列此閘重跑） |
 | `AT-BK-09-7-3` | TCS AC-BK-09-7 | promtool test rules 與 check rules 皆 SUCCESS… | sidecar | 3 | 見 AC 列（sidecar） | backup_alerts_test.yml::AT_BK_09_7_3（3 個 name） | 未驗 | ✅ 實作+測試（一審〔G-S6〕綠；二審未列此閘重跑） |
 | `AT-BK-09-7-E-1` | TCS AC-BK-09-7 | 鎖函式負控：promtool 測試檔缺規則名、compose 掛載缺 alerts.yml… | sidecar | 3 | 見 AC 列（sidecar） | test_backup_ctl_deploy_config.py::test_AT_BK_09_7_E_1_… | 未驗 | ✅ 實作+測試（一審〔G-S4〕綠；二審未列此閘重跑） |
-| `AT-BK-09-7-R-1` | TCS AC-BK-09-7 | 真機 V10：Prometheus 序列帶 backup_job 與抓取目標標籤 job=pgbackrest 而無 exported_job… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | 未驗（RM 真機未跑，報告 §H） | ⬜ 未開始（RM 真機未跑；不計入自動 AT） |
+| `AT-BK-09-7-R-1` | TCS AC-BK-09-7 | 真機 V10：Prometheus 序列帶 backup_job 與抓取目標標籤 job=pgbackrest 而無 exported_job… | 真機 | 3 | 見 AC 列（全棧） | 真機手動（RM；無測試函式） | ✅ 真機 PASS（2026-10-31 16:23～16:28 真機棒：序列標籤 job=pgbackrest 無 exported_job；造失敗後 PgBackRestJobFailed +51 秒 pending、+111 秒 firing、還原後 +81 秒離開；前置＝在線 Prometheus 經 SIGHUP 重載規則 12→14，見報告 §H 真機新發現 F-12 與 docker/README.md 告警規則列） | ✅ 真機已驗（RM；不計入自動 AT） |
 | `AT-BK-09-8-1` | TCS AC-BK-09-8 | 相鄰兩個不同 `ts` 的最大間隔 ≤3 秒（工作進行中心跳不中斷）… | sidecar | 3（階二） | 見 AC 列（sidecar） | 〈階二未做〉預定 BackupSidecarContractIT | 未驗 | ⬜ 階二未做（不計） |
 | `AT-BK-09-8-2` | TCS AC-BK-09-8 | 匯出行程長時間不返回：約 3 秒後被 timeout 終止、info.json 記 ok:false… | sidecar | 3 | 見 AC 列（sidecar） | BackupSidecarContractIT.AT_BK_09_8_2_… | 未驗 | ✅ 實作+測試（一審綠；［二審］PASS） |
 | `AT-BK-09-8-3` | TCS AC-BK-09-8 | 進行中工作的假 runner 維持 RUNNING 且心跳持續更新：20 次 GET 的 control.reason 皆為 null… | backend | 3（階二） | 見 AC 列（backend） | BackupApiIT.AT_BK_09_8_3_… | 未驗 | ✅ 實作+測試（K 載具已做、綠（階二）；［二審］PASS） |
