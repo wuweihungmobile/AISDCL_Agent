@@ -6,13 +6,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ToolsRegion } from "@/components/layout/ToolsRegion";
 import type { Role } from "@/lib/api/types";
-import type { NavEntry } from "@/lib/nav/registry";
+import { navHref, visibleNavEntries, type NavEntry } from "@/lib/nav/registry";
 import { Providers, makeClient, signIn, stubApi } from "@/tests/helpers/api";
+import { DELIVERED_MOBILE_LABELS, DELIVERED_NAV_ROWS } from "@/tests/helpers/navDelivered";
 
 /**
  * Tools 區只消費導覽登記表（TCS-SelfImprovingMirror-P1b R21）：加一列即多一個入口、enabled 與 roles 決定可見、依 order 排序、
  * mobile 旗標落成 max-md:hidden、active 為依序第一個命中的可見項（未知路徑沒有任何 active）。
  * 以 vi.mock 把 NAV_REGISTRY 換成測試的登記表；元件本身不認得任何特定入口。
+ * OBS-SI-321 根治：連結數、DOM 順序、max-md:hidden 的集合不再釘「九個連結」——期望值取自登記表自身（visibleNavEntries 與各列的 mobile 欄），
+ * 已交付列只有一份共用快照（tests/helpers/navDelivered.ts）；測試標題沿 TCS 字樣不動。登記表在末尾多加一列新功能，本檔不必再改。
  */
 const state = vi.hoisted(() => ({ pathname: "/", registry: null as unknown, real: null as unknown }));
 vi.mock("next/navigation", () => ({
@@ -77,22 +80,20 @@ describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變",
     const demo = extra({ id: "demo", label: "示範功能", href: "/demo", order: 56, mobile: false, match: (p) => p === "/demo" });
     state.registry = [...REAL(), demo];
     renderTools("OPERATOR", "/");
-    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "示範功能", "系統設定", "系統管理", "自我進化"]);
+    // 期望序＝真登記表對 OPERATOR 的可見項（已依 order 升冪），示範項插在第一個 order 比它大的項之前（不寫死整串標籤與項數）
+    const base = visibleNavEntries(REAL(), "OPERATOR");
+    const at = base.findIndex((e) => e.order > demo.order);
+    const expected = at === -1 ? [...base, demo] : [...base.slice(0, at), demo, ...base.slice(at)];
+    expect(labels()).toEqual(expected.map((e) => e.label));
     const links = navLinks();
-    expect(links[6]).toHaveAttribute("href", "/demo");
-    // 其餘九個連結不變（標籤與 href）
+    const demoAt = expected.indexOf(demo);
+    expect(links[demoAt]).toHaveAttribute("href", "/demo");
+    // 位置：在議題中心（order 55）之後、系統設定（order 60）之前
+    expect(labels().indexOf("議題中心")).toBeLessThan(demoAt);
+    expect(demoAt).toBeLessThan(labels().indexOf("系統設定"));
+    // 其餘連結不變（標籤與 href；順序與真登記表的可見項相同）
     const others = links.filter((a) => a.getAttribute("aria-label") !== "示範功能");
-    expect(others.map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")])).toEqual([
-      ["儀表板", "/"],
-      ["專案管理", "/projects"],
-      ["BRD/PRD 匯入", "/import"],
-      ["執行中心", "/projects"],
-      ["監控中心", "/projects"],
-      ["議題中心", "/issues"],
-      ["系統設定", "/settings"],
-      ["系統管理", "/sysadmin"],
-      ["自我進化", "/self-improving"],
-    ]);
+    expect(others.map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")])).toEqual(base.map((e) => [e.label, navHref(e, { currentProjectId: null })]));
   });
 
   it("AT_932_6_5 路徑為 /demo 時該連結的 aria-current 為 page（match 取自登記表那一列）；ToolsRegion.tsx 原始碼不含 demo（沒有任何針對新入口的程式碼）", () => {
@@ -107,13 +108,18 @@ describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變",
 });
 
 describe("AT_932_6_6 enabled 為假或角色不符的項目不渲染", () => {
-  const registry = () => [
-    ...REAL(),
-    extra({ id: "off", label: "停用項", order: 71, enabled: false }),
-    extra({ id: "admin-only", label: "僅管理員", order: 72, roles: ["ADMIN"] }),
-    extra({ id: "op-admin", label: "操作員以上", order: 73, roles: ["OPERATOR", "ADMIN"] }),
-  ];
-  const original = ["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "議題中心", "系統設定", "系統管理", "自我進化"];
+  // 額外項的 order 排在真登記表所有項之後（取最大值再加 1～3），所以不論登記表日後長到多少列，額外項都在 DOM 的最後
+  const registry = () => {
+    const top = Math.max(...REAL().map((e) => e.order));
+    return [
+      ...REAL(),
+      extra({ id: "off", label: "停用項", order: top + 1, enabled: false }),
+      extra({ id: "admin-only", label: "僅管理員", order: top + 2, roles: ["ADMIN"] }),
+      extra({ id: "op-admin", label: "操作員以上", order: top + 3, roles: ["OPERATOR", "ADMIN"] }),
+    ];
+  };
+  /** 真登記表對該角色的可見項標籤（enabled 為真、roles 缺或含該角色；依 order 升冪）。 */
+  const original = (role: Role) => visibleNavEntries(REAL(), role).map((e) => e.label);
 
   it.each([
     ["VIEWER", []],
@@ -122,7 +128,10 @@ describe("AT_932_6_6 enabled 為假或角色不符的項目不渲染", () => {
   ] as Array<[Role, string[]]>)("AT_932_6_6 %s 看得到的額外項：%j；roles 缺的既有九項三種角色都看得到；被隱藏的項目不在 DOM（不是 CSS 隱藏）", (role, visibleExtras) => {
     state.registry = registry();
     renderTools(role);
-    expect(labels()).toEqual([...original, ...visibleExtras]);
+    expect(labels()).toEqual([...original(role), ...visibleExtras]);
+    // roles 缺且 enabled 為真的既有項，三種角色都看得到（已交付的九項即屬此類）
+    for (const e of REAL().filter((x) => x.enabled && x.roles === undefined)) expect(labels(), `${e.label} 三種角色都看得到`).toContain(e.label);
+    for (const [, label] of DELIVERED_NAV_ROWS) expect(labels(), `已交付的 ${label}`).toContain(label);
     const nav = within(screen.getByRole("navigation", { name: "主導覽" }));
     for (const hidden of ["停用項", "僅管理員", "操作員以上"].filter((l) => !visibleExtras.includes(l))) {
       expect(nav.queryByRole("link", { name: hidden }), hidden).toBeNull();
@@ -145,7 +154,7 @@ describe("AT_932_6_7 入口依 order 升冪，同序依登記表原序", () => {
     state.registry = REAL().map((e) => (e.id === "settings" ? { ...e, order: 1 } : e));
     renderTools();
     expect(labels()[0]).toBe("系統設定");
-    expect(labels()).toHaveLength(9);
+    expect(labels()).toHaveLength(visibleNavEntries(REAL(), "OPERATOR").length);
   });
 });
 
@@ -154,24 +163,40 @@ describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
 
   it("AT_932_6_8 九個連結都在 DOM；只有 mobile 為 false 的自我進化、議題中心與系統管理帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
     renderTools();
-    expect(navLinks()).toHaveLength(9);
+    // 每個可見的登記項一個連結（不寫死項數）；已交付的九項都在 DOM
+    expect(navLinks()).toHaveLength(visibleNavEntries(REAL(), "OPERATOR").length);
+    for (const [, label] of DELIVERED_NAV_ROWS) expect(labels(), `已交付的 ${label} 在 DOM`).toContain(label);
+    const mobileOf = (label: string) => (REAL().find((e) => e.label === label) as NavEntry).mobile;
     for (const link of navLinks()) {
       const label = link.getAttribute("aria-label");
       expect(link.getAttribute("title")).toBe(label);
       expect(link.textContent).toBe(label);
-      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(label === "自我進化" || label === "議題中心" || label === "系統管理");
+      // max-md:hidden 恰在登記表 mobile 為 false 的項上
+      expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(mobileOf(label as string) === false);
     }
+    // 已交付列：自我進化、議題中心、系統管理（mobile 為 false）帶 max-md:hidden，其餘六項不帶
+    for (const [, label, , mobile] of DELIVERED_NAV_ROWS) expect(classOf(label).includes("max-md:hidden"), `已交付的 ${label}（mobile ${String(mobile)}）`).toBe(!mobile);
   });
 
   // TCS-SysAdminBackup-20261027 AT-BK-01-3-1（R-BK-03）：真登記表的九個連結；<768 的底部 Tab 不顯示的恰為三項，ToolsRegion.tsx 本身不認得任何特定入口（G-C3 另以 git diff 零差異鎖住）
   it("AT_BK_01_3_1 真登記表渲染 Tools 區：九個連結皆在 DOM；帶 max-md:hidden 的恰為自我進化、議題中心、系統管理三項，其餘六項不帶；每個連結的 aria-label 與 title 恆等於其 label；元件原始碼不含系統管理的任何字樣", () => {
     renderTools("VIEWER");
     const links = navLinks();
-    expect(links).toHaveLength(9);
+    const visible = visibleNavEntries(REAL(), "VIEWER");
+    expect(links).toHaveLength(visible.length);
     const hidden = links.filter((a) => classOf(a.getAttribute("aria-label") as string).includes("max-md:hidden")).map((a) => a.getAttribute("aria-label"));
-    expect(hidden.sort()).toEqual(["自我進化", "議題中心", "系統管理"].sort());
+    // 帶 max-md:hidden 的恰為登記表 mobile 為 false 的項；已交付的三項（自我進化、議題中心、系統管理）在其中
+    expect([...hidden].sort()).toEqual(
+      visible
+        .filter((e) => !e.mobile)
+        .map((e) => e.label)
+        .sort(),
+    );
+    expect(hidden).toEqual(expect.arrayContaining(DELIVERED_NAV_ROWS.filter((row) => !row[3]).map((row) => row[1])));
+    // 其餘（mobile 為 true）依顯示序：登記表可見項的 mobile 為 true 者，也就是已交付的六項
     const shown = links.filter((a) => !classOf(a.getAttribute("aria-label") as string).includes("max-md:hidden")).map((a) => a.getAttribute("aria-label"));
-    expect(shown).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "執行中心", "監控中心", "系統設定"]);
+    expect(shown).toEqual(visible.filter((e) => e.mobile).map((e) => e.label));
+    expect(shown).toEqual(DELIVERED_MOBILE_LABELS);
     for (const link of links) {
       expect(link.getAttribute("title")).toBe(link.getAttribute("aria-label"));
       expect(link.textContent).toBe(link.getAttribute("aria-label"));

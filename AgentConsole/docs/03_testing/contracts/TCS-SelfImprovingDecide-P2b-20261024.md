@@ -1782,3 +1782,4 @@ Push-Location AgentConsole; docker compose exec engine-bridge sh -c 'touch "$BRI
 | 14 | 2026-10-25 | AT-950-10-E-1 | 測試標題含 `AT_932_6_4` 字樣 | 標題不得含其他 AT 的 ID（§2 規則）；改為文字描述，斷言不變（修復棒） | SCG-4 QA P4-2 |
 | 15 | 2026-10-25 | §2「每個 AT 恰一個測試」字面 | — | 事實記錄：98 個 AT 中 47 個以參數化或多個 it 實作（每個宣告都帶底線形），單跑篩選選到整個 AT，符合「子情境以參數化保留底線形」；字面不改、不構成缺陷 | SCG-4 QA P4-3 |
 | 16 | 2026-10-25 | W21；AT-935-5-1 | 對帳面板「無待入帳」字樣 | 事實記錄：`truncated` 為 true 時面板顯示「無待入帳（僅涵蓋最新 100 筆稽核列）」，較舊待入帳列不可見；已加註、符合 W21，列為 UX 候選（OBS） | SCG-4 QA P4-4 |
+| 17 | 2026-10-31 | AT-950-10-E-1（`lib/nav/registry.test.ts`） | 「NAV_REGISTRY 恰九項、九列各欄 toEqual」 | 前 N 列（N＝已交付快照列數）逐欄等於 `tests/helpers/navDelivered.ts` 快照、登記表不得少於 N、self-improving 仍在索引 6；AT 標題與 id 不變 | OBS-SI-321 根因修法；同 TCS-SelfImprovingMirror-P1b 勘誤 23 |

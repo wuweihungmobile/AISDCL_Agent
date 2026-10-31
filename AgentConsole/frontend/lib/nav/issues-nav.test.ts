@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { DELIVERED_DISPLAY_IDS, DELIVERED_MOBILE_IDS, DELIVERED_NAV_IDS, deliveredIdsIn, deliveredPrefix } from "@/tests/helpers/navDelivered";
 import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry } from "./registry";
 
 /**
@@ -10,6 +11,8 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
  * 既有導覽測試的釘值（registry.test.ts、ToolsRegion.test.tsx）隨之同步，不在本檔。
  * 2026-10-28（TCS-SysAdminBackup-20261027 R-BK-01）登記表加第九項 sysadmin：本檔的長度、id 清單、顯示序與 order／icon 集合大小隨之上修（8→9），
  * `NAV_REGISTRY[7]` 仍是 issues 的斷言與原七列的逐欄快照不動；第九項本身的斷言在 sysadmin-nav.test.ts。
+ * OBS-SI-321 根治：AT_IC_11_1_1 的項數、id 清單、顯示序、order／icon 集合大小不再釘「恰九項」——改為已交付列的前綴快照（tests/helpers/navDelivered.ts，四個導覽測試檔共用）
+ * 加上由登記表自身推導的唯一性斷言；測試標題沿 TCS 字樣不動。之後登記表在末尾多加一列新功能，本檔不必再改。
  */
 const ROOT = process.cwd();
 const byId = (id: string) => NAV_REGISTRY.find((e) => e.id === id) as NavEntry;
@@ -17,22 +20,26 @@ const ids = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.id);
 
 describe("AT_IC_11_1 登記表第八項與顯示序", () => {
   it("AT_IC_11_1_1 NAV_REGISTRY 恰九項（原八項加 sysadmin）、id 依陣列序 dashboard、projects、import、execute、monitor、settings、self-improving、issues、sysadmin；issues 各欄符規格；顯示序完整九項；mobile 為 true 的項數 6", () => {
-    expect(NAV_REGISTRY).toHaveLength(9);
-    expect(ids(NAV_REGISTRY)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings", "self-improving", "issues", "sysadmin"]);
+    // 前綴比對（OBS-SI-321）：已交付九列的 id 依陣列序相符；登記表在末尾多加的列不影響本斷言
+    expect(NAV_REGISTRY.length, "登記表不得少於已交付列數").toBeGreaterThanOrEqual(DELIVERED_NAV_IDS.length);
+    expect(ids(deliveredPrefix(NAV_REGISTRY))).toEqual(DELIVERED_NAV_IDS);
     const issues = byId("issues");
     expect(issues).toMatchObject({ id: "issues", label: "議題中心", order: 55, href: "/issues", mobile: false, enabled: true });
     expect(issues.roles, "roles 缺＝所有已登入角色皆可見").toBeUndefined();
     expect(NAV_REGISTRY[7]).toBe(issues); // 加在陣列末尾
     expect(typeof issues.match).toBe("function");
     // 顯示序（依 order 升冪）：議題中心排在監控中心之後、系統設定之前，系統管理排在系統設定之後，自我進化仍在最後
+    // 已交付九列在可見項中的相對顯示序不變（日後新增的列夾在中間也不影響）
     for (const role of ["ADMIN", "OPERATOR", "VIEWER", undefined] as const) {
-      expect(ids(visibleNavEntries(NAV_REGISTRY, role)), String(role)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "issues", "settings", "sysadmin", "self-improving"]);
+      expect(deliveredIdsIn(ids(visibleNavEntries(NAV_REGISTRY, role))), String(role)).toEqual(DELIVERED_DISPLAY_IDS);
     }
-    expect(NAV_REGISTRY.filter((e) => e.mobile)).toHaveLength(6);
-    expect(NAV_REGISTRY.filter((e) => e.mobile).map((e) => e.id)).toEqual(["dashboard", "projects", "import", "execute", "monitor", "settings"]);
-    // order 與 id 各自唯一；圖示與原八個互異
-    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(9);
-    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(9);
+    // mobile：已交付列中為 true 的恰為前六項；整張登記表為 true 的項數不超過 6（新功能預設 false）
+    expect(ids(deliveredPrefix(NAV_REGISTRY).filter((e) => e.mobile))).toEqual(DELIVERED_MOBILE_IDS);
+    expect(NAV_REGISTRY.filter((e) => e.mobile).length).toBeLessThanOrEqual(6);
+    // order 與 id 各自唯一；圖示互異（整張登記表）
+    expect(new Set(ids(NAV_REGISTRY)).size).toBe(NAV_REGISTRY.length);
+    expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(NAV_REGISTRY.length);
+    expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(NAV_REGISTRY.length);
   });
 
   it("AT_IC_11_1_E_1 原七列逐欄快照：各欄與陣列位置全不變；self-improving 的 label「自我進化」、order 70、mobile false 不變", () => {
