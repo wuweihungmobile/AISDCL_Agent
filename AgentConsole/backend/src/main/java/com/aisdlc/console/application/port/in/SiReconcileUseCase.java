@@ -10,7 +10,12 @@ import java.util.List;
  * {@code observations}、{@code events} 各自 {@code limit=500} 迴圈取頁（上限各 20 頁）。「已入帳」＝帳本有同 {@code audit_ref} 的
  * {@code dec}／{@code obs.add}／{@code obs.close} 事件，或 {@code marks_kv.audit_ref} 相同的觀察列。<b>讀路徑唯一的副作用</b>是把 obs-add 稽核列
  * 的 {@code subject_id}（NULL）依帳本的新列號回填（冪等）。量不到（Bridge 失敗、逾時、頁數超限）＝{@code NOT-EVALUABLE}：
- * {@code ingested} 與 {@code orphans} 為 {@code null}、不回填，<b>絕不</b>以空陣列或 {@code false} 冒充「沒有待入帳」。
+ * {@code ingested}、{@code supersededBy} 與 {@code orphans} 為 {@code null}、不回填，<b>絕不</b>以空陣列或 {@code false} 冒充「沒有待入帳」。
+ *
+ * <p><b>取代判定</b>（TCS-SelfImprovingDecideDedupe W-D3）：同一張卡的同一決定（subject＋digest＋dkind 相同）可能落下不只一份稽核檔（重送閘擋不到的並行請求、
+ * 閘上線前的歷史列、無 digest 的動詞），主機端只能入帳其中一份；其餘的列在帳本裡永遠沒有對應項。待入帳的帶 digest 的 decide 列，若<b>整張表</b>（與
+ * {@code limit} 無關）有另一列同一決定且已入帳，{@code supersededBy} 就是那些已入帳列中 {@code time} 最早者的 {@code auditRef}；{@code ingested} 仍如實為
+ * {@code false}（不冒充已入帳）。無 digest 的動詞（rollback、unblock、resume）與 dkind 看不出的列一律不參與（{@code null}）。
  */
 public interface SiReconcileUseCase {
 
@@ -42,12 +47,14 @@ public interface SiReconcileUseCase {
     }
 
     /**
-     * @param subjectId decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 {@code null}）
-     * @param digest    只有帶卡面 digest 的六種動詞才有
-     * @param ingested  帳本是否已有這筆；量不到時為 {@code null}
+     * @param dkind        decide 列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出 dkind 的列為 {@code null}
+     * @param subjectId    decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 {@code null}）
+     * @param digest       只有帶卡面 digest 的六種動詞才有
+     * @param ingested     帳本是否已有這筆；量不到時為 {@code null}
+     * @param supersededBy 被同一決定的已入帳列取代時，那一列的 {@code auditRef}；其餘（含量不到）為 {@code null}
      */
-    record Item(String auditRef, String kind, String user, String role, OffsetDateTime time, String subjectId, String digest,
-                String keyId, Boolean ingested) {
+    record Item(String auditRef, String kind, String dkind, String user, String role, OffsetDateTime time, String subjectId,
+                String digest, String keyId, Boolean ingested, String supersededBy) {
     }
 
     /**

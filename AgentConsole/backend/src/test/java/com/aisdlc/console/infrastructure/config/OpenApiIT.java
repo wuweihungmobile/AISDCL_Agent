@@ -32,6 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * （路徑 67→71、操作 76→81；只增不減）。
  * 議題中心（TCS-IssueCenter-20261027）再加三個路徑——{@code /issues}（GET）、{@code /issues/{id}}（GET）、{@code /issues/{id}/priority}（PUT、DELETE）
  * （路徑 71→74、操作 81→85；只增不減）。
+ * SelfImproving 決定重送去重（TCS-SelfImprovingDecideDedupe）不新增路徑與操作（77、89 不變）：對帳項 {@code SiConsoleWriteItem} 由九鍵增為十一鍵，決定端點的
+ * 409 說明載明新 reason（AT-951-6-1）。
  * 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 R-BK-59）再加三個路徑——{@code /sysadmin/backups}（GET）、{@code /sysadmin/backups/jobs}（GET、POST）、
  * {@code /sysadmin/backups/jobs/{id}}（GET）（路徑 74→77、操作 85→89；只增不減；sysadmin 路徑沒有 put、patch、delete）。
  */
@@ -208,6 +210,37 @@ class OpenApiIT extends AbstractApiIT {
                 .endsWith("/SiObservationRequest");
         assertThat(docs.<String>read("$.paths['/api/v1/si/observations/{id}/close'].post.requestBody.content['application/json']"
                 + ".schema['$ref']")).endsWith("/SiCloseRequest");
+    }
+
+    /**
+     * SelfImproving 決定重送去重（TCS-SelfImprovingDecideDedupe AT-951-6-1；W-D1、W-D3、W-D6）：對帳項 {@code SiConsoleWriteItem} 恰十一鍵（多 {@code dkind} 與
+     * {@code supersededBy}，兩者皆非必填），決定端點的 409 與 operation 說明載明 {@code si_decision_duplicate}，其餘兩個寫入 POST 的 409 說明不含它，路徑與
+     * 操作總數不變。為什麼重要：前端以 /v3/api-docs 產生型別——對帳項少一個鍵，面板就讀不到取代狀態；把新鍵標成必填，既有呼叫端與夾具全部要跟著改；
+     * 而 409 說明沒載明新 reason，使用者與整合者就只會看到泛用的「與目前狀態衝突」。
+     */
+    @Test
+    void AT_951_6_1_theConsoleWriteItemHasElevenKeysAndTheDecideEndpointDocumentsTheDuplicateReason() {
+        Resp docs = docs();
+
+        Map<String, Object> properties = docs.read("$.components.schemas.SiConsoleWriteItem.properties");
+        assertThat(properties.keySet()).containsExactlyInAnyOrder("auditRef", "kind", "dkind", "user", "role", "time", "subjectId", "digest",
+                "keyId", "ingested", "supersededBy");
+        assertThat(docs.<List<String>>read("$.components.schemas.SiConsoleWriteItem.required"))
+                .as("必填集合不變：dkind 與 supersededBy 非必填").containsExactlyInAnyOrder("auditRef", "kind", "user", "role", "time", "keyId");
+
+        String duplicate = "si_decision_duplicate";
+        assertThat(docs.<String>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.responses['409'].description"))
+                .as("決定端點的 409 說明載明新 reason").contains(duplicate);
+        assertThat(docs.<String>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.description"))
+                .as("postSiDecide 的 operation 說明載明新 reason").contains(duplicate);
+        for (String other : List.of("/api/v1/si/observations", "/api/v1/si/observations/{id}/close")) {
+            assertThat(docs.<String>read("$.paths['" + other + "'].post.responses['409'].description")).as("%s 的 409 說明不含新 reason", other)
+                    .doesNotContain(duplicate);
+        }
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.responses").keySet())
+                .as("決定端點的回應狀態碼集合與既有相同")
+                .containsExactlyInAnyOrder("201", "400", "401", "403", "409", "422", "429", "502", "503", "504");
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("本鍵不新增路徑").hasSize(77);
     }
 
     @Test

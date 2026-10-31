@@ -51,7 +51,8 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/executions/{runId}/resume", "POST /api/v1/executions/{runId}/cancel",
             "POST /api/v1/executions/{runId}/restore/{checkpointId}",
             "POST /api/v1/executions/{runId}/review/{stepId}",
-            // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）
+            // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）；
+            // 決定端點另有 backend 的重送閘（si_decision_duplicate；說明見 CONFLICT_DESCRIPTION）
             "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close",
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：設定順位時議題的狀態不可排（issue_not_rankable）
             "PUT /api/v1/issues/{id}/priority",
@@ -66,6 +67,16 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/si/observations/{id}/close",
             // 議題中心：清除順位是冪等的刪列（不呼叫 Bridge；列不存在也是 204），不會回 404（TCS-IssueCenter-20261027 D-C14）
             "DELETE /api/v1/issues/{id}/priority");
+
+    /**
+     * 409 的說明有端點專屬版本時的覆寫（預設是「與目前狀態衝突（reason 說明原因）」）。決定端點有兩種 409（TCS-SelfImprovingDecideDedupe W-D1）：backend 自己的重送閘
+     * {@code si_decision_duplicate}，與 Bridge 的 {@code si_audit_exists}；其餘兩個寫入 POST 只有後者，說明維持預設、不載明重送閘。
+     */
+    private static final Map<String, String> CONFLICT_DESCRIPTION = Map.of(
+            "POST /api/v1/si/proposals/{id}/decide", "與目前狀態衝突（reason 說明原因）：si_decision_duplicate＝同一張卡的同一決定已送出過"
+                    + "（僅帶 digest 的六個動詞 approve、reject、return、promote、decline-promote、ack-handoff；表內已有 subject、digest、dkind 都相同的 decide 列，"
+                    + "不論該列是否已入帳、哪個帳號送的、理由是否相同；details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、"
+                    + "不呼叫 Bridge；rollback、unblock、resume 沒有卡面 digest，不受此閘）；si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生）");
 
     /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
     private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
@@ -246,7 +257,7 @@ public class ErrorResponseDocumentation {
                     add(operation, "404", NOT_FOUND_DESCRIPTION.getOrDefault(key, "資源不存在或已軟刪除"));
                 }
                 if (CONFLICT_ENDPOINTS.contains(key)) {
-                    add(operation, "409", "與目前狀態衝突（reason 說明原因）");
+                    add(operation, "409", CONFLICT_DESCRIPTION.getOrDefault(key, "與目前狀態衝突（reason 說明原因）"));
                 }
                 if (path.startsWith("/api/")) {
                     add(operation, "429", "超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After）");

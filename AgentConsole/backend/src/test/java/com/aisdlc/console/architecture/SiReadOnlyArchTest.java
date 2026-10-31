@@ -6,6 +6,7 @@ import com.aisdlc.console.application.port.out.SiConsoleWriteRepository;
 import com.aisdlc.console.application.service.SiConsoleWriteService;
 import com.aisdlc.console.application.service.SiMirrorQueryService;
 import com.aisdlc.console.application.service.SiReconcileService;
+import com.aisdlc.console.domain.model.si.SiConsoleWriteSummary;
 import com.aisdlc.console.domain.model.si.SiExport;
 import com.tngtech.archunit.core.domain.JavaAccess;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.lang.reflect.RecordComponent;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,7 +42,8 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SelfImproving 寫入面的結構鎖（TCS-SelfImprovingMirror-P1b R7、R10；TCS-SelfImprovingDecide-P2b AT-935-3-1、AT-950-8-2）。
+ * SelfImproving 寫入面的結構鎖（TCS-SelfImprovingMirror-P1b R7、R10；TCS-SelfImprovingDecide-P2b AT-935-3-1、AT-950-8-2；TCS-SelfImprovingDecideDedupe AT-951-6-E-1：
+ * 寫入埠多了重送閘用的唯讀查詢 {@code findDecideAuditRefs}、對帳讀埠多了 {@code findDecideRows}，「三條 DML、一個配接器」兩條不變）。
  * 為什麼用 ArchUnit：P1b 的前提是「Console 對 SelfImproving 零寫入」；P2b 把它改寫為「帳本只有根層 CLI 能寫，Console 只產生並落地經簽章的稽核 JSON」——
  * 行為面由整合測試覆蓋（DELETE、PUT、PATCH 一律 403／405），這裡鎖<b>結構</b>：日後有人加了第五個 POST、加了刪除映射、在 {@code AgentBridge}
  * 上多開一個 {@code si} 起頭的呼叫、或讓別的類別碰寫入埠與稽核表，編譯得過、整合測試也許沒測到，但這支會在最便宜的地方先紅。
@@ -165,12 +168,13 @@ class SiReadOnlyArchTest {
         return out.toString();
     }
 
-    @Test
-    void AT_950_8_2_theTableIsReachedByOneAdapterThroughThreeWritePathsAndNothingElse() throws IOException {
+    private static final String ADAPTER_PATH = "com/aisdlc/console/adapter/out/persistence/SiConsoleWriteAdapter.java";
+
+    /** 主程式的全部原始碼（已去註解），鍵為相對 {@code src/main/java} 的路徑。 */
+    private static Map<String, String> mainSources() throws IOException {
         Path root = Path.of("src", "main", "java");
-        Map<String, String> sources;
         try (Stream<Path> files = Files.walk(root)) {
-            sources = files.filter(p -> p.toString().endsWith(".java")).collect(Collectors.toMap(
+            return files.filter(p -> p.toString().endsWith(".java")).collect(Collectors.toMap(
                     p -> root.relativize(p).toString().replace('\\', '/'), p -> {
                         try {
                             return stripComments(Files.readString(p, StandardCharsets.UTF_8));
@@ -179,7 +183,12 @@ class SiReadOnlyArchTest {
                         }
                     }));
         }
-        String adapterPath = "com/aisdlc/console/adapter/out/persistence/SiConsoleWriteAdapter.java";
+    }
+
+    @Test
+    void AT_950_8_2_theTableIsReachedByOneAdapterThroughThreeWritePathsAndNothingElse() throws IOException {
+        Map<String, String> sources = mainSources();
+        String adapterPath = ADAPTER_PATH;
         List<String> touching = sources.entrySet().stream().filter(e -> e.getValue().contains(TABLE)).map(Map.Entry::getKey).sorted().toList();
         assertThat(touching).as("存取表的類別（註解之外的原始碼提及）只有一個 persistence adapter").containsExactly(adapterPath);
 
@@ -197,14 +206,131 @@ class SiReadOnlyArchTest {
 
         Set<String> repositoryMethods = methodNames(SiConsoleWriteRepository.class);
         Set<String> queryMethods = methodNames(SiConsoleWriteQueries.class);
-        assertThat(repositoryMethods).as("寫入埠的方法").containsExactlyInAnyOrder("insert", "deleteByAuditRef");
+        assertThat(repositoryMethods).as("寫入埠的方法：兩個寫入加重送閘的唯讀查詢").containsExactlyInAnyOrder("insert", "deleteByAuditRef",
+                "findDecideAuditRefs");
         assertThat(queryMethods).as("讀埠的方法：回填與唯讀查詢").containsExactlyInAnyOrder("findRecent", "findExistingAuditRefs",
-                "findObsAddRefsWithoutSubject", "fillSubjectId");
+                "findObsAddRefsWithoutSubject", "fillSubjectId", "findDecideRows");
         Set<String> all = new TreeSet<>(repositoryMethods);
         all.addAll(queryMethods);
         assertThat(all).as("兩個埠的方法只有 insert、deleteByAuditRef、fillSubjectId 與 find… 的唯讀查詢")
                 .allSatisfy(name -> assertThat(name.equals("insert") || name.equals("deleteByAuditRef") || name.equals("fillSubjectId")
                         || name.startsWith("find")).isTrue());
+    }
+
+    // ── AT-951-6-E-1：兩個埠的方法集合與 findRecent 的投影形狀同步（TCS-SelfImprovingDecideDedupe W-D2、W-D6）─────────────────────
+
+    private static final String DKIND_COLUMN = "case when kind = 'decide' then (body::jsonb)->>'dkind' end as dkind";
+
+    /**
+     * 配接器（已去註解）中方法 {@code method} 的第一個 {@code jdbc.query(…)} 的第一個引數，也就是它的 SQL：字串字面值逐一相接，常數名代入其宣告的值
+     * （重送閘與對帳讀面共用同一個 dkind 表達式常數，所以要代入才看得到完整的 SQL）。
+     */
+    private static String sqlOf(String adapter, String method) {
+        Matcher declaration = Pattern.compile("\\s" + method + "\\s*\\([^)]*\\)\\s*\\{").matcher(adapter);
+        assertThat(declaration.find()).as("配接器宣告了方法 %s", method).isTrue();
+        int query = adapter.indexOf("jdbc.query(", declaration.end());
+        assertThat(query).as("方法 %s 以 jdbc.query 查詢", method).isGreaterThan(-1);
+        return evaluate(adapter, query + "jdbc.query(".length(), ",)");
+    }
+
+    /** 從 {@code from} 起求值一串以加號相接的字串字面值與常數名，遇到 {@code stops} 內的字元（字面值之外）即止。 */
+    private static String evaluate(String source, int from, String stops) {
+        StringBuilder out = new StringBuilder();
+        int i = from;
+        while (i < source.length() && stops.indexOf(source.charAt(i)) < 0) {
+            char c = source.charAt(i);
+            if (c == '"') {
+                int j = i + 1;
+                while (source.charAt(j) != '"') {
+                    if (source.charAt(j) == '\\') {
+                        j++;
+                    }
+                    out.append(source.charAt(j));
+                    j++;
+                }
+                i = j + 1;
+            } else if (Character.isJavaIdentifierStart(c)) {
+                int j = i;
+                while (j < source.length() && Character.isJavaIdentifierPart(source.charAt(j))) {
+                    j++;
+                }
+                out.append(constantValue(source, source.substring(i, j)));
+                i = j;
+            } else {
+                i++;
+            }
+        }
+        return out.toString();
+    }
+
+    private static String constantValue(String source, String name) {
+        Matcher declaration = Pattern.compile("static\\s+final\\s+String\\s+" + name + "\\s*=").matcher(source);
+        assertThat(declaration.find()).as("配接器宣告了字串常數 %s", name).isTrue();
+        return evaluate(source, declaration.end(), ";");
+    }
+
+    @Test
+    void AT_951_6_E_1_theTableStillHasOneAdapterAndThreeDmlStatementsAndThePortsAndTheProjectionStayInSync() throws IOException {
+        Map<String, String> sources = mainSources();
+        String adapter = sources.get(ADAPTER_PATH);
+        String repositorySource = sources.get("com/aisdlc/console/application/port/out/SiConsoleWriteRepository.java");
+        String queriesSource = sources.get("com/aisdlc/console/application/port/out/SiConsoleWriteQueries.java");
+        // 防反空轉：掃描確實讀到配接器與兩個埠的原始碼
+        assertThat(adapter).as("SiConsoleWriteAdapter.java 的原始碼").isNotBlank();
+        assertThat(repositorySource).as("SiConsoleWriteRepository.java 的原始碼").isNotBlank();
+        assertThat(queriesSource).as("SiConsoleWriteQueries.java 的原始碼").isNotBlank();
+
+        List<String> touching = sources.entrySet().stream().filter(e -> e.getValue().contains(TABLE)).map(Map.Entry::getKey).sorted().toList();
+        assertThat(touching).as("提及表名的非註解原始碼仍只有一個 persistence adapter").containsExactly(ADAPTER_PATH);
+
+        // DML 仍三條：INSERT 一、UPDATE 一且只設 subject_id、DELETE 一且依 audit_ref；新增的查詢都是 SELECT
+        assertThat(count(adapter, "(?is)insert\\s+into\\s+console\\." + TABLE + "\\b")).as("INSERT 恰一條").isEqualTo(1);
+        Matcher update = Pattern.compile("(?is)update\\s+console\\." + TABLE + "\\s+set\\s+(\\w+)\\s*=").matcher(adapter);
+        assertThat(update.find()).as("UPDATE 恰一條").isTrue();
+        assertThat(update.group(1)).as("唯一的 UPDATE 只設 subject_id").isEqualTo("subject_id");
+        assertThat(update.find()).as("沒有第二條 UPDATE").isFalse();
+        assertThat(count(adapter, "(?is)delete\\s+from\\s+console\\." + TABLE + "\\s+where\\s+audit_ref\\s*=")).as("DELETE 恰一條且按 audit_ref").isEqualTo(1);
+        assertThat(count(adapter, "(?is)\\b(insert|update|delete)\\b[^;\"]*console\\." + TABLE)).as("DML 敘述總數仍為三").isEqualTo(3);
+
+        String findRecent = sqlOf(adapter, "findRecent");
+        String findDecideAuditRefs = sqlOf(adapter, "findDecideAuditRefs");
+        String findDecideRows = sqlOf(adapter, "findDecideRows");
+        assertThat(findRecent).as("防反空轉：看得到 findRecent 的 SQL").isNotBlank();
+        assertThat(findDecideAuditRefs).as("防反空轉：看得到 findDecideAuditRefs 的 SQL").isNotBlank();
+        assertThat(findDecideRows).as("防反空轉：看得到 findDecideRows 的 SQL").isNotBlank();
+        assertThat(findDecideAuditRefs).as("findDecideAuditRefs 是 SELECT").matches("(?is)\\s*select\\b.*");
+        assertThat(findDecideRows).as("findDecideRows 是 SELECT").matches("(?is)\\s*select\\b.*");
+
+        // 兩個埠的方法集合同步，且新方法名同時出現在介面與配接器
+        assertThat(methodNames(SiConsoleWriteRepository.class)).as("寫入埠的方法集合").containsExactlyInAnyOrder("insert", "deleteByAuditRef",
+                "findDecideAuditRefs");
+        assertThat(methodNames(SiConsoleWriteQueries.class)).as("對帳讀埠的方法集合").containsExactlyInAnyOrder("findRecent",
+                "findExistingAuditRefs", "findObsAddRefsWithoutSubject", "fillSubjectId", "findDecideRows");
+        assertThat(repositorySource).as("寫入埠介面").contains("findDecideAuditRefs");
+        assertThat(adapter).as("配接器").contains("findDecideAuditRefs").contains("findDecideRows");
+        assertThat(queriesSource).as("對帳讀埠介面").contains("findDecideRows");
+
+        // findRecent 的投影：不含 select *，select 清單除 dkind 的表達式外恰為既有八欄（沒有整欄 body 與 mac）
+        assertThat(findRecent.toLowerCase(java.util.Locale.ROOT).replaceAll("\\s+", " ")).as("findRecent 不得 select *").doesNotContain("select *");
+        Matcher select = Pattern.compile("(?is)^\\s*select\\s+(.*?)\\s+from\\s+console\\." + TABLE + "\\b").matcher(findRecent);
+        assertThat(select.find()).as("findRecent 的 select 清單").isTrue();
+        List<String> columns = Arrays.stream(select.group(1).split(",")).map(String::trim).toList();
+        assertThat(columns).as("取自 body 的只有 dkind 這一個表達式").filteredOn(c -> c.contains("body") || c.contains("mac"))
+                .containsExactly(DKIND_COLUMN);
+        assertThat(columns.stream().filter(c -> !c.equals(DKIND_COLUMN)).map(c -> c.replace("\"", "")).toList())
+                .as("除 dkind 的表達式外恰為既有八欄").containsExactly("audit_ref", "kind", "user", "role", "time", "subject_id", "digest", "key_id");
+        assertThat(findDecideRows).as("findDecideRows 與 findRecent 同一投影").contains(DKIND_COLUMN);
+
+        // 讀面的記錄只多一個 dkind 元件，沒有 body 與 mac
+        assertThat(Arrays.stream(SiConsoleWriteSummary.class.getRecordComponents()).map(RecordComponent::getName).toList())
+                .as("SiConsoleWriteSummary 的元件").contains("dkind").doesNotContain("body", "mac");
+
+        // 寫入埠只有寫入服務使用、讀埠只有對帳服務使用
+        JavaClasses classes = mainClasses();
+        assertThat(accessorsOf(classes, SiConsoleWriteRepository.class, a -> true)).as("只有 SiConsoleWriteService 使用寫入埠")
+                .containsExactly(SiConsoleWriteService.class.getSimpleName());
+        assertThat(accessorsOf(classes, SiConsoleWriteQueries.class, a -> true)).as("只有 SiReconcileService 使用對帳讀埠")
+                .containsExactly(SiReconcileService.class.getSimpleName());
     }
 
     private static int count(String text, String regex) {

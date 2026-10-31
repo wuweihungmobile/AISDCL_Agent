@@ -7,6 +7,7 @@
  *    資料量小，換取「不會顯示過期計數」的簡單正確性。
  */
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useSyncExternalStore } from "react";
 
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { bucketFor, rangeParams, type RangeId } from "@/lib/domain/metrics";
@@ -125,6 +126,7 @@ import type {
   SddEngineStatus,
   SddFreezeRequest,
   SiCloseRequest,
+  SiConsoleWrites,
   SiDecideRequest,
   SiListParams,
   SiObservationRequest,
@@ -1054,6 +1056,18 @@ export function useSiConsoleWrites() {
     enabled,
     ...SI_QUERY_OPTIONS,
   });
+}
+
+/**
+ * 對帳讀面的**唯讀快取**（決定對話框用；TCS-SelfImprovingDecideDedupe W-D5）：只讀 {@link useSiConsoleWrites}（對帳面板）已放進查詢快取的資料，**不建立查詢、
+ * 不發任何請求**——沒有對帳面板的頁面（議題中心）快取是空的，回 `undefined`，對話框就不停用任何動詞、交給 backend 的 409。快取更新時（面板重抓完成、
+ * 寫入成功後失效重取）會重新渲染。面板的查詢卸載（`gcTime` 為 0）時回 `undefined`。
+ */
+export function useSiConsoleWritesCache(): SiConsoleWrites | undefined {
+  const qc = useQueryClient();
+  const subscribe = useCallback((onChange: () => void) => qc.getQueryCache().subscribe(onChange), [qc]);
+  const snapshot = useCallback(() => qc.getQueryData<SiConsoleWrites>(qk.siConsoleWrites), [qc]);
+  return useSyncExternalStore(subscribe, snapshot, () => undefined);
 }
 
 /**

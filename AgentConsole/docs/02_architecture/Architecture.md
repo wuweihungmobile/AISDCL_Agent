@@ -331,6 +331,7 @@ app/
 ├── import/page.tsx                 # BRD/PRD 匯入解析（UI-SCR-06）
 ├── settings/page.tsx               # 系統參數設定（UI-SCR-09）
 ├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
+├── issues/page.tsx                 # 議題中心：三類帳本的中文議題清單、順位與決定（〔IssueCenter 已落地 2026-10-27〕；左列第八項；本行 2026-10-31 補入，OBS-SI-321 文件漂移）
 ├── sysadmin/
 │   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、order 65 介於系統設定與自我進化之間、底部 Tab 不顯示）
 │   └── backup/page.tsx             # 資料庫備份：狀態卡、備份清單、排程與保留、控制面健康與資料新鮮度、還原與涵蓋範圍說明（唯讀；階段二加手動觸發與工作紀錄）
@@ -358,7 +359,7 @@ app/
 | 區塊 | 唯一元件檔 | 對應設計稿 | 內容 |
 |------|-----------|------------|------|
 | Top | `frontend/components/layout/TopRegion.tsx` | Topbar＋Masthead | 公告列（說明文件、下載 CLI、GitHub、Bridge 狀態、通知、幫助、語言、使用者徽章）；logo；搜尋列與 recent chips；通知鈴；signoff 佇列鈕（draftCount badge）；**本頁說明鈕**（**〔PageHelp 已落地 2026-10-28〕**右側群組末端、`showTools` 分支內，`components/domain/help/PageHelpButton.tsx` 以 `next/dynamic` 載入，說明本體不進首屏；顯示與內容由 `frontend/lib/help/registry.ts` 的說明登記表決定——路由無說明項或仍在 `PENDING_HELP_PAGES` 者不渲染；§5.4） |
-| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
+| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化〔訂正（2026-10-31，OBS-SI-321 根因修法）：現為九項，加議題中心〔2026-10-27〕與系統管理〔2026-10-28〕；項數改由 `registry.ts` 推導，`registry.test.ts`／`issues-nav.test.ts`／`sysadmin-nav.test.ts`／`ToolsRegion.test.tsx` 不再釘「恰 N 項」，新增入口只改登記表一列〕；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
 | Content | `frontend/components/layout/ContentRegion.tsx` | Main | 路由內容容器；`children` 由 `app/layout.tsx` 傳入 |
 | Bottom | `frontend/components/layout/BottomRegion.tsx` | （設計稿無；依掌舵者四區塊要求新增） | Engine Bridge 連線狀態點、版本號、Toast 宿主；不得放任何新功能 |
 
@@ -982,7 +983,7 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 | 422 | Bridge 有界閘或消毒拒絕（結構化原因逐字帶出） |
 | 502／504 | Bridge 不可達／逾時（建立執行失敗已補償刪除 run 列） |
 
-**SelfImproving 相關的 `reason`**（〔P1b 已落地 2026-10-22／P2b 已落地 2026-10-25〕；SelfImproving PRD §9.3；Bridge 產生、backend 逐字轉出；T1：sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）：
+**SelfImproving 相關的 `reason`**（〔P1b 已落地 2026-10-22／P2b 已落地 2026-10-25〕；SelfImproving PRD §9.3；多由 Bridge 產生、backend 逐字轉出，`si_decision_duplicate` 由 backend 自產〔2026-10-31 增量，鍵 `agentconsole-si-decide-dedupe`〕；T1：sid `d6dfce97-92bd-4d34-b7d3-73cf5feaa23d` line 13）：
 
 | HTTP | `reason` | 何時 |
 |------|----------|------|
@@ -991,6 +992,7 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 | 503 | `si_write_disabled` | Bridge 未設 `BRIDGE_SI_WRITE_TOKEN` 或 `BRIDGE_SI_AUDIT_DIR`（P2b；沿 `sdd_write_disabled` 體例） |
 | 403 | `si_write_forbidden` | 缺或錯 `X-Bridge-Token`（Bridge）；或 backend 端帳號不在 `console.si.deciders`（P2b；角色不足者先被 `SecurityConfig` 擋成一般 403） |
 | 409 | `si_audit_exists` | 稽核目錄已有同名 `<audit_ref>.json`（P2b；不覆寫） |
+| 409 | `si_decision_duplicate` | 同一卡（`subject`＋`digest`）同一個帶 digest 的決定動詞已有稽核列（不論是否已入帳；`rollback`／`unblock`／`resume` 無 digest 不受閘）；backend 在取 `audit_ref`／簽章／INSERT 之前擋、零副作用；`details`＝`existingAuditRef`、`dkind`、`subject`、`digest8`（增量 2026-10-31；TCS-SelfImprovingDecideDedupe W-D1、契約 §8） |
 | 422 | `invalid_request` | `{id}` 或 `audit_ref` 形態不符、`{id}` 與稽核外層 `subject` 不符、`kind` 與端點不符、請求非單一 JSON 物件或超過 64KB、`schema_rev` 不符（P1b／P2b） |
 
 **系統管理／資料庫備份的 `reason`**（〔K1 已落地 2026-10-28〕；TCS-SysAdminBackup §C4；不進 `lib/api/reasons.ts`，前端 `BACKUP_REASONS`、backend `ErrorReasons` 的 `BACKUP_` 五常數與契約表三方雙向鎖）：

@@ -727,3 +727,7 @@ Scenario: （backend）結構鎖：表仍只由一個配接器存取且 DML 仍�
 
 | # | 日期 | 位置 | 原文（摘） | 訂正 | 依據 |
 |---|------|------|-----------|------|------|
+| 1 | 2026-10-31 | AT-951-1-E-1 | 「`MINI.si.writes` 恰 8 筆」 | 迷你 Bridge 的 `writes` 也記錄預檢（含 `:validate`）：(a)～(e) 七個寫入後恰 8 筆（含起手的 approve）、(f) 兩次預檢後為 10 筆；訂正為「不含預檢恰 8 筆（含預檢為 10）」，斷言依此釘兩個值 | Developer 交卷勘誤候選 1 |
+| 2 | 2026-10-31 | §5.6 `writeItem` | 「既有呼叫的結果逐位元組相同」 | `writeItem` 現恆輸出 `dkind`、`supersededBy` 兩個 null 鍵（與十一鍵契約一致），JSON 不再逐位元組相同；訂正為「既有呼叫的斷言結果不變」 | Developer 交卷勘誤候選 2 |
+| 3 | 2026-10-31 | W-D1（`digest8` 省略句）；W-D3（`d.auditRef` 不等於 `r.auditRef`） | 兩條防禦性條文 | 事實記錄：digest 為 null 的動詞在閘前即放行，`digest8` 省略句無可達路徑；r 待入帳而 d 已入帳，兩者必為不同列，該條件恆成立；兩者皆不改碼、字面保留 | Developer 交卷勘誤候選 3 |
+| 4 | 2026-10-31 | §5.7 frontend 測試列；§3.2 註記 | §3.2 允許開發 agent 另開 `SiWritesPanel.test.tsx`，§5.7 允許集合未列該檔 | §5.7 frontend 測試列補「`components/domain/si/SiWritesPanel.test.tsx`（若新增）」，使 V5 的範圍守衛與 §3.2 一致；本輪未新增該檔，對帳面板的 AT 仍住 `SiView.test.tsx` | RTM 棒疑義一 |

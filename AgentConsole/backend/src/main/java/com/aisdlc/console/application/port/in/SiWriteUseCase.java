@@ -8,11 +8,13 @@ import com.aisdlc.console.domain.model.si.SiValidation;
  *
  * <p><b>閘門序</b>（四個方法同一關，含預檢；先中者定案）：授權（帳號須在 {@code console.si.deciders}，否則 403 {@code si_write_forbidden}）
  * → 寫入面停用（503 {@code si_write_disabled}，{@code details.cause}＝{@code audit_key_unset}｜{@code bridge_token_unset}）→ 輸入閘
- * （422 {@code invalid_request}，{@code details.violations} 一次全列；含帳號名值域）→ 執行。角色（須為 ADMIN）由安全層先擋（403
- * {@code ACCESS_DENIED}）。輸入閘先於<b>一切</b>副作用（取 ref、簽章、資料庫、Bridge）。
+ * （422 {@code invalid_request}，{@code details.violations} 一次全列；含帳號名值域）→（<b>只有 {@link #decide} 的六個帶卡面 digest 的動詞</b>：重送閘，
+ * 同 subject＋digest＋dkind 已有 decide 列＝409 {@code si_decision_duplicate}，TCS-SelfImprovingDecideDedupe W-D1）→ 執行。角色（須為 ADMIN）由安全層先擋
+ * （403 {@code ACCESS_DENIED}）。輸入閘與重送閘先於<b>一切</b>副作用（取 ref、簽章、資料庫、Bridge）。
  *
- * <p>每個請求至多一次 Bridge 呼叫、不重試；重送一律新 {@code auditRef}。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（讀取逾時、
- * 送出後連線重設、2xx 本文無法解析）時<b>保留</b>該列並在錯誤的 {@code details.outcomeUnknown} 標明。
+ * <p>每個請求至多一次 Bridge 呼叫、不重試；重送一律新 {@code auditRef}（帶 digest 的決定動詞除外：同一決定已被重送閘擋下，不會取新 ref）。Bridge 明確拒絕或
+ * 確定未落檔時補償刪除稽核列；結果不明（讀取逾時、送出後連線重設、2xx 本文無法解析）時<b>保留</b>該列並在錯誤的 {@code details.outcomeUnknown} 標明
+ * （帶 digest 的決定，保留的列也會擋住同一決定的重送）。
  */
 public interface SiWriteUseCase {
 

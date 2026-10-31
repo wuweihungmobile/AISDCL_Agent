@@ -124,7 +124,7 @@ public final class ErrorReasons {
     /** 單筆提案不存在（404，帶 {@code details.id}）：「404 的 reason 省略」慣例的例外之一，另一個是 {@link #RTM_NOT_FOUND}。 */
     public static final String SI_NOT_FOUND = "si_not_found";
 
-    // ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W15；Architecture §11.1；前端住 lib/domain/si.ts 的 SI_REASONS）──
+    // ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W15；重送閘 TCS-SelfImprovingDecideDedupe W-D1；Architecture §11.1；前端住 lib/domain/si.ts 的 SI_REASONS）──
     /**
      * SelfImproving 寫入面停用（503）：backend 沒有設定稽核簽章金鑰或 Bridge 寫入權杖（{@code details.cause}＝{@code audit_key_unset}｜
      * {@code bridge_token_unset}，先中者），或 Bridge 回報它沒設權杖或稽核目錄（{@code details.detail} 逐字）。
@@ -137,6 +137,13 @@ public final class ErrorReasons {
     public static final String SI_WRITE_FORBIDDEN = "si_write_forbidden";
     /** 稽核檔已存在（409）：Bridge 以獨佔建檔拒絕覆寫同名 {@code <audit_ref>.json}（每次新 ref，正常情況不會發生）。 */
     public static final String SI_AUDIT_EXISTS = "si_audit_exists";
+    /**
+     * 同一張卡的同一決定已送出過（409；TCS-SelfImprovingDecideDedupe W-D1）：只有 {@code POST /api/v1/si/proposals/{id}/decide} 且動詞帶卡面 digest
+     * （approve、reject、return、promote、decline-promote、ack-handoff）時，{@code console.si_console_writes} 已有 {@code kind=decide} 且 subject、digest、dkind
+     * 三者相同的列（不論該列是否已入帳、哪個帳號送的）；{@code details}＝{@code existingAuditRef}、{@code dkind}、{@code subject}、{@code digest8}。
+     * 這個 reason 由 backend 自己產生，不是 Bridge 的錯誤（{@code SiBridgeErrors} 不涉及）。
+     */
+    public static final String SI_DECISION_DUPLICATE = "si_decision_duplicate";
 
     // ── 議題中心（TCS-IssueCenter-20261027 D-C5；契約 API_Contract_IssueCenter.md 的〈issue 類 reason 表〉；前端住 lib/domain/issues.ts 的 ISSUE_REASONS）──
     // 🔴 與 SI 類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 ISSUE_REASONS、本類別的 ISSUE_ 前綴常數與契約表三方雙向鎖。

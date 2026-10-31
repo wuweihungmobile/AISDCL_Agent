@@ -8,13 +8,21 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Console 自己的稽核列的<b>對帳讀埠</b>（TCS-SelfImprovingDecide-P2b W14）：唯讀查詢加唯一的回填。查詢一律不選 {@code body} 與
- * {@code mac}（簽章材料不離開寫入路徑）；呼叫者只有 {@code SiReconcileService}。
+ * Console 自己的稽核列的<b>對帳讀埠</b>（TCS-SelfImprovingDecide-P2b W14；TCS-SelfImprovingDecideDedupe W-D2、W-D3）：唯讀查詢加唯一的回填。查詢不選整欄
+ * {@code body} 與 {@code mac}（簽章材料不離開寫入路徑）；只以表達式取出 {@code body} 內的 {@code dkind}（{@link SiConsoleWriteSummary#dkind()}）。
+ * 呼叫者只有 {@code SiReconcileService}。
  */
 public interface SiConsoleWriteQueries {
 
     /** 時間新到舊（同刻依 {@code audit_ref} 升冪）的前 {@code limit} 列。 */
     List<SiConsoleWriteSummary> findRecent(int limit);
+
+    /**
+     * 全部 {@code kind='decide'} 的列（與 {@link #findRecent} 同一投影，與任何 {@code limit} 無關），依 {@code time} 升冪、同刻依 {@code audit_ref} 升冪
+     * （小寫 UUID 字串的字典序，等同 PostgreSQL uuid 的位元組序；呼叫端不得重排）。供對帳的取代判定（W-D3）：同一決定的已入帳列可能比
+     * {@link #findRecent} 取回的更舊。
+     */
+    List<SiConsoleWriteSummary> findDecideRows();
 
     /** 候選編號中，表內真的有列的那些（帳本有而表內沒有的＝orphan 由差集得出）。 */
     Set<UUID> findExistingAuditRefs(Collection<UUID> candidates);

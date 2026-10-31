@@ -9,10 +9,10 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { SiProposal } from "@/lib/api/types";
+import type { SiConsoleWrite, SiConsoleWrites, SiProposal } from "@/lib/api/types";
 import { ingestCommands } from "@/lib/domain/si";
 import { failure } from "@/tests/helpers/api";
-import { GA, clone, renderSi, type SiFixture, type SiStub } from "@/tests/helpers/si";
+import { GA, clone, renderSi, siUnavailable, writeItem, type SiFixture, type SiStub } from "@/tests/helpers/si";
 
 // 測試環境沒有 App Router：AuthProvider 要的 useRouter 換成穩定的替身
 const router = vi.hoisted(() => ({ push: () => undefined, replace: () => undefined, back: () => undefined }));
@@ -362,5 +362,217 @@ describe("AT_933_1_E_2 失敗不關窗、原因逐字：403、409、503、422 �
       await waitFor(() => expect(submit, "結束後恢復").toBeEnabled());
       expect(within(dialog).queryByTestId("si-decide-result"), "失敗不顯示收據").toBeNull();
     }
+  });
+});
+
+// ══ 決定重送去重：對話框停用已送出待入帳的動詞、409 的原因明確（TCS-SelfImprovingDecideDedupe：AT-951-5-1、5-2、5-E-1、5-E-2；W-D5）══════════════════
+// 為什麼重要：OBS-SI-348——掌舵者對同一張卡的同一決定連送了四次，四次都 201、落了四份稽核檔，主機只能入帳一份。對話框要在「已送出待入帳」時讓該動詞不可選、說明稽核編號，
+// 而且只讀對帳面板的既有快取、不替自己多發請求（議題中心也掛載這個對話框，多一個 GET 會改變它的請求序列）；快取缺席或對帳量不到時寧可不停用、交給 backend 的 409，
+// 也不能錯停用掌舵者的合法決定。沒有卡面 digest 的動詞（回滾、解除、恢復）沒有重送閘，永不停用。
+
+const ADMIN_PENDING = "b2000000-0000-4000-8000-0000000000b1";
+const DUP_REF = "b2000000-0000-4000-8000-0000000000b2";
+const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === "/api/v1/si/console-writes");
+const callLog = (stub: SiStub) => stub.calls.map((c) => `${c.method} ${c.path}`);
+const DECIDE_PATH = `/api/v1/si/proposals/${PROP}/decide`;
+const D1 = `sha256:${"b".repeat(64)}`;
+
+/** 對帳回應（預設已對帳成功、沒有 orphans）；測試以 overrides 回它。 */
+function writesOf(items: SiConsoleWrite[], patch: Partial<SiConsoleWrites> = {}): { data: SiConsoleWrites } {
+  return { data: { items, truncated: false, orphans: [], reconcile: { status: "ok", reason: null, backfilled: 0 }, ...patch } };
+}
+
+/**
+ * 對帳面板列出待入帳列、切到提案分頁（面板的查詢快取此時已有資料）；**還沒開對話框**——要數請求的案例先記下請求序列再開，
+ * 才抓得到對話框掛載時自己多發的請求。
+ */
+async function listThenGoToProposals(user: ReturnType<typeof userEvent.setup>, fixture: SiFixture, overrides: SiStub["overrides"], pendingRef: string) {
+  const view = renderSi({ role: "ADMIN", username: "admin", fixture, overrides });
+  await within(await screen.findByTestId("si-writes-panel")).findByTestId(`si-pending-${pendingRef}`);
+  await user.click(await screen.findByRole("tab", { name: /^提案/ }));
+  await screen.findByTestId(`si-decide-open-${PROP}`);
+  return view;
+}
+
+/** 點 PROP-SI-004 的決定鈕、等對話框出現。 */
+async function openDecideDialog(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByTestId(`si-decide-open-${PROP}`));
+  return screen.findByTestId("si-decide-dialog");
+}
+
+async function openAfterPanelListed(user: ReturnType<typeof userEvent.setup>, fixture: SiFixture, overrides: SiStub["overrides"], pendingRef: string) {
+  const view = await listThenGoToProposals(user, fixture, overrides, pendingRef);
+  return { ...view, dialog: await openDecideDialog(user) };
+}
+
+const optionOf = (dialog: HTMLElement, value: string) => within(dialog).getByTestId("si-decide-verb").querySelector(`option[value="${value}"]`) as HTMLOptionElement;
+
+describe("AT_951_5_1 決定對話框：已送出待入帳的同一決定使該動詞選項停用並顯示 si-decide-dup，且不發新的對帳請求", () => {
+  it("AT_951_5_1 情境一（proposed／loop、待入帳的 approve）：approve 選項停用、reject 與 return 不停用；情境二（verified／NE、待入帳的 promote）：promote 停用、decline-promote 不停用；si-decide-dup 含稽核編號；開啟對話框後 console-writes 的次數不變；情境一改選 reject 送出恰一個 POST", async () => {
+    const user = userEvent.setup();
+    const pendingRow = (auditRef: string, dkind: string) => writeItem({ auditRef, kind: "decide", subjectId: PROP, dkind, digest: D0, ingested: false, supersededBy: null });
+
+    // 情境一：先記下 console-writes 的請求次數，才開對話框
+    const one = await listThenGoToProposals(user, GA, { "console-writes": () => writesOf([pendingRow(ADMIN_PENDING, "approve")]) }, ADMIN_PENDING);
+    const readsBefore = consoleWriteCalls(one.stub).length;
+    expect(readsBefore, "防反空轉：面板確實發過一次對帳請求").toBe(1);
+    const dialogOne = await openDecideDialog(user);
+    expect(optionOf(dialogOne, "approve"), "approve 停用").toBeDisabled();
+    expect(optionOf(dialogOne, "reject"), "reject 不停用").toBeEnabled();
+    expect(optionOf(dialogOne, "return"), "return 不停用").toBeEnabled();
+    expect(within(dialogOne).getByTestId("si-decide-dup")).toHaveTextContent(`已送出待入帳（稽核編號 ${ADMIN_PENDING}）`);
+    expect(consoleWriteCalls(one.stub).length, "開啟對話框後 console-writes 的次數不變（對話框沒有自己發讀取）").toBe(readsBefore);
+    await user.selectOptions(within(dialogOne).getByTestId("si-decide-verb"), "reject");
+    await user.type(within(dialogOne).getByTestId("si-decide-reason"), "證據座標不足");
+    await user.selectOptions(within(dialogOne).getByTestId("si-decide-class"), "證據不足");
+    expect(consoleWriteCalls(one.stub).length, "送出之前 console-writes 的次數不變").toBe(readsBefore);
+    await user.click(within(dialogOne).getByTestId("si-decide-submit"));
+    await waitFor(() => expect(posts(one.stub)).toHaveLength(1));
+    expect(JSON.parse(posts(one.stub)[0].body as string)).toMatchObject({ dkind: "reject", digest: D0 });
+    one.unmount();
+
+    // 情境二
+    const two = await listThenGoToProposals(user, proposalFixture({ state: "verified", verdict: "NE" }), { "console-writes": () => writesOf([pendingRow(DUP_REF, "promote")]) }, DUP_REF);
+    const readsBeforeTwo = consoleWriteCalls(two.stub).length;
+    const dialogTwo = await openDecideDialog(user);
+    expect(optionOf(dialogTwo, "promote"), "promote 停用").toBeDisabled();
+    expect(optionOf(dialogTwo, "decline-promote"), "decline-promote 不停用").toBeEnabled();
+    expect(within(dialogTwo).getByTestId("si-decide-dup")).toHaveTextContent(`已送出待入帳（稽核編號 ${DUP_REF}）`);
+    expect(consoleWriteCalls(two.stub).length, "開啟對話框後 console-writes 的次數不變").toBe(readsBeforeTwo);
+  });
+});
+
+describe("AT_951_5_2 後端回 409 si_decision_duplicate 時 toast 顯示既有稽核編號，對話框不關、連點只送一次", () => {
+  it("AT_951_5_2 選 approve 後連點送出兩下：恰一個 POST；toast 含起首句與 si_decision_duplicate；對話框仍開、沒有 si-decide-result；送出鈕恢復可用", async () => {
+    const user = userEvent.setup({ delay: null });
+    const { stub, dialog } = await openProposalDecide(user, GA, {
+      decide: () =>
+        failure(409, {
+          message: "同一張卡的同一決定（approve）已有稽核檔",
+          reason: "si_decision_duplicate",
+          details: { existingAuditRef: DUP_REF, dkind: "approve", subject: PROP, digest8: "d21ae6f5" },
+        }),
+    });
+    await user.selectOptions(within(dialog).getByTestId("si-decide-verb"), "approve");
+    const submit = within(dialog).getByTestId("si-decide-submit");
+
+    await user.dblClick(submit);
+
+    await waitFor(() => expect(toastText()).toContain("si_decision_duplicate"));
+    expect(posts(stub), "連點只送一次").toHaveLength(1);
+    expect(toastText()).toContain(`同一張卡的同一決定已送出（稽核編號 ${DUP_REF}），待主機入帳，不需重送`);
+    expect(screen.getByTestId("si-decide-dialog"), "對話框仍開著").toBeInTheDocument();
+    expect(within(dialog).queryByTestId("si-decide-result"), "表單未收起、沒有收據").toBeNull();
+    await waitFor(() => expect(submit, "送出鈕在請求結束後恢復").toBeEnabled());
+  });
+});
+
+describe("AT_951_5_E_1 無對帳快取或對帳量不到時不停用任何動詞，且對話框不發出任何新的 console-writes 請求", () => {
+  const dupFailure = () =>
+    failure(409, { message: "同一張卡的同一決定已有稽核檔", reason: "si_decision_duplicate", details: { existingAuditRef: DUP_REF, dkind: "approve", subject: PROP, digest8: "d21ae6f5" } });
+
+  async function runScenario(user: ReturnType<typeof userEvent.setup>, overrides: SiStub["overrides"], waitForPanel: (panel: HTMLElement) => Promise<unknown>) {
+    const view = renderSi({ role: "ADMIN", username: "admin", overrides: { ...overrides, decide: dupFailure } });
+    await waitForPanel(await screen.findByTestId("si-writes-panel"));
+    await user.click(await screen.findByRole("tab", { name: /^提案/ }));
+    await screen.findByTestId(`si-decide-open-${PROP}`);
+    const before = callLog(view.stub); // 先記下全部請求的序列，才開對話框：對話框掛載時多發的請求才現形
+    const dialog = await openDecideDialog(user);
+
+    for (const value of ["approve", "reject", "return"]) expect(optionOf(dialog, value), `${value} 不停用`).toBeEnabled();
+    expect(within(dialog).queryByTestId("si-decide-dup")).toBeNull();
+    await user.selectOptions(within(dialog).getByTestId("si-decide-verb"), "approve");
+    await user.click(within(dialog).getByTestId("si-decide-submit"));
+    await waitFor(() => expect(toastText()).toContain("si_decision_duplicate"));
+
+    expect(callLog(view.stub).slice(0, before.length), "請求序列只增不改").toEqual(before);
+    expect(callLog(view.stub).slice(before.length), "開啟對話框到送出完成之間只多一個決定 POST（對話框不發讀取）").toEqual([`POST ${DECIDE_PATH}`]);
+    expect(toastText()).toContain(`同一張卡的同一決定已送出（稽核編號 ${DUP_REF}）`);
+    expect(screen.getByTestId("si-decide-dialog"), "對話框不關閉").toBeInTheDocument();
+    expect(within(dialog).queryByTestId("si-decide-dup")).toBeNull();
+    return view;
+  }
+
+  it("AT_951_5_E_1 (a) 對帳查詢失敗（503 si_unavailable）：快取沒有資料，不停用任何動詞、沒有 si-decide-dup；送出得到恰一個 POST（以後端 409 為準）", async () => {
+    const user = userEvent.setup();
+    await runScenario(user, { "console-writes": () => siUnavailable() }, (panel) => within(panel).findByTestId("si-error"));
+  });
+
+  it("AT_951_5_E_1 (b) 對帳查詢還在途中（回應延遲到斷言之後）：快取沒有資料，不停用、不多發讀取；送出同樣只靠後端 409", async () => {
+    const user = userEvent.setup();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    try {
+      await runScenario(
+        user,
+        {
+          "console-writes": async () => {
+            await gate;
+            return undefined;
+          },
+        },
+        (panel) => within(panel).findByTestId("si-loading"),
+      );
+    } finally {
+      release?.();
+    }
+  });
+
+  it("AT_951_5_E_1 (c) 對帳回 NOT-EVALUABLE、items 含一列 approve（ingested 為 null）：不停用任何動詞、沒有 si-decide-dup；送出同樣只靠後端 409", async () => {
+    const user = userEvent.setup();
+    await runScenario(
+      user,
+      {
+        "console-writes": () =>
+          writesOf([writeItem({ auditRef: ADMIN_PENDING, kind: "decide", subjectId: PROP, dkind: "approve", digest: D0, ingested: null })], {
+            orphans: null,
+            reconcile: { status: "NOT-EVALUABLE", reason: "bridge_timeout", backfilled: 0 },
+          }),
+      },
+      (panel) => within(panel).findByTestId("si-reconcile-ne"),
+    );
+  });
+});
+
+describe("AT_951_5_E_2 dkind、digest、對象、入帳狀態、取代狀態或 kind 不相符的列，以及無 digest 的動詞的待入帳列，都不使動詞停用", () => {
+  const row = (auditRef: string, patch: Partial<Parameters<typeof writeItem>[0]>) =>
+    writeItem({ auditRef, kind: "decide", subjectId: PROP, dkind: "approve", digest: D0, ingested: false, supersededBy: null, ...patch });
+  const ref = (n: number) => `b2000000-0000-4000-8000-0000000000c${n}`;
+
+  it("AT_951_5_E_2 情境一（卡面 digest 為 D0 的 proposed／loop）：七列都不該命中的列——approve、reject、return 三個選項皆不停用，沒有 si-decide-dup", async () => {
+    const user = userEvent.setup();
+    const rows = [
+      row(ref(1), { dkind: "promote" }),
+      row(ref(2), { digest: D1 }),
+      row(ref(3), { subjectId: "PROP-SI-005" }),
+      row(ref(4), { ingested: true }),
+      row(ref(5), { supersededBy: DUP_REF }),
+      writeItem({ auditRef: ref(6), kind: "obs-add", subjectId: null, ingested: false }),
+      row(ref(7), { dkind: null }),
+    ];
+    const { dialog } = await openAfterPanelListed(user, GA, { "console-writes": () => writesOf(rows) }, ref(1));
+    for (const value of ["approve", "reject", "return"]) expect(optionOf(dialog, value), `${value} 不停用`).toBeEnabled();
+    expect(within(dialog).queryByTestId("si-decide-dup")).toBeNull();
+  });
+
+  it("AT_951_5_E_2 情境二（promoted 的提案、待入帳的 rollback 列，digest 為 null）：rollback 選項不停用，沒有 si-decide-dup——無 digest 的動詞不受重送閘", async () => {
+    const user = userEvent.setup();
+    const rows = [row(ref(1), { dkind: "rollback", digest: null })];
+    const { dialog } = await openAfterPanelListed(user, proposalFixture({ state: "promoted", verdict: "PASS" }), { "console-writes": () => writesOf(rows) }, ref(1));
+    expect(optionOf(dialog, "rollback"), "rollback 不停用").toBeEnabled();
+    expect(within(dialog).queryByTestId("si-decide-dup")).toBeNull();
+  });
+
+  it("AT_951_5_E_2 情境三（狀態橫幅暫停 RUN-SI-001、待入帳的 resume 列，digest 為 null）：resume 選項不停用，沒有 si-decide-dup", async () => {
+    const user = userEvent.setup();
+    const rows = [row(ref(1), { subjectId: "RUN-SI-001", dkind: "resume", digest: null })];
+    renderSi({ role: "ADMIN", username: "admin", fixture: suspendedFixture(), overrides: { "console-writes": () => writesOf(rows) } });
+    await within(await screen.findByTestId("si-writes-panel")).findByTestId(`si-pending-${ref(1)}`);
+    await user.click(await screen.findByTestId("si-resume-open"));
+    const dialog = await screen.findByTestId("si-decide-dialog");
+    expect(optionOf(dialog, "resume"), "resume 不停用").toBeEnabled();
+    expect(within(dialog).queryByTestId("si-decide-dup")).toBeNull();
   });
 });

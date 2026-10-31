@@ -986,6 +986,10 @@ const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === 
 const AUDIT_A = "b2000000-0000-4000-8000-00000000000a";
 const AUDIT_B = "b2000000-0000-4000-8000-00000000000b";
 const AUDIT_C = "b2000000-0000-4000-8000-00000000000c";
+/** 決定重送去重（TCS-SelfImprovingDecideDedupe）的夾具：AUDIT_E 已入帳、AUDIT_S 是被它取代的同一決定；DIGEST_X 為該決定的卡面 digest。 */
+const AUDIT_E = "b2000000-0000-4000-8000-0000000000e1";
+const AUDIT_S = "b2000000-0000-4000-8000-0000000000e2";
+const DIGEST_X = `sha256:${"a".repeat(64)}`;
 
 /** console-writes 的回應物件（預設：已對帳、沒有 orphans）；測試以 overrides 回它。 */
 function writesData(patch: Partial<SiConsoleWrites> = {}): { data: SiConsoleWrites } {
@@ -1083,11 +1087,21 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
     const user = userEvent.setup();
     const withRun = clone(GA);
     withRun.status.items[0].suspended = { run: "RUN-SI-001" };
+    // 對帳面板另有「已被取代」群組（TCS-SelfImprovingDecideDedupe）：資料含一組被取代的決定（AUDIT_S 被已入帳的 AUDIT_E 取代），群組的展開鈕才會出現在掃描範圍內
     const { container } = renderSi({
       role: "ADMIN",
       username: "admin",
       fixture: withRun,
-      overrides: { "console-writes": () => writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide" })] }) },
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            items: [
+              writeItem({ auditRef: AUDIT_A, kind: "decide" }),
+              writeItem({ auditRef: AUDIT_E, kind: "decide", subjectId: "PROP-SI-006", dkind: "promote", digest: DIGEST_X, ingested: true }),
+              writeItem({ auditRef: AUDIT_S, kind: "decide", subjectId: "PROP-SI-006", dkind: "promote", digest: DIGEST_X, ingested: false, supersededBy: AUDIT_E }),
+            ],
+          }),
+      },
     });
     const seenPrefixes = new Set<string>();
     const seenReadOnly = new Set<string>();
@@ -1095,6 +1109,8 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
       "si-refresh",
       "si-retry",
       "si-load-more",
+      // 對帳面板「已被取代」群組的展開鈕：只改畫面上的展開狀態，不送寫入請求、不落檔；封閉集合逐個列名（名稱與 testid 仍受 FORBIDDEN_NAME 掃描）
+      "si-superseded-toggle",
       // 狀態快篩的 pill（觀察與提案各四顆）：只改畫面上的篩選條件，不送寫入請求、不落檔；以封閉集合逐個列名，不放寬成 si-status- 前綴
       "si-status-observations-all",
       "si-status-observations-open",
@@ -1122,6 +1138,10 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
     await screen.findByTestId("si-resume-open");
     await within(await screen.findByTestId("si-writes-panel")).findByTestId(`si-pending-${AUDIT_A}`);
     sweep();
+    // 展開「已被取代」群組後再掃一次：群組內的列沒有任何按鈕或連結，掃描面不會多出刪除類控件
+    await user.click(within(screen.getByTestId("si-writes-panel")).getByTestId("si-superseded-toggle"));
+    await within(screen.getByTestId("si-writes-panel")).findByTestId(`si-superseded-${AUDIT_S}`);
+    sweep();
     await user.click(tabButton(/^提案/));
     await screen.findByTestId("si-prop-table");
     sweep();
@@ -1142,13 +1162,15 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
         "si-status-proposals-done",
       ].sort(),
     );
-    // 對帳面板只有「入帳指令」展開鈕（沒有刪除、移除、清除）
+    // 防反空轉：群組的展開鈕真的被掃到（否則上面的封閉集合與名稱掃描對它是死名單）
+    expect(seenReadOnly.has("si-superseded-toggle"), "si-superseded-toggle 被掃到").toBe(true);
+    // 對帳面板只有「入帳指令」展開鈕與「已被取代」群組的展開鈕（沒有刪除、移除、清除）
     const panel = screen.getByTestId("si-writes-panel");
     expect(
       within(panel)
         .getAllByRole("button")
         .map((b) => b.textContent),
-    ).toEqual(["入帳指令"]);
+    ).toEqual(["入帳指令", "另有 1 筆已被取代（同一張卡的同一決定已由其他稽核檔入帳）"]);
   });
 });
 
@@ -1274,5 +1296,152 @@ describe("AT_935_5_E_4 紅色警示與量不到：orphans 顯示警示，NOT-EVA
     const error = await within(panel).findByTestId("si-error");
     expect(error).toHaveTextContent("si_unavailable");
     expect(within(panel).queryByTestId("si-writes-empty")).toBeNull();
+  });
+});
+
+// ══ 決定重送去重：對帳面板的「已被取代」群組（TCS-SelfImprovingDecideDedupe：AT-951-4-1、4-E-1、4-E-2；W-D4；NFR-DD-3）══════════════════════
+// 為什麼重要：OBS-SI-348——同一決定的多份稽核檔只有一份能入帳，其餘永遠顯示待入帳而誤導掌舵者。面板要把被取代的列移出待入帳清單、收進預設收合的群組（不是刪除、
+// 也不冒充已入帳），且「量不到」時不得顯示群組或「無待入帳」；被取代的筆數也不能讓真正的待入帳或 orphans 警示被吞掉。
+const SUPERSEDED_TITLE = (n: number) => `另有 ${n} 筆已被取代（同一張卡的同一決定已由其他稽核檔入帳）`;
+const AUDIT_S2 = "b2000000-0000-4000-8000-0000000000e3";
+const AUDIT_S3 = "b2000000-0000-4000-8000-0000000000e4";
+
+describe("AT_951_4_1 對帳面板：待入帳清單排除被取代列，被取代列進預設收合的群組，兩處都顯示 dkind，群組列沒有入帳指令鈕，面板內沒有刪除類控件", () => {
+  it("AT_951_4_1 si-pending-list 恰含 P1 與 P2（P1 顯示 核准 approve、P2 沒有 dkind 元素）；si-superseded-list 在其後、預設收合、標題為另有 2 筆已被取代；展開後 S1、S2 依 time 升冪、各列含 dkind、對象、time、auditRef 與取代者且沒有入帳指令鈕；面板內沒有刪除類控件", async () => {
+    const user = userEvent.setup();
+    const P1 = "b2000000-0000-4000-8000-0000000000a1";
+    const P2 = "b2000000-0000-4000-8000-0000000000a2";
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            items: [
+              writeItem({ auditRef: AUDIT_S2, kind: "decide", subjectId: "PROP-SI-006", dkind: "promote", digest: DIGEST_X, supersededBy: AUDIT_E, time: "2026-10-31T10:21:00Z" }),
+              writeItem({ auditRef: P1, kind: "decide", subjectId: "PROP-SI-004", dkind: "approve", digest: DIGEST_X, time: "2026-10-31T10:00:00Z" }),
+              writeItem({ auditRef: AUDIT_E, kind: "decide", subjectId: "PROP-SI-006", dkind: "promote", digest: DIGEST_X, ingested: true, time: "2026-10-31T10:19:51Z" }),
+              writeItem({ auditRef: P2, kind: "obs-add", subjectId: null, time: "2026-10-31T10:05:00Z" }),
+              writeItem({ auditRef: AUDIT_S, kind: "decide", subjectId: "PROP-SI-006", dkind: "promote", digest: DIGEST_X, supersededBy: AUDIT_E, time: "2026-10-31T10:20:30Z" }),
+            ],
+          }),
+      },
+    });
+    const panelEl = await screen.findByTestId("si-writes-panel");
+    const panel = within(panelEl);
+
+    const pendingList = await panel.findByTestId("si-pending-list");
+    expect(Array.from(pendingList.querySelectorAll<HTMLElement>('[data-testid^="si-pending-"]')).map((li) => li.dataset.testid)).toEqual([`si-pending-${P1}`, `si-pending-${P2}`]);
+    expect(within(pendingList).queryByTestId(`si-pending-${AUDIT_S}`)).toBeNull();
+    expect(within(pendingList).queryByTestId(`si-pending-${AUDIT_S2}`)).toBeNull();
+    expect(within(pendingList).getByTestId(`si-dkind-${P1}`)).toHaveTextContent(/核准.*approve/);
+    expect(within(pendingList).queryByTestId(`si-dkind-${P2}`), "非 decide 列沒有 dkind 元素").toBeNull();
+
+    const group = panel.getByTestId("si-superseded-list");
+    expect(pendingList.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING, "群組在待入帳清單之後").toBeTruthy();
+    const toggle = within(group).getByTestId("si-superseded-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.textContent).toBe(SUPERSEDED_TITLE(2));
+    expect(within(group).queryByTestId(`si-superseded-${AUDIT_S}`), "預設收合：沒有任何被取代列").toBeNull();
+    expect(within(group).queryByTestId(`si-superseded-${AUDIT_S2}`)).toBeNull();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      Array.from(group.querySelectorAll<HTMLElement>('li[data-testid^="si-superseded-"]')).map((li) => li.dataset.testid),
+      "依 time 升冪",
+    ).toEqual([`si-superseded-${AUDIT_S}`, `si-superseded-${AUDIT_S2}`]);
+    for (const [ref, time] of [
+      [AUDIT_S, "2026-10-31T10:20:30Z"],
+      [AUDIT_S2, "2026-10-31T10:21:00Z"],
+    ]) {
+      const row = within(group).getByTestId(`si-superseded-${ref}`);
+      expect(within(row).getByTestId(`si-dkind-${ref}`)).toHaveTextContent(/晉升.*promote/);
+      expect(row).toHaveTextContent("對象：PROP-SI-006");
+      expect(row).toHaveTextContent(time);
+      expect(row).toHaveTextContent(ref);
+      expect(within(row).getByTestId(`si-superseded-by-${ref}`)).toHaveTextContent(`取代者：${AUDIT_E}`);
+      expect(within(row).queryAllByRole("button"), "群組列沒有入帳指令鈕或任何按鈕").toEqual([]);
+      expect(within(row).queryAllByRole("link")).toEqual([]);
+      expect(within(row).queryByRole("button", { name: "入帳指令" })).toBeNull();
+    }
+    // 對帳面板內（含展開後的群組）所有按鈕與連結：名稱與 testid 都不含刪除、移除、清除、delete、remove
+    const controls = Array.from(panelEl.querySelectorAll<HTMLElement>("button, a"));
+    expect(controls.length, "防反空轉：面板內確實有按鈕被掃到（兩個待入帳列的入帳指令鈕加群組的展開鈕）").toBe(3);
+    for (const el of controls) {
+      expect(`${el.getAttribute("aria-label") ?? ""} ${el.textContent ?? ""}`, `按鈕名稱：${el.textContent}`).not.toMatch(FORBIDDEN_NAME);
+      expect(el.dataset.testid ?? "", "testid").not.toMatch(FORBIDDEN_NAME);
+    }
+  });
+});
+
+describe("AT_951_4_E_1 對帳量不到時不渲染被取代群組，也不顯示無待入帳", () => {
+  it("AT_951_4_E_1 NOT-EVALUABLE（bridge_timeout）：顯示 si-reconcile-ne 與 reason；沒有 si-superseded-list、si-pending-list、si-writes-empty；整頁文字不含已被取代——群組由對帳狀態而非資料控制", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            items: [
+              writeItem({ auditRef: AUDIT_A, kind: "decide", dkind: "approve", digest: DIGEST_X, ingested: null }),
+              // 契約外輸入：量不到時 supersededBy 本應為 null；刻意給字串，證明不渲染群組是由對帳狀態決定的
+              writeItem({ auditRef: AUDIT_S, kind: "decide", dkind: "promote", digest: DIGEST_X, ingested: false, supersededBy: AUDIT_E }),
+            ],
+            orphans: null,
+            reconcile: { status: "NOT-EVALUABLE", reason: "bridge_timeout", backfilled: 0 },
+          }),
+      },
+    });
+
+    const ne = await screen.findByTestId("si-reconcile-ne");
+
+    expect(ne).toHaveTextContent("bridge_timeout");
+    expect(screen.queryByTestId("si-superseded-list")).toBeNull();
+    expect(screen.queryByTestId("si-pending-list")).toBeNull();
+    expect(screen.queryByTestId("si-writes-empty")).toBeNull();
+    expect(document.body.textContent ?? "").not.toContain("已被取代");
+  });
+});
+
+describe("AT_951_4_E_2 被取代筆數不影響無待入帳的判定，orphans 與一般待入帳仍各自生效", () => {
+  const supersededRows = [
+    writeItem({ auditRef: AUDIT_S, kind: "decide", dkind: "promote", digest: DIGEST_X, supersededBy: AUDIT_E, time: "2026-10-31T10:20:30Z" }),
+    writeItem({ auditRef: AUDIT_S2, kind: "decide", dkind: "promote", digest: DIGEST_X, supersededBy: AUDIT_E, time: "2026-10-31T10:21:00Z" }),
+    writeItem({ auditRef: AUDIT_S3, kind: "decide", dkind: "promote", digest: DIGEST_X, supersededBy: AUDIT_E, time: "2026-10-31T10:21:26Z" }),
+  ];
+
+  it("AT_951_4_E_2 (a) 只有被取代的待入帳列、orphans 為空：顯示無待入帳、沒有 si-pending-list，群組標題為另有 3 筆", async () => {
+    renderSi({ role: "ADMIN", username: "admin", overrides: { "console-writes": () => writesData({ items: supersededRows, orphans: [] }) } });
+    const panel = within(await screen.findByTestId("si-writes-panel"));
+    expect(await panel.findByTestId("si-writes-empty")).toHaveTextContent("無待入帳");
+    expect(panel.queryByTestId("si-pending-list")).toBeNull();
+    expect(panel.getByTestId("si-superseded-toggle").textContent).toBe(SUPERSEDED_TITLE(3));
+  });
+
+  it("AT_951_4_E_2 (b) 同 (a) 但 orphans 有一筆：沒有 si-writes-empty、有 si-write-alerts，群組仍在", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: { "console-writes": () => writesData({ items: supersededRows, orphans: [{ auditRef: AUDIT_B, kind: "decide", subject: "PROP-SI-004" }] }) },
+    });
+    const panel = within(await screen.findByTestId("si-writes-panel"));
+    expect(await panel.findByTestId("si-write-alerts")).toBeInTheDocument();
+    expect(panel.queryByTestId("si-writes-empty")).toBeNull();
+    expect(panel.getByTestId("si-superseded-toggle").textContent).toBe(SUPERSEDED_TITLE(3));
+  });
+
+  it("AT_951_4_E_2 (c) 一列一般待入帳加兩列被取代的待入帳列、orphans 為空：si-pending-list 恰一列、沒有 si-writes-empty，群組標題為另有 2 筆", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: { "console-writes": () => writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide", dkind: "approve", digest: DIGEST_X }), ...supersededRows.slice(0, 2)], orphans: [] }) },
+    });
+    const panel = within(await screen.findByTestId("si-writes-panel"));
+    const list = await panel.findByTestId("si-pending-list");
+    expect(Array.from(list.querySelectorAll<HTMLElement>('[data-testid^="si-pending-"]')).map((li) => li.dataset.testid)).toEqual([`si-pending-${AUDIT_A}`]);
+    expect(panel.queryByTestId("si-writes-empty")).toBeNull();
+    expect(panel.getByTestId("si-superseded-toggle").textContent).toBe(SUPERSEDED_TITLE(2));
   });
 });

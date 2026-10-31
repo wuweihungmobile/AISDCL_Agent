@@ -287,7 +287,7 @@ export interface paths {
         put?: never;
         /**
          * 對待決提案或暫停的運轉下決定（P2b；僅 ADMIN）
-         * @description 九種動詞（approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；沒有批次核准）；路徑 id 為 PROP 號（resume 為 RUN 號）。各動詞必填與禁止的欄位見 SiDecideRequest；多帶或缺帶一律 422。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         * @description 九種動詞（approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；沒有批次核准）；路徑 id 為 PROP 號（resume 為 RUN 號）。各動詞必填與禁止的欄位見 SiDecideRequest；多帶或缺帶一律 422。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ （僅帶卡面 digest 的六個動詞 approve、reject、return、promote、decline-promote、ack-handoff 另有重送閘：表內已有 kind=decide 且 subject、digest、dkind 都相同的列＝409 si_decision_duplicate，不論該列是否已入帳、哪個帳號送的、理由是否相同；details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、不呼叫 Bridge；同 subject 與 digest 但 dkind 不同照常受理；rollback、unblock、resume 沒有卡面 digest，不受此閘）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。重送一律新 auditRef（帶 digest 的六個動詞除外：同一決定已被重送閘擋下）。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
          */
         post: operations["postSiDecide"];
         delete?: never;
@@ -1141,7 +1141,7 @@ export interface paths {
         };
         /**
          * Console 稽核列與 SelfImproving 帳本的對帳（P2b；VIEWER 以上可讀）
-         * @description 回 Console 自己的稽核列（時間新到舊；不含 body 與 mac）與每列是否已入帳（ingested）、帳本中 carrier 為 console 而本表沒有對應列的項（orphans，紅色警示來源）。對帳在 backend 一次全量做：以 Bridge 的 observations 與 events 各自 limit=500 迴圈取頁（上限各 20 頁）。讀路徑唯一的副作用是把 obs-add 列的 subjectId（NULL）依帳本新列號回填（冪等）；Bridge 永遠只被呼叫 GET。量不到（Bridge 失敗、逾時、頁數超限）＝reconcile.status 為 NOT-EVALUABLE（reason：si_unavailable、bridge_unreachable、bridge_timeout、scan_cap_exceeded），items 照回、ingested 與 orphans 為 null——不回空陣列、不冒充無待入帳。
+         * @description 回 Console 自己的稽核列（時間新到舊；不含 body 與 mac）與每列是否已入帳（ingested）、帳本中 carrier 為 console 而本表沒有對應列的項（orphans，紅色警示來源）。每列另帶 dkind（decide 列的決定動詞，取自稽核 body；其餘為 null）與 supersededBy：待入帳的帶 digest 的決定列，若同一決定（同對象、同 digest、同動詞）已有另一列入帳，就是那一列的 auditRef（已入帳者中 time 最早；取自整張表、與 limit 無關），ingested 仍為 false。對帳在 backend 一次全量做：以 Bridge 的 observations 與 events 各自 limit=500 迴圈取頁（上限各 20 頁）。讀路徑唯一的副作用是把 obs-add 列的 subjectId（NULL）依帳本新列號回填（冪等）；Bridge 永遠只被呼叫 GET。量不到（Bridge 失敗、逾時、頁數超限）＝reconcile.status 為 NOT-EVALUABLE（reason：si_unavailable、bridge_unreachable、bridge_timeout、scan_cap_exceeded），items 照回、ingested、supersededBy 與 orphans 為 null——不回空陣列、不冒充無待入帳。
          */
         get: operations["getSiConsoleWrites"];
         put?: never;
@@ -2788,6 +2788,8 @@ export interface components {
             auditRef: string;
             /** @enum {string} */
             kind: "decide" | "obs-add" | "obs-close";
+            /** @description kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null */
+            dkind?: string | null;
             user: string;
             role: string;
             /**
@@ -2803,6 +2805,11 @@ export interface components {
             keyId: string;
             /** @description 帳本是否已有同 auditRef 的 dec／obs.add／obs.close 事件或觀察列標記；量不到時為 null */
             ingested?: boolean | null;
+            /**
+             * Format: uuid
+             * @description 待入帳的帶 digest 的決定列，若同一決定（同對象、同 digest、同動詞）已有另一列入帳＝那一列的 auditRef（已入帳者中 time 最早；與 limit 無關）；ingested 仍為 false。其餘（含量不到、無 digest 的動詞）為 null
+             */
+            supersededBy?: string | null;
         };
         SiConsoleWriteOrphan: {
             auditRef: string;
@@ -5392,7 +5399,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 與目前狀態衝突（reason 說明原因） */
+            /** @description 與目前狀態衝突（reason 說明原因）：si_decision_duplicate＝同一張卡的同一決定已送出過（僅帶 digest 的六個動詞 approve、reject、return、promote、decline-promote、ack-handoff；表內已有 subject、digest、dkind 都相同的 decide 列，不論該列是否已入帳、哪個帳號送的、理由是否相同；details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、不呼叫 Bridge；rollback、unblock、resume 沒有卡面 digest，不受此閘）；si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生） */
             409: {
                 headers: {
                     [name: string]: unknown;

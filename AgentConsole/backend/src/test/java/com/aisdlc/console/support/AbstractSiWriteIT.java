@@ -33,6 +33,17 @@ public abstract class AbstractSiWriteIT extends AbstractExecutionIT {
     protected static final String PROP = "PROP-SI-004";
     protected static final String RUN = "RUN-SI-001";
     protected static final String OBS = "OBS-SI-005";
+    /** 另一個真帳本已有的提案號（重送閘與取代判定的「不同對象」案例用；TCS-SelfImprovingDecideDedupe §5.1）。 */
+    protected static final String PROP5 = "PROP-SI-005";
+    protected static final String PROP6 = "PROP-SI-006";
+    /** 與 {@link #D0} 不同的 digest（{@code sha256:} 接 64 個小寫 b；前 8 碼為 bbbbbbbb）。 */
+    protected static final String D1 = "sha256:" + "b".repeat(64);
+    /**
+     * 同刻 tie-break 用的 UUID 字面（跨首位元組 0x7f 與 0x80，鎖住 Java 的 {@link java.util.UUID#compareTo} 以有號 long 比較的陷阱）：{@code UT1} 的字串序與
+     * PostgreSQL uuid 序較小；{@code UT2} 較大，但 {@code UUID.compareTo} 卻判它較小。
+     */
+    protected static final String UT1 = "7fffffff-0000-4000-8000-000000000001";
+    protected static final String UT2 = "80000000-0000-4000-8000-000000000002";
 
     @Autowired
     protected SiWriteSeam.Switchable settings;
@@ -153,6 +164,21 @@ public abstract class AbstractSiWriteIT extends AbstractExecutionIT {
         jdbc.update("insert into console.si_console_writes (audit_ref, kind, \"user\", role, \"time\", subject_id, digest, body, "
                 + "key_id, mac) values (?::uuid, ?, 'admin', 'ADMIN', ?::timestamptz, ?, ?, ?, 'f076edf0', ?)", auditRef, kind,
                 timeIso, subjectId, digest, "{\"fixture\":true}", "0".repeat(64));
+    }
+
+    /**
+     * 通用的稽核列夾具（TCS-SelfImprovingDecideDedupe §5.5）：欄位沿 {@link #insertWrite}（user 為 admin、role 為 ADMIN、key_id 為 f076edf0、mac 為 64 個 0），
+     * 差別是 {@code kind} 與 {@code body} 由呼叫端給（例：obs-add 的 body 含 dkind 這類樣本，證明非 decide 列不因 body 含鍵就取值）。{@code body} 必須是合法 JSON。
+     */
+    protected void insertAudit(String auditRef, String kind, String subjectId, String digest, String bodyJson, String timeIso) {
+        jdbc.update("insert into console.si_console_writes (audit_ref, kind, \"user\", role, \"time\", subject_id, digest, body, "
+                + "key_id, mac) values (?::uuid, ?, 'admin', 'ADMIN', ?::timestamptz, ?, ?, ?, 'f076edf0', ?)", auditRef, kind,
+                timeIso, subjectId, digest, bodyJson, "0".repeat(64));
+    }
+
+    /** decide 列的便捷包裝：body 為只含 {@code dkind} 一鍵的合法 JSON（{@link #insertWrite} 植入的列沒有 dkind，兩者並用才能造出「看不出 dkind」的對照）。 */
+    protected void insertDecide(String auditRef, String subjectId, String digest, String dkind, String timeIso) {
+        insertAudit(auditRef, "decide", subjectId, digest, "{\"dkind\":\"" + dkind + "\"}", timeIso);
     }
 
     /** Bridge 的 export 物件（snake_case 的外層；對帳掃描只讀 items、truncated、next_since）。 */

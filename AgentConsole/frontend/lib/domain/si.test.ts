@@ -24,6 +24,7 @@ import {
   buildDecideRequest,
   buildObservationRequest,
   cardNeEntries,
+  decideKindLabel,
   decideVerbOptions,
   describeTouched,
   describeValue,
@@ -49,12 +50,14 @@ import {
   noEventText,
   notEvaluableText,
   obsStatusClass,
+  pendingDecision,
   pendingWrites,
   prettyJson,
   propStatusClass,
   siErrorParts,
   siErrorSummary,
   siWriteErrorText,
+  supersededWrites,
   suspendedRun,
   validateCloseForm,
   validateDecideForm,
@@ -230,9 +233,9 @@ describe("AT_932_1_7 lib/domain/si.ts 純函式表驅動（R15、R17）", () => 
       expect(hasBucketData([obs("a"), obs("b", { buckets: [] })])).toBe(true);
     });
 
-    it("AT_932_1_7 SI_PAGE_LIMIT 為 100；SI_REASONS 恰五個鍵（P1b 的兩個在前、P2b 的三個接後；TCS §4 漏列這一條，P2b 同步時補改）", () => {
+    it("AT_932_1_7 SI_PAGE_LIMIT 為 100；SI_REASONS 恰六個鍵（P1b 的兩個在前、P2b 的三個接後、決定重送去重的 DECISION_DUPLICATE 殿後；原五鍵與順序不變）", () => {
       expect(SI_PAGE_LIMIT).toBe(100);
-      expect(Object.keys(SI_REASONS)).toEqual(["UNAVAILABLE", "NOT_FOUND", "WRITE_DISABLED", "WRITE_FORBIDDEN", "AUDIT_EXISTS"]);
+      expect(Object.keys(SI_REASONS)).toEqual(["UNAVAILABLE", "NOT_FOUND", "WRITE_DISABLED", "WRITE_FORBIDDEN", "AUDIT_EXISTS", "DECISION_DUPLICATE"]);
     });
   });
 });
@@ -545,7 +548,7 @@ function siReasonTable(): Array<{ reason: string; when: string }> {
 }
 
 describe("AT_940_5_1 SI reason 常數與凍結的 Architecture §11.1 對拍，且不進 REASONS（R19）", () => {
-  it("AT_940_5_1 SI_REASONS 恰為五個鍵（P1b 兩個加 P2b 三個）、五值都在表的 reason 欄；表中 reason 以 si_ 起頭的全部列都有對應常數（P2b 起不再有「只標 P2b 者不需要」）", () => {
+  it("AT_940_5_1 SI_REASONS 恰為六個鍵（P1b 兩個加 P2b 三個加決定重送去重一個）、六值都在表的 reason 欄；表中 reason 以 si_ 起頭的全部列都有對應常數（P2b 起不再有「只標 P2b 者不需要」）", () => {
     const rows = siReasonTable();
     expect(rows.length, "表解析不到足夠的列，格式可能變了").toBeGreaterThanOrEqual(5);
     expect(SI_REASONS.UNAVAILABLE).toBe("si_unavailable");
@@ -553,7 +556,8 @@ describe("AT_940_5_1 SI reason 常數與凍結的 Architecture §11.1 對拍，�
     expect(SI_REASONS.WRITE_DISABLED).toBe("si_write_disabled");
     expect(SI_REASONS.WRITE_FORBIDDEN).toBe("si_write_forbidden");
     expect(SI_REASONS.AUDIT_EXISTS).toBe("si_audit_exists");
-    expect(Object.keys(SI_REASONS).sort()).toEqual(["AUDIT_EXISTS", "NOT_FOUND", "UNAVAILABLE", "WRITE_DISABLED", "WRITE_FORBIDDEN"]);
+    expect(SI_REASONS.DECISION_DUPLICATE).toBe("si_decision_duplicate");
+    expect(Object.keys(SI_REASONS).sort()).toEqual(["AUDIT_EXISTS", "DECISION_DUPLICATE", "NOT_FOUND", "UNAVAILABLE", "WRITE_DISABLED", "WRITE_FORBIDDEN"]);
     const inTable = new Set(rows.map((r) => r.reason));
     for (const value of Object.values(SI_REASONS)) expect(inTable.has(value), `${value} 不在 Architecture §11.1 的表內`).toBe(true);
     const siRows = rows.filter((r) => r.reason.startsWith("si_")).map((r) => r.reason);
@@ -955,6 +959,15 @@ describe("AT_950_9_2 純函式：三個驗證函式、ingestCommands、pendingWr
     expect(JSON.stringify(items), "輸入不被改動").toBe(snapshot);
     expect(pendingWrites([])).toEqual([]);
     expect(pendingWrites([item("a0000000-0000-4000-8000-000000000001", "2026-10-24T14:30:17Z", true), item("d0000000-0000-4000-8000-000000000004", "2026-10-24T14:30:12Z", null)])).toEqual([]);
+
+    // 決定重送去重（TCS-SelfImprovingDecideDedupe W-D4）：被同一決定的已入帳列取代的列（supersededBy 為非空字串）不算待入帳；supersededBy 為 null 者照舊算
+    const superseded: SiConsoleWrite = { ...item("e0000000-0000-4000-8000-000000000005", "2026-10-24T14:30:11Z", false), supersededBy: "a0000000-0000-4000-8000-000000000001" };
+    const notSuperseded: SiConsoleWrite = { ...item("f0000000-0000-4000-8000-000000000006", "2026-10-24T14:30:13Z", false), supersededBy: null };
+    expect(
+      pendingWrites([...items, superseded]).map((i) => i.auditRef),
+      "被取代列被排除",
+    ).toEqual(pendingWrites(items).map((i) => i.auditRef));
+    expect(pendingWrites([superseded, notSuperseded]).map((i) => i.auditRef)).toEqual(["f0000000-0000-4000-8000-000000000006"]);
   });
 
   it("AT_950_9_2 siWriteErrorText：主訊息含 reason 逐字；422 另列各 violation 的 欄位：訊息（取 details.violations，沒有時退回 errors[]）；503 si_unavailable 另列 cause 與 detail 逐字；其餘狀態不加料", () => {
@@ -985,6 +998,147 @@ describe("AT_950_9_2 純函式：三個驗證函式、ingestCommands、pendingWr
     );
     expect(siWriteErrorText(new Error("網路"))).toBe("網路");
     expect(siWriteErrorText("字串")).toBe("發生未知錯誤");
+  });
+});
+
+// ══ 決定重送去重（TCS-SelfImprovingDecideDedupe：AT-951-4-2、AT-951-5-3；W-D4、W-D5）═══════════════════════════════════════════════════
+// 為什麼重要：這幾個純函式決定「哪些稽核列還算待入帳」（誤把被取代的列留在待入帳＝OBS-SI-348 的誤導再現；誤把真正待入帳的列藏起來＝待辦被吞）與「對話框停用哪些動詞」
+// （誤停用＝掌舵者的合法決定被擋；漏停用只剩 backend 的 409 把關）。所以逐條件破壞單一欄位、量不到與無 digest 的動詞都要有對照；期望值取自 TCS，不取自被測碼。
+
+const DEDUPE_REF = (n: number) => `d${String(n).padStart(7, "0")}-0000-4000-8000-000000000000`;
+
+/** 對帳項夾具：預設為「待入帳的 approve（PROP-SI-004、GOOD_DIGEST）、沒有被取代」；patch 逐欄覆寫（欄位值給 undefined 即缺席）。 */
+function dedupeItem(auditRef: string, patch: Partial<Record<keyof SiConsoleWrite, unknown>> = {}): SiConsoleWrite {
+  const base: Record<string, unknown> = {
+    auditRef,
+    kind: "decide",
+    dkind: "approve",
+    user: "admin",
+    role: "ADMIN",
+    time: "2026-10-31T10:00:00Z",
+    subjectId: "PROP-SI-004",
+    digest: GOOD_DIGEST,
+    keyId: "f076edf0",
+    ingested: false,
+    supersededBy: null,
+    ...patch,
+  };
+  for (const key of Object.keys(base)) if (base[key] === undefined) delete base[key];
+  return base as unknown as SiConsoleWrite;
+}
+
+describe("AT_951_4_2 對帳面板的純函式：pendingWrites 排除被取代列、supersededWrites 的篩選與排序、decideKindLabel 的對照", () => {
+  const E1 = DEDUPE_REF(1);
+  const items = [
+    dedupeItem(DEDUPE_REF(20), { time: "2026-10-31T10:00:30Z", supersededBy: E1 }),
+    dedupeItem(DEDUPE_REF(11), { time: "2026-10-31T10:00:10Z", supersededBy: null }),
+    dedupeItem(DEDUPE_REF(13), { time: "2026-10-31T10:00:05Z", supersededBy: undefined }),
+    dedupeItem(DEDUPE_REF(12), { time: "2026-10-31T10:00:05Z", supersededBy: "" }),
+    dedupeItem(DEDUPE_REF(22), { time: "2026-10-31T10:00:20Z", supersededBy: E1 }),
+    dedupeItem(DEDUPE_REF(21), { time: "2026-10-31T10:00:20Z", supersededBy: E1 }),
+    dedupeItem(DEDUPE_REF(30), { ingested: true, supersededBy: E1 }),
+    dedupeItem(DEDUPE_REF(31), { ingested: null, supersededBy: E1 }),
+    dedupeItem(DEDUPE_REF(32), { ingested: true }),
+  ];
+
+  it("AT_951_4_2 pendingWrites 只回 ingested 為 false 且 supersededBy 為 null、缺席或空字串者，依 time 升冪、同刻依 auditRef；ingested 為 true 或 null 的列一律不回", () => {
+    expect(pendingWrites(items).map((i) => i.auditRef)).toEqual([DEDUPE_REF(12), DEDUPE_REF(13), DEDUPE_REF(11)]);
+  });
+
+  it("AT_951_4_2 supersededWrites 只回 ingested 為 false 且 supersededBy 為非空字串者，排序規則同；ingested 為 true 或 null 而 supersededBy 為字串者不回", () => {
+    expect(supersededWrites(items).map((i) => i.auditRef)).toEqual([DEDUPE_REF(21), DEDUPE_REF(22), DEDUPE_REF(20)]);
+  });
+
+  it("AT_951_4_2 兩個函式都不改動輸入、空清單回空，且兩者互補（同一列不會同時出現在兩邊）", () => {
+    const snapshot = JSON.stringify(items);
+    pendingWrites(items);
+    supersededWrites(items);
+    expect(JSON.stringify(items), "輸入不被改動").toBe(snapshot);
+    expect(pendingWrites([])).toEqual([]);
+    expect(supersededWrites([])).toEqual([]);
+    const pending = new Set(pendingWrites(items).map((i) => i.auditRef));
+    for (const s of supersededWrites(items)) expect(pending.has(s.auditRef), `${s.auditRef} 不得同時是待入帳與已被取代`).toBe(false);
+  });
+
+  it("AT_951_4_2 decideKindLabel：九個 dkind 依序為 核准、否決、退回、晉升、不晉升、回滾、解除、恢復、轉交；未知值原樣回該值；null 與 undefined 回空字串", () => {
+    const kinds = ["approve", "reject", "return", "promote", "decline-promote", "rollback", "unblock", "resume", "ack-handoff"];
+    expect(kinds.map((k) => decideKindLabel(k))).toEqual(["核准", "否決", "退回", "晉升", "不晉升", "回滾", "解除", "恢復", "轉交"]);
+    expect(decideKindLabel("future-verb")).toBe("future-verb");
+    expect(decideKindLabel("Approve"), "區分大小寫：不認得就原樣回傳").toBe("Approve");
+    expect(decideKindLabel("constructor"), "原型鏈上的名稱不是動詞").toBe("constructor");
+    expect(decideKindLabel(null)).toBe("");
+    expect(decideKindLabel(undefined)).toBe("");
+  });
+});
+
+describe("AT_951_5_3 決定對話框的純函式：pendingDecision 的比對規則、siWriteErrorText 的重送文案與 SI_REASONS 的六個鍵", () => {
+  const TARGET = { subject: "PROP-SI-004", digest: GOOD_DIGEST, dkind: "approve" };
+  const OTHER_DIGEST = `sha256:${"b".repeat(64)}`;
+
+  it("AT_951_5_3 pendingDecision 命中：kind 為 decide、subject、digest、dkind 皆相符、ingested 為 false 且 supersededBy 為 null、缺席或空字串各一個樣本，都回該列", () => {
+    for (const supersededBy of [null, undefined, ""]) {
+      const row = dedupeItem(DEDUPE_REF(1), { supersededBy });
+      expect(pendingDecision([row], TARGET), `supersededBy＝${JSON.stringify(supersededBy)}`).toBe(row);
+    }
+  });
+
+  it.each([
+    ["kind 為 obs-add", { kind: "obs-add" }],
+    ["subjectId 不同", { subjectId: "PROP-SI-005" }],
+    ["digest 不同（字串對字串）", { digest: OTHER_DIGEST }],
+    ["digest 不同（字串對 null）", { digest: null }],
+    ["dkind 不同", { dkind: "reject" }],
+    ["列的 dkind 為 null", { dkind: null }],
+    ["列的 dkind 缺席", { dkind: undefined }],
+    ["ingested 為 true", { ingested: true }],
+    ["ingested 為 null（量不到）", { ingested: null }],
+    ["supersededBy 為非空字串", { supersededBy: DEDUPE_REF(9) }],
+  ] as Array<[string, Partial<Record<keyof SiConsoleWrite, unknown>>]>)("AT_951_5_3 pendingDecision 逐一破壞單一條件回 null：%s", (_name, patch) => {
+    expect(pendingDecision([dedupeItem(DEDUPE_REF(1), patch)], TARGET)).toBeNull();
+  });
+
+  it("AT_951_5_3 pendingDecision：目標 digest 為 null（沒有卡面 digest 的動詞）一律回 null，即使列的 digest 也為 null、其餘條件全符；兩列同時命中回 time 最早者（同刻回 auditRef 較小者）；空清單回 null；不改動輸入", () => {
+    const noDigest = dedupeItem(DEDUPE_REF(1), { dkind: "resume", subjectId: "RUN-SI-001", digest: null });
+    expect(pendingDecision([noDigest], { subject: "RUN-SI-001", digest: null, dkind: "resume" })).toBeNull();
+    const late = dedupeItem(DEDUPE_REF(2), { time: "2026-10-31T10:05:00Z" });
+    const early = dedupeItem(DEDUPE_REF(3), { time: "2026-10-31T10:01:00Z" });
+    expect(pendingDecision([late, early], TARGET)).toBe(early);
+    const tieHigh = dedupeItem(DEDUPE_REF(5), { time: "2026-10-31T10:03:00Z" });
+    const tieLow = dedupeItem(DEDUPE_REF(4), { time: "2026-10-31T10:03:00Z" });
+    expect(pendingDecision([tieHigh, tieLow], TARGET), "同刻回 auditRef 較小者").toBe(tieLow);
+    expect(pendingDecision([], TARGET)).toBeNull();
+    const input = [late, early];
+    const snapshot = JSON.stringify(input);
+    pendingDecision(input, TARGET);
+    expect(JSON.stringify(input), "輸入不被改動").toBe(snapshot);
+  });
+
+  it("AT_951_5_3 siWriteErrorText：409 si_decision_duplicate 以『同一張卡的同一決定已送出（稽核編號 <ref>），待主機入帳，不需重送』起首、其後以全形分號接原文（reason 與 traceId 逐字）；缺 existingAuditRef 時不含括號段；409 si_audit_exists 與既有行為逐字相同", () => {
+    const ref = "b2000000-0000-4000-8000-00000000000a";
+    const dup = new ApiError({
+      status: 409,
+      message: "重複的決定",
+      reason: "si_decision_duplicate",
+      traceId: "tr-9",
+      details: { existingAuditRef: ref, dkind: "approve", subject: "PROP-SI-004", digest8: "d21ae6f5" },
+    });
+    expect(siWriteErrorText(dup)).toBe(`同一張卡的同一決定已送出（稽核編號 ${ref}），待主機入帳，不需重送；重複的決定：si_decision_duplicate（traceId：tr-9）`);
+    for (const details of [undefined, {}, { existingAuditRef: 5 }, { existingAuditRef: null }]) {
+      const text = siWriteErrorText(new ApiError({ status: 409, message: "x", reason: "si_decision_duplicate", details }));
+      expect(text, JSON.stringify(details)).toBe("同一張卡的同一決定已送出，待主機入帳，不需重送；x：si_decision_duplicate");
+      expect(text).not.toContain("稽核編號");
+    }
+    expect(siWriteErrorText(new ApiError({ status: 409, message: "稽核檔已存在", reason: "si_audit_exists" }))).toBe("稽核檔已存在：si_audit_exists");
+    // 狀態碼與 reason 必須同時相符：別的狀態碼配這個 reason、或這個狀態碼配別的 reason，都沒有起首句
+    expect(siWriteErrorText(new ApiError({ status: 400, message: "x", reason: "si_decision_duplicate" }))).toBe("x：si_decision_duplicate");
+    expect(siWriteErrorText(new ApiError({ status: 409, message: "x", reason: "另一個原因", details: { existingAuditRef: ref } }))).toBe("x：另一個原因");
+  });
+
+  it("AT_951_5_3 SI_REASONS 的鍵依序恰為 UNAVAILABLE、NOT_FOUND、WRITE_DISABLED、WRITE_FORBIDDEN、AUDIT_EXISTS、DECISION_DUPLICATE；六個值都在 Architecture §11.1 的 SI reason 表內，且表中 si_ 起頭的列恰為這六個", () => {
+    expect(Object.keys(SI_REASONS)).toEqual(["UNAVAILABLE", "NOT_FOUND", "WRITE_DISABLED", "WRITE_FORBIDDEN", "AUDIT_EXISTS", "DECISION_DUPLICATE"]);
+    const rows = siReasonTable().map((r) => r.reason);
+    for (const value of Object.values(SI_REASONS)) expect(rows, `${value} 不在 Architecture §11.1 的表內`).toContain(value);
+    expect(rows.filter((r) => r.startsWith("si_")).sort()).toEqual(Object.values(SI_REASONS).sort());
   });
 });
 

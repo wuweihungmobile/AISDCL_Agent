@@ -7,9 +7,11 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
- * {@code GET /api/v1/si/console-writes} 的 {@code data}（TCS-SelfImprovingDecide-P2b W14）：Console 稽核列與帳本的對帳。{@code items[]} 鍵集合恰為
- * {@code auditRef、kind、user、role、time、subjectId、digest、keyId、ingested}——<b>沒有 body 與 mac</b>；量不到（{@code reconcile.status}＝
- * {@code NOT-EVALUABLE}）時 {@code ingested} 與 {@code orphans} 為 {@code null}，<b>不是</b>空陣列也不是 {@code false}。
+ * {@code GET /api/v1/si/console-writes} 的 {@code data}（TCS-SelfImprovingDecide-P2b W14；TCS-SelfImprovingDecideDedupe W-D3）：Console 稽核列與帳本的對帳。
+ * {@code items[]} 鍵集合恰為 {@code auditRef、kind、dkind、user、role、time、subjectId、digest、keyId、ingested、supersededBy}（十一鍵，鍵恆在、值可為 null）——
+ * <b>沒有 body 與 mac</b>；量不到（{@code reconcile.status}＝{@code NOT-EVALUABLE}）時 {@code ingested}、{@code supersededBy} 與 {@code orphans} 為
+ * {@code null}，<b>不是</b>空陣列也不是 {@code false}。被同一決定的已入帳列取代的待入帳列，{@code ingested} 仍為 {@code false}、{@code supersededBy} 為
+ * 那一列的 {@code auditRef}。
  */
 @Schema(name = "SiConsoleWrites", description = "Console 稽核列與 SelfImproving 帳本的對帳結果")
 public record SiConsoleWritesResponse(
@@ -23,13 +25,16 @@ public record SiConsoleWritesResponse(
     public record Item(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "uuid") String auditRef,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close"}) String kind,
+            @Schema(nullable = true, description = "kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null") String dkind,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String user,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String role,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "date-time", description = "稽核 body 的 time（同一瞬間；以 UTC 表示）") OffsetDateTime time,
             @Schema(nullable = true, description = "decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 null）") String subjectId,
             @Schema(nullable = true, description = "卡面 digest（只有六種決定動詞才有）") String digest,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "簽章金鑰的 sha256 前 8 碼") String keyId,
-            @Schema(nullable = true, description = "帳本是否已有同 auditRef 的 dec／obs.add／obs.close 事件或觀察列標記；量不到時為 null") Boolean ingested) {
+            @Schema(nullable = true, description = "帳本是否已有同 auditRef 的 dec／obs.add／obs.close 事件或觀察列標記；量不到時為 null") Boolean ingested,
+            @Schema(nullable = true, format = "uuid", description = "待入帳的帶 digest 的決定列，若同一決定（同對象、同 digest、同動詞）已有另一列入帳＝那一列的 auditRef"
+                    + "（已入帳者中 time 最早；與 limit 無關）；ingested 仍為 false。其餘（含量不到、無 digest 的動詞）為 null") String supersededBy) {
     }
 
     /** 帳本有、Console 表內沒有的 carrier=console 項。 */
@@ -51,8 +56,8 @@ public record SiConsoleWritesResponse(
 
     public static SiConsoleWritesResponse from(ConsoleWrites writes) {
         return new SiConsoleWritesResponse(
-                writes.items().stream().map(i -> new Item(i.auditRef(), i.kind(), i.user(), i.role(), i.time(), i.subjectId(),
-                        i.digest(), i.keyId(), i.ingested())).toList(),
+                writes.items().stream().map(i -> new Item(i.auditRef(), i.kind(), i.dkind(), i.user(), i.role(), i.time(), i.subjectId(),
+                        i.digest(), i.keyId(), i.ingested(), i.supersededBy())).toList(),
                 writes.truncated(),
                 writes.orphans() == null ? null
                         : writes.orphans().stream().map(o -> new Orphan(o.auditRef(), o.kind(), o.subject())).toList(),

@@ -10,6 +10,9 @@
  *  - 必填欄依動詞（表 M-D）：缺欄時送出鈕停用並顯示原因（不是靜默停用）；verdict 為 NE 的晉升（晉升後式）須勾選「已知悉未驗採納」。
  *  - 送出＝單次 `postSiDecide`：請求中停用（連點只送一次；以 ref 同步擋，不靠重繪）；失敗以 toast 顯示原因逐字、對話框不關；成功顯示稽核編號、待入帳字樣與兩個入帳指令，
  *    對話框不自動關閉（關掉＝收據消失）。成功後表單收起（避免對同一張卡重複送出第二筆決定）；關閉後重開同一張卡不沿用上次結果（內容元件隨對話框卸載）。
+ *  - **已送出而待入帳的同一決定不可再送**（TCS-SelfImprovingDecideDedupe W-D5）：對帳面板的查詢快取裡已有同對象、同 digest、同動詞、尚未入帳也沒被取代的稽核列時，
+ *    該動詞的選項停用並在送出鈕旁說明（稽核編號）；backend 對這六個帶 digest 的動詞也有重送閘（409 `si_decision_duplicate`，toast 說明）。對話框**只讀既有快取、不發任何
+ *    新請求**——沒有對帳面板的頁面（議題中心）、面板還在載入或已失敗、對帳量不到時都不停用，只靠 backend 的 409；沒有卡面 digest 的動詞（回滾、解除、恢復）永不停用。
  */
 import { Send } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -21,9 +24,9 @@ import { Field } from "@/components/ui/field";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { useSiDecide } from "@/lib/api/queries";
+import { useSiConsoleWritesCache, useSiDecide } from "@/lib/api/queries";
 import type { SiProposal, SiWriteReceipt } from "@/lib/api/types";
-import { DECIDE_FIELDS, SI_REASON_CLASSES, SI_REASON_MAX, buildDecideRequest, decideVerbOptions, digest8, isDecideKind, siWriteErrorText, validateDecideForm } from "@/lib/domain/si";
+import { DECIDE_FIELDS, SI_REASON_CLASSES, SI_REASON_MAX, buildDecideRequest, decideVerbOptions, digest8, isDecideKind, pendingDecision, siWriteErrorText, validateDecideForm } from "@/lib/domain/si";
 import { SiWriteResult } from "./siParts";
 
 /** 對話框的對象：提案卡（點擊當下的快照，綁其卡面 digest）或橫幅暫停的運轉（恢復；沒有 digest）。 */
@@ -62,6 +65,18 @@ function DecideBody({ target, onClose }: { target: DecideTarget; onClose: () => 
   const verbs = useMemo(() => decideVerbOptions(target.kind === "prop" ? target.proposal : { suspended: { run: target.run } }), [target]);
   const selected = verbs.find((v) => v.dkind === dkind);
   const need = isDecideKind(dkind) ? DECIDE_FIELDS[dkind] : null;
+
+  // 已送出而待入帳的同一決定（每個動詞各查一次）：只讀對帳面板的查詢快取（沒有快取、或對帳不是 ok＝量不到，一律不停用）；沒有卡面 digest 的動詞 digest 為 null，永不命中
+  const cache = useSiConsoleWritesCache();
+  const pendingByVerb = useMemo(() => {
+    const hits = new Map<string, { label: string; auditRef: string }>();
+    if (!cache || cache.reconcile.status !== "ok") return hits;
+    for (const v of verbs) {
+      const hit = pendingDecision(cache.items, { subject, digest: DECIDE_FIELDS[v.dkind].digest ? boundDigest : null, dkind: v.dkind });
+      if (hit) hits.set(v.dkind, { label: v.label, auditRef: hit.auditRef });
+    }
+    return hits;
+  }, [cache, verbs, subject, boundDigest]);
 
   // 表單送給驗證與請求組裝的值：該動詞用不到的欄位一律視為沒填（切換動詞時隱藏欄位的殘值不會被送出、也不會被誤判成禁止欄）
   const form = {
@@ -141,7 +156,7 @@ function DecideBody({ target, onClose }: { target: DecideTarget; onClose: () => 
           <Select value={dkind} onChange={(e) => pick(e.target.value)} data-testid="si-decide-verb">
             <option value="">請選擇動詞</option>
             {verbs.map((v) => (
-              <option key={v.dkind} value={v.dkind}>
+              <option key={v.dkind} value={v.dkind} disabled={pendingByVerb.has(v.dkind)}>
                 {v.label}
               </option>
             ))}
@@ -180,7 +195,16 @@ function DecideBody({ target, onClose }: { target: DecideTarget; onClose: () => 
           </p>
         ) : null}
       </DialogBody>
-      <DialogFooter>
+      <DialogFooter className="flex-wrap items-center">
+        {pendingByVerb.size > 0 ? (
+          <div className="mr-auto flex flex-col gap-0.5 text-xs text-wg-muted">
+            {[...pendingByVerb.entries()].map(([verbKind, { label, auditRef }]) => (
+              <p key={verbKind} data-testid="si-decide-dup" className="break-all">
+                {`${label}：已送出待入帳（稽核編號 ${auditRef}）`}
+              </p>
+            ))}
+          </div>
+        ) : null}
         <Button variant="ghost" onClick={onClose} disabled={busy}>
           取消
         </Button>

@@ -482,6 +482,9 @@
 ## 2.6 系統管理／資料庫備份（Console SysAdmin Backup）階一的 TCS 本地 ID 追溯（PRD FR-BK-01～10；不計入 §2 總列數）
 > 本子表 2026-10-31 依 DEF-200-576 搬至 [RTM-SysAdminBackup-20261031.md](RTM-SysAdminBackup-20261031.md)（304 列；回填義務不變）。
 
+## 2.7 SelfImproving 決定重送去重與對帳取代標示（dedupe 增量）的 TCS 本地 ID 追溯（PRD FR-SI-33／35 的 Console 半；不計入 §2 總列數）
+> 本子表 2026-10-31 依 DEF-200-576 體例自始立於 [RTM-SelfImprovingDecideDedupe-20261031.md](RTM-SelfImprovingDecideDedupe-20261031.md)（33 列：F 1、US 1、AC 6、AT 25；鍵 `agentconsole-si-decide-dedupe`；回填義務不變）。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）

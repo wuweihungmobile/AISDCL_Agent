@@ -37,8 +37,9 @@ export const SI_AUTO_LOAD_MAX_PAGES = 20;
 export const SI_CONSOLE_WRITES_LIMIT = 100;
 
 /**
- * SI 的 reason 常數（與凍結的 Architecture §11.1〈SelfImproving 相關的 reason〉表逐字一致，lib/domain/si.test.ts 解析該表比對；P2b 起五個：
- * 表中 `si_` 起頭的全部列）。刻意不放進 lib/api/reasons.ts 的 REASONS：REASONS 與凍結契約附錄 B 雙向鎖，多一個前端常數＝reasons.test.ts 紅（R19、⚖11）。
+ * SI 的 reason 常數（與凍結的 Architecture §11.1〈SelfImproving 相關的 reason〉表逐字一致，lib/domain/si.test.ts 解析該表比對；六個：
+ * 表中 `si_` 起頭的全部列；P2b 起五個，決定重送去重〔TCS-SelfImprovingDecideDedupe〕加第六個 `DECISION_DUPLICATE`）。刻意不放進 lib/api/reasons.ts 的 REASONS：
+ * REASONS 與凍結契約附錄 B 雙向鎖，多一個前端常數＝reasons.test.ts 紅（R19、⚖11）。
  * 422 `invalid_request` 是輸入閘與 Bridge 層共用的 reason（backend 的輸入閘直接回它；Bridge 的 422 則以 details.bridgeReason 帶出、頂層 reason 是 BRIDGE_REJECTED），
  * 所以不在這裡。
  */
@@ -51,6 +52,8 @@ export const SI_REASONS = {
   WRITE_FORBIDDEN: "si_write_forbidden",
   /** 稽核目錄已有同名 `<audit_ref>.json`（不覆寫）：409。 */
   AUDIT_EXISTS: "si_audit_exists",
+  /** 同一張卡的同一決定已送出過（backend 自己的重送閘，只管帶卡面 digest 的六個動詞）：409，`details.existingAuditRef` 為先前那份稽核檔的編號。 */
+  DECISION_DUPLICATE: "si_decision_duplicate",
 } as const;
 
 /** 模組桶選項的顯示次序（只管排序，不管歸屬：比對恆用資料自帶的 `buckets` 成員關係）；表外的值依出現序附在後面。 */
@@ -776,25 +779,83 @@ export function writeSubjectText(subject: string | null | undefined): string {
   return subject === null || subject === undefined || subject === "" ? "—" : subject;
 }
 
-/**
- * 待入帳的稽核列：只回 `ingested` 為 false 者（null＝對帳量不到、true＝已入帳都不回），依 `time` 升冪（最久未入帳的在前；同刻依 auditRef）。
- * 量不到時不得當成「沒有待入帳」——呼叫端另以 `reconcile.status` 判斷（NOT-EVALUABLE 時整個清單不可信）。
- */
-export function pendingWrites(items: ReadonlyArray<SiConsoleWrite>): SiConsoleWrite[] {
+/** 稽核列的排序：`time` 升冪（最久的在前；時間無法解析視為 0），同刻依 auditRef。 */
+function compareByTime(a: SiConsoleWrite, b: SiConsoleWrite): number {
   const stamp = (item: SiConsoleWrite) => {
     const ms = Date.parse(item.time);
     return Number.isNaN(ms) ? 0 : ms;
   };
-  return items.filter((item) => item.ingested === false).sort((a, b) => stamp(a) - stamp(b) || (a.auditRef < b.auditRef ? -1 : a.auditRef > b.auditRef ? 1 : 0));
+  return stamp(a) - stamp(b) || (a.auditRef < b.auditRef ? -1 : a.auditRef > b.auditRef ? 1 : 0);
+}
+
+/** 被同一決定的已入帳列取代：`supersededBy` 為非空字串（null、缺席與空字串都不算；TCS-SelfImprovingDecideDedupe W-D4）。 */
+function isSuperseded(item: SiConsoleWrite): boolean {
+  return typeof item.supersededBy === "string" && item.supersededBy !== "";
+}
+
+/**
+ * 待入帳的稽核列：只回 `ingested` 為 false 且**沒有被取代**者（null＝對帳量不到、true＝已入帳都不回；`supersededBy` 為非空字串＝同一決定已由另一份稽核檔入帳，
+ * 改列 `supersededWrites`），依 `time` 升冪（最久未入帳的在前；同刻依 auditRef）。
+ * 量不到時不得當成「沒有待入帳」——呼叫端另以 `reconcile.status` 判斷（NOT-EVALUABLE 時整個清單不可信）。
+ */
+export function pendingWrites(items: ReadonlyArray<SiConsoleWrite>): SiConsoleWrite[] {
+  return items.filter((item) => item.ingested === false && !isSuperseded(item)).sort(compareByTime);
+}
+
+/**
+ * 已被取代的稽核列：`ingested` 為 false 且 `supersededBy` 為非空字串者（同一張卡的同一決定已由另一份稽核檔入帳；它仍是 `ingested=false`——不冒充已入帳），
+ * 排序同 `pendingWrites`。`ingested` 為 true 或 null 的列不回（量不到時整欄不可信，呼叫端另以 `reconcile.status` 判斷）。不改動輸入。
+ */
+export function supersededWrites(items: ReadonlyArray<SiConsoleWrite>): SiConsoleWrite[] {
+  return items.filter((item) => item.ingested === false && isSuperseded(item)).sort(compareByTime);
+}
+
+/** 九個決定動詞的中文標籤（canonical，不分卡面情境；決定對話框的動詞選項另依卡面情境有「不轉交」「晉升（未驗採納）」等變體）。 */
+const DECIDE_KIND_LABELS: Readonly<Record<SiDecideKind, string>> = {
+  approve: "核准",
+  reject: "否決",
+  return: "退回",
+  promote: "晉升",
+  "decline-promote": "不晉升",
+  rollback: "回滾",
+  unblock: "解除",
+  resume: "恢復",
+  "ack-handoff": "轉交",
+};
+
+/** 決定動詞的中文標籤；未知值原樣回傳（畫面上與原文並列，不丟資訊）、null 與 undefined 回空字串。 */
+export function decideKindLabel(dkind: string | null | undefined): string {
+  if (dkind === null || dkind === undefined) return "";
+  return isDecideKind(dkind) ? DECIDE_KIND_LABELS[dkind] : dkind;
+}
+
+/**
+ * 已送出而尚待入帳的同一決定（決定對話框用；TCS-SelfImprovingDecideDedupe W-D5）：回 `items` 中第一個（`time` 最早、同刻 `auditRef` 最小）同時符合
+ * `kind` 為 decide、`subjectId` 等於 `subject`、列的 `digest` 等於 `digest`、列的 `dkind` 為非 null 且等於 `dkind`、`ingested` 為 false、沒有被取代的列，否則 null。
+ * `digest` 為 null（沒有卡面 digest 的動詞：rollback、unblock、resume）一律回 null——它們不受重送閘，也不該被對話框停用。不改動輸入。
+ */
+export function pendingDecision(items: ReadonlyArray<SiConsoleWrite>, target: { subject: string; digest: string | null; dkind: string }): SiConsoleWrite | null {
+  if (target.digest === null) return null;
+  // 列的 dkind 為 null 或缺席時不會等於字串型的 target.dkind，所以「dkind 非 null」不必另判
+  const hits = items.filter(
+    (item) => item.kind === "decide" && item.subjectId === target.subject && item.digest === target.digest && item.dkind === target.dkind && item.ingested === false && !isSuperseded(item),
+  );
+  return hits.sort(compareByTime)[0] ?? null;
 }
 
 /**
  * 寫入失敗的一句話（toast 用；各部分以「；」相接，因為 toast 不保留換行）：`describeError` 的主訊息加 reason 逐字（含 traceId）；
- * 422 另列每筆 violation 的 `欄位：訊息`（取 `details.violations`，沒有時退回頂層 `errors[]`）；503 `si_unavailable` 另列 cause 與 detail 逐字。
+ * 422 另列每筆 violation 的 `欄位：訊息`（取 `details.violations`，沒有時退回頂層 `errors[]`）；503 `si_unavailable` 另列 cause 與 detail 逐字；
+ * 409 `si_decision_duplicate`（重送閘）以一句人話起首——`同一張卡的同一決定已送出（稽核編號 <details.existingAuditRef>），待主機入帳，不需重送`
+ * （`existingAuditRef` 不是字串時省略括號段），其後仍接 `describeError` 的原文（reason 與 traceId 逐字保留）。
  */
 export function siWriteErrorText(error: unknown): string {
   const parts = [describeError(error)];
   if (error instanceof ApiError) {
+    if (error.status === 409 && error.reason === SI_REASONS.DECISION_DUPLICATE) {
+      const existing = error.details?.existingAuditRef;
+      parts.unshift(`同一張卡的同一決定已送出${typeof existing === "string" ? `（稽核編號 ${existing}）` : ""}，待主機入帳，不需重送`);
+    }
     const violations = error.details?.violations;
     const listed = Array.isArray(violations)
       ? violations.flatMap((v) => (typeof v === "object" && v !== null && typeof (v as { message?: unknown }).message === "string" ? [v as { field?: unknown; message: string }] : []))

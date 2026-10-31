@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { clearSession, resetSessionCache } from "@/lib/auth/store";
 import * as api from "./endpoints";
+import type { SiConsoleWrite } from "./types";
 
 /**
  * SelfImproving 的 API 層：P1b 的六個唯讀函式（TCS-SelfImprovingMirror-P1b R11：網址、查詢與 id 編碼）加 P2b 的寫入載體
@@ -267,5 +268,92 @@ describe("AT_950_10_2 已入庫的 schema.d.ts 含十個 SI 路徑，各自只�
   it("AT_950_10_2 package.json 的 scripts 有 gen:api（重產指令；重產後無差異由 V7 現查）", () => {
     const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf-8")) as { scripts: Record<string, string> };
     expect(pkg.scripts["gen:api"]).toBe("node scripts/gen-api.mjs");
+  });
+});
+
+/**
+ * 決定重送去重（TCS-SelfImprovingDecideDedupe AT-951-6-2；W-D3、W-D6）：已入庫的 schema.d.ts 裡，對帳項 `SiConsoleWriteItem` 由九鍵增為十一鍵——多 `dkind` 與
+ * `supersededBy`，兩者選填且可為 null（與 backend 契約同名）；SI 的路徑與 operationId 不變。為什麼重要：型別是前端讀到後端欄位的唯一依據——少一個鍵，面板就讀不到取代狀態；
+ * 把新鍵標成必填，既有的夾具與呼叫端全部要跟著改。
+ */
+describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵，兩個新鍵選填且可為 null，SI 路徑與 operationId 不變", () => {
+  const schema = readFileSync(path.join(ROOT, "lib", "api", "schema.d.ts"), "utf-8");
+
+  /** openapi-typescript 的 components.schemas 區塊：`SiConsoleWriteItem: {` 起（縮排八格）、下一個同縮排的 `};` 止。 */
+  function itemBlock(): string {
+    const start = schema.indexOf("\n        SiConsoleWriteItem: {");
+    expect(start, "schema.d.ts 找不到 SiConsoleWriteItem").toBeGreaterThan(-1);
+    const end = schema.indexOf("\n        };", start);
+    expect(end, "SiConsoleWriteItem 區塊沒有結尾").toBeGreaterThan(start);
+    return schema.slice(start, end);
+  }
+
+  const ELEVEN = ["auditRef", "kind", "dkind", "user", "role", "time", "subjectId", "digest", "keyId", "ingested", "supersededBy"];
+
+  it("AT_951_6_2 區塊內的鍵恰為十一個且與 backend 契約同名；dkind 與 supersededBy 為選填且型別為字串或 null；auditRef、kind、user、role、time、keyId 仍為必填", () => {
+    // 屬性列＝縮排十二格、以識別字起頭（JSDoc 的行以斜線或星號起頭，不會被收進來）
+    const props = [...itemBlock().matchAll(/^ {12}(\w+)(\?)?: ([^;]+);$/gm)].map((m) => ({ name: m[1], optional: m[2] === "?", type: m[3] }));
+    expect(props.map((p) => p.name).sort()).toEqual([...ELEVEN].sort());
+    const byName = new Map(props.map((p) => [p.name, p]));
+    for (const name of ["dkind", "supersededBy"]) {
+      expect(byName.get(name)?.optional, `${name} 為選填`).toBe(true);
+      expect(byName.get(name)?.type, `${name} 的型別為字串或 null`).toBe("string | null");
+    }
+    for (const name of ["auditRef", "kind", "user", "role", "time", "keyId"]) expect(byName.get(name)?.optional, `${name} 仍為必填`).toBe(false);
+    for (const name of ["subjectId", "digest", "ingested"]) expect(byName.get(name)?.optional, `${name} 仍為選填`).toBe(true);
+  });
+
+  it("AT_951_6_2 SiConsoleWrite 型別帶兩個新鍵的物件字面值成立（由 tsc --noEmit 檢查型別；這裡驗執行期形狀），缺這兩鍵的舊形狀仍合法", () => {
+    const withNewKeys: SiConsoleWrite = {
+      auditRef: "b2000000-0000-4000-8000-0000000000e2",
+      kind: "decide",
+      dkind: "promote",
+      user: "admin",
+      role: "ADMIN",
+      time: "2026-10-31T10:20:30Z",
+      subjectId: "PROP-SI-006",
+      digest: `sha256:${"a".repeat(64)}`,
+      keyId: "f076edf0",
+      ingested: false,
+      supersededBy: "b2000000-0000-4000-8000-0000000000e1",
+    };
+    const nullable: SiConsoleWrite = { ...withNewKeys, dkind: null, supersededBy: null };
+    const legacy: SiConsoleWrite = { auditRef: withNewKeys.auditRef, kind: "obs-add", user: "admin", role: "ADMIN", time: withNewKeys.time, keyId: withNewKeys.keyId };
+    expect(Object.keys(withNewKeys).sort()).toEqual([...ELEVEN].sort());
+    expect(nullable.supersededBy).toBeNull();
+    expect("dkind" in legacy).toBe(false);
+  });
+
+  it("AT_951_6_2 以 /api/v1/si/ 起頭的路徑鍵與 operationId 與重產前相同（十個路徑、十一個操作）", () => {
+    const keys = [...schema.matchAll(/^ {4}"(\/api\/v1\/si\/[^"]*)": \{/gm)].map((m) => m[1]);
+    expect(keys.sort()).toEqual(
+      [
+        "/api/v1/si/console-writes",
+        "/api/v1/si/events",
+        "/api/v1/si/observations",
+        "/api/v1/si/observations/validate",
+        "/api/v1/si/observations/{id}/close",
+        "/api/v1/si/proposals",
+        "/api/v1/si/proposals/{id}",
+        "/api/v1/si/proposals/{id}/decide",
+        "/api/v1/si/runs",
+        "/api/v1/si/status",
+      ].sort(),
+    );
+    const operationIds = [
+      "getSiStatus",
+      "getSiObservations",
+      "postSiObservation",
+      "getSiEvents",
+      "getSiProposals",
+      "getSiProposal",
+      "getSiRuns",
+      "postSiDecide",
+      "postSiObservationClose",
+      "postSiObservationValidate",
+      "getSiConsoleWrites",
+    ];
+    for (const id of operationIds) expect(schema, `operationId ${id}`).toContain(`${id}: {`);
+    expect([...schema.matchAll(/operations\["((?:get|post|put|patch|delete)Si\w*)"\]/g)].map((m) => m[1]).sort()).toEqual([...operationIds].sort());
   });
 });

@@ -7,11 +7,13 @@ import com.aisdlc.console.application.port.out.SiConsoleWriteQueries;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.exception.ValidationException;
 import com.aisdlc.console.domain.model.si.SiConsoleWriteSummary;
+import com.aisdlc.console.domain.model.si.SiWriteKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +28,8 @@ import java.util.regex.Pattern;
  *
  * <p>對 Bridge <b>永遠只送 GET</b>（{@code siExport}）；對資料庫唯一的寫入是 {@link SiConsoleWriteQueries#fillSubjectId}（回填 obs-add 稽核列的
  * {@code subject_id}，冪等）。Bridge 任何失敗都不拋給呼叫端：回 {@code NOT-EVALUABLE}、{@code items} 照回——稽核列本身永遠讀得到。
+ * 對帳量得到時另做取代判定（{@code supersededBy}；TCS-SelfImprovingDecideDedupe W-D3）：同一決定已有另一份稽核檔入帳的待入帳列帶那一份的
+ * {@code auditRef}，{@code ingested} 仍如實為 false。
  */
 @Service
 public class SiReconcileService implements SiReconcileUseCase {
@@ -92,11 +96,13 @@ public class SiReconcileService implements SiReconcileUseCase {
         // 回填之後才讀列：回應裡的 subjectId 就是填好的值
         List<SiConsoleWriteSummary> rows = queries.findRecent(size + 1);
         boolean truncated = rows.size() > size;
+        List<SiConsoleWriteSummary> shown = rows.subList(0, Math.min(size, rows.size()));
+        Map<String, String> superseded = ledger == null ? Map.of() : supersededBy(ledger, shown);
         List<Item> items = new ArrayList<>();
-        for (SiConsoleWriteSummary row : rows.subList(0, Math.min(size, rows.size()))) {
+        for (SiConsoleWriteSummary row : shown) {
             String ref = row.auditRef().toString();
-            items.add(new Item(ref, row.kind().wire(), row.user(), row.role(), row.time(), row.subjectId(), row.digest(),
-                    row.keyId(), ledger == null ? null : ledger.ingested().contains(ref)));
+            items.add(new Item(ref, row.kind().wire(), row.dkind(), row.user(), row.role(), row.time(), row.subjectId(), row.digest(),
+                    row.keyId(), ledger == null ? null : ledger.ingested().contains(ref), superseded.get(ref)));
         }
         Reconcile reconcile = ledger != null ? new Reconcile(STATUS_OK, null, backfilled)
                 : new Reconcile(STATUS_NOT_EVALUABLE, notEvaluable, 0);
@@ -178,6 +184,47 @@ public class SiReconcileService implements SiReconcileUseCase {
         Map<String, Object> out = new LinkedHashMap<>();
         map.forEach((key, value) -> out.put(String.valueOf(key), value));
         return out;
+    }
+
+    // ── 取代判定（TCS-SelfImprovingDecideDedupe W-D3）───────────────────────────────────────────────
+
+    /** 「同一個決定」的身分：同 subject、同 dkind、同 digest（三者皆非 null 才有身分；無 digest 的動詞與看不出 dkind 的列沒有）。 */
+    private record DecisionKey(String subject, String dkind, String digest) {
+
+        static DecisionKey of(SiConsoleWriteSummary row) {
+            return row.subjectId() == null || row.dkind() == null || row.digest() == null
+                    ? null : new DecisionKey(row.subjectId(), row.dkind(), row.digest());
+        }
+    }
+
+    /**
+     * {@code shown} 中每個「待入帳、帶 digest 的 decide 列」→ 取代它的已入帳列的 {@code auditRef}（沒有被取代的列不在回傳的 map 內）。取代者從
+     * <b>整張表的 decide 列</b>（{@link SiConsoleWriteQueries#findDecideRows}，與 {@code limit} 無關）找：同一決定、本次掃描判為已入帳、{@code time}
+     * 最早（同刻 {@code audit_ref} 字串序最小）。{@code findDecideRows} 已由資料庫依 {@code time}、{@code audit_ref} 升冪排好——這裡只取每個決定身分的
+     * <b>第一個</b>已入帳列，不重排（Java 的 {@code UUID.compareTo} 是有號比較，順序與資料庫不同）。待入帳列本身不在已入帳集合內，所以「另一列」的條件自然成立。
+     * 取代者必須是本表的列：帳本有 carrier 為 console 而表內沒有的項（orphan）不在 {@code findDecideRows} 內，不充當取代者。
+     */
+    private Map<String, String> supersededBy(Ledger ledger, List<SiConsoleWriteSummary> shown) {
+        Map<DecisionKey, String> firstIngested = new HashMap<>();
+        for (SiConsoleWriteSummary row : queries.findDecideRows()) {
+            DecisionKey key = DecisionKey.of(row);
+            String ref = row.auditRef().toString();
+            if (key != null && ledger.ingested().contains(ref)) {
+                firstIngested.putIfAbsent(key, ref);
+            }
+        }
+        Map<String, String> superseded = new HashMap<>();
+        for (SiConsoleWriteSummary row : shown) {
+            String ref = row.auditRef().toString();
+            DecisionKey key = DecisionKey.of(row);
+            if (row.kind() == SiWriteKind.DECIDE && key != null && !ledger.ingested().contains(ref)) {
+                String by = firstIngested.get(key);
+                if (by != null) {
+                    superseded.put(ref, by);
+                }
+            }
+        }
+        return superseded;
     }
 
     // ── 回填與 orphan ─────────────────────────────────────────────────────────────────────────

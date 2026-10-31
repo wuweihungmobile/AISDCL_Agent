@@ -6,6 +6,7 @@ import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedExcepti
 import com.aisdlc.console.application.port.out.SiAuditRefSource;
 import com.aisdlc.console.application.port.out.SiConsoleWriteRepository;
 import com.aisdlc.console.application.port.out.SiWriteSettings;
+import com.aisdlc.console.domain.exception.ConflictException;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.ForbiddenException;
 import com.aisdlc.console.domain.exception.ServiceUnavailableException;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -31,9 +33,14 @@ import java.util.function.Consumer;
  * SelfImproving 寫入載體的用例（TCS-SelfImprovingDecide-P2b W10、W11、W15）。<b>整個 backend 唯一</b>呼叫 {@code AgentBridge.siWrite…} 與
  * {@link SiConsoleWriteRepository}（寫入埠）的類別（ArchUnit 鎖住）。
  *
- * <p>流程（決定、新增觀察、關閉觀察同一條）：授權 → 停用檢查 → 輸入閘 → 取 {@code auditRef}（{@link SiAuditRefSource}）與 {@code time}
- * → {@link SiAuditSigner} 組 body 並簽章 → <b>INSERT 稽核列</b> → 單次 Bridge 呼叫（外層字串原樣送出）→ 回收據。INSERT 先於 Bridge：
- * 寧可有列無檔、不要有檔無列（PRD §9.3）。<b>不重試</b>；重送一律新 {@code auditRef}。
+ * <p>流程（決定、新增觀察、關閉觀察同一條）：授權 → 停用檢查 → 輸入閘 →（<b>只有帶卡面 digest 的六個決定動詞</b>：重送閘，見下）→ 取 {@code auditRef}
+ * （{@link SiAuditRefSource}）與 {@code time} → {@link SiAuditSigner} 組 body 並簽章 → <b>INSERT 稽核列</b> → 單次 Bridge 呼叫（外層字串原樣送出）→
+ * 回收據。INSERT 先於 Bridge：寧可有列無檔、不要有檔無列（PRD §9.3）。<b>不重試</b>；重送一律新 {@code auditRef}（帶 digest 的決定動詞除外：已被重送閘擋下）。
+ *
+ * <p><b>重送閘</b>（TCS-SelfImprovingDecideDedupe W-D1）：approve、reject、return、promote、decline-promote、ack-handoff 在輸入閘之後、取 ref 之前，查表內是否已有
+ * 同 subject＋digest＋dkind 的 decide 列（不論是否已入帳、哪個帳號送的、理由是否相同）；有＝409 {@code si_decision_duplicate}，<b>零副作用</b>（不取 ref、不簽章、
+ * 不寫資料庫、不呼叫 Bridge）。rollback、unblock、resume 沒有卡面 digest 可綁，不受此閘（重送的合法性由主機端 decide 的前提態判）；obs-add、obs-close 亦不經此閘。
+ * 閘是「檢查後才 INSERT」，沒有資料庫唯一約束，並行請求仍可能各落一列——殘餘由對帳讀面的取代判定（{@code SiReconcileService}）標示。
  *
  * <p><b>補償</b>：Bridge 明確拒絕（任何 4xx、503）、其他 5xx、連線階段失敗、1xx／3xx（請求沒有被處理）＝確定沒有落檔→刪除剛寫的那一列；
  * 讀取逾時、送出後連線重設或提前 EOF、2xx 但本文無法解析＝結果不明（檔可能已落地）→<b>保留</b>該列並在錯誤的 {@code details.outcomeUnknown}
@@ -45,6 +52,8 @@ import java.util.function.Consumer;
 public class SiConsoleWriteService implements SiWriteUseCase {
 
     private static final Logger LOG = LoggerFactory.getLogger(SiConsoleWriteService.class);
+
+    private static final String DIGEST_PREFIX = "sha256:";
 
     private final SiWriteSettings settings;
     private final SiAuditSigner signer;
@@ -65,6 +74,7 @@ public class SiConsoleWriteService implements SiWriteUseCase {
     public Receipt decide(String user, String id, DecideInput input) {
         authorize(user);
         SiDecideCommand command = SiWriteGates.decide(user, id, input);
+        rejectResend(command);
         return write(SiWriteKind.DECIDE, user, command.subject(), command.digest(),
                 (ref, time) -> signer.decideBody(ref, user, time, command),
                 audit -> bridge.siWriteDecide(command.subject(), audit));
@@ -119,6 +129,36 @@ public class SiConsoleWriteService implements SiWriteUseCase {
 
     private static ServiceUnavailableException disabled(String cause, String message) {
         return new ServiceUnavailableException(message, ErrorReasons.SI_WRITE_DISABLED, Map.of("cause", cause));
+    }
+
+    // ── 決定的重送閘（輸入閘之後、取 ref 之前；TCS-SelfImprovingDecideDedupe W-D1）──────────────────────
+
+    /**
+     * 帶卡面 digest 的決定動詞（{@code digest} 非 null）：表內已有同 subject＋digest＋dkind 的 decide 列＝409 {@link ErrorReasons#SI_DECISION_DUPLICATE}。
+     * 沒有 digest 的動詞（rollback、unblock、resume）直接放行。訊息中性（先前那一列可能已入帳也可能尚未），要求以對帳面板為準。
+     */
+    private void rejectResend(SiDecideCommand command) {
+        if (command.digest() == null) {
+            return;
+        }
+        List<UUID> existing = repository.findDecideAuditRefs(command.subject(), command.digest(), command.dkind());
+        if (existing.isEmpty()) {
+            return;
+        }
+        UUID first = existing.get(0);                          // SQL 已依 time、audit_ref 升冪排好：取第一個，不在 Java 端重排
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("existingAuditRef", first.toString());
+        details.put("dkind", command.dkind());
+        details.put("subject", command.subject());
+        details.put("digest8", digest8(command.digest()));    // 受閘動詞的 digest 恆非 null（輸入閘已驗格式），故此鍵恆在
+        throw new ConflictException("同一張卡的同一決定（" + command.dkind() + "）已有稽核檔（稽核編號 " + first
+                + "），不重複簽發；請以對帳面板為準", ErrorReasons.SI_DECISION_DUPLICATE, details);
+    }
+
+    /** digest 去掉 {@code sha256:} 前綴後的前 8 碼（輸入閘保證格式為 {@code sha256:} 接 64 位十六進位）。 */
+    private static String digest8(String digest) {
+        String hex = digest.startsWith(DIGEST_PREFIX) ? digest.substring(DIGEST_PREFIX.length()) : digest;
+        return hex.substring(0, Math.min(8, hex.length()));
     }
 
     // ── 寫入主流程 ──────────────────────────────────────────────────────────────────────────

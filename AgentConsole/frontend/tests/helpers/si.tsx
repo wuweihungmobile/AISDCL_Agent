@@ -175,18 +175,32 @@ export function signInAs(role: Role = "OPERATOR", username = "operator"): void {
   saveSession({ accessToken: "a", refreshToken: "r", expiresAt: Date.now() + 1e6, role, username });
 }
 
-/** `console-writes` 的一項：只給要緊的四欄，其餘為固定的合理值（待入帳、admin 寫的、時間與金鑰為黃金檔的值）。 */
-export function writeItem(item: { auditRef: string; kind: SiConsoleWrite["kind"]; subjectId?: string | null; ingested?: boolean | null; time?: string }): SiConsoleWrite {
+/**
+ * `console-writes` 的一項：只給要緊的幾欄，其餘為固定的合理值（待入帳、admin 寫的、時間與金鑰為黃金檔的值）。
+ * `dkind`、`digest`、`supersededBy` 預設為 null（鍵恆在——與 backend 的十一鍵契約一致）；決定重送去重（TCS-SelfImprovingDecideDedupe）的案例才需要給。
+ */
+export function writeItem(item: {
+  auditRef: string;
+  kind: SiConsoleWrite["kind"];
+  subjectId?: string | null;
+  ingested?: boolean | null;
+  time?: string;
+  dkind?: string | null;
+  digest?: string | null;
+  supersededBy?: string | null;
+}): SiConsoleWrite {
   return {
     auditRef: item.auditRef,
     kind: item.kind,
+    dkind: item.dkind === undefined ? null : item.dkind,
     user: "admin",
     role: "ADMIN",
     time: item.time ?? "2026-10-24T14:30:15Z",
     subjectId: item.subjectId === undefined ? (item.kind === "obs-add" ? null : item.kind === "decide" ? "PROP-SI-004" : "OBS-SI-005") : item.subjectId,
-    digest: null,
+    digest: item.digest === undefined ? null : item.digest,
     keyId: "f076edf0",
     ingested: item.ingested === undefined ? false : item.ingested,
+    supersededBy: item.supersededBy === undefined ? null : item.supersededBy,
   };
 }
 

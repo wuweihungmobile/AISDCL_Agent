@@ -3,6 +3,7 @@ package com.aisdlc.console.adapter.in.web;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.aisdlc.console.application.port.out.SiConsoleWriteRepository;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.support.AbruptCloseServer;
 import com.aisdlc.console.support.AbstractSiWriteIT;
@@ -11,6 +12,7 @@ import com.aisdlc.console.support.SiWriteSeam;
 import com.aisdlc.minibridge.MiniBridge.Si.WriteReply;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import tools.jackson.databind.JsonNode;
@@ -21,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -304,13 +307,22 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         }
         for (String account : List.of("admin", "ops_admin")) {
             String token = account.equals("admin") ? admin() : adminAs(account);
+            // 兩個帳號送不同動詞：重送閘不看帳號（TCS-SelfImprovingDecideDedupe 已知邊界 4），同一決定由第二個帳號再送會被 409 擋下；
+            // 這裡驗的仍是「名單內的 Admin 皆放行」，所以讓兩邊各下一個不同的決定
+            Map<String, Object> decision = account.equals("admin") ? approve() : reject();
 
             assertThat(post(token, "/observations/validate", observation()).status()).as("%s validate", account).isEqualTo(200);
-            assertThat(post(token, "/proposals/" + PROP + "/decide", approve()).status()).as("%s decide", account).isEqualTo(201);
+            assertThat(post(token, "/proposals/" + PROP + "/decide", decision).status()).as("%s decide", account).isEqualTo(201);
             assertThat(post(token, "/observations", observation()).status()).as("%s obs-add", account).isEqualTo(201);
             assertThat(post(token, "/observations/" + OBS + "/close", closeDecided()).status()).as("%s close", account).isEqualTo(201);
         }
         assertThat(writeRows()).extracting(row -> row.get("user")).containsOnly("admin", "ops_admin");
+
+        Resp otherAccount = post(adminAs("ops_admin"), "/proposals/" + PROP + "/decide", approve());
+
+        assertThat(otherAccount.status()).as("閘不看帳號：admin 已送過的 approve，ops_admin 再送同一決定也被擋（表 M-G 情境 9）").isEqualTo(409);
+        assertThat(otherAccount.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(writeCount()).as("被擋的重送不留列").isEqualTo(6);
 
         Resp capitalised = post(adminAs("Admin"), "/proposals/" + PROP + "/decide", approve());
 
@@ -428,17 +440,21 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         try {
             refs.refs(ref("b2", 1), ref("b2", 2), ref("b2", 3), ref("b2", 4));
             readTimeout.cap(Duration.ofSeconds(1));
-            texts.addAll(capture(post(admin(), "/proposals/" + PROP + "/decide", approve())));          // 成功寫入
+            // 四次各用不同的動詞：同一決定的重送會被重送閘（409）擋在 Bridge 之前（TCS-SelfImprovingDecideDedupe §4 第 3 項），
+            // 而這個 AT 要四種結果（成功、Bridge 403、Bridge 503、逾時）都真的走到 Bridge
+            Map<String, Map<String, Object>> verbs = allDecides();
+            String decide = "/proposals/" + PROP + "/decide";
+            texts.addAll(capture(post(admin(), decide, verbs.get("approve"))));                         // 成功寫入
 
             MINI.si.writeReply = WriteReply.error(403, "si_write_forbidden");
-            texts.addAll(capture(post(admin(), "/proposals/" + PROP + "/decide", approve())));          // Bridge 403
+            texts.addAll(capture(post(admin(), decide, verbs.get("reject"))));                          // Bridge 403
 
             MINI.si.writeReply = WriteReply.error(503, "si_unavailable", "cause", "audit_write_failed", "detail", "errno=28; OSError");
-            texts.addAll(capture(post(admin(), "/proposals/" + PROP + "/decide", approve())));          // Bridge 503
+            texts.addAll(capture(post(admin(), decide, verbs.get("return"))));                          // Bridge 503
 
             MINI.si.writeReply = null;
             MINI.si.writeDelayMillis = 3_000;
-            texts.addAll(capture(post(admin(), "/proposals/" + PROP + "/decide", approve())));          // 逾時
+            texts.addAll(capture(post(admin(), decide, verbs.get("promote"))));                         // 逾時
         } finally {
             root.detachAppender(appender);
         }
@@ -628,5 +644,353 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         String secondRef = outer(1).get("audit_ref").asString();
         assertThat(firstRef).isNotEqualTo(secondRef);
         assertThat(writeRows()).hasSize(1).first().satisfies(row -> assertThat(row).containsEntry("audit_ref", secondRef));
+    }
+
+    // ══ 決定重送閘與 dkind（TCS-SelfImprovingDecideDedupe：AT-951-1-1、1-2、1-E-1～1-E-4、2-E-1；W-D1、W-D2）══════════════════════════════════
+    // 為什麼重要：OBS-SI-348——同一張卡的同一決定被連送四次，落四份稽核檔，主機端只能入帳一份，其餘三份在對帳面板永遠顯示待入帳。閘擋錯方向的代價不對稱：
+    // 該擋的沒擋＝誤導再現；不該擋的擋了＝掌舵者的合法決定（入帳前改變主意、同一 RUN 再度暫停後的第二次恢復）被封死。所以逐項驗：擋什麼（六個帶 digest 的動詞）、
+    // 不擋什麼（不同 dkind、digest、subject、無 digest 的動詞、obs-add、obs-close、validate）、排在哪裡（授權與輸入閘之後）、擋下時的零副作用，以及與補償、結果不明的互動。
+
+    private static final String DECIDE = "/proposals/" + PROP + "/decide";
+
+    @Autowired
+    private SiConsoleWriteRepository writeRepository;
+
+    // ── AT-951-1-1：六個帶 digest 的動詞重送皆 409，details 恰四鍵，零副作用 ─────────────────────────────
+
+    @Test
+    void AT_951_1_1_aResendOfEachOfTheSixDigestVerbsGets409WithExactlyFourDetailKeysAndNoSideEffect() {
+        List<String> verbs = List.of("approve", "reject", "return", "promote", "decline-promote", "ack-handoff");
+        for (int i = 1; i <= verbs.size(); i++) {
+            refs.refs(ref("d1", i));
+        }
+        Map<String, Map<String, Object>> decides = allDecides();
+        Map<String, String> firstReceipts = new LinkedHashMap<>();
+        for (String dkind : verbs) {
+            Resp first = post(admin(), DECIDE, decides.get(dkind));
+
+            assertThat(first.status()).as("%s 首次", dkind).isEqualTo(201);
+            firstReceipts.put(dkind, first.<String>read("$.data.auditRef"));
+        }
+        List<Map<String, Object>> rowsBefore = writeRows();
+        assertThat(rowsBefore).as("六個動詞各落一列").hasSize(6);
+        int bridgeWritesBefore = MINI.si.writes.size();
+        List<String> bridgeRequestsBefore = MINI.requests();
+        int takenBefore = refs.taken();
+
+        for (String dkind : verbs) {
+            Map<String, Object> resend = new LinkedHashMap<>(decides.get(dkind));
+            if (resend.containsKey("reason")) {
+                resend.put("reason", "重送時改過的理由：" + dkind);   // 理由不同也擋：閘只看 subject＋digest＋dkind
+            }
+            if (resend.containsKey("reasonClass")) {
+                resend.put("reasonClass", "未說明");
+            }
+
+            Resp resp = post(admin(), DECIDE, resend);
+
+            assertThat(resp.status()).as("%s 重送", dkind).isEqualTo(409);
+            assertThat(resp.<String>read("$.reason")).as(dkind).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+            assertThat(resp.<String>read("$.details.existingAuditRef")).as("%s：existingAuditRef 為首次收據的 auditRef", dkind)
+                    .isEqualTo(firstReceipts.get(dkind));
+            Map<String, Object> details = resp.read("$.details");
+            assertThat(details.keySet()).as("%s：details 恰四鍵", dkind).containsExactlyInAnyOrder("existingAuditRef", "dkind", "subject", "digest8");
+            assertThat(details).as(dkind).containsEntry("digest8", "d21ae6f5").containsEntry("dkind", dkind).containsEntry("subject", PROP);
+            assertThat(resp.<String>read("$.message")).as(dkind).contains("請以對帳面板為準");
+        }
+
+        assertThat(writeRows()).as("重送後六列逐位元組不變").isEqualTo(rowsBefore);
+        assertThat(MINI.si.writes).as("Bridge 的寫入請求筆數不變").hasSize(bridgeWritesBefore);
+        assertThat(MINI.requests()).as("Bridge 的請求（含 GET）完全不變").isEqualTo(bridgeRequestsBefore);
+        assertThat(refs.taken()).as("ref 來源取用次數不變").isEqualTo(takenBefore);
+    }
+
+    // ── AT-951-1-2：不論先前那一列是否已入帳都擋，且重送閘不呼叫 Bridge ───────────────────────────────
+
+    @Test
+    void AT_951_1_2_theGateRejectsWhetherOrNotThePriorRowIsIngestedAndNeverCallsTheBridge() {
+        refs.refs(ref("d1", 1), ref("d1", 2));
+        Resp first = post(admin(), DECIDE, approve());
+        assertThat(first.status()).isEqualTo(201);
+        String r1 = first.<String>read("$.data.auditRef");
+        MINI.si.payloads.put("events", export("events", List.of(event(7, "dec", "console", r1, "prop", PROP)), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+        Resp reconcile = api.get(viewer(), SI + "/console-writes");
+        assertThat(reconcile.<Boolean>read("$.data.items[0].ingested")).as("情境前提：R1 已入帳（帳本有同 auditRef 的 dec）").isTrue();
+        List<String> bridgeRequestsBefore = MINI.requests();
+        int bridgeWritesBefore = MINI.si.writes.size();
+        int takenBefore = refs.taken();
+        List<Map<String, Object>> rowsBefore = writeRows();
+
+        Resp resend = post(admin(), DECIDE, approve());
+
+        assertThat(resend.status()).isEqualTo(409);
+        assertThat(resend.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(resend.<String>read("$.details.existingAuditRef")).isEqualTo(r1);
+        assertThat(writeRows()).as("表內仍恰一列").hasSize(1).isEqualTo(rowsBefore);
+        assertThat(MINI.requests()).as("重送前後沒有任何 GET events、GET observations 或 POST").isEqualTo(bridgeRequestsBefore);
+        assertThat(MINI.si.writes).hasSize(bridgeWritesBefore);
+        assertThat(refs.taken()).isEqualTo(takenBefore);
+    }
+
+    // ── AT-951-1-E-1：不該被擋的請求照常受理 ────────────────────────────────────────────────────────────
+
+    @Test
+    void AT_951_1_E_1_requestsThatAreNotTheSameDecisionAreAcceptedAsUsual() {
+        for (int i = 1; i <= 8; i++) {
+            refs.refs(ref("d1", i));
+        }
+        assertThat(post(admin(), DECIDE, approve()).status()).as("起手的 approve").isEqualTo(201);
+
+        assertThat(post(admin(), DECIDE, reject()).status()).as("(a) 同 subject、同 digest、不同 dkind").isEqualTo(201);
+        assertThat(post(admin(), DECIDE, map("dkind", "approve", "digest", D1)).status()).as("(b) 同 subject、同 dkind、不同 digest").isEqualTo(201);
+        assertThat(post(admin(), "/proposals/" + PROP5 + "/decide", approve()).status()).as("(c) 不同 subject").isEqualTo(201);
+        assertThat(post(admin(), "/observations", observation()).status()).as("(d) obs-add 第一次").isEqualTo(201);
+        assertThat(post(admin(), "/observations", observation()).status()).as("(d) obs-add 同本文第二次").isEqualTo(201);
+        assertThat(post(admin(), "/observations/" + OBS + "/close", closeDecided()).status()).as("(e) obs-close 第一次").isEqualTo(201);
+        assertThat(post(admin(), "/observations/" + OBS + "/close", closeDecided()).status()).as("(e) obs-close 同本文第二次").isEqualTo(201);
+
+        assertThat(writeCount()).as("表內列數為 8（含起手的 approve）").isEqualTo(8);
+        assertThat(MINI.si.writes).as("到這裡 Bridge 恰收到 8 個寫入（預檢另計）").hasSize(8);
+        assertThat(post(admin(), "/observations/validate", observation()).status()).as("(f) validate 第一次").isEqualTo(200);
+        assertThat(post(admin(), "/observations/validate", observation()).status()).as("(f) validate 第二次").isEqualTo(200);
+        assertThat(writeCount()).as("預檢不寫表").isEqualTo(8);
+        assertThat(MINI.si.writes).as("預檢也記在迷你 Bridge 的 writes，故總數為 10").hasSize(10);
+    }
+
+    // ── AT-951-1-E-2：補償刪列後可重送；結果不明而保留的列擋住重送（已知邊界）─────────────────────────────
+
+    @Test
+    void AT_951_1_E_2_aCompensatedRowDoesNotBlockAResendButARowKeptForAnUnknownOutcomeDoes() {
+        for (int i = 1; i <= 3; i++) {
+            refs.refs(ref("d1", i));
+        }
+        MINI.si.writeReply = WriteReply.error(503, "si_unavailable", "cause", "audit_write_failed", "detail", "errno=28; OSError");
+        Resp refused = post(admin(), DECIDE, approve());
+        MINI.si.writeReply = null;
+        assertThat(refused.status()).as("Bridge 確定未落檔").isEqualTo(503);
+        assertThat(writeCount()).as("補償刪列：表內零列").isZero();
+
+        Resp again = post(admin(), DECIDE, approve());
+
+        assertThat(again.status()).as("補償後重送同一個 approve").isEqualTo(201);
+        assertThat(writeRows()).as("表內恰一列，且為第二次取的 ref").hasSize(1).first()
+                .satisfies(row -> assertThat(row).containsEntry("audit_ref", ref("d1", 2)));
+
+        readTimeout.cap(Duration.ofSeconds(1));
+        MINI.si.writeDelayMillis = 3_000;
+        Resp timedOut = post(admin(), DECIDE, promote());
+        MINI.si.writeDelayMillis = 0;
+        readTimeout.reset();
+        assertThat(timedOut.status()).as("讀取逾時").isEqualTo(504);
+        assertThat(timedOut.<Boolean>read("$.details.outcomeUnknown")).isTrue();
+        assertThat(writeCount()).as("promote 的列因結果不明而保留：表內共二列").isEqualTo(2);
+        int bridgeWritesBefore = MINI.si.writes.size();
+        int takenBefore = refs.taken();
+
+        Resp resend = post(admin(), DECIDE, promote());
+
+        assertThat(resend.status()).as("結果不明而保留的列擋住重送（已知邊界 1）").isEqualTo(409);
+        assertThat(resend.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(resend.<String>read("$.details.existingAuditRef")).isEqualTo(ref("d1", 3));
+        assertThat(writeCount()).isEqualTo(2);
+        assertThat(MINI.si.writes).as("重送前後 Bridge 的寫入筆數相同").hasSize(bridgeWritesBefore);
+        assertThat(refs.taken()).isEqualTo(takenBefore);
+    }
+
+    private static Map<String, Object> promote() {
+        return allDecides().get("promote");
+    }
+
+    // ── AT-951-1-E-3：重送閘排在授權、停用與輸入閘之後 ──────────────────────────────────────────────────
+
+    @Test
+    void AT_951_1_E_3_theGateComesAfterAuthorizationTheDisabledCheckAndTheInputGate() {
+        refs.refs(ref("d1", 1));
+        assertThat(post(admin(), DECIDE, approve()).status()).as("起手的 approve").isEqualTo(201);
+        int takenBefore = refs.taken();
+        long rowsBefore = writeCount();
+
+        Resp outsider = post(adminAs("outsider"), DECIDE, approve());
+        Resp viewer = post(viewer(), DECIDE, approve());
+        Resp operator = post(operator(), DECIDE, approve());
+        Resp anonymous = post(null, DECIDE, approve());
+        settings.noKey();
+        Resp noKey = post(admin(), DECIDE, approve());
+        settings.reset();
+        settings.noToken();
+        Resp noToken = post(admin(), DECIDE, approve());
+        settings.reset();
+        Resp withReason = post(admin(), DECIDE, map("dkind", "approve", "digest", D0, "reason", "多餘的理由"));
+
+        assertThat(outsider.status()).as("(a) 名單外的 Admin").isEqualTo(403);
+        assertThat(outsider.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_WRITE_FORBIDDEN);
+        assertThat(viewer.status()).as("(b) Viewer").isEqualTo(403);
+        assertThat(viewer.<String>read("$.reason")).isEqualTo(ErrorReasons.ACCESS_DENIED);
+        assertThat(operator.status()).as("(c) Operator").isEqualTo(403);
+        assertThat(operator.<String>read("$.reason")).isEqualTo(ErrorReasons.ACCESS_DENIED);
+        assertThat(anonymous.status()).as("(d) 無 token").isEqualTo(401);
+        assertThat(noKey.status()).as("(e) 金鑰環為空").isEqualTo(503);
+        assertThat(noKey.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_WRITE_DISABLED);
+        assertThat(noKey.<String>read("$.details.cause")).isEqualTo("audit_key_unset");
+        assertThat(noToken.status()).as("(f) Bridge 權杖為空").isEqualTo(503);
+        assertThat(noToken.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_WRITE_DISABLED);
+        assertThat(noToken.<String>read("$.details.cause")).isEqualTo("bridge_token_unset");
+        assertThat(withReason.status()).as("(g) 本文違規：輸入閘先於重送閘").isEqualTo(422);
+        assertThat(withReason.<String>read("$.reason")).isEqualTo("invalid_request");
+        assertThat(violationFields(withReason)).contains("reason");
+        for (Resp resp : List.of(outsider, viewer, operator, anonymous, noKey, noToken, withReason)) {
+            assertThat(resp.status()).as("全程沒有 409").isNotEqualTo(409);
+        }
+        assertThat(writeCount()).as("表內列數不變").isEqualTo(rowsBefore);
+        assertThat(refs.taken()).as("ref 取用次數不變").isEqualTo(takenBefore);
+    }
+
+    // ── AT-951-1-E-4：無 digest 的動詞不受重送閘 ────────────────────────────────────────────────────────
+
+    @Test
+    void AT_951_1_E_4_verbsWithoutADigestAreNotGatedSoResumeRollbackAndUnblockMayBeSentTwice() {
+        for (int i = 1; i <= 6; i++) {
+            refs.refs(ref("d1", i));
+        }
+        Map<String, Map<String, Object>> decides = allDecides();
+        String resume = "/proposals/" + RUN + "/decide";
+        Map<String, String> auditRefs = new LinkedHashMap<>();
+
+        Resp resume1 = post(admin(), resume, decides.get("resume"));
+        Resp resume2 = post(admin(), resume, map("dkind", "resume", "reason", "同一 RUN 再度暫停後的第二次恢復"));
+        Resp rollback1 = post(admin(), DECIDE, decides.get("rollback"));
+        Resp rollback2 = post(admin(), DECIDE, decides.get("rollback"));
+        Resp unblock1 = post(admin(), DECIDE, decides.get("unblock"));
+        Resp unblock2 = post(admin(), DECIDE, decides.get("unblock"));
+
+        Map<String, Resp> all = new LinkedHashMap<>();
+        all.put("(a) resume 第一次", resume1);
+        all.put("(a) resume 第二次（理由不同）", resume2);
+        all.put("(b) rollback 第一次", rollback1);
+        all.put("(b) rollback 第二次", rollback2);
+        all.put("(c) unblock 第一次", unblock1);
+        all.put("(c) unblock 第二次", unblock2);
+        all.forEach((label, resp) -> {
+            assertThat(resp.status()).as(label).isEqualTo(201);
+            auditRefs.put(label, resp.<String>read("$.data.auditRef"));
+        });
+        assertThat(writeCount()).as("表內列數為 6").isEqualTo(6);
+        assertThat(MINI.si.writes).as("每次都落檔：Bridge 恰 6 筆").hasSize(6);
+        assertThat(refs.taken()).as("每次都取新 ref").isEqualTo(6);
+        assertThat(auditRefs.values()).as("每個請求的 auditRef 都不同（含兩次 resume）").doesNotHaveDuplicates();
+        assertThat(resume1.<String>read("$.data.auditRef")).isNotEqualTo(resume2.<String>read("$.data.auditRef"));
+    }
+
+    // ── AT-951-2-E-1：findDecideAuditRefs 的查詢語意 ────────────────────────────────────────────────────
+
+    @Test
+    void AT_951_2_E_1_findDecideAuditRefsOrdersByTimeThenByStringOrderAndMatchesOnlyTheExactDecision() {
+        String x1 = ref("d2", 1);
+        String t09 = "2026-10-31T09:00:00Z";
+        String t10 = "2026-10-31T10:00:00Z";
+        // 插入次序故意是 X3、X1、X2：回傳順序不得取決於插入次序
+        insertDecide(UT2, PROP, D0, "promote", t10);
+        insertDecide(x1, PROP, D0, "promote", t09);
+        insertDecide(UT1, PROP, D0, "promote", t10);
+        // 干擾列：同 subject 與 digest 但不同 dkind／不同 digest／不同 subject／非 decide 列（body 含 dkind 也不算）／沒有 digest 的 rollback
+        insertDecide(ref("d2", 11), PROP, D0, "approve", t09);
+        insertDecide(ref("d2", 12), PROP, D1, "promote", t09);
+        insertDecide(ref("d2", 13), PROP5, D0, "promote", t09);
+        insertAudit(ref("d2", 14), "obs-add", PROP, D0, "{\"dkind\":\"promote\"}", t09);
+        insertDecide(ref("d2", 21), PROP, null, "rollback", t09);
+        insertDecide(ref("d2", 22), PROP, null, "rollback", t10);
+
+        List<String> promotes = toText(writeRepository.findDecideAuditRefs(PROP, D0, "promote"));
+        List<String> rollbacks = toText(writeRepository.findDecideAuditRefs(PROP, null, "rollback"));
+        List<String> rejects = toText(writeRepository.findDecideAuditRefs(PROP, D0, "reject"));
+        List<String> upper = toText(writeRepository.findDecideAuditRefs(PROP, D0, "PROMOTE"));
+
+        assertThat(promotes).as("(a) 依 time 升冪；同刻依小寫 UUID 字串序（UT1 在前、UT2 在後，不是 UUID.compareTo 的順序）")
+                .containsExactly(x1, UT1, UT2);
+        assertThat(rollbacks).as("(b) digest 為 null 一律不命中（即使表內有 digest 為 null 的 rollback 列）").isEmpty();
+        assertThat(rejects).as("(c) dkind 不同").isEmpty();
+        assertThat(upper).as("(d) dkind 區分大小寫").isEmpty();
+        assertThat(writeRepository.findDecideAuditRefs(PROP, D0, null)).as("dkind 為 null 回空清單").isEmpty();
+        assertThat(writeRepository.findDecideAuditRefs(null, D0, "promote")).as("subject 為 null 回空清單").isEmpty();
+    }
+
+    private static List<String> toText(List<UUID> refs) {
+        return refs.stream().map(UUID::toString).toList();
+    }
+
+    // ── AT-951-2-1：九個動詞經 API 寫入後，對帳讀面的 dkind 逐一相符 ───────────────────────────────────
+
+    @Test
+    void AT_951_2_1_afterTheNineVerbsAreWrittenEveryDecideItemCarriesItsDkindAndTheOtherKindsCarryNull() {
+        for (int i = 1; i <= 11; i++) {
+            refs.refs(ref("d3", i));
+        }
+        MINI.si.payloads.put("events", export("events", List.of(), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+        Map<String, String> dkindByRef = new LinkedHashMap<>();
+        for (Map.Entry<String, Map<String, Object>> verb : allDecides().entrySet()) {
+            Resp resp = post(admin(), "/proposals/" + idFor(verb.getKey()) + "/decide", verb.getValue());
+
+            assertThat(resp.status()).as(verb.getKey()).isEqualTo(201);
+            dkindByRef.put(resp.<String>read("$.data.auditRef"), verb.getKey());
+        }
+        Resp add = post(admin(), "/observations", observation());
+        Resp close = post(admin(), "/observations/" + OBS + "/close", closeDecided());
+        assertThat(add.status()).isEqualTo(201);
+        assertThat(close.status()).isEqualTo(201);
+
+        Resp resp = api.get(viewer(), SI + "/console-writes");
+
+        assertThat(resp.status()).isEqualTo(200);
+        List<Map<String, Object>> items = resp.read("$.data.items");
+        assertThat(items).as("九個決定加一個 obs-add 與一個 obs-close").hasSize(11);
+        List<String> digestVerbs = List.of("approve", "reject", "return", "promote", "decline-promote", "ack-handoff");
+        for (Map<String, Object> item : items) {
+            String auditRef = (String) item.get("auditRef");
+            if ("decide".equals(item.get("kind"))) {
+                String dkind = dkindByRef.get(auditRef);
+                assertThat(item.get("dkind")).as("decide 項 %s 的 dkind 等於寫入的動詞", auditRef).isEqualTo(dkind);
+                assertThat(item.get("digest")).as("%s 的 digest", dkind).isEqualTo(digestVerbs.contains(dkind) ? D0 : null);
+            } else {
+                assertThat(item).as("非 decide 項 %s：dkind 鍵仍在、值為 null", auditRef).containsEntry("dkind", null);
+            }
+        }
+        assertThat(items.stream().filter(item -> "decide".equals(item.get("kind"))).map(item -> (String) item.get("dkind")).toList())
+                .as("九個動詞一個不漏").containsExactlyInAnyOrderElementsOf(allDecides().keySet());
+        assertThat(resp.body()).as("body 與 mac 兩個鍵不出現在回應任何位置").doesNotContain("\"body\"").doesNotContain("\"mac\"");
+    }
+
+    // ── AT-951-2-E-2：看不出 dkind 的列與非 decide 列一律為 null ─────────────────────────────────────────
+
+    @Test
+    void AT_951_2_E_2_rowsWithoutADkindAndRowsThatAreNotDecideAreNullAndNeitherBreaksTheReadNorFoolsTheGate() {
+        String w1 = ref("d4", 1);
+        String w2 = ref("d4", 2);
+        String w3 = ref("d4", 3);
+        String w4 = ref("d4", 4);
+        insertWrite(w1, "decide", PROP, D0, "2026-10-31T09:01:00Z");                      // body 只有 fixture 鍵、沒有 dkind
+        insertAudit(w2, "obs-add", null, null, "{\"dkind\":\"approve\"}", "2026-10-31T09:02:00Z");   // 非 decide：body 含 dkind 也不取
+        insertWrite(w3, "obs-close", OBS, null, "2026-10-31T09:03:00Z");
+        insertDecide(w4, PROP, D0, "approve", "2026-10-31T09:04:00Z");
+        MINI.si.payloads.put("events", export("events", List.of(), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+
+        Resp resp = api.get(viewer(), SI + "/console-writes");
+        List<UUID> gate = writeRepository.findDecideAuditRefs(PROP, D0, "approve");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.reconcile.status")).isEqualTo("ok");
+        List<Map<String, Object>> items = resp.read("$.data.items");
+        assertThat(items).as("四列皆在 items").hasSize(4);
+        Map<String, Object> dkinds = new LinkedHashMap<>();
+        items.forEach(item -> dkinds.put((String) item.get("auditRef"), item.get("dkind")));
+        assertThat(dkinds.get(w1)).as("W1：沒有 dkind 鍵的 decide 列").isNull();
+        assertThat(dkinds.get(w2)).as("W2：kind 非 decide，不因 body 含 dkind 就取值").isNull();
+        assertThat(dkinds.get(w3)).as("W3：obs-close").isNull();
+        assertThat(dkinds.get(w4)).as("W4：有 dkind 的 decide 列").isEqualTo("approve");
+        assertThat(dkinds).as("四列的 dkind 鍵都在").containsKeys(w1, w2, w3, w4);
+        assertThat(toText(gate)).as("重送閘只認 W4：W1 沒有 dkind，不會被誤認為同一決定").containsExactly(w4);
+        assertThat(resp.body()).doesNotContain("\"body\"").doesNotContain("\"mac\"");
     }
 }

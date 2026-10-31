@@ -35,7 +35,8 @@ import java.security.Principal;
  *
  * <p>權限：GET＝VIEWER 以上（無有效 JWT＝401）；<b>四個 POST＝僅 ADMIN</b>（{@code SecurityConfig}：VIEWER／OPERATOR＝403 {@code ACCESS_DENIED}），
  * 帳號另須在 {@code console.si.deciders} 名單內（403 {@code si_write_forbidden}）；PUT／PATCH／DELETE 對 VIEWER＝403、對 OPERATOR／ADMIN＝405（沒有對映）。
- * 閘門序（POST）：401→403 ACCESS_DENIED→403 si_write_forbidden→503 si_write_disabled→422 invalid_request→執行。
+ * 閘門序（POST）：401→403 ACCESS_DENIED→403 si_write_forbidden→503 si_write_disabled→422 invalid_request→（只有 decide 的六個帶 digest 動詞：409
+ * si_decision_duplicate；TCS-SelfImprovingDecideDedupe W-D1）→執行。
  *
  * <p>GET 回應的 {@code data} 是 Bridge 的 export 物件原樣轉遞（欄名只經 snake_case→camelCase，值不動）；backend 不重算、不快取、不補欄。
  * 各 kind 的 {@code items} 欄位形狀見契約後繼檔 {@code API_Contract_SelfImproving_P1b.md §1.7}（端點總表為同檔 §1.0）。
@@ -50,11 +51,23 @@ public class SiController {
 
     private static final String SINCE = "游標（選填；整數 ≥0）：只回「ID 的數字部分」嚴格大於它的項目；取自上一頁回應的 nextSince。不合 → 400";
     private static final String LIMIT = "頁大小（選填；整數 ≥1）：不合 → 400；超過根層協定參數檔的上限時，CLI 失敗而回 503 si_unavailable（cause=nonzero_rc）";
-    private static final String WRITE_FLOW = "驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ "
+    private static final String WRITE_GATES = "驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ "
             + "寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；"
-            + "details.violations[{field,message}] 一次全列）→ 簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。"
+            + "details.violations[{field,message}] 一次全列）→ ";
+    private static final String WRITE_EXECUTION = "簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。"
             + "Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 "
-            + "details.outcomeUnknown 標明。重送一律新 auditRef。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。";
+            + "details.outcomeUnknown 標明。";
+    private static final String WRITE_RESULT = "201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。";
+    private static final String WRITE_FLOW = WRITE_GATES + WRITE_EXECUTION + "重送一律新 auditRef。" + WRITE_RESULT;
+    /**
+     * 決定端點的流程：輸入閘之後、取 auditRef 之前，帶卡面 digest 的六個動詞多一關重送閘（TCS-SelfImprovingDecideDedupe W-D1）；結果不明而保留的列也會擋住重送
+     * （補救是主機端依 PRD §9.3 補償刪列，409 訊息提示請以對帳面板為準）。
+     */
+    private static final String DECIDE_FLOW = WRITE_GATES + "（僅帶卡面 digest 的六個動詞 approve、reject、return、promote、decline-promote、ack-handoff 另有重送閘："
+            + "表內已有 kind=decide 且 subject、digest、dkind 都相同的列＝409 si_decision_duplicate，不論該列是否已入帳、哪個帳號送的、理由是否相同；"
+            + "details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、不呼叫 Bridge；同 subject 與 digest 但 dkind 不同照常受理；"
+            + "rollback、unblock、resume 沒有卡面 digest，不受此閘）→ " + WRITE_EXECUTION
+            + "重送一律新 auditRef（帶 digest 的六個動詞除外：同一決定已被重送閘擋下）。" + WRITE_RESULT;
 
     private final SiMirrorUseCase si;
     private final SiWriteUseCase write;
@@ -139,7 +152,7 @@ public class SiController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(operationId = "postSiDecide", summary = "對待決提案或暫停的運轉下決定（P2b；僅 ADMIN）",
             description = "九種動詞（approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；沒有批次核准）；"
-                    + "路徑 id 為 PROP 號（resume 為 RUN 號）。各動詞必填與禁止的欄位見 SiDecideRequest；多帶或缺帶一律 422。" + WRITE_FLOW)
+                    + "路徑 id 為 PROP 號（resume 為 RUN 號）。各動詞必填與禁止的欄位見 SiDecideRequest；多帶或缺帶一律 422。" + DECIDE_FLOW)
     public ApiResult<SiWriteReceiptResponse> decide(@Parameter(description = "提案 ID（例：PROP-SI-004）；resume 為運轉 ID（例：RUN-SI-001）")
                                                     @PathVariable String id, @RequestBody SiDecideRequest request,
                                                     Principal principal) {
@@ -178,10 +191,12 @@ public class SiController {
     @GetMapping("/console-writes")
     @Operation(operationId = "getSiConsoleWrites", summary = "Console 稽核列與 SelfImproving 帳本的對帳（P2b；VIEWER 以上可讀）",
             description = "回 Console 自己的稽核列（時間新到舊；不含 body 與 mac）與每列是否已入帳（ingested）、帳本中 carrier 為 console 而本表沒有對應列的項（orphans，"
-                    + "紅色警示來源）。對帳在 backend 一次全量做：以 Bridge 的 observations 與 events 各自 limit=500 迴圈取頁（上限各 20 頁）。"
+                    + "紅色警示來源）。每列另帶 dkind（decide 列的決定動詞，取自稽核 body；其餘為 null）與 supersededBy：待入帳的帶 digest 的決定列，"
+                    + "若同一決定（同對象、同 digest、同動詞）已有另一列入帳，就是那一列的 auditRef（已入帳者中 time 最早；取自整張表、與 limit 無關），ingested 仍為 false。"
+                    + "對帳在 backend 一次全量做：以 Bridge 的 observations 與 events 各自 limit=500 迴圈取頁（上限各 20 頁）。"
                     + "讀路徑唯一的副作用是把 obs-add 列的 subjectId（NULL）依帳本新列號回填（冪等）；Bridge 永遠只被呼叫 GET。量不到（Bridge 失敗、逾時、"
                     + "頁數超限）＝reconcile.status 為 NOT-EVALUABLE（reason：si_unavailable、bridge_unreachable、bridge_timeout、scan_cap_exceeded），"
-                    + "items 照回、ingested 與 orphans 為 null——不回空陣列、不冒充無待入帳。")
+                    + "items 照回、ingested、supersededBy 與 orphans 為 null——不回空陣列、不冒充無待入帳。")
     public ApiResult<SiConsoleWritesResponse> consoleWrites(
             @Parameter(description = "回傳的稽核列數（選填；整數 1～500，預設 100）：不合 → 400",
                     schema = @Schema(type = "integer", format = "int32", minimum = "1", maximum = "500", defaultValue = "100"))
