@@ -1341,6 +1341,7 @@ describe("AT_951_4_1 對帳面板：待入帳清單排除被取代列，被取�
     expect(pendingList.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING, "群組在待入帳清單之後").toBeTruthy();
     const toggle = within(group).getByTestId("si-superseded-toggle");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle, "一審 F-05：展開鈕以 aria-controls 指向它控制的清單（輔助技術靠它找到展開後的內容）").toHaveAttribute("aria-controls", "si-superseded-items");
     expect(toggle.textContent).toBe(SUPERSEDED_TITLE(2));
     expect(within(group).queryByTestId(`si-superseded-${AUDIT_S}`), "預設收合：沒有任何被取代列").toBeNull();
     expect(within(group).queryByTestId(`si-superseded-${AUDIT_S2}`)).toBeNull();
@@ -1348,6 +1349,9 @@ describe("AT_951_4_1 對帳面板：待入帳清單排除被取代列，被取�
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const controlled = panelEl.querySelector(`#${toggle.getAttribute("aria-controls") ?? "none"}`);
+    expect(controlled, "展開後 aria-controls 指向的元素存在").not.toBeNull();
+    expect(controlled?.querySelectorAll('li[data-testid^="si-superseded-"]').length, "它就是裝著被取代列的清單").toBe(2);
     expect(
       Array.from(group.querySelectorAll<HTMLElement>('li[data-testid^="si-superseded-"]')).map((li) => li.dataset.testid),
       "依 time 升冪",
@@ -1443,5 +1447,25 @@ describe("AT_951_4_E_2 被取代筆數不影響無待入帳的判定，orphans �
     expect(Array.from(list.querySelectorAll<HTMLElement>('[data-testid^="si-pending-"]')).map((li) => li.dataset.testid)).toEqual([`si-pending-${AUDIT_A}`]);
     expect(panel.queryByTestId("si-writes-empty")).toBeNull();
     expect(panel.getByTestId("si-superseded-toggle").textContent).toBe(SUPERSEDED_TITLE(2));
+  });
+
+  // 一審 F-04：(a)～(c) 都至少有一列被取代，分不出「被取代列數為 0 時不渲染群組」與「對帳 ok 就渲染群組」；
+  // 沒有任何被取代列時，群組、展開鈕與「已被取代」字樣都不該出現（否則畫面會出現「另有 0 筆已被取代」的空群組）
+  it("AT_951_4_E_2 (d) 對帳 ok、只有一般待入帳列、orphans 為空、沒有任何被取代列：沒有 si-superseded-list 與 si-superseded-toggle，面板文字不含已被取代", async () => {
+    renderSi({
+      role: "ADMIN",
+      username: "admin",
+      overrides: { "console-writes": () => writesData({ items: [writeItem({ auditRef: AUDIT_A, kind: "decide", dkind: "approve", digest: DIGEST_X })], orphans: [] }) },
+    });
+    const panelEl = await screen.findByTestId("si-writes-panel");
+    const panel = within(panelEl);
+    const list = await panel.findByTestId("si-pending-list");
+    expect(
+      Array.from(list.querySelectorAll<HTMLElement>('[data-testid^="si-pending-"]')).map((li) => li.dataset.testid),
+      "防反空轉：一般待入帳列確實渲染",
+    ).toEqual([`si-pending-${AUDIT_A}`]);
+    expect(panel.queryByTestId("si-superseded-list"), "被取代列數為 0：不渲染群組").toBeNull();
+    expect(panel.queryByTestId("si-superseded-toggle"), "也沒有展開鈕").toBeNull();
+    expect(panelEl.textContent ?? "", "面板文字不含已被取代").not.toContain("已被取代");
   });
 });

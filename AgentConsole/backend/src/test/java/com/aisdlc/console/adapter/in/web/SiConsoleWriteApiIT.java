@@ -321,7 +321,8 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         Resp otherAccount = post(adminAs("ops_admin"), "/proposals/" + PROP + "/decide", approve());
 
         assertThat(otherAccount.status()).as("閘不看帳號：admin 已送過的 approve，ops_admin 再送同一決定也被擋（表 M-G 情境 9）").isEqualTo(409);
-        assertThat(otherAccount.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(otherAccount.<String>read("$.reason")).as("線上 reason 字面（不比常數自己）").isEqualTo("si_decision_duplicate")
+                .isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
         assertThat(writeCount()).as("被擋的重送不留列").isEqualTo(6);
 
         Resp capitalised = post(adminAs("Admin"), "/proposals/" + PROP + "/decide", approve());
@@ -690,7 +691,8 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
             Resp resp = post(admin(), DECIDE, resend);
 
             assertThat(resp.status()).as("%s 重送", dkind).isEqualTo(409);
-            assertThat(resp.<String>read("$.reason")).as(dkind).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+            assertThat(resp.<String>read("$.reason")).as("%s：線上 reason 字面（不比常數自己）", dkind).isEqualTo("si_decision_duplicate")
+                    .isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
             assertThat(resp.<String>read("$.details.existingAuditRef")).as("%s：existingAuditRef 為首次收據的 auditRef", dkind)
                     .isEqualTo(firstReceipts.get(dkind));
             Map<String, Object> details = resp.read("$.details");
@@ -725,12 +727,47 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         Resp resend = post(admin(), DECIDE, approve());
 
         assertThat(resend.status()).isEqualTo(409);
-        assertThat(resend.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(resend.<String>read("$.reason")).as("線上 reason 字面（不比常數自己）").isEqualTo("si_decision_duplicate")
+                .isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
         assertThat(resend.<String>read("$.details.existingAuditRef")).isEqualTo(r1);
         assertThat(writeRows()).as("表內仍恰一列").hasSize(1).isEqualTo(rowsBefore);
         assertThat(MINI.requests()).as("重送前後沒有任何 GET events、GET observations 或 POST").isEqualTo(bridgeRequestsBefore);
         assertThat(MINI.si.writes).hasSize(bridgeWritesBefore);
         assertThat(refs.taken()).isEqualTo(takenBefore);
+
+        // 一審 F-02：existingAuditRef 是「time 最早、同刻 audit_ref 小寫字串序最小」的那一列——不是最後一列，也不是 UUID.compareTo 的最小者。
+        // 上面單一列的情境分不出「取第一個」與「取最後一個」，所以另植同一決定的多列（表內清空後各植一次；插入次序故意與期望次序相反）
+        String t09 = "2026-10-31T09:00:00Z";
+        String t10 = "2026-10-31T10:00:00Z";
+        String x1 = ref("d1", 11);
+        jdbc.execute("TRUNCATE console.si_console_writes");
+        insertDecide(UT2, PROP, D0, "approve", t10);
+        insertDecide(x1, PROP, D0, "approve", t09);
+        insertDecide(UT1, PROP, D0, "approve", t10);
+        assertResendRejectedPointingAt("子情境一（三列：X1 時間最早、X2＝UT1 與 X3＝UT2 同刻且晚於 X1）", x1);
+
+        jdbc.execute("TRUNCATE console.si_console_writes");
+        insertDecide(UT2, PROP, D0, "approve", t10);
+        insertDecide(UT1, PROP, D0, "approve", t10);
+        assertResendRejectedPointingAt("子情境二（只有同刻的 UT1、UT2 兩列：取小寫 UUID 字串序較小者，不是 UUID.compareTo 的順序）", UT1);
+    }
+
+    /** 表內已植好同一決定（approve、{@code PROP}、{@code D0}）的列時再送一次：409、{@code existingAuditRef} 為期望的那一列，且零副作用（列、Bridge 請求、ref 取用都不變）。 */
+    private void assertResendRejectedPointingAt(String scenario, String expectedExistingAuditRef) {
+        List<String> bridgeRequestsBefore = MINI.requests();
+        int bridgeWritesBefore = MINI.si.writes.size();
+        int takenBefore = refs.taken();
+        List<Map<String, Object>> rowsBefore = writeRows();
+
+        Resp resend = post(admin(), DECIDE, approve());
+
+        assertThat(resend.status()).as("%s：重送", scenario).isEqualTo(409);
+        assertThat(resend.<String>read("$.reason")).as("%s：線上 reason 字面", scenario).isEqualTo("si_decision_duplicate");
+        assertThat(resend.<String>read("$.details.existingAuditRef")).as("%s：existingAuditRef", scenario).isEqualTo(expectedExistingAuditRef);
+        assertThat(writeRows()).as("%s：表內列數與內容不變", scenario).isEqualTo(rowsBefore);
+        assertThat(MINI.requests()).as("%s：Bridge 零新增請求", scenario).isEqualTo(bridgeRequestsBefore);
+        assertThat(MINI.si.writes).as("%s：Bridge 寫入筆數不變", scenario).hasSize(bridgeWritesBefore);
+        assertThat(refs.taken()).as("%s：ref 取用次數不變", scenario).isEqualTo(takenBefore);
     }
 
     // ── AT-951-1-E-1：不該被擋的請求照常受理 ────────────────────────────────────────────────────────────
@@ -791,7 +828,8 @@ class SiConsoleWriteApiIT extends AbstractSiWriteIT {
         Resp resend = post(admin(), DECIDE, promote());
 
         assertThat(resend.status()).as("結果不明而保留的列擋住重送（已知邊界 1）").isEqualTo(409);
-        assertThat(resend.<String>read("$.reason")).isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
+        assertThat(resend.<String>read("$.reason")).as("線上 reason 字面（不比常數自己）").isEqualTo("si_decision_duplicate")
+                .isEqualTo(ErrorReasons.SI_DECISION_DUPLICATE);
         assertThat(resend.<String>read("$.details.existingAuditRef")).isEqualTo(ref("d1", 3));
         assertThat(writeCount()).isEqualTo(2);
         assertThat(MINI.si.writes).as("重送前後 Bridge 的寫入筆數相同").hasSize(bridgeWritesBefore);

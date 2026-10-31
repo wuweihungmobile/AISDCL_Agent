@@ -1,5 +1,6 @@
 package com.aisdlc.console.infrastructure.config;
 
+import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.model.config.ConfigCatalog;
 import com.aisdlc.console.support.AbstractApiIT;
 import com.aisdlc.console.support.ApiClient.Resp;
@@ -229,6 +230,9 @@ class OpenApiIT extends AbstractApiIT {
                 .as("必填集合不變：dkind 與 supersededBy 非必填").containsExactlyInAnyOrder("auditRef", "kind", "user", "role", "time", "keyId");
 
         String duplicate = "si_decision_duplicate";
+        // 一審 F-01：說明文字（ErrorResponseDocumentation、SiController）與前端 SI_REASONS 都寫死這個字面；常數若被改掉，線上 reason 與常數同步變、說明卻不會跟著變，
+        // 光比說明含字面看不出——所以另釘「常數值就是線上字面」
+        assertThat(ErrorReasons.SI_DECISION_DUPLICATE).as("ErrorReasons.SI_DECISION_DUPLICATE 的值就是線上 reason 字面").isEqualTo(duplicate);
         assertThat(docs.<String>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.responses['409'].description"))
                 .as("決定端點的 409 說明載明新 reason").contains(duplicate);
         assertThat(docs.<String>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.description"))

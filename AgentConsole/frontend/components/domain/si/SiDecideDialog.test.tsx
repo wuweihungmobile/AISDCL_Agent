@@ -372,6 +372,7 @@ describe("AT_933_1_E_2 失敗不關窗、原因逐字：403、409、503、422 �
 
 const ADMIN_PENDING = "b2000000-0000-4000-8000-0000000000b1";
 const DUP_REF = "b2000000-0000-4000-8000-0000000000b2";
+const REJECT_PENDING = "b2000000-0000-4000-8000-0000000000b3";
 const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === "/api/v1/si/console-writes");
 const callLog = (stub: SiStub) => stub.calls.map((c) => `${c.method} ${c.path}`);
 const DECIDE_PATH = `/api/v1/si/proposals/${PROP}/decide`;
@@ -439,6 +440,36 @@ describe("AT_951_5_1 決定對話框：已送出待入帳的同一決定使該�
     expect(optionOf(dialogTwo, "decline-promote"), "decline-promote 不停用").toBeEnabled();
     expect(within(dialogTwo).getByTestId("si-decide-dup")).toHaveTextContent(`已送出待入帳（稽核編號 ${DUP_REF}）`);
     expect(consoleWriteCalls(two.stub).length, "開啟對話框後 console-writes 的次數不變").toBe(readsBeforeTwo);
+  });
+
+  // 一審 F-03：上面兩個情境都只有單一動詞命中，分不出「全部命中的動詞都停用、各說明一則」與「只處理第一個命中」。
+  // 這裡同一張卡同時有 approve 與 reject 兩個待入帳列（入帳前掌舵者可以改變主意，兩個不同動詞各送過一次是合法的）：兩個選項都停用、說明恰兩則、各帶自己的稽核編號、其餘動詞不受影響。
+  // （單獨成一個 it 而不改上面的情境一：情境一要選 reject 送出，reject 一旦被停用就選不到。）
+  it("AT_951_5_1 情境三（proposed／loop、approve 與 reject 兩個動詞各有一列待入帳）：兩個選項都停用、return 不停用；si-decide-dup 恰兩則且各帶自己的稽核編號；開啟對話框後 console-writes 的次數不變", async () => {
+    const user = userEvent.setup();
+    const pendingRow = (auditRef: string, dkind: string) => writeItem({ auditRef, kind: "decide", subjectId: PROP, dkind, digest: D0, ingested: false, supersededBy: null });
+
+    const view = await listThenGoToProposals(user, GA, { "console-writes": () => writesOf([pendingRow(ADMIN_PENDING, "approve"), pendingRow(REJECT_PENDING, "reject")]) }, ADMIN_PENDING);
+    const readsBefore = consoleWriteCalls(view.stub).length;
+    expect(readsBefore, "防反空轉：面板確實發過一次對帳請求").toBe(1);
+    const dialog = await openDecideDialog(user);
+
+    expect(optionOf(dialog, "approve"), "approve 停用").toBeDisabled();
+    expect(optionOf(dialog, "reject"), "reject 也停用（多個動詞同時命中，不是只處理第一個）").toBeDisabled();
+    expect(optionOf(dialog, "return"), "沒有待入帳列的 return 不停用").toBeEnabled();
+    const dups = within(dialog).getAllByTestId("si-decide-dup");
+    expect(dups, "si-decide-dup 恰兩則：每個命中的動詞各一則").toHaveLength(2);
+    const texts = dups.map((el) => el.textContent ?? "");
+    for (const text of texts) expect(text).toContain("已送出待入帳（稽核編號 ");
+    expect(
+      texts.filter((t) => t.includes(`稽核編號 ${ADMIN_PENDING}）`)),
+      "approve 的稽核編號恰出現在一則",
+    ).toHaveLength(1);
+    expect(
+      texts.filter((t) => t.includes(`稽核編號 ${REJECT_PENDING}）`)),
+      "reject 的稽核編號恰出現在一則",
+    ).toHaveLength(1);
+    expect(consoleWriteCalls(view.stub).length, "開啟對話框後 console-writes 的次數不變（對話框沒有自己發讀取）").toBe(readsBefore);
   });
 });
 
@@ -527,6 +558,23 @@ describe("AT_951_5_E_1 無對帳快取或對帳量不到時不停用任何動詞
       {
         "console-writes": () =>
           writesOf([writeItem({ auditRef: ADMIN_PENDING, kind: "decide", subjectId: PROP, dkind: "approve", digest: D0, ingested: null })], {
+            orphans: null,
+            reconcile: { status: "NOT-EVALUABLE", reason: "bridge_timeout", backfilled: 0 },
+          }),
+      },
+      (panel) => within(panel).findByTestId("si-reconcile-ne"),
+    );
+  });
+
+  // 一審 F-05：(c) 的樣本列 ingested 為 null，本來就不符 pendingDecision 的 ingested 必須為 false，所以拿掉對話框對 reconcile.status 的防護，(c) 也不會紅。
+  // 這裡的樣本列刻意是契約外輸入（量不到時 backend 的 ingested 恆為 null）：其餘條件全命中、只有對帳狀態不是 ok，證明「不停用」由對帳狀態決定、不由資料決定。
+  it("AT_951_5_E_1 (d) 對帳回 NOT-EVALUABLE、items 含一列其餘條件全命中的 approve（ingested 為 false，契約外輸入）：不停用任何動詞、沒有 si-decide-dup；送出同樣只靠後端 409", async () => {
+    const user = userEvent.setup();
+    await runScenario(
+      user,
+      {
+        "console-writes": () =>
+          writesOf([writeItem({ auditRef: ADMIN_PENDING, kind: "decide", subjectId: PROP, dkind: "approve", digest: D0, ingested: false, supersededBy: null })], {
             orphans: null,
             reconcile: { status: "NOT-EVALUABLE", reason: "bridge_timeout", backfilled: 0 },
           }),
