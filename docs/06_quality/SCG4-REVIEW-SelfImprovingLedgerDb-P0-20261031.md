@@ -80,4 +80,4 @@ TCS〈勘誤一〉1-1～1-12（對應 F-05、F-04、F-03、F-02、F-01、F-12、
 - 勘誤套用（主控，凍結後修訂路由第 4 點）：TCS 檔尾〈勘誤一〉1-1～1-12；PRD 不變。新 digest 由 `spec-refreeze` 記入（見下）。
 - FSM 鍵 `monorepo-si-ledgerdb-p0`（主控依凍結常態規則執行）：IMPLEMENTATION → `transition --to PR_REVIEW` → `gate PR_REVIEW PASS`（→ RTM_VERIFY；報告＝本檔）→ RTM `docs/06_quality/RTM-SelfImprovingLedgerDb-P0-20261031.md`（AT 38／38）→ `gate RTM_VERIFY PASS`（→ RELEASE_READY）→ `spec-refreeze --doc PRD --doc TCS`（結果與 digest 填於下一行）。
 - refreeze 結果（2026-10-31 14:0x，主控執行 `spec-refreeze --doc PRD --doc TCS` rc 0）：`refrozen: true`、`stage: Stage-2`、`supersedes: 2026-10-27T16:42:35+00:00`；記入 PRD `sha256:d66d0e59cab5823a39a58c2dd6b948f3a0eb7713fdda49de761c147b764baaf4`（不變）、TCS `sha256:3aadc7a78da88605d992a67a890ea3d9ceec02a818edd576411e8aa4de5b0119`（含〈勘誤一〉1-1～1-12；Stage-2 原值 `sha256:fec0a41a…a9364f`）。鍵狀態 RELEASE_READY。
-- RELEASE：P0 交付全為文件與一支 DT 檔、無執行期面；RELEASE 轉移待掌舵者裁示（依本檔證據放行，或留至 P1 一併）。
+- RELEASE：P0 交付全為文件與一支 DT 檔、無執行期面；掌舵者 2026-10-31 14:3x 互動選項裁示「留到 P1 一起」⇒ 維持 RELEASE_READY，P1 規格凍結時一併處理。
