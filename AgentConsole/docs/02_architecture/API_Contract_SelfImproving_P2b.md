@@ -264,3 +264,87 @@ compose：engine-bridge 恰一條可寫 SI bind（長語法、`${AUTOSDD_SI_DIR:
 | 部署與 CI | AC-950-11 | `test_si_deploy_config.py`（compose、`.env.example`、CI paths） |
 
 V 系列（V1～V12；真後端／真容器／真瀏覽器／掌舵者真機）不是 AT：結果記於 SCG-4 報告與 RTM §2.3 子表的 E2E 欄，未驗者如實標「未驗」。
+
+---
+
+## 8. 增補（2026-10-31；鍵 agentconsole-si-decide-dedupe）
+
+> 本節**追加**於 v1.0 之後，§0～§7 一字未改；與前文衝突處以本節為準。規格依據：`AgentConsole/docs/03_testing/contracts/TCS-SelfImprovingDecideDedupe-20261031.md`（F-903、US-917、AC-951-1～951-6、W-D1～W-D6）。事故來源：觀察帳本 OBS-SI-348——2026-10-31 掌舵者對同一張卡的同一決定連送四次，四次皆 201、落四份稽核檔，主機只能入帳一份，其餘三份在對帳面板永遠顯示待入帳。
+>
+> 本節的行為由實作與該 TCS 的 25 個 AT 驗收；實作與本節不符時以 TCS 與 `/v3/api-docs` 為準並回報修正。
+
+**版本沿革補列**（前文版本表不改）
+
+| 版本 | 日期 | 範圍 | 對應來源 |
+|------|------|------|----------|
+| v1.1 | 2026-10-31 | 增補：決定重送閘（新 409 `si_decision_duplicate`）；對帳 `items[]` 加 `dkind`、`supersededBy`（九鍵→十一鍵）；reason 常數加一個（五→六） | TCS-SelfImprovingDecideDedupe（鍵 `agentconsole-si-decide-dedupe`）W-D1～W-D6 |
+
+### 8.1 變更摘要
+
+1. **新 409**：`POST /api/v1/si/proposals/{id}/decide` 在輸入閘之後、取 `auditRef` 之前查 `si_console_writes`，帶 digest 的六個動詞（approve、reject、return、promote、decline-promote、ack-handoff）已有同 subject＋digest＋dkind 的 decide 列＝409 `si_decision_duplicate`，零副作用；rollback、unblock、resume 不受此閘（§8.2）。
+2. **對帳 `items[]` 十一鍵**：加 `dkind`、`supersededBy`（§8.3～§8.5）；被同一決定的已入帳列取代的待入帳列，`ingested` 仍如實為 false。
+3. **不改**：Flyway 與觸發器、Bridge 與稽核檔、根層 `tools/`、`console-writes` 的分頁與 scan 上限、obs-add、obs-close、validate 的任何行為；既有稽核紀錄不刪。
+
+### 8.2 §1.4 新增的 409 列與 §0.3 的閘門序補述（W-D1）
+
+| HTTP | reason | 何時 | details |
+|------|--------|------|---------|
+| 409 | `si_decision_duplicate` | 僅 `POST /api/v1/si/proposals/{id}/decide` 且動詞帶 digest（approve、reject、return、promote、decline-promote、ack-handoff）：`console.si_console_writes` 已有 `kind=decide` 且 `subject_id`、`digest`、`dkind` 三者與本請求相同的列；**不論該列是否已入帳、不論哪個帳號送的、不論 `reason` 是否相同**。rollback、unblock、resume 沒有卡面 digest 可綁，**不受此閘**（其重送的合法性由主機端 decide 的前提態判） | `existingAuditRef`（符合的列中 time 最早、同刻 auditRef 最小者）、`dkind`、`subject`、`digest8`（digest 去掉 `sha256:` 後的前 8 碼；受閘動詞的 digest 恆非 null，故四鍵恆在；防禦性規格：若 digest 為 null 則省略此鍵而不輸出 null——沿凍結契約 `API_Contract_P3-6.md` §0.2「`ApiError.details` 內不輸出 null 值」；`DomainException.details` 以 `Map.copyOf` 建立，遇 null 會 NPE 變 500） |
+
+- **閘門序**（補述 §0.3）：自本節起，decide（帶 digest 的動詞）在序 5（422 輸入閘）與序 6（執行）之間多一關——重送閘（409）；執行順延為序 7。rollback、unblock、resume 與 obs-add、obs-close、validate 不經此關，閘門序不變。
+- **對前文的補述**：§0.2 的「重送一律新 ref」與 §0.4 第 3 點的「重送（新 ref）」，對帶 digest 的六個動詞自本節起不再成立（重送在取 `auditRef` 之前即被 409 擋下；補救見下列已知邊界 (1)），對 rollback、unblock、resume 與 obs-add、obs-close 仍成立；§0.4 第 1 點的流程，在「取 `auditRef` 與 `time`」之前，帶 digest 的 decide 多一關重送閘。
+- **零副作用**：409 前不取 `auditRef`、不簽章、不寫 DB、不呼叫 Bridge（含 GET）；`message` 含「請以對帳面板為準」。
+- **不擋的情形**：同 subject＋digest 但 dkind 不同照常受理（入帳前改變主意是合法的，由主機端決定吃哪一份）；digest 不同、subject 不同照常受理；補償刪除（§0.4）後列已不存在，可重送；rollback、unblock、resume 一律照常受理（同一 RUN 再度暫停後第二次合法的 resume 不得被擋）。
+- **已知邊界**：(1) 結果不明而保留的列（§0.4 第 3 點）與補償刪除失敗留下的幽靈列也會擋重送（僅限帶 digest 的動詞），原補救「重送新 ref」對這六個動詞不再成立，改為主機端 DBA 依 PRD §9.3 補償刪列，409 訊息提示請以對帳面板為準；(2) rollback、unblock、resume 不受閘、不參與取代判定、對話框也不停用：連送會各落一份稽核檔，主機入帳一份後其餘在對帳面板仍顯示為待入帳（OBS-SI-348 同型症狀對這三個動詞仍可能發生）；(3) 閘為檢查後才 INSERT，並行請求可能各落一列，殘餘由 §8.5 的取代標示承接；(4) 閘不看帳號；(5) promote 的兩個後式（一般與 `unverifiedAck`）同為 dkind=promote、同鍵，且 digest 只綁卡面內容、不含 verdict：verdict 改變而 digest 不變時，先前未入帳的 promote 仍擋住新的 promote（補救同 (1)）。
+- **說明文件**：`ErrorResponseDocumentation` 對決定端點的 409 說明與 `postSiDecide` 的 operation 說明載明本 reason；其餘兩個寫入 POST 的 409 說明不變。
+
+### 8.3 §4 的 `items[]` 鍵集合變更（W-D3）
+
+`GET /api/v1/si/console-writes` 的 `items[]` 鍵集合自 §4 的九鍵改為**恰十一鍵**：`auditRef, kind, dkind, user, role, time, subjectId, digest, keyId, ingested, supersededBy`（鍵恆在、值可為 null；仍不含 `body`、`mac`；比對不看鍵序）。
+
+| 新增鍵 | 型別 | 規則 |
+|--------|------|------|
+| `dkind` | string｜null | `kind=decide` 的列＝該決定的動詞（九個之一，原樣透傳、不設 enum）；其餘 kind、以及看不出 dkind 的列（body 無 dkind 的歷史或夾具列）＝null |
+| `supersededBy` | string（uuid）｜null | 見 §8.5；`reconcile.status` 為 NOT-EVALUABLE 時與 `ingested` 一樣整欄為 null |
+
+§4 其餘規則不變（`reconcile`、`orphans`、回填、量不到的處理）。被取代列的 `ingested` 仍為 false（不冒充已入帳）。
+
+### 8.4 `dkind` 的來源與兩個埠（W-D2）
+
+- **不改 Flyway、不加欄**。`dkind` 由稽核列 `body`（TEXT；`SiAuditSigner` 自己產生的合法 JSON）以 SQL 表達式 `(body::jsonb)->>'dkind'` 取出，且只對 `kind='decide'` 的列取（以 `case when kind = 'decide' then … end` 保護：非 decide 列恆為 null）。
+- **寫入埠** `SiConsoleWriteRepository.findDecideAuditRefs(subject, digest, dkind)`：回 `List<UUID>`，只含 `kind='decide'` 且 `subject_id`、`digest`、dkind 皆等於參數的列，依 `time` 升冪、同刻 `audit_ref` 升冪；`digest` 或 `dkind` 為 null 回空清單（無 digest 的動詞不受重送閘，不提供 null 比對）。呼叫者仍只有 `SiConsoleWriteService`。
+- **對帳讀埠** `SiConsoleWriteSummary` 加元件 `dkind`；`findRecent` 以同一表達式選出；另加 `findDecideRows()`（全部 decide 列的同一投影，time 升冪、同刻 `audit_ref` 升冪，供 §8.5）。呼叫者仍只有 `SiReconcileService`。
+- **仍不選整欄 `body` 與 `mac`**：v1.0 與各 Javadoc 的「查詢一律不選 body 與 mac」自本節起讀作「不選整欄 body 與 mac；只以表達式取 body 內的 dkind」。`SiConsoleWriteAdapter` 仍是唯一存取該表的類別，DML 敘述仍三條（新增的兩個查詢是 SELECT）。
+- **同刻 tie-break**：本節所有「同刻 `audit_ref` 升冪」一律指小寫正規 UUID 字串的字典序（等同 PostgreSQL uuid 的位元組序）；Java 端不得用 `UUID.compareTo`（有號比較，首位元組 0x80 以上者會排到 0x7f 以下者之前），也不得對 SQL 已排序的結果重排。
+
+### 8.5 `supersededBy` 的判定（W-D3）
+
+對 `items[]` 中 `kind=decide`、`ingested=false`、且 `dkind`、`subjectId` 與 `digest` 皆非 null 的列 r（即帶 digest 的六個動詞）：在**整張表的 decide 列**（與 `limit` 無關）中找「另一列」d，須同時成立——`d.auditRef` 不等於 `r.auditRef`；`d.auditRef` 屬於同一次 `scan()` 的 `ingested` 集合；`d.subjectId` 等於 `r.subjectId`；`d.dkind` 等於 `r.dkind`；`d.digest` 等於 `r.digest`。`supersededBy`＝這些 d 中 `time` 最早者（同刻取 `auditRef` 升冪第一個，比較規則見 §8.4）的 `auditRef`；沒有 d 則 null。其餘列（kind 非 decide、已入帳、`dkind`、`subjectId` 或 `digest` 為 null）一律 null。
+
+- 取代者必須是本表的列：帳本有 carrier 為 console 而表內沒有的項（orphan）不充當取代者；兩列都未入帳時互不取代，直到其中一份入帳。
+- `dkind` 為 null 的 decide 列（body 無 dkind 的歷史或夾具列）與無 digest 的動詞（rollback、unblock、resume）一律不參與取代判定（寧可不隱藏：同一 RUN 再度暫停後第二次合法的 resume，不得被先前已入帳的 resume 誤判為被取代）。
+- 判定與 `limit` 無關：同一時刻不同 `limit` 下，同一列的 `supersededBy` 相同。
+
+### 8.6 §6 的前端資料來源增補（W-D4、W-D5）
+
+| 控件 | 資料來源與規則（增補） |
+|------|------------------------|
+| `SiWritesPanel` | 待入帳清單只含 `ingested=false` 且 `supersededBy` 為 null、缺席或空字串者；`supersededBy` 非空者進**預設收合**的群組 `si-superseded-list`（標題 `另有 N 筆已被取代（同一張卡的同一決定已由其他稽核檔入帳）`；展開後每列顯示 dkind〔決定動詞中文標籤加原文〕、對象、time、auditRef 與 `取代者：<supersededBy>`，沒有入帳指令鈕；面板內按鈕與連結的名稱與 testid 不含刪除、移除、清除字樣）；NOT-EVALUABLE 時不渲染群組；「無待入帳」只看待入帳清單與 orphans；待入帳列同樣顯示 dkind |
+| `SiDecideDialog` | **只讀**既有的對帳查詢快取（面板所用的同一個查詢鍵），不發任何新的 GET：快取有資料且對帳 ok 時，有 `kind=decide`、同 subject＋digest＋dkind（digest 非 null）、`ingested=false` 且 `supersededBy` 為 null、缺席或空字串的列者，該動詞選項停用並於送出鈕旁顯示 `已送出待入帳（稽核編號 <auditRef>）`；快取缺席（沒有面板的頁面如議題中心、面板查詢載入中或失敗）或對帳 NOT-EVALUABLE 時不停用（以 backend 409 為準）；無 digest 的動詞永不停用；收到 409 `si_decision_duplicate` 時 toast 以 `同一張卡的同一決定已送出（稽核編號 <existingAuditRef>），待主機入帳，不需重送` 起首並接 reason 與 traceId 原文，對話框不關 |
+
+決定對話框同時被 `/self-improving` 與議題中心使用；議題中心沒有對帳面板、沒有快取，對話框在該處不停用，只靠 backend 409（對話框不發新的對帳請求，議題中心零改動）。
+
+### 8.7 reason 常數落點（補述 §1.4 末段）
+
+Java `ErrorReasons.SI_DECISION_DUPLICATE`＝`si_decision_duplicate`；TS `lib/domain/si.ts` 的 `SI_REASONS.DECISION_DUPLICATE`（五鍵→六鍵，原五鍵與順序不變）；Architecture §11.1 的 SelfImproving reason 表另有一列（主控已加在工作樹，與實作同一 commit 進、不得先單獨 commit；該表標題已隨之訂正，因本 reason 由 backend 產生）。`SiBridgeErrors` 不動（Bridge 不會回此 reason）。
+
+### 8.8 驗收對照（補述 §7）
+
+| 面 | AT 群（TCS-SelfImprovingDecideDedupe §1） | 自動測試 |
+|----|-------------------------------------------|----------|
+| backend 重送閘、dkind 與埠 | AC-951-1、AC-951-2 | `SiConsoleWriteApiIT` |
+| backend 取代判定 | AC-951-3 | `SiConsoleWritesReadApiIT` |
+| 契約面與結構鎖 | AC-951-6 | `OpenApiIT`、`SiReadOnlyArchTest`、`lib/api/si.endpoints.test.ts` |
+| frontend 面板與對話框 | AC-951-4、AC-951-5 | `SiView.test.tsx`、`SiDecideDialog.test.tsx`、`lib/domain/si.test.ts` |
+
+V 系列（V1～V6；真機對帳頁的事故三筆、真機重送閘、`schema.d.ts` 重產、閘門、範圍守衛、平台）不是 AT，結果記於 SCG-4 報告與本鍵 RTM 本地子表（`RTM-SelfImprovingDecideDedupe-20261031.md`）的 E2E 欄，未驗者如實標「未驗」。
