@@ -48,6 +48,7 @@ from .perception.hotkey_handler import HotkeyHandler
 from .utils.config import load_config
 from .utils.logger import setup_logger
 from .utils.notifier import notify
+from .utils.platform_caps import is_windows
 
 
 def _validate_playbook_format(path: str) -> None:
@@ -100,9 +101,29 @@ def build_executor(cfg, hotkey=None, logger=None):
 
 
 def _stdin_is_tty() -> bool:
+    """stdin 後面真的有人在終端機前（POSIX＝isatty()；Windows 另要求它是真 console）。"""
     try:
-        return bool(sys.stdin and sys.stdin.isatty())
+        if not (sys.stdin and sys.stdin.isatty()):
+            return False
     except (ValueError, OSError):                  # stdin 被關掉／無效 fd＝沒有人在終端機前
+        return False
+    if not is_windows():
+        return True
+    # Windows 行為＝`isatty()` 對 NUL 這個字元裝置也回 True（Python 3.11.9 實測）：Bridge 以
+    # `stdin=DEVNULL` 起的無頭引擎因此被當成有人在終端機前，掛上全域 ESC+F12 hook（suppress 會
+    # 吃掉開發機的 ESC／F12）。真判準＝stdin 把手是 console 輸入緩衝，即 `GetConsoleMode` 成功
+    # （NUL、管線、檔案皆失敗）。prototype 只設在私有的 WinDLL 實例上，不改 `ctypes.windll` 的共用
+    # 物件；handle 宣告為 c_void_p 免得 64 位元被截成 int。判不出來＝False（寧可少一個熱鍵）。
+    try:
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.GetStdHandle.restype = ctypes.c_void_p
+        kernel32.GetConsoleMode.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong))
+        kernel32.GetConsoleMode.restype = ctypes.c_int
+        handle = kernel32.GetStdHandle(-10)             # STD_INPUT_HANDLE
+        return bool(kernel32.GetConsoleMode(handle, ctypes.byref(ctypes.c_ulong())))
+    except Exception:                              # noqa: BLE001 — 判不出來就當沒有 TTY
         return False
 
 

@@ -61,6 +61,11 @@ class _Hotkey:
 @pytest.fixture(autouse=True)
 def _interactive_env(monkeypatch):
     monkeypatch.delenv(_UNATTENDED, raising=False)
+    # 本檔守的是「註冊閘」的邏輯，用 sys.stdin 替身模擬有／無 TTY。Windows 另要求 stdin 是真
+    # console（`GetConsoleMode`）：那一層有專屬測試 test_stdin_is_tty_windows_console.py。這裡
+    # 讓 Windows 也走 `isatty()` 替身那條路，否則 pytest 的 NUL stdin 會讓 Windows 上「有 TTY」
+    # 那幾案恆為 False。
+    monkeypatch.setattr(main_mod, "is_windows", lambda: False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
