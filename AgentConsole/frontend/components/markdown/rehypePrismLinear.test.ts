@@ -218,7 +218,10 @@ describe("與上游逐位相等：隨機文件（固定種子，可重現）", (
 });
 
 describe("複雜度：行數放大 4 倍，時間只放大約 4 倍（上游約 17 倍）", () => {
-  it("大區塊的耗時隨行數線性成長", () => {
+  // 量的是「比值」不是絕對耗時：本 it 要跑 15 次 2,000／8,000 行的著色（5 次暖機＋各 5 次取最小值），絕對牆鐘隨機器而變——
+  // GitHub ubuntu runner 上與其他 vitest worker 共用 CPU 時實測 5,058ms（2026-10-31 agentconsole-ci run 41205687938），撞到 vitest 預設 5,000ms
+  // 逾時而紅，與比值斷言無關；逾時顯式放到 60s，比值門檻（<10）一字不改。
+  it("大區塊的耗時隨行數線性成長", { timeout: 60_000 }, () => {
     // 用 python：Prism 對它的斷詞是線性的；markdown 語法自己的斷詞就是二次方（refractor.highlight 4 倍行數約 16 倍時間），會把「逐行拆分」的訊號蓋掉
     const make = (pairs: number) => `<pre><code class="language-python">${esc(Array.from({ length: pairs }, (_, i) => `def f${i}(x):\n    return x * ${i}  # 註解`).join("\n"))}</code></pre>`;
     const best = (html: string) => {
