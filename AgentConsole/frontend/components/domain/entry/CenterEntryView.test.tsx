@@ -3,14 +3,21 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import ExecuteEntryPage, { metadata as executeMetadata } from "@/app/execute/page";
+import MonitorEntryPage, { metadata as monitorMetadata } from "@/app/monitor/page";
+import { qk } from "@/lib/api/queries";
 import { projectStatus } from "@/lib/domain/status";
+import { getLastProjectId } from "@/lib/nav/lastProject";
 import { Providers, failure, makeClient, signIn, stubApi, type ApiCall } from "@/tests/helpers/api";
 import { CenterEntryView } from "./CenterEntryView";
 
 /**
  * 執行中心／監控中心的無專案入口頁（TCS-ExecMonitorEntry-20261101 F-905、AC-953-2；W-E1；Console PRD §0.8）：
- * AT_953_2_1（空列表：標題、說明、空狀態與兩個去處）、AT_953_2_2（有專案：「選擇專案」清單）、AT_953_2_3（載入中與錯誤重試）、AT_953_2_E_1（VIEWER：新建專案停用、匯入仍在）。
+ * AT_953_2_1（空列表：標題、說明、空狀態與兩個去處）、AT_953_2_2（有專案：「選擇專案」清單；不跳轉、不寫入、不記住專案）、
+ * AT_953_2_3（載入中、錯誤重試、已有清單後背景重抓失敗清單照常）、AT_953_2_E_1（VIEWER：新建專案停用、匯入仍在）、
+ * AT_953_2_4（頁殼：app/execute 與 app/monitor 各組出正確 kind 的入口頁，metadata.title 各對各）。
  * 兩個 kind（execute／monitor）共用一個元件（⚖3），所以凡是依 kind 變化的斷言（標題、說明、連結目的路徑）都兩個 kind 各跑一次——只測一個 kind 抓不到「寫死 execute」這類錯。
+ * SCG-4 一審（2026-11-02）三個存活突變的補強（TCS 勘誤 3、4）：頁殼 kind（F-01 → AT_953_2_4）、有舊資料時重抓失敗換錯誤卡（F-02 → AT_953_2_3 第三個 it）、進入頁記住專案（F-03 → AT_953_2_2 的 getLastProjectId 斷言）。
  * 判定指令：npx vitest run components/domain/entry/CenterEntryView.test.tsx -t "<AT 底線形>"
  */
 const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
@@ -130,6 +137,9 @@ describe("AT_953_2 入口頁三態與動作（W-E1）", () => {
       expect(calls.every((c) => c.method === "GET")).toBe(true);
       expect(nav.push).not.toHaveBeenCalled();
       expect(nav.replace).not.toHaveBeenCalled();
+      // W-E1 (d)／W-E5：入口頁不記住專案（「最近造訪」只由專案頁的 useCurrentProjectId 寫入）；SCG-4 一審 F-03（突變「進入頁 rememberProjectId」須轉紅）
+      expect(getLastProjectId(), "最近造訪記錄未被寫入").toBeNull();
+      expect(window.sessionStorage.getItem("aisdlc.console.lastProject")).toBeNull();
     },
   );
 
@@ -168,6 +178,30 @@ describe("AT_953_2 入口頁三態與動作（W-E1）", () => {
     await waitFor(() => expect(listCalls(calls), "按重試後再打一次").toHaveLength(2));
   });
 
+  it("AT_953_2_3 已有清單後背景重抓失敗 → 清單照常、沒有錯誤卡（只有「根本沒有資料」才換成錯誤畫面；W-E1 (c)）", async () => {
+    // SCG-4 一審 F-02：突變「projects === undefined || all.isError 就換錯誤卡」須轉紅
+    let served = 0;
+    const { calls } = stubApi((c) => {
+      if (c.method !== "GET" || c.path !== "/api/v1/projects") return undefined;
+      served += 1;
+      return served === 1 ? { data: page([summary("pa", "Alpha", "READY")]) } : failure(500, { message: "伺服器錯誤" });
+    });
+    const client = makeClient();
+    render(
+      <Providers client={client}>
+        <CenterEntryView kind="execute" />
+      </Providers>,
+    );
+    expect(within(await screen.findByRole("list", { name: "選擇專案" })).getAllByRole("link")).toHaveLength(1);
+
+    await client.refetchQueries({ queryKey: qk.allProjects });
+    await waitFor(() => expect(listCalls(calls), "背景重抓已發出且失敗").toHaveLength(2));
+    const list = screen.getByRole("list", { name: "選擇專案" });
+    expect(within(list).getAllByRole("link"), "清單仍是上一份資料").toHaveLength(1);
+    expect(screen.queryByRole("alert"), "不換成錯誤卡").toBeNull();
+    expect(screen.queryByText("無法載入專案列表")).toBeNull();
+  });
+
   it.each(KINDS)("AT_953_2_E_1 $kind：VIEWER、專案列表為空 →「新建專案」是停用按鈕（title 權限不足）、頁內沒有連到 /projects/new 的連結；「BRD/PRD 匯入」連結仍在；空狀態照常", async ({ kind }) => {
     signIn("VIEWER", "viewer");
     backend([]);
@@ -183,5 +217,23 @@ describe("AT_953_2 入口頁三態與動作（W-E1）", () => {
     // 「BRD/PRD 匯入」三種角色皆顯示（⚖5：匯入頁自管權限）
     expect(screen.getByRole("link", { name: "BRD/PRD 匯入" })).toHaveAttribute("href", "/import");
     expect(screen.getByTestId("center-entry-view")).toHaveAttribute("data-kind", kind);
+  });
+});
+
+describe("AT_953_2_4 頁殼（W-E1 (e)）：app/execute 與 app/monitor 只殼組 CenterEntryView，kind 與 metadata.title 各對各", () => {
+  // SCG-4 一審 F-01：突變「execute 頁殼改 kind=monitor」在 vitest 層須轉紅（原本只有 E2E AT-953-4-2 承擔）；F-06：metadata.title 也釘住
+  it.each([
+    { Page: ExecuteEntryPage, meta: executeMetadata, kind: "execute", title: "執行中心" },
+    { Page: MonitorEntryPage, meta: monitorMetadata, kind: "monitor", title: "監控中心" },
+  ])("AT_953_2_4 $kind：頁殼渲染出 data-kind=$kind 的入口頁、標題「$title」，metadata.title 為「$title」", async ({ Page, meta, kind, title }) => {
+    backend([]);
+    render(
+      <Providers client={makeClient()}>
+        <Page />
+      </Providers>,
+    );
+    expect(await screen.findByTestId("center-entry-view")).toHaveAttribute("data-kind", kind);
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(meta.title).toBe(title);
   });
 });

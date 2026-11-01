@@ -187,3 +187,12 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ExecMonitorEntry-20261101.md`（17 
 
 | 編號 | 位置 | 原文 | 改為 | 依據 |
 |------|------|------|------|------|
+| 1 | §4 #1 | 只列 AT_932_6_1 與 AT_932_6_3 探針 | 補列 `registry.test.ts` AT_932_6_E_2 第三個 it（「六項的 href 與舊 hrefFor 完全相同」）：D1 後必紅，依 W-E4 只改預期值——以 `entryPageFallback` 只對 execute／monitor×無專案放行、其餘格仍比 `legacyHref`，`legacyHref`（改動前行為的對照基準）不動 | 開發棒勘誤候選 1；QA 一審 (e)1；P1b TCS 勘誤 26 已列它 |
+| 2 | AT-953-3-1 | `helpForPath("/execute").id` | `helpForPath("/execute")` 為 `execute-entry`、`helpForPath("/monitor")` 為 `monitor-entry`（該函式回傳說明 id 字串，不是物件）；另釘 `helpForPath("/projects/p1/execute")` 仍為 `execute`（⚖4：入口頁說明是新增、不取代專案頁說明） | 開發棒勘誤候選 3；QA (e)2 |
+| 3 | AT-953-2-2、AT-953-2-3 | Then 未涵蓋 W-E1 (c)「`isError && !data` 才換錯誤畫面」與 (d)「不記住專案」 | AT-953-2-2 Then 加「最近造訪記錄未被寫入（`getLastProjectId()` 為 null、sessionStorage 無 `aisdlc.console.lastProject`）」；AT-953-2-3 加第三個 it「已有清單後背景重抓失敗（第一次 200、重抓 500）→ 清單仍是上一份、無錯誤卡」。主控於一審後補斷言；突變重放：x10（`projects === undefined \|\| all.isError`）紅 AT_953_2_3 第三個 it、x11（進入頁 `rememberProjectId`）紅 AT_953_2_2×2 | QA 一審 F-02、F-03（P3；突變 x10／x11 存活） |
+| 4 | §1 映射表、§3.1、AC 編號規則第 4 點 | AC-953-2 的 AT 為 2-1、2-2、2-3、2-E-1；AT 共 10（正控 8） | 新增 **AT-953-2-4**（FT，`CenterEntryView.test.tsx`，兩個 kind 各跑）：Given 專案列表為空 When 以 `app/execute/page.tsx`／`app/monitor/page.tsx` 的預設匯出渲染 Then `center-entry-view` 的 `data-kind` 各為 execute／monitor、標題各為「執行中心」／「監控中心」、該頁 `metadata.title` 同標題；AT 共 11（正控 9、負控 2）。突變重放：m12（execute 頁殼改 `kind="monitor"`）紅 AT_953_2_4 execute | QA 一審 F-01（P3：vitest 層無人載入頁殼，只有 E2E 承擔）、F-06（`metadata.title` 無斷言） |
+| 5 | §4 #4 | 「若有頁數釘值改為二十」 | 不需改：`lib/help/registry.test.ts` 的 `ROUTE_TABLE` 是具體路徑表、與 `HELP_ROUTES` 鍵數無關；兩條新路由由 AT-953-3-1 與三道雙向鎖涵蓋 | QA (e)5 |
+| 6 | W-E4「AT 標題與 id 不變」 | `registry.test.ts` 兩個 it 標題仍寫「無專案時回 /projects」「與舊 hrefFor 完全相同」，與現行斷言相反 | 刻意保留（與 TCS-ConsoleNavConsolidation 勘誤 6 同口徑：AT id 前綴是判定鍵、標題字面沿 TCS 不動），現值由檔頭與行內註解給出 | QA 一審 F-04（P4）；開發棒勘誤候選 2 |
+| 7 | AT-953-1-2 判準來源 | `ownPathProblems`「沿 registry.test.ts 的判準」 | 事實登記：`exec-monitor-entry.test.ts` 內是該判準的複本（附 broken 負控證明鑑別力）；日後判準演進時兩處同步，或抽到 `tests/helpers` 一次 export（與 `navDelivered.ts` 衍生常數同型的整併項） | QA 一審 F-05（P4） |
+| 8 | §6.1 | 「17 列：F 1、US 1、AC 5、AT 10」 | 18 列：F 1、US 1、AC 5、AT 11（AT-953-2-4 入列） | 勘誤 4 連動 |
+| 9 | §6.2 V2 | 兩張已追蹤響應式截圖 | `shells-and-layout.spec.ts` 真機跑會重寫 `tests/e2e/__screenshots__/20-responsive-tablet.png`、`21-responsive-mobile.png`；本鍵側欄未變、差異只是動態內容，主控以 `git show HEAD:<path>` 還原、不入庫（UI 真的變了才隨 RELEASE 提交） | V2 實跑事實 |
