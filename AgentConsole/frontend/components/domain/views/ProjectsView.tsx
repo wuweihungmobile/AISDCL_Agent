@@ -96,8 +96,9 @@ export function ProjectsView() {
         subtitle={`Project → Goal → Task 三層管理 · 共 ${total} 筆`}
         actions={
           <>
+            {/* 導覽整併 2026-11-01（Console PRD §0.7）：側欄不再有匯入入口，這顆按鈕是專案管理頁進入 /import 的入口；文字與空狀態文案「從「BRD/PRD 匯入」讓 AI 拆解」同名 */}
             <Button asChild variant="ghost" iconLeft={Upload}>
-              <Link href="/import">匯入</Link>
+              <Link href="/import">BRD/PRD 匯入</Link>
             </Button>
             <Button iconLeft={Plus} disabled={!canWrite} title={canWrite ? undefined : "權限不足（唯讀角色）"} onClick={() => setEntity({ kind: "project", mode: "create" })}>
               新建專案

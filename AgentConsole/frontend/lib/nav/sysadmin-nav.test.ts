@@ -14,10 +14,15 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
  * OBS-SI-321 根治：項數、id 清單、顯示序、order／icon 集合大小不再釘「恰九項」，改為已交付列的前綴快照（tests/helpers/navDelivered.ts，四個導覽測試檔共用）加上由登記表自身推導的唯一性斷言；
  * AT_BK_01_1_2 不再讀別檔原始碼比字面（那是第二份真相的鎖），改為直接以 NAV_REGISTRY 與共用快照核對「既有導覽測試所依賴的每個事實」。測試標題與 AT id 沿 TCS 字樣不動。
  * 之後登記表在末尾多加一列新功能，本檔不必再改。
+ * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101 §4 #2、W-N1；SysAdmin TCS 勘誤 1-36）：settings order 60→80、sysadmin order 65→75、import 列停用（enabled false）
+ * ⇒ 現行顯示序 self-improving 70 < sysadmin 75 < settings 80，系統管理排在自我進化之後、系統設定之前。上面敘述與各測試標題裡的舊數字（60／65／70、「系統設定之後、自我進化之前」）是 R-BK-01 當時的敘述，
+ * 現行期望值以測試內的斷言為準；比對「側欄實際顯示的已交付項」的期望值先濾掉停用的 import（快照衍生常數是快照層級，含停用列；見 tests/helpers/navDelivered.ts 檔頭）。
  */
 const ROOT = process.cwd();
 const byId = (id: string) => NAV_REGISTRY.find((e) => e.id === id) as NavEntry;
 const ids = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.id);
+/** 側欄實際顯示的已交付項（依顯示序）：快照的顯示序濾掉 enabled 為 false 的列。導覽整併 2026-11-01 起 import 停用，不在可見項裡（W-N1、W-N2）。 */
+const SHOWN_DISPLAY_IDS = DELIVERED_DISPLAY_IDS.filter((id) => DELIVERED_NAV_ROWS.some((row) => row[0] === id && row[4]));
 
 describe("AT_BK_01_1 登記表第九項與顯示序", () => {
   it("AT_BK_01_1_1 NAV_REGISTRY 恰九項、id 依陣列序；[6] 是 self-improving、[7] 是 issues、[8] 是 sysadmin；sysadmin 各欄逐值（icon 是 Database、不是 DatabaseBackup）；四種角色的顯示序；order 唯一、icon 互異", () => {
@@ -28,35 +33,36 @@ describe("AT_BK_01_1 登記表第九項與顯示序", () => {
     expect(NAV_REGISTRY[7].id).toBe("issues");
     const sysadmin = byId("sysadmin");
     expect(NAV_REGISTRY[8]).toBe(sysadmin);
-    expect(sysadmin).toMatchObject({ id: "sysadmin", label: "系統管理", href: "/sysadmin", order: 65, enabled: true, mobile: false });
+    // order 65→75（導覽整併 2026-11-01，TCS-ConsoleNavConsolidation §4 #2）
+    expect(sysadmin).toMatchObject({ id: "sysadmin", label: "系統管理", href: "/sysadmin", order: 75, enabled: true, mobile: false });
     expect(sysadmin.roles, "roles 缺＝所有已登入角色皆可見").toBeUndefined();
     expect(sysadmin.icon).toBe(Database);
     expect(sysadmin.icon).not.toBe(DatabaseBackup);
     expect(typeof sysadmin.match).toBe("function");
-    // 已交付九列在可見項中的相對顯示序不變（日後新增的列夾在中間也不影響）
+    // 已交付各列在可見項中的相對顯示序不變（日後新增的列夾在中間也不影響）；導覽整併 2026-11-01 起期望值為濾掉停用 import 的 SHOWN_DISPLAY_IDS（§4 #2、W-N2）
     for (const role of ["ADMIN", "OPERATOR", "VIEWER", undefined] as const) {
-      expect(deliveredIdsIn(ids(visibleNavEntries(NAV_REGISTRY, role))), String(role)).toEqual(DELIVERED_DISPLAY_IDS);
+      expect(deliveredIdsIn(ids(visibleNavEntries(NAV_REGISTRY, role))), String(role)).toEqual(SHOWN_DISPLAY_IDS);
     }
     expect(new Set(ids(NAV_REGISTRY)).size).toBe(NAV_REGISTRY.length);
     expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(NAV_REGISTRY.length);
     expect(new Set(NAV_REGISTRY.map((e) => e.icon)).size).toBe(NAV_REGISTRY.length);
-    // 顯示序的 order：settings 60 < sysadmin 65 < self-improving 70
-    expect([byId("settings").order, sysadmin.order, byId("self-improving").order]).toEqual([60, 65, 70]);
+    // 顯示序的 order：self-improving 70 < sysadmin 75 < settings 80（導覽整併 2026-11-01；整併前是 settings 60 < sysadmin 65 < self-improving 70）
+    expect([byId("self-improving").order, sysadmin.order, byId("settings").order]).toEqual([70, 75, 80]);
   });
 
   it("AT_BK_01_1_2 既有導覽測試已同步：issues-nav.test.ts 的長度、id 清單、顯示序含 sysadmin 且 NAV_REGISTRY[7] 斷言仍在；registry.test.ts 的 AT_950_10_E_1 改述為「原八列不變，另加系統管理」並補第九列；ToolsRegion.test.tsx 補了九個連結與 max-md:hidden 判準", () => {
     // OBS-SI-321：不再讀別檔原始碼比字面（那是第二份真相的鎖）——既有導覽測試所依賴的每個事實，改直接從 NAV_REGISTRY 與共用的已交付快照核對。
     // issues-nav.test.ts 依賴的事實：登記表含第九列 sysadmin（索引 8，已交付九列的最後一列）、NAV_REGISTRY[7] 仍是 issues、
-    // 三種角色與未知角色的顯示序都含 sysadmin（系統設定之後、自我進化之前）、order 與 icon 集合大小等於登記表長度
+    // 三種角色與未知角色的顯示序都含 sysadmin（導覽整併 2026-11-01 起在自我進化之後、系統設定之前；整併前是系統設定之後、自我進化之前）、order 與 icon 集合大小等於登記表長度
     expect(NAV_REGISTRY[8].id).toBe("sysadmin");
     expect(DELIVERED_NAV_IDS[DELIVERED_NAV_IDS.length - 1]).toBe("sysadmin");
     expect(NAV_REGISTRY[7].id).toBe("issues");
     for (const role of ["ADMIN", "OPERATOR", "VIEWER", undefined] as const) {
       const display = ids(visibleNavEntries(NAV_REGISTRY, role));
-      expect(deliveredIdsIn(display), String(role)).toEqual(DELIVERED_DISPLAY_IDS);
+      expect(deliveredIdsIn(display), String(role)).toEqual(SHOWN_DISPLAY_IDS);
       expect(
-        display.indexOf("settings") < display.indexOf("sysadmin") && display.indexOf("sysadmin") < display.indexOf("self-improving"),
-        `${String(role)}：系統管理排在系統設定之後、自我進化之前`,
+        display.indexOf("self-improving") < display.indexOf("sysadmin") && display.indexOf("sysadmin") < display.indexOf("settings"),
+        `${String(role)}：系統管理排在自我進化之後、系統設定之前`,
       ).toBe(true);
     }
     expect(new Set(NAV_REGISTRY.map((e) => e.order)).size).toBe(NAV_REGISTRY.length);
@@ -102,13 +108,14 @@ describe("AT_BK_01_1 登記表第九項與顯示序", () => {
       hrefNoProject: navHref(e, { currentProjectId: null }),
       hrefProject: navHref(e, { currentProjectId: "p1" }),
     });
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation §4 #2、W-N1）：import 列 enabled true→false、settings 列 order 60→80；其餘欄與位置不變
     expect(NAV_REGISTRY.slice(0, 8).map(snapshot)).toEqual([
       { id: "dashboard", label: "儀表板", order: 10, enabled: true, mobile: true, roles: null, hrefNoProject: "/", hrefProject: "/" },
       { id: "projects", label: "專案管理", order: 20, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects" },
-      { id: "import", label: "BRD/PRD 匯入", order: 30, enabled: true, mobile: true, roles: null, hrefNoProject: "/import", hrefProject: "/import" },
+      { id: "import", label: "BRD/PRD 匯入", order: 30, enabled: false, mobile: true, roles: null, hrefNoProject: "/import", hrefProject: "/import" },
       { id: "execute", label: "執行中心", order: 40, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/execute" },
       { id: "monitor", label: "監控中心", order: 50, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/monitor" },
-      { id: "settings", label: "系統設定", order: 60, enabled: true, mobile: true, roles: null, hrefNoProject: "/settings", hrefProject: "/settings" },
+      { id: "settings", label: "系統設定", order: 80, enabled: true, mobile: true, roles: null, hrefNoProject: "/settings", hrefProject: "/settings" },
       { id: "self-improving", label: "自我進化", order: 70, enabled: true, mobile: false, roles: null, hrefNoProject: "/self-improving", hrefProject: "/self-improving" },
       { id: "issues", label: "議題中心", order: 55, enabled: true, mobile: false, roles: null, hrefNoProject: "/issues", hrefProject: "/issues" },
     ]);

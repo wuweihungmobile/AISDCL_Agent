@@ -335,7 +335,8 @@ describe("AT_932_6_E_2 舊六項的 active 與 href 行為不變，唯一差異�
       "/projects/p1/monitor",
       "/projects/p1/execute/x",
     ];
-    for (const pathname of known) expect(newActive(pathname), pathname).toBe(legacyActive(pathname));
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation W-N2；§4 #4 未列的連動）：import 列停用 → 不在可見項，/import 與其子路徑沒有任何項 active（舊 activeNav 仍回 import）；其餘路徑逐一相同
+    for (const pathname of known) expect(newActive(pathname), pathname).toBe(pathname.startsWith("/import") ? null : legacyActive(pathname));
   });
 
   it("AT_932_6_E_2 唯一差異：舊行為下不屬於任何已知前綴的路徑（/unknown、/foo/bar）fallback 成 projects，新行為為無 active", () => {

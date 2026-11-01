@@ -196,14 +196,19 @@ test.describe("V-08：九個畫面對設計稿（DOM 結構斷言＋截圖供人
       ["通知鈴", page.getByTestId("bell-trigger")],
       ["待審批佇列鈕", page.getByRole("link", { name: /待審批佇列 \d+ 筆/ })],
       ["側欄標題：導航", page.getByText("導航", { exact: true })],
+      // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation-20261101 §4 #7、W-N2、W-N4；Console PRD §0.7）：側欄由六項錨點改為八項，依新顯示序
+      // （儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定）；「BRD/PRD 匯入」已停用、不在側欄，改自專案管理頁右上的按鈕進入。
       ["導航：儀表板", page.getByRole("link", { name: "儀表板", exact: true })],
       ["導航：專案管理", page.getByRole("link", { name: "專案管理", exact: true })],
-      ["導航：BRD/PRD 匯入", page.getByRole("link", { name: "BRD/PRD 匯入", exact: true })],
       ["導航：執行中心", page.getByRole("link", { name: "執行中心", exact: true })],
       ["導航：監控中心", page.getByRole("link", { name: "監控中心", exact: true })],
+      ["導航：議題中心", page.getByRole("link", { name: "議題中心", exact: true })],
+      ["導航：自我進化", page.getByRole("link", { name: "自我進化", exact: true })],
+      ["導航：系統管理", page.getByRole("link", { name: "系統管理", exact: true })],
       ["導航：系統設定", page.getByRole("link", { name: "系統設定", exact: true })],
       ["我的專案 rail", page.getByText("我的專案", { exact: true })],
     ]);
+    await expect.soft(page.getByRole("navigation", { name: "主導覽" }).getByRole("link", { name: "BRD/PRD 匯入", exact: true }), "導覽整併：側欄不再有「BRD/PRD 匯入」").toHaveCount(0);
   });
 
   test("畫面 1 總覽儀表板：標題與副標、匯入按鈕、四張 KPI 卡、進行中的執行、待人工審批", async ({ page, request }) => {
@@ -236,7 +241,8 @@ test.describe("V-08：九個畫面對設計稿（DOM 結構斷言＋截圖供人
     await expect(card).toHaveCount(1, FIRST_LOAD);
     await expectAnchors(page, "畫面 2", [
       ["副標：Project → Goal → Task 三層管理 · 共 N 筆", page.getByText(/Project → Goal → Task 三層管理 · 共 \d+ 筆/)],
-      ["右側：匯入", page.getByRole("link", { name: "匯入", exact: true })],
+      // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation-20261101 §4 #7、W-N3）：右上連結改名「BRD/PRD 匯入」（原為「匯入」）；下方另斷言名稱恰為「匯入」的連結不存在
+      ["右側：BRD/PRD 匯入", page.getByRole("link", { name: "BRD/PRD 匯入", exact: true })],
       ["右側：新建專案", page.getByRole("button", { name: "新建專案" })],
       ["工具列：篩選標籤", page.getByText("篩選", { exact: true })],
       ["狀態 tab：全部", page.getByRole("button", { name: "全部", exact: true })],
@@ -257,6 +263,7 @@ test.describe("V-08：九個畫面對設計稿（DOM 結構斷言＋截圖供人
       ["專案卡：執行", card.getByRole("link", { name: /執行/ })],
       ["專案卡：監控", card.getByRole("link", { name: /監控/ })],
     ]);
+    await expect.soft(page.getByRole("link", { name: "匯入", exact: true }), "導覽整併：名稱恰為「匯入」的連結已不存在（改名為「BRD/PRD 匯入」）").toHaveCount(0);
     await snap(page, "p9-w7-screen-02-projects.png");
   });
 

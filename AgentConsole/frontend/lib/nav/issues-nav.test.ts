@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { DELIVERED_DISPLAY_IDS, DELIVERED_MOBILE_IDS, DELIVERED_NAV_IDS, deliveredIdsIn, deliveredPrefix } from "@/tests/helpers/navDelivered";
+import { DELIVERED_DISPLAY_IDS, DELIVERED_MOBILE_IDS, DELIVERED_NAV_IDS, DELIVERED_NAV_ROWS, deliveredIdsIn, deliveredPrefix } from "@/tests/helpers/navDelivered";
 import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry } from "./registry";
 
 /**
@@ -13,10 +13,15 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
  * `NAV_REGISTRY[7]` 仍是 issues 的斷言與原七列的逐欄快照不動；第九項本身的斷言在 sysadmin-nav.test.ts。
  * OBS-SI-321 根治：AT_IC_11_1_1 的項數、id 清單、顯示序、order／icon 集合大小不再釘「恰九項」——改為已交付列的前綴快照（tests/helpers/navDelivered.ts，四個導覽測試檔共用）
  * 加上由登記表自身推導的唯一性斷言；測試標題沿 TCS 字樣不動。之後登記表在末尾多加一列新功能，本檔不必再改。
+ * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101 §4 #3、W-N1、W-N2；IssueCenter TCS 勘誤 1-14）：import 列停用（enabled false）、settings order 60→80、sysadmin order 65→75
+ * ⇒ 現行顯示序 議題中心→自我進化→系統管理→系統設定。上面敘述與各測試標題裡的舊描述（「監控中心之後、系統設定之前」「恰九項」「顯示序完整九項」）是當時的敘述，現行期望值以測試內的斷言為準；
+ * 側欄實際顯示的已交付項不含停用的 import（快照衍生常數是快照層級，含停用列；見 tests/helpers/navDelivered.ts 檔頭），所以比對顯示序的期望值先濾掉它。
  */
 const ROOT = process.cwd();
 const byId = (id: string) => NAV_REGISTRY.find((e) => e.id === id) as NavEntry;
 const ids = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.id);
+/** 側欄實際顯示的已交付項（依顯示序）：快照的顯示序濾掉 enabled 為 false 的列。導覽整併 2026-11-01 起 import 停用，不在可見項裡（W-N1、W-N2）。 */
+const SHOWN_DISPLAY_IDS = DELIVERED_DISPLAY_IDS.filter((id) => DELIVERED_NAV_ROWS.some((row) => row[0] === id && row[4]));
 
 describe("AT_IC_11_1 登記表第八項與顯示序", () => {
   it("AT_IC_11_1_1 NAV_REGISTRY 恰九項（原八項加 sysadmin）、id 依陣列序 dashboard、projects、import、execute、monitor、settings、self-improving、issues、sysadmin；issues 各欄符規格；顯示序完整九項；mobile 為 true 的項數 6", () => {
@@ -28,10 +33,10 @@ describe("AT_IC_11_1 登記表第八項與顯示序", () => {
     expect(issues.roles, "roles 缺＝所有已登入角色皆可見").toBeUndefined();
     expect(NAV_REGISTRY[7]).toBe(issues); // 加在陣列末尾
     expect(typeof issues.match).toBe("function");
-    // 顯示序（依 order 升冪）：議題中心排在監控中心之後、系統設定之前，系統管理排在系統設定之後，自我進化仍在最後
-    // 已交付九列在可見項中的相對顯示序不變（日後新增的列夾在中間也不影響）
+    // 顯示序（依 order 升冪；導覽整併 2026-11-01 起）：議題中心→自我進化→系統管理→系統設定（整併前是：議題中心排在監控中心之後、系統設定之前，系統管理在系統設定之後，自我進化最後）
+    // 已交付各列在可見項中的相對顯示序不變（日後新增的列夾在中間也不影響）；期望值為濾掉停用 import 的 SHOWN_DISPLAY_IDS（§4 #3、W-N2）
     for (const role of ["ADMIN", "OPERATOR", "VIEWER", undefined] as const) {
-      expect(deliveredIdsIn(ids(visibleNavEntries(NAV_REGISTRY, role))), String(role)).toEqual(DELIVERED_DISPLAY_IDS);
+      expect(deliveredIdsIn(ids(visibleNavEntries(NAV_REGISTRY, role))), String(role)).toEqual(SHOWN_DISPLAY_IDS);
     }
     // mobile：已交付列中為 true 的恰為前六項；整張登記表為 true 的項數不超過 6（新功能預設 false）
     expect(ids(deliveredPrefix(NAV_REGISTRY).filter((e) => e.mobile))).toEqual(DELIVERED_MOBILE_IDS);
@@ -53,13 +58,14 @@ describe("AT_IC_11_1 登記表第八項與顯示序", () => {
       hrefNoProject: navHref(e, { currentProjectId: null }),
       hrefProject: navHref(e, { currentProjectId: "p1" }),
     });
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation §4 #3、W-N1）：import 列 enabled true→false、settings 列 order 60→80；其餘欄與位置不變
     expect(NAV_REGISTRY.slice(0, 7).map(snapshot)).toEqual([
       { id: "dashboard", label: "儀表板", order: 10, enabled: true, mobile: true, roles: null, hrefNoProject: "/", hrefProject: "/" },
       { id: "projects", label: "專案管理", order: 20, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects" },
-      { id: "import", label: "BRD/PRD 匯入", order: 30, enabled: true, mobile: true, roles: null, hrefNoProject: "/import", hrefProject: "/import" },
+      { id: "import", label: "BRD/PRD 匯入", order: 30, enabled: false, mobile: true, roles: null, hrefNoProject: "/import", hrefProject: "/import" },
       { id: "execute", label: "執行中心", order: 40, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/execute" },
       { id: "monitor", label: "監控中心", order: 50, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/monitor" },
-      { id: "settings", label: "系統設定", order: 60, enabled: true, mobile: true, roles: null, hrefNoProject: "/settings", hrefProject: "/settings" },
+      { id: "settings", label: "系統設定", order: 80, enabled: true, mobile: true, roles: null, hrefNoProject: "/settings", hrefProject: "/settings" },
       { id: "self-improving", label: "自我進化", order: 70, enabled: true, mobile: false, roles: null, hrefNoProject: "/self-improving", hrefProject: "/self-improving" },
     ]);
     expect(NAV_REGISTRY[6].id).toBe("self-improving");
@@ -69,7 +75,8 @@ describe("AT_IC_11_1 登記表第八項與顯示序", () => {
       ["/projects", "projects"],
       ["/projects/p1/execute", "execute"],
       ["/projects/p1/monitor", "monitor"],
-      ["/import", "import"],
+      // 導覽整併 2026-11-01：import 停用 → 不在可見項，/import 沒有任何項 active（原為 "import"；TCS-ConsoleNavConsolidation W-N2）
+      ["/import", null],
       ["/settings", "settings"],
       ["/self-improving", "self-improving"],
       ["/self-improving/x", "self-improving"],

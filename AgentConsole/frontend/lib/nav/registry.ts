@@ -8,7 +8,13 @@
  *    PRD AC-SI-32-6 (f)；所以 `projects` 必須明寫自己的判斷式，並排除 execute／monitor 以免被它吃掉）；
  *  - `mobile` 為 false 的項在 <768 的底部 Tab 不顯示（元件以 `max-md:hidden` 隱藏，DOM 內仍在）；`mobile` 為 true 的項數不得超過 6；
  *  - `href` 為字串直取、為函式則以 `{ currentProjectId }` 呼叫（執行／監控都從專案進入，沒有專案時退回專案列表）。
- * registry.test.ts 鎖：九項內容、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變。
+ * registry.test.ts 鎖：九列內容（一列停用、側欄顯示八項）、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變。
+ *
+ * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101、Console PRD §0.7，掌舵者裁決）：`import` 列停用（`enabled: false`、不刪列），所以登記表仍九列、側欄顯示八項；
+ * `settings` order 60→80、`sysadmin` order 65→75，顯示序為 儀表板 10、專案管理 20、執行中心 40、監控中心 50、議題中心 55、自我進化 70、系統管理 75、系統設定 80。
+ * WHY 停用而不刪列：三份凍結 TCS 的「恰 N 項」與陣列索引陳述（`[2]` import、`[6]` self-improving、`[7]` issues、`[8]` sysadmin）全部維持真，`/import` 路由、match 認領與頁面說明不動；
+ * 匯入改由專案管理頁右上的「BRD/PRD 匯入」按鈕進入，要把入口放回側欄只需把 `enabled` 改回 true。
+ * 下方 issues、sysadmin 兩列行內註解裡的 order 比較（55 介於 50 與 60；65 介於 60 與 70）是各自加入當時的歷史敘述，現行顯示序一律以各列的 `order` 欄為準。
  */
 import { Activity, Database, Dna, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
 
@@ -46,7 +52,9 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     enabled: true,
     mobile: true,
   },
-  { id: "import", label: "BRD/PRD 匯入", icon: Upload, href: "/import", match: (pathname) => pathname.startsWith("/import"), order: 30, enabled: true, mobile: true },
+  // 導覽整併 2026-11-01（Console PRD §0.7；TCS-ConsoleNavConsolidation-20261101 W-N1）：停用＝側欄與底部 Tab 不顯示；列與其餘各欄（label、icon、href、match、order、mobile）一字不動。
+  // /import 頁照舊存在，改由專案管理頁右上的「BRD/PRD 匯入」按鈕進入。
+  { id: "import", label: "BRD/PRD 匯入", icon: Upload, href: "/import", match: (pathname) => pathname.startsWith("/import"), order: 30, enabled: false, mobile: true },
   {
     id: "execute",
     label: "執行中心",
@@ -68,7 +76,7 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     enabled: true,
     mobile: true,
   },
-  { id: "settings", label: "系統設定", icon: Settings, href: "/settings", match: (pathname) => pathname.startsWith("/settings"), order: 60, enabled: true, mobile: true },
+  { id: "settings", label: "系統設定", icon: Settings, href: "/settings", match: (pathname) => pathname.startsWith("/settings"), order: 80, enabled: true, mobile: true },
   // 第七項：自我進化（P1b）。底部 Tab 已有六項，所以 mobile 為 false（768 以上兩種形態照常顯示）
   {
     id: "self-improving",
@@ -101,7 +109,7 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     icon: Database,
     href: "/sysadmin",
     match: (pathname) => pathname === "/sysadmin" || pathname.startsWith("/sysadmin/"),
-    order: 65,
+    order: 75,
     enabled: true,
     mobile: false,
   },

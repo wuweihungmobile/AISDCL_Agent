@@ -27,8 +27,9 @@ test("導覽六項都能點到對應頁面，每頁四區塊各一份", async ({
   await loginViaStorage(page, request);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "主導覽" });
+  // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation-20261101 §4 #6、W-N4；Console PRD §0.7）：側欄的「BRD/PRD 匯入」已停用，這裡只點仍在側欄的三項；
+  // 匯入頁改自專案管理頁右上的按鈕「BRD/PRD 匯入」進入（下方）。
   const cases: Array<[link: string, url: RegExp, heading: RegExp]> = [
-    ["BRD/PRD 匯入", /\/import$/, /BRD \/ PRD 智能匯入/],
     ["系統設定", /\/settings$/, /系統參數設定/],
     ["專案管理", /\/projects$/, /專案管理/],
     ["儀表板", /\/$/, /總覽儀表板/],
@@ -39,6 +40,16 @@ test("導覽六項都能點到對應頁面，每頁四區塊各一份", async ({
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
     for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
   }
+
+  // 側欄不存在「BRD/PRD 匯入」；/import 自 /projects 的按鈕進入，標題與四區塊照舊
+  await expect(nav.getByRole("link", { name: "BRD/PRD 匯入" })).toHaveCount(0);
+  await nav.getByRole("link", { name: "專案管理" }).click();
+  await expect(page).toHaveURL(/\/projects$/);
+  await page.locator('[data-region="content"]').getByRole("link", { name: "BRD/PRD 匯入", exact: true }).click();
+  await expect(page).toHaveURL(/\/import$/);
+  await expect(page.getByRole("heading", { name: /BRD \/ PRD 智能匯入/ })).toBeVisible();
+  for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
+  await expect(nav.getByRole("link", { name: "BRD/PRD 匯入" }), "匯入頁上側欄仍沒有該入口").toHaveCount(0);
 
   // 執行中心／監控中心從「目前專案」進入（進專案頁後記住該專案）
   await page.goto(`/projects/${projectId}`);

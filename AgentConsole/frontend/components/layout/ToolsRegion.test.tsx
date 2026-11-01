@@ -16,6 +16,9 @@ import { DELIVERED_MOBILE_LABELS, DELIVERED_NAV_ROWS } from "@/tests/helpers/nav
  * 以 vi.mock 把 NAV_REGISTRY 換成測試的登記表；元件本身不認得任何特定入口。
  * OBS-SI-321 根治：連結數、DOM 順序、max-md:hidden 的集合不再釘「九個連結」——期望值取自登記表自身（visibleNavEntries 與各列的 mobile 欄），
  * 已交付列只有一份共用快照（tests/helpers/navDelivered.ts）；測試標題沿 TCS 字樣不動。登記表在末尾多加一列新功能，本檔不必再改。
+ * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101 §4 #5、AC-952-1、W-N1、W-N2）：import 列停用（enabled false）→ 不渲染；settings order 60→80、sysadmin order 65→75
+ * ⇒ 側欄八項，序為 儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定。各測試標題裡的「九個連結／九項」是整併前的描述（沿 TCS 不動標題），現行期望值以測試內的斷言為準；
+ * 比對 DOM 的已交付項一律用 SHOWN_ROWS（快照濾掉停用列；快照衍生常數是快照層級、含停用列，見 tests/helpers/navDelivered.ts 檔頭）。ToolsRegion.tsx 本身不動。
  */
 const state = vi.hoisted(() => ({ pathname: "/", registry: null as unknown, real: null as unknown }));
 vi.mock("next/navigation", () => ({
@@ -44,6 +47,8 @@ vi.mock("@/lib/nav/registry", async (importOriginal) => {
 
 const REAL = () => state.real as ReadonlyArray<NavEntry>;
 const labelOf = (id: string) => (REAL().find((e) => e.id === id) as NavEntry).label;
+/** 側欄實際渲染的已交付列：共用快照濾掉 enabled 為 false 的列（導覽整併 2026-11-01 起 import 停用，不在 DOM；W-N1、W-N2）。 */
+const SHOWN_ROWS = DELIVERED_NAV_ROWS.filter((row) => row[4]);
 
 /** 沒有專案的列表回應（ToolsRegion 的「我的專案」rail 與目前專案推導會查它）。 */
 function stubProjects() {
@@ -88,9 +93,9 @@ describe("AT_932_6_5 登記表加一列即出現入口，元件原始碼不變",
     const links = navLinks();
     const demoAt = expected.indexOf(demo);
     expect(links[demoAt]).toHaveAttribute("href", "/demo");
-    // 位置：在議題中心（order 55）之後、系統設定（order 60）之前
+    // 位置：在議題中心（order 55）之後、自我進化（order 70）之前（導覽整併 2026-11-01 前是「系統設定（order 60）之前」；TCS-ConsoleNavConsolidation §4 #5）
     expect(labels().indexOf("議題中心")).toBeLessThan(demoAt);
-    expect(demoAt).toBeLessThan(labels().indexOf("系統設定"));
+    expect(demoAt).toBeLessThan(labels().indexOf("自我進化"));
     // 其餘連結不變（標籤與 href；順序與真登記表的可見項相同）
     const others = links.filter((a) => a.getAttribute("aria-label") !== "示範功能");
     expect(others.map((a) => [a.getAttribute("aria-label"), a.getAttribute("href")])).toEqual(base.map((e) => [e.label, navHref(e, { currentProjectId: null })]));
@@ -129,9 +134,9 @@ describe("AT_932_6_6 enabled 為假或角色不符的項目不渲染", () => {
     state.registry = registry();
     renderTools(role);
     expect(labels()).toEqual([...original(role), ...visibleExtras]);
-    // roles 缺且 enabled 為真的既有項，三種角色都看得到（已交付的九項即屬此類）
+    // roles 缺且 enabled 為真的既有項，三種角色都看得到（已交付且啟用的項即屬此類；導覽整併 2026-11-01 起 import 停用，不在其中）
     for (const e of REAL().filter((x) => x.enabled && x.roles === undefined)) expect(labels(), `${e.label} 三種角色都看得到`).toContain(e.label);
-    for (const [, label] of DELIVERED_NAV_ROWS) expect(labels(), `已交付的 ${label}`).toContain(label);
+    for (const [, label] of SHOWN_ROWS) expect(labels(), `已交付的 ${label}`).toContain(label);
     const nav = within(screen.getByRole("navigation", { name: "主導覽" }));
     for (const hidden of ["停用項", "僅管理員", "操作員以上"].filter((l) => !visibleExtras.includes(l))) {
       expect(nav.queryByRole("link", { name: hidden }), hidden).toBeNull();
@@ -147,7 +152,9 @@ describe("AT_932_6_7 入口依 order 升冪，同序依登記表原序", () => {
     // 陣列順序刻意打亂：t2 排在 t1 之前（同序者依登記表原序，所以 DOM 先 t2 後 t1）
     state.registry = [REAL()[5], t2, REAL()[0], REAL()[6], t1, REAL()[3], REAL()[1], REAL()[4], REAL()[2]];
     const view = renderTools();
-    expect(labels()).toEqual(["儀表板", "專案管理", "BRD/PRD 匯入", "同序後者", "同序前者", "執行中心", "監控中心", "系統設定", "自我進化"]);
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation §4 #5、W-N1）：REAL()[2] 是停用的 import（不渲染）、系統設定 order 80 排在自我進化 70 之後
+    // （整併前：儀表板、專案管理、BRD/PRD 匯入、同序後者、同序前者、執行中心、監控中心、系統設定、自我進化）
+    expect(labels()).toEqual(["儀表板", "專案管理", "同序後者", "同序前者", "執行中心", "監控中心", "自我進化", "系統設定"]);
     view.unmount();
 
     // 改 order 即移動：把「系統設定」的 order 改成最小值
@@ -163,9 +170,9 @@ describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
 
   it("AT_932_6_8 九個連結都在 DOM；只有 mobile 為 false 的自我進化、議題中心與系統管理帶 max-md:hidden；aria-label 與 title 恆等於 label", () => {
     renderTools();
-    // 每個可見的登記項一個連結（不寫死項數）；已交付的九項都在 DOM
+    // 每個可見的登記項一個連結（不寫死項數）；已交付且啟用的各項都在 DOM（導覽整併 2026-11-01 起 import 停用，不渲染）
     expect(navLinks()).toHaveLength(visibleNavEntries(REAL(), "OPERATOR").length);
-    for (const [, label] of DELIVERED_NAV_ROWS) expect(labels(), `已交付的 ${label} 在 DOM`).toContain(label);
+    for (const [, label] of SHOWN_ROWS) expect(labels(), `已交付的 ${label} 在 DOM`).toContain(label);
     const mobileOf = (label: string) => (REAL().find((e) => e.label === label) as NavEntry).mobile;
     for (const link of navLinks()) {
       const label = link.getAttribute("aria-label");
@@ -174,8 +181,8 @@ describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
       // max-md:hidden 恰在登記表 mobile 為 false 的項上
       expect(classOf(label as string).includes("max-md:hidden"), `${label} 的 max-md:hidden`).toBe(mobileOf(label as string) === false);
     }
-    // 已交付列：自我進化、議題中心、系統管理（mobile 為 false）帶 max-md:hidden，其餘六項不帶
-    for (const [, label, , mobile] of DELIVERED_NAV_ROWS) expect(classOf(label).includes("max-md:hidden"), `已交付的 ${label}（mobile ${String(mobile)}）`).toBe(!mobile);
+    // 已交付且啟用的列：自我進化、議題中心、系統管理（mobile 為 false）帶 max-md:hidden，其餘五項不帶（整併前是六項；import 已停用不在 DOM）
+    for (const [, label, , mobile] of SHOWN_ROWS) expect(classOf(label).includes("max-md:hidden"), `已交付的 ${label}（mobile ${String(mobile)}）`).toBe(!mobile);
   });
 
   // TCS-SysAdminBackup-20261027 AT-BK-01-3-1（R-BK-03）：真登記表的九個連結；<768 的底部 Tab 不顯示的恰為三項，ToolsRegion.tsx 本身不認得任何特定入口（G-C3 另以 git diff 零差異鎖住）
@@ -193,10 +200,11 @@ describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
         .sort(),
     );
     expect(hidden).toEqual(expect.arrayContaining(DELIVERED_NAV_ROWS.filter((row) => !row[3]).map((row) => row[1])));
-    // 其餘（mobile 為 true）依顯示序：登記表可見項的 mobile 為 true 者，也就是已交付的六項
+    // 其餘（mobile 為 true）依顯示序：登記表可見項的 mobile 為 true 者，也就是已交付且啟用的五項（導覽整併 2026-11-01 起 import 停用；整併前是六項）
     const shown = links.filter((a) => !classOf(a.getAttribute("aria-label") as string).includes("max-md:hidden")).map((a) => a.getAttribute("aria-label"));
     expect(shown).toEqual(visible.filter((e) => e.mobile).map((e) => e.label));
-    expect(shown).toEqual(DELIVERED_MOBILE_LABELS);
+    // DELIVERED_MOBILE_LABELS 是快照層級（含停用的 import）：期望值先濾掉停用列（TCS-ConsoleNavConsolidation §4 #5、W-N2）
+    expect(shown).toEqual(DELIVERED_MOBILE_LABELS.filter((label) => SHOWN_ROWS.some((row) => row[1] === label)));
     for (const link of links) {
       expect(link.getAttribute("title")).toBe(link.getAttribute("aria-label"));
       expect(link.textContent).toBe(link.getAttribute("aria-label"));
@@ -207,14 +215,15 @@ describe("AT_932_6_8 mobile 旗標以 max-md:hidden 落實", () => {
   });
 
   it("AT_932_6_8 替身登記表把自我進化的 mobile 改為 true 後它不再帶 max-md:hidden；把既有項改為 false 後它帶；aria-label 與 title 不隨 mobile 改變", () => {
-    state.registry = REAL().map((e) => (e.id === "self-improving" ? { ...e, mobile: true } : e.id === "import" ? { ...e, mobile: false } : e));
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation §4 #5、W-N1）：import 已停用、不在 DOM，「既有項改為 false」的樣本由「BRD/PRD 匯入」改為「專案管理」
+    state.registry = REAL().map((e) => (e.id === "self-improving" ? { ...e, mobile: true } : e.id === "projects" ? { ...e, mobile: false } : e));
     renderTools();
     expect(classOf("自我進化")).not.toContain("max-md:hidden");
-    expect(classOf("BRD/PRD 匯入")).toContain("max-md:hidden");
+    expect(classOf("專案管理")).toContain("max-md:hidden");
     expect(classOf("儀表板")).not.toContain("max-md:hidden");
-    const imp = within(screen.getByRole("navigation", { name: "主導覽" })).getByRole("link", { name: "BRD/PRD 匯入" });
-    expect(imp.getAttribute("title")).toBe("BRD/PRD 匯入");
-    expect(imp.getAttribute("aria-label")).toBe("BRD/PRD 匯入");
+    const projects = within(screen.getByRole("navigation", { name: "主導覽" })).getByRole("link", { name: "專案管理" });
+    expect(projects.getAttribute("title")).toBe("專案管理");
+    expect(projects.getAttribute("aria-label")).toBe("專案管理");
   });
 });
 
@@ -227,7 +236,8 @@ describe("AT_932_6_9 active 依序第一個命中，未知路徑不亮任何項"
     ["/projects/p1/goals", "projects"],
     ["/projects/p1/execute", "execute"],
     ["/projects/p1/monitor", "monitor"],
-    ["/import", "import"],
+    // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation W-N2）：import 停用 → 不在可見項，/import 沒有任何項 active（原為 "import"；尤其不 fallback 成專案管理）
+    ["/import", "none"],
     ["/settings", "settings"],
     ["/settings/x", "settings"],
     ["/self-improving", "self-improving"],
@@ -259,5 +269,32 @@ describe("AT_932_6_9 active 依序第一個命中，未知路徑不亮任何項"
     expect(nav.getByRole("link", { name: "專案管理" })).toHaveAttribute("aria-current", "page");
     expect(nav.getByRole("link", { name: "執行中心" })).toHaveAttribute("href", "/projects/p2/execute");
     expect(nav.getByRole("link", { name: "監控中心" })).toHaveAttribute("href", "/projects/p2/monitor");
+  });
+});
+
+// TCS-ConsoleNavConsolidation-20261101 AC-952-1（W-N2；Console PRD §0.7）：真登記表渲染的側欄在導覽整併後只剩八項，停用的匯入入口不在 DOM；ToolsRegion.tsx 本身不動（G-C3）
+describe("AT_952_1_3 導覽整併後真登記表渲染的側欄", () => {
+  const hiddenOnMobile = (link: HTMLElement) => link.className.split(/\s+/).includes("max-md:hidden");
+
+  it("AT_952_1_3 真登記表、OPERATOR 渲染 ToolsRegion：主導覽恰八個連結、aria-label 序為 儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定；沒有名稱「BRD/PRD 匯入」的連結；max-md:hidden 恰在議題中心、自我進化、系統管理；ToolsRegion.tsx 不含匯入入口的任何字樣", () => {
+    const view = renderTools("OPERATOR", "/");
+    const links = navLinks();
+    expect(links).toHaveLength(8);
+    expect(labels()).toEqual(["儀表板", "專案管理", "執行中心", "監控中心", "議題中心", "自我進化", "系統管理", "系統設定"]);
+    // 停用的 import 不渲染：沒有名稱「BRD/PRD 匯入」的連結，也沒有任何連結指向 /import
+    expect(screen.queryByRole("link", { name: "BRD/PRD 匯入" })).toBeNull();
+    expect(links.map((a) => a.getAttribute("href"))).not.toContain("/import");
+    // <768 底部 Tab：max-md:hidden 恰在 mobile 為 false 的三項；其餘五項（儀表板、專案管理、執行中心、監控中心、系統設定）顯示
+    expect(links.filter(hiddenOnMobile).map((a) => a.getAttribute("aria-label"))).toEqual(["議題中心", "自我進化", "系統管理"]);
+    expect(links.filter((a) => !hiddenOnMobile(a)).map((a) => a.getAttribute("aria-label"))).toEqual(["儀表板", "專案管理", "執行中心", "監控中心", "系統設定"]);
+    // ToolsRegion.tsx 零差異（G-C3 的 git diff 由主控核對）：登記表驅動，元件不得為了隱藏匯入入口而出現它的任何字樣
+    const source = readFileSync(path.join(process.cwd(), "components", "layout", "ToolsRegion.tsx"), "utf-8");
+    expect(source.includes("匯入") || source.includes("/import") || /["'`]import["'`]/.test(source), "ToolsRegion.tsx 不得針對匯入入口寫任何字樣").toBe(false);
+
+    // 對照組（斷言有鑑別力）：import 若啟用，同一個畫面就會多出「BRD/PRD 匯入」連結
+    view.unmount();
+    state.registry = REAL().map((e) => (e.id === "import" ? { ...e, enabled: true } : e));
+    renderTools("OPERATOR", "/");
+    expect(screen.getByRole("link", { name: "BRD/PRD 匯入" }), "對照組：啟用 import 後側欄多一項").toHaveAttribute("href", "/import");
   });
 });

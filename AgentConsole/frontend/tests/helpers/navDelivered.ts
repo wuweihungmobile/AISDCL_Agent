@@ -9,34 +9,38 @@ import type { Role } from "@/lib/api/types";
  * 唯一性、mobile 上限、icon 互異、href 對應真路由、match 互斥一律以 `NAV_REGISTRY` 自身推導，不看這份快照。
  *
  * 欄位：[id, label, order, mobile, enabled, roles]；roles 缺＝null。
+ *
+ * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101 §4 #1、W-N1）：import 列 enabled 改 false（停用、不刪列，仍留在快照裡）、settings order 60→80、sysadmin order 65→75；列序與其他欄不變。
+ * 注意：下面的衍生常數（DELIVERED_DISPLAY_IDS、DELIVERED_MOBILE_IDS、DELIVERED_MOBILE_LABELS）是**快照層級**——不看 enabled，停用列仍在其中；
+ * 要比對「側欄實際顯示的已交付項」（可見項、DOM 連結、底部 Tab）的測試，須先濾掉 enabled 為 false 的列（row[4]）。
  */
 export type DeliveredNavRow = readonly [id: string, label: string, order: number, mobile: boolean, enabled: boolean, roles: ReadonlyArray<Role> | null];
 
 export const DELIVERED_NAV_ROWS: ReadonlyArray<DeliveredNavRow> = [
   ["dashboard", "儀表板", 10, true, true, null],
   ["projects", "專案管理", 20, true, true, null],
-  ["import", "BRD/PRD 匯入", 30, true, true, null],
+  ["import", "BRD/PRD 匯入", 30, true, false, null],
   ["execute", "執行中心", 40, true, true, null],
   ["monitor", "監控中心", 50, true, true, null],
-  ["settings", "系統設定", 60, true, true, null],
+  ["settings", "系統設定", 80, true, true, null],
   ["self-improving", "自我進化", 70, false, true, null],
   ["issues", "議題中心", 55, false, true, null],
-  ["sysadmin", "系統管理", 65, false, true, null],
+  ["sysadmin", "系統管理", 75, false, true, null],
 ];
 
 /** 已交付列的 id，依陣列序。 */
 export const DELIVERED_NAV_IDS: ReadonlyArray<string> = DELIVERED_NAV_ROWS.map((row) => row[0]);
 
-/** 已交付列的 id，依顯示序（order 升冪；同序依陣列序——Array.prototype.sort 是穩定排序）。 */
+/** 已交付列的 id，依顯示序（order 升冪；同序依陣列序——Array.prototype.sort 是穩定排序）。快照層級：含停用列（import）。 */
 export const DELIVERED_DISPLAY_IDS: ReadonlyArray<string> = [...DELIVERED_NAV_ROWS].sort((a, b) => a[2] - b[2]).map((row) => row[0]);
 
-/** 已交付列中 mobile 為 true 的 id（<768 的底部 Tab 顯示的那幾項），依顯示序。 */
+/** 已交付列中 mobile 欄為 true 的 id，依顯示序。欄位層級、不看 enabled：停用的 import 其 mobile 欄照舊為 true（⚖5），所以仍在其中。 */
 export const DELIVERED_MOBILE_IDS: ReadonlyArray<string> = [...DELIVERED_NAV_ROWS]
   .sort((a, b) => a[2] - b[2])
   .filter((row) => row[3])
   .map((row) => row[0]);
 
-/** 已交付列中 mobile 為 true 的 label，依顯示序（＝<768 底部 Tab 的六個入口）。 */
+/** 已交付列中 mobile 為 true 的 label，依顯示序。快照層級：含停用的 import；<768 底部 Tab 實際顯示的是濾掉停用列後的五項。 */
 export const DELIVERED_MOBILE_LABELS: ReadonlyArray<string> = [...DELIVERED_NAV_ROWS]
   .sort((a, b) => a[2] - b[2])
   .filter((row) => row[3])

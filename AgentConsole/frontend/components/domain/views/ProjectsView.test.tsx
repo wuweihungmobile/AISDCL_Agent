@@ -190,3 +190,34 @@ describe("專案列表：復原（POST /projects/{id}/restore；C-3）", () => {
     expect(await screen.findByText(/復原失敗：權限不足：ACCESS_DENIED/)).toBeInTheDocument();
   });
 });
+
+// TCS-ConsoleNavConsolidation-20261101 AC-952-2（W-N3；Console PRD §0.7）：側欄不再有匯入入口，專案管理頁右上的連結改名「BRD/PRD 匯入」（href、圖示不變；空狀態文案本就同名）
+describe("專案列表：右上「BRD/PRD 匯入」連結（AC-952-2；W-N3）", () => {
+  const emptyBackend = () => backend((c) => (c.method === "GET" && c.path === "/api/v1/projects" ? { data: page([]) } : undefined));
+
+  it("AT_952_2_1 OPERATOR、空專案列表：右上連結名稱「BRD/PRD 匯入」、href 為 /import、內含圖示 svg；頁內沒有名稱恰為「匯入」的連結；空狀態描述含「BRD/PRD 匯入」", async () => {
+    emptyBackend();
+    view();
+    const link = await screen.findByRole("link", { name: "BRD/PRD 匯入" });
+    expect(link).toHaveAttribute("href", "/import");
+    expect(link.querySelector("svg"), "Upload 圖示仍在連結內").not.toBeNull();
+    expect(screen.queryByRole("link", { name: "匯入" }), "改名後不再有名稱恰為「匯入」的連結").toBeNull();
+    // 空狀態（等列表載入完）：描述裡的「BRD/PRD 匯入」與按鈕同名
+    expect(await screen.findByText("還沒有任何專案")).toBeInTheDocument();
+    expect(screen.getByText(/或從「BRD\/PRD 匯入」讓 AI 拆解/)).toBeInTheDocument();
+    // 對照組（讓下一個 AT 的 toBeDisabled 有鑑別力）：OPERATOR 的「新建專案」可按
+    expect(screen.getByRole("button", { name: "新建專案" })).toBeEnabled();
+  });
+
+  it("AT_952_2_E_1 VIEWER 渲染：「BRD/PRD 匯入」連結仍在（名稱與 href 同上；匯入頁的權限不在本鍵範圍）；「新建專案」按鈕為停用（既有行為不變）", async () => {
+    signIn("VIEWER", "viewer");
+    emptyBackend();
+    view();
+    const link = await screen.findByRole("link", { name: "BRD/PRD 匯入" });
+    expect(link).toHaveAttribute("href", "/import");
+    expect(screen.queryByRole("link", { name: "匯入" })).toBeNull();
+    const create = screen.getByRole("button", { name: "新建專案" });
+    expect(create).toBeDisabled();
+    expect(create).toHaveAttribute("title", "權限不足（唯讀角色）");
+  });
+});
