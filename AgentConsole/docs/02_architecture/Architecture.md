@@ -333,7 +333,7 @@ app/
 ├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
 ├── issues/page.tsx                 # 議題中心：三類帳本的中文議題清單、順位與決定（〔IssueCenter 已落地 2026-10-27〕；左列第八項；本行 2026-10-31 補入，OBS-SI-321 文件漂移）
 ├── sysadmin/
-│   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、order 65 介於系統設定與自我進化之間、底部 Tab 不顯示）
+│   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、底部 Tab 不顯示；order 原 65 介於系統設定與自我進化之間，〔導覽整併 2026-11-01〕改 75 介於自我進化與系統設定（80）之間）
 │   └── backup/page.tsx             # 資料庫備份：狀態卡、備份清單、排程與保留、控制面健康與資料新鮮度、還原與涵蓋範圍說明（唯讀；階段二加手動觸發與工作紀錄）
 └── api/health/route.ts             # 前端健康檢查（API-HLT-03）；PRD §4.2 的 BFF 層不實作
 ```
@@ -359,7 +359,7 @@ app/
 | 區塊 | 唯一元件檔 | 對應設計稿 | 內容 |
 |------|-----------|------------|------|
 | Top | `frontend/components/layout/TopRegion.tsx` | Topbar＋Masthead | 公告列（說明文件、下載 CLI、GitHub、Bridge 狀態、通知、幫助、語言、使用者徽章）；logo；搜尋列與 recent chips；通知鈴；signoff 佇列鈕（draftCount badge）；**本頁說明鈕**（**〔PageHelp 已落地 2026-10-28〕**右側群組末端、`showTools` 分支內，`components/domain/help/PageHelpButton.tsx` 以 `next/dynamic` 載入，說明本體不進首屏；顯示與內容由 `frontend/lib/help/registry.ts` 的說明登記表決定——路由無說明項或仍在 `PENDING_HELP_PAGES` 者不渲染；§5.4） |
-| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化〔訂正（2026-10-31，OBS-SI-321 根因修法）：現為九項，加議題中心〔2026-10-27〕與系統管理〔2026-10-28〕；項數改由 `registry.ts` 推導，`registry.test.ts`／`issues-nav.test.ts`／`sysadmin-nav.test.ts`／`ToolsRegion.test.tsx` 不再釘「恰 N 項」，新增入口只改登記表一列〕；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
+| Tools | `frontend/components/layout/ToolsRegion.tsx` | Sidebar | 導航項由 `frontend/lib/nav/registry.ts` 的**登記表**決定（P1b 落地後為七項：儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定、自我進化〔訂正（2026-10-31，OBS-SI-321 根因修法）：現為九項，加議題中心〔2026-10-27〕與系統管理〔2026-10-28〕；項數改由 `registry.ts` 推導，`registry.test.ts`／`issues-nav.test.ts`／`sysadmin-nav.test.ts`／`ToolsRegion.test.tsx` 不再釘「恰 N 項」，新增入口只改登記表一列〕〔訂正（導覽整併 2026-11-01，Console PRD §0.7）：登記表仍九列，`import` 列 `enabled: false` 不渲染 ⇒ 側欄顯示八項，序為儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定；`/import` 由專案管理頁按鈕「BRD/PRD 匯入」進入〕；**〔P1b 已落地 2026-10-22〕**——`ToolsRegion.tsx` 只消費登記表，由 `registry.test.ts` 的 `AT_932_6_4` 讀檔斷言釘住）；「我的專案」rail（狀態點＋專案名）〔訂正（SelfImproving PRD T1 修訂 v0.10，⚖14；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：原文「導航六項（儀表板、專案管理、BRD/PRD 匯入、執行、監控、系統設定）」；導覽項改由登記表決定，新增入口只加登記表一列，見硬規則 2、5 與 §5.4〕 |
 | Content | `frontend/components/layout/ContentRegion.tsx` | Main | 路由內容容器；`children` 由 `app/layout.tsx` 傳入 |
 | Bottom | `frontend/components/layout/BottomRegion.tsx` | （設計稿無；依掌舵者四區塊要求新增） | Engine Bridge 連線狀態點、版本號、Toast 宿主；不得放任何新功能 |
 
@@ -418,13 +418,13 @@ export interface NavEntry {
   match: (pathname: string) => boolean;     // 此項是否 active：純函式，不讀 React 狀態
   order: number;                            // 升冪；唯一
   roles?: Role[];                           // 缺＝所有已登入角色（Role 見 lib/api/types.ts）
-  enabled: boolean;                         // false＝不渲染；預留給日後旗標，本輪不做旗標系統
+  enabled: boolean;                         // false＝不渲染；2026-11-01 起 `import` 列以此停用側欄入口（頁面、href、match 保留；PRD §0.7）
   mobile: boolean;                          // <768 底部 Tab 是否顯示（上限 6 項 true，registry.test.ts 斷言）
 }
 export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 ```
 
-渲染規則：`enabled` 為真且（`roles` 缺或含目前角色）者才渲染，依 `order` 升冪；active＝依序第一個 `match(pathname)` 為真者（**不再有未知路徑 fallback 成「專案管理」**）；768～1279 為圖示側欄、≥1280 為完整側欄（`mobile` 不影響這兩者）；<768 底部 Tab 只渲染 `mobile: true` 的項（新功能預設 `false`，窄螢幕實測後再升）。
+渲染規則：`enabled` 為真且（`roles` 缺或含目前角色）者才渲染，依 `order` 升冪；active＝依序第一個 `match(pathname)` 為真者（**不再有未知路徑 fallback 成「專案管理」**）；768～1279 為圖示側欄、≥1280 為完整側欄（`mobile` 不影響這兩者）；<768 底部 Tab 只渲染 `mobile: true` 的項（新功能預設 `false`，窄螢幕實測後再升）。**〔導覽整併 2026-11-01（Console PRD §0.7；鍵 `agentconsole-nav-consolidation`）〕**：`import` 列 `enabled: false`（側欄不顯示；`/import` 由專案管理頁按鈕「BRD/PRD 匯入」與儀表板主按鈕進入）；`order` 現值 dashboard 10、projects 20、import 30（停用）、execute 40、monitor 50、issues 55、self-improving 70、sysadmin 75、settings 80 ⇒ 顯示序 儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定；已交付列快照 `frontend/tests/helpers/navDelivered.ts` 同步。
 
 接入檢查表（逐項勾）：
 

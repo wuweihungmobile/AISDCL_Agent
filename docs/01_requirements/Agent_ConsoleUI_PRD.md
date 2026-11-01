@@ -121,6 +121,16 @@
 - **儲存後端**：`storage.mode`（yaml_only/both/db_only）/ `db_dsn`（加密）/ `dual_read_resolution`。
 > §5.5.1.1 既有的 provider/apiUrl/apiKey 欄位保留為 Console 抽象層；物化到引擎時由 Bridge 對映成上述 `MINIMAX_*` 與 `claude` 區段 + `config.yaml`。
 
+### 0.7 側邊欄導覽整併校正（與 §8.1 合併；掌舵者 2026-11-01 指令，sid `655d9777-cfd0-4478-b2b3-b8245313b24c`；鍵 `agentconsole-nav-consolidation`）
+
+掌舵者 2026-11-01 以互動選項裁決三件事（原文「UI優化整併, 請將左邊 Tools Bar的BRD/PRD匯入移除, 保留"專案管理/匯入", 將"匯入"改成"BRD/PRD匯入"」「UI Tools Bar 順序調整」「"監控中心"與"執行中心"有何不同? 若功能都相同, 是否只保留"監控中心"」）：
+
+1. **側邊欄不再顯示「BRD/PRD 匯入」入口**：`/import` 頁面、路由與頁面說明全部保留，入口改為專案管理頁右上的按鈕「BRD/PRD 匯入」（原文字「匯入」）與儀表板既有的主按鈕「匯入 BRD / PRD」。機械物＝導覽登記表 `import` 列 `enabled: false`（列、索引、`href`、`match` 不變；Architecture §5.4 的 `enabled` 旗標首次實際使用）。
+2. **「執行中心」與「監控中心」兩者都保留**：執行中心是操作面（啟動、暫停、恢復、取消批次；自治等級與 Token 預算；審核待審項；從斷點恢復），監控中心是觀察面（完成率、成功率、Token 指標、趨勢圖、事件時間軸、日誌查詢、告警確認、引擎狀態）；功能不重疊，刪任一頁都會失去一整面。
+3. **顯示序**改為：儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定（登記表 `order`：10、20、40、50、55、70、75、80；只動 `settings` 60→80 與 `sysadmin` 65→75，其餘列不動）。<768 底部 Tab 顯示 `mobile: true` 的五項（儀表板、專案管理、執行中心、監控中心、系統設定），不補第六項。
+
+本節凌駕 §8.1 的側邊欄表（該表保留原文作史料）；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ConsoleNavConsolidation-20261101.md`。
+
 ---
 
 ## 1. 文件概述
@@ -1887,6 +1897,8 @@ CREATE INDEX idx_system_configs_category_key ON system_configs(category, key);
 | 🚀 | 執行中心 | `/projects/[id]/execute` | 專案執行控制台（從專案進入） |
 | 📈 | 監控中心 | `/projects/[id]/monitor` | 專案監控儀表板（從專案進入） |
 | ⚙ | 系統設定 | `/settings` | 系統參數設定 |
+
+> 2026-11-01 校正（§0.7，凌駕本表）：側邊欄不再顯示「BRD/PRD 匯入」（頁面保留，自專案管理頁按鈕「BRD/PRD 匯入」或儀表板主按鈕進入）；顯示序＝儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定。議題中心、自我進化、系統管理三項的入口分別由各自的 PRD 增補（本表為 v1.1.0 原文）。
 
 ### 8.2 設計系統
 
