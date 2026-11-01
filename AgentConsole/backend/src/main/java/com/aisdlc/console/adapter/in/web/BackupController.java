@@ -39,7 +39,7 @@ import java.util.Map;
  * 失敗一律<b>沒有 {@code data}</b>（不回空表、不回部分資料）。
  */
 @RestController
-@RequestMapping("/api/v1/sysadmin")
+@RequestMapping("/api/v1/sysadmin/backups")
 @Tag(name = "系統管理（資料庫備份）", description = "備份清單與狀態（唯讀）、手動觸發全備／增備／驗證（僅 ADMIN）、工作紀錄；契約檔 API_Contract_SysAdminBackup.md")
 public class BackupController {
 
@@ -51,7 +51,7 @@ public class BackupController {
         this.trigger = trigger;
     }
 
-    @GetMapping("/backups")
+    @GetMapping
     @Operation(operationId = "getBackupOverview", summary = "備份總覽（唯讀；系統管理／資料庫備份）",
             description = "備份清單、四張最近狀態卡（全備、增備、離站 pg_dump、驗證）、排程與保留、各 repo 狀態、WAL 歸檔健康與進行中的工作。"
                     + "每個請求讀 sidecar 匯出的 8 個控制面檔案（不快取）。🔴 fail-loud：控制面未設定（control.reason=not_configured）、匯出檔不可讀"
@@ -62,7 +62,7 @@ public class BackupController {
         return ApiResult.ok(BackupOverviewResponse.from(query.overview(isAdmin(authentication))));
     }
 
-    @GetMapping("/backups/jobs")
+    @GetMapping("/jobs")
     @Operation(operationId = "getBackupJobs", summary = "備份工作紀錄（唯讀；Console 發起的手動工作）",
             description = "requested_at 嚴格新到舊；排程工作不在此表（看總覽的狀態卡）。limit 預設 20、1～100；before 為 ISO-8601 時間（嚴格小於 requested_at）；"
                     + "參數非法 → 422 invalid_request（details.violations[{field,message}]）。回 {items, nextBefore}。requestedBy、detail 僅 ADMIN。"
@@ -77,7 +77,7 @@ public class BackupController {
         return ApiResult.ok(BackupJobPageResponse.from(query.jobs(limit, before, isAdmin(authentication))));
     }
 
-    @GetMapping("/backups/jobs/{id}")
+    @GetMapping("/jobs/{id}")
     @Operation(operationId = "getBackupJob", summary = "單筆備份工作（唯讀）",
             description = "查無或 id 不是 UUID → 404 backup_job_not_found（不是 500、不是 422）。detail（已遮罩、最後 ≤2000 字元）與 requestedBy 僅 ADMIN。"
                     + "控制面未設定或資料庫讀取失敗 → 503 backup_control_unavailable。VIEWER 以上可讀。")
@@ -86,7 +86,7 @@ public class BackupController {
         return ApiResult.ok(BackupJobResponse.from(query.job(id, isAdmin(authentication))));
     }
 
-    @PostMapping("/backups/jobs")
+    @PostMapping("/jobs")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(operationId = "postBackupJob", summary = "手動觸發備份（全備、增備、驗證；僅 ADMIN）",
             description = "body {type:\"full|diff|verify\", confirm:true}。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 本文不是 JSON 物件"

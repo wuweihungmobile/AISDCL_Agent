@@ -215,14 +215,14 @@ class BackupApiIT extends AbstractApiIT {
         assertThat(requestFiles()).as(label + "：請求目錄零檔（含無 .tmp）").isEmpty();
     }
 
+    /** 讀請求檔成 JSON 物件（Jackson 回傳 raw {@code Map}，轉型集中在這一處）。 */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> mapOf(Object value) {
         return (Map<String, Object>) value;
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<String> stringsOf(Object value) {
-        return (List<String>) value;
+    private Map<String, Object> requestFile(String id) throws IOException {
+        return mapOf(JSON.readValue(Files.readString(requestRoot.resolve(id + ".json"), StandardCharsets.UTF_8), Map.class));
     }
 
     /** 改 INFO_2REPO 的第一個 stanza：{@code mutate} 收 backup 清單與 repo 清單。 */
@@ -1126,7 +1126,7 @@ class BackupApiIT extends AbstractApiIT {
         assertThat(id).isNotEqualTo("not-honored");
         UUID.fromString(id);
         assertThat(requestFiles()).containsExactly(id + ".json");
-        Map<String, Object> file = JSON.readValue(Files.readString(requestRoot.resolve(id + ".json"), StandardCharsets.UTF_8), Map.class);
+        Map<String, Object> file = requestFile(id);
         assertThat(file.keySet()).containsExactly("schema_rev", "id", "type", "requested_at", "expires_at");
         assertThat(file).containsEntry("id", id).containsEntry("type", "verify");
         assertThat(file.toString()).doesNotContain("cmd").doesNotContain("touch");
@@ -1148,7 +1148,7 @@ class BackupApiIT extends AbstractApiIT {
                 + "as at from console.backup_jobs where id = ?::uuid", id);
         assertThat(row).containsEntry("status", "QUEUED").containsEntry("requested_by", "admin").containsEntry("at", iso(NOW));
         assertThat(requestFiles()).containsExactly(id + ".json");
-        Map<String, Object> file = JSON.readValue(Files.readString(requestRoot.resolve(id + ".json"), StandardCharsets.UTF_8), Map.class);
+        Map<String, Object> file = requestFile(id);
         assertThat(file).containsEntry("schema_rev", 1).containsEntry("type", "diff").containsEntry("requested_at", iso(NOW))
                 .containsEntry("expires_at", iso(NOW.plusSeconds(120)));
     }

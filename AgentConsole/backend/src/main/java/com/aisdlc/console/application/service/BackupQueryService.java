@@ -74,7 +74,6 @@ public class BackupQueryService implements BackupQueryUseCase {
     private final BackupSettings settings;
     private final BackupJobRepository jobs;
     private final WalArchiveStatsPort walArchive;
-    private final BackupClock clock;
     private final BackupJobReconciler reconciler;
     private final ExportReader reader;
 
@@ -83,8 +82,8 @@ public class BackupQueryService implements BackupQueryUseCase {
         this.settings = settings;
         this.jobs = jobs;
         this.walArchive = walArchive;
-        this.clock = clock;
         this.reconciler = reconciler;
+        // 時鐘只有匯出讀取器在用（Export 建立時刻與心跳判定）；本類別自身不讀時間，不另存欄位。
         this.reader = new ExportReader(settings, control, clock);
     }
 
