@@ -500,7 +500,9 @@ class BackupArchTest {
 
         String controllerSource = sources.get(CONTROLLER);
         assertThat(mappingViolations(controllerSource + "\n@PutMapping(\"/backups/retention\")")).as("多一個 @PutMapping").isNotEmpty();
-        assertThat(mappingViolations(controllerSource.replace("@PostMapping(\"/backups/jobs\")", ""))).as("少一個 @PostMapping").isNotEmpty();
+        // 負控拿掉唯一的 @PostMapping；不綁路徑字面——2026-11-01 把 /backups 併入類別層 @RequestMapping 後，
+        // 舊字面 @PostMapping("/backups/jobs") 已不存在，replace 零命中會讓本負控靜默失效（agentconsole-ci 實紅）。
+        assertThat(mappingViolations(controllerSource.replaceFirst("@PostMapping\\([^)]*\\)", ""))).as("少一個 @PostMapping").isNotEmpty();
         assertThat(mappingViolations(controllerSource + "\n@DeleteMapping")).as("多一個 @DeleteMapping").isNotEmpty();
         assertThat(mappingViolations(controllerSource + "\n@RequestMapping(method = RequestMethod.PUT)")).as("帶 method 的 @RequestMapping").isNotEmpty();
     }
