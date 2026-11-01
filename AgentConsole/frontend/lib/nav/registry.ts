@@ -14,7 +14,6 @@
  * `settings` order 60→80、`sysadmin` order 65→75，顯示序為 儀表板 10、專案管理 20、執行中心 40、監控中心 50、議題中心 55、自我進化 70、系統管理 75、系統設定 80。
  * WHY 停用而不刪列：三份凍結 TCS 的「恰 N 項」與陣列索引陳述（`[2]` import、`[6]` self-improving、`[7]` issues、`[8]` sysadmin）全部維持真，`/import` 路由、match 認領與頁面說明不動；
  * 匯入改由專案管理頁右上的「BRD/PRD 匯入」按鈕進入，要把入口放回側欄只需把 `enabled` 改回 true。
- * 下方 issues、sysadmin 兩列行內註解裡的 order 比較（55 介於 50 與 60；65 介於 60 與 70）是各自加入當時的歷史敘述，現行顯示序一律以各列的 `order` 欄為準。
  */
 import { Activity, Database, Dna, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
 
@@ -89,7 +88,7 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     mobile: false,
   },
   // 第八項：議題中心（TCS-IssueCenter-20261027 R-IC-62）。加在陣列**末尾**（原七列的陣列位置與索引不變，`NAV_REGISTRY[6]` 仍是 self-improving）；
-  // 顯示序由 order 決定：55 介於監控中心 50 與系統設定 60，所以排在自我進化（70）之前。底部 Tab 已有六項，所以 mobile 為 false（先例同 self-improving）。
+  // 顯示序由 order 決定：55 介於監控中心 50 與自我進化 70（加入當時介於監控中心與系統設定 60；導覽整併 2026-11-01 把 settings 改 80、sysadmin 改 75）。底部 Tab 已有六項，所以 mobile 為 false（先例同 self-improving）。
   {
     id: "issues",
     label: "議題中心",
@@ -101,7 +100,7 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     mobile: false,
   },
   // 第九項：系統管理（TCS-SysAdminBackup-20261027 R-BK-01）。同樣加在陣列**末尾**（原八列的陣列位置與索引不變，`NAV_REGISTRY[6]` 仍是 self-improving、`[7]` 仍是 issues）；
-  // 顯示序由 order 決定：65 介於系統設定 60 與自我進化 70，所以排在系統設定之後、自我進化之前。底部 Tab 已有六項，所以 mobile 為 false（先例同 self-improving、issues）。
+  // 顯示序由 order 決定：75 介於自我進化 70 與系統設定 80，所以排在自我進化之後、系統設定之前（加入當時為 65，介於系統設定 60 與自我進化 70；導覽整併 2026-11-01 改值）。底部 Tab 已有六項，所以 mobile 為 false（先例同 self-improving、issues）。
   // 圖示 Database（與 DatabaseBackup 互異；九個圖示皆不重複）。
   {
     id: "sysadmin",

@@ -201,6 +201,8 @@ describe("專案列表：右上「BRD/PRD 匯入」連結（AC-952-2；W-N3）",
     const link = await screen.findByRole("link", { name: "BRD/PRD 匯入" });
     expect(link).toHaveAttribute("href", "/import");
     expect(link.querySelector("svg"), "Upload 圖示仍在連結內").not.toBeNull();
+    // SCG-4 一審 F-02（突變 m16：Upload→Plus 存活）：W-N3「仍帶 Upload 圖示」要釘到圖示本身——lucide-react 在 svg 上標 `lucide-upload`
+    expect(link.querySelector("svg")?.getAttribute("class") ?? "", "圖示須是 Upload（lucide-upload），不是任意 svg").toContain("lucide-upload");
     expect(screen.queryByRole("link", { name: "匯入" }), "改名後不再有名稱恰為「匯入」的連結").toBeNull();
     // 空狀態（等列表載入完）：描述裡的「BRD/PRD 匯入」與按鈕同名
     expect(await screen.findByText("還沒有任何專案")).toBeInTheDocument();

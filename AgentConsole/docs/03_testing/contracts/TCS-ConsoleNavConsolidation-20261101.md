@@ -183,3 +183,12 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ConsoleNav-20261101.md`（10 列 AT
 
 | 編號 | 位置 | 原文 | 改為 | 依據 |
 |------|------|------|------|------|
+| 1 | §4 #4 | 「預期不需改」 | `registry.test.ts` 的 AT_932_6_E_2 已知前綴迴圈：`/import` 及子路徑新期望 `null`（import 停用、不在可見項），其餘路徑仍等於舊 activeNav；改一行預期值 | 開發棒勘誤候選 1；QA 一審 F-03 |
+| 2 | §4 #5 | 只列 AT_932_6_5／6_7／6_8 | 另列 AT_932_6_6（改比濾停用列的快照）、AT_932_6_8 前一個 it（同）、AT_932_6_9（`/import` 期望 none）、AT_BK_01_3_1（`DELIVERED_MOBILE_LABELS` 先濾停用列）；`issues-nav` AT_IC_11_1_E_1 的 `/import` 探針、`sysadmin-nav` AT_BK_01_1_1 的 order 75 屬 §4 #2／#3 的連動。根因＝`navDelivered.ts` 衍生常數不看 enabled，各消費檔以局部常數濾 enabled | 開發棒勘誤候選 2；QA F-03、F-05 |
+| 3 | §6.1 | 「10 列 AT＋V 系列」 | 子表 16 列（F 1、US 1、AC 4、AT 10）；V1～V3 不入列 | QA F-03 |
+| 4 | W-N3／AT-952-2-1、AT-952-2-E-1 | 「內含 svg」；「三種角色都看得到」 | AT-952-2-1 Then 加「svg 類別含 `lucide-upload`」（突變 Upload→Plus 須轉紅；主控已於實作 commit 後補斷言）；「三種角色」以 OPERATOR（2-1）與 VIEWER（2-E-1）釘住，ADMIN 走同一無條件渲染、不另立 AT | QA F-02（突變 m16 存活） |
+| 5 | D1「其餘一字不動」 | issues／sysadmin 兩列行內註解仍寫舊 order 比較 | 允許同步這兩段註解為現值（主控已改），檔頭免責句刪除 | 開發棒勘誤候選 5；QA F-01 |
+| 6 | W-N4「AT 標題與 id 不變」 | 既有 it 標題含「九個連結／九項／六項」等舊計數 | 刻意保留（與 OBS-SI-321 勘誤「AT 標題與 id 不變」同口徑；AT id 前綴是判定鍵）；現值由各檔檔頭註解與本 TCS W-N1／W-N2 給出 | QA F-04（P4） |
+| 7 | AT-952-1-1／1-2／1-3 | 釘「恰九列／恰八項／恰八連結」 | 保留：本鍵的事實就是項數變動；日後登記表末尾加列時這三個 AT 隨之改（`nav-consolidation.test.ts` 檔頭已註明） | 開發棒勘誤候選 4 |
+| 8 | IssueCenter TCS 勘誤 1-14、SysAdmin TCS 勘誤 1-36 的讀法 | 「mobile 為 true 的可見項 5」 | 欄位層級 mobile 為 true 仍 6（停用的 import 保留 mobile true，⚖5）；AT_IC_11_1_1／AT_BK_01_3_E_1 的「≤6」斷言不變 | QA 勘誤候選 5 |
+| 9 | AT-952-3-3 | `p9-w7-ui.spec.ts` 對 Docker 全棧跑 | 該 spec 以 `test.skip(!E2E_ROOT)` 整檔閘住（需 Bridge 側 `E2E_ROOT` 全環境），本輪以拋棄式 Playwright 探針對 nginx 入口代驗同一組錨點（側欄八項序、無匯入入口、專案管理頁按鈕、`/import` 可達、390px 底部 Tab 五項）；spec 文字改法由 QA 靜態審閱 | V2 實跑限制（§6.2） |
