@@ -109,12 +109,13 @@ describe("AT_BK_01_1 登記表第九項與顯示序", () => {
       hrefProject: navHref(e, { currentProjectId: "p1" }),
     });
     // 導覽整併 2026-11-01（TCS-ConsoleNavConsolidation §4 #2、W-N1）：import 列 enabled true→false、settings 列 order 60→80；其餘欄與位置不變
+    // 執行／監控入口頁 2026-11-01（TCS-ExecMonitorEntry-20261101 §4 #3、W-E2）：execute／monitor 的 hrefNoProject 由 /projects 改為各自的入口頁 /execute、/monitor
     expect(NAV_REGISTRY.slice(0, 8).map(snapshot)).toEqual([
       { id: "dashboard", label: "儀表板", order: 10, enabled: true, mobile: true, roles: null, hrefNoProject: "/", hrefProject: "/" },
       { id: "projects", label: "專案管理", order: 20, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects" },
       { id: "import", label: "BRD/PRD 匯入", order: 30, enabled: false, mobile: true, roles: null, hrefNoProject: "/import", hrefProject: "/import" },
-      { id: "execute", label: "執行中心", order: 40, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/execute" },
-      { id: "monitor", label: "監控中心", order: 50, enabled: true, mobile: true, roles: null, hrefNoProject: "/projects", hrefProject: "/projects/p1/monitor" },
+      { id: "execute", label: "執行中心", order: 40, enabled: true, mobile: true, roles: null, hrefNoProject: "/execute", hrefProject: "/projects/p1/execute" },
+      { id: "monitor", label: "監控中心", order: 50, enabled: true, mobile: true, roles: null, hrefNoProject: "/monitor", hrefProject: "/projects/p1/monitor" },
       { id: "settings", label: "系統設定", order: 80, enabled: true, mobile: true, roles: null, hrefNoProject: "/settings", hrefProject: "/settings" },
       { id: "self-improving", label: "自我進化", order: 70, enabled: true, mobile: false, roles: null, hrefNoProject: "/self-improving", hrefProject: "/self-improving" },
       { id: "issues", label: "議題中心", order: 55, enabled: true, mobile: false, roles: null, hrefNoProject: "/issues", hrefProject: "/issues" },
@@ -139,6 +140,9 @@ describe("AT_BK_01_1 登記表第九項與顯示序", () => {
       "/projects",
       "/projects/p1/execute",
       "/projects/p1/monitor",
+      // 執行／監控入口頁 2026-11-01（TCS-ExecMonitorEntry-20261101 §4 #3）：入口路徑也不得被兩項同時命中
+      "/execute",
+      "/monitor",
       "/import",
       "/settings",
       "/self-improving",

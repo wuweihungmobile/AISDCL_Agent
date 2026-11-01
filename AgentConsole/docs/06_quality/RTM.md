@@ -488,6 +488,9 @@
 ## 2.8 Console 側欄導覽整併（停用匯入入口、專案管理頁按鈕改名、顯示序重排）的 TCS 本地 ID 追溯（Console PRD §0.7；不計入 §2 總列數）
 > 本子表 2026-11-01 依 DEF-200-576 體例自始立於 [RTM-ConsoleNav-20261101.md](RTM-ConsoleNav-20261101.md)（16 列：F 1、US 1、AC 4、AT 10；鍵 `agentconsole-nav-consolidation`；回填義務不變）。
 
+## 2.9 執行中心／監控中心無專案入口頁（`/execute`、`/monitor`）的 TCS 本地 ID 追溯（Console PRD §0.8；不計入 §2 總列數）
+> 本子表 2026-11-01 依 DEF-200-576 體例自始立於 [RTM-ExecMonitorEntry-20261101.md](RTM-ExecMonitorEntry-20261101.md)（17 列：F 1、US 1、AC 5、AT 10；鍵 `agentconsole-exec-monitor-entry`；回填義務不變）。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）

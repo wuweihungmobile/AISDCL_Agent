@@ -51,6 +51,22 @@ test("導覽六項都能點到對應頁面，每頁四區塊各一份", async ({
   for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
   await expect(nav.getByRole("link", { name: "BRD/PRD 匯入" }), "匯入頁上側欄仍沒有該入口").toHaveCount(0);
 
+  // 執行中心／監控中心的無專案入口頁（TCS-ExecMonitorEntry-20261101 AT-953-4-2、W-E4；Console PRD §0.8）：深連結 /execute、/monitor 是入口頁（標題、說明、專案清單；側欄該中心為 active），
+  // 清單裡點本測試建立的專案 → 該專案的執行頁／監控頁（專案頁本身的行為見下方既有案例，不在此重複）
+  for (const [kind, title, viewId] of [
+    ["execute", "執行中心", "execute-view"],
+    ["monitor", "監控中心", "monitor-view"],
+  ] as const) {
+    await page.goto(`/${kind}`);
+    await expect(page.getByRole("heading", { name: title })).toBeVisible();
+    await expect(page.getByTestId("center-entry-view")).toBeVisible();
+    await expect(nav.getByRole("link", { name: title }), `${kind} 入口頁上側欄該中心為 active`).toHaveAttribute("aria-current", "page");
+    for (const r of REGIONS) await expect(page.locator(`[data-region="${r}"]`)).toHaveCount(1);
+    await page.getByRole("list", { name: "選擇專案" }).getByRole("link", { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${projectId}/${kind}$`));
+    await expect(page.getByTestId(viewId)).toBeVisible();
+  }
+
   // 執行中心／監控中心從「目前專案」進入（進專案頁後記住該專案）
   await page.goto(`/projects/${projectId}`);
   await nav.getByRole("link", { name: "執行中心" }).click();

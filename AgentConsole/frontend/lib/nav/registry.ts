@@ -7,8 +7,8 @@
  *  - active＝在可見項中依序第一個 `match(pathname)` 為真者，沒有命中就沒有任何項 active——**未知路徑不 fallback 成「專案管理」**（舊行為的改變，
  *    PRD AC-SI-32-6 (f)；所以 `projects` 必須明寫自己的判斷式，並排除 execute／monitor 以免被它吃掉）；
  *  - `mobile` 為 false 的項在 <768 的底部 Tab 不顯示（元件以 `max-md:hidden` 隱藏，DOM 內仍在）；`mobile` 為 true 的項數不得超過 6；
- *  - `href` 為字串直取、為函式則以 `{ currentProjectId }` 呼叫（執行／監控都從專案進入，沒有專案時退回專案列表）。
- * registry.test.ts 鎖：九列內容（一列停用、側欄顯示八項）、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變。
+ *  - `href` 為字串直取、為函式則以 `{ currentProjectId }` 呼叫（執行／監控都從專案進入，沒有專案時退回各自的入口頁 /execute、/monitor（Console PRD §0.8，2026-11-01））。
+ * registry.test.ts 鎖：九列內容（一列停用、側欄顯示八項）、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變（差異明列於測試：未知路徑不再亮專案管理；執行／監控無專案時退回入口頁）。
  *
  * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101、Console PRD §0.7，掌舵者裁決）：`import` 列停用（`enabled: false`、不刪列），所以登記表仍九列、側欄顯示八項；
  * `settings` order 60→80、`sysadmin` order 65→75，顯示序為 儀表板 10、專案管理 20、執行中心 40、監控中心 50、議題中心 55、自我進化 70、系統管理 75、系統設定 80。
@@ -58,9 +58,10 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     id: "execute",
     label: "執行中心",
     icon: Play,
-    // 執行／監控都從專案進入；沒有任何專案時退回專案列表
-    href: (ctx) => (ctx.currentProjectId ? `/projects/${ctx.currentProjectId}/execute` : "/projects"),
-    match: (pathname) => EXECUTE.test(pathname),
+    // 執行／監控都從專案進入；沒有專案時退回入口頁 /execute（Console PRD §0.8，2026-11-01；TCS-ExecMonitorEntry-20261101 W-E2），不再退回專案列表。
+    // match 認領專案頁（/projects/<id>/execute…）與入口頁（精確 /execute，不認子路徑與相近字串）
+    href: (ctx) => (ctx.currentProjectId ? `/projects/${ctx.currentProjectId}/execute` : "/execute"),
+    match: (pathname) => EXECUTE.test(pathname) || pathname === "/execute",
     order: 40,
     enabled: true,
     mobile: true,
@@ -69,8 +70,9 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     id: "monitor",
     label: "監控中心",
     icon: Activity,
-    href: (ctx) => (ctx.currentProjectId ? `/projects/${ctx.currentProjectId}/monitor` : "/projects"),
-    match: (pathname) => MONITOR.test(pathname),
+    // 同執行中心：沒有專案時退回入口頁 /monitor；match 認領專案頁與精確的 /monitor
+    href: (ctx) => (ctx.currentProjectId ? `/projects/${ctx.currentProjectId}/monitor` : "/monitor"),
+    match: (pathname) => MONITOR.test(pathname) || pathname === "/monitor",
     order: 50,
     enabled: true,
     mobile: true,

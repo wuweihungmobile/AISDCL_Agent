@@ -3,7 +3,10 @@
  * 不 import 任何元件、hooks 或其他模組：說明內容全在 lib/help/**，經 PR 修改；名稱解析（需要引用既有常數表）放在 components/domain/help/stateSources.ts。
  */
 
-/** 說明項 id（PRD §4 的十六頁，加姊妹案「系統管理／資料庫備份」的 sysadmin、sysadmin-backup；PRD D-12）；姊妹案日後加成員。 */
+/**
+ * 說明項 id（PRD §4 的十六頁，加姊妹案「系統管理／資料庫備份」的 sysadmin、sysadmin-backup；PRD D-12）；姊妹案日後加成員。
+ * 2026-11-01 加執行中心／監控中心的無專案入口頁 execute-entry、monitor-entry（TCS-ExecMonitorEntry-20261101 W-E3；與專案執行頁 execute、專案監控頁 monitor 各自獨立）。
+ */
 export type HelpId =
   | "dashboard"
   | "projects"
@@ -17,6 +20,8 @@ export type HelpId =
   | "task-form"
   | "execute"
   | "monitor"
+  | "execute-entry"
+  | "monitor-entry"
   | "import"
   | "settings"
   | "self-improving"

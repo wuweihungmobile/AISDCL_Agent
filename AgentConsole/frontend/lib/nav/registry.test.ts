@@ -9,7 +9,8 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
 /**
  * 導覽登記表（TCS-SelfImprovingMirror-P1b R20、R21；Architecture §5.4、ADR-SI-13）：Tools 區的入口全部取自 NAV_REGISTRY，
  * 新增導覽項只加一列、不改任何元件。這裡鎖：登記表的內容、每列 href 都對應真實存在的路由頁、match 對代表路徑互斥、
- * ToolsRegion.tsx 只消費登記表（沒有入口常數與路徑分支），以及舊六項的行為不變（唯一差異：未知路徑不再亮「專案管理」）。
+ * ToolsRegion.tsx 只消費登記表（沒有入口常數與路徑分支），以及舊六項的行為不變（唯一差異：未知路徑不再亮「專案管理」；2026-11-01 起另加：執行／監控沒有專案時退回入口頁 /execute、/monitor，
+ * TCS-ExecMonitorEntry-20261101 W-E2，該 AT 的標題字面沿 TCS 不動、現行期望值以測試內斷言為準，新增的入口頁 AT 住 exec-monitor-entry.test.ts）。
  *
  * 釘值政策（OBS-SI-321 根治）：本檔**不釘登記表的項數**，也不另持一份清單當期望值——
  *  · 唯一性、mobile 上限、icon 互異、href 對應真路由、match 互斥、「每項自己的頁面由自己認領」、ToolsRegion 不含任何入口標籤字面，
@@ -31,6 +32,9 @@ const PATHS: Array<[pathname: string, expected: string]> = [
   ["/projects/p1/goals/g1/tasks/t1/edit", "projects"],
   ["/projects/p1/execute", "execute"],
   ["/projects/p1/monitor", "monitor"],
+  // 2026-11-01（TCS-ExecMonitorEntry-20261101 §4 #1、W-E2）：無專案入口頁由各自的項認領（精確比對，不認子路徑）
+  ["/execute", "execute"],
+  ["/monitor", "monitor"],
   ["/import", "import"],
   ["/settings", "settings"],
   ["/settings/x", "settings"],
@@ -111,7 +115,7 @@ function registryProblems(registry: ReadonlyArray<NavEntry>, pathProbes: Readonl
 /** 登記表尚未用過的 order（取最大值再加 10）：樣本列（負控）用它，登記表日後用到任何 order 都不會與樣本撞號。 */
 const FREE_ORDER = Math.max(...NAV_REGISTRY.map((e) => e.order)) + 10;
 
-/** 登記項自己的頁面路徑：字串 href 直取；函式型以「有專案」解析（無專案時退回 /projects 是別項的頁面，不是本項的）。 */
+/** 登記項自己的頁面路徑：字串 href 直取；函式型以「有專案」解析（無專案時退回的入口頁 /execute、/monitor 另由上面代表路徑表與 exec-monitor-entry.test.ts 逐項釘住認領；2026-11-01 前退回 /projects，那是別項的頁面）。 */
 const ownPath = (e: NavEntry): string => navHref(e, { currentProjectId: "p1" }).split(/[?#]/)[0];
 
 /** 每個登記項自己的頁面路徑都恰被該項認領（沒有別項同時命中、也不是沒人認領）；對日後新增的列自動生效。回傳違規說明。 */
@@ -161,7 +165,8 @@ describe("AT_932_6_1 登記表欄位值符合 R20（已交付列逐欄相符；�
     for (const id of ["execute", "monitor"]) {
       const entry = byId(id);
       expect(typeof entry.href).toBe("function");
-      expect(navHref(entry, { currentProjectId: null })).toBe("/projects");
+      // 2026-11-01（TCS-ExecMonitorEntry-20261101 §4 #1、W-E2）：無專案時改退回入口頁 /execute、/monitor（原為 /projects；本 it 的標題字面沿 TCS 不動，現行期望值以斷言為準）
+      expect(navHref(entry, { currentProjectId: null })).toBe(`/${id}`);
       expect(navHref(entry, { currentProjectId: "p1" })).toBe(`/projects/p1/${id}`);
     }
     // 前綴比對（append-safe）：字串型 href 的已交付七項依序相符；日後在末尾多加的列不影響
@@ -350,9 +355,12 @@ describe("AT_932_6_E_2 舊六項的 active 與 href 行為不變，唯一差異�
   });
 
   it("AT_932_6_E_2 六項的 href：無專案與有專案時與舊 hrefFor 完全相同", () => {
+    // 2026-11-01（TCS-ExecMonitorEntry-20261101 W-E2；§4 #1 未列的連動）：執行／監控沒有專案時，由退回 /projects 改為退回各自的入口頁 /execute、/monitor——
+    // 這是除「未知路徑 fallback」外唯一的 href 差異（標題的「完全相同」是當時的描述，沿 TCS 不動標題）；其餘各格仍與舊 hrefFor 逐字相同
+    const entryPageFallback = (id: LegacyId, currentId: string | null): string | null => (currentId === null && (id === "execute" || id === "monitor") ? `/${id}` : null);
     for (const id of ["dashboard", "projects", "import", "execute", "monitor", "settings"] as const) {
       const entry = NAV_REGISTRY.find((e) => e.id === id) as NavEntry;
-      for (const currentId of [null, "p1"]) expect(navHref(entry, { currentProjectId: currentId }), `${id} / ${String(currentId)}`).toBe(legacyHref(id, currentId));
+      for (const currentId of [null, "p1"]) expect(navHref(entry, { currentProjectId: currentId }), `${id} / ${String(currentId)}`).toBe(entryPageFallback(id, currentId) ?? legacyHref(id, currentId));
     }
   });
 });
