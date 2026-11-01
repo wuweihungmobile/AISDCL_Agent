@@ -1927,6 +1927,9 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # 刻意不與其他守衛共用／`AUTOSDD_UNATTENDED` 有設時抑制詞表縮到只認方括號標記／
     # payload 退化與任何例外 fail-open（截斷證據面偏向假紅，故超 byte cap 一律放行）。
     ("Stop", ".claude/hooks/check_claim_provenance.py"): frozenset({"*"}),
+    # 收尾常態規則的機械物（2026-11-01；立案 sid 655d9777 line 8687）：散文交棒且本回合無
+    # AskUserQuestion ⇒ decision:block 推回一次（第二次 Stop 放行）。契約見該條目 _comment。
+    ("Stop", ".claude/hooks/check_pending_handoff.py"): frozenset({"*"}),
     ("PreCompact", ".claude/hooks/precompact_restart_point.py"): frozenset({"*"}),
 }
 

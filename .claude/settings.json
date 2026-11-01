@@ -219,6 +219,20 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "_comment": "收尾常態規則的機械物（根 CLAUDE.md〈派工模型與凍結常態規則〉第三條；立案＝掌舵者真機回報 sid 655d9777 line 8687、症狀 line 8657、授權句 line 12）。續航協定守三類停（撞額度／壓縮／session 死亡），第四類『主控自認做完、決定還掛在人身上』此前零觀測者：2026-11-01 02:18 主控把 OBS-SI-362 刪檔決定與 V2 目視寫成『人工決定』結束回合，額度已重置、六小時零中斷事件、哨兵巡邏 rc 0 無撞線可續 ⇒ 整套架構把『主控結束回合』當成『沒事可做』。判準＝最後一則文字含交棒詞（引號內、緊鄰否定、權限核准、K=1 親打、已述互動選項者不算）且本回合無 AskUserQuestion tool_use ⇒ 送 Stop 的官方阻斷形態 {decision:block, reason}，把回合推回主控一次；與姊妹檔 check_claim_provenance 不同之處＝那支治『話講太滿』（推回只會生更多話，故只出聲），本支治『工作沒做完』（推回之後主控做的正是缺的那一步：問或決）。煞車＝stop_hook_active 為真一律放行（每回合至多一個額外回合）；AUTOSDD_UNATTENDED 有設時 no-op（無人可答）；逐字稿讀不到／超 byte cap／任何例外 fail-open。真實面普查（本機 153 支頂層逐字稿／195 回合）命中 7、逐筆判讀 0 假紅，6 回合因同回合有 AskUserQuestion 正確靜音；重跑 tools/probe/handoff_census.py。逃生口 AUTOSDD_HANDOFF_GUARD_OFF（不與其他守衛共用）；K=1 決定在句內寫明『須掌舵者親打』。回歸鎖 tools/tests/test_check_pending_handoff.py。",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/check_pending_handoff.py"
+            ],
+            "timeout": 15
+          }
+        ]
       }
     ]
   }
