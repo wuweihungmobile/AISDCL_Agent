@@ -57,7 +57,7 @@ ADR-001 D11 已拍板「視覺以設計稿為準」，D3 要求圖表 spike 並�
 - 容器：本體 `max-w-[var(--container-max)]`（token 1440）、內距 24、左右欄 gap 32，**外框在 layout、捲動在 ContentRegion**（右欄獨立捲動，整體 100vh 不捲）。
 - **登入頁在同一個 layout 內**：區塊依登入狀態自我調整（`/login` 只顯示品牌列、無側欄／搜尋／動作），而不是另開第二個 layout——否則就有兩處組裝。
 - 響應式（PRD §8.3）都在區塊內以 Tailwind 斷點切換：≥1280 側欄 240px；768～1279 側欄 64px 只留圖示（`aria-label`／`title` 保留）；<768 `flex-col-reverse` 把 Tools 排到內容下方成為底部 Tab。（踩坑：同時加 `order-last` 會與 `column-reverse` 互相抵銷，E2E 以 bounding box 抓到。）
-- 「執行中心／監控中心」需要 projectId：網址中的專案 → 最近造訪（sessionStorage，以 `useSyncExternalStore` 避免水合不一致）→ 專案列表第一筆 → 都沒有退回 `/projects`。
+- 「執行中心／監控中心」需要 projectId：網址中的專案 → 最近造訪（sessionStorage，以 `useSyncExternalStore` 避免水合不一致）→ 專案列表第一筆 → 都沒有退回 `/projects`。**2026-11-01 訂正（Console PRD §0.8；鍵 `agentconsole-exec-monitor-entry`）**：都沒有時改退回各自的無專案入口頁 `/execute`／`/monitor`（說明＋專案選擇清單＋「新建專案」「BRD/PRD 匯入」動作），不再退回 `/projects`——零未封存專案時使用者點兩個入口只看到專案管理頁的空狀態，分不出是功能壞掉還是沒有專案（掌舵者 2026-11-01 真機回報）。
 - Bridge 連線狀態：目前沒有任何對瀏覽器開放的來源（後端 health 為 `show-details: never`），誠實顯示「Engine Bridge · 待接線」，不假裝已連線；接線只需改 `hooks/useServiceStatus.ts`。console-api 狀態沿用專案列表輪詢（30 秒）的結果。
 
 ### D4　資料存取

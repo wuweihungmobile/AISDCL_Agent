@@ -131,6 +131,18 @@
 
 本節凌駕 §8.1 的側邊欄表（該表保留原文作史料）；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ConsoleNavConsolidation-20261101.md`。
 
+### 0.8 執行中心／監控中心的無專案入口（與 §8.1、§5.3、§5.4 合併；掌舵者 2026-11-01 真機回報「監控中心與執行中心UI無法執行」，sid `655d9777-cfd0-4478-b2b3-b8245313b24c`；鍵 `agentconsole-exec-monitor-entry`）
+
+**事實**：執行中心與監控中心都是**專案層級**的頁面（`/projects/[id]/execute`、`/projects/[id]/monitor`）；側欄兩個入口的目的專案依序取 網址中的專案 → 最近造訪 → 專案列表第一筆。原設計在三者都沒有時**退回 `/projects`**（ADR-002 D3）。資料庫沒有任何未封存專案時，點兩個入口只會落到專案管理頁的空狀態「還沒有任何專案」，網址、標題、側欄 active 項都是「專案管理」——使用者分不出是功能壞掉還是沒有專案（2026-11-01 真機：nginx 記錄掌舵者多次自儀表板落到 `/projects`，兩頁零請求、零錯誤）。
+
+**校正**（凌駕 §8.1 表「從專案進入」的隱含退回）：
+
+1. 新增兩個**無專案入口頁** `/execute`、`/monitor`：標題分別為「執行中心」「監控中心」，一段白話說明（本中心以專案為單位；請選擇專案進入；沒有專案先新建或匯入），右上動作「BRD/PRD 匯入」（→ `/import`）與「新建專案」（→ `/projects/new`；唯讀角色停用），頁身為**專案選擇清單**（沿用側欄與儀表板共用的專案列表快取；每列連到該專案的 `/projects/<id>/execute` 或 `/monitor`）；沒有專案時顯示空狀態「還沒有任何專案」與同一組動作。入口頁不啟動、不控制任何批次，**不是**第三種中心。
+2. 側欄登記表 `execute`／`monitor` 兩列的 `href(ctx)`：有目的專案時不變（直達該專案頁）；**沒有時退回各自的入口頁 `/execute`／`/monitor`**，不再退回 `/projects`。兩列的 `match` 加認 `/execute`、`/monitor` 這兩個精確路徑，使入口頁上的 active 項是該中心本身。登記表列數、索引、`order`、`mobile`、`enabled` 皆不變。
+3. 頁面說明（§8.1 每頁說明）為兩個入口頁各補一條（id `execute-entry`、`monitor-entry`），走既有三道雙向鎖。
+
+本節凌駕 §8.1 表與 ADR-002 D3 的退回句；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ExecMonitorEntry-20261101.md`。
+
 ---
 
 ## 1. 文件概述
@@ -1899,6 +1911,7 @@ CREATE INDEX idx_system_configs_category_key ON system_configs(category, key);
 | ⚙ | 系統設定 | `/settings` | 系統參數設定 |
 
 > 2026-11-01 校正（§0.7，凌駕本表）：側邊欄不再顯示「BRD/PRD 匯入」（頁面保留，自專案管理頁按鈕「BRD/PRD 匯入」或儀表板主按鈕進入）；顯示序＝儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定。議題中心、自我進化、系統管理三項的入口分別由各自的 PRD 增補（本表為 v1.1.0 原文）。
+> 2026-11-01 校正（§0.8，凌駕本表）：執行中心、監控中心在沒有目的專案（網址／最近造訪／列表第一筆皆無）時退回各自的無專案入口頁 `/execute`、`/monitor`（說明＋選擇專案＋新建／匯入入口），不再退回 `/projects`。
 
 ### 8.2 設計系統
 

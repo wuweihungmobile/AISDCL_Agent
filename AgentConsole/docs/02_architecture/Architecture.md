@@ -328,6 +328,8 @@ app/
 │       │               └── edit/page.tsx
 │       ├── execute/page.tsx        # 專案執行控制台（UI-SCR-07）
 │       └── monitor/page.tsx        # 專案監控儀表板（UI-SCR-08）
+├── execute/page.tsx                # 執行中心無專案入口頁（2026-11-01；Console PRD §0.8；只殼，組 components/domain/entry/CenterEntryView kind="execute"）
+├── monitor/page.tsx                # 監控中心無專案入口頁（同上，kind="monitor"）
 ├── import/page.tsx                 # BRD/PRD 匯入解析（UI-SCR-06）
 ├── settings/page.tsx               # 系統參數設定（UI-SCR-09）
 ├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
@@ -414,7 +416,7 @@ export interface NavEntry {
   id: string;                               // 唯一；穩定鍵（key、測試選取）
   label: string;                            // 繁中標籤；同時是 aria-label 與 title
   icon: LucideIcon;                         // lucide-react
-  href: string | ((ctx: NavCtx) => string); // 動態段（如目前專案）用函式；無專案時的退回邏輯寫在函式內
+  href: string | ((ctx: NavCtx) => string); // 動態段（如目前專案）用函式；無專案時的退回邏輯寫在函式內（execute／monitor 自 2026-11-01 起退回各自的入口頁 /execute、/monitor，不再退回 /projects；Console PRD §0.8）
   match: (pathname: string) => boolean;     // 此項是否 active：純函式，不讀 React 狀態
   order: number;                            // 升冪；唯一
   roles?: Role[];                           // 缺＝所有已登入角色（Role 見 lib/api/types.ts）
