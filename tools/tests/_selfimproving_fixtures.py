@@ -1368,7 +1368,7 @@ class Srv:
             if "Content-Length" not in headers:
                 h.send_header("Content-Length", str(len(body)))
             if not (opts.get("stall") or opts.get("drip")):
-                with self._lock:  # 減在 end_headers 前：空本文回應在那一刻即完整（DEF-200-579；572 只涵蓋本文）
+                with self._lock:  # 先減再送標頭：空本文在此即完整（DEF-200-579）
                     self._inflight -= 1
                     done = True
             h.end_headers()
