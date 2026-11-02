@@ -155,6 +155,9 @@ services:
       BRIDGE_SI_WRITE_TOKEN: ${BRIDGE_SI_WRITE_TOKEN:-}
       CONSOLE_SI_DECIDERS: ${CONSOLE_SI_DECIDERS:-}
       CONSOLE_SI_AUDIT_KEY: ${CONSOLE_SI_AUDIT_KEY:-}
+      # 🔴 ResearchToPRD 研究寫入面權杖（ADR-003 D4、ADR-XPLAT-017 §D2）：backend 發送（X-Bridge-Token）、engine-bridge 驗證，
+      # 兩邊同值；與上面的 SDD／SI 權杖是三個獨立的值。預設空＝研究寫入端點整個停用（回 503 research_write_disabled）。
+      BRIDGE_RESEARCH_WRITE_TOKEN: ${BRIDGE_RESEARCH_WRITE_TOKEN:-}
       # 使用者密碼雜湊：未在 .env 設定時「不傳入」（用 application.yml 的開發預設）；正式環境必須覆寫
       # （.env 內的 $ 要寫成 $$，見 .env.example）。
       CONSOLE_ADMIN_PASSWORD_HASH:
@@ -238,6 +241,11 @@ services:
       # 權杖與 backend 的 BRIDGE_SI_WRITE_TOKEN 同值；預設空＝SI 寫入面停用（寫入端點回 503 si_write_disabled）。Bridge 不持有簽章金鑰。
       BRIDGE_SI_WRITE_TOKEN: ${BRIDGE_SI_WRITE_TOKEN:-}
       BRIDGE_SI_AUDIT_DIR: /si-audit
+      # 🔴 ResearchToPRD 研究面（ADR-003 D8／D10、ADR-XPLAT-017；Architecture §9.4）：工作區在唯一可寫的 /workspace 之下（自動併入允許根）；
+      # 全棧只跑 mock claude 的 E2E（真研究限本機模式）；權杖與 backend 同值、預設空＝研究寫入端點停用；研究端點另需上面的 BRIDGE_DB_DSN。
+      BRIDGE_RESEARCH_ROOT: /workspace/my-project
+      BRIDGE_RESEARCH_WRITE_TOKEN: ${BRIDGE_RESEARCH_WRITE_TOKEN:-}
+      BRIDGE_RESEARCH_CLAUDE_COMMAND: aisdlc-mock-claude
     volumes:
       - ../AISDLC_SDD:/sdd:ro
       - engine_workspace:/workspace

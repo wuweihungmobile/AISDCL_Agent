@@ -10,14 +10,14 @@
 
 | 指標 | 凍結基線 `AISDLC_SDD_v0.01` | 最新演化版 `AISDLC_SDD_v0.30` |
 |------|------|------|
-| Agents 總數 | 25 | 28 |
-| — core / specialized | 7 / 18 | 7 / 21 |
+| Agents 總數 | 25 | 30 |
+| — core / specialized | 7 / 18 | 7 / 23 |
 | — 其中 runtime（specialized/sdd-*） | 4 | 7 |
 | Scenarios | 10 | 10 |
-| Workflows（workflow/README.md 宣稱） | 23 | 23 |
-| docs_template/sdd 模板（md + yaml） | 59（56 md + 3 yaml） | 59（56 md + 3 yaml） |
+| Workflows（workflow/README.md 宣稱） | 23 | 24 |
+| docs_template/sdd 模板（md + yaml） | 59（56 md + 3 yaml） | 63（60 md + 3 yaml） |
 | .claude/skills | 42 | 42 |
 | governance R-*.yaml | 38 | 39 |
 
 > 數字來源：agents/scenarios/skills/templates/governance＝對應目錄磁碟實掃；
-> workflows＝workflow/README.md 宣稱（curated 數＝1 Gate+8 core+13 scenario+1 ADR，非檔數）。
+> workflows＝workflow/README.md 宣稱（curated 數＝1 Gate+8 core+13 scenario+1 ADR+1 Research-to-PRD，非檔數）。

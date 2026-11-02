@@ -143,6 +143,19 @@
 
 本節凌駕 §8.1 表與 ADR-002 D3 的退回句；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ExecMonitorEntry-20261101.md`。
 
+### 0.9 研發工作流（ResearchToPRD）：單一側欄入口與權威邊界（與 §8.1、§5.2、§0.4 合併；掌舵者 2026-11-02 指令，sid `245e80aa-71c4-443b-b8fe-d59f87a9f0e8`；鍵 `agentconsole-research-to-prd-p0`／`-p1`／`-p2`，框架側 `sdd-research-to-prd`）
+
+掌舵者 2026-11-02 於互動視窗貼入 ResearchSOPtoPRD.prd（逐字存檔 `docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md`），原文指令「請參考以下資訊協助設計開發新功能==> ResearchSOPtoPRD.prd，並“完美整合到目前專案功能中“」；追問「不納入怎會有順暢的UI流程, 而研發的過程, 也應該納入資料庫紀錄」；授權「以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案(不需要顧慮成本)，我授權幫我決策, 若真需要我決定, 請以最簡單的解釋, 讓我互動選項決策」。主控依授權代決 D-12～D-66（`docs/01_requirements/ResearchToPRD_PRD.md` 附錄 C）。本節是**權威區塊指標**：功能的需求本文在該 PRD（FR-R2P-01～23、NFR-R2P-01～13），本節只記錄對本 PRD 既有節的**校正**：
+
+1. **側欄只新增 1 個入口「研發工作流」**（路由 `/research`；登記表 `research` 列 `order: 35`、`enabled: true`、`mobile: false`）；不加來源規格 §6.1 的五個並列入口。進入單一研究專案後只有一條路由 `/research/[researchId]`，以 `?step=topic｜studio｜route｜build｜deliver` 切換五個步驟面板；步驟列與游標持久化在 DB，離開再回來從同一步續做。顯示序（登記表 `order`）：儀表板 10、專案管理 20、**研發工作流 35**、執行中心 40、監控中心 50、議題中心 55、自我進化 70、系統管理 75、系統設定 80；<768 底部 Tab 仍顯示 `mobile: true` 的五項可見項（儀表板、專案管理、執行中心、監控中心、系統設定）；登記表 `mobile: true` 共 6 列（含停用的 `import`）＝上限（`registry.test.ts` 斷言），新列只能 `mobile: false`。
+2. **人工簽核硬閘（§0.4）延伸到研發工作流**：Gate 0 核准與退回修改、分流確認、SCG-4／SCG-5 結果登錄、建立 Release Tag 與 PR、ESCALATION 時的「換世代」（放棄舊 FSM 鍵）**僅 ADMIN**；產品內的 Gate 0 永遠要求真人在 Console 點擊，任何 agent、Bridge 排程或 CLI 都不得呼叫核准端點（根 `CLAUDE.md`〈凍結常態規則〉只管開發本功能時的 `spec-frozen`）；`approver` 一律取 JWT subject。
+3. **與 BRD/PRD 匯入（§5.2）的關係**：匯入負責「拆解已有文件」；研發工作流在其前端加上研究與審查、在其後端重用既有拆解與 signoff 硬閘（未簽核的草稿啟動執行仍 409）；兩者並存，匯入入口不變（§0.7 的專案管理頁按鈕）。
+4. **研發全程入庫**：研究專案（`RP-NNNN`）與 Console 專案分離，分流後以 `console_project_id` 關聯；DB 為 Console 讀模型、寫入者唯一＝Engine Bridge（fail-loud 寫入器＋檔案 outbox，無 `BRIDGE_DB_DSN` 即 503〔唯一例外：能力探針 `GET /api/v1/research/capabilities` 仍回 200 並標 `db:false`〕、不降級成純檔案）；FSM 狀態的事實仍是 `FSM-STATE-*.yaml`（ADR-001 D22）。
+5. **部署姿態**：真研究（headless claude、git 與 GitHub 副作用）限本機模式；Docker 全棧只跑 mock claude 的 E2E（`GET /health/deep` 揭露 `research.mode`）；研究工作區預設在 repo 外（Windows `%USERPROFILE%\.autosdd\my-project\`、POSIX `~/.autosdd/my-project/`）。
+6. **頁面說明**：新增 `research`、`research-workspace` 兩條，走既有三道雙向鎖，`PENDING_HELP_PAGES` 維持空。
+
+本節凌駕 §8.1 側邊欄表與 §0.7 的顯示序（插入第九個可見項）；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ResearchToPRD-P<N>-<YYYYMMDD>.md`（P0、P1、P2 各一份）。
+
 ---
 
 ## 1. 文件概述
@@ -1912,6 +1925,7 @@ CREATE INDEX idx_system_configs_category_key ON system_configs(category, key);
 
 > 2026-11-01 校正（§0.7，凌駕本表）：側邊欄不再顯示「BRD/PRD 匯入」（頁面保留，自專案管理頁按鈕「BRD/PRD 匯入」或儀表板主按鈕進入）；顯示序＝儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定。議題中心、自我進化、系統管理三項的入口分別由各自的 PRD 增補（本表為 v1.1.0 原文）。
 > 2026-11-01 校正（§0.8，凌駕本表）：執行中心、監控中心在沒有目的專案（網址／最近造訪／列表第一筆皆無）時退回各自的無專案入口頁 `/execute`、`/monitor`（說明＋選擇專案＋新建／匯入入口），不再退回 `/projects`。
+> 2026-11-02 校正（§0.9，凌駕本表）：側欄新增「研發工作流」（`/research`，位於專案管理與執行中心之間，`mobile: false`）；顯示序＝儀表板、專案管理、研發工作流、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定；研發工作流內部以 `/research/[researchId]?step=` 切換五步，不新增其他側欄入口。
 
 ### 8.2 設計系統
 

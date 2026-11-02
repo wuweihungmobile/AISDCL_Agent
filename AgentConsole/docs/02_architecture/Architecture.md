@@ -11,6 +11,8 @@
 
 > **文件規則**：與 PRD 衝突時，PRD §0 優先；與 PRD 其餘章節的差異一律登記於 ADR-001 §4／§5，本文不重複辯護。指令一律「bash 區塊＋PowerShell 區塊」並列（見 §9）；路徑一律相對 monorepo 根或 `AgentConsole/`，不寫死任何磁碟絕對路徑。
 
+> **〔ResearchToPRD W0 增補 2026-11-02〕** 本檔 §2.2、§3、§5.1、§5.4、§6(e)、§7.2、§8.2～§8.4、§9.4、§10.1、§10.2、§10.4、§11.1、§11.3′、§12.1、§12.2 載有研究到規格功能（無新服務、無新容器）的增補，以〔ResearchToPRD …〕標記；決策見 [ADR-003-ResearchToPRD.md](ADR-003-ResearchToPRD.md) 與 [ADR-XPLAT-017](../../../docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md)，端點契約見 [API_Contract_ResearchToPRD.md](API_Contract_ResearchToPRD.md)。
+
 ---
 
 ## 1. 系統脈絡（C4 L1）
@@ -137,6 +139,27 @@
 
 > 以上為 W2-B 於 2026-10-15 實跑後的回填值（服務 16 個＝PRD 11 個＋minio、minio-init、minio-certs、postgres-exporter×2）；**最終服務、埠、卷以 `docker compose config` 輸出為準**，逐項差異與實測依據見 `docker/README.md`〈9 與 PRD 的差異〉。frontend／backend 的 healthcheck 以 `wget` 失敗再試 `curl`（alpine 映像沒有 curl）。
 
+> **〔ResearchToPRD W0 增補 2026-11-02〕** 研究到規格功能**不新增服務與容器**；各容器的變動如下（決策 ADR-003、ADR-XPLAT-017）：
+>
+> | 容器 | 變動 |
+> |------|------|
+> | frontend | 新增領域元件群 `components/domain/research/`、兩條路由 `/research`、`/research/[researchId]`；新相依 `mermaid`、`diff`（ADR-003 D9） |
+> | backend（console-api） | 新增 `ResearchController`（`adapter.in.web`）、`StreamController` 加一條研究串流、JDBC 讀配接器 `adapter.out.persistence.research.*`、`BridgeHttpAdapter` 加 `/research/*` 呼叫、純函式 `domain.service.ResearchFlowPolicy`、`SecurityConfig` 的 ADMIN 規則；Flyway V16～V19 |
+> | engine-bridge | 新增套件 `app/research/`（§3）、`routers/research.py`；`settings.py` 新環境變數（§9.4）；`sdd_cli.py` 研究面動詞（ADR-XPLAT-017）；`GET /health/deep` 加資訊欄 `research`（含 `mode`：`local`／`mock-only`；不影響 503 判定，同 `sdd` 先例，§10.1） |
+> | AutoClaude／AISDLC_SDD | **AutoClaude 零改動**；AISDLC_SDD 由獨立鍵 `sdd-research-to-prd` 在框架側加方法層（ADR-XPLAT-017 §D7），不在 AgentConsole 鍵的權限內（`AgentConsole/CLAUDE.md` 鐵律 7） |
+> | 外部 | 新增 Bridge 出站目的地（`BRIDGE_RESEARCH_FETCH_ALLOWLIST`，初始＝arXiv、Semantic Scholar、GitHub API、Stack Exchange API；產業網域由 ADMIN 加入） |
+> | Docker 全棧 | Bridge 映像**不裝** `claude`／`gh`；只跑 mock claude（`aisdlc-mock-claude`）的 E2E，真研究限本機模式（ADR-003 D10） |
+>
+> 元件關係（文字 C4）：
+> ```
+> 瀏覽器 ──/api/v1/research/** (JWT)──▶ console-api ──X-Bridge-Token(BRIDGE_RESEARCH_WRITE_TOKEN)──▶ engine-bridge /research/*
+>    ▲  SSE /api/v1/stream/research/{id}                │ JDBC 唯讀 console.research_*            │ psycopg 寫入 console.research_*（fail-loud＋outbox）
+>    └────────────────────────────────────────────────◀─┘                                         ├─ httpx（獨立 allowlist）→ arXiv／S2／GitHub／SE
+>                                                                                                 ├─ RunManager → `python -m autoclaude …`（stage run；headless claude）
+>                                                                                                 ├─ FSM CLI 子行程（research 面動詞）→ FSM-STATE-*.yaml（工作區／目標根）
+>                                                                                                 └─ git／gh 子行程（route 面；僅本機模式）
+> ```
+
 ### 2.3 埠號總表
 
 | 埠 | 用途 | 本機開發 | Docker 全棧 |
@@ -195,7 +218,7 @@ AgentConsole/
 ├── docs/{02_architecture,04_planning,06_quality}/
 ├── frontend/            Next.js 16（app/ components/{layout,ui,charts,markdown,domain} lib/ styles/ tests/ Dockerfile）
 ├── backend/             Spring Boot 4.1 / Java 21（src/main/java/com/aisdlc/console/{adapter,application,domain,infrastructure}；src/main/resources/db/migration/V1__init.sql；Dockerfile）
-├── engine-bridge/       FastAPI（app/{main.py,settings.py,runner.py,events.py,locks.py,db.py,security.py,routers/{autoclaude.py,sdd.py}} tests/ pyproject.toml Dockerfile .venv/）
+├── engine-bridge/       FastAPI（app/{main.py,settings.py,runner.py,events.py,locks.py,db.py,security.py,routers/{autoclaude.py,sdd.py,research.py},research/} tests/ pyproject.toml Dockerfile .venv/）
 └── docker/{nginx,postgres/{primary,replica},pgbackrest,redis,prometheus,grafana}/
 ```
 
@@ -224,6 +247,10 @@ AgentConsole/
 | `backend/src/main/resources/db/migration/` | Flyway 遷移 V1～V5（ADR-001 D5） | W2／W3 |
 | `backend/src/test/` | 單元、ArchUnit、Testcontainers 整合測試 | W2／W3 |
 | `engine-bridge/app/` | `main.py`、`settings.py`、`runner.py`、`events.py`、`locks.py`、`db.py`、`security.py`、`models.py`、`routers/{autoclaude,sdd}.py`（**〔P1b 已落地 2026-10-22〕另有 `routers/si.py`、`si_cli.py`；〔P2b 已落地 2026-10-25〕另有 `si_audit.py`，§10.3**） | W1-B；SI P1b／P2b |
+| `engine-bridge/app/research/` | **〔ResearchToPRD W0 增補〕**研究套件（根層落點規則不適用：子專案內模組，`docs/02_architecture/Root_Layout_and_Module_Placement.md` §2 末段）：`__init__.py`（一句用途）、`settings.py`（研究面環境變數解析）、`db.py`（`ResearchDb`：fail-loud 交易、事件配號、冪等 upsert）、`outbox.py`（寫檔→記錄→DB→標 done；啟動重放）、`layout.py`（`<slug>/{00_research,01_specs,02_governance,03_execution}` 與路徑淨化）、`fsm_ops.py`（研究面 FSM 驅動，包 `sdd_cli.run_verb`）、`fetch/{allowlist,http,arxiv,semantic_scholar,github,stackexchange}.py`、`compile/{personas,playbooks,prompts}.py`（agent YAML→`.prompts/*.md`、stage playbook、`config_overrides`）、`gates/{schemas,evidence,prd_schema,review_card,aggregate}.py`＋`gate_cli.py`（evaluator 載具，純標準庫）、`orchestrator.py`（確定性狀態機：stage→驗證→入庫→gate→下一步）、`export.py`（`state.json`／`review_card.json`／`evidence_matrix.md` 等渲染）；P1：`route.py`、`scaffold.py`、`gitops.py`（git／gh 白名單呼叫）、`scr.py`、`scaffold_templates/<name>/`；P2：`release.py` | ResearchToPRD P0～P2 |
+| `engine-bridge/app/routers/research.py` | `/research/*` 薄殼（驗權杖、轉 `research` 套件） | ResearchToPRD P0～P2 |
+| `frontend/app/research/` | `page.tsx`（研究專案清單＋新建）、`[researchId]/page.tsx`（研究工作區；`?step=`）；只殼 | ResearchToPRD P0 |
+| `frontend/components/domain/research/` | 研究領域元件群（§5.4 填寫表）；`lib/domain/research.ts`（純函式）、`lib/help/{research,research-workspace}.ts` | ResearchToPRD P0～P2 |
 | `engine-bridge/tests/` | pytest（生命週期、pause、stop、restore、409、422、SSE 重播、孤兒回收、decompose、sdd） | W1-B |
 | `engine-bridge/.venv/` | **已廢止**：Bridge 改裝進根層 `.venv`（ADR-001 D6 補記；pre-commit stray_venv 閘禁止其他 venv） | — |
 | `docker/nginx/` | `nginx.conf`、`conf.d/default.conf`（含 SSE 設定） | W2-B |
@@ -337,6 +364,9 @@ app/
 ├── sysadmin/
 │   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、底部 Tab 不顯示；order 原 65 介於系統設定與自我進化之間，〔導覽整併 2026-11-01〕改 75 介於自我進化與系統設定（80）之間）
 │   └── backup/page.tsx             # 資料庫備份：狀態卡、備份清單、排程與保留、控制面健康與資料新鮮度、還原與涵蓋範圍說明（唯讀；階段二加手動觸發與工作紀錄）
+├── research/                       # 研發工作流（〔ResearchToPRD P0〕；側欄第十項「研發工作流」，order 35、mobile:false；D-13；只殼，見 §5.4）
+│   ├── page.tsx                    # 研究專案清單＋新建（只殼；組 ResearchListView）
+│   └── [researchId]/page.tsx       # 研究工作區：步驟列＋面板；?step=topic|studio|route|build|deliver（只殼；組 ResearchWorkspaceView）
 └── api/health/route.ts             # 前端健康檢查（API-HLT-03）；PRD §4.2 的 BFF 層不實作
 ```
 
@@ -442,7 +472,25 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 - [ ] CI：`.github/workflows/agentconsole-ci.yml` 的 `paths` 若涉及新目錄須加——`.github/` 屬根層，開發 agent 回報、由主控代做（`AgentConsole/CLAUDE.md` 鐵律 7）
 - [ ] 契約：HTTP 形狀的唯一消費者是 console-api；Bridge 新端點先改 §10 與 `engine-bridge/README.md`
 
-## 6. 資料流四條
+**〔ResearchToPRD W0 填寫〕**逐項（任一缺＝未接入；同一個 commit 收齊）：
+
+| 檢查項 | 填寫 |
+|--------|------|
+| 路由頁只殼 | 上列 2 頁；不 import 四區塊元件 |
+| 領域元件 | `components/domain/research/{ResearchListView,ResearchWorkspaceView,FlowStepper,ResearchFlowHeader,TopicPanel,EvidenceTimeline,EvidenceMatrixTable,AllowlistDialog,StudioPanel,PrdOutline,PrdDiffView,MermaidBlock,GatekeeperPanel}.tsx`（P0）；`RouteDrawer.tsx`（P1）；`BuildPanel.tsx`、`DeliverPanel.tsx`、`ResearchBackLink.tsx`（P2）；重用 `SddEscalationBlock`、`CopyCommand`、`RtmPanel`、`ReviewCard`、`LiveLogCard`、`TokenTrendChart`、`MarkdownEditor`／`MarkdownView`、`EntityDialog`、`ConfirmDialog`、`NotificationBell` |
+| API 條目 | `endpoints.ts` 每端點一函式；`queries.ts` 查詢鍵 `qk.research*`；`types.ts`；`schema.d.ts` 重產入庫 |
+| 純函式 | `lib/domain/research.ts`（`deriveSteps`、`scoreRadar`、`diffLines`、`stepReachable`）＋`.test.ts` |
+| 導覽登記表 | `{ id:"research", label:"研發工作流", icon: FlaskConical, href:"/research", match:(p)=>/^\/research(\/.*)?$/.test(p), order:35, enabled:true, mobile:false }`，加在陣列**末尾**；`mobile` 必須 false（`registry.test.ts:107,143` 數的是 `NAV_REGISTRY.filter(e=>e.mobile)` 全列，含停用的 `import`，現況已 6 列＝上限）；`order` 不可用既有值（現況 10／20／30〔import，停用〕／40／50／55／70／75／80，`lib/nav/registry.ts:42-115`），35 為空缺；圖示以落檔當時實檔為準（P0 TCS 重驗）；`DELIVERED_NAV_ROWS` 前綴斷言（`registry.test.ts:409-411`）不受影響；四份凍結 TCS（IssueCenter／SysAdminBackup／ConsoleNavConsolidation／SelfImprovingMirror）的「恰 N 項」陳述以勘誤處理 |
+| 說明登記表 | 新增 `research`（清單頁）、`research-workspace`（工作區；五步差異寫在 `steps` 欄）兩條，寫實不走 pending，`PENDING_CEILING` 維持 0；`HELP_ROUTES` 加 `"/research": "research"`、`"/research/[researchId]": "research-workspace"`；`states` 引用 `lib/help/states.ts` 表 id（`lib/help/types.ts` 的 `StateTableId` 聯集新增成員 `researchFlow`——camelCase，沿既有成員命名，D-49——並新增同 id 的狀態表，詞彙取自 `flow_status`／`flow_phase`；PageHelp 既有凍結 TCS 對 `StateTableId` 成員的陳述以勘誤處理） |
+| layout 測試 | 導覽斷言由登記表驅動，不需手改；加一個「`mobile:false` 不在底部 Tab」斷言 |
+| RTM | `AgentConsole/docs/06_quality/RTM-ResearchToPRD-P<N>-<日期>.md`（每期一檔，先例 `RTM-ExecMonitorEntry-20261101.md`）＋ `RTM.md` 存根（ID 加反引號故不計入總列數；D-34） |
+| 本文同步 | §2.2、§3、§5.1、§6(e)、§7.2、§8.2～8.4、§9.4、§10.2／§10.4、§11.1、§11.3、§12 |
+| CI | `.github/workflows/agentconsole-ci.yml` 的 `paths` 兩處（`on.push`、`on.pull_request`）加 `AISDLC_SDD/*/agent/**`、`AISDLC_SDD/*/docs_template/sdd/requirements/**`、`AISDLC_SDD/*/workflow/sdd-research-to-prd/**`（Bridge 讀框架檔的對拍測試需要；先例＝同檔 `:27-28` 與 `:44-45` 的 `AISDLC_SDD/scripts/**`、`AISDLC_SDD/*/tools/fsm_runtime/**`；兩份 `paths` 清單分別在 `:21-35`、`:38-52`）——根層檔，開發 agent 回報、主控代做 |
+| 契約 | `API_Contract_ResearchToPRD.md`；Bridge 端點先改 §10.4 與 `engine-bridge/README.md` |
+
+兩個既有頁的唯一改動：`app/projects/[projectId]/execute/page.tsx`、`…/monitor/page.tsx` 的**頁殼**加 `ResearchBackLink`（`?from=research:<uuid>` 且可讀該研究專案時顯示「回到研發工作流」，P2）；`ExecuteView`／`MonitorView` 本體與其凍結 TCS 零改。
+
+## 6. 資料流五條
 
 ### 6(a) CRUD（US-P／G／T、API-PRJ／GOL／TSK）
 
@@ -596,6 +644,17 @@ AutoClaude 沒有審核鉤子，也不改它；閘點由 console-api 的 `Review
 5. 評估時機：每則被消費的事件觸發一次；另有 30 秒排程 tick 處理純時間型規則。確認告警 `POST /monitor/alerts/{alertId}/acknowledge` 寫 `acknowledged*` 欄位。
 6. 報表 `API-MON-07`：PDF／CSV 由後端產生（函式庫由 W3 後端選定並記入交卷）。
 
+### 6(e) 研究到規格（ResearchToPRD；P0 起，隨期擴充）
+
+1. **建立**：瀏覽器 `POST /api/v1/research/projects`（OPERATOR 以上）→ console-api 驗輸入（slug、topic、深度列舉、層開關）、配 UUID、`AuditTrail.note("research.create","research",id)` → Bridge `POST /research/projects`（`X-Bridge-Token`）→ Bridge：**單一交易**寫 `research_projects`（DB 序列配 `rp_no`）＋`research_artifacts(ISSUE_SCOPE)`＋`research_events(seq=1)`，再建工作區（`BRIDGE_RESEARCH_ROOT/<slug>/`）、渲染 `issue_scope.json`、建外環 FSM 鍵 `research-<slug>`（INIT→AGENT_LOAD）→ 201。無 `BRIDGE_DB_DSN` 即 503，零檔案寫入。
+2. **深研**：`POST …/stages/research` → Bridge 編譯 `RESEARCH` stage run（`.prompts/*.md`、`playbook.yaml`、`config.yaml`；`config_overrides.claude.extra_args=["--permission-mode","acceptEdits","--allowedTools","<清單>"]`；每步 `maintain_context:false`；請求 `env` 帶 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`），Bridge 原生抓取先行（arXiv／S2／GitHub／SE：原檔＋sha256＋`research_fetches`）→ 啟動 run → 事件流（引擎 `log／step／token` → `research_events`）→ run 終態 → `gates` 驗 `evidence_items.json` → 入庫（`research_sources`／`research_evidence_items`）→ 渲染 `evidence_matrix.md` → `flow_phase=EVIDENCE_READY`。
+3. **起草**：`stages/draft` → `DRAFT` run（`spec-engineer`）→ 驗 SE-PRD 結構與 `E-NNN` 引用 → `research_prd_versions`(AGENT)。
+4. **審查迴圈**：`stages/review`（或 `iterate`）→ `transition →SCG_VALIDATION` → `REVIEW-k` run（4 步，各自 `maintain_context:false`）→ 解析 `reviews/round-k/<dim>.json`（不合 schema 重試一次，仍不合＝`REVIEW_INVALID`：不寫輪列、不呼叫 gate，stage run 記 `exit_reason=review_invalid`）→ 前置否決＋聚合（純碼；地板 60、未結 P1）→ `gate SCG_VALIDATION PASS／FAIL`（FSM 計數；POST_HUMAN 再審通過不呼叫）→ **同一交易**一次寫 `research_review_*`（輪列、四維分數、缺陷）與事件（輪列只在輪有結果時寫入，進行中只在 stage run；D-57）→ PASS：`WAITING_HUMAN`／FAIL：`REVISE-k` run（缺陷清單進起草者 prompt）→ 再審；第 3 次 FAIL＝`ESCALATED`（外環鍵 `SDD_ENABLE_AUTO_RECOVERY=0`）；ESCALATION 人工恢復後預算不歸零，至多再得一次審查（D-60；§12.1 L-R12）。
+5. **Gate 0**：`POST …/approve`（**僅 ADMIN**；`expectedDigests`＝人當時看到的版本摘要）→ Bridge `:approve-baseline`：複製核准版為 `PRD-v1.0.0.md` →（有重試史才）`transition →SPEC_REGRESSION_CHECK` → `spec-frozen --stage Gate-0 …`（docs＝PRD＋證據矩陣＋issue_scope＋adr_draft）→ `research_gate_decisions`（append-only）＋`research_artifacts(PRD_BASELINE)` → `flow_step=route`。人工退回＝`POST …/return`（`gate SCG_VALIDATION FAIL`，共用預算）。
+6. **分流**（P1）：`POST …/route/preview`（OPERATOR，零副作用）→ `POST …/route`（**僅 ADMIN**）→ console-api 先建 `projects` 列（`execution_path`、`sdd_project`）→ Bridge `:route`（git／scaffold／發佈文件／建內環鍵／Stage-1 採納）→ `research_route_decisions`＋`research_route_steps` → `flow_step=build`。
+7. **內環**（P1 TCS 草擬、P2 看板）：`tcs-draft` stage run → 既有 `POST /projects/{id}/sdd/freeze`（Stage-2）→ 既有 import／signoff／execute（console-api 原路徑）→ 事件仍由既有 `RunConsumers` 寫 `execution_*`；研究面只做連結與衍生相態；SCG-4／SCG-5 由 ADMIN 以 `POST …/gates` 登錄（P2）。
+8. **斷線續做**：任何時間重進 `/research/{id}`：`GET` 回 `flow.currentStep`；SSE 以 `Last-Event-ID` 或 `?after=` 從 `research_events` 重播；「我已恢復，繼續（僅一次機會）」＝`stages/revise` 帶 `afterEscalation=true`，Bridge 唯讀驗 FSM 已離開 ESCALATION*；「換世代」＝`POST …/reinit` 帶 `generation:"next"`（D-60、D-64；**僅 ADMIN**：VIEWER 由既有授權鏈擋下〔403 `ACCESS_DENIED`〕、OPERATOR 由 console-api 的 `ResearchCommandService` 在服務層擋下〔403 `research_write_forbidden`〕，兩者 Bridge 請求數 0；FSM 現態須為 ESCALATION*、理由必填）：Bridge 建新世代鍵 `research-<slug>-g<N+1>`、`fsm_generation`＋1、`fsm_project` 改指新鍵、寫 `research_gate_decisions(ABANDON_KEY)`，舊鍵留 ESCALATION、不呼叫 `resume-from-escalation`。
+
 ## 7. `execution_runs` 寫入分工與資料所有權
 
 ### 7.1 `execution_runs` 欄位寫入分工（ADR-001 D10；PRD §0.2.2「狀態真相單一」）
@@ -628,6 +687,16 @@ console-api 對 Bridge 欄位**只讀**；Bridge 對 console 欄位**只讀**（
 | `projects`、`goals`、`tasks`、`goal_dependencies`、`import_records`、`system_configs`、`system_config_history`、`review_requests`、`alerts` | **console-api**（唯一） | Bridge 不寫；僅 `execution_steps.task_id` 的外鍵檢查會觸及 `tasks` |
 | `issue_priority`（V14；議題中心的順位，PRD `docs/01_requirements/Issue_Center_PRD.md` §6.5、TCS-IssueCenter R-IC-59） | **console-api**（唯一；JDBC 配接器只有 UPSERT 與 DELETE 兩條敘述，經 `PUT／DELETE /api/v1/issues/{id}/priority`、僅 ADMIN；無 JPA 實體，`ddl-auto=validate` 不檢查本表；不存歷史，變更軌跡在 `audit_log`） | Bridge 不讀不寫（議題本身住根層 SelfImproving 帳本，Bridge 只經 `GET /si/issues` 唯讀鏡像）；順位只在 console-api 合併進 `GET /api/v1/issues` 回應 |
 | `backup_jobs`（V15；手動備份工作，PRD `docs/01_requirements/Console_SysAdmin_Backup_PRD.md` §6、TCS-SysAdminBackup §C5；**〔K1 已落地 2026-10-28〕**） | **console-api**（唯一；`BackupJobService` 先插列後寫請求檔、寫檔失敗補償為 FAILED；`BackupJobReconciler` 把 sidecar `results/` 對帳回終態、QUEUED 逾 2×`request-ttl-seconds` 標 EXPIRED、RUNNING 逾 `job-max-seconds` 且心跳過期標 timeout；只有 ADMIN 經 `POST /api/v1/sysadmin/backups/jobs` 建列；無 JPA 實體，`ddl-auto=validate` 不檢查本表；變更軌跡在 `audit_log`） | Bridge 不讀不寫；sidecar 不碰 DB（只經兩個具名卷的檔案協定，§2.5） |
+| `research_projects`（V16；含 `rp_no`、`flow_*` 游標、`last_event_seq`、`console_project_id`） | **Bridge**（INSERT；條件式 UPDATE；`id` 由 console-api 配號、同 `run_id` 先例；`rp_no` 由 DB 序列配號）；游標與引擎動作**同一交易** | console-api（JDBC 唯讀）。**console-api 對 `research_*` 零寫入**：ArchUnit 加一條「`adapter.out.persistence.research..` 不得出現 `INSERT｜UPDATE｜DELETE`」的字串掃描測試 |
+| `research_events`（V16；append-only，DB 觸發器擋 UPDATE／DELETE） | **Bridge** | console-api；時間軸、SSE 重播、對帳結果與稽核的共同事實來源 |
+| `research_stage_runs`、`research_artifacts`（V16） | **Bridge** | console-api；研究 stage run **不進** `execution_runs`／`execution_steps`（`db.py:100-114` 的跳過行為，§6(e)） |
+| `research_sources`、`research_fetches`、`research_evidence_items`、`research_allowlist_entries`（V17） | **Bridge**（`research_fetches`、`research_evidence_items` append-only；`research_sources` 只准升級查證層級；`research_allowlist_entries` 只准更新 `enabled`／停用欄） | console-api；allowlist 的 POST／PATCH 經 console-api 轉 Bridge，僅 ADMIN |
+| `research_prd_versions`（含本文，V18） | **Bridge**（人工編輯經 `PUT /research/projects/{id}/prd` 由 Bridge 寫檔＋寫列；console-api 不直寫） | console-api；append-only（新版新列） |
+| `research_review_rounds`／`_scores`／`_defects`（V18） | **Bridge**（rounds 與 scores append-only：輪列只在輪有結果時、與分數列、缺陷列同一交易一次寫入，D-57；defects 的 `status` 單向可轉移） | console-api；評分由 Bridge 純碼聚合，審查者 agent 只提供各維度分數與缺陷 |
+| `research_gate_decisions`（V18；append-only） | **Bridge** | console-api；人工決定的內容；V6 `audit_log` 另記「誰對哪個實體做了請求」（`V6__audit_log.sql:4-5`，無本文），兩者以 `audit_trace_id`＝`trace_id` 對應 |
+| `research_route_decisions`、`research_route_steps`、`research_scr`、`research_decompositions`、`research_deliveries`、視圖 `v_research_healing_attempts`（V19） | **Bridge** | console-api；`research_route_decisions.console_project_id` 指向 console-api 先建的 `projects` 列；視圖建在既有 `execution_runs`／`execution_steps` 之上、不新增寫入路徑 |
+
+研究專案的內環 run＝`execution_runs.project_id=research_projects.console_project_id`；工作區檔案由 Bridge 寫、人唯讀；`state.json` 是 Bridge 匯出的**非權威**投影，不得被任何程式讀回當輸入（ADR-003 D3）。
 
 W5（契約 v1.2）增補的欄位，同樣只由 console-api 寫：`import_records.warnings`（JSONB，預設 `[]`）、`import_records.parse_options`（JSONB，可 NULL）——重開匯入記錄時還原黃色解析提示與解析選項（V8，主控裁決 C-10）；`projects.deleted_at`／`projects.status_before_delete`、`goals.deleted_at`、`tasks.deleted_at`——軟刪除保留期與復原（V9，主控裁決 C-3，ADR-001 D19；刪除專案時專案與連帶軟刪的目標、任務寫同一個 `deleted_at`）。欄位定義見 §11.3 與契約 §0.5。
 
@@ -685,6 +754,12 @@ JWT（HS256）；access 30 分鐘、refresh 7 天；`POST /api/v1/auth/login`、
 | 修改系統參數（單鍵、token-guard、reset、匯入設定） | — | — | — | ✅ |
 | 測試模型連線、匯出設定（不含敏感明文） | — | — | — | ✅ |
 | 揭露敏感參數明文（US-S-04「顯示」；每次寫審計） | — | — | — | ✅ |
+| 讀研究專案／事件／來源／證據／PRD 版本／審查／分流／SCR／交付／allowlist（`GET /api/v1/research/**`、`/api/v1/stream/research/**`；**〔ResearchToPRD〕**） | — | ✅ | ✅ | ✅ |
+| 建研究專案、啟動 stage（研究／草擬／審查／修訂／迭代／TCS 草擬）、存 PRD 新版、分流預演、發起 SCR、取消／對帳／封存／復原／重試初始化（`POST／PUT` 通用規則） | — | — | ✅ | ✅ |
+| **Gate 0 核准與退回修改、分流確認、SCG-4／SCG-5 登錄、建立 Release Tag／PR、新增／停用研究來源 allowlist**（`POST …/approve`、`…/return`、`…/route`、`…/gates`、`…/delivery/tag`、`…/delivery/pr`、`POST／PATCH /research/allowlist`；`SecurityConfig` 逐條規則**置於通用規則之前**，先例 `SecurityConfig.java:88-97`；D-12） | — | — | — | ✅ |
+| **換世代**（`POST …/reinit` 帶 `generation:"next"`；同一路徑的重試初始化模式為 OPERATOR 以上，`SecurityConfig` 的 matcher 無法依請求本文分流，所以角色檢查分兩段：VIEWER 由既有授權鏈擋下（403 `ACCESS_DENIED`），OPERATOR 通過授權鏈後由 console-api 的 `ResearchCommandService` 在服務層擋下（403 `research_write_forbidden`），兩者 Bridge 請求數 0，以 `RbacIT` 各釘一個斷言；D-64） | — | — | — | ✅ |
+
+`approver` 一律取 JWT subject，請求本文不收（先例 `SddFreezeRequest.java:11`）；`RbacIT` 補：VIEWER 對所有 POST／PUT／PATCH 回 403、OPERATOR 對 ADMIN 專屬端點回 403、對 `reinit` 帶 `generation:"next"`：VIEWER 回 403 `ACCESS_DENIED`（授權鏈）、OPERATOR 回 403 `research_write_forbidden`（服務層），兩者 Bridge 請求數皆為 0（D-64）、匿名 401。
 
 Bridge 端點不對任何使用者開放，只有 console-api 以服務身分呼叫（內網）。
 
@@ -700,6 +775,15 @@ Bridge 端點不對任何使用者開放，只有 console-api 以服務身分呼
 - **黑名單字元集 SSOT**：`AutoClaude/autoclaude/utils/shell_deny_chars.py` 的 `BASE_DENY_CHARS = frozenset("!`><~$&;")`（8 個字元）。Bridge 以 parity 測試直接比對該常數；後端複製常數並在檔頭註明 SSOT 路徑，W4 QA 以腳本比對兩者字元集一致（Plan W4）。
 - 引擎的 SDD 路徑另有模板白名單（`SddToPlaybookAdapter._EVALUATOR_TEMPLATE`）；UI 自由輸入的 `evaluatorCommand` 不走該模板，故依上表第 2 層以可執行檔白名單補強。
 
+**〔ResearchToPRD 增列〕UI 輸入 → 引擎指令／路徑**
+
+| 層 | 位置 | 規則 | 違規 |
+|----|------|------|------|
+| 1 | console-api | `slug`＝`^[a-z0-9][a-z0-9-]{0,29}$`；`topic` ≤500 字、無 NUL；`depthLevel` 列舉；層開關布林；`targetPath` 絕對路徑；`stackTemplate`／`visibility` 列舉；`repoName`＝`^[a-z][a-z0-9-]{1,38}$`；allowlist `host` 正規式 | 400（欄位級 `errors[]`） |
+| 2 | Bridge 入口 | `execution_path`／`targetPath` 過 `security.check_path`（allowed roots，含自動併入的 research／scaffold 根）；`prd` 本文 ≤1 MiB、UTF-8、無 NUL；`expectedDigests` 鍵為相對 POSIX 路徑；寫入面需 `X-Bridge-Token`（`BRIDGE_RESEARCH_WRITE_TOKEN`，規則同 SI 權杖） | 422 `violations[]`／403／503 |
+| 3 | Bridge 子行程 | `git`／`gh`／FSM CLI 一律 **argv 陣列、不經 shell**；所有使用者可影響的 argv 片段先過列舉或正規式；環境以白名單重建（移除 `BRIDGE_*`、`SDD_*`、`PYTHONPATH`）；`GH_TOKEN` 只進子行程 env、**不入 argv／檔案／log／DB**；子行程一律經 `procutil.popen_platform_kwargs()`；git／gh 允許集合見 ADR-003 D16 | `sdd_cli_usage`（Bridge 自己的 bug）500 |
+| 4 | 引擎末端 | stage run 以 `--allowedTools` 分角色最小授權（研究：Read／Write／Edit／Glob／Grep，Web 層啟用時加 WebSearch／WebFetch；起草修訂：Read／Write／Edit／Glob／Grep；審查：Read／Glob／Grep＋`Write(<工作區>/02_governance/reviews/**)`）；一律不給 Bash／PowerShell／Task／Agent；`evaluator_command` 受 `DENY_CHARS`（`security.py:35,246-271`）與引擎 PRE_ATTEMPT 驗證，路徑一律 `resolve()` 長名（避 Windows 8.3 短名的 `~`） | 步驟失敗 |
+
 ### 8.4 NFR-SEC-04：外呼預設 deny＋allowlist，與 SSRF 防護
 
 > **誠實劃界（主控 2026-10-15 回寫）**：Bridge 的 SEC-04 實作為精確 host 白名單＋兩種 URL 解析器一致性校驗＋拒絕 userinfo／反斜線／IDN 差異／十進位與十六進位 IP 寫法＋私網 IP 除非明列否則拒絕；**DNS 解析後驗 IP 與釘住連線 IP 未做**（實際外呼由引擎行程自己解析，Bridge 釘不住），decompose 的 httpx 不跟隨 redirect。後端 Phase 6 的 `test-connection` 須自行補 DNS 解析後驗 IP。
@@ -707,6 +791,7 @@ Bridge 端點不對任何使用者開放，只有 console-api 以服務身分呼
 - **範圍**：(a) console-api 的 `POST /settings/test-connection` 與任何由 Console 發起的 HTTP；(b) Bridge 對 MiniMax 等模型端點的外呼（`config_overrides` 的 `minimax.base_url`、環境變數 `MINIMAX_BASE_URL`）。
 - **規則**：預設 deny；域名 allowlist（Bridge：`BRIDGE_OUTBOUND_ALLOWLIST`；console：`console.security.outbound-allowlist`）；校驗欄位明列 `model.apiUrl` 與 `MINIMAX_BASE_URL`；**禁私網段與 loopback／link-local**（`127.0.0.0/8`、`10/8`、`172.16/12`、`192.168/16`、`169.254/16`，另補 IPv6 的 `::1`、`fe80::/10`、`fc00::/7`）；禁 DNS rebinding（解析後驗 IP、連線用已驗 IP）；禁 redirect 跳出 allowlist（不自動跟隨，或每一跳重驗）；全程審計 log。
 - **本機例外**：`localhost`／`127.0.0.1` 只在 e2e／本機開發 profile 的 allowlist 內明列時放行（供 `mock_brain_server.py`）；Docker 全棧預設 allowlist 不含 loopback 與私網。
+- **〔ResearchToPRD 增列〕研究抓取**：Bridge 對研究來源的抓取使用新包裝函式 `check_research_url`（`app/research/fetch/allowlist.py`；先呼叫既有 `security.check_outbound_url`〔`security.py:275-303`，接受 http、任意埠與尾點〕取 parser 一致性，再加 https 限定、埠 443 限定、尾點拒絕與解析後私網 IP 拒絕；不修改 `check_outbound_url`，D-62(3)）、**獨立清單**（`BRIDGE_RESEARCH_FETCH_ALLOWLIST`＋ADMIN 管理的 `research_allowlist_entries`；與模型端點清單 `BRIDGE_OUTBOUND_ALLOWLIST` 分開，D-35），預設 deny。Bridge 自己是 HTTP 客戶端，所以補上上方誠實劃界承認缺的「DNS 解析後驗 IP、釘連線」（**僅限研究抓取**）：resolve → 拒 `127/8、10/8、172.16/12、192.168/16、169.254/16、::1、fe80::/10、fc00::/7` → 以解析後 IP 連線並設 `Host`／SNI → 不自動 redirect（`follow_redirects=false`，同 `decompose` 先例）、逐跳重驗 → 逐筆寫 `research_fetches`（含被拒者，`outcome=DENIED_*`）；回應體上限 5 MiB、逾時 20 s；各 host 套 `min_interval_seconds` 並遵守伺服器回傳的限流訊號。httpx 釘 IP＋SNI 的可行性由 V-R4 實測，不可行則退回「解析後比對 IP 非私網」。headless claude 的 WebFetch／WebSearch 不經此清單（引擎行程自己外呼）→ 以 `WebFetch(domain:…)` 規則與 `allowed_domains` 約束（V-R1），**Web 層預設關閉**（Web allowlist 為空），並在 §12.1 L-R1 如實登記為「Bridge 觀測不到單筆呼叫，只認 agent 宣告」。GitHub token：console-api 從 `system_configs`（`is_encrypted`，AES-256）取出後**僅在單次請求本文**傳給 Bridge；Bridge 不落地。Mermaid：`securityLevel:'strict'`，渲染逾時 3 s，失敗顯示原始碼。
 
 ### 8.5 NFR-SEC-05：token_guard 群組校驗
 
@@ -882,6 +967,18 @@ Push-Location AgentConsole; docker compose -f docker-compose.dev.yml down; Pop-L
 | `BRIDGE_ALLOWED_PATH_ROOTS`／`BRIDGE_OUTBOUND_ALLOWLIST` | Bridge | 路徑 allowlist 以 `os.pathsep` 分隔（POSIX `:`、Windows `;`）；外呼 allowlist 以逗號分隔（§8.3、§8.4） |
 | `MINIMAX_API_KEY`／`MINIMAX_BASE_URL`／`MINIMAX_MODEL` | Bridge | 修正腦；`MINIMAX_API_KEY` 只放環境變數，不入 config |
 | `NEXT_PUBLIC_API_URL` | frontend | 後端 origin（不含 `/api/v1`）；全棧同源為空 |
+| `BRIDGE_RESEARCH_ROOT` | Bridge | **〔ResearchToPRD〕**研究工作區根；預設 **repo 外**（D-28）：Windows `%USERPROFILE%\.autosdd\my-project\`、POSIX `~/.autosdd/my-project/`、Docker `/workspace/my-project`；必須在 `BRIDGE_ALLOWED_PATH_ROOTS` 之下（自動併入允許根），啟動時驗證並於 `GET /health/deep` 的 `research.root` 揭露；根 `.gitignore` 仍加 `/my-project/` |
+| `BRIDGE_SCAFFOLD_ROOT` | Bridge | 軌道 B 新專案的父目錄；未設＝軌道 B 停用（`capabilities.scaffoldRoot=null`）；自動併入允許根 |
+| `BRIDGE_RESEARCH_WRITE_TOKEN` | Bridge、backend（`console.bridge.research-write-token`） | 研究寫入面權杖（≥32 字元，佔位字串＝啟動失敗；未設＝研究寫入端點 503 `research_write_disabled`）；引擎／FSM／git 子行程環境一律剝除 |
+| `BRIDGE_RESEARCH_FETCH_ALLOWLIST` | Bridge | Bridge 原生抓取主機基底（逗號分隔）；預設 `export.arxiv.org,arxiv.org,api.semanticscholar.org,api.github.com,api.stackexchange.com`（D-17）；有效清單＝本變數 ∪ 啟用中的 ADMIN 條目 |
+| `BRIDGE_RESEARCH_WEB_ALLOWLIST` | Bridge | headless WebSearch／WebFetch 的 `allowed_domains` 基底；**預設空＝Web 層關閉**（產業層需 ADMIN 明列）；有效清單＝本變數 ∪ 啟用中的 ADMIN 條目 |
+| `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` | Bridge | 同時 stage run 數；預設 1（額度保守；D-27） |
+| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | Bridge | 寫入 `config_overrides.playbook.step_timeout_seconds`；預設 1200 |
+| `BRIDGE_RESEARCH_CLAUDE_COMMAND` | Bridge | `claude.command`；Docker E2E＝`aisdlc-mock-claude` |
+| `BRIDGE_RESEARCH_FETCH_MAX_BYTES`／`BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS` | Bridge | 單檔位元組上限與逾時；預設 5 MiB／20 s |
+| `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` | 由 Bridge 寫入每個 stage run 的請求 `env`（非部署變數） | headless `claude -p` 背景等待上限（DEF-200-575）；值＝`BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS`×1000，與步驟牆鐘同源、不另立數字；`_ENV_DENY` 不含它（`security.py:41-50`）；步驟 prompt 另禁背景任務與子代理 |
+
+`docker-compose.yml` 的 engine-bridge 區塊同步加 `BRIDGE_RESEARCH_ROOT: /workspace/my-project`、`BRIDGE_RESEARCH_WRITE_TOKEN: ${BRIDGE_RESEARCH_WRITE_TOKEN:-}`、`BRIDGE_RESEARCH_CLAUDE_COMMAND: aisdlc-mock-claude`；backend 區塊加同名權杖；`.env.example` 只放 `<YOUR_…>`；`BRIDGE_ALLOWED_PATH_ROOTS` 不必改（自動併入）。研究端點需要 `BRIDGE_DB_DSN`（無 DSN＝503 `research_requires_db`，唯一例外是 `GET /research/capabilities`：仍 200、`db:false`〔D-49〕；與純檔案模式的既有說明並存：純檔案模式只適用單獨驗 Bridge）。
 
 ## 10. Bridge API 契約（逐字採用；Bridge 開發者同時依此實作）
 
@@ -933,7 +1030,7 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | `alert` 事件 | Bridge 會發（ESCALATION、TOKEN_HALT、LIMIT_RETRY、RESTORE、ENV_LOST 等）；console-api 轉發，並依 §6(d) 另行產生 Console 自己的告警 |
 | 時間戳 | ISO-8601 含 offset（UTC），不得為 naive 時間 |
 | 錯誤封包 | 400／409／422 皆含 `code` 與 `reason`／`gate`／`violations`；console-api 轉成 PRD §7.2 錯誤格式並逐字保留原因 |
-| 深度探針（W5 C-2；`BR-26`；W7 D-17 加 `sdd`） | `GET /health/deep`（免認證）：`git --version`（逾時 5 秒）、`import autoclaude`、workspace 可寫、DB ping（有設 DSN 才做）——**這四項任一失敗＝整體 503**；另有第五項 **`sdd`（W7，只當資訊）**；全過 → 200 `{"status":"ok","checks":{"git":{"ok":true,"version":"…"},"autoclaude":{…},"workspace":{"ok":true},"db":{"ok":true｜null},"sdd":{"ok":true｜null｜false,"latest":"AISDLC_SDD_v0.30"｜null}}}`，前四項任一失敗 → 503 `{"status":"degraded","reason":"…","checks":{…}}`（頂層 `reason` 不含 `sdd`）。`sdd` 三態：`null`＝沒有可用的 SDD 目錄；`true`＝目錄存在且有 `build/reports/fsm` **或**入口文件 `AISDLC_SDD_INIT.md`；`false`＝目錄不存在／不是目錄，或兩者都沒有（空的或掛錯的唯讀掛載）——**判準不能只看 `build/reports/fsm`**：它被 git 忽略，乾淨 clone 沒有（契約 §3.1.1、§6.7.3 Q1）。**`sdd.ok=false` 不觸發 503**（主控裁決 Q4：SDD 是選用引擎，壞了只顯示在 Console 的 SDD 卡〔`GET /engines/sdd` 的 `available=false`〕，不該讓 Agent 可用率下降或誤報告警）。**compose 的 bridge healthcheck 與 console-api 的探測環（預設 `autoclaude.healthCheckPath=/health/deep`，讀取逾時 8 秒）都打它**；Bridge 映像須安裝 `git`（QA DEF-AC-003） |
+| 深度探針（W5 C-2；`BR-26`；W7 D-17 加 `sdd`） | `GET /health/deep`（免認證）：`git --version`（逾時 5 秒）、`import autoclaude`、workspace 可寫、DB ping（有設 DSN 才做）——**這四項任一失敗＝整體 503**；另有第五項 **`sdd`（W7，只當資訊）**；全過 → 200 `{"status":"ok","checks":{"git":{"ok":true,"version":"…"},"autoclaude":{…},"workspace":{"ok":true},"db":{"ok":true｜null},"sdd":{"ok":true｜null｜false,"latest":"AISDLC_SDD_v0.30"｜null}}}`，前四項任一失敗 → 503 `{"status":"degraded","reason":"…","checks":{…}}`（頂層 `reason` 不含 `sdd`）。`sdd` 三態：`null`＝沒有可用的 SDD 目錄；`true`＝目錄存在且有 `build/reports/fsm` **或**入口文件 `AISDLC_SDD_INIT.md`；`false`＝目錄不存在／不是目錄，或兩者都沒有（空的或掛錯的唯讀掛載）——**判準不能只看 `build/reports/fsm`**：它被 git 忽略，乾淨 clone 沒有（契約 §3.1.1、§6.7.3 Q1）。**`sdd.ok=false` 不觸發 503**（主控裁決 Q4：SDD 是選用引擎，壞了只顯示在 Console 的 SDD 卡〔`GET /engines/sdd` 的 `available=false`〕，不該讓 Agent 可用率下降或誤報告警）。**compose 的 bridge healthcheck 與 console-api 的探測環（預設 `autoclaude.healthCheckPath=/health/deep`，讀取逾時 8 秒）都打它**；Bridge 映像須安裝 `git`（QA DEF-AC-003）**〔ResearchToPRD〕**另有資訊欄 `research`（`{"mode":"local"｜"mock-only","root":…,"db":…,"claude_cli":{…},"gh_cli":{…},"git":{…},"web_layer_enabled":…,"scaffold_templates":[…]}`；**不影響 503 判定**，同 `sdd` 先例；`mode=mock-only`＝Bridge 在容器內、無真 `claude`，UI 停用「啟動深研」，D-29）。 |
 | AISDLC_SDD 唯讀查詢（W7 D-16；`BR-13`／`BR-14`） | `GET /sdd/version`、`GET /sdd/fsm`（專案清單）、`GET /sdd/fsm/{project}`；三者全唯讀，**不寫 SDD 目錄、不寫 FSM-STATE**（AISDLC_SDD Rule 9：繞過 `FSMRuntime` 直接讀寫是違反即停機的禁令；ADR-001 D22）。`SDD_ROOT` 無效 → 503 `sdd_unavailable`；`build/reports/fsm` 不存在（乾淨 clone）→ 清單回 200 空陣列。現行 FSM-STATE 的真實結構：`retry_history` 是以重試閘為鍵的映射、`human_pending_tracking` 是單一映射、沒有 RTM 覆蓋鍵——三個新欄位的語意以此為準（契約 §3.1.3）。console-api 經 `GET /api/v1/engines/sdd` 消費（契約 §1.7.1） |
 | `X-Trace-Id`（W5 C-12） | console-api 對 Bridge 的每個請求帶此標頭；Bridge 中介層讀取（缺則自產 uuid4）、回應回帶同名標頭、每一行應用日誌帶 `trace_id`。契約 §0.4 第 6 點、§3.1.1 |
 | 資源取樣（W7 D-12；`US-M-10`） | `GET /autoclaude/runs/{run_id}` 的回應新增 `resources: {cpu_percent, rss_bytes, process_count, sampled_at} \| null`（只增不減）。Bridge 背景每 5 秒以 psutil 對每個「引擎行程樹存活」的 run 取樣一次，請求路徑只回最近一筆；`cpu_percent`＝行程樹各行程 `cpu_percent` 總和 ÷ 邏輯核心數（整機正規化，小數 1 位）、`rss_bytes`＝RSS 總和；取樣器須跨 tick 持有 `psutil.Process` 物件（否則 CPU 恆為 0.0）。引擎行程不存活（尚未啟動、PAUSED、終態）、尚無第一筆樣本、樣本超過 15 秒未更新時為 null。不含 pid。契約 §3.1.2 |
@@ -947,8 +1044,8 @@ Bridge 執行狀態：INITIALIZING／RUNNING／PAUSING／PAUSED／CANCELLING／C
 | 不變量 | 內容 |
 |------|------|
 | 寫入只經 CLI | Bridge 以子行程呼叫 `python -m tools.fsm_runtime.fsm_runtime`：cwd＝SDD 版本目錄、`PYTHONPATH`＝版本目錄、`PYTHONDONTWRITEBYTECODE=1`、兩個規則遙測旗標 `0`、`SDD_STATE_DIR=<專案根>/build/reports/fsm`、`SDD_PROJECT=<專案鍵>`、不繼承任何 `BRIDGE_*`；Bridge 原始碼不得開寫 `FSM-STATE-*.yaml`（Rule 9 禁令 #1，AST 測試釘住）；每次呼叫必帶 `--must-exist`（現行 CLI 會替不存在的專案自動建檔） |
-| 動詞白名單 | `spec-frozen`（僅經 `POST /sdd/fsm/{project}:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed`；其餘動詞一律不呼叫。人工閘只有「核准凍結」；談判與委派同步是批次生命週期的自動動作 |
-| 權杖 | 兩個寫入入口（`:freeze`、含 `sdd` 區塊的 `POST /autoclaude/runs`）須帶標頭 `X-Bridge-Token`；Bridge 未設 `BRIDGE_SDD_WRITE_TOKEN`＝503 `sdd_write_disabled`、缺或錯＝403 `sdd_write_forbidden`；backend 的屬性是 `console.bridge.sdd-write-token`（未設時 freeze 回 503、execute 不送 `sdd` 並以警告出聲）；`_child_env` 剝除該變數，引擎子行程不持有；佔位字串或短於 32 字元＝兩端啟動即失敗 |
+| 動詞白名單 | **`:freeze`／`/autoclaude/runs` 的 `sdd` 區塊**：`spec-frozen`（僅經 `POST /sdd/fsm/{project}:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed`；其餘動詞一律不呼叫。人工閘只有「核准凍結」；談判與委派同步是批次生命週期的自動動作。**〔ResearchToPRD〕研究寫入面**（獨立權杖 `BRIDGE_RESEARCH_WRITE_TOKEN`、獨立端點 `/research/*`，不開放給 `:freeze` 與 `sdd` 區塊）另加：唯一建檔例外 `show`（不帶 `--must-exist`，僅 `POST /research/projects` 與 `:route` 兩個呼叫點）、受限 `transition`、`gate`（SCG_VALIDATION／PR_REVIEW／RTM_VERIFY／RELEASE_READY）、`spec-refreeze`——實作為 `sdd_cli.py` 內**獨立的** `RESEARCH_VERBS`／`_RESEARCH_VERB_FLAGS` 兩張表，既有 `ALLOWED_VERBS` 與 `tests/test_sdd_cli.py` 零改動（D-49）；`resume-from-escalation` **仍不入**；細節與測試鎖見 [ADR-XPLAT-017](../../../docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md) §D2、§5 |
+| 權杖 | 兩個寫入入口（`:freeze`、含 `sdd` 區塊的 `POST /autoclaude/runs`）須帶標頭 `X-Bridge-Token`；Bridge 未設 `BRIDGE_SDD_WRITE_TOKEN`＝503 `sdd_write_disabled`、缺或錯＝403 `sdd_write_forbidden`；backend 的屬性是 `console.bridge.sdd-write-token`（未設時 freeze 回 503、execute 不送 `sdd` 並以警告出聲）；`_child_env` 剝除該變數，引擎子行程不持有；佔位字串或短於 32 字元＝兩端啟動即失敗**〔ResearchToPRD〕**研究寫入面另有 `BRIDGE_RESEARCH_WRITE_TOKEN`（backend 屬性 `console.bridge.research-write-token`；未設＝503 `research_write_disabled`、缺或錯＝403 `research_write_forbidden`；規則同上，兩端啟動即失敗）。 |
 | 狀態目錄 | `<root>/build/reports/fsm`；`GET /sdd/fsm*` 的 `root` 選填（過 `BRIDGE_ALLOWED_PATH_ROOTS`），不帶＝框架目錄（相容）；進入 Bridge 的專案名一律先過與 SDD `sanitize_component` 一致的鏡像淨化；引擎子行程只帶 `SDD_PROJECT`、不帶 `SDD_STATE_DIR`（繼承自 Bridge 環境的兩者先剝除） |
 | 綁定（Console 專案為錨，D-115-14） | 綁定＝`execution_path`（狀態目錄根）＋`sdd_project`（預設＝專案名，由 Bridge 淨化、第一次使用時寫回）；路徑 A 匯入帶選填 `targetProjectId` 併入既有專案；同一 `(execution_path, sdd_project)` 只能綁一個未刪除專案；核准凍結維持專案層端點、不帶 `binding` |
 | 凍結綁內容 | `frozen_stages[].spec_doc_digests`（換行正規化後的 UTF-8 文字的 sha256，與 adapter 的 `SddSpec.digest` 逐位元相同）；編譯、匯入、執行前、`resume`／`restore` 皆比對；不吻合＝409 `spec_digest_changed`、未凍結＝422 `spec_not_frozen`；規格出現卻未編成的 AT 不是錯誤（`/sdd/compile` 回 200＋`unmapped_at_ids`，Console 轉警告） |
@@ -969,6 +1066,40 @@ Bridge 回 snake_case、backend 轉 camelCase；SI 資料面取不到一律明�
 | `POST /si/observations:validate` | P2b | 唯讀預檢（**不需權杖、不落檔**）：請求＝未簽的 `body` 物件；子行程 `obs-add --dry-run --body-file -`（stdin 餵入） | 200：`{"ok","row","row_bytes","row_max_bytes","findings":[{code,detail}]}`（`ok=false` 仍 200） | 503 `si_unavailable`、422 `invalid_request` |
 
 backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，連線 2 秒、讀取 20 秒、不重試）與 `POST /api/v1/si/proposals/{id}/decide`、`POST /api/v1/si/observations`、`POST /api/v1/si/observations/{id}/close`、`POST /api/v1/si/observations/validate`（`ADMIN` 且帳號名在 `console.si.deciders`；DB 表 `si_console_writes`）；瀏覽器不直連 Bridge（§10.1 消費者列）。
+
+### 10.4 研究寫入面（ResearchToPRD；ADR-003、ADR-XPLAT-017；形狀細節見 `API_Contract_ResearchToPRD.md` §2）
+
+| 不變量 | 內容 |
+|--------|------|
+| 唯一寫入者 | Bridge 是 `console.research_*` 唯一寫入者；`ResearchDb` **fail-loud**（與 `BridgeDb` best-effort 相反，`db.py:12-13`）；`BRIDGE_DB_DSN` 未設⇒研究端點 503 `research_requires_db`（唯一例外：能力探針 `GET /research/capabilities` 仍 200、`db:false`；D-49） |
+| 持久化協定 | 寫檔（原子 replace，重用 `fsutil.write_text_atomic`；**不新增** `os.replace`／`rename`／`move` 站點）→ outbox 記錄 → DB 交易（資料列＋`research_events`＋`last_event_seq`）→ 標 done；DB 不可用⇒stage run `BLOCKED_DB`＋`research.alert`、退避重試；重啟重放 outbox（自然鍵 UNIQUE 保冪等） |
+| FSM 寫入 | 只經 CLI 子行程（`sdd_cli.run_verb`）；研究面動詞表＝ADR-XPLAT-017 §D2（`sdd_cli.py` 內獨立的 `RESEARCH_VERBS` 表，既有 `ALLOWED_VERBS` 零改動）；外環鍵環境 `SDD_ENABLE_AUTO_RECOVERY=0`；Bridge 原始碼不得開寫 `FSM-STATE-*.yaml`（AST 鎖） |
+| HUMAN_PENDING 守則 | 外環鍵現態為 HUMAN_PENDING 時，Bridge **不呼叫 `gate SCG_VALIDATION PASS`**（PASS 路徑直接 `transition(HUMAN_PENDING)`，HUMAN_PENDING→HUMAN_PENDING 非合法邊＝rc 1）；人工退回＝`gate SCG_VALIDATION FAIL`（態不動、計數＋1、trace 記 `gate_fail_blocked`）；退回後再審通過只記 DB、未通過仍呼叫 `gate FAIL`（D-50；ADR-XPLAT-017 D6；AST 鎖與暫存狀態目錄負控） |
+| ESCALATION 恢復後（D-60） | 引擎的 `resume-from-escalation` 不動 retry 計數（只有 `gate PASS` 與 `spec-frozen` 歸零）⇒ 人工恢復後 `SCG_VALIDATION` 的 `current_count` 仍為 3：至多再得一次審查（PASS 歸零；FAIL 立即再 ESCALATION，歷史列帶引擎的 tamper 字樣，見 §12.1 L-R12）；`iterate` 只跑一輪，迴圈續停以每輪 `gate` 回傳的 `next_state`／`escalated` 為準，Bridge 不自以 `3 − current_count` 判斷；全新預算＝換世代（僅 ADMIN〔D-64〕；`POST …/reinit` 的 `generation:"next"`：`show` 建新鍵〔建檔例外的第三個呼叫點〕、`fsm_generation`＋1、`fsm_project` 改指新鍵、`research_gate_decisions(ABANDON_KEY)`、舊鍵留 ESCALATION；ADR-XPLAT-017 D6） |
+| stage run | 內部呼叫 `RunManager`；`execution_path`＝工作區；每步 `maintain_context:false`；不寫 `execution_runs`／`execution_steps`（`db.py:100-114` 的跳過行為）；同時 stage run 數 ≤ `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` |
+| 對帳 | `:reconcile` 重雜湊檔案對 `research_artifacts`／`research_prd_versions`／`research_sources.raw_sha256`，**只報告不修復**，結果追加 `research_events`（`research.reconcile`） |
+| 人工決定 | `approver` 由 console-api 取 JWT subject 轉傳；Bridge 驗非空、非保留字（`bridge`／`agent`／`system`）、長度 1 至 100 且符合 `^[A-Za-z0-9._@-]+$`；沒有任何 Bridge 內程式路徑呼叫 `:approve-baseline`（AST 鎖） |
+| allowlist 稽核 | ADMIN 新增／停用 allowlist 條目：Bridge 寫 `research_allowlist_entries`（`added_by`／`disabled_by`＝JWT subject）並回應成功後，console-api 以既有 `AuditTrail.note("research.allowlist", "research_allowlist", <條目 id>)` 標註（`audit` 日誌行帶 `action=research.allowlist`、`entity=research_allowlist:<id>`；V6 `audit_log` 列〔每個 `/api/` 寫入請求本就恆一列，含被拒的 401／403／422／429〕的 `entity_type='research_allowlist'`、`entity_id`＝條目 id；不新增欄位、不改 V6、不改 `AuditLoggingFilter`）；**不寫 `research_events`**（該表以 `research_id` 為鍵，allowlist 是全域資源；D-52、D-62(1)） |
+| 審查輪列寫入時點 | 輪列只在輪有結果時（前置否決已判，或四維審查卡皆通過驗證並彙整、`gate` 已回傳）與分數列、缺陷列、`research_events` 同一交易一次寫入（`research_review_rounds` append-only，D-57）；取消、中斷、Bridge 重啟、無效輸出一律不寫輪列、不佔 `round_no`、不耗預算；進行中只由 REVIEW stage run（`UNIQUE(research_id, stage, round_no, attempt)`）與 `research.run` 事件表達，`research.review` 只在輪完成時送；`round_no`＝已完成評估的序號，與 FSM `gate` 呼叫一一對應（POST_HUMAN 通過輪除外）；審查結果的寫入順序與崩潰窗口（D-58(b)）：Bridge 在呼叫 `gate` **之前**先把輪結果（聚合分數、四維分數、缺陷、`prd_version_no`、`trigger_kind`）落到 outbox；`gate` 回傳後補 `fsm_gate_result`／`fsm_retry_count`／`verdict`，並在同一交易寫輪列、分數、缺陷、事件；重放 outbox 時先以 FSM `show` 讀 `decision_trace`／`retry_history` 判斷該輪的 `gate` 是否已呼叫（已呼叫＝只補 DB、不重呼叫；未呼叫＝先呼叫再寫），使 `gate` 呼叫與輪列寫入對崩潰冪等（`gate` 已呼叫而 DB 未寫是 D-57 必然留下的窗口）。**例外（D-59(5)）**：POST_HUMAN 通過輪依設計不呼叫 `gate`（D-50），重放時不得套「未呼叫就補呼叫」（否則在 HUMAN_PENDING 送出非法的 `gate PASS`），該輪只補 DB。 |
+| 無效審查輸出 | `REVIEW_INVALID`（審查者輸出重試一次後仍不合 schema，evaluator 無法評分）：**不寫 `research_review_rounds` 列、不佔 `round_no`**，只記 REVIEW stage run（`status=FAILED`、`exit_reason=review_invalid`）與事件 `research.review_invalid`；不呼叫 FSM gate、不耗預算；重新審查沿用同一輪號（`attempt`＋1；D-55） |
+| FSM 視圖 | `GET /api/v1/research/projects/{id}/fsm`（API-RP-13）轉 Bridge `GET /sdd/fsm/{key}?root=`，回 `ResearchFsmViewDto`＝既有 `SddFsmState` 原樣、只增不減，另加 `retryHistory.gates`（各閘 `currentCount`＝FSM 檔該閘 `current_count`、`entries`＝該閘 `history` 筆數；既有 `retryHistory.count`／`last` 不動）與 `humanReturnCount`（整數：目前 `fsm_generation` 內 `research_gate_decisions` 中 `gate=GATE0`、`decision=CHANGES` 的筆數，console-api 讀 DB 計得）；各閘分項由 Bridge 在 `GET /sdd/fsm/{key}` 的投影新增同級鍵 `retry_gates`（additive；既有 `retry_history`＝`{count,last}` 與其測試不動）；供 UI 做 FR-R2P-08 邊界條件的「第 n 輪 vs retry_history」對照（D-59(4)） |
+| 內環 | 不變：`POST /autoclaude/runs`（含 `sdd`）、`POST /sdd/compile`、`POST /sdd/fsm/{project}:freeze`（Stage-2）；Gate 0 專用 `:approve-baseline` 與 `:freeze` 並存 |
+
+Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
+
+| 端點 | 期 | 成功 | 失敗（`reason`） |
+|------|----|------|-----------------|
+| `GET /research/capabilities` | P0 | 200 | — |
+| `POST /research/projects` | P0 | 201 | 503 `research_write_disabled`／`research_requires_db`；403 `research_write_forbidden`；409 `slug_in_use`；422 |
+| `POST /research/projects/{id}/stages/{stage}:start` | P0（`research/draft/review/revise/iterate`）、P1（`tcs-draft`） | 202 `{stageRunId}` | 409 `stage_conflict`／`fsm_state_conflict`／`escalated`；503 `db_blocked` |
+| `PUT /research/projects/{id}/prd` | P0 | 201 新版 | 409 `prd_version_conflict`／`spec_frozen` |
+| `POST /research/projects/{id}:approve-baseline`、`:return` | P0 | 200 | 409 `fsm_state_conflict`／`spec_digest_changed`／`review_not_passed`／`escalated`；422 `sanitization_failed` |
+| `POST /research/projects/{id}:route-preview`、`:route` | P1 | 200／202 | 409 `route_conflict`／`branch_exists`；422 `target_not_empty`／`public_confirmation_required`／`route_unsupported_in_deployment`；502 `route_step_failed`（帶 `failureStep`） |
+| `POST /research/projects/{id}:scr` | P1 | 202／201 | 409 `scr_limit`／`scr_open` |
+| `POST /research/projects/{id}:gates`、`:tag`、`:pr` | P2 | 200／201 | 409 `tag_exists`；422 |
+| `POST /research/projects/{id}:cancel`、`:reconcile`、`:reinit`、`:archive`、`:restore` | P0 | 200 | 404 `research_not_found`；`:reinit` 的換世代模式另有 409 `fsm_state_conflict`（現態非 ESCALATION*）、422（缺理由） |
+| `GET／POST /research/allowlist`、`PATCH /research/allowlist/{id}` | P0 | 200／201 | 422 `terms_ack_required` |
+| `GET /research/projects/{id}/events?after=`、`/stream` | P0 | 200／SSE | 404 |
 
 ## 11. 後端 API
 
@@ -1007,6 +1138,25 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 | 409 | `backup_too_frequent` | 距上一份同類備份過近（`details.type`、`details.nextAllowedAt`；full 86400 秒、diff 3600 秒、verify 不設） |
 | 404 | `backup_job_not_found` | 單筆工作不存在或 id 不是 UUID |
 | 422 | `invalid_request` | `limit` 不在 1..100、`before` 非 ISO-8601、`type` 不是 full／diff／verify（區域常數，不入契約表） |
+
+**〔ResearchToPRD 增補〕研究端點（`API_Contract_ResearchToPRD.md` 為 SSOT；本表是簡表）**
+
+| 端點 | 角色 | 成功 | 備註 |
+|------|------|------|------|
+| `GET /api/v1/research/capabilities` | V+ | 200 | 轉 Bridge，快取 30 s；無 DSN 仍 200（`db:false`，503 規則的唯一例外；D-49） |
+| `GET／POST /api/v1/research/projects`、`GET …/{id}` | V+／O+／V+ | 200／201／200 | `{id}` 回 `flow`（`steps[]`、`currentStep`、`furthestStep`、`effective` 相態）；`AuditTrail.note("research.create",…)` |
+| `GET …/{id}/events?afterSeq=&limit=`、`GET /api/v1/stream/research/{id}` | V+ | 200／SSE | `Last-Event-ID`；與 `StreamController` 同款背壓 |
+| `GET …/{id}/sources｜evidence｜prd/versions｜prd/versions/{n}｜review-rounds｜review-rounds/{n}｜fsm｜route｜scr｜decomposition｜delivery｜records/audit` | V+ | 200 | 純讀 DB（`fsm`＝轉 Bridge `GET /sdd/fsm/{key}?root=`，另回 `retryHistory.gates` 與 `humanReturnCount`；D-59(4)） |
+| `PUT …/{id}/prd` | O+ | 201 | 樂觀鎖 `baseVersion` |
+| `POST …/{id}/stages/{stage}` | O+ | 202 | `stage` 列舉；`afterEscalation` |
+| `POST …/{id}/approve`、`POST …/{id}/return` | **ADMIN** | 200 | Gate 0；`approver`＝JWT subject（不收請求內 approver） |
+| `POST …/{id}/route/preview` | O+ | 200 | 零副作用 |
+| `POST …/{id}/route`、`…/gates`、`…/delivery/tag`、`…/delivery/pr` | **ADMIN** | 202／200／201 | P1／P2 |
+| `POST …/{id}/scr`、`…/cancel`、`…/reconcile`、`…/reinit`（重試初始化）、`…/archive`、`…/restore` | O+ | 200／202 | `reinit`（不帶 `generation`）只在 `flow_status=FAILED` 且 `flow_detail` 以 `init_failed:` 起頭時可呼叫，其餘 409 `stage_conflict`（`details.flowStatus`／`flowDetail`）、零寫入（D-65） |
+| `POST …/{id}/reinit` 帶 `generation:"next"`（換世代） | **ADMIN**（由 `ResearchCommandService` 檢查；matcher 無法依本文分流，D-64） | 200 | D-60；FSM 現態須為 ESCALATION*、理由必填；VIEWER 回 403 `ACCESS_DENIED`（授權鏈）、OPERATOR 回 403 `research_write_forbidden`（服務層），兩者 Bridge 請求數 0 |
+| `GET／POST /api/v1/research/allowlist`、`PATCH …/{id}` | V+／**ADMIN**／**ADMIN** | 200／201／200 | D-17 |
+
+`OpenApiIT` 的 `EXPECTED` 路徑／操作計數、`schema.d.ts`、`ErrorResponseDocumentation`（先例 `:49`、`:141`）同 commit 更新；計數以當下實測為準。**研究 `reason`**（雙向鎖：前端 `lib/api/reasons.ts` 或區域常數、backend `ErrorReasons`、契約表）：`research_write_disabled`(503)、`research_write_forbidden`(403)、`research_requires_db`(503)、`db_blocked`(503)、`research_not_found`(404)、`slug_in_use`(409)、`stage_conflict`(409)、`prd_version_conflict`(409)、`review_not_passed`(409)、`spec_digest_changed`(409)、`fsm_state_conflict`(409)、`escalated`(409)、`spec_frozen`(409)、`route_conflict`(409)、`branch_exists`(409)、`scr_open`(409)、`scr_limit`(409)、`decomposition_stale`(409)、`tag_exists`(409)、`layer_unavailable`(400)、`sanitization_failed`(422)、`target_not_empty`(422)、`public_confirmation_required`(422)、`route_unsupported_in_deployment`(422)、`terms_ack_required`(422)。
 
 ### 11.2 DTO 欄位表（camelCase；取自 PRD §5／§6）
 
@@ -1168,6 +1318,606 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 -- agent.enableSelfEvolution），文字逐字取自契約附錄 C.1／C.2
 ```
 
+### 11.3′ 研究到規格 DDL（V16～V19；〔ResearchToPRD W0 增補 2026-11-02〕）
+
+**K.1　`V16__research_core.sql`**
+```sql
+-- V16__research_core.sql — ResearchToPRD P0：研究專案（流程脊游標）、事件帳、stage run、檔案登記
+-- 寫入者唯一＝engine-bridge（Architecture §7.2）；console-api 只讀（JDBC，無 JPA 實體，ddl-auto=validate 不檢查本表；先例 V13／V15）。
+-- 人工決定的「誰對哪個實體做了請求」由既有 V6 audit_log 記；內容住 V18 research_gate_decisions。
+CREATE SEQUENCE console.research_rp_seq START 1;
+
+CREATE FUNCTION console.research_next_rp_no() RETURNS text LANGUAGE sql AS
+$$ SELECT 'RP-' || lpad(n::text, GREATEST(4, length(n::text)), '0') FROM (SELECT nextval('console.research_rp_seq') AS n) s $$;   -- 超過 4 位數不截斷
+
+CREATE TABLE console.research_projects (
+    id UUID PRIMARY KEY,                                   -- console-api 配號（同 execution_runs.id 先例）
+    rp_no VARCHAR(12) NOT NULL UNIQUE DEFAULT console.research_next_rp_no() CHECK (rp_no ~ '^RP-[0-9]{4,}$'),   -- 顯示編號（D-37）
+    slug VARCHAR(30) NOT NULL CHECK (slug ~ '^[a-z0-9][a-z0-9-]{0,29}$'),
+    title VARCHAR(200) NOT NULL,
+    topic TEXT NOT NULL CHECK (char_length(topic) <= 500),
+    scope JSONB NOT NULL DEFAULT '{}'::jsonb,              -- issue_scope.json 的鏡像：技術棧、層開關、檢索邊界
+    scope_rev INTEGER NOT NULL DEFAULT 1 CHECK (scope_rev >= 1),
+    depth_level VARCHAR(10) NOT NULL DEFAULT 'STANDARD' CHECK (depth_level IN ('QUICK','STANDARD','DEEP')),
+    target_scope VARCHAR(20) NOT NULL DEFAULT 'UNDECIDED'
+        CHECK (target_scope IN ('UNDECIDED','AISDLC_MODULE','STANDALONE_PROJECT')),
+    workspace_path VARCHAR(500) NOT NULL,                  -- <BRIDGE_RESEARCH_ROOT>/<slug>（絕對路徑；預設 repo 外，D-28）
+    fsm_project VARCHAR(100) NOT NULL,                     -- 外環鍵 research-<slug>[-g<N>]
+    fsm_state_dir VARCHAR(500) NOT NULL,                   -- <workspace>/build/reports/fsm
+    fsm_generation INTEGER NOT NULL DEFAULT 1 CHECK (fsm_generation >= 1),
+    -- 流程脊游標（Bridge 與引擎動作同一交易寫入；步驟 3 之後的相態為衍生，不落此欄）
+    flow_step VARCHAR(10) NOT NULL DEFAULT 'topic' CHECK (flow_step IN ('topic','studio','route','build','deliver')),
+    flow_phase VARCHAR(20) NOT NULL DEFAULT 'INGESTED' CHECK (flow_phase IN (
+        'INGESTED','RESEARCHING','EVIDENCE_READY','DRAFTING','REVIEWING','REVISING','GATE0_PENDING','FROZEN',
+        'ROUTING','ROUTED','TCS_DRAFTING','TCS_PENDING','SCR_OPEN')),
+    flow_status VARCHAR(14) NOT NULL DEFAULT 'IDLE' CHECK (flow_status IN (
+        'IDLE','RUNNING','WAITING_HUMAN','BLOCKED','ESCALATED','FAILED','CANCELLED','COMPLETED')),
+    flow_detail VARCHAR(300) NOT NULL DEFAULT '',
+    console_project_id UUID REFERENCES console.projects(id),   -- 分流後綁定的 Console 專案（console-api 先建、Bridge 後填；D-37）
+    parent_research_id UUID REFERENCES console.research_projects(id),   -- 大型 SCR 的前身
+    last_event_seq BIGINT NOT NULL DEFAULT 0,
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    archived_at TIMESTAMP WITH TIME ZONE
+);
+CREATE UNIQUE INDEX ux_research_projects_slug_active ON console.research_projects (slug) WHERE archived_at IS NULL;
+CREATE UNIQUE INDEX ux_research_projects_console_project ON console.research_projects (console_project_id) WHERE console_project_id IS NOT NULL;
+CREATE INDEX idx_research_projects_flow ON console.research_projects (flow_step, flow_status) WHERE archived_at IS NULL;
+
+-- 共用的 append-only 守衛（V13 si_console_writes_guard 的泛化：任何 UPDATE／DELETE 一律拒絕）
+CREATE FUNCTION console.research_append_only_guard() RETURNS trigger
+    LANGUAGE plpgsql AS
+$$
+BEGIN
+    RAISE EXCEPTION '% 為 append-only（不可改、不可刪）', TG_TABLE_NAME
+        USING ERRCODE = 'integrity_constraint_violation';
+END;
+$$;
+
+-- 受控可更新表的通用守衛（D-49）：表名→允許更新欄位清單；清單外欄位的 UPDATE 與任何 DELETE 一律拒絕（更正＝追加新列）。
+-- 全部 18 張 research_* 表不是掛 research_append_only_guard() 就是掛本函式，所以沒有任何一張表可被 DELETE；兩者拒絕時一律 ERRCODE = 'integrity_constraint_violation'（SQLSTATE 23000；D-53）。審查輪表 research_review_rounds 是 append-only（掛 research_append_only_guard()），不在下方允許清單內（D-57）。
+-- V19 各表的條目一併在此宣告（函式於 V16 一次建立；V19 只掛觸發器，Flyway 已發佈檔不改）。
+CREATE FUNCTION console.research_controlled_update_guard() RETURNS trigger
+    LANGUAGE plpgsql AS
+$$
+DECLARE
+    allowed text[];
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION '% 不可刪除（更正＝追加新列）', TG_TABLE_NAME
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    allowed := CASE TG_TABLE_NAME
+        WHEN 'research_projects' THEN ARRAY['title','topic','scope','scope_rev','depth_level','target_scope','fsm_project','fsm_generation',
+                                            'flow_step','flow_phase','flow_status','flow_detail','console_project_id',
+                                            'last_event_seq','updated_at','archived_at']
+        WHEN 'research_stage_runs' THEN ARRAY['status','tokens_used','exit_reason','started_at','finished_at']
+        WHEN 'research_sources' THEN ARRAY['verification']
+        WHEN 'research_review_defects' THEN ARRAY['status','fixed_in_version_no','waived_by','waiver_reason','resolved_at']
+        WHEN 'research_allowlist_entries' THEN ARRAY['enabled','disabled_by','disabled_at']
+        WHEN 'research_route_decisions' THEN ARRAY['status','failure_step','finished_at','repo_url','published_docs',
+                                                   'console_project_id','impl_fsm_project','impl_state_dir']
+        WHEN 'research_route_steps' THEN ARRAY['status','exit_code','stdout_tail','stderr_tail','finished_at']
+        WHEN 'research_decompositions' THEN ARRAY['status','draft_id','import_record_id','tcs_rel_path','tcs_sha256','tasks_count','gate_rejection']
+        WHEN 'research_scr' THEN ARRAY['status','prd_to_version_no','successor_research_id','impl_fsm_actions','decided_by','decided_at']
+        ELSE NULL
+    END;
+    IF allowed IS NULL THEN
+        RAISE EXCEPTION '% 未登記於 research_controlled_update_guard 的允許清單', TG_TABLE_NAME
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    IF (to_jsonb(NEW) - allowed) IS DISTINCT FROM (to_jsonb(OLD) - allowed) THEN
+        RAISE EXCEPTION '% 只准更新 %', TG_TABLE_NAME, allowed
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_research_projects_guard BEFORE UPDATE OR DELETE ON console.research_projects
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+
+CREATE TABLE console.research_events (
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    seq BIGINT NOT NULL CHECK (seq >= 1),                  -- 每專案單調；＝SSE id
+    event_type VARCHAR(40) NOT NULL,                       -- research.step／run／source／evidence／prd／review／review_invalid／defect／gate／reconcile／route／scr／delivery／alert
+    step VARCHAR(10) NOT NULL,
+    actor VARCHAR(100) NOT NULL,                           -- JWT subject 或 'bridge'
+    ref_kind VARCHAR(30),
+    ref_id UUID,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (research_id, seq)
+);
+CREATE INDEX idx_research_events_type ON console.research_events (research_id, event_type);
+CREATE TRIGGER trg_research_events_guard BEFORE UPDATE OR DELETE ON console.research_events
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+CREATE TABLE console.research_stage_runs (
+    id UUID PRIMARY KEY,                                   -- Bridge 配號；＝引擎 run_id
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    stage VARCHAR(10) NOT NULL CHECK (stage IN ('RESEARCH','DRAFT','REVIEW','REVISE','TCS_DRAFT')),
+    round_no INTEGER NOT NULL DEFAULT 0 CHECK (round_no >= 0),   -- REVIEW stage run：本次要產生的輪號（已完成評估的輪數＋1）；取消／中斷／無效輸出後重審沿用同號、attempt＋1，審查輪列不因此新增或佔號（D-57）
+    attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+    scope_rev INTEGER NOT NULL DEFAULT 1 CHECK (scope_rev >= 1),
+    status VARCHAR(10) NOT NULL DEFAULT 'QUEUED'
+        CHECK (status IN ('QUEUED','RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED_DB')),
+    playbook_sha256 CHAR(64) CHECK (playbook_sha256 ~ '^[0-9a-f]{64}$'),
+    config_sha256 CHAR(64) CHECK (config_sha256 ~ '^[0-9a-f]{64}$'),
+    prompt_manifest JSONB NOT NULL DEFAULT '[]'::jsonb,    -- [{role, agent_yaml, yaml_sha256, persona_sha256}]
+    allowlist_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb, -- 本 run 的有效 FETCH／WEB 清單（D-17 事後稽核）
+    tokens_used BIGINT NOT NULL DEFAULT 0,
+    exit_reason VARCHAR(300) NOT NULL DEFAULT '',
+    requested_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    finished_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (research_id, stage, round_no, attempt)
+);
+CREATE INDEX idx_research_stage_runs_status ON console.research_stage_runs (status) WHERE status IN ('QUEUED','RUNNING','BLOCKED_DB');
+CREATE UNIQUE INDEX ux_research_stage_runs_active ON console.research_stage_runs (research_id) WHERE status IN ('QUEUED','RUNNING');   -- D-61（D-27）：同一研究專案同時至多一個進行中的 stage run；並行上限 1 由資料庫守，應用層 409 stage_conflict 在其前
+-- 編譯結果欄（playbook_sha256／config_sha256／prompt_manifest／allowlist_snapshot）於建立列時一併寫入、之後唯讀（通用守衛的允許清單只有 status／tokens_used／exit_reason／started_at／finished_at）
+CREATE TRIGGER trg_research_stage_runs_guard BEFORE UPDATE OR DELETE ON console.research_stage_runs
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+
+CREATE TABLE console.research_artifacts (                  -- 檔案登記：每個具名檔案版本一列（「檔案 ↔ 表」的樞紐）
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    kind VARCHAR(20) NOT NULL CHECK (kind IN (
+        'ISSUE_SCOPE','EVIDENCE_ITEMS','EVIDENCE_MATRIX','PRD_DRAFT','PRD_BASELINE','ADR_DRAFT','REVIEW_CARD',
+        'ROUTE_DECISION','STATE_EXPORT','TASK_DECOMPOSITION','TCS','HEALING_LOG')),
+    version INTEGER NOT NULL CHECK (version >= 1),
+    rel_path VARCHAR(500) NOT NULL,                        -- 相對工作區
+    sha256 CHAR(64) NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    bytes BIGINT NOT NULL CHECK (bytes >= 0),
+    origin VARCHAR(6) NOT NULL CHECK (origin IN ('AGENT','HUMAN','BRIDGE')),
+    content TEXT CHECK (content IS NULL OR octet_length(content) <= 1048576),   -- JSON 類產物全文（nullable，≤1 MiB 位元組：octet_length 計位元組、length 計字元，多位元組字元會使後者低估；D-53、D-59(2)）：kind=EVIDENCE_ITEMS 者為 evidence_items.json 位元組原樣全文，含 counter_evidence／honest_bounds（D-43；P0 不另立表）
+    stage_run_id UUID REFERENCES console.research_stage_runs(id),
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (research_id, kind, version)
+);
+CREATE TRIGGER trg_research_artifacts_guard BEFORE UPDATE OR DELETE ON console.research_artifacts
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+```
+
+**K.2　`V17__research_evidence.sql`**
+```sql
+-- V17__research_evidence.sql — 來源實體、每次抓取、證據抽取、ADMIN 管理的 allowlist（根層研究 SOP S2／S3 的資料化）
+CREATE TABLE console.research_sources (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    source_no VARCHAR(8) NOT NULL CHECK (source_no ~ '^S-[0-9]{3,4}$'),
+    layer VARCHAR(9) NOT NULL CHECK (layer IN ('ACADEMIC','INDUSTRY','OSS','COMMUNITY')),
+    tier VARCHAR(2) NOT NULL CHECK (tier IN ('T1','T2','T3')),                     -- SOP S2:58
+    verification VARCHAR(2) NOT NULL CHECK (verification IN ('V1','V2','V3')),     -- SOP S2:69（V0 不得列入）
+    anchor_kind VARCHAR(6) NOT NULL CHECK (anchor_kind IN ('URL','DOI','COMMIT')),
+    url TEXT NOT NULL,
+    doi VARCHAR(200),
+    git_commit VARCHAR(64),
+    title TEXT NOT NULL,
+    authors_org TEXT NOT NULL DEFAULT '',
+    published_at DATE,
+    source_type VARCHAR(10) NOT NULL DEFAULT 'OTHER'
+        CHECK (source_type IN ('PAPER','PREPRINT','ENG_BLOG','WHITEPAPER','PATENT','REPO','ISSUE_PR','FORUM','DOC','OTHER')),
+    license_spdx VARCHAR(100),
+    license_note TEXT NOT NULL DEFAULT '',
+    clue_only BOOLEAN NOT NULL DEFAULT FALSE,                -- T3 強制 true 由下方 CHECK 鎖；T1／T2 的 clue_only 由 Bridge 寫入器依證據分層規則設定，不下沉為 CHECK（D-61：應用層保證、AT 守）
+    first_fetched_at TIMESTAMP WITH TIME ZONE NOT NULL,    -- 首次出現時間：Bridge 抓取＝抓取時間；宣告型來源＝其網址首次出現於 search_log 的時間
+    UNIQUE (research_id, source_no),
+    UNIQUE (research_id, url),
+    CHECK (tier <> 'T3' OR clue_only),                                              -- SOP S2:58：T3 只當線索、不入正式證據
+    CHECK (anchor_kind <> 'DOI' OR doi IS NOT NULL),
+    CHECK (anchor_kind <> 'COMMIT' OR (git_commit IS NOT NULL AND git_commit ~ '^[0-9a-f]{40}$')),               -- 證據矩陣模板 §2.3 規則 3；NULL 不得靜默通過（D-59(1)）：CHECK 對 NULL 視為通過，COMMIT 錨點缺 git_commit 時 ~ 運算為 NULL，所以先判 IS NOT NULL
+    CHECK (url ~ '^https://')                                                       -- 同上：來源網址必須 https
+);
+-- 受控可更新＋單向（D-49）：通用守衛只放行 verification 並擋任何 DELETE；專用守衛再鎖「只升不降」
+CREATE FUNCTION console.research_source_verification_guard() RETURNS trigger LANGUAGE plpgsql AS
+$$
+BEGIN
+    IF substr(NEW.verification, 2)::int < substr(OLD.verification, 2)::int THEN        -- V1 < V2 < V3
+        RAISE EXCEPTION 'research_sources.verification 只升不降（% → %）', OLD.verification, NEW.verification
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_research_sources_guard BEFORE UPDATE OR DELETE ON console.research_sources
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+CREATE TRIGGER trg_research_sources_verification BEFORE UPDATE OF verification ON console.research_sources
+    FOR EACH ROW EXECUTE FUNCTION console.research_source_verification_guard();
+
+CREATE TABLE console.research_fetches (                    -- 每次抓取（含被拒）；append-only
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    source_id UUID REFERENCES console.research_sources(id),
+    stage_run_id UUID REFERENCES console.research_stage_runs(id),
+    layer VARCHAR(9) NOT NULL CHECK (layer IN ('ACADEMIC','INDUSTRY','OSS','COMMUNITY')),
+    fetch_no VARCHAR(10) NOT NULL CHECK (fetch_no ~ '^F-[0-9]{4,}$'),    -- 每研究專案單調：Bridge 於同交易 max+1 配號（同專案同時只有一個 RUNNING stage run，UNIQUE 兜底）；來源的 fetch_refs 指向它
+    fetch_method VARCHAR(10) NOT NULL CHECK (fetch_method IN ('API','WEB_FETCH','WEB_SEARCH','MANUAL')),
+    observed_by VARCHAR(14) NOT NULL CHECK (observed_by IN ('BRIDGE','AGENT_DECLARED')),   -- WEB_* 由 agent 宣告，Bridge 觀測不到單筆
+    search_no INTEGER CHECK (search_no IS NULL OR search_no >= 1),                         -- 只有 agent 宣告的 search_log 列有：Q-NNN 的數字部分（search_log[].id；D-43、D-53）
+    result_urls JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(result_urls) = 'array'),   -- search_log[].result_urls（https 字串陣列；D-53）
+    host VARCHAR(255),                                                                     -- WEB_SEARCH 列為空（搜尋沒有單一網址）；解析不出 host 的被拒外呼寫保留字 '(unparsed)'（非空、不是合法主機名，D-61 的非空 CHECK 放行；D-66）
+    url TEXT,
+    query_text TEXT,
+    http_status INTEGER,
+    outcome VARCHAR(18) NOT NULL CHECK (outcome IN (
+        'OK','DENIED_ALLOWLIST','DENIED_PRIVATE_IP','HTTP_ERROR','TIMEOUT','TOO_LARGE','PARSE_ERROR','RATE_LIMITED')),
+    raw_rel_path VARCHAR(500),
+    raw_sha256 CHAR(64) CHECK (raw_sha256 IS NULL OR raw_sha256 ~ '^[0-9a-f]{64}$'),
+    raw_bytes BIGINT CHECK (raw_bytes IS NULL OR raw_bytes >= 0),
+    duration_ms INTEGER,
+    fetched_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (research_id, fetch_no),
+    -- NULL 不得靜默通過（D-59(1)）：非 WEB_SEARCH 列 url、host 皆必填；WEB_SEARCH 列兩欄皆空（搜尋沒有單一網址）；兩條都只用 IS NULL／IS NOT NULL 判，不產生 NULL 結果
+    CHECK (fetch_method = 'WEB_SEARCH' OR (url IS NOT NULL AND host IS NOT NULL)),
+    CHECK (fetch_method <> 'WEB_SEARCH' OR (url IS NULL AND host IS NULL)),
+    CHECK (host IS NULL OR host <> ''),                                              -- D-61：非 NULL 的 host 不得為空字串（DENIED 列也一樣，否則空 host 的被拒紀錄無從稽核）
+    CHECK (observed_by = 'AGENT_DECLARED' OR search_no IS NULL)
+);
+CREATE UNIQUE INDEX ux_research_fetches_search_no ON console.research_fetches (research_id, search_no) WHERE search_no IS NOT NULL;
+CREATE INDEX idx_research_fetches_research ON console.research_fetches (research_id, fetched_at);
+CREATE TRIGGER trg_research_fetches_guard BEFORE UPDATE OR DELETE ON console.research_fetches
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+CREATE TABLE console.research_evidence_items (             -- SOP S3 七欄；缺欄寫「未見」（NOT NULL＋gate 驗非空）；以 matrix_version 新增、不改
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    matrix_version INTEGER NOT NULL CHECK (matrix_version >= 1),    -- ＝ research_artifacts(kind='EVIDENCE_ITEMS').version
+    scope_rev INTEGER NOT NULL DEFAULT 1 CHECK (scope_rev >= 1),
+    evidence_no VARCHAR(8) NOT NULL CHECK (evidence_no ~ '^E-[0-9]{3,4}$'),
+    source_id UUID NOT NULL REFERENCES console.research_sources(id),
+    candidate VARCHAR(200),                                         -- 候選技術名（供優缺點矩陣分組；可空；D-43）
+    claim TEXT NOT NULL,                                            -- PRD 引用的論點
+    f1_mechanism TEXT NOT NULL,
+    f2_evidence TEXT NOT NULL,
+    f3_critique TEXT NOT NULL,
+    f4_risk_tags TEXT[] NOT NULL DEFAULT '{}',
+    f5_applicability JSONB NOT NULL,                                -- 六格 A／M／N＋理由（技術可行｜授權相容｜維護風險｜效能邊界｜資安｜成本）
+    f6_limits TEXT NOT NULL,
+    f7_verification VARCHAR(2) NOT NULL CHECK (f7_verification IN ('V1','V2','V3')),
+    strength VARCHAR(9) NOT NULL DEFAULT 'WEAK' CHECK (strength IN ('STRONG','MEDIUM','WEAK','CANDIDATE')),   -- 必須等於證據矩陣模板 §3.3 函式值（Bridge 驗）
+    unanchored BOOLEAN NOT NULL DEFAULT FALSE,                      -- F2 數字在抓取原文比對不到：Bridge 入庫時計算，研究者不寫；TRUE 的列 PRD 不得引用
+    UNIQUE (research_id, matrix_version, evidence_no)
+);
+CREATE INDEX idx_research_evidence_source ON console.research_evidence_items (source_id);
+CREATE TRIGGER trg_research_evidence_items_guard BEFORE UPDATE OR DELETE ON console.research_evidence_items
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+CREATE TABLE console.research_allowlist_entries (          -- D-17：產業網域由 ADMIN 逐一加入；Reddit 預設不在任何清單
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    list_kind VARCHAR(5) NOT NULL CHECK (list_kind IN ('FETCH','WEB')),
+    host VARCHAR(255) NOT NULL CHECK (host ~ '^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$'),
+    layer VARCHAR(9) NOT NULL CHECK (layer IN ('ACADEMIC','INDUSTRY','OSS','COMMUNITY')),
+    purpose VARCHAR(200) NOT NULL DEFAULT '',
+    tos_note TEXT NOT NULL DEFAULT '',
+    min_interval_seconds INTEGER NOT NULL DEFAULT 3 CHECK (min_interval_seconds BETWEEN 1 AND 3600),   -- 實際間隔＝max(Bridge 內建下限, 本值)（PRD NFR-R2P-03-6）；建立後不可改（受控更新守衛只放行 enabled／disabled_*），要調整＝停用後重建
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    tos_acknowledged BOOLEAN NOT NULL DEFAULT FALSE,
+    added_by VARCHAR(100) NOT NULL,
+    added_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    disabled_by VARCHAR(100),
+    disabled_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (list_kind, host),
+    CHECK (host !~ '(^|\.)(reddit\.com|redd\.it)$' OR tos_acknowledged),            -- Reddit 須先確認條款
+    CHECK (enabled OR (disabled_by IS NOT NULL AND disabled_at IS NOT NULL))
+);
+-- 受控可更新（D-49）：由通用守衛 research_controlled_update_guard() 只放行 enabled／disabled_by／disabled_at，並擋任何 DELETE
+CREATE TRIGGER trg_research_allowlist_guard BEFORE UPDATE OR DELETE ON console.research_allowlist_entries
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+
+```
+
+**K.3　`V18__research_prd_review_gate.sql`**
+```sql
+-- V18__research_prd_review_gate.sql — PRD 版本（含本文，供工作室編輯器與 Diff）、四方審查輪、分數、缺陷、人工決定（Gate 0 屬 P0，所以決定表隨 V18）
+CREATE TABLE console.research_prd_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    version_no INTEGER NOT NULL CHECK (version_no >= 1),
+    semver VARCHAR(30) NOT NULL CHECK (semver ~ '^v[0-9]+\.[0-9]+\.[0-9]+(-draft)?$'),   -- 含 v 前綴：例 v0.3.0-draft、v1.0.0（審查卡與 route_decision.json 的 prd_version 字串；D-43）
+    kind VARCHAR(8) NOT NULL CHECK (kind IN ('DRAFT','BASELINE')),
+    author_kind VARCHAR(5) NOT NULL CHECK (author_kind IN ('AGENT','HUMAN')),
+    author VARCHAR(100) NOT NULL,                          -- agent id 或 JWT subject
+    parent_version_no INTEGER,
+    content TEXT NOT NULL CHECK (octet_length(content) <= 1048576),   -- 位元組（非字元數；D-59(2)）
+    rel_path VARCHAR(500) NOT NULL,
+    sha256 CHAR(64) NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
+    bytes INTEGER NOT NULL CHECK (bytes >= 0),
+    evidence_refs VARCHAR(8)[] NOT NULL DEFAULT '{}',      -- PRD 內 [E-NNN] 引用（M1 證據錨定率的分子分母）
+    change_summary VARCHAR(500) NOT NULL DEFAULT '',
+    stage_run_id UUID REFERENCES console.research_stage_runs(id),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (research_id, version_no),
+    FOREIGN KEY (research_id, parent_version_no) REFERENCES console.research_prd_versions (research_id, version_no)
+);
+CREATE TRIGGER trg_research_prd_versions_guard BEFORE UPDATE OR DELETE ON console.research_prd_versions
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+-- 審查輪列只在輪有結果時（前置否決已判，或四維審查卡皆通過驗證並彙整、`gate` 已回傳）與四維分數列、缺陷列、research_events 同一交易一次寫入（D-57）。
+-- 列存在＝輪已完成評估，所以沒有 status 欄：單值欄位沒有資訊量，還會留下「日後有人寫 RUNNING 列」的後路；
+-- 進行中、取消、中斷（額度或 API）、Bridge 重啟、輸出無效（REVIEW_INVALID）一律不寫列、不佔 round_no、不耗預算，
+-- 只記 REVIEW stage run（research_stage_runs，UNIQUE(research_id, stage, round_no, attempt)）與事件。
+-- round_no＝已完成評估的序號，與 FSM gate 呼叫一一對應（POST_HUMAN 通過輪除外；人工退回呼叫 gate FAIL 但不是審查輪）。
+-- round_no 連續（1、2、3…不跳號）由 Bridge 寫入器於同交易 max+1 配號保證、AT 守（D-61）：UNIQUE(research_id, round_no) 只擋重複、不擋跳號，連續性不下沉為 DDL。
+CREATE TABLE console.research_review_rounds (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    round_no INTEGER NOT NULL CHECK (round_no >= 1),
+    fsm_generation INTEGER NOT NULL DEFAULT 1,
+    prd_version_no INTEGER NOT NULL,
+    trigger_kind VARCHAR(10) NOT NULL CHECK (trigger_kind IN ('AUTO','MANUAL','POST_HUMAN')),
+    precheck_passed BOOLEAN NOT NULL,                      -- 前置否決 P1（SLV-001／SLV-002／SLV-003／AMBIGUITY）；FALSE＝不計分直接 FAIL
+    precheck_detail JSONB NOT NULL DEFAULT '{}'::jsonb,    -- {"checks":[{"id","passed","detail"}×4]}（審查卡 precheck.checks[]）
+    weighted_score NUMERIC(5,2) CHECK (weighted_score BETWEEN 0 AND 100),   -- W100/100 精確值，不四捨五入（D-42）；前置否決不過時 NULL
+    threshold NUMERIC(5,2) NOT NULL DEFAULT 85.00 CHECK (threshold BETWEEN 50.00 AND 100.00),   -- D-61：產品常數的範圍鎖（passed 的 CHECK 以它為比較基準，被寫成 0 會使 passed 恆真）
+    floor_score INTEGER NOT NULL DEFAULT 60 CHECK (floor_score BETWEEN 50 AND 100),   -- D-14／D-42／D-65：任一維度不低於地板（初值 60、未校準）；範圍鎖與 threshold 對稱，地板被寫成 0 會架空 D-14
+    min_dimension_score INTEGER CHECK (min_dimension_score BETWEEN 0 AND 100),
+    open_p1_count INTEGER NOT NULL DEFAULT 0 CHECK (open_p1_count >= 0),
+    passed BOOLEAN NOT NULL,
+    verdict VARCHAR(8) NOT NULL CHECK (verdict IN ('PASS','REVISE','ESCALATE')),     -- REVIEW_INVALID 不是輪的 verdict：無效輸出不寫輪列、不佔 round_no，只記 stage run（exit_reason=review_invalid）與事件 research.review_invalid（D-55）
+    fsm_gate_result VARCHAR(4) CHECK (fsm_gate_result IN ('PASS','FAIL')),
+    fsm_retry_count INTEGER,                               -- gate FAIL 的回傳 retry_count；gate PASS 的回傳不帶 retry_count，引擎於 PASS 時歸零，故寫 0；POST_HUMAN 通過輪未呼叫 gate ⇒ NULL（D-61；與 fsm_gate_result 同為 NULL）
+    escalated BOOLEAN NOT NULL DEFAULT FALSE,
+    stage_run_id UUID NOT NULL REFERENCES console.research_stage_runs(id),   -- 產生本輪的 REVIEW stage run；進行中的狀態只住那裡（D-57）
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL,          -- 取自該 stage run 的 started_at；列到有結果才寫，不能用 DEFAULT NOW()（那會變成寫入時刻）
+    finished_at TIMESTAMP WITH TIME ZONE NOT NULL,         -- 取自該 stage run 的 finished_at
+    UNIQUE (research_id, round_no),
+    FOREIGN KEY (research_id, prd_version_no) REFERENCES console.research_prd_versions (research_id, version_no),
+    CHECK (finished_at >= started_at),
+    -- 以 IS TRUE 形式寫，避免 NULL 比較使 CHECK 靜默通過（D-14 三條件＋預檢＋verdict；D-42：weighted_score 是 W100/100 精確值，比較不經四捨五入）
+    CHECK (passed IS NOT TRUE OR ((weighted_score >= threshold) IS TRUE AND (min_dimension_score >= floor_score) IS TRUE
+                                  AND open_p1_count = 0 AND precheck_passed IS TRUE AND verdict IS NOT DISTINCT FROM 'PASS')),
+    -- D-50：自動／手動觸發的通過輪必有 gate PASS；人工退回後的再審（POST_HUMAN）通過只記 DB、不呼叫 gate PASS
+    CHECK (passed IS NOT TRUE OR trigger_kind = 'POST_HUMAN' OR fsm_gate_result IS NOT DISTINCT FROM 'PASS'),
+    CHECK (NOT (trigger_kind = 'POST_HUMAN' AND passed IS TRUE) OR fsm_gate_result IS NULL),
+    -- D-57：輪與 gate 呼叫一一對應——未通過的輪必有 gate FAIL（與上兩條合起來：fsm_gate_result 為 NULL ⇔ POST_HUMAN 通過）
+    CHECK (passed IS TRUE OR fsm_gate_result IS NOT DISTINCT FROM 'FAIL'),
+    -- 前置否決不過＝不計分（審查卡：weighted_total、min_dimension_score 為 null）
+    CHECK (precheck_passed IS NOT FALSE OR (weighted_score IS NULL AND min_dimension_score IS NULL AND passed IS NOT TRUE)),
+    -- D-61：單向 CHECK 留下的反向缺口（以下三條只用 NOT NULL 欄或 IS NULL 判，不產生 NULL 結果）
+    CHECK ((verdict = 'PASS') = (passed IS TRUE)),                       -- PASS 與 passed 互為充要（補「passed 為 false 卻 verdict='PASS'」）
+    CHECK (escalated = (verdict = 'ESCALATE')),                          -- escalated 與 ESCALATE 互為充要
+    CHECK ((fsm_retry_count IS NULL) = (fsm_gate_result IS NULL))        -- 兩欄同為 NULL（POST_HUMAN 通過輪未呼叫 gate）或同非 NULL
+);
+-- append-only（D-57）：任何 UPDATE／DELETE 一律拒絕；輪列沒有「事後寫終態欄」這回事，所以不在通用守衛的允許清單內
+CREATE TRIGGER trg_research_review_rounds_guard BEFORE UPDATE OR DELETE ON console.research_review_rounds
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+CREATE TABLE console.research_review_scores (
+    round_id UUID NOT NULL REFERENCES console.research_review_rounds(id),
+    dimension VARCHAR(12) NOT NULL CHECK (dimension IN ('ARCHITECTURE','PRODUCT','QA','SECURITY')),
+    weight NUMERIC(4,3) NOT NULL CHECK (weight > 0 AND weight <= 1),                -- 0.300／0.250／0.250／0.200
+    score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 100),                        -- 五項 rubric（各 0～20）之和；整數（D-42）
+    agent_id VARCHAR(80) NOT NULL,                         -- sd-architect／pm-po／qa-tester／security-engineer（PRODUCT 維度＝pm-po，即 agent/core/03.pm-po-agent-zh.yaml 的 agent.id；D-44）
+    assist_agent_id VARCHAR(80),                           -- 只有 SECURITY：compliance-officer（授權項輔助），其餘 NULL
+    assist_agent_yaml_sha256 CHAR(64) CHECK (assist_agent_yaml_sha256 IS NULL OR assist_agent_yaml_sha256 ~ '^[0-9a-f]{64}$'),
+    agent_yaml_path VARCHAR(300) NOT NULL,
+    agent_yaml_sha256 CHAR(64) NOT NULL CHECK (agent_yaml_sha256 ~ '^[0-9a-f]{64}$'),
+    persona_sha256 CHAR(64) NOT NULL CHECK (persona_sha256 ~ '^[0-9a-f]{64}$'),
+    summary TEXT NOT NULL DEFAULT '',
+    raw_rel_path VARCHAR(500) NOT NULL,
+    raw_sha256 CHAR(64) NOT NULL CHECK (raw_sha256 ~ '^[0-9a-f]{64}$'),
+    stage_run_id UUID REFERENCES console.research_stage_runs(id),
+    CHECK ((assist_agent_id IS NULL) = (assist_agent_yaml_sha256 IS NULL)),
+    PRIMARY KEY (round_id, dimension)
+);
+CREATE TRIGGER trg_research_review_scores_guard BEFORE UPDATE OR DELETE ON console.research_review_scores
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+CREATE TABLE console.research_review_defects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    round_id UUID NOT NULL REFERENCES console.research_review_rounds(id),
+    defect_no VARCHAR(16) NOT NULL,                        -- D-<輪>-<NNN>（審查卡 defects[].id）
+    dimension VARCHAR(12) NOT NULL CHECK (dimension IN ('ARCHITECTURE','PRODUCT','QA','SECURITY')),
+    severity VARCHAR(2) NOT NULL CHECK (severity IN ('P1','P2','P3','P4')),
+    code VARCHAR(40) NOT NULL,
+    prd_anchor VARCHAR(200) NOT NULL DEFAULT '',
+    description TEXT NOT NULL,
+    suggestion TEXT NOT NULL DEFAULT '',
+    evidence_refs VARCHAR(8)[] NOT NULL DEFAULT '{}',
+    status VARCHAR(10) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','FIXED','WAIVED','SUPERSEDED','REGRESSED')),
+    fixed_in_version_no INTEGER,
+    waived_by VARCHAR(100),
+    waiver_reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (round_id, defect_no),
+    CHECK (status <> 'WAIVED' OR (waived_by IS NOT NULL AND waiver_reason IS NOT NULL)),          -- 審查卡 waiver{by,reason,at}：by／reason 必填（D-53）
+    CHECK (status NOT IN ('FIXED','WAIVED','SUPERSEDED') OR resolved_at IS NOT NULL)            -- 離開 OPEN 的終態必有解決時間（D-53）；WAIVED 的 waiver.at＝resolved_at
+);
+-- 缺陷 status 單向轉移（D-49；審查卡模板 §5.3）：OPEN→FIXED／WAIVED／SUPERSEDED、FIXED→REGRESSED、REGRESSED→FIXED，其餘一律拒；status 未變動的 UPDATE 不受限
+CREATE FUNCTION console.research_defect_status_guard() RETURNS trigger LANGUAGE plpgsql AS
+$$
+BEGIN
+    IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
+           (OLD.status = 'OPEN'      AND NEW.status IN ('FIXED','WAIVED','SUPERSEDED'))
+        OR (OLD.status = 'FIXED'     AND NEW.status = 'REGRESSED')
+        OR (OLD.status = 'REGRESSED' AND NEW.status = 'FIXED')) THEN
+        RAISE EXCEPTION 'research_review_defects.status 不得由 % 轉為 %', OLD.status, NEW.status
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER trg_research_defects_guard BEFORE UPDATE OR DELETE ON console.research_review_defects
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+CREATE TRIGGER trg_research_defects_status BEFORE UPDATE OF status ON console.research_review_defects
+    FOR EACH ROW EXECUTE FUNCTION console.research_defect_status_guard();
+CREATE INDEX idx_research_defects_open ON console.research_review_defects (round_id) WHERE status = 'OPEN';
+
+CREATE TABLE console.research_gate_decisions (             -- append-only；內容與 V6 audit_log 以 audit_trace_id 對應
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    gate VARCHAR(11) NOT NULL CHECK (gate IN ('GATE0','SCR','ROUTE','STAGE2','SCG4','SCG5','ABANDON_KEY')),
+    decision VARCHAR(9) NOT NULL CHECK (decision IN ('APPROVED','REJECTED','CHANGES','ABANDONED')),
+    decided_by VARCHAR(100) NOT NULL,                      -- JWT subject（人；僅 ADMIN 動作，D-12）
+    decided_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    prd_version_no INTEGER,
+    review_round_no INTEGER,
+    fsm_project VARCHAR(100) NOT NULL,
+    fsm_stage VARCHAR(64),                                 -- Gate-0／Gate-0-SCR1／Stage-1／Stage-2
+    fsm_state_after VARCHAR(40),
+    frozen_digests JSONB NOT NULL DEFAULT '{}'::jsonb,     -- {相對路徑: sha256}；＝frozen_stages[-1].spec_doc_digests
+    reason TEXT NOT NULL DEFAULT '',
+    audit_trace_id VARCHAR(64),
+    CHECK (gate <> 'GATE0' OR decision <> 'APPROVED' OR (frozen_digests <> '{}'::jsonb AND fsm_stage IS NOT NULL))
+);
+CREATE INDEX idx_research_gate_research ON console.research_gate_decisions (research_id, decided_at);
+CREATE TRIGGER trg_research_gate_guard BEFORE UPDATE OR DELETE ON console.research_gate_decisions
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+```
+
+**K.4　`V19__research_route_scr_delivery.sql`（P1 一次建立；P2 只寫入列）**
+```sql
+-- V19__research_route_scr_delivery.sql — 分流、SCR、拆解、交付；自癒視圖
+CREATE TABLE console.research_route_decisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    track CHAR(1) NOT NULL CHECK (track IN ('A','B')),
+    target_kind VARCHAR(10) NOT NULL CHECK (target_kind IN ('MODULE','STANDALONE')),
+    target_module VARCHAR(12) CHECK (target_module IN ('autoclaude','agentconsole','sdd','monorepo')),
+    target_path VARCHAR(500) NOT NULL,
+    git_branch VARCHAR(200),
+    base_ref VARCHAR(200),
+    repo_url VARCHAR(500),
+    repo_visibility VARCHAR(7) CHECK (repo_visibility IN ('PUBLIC','PRIVATE')),
+    stack_template VARCHAR(40),
+    console_project_id UUID REFERENCES console.projects(id),
+    impl_fsm_project VARCHAR(100),
+    impl_state_dir VARCHAR(500),
+    published_docs JSONB NOT NULL DEFAULT '{}'::jsonb,     -- {目標 docs/ 相對路徑: sha256}
+    scope_differs_reason VARCHAR(200),                     -- 分流與 PRD target_scope 不同時必填（FR-R2P-11）
+    status VARCHAR(11) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','COMPENSATED')),
+    failure_step VARCHAR(30),
+    decided_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    CHECK ((track = 'A' AND target_kind = 'MODULE' AND target_module IS NOT NULL)
+        OR (track = 'B' AND target_kind = 'STANDALONE' AND target_module IS NULL)),
+    CHECK (repo_visibility IS DISTINCT FROM 'PUBLIC' OR track = 'B')
+);
+CREATE UNIQUE INDEX ux_research_route_active ON console.research_route_decisions (research_id)
+    WHERE status IN ('PENDING','RUNNING','SUCCEEDED');
+
+CREATE TABLE console.research_route_steps (
+    route_id UUID NOT NULL REFERENCES console.research_route_decisions(id),
+    step_no INTEGER NOT NULL CHECK (step_no >= 1),
+    step VARCHAR(24) NOT NULL CHECK (step IN (
+        'VALIDATE_TARGET','GIT_SWITCH','SCAFFOLD_FILES','GIT_INIT','GIT_COMMIT','GH_REPO_CREATE','PUBLISH_DOCS',
+        'COPY_WORKSPACE','REGISTER_STUB','IMPL_KEY_INIT','BASELINE_ADOPT')),               -- GIT_SWITCH＝git worktree add（獨立 worktree，D-20 SA-08）
+    status VARCHAR(11) NOT NULL CHECK (status IN ('RUNNING','OK','FAILED','SKIPPED','COMPENSATED')),
+    argv_redacted TEXT NOT NULL DEFAULT '',                -- 去敏後的 argv（不含 token）
+    exit_code INTEGER,
+    stdout_tail VARCHAR(2000) NOT NULL DEFAULT '',
+    stderr_tail VARCHAR(2000) NOT NULL DEFAULT '',
+    started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (route_id, step_no)
+);
+
+CREATE TABLE console.research_scr (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    scr_no INTEGER NOT NULL CHECK (scr_no >= 1),
+    kind VARCHAR(5) NOT NULL CHECK (kind IN ('MINOR','MAJOR')),
+    source_kind VARCHAR(14) NOT NULL CHECK (source_kind IN ('HUMAN','REVIEW_FINDING','SCG4','HEALING_FAILED')),
+    reason TEXT NOT NULL,
+    reason_class VARCHAR(10) NOT NULL DEFAULT 'OTHER' CHECK (reason_class IN ('EVIDENCE','AC_VAGUE','REQ_CHANGE','INFEASIBLE','OTHER')),   -- PRD 缺漏證據／AC 模糊／需求變更／技術不可行／其他（M6 分群）
+    affected_sections TEXT[] NOT NULL DEFAULT '{}',
+    status VARCHAR(10) NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','APPROVED','REJECTED','APPLIED','SUPERSEDED')),
+    prd_from_version_no INTEGER,
+    prd_to_version_no INTEGER,
+    successor_research_id UUID REFERENCES console.research_projects(id),   -- MAJOR：新研究專案
+    impl_fsm_actions JSONB NOT NULL DEFAULT '[]'::jsonb,                   -- 實際呼叫過的 FSM 動詞序列（稽核）
+    requested_by VARCHAR(100) NOT NULL,
+    requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    decided_by VARCHAR(100),
+    decided_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (research_id, scr_no)
+);
+
+CREATE TABLE console.research_decompositions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    path CHAR(1) NOT NULL CHECK (path IN ('A','B','C')),                    -- 沿 import 解析路徑 A／B／C（ImportController.java:108-116）
+    draft_id VARCHAR(64),                                                   -- /autoclaude/decompose 草稿 id（路徑 C）
+    import_record_id UUID REFERENCES console.import_records(id),
+    tcs_rel_path VARCHAR(500),
+    tcs_sha256 CHAR(64) CHECK (tcs_sha256 IS NULL OR tcs_sha256 ~ '^[0-9a-f]{64}$'),
+    prd_sha256 CHAR(64) CHECK (prd_sha256 IS NULL OR prd_sha256 ~ '^[0-9a-f]{64}$'),   -- 拆解綁凍結 PRD（stale 判定）
+    tasks_count INTEGER NOT NULL DEFAULT 0 CHECK (tasks_count >= 0),
+    gate_rejection VARCHAR(30),                                             -- max_steps／cycle／empty_prompt／brain_*（decompose.py:37-47）
+    status VARCHAR(10) NOT NULL DEFAULT 'DRAFTED'
+        CHECK (status IN ('DRAFTED','SCG_PASSED','FROZEN','IMPORTED','SIGNED_OFF','REJECTED','STALE')),
+    stage_run_id UUID REFERENCES console.research_stage_runs(id),
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- 受控可更新表掛通用守衛（D-49；允許清單已在 V16 的函式內宣告）
+CREATE TRIGGER trg_research_route_decisions_guard BEFORE UPDATE OR DELETE ON console.research_route_decisions
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+CREATE TRIGGER trg_research_route_steps_guard BEFORE UPDATE OR DELETE ON console.research_route_steps
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+CREATE TRIGGER trg_research_scr_guard BEFORE UPDATE OR DELETE ON console.research_scr
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+CREATE TRIGGER trg_research_decompositions_guard BEFORE UPDATE OR DELETE ON console.research_decompositions
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+
+CREATE TABLE console.research_deliveries (                 -- append-only（P2 寫入；表隨 V19 建立，Flyway 已發佈檔不改）
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    research_id UUID NOT NULL REFERENCES console.research_projects(id),
+    kind VARCHAR(12) NOT NULL CHECK (kind IN ('RELEASE_TAG','PULL_REQUEST','RELEASE_NOTE')),
+    ref VARCHAR(200) NOT NULL,                             -- tag 名或 PR 編號
+    commit_sha VARCHAR(40) CHECK (commit_sha IS NULL OR commit_sha ~ '^[0-9a-f]{40}$'),
+    url VARCHAR(500),
+    rtm_run_id UUID REFERENCES console.execution_runs(id),
+    rtm_report_ref VARCHAR(300),
+    fsm_state_after VARCHAR(40),
+    status VARCHAR(7) NOT NULL CHECK (status IN ('CREATED','FAILED')),
+    detail VARCHAR(2000) NOT NULL DEFAULT '',
+    created_by VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (research_id, kind, ref)
+);
+CREATE TRIGGER trg_research_deliveries_guard BEFORE UPDATE OR DELETE ON console.research_deliveries
+    FOR EACH ROW EXECUTE FUNCTION console.research_append_only_guard();
+
+-- 自癒嘗試＝既有 execution_steps（RETRYING／FAILED）；視圖不新增任何寫入路徑
+CREATE VIEW console.v_research_healing_attempts AS
+SELECT rp.id AS research_id, er.id AS run_id, er.run_number, es.task_id, es.step_number, es.action,
+       es.status, es.error_message, es.tokens_used, es."timestamp" AS occurred_at
+FROM console.research_projects rp
+JOIN console.execution_runs er ON er.project_id = rp.console_project_id
+JOIN console.execution_steps es ON es.run_id = er.id
+WHERE es.status IN ('RETRYING', 'FAILED');
+```
+
+> **DDL 驗收**：`ResearchSchemaMigrationIT`（新類別；既有 `SchemaMigrationIT` 只改 Flyway 版本清單）對 V16～V19 套用成功＋`ddl-auto=validate` 不因新表報錯；每個 CHECK／觸發器各一個 Testcontainers 斷言（越界值被擋、append-only 表 UPDATE／DELETE 被擋、`tier='T3' AND clue_only=false` 被擋、`passed=true` 但分數不足或某維度低於地板或有 open P1 被擋、Reddit 網域未確認條款被擋、`rp_no` 超過四位數不截斷）。**D-49 三種觸發器**：受控可更新表更新清單外欄位與任何 DELETE 被通用守衛擋（含 `research_allowlist_entries` 只准 `enabled`／停用欄、`research_stage_runs` 編譯結果欄唯讀）、缺陷 `status` 非法轉移被擋（`OPEN→FIXED／WAIVED／SUPERSEDED`、`FIXED→REGRESSED`、`REGRESSED→FIXED` 放行）、來源 `verification` 降級被擋。**D-42／D-50 一致性**：`weighted_score` 以 `NUMERIC(5,2)` 精確比較（84.95 對 85.00 不過）、`passed` 且非 `POST_HUMAN` 而 `fsm_gate_result` 非 `PASS` 被擋、`POST_HUMAN` 通過而 `fsm_gate_result` 非 NULL 被擋、前置否決不過而帶分數被擋。**D-57 輪列 append-only**：對 `research_review_rounds` 任一列的 UPDATE（含 `round_no`、`verdict`、`finished_at` 任一欄）與 DELETE 被擋；輪列缺 `precheck_passed`、`passed`、`verdict`、`stage_run_id`、`started_at` 或 `finished_at`、或 `finished_at` 早於 `started_at` 被擋；`passed` 為 false 而 `fsm_gate_result` 非 `FAIL` 被擋。**D-61 型別層補鎖**：`research_review_rounds` 的 `verdict='PASS'` 而 `passed` 非 true（或 `passed` 為 true 而 `verdict` 非 `PASS`）被擋、`escalated` 與 `verdict='ESCALATE'` 不一致被擋、`fsm_retry_count` 與 `fsm_gate_result` 一邊為 NULL 另一邊非 NULL 被擋、`threshold` 低於 50.00 或高於 100.00 被擋；`research_stage_runs` 同一 `research_id` 的第二筆 QUEUED／RUNNING 被部分唯一索引擋；`research_fetches.host` 為空字串被擋；`round_no` 連續性與 T1／T2 的 `clue_only` 不在 DDL 斷言範圍（應用層保證，由 Bridge 寫入器的測試守）。**D-65 地板鎖**：`research_review_rounds.floor_score` 低於 50 或高於 100 被擋（與 `threshold` 的範圍鎖對稱；寫成 0 會架空 D-14 的每維度地板；初值 60 與邊界 50、100 通過）。**D-43／D-53 對映**：`research_artifacts.content` 與 `research_prd_versions.content` 超過 1 MiB（以位元組計，多位元組字元的字元數不得充當位元組數；D-59(2)）被擋、`research_fetches` 的 `WEB_SEARCH` 列帶 url 或 host、非 `WEB_SEARCH` 列的 url 或 host 為 NULL 被擋（D-59(1)）、`result_urls` 非 JSON 陣列被擋、`research_sources` 的 `url` 非 https、或 `COMMIT` 的 `git_commit` 為 NULL 或非 40 位 hex 被擋（D-59(1)）、`research_prd_versions.semver` 不合 `v` 前綴格式被擋、`research_review_scores` 的 `assist_agent_id` 與其 sha256 不成對被擋、`WAIVED` 缺 `waived_by` 或 `waiver_reason` 被擋、`FIXED`／`WAIVED`／`SUPERSEDED` 缺 `resolved_at` 被擋、`trigger_kind` 越出列舉被擋、`verdict` 為 `REVIEW_INVALID` 被擋（D-55）、`precheck_passed IS FALSE` 而 `passed` 為 true 或帶 `weighted_score` 被擋；**所有 18 張 `research_*` 表逐表 DELETE 一律被擋；觸發器拒絕的 SQLSTATE 一律為類別 23（`integrity_constraint_violation`）**（D-53）。`gen_random_uuid()` 與 V1 同款（PG13+ 內建）。V16～V18 於 P0、V19 於 P1 套用；每支遷移只追加、已發佈檔不改。
+
+**M　檔案 ↔ 表 對照表（工作區 `<BRIDGE_RESEARCH_ROOT>/<slug>/`）**
+
+| 檔案（相對工作區） | 作者 | 流向 | 登記（`research_artifacts.kind`） | 結構化落點 | 驗證／備註 |
+|---|---|---|---|---|---|
+| `00_research/issue_scope.json` | BRIDGE（由 UI 輸入渲染） | DB→檔 | `ISSUE_SCOPE` | `research_projects.scope`、`topic`、`depth_level` | 建立時渲染；之後僅在人改範圍時升版（`scope_rev`＋1） |
+| `00_research/raw/<sha256>.<ext>` | BRIDGE（API 抓取）／AGENT（節錄） | 檔→DB | （不登記為 artifact） | `research_fetches.raw_rel_path`、`raw_sha256` | 內容定址；**git-ignored、不進任何版控與備份**（D-18）；API 類為真位元組，WEB 類為 agent 節錄 |
+| `00_research/evidence_items.json` | AGENT | 檔→驗→DB | `EVIDENCE_ITEMS` | `research_sources`、`research_evidence_items`、`research_fetches`（宣告者的 `search_log`）、`research_artifacts.content`（全文，含 `counter_evidence`／`honest_bounds`） | `gates/evidence.py` 驗證證據矩陣模板 §2.3 的 16 條；evaluator 載具 |
+| `00_research/evidence_matrix.md` | BRIDGE（確定性渲染，含 S8 三桶） | DB→檔 | `EVIDENCE_MATRIX` | 同上 | 供人讀、供 `spec-frozen --doc` |
+| `01_specs/PRD_draft.md`（`PRD-v0.N.md`） | AGENT／HUMAN | 檔→驗→DB | `PRD_DRAFT` | `research_prd_versions`（`content`、`sha256`、`evidence_refs`） | `gates/prd_schema.py`：家規必讀章＋來源六節錨點、`E-NNN` 引用、Gherkin AC |
+| `01_specs/PRD-v1.0.0.md` | BRIDGE（核准時複製 head 版） | 檔→DB | `PRD_BASELINE` | `research_prd_versions(kind=BASELINE)`、`research_gate_decisions.frozen_digests` | **FSM `spec-frozen` 的 `--doc`** |
+| `01_specs/adr_draft.md` | AGENT | 檔→DB | `ADR_DRAFT` | （僅登記） | 隨 Gate 0 一併凍結 |
+| `02_governance/reviews/round-<k>/<dimension 小寫>.json` | AGENT（審查者） | 檔→驗→DB | （不登記；`raw_*` 在分數列） | `research_review_scores`、`research_review_defects` | `gates/review_card.py` 驗審查卡模板 §6.2；分數僅取各維度整數，加權由碼（`W100`，D-42） |
+| `02_governance/review_card.json` | BRIDGE（跨輪彙整，append 式重渲） | DB→檔 | `REVIEW_CARD` | `research_review_rounds`＋`_scores`＋`_defects` | 規格 §2 的「歷史評分與缺陷修訂紀錄」 |
+| `02_governance/route_decision.json` | BRIDGE | DB→檔 | `ROUTE_DECISION` | `research_route_decisions`、`research_route_steps` | |
+| `02_governance/state.json` | BRIDGE（匯出） | FSM＋DB→檔 | `STATE_EXPORT` | `research_projects.flow_*`＋FSM 唯讀視圖 | 🔴 **非權威**：FSM 真相＝`FSM-STATE-*.yaml`（只經 `FSMRuntime`）、游標真相＝DB；不得被任何程式讀回當輸入 |
+| `build/reports/fsm/FSM-STATE-research-<slug>.yaml` | FSM CLI | — | （不登記） | （Bridge 唯讀鏡像於 `GET /sdd/fsm/{key}?root=`） | 被 `.gitignore` 忽略（BRIDGE §8.1:364-365）；每次 Gate／SCR 把 `show` 輸出引進證據 |
+| `03_execution/TCS-<Feature>-<日期>.md` | AGENT（P1） | 檔→驗→DB | `TCS` | `research_decompositions.tcs_*` | 發佈到目標 `docs/03_testing/contracts/` 後才是內環 Stage-2 的 `--doc` |
+| `03_execution/task_decomposition.json` | BRIDGE（由 TCS／draft 渲染） | DB→檔 | `TASK_DECOMPOSITION` | `research_decompositions`、`import_records.parsed_result` | |
+| `03_execution/healing_history.log` | BRIDGE（append） | 引擎事件→檔 | `HEALING_LOG` | **既有表**：`execution_steps`、`checkpoints`（視圖 `v_research_healing_attempts`） | 檔案是衍生日誌，DB 真相不重複；寫檔前遮蔽疑似機密 |
+| `traceability_matrix.json`（規格 §5） | — | — | — | `GET /autoclaude/runs/{id}/rtm`（`rtm.py:79`）；`research_deliveries.rtm_report_ref` 只存參照 | 不發明第二套 RTM |
+
 ### 11.4 系統參數 → 引擎設定對映（`API-SET-10`；Phase 4 起由 `ConfigMaterializer` 實作）
 
 > **主控 2026-10-15 回寫**：`autoclaude.dalBackend → storage.mode` 的對映**實際不生效**——Bridge 固定 `yaml_only`（pause／restore 靠檔案式 checkpoint）；以 `config_overrides` 指定 `checkpoint_dir`／`log_dir` 亦不採用（落點由 Bridge 決定、`workspace` 欄位回報）。
@@ -1235,6 +1985,18 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 | L-12 | **Console 的斷點清單與步驟時間軸依賴 Bridge 的 DB 模式**（W7，完整性審查 I-07）：`GET /executions/{runId}/checkpoints`、審核 `RETRY` 找還原點、事件時間軸（`steps`）都讀 `console` schema 的 `checkpoints`／`execution_steps`，而這兩張表**完全由 Bridge 寫入**（`engine-bridge/app/db.py`，§7）；`AgentBridge.listCheckpoints`（Bridge 的 `GET …/checkpoints`）在 `backend/src/main` 沒有呼叫者，只有 adapter 測試〔**已處理（2026-10-21 現查；回寫自體檢子代理 OBS-SI-203）**：`listCheckpoints` 已自 `AgentBridge` 刪除（完整性審查 I-07），`AgentConsole/backend/src` 全樹僅剩 `src/test/java/com/aisdlc/minibridge/MiniRun.java`:95 的註記句說明其刪除；原文「在 `backend/src/main` 沒有呼叫者，只有 adapter 測試」為刪除前的現況〕 | Bridge 以純檔案模式啟動（沒設 `BRIDGE_DB_DSN`）時，這兩個畫面會是空的（純檔案模式下的實際表現：**已由 W7-QA 實測取代**——兩個畫面確為空，結論見 `AgentConsole/CLAUDE.md`:108〈環境變數〉`BRIDGE_DB_DSN` 列；2026-10-21 回寫；〔訂正：原文「純檔案模式下的實際表現**待驗**」〕）。compose 與 e2e README 都有設 DSN，標準部署不受影響；本機開發跑 Console 時必須同時給 Bridge 一個 DSN——`AgentConsole/CLAUDE.md` 所載的純檔案模式只適用於單獨驗 Bridge。`listCheckpoints` 的死碼由 BE 另案刪除或補用途（完整性審查 V-11④；**已刪**，見上） |
 | L-13 | **backend 不採用 JDT 註解式空值分析**（2026-10-19 掌舵者 IDE 診斷清單：VS Code Java 擴充的 `java.compile.nullAnalysis.mode` 預設 `automatic`，偵測到 classpath 上 Spring Framework 7／JSpecify 的空值註解即自動開啟，對每個未標註型別的方法參照報「Null type safety … needs unchecked conversion」，實測 185 筆；backend 原始碼沒有任何 `@NullMarked`／`@NonNull`，Gradle 編譯與測試不報、不是程式缺陷） | 開發機設定：在 VS Code 使用者或工作區設定把 `java.compile.nullAnalysis.mode` 設為 `disabled`（根 `.vscode/` 被 `.gitignore` 排除，無法隨 repo 分發，故以本列為唯一依據）。若日後要採用 JSpecify，須另立 ADR、逐 package 加 `@NullMarked` 並補齊可空標註，不得只開分析不標註 |
 | L-14 | **SelfImproving 鏡像要求 Bridge 容器唯讀掛載 repo 的一部分**（SelfImproving PRD §9.7 FC-b；**〔P1b 已落地 2026-10-22：採設計 A，`docker-compose.yml` 六條長語法唯讀 bind＋`SI_ROOT=/repo`，`AT-932-4-4`／`AT-940-3-1` 靜態鎖；真容器掛載行為已於 2026-10-25 實測（P2b V3，見本列末段）〕**；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：Bridge 映像（`engine-bridge/Dockerfile`:33–34）只 COPY `AutoClaude/` 與 `engine-bridge/`、無 `.git`（`:27–30` 只安裝 `git` 執行檔並冒煙 `git --version`），現行 compose 只掛 `../AISDLC_SDD:/sdd:ro`、`engine_workspace`、`app_logs`（`docker-compose.yml`:217–219）；`/si/*` 以子行程呼叫根層 `tools/selfimproving.py export`，須由 compose 以**長語法**（`bind.create_host_path: false`）唯讀掛載六條到 `<SI_ROOT>`（`SI_ROOT=/repo`）：`../tools`、`../docs/06_quality`、`../.git/HEAD`、`../.git/refs`、`../.git/objects`、`../.git/packed-refs`；**不掛 `.git/config`**（remote URL 可能內嵌憑證，且 repo 的 remote URL 不得內嵌憑證）、**不掛 repo 根**（根下被忽略的 `AgentConsole/.env` 含 `JWT_SECRET`、`CONSOLE_ENCRYPTION_KEY`，而 Bridge 容器內跑的是引擎執行的使用者指令） | 未掛載或 `SI_ROOT` 未設＝`/si/*` 回 503 `si_unavailable`（不是空表）；`.git/packed-refs` 於主機不存在時，短語法會讓 Docker 在主機建立同名目錄而破壞 repo（故用長語法、來源不存在即啟動失敗）；單檔 bind mount（`HEAD`、`packed-refs`）在 git 以 lock＋rename 換檔（切分支、`pack-refs`）後，容器可能保留舊 inode ⇒ `head_sha` 靜默過期（**未實測**；備案＝掛整個 `.git` 唯讀並以空檔覆蓋 `.git/config`，P1b 以真容器二擇一）；`git` 對 bind mount 的擁有者檢查見 V-12；**〔P2b 已落地 2026-10-25：compose 恰一條可寫稽核 bind（長語法、`create_host_path: false`，主機目錄須預先存在）；真容器可寫 bind 權限已於 2026-10-25 實測（V3：容器內 uid 10001 對 `/si-audit`〔9p rw〕寫入成功、六條 `/repo` bind 皆 9p ro、`touch /repo/tools/.probe` 回 Read-only file system；主機讀得到容器寫的稽核檔並由 CLI 入帳 OBS-SI-308／309；主機目錄缺席時 compose 是否明確失敗與 Linux 主機仍未驗）〕**另需一個**可寫** bind mount：`BRIDGE_SI_AUDIT_DIR`（容器內稽核檔目錄）↔ 主機 `<AUTOSDD_SI_DIR>/console_audit`，只掛這個子目錄、不連帶掛家目錄其餘部分；缺＝寫入面 503 `si_write_disabled` |
+| L-R1 | headless WebSearch／WebFetch 的逐筆呼叫 Bridge 觀測不到，只認 agent 在 `evidence_items.json` 宣告（`observed_by=AGENT_DECLARED`，查證層級 ≤V2）；Web 層預設關閉 | 審查發現宣告的 URL 不可開／內容不符→降級該來源並記缺陷 |
+| L-R2 | 審查獨立性（R-9.20.3 型）在 AutoClaude 路徑結構上不成立：同一 AI、同工作區可互讀（BRIDGE §6.4:211-213） | 補償：分 run、`maintain_context:false`、聚合由碼、Gate 0 人工；**不宣稱滿足** |
+| L-R3 | Docker 全棧無 `claude`／`gh`、無 repo 可寫 bind：真研究與軌道 A／B 的 git／GitHub 只在本機模式；容器模式只跑 mock claude 的 E2E | `GET /research/capabilities`（`mode`）＋UI 停用說明（D-29） |
+| L-R4 | 工作區預設 repo 外（D-28）；若部署者把 `BRIDGE_RESEARCH_ROOT` 設到 monorepo 下，每個 `claude -p` 載入根 `CLAUDE.md` 鏈與根 hooks（token 成本、額度守衛干擾） | V-R2 負向驗證；根 `.gitignore` 仍加 `/my-project/` |
+| L-R5 | `transition`／`gate` 為舊 CLI 契約（非單行 JSON） | Bridge 預檢＋事後驗證；再開症狀：誤判一次→框架 CLI 加 `--json` |
+| L-R6 | 非 Python 標的無 AT 綁定（evaluator 只收 `pytest`，BRIDGE §7） | P1 只做 `python-fastapi`（D-32）；其餘棧警告「無凍結綁內容」 |
+| L-R7 | 狀態檔 load-modify-save 無跨行程鎖（同 BRIDGE §6.10:301） | 研究面只由 Bridge 單行程寫外環鍵；人在 SDD session 手動並寫＝已知競態 |
+| L-R8 | 軌道 B `gh repo create` 與建 PR 需操作者本機 `gh` 已登入或請求帶 token | `capabilities.ghCli`；V-R8 |
+| L-R9 | `research_events` 與 `research_projects.last_event_seq` 配號在單一 Bridge 行程下安全；多實例 Bridge 需改用序列或 advisory lock | 現行單 worker（`Dockerfile:57`）；再開症狀：Bridge 水平擴展 |
+| L-R10 | Stack Exchange 速率限制官方數值未現查（官方頁無法抓取；arXiv、GitHub、Semantic Scholar 已現查並回填 PRD NFR-R2P-03-6） | 保守節流初值（非事實宣稱）＋遵守伺服器回傳限流訊號；V-R9 殘餘落證 |
+| L-R11 | 框架對 HUMAN_PENDING 的 72 小時提醒／168 小時升級只由 hooks SessionStart 執行（`SDD_FSM_ENGINE.md:433-434`；`.claude/hooks/session_start.py:279`）；Console 路徑沒有 hooks（D-48(3)） | P0 以 UI 顯示等待時長＋滿 72 小時橫幅提醒，不轉 REMINDER、不自動升級（PRD AC-R2P-09-10、NFR-R2P-06-5）；再開症狀：掌舵者回報因 Gate 0 久未核准而錯過提醒 |
+| L-R12 | ESCALATION 人工恢復後的重試計數不歸零：引擎的 `resume-from-escalation` 不動 retry 計數（只有 `gate PASS` 與 `spec-frozen` 歸零）；`increment_retry` 見計數已達上限時把 `current_count` 夾在上限，並在該筆歷史的 `failure_reason` 標「(tamper detected: …)」字樣——這是引擎對「已達上限後再 FAIL」的既有標記（`state_loader.py:211-269`），不是研究面被竄改 | 恢復後至多再得一次審查（PASS 歸零、FAIL 立即再 ESCALATION；D-60）；歷史列照引擎原文顯示、不改寫也不隱藏；全新預算＝換世代（API-RP-20 `generation:"next"`）；再開症狀：掌舵者要求恢復後重新得 3 輪（須先改引擎 `state_loader.py` 與 TLA+，或走換世代） |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）
 
@@ -1252,3 +2014,11 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 | V-10 | `pgbackrest_*` 指標的產出方式（G-04）。**結論（2026-10-21 現查；已驗）**：產出方式＝pgbackrest sidecar 的 `pgbackrest-metrics.sh` 每 60 秒以 `pgbackrest info --output=json` 產生 Prometheus 文字格式，busybox httpd 在 `:9854/metrics` 提供（`AgentConsole/docker/README.md`:387；Prometheus 目標 `pgbackrest:9854`，`docker/prometheus/prometheus.yml`:33）；W7-QA 實測（`QA_W7_Closure.md` §8.3）：該目標 up，備份後 `pgbackrest_stanza_status`＝0、`pgbackrest_backup_since_last_full_seconds` 與 `pgbackrest_backup_last_status` 皆有序列；新部署尚無備份時這兩個序列不存在，屬預期（`alerts.yml` 註解） | Prometheus targets 與指標查詢 | W2-B |
 | V-11 | Bridge 與 SSOT 對「SDD LATEST」的判定可能分歧（完整性審查 I-04）：Bridge 取 `engine-bridge/app/settings.py` 的「目錄名數字最大的 `AISDLC_SDD_v<M>.<N>`」（不看 git），SSOT `tools/lib/sdd_latest.py` 以 `git ls-files` 判定；兩者在「工作樹有未入庫的版本目錄」時**實驗確認分歧**（W7-QA 以拋棄式 git repo 比對：v9.99 只在工作樹時 SSOT 回 v0.30 並警告未 tracked、Bridge 回 v9.99；`git add` 後兩者一致；`.bak` 與「- Copy」兩者都排除；登 DEF-AC-012，P4，主控裁決保留——分歧只在有未入庫版本目錄的開發機出現，正式部署的 `SDD_ROOT` 掛載面沒有未入庫目錄）。CI 路徑過濾已於 W7 補 `AISDLC_SDD/scripts/**` 與 `AISDLC_SDD/*/tools/fsm_runtime/**` | 若要消除分歧，Bridge `settings.py` 改呼叫 SSOT（需 git 可用；Docker 映像內沒有 `.git`，所以要另定無 git 時的退路）；暫以文件登記 | 主控（保留） |
 | V-12 | **〔P1b 已落地 2026-10-22；真容器未實測〕**容器內 `git` 的 `safe.directory` 環境變數式放行對唯讀 bind mount 是否足夠（SelfImproving PRD §9.2 鐵律三自問表、§9.7 FC-b；T1：sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d line 13）：映像使用者 uid 10001 與主機擁有者不同，`git` 會報 `dubious ownership`；放行法＝`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory`、`GIT_CONFIG_VALUE_0=<SI_ROOT>`（只對該路徑，不用 `*`），映像 `git --version` 須 ≥ 2.31。**結論（2026-10-25 真容器實測；已驗）**：`docker compose exec -T -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo engine-bridge sh -c 'git -C /repo rev-parse HEAD'` 回主機 HEAD（`5997bb1a…`），不帶放行回 `fatal: detected dubious ownership`（rc 128）；bind 在容器內擁有者 uid 0、Bridge 程序 uid 10001、映像 git 2.47.3；`GET /api/v1/si/status` 的 `headSha` 等於主機 HEAD、`ne` 為空。P1b 實作已把環境變數式放行寫進 `engine-bridge/app/si_cli.py`（`GIT_CONFIG_COUNT=1`、`GIT_CONFIG_KEY_0=safe.directory`、`GIT_CONFIG_VALUE_0=<SI_ROOT>`，單元測試釘住），真容器行為已驗（上述）；再開症狀＝容器內 `export` 的 `head_sha` 回 `null` 並於 `ne` 列 `git`（附 stderr 的 `dubious ownership` 字樣） | P1b 實作輪以真容器驗：`docker compose exec -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo engine-bridge git -C /repo rev-parse HEAD`（bash 與 PowerShell 同形） | P1b 開發（鍵 `agentconsole-si-mirror`） |
+| V-R1 | headless `claude -p` 的 `--allowedTools "WebFetch(domain:…)"` 語法與無提示行為 | 暫存目錄 `claude -p --permission-mode acceptEdits --permission-prompts none --allowedTools … "<一句提示>"`，看 rc 與輸出（PowerShell 與 bash 同形） | PKG-BR-C 開發棒（P0，本機模式） |
+| V-R2 | 負向：repo 外工作區不載入根 `CLAUDE.md` 鏈與根 hooks、每回合 token | 同一提示分別在 repo 外工作區與 repo 內 `my-project/x` 各跑一次，比 `--output-format json` 的 usage 與 `--debug hooks` | PKG-BR-C＋主控（P0） |
+| V-R3 | Windows `-p <prompt>` 命令列長度與 `.prompts/` 參照法 | 構造 20 KB／40 KB 提示對比 | PKG-BR-C（P0） |
+| V-R4 | httpx 釘 IP＋SNI 的可行性 | 單元測試對本機假伺服器；不可行則退回「解析後比對 IP 非私網」 | PKG-BR-B（P0） |
+| V-R5 | 無 `MINIMAX_API_KEY` 時 evaluator 失敗後的重試行為 | mock claude＋失敗 evaluator 觀察 `engine-N.log` | PKG-BR-C（P0） |
+| V-R6／V-R7 | 新狀態目錄首次 `show`（不帶 `--must-exist`）建檔行為、第 3 次 FAIL 後現態；`spec-frozen --stage Gate-0 --digest --root <工作區>` 的相對 `--doc` 與摘要 | 暫存 `SDD_STATE_DIR` 下實跑（腳本見 `ResearchToPRD_Plan.md` 附錄） | PKG-BR-A（P0） |
+| V-R8 | Bridge 環境下 `gh auth status`／`GH_TOKEN` 行為 | 本機模式 | P1 的 route 棒 |
+| V-R9 | Stack Exchange 官方速率限制（arXiv、GitHub、Semantic Scholar 主控已現查並回填 PRD NFR-R2P-03-6） | 以官方頁 `https://api.stackexchange.com/docs/throttle` 現查，回填 PRD NFR-R2P-03-6 與 allowlist 條目 | PKG-BR-B（P0） |

@@ -1,9 +1,31 @@
 # AISDLC-SDD Framework CHANGELOG
 
 **維護者**: AISDLC-SDD Framework Team
-**最後更新**: 2026-10-19
+**最後更新**: 2026-11-02
 
 ---
+
+## [v0.30 LATEST 原地修改] - 2026-11-02（ResearchSOPtoPRD 框架層：Stage-0 研究到規格；LATEST 本就可原地改，未開新版）
+
+> 來源：掌舵者 2026-11-02 貼入 ResearchSOPtoPRD 規格並問「是否納入 AISDLC_SDD 流程」；主控裁決 D-21（方法層進框架、執行層在 Console／Bridge）。完整 delta、決策與回退見 `EVOLUTION_LOG.md`〈LATEST 修改備忘：ResearchSOPtoPRD 框架層〉；上位需求為根層 `docs/01_requirements/ResearchToPRD_PRD.md`。
+
+### 新增
+- **工作流** `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`：研究 → 證據矩陣 → PRD → 四方對抗審查 → Gate 0 人工核准；兩把 FSM 鍵、狀態對映（逐邊附 `transition_rules.py` 行號）、最多 3 輪審查的預算語意、SCR 三條路、人手流程。
+- **Agent** `research-analyst-zh.yaml`（證據端）、`spec-engineer-zh.yaml`（規格端）；審查沿用 sd-architect、pm-po、qa-tester、security-engineer。
+- **模板** `ISSUE-SCOPE-TEMPLATE.md`、`EVIDENCE-MATRIX-TEMPLATE.md`、`PRD-SPEC-ENGINEERED-TEMPLATE.md`（家規 14 章為頂層、六節錨點、章尾對映表）、`ADVERSARIAL-REVIEW-CARD-TEMPLATE.md`：含 9 個機器可讀 JSON 契約區塊（`<!-- r2p:contract=… -->` 標記）。
+- **文件**：ADR-001（框架層，D1～D7）、TCS-ResearchToPRD-Framework-20261102（F-970／US-970／AC-970-1～7）。
+
+### 修改
+- `AISDLC_SDD_INIT.md`（`auto_load_config`、Agent／Workflow／模板索引三清單與計數）、`workflow/README.md`、`agent/README.md`（計數句依訂正協議保留原文逐字）、`agent/specialized/README.md`、`SDD_SPEC_FIRST_GATE.md`（Gate-0 命名、SCR stage 名、SCG-0 評估器條款）、`SDD_AUTOCLAUDE_BRIDGE.md`（§8.0 加 `research` 外環鍵前綴、新增 §9）、greenfield 與 brownfield enhancement（Stage-0 指標）、`docs_template/README.md`、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`、`EVOLUTION_LOG.md`、`AISDLC_SDD/CLAUDE.md`（Rule 2 目錄樹、快速參考表、Rule 6 兩列）；`scripts/framework_status_snapshot.py` 的 curated 工作流組成字串加 `+1 Research-to-PRD`。
+
+### 刻意不變
+- `_HAPPY_PATH`、`formal/`、`governance/rules/R-*.yaml`、skills、FSM runtime 與 CLI、`PRD_Universal_Template.md`。
+
+### 形式化驗證
+- 本輪未改 `_HAPPY_PATH` 或任何 `*.tla`／`.cfg` ⇒ TLC 不適用（各版既有五軌證明維持有效）。
+
+### 計數
+- Agents +2；`docs_template/sdd` 模板 +4；Workflows +1（絕對數字以重生後的 `FRAMEWORK_STATUS.md` 為準）。
 
 ## [v0.30 LATEST 原地修改] - 2026-10-19（SelfImproving P1 輪／FSM runtime：spec-refreeze 與發布關卡回邊；LATEST 本就可原地改，未開新版）
 

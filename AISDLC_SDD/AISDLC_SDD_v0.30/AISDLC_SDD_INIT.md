@@ -197,7 +197,7 @@ Claude Code Hook 層的**強制攔截**；Phase E 在此之上依序加入**精�
 ### 核心特色
 
 - 繼承 AISDLC v0.09 全部核心機制（Agent、Workflow、Scenario、按需載入）
-- 新增 SDD 專屬模板（59 個：56 md + 3 yaml）、CI/CD 規格（9 個）、場景增強（10 個）
+- 新增 SDD 專屬模板（63 個：60 md + 3 yaml）、CI/CD 規格（9 個）、場景增強（10 個）
 - 強制 SCG 閘門：每個開發階段都有規格合規檢查（SCG-0 ~ SCG-6）
 - 支援全部 10 個場景：Greenfield、Brownfield、Refactoring、Documentation、DevOps、Integration、Migration、Performance、Security、Testing
 - 內建 42 個 Claude Code Skills（33 繼承強化 + 9 SDD 核心）
@@ -342,6 +342,14 @@ auto_load_config:
     # 刻意不自行發明新時機——否則就是同一份知識的第二個家。
     - path: "agent/specialized/sdd-zero-trust-auditor-zh.yaml"
       load_at: "SCG-4／SCG-5 前的獨立複審（文件級零信任稽核者，唯讀）"
+    # ResearchSOPtoPRD（掌舵者 2026-11-02；主控裁決 D-21）：Stage-0 研究到規格的兩支 agent。
+    # 不新增場景鍵：Stage-0 是任何場景的可選前置（外環鍵 research-<slug>），不是第 11 種專案；
+    # 載入時機＝workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md 的對應階段。
+    # 審查四角沿用既有 agent（sd-architect／pm-po／qa-tester／security-engineer，授權欄 compliance-officer），不重複登記。
+    - path: "agent/specialized/research-analyst-zh.yaml"
+      load_at: "Stage-0 研究到規格：RESEARCH 階段與增補研究（sdd-research-to-prd 工作流）"
+    - path: "agent/specialized/spec-engineer-zh.yaml"
+      load_at: "Stage-0 研究到規格：DRAFT 與 REVISE 階段（sdd-research-to-prd 工作流）"
 
   greenfield:
     primary_agents:
@@ -571,9 +579,9 @@ auto_load_config:
 | 06 | `agent/core/06.dev-developer-zh.yaml` | 開發工程師 |
 | 07 | `agent/core/07.qa-tester-zh.yaml` | QA 測試師（SDD 核心）|
 
-### Specialized Agents（21 個）（v0.02 +sdd-playbook-compiler；v0.28 +sdd-prd-to-playbook；R85 +sdd-zero-trust-auditor 補列）
+### Specialized Agents（23 個）（v0.02 +sdd-playbook-compiler；v0.28 +sdd-prd-to-playbook；R85 +sdd-zero-trust-auditor 補列；ResearchSOPtoPRD +research-analyst、+spec-engineer）
 
-> 含 14 個場景專屬 + 5 個系統級 runtime agent（Phase D~H 自動化閉環產出，由 Runtime 在對應 observation 狀態觸發，非場景載入）+ 2 個橋接 agent（v0.02 Phase Z / ACT-163：sdd-playbook-compiler〔末端：凍結契約→測試 playbook〕；AutoSDD_improving_94：sdd-prd-to-playbook〔前端：PRD→三層 playbook〕）。
+> 含 14 個場景專屬 + 2 個 Stage-0 研究到規格 agent（research-analyst、spec-engineer；ResearchSOPtoPRD，Stage-0 前置、任何場景可選）+ 5 個系統級 runtime agent（Phase D~H 自動化閉環產出，由 Runtime 在對應 observation 狀態觸發，非場景載入）+ 2 個橋接 agent（v0.02 Phase Z / ACT-163：sdd-playbook-compiler〔末端：凍結契約→測試 playbook〕；AutoSDD_improving_94：sdd-prd-to-playbook〔前端：PRD→三層 playbook〕）。
 >
 > 🔴 **R85／DEF-200-081① 訂正（被訂正的原文逐字保留：「Specialized Agents（20 個）」「含 14 個場景專屬 + 4 個系統級 runtime agent」）**：
 > `sdd-zero-trust-auditor-zh.yaml` 早已在磁碟上（隨 R84 入庫），但本節的**計數、下方清單表、
@@ -598,6 +606,8 @@ auto_load_config:
 | `agent/specialized/sd-web-architect-zh.yaml` | Web 架構師 | Web 開發 |
 | `agent/specialized/security-engineer-zh.yaml` | 安全工程師 | Security |
 | `agent/specialized/technical-writer-zh.yaml` | 技術寫作師 | Documentation / All |
+| `agent/specialized/research-analyst-zh.yaml` | 研究分析師（Stage-0：三層檢索、七欄證據抽取、反證、誠實劃界，產出 evidence_items.json） | Stage-0 研究到規格（任何場景的可選前置；ResearchSOPtoPRD） |
+| `agent/specialized/spec-engineer-zh.yaml` | 規格工程師（Stage-0：證據矩陣 → SE-PRD 與 adr_draft 起草與修訂；不審查、不評分） | Stage-0 研究到規格（任何場景的可選前置；ResearchSOPtoPRD） |
 | `agent/specialized/sdd-orchestrator-zh.yaml` | SDD 閉環總指揮（Test→Fix 自動派遣） | Runtime / 系統級（Phase D） |
 | `agent/specialized/sdd-diagnostic-zh.yaml` | 自癒診斷師（ESCALATION 分類 / auto_recoverable 判定） | Runtime / 系統級（Phase G M1） |
 | `agent/specialized/sdd-evaluator-zh.yaml` | 執行接地評估器（沙箱運行 App、生成-評估分離對抗） | Runtime / 系統級（Phase H M1） |
@@ -638,6 +648,12 @@ auto_load_config:
 | Workflow | 說明 |
 |---------|------|
 | `ADR_GENERATION.md` | ADR 產生流程 |
+
+### Research-to-PRD Workflow（`workflow/sdd-research-to-prd/`；ResearchSOPtoPRD，Stage-0 前置）
+
+| Workflow | 說明 |
+|---------|------|
+| `SDD_RESEARCH_TO_PRD.md` | 研究到規格：三層檢索 → 證據矩陣 → SE-PRD → 四方對抗審查 → Gate 0 人工核准（SCG-0 之前的外環；FSM 鍵 `research-<slug>`、stage 名 `Gate-0`） |
 
 ### Scenario-Specific Workflows（`workflow/scenario-specific/`）
 
@@ -691,7 +707,7 @@ auto_load_config:
 
 ---
 
-## SDD 模板索引（59 個）
+## SDD 模板索引（63 個）
 
 ### docs_template/sdd/ 完整模板清單
 
@@ -702,6 +718,10 @@ auto_load_config:
 | **requirements** | `AMBIGUITY-SCORER-SPEC.md` | 模糊度評分公式凍結規格（SCORER_VERSION） | All（Phase G M3） |
 | **requirements** | `AMBIGUITY-WAIVER-TEMPLATE.md` | 模糊度豁免聲明 | All（Phase G M3） |
 | **requirements** | `SPEC-PATCH-TEMPLATE.md` | 規格自癒 patch 提案（proposed） | All（Phase J） |
+| **requirements** | `ISSUE-SCOPE-TEMPLATE.md` | 研究議題與檢索邊界契約（issue_scope.json；S1 四要素） | All（Stage-0 研究到規格） |
+| **requirements** | `EVIDENCE-MATRIX-TEMPLATE.md` | 證據項契約（evidence_items.json）與證據矩陣版式（S2／S3／S5／S8） | All（Stage-0 研究到規格） |
+| **requirements** | `PRD-SPEC-ENGINEERED-TEMPLATE.md` | 研究到規格版 PRD（SE-PRD：家規 14 章為頂層＋六節錨點＋章尾對映表；兼具 FRD-lite） | All（Stage-0 研究到規格） |
+| **requirements** | `ADVERSARIAL-REVIEW-CARD-TEMPLATE.md` | 四方對抗審查評分卡（rubric、單維度與彙整 JSON 契約、加權與通過條件） | All（Stage-0 研究到規格） |
 | **architecture** | `AS-IS-SRD-TEMPLATE.md` | 現況系統規格（逆向） | Brownfield |
 | **architecture** | `TO-BE-SRD-TEMPLATE.md` | 目標系統規格 | Brownfield |
 | **architecture** | `BEFORE-ARCH-TEMPLATE.md` | 重構前架構快照 | Refactoring |

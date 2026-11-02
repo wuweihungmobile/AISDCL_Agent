@@ -491,6 +491,9 @@
 ## 2.9 執行中心／監控中心無專案入口頁（`/execute`、`/monitor`）的 TCS 本地 ID 追溯（Console PRD §0.8；不計入 §2 總列數）
 > 本子表 2026-11-01 依 DEF-200-576 體例自始立於 [RTM-ExecMonitorEntry-20261101.md](RTM-ExecMonitorEntry-20261101.md)（18 列：F 1、US 1、AC 5、AT 11；鍵 `agentconsole-exec-monitor-entry`；回填義務不變）。
 
+## 2.10 研究議題轉規格書 P0 外環（ResearchToPRD；`/research`）的 TCS 本地 ID 追溯（ResearchToPRD_PRD.md；不計入 §2 總列數）
+> 本子表 2026-11-02 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P0-20261102.md](RTM-ResearchToPRD-P0-20261102.md)（238 列：F 1、US 3、AC 24、AT 210；鍵 `agentconsole-research-to-prd-p0`；回填義務不變）。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）

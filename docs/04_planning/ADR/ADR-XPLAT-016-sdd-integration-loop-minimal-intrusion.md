@@ -175,7 +175,7 @@ improving_115 判定「AISDLC_SDD 已融入系統」為**部分**：引擎面（
 | 逾時 | 單次 20 秒；逾時以行程樹終止（`procutil.begin_terminate`）後回 504 `sdd_cli_timeout` | 〔乾跑 #13〕暖機 0.07～0.11 秒，20 秒涵蓋冷啟動與防毒掃描 |
 | 序列化 | 行程內以 `(狀態目錄, 專案鍵)` 為鍵的互斥鎖，**同時罩住**「CLI 呼叫」與「`GET /sdd/fsm/{project}` 的檔案讀取」 | 消除 Bridge 自己「讀的當下被 `os.replace` 換檔」的 Windows 共享違規（體檢報告列為理論洞；本設計把自造的那一半消掉） |
 | 與 SDD session 並行 | **已知邊界**：狀態檔 load-modify-save 沒有跨行程鎖（只有 `os.replace` 原子） | improving_115 §5.1-6；Bridge 只在 spawn 與終態各呼叫一次，預期近零，登理論洞 |
-| 動詞白名單 | `spec-frozen`（僅經 `:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed` | 其餘動詞（`transition`、`gate`、`resume-from-escalation`、`spec-audit`、`check-impl`、`complete-auto-compact`、`reset-ledger`、`reconcile`、`negotiate-exit --outcome underspecified`）Bridge 一律不呼叫；以測試釘住（§15） |
+| 動詞白名單 | `spec-frozen`（僅經 `:freeze`）、`negotiate-enter`、`negotiate-exit --outcome agreed`、`delegate-enter`、`delegate-exit --decision done｜failed` | 其餘動詞（`transition`、`gate`、`resume-from-escalation`、`spec-audit`、`check-impl`、`complete-auto-compact`、`reset-ledger`、`reconcile`、`negotiate-exit --outcome underspecified`）Bridge 一律不呼叫；以測試釘住（§15）。〔2026-11-02 註記：研究面（鍵 `research-<slug>` 與 `agentconsole-research-to-prd-*`／`sdd-research-to-prd` 功能鍵）的動詞白名單另見 ADR-XPLAT-017 §D2；本列對 `:freeze` 與 `/autoclaude/runs` 的 `sdd` 區塊仍有效，`resume-from-escalation` 仍不入。〕 |
 
 ---
 
@@ -752,3 +752,7 @@ SA 契約 §6.8.3 B 表的八項，加上與它們連動的 Q1／Q3／Q4／Q5（
 | Q3 | FSM 停在委派態的解卡 | D-115-15：取消⇒`done`；新批次遇 DELEGATED 時依 `playbook_ref` 所指 run 判定回收（終態或不存在）或 409（活躍、外來）；與 SA 建議的差異：以 FSM 記的 run 為準，不是「Bridge 有沒有同 `fsm_project` 的活躍 run」 | §10.1、§10.3 |
 | Q4 | `approver`／`fsm_project` 兩個補欄 | 採用：`sdd.approver`（選填，省略記 `console`，1～100 字、不含 `;`）；`/sdd/compile` 請求 `fsm_project`、回應 `spec_file`／`fsm_project` | §5.2、§7.3、§8.3 |
 | Q5 | 回應形狀的小選擇 | 採用：`ParsedResult` 四欄伺服器擁有；`unmapped_at_ids` 非空仍回 200、Console 轉警告 `at_unmapped`；清單項不帶 `phase`；`spec_format_version` 只顯示 | §8.2 |
+
+## 附錄 F：後續 ADR 指標（ResearchToPRD W0 規格波，主控收尾單人窗口，2026-11-02）
+
+[ADR-XPLAT-017](ADR-XPLAT-017-bridge-fsm-write-surface.md)（Bridge 研究寫入面：雙鍵模型、FSM 動詞擴充、Gate-0 端點、框架側白名單）**補充**本 ADR §3.5 與 §11，不取代任何決策：§3.5 的動詞白名單列只加註記（研究面的 `show`／`transition`／`gate`／`spec-refreeze` 另有獨立權杖與端點，`resume-from-escalation` 仍不入）；§11 白名單本文不改，框架鍵 `sdd-research-to-prd` 的可改檔以 ADR-XPLAT-017 §D7 為準，`AgentConsole/CLAUDE.md` 鐵律 7 引用它。主控裁決 D-23、D-38（PRD `docs/01_requirements/ResearchToPRD_PRD.md` 附錄 C.2）。

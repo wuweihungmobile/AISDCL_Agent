@@ -68,6 +68,10 @@ desktop.ini
 # （FSM-STATE-*.yaml、CONTEXT-LEDGER-*、MONITOR-VIOLATION-* 等執行期產物；子專案的同名目錄
 # 已由各自 .gitignore 的 build/ 排除，只有根層沒人守）；同上兩行以 / 前綴鎖根層
 /build/reports/fsm/
+# ResearchToPRD（2026-11-02，主控裁決 D-28／ADR-003 D8）：研究工作區預設在 repo 外
+# （~/.autosdd/my-project/），BRIDGE_RESEARCH_ROOT 覆寫到 repo 內時這裡兜底——
+# 工作區含第三方原文、agent 產物與外環 FSM 狀態檔，皆「輸出非輸入」且不得入版控（D-18）
+/my-project/
 
 # AutoClaude 測試/執行於 monorepo 根 cwd 落地的 runtime 產物（escalation dumps、
 # checkpoint、kb metrics/goal_progress jsonl、perf 結果等「輸出非輸入」可重生衍生物，

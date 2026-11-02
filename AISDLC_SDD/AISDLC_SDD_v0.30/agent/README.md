@@ -26,6 +26,7 @@ agent/
 │   ├── qa-lead-zh.yaml
 │   ├── qa-mobile-tester-zh.yaml
 │   ├── qa-web-tester-zh.yaml
+│   ├── research-analyst-zh.yaml        # Stage-0 研究到規格（任何場景的可選前置；ResearchSOPtoPRD）
 │   ├── sd-mobile-architect-zh.yaml
 │   ├── sd-web-architect-zh.yaml
 │   ├── sdd-diagnostic-zh.yaml          # 系統級 runtime agent
@@ -34,7 +35,9 @@ agent/
 │   ├── sdd-orchestrator-zh.yaml        # 系統級 runtime agent
 │   ├── sdd-playbook-compiler-zh.yaml   # 橋接 agent（末端：凍結契約→測試 playbook）
 │   ├── sdd-prd-to-playbook-zh.yaml      # 橋接 agent（前端：PRD→三層 playbook，improving_94）
+│   ├── sdd-zero-trust-auditor-zh.yaml   # 文件級零信任稽核者（唯讀；SCG-4／SCG-5 前的獨立複審；AGT-10／R84）
 │   ├── security-engineer-zh.yaml
+│   ├── spec-engineer-zh.yaml           # Stage-0 研究到規格（任何場景的可選前置；ResearchSOPtoPRD）
 │   ├── technical-writer-zh.yaml
 │   └── README.md
 ├── AGENT_COLLABORATION_PATTERNS.md
@@ -74,7 +77,9 @@ agent/
 ## 🔧 專業化 Agent (Specialized Agents)
 
 提供特定領域的專業能力，依需求選用。**v0.09 起全部中文化 (`-zh.yaml`)**。
-共 **20 個 Specialized（14 persona/specialized + 4 系統級 runtime + 2 橋接 agent）**：
+共 **23 個 Specialized（16 persona/specialized〔含 2 個 Stage-0 研究到規格 agent〕 + 4 系統級 runtime + 2 橋接 agent + 1 個文件級稽核 agent）**：
+
+> 🔴 **訂正（ResearchSOPtoPRD；訂正協議見 `agent/EVIDENCE_DISCIPLINE.md`〈四、訂正協議〉）**：被訂正的原文逐字保留——「共 **20 個 Specialized（14 persona/specialized + 4 系統級 runtime + 2 橋接 agent）**：」。**為何是假話**：原文在加入兩支 Stage-0 agent 之前就已少算一支——文件級零信任稽核者 `sdd-zero-trust-auditor-zh.yaml`（AGT-10／R84 新增）當時漏列。現值以 `FRAMEWORK_STATUS.md`（`framework_status_snapshot.py` 自磁碟生成）為唯一真相源；同一宣稱的其他站點（上方目錄樹、本節清單、文末 FAQ）已在同一批編修處置。
 
 ### 開發專業化
 - `dev-senior-zh.yaml` - 資深開發者 (Senior)
@@ -98,6 +103,11 @@ agent/
 - `technical-writer-zh.yaml` - 技術文件撰寫員 (DocX)
 - `compliance-officer-zh.yaml` - 合規專員 (CompOff)
 
+### Stage-0 研究到規格（任何場景的可選前置；ResearchSOPtoPRD）
+- `research-analyst-zh.yaml` - 研究分析師 (Rae)：三層檢索、七欄證據抽取、反證、誠實劃界，產出 `evidence_items.json`；不起草 PRD、不審查、不評分
+- `spec-engineer-zh.yaml` - 規格工程師 (SpecEng)：證據矩陣 → 研究到規格版 PRD（SE-PRD）與 `adr_draft.md` 的起草與修訂；與審查四角分離，不審查、不評分
+- 工作流：[workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md](../workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md)；審查沿用 sd-architect、pm-po、qa-tester、security-engineer（授權欄由 compliance-officer 輔），不重複登記
+
 ### 系統級 Runtime Agent
 - `sdd-orchestrator-zh.yaml` - SDD 閉環總指揮
 - `sdd-diagnostic-zh.yaml` - 自癒診斷 Agent
@@ -105,6 +115,7 @@ agent/
 - `sdd-gc-zh.yaml` - 鷹架 GC Agent
 - `sdd-playbook-compiler-zh.yaml` - Playbook 編譯器（橋接末端：凍結契約→測試 playbook）
 - `sdd-prd-to-playbook-zh.yaml` - PRD→Playbook 規劃架構師（橋接前端：PRD→三層 playbook，AutoSDD_improving_94）
+- `sdd-zero-trust-auditor-zh.yaml` - 文件級零信任稽核者（唯讀；只複驗上游宣稱、不產出被稽核物；SCG-4／SCG-5 前的獨立複審；AGT-10／R84 新增）
 
 > **系統級 runtime agent 採 runtime schema（responsibilities/inputs/workflow/outputs），刻意不遵 persona 模板**——其由 FSM Runtime 在對應事件觸發時載入，非情境式 persona 角色。
 
@@ -243,7 +254,9 @@ A: SDD v0.01 已刻意移除 `backup_en/` 目錄（設計決策：僅維護中�
 
 ### Q: Specialized Agents 都有中文版嗎？
 
-A: 是的！v0.09 起所有 14 個 persona/specialized Agents 均已中文化（`-zh.yaml` 後綴），與核心 Agent 保持一致。另有 4 個系統級 runtime agent（`sdd-*`，採 runtime schema）+ 2 個橋接 agent（`sdd-playbook-compiler` 末端、`sdd-prd-to-playbook` 前端），合計 20 個 Specialized（計數見上方與 FRAMEWORK_STATUS.md）。
+A: 是的！v0.09 起 14 個 persona/specialized Agents 均已中文化（`-zh.yaml` 後綴），其後新增的 2 個 Stage-0 研究到規格 agent 同樣是中文版，與核心 Agent 保持一致。另有 4 個系統級 runtime agent（`sdd-*`，採 runtime schema）+ 2 個橋接 agent（`sdd-playbook-compiler` 末端、`sdd-prd-to-playbook` 前端）+ 1 個文件級稽核 agent（`sdd-zero-trust-auditor`），合計 23 個 Specialized（計數見上方與 FRAMEWORK_STATUS.md）。
+
+> 🔴 **訂正（ResearchSOPtoPRD；同〈專業化 Agent〉節的訂正，訂正協議見 `agent/EVIDENCE_DISCIPLINE.md`〈四、訂正協議〉）**：被訂正的原文逐字保留——「A: 是的！v0.09 起所有 14 個 persona/specialized Agents 均已中文化（`-zh.yaml` 後綴），與核心 Agent 保持一致。另有 4 個系統級 runtime agent（`sdd-*`，採 runtime schema）+ 2 個橋接 agent（`sdd-playbook-compiler` 末端、`sdd-prd-to-playbook` 前端），合計 20 個 Specialized（計數見上方與 FRAMEWORK_STATUS.md）。」
 
 ### Q: 如何貢獻新的 Agent？
 

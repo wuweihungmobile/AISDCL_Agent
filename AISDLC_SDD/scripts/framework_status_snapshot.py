@@ -77,7 +77,8 @@ def _count_subdirs(path: str) -> int:
 
 
 def _workflows_declared(version_path: str) -> int | None:
-    """workflow/README.md 是工作流總數的權威源（23＝1 Gate+8 core+13 scenario+1 ADR 為 curated 數，非檔數）。"""
+    """workflow/README.md 是工作流總數的權威源（curated 數＝1 Gate+8 core+13 scenario+1 ADR+1 Research-to-PRD，非檔數；
+    數字本身一律讀 README 的「共 N 個工作流」句，本 docstring 不寫死總數——ResearchToPRD W0 主控裁決 D-47）。"""
     readme = os.path.join(version_path, "workflow", "README.md")
     if not os.path.isfile(readme):
         return None
@@ -159,7 +160,7 @@ def render(repo_root: str) -> str:
         _row("governance R-*.yaml", mb["governance_rules"], ml["governance_rules"]),
         "",
         "> 數字來源：agents/scenarios/skills/templates/governance＝對應目錄磁碟實掃；",
-        "> workflows＝workflow/README.md 宣稱（curated 數＝1 Gate+8 core+13 scenario+1 ADR，非檔數）。",
+        "> workflows＝workflow/README.md 宣稱（curated 數＝1 Gate+8 core+13 scenario+1 ADR+1 Research-to-PRD，非檔數）。",
         "",
     ]
     return "\n".join(lines)

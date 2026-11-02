@@ -8,6 +8,8 @@
 
 ---
 
+> **Stage-0（可選前置：研究到規格）**：新專案立項前若還沒有 PRD，可先走 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`（研究 → 證據矩陣 → PRD → 四方對抗審查 → Gate 0 人工核准）。這裡的 Stage-0 是外環前置（FSM stage 名 `Gate-0`），與下方流程總覽的「Stage 0: Spec Foundation」是兩件事。Gate 0 之後以**軌道 B（獨立新專案）**分流進本流程：PRD 經 Stage-1 基線採納；全新專案**不適用**增量條款，SCG-1～3（SRD、C4、ADR、OpenAPI）仍走完整清單。
+
 ## 🎯 SDD 強化流程總覽
 
 Greenfield 是 SDD 的天然沃土，規格完全先行，無歷史包袱。

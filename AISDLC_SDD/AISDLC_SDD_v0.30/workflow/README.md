@@ -2,13 +2,13 @@
 # Workflow Directory
 
 **版本**: v0.01-SDD
-**最後更新**: 2026-04-16
+**最後更新**: 2026-11-02
 
 ---
 
 ## 概覽
 
-AISDLC-SDD v0.01 提供 **8 個核心 Workflows**、**13 個情境專用 Workflows**、**1 個 SDD Spec-First Gate Workflow** 和 **1 個 ADR Generation Workflow**，共 23 個工作流，涵蓋需求分析到 Sprint 執行的完整開發生命週期，並內建 SCG 閘門品質管控。
+AISDLC-SDD v0.01 提供 **8 個核心 Workflows**、**13 個情境專用 Workflows**、**1 個 SDD Spec-First Gate Workflow**、**1 個 ADR Generation Workflow** 和 **1 個 Research-to-PRD Workflow**，共 24 個工作流，涵蓋需求分析到 Sprint 執行的完整開發生命週期，並內建 SCG 閘門品質管控。
 
 ---
 
@@ -94,6 +94,14 @@ change-management   consistency-check   interaction-analysis   sprint-execution
 | `security-assessment-flow.md` | 安全評估與合規檢查流程 | security |
 | `tech-stack-selection-flow.md` | 技術選型流程 | greenfield / migration |
 | `code-analysis-flow.md` | 代碼分析流程 | brownfield / refactoring |
+
+---
+
+## 🔬 Stage-0 前置工作流（research-to-prd）
+
+| 檔案 | 工作流程名稱 | 用途 |
+|------|------------|------|
+| `sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` | 研究到規格（Stage-0） | 研究 → 證據矩陣 → PRD → 四方對抗審查 → Gate 0 人工核准；SCG-0 之前的外環，任何場景可選（Greenfield／Brownfield 有指標）；Primary Agents：research-analyst、spec-engineer（審查沿用 sd-architect、pm-po、qa-tester、security-engineer） |
 
 ---
 

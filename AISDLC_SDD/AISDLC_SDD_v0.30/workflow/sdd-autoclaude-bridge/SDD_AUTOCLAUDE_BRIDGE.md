@@ -1,6 +1,6 @@
 # SDD_AUTOCLAUDE_BRIDGE — SDD 文件 → AutoClaude Playbook 標準作業（Phase Z / ACT-162；整合輪 115 增補 Console／Bridge 路徑；整合輪 116 增補子專案 SDD session SOP）
 
-> **版本**：v0.04（v0.02＝Phase Z：AutoClaude 執行引擎橋接，ACT-162~171；v0.03＝整合輪 115：Phase Z′ 落地更正、Console／Bridge 路徑單一 SOP、何時走 SDD 迴圈；v0.04＝整合輪 116：§7 改三徑、新增 §8 子專案 SDD session〔根 session、外部專案模式〕單一 SOP）
+> **版本**：v0.05（v0.02＝Phase Z：AutoClaude 執行引擎橋接，ACT-162~171；v0.03＝整合輪 115：Phase Z′ 落地更正、Console／Bridge 路徑單一 SOP、何時走 SDD 迴圈；v0.04＝整合輪 116：§7 改三徑、新增 §8 子專案 SDD session〔根 session、外部專案模式〕單一 SOP；v0.05＝ResearchSOPtoPRD：§8.0 加 `research` 外環鍵前綴、新增 §9 研究到規格路徑）
 > **依據**：monorepo `docs/04_planning/Archive/AutoSDD_improving_01.md`（已凍結，2026-06-12）；Console／Bridge 路徑與 FSM CLI 契約＝`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`；子專案 SDD session 的裁決與探針事實＝`docs/04_planning/AutoSDD_improving_116.md`（§1.1 探針 P1～P10、§6 裁決 D-116-01～18）
 > **配套 Agent**：`agent/specialized/sdd-playbook-compiler-zh.yaml`
 > **配套規則**：`governance/rules/R-9.38-playbook-translation-fidelity.yaml`
@@ -339,6 +339,7 @@ Console 沒有「退回修改」與「解除綁定」。完整清單與再開症
 | 何時走本節 | 依 §7：徑①（委派迴圈）與徑②（SDD session-only）走本節；徑③（一般流程）不開 hooks-ON 視窗 |
 | FSM 的單位 | **一個功能週期一個 FSM 專案鍵**（D-116-03）。原因：`transition_rules.py` 的 `RELEASE` 是終態（出邊集合為空），IMPLEMENTATION／PR_REVIEW／RTM_VERIFY 也沒有回 SPEC_DRAFTING 的邊——一個鍵只走得完一個功能，下一個功能用新鍵 |
 | 鍵的格式 | `<sub>-<slug>`：`sub` ∈ `autoclaude`／`agentconsole`／`monorepo`／`sdd`；`slug` 小寫 kebab、≤30 字。**鍵一律小寫**：Windows 檔名不分大小寫、POSIX 分，混用大小寫會在兩個平台各得一份 `FSM-STATE-*.yaml`（G-116-19） |
+| 外環鍵（研究到規格） | `research-<slug>`（換世代：`research-<slug>-g<N>`；`slug` 小寫 kebab、≤30 字）：研究到規格工作流（`workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`）的外環鍵，**狀態目錄在研究工作區的 `build/reports/fsm`**（絕對路徑，不屬 §8.1 的四個標準目錄）；一把外環鍵走到 SPEC_FROZEN（Gate 0）為止，分流後另建內環鍵 `<sub>-<slug>`；詳見 §9 |
 | 狀態目錄 | 每個子專案一個目錄（§8.1），目錄內多個鍵的狀態檔共處；同目錄多檔而無法指認鍵＝adapter／Bridge fail-closed（§1） |
 | RELEASE 語意 | 週期終點是 RELEASE_READY；功能合併進 main 且雲端 CI 綠之後，由收尾者記一次 `RELEASE`（終態，不重開；§8.7） |
 | Console | 一個功能一個 Console 專案（`execution_path`＝子專案根；§8.11） |
@@ -608,3 +609,51 @@ SCG 是**單一功能**的閘；AutoClaude 的 G0～G6 與 AgentConsole 的 W �
 | 鍵的大小寫（G-116-19） | 檔案系統大小寫差異 | 標準鍵一律小寫 kebab（§8.0） |
 | 機械半段空轉（G-116-15） | 見 §8.5 | 由 QA 人讀補位；碼延後，再開症狀見 §8.5 |
 | Java／TS 的 AT（G-116-11） | 不入 evaluator（§7） | pytest 殼代跑延後，再開症狀：掌舵者要求 Java／TS 功能走 Console 委派 |
+
+## 9. Research-to-PRD 路徑（Console／Bridge；ResearchSOPtoPRD）
+
+本節是研究到規格工作流（`workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`，下稱「工作流」）在 Console／Bridge 一側的**唯一**條文；方法（角色、審查、Gate 0、SCR）以工作流為準，本節只寫 Bridge 對 FSM 的寫入面與兩條路徑的關係。上位需求：根層 PRD `docs/01_requirements/ResearchToPRD_PRD.md`（FR-R2P-08、10、19）；裁決：主控 D-21～D-26、D-36、D-38；Bridge 側設計在 `docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md`，Console 側在 AgentConsole 的 ADR-003 與 API 契約（同輪落檔）。
+
+### 9.1 雙鍵與狀態目錄
+
+| | 外環鍵 | 內環鍵 |
+|---|---|---|
+| 鍵 | `research-<slug>`（換世代：`research-<slug>-g<N>`） | `<sub>-<slug>`（軌道 A）或新專案名（軌道 B） |
+| 狀態目錄 | 研究工作區的 `build/reports/fsm`（Bridge 唯一建檔點） | 目標專案的標準狀態目錄（§8.1）；Bridge 固定讀 `<execution_path>/build/reports/fsm`（§8.11） |
+| 生命週期 | INIT → … → SPEC_FROZEN（stage 名 `Gate-0`；SCR 重走 `Gate-0-SCR<n>`） | Stage-1 基線採納 → Stage-2 TCS → … → RELEASE |
+
+兩鍵以資料庫與 `--reason` 互指。單鍵與 §8.11 的「向上找狀態目錄」互斥：軌道 A 的 TCS 必須住目標專案的 `docs/03_testing/contracts/`，adapter 才找得到狀態目錄。
+
+### 9.2 Bridge 的 FSM 寫入面（擴充 §6.9 的白名單，僅研究面）
+
+§6.9 的動詞白名單不改；研究面另立獨立寫入權杖與端點，新增下列動詞（全部以研究面限定，不開放給 `:freeze` 或含 `sdd` 區塊的 `POST /autoclaude/runs`）：
+
+| 動詞 | 限制 |
+|---|---|
+| `show`（建檔專用） | 唯一不帶 `--must-exist` 的呼叫，只有兩個呼叫點：研究專案建立（外環鍵須符合 `^research-[a-z0-9][a-z0-9-]{0,29}(-g[0-9]+)?$`）與分流建內環鍵（鍵與目錄須等於資料庫已記錄者）；目錄須在 allowed roots 且為 `…/build/reports/fsm`；檔已存在 ⇒ 409 |
+| `transition` | `--to` 限 {SCENARIO_DETECT, AGENT_LOAD, SPEC_DRAFTING, SCG_VALIDATION, SPEC_REGRESSION_CHECK, SPEC_AUDIT, PR_REVIEW, RELEASE, HUMAN_PENDING}；外環鍵只准前五值；`HUMAN_PENDING` 僅內環鍵的基線採納路徑（現態須為 SCG_VALIDATION 且 `--reason` 以 `baseline adoption` 起頭）；`--trigger` 固定 `research_bridge`；呼叫前預檢現態到目標、呼叫後再讀驗 |
+| `gate` | `--gate` 限 {`SCG_VALIDATION`, `PR_REVIEW`, `RTM_VERIFY`, `RELEASE_READY`} 四個閘（`SCG_VALIDATION` 只用於外環鍵，其餘三個只用於內環鍵）；`--result` 限 PASS／FAIL；`--reason` 必填；取回傳的 `next_state`、`retry_count`、`escalated`，不自建計數 |
+| `spec-refreeze` | 僅 SCR 用；`--approver` 取登入者 |
+| `spec-frozen`（既有） | 研究面的 `--stage` 限 `Gate-0`、`Gate-0-SCR<n>`、`Stage-1` |
+
+`gate` 的實際使用面見 ADR-XPLAT-017 §D2：外環鍵 SCG_VALIDATION 由 evaluator 與 ADMIN 退回呼叫；內環三閘由 Console 登錄 SCG-4／SCG-5／CI 結果時呼叫（裁決 D-45；P0／P1 不呼叫內環三閘）。
+
+仍**不**呼叫：`resume-from-escalation`（只有人，R-9.5）、`reconcile`、`spec-audit`、`check-impl`、`complete-auto-compact`、`reset-ledger`、`negotiate-exit` 的 `underspecified`。Bridge 原始碼不得直接寫 `FSM-STATE-*.yaml`（絕對禁令 #1）；外環鍵的 CLI 環境固定 `SDD_ENABLE_AUTO_RECOVERY=0`，其餘環境規則同 §6.9。
+
+### 9.3 Gate 0 端點
+
+`POST /research/projects/{id}:approve-baseline` 承載 Gate 0：stage 名 `Gate-0`，`--doc` 恰為四份——`01_specs/PRD-v1.0.0.md`（PRD 基線）、`00_research/evidence_matrix.md`（證據矩陣）、`00_research/issue_scope.json`（議題檔）、`01_specs/adr_draft.md`（ADR 草稿），**不含 TCS**；前置現態 HUMAN_PENDING；`approver`＝登入者（由 console-api 轉傳，Bridge 驗非空與格式，§8.4 慣例）。放寬 `missing_tcs` **只在本端點與分流的 Stage-1 採納**內，既有 `:freeze` 契約不改。有重試史（`SCG_VALIDATION.current_count > 0`）時，端點內建先走 SPEC_REGRESSION_CHECK。人手流程不經此端點，直接跑工作流第 2.6 節第 9 列的指令。
+
+**Bridge 守則（裁決 D-50）：現態 HUMAN_PENDING 時不呼叫 gate PASS；再審通過只記 DB。** 人工要求修改＝`gate SCG_VALIDATION FAIL --reason "人工審查：<修改要求>"`（與 `SDD_SPEC_FIRST_GATE.md` 對照表第 5 列同一做法：狀態維持 HUMAN_PENDING、計數加 1、被擋的轉態記 `gate_fail_blocked`、第 3 次 FAIL → ESCALATION）；`gate PASS` 在 HUMAN_PENDING 會走 HUMAN_PENDING → HUMAN_PENDING 的非法轉態（traceback、rc 1、狀態檔不動），所以退回後的再審通過只寫資料庫（審查輪 `passed = true`；彙整卡該輪 `fsm.gate_result=null`，審查卡模板第 7.3 節不變量 1），等 ADMIN 核准；核准時有重試史先走 SPEC_REGRESSION_CHECK 再 `spec-frozen`（工作流第 2.4、8 章）。
+
+### 9.4 SCR 與 ESCALATION
+
+SCR 三條路——小型（MINOR）＝外環鍵重走 stage `Gate-0-SCR<n>`，再由內環鍵走 SPEC_AUDIT 加 `spec-refreeze`；大型（MAJOR）＝新研究專案；自癒耗盡＝人手 `resume-from-escalation --to SPEC_DRAFTING`——見工作流第 9.3 節；Console 的 SCR 按鈕在最後一種情境只產生指令與記錄，不代跑。外環鍵進 ESCALATION 時，Console 以 `GET /sdd/fsm/{key}?root=<研究工作區>` 顯示恢復指令（`recovery`），人在終端執行；不新增第二條恢復路徑。
+
+### 9.5 與 §6、§8 的關係與已知邊界
+
+- §6（委派迴圈）管**內環**的實作批次；本節管**外環**到 Gate 0 與分流；§8（hooks-ON 視窗）仍是人手改本 repo 自身的路徑。研究工作區在 repo 外（預設 `%USERPROFILE%\.autosdd\my-project\<slug>\`，POSIX `~/.autosdd/my-project/<slug>/`），路徑不含 `docs/01_requirements/` 等規格目錄子字串，所以 Rule 9.6 不擋工作區檔案。
+- 狀態檔 load-modify-save 沒有跨行程鎖（§6.10）：外環鍵只由 Bridge 單行程寫；人在 hooks-ON 視窗同時寫同一鍵＝已知競態。
+- HUMAN_PENDING 逾時守門（72 小時提醒、168 小時升級 ESCALATION）只由 hooks 的 SessionStart 檢查執行；Console 路徑沒有 hooks，不會自動提醒或升級。裁決 D-48(3)：Console 路徑以 UI 顯示等待時長＋72h 橫幅、不轉 REMINDER，不新增 hook 或守衛（記入 Console 架構文件 §12.1 已知限制 L-R；工作流第 11 章）。
+- 軌道 B（全新專案）的內環走完整 SCG-1～3，不適用增量條款；軌道 A 適用增量條款（裁決 D-48(2)；工作流第 9.2 節第 5 點）。
+- 審查獨立性不滿足 R-9.20.3（§6.4）；`transition` 與 `gate` 是舊 CLI 契約（非單行 JSON），以預檢加事後驗證補償。完整清單與再開症狀見工作流第 11 章。

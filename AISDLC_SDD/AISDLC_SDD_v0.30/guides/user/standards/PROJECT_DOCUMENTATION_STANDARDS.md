@@ -113,7 +113,7 @@ AISDLC_SDD_v0.01/                         # 工作目錄（框架即專案目錄
 │           └── IaC_Spec_{Module}.md
 │
 ├── agent/                            # Agent 配置（21 個）
-├── workflow/                         # Workflow 定義（23 個）
+├── workflow/                         # Workflow 定義（24 個）
 ├── scenarios/                        # 十大情境 SOP
 ├── docs_template/                    # SDD 文檔模板（51+ 個，使用前複製到 docs/）
 ├── tools/                            # 工具腳本

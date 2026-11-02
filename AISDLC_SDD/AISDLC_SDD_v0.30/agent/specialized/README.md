@@ -5,7 +5,7 @@
 
 ---
 
-## 21 個 Specialized（14 persona/specialized + 7 系統級 runtime）
+## 23 個 Specialized（16 persona/specialized + 7 系統級 runtime）
 
 > 🔴 **R84 訂正（AGT-10 同輪）**：本標題原寫「19 個（14 + 5）」，而磁碟當時已有 20 支——
 > `sdd-prd-to-playbook-zh.yaml` 在 v0.29 加入後從未回填本表。**計數的唯一真相源是磁碟**
@@ -24,9 +24,11 @@
 | `qa-lead-zh.yaml` | QA 主管 | Testing | 測試策略、測試金字塔設計 |
 | `qa-mobile-tester-zh.yaml` | 行動端 QA | Mobile Testing | Mobile E2E 測試策略 |
 | `qa-web-tester-zh.yaml` | Web QA | Web Testing | Web E2E 測試、可及性測試 |
+| `research-analyst-zh.yaml` | 研究分析師 | Stage-0 研究到規格（任何場景的可選前置） | 三層檢索、七欄證據抽取、反證、誠實劃界（產出 evidence_items.json） |
 | `sd-mobile-architect-zh.yaml` | Mobile 架構師 | Greenfield Mobile | iOS/Android/跨平台架構設計 |
 | `sd-web-architect-zh.yaml` | Web 架構師 | Greenfield Web | Web 系統架構、前後端分離設計 |
 | `security-engineer-zh.yaml` | 安全工程師 | Security | STRIDE 威脅模型、OWASP Top 10 |
+| `spec-engineer-zh.yaml` | 規格工程師 | Stage-0 研究到規格（任何場景的可選前置） | SE-PRD 與 adr_draft 起草與修訂、Rule 7 ID、Gherkin AC |
 | `technical-writer-zh.yaml` | 技術寫作師 | Documentation | Living Doc 策略、ADR 維護 |
 
 ### 系統級 Runtime Agent（7）
@@ -77,6 +79,11 @@
 - **ADR Archaeology**：重建歷史架構決策記錄
 - RTM 文件維護
 
+### Research Analyst／Spec Engineer — Stage-0 研究到規格
+- **Research Analyst（Rae）**：依 `issue_scope.json` 做三層檢索、七欄證據抽取、反證與誠實劃界，產出 `evidence_items.json`（證據矩陣由它渲染）；不起草 PRD、不審查、不評分
+- **Spec Engineer（SpecEng）**：把證據矩陣轉成研究到規格版 PRD（SE-PRD）與 `adr_draft.md`，審查輪只依缺陷清單修訂；與審查四角分離（起草者與審查者分離）
+- 工作流：`workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`；審查沿用 sd-architect、pm-po、qa-tester、security-engineer（授權欄由 compliance-officer 輔）
+
 ---
 
 ## 選用指引
@@ -96,6 +103,7 @@
 | Migration | integration-specialist, qa-automation |
 | Performance | performance-engineer |
 | Security | security-engineer, compliance-officer |
+| Stage-0（任何場景的前置：研究到規格） | research-analyst, spec-engineer（審查沿用 sd-architect、pm-po、qa-tester、security-engineer） |
 
 ### 按需載入原則
 - Specialized Agents 按需載入，不預先全部載入

@@ -2,9 +2,9 @@
 # AISDLC-SDD Document Templates Overview
 
 **版本**: v0.01-SDD
-**最後更新**: 2026-06-02
+**最後更新**: 2026-11-02
 **維護狀態**: Active
-**SDD 轉型狀態**: ✅ 完成（新增 sdd/ 目錄，含 59 個 SDD 專屬模板）
+**SDD 轉型狀態**: ✅ 完成（新增 sdd/ 目錄，含 63 個 SDD 專屬模板）
 
 ---
 
@@ -12,8 +12,8 @@
 
 ```
 docs_template/
-├── sdd/                     # 🆕 SDD 專屬模板（59 個：56 md + 3 yaml）
-│   ├── requirements/        # 需求類（5 個）：INVARIANT-SPEC、THIRD-PARTY-API-RESEARCH、AMBIGUITY-SCORER-SPEC、AMBIGUITY-WAIVER、SPEC-PATCH
+├── sdd/                     # 🆕 SDD 專屬模板（63 個：60 md + 3 yaml）
+│   ├── requirements/        # 需求類（9 個）：INVARIANT-SPEC、THIRD-PARTY-API-RESEARCH、AMBIGUITY-SCORER-SPEC、AMBIGUITY-WAIVER、SPEC-PATCH、ISSUE-SCOPE、EVIDENCE-MATRIX、PRD-SPEC-ENGINEERED、ADVERSARIAL-REVIEW-CARD
 │   ├── architecture/        # 架構類（13 個）：AS-IS/TO-BE-SRD、SAD、ADR 相關、Migration 相關、PATH-COST-MODEL-SPEC、SPEC-ANCHOR 等
 │   ├── adr/                 # ADR 類（4 個）：ADR-INDEX、ADR-TEMPLATE、Automation/Performance ADR
 │   ├── api/                 # API 類（4 個：1 md + 3 yaml）：API-COMPAT + 3 Contract YAML
@@ -482,7 +482,7 @@ SDD 模板存放於 `docs_template/sdd/` 目錄，使用規則：
 
 | docs/ 子目錄 | SDD 模板來源 | 說明 |
 |-------------|------------|------|
-| `docs/01_requirements/` | `sdd/requirements/` | Invariant Spec、Third-Party API Research |
+| `docs/01_requirements/` | `sdd/requirements/` | Invariant Spec、Third-Party API Research；研究到規格（Stage-0）的四份模板（ISSUE-SCOPE、EVIDENCE-MATRIX、PRD-SPEC-ENGINEERED、ADVERSARIAL-REVIEW-CARD）在**研究工作區**內使用，路徑見 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` 第 10 章 |
 | `docs/02_architecture/` | `sdd/architecture/` | AS-IS/TO-BE SRD、SAD、C4、Migration Contract Map |
 | `docs/02_architecture/adr/` | `sdd/adr/` | ADR 模板與索引 |
 | `docs/02_architecture/api/` | `sdd/api/` | API-COMPAT、Contract YAML |
@@ -495,6 +495,16 @@ SDD 模板存放於 `docs_template/sdd/` 目錄，使用規則：
 ---
 
 ## 📊 模板更新歷史 (Update History)
+
+### ResearchSOPtoPRD Stage-0 模板 (2026-11-02)
+
+**`sdd/requirements/` 新增 4 個模板**（總數與各類計數以重生後的 `FRAMEWORK_STATUS.md` 為準，本節不複寫數字），供研究到規格工作流（`workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`；立案：掌舵者 2026-11-02 ResearchSOPtoPRD；主控裁決 D-21）使用：
+- `ISSUE-SCOPE-TEMPLATE.md`：研究議題與檢索邊界契約（`issue_scope.json`）
+- `EVIDENCE-MATRIX-TEMPLATE.md`：證據項契約（`evidence_items.json`）與證據矩陣版式
+- `PRD-SPEC-ENGINEERED-TEMPLATE.md`：研究到規格版 PRD（SE-PRD：家規 14 章為頂層、六節錨點、章尾對映表）
+- `ADVERSARIAL-REVIEW-CARD-TEMPLATE.md`：四方對抗審查評分卡（rubric、單維度與彙整 JSON 契約、加權與通過條件）
+
+> 這四份含 9 個機器可讀 JSON 契約區塊（每個區塊前一行有 `r2p:contract=<名稱>` 定位標記，HTML 註解形式，勿刪勿改名）；`AISDLC_SDD_INIT.md` 的模板索引已同步加列，計數對賬沿用 FF-15（見下一節）。
 
 ### v0.01-SDD-J 模板代謝對賬 (2026-06-02)
 

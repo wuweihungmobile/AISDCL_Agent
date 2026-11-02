@@ -8,6 +8,8 @@
 
 ---
 
+> **Stage-0（可選前置：研究到規格）**：既有系統要加新功能、需要外部證據（第三方方案、授權、維護風險、效能邊界）支撐時，可先走 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`（研究 → 證據矩陣 → PRD → 四方對抗審查 → Gate 0 人工核准）。這裡的 Stage-0 是外環前置（FSM stage 名 `Gate-0`），與下方「Stage 0 → Stage 1：現況分析」是兩件事。Gate 0 之後以**軌道 A（併入既有模組）**分流：PRD、證據矩陣與 ADR 發佈到目標子專案的 `docs/`，經 Stage-1 基線採納後，內環沿用本檔的 As-Is 基線與增量條款。
+
 ## 🎯 目標：逆向規格工程（Reverse Spec Engineering）
 
 Brownfield 是 SDD 的最大挑戰——現有系統往往沒有完整規格。

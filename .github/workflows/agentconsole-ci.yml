@@ -26,6 +26,9 @@ on:
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
       - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
       - "AISDLC_SDD/*/tools/fsm_runtime/**"
+      - "AISDLC_SDD/*/agent/**"                              # engine-bridge 研究面編譯期讀框架 agent YAML（ResearchToPRD W0；ADR-XPLAT-017 §D7、計畫書 L8）
+      - "AISDLC_SDD/*/docs_template/sdd/requirements/**"     # 研究面模板↔Bridge schema 對拍（L12）
+      - "AISDLC_SDD/*/workflow/sdd-research-to-prd/**"       # 研究面 workflow 條文（評分協定、Gate-0 文件集）
       - "tools/selfimproving.py"          # engine-bridge /si/* 以子行程執行 si export（P1b；TCS D11，AT-940-4-1）
       - "tools/_stdio_utf8.py"
       - "tools/lib/platform_utils.py"
@@ -43,6 +46,9 @@ on:
       - "tools/lib/cpu_budget.py"       # 多 CPU worker 數 SSOT
       - "AISDLC_SDD/scripts/**"          # engine-bridge 的 /sdd/* 讀 SDD 版本目錄與 FSM 狀態檔（W7 D-16；QA O-34）
       - "AISDLC_SDD/*/tools/fsm_runtime/**"
+      - "AISDLC_SDD/*/agent/**"                              # engine-bridge 研究面編譯期讀框架 agent YAML（ResearchToPRD W0；ADR-XPLAT-017 §D7、計畫書 L8）
+      - "AISDLC_SDD/*/docs_template/sdd/requirements/**"     # 研究面模板↔Bridge schema 對拍（L12）
+      - "AISDLC_SDD/*/workflow/sdd-research-to-prd/**"       # 研究面 workflow 條文（評分協定、Gate-0 文件集）
       - "tools/selfimproving.py"          # engine-bridge /si/* 以子行程執行 si export（P1b；TCS D11，AT-940-4-1）
       - "tools/_stdio_utf8.py"
       - "tools/lib/platform_utils.py"

@@ -138,7 +138,7 @@ ruff check AgentConsole\engine-bridge
 4. **不准寫真實機密**；`.env.example` 只放 `<YOUR_...>`；pre-commit 有機密掃描。
 5. 新 `.sh` 須 shellcheck 乾淨且 `bash -n` 過，且**只給容器內（Linux）用**。
 6. 新 Python：`open()`／`read_text()`／`write_text()` 一律帶 `encoding="utf-8"`；`os.replace`／`os.rename`／`shutil.move`／`Path.rename`／`Path.replace` 呼叫點須包 `try/except OSError`；平台專屬 API 罩 `sys.platform`；時間戳一律帶 tz（`datetime.now(timezone.utc)`）；`ruff check` 必須 0 錯。
-7. 不准動根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`；`AutoClaude/` 與 `AISDLC_SDD/` 只准改 ADR-XPLAT-016 §11 白名單列出的檔（AISDLC_SDD 只准 LATEST 原地改，凍結版一律不碰），白名單外仍禁止、以 `git diff --name-only` 機械核對。
+7. 不准動根層 `CLAUDE.md`、`.claude/`、`tools/`、`.github/`；`AutoClaude/` 與 `AISDLC_SDD/` 只准改 ADR-XPLAT-016 §11 白名單列出的檔（AISDLC_SDD 只准 LATEST 原地改，凍結版一律不碰），白名單外仍禁止、以 `git diff --name-only` 機械核對；ResearchToPRD 的框架側可改檔另依 ADR-XPLAT-017 §D7（僅 `sdd-research-to-prd` 鍵視窗；AgentConsole 三鍵 `agentconsole-research-to-prd-p0|p1|p2` 的開發 agent 一律不得動框架樹）。
 8. 暫存檔放 session 提供的暫存目錄，不放 repo；不自架背景等待後交卷；不再派子 agent。
 9. 子代理交卷一律純文字（harness 拒寫報告類檔名是設計，不得以 heredoc 或換檔名繞過）；報告落檔由主控做。
 10. 「根因是 X」只是待驗假設，實證後才寫成結論；宣稱「已驗證／通過」必附當回合真跑的輸出。

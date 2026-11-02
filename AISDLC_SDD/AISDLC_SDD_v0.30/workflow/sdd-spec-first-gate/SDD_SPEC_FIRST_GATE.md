@@ -3,9 +3,9 @@
 
 **版本**: v1.3
 **建立日期**: 2026-04-12
-**最後更新**: 2026-10-18
+**最後更新**: 2026-11-02
 **工作流程類型**: 品質閘門（Quality Gate）
-**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）；整合輪 115 補強（S-01 FSM 寫入指令、G-10 增量條款）；整合輪 116 補強（D-116-09 報告與 RTM 落點、棕地基線採納指路）
+**分類**: SDD Phase 01 新增；Phase A 強化（FSM 整合）；整合輪 115 補強（S-01 FSM 寫入指令、G-10 增量條款）；整合輪 116 補強（D-116-09 報告與 RTM 落點、棕地基線採納指路）；ResearchSOPtoPRD 補強（Gate-0 命名、SCR 列、SCG-0 評估器條款）
 
 ---
 
@@ -192,8 +192,8 @@ SCG-6＝`RELEASE_READY`（上限 2；OBS-SI-117，語意同 `RTM_VERIFY`：第 1
 | 3 | 步驟 2a／2a-bis／2b 任一失敗（retry_count++） | SCG_VALIDATION → SPEC_DRAFTING；第 3 次失敗 → ESCALATION | `gate --gate SCG_VALIDATION --result FAIL --reason "<失敗原因，例：SLV-002／FRD 缺 NFR 量化>"` |
 | 4 | 步驟 3 Compliance Gate PASSED | SCG_VALIDATION → HUMAN_PENDING | `gate --gate SCG_VALIDATION --result PASS --reason "SCG-<n> PASS"` |
 | 5 | 步驟 4 🔴 人要求修改 | 維持 HUMAN_PENDING（FSM **沒有** HUMAN_PENDING → SPEC_DRAFTING 的邊） | `gate --gate SCG_VALIDATION --result FAIL --reason "人工審查：<修改要求>"`：retry_count++，被擋的轉態記進 `decision_trace`（`gate_fail_blocked`）；改好文件後**重新取得人的確認**；不要嘗試 `transition --to SPEC_DRAFTING`（TransitionError，rc 1） |
-| 6 | 步驟 4 🔴 **人明確確認通過之後**（步驟 5） | HUMAN_PENDING → SPEC_FROZEN | `spec-frozen …`（見下一小節；之後依步驟 5 執行 `/stage-compaction`） |
-| 7 | SPEC_FROZEN 之後，還有下一個 Stage | SPEC_FROZEN → SPEC_DRAFTING | `transition --to SPEC_DRAFTING --reason "進入 Stage-<n+1>"`（再回第 2 列） |
+| 6 | 步驟 4 🔴 **人明確確認通過之後**（步驟 5） | HUMAN_PENDING → SPEC_FROZEN | `spec-frozen …`（見下一小節；之後依步驟 5 執行 `/stage-compaction`）；研究到規格外環鍵的 Gate 0 用 `--stage Gate-0`，`--doc` 恰為 `01_specs/PRD-v1.0.0.md`、`00_research/evidence_matrix.md`、`00_research/issue_scope.json`、`01_specs/adr_draft.md` 四份、不含 TCS（見 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` 第 8 章） |
+| 7 | SPEC_FROZEN 之後，還有下一個 Stage | SPEC_FROZEN → SPEC_DRAFTING | `transition --to SPEC_DRAFTING --reason "進入 Stage-<n+1>"`（再回第 2 列）；研究到規格外環鍵的 SCR 重走用 stage 名 `Gate-0-SCR<n>`（見 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` 第 9.3 節） |
 | 8 | SPEC_FROZEN 之後，進入實作（R-9.20.2 先過測試合約談判閘） | SPEC_FROZEN → TEST_CONTRACT_NEGOTIATED → IMPLEMENTATION | `negotiate-enter --reason "<原因>" --contract-ref "<TCS 相對路徑>"`；Dev／QA 對 oracle 達成共識並簽署後 `negotiate-exit --outcome agreed --reason "<共識依據>"`（規格不夠明確、定不出 oracle 時改 `--outcome underspecified` → SPEC_DRAFTING）。`SPEC_FROZEN → IMPLEMENTATION` 直達邊為向後相容仍存在，但走它等於靜默略過 R-9.20.2，無明文理由不要用 |
 | 9 | 實作交 AutoClaude 執行 | IMPLEMENTATION → AUTOCLAUDE_DELEGATED → IMPLEMENTATION | `delegate-enter`／`delegate-exit`：見 `workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md`（Console／Bridge 路徑由 Bridge 呼叫） |
 | 10 | SCG-4 開始 PR 審查 | IMPLEMENTATION → PR_REVIEW | `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"` |
@@ -205,6 +205,7 @@ SCG-6＝`RELEASE_READY`（上限 2；OBS-SI-117，語意同 `RTM_VERIFY`：第 1
 
 補充：
 
+- **研究到規格外環鍵（Stage-0）**：外環鍵 `research-<slug>`（換世代 `research-<slug>-g<N>`）沿用本表全部指令，只有三處命名與環境不同——`spec-frozen` 的 stage 名固定 `Gate-0`（SCR 重走為 `Gate-0-SCR<n>`）、凍結文件集不含 TCS、`SDD_STATE_DIR` 指向研究工作區的 `build/reports/fsm`，且 CLI 環境固定 `SDD_ENABLE_AUTO_RECOVERY=0`（審查分數不足不得被自動恢復）。完整對映、預算語意（最多 3 輪審查）與逐列指令見 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` 第 2 章。
 - **只認合法邊**：`transition`／`gate` 只走 `tools/fsm_runtime/transition_rules.py` 的合法邊；其他＝TransitionError
   （舊動詞：traceback＋rc 1；新動詞、`spec-refreeze` 與帶 `--digest` 或 `--json` 的 `spec-frozen`：rc 3＋單行 JSON）。
 - **SPEC_REGRESSION_CHECK**：若 `SDD_FSM_ENGINE.md` 的轉換表要求先過它（本 Stage 有重試歷史，即第 5 列留下的
@@ -335,6 +336,7 @@ cd "<SDD 版本目錄>" && python -m tools.fsm_runtime.fsm_runtime spec-refreeze
 - [ ] 使用標準 ID 格式（EPIC/F/US/AC）
 - [ ] SLV 前置驗證通過（SLV-001~003）
 - [ ] **Ambiguity Gate 通過**：所有 AC ambiguity score < 0.4，或例外項已建立 AMBIGUITY-WAIVER（Phase G M3 / Rule 9.16）
+- [ ] （研究到規格路徑）對抗審查評分卡是本閘的評估器，**不取代**上列 SLV 與 Ambiguity 前置：前置否決不可被分數覆蓋；一輪通過＝加權 ≥85、每維度 ≥ 地板、無未結 P1，且最後仍由人在 Gate 0 核准（見 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` 第 6、8 章）
 
 ### SCG-1（Design Spec Gate）
 - [ ] SRD 完整定義系統設計

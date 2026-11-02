@@ -66,7 +66,7 @@ d:/CursorProject/AISDLC_SDD/          ← 專案根目錄
 │   ├── guides/system/sdd/SDD_GUIDE.md ← SDD 快速指引
 │   ├── agent/                         ← core + specialized agents（含 sdd-* 系統級 runtime agent，多 sdd-playbook-compiler；數量見 FRAMEWORK_STATUS.md）
 │   ├── scenarios/                     ← 場景（greenfield/brownfield/refactoring/documentation/devops/integration/migration/performance/security/testing）
-│   ├── workflow/                      ← 工作流（1 SDD Gate + core + scenario + ADR）
+│   ├── workflow/                      ← 工作流（1 SDD Gate + core + scenario + ADR + Research-to-PRD）
 │   ├── docs_template/                 ← 文檔模板（含 SDD 專屬模板：md + yaml）
 │   ├── cicd/                          ← SDD CI/CD 規格
 │   ├── guides/                        ← 參考指南
@@ -256,6 +256,8 @@ AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 | `security-engineer-zh.yaml` | STRIDE 威脅模型 |
 | `devops-engineer-zh.yaml` | IaC 規格、Pipeline |
 | `integration-specialist-zh.yaml` | CDC、OpenAPI First |
+| `research-analyst-zh.yaml` | Stage-0 研究到規格：三層檢索與證據抽取（任何場景的可選前置） |
+| `spec-engineer-zh.yaml` | Stage-0 研究到規格：SE-PRD 起草與修訂（任何場景的可選前置） |
 
 > 完整 Agent 配置與載入規則見 `AISDLC_SDD_INIT.md` 的 `auto_load_config`（agent 數量見 FRAMEWORK_STATUS.md）。
 
@@ -390,6 +392,7 @@ AISDLC_SDD_v<LATEST>/AISDLC_SDD_INIT.md
 | **🆕 FSM 狀態機** | `AISDLC_SDD_v<LATEST>/workflow/sdd-fsm-engine/SDD_FSM_ENGINE.md` | 閉環狀態轉換與 retry 上限 |
 | **🆕 退場機制** | `AISDLC_SDD_v<LATEST>/workflow/sdd-escalation/SDD_ESCALATION_PROTOCOL.md` | ESCALATION / TERMINATED |
 | **🆕 上下文管理** | `AISDLC_SDD_v<LATEST>/workflow/sdd-context-governor/SDD_CONTEXT_GOVERNOR.md` | Token 預算監控 |
+| **🆕 研究到規格（Stage-0）** | `AISDLC_SDD_v<LATEST>/workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md` | 研究 → 證據矩陣 → PRD → 四方審查 → Gate 0（SCG-0 之前的外環；外環鍵 `research-<slug>`） |
 
 ---
 

@@ -468,6 +468,21 @@ FILE_DIRECTORY_RULES.md（`AISDLC_SDD/AISDLC_SDD_v0.30/FILE_DIRECTORY_RULES.md`�
 - **未動（已知邊界）**：裸 `transition --to IMPLEMENTATION`（自 RELEASE_READY）邊合法但不記次數（與其他 gate 同，只用於恢復）；hooks-ON 時 R-9.6 在 RELEASE_READY／RELEASE 擋 `docs/01～03` 的 Write／Edit（CLI 本身不受此擋）；
   `DRIFT_OBSERVATION` 的 `DriftSources` 不含 RELEASE_READY（漂移觀測的入口集合與 retry 預算無關，本輪不動）。
 
+## LATEST 修改備忘：ResearchSOPtoPRD 框架層（Stage-0 研究到規格；掌舵者 2026-11-02 立案；主控裁決 D-21）
+
+> 本節是對 LATEST（v0.30）的原地修改，未開新版（LATEST 本就可原地改；凍結基線與中間歷史版一律不動）。決策全文見 `docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md`（D1～D7），上位需求為根層 `docs/01_requirements/ResearchToPRD_PRD.md`（唯一 PRD），測試契約見 `docs/03_testing/contracts/TCS-ResearchToPRD-Framework-20261102.md`。
+
+| 欄位 | 內容 |
+|------|------|
+| **範圍** | 新增 `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`；`agent/specialized/research-analyst-zh.yaml`、`spec-engineer-zh.yaml`；`docs_template/sdd/requirements/{ISSUE-SCOPE,EVIDENCE-MATRIX,PRD-SPEC-ENGINEERED,ADVERSARIAL-REVIEW-CARD}-TEMPLATE.md`；ADR-001 與 TCS。修改：`AISDLC_SDD_INIT.md`（`auto_load_config`、Agent／Workflow／模板索引三清單與計數）、`workflow/README.md`、`agent/README.md`（計數句依訂正協議保留原文逐字、補列稽核者與兩支新 agent、Stage-0 小節）、`agent/specialized/README.md`、`SDD_SPEC_FIRST_GATE.md`（Gate-0 命名、SCR stage 名、SCG-0 評估器條款）、`SDD_AUTOCLAUDE_BRIDGE.md`（§8.0 加 `research` 外環鍵前綴、新增 §9）、greenfield 與 brownfield enhancement（各一段 Stage-0 指標）、`docs_template/README.md`（計數、需求類清單、路徑對應表、更新歷史）、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`（Workflow 數）、`AISDLC_SDD/CLAUDE.md`（Rule 2 目錄樹一句、〈框架核心文件快速參考〉一列、Rule 6 兩列）、本檔、`releases/CHANGELOG.md`（新增條目與頂部日期行）；`scripts/framework_status_snapshot.py`（curated 工作流組成字串加 `+1 Research-to-PRD`；主控補丁）；重生 `FRAMEWORK_STATUS.md` |
+| **決策** | 方法層進框架、執行層在 Console／Bridge（D-21）；兩把 FSM 鍵（外環 `research-<slug>`、內環 `<sub>-<slug>`）與 stage 名 `Gate-0`、`Gate-0-SCR<n>`、`Stage-1`、`Stage-2`；Gate 0 永遠真人核准、凍結文件集四份不含 TCS（D-19、D-23）；評分卡是 SCG-0 的評估器、前置否決不可被分數覆蓋；審查最多 3 輪（採 FSM 預算，D-24）；人工退回走 `gate SCG_VALIDATION FAIL`（D-25；現態 HUMAN_PENDING 時 Bridge 不呼叫 `gate PASS`、再審通過只記 DB，D-50）；外環鍵關閉自動恢復（D-26）；ESCALATION 人工恢復後預算不歸零、至多再得一次審查（全新預算＝換世代鍵，D-60）；SE-PRD 以家規 14 章為頂層、六節錨點嵌入、章尾對映表（D-20） |
+| **刻意不碰** | `transition_rules.py` 的 `_HAPPY_PATH`、`formal/`、`governance/rules/R-*.yaml`、`.claude/`、skills、FSM runtime 與 CLI、`PRD_Universal_Template.md` |
+| **TLC 證據** | N/A——未改任何 `_HAPPY_PATH` 或 `*.tla`／`.cfg`，各版既有五軌 TLC 證明維持有效 |
+| **計數** | Agents +2（specialized +2）；`docs_template/sdd` 模板 +4；Workflows +1；絕對數字以重生後的 `FRAMEWORK_STATUS.md` 為準 |
+| **驗證** | `framework_status_snapshot.py --check`、四支 agent lint、`arch_fitness` FF-6／7／13／15、`ci-gate`；契約自洽檢核（TCS AT-970-3-x）；FSM 暫存狀態目錄演練（TCS AT-970-7-x） |
+| **已知邊界** | 審查獨立性不滿足 R-9.20.3（補償控制見工作流第 6.7 節）；人手流程沒有機器驗證器；`sdd_env.py` 不認研究鍵；軌道 B 全新專案不適用增量條款（工作流第 9.2 節第 5 點）；HUMAN_PENDING 逾時守門只在 hooks 路徑，Console 路徑以 UI 顯示等待時長＋72h 橫幅、不轉 REMINDER（工作流第 11 章；D-48(3)）。**增量條款（D-48(1)）**：本鍵適用 `SDD_SPEC_FIRST_GATE.md`〈增量（delta）條款〉；Stage-1 採納的三份上位文件（`AISDLC_SDD/CLAUDE.md`、INIT、SPEC_FIRST_GATE）被本鍵改動的部分都是只增不減的註冊與條文增補，收尾以 `spec-refreeze` 重凍。**既有債（主控 D-62(4)；不在本鍵白名單、不處理）**：`FILE_DIRECTORY_RULES.md` 寫檔規則表未登記四個新模板（既有兩模板同樣未登記，框架既有債） |
+| **回退指引** | 刪除上列新增檔、還原各修改檔的對應段落、重生 `FRAMEWORK_STATUS.md` 即可；不影響任何版本的 API、FSM 狀態或 `*.tla` |
+
 ## v0.29 → v0.30
 
 | 欄位 | 內容 |
