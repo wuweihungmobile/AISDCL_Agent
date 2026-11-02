@@ -3,8 +3,9 @@ import type { PageHelp } from "./types";
 /**
  * 研究工作區（`/research/[researchId]`，單一路由以 `?step=` 切換五步）的說明（TCS-ResearchToPRD-P0-20261102 FR-R2P-21、AC-R2P-21-2；體例沿 TCS-PageHelp-20261027）：
  * 五步各做什麼寫在 `steps` 欄（AT-960-18-2：五步差異）；狀態與階段詞彙引用 `researchFlow` 表（名稱取自 lib/domain/research.ts，說明不自持名稱）。
- * 欄位名是畫面字樣的逐字引用（出處鎖會到 sourceFiles 找它）：頁首與步驟列的字樣住 ResearchFlowHeader.tsx、FlowStepper.tsx，占位面板與橫幅的字樣住 ResearchWorkspaceView.tsx。
- * 各步驟面板（議題面板、PRD 工作室）自己的欄位字樣尚未在這頁登記：它們是獨立元件，上線後依出處鎖的規則補進這頁的 fields 與 sourceFiles。
+ * 欄位名是畫面字樣的逐字引用（出處鎖會到 sourceFiles 找它）：頁首與步驟列的字樣住 ResearchFlowHeader.tsx、FlowStepper.tsx，占位面板與橫幅的字樣住 ResearchWorkspaceView.tsx，
+ * 第一步面板住 TopicPanel.tsx、EvidenceTimeline.tsx、EvidenceMatrixTable.tsx（研究來源設定對話框住 AllowlistDialog.tsx），
+ * 第二步 PRD 工作室住 StudioPanel.tsx、PrdOutline.tsx、PrdDiffView.tsx、MermaidBlock.tsx 與審批欄 GatekeeperPanel.tsx；兩個步驟面板的欄位都登記在這一頁。
  * 英文只用白名單詞；數字不超過兩位。
  */
 export const researchWorkspace: PageHelp = {
@@ -45,7 +46,74 @@ export const researchWorkspace: PageHelp = {
       source: "系統自動產生",
     },
     { name: "重試初始化", meaning: "只有初始化失敗時才能按。重試不會覆寫已有的檔案，也不會重複建立狀態機。", source: "您填寫或選擇" },
+
+    // ── 第一步「研究」：議題、研究動作、證據動態欄與證據矩陣 ──
+    { name: "啟動深研", meaning: "第一步的主按鈕，系統依命題蒐集來源並整理成證據矩陣。容器模式只跑模擬驗收，這顆鈕會停用。", source: "您填寫或選擇" },
+    { name: "續跑", meaning: "研究中途失敗、而且有存檔點可接時出現，會從上次做到的地方接著跑。", source: "您填寫或選擇" },
+    { name: "重試", meaning: "研究跑完卻沒有找到可用證據時出現，沒有存檔點可接，會重新跑一次。", source: "您填寫或選擇" },
+    { name: "再次深研", meaning: "研究完成後想補充證據時用，會再跑一次研究。", source: "您填寫或選擇" },
+    { name: "停止研究", meaning: "研究進行中才看得到。按下後會停止，已入庫的證據會保留。", source: "您填寫或選擇" },
+    { name: "生成 PRD 初稿", meaning: "合格證據夠多時才能按，系統會依證據草擬 PRD，完成後進入第二步。證據不夠時按鈕停用，並說明缺什麼。", source: "您填寫或選擇" },
+    { name: "檢索深度", meaning: "建立研究專案時選定，到了這一步只能看、不能改。", source: "其他頁面帶入" },
+    { name: "來源層", meaning: "這次研究要查哪幾類來源，建立時選定，這裡只能看。", source: "其他頁面帶入" },
+    { name: "納入範圍", meaning: "這次研究要涵蓋的主題清單，建立時定案，這裡只能看。", source: "其他頁面帶入" },
+    { name: "排除範圍", meaning: "這次研究不要涵蓋的主題清單，建立時定案，這裡只能看。", source: "其他頁面帶入" },
+    { name: "目標技術棧", meaning: "研究結果要用在哪個技術環境，用來判斷候選技術適不適用。", source: "其他頁面帶入" },
+    {
+      name: "動態欄",
+      meaning: "即時顯示來源、證據與執行狀態的時間軸。重開頁面時由資料庫重建，內容以資料庫為準。",
+      source: "執行引擎回報",
+      sourceNote: "取自資料庫的事件帳",
+    },
+    { name: "即時連線中", meaning: "動態欄的連線狀態。連線正常時，新事件會即時出現。", source: "系統自動產生" },
+    { name: "重新連線", meaning: "即時連線連續失敗、改為定時重新整理後才出現，按下會再試著連線。", source: "您填寫或選擇" },
+    { name: "重新同步", meaning: "動態欄補不齊事件時出現，按下會重新向資料庫取回。", source: "您填寫或選擇" },
+    { name: "證據矩陣表", meaning: "每列一筆證據，可展開看七個欄位與來源的抓取紀錄。頁頂會統計各種標記的筆數。", source: "執行引擎回報" },
+    { name: "技術優缺點矩陣", meaning: "依候選技術整理優缺點，只列有證據的候選。每格都附證據編號，點了會跳到那一列。", source: "執行引擎回報" },
+    { name: "矩陣版本", meaning: "證據矩陣每次整理都會產生新版本，可以切換查看舊版本。", source: "系統自動產生" },
+    { name: "UNANCHORED", meaning: "證據找不到可核對的出處時的標記，不算合格證據。", source: "系統自動產生" },
+    { name: "授權待查", meaning: "來源的授權屬嚴格授權或沒有授權資訊時的標記，使用前要先確認。", source: "系統自動產生" },
+    { name: "研究來源設定", meaning: "僅 ADMIN 可用，入口在研發工作流清單頁。管理研究可以抓取的來源網域。", source: "系統參數" },
+    { name: "新增", meaning: "在研究來源設定裡，把填好的網域加入允許清單。", source: "您填寫或選擇" },
+    { name: "停用", meaning: "停用後，下一個研究階段的有效清單就不含這個網域。部署設定的基底條目不能停用。", source: "您填寫或選擇" },
+    { name: "啟用", meaning: "重新啟用一個已停用的網域條目。", source: "您填寫或選擇" },
+
+    // ── 第二步「規格工作室」：目錄、編輯器、預覽、版本差異 ──
+    { name: "PRD 目錄", meaning: "由 PRD 的標題整理成目錄，點一項會捲到對應的章節。視窗較窄時會收成一顆圖示鈕。", source: "系統自動產生", sourceNote: "由 PRD 的標題整理出來" },
+    { name: "編輯模式", meaning: "切換編輯、預覽與版本差異三種檢視，切換時不會丟掉編輯中的內容。", source: "您填寫或選擇" },
+    { name: "Diff", meaning: "選兩個版本逐行比較，每行用符號與文字標示新增或刪除。可以一鍵對調新舊。", source: "您填寫或選擇" },
+    { name: "儲存", meaning: "把修改存成新的人工版本，先前的審查結果會標為已過期。唯讀角色與已凍結的規格不能存。", source: "您填寫或選擇" },
+    { name: "目前版本", meaning: "正在編輯的 PRD 版本號、作者類型與大小。", source: "系統自動產生" },
+    { name: "有尚未儲存的修改", meaning: "表示畫面上的內容還沒存。離開頁面前會先確認，草稿也會暫存在這個瀏覽器。", source: "系統自動產生" },
+    { name: "PRD 已有更新的版本", meaning: "別人或系統先存了新版本時出現，您的修改不會蓋過它。請重新整理取得最新版本。", source: "系統自動產生" },
+    { name: "載入最新版本（捨棄我的修改）", meaning: "放棄目前的修改，改看資料庫裡最新的版本。", source: "您填寫或選擇" },
+    { name: "規格已凍結", meaning: "規格經 ADMIN 核准後就凍結，編輯器變成唯讀，要改只能走規格變更。", source: "系統自動產生" },
+    { name: "前往分流", meaning: "規格凍結後出現，點了前往第三步。", source: "系統自動產生" },
+    { name: "精簡編輯器", meaning: "文件較大時改用的輸入框，沒有語法高亮與即時預覽，輸入比較順。要看渲染結果請切到預覽。", source: "系統自動產生" },
+    { name: "PRD 超過 200KB", meaning: "PRD 太大時，預覽改為純文字，編輯與儲存不受影響。", source: "系統自動產生" },
+    { name: "Mermaid 圖表", meaning: "PRD 裡的流程圖會畫成圖形，語法有誤或畫太久時改顯示原始碼。", source: "系統自動產生" },
+
+    // ── 第二步右欄「審批」：審查結果、缺陷與 Gate 0 決定 ──
+    { name: "審批動作", meaning: "右欄的操作區，依審查結果與您的角色決定哪些按鈕可按。不能按的按鈕旁會說明原因。", source: "系統自動產生" },
+    { name: "加權總分", meaning: "四位審查者的分數依權重算出的總分，要達門檻才算通過。", source: "執行引擎回報", sourceNote: "四位審查者的分數加權" },
+    { name: "最低維度分", meaning: "四個維度裡最低的一項，不能低於地板分。", source: "執行引擎回報" },
+    { name: "已過期", meaning: "審查的是舊版本。PRD 存了新版本後，要重新審查才能核准。", source: "系統自動產生" },
+    { name: "缺陷卡", meaning: "審查找出的問題。每張卡有嚴重度、維度、章節、說明與修訂建議，嚴重的排在前面。", source: "執行引擎回報" },
+    { name: "定位", meaning: "點了會把編輯器移到缺陷所在的章節；找不到章節時會提示。", source: "您填寫或選擇" },
+    { name: "一鍵自動迭代修正", meaning: "審查沒通過時出現，系統會依缺陷自動修訂 PRD 並再審一輪。", source: "您填寫或選擇" },
+    { name: "重新審查", meaning: "PRD 有新版本或審查沒有完成時出現，會再送出四方審查。第一次送審時這顆鈕叫「送審」。", source: "您填寫或選擇" },
+    { name: "剩餘預算", meaning: "自動迭代還能再跑幾次，上限三次，以狀態機的重試計數為準。", source: "執行引擎回報", sourceNote: "取自狀態機的重試計數" },
+    { name: "恢復後僅一次機會", meaning: "人工恢復後預算不歸零，至多再審一輪；再沒通過會立刻再升級給人工。", source: "系統自動產生" },
+    { name: "核准 PRD", meaning: "僅 ADMIN 可用。審查通過且是最新版本時，核准並凍結規格。", source: "您填寫或選擇" },
+    { name: "退回修改", meaning: "僅 ADMIN 可用，只在等待核准時出現。會把 PRD 退回可編輯狀態，並用掉一次審查預算。", source: "您填寫或選擇" },
+    { name: "已等待超過 72 小時，尚未核准", meaning: "等待核准超過三天時顯示的提醒。只是提醒，不會自動核准或升級。", source: "系統自動產生" },
+    {
+      name: "我已恢復，繼續（僅一次機會）",
+      meaning: "審查升級給人工後，先在 Console 外恢復狀態機，再按這顆鈕續跑。系統只確認狀態機已離開升級狀態。",
+      source: "您填寫或選擇",
+    },
+    { name: "換世代", meaning: "僅 ADMIN 可用。放棄舊的狀態機鍵、重新計審查預算，要填理由並再確認一次。", source: "您填寫或選擇" },
   ],
   states: [{ table: "researchFlow" }],
-  sourceFiles: ["components/domain/research/ResearchWorkspaceView.tsx", "components/domain/research/ResearchFlowHeader.tsx", "components/domain/research/FlowStepper.tsx"],
+  sourceFiles: ["components/domain/research/**"],
 };
