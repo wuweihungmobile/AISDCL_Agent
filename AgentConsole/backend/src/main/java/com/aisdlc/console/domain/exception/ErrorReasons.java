@@ -164,4 +164,57 @@ public final class ErrorReasons {
     public static final String BACKUP_TOO_FREQUENT = "backup_too_frequent";
     /** 單筆工作不存在或 id 不是 UUID（404）。 */
     public static final String BACKUP_JOB_NOT_FOUND = "backup_job_not_found";
+
+    // ── 研究到規格（ResearchToPRD P0；TCS-ResearchToPRD-P0-20261102 §5.1「錯誤 reason」、AT-960-5-6；契約 API_Contract_ResearchToPRD.md §0.2；前端住 lib/domain/research.ts 的 RESEARCH_REASONS）──
+    // 🔴 與 SI、議題、備份類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 RESEARCH_REASONS、本類別的 RESEARCH_ 前綴常數與契約表三方雙向鎖。
+    // 前綴一律 RESEARCH_（不得以 ISSUE_、BACKUP_ 起頭，否則兩個既有契約測試的集合鎖紅；TCS §4 #26）。值為英文識別字、逐字；Bridge 的 reason 由 console-api 原樣透傳。
+    // P0 契約範圍恰十八個（另有 Bridge 專屬的三個，見本節末）：`invalid_request`（輸入閘，400／422）是區域常數（ResearchInputGates.INVALID_REQUEST）、不入本類別與契約表（先例 SiWriteGates）。
+    /** backend 或 Bridge 沒有設定研究寫入權杖（503）：研究寫入面整個停用。 */
+    public static final String RESEARCH_WRITE_DISABLED = "research_write_disabled";
+    /**
+     * 403：Bridge 拒絕 backend 附的權杖（缺或錯），或 console-api 服務層角色檢查（OPERATOR 打換世代，D-64）。兩者是不同的擋下層
+     * （前者在 Bridge 傳輸層，後者在 {@code ResearchCommandService} 入口），但共用同一個識別字。
+     */
+    public static final String RESEARCH_WRITE_FORBIDDEN = "research_write_forbidden";
+    /** Bridge 沒有資料庫連線（503）：研究端點不降級成純檔案模式（能力探針除外：它仍回 200 並以 db=false 說明）。 */
+    public static final String RESEARCH_REQUIRES_DB = "research_requires_db";
+    /** 研究資料庫暫時不可用（503；stage run 進 BLOCKED_DB，復原後 outbox 重放）。 */
+    public static final String RESEARCH_DB_BLOCKED = "db_blocked";
+    /** 研究專案（或 allowlist 條目）不存在（404；「404 的 reason 省略」慣例的例外）。 */
+    public static final String RESEARCH_NOT_FOUND = "research_not_found";
+    /** slug 已被未封存的研究專案使用（409）。 */
+    public static final String RESEARCH_SLUG_IN_USE = "slug_in_use";
+    /** 同一研究專案已有進行中的 stage，或重試初始化的狀態前置不成立（409；details 由 Bridge 逐字帶出）。 */
+    public static final String RESEARCH_STAGE_CONFLICT = "stage_conflict";
+    /** PRD 存檔的 baseVersion 不是目前 head（409；details.headVersion）。 */
+    public static final String RESEARCH_PRD_VERSION_CONFLICT = "prd_version_conflict";
+    /** head 版本沒有通過的審查輪，不能核准（409）。 */
+    public static final String RESEARCH_REVIEW_NOT_PASSED = "review_not_passed";
+    /** 核准時檔案摘要與核准人看到的不同（409；details.pair）。 */
+    public static final String RESEARCH_SPEC_DIGEST_CHANGED = "spec_digest_changed";
+    /** 外環 FSM 現態不允許這個動作（409；details.current_state）。 */
+    public static final String RESEARCH_FSM_STATE_CONFLICT = "fsm_state_conflict";
+    /** 外環 FSM 在 ESCALATION*（409；details.recovery 帶恢復指令）。 */
+    public static final String RESEARCH_ESCALATED = "escalated";
+    /** 規格已於 Gate 0 凍結，不能再存 PRD 新版（409）。 */
+    public static final String RESEARCH_SPEC_FROZEN = "spec_frozen";
+    /** 建立請求勾了 industry 層，但 Web 層未啟用（400；Bridge 入口回 422，console-api 輸入閘回 400）。 */
+    public static final String RESEARCH_LAYER_UNAVAILABLE = "layer_unavailable";
+    /** 路徑或名稱沒有通過 Bridge 的安全檢查（422）。 */
+    public static final String RESEARCH_SANITIZATION_FAILED = "sanitization_failed";
+    /** Reddit 網域的 allowlist 條目沒有確認服務條款（422）。 */
+    public static final String RESEARCH_TERMS_ACK_REQUIRED = "terms_ack_required";
+    /** 研究呼叫連不上 Engine Bridge（502；連線階段失敗）：研究端點的專屬識別字，不同於既有端點的中文常數 {@link #BRIDGE_UNREACHABLE}。 */
+    public static final String RESEARCH_BRIDGE_UNREACHABLE = "bridge_unreachable";
+    /** 研究呼叫讀取逾時（504；POST 不重試，結果不明）。 */
+    public static final String RESEARCH_BRIDGE_TIMEOUT = "bridge_timeout";
+
+    // ── Bridge 專屬的三個 reason（PKG-BR-A 新增、契約 API_Contract_ResearchToPRD §0.2／§3 的 reason 清單尚未列入——勘誤候選「契約 §3 reason 清單補列」）──
+    // 值逐字取自 Bridge（console-api 原樣透傳）；契約與前端 RESEARCH_REASONS 補列前，ResearchReasonsTest 以「已知待補列」名單明載這三個，補列後該名單必須清空。
+    /** allowlist 已有同 list_kind 與 host 的條目（409）。 */
+    public static final String RESEARCH_ALLOWLIST_EXISTS = "allowlist_exists";
+    /** 專案初始化的某一步失敗（Bridge 回 502；{@code details.step}＝workspace｜files｜fsm）：游標已標 FAILED，以重試初始化補建。 */
+    public static final String RESEARCH_INIT_FAILED = "init_failed";
+    /** Bridge 端點本體尚未實作（Bridge 回 501；P0 第一波骨架）：console-api 轉成上游失敗（502），不假裝成功。 */
+    public static final String RESEARCH_NOT_IMPLEMENTED = "not_implemented";
 }

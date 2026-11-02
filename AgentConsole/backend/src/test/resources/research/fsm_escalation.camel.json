@@ -1,0 +1,27 @@
+{
+  "project": "research-demo",
+  "currentState": "ESCALATION",
+  "currentSprint": 1,
+  "sessionId": "sid-research-demo",
+  "updatedAt": "2026-11-02T08:00:00+00:00",
+  "frozenStages": [{"stage": "SCG-0"}],
+  "decisionTrace": [
+    {"ts": "2026-11-02T07:50:00+00:00", "from": "SPEC_DRAFTING", "to": "HUMAN_PENDING", "reason": "gate PASS", "spec_refs": ["PRD-v0.2.0"], "agents_consulted": ["pm-po"], "trigger": "auto"},
+    {"ts": "2026-11-02T07:58:00+00:00", "from": "HUMAN_PENDING", "to": "ESCALATION", "reason": "SCG_VALIDATION 連續 3 次 FAIL", "spec_refs": [], "agents_consulted": [], "trigger": "auto"}
+  ],
+  "source": "FSM-STATE-research-demo.yaml",
+  "humanPending": {"count": 0, "items": []},
+  "retryHistory": {"count": 3, "last": {"gate": "SCG_VALIDATION", "attempt": 3, "date": "2026-11-02T07:58:00+00:00", "failure_reason": "review FAIL", "scg_gate": "SCG-1"}},
+  "rtmCoverage": null,
+  "phase": {"name": "BLOCKED", "order": 0, "blocking": true, "observation": false},
+  "escalationHistory": [
+    {"triggered_at": "2026-11-02T07:58:30+00:00", "trigger_reason": "SCG_VALIDATION 連續 3 次 FAIL", "resolved_at": null, "resolution": null, "source": "gate"}
+  ],
+  "escalationProvenance": {"trigger": "gate_fail_exhausted"},
+  "fsmProject": "research-demo",
+  "recovery": {
+    "target": "SPEC_DRAFTING",
+    "powershell": "Push-Location \"<SDD 版本目錄>\"; & \"<python>\" -m tools.fsm_runtime.fsm_runtime resume-from-escalation --project \"research-demo\" --to SPEC_DRAFTING --reason \"<人工原因>\"; Pop-Location",
+    "posix": "cd \"<SDD 版本目錄>\" && \"<python>\" -m tools.fsm_runtime.fsm_runtime resume-from-escalation --project \"research-demo\" --to SPEC_DRAFTING --reason \"<人工原因>\""
+  }
+}

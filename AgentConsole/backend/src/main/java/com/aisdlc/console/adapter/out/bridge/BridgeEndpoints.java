@@ -47,6 +47,14 @@ public class BridgeEndpoints {
         return base("sdd");
     }
 
+    /**
+     * {@code /research/*} 的基底位址（不含結尾斜線）：解析規則同 {@link #siBase()}——研究面沒有自己的 engineUrl 設定鍵，同一個 Bridge 服務
+     * 所有路徑前綴（自訂的 {@code sdd.engineUrl} 優先，否則 {@code ENGINE_BRIDGE_URL}；TCS-ResearchToPRD-P0 D5）。
+     */
+    public String researchBase() {
+        return base("sdd");
+    }
+
     /** 健康探測路徑（{@code autoclaude.healthCheckPath}，預設 {@code /health/deep}）。 */
     public String healthPath() {
         String path = settings.find("autoclaude", "healthCheckPath").orElse(DEFAULT_HEALTH_PATH);
@@ -68,6 +76,15 @@ public class BridgeEndpoints {
      */
     public Optional<String> siWriteToken() {
         return Optional.ofNullable(properties.siWriteToken());
+    }
+
+    /**
+     * 研究寫入權杖（{@code console.bridge.research-write-token}；契約 API_Contract_ResearchToPRD §2.1）：只給 Bridge 出站介面卡附
+     * {@code X-Bridge-Token} 標頭用（全部研究寫入呼叫；讀取呼叫不帶），未設為空。與 SDD、SI 權杖是三個獨立的值。
+     * 🔴 值絕不進日誌、錯誤封包或 {@code details}。
+     */
+    public Optional<String> researchWriteToken() {
+        return Optional.ofNullable(properties.researchWriteToken());
     }
 
     private String base(String category) {

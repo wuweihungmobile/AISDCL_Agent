@@ -17,6 +17,14 @@ console:
   sse:
     # 與 e2e profile 一致（契約附錄 D.2：e2e／test profile 覆寫為 2），讓 keep-alive 測試不必等 15 秒。
     keep-alive-seconds: 2
+  bridge:
+    # 研究寫入權杖（TCS-ResearchToPRD-P0 D5）：整合測試的假值（≥32 字元、含 mock；與迷你 Bridge 的 MiniResearch.TOKEN 同值），
+    # 讓研究寫入面在所有整合測試的 context 中預設啟用；測試以 ResearchSeam 的開關臨時改回「未設」。
+    research-write-token: mock-bridge-research-write-token-for-tests-0123456789
+  research:
+    stream:
+      # 測試用的短輪詢間隔（production 預設 250）；重播視窗保持預設，AT-960-10-2 以 @TestPropertySource 縮成 20。
+      poll-millis: 50
 management:
   prometheus:
     metrics:

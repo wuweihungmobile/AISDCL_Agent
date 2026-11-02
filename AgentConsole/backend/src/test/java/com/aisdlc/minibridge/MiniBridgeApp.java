@@ -30,6 +30,12 @@ class MiniBridgeApp {
         return new MiniBridgeController(bridge);
     }
 
+    /** 研究面（ResearchToPRD P0）：{@code /research/*}，行為與旋鈕見 {@link MiniResearch}。 */
+    @Bean
+    MiniResearchController miniResearchController(MiniBridge bridge) {
+        return new MiniResearchController(bridge.research);
+    }
+
     /**
      * 對照真 Bridge 的 HTTP 中介層（契約 §3.1.1）：記下每個請求帶的 {@code X-Trace-Id}（供測試斷言「console-api 對 Bridge 的每個請求
      * 都帶標頭」），並<b>回應回帶同名標頭</b>（請求沒帶就自產一個 UUID）。

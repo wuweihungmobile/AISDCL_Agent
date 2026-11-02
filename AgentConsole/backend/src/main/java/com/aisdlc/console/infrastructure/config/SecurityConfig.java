@@ -49,6 +49,9 @@ import java.util.List;
  *   <li>{@code PUT}、{@code DELETE /api/v1/issues/**}：僅 ADMIN（議題中心的優先順序，TCS-IssueCenter-20261027 R-IC-58；各一條規則，同樣<b>置於通用規則之前</b>）。</li>
  *   <li>{@code POST /api/v1/sysadmin/**}：僅 ADMIN（系統管理／資料庫備份的手動觸發，TCS-SysAdminBackup-20261027 R-BK-57；<b>置於通用規則之前</b>）。
  *       所有 GET 為 VIEWER 以上；{@code /sysadmin/**} 的 PUT、PATCH、DELETE 沒有對映（VIEWER 403、OPERATOR／ADMIN 404 或 405）。</li>
+ *   <li>{@code POST /api/v1/research/projects/{id}/approve｜return｜route｜gates｜delivery/tag｜delivery/pr}、{@code POST /api/v1/research/allowlist}、
+ *       {@code PATCH /api/v1/research/allowlist/{id}}：僅 ADMIN（ResearchToPRD；各一條規則，<b>置於通用規則之前</b>；{@code route/preview} 是 OPERATOR；
+ *       {@code reinit} 的換世代模式由 {@code ResearchCommandService} 另判，D-64）。所有研究 GET 與研究事件串流為 VIEWER 以上。</li>
  *   <li>{@code /api/v1/settings/**} 的<b>非 GET</b>：僅 ADMIN（含 {@code POST /settings/export｜import｜test-connection}：
  *       它們是 POST，但屬 ADMIN 專用）；{@code GET …?reveal=true} 由 Controller 檢查角色。</li>
  *   <li>其餘 {@code /api/v1/**}（POST／PUT／DELETE）：OPERATOR／ADMIN（VIEWER 只能讀）。</li>
@@ -93,6 +96,18 @@ public class SecurityConfig {
                         // 系統管理／資料庫備份的手動觸發（TCS-SysAdminBackup-20261027 R-BK-57）：POST 只有 ADMIN；同樣必須在通用規則之前，
                         // 否則 OPERATOR 會通過安全層。保留與排程沒有任何可寫面：PUT、PATCH、DELETE 沒有對映（落在通用規則）
                         .requestMatchers(HttpMethod.POST, "/api/v1/sysadmin/**").hasRole("ADMIN")
+                        // 研究到規格的 ADMIN 專屬動作（TCS-ResearchToPRD-P0 §4 #16、AT-960-5-3；契約 API_Contract_ResearchToPRD §0.1、D-12）：每個精確路徑各一條規則，
+                        // 同樣必須在通用規則之前（先中者定案），否則 OPERATOR 會通過安全層。{id} 位置以 * 比對單一路徑段；route/preview 不在此列（OPERATOR 可用）。
+                        // 🔴 …/reinit 刻意不在此列：同一路徑的重試初始化模式為 OPERATOR 以上，matcher 無法依請求本文分流——換世代（generation:"next"）的角色檢查
+                        // 在 ResearchCommandService（OPERATOR＝403 research_write_forbidden；VIEWER 由通用規則先擋＝403 ACCESS_DENIED；D-64、AT-960-15-9）
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/approve").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/return").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/route").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/gates").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/delivery/tag").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/delivery/pr").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/allowlist").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/research/allowlist/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasAnyRole("OPERATOR", "ADMIN")
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

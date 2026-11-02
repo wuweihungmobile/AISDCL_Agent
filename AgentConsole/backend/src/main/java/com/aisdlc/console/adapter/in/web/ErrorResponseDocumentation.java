@@ -31,6 +31,9 @@ import java.util.Set;
 public class ErrorResponseDocumentation {
 
     private static final String ERROR_REF = "#/components/schemas/ApiError";
+    /** 研究端點的路徑前綴（ResearchToPRD P0；專屬的 403、404、409、422、502、503、504 說明在 {@link ResearchErrorDocs}）。 */
+    private static final String RESEARCH_PATH = "/api/v1/research/";
+    private static final String RESEARCH_STREAM_PATH = "/api/v1/stream/research/";
 
     /** 有狀態規則、會回 409 的端點（方法＋路徑）。 */
     private static final Set<String> CONFLICT_ENDPOINTS = Set.of(
@@ -249,20 +252,22 @@ public class ErrorResponseDocumentation {
                 if (!NEVER_UNAUTHORIZED.contains(key)) {
                     add(operation, "401", isPublic ? "帳號密碼錯誤，或 refresh token 無效／過期／已被撤銷" : "未登入，或 access token 無效／過期");
                 }
+                boolean research = path.startsWith(RESEARCH_PATH) || path.startsWith(RESEARCH_STREAM_PATH);
                 if ((!isPublic && !isRead) || ROLE_GATED_READ_ENDPOINTS.contains(key)) {
-                    add(operation, "403", "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；"
+                    add(operation, "403", research ? ResearchErrorDocs.FORBIDDEN : "角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；"
                             + "已刪除專案清單需 OPERATOR 以上）");
                 }
                 if ((path.contains("{") || path.endsWith("/reorder")) && !NEVER_NOT_FOUND.contains(key)) {
-                    add(operation, "404", NOT_FOUND_DESCRIPTION.getOrDefault(key, "資源不存在或已軟刪除"));
+                    add(operation, "404", research ? ResearchErrorDocs.NOT_FOUND : NOT_FOUND_DESCRIPTION.getOrDefault(key, "資源不存在或已軟刪除"));
                 }
-                if (CONFLICT_ENDPOINTS.contains(key)) {
-                    add(operation, "409", CONFLICT_DESCRIPTION.getOrDefault(key, "與目前狀態衝突（reason 說明原因）"));
+                if (CONFLICT_ENDPOINTS.contains(key) || ResearchErrorDocs.CONFLICT.containsKey(key)) {
+                    add(operation, "409", CONFLICT_DESCRIPTION.getOrDefault(key,
+                            ResearchErrorDocs.CONFLICT.getOrDefault(key, "與目前狀態衝突（reason 說明原因）")));
                 }
                 if (path.startsWith("/api/")) {
                     add(operation, "429", "超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After）");
                 }
-                EXTRA.getOrDefault(key, Map.of()).forEach((code, description) -> add(operation, code, description));
+                EXTRA.getOrDefault(key, ResearchErrorDocs.EXTRA.getOrDefault(key, Map.of())).forEach((code, description) -> add(operation, code, description));
             }));
         };
     }

@@ -92,6 +92,12 @@ public final class MiniBridge implements AutoCloseable {
     public final Si si = new Si();
 
     /**
+     * {@code /research/*} 的研究面（ResearchToPRD P0；TCS-ResearchToPRD-P0 §5）：寫入端點、allowlist、能力探針與事件推送，行為見 {@link MiniResearch}。
+     * 研究專案的 FSM 視圖走既有的 {@link #sdd}（{@code GET /sdd/fsm/{project}}，狀態本文可帶 {@code retry_gates}）。
+     */
+    public final MiniResearch research;
+
+    /**
      * AISDLC_SDD 唯讀查詢的假資料（欄位名與型別同真 Bridge 的 {@code routers/sdd.py}：snake_case 的本文、404 {@code fsm_not_found}、
      * 422 {@code fsm_state_unreadable}、503 {@code sdd_unavailable}）。{@link #reset()} 回到預設夾具：兩個專案
      * {@code e2e-alpha}（IMPLEMENTATION、三筆重試歷史）與 {@code e2e-bravo}（HUMAN_PENDING、待人工 1 筆），另有兩個讀不動的檔名。
@@ -418,6 +424,7 @@ public final class MiniBridge implements AutoCloseable {
 
     private MiniBridge(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
+        this.research = new MiniResearch(jdbc);
         SpringApplication app = new SpringApplication(MiniBridgeApp.class);
         app.setWebApplicationType(WebApplicationType.SERVLET);
         // 🔴 不可設 logging.level.root：Logback 的狀態是整個 JVM 共用的，迷你 Bridge 的 SpringApplication 啟動時會把 root 壓成 WARN，
@@ -492,6 +499,7 @@ public final class MiniBridge implements AutoCloseable {
         deepHealthMode = DeepHealthMode.HEALTHY;
         sdd.reset();
         si.reset();
+        research.reset();
         dropStreams();
     }
 

@@ -1,10 +1,13 @@
 package com.aisdlc.console.adapter.in.web;
 
+import com.aisdlc.console.adapter.in.web.dto.research.ResearchEvent;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Frame;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Kind;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Sink;
 import com.aisdlc.console.application.port.in.ExecutionStreamUseCase.Subscription;
+import com.aisdlc.console.application.port.in.ResearchStreamUseCase;
+import com.aisdlc.console.domain.model.research.ResearchViews;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -41,10 +44,14 @@ import java.util.UUID;
  * 訂閱、重播、去重、佇列、keep-alive 與終態關閉都在 {@link ExecutionStreamUseCase}；本類別只提供把框架寫進 {@link SseEmitter} 的
  * {@link Sink}。第一個框架是 {@code retry:3000}；之後每個事件由 {@code id}、{@code event}、{@code data}（單行緊湊 JSON，缺值的欄位省略）
  * 三個欄位加空行組成；{@code Spring SseEmitter} 輸出不帶冒號後空白，客戶端一律以解析後的欄位處理（契約 §2.1、AR-03）。
+ *
+ * <p>另有研究事件串流 {@code GET /stream/research/{id}}（ResearchToPRD P0；API_Contract_ResearchToPRD API-RP-06）：事件來源是 append-only 事件帳
+ * {@code console.research_events}，{@code id}＝事件 seq、{@code event}＝事件型別、{@code data}＝ResearchEvent（camelCase，含 null 欄位）；重播與缺口規則
+ * （{@code research.replay_gap}、{@code heartbeat}）在 {@link ResearchStreamUseCase}。認證同上（Bearer 與 {@code ?access_token=}），VIEWER 以上。
  */
 @RestController
-@RequestMapping("/api/v1/stream/executions/{runId}")
-@Tag(name = "SSE 推送", description = "Phase 4；API-SSE")
+@RequestMapping("/api/v1/stream")
+@Tag(name = "SSE 推送", description = "Phase 4；API-SSE；ResearchToPRD 的研究事件串流 API-RP-06")
 public class StreamController {
 
     private static final Logger LOG = LoggerFactory.getLogger(StreamController.class);
@@ -54,13 +61,18 @@ public class StreamController {
             .changeDefaultPropertyInclusion(value -> value.withValueInclusion(JsonInclude.Include.NON_NULL))
             .build();
 
-    private final ExecutionStreamUseCase streams;
+    /** 研究事件的 {@code data}：單行緊湊 JSON，<b>null 欄位保留</b>（ResearchEvent 的 refKind、refId 為 null 是有語意的，前端型別是 string｜null）。 */
+    private static final JsonMapper RESEARCH_JSON = JsonMapper.builder().build();
 
-    public StreamController(ExecutionStreamUseCase streams) {
+    private final ExecutionStreamUseCase streams;
+    private final ResearchStreamUseCase researchStreams;
+
+    public StreamController(ExecutionStreamUseCase streams, ResearchStreamUseCase researchStreams) {
         this.streams = streams;
+        this.researchStreams = researchStreams;
     }
 
-    @GetMapping(path = "/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(path = "/executions/{runId}/logs", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @SecurityRequirement(name = OpenApiNames.BEARER)
     @SecurityRequirement(name = OpenApiNames.QUERY_TOKEN)
     @ApiResponse(responseCode = "200", description = "text/event-stream",
@@ -90,7 +102,7 @@ public class StreamController {
         return open(runId, Kind.LOGS, lastEventId, tail);
     }
 
-    @GetMapping(path = "/metrics", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @GetMapping(path = "/executions/{runId}/metrics", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @SecurityRequirement(name = OpenApiNames.BEARER)
     @SecurityRequirement(name = OpenApiNames.QUERY_TOKEN)
     @ApiResponse(responseCode = "200", description = "text/event-stream",
@@ -112,6 +124,43 @@ public class StreamController {
         return open(runId, Kind.METRICS, lastEventId, null);
     }
 
+    @GetMapping(path = "/research/{id}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @SecurityRequirement(name = OpenApiNames.BEARER)
+    @SecurityRequirement(name = OpenApiNames.QUERY_TOKEN)
+    @ApiResponse(responseCode = "200", description = "text/event-stream",
+            headers = {
+                    @Header(name = "Cache-Control", description = "no-cache, no-store", schema = @Schema(type = "string")),
+                    @Header(name = "X-Accel-Buffering", description = "no", schema = @Schema(type = "string"))},
+            content = @Content(mediaType = "text/event-stream", schema = @Schema(type = "string",
+                    description = "SSE 文字框架；事件框架 id（＝research_events.seq）／event（事件型別）／data（ResearchEvent JSON，camelCase）三個欄位加空行。")))
+    @Operation(summary = "研究事件串流（SSE；API-RP-06）",
+            description = "事件來源是 append-only 事件帳 console.research_events（Bridge 是唯一寫入者）；每個連線一條虛擬執行緒自己尾隨事件帳，慢速訂閱者不拖住發布端。"
+                    + "id＝事件 seq、event＝事件型別（research.step｜run｜source｜evidence｜prd｜review｜review_invalid｜defect｜gate｜reconcile｜route｜scr｜delivery｜alert）、"
+                    + "data＝ResearchEvent。沒有 Last-Event-ID 時只送連線之後的新事件；有 Last-Event-ID 時重播其後的事件（最多最新 replay-window 筆）。"
+                    + "重播不完整（重播視窗已逾期，或相鄰事件序號不連續）時，先送 event: research.replay_gap（data＝{fromSeq, toSeq}；無 id: 行、不佔 seq、不寫入事件帳）再續送可用事件，"
+                    + "客戶端收到即全量重抓（專案詳情、列表、GET …/events?afterSeq=）。連續 15 秒沒有任何框架送 event: heartbeat（data＝{}，無 id）。"
+                    + "認證：Authorization: Bearer 與 ?access_token= 兩者皆收；VIEWER 以上。專案不存在＝404 research_not_found（已封存者仍可讀）。")
+    public ResponseEntity<SseEmitter> researchEvents(
+            @PathVariable UUID id,
+            @Parameter(description = "最後收到的事件 seq（非負整數）；伺服器從其後重播；格式不合視為沒有帶",
+                    schema = @Schema(type = "string", pattern = "^[0-9]+$"))
+            @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
+            @Parameter(description = "access token（與 Authorization 標頭擇一）")
+            @RequestParam(name = "access_token", required = false) String accessToken) {
+        SseEmitter emitter = new SseEmitter(0L);
+        ResearchEmitterSink sink = new ResearchEmitterSink(emitter);
+        sink.retry();
+        ResearchStreamUseCase.Subscription active = researchStreams.open(id, lastEventId, sink);
+        emitter.onCompletion(active::close);
+        emitter.onTimeout(active::close);
+        emitter.onError(error -> active.close());
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "event-stream", StandardCharsets.UTF_8))
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store")
+                .header("X-Accel-Buffering", "no")
+                .body(emitter);
+    }
+
     private ResponseEntity<SseEmitter> open(UUID runId, Kind kind, String lastEventId, Integer tail) {
         SseEmitter emitter = new SseEmitter(0L);
         EmitterSink sink = new EmitterSink(emitter);
@@ -129,6 +178,53 @@ public class StreamController {
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store")
                 .header("X-Accel-Buffering", "no")
                 .body(emitter);
+    }
+
+    /**
+     * 把研究事件串流用例的框架寫進 {@link SseEmitter}：事件框架（{@code seq} 非 null）帶 {@code id:} 行，{@code data} 是領域事件轉成的 {@link ResearchEvent}；
+     * 傳輸層框架（{@code research.replay_gap}、{@code heartbeat}）不帶 {@code id:}。寫失敗（客戶端已斷線）回 false，用例即結束該連線。
+     */
+    private static final class ResearchEmitterSink implements ResearchStreamUseCase.Sink {
+
+        private final SseEmitter emitter;
+
+        ResearchEmitterSink(SseEmitter emitter) {
+            this.emitter = emitter;
+        }
+
+        /** 第一個框架：{@code retry:3000}（瀏覽器 EventSource 自動重連的等待毫秒）。 */
+        void retry() {
+            try {
+                emitter.send(SseEmitter.event().reconnectTime(RECONNECT_MILLIS));
+            } catch (IOException | RuntimeException e) {
+                LOG.debug("研究 SSE retry 框架送出失敗：{}", e.toString());
+            }
+        }
+
+        @Override
+        public boolean send(ResearchStreamUseCase.Frame frame) {
+            try {
+                Object data = frame.data() instanceof ResearchViews.Event event ? ResearchEvent.from(event) : frame.data();
+                SseEmitter.SseEventBuilder builder = SseEmitter.event();
+                if (frame.seq() != null) {
+                    builder.id(String.valueOf(frame.seq()));
+                }
+                emitter.send(builder.name(frame.event()).data(RESEARCH_JSON.writeValueAsString(data)));
+                return true;
+            } catch (IOException | RuntimeException e) {
+                LOG.debug("研究 SSE 框架送出失敗（客戶端已斷線？）：{}", e.toString());
+                return false;
+            }
+        }
+
+        @Override
+        public void close() {
+            try {
+                emitter.complete();
+            } catch (RuntimeException e) {
+                LOG.debug("研究 SSE 完成通知失敗：{}", e.toString());
+            }
+        }
     }
 
     /** 把用例的框架寫進 {@link SseEmitter}；寫失敗（客戶端已斷線）回 false，用例即結束該連線。 */

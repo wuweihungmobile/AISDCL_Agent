@@ -37,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 409 說明載明新 reason（AT-951-6-1）。
  * 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 R-BK-59）再加三個路徑——{@code /sysadmin/backups}（GET）、{@code /sysadmin/backups/jobs}（GET、POST）、
  * {@code /sysadmin/backups/jobs/{id}}（GET）（路徑 74→77、操作 85→89；只增不減；sysadmin 路徑沒有 put、patch、delete）。
+ * ResearchToPRD P0（TCS-ResearchToPRD-P0 §4 #14、AT-960-5-5）再加研究面 24 條路徑（{@code /research/**} 23 條與 SSE {@code /stream/research/{id}}）、26 個操作
+ * （路徑 77→101、操作 89→115；只增不減；研究路徑沒有 delete）。
  */
 class OpenApiIT extends AbstractApiIT {
 
@@ -130,7 +132,36 @@ class OpenApiIT extends AbstractApiIT {
             // ── 系統管理／資料庫備份：總覽與工作紀錄（GET）、僅 ADMIN 的手動觸發（POST）；沒有 put、patch、delete ──
             Map.entry("/api/v1/sysadmin/backups", List.of("get")),
             Map.entry("/api/v1/sysadmin/backups/jobs", List.of("get", "post")),
-            Map.entry("/api/v1/sysadmin/backups/jobs/{id}", List.of("get"))));
+            Map.entry("/api/v1/sysadmin/backups/jobs/{id}", List.of("get")),
+            // ── ResearchToPRD P0（TCS-ResearchToPRD-P0 §4 #14）：研究面 24 條路徑（含 SSE）、26 個操作；研究路徑沒有 delete ──
+            Map.entry("/api/v1/research/capabilities", List.of("get")),
+            Map.entry("/api/v1/research/projects", List.of("get", "post")),
+            Map.entry("/api/v1/research/projects/{id}", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/events", List.of("get")),
+            Map.entry("/api/v1/stream/research/{id}", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/sources", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/evidence", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/prd/versions", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/prd/versions/{n}", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/prd", List.of("put")),
+            Map.entry("/api/v1/research/projects/{id}/review-rounds", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/review-rounds/{n}", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/stages/{stage}", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/approve", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/fsm", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/cancel", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/reconcile", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/archive", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/restore", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/records/audit", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/reinit", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/return", List.of("post")),
+            Map.entry("/api/v1/research/allowlist", List.of("get", "post")),
+            Map.entry("/api/v1/research/allowlist/{id}", List.of("patch"))));
+
+    /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
+    private static final int EXPECTED_PATH_COUNT = 101;
+    private static final int EXPECTED_OPERATION_COUNT = 115;
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -142,7 +173,7 @@ class OpenApiIT extends AbstractApiIT {
     void theDocumentListsExactlyTheEndpointsDeliveredSoFarPhaseOneTwoAndBothBackendBatons() {
         Resp docs = docs();
         Set<String> paths = new TreeSet<>(docs.<Map<String, Object>>read("$.paths").keySet());
-        assertThat(paths).hasSize(77).containsExactlyElementsOf(EXPECTED.keySet());
+        assertThat(paths).hasSize(EXPECTED_PATH_COUNT).containsExactlyElementsOf(EXPECTED.keySet());
         int operationCount = 0;
         for (Map.Entry<String, List<String>> expected : EXPECTED.entrySet()) {
             Map<String, Object> operations = docs.read("$.paths['" + expected.getKey() + "']");
@@ -150,7 +181,8 @@ class OpenApiIT extends AbstractApiIT {
                     .containsExactlyElementsOf(expected.getValue());
             operationCount += operations.size();
         }
-        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET、P2b 的五個新操作、議題中心的四個操作與備份的四個操作").isEqualTo(89);
+        assertThat(operationCount).as("契約 v1.5 的操作總數加 P1b 的六個 SI GET、P2b 的五個新操作、議題中心的四個操作、備份的四個操作與研究面的 26 個操作")
+                .isEqualTo(EXPECTED_OPERATION_COUNT);
     }
 
     /**
@@ -166,7 +198,7 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
                 "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
                 "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes");
-        assertThat(paths).hasSize(77);
+        assertThat(paths).hasSize(EXPECTED_PATH_COUNT);
         for (String path : si) {
             Map<String, Object> operations = docs.read("$.paths['" + path + "']");
             assertThat(operations.keySet()).as(path).doesNotContain("delete", "put", "patch");
@@ -244,7 +276,7 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/si/proposals/{id}/decide'].post.responses").keySet())
                 .as("決定端點的回應狀態碼集合與既有相同")
                 .containsExactlyInAnyOrder("201", "400", "401", "403", "409", "422", "429", "502", "503", "504");
-        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("本鍵不新增路徑").hasSize(77);
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("本鍵不新增路徑（總數隨後續鍵增為現值）").hasSize(EXPECTED_PATH_COUNT);
     }
 
     @Test
@@ -830,5 +862,119 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<List<String>>read("$.components.schemas.ExecutionRunResponse.properties.bridgeStatus.enum"))
                 .containsExactlyInAnyOrder("INITIALIZING", "RUNNING", "PAUSING", "PAUSED", "CANCELLING", "COMPLETED",
                         "FAILED", "CANCELLED");
+    }
+
+    // ── ResearchToPRD P0（TCS-ResearchToPRD-P0 AT-960-5-5；API 契約 §1.1）────────────────────────────────
+
+    /** 研究面 25 個有 operationId 的操作（鍵＝方法加路徑）；SSE 的 {@code GET /stream/research/{id}} 契約的 operationId 欄為「—」，不在表內。 */
+    private static final Map<String, String> RESEARCH_OPERATION_IDS = Map.ofEntries(
+            Map.entry("get /api/v1/research/capabilities", "getResearchCapabilities"),
+            Map.entry("get /api/v1/research/projects", "listResearchProjects"),
+            Map.entry("post /api/v1/research/projects", "createResearchProject"),
+            Map.entry("get /api/v1/research/projects/{id}", "getResearchProject"),
+            Map.entry("get /api/v1/research/projects/{id}/events", "listResearchEvents"),
+            Map.entry("get /api/v1/research/projects/{id}/sources", "listResearchSources"),
+            Map.entry("get /api/v1/research/projects/{id}/evidence", "listResearchEvidence"),
+            Map.entry("get /api/v1/research/projects/{id}/prd/versions", "listPrdVersions"),
+            Map.entry("get /api/v1/research/projects/{id}/prd/versions/{n}", "getPrdVersion"),
+            Map.entry("put /api/v1/research/projects/{id}/prd", "savePrdVersion"),
+            Map.entry("get /api/v1/research/projects/{id}/review-rounds", "listReviewRounds"),
+            Map.entry("get /api/v1/research/projects/{id}/review-rounds/{n}", "getReviewRound"),
+            Map.entry("post /api/v1/research/projects/{id}/stages/{stage}", "startResearchStage"),
+            Map.entry("post /api/v1/research/projects/{id}/approve", "approveResearchBaseline"),
+            Map.entry("get /api/v1/research/projects/{id}/fsm", "getResearchFsm"),
+            Map.entry("post /api/v1/research/projects/{id}/cancel", "cancelResearchStage"),
+            Map.entry("post /api/v1/research/projects/{id}/reconcile", "reconcileResearch"),
+            Map.entry("post /api/v1/research/projects/{id}/archive", "archiveResearchProject"),
+            Map.entry("post /api/v1/research/projects/{id}/restore", "restoreResearchProject"),
+            Map.entry("get /api/v1/research/projects/{id}/records/audit", "getResearchRecordsAudit"),
+            Map.entry("post /api/v1/research/projects/{id}/reinit", "reinitResearchProject"),
+            Map.entry("post /api/v1/research/projects/{id}/return", "returnResearchPrd"),
+            Map.entry("get /api/v1/research/allowlist", "listResearchAllowlist"),
+            Map.entry("post /api/v1/research/allowlist", "addResearchAllowlistEntry"),
+            Map.entry("patch /api/v1/research/allowlist/{id}", "updateResearchAllowlistEntry"));
+
+    private static Set<String> codes(String... codes) {
+        return Set.of(codes);
+    }
+
+    /**
+     * 研究面 26 個操作各自會回的狀態碼集合（契約 §0.2 共通失敗表）：400＝有路徑／查詢參數或請求本文；403＝寫入（含研究專屬的 research_write_forbidden）；404＝路徑含變數；
+     * 409＝有狀態規則（slug、版本、stage、核准、退回、封存、重試初始化、allowlist 重複）；422／502／503／504＝依端點（輸入閘、Bridge 失敗）；429＝所有 /api/ 端點。
+     * 為什麼重要：前端以 /v3/api-docs 產生型別與錯誤處理——多文件化一個回不出來的狀態碼，前端會寫出永遠走不到的分支；少一個，前端沒有該失敗的型別。
+     */
+    private static final Map<String, Set<String>> RESEARCH_STATUS_CODES = Map.ofEntries(
+            Map.entry("get /api/v1/research/capabilities", codes("200", "401", "429", "502", "504")),
+            Map.entry("get /api/v1/research/projects", codes("200", "400", "401", "429")),
+            Map.entry("post /api/v1/research/projects", codes("201", "400", "401", "403", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/events", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/stream/research/{id}", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/sources", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/evidence", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/prd/versions", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/prd/versions/{n}", codes("200", "400", "401", "404", "429")),
+            Map.entry("put /api/v1/research/projects/{id}/prd", codes("201", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/review-rounds", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/review-rounds/{n}", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/stages/{stage}", codes("202", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/approve", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/fsm", codes("200", "400", "401", "404", "422", "429", "502", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/cancel", codes("200", "400", "401", "403", "404", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/reconcile", codes("200", "400", "401", "403", "404", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/archive", codes("200", "400", "401", "403", "404", "409", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/restore", codes("200", "400", "401", "403", "404", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/records/audit", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/reinit", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/return", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/allowlist", codes("200", "401", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/allowlist", codes("201", "400", "401", "403", "409", "422", "429", "502", "503", "504")),
+            Map.entry("patch /api/v1/research/allowlist/{id}", codes("200", "400", "401", "403", "404", "422", "429", "502", "503", "504")));
+
+    private static boolean isResearchPath(String path) {
+        return path.startsWith("/api/v1/research/") || path.startsWith("/api/v1/stream/research/");
+    }
+
+    @Test
+    void AT_960_5_5_theResearchPathsHaveExactlyTheContractOperationsAndOperationIdsAndNoneCanDelete() {
+        Resp docs = docs();
+        Map<String, Object> paths = docs.read("$.paths");
+        List<String> researchPaths = paths.keySet().stream().filter(OpenApiIT::isResearchPath).sorted().toList();
+
+        assertThat(researchPaths).as("研究路徑 24 條：/research/** 23 條與 SSE 1 條").hasSize(24);
+        int operations = 0;
+        for (String path : researchPaths) {
+            Map<String, Object> methods = docs.read("$.paths['" + path + "']");
+            assertThat(methods.keySet()).as(path + "：研究路徑沒有 delete").doesNotContain("delete");
+            assertThat(new TreeSet<>(methods.keySet())).as(path).containsExactlyElementsOf(EXPECTED.get(path));
+            operations += methods.size();
+        }
+        assertThat(operations).as("研究面的操作總數").isEqualTo(26);
+        assertThat(RESEARCH_OPERATION_IDS).as("契約 §1.1 有 operationId 的操作為 25 個（SSE 沒有）").hasSize(25);
+        for (Map.Entry<String, String> expected : RESEARCH_OPERATION_IDS.entrySet()) {
+            String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
+            String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
+            assertThat(docs.<String>read("$.paths['" + path + "']." + method + ".operationId")).as(expected.getKey()).isEqualTo(expected.getValue());
+        }
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/stream/research/{id}']").keySet()).containsExactly("get");
+        assertThat(docs.<Map<String, Object>>read("$.paths['/api/v1/stream/research/{id}'].get.responses['200'].content").keySet())
+                .containsExactly("text/event-stream");
+        List<Map<String, Object>> security = docs.read("$.paths['/api/v1/stream/research/{id}'].get.security");
+        assertThat(security.stream().flatMap(m -> m.keySet().stream()).toList())
+                .as("研究事件串流同既有兩條 SSE：Bearer 標頭或 ?access_token=").containsExactlyInAnyOrder("bearerAuth", "queryAccessToken");
+        assertThat(docs.<List<String>>read("$.paths['/api/v1/stream/research/{id}'].get.parameters[?(@.in=='header')].name")).containsExactly("Last-Event-ID");
+    }
+
+    @Test
+    void AT_960_5_5_everyResearchOperationDocumentsExactlyTheStatusCodesItCanReturn() {
+        Resp docs = docs();
+
+        assertThat(RESEARCH_STATUS_CODES).as("26 個研究操作").hasSize(26);
+        for (Map.Entry<String, Set<String>> expected : RESEARCH_STATUS_CODES.entrySet()) {
+            String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
+            String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet())
+                    .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
+        }
     }
 }

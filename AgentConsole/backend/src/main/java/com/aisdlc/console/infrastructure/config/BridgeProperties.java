@@ -1,13 +1,14 @@
 package com.aisdlc.console.infrastructure.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 import java.util.regex.Pattern;
 
 /**
  * Engine Bridge 位址的程序層預設（{@code console.bridge.url}，環境變數 {@code ENGINE_BRIDGE_URL}，預設
- * {@value #LOCAL_DEFAULT}——本機 bootRun 搭本機的 Bridge）與兩個寫入權杖（{@code console.bridge.sdd-write-token}、
- * {@code console.bridge.si-write-token}）。
+ * {@value #LOCAL_DEFAULT}——本機 bootRun 搭本機的 Bridge）與三個寫入權杖（{@code console.bridge.sdd-write-token}、
+ * {@code console.bridge.si-write-token}、{@code console.bridge.research-write-token}）。
  *
  * <p>解析順序（契約 §3.1、§5.0.1）：<b>管理員在設定頁改過的 {@code autoclaude.engineUrl}／{@code sdd.engineUrl}</b>
  * （值不等於出廠預設才算「改過」）優先；否則用本屬性——e2e 的 {@code http://127.0.0.1:18081}、compose 的
@@ -22,14 +23,20 @@ import java.util.regex.Pattern;
  * 與 SDD 權杖是兩個獨立的值），同一個標頭，只用於三個稽核檔落地的 POST（決定、新增觀察、關閉觀察；預檢不需權杖）。規則與
  * SDD 權杖相同（未設＝停用、過短或佔位＝啟動失敗）。
  *
+ * <p><b>研究寫入權杖</b>（ResearchToPRD P0；TCS-ResearchToPRD-P0 D5、契約 API_Contract_ResearchToPRD §0.2 第 3 列）：環境變數
+ * {@code BRIDGE_RESEARCH_WRITE_TOKEN}（與 Bridge 同名同值，<b>與 SDD、SI 權杖是三個獨立的值</b>），同一個標頭，用於全部研究寫入呼叫
+ * （建立、啟動 stage、存 PRD、核准、退回、取消、對帳、封存、復原、重試初始化／換世代、allowlist 新增與停用）；讀取呼叫不帶。規則同其餘兩個權杖：
+ * 未設＝研究寫入面停用（503 {@code research_write_disabled}），過短或仍是 {@code <…>} 佔位＝啟動即失敗。
+ *
  * <p>🔴 權杖值絕不進日誌、錯誤封包或 {@code details}：本類別的 {@link #toString()} 與驗證錯誤訊息都只講長度，不含值。
  *
- * @param url           空白時退回 {@link #LOCAL_DEFAULT}
- * @param sddWriteToken 空白＝null（停用）；非空白時已去前後空白並通過長度與佔位檢查
- * @param siWriteToken  同上（SelfImproving 寫入面）
+ * @param url                空白時退回 {@link #LOCAL_DEFAULT}
+ * @param sddWriteToken      空白＝null（停用）；非空白時已去前後空白並通過長度與佔位檢查
+ * @param siWriteToken       同上（SelfImproving 寫入面）
+ * @param researchWriteToken 同上（研究寫入面）
  */
 @ConfigurationProperties(prefix = "console.bridge")
-public record BridgeProperties(String url, String sddWriteToken, String siWriteToken) {
+public record BridgeProperties(String url, String sddWriteToken, String siWriteToken, String researchWriteToken) {
 
     /** 本機開發位址。 */
     public static final String LOCAL_DEFAULT = "http://localhost:8081";
@@ -39,12 +46,20 @@ public record BridgeProperties(String url, String sddWriteToken, String siWriteT
     /** {@code <YOUR_BRIDGE_SDD_WRITE_TOKEN_MIN_32_CHARS>} 這類 {@code .env.example} 佔位。 */
     private static final Pattern PLACEHOLDER = Pattern.compile("^<[^<>]*>$");
 
+    @ConstructorBinding
     public BridgeProperties {
         url = url == null || url.isBlank() ? LOCAL_DEFAULT : url.strip();
         sddWriteToken = checkedToken(sddWriteToken, "console.bridge.sdd-write-token", "BRIDGE_SDD_WRITE_TOKEN",
                 "SDD 寫入面");
         siWriteToken = checkedToken(siWriteToken, "console.bridge.si-write-token", "BRIDGE_SI_WRITE_TOKEN",
                 "SelfImproving 寫入面");
+        researchWriteToken = checkedToken(researchWriteToken, "console.bridge.research-write-token",
+                "BRIDGE_RESEARCH_WRITE_TOKEN", "研究寫入面");
+    }
+
+    /** 研究寫入面加入之前的三欄形態（既有呼叫端與測試沿用；研究寫入權杖視為未設）。 */
+    public BridgeProperties(String url, String sddWriteToken, String siWriteToken) {
+        this(url, sddWriteToken, siWriteToken, null);
     }
 
     /** backend 有設定 SDD 寫入權杖（SDD 寫入面啟用）。 */
@@ -55,6 +70,11 @@ public record BridgeProperties(String url, String sddWriteToken, String siWriteT
     /** backend 有設定 SelfImproving 寫入權杖（寫入面另需稽核簽章金鑰才啟用）。 */
     public boolean siWriteTokenConfigured() {
         return siWriteToken != null;
+    }
+
+    /** backend 有設定研究寫入權杖（研究寫入面啟用）。 */
+    public boolean researchWriteTokenConfigured() {
+        return researchWriteToken != null;
     }
 
     private static String checkedToken(String raw, String property, String variable, String surface) {
@@ -77,6 +97,7 @@ public record BridgeProperties(String url, String sddWriteToken, String siWriteT
     @Override
     public String toString() {
         return "BridgeProperties[url=" + url + ", sddWriteToken=" + (sddWriteToken == null ? "<unset>" : "<set>")
-                + ", siWriteToken=" + (siWriteToken == null ? "<unset>" : "<set>") + "]";
+                + ", siWriteToken=" + (siWriteToken == null ? "<unset>" : "<set>")
+                + ", researchWriteToken=" + (researchWriteToken == null ? "<unset>" : "<set>") + "]";
     }
 }

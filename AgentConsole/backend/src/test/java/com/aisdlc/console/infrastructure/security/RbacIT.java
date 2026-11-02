@@ -1,26 +1,39 @@
 package com.aisdlc.console.infrastructure.security;
 
-import com.aisdlc.console.support.AbstractApiIT;
+import com.aisdlc.console.support.AbstractExecutionIT;
 import com.aisdlc.console.support.ApiClient;
 import com.aisdlc.console.support.ApiClient.Resp;
+import com.aisdlc.console.support.ResearchFixtures;
+import com.aisdlc.minibridge.MiniBridge;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * RBAC（NFR-9.2-02；Architecture §8.2）：VIEWER 只能讀；OPERATOR／ADMIN 可寫；免認證端點不需 token；
  * 其餘 /actuator/** 只有 ADMIN。每一個寫入端點都逐一驗，避免日後新增端點時漏掉授權規則。
+ *
+ * <p>ResearchToPRD P0（TCS-ResearchToPRD-P0 AT-960-5-1、5-2、5-3、15-9）：本類別改繼承 {@link AbstractExecutionIT}（RANDOM_PORT＋迷你 Bridge；MockMvc 照常可用），
+ * 才數得到「被授權鏈擋下的請求有沒有真的沒到 Bridge」；既有案例的斷言與資料都不動。
  */
-class RbacIT extends AbstractApiIT {
+class RbacIT extends AbstractExecutionIT {
 
     private record Write(String method, String url, Object body) {
     }
@@ -79,6 +92,7 @@ class RbacIT extends AbstractApiIT {
         return switch (write.method()) {
             case "POST" -> write.body() == null ? api.post(token, write.url()) : api.post(token, write.url(), write.body());
             case "PUT" -> api.put(token, write.url(), write.body());
+            case "PATCH" -> api.raw(token, HttpMethod.PATCH, write.url(), ApiClient.toJson(write.body()));
             case "DELETE" -> api.delete(token, write.url());
             default -> throw new IllegalArgumentException(write.method());
         };
@@ -278,5 +292,246 @@ class RbacIT extends AbstractApiIT {
         Resp resp = api.send(viewer(), MockMvcRequestBuilders.post("/api/v1/projects")
                 .header("X-Role", "ADMIN").contentType(MediaType.APPLICATION_JSON).content(ApiClient.toJson(body)));
         assertThat(resp.status()).isEqualTo(403);
+    }
+
+    // ── ResearchToPRD P0：研究面的角色矩陣（TCS-ResearchToPRD-P0 §3） ───────────────────────────────
+
+    private static final String RESEARCH = "/api/v1/research";
+    private static final Path SECURITY_CONFIG = Path.of("src", "main", "java", "com", "aisdlc", "console", "infrastructure", "config", "SecurityConfig.java");
+
+    private static Map<String, Object> researchCreateBody(String slug) {
+        Map<String, Object> layers = new LinkedHashMap<>();
+        layers.put("academic", true);
+        layers.put("industry", false);
+        layers.put("oss", true);
+        layers.put("community", false);
+        Map<String, Object> scope = new LinkedHashMap<>();
+        scope.put("layers", layers);
+        scope.put("inScope", List.of("範圍內一項"));
+        scope.put("recencyYears", 2);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("slug", slug);
+        body.put("title", "RBAC 研究");
+        body.put("topic", "RBAC 議題");
+        body.put("scope", scope);
+        body.put("depthLevel", "STANDARD");
+        return body;
+    }
+
+    private static Map<String, Object> allowlistBody() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("listKind", "WEB");
+        body.put("host", "example.com");
+        body.put("layer", "INDUSTRY");
+        body.put("purpose", "產業部落格");
+        body.put("tosNote", "條款已讀");
+        body.put("minIntervalSeconds", 5);
+        body.put("tosAcknowledged", false);
+        return body;
+    }
+
+    private static Map<String, Object> approveBody() {
+        return Map.of("prdVersion", 1, "expectedDigests", Map.of("01_specs/PRD-v1.0.0.md", "sha256:" + "a".repeat(64)));
+    }
+
+    /** AT-960-5-1：approve、return、POST allowlist、PATCH allowlist/{id} 只有 ADMIN；被擋的請求一個都不到迷你 Bridge。 */
+    @Test
+    void AT_960_5_1_adminOnlyResearchEndpointsAre401ForAnonymousAnd403ForViewerAndOperatorAndNeverReachTheBridge() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-admin-only");
+        List<Write> adminOnly = List.of(
+                new Write("POST", RESEARCH + "/projects/" + project + "/approve", approveBody()),
+                new Write("POST", RESEARCH + "/projects/" + project + "/return", Map.of("reason", "退回修訂")),
+                new Write("POST", RESEARCH + "/allowlist", allowlistBody()),
+                new Write("PATCH", RESEARCH + "/allowlist/" + UUID.randomUUID(), Map.of("enabled", false)));
+
+        for (Write write : adminOnly) {
+            String label = write.method() + " " + write.url();
+            int callsBefore = MINI.research.calls.size();
+
+            assertThat(call(null, write).status()).as("匿名 " + label).isEqualTo(401);
+            for (String token : List.of(viewer(), operator())) {
+                Resp denied = call(token, write);
+                assertThat(denied.status()).as(label).isEqualTo(403);
+                assertThat(denied.<Integer>read("$.code")).isEqualTo(403);
+                assertThat(denied.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+                assertThat(denied.<String>read("$.traceId")).isEqualTo(denied.header("X-Trace-Id"));
+            }
+            assertThat(MINI.research.calls).as(label + "：匿名、VIEWER、OPERATOR 的請求都沒有到迷你 Bridge").hasSize(callsBefore);
+
+            long writesBefore = MINI.research.writeCount();
+            Resp admin = call(admin(), write);
+            assertThat(admin.status()).as("ADMIN 通過授權層：" + label).isNotIn(401, 403);
+            assertThat(MINI.research.writeCount()).as(label + "：ADMIN 的請求到達迷你 Bridge 恰一次").isEqualTo(writesBefore + 1);
+        }
+    }
+
+    /** AT-960-5-2：一般寫入端點 VIEWER 403（Bridge 請求數 0）、OPERATOR 與 ADMIN 通過；全部研究 GET 三種角色皆可讀、匿名 401。 */
+    @Test
+    void AT_960_5_2_generalResearchWritesNeedOperatorAndEveryResearchGetIsOpenToAViewerButNotToAnAnonymousCaller() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-general");
+        MINI.sdd.addProject("research-rbac-general", "HUMAN_PENDING", 1, "sid-rbac", "2026-11-02T00:00:00+00:00", new MiniBridge.Sdd.SddRetry(0, null),
+                Map.of("count", 0, "items", List.of()));
+        String base = RESEARCH + "/projects/" + project;
+        List<Write> general = List.of(
+                new Write("POST", RESEARCH + "/projects", researchCreateBody("rbac-created")),
+                new Write("PUT", base + "/prd", Map.of("baseVersion", 0, "content", "# PRD", "changeSummary", "第一版")),
+                new Write("POST", base + "/stages/research", Map.of()),
+                new Write("POST", base + "/cancel", null),
+                new Write("POST", base + "/reconcile", null),
+                new Write("POST", base + "/archive", null),
+                new Write("POST", base + "/restore", null),
+                new Write("POST", base + "/reinit", Map.of()));
+
+        for (Write write : general) {
+            String label = write.method() + " " + write.url();
+            int callsBefore = MINI.research.calls.size();
+            Resp viewerResp = call(viewer(), write);
+            assertThat(viewerResp.status()).as("VIEWER " + label).isEqualTo(403);
+            assertThat(viewerResp.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+            assertThat(call(null, write).status()).as("匿名 " + label).isEqualTo(401);
+            assertThat(MINI.research.calls).as(label + "：VIEWER 與匿名的請求都沒有到迷你 Bridge").hasSize(callsBefore);
+        }
+        for (String token : List.of(operator(), admin())) {
+            for (Write write : general) {
+                String label = write.method() + " " + write.url();
+                long writesBefore = MINI.research.writeCount();
+                Resp resp = call(token, write);
+                assertThat(resp.status()).as("通過授權層（不是 401 或 403）：" + label).isNotIn(401, 403);
+                assertThat(MINI.research.writeCount()).as(label + "：到達迷你 Bridge 恰一次（二次呼叫的 4xx 也是 Bridge 的回應）").isEqualTo(writesBefore + 1);
+            }
+        }
+
+        List<String> gets = List.of(RESEARCH + "/capabilities", RESEARCH + "/projects", RESEARCH + "/allowlist", base, base + "/events", base + "/sources",
+                base + "/evidence", base + "/prd/versions", base + "/prd/versions/1", base + "/review-rounds", base + "/review-rounds/1", base + "/fsm",
+                base + "/records/audit");
+        for (String url : gets) {
+            for (String token : List.of(viewer(), operator(), admin())) {
+                Resp resp = api.get(token, url);
+                assertThat(resp.status()).as("GET " + url).isIn(200, 404);
+                if (resp.status() == 404) {
+                    assertThat(resp.<String>read("$.reason")).as("GET " + url + " 的 404").isEqualTo("research_not_found");
+                }
+            }
+            assertThat(api.get(null, url).status()).as("匿名 GET " + url).isEqualTo(401);
+        }
+        String ghost = RESEARCH + "/projects/" + UUID.randomUUID();
+        for (String suffix : List.of("", "/events", "/sources", "/evidence", "/prd/versions", "/prd/versions/1", "/review-rounds", "/review-rounds/1", "/fsm",
+                "/records/audit")) {
+            Resp resp = api.get(viewer(), ghost + suffix);
+            assertThat(resp.status()).as("專案不存在時授權層放行、由 controller 回 404：" + suffix).isEqualTo(404);
+            assertThat(resp.<String>read("$.reason")).isEqualTo("research_not_found");
+        }
+    }
+
+    /** {@code SecurityConfig} 原始碼裡的一條授權規則：行號、matcher 引數（空白折疊）、角色引數。 */
+    private record Rule(int line, String matcher, String role) {
+    }
+
+    private static List<Rule> authorizationRules() {
+        String source;
+        try {
+            source = Files.readString(SECURITY_CONFIG, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("讀不到 " + SECURITY_CONFIG.toAbsolutePath(), e);
+        }
+        Matcher found = Pattern.compile("\\.requestMatchers\\(([^)]*)\\)\\s*\\.(hasRole|hasAnyRole|permitAll)\\(([^)]*)\\)").matcher(source);
+        List<Rule> rules = new ArrayList<>();
+        while (found.find()) {
+            int line = 1 + (int) source.substring(0, found.start()).chars().filter(c -> c == '\n').count();
+            rules.add(new Rule(line, found.group(1).replaceAll("\\s+", " ").strip(), found.group(2) + "(" + found.group(3).strip() + ")"));
+        }
+        return rules;
+    }
+
+    /** AT-960-5-3：研究 ADMIN 規則逐條置於通用規則之前；route/preview 不在其中；既有規則的內容與次序不變。 */
+    @Test
+    void AT_960_5_3_everyResearchAdminRuleSitsBeforeTheGenericRuleAndTheExistingRulesKeepTheirOrder() {
+        List<Rule> rules = authorizationRules();
+        List<Rule> research = rules.stream().filter(rule -> rule.matcher().contains("/api/v1/research/")).toList();
+        Rule generic = rules.stream().filter(rule -> rule.matcher().equals("\"/api/v1/**\"")).findFirst().orElseThrow();
+
+        assertThat(research).extracting(Rule::matcher).containsExactly(
+                "HttpMethod.POST, \"/api/v1/research/projects/*/approve\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/return\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/route\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/gates\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/tag\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/pr\"",
+                "HttpMethod.POST, \"/api/v1/research/allowlist\"",
+                "HttpMethod.PATCH, \"/api/v1/research/allowlist/*\"");
+        assertThat(research).as("每條研究規則都是 ADMIN 專屬").extracting(Rule::role).containsOnly("hasRole(\"ADMIN\")");
+        assertThat(research).as("每條研究規則的行號都小於通用 /api/v1/** 規則（先中者定案）").allSatisfy(rule -> assertThat(rule.line()).isLessThan(generic.line()));
+        assertThat(research).as("…/reinit 與 …/route/preview 都不在 ADMIN 規則內").noneMatch(rule -> rule.matcher().contains("reinit") || rule.matcher().contains("preview"));
+
+        List<String> others = rules.stream().filter(rule -> !research.contains(rule)).map(Rule::matcher).toList();
+        assertThat(others).as("拿掉研究規則之後剩下的，恰為既有的規則序列（si、issues、sysadmin、settings、通用都不動）").containsExactly(
+                "HttpMethod.POST, \"/api/v1/auth/login\", \"/api/v1/auth/refresh\", \"/api/v1/auth/logout\"",
+                "\"/actuator/health\", \"/actuator/health/**\", \"/actuator/prometheus\"",
+                "\"/v3/api-docs\", \"/v3/api-docs/**\", \"/swagger-ui.html\", \"/swagger-ui/**\"",
+                "HttpMethod.GET, \"/api/v1/**\"",
+                "HttpMethod.POST, \"/api/v1/si/**\"",
+                "HttpMethod.PUT, \"/api/v1/issues/**\"",
+                "HttpMethod.DELETE, \"/api/v1/issues/**\"",
+                "HttpMethod.POST, \"/api/v1/sysadmin/**\"",
+                "\"/api/v1/settings/**\"",
+                "\"/api/v1/**\"",
+                "\"/actuator/**\"");
+        int lastExisting = rules.stream().filter(rule -> rule.matcher().contains("/sysadmin/")).findFirst().orElseThrow().line();
+        int settings = rules.stream().filter(rule -> rule.matcher().contains("/settings/")).findFirst().orElseThrow().line();
+        assertThat(research).as("研究規則夾在 sysadmin 與 settings 之間").allSatisfy(rule -> assertThat(rule.line()).isBetween(lastExisting + 1, settings - 1));
+
+        // 行為探針：精確路徑的 ADMIN 規則真的生效，route/preview 則是 OPERATOR 可用
+        UUID project = new ResearchFixtures(jdbc).project("rbac-order");
+        for (String path : List.of("approve", "return", "route", "gates", "delivery/tag", "delivery/pr")) {
+            String url = RESEARCH + "/projects/" + project + "/" + path;
+            Resp operator = api.post(operator(), url, Map.of());
+            assertThat(operator.status()).as("OPERATOR POST " + path).isEqualTo(403);
+            assertThat(operator.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+            assertThat(api.post(admin(), url, Map.of()).status()).as("ADMIN POST " + path + " 通過授權層").isNotIn(401, 403);
+        }
+        String preview = RESEARCH + "/projects/" + project + "/route/preview";
+        assertThat(api.post(operator(), preview, Map.of()).status()).as("OPERATOR 通過 route/preview 的授權層").isNotIn(401, 403);
+        assertThat(api.post(viewer(), preview, Map.of()).status()).as("VIEWER 仍被通用 POST 規則擋下").isEqualTo(403);
+        assertThat(api.post(operator(), RESEARCH + "/projects/" + project + "/x/approve", Map.of()).status())
+                .as("* 只比對單一路徑段：多一段的路徑不命中 ADMIN 規則").isNotEqualTo(403);
+    }
+
+    /** AT-960-15-9：換世代（generation:"next"）只有 ADMIN——角色檢查在服務層；不帶 generation 的重試初始化 OPERATOR 仍可用。 */
+    @Test
+    void AT_960_15_9_reinitWithGenerationNextIsAdminOnlyInTheServiceLayerWhileTheRetryInitModeStaysOperator() {
+        ResearchFixtures fx = new ResearchFixtures(jdbc);
+        UUID escalated = fx.project("rbac-escalated", "studio", "REVIEWING", "ESCALATED", "");
+        UUID failedInit = fx.project("rbac-init-failed", "topic", "INGESTED", "FAILED", "init_failed:fsm");
+        Map<String, Object> next = Map.of("generation", "next", "reason", "放棄舊鍵，換世代重審");
+        String nextUrl = RESEARCH + "/projects/" + escalated + "/reinit";
+        String retryUrl = RESEARCH + "/projects/" + failedInit + "/reinit";
+
+        Resp viewerNext = api.post(viewer(), nextUrl, next);
+        assertThat(viewerNext.status()).isEqualTo(403);
+        assertThat(viewerNext.<Integer>read("$.code")).isEqualTo(403);
+        assertThat(viewerNext.<String>read("$.reason")).as("VIEWER：既有授權鏈（通用 POST 規則要求 OPERATOR 以上）").isEqualTo("ACCESS_DENIED");
+        Resp operatorNext = api.post(operator(), nextUrl, next);
+        assertThat(operatorNext.status()).isEqualTo(403);
+        assertThat(operatorNext.<String>read("$.reason")).as("OPERATOR：服務層的角色檢查，與授權鏈的 ACCESS_DENIED 不同").isEqualTo("research_write_forbidden");
+        assertThat(MINI.research.calls).as("VIEWER 與 OPERATOR 被擋：迷你 Bridge 請求數皆為 0").isEmpty();
+
+        Resp adminNext = api.post(admin(), nextUrl, next);
+        assertThat(adminNext.status()).as("ADMIN 通過").isEqualTo(200);
+        assertThat(MINI.research.calls).as("ADMIN 的換世代恰一個 :reinit").hasSize(1);
+        assertThat(MINI.research.calls.get(0).path()).endsWith("/" + escalated + ":reinit");
+
+        MINI.research.calls.clear();
+        Resp operatorRetry = api.post(operator(), retryUrl, Map.of());
+        assertThat(operatorRetry.status()).as("不帶 generation 的重試初始化：OPERATOR 仍可用").isEqualTo(200);
+        assertThat(MINI.research.calls).hasSize(1);
+        assertThat(MINI.research.calls.get(0).body()).as("重試初始化不帶 generation").doesNotContainKey("generation");
+        Resp viewerRetry = api.post(viewer(), retryUrl, Map.of());
+        assertThat(viewerRetry.status()).isEqualTo(403);
+        assertThat(viewerRetry.<String>read("$.reason")).as("既有 OPERATOR 以上的寫入規則不變").isEqualTo("ACCESS_DENIED");
+        assertThat(MINI.research.calls).as("VIEWER 的重試初始化沒到 Bridge").hasSize(1);
+
+        assertThat(authorizationRules().stream().filter(rule -> rule.matcher().contains("/api/v1/research/")))
+                .as("SecurityConfig 的研究 ADMIN matcher 清單不含 …/reinit（同路徑同方法無法依請求本文分流，所以分流在服務層）")
+                .noneMatch(rule -> rule.matcher().contains("reinit"));
     }
 }

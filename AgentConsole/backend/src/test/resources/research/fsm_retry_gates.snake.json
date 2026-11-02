@@ -1,0 +1,24 @@
+{
+  "project": "research-demo-g2",
+  "current_state": "HUMAN_PENDING",
+  "current_sprint": 1,
+  "session_id": "sid-research-demo-g2",
+  "updated_at": "2026-11-02T09:00:00+00:00",
+  "frozen_stages": [],
+  "decision_trace": [
+    {"ts": "2026-11-02T08:59:00+00:00", "from": "SPEC_DRAFTING", "to": "HUMAN_PENDING", "reason": "gate PASS", "spec_refs": [], "agents_consulted": ["pm-po"], "trigger": "auto"}
+  ],
+  "source": "FSM-STATE-research-demo-g2.yaml",
+  "human_pending": {"count": 1, "items": [{"entered_at": "2026-11-02T08:59:00+00:00", "reminder_sent_at": null, "reminder_hours": 72, "escalation_hours": 168}]},
+  "retry_history": {"count": 3, "last": {"gate": "SCG_VALIDATION", "attempt": 2, "date": "2026-11-02T08:30:00+00:00", "failure_reason": "review FAIL", "scg_gate": "SCG-1"}},
+  "rtm_coverage": null,
+  "phase": {"name": "HUMAN_GATE", "order": 3, "blocking": false, "observation": false},
+  "escalation_history": [],
+  "escalation_provenance": null,
+  "fsm_project": "research-demo-g2",
+  "retry_gates": {
+    "SCG_VALIDATION": {"current_count": 2, "entries": 3},
+    "PR_REVIEW": {"current_count": 0, "entries": 0},
+    "RTM_VERIFY": {"current_count": 0, "entries": 0}
+  }
+}

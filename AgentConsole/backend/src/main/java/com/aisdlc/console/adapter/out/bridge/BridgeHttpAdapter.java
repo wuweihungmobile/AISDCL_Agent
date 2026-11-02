@@ -1,7 +1,9 @@
 package com.aisdlc.console.adapter.out.bridge;
 
 import com.aisdlc.console.application.port.out.AgentBridge;
+import com.aisdlc.console.application.port.out.ResearchBridge;
 import com.aisdlc.console.domain.exception.ErrorReasons;
+import com.aisdlc.console.domain.exception.ResearchBridgeException;
 import com.aisdlc.console.domain.exception.ServiceUnavailableException;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.engine.SddFsmList;
@@ -18,6 +20,7 @@ import com.aisdlc.console.domain.model.si.SiWriteAck;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.ClientHttpRequestFactory;
@@ -48,6 +51,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -57,6 +61,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -68,12 +73,18 @@ import java.util.stream.Stream;
  * 5xx → {@link UpstreamException.Failure}；4xx → {@link BridgeRejectedException}（Bridge 的
  * {@code {code,reason,gate?,detail?,violations?}} 封包原樣帶回，由用例依端點語意轉成 409／422…）。
  *
+ * <p>研究面（{@link ResearchBridge}；ResearchToPRD P0）同一套規則，差別只有三點：上游失敗的 reason 是英文識別字——連線失敗與讀取逾時轉成
+ * {@link ResearchBridgeException}（{@code bridge_unreachable}、{@code bridge_timeout}）；Bridge 明確拒絕的 503（{@code research_write_disabled}、
+ * {@code research_requires_db}、{@code db_blocked}）與 4xx 一樣是 {@link BridgeRejectedException}；Bridge 自己回報的上游失敗（501 {@code not_implemented}、
+ * 502 {@code init_failed}）以 {@link ResearchBridgeException#failure} 帶 Bridge 的 reason 與 details 原樣轉出。<b>寫入一律不重試</b>、附
+ * {@code X-Bridge-Token}（{@code console.bridge.research-write-token}；沒設就不發出請求）；讀取（能力探針、allowlist、FSM 視圖）不帶權杖、不重試。
+ *
  * <p><b>traceId 貫穿</b>（契約 §0.4 第 6 點，C-12）：對 Bridge 的<b>每一個</b>請求（含 SSE 事件串流與健康探測）都帶標頭
  * {@value #TRACE_HEADER}。值取自目前執行緒 MDC 的 {@code traceId}（使用者請求由 {@code TraceIdFilter} 寫入；事件消費者與啟動對帳
  * 由用例層放入該 run 的 traceId）；執行緒上沒有時（探測環等背景工作）新產一個 UUID。同一次呼叫的重試沿用同一個值。
  */
 @Component
-class BridgeHttpAdapter implements AgentBridge {
+class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
 
     static final String TRACE_HEADER = "X-Trace-Id";
     /** SDD 寫入權杖標頭（ADR-XPLAT-016 §9）：只附在四個會觸發 FSM 寫入的呼叫。🔴 值絕不進日誌、錯誤封包或 details。 */
@@ -87,6 +98,17 @@ class BridgeHttpAdapter implements AgentBridge {
      * TCS-SelfImprovingDecide-P2b W3、W15）：同 {@code sdd_write_disabled}，是設定決定的明確拒絕、不是 5xx 故障。
      */
     private static final String SI_WRITE_DISABLED = "si_write_disabled";
+    /** Bridge 對研究端點明確拒絕（設定或資料庫狀態決定，不是故障）的 503 reason：與 4xx 同走 {@code BridgeRejectedException}。 */
+    private static final Set<String> RESEARCH_REJECTED_503 = Set.of(ErrorReasons.RESEARCH_WRITE_DISABLED, ErrorReasons.RESEARCH_REQUIRES_DB,
+            ErrorReasons.RESEARCH_DB_BLOCKED);
+    /** Bridge 自己回報的研究上游失敗（501 骨架、502 初始化失敗）：reason 與 details 原樣轉出，不併入一般的「引擎橋接服務錯誤」。 */
+    private static final Set<String> RESEARCH_UPSTREAM = Set.of(ErrorReasons.RESEARCH_NOT_IMPLEMENTED, ErrorReasons.RESEARCH_INIT_FAILED);
+    /** 研究寫入（POST／PUT／PATCH）的讀取逾時 30 秒、連線 2 秒、不重試（契約 §0.2 第 8 列）。 */
+    private static final Duration RESEARCH_WRITE_READ_TIMEOUT = Duration.ofSeconds(30);
+    /** 研究讀取（能力探針、allowlist）的讀取逾時 10 秒（能力探針含外部 CLI 的版本探測）、連線 2 秒、不重試。 */
+    private static final Duration RESEARCH_READ_TIMEOUT = Duration.ofSeconds(10);
+    /** {@code POST /research/projects/{id}:<verb>} 允許的動詞（白名單：動詞會直接進網址）。 */
+    private static final Set<String> RESEARCH_VERBS = Set.of("cancel", "reconcile", "archive", "restore");
     private static final String TRACE_MDC_KEY = "traceId";
     private static final Logger LOG = LoggerFactory.getLogger(BridgeHttpAdapter.class);
     private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -441,6 +463,174 @@ class BridgeHttpAdapter implements AgentBridge {
         }
         Long rowMax = doc.get("row_max_bytes") instanceof Number max ? Long.valueOf(max.longValue()) : null;
         return new SiValidation(ok, row, rowBytes.longValue(), rowMax, findings);
+    }
+
+    // ── ResearchToPRD P0：研究面（契約 API_Contract_ResearchToPRD §2；寫入一律不重試、附 X-Bridge-Token 與 X-Trace-Id）────────────────
+
+    @Override
+    public boolean writeEnabled() {
+        return endpoints.researchWriteToken().isPresent();
+    }
+
+    @Override
+    public Map<String, Object> capabilities() {
+        Object doc = research(() -> getJson(endpoints.researchBase() + "/research/capabilities", Map.of(), RESEARCH_READ_TIMEOUT, 0));
+        if (!(doc instanceof Map<?, ?>)) {
+            throw malformed("GET /research/capabilities");
+        }
+        return asMap(doc);
+    }
+
+    @Override
+    public Map<String, Object> allowlist() {
+        Object doc = research(() -> getJson(endpoints.researchBase() + "/research/allowlist", Map.of(), RESEARCH_READ_TIMEOUT, 0));
+        if (doc instanceof List<?> items) {
+            return Map.of("items", items);
+        }
+        if (!(doc instanceof Map<?, ?>)) {
+            throw malformed("GET /research/allowlist");
+        }
+        return asMap(doc);
+    }
+
+    @Override
+    public ResearchFsm fsm(String fsmProject, String root) {
+        Map<String, Object> variables = new LinkedHashMap<>();
+        variables.put("project", fsmProject);
+        variables.put("root", root);
+        Map<String, Object> doc = asMap(research(() -> getJson(endpoints.sddBase() + "/sdd/fsm/{project}?root={root}", variables,
+                SDD_READ_TIMEOUT, 0)));
+        if (doc.isEmpty()) {
+            throw malformed("GET /sdd/fsm/{project}");
+        }
+        return new ResearchFsm(fsmStateOf(doc, fsmProject), gatesOf(doc.get("retry_gates")));
+    }
+
+    @Override
+    public Map<String, Object> createProject(Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects", body);
+    }
+
+    @Override
+    public Map<String, Object> startStage(UUID researchId, String stage, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + "/stages/" + pathSegment(stage) + ":start", body);
+    }
+
+    @Override
+    public Map<String, Object> savePrd(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.PUT, "/research/projects/" + researchId + "/prd", body);
+    }
+
+    @Override
+    public Map<String, Object> approve(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":approve-baseline", body);
+    }
+
+    @Override
+    public Map<String, Object> returnPrd(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":return", body);
+    }
+
+    @Override
+    public Map<String, Object> action(UUID researchId, String verb, Map<String, Object> body) {
+        if (!RESEARCH_VERBS.contains(verb)) {
+            throw new IllegalArgumentException("不支援的研究動作：" + verb);
+        }
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":" + verb, body);
+    }
+
+    @Override
+    public Map<String, Object> reinit(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":reinit", body);
+    }
+
+    @Override
+    public Map<String, Object> addAllowlistEntry(Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/allowlist", body);
+    }
+
+    @Override
+    public Map<String, Object> patchAllowlistEntry(String entryId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.PATCH, "/research/allowlist/" + pathSegment(entryId), body);
+    }
+
+    /**
+     * 研究寫入的共同路徑：附 {@code X-Bridge-Token}（沒有權杖就不發出請求；呼叫端本來就該先問 {@link #writeEnabled()}，這裡是最後一道網）、連線 2 秒／讀取 30 秒、
+     * <b>不重試</b>。🔴 權杖只放進請求，不進日誌、例外訊息或錯誤封包。網址由呼叫端組好（id 是 UUID、其餘片段已嚴格 percent-encode），不經範本引擎。
+     */
+    private Map<String, Object> researchWrite(HttpMethod method, String path, Map<String, Object> body) {
+        Map<String, String> auth = researchWriteToken();
+        if (auth.isEmpty()) {
+            throw new ServiceUnavailableException("backend 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面已停用",
+                    ErrorReasons.RESEARCH_WRITE_DISABLED, Map.of("cause", "bridge_token_unset"));
+        }
+        String payload = JSON.writeValueAsString(body);
+        URI uri = URI.create(endpoints.researchBase() + path);
+        return research(() -> {
+            try {
+                return client(RESEARCH_WRITE_READ_TIMEOUT, traceId()).method(method).uri(uri).headers(h -> auth.forEach(h::set))
+                        .contentType(MediaType.APPLICATION_JSON).body(payload)
+                        .exchange((request, response) -> handle(response.getStatusCode(), readBody(response.getBody())));
+            } catch (ResourceAccessException e) {
+                throw translate(e);
+            }
+        });
+    }
+
+    /** 連線階段失敗與讀取逾時 → {@link ResearchBridgeException}（reason 為英文識別字 {@code bridge_unreachable}、{@code bridge_timeout}）。 */
+    private static <T> T research(Supplier<T> call) {
+        try {
+            return call.get();
+        } catch (UpstreamException.Unavailable e) {
+            throw ResearchBridgeException.unreachable(e.getMessage(), e.deliveryUncertain());
+        } catch (UpstreamException.TimedOut e) {
+            throw ResearchBridgeException.timedOut(e.getMessage());
+        }
+    }
+
+    /** 研究寫入權杖標頭（與 SDD、SI 權杖是三個獨立的值）：空 map＝沒設。 */
+    private Map<String, String> researchWriteToken() {
+        return endpoints.researchWriteToken().map(token -> Map.of(TOKEN_HEADER, token)).orElse(Map.of());
+    }
+
+    /** Bridge 的 {@code retry_gates}：{@code {<閘>: {current_count, entries}}}（缺鍵＝空；缺欄位＝0）。 */
+    private static Map<String, GateCount> gatesOf(Object value) {
+        Map<String, GateCount> out = new LinkedHashMap<>();
+        asMap(value).forEach((gate, raw) -> {
+            Map<String, Object> entry = asMap(raw);
+            out.put(gate, new GateCount(intOrZero(entry.get("current_count")), intOrZero(entry.get("entries"))));
+        });
+        return out;
+    }
+
+    /** 錯誤本文剝掉 null 值（{@code Map.copyOf} 不收 null；契約 §0.2：details 內不輸出 null）。 */
+    private static Map<String, Object> withoutNulls(Map<String, Object> source) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        source.forEach((key, value) -> {
+            if (value != null) {
+                out.put(key, value);
+            }
+        });
+        return out;
+    }
+
+    /** Bridge 回報的上游失敗的 details：{@code bridgeStatus}、頂層補充欄位（{@code endpoint}、{@code stage}、{@code detail}…）與 {@code details} 物件（{@code step}…）。 */
+    private static Map<String, Object> researchDetails(Map<String, Object> error, int bridgeStatus) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("bridgeStatus", bridgeStatus);
+        error.forEach((key, value) -> {
+            if (value != null && !"code".equals(key) && !"reason".equals(key) && !"details".equals(key)) {
+                out.put(key, value);
+            }
+        });
+        if (error.get("details") instanceof Map<?, ?> nested) {
+            nested.forEach((key, value) -> {
+                if (key != null && value != null) {
+                    out.put(String.valueOf(key), value);
+                }
+            });
+        }
+        return out;
     }
 
     /**
@@ -974,13 +1164,18 @@ class BridgeHttpAdapter implements AgentBridge {
                 && (SDD_WRITE_DISABLED.equals(reason) || SI_WRITE_DISABLED.equals(reason));
         // 503 si_unavailable 同理：SelfImproving 資料面不可用是 Bridge 明確回報的狀態（帶 cause 與 detail），不是上游故障
         boolean siUnavailable = status.value() == 503 && SI_UNAVAILABLE.equals(reason);
-        if (status.is4xxClientError() || writeDisabled || siUnavailable) {
+        // 研究端點的 503 research_write_disabled／research_requires_db／db_blocked 同理（契約 §0.2 第 3、4 列與 AC-R2P-04-1）
+        boolean researchRejected = status.value() == 503 && reason != null && RESEARCH_REJECTED_503.contains(reason);
+        if (status.is4xxClientError() || writeDisabled || siUnavailable || researchRejected) {
             List<Map<String, Object>> violations = new ArrayList<>();
             for (Object item : asList(error.get("violations"))) {
                 violations.add(asMap(item));
             }
             throw new BridgeRejectedException(status.value(), reason == null ? "" : reason, text(error.get("gate")),
-                    detailText(error.get("detail")), violations, error);
+                    detailText(error.get("detail")), violations, withoutNulls(error));
+        }
+        if (reason != null && RESEARCH_UPSTREAM.contains(reason) && (status.value() == 501 || status.value() == 502)) {
+            throw ResearchBridgeException.failure("研究引擎回報失敗（HTTP " + status.value() + "，" + reason + "）", reason, researchDetails(error, status.value()));
         }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("bridgeStatus", status.value());

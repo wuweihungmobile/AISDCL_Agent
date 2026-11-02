@@ -1,0 +1,20 @@
+{
+  "project": "research-demo-g2",
+  "currentState": "HUMAN_PENDING",
+  "currentSprint": 1,
+  "sessionId": "sid-research-demo-g2",
+  "updatedAt": "2026-11-02T09:00:00+00:00",
+  "frozenStages": [],
+  "decisionTrace": [
+    {"ts": "2026-11-02T08:59:00+00:00", "from": "SPEC_DRAFTING", "to": "HUMAN_PENDING", "reason": "gate PASS", "spec_refs": [], "agents_consulted": ["pm-po"], "trigger": "auto"}
+  ],
+  "source": "FSM-STATE-research-demo-g2.yaml",
+  "humanPending": {"count": 1, "items": [{"entered_at": "2026-11-02T08:59:00+00:00", "reminder_sent_at": null, "reminder_hours": 72, "escalation_hours": 168}]},
+  "retryHistory": {"count": 3, "last": {"gate": "SCG_VALIDATION", "attempt": 2, "date": "2026-11-02T08:30:00+00:00", "failure_reason": "review FAIL", "scg_gate": "SCG-1"}},
+  "rtmCoverage": null,
+  "phase": {"name": "HUMAN_GATE", "order": 3, "blocking": false, "observation": false},
+  "escalationHistory": [],
+  "escalationProvenance": null,
+  "fsmProject": "research-demo-g2",
+  "recovery": null
+}

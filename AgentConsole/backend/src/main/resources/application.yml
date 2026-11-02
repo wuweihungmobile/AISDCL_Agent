@@ -133,6 +133,19 @@ console:
     # 同一個 X-Bridge-Token 標頭，只用於三個稽核檔落地的 POST（決定、新增觀察、關閉觀察；預檢不帶）。規則同 sdd-write-token：
     # 空＝SelfImproving 寫入面停用；有設但短於 32 字元或仍是 <…> 佔位＝backend 啟動即失敗；值絕不進日誌、錯誤封包或 details。
     si-write-token: ${BRIDGE_SI_WRITE_TOKEN:}
+    # 研究寫入權杖（ResearchToPRD P0；TCS-ResearchToPRD-P0 D5、契約 API_Contract_ResearchToPRD §0.2 第 3 列）：與 Bridge 同名同值的環境變數
+    # BRIDGE_RESEARCH_WRITE_TOKEN（與 SDD、SI 權杖是三個獨立的值），同一個 X-Bridge-Token 標頭，用於全部研究寫入呼叫（讀取呼叫不帶）。
+    # 規則同 sdd-write-token：空＝研究寫入面停用（503 research_write_disabled）；有設但短於 32 字元或仍是 <…> 佔位＝backend 啟動即失敗；
+    # 值絕不進日誌、錯誤封包或 details。
+    research-write-token: ${BRIDGE_RESEARCH_WRITE_TOKEN:}
+  research:
+    # 研究事件串流（GET /api/v1/stream/research/{id}；契約 §1.4 API-RP-05／06、ADR-003 D6）：每個連線一條虛擬執行緒、自己尾隨 console.research_events
+    # （append-only 事件帳；Bridge 是唯一寫入者）。poll-millis＝輪詢間隔；replay-window＝重連時最多重播最新幾筆事件——Last-Event-ID 之後的事件
+    # 多於這個數時，先送 research.replay_gap 訊號（fromSeq、toSeq）再重播最新的 replay-window 筆，客戶端改以 REST afterSeq 回補。
+    # keep-alive（heartbeat）間隔沿用 console.sse.keep-alive-seconds。
+    stream:
+      poll-millis: 250
+      replay-window: 1000
   si:
     # SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W9）：Console 不寫帳本，只簽稽核 JSON 並經 Bridge 落檔，由主機端根層 CLI 驗簽入帳。
     # deciders：可寫入的帳號名單（逗號分隔；須是 ADMIN 且 JWT 帳號名逐字在名單內、區分大小寫）；空＝無人可寫（預設）。
