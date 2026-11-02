@@ -28,7 +28,7 @@
 | 檔 | 內容 |
 |----|------|
 | `docs/01_requirements/ResearchToPRD_PRD.md` | PRD（回指來源規格章節；§9.0 附**模組落點表**——本功能屬子專案模組，落 AgentConsole／AISDLC_SDD，不往根層放；`Root_Layout_and_Module_Placement.md` §2） |
-| `docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md` | 來源規格逐字檔（掌舵者原文；PRD 多處以「來源 §x.y」回指其章節）。**主控預先落檔、W0 同 commit 收入**（落檔 commit 一併 `git add`；先於各鍵 Stage-1 採納的基準 commit，故不在 ADR-XPLAT-017 §D7 的根層例外清單內） |
+| `docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md` | 來源規格逐字檔（掌舵者原文；PRD 多處以「來源 §x.y」回指其章節）。**主控預先落檔、W0 同 commit 收入**（落檔 commit `25c66981` 一併 `git add`；首次入庫在各鍵 Stage-1 基準 commit `01d9be6e` **之後**，故**列入** ADR-XPLAT-017 §D7 的根層例外清單——框架 SCG-4 一審 F-01 訂正） |
 | `AgentConsole/docs/02_architecture/Architecture.md` | 本輪增補：§2.2、§3、§5.1、§5.4、§6(e)、§7.2、§8.2～8.4、§9.4、§10.1～10.3、§11.1、§11.3（DDL 全文）、§12.1～12.2 |
 | `AgentConsole/docs/02_architecture/API_Contract_ResearchToPRD.md` | 定稿 v1.0 |
 | `AgentConsole/docs/02_architecture/ADR-003-ResearchToPRD.md` | AgentConsole 側決策 D1～D16 |

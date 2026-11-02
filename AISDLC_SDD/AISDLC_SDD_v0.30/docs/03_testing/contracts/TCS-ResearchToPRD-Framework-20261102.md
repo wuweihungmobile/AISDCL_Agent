@@ -20,7 +20,7 @@
 | **Feature 名稱** | Research-to-PRD 框架層——Stage-0 研究到規格的方法層（1 個工作流、2 支 agent、4 份模板、ADR-001）與其註冊／條文增補，不動 FSM runtime、規則、skills |
 | **User Story** | US-970（已對全 repo 的 md／yaml／json／py／ts／java 以 Grep 確認 F-970、US-970、AC-970、AT-970、EPIC-970 皆未被使用；Console 側既有最大號 F-905、US-919、AC-953，`R2P` 前綴的上位需求另有命名空間，不撞號） |
 | **建立日期** | 2026-11-02 |
-| **輸入快照** | HEAD＝`01d9be6e`；LATEST＝`AISDLC_SDD_v0.30`（現查 `python AISDLC_SDD/scripts/sdd_version.py`）；三份上位檔 digest 見〈增量追溯表〉（SD-B 於 HEAD 工作樹以框架自己的 `spec_digest.digest_doc` 現算；三檔當時與 HEAD 相同、無未提交修改；其後主控另改了 `AISDLC_SDD/scripts/framework_status_snapshot.py`〔D-47 補丁，不在三檔內，三檔摘要不受影響〕） |
+| **輸入快照** | 起點 commit（`$base`）＝`01d9be6e`（框架鍵開工前，本鍵 Stage-1 的基準）；框架側落檔 commit＝`25c66981`；LATEST＝`AISDLC_SDD_v0.30`（現查 `python AISDLC_SDD/scripts/sdd_version.py`）；五份 Stage-1 採納文件的摘要見〈增量追溯表〉（以框架自己的 `spec_digest.digest_doc` 對 repo 工作樹現檔重算；SCG-4 一審 F-02 訂正，見勘誤） |
 | **QA 負責人** | 本鍵 SCG-4 的獨立審查者（規格作者＝SD-B，落地者＝框架鍵視窗的開發 agent，三方不同；審查者獨立性的已知邊界見 §7 ⚖6） |
 | **FSM 功能鍵** | `sdd-research-to-prd`（`sub=sdd`；一律從 monorepo 根啟動：`python AISDLC_SDD/scripts/sdd_env.py --sub sdd --slug research-to-prd`；狀態目錄 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/build/reports/sdd-dogfood`） |
 | **SCG Gate** | SCG-4 □ 待審 |
@@ -29,7 +29,7 @@
 
 ## 增量變更專用：FRD-lite 與〈增量追溯表〉
 
-> 適用 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈增量（delta）條款〉：變更限於已凍結系統的單一 Feature。**適用性的誠實聲明**：條款的適用範圍排除「要改動已凍結上位文件本身者」，而本鍵會小幅改動 Stage-1 採納的三份上位文件（INIT、SPEC_FIRST_GATE、`AISDLC_SDD/CLAUDE.md`）——改動性質是**只增不減的註冊與條文增補**（新增清單列、新增條目、新增一節、既有計數句依磁碟現值更新），不改任何既有條款的語意。**這個判斷已由主控 D-48(1) 裁決：適用增量條款；收尾 spec-refreeze**（§7 ⚖1；屬流程解釋，在凍結常態規則射程內由主控代決，掌舵者可隨時以 T1 推翻，推翻時改走完整 SCG-1～3 清單）。本鍵會改動上位文件，所以收尾須在 SPEC_AUDIT 或 RELEASE_READY 態以 `spec-refreeze` 重凍（§6）。
+> 適用 `workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md`〈增量（delta）條款〉：變更限於已凍結系統的單一 Feature。**適用性的誠實聲明**：條款的適用範圍排除「要改動已凍結上位文件本身者」，而本鍵改動了三份框架上位文件（INIT、SPEC_FIRST_GATE、`AISDLC_SDD/CLAUDE.md`）——改動性質是**只增不減的註冊與條文增補**（新增清單列、新增條目、新增一節、既有計數句依磁碟現值更新），不改任何既有條款的語意。**這個判斷已由主控 D-48(1) 裁決：適用增量條款，以 `spec-refreeze` 重記摘要**（§7 ⚖1；屬流程解釋，在凍結常態規則射程內由主控代決，掌舵者可隨時以 T1 推翻，推翻時改走完整 SCG-1～3 清單）。**落檔時序（SCG-4 一審 F-02 查證）**：本鍵的 Stage-1 於框架側改動落入工作樹**之後**才採納，所以五份採納文件（三份框架上位文件、根層 PRD、ADR-001）的凍結摘要記的是**改動後**的內容；其後任何再改（SCG-4 審查所致的 PRD 訂正、本檔勘誤）都須以 `spec-refreeze` 重記（§6）。
 
 ### FRD-lite
 
@@ -46,7 +46,7 @@
 1. **編譯文法**（備查；本檔走徑②，不編譯）：AC 為 `AC-[\d\-]+`、AT 為 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*` 且 AT 前兩段數字＝所屬 AC（ADR-XPLAT-016 §8.1）。
 2. **對映**：本檔 AC 自 `AC-970-1` 起，共 7 個：970-1 新增檔齊備與格式、970-2 註冊與計數、970-3 JSON 契約自洽、970-4 框架治理閘不退步、970-5 變更邊界與追溯、970-6 文件內容對齊、970-7 FSM 演練。
 3. **AT 命名**：`AT-970-<AC 序>-<序>`；負控與邊界 `AT-970-<AC 序>-E-<序>`（掛在其所屬 AC 之下，符合文法）。
-4. **計數**：AC 7 個、AT 34 個（正控 25、負控 9；見 §1）。
+4. **計數**：AC 7 個、AT 35 個（正控 26、負控 9；見 §1）。
 
 **本增量交付物**（D1～D6；路徑相對版本目錄 `AISDLC_SDD/AISDLC_SDD_v<LATEST>/`，除非另註）
 
@@ -56,14 +56,14 @@
 | D2 | 兩支 agent | `agent/specialized/research-analyst-zh.yaml`、`spec-engineer-zh.yaml` | 同上 | AC-970-1、4 |
 | D3 | 四份模板 | `docs_template/sdd/requirements/{ISSUE-SCOPE,EVIDENCE-MATRIX,PRD-SPEC-ENGINEERED,ADVERSARIAL-REVIEW-CARD}-TEMPLATE.md` | 同上 | AC-970-3、6 |
 | D4 | ADR | `docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md` | 同上 | AC-970-6 |
-| D5 | 註冊與條文增補（既有檔，只增不減） | 版本目錄內 12 檔（`AISDLC_SDD_INIT.md`、`workflow/README.md`、`agent/README.md`、`agent/specialized/README.md`、`SDD_SPEC_FIRST_GATE.md`、`SDD_AUTOCLAUDE_BRIDGE.md`、greenfield 與 brownfield enhancement、`docs_template/README.md`、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`、`EVOLUTION_LOG.md`、`releases/CHANGELOG.md`）＋版本目錄外 `AISDLC_SDD/CLAUDE.md`（Rule 2 目錄樹一句、快速參考一列、Rule 6 兩列） | 同上（依 SD-B 的 `FRAMEWORK_EDITS.md` E01～E36 逐塊套用） | AC-970-2、5 |
+| D5 | 註冊與條文增補（既有檔，只增不減） | 版本目錄內 12 檔（`AISDLC_SDD_INIT.md`、`workflow/README.md`、`agent/README.md`、`agent/specialized/README.md`、`SDD_SPEC_FIRST_GATE.md`、`SDD_AUTOCLAUDE_BRIDGE.md`、greenfield 與 brownfield enhancement、`docs_template/README.md`、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`、`EVOLUTION_LOG.md`、`releases/CHANGELOG.md`）＋版本目錄外 `AISDLC_SDD/CLAUDE.md`（Rule 2 目錄樹一句、快速參考一列、Rule 6 兩列） | 同上（落檔 commit `25c66981`；只增不減的重現指令見 §7 ⚖1） | AC-970-2、5 |
 | D6 | 本檔、組成字串補丁與 `FRAMEWORK_STATUS.md` 重生 | 本檔；`AISDLC_SDD/scripts/framework_status_snapshot.py`（curated 組成字串加 `+1 Research-to-PRD`，D-47）；`AISDLC_SDD/FRAMEWORK_STATUS.md`（`framework_status_snapshot.py --write`，同 commit 最後一步） | SD-B（本檔）／主控（補丁與重生） | AC-970-2 |
 
 **提交順序與責任**
 
-- D1～D4（新增檔）→ AT-970-3-x（契約自洽）→ D5（逐塊套用，先 `--check` 再套用）→ D6 重生 → AT-970-1～6 全跑 → 收尾 `spec-refreeze`（§6）。
+- D1～D4（新增檔）→ AT-970-3-x（契約自洽）→ D5（既有檔編修）→ D6 重生 → AT-970-1～6 全跑 → `spec-refreeze`（§6）。以上步驟已於落檔 commit `25c66981` 完成，本行保留為重做時的順序。
 - 框架鍵視窗是 hooks-ON 視窗：寫 `docs/02_architecture/`、`docs/03_testing/` 須在 INIT、SCENARIO_DETECT、AGENT_LOAD、SPEC_DRAFTING、SPEC_AUDIT、SPEC_REGRESSION_CHECK 或 RESUME_VERIFICATION 態（BRIDGE §8.3 第 3 點）。
-- 開發 agent **不 commit／push**（主控驗證後 commit）；不動 §5 白名單（AT-970-5-1）以外的檔；凍結版與中間歷史版一律不碰；不跑 FSM CLI 寫入動詞（AT-970-7 的演練只寫暫存狀態目錄，由獨立 QA 於 SCG-4 時執行）。
+- 開發 agent **不 commit／push**（主控驗證後 commit）；不動 §5 白名單（AT-970-5-1）以外的檔；凍結版與中間歷史版一律不碰；不跑 FSM CLI 寫入動詞（AT-970-7 的演練只寫 `$tmp` 之下的暫存狀態目錄與版本目錄複本，由獨立 QA 於 SCG-4 時執行）。
 
 **〈增量行為規則〉**（W-F1～W-F6；各 AT 以 W-F 編號引用。實查依據：`transition_rules.py`、`fsm_runtime.py`、`framework_status_snapshot.py`、`agent_template_lint.py`、`arch_fitness.py`、`SDD_AUTOCLAUDE_BRIDGE.md` §8）
 
@@ -72,7 +72,7 @@
 - **W-F3 契約**：四份模板共 9 個 `<!-- r2p:contract=<名稱> -->` JSON 區塊，各恰 1 個，自洽於檢核器（附錄 A）；值域與根層 PRD §5.1 一致——`topic` 1～500 字、`slug` `^[a-z0-9][a-z0-9-]{0,29}$`、`depth_level` `QUICK／STANDARD／DEEP`、`layers` 四個布林 `academic／industry／oss／community`；評分以整數 `W100 = 30A+25P+25Q+20S` 判定，通過＝前置全過且 `W100 ≥ 8500` 且每維度 ≥ 60 且無未結 P1（D-14）；彙整卡 `review_card`（審查卡模板第 7 節）另有三條契約（主控 D-54、D-55）：每輪含 `prd_version`（semver 字串）與 `prd_version_no`（整數，對映資料庫 `version_no`，是正式鍵），兩者連同 `prd_sha256` 描述同一份 PRD、輪與輪之間 `prd_version_no` 不遞減；凡有呼叫 `gate` 的輪 `fsm.gate_result=PASS` ⇔ `passed=true`，POST_HUMAN 再審通過的輪 `fsm.gate_result=null`；`REVIEW_INVALID` 不寫審查輪列、不在 `rounds[].verdict` 的值域（只記 stage run 與事件）。
 - **W-F4 SE-PRD**：頂層是家規 `PRD_Universal_Template` 的 14 章（章號與標題逐字一致）；來源六節以 `<!-- r2p:section=N -->` 錨點嵌入、各恰 1 個；章尾附錄 R 附「來源六節 ↔ 家規章節」對映表（7 列、無錨點語法）；**雙重預檢**＝六節錨點齊全 且 家規必讀章非空（D-20 SA-01；PRD AC-R2P-07-2）。
 - **W-F5 FSM 對映**：外環鍵 `research-<slug>`（換世代 `-g<N>`）、內環鍵 `<sub>-<slug>`；stage 名 `Gate-0`、`Gate-0-SCR<n>`、`Stage-1`、`Stage-2`；Gate 0 的 `--doc` 恰為 `01_specs/PRD-v1.0.0.md`、`00_research/evidence_matrix.md`、`00_research/issue_scope.json`、`01_specs/adr_draft.md` 四份、不含 TCS，`--approver` 必須是真人；審查最多 3 輪（`RETRY_LIMITS["SCG_VALIDATION"]=3`，第 3 次 `gate FAIL` 即 ESCALATION；人工退回走 `gate SCG_VALIDATION FAIL` 共用預算；現態 HUMAN_PENDING 時 Bridge 不呼叫 gate PASS、再審通過只記 DB，D-50；ESCALATION 經人工恢復後預算不歸零：至多再得一次審查，FAIL 立即再 ESCALATION、PASS 歸零，全新預算＝換世代鍵，D-60）；外環鍵環境 `SDD_ENABLE_AUTO_RECOVERY=0`；SCR 三路（MINOR＝外環重走 `Gate-0-SCR<n>` 加內環 SPEC_AUDIT／`spec-refreeze`；MAJOR＝新研究專案；自癒耗盡＝人手 `resume-from-escalation`）；Bridge 可用動詞＝`show`（建檔）、`transition`（受限）、`gate`（`SCG_VALIDATION`／`PR_REVIEW`／`RTM_VERIFY`／`RELEASE_READY`）、`spec-refreeze`、`spec-frozen`，**不含** `resume-from-escalation`。
-- **W-F6 變更邊界**：本鍵的變更集合只准落在 24 條白名單路徑（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `FRAMEWORK_STATUS.md`）與版本目錄 `docs/06_quality/`（報告與 RTM 落點）；`_HAPPY_PATH`、`formal/`、`governance/rules/R-*.yaml`、`.claude/`、skills、`PRD_Universal_Template.md`、根層 `tools/`、`.claude/` 零差異；根層其餘變動只准主控收尾單窗的 W0 連動檔（D-46 逐字清單：`.gitignore`、`.github/workflows/agentconsole-ci.yml`、根層 PRD 兩份、ADR-XPLAT-016／017、`AgentConsole/**`）。
+- **W-F6 變更邊界**：本鍵的變更集合只准落在 24 條白名單路徑（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `FRAMEWORK_STATUS.md`）與版本目錄 `docs/06_quality/`（報告與 RTM 落點）；`_HAPPY_PATH`、`formal/`、`governance/rules/R-*.yaml`、`.claude/`、skills、`PRD_Universal_Template.md`、根層 `tools/`、`.claude/` 零差異；根層其餘變動只准主控收尾單窗的 W0 連動檔（D-46 逐字清單，共 8 條：`.gitignore`、`.github/workflows/agentconsole-ci.yml`、根層 PRD 兩份與來源規格逐字檔 `ResearchSOPtoPRD_Source_Spec.md`、ADR-XPLAT-016／017、`AgentConsole/**`）。
 
 **上位需求對照**（根層 `docs/01_requirements/ResearchToPRD_PRD.md`；AT-970-6-5 機械核對每個編號都存在於該 PRD）
 
@@ -82,7 +82,7 @@
 | AC-970-2 | PRD §9.1 元件 C21、C22 | AC-R2P-07-2 |
 | AC-970-3 | FR-R2P-03、FR-R2P-05、FR-R2P-08 | AC-R2P-03-2、AC-R2P-05-1、AC-R2P-05-7、AC-R2P-08-1、AC-R2P-08-5 |
 | AC-970-4 | NFR-R2P-05、NFR-R2P-08 | AC-R2P-04-9 |
-| AC-970-5 | NFR-R2P-08（變更集合與回填） | AC-R2P-10-9 |
+| AC-970-5 | NFR-R2P-08（文件最小集與回填）；變更邊界的直接依據是 PRD §9.0 落點表與 ADR-XPLAT-017 §D7（非 AC） | AC-R2P-11-7、AC-R2P-12-6 |
 | AC-970-6 | FR-R2P-07、FR-R2P-08、FR-R2P-10、FR-R2P-19 | AC-R2P-07-2、AC-R2P-08-2、AC-R2P-08-3、AC-R2P-10-1、AC-R2P-19-1 |
 | AC-970-7 | FR-R2P-08、FR-R2P-10、FR-R2P-19 | AC-R2P-08-3、AC-R2P-08-9、AC-R2P-08-10、AC-R2P-10-5、AC-R2P-10-8、AC-R2P-19-8 |
 
@@ -90,40 +90,44 @@
 
 | US ID | User Story | AC ID | AC（Given／When／Then） |
 |-------|------------|-------|-----------------------|
-| US-970 | 身為框架維護者，我想把研究到規格的方法層以 Markdown 與 YAML 納入 AISDLC_SDD LATEST 而不動 FSM runtime、規則與 skills，以便 Console 與人手流程共用同一個方法真相源 | AC-970-1 | Given 框架鍵視窗依 `FRAMEWORK_EDITS.md` 落地 When 檢查九個新增檔 Then 九檔存在於指定路徑；兩支 agent YAML 可解析且含值域（`required_input`）與雙重預檢（`dual_precheck`）欄位；全部為 UTF-8、無 BOM、純 LF；舊名 ADR 與已取消的框架側 PRD 不存在 |
+| US-970 | 身為框架維護者，我想把研究到規格的方法層以 Markdown 與 YAML 納入 AISDLC_SDD LATEST 而不動 FSM runtime、規則與 skills，以便 Console 與人手流程共用同一個方法真相源 | AC-970-1 | Given 框架側九個新增檔已落地 When 檢查九個新增檔 Then 九檔存在於指定路徑；兩支 agent YAML 可解析且含值域（`required_input`）與雙重預檢（`dual_precheck`）欄位；全部為 UTF-8、無 BOM、純 LF；舊名 ADR 與已取消的框架側 PRD 不存在 |
 | US-970 | 同上 | AC-970-2 | Given 既有註冊清單 When 逐塊套用編修並重生 `FRAMEWORK_STATUS.md` Then INIT 四處、五份 README 與標準文件（`workflow/README.md`、`agent/specialized/README.md`、`agent/README.md`、`docs_template/README.md`、`PROJECT_DOCUMENTATION_STANDARDS.md`）、`AISDLC_SDD/CLAUDE.md`（Rule 2、快速參考、Rule 6）、CHANGELOG 日期皆登記新增項、計數宣稱等於磁碟（`agent/README.md` 的訂正保留原文）、`framework_status_snapshot.py --check` rc 0；對一份「磁碟多了一支 agent 卻未重生」的狀態檔 `--check` 必須 rc 1 |
 | US-970 | 同上 | AC-970-3 | Given 四份模板的九個 JSON 契約區塊 When 以契約檢核器檢核 Then 9 個區塊 0 項問題、29 個注入錯誤全被抓到且 1 個合法變體（POST_HUMAN 再審通過的輪 `fsm.gate_result=null`）不被誤判；缺任一標記即 rc 1 |
 | US-970 | 同上 | AC-970-4 | Given 新增兩支 agent 與四份模板 When 跑四支 agent lint、`arch_fitness`、skills 鏡像檢查與 `ci-gate` Then 四 lint rc 0、FF-6／7／13／15 皆為 info 且 `n_fail` 0、鏡像 rc 0、`ci-gate` rc 0；鬼影模板路徑會被 lint 抓到 |
-| US-970 | 同上 | AC-970-5 | Given 本鍵的變更集合 When 與白名單核對 Then 全部落在 24 條白名單路徑、版本目錄 `docs/06_quality/` 與 D-46 的根層連動逐字清單內，`tools/`、`.claude/` 與其他受保護路徑零差異；〈增量追溯表〉的三個摘要等於 Stage-1 凍結記錄 |
-| US-970 | 同上 | AC-970-6 | Given 工作流、ADR、模板、BRIDGE §9 與 SPEC_FIRST_GATE 條文 When 逐項比對 Then 章節與決策編號齊全、Gate 0 恰四份文件不含 TCS、`gate` 為四個閘且不含 `resume-from-escalation`（BRIDGE §9.2 含實際使用面句，D-45）、人工退回守則住在工作流第 8 章與 BRIDGE §9.3 且與 `SDD_SPEC_FIRST_GATE.md` 對照表第 5 列一致（D-50）、SE-PRD 為家規 14 章頂層加六錨點加章尾對映表、無占位字樣、被引用的上位需求編號皆存在於根層 PRD、恢復後預算句（D-60）同在工作流第 2.5 節與審查卡模板第 2.3 節、SE-PRD 模板 P0-7 列含四個預檢代碼、審查卡模板第 5.3 節含缺陷狀態轉移矩陣 |
+| US-970 | 同上 | AC-970-5 | Given 本鍵的變更集合 When 與白名單核對 Then 全部落在 24 條白名單路徑、版本目錄 `docs/06_quality/` 與 D-46 的根層連動逐字清單內，`tools/`、`.claude/` 與其他受保護路徑零差異；〈增量追溯表〉的五個摘要等於 Stage-1 凍結記錄（含 `spec-refreeze` 重記） |
+| US-970 | 同上 | AC-970-6 | Given 工作流、ADR、模板、BRIDGE §9 與 SPEC_FIRST_GATE 條文 When 逐項比對 Then 章節與決策編號齊全、Gate 0 恰四份文件不含 TCS、`gate` 為四個閘且不含 `resume-from-escalation`（BRIDGE §9.2 含實際使用面句，D-45）、人工退回守則住在工作流第 8 章與 BRIDGE §9.3 且與 `SDD_SPEC_FIRST_GATE.md` 對照表第 5 列一致（D-50）、SE-PRD 為家規 14 章頂層加六錨點加章尾對映表、無占位字樣、被引用的上位需求編號皆存在於根層 PRD、恢復後預算句（D-60）同在工作流第 2.5 節與審查卡模板第 2.3 節、SE-PRD 模板 P0-7 列的四個預檢代碼逐處計數、審查卡模板第 5.3 節含缺陷狀態轉移矩陣、散文條文的關鍵數字與句子（W100 公式與 8500 門檻、第 N 次 FAIL＝ESCALATION、四維權重百分比、ADR D7 後半句、BRIDGE 外環鍵前五值、Gate 0 永遠要求真人核准、V0 不得列入）與契約 JSON 或引擎常數對拍 |
 | US-970 | 同上 | AC-970-7 | Given 暫存 FSM 狀態目錄 When 依工作流第 2.6、9.3 節的指令序列演練 Then PASS 後 Gate 0 以四文件凍結；3 次 FAIL 為 ESCALATION（自動恢復關閉時回傳無 `auto_recovery`，預設開啟時有）；人工退回走 `gate FAIL` 且 HUMAN_PENDING→SPEC_DRAFTING 被拒、SPEC_REGRESSION_CHECK 後可凍結；現態 HUMAN_PENDING 時 `gate FAIL` 態不動且計數加 1、`gate PASS` rc≠0 且態與計數不變（D-50 負控）；ESCALATION 人工恢復後計數仍為上限、恢復後第一次 `gate FAIL` 立即再 ESCALATION、`gate PASS` 歸零並進 HUMAN_PENDING（D-60）；SCR-minor 序列落到 IMPLEMENTATION；研究工作區路徑不被 Rule 9.6 規格寫入阻擋 |
 
 ### 〈增量追溯表〉（SCG-0～3 每個清單項一列；清單見 `SDD_SPEC_FIRST_GATE.md`〈閘門通過標準〉）
 
-> 凍結摘要＝該文件在本鍵 `frozen_stages[*].spec_doc_digests` 的值；以下三個是 **Stage-1 採納當下（本鍵改動之前）** 的基準，SD-B 於 HEAD `01d9be6e` 工作樹現算，**Stage-1 凍結時由 CLI 重算為準**，主控以 AT-970-5-3 比對、不符則先更新本表。路徑相對 `spec-frozen --root`＝`AISDLC_SDD/`。標「本增量」者由本檔 FRD-lite 與 TCS 自身滿足（增量文件集本身仍照常走 SCG_VALIDATION → 人類確認 → `spec-frozen`，TCS 在 `--doc` 內）；標「不適用」者附理由並交人在 HUMAN_PENDING 確認（Rule 8）。
+> 凍結摘要＝該文件在本鍵 `frozen_stages[*].spec_doc_digests` 的值；`spec-refreeze` 追加的重記條目與原條目取聯集、同鍵後者勝出（與 AutoClaude `check_digest`、Bridge 的消費語意相同；`state_loader.py` 的 `record_spec_refreeze`）。以下五份是本鍵 **Stage-1 的真實採納集合**（SCG-4 一審 F-02 訂正）：`spec-frozen --root` 是 **monorepo 根**（因含根層 PRD），鍵是相對根的正斜線路徑；摘要是**改動後**內容的摘要（Stage-1 於框架側改動落入工作樹之後才採納，時序見檔頭〈增量條款〉段）。摘要以框架自己的 `spec_digest.digest_doc` 對 repo 工作樹現檔重算（重算指令見 AT-970-5-3），**CLI 的值為準**，主控以 AT-970-5-3 比對、不符則先更新本表（文件於凍結後被改而未重記，也會讓兩者不等）。標「本增量」者由本檔 FRD-lite 與 TCS 自身滿足（增量文件集本身仍照常走 SCG_VALIDATION → 人類確認 → `spec-frozen`，TCS 在 `--doc` 內）；標「不適用」者附理由並交人在 HUMAN_PENDING 確認（Rule 8）。
 >
-> | 代號 | 上位文件 | 路徑 | 凍結摘要 |
-> |------|----------|------|----------|
-> | U1 | 框架規則總綱 | `CLAUDE.md` | `sha256:e1a2801843b9072bdafa599070a7b53cd91c1687e6cefc00cb4c9754ce47cd68` |
-> | U2 | 框架入口 | `AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:7c6d5620e70f08a75587bfa8adde6ef3d3af32b0c95f084a47bec8b020ee0eac` |
-> | U3 | 閘門工作流 | `AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | `sha256:c44b47a825c88aa296818db2004a0267ccc1d1e49a692c2ff062b084bdd39c00` |
+> | 代號 | 上位文件 | 路徑（相對 monorepo 根） | 凍結摘要 |
+> |------|----------|--------------------------|----------|
+> | U1 | 框架規則總綱 | `AISDLC_SDD/CLAUDE.md` | `sha256:09d88638cd8e3d441c3f1bd94cbf289beff767cd9455063263125c06b9142908` |
+> | U2 | 框架入口 | `AISDLC_SDD/AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:c0732753d2a2e7b19678ec48d169845e3280a3b06422325a966a9fd4b07dde28` |
+> | U3 | 閘門工作流 | `AISDLC_SDD/AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | `sha256:ca913bb1f62f97ef4b06fd698c2c5c3b0327f464fa90b1760d8a07a8b4ec98fa` |
+> | U4 | 研究到規格 PRD（唯一 PRD） | `docs/01_requirements/ResearchToPRD_PRD.md` | `sha256:179e839fe318388ad3522de3d7b6f8bda222f6b808dff23455e32a3ae3007ed8` |
+> | U5 | 框架 ADR-001 | `AISDLC_SDD/AISDLC_SDD_v0.30/docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md` | `sha256:c2935ae10317a9db4992057db14a0e58983005711f9072f0b74cd39829260180` |
+>
+> 改動前基準（資訊用，不是 AT-970-5-3 的比對對象）：起點 commit `01d9be6e` 的三份框架上位文件摘要為 U1 `sha256:e1a2801843b9072bdafa599070a7b53cd91c1687e6cefc00cb4c9754ce47cd68`、U2 `sha256:7c6d5620e70f08a75587bfa8adde6ef3d3af32b0c95f084a47bec8b020ee0eac`、U3 `sha256:c44b47a825c88aa296818db2004a0267ccc1d1e49a692c2ff062b084bdd39c00`（`git show 01d9be6e:<路徑>` 經 `digest_doc` 可重算；U4 與 U5 在該 commit 尚不存在，是本鍵新增）。
 
 | 清單項（閘門／項目） | 追溯 ID | 已凍結上位文件（路徑） | 凍結摘要 |
 |---------------------|---------|----------------------|---------|
-| SCG-0／PRD 已完成（業務目標、範疇、假設） | ADOPTED U2〈核心特色與範疇〉；上位需求＝根層 PRD FR-R2P-01～23（引用，不在 Stage-1 基準內） | `AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:7c6d5620e70f08a75587bfa8adde6ef3d3af32b0c95f084a47bec8b020ee0eac` |
+| SCG-0／PRD 已完成（業務目標、範疇、假設） | ADOPTED U4〈根層 PRD：業務目標、範疇、假設；FR-R2P-01～23〉 | `docs/01_requirements/ResearchToPRD_PRD.md` | `sha256:179e839fe318388ad3522de3d7b6f8bda222f6b808dff23455e32a3ae3007ed8` |
 | SCG-0／FRD 所有欄位完整 | 本增量：F-970、US-970（FRD-lite 表） | —（本檔，Stage-2 凍結時由 CLI 記錄） | — |
 | SCG-0／每個 US 有可測 AC（Given／When／Then） | 本增量：AC-970-1～7（§1 皆有 AT） | —（本檔） | — |
 | SCG-0／追溯鏈 EPIC → F → US → AC 完整 | 本增量：EPIC-970 → F-970 → US-970 → AC-970-1～7 → AT（§1） | —（本檔） | — |
-| SCG-0／使用標準 ID 格式 | ADOPTED U1〈Rule 7〉 | `CLAUDE.md` | `sha256:e1a2801843b9072bdafa599070a7b53cd91c1687e6cefc00cb4c9754ce47cd68` |
-| SCG-0／SLV 前置驗證（SLV-001～003） | ADOPTED U3〈SCG-0 通過標準〉；機械半段對表格形 AC 空轉，QA 人讀補位（BRIDGE §8.5；§7 ⚖2） | `AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | `sha256:c44b47a825c88aa296818db2004a0267ccc1d1e49a692c2ff062b084bdd39c00` |
-| SCG-0／Ambiguity Gate（AC 模糊度 < 0.4 或有 WAIVER） | ADOPTED U3〈SCG-0 通過標準〉；本檔 AC 以 `AC-970-n` 編號、AT 以 Given／When／Then 描述 | 同上 | `sha256:c44b47a825c88aa296818db2004a0267ccc1d1e49a692c2ff062b084bdd39c00` |
-| SCG-1／SRD 完整定義系統設計 | ADOPTED U2〈框架結構與入口〉；本增量的設計＝工作流第 2 章（FSM 對映）與 ADR-001 | `AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:7c6d5620e70f08a75587bfa8adde6ef3d3af32b0c95f084a47bec8b020ee0eac` |
+| SCG-0／使用標準 ID 格式 | ADOPTED U1〈Rule 7〉 | `AISDLC_SDD/CLAUDE.md` | `sha256:09d88638cd8e3d441c3f1bd94cbf289beff767cd9455063263125c06b9142908` |
+| SCG-0／SLV 前置驗證（SLV-001～003） | ADOPTED U3〈SCG-0 通過標準〉；機械半段對表格形 AC 空轉，QA 人讀補位（BRIDGE §8.5；§7 ⚖2） | `AISDLC_SDD/AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` | `sha256:ca913bb1f62f97ef4b06fd698c2c5c3b0327f464fa90b1760d8a07a8b4ec98fa` |
+| SCG-0／Ambiguity Gate（AC 模糊度 < 0.4 或有 WAIVER） | ADOPTED U3〈SCG-0 通過標準〉；本檔 AC 以 `AC-970-n` 編號、AT 以 Given／When／Then 描述 | 同上 | `sha256:ca913bb1f62f97ef4b06fd698c2c5c3b0327f464fa90b1760d8a07a8b4ec98fa` |
+| SCG-1／SRD 完整定義系統設計 | ADOPTED U2〈框架結構與入口〉；本增量的設計＝工作流第 2 章（FSM 對映）與 ADR-001（U5） | `AISDLC_SDD/AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:c0732753d2a2e7b19678ec48d169845e3280a3b06422325a966a9fd4b07dde28` |
 | SCG-1／API Spec 草稿（端點清單） | 不適用：框架無 HTTP API；機器契約住四份模板的 9 個 JSON 區塊（AT-970-3-x 驗） | — | — |
 | SCG-1／NFR 規格化（量化目標） | 不適用：Markdown 與 YAML 資產沒有執行期 NFR；非功能面＝AC-970-4（既有治理閘零退步）、AC-970-5（變更邊界） | — | — |
-| SCG-1／技術選型有合理依據 | 本增量：ADR-001 D1～D7（含替代方案評估） | —（ADR-001，隨本鍵新增） | — |
-| SCG-2／SRD 完整定義系統架構 | ADOPTED U2；本增量的架構＝雙環漏斗與兩把鍵（工作流第 0.2、2.1 節） | `AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:7c6d5620e70f08a75587bfa8adde6ef3d3af32b0c95f084a47bec8b020ee0eac` |
+| SCG-1／技術選型有合理依據 | ADOPTED U5〈ADR-001 D1～D7，含替代方案評估〉 | `AISDLC_SDD/AISDLC_SDD_v0.30/docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md` | `sha256:c2935ae10317a9db4992057db14a0e58983005711f9072f0b74cd39829260180` |
+| SCG-2／SRD 完整定義系統架構 | ADOPTED U2；本增量的架構＝雙環漏斗與兩把鍵（工作流第 0.2、2.1 節） | `AISDLC_SDD/AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` | `sha256:c0732753d2a2e7b19678ec48d169845e3280a3b06422325a966a9fd4b07dde28` |
 | SCG-2／C4 Context 與 Container 圖 | 不適用：框架資產無執行期容器；Console／Bridge 的容器圖在 AgentConsole Architecture（根層 PRD §9.2） | — | — |
-| SCG-2／所有重大架構決策有對應 ADR | 本增量：ADR-001（D1～D7）；Bridge 側＝根層 ADR-XPLAT-017 | —（ADR-001） | — |
+| SCG-2／所有重大架構決策有對應 ADR | ADOPTED U5〈ADR-001 D1～D7〉；Bridge 側＝根層 ADR-XPLAT-017 | `AISDLC_SDD/AISDLC_SDD_v0.30/docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md` | `sha256:c2935ae10317a9db4992057db14a0e58983005711f9072f0b74cd39829260180` |
 | SCG-2／Trust Boundary Map（安全場景必備） | 不適用：本鍵非安全場景；外呼邊界在 Bridge（根層 PRD NFR-R2P-03） | — | — |
 | SCG-3／使用 OpenAPI 3.1 | 不適用：框架無 HTTP API，沒有可追溯的已凍結 OpenAPI | — | — |
 | SCG-3／所有端點已定義 Request／Response Schema | 不適用：同上 | — | — |
@@ -135,7 +139,7 @@
 
 ## 1. AC → AT 映射表
 
-> **AT ID 文法**：`AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，前兩段數字＝所屬 AC（`AT-970-1-2` 屬 `AC-970-1`；`AT-970-1-E-1` 屬 `AC-970-1`）。**自動化**欄的「✅」＝可由 PowerShell 指令自動判定；「🔶」＝指令已給但依任務書約束 SD-B 未實跑（§2.7 預期值依讀碼，首次執行的差異以實跑為準並走勘誤）。
+> **AT ID 文法**：`AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，前兩段數字＝所屬 AC（`AT-970-1-2` 屬 `AC-970-1`；`AT-970-1-E-1` 屬 `AC-970-1`）。**自動化**欄的「✅」＝可由 PowerShell 指令自動判定；「🔶」＝FSM 演練 AT（寫 `$tmp` 之下的暫存狀態目錄與版本目錄複本；§2.7 預期值原依讀碼推得，首次執行的差異以實跑為準並走勘誤）。
 
 | AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
 |-------|---------|-------|---------|-------|---------|------|
@@ -156,13 +160,14 @@
 | AC-970-4 | 同上 | AT-970-4-E-1 | 負控：鬼影模板路徑被 `agent_template_lint` 抓到（rc 1），修正後 rc 0 | ✅ | Integration | □ |
 | AC-970-5 | 變更邊界與追溯 | AT-970-5-1 | 變更集合落在 24 條白名單路徑、`docs/06_quality/` 與 D-46 根層連動逐字清單內；`tools/`、`.claude/` 零差異 | ✅ | Integration | □ |
 | AC-970-5 | 同上 | AT-970-5-2 | 受保護路徑零差異 | ✅ | Integration | □ |
-| AC-970-5 | 同上 | AT-970-5-3 | 〈增量追溯表〉三個摘要＝Stage-1 凍結記錄（唯讀 `show`） | ✅ | Integration | □ |
+| AC-970-5 | 同上 | AT-970-5-3 | 〈增量追溯表〉五個摘要＝Stage-1 凍結記錄與 `spec-refreeze` 重記條目的聯集（唯讀 `show`） | ✅ | Integration | □ |
 | AC-970-5 | 同上 | AT-970-5-E-1 | 負控：邊界函式對合成的越界路徑（含清單外的根層文件、清單外的 `scripts/` 檔、根層 `.claude/`）回報違規 | ✅ | Unit | □ |
-| AC-970-6 | 文件內容對齊 | AT-970-6-1 | 工作流章節 0～14 連號；ADR 決策恰 D1～D7 且各含其關鍵語；恢復後預算句（D-60）、P0-7 預檢代碼、缺陷狀態轉移矩陣各在其位 | ✅ | Unit | □ |
+| AC-970-6 | 文件內容對齊 | AT-970-6-1 | 工作流章節 0～14 連號；ADR 決策恰 D1～D7 且各含其關鍵語；恢復後預算句（D-60）、P0-7 預檢代碼逐處計數、缺陷狀態轉移矩陣各在其位 | ✅ | Unit | □ |
 | AC-970-6 | 同上 | AT-970-6-2 | Gate 0 四文件不含 TCS；BRIDGE §9.2 動詞列、四個閘與使用面句（D-45）；不含 `resume-from-escalation`；人工退回守則三處一致（D-50） | ✅ | Unit | □ |
 | AC-970-6 | 同上 | AT-970-6-3 | SE-PRD 結構：14 章標題逐字同家規、六錨點各一、章尾附錄 R | ✅ | Unit | □ |
 | AC-970-6 | 同上 | AT-970-6-4 | 無占位字樣；除 SE-PRD 模板外無雙大括號佔位 | ✅ | Unit | □ |
 | AC-970-6 | 同上 | AT-970-6-5 | 上位需求編號存在於根層 PRD；舊名與已取消的框架側 PRD 零殘留 | ✅ | Unit | □ |
+| AC-970-6 | 同上 | AT-970-6-6 | 散文條文與契約 JSON／引擎常數對拍：W100 公式與 8500 門檻、第 N 次 FAIL＝ESCALATION、ADR D7 後半、四維權重百分比、BRIDGE 外環鍵前五值、Gate 0 永遠要求真人核准、V0 不得列入、「最多 N 輪」六處復述（二審 N-1） | ✅ | Unit | □ |
 | AC-970-6 | 同上 | AT-970-6-E-1 | 負控：SE-PRD 結構函式對四種變異各回報問題 | ✅ | Unit | □ |
 | AC-970-7 | FSM 演練 | AT-970-7-1 | 🔶 PASS → Gate 0 以四文件凍結（`SPEC_FROZEN`） | 🔶 | Integration | □ |
 | AC-970-7 | 同上 | AT-970-7-2 | 🔶 FAIL×3 → ESCALATION；自動恢復關閉時無 `auto_recovery` | 🔶 | Integration | □ |
@@ -176,14 +181,14 @@
 
 **覆蓋率統計**:
 - 總 AC 數: 7
-- 已映射 AT 數: 34（✅ 26、🔶 8）
+- 已映射 AT 數: 35（✅ 27、🔶 8）
 - 映射覆蓋率: 100% （目標: 100%）
 
 ---
 
 ## 2. 可自動化 AT 規格
 
-> 每個 AT＝Given／When／Then 一句＋可直接貼進 PowerShell 的指令＋預期輸出。**PowerShell 規約**：不用裸 `cd`／`Set-Location`；讀 rc 先存變數、不接管線；讀檔一律指名 UTF-8（`Read-Utf8`）；暫存檔只放 `$tmp`；每個 AT 以一行 `RESULT <AT-ID> PASS|FAIL …` 收尾，**逐字貼進證據檔**。AT 區塊在同一個 PowerShell 視窗內依序貼（後面的 AT 沿用前面定義的變數與函式）。除標 🔶 者外，SD-B 已在套用 `FRAMEWORK_EDITS.md` 的暫存樹實跑，預期輸出是實跑值；🔶 區塊依任務書約束 SD-B 未跑 FSM 寫入動詞，預期值依讀碼推得（座標列在各 AT）。
+> 每個 AT＝Given／When／Then 一句＋可直接貼進 PowerShell 的指令＋預期輸出。**PowerShell 規約**：不用裸 `cd`／`Set-Location`；讀 rc 先存變數、不接管線；讀檔一律指名 UTF-8（`Read-Utf8`）；暫存檔只放 `$tmp`；每個 AT 以一行 `RESULT <AT-ID> PASS|FAIL …` 收尾，**逐字貼進證據檔**。AT 區塊在同一個 PowerShell 視窗內依序貼（後面的 AT 沿用前面定義的變數與函式）。預期輸出是對落檔後的 repo 實跑所得；標 🔶 的 FSM 演練區塊，預期值原依讀碼推得（座標列在各 AT），以實跑為準、不符走勘誤。
 
 ### 2.0 共用前置（每個 AT 區塊假設已執行）
 
@@ -227,7 +232,7 @@ $edited12 = @(
 
 ### 2.1 AC-970-1：九個新增檔齊備與格式
 
-**AT-970-1-1**（Unit）Given 框架鍵視窗依 `FRAMEWORK_EDITS.md` 落地 When 檢查九個新增檔路徑 Then 九檔皆存在，舊名 ADR 不存在。
+**AT-970-1-1**（Unit）Given 框架側新增檔已落地 When 檢查九個新增檔路徑 Then 九檔皆存在，舊名 ADR 不存在。
 
 ```powershell
 # AT-970-1-1
@@ -371,7 +376,7 @@ $ck.GetEnumerator() | ForEach-Object { '{0} {1}' -f $(if ($_.Value) { 'PASS' } e
 Show-Result 'AT-970-2-1' (@($ck.Values | Where-Object { -not $_ }).Count -eq 0) "specialized=$specN templates=$tmplN workflows=$wfN"
 ```
 
-預期輸出：二十一行 `PASS …`、`RESULT AT-970-2-1 PASS specialized=<磁碟實數> templates=<磁碟實數> workflows=<磁碟實數>`（暫存樹實跑：specialized=23、templates=63、workflows=24；落地以磁碟為準）。
+預期輸出：二十一行 `PASS …`、`RESULT AT-970-2-1 PASS specialized=<磁碟實數> templates=<磁碟實數> workflows=<磁碟實數>`（對 repo 現檔實跑：specialized=23、templates=63、workflows=24；以磁碟為準）。
 
 **AT-970-2-2**（Integration）Given 重生後的 `FRAMEWORK_STATUS.md` When 跑 `framework_status_snapshot.py --check` Then rc 0。
 
@@ -493,7 +498,7 @@ $okSel = ($sel.Count -ge 4 -and @($sel | Where-Object { $_.severity -ne 'info' }
 Show-Result 'AT-970-4-2' (($rc -in 0, 1) -and $af.n_fail -eq 0 -and $okSel) "rc=$rc n_fail=$($af.n_fail) n_warn=$($af.n_warn)"
 ```
 
-預期輸出（暫存樹實跑）：`FF-6 info 文件相對連結完整`、`FF-7 info Agent↔Workflow↔Skill 引用健康`、`FF-13 info 全部 30 個 agent YAML 嚴格合法且具 agent 定義鍵`、`FF-15 info SDD 模板索引與磁碟一致（63 個模板全索引、全可解析）`、`RESULT AT-970-4-2 PASS rc=1 n_fail=0 n_warn=3`。`n_warn=3` 是改動前就存在的 FF-5、FF-16（兩筆）advisory，在未改動的複本上跑同值（SD-B 以改動前複本對照過），所以 rc=1 屬預期；數字 30、63 與 `n_warn` 落地時以磁碟現值為準。
+預期輸出（對 repo 現檔實跑）：`FF-6 info 文件相對連結完整`、`FF-7 info Agent↔Workflow↔Skill 引用健康`、`FF-13 info 全部 30 個 agent YAML 嚴格合法且具 agent 定義鍵`、`FF-15 info SDD 模板索引與磁碟一致（63 個模板全索引、全可解析）`、`RESULT AT-970-4-2 PASS rc=1 n_fail=0 n_warn=3`。`n_warn=3` 是改動前就存在的 FF-5、FF-16（兩筆）advisory，在改動前的起點 commit `01d9be6e` 上跑同值（可用 `git archive 01d9be6e AISDLC_SDD` 解出複本對照），所以 rc=1 屬預期；數字 30、63 與 `n_warn` 以磁碟現值為準。
 
 **AT-970-4-3**（Integration）Given 本鍵未新增 skill When 跑 skills 鏡像與版本戳記檢查 Then 皆 rc 0。
 
@@ -551,13 +556,13 @@ Show-Result 'AT-970-4-E-1' ($rcBad -eq 1 -and $rcGood -eq 0 -and (($o -join "`n"
 
 ### 2.5 AC-970-5：變更邊界與追溯
 
-> 前置：`$base` 必須先設為**起點 commit**＝主控在 Stage-1 採納當下記錄的 `git rev-parse HEAD`（本檔輸入快照的 HEAD 是 `01d9be6e`，只是參考值）。`$base` 若設成 `HEAD` 而變更已 commit，比對結果會是空集合而假綠——所以 AT-970-5-1 起手就擋掉未設值。
+> 前置：`$base` 必須先設為**起點 commit**＝框架鍵開工前的 `git rev-parse HEAD`，本鍵為 **`01d9be6e`**（本鍵 Stage-1 的基準 commit；落檔 commit 是 `25c66981`）：`$base = (git -C $root rev-parse 01d9be6e)`。`$base` 若設成 `HEAD` 而變更已 commit，比對結果會是空集合而假綠——所以 AT-970-5-1 起手就擋掉未設值。
 
-**AT-970-5-1**（Integration）Given 起點 commit 與目前工作樹 When 列出整個 repo 相對起點的追蹤檔變更，加上 `AISDLC_SDD`、`tools`、`.claude`、`.github` 範圍內的未追蹤檔 Then 每個路徑都在 24 條白名單（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `AISDLC_SDD/FRAMEWORK_STATUS.md`）、版本目錄 `docs/06_quality/`（報告與 RTM 落點，BRIDGE §8.5），或主控收尾單窗的根層連動例外清單（主控 D-46，逐字 7 條：`.gitignore`、`.github/workflows/agentconsole-ci.yml`、`docs/01_requirements/ResearchToPRD_PRD.md`、`docs/01_requirements/Agent_ConsoleUI_PRD.md`、`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`、`docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md`、`AgentConsole/**`）之內；根層 `tools/`、`.claude/` 必須為空，不接受任何例外。追蹤檔變更掃整個 repo，是因為 D-46 的例外清單住在 `AISDLC_SDD` 範圍之外；未追蹤檔仍只掃四個範圍（根層其他未追蹤的文件由主控收尾單窗處置，不歸本鍵判）。
+**AT-970-5-1**（Integration）Given 起點 commit 與目前工作樹 When 列出整個 repo 相對起點的追蹤檔變更，加上 `AISDLC_SDD`、`tools`、`.claude`、`.github` 範圍內的未追蹤檔 Then 每個路徑都在 24 條白名單（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `AISDLC_SDD/FRAMEWORK_STATUS.md`）、版本目錄 `docs/06_quality/`（報告與 RTM 落點，BRIDGE §8.5），或主控收尾單窗的根層連動例外清單（主控 D-46，逐字 8 條：`.gitignore`、`.github/workflows/agentconsole-ci.yml`、`docs/01_requirements/ResearchToPRD_PRD.md`、`docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md`、`docs/01_requirements/Agent_ConsoleUI_PRD.md`、`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`、`docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md`、`AgentConsole/**`）之內；根層 `tools/`、`.claude/` 必須為空，不接受任何例外。追蹤檔變更掃整個 repo，是因為 D-46 的例外清單住在 `AISDLC_SDD` 範圍之外；未追蹤檔仍只掃四個範圍（根層其他未追蹤的文件由主控收尾單窗處置，不歸本鍵判）。來源規格逐字檔 `ResearchSOPtoPRD_Source_Spec.md` 在起點 commit 之後的 W0 落檔 commit 才首次入庫，所以列入清單（勘誤 1）。
 
 ```powershell
 # AT-970-5-1
-if (-not $base) { throw '先設 $base：起點 commit（Stage-1 採納當下的 git rev-parse HEAD）' }
+if (-not $base) { throw '先設 $base：起點 commit（框架鍵開工前的 git rev-parse HEAD；本鍵為 01d9be6e）' }
 $allowed = @($new9 + $edited12 | ForEach-Object { "AISDLC_SDD/$ver/$_" }) + @('AISDLC_SDD/CLAUDE.md', 'AISDLC_SDD/scripts/framework_status_snapshot.py', 'AISDLC_SDD/FRAMEWORK_STATUS.md')
 # 根層連動的已知例外（主控 D-46；與 ADR-XPLAT-017 §D7 機械核對法的清單逐字同步）：主控收尾單人窗口的 W0 連動檔，不是框架鍵視窗的變更。
 # 清單是逐字比對、不是萬用字元（只有 AgentConsole/ 是目錄前綴）；其餘任何根層路徑一律違規，tools／.claude 零例外
@@ -565,6 +570,7 @@ $rootExempt = @(
     '.gitignore',
     '.github/workflows/agentconsole-ci.yml',
     'docs/01_requirements/ResearchToPRD_PRD.md',
+    'docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md',
     'docs/01_requirements/Agent_ConsoleUI_PRD.md',
     'docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md',
     'docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md')
@@ -593,10 +599,10 @@ $viol    = @(Get-BoundaryViolations $changed)
 'root exempt entries: ' + ($rootExempt.Count + $rootExemptDirs.Count)
 'changed paths: ' + $changed.Count
 $viol
-Show-Result 'AT-970-5-1' ($viol.Count -eq 0 -and $allowed.Count -eq 24 -and ($rootExempt.Count + $rootExemptDirs.Count) -eq 7) "violations=$($viol.Count)"
+Show-Result 'AT-970-5-1' ($viol.Count -eq 0 -and $allowed.Count -eq 24 -and ($rootExempt.Count + $rootExemptDirs.Count) -eq 8) "violations=$($viol.Count)"
 ```
 
-預期輸出：`whitelist size: 24`、`root exempt entries: 7`、`changed paths: <N>`（N 以實際變動為準：新增與被改檔、`docs/06_quality/` 報告，加上收尾單窗的根層連動檔）、`RESULT AT-970-5-1 PASS violations=0`。
+預期輸出：`whitelist size: 24`、`root exempt entries: 8`、`changed paths: <N>`（N 以實際變動為準：新增與被改檔、`docs/06_quality/` 報告，加上收尾單窗的根層連動檔）、`RESULT AT-970-5-1 PASS violations=0`。
 
 **AT-970-5-2**（Integration）Given 同一起點 When 檢查受保護路徑 Then `_HAPPY_PATH` 所在的 `transition_rules.py`、`formal/`、`governance/rules/`、兩處 `.claude/`、`PRD_Universal_Template.md`、根層 `tools/`、`.claude/`、`.github/` 皆零差異（`_HAPPY_PATH` 不變 ⇒ 免跑 TLC；唯一例外是 AT-970-5-1 的 `$rootExempt` 清單內的 `.github/workflows/agentconsole-ci.yml`）。
 
@@ -610,7 +616,7 @@ Show-Result 'AT-970-5-2' ($d.Count -eq 0) "protected paths changed=$($d.Count)"
 
 預期輸出：`RESULT AT-970-5-2 PASS protected paths changed=0`。（`$rootExempt`、`Test-RootExempt` 沿用 AT-970-5-1。）
 
-**AT-970-5-3**（Integration）Given 本鍵 Stage-1 已採納（在本鍵視窗，三件組已設） When 以唯讀 `show` 取 `frozen_stages` 中 `Stage-1` 的 `spec_doc_digests`，與本檔〈增量追溯表〉的三個摘要比對 Then 逐值相等；不等＝表過期，須先更新本表再送審（`show` 不是寫入動詞）。
+**AT-970-5-3**（Integration）Given 本鍵 Stage-1 已採納、其後的 `spec-refreeze` 已重記（在本鍵視窗，三件組已設） When 以唯讀 `show` 取 `frozen_stages` **全部條目**的 `spec_doc_digests`，依序取聯集（同鍵後者勝出；含 `spec-refreeze` 追加的重記條目——其 `stage` 取最近一筆〔`state_loader.py` 的 `record_spec_refreeze`〕，所以不能只讀 `Stage-1` 那一筆），與本檔〈增量追溯表〉的五個摘要逐鍵比對 Then 逐值相等；不等＝表過期（文件於凍結後被改而未重記，或表未更新），須先 `spec-refreeze` 或更新本表再送審（`show` 不是寫入動詞；上位：AC-R2P-11-7、AC-R2P-19-8）。
 
 ```powershell
 # AT-970-5-3（需在本鍵視窗執行：SDD_STATE_DIR 與 SDD_PROJECT 已是 sdd-research-to-prd 的三件組）
@@ -620,19 +626,20 @@ $out = & $py -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime show --p
 $rc = $LASTEXITCODE
 Pop-Location
 $j = ($out -join "`n") | ConvertFrom-Json
-$s1 = @($j.fsm_state.frozen_stages | Where-Object { $_.stage -eq 'Stage-1' })[0]
+$eff = @{}                                    # 有效凍結摘要：frozen_stages 全部條目依序取聯集、同鍵後者勝出（含 spec-refreeze 追加的重記條目；與 AutoClaude check_digest、Bridge 的消費語意相同）
+foreach ($e in @($j.fsm_state.frozen_stages)) { if ($e.spec_doc_digests) { foreach ($p in $e.spec_doc_digests.PSObject.Properties) { $eff[$p.Name] = $p.Value } } }
 $tcsText = Read-Utf8 (Join-Path $vd 'docs/03_testing/contracts/TCS-ResearchToPRD-Framework-20261102.md')
 $want = [ordered]@{}
 foreach ($m in [regex]::Matches($tcsText, '(?m)^> \| U\d \| [^|]+ \| `([^`]+)` \| `(sha256:[0-9a-f]{64})` \|$')) { $want[$m.Groups[1].Value] = $m.Groups[2].Value }
-$bad = @(foreach ($k in $want.Keys) { if ($s1.spec_doc_digests.$k -ne $want[$k]) { "$k : 表=$($want[$k]) 凍結=$($s1.spec_doc_digests.$k)" } })
+$bad = @(foreach ($k in $want.Keys) { if ($eff[$k] -ne $want[$k]) { "$k : 表=$($want[$k]) 凍結=$($eff[$k])" } })
 $bad
-Show-Result 'AT-970-5-3' ($rc -eq 0 -and $want.Count -eq 3 -and $bad.Count -eq 0) "rc=$rc table_rows=$($want.Count)"
+Show-Result 'AT-970-5-3' ($rc -eq 0 -and $want.Count -eq 5 -and $bad.Count -eq 0) "rc=$rc table_rows=$($want.Count)"
 ```
 
-預期輸出：`RESULT AT-970-5-3 PASS rc=0 table_rows=3`。重算指令（主控在 Stage-1 採納前先算好填表；CLI 的值為準）：
+預期輸出：`RESULT AT-970-5-3 PASS rc=0 table_rows=5`。重算指令（唯讀；主控在 `spec-refreeze` 前先算好填表，CLI 重記的值為準；`-B` 使重算不在 repo 內寫 `__pycache__`）：
 
 ```powershell
-# 摘要重算（唯讀；框架自己的 spec_digest 演算法：換行正規化後 UTF-8 的 SHA-256）
+# 摘要重算（唯讀；框架自己的 spec_digest 演算法：換行正規化後 UTF-8 的 SHA-256；鍵＝相對 monorepo 根的正斜線路徑，與 spec-frozen --root＝monorepo 根 時的鍵逐字相同）
 $dg = @'
 import sys
 from pathlib import Path
@@ -643,10 +650,10 @@ for doc in sys.argv[3:]:
 '@
 $dgFile = Join-Path $tmp 'digest_docs.py'
 Write-Utf8 $dgFile $dg
-& $py -I -X utf8 $dgFile $vd $sdd 'CLAUDE.md' "$ver/AISDLC_SDD_INIT.md" "$ver/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md"
+& $py -B -I -X utf8 $dgFile $vd $root 'AISDLC_SDD/CLAUDE.md' "AISDLC_SDD/$ver/AISDLC_SDD_INIT.md" "AISDLC_SDD/$ver/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md" 'docs/01_requirements/ResearchToPRD_PRD.md' "AISDLC_SDD/$ver/docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md"
 ```
 
-**AT-970-5-E-1**（Unit，負控）Given 邊界函式（沿用 AT-970-5-1 的 `$allowed`、`$rootExempt` 與 `Get-BoundaryViolations`） When 餵入合成路徑 Then 越界者被回報（含清單外的根層文件、清單外的 `scripts/` 檔、根層 `.claude/`）；白名單、D-46 清單與 `docs/06_quality/` 內者不被回報。
+**AT-970-5-E-1**（Unit，負控）Given 邊界函式（沿用 AT-970-5-1 的 `$allowed`、`$rootExempt` 與 `Get-BoundaryViolations`） When 餵入合成路徑 Then 越界者被回報（含清單外的根層文件、清單外的 `scripts/` 檔、根層 `.claude/`，以及與清單內檔名近似的 `ResearchSOPtoPRD_Source_Spec.md.bak`——清單是逐字比對、不是前綴）；白名單、D-46 清單（含 `ResearchSOPtoPRD_Source_Spec.md`）與 `docs/06_quality/` 內者不被回報。
 
 ```powershell
 # AT-970-5-E-1
@@ -658,12 +665,13 @@ $okPaths = @(
     "AISDLC_SDD/$ver/docs/06_quality/RTM-x.md", "AISDLC_SDD/$ver/AISDLC_SDD_INIT.md", "AISDLC_SDD/$ver/docs_template/README.md",
     "AISDLC_SDD/$ver/agent/README.md", "AISDLC_SDD/$ver/guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md",
     'AISDLC_SDD/CLAUDE.md', 'AISDLC_SDD/scripts/framework_status_snapshot.py', 'AISDLC_SDD/FRAMEWORK_STATUS.md',
-    '.gitignore', '.github/workflows/agentconsole-ci.yml', 'docs/01_requirements/ResearchToPRD_PRD.md', 'docs/01_requirements/Agent_ConsoleUI_PRD.md',
+    '.gitignore', '.github/workflows/agentconsole-ci.yml', 'docs/01_requirements/ResearchToPRD_PRD.md', 'docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md',
+    'docs/01_requirements/Agent_ConsoleUI_PRD.md',
     'docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md', 'docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md',
     'AgentConsole/docs/02_architecture/ADR-003-ResearchToPRD.md')
 $c4  = @(Get-BoundaryViolations $okPaths).Count -eq 0
 $c5  = @(Get-BoundaryViolations @('.github/workflows/other.yml')).Count -eq 1
-$c6  = @(Get-BoundaryViolations @('docs/01_requirements/Other_PRD.md', 'ONBOARDING.md', 'docs/04_planning/ADR/ADR-XPLAT-099-other.md')).Count -eq 3
+$c6  = @(Get-BoundaryViolations @('docs/01_requirements/Other_PRD.md', 'ONBOARDING.md', 'docs/04_planning/ADR/ADR-XPLAT-099-other.md', 'docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md.bak')).Count -eq 4
 $c7  = @(Get-BoundaryViolations @('AISDLC_SDD/scripts/other.py')).Count -eq 1
 "transition_rules flagged=$c1; frozen baseline flagged=$c2; root tools flagged=$c3; root .claude flagged=$c3b; allowed and exempt not flagged=$c4; other workflow flagged=$c5; off-list root docs flagged=$c6; other script flagged=$c7"
 Show-Result 'AT-970-5-E-1' ($c1 -and $c2 -and $c3 -and $c3b -and $c4 -and $c5 -and $c6 -and $c7)
@@ -673,7 +681,7 @@ Show-Result 'AT-970-5-E-1' ($c1 -and $c2 -and $c3 -and $c3b -and $c4 -and $c5 -a
 
 ### 2.6 AC-970-6：文件內容對齊
 
-**AT-970-6-1**（Unit）Given 工作流、ADR 與兩份模板 When 抽出章節、決策編號與指定條文 Then 工作流章節 0～14 連號；ADR 決策恰 D1～D7，且各決策行含 PRD §9.5 的關鍵語；工作流表頭引用根層 PRD；ADR 引用 FR-R2P 與 AC-R2P；恢復後預算句（主控 D-60）同時住在工作流第 2.5 節與審查卡模板第 2.3 節；SE-PRD 模板 P0-7 列含四個預檢代碼（與根層 PRD §5.1.3 同名）；審查卡模板第 5.3 節寫明缺陷狀態的合法轉移（`REGRESSED`→`FIXED` 是 `REGRESSED` 的唯一出口、其餘一律拒；與 Console 資料庫的轉移矩陣一致）（上位：PRD §9.5「框架 ADR-001」列；AC-R2P-02-11）。
+**AT-970-6-1**（Unit）Given 工作流、ADR 與兩份模板 When 抽出章節、決策編號與指定條文 Then 工作流章節 0～14 連號；ADR 決策恰 D1～D7，且各決策行含 PRD §9.5 的關鍵語；工作流表頭引用根層 PRD；ADR 引用 FR-R2P 與 AC-R2P；恢復後預算句（主控 D-60）同時住在工作流第 2.5 節與審查卡模板第 2.3 節；SE-PRD 模板 P0-7 列的四個預檢代碼逐處計數（`CITES_MISSING` 1、`CITES_V1` 2、`CITES_UNANCHORED` 1、`CITES_CANDIDATE` 2，且每個都有「否則 `代碼`」定義子句；與根層 PRD §5.1.3 同名）；審查卡模板第 5.3 節寫明缺陷狀態的合法轉移（`REGRESSED`→`FIXED` 是 `REGRESSED` 的唯一出口、其餘一律拒；與 Console 資料庫的轉移矩陣一致）（上位：PRD §9.5「框架 ADR-001」列；AC-R2P-02-11）。
 
 ```powershell
 # AT-970-6-1
@@ -690,7 +698,9 @@ $wf25   = [regex]::Match($wf,   '(?s)\n### 2\.5 .*?(?=\n### 2\.6 )').Value
 $card23 = [regex]::Match($card, '(?s)\n### 2\.3 .*?(?=\n## 3\. )').Value
 $card53 = [regex]::Match($card, '(?s)\n### 5\.3 .*?(?=\n## 6\. )').Value
 $p07    = [regex]::Match($sepr, '(?m)^\| P0-7 \|.*$').Value
-$codes  = 'CITES_MISSING', 'CITES_V1', 'CITES_UNANCHORED', 'CITES_CANDIDATE'                                   # 與根層 PRD §5.1.3 同名
+$codeCnt = [ordered]@{ 'CITES_MISSING' = 1; 'CITES_V1' = 2; 'CITES_UNANCHORED' = 1; 'CITES_CANDIDATE' = 2 }   # 與根層 PRD §5.1.3 同名；P0-7 列內各代碼的出現次數＝1 次定義子句（「否則 `代碼`」）加 V1、CANDIDATE 各 1 次說明子句；逐處計數，改動任一處即紅
+$p07Ok = ($p07 -ne '')
+foreach ($c in $codeCnt.Keys) { if (([regex]::Matches($p07, [regex]::Escape($c))).Count -ne $codeCnt[$c] -or -not $p07.Contains('否則 `' + $c + '`')) { $p07Ok = $false } }
 $ck = [ordered]@{
     '工作流章節 0..14 連號'          = (($chap -join ',') -eq ((0..14) -join ','))
     'ADR 決策恰 D1..D7'              = (($dec -join ',') -eq '1,2,3,4,5,6,7')
@@ -699,7 +709,7 @@ $ck = [ordered]@{
     'ADR 引用 FR-R2P 與 AC-R2P'      = ($adr -match 'FR-R2P-\d\d' -and $adr -match 'AC-R2P-\d\d-\d')
     '工作流第 2.5 節含恢復後預算句（D-60）'   = $wf25.Contains($d60)
     '審查卡模板第 2.3 節含恢復後預算句（D-60）' = $card23.Contains($d60)
-    'SE-PRD 模板 P0-7 列含四個預檢代碼'       = ($p07 -ne '' -and @($codes | Where-Object { -not $p07.Contains($_) }).Count -eq 0)
+    'SE-PRD 模板 P0-7 列：四個預檢代碼逐處計數且各有定義子句' = $p07Ok
     '審查卡模板第 5.3 節含缺陷狀態轉移矩陣'    = ($card53.Contains('`REGRESSED`→`FIXED`') -and $card53.Contains('其餘一律拒'))
 }
 $ck.GetEnumerator() | ForEach-Object { '{0} {1}' -f $(if ($_.Value) { 'PASS' } else { 'FAIL' }), $_.Key }
@@ -828,7 +838,50 @@ $absent
 Show-Result 'AT-970-6-5' ($stale.Count -eq 0 -and $absent.Count -eq 0 -and $frN -ge 8 -and $acN -ge 10)
 ```
 
-預期輸出：`stale old names: 0`、`cited ids: <N> (FR <≥8>, AC <≥10>); absent in PRD: 0`（暫存樹對 SD-A 交付的根層 PRD 實跑：`cited ids: 42 (FR 11, AC 25); absent in PRD: 0`；PRD 與引用會隨修訂而變，判準是 `absent in PRD: 0`）、`RESULT AT-970-6-5 PASS`。（`$adr`、`$wf` 沿用 AT-970-6-1。）
+預期輸出：`stale old names: 0`、`cited ids: <N> (FR <≥8>, AC <≥10>); absent in PRD: 0`（對 repo 現檔與根層 PRD 實跑：`cited ids: 44 (FR 11, AC 27); absent in PRD: 0`；PRD 與引用會隨修訂而變，判準是 `absent in PRD: 0`）、`RESULT AT-970-6-5 PASS`。（`$adr`、`$wf` 沿用 AT-970-6-1。）
+
+**AT-970-6-6**（Unit）Given 審查卡模板的 `review_params`、工作流、ADR-001、BRIDGE §9.2、證據矩陣模板與引擎常數 `RETRY_LIMITS` When 對散文條文逐項對拍 Then 九項皆成立：(1) 審查卡 §2.2 與工作流 §6.3 的 `W100` 公式係數＝`review_params.weights` 各乘 100；(2) 兩處的 `W100 ≥ N`／`-ge N` 之 N＝100×`review_params.threshold`（8500）；(3) 工作流與審查卡裡所有「第 N 次…ESCALATION」的復述（工作流 §2.3、§2.6 表列、第 7 章、第 14 章步驟 6，審查卡 §2.3、§5.1 末句），逐處抽出的 N＝引擎 `RETRY_LIMITS["SCG_VALIDATION"]`；(4) ADR-001 的 D7 行含「審查預算採 FSM 預算」；(5) 工作流兩處權重百分比表列（§2 角色表、§6.2 維度表）＝`review_params.weights`；(6) BRIDGE §9.2 `transition` 列含「外環鍵只准前五值」，且該列 `--to` 集合的前五值恰為 `SCENARIO_DETECT`、`AGENT_LOAD`、`SPEC_DRAFTING`、`SCG_VALIDATION`、`SPEC_REGRESSION_CHECK`；(7) 工作流第 8 章含「產品內的 Gate 0 永遠要求真人核准」；(8) 證據矩陣模板含「`V0`（只憑記憶）**不得列入**」；(9) 工作流、審查卡與 ADR-001 裡所有「最多 N 輪」復述（工作流 §1 流程圖、§2.3 標題、§2.3 結論句、§6.3 末段，審查卡 §2.3，ADR-001 預算語意列，共六處；§2.3 的來源規格對照句「＝最多 4 輪」以前置「＝」排除）逐處抽出的 N＝引擎 `RETRY_LIMITS["SCG_VALIDATION"]`（SCG-4 二審 N-1，勘誤 10）（上位：PRD §5.1.3、§5.1.4；AC-R2P-08-1、AC-R2P-10-1；D-14、D-42）。這些是 JSON 契約檢核器（AT-970-3-x）管不到的散文復述——判定公式只住審查卡模板 §2.2（D-42），復述處漂移就與 PRD 脫鉤（SCG-4 一審 F-04）。
+
+```powershell
+# AT-970-6-6
+$wf   = Read-Utf8 (Join-Path $vd 'workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md')
+$adr  = Read-Utf8 (Join-Path $vd 'docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md')
+$brg  = Read-Utf8 (Join-Path $vd 'workflow/sdd-autoclaude-bridge/SDD_AUTOCLAUDE_BRIDGE.md')
+$card = Read-Utf8 (Join-Path $vd 'docs_template/sdd/requirements/ADVERSARIAL-REVIEW-CARD-TEMPLATE.md')
+$evid = Read-Utf8 (Join-Path $vd 'docs_template/sdd/requirements/EVIDENCE-MATRIX-TEMPLATE.md')
+$trl  = Read-Utf8 (Join-Path $vd 'tools/fsm_runtime/transition_rules.py')
+$f3   = '`' * 3                                              # 三個反引號：不直接寫進本區塊（會截斷 Markdown 圍欄）
+$rp   = [regex]::Match($card, ('(?s)<!-- r2p:contract=review_params -->\s*' + $f3 + 'json\s*(.*?)\s*' + $f3)).Groups[1].Value | ConvertFrom-Json
+$pct  = [ordered]@{}                                         # 權重百分比（整數）＝review_params.weights 各乘 100
+foreach ($d in 'ARCHITECTURE', 'PRODUCT', 'QA', 'SECURITY') { $pct[$d] = [int][Math]::Round($rp.weights.$d * 100) }
+$thr100 = [int]$rp.threshold * 100
+$limit  = [regex]::Match($trl, '"SCG_VALIDATION":\s*(\d+)').Groups[1].Value
+$fx     = "$($pct['ARCHITECTURE'])·A \+ $($pct['PRODUCT'])·P \+ $($pct['QA'])·Q \+ $($pct['SECURITY'])·S"
+$badN   = @(foreach ($t in @($card, $wf)) { foreach ($m in [regex]::Matches($t, '(?:W100 ≥ |-ge )(\d{4})\b')) { if ([int]$m.Groups[1].Value -ne $thr100) { $m.Value } } })
+$nEsc   = @(foreach ($t in @($wf, $card)) { foreach ($m in [regex]::Matches($t, '第 (\d+) 次[^。；\n]{0,24}?ESCALATION')) { $m.Groups[1].Value } })
+$nMax   = @(foreach ($t in @($wf, $card, $adr)) { foreach ($m in [regex]::Matches($t, '(?<!＝)最多 (\d+) 輪')) { $m.Groups[1].Value } })   # 六處：工作流 §1 圖、§2.3 標題、§2.3 結論句、§6.3 末段，卡 §2.3，ADR-001 預算語意列；§2.3 對照句「＝最多 4 輪」以前置「＝」排除（SCG-4 二審 N-1）
+$want   = @(foreach ($d in $pct.Keys) { $d + '=' + $pct[$d] }) | Sort-Object
+$pA     = @([regex]::Matches($wf, '（(ARCHITECTURE|PRODUCT|QA|SECURITY)，(?:權重 )?(\d+)%）') | ForEach-Object { $_.Groups[1].Value + '=' + $_.Groups[2].Value }) | Sort-Object
+$pB     = @([regex]::Matches($wf, '(?m)^\| (ARCHITECTURE|PRODUCT|QA|SECURITY) \| (\d+)% \|') | ForEach-Object { $_.Groups[1].Value + '=' + $_.Groups[2].Value }) | Sort-Object
+$d7     = [regex]::Match($adr, '(?m)^\*\*D7\u3000.*$').Value
+$to     = [regex]::Match($brg, '`--to` 限 \{([^}]+)\}；外環鍵只准前五值')
+$first5 = if ($to.Success) { (@($to.Groups[1].Value -split ',\s*') | Select-Object -First 5) -join ',' } else { '' }
+$ck = [ordered]@{
+    '卡 2.2 與工作流 6.3 的 W100 公式係數＝review_params.weights×100'          = ($null -ne $rp -and [regex]::IsMatch($card, ('W100\s*=\s*' + $fx)) -and [regex]::IsMatch($wf, ('W100\s*=\s*' + $fx)))
+    '卡與工作流的 W100 門檻 N＝100×review_params.threshold'                    = ($badN.Count -eq 0 -and [regex]::IsMatch($card, 'W100 ≥ \d{4}') -and [regex]::IsMatch($wf, 'W100 ≥ \d{4}'))
+    '工作流與卡所有「第 N 次…ESCALATION」復述的 N＝引擎 RETRY_LIMITS[SCG_VALIDATION]' = ($limit -ne '' -and $nEsc.Count -ge 2 -and @($nEsc | Where-Object { $_ -ne $limit }).Count -eq 0 -and $wf.Contains('第 ' + $limit + ' 次 FAIL 就是 ESCALATION') -and $card.Contains('第 ' + $limit + ' 次 `gate FAIL` 即 ESCALATION'))
+    'ADR-001 D7 行含「審查預算採 FSM 預算」'                                     = ($d7.Contains('評分卡是 SCG-0 的評估器') -and $d7.Contains('審查預算採 FSM 預算'))
+    '工作流兩處權重百分比表列＝review_params.weights'                           = ($want.Count -eq 4 -and ($pA -join ',') -eq ($want -join ',') -and ($pB -join ',') -eq ($want -join ','))
+    'BRIDGE 9.2 外環鍵只准前五值，且前五值為外環集合'                            = ($first5 -eq 'SCENARIO_DETECT,AGENT_LOAD,SPEC_DRAFTING,SCG_VALIDATION,SPEC_REGRESSION_CHECK')
+    '工作流第 8 章：產品內的 Gate 0 永遠要求真人核准'                            = $wf.Contains('產品內的 Gate 0 永遠要求真人核准')
+    '證據矩陣模板：V0（只憑記憶）不得列入'                                       = $evid.Contains('`V0`（只憑記憶）**不得列入**')
+    '工作流／卡／ADR-001 所有「最多 N 輪」復述的 N＝引擎 RETRY_LIMITS[SCG_VALIDATION]（六處）' = ($limit -ne '' -and $nMax.Count -ge 6 -and @($nMax | Where-Object { $_ -ne $limit }).Count -eq 0)
+}
+$ck.GetEnumerator() | ForEach-Object { '{0} {1}' -f $(if ($_.Value) { 'PASS' } else { 'FAIL' }), $_.Key }
+Show-Result 'AT-970-6-6' (@($ck.Values | Where-Object { -not $_ }).Count -eq 0)
+```
+
+預期輸出：九行 `PASS …`、`RESULT AT-970-6-6 PASS`。
 
 **AT-970-6-E-1**（Unit，負控）Given AT-970-6-3 的結構函式 When 餵入四種變異的 SE-PRD（重複錨點、附錄 R 改名、第 1 章標題被改寫、附錄 R 內混入錨點） Then 每種變異都回報至少一個問題（證明 AT-970-6-3 的 0 問題不是函式失明）。
 
@@ -845,13 +898,13 @@ $rows | ForEach-Object { '{0}: mutated={1} problems={2}' -f $_.Case, $_.Mutated,
 Show-Result 'AT-970-6-E-1' (@($rows | Where-Object { -not ($_.Mutated -and $_.Problems -ge 1) }).Count -eq 0)
 ```
 
-預期輸出：四行 `<變異>: mutated=True problems=<≥1>`（暫存樹實跑依序為 2、1、1、3）、`RESULT AT-970-6-E-1 PASS`。
+預期輸出：四行 `<變異>: mutated=True problems=<≥1>`（對 repo 現檔實跑依序為 2、1、1、3）、`RESULT AT-970-6-E-1 PASS`。
 
 ### 2.7 AC-970-7：FSM 演練（暫存狀態目錄）
 
-> **誠實標示（依任務書約束）**：SD-B 未跑 FSM CLI 寫入動詞；標 🔶 的 AT 的預期值依讀碼推得，座標：`tools/fsm_runtime/fsm_runtime.py`（`record_gate_result` :526-645、`_cli`／`_cli_structured` :3603-3740、`_is_blocked_spec_write` :339-352）、`state_loader.py`（`record_spec_frozen` :290-308、`record_spec_refreeze` :317-352）、`transition_rules.py`（`_HAPPY_PATH`〔HUMAN_PENDING 的出邊在 :28〕、`assert_transition` :300-302、`RETRY_LIMITS` :267-275、`next_state_on_gate_fail` :318-337）；D-50 兩個負控另依 `fsm_runtime.py:535-544`（`gate PASS` 路徑，沒有 try／except）與 `state_loader.py:271-274`（`reset_retry` 只改記憶體）；D-60 的恢復後預算（AT-970-7-6）另依 `fsm_runtime.py:1194-1218`（`resume_from_escalation` 不動重試計數）與 `state_loader.py:237-248`（`increment_retry` 見計數已達上限時夾在上限並標 tamper）。**首次執行與預期不符時，先查預期值是否讀錯（走勘誤），再查實作。**
+> **預期值與實跑**：標 🔶 的 AT 的預期值原依讀碼推得，座標：`tools/fsm_runtime/fsm_runtime.py`（`record_gate_result` :526-645、`_cli`／`_cli_structured` :3603-3740、`_is_blocked_spec_write` :339-352）、`state_loader.py`（`record_spec_frozen` :290-308、`record_spec_refreeze` :317-352）、`transition_rules.py`（`_HAPPY_PATH`〔HUMAN_PENDING 的出邊在 :28〕、`assert_transition` :300-302、`RETRY_LIMITS` :267-275、`next_state_on_gate_fail` :318-337）；D-50 兩個負控另依 `fsm_runtime.py:535-544`（`gate PASS` 路徑，沒有 try／except）與 `state_loader.py:271-274`（`reset_retry` 只改記憶體）；D-60 的恢復後預算（AT-970-7-6）另依 `fsm_runtime.py:1194-1218`（`resume_from_escalation` 不動重試計數）與 `state_loader.py:237-248`（`increment_retry` 見計數已達上限時夾在上限並標 tamper）。SCG-4 一審（2026-11-02）已於 repo 實跑八個 🔶 AT，全數 PASS，唯 AT-970-7-1 預期輸出的鍵排序敘述有誤（勘誤 5）。**之後再跑與預期不符時，先查預期值是否讀錯（走勘誤），再查實作。**
 >
-> 演練只寫 `$tmp` 之下的暫存狀態目錄（`SDD_STATE_DIR`），兩個遙測旗標顯式 0（BRIDGE §8.3 第 5 點）；每次都帶 `--project` 顯式鍵。**會暫時改動目前視窗的 `SDD_STATE_DIR` 等環境變數**，AT-970-7-0 先存、AT-970-7-Z 還原——若是在 hooks-ON 的本鍵視窗跑，務必做到 AT-970-7-Z，否則後續指令會指到暫存目錄。
+> 演練只寫 `$tmp` 之下：暫存狀態目錄（`SDD_STATE_DIR`）與 **AISDLC_SDD 的最小複本**（`$fsmVd`＝`$tmp/AISDLC_SDD/<版本目錄>`；runtime 以模組檔位置推得 `REPO_ROOT` 與共用腳本 `../scripts/component_sanitizer.py`，所以 `scripts/` 一併複製並保持相對位置）。FSM runtime 的報告目錄（例：`snapshot.py` 的 `SNAPSHOT_DIR`＝`build/reports/abort/`）由模組檔位置推得、不隨 `SDD_STATE_DIR`，而 `ABORT-RAW-<日期>.yaml` 是讀改寫的累加檔——直接從 repo 跑，自動恢復被拒時會在 repo 留下報告、且同日已有真實事件時無法精準清除（SCG-4 一審 F-03），所以演練的 CLI 一律從複本跑，repo 的 `build/reports/` 零寫入。兩個遙測旗標顯式 0（BRIDGE §8.3 第 5 點）；每次都帶 `--project` 顯式鍵。**會暫時改動目前視窗的 `SDD_STATE_DIR` 等環境變數**，AT-970-7-0 先存、AT-970-7-Z 還原——若是在 hooks-ON 的本鍵視窗跑，務必做到 AT-970-7-Z，否則後續指令會指到暫存目錄。
 
 **AT-970-7-5**（Unit）Given `fsm_runtime._is_blocked_spec_write`（Rule 9.6 絕對禁令 3 的純函式；唯讀、不寫任何狀態） When 餵入研究工作區路徑與規格目錄路徑 Then 研究工作區路徑（`00_research`、`01_specs`、`02_governance`、`03_execution` 目錄名不含 `docs/01～03` 子字串）在任何狀態都不被擋；規格目錄在非草擬態被擋、草擬態放行（上位：PRD §9.0 D-28 的工作區位置推論；工作流第 10.1 節）。
 
@@ -876,7 +929,7 @@ sys.exit(0 if all(g == w for _, g, w in cases) else 1)
 '@
 $script = Join-Path $tmp 'at970_7_5.py'
 Write-Utf8 $script $code
-$o = & $py -I -X utf8 $script $vd
+$o = & $py -B -I -X utf8 $script $vd
 $rc = $LASTEXITCODE
 $o
 Show-Result 'AT-970-7-5' ($rc -eq 0) "rc=$rc"
@@ -887,15 +940,20 @@ Show-Result 'AT-970-7-5' ($rc -eq 0) "rc=$rc"
 **AT-970-7-0（共用，🔶 各 AT 之前先貼）**
 
 ```powershell
-# AT-970-7-0 共用（FSM 暫存狀態目錄）
+# AT-970-7-0 共用（FSM 暫存狀態目錄與版本目錄複本）
 $saved = @{}
 foreach ($n in 'SDD_STATE_DIR', 'SDD_ENABLE_AUTO_RECOVERY', 'SDD_ENABLE_RULE_FIRE_TELEMETRY', 'SDD_ENABLE_RULE_CATCH_TELEMETRY') { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
 $fsmDir = Join-Path $tmp 'fsm'
 New-Item -ItemType Directory -Force -Path $fsmDir | Out-Null
+$fsmSdd = Join-Path $tmp 'AISDLC_SDD'                          # AISDLC_SDD 的最小複本：runtime 以模組檔位置推得 REPO_ROOT（版本目錄）與共用腳本 ../scripts/component_sanitizer.py，兩者必須保持相對位置
+New-Item -ItemType Directory -Force -Path $fsmSdd | Out-Null
+$fsmVd = Join-Path $fsmSdd $ver                                # FSM 的報告目錄（build/reports/abort/ 等）不隨 SDD_STATE_DIR；演練一律從複本跑，repo 零寫入（SCG-4 一審 F-03）
+Copy-Item -LiteralPath $vd -Destination $fsmVd -Recurse
+Copy-Item -LiteralPath (Join-Path $sdd 'scripts') -Destination (Join-Path $fsmSdd 'scripts') -Recurse
 $env:SDD_STATE_DIR = $fsmDir
 $env:SDD_ENABLE_RULE_FIRE_TELEMETRY = '0'; $env:SDD_ENABLE_RULE_CATCH_TELEMETRY = '0'
 function Invoke-Sdd([string[]]$A) {
-    Push-Location $vd -ErrorAction Stop
+    Push-Location $fsmVd -ErrorAction Stop
     try { $out = & $py -W ignore::RuntimeWarning -m tools.fsm_runtime.fsm_runtime @A; $rc = $LASTEXITCODE } finally { Pop-Location }
     [pscustomobject]@{ Out = $out; Rc = $rc }
 }
@@ -919,9 +977,10 @@ function New-DrillWorkspace([string]$Name) {
 }
 $gate0Docs = '01_specs/PRD-v1.0.0.md', '00_research/evidence_matrix.md', '00_research/issue_scope.json', '01_specs/adr_draft.md'
 "state dir = $fsmDir"
+"version dir copy = $fsmVd"
 ```
 
-預期輸出：`state dir = <暫存目錄>/fsm`，無錯誤。
+預期輸出：`state dir = <暫存目錄>/fsm`、`version dir copy = <暫存目錄>/AISDLC_SDD/AISDLC_SDD_v<LATEST>`，無錯誤。
 
 **AT-970-7-1**（Integration，🔶）Given 外環鍵走到 SCG_VALIDATION When `gate PASS`、再以四份文件跑 `spec-frozen --stage Gate-0 --digest` Then `gate` 回傳 `next_state=HUMAN_PENDING`；`spec-frozen` rc 0、`current_state=SPEC_FROZEN`、`stage=Gate-0`、`spec_doc_digests` 的鍵恰為那四份（無 TCS）（上位：AC-R2P-10-1）。
 
@@ -942,7 +1001,7 @@ $keys = (@($zj.spec_doc_digests.PSObject.Properties.Name | Sort-Object) -join ',
 Show-Result 'AT-970-7-1' ($g.next_state -eq 'HUMAN_PENDING' -and $z.Rc -eq 0 -and $zj.ok -eq $true -and $zj.current_state -eq 'SPEC_FROZEN' -and $zj.stage -eq 'Gate-0' -and $keys -eq ((@($gate0Docs | Sort-Object)) -join ','))
 ```
 
-預期輸出：`gate PASS -> next_state=HUMAN_PENDING`、`spec-frozen rc=0 current_state=SPEC_FROZEN stage=Gate-0`、`digest keys: 00_research/evidence_matrix.md,00_research/issue_scope.json,01_specs/PRD-v1.0.0.md,01_specs/adr_draft.md`、`RESULT AT-970-7-1 PASS`。
+預期輸出：`gate PASS -> next_state=HUMAN_PENDING`、`spec-frozen rc=0 current_state=SPEC_FROZEN stage=Gate-0`、`digest keys: 00_research/evidence_matrix.md,00_research/issue_scope.json,01_specs/adr_draft.md,01_specs/PRD-v1.0.0.md`（`Sort-Object` 不分大小寫，`adr_draft` 排在 `PRD-v1.0.0` 之前；勘誤 5）、`RESULT AT-970-7-1 PASS`。
 
 **AT-970-7-2**（Integration，🔶）Given 外環鍵環境 `SDD_ENABLE_AUTO_RECOVERY=0` When 連續 3 次 `gate SCG_VALIDATION FAIL`（每輪之間 `transition → SCG_VALIDATION`） Then 第 1、2 次 `next_state=SPEC_DRAFTING`；第 3 次 `retry_count=3`、`next_state=ESCALATION`、`escalated=True`、回傳**沒有** `auto_recovery`；磁碟狀態為 ESCALATION——即「最多 3 輪審查，第 3 次 FAIL 即 ESCALATION」（上位：AC-R2P-08-3、AC-R2P-08-10；D-24、D-26）。
 
@@ -1117,7 +1176,7 @@ Show-Result 'AT-970-7-4' ($s1.Rc -eq 0 -and $ne.Rc -eq 0 -and $nx.Rc -eq 0 -and 
 
 預期輸出：`stage-1 rc=0; negotiate rc=0/0; state before SCR=IMPLEMENTATION`、`SPEC_AUDIT rc=0; spec-refreeze rc=0; PR_REVIEW rc=0; gate FAIL next_state=IMPLEMENTATION`、`RESULT AT-970-7-4 PASS`。
 
-**AT-970-7-Z（收尾）**還原環境並刪暫存目錄（跑過任何 🔶 AT 或 AT-970-0 後必做）：
+**AT-970-7-Z（收尾）**還原環境並刪暫存目錄（含版本目錄複本；跑過任何 🔶 AT 或 AT-970-0 後必做）：
 
 ```powershell
 # AT-970-7-Z 收尾
@@ -1132,7 +1191,7 @@ Remove-Item -LiteralPath $tmp -Recurse -Force
 
 ## 3. AT 完整清單
 
-AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源，避免兩處漂移）；各 AT 的指令與預期輸出在 §2。測試類型分佈：Unit 12、Integration 18、Contract 3、E2E 1（`AT-970-4-4`）。
+AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源，避免兩處漂移）；各 AT 的指令與預期輸出在 §2。測試類型分佈：Unit 13、Integration 18、Contract 3、E2E 1（`AT-970-4-4`）。
 
 ---
 
@@ -1146,7 +1205,7 @@ AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源
 | 新鮮度失明 | AT-970-2-E-1 | 磁碟多一支 agent 而未重生，`--check` 必須紅 | 暫存迷你樹＋注入一支 agent | `stale rc=1` |
 | 缺標記 | AT-970-3-E-1 | 移除 `review_params` 契約標記 | 暫存複本 | 檢核器 rc 1 並指名該標記 |
 | 鬼影引用 | AT-970-4-E-1 | agent 引用不存在的模板 | 暫存版本樹 `v0.99` | lint rc 1＋`BROKEN`；改回真檔 rc 0 |
-| 越界 | AT-970-5-E-1 | 邊界函式對合成越界路徑回報違規 | 合成路徑八組 | 越界者被回報（含清單外的根層文件與 `scripts/` 檔、根層 `.claude/`），白名單、D-46 清單與 `06_quality` 不被回報 |
+| 越界 | AT-970-5-E-1 | 邊界函式對合成越界路徑回報違規 | 合成路徑八組（含近似檔名 `….md.bak`） | 越界者被回報（含清單外的根層文件與 `scripts/` 檔、根層 `.claude/`），白名單、D-46 清單與 `06_quality` 不被回報 |
 | 結構變異 | AT-970-6-E-1 | SE-PRD 四種變異（重複錨點、附錄改名、標題改寫、附錄混入錨點） | 變異後文字 | 每種 ≥1 個問題 |
 | 環境旗標 | AT-970-7-E-1 | 自動恢復預設開啟時第 3 次 FAIL 的回傳含 `auto_recovery` | 同序列、未設旗標 | `auto_recovery_key=True` |
 | 人工退回守則 | AT-970-7-E-2 | 現態 HUMAN_PENDING 時人工退回（`gate FAIL`）態不動、計數加 1、記 `gate_fail_blocked`（D-50） | 同一暫存鍵連續兩次人工 `gate FAIL` | 兩次皆 `next_state=HUMAN_PENDING`，計數 1 與 2 |
@@ -1159,14 +1218,14 @@ AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源
 
 | 資料項目 | 類型 | 說明 | 來源 |
 |---------|------|------|------|
-| 新增檔清單 `$new9`、被改檔清單 `$edited12` | 靜態清單 | 9＋12 個，路徑相對版本目錄；白名單另含 `AISDLC_SDD/CLAUDE.md`、`AISDLC_SDD/scripts/framework_status_snapshot.py`、`AISDLC_SDD/FRAMEWORK_STATUS.md` 共 24 條；根層連動例外清單 `$rootExempt`（D-46，7 條）見 AT-970-5-1 | §2.0 前置、AT-970-5-1 |
+| 新增檔清單 `$new9`、被改檔清單 `$edited12` | 靜態清單 | 9＋12 個，路徑相對版本目錄；白名單另含 `AISDLC_SDD/CLAUDE.md`、`AISDLC_SDD/scripts/framework_status_snapshot.py`、`AISDLC_SDD/FRAMEWORK_STATUS.md` 共 24 條；根層連動例外清單 `$rootExempt`（D-46，8 條）見 AT-970-5-1 | §2.0 前置、AT-970-5-1 |
 | 契約區塊與有效範例 | 靜態 Fixture | 四份模板內 9 個 `<!-- r2p:contract=… -->` JSON 區塊（`issue_scope`、`evidence_items`、`axis_registry`、`risk_tag_registry`、`review_params`、`rubric_registry`、`review_dimension`、`review_dimension_qa`、`review_card`） | `docs_template/sdd/requirements/*-TEMPLATE.md` |
 | 暫存迷你樹（新鮮度負控） | 動態生成 | 兩個版本目錄各一支 core agent 與一份 README | AT-970-2-E-1 |
 | 暫存版本樹 `v0.99`（鬼影引用負控） | 動態生成 | 一份真模板、一支引用它（或引用不存在檔）的 agent | AT-970-4-E-1 |
 | 契約模板暫存複本（缺標記負控） | 動態生成 | 複製 `docs_template/sdd/requirements/*-TEMPLATE.md` 後移除一個標記 | AT-970-3-E-1 |
 | SE-PRD 變異文字 | 動態生成 | 對真模板做四種字串替換 | AT-970-6-E-1 |
-| FSM 暫存狀態目錄與研究工作區 | 動態生成 | `$tmp/fsm`（`SDD_STATE_DIR`）、`$tmp/ws-a`／`ws-d`（Gate 0 四份文件）、`$tmp/ws-e`（內環 PRD 副本） | AT-970-7-0～7-4、7-6、7-E-1～7-E-3 |
-| 上位檔摘要 | 靜態值＋現算 | 三個摘要見〈增量追溯表〉；重算指令見 AT-970-5-3 | HEAD `01d9be6e`／Stage-1 CLI |
+| FSM 暫存狀態目錄與研究工作區 | 動態生成 | `$tmp/fsm`（`SDD_STATE_DIR`）、`$tmp/AISDLC_SDD`（版本目錄與 `scripts/` 的複本）、`$tmp/ws-a`／`ws-d`（Gate 0 四份文件）、`$tmp/ws-e`（內環 PRD 副本） | AT-970-7-0～7-4、7-6、7-E-1～7-E-3 |
+| 上位檔摘要 | 靜態值＋現算 | 五個摘要見〈增量追溯表〉；重算指令見 AT-970-5-3 | repo 工作樹現檔（`digest_doc`）／`spec-refreeze` 重記 |
 | 根層 PRD | 外部文件 | AT-970-6-5 讀 `docs/01_requirements/ResearchToPRD_PRD.md` 核對上位編號 | 根層（SD-A 交付；主控落檔） |
 | 機密 | — | 本鍵不涉任何機密；演練的 approver 是固定字串 `at970-human` | — |
 
@@ -1179,7 +1238,7 @@ AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源
 | EPIC-970 → F-970 | □ 已映射（FRD-lite 檔頭） |
 | F-970 → US-970 | □ 已映射 |
 | US-970 → AC-970-1～7 | □ 已映射（FRD-lite 表） |
-| AC-970-1～7 → AT-970-… | □ 已映射（§1，本文件；34 個 AT） |
+| AC-970-1～7 → AT-970-… | □ 已映射（§1，本文件；35 個 AT） |
 | AT → 本機 CI 閘門 | □ 已整合（AT-970-4-4 `ci-gate.ps1`） |
 | AC → 上位 FR-R2P／AC-R2P | □ 已映射（〈上位需求對照〉；AT-970-6-5 機械核對編號存在） |
 
@@ -1194,20 +1253,20 @@ AT 的類型、描述與狀態只在 §1 映射表維護一份（單一真相源
 | V3 | 人 | 以 SE-PRD 模板填一份玩具 PRD，逐條核對模板第 0.2 節 P0-1～P0-9（含雙重預檢兩項） | 模板可填、預檢條文無歧義 |
 | V4 | Console 側（P0 實作期） | `AgentConsole/engine-bridge/tests/test_research_schema_parity.py` 以 `<!-- r2p:contract=… -->` 標記抽取本檔所屬四份模板的範例並對拍 Bridge 側 schema（`SDD_ROOT` 在才跑，否則標 TOOL-ABSENCE） | 框架側不阻擋、不替代；以 Console 側報告為準 |
 
-**收尾（SPEC_AUDIT 或 RELEASE_READY 態）**：本鍵修改了 Stage-1 採納的三份上位文件，所以實作與審查完成後，以 `spec-refreeze` 重記摘要（一次 `--doc` 列出被改的三檔（＝〈增量追溯表〉U1～U3：`CLAUDE.md`、`AISDLC_SDD_INIT.md`、`SDD_SPEC_FIRST_GATE.md`），`--root` 同 Stage-1，`--approver` 填人，`--reason` 寫「ResearchSOPtoPRD 框架層增補：登記與條文，不改既有條款語意」）；重記只追加條目、不洗掉任何重試預算。其後 `FRAMEWORK_STATUS.md` 重生仍是最後一步。
+**收尾（SPEC_AUDIT 或 RELEASE_READY 態）**：Stage-1 於框架側改動落入工作樹**之後**才採納，五份採納文件（`AISDLC_SDD/CLAUDE.md`、`AISDLC_SDD_INIT.md`、`SDD_SPEC_FIRST_GATE.md`、根層 PRD、ADR-001；〈增量追溯表〉U1～U5）記的是改動後的摘要，所以本鍵自己的改動沒有待重記項；其後的再改（SCG-4 審查所致的 PRD 訂正、本檔勘誤）以 `spec-refreeze` 重記：一次 `--doc` 列出被改的文件（含本檔；`--root`＝monorepo 根、路徑為相對根的正斜線路徑，與 Stage-1 同形），`--approver` 填人（或依凍結常態規則由主控代執行並引審查報告座標），`--reason` 寫訂正內容；重記只追加條目、不洗掉任何重試預算，消費端取全部條目的聯集、同鍵後者勝出（`state_loader.py` 的 `record_spec_refreeze`）。其後 `FRAMEWORK_STATUS.md` 重生仍是最後一步。
 
 ---
 
 ## 7. ⚖ 預設值與已知邊界（交人在 Stage-2 HUMAN_PENDING 確認；SCG-4 審查者亦須獨立檢視）
 
-1. **⚖1 增量條款的適用性**：**主控 D-48(1) 裁決：適用增量條款；收尾 spec-refreeze**（屬流程解釋，在凍結常態規則射程內由主控代決；掌舵者可隨時以 T1 推翻，推翻時改走完整 SCG-1～3 清單）。理由：改動限於註冊清單、條文增補與依磁碟現值更新的計數句，**只增不減**，不改既有條款的語意；〈閘門通過標準〉的「改動已凍結上位文件本身者不適用」字面上對本鍵有爭議，所以裁決附機械依據（暫存樹以 `git diff --numstat` 實測，新增／移除行）：`AISDLC_SDD_INIT.md` +24／−4、`workflow/README.md` +10／−2、`agent/README.md` +15／−2、`agent/specialized/README.md` +9／−1、`SDD_SPEC_FIRST_GATE.md` +6／−4、`SDD_AUTOCLAUDE_BRIDGE.md` +50／−1、greenfield +2／−0、brownfield +2／−0、`docs_template/README.md` +15／−5、`PROJECT_DOCUMENTATION_STANDARDS.md` +1／−1、`EVOLUTION_LOG.md` +15／−0、`CHANGELOG.md` +23／−1、`AISDLC_SDD/CLAUDE.md` +4／−1（合計 +176／−22）；被移除的 22 行全是就地延伸的計數句、日期行、註記句，或表格列內多寫一個儲存格；`agent/README.md` 被取代的兩個計數句原文逐字保留於同檔的訂正引言（訂正協議；AT-970-2-1 驗）（重現指令見 `FRAMEWORK_VERIFY.md` 步驟 9b）。**收尾重凍的 `--doc`**＝Stage-1 採納的三份上位文件（`AISDLC_SDD/CLAUDE.md`、`AISDLC_SDD_INIT.md`、`SDD_SPEC_FIRST_GATE.md`；〈增量追溯表〉U1～U3）；`SDD_AUTOCLAUDE_BRIDGE.md` 不在 `sub=sdd` 的採納集合（BRIDGE §8.4），其改動同樣只增不減。反向症狀：SCG-0～3 審查發現增補改動了既有條文的語意 ⇒ 改走完整 SCG-1～3 清單（本鍵的 ADR-001 已能滿足 SCG-2 的 ADR 項，SRD、C4、OpenAPI 無對應物，需另行說明）。
+1. **⚖1 增量條款的適用性**：**主控 D-48(1) 裁決：適用增量條款，以 `spec-refreeze` 重記摘要**（屬流程解釋，在凍結常態規則射程內由主控代決；掌舵者可隨時以 T1 推翻，推翻時改走完整 SCG-1～3 清單）。理由：改動限於註冊清單、條文增補與依磁碟現值更新的計數句，**只增不減**，不改既有條款的語意；〈閘門通過標準〉的「改動已凍結上位文件本身者不適用」字面上對本鍵有爭議，所以裁決附機械依據。**重現指令**（在 repo 內可跑；起點 `01d9be6e`、落檔 `25c66981`）：`git -c core.quotepath=false diff --numstat --diff-filter=M 01d9be6e 25c66981 -- AISDLC_SDD ':(exclude)AISDLC_SDD/FRAMEWORK_STATUS.md' ':(exclude)AISDLC_SDD/scripts'`（13 個被改檔；等價於逐一列出路徑：`$edited12` 各加 `AISDLC_SDD/<版本目錄>/` 前綴，再加 `AISDLC_SDD/CLAUDE.md`）；逐檔新增／移除行：`AISDLC_SDD_INIT.md` +24／−4、`workflow/README.md` +10／−2、`agent/README.md` +15／−2、`agent/specialized/README.md` +9／−1、`SDD_SPEC_FIRST_GATE.md` +6／−4、`SDD_AUTOCLAUDE_BRIDGE.md` +50／−1、greenfield +2／−0、brownfield +2／−0、`docs_template/README.md` +15／−5、`PROJECT_DOCUMENTATION_STANDARDS.md` +1／−1、`EVOLUTION_LOG.md` +15／−0、`CHANGELOG.md` +23／−1、`AISDLC_SDD/CLAUDE.md` +4／−1（合計 +176／−22；篩選與排除不可省——不加的 `-- AISDLC_SDD` 會連 9 個新增檔、`FRAMEWORK_STATUS.md` 與 `framework_status_snapshot.py` 一併計入，得 24 檔 +4632／−29；只加 `--diff-filter=M` 而不排除那兩檔，得 15 檔 +184／−29）；被移除的 22 行全是就地延伸的計數句、日期行、註記句，或表格列內多寫一個儲存格；`agent/README.md` 被取代的兩個計數句原文逐字保留於同檔的訂正引言（訂正協議；AT-970-2-1 驗）。**Stage-1 採納集合與重記**：真實的 Stage-1 於改動落入工作樹之後才採納，五份文件（`AISDLC_SDD/CLAUDE.md`、INIT、SPEC_FIRST_GATE、根層 PRD、ADR-001；〈增量追溯表〉U1～U5）記的是改動後摘要，所以本鍵自己的改動沒有待重記項；其後的再改（PRD 的 W0 訂正、本檔勘誤）才以 `spec-refreeze` 重記（`--doc` 列出被改的文件，`--root` 同 Stage-1）。`SDD_AUTOCLAUDE_BRIDGE.md` 不在 `sub=sdd` 的採納集合（BRIDGE §8.4），其改動同樣只增不減。反向症狀：SCG-0～3 審查發現增補改動了既有條文的語意 ⇒ 改走完整 SCG-1～3 清單（本鍵的 ADR-001 已能滿足 SCG-2 的 ADR 項，SRD、C4、OpenAPI 無對應物，需另行說明）。
 2. **⚖2 機械半段空轉**：SLV 規則檔掃描路徑樣式、模糊度計分器以標題抽 AC，對本檔表格形 AC 不產生判斷（BRIDGE §8.5、G-116-15）；預設由 QA 逐條讀 AC 與追溯表補位，不得把「機械半段沒報錯」當成通過。
 3. **⚖3 `agent.version` 欄**：兩支新 agent 的版本欄寫 `see FRAMEWORK_STATUS.md`（不寫死版號；`agent_scg_anchor_lint` AGT-05 要求），預設不另列版號。
-4. **⚖4 白名單邊界**：預設＝24 條白名單路徑（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `FRAMEWORK_STATUS.md`；主控 D-47 擴充）加版本目錄 `docs/06_quality/` 報告；`scripts/**` 其餘檔不在內（AT-970-5-1 比 ADR-XPLAT-017 §D7 的機械核對法更嚴：只放行 `framework_status_snapshot.py` 一檔）。**根層連動的已知例外（主控 D-46）**：主控收尾單窗的 W0 連動檔，逐字清單＝`.gitignore`、`.github/workflows/agentconsole-ci.yml`、`docs/01_requirements/ResearchToPRD_PRD.md`、`docs/01_requirements/Agent_ConsoleUI_PRD.md`、`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`、`docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md`、`AgentConsole/**`；`tools/`、`.claude/` 必須為空。ADR-XPLAT-017 §D7 機械核對法的末句由主控依 D-46 改為同一清單（原句「根層 `.github/` 的 diff 必須為空」與 PRD §9.0〈根層連動〉字面衝突，測試會對合法 commit 判紅）。
+4. **⚖4 白名單邊界**：預設＝24 條白名單路徑（9 個新增檔、版本目錄內 12 個被改檔、`AISDLC_SDD/CLAUDE.md`、主控補丁 `AISDLC_SDD/scripts/framework_status_snapshot.py`、重生的 `FRAMEWORK_STATUS.md`；主控 D-47 擴充）加版本目錄 `docs/06_quality/` 報告；`scripts/**` 其餘檔不在內（AT-970-5-1 比 ADR-XPLAT-017 §D7 的機械核對法更嚴：只放行 `framework_status_snapshot.py` 一檔）。**根層連動的已知例外（主控 D-46）**：主控收尾單窗的 W0 連動檔，逐字清單共 8 條＝`.gitignore`、`.github/workflows/agentconsole-ci.yml`、`docs/01_requirements/ResearchToPRD_PRD.md`、`docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md`、`docs/01_requirements/Agent_ConsoleUI_PRD.md`、`docs/04_planning/ADR/ADR-XPLAT-016-sdd-integration-loop-minimal-intrusion.md`、`docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md`、`AgentConsole/**`；`tools/`、`.claude/` 必須為空。`ResearchSOPtoPRD_Source_Spec.md` 在起點 commit 之後的 W0 落檔 commit 才首次入庫，所以列入（SCG-4 一審 F-01；原清單 7 條漏了它）。ADR-XPLAT-017 §D7 機械核對法的末句由主控依 D-46 改為同一清單（原句「根層 `.github/` 的 diff 必須為空」與 PRD §9.0〈根層連動〉字面衝突，測試會對合法 commit 判紅）。
 5. **⚖5 Gate 0 不含 TCS**：與 SPEC_FIRST_GATE「增量文件集（FRD-lite＋TCS）本身走 SCG_VALIDATION → 人類確認 → `spec-frozen`（TCS 必須在 `--doc` 內）」不衝突——後者是**內環** Stage-2；外環 Gate 0 凍結的是 PRD、證據矩陣、議題檔、ADR 草稿（D-23）。
 6. **⚖6 審查獨立性**：本鍵的 QA 審查者與起草者同為 AI、同工作區可互讀，不滿足 R-9.20.3 型獨立性；補償＝獨立 session、由 QA 重跑全部 AT 並貼輸出、主控親驗 rc。**不宣稱滿足。**
-7. **⚖7 白名單外的落後項**：**已由 D-47 納入白名單**——`docs_template/README.md`、`agent/README.md`、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`、`AISDLC_SDD/CLAUDE.md` 的 Rule 2 目錄樹與〈框架核心文件快速參考〉、`releases/CHANGELOG.md` 頂部日期行（`FRAMEWORK_EDITS.md` E32～E36），以及主控補丁 `scripts/framework_status_snapshot.py` 的工作流組成字串（`+1 Research-to-PRD`）；AT-970-2-1 逐項驗。本項不再有落後的導覽項；`agent/README.md` 的 Specialized 計數句原本就落後一支（漏列 `sdd-zero-trust-auditor`），訂正時依訂正協議保留原文逐字（E33a、E33g）。
-8. **⚖8 FSM 演練預期值**：AT-970-7-1～7-4、7-6、7-E-1～7-E-3 的預期值依讀碼推得、SD-B 未跑（任務書禁跑 FSM CLI 寫入動詞）；首次執行與預期不符時，先查預期值是否讀錯並走勘誤，再查實作。
+7. **⚖7 白名單外的落後項**：**已由 D-47 納入白名單**——`docs_template/README.md`、`agent/README.md`、`guides/user/standards/PROJECT_DOCUMENTATION_STANDARDS.md`、`AISDLC_SDD/CLAUDE.md` 的 Rule 2 目錄樹與〈框架核心文件快速參考〉、`releases/CHANGELOG.md` 頂部日期行（落檔 commit `25c66981`），以及主控補丁 `scripts/framework_status_snapshot.py` 的工作流組成字串（`+1 Research-to-PRD`）；AT-970-2-1 逐項驗。本項不再有落後的導覽項；`agent/README.md` 的 Specialized 計數句原本就落後一支（漏列 `sdd-zero-trust-auditor`），訂正時依訂正協議保留原文逐字（AT-970-2-1 驗）。
+8. **⚖8 FSM 演練預期值**：AT-970-7-1～7-4、7-6、7-E-1～7-E-3 的預期值原依讀碼推得；SCG-4 一審（2026-11-02）已於 repo 實跑八個演練 AT，全數 PASS，唯 AT-970-7-1 預期輸出的鍵排序敘述有誤（勘誤 5）。之後再跑與預期不符時，先查預期值是否讀錯並走勘誤，再查實作。演練一律從 `$tmp` 內的版本目錄複本執行，repo 零寫入（勘誤 3）。
 9. **⚖9 `HUMAN_PENDING` 逾時**：72 小時提醒、168 小時升級由 hooks 的 SessionStart 檢查執行；Console 路徑沒有 hooks，不會自動提醒或升級。**D-48(3)：Console 路徑以 UI 顯示等待時長＋72h 橫幅、不轉 REMINDER**，不新增 hook 或守衛（記入 Console 架構文件 §12.1 已知限制 L-R；工作流第 11 章）。本鍵不測、不補丁。
 10. **⚖10 Track B 增量條款**：**D-48(2)：軌道 B 內環走完整 SCG-1～3**；軌道 A 走增量條款。全新專案不適用增量條款，Gate 0 之後走軌道 B 的內環仍須完整 SCG-1～3（工作流第 9.2 節第 5 點）；本 TCS 只管框架層，不涵蓋軌道 B 的專案。
 11. **⚖11 ESCALATION 人工恢復後的審查預算（主控 D-60）**：預設＝不歸零。`resume-from-escalation` 不動重試計數，只有 `gate PASS` 與 `spec-frozen` 歸零，所以人工恢復後至多再得一次審查（FAIL 立即再 ESCALATION、PASS 歸零）；要全新的 3 次預算只能換世代鍵 `research-<slug>-g2`（工作流第 2.5 節；審查卡模板第 2.3 節；演練見 AT-970-7-6）。**已知邊界**：引擎的 `increment_retry` 見計數已達上限時標「tamper detected」並夾在上限，合法的人工恢復後第一次 FAIL 也走這條路，所以歷史列會出現看似遭竄改的字樣而實為預期；不改引擎（Rule 9 絕對禁令 8 與守衛面准入）。AT-970-7-6 為 🔶（預期值依讀碼推得，同 ⚖8）。
@@ -1800,11 +1859,22 @@ if __name__ == "__main__":
 
 ---
 
-## 勘誤（凍結後的訂正只寫在這裡，走 `spec-refreeze`；不改上方原文）
+## 勘誤（凍結後的訂正；內文已就地訂正、被訂正的原文逐字保留於下表；走 `spec-refreeze`）
+
+> 日期一律 2026-11-02；來源＝SCG-4 一審（鍵 `sdd-research-to-prd`，commit `25c66981`）的發現 F-01～F-07 與其計數連動；勘誤 10 來源＝SCG-4 二審（同鍵，TCS 現檔 `9602289ef45c…`）的邊界發現 N-1。
 
 | 編號 | 日期 | 位置 | 原文 | 訂正 | 原因與證據 |
 |------|------|------|------|------|------------|
-| — | — | — | — | — | 尚無 |
+| 1 | 2026-11-02 | `AT-970-5-1` 的 `$rootExempt`、`-eq 7`、預期輸出；`AT-970-5-E-1` 的 `$okPaths` 與 `$c6`；§5 資料表；§7 ⚖4；W-F6；AT-970-5-1 描述 | 「逐字 7 條：`.gitignore`、`.github/workflows/agentconsole-ci.yml`、`docs/01_requirements/ResearchToPRD_PRD.md`、`docs/01_requirements/Agent_ConsoleUI_PRD.md`、ADR-XPLAT-016、ADR-XPLAT-017、`AgentConsole/**`」；`-eq 7`；`root exempt entries: 7` | 加第 8 條 `docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md`（排在 `ResearchToPRD_PRD.md` 之後，與 ADR-XPLAT-017 §D7 同序），字面 7 改 8；5-E-1 的合法路徑加該檔，並以近似檔名 `….md.bak` 證明清單是逐字比對 | 該檔在起點 commit `01d9be6e` 不存在（`git cat-file -e 01d9be6e:<路徑>` rc 128），首次入庫於 `25c66981`；一審 AT-970-5-1 `FAIL violations=1`；對真 repo 加第 8 條後 5-1／5-2／5-E-1 全 PASS（QA 一審 F-01）；PRD §9.0 與附錄 C.7 D-46、ADR-XPLAT-017 §D7、計畫書同批由主控訂正 |
+| 2 | 2026-11-02 | 檔頭〈增量條款〉段與輸入快照列；〈增量追溯表〉說明、U 表與 SCG 各列；`AT-970-5-3`；§5 資料表；§6 收尾段；§7 ⚖1 | 「以下三個是 **Stage-1 採納當下（本鍵改動之前）** 的基準」「路徑相對 `spec-frozen --root`＝`AISDLC_SDD/`」；U1 `CLAUDE.md` `sha256:e1a2801843b9…`、U2 `AISDLC_SDD_v0.30/AISDLC_SDD_INIT.md` `sha256:7c6d5620e70f…`、U3 `AISDLC_SDD_v0.30/workflow/sdd-spec-first-gate/SDD_SPEC_FIRST_GATE.md` `sha256:c44b47a825c8…`；AT-970-5-3「取 `frozen_stages` 中 `Stage-1` 的 `spec_doc_digests`，與本檔〈增量追溯表〉的三個摘要比對」；「收尾重凍的 `--doc`＝Stage-1 採納的三份上位文件」 | 表改為真 Stage-1 記錄：五份（U1～U3 加根層 PRD、ADR-001）、`--root`＝monorepo 根、鍵＝相對根的正斜線路徑、值＝改動後內容摘要（U1 `09d88638…`、U2 `c0732753…`、U3 `ca913bb1…`、U4 `179e839f…`、U5 `c2935ae1…`；U4 是 PRD 於 2026-11-02 07:08:57Z 修改後的現檔）；保留改動前三份摘要作資訊基準；AT-970-5-3 改讀 `frozen_stages` 全部條目的聯集並比對五鍵；§6 收尾段與 ⚖1 改述 | 一審 AT-970-5-3 `FAIL rc=0 table_rows=3`（三個凍結值皆空）；Stage-1 於 2026-11-02T04:04:47Z 才採納、記五份改動後摘要（QA 一審 F-02）；`spec-refreeze` 追加的重記條目其 `stage` 取最近一筆（Stage-2）且只含被點名的文件，消費端取聯集（`state_loader.py` 的 `record_spec_refreeze`），所以只讀 `Stage-1` 那一筆會在重記後失明 |
+| 3 | 2026-11-02 | §2.7 引言、`AT-970-7-0`、`AT-970-7-Z`（`AT-970-7-E-1` 受影響）；`AT-970-7-5` 的 python 呼叫 | 「演練只寫 `$tmp` 之下的暫存狀態目錄（`SDD_STATE_DIR`）」；`Invoke-Sdd` 以 `Push-Location $vd` 從 repo 的版本目錄執行；7-5 的 `& $py -I -X utf8 $script $vd` | AT-970-7-0 建立 `$tmp/AISDLC_SDD`（版本目錄與 `scripts/` 的複本）；`Invoke-Sdd` 改從 `$fsmVd` 執行；7-Z 一併刪除；§2.7 引言據實改寫；7-5 加 `-B`（不在 repo 寫位元組碼） | `snapshot.py:17` 的 `SNAPSHOT_DIR`（`REPO_ROOT/build/reports/abort`，`REPO_ROOT` 由模組檔位置推得）不隨 `SDD_STATE_DIR`；一審 7-E-1 在真 repo 留下 `ABORT-<日期>-auto-recovery-refused.md` 與 `ABORT-RAW-<日期>.yaml`（QA 一審 F-03）；後者是讀改寫的累加檔（`_append_raw_abort_event`），同日已有真實事件時無法精準清除，所以以隔離取代清理；複本須含 `AISDLC_SDD/scripts/`（`state_loader.py` 以 `parents[3]/scripts/component_sanitizer.py` 載入共用淨化模組，只複製版本目錄會 `FileNotFoundError`；作者以暫存複本實測） |
+| 4 | 2026-11-02 | `AT-970-6-1` 的 P0-7 檢查；新增 `AT-970-6-6`；§1、§3、§6、SCG-4 通過標準的計數 | `'SE-PRD 模板 P0-7 列含四個預檢代碼' = ($p07 -ne '' -and @($codes | Where-Object { -not $p07.Contains($_) }).Count -eq 0)`（以 `Contains` 判整列）；沒有 AT 比對散文條文 | 改逐處計數（`CITES_MISSING` 1、`CITES_V1` 2、`CITES_UNANCHORED` 1、`CITES_CANDIDATE` 2）並要求四個「否則 `代碼`」定義子句；新增 AT-970-6-6，對八個散文條文與 `review_params` JSON、引擎 `RETRY_LIMITS` 對拍 | 一審突變 M27（P0-7 列內 `CITES_CANDIDATE` 出現兩次，改一處仍 PASS）與 S01～S08（八個散文條文改動全數存活；QA 一審 F-04）；訂正後 M27 與 S01～S08 皆被殺死（作者以突變自證腳本實跑） |
+| 5 | 2026-11-02 | `AT-970-7-1` 預期輸出第三行 | `digest keys: 00_research/evidence_matrix.md,00_research/issue_scope.json,01_specs/PRD-v1.0.0.md,01_specs/adr_draft.md` | `digest keys: 00_research/evidence_matrix.md,00_research/issue_scope.json,01_specs/adr_draft.md,01_specs/PRD-v1.0.0.md` | `Sort-Object` 不分大小寫，`adr_draft` 排在 `PRD-v1.0.0` 之前；一審實跑如此（`RESULT` 行不受影響，AT 兩側用同一排序；QA 一審 F-05） |
+| 6 | 2026-11-02 | 檔頭 D5 列；`AT-970-1-1` 與 FRD-lite AC-970-1 的 Given；§2 引言；§7 ⚖1、⚖7、⚖8 | 「依 SD-B 的 `FRAMEWORK_EDITS.md` E01～E36 逐塊套用」「重現指令見 `FRAMEWORK_VERIFY.md` 步驟 9b」「（`FRAMEWORK_EDITS.md` E32～E36）」「（E33a、E33g）」「Given 框架鍵視窗依 `FRAMEWORK_EDITS.md` 落地」 | 改為 repo 內可重現的依據：落檔 commit `25c66981`；只增不減以 `git diff --numstat --diff-filter=M 01d9be6e 25c66981 -- AISDLC_SDD ':(exclude)AISDLC_SDD/FRAMEWORK_STATUS.md' ':(exclude)AISDLC_SDD/scripts'` 重現（13 個被改檔，合計 +176／−22） | 兩檔是作者的過程文件、不在 repo，他機無法照 TCS 重現（QA 一審 F-06）；一審以同一 numstat 重算，與 ⚖1 宣稱逐值相同。不加篩選的 `-- AISDLC_SDD` 得 24 檔 +4632／−29（連 9 個新增檔、`FRAMEWORK_STATUS.md` 與 `framework_status_snapshot.py` 一併計入），不是 +176／−22；加 `--diff-filter=M` 並排除那兩檔才是 13 個被改檔的合計（作者對 repo 實跑：13 檔 +176／−22） |
+| 7 | 2026-11-02 | 〈上位需求對照〉AC-970-5 列 | `NFR-R2P-08（變更集合與回填）`／`AC-R2P-10-9` | `NFR-R2P-08（文件最小集與回填）；變更邊界的直接依據是 PRD §9.0 落點表與 ADR-XPLAT-017 §D7（非 AC）`／`AC-R2P-11-7、AC-R2P-12-6` | AC-R2P-10-9 是 `:freeze` 的 422 `missing_tcs` 契約，與變更邊界無關；AC-R2P-11-7 是 Stage-1 採納以 `--digest --root` 記摘要、AC-R2P-12-6 是治理檔與 `tools/`、`.claude/` 零變更（`git diff --name-only` 核對）（QA 一審 F-07；作者讀 PRD 選定） |
+| 8 | 2026-11-02 | 檔頭計數、§1 表與覆蓋率、§3、§6、SCG-4 通過標準 | 「AT 34 個（正控 25、負控 9）」「已映射 AT 數: 34（✅ 26、🔶 8）」「Unit 12、Integration 18、Contract 3、E2E 1」「7 個 AC、34 個 AT」 | 「AT 35 個（正控 26、負控 9）」「已映射 AT 數: 35（✅ 27、🔶 8）」「Unit 13、Integration 18、Contract 3、E2E 1」「7 個 AC、35 個 AT」 | 新增 AT-970-6-6（勘誤 4） |
+| 9 | 2026-11-02 | 本節標題與說明 | 「勘誤（凍結後的訂正只寫在這裡，走 `spec-refreeze`；不改上方原文）」 | 「勘誤（凍結後的訂正；內文已就地訂正、被訂正的原文逐字保留於下表；走 `spec-refreeze`）」 | AT 區塊是可由 QA 逐字抽出執行的指令；只在勘誤表另寫更正，會讓抽出者執行到已知錯誤的舊區塊（一審 QA 即須在 driver 複本手動套用修法）。被訂正的原文仍逐字保留於本表（訂正協議：禁止靜默覆寫） |
+| 10 | 2026-11-02 | `AT-970-6-6` 描述、區塊（新增 `$nMax` 與第九檢核）、預期輸出；§1 表 AT-970-6-6 列 | 「Then 八項皆成立」「預期輸出：八行 `PASS …`」；區塊只抽「第 N 次…ESCALATION」（`$nEsc`），無「最多 N 輪」抽取 | 加第 (9) 項：工作流四處（§1 流程圖、§2.3 標題、§2.3 結論句、§6.3 末段）、審查卡 §2.3、ADR-001 預算語意列的「最多 N 輪」復述逐處抽出 N，與引擎 `RETRY_LIMITS["SCG_VALIDATION"]` 對拍（`(?<!＝)最多 (\d+) 輪`：以前置「＝」排除 §2.3 的來源規格對照句「＝最多 4 輪」；`-ge 6`）；八改九 | SCG-4 二審 N-1（P4）：6-6 (3) 只守六處「第 N 次…ESCALATION」，QA 鏡突變 S09（工作流 §2.3 標題 3→4）與 S10（§6.3 末段 3→4）存活、範圍內 S11 被殺；訂正後由主控在 RELEASE_READY 態實跑 6-6 並重放 S09／S10，輸出貼於 SCG-4 報告落檔版〈二審後附記〉，再以 `spec-refreeze` 重記本檔 |
 
 ---
 
@@ -1812,7 +1882,7 @@ if __name__ == "__main__":
 
 | 驗證項目 | 判斷標準 | 狀態 |
 |---------|---------|------|
-| AC → AT 100% 映射 | 7 個 AC、34 個 AT，無未映射 AC | □ |
+| AC → AT 100% 映射 | 7 個 AC、35 個 AT，無未映射 AC | □ |
 | AT 格式可自動化 | 每個 AT 為 PowerShell 指令＋`RESULT … PASS／FAIL` 判定行（🔶 者已標預期值依據） | □ |
 | 負向測試覆蓋 | 每個 AC 至少一個負控（AT-970-1～7 的 `E-1`） | □ |
 | 邊界值測試 | 白名單邊界、檔案形態（BOM／CR／檔尾）、值域（`topic`／`slug`／`depth_level`／`layers`）、人工恢復後的預算邊界皆有 AT | □ |
