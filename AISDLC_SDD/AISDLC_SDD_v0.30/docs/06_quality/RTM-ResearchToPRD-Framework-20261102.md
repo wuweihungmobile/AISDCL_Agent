@@ -5,6 +5,7 @@
 **審查報告**: `docs/06_quality/SCG4-REVIEW-ResearchToPRD-Framework-20261102.md`（一審 FAIL 2026-11-02 14:2x → 二審 PASS 2026-11-02 19:0x；P1 0／P2 0／P3 0／P4 2）
 **上位**: 根層 `docs/01_requirements/ResearchToPRD_PRD.md`（FR-R2P／AC-R2P）、`docs/02_architecture/adr/ADR-001-research-to-prd-framework-layer.md`（D1～D7）
 **建立**: 2026-11-02（RTM_VERIFY 態；TCS §6「RTM 與報告落點」、SCG-4 一審 F-08）
+**RELEASE**: 2026-11-02 20:5x `gate RELEASE_READY PASS` rc 0 → RELEASE（commit `93b5ca94` 觸發的五支雲端 run 全 success：aisdlc-sdd-ci 41446402269、root-infra-ci 41446402250、agentconsole-ci 41446402268、windows-compat-ci 41446402300、macos-compat-ci 41446402316；本鍵 docs commit `1ae8033f`）
 **規約**: 每完成一項需求回填四格（實作檔／自動測試／E2E 驗證／狀態）；不刪列、不改號、不合併列。「自動測試」欄的 rc 皆取自 SCG-4 二審 QA 鏡（Sonnet，唯讀）的 driver 行程輸出（`RESULT <AT> PASS`，driver rc 0），AT-970-4-4 取自一審；主控收尾重跑的結果併記於各列，逐字輸出貼於 SCG-4 報告〈二審後附記〉。
 
 ## 1. AC → AT 追溯（35 列）
