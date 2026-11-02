@@ -5,8 +5,9 @@
 之類，不是 API host，也不會被抓取）。Stack Exchange 的標題與使用者名稱是 HTML 實體編碼過的，
 解析時還原成純文字。
 
-節流：官方速率限制頁無法現查（V-R9 殘項，本棒未現查）——`allowlist` 的 3 秒是**保守初值、非事實
-宣稱**；回應本文的 `backoff` 欄位（秒）由 `http.body_backoff_seconds` 一律遵守。
+節流：官方 throttle 頁（主控 2026-11-03 現查）寫明每 IP 超過 30 請求/秒即丟棄並封鎖約 30 秒到
+數分鐘、回應 `backoff` 必須遵守、語意相同的請求一分鐘內不重發——`allowlist` 的 3 秒是遠低於
+上限的**保守值**；回應本文的 `backoff` 欄位（秒）由 `http.body_backoff_seconds` 一律遵守。
 壞格式（不是 JSON、沒有 `items` 陣列）＝`PARSE_ERROR` 且不產生來源列；缺欄寫 `未見`。
 """
 from __future__ import annotations

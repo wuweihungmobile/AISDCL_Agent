@@ -46,8 +46,10 @@ HTTP_ERROR = "HTTP_ERROR"
 
 #: 部署基底主機的內建節流下限（秒；TCS §5.1、PRD NFR-R2P-03-6，V-R9 官方頁現查值）。
 #: `api.github.com` 取「未帶權杖的一般端點」60 秒（路由輸出 allowlist 清單用；實際間隔看端點與
-#: 權杖，見 `builtin_floor`）。Stack Exchange 的 3 秒是**保守初值、非事實宣稱**（官方頁無法
-#: 現查，V-R9 殘項）。
+#: 權杖，見 `builtin_floor`）。Stack Exchange 的 3 秒是**保守值**：官方 throttle 頁
+#: （主控 2026-11-03 現查 https://api.stackexchange.com/docs/throttle）寫明每 IP 超過
+#: 30 請求/秒即丟棄並封鎖約 30 秒到數分鐘、回應的 `backoff` 欄位必須遵守、語意相同的
+#: 請求一分鐘內不重發、每日配額預設 10,000（依 key）；3 秒間隔遠低於上限（V-R9 已結）。
 ENV_MIN_INTERVALS: Mapping[str, int] = MappingProxyType({
     "export.arxiv.org": 3, "arxiv.org": 3, "api.semanticscholar.org": 3, "api.github.com": 60,
     "api.stackexchange.com": 3})

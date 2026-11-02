@@ -668,14 +668,16 @@ def test_AT_960_8_7_default_effective_intervals_equal_the_v_r9_values() -> None:
     assert builtin_floor("docs.example.com") == DEFAULT_ENV_MIN_INTERVAL
 
 
-def test_AT_960_8_7_stack_exchange_interval_is_a_conservative_initial_value_not_a_fact() -> None:
-    """V-R9 殘項：Stack Exchange 官方頁本棒未現查，3 秒是保守初值（非事實宣稱）；註記必須留在
-    原始碼裡，免得日後有人把它讀成官方數值。"""
+def test_AT_960_8_7_stack_exchange_interval_is_conservative_per_official_page() -> None:
+    """V-R9（已結，主控 2026-11-03 現查官方 throttle 頁）：每 IP 超過 30 請求/秒即丟棄並
+    短期封鎖、`backoff` 必須遵守；3 秒是遠低於上限的保守值。出處與上限數字必須留在原始碼裡，
+    免得日後有人把 3 秒讀成官方數值、或把官方上限當成本產品的間隔。"""
     package = Path(fetch_http.__file__).parent
     allowlist_source = (package / "allowlist.py").read_text(encoding="utf-8")
-    assert "非事實宣稱" in allowlist_source and "Stack Exchange" in allowlist_source
+    assert "官方 throttle 頁" in allowlist_source and "30 請求/秒" in allowlist_source
+    assert "api.stackexchange.com/docs/throttle" in allowlist_source
     stack_source = (package / "stackexchange.py").read_text(encoding="utf-8")
-    assert "未現查" in stack_source and "非事實" in stack_source
+    assert "30 請求/秒" in stack_source and "backoff" in stack_source
     assert ENV_MIN_INTERVALS["api.stackexchange.com"] == 3
 
 
