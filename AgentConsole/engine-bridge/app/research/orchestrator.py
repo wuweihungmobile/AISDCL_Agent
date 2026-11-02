@@ -695,7 +695,8 @@ class Orchestrator:
                 self.writer.persist(Op("event.append", rid, {
                     "research_id": rid, "event_type": "research.alert", "actor": "bridge",
                     "payload": {"kind": "FETCH_SKIPPED_OVER_LIMIT", "detail": json.dumps(
-                        [s.to_payload() for s in batch.skipped], ensure_ascii=False)[:4000]},
+                        [s.to_payload() for s in batch.skipped],
+                        ensure_ascii=False)[:4000]},
                     "ref_kind": "alert", "ref_id": str(uuid.uuid4())}))
         layout.write_workspace_file(ws, PREFETCH_INDEX_REL,
                                     json.dumps(index, ensure_ascii=False, indent=1) + "\n")

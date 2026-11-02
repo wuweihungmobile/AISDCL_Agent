@@ -629,7 +629,8 @@ def test_AT_960_12_E_3_the_database_check_agrees_with_the_judgement(rdb: Any) ->
                fsm_gate_result="PASS", fsm_retry_count=0)
     with pytest.raises(ResearchDbError) as caught:
         db.insert_review_round(research_id=ids.research, actor="bridge", round=row)
-    assert caught.value.sqlstate == "23514", "passed=true 而 84.95 < 85.00：CHECK 擋下"
+    assert caught.value.sqlstate == "23514", (
+        "passed=true 而 84.95 < 85.00：CHECK 擋下")
     assert [r["round_no"] for r in db.query(
         "SELECT round_no FROM {s}.research_review_rounds WHERE research_id = %s ORDER BY 1",
         (ids.research,))] == [1], "被擋的輪不留任何列"
