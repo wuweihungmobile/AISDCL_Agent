@@ -234,10 +234,10 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["startResearchStage", () => api.startResearchStage("R", "revise", { afterEscalation: true }), "POST", "/api/v1/research/projects/R/stages/revise", { afterEscalation: true }],
   [
     "approveResearchBaseline",
-    () => api.approveResearchBaseline("R", { prdVersion: "v0.3.0-draft", expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" }),
+    () => api.approveResearchBaseline("R", { prdVersion: 3, expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" }),
     "POST",
     "/api/v1/research/projects/R/approve",
-    { prdVersion: "v0.3.0-draft", expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" },
+    { prdVersion: 3, expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" },
   ],
   ["getResearchFsm", () => api.getResearchFsm("R"), "GET", "/api/v1/research/projects/R/fsm"],
   ["cancelResearchStage", () => api.cancelResearchStage("R"), "POST", "/api/v1/research/projects/R/cancel"],

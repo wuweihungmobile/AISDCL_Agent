@@ -15,10 +15,14 @@ import { z } from "zod";
 import { ApiError, describeError } from "@/lib/api/client";
 import type {
   Config,
+  ResearchAllowlistRequest,
+  ResearchCapabilities,
   ResearchCreateRequest,
   ResearchDepthLevel,
   ResearchDerivedFlowPhase,
   ResearchEvent,
+  ResearchEvidenceItem,
+  ResearchEvidenceMatrix,
   ResearchFlowPhase,
   ResearchFlowStatus,
   ResearchFlowStepId,
@@ -28,6 +32,8 @@ import type {
   ResearchProjectSummary,
   ResearchReconcileResult,
   ResearchReviewRound,
+  ResearchSource,
+  ResearchSourceLayer,
 } from "@/lib/api/types";
 import type { StatusMeta } from "@/lib/domain/status";
 
@@ -751,4 +757,537 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
 export function researchErrorText(error: unknown): string {
   if (error instanceof ApiError && error.reason !== undefined && REASON_TEXT[error.reason] !== undefined) return REASON_TEXT[error.reason];
   return describeError(error);
+}
+
+// ══ 研究面板（PKG-FE-B）：事件時間軸、證據矩陣、議題面板、研究來源設定 ═══════════════════════════════════
+// 以下全是純函式與常數（不讀瀏覽器全域、不發請求）；元件只負責把結果畫出來。
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const isSeq = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 1;
+
+// ── 事件時間軸與串流去重（FR-R2P-06；AC-R2P-06-1～06-4；TCS AT-960-10-4～10-8）──────────────────
+
+/**
+ * 研究串流的具名事件（契約 §3）。EventSource 只把「有人 addEventListener 的事件名」交給程式，所以**全部都要訂閱**——連 P1、P2 才會出現的、
+ * 與目前畫面不顯示的也一樣：沒訂閱的事件仍佔用 seq，下一則收到的事件就會被誤判成「序號不連續」而白白全量重抓。
+ */
+export const RESEARCH_SSE_EVENT_TYPES: readonly string[] = [
+  "research.step",
+  "research.run",
+  "research.source",
+  "research.evidence",
+  "research.prd",
+  "research.review",
+  "research.review_invalid",
+  "research.defect",
+  "research.gate",
+  "research.reconcile",
+  "research.route",
+  "research.scr",
+  "research.delivery",
+  "research.alert",
+];
+/** 傳輸層訊號（不是 `research_events` 列、不帶 `id:`、不佔 seq）：伺服器重播不完整時送出，客戶端收到即全量重抓。 */
+export const RESEARCH_REPLAY_GAP_EVENT = "research.replay_gap";
+export const RESEARCH_HEARTBEAT_EVENT = "heartbeat";
+
+/** 研究串流網址（EventSource 不能帶標頭，token 放網址；API-RP-06）：`base` 為後端 origin（不含 `/api/v1`，全棧同源為空字串）。 */
+export function buildResearchStreamUrl(base: string, researchId: string, token: string): string {
+  return `${base}/api/v1/stream/research/${encodeURIComponent(researchId)}?access_token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * 串流上的事件：`data` 是 ResearchEvent JSON；`emittedAt`（選填）是伺服器送出的時間，量測「事件到畫面」延遲用——帶 offset 的 ISO-8601 字串，或 epoch 毫秒（數字）。
+ * 契約 §1.3 的 DTO 沒有此欄、後端測試替身把它放在 `payload.emitted_at`（epoch 毫秒），所以解析時頂層 `emittedAt` 與 `payload.emitted_at`／`payload.emittedAt` 都認（見 `parseTimelineEvent`）。
+ */
+export type TimelineEvent = ResearchEvent & { emittedAt?: string | number | null };
+
+/** 事件的送出時間：頂層 `emittedAt` 優先，其次 `payload.emitted_at`、`payload.emittedAt`；只認字串或有限數字，其餘當沒有。 */
+function emittedAtOf(raw: Record<string, unknown>, payload: Record<string, unknown>): string | number | null {
+  for (const candidate of [raw.emittedAt, payload.emitted_at, payload.emittedAt]) {
+    if (typeof candidate === "string" && candidate !== "") return candidate;
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * 解析串流訊息：序號以 `data.seq` 為準（瀏覽器的 `lastEventId` 在事件沒有 `id:` 行時沿用前一則的值，不能當身分），沒有合法 seq 才退用 `id`。
+ * 形狀不合（不是物件、沒有 `eventType`、序號解不出）回 null——呼叫端略過，不讓一行損毀的資料掛掉整條串流。
+ */
+export function parseTimelineEvent(raw: unknown, id?: string | null): TimelineEvent | null {
+  if (!isRecord(raw) || typeof raw.eventType !== "string" || raw.eventType === "") return null;
+  const fromId = typeof id === "string" && /^\d+$/.test(id) ? Number(id) : null;
+  const seq = isSeq(raw.seq) ? raw.seq : fromId;
+  if (!isSeq(seq)) return null;
+  const payload = isRecord(raw.payload) ? raw.payload : {};
+  return {
+    seq,
+    eventType: raw.eventType,
+    step: (typeof raw.step === "string" ? raw.step : "topic") as ResearchFlowStepId,
+    actor: typeof raw.actor === "string" ? raw.actor : "",
+    refKind: typeof raw.refKind === "string" ? raw.refKind : null,
+    refId: typeof raw.refId === "string" ? raw.refId : null,
+    payload,
+    occurredAt: typeof raw.occurredAt === "string" ? raw.occurredAt : "",
+    emittedAt: emittedAtOf(raw, payload),
+  };
+}
+
+/** `research.replay_gap` 的資料 `{fromSeq, toSeq}`：缺漏的序號範圍；形狀不合回 null（訊號本身仍要觸發重抓，只是沒有範圍）。 */
+export function parseReplayGap(raw: unknown): { fromSeq: number; toSeq: number } | null {
+  return isRecord(raw) && isSeq(raw.fromSeq) && isSeq(raw.toSeq) ? { fromSeq: raw.fromSeq, toSeq: raw.toSeq } : null;
+}
+
+export type IncomingSeq = "duplicate" | "next" | "gap";
+
+/** 新到事件相對「已處理的最大 seq」：小於等於＝重複（至少一次送達的重播）、恰好加一＝接續、更大＝缺口（要全量重抓）。 */
+export function classifyIncomingSeq(lastSeq: number, seq: number): IncomingSeq {
+  if (seq <= lastSeq) return "duplicate";
+  return seq === lastSeq + 1 ? "next" : "gap";
+}
+
+/** 兩份事件依 seq 聯集：升冪、同 seq 只留一筆（`base`＝資料庫的 REST 結果，優先於串流上收到的）。 */
+export function mergeEventsBySeq<T extends { seq: number }>(base: readonly T[], incoming: readonly T[]): T[] {
+  const bySeq = new Map<number, T>();
+  for (const event of incoming) bySeq.set(event.seq, event);
+  for (const event of base) bySeq.set(event.seq, event);
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+/** 自 seq 1 起連續的最長前綴（事件帳的 seq 自 1 起連續；缺口之後的事件一律不渲染——缺口補上前不得顯示殘缺的時間軸）。輸入須已依 seq 升冪、去重。 */
+export function contiguousPrefix<T extends { seq: number }>(sorted: readonly T[]): T[] {
+  const out: T[] = [];
+  for (const event of sorted) {
+    if (event.seq !== out.length + 1) break;
+    out.push(event);
+  }
+  return out;
+}
+
+export type TimelineView<T> = {
+  /** 要渲染的事件：嚴格遞增、自 1 起連續、沒有重複 */
+  visible: T[];
+  /** 已收到但因缺口或障壁而扣住的事件數 */
+  held: number;
+  /** 第一個沒有渲染的 seq（缺口的起點；全部都渲染了為 null） */
+  gapFrom: number | null;
+  /** 已處理（載入或收到）的最大 seq（含扣住的）：下一則串流事件相對它判重複、接續或缺口 */
+  lastSeq: number;
+};
+
+/**
+ * REST 結果與串流事件合成要渲染的時間軸。`barrier` 非 null＝正在全量重抓：只渲染 seq 不超過它的事件（重抓完成前不渲染缺口或訊號之後的事件），
+ * 重抓完成後由呼叫端放掉障壁，兩邊依 seq 去重合併。
+ */
+export function timelineView<T extends { seq: number }>(rest: readonly T[], live: readonly T[], barrier: number | null = null): TimelineView<T> {
+  const merged = mergeEventsBySeq(rest, live);
+  const lastSeq = merged.length === 0 ? 0 : merged[merged.length - 1].seq;
+  const allowed = barrier === null ? merged : merged.filter((event) => event.seq <= barrier);
+  const visible = contiguousPrefix(allowed);
+  const held = merged.length - visible.length;
+  return { visible, held, gapFrom: held > 0 ? visible.length + 1 : null, lastSeq };
+}
+
+/** 時間軸最多渲染最近幾筆（其餘折疊，按鈕展開）；事件帳整份重抓上限約 10,000 筆，全部渲染會拖慢頁面。 */
+export const TIMELINE_RENDER_LIMIT = 500;
+
+export type EventTone = "normal" | "good" | "warn" | "error";
+export type EventKind = "step" | "run" | "source" | "evidence" | "prd" | "review" | "defect" | "gate" | "reconcile" | "alert" | "other";
+/**
+ * 一筆事件在時間軸上的呈現：`headline` 是固定用語、`subject` 是動態主文（來源標題、論點、無效原因、警示說明…；外部衍生，元件一律當純文字渲染）、
+ * `meta` 是短的附註；`url` 只在來源事件有（是否成連結由 `safeExternalHref` 決定）。
+ */
+export type EventLine = { kind: EventKind; headline: string; subject: string; meta: string[]; tone: EventTone; url?: string };
+
+export const STAGE_LABEL: Readonly<Record<string, string>> = { RESEARCH: "研究", DRAFT: "草擬", REVIEW: "審查", REVISE: "修訂", ITERATE: "迭代", TCS_DRAFT: "測試規格草擬" };
+export const RUN_STATUS_LABEL: Readonly<Record<string, string>> = {
+  QUEUED: "排隊中",
+  RUNNING: "執行中",
+  SUCCEEDED: "已完成",
+  FAILED: "失敗",
+  CANCELLED: "已取消",
+  BLOCKED_DB: "資料庫阻塞",
+};
+export const SOURCE_LAYER_LABEL: Readonly<Record<ResearchSourceLayer, string>> = { ACADEMIC: "學術層", INDUSTRY: "產業層", OSS: "開源層", COMMUNITY: "社群層" };
+export const REVIEW_VERDICT_LABEL: Readonly<Record<string, string>> = { PASS: "通過", REVISE: "需修訂", ESCALATE: "升級人工" };
+export const ALERT_KIND_LABEL: Readonly<Record<string, string>> = { BLOCKED_DB: "資料庫阻塞", ESCALATED: "待人工處理", QUOTA: "額度", DENIED_FETCH: "外呼被拒", STAGE_FAILED: "階段失敗" };
+export const EVIDENCE_STRENGTH_LABEL: Readonly<Record<ResearchEvidenceItem["strength"], string>> = { STRONG: "強", MEDIUM: "中", WEAK: "弱", CANDIDATE: "候選" };
+
+const labelOf = (table: Readonly<Record<string, string>>, key: string): string => table[key] ?? key;
+const payloadText = (payload: Record<string, unknown>, key: string): string => {
+  const value = payload[key];
+  return typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : "";
+};
+const payloadNumber = (payload: Record<string, unknown>, key: string): number | null => {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+};
+const compact = (parts: ReadonlyArray<string | false | null | undefined>): string[] => parts.filter((part): part is string => typeof part === "string" && part !== "");
+
+/** 事件在時間軸上的呈現（契約 §3 各事件的 payload；缺欄一律略過、不丟例外，未知的事件型別只顯示型別名）。 */
+export function describeResearchEvent(event: Pick<ResearchEvent, "eventType" | "payload">): EventLine {
+  const p = event.payload;
+  switch (event.eventType) {
+    case "research.step": {
+      const step = payloadText(p, "flowStep");
+      const status = payloadText(p, "flowStatus");
+      return {
+        kind: "step",
+        headline: "流程推進",
+        subject: compact([payloadText(p, "flowPhase") !== "" && flowPhaseLabel(payloadText(p, "flowPhase")), status !== "" && `（${flowStatusLabel(status)}）`]).join(""),
+        meta: compact([isFlowStepId(step) ? `第 ${stepNumber(step)} 步「${FLOW_STEP_LABEL[step]}」` : step, payloadText(p, "flowDetail")]),
+        tone: status === "FAILED" ? "error" : status === "BLOCKED" || status === "ESCALATED" ? "warn" : "normal",
+      };
+    }
+    case "research.run": {
+      const status = payloadText(p, "status");
+      const round = payloadNumber(p, "roundNo");
+      const attempt = payloadNumber(p, "attempt");
+      const tokens = payloadNumber(p, "tokensUsed");
+      return {
+        kind: "run",
+        headline: `${labelOf(STAGE_LABEL, payloadText(p, "stage"))}階段`,
+        subject: status === "" ? "" : labelOf(RUN_STATUS_LABEL, status),
+        meta: compact([round !== null && round > 0 && `第 ${round} 輪`, attempt !== null && `第 ${attempt} 次嘗試`, tokens !== null && `累計 ${tokens.toLocaleString("en-US")} tokens`]),
+        tone: status === "FAILED" ? "error" : status === "SUCCEEDED" ? "good" : status === "BLOCKED_DB" ? "warn" : "normal",
+      };
+    }
+    case "research.source": {
+      const layer = payloadText(p, "layer");
+      const outcome = payloadText(p, "fetchOutcome");
+      const url = payloadText(p, "url");
+      return {
+        kind: "source",
+        headline: `取得來源 ${payloadText(p, "sourceNo")}`.trim(),
+        subject: payloadText(p, "title"),
+        meta: compact([
+          labelOf(SOURCE_LAYER_LABEL, layer),
+          payloadText(p, "tier") !== "" && `分級 ${payloadText(p, "tier")}`,
+          payloadText(p, "verification") !== "" && `查證 ${payloadText(p, "verification")}`,
+          outcome !== "" && `抓取 ${outcome}`,
+        ]),
+        tone: outcome === "" || outcome === "OK" ? "normal" : "warn",
+        ...(url === "" ? {} : { url }),
+      };
+    }
+    case "research.evidence": {
+      const strength = payloadText(p, "strength");
+      return {
+        kind: "evidence",
+        headline: `證據列 ${payloadText(p, "evidenceNo")}`.trim(),
+        subject: payloadText(p, "claim"),
+        meta: compact([payloadText(p, "sourceNo") !== "" && `來源 ${payloadText(p, "sourceNo")}`, strength !== "" && `強度 ${labelOf(EVIDENCE_STRENGTH_LABEL, strength)}`]),
+        tone: "normal",
+      };
+    }
+    case "research.prd":
+      return {
+        kind: "prd",
+        headline: "PRD 新版本",
+        subject: payloadText(p, "semver"),
+        meta: compact([payloadText(p, "authorKind") === "AGENT" ? "AI 起草" : payloadText(p, "authorKind") === "HUMAN" ? "人工編輯" : payloadText(p, "authorKind"), payloadText(p, "author")]),
+        tone: "normal",
+      };
+    case "research.review": {
+      const verdict = payloadText(p, "verdict");
+      const weighted = payloadNumber(p, "weightedScore");
+      const min = payloadNumber(p, "minDimensionScore");
+      const round = payloadNumber(p, "roundNo");
+      return {
+        kind: "review",
+        headline: round === null ? "審查完成" : `第 ${round} 輪審查完成`,
+        subject: labelOf(REVIEW_VERDICT_LABEL, verdict),
+        meta: compact([weighted === null ? "前置檢查未過，未計分" : `加權 ${weighted.toFixed(2)}`, min !== null && `最低維度 ${min}`]),
+        tone: verdict === "PASS" ? "good" : verdict === "ESCALATE" ? "error" : "warn",
+      };
+    }
+    case "research.review_invalid":
+      return {
+        kind: "review",
+        headline: "審查輸出無效",
+        subject: payloadText(p, "reason"),
+        meta: compact([payloadNumber(p, "roundNo") !== null && `第 ${payloadText(p, "roundNo")} 輪`, payloadNumber(p, "attempt") !== null && `第 ${payloadText(p, "attempt")} 次嘗試`]),
+        tone: "error",
+      };
+    case "research.defect":
+      return {
+        kind: "defect",
+        headline: `缺陷 ${payloadText(p, "defectNo")}`.trim(),
+        subject: compact([payloadText(p, "severity"), payloadText(p, "dimension")]).join(" · "),
+        meta: compact([payloadText(p, "status")]),
+        tone: payloadText(p, "severity") === "P1" ? "error" : "normal",
+      };
+    case "research.gate":
+      return {
+        kind: "gate",
+        headline: "Gate 決定",
+        subject: payloadText(p, "decision"),
+        meta: compact([payloadText(p, "gate"), payloadText(p, "decidedBy") !== "" && `決定者 ${payloadText(p, "decidedBy")}`]),
+        tone: "normal",
+      };
+    case "research.reconcile": {
+      const consistent = p.consistent === true;
+      const drift = payloadNumber(p, "driftCount");
+      return { kind: "reconcile", headline: "對帳", subject: consistent ? "一致" : "發現不一致", meta: compact([drift !== null && `${drift} 項漂移`]), tone: consistent ? "good" : "warn" };
+    }
+    case "research.alert": {
+      const kind = payloadText(p, "kind");
+      return { kind: "alert", headline: `警示：${labelOf(ALERT_KIND_LABEL, kind)}`, subject: payloadText(p, "detail"), meta: [], tone: kind === "STAGE_FAILED" ? "error" : "warn" };
+    }
+    default:
+      return { kind: "other", headline: event.eventType, subject: "", meta: [], tone: "normal" };
+  }
+}
+
+// ── 事件到畫面的延遲（AC-R2P-06-1；AT-960-10-7）────────────────────────────────────────
+
+const HAS_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
+const instantMs = (value: string | number | Date): number => {
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  return HAS_OFFSET.test(value) ? Date.parse(value) : Number.NaN;
+};
+
+/**
+ * 事件自產生到畫面顯示的延遲（毫秒）：`renderedAt`（前端記下的 `rendered_at`）減 `emittedAt`（伺服器送出時間）；字串形式的時間戳都要帶 offset，數字是 epoch 毫秒（本身就是絕對瞬間）。
+ * 沒有 `emittedAt`、或任一方沒有 offset／解不出，回 null——量不到就是量不到、不是 0，呼叫端計入 `unmeasured`。時鐘偏差造成的負值照實回傳、不夾 0。
+ */
+export function renderLatencyMs(event: { emittedAt?: string | number | null }, renderedAt: string | number | Date): number | null {
+  if (event.emittedAt === undefined || event.emittedAt === null || event.emittedAt === "") return null;
+  const emitted = instantMs(event.emittedAt);
+  const rendered = instantMs(renderedAt);
+  return Number.isNaN(emitted) || Number.isNaN(rendered) ? null : rendered - emitted;
+}
+
+/** 最近秩（nearest-rank）百分位：升冪後取第 ⌈p×n⌉ 個；沒有樣本回 null。 */
+export function percentile(values: readonly number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length - 1e-9)));
+  return sorted[rank - 1];
+}
+
+export type LatencySummary = { measured: number; unmeasured: number; p95: number | null };
+
+/** 延遲樣本的摘要：null 的樣本（量不到）不入 P95、計入 `unmeasured`。 */
+export function latencySummary(samples: ReadonlyArray<number | null>): LatencySummary {
+  const measured = samples.filter((sample): sample is number => sample !== null);
+  return { measured: measured.length, unmeasured: samples.length - measured.length, p95: percentile(measured, 0.95) };
+}
+
+// ── 證據矩陣（FR-R2P-05、06；AT-960-10-6；PRD §5.1.1 步驟 1 條件）──────────────────────────────
+
+/** 步驟 1 的證據閘：最新矩陣至少這麼多列「層級 V2 以上、非 UNANCHORED、非線索」才可生成 PRD 初稿（初值、未校準；PRD §5.1.1）。 */
+export const MIN_EVIDENCE_ROWS = 3;
+/** 解析不出 host 的被拒外呼，入庫列的 host 取此保留字（D-66）；顯示時原樣、不轉空白、不加連結。 */
+export const RESEARCH_UNPARSED_HOST = "(unparsed)";
+
+/** 合格的證據列：查證層級 V2 以上、Bridge 錨定檢查沒有標 UNANCHORED、來源不是線索（`clueOnly`）。來源清單裡找不到的列視為非線索（沒有反證）。 */
+export function qualifiedEvidenceRows<I extends Pick<ResearchEvidenceItem, "sourceNo" | "f7Verification" | "unanchored">>(
+  items: readonly I[],
+  sources: ReadonlyArray<Pick<ResearchSource, "sourceNo" | "clueOnly">>,
+): I[] {
+  const clues = new Set(sources.filter((s) => s.clueOnly).map((s) => s.sourceNo));
+  return items.filter((item) => (item.f7Verification === "V2" || item.f7Verification === "V3") && !item.unanchored && !clues.has(item.sourceNo));
+}
+
+export type EvidenceGate = { ok: boolean; qualified: number; required: number; text: string };
+
+/** 證據閘（步驟 1 的條件之一）：不過時 `text` 說明缺什麼。 */
+export function evidenceGate(items: readonly ResearchEvidenceItem[], sources: ReadonlyArray<Pick<ResearchSource, "sourceNo" | "clueOnly">>): EvidenceGate {
+  const qualified = qualifiedEvidenceRows(items, sources).length;
+  const ok = qualified >= MIN_EVIDENCE_ROWS;
+  return {
+    ok,
+    qualified,
+    required: MIN_EVIDENCE_ROWS,
+    text: ok ? `證據已足夠：${qualified} 列合格` : `證據不足：目前只有 ${qualified} 列合格（層級 V2 以上、已錨定、非線索），至少需要 ${MIN_EVIDENCE_ROWS} 列`,
+  };
+}
+
+/** UNANCHORED 的列數（數字在抓取原文比對不到者；Bridge 入庫時計算）。 */
+export function unanchoredCount(items: ReadonlyArray<Pick<ResearchEvidenceItem, "unanchored">>): number {
+  return items.filter((item) => item.unanchored).length;
+}
+
+/** 授權待查：授權條款是 GPL／AGPL 系（不含 LGPL）或缺（「未見」）；AC-R2P-05-5。 */
+export function isLicensePending(spdx: string | null | undefined): boolean {
+  const value = (spdx ?? "").trim();
+  return value === "" || value === "未見" || /\bA?GPL/i.test(value);
+}
+
+export function licensePendingCount(items: ReadonlyArray<Pick<ResearchEvidenceItem, "sourceNo">>, sources: ReadonlyArray<Pick<ResearchSource, "sourceNo" | "licenseSpdx">>): number {
+  const license = new Map(sources.map((s) => [s.sourceNo, s.licenseSpdx] as const));
+  return items.filter((item) => isLicensePending(license.get(item.sourceNo))).length;
+}
+
+export type ProsConsEntry = { evidenceNo: string; text: string };
+export type ProsConsCandidate = { candidate: string; evidenceNos: string[]; pros: ProsConsEntry[]; cons: ProsConsEntry[] };
+
+const hasContent = (text: string | null | undefined): text is string => typeof text === "string" && text.trim() !== "" && text.trim() !== "未見";
+
+/**
+ * 技術優缺點矩陣（唯讀；AC-R2P-06-5）：依候選技術分組，**只列有證據列的候選**（沒有候選名的列不歸任何組、只存在於範圍的候選不憑空出現）。
+ * 優點＝該候選各證據列的論點（`claim`）；缺點＝失敗與批評（F3）、限制（F6）與判為削弱或限縮（WEAKEN／LIMIT）的反證說明；每格帶 `evidenceNo`（畫面上的 `[E-NNN]` 連結）。
+ * 候選依第一次出現的順序排列。
+ */
+export function prosConsMatrix(matrix: Pick<ResearchEvidenceMatrix, "items" | "counterEvidence">): ProsConsCandidate[] {
+  const groups = new Map<string, ProsConsCandidate>();
+  for (const item of matrix.items) {
+    const name = (item.candidate ?? "").trim();
+    if (name === "") continue;
+    const group = groups.get(name) ?? { candidate: name, evidenceNos: [], pros: [], cons: [] };
+    groups.set(name, group);
+    group.evidenceNos.push(item.evidenceNo);
+    if (hasContent(item.claim)) group.pros.push({ evidenceNo: item.evidenceNo, text: item.claim });
+    for (const text of [item.f3Critique, item.f6Limits]) if (hasContent(text)) group.cons.push({ evidenceNo: item.evidenceNo, text });
+  }
+  for (const counter of matrix.counterEvidence) {
+    if (counter.conclusion !== "WEAKEN" && counter.conclusion !== "LIMIT") continue;
+    const group = [...groups.values()].find((g) => g.evidenceNos.includes(counter.evidenceNo));
+    if (group !== undefined && hasContent(counter.note)) group.cons.push({ evidenceNo: counter.evidenceNo, text: counter.note });
+  }
+  return [...groups.values()];
+}
+
+/** 外部網址只有「合法的 https、沒有帳密」才可成為連結（外部來源是資料不是指令：`javascript:`、`data:` 等一律只顯示文字）；回正規化後的網址或 null。 */
+export function safeExternalHref(url: string | null | undefined): string | null {
+  if (typeof url !== "string" || url === "") return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" && parsed.username === "" && parsed.password === "" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── 議題面板（FR-R2P-04；AT-960-19-7）───────────────────────────────────────────────────
+
+export type ResearchFailure = {
+  /** `exit_reason`（取自游標的 `flowDetail`；沒有說明時為空字串） */
+  reason: string;
+  /** `no_evidence` 沒有任何來源取得成功，沒有 checkpoint 可續，只能重試；其餘（`token_guard_halt`、`step_timeout`…）從 checkpoint 續跑 */
+  action: "resume" | "retry";
+  text: string;
+};
+
+/**
+ * 研究階段失敗（步驟 1 且 `flow_status=FAILED`，初始化失敗不算）的呈現：橫幅「研究未完成：原因」加「續跑」，`no_evidence` 則是「研究失敗」加「重試」。
+ * 失敗的研究不得顯示為完成（AC-R2P-04-5）；沒有失敗回 null。
+ */
+export function researchFailureOf(project: Pick<ResearchProjectSummary, "flowStep" | "flowStatus" | "flowDetail">): ResearchFailure | null {
+  if (project.flowStep !== "topic" || project.flowStatus !== "FAILED" || isInitFailed(project)) return null;
+  const reason = project.flowDetail.trim();
+  if (reason === "no_evidence") return { reason, action: "retry", text: `研究失敗：沒有任何來源取得成功（${reason}）` };
+  return { reason, action: "resume", text: `研究未完成：${reason === "" ? "後端沒有提供原因" : reason}` };
+}
+
+/** 容器模式（Bridge 映像沒有 `claude`）下「啟動深研」停用時顯示的說明（AC-R2P-04-11；逐字）。 */
+export const MOCK_ONLY_NOTICE = "容器模式只跑 mock claude 的驗收；真研究限本機模式";
+
+/**
+ * 研究環境不允許啟動深研的原因（沒有擋就回 null）：探針失敗、尚未載入、Bridge 沒連上資料庫（研究不降級成純檔案模式）、容器模式、找不到 `claude`。
+ * 伺服器端不因 mock-only 拒絕（供 API 直呼驗證），所以這只是 UI 的停用說明。
+ */
+export function researchEnvironmentBlock(capabilities: Pick<ResearchCapabilities, "mode" | "db" | "claudeCli"> | undefined, probeFailed: boolean): string | null {
+  if (probeFailed) return "無法確認研究環境（Bridge 不可用或沒有回應），暫時不能啟動研究";
+  if (capabilities === undefined) return "正在檢查研究環境…";
+  if (!capabilities.db) return "Bridge 沒有連上資料庫：研究需要資料庫，不會降級成純檔案模式";
+  if (capabilities.mode === "mock-only") return MOCK_ONLY_NOTICE;
+  if (!capabilities.claudeCli.ok) return "找不到 claude 命令列工具，請先在本機安裝並登入";
+  return null;
+}
+
+export type ResearchScopeView = {
+  layers: Record<"academic" | "industry" | "oss" | "community", boolean>;
+  techStack: string;
+  inScope: string[];
+  outOfScope: string[];
+  recencyYears: number | null;
+  applicabilityAxes: string[];
+};
+
+/** 專案詳情的 `scope`（自由形狀的 JSON）整理成畫面要的唯讀內容；缺欄、型別不對一律當空值，不丟例外。 */
+export function readResearchScope(scope: Record<string, unknown>): ResearchScopeView {
+  const layers = isRecord(scope.layers) ? scope.layers : {};
+  const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "") : []);
+  return {
+    layers: { academic: layers.academic === true, industry: layers.industry === true, oss: layers.oss === true, community: layers.community === true },
+    techStack: typeof scope.techStack === "string" ? scope.techStack : "",
+    inScope: strings(scope.inScope),
+    outOfScope: strings(scope.outOfScope),
+    recencyYears: typeof scope.recencyYears === "number" ? scope.recencyYears : null,
+    applicabilityAxes: strings(scope.applicabilityAxes),
+  };
+}
+
+// ── 研究來源設定（FR-R2P-04；AT-960-19-8）──────────────────────────────────────────────
+
+/** 契約 §1.2：小寫 host、無 scheme、埠、路徑與帳密（DB CHECK 同式）。 */
+export const ALLOWLIST_HOST_PATTERN = /^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$/;
+export const ALLOWLIST_PURPOSE_MAX = 200;
+export const ALLOWLIST_INTERVAL_MIN = 1;
+export const ALLOWLIST_INTERVAL_MAX = 3600;
+export const ALLOWLIST_DEFAULT_INTERVAL = 5;
+
+export const ALLOWLIST_LIST_KIND_LABEL: Readonly<Record<ResearchAllowlistRequest["listKind"], string>> = { WEB: "Web 層（產業網域）", FETCH: "原生抓取" };
+export const ALLOWLIST_LAYER_OPTIONS: ReadonlyArray<{ id: ResearchSourceLayer; label: string }> = [
+  { id: "INDUSTRY", label: SOURCE_LAYER_LABEL.INDUSTRY },
+  { id: "ACADEMIC", label: SOURCE_LAYER_LABEL.ACADEMIC },
+  { id: "OSS", label: SOURCE_LAYER_LABEL.OSS },
+  { id: "COMMUNITY", label: SOURCE_LAYER_LABEL.COMMUNITY },
+];
+
+/** Reddit 網域（`reddit.com`、`*.reddit.com`、`redd.it`）：加入清單須先確認「已自建 Reddit 應用並接受其條款」（D-17；422 `terms_ack_required`）。 */
+export function isRedditHost(host: string): boolean {
+  const value = host.trim().toLowerCase();
+  return value === "reddit.com" || value.endsWith(".reddit.com") || value === "redd.it";
+}
+
+export type AllowlistForm = {
+  listKind: ResearchAllowlistRequest["listKind"];
+  host: string;
+  layer: string;
+  purpose: string;
+  tosNote: string;
+  /** 輸入框的字串（驗證後才轉整數） */
+  minIntervalSeconds: string;
+  tosAcknowledged: boolean;
+};
+export type AllowlistFormField = "host" | "layer" | "purpose" | "minIntervalSeconds" | "tosAcknowledged";
+
+/** 主機名稱先去頭尾空白並轉小寫再驗（貼進大小寫混用的網域是常見情形，轉換不改變語意）。 */
+export function normalizeAllowlistHost(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+/** 研究來源設定的新增表單驗證（前端只為更早給回饋；後端輸入閘與 Bridge 入口各再擋一次）：逐欄回第一則錯誤，沒有錯誤回空物件。 */
+export function allowlistFormErrors(form: AllowlistForm): Partial<Record<AllowlistFormField, string>> {
+  const errors: Partial<Record<AllowlistFormField, string>> = {};
+  const host = normalizeAllowlistHost(form.host);
+  if (host === "") errors.host = "請輸入主機名稱";
+  else if (/[/:@?#\s]/.test(host)) errors.host = "只輸入主機名稱，不要含 https://、埠號、路徑或帳密";
+  else if (!ALLOWLIST_HOST_PATTERN.test(host)) errors.host = "主機名稱只能是英數、點與連字號，且以英數開頭與結尾";
+  if (!ALLOWLIST_LAYER_OPTIONS.some((option) => option.id === form.layer)) errors.layer = "請選擇來源層";
+  if (Array.from(form.purpose.trim()).length > ALLOWLIST_PURPOSE_MAX) errors.purpose = `用途最多 ${ALLOWLIST_PURPOSE_MAX} 個字`;
+  const interval = Number(form.minIntervalSeconds);
+  if (form.minIntervalSeconds.trim() === "" || !Number.isInteger(interval) || interval < ALLOWLIST_INTERVAL_MIN || interval > ALLOWLIST_INTERVAL_MAX)
+    errors.minIntervalSeconds = `最小間隔須為 ${ALLOWLIST_INTERVAL_MIN} 至 ${ALLOWLIST_INTERVAL_MAX} 的整數（秒）`;
+  if (host !== "" && isRedditHost(host) && !form.tosAcknowledged) errors.tosAcknowledged = "Reddit 網域須先勾選「已自建 Reddit 應用並接受其條款」";
+  return errors;
+}
+
+/** 表單轉請求本文（camelCase）：`tosAcknowledged` 只有 Reddit 網域才可能為真。 */
+export function toAllowlistRequest(form: AllowlistForm): ResearchAllowlistRequest {
+  const host = normalizeAllowlistHost(form.host);
+  return {
+    listKind: form.listKind,
+    host,
+    layer: form.layer,
+    purpose: form.purpose.trim(),
+    tosNote: form.tosNote.trim(),
+    minIntervalSeconds: Number(form.minIntervalSeconds),
+    tosAcknowledged: isRedditHost(host) && form.tosAcknowledged,
+  };
 }

@@ -35,10 +35,10 @@ export const EVENTS: ResearchEvent[] = [
   event(14, "research.alert", "topic", 13, { kind: "DENIED_FETCH", detail: "api.example.com 不在允許清單" }),
 ];
 
-/** 依 `afterSeq`（嚴格大於）與 `limit` 切一頁，回應形狀同 API-RP-05：`truncated` 為真時 `nextSeq` 是本頁最後一筆的 seq。 */
+/** 依 `afterSeq`（嚴格大於）與 `limit` 切一頁，回應形狀同 API-RP-05：`nextSeq` 恆有值＝本頁最後一筆的 seq（沒有事件時為請求的 `afterSeq`；schema.d.ts `EventPage`）。 */
 export function eventPage(events: readonly ResearchEvent[], afterSeq = 0, limit = 500): ResearchEventPage {
   const rest = events.filter((e) => e.seq > afterSeq);
   const items = rest.slice(0, limit);
   const truncated = rest.length > items.length;
-  return { items, nextSeq: truncated ? items[items.length - 1].seq : null, truncated };
+  return { items, nextSeq: items.length > 0 ? items[items.length - 1].seq : afterSeq, truncated };
 }

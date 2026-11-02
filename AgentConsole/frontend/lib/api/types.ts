@@ -643,8 +643,8 @@ export type ResearchEvent = {
   payload: Record<string, unknown>;
   occurredAt: string;
 };
-/** `GET …/events?afterSeq=&limit=`（單頁上限 500）：`truncated` 為真時以 `nextSeq` 續抓。 */
-export type ResearchEventPage = { items: ResearchEvent[]; nextSeq: number | null; truncated: boolean };
+/** `GET …/events?afterSeq=&limit=`（單頁上限 500）：`truncated` 為真時以 `nextSeq` 續抓；`nextSeq` 恆有值（schema.d.ts 與後端一致）。 */
+export type ResearchEventPage = { items: ResearchEvent[]; nextSeq: number; truncated: boolean };
 
 export type ResearchSourceLayer = "ACADEMIC" | "INDUSTRY" | "OSS" | "COMMUNITY";
 export type ResearchSourceFetch = {
@@ -665,7 +665,8 @@ export type ResearchSource = {
   tier: "T1" | "T2" | "T3";
   verification: "V1" | "V2" | "V3";
   anchorKind: "URL" | "DOI" | "COMMIT";
-  url: string;
+  /** DOI 或 git commit 定位的來源可能沒有網址（schema.d.ts 與後端一致）。 */
+  url: string | null;
   doi: string | null;
   gitCommit: string | null;
   title: string;
@@ -802,10 +803,11 @@ export type ResearchApproveResult = { gateDecisionId: string; stage: string; spe
 export type ResearchReturnResult = { gateDecisionId: string; fsmRetryCount: number; escalated: boolean };
 
 export type ResearchAllowlistEntry = {
-  id: string;
+  /** 部署環境變數基底（`source=ENV`）的條目沒有資料列：`id` 與 `layer` 為 null，不可 PATCH。 */
+  id: string | null;
   listKind: "FETCH" | "WEB";
   host: string;
-  layer: string;
+  layer: string | null;
   purpose: string;
   tosNote: string;
   minIntervalSeconds: number;
@@ -854,8 +856,8 @@ export type ResearchCreateScope = {
 };
 export type ResearchCreateRequest = { slug: string; title: string; topic: string; scope: ResearchCreateScope; depthLevel: ResearchDepthLevel; targetScopeHint?: ResearchTargetScopeHint };
 export type ResearchSavePrdRequest = { baseVersion: number; content: string; changeSummary?: string };
-/** `prdVersion` 的型別契約未定（§1.4 只寫「須為 head 且有 passed 輪」）：schema.d.ts 重產後收斂。 */
-export type ResearchApproveRequest = { prdVersion: string | number; expectedDigests: Record<string, string>; reason?: string };
+/** `prdVersion` 是整數 versionNo（須為 head 且有通過的審查輪；schema.d.ts 與後端一致）。 */
+export type ResearchApproveRequest = { prdVersion: number; expectedDigests: Record<string, string>; reason?: string };
 export type ResearchReturnRequest = { reason: string };
 /** 無 `generation`＝重試初始化（冪等）；`generation: "next"`＝換世代（僅 ADMIN，`reason` 必填 1～500 字；D-60、D-64）。 */
 export type ResearchReinitRequest = { generation?: "next"; reason?: string };
