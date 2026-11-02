@@ -82,10 +82,10 @@ class BackupJobMigrationIT {
     private static String snapshotOfExistingTables(JdbcTemplate jdbc) {
         String columns = jdbc.queryForObject("select string_agg(table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' "
                 + "|| coalesce(character_maximum_length::text, '-') || ':' || coalesce(column_default, '-'), ';' order by table_name, ordinal_position) "
-                + "from information_schema.columns where table_schema = 'console' and table_name <> 'backup_jobs'", String.class);
+                + "from information_schema.columns where table_schema = 'console' and table_name <> 'backup_jobs' and table_name not like 'research\\_%'", String.class);
         String constraints = jdbc.queryForObject("select string_agg(conrelid::regclass::text || '.' || conname || ':' || pg_get_constraintdef(oid), ';' "
                 + "order by conrelid::regclass::text, conname) from pg_constraint where connamespace = 'console'::regnamespace "
-                + "and conrelid::regclass::text <> 'console.backup_jobs'", String.class);
+                + "and conrelid::regclass::text <> 'console.backup_jobs' and conrelid::regclass::text not like 'console.research\\_%'", String.class);
         return columns + "|" + constraints;
     }
 
@@ -165,7 +165,7 @@ class BackupJobMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15");
+                "11", "12", "13", "14", "15", "16", "17", "18");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }
