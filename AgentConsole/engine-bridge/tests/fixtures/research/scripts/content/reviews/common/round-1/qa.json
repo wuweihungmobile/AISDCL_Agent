@@ -1,0 +1,66 @@
+{
+  "schema_rev": 1,
+  "round": 1,
+  "dimension": "QA",
+  "agent_id": "qa-tester",
+  "prd_sha256": "0fa8b8c949bdc75bd428f70816fbbc2a819d850438ce2ede65cdf15b435c4088",
+  "rubric": [
+    {
+      "item": "us_ambiguity",
+      "score": 14,
+      "max": 20,
+      "note": "核對 §5.1：兩個 User Story 的名詞皆已定義，但仍有缺口"
+    },
+    {
+      "item": "gwt_automatable",
+      "score": 14,
+      "max": 20,
+      "note": "核對 §5.2：AC 的 Then 可直接寫成自動化斷言，但仍有缺口"
+    },
+    {
+      "item": "edge_case_coverage",
+      "score": 14,
+      "max": 20,
+      "note": "核對 §5.1：邊界條件涵蓋上限、空值與失敗，但仍有缺口"
+    },
+    {
+      "item": "traceability",
+      "score": 14,
+      "max": 20,
+      "note": "核對 §14：EPIC 到 AC 的追溯沒有斷鏈，ID 格式合規，但仍有缺口"
+    },
+    {
+      "item": "nfr_testability",
+      "score": 14,
+      "max": 20,
+      "note": "核對 §6：NFR 皆有量測法，但仍有缺口"
+    }
+  ],
+  "score": 70,
+  "summary": "AC 多數可自動化；缺口在 AC-001-2 的可觀察斷言與 NFR-002 的量測法",
+  "defects": [
+    {
+      "code": "QA-GWT_AUTOMATABLE-01",
+      "severity": "P2",
+      "prd_anchor": "§5.2/AC-001-2",
+      "description": "Then 子句沒有可量測的狀態變更，無法寫成自動化斷言",
+      "suggestion": "補上預期的狀態碼與欄位值",
+      "evidence_refs": []
+    },
+    {
+      "code": "QA-NFR_TESTABILITY-01",
+      "severity": "P2",
+      "prd_anchor": "§6/NFR-002",
+      "description": "資安與防護的目標缺量測法，無法判定是否達標",
+      "suggestion": "補上量測法與通過門檻",
+      "evidence_refs": []
+    }
+  ],
+  "qa_extra": {
+    "slv_manual_check": {
+      "ac_total": 4,
+      "ac_testable": 3,
+      "notes": "逐條人讀；AC-001-2 的 Then 不可觀察"
+    }
+  }
+}

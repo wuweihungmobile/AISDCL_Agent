@@ -1,0 +1,58 @@
+{
+  "schema_rev": 1,
+  "round": 2,
+  "dimension": "QA",
+  "agent_id": "qa-tester",
+  "prd_sha256": "835f732adfcf44c7a2e2ba74154691e6f42d48a1e4a0aa02806b97589fd00409",
+  "rubric": [
+    {
+      "item": "us_ambiguity",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §5.1：兩個 User Story 的名詞皆已定義；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "gwt_automatable",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §5.2：AC 的 Then 可直接寫成自動化斷言；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "edge_case_coverage",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §5.1：邊界條件涵蓋上限、空值與失敗；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "traceability",
+      "score": 15,
+      "max": 20,
+      "note": "已核對 §14：EPIC 到 AC 的追溯沒有斷鏈，ID 格式合規；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "nfr_testability",
+      "score": 15,
+      "max": 20,
+      "note": "已核對 §6：NFR 皆有量測法；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 78,
+  "summary": "AC 皆可自動化；F-002 的邊界條件仍缺並發與空檔案",
+  "defects": [
+    {
+      "code": "QA-EDGE_CASE_COVERAGE-01",
+      "severity": "P2",
+      "prd_anchor": "§5.1/F-002",
+      "description": "F-002 的邊界條件缺少並發重跑與空檔案的處理",
+      "suggestion": "補並發重跑與 0 位元組文件的行為",
+      "evidence_refs": []
+    }
+  ],
+  "qa_extra": {
+    "slv_manual_check": {
+      "ac_total": 4,
+      "ac_testable": 4,
+      "notes": "逐條人讀；四條 AC 的 Then 皆可寫成自動化斷言"
+    }
+  }
+}

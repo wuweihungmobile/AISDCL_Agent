@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 2,
+  "dimension": "PRODUCT",
+  "agent_id": "pm-po",
+  "prd_sha256": "835f732adfcf44c7a2e2ba74154691e6f42d48a1e4a0aa02806b97589fd00409",
+  "rubric": [
+    {
+      "item": "business_value",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §1.2：痛點有量化基準，目標用戶明確；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "metric_measurability",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §1.3：成功指標有數值與量測時間點；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "scope_discipline",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §3.2：範圍外已列明，沒有需求蔓延；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "prioritization",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §3.1：兩個 Feature 的優先級已排序；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "evidence_grounding",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §1.2：結論與證據矩陣一致，沒有引用 V1 的列；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 85,
+  "summary": "範圍清楚；優先級用語仍不一致",
+  "defects": [
+    {
+      "code": "PROD-PRIORITIZATION-01",
+      "severity": "P3",
+      "prd_anchor": "§3.1",
+      "description": "MVP 清單的優先級欄混用 P0 與 Must",
+      "suggestion": "統一為 P0／P1／P2",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -29,7 +29,7 @@ from .decompose import BrainFactory, DecomposeService, DraftStore, default_brain
 from .errors import ApiError
 from .health import deep_health
 from .locks import AdvisoryLock
-from .routers import autoclaude, sdd, si
+from .routers import autoclaude, research, sdd, si
 from .runner import RunManager
 from .security import AuditLog
 from .settings import Settings, load_settings
@@ -102,6 +102,7 @@ def create_app(settings: Settings | None = None, *,
     app.include_router(autoclaude.router)
     app.include_router(sdd.router)
     app.include_router(si.router)
+    app.include_router(research.router)
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:

@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 3,
+  "dimension": "ARCHITECTURE",
+  "agent_id": "sd-architect",
+  "prd_sha256": "50d0eb2b3e647007d4dc316613664b134ca2679ebfa4885aa04e9614dd2356e9",
+  "rubric": [
+    {
+      "item": "coupling",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §9.3：API 與渲染工作的邊界清楚，相依方向單一；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "dependency_risk",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §9.4：兩個候選相依都有授權與依據，維護狀態已逐項說明；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "performance_bounds",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §6/NFR-001：吞吐量與延遲目標有數值，與架構相稱；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "data_interface",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.2：資料模型與三個 API 足以據以實作；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "evidence_fit",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §1.2：選型結論由 E-001 與 E-002 支撐；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 82,
+  "summary": "效能條件已補齊；API 責任邊界仍可再收斂",
+  "defects": [
+    {
+      "code": "ARCH-COUPLING-01",
+      "severity": "P3",
+      "prd_anchor": "§9.3",
+      "description": "API-002 與 API-003 的責任有重疊，查詢與重跑共用同一個失敗清單模型",
+      "suggestion": "於 9.3 說明兩者共用的資料模型與責任邊界",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "schema_rev": 1,
+  "round": 1,
+  "dimension": "ARCHITECTURE",
+  "agent_id": "sd-architect",
+  "prd_sha256": "0fa8b8c949bdc75bd428f70816fbbc2a819d850438ce2ede65cdf15b435c4088",
+  "rubric": [
+    {
+      "item": "coupling",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.3：API 與渲染工作的邊界清楚，相依方向單一；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "dependency_risk",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.4：兩個候選相依都有授權與依據，維護狀態已逐項說明；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "performance_bounds",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §6/NFR-001：吞吐量與延遲目標有數值，與架構相稱；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "data_interface",
+      "score": 15,
+      "max": 20,
+      "note": "已核對 §9.2：資料模型與三個 API 足以據以實作；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "evidence_fit",
+      "score": 15,
+      "max": 20,
+      "note": "已核對 §1.2：選型結論由 E-001 與 E-002 支撐；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 78,
+  "summary": "整體結構清楚；主要缺口是相依的維護狀態",
+  "defects": [
+    {
+      "code": "ARCH-DEPENDENCY_RISK-01",
+      "severity": "P2",
+      "prd_anchor": "§9.4",
+      "description": "外部相依表未載每個相依的維護者人數與最近提交，無法評估停更風險",
+      "suggestion": "於 9.4 補維護狀態欄並引用對應證據列",
+      "evidence_refs": [
+        "E-002"
+      ]
+    }
+  ]
+}

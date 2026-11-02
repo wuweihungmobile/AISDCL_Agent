@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 2,
+  "dimension": "ARCHITECTURE",
+  "agent_id": "sd-architect",
+  "prd_sha256": "835f732adfcf44c7a2e2ba74154691e6f42d48a1e4a0aa02806b97589fd00409",
+  "rubric": [
+    {
+      "item": "coupling",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.3：API 與渲染工作的邊界清楚，相依方向單一；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "dependency_risk",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.4：兩個候選相依都有授權與依據，維護狀態已逐項說明；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "performance_bounds",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §6/NFR-001：吞吐量與延遲目標有數值，與架構相稱；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "data_interface",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §9.2：資料模型與三個 API 足以據以實作；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "evidence_fit",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §1.2：選型結論由 E-001 與 E-002 支撐；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 80,
+  "summary": "相依維護狀態已補齊；剩效能量測條件",
+  "defects": [
+    {
+      "code": "ARCH-PERFORMANCE_BOUNDS-01",
+      "severity": "P3",
+      "prd_anchor": "§6/NFR-001",
+      "description": "提交 API 的 P99 目標沒有說明量測條件（資料量與並發數）",
+      "suggestion": "於 NFR-001 補資料量與並發數",
+      "evidence_refs": []
+    }
+  ]
+}

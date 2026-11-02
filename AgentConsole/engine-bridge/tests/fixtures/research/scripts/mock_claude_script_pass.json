@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "steps": [
+    {
+      "role": "research",
+      "round": 0,
+      "writes": [
+        {
+          "path": "00_research/evidence_items.json",
+          "from": "content/evidence_items.json"
+        }
+      ]
+    },
+    {
+      "role": "draft",
+      "round": 0,
+      "writes": [
+        {
+          "path": "01_specs/PRD_draft.md",
+          "from": "content/PRD_v1.md"
+        },
+        {
+          "path": "01_specs/adr_draft.md",
+          "from": "content/adr_draft.md"
+        }
+      ]
+    },
+    {
+      "role": "review-architecture",
+      "round": 1,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-1/architecture.json",
+          "from": "content/reviews/common/round-1/architecture.json"
+        }
+      ]
+    },
+    {
+      "role": "review-product",
+      "round": 1,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-1/product.json",
+          "from": "content/reviews/common/round-1/product.json"
+        }
+      ]
+    },
+    {
+      "role": "review-qa",
+      "round": 1,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-1/qa.json",
+          "from": "content/reviews/common/round-1/qa.json"
+        }
+      ]
+    },
+    {
+      "role": "review-security",
+      "round": 1,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-1/security.json",
+          "from": "content/reviews/common/round-1/security.json"
+        }
+      ]
+    },
+    {
+      "role": "revise",
+      "round": 1,
+      "writes": [
+        {
+          "path": "01_specs/PRD_draft.md",
+          "from": "content/PRD_v2.md"
+        }
+      ]
+    },
+    {
+      "role": "review-architecture",
+      "round": 2,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-2/architecture.json",
+          "from": "content/reviews/pass/round-2/architecture.json"
+        }
+      ]
+    },
+    {
+      "role": "review-product",
+      "round": 2,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-2/product.json",
+          "from": "content/reviews/pass/round-2/product.json"
+        }
+      ]
+    },
+    {
+      "role": "review-qa",
+      "round": 2,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-2/qa.json",
+          "from": "content/reviews/pass/round-2/qa.json"
+        }
+      ]
+    },
+    {
+      "role": "review-security",
+      "round": 2,
+      "writes": [
+        {
+          "path": "02_governance/reviews/round-2/security.json",
+          "from": "content/reviews/pass/round-2/security.json"
+        }
+      ]
+    }
+  ]
+}

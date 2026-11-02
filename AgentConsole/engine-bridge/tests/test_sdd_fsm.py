@@ -30,7 +30,9 @@ _D16_KEYS = {"human_pending", "retry_history", "rtm_coverage"}
 #: （app/fsm_phase.py；W4 dogfood 產物）；`recovery` 只在 ESCALATION／ESCALATION_FINAL 時出現、
 #: 其餘情形鍵缺席（契約 §3.1.4 (c)），所以不在常態鍵集合裡。
 _V15_KEYS = {"phase", "escalation_history", "escalation_provenance", "fsm_project"}
-_NEW_KEYS = _D16_KEYS | _V15_KEYS
+#: ResearchToPRD（D-59(4)）：`retry_history` 的同級新鍵（各登記閘的 current_count 與 entries）。
+_R2P_KEYS = {"retry_gates"}
+_NEW_KEYS = _D16_KEYS | _V15_KEYS | _R2P_KEYS
 _LIST_KEYS = {"project", "source", "current_state", "updated_at"}
 
 

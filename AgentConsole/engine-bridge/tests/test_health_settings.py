@@ -88,6 +88,34 @@ def test_outside_a_monorepo_the_default_roots_are_only_the_workspace(
     assert cfg.allowed_path_roots == ((tmp_path / "ws").resolve(),)
 
 
+def test_research_defaults_match_the_documented_table_and_stay_outside_the_repo() -> None:
+    """ResearchToPRD（AT-960-2-E-1 的設定表面）：預設值、預設工作區根在 repo 外且不動允許根。"""
+    cfg = load_settings({})
+    assert cfg.research_max_concurrent_runs == 1 and cfg.research_step_timeout_seconds == 1200
+    assert cfg.research_fetch_allowlist == (
+        "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
+        "api.stackexchange.com")
+    assert cfg.research_web_allowlist == () and cfg.research_write_token is None
+    assert (cfg.research_fetch_max_bytes, cfg.research_fetch_timeout_seconds) == (5242880, 20.0)
+    assert not str(cfg.research_root).startswith(str(REPO_ROOT.resolve()))
+    assert cfg.research_root not in cfg.allowed_path_roots, "研究面沒啟用時不動允許根"
+
+
+@pytest.mark.parametrize(("name", "value"), [
+    ("BRIDGE_RESEARCH_WRITE_TOKEN", "short"),
+    ("BRIDGE_RESEARCH_WRITE_TOKEN", "<YOUR_BRIDGE_RESEARCH_WRITE_TOKEN_MIN_32_CHARS>"),
+    ("BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS", "0"),
+    ("BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS", "0"),
+    ("BRIDGE_RESEARCH_FETCH_MAX_BYTES", "-1"),
+    ("BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS", "nan"),
+    ("BRIDGE_RESEARCH_FETCH_ALLOWLIST", "https://arxiv.org"),
+])
+def test_invalid_research_values_fail_loud_at_startup(name: str, value: str) -> None:
+    with pytest.raises(SettingsError) as caught:
+        load_settings({name: value})
+    assert name in str(caught.value)
+
+
 def test_health_has_the_contract_shape(bridge) -> None:
     import autoclaude
 

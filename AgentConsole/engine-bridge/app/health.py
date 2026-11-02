@@ -20,6 +20,10 @@
               healthcheck 都打這一支，503 會被當成 Bridge 不可用）。所以 `sdd.ok` 為 false 時
               整體照常 200，頂層 `reason` 也只列前四項的失敗。（契約 v1.4 §3.1.1，主控裁定）
 
+另帶頂層資訊欄 `research`（ResearchToPRD；ADR-003 D10）：`research_info` 的固定鍵集合（mode、
+root、db、claude_cli、gh_cli、git、web_layer_enabled、scaffold_templates），量不到的項目標
+`NOT-EVALUABLE`；與 `sdd` 一樣只當資訊，永遠不影響整體判定與 HTTP 狀態。
+
 Windows 行為＝`git` 由 CreateProcess 依 PATH 解析（找不到同樣是 FileNotFoundError）；spawn 參數走
 `procutil.popen_platform_kwargs()`（CREATE_NO_WINDOW 等，與引擎 spawn 同一個來源）。
 """
@@ -32,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from . import procutil
+from .research.settings import research_info
 from .settings import Settings
 
 #: `git --version` 的逾時秒數（契約 §3.1.1：5 秒）。
@@ -141,6 +146,8 @@ def deep_health(cfg: Settings, db: Any | None) -> tuple[int, dict[str, Any]]:
     }
     failed = [f"{name}: {check['reason']}" for name, check in checks.items()
               if name not in _INFORMATIONAL_CHECKS and check["ok"] is False]
+    research = research_info(cfg)
     if not failed:
-        return 200, {"status": "ok", "checks": checks}
-    return 503, {"status": "degraded", "reason": "；".join(failed), "checks": checks}
+        return 200, {"status": "ok", "checks": checks, "research": research}
+    return 503, {"status": "degraded", "reason": "；".join(failed), "checks": checks,
+                 "research": research}

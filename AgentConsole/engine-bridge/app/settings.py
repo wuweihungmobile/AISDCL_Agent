@@ -51,6 +51,44 @@
                               BRIDGE_SI_WRITE_TOKEN 皆有設（未啟用時三個寫入端點一律 503
                               `si_write_disabled`）。docker compose 把它以可寫 bind 掛到主機的
                               `<AUTOSDD_SI_DIR>/console_audit`（其餘 SI bind 皆唯讀）
+  BRIDGE_RESEARCH_ROOT        ResearchToPRD 研究工作區根（ADR-003 D8）。預設在 **repo 外**：
+                              Windows 為家目錄（USERPROFILE）下的 .autosdd/my-project，
+                              POSIX 為 ~/.autosdd/my-project（Docker 由 compose 明設
+                              /workspace/my-project）。不可是檔案系統根。研究面啟用（明設
+                              本變數，或設了寫入權杖）且明設了 BRIDGE_ALLOWED_PATH_ROOTS 時，
+                              必須落在其中某個根之下，否則啟動即 SettingsError；啟用時並自動
+                              併入允許根（`/sdd/fsm/{key}?root=<工作區>` 的路徑閘靠它放行）。
+                              研究面沒啟用時不動允許根。工作區結構 `<root>/<slug>/` 下有
+                              00_research、01_specs、02_governance、03_execution；
+                              `GET /health/deep` 的 `research.root` 揭露解析結果
+  BRIDGE_RESEARCH_WRITE_TOKEN 研究寫入面權杖（HTTP 標頭 `X-Bridge-Token`；backend 的
+                              `console.bridge.research-write-token` 與它同值；與 SDD、SI 的
+                              權杖是三個獨立的值）。規則同 BRIDGE_SI_WRITE_TOKEN：未設＝停用
+                              （寫入端點 503 `research_write_disabled`）；有設但短於 32 字元
+                              或仍是 `<…>` 佔位＝啟動即 SettingsError。研究端點另需
+                              BRIDGE_DB_DSN：無 DSN 一律 503 `research_requires_db`，不降級成
+                              純檔案模式。引擎、FSM、git 子行程的環境一律不含它；repo 內不放真值
+  BRIDGE_RESEARCH_FETCH_ALLOWLIST
+                              Bridge 原生抓取（API 層）的主機基底，逗號分隔；預設
+                              export.arxiv.org、arxiv.org、api.semanticscholar.org、
+                              api.github.com、api.stackexchange.com。有效清單＝本變數 ∪ 啟用中的
+                              ADMIN 條目；與 BRIDGE_OUTBOUND_ALLOWLIST（模型端點）是兩份獨立清單
+  BRIDGE_RESEARCH_WEB_ALLOWLIST
+                              headless WebSearch／WebFetch 的網域基底，逗號分隔；**預設空＝
+                              Web 層關閉**（產業層需 ADMIN 逐一加入；有效清單同上）
+  BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS
+                              同時 stage run 數（預設 1；額度保守）
+  BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS
+                              每個 stage run 的步驟牆鐘秒數（預設 1200；1～86400），寫入
+                              `config_overrides.playbook.step_timeout_seconds`；請求 env 的
+                              CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS 與它同源（乘 1000）
+  BRIDGE_RESEARCH_CLAUDE_COMMAND
+                              stage run 的 `claude.command`（未設＝引擎預設的 claude）；
+                              Docker 全棧 E2E 設 aisdlc-mock-claude
+  BRIDGE_RESEARCH_FETCH_MAX_BYTES
+                              原生抓取單一回應的位元組上限（預設 5242880＝5 MiB）
+  BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS
+                              原生抓取的逾時秒數（預設 20）
 """
 from __future__ import annotations
 
@@ -65,9 +103,21 @@ from pathlib import Path
 DEFAULT_OUTBOUND_ALLOWLIST = ("api.minimax.io", "api.minimax.chat", "localhost", "127.0.0.1")
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _SDD_DIR_RE = re.compile(r"^AISDLC_SDD_v(\d+)\.(\d+)$")
-#: 寫入權杖的最短長度（≥32 字元隨機；`openssl rand -hex 32` 得 64 字元）。SDD 與 SI 兩個寫入面共用。
+#: 寫入權杖的最短長度（≥32 字元隨機；`openssl rand -hex 32` 得 64 字元）。
+#: SDD、SI、研究三個寫入面共用。
 SDD_WRITE_TOKEN_MIN_LEN = 32
 SI_WRITE_TOKEN_MIN_LEN = SDD_WRITE_TOKEN_MIN_LEN
+RESEARCH_WRITE_TOKEN_MIN_LEN = SDD_WRITE_TOKEN_MIN_LEN
+
+#: 研究面（ResearchToPRD；ADR-003 D7／D8、Architecture §9.4）的預設值——唯一一份，產品碼與測試共用
+#: （解析邏輯在 `app/research/settings.py`，它從這裡 import）。
+RESEARCH_DEFAULT_FETCH_ALLOWLIST = (
+    "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
+    "api.stackexchange.com")
+RESEARCH_DEFAULT_MAX_CONCURRENT_RUNS = 1
+RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS = 1200
+RESEARCH_DEFAULT_FETCH_MAX_BYTES = 5 * 1024 * 1024
+RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS = 20.0
 
 # <monorepo>/AgentConsole/engine-bridge
 BRIDGE_DIR = Path(__file__).resolve().parents[1]
@@ -92,6 +142,20 @@ class Settings:
     stop_grace_seconds: float
     allowed_path_roots: tuple[Path, ...]
     outbound_allowlist: tuple[str, ...]
+    #: ResearchToPRD 研究面（`BRIDGE_RESEARCH_*`；解析與驗證見 `app/research/settings.py`）。
+    #: 這幾個欄位刻意放在 `log_dir` 之前：末尾五欄的相對順序是既有測試釘住的
+    #: （`test_si_cli.py`），新欄位不往後加。
+    #: `research_root` 是已 resolve 的工作區根（`load_settings` 一律給值）；`research_write_token`
+    #: repr=False 同其他權杖，None＝研究寫入面停用。
+    research_root: Path
+    research_write_token: str | None = field(default=None, repr=False)
+    research_fetch_allowlist: tuple[str, ...] = RESEARCH_DEFAULT_FETCH_ALLOWLIST
+    research_web_allowlist: tuple[str, ...] = ()
+    research_max_concurrent_runs: int = RESEARCH_DEFAULT_MAX_CONCURRENT_RUNS
+    research_step_timeout_seconds: int = RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS
+    research_claude_command: str | None = None
+    research_fetch_max_bytes: int = RESEARCH_DEFAULT_FETCH_MAX_BYTES
+    research_fetch_timeout_seconds: float = RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS
     log_dir: Path | None = None
     #: SDD 寫入權杖；repr=False 讓 `print(settings)`／日誌不會把它帶出去。None＝寫入面停用。
     sdd_write_token: str | None = field(default=None, repr=False)
@@ -108,6 +172,12 @@ class Settings:
     def si_write_enabled(self) -> bool:
         """SI 寫入面啟用＝權杖與稽核目錄兩者皆已設定（W1）；任一缺＝三個寫入端點一律 503。"""
         return self.si_write_token is not None and self.si_audit_dir is not None
+
+    @property
+    def research_write_enabled(self) -> bool:
+        """研究寫入面啟用＝已設寫入權杖；未設＝寫入端點一律 503 `research_write_disabled`。
+        （資料庫另算：無 `db_dsn` 時研究端點 503 `research_requires_db`，與權杖互相獨立。）"""
+        return self.research_write_token is not None
 
 
 def _looks_like_monorepo(root: Path) -> bool:
@@ -224,6 +294,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             defaults.append(REPO_ROOT.resolve())
         roots = tuple(defaults)
 
+    # 研究面（ADR-003 D8）：延遲 import——`app.research.settings` 自己也 import 本模組的常數
+    # 與錯誤型別，頂層 import 會成環。
+    from .research.settings import parse_research_env
+
+    research = parse_research_env(e, allowed_roots=roots, roots_explicit=bool(raw_roots))
+
     raw_allow = e.get("BRIDGE_OUTBOUND_ALLOWLIST", "").strip()
     allowlist = tuple(h.strip().lower().rstrip(".") for h in raw_allow.split(",") if h.strip()) \
         if raw_allow else DEFAULT_OUTBOUND_ALLOWLIST
@@ -252,8 +328,17 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         db_schema=schema,
         bridge_instance=instance[:100],
         stop_grace_seconds=_parse_float(e, "BRIDGE_STOP_GRACE_SECONDS", 30.0),
-        allowed_path_roots=roots,
+        allowed_path_roots=research.allowed_roots,
         outbound_allowlist=allowlist,
+        research_root=research.root,
+        research_write_token=research.write_token,
+        research_fetch_allowlist=research.fetch_allowlist,
+        research_web_allowlist=research.web_allowlist,
+        research_max_concurrent_runs=research.max_concurrent_runs,
+        research_step_timeout_seconds=research.step_timeout_seconds,
+        research_claude_command=research.claude_command,
+        research_fetch_max_bytes=research.fetch_max_bytes,
+        research_fetch_timeout_seconds=research.fetch_timeout_seconds,
         log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
         sdd_write_token=_parse_sdd_write_token(e),
         si_root=si_root,

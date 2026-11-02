@@ -1,0 +1,58 @@
+{
+  "schema_rev": 1,
+  "round": 3,
+  "dimension": "QA",
+  "agent_id": "qa-tester",
+  "prd_sha256": "50d0eb2b3e647007d4dc316613664b134ca2679ebfa4885aa04e9614dd2356e9",
+  "rubric": [
+    {
+      "item": "us_ambiguity",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §5.1：兩個 User Story 的名詞皆已定義；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "gwt_automatable",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §5.2：AC 的 Then 可直接寫成自動化斷言；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "edge_case_coverage",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §5.1：邊界條件涵蓋上限、空值與失敗；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "traceability",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §14：EPIC 到 AC 的追溯沒有斷鏈，ID 格式合規；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "nfr_testability",
+      "score": 16,
+      "max": 20,
+      "note": "已核對 §6：NFR 皆有量測法；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 82,
+  "summary": "邊界條件已補齊；追蹤鏈的說明可再完整",
+  "defects": [
+    {
+      "code": "QA-TRACEABILITY-01",
+      "severity": "P3",
+      "prd_anchor": "§14",
+      "description": "追蹤鏈只示範單一 AC，沒有說明 AT 的對映規則",
+      "suggestion": "補 AT 編號與 AC 的對映規則",
+      "evidence_refs": []
+    }
+  ],
+  "qa_extra": {
+    "slv_manual_check": {
+      "ac_total": 4,
+      "ac_testable": 4,
+      "notes": "逐條人讀；四條 AC 的 Then 皆可寫成自動化斷言"
+    }
+  }
+}

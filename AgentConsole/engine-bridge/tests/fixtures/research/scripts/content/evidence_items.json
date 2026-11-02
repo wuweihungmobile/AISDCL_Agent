@@ -1,0 +1,419 @@
+{
+  "schema_rev": 1,
+  "issue_scope_sha256": "0000000000000000000000000000000000000000000000000000000000000001",
+  "scope_rev": 1,
+  "search_log": [
+    {
+      "id": "Q-001",
+      "layer": "INDUSTRY",
+      "tool": "WebSearch",
+      "query": "example render engine production blog",
+      "at": "2026-11-02T10:05:00+08:00",
+      "result_urls": [
+        "https://example.org/blog/example-post"
+      ]
+    },
+    {
+      "id": "Q-002",
+      "layer": "COMMUNITY",
+      "tool": "WebSearch",
+      "query": "example render engine pitfalls forum",
+      "at": "2026-11-02T10:07:00+08:00",
+      "result_urls": [
+        "https://example.org/forum/thread-123"
+      ]
+    },
+    {
+      "id": "Q-003",
+      "layer": "ACADEMIC",
+      "tool": "WebSearch",
+      "query": "example render engine survey",
+      "at": "2026-11-02T10:09:00+08:00",
+      "result_urls": [
+        "https://example.org/papers/example-survey",
+        "https://example.org/papers/example-limits"
+      ]
+    },
+    {
+      "id": "Q-004",
+      "layer": "ACADEMIC",
+      "tool": "WebSearch",
+      "query": "example render engine limitations fails negative result",
+      "at": "2026-11-02T10:12:00+08:00",
+      "result_urls": [
+        "https://example.org/papers/example-limits"
+      ]
+    },
+    {
+      "id": "Q-005",
+      "layer": "OSS",
+      "tool": "WebSearch",
+      "query": "example-lib license incompatibility known issue",
+      "at": "2026-11-02T10:15:00+08:00",
+      "result_urls": []
+    },
+    {
+      "id": "Q-006",
+      "layer": "INDUSTRY",
+      "tool": "WebSearch",
+      "query": "example post claims does not generalize",
+      "at": "2026-11-02T10:18:00+08:00",
+      "result_urls": [
+        "https://example.org/papers/example-limits"
+      ]
+    },
+    {
+      "id": "Q-007",
+      "layer": "ACADEMIC",
+      "tool": "WebSearch",
+      "query": "example render engine batch throughput paper",
+      "at": "2026-11-02T10:20:00+08:00",
+      "result_urls": [
+        "https://example.org/papers/example-001"
+      ]
+    },
+    {
+      "id": "Q-008",
+      "layer": "OSS",
+      "tool": "WebSearch",
+      "query": "example-lib repository",
+      "at": "2026-11-02T10:22:00+08:00",
+      "result_urls": [
+        "https://example.org/repos/example-lib"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "source_no": "S-001",
+      "layer": "ACADEMIC",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "DOI",
+      "url": "https://example.org/papers/example-001",
+      "doi": "10.0000/EXAMPLE.001",
+      "git_commit": null,
+      "title": "Example Paper A",
+      "authors_org": "Example Lab",
+      "published_at": "2025-03-01",
+      "source_type": "PAPER",
+      "license_spdx": null,
+      "license_note": "論文頁面未載授權條款",
+      "clue_only": false,
+      "fetch_refs": []
+    },
+    {
+      "source_no": "S-002",
+      "layer": "OSS",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "COMMIT",
+      "url": "https://example.org/repos/example-lib",
+      "doi": null,
+      "git_commit": "0123456789abcdef0123456789abcdef01234567",
+      "title": "example-lib",
+      "authors_org": "Example Org",
+      "published_at": "2025-09-12",
+      "source_type": "REPO",
+      "license_spdx": "Apache-2.0",
+      "license_note": "取自 repo 授權檔",
+      "clue_only": false,
+      "fetch_refs": []
+    },
+    {
+      "source_no": "S-003",
+      "layer": "INDUSTRY",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "URL",
+      "url": "https://example.org/blog/example-post",
+      "doi": null,
+      "git_commit": null,
+      "title": "Example Engineering Post",
+      "authors_org": "Example Inc.",
+      "published_at": "2025-06-30",
+      "source_type": "ENG_BLOG",
+      "license_spdx": null,
+      "license_note": "部落格頁面未載授權條款",
+      "clue_only": false,
+      "fetch_refs": []
+    },
+    {
+      "source_no": "S-004",
+      "layer": "COMMUNITY",
+      "tier": "T3",
+      "verification": "V1",
+      "anchor_kind": "URL",
+      "url": "https://example.org/forum/thread-123",
+      "doi": null,
+      "git_commit": null,
+      "title": "Forum thread about example engine",
+      "authors_org": "未見",
+      "published_at": null,
+      "source_type": "FORUM",
+      "license_spdx": null,
+      "license_note": "未見",
+      "clue_only": true,
+      "fetch_refs": []
+    },
+    {
+      "source_no": "S-005",
+      "layer": "ACADEMIC",
+      "tier": "T2",
+      "verification": "V2",
+      "anchor_kind": "URL",
+      "url": "https://example.org/papers/example-survey",
+      "doi": null,
+      "git_commit": null,
+      "title": "Example Survey of Render Engines",
+      "authors_org": "Example Survey Group",
+      "published_at": "2025-11-20",
+      "source_type": "PREPRINT",
+      "license_spdx": null,
+      "license_note": "預印本頁面未載授權條款",
+      "clue_only": false,
+      "fetch_refs": []
+    },
+    {
+      "source_no": "S-006",
+      "layer": "ACADEMIC",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "URL",
+      "url": "https://example.org/papers/example-limits",
+      "doi": null,
+      "git_commit": null,
+      "title": "Limits of Template Caching",
+      "authors_org": "Example Lab B",
+      "published_at": "2025-08-15",
+      "source_type": "PREPRINT",
+      "license_spdx": null,
+      "license_note": "預印本頁面未載授權條款",
+      "clue_only": false,
+      "fetch_refs": []
+    }
+  ],
+  "items": [
+    {
+      "evidence_no": "E-001",
+      "source_no": "S-001",
+      "scope_rev": 1,
+      "candidate": "候選方案甲",
+      "claim": "候選方案甲在固定樣板的批次渲染中吞吐量明顯高於基準實作",
+      "f1": "以預先編譯的樣板快取取代逐頁解析；由渲染器觸發，以基準測試驗證",
+      "f2": "基準 X、單機 8 核、1000 頁文件：1200 頁每分鐘，對照組 450 頁每分鐘",
+      "f3": "作者自述僅在樣板固定時成立，樣板每頁不同時優勢消失",
+      "f4": [],
+      "f5": {
+        "technical": {
+          "grade": "A",
+          "reason": "可由 Python 直接呼叫，無額外執行環境"
+        },
+        "license": {
+          "grade": "M",
+          "reason": "論文未載授權，需另查實作授權"
+        },
+        "maintenance": {
+          "grade": "M",
+          "reason": "作者實作的維護狀態未見"
+        },
+        "performance": {
+          "grade": "A",
+          "reason": "吞吐量優勢直接對應效能邊界需求"
+        },
+        "security": {
+          "grade": "M",
+          "reason": "未見資安評估，需另行檢核"
+        },
+        "cost": {
+          "grade": "A",
+          "reason": "無額外授權費用"
+        }
+      },
+      "f6": "單一基準、單一硬體；未見獨立重現",
+      "f7": "V2",
+      "strength": "MEDIUM"
+    },
+    {
+      "evidence_no": "E-002",
+      "source_no": "S-002",
+      "scope_rev": 1,
+      "candidate": "候選方案乙",
+      "claim": "候選方案乙以 Apache-2.0 釋出且近一年有持續提交",
+      "f1": "開源函式庫，授權與提交紀錄取自 repo 頁面與授權檔",
+      "f2": "授權識別碼 Apache-2.0；最近提交日期 2025-09-12",
+      "f3": "未見",
+      "f4": [
+        "DEP"
+      ],
+      "f5": {
+        "technical": {
+          "grade": "A",
+          "reason": "提供 Python 綁定"
+        },
+        "license": {
+          "grade": "A",
+          "reason": "Apache-2.0 與目標授權限制相容"
+        },
+        "maintenance": {
+          "grade": "M",
+          "reason": "維護者人數少，需評估停更風險"
+        },
+        "performance": {
+          "grade": "M",
+          "reason": "未見效能數據，需自行量測"
+        },
+        "security": {
+          "grade": "M",
+          "reason": "未見安全公告紀錄，需掃描相依"
+        },
+        "cost": {
+          "grade": "A",
+          "reason": "無授權費用"
+        }
+      },
+      "f6": "只讀 repo 頁面與授權檔；未讀原始碼",
+      "f7": "V2",
+      "strength": "MEDIUM"
+    },
+    {
+      "evidence_no": "E-003",
+      "source_no": "S-003",
+      "scope_rev": 1,
+      "candidate": "候選方案甲",
+      "claim": "業界團隊在生產環境採用候選方案甲並回報延遲下降",
+      "f1": "工程部落格描述以樣板快取降低渲染延遲",
+      "f2": "文中自述 P95 延遲由 900 ms 降到 300 ms，未列基準與對照組細節",
+      "f3": "文中未說明量測環境與樣本數",
+      "f4": [
+        "SELF"
+      ],
+      "f5": {
+        "technical": {
+          "grade": "A",
+          "reason": "做法與候選方案甲一致"
+        },
+        "license": {
+          "grade": "M",
+          "reason": "部落格未載授權，需另查"
+        },
+        "maintenance": {
+          "grade": "M",
+          "reason": "未見後續維護說明"
+        },
+        "performance": {
+          "grade": "M",
+          "reason": "自述數字未見獨立重現"
+        },
+        "security": {
+          "grade": "M",
+          "reason": "未見資安討論"
+        },
+        "cost": {
+          "grade": "A",
+          "reason": "無額外授權費用"
+        }
+      },
+      "f6": "官方部落格自述成果；只讀轉述，未開原文逐字核對",
+      "f7": "V2",
+      "strength": "MEDIUM"
+    },
+    {
+      "evidence_no": "E-004",
+      "source_no": "S-005",
+      "scope_rev": 1,
+      "candidate": null,
+      "claim": "渲染方案的選型文獻多數把樣板是否固定列為首要分流條件",
+      "f1": "綜述整理既有渲染方案並以樣板固定程度分類",
+      "f2": "綜述納入 24 個方案，其中 17 個以樣板固定為前提",
+      "f3": "綜述自述分類依作者判斷，未做獨立標註一致性檢查",
+      "f4": [
+        "IMM"
+      ],
+      "f5": {
+        "technical": {
+          "grade": "M",
+          "reason": "分類可轉為本案的選型條件"
+        },
+        "license": {
+          "grade": "N",
+          "reason": "綜述不涉及授權比較"
+        },
+        "maintenance": {
+          "grade": "N",
+          "reason": "綜述不涉及維護狀態"
+        },
+        "performance": {
+          "grade": "M",
+          "reason": "僅質性描述，需自行量測"
+        },
+        "security": {
+          "grade": "N",
+          "reason": "綜述不涉及資安"
+        },
+        "cost": {
+          "grade": "N",
+          "reason": "綜述不涉及成本"
+        }
+      },
+      "f6": "預印本、頁面未顯示 venue；只讀摘要頁",
+      "f7": "V2",
+      "strength": "WEAK"
+    }
+  ],
+  "counter_evidence": [
+    {
+      "evidence_no": "E-001",
+      "search_id": "Q-004",
+      "conclusion": "LIMIT",
+      "source_no": "S-006",
+      "note": "S-006 指出樣板每頁不同時優勢消失；已併入 E-001 的 f3"
+    },
+    {
+      "evidence_no": "E-002",
+      "search_id": "Q-005",
+      "conclusion": "NOT_FOUND",
+      "source_no": null,
+      "note": "以反證字串搜尋無相關結果；不代表不存在"
+    },
+    {
+      "evidence_no": "E-003",
+      "search_id": "Q-006",
+      "conclusion": "IRRELEVANT",
+      "source_no": "S-006",
+      "note": "S-006 討論離線批次，與本案的生產情境無關"
+    },
+    {
+      "evidence_no": "E-004",
+      "search_id": null,
+      "conclusion": "NOT_SEARCHED",
+      "source_no": null,
+      "note": "本輪未做專門反證搜尋"
+    }
+  ],
+  "honest_bounds": {
+    "not_found": [
+      {
+        "query": "example-lib license incompatibility known issue",
+        "date": "2026-11-02",
+        "result": "無相關結果"
+      }
+    ],
+    "summary_only": [
+      "S-001",
+      "S-002",
+      "S-003",
+      "S-004",
+      "S-005",
+      "S-006"
+    ],
+    "not_read_fully": [
+      "S-001",
+      "S-002",
+      "S-003",
+      "S-004",
+      "S-005",
+      "S-006"
+    ]
+  }
+}

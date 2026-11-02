@@ -168,6 +168,26 @@ def _retry_history(history: Any) -> dict[str, Any]:
     return {"count": count, "last": last}
 
 
+#: `retry_gates` 只列這三個登記的重試閘（登記外的閘鍵不出現；D-59(4)）。
+RETRY_GATES: tuple[str, ...] = ("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY")
+
+
+def _retry_gates(history: Any) -> dict[str, dict[str, int]]:
+    """`retry_history` → `{<閘>: {current_count, entries}}`（三個登記閘恆在；API-RP-13）。
+
+    `current_count`＝該閘檔內的 `current_count`（非負整數）、`entries`＝該閘 `history` 的筆數。
+    與 `_retry_history` 同樣寬容：缺失或型別不對的閘、欄位一律記 0，壞形狀不使投影失敗。"""
+    gates: dict[str, dict[str, int]] = {}
+    for gate in RETRY_GATES:
+        entry = history.get(gate) if isinstance(history, dict) else None
+        count = entry.get("current_count") if isinstance(entry, dict) else None
+        records = entry.get("history") if isinstance(entry, dict) else None
+        valid = isinstance(count, int) and not isinstance(count, bool) and count > 0
+        gates[gate] = {"current_count": count if valid else 0,
+                       "entries": len(records) if isinstance(records, list) else 0}
+    return gates
+
+
 def _state_view(state: dict[str, Any], *, source: str, key: str, sdd_root: Path,
                 fsm_dir: Path) -> dict[str, Any]:
     """`GET /sdd/fsm/{project}` 與 `:freeze` 成功回應的共同形狀。既有欄位一個都不動，只增不減。"""
@@ -191,6 +211,9 @@ def _state_view(state: dict[str, Any], *, source: str, key: str, sdd_root: Path,
         # 樣帶出。
         "human_pending": _human_pending(state.get("human_pending_tracking")),
         "retry_history": _retry_history(state.get("retry_history")),
+        # ResearchToPRD（D-59(4)）：同級新鍵，各登記閘的 `{current_count, entries}`（additive；
+        # 上面的 `retry_history` 形狀與值不動）。
+        "retry_gates": _retry_gates(state.get("retry_history")),
         "rtm_coverage": state.get("rtm_coverage"),
         # v1.5：`phase`＝current_state 的純函式投影（app/fsm_phase.py，契約 §3.1.5；W4 dogfood
         # 產物）。欄位永遠出現；缺值、非字串、不認得的狀態回 UNKNOWN／0 物件（不是 null）。

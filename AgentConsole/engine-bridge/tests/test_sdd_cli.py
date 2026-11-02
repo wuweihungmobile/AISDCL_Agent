@@ -355,3 +355,268 @@ def test_the_cli_call_runs_inside_the_guard_so_a_reader_waits_for_it(
         assert observed == []
     thread.join(5)
     assert observed == ["read"]
+
+
+# ══ 研究面動詞表（ResearchToPRD；TCS-ResearchToPRD-P0-20261102 AC-960-13；ADR-XPLAT-017 D2）══
+# 上面各列一字不動：既有五動詞的白名單、旗標與 `run_verb` 照舊；研究面是獨立的動詞表與獨立的
+# 執行入口 `run_research_verb`（只對 `/research/*` 開放）。
+_OUTER_KEY = "research-demo"
+_INNER_KEY = "autoclaude-demo"
+_FORBIDDEN_RESEARCH_VERBS = [
+    ("resume-from-escalation", ["--to", "SPEC_DRAFTING", "--reason", "r"]),
+    ("reconcile", ["--reason", "r"]),
+    ("spec-audit", ["--reason", "r"]),
+    ("check-impl", ["--reason", "r"]),
+    ("complete-auto-compact", ["--reason", "r"]),
+    ("reset-ledger", ["--reason", "r"]),
+    ("negotiate-exit", ["--outcome", "underspecified", "--reason", "r"]),
+    ("negotiate-enter", ["--reason", "r"]),
+    ("delegate-enter", ["--reason", "r"]),
+    ("", ["--reason", "r"]),
+]
+
+
+def _research_error(fake: Path, state_dir: Path, verb: str, args: list[str], *,
+                    project: str = _OUTER_KEY, **kw) -> ApiError:
+    with pytest.raises(ApiError) as caught:
+        sdd_cli.run_research_verb(verb, args, sdd_root=fake, state_dir=state_dir,
+                                  project=project, **kw)
+    return caught.value
+
+
+def test_AT_960_13_1_the_five_existing_verbs_stay_and_the_research_table_is_separate() -> None:
+    assert sdd_cli.ALLOWED_VERBS == {
+        "spec-frozen", "negotiate-enter", "negotiate-exit", "delegate-enter", "delegate-exit"}
+    assert sdd_cli.RESEARCH_VERBS == {
+        "show", "transition", "gate", "spec-frozen", "spec-refreeze"}
+    assert sdd_cli.RESEARCH_VERBS & sdd_cli.ALLOWED_VERBS == {"spec-frozen"}, \
+        "兩張表只共用 spec-frozen；研究面其餘動詞不得滲進既有白名單"
+    assert sdd_cli.RESEARCH_VERBS is not sdd_cli.ALLOWED_VERBS
+
+
+@pytest.mark.parametrize(("verb", "args"), _FORBIDDEN_RESEARCH_VERBS,
+                         ids=[v or "empty" for v, _a in _FORBIDDEN_RESEARCH_VERBS])
+def test_AT_960_13_1_a_forbidden_verb_is_refused_before_any_process_starts(
+        verb: str, args: list[str], fake: Path, state_dir: Path) -> None:
+    err = _research_error(fake, state_dir, verb, args)
+    assert (err.status_code, err.body["reason"]) == (500, "sdd_cli_usage"), f"verb={verb!r}"
+    assert read_calls(fake) == [], f"禁用動詞 {verb!r} 連子行程都不該起"
+
+
+@pytest.mark.parametrize("verb", ["show", "transition", "gate", "spec-refreeze"])
+def test_AT_960_13_1_the_existing_entry_refuses_every_research_only_verb(
+        verb: str, fake: Path, state_dir: Path) -> None:
+    """`:freeze` 與 `/autoclaude/runs` 的 sdd 區塊走的 `run_verb` 不認研究面動詞。"""
+    err = _error(fake, state_dir, verb, ["--reason", "r"])
+    assert (err.status_code, err.body["reason"]) == (500, "sdd_cli_usage")
+    assert read_calls(fake) == []
+
+
+def test_AT_960_13_1_only_the_research_surface_names_the_research_entry() -> None:
+    import ast
+
+    app_dir = Path(sdd_cli.__file__).resolve().parent
+    names = {"run_research_verb", "check_research_allowed", "build_research_argv",
+             "build_research_env", "research_transition_args", "research_gate_args",
+             "research_freeze_args", "research_refreeze_args", "validate_research_approver"}
+    found: set[str] = set()
+    for path in sorted(app_dir.rglob("*.py")):
+        rel = path.relative_to(app_dir).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            ident = (node.id if isinstance(node, ast.Name) else node.attr
+                     if isinstance(node, ast.Attribute) else node.name
+                     if isinstance(node, ast.alias) else "")
+            if ident in names or ident.startswith("RESEARCH_VERB"):
+                found.add(rel)
+    allowed = {rel for rel in found if rel == "sdd_cli.py" or rel == "routers/research.py"
+               or rel.startswith("research/")}
+    assert found and found == allowed, \
+        f"研究面動詞入口只准研究面自己引用（:freeze 與 sdd run 不得）：{sorted(found - allowed)}"
+
+
+# ── 動詞旗標與值域矩陣（鍵類別 × 動詞 × 旗標 × 值；逐格表驅動）─────────────────────────────
+def _tr(to: str, reason: str = "why", trigger: str = "research_bridge") -> list[str]:
+    return ["--to", to, "--reason", reason, "--trigger", trigger]
+
+
+def _gt(gate: str, result: str = "PASS", reason: str = "why") -> list[str]:
+    return ["--gate", gate, "--result", result, "--reason", reason]
+
+
+def _fz(stage: str, docs: tuple[str, ...] = ("a.md",), *, drop: str | None = None) -> list[str]:
+    args = ["--stage", stage]
+    for doc in docs:
+        args += ["--doc", doc]
+    tail = ["--digest", "--root", "/r", "--reason", "x", "--approver", "alice", "--json"]
+    if drop is not None:
+        at = tail.index(drop)
+        tail = tail[:at] + tail[at + (1 if drop in ("--digest", "--json") else 2):]
+    return [*args, *tail]
+
+
+def _rf(docs: tuple[str, ...] = ("a.md",), *, drop: str | None = None) -> list[str]:
+    args: list[str] = []
+    for doc in docs:
+        args += ["--doc", doc]
+    tail = ["--root", "/r", "--reason", "x", "--approver", "alice"]
+    if drop is not None:
+        at = tail.index(drop)
+        tail = tail[:at] + tail[at + 2:]
+    return [*args, *tail]
+
+
+_OUTER_TO = ("SCENARIO_DETECT", "AGENT_LOAD", "SPEC_DRAFTING", "SCG_VALIDATION",
+             "SPEC_REGRESSION_CHECK")
+_INNER_ONLY_TO = ("SPEC_AUDIT", "PR_REVIEW", "RELEASE")
+_NEVER_TO = ("INIT", "SPEC_FROZEN", "IMPLEMENTATION", "ESCALATION", "ESCALATION_FINAL",
+             "RELEASE_READY", "AUTO_RECOVERY_ATTEMPT", "TERMINATED", "NOPE", "", "spec_drafting",
+             "SPEC_DRAFTING ")
+
+
+def _matrix() -> list[tuple[str, str, str, list[str], bool]]:
+    cells: list[tuple[str, str, str, list[str], bool]] = []
+
+    def add(label: str, key: str, verb: str, args: list[str], ok: bool) -> None:
+        cells.append((f"{'outer' if key == _OUTER_KEY else 'inner'}:{verb}:{label}",
+                      key, verb, args, ok))
+
+    both = (_OUTER_KEY, _INNER_KEY)
+    for to in _OUTER_TO:
+        for key in both:
+            add(f"--to={to}", key, "transition", _tr(to), True)
+    for to in _INNER_ONLY_TO:
+        add(f"--to={to}", _OUTER_KEY, "transition", _tr(to), False)
+        add(f"--to={to}", _INNER_KEY, "transition", _tr(to), True)
+    for to in _NEVER_TO:
+        for key in both:
+            add(f"--to={to!r}", key, "transition", _tr(to), False)
+    add("--to=HUMAN_PENDING baseline", _INNER_KEY, "transition",
+        _tr("HUMAN_PENDING", "baseline adoption: SCG PASS"), True)
+    for reason in ("adopt baseline", "Baseline adoption", " baseline adoption", "why"):
+        add(f"--to=HUMAN_PENDING reason={reason!r}", _INNER_KEY, "transition",
+            _tr("HUMAN_PENDING", reason), False)
+    for reason in ("baseline adoption: SCG PASS", "why"):
+        add(f"--to=HUMAN_PENDING reason={reason!r}", _OUTER_KEY, "transition",
+            _tr("HUMAN_PENDING", reason), False)
+    for key in both:
+        add("trigger missing", key, "transition",
+            ["--to", "SPEC_DRAFTING", "--reason", "why"], False)
+        add("trigger=cli_manual", key, "transition", _tr("SPEC_DRAFTING", trigger="cli_manual"),
+            False)
+        add("trigger=empty", key, "transition", _tr("SPEC_DRAFTING", trigger=""), False)
+        add("reason missing", key, "transition",
+            ["--to", "SPEC_DRAFTING", "--trigger", "research_bridge"], False)
+        add("reason empty", key, "transition", _tr("SPEC_DRAFTING", reason=""), False)
+        add("reason blank", key, "transition", _tr("SPEC_DRAFTING", reason="   \t"), False)
+        add("reason like a flag", key, "transition", _tr("SPEC_DRAFTING", reason="--to X"), True)
+        add("to missing", key, "transition",
+            ["--reason", "why", "--trigger", "research_bridge"], False)
+        add("--to twice", key, "transition", [*_tr("SPEC_DRAFTING"), "--to", "AGENT_LOAD"], False)
+        add("--gate is not a transition flag", key, "transition",
+            [*_tr("SPEC_DRAFTING"), "--gate", "SCG_VALIDATION"], False)
+        add("flag without value", key, "transition", [*_tr("SPEC_DRAFTING"), "--reason"], False)
+        add("NUL in value", key, "transition", _tr("SPEC_DRAFTING", reason="a\x00b"), False)
+    add("--gate=SCG_VALIDATION", _OUTER_KEY, "gate", _gt("SCG_VALIDATION"), True)
+    add("--gate=SCG_VALIDATION", _INNER_KEY, "gate", _gt("SCG_VALIDATION"), False)
+    for gate in ("PR_REVIEW", "RTM_VERIFY", "RELEASE_READY"):
+        add(f"--gate={gate}", _OUTER_KEY, "gate", _gt(gate), False)
+        add(f"--gate={gate}", _INNER_KEY, "gate", _gt(gate), True)
+    for gate in ("SPEC_REGRESSION_CHECK", "NOPE", "", "scg_validation"):
+        for key in both:
+            add(f"--gate={gate!r}", key, "gate", _gt(gate), False)
+    for key, gate in ((_OUTER_KEY, "SCG_VALIDATION"), (_INNER_KEY, "PR_REVIEW")):
+        for result in ("PASS", "FAIL"):
+            add(f"--result={result}", key, "gate", _gt(gate, result), True)
+        for result in ("pass", "fail", "ESCALATE", "", "PASS "):
+            add(f"--result={result!r}", key, "gate", _gt(gate, result), False)
+        add("reason missing", key, "gate", ["--gate", gate, "--result", "PASS"], False)
+        add("reason blank", key, "gate", _gt(gate, reason="  "), False)
+        add("result missing", key, "gate", ["--gate", gate, "--reason", "why"], False)
+        add("gate missing", key, "gate", ["--result", "PASS", "--reason", "why"], False)
+        add("--trigger is not a gate flag", key, "gate",
+            [*_gt(gate), "--trigger", "research_bridge"], False)
+        add("--result twice", key, "gate", [*_gt(gate), "--result", "FAIL"], False)
+    for stage in ("Gate-0", "Gate-0-SCR1", "Gate-0-SCR12", "Stage-1"):
+        add(f"--stage={stage}", _OUTER_KEY, "spec-frozen", _fz(stage), True)
+    for stage in ("Gate-0-SCR", "Gate-0-SCRx", "Gate-0-SCR1a", "Gate-1", "Stage-2", "Stage-0",
+                  "gate-0", "Gate-0 ", ""):
+        add(f"--stage={stage!r}", _OUTER_KEY, "spec-frozen", _fz(stage), False)
+    add("--stage=Stage-1", _INNER_KEY, "spec-frozen", _fz("Stage-1"), True)
+    for stage in ("Gate-0", "Gate-0-SCR1", "Stage-2"):
+        add(f"--stage={stage}", _INNER_KEY, "spec-frozen", _fz(stage), False)
+    for key, stage in ((_OUTER_KEY, "Gate-0"), (_INNER_KEY, "Stage-1")):
+        add("several --doc", key, "spec-frozen", _fz(stage, ("a.md", "b.md", "c.md")), True)
+        add("no --doc", key, "spec-frozen", _fz(stage, ()), False)
+        for flag in ("--digest", "--root", "--reason", "--approver", "--json"):
+            add(f"{flag} missing", key, "spec-frozen", _fz(stage, drop=flag), False)
+        add("--result is not a freeze flag", key, "spec-frozen",
+            [*_fz(stage), "--result", "PASS"], False)
+        add("--root blank", key, "spec-frozen", [
+            "--stage", stage, "--doc", "a.md", "--digest", "--root", " ", "--reason", "x",
+            "--approver", "alice", "--json"], False)
+        add("--digest twice", key, "spec-frozen", [*_fz(stage), "--digest"], False)
+        add("--root twice", key, "spec-frozen", [*_fz(stage), "--root", "/other"], False)
+        add("one --doc", key, "spec-refreeze", _rf(), True)
+        add("no --doc", key, "spec-refreeze", _rf(()), False)
+        add("several --doc", key, "spec-refreeze", _rf(("a.md", "b.md")), True)
+        for flag in ("--root", "--reason", "--approver"):
+            add(f"{flag} missing", key, "spec-refreeze", _rf(drop=flag), False)
+        add("--digest is not a refreeze flag", key, "spec-refreeze",
+            [*_rf(), "--digest"], False)
+        add("--stage is not a refreeze flag", key, "spec-refreeze",
+            [*_rf(), "--stage", "Stage-1"], False)
+    for key in both:
+        add("no flags", key, "show", [], True)
+        add("any flag", key, "show", ["--reason", "x"], False)
+        add("--json", key, "show", ["--json"], False)
+        for verb, args in (("transition", _tr("SPEC_DRAFTING")), ("gate", _gt(
+                "SCG_VALIDATION" if key == _OUTER_KEY else "PR_REVIEW")),
+                ("spec-frozen", _fz("Gate-0" if key == _OUTER_KEY else "Stage-1")),
+                ("spec-refreeze", _rf()), ("show", [])):
+            add("--project given", key, verb, ["--project", "other", *args], False)
+            add("--must-exist given", key, verb, ["--must-exist", *args], False)
+            add("unknown flag", key, verb, [*args, "--nope", "1"], False)
+    return cells
+
+
+_MATRIX = _matrix()
+
+
+@pytest.mark.parametrize(("key", "verb", "args", "ok"), [c[1:] for c in _MATRIX],
+                         ids=[c[0] for c in _MATRIX])
+def test_AT_960_13_2_the_flag_and_value_matrix_cell(
+        key: str, verb: str, args: list[str], ok: bool, fake: Path, state_dir: Path) -> None:
+    if ok:
+        sdd_cli.check_research_allowed(verb, args, key=key)
+        return
+    with pytest.raises(ApiError) as caught:
+        sdd_cli.check_research_allowed(verb, args, key=key)
+    assert (caught.value.status_code, caught.value.body["reason"]) == (500, "sdd_cli_usage")
+    err = _research_error(fake, state_dir, verb, args, project=key)
+    assert (err.status_code, err.body["reason"]) == (500, "sdd_cli_usage")
+    assert read_calls(fake) == [], "越格組合在起子行程之前就被拒"
+
+
+def test_AT_960_13_2_the_matrix_covers_both_key_classes_and_every_research_verb() -> None:
+    assert sdd_cli.is_outer_key(_OUTER_KEY) and not sdd_cli.is_outer_key(_INNER_KEY)
+    for key in (_OUTER_KEY, _INNER_KEY):
+        for verb in sorted(sdd_cli.RESEARCH_VERBS):
+            verdicts = {c[4] for c in _MATRIX if c[1] == key and c[2] == verb}
+            assert verdicts == {True, False}, f"{key} × {verb} 須同時有放行格與越格"
+
+
+def test_AT_960_13_2_the_research_builders_only_produce_accepted_invocations() -> None:
+    sdd_cli.check_research_allowed("transition", sdd_cli.research_transition_args(
+        to="SPEC_DRAFTING", reason="why"), key=_OUTER_KEY)
+    sdd_cli.check_research_allowed("gate", sdd_cli.research_gate_args(
+        gate="SCG_VALIDATION", result="FAIL", reason="why"), key=_OUTER_KEY)
+    sdd_cli.check_research_allowed("gate", sdd_cli.research_gate_args(
+        gate="RTM_VERIFY", result="PASS", reason="why"), key=_INNER_KEY)
+    sdd_cli.check_research_allowed("spec-frozen", sdd_cli.research_freeze_args(
+        stage="Gate-0", docs=["a.md", "b.md"], root="/r", reason="x", approver="alice@example.com"),
+        key=_OUTER_KEY)
+    sdd_cli.check_research_allowed("spec-refreeze", sdd_cli.research_refreeze_args(
+        docs=["a.md"], root="/r", reason="x", approver="ops_01"), key=_OUTER_KEY)
+    assert sdd_cli.research_transition_args(to="AGENT_LOAD", reason="r")[-2:] == [
+        "--trigger", "research_bridge"]

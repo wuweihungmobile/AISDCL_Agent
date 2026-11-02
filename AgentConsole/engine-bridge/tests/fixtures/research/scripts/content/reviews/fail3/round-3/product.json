@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 3,
+  "dimension": "PRODUCT",
+  "agent_id": "pm-po",
+  "prd_sha256": "50d0eb2b3e647007d4dc316613664b134ca2679ebfa4885aa04e9614dd2356e9",
+  "rubric": [
+    {
+      "item": "business_value",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §1.2：痛點有量化基準，目標用戶明確"
+    },
+    {
+      "item": "metric_measurability",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §1.3：成功指標有數值與量測時間點；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "scope_discipline",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §3.2：範圍外已列明，沒有需求蔓延；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "prioritization",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §3.1：兩個 Feature 的優先級已排序；尚有小缺口，見缺陷清單"
+    },
+    {
+      "item": "evidence_grounding",
+      "score": 17,
+      "max": 20,
+      "note": "已核對 §1.2：結論與證據矩陣一致，沒有引用 V1 的列；尚有小缺口，見缺陷清單"
+    }
+  ],
+  "score": 86,
+  "summary": "範圍與優先級已清楚；成功指標的分母需要定義",
+  "defects": [
+    {
+      "code": "PROD-METRIC_MEASURABILITY-01",
+      "severity": "P3",
+      "prd_anchor": "§1.3",
+      "description": "每日批次完成率沒有說明分母的定義",
+      "suggestion": "補分母為當日提交的批次數",
+      "evidence_refs": []
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 # Engine Bridge（FastAPI 旁車）
 
 把兩個**純 CLI** 引擎（`AutoClaude/`、`AISDLC_SDD/`）包成 REST + SSE，給 Spring Boot 後端呼叫（PRD §0.2）。
-單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/si/*`、`/health`、`/health/deep`。**最小侵入白名單**（ADR-XPLAT-016 §11；2026-10-17 整合輪 115 取代原「零侵入」）：兩個引擎只准改該 ADR 列出的檔，其餘仍由本旁車包裝；SDD FSM 的寫入一律經 `FSMRuntime` CLI 子行程，Bridge 原始碼不開寫 `FSM-STATE-*.yaml`（見〈SDD 整合〉）。
+單一服務、單一埠 `8081`，以路徑前綴區分：`/autoclaude/*`、`/sdd/*`、`/si/*`、`/research/*`、`/health`、`/health/deep`。**最小侵入白名單**（ADR-XPLAT-016 §11；2026-10-17 整合輪 115 取代原「零侵入」）：兩個引擎只准改該 ADR 列出的檔，其餘仍由本旁車包裝；SDD FSM 的寫入一律經 `FSMRuntime` CLI 子行程，Bridge 原始碼不開寫 `FSM-STATE-*.yaml`（見〈SDD 整合〉）。
 
 ```
 app/main.py        FastAPI app／lifespan（啟動做孤兒回收、起資源取樣器）／/health／/health/deep
@@ -13,14 +13,15 @@ app/db.py          DB 模式狀態鏡射            app/decompose.py 目標拆�
 app/procutil.py    行程樹治理（psutil）       app/mock_claude.py E2E 用的確定性 claude 替身（console script）
 app/health.py      /health/deep 深度探針      app/tracing.py   X-Trace-Id 中介層＋contextvar（traceId 貫穿）
 app/logsetup.py    日誌格式（每行 trace_id）＋BRIDGE_LOG_DIR 滾動檔      app/resources.py 引擎行程樹資源取樣（`resources`；D-12）
-app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 八個唯讀 GET〔含議題中心兩個〕、三個稽核檔落地 POST 與一個 `:validate` 預檢 POST）
-app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固定環境、動詞白名單、20 秒逾時、rc→HTTP、`(狀態目錄, 專案鍵)` 互斥鎖）
+app/routers/       autoclaude.py、sdd.py、si.py（`/si/*` 八個唯讀 GET〔含議題中心兩個〕、三個稽核檔落地 POST 與一個 `:validate` 預檢 POST）、research.py（`/research/*`，見〈ResearchToPRD 研究面〉）
+app/sdd_cli.py     唯一的 FSM 寫入出口：FSMRuntime CLI 子行程（固定環境、動詞白名單、20 秒逾時、rc→HTTP、`(狀態目錄, 專案鍵)` 互斥鎖）；研究面另有獨立的動詞表 `RESEARCH_VERBS`
 app/si_cli.py      唯一的 SelfImproving 子行程出口：根層 CLI 的唯讀 `export` 與 `obs-add --dry-run`（白名單環境、15 秒逾時、8 MiB 輸出上限、失敗一律 503 `si_unavailable`）
 app/si_audit.py    整個 `app/` 唯一以寫入形態開 SelfImproving 路徑者：把 backend 簽好的稽核 JSON 原樣落成 `<audit_ref>.json`（獨佔建檔、不覆寫；P2b）
 app/sdd_state.py   FSM 狀態檔唯讀存取（tail／凍結階段／委派引用／恢復指令）   app/sdd_sync.py  委派同步純函式（reason 組字、終態對映、預檢表、回收點判定）
 app/sdd_run.py     批次的 SDD 側（路徑閘、三點摘要預檢、FSM 寫入、補償、`resume`／`restore` 重驗）    app/sdd_adapter.py AutoClaude adapter 的呼叫接縫
 app/fsm_names.py   FSM 專案名規則（`sanitize_component` 的逐字鏡像＋輸出域判準）    app/spec_digest.py 規格摘要（換行正規化的 UTF-8 sha256）    app/rtm.py `GET …/rtm`
 app/fsm_phase.py   `current_state` → `phase{name,order,blocking,observation}` 純函式（契約 §3.1.5；W4 dogfood 由真 haiku 寫出、SCG-4 審查通過後搬入）
+app/research/      ResearchToPRD 研究面基底（P0）：settings（`BRIDGE_RESEARCH_*` 讀取與驗證、能力資訊）／layout（工作區與路徑消毒、原子寫檔）／db（fail-loud 寫入器，`console.research_*` 唯一寫入者）／outbox（持久化協定與重放）／fsm_ops（外環與內環 FSM 驅動，只經 `sdd_cli`）／export（確定性渲染與 `state.json` 投影）
 ```
 
 ## 前置需求
@@ -69,6 +70,8 @@ Invoke-RestMethod http://localhost:8081/health
 | 是目錄，且有 `build/reports/fsm`，**或**有版本入口文件 `AISDLC_SDD_INIT.md` | `true`，`latest`＝目錄名 | 不受影響 |
 | 是目錄，兩者都沒有（空目錄、唯讀掛載沒掛到東西） | `false`（`latest` 為目錄名） | 不受影響 |
 
+另帶頂層資訊欄 `research`（ResearchToPRD；ADR-003 D10；200 與 503 兩種回應都帶）：固定八個鍵 `mode`、`root`（解析後的研究工作區根）、`db`、`claude_cli`、`gh_cli`、`git`、`web_layer_enabled`、`scaffold_templates`，量不到的項目標 `NOT-EVALUABLE`。與 `sdd` 一樣**只當資訊**：永遠不影響整體 `status` 與 HTTP 狀態，頂層 `reason` 也不列它。
+
 為什麼入口文件也算數、不能只看 `build/reports/fsm`：LATEST 版的 `build/reports/` 被 git 忽略（`AISDLC_SDD/.gitignore`），入庫檔數為 0，所以**全新 clone 沒有 FSM 狀態目錄**——那是跑過 SDD runtime 才會產生的執行期產物，不是「SDD 樹有沒有掛上」的證據。只看它的話，Console 的 SDD 卡會對一份完好的全新 clone 顯示失敗。
 
 ## 環境變數
@@ -83,7 +86,16 @@ Invoke-RestMethod http://localhost:8081/health
 | `SI_ROOT` | 本機直跑且 `<monorepo>` 像 monorepo 時＝monorepo 根；否則（例如容器內）未設 | SelfImproving 的 repo 根：其下 `tools/` 有根層 CLI、`docs/06_quality/` 有帳本；`/si/*` 以子行程在此目錄呼叫唯讀 `export`。解析後須為絕對路徑且**不可是檔案系統根**（啟動即 `SettingsError`）；不檢查存在性與內容——缺 CLI 在請求時回 503 `si_unavailable`（`cause` 為 `si_script_missing`）。**不併入 `BRIDGE_ALLOWED_PATH_ROOTS`**（那是引擎 `execution_path` 的閘）。docker compose 設 `/repo` 並以唯讀 bind 掛入必要子集（見 `docker-compose.yml`） |
 | `BRIDGE_SI_WRITE_TOKEN` | （未設＝SI 寫入面停用） | SelfImproving 寫入面權杖（P2b；backend 與 Bridge 同值，HTTP 標頭 `X-Bridge-Token`；**與 SDD 的權杖是兩個獨立的值**）。規則同 `BRIDGE_SDD_WRITE_TOKEN`：未設＝停用，設了但**短於 32 字元或仍是 `<…>` 佔位＝啟動即 `SettingsError`**（訊息不含值）。`POST /si/observations:validate` 是唯讀預檢，不需權杖。repo 內不放任何真值；產生方式見 `AgentConsole/.env.example`。Bridge **不持有**稽核簽章金鑰（金鑰只在 console-api 與主機端 CLI） |
 | `BRIDGE_SI_AUDIT_DIR` | （未設＝SI 寫入面停用） | 稽核檔落地目錄（**容器內路徑**；P2b）。解析後須為絕對路徑且**不可是檔案系統根**；不檢查存在性（目錄缺席在請求時回 503 `si_unavailable`，`cause` 為 `audit_write_failed`；Bridge 從不建立它）、**不併入 `BRIDGE_ALLOWED_PATH_ROOTS`**。docker compose 設 `/si-audit` 並以**唯一一條可寫 bind** 掛到主機的 `<AUTOSDD_SI_DIR>/console_audit`（見〈SelfImproving 寫入載體〉；其餘 SI bind 皆唯讀）。寫入面啟用＝本變數與 `BRIDGE_SI_WRITE_TOKEN` 皆有設 |
-| `BRIDGE_DB_DSN` | （未設＝純檔案模式） | PostgreSQL DSN；設了才寫 DB、鎖才跨實例 |
+| `BRIDGE_RESEARCH_ROOT` | `<家目錄>/.autosdd/my-project`（**repo 外**：Windows 取 `USERPROFILE`、POSIX 取 `HOME`；Docker 由 compose 明設 `/workspace/my-project`） | ResearchToPRD 研究工作區根（ADR-003 D8）；其下 `<slug>/{00_research,01_specs,02_governance,03_execution}`。解析後須為絕對路徑且**不可是檔案系統根**；**研究面啟用（明設本變數或設了 `BRIDGE_RESEARCH_WRITE_TOKEN`）且明設了 `BRIDGE_ALLOWED_PATH_ROOTS` 時，必須落在其中某個根之下**（否則啟動即 `SettingsError`），並**自動併入允許根**（`/sdd/fsm/{key}?root=<工作區>` 等路徑閘靠它放行）；研究面沒啟用時不動允許根。`GET /health/deep` 的 `research.root` 揭露解析結果 |
+| `BRIDGE_RESEARCH_WRITE_TOKEN` | （未設＝研究寫入面停用） | 研究寫入面權杖（backend 的 `console.bridge.research-write-token` 與 Bridge 同值，HTTP 標頭 `X-Bridge-Token`；**與 SDD、SI 的權杖是三個獨立的值**）。規則同 `BRIDGE_SI_WRITE_TOKEN`：未設＝寫入端點 503 `research_write_disabled`；設了但**短於 32 字元或仍是 `<…>` 佔位＝啟動即 `SettingsError`**（訊息不含值）。研究端點另需 `BRIDGE_DB_DSN`（無 DSN 一律 503 `research_requires_db`，**不降級成純檔案模式**；唯一例外是 `GET /research/capabilities`）。引擎、FSM、git 子行程的環境一律不含它；repo 內不放真值，產生方式見 `AgentConsole/.env.example` |
+| `BRIDGE_RESEARCH_FETCH_ALLOWLIST` | `export.arxiv.org,arxiv.org,api.semanticscholar.org,api.github.com,api.stackexchange.com` | Bridge 原生抓取（API 層）的主機基底，逗號分隔（小寫、去尾端 `.`、去重；含 scheme／埠／路徑者啟動即 `SettingsError`）。有效清單＝本變數 ∪ 啟用中的 ADMIN 條目；與 `BRIDGE_OUTBOUND_ALLOWLIST`（模型端點）是兩份獨立清單 |
+| `BRIDGE_RESEARCH_WEB_ALLOWLIST` | （空＝**Web 層關閉**） | headless WebSearch／WebFetch 的網域基底，逗號分隔；產業層需 ADMIN 逐一加入（有效清單同上）。空時 `web_layer_enabled` 為假，scope 含 `industry` 的建立請求回 422 `layer_unavailable` |
+| `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` | `1` | 同時 stage run 數（額度保守）；≥1 |
+| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | `1200` | 寫入每個 stage run 的 `config_overrides.playbook.step_timeout_seconds`；1～86400。請求 `env` 的 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（DEF-200-575）與它同源（×1000），不另立數字 |
+| `BRIDGE_RESEARCH_CLAUDE_COMMAND` | （未設＝引擎預設的 `claude`） | stage run 的 `claude.command`；Docker 全棧 E2E 設 `aisdlc-mock-claude`（映像不含真 `claude` 與 `gh`） |
+| `BRIDGE_RESEARCH_FETCH_MAX_BYTES` | `5242880`（5 MiB） | 原生抓取單一回應的位元組上限；≥1 |
+| `BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS` | `20` | 原生抓取的逾時秒數；>0 的有限數字 |
+| `BRIDGE_DB_DSN` | （未設＝純檔案模式） | PostgreSQL DSN；設了才寫 DB、鎖才跨實例。**研究端點一律需要它**（見上列 `BRIDGE_RESEARCH_WRITE_TOKEN`） |
 | `BRIDGE_DB_SCHEMA` | `console` | **Console 九張表所在的 schema**。DB 模式的 SQL 一律用 schema 限定名（`console.execution_runs`、`console.execution_steps`、`console.checkpoints`），以 `psycopg.sql.Identifier` 引用；AutoClaude 自己的 alembic 在 `public` 有同名表，所以不可用 `public`。advisory lock 不是表，不受影響 |
 | `BRIDGE_INSTANCE` | `<hostname>-<pid>-<uuid8>` | 本實例識別（≤100 字，寫進 `execution_runs.bridge_instance`） |
 | `BRIDGE_STOP_GRACE_SECONDS` | `30` | stop／pause 送終止訊號後，等多久才升級強殺 |
@@ -98,6 +110,7 @@ Invoke-RestMethod http://localhost:8081/health
 `POST /autoclaude/runs`（201／409 `advisory_lock_held`＋`holder_run_id`／422；本文含 `sdd` 區塊時另要 `X-Bridge-Token`，201 多 `warnings[]`）、`POST /autoclaude/runs/{id}:pause|:resume|:stop`（202；`:resume` 對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `GET /autoclaude/runs/{id}`、`GET …/rtm`（追溯覆蓋，唯讀；見下）、`GET …/stream?after=`（SSE，亦認 `Last-Event-ID`）、`GET …/events?after=&limit=`、`GET …/checkpoints`、`POST …/restore`（對含 `sdd` 的 run 要 `X-Bridge-Token`）、
 `POST /autoclaude/decompose`、`POST /autoclaude/decompose/{draft_id}:approve`、`GET /sdd/version`、`GET /sdd/fsm`、`GET /sdd/fsm/{project}`（兩者皆認選填 `root`）、`POST /sdd/fsm/{project}:freeze`（人工閘寫入，要 `X-Bridge-Token`）、`POST /sdd/compile`、`GET /health`、`GET /health/deep`。
+ResearchToPRD 研究面（P0）：`POST /research/projects`、`POST /research/projects/{id}:reinit|:cancel|:archive|:restore`、`PUT …/prd`、`POST …/stages/{stage}:start`（骨架）、`POST …:approve-baseline|:return|:reconcile`（骨架）、`GET …/events`、`GET …/stream`（SSE）、`GET｜POST /research/allowlist`、`PATCH /research/allowlist/{id}`、`GET /research/capabilities`（見〈ResearchToPRD 研究面〉）。
 另有 SelfImproving 的唯讀鏡像（P1b）：`GET /si/status`、`GET /si/observations`、`GET /si/events`、`GET /si/proposals`、`GET /si/proposals/{id}`、`GET /si/runs`（見下），加議題中心的兩個：`GET /si/issues`、`GET /si/issues/{id}`（見〈議題中心〉），與 P2b 的寫入載體：`POST /si/proposals/{id}:decide`、`POST /si/observations`、`POST /si/observations/{id}:close`（稽核檔落地，要 `X-Bridge-Token`）、`POST /si/observations:validate`（唯讀預檢）（見〈SelfImproving 寫入載體〉）。
 錯誤封包一律 `{"code":<狀態>,"reason":"…",…}`；422 另帶 `violations`（逐項列出違規欄位與字元）。互動式文件：`http://localhost:8081/docs`。
 
@@ -133,6 +146,32 @@ Console 的決定與帳本寫入**不直接寫帳本**：backend 簽好稽核 JS
 - **validate**：本文須為單一 JSON 物件且 ≤ 65536 位元組（否則 422，且不啟動子行程）；rc 0 與 1 都是合法輸出（`ok` 為 false 仍回 200）、本文為 CLI 預覽物件**逐值透傳**（`ok`、`row`、`row_bytes`、`row_max_bytes`、`findings`）；失敗形態同 `export`（503 `si_unavailable`，`cause`：`si_root_unset`、`si_script_missing`、`spawn_failed`、`timeout`、`stdout_too_large`、`nonzero_rc`〔含 rc 3〕、`bad_json`、`bad_shape`）。
 - **稽核目錄與主機端**：compose 把主機的 `<AUTOSDD_SI_DIR>/console_audit`（`AUTOSDD_SI_DIR` 未設時預設 `~/.autosdd/selfimproving`，與根層 CLI 的預設同處）以長語法**可寫** bind 到容器內的 `BRIDGE_SI_AUDIT_DIR`（`/si-audit`），`create_host_path: false`——**主機目錄必須先存在**，缺席時 `docker compose up` 會明確失敗（不在主機上憑空建目錄）。Bridge 容器以非 root（uid 10001）執行：Linux 主機上該目錄須讓此 uid 可寫（例如 `chmod o+w`），Docker Desktop（Windows／macOS）由檔案共用層處理。主機端入帳用同一把金鑰：`AUTOSDD_SI_AUDIT_KEY` 須含 console-api 的 `CONSOLE_SI_AUDIT_KEY` 簽章用的那一把（輪替期間含全部舊金鑰）。
 - 這個目錄是**整個 compose 唯一可寫的 SI bind**；`/repo` 下的 SI 掛載仍全為唯讀。檔案只增不減（Bridge 不輪替、不清理）。真容器的寫入權限與主機端 CLI 讀得到同一目錄，只由 TCS 的 V3 真機驗證承擔。
+
+### ResearchToPRD 研究面：`/research/*`（P0；TCS-ResearchToPRD-P0 D2、ADR-003、ADR-XPLAT-017、API 契約 §2）
+
+僅 console-api 呼叫（不對瀏覽器開放）。**Bridge 是 `console.research_*` 的唯一寫入者**（ADR-003 D4）；FSM 一律經 `app/research/fsm_ops.py` → `app/sdd_cli.py` 的研究面入口（CLI 子行程，Bridge 原始碼不開寫狀態檔）。工作區在 `BRIDGE_RESEARCH_ROOT` 之下：`<slug>/{00_research,01_specs,02_governance,03_execution}`。
+
+- **關卡順序**（寫入端點；先中者定案，先於本文驗證）：①`BRIDGE_RESEARCH_WRITE_TOKEN` 未設＝503 `research_write_disabled`；②`X-Bridge-Token` 缺或錯＝403 `research_write_forbidden`（缺與錯同一個回應，`hmac.compare_digest`）；③無 `BRIDGE_DB_DSN`＝503 `research_requires_db`（**不降級成純檔案模式**）；④本文＝422 `invalid_request`（`violations[{field,rule,message}]`）；⑤業務前置＝404 `research_not_found`／409。唯讀 `GET`（`events`、`stream`、`allowlist`）只有第③關；`GET /research/capabilities` 一律 200（無 DSN 時 `db` 為假）。成功與被拒都記 `research_write` 稽核（`verb`、`research_id`、`approver`、`result`、`trace_id`，**不含權杖**）。
+- **持久化協定**（ADR-003 D2）：寫檔→outbox（`<研究根>/.outbox/outbox.jsonl`，只增）→DB 交易→標完成。DB 不可用時，該操作綁定的 stage run 轉 `BLOCKED_DB` 並發 `research.alert`（兩者一併落 outbox，恢復後重放可見）；下一次寫入前依序重放（冪等：自然鍵或狀態相等；檔案缺失或應用層衝突的毒記錄標 `rejected`、不堵住後面）。單一 Bridge 行程假設（L-R9，與整個 Bridge「單一 worker」一致）。`research_events.seq` 單調，游標更新與 `research.step` 事件同一交易；`round_no` 連續、證據列 `content` 必填等守衛在寫入器層先於 DB 約束。
+- **骨架（501）**：`stages/{stage}:start`（P0 五個 stage 的啟動本體）、`:approve-baseline`、`:return`、`:reconcile` 的**前置驗證都已落地**（stage 值域、凍結、進行中衝突、ESCALATION 守衛、各 stage 前置表、全站並行上限、approver 與 reason 清理、專案存在），通過後回 **501 `not_implemented`**（本文帶 `endpoint`）——尚未實作的路徑絕不回 2xx；`tcs-draft` 屬 P1，一律 501。本體由 PKG-BR-C 填入（`:approve-baseline` 是整個 `app/` 唯一可呼叫 `fsm_ops.approve_baseline` 的地方，AST 鎖）。
+
+| 端點 | 成功 | 說明 |
+|------|------|------|
+| `POST /research/projects` | 201 | 建立專案：單一寫入配 `RP-NNNN`、建四目錄與 `00_research/issue_scope.json`、建外環 FSM 鍵於 `AGENT_LOAD`；slug 已被未封存專案占用＝409 `slug_in_use`；初始化失敗＝專案列照建但標 `FAILED`／`init_failed:<步驟>`（`workspace`｜`files`｜`fsm`） |
+| `POST /research/projects/{id}:reinit` | 200 | 無 `generation`＝重試初始化（只在 FAILED 且 `init_failed:` 時可用、冪等；其餘 409 `stage_conflict` 且零寫入；補建失敗 502 `init_failed`）；`{"generation":"next","reason","decided_by"}`＝換世代（外環須在 ESCALATION*，否則 409 `fsm_state_conflict`；單一交易放棄舊鍵、改指 `research-<slug>-g<n>`；D-60／D-64） |
+| `PUT /research/projects/{id}/prd` | 201 | 人工編輯存新版（樂觀鎖 `base_version`，不符 409 `prd_version_conflict`；已凍結 409 `spec_frozen`；內容非空、無 NUL、UTF-8、≤ 1 MiB） |
+| `POST …/{id}/stages/{stage}:start` | 202／**501** | 見上（骨架）；`stage` 為 `research`｜`draft`｜`review`｜`revise`｜`iterate`｜`tcs-draft`。同專案已有進行中（QUEUED／RUNNING）的 run＝409 `stage_conflict`（`details.activeStageRunId`、`activeStage`）；全站進行中數達 `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` 同樣 409 `stage_conflict`（`details.cause` 為 `max_concurrent_runs`，另帶 `limit`、`active`；**不排隊**）。上限檢查與 stage run 建列在同一把全站啟動鎖內（本體必須在回傳前建好該列） |
+| `POST …/{id}:approve-baseline`｜`:return`｜`:reconcile` | **501** | 見上（骨架） |
+| `POST …/{id}:cancel` | 200 | 停止進行中的 stage run（資料庫標 `CANCELLED` 並發 `research.run`；沒有進行中者＝冪等，`stopped_run_id` 為 `null`）；行程終止由 PKG-BR-C 注入的 stopper 負責 |
+| `POST …/{id}:archive`｜`:restore` | 200 | 封存（有進行中 stage＝409 `stage_conflict`）／復原 |
+| `GET …/{id}/events?after=&limit=` | 200 | 事件帳（單調 `seq`；`limit` 上限 500；回 `items`、`next_seq`、`truncated`） |
+| `GET …/{id}/stream?after=` | SSE | 同一事件帳的串流（亦認 `Last-Event-ID`；先重播游標之後、再輪詢；`retry: 3000`；閒置 15 秒送 `event: heartbeat`）；與 `events` 逐列相等 |
+| `GET｜POST /research/allowlist`、`PATCH …/{entry_id}` | 200／201 | 抓取（`FETCH`）與 Web（`WEB`）清單的 ADMIN 條目：有效清單＝環境基底 ∪ 啟用中條目；Reddit 預設不在任何清單、加入須 `tos_acknowledged`；PATCH 只准改 `enabled`，條目不可刪 |
+| `GET /research/capabilities` | 200 | 能力資訊（同 `/health/deep` 的 `research` 欄：`mode`、`root`、`db`、`claude_cli`、`gh_cli`、`git`、`web_layer_enabled`、`scaffold_templates`；量不到者 `NOT-EVALUABLE`） |
+
+- **FSM 研究面動詞**（`sdd_cli.RESEARCH_VERBS`，與既有 `ALLOWED_VERBS` 是兩張獨立的表；越界在送出前就 500 `sdd_cli_usage`）：`show`（唯一建檔呼叫，不帶 `--must-exist`）、`transition`（`--to` 依鍵矩陣，外環鍵只准 `SCENARIO_DETECT`｜`AGENT_LOAD`｜`SPEC_DRAFTING`｜`SCG_VALIDATION`｜`SPEC_REGRESSION_CHECK`；`--trigger research_bridge`；送出前先預檢鏡像邊表、事後讀驗現態）、`gate`（外環只准 `SCG_VALIDATION`，內環 `PR_REVIEW`｜`RTM_VERIFY`｜`RELEASE_READY`；以 CLI 回傳為準）、`spec-frozen`（`--stage` 限 `Gate-0`｜`Gate-0-SCR<n>`｜`Stage-1`）、`spec-refreeze`。`resume-from-escalation`、`reconcile`、`negotiate-*`、`delegate-*` 一律不入表——**恢復只有人能做**。
+- **外環鍵與預算**：鍵文法 `^research-[a-z0-9][a-z0-9-]{0,29}(-g[0-9]+)?$`；外環鍵的子行程環境固定 `SDD_ENABLE_AUTO_RECOVERY=0`（審查分數不足不得被自動恢復）；現態為 `HUMAN_PENDING` 時不呼叫 `gate SCG_VALIDATION PASS`（D-50）；人工恢復後重試預算**不歸零**（D-60；`GET /sdd/fsm/{project}` 另增同級投影鍵 `retry_gates`，`retry_history` 形狀不動；要全新預算走 `:reinit` 換世代）。核准人 `approver` 須是 JWT subject（非保留字 `bridge`｜`agent`｜`system`、≤ 100 字、只含 `[A-Za-z0-9._@-]`）。
+- **機械鎖**：`tests/test_research_ast_locks.py`（C1～C7：不寫 FSM 狀態檔、核准類呼叫只在 HTTP 處理函式、外環環境固定、動詞表、子行程旗標、無 `shell=True`、HUMAN_PENDING 守衛）、`tests/test_research_capability.py`（網路外呼只在 `app/research/fetch/`、子行程只在登記的 exec 模組且只經 `procutil`、無 `git`／`gh` 的 argv；**新增研究面模組須先在它的登記表登記類別**）、`tests/test_research_deploy_config.py`（compose 權杖接線、映像不裝 `claude`／`gh`、`.env.example` 只有佔位）。
 
 ### 資源取樣：`GET /autoclaude/runs/{id}` 的 `resources`（契約 v1.3 §3.1.2；W7 D-12）
 
@@ -295,6 +334,18 @@ Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\Activate.ps1; ruff
 W7 新增兩支：`tests/test_resources.py`（`resources` 取樣：欄位型別與範圍、整機正規化、終態與 PAUSED 為 null、已消失的 pid 不炸、**跨 tick 持有同一組 `Process` 物件**、過期樣本回 null、背景執行緒與 spawn 後立即補樣，含真 psutil 行程與經真 HTTP 的 E2E）、`tests/test_sdd_fsm.py`（`GET /sdd/fsm` 清單與 `errors`、detail 的 `human_pending`／`retry_history`／`rtm_coverage`；用合成夾具，另有一支對**真實**狀態檔的測試，該版本沒有任何狀態檔時 skip 並寫明原因）。
 整合輪 115（ADR-XPLAT-016）新增：`tests/fake_sdd.py`（假 SDD 樹：一支只依 ADR §4 契約回放 JSON 的迷你 FSM 狀態機 CLI，記錄 argv／cwd／環境到 `fake_calls.jsonl`）與 `tests/sdd_run_support.py`（共用夾具）；`test_fsm_names.py`（專案名鏡像與 SDD 原檔逐樣本對拍）、`test_spec_digest.py`、`test_sdd_cli.py`（argv／環境／rc 對映／逾時殺樹／白名單／互斥鎖）、`test_sdd_sync.py`（reason 組字、終態對映表、預檢表、回收點判定）、`test_sdd_token.py`、`test_sdd_freeze.py`（`:freeze` 逐格）、`test_sdd.py`（compile 擴充）、`test_sdd_run.py`（建立流程、預檢、補償、稽核）、`test_sdd_run_lifecycle.py`（終態同步、回收點、`resume`／`restore` 重驗與權杖、孤兒、`RunRecord`、`_child_env`）、`test_rtm.py`、`test_sdd_integration_parity.py`（跨專案對拍 F-1～F-11：compile 與 `sdd_compile` CLI 逐任務相等、只認指定者、凍結後改檔、AST 鎖、摘要演算法、權杖與環境不外洩、同步與補償矩陣、AT 文法；**含用真 SDD CLI 子行程的整合測試**——真 CLI 在該環境 import 不了時略過並印原因）。F-8 在 `test_fsm_names.py`、F-12 在 `test_sdd_cli.py`；F-5（`phase` 表對 SDD LATEST 狀態集合的對拍，用真 SDD 樹的子行程取 `_HAPPY_PATH`／`OBSERVATION_STATES`／`_BLOCKING_STATES`）已真跑。`test_fsm_phase.py` 收納 W4 dogfood 的七個 AT（真 claude haiku 寫出、SCG-4 審查通過，測試名保留 AT 編號）與契約 §3.1.5 的逐鍵對映表。
 另有兩支與 Docker 部署相關的測試：`tests/test_health_deep.py`（`/health/deep` 的 200／503 與各項檢查的失敗路徑；`sdd` 的未設／有效／全新 clone／不存在／是檔案／空目錄六種情境，並鎖住「`sdd.ok` 為 false 時整體仍 200、頂層 `reason` 不含 sdd」）、`tests/test_trace_logging.py`（`X-Trace-Id` 回帶、每行日誌的 `trace_id`、`BRIDGE_LOG_DIR`）；以及 `tests/test_deploy_config.py`——**靜態**讀檔，把 W5 的部署缺陷修法（映像裝 git、healthcheck 打 `/health/deep`、compose 必填金鑰、日誌卷 `nocopy`、信任代理預設值、nginx `error_log crit`、`restore.sh` 的 root 階段建目錄…）各釘成一條斷言，因為這類缺陷只在 Docker 全棧真跑才現形，而 docker／nginx 設定沒有自己的 pytest 家。
+ResearchToPRD 研究面（P0）新增 `tests/test_research_{settings,db,layout,router,fsm_ops,fsm_view,ast_locks,events,capability,deploy_config}.py`、`tests/research_pg_support.py` 與 `tests/fixtures/research/{framework,scripts}/`（框架模板與 agent 的夾具副本、研究劇本）。兩個環境條件（缺了就跳過並寫明 `TOOL-ABSENCE`）：`BRIDGE_TEST_DSN`（資料庫型 AT：每個測試用 `make_research_db()` 在該伺服器建一個名稱以 `r2p_bra_` 起頭的**拋棄式資料庫**、套 backend 的 Flyway `V1`～`V18` 真檔、用畢 `DROP`；DSN 的帳號須能 `CREATE DATABASE`）與 `SDD_ROOT`（真框架 FSM 對拍；LATEST 現查 `python AISDLC_SDD/scripts/sdd_version.py`）。**兩者皆在場時，研究面的測試應為 0 skipped**（既有的兩個環境型 skip 不在此列：`test_sdd_fsm.py` 的 symlink 測試〔平台無權限建符號連結〕與對真實 FSM 狀態檔的測試〔全新 clone 沒有狀態檔〕）：
+
+```bash
+# cwd＝AgentConsole/engine-bridge
+BRIDGE_TEST_DSN='postgresql://<YOUR_USER>:<YOUR_PASSWORD>@localhost:5432/<YOUR_DB>' SDD_ROOT='<monorepo>/AISDLC_SDD/AISDLC_SDD_v0.30' python -m pytest tests -q
+```
+
+```powershell
+$env:BRIDGE_TEST_DSN = "postgresql://<YOUR_USER>:<YOUR_PASSWORD>@localhost:5432/<YOUR_DB>"; $env:SDD_ROOT = "<monorepo>\AISDLC_SDD\AISDLC_SDD_v0.30"
+Push-Location AgentConsole\engine-bridge; ..\..\.venv\Scripts\python.exe -m pytest tests -q; Pop-Location
+```
+
 DB 整合測試（寫入 `console` schema、advisory lock 跨實例互斥）需要一個可寫的 PostgreSQL：
 
 ```bash

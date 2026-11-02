@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 3,
+  "dimension": "SECURITY",
+  "agent_id": "security-engineer",
+  "prd_sha256": "50d0eb2b3e647007d4dc316613664b134ca2679ebfa4885aa04e9614dd2356e9",
+  "rubric": [
+    {
+      "item": "license_conflict",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §9.4：外部相依的授權與目標授權相容，授權待查列已標示"
+    },
+    {
+      "item": "secret_handling",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：機密不入日誌與版控，脫敏規則明確"
+    },
+    {
+      "item": "injection_risk",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：輸入驗證規則明確，文件內容視為資料"
+    },
+    {
+      "item": "authn_authz",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：角色與權限已列明"
+    },
+    {
+      "item": "external_content_safety",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §9.4：外部內容視為資料，相依來源已逐項列出"
+    }
+  ],
+  "score": 90,
+  "summary": "授權處置已改善；核准憑證的有效期限需要寫明",
+  "defects": [
+    {
+      "code": "SEC-AUTHN_AUTHZ-01",
+      "severity": "P3",
+      "prd_anchor": "§6/NFR-002",
+      "description": "核准人身分如何驗證只寫來源、沒有寫憑證的有效期限",
+      "suggestion": "補憑證有效期限與驗證失敗的處置",
+      "evidence_refs": []
+    }
+  ]
+}

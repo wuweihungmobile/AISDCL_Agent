@@ -1,0 +1,51 @@
+{
+  "schema_rev": 1,
+  "round": 2,
+  "dimension": "SECURITY",
+  "agent_id": "security-engineer",
+  "prd_sha256": "835f732adfcf44c7a2e2ba74154691e6f42d48a1e4a0aa02806b97589fd00409",
+  "rubric": [
+    {
+      "item": "license_conflict",
+      "score": 19,
+      "max": 20,
+      "note": "已核對 §9.4：外部相依的授權與目標授權相容，授權待查列已標示"
+    },
+    {
+      "item": "secret_handling",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：機密不入日誌與版控，脫敏規則明確"
+    },
+    {
+      "item": "injection_risk",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：輸入驗證規則明確，文件內容視為資料"
+    },
+    {
+      "item": "authn_authz",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §6/NFR-002：角色與權限已列明"
+    },
+    {
+      "item": "external_content_safety",
+      "score": 18,
+      "max": 20,
+      "note": "已核對 §9.4：外部內容視為資料，相依來源已逐項列出"
+    }
+  ],
+  "score": 91,
+  "summary": "資安與授權設計完整；僅剩輪替頻率的建議",
+  "defects": [
+    {
+      "code": "SEC-SECRET_HANDLING-01",
+      "severity": "P4",
+      "prd_anchor": "§6/NFR-002",
+      "description": "憑證輪替的頻率未寫明",
+      "suggestion": "補輪替週期",
+      "evidence_refs": []
+    }
+  ]
+}

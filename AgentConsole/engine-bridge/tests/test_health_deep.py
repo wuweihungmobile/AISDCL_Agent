@@ -68,7 +68,13 @@ def test_all_checks_pass_returns_200_with_the_contract_shape(
     seen = _fake_git(monkeypatch, stdout="git version 2.39.5\n")
     resp = live.client.get("/health/deep")
     assert resp.status_code == 200
-    assert resp.json() == {
+    body = resp.json()
+    # ResearchToPRD：頂層另帶資訊欄 `research`（值隨機器的 PATH 而異，鍵集合固定；細節見
+    # test_research_router.py 的 AT_960_2_7）；其餘形狀與此前逐值相同。
+    assert set(body.pop("research")) == {
+        "mode", "root", "db", "claude_cli", "gh_cli", "git", "web_layer_enabled",
+        "scaffold_templates"}
+    assert body == {
         "status": "ok",
         "checks": {
             "git": {"ok": True, "version": "git version 2.39.5"},

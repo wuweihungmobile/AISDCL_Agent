@@ -20,12 +20,21 @@ Rule 9 絕對禁令 #1（繞過 FSMRuntime 直接讀寫 FSM-STATE-*.yaml）在�
 跨平台：子行程旗標走 `procutil.popen_platform_kwargs()`（Windows＝新行程組＋無視窗；POSIX＝新
 session）；逾時以行程樹終止（`procutil.begin_terminate`，不直接 `os.kill`）。Windows 行為＝venv 的
 `python.exe`是啟動器、真正的直譯器是它的子行程，所以逾時必須殺整棵樹。
+
+研究面（ResearchToPRD；ADR-XPLAT-017 D2、D4）：檔尾另有**獨立**的研究面動詞表 `RESEARCH_VERBS`
+（`show`、`transition`、`gate`、`spec-frozen`、`spec-refreeze`）、旗標白名單
+`_RESEARCH_VERB_FLAGS`、檢查函式 `check_research_allowed`、組裝函式與執行入口
+`run_research_verb`。上面的 `ALLOWED_VERBS`、`_VERB_FLAGS`、`run_verb` 一字不動：研究面動詞只對
+`/research/*` 開放，不開放給 `:freeze` 與 `/autoclaude/runs` 的 `sdd` 區塊；`resume-from-escalation`
+永不入表（ESCALATION 只有人能解）。外環鍵（`research-<slug>`）的每次呼叫環境固定
+`SDD_ENABLE_AUTO_RECOVERY=0`。
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -306,5 +315,288 @@ def run_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, state_dir
         audit_call("ok", rc)
         return payload
     failure = _map_failure(verb, project, rc, payload)
+    audit_call(f"rc={rc}:{failure.body['reason']}", rc, stderr)
+    raise failure
+
+
+# ══ 研究面（ResearchToPRD；ADR-XPLAT-017 D2、D4、§4）══════════════════════════════════════════
+# 獨立於上面的 ALLOWED_VERBS／_VERB_FLAGS／run_verb（那三者零改動）。研究面動詞只對 `/research/*`
+# 開放；每個值域都表驅動，越界在送出前就 500 `sdd_cli_usage`、且不起子行程。
+RESEARCH_VERB_SHOW = "show"
+RESEARCH_VERB_TRANSITION = "transition"
+RESEARCH_VERB_GATE = "gate"
+RESEARCH_VERB_SPEC_FROZEN = VERB_SPEC_FROZEN
+RESEARCH_VERB_SPEC_REFREEZE = "spec-refreeze"
+
+#: 研究面動詞表。`resume-from-escalation`、`reconcile`、`spec-audit`、`check-impl`、
+#: `complete-auto-compact`、`reset-ledger`、`negotiate-*`、`delegate-*` 一律不入表。
+RESEARCH_VERBS: frozenset[str] = frozenset({
+    RESEARCH_VERB_SHOW, RESEARCH_VERB_TRANSITION, RESEARCH_VERB_GATE,
+    RESEARCH_VERB_SPEC_FROZEN, RESEARCH_VERB_SPEC_REFREEZE,
+})
+
+#: 每個動詞可帶的旗標（`--project`／`--must-exist` 由 `run_research_verb` 自己加，呼叫端不得帶）。
+_RESEARCH_VERB_FLAGS: dict[str, frozenset[str]] = {
+    RESEARCH_VERB_SHOW: frozenset(),
+    RESEARCH_VERB_TRANSITION: frozenset({"--to", "--reason", "--trigger"}),
+    RESEARCH_VERB_GATE: frozenset({"--gate", "--result", "--reason"}),
+    RESEARCH_VERB_SPEC_FROZEN: frozenset({"--stage", "--doc", "--digest", "--root", "--reason",
+                                          "--approver", "--json"}),
+    RESEARCH_VERB_SPEC_REFREEZE: frozenset({"--doc", "--root", "--reason", "--approver"}),
+}
+_RESEARCH_REPEATABLE_FLAGS = frozenset({"--doc"})
+
+#: `transition --trigger` 的固定值（decision_trace 的來源標記）。
+RESEARCH_TRIGGER = "research_bridge"
+#: 外環鍵 `research-<slug>[-g<N>]`（世代鍵 `-g<N>` 是換世代的新鍵）；其餘鍵一律視為內環鍵。
+OUTER_KEY_RE = re.compile(r"^research-[a-z0-9][a-z0-9-]{0,29}(-g[0-9]+)?$")
+#: `transition --to` 的值域：外環只准前五值；內環另准 SPEC_AUDIT、PR_REVIEW、RELEASE。
+OUTER_TRANSITION_TARGETS: frozenset[str] = frozenset({
+    "SCENARIO_DETECT", "AGENT_LOAD", "SPEC_DRAFTING", "SCG_VALIDATION", "SPEC_REGRESSION_CHECK"})
+INNER_TRANSITION_TARGETS: frozenset[str] = OUTER_TRANSITION_TARGETS | {
+    "SPEC_AUDIT", "PR_REVIEW", "RELEASE"}
+#: 內環鍵的基線採納路徑：現態為 SCG_VALIDATION 時 `--to HUMAN_PENDING`，且 `--reason` 以此起頭。
+BASELINE_ADOPTION_TARGET = "HUMAN_PENDING"
+BASELINE_ADOPTION_REASON_PREFIX = "baseline adoption"
+OUTER_GATES: frozenset[str] = frozenset({"SCG_VALIDATION"})
+INNER_GATES: frozenset[str] = frozenset({"PR_REVIEW", "RTM_VERIFY", "RELEASE_READY"})
+GATE_RESULTS: tuple[str, ...] = ("PASS", "FAIL")
+#: `spec-frozen --stage` 的值域：外環只准 Gate-0、Gate-0-SCR<n>、Stage-1；內環只准 Stage-1。
+OUTER_FREEZE_STAGE_RE = re.compile(r"^(Gate-0(-SCR[0-9]+)?|Stage-1)$")
+INNER_FREEZE_STAGES: frozenset[str] = frozenset({"Stage-1"})
+#: 核准人（`--approver`）：JWT subject，由 console-api 轉入；Bridge 再驗一次。
+RESERVED_APPROVERS: frozenset[str] = frozenset({"bridge", "agent", "system"})
+APPROVER_MAX_CHARS = 100
+_APPROVER_RE = re.compile(r"^[A-Za-z0-9._@-]+$")
+#: 外環鍵的子行程環境固定關閉自動恢復（審查分數不足不得被自動恢復；R-9.5、禁令 6）。
+RESEARCH_AUTO_RECOVERY_ENV = "SDD_ENABLE_AUTO_RECOVERY"
+_TRANSITION_OK_RE = re.compile(r"^OK transitioned to (\S+)\s*$")
+
+
+def is_outer_key(key: str) -> bool:
+    return OUTER_KEY_RE.fullmatch(key) is not None
+
+
+def validate_research_approver(raw: object) -> str:
+    """核准人驗證：非空、非保留字（`bridge`／`agent`／`system`，不分大小寫）、≤100 字、只含
+    `[A-Za-z0-9._@-]`（所以空白與 `+` 皆不合）、且不得以 `-` 起頭（argv 注入）。不合＝422
+    `invalid_request`（`violations[{field,rule,message}]`）；合格原樣回傳（不 strip）。"""
+    value = raw if isinstance(raw, str) else ""
+    rules: list[tuple[str, str]] = []
+    if not value:
+        rules.append(("required", "approver 必填"))
+    else:
+        if value.casefold() in RESERVED_APPROVERS:
+            rules.append(("reserved", "approver 不得是保留字 bridge／agent／system"))
+        if len(value) > APPROVER_MAX_CHARS:
+            rules.append(("too_long", f"approver 不得超過 {APPROVER_MAX_CHARS} 字元"))
+        if not _APPROVER_RE.fullmatch(value):
+            rules.append(("invalid_chars", "approver 只准 [A-Za-z0-9._@-]（不含空白與 +）"))
+        if value.startswith("-"):
+            rules.append(("leading_dash", "approver 不得以 - 起頭"))
+    if rules:
+        raise ApiError(422, "invalid_request", violations=[
+            {"field": "approver", "rule": rule, "message": message} for rule, message in rules])
+    return value
+
+
+def research_transition_args(*, to: str, reason: str) -> list[str]:
+    return ["--to", to, "--reason", reason, "--trigger", RESEARCH_TRIGGER]
+
+
+def research_gate_args(*, gate: str, result: str, reason: str) -> list[str]:
+    return ["--gate", gate, "--result", result, "--reason", reason]
+
+
+def research_freeze_args(*, stage: str, docs: Sequence[str], root: str, reason: str,
+                         approver: str) -> list[str]:
+    """`spec-frozen` 的研究面 argv（含 `--digest --json`）。核准人在**這個函式內**驗證並組進 argv
+    （驗證與組裝不拆開：沒有「驗過」與「組的」兩份不同的值）。"""
+    checked = validate_research_approver(approver)
+    args = ["--stage", stage]
+    for doc in docs:
+        args += ["--doc", doc]
+    return [*args, "--digest", "--root", root, "--reason", reason, "--approver", checked,
+            "--json"]
+
+
+def research_refreeze_args(*, docs: Sequence[str], root: str, reason: str,
+                           approver: str) -> list[str]:
+    checked = validate_research_approver(approver)
+    args: list[str] = []
+    for doc in docs:
+        args += ["--doc", doc]
+    return [*args, "--root", root, "--reason", reason, "--approver", checked]
+
+
+def check_research_allowed(verb: str, args: Sequence[str], *, key: str) -> None:
+    """研究面動詞、旗標與值域的檢查（表驅動；依鍵類別＝外環或內環）。越界一律 500
+    `sdd_cli_usage`（Bridge 自己的 bug；測試必須零次出現），且在起子行程之前。
+
+    呼叫端不得帶 `--project`、`--must-exist`（由 `run_research_verb` 加）；每個旗標至多一次
+    （`--doc` 可重複）；值原樣吃掉（含以 `--` 起頭的理由）。"""
+    if verb not in RESEARCH_VERBS:
+        raise _usage(f"verb not allowed: {verb!r}")
+    allowed = _RESEARCH_VERB_FLAGS[verb]
+    outer = is_outer_key(key)
+    seen: dict[str, list[str]] = {}
+    i = 0
+    while i < len(args):
+        flag = str(args[i])
+        if flag not in allowed:
+            raise _usage(f"flag not allowed for {verb}: {flag!r}")
+        if flag in _BOOL_FLAGS:
+            if flag in seen:
+                raise _usage(f"flag {flag} for {verb} given twice")
+            seen[flag] = [""]
+            i += 1
+            continue
+        if i + 1 >= len(args):
+            raise _usage(f"flag {flag} for {verb} has no value")
+        value = str(args[i + 1])
+        if "\x00" in value:
+            raise _usage(f"flag {flag} for {verb} has a NUL in its value")
+        if flag in seen and flag not in _RESEARCH_REPEATABLE_FLAGS:
+            raise _usage(f"flag {flag} for {verb} given twice")
+        seen.setdefault(flag, []).append(value)
+        i += 2
+
+    def one(flag: str) -> str | None:
+        values = seen.get(flag)
+        return values[0] if values else None
+
+    def need_text(flag: str) -> str:
+        value = one(flag)
+        if value is None or not value.strip():
+            raise _usage(f"{verb} requires a non-empty {flag}")
+        return value
+
+    if verb == RESEARCH_VERB_TRANSITION:
+        target, reason = one("--to"), need_text("--reason")
+        if one("--trigger") != RESEARCH_TRIGGER:
+            raise _usage(f"transition requires --trigger {RESEARCH_TRIGGER}")
+        if target == BASELINE_ADOPTION_TARGET:
+            if outer or not reason.startswith(BASELINE_ADOPTION_REASON_PREFIX):
+                raise _usage("transition --to HUMAN_PENDING is only the inner-key baseline "
+                             f"adoption path (reason must start with "
+                             f"{BASELINE_ADOPTION_REASON_PREFIX!r})")
+        elif target not in (OUTER_TRANSITION_TARGETS if outer else INNER_TRANSITION_TARGETS):
+            raise _usage(f"transition --to {target!r} is not allowed for this key class")
+    elif verb == RESEARCH_VERB_GATE:
+        need_text("--reason")
+        if one("--gate") not in (OUTER_GATES if outer else INNER_GATES):
+            raise _usage(f"gate --gate {one('--gate')!r} is not allowed for this key class")
+        if one("--result") not in GATE_RESULTS:
+            raise _usage("gate --result must be PASS or FAIL")
+    elif verb == RESEARCH_VERB_SPEC_FROZEN:
+        stage = one("--stage")
+        if stage is None or not (OUTER_FREEZE_STAGE_RE.fullmatch(stage) if outer
+                                 else stage in INNER_FREEZE_STAGES):
+            raise _usage(f"spec-frozen --stage {stage!r} is not allowed for this key class")
+        for flag in ("--reason", "--approver", "--root"):
+            need_text(flag)
+        if not seen.get("--doc") or "--digest" not in seen or "--json" not in seen:
+            raise _usage("spec-frozen requires --doc (at least one), --digest and --json")
+    elif verb == RESEARCH_VERB_SPEC_REFREEZE:
+        for flag in ("--reason", "--approver", "--root"):
+            need_text(flag)
+        if not seen.get("--doc"):
+            raise _usage("spec-refreeze requires at least one --doc")
+
+
+def build_research_argv(verb: str, args: Sequence[str], project: str, *,
+                        create: bool = False) -> list[str]:
+    """研究面的 argv（列表、不經 shell）。`create`＝建檔專用的 `show`：**唯一不帶 `--must-exist`**
+    的形態（缺檔時框架 CLI 依模板建出 INIT 狀態檔）；其餘一律恆附 `--must-exist`。"""
+    guard = [] if create else ["--must-exist"]
+    return [sys.executable, "-W", "ignore::RuntimeWarning", "-m", CLI_MODULE, verb,
+            "--project", project, *guard, *args]
+
+
+def build_research_env(base: Mapping[str, str], *, sdd_root: Path, state_dir: Path,
+                       project: str) -> dict[str, str]:
+    """`build_cli_env` 的固定環境，外環鍵另加 `SDD_ENABLE_AUTO_RECOVERY=0`（ADR-XPLAT-017 D4）。
+    `BRIDGE_*`、`SDD_*`（除固定集合）、`PYTHONPATH` 一律先移除再重建。"""
+    env = build_cli_env(base, sdd_root=sdd_root, state_dir=state_dir, project=project)
+    if is_outer_key(project):
+        env[RESEARCH_AUTO_RECOVERY_ENV] = "0"
+    return env
+
+
+def _research_payload(verb: str, stdout: str) -> dict[str, Any] | None:
+    """各動詞的成功輸出形態不同：`show` 是多行 JSON（整段解析）、`transition` 是純文字
+    `OK transitioned to X`、其餘是單行 JSON。解不出來＝None（呼叫端回 502，不靜默通過）。"""
+    if verb == RESEARCH_VERB_SHOW:
+        try:
+            doc = json.loads(stdout)
+        except ValueError:
+            return None
+        return doc if isinstance(doc, dict) else None
+    if verb == RESEARCH_VERB_TRANSITION:
+        lines = [ln for ln in stdout.splitlines() if ln.strip()]
+        match = _TRANSITION_OK_RE.match(lines[-1]) if lines else None
+        return {"ok": True, "verb": verb, "current_state": match.group(1)} if match else None
+    return _last_json_line(stdout)
+
+
+def run_research_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, state_dir: Path,
+                      project: str, create: bool = False, timeout: float | None = None,
+                      audit: AuditLog | None = None, approver: str | None = None,
+                      context: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """以子行程跑一個研究面動詞，回傳解析後的輸出（物件）。失敗一律是 `ApiError`。
+
+    研究面的**唯一**執行入口（與 `run_verb` 平行、互不呼叫）。rc→HTTP 與 `run_verb` 同表
+    （1→502 `sdd_cli_failed`、2→500 `sdd_cli_usage`、3→409 `fsm_state_conflict`、4→422
+    `sdd_invalid_argument`、5→404／422、逾時→504 `sdd_cli_timeout`）；每次呼叫都記一筆稽核
+    `sdd_cli`（不含環境、權杖與 `--reason` 文字）。`create=True` 只准 `show` 且須是外環鍵。
+    呼叫端要序列化就自己包 `state_guard`（可重入）。"""
+    check_research_allowed(verb, args, key=project)
+    if create and not (verb == RESEARCH_VERB_SHOW and is_outer_key(project)):
+        raise _usage("create is only for `show` on an outer key")
+    if timeout is None:
+        timeout = DEFAULT_TIMEOUT_SECONDS
+    if sdd_root is None or not Path(sdd_root).is_dir():
+        raise ApiError(503, "sdd_unavailable",
+                       detail="找不到 AISDLC_SDD 目錄；請設定 SDD_ROOT（Docker 需掛載）")
+    argv = build_research_argv(verb, args, project, create=create)
+    env = build_research_env(os.environ, sdd_root=Path(sdd_root), state_dir=Path(state_dir),
+                             project=project)
+
+    def audit_call(result: str, rc: int | None, stderr: str = "") -> None:
+        if audit is None:
+            return
+        fields: dict[str, Any] = {
+            "verb": verb, "project": project, "approver": approver, "result": result, "rc": rc,
+            "trace_id": trace_id_var.get(), **(context or {})}
+        if stderr:
+            fields["stderr_tail"] = stderr[-_STDERR_AUDIT_CHARS:]
+        audit.record("sdd_cli", **fields)
+
+    try:
+        proc = subprocess.Popen(
+            argv, cwd=str(sdd_root), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, **procutil.popen_platform_kwargs())
+    except OSError as exc:
+        audit_call(f"spawn_error:{type(exc).__name__}", None)
+        raise ApiError(502, "sdd_cli_failed",
+                       detail=f"cannot start the sdd cli ({type(exc).__name__})") from exc
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        out, err = _reap(proc)
+        audit_call("timeout", None, err.decode("utf-8", errors="replace"))
+        raise ApiError(504, "sdd_cli_timeout",
+                       detail=f"{verb} did not finish within {timeout:g}s") from exc
+    stdout, stderr = out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
+    rc = proc.returncode
+    if rc == 0:
+        payload = _research_payload(verb, stdout)
+        if payload is None:
+            audit_call("bad_output", rc, stderr)
+            raise ApiError(502, "sdd_cli_failed",
+                           detail=f"{verb} succeeded but its stdout is not the expected shape")
+        audit_call("ok", rc)
+        return payload
+    failure = _map_failure(verb, project, rc, _last_json_line(stdout))
     audit_call(f"rc={rc}:{failure.body['reason']}", rc, stderr)
     raise failure
