@@ -1350,8 +1350,7 @@ class Srv:
         try:
             self.arrived(h.path).set()
             route = self.routes.get(h.path) or (404, {}, b"")  # 未登記路徑＝404 空本文
-            status, headers, body = route[:3]
-            opts = route[3] if len(route) > 3 else {}
+            status, headers, body, opts = (*route[:3], route[3] if len(route) > 3 else {})
             if opts.get("hold") is not None:
                 opts["hold"].wait(30)
             if opts.get("delay"):
@@ -1368,6 +1367,10 @@ class Srv:
                 h.send_header(k, v)
             if "Content-Length" not in headers:
                 h.send_header("Content-Length", str(len(body)))
+            if not (opts.get("stall") or opts.get("drip")):
+                with self._lock:  # 減在 end_headers 前：空本文回應在那一刻即完整（DEF-200-579；572 只涵蓋本文）
+                    self._inflight -= 1
+                    done = True
             h.end_headers()
             if opts.get("stall"):  # 送完標頭後不送本文，等伺服器關閉
                 self.closing.wait(30)
@@ -1378,9 +1381,6 @@ class Srv:
                     if self.closing.wait(0.5):
                         break
             else:
-                with self._lock:  # 寫本文前先減：finally 才減會把序列客戶端判成重疊（DEF-200-572）
-                    self._inflight -= 1
-                done = True
                 h.wfile.write(body)
         except OSError:  # 含 BrokenPipe／ConnectionReset／ConnectionAborted：客戶端先走了
             pass
