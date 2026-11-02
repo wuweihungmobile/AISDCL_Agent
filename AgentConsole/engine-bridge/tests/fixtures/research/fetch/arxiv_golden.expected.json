@@ -1,0 +1,36 @@
+[
+  {
+    "layer": "ACADEMIC",
+    "tier": "T1",
+    "verification": "V2",
+    "anchor_kind": "DOI",
+    "url": "https://arxiv.org/abs/2401.00001v2",
+    "doi": "10.1145/3600000.3600001",
+    "git_commit": null,
+    "title": "Efficient Garbage Collection for Persistent Memory",
+    "authors_org": "Ada Author, Ben Writer",
+    "published_at": "2024-01-02",
+    "source_type": "PREPRINT",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "2401.00001v2"
+  },
+  {
+    "layer": "ACADEMIC",
+    "tier": "T1",
+    "verification": "V2",
+    "anchor_kind": "URL",
+    "url": "https://arxiv.org/abs/cs/0112017v1",
+    "doi": "未見",
+    "git_commit": null,
+    "title": "An Old-Style Identifier Survey",
+    "authors_org": "Cleo Elder",
+    "published_at": "2001-12-18",
+    "source_type": "PREPRINT",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "cs/0112017v1"
+  }
+]

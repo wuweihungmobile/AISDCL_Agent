@@ -1,0 +1,34 @@
+{
+  "total": 2,
+  "offset": 0,
+  "next": 2,
+  "data": [
+    {
+      "paperId": "649def34f8be52c8b66281af98ae884c09aef38b",
+      "url": "https://www.semanticscholar.org/paper/649def34f8be52c8b66281af98ae884c09aef38b",
+      "title": "Construction of the Literature Graph in Semantic Scholar",
+      "abstract": "We describe a deployed scalable system for organizing published scientific literature.",
+      "year": 2018,
+      "venue": "NAACL",
+      "publicationDate": "2018-05-14",
+      "citationCount": 321,
+      "externalIds": {"DOI": "10.18653/v1/N18-3011", "ArXiv": "1805.02262"},
+      "authors": [
+        {"authorId": "1741101", "name": "Waleed Ammar"},
+        {"authorId": "2529182", "name": "Dirk Groeneveld"}
+      ]
+    },
+    {
+      "paperId": "0123456789abcdef0123456789abcdef01234567",
+      "url": "https://www.semanticscholar.org/paper/0123456789abcdef0123456789abcdef01234567",
+      "title": "A Survey of Template Caching",
+      "abstract": "A short survey abstract.",
+      "year": 2023,
+      "venue": "",
+      "publicationDate": null,
+      "citationCount": 4,
+      "externalIds": {},
+      "authors": [{"authorId": null, "name": "Cara Survey"}]
+    }
+  ]
+}

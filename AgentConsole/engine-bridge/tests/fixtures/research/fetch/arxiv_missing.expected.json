@@ -1,0 +1,19 @@
+[
+  {
+    "layer": "ACADEMIC",
+    "tier": "T1",
+    "verification": "V1",
+    "anchor_kind": "URL",
+    "url": "https://arxiv.org/abs/2402.00002v1",
+    "doi": "未見",
+    "git_commit": null,
+    "title": "未見",
+    "authors_org": "未見",
+    "published_at": "未見",
+    "source_type": "PREPRINT",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "2402.00002v1"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "total": 2,
+  "offset": 0,
+  "data": [
+    {
+      "paperId": "fedcba9876543210fedcba9876543210fedcba98",
+      "publicationDate": "2018-13-45"
+    },
+    {
+      "title": "A paper with neither a url nor a usable paper id",
+      "abstract": "Nothing to anchor on."
+    }
+  ]
+}

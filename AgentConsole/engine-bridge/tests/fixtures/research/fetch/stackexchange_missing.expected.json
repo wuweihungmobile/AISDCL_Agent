@@ -1,0 +1,23 @@
+[
+  {
+    "layer": "COMMUNITY",
+    "tier": "T3",
+    "verification": "V1",
+    "anchor_kind": "URL",
+    "url": "https://stackoverflow.com/questions/333",
+    "doi": null,
+    "git_commit": null,
+    "title": "未見",
+    "authors_org": "未見",
+    "published_at": "未見",
+    "source_type": "FORUM",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": true,
+    "external_id": "未見",
+    "score": "未見",
+    "is_answered": false,
+    "answer_count": "未見",
+    "tags": []
+  }
+]

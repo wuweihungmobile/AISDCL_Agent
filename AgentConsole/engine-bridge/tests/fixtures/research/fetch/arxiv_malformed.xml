@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Truncated in the middle of an entry</title>
+  <entry>
+    <id>http://arxiv.org/abs/2403.00003v1</id>
+    <title>The response was cut off here

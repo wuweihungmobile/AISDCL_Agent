@@ -1,0 +1,40 @@
+[
+  {
+    "layer": "ACADEMIC",
+    "tier": "T1",
+    "verification": "V2",
+    "anchor_kind": "DOI",
+    "url": "https://www.semanticscholar.org/paper/649def34f8be52c8b66281af98ae884c09aef38b",
+    "doi": "10.18653/v1/N18-3011",
+    "git_commit": null,
+    "title": "Construction of the Literature Graph in Semantic Scholar",
+    "authors_org": "Waleed Ammar, Dirk Groeneveld",
+    "published_at": "2018-05-14",
+    "source_type": "PAPER",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "649def34f8be52c8b66281af98ae884c09aef38b",
+    "year": 2018,
+    "citation_count": 321
+  },
+  {
+    "layer": "ACADEMIC",
+    "tier": "T1",
+    "verification": "V2",
+    "anchor_kind": "URL",
+    "url": "https://www.semanticscholar.org/paper/0123456789abcdef0123456789abcdef01234567",
+    "doi": "未見",
+    "git_commit": null,
+    "title": "A Survey of Template Caching",
+    "authors_org": "Cara Survey",
+    "published_at": "未見",
+    "source_type": "PREPRINT",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "0123456789abcdef0123456789abcdef01234567",
+    "year": 2023,
+    "citation_count": 4
+  }
+]

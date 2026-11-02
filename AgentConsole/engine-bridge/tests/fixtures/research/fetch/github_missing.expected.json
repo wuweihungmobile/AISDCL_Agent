@@ -1,0 +1,25 @@
+[
+  {
+    "layer": "OSS",
+    "tier": "T1",
+    "verification": "V2",
+    "anchor_kind": "URL",
+    "url": "https://github.com/sparse-org/sparse-repo",
+    "doi": null,
+    "git_commit": "未見",
+    "title": "sparse-org/sparse-repo",
+    "authors_org": "未見",
+    "published_at": "未見",
+    "source_type": "REPO",
+    "license_spdx": "未見",
+    "license_note": "未見",
+    "clue_only": false,
+    "external_id": "sparse-org/sparse-repo",
+    "stars": "未見",
+    "pushed_at": "未見",
+    "default_branch": "未見",
+    "qualifies": false,
+    "archived": false,
+    "fork": false
+  }
+]

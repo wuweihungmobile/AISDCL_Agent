@@ -1,0 +1,14 @@
+{
+  "total_count": 2,
+  "incomplete_results": false,
+  "items": [
+    {
+      "full_name": "sparse-org/sparse-repo",
+      "license": null
+    },
+    {
+      "html_url": "https://github.com/no-name/no-name",
+      "stargazers_count": 99999
+    }
+  ]
+}

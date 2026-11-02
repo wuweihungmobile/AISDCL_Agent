@@ -1,0 +1,8 @@
+{
+  "name": "main",
+  "commit": {
+    "sha": "0123456789abcdef0123456789abcdef01234567",
+    "commit": {"committer": {"date": "2026-10-20T08:30:00Z"}, "message": "Fix the collector"}
+  },
+  "protected": false
+}

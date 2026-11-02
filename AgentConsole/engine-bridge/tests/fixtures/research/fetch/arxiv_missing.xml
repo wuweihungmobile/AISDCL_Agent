@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query: sparse feed</title>
+  <id>http://arxiv.org/api/oPlaceholderQueryId</id>
+  <entry>
+    <id>http://arxiv.org/abs/2402.00002v1</id>
+  </entry>
+  <entry>
+    <title>An entry without an identifier</title>
+    <summary>Has no id element, so there is nothing to anchor on.</summary>
+  </entry>
+</feed>

@@ -872,3 +872,54 @@ def test_AT_960_15_E_1_a_failed_new_key_leaves_the_db_ahead_and_retry_init_heals
     assert db_snapshot(env, rid) == snap and env.rdb.count(
         "research_gate_decisions", "gate = 'ABANDON_KEY'") == 1
     assert "resume-from-escalation" not in verbs(popen_log)
+
+
+# ══ AT-960-8-9（抓取面；PKG-BR-B 補，append-only）：端點與抓取層共用常數與有效清單 ═══════════
+def test_AT_960_8_9_the_router_imports_the_single_interval_table_from_the_fetch_layer() -> None:
+    import ast
+
+    from app.research.fetch import allowlist as fetch_allowlist
+    from app.routers import research as research_router
+
+    assert research_router.ENV_MIN_INTERVALS is fetch_allowlist.ENV_MIN_INTERVALS
+    assert research_router.DEFAULT_ENV_MIN_INTERVAL == fetch_allowlist.DEFAULT_ENV_MIN_INTERVAL
+    tree = ast.parse(Path(research_router.__file__).read_text(encoding="utf-8"))
+    assigned = {t.id for node in tree.body if isinstance(node, ast.Assign | ast.AnnAssign)
+                for t in (node.targets if isinstance(node, ast.Assign) else [node.target])
+                if isinstance(t, ast.Name)}
+    assert not {"ENV_MIN_INTERVALS", "DEFAULT_ENV_MIN_INTERVAL"} & assigned, \
+        "節流下限表的唯一定義在 research/fetch/allowlist.py；路由只 import"
+
+
+def test_AT_960_8_9_the_fetch_layer_builds_its_list_from_the_endpoint_rows_and_values_only_lengthen(
+        env: Env) -> None:
+    from app.research.fetch import build_effective_allowlist
+
+    assert env.rdb is not None
+    entries = {}
+    for host, layer, interval in (("export.arxiv.org", "ACADEMIC", 1),
+                                  ("docs.example.com", "INDUSTRY", 20)):
+        added = env.post("/research/allowlist", {
+            "list_kind": "FETCH", "host": host, "layer": layer, "min_interval_seconds": interval,
+            "added_by": ADMIN})
+        assert added.status_code == 201, added.text
+        entries[host] = added.json()["id"]
+    got = env.get("/research/allowlist").json()
+    fetch_list = build_effective_allowlist(env.settings.research_fetch_allowlist,
+                                           env.db.list_allowlist())
+    assert list(fetch_list.hosts) == got["effective"]["FETCH"]
+    listed = {(e["host"], e["source"]): e["min_interval_seconds"] for e in got["items"]}
+    assert listed[("export.arxiv.org", "ENV")] == 3 and listed[("export.arxiv.org", "ADMIN")] == 1
+    assert (fetch_list.interval("export.arxiv.org"), fetch_list.interval("docs.example.com")) == (
+        3, 20), "ADMIN 條目填 1 低於內建下限 3，仍以 3 執行；填 20 高於下限，以 20 執行"
+    off = env.patch(f"/research/allowlist/{entries['docs.example.com']}",
+                    {"enabled": False, "disabled_by": ADMIN})
+    assert off.status_code == 200
+    after = build_effective_allowlist(env.settings.research_fetch_allowlist,
+                                      env.db.list_allowlist())
+    assert "docs.example.com" not in after.hosts
+    assert list(after.hosts) == env.get("/research/allowlist").json()["effective"]["FETCH"]
+    assert [row["host"] for row in after.snapshot()] == [
+        "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
+        "api.stackexchange.com", "export.arxiv.org"], "快照逐條列出基底與啟用中的 ADMIN 條目"
+    assert "reddit.com" not in after.hosts, "Reddit 預設不在任何清單"

@@ -49,6 +49,15 @@ CAPABILITY: dict[str, str] = {
     "research/db.py": "rw",
     "research/fsm_ops.py": "exec",
     "routers/research.py": "exec",
+    # PKG-BR-B：抓取器。`__init__` 只落地原文檔（寫檔、無網路庫）＝rw；其餘模組用 httpx／socket／
+    # urllib（連 `urllib.parse` 的字串解析也算，TCS 字面）＝net，且只准住在 fetch/ 之下。
+    "research/fetch/__init__.py": "rw",
+    "research/fetch/allowlist.py": "net",
+    "research/fetch/http.py": "net",
+    "research/fetch/arxiv.py": "net",
+    "research/fetch/semantic_scholar.py": "net",
+    "research/fetch/github.py": "net",
+    "research/fetch/stackexchange.py": "net",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",

@@ -47,6 +47,7 @@ from ..research.db import (
     jsonable,
     utc_now,
 )
+from ..research.fetch.allowlist import DEFAULT_ENV_MIN_INTERVAL, ENV_MIN_INTERVALS
 from ..research.outbox import DbBlocked, DurableWriter, FileRef, FileWrite, Op, Outbox
 from ..research.settings import research_info
 from ..sdd_state import ESCALATION_STATES
@@ -68,11 +69,6 @@ STREAM_BATCH = 200
 #: SSE：輪詢事件表的間隔與心跳間隔（秒）；測試以 monkeypatch 縮短。
 STREAM_POLL_SECONDS = 1.0
 STREAM_HEARTBEAT_SECONDS = 15.0
-#: 部署基底主機的內建節流下限（秒；TCS §5.1，V-R9 現查值；PKG-BR-B 的 fetch 層以它為準）。
-ENV_MIN_INTERVALS: dict[str, int] = {
-    "export.arxiv.org": 3, "arxiv.org": 3, "api.semanticscholar.org": 3, "api.github.com": 60,
-    "api.stackexchange.com": 3}
-DEFAULT_ENV_MIN_INTERVAL = 3
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
 _LIST_KINDS = ("FETCH", "WEB")
 _LAYERS = ("ACADEMIC", "INDUSTRY", "OSS", "COMMUNITY")
