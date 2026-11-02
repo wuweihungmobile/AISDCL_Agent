@@ -57,7 +57,7 @@ def test_AT_960_2_3_the_write_token_is_checked_at_startup_like_the_si_token(tmp_
 def test_AT_960_2_E_1_the_defaults_are_the_documented_values(tmp_path: Path) -> None:
     cfg = load_settings(_env(tmp_path))
     assert cfg.research_max_concurrent_runs == 1
-    assert cfg.research_step_timeout_seconds == 1200
+    assert cfg.research_step_timeout_seconds == 600  # D-75：與引擎 Kernel 固定步驟逾時同值
     assert cfg.research_fetch_allowlist == (
         "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
         "api.stackexchange.com") == RESEARCH_DEFAULT_FETCH_ALLOWLIST

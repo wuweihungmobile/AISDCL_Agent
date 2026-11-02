@@ -655,3 +655,428 @@ def test_AT_960_2_6_the_research_package_adds_no_directory_entry_primitive() -> 
                  for f in files}
     assert {n: h for n, h in offenders.items() if h} == {}, \
         "app/research/** 內 os.replace／rename／shutil.move／Path.replace 呼叫數須為 0"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# PKG-BR-C 附加（append-only；上方既有測試一字未動）：AT-960-9-E-1、12-5、12-9。
+# 這三個 AT 要活 Bridge＋引擎＋假 claude 的整條 stage 流程，夾具與流程助手住在
+# `test_research_orchestrator.py`、播種助手住在 `test_research_approve.py`，這裡只引用。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+from tests import test_research_approve as _approve  # noqa: E402  （附加區：引用共用助手）
+from tests import test_research_orchestrator as _orch  # noqa: E402
+from tests import test_research_router as _router  # noqa: E402
+
+tree, scripted, rig = _orch.tree, _orch.scripted, _orch.rig
+popen_log, make_env, env = _router.popen_log, _router.make_env, _router.env
+
+
+def _rows(db: ResearchDb, sql: str, *params: Any) -> list[dict[str, Any]]:
+    return db.query(sql, params)
+
+
+# ── AT-960-9-E-1：抓取、來源、證據、PRD 版本與登記列的入庫欄位 ───────────────────────────────────
+def test_AT_960_9_E_1_ingested_rows_are_complete_and_equal_the_files(
+        make_bridge: Any, settings: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        tree: Path, rdb: ThrowawayDb) -> None:
+    script = _orch.custom_script(tmp_path, lambda steps: None)
+    declared = json.loads((tmp_path / "scripts" / "content" / "evidence_items.json").read_text(
+        encoding="utf-8"))
+    declared["search_log"].append({
+        "id": "Q-009", "layer": "INDUSTRY", "tool": "WebFetch", "at": "2026-11-02T10:30:00+08:00",
+        "query": "https://Example.org/blog/example-post", "result_urls": []})
+    (tmp_path / "scripts" / "content" / "evidence_items.json").write_text(
+        json.dumps(declared, ensure_ascii=False), encoding="utf-8")
+    live = _orch.build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+    rid = _orch.create(live)
+    _orch.run_stage(live, rid, "research")
+    ws = Path(_orch.project(live, rid)["workspace_path"])
+    fetches = _rows(live.db, "SELECT * FROM {s}.research_fetches WHERE research_id = %s "
+                    "ORDER BY fetch_no", rid)
+    numbers = [f["fetch_no"] for f in fetches]
+    assert all(re.fullmatch(r"F-\d{4,}", n) for n in numbers)
+    assert [int(n[2:]) for n in numbers] == list(range(1, len(numbers) + 1)), "單調、無重複"
+    bridge = [f for f in fetches if f["observed_by"] == "BRIDGE"]
+    agent = [f for f in fetches if f["observed_by"] == "AGENT_DECLARED"]
+    assert bridge and len(agent) == len(declared["search_log"]) == 9
+    for row in bridge:
+        assert row["layer"] and row["outcome"] and row["stage_run_id"] and row["fetched_at"]
+        if row["outcome"] == "OK":
+            raw = ws / row["raw_rel_path"]
+            assert row["raw_sha256"] == hashlib.sha256(raw.read_bytes()).hexdigest()
+            assert row["raw_bytes"] == len(raw.read_bytes())
+        else:
+            assert row["raw_sha256"] is None, "失敗或被拒的列沒有原文雜湊"
+    for entry, row in zip(declared["search_log"], agent, strict=True):
+        assert row["search_no"] == int(entry["id"][2:]) and row["query_text"] == entry["query"]
+        assert list(row["result_urls"]) == entry["result_urls"]
+        if entry["tool"] == "WebFetch":
+            assert (row["fetch_method"], row["url"], row["host"]) == (
+                "WEB_FETCH", entry["query"], "example.org")
+        else:
+            assert (row["fetch_method"], row["url"], row["host"]) == ("WEB_SEARCH", None, None)
+    items = {i["evidence_no"]: i for i in declared["items"]}
+    stored = _rows(live.db, "SELECT * FROM {s}.research_evidence_items WHERE research_id = %s",
+                   rid)
+    assert {r["evidence_no"] for r in stored} == set(items)
+    for row in stored:
+        item = items[row["evidence_no"]]
+        assert (row["candidate"], row["scope_rev"], row["strength"]) == (
+            item["candidate"], declared["scope_rev"], item["strength"])
+        assert (row["claim"], row["f1_mechanism"], row["f2_evidence"], row["f3_critique"],
+                row["f6_limits"], row["f7_verification"]) == (
+            item["claim"], item["f1"], item["f2"], item["f3"], item["f6"], item["f7"])
+        assert list(row["f4_risk_tags"]) == item["f4"] and row["unanchored"] is False
+    registered = _rows(live.db, "SELECT * FROM {s}.research_artifacts WHERE research_id = %s AND "
+                       "kind = 'EVIDENCE_ITEMS'", rid)
+    assert len(registered) == 1
+    file_bytes = (ws / "00_research" / "evidence_items.json").read_bytes()
+    assert registered[0]["content"].encode("utf-8") == file_bytes
+    assert registered[0]["sha256"] == hashlib.sha256(file_bytes).hexdigest()
+    # 對照組：content 為 NULL 的登記嘗試入庫被拒，整次入庫不寫任何證據列與登記列
+    before = (rdb.count("research_evidence_items"), rdb.count("research_artifacts"))
+    with pytest.raises((ResearchGuardError, ResearchDbError)):
+        live.db.record_evidence(
+            research_id=rid, matrix_version=2, actor="bridge", stage_run_id=None,
+            artifact={"rel_path": "00_research/evidence_items.json", "sha256": sha("x"),
+                      "bytes": 1, "content": None, "created_by": "bridge"},
+            items=[{"evidence_no": "E-900", "source_no": "S-001", "claim": "x", "f1_mechanism": "x",
+                    "f2_evidence": "x", "f3_critique": "x", "f5_applicability": {},
+                    "f6_limits": "x", "f7_verification": "V2", "strength": "MEDIUM"}])
+    assert (rdb.count("research_evidence_items"), rdb.count("research_artifacts")) == before
+    # PRD：每次寫入新增一列、sha256 等於 01_specs 對應檔案；舊列不可改
+    for version, text in ((1, "# PRD 一\n"), (2, "# PRD 二\n")):
+        saved = live.put(f"/research/projects/{rid}/prd", {
+            "base_version": version - 1, "content": text, "author": ALICE})
+        assert saved.status_code == 201, saved.text
+    versions = _rows(live.db, "SELECT * FROM {s}.research_prd_versions WHERE research_id = %s "
+                     "ORDER BY version_no", rid)
+    assert [v["version_no"] for v in versions] == [1, 2], "每次寫入各新增一列"
+    for row in versions:
+        assert row["sha256"] == hashlib.sha256((ws / row["rel_path"]).read_bytes()).hexdigest()
+    with pytest.raises(psycopg.errors.Error):
+        rdb.exec("UPDATE console.research_prd_versions SET content = 'x' WHERE research_id = %s",
+                 rid)
+
+
+# ── AT-960-12-5：輪與缺陷入庫、審查卡逐欄相等、缺陷只依單向表轉移 ─────────────────────────────────
+DEFECT_STATES = ("OPEN", "FIXED", "WAIVED", "SUPERSEDED", "REGRESSED")
+ALLOWED_DEFECT_MOVES = {("OPEN", "FIXED"), ("OPEN", "WAIVED"), ("OPEN", "SUPERSEDED"),
+                        ("FIXED", "REGRESSED"), ("REGRESSED", "FIXED")}
+
+
+def _add_round_docs(script: str, round_no: int, prd_text: str, docs: dict[str, Any]) -> None:
+    """為劇本加一輪審查：四份維度 JSON 由呼叫端給（可事先改缺陷），這裡只補 round 與 prd_sha256。"""
+    path = Path(script)
+    digest = hashlib.sha256(prd_text.encode("utf-8")).hexdigest()
+    plan = json.loads(path.read_text(encoding="utf-8"))
+    for dimension in _orch.DIMS:
+        data = {**docs[dimension], "round": round_no, "prd_sha256": digest}
+        rel = f"content/r{round_no}-{dimension}.json"
+        (path.parent / rel).write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        plan["steps"].append({"role": f"review-{dimension}", "round": round_no, "writes": [{
+            "path": f"02_governance/reviews/round-{round_no}/{dimension}.json", "from": rel}]})
+    path.write_text(json.dumps(plan), encoding="utf-8")
+
+
+def test_AT_960_12_5_defect_status_moves_only_along_the_one_way_table() -> None:
+    from app.research.gates.review_card import is_allowed_transition, next_defect_status
+
+    for old in DEFECT_STATES:
+        for new in DEFECT_STATES:
+            allowed = (old, new) in ALLOWED_DEFECT_MOVES
+            assert is_allowed_transition(old, new) is allowed, (old, new)
+            if new != "WAIVED":
+                if allowed:
+                    assert next_defect_status(old, new) == new
+                else:
+                    with pytest.raises(ValueError):
+                        next_defect_status(old, new)
+    assert next_defect_status("OPEN", "WAIVED", waived_by=ALICE, waiver_reason="接受風險") == (
+        "WAIVED")
+    for by, reason in ((None, "x"), (ALICE, ""), (ALICE, "  ")):
+        with pytest.raises(ValueError):
+            next_defect_status("OPEN", "WAIVED", waived_by=by, waiver_reason=reason)
+
+
+def test_AT_960_12_5_three_rounds_agree_with_the_card_and_a_reraised_defect_regresses(
+        scripted: tuple[Any, str]) -> None:
+    from decimal import Decimal
+
+    from app.research.gates.review_card import validate_review_card
+
+    live, script = scripted
+    base = {dim: json.loads((_orch.SCRIPTS / "content" / "reviews" / "common" / "round-1" /
+                             f"{dim}.json").read_text(encoding="utf-8")) for dim in _orch.DIMS}
+    fixed_one = {**base, "qa": {**base["qa"], "defects": base["qa"]["defects"][1:]}}
+    target = base["qa"]["defects"][0]                      # 第 2 輪不再提出、第 3 輪再度提出
+    for number, docs in ((1, base), (2, fixed_one), (3, base)):
+        _add_round_docs(script, number, _orch.PRD_V1, docs)
+    rid = _orch.create(live)
+    _orch.to_draft(live, rid)
+
+    def defect_state() -> dict[str, Any]:
+        """第 1 輪提出的那一列（每輪的發現各自成列；舊列的 status 依後續輪次轉移）。"""
+        found = _rows(live.db, "SELECT d.* FROM {s}.research_review_defects d JOIN "
+                      "{s}.research_review_rounds r ON r.id = d.round_id WHERE r.research_id = %s "
+                      "AND r.round_no = 1 AND d.code = %s AND d.prd_anchor = %s", rid,
+                      target["code"], target["prd_anchor"])
+        assert len(found) == 1 and found[0]["defect_no"].startswith("D-1-")
+        return found[0]
+
+    _orch.run_stage(live, rid, "review")
+    assert defect_state()["status"] == "OPEN"
+    _orch.run_stage(live, rid, "revise")
+    _orch.run_stage(live, rid, "review")
+    after_two = defect_state()
+    assert after_two["status"] == "FIXED" and after_two["resolved_at"] is not None
+    assert after_two["fixed_in_version_no"] == _orch.rounds(live, rid)[1]["prd_version_no"]
+    _orch.run_stage(live, rid, "revise")
+    _orch.run_stage(live, rid, "review")
+    assert defect_state()["status"] == "REGRESSED", "已 FIXED 的缺陷再度被提出＝REGRESSED"
+    rounds = _orch.rounds(live, rid)
+    assert [r["verdict"] for r in rounds] == ["REVISE", "REVISE", "ESCALATE"]
+    ws = Path(_orch.project(live, rid)["workspace_path"])
+    card = json.loads((ws / "02_governance" / "review_card.json").read_text(encoding="utf-8"))
+    problems = validate_review_card(card)
+    assert problems == [], [(p.rule, p.path, p.message) for p in problems]
+    assert card["final_verdict"] == "ESCALATED" and len(card["rounds"]) == 3
+    versions = {v["version_no"]: v for v in _rows(
+        live.db, "SELECT version_no, semver, sha256 FROM {s}.research_prd_versions "
+        "WHERE research_id = %s", rid)}
+    last_no = 0
+    for row, entry in zip(rounds, card["rounds"], strict=True):
+        scores = _rows(live.db, "SELECT dimension, score FROM {s}.research_review_scores "
+                       "WHERE round_id = %s", row["id"])
+        assert {s["dimension"]: s["score"] for s in scores} == {
+            r["dimension"]: r["score"] for r in entry["reviewers"]}
+        assert Decimal(str(entry["weighted_total"])) == row["weighted_score"]
+        assert entry["round"] == row["round_no"] and entry["passed"] == row["passed"]
+        assert entry["prd_version_no"] == row["prd_version_no"] >= last_no, "輪與輪不遞減"
+        last_no = entry["prd_version_no"]
+        assert entry["prd_version"] == versions[row["prd_version_no"]]["semver"]
+        assert entry["prd_sha256"] == versions[row["prd_version_no"]]["sha256"]
+        assert set(entry["fsm"]) == {"gate_result", "retry_count"}
+        assert (entry["fsm"]["gate_result"] == "PASS") == bool(row["passed"])
+        assert [c["id"] for c in entry["precheck"]["checks"]] == [
+            "SLV-001", "SLV-002", "SLV-003", "AMBIGUITY"]
+        assert "dimension_floor" in entry["params"]
+        for reviewer in entry["reviewers"]:
+            assert set(reviewer) == {
+                "dimension", "weight", "agent", "agent_id", "agent_yaml_sha256",
+                "assist_agent_id", "assist_agent_yaml_sha256", "persona_sha256", "score",
+                "raw_file", "raw_sha256"}
+            assert (reviewer["assist_agent_id"] is not None) == (
+                reviewer["dimension"] == "SECURITY"), "只有 SECURITY 有 assist"
+        stored = _rows(live.db, "SELECT * FROM {s}.research_review_defects WHERE round_id = %s "
+                       "ORDER BY defect_no", row["id"])
+        assert len(stored) == len(entry["defects"])
+    shown = {d["id"]: d for r in card["rounds"] for d in r["defects"]}
+    for row in _rows(live.db, "SELECT d.* FROM {s}.research_review_defects d JOIN "
+                     "{s}.research_review_rounds r ON r.id = d.round_id WHERE r.research_id = %s",
+                     rid):
+        card_row = shown[row["defect_no"]]
+        assert (card_row["dimension"], card_row["severity"], card_row["code"],
+                card_row["anchor"], card_row["finding"], card_row["status"]) == (
+            row["dimension"], row["severity"], row["code"], row["prd_anchor"],
+            row["description"], row["status"])
+
+
+# ── AT-960-12-9：審查結果的寫入順序與崩潰冪等（D-58）─────────────────────────────────────────
+def _journal_entry_for(round_no: int, rid: str, run_id: str, *, passed: bool,
+                       trigger: str = "AUTO", intent: str | None) -> dict[str, Any]:
+    from app.research.gates.schemas import DIMENSIONS, RUBRIC_REGISTRY
+
+    score = 90 if passed else 80
+    return {
+        "v": 1, "research_id": rid, "round_no": round_no, "stage_run_id": run_id, "done": False,
+        "trigger_kind": trigger, "prd_version_no": 1, "prd_text_sha256": sha("prd"),
+        "precheck": {"passed": True, "checks": [
+            {"id": i, "passed": True, "detail": ""} for i in
+            ("SLV-001", "SLV-002", "SLV-003", "AMBIGUITY")]},
+        "precheck_passed": True, "open_p1_count": 0,
+        "scores": [{
+            "dimension": d, "score": score, "agent_id": RUBRIC_REGISTRY[d]["agent_id"],
+            "assist_agent_id": None, "assist_agent_yaml_sha256": None,
+            "agent_yaml_path": RUBRIC_REGISTRY[d]["agent_file"], "agent_yaml_sha256": sha("yaml"),
+            "persona_sha256": sha("persona"), "summary": "摘要", "stage_run_id": run_id,
+            "raw_rel_path": f"02_governance/reviews/round-{round_no}/{d.lower()}.json",
+            "raw_sha256": sha(f"{round_no}{d}")} for d in DIMENSIONS],
+        "defects": [{"defect_no": f"D-{round_no}-001", "dimension": "QA", "severity": "P3",
+                     "code": "QA-TRACEABILITY-01", "prd_anchor": "§14", "description": "追蹤鏈不全",
+                     "suggestion": "補齊", "evidence_refs": []}],
+        "weighted_score": f"{score}.00", "min_dimension_score": score, "passed": passed,
+        "gate_intent": intent,
+        "gate_reason": f"R2P review round {round_no} (stage_run {run_id})",
+        "fsm_generation": 1, "started_at": ISO, "finished_at": ISO}
+
+
+def _stage_journal(orch: Any, rid: str, entry: dict[str, Any]) -> None:
+    """為崩潰重放播種：REVIEW stage run（外鍵）與落在磁碟上、尚未標完成的輪結果。"""
+    orch.db.insert_stage_run(research_id=rid, stage_run_id=entry["stage_run_id"], stage="REVIEW",
+                             round_no=entry["round_no"], requested_by=ALICE, status="SUCCEEDED")
+    orch.journal.write(entry)
+
+
+def _history(ctx: Any) -> list[Any]:
+    from app.research import fsm_ops
+
+    retry = (fsm_ops.show(ctx).get("retry_history") or {}).get("SCG_VALIDATION") or {}
+    return list(retry.get("history") or [])
+
+
+def _review_events(env: Any, rid: str) -> int:
+    return len(_rows(env.db, "SELECT 1 FROM {s}.research_events WHERE research_id = %s AND "
+                     "event_type = 'research.review'", rid))
+
+
+def _orchestrator(env: Any) -> Any:
+    return env.live.app.state.research.orchestrator
+
+
+def _gate_calls(log: list[list[str]], since: int) -> int:
+    return [c[0] for c in _approve.fsm_calls(log, since)].count("gate")
+
+
+def test_AT_960_12_9_the_round_result_is_on_disk_before_gate_and_one_transaction_follows(
+        scripted: tuple[Any, str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.research import fsm_ops
+
+    live, script = scripted
+    rid, _ = _orch.ready_for_round_two(live, script)
+    path = live.orch.journal.directory / f"r-{rid}-2.json"
+    seen: list[dict[str, Any]] = []
+    real_gate = fsm_ops.gate
+
+    def spy(ctx: Any, **kw: Any) -> Any:
+        seen.append(json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {})
+        return real_gate(ctx, **kw)
+
+    monkeypatch.setattr(fsm_ops, "gate", spy)
+    _orch.run_stage(live, rid, "review")
+    assert len(seen) == 1, "gate 恰呼叫一次"
+    pre = seen[0]
+    assert {"scores", "defects", "prd_version_no", "trigger_kind", "weighted_score"} <= set(pre)
+    assert len(pre["scores"]) == 4 and pre["done"] is False
+    assert not {"fsm_gate_result", "fsm_retry_count", "verdict"} & set(pre), (
+        "gate 呼叫瞬間磁碟上的結果還沒有 FSM 回報的欄位")
+    row = _orch.rounds(live, rid)[1]
+    assert (row["fsm_gate_result"], row["fsm_retry_count"], row["verdict"]) == ("FAIL", 2, "REVISE")
+    assert json.loads(path.read_text(encoding="utf-8"))["done"] is True
+    counts = (live.rdb.count("research_review_scores"), live.rdb.count("research_review_defects"),
+              len(_orch.events(live, rid, "research.review")))
+    assert counts[0] == 8 and counts[2] == 2
+
+
+def test_AT_960_12_9_case_a_gate_already_called_replay_only_fills_the_db(
+        env: Any, popen_log: list[list[str]]) -> None:
+    from app.research import fsm_ops
+
+    rid = _router.create(env)["research_id"]
+    _approve.seed_pending(env, rid, passed=False, fsm="SCG_VALIDATION")
+    run_id = str(uuid.uuid4())
+    entry = _journal_entry_for(2, rid, run_id, passed=False, intent="FAIL")
+    _stage_journal(_orchestrator(env), rid, entry)
+    ctx = _router.fsm_ctx_of(env, rid)
+    fsm_ops.gate(ctx, gate="SCG_VALIDATION", result="FAIL", reason=entry["gate_reason"])
+    history, events = len(_history(ctx)), _review_events(env, rid)
+    since = len(popen_log)
+    for _ in range(2):                                   # 重放兩次
+        _orchestrator(env).reap_orphans()
+    assert _gate_calls(popen_log, since) == 0, "gate 已呼叫過：重放不再呼叫"
+    assert len(_history(ctx)) == history == 1
+    rows = _rows(env.db, "SELECT * FROM {s}.research_review_rounds WHERE research_id = %s AND "
+                 "round_no = 2", rid)
+    assert len(rows) == 1 and rows[0]["fsm_gate_result"] == "FAIL"
+    assert rows[0]["fsm_retry_count"] == 1
+    assert env.rdb.count("research_review_scores") == 4, "四維分數各恰一列"
+    assert _review_events(env, rid) == events + 1, "research.review 事件恰一筆"
+
+
+def test_AT_960_12_9_case_b_gate_not_yet_called_replay_calls_it_exactly_once_then_writes(
+        env: Any, popen_log: list[list[str]]) -> None:
+    rid = _router.create(env)["research_id"]
+    _approve.seed_pending(env, rid, passed=False, fsm="SCG_VALIDATION")
+    entry = _journal_entry_for(2, rid, str(uuid.uuid4()), passed=False, intent="FAIL")
+    _stage_journal(_orchestrator(env), rid, entry)
+    ctx = _router.fsm_ctx_of(env, rid)
+    before = len(_history(ctx))
+    since = len(popen_log)
+    for _ in range(2):
+        _orchestrator(env).reap_orphans()
+    assert _gate_calls(popen_log, since) == 1, "重放先呼叫 gate 恰一次（第二次重放不再呼叫）"
+    assert len(_history(ctx)) == before + 1, "未通過：retry_history 恰加一筆"
+    rows = _rows(env.db, "SELECT * FROM {s}.research_review_rounds WHERE research_id = %s AND "
+                 "round_no = 2", rid)
+    assert len(rows) == 1 and rows[0]["fsm_retry_count"] == 1
+    assert json.loads((_orchestrator(env).journal.directory / f"r-{rid}-2.json").read_text(
+        encoding="utf-8"))["done"] is True
+
+
+def test_AT_960_12_9_case_c_a_post_human_pass_is_never_given_a_gate_pass_on_replay(
+        env: Any, popen_log: list[list[str]]) -> None:
+    from app.research import fsm_ops
+
+    rid = _router.create(env)["research_id"]
+    _approve.seed_pending(env, rid)                      # FSM 在 HUMAN_PENDING、第 1 輪已通過
+    entry = _journal_entry_for(2, rid, str(uuid.uuid4()), passed=True, trigger="POST_HUMAN",
+                               intent=None)
+    _stage_journal(_orchestrator(env), rid, entry)
+    ctx = _router.fsm_ctx_of(env, rid)
+    trace = len(fsm_ops.show(ctx)["decision_trace"])
+    since = len(popen_log)
+    for _ in range(2):
+        _orchestrator(env).reap_orphans()
+    assert _gate_calls(popen_log, since) == 0, "POST_HUMAN 通過輪依設計不呼叫 gate"
+    assert fsm_ops.current_state(ctx) == "HUMAN_PENDING"
+    assert len(fsm_ops.show(ctx)["decision_trace"]) == trace
+    rows = _rows(env.db, "SELECT * FROM {s}.research_review_rounds WHERE research_id = %s AND "
+                 "round_no = 2", rid)
+    assert len(rows) == 1 and rows[0]["passed"] is True
+    assert (rows[0]["fsm_gate_result"], rows[0]["fsm_retry_count"]) == (None, None)
+    assert rows[0]["trigger_kind"] == "POST_HUMAN"
+
+
+# ── AT-960-2-5（stage 實跑那一半）：stage 中途資料庫寫入失敗 → BLOCKED_DB＋alert → 復原重放 ──────
+def test_AT_960_2_5_a_db_outage_during_a_stage_blocks_the_run_and_replay_is_exact(
+        make_bridge: Any, settings: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        tree: Path, rdb: ThrowawayDb) -> None:
+    class Outage:
+        armed = False
+
+        def __call__(self, text: str, _params: Any) -> None:
+            if self.armed and text.lstrip().upper().startswith(("INSERT", "UPDATE", "DELETE")):
+                raise psycopg.errors.InternalError_("injected: database connection closed")
+
+    outage = Outage()
+    script = _orch.custom_script(tmp_path, lambda steps: None)
+    live = _orch.build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb,
+                           script=script, hook=outage)
+    rid = _orch.create(live)
+    _orch.patch_step(script, "research", 0, delay=4)
+    _orch.run_stage(live, rid, "research", wait=False)
+    _orch.wait_until(lambda: any(r["status"] == "RUNNING" for r in _orch.runs_of(
+        live, rid, "RESEARCH")) and live.trace.is_file()
+        and "research" in live.trace.read_text(encoding="utf-8"))
+    outage.armed = True                                     # stage 中途：後續寫入全部失敗
+    assert live.orch.join(rid, 120)
+    run = _orch.runs_of(live, rid, "RESEARCH")[0]
+    assert run["status"] == "RUNNING", "阻塞期間資料庫沒被更新；終態暫存在 outbox"
+    pending = live.orch.writer.outbox.pending()
+    staged = {(op.kind, op.payload.get("status") or op.payload.get("event_type")) for op in pending}
+    assert ("stage_run.update", "BLOCKED_DB") in staged
+    alert = next(op for op in pending if op.kind == "event.append"
+                 and op.payload["event_type"] == "research.alert")
+    assert alert.payload["payload"]["kind"] == "BLOCKED_DB"
+    outage.armed = False                                    # 恢復資料庫、重放兩次
+    live.orch.writer.replay()
+    assert _orch.runs_of(live, rid, "RESEARCH")[0]["status"] == "BLOCKED_DB"
+    events = live.db.list_events(rid, limit=500)
+    assert [e["seq"] for e in events] == list(range(1, len(events) + 1)), "seq 自 1 起連續"
+    assert [e["payload"].get("kind") for e in events if e["event_type"] == "research.alert"] == [
+        "BLOCKED_DB"]
+    before = (rdb.count("research_events"), rdb.count("research_stage_runs"),
+              rdb.count("research_evidence_items"))
+    live.orch.writer.replay()
+    assert (rdb.count("research_events"), rdb.count("research_stage_runs"),
+            rdb.count("research_evidence_items")) == before, "第二次重放不新增任何列"
+    assert not live.orch.writer.outbox.pending(), "重放完成後 outbox 沒有待處理記錄"

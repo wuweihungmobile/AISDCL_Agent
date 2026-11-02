@@ -58,6 +58,24 @@ CAPABILITY: dict[str, str] = {
     "research/fetch/semantic_scholar.py": "net",
     "research/fetch/github.py": "net",
     "research/fetch/stackexchange.py": "net",
+    # PKG-BR-C：編譯層與 gate evaluator 是純函式（只讀框架 YAML 與工作區檔案；寫檔、建 run、
+    # 驅動 FSM 都在 orchestrator）＝ro；`gate_cli` 是引擎的 evaluator 子行程入口，只讀檔、印出違規。
+    "research/compile/__init__.py": "ro",
+    "research/compile/personas.py": "ro",
+    "research/compile/playbooks.py": "ro",
+    "research/compile/prompts.py": "ro",
+    "research/gates/__init__.py": "ro",
+    "research/gates/schemas.py": "ro",
+    "research/gates/evidence.py": "ro",
+    "research/gates/prd_schema.py": "ro",
+    "research/gates/review_card.py": "ro",
+    "research/gates/aggregate.py": "ro",
+    "research/gate_cli.py": "ro",
+    "research/gates/ingest.py": "ro",
+    "research/gates/reconcile.py": "ro",
+    # orchestrator 不自己 Popen（引擎由 `RunManager` 起、FSM 由 `fsm_ops`→`sdd_cli` 起），但它是驅動
+    # 這兩條子行程路徑的門：import fsm_ops 的模組一律須登記為 exec。
+    "research/orchestrator.py": "exec",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",

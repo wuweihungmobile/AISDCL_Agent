@@ -91,7 +91,7 @@ def test_outside_a_monorepo_the_default_roots_are_only_the_workspace(
 def test_research_defaults_match_the_documented_table_and_stay_outside_the_repo() -> None:
     """ResearchToPRD（AT-960-2-E-1 的設定表面）：預設值、預設工作區根在 repo 外且不動允許根。"""
     cfg = load_settings({})
-    assert cfg.research_max_concurrent_runs == 1 and cfg.research_step_timeout_seconds == 1200
+    assert cfg.research_max_concurrent_runs == 1 and cfg.research_step_timeout_seconds == 600
     assert cfg.research_fetch_allowlist == (
         "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
         "api.stackexchange.com")

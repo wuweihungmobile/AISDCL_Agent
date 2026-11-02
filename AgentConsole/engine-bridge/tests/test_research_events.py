@@ -231,3 +231,47 @@ def test_AT_960_10_3_after_and_last_event_id_resume_without_gaps_and_limits_trun
         frames = parse_sse(resp.iter_lines())
     assert [int(f["id"]) for f in frames[:-1]] == [total - 1, total]
     assert env.get(f"/research/projects/{uuid.uuid4()}/events").status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# PKG-BR-C 附加（append-only；上方既有測試一字未動）：AT-960-10-3 的另一半——完整 research＋draft＋
+# review 真流程（活 Bridge＋引擎＋假 claude）產生的事件，型別、payload 鍵集合與重播都符合契約。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+def test_AT_960_10_3_a_real_research_draft_review_flow_emits_only_contract_events(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, rdb: ThrowawayDb) -> None:
+    from tests import test_research_orchestrator as orch
+    from tests.research_stage_support import install_framework
+
+    monkeypatch.setattr(router_module, "STREAM_POLL_SECONDS", 0.05)
+    monkeypatch.setattr(router_module, "STREAM_HEARTBEAT_SECONDS", 0.3)
+    tree = install_framework(make_fake_sdd(tmp_path / "sdd"))
+    rig = orch.build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb)
+    rid = orch.create(rig)
+    orch.to_draft(rig, rid)
+    orch.run_stage(rig, rid, "review")
+    rows = [jsonable(r) for r in rig.db.list_events(rid, after_seq=0, limit=500)]
+    kinds = {r["event_type"] for r in rows}
+    assert {"research.step", "research.run", "research.source", "research.evidence",
+            "research.prd", "research.review", "research.defect"} <= kinds
+    assert kinds <= P0_TYPES and not {"research.route", "research.scr", "research.delivery",
+                                      "research.replay_gap"} & kinds
+    assert [r["seq"] for r in rows] == list(range(1, len(rows) + 1))
+    for row in rows:
+        assert set(row["payload"]) == EVENT_PAYLOAD_KEYS[row["event_type"]], row["event_type"]
+    reviews = [r for r in rows if r["event_type"] == "research.review"]
+    assert len(reviews) == 1, "research.review 只在輪完成時送，審查進行中只以 research.run 表達"
+    assert reviews[0]["payload"]["verdict"] == "REVISE" and reviews[0]["payload"]["roundNo"] == 1
+    run_events = [r["payload"]["status"] for r in rows if r["event_type"] == "research.run"
+                  and r["payload"]["stage"] == "REVIEW"]
+    assert run_events[:2] == ["QUEUED", "RUNNING"] and run_events[-1] == "SUCCEEDED"
+    review_at = rows.index(reviews[0])
+    assert any(r["event_type"] == "research.run" and r["payload"]["status"] == "RUNNING"
+               and r["payload"]["stage"] == "REVIEW" for r in rows[:review_at])
+    rest = rig.client.get(f"/research/projects/{rid}/events?after=0&limit=500").json()
+    assert rest["items"] == rows
+    with rig.client.stream("GET", f"/research/projects/{rid}/stream?after=0") as resp:
+        frames = parse_sse(resp.iter_lines())
+    assert [json.loads(f["data"]) for f in frames[:-1]] == rows
+    assert frames[-1]["event"] == "heartbeat" and all(
+        f["event"] != "research.replay_gap" for f in frames)

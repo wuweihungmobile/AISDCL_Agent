@@ -10,10 +10,11 @@
 行程）。成功與被拒都記 `bridge.audit` 的
 `research_write{verb,research_id,approver,result,trace_id}`，不含權杖。
 
-骨架（待 PKG-BR-C 填本體）：`stages/{stage}:start` 的啟動、`:approve-baseline`、`:return`、
-`:reconcile`——前置條件與驗證都在這裡（含 stage 啟動的並行上限：同專案互斥與全站
-`BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS`，達上限一律 409 `stage_conflict`），通過後回 501
-`not_implemented`（絕不是 2xx：尚未實作的路徑不得被誤當成功）。`:approve-baseline` 是唯一可呼叫
+四類處理函式（`stages/{stage}:start` 的啟動、`:approve-baseline`、`:return`、`:reconcile`）的
+前置條件與驗證都在這裡（含 stage 啟動的並行上限：同專案互斥與全站
+`BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS`，達上限一律 409 `stage_conflict`）；通過後的動作交
+`research/orchestrator.py`（啟動、對帳、投影）與 `fsm_ops`（Gate 0、人工退回）。唯一仍回 501
+`not_implemented` 的是 P1 的 `tcs-draft`（絕不是 2xx）。`:approve-baseline` 是唯一可呼叫
 `fsm_ops.approve_baseline` 的地方（AST 鎖）。
 """
 from __future__ import annotations
@@ -48,6 +49,14 @@ from ..research.db import (
     utc_now,
 )
 from ..research.fetch.allowlist import DEFAULT_ENV_MIN_INTERVAL, ENV_MIN_INTERVALS
+from ..research.orchestrator import (
+    APPROVE_DOCS,
+    Orchestrator,
+    approve_input_violations,
+    derive_flow_status,
+    digest_problems,
+    human_reason,
+)
 from ..research.outbox import DbBlocked, DurableWriter, FileRef, FileWrite, Op, Outbox
 from ..research.settings import research_info
 from ..sdd_state import ESCALATION_STATES
@@ -84,6 +93,8 @@ class ResearchContext:
     writer: DurableWriter | None
     #: PKG-BR-C 注入：停止進行中 stage run 的行程（None＝只在資料庫標記取消）。
     stopper: Callable[[str], None] | None = None
+    #: PKG-BR-C 注入：啟動與驅動 stage run 的 orchestrator（測試可換成注入假抓取層的實例）。
+    orchestrator: Orchestrator | None = None
 
 
 _build_lock = threading.Lock()
@@ -100,7 +111,15 @@ def _build_context(state: Any) -> ResearchContext:
             writer.replay()                  # 重啟重放：DB 不可用時記錄留在 outbox、這裡不拋
         except Exception:                    # noqa: BLE001 — 重放失敗不得擋住整個 API；留記錄
             logger.exception("研究 outbox 啟動重放失敗（記錄仍在 outbox，之後的寫入會再重放）")
-    return ResearchContext(cfg=cfg, audit=audit, db=db, writer=writer)
+    ctx = ResearchContext(cfg=cfg, audit=audit, db=db, writer=writer)
+    if db is not None and writer is not None:
+        ctx.orchestrator = Orchestrator(cfg, audit, db, writer)
+        ctx.stopper = ctx.orchestrator.stop
+        try:
+            ctx.orchestrator.reap_orphans()      # 上一個 Bridge 行程留下的 stage run＝orphaned
+        except Exception:                    # noqa: BLE001 — 回收失敗不得擋住整個 API
+            logger.exception("研究 stage run 孤兒回收失敗")
+    return ctx
 
 
 def get_context(request: Request) -> ResearchContext:
@@ -228,8 +247,7 @@ def _fsm_ctx(ctx: ResearchContext, row: dict[str, Any], *, actor: str | None = N
 
 def _not_implemented(endpoint: str, **extra: Any) -> ApiError:
     return ApiError(501, "not_implemented", endpoint=endpoint,
-                    detail="尚未實作：本端點的本體由 PKG-BR-C 填入（前置條件與驗證已在這裡）",
-                    **extra)
+                    detail="尚未實作：這是 P1 功能，P0 不提供（前置條件與驗證已在這裡）", **extra)
 
 
 # ── 外環 FSM 鍵：唯一的建檔呼叫點（AST 鎖：呼叫者只有初始化流程與換世代）──────────────────────────
@@ -520,7 +538,7 @@ def _prd_violations(body: PrdIn) -> int:
     return size
 
 
-# ── 啟動 stage（前置條件在這裡；本體由 PKG-BR-C 填）───────────────────────────────────────────────
+# ── 啟動 stage（前置條件在這裡；本體在 research/orchestrator.py）─────────────────────────────────
 class StageStartIn(BaseModel):
     auto: bool = False
     note: str | None = None
@@ -608,15 +626,17 @@ def _escalation_gate(ctx: ResearchContext, row: dict[str, Any], stage: str,
 
 def _run_stage(ctx: ResearchContext, row: dict[str, Any], stage: str,
                body: StageStartIn) -> dict[str, Any]:
-    """啟動 stage run（PKG-BR-C 填本體）。
+    """啟動 stage run（本體在 `Orchestrator.start`）。
 
     契約：呼叫端持有全站啟動鎖（`SITE_STAGE_LOCK`），已通過前置條件與並行上限；本體必須在回傳前
     建好 stage run 列（QUEUED 或 RUNNING，下一個啟動請求的上限檢查才看得到它），且不得長時間阻塞
     （起行程後即回 202）。"""
-    raise _not_implemented(f"stages/{stage}:start", stage=stage)
+    assert ctx.orchestrator is not None
+    return ctx.orchestrator.start(row, stage, requested_by=body.requested_by,
+                                  after_escalation=body.after_escalation, auto=body.auto)
 
 
-# ── Gate 0、人工退回、對帳（骨架：驗證在這裡、本體由 PKG-BR-C 填）────────────────────────────
+# ── Gate 0、人工退回、對帳 ───────────────────────────────────────────────────────────────────
 class ApproveIn(BaseModel):
     prd_version: int
     expected_digests: dict[str, str] = {}
@@ -624,15 +644,101 @@ class ApproveIn(BaseModel):
     reason: str | None = None
 
 
+def _regression_reason(ctx: ResearchContext, rid: str) -> str:
+    """進 SPEC_REGRESSION_CHECK 的理由：已處理缺陷數與人工要求數（取自資料庫）。"""
+    assert ctx.db is not None
+    fixed = ctx.db.query(
+        "SELECT count(*) AS n FROM {s}.research_review_defects d "
+        "JOIN {s}.research_review_rounds r ON r.id = d.round_id "
+        "WHERE r.research_id = %s AND d.status IN ('FIXED', 'WAIVED')", (rid,))
+    human = ctx.db.query("SELECT count(*) AS n FROM {s}.research_gate_decisions WHERE "
+                         "research_id = %s AND decision = 'CHANGES'", (rid,))
+    return (f"gate 0 regression check: {fixed[0]['n']} defects handled, "
+            f"{human[0]['n']} human requests")
+
+
 @router.post("/projects/{research_id}:approve-baseline")
 def approve_baseline(research_id: str, body: ApproveIn,
                      ctx: ResearchContext = Depends(write_gate("approve_baseline"))
                      ) -> dict[str, Any]:
+    """Gate 0（ADR-XPLAT-017 §D3 的檢查序：權杖→審查→摘要→FSM 現態→回歸態→凍結）。先中者定案；
+    前五關都是唯讀，任何一關不過都零寫入。`approve_baseline` 的唯一呼叫點（AST 鎖 C2）。
+
+    摘要（D-72）：只比對前端送來的 `expected_digests` 鍵——不符 422 `digest_mismatch`、一個鍵都沒送
+    422 `missing_digests`、缺鍵不算錯；四份文件的摘要一律由 `spec-frozen --digest --root` 在凍結當下
+    自工作區計算並記入凍結記錄（回應的 `spec_doc_digests` 與 R6 列的 `frozen_digests` 取自它）。"""
+    assert ctx.db is not None and ctx.writer is not None
     rid = _research_id(research_id)
     with operation(ctx, "approve_baseline", rid, body.approver):
-        sdd_cli.validate_research_approver(body.approver)
-        _project(ctx, rid)
-        raise _not_implemented("approve-baseline")
+        approver = sdd_cli.validate_research_approver(body.approver)
+        violations = approve_input_violations(body.expected_digests, body.reason)
+        if violations:
+            raise unprocessable(violations, "invalid_request")
+        with ctx.writer.project_lock(rid):
+            row = _project(ctx, rid)
+            workspace = Path(row["workspace_path"])
+            drafts = ctx.db.query(
+                "SELECT version_no, rel_path, sha256 FROM {s}.research_prd_versions WHERE "
+                "research_id = %s AND kind = 'DRAFT' ORDER BY version_no DESC LIMIT 1", (rid,))
+            head = drafts[0] if drafts else None
+            last = ctx.db.review_state(rid)["last"]
+            if (head is None or last is None or not last["passed"]
+                    or int(last["prd_version_no"]) != int(head["version_no"])
+                    or body.prd_version != int(head["version_no"])):
+                raise ApiError(409, "review_not_passed", details={
+                    "headVersion": None if head is None else int(head["version_no"]),
+                    "requested": body.prd_version})
+            docs = APPROVE_DOCS
+            raw = (workspace / head["rel_path"]).read_bytes()
+            actual = {docs[0]: layout.sha256_bytes(raw)}
+            for doc in docs[1:]:
+                found = layout.file_digest(workspace, doc)
+                if found is not None:
+                    actual[doc] = found[0]
+            problem = digest_problems(body.expected_digests, actual, str(head["rel_path"]))
+            if problem is not None:
+                raise ApiError(422, problem[0], details=problem[1])
+            fctx = _fsm_ctx(ctx, row, actor=approver)
+            state = fsm_ops.read_current(fctx)
+            if fsm_ops.is_escalated(state):
+                raise fsm_ops.escalated_error(fctx, state)
+            if state.get("current_state") != "HUMAN_PENDING":
+                raise fsm_ops.conflict("fsm_state_conflict", current_state=state.get(
+                    "current_state"), expected_state="HUMAN_PENDING")
+            shown = fsm_ops.show(fctx)
+            count = int(((shown.get("retry_history") or {}).get("SCG_VALIDATION") or {}).get(
+                "current_count", 0) or 0)
+            if count > 0:               # 只取決於 show 讀到的計數（不看 DB 輪數、不自建計數變數）
+                fsm_ops.transition(fctx, to="SPEC_REGRESSION_CHECK",
+                                   reason=_regression_reason(ctx, rid))
+            layout.write_workspace_file(workspace, docs[0], raw.decode("utf-8"))
+            frozen = fsm_ops.approve_baseline(
+                fctx, docs=list(docs), root=str(workspace), approver=approver,
+                reason=(body.reason or "Gate 0 approved")[:500])
+            digests = dict(frozen["spec_doc_digests"])
+            version_no = int(head["version_no"])
+            decision_id = str(uuid.uuid4())
+            top = ctx.db.head_prd(rid)
+            digest = layout.sha256_bytes(raw)
+            ctx.writer.persist(Op("prd.save", rid, dict(
+                research_id=rid, version_no=(int(top["version_no"]) if top else 0) + 1,
+                kind="BASELINE", author_kind="HUMAN", author=approver,
+                content=raw.decode("utf-8"), rel_path=docs[0], sha256=digest, bytes=len(raw),
+                change_summary="Gate 0 核准基線"),
+                files=(FileRef(str(workspace), docs[0], digest),)))
+            ctx.writer.persist(Op("gate.decision", rid, dict(
+                research_id=rid, decision_id=decision_id, gate="GATE0", decision="APPROVED",
+                decided_by=approver, decided_at=utc_now().isoformat(), prd_version_no=version_no,
+                review_round_no=int(last["round_no"]), fsm_project=row["fsm_project"],
+                fsm_stage=frozen.get("stage", "Gate-0"), fsm_state_after="SPEC_FROZEN",
+                frozen_digests=digests, reason=body.reason or "", audit_trace_id=trace_id_var.get(),
+                flow={"step": "route", "phase": "FROZEN", "status": "IDLE", "detail": ""})))
+            fresh = _project(ctx, rid)
+            assert ctx.orchestrator is not None
+            ctx.orchestrator.reconcile(fresh, actor="bridge")       # Gate 0 時點的自動對帳
+            ctx.orchestrator.project_state(rid)
+    return {"gate_decision_id": decision_id, "stage": "Gate-0", "spec_doc_digests": digests,
+            "fsm_state": "SPEC_FROZEN"}
 
 
 class ReturnIn(BaseModel):
@@ -643,23 +749,56 @@ class ReturnIn(BaseModel):
 @router.post("/projects/{research_id}:return")
 def return_for_changes(research_id: str, body: ReturnIn,
                        ctx: ResearchContext = Depends(write_gate("return"))) -> dict[str, Any]:
+    """人工退回（框架 SOP 第 5 列）：FSM 維持 HUMAN_PENDING、以**靜態 FAIL** 的 `gate` 帶人工理由使
+    計數加一（與自動審查共用同一份三次預算）、PRD 回到可編輯（游標 REVISING）。"""
+    assert ctx.db is not None and ctx.writer is not None
     rid = _research_id(research_id)
     with operation(ctx, "return", rid, body.approver):
-        sdd_cli.validate_research_approver(body.approver)
-        if not 1 <= len(body.reason.strip()) <= 500:
+        approver = sdd_cli.validate_research_approver(body.approver)
+        reason = human_reason(body.reason)
+        if not 1 <= len(body.reason.strip()) <= 500 or len(reason) > 500:
             raise unprocessable([_violation("reason", "invalid_length", "reason 須為 1～500 字")],
                                 "invalid_request")
-        _project(ctx, rid)
-        raise _not_implemented("return")
+        with ctx.writer.project_lock(rid):
+            row = _project(ctx, rid)
+            if row["flow_phase"] == "FROZEN" or row["flow_step"] in _FROZEN_STEPS:
+                raise ApiError(409, "spec_frozen", details={
+                    "flowStep": row["flow_step"], "flowPhase": row["flow_phase"]})
+            fctx = _fsm_ctx(ctx, row, actor=approver)
+            state = fsm_ops.read_current(fctx)
+            if fsm_ops.is_escalated(state):
+                raise fsm_ops.escalated_error(fctx, state)
+            if state.get("current_state") != "HUMAN_PENDING":
+                raise fsm_ops.conflict("fsm_state_conflict", current_state=state.get(
+                    "current_state"), expected_state="HUMAN_PENDING")
+            result = fsm_ops.gate(fctx, gate="SCG_VALIDATION", result="FAIL", reason=reason)
+            head, last = ctx.db.head_prd(rid), ctx.db.review_state(rid)["last"]
+            decision_id = str(uuid.uuid4())
+            ctx.writer.persist(Op("gate.decision", rid, dict(
+                research_id=rid, decision_id=decision_id, gate="GATE0", decision="CHANGES",
+                decided_by=approver, decided_at=utc_now().isoformat(),
+                prd_version_no=None if head is None else int(head["version_no"]),
+                review_round_no=None if last is None else int(last["round_no"]),
+                fsm_project=row["fsm_project"], fsm_stage=None,
+                fsm_state_after=result["next_state"], frozen_digests={}, reason=reason,
+                audit_trace_id=trace_id_var.get(),
+                flow={"step": "studio", "phase": "REVISING", "detail": "",
+                      "status": derive_flow_status([], result["next_state"])})))
+            assert ctx.orchestrator is not None
+            ctx.orchestrator.project_state(rid)
+    return {"gate_decision_id": decision_id, "fsm_retry_count": result.get("retry_count"),
+            "escalated": bool(result.get("escalated"))}
 
 
 @router.post("/projects/{research_id}:reconcile")
 def reconcile(research_id: str,
               ctx: ResearchContext = Depends(write_gate("reconcile"))) -> dict[str, Any]:
+    """對帳（只報告、不修復）：結果追加一筆 `research.reconcile` 事件。"""
     rid = _research_id(research_id)
     with operation(ctx, "reconcile", rid, None):
-        _project(ctx, rid)
-        raise _not_implemented("reconcile")
+        row = _project(ctx, rid)
+        assert ctx.orchestrator is not None
+        return ctx.orchestrator.reconcile(row, actor="bridge")
 
 
 # ── 取消、封存、復原 ─────────────────────────────────────────────────────────────────────────

@@ -115,7 +115,8 @@ RESEARCH_DEFAULT_FETCH_ALLOWLIST = (
     "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
     "api.stackexchange.com")
 RESEARCH_DEFAULT_MAX_CONCURRENT_RUNS = 1
-RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS = 1200
+# D-75：對齊引擎 Kernel 路徑固定的步驟逾時（kernel.py:196），看門狗才會先於引擎響
+RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS = 600
 RESEARCH_DEFAULT_FETCH_MAX_BYTES = 5 * 1024 * 1024
 RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS = 20.0
 

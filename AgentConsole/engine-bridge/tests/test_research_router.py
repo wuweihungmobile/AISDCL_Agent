@@ -8,9 +8,11 @@ TCS-ResearchToPRD-P0-20261102：AT-960-2-1／2-2／2-7（閘門與能力探針�
 活 Bridge＝`make_bridge`（真 uvicorn＋真 HTTP）；DB 型測試用 `research_pg_support` 的拋棄式資料庫
 （`BRIDGE_TEST_DSN` 未設＝TOOL-ABSENCE 跳過）；FSM 樹有 `fake`（假 CLI）與 `real`（真 SDD 樹，
 `SDD_ROOT` 不在＝TOOL-ABSENCE 跳過）兩種，同一組斷言各跑一次。
-骨架端點（stage 啟動、`:approve-baseline`、`:return`、`:reconcile`）的本體由 PKG-BR-C 填：前置條件
-通過後現回 501 `not_implemented`，BR-C 填入後改為真正的 202／200——本檔的斷言對「501 或成功碼」都成立
-（只要求「不是 409 前置失敗」）。
+四類處理函式（stage 啟動、`:approve-baseline`、`:return`、`:reconcile`）的本體已由 PKG-BR-C 落地
+（原為 501 骨架）：本檔對 stage 啟動只驗「請求被接受（202）」；引擎的 claude 一律設成不存在的指令
+（`research_claude_command`＝`ABSENT_CLAUDE`：run 立刻失敗、絕不呼叫真正的模型），並以 `settle`
+等 stage 鏈結束後才改列或拍快照；假 SDD 樹補上夾具框架檔（編譯層需要）。完整流程的測試在
+`test_research_orchestrator.py`、Gate 0 在 `test_research_approve.py`。
 """
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ from app.research.db import ResearchDb
 from app.settings import Settings
 from tests.fake_sdd import make_fake_sdd, read_state
 from tests.research_pg_support import ThrowawayDb, make_research_db
+from tests.research_stage_support import ABSENT_CLAUDE, install_framework, settle
 from tests.test_research_fsm_ops import fail_to_escalation, human_resume, real_sdd_root
 
 TOKEN = "t0ken-" + "r" * 40
@@ -54,7 +57,7 @@ def rdb() -> Iterator[ThrowawayDb]:
 
 @pytest.fixture
 def fake(tmp_path: Path) -> Path:
-    return make_fake_sdd(tmp_path / "sdd")
+    return install_framework(make_fake_sdd(tmp_path / "sdd"))      # stage 啟動要編譯：需框架檔
 
 
 @pytest.fixture(params=["fake", "real"])
@@ -116,7 +119,8 @@ def build_env(make_bridge: Callable[..., Any], settings: Settings, tmp_path: Pat
     """活 Bridge＋研究設定（工作區根在允許根之下、權杖已設、DSN 指向拋棄式庫或缺省）。"""
     root = tmp_path / "workspace" / "my-project"
     fields: dict[str, Any] = {"db_dsn": rdb.dsn if rdb else None, "research_root": root,
-                              "research_write_token": TOKEN, "sdd_root": tree}
+                              "research_write_token": TOKEN, "sdd_root": tree,
+                              "research_claude_command": ABSENT_CLAUDE}      # hermetic：不呼叫模型
     fields.update(over)
     cfg = replace(settings, **fields)
     return Env(live=make_bridge(cfg), settings=cfg, rdb=rdb, root=root, tree=tree)
@@ -439,24 +443,24 @@ def test_AT_960_3_4_retry_init_is_refused_in_every_other_state_with_zero_writes(
         assert db_snapshot(env, rid) == snap, slug
 
 
-# ══ 尚未實作的骨架：形狀被釘住，不會被誤當成功 ═════════════════════════════════════════════════
-def test_the_skeleton_endpoints_answer_501_after_their_validation(env: Env) -> None:
+# ══ 四類處理函式（原 501 骨架，BR-C 已落地）：先驗證、後動作；被拒的請求不寫任何東西 ═════════════
+def test_the_gate_0_return_and_start_handlers_validate_before_acting_and_p1_stays_501(
+        env: Env) -> None:
     assert env.rdb is not None
     rid = create(env)["research_id"]
     snap = db_snapshot(env, rid)
     approve = {"prd_version": 1, "expected_digests": {}, "approver": ALICE}
-    for path, body in ((f"/research/projects/{rid}:approve-baseline", approve),
-                       (f"/research/projects/{rid}:return",
-                        {"approver": ALICE, "reason": "補證據"}),
-                       (f"/research/projects/{rid}:reconcile", {}),
-                       (f"/research/projects/{rid}/stages/research:start",
-                        {"requested_by": ALICE})):
+    for path, body, want in (
+            (f"/research/projects/{rid}:approve-baseline", approve, (409, "review_not_passed")),
+            (f"/research/projects/{rid}:return", {"approver": ALICE, "reason": "補證據"},
+             (409, "fsm_state_conflict")),
+            (f"/research/projects/{rid}/stages/tcs-draft:start", {"requested_by": ALICE},
+             (501, "not_implemented"))):                # P1 的 stage：形狀仍釘住，絕不是 2xx
         resp = env.post(path, body)
-        assert resp.status_code in (501, 200, 202), (path, resp.text)
+        assert (resp.status_code, resp.json()["reason"]) == want, (path, resp.text)
         if resp.status_code == 501:
             out = resp.json()
-            assert (out["code"], out["reason"]) == (501, "not_implemented"), path
-            assert out["endpoint"] and out["detail"]
+            assert out["code"] == 501 and out["endpoint"] and out["detail"]
     for bad in ("bridge", "Agent", "SYSTEM", "", "a b", "a+b", "x" * 101, "-rf"):
         resp = env.post(f"/research/projects/{rid}:approve-baseline", {**approve, "approver": bad})
         assert resp.status_code == 422, repr(bad)
@@ -465,7 +469,12 @@ def test_the_skeleton_endpoints_answer_501_after_their_validation(env: Env) -> N
     assert env.post(f"/research/projects/{uuid.uuid4()}:reconcile", {}).status_code == 404
     assert env.post(f"/research/projects/{rid}/stages/bogus:start",
                     {"requested_by": ALICE}).status_code == 422
-    assert db_snapshot(env, rid) == snap, "骨架與被拒的請求都不寫任何東西"
+    assert db_snapshot(env, rid) == snap, "被拒的請求都不寫任何東西"
+    # 會動作的兩個：對帳回 200；research 啟動回 202（引擎沒有 claude、run 立刻失敗，等它結束）
+    assert env.post(f"/research/projects/{rid}:reconcile", {}).status_code == 200
+    started = env.post(f"/research/projects/{rid}/stages/research:start", {"requested_by": ALICE})
+    assert started.status_code == 202, started.text
+    settle(env.live, rid)
 
 
 # ══ AT-960-6-1：游標持久化在 DB ═══════════════════════════════════════════════════════════════
@@ -497,7 +506,8 @@ def test_AT_960_6_3_an_unmet_precondition_is_409_with_the_unmet_rules_and_change
         env: Env) -> None:
     assert env.rdb is not None
     rid = create(env)["research_id"]
-    assert _start(env, rid, "research").status_code in (501, 202), "INGESTED 滿足前置條件"
+    assert _start(env, rid, "research").status_code == 202, "INGESTED 滿足前置條件"
+    settle(env.live, rid)                      # 啟動真的會動作：等 stage 鏈結束才手改列與拍快照
     env.rdb.exec("UPDATE console.research_projects SET flow_phase = 'DRAFTING' WHERE id = %s", rid)
     snap, expected = db_snapshot(env, rid), {
         "research": [("phase", "DRAFTING")], "draft": [("phase", "DRAFTING")],
@@ -553,9 +563,10 @@ def test_AT_960_6_4_the_site_wide_cap_rejects_a_stage_on_another_project(
     assert (resp.status_code, resp.json()["reason"]) == (409, "stage_conflict")
     assert resp.json()["details"] == {"cause": "max_concurrent_runs", "limit": 1, "active": 1}
     assert env.rdb.count("research_stage_runs") == runs, "沒有為 beta 建任何 stage run 列"
-    # 上限調成 2：同一個請求通過上限這關（前置條件本來就滿足 ⇒ 骨架 501，BR-C 填本體後為 202）
+    # 上限調成 2：同一個請求通過上限這關（前置條件本來就滿足 ⇒ 202）
     wider = make_env(env.tree, env.rdb, research_max_concurrent_runs=2)
-    assert _start(wider, beta, "research").status_code in (501, 202)
+    assert _start(wider, beta, "research").status_code == 202
+    settle(wider.live, beta)
 
 
 def test_AT_960_6_4_a_finished_stage_run_no_longer_counts_against_the_cap(env: Env) -> None:
@@ -563,7 +574,8 @@ def test_AT_960_6_4_a_finished_stage_run_no_longer_counts_against_the_cap(env: E
     env.db.insert_stage_run(research_id=alpha, stage_run_id=str(uuid.uuid4()), stage="RESEARCH",
                             requested_by=ALICE, status="SUCCEEDED")
     assert env.db.count_active_stage_runs() == 0
-    assert _start(env, beta, "research").status_code in (501, 202)
+    assert _start(env, beta, "research").status_code == 202
+    settle(env.live, beta)
 
 
 def test_AT_960_15_6_in_escalation_new_reviews_and_automatic_revisions_are_blocked(
@@ -596,7 +608,8 @@ def test_AT_960_15_5_after_escalation_only_reads_the_fsm_and_never_writes_it(
     assert (plain.status_code, plain.json()["reason"]) == (409, "escalated")
     human_resume(env.tree, fctx.state_dir, fctx.key)       # 人以框架 CLI 恢復（Bridge 沒有此動詞）
     after = _start(env, rid, "revise", after_escalation=True)
-    assert after.status_code in (501, 202), after.text          # 前置已過；BR-C 填本體後為 202
+    assert after.status_code == 202, after.text                 # 前置已過 ⇒ 202
+    settle(env.live, rid)                                       # 引擎沒有 claude：run 立刻失敗
     assert fsm_ops.current_state(fctx) == "SPEC_DRAFTING"
     assert set(verbs(popen_log, since)) <= {"show"}, "Bridge 的 FSM 呼叫只有唯讀的 show"
 
@@ -923,3 +936,109 @@ def test_AT_960_8_9_the_fetch_layer_builds_its_list_from_the_endpoint_rows_and_v
         "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
         "api.stackexchange.com", "export.arxiv.org"], "快照逐條列出基底與啟用中的 ADMIN 條目"
     assert "reddit.com" not in after.hosts, "Reddit 預設不在任何清單"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# PKG-BR-C 附加（append-only；上方既有測試只依「本體已落地」做必要同步，見檔頭）：
+# AT-960-6-4（假 claude 延遲下兩專案真並行）、7-6（mock-only）、8-9（stage 快照）。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+def _stage_rig(make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+               monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb, **over: Any
+               ) -> tuple[Any, str]:
+    """活 Bridge＋FC（假 claude）＋注入假抓取層的 orchestrator；回 (rig, 劇本路徑)。"""
+    from tests import test_research_orchestrator as orch
+
+    script = orch.custom_script(tmp_path, lambda steps: None)
+    return orch.build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script,
+                          **over), script
+
+
+def test_AT_960_6_4_two_projects_really_run_in_parallel_when_the_cap_is_two_and_conflicts_hold(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    from tests import test_research_orchestrator as orch
+
+    rig, script = _stage_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb,
+                             research_max_concurrent_runs=2)
+    orch.patch_step(script, "research", 0, delay=4)                  # 假 claude 延遲
+    alpha, beta, gamma = (orch.create(rig, slug) for slug in ("alpha", "beta", "gamma"))
+    orch.run_stage(rig, alpha, "research", wait=False)
+    orch.run_stage(rig, beta, "research", wait=False)
+    orch.wait_until(lambda: rig.db.count_active_stage_runs() == 2, 30)   # 兩專案同時在跑
+    again = rig.post(f"/research/projects/{alpha}/stages/research:start", {"requested_by": ALICE})
+    assert (again.status_code, again.json()["reason"]) == (409, "stage_conflict")
+    assert set(again.json()["details"]) == {"activeStageRunId", "activeStage"}
+    third = rig.post(f"/research/projects/{gamma}/stages/research:start", {"requested_by": ALICE})
+    assert (third.status_code, third.json()["reason"]) == (409, "stage_conflict")
+    assert third.json()["details"] == {"cause": "max_concurrent_runs", "limit": 2, "active": 2}
+    assert rig.orch.join(alpha, 120) and rig.orch.join(beta, 120)
+    for rid in (alpha, beta):
+        assert [r["status"] for r in orch.runs_of(rig, rid, "RESEARCH")] == ["SUCCEEDED"]
+        seqs = [e["seq"] for e in rig.db.list_events(rid, limit=500)]
+        assert seqs == list(range(1, len(seqs) + 1)), "序號自 1 起連續、無重複"
+    calls = [json.loads(x) for x in rig.trace.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert len([c for c in calls if c.get("role") == "research"]) >= 2, "兩專案各起了一個假 claude"
+
+
+def test_AT_960_7_6_mock_only_mode_still_accepts_the_research_stage(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    import shutil
+
+    from tests import test_research_orchestrator as orch
+
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda cmd, *a, **k: None if cmd == "claude" else
+                        real_which(cmd, *a, **k))                  # PATH 上沒有 claude：mock-only
+    rig, _script = _stage_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb)
+    assert rig.client.get("/research/capabilities").json()["mode"] == "mock-only"
+    assert rig.client.get("/health/deep").json()["research"]["mode"] == "mock-only"
+    rid = orch.create(rig)
+    body = orch.run_stage(rig, rid, "research").json()               # 202 且 stage 完成
+    assert body["stage_run_id"] and "reason" not in body, "沒有任何「停用」錯誤（停用只在 UI 層）"
+    assert [r["status"] for r in orch.runs_of(rig, rid, "RESEARCH")] == ["SUCCEEDED"]
+    assert rig.client.get("/research/capabilities").json()["mode"] == "mock-only"
+
+
+def test_AT_960_8_9_the_stage_snapshot_follows_the_effective_allowlist_entry_by_entry(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    from tests import test_research_orchestrator as orch
+
+    rig, _script = _stage_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb,
+                              research_web_allowlist=("base.example.org",))
+    rid = orch.create(rig)
+
+    def snapshot() -> set[tuple[str, str, str]]:
+        run = orch.runs_of(rig, rid, "RESEARCH")[-1]
+        return {(e["list_kind"], e["host"], e["source"]) for e in run["allowlist_snapshot"]}
+
+    base = {("FETCH", host, "ENV") for host in rig.settings.research_fetch_allowlist}
+    assert len(base) == 5 and not any("reddit" in host for _k, host, _s in base)
+    orch.run_stage(rig, rid, "research")
+    assert snapshot() == {*base, ("WEB", "base.example.org", "ENV")}, "預設：五個基底主機＋環境 WEB"
+    audit = rig.settings.engine_workspace / "_audit.jsonl"
+    audits = audit.read_text(encoding="utf-8").count("\n") if audit.is_file() else 0
+    events = rig.rdb.count("research_events")
+    added = rig.post("/research/allowlist", {
+        "list_kind": "WEB", "host": "blog.example.org", "layer": "INDUSTRY", "purpose": "產業",
+        "min_interval_seconds": 5, "tos_acknowledged": False, "added_by": ADMIN})
+    assert added.status_code == 201, added.text
+    assert added.json()["added_by"] == ADMIN
+    reddit = rig.post("/research/allowlist", {
+        "list_kind": "WEB", "host": "reddit.com", "layer": "COMMUNITY", "purpose": "社群",
+        "min_interval_seconds": 5, "tos_acknowledged": False, "added_by": ADMIN})
+    assert (reddit.status_code, reddit.json()["reason"]) == (422, "terms_ack_required")
+    assert rig.post("/research/allowlist", {
+        "list_kind": "WEB", "host": "reddit.com", "layer": "COMMUNITY", "purpose": "社群",
+        "min_interval_seconds": 5, "tos_acknowledged": True, "added_by": ADMIN}).status_code == 201
+    assert rig.rdb.count("research_events") == events, "allowlist 變更不寫 research_events（D-52）"
+    assert (audit.read_text(encoding="utf-8").count("\n") if audit.is_file() else 0) > audits
+    orch.run_stage(rig, rid, "research")
+    assert ("WEB", "blog.example.org", "ADMIN") in snapshot(), "新增條目出現在下一個 stage 的快照"
+    off = rig.client.patch(f"/research/allowlist/{added.json()['id']}",
+                           json={"enabled": False, "disabled_by": ADMIN}, headers=HEAD)
+    assert off.status_code == 200 and off.json()["disabled_by"] == ADMIN
+    orch.run_stage(rig, rid, "research")
+    assert ("WEB", "blog.example.org", "ADMIN") not in snapshot(), "停用後不再出現"
+    assert {h for _k, h, _s in snapshot()} >= {h for _k, h, _s in base}

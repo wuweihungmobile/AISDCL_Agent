@@ -91,7 +91,7 @@ Invoke-RestMethod http://localhost:8081/health
 | `BRIDGE_RESEARCH_FETCH_ALLOWLIST` | `export.arxiv.org,arxiv.org,api.semanticscholar.org,api.github.com,api.stackexchange.com` | Bridge 原生抓取（API 層）的主機基底，逗號分隔（小寫、去尾端 `.`、去重；含 scheme／埠／路徑者啟動即 `SettingsError`）。有效清單＝本變數 ∪ 啟用中的 ADMIN 條目；與 `BRIDGE_OUTBOUND_ALLOWLIST`（模型端點）是兩份獨立清單 |
 | `BRIDGE_RESEARCH_WEB_ALLOWLIST` | （空＝**Web 層關閉**） | headless WebSearch／WebFetch 的網域基底，逗號分隔；產業層需 ADMIN 逐一加入（有效清單同上）。空時 `web_layer_enabled` 為假，scope 含 `industry` 的建立請求回 422 `layer_unavailable` |
 | `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` | `1` | 同時 stage run 數（額度保守）；≥1 |
-| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | `1200` | 寫入每個 stage run 的 `config_overrides.playbook.step_timeout_seconds`；1～86400。請求 `env` 的 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（DEF-200-575）與它同源（×1000），不另立數字 |
+| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | `600` | 寫入每個 stage run 的 `config_overrides.playbook.step_timeout_seconds`，並由 orchestrator 看門狗執行；1～86400。預設 600＝引擎 Kernel 路徑固定的步驟逾時（主控裁決 D-75；設更大也會被引擎的 600 秒先切斷，真需求須讓引擎讀設定，列 P1）。請求 `env` 的 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（DEF-200-575）與它同源（×1000），不另立數字 |
 | `BRIDGE_RESEARCH_CLAUDE_COMMAND` | （未設＝引擎預設的 `claude`） | stage run 的 `claude.command`；Docker 全棧 E2E 設 `aisdlc-mock-claude`（映像不含真 `claude` 與 `gh`） |
 | `BRIDGE_RESEARCH_FETCH_MAX_BYTES` | `5242880`（5 MiB） | 原生抓取單一回應的位元組上限；≥1 |
 | `BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS` | `20` | 原生抓取的逾時秒數；>0 的有限數字 |

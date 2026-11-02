@@ -81,6 +81,11 @@ def create_app(settings: Settings | None = None, *,
         try:
             yield
         finally:
+            # PKG-BR-C／主控接線：研究 orchestrator 先停（它的 stage run 由 runs 承載；未停時
+            # RUNNING 列只會在下次啟動被 reap_orphans 收斂、子行程不會被停）
+            research = getattr(app.state, "research", None)
+            if research is not None and getattr(research, "orchestrator", None) is not None:
+                await asyncio.to_thread(research.orchestrator.shutdown)
             await asyncio.to_thread(runs.shutdown)
             if db is not None:
                 db.close()
