@@ -246,10 +246,14 @@ services:
       BRIDGE_RESEARCH_ROOT: /workspace/my-project
       BRIDGE_RESEARCH_WRITE_TOKEN: ${BRIDGE_RESEARCH_WRITE_TOKEN:-}
       BRIDGE_RESEARCH_CLAUDE_COMMAND: aisdlc-mock-claude
+      # 全棧 mock E2E 的研究劇本（TCS AT-960-22-1；mock_claude 研究劇本模式）：預設空＝mock claude 走一般模式；整合驗證時在
+      # .env 設 MOCK_CLAUDE_RESEARCH_SCRIPT=/mock-research/mock_claude_script_pass.json（劇本與 content/ 由下面的唯讀 bind 提供）。
+      MOCK_CLAUDE_RESEARCH_SCRIPT: ${MOCK_CLAUDE_RESEARCH_SCRIPT:-}
     volumes:
       - ../AISDLC_SDD:/sdd:ro
       - engine_workspace:/workspace
       - app_logs:/app/logs
+      - ./engine-bridge/tests/fixtures/research/scripts:/mock-research:ro
       # 🔴 設計 A（六條長語法唯讀 bind）：不掛 repo 根（會暴露被忽略的 .env）、不掛真的 .git/config（內含 remote 與
       # 憑證設定）；`create_host_path: false` 讓來源缺席時 compose 明確失敗，而不是在主機上憑空建出空目錄。
       # 🔴 未實測的兩個風險（Architecture §12.1 L-14、§12.2 V-12，由 V3 真容器實測決定採 A 或備案 B）：
