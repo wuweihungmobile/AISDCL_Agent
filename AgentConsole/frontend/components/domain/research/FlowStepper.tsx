@@ -17,9 +17,13 @@ import { cn } from "@/lib/utils";
 
 const STATE_ICON: Readonly<Record<ResearchFlowStepState, LucideIcon>> = { DONE: Check, CURRENT: CircleDot, BLOCKED: TriangleAlert, TODO: Circle };
 
-/** 狀態的底色與字色（只取設計 token；顏色只作輔助，意思由文字與圖示表達）。 */
+/**
+ * 狀態的底色與字色（只取設計 token；顏色只作輔助，意思由文字與圖示表達）。
+ * 「已完成」的字用 primary-strong、框線維持主色：步驟 chip 沒有自己的底，字直接坐在頁面底色（bg-base）上，主色字在那上面只有 4.22:1（真瀏覽器 axe 回報 4.21，
+ * 低於 WCAG AA 一般文字的 4.5:1）；primary-strong 是同一個綠加深（6.02:1），先例＝styles/tokens.console.css〈無障礙覆寫〉與 components/domain/sysadmin/tone.ts。
+ */
 const STATE_CLASS: Readonly<Record<ResearchFlowStepState, string>> = {
-  DONE: "border-wg-primary text-wg-primary",
+  DONE: "border-wg-primary text-wg-primary-strong",
   CURRENT: "border-wg-primary bg-wg-primary text-white",
   BLOCKED: "border-wg-draft-border bg-wg-draft-bg text-wg-accent",
   TODO: "border-wg-line text-wg-muted",

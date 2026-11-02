@@ -199,9 +199,11 @@ function CreateForm({ onClose }: { onClose: () => void }) {
 }
 
 const BADGE_CLASS: Readonly<Record<ProjectBadgeId, string>> = {
-  active: "bg-wg-base text-wg-primary",
-  frozen: "bg-wg-base text-wg-primary",
-  delivered: "bg-wg-base text-wg-primary",
+  // 主色字坐在 bg-base 上對比 4.21:1（axe color-contrast serious，FE-D 三寬度實測）；
+  // 改用 primary-strong（同 FlowStepper DONE chip 與 tokens.console.css〈無障礙覆寫〉先例）
+  active: "bg-wg-base text-wg-primary-strong",
+  frozen: "bg-wg-base text-wg-primary-strong",
+  delivered: "bg-wg-base text-wg-primary-strong",
   scr: "bg-wg-alert-bg text-wg-warning-text",
   init_failed: "bg-wg-draft-bg text-wg-accent",
   archived: "bg-wg-base text-wg-muted",

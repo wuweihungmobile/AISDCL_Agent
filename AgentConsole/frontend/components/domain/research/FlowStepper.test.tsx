@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ResearchFlowStatus, ResearchFlowStepId } from "@/lib/api/types";
 import { FLOW_STEP_IDS, FLOW_STEP_LABEL, STEP_STATE_LABEL, deriveSteps } from "@/lib/domain/research";
+import { contrastRatio, tokenHex } from "@/tests/helpers/tokens";
 import { FlowStepper } from "./FlowStepper";
 
 /**
@@ -119,6 +120,30 @@ describe("AT_960_19_3 FlowStepper 恆五項，狀態與可及名稱含狀態文�
     expect(screen.getByRole("list", { name: "研發工作流步驟" })).toBeInTheDocument();
     rerender(<FlowStepper steps={deriveSteps("topic", "IDLE")} label="自訂名稱" />);
     expect(screen.getByRole("list", { name: "自訂名稱" })).toBeInTheDocument();
+  });
+
+  // 四種狀態的 chip 字色對比（WCAG AA 一般文字 4.5:1）：chip 只有進行中與受阻有自己的底，已完成與待做的字直接坐在頁面底色上。
+  // 已完成曾用主色字（bg-base 上 4.22:1，真瀏覽器 axe 在 1440 的 /research/<id> 量到 4.21 而紅）；改用 primary-strong（6.02:1）。真頁面層級的把關在 tests/e2e/a11y.mock.spec.ts 的 axe 掃描。
+  const CHIP_TEXT: ReadonlyArray<{ step: ResearchFlowStepId; status: ResearchFlowStatus; state: string; textClass: string; fg: string; bg: string }> = [
+    { step: "studio", status: "IDLE", state: "DONE", textClass: "text-wg-primary-strong", fg: "color-primary-strong", bg: "color-bg-base" },
+    { step: "studio", status: "IDLE", state: "CURRENT", textClass: "text-white", fg: "#FFFFFF", bg: "color-primary" },
+    { step: "studio", status: "BLOCKED", state: "BLOCKED", textClass: "text-wg-accent", fg: "color-accent", bg: "color-draft-bg" },
+    { step: "studio", status: "IDLE", state: "TODO", textClass: "text-wg-muted", fg: "color-text-muted", bg: "color-bg-base" },
+  ];
+  it.each(CHIP_TEXT)("AT_960_19_3 $state 的 chip：字色 class 是 $textClass，對它坐的底色對比 ≥ 4.5:1（設計 token 實際值；DONE 不得退回主色字）", ({ step, status, state, textClass, fg, bg }) => {
+    render(<FlowStepper steps={deriveSteps(step, status)} />);
+    const row = items().find((li) => li.getAttribute("data-state") === state);
+    expect(row, `有一項是 ${state}`).toBeDefined();
+    const chip = (row as HTMLElement).querySelector("span.inline-flex");
+    expect(chip).not.toBeNull();
+    const classes = (chip as HTMLElement).className.split(/\s+/);
+    expect(classes).toContain(textClass);
+    if (state === "DONE") expect(classes, "主色字坐在 bg-base 上只有 4.22:1").not.toContain("text-wg-primary");
+    const fgHex = fg.startsWith("#") ? fg : tokenHex(fg);
+    const bgHex = tokenHex(bg);
+    expect(fgHex, `找不到前景 token ${fg}`).toBeDefined();
+    expect(bgHex, `找不到底色 token ${bg}`).toBeDefined();
+    expect(contrastRatio(fgHex as string, bgHex as string)).toBeGreaterThanOrEqual(4.5);
   });
 });
 

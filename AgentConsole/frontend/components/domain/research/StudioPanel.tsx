@@ -12,6 +12,7 @@
  *    （精簡編輯器：沒有語法高亮與即時預覽，輸入延遲不隨文件大小成長；AC-R2P-09-8 的 200KB 量測見 tests/e2e/research-studio-perf.mock.spec.ts）。
  *  - **預覽分批渲染、超界降級**：預覽把文件切成「一個標題一個區塊」逐批渲染（每批約 `PREVIEW_BATCH_CHARS` 字、排在瀏覽器閒置時），畫面不凍結；Mermaid 圍欄交給延遲載入的 `MermaidBlock`；
  *    超過 `PRD_PREVIEW_MAX_BYTES`（200KB）改顯示純文字並說明原因。預覽不渲染原始 HTML（`MarkdownView` 沒有 rehype-raw）、外部連結一律 `noopener noreferrer`。
+ *    Markdown 渲染管線（`MarkdownView`）與 Mermaid 一樣延遲載入，不進 `/research/[researchId]` 的首屏 chunk（見 `BlockPreviewLazy`）。
  *  - **版面三段**：視窗 ≥ 1280 三欄、768～1279 目錄收成圖示鈕、< 768 改分頁籤（目錄、編輯器、審批）；三個區塊永遠都在 DOM 裡（只切顯示），審批欄的串流與狀態不會因切頁籤而中斷。
  *  - 外部衍生文字（PRD 內文由 AI 產生）只經 `MarkdownView`／純文字節點渲染；本檔不用 `dangerouslySetInnerHTML`。
  */
@@ -19,10 +20,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Eye, GitCompareArrows, Lock, Pencil, Save } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from "react";
 
 import { MarkdownEditor } from "@/components/markdown/MarkdownEditor";
-import { MarkdownView } from "@/components/markdown/MarkdownView";
 import { Button } from "@/components/ui/button";
 import { PillTabs, pillPanelId, pillTabId } from "@/components/ui/pill-tabs";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -313,21 +313,31 @@ export function scrollTextareaToOffset(textarea: HTMLTextAreaElement, offset: nu
 
 const MermaidBlockLazy = dynamic(() => import("./MermaidBlock").then((module) => module.MermaidBlock), { ssr: false, loading: () => <Skeleton className="my-3 h-24 rounded-md" /> });
 
+/** Markdown 渲染元件（`components/markdown/MarkdownView` 的 `MarkdownView`）：本檔不靜態 import 它，預覽延遲載入完成後才以屬性拿到（見 `BlockPreviewLazy`）。 */
+type MarkdownRenderer = ComponentType<{ source: string; empty?: string }>;
+
 /**
  * 預覽的一個區塊。`memo`＋穩定的 `block` 物件（`BlockPreview` 以 `useMemo` 切一次）：後面的批次渲染進來時，已經畫好的區塊不重新跑一遍 Markdown 管線——
  * 否則每一批都把前面全部重解析，總成本隨批數平方成長（200KB 的 PRD 約 5 批，實測全部畫完約 1 秒，其中大半是重複工作）。
  */
-const PreviewBlock = memo(function PreviewBlock({ block }: { block: PrdBlock }) {
+const PreviewBlock = memo(function PreviewBlock({ block, View }: { block: PrdBlock; View: MarkdownRenderer }) {
   return (
     <section data-testid="prd-block" data-prd-line={block.line}>
       {block.segments.map((segment, i) =>
-        segment.kind === "markdown" ? <MarkdownView key={i} source={segment.text} empty="" /> : <MermaidBlockLazy key={i} code={segment.code} label={`Mermaid 圖表 ${segment.ordinal}`} />,
+        segment.kind === "markdown" ? <View key={i} source={segment.text} empty="" /> : <MermaidBlockLazy key={i} code={segment.code} label={`Mermaid 圖表 ${segment.ordinal}`} />,
       )}
     </section>
   );
 });
 
-function BlockPreview({ text, focusLine }: { text: string; focusLine: number | null }) {
+type BlockPreviewProps = {
+  text: string;
+  focusLine: number | null;
+  /** 預覽（含渲染管線）備妥、掛上之後呼叫一次：工作室據此補做「預覽還在載入時收到的捲動請求」。 */
+  onReady?: () => void;
+};
+
+function BlockPreview({ text, focusLine, onReady, View }: BlockPreviewProps & { View: MarkdownRenderer }) {
   const blocks = useMemo(() => splitPrdBlocks(text), [text]);
   const [shown, setShown] = useState(() => nextBlockCount(blocks, 0, PREVIEW_BATCH_CHARS));
   // 目錄點到還沒渲染的章節時，先把它之前的區塊補齊（在 render 內衍生，不需要 effect 裡設狀態）
@@ -337,6 +347,9 @@ function BlockPreview({ text, focusLine }: { text: string; focusLine: number | n
     if (count >= blocks.length) return;
     return scheduleIdle(() => setShown(nextBlockCount(blocks, count, PREVIEW_BATCH_CHARS)));
   }, [count, blocks]);
+  useEffect(() => {
+    onReady?.();
+  }, [onReady]);
   return (
     <div
       data-testid="prd-preview"
@@ -348,7 +361,7 @@ function BlockPreview({ text, focusLine }: { text: string; focusLine: number | n
       className="max-h-[70vh] overflow-auto rounded-md border border-wg-line bg-wg-surface px-5 py-4"
     >
       {blocks.slice(0, count).map((block) => (
-        <PreviewBlock key={block.line} block={block} />
+        <PreviewBlock key={block.line} block={block} View={View} />
       ))}
       {count < blocks.length ? (
         <p role="status" data-testid="prd-preview-progress" className="py-2 text-sm text-wg-muted">
@@ -359,8 +372,35 @@ function BlockPreview({ text, focusLine }: { text: string; focusLine: number | n
   );
 }
 
-function PrdPreview({ text, bytes, focusLine }: { text: string; bytes: number; focusLine: number | null }) {
-  if (bytes <= PRD_PREVIEW_MAX_BYTES) return <BlockPreview text={text} focusLine={focusLine} />;
+/**
+ * 預覽整包延遲載入：Markdown 渲染管線（react-markdown、remark-gfm、rehype-highlight 與語法高亮的語言表，合計約 326KB／gzip 94KB）原本被本檔靜態 import，
+ * 因此進了 `/research/[researchId]` 的首屏（量測：首次載入比 FE-C 之前多 54%，其中七成是這一包）；現在它是非同步 chunk，不在首屏路徑上：議題步等其他步驟、
+ * 唯讀或超過 200KB 改走純文字的工作室（那條路徑完全不載入管線）都不付這一包。誠實劃界：編輯器套件（`MarkdownEditorImpl`）自己也 import 這幾個套件、與預覽共用同一個 chunk，
+ * 所以可寫的小文件進工作室、編輯器掛上時仍會把它抓下來——那是掛上之後的非同步載入，不擋首屏，也讓第一次切預覽不必再等。
+ * 載入器回傳的元件把載入好的 `MarkdownView` 以屬性交給 `BlockPreview`：預覽容器（`prd-preview`）在管線備妥之後才出現（載入中只有骨架），
+ * 不會有「容器在、內容還沒到」的半成品畫面；區塊的捲動定位與分批渲染都以備妥為前提（載入中收到的捲動請求由 `StudioInner` 保留、`onReady` 之後補做）。
+ * 動態 import 的字面仍在本檔：EvidenceTimeline.test.tsx 的掃描規定 Markdown 渲染器只准出現在 StudioPanel.tsx（動態 import 的字面也算 import）。
+ */
+const BlockPreviewLazy = dynamic<BlockPreviewProps>(
+  () =>
+    import("@/components/markdown/MarkdownView").then(({ MarkdownView }) => {
+      function LoadedBlockPreview(props: BlockPreviewProps) {
+        return <BlockPreview {...props} View={MarkdownView} />;
+      }
+      return LoadedBlockPreview;
+    }),
+  {
+    ssr: false,
+    loading: () => (
+      <div role="status" aria-busy="true" aria-label="PRD 預覽載入中" data-testid="prd-preview-loading">
+        <Skeleton className="h-[320px] rounded-md" />
+      </div>
+    ),
+  },
+);
+
+function PrdPreview({ text, bytes, focusLine, onReady }: { text: string; bytes: number; focusLine: number | null; onReady: () => void }) {
+  if (bytes <= PRD_PREVIEW_MAX_BYTES) return <BlockPreviewLazy text={text} focusLine={focusLine} onReady={onReady} />;
   return (
     <div data-testid="prd-preview-degraded" className="flex flex-col gap-2">
       <p role="note" className="rounded-md border border-wg-alert-border bg-wg-alert-bg px-3 py-2 text-sm text-wg-warning-text">
@@ -445,6 +485,9 @@ function StudioInner({ researchId, project, completed }: ResearchPanelProps) {
   const [justSaved, setJustSaved] = useState<{ no: number; text: string } | null>(null);
   const [conflict, setConflict] = useState<{ headVersion: number | null } | null>(null);
   const [scrollRequest, setScrollRequest] = useState<ScrollRequest | null>(null);
+  // 預覽（含延遲載入的 Markdown 管線）每掛上一次加一：預覽還在下載時收到的捲動請求，等它備妥後由下面的 effect 補做
+  const [previewEpoch, setPreviewEpoch] = useState(0);
+  const onPreviewReady = useCallback(() => setPreviewEpoch((n) => n + 1), []);
 
   const serverText = headContent.data?.content ?? (justSaved !== null && justSaved.no === headNo ? justSaved.text : undefined);
   const text = local?.text ?? serverText ?? "";
@@ -475,16 +518,21 @@ function StudioInner({ researchId, project, completed }: ResearchPanelProps) {
     if (settled && !dirty) clearDraft(researchId);
   }, [settled, dirty, researchId]);
 
-  // 目錄與缺陷定位：依目前模式把游標或捲動位置移到該章節（只在 request 換新時做一次）
+  // 目錄與缺陷定位：依目前模式把游標或捲動位置移到該章節（每個 request 只做一次；預覽模式下目標區塊還沒出現＝預覽還在載入，保留到 previewEpoch 變動後再做）
   useEffect(() => {
     if (scrollRequest === null || handledNonce.current === scrollRequest.nonce) return;
     const root = rootRef.current;
     if (root === null) return;
-    handledNonce.current = scrollRequest.nonce;
     const { item } = scrollRequest;
     if (mode === "preview") {
-      root.querySelector(`[data-prd-line="${item.line}"]`)?.scrollIntoView({ block: "start" });
-    } else if (mode === "edit") {
+      const target = root.querySelector(`[data-prd-line="${item.line}"]`);
+      if (target === null) return;
+      handledNonce.current = scrollRequest.nonce;
+      target.scrollIntoView({ block: "start" });
+      return;
+    }
+    handledNonce.current = scrollRequest.nonce;
+    if (mode === "edit") {
       const textarea = root.querySelector("textarea");
       if (textarea instanceof HTMLTextAreaElement) scrollTextareaToOffset(textarea, item.offset);
       // 即時預覽窗（精簡編輯器之外的編輯器）：同序的標題元素一併捲到
@@ -493,7 +541,7 @@ function StudioInner({ researchId, project, completed }: ResearchPanelProps) {
         .querySelectorAll(".w-md-editor-preview h1, .w-md-editor-preview h2, .w-md-editor-preview h3, .w-md-editor-preview h4, .w-md-editor-preview h5, .w-md-editor-preview h6")
         [ordinal]?.scrollIntoView({ block: "start" });
     }
-  }, [scrollRequest, mode]);
+  }, [scrollRequest, mode, previewEpoch]);
 
   const selectSection = useCallback((item: OutlineItem) => {
     setMode((current) => (current === "diff" ? "preview" : current)); // Diff 沒有章節可捲：先回到預覽
@@ -570,7 +618,7 @@ function StudioInner({ researchId, project, completed }: ResearchPanelProps) {
     return mode === "edit" ? (
       <EditorArea value={text} onChange={edit} readOnly={readOnly} bytes={bytes} onNotify={notify} />
     ) : mode === "preview" ? (
-      <PrdPreview text={text} bytes={bytes} focusLine={scrollRequest?.item.line ?? null} />
+      <PrdPreview text={text} bytes={bytes} focusLine={scrollRequest?.item.line ?? null} onReady={onPreviewReady} />
     ) : (
       <PrdDiffView researchId={researchId} versions={versions} />
     );

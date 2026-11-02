@@ -27,17 +27,26 @@
   匯入到既有專案（`targetProjectId`、SDD 規格資訊與警告）、執行頁追溯覆蓋（諮詢）面板（200／404／非終態／無綁定）與 execute 201 的 `warnings[]`、
   監控頁 SDD 卡（專案模式 `?projectId=`、階段進度、ESCALATION 橫幅與兩段恢復指令的複製鈕；人工恢復後不誤報）。專案詳情的假後端是檔內自帶的 `SddProjectWorld`，執行與監控情境借用 `Engine`／`MonitorWorld`。
   設環境變數 `E2E_SHOTS_DIR` 才會把重點畫面存成 png（不進 repo）；情境數以 `--list` 現查。對 production 建置跑（`E2E_MODE=standalone`），並一律帶 `--output=<自己的暫存目錄>`，避免與別的 Playwright 行程共用、清掉 `test-results`。
+- `research-studio-perf.mock.spec.ts`（ResearchToPRD P0 PKG-FE-C；5 個）：研發工作流「PRD 工作室」的真瀏覽器驗證，假資料取 `tests/fixtures/research/**`（與 vitest 共用）。
+  ① AT-960-17-1 效能量測（200KB PRD）：輸入延遲 P95 小於 100 毫秒、Diff 計算小於 1 秒、預覽首次渲染不超過 2 秒三道門檻，量測值與機器規格落 `testInfo.outputPath` 的 JSON 與主控台的 `[perf]` 行；另一支量編輯器套件的輸入延遲隨文件大小成長，是 `RICH_EDIT_MAX_BYTES` 門檻的實測依據。
+  預覽的 Markdown 管線自 PKG-FE-D 起是非同步 chunk（不在 `/research/[researchId]` 的首屏路徑）；200KB 的夾具走精簡輸入框、編輯器套件（與它共用同一個 chunk）不會先載入，所以「預覽首次渲染」的第一次（冷啟動）含那個 chunk 的下載時間，其後為熱。
+  ② AT-960-16-1 版面（1440 三欄、1000 目錄收成圖示、600 分頁籤）與工作室面板級 axe 掃描（八個狀態，有負控）；③ AT-960-16-3 真函式庫的 Mermaid（合法圖、語法錯誤、含 script 與 click 回呼者不執行、不對外發請求）。
+  不需要後端、不連外網；一律對 production 建置跑（`E2E_MODE=standalone`）並帶 `--output=<自己的暫存目錄>`。
+- `a11y.mock.spec.ts`（既有；PKG-FE-D 起新增研發工作流的 3 個情境）：整頁 axe（WCAG 2.0／2.1 A／AA，零違規）——研發工作流清單 `/research`（ADMIN）、研究工作區 `/research/<id>` 的議題步（動態欄、證據矩陣表、技術優缺點矩陣）與 PRD 工作室步（1440 的編輯、預覽、Diff 三個模式，1000 目錄收合，600 分頁籤），
+  清單與議題步各掃 1440／1000／600 三個寬度。這把尺在 PKG-FE-D 抓到並修掉五步列「已完成」chip 的字色（主色字坐在頁面底色上只有 4.21:1，改用 `primary-strong`）；整頁掃描（而不只掃工作室面板）才看得到步驟列與清單徽章這類面板外的元件。
 
 ```bash
 (cd AgentConsole/frontend && npx playwright test tests/e2e/execute.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/dashboard.mock.spec.ts)
 (cd AgentConsole/frontend && npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts)
 (cd AgentConsole/frontend && E2E_MODE=standalone npx playwright test tests/e2e/p10-w115-sdd.mock.spec.ts --output=<自己的暫存目錄>/pw)
+(cd AgentConsole/frontend && npm run build && E2E_MODE=standalone E2E_WEB_PORT=3208 npx playwright test tests/e2e/a11y.mock.spec.ts tests/e2e/research-studio-perf.mock.spec.ts --output=<自己的暫存目錄>/pw)
 ```
 
 ```powershell
 Push-Location AgentConsole\frontend; npx playwright test tests/e2e/execute.mock.spec.ts tests/e2e/monitor.mock.spec.ts tests/e2e/dashboard.mock.spec.ts; Pop-Location
 Push-Location AgentConsole\frontend; npx playwright test tests/e2e/import.mock.spec.ts tests/e2e/settings.mock.spec.ts tests/e2e/notifications.mock.spec.ts; Pop-Location
 Push-Location AgentConsole\frontend; $env:E2E_MODE="standalone"; npx playwright test tests/e2e/p10-w115-sdd.mock.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
+Push-Location AgentConsole\frontend; npm run build; $env:E2E_MODE="standalone"; $env:E2E_WEB_PORT="3208"; npx playwright test tests/e2e/a11y.mock.spec.ts tests/e2e/research-studio-perf.mock.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
 ```
 
 寫 mock spec 的陷阱：Playwright 的 `getByLabel` 預設是**子字串**比對，而每列參數另有「重置：○○」「顯示：○○」按鈕，查輸入框要加 `{ exact: true }`；
