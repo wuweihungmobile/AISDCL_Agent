@@ -7,6 +7,7 @@ import { reviewConsequence } from "@/components/domain/execute/reviewHelp";
 import { GATE_LABEL } from "@/components/domain/import/gateErrors";
 import { SERVICE_LABEL, type ServiceState } from "@/hooks/useServiceStatus";
 import type { AlertRule, ExecutionStepStatus, GateName, GoalStatus, ImportStatus, ProjectStatus, ReviewDecision, ReviewKind, RunStatus, TaskStatus } from "@/lib/api/types";
+import { FLOW_PHASE_LABEL, FLOW_STATUS_LABEL } from "@/lib/domain/research";
 import { SDD_PHASE_LABEL } from "@/lib/domain/sdd";
 import { OBS_STATUS_OPTIONS, PROPOSAL_STATUS_OPTIONS, PROP_STATE_KEYS, propStatusClass, type ObsStatusClass, type PropStatusClass } from "@/lib/domain/si";
 import {
@@ -43,7 +44,7 @@ import { STATE_SOURCES, type StateSource } from "./stateSources";
 const ROOT = process.cwd();
 const rel = (file: string) => path.relative(ROOT, file).split(path.sep).join("/");
 
-/** 必備的 18 張表（PRD §8.2；只准增不准減）。 */
+/** 必備的 19 張表（PRD §8.2 的十八張加研發工作流的 researchFlow，TCS-ResearchToPRD-P0-20261102 §4.1 第 8 列；只准增不准減）。 */
 const REQUIRED_TABLE_IDS = [
   "projectStatus",
   "goalStatus",
@@ -63,6 +64,7 @@ const REQUIRED_TABLE_IDS = [
   "obsClass",
   "propClass",
   "propState",
+  "researchFlow",
 ] as const satisfies readonly StateTableId[];
 
 /** sddFsmState 的五個鍵（PRD §8.2 備註 2；無單一常數可現讀，只有子字串弱鎖）。 */
@@ -93,6 +95,11 @@ const UPSTREAM: Record<UpstreamId, Upstream> = {
   obsClass: { keys: () => optionKeys(OBS_STATUS_OPTIONS), label: optionLabel(OBS_STATUS_OPTIONS) },
   propClass: { keys: () => optionKeys(PROPOSAL_STATUS_OPTIONS), label: optionLabel(PROPOSAL_STATUS_OPTIONS) },
   propState: { keys: () => [...PROP_STATE_KEYS] },
+  // 研發工作流（TCS-ResearchToPRD-P0-20261102 §4.1 第 8 列）：上游是 lib/domain/research.ts 的兩張詞彙常數（flow_status 九值、flow_phase 十八值），測試內直接 import、不經 STATE_SOURCES
+  researchFlow: {
+    keys: () => [...Object.keys(FLOW_STATUS_LABEL), ...Object.keys(FLOW_PHASE_LABEL)],
+    label: (k) => (FLOW_STATUS_LABEL as Readonly<Record<string, string | undefined>>)[k] ?? (FLOW_PHASE_LABEL as Readonly<Record<string, string | undefined>>)[k],
+  },
 };
 const UPSTREAM_IDS = Object.keys(UPSTREAM) as UpstreamId[];
 

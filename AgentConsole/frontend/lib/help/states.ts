@@ -1,5 +1,6 @@
 /**
- * 狀態詞的白話釋義（TCS-PageHelp-20261027 C3、R-PH-08～R-PH-10；PRD §8.2、D-5、D-11）：十八張表，每張表**全站只寫一份**，頁檔只用表 id 引用（lib/help/<id>.ts 的 states）。
+ * 狀態詞的白話釋義（TCS-PageHelp-20261027 C3、R-PH-08～R-PH-10；PRD §8.2、D-5、D-11）：十九張表（十八張加 2026-11-02 研發工作流的 `researchFlow`，TCS-ResearchToPRD-P0-20261102 ⚖4），
+ * 每張表**全站只寫一份**，頁檔只用表 id 引用（lib/help/<id>.ts 的 states）。
  * 每列只有 `meaning`（這個狀態是什麼意思）與 `next`（通常的下一步）；**刻意沒有 label／name**——狀態名稱只取自既有常數表
  * （components/domain/help/stateSources.ts 的 STATE_SOURCES），說明不自持名稱，畫面改字說明就自動跟著改。
  *
@@ -14,7 +15,21 @@
  * `next` 的依據：專案、目標、任務取 PRD 附錄 B 的「可轉移至」；批次與審核取契約附錄 A；匯入取契約 §1.1；連線狀態取 hooks/useServiceStatus.ts 檔頭；
  * SDD 階段取契約 §3.1.5；提案狀態取 SelfImproving PRD §5.1.2。內容是否與出處一致沒有機械判準，由 SCG-4 人讀對照。
  */
-import type { AlertRule, ExecutionStepStatus, GateName, GoalStatus, ImportStatus, ProjectStatus, ReviewDecision, ReviewKind, RunStatus, TaskStatus } from "@/lib/api/types";
+import type {
+  AlertRule,
+  ExecutionStepStatus,
+  GateName,
+  GoalStatus,
+  ImportStatus,
+  ProjectStatus,
+  ResearchDerivedFlowPhase,
+  ResearchFlowPhase,
+  ResearchFlowStatus,
+  ReviewDecision,
+  ReviewKind,
+  RunStatus,
+  TaskStatus,
+} from "@/lib/api/types";
 import type { StateRow, StateTableId } from "./types";
 
 export const STATE_HELP = {
@@ -182,4 +197,37 @@ export const STATE_HELP = {
     "handed-off": { meaning: "這個提案不能由自動流程處理，已轉交給人工。", next: "請由人工接手處理，不需要再走自動流程。" },
     retired: { meaning: "提案已經退役，日後不再套用。根層目前不會產生這個狀態，畫面為日後預留。", next: "目前不會出現，不需要處理。" },
   } satisfies Readonly<Record<string, StateRow>>,
+
+  // ── 研發工作流 ──────────────────────────────────────────────────────────
+  // 一張表涵蓋兩組詞：流程狀態（九個，含衍生的「已暫停」）與流程階段（十八個，含五個衍生相態）；兩組的鍵不相交，鍵集合取自 lib/domain/research.ts 的 FLOW_STATUS_LABEL 與
+  // FLOW_PHASE_LABEL。型別鎖以兩組字面值聯集宣告：新增狀態或階段而這裡沒補，編譯即紅（第一道鎖；執行期雙向鎖在 stateKeys.test.ts）。
+  researchFlow: {
+    IDLE: { meaning: "目前沒有進行中的動作，工作流停在某一步等您操作。", next: "請依目前所在的步驟，按下一個動作。" },
+    RUNNING: { meaning: "引擎正在執行研究、草擬或審查等階段。", next: "做完會回到「閒置」，需要您核准時會變成「等待人工」。" },
+    WAITING_HUMAN: { meaning: "流程停下來等您決定，例如核准規格或處理審查結果。", next: "請在規格工作室核准或退回，系統不會自動往下走。" },
+    BLOCKED: { meaning: "流程被擋住了，例如資料庫暫時不能寫入。原因會顯示在頁面上方。", next: "排除原因後系統會自動補寫並繼續，必要時請重新整理。" },
+    ESCALATED: { meaning: "多次審查都沒過，系統不再自動重試，需要人來處理。", next: "請照升級區塊的指示處理，再按「我已恢復，繼續」，或請 ADMIN 換世代。" },
+    FAILED: { meaning: "這一步執行失敗，工作流沒有往前走。", next: "請看頁面上方的原因，修正後重試。" },
+    CANCELLED: { meaning: "進行中的階段被人停掉了，已經做完的部分仍然保留。", next: "需要時可以重新啟動同一個階段。" },
+    COMPLETED: { meaning: "整條工作流已經走完。", next: "不會再變動，可以查看交付的結果。" },
+    PAUSED: { meaning: "執行被暫停，進度先保留著。這是由系統即時推算的狀態，不會存進資料庫。", next: "繼續執行後會回到「執行中」。" },
+    INGESTED: { meaning: "議題剛建立，工作區與狀態機已準備好，還沒開始研究。", next: "按「啟動深研」開始蒐集來源。" },
+    RESEARCHING: { meaning: "引擎正在蒐集來源並整理證據。", next: "完成後會變成「證據已備妥」。" },
+    EVIDENCE_READY: { meaning: "證據矩陣已經達到門檻，可以開始草擬 PRD。", next: "按「生成 PRD 初稿」進入規格工作室。" },
+    DRAFTING: { meaning: "引擎或您正在撰寫 PRD 草稿。", next: "草稿存好後會送交四方審查。" },
+    REVIEWING: { meaning: "四位審查者正在各自評分。", next: "審查完成後會出現分數，通過就等待核准，沒通過則進入修訂。" },
+    REVISING: { meaning: "依審查指出的缺陷修改 PRD，修訂完會再審查一輪。", next: "最多審查三輪，第三次沒通過就會升級給人工。" },
+    GATE0_PENDING: { meaning: "審查已通過，等待 ADMIN 核准並凍結規格。", next: "請 ADMIN 在規格工作室核准或退回，等待太久會出現提醒。" },
+    FROZEN: { meaning: "規格已核准並凍結，不能再直接修改。", next: "之後要改規格，只能走規格變更流程。" },
+    ROUTING: { meaning: "正在決定規格要併入既有模組或另開新專案。", next: "完成後會變成「已分流」。" },
+    ROUTED: { meaning: "分流已完成，目標位置與分支都準備好了。", next: "接著可以草擬測試規格，再進入拆解與執行。" },
+    TCS_DRAFTING: { meaning: "正在草擬測試規格。", next: "草擬完會等您確認，確認後才能開始實作。" },
+    TCS_PENDING: { meaning: "測試規格已草擬完，等待人工確認。", next: "確認並凍結後，才會進入拆解與執行。" },
+    SCR_OPEN: { meaning: "已凍結的規格正在走變更流程。", next: "變更核准後會回到對應的步驟重新做。" },
+    BUILDING: { meaning: "正在把規格拆成任務，並交給執行引擎實作。這是由系統即時推算的相態，不會存進資料庫。", next: "完成後會進入交付，出錯時引擎會先自癒。" },
+    HEALING: { meaning: "有任務失敗，引擎正在自動重試與修正。這是由系統即時推算的相態，不會存進資料庫。", next: "修好會回到「建置中」，修不好會升級給人工。" },
+    AWAITING_HUMAN: { meaning: "執行中的任務需要人工審核才能繼續。這是由系統即時推算的相態，不會存進資料庫。", next: "請到執行中心處理待審核的項目。" },
+    RELEASE_PENDING: { meaning: "實作與驗證都完成了，等待建立發布標籤。這是由系統即時推算的相態，不會存進資料庫。", next: "請 ADMIN 確認後建立標籤，完成交付。" },
+    DELIVERED: { meaning: "整條工作流已經交付完成。這是由系統即時推算的相態，不會存進資料庫。", next: "不會再變動，可以查看交付的摘要。" },
+  } satisfies Record<ResearchFlowStatus | ResearchFlowPhase | ResearchDerivedFlowPhase, StateRow>,
 } satisfies Record<StateTableId, Readonly<Record<string, StateRow>>>;

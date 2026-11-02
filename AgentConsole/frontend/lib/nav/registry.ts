@@ -8,14 +8,18 @@
  *    PRD AC-SI-32-6 (f)；所以 `projects` 必須明寫自己的判斷式，並排除 execute／monitor 以免被它吃掉）；
  *  - `mobile` 為 false 的項在 <768 的底部 Tab 不顯示（元件以 `max-md:hidden` 隱藏，DOM 內仍在）；`mobile` 為 true 的項數不得超過 6；
  *  - `href` 為字串直取、為函式則以 `{ currentProjectId }` 呼叫（執行／監控都從專案進入，沒有專案時退回各自的入口頁 /execute、/monitor（Console PRD §0.8，2026-11-01））。
- * registry.test.ts 鎖：九列內容（一列停用、側欄顯示八項）、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變（差異明列於測試：未知路徑不再亮專案管理；執行／監控無專案時退回入口頁）。
+ * registry.test.ts 鎖：十列內容（一列停用、側欄顯示九項）、每列 href 對應存在的 app/**\/page.tsx、match 對代表路徑互斥、ToolsRegion 只消費、舊六項行為不變（差異明列於測試：未知路徑不再亮專案管理；執行／監控無專案時退回入口頁）。
  *
  * 導覽整併（2026-11-01；TCS-ConsoleNavConsolidation-20261101、Console PRD §0.7，掌舵者裁決）：`import` 列停用（`enabled: false`、不刪列），所以登記表仍九列、側欄顯示八項；
  * `settings` order 60→80、`sysadmin` order 65→75，顯示序為 儀表板 10、專案管理 20、執行中心 40、監控中心 50、議題中心 55、自我進化 70、系統管理 75、系統設定 80。
  * WHY 停用而不刪列：三份凍結 TCS 的「恰 N 項」與陣列索引陳述（`[2]` import、`[6]` self-improving、`[7]` issues、`[8]` sysadmin）全部維持真，`/import` 路由、match 認領與頁面說明不動；
  * 匯入改由專案管理頁右上的「BRD/PRD 匯入」按鈕進入，要把入口放回側欄只需把 `enabled` 改回 true。
+ *
+ * 研發工作流（2026-11-02；TCS-ResearchToPRD-P0-20261102 ⚖1、AT-960-18-1；PRD FR-R2P-21、ADR-003 D5）：第十列 `research` 加在陣列**末尾**（索引 9；原九列的索引與欄位不變），
+ * order 35 是原先的空位（專案管理 20 與停用的匯入 30 之後、執行中心 40 之前），所以顯示序為 儀表板、專案管理、研發工作流、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定（側欄九項）。
+ * 底部 Tab 已有六項（`mobile` 為 true 的項數上限，含停用的匯入），所以 `mobile` 為 false（先例同 self-improving、issues、sysadmin）。
  */
-import { Activity, Database, Dna, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
+import { Activity, Database, Dna, FlaskConical, FolderOpen, LayoutDashboard, ListChecks, Play, Settings, Upload, type LucideIcon } from "lucide-react";
 
 import type { Role } from "@/lib/api/types";
 
@@ -111,6 +115,18 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [
     href: "/sysadmin",
     match: (pathname) => pathname === "/sysadmin" || pathname.startsWith("/sysadmin/"),
     order: 75,
+    enabled: true,
+    mobile: false,
+  },
+  // 第十項：研發工作流（TCS-ResearchToPRD-P0-20261102 ⚖1）。同樣加在陣列**末尾**（原九列的陣列位置與索引不變）；整條工作流只佔側欄一個入口，進入單一研究專案後以 `?step=` 切換五步面板，
+  // 不新增五個側欄入口。match 認 /research 與其子路徑（精確比對路徑段：/researchx、/research-x 不命中）。圖示 FlaskConical（與其餘九個圖示皆不重複）。
+  {
+    id: "research",
+    label: "研發工作流",
+    icon: FlaskConical,
+    href: "/research",
+    match: (pathname) => pathname === "/research" || pathname.startsWith("/research/"),
+    order: 35,
     enabled: true,
     mobile: false,
   },

@@ -279,13 +279,14 @@ describe("AT_952_1_3 導覽整併後真登記表渲染的側欄", () => {
   it("AT_952_1_3 真登記表、OPERATOR 渲染 ToolsRegion：主導覽恰八個連結、aria-label 序為 儀表板、專案管理、執行中心、監控中心、議題中心、自我進化、系統管理、系統設定；沒有名稱「BRD/PRD 匯入」的連結；max-md:hidden 恰在議題中心、自我進化、系統管理；ToolsRegion.tsx 不含匯入入口的任何字樣", () => {
     const view = renderTools("OPERATOR", "/");
     const links = navLinks();
-    expect(links).toHaveLength(8);
-    expect(labels()).toEqual(["儀表板", "專案管理", "執行中心", "監控中心", "議題中心", "自我進化", "系統管理", "系統設定"]);
+    // 2026-11-02（TCS-ResearchToPRD-P0-20261102 §4.1 第 2 列）：側欄多一項「研發工作流」（order 35、mobile 為 false）⇒ 九個連結，序為專案管理之後、執行中心之前
+    expect(links).toHaveLength(9);
+    expect(labels()).toEqual(["儀表板", "專案管理", "研發工作流", "執行中心", "監控中心", "議題中心", "自我進化", "系統管理", "系統設定"]);
     // 停用的 import 不渲染：沒有名稱「BRD/PRD 匯入」的連結，也沒有任何連結指向 /import
     expect(screen.queryByRole("link", { name: "BRD/PRD 匯入" })).toBeNull();
     expect(links.map((a) => a.getAttribute("href"))).not.toContain("/import");
     // <768 底部 Tab：max-md:hidden 恰在 mobile 為 false 的三項；其餘五項（儀表板、專案管理、執行中心、監控中心、系統設定）顯示
-    expect(links.filter(hiddenOnMobile).map((a) => a.getAttribute("aria-label"))).toEqual(["議題中心", "自我進化", "系統管理"]);
+    expect(links.filter(hiddenOnMobile).map((a) => a.getAttribute("aria-label"))).toEqual(["研發工作流", "議題中心", "自我進化", "系統管理"]);
     expect(links.filter((a) => !hiddenOnMobile(a)).map((a) => a.getAttribute("aria-label"))).toEqual(["儀表板", "專案管理", "執行中心", "監控中心", "系統設定"]);
     // ToolsRegion.tsx 零差異（G-C3 的 git diff 由主控核對）：登記表驅動，元件不得為了隱藏匯入入口而出現它的任何字樣
     const source = readFileSync(path.join(process.cwd(), "components", "layout", "ToolsRegion.tsx"), "utf-8");
@@ -296,5 +297,48 @@ describe("AT_952_1_3 導覽整併後真登記表渲染的側欄", () => {
     state.registry = REAL().map((e) => (e.id === "import" ? { ...e, enabled: true } : e));
     renderTools("OPERATOR", "/");
     expect(screen.getByRole("link", { name: "BRD/PRD 匯入" }), "對照組：啟用 import 後側欄多一項").toHaveAttribute("href", "/import");
+  });
+});
+
+// TCS-ResearchToPRD-P0-20261102 AT-960-18-4（AC-R2P-21-3；W-R9）：整條研發工作流只佔側欄一個入口「研發工作流」（order 35、mobile 為 false）：
+// 底部 Tab（<768）不含它、≥768 的兩種形態皆含；ToolsRegion.tsx 本身不認得它（零差異，AT-960-20-4 另以 git diff 核對）
+describe("AT_960_18_4 研發工作流入口（底部 Tab 不含、側欄含）", () => {
+  const hiddenOnMobile = (link: HTMLElement) => link.className.split(/\s+/).includes("max-md:hidden");
+  const ariaLabelOf = (link: HTMLElement) => link.getAttribute("aria-label");
+
+  it.each<Role>(["OPERATOR", "VIEWER"])(
+    "AT_960_18_4 %s 渲染 ToolsRegion：主導覽共 9 個連結、DOM 序依 order、max-md:hidden 恰在研發工作流與另外三項、底部 Tab 可見五項不變、研發工作流連結的 aria-label 與 title 為其 label",
+    (role) => {
+      renderTools(role, "/");
+      const links = navLinks();
+      expect(links).toHaveLength(9);
+      expect(links.map(ariaLabelOf)).toEqual(["儀表板", "專案管理", "研發工作流", "執行中心", "監控中心", "議題中心", "自我進化", "系統管理", "系統設定"]);
+      // 研發工作流自己的欄位取自登記表：order 35 夾在專案管理 20 與執行中心 40 之間（所以 DOM 序在兩者之間）
+      const research = REAL().find((e) => e.id === "research") as NavEntry;
+      expect([research.order, research.mobile, research.enabled]).toEqual([35, false, true]);
+      // <768 底部 Tab：max-md:hidden 恰在 mobile 為 false 的四項；可見的五項與導覽整併後相同
+      expect(links.filter(hiddenOnMobile).map(ariaLabelOf)).toEqual(["研發工作流", "議題中心", "自我進化", "系統管理"]);
+      expect(links.filter((a) => !hiddenOnMobile(a)).map(ariaLabelOf)).toEqual(["儀表板", "專案管理", "執行中心", "監控中心", "系統設定"]);
+      const link = screen.getByRole("link", { name: "研發工作流" });
+      expect(link).toHaveAttribute("aria-label", "研發工作流");
+      expect(link).toHaveAttribute("title", "研發工作流");
+      expect(link).toHaveAttribute("href", "/research");
+      expect(link.textContent).toBe("研發工作流");
+    },
+  );
+
+  it.each([
+    ["/research", ["研發工作流"]],
+    ["/research/abc", ["研發工作流"]],
+    ["/research/abc/extra", ["研發工作流"]],
+    ["/researchx", []],
+    ["/research-x", []],
+    ["/execute", ["執行中心"]],
+    ["/projects/p1/execute", ["執行中心"]],
+  ] as Array<[string, string[]]>)("AT_960_18_4 路徑 %s：aria-current 恰在 %j", (pathname, expected) => {
+    renderTools("OPERATOR", pathname);
+    const current = navLinks().filter((a) => a.hasAttribute("aria-current"));
+    expect(current.map(ariaLabelOf)).toEqual(expected);
+    for (const link of current) expect(link).toHaveAttribute("aria-current", "page");
   });
 });

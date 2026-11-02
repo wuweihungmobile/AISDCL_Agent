@@ -55,6 +55,32 @@ import type {
   ProjectResponse,
   ProjectSummary,
   ReportParams,
+  ResearchActionResult,
+  ResearchAllowlistEntry,
+  ResearchAllowlistPatch,
+  ResearchAllowlistRequest,
+  ResearchApproveRequest,
+  ResearchApproveResult,
+  ResearchCapabilities,
+  ResearchCreateRequest,
+  ResearchEventPage,
+  ResearchEvidenceMatrix,
+  ResearchFsmView,
+  ResearchPrdVersion,
+  ResearchProjectDetail,
+  ResearchProjectSummary,
+  ResearchReconcileResult,
+  ResearchRecordsAudit,
+  ResearchReinitRequest,
+  ResearchReinitResult,
+  ResearchReturnRequest,
+  ResearchReturnResult,
+  ResearchReviewRound,
+  ResearchSavePrdRequest,
+  ResearchSource,
+  ResearchStage,
+  ResearchStageStarted,
+  ResearchStartStageRequest,
   ReviewBody,
   SddBindingRequest,
   SddEngineStatus,
@@ -631,4 +657,145 @@ export function deleteIssuePriority(id: string): Promise<void> {
  */
 export function getBackupOverview(opts: Opts = {}): Promise<BackupOverview> {
   return apiRequest<BackupOverview>("/api/v1/sysadmin/backups", { signal: opts.signal });
+}
+
+// ── ResearchToPRD P0（研發工作流；TCS-ResearchToPRD-P0-20261102 ⚖12；契約 API_Contract_ResearchToPRD.md §1.1）──────────────────────────
+// 二十五個函式，函式名＝契約的 operationId（P1、P2 的端點不在這裡）。瀏覽器只呼叫 console-api 的 /api/v1/research/**，從不直連 Bridge；
+// 寫入端點的角色（OPERATOR 以上、ADMIN 專屬）由後端判，前端只做體驗層停用。本文原樣 `JSON.stringify`（鍵集合＝呼叫端給的）。
+const RESEARCH = "/api/v1/research";
+const researchProject = (id: string): string => `${RESEARCH}/projects/${seg(id)}`;
+
+/** 能力探針（API-RP-01）：無 `BRIDGE_DB_DSN` 時仍回 200 並以 `db: false` 說明（⚖6）；`mode` 為 `mock-only` 時 UI 停用「啟動深研」。 */
+export function getResearchCapabilities(opts: Opts = {}): Promise<ResearchCapabilities> {
+  return apiRequest<ResearchCapabilities>(`${RESEARCH}/capabilities`, { signal: opts.signal });
+}
+
+/**
+ * 研究專案清單（API-RP-02）：預設只列未封存的專案；`archived: true` 列已封存的（清單頁狀態篩選選「已封存」時用，讓 30 天內的專案可復原）。
+ * 契約的總表沒有寫出查詢參數的名稱，TCS AT-960-4-6 只說「封存後 GET 清單預設不含該專案、帶 archived 篩選可見」，這裡取字面：`?archived=true`
+ * （已列入交卷「勘誤候選」；後端定名不同時只需改這一處）；undefined 與 false 不進網址。
+ */
+export function listResearchProjects(opts: { archived?: boolean } & Opts = {}): Promise<ResearchProjectSummary[]> {
+  return apiRequest<ResearchProjectSummary[]>(`${RESEARCH}/projects`, { query: { archived: opts.archived === true ? true : undefined }, signal: opts.signal });
+}
+
+/** 建立研究專案（API-RP-03；OPERATOR 以上；201）：`slug` 重複 409 `slug_in_use`；初始化失敗不丟錯，由回應的 `flowStatus` 為 FAILED 表達。 */
+export function createResearchProject(body: ResearchCreateRequest): Promise<ResearchProjectDetail> {
+  return apiRequest<ResearchProjectDetail>(`${RESEARCH}/projects`, { method: "POST", body });
+}
+
+/** 專案詳情與流程脊（API-RP-04）：`flow` 取自後端衍生的結果，前端不重算。 */
+export function getResearchProject(id: string, opts: Opts = {}): Promise<ResearchProjectDetail> {
+  return apiRequest<ResearchProjectDetail>(researchProject(id), { signal: opts.signal });
+}
+
+/** 事件帳（API-RP-05）：`afterSeq` 為嚴格大於的游標、`limit` 單頁上限 500；`truncated` 為真時以回應的 `nextSeq` 續抓；undefined 不進網址。 */
+export function listResearchEvents(id: string, opts: { afterSeq?: number; limit?: number } & Opts = {}): Promise<ResearchEventPage> {
+  return apiRequest<ResearchEventPage>(`${researchProject(id)}/events`, { query: { afterSeq: opts.afterSeq, limit: opts.limit }, signal: opts.signal });
+}
+
+/** 來源清單（API-RP-07）。 */
+export function listResearchSources(id: string, opts: Opts = {}): Promise<ResearchSource[]> {
+  return apiRequest<ResearchSource[]>(`${researchProject(id)}/sources`, { signal: opts.signal });
+}
+
+/** 證據矩陣（API-RP-07）：`matrixVersion` 缺省取最新版（undefined 不進網址）。 */
+export function listResearchEvidence(id: string, opts: { matrixVersion?: number } & Opts = {}): Promise<ResearchEvidenceMatrix> {
+  return apiRequest<ResearchEvidenceMatrix>(`${researchProject(id)}/evidence`, { query: { matrixVersion: opts.matrixVersion }, signal: opts.signal });
+}
+
+/** PRD 版本清單（API-RP-08；不含 `content`）。 */
+export function listPrdVersions(id: string, opts: Opts = {}): Promise<ResearchPrdVersion[]> {
+  return apiRequest<ResearchPrdVersion[]>(`${researchProject(id)}/prd/versions`, { signal: opts.signal });
+}
+
+/** 單一 PRD 版本（API-RP-08；含 `content`）。 */
+export function getPrdVersion(id: string, versionNo: number, opts: Opts = {}): Promise<ResearchPrdVersion> {
+  return apiRequest<ResearchPrdVersion>(`${researchProject(id)}/prd/versions/${seg(String(versionNo))}`, { signal: opts.signal });
+}
+
+/** 存成新版本（API-RP-09；OPERATOR 以上；201）：`baseVersion` 須為目前 head，否則 409 `prd_version_conflict`；凍結後 409 `spec_frozen`。 */
+export function savePrdVersion(id: string, body: ResearchSavePrdRequest): Promise<ResearchPrdVersion> {
+  return apiRequest<ResearchPrdVersion>(`${researchProject(id)}/prd`, { method: "PUT", body });
+}
+
+/** 審查輪清單（API-RP-10；只有已完成評估的輪才有列）。 */
+export function listReviewRounds(id: string, opts: Opts = {}): Promise<ResearchReviewRound[]> {
+  return apiRequest<ResearchReviewRound[]>(`${researchProject(id)}/review-rounds`, { signal: opts.signal });
+}
+
+/** 單一審查輪（API-RP-10）：`roundNo` 指向沒有列的輪（進行中、取消、無效輸出）回 404 `research_not_found`。 */
+export function getReviewRound(id: string, roundNo: number, opts: Opts = {}): Promise<ResearchReviewRound> {
+  return apiRequest<ResearchReviewRound>(`${researchProject(id)}/review-rounds/${seg(String(roundNo))}`, { signal: opts.signal });
+}
+
+/**
+ * 啟動階段（API-RP-11；OPERATOR 以上；202）：`stage` 為 research、draft、review、revise、iterate（P0）；本文選填，沒給就送空物件。
+ * 「我已恢復，繼續」＝`revise` 帶 `afterEscalation: true`（Bridge 唯讀驗 FSM 已離開 ESCALATION*，不呼叫任何 FSM 寫入動詞）。
+ */
+export function startResearchStage(id: string, stage: ResearchStage, body: ResearchStartStageRequest = {}): Promise<ResearchStageStarted> {
+  return apiRequest<ResearchStageStarted>(`${researchProject(id)}/stages/${seg(stage)}`, { method: "POST", body });
+}
+
+/** Gate 0 核准（API-RP-12；僅 ADMIN）：`approver` 取 JWT subject，請求本文不收。非冪等：第二次呼叫 409 `fsm_state_conflict`。 */
+export function approveResearchBaseline(id: string, body: ResearchApproveRequest): Promise<ResearchApproveResult> {
+  return apiRequest<ResearchApproveResult>(`${researchProject(id)}/approve`, { method: "POST", body });
+}
+
+/** 外環 FSM 視圖（API-RP-13）：既有 SDD 狀態原樣，另有 `retryHistory.gates` 與 `humanReturnCount`。 */
+export function getResearchFsm(id: string, opts: Opts = {}): Promise<ResearchFsmView> {
+  return apiRequest<ResearchFsmView>(`${researchProject(id)}/fsm`, { signal: opts.signal });
+}
+
+/** 停止進行中的 stage run（API-RP-18；OPERATOR 以上）：被取消的審查 run 不寫審查輪列、不佔輪號（D-57）。 */
+export function cancelResearchStage(id: string): Promise<ResearchActionResult> {
+  return apiRequest<ResearchActionResult>(`${researchProject(id)}/cancel`, { method: "POST" });
+}
+
+/** 對帳（API-RP-18；OPERATOR 以上）：只報告、不修復任何一邊，結果追加一筆 `research.reconcile` 事件。 */
+export function reconcileResearch(id: string): Promise<ResearchReconcileResult> {
+  return apiRequest<ResearchReconcileResult>(`${researchProject(id)}/reconcile`, { method: "POST" });
+}
+
+/** 封存（軟刪除；API-RP-18；OPERATOR 以上）。 */
+export function archiveResearchProject(id: string): Promise<ResearchActionResult> {
+  return apiRequest<ResearchActionResult>(`${researchProject(id)}/archive`, { method: "POST" });
+}
+
+/** 復原已封存的專案（API-RP-18；OPERATOR 以上；30 天內）。 */
+export function restoreResearchProject(id: string): Promise<ResearchActionResult> {
+  return apiRequest<ResearchActionResult>(`${researchProject(id)}/restore`, { method: "POST" });
+}
+
+/** 入庫完整率（API-RP-19）：R1～R14 各類筆數與 `missing`。 */
+export function getResearchRecordsAudit(id: string, opts: Opts = {}): Promise<ResearchRecordsAudit> {
+  return apiRequest<ResearchRecordsAudit>(`${researchProject(id)}/records/audit`, { signal: opts.signal });
+}
+
+/**
+ * 重試初始化或換世代（API-RP-20；OPERATOR 以上）：本文不帶 `generation`＝重試初始化（冪等；只在初始化失敗時可呼叫，其餘 409 `stage_conflict`）；
+ * `generation: "next"` 加必填 `reason`＝換世代（僅 ADMIN；VIEWER 由授權鏈回 403 `ACCESS_DENIED`、OPERATOR 由服務層回 403 `research_write_forbidden`；D-60、D-64）。
+ */
+export function reinitResearchProject(id: string, body: ResearchReinitRequest = {}): Promise<ResearchReinitResult> {
+  return apiRequest<ResearchReinitResult>(`${researchProject(id)}/reinit`, { method: "POST", body });
+}
+
+/** 退回修改（API-RP-21；僅 ADMIN）：FSM 維持 HUMAN_PENDING、計數加一，與自動 FAIL 共用三次預算（D-50）；`reason` 必填。 */
+export function returnResearchPrd(id: string, body: ResearchReturnRequest): Promise<ResearchReturnResult> {
+  return apiRequest<ResearchReturnResult>(`${researchProject(id)}/return`, { method: "POST", body });
+}
+
+/** 研究來源 allowlist 清單（API-RP-22；VIEWER 以上）：含環境基底與 ADMIN 條目。 */
+export function listResearchAllowlist(opts: Opts = {}): Promise<ResearchAllowlistEntry[]> {
+  return apiRequest<ResearchAllowlistEntry[]>(`${RESEARCH}/allowlist`, { signal: opts.signal });
+}
+
+/** 新增 allowlist 條目（API-RP-22；僅 ADMIN；201）：Reddit 網域須 `tosAcknowledged: true`，否則 422 `terms_ack_required`。 */
+export function addResearchAllowlistEntry(body: ResearchAllowlistRequest): Promise<ResearchAllowlistEntry> {
+  return apiRequest<ResearchAllowlistEntry>(`${RESEARCH}/allowlist`, { method: "POST", body });
+}
+
+/** 停用或啟用 allowlist 條目（API-RP-22；僅 ADMIN；PATCH）：本文只准 `enabled`，含其他欄位回 422；條目不可刪。 */
+export function updateResearchAllowlistEntry(id: string, body: ResearchAllowlistPatch): Promise<ResearchAllowlistEntry> {
+  return apiRequest<ResearchAllowlistEntry>(`${RESEARCH}/allowlist/${seg(id)}`, { method: "PATCH", body });
 }

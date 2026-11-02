@@ -10,6 +10,7 @@
  */
 import { GATE_LABEL } from "@/components/domain/import/gateErrors";
 import { SERVICE_LABEL } from "@/hooks/useServiceStatus";
+import { FLOW_VOCABULARY_KEYS, flowVocabularyLabel } from "@/lib/domain/research";
 import { SDD_ESCALATION_STATES, SDD_PHASE_LABEL } from "@/lib/domain/sdd";
 import { OBS_STATUS_OPTIONS, PROPOSAL_STATUS_OPTIONS, PROP_STATE_KEYS } from "@/lib/domain/si";
 import {
@@ -67,4 +68,6 @@ export const STATE_SOURCES: Record<StateTableId, StateSource> = {
   propClass: fromOptions("提案分類", PROPOSAL_STATUS_OPTIONS),
   // 畫面印英文原值、沒有中文標籤常數：只准 raw
   propState: { title: "提案狀態", keys: PROP_STATE_KEYS },
+  // 研發工作流（TCS-ResearchToPRD-P0-20261102 ⚖4）：鍵取自 lib/domain/research.ts 的 FLOW_STATUS_LABEL 與 FLOW_PHASE_LABEL（兩組值域不相交），標籤同取自這兩張表（未登記的鍵顯示原值）
+  researchFlow: { title: "研發工作流的狀態與階段", keys: FLOW_VOCABULARY_KEYS, labelOf: flowVocabularyLabel },
 };

@@ -6,6 +6,7 @@
 /**
  * 說明項 id（PRD §4 的十六頁，加姊妹案「系統管理／資料庫備份」的 sysadmin、sysadmin-backup；PRD D-12）；姊妹案日後加成員。
  * 2026-11-01 加執行中心／監控中心的無專案入口頁 execute-entry、monitor-entry（TCS-ExecMonitorEntry-20261101 W-E3；與專案執行頁 execute、專案監控頁 monitor 各自獨立）。
+ * 2026-11-02 加研發工作流的兩頁 research（研究專案清單 `/research`）、research-workspace（研究工作區 `/research/[researchId]`，五步差異寫在 steps 欄；TCS-ResearchToPRD-P0-20261102 FR-R2P-21）。
  */
 export type HelpId =
   | "dashboard"
@@ -27,9 +28,11 @@ export type HelpId =
   | "self-improving"
   | "issues"
   | "sysadmin"
-  | "sysadmin-backup";
+  | "sysadmin-backup"
+  | "research"
+  | "research-workspace";
 
-/** 狀態表 id（PRD §8.2 的十八張）。 */
+/** 狀態表 id（PRD §8.2 的十八張，加研發工作流的 `researchFlow` 成十九張；`researchFlow` 取 camelCase 沿既有成員命名，D-49.6）。 */
 export type StateTableId =
   | "projectStatus"
   | "goalStatus"
@@ -48,7 +51,8 @@ export type StateTableId =
   | "serviceState"
   | "obsClass"
   | "propClass"
-  | "propState";
+  | "propState"
+  | "researchFlow";
 
 /** 欄位資料的來源，恰六類（AC-PH-05-4）。 */
 export type FieldSource = "您填寫或選擇" | "系統自動產生" | "執行引擎回報" | "自我進化帳本" | "系統參數" | "其他頁面帶入";

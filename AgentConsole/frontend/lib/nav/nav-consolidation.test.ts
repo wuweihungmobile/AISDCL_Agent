@@ -13,12 +13,16 @@ import { NAV_REGISTRY, activeNavEntry, navHref, visibleNavEntries, type NavEntry
  * 判定指令：npx vitest run lib/nav/nav-consolidation.test.ts -t "<AT 底線形>"
  * 期望值是 TCS 的字面事實（九列的逐欄值、八項顯示序），所以逐字釘；與 registry.test.ts 的「不釘項數」政策（OBS-SI-321）是兩件事——
  * 之後登記表在末尾多加新列，本檔「恰九列、恰八項」的期望要隨該功能的 TCS 勘誤一起改（那是有意識的變更）。
+ * 2026-11-02 已依此改過一次（TCS-ResearchToPRD-P0-20261102 §4.1 第 1 列）：末尾加第十列 `research`（order 35），所以現行期望是十列、側欄九項；各測試標題裡的「九列／八項」是整併當時的描述（標題與 AT id 不變），
+ * 現行期望值以測試內的斷言為準；AT_960_18_5 把這次改動本身釘成斷言。
  */
 const ROLES: ReadonlyArray<Role | undefined> = ["ADMIN", "OPERATOR", "VIEWER", undefined];
 const ids = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.id);
 const labelsOf = (list: ReadonlyArray<NavEntry>) => list.map((e) => e.label);
 
-/** 整併後的九列（陣列序不變）：[id, label, order, enabled, mobile]。 */
+/**
+ * 整併後的九列加 2026-11-02 研發工作流（TCS-ResearchToPRD-P0-20261102 §4.1 第 1 列；`research` 在陣列末尾、order 35）共十列（陣列序不變）：[id, label, order, enabled, mobile]。
+ */
 const ROWS: ReadonlyArray<readonly [id: string, label: string, order: number, enabled: boolean, mobile: boolean]> = [
   ["dashboard", "儀表板", 10, true, true],
   ["projects", "專案管理", 20, true, true],
@@ -29,9 +33,10 @@ const ROWS: ReadonlyArray<readonly [id: string, label: string, order: number, en
   ["self-improving", "自我進化", 70, true, false],
   ["issues", "議題中心", 55, true, false],
   ["sysadmin", "系統管理", 75, true, false],
+  ["research", "研發工作流", 35, true, false],
 ];
-/** 整併後側欄的顯示序（W-N2；不含停用的 import）。 */
-const VISIBLE_IDS = ["dashboard", "projects", "execute", "monitor", "issues", "self-improving", "sysadmin", "settings"];
+/** 側欄的顯示序（W-N2；不含停用的 import；研發工作流 order 35 排在專案管理之後、執行中心之前，共九項）。 */
+const VISIBLE_IDS = ["dashboard", "projects", "research", "execute", "monitor", "issues", "self-improving", "sysadmin", "settings"];
 /** 整併後底部 Tab 顯示的五項（mobile 為 true 的可見項；⚖3 不補第六項）。 */
 const MOBILE_LABELS = ["儀表板", "專案管理", "執行中心", "監控中心", "系統設定"];
 
@@ -77,6 +82,7 @@ describe("AT_952_1 登記表改值與側欄顯示序（W-N1、W-N2）", () => {
     expect(orderOf("settings")).toBe(80);
     expect(orderOf("sysadmin")).toBe(75);
     expect([orderOf("dashboard"), orderOf("projects"), orderOf("execute"), orderOf("monitor"), orderOf("issues"), orderOf("self-improving")]).toEqual([10, 20, 40, 50, 55, 70]);
+    expect(orderOf("research"), "研發工作流（ResearchToPRD P0）的 order 取原先的空位 35").toBe(35);
 
     // 唯一性與互異（整張登記表）
     expect(new Set(ids(NAV_REGISTRY)).size).toBe(NAV_REGISTRY.length);
@@ -88,18 +94,19 @@ describe("AT_952_1 登記表改值與側欄顯示序（W-N1、W-N2）", () => {
     for (const role of ROLES) {
       const visible = visibleNavEntries(NAV_REGISTRY, role);
       expect(ids(visible), String(role)).toEqual(VISIBLE_IDS);
-      expect(visible, String(role)).toHaveLength(8);
+      expect(visible, String(role)).toHaveLength(9);
       expect(ids(visible), `${String(role)}：停用的 import 不在可見項`).not.toContain("import");
     }
-    // 共用快照的顯示序（依 order 升冪）濾掉 enabled 為 false 的列後，就是上面那八項
+    // 共用快照的顯示序（依 order 升冪）濾掉 enabled 為 false 的列後，就是上面九項裡屬於已交付列的那八項（研發工作流是快照之後的新列，不在快照內；TCS-ResearchToPRD §4.1 第 1 列未列此行的連動）
     const enabledIds = new Set(DELIVERED_NAV_ROWS.filter((row) => row[4]).map((row) => row[0]));
-    expect(DELIVERED_DISPLAY_IDS.filter((id) => enabledIds.has(id))).toEqual(VISIBLE_IDS);
-    // 對照組（斷言有鑑別力）：import 若啟用，同一個函式就回九項、import 排在專案管理之後
+    expect(DELIVERED_DISPLAY_IDS.filter((id) => enabledIds.has(id))).toEqual(VISIBLE_IDS.filter((id) => enabledIds.has(id)));
+    // 對照組（斷言有鑑別力）：import 若啟用，同一個函式就回十項、import 排在專案管理之後、研發工作流之前
     const reEnabled = NAV_REGISTRY.map((e) => (e.id === "import" ? { ...e, enabled: true } : e));
     expect(ids(visibleNavEntries(reEnabled, "OPERATOR")), "對照組：啟用 import 後會多一項").toEqual([
       "dashboard",
       "projects",
       "import",
+      "research",
       "execute",
       "monitor",
       "issues",
@@ -141,5 +148,25 @@ describe("AT_952_1 登記表改值與側欄顯示序（W-N1、W-N2）", () => {
     for (const role of ROLES) {
       expect(labelsOf(visibleNavEntries(NAV_REGISTRY, role).filter((e) => e.mobile)), String(role)).toEqual(MOBILE_LABELS);
     }
+  });
+
+  // TCS-ResearchToPRD-P0-20261102 AT-960-18-5（AC-R2P-21-1）：本檔既有斷言依 §4.1 第 1 列只改了預期值（ROWS 十列、VISIBLE_IDS 九項、`toHaveLength(9)`、對照組的期望序）；
+  // 這一個 it 把「改了什麼」本身釘成斷言：十列、九項顯示序、對照組序，以及去掉研發工作流後恰是整併後的八項。ToolsRegion 渲染的那一半在 ToolsRegion.test.tsx 的 AT_960_18_4。
+  it("AT_960_18_5 既有導覽整併測試只改預期值：登記表十列、側欄九項（研發工作流在專案管理之後、執行中心之前）；對照組啟用 import 後 research 在 import 之後、execute 之前；去掉 research 即整併後的八項", () => {
+    expect(NAV_REGISTRY).toHaveLength(10);
+    expect(ROWS).toHaveLength(10);
+    expect(ids(NAV_REGISTRY)[9], "新列加在陣列末尾").toBe("research");
+    expect(VISIBLE_IDS).toHaveLength(9);
+    for (const role of ROLES) expect(ids(visibleNavEntries(NAV_REGISTRY, role)), String(role)).toEqual(VISIBLE_IDS);
+    const reEnabled = ids(
+      visibleNavEntries(
+        NAV_REGISTRY.map((e) => (e.id === "import" ? { ...e, enabled: true } : e)),
+        "OPERATOR",
+      ),
+    );
+    expect(reEnabled).toHaveLength(10);
+    expect(reEnabled.indexOf("research"), "對照組：research 緊接在 import 之後").toBe(reEnabled.indexOf("import") + 1);
+    expect(reEnabled.indexOf("execute"), "對照組：execute 緊接在 research 之後").toBe(reEnabled.indexOf("research") + 1);
+    expect(VISIBLE_IDS.filter((id) => id !== "research")).toEqual(["dashboard", "projects", "execute", "monitor", "issues", "self-improving", "sysadmin", "settings"]);
   });
 });

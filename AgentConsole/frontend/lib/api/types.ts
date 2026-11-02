@@ -568,3 +568,300 @@ export type BackupJobPage = S["BackupJobPage"];
 /** `POST /backups/jobs` 的 202 回應；請求本文是 `{ type: "full" | "diff" | "verify", confirm: true }`。 */
 export type BackupJobAccepted = S["BackupJobAccepted"];
 export type BackupJobStatus = BackupJob["status"];
+
+// ── ResearchToPRD P0（研發工作流；TCS-ResearchToPRD-P0-20261102；契約 API_Contract_ResearchToPRD.md §1.3、§1.4）──────────────────────────
+// `schema.d.ts` 由 PKG-API 收尾重產，這裡依契約手寫（鍵名 camelCase；時間為 ISO-8601 含 offset）：契約的 DTO 名稱加 `Research` 前綴避免撞名，
+// 對照＝ResearchProjectSummary／ResearchProjectDetail／ResearchEvent／SourceDto→ResearchSource／EvidenceItemDto→ResearchEvidenceItem／
+// EvidenceMatrixDto→ResearchEvidenceMatrix／PrdVersionDto→ResearchPrdVersion／ReviewRoundDto→ResearchReviewRound／ResearchFsmViewDto→ResearchFsmView／
+// AllowlistEntryDto→ResearchAllowlistEntry／CapabilitiesDto→ResearchCapabilities／RecordsAuditDto→ResearchRecordsAudit／ReconcileResult→ResearchReconcileResult。
+// 值域日後新增的值要原樣顯示、不崩潰，所以 DTO 內的相態欄（flowPhase、effective.phase）一律放寬成 string；封閉詞彙另由 lib/domain/research.ts 登記。
+/** 工作流五步（`flow_step`；固定順序 topic→deliver）。 */
+export type ResearchFlowStepId = "topic" | "studio" | "route" | "build" | "deliver";
+/** `flow_status`：DB 游標八值加衍生的 `PAUSED`（只出現在 `flow.effective`，D-20 SA-06）。游標值一律由 Bridge 寫入並原樣取用，前端不自行衍生（D-59(3)）。 */
+export type ResearchFlowStatus = "IDLE" | "RUNNING" | "WAITING_HUMAN" | "BLOCKED" | "ESCALATED" | "FAILED" | "CANCELLED" | "COMPLETED" | "PAUSED";
+/** `flow_phase` 的十三個 DB 游標值（Architecture §11.3′ 的 CHECK 列舉）。 */
+export type ResearchFlowPhase =
+  "INGESTED" | "RESEARCHING" | "EVIDENCE_READY" | "DRAFTING" | "REVIEWING" | "REVISING" | "GATE0_PENDING" | "FROZEN" | "ROUTING" | "ROUTED" | "TCS_DRAFTING" | "TCS_PENDING" | "SCR_OPEN";
+/** 步驟 3 之後由 `ResearchFlowPolicy` 自 FSM 與 `execution_runs` 衍生的相態（不落 DB；TCS AT-960-18-3 列的五個）。 */
+export type ResearchDerivedFlowPhase = "BUILDING" | "HEALING" | "AWAITING_HUMAN" | "RELEASE_PENDING" | "DELIVERED";
+export type ResearchFlowStepState = "DONE" | "CURRENT" | "BLOCKED" | "TODO";
+export type ResearchFlowStep = { id: ResearchFlowStepId; label: string; state: ResearchFlowStepState; phase?: string; blockedReason?: string };
+export type ResearchFlow = {
+  currentStep: ResearchFlowStepId;
+  furthestStep: ResearchFlowStepId;
+  /** 固定 5 項，順序＝topic→deliver */
+  steps: ResearchFlowStep[];
+  /** 步驟 3 之後由 `ResearchFlowPolicy` 衍生；步驟 1～3 取 DB 游標 */
+  effective: { step: ResearchFlowStepId; phase: string; status: ResearchFlowStatus; detail: string };
+  /** 例 `/research/<id>?step=studio` */
+  resumeHref: string;
+};
+export type ResearchDepthLevel = "QUICK" | "STANDARD" | "DEEP";
+export type ResearchTargetScopeHint = "AISDLC_MODULE" | "STANDALONE_PROJECT" | "UNDECIDED";
+
+export type ResearchProjectSummary = {
+  id: string;
+  /** 顯示編號 `RP-NNNN`（DB 序列配號） */
+  rpNo: string;
+  slug: string;
+  title: string;
+  depthLevel: string;
+  targetScope: string;
+  flowStep: ResearchFlowStepId;
+  flowPhase: string;
+  flowStatus: ResearchFlowStatus;
+  /** 失敗時 `init_failed:<步驟>`；其餘為自由說明 */
+  flowDetail: string;
+  consoleProjectId: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+};
+export type ResearchLastReview = { round: number; weightedScore: number | null; minDimensionScore: number | null; passed: boolean; escalated: boolean };
+export type ResearchProjectDetail = ResearchProjectSummary & {
+  topic: string;
+  scope: Record<string, unknown>;
+  scopeRev: number;
+  fsmProject: string;
+  fsmGeneration: number;
+  flow: ResearchFlow;
+  counts: { sources: number; evidenceItems: number; prdVersions: number; reviewRounds: number; openDefects: number };
+  headPrdVersion: number | null;
+  /** 最新一個已完成的輪（D-57：審查輪列只在輪有結果時一次寫入） */
+  lastReview: ResearchLastReview | null;
+  parentResearchId: string | null;
+};
+
+export type ResearchEvent = {
+  seq: number;
+  eventType: string;
+  step: ResearchFlowStepId;
+  actor: string;
+  refKind: string | null;
+  refId: string | null;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+};
+/** `GET …/events?afterSeq=&limit=`（單頁上限 500）：`truncated` 為真時以 `nextSeq` 續抓。 */
+export type ResearchEventPage = { items: ResearchEvent[]; nextSeq: number | null; truncated: boolean };
+
+export type ResearchSourceLayer = "ACADEMIC" | "INDUSTRY" | "OSS" | "COMMUNITY";
+export type ResearchSourceFetch = {
+  fetchNo: string;
+  method: string;
+  observedBy: "BRIDGE" | "AGENT_DECLARED";
+  /** 解析不出 host 的被拒外呼記保留字 `(unparsed)`（TCS §5.1） */
+  host: string;
+  httpStatus: number | null;
+  outcome: string;
+  rawSha256: string | null;
+  rawBytes: number | null;
+  fetchedAt: string;
+};
+export type ResearchSource = {
+  sourceNo: string;
+  layer: ResearchSourceLayer;
+  tier: "T1" | "T2" | "T3";
+  verification: "V1" | "V2" | "V3";
+  anchorKind: "URL" | "DOI" | "COMMIT";
+  url: string;
+  doi: string | null;
+  gitCommit: string | null;
+  title: string;
+  authorsOrg: string;
+  publishedAt: string | null;
+  sourceType: string;
+  licenseSpdx: string | null;
+  licenseNote: string;
+  clueOnly: boolean;
+  fetches: ResearchSourceFetch[];
+};
+export type ResearchEvidenceItem = {
+  evidenceNo: string;
+  sourceNo: string;
+  candidate: string | null;
+  claim: string;
+  f1Mechanism: string;
+  f2Evidence: string;
+  f3Critique: string;
+  f4RiskTags: string[];
+  f5Applicability: Record<string, { grade: "A" | "M" | "N"; reason: string }>;
+  f6Limits: string;
+  f7Verification: "V1" | "V2" | "V3";
+  strength: "STRONG" | "MEDIUM" | "WEAK" | "CANDIDATE";
+  /** Bridge 入庫時計算；PRD 不得引用 */
+  unanchored: boolean;
+  matrixVersion: number;
+  scopeRev: number;
+};
+export type ResearchCounterEvidence = {
+  evidenceNo: string;
+  searchId: string | null;
+  conclusion: "WEAKEN" | "LIMIT" | "IRRELEVANT" | "NOT_FOUND" | "NOT_SEARCHED";
+  sourceNo: string | null;
+  note: string;
+};
+export type ResearchHonestBounds = { notFound: Array<{ query: string; date: string; result: string }>; summaryOnly: string[]; notReadFully: string[] };
+export type ResearchSearchLog = { searchNo: string; layer: ResearchSourceLayer; tool: "WebSearch" | "WebFetch"; query: string; at: string; resultUrls: string[] };
+export type ResearchEvidenceMatrix = {
+  matrixVersion: number;
+  scopeRev: number;
+  sha256: string;
+  items: ResearchEvidenceItem[];
+  counterEvidence: ResearchCounterEvidence[];
+  honestBounds: ResearchHonestBounds;
+  searchLog: ResearchSearchLog[];
+};
+
+export type ResearchPrdVersion = {
+  versionNo: number;
+  semver: string;
+  kind: "DRAFT" | "BASELINE";
+  authorKind: "AGENT" | "HUMAN";
+  author: string;
+  parentVersionNo: number | null;
+  sha256: string;
+  bytes: number;
+  evidenceRefs: string[];
+  changeSummary: string;
+  createdAt: string;
+  /** 只有單筆端點（`getPrdVersion`）回 */
+  content?: string;
+};
+
+export type ResearchReviewDimension = "ARCHITECTURE" | "PRODUCT" | "QA" | "SECURITY";
+export type ResearchReviewScore = {
+  dimension: ResearchReviewDimension;
+  weight: number;
+  /** 整數 0～100 */
+  score: number;
+  /** PRODUCT＝`pm-po`（D-44） */
+  agentId: string;
+  /** 只有 SECURITY：compliance-officer，其餘 null */
+  assistAgentId: string | null;
+  assistAgentYamlSha256: string | null;
+  agentYamlSha256: string;
+  personaSha256: string;
+  summary: string;
+};
+export type ResearchDefect = {
+  defectNo: string;
+  dimension: string;
+  severity: "P1" | "P2" | "P3" | "P4";
+  code: string;
+  prdAnchor: string;
+  description: string;
+  suggestion: string;
+  evidenceRefs: string[];
+  status: "OPEN" | "FIXED" | "WAIVED" | "SUPERSEDED" | "REGRESSED";
+  fixedInVersionNo: number | null;
+  /** 該版本的 semver（審查卡的 `resolved_in`） */
+  resolvedIn: string | null;
+  waiver: { by: string; reason: string; at: string } | null;
+};
+export type ResearchPrecheck = { passed: boolean; checks: Array<{ id: "SLV-001" | "SLV-002" | "SLV-003" | "AMBIGUITY"; passed: boolean; detail: string }> };
+export type ResearchReviewConditions = { precheckPassed: boolean; weightedGeThreshold: boolean | null; allDimensionsGeFloor: boolean | null; noOpenP1: boolean };
+/**
+ * 審查輪（D-57：輪列只在輪有結果時一次寫入，所以沒有 `status`）。`weightedScore`（NUMERIC(5,2) 原樣）顯示用 `toFixed(2)`，
+ * 比較一律用整數 `Math.round(weightedScore * 100)` 對 8500，不得先四捨五入到一位（D-42）。
+ */
+export type ResearchReviewRound = {
+  roundNo: number;
+  /** 輪列的 `fsm_generation`，供 UI 只比對目前世代（D-59(4)） */
+  fsmGeneration: number;
+  prdVersionNo: number;
+  prdVersion: string;
+  triggerKind: "AUTO" | "MANUAL" | "POST_HUMAN";
+  precheck: ResearchPrecheck;
+  weightedScore: number | null;
+  threshold: number;
+  floorScore: number;
+  minDimensionScore: number | null;
+  conditions: ResearchReviewConditions;
+  openP1Count: number;
+  passed: boolean;
+  verdict: "PASS" | "REVISE" | "ESCALATE";
+  /** `triggerKind=POST_HUMAN` 且通過時為 null（HUMAN_PENDING 下不呼叫 `gate … PASS`，D-50） */
+  fsmGateResult: "PASS" | "FAIL" | null;
+  /** gate FAIL 輪＝其回傳的 `retry_count`；gate PASS 輪＝0；POST_HUMAN 通過輪＝null（D-61） */
+  fsmRetryCount: number | null;
+  escalated: boolean;
+  scores: ResearchReviewScore[];
+  defects: ResearchDefect[];
+  startedAt: string;
+  finishedAt: string;
+};
+/** API-RP-13：研究面 FSM 視圖＝既有 `SddFsmState` 原樣、只增不減，再加 `retryHistory.gates` 與 `humanReturnCount`（D-59(4)）。 */
+export type ResearchFsmView = SddFsmState & {
+  retryHistory: { gates: Record<string, { currentCount: number; entries: number }> };
+  /** 目前 `fsm_generation` 內 `research_gate_decisions` 中 gate=GATE0、decision=CHANGES 的筆數 */
+  humanReturnCount: number;
+};
+export type ResearchApproveResult = { gateDecisionId: string; stage: string; specDocDigests: Record<string, string>; fsmState: string };
+export type ResearchReturnResult = { gateDecisionId: string; fsmRetryCount: number; escalated: boolean };
+
+export type ResearchAllowlistEntry = {
+  id: string;
+  listKind: "FETCH" | "WEB";
+  host: string;
+  layer: string;
+  purpose: string;
+  tosNote: string;
+  minIntervalSeconds: number;
+  enabled: boolean;
+  tosAcknowledged: boolean;
+  source: "ENV" | "ADMIN";
+  addedBy: string | null;
+  addedAt: string | null;
+};
+export type ResearchCapabilities = {
+  /** `mock-only` 時 UI 停用「啟動深研」（伺服器端不拒絕，供 API 直呼驗證；W-R13） */
+  mode: "local" | "mock-only";
+  db: boolean;
+  claudeCli: { ok: boolean; version?: string };
+  ghCli: { ok: boolean; authenticated: boolean };
+  git: { ok: boolean; version?: string };
+  researchRoot: string;
+  scaffoldRoot: string | null;
+  scaffoldTemplates: string[];
+  repoWritable: boolean;
+  webLayerEnabled: boolean;
+  fetchHosts: string[];
+};
+/** R1～R14 各類筆數；`missing` 為筆數 0 且該類不屬「允許為 0」（R10、R12）者。 */
+export type ResearchRecordsAudit = { classes: Array<{ id: string; name: string; count: number }>; missing: string[] };
+export type ResearchReconcileCheck = {
+  name: string;
+  status: "ok" | "drift" | "NOT_EVALUABLE";
+  drift?: Array<{ kind: string; path: string; expectedSha256?: string; actualSha256?: string }>;
+};
+/** 對帳只報告、不修復（AC-R2P-23-1）：`consistent` 僅在全部 check 為 ok 時為真。 */
+export type ResearchReconcileResult = { consistent: boolean; checks: ResearchReconcileCheck[] };
+
+/** API-RP-11 的 `stage`（`tcs-draft` 屬 P1，P0 不送）。 */
+export type ResearchStage = "research" | "draft" | "review" | "revise" | "iterate" | "tcs-draft";
+/** 請求本文：`afterEscalation` 為「我已恢復，繼續」（Bridge 唯讀驗 FSM 已離開 ESCALATION*，不呼叫任何 FSM 寫入動詞）。 */
+export type ResearchStartStageRequest = { auto?: boolean; note?: string; afterEscalation?: boolean };
+export type ResearchStageStarted = { stageRunId: string; flowPhase: string; flowStatus: ResearchFlowStatus };
+export type ResearchCreateScope = {
+  layers: { academic: boolean; industry: boolean; oss: boolean; community: boolean };
+  techStack: string;
+  inScope: string[];
+  outOfScope: string[];
+  recencyYears: 1 | 2 | 3;
+  applicabilityAxes: string[];
+};
+export type ResearchCreateRequest = { slug: string; title: string; topic: string; scope: ResearchCreateScope; depthLevel: ResearchDepthLevel; targetScopeHint?: ResearchTargetScopeHint };
+export type ResearchSavePrdRequest = { baseVersion: number; content: string; changeSummary?: string };
+/** `prdVersion` 的型別契約未定（§1.4 只寫「須為 head 且有 passed 輪」）：schema.d.ts 重產後收斂。 */
+export type ResearchApproveRequest = { prdVersion: string | number; expectedDigests: Record<string, string>; reason?: string };
+export type ResearchReturnRequest = { reason: string };
+/** 無 `generation`＝重試初始化（冪等）；`generation: "next"`＝換世代（僅 ADMIN，`reason` 必填 1～500 字；D-60、D-64）。 */
+export type ResearchReinitRequest = { generation?: "next"; reason?: string };
+export type ResearchReinitResult = { flow: ResearchFlow; fsmProject?: string; fsmGeneration?: number; gateDecisionId?: string };
+export type ResearchAllowlistRequest = { listKind: "FETCH" | "WEB"; host: string; layer: string; purpose: string; tosNote: string; minIntervalSeconds: number; tosAcknowledged: boolean };
+/** `PATCH …/allowlist/<id>`：只准改 `enabled`（本文含其他欄位回 422）。 */
+export type ResearchAllowlistPatch = { enabled: boolean };
+/** 取消、封存、復原的回應本文契約未定形狀（只保證 200）：呼叫端只看成功與否。 */
+export type ResearchActionResult = Record<string, unknown>;

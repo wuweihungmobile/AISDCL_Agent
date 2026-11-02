@@ -25,6 +25,8 @@ import { monitorEntry } from "./monitor-entry";
 import { projectDetail } from "./project-detail";
 import { projectForm } from "./project-form";
 import { projects } from "./projects";
+import { research } from "./research";
+import { researchWorkspace } from "./research-workspace";
 import { selfImproving } from "./self-improving";
 import { settings } from "./settings";
 import { sysadmin } from "./sysadmin";
@@ -56,6 +58,8 @@ export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = {
   issues,
   sysadmin,
   "sysadmin-backup": sysadminBackup,
+  research,
+  "research-workspace": researchWorkspace,
 };
 
 /**
@@ -63,6 +67,8 @@ export const HELP_PAGES: Readonly<Partial<Record<HelpId, PageHelp>>> = {
  * 2026-10-28 姊妹案「系統管理／資料庫備份」（TCS-SysAdminBackup-20261027 AT-BK-01-2-4、D-PH-14）新增 /sysadmin、/sysadmin/backup 兩頁，先以佔位列入 pending
  * （同 commit 上修 registry.test.ts 的 PENDING_CEILING 0→2）；2026-10-31 每頁說明補頁棒把兩頁寫實、移進 HELP_PAGES，天花板下修回 0，清單再度為空（十八頁全數已寫）。
  * 2026-11-01 執行中心／監控中心的無專案入口頁（TCS-ExecMonitorEntry-20261101 W-E3）新增 /execute、/monitor 兩頁，直接寫實、不走 pending（天花板維持 0），清單仍為空（二十頁全數已寫）。
+ * 2026-11-02 研發工作流（TCS-ResearchToPRD-P0-20261102 AT-960-18-2）新增 /research、/research/[researchId] 兩條路由與說明（research、research-workspace），直接寫實、不走 pending（天花板維持 0），
+ * 清單仍為空（二十二頁全數已寫；HELP_ROUTES 二十五條）。
  */
 export const PENDING_HELP_PAGES: readonly HelpId[] = [];
 
@@ -70,8 +76,9 @@ export const PENDING_HELP_PAGES: readonly HelpId[] = [];
  * `states` 為空的頁（沒有會變動的狀態；對話框的狀態段只顯示固定一句）。與頁內容雙向相等：states 為空者必在這裡，這裡的頁 states 必為空。
  * sysadmin、sysadmin-backup 的狀態詞（成功、失敗、進行中、中斷、從未執行、逾期等）是畫面私有字樣、沒有可對應 StateTableId 的常數表，改寫在欄位表的釋義裡（各頁檔頭註解有說明）。
  * execute-entry、monitor-entry（無專案入口頁）只有標題、說明、兩個動作與專案清單，沒有會變動的狀態詞。
+ * research（研究專案清單）的狀態徽章是畫面私有字樣（沒有可對應 StateTableId 的常數表），改寫在欄位表的釋義裡；工作流的狀態與階段詞彙在 research-workspace 引用的 researchFlow 表。
  */
-export const NO_STATE_PAGES: readonly HelpId[] = ["project-form", "task-form", "settings", "sysadmin", "sysadmin-backup", "execute-entry", "monitor-entry"];
+export const NO_STATE_PAGES: readonly HelpId[] = ["project-form", "task-form", "settings", "sysadmin", "sysadmin-backup", "execute-entry", "monitor-entry", "research"];
 
 /** 路由樣板→說明 id（含 pending 頁的路由；不含 `/login`：登入頁沒有說明）。樣板是 Next 的資料夾名，根路由為 `/`。 */
 export const HELP_ROUTES: Readonly<Record<string, HelpId>> = {
@@ -98,6 +105,8 @@ export const HELP_ROUTES: Readonly<Record<string, HelpId>> = {
   "/issues": "issues",
   "/sysadmin": "sysadmin",
   "/sysadmin/backup": "sysadmin-backup",
+  "/research": "research",
+  "/research/[researchId]": "research-workspace",
 };
 
 const DYNAMIC_SEGMENT = /^\[[^\]]+\]$/;

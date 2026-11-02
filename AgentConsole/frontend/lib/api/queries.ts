@@ -15,10 +15,15 @@ import { SI_CONSOLE_WRITES_LIMIT, SI_PAGE_LIMIT } from "@/lib/domain/si";
 import { isRunTerminal } from "@/lib/domain/status";
 import {
   acknowledgeAlert,
+  addResearchAllowlistEntry,
+  approveResearchBaseline,
+  archiveResearchProject,
   cancelExecution,
+  cancelResearchStage,
   confirmImport,
   createGoal,
   createProject,
+  createResearchProject,
   createTask,
   deleteGoal,
   deleteIssuePriority,
@@ -39,8 +44,14 @@ import {
   getIssues,
   getNotificationSummary,
   getPendingSignoffs,
+  getPrdVersion,
   getProject,
   getProjectMetrics,
+  getResearchCapabilities,
+  getResearchFsm,
+  getResearchProject,
+  getResearchRecordsAudit,
+  getReviewRound,
   getSddEngineStatus,
   getSiConsoleWrites,
   getSiEvents,
@@ -58,10 +69,17 @@ import {
   listExecutionSteps,
   listGoals,
   listImports,
+  listPrdVersions,
   listProjectAlerts,
   listProjectExecutions,
   listProjectLogs,
   listProjects,
+  listResearchAllowlist,
+  listResearchEvents,
+  listResearchEvidence,
+  listResearchProjects,
+  listResearchSources,
+  listReviewRounds,
   listSettings,
   listSettingsByCategory,
   listSettingsHistory,
@@ -73,23 +91,30 @@ import {
   postSiObservationClose,
   postSiObservationValidate,
   putIssuePriority,
+  reconcileResearch,
+  reinitResearchProject,
   rejectImport,
   reorderGoals,
   resetCategory,
   resetSetting,
   restoreExecution,
   restoreProject,
+  restoreResearchProject,
   resumeExecution,
   retryTask,
+  returnResearchPrd,
   reviewExecution,
+  savePrdVersion,
   signoffGoal,
   signoffImport,
   signoffProject,
   signoffTask,
+  startResearchStage,
   testConnection,
   updateGoal,
   updateProject,
   updateProjectSddBinding,
+  updateResearchAllowlistEntry,
   updateSetting,
   updateTask,
   updateTokenGuard,
@@ -122,6 +147,18 @@ import type {
   ParseResult,
   ProjectDetail,
   ReportParams,
+  ResearchAllowlistPatch,
+  ResearchAllowlistRequest,
+  ResearchApproveRequest,
+  ResearchCreateRequest,
+  ResearchEvent,
+  ResearchProjectDetail,
+  ResearchReconcileResult,
+  ResearchReinitRequest,
+  ResearchReturnRequest,
+  ResearchSavePrdRequest,
+  ResearchStage,
+  ResearchStartStageRequest,
   ReviewDecision,
   SddEngineStatus,
   SddFreezeRequest,
@@ -194,6 +231,29 @@ export const qk = {
   issue: (id: string) => ["issues", "detail", id] as const,
   /** 系統管理／資料庫備份（TCS-SysAdminBackup-20261027）：總覽掛在 ["backup"] 底下，階段二的工作紀錄與單筆工作也會掛在這裡。 */
   backupOverview: ["backup", "overview"] as const,
+  /**
+   * 研發工作流（ResearchToPRD P0；TCS-ResearchToPRD-P0-20261102）：全部掛在 ["research"] 底下。專案級資料（詳情、事件、來源、證據、PRD、審查、FSM、入庫完整率、對帳結果）
+   * 掛在 ["research", "project", id] 底下，寫入成功後以 invalidateResearch 一次標為過期；清單、能力探針、allowlist 各自一份。
+   */
+  researchAll: ["research"] as const,
+  researchCapabilities: ["research", "capabilities"] as const,
+  researchAllowlist: ["research", "allowlist"] as const,
+  researchProjects: ["research", "projects"] as const,
+  /** 已封存清單（`researchProjects` 的子鍵：前綴失效時兩份一起重抓） */
+  researchProjectsArchived: ["research", "projects", "archived"] as const,
+  researchProjectAll: (id: string) => ["research", "project", id] as const,
+  researchProject: (id: string) => ["research", "project", id, "detail"] as const,
+  researchEvents: (id: string) => ["research", "project", id, "events"] as const,
+  researchSources: (id: string) => ["research", "project", id, "sources"] as const,
+  researchEvidence: (id: string, matrixVersion: number | null) => ["research", "project", id, "evidence", matrixVersion ?? "latest"] as const,
+  researchPrdVersions: (id: string) => ["research", "project", id, "prd-versions"] as const,
+  researchPrdVersion: (id: string, versionNo: number) => ["research", "project", id, "prd-version", versionNo] as const,
+  researchReviewRounds: (id: string) => ["research", "project", id, "review-rounds"] as const,
+  researchReviewRound: (id: string, roundNo: number) => ["research", "project", id, "review-round", roundNo] as const,
+  researchFsm: (id: string) => ["research", "project", id, "fsm"] as const,
+  researchRecordsAudit: (id: string) => ["research", "project", id, "records-audit"] as const,
+  /** 最近一次對帳的結果（只由對帳 mutation 寫入；沒有 queryFn，所以任何重抓都不會替使用者打一次 POST）。 */
+  researchReconcile: (id: string) => ["research", "project", id, "reconcile"] as const,
 };
 
 const POLL_MS = 30_000;
@@ -1179,3 +1239,231 @@ export function useBackupOverview() {
     refetchInterval: BACKUP_OVERVIEW_POLL_MS,
   });
 }
+
+// ══ 研發工作流（ResearchToPRD P0；TCS-ResearchToPRD-P0-20261102；契約 API_Contract_ResearchToPRD.md §1）═══════════════════════════════════
+// FE-B（議題、時間軸、證據矩陣、allowlist）與 FE-C（工作室、審查、核准）的面板不能改這支檔，所以查詢與寫入 hook 在這裡一次備齊；面板只 import，不自己 useQuery。
+
+/** 引擎在跑（`flowStatus` 為 RUNNING）時重抓詳情與事件的間隔：取通知輪詢的地板（10 秒）；分頁不可見時 TanStack Query 預設停止輪詢。 */
+export const RESEARCH_POLL_MS = NOTIFICATION_POLL_FLOOR_MS;
+/** 事件帳整份重抓的單頁筆數（契約上限 500）與頁數上限（擋住游標失控時的無限請求；超過就停在已取得的部分）。 */
+export const RESEARCH_EVENT_PAGE_LIMIT = 500;
+export const RESEARCH_EVENT_MAX_PAGES = 20;
+
+/** 能力探針：後端快取 30 秒；失敗（連不上 Bridge 等）不重試，原因要讓人看到。 */
+export function useResearchCapabilities() {
+  const enabled = useEnabled();
+  return useQuery({
+    queryKey: qk.researchCapabilities,
+    queryFn: ({ signal }) => getResearchCapabilities({ signal }),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
+  });
+}
+
+/**
+ * 研究專案清單：與專案列表同節奏（15 秒內視為新鮮、每 30 秒重抓）。預設列未封存的專案；`archived: true` 列已封存的（另一份快取，
+ * 清單頁只在狀態篩選選「已封存」時以 `enabled` 啟用它）。
+ */
+export function useResearchProjects(opts: { archived?: boolean; enabled?: boolean } = {}) {
+  const enabled = useEnabled(opts.enabled ?? true);
+  const archived = opts.archived === true;
+  return useQuery({
+    queryKey: archived ? qk.researchProjectsArchived : qk.researchProjects,
+    queryFn: ({ signal }) => listResearchProjects({ archived, signal }),
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: POLL_MS,
+  });
+}
+
+/** 專案詳情與流程脊：引擎在跑時每 10 秒重抓（游標由 Bridge 推進）；其餘狀態不輪詢，寫入成功與事件到達時由 `invalidateResearch` 重抓。 */
+export function useResearchProject(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({
+    queryKey: qk.researchProject(id ?? ""),
+    queryFn: ({ signal }) => getResearchProject(id as string, { signal }),
+    enabled,
+    refetchInterval: (query) => ((query.state.data as ResearchProjectDetail | undefined)?.flowStatus === "RUNNING" ? RESEARCH_POLL_MS : false),
+  });
+}
+
+/** 事件帳整份（自 `afterSeq=0` 逐頁抓完；`truncated` 為真時以 `nextSeq` 續抓，上限 `RESEARCH_EVENT_MAX_PAGES` 頁）。 */
+async function fetchAllResearchEvents(id: string, signal?: AbortSignal): Promise<ResearchEvent[]> {
+  const events: ResearchEvent[] = [];
+  let after = 0;
+  for (let page = 0; page < RESEARCH_EVENT_MAX_PAGES; page += 1) {
+    const res = await listResearchEvents(id, { afterSeq: after, limit: RESEARCH_EVENT_PAGE_LIMIT, signal });
+    events.push(...res.items);
+    if (!res.truncated || res.nextSeq === null || res.nextSeq <= after) break;
+    after = res.nextSeq;
+  }
+  return events;
+}
+
+/** 事件帳（REST；頁首的 Token 速率與時間軸的回補共用這份快取）：`poll` 為真時每 10 秒重抓。 */
+export function useResearchEvents(id: string | undefined, opts: { poll?: boolean } = {}) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({
+    queryKey: qk.researchEvents(id ?? ""),
+    queryFn: ({ signal }) => fetchAllResearchEvents(id as string, signal),
+    enabled,
+    refetchInterval: opts.poll ? RESEARCH_POLL_MS : false,
+  });
+}
+
+export function useResearchSources(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchSources(id ?? ""), queryFn: ({ signal }) => listResearchSources(id as string, { signal }), enabled });
+}
+
+/** 證據矩陣：`matrixVersion` 缺省取最新版。 */
+export function useResearchEvidence(id: string | undefined, matrixVersion?: number) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchEvidence(id ?? "", matrixVersion ?? null), queryFn: ({ signal }) => listResearchEvidence(id as string, { matrixVersion, signal }), enabled });
+}
+
+export function usePrdVersions(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchPrdVersions(id ?? ""), queryFn: ({ signal }) => listPrdVersions(id as string, { signal }), enabled });
+}
+
+/** 單一 PRD 版本（含內容）：`versionNo` 為 null 時不啟用。 */
+export function usePrdVersion(id: string | undefined, versionNo: number | null) {
+  const enabled = useEnabled(Boolean(id) && versionNo !== null);
+  return useQuery({ queryKey: qk.researchPrdVersion(id ?? "", versionNo ?? 0), queryFn: ({ signal }) => getPrdVersion(id as string, versionNo as number, { signal }), enabled });
+}
+
+export function useReviewRounds(id: string | undefined, opts: { pollMs?: number | false } = {}) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchReviewRounds(id ?? ""), queryFn: ({ signal }) => listReviewRounds(id as string, { signal }), enabled, refetchInterval: opts.pollMs ?? false });
+}
+
+/** 單一審查輪：沒有列的輪（進行中、取消、無效輸出）回 404 `research_not_found`，不重試。 */
+export function useReviewRound(id: string | undefined, roundNo: number | null) {
+  const enabled = useEnabled(Boolean(id) && roundNo !== null);
+  return useQuery({ queryKey: qk.researchReviewRound(id ?? "", roundNo ?? 0), queryFn: ({ signal }) => getReviewRound(id as string, roundNo as number, { signal }), enabled, retry: false });
+}
+
+export function useResearchFsm(id: string | undefined, opts: { pollMs?: number | false } = {}) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchFsm(id ?? ""), queryFn: ({ signal }) => getResearchFsm(id as string, { signal }), enabled, refetchInterval: opts.pollMs ?? false });
+}
+
+export function useResearchRecordsAudit(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchRecordsAudit(id ?? ""), queryFn: ({ signal }) => getResearchRecordsAudit(id as string, { signal }), enabled });
+}
+
+/** allowlist 清單（VIEWER 以上可讀；對話框開著才需要，所以由呼叫端以 `enabled` 控制）。 */
+export function useResearchAllowlist(enabledByCaller = true) {
+  const enabled = useEnabled(enabledByCaller);
+  return useQuery({ queryKey: qk.researchAllowlist, queryFn: ({ signal }) => listResearchAllowlist({ signal }), enabled });
+}
+
+/**
+ * 最近一次對帳結果的**唯讀快取**：只讀 {@link useReconcileResearch} 放進去的資料，**不建立查詢、不發任何請求**（對帳是 POST，只在使用者按「對帳」時才送）。
+ * 快取更新時重新渲染；該專案有其他寫入成功時結果被丟掉（過期的紅色提示比沒有提示更糟），回 `undefined`。
+ */
+export function useResearchReconcileCache(id: string | undefined): ResearchReconcileResult | undefined {
+  const qc = useQueryClient();
+  const subscribe = useCallback((onChange: () => void) => qc.getQueryCache().subscribe(onChange), [qc]);
+  const snapshot = useCallback(() => (id ? qc.getQueryData<ResearchReconcileResult>(qk.researchReconcile(id)) : undefined), [qc, id]);
+  return useSyncExternalStore(subscribe, snapshot, () => undefined);
+}
+
+/**
+ * 研究寫入成功後：該專案的所有資料與清單標為過期（進行中的查詢自動重抓），並丟掉舊的對帳結果；`id` 缺省只動清單。
+ * 不等待重取完成就回傳 promise 的呼叫端可自行 `void`——寫入的收據要立刻顯示。
+ */
+export function invalidateResearch(qc: QueryClient, id?: string): Promise<unknown> {
+  const tasks: Array<Promise<unknown>> = [qc.invalidateQueries({ queryKey: qk.researchProjects })];
+  if (id) {
+    qc.removeQueries({ queryKey: qk.researchReconcile(id) });
+    tasks.push(qc.invalidateQueries({ queryKey: qk.researchProjectAll(id) }));
+  }
+  return Promise.all(tasks);
+}
+
+/** 研究寫入的共同骨架：成功後以 `invalidateResearch` 重抓；`projectIdOf` 由變數取出專案 id（建立專案時回應才有 id，所以另由 `onSuccess` 的結果處理）。 */
+function useResearchWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>, projectIdOf: (vars: TVars) => string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (_data, vars) => invalidateResearch(qc, projectIdOf(vars)),
+  });
+}
+
+export function useCreateResearchProject() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (body: ResearchCreateRequest) => createResearchProject(body), onSuccess: () => invalidateResearch(qc) });
+}
+
+export const useSavePrdVersion = () =>
+  useResearchWrite(
+    (v: { id: string; body: ResearchSavePrdRequest }) => savePrdVersion(v.id, v.body),
+    (v) => v.id,
+  );
+export const useStartResearchStage = () =>
+  useResearchWrite(
+    (v: { id: string; stage: ResearchStage; body?: ResearchStartStageRequest }) => startResearchStage(v.id, v.stage, v.body),
+    (v) => v.id,
+  );
+export const useApproveResearchBaseline = () =>
+  useResearchWrite(
+    (v: { id: string; body: ResearchApproveRequest }) => approveResearchBaseline(v.id, v.body),
+    (v) => v.id,
+  );
+export const useReturnResearchPrd = () =>
+  useResearchWrite(
+    (v: { id: string; body: ResearchReturnRequest }) => returnResearchPrd(v.id, v.body),
+    (v) => v.id,
+  );
+export const useCancelResearchStage = () =>
+  useResearchWrite(
+    (id: string) => cancelResearchStage(id),
+    (id) => id,
+  );
+export const useArchiveResearchProject = () =>
+  useResearchWrite(
+    (id: string) => archiveResearchProject(id),
+    (id) => id,
+  );
+export const useRestoreResearchProject = () =>
+  useResearchWrite(
+    (id: string) => restoreResearchProject(id),
+    (id) => id,
+  );
+export const useReinitResearchProject = () =>
+  useResearchWrite(
+    (v: { id: string; body?: ResearchReinitRequest }) => reinitResearchProject(v.id, v.body),
+    (v) => v.id,
+  );
+
+/**
+ * 對帳：回應放進 `qk.researchReconcile`（頁面的紅色提示只讀這份快取），並讓事件帳與清單重抓（對帳會追加一筆 `research.reconcile` 事件）。
+ * 結果只在這個分頁工作階段內保留（`gcTime` 無限），其他寫入成功時由 `invalidateResearch` 丟掉。
+ */
+export function useReconcileResearch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => reconcileResearch(id).then((result) => ({ id, result })),
+    onSuccess: ({ id, result }) => {
+      qc.setQueryDefaults(qk.researchReconcile(id), { gcTime: Infinity });
+      qc.setQueryData(qk.researchReconcile(id), result);
+      void qc.invalidateQueries({ queryKey: qk.researchEvents(id) });
+    },
+  });
+}
+
+/** allowlist 新增、停用成功後：清單與能力探針（`fetchHosts`）一併重抓。 */
+function useAllowlistWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: qk.researchAllowlist }), qc.invalidateQueries({ queryKey: qk.researchCapabilities })]),
+  });
+}
+
+export const useAddResearchAllowlistEntry = () => useAllowlistWrite((body: ResearchAllowlistRequest) => addResearchAllowlistEntry(body));
+export const useUpdateResearchAllowlistEntry = () => useAllowlistWrite((v: { id: string; body: ResearchAllowlistPatch }) => updateResearchAllowlistEntry(v.id, v.body));

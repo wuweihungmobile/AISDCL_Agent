@@ -44,6 +44,11 @@ const PATHS: Array<[pathname: string, expected: string]> = [
   ["/issues/x", "issues"],
   ["/sysadmin", "sysadmin"],
   ["/sysadmin/backup", "sysadmin"],
+  // 2026-11-02（TCS-ResearchToPRD-P0-20261102 §4.1 第 4 列、AT-960-18-1）：研發工作流認 /research 與其子路徑（精確比對路徑段，相近字串不命中）；原表以 `null` 描述「無項命中」，本表一律用 "none"
+  ["/research", "research"],
+  ["/research/x", "research"],
+  ["/researchx", "none"],
+  ["/research-x", "none"],
   ["/sysadmin-x", "none"],
   ["/self-improving-x", "none"],
   ["/projects-x", "none"],

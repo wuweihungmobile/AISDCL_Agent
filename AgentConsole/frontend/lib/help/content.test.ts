@@ -40,7 +40,7 @@ const REQUIRED_PAGE_IDS = [
   "issues",
 ] as const;
 
-/** 必備的 18 張狀態表（PRD §8.2；只准增不准減）。 */
+/** 必備的 19 張狀態表（PRD §8.2 的十八張加研發工作流的 researchFlow，TCS-ResearchToPRD-P0-20261102 §4.1 第 7 列；只准增不准減）。 */
 const REQUIRED_TABLE_IDS = [
   "projectStatus",
   "goalStatus",
@@ -60,6 +60,7 @@ const REQUIRED_TABLE_IDS = [
   "obsClass",
   "propClass",
   "propState",
+  "researchFlow",
 ] as const satisfies readonly StateTableId[];
 
 /** 欄位資料來源的六類（PRD §8.1；單一出處）。 */

@@ -178,6 +178,90 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
 
   // ── 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.1；API-BK-01）：階段一只有一個唯讀 GET（總覽），不收查詢參數；階段二另三個端點尚未加入 ──
   ["getBackupOverview", () => api.getBackupOverview(), "GET", "/api/v1/sysadmin/backups"],
+
+  // ── ResearchToPRD P0（TCS-ResearchToPRD-P0-20261102 ⚖12；契約 API_Contract_ResearchToPRD.md §1.1）：二十五個函式，函式名＝契約的 operationId ──
+  ["getResearchCapabilities", () => api.getResearchCapabilities(), "GET", "/api/v1/research/capabilities"],
+  ["listResearchProjects", () => api.listResearchProjects(), "GET", "/api/v1/research/projects"],
+  [
+    "createResearchProject",
+    () =>
+      api.createResearchProject({
+        slug: "vector-db",
+        title: "向量資料庫選型",
+        topic: "向量資料庫選型",
+        scope: {
+          layers: { academic: true, industry: false, oss: true, community: true },
+          techStack: "",
+          inScope: ["向量資料庫選型"],
+          outOfScope: [],
+          recencyYears: 3,
+          applicabilityAxes: ["技術可行", "授權相容"],
+        },
+        depthLevel: "STANDARD",
+      }),
+    "POST",
+    "/api/v1/research/projects",
+    {
+      slug: "vector-db",
+      title: "向量資料庫選型",
+      topic: "向量資料庫選型",
+      scope: {
+        layers: { academic: true, industry: false, oss: true, community: true },
+        techStack: "",
+        inScope: ["向量資料庫選型"],
+        outOfScope: [],
+        recencyYears: 3,
+        applicabilityAxes: ["技術可行", "授權相容"],
+      },
+      depthLevel: "STANDARD",
+    },
+  ],
+  ["getResearchProject", () => api.getResearchProject("R"), "GET", "/api/v1/research/projects/R"],
+  ["listResearchEvents", () => api.listResearchEvents("R", { afterSeq: 40, limit: 500 }), "GET", "/api/v1/research/projects/R/events?afterSeq=40&limit=500"],
+  ["listResearchSources", () => api.listResearchSources("R"), "GET", "/api/v1/research/projects/R/sources"],
+  ["listResearchEvidence", () => api.listResearchEvidence("R", { matrixVersion: 2 }), "GET", "/api/v1/research/projects/R/evidence?matrixVersion=2"],
+  ["listPrdVersions", () => api.listPrdVersions("R"), "GET", "/api/v1/research/projects/R/prd/versions"],
+  ["getPrdVersion", () => api.getPrdVersion("R", 3), "GET", "/api/v1/research/projects/R/prd/versions/3"],
+  [
+    "savePrdVersion",
+    () => api.savePrdVersion("R", { baseVersion: 2, content: "# PRD", changeSummary: "人工修訂" }),
+    "PUT",
+    "/api/v1/research/projects/R/prd",
+    { baseVersion: 2, content: "# PRD", changeSummary: "人工修訂" },
+  ],
+  ["listReviewRounds", () => api.listReviewRounds("R"), "GET", "/api/v1/research/projects/R/review-rounds"],
+  ["getReviewRound", () => api.getReviewRound("R", 2), "GET", "/api/v1/research/projects/R/review-rounds/2"],
+  ["startResearchStage", () => api.startResearchStage("R", "revise", { afterEscalation: true }), "POST", "/api/v1/research/projects/R/stages/revise", { afterEscalation: true }],
+  [
+    "approveResearchBaseline",
+    () => api.approveResearchBaseline("R", { prdVersion: "v0.3.0-draft", expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" }),
+    "POST",
+    "/api/v1/research/projects/R/approve",
+    { prdVersion: "v0.3.0-draft", expectedDigests: { "01_specs/PRD-v1.0.0.md": `sha256:${"a".repeat(64)}` }, reason: "審查已過" },
+  ],
+  ["getResearchFsm", () => api.getResearchFsm("R"), "GET", "/api/v1/research/projects/R/fsm"],
+  ["cancelResearchStage", () => api.cancelResearchStage("R"), "POST", "/api/v1/research/projects/R/cancel"],
+  ["reconcileResearch", () => api.reconcileResearch("R"), "POST", "/api/v1/research/projects/R/reconcile"],
+  ["archiveResearchProject", () => api.archiveResearchProject("R"), "POST", "/api/v1/research/projects/R/archive"],
+  ["restoreResearchProject", () => api.restoreResearchProject("R"), "POST", "/api/v1/research/projects/R/restore"],
+  ["getResearchRecordsAudit", () => api.getResearchRecordsAudit("R"), "GET", "/api/v1/research/projects/R/records/audit"],
+  [
+    "reinitResearchProject",
+    () => api.reinitResearchProject("R", { generation: "next", reason: "三輪審查都沒過，放棄舊鍵重新開始" }),
+    "POST",
+    "/api/v1/research/projects/R/reinit",
+    { generation: "next", reason: "三輪審查都沒過，放棄舊鍵重新開始" },
+  ],
+  ["returnResearchPrd", () => api.returnResearchPrd("R", { reason: "第三章 AC 不可測" }), "POST", "/api/v1/research/projects/R/return", { reason: "第三章 AC 不可測" }],
+  ["listResearchAllowlist", () => api.listResearchAllowlist(), "GET", "/api/v1/research/allowlist"],
+  [
+    "addResearchAllowlistEntry",
+    () => api.addResearchAllowlistEntry({ listKind: "WEB", host: "docs.example.com", layer: "INDUSTRY", purpose: "官方文件", tosNote: "", minIntervalSeconds: 5, tosAcknowledged: false }),
+    "POST",
+    "/api/v1/research/allowlist",
+    { listKind: "WEB", host: "docs.example.com", layer: "INDUSTRY", purpose: "官方文件", tosNote: "", minIntervalSeconds: 5, tosAcknowledged: false },
+  ],
+  ["updateResearchAllowlistEntry", () => api.updateResearchAllowlistEntry("A", { enabled: false }), "PATCH", "/api/v1/research/allowlist/A", { enabled: false }],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -198,10 +282,54 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview；不多不少）", () => {
+  it("匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），共 109 個；不多不少", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(84);
+    expect(names).toHaveLength(109);
+  });
+
+  it("研究端點（ResearchToPRD P0）：id 編成單一路徑段；省略的選項不進網址（清單的 archived 只在為 true 時帶 ?archived=true）；啟動階段與重試初始化沒給本文時送空物件；PATCH 的方法字串就是 PATCH", async () => {
+    const fetchMock = vi.fn(async () => okJson());
+    vi.stubGlobal("fetch", fetchMock);
+    await api.getResearchProject("a/b c");
+    await api.listResearchProjects({ archived: true });
+    await api.listResearchProjects({ archived: false });
+    await api.listResearchEvents("R");
+    await api.listResearchEvents("R", { afterSeq: 0, limit: 5 });
+    await api.listResearchEvidence("R");
+    await api.startResearchStage("R", "research");
+    await api.reinitResearchProject("R");
+    await api.updateResearchAllowlistEntry("a/b", { enabled: true });
+    const calls = fetchMock.mock.calls.map((c) => c as unknown as [string, RequestInit]);
+    expect(calls.map(([url]) => url)).toEqual([
+      "/api/v1/research/projects/a%2Fb%20c",
+      "/api/v1/research/projects?archived=true",
+      "/api/v1/research/projects",
+      "/api/v1/research/projects/R/events",
+      "/api/v1/research/projects/R/events?afterSeq=0&limit=5",
+      "/api/v1/research/projects/R/evidence",
+      "/api/v1/research/projects/R/stages/research",
+      "/api/v1/research/projects/R/reinit",
+      "/api/v1/research/allowlist/a%2Fb",
+    ]);
+    expect(JSON.parse(String(calls[6][1].body))).toEqual({});
+    expect(JSON.parse(String(calls[7][1].body))).toEqual({});
+    expect(calls[8][1].method).toBe("PATCH");
+    expect(JSON.parse(String(calls[8][1].body))).toEqual({ enabled: true });
+  });
+
+  it("研究端點的錯誤封包原樣丟成 ApiError（reason 與 details 保留）：409 fsm_state_conflict 帶 details.current_state", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ code: 409, message: "狀態衝突", reason: "fsm_state_conflict", details: { current_state: "ESCALATION" }, errors: [] }), {
+            status: 409,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    );
+    await expect(api.startResearchStage("R", "revise", { afterEscalation: true })).rejects.toMatchObject({ status: 409, reason: "fsm_state_conflict", details: { current_state: "ESCALATION" } });
   });
 
   it("v1.4 的三個端點省略可選參數時，網址上不帶它們（getPendingSignoffs 不帶 limit、getSddEngineStatus 不帶 project 也不帶 projectId）", async () => {

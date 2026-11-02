@@ -60,7 +60,7 @@ export function describeError(error: unknown): string {
 export type QueryValue = string | number | boolean | null | undefined;
 
 export type RequestOptions = {
-  method?: "GET" | "POST" | "PUT" | "DELETE";
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   query?: Record<string, QueryValue>;
   /** 一般物件以 JSON 送出；FormData（檔案上傳）原樣送出，由瀏覽器自己帶 multipart boundary（絕不手設 Content-Type） */
   body?: unknown;
