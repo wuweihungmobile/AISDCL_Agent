@@ -7,6 +7,7 @@ FSM 樹有 `fake` 與 `real` 兩種。
 from __future__ import annotations
 
 import hashlib
+import itertools
 import re
 import time
 from pathlib import Path
@@ -20,19 +21,24 @@ from app.research.gates.reconcile import (
     FLOW_FSM_MAPPING,
     derive_flow_status,
     flow_fsm_mapping_ok,
+    mapping_check,
+    prd_save_cursor,
 )
 from app.research.orchestrator import MATRIX_REL, REVIEW_CARD_REL
 from tests import test_research_router as router_tests
 from tests.test_research_approve import (
     ADMIN,
+    ADR_REL,
     BASELINE_REL,
+    PRD_TEXT,
+    SCOPE_REL,
     approve,
     seed_pending,
     seen,
     state_file,
     workspace,
 )
-from tests.test_research_router import Env, create, project_row, tree_digest
+from tests.test_research_router import ALICE, Env, create, project_row, tree_digest
 
 rdb, fake, tree, popen_log = (router_tests.rdb, router_tests.fake, router_tests.tree,
                               router_tests.popen_log)
@@ -126,6 +132,7 @@ def test_AT_960_21_1_six_checks_report_drift_with_both_digests_and_fix_nothing(e
 # ── AT-960-21-2：游標與 FSM 的對映表（單元）─────────────────────────────────────────────────
 LEGAL = {
     ("AGENT_LOAD", "topic", "INGESTED"), ("AGENT_LOAD", "topic", "EVIDENCE_READY"),
+    ("AGENT_LOAD", "studio", "REVISING"),       # 換世代（D-60）之後：新鍵 AGENT_LOAD、PRD 修訂中
     ("SPEC_DRAFTING", "studio", "DRAFTING"), ("SPEC_DRAFTING", "studio", "REVISING"),
     ("SCG_VALIDATION", "studio", "REVIEWING"),
     ("HUMAN_PENDING", "studio", "GATE0_PENDING"), ("HUMAN_PENDING", "studio", "REVISING"),
@@ -158,17 +165,123 @@ def test_AT_960_21_2_the_table_is_the_whole_rule_and_status_is_derived_not_judge
                 for step, phases in by_step.items() for phase in phases}
     assert LEGAL <= accepted, "TCS 逐列的合法列都在表內"
     assert not accepted & ILLEGAL, "TCS 逐列的不合列都不在表內"
-    # 表驅動：表外的任何組合一律假；`flow_status` 不是輸入（簽名只有三個參數）
+    # 表驅動：表外的任何組合一律假；`flow_status` 不是輸入（只有 D-77 的 FAILED 一個例外，
+    # 見下一個測試）
     for state in ("INIT", "SPEC_FROZEN", "ESCALATION_FINAL"):
         for step in ("topic", "studio", "route", "bogus"):
             for phase in ("INGESTED", "REVIEWING", "FROZEN", "BOGUS"):
                 assert flow_fsm_mapping_ok(state, step, phase) is ((state, step, phase) in accepted)
-    # 衍生函式（優先序 ESCALATED > RUNNING > WAITING_HUMAN > IDLE）
+    # 衍生函式（優先序 ESCALATED > RUNNING > FAILED > WAITING_HUMAN > IDLE；FAILED 由呼叫端明說）
     assert derive_flow_status(["RUNNING"], "ESCALATION") == "ESCALATED"
     assert derive_flow_status(["QUEUED"], "HUMAN_PENDING") == "RUNNING"
     assert derive_flow_status(["SUCCEEDED", "FAILED"], "HUMAN_PENDING") == "WAITING_HUMAN"
     assert derive_flow_status([], "SCG_VALIDATION") == "IDLE"
     assert derive_flow_status(["CANCELLED"], None) == "IDLE"
+    assert derive_flow_status([], "HUMAN_PENDING", last_run_failed=True) == "FAILED"
+
+
+def test_D_77_a_failed_cursor_is_legal_for_every_fsm_state_in_the_table_and_only_those() -> None:
+    """D-77：`flow_status=FAILED` 的游標對表內的每個 FSM 現態都合法（失敗時相態退回穩定相態，不必與
+    已被推進的 FSM 對得上）；表外現態與讀不到（None）照舊不合法；其他狀態值不享有這個待遇。"""
+    for state in FLOW_FSM_MAPPING:
+        for step, phase in (("topic", "INGESTED"), ("studio", "DRAFTING"), ("route", "FROZEN"),
+                            ("studio", "NO_SUCH_PHASE")):
+            assert flow_fsm_mapping_ok(state, step, phase, "FAILED") is True, (state, step, phase)
+    assert flow_fsm_mapping_ok("NO_SUCH_STATE", "topic", "INGESTED", "FAILED") is False
+    assert flow_fsm_mapping_ok(None, "topic", "INGESTED", "FAILED") is False
+    for status in ("IDLE", "RUNNING", "WAITING_HUMAN", "BLOCKED", "ESCALATED", "CANCELLED", None):
+        assert flow_fsm_mapping_ok("SCG_VALIDATION", "studio", "DRAFTING", status) is False, status
+        assert flow_fsm_mapping_ok("SCG_VALIDATION", "studio", "REVIEWING", status) is True
+    drift = mapping_check("SCG_VALIDATION", "studio", "DRAFTING", readable=True)
+    assert drift["status"] == "drift" and drift["drift"][0]["kind"] == "FSM_FLOW"
+    assert mapping_check("SCG_VALIDATION", "studio", "DRAFTING", readable=True,
+                         flow_status="FAILED")["status"] == "ok"
+    unreadable = mapping_check("SCG_VALIDATION", "studio", "DRAFTING", readable=False,
+                               flow_status="FAILED")
+    assert unreadable["status"] == "NOT_EVALUABLE", "量不到仍不得 false-green"
+
+
+# ── INT-05：人工存 PRD 之後的游標（純函式表）──────────────────────────────────────────────────
+SAVE_CURSOR_TABLE = [
+    # (FSM 現態, 現在的 step, phase) → 存稿後的 (step, phase)
+    ("AGENT_LOAD", "topic", "INGESTED", ("topic", "INGESTED")),             # 研究步驟：保持
+    ("AGENT_LOAD", "topic", "EVIDENCE_READY", ("topic", "EVIDENCE_READY")),
+    ("AGENT_LOAD", "studio", "REVISING", ("studio", "REVISING")),           # 換世代之後：保持
+    ("SPEC_DRAFTING", "studio", "DRAFTING", ("studio", "DRAFTING")),
+    ("SPEC_DRAFTING", "studio", "REVISING", ("studio", "REVISING")),        # 合法就保持
+    ("SPEC_DRAFTING", "studio", "REVIEWING", ("studio", "DRAFTING")),       # 不合法：DRAFTING 優先
+    ("SPEC_DRAFTING", "topic", "EVIDENCE_READY", ("studio", "DRAFTING")),
+    ("SCG_VALIDATION", "studio", "REVIEWING", ("studio", "REVIEWING")),
+    ("SCG_VALIDATION", "studio", "DRAFTING", ("studio", "REVIEWING")),      # 只有 REVIEWING 合法
+    ("HUMAN_PENDING", "studio", "GATE0_PENDING", ("studio", "REVISING")),   # 不再等 Gate 0
+    ("HUMAN_PENDING", "studio", "REVISING", ("studio", "REVISING")),
+    ("HUMAN_PENDING", "studio", "DRAFTING", ("studio", "REVISING")),        # DRAFTING 不合法
+    ("SPEC_REGRESSION_CHECK", "studio", "GATE0_PENDING", ("studio", "REVISING")),
+    ("ESCALATION", "studio", "REVIEWING", ("studio", "REVIEWING")),
+    ("ESCALATION", "studio", "DRAFTING", ("studio", "REVISING")),
+    ("NO_SUCH_STATE", "studio", "DRAFTING", ("studio", "DRAFTING")),        # 查無該態：不改
+    (None, "topic", "INGESTED", ("topic", "INGESTED")),                      # FSM 讀不到：不改
+    (None, "studio", "GATE0_PENDING", ("studio", "REVISING")),          # 僅「不再等 Gate 0」照降
+]
+
+
+@pytest.mark.parametrize("fsm_state, step, phase, expected", SAVE_CURSOR_TABLE)
+def test_INT_05_a_human_save_lands_on_a_phase_the_fsm_state_allows(
+        fsm_state: str | None, step: str, phase: str, expected: tuple[str, str]) -> None:
+    got = prd_save_cursor(fsm_state, step, phase)
+    assert got == expected
+    if fsm_state in FLOW_FSM_MAPPING:               # 表內現態：結果一律合法（不固定寫 DRAFTING）
+        assert flow_fsm_mapping_ok(fsm_state, *got) is True
+
+
+def test_INT_05_a_human_save_while_waiting_for_gate_0_leaves_the_reconcile_consistent(
+        env: Env) -> None:
+    """HUMAN_PENDING 下 `PUT prd`（人在 Gate 0 前改稿）之後，游標是該態的合法對映（REVISING，不是對
+    HUMAN_PENDING 不合法的 DRAFTING），`:reconcile` 仍是 `consistent: true`、零漂移。"""
+    rid, _head, _ws = seeded(env)
+    assert reconcile(env, rid)["consistent"] is True
+    head = env.db.head_prd(rid)
+    assert head is not None
+    saved = env.put(f"/research/projects/{rid}/prd", {
+        "base_version": int(head["version_no"]), "content": PRD_TEXT + "\n改了一行。\n",
+        "author": ALICE})
+    assert saved.status_code == 201, saved.text
+    row = project_row(env, rid)
+    assert (row["flow_step"], row["flow_phase"], row["flow_status"]) == (
+        "studio", "REVISING", "WAITING_HUMAN")
+    result = reconcile(env, rid)
+    assert (result["consistent"], result["driftCount"]) == (True, 0), result
+
+
+# ── INT-10：凍結的四份文件，每檔一個漂移列、kind 依檔、不重複計入 ─────────────────────────────────
+FROZEN_KINDS = {BASELINE_REL: "PRD", MATRIX_REL: "EVIDENCE_MATRIX", SCOPE_REL: "ISSUE_SCOPE",
+                ADR_REL: "ADR_DRAFT"}
+
+
+def test_INT_10_each_frozen_file_is_one_drift_with_its_own_kind_and_is_never_counted_twice(
+        env: Env) -> None:
+    rid, _head, ws = seeded(env)
+    assert approve(env, rid, seen(env, rid, BASELINE_REL, MATRIX_REL),
+                   approver=ADMIN).status_code == 200
+    clean = reconcile(env, rid)
+    assert (clean["consistent"], clean["driftCount"]) == (True, 0), clean
+    combos = [(rel,) for rel in FROZEN_KINDS] + list(itertools.combinations(FROZEN_KINDS, 2))
+    for combo in combos:
+        original = {rel: (ws / rel).read_bytes() for rel in combo}
+        for rel in combo:
+            (ws / rel).write_bytes(original[rel] + b"!")
+        result = reconcile(env, rid)
+        checks = {c["id"]: c for c in result["checks"]}
+        found = sorted((d["kind"], d["path"]) for c in result["checks"] for d in c["drift"])
+        assert found == sorted((FROZEN_KINDS[rel], rel) for rel in combo), combo
+        assert result["driftCount"] == len(combo) and result["consistent"] is False, (
+            combo, result["driftCount"])
+        assert sorted(d["path"] for d in checks["prd_sha256"]["drift"]) == sorted(
+            rel for rel in combo if rel != MATRIX_REL), "矩陣不在 prd_sha256 重複計入"
+        assert (checks["evidence_matrix"]["status"] == "drift") is (MATRIX_REL in combo), combo
+        for rel in combo:
+            (ws / rel).write_bytes(original[rel])
+    assert reconcile(env, rid)["driftCount"] == 0, "還原後回到零漂移"
 
 
 # ── AT-960-21-3：狀態檔讀不動 ───────────────────────────────────────────────────────────────

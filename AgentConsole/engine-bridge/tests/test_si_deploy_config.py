@@ -181,7 +181,9 @@ def test_AT_950_1_3_readme_and_settings_header_name_the_p2b_variables_paths_and_
 
 
 # ── compose 的 SI 掛載：恰符合設計 A 或 B（＋P2b 恰一條可寫的稽核 bind）───────────────────────────
-EXISTING_MOUNTS = ("../AISDLC_SDD:/sdd:ro", "engine_workspace:/workspace", "app_logs:/app/logs")
+EXISTING_MOUNTS = ("../AISDLC_SDD:/sdd:ro", "engine_workspace:/workspace", "app_logs:/app/logs",
+                   # ResearchToPRD 整合 P0（commit 04884296）：mock claude 研究劇本夾具的唯讀 bind
+                   "./engine-bridge/tests/fixtures/research/scripts:/mock-research:ro")
 COMMON = {("../tools", "/repo/tools"), ("../docs/06_quality", "/repo/docs/06_quality")}
 DESIGN_A = COMMON | {("../.git/HEAD", "/repo/.git/HEAD"), ("../.git/refs", "/repo/.git/refs"),
                      ("../.git/objects", "/repo/.git/objects"),

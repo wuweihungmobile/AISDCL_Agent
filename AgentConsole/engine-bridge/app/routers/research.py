@@ -27,7 +27,7 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +49,7 @@ from ..research.db import (
     utc_now,
 )
 from ..research.fetch.allowlist import DEFAULT_ENV_MIN_INTERVAL, ENV_MIN_INTERVALS
+from ..research.gates.reconcile import prd_save_cursor
 from ..research.orchestrator import (
     APPROVE_DOCS,
     Orchestrator,
@@ -58,7 +59,7 @@ from ..research.orchestrator import (
     human_reason,
 )
 from ..research.outbox import DbBlocked, DurableWriter, FileRef, FileWrite, Op, Outbox
-from ..research.settings import research_info
+from ..research.settings import research_capabilities
 from ..sdd_state import ESCALATION_STATES
 from ..security import AuditLog, is_within
 from ..settings import Settings
@@ -245,6 +246,14 @@ def _fsm_ctx(ctx: ResearchContext, row: dict[str, Any], *, actor: str | None = N
                           key=key or row["fsm_project"], audit=ctx.audit, actor=actor)
 
 
+def _fsm_state_or_none(ctx: ResearchContext, row: dict[str, Any]) -> str | None:
+    """外環 FSM 現態（唯讀、不起子行程）；狀態檔缺席或讀不動＝None（呼叫端據此保守處理）。"""
+    try:
+        return fsm_ops.current_state(_fsm_ctx(ctx, row))
+    except ApiError:
+        return None
+
+
 def _not_implemented(endpoint: str, **extra: Any) -> ApiError:
     return ApiError(501, "not_implemented", endpoint=endpoint,
                     detail="尚未實作：這是 P1 功能，P0 不提供（前置條件與驗證已在這裡）", **extra)
@@ -405,11 +414,12 @@ def reinit_project(research_id: str, body: ReinitIn | None = None,
 
 
 def _retry_init(ctx: ResearchContext, row: dict[str, Any]) -> dict[str, Any]:
-    """重試初始化（冪等）：只在 FAILED 且 `init_failed:` 時可用；補齊缺的目錄、
-    `issue_scope.json` 與其登記列、FSM 鍵（不覆寫已存在檔案、不重複配號與建鍵）。其餘狀態
-    409 `stage_conflict`、零寫入。"""
+    """重試（冪等）：只在 `flow_status=FAILED` 時可用——初始化失敗（`init_failed:<步驟>`）補齊缺的
+    目錄、`issue_scope.json` 與其登記列、FSM 鍵（不覆寫已存在檔案、不重複配號與建鍵）；stage run
+    失敗或取消（D-77；`flow_detail` 為 exit_reason）沒有缺的東西，只是清掉失敗標記、讓游標回到
+    衍生狀態。其餘狀態 409 `stage_conflict`、零寫入。"""
     assert ctx.writer is not None and ctx.db is not None
-    if row["flow_status"] != "FAILED" or not str(row["flow_detail"]).startswith("init_failed:"):
+    if row["flow_status"] != "FAILED":
         raise ApiError(409, "stage_conflict", details={
             "flowStatus": row["flow_status"], "flowDetail": row["flow_detail"]})
     rid, workspace = str(row["id"]), Path(row["workspace_path"])
@@ -433,7 +443,9 @@ def _retry_init(ctx: ResearchContext, row: dict[str, Any]) -> dict[str, Any]:
         if _flow_out(row) != failed:
             _set_cursor(ctx, rid, failed, "bridge")
         raise ApiError(502, "init_failed", details={"step": failed_step})
-    _set_cursor(ctx, rid, {**_flow_out(row), "status": "IDLE", "detail": ""}, "bridge")
+    # 初始化後恆為 IDLE；stage 失敗（D-77）則依 FSM 現態衍生
+    status = derive_flow_status([], _fsm_state_or_none(ctx, row))
+    _set_cursor(ctx, rid, {**_flow_out(row), "status": status, "detail": ""}, "bridge")
     return {"flow": _flow_out(_project(ctx, rid))}
 
 
@@ -472,7 +484,8 @@ def _abandon_and_reinit(ctx: ResearchContext, row: dict[str, Any], reason: str,
         research_id=rid, decision_id=decision_id, decided_by=decided_by, reason=reason,
         old_fsm_project=row["fsm_project"], new_fsm_project=new_key, new_generation=generation,
         fsm_state_after=current, audit_trace_id=trace_id_var.get(),
-        flow={"step": row["flow_step"], "phase": "REVISING", "status": "IDLE", "detail": ""})))
+        # 進得了 ESCALATION 的專案一定在規格工作室；寫死 studio，游標對映才與新鍵（AGENT_LOAD）一致
+        flow={"step": "studio", "phase": "REVISING", "status": "IDLE", "detail": ""})))
     row = _project(ctx, rid)                       # 提交之後 `fsm_project` 已指向新世代鍵
     failed = _fsm_init_step(ctx, row, actor=decided_by)
     if failed is not None:
@@ -512,11 +525,17 @@ def save_prd(research_id: str, body: PrdIn,
             rel = f"01_specs/PRD-{semver}.md"
             digest = layout.sha256_text(body.content)
             workspace = Path(row["workspace_path"])
+            # 游標：FSM 現態的合法對映（不固定寫 DRAFTING；INT-05）、狀態依 stage run 與 FSM 衍生
+            # （D-56）
+            fsm_state = _fsm_state_or_none(ctx, row)
+            step, phase = prd_save_cursor(fsm_state, row["flow_step"], row["flow_phase"])
+            active = ctx.db.active_stage_run(rid)
+            status = derive_flow_status([] if active is None else [active["status"]], fsm_state)
             op = Op("prd.save", rid, dict(
                 research_id=rid, version_no=version_no, semver=semver, kind="DRAFT",
                 author_kind="HUMAN", author=author, content=body.content, rel_path=rel,
                 sha256=digest, bytes=size, change_summary=body.change_summary[:500],
-                flow={"step": "studio", "phase": "DRAFTING", "status": "IDLE", "detail": ""}),
+                flow={"step": step, "phase": phase, "status": status, "detail": ""}),
                 files=(FileRef(str(workspace), rel, digest),))
             ctx.writer.persist(op, writes=[FileWrite(workspace, rel, body.content)])
     return {"version_no": version_no, "semver": semver, "sha256": digest, "bytes": size}
@@ -810,8 +829,12 @@ class ActorIn(BaseModel):
 def cancel_stage(research_id: str, body: ActorIn | None = None,
                  ctx: ResearchContext = Depends(write_gate("cancel"))) -> dict[str, Any]:
     """停止進行中的 stage run：有注入 `stopper`（PKG-BR-C）就先停行程；資料庫一律標 CANCELLED 並
-    發 `research.run`。沒有進行中的 stage＝冪等（`stopped_run_id` 為 null）。"""
-    assert ctx.db is not None and ctx.writer is not None
+    發 `research.run`。沒有進行中的 stage＝冪等（`stopped_run_id` 為 null）。
+
+    游標收尾與失敗同一條路（D-77）：`flow_status=FAILED`、`flow_detail=cancelled`、相態退回該
+    run 開始前的穩定相態（研究 run 的 RESEARCHING 不留在游標上），所以取消之後
+    `stages/research` 與 `:reinit`（重試）都能再走。"""
+    assert ctx.db is not None and ctx.writer is not None and ctx.orchestrator is not None
     rid, actor = _research_id(research_id), (body or ActorIn()).actor
     with operation(ctx, "cancel", rid, actor):
         row = _project(ctx, rid)
@@ -824,7 +847,7 @@ def cancel_stage(research_id: str, body: ActorIn | None = None,
         ctx.writer.persist(Op("stage_run.update", rid, {
             "stage_run_id": run_id, "status": "CANCELLED", "exit_reason": "cancelled",
             "finished_at": utc_now().isoformat(), "actor": actor}))
-        _set_cursor(ctx, rid, {**_flow_out(row), "status": "CANCELLED", "detail": ""}, actor)
+        ctx.orchestrator.settle_failed(rid, "cancelled", run_ids=(run_id,), actor=actor)
         return {"stopped_run_id": run_id, "flow": _flow_out(_project(ctx, rid))}
 
 
@@ -1030,4 +1053,14 @@ def patch_allowlist(entry_id: str, body: AllowlistPatchIn,
 # ── 能力探針（無 DSN 仍 200；D-49）──────────────────────────────────────────────────────────
 @router.get("/capabilities")
 def capabilities(request: Request) -> dict[str, Any]:
-    return research_info(get_context(request).cfg)
+    """八個資訊欄（同 `/health/deep` 的 `research`）加契約 §2.1 的五個（D-76(1)）。
+    `fetch_hosts`＝有效 FETCH 清單（部署基底 ∪ 啟用中的 ADMIN 條目）；無資料庫或資料庫暫時
+    不可用時回部署基底——探針一律 200。"""
+    ctx = get_context(request)
+    hosts: Sequence[str] = ctx.cfg.research_fetch_allowlist
+    if ctx.db is not None:
+        try:
+            hosts = effective_allowlist(ctx.cfg, ctx.db.list_allowlist())["FETCH"]
+        except ResearchDbError:
+            logger.warning("capabilities：讀不到 ADMIN allowlist，fetch_hosts 先回部署基底")
+    return research_capabilities(ctx.cfg, fetch_hosts=hosts)

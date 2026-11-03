@@ -26,6 +26,11 @@
                            位元組原樣寫到工作區（目前目錄）的 `path`。缺步驟、壞劇本、越界路徑
                            （絕對路徑或含 `..`）＝rc 2 並在 stderr 說明（不靜默成功）。劇本內容
                            完全由夾具決定，本模組不內嵌任何評分或證據常數。
+                           劇本頂層另可帶**選填**鍵 `"prefetch": "<相對劇本目錄的路徑>"`（D-78）：
+                           指向 Bridge 研究 stage 的前置抓取夾具——本模組不讀它（替身 claude 只看
+                           `steps`），讀它的是 Bridge 的 `app/research/offline.py`：劇本模式與
+                           mock-only 下前置抓取不連網，改用這份夾具宣告的抓取紀錄與候選來源
+                           （格式見該模組檔頭）。
                            **未設此變數時行為與此前逐位元組相同**。
 輸出：單行 JSON，形狀對齊真 claude 的 `--output-format json`（含 usage／modelUsage，使引擎
 能推出 context%）；`result` 內回放 prompt 中所有 `[KEYWORD]` 字樣，滿足 expected_output_regex。

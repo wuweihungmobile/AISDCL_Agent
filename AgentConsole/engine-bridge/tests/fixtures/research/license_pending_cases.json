@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "rule": "D-80：授權待查＝license_spdx 為 null／空白／UNKNOWN／未見（大小寫不敏感、先修剪空白）；含 OR／AND／WITH 的複合表達式與 LGPL 等已知授權不待查；其餘依 GPL／AGPL 系（\\bA?GPL）判（AC-R2P-05-5）。",
+  "usage": "雙端對拍：Bridge（engine-bridge/tests/test_research_gates.py、gates/evidence.py is_license_pending）與前端（lib/domain/research.ts isLicensePending）各自對同一組輸入斷言同一份期望；任何一端改規則必須同時改這張表。",
+  "cases": [
+    {"license_spdx": null, "pending": true, "why": "null＝尚未查到授權"},
+    {"license_spdx": "", "pending": true, "why": "空字串"},
+    {"license_spdx": "   ", "pending": true, "why": "只有空白（修剪後為空）"},
+    {"license_spdx": "未見", "pending": true, "why": "模板的缺資訊字樣"},
+    {"license_spdx": "UNKNOWN", "pending": true, "why": "agent 依模板「查不到寫 UNKNOWN」；DB 原樣存放"},
+    {"license_spdx": "unknown", "pending": true, "why": "大小寫不敏感"},
+    {"license_spdx": "Unknown", "pending": true, "why": "大小寫不敏感"},
+    {"license_spdx": " UNKNOWN ", "pending": true, "why": "前後空白先修剪"},
+    {"license_spdx": "MIT", "pending": false, "why": "已知寬鬆授權"},
+    {"license_spdx": "Apache-2.0", "pending": false, "why": "已知寬鬆授權"},
+    {"license_spdx": "BSD-3-Clause", "pending": false, "why": "已知寬鬆授權"},
+    {"license_spdx": "GPL-3.0-only", "pending": true, "why": "GPL 系"},
+    {"license_spdx": "gpl-3.0-only", "pending": true, "why": "GPL 系；大小寫不敏感"},
+    {"license_spdx": "GPL-2.0-or-later", "pending": true, "why": "GPL 系；-or-later 是識別碼的一部分、不是複合式連接詞"},
+    {"license_spdx": "AGPL-3.0-or-later", "pending": true, "why": "AGPL 系；-or-later 同上"},
+    {"license_spdx": "agpl-3.0", "pending": true, "why": "AGPL 系；大小寫不敏感"},
+    {"license_spdx": "GPL", "pending": true, "why": "只寫 GPL"},
+    {"license_spdx": "LGPL-3.0", "pending": false, "why": "LGPL 是已知授權（D-80），不待查"},
+    {"license_spdx": "LGPL-2.1-or-later", "pending": false, "why": "LGPL 是已知授權（D-80），不待查"},
+    {"license_spdx": "lgpl-2.1", "pending": false, "why": "LGPL 大小寫不敏感"},
+    {"license_spdx": "MIT OR GPL-2.0", "pending": false, "why": "複合式：知道授權、要人判，原樣顯示"},
+    {"license_spdx": "GPL-2.0 OR MIT", "pending": false, "why": "複合式以 GPL 起頭也不待查"},
+    {"license_spdx": "Apache-2.0 AND GPL-3.0-only", "pending": false, "why": "AND 複合式"},
+    {"license_spdx": "GPL-2.0 WITH Classpath-exception-2.0", "pending": false, "why": "WITH 複合式（附例外條款）"},
+    {"license_spdx": "(MIT OR GPL-2.0-only)", "pending": false, "why": "括號包住的複合式"},
+    {"license_spdx": "mit or gpl-2.0", "pending": false, "why": "連接詞大小寫不敏感"}
+  ]
+}

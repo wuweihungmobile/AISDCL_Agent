@@ -73,6 +73,9 @@ CAPABILITY: dict[str, str] = {
     "research/gate_cli.py": "ro",
     "research/gates/ingest.py": "ro",
     "research/gates/reconcile.py": "ro",
+    # D-78／INT-06：劇本模式與 mock-only 的前置抓取離線夾具——只讀劇本與夾具檔、組成 `FetchBatch`，
+    # 不 import 任何網路庫、不寫檔（原文落地與入庫仍在 orchestrator 的同一條路徑）。
+    "research/offline.py": "ro",
     # orchestrator 不自己 Popen（引擎由 `RunManager` 起、FSM 由 `fsm_ops`→`sdd_cli` 起），但它是驅動
     # 這兩條子行程路徑的門：import fsm_ops 的模組一律須登記為 exec。
     "research/orchestrator.py": "exec",

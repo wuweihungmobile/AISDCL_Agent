@@ -288,6 +288,7 @@ def test_AT_960_2_7_capabilities_and_health_deep_share_a_fixed_info_shape(
         make_env: Callable[..., Env], fake: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     keys = {"mode", "root", "db", "claude_cli", "gh_cli", "git", "web_layer_enabled",
             "scaffold_templates"}
+    extra = {"sdd_root", "research_root", "scaffold_root", "repo_writable", "fetch_hosts"}
     env = make_env(fake, None)
 
     def probe() -> tuple[dict[str, Any], dict[str, Any], int]:
@@ -301,14 +302,49 @@ def test_AT_960_2_7_capabilities_and_health_deep_share_a_fixed_info_shape(
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: (
         f"/fake/{name}" if name in ("claude", "git", "gh") else real_which(name, *a, **k)))
     cap, info, status_with = probe()
-    assert set(cap) == keys and cap == info
+    # D-76(1)：capabilities 在 TCS 的八個鍵之上多帶契約 §2.1 的五個（「恰八鍵」勘誤為
+    # 「至少含八鍵」）；`/health/deep` 的 `research` 仍是固定的八個鍵，且與 capabilities 的前八鍵
+    # 逐值相同
+    assert keys <= set(cap) and set(cap) == keys | extra and set(info) == keys
+    assert {k: cap[k] for k in keys} == info
     assert cap["mode"] == "local" and cap["claude_cli"]["ok"] and cap["git"]["ok"]
     assert cap["claude_cli"]["version"] == "NOT-EVALUABLE" and cap["db"] is False
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: (
         None if name == "claude" else real_which(name, *a, **k)))
     cap, info, status_without = probe()
-    assert cap["mode"] == "mock-only" and set(info) == keys and cap == info
+    assert cap["mode"] == "mock-only" and set(info) == keys and {k: cap[k] for k in keys} == info
     assert status_with == status_without, "research 資訊欄不影響 /health/deep 的狀態碼"
+
+
+def test_D_76_capabilities_carry_the_contract_keys_and_fetch_hosts_follow_the_admin_entries(
+        env: Env, make_env: Callable[..., Env], fake: Path) -> None:
+    """INT-08：契約 §2.1 的五個鍵——`sdd_root`、`research_root`、`scaffold_root`、`repo_writable`、
+    `fetch_hosts`。`fetch_hosts`＝有效 FETCH 清單：部署基底，加上 ADMIN 新增且啟用中的條目
+    （停用即消失；WEB 條目不算）；無資料庫時仍 200、回部署基底。"""
+    cfg = env.settings
+    base = list(cfg.research_fetch_allowlist)
+    cap = env.get("/research/capabilities").json()
+    assert cap["sdd_root"] == str(cfg.sdd_root) and cap["research_root"] == str(cfg.research_root)
+    assert cap["scaffold_root"] is None, "軌道 B（BRIDGE_SCAFFOLD_ROOT）屬 P1：P0 一律停用"
+    assert isinstance(cap["repo_writable"], bool)
+    assert cap["fetch_hosts"] == base and cap["db"] is True
+    added = env.post("/research/allowlist", {
+        "list_kind": "FETCH", "host": "docs.example.com", "layer": "INDUSTRY", "added_by": ADMIN})
+    assert added.status_code == 201, added.text
+    web = env.post("/research/allowlist", {
+        "list_kind": "WEB", "host": "blog.example.org", "layer": "INDUSTRY", "added_by": ADMIN})
+    assert web.status_code == 201, web.text
+    assert env.get("/research/capabilities").json()["fetch_hosts"] == [*base, "docs.example.com"]
+    off = env.patch(f"/research/allowlist/{added.json()['id']}",
+                    {"enabled": False, "disabled_by": ADMIN})
+    assert off.status_code == 200
+    assert env.get("/research/capabilities").json()["fetch_hosts"] == base, "停用即消失"
+    on = env.patch(f"/research/allowlist/{added.json()['id']}", {"enabled": True})
+    assert on.status_code == 200
+    assert env.get("/research/capabilities").json()["fetch_hosts"] == [*base, "docs.example.com"]
+    nodb = make_env(fake, None).get("/research/capabilities")
+    assert nodb.status_code == 200 and nodb.json()["db"] is False
+    assert nodb.json()["fetch_hosts"] == base
 
 
 # ══ AT-960-3-1：合法建立 ════════════════════════════════════════════════════════════════════
@@ -429,8 +465,14 @@ def test_AT_960_3_4_a_failed_init_is_marked_and_only_retry_init_in_that_state_he
 
 def test_AT_960_3_4_retry_init_is_refused_in_every_other_state_with_zero_writes(
         env: Env, popen_log: list[list[str]]) -> None:
+    """「其他狀態」＝`flow_status` 不是 FAILED 的一切（D-77 之後 FAILED 不再限於 `init_failed:`；
+    stage run 失敗或取消的重試見下一個測試）。`flow_detail` 不是判準：IDLE 帶著殘留的
+    `init_failed:` 字樣一樣被拒。"""
     assert env.rdb is not None
-    cases = {"escalated": ("ESCALATED", ""), "failed-but-not-init": ("FAILED", "stage_failed:x")}
+    cases = {"escalated": ("ESCALATED", ""), "running": ("RUNNING", ""),
+             "waiting": ("WAITING_HUMAN", ""), "blocked": ("BLOCKED", ""),
+             "completed": ("COMPLETED", ""),
+             "idle-with-a-stale-detail": ("IDLE", "init_failed:fsm")}
     for slug, (status, detail) in cases.items():
         rid = create(env, slug)["research_id"]
         env.rdb.exec("UPDATE console.research_projects SET flow_status = %s, flow_detail = %s "
@@ -441,6 +483,41 @@ def test_AT_960_3_4_retry_init_is_refused_in_every_other_state_with_zero_writes(
         assert resp.json()["details"] == {"flowStatus": status, "flowDetail": detail}
         assert tree_digest(env.root) == before and len(popen_log) == calls
         assert db_snapshot(env, rid) == snap, slug
+
+
+def test_AT_960_3_4_retry_also_clears_a_stage_failure_marker_and_derives_the_status_from_the_fsm(
+        env: Env, popen_log: list[list[str]]) -> None:
+    """D-77：stage run 失敗或取消的游標是 `FAILED＋flow_detail＝<exit_reason>`，「重試」（無
+    `generation` 的 `:reinit`）在 FAILED 下一律可用：沒有缺的東西要補（不寫檔、不起 FSM 子行程），
+    只清掉失敗標記；`flow_status` 依 FSM 現態重新衍生（AGENT_LOAD＝IDLE、HUMAN_PENDING＝
+    WAITING_HUMAN），步驟與相態不動。"""
+    assert env.rdb is not None
+    first = create(env, "stage-failed")
+    rid, rp_no = first["research_id"], first["rp_no"]
+    env.rdb.exec("UPDATE console.research_projects SET flow_status = 'FAILED', flow_detail = "
+                 "'step_timeout' WHERE id = %s", rid)
+    workspace = env.root / "stage-failed"                  # outbox 住在工作區根之下：只比專案工作區
+    files, calls = tree_digest(workspace), len(popen_log)
+    resp = env.post(f"/research/projects/{rid}:reinit", {})
+    assert resp.status_code == 200, resp.text
+    row = project_row(env, rid)
+    assert (row["flow_step"], row["flow_phase"], row["flow_status"], row["flow_detail"]) == (
+        "topic", "INGESTED", "IDLE", "") and row["rp_no"] == rp_no
+    assert resp.json()["flow"] == {"step": "topic", "phase": "INGESTED", "status": "IDLE",
+                                   "detail": ""}
+    assert tree_digest(workspace) == files and len(popen_log) == calls, "不寫檔、不起 FSM 子行程"
+    again = env.post(f"/research/projects/{rid}:reinit", {})        # 已清掉標記：再重試＝409
+    assert (again.status_code, again.json()["reason"]) == (409, "stage_conflict")
+    # HUMAN_PENDING 下的失敗（例：POST_HUMAN 審查輸出無效）：清掉標記後是 WAITING_HUMAN、不是 IDLE
+    other = _control_in_human_pending(env)
+    env.rdb.exec("UPDATE console.research_projects SET flow_step = 'studio', flow_phase = "
+                 "'REVISING', flow_status = 'FAILED', flow_detail = 'review_invalid' WHERE id = %s",
+                 other)
+    healed = env.post(f"/research/projects/{other}:reinit", {})
+    assert healed.status_code == 200, healed.text
+    row = project_row(env, other)
+    assert (row["flow_step"], row["flow_phase"], row["flow_status"], row["flow_detail"]) == (
+        "studio", "REVISING", "WAITING_HUMAN", "")
 
 
 # ══ 四類處理函式（原 501 骨架，BR-C 已落地）：先驗證、後動作；被拒的請求不寫任何東西 ═════════════
@@ -666,7 +743,52 @@ def test_AT_960_6_6_two_concurrent_puts_on_the_same_base_one_wins_and_one_confli
     assert rows[3] == (4, "HUMAN", ALICE, 3, win["sha256"])
     on_disk = env.root / "demo" / "01_specs" / "PRD-v0.4.0-draft.md"
     assert hashlib.sha256(on_disk.read_bytes()).hexdigest() == win["sha256"]
-    assert project_row(env, rid)["flow_phase"] == "DRAFTING"
+    # 游標依 FSM 現態取合法對映（INT-05）：專案還在 AGENT_LOAD（只有研究步驟），人工存稿不把游標拉去
+    # studio／DRAFTING（那對 AGENT_LOAD 不合法）；TCS 原文「flow_phase 回 DRAFTING」見 FSM 在
+    # SPEC_DRAFTING 的下一個測試
+    assert project_row(env, rid)["flow_phase"] == "INGESTED"
+
+
+def test_AT_960_6_6_a_human_save_moves_the_cursor_to_a_phase_the_fsm_state_allows(
+        env: Env) -> None:
+    """人工存 PRD 之後游標一律是 FSM 現態的合法對映（`prd_save_cursor`）：SPEC_DRAFTING 回 DRAFTING
+    （API-RP-09）、HUMAN_PENDING 的 GATE0_PENDING 降成 REVISING（head 已是未審查的新版）、
+    `flow_status` 依 FSM 衍生；每一次存稿後 `:reconcile` 都是一致的（INT-05）。"""
+    from app.research.gates.reconcile import FLOW_FSM_MAPPING
+
+    assert env.rdb is not None
+    rid = create(env, "cursor")["research_id"]
+    ctx = fsm_ctx_of(env, rid)
+    fsm_ops.transition(ctx, to="SPEC_DRAFTING", reason="start drafting")
+    env.rdb.exec("UPDATE console.research_projects SET flow_step = 'studio', flow_phase = "
+                 "'REVISING' WHERE id = %s", rid)
+    url = f"/research/projects/{rid}/prd"
+    first = env.put(url, {"base_version": 0, "content": "# v1\n", "author": ALICE})
+    assert first.status_code == 201, first.text
+    row = project_row(env, rid)
+    assert (row["flow_step"], row["flow_phase"], row["flow_status"]) == (
+        "studio", "REVISING", "IDLE"), "SPEC_DRAFTING 允許 REVISING：合法就保持"
+    env.rdb.exec("UPDATE console.research_projects SET flow_phase = 'REVIEWING' WHERE id = %s", rid)
+    second = env.put(url, {"base_version": 1, "content": "# v2\n", "author": ALICE})
+    assert second.status_code == 201
+    assert project_row(env, rid)["flow_phase"] == "DRAFTING", "REVIEWING 對 SPEC_DRAFTING 不合法"
+    fsm_ops.transition(ctx, to="SCG_VALIDATION", reason="ready for review")
+    fsm_ops.gate(ctx, gate="SCG_VALIDATION", result="PASS", reason="the review passed")
+    assert fsm_ops.current_state(ctx) == "HUMAN_PENDING"
+    env.rdb.exec("UPDATE console.research_projects SET flow_phase = 'GATE0_PENDING', "
+                 "flow_status = 'WAITING_HUMAN' WHERE id = %s", rid)
+    third = env.put(url, {"base_version": 2, "content": "# v3\n", "author": ALICE})
+    assert third.status_code == 201
+    row = project_row(env, rid)
+    assert (row["flow_step"], row["flow_phase"], row["flow_status"]) == (
+        "studio", "REVISING", "WAITING_HUMAN"), "人改過＝等 Gate 0 的前提不再成立；狀態依 FSM 衍生"
+    assert (row["flow_step"], row["flow_phase"]) in {
+        (step, phase) for step, phases in FLOW_FSM_MAPPING["HUMAN_PENDING"].items()
+        for phase in phases}
+    report = env.post(f"/research/projects/{rid}:reconcile", {})
+    assert report.status_code == 200
+    mapping = next(c for c in report.json()["checks"] if c["id"] == "fsm_flow_mapping")
+    assert mapping["status"] == "ok", mapping
 
 
 def test_AT_960_6_6_bad_prd_content_is_422_and_adds_no_version(env: Env) -> None:
@@ -757,7 +879,11 @@ def test_cancel_archive_and_restore(env: Env) -> None:
     assert done.status_code == 200 and done.json()["stopped_run_id"] == run_id
     assert env.rdb.one("SELECT status, exit_reason FROM console.research_stage_runs "
                        "WHERE id = %s", run_id) == ("CANCELLED", "cancelled")
-    assert project_row(env, rid)["flow_status"] == "CANCELLED"
+    cancelled = project_row(env, rid)                    # D-77：取消與失敗同一條路——FAILED＋原因
+    assert (cancelled["flow_status"], cancelled["flow_detail"]) == ("FAILED", "cancelled")
+    assert (cancelled["flow_step"], cancelled["flow_phase"]) == ("topic", "INGESTED")
+    assert done.json()["flow"] == {"step": "topic", "phase": "INGESTED", "status": "FAILED",
+                                   "detail": "cancelled"}
     assert env.post(f"/research/projects/{rid}:archive", {}).status_code == 200
     assert project_row(env, rid)["archived_at"] is not None
     assert create(env, "demo")["research_id"] != rid, "封存後 slug 可再用"
@@ -844,6 +970,11 @@ def test_AT_960_15_8_generation_next_abandons_the_old_key_in_one_transaction(
     assert (refused.status_code, refused.json()["reason"]) == (409, "fsm_state_conflict")
     assert refused.json()["details"]["current_state"] == "HUMAN_PENDING"
     assert db_snapshot(env, other) == control_snap and len(popen_log) == calls
+    # INT-05：換世代後游標（studio／REVISING）與新鍵（AGENT_LOAD）的對映一致（放在最後：對帳會
+    # 追加事件）
+    mapping = next(c for c in env.post(f"/research/projects/{rid}:reconcile", {}).json()["checks"]
+                   if c["id"] == "fsm_flow_mapping")
+    assert mapping["status"] == "ok", mapping
 
 
 def test_AT_960_15_E_1_a_failed_new_key_leaves_the_db_ahead_and_retry_init_heals_it(

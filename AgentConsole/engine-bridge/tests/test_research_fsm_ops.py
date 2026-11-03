@@ -455,6 +455,37 @@ def test_AT_960_13_6_reads_never_touch_the_state_file(
     assert (sha256_of(path), path.stat().st_mtime_ns) == before, "唯讀路徑不寫狀態檔"
 
 
+# ══ INT-14 ④：容器內的恢復指令另附主機 PowerShell 形式 ═════════════════════════════════════════
+@pytest.mark.parametrize("container, hostname, expected", [
+    (True, "9f8e7d6c5b4a", "docker exec -it 9f8e7d6c5b4a sh"),        # Docker 預設主機名＝容器 ID
+    (True, "aisdlc-engine-bridge", "docker exec -it aisdlc-engine-bridge sh"),
+    (False, "9f8e7d6c5b4a", None),                              # 主機上的 Bridge：路徑本來就可讀
+    (True, None, None), (True, "", None),
+    (True, "a b", None), (True, "x;rm -rf /", None), (True, "$(id)", None),      # 不是合法識別字
+])
+def test_INT_14_the_host_form_enters_the_container_and_is_never_guessed(
+        container: bool, hostname: str | None, expected: str | None) -> None:
+    assert fsm_ops.host_enter_command(container=container, hostname=hostname) == expected
+
+
+def test_INT_14_an_escalated_409_in_a_container_carries_the_host_powershell_form(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    ctx = fsm_ops.FsmCtx(sdd_root=Path("/sdd/AISDLC_SDD_v0.30"),
+                         state_dir=tmp_path / "build" / "reports" / "fsm", key="research-demo")
+    state = {"current_state": "ESCALATION"}
+    monkeypatch.setenv("HOSTNAME", "9f8e7d6c5b4a")
+    monkeypatch.setattr(fsm_ops, "in_container", lambda: False)
+    host = fsm_ops.escalated_error(ctx, state).body["details"]["recovery"]
+    assert set(host) == {"target", "powershell", "posix"}, "主機上的 Bridge：形狀與此前逐鍵相同"
+    monkeypatch.setattr(fsm_ops, "in_container", lambda: True)
+    boxed = fsm_ops.escalated_error(ctx, state).body["details"]["recovery"]
+    assert set(boxed) == {"target", "powershell", "posix", "host_powershell"}
+    assert boxed["host_powershell"] == "docker exec -it 9f8e7d6c5b4a sh"
+    assert {k: boxed[k] for k in host} == host, "容器內路徑照給（容器裡的真實路徑），只是另附一個鍵"
+    assert "sh" == boxed["host_powershell"].rsplit(" ", 1)[1] and "resume-from-escalation" in (
+        boxed["posix"]), "進容器後貼 posix 那一行"
+
+
 # ══ AT-960-13-8：人工恢復後預算不歸零 ═══════════════════════════════════════════════════════
 @pytest.mark.parametrize("after", ["fail", "pass"])
 def test_AT_960_13_8_after_a_human_resume_the_budget_is_not_reset(

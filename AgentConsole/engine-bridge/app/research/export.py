@@ -21,7 +21,7 @@ from decimal import Decimal
 from typing import Any
 
 from .gates.aggregate import CONDITION_KEYS
-from .gates.evidence import CELL_MAX_CHARS, license_pending_numbers
+from .gates.evidence import CELL_MAX_CHARS, is_license_unknown, license_pending_numbers
 from .gates.schemas import AXIS_BY_LABEL, MISSING_TEXT, REVIEW_PARAMS, SCHEMA_REV
 
 ISSUE_SCOPE_SCHEMA_REV = 1
@@ -252,7 +252,7 @@ def _cell(value: object) -> str:
 
 
 def _license_cell(spdx: str | None) -> str:
-    return MISSING_TEXT if spdx is None or spdx in ("", "UNKNOWN", MISSING_TEXT) else spdx
+    return MISSING_TEXT if is_license_unknown(spdx) else str(spdx)
 
 
 def _locator(src: Mapping[str, Any]) -> str:

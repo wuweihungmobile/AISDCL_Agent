@@ -51,8 +51,14 @@ CONCLUSIONS = ("WEAKEN", "LIMIT", "IRRELEVANT", "NOT_FOUND", "NOT_SEARCHED")
 SEARCH_TOOLS = ("WebSearch", "WebFetch")
 #: 風險標籤中會把強度封頂在 MEDIUM 的三個（模板 §3.3 封頂列）。
 CAPPING_TAGS = frozenset({"IMM", "SELF", "SCOPE"})
-#: 授權待查的 GPL 系 SPDX 前綴（判定表；`GPL-3.0-only`、`AGPL-3.0-or-later` 等；測試釘住）。
-GPL_FAMILY_PREFIXES: tuple[str, ...] = ("GPL", "AGPL")
+#: 授權「未見」的寫法（D-80；比對一律大小寫不敏感、先修剪空白）：空字串、agent 依模板「查不到寫
+#: UNKNOWN」的值、模板的「未見」。`None`（DB 的 NULL）另判。
+_LICENSE_UNKNOWN_FORMS = frozenset({"", "unknown", MISSING_TEXT})
+#: SPDX 複合表達式的連接詞：以空白或括號與前後分隔的 `OR`／`AND`／`WITH`；`GPL-3.0-or-later` 的
+#: `-or-` 是識別碼的一部分（前後是連字號），不算。
+_COMPOSITE_LICENSE_RE = re.compile(r"(?:^|[\s()])(?:OR|AND|WITH)(?:[\s()]|$)", re.IGNORECASE)
+#: GPL／AGPL 系（AC-R2P-05-5）。字界 `\b` 使 `LGPL` 不命中（`GPL` 前面是字母）：LGPL 是已知授權。
+_GPL_FAMILY_RE = re.compile(r"\bA?GPL", re.IGNORECASE)
 
 _NO_RE = {"Q": re.compile(r"^Q-\d{3,4}$"), "S": re.compile(r"^S-\d{3,4}$"),
           "E": re.compile(r"^E-\d{3,4}$")}
@@ -515,12 +521,24 @@ def _number_of(identifier: Any) -> int | None:
 
 
 # ══ 授權待查（模板 §4.1 統計行；資安審查輸入）═══════════════════════════════════════════════════
+def is_license_unknown(license_spdx: str | None) -> bool:
+    """授權條款「未見」：`null`、空白、`UNKNOWN`、`未見`（大小寫不敏感）。矩陣的授權欄把這些一律渲染成
+    `未見`（D-70），「授權待查」計數也以它為首要判準，兩處共用這一個函式。"""
+    return license_spdx is None or license_spdx.strip().casefold() in _LICENSE_UNKNOWN_FORMS
+
+
 def is_license_pending(license_spdx: str | None) -> bool:
-    """授權待查＝GPL／AGPL 系，或授權條款為未見（`null`、`UNKNOWN`、`未見`）。"""
-    if license_spdx is None or license_spdx.strip() in ("", "UNKNOWN", MISSING_TEXT):
+    """授權待查（D-80；矩陣頁頂計數與資安審查輸入；前端 `isLicensePending` 與它對拍同一張期望表
+    `tests/fixtures/research/license_pending_cases.json`）：
+      · 授權為「未見」（見 `is_license_unknown`）＝待查；
+      · 含 `OR`／`AND`／`WITH` 的複合表達式＝知道授權、要人判，原樣顯示、**不**待查（即使有 GPL）；
+      · 其餘依 GPL／AGPL 系判（`\\bA?GPL`）；LGPL 等已知授權不待查。"""
+    if is_license_unknown(license_spdx):
         return True
-    upper = license_spdx.strip().upper()
-    return any(upper == p or upper.startswith(p + "-") for p in GPL_FAMILY_PREFIXES)
+    text = str(license_spdx).strip()
+    if _COMPOSITE_LICENSE_RE.search(text):
+        return False
+    return _GPL_FAMILY_RE.search(text) is not None
 
 
 def license_pending_numbers(items: Sequence[Mapping[str, Any]],

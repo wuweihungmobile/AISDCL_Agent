@@ -22,9 +22,12 @@ from app.research.db import ResearchDbError
 from app.research.gate_cli import run as run_gate_cli
 from app.research.gates import aggregate, prd_schema
 from app.research.gates.evidence import (
+    CELL_MAX_CHARS,
+    MIN_EVIDENCE_ROWS,
     EvidenceContext,
     compute_unanchored,
     dedupe_rows,
+    is_license_pending,
     license_pending_numbers,
     normalize_locator,
     number_tokens,
@@ -32,6 +35,7 @@ from app.research.gates.evidence import (
     validate_evidence_items,
 )
 from app.research.gates.ingest import plan_ingest
+from app.research.gates.review_card import validate_review_dimension
 from app.research.gates.schemas import (
     DIMENSION_FLOOR,
     DIMENSIONS,
@@ -149,6 +153,20 @@ def test_AT_960_9_1_each_single_mutation_names_its_rule(name: str) -> None:
     assert GOLDEN != evidence(edit) and rule in found, (name, found)
 
 
+def test_AT_960_9_1_the_cell_limit_is_inclusive_a_600_character_cell_passes_and_601_is_named_r9(
+) -> None:
+    """儲存格上限 600 是「含」邊界：恰 600 字元合格、601 字元才點名 R9（突變 `>`→`>=` 會讓
+    前者誤判）。"""
+    assert CELL_MAX_CHARS == 600, "TCS §5.1 值域常數"
+    exact = evidence(_set("items[0].f6", "長" * CELL_MAX_CHARS))
+    assert validate_evidence_items(exact) == [], "恰 600 字元：整份檔案仍然合格"
+    over = evidence(_set("items[0].f6", "長" * (CELL_MAX_CHARS + 1)))
+    assert "R9" in hit_rules(over) and hit_rules(over) == {"R9"}
+    # 其他文字欄位（不只 f6）同一條界線：search_log 的 query 與 sources 的 title 各驗一次
+    assert validate_evidence_items(evidence(_set("sources[0].title", "題" * CELL_MAX_CHARS))) == []
+    assert "R9" in hit_rules(evidence(_set("sources[0].title", "題" * (CELL_MAX_CHARS + 1))))
+
+
 def test_AT_960_9_1_context_rules_r15_and_r16() -> None:
     doc = evidence()
     assert "R16" in hit_rules(doc, EvidenceContext(issue_scope_sha256=HEX64))
@@ -238,6 +256,36 @@ def test_AT_960_9_4_the_ingest_plan_flags_unanchored_rows_and_counts_qualifying_
     assert [s["search_no"] for s in later.searches] == [4, 5, 6, 7, 8], "增補只入庫新增的搜尋"
 
 
+def test_AT_960_9_4_the_evidence_gate_is_open_at_exactly_three_qualifying_rows_and_shut_at_two(
+) -> None:
+    """證據閘（PRD §5.1.1）：層級 ≥ V2、非 UNANCHORED、非 clue_only 的列至少
+    `MIN_EVIDENCE_ROWS`＝3。邊界兩側各釘一次：恰 3 列放行、2 列不放行（突變 3→2 會讓後者
+    誤放行）。"""
+    assert MIN_EVIDENCE_ROWS == 3, "初值、未校準：常數登記並以測試釘住"
+
+    def plan_of(edit: Callable[[dict[str, Any]], None] | None = None) -> Any:
+        return plan_ingest(evidence(edit), matrix_version=1, raw_text_of=lambda _ref: None)
+
+    def v1(*indexes: int) -> Callable[[dict[str, Any]], None]:
+        def edit(doc: dict[str, Any]) -> None:
+            for index in indexes:
+                doc["items"][index]["f7"] = "V1"
+        return edit
+
+    assert (plan_of().qualifying, plan_of().enough) == (4, True)
+    three = plan_of(v1(3))
+    assert (three.qualifying, three.enough) == (3, True), "恰 3 列合格：證據閘開"
+    two = plan_of(v1(2, 3))
+    assert (two.qualifying, two.enough) == (2, False), "2 列合格：證據閘不開"
+    # 其餘三種「不合格」的形態各自讓合格列少一列：clue_only 來源、UNANCHORED 列
+    clue = plan_of(lambda doc: doc["items"][3].update(source_no="S-004"))
+    assert (clue.qualifying, clue.enough) == (3, True), "引用 T3 線索來源的列不算合格"
+    doc = evidence()
+    doc["sources"][0]["fetch_refs"] = ["F-0001"]
+    unanchored = plan_ingest(doc, matrix_version=1, raw_text_of={"F-0001": "與數字無關"}.get)
+    assert unanchored.unanchored == ["E-001"] and unanchored.qualifying == 3 and unanchored.enough
+
+
 # ══ AT-960-9-5：再次研究產生新矩陣版本，舊版保留，檔案雜湊等於最新版 ═════════════════════════════
 def test_AT_960_9_5_a_second_research_run_adds_a_matrix_version_and_keeps_the_old_rows(
         rig: Any) -> None:
@@ -277,6 +325,46 @@ def test_AT_960_9_6_license_pending_counts_gpl_family_and_unknown_licenses() -> 
                                                        "E-008"]
     head = render(evidence()).text.split("\n")[3]            # 矩陣頁頂：GPL／AGPL 與未見的計數
     assert head.startswith("> 授權待查：3 筆") and "E-001、E-003、E-004" in head
+
+
+LICENSE_CASES: dict[str, Any] = json.loads(
+    (CONTENT.parents[1] / "license_pending_cases.json").read_text(encoding="utf-8"))
+
+
+def test_AT_960_9_6_the_shared_table_decides_every_license_case_like_the_frontend() -> None:
+    """D-80 雙端對拍：這張表也由前端 `isLicensePending` 的測試逐列斷言；Bridge 這端逐列都要對。"""
+    cases = LICENSE_CASES["cases"]
+    assert LICENSE_CASES["schema"] == 1
+    wrong = [(c["license_spdx"], c["pending"]) for c in cases
+             if is_license_pending(c["license_spdx"]) is not c["pending"]]
+    assert wrong == [], f"與共用期望表不符：{wrong}"
+    texts = [c["license_spdx"] for c in cases if c["license_spdx"] is not None]
+    unknowns = {t for t in texts if t.strip().casefold() == "unknown"}
+    assert len(unknowns) >= 3, "UNKNOWN 的大小寫與空白變體"
+    assert sum(t.strip().upper().startswith("LGPL") for t in texts) >= 2, "LGPL 列"
+    composite = sum(bool(re.search(r"\b(OR|AND|WITH)\b", t, re.IGNORECASE)) for t in texts)
+    assert composite >= 5, "複合式列"
+    gpl_family = sum(re.match(r"\s*A?GPL", t, re.IGNORECASE) is not None for t in texts)
+    assert gpl_family >= 5, "GPL／AGPL 列"
+    assert sum(c["pending"] for c in cases) >= 8 and sum(not c["pending"] for c in cases) >= 8
+
+
+def test_AT_960_9_6_the_matrix_header_and_the_license_cell_follow_the_same_table() -> None:
+    """渲染路徑：授權待查計數（資安審查輸入同源）與矩陣授權欄的「未見」，對每個表列都與判準一致。"""
+    for case in LICENSE_CASES["cases"]:
+        def edit(doc: dict[str, Any], spdx: Any = case["license_spdx"]) -> None:
+            doc["sources"][0]["license_spdx"] = spdx          # E-001 的來源 S-001
+            for other in (2, 4):                  # S-003、S-005 原為 null：先壓成已知授權
+                doc["sources"][other]["license_spdx"] = "MIT"
+        text = render(evidence(edit)).text
+        head = text.split("\n")[3]
+        expected = 1 if case["pending"] else 0
+        assert head.startswith(f"> 授權待查：{expected} 筆"), (case["license_spdx"], head)
+        row = next(ln for ln in text.split("\n") if ln.startswith("| S-001 |"))
+        cell = [c.strip() for c in row.strip().strip("|").split("|")][7]
+        spdx = case["license_spdx"]
+        unknown = spdx is None or spdx.strip().casefold() in ("", "unknown", "未見")
+        assert cell == ("未見" if unknown else spdx), (spdx, cell)
 
 
 def test_AT_960_9_7_locators_are_normalised_and_duplicates_keep_a_reference_count() -> None:
@@ -576,6 +664,17 @@ def test_AT_960_12_2_the_four_conditions_each_veto_a_pass_on_their_own() -> None
     assert all(ok.judgement.conditions.values())
     exact = decide(scores(85, 85, 85, 85))
     assert exact.verdict == "PASS" and exact.judgement.w100 == 8500, "W100 剛好 8500 通過"
+    # TCS 首組輸入：預檢過、W100 8500、最低維度恰 60、未結 P1 為 0 ⇒ PASS（地板與門檻兩個邊界
+    # 同時成立）
+    edge = decide(scores(100, 100, 60, 75))
+    assert (edge.judgement.w100, edge.judgement.min_dimension_score) == (8500, 60)
+    assert edge.verdict == "PASS" and edge.gate_call == "PASS" and edge.judgement.passed is True
+    assert edge.judgement.conditions["all_dimensions_ge_floor"] is True, "最低維度恰 60：不低於地板"
+    floor_only = decide(scores(100, 100, 100, 60))               # 只有地板在邊界、W100 遠高於門檻
+    assert floor_only.judgement.w100 == 9200 and floor_only.verdict == "PASS"
+    assert floor_only.judgement.conditions["all_dimensions_ge_floor"] is True
+    below_floor = decide(scores(100, 100, 100, 59))
+    assert below_floor.judgement.conditions["all_dimensions_ge_floor"] is False
     cases = {
         "W100 差一格（8495）": (decide(scores(85, 85, 84, 86)), "weighted_ge_threshold"),
         "最低維度 59": (decide(scores(100, 100, 100, 59)), "all_dimensions_ge_floor"),
@@ -637,3 +736,64 @@ def test_AT_960_12_E_3_the_database_check_agrees_with_the_judgement(rdb: Any) ->
     row["weighted_score"] = "85.00"                      # 邊界：整數判定通過者，DB 同樣放行
     assert db.insert_review_round(research_id=ids.research, actor="bridge",
                                   round=row)["applied"] is True
+
+
+# ══ AT-960-12-3（單元部分）：審查者單維度輸出的邊界規則 ═══════════════════════════════════════════
+REVIEW_ARCH: dict[str, Any] = json.loads(
+    (CONTENT / "reviews" / "common" / "round-1" / "architecture.json").read_text(encoding="utf-8"))
+
+
+def review_doc(edit: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+    doc = copy.deepcopy(REVIEW_ARCH)
+    if edit is not None:
+        edit(doc)
+    return doc
+
+
+def review_rules(doc: dict[str, Any]) -> list[tuple[str, str]]:
+    """(規則, 路徑) 清單；證據編號取黃金證據檔的四列。"""
+    return [(v.rule, v.path) for v in validate_review_dimension(
+        doc, dimension="ARCHITECTURE", round_no=1, prd_sha256=REVIEW_ARCH["prd_sha256"],
+        evidence_numbers=ROWS)]
+
+
+def with_item_score(score: int, note: str) -> Callable[[dict[str, Any]], None]:
+    """第一個 rubric 項目改成指定分數與說明；`score` 一併改成五項之和（加總規則不是被測對象）。"""
+    def edit(doc: dict[str, Any]) -> None:
+        doc["rubric"][0].update(score=score, note=note)
+        doc["score"] = sum(r["score"] for r in doc["rubric"])
+    return edit
+
+
+def test_AT_960_12_3_the_golden_reviewer_file_is_valid() -> None:
+    assert review_rules(review_doc()) == []
+
+
+def test_AT_960_12_3_an_item_scoring_18_or_more_must_cite_a_prd_anchor_in_its_note() -> None:
+    """score≥18 的 rubric 項目 note 必含 `§`：恰 18 無 § ⇒ V3；17 無 § ⇒ 通過；18 有 § ⇒ 通過
+    （突變 `>=18`→`>=19` 會讓第一條漏網）。"""
+    bare = "沒有任何錨點的泛泛說明"
+    assert review_rules(review_doc(with_item_score(18, bare))) == [("V3", "rubric[0].note")]
+    assert review_rules(review_doc(with_item_score(19, bare))) == [("V3", "rubric[0].note")]
+    assert review_rules(review_doc(with_item_score(20, bare))) == [("V3", "rubric[0].note")]
+    assert review_rules(review_doc(with_item_score(17, bare))) == []
+    assert review_rules(review_doc(with_item_score(0, bare))) == []
+    assert review_rules(review_doc(with_item_score(18, "已核對 §9.3：邊界清楚"))) == []
+
+
+def anchored(anchor: str) -> Callable[[dict[str, Any]], None]:
+    def edit(doc: dict[str, Any]) -> None:
+        doc["defects"][0]["prd_anchor"] = anchor
+    return edit
+
+
+def test_AT_960_12_3_a_defect_anchor_must_name_one_of_the_14_house_chapters() -> None:
+    """prd_anchor 的章號是家規 14 章之一（§1～§14）：§14 通過、§15 與 §0 拒絕（突變
+    `1[0-4]`→`1[0-5]` 會讓 §15 通過）；節號與 ID 後綴照文法。"""
+    good = ["§1", "§9", "§10", "§14", "§9.4", "§14.12", "§6/NFR-001", "§1.2/AC-001-1"]
+    bad = ["§15", "§0", "§19", "§100", "§9.123", "9.4", "§", "§ 9", "§9.4/xx", "§9.4/"]
+    for anchor in good:
+        assert review_rules(review_doc(anchored(anchor))) == [], anchor
+    for anchor in bad:
+        found = review_rules(review_doc(anchored(anchor)))
+        assert found == [("V4", "defects[0].prd_anchor")], anchor

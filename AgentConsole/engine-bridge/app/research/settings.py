@@ -5,7 +5,8 @@
   1. `parse_research_env`：把環境映射解成研究面欄位，驗證後由 `load_settings` 併入 `Settings`
      的 `research_*` 欄位；
   2. 工作區根的預設與允許根的處置（見該函式）；
-  3. `research_info`：`GET /research/capabilities` 與 `GET /health/deep` 共用的資訊欄。
+  3. `research_info`：`GET /research/capabilities` 與 `GET /health/deep` 共用的八個資訊欄；
+     `research_capabilities`：capabilities 端點另加的五個契約鍵（D-76(1)）。
 
 預設值（`RESEARCH_DEFAULT_*`）住 `app/settings.py`（與 `DEFAULT_OUTBOUND_ALLOWLIST` 同處），測試與
 產品碼共用同一份，本模組只 import、不複製。
@@ -13,16 +14,18 @@
 from __future__ import annotations
 
 import math
+import os
 import re
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..security import is_within
 from ..settings import (
+    REPO_ROOT,
     RESEARCH_DEFAULT_FETCH_ALLOWLIST,
     RESEARCH_DEFAULT_FETCH_MAX_BYTES,
     RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS,
@@ -30,6 +33,7 @@ from ..settings import (
     RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS,
     SettingsError,
     _anchor_guard,
+    _looks_like_monorepo,
     _parse_write_token,
 )
 
@@ -51,9 +55,13 @@ RESEARCH_ENV_VARS: tuple[str, ...] = (
 
 #: 量不到的資訊一律標這個字樣，不省略鍵（TCS AT-960-2-7）。
 NOT_EVALUABLE = "NOT-EVALUABLE"
-#: `research_info` 的鍵集合（固定；`/health/deep` 的 `research` 與 capabilities 逐鍵相同）。
+#: `research_info` 的鍵集合（固定；`/health/deep` 的 `research` 與 capabilities 都含這八個鍵）。
 INFO_KEYS: tuple[str, ...] = (
     "mode", "root", "db", "claude_cli", "gh_cli", "git", "web_layer_enabled", "scaffold_templates")
+#: `GET /research/capabilities` 在 `INFO_KEYS` 之上多帶的契約鍵（API 契約 §2.1；D-76(1)）。只有
+#: capabilities 端點帶（`/health/deep` 只當資訊、不查資料庫，鍵集合維持八個）。
+CAPABILITY_EXTRA_KEYS: tuple[str, ...] = (
+    "sdd_root", "research_root", "scaffold_root", "repo_writable", "fetch_hosts")
 
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
 #: 一個 stage 步驟牆鐘的上界（秒）：一天。再長的值只會是誤設。
@@ -207,4 +215,25 @@ def research_info(cfg: Settings) -> dict[str, Any]:
         "git": {"ok": git, "version": NOT_EVALUABLE},
         "web_layer_enabled": bool(cfg.research_web_allowlist),
         "scaffold_templates": [],
+    }
+
+
+def repo_writable() -> bool:
+    """軌道 A（分流到既有模組）需要寫 monorepo：Bridge 在 monorepo 內且該目錄可寫＝真；容器內
+    （`REPO_ROOT` 不像 monorepo、或唯讀掛載）＝假。只做權限探測（`os.access`），不寫任何東西。"""
+    return _looks_like_monorepo(REPO_ROOT) and os.access(REPO_ROOT, os.W_OK)
+
+
+def research_capabilities(cfg: Settings, *, fetch_hosts: Sequence[str]) -> dict[str, Any]:
+    """`GET /research/capabilities` 的本文：`research_info` 的八個鍵，加上契約 §2.1 的五個
+    （`CAPABILITY_EXTRA_KEYS`）。`fetch_hosts` 由呼叫端給（有效 FETCH 清單＝部署基底 ∪ 啟用中的
+    ADMIN 條目；後者在資料庫，這裡不查）。`scaffold_root` 在 P0 恆為 `None`（軌道 B 的
+    `BRIDGE_SCAFFOLD_ROOT` 屬 P1，未實作＝停用）。"""
+    return {
+        **research_info(cfg),
+        "sdd_root": None if cfg.sdd_root is None else str(cfg.sdd_root),
+        "research_root": str(cfg.research_root),
+        "scaffold_root": None,
+        "repo_writable": repo_writable(),
+        "fetch_hosts": list(fetch_hosts),
     }

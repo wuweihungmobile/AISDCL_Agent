@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "prefetch": "content/prefetch_pass.json",
   "steps": [
     {
       "role": "research",

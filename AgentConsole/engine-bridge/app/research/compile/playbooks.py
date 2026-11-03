@@ -303,9 +303,14 @@ def compile_stage(req: StageRequest) -> CompiledStage:
         "version": "1.0", "project": f"research-{req.slug}", "workflow_type": "auto",
         "global_invariants": {"max_retries_per_step": req.max_retries, "auto_compact_interval": 0},
         "tasks": [step.task() for step in steps]}
+    # `minimax.enable_kernel_brain: false`（D-79）：研究 run 的判定全由確定性的 evaluator 承擔
+    # （D-43），引擎的 Brain 一律釘關；不靠引擎預設值（引擎改預設，研究 run 仍是關的）。與子行程
+    # 環境不帶 `MINIMAX_*`（orchestrator 的 `ResearchRunHandle`）是兩道獨立的釘：前者擋「用
+    # Brain」，後者擋「ESCALATION 時引擎依金鑰是否存在而同步呼叫 MiniMax 的演化提案」。
     config = {"claude": {"command": req.claude_command, "extra_args": extra_args},
               "playbook": {"step_timeout_seconds": req.step_timeout_seconds},
-              "token_guard": {"auto_resume": False}}
+              "token_guard": {"auto_resume": False},
+              "minimax": {"enable_kernel_brain": False}}
     env = {"CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS": str(req.step_timeout_seconds * 1000)}
     return CompiledStage(
         stage=req.stage, round_no=req.round_no, steps=tuple(steps),

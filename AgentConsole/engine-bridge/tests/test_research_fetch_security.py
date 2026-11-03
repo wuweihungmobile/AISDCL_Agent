@@ -528,6 +528,25 @@ def test_AT_960_8_5_the_size_limit_is_the_configured_value_and_the_boundary_is_e
     assert record.outcome == "TOO_LARGE" and "Content-Length" in record.detail
 
 
+def test_AT_960_8_5_content_length_at_the_limit_is_accepted_and_one_more_is_refused() -> None:
+    """標頭宣告的 Content-Length 也是「含」邊界：恰等於上限放行、多 1 位元組才 TOO_LARGE（突變
+    `>`→`>=` 會把恰等於上限的回應擋下）。標頭值取預設上限與測試用的小上限各驗一次。"""
+    for limit in (LIMIT, 10):
+        def reply(declared: int) -> Reply:
+            headers = {"content-type": "text/plain", "content-length": str(declared)}
+            return Reply(200, headers, b"abc")
+
+        options = {} if limit == LIMIT else {"max_bytes": limit}
+        exact = make_rig(lambda call: reply(limit), **options)
+        record = exact.client.fetch("https://arxiv.org/x", layer="ACADEMIC").terminal
+        assert (record.outcome, record.raw_text) == ("OK", "abc"), (limit, record.detail)
+        over = make_rig(lambda call: reply(limit + 1),
+                        **({} if limit == LIMIT else {"max_bytes": limit}))
+        record = over.client.fetch("https://arxiv.org/x", layer="ACADEMIC").terminal
+        assert record.outcome == "TOO_LARGE" and "Content-Length" in record.detail, limit
+        assert record.raw_text is None, "超界不落地、不截斷"
+
+
 def test_AT_960_8_5_a_slow_body_and_a_late_empty_body_both_time_out_on_the_fake_clock() -> None:
     slow = make_rig(lambda call: Reply(200, {"content-type": "text/plain"},
                                        b"a" * (3 * 65_536), chunk_advance=8.0))

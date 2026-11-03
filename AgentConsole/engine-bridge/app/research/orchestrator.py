@@ -43,7 +43,14 @@ from . import export, fsm_ops, layout
 from .compile import CompiledStage, CompileError, StageRequest, compile_stage, defects_rel
 from .compile.playbooks import EVIDENCE_INDEX_REL, PREFETCH_INDEX_REL, PREVIOUS_EVIDENCE_REL
 from .db import ResearchDb, utc_now
-from .fetch import FetchClient, build_effective_allowlist, effective_limits, run_prefetch, task_for
+from .fetch import (
+    FetchBatch,
+    FetchClient,
+    build_effective_allowlist,
+    effective_limits,
+    run_prefetch,
+    task_for,
+)
 from .gates import aggregate
 from .gates.evidence import EvidenceContext, validate_evidence_items
 from .gates.ingest import plan_ingest
@@ -63,6 +70,7 @@ from .gates.review_card import (
     validate_review_dimension,
 )
 from .gates.schemas import DIMENSIONS, RUBRIC_REGISTRY, SCG_RETRY_LIMIT, violation_lines
+from .offline import OfflineFixtureError, fixture_file, load_batch, offline_reason
 from .outbox import DbBlocked, DurableWriter, FileRef, FileWrite, Op
 
 logger = logging.getLogger("bridge.research.orchestrator")
@@ -79,7 +87,10 @@ PRD_DRAFT_REL = "01_specs/PRD_draft.md"
 ADR_DRAFT_REL = "01_specs/adr_draft.md"
 LICENSE_PENDING_REL = "00_research/license_pending.json"
 DEFAULT_CLAUDE = "claude"
-_STRIPPED_PREFIXES = ("BRIDGE_", "SDD_")
+#: 研究 run 的引擎子行程環境不帶的名稱前綴：Bridge 自己的設定（`BRIDGE_*`）、SDD 寫入面（`SDD_*`）、
+#: Brain 的金鑰與端點（`MINIMAX_*`；D-79：引擎在 ESCALATION 時依金鑰是否存在決定要不要同步呼叫
+#: MiniMax——資料出口，且多耗約 11 秒；研究 run 不用 Brain，所以一律不給）。
+_STRIPPED_PREFIXES = ("BRIDGE_", "SDD_", "MINIMAX_")
 _STRIPPED_NAMES = frozenset({"PYTHONPATH", "GITHUB_TOKEN", "GH_TOKEN", "GH_ENTERPRISE_TOKEN"})
 _JSON_PATH_SAFE = re.compile(r"[^A-Za-z0-9_.\[\]-]")
 
@@ -87,7 +98,8 @@ _JSON_PATH_SAFE = re.compile(r"[^A-Za-z0-9_.\[\]-]")
 # ── 子行程環境（AT-960-7-E-2）──────────────────────────────────────────────────────────────────
 class ResearchRunHandle(RunHandle):
     """研究 stage 的引擎 run：子行程環境再剝掉 Bridge 的設定與機密（`BRIDGE_*`、`SDD_*`、
-    `PYTHONPATH`、GitHub 權杖）。父類只剝 SDD 寫入面的三個名字，所以哨兵值會一路走到假 claude。"""
+    `MINIMAX_*`、`PYTHONPATH`、GitHub 權杖）。父類只剝 SDD 寫入面的三個名字，所以哨兵值會一路走到
+    假 claude。"""
 
     def _child_env(self) -> dict[str, str]:
         env = super()._child_env()
@@ -228,6 +240,10 @@ class Orchestrator:
         self._poll = poll_seconds
         self._threads: dict[str, threading.Thread] = {}
         self._cancelled: set[str] = set()
+        #: stage run id → 該 run 開始前的游標相態（失敗、取消、回收時游標退回它；D-77）。
+        #: 記憶體內：重啟後查不到時改由事件帳推回（`_stable_phase`）。被取消的 run 的條目由
+        #: `settle_failed`（取消端點）取走，執行緒收到取消後不碰它。
+        self._prior_phase: dict[str, str] = {}
         self._guard = threading.RLock()
         self.journal = ReviewJournal(Path(writer.outbox.path).parent / "review-pending")
 
@@ -279,7 +295,8 @@ class Orchestrator:
 
     def reap_orphans(self) -> list[str]:
         """啟動時：上一個 Bridge 行程留下的 QUEUED／RUNNING stage run 一律 FAILED（`orphaned`；
-        不寫輪列、不耗預算）；游標回 IDLE 並寫明原因；未收尾的審查 journal 依 D-58 補完。"""
+        不寫輪列、不耗預算）；游標退回該 run 開始前的穩定相態、`flow_status` 為 FAILED 並寫明原因
+        （D-77）；未收尾的審查 journal 依 D-58 補完。"""
         reaped: list[str] = []
         rows = self.db.query(
             "SELECT id, research_id FROM {s}.research_stage_runs "
@@ -289,7 +306,7 @@ class Orchestrator:
             self.writer.persist(Op("stage_run.update", rid, {
                 "stage_run_id": run_id, "status": "FAILED", "exit_reason": "orphaned",
                 "finished_at": utc_now().isoformat(), "actor": "bridge"}))
-            self._sync_flow(rid, detail="orphaned")
+            self.settle_failed(rid, "orphaned", run_ids=(run_id,))
             reaped.append(run_id)
         for entry in self.journal.pending():
             try:
@@ -321,18 +338,49 @@ class Orchestrator:
 
     # ── 游標（flow_status 一律衍生）───────────────────────────────────────────────────────────
     def _sync_flow(self, rid: str, *, step: str | None = None, phase: str | None = None,
-                   detail: str | None = None) -> None:
+                   detail: str | None = None, failed: bool = False, actor: str = "bridge") -> None:
+        """寫游標：`flow_status` 一律由 `derive_flow_status` 衍生（`failed`＝這次收尾是 stage run
+        失敗、取消或回收，D-77）；與現值相同就不寫。"""
         row = self._project(rid)
         runs = self.db.query("SELECT status FROM {s}.research_stage_runs WHERE research_id = %s "
                              "AND status IN ('QUEUED', 'RUNNING')", (rid,))
-        status = derive_flow_status([r["status"] for r in runs], self._fsm_state(row))
+        status = derive_flow_status([r["status"] for r in runs], self._fsm_state(row),
+                                    last_run_failed=failed)
         flow = {"step": step or row["flow_step"], "phase": phase or row["flow_phase"],
                 "status": status, "detail": row["flow_detail"] if detail is None else detail}
         if flow != {"step": row["flow_step"], "phase": row["flow_phase"],
                     "status": row["flow_status"], "detail": row["flow_detail"]}:
             self.writer.persist(Op("project.cursor", rid, {
-                "research_id": rid, "actor": "bridge", "flow": flow}))
+                "research_id": rid, "actor": actor, "flow": flow}))
         self.project_state(rid)
+
+    def settle_failed(self, rid: str, exit_reason: str, *, run_ids: Sequence[str] = (),
+                      actor: str = "bridge") -> None:
+        """stage run 失敗、取消或被回收之後的游標收尾（D-77；三者同一條路）：相態退回該 run
+        開始前的穩定相態（RESEARCHING 這類只在 run 進行中才成立的相態不留在游標上，否則
+        `stages/research` 的前置相態永遠不滿足）、`flow_status` 為 FAILED（FSM 在 ESCALATION 類時
+        仍是 ESCALATED）、`flow_detail` 寫 `exit_reason`。`run_ids`＝剛結束的 run（取記憶體內的
+        開始前相態；查不到由 `_stable_phase` 從事件帳推回）。"""
+        with self._guard:
+            known = [self._prior_phase.pop(run_id, None) for run_id in run_ids]
+        prior = next((phase for phase in known if phase), None)
+        row = self._project(rid)
+        phase = prior or self._stable_phase(rid, str(row["flow_phase"]))
+        self._sync_flow(rid, phase=phase, detail=exit_reason, failed=True, actor=actor)
+
+    def _stable_phase(self, rid: str, current: str) -> str:
+        """查不到 run 開始前相態時（Bridge 重啟後的孤兒回收、直接建列的 run）的穩定相態：
+        `RESEARCHING` 只在研究 run 進行中成立，退回事件帳（`research.step`，append-only）裡最近
+        一次記錄的研究步驟穩定相態（INGESTED 或 EVIDENCE_READY；沒有記錄＝INGESTED，建立專案時的
+        相態）；其餘相態原樣。"""
+        if current != "RESEARCHING":
+            return current
+        last = self._one(
+            "SELECT payload->>'flowPhase' AS phase FROM {s}.research_events WHERE research_id = %s "
+            "AND event_type = 'research.step' AND payload->>'flowStep' = 'topic' "
+            "AND payload->>'flowPhase' IN ('INGESTED', 'EVIDENCE_READY') ORDER BY seq DESC LIMIT 1",
+            (rid,))
+        return str(last["phase"]) if last else "INGESTED"
 
     def project_state(self, rid: str) -> None:
         """`02_governance/state.json` 匯出（只寫、從不讀回）；失敗不拖垮流程。"""
@@ -395,7 +443,8 @@ class Orchestrator:
             values["issue_scope_sha256"] = _sha(scope_file.read_bytes())
             values["supplement"] = (ws / "00_research" / "evidence_items.json").is_file()
             values["budget_note"] = self._budget_note(row)
-            values["accept_template_sentinel"] = "MOCK_CLAUDE_RESEARCH_SCRIPT" in os.environ
+            values["accept_template_sentinel"] = bool(
+                os.environ.get("MOCK_CLAUDE_RESEARCH_SCRIPT", "").strip())  # 空字串＝未設
         elif stage in ("review", "revise") and head is not None:
             values["prd_rel"] = str(head["rel_path"])
             if stage == "review":
@@ -515,12 +564,14 @@ class Orchestrator:
         return new
 
     def _fail_active(self, rid: str, reason: str) -> None:
+        ids: list[str] = []
         for run in self.db.query("SELECT id FROM {s}.research_stage_runs WHERE research_id = %s "
                                  "AND status IN ('QUEUED', 'RUNNING')", (rid,)):
+            ids.append(str(run["id"]))
             self.writer.persist(Op("stage_run.update", rid, {
                 "stage_run_id": str(run["id"]), "status": "FAILED", "exit_reason": reason,
                 "finished_at": utc_now().isoformat(), "actor": "bridge"}))
-        self._sync_flow(rid, detail=reason)
+        self.settle_failed(rid, reason, run_ids=ids)
 
     def _run_one(self, rid: str, plan: StagePlan) -> Outcome:
         run_id = plan.run_id
@@ -529,7 +580,8 @@ class Orchestrator:
             "stage_run_id": run_id, "status": "RUNNING", "started_at": started.isoformat(),
             "actor": "bridge"}))
         row = self._project(rid)
-        prior_phase = str(row["flow_phase"])
+        with self._guard:               # 失敗、取消、回收時游標退回這個相態（D-77）
+            self._prior_phase[run_id] = str(row["flow_phase"])
         phase = {"research": "RESEARCHING", "revise": "REVISING"}.get(plan.stage)
         if plan.stage == "review" and plan.trigger_kind != "POST_HUMAN":
             phase = "REVIEWING"
@@ -555,11 +607,15 @@ class Orchestrator:
             "tokens_used": tokens, "finished_at": utc_now().isoformat(), "actor": "bridge"}))
         final = not plan.iterate or outcome.status != "SUCCEEDED" or (
             plan.stage == "review" and outcome.verdict != "REVISE")
+        if outcome.status != "SUCCEEDED":
+            # 失敗不使游標顯示為完成（D-77）：相態退回 stage 開始前的穩定相態、`flow_status` 為
+            # FAILED、原因寫進 `flow_detail`——與取消、孤兒回收同一條收尾路徑
+            self.settle_failed(rid, outcome.exit_reason, run_ids=(run_id,))
+            return outcome
+        with self._guard:
+            self._prior_phase.pop(run_id, None)
         if final or plan.stage == "review":
-            failed = outcome.status != "SUCCEEDED"
-            # 失敗不使游標顯示為完成：相態退回 stage 開始前的穩定相態，原因寫進 `flow_detail`
-            self._sync_flow(rid, phase=prior_phase if failed else None,
-                            detail=outcome.exit_reason if failed else "")
+            self._sync_flow(rid, detail="")
         return outcome
 
     def _on_failure(self, rid: str, plan: StagePlan, exc: StageFailed) -> None:
@@ -661,19 +717,42 @@ class Orchestrator:
                 logger.info("議題無法組成 %s 的查詢，略過", kind)
         return tasks
 
-    def _prefetch(self, ctx: _Ctx, plan: StagePlan) -> None:
-        """Bridge 原生抓取（API 層）：落地原文、逐筆入庫（含被拒者）、寫 `prefetch_index.json`。"""
-        rid, ws = str(ctx.row["id"]), ctx.workspace
+    def _offline_reason(self) -> str | None:
+        """前置抓取是否不得連網（D-78）：連線層是正式預設（`default_client_factory`）時，遇到劇本模式或
+        mock-only 一律離線；換了抓取層（測試注入假連線層）的呼叫端自備連線層，照原路徑走。"""
+        if self._client_factory is not default_client_factory:
+            return None
+        return offline_reason(self.cfg)
+
+    def _fetch_batch(self, ctx: _Ctx, plan: StagePlan) -> FetchBatch | None:
+        """前置抓取的結果批次：離線＝夾具（沒有夾具＝空批次，`no_sources` 但不外呼）；本機模式＝
+        真抓取（議題組不出任何查詢＝None，沒有批次）。兩條路產出同形的 `FetchBatch`，入庫共用
+        `_prefetch`。"""
+        reason = self._offline_reason()
+        if reason is not None:
+            logger.info("研究 %s 的前置抓取走離線夾具（%s）：不連網", ctx.row["id"], reason)
+            try:
+                return load_batch(fixture_file())
+            except OfflineFixtureError as exc:
+                raise StageFailed("prefetch_fixture_invalid", str(exc)[:300]) from exc
         limits = effective_limits(str(ctx.row["depth_level"]))
         tasks = self._research_tasks(ctx.row, limits.per_layer)
+        if not tasks:
+            return None
+        self._check_cancel(plan.run_id)
+        allow = build_effective_allowlist(self.cfg.research_fetch_allowlist,
+                                          self.db.list_allowlist())
+        return run_prefetch(self._client_factory(self.cfg, allow), tasks,
+                            depth_level=str(ctx.row["depth_level"]), now=utc_now())
+
+    def _prefetch(self, ctx: _Ctx, plan: StagePlan) -> None:
+        """前置抓取（API 層）：落地原文、逐筆入庫（含被拒者）、寫 `prefetch_index.json`。批次來自
+        `_fetch_batch`（本機模式＝Bridge 原生抓取；劇本模式與 mock-only＝離線夾具），入庫路徑
+        只有一條。"""
+        rid, ws = str(ctx.row["id"]), ctx.workspace
         index: dict[str, Any] = {"fetches": {}, "candidates": []}
-        batch = None
-        if tasks:
-            self._check_cancel(plan.run_id)
-            allow = build_effective_allowlist(self.cfg.research_fetch_allowlist,
-                                              self.db.list_allowlist())
-            batch = run_prefetch(self._client_factory(self.cfg, allow), tasks,
-                                 depth_level=str(ctx.row["depth_level"]), now=utc_now())
+        batch = self._fetch_batch(ctx, plan)
+        if batch is not None:
             numbers: dict[int, str] = {}
             for record in batch.records:
                 body = {**record.to_db(), "source_id": None, "stage_run_id": plan.run_id}
@@ -712,7 +791,8 @@ class Orchestrator:
         prev = ws / PREVIOUS_EVIDENCE_REL
         return EvidenceContext(
             issue_scope=scope, issue_scope_sha256=_sha((ws / layout.ISSUE_SCOPE_REL).read_bytes()),
-            accept_template_sentinel="MOCK_CLAUDE_RESEARCH_SCRIPT" in os.environ,
+            accept_template_sentinel=bool(
+                os.environ.get("MOCK_CLAUDE_RESEARCH_SCRIPT", "").strip()),
             fetch_index=index.get("fetches") or {},
             previous=json.loads(prev.read_text(encoding="utf-8")) if plan.compiled.steps[0].inputs
             .get("previous") and prev.is_file() else None)
@@ -1081,21 +1161,29 @@ class Orchestrator:
         def digests(*paths: str) -> dict[str, str | None]:
             return {p: (d[0] if (d := layout.file_digest(ws, p)) else None) for p in paths}
 
+        # `prd_sha256` 項（INT-10）：核准後＝Gate 0 凍結的每份文件各一個漂移列、kind 依檔
+        # （`FROZEN_DOC_KINDS`）；證據矩陣另有自己的對帳項（`evidence_matrix`，比對最新矩陣版本
+        # 登記的 sha256），凍結集合裡的那一份由它負責，這裡不重複計入（同一個檔案漂移只算一次）。
         prd: list[dict[str, Any]] = []
         if approved is not None:
             frozen = approved["frozen_digests"] or {}
-            prd = [{"path": p, "sha256": str(v).removeprefix("sha256:")} for p, v in frozen.items()]
+            prd = [{"path": p, "sha256": str(v).removeprefix("sha256:"),
+                    "kind": FROZEN_DOC_KINDS.get(p, "PRD")}
+                   for p, v in frozen.items() if p != MATRIX_REL]
         else:
             head = self.db.head_prd(rid)
-            prd = [] if head is None else [{"path": head["rel_path"], "sha256": head["sha256"]}]
+            prd = [] if head is None else [{"path": head["rel_path"], "sha256": head["sha256"],
+                                            "kind": "PRD"}]
         prd_check = file_check("prd_sha256", "PRD", None, None)
         if prd:
-            drifts = [file_check("prd_sha256", "PRD", item, digests(item["path"])) for item in prd]
+            drifts = [file_check("prd_sha256", item["kind"], item, digests(item["path"]))
+                      for item in prd]
             bad = [d for c in drifts for d in c["drift"]]
             prd_check = {"id": "prd_sha256", "status": "drift" if bad else "ok", "present": True,
                          "detail": "", "drift": bad}
         checks = [
-            mapping_check(state, row["flow_step"], row["flow_phase"], readable=readable),
+            mapping_check(state, row["flow_step"], row["flow_phase"], readable=readable,
+                          flow_status=row["flow_status"]),
             prd_check]
         for check_id, kind, label in (("review_card", "REVIEW_CARD", "REVIEW_CARD"),
                                       ("evidence_matrix", "EVIDENCE_MATRIX", "EVIDENCE_MATRIX")):
@@ -1115,6 +1203,11 @@ class Orchestrator:
 BASELINE_REL = "01_specs/PRD-v1.0.0.md"
 #: Gate 0 凍結的四份文件（相對工作區的 POSIX 路徑；第一份是 PRD 基線；不要求 TCS）。
 APPROVE_DOCS: tuple[str, ...] = (BASELINE_REL, MATRIX_REL, layout.ISSUE_SCOPE_REL, ADR_DRAFT_REL)
+#: 凍結文件各自的對帳 kind（與 `research_artifacts.kind` 同名；INT-10：漂移列的 kind 依檔，
+#: 不一律標 PRD）。
+FROZEN_DOC_KINDS: Mapping[str, str] = {
+    BASELINE_REL: "PRD", MATRIX_REL: "EVIDENCE_MATRIX", layout.ISSUE_SCOPE_REL: "ISSUE_SCOPE",
+    ADR_DRAFT_REL: "ADR_DRAFT"}
 HUMAN_REASON_PREFIX = "人工審查："
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -1165,7 +1258,7 @@ def digest_problems(expected: Mapping[str, str], actual: Mapping[str, str],
     return ("digest_mismatch", {"files": wrong}) if wrong else None
 
 
-__all__ = ["APPROVE_DOCS", "BASELINE_REL", "HUMAN_REASON_PREFIX", "Orchestrator",
-           "ResearchRunHandle", "ResearchRunManager", "ReviewJournal", "StageFailed",
-           "approve_input_violations", "derive_exit_reason", "derive_flow_status",
+__all__ = ["APPROVE_DOCS", "BASELINE_REL", "FROZEN_DOC_KINDS", "HUMAN_REASON_PREFIX",
+           "Orchestrator", "ResearchRunHandle", "ResearchRunManager", "ReviewJournal",
+           "StageFailed", "approve_input_violations", "derive_exit_reason", "derive_flow_status",
            "digest_problems", "flow_fsm_mapping_ok", "human_reason"]

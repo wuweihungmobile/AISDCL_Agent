@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "note": "mock-only／劇本模式的前置抓取夾具（D-78；pass 劇本）：Bridge 不連網，改用這裡宣告的抓取紀錄與候選來源，走與真抓取同一條入庫路徑。網址是真實形狀的字串、從不連線；抓取紀錄一律 outcome=OK、fetch_method=API、observed_by=BRIDGE。",
+  "fetches": [
+    {
+      "id": "arxiv-1",
+      "layer": "ACADEMIC",
+      "url": "https://export.arxiv.org/api/query?search_query=all%3Amock&start=0&max_results=5",
+      "query": "mock research topic",
+      "http_status": 200,
+      "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<feed xmlns=\"http://www.w3.org/2005/Atom\">\n  <entry>\n    <id>http://arxiv.org/abs/2501.00001v1</id>\n    <title>Mock Candidate Paper A</title>\n    <summary>Fixture text for the mock-only research stage. Reported throughput 1200 pages per minute.</summary>\n  </entry>\n</feed>\n"
+    },
+    {
+      "id": "github-1",
+      "layer": "OSS",
+      "url": "https://api.github.com/search/repositories?q=mock-lib&per_page=5",
+      "query": "mock research topic",
+      "http_status": 200,
+      "text": "{\"total_count\": 1, \"items\": [{\"full_name\": \"example/mock-lib\", \"html_url\": \"https://github.com/example/mock-lib\", \"license\": {\"spdx_id\": \"Apache-2.0\"}}]}"
+    }
+  ],
+  "sources": [
+    {
+      "fetch": "arxiv-1",
+      "layer": "ACADEMIC",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "URL",
+      "url": "https://arxiv.org/abs/2501.00001",
+      "doi": null,
+      "git_commit": null,
+      "title": "Mock Candidate Paper A",
+      "authors_org": "Mock Lab",
+      "published_at": "2025-01-02",
+      "source_type": "PREPRINT",
+      "license_spdx": null,
+      "license_note": "未見",
+      "clue_only": false
+    },
+    {
+      "fetch": "github-1",
+      "layer": "OSS",
+      "tier": "T1",
+      "verification": "V2",
+      "anchor_kind": "URL",
+      "url": "https://github.com/example/mock-lib",
+      "doi": null,
+      "git_commit": null,
+      "title": "example/mock-lib",
+      "authors_org": "example",
+      "published_at": "2025-06-01",
+      "source_type": "REPO",
+      "license_spdx": "Apache-2.0",
+      "license_note": "取自 repo 授權欄",
+      "clue_only": false
+    }
+  ]
+}

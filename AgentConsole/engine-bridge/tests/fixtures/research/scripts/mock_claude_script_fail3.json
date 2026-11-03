@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "prefetch": "content/prefetch_fail3.json",
   "steps": [
     {
       "role": "research",

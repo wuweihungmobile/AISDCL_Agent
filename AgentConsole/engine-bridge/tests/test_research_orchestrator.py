@@ -7,8 +7,10 @@
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import shutil
+import socket
 import time
 import uuid
 from collections.abc import Callable, Iterator
@@ -21,6 +23,7 @@ import pytest
 
 from app.research import fsm_ops
 from app.research.db import ResearchDb
+from app.research.fetch import FetchClient
 from app.research.orchestrator import Orchestrator
 from app.research.outbox import DurableWriter, Outbox
 from app.routers.research import ResearchContext
@@ -98,9 +101,10 @@ class Rig:
 def build_rig(make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
               monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb, *,
               script: str = SCRIPT_FAIL3, hook: Callable[[str, Any], None] | None = None,
-              **over: Any) -> Rig:
+              offline: bool = False, **over: Any) -> Rig:
     """活 Bridge＋研究設定＋注入了假抓取層的 orchestrator。FC 的環境變數設在行程環境（引擎子行程
-    繼承；Bridge 的機密哨兵則由 `ResearchRunHandle` 剝掉）。"""
+    繼承；Bridge 的機密哨兵則由 `ResearchRunHandle` 剝掉）。`offline=True`＝不注入抓取層
+    （正式佈線）：劇本模式下前置抓取走離線夾具、不連網（D-78）。"""
     root = tmp_path / "workspace" / "my-project"
     trace, state = tmp_path / "fc_trace.jsonl", tmp_path / "fc_state.json"
     for name, value in (("MOCK_CLAUDE_RESEARCH_SCRIPT", str(SCRIPTS / script)),
@@ -116,7 +120,8 @@ def build_rig(make_bridge: Callable[..., Any], settings: Settings, tmp_path: Pat
     db = ResearchDb(rdb.dsn, statement_hook=hook)
     writer = DurableWriter(db, Outbox(root / ".outbox" / "outbox.jsonl"))
     orch = Orchestrator(cfg, live.app.state.audit, db, writer, poll_seconds=0.05,
-                        fetch_client_factory=lambda *_: make_rig(arxiv_script).client)
+                        fetch_client_factory=None if offline else (
+                            lambda *_: make_rig(arxiv_script).client))
     live.app.state.research = ResearchContext(
         cfg=cfg, audit=live.app.state.audit, db=db, writer=writer, stopper=orch.stop,
         orchestrator=orch)
@@ -317,8 +322,11 @@ def test_AT_960_7_5_a_bounded_stage_fails_with_its_exit_reason_and_keeps_stored_
     assert (failed["status"], failed["exit_reason"], failed["attempt"]) == ("FAILED", reason, 1)
     assert (rig.rdb.count("research_sources"), rig.rdb.count("research_evidence_items")) == stored
     flow = project(rig, rid)
-    assert flow["flow_status"] == "IDLE" and reason in flow["flow_detail"]
+    # D-77：失敗游標＝FAILED＋flow_detail＝exit_reason（原為 IDLE；TCS AT-960-7-5／D-56 勘誤）
+    assert (flow["flow_status"], flow["flow_detail"]) == ("FAILED", reason)
     assert flow["flow_phase"] == "INGESTED"                  # 不顯示為完成
+    assert events(rig, rid, "research.step")[-1]["payload"] == {
+        "flowStep": "topic", "flowPhase": "INGESTED", "flowStatus": "FAILED", "flowDetail": reason}
     rewrite_script(script, "research", 0, None)
     run_stage(rig, rid, "research")
     second = runs_of(rig, rid, "RESEARCH")[1]
@@ -333,10 +341,319 @@ def test_AT_960_7_5_a_stage_run_left_over_by_a_restart_is_reaped_as_orphaned(rig
     assert rig.orch.reap_orphans() == [run_id]
     row = runs_of(rig, rid, "RESEARCH")[0]
     assert (row["status"], row["exit_reason"]) == ("FAILED", "orphaned")
-    assert project(rig, rid)["flow_status"] == "IDLE"
+    flow = project(rig, rid)                            # D-77：回收與失敗、取消同一條收尾路徑
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "INGESTED", "FAILED", "orphaned")
     assert rig.orch.reap_orphans() == []                       # 冪等
     run_stage(rig, rid, "research")
     assert [r["attempt"] for r in runs_of(rig, rid, "RESEARCH")] == [1, 2]
+
+
+# ── D-77（INT-02／04）：失敗與取消的游標＝FAILED＋原因，相態退回可重入狀態，之後可重試 ───────────
+def start_slow_research(rig: Rig, script: str, rid: str) -> None:
+    """啟動一個假 claude 長時間不結束的 research，等它真的在跑（RUNNING 且 FC 已被呼叫）。"""
+    patch_step(script, "research", 0, delay=30)
+    run_stage(rig, rid, "research", wait=False)
+    wait_until(lambda: any(r["status"] == "RUNNING" for r in runs_of(rig, rid, "RESEARCH"))
+               and rig.trace.is_file() and "research" in rig.trace.read_text(encoding="utf-8"))
+
+
+def cancel_and_settle(rig: Rig, rid: str) -> dict[str, Any]:
+    resp = rig.post(f"/research/projects/{rid}:cancel", {"actor": ALICE})
+    assert resp.status_code == 200 and resp.json()["stopped_run_id"], resp.text
+    assert rig.orch.join(rid, 60), "取消後 stage 鏈在期限內結束"
+    return dict(resp.json())
+
+
+def test_D_77_cancelling_a_research_run_leaves_a_retryable_failed_cursor(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, rdb: ThrowawayDb) -> None:
+    """INT-02：取消後游標是 `INGESTED／FAILED／cancelled`（不是卡在 RESEARCHING），再啟動 research
+    回 202 並成功、`:reinit`（重試）回 200 清掉標記；成功後 FAILED 自然衍生掉。"""
+    fake = install_framework(make_fake_sdd(tmp_path / "sdd"))
+    script = custom_script(tmp_path, lambda steps: None)
+    rig = build_rig(make_bridge, settings, tmp_path, monkeypatch, fake, rdb, script=script)
+    rid = create(rig)
+    start_slow_research(rig, script, rid)
+    assert project(rig, rid)["flow_phase"] == "RESEARCHING", "進行中的相態"
+    out = cancel_and_settle(rig, rid)
+    assert out["flow"] == {"step": "topic", "phase": "INGESTED", "status": "FAILED",
+                           "detail": "cancelled"}
+    assert runs_of(rig, rid, "RESEARCH")[0]["status"] == "CANCELLED"
+    flow = project(rig, rid)
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "INGESTED", "FAILED", "cancelled")
+    # 重試一：「重試」（reinit）清掉失敗標記，相態不動
+    healed = rig.post(f"/research/projects/{rid}:reinit", {})
+    assert healed.status_code == 200, healed.text
+    assert healed.json()["flow"] == {"step": "topic", "phase": "INGESTED", "status": "IDLE",
+                                     "detail": ""}
+    # 重試二：取消後再啟動 research＝202（原本 409 stage_conflict：前置相態要 INGESTED／
+    # EVIDENCE_READY）
+    start_slow_research(rig, script, rid)
+    cancel_and_settle(rig, rid)
+    patch_step(script, "research", 0, delay=0)
+    run_stage(rig, rid, "research")                                  # 202（run_stage 內斷言）
+    runs = runs_of(rig, rid, "RESEARCH")
+    assert [r["status"] for r in runs] == ["CANCELLED", "CANCELLED", "SUCCEEDED"]
+    assert [r["attempt"] for r in runs] == [1, 2, 3]
+    flow = project(rig, rid)
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "EVIDENCE_READY", "IDLE", ""), "成功收尾：FAILED 自然衍生掉"
+
+
+def test_D_77_a_cancelled_rerun_returns_to_the_phase_it_started_from(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, rdb: ThrowawayDb) -> None:
+    """相態退回的是「該 run 開始前」的穩定相態，不是一律 INGESTED：已有合格證據（EVIDENCE_READY）的
+    專案再跑一次 research 被取消，仍留在 EVIDENCE_READY，`draft` 照常可啟動。"""
+    fake = install_framework(make_fake_sdd(tmp_path / "sdd"))
+    script = custom_script(tmp_path, lambda steps: None)
+    rig = build_rig(make_bridge, settings, tmp_path, monkeypatch, fake, rdb, script=script)
+    rid = create(rig)
+    run_stage(rig, rid, "research")
+    assert project(rig, rid)["flow_phase"] == "EVIDENCE_READY"
+    start_slow_research(rig, script, rid)
+    cancel_and_settle(rig, rid)
+    flow = project(rig, rid)
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "EVIDENCE_READY", "FAILED", "cancelled")
+    patch_step(script, "research", 0, delay=0)
+    run_stage(rig, rid, "draft")                              # 前置相態 EVIDENCE_READY 仍成立
+    assert project(rig, rid)["flow_phase"] == "DRAFTING"
+
+
+def test_D_77_an_orphaned_research_run_does_not_leave_the_cursor_in_researching(
+        rig: Rig) -> None:
+    """Bridge 重啟後的孤兒回收（記憶體沒有「開始前相態」）：RESEARCHING 由事件帳推回最近的
+    穩定相態。"""
+    rid = create(rig)
+    run_stage(rig, rid, "research")
+    assert project(rig, rid)["flow_phase"] == "EVIDENCE_READY"
+    run_id = str(uuid.uuid4())
+    rig.db.insert_stage_run(research_id=rid, stage_run_id=run_id, stage="RESEARCH", round_no=0,
+                            attempt=2, scope_rev=1, status="RUNNING", requested_by=ALICE)
+    rig.rdb.exec("UPDATE console.research_projects SET flow_phase = 'RESEARCHING', "
+                 "flow_status = 'RUNNING' WHERE id = %s", rid)       # 進行中的游標；崩潰時留在這裡
+    assert rig.orch.reap_orphans() == [run_id]
+    flow = project(rig, rid)
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "EVIDENCE_READY", "FAILED", "orphaned")
+    run_stage(rig, rid, "research")                                  # 前置相態成立：可再啟動
+
+
+def test_D_77_a_failed_cursor_reconciles_as_consistent_for_every_fsm_state(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    """INT-04：失敗 run 之後 `:reconcile` 的 `fsm_flow_mapping` 是 ok（FAILED 游標對表內每個 FSM 態
+    合法）；審查 run 失敗時 FSM 已被推到 SCG_VALIDATION、游標相態退回 DRAFTING，正是這個不相配。"""
+    script = custom_script(tmp_path, lambda steps: None)
+    rig = build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+    rid = create(rig)
+    to_draft(rig, rid)
+    patch_step(script, "review-qa", 1, result="Claude usage limit reached|1760000000")
+    run_stage(rig, rid, "review")
+    failed = runs_of(rig, rid, "REVIEW")[0]
+    assert (failed["status"], failed["exit_reason"]) == ("FAILED", "quota")
+    assert fsm_state(rig, rid) == "SCG_VALIDATION"
+    flow = project(rig, rid)
+    assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+        "DRAFTING", "FAILED", "quota"), "游標相態退回審查開始前；FSM 已在 SCG_VALIDATION"
+    report = rig.post(f"/research/projects/{rid}:reconcile", {}).json()
+    mapping = next(c for c in report["checks"] if c["id"] == "fsm_flow_mapping")
+    assert mapping["status"] == "ok" and mapping["drift"] == [], mapping
+    # 對照：同一組 (FSM 態, 步驟, 相態) 在游標不是 FAILED 時確實不合法
+    rig.rdb.exec("UPDATE console.research_projects SET flow_status = 'IDLE', flow_detail = '' "
+                 "WHERE id = %s", rid)
+    drift = next(c for c in rig.post(f"/research/projects/{rid}:reconcile", {}).json()["checks"]
+                 if c["id"] == "fsm_flow_mapping")
+    assert drift["status"] == "drift"
+
+
+# ── D-78（INT-06）：劇本模式與 mock-only 的前置抓取零外呼，改走夾具、同一條入庫路徑 ────────────
+@pytest.fixture
+def net_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """記錄並擋下本行程內一切出網：`FetchClient.fetch` 呼叫、對名稱的 DNS 解析、對非 loopback 位址的
+    socket 連線（loopback 照常放行：活 Bridge 與測試客戶端走它）。清單為空＝研究 stage 全程零外呼。
+    （引擎與假 claude 是子行程、不在這個行程內；它們的出網由 INT-07 的測試以本機監聽埠驗。）"""
+    calls: list[str] = []
+    loopback = {"127.0.0.1", "::1", "localhost"}
+    real_getaddrinfo, real_connect = socket.getaddrinfo, socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def fetch(self: FetchClient, url: str, **_kw: Any) -> Any:
+        calls.append(f"fetch:{url}")
+        raise AssertionError(f"零外呼：不得呼叫 FetchClient.fetch（{url[:60]}）")
+
+    def getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
+        if host not in (None, "") and str(host) not in loopback:
+            try:
+                ipaddress.ip_address(str(host).split("%", 1)[0])      # IP 字面值不查 DNS
+            except ValueError:
+                calls.append(f"dns:{host}")
+                raise OSError(f"零外呼：DNS 解析被擋（{host}）") from None
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    def guard(address: Any) -> None:
+        host = address[0] if isinstance(address, tuple) else address
+        if str(host) not in loopback:
+            calls.append(f"connect:{address}")
+            raise OSError(f"零外呼：連線被擋（{address}）")
+
+    def connect(self: socket.socket, address: Any) -> None:
+        guard(address)
+        return real_connect(self, address)
+
+    def connect_ex(self: socket.socket, address: Any) -> int:
+        guard(address)
+        return real_connect_ex(self, address)
+
+    monkeypatch.setattr(FetchClient, "fetch", fetch)
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    return calls
+
+
+def test_D_78_the_net_spy_records_and_blocks_every_kind_of_call_out(net_calls: list[str]) -> None:
+    """負控：假連線層真的看得到、也真的擋得住（否則下面的「零外呼」是空話）。"""
+    with pytest.raises(AssertionError):
+        make_rig(arxiv_script).client.fetch("https://export.arxiv.org/api/query?x=1",
+                                            layer="ACADEMIC")
+    with pytest.raises(OSError):
+        socket.getaddrinfo("export.arxiv.org", 443)
+    with pytest.raises(OSError):
+        socket.create_connection(("93.184.216.34", 443), timeout=1)
+    assert [c.split(":", 1)[0] for c in net_calls] == ["fetch", "dns", "connect"], net_calls
+
+
+def offline_rig(make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+                monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb, **kw: Any) -> Rig:
+    return build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, offline=True, **kw)
+
+
+def bridge_fetches(rig: Rig, rid: str) -> list[dict[str, Any]]:
+    return rig.db.query("SELECT host, url, layer, outcome, fetch_method, observed_by, "
+                        "raw_rel_path, raw_sha256, raw_bytes FROM {s}.research_fetches "
+                        "WHERE research_id = %s AND observed_by = 'BRIDGE' ORDER BY fetch_no",
+                        (rid,))
+
+
+@pytest.mark.parametrize("script", [SCRIPT_PASS, SCRIPT_FAIL3])
+def test_D_78_script_mode_research_makes_no_outbound_call_and_stores_the_fixture_fetches(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb, net_calls: list[str],
+        script: str) -> None:
+    """INT-06：劇本模式（`MOCK_CLAUDE_RESEARCH_SCRIPT` 有設）＋正式佈線（沒注入抓取層）＝research
+    stage 全程零外呼（`FetchClient.fetch` 沒被呼叫、沒有 DNS、沒有對外 connect）。夾具宣告的
+    抓取紀錄走與真抓取同一條入庫路徑：`research_fetches` 列（BRIDGE／API／OK）、
+    `00_research/raw/<sha12>.txt` 原文、`prefetch_index.json` 的抓取與候選；stage 照常成功並
+    產出證據矩陣。"""
+    rig = offline_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+    rid = create(rig, "offline")
+    run_stage(rig, rid, "research")
+    assert net_calls == [], f"劇本模式不得出網：{net_calls}"
+    run = runs_of(rig, rid, "RESEARCH")[0]
+    assert (run["status"], run["exit_reason"] or "") == ("SUCCEEDED", "")
+    rows = bridge_fetches(rig, rid)
+    assert [(r["host"], r["layer"]) for r in rows] == [
+        ("export.arxiv.org", "ACADEMIC"), ("api.github.com", "OSS")]
+    assert all((r["outcome"], r["fetch_method"], r["observed_by"]) == ("OK", "API", "BRIDGE")
+               for r in rows)
+    ws = Path(project(rig, rid)["workspace_path"])
+    name = Path(script).stem.removeprefix("mock_claude_script_")        # pass／fail3
+    fixture = json.loads((SCRIPTS / "content" / f"prefetch_{name}.json").read_text(
+        encoding="utf-8"))
+    for row, declared in zip(rows, fixture["fetches"], strict=True):
+        assert row["url"] == declared["url"]
+        raw = (ws / row["raw_rel_path"]).read_bytes()
+        assert raw.decode("utf-8") == declared["text"] and len(raw) == row["raw_bytes"]
+    index = json.loads((ws / "00_research" / "prefetch_index.json").read_text(encoding="utf-8"))
+    assert sorted(index["fetches"]) == ["F-0001", "F-0002"]
+    assert all(v["observed_by"] == "BRIDGE" and v["outcome"] == "OK"
+               for v in index["fetches"].values())
+    assert [(c["title"], c["fetch_refs"]) for c in index["candidates"]] == [
+        (declared["title"], [f"F-000{n}"]) for n, declared in enumerate(fixture["sources"], 1)]
+    assert rig.rdb.count("research_evidence_items") == 4 and (
+        ws / "00_research" / "evidence_matrix.md").is_file()
+    assert project(rig, rid)["flow_phase"] == "EVIDENCE_READY"
+
+
+def test_D_78_a_script_without_a_fixture_or_with_zero_sources_fails_with_no_evidence_offline(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb,
+        net_calls: list[str]) -> None:
+    """無夾具＝`no_sources`（stage 以 `no_evidence` 失敗）但**不外呼**；夾具宣告零來源同樣是
+    `no_evidence`（不產生空矩陣、不留任何證據列）。游標是 `FAILED／no_evidence`、相態回
+    INGESTED。"""
+    def drop_fixture(path: Path) -> None:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc.pop("prefetch")
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+    def zero_sources(path: Path) -> None:
+        (path.parent / "content" / "prefetch_empty.json").write_text(
+            json.dumps({"schema": 1, "fetches": [], "sources": []}), encoding="utf-8")
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["prefetch"] = "content/prefetch_empty.json"
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+    for label, edit in (("no-fixture", drop_fixture), ("zero-sources", zero_sources)):
+        script = custom_script(tmp_path, lambda steps: None, base=SCRIPT_PASS)
+        edit(Path(script))
+        rig = offline_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+        rid = create(rig, label)
+        run_stage(rig, rid, "research")
+        run = runs_of(rig, rid, "RESEARCH")[0]
+        assert (run["status"], run["exit_reason"]) == ("FAILED", "no_evidence"), label
+        flow = project(rig, rid)
+        assert (flow["flow_phase"], flow["flow_status"], flow["flow_detail"]) == (
+            "INGESTED", "FAILED", "no_evidence"), label
+        assert bridge_fetches(rig, rid) == [] and rig.rdb.count("research_evidence_items") == 0
+        assert net_calls == [], label
+
+
+def test_D_78_a_broken_or_unsafe_fixture_declaration_fails_loudly_instead_of_reading_as_empty(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb,
+        net_calls: list[str]) -> None:
+    cases = {"not-json": ("content/broken.json", "{not json"),
+             "wrong-schema": ("content/broken.json", json.dumps({"schema": 2})),
+             "missing-file": ("content/nope.json", None),
+             "escapes-the-script-dir": ("../outside.json", json.dumps({"schema": 1}))}
+    for label, (declared, text) in cases.items():
+        script = custom_script(tmp_path, lambda steps: None, base=SCRIPT_PASS)
+        path = Path(script)
+        if text is not None:
+            (path.parent / "content" / "broken.json").write_text(text, encoding="utf-8")
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["prefetch"] = declared
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        rig = offline_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+        rid = create(rig, label)
+        run_stage(rig, rid, "research")
+        run = runs_of(rig, rid, "RESEARCH")[0]
+        assert (run["status"], run["exit_reason"]) == ("FAILED", "prefetch_fixture_invalid"), label
+        assert bridge_fetches(rig, rid) == [] and net_calls == [], label
+
+
+def test_D_78_mock_only_mode_without_any_script_never_calls_out_either(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb,
+        net_calls: list[str]) -> None:
+    """第二個觸發條件：capabilities `mode=mock-only`（PATH 上沒有 claude）。沒有劇本＝沒有夾具＝
+    `no_evidence`、不外呼；本機模式（有 claude、沒劇本）才是真抓取（有注入抓取層的測試涵蓋）。"""
+    rig = offline_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb)
+    monkeypatch.delenv("MOCK_CLAUDE_RESEARCH_SCRIPT")
+    real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: (
+        None if name == "claude" else real_which(name, *a, **k)))
+    assert rig.client.get("/research/capabilities").json()["mode"] == "mock-only"
+    rid = create(rig, "mockonly")
+    run_stage(rig, rid, "research")
+    run = runs_of(rig, rid, "RESEARCH")[0]
+    assert (run["status"], run["exit_reason"]) == ("FAILED", "no_evidence")
+    assert bridge_fetches(rig, rid) == [] and net_calls == []
 
 
 # ── AT-960-7-7：flow_status 由 stage run 與 FSM 現態衍生 ─────────────────────────────────────
@@ -354,6 +671,17 @@ def test_AT_960_7_7_flow_status_is_derived_from_runs_and_fsm_state_only() -> Non
         (["SUCCEEDED"], "ESCALATION_FINAL", "ESCALATED"), (["FAILED"], "SPEC_DRAFTING", "IDLE"),
         (["CANCELLED"], "AGENT_LOAD", "IDLE"), ([], "SPEC_FROZEN", "IDLE")]
     assert [derive_flow_status(runs, state) for runs, state, _ in table] == [t[2] for t in table]
+    # D-77：呼叫端明說這次收尾是失敗／取消／回收（`last_run_failed`）⇒ FAILED；優先序
+    # ESCALATED > RUNNING > FAILED > WAITING_HUMAN > IDLE。清單裡的 FAILED／CANCELLED 本身仍只是歷史
+    # （上表（八）（九））——失敗與否是收尾當下的事實，所以後續任何一次成功的收尾都把 FAILED 衍生掉。
+    failed_table = [
+        ([], "AGENT_LOAD", "FAILED"), (["SUCCEEDED"], "SPEC_DRAFTING", "FAILED"),
+        ([], "HUMAN_PENDING", "FAILED"), ([], None, "FAILED"),
+        (["RUNNING"], "AGENT_LOAD", "RUNNING"), (["QUEUED"], "HUMAN_PENDING", "RUNNING"),
+        ([], "ESCALATION", "ESCALATED"), (["RUNNING"], "ESCALATION_FINAL", "ESCALATED")]
+    assert [derive_flow_status(runs, state, last_run_failed=True)
+            for runs, state, _ in failed_table] == [t[2] for t in failed_table]
+    assert derive_flow_status([], "HUMAN_PENDING", last_run_failed=False) == "WAITING_HUMAN"
     source = ast.parse(Path(reconcile.__file__).read_text(encoding="utf-8"))
     fn = next(n for n in ast.walk(source) if isinstance(n, ast.FunctionDef)
               and n.name == "derive_flow_status")
@@ -838,12 +1166,63 @@ def test_AT_960_8_5_all_fetches_failing_without_a_web_layer_fails_the_stage_with
                         "kind IN ('EVIDENCE_MATRIX', 'EVIDENCE_ITEMS')", (rid,)) == []
     assert rig.rdb.count("research_evidence_items") == 0 and rig.rdb.count("research_sources") == 0
     flow = project(rig, rid)
-    assert (flow["flow_phase"], flow["flow_status"]) == ("INGESTED", "IDLE")
-    assert "no_evidence" in flow["flow_detail"]
+    assert (flow["flow_phase"], flow["flow_status"]) == ("INGESTED", "FAILED")      # D-77
+    assert flow["flow_detail"] == "no_evidence"
     fetches = rig.db.query("SELECT outcome, observed_by FROM {s}.research_fetches "
                            "WHERE research_id = %s", (rid,))
     assert fetches, "每次失敗各記一列、其餘來源照常嘗試"
     assert all(f["observed_by"] == "BRIDGE" and f["outcome"] != "OK" for f in fetches)
+
+
+# ── AT-960-8-E-3（stage 層）：超出深度上界的候選＝一筆 research.alert 事件，不佔抓取列 ───────────
+def atom_feed(count: int) -> bytes:
+    """`count` 個 entry 的 arXiv Atom（id 為合法的新式識別碼；內容只求能被解析器收下）。"""
+    entries = "".join(
+        f"<entry><id>http://arxiv.org/abs/2401.{n:05d}v1</id><published>2024-01-02T10:00:00Z"
+        f"</published><title>Paper {n}</title><summary>Summary {n} of garbage collection."
+        f"</summary><author><name>Author {n}</name></author></entry>" for n in range(1, count + 1))
+    return ('<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">'
+            f"{entries}</feed>").encode()
+
+
+def arxiv_feed_of(count: int) -> Callable[[Any], Reply]:
+    def script(call: Any) -> Reply:
+        if "arxiv.org" in call.host_header and call.path.startswith("/api/query"):
+            return Reply(200, {"content-type": "application/atom+xml"}, atom_feed(count))
+        return json_reply("{}", status=404)
+    return script
+
+
+def test_AT_960_8_E_3_over_limit_candidates_leave_exactly_one_alert_event_and_no_fetch_row(
+        rig: Rig) -> None:
+    """D-71′ 的載體：超出每層上界（QUICK＝5）的候選不抓取、不截斷，整批只留**一筆**
+    `research.alert`（kind＝`FETCH_SKIPPED_OVER_LIMIT`、detail 為可解析的 JSON 陣列，每個超限
+    候選一個元素），不佔 `research_fetches`；沒有超限就一筆都沒有。"""
+    rig.orch._client_factory = lambda *_: make_rig(arxiv_feed_of(8)).client
+    rid = create(rig, "overlimit", depth_level="QUICK")
+    run_stage(rig, rid, "research")
+    alerts = [e["payload"] for e in events(rig, rid, "research.alert")]
+    skipped = [p for p in alerts if p["kind"] == "FETCH_SKIPPED_OVER_LIMIT"]
+    assert len(skipped) == 1, f"超限時恆一筆：{alerts}"
+    assert set(skipped[0]) == {"kind", "detail"}
+    detail = json.loads(skipped[0]["detail"])
+    assert isinstance(detail, list) and len(detail) == 3, "8 個候選、每層留 5 個 ⇒ 3 個超限"
+    for item in detail:
+        assert set(item) == {"reason", "layer", "kind", "url", "limit"}
+        assert (item["reason"], item["layer"], item["limit"]) == (
+            "skipped:over_limit", "ACADEMIC", "per_layer")
+        assert item["url"].startswith("https://arxiv.org/abs/2401.0000")
+    fetched = {r["url"] for r in rig.db.query(
+        "SELECT url FROM {s}.research_fetches WHERE research_id = %s", (rid,))}
+    assert not {item["url"] for item in detail} & fetched, "超限候選不佔 research_fetches"
+    for step in events(rig, rid, "research.step"):
+        assert set(step["payload"]) == {"flowStep", "flowPhase", "flowStatus", "flowDetail"}
+    # 對照：沒有候選超限的 run，不留任何這種事件
+    calm = create(rig, "withinlimit", depth_level="QUICK")
+    rig.orch._client_factory = lambda *_: make_rig(arxiv_feed_of(3)).client
+    run_stage(rig, calm, "research")
+    assert [p for p in (e["payload"] for e in events(rig, calm, "research.alert"))
+            if p["kind"] == "FETCH_SKIPPED_OVER_LIMIT"] == []
 
 
 # ── AT-960-8-E-2（stage 層）：啟動時複驗 Web 層；只有開產業層的 run 才有 Web 工具 ───────────────
@@ -935,6 +1314,123 @@ def test_V_R5_an_evaluator_failure_is_retried_without_any_minimax_key(
     assert rig.rdb.count("research_evidence_items") == len(
         json.loads((content / "evidence_items.json").read_text(encoding="utf-8"))["items"])
     assert not any("MINIMAX" in key for c in calls for key in c.get("env_keys", []))
+
+
+# ── D-79（INT-07）：研究 run 釘關 Brain、引擎子行程環境不帶 MINIMAX_*，失敗路徑零外呼 ───────────
+class Listener:
+    """本機 TCP 監聽埠：記下每一個進來的連線（立刻關閉）。把它當成假的 MiniMax 端點——引擎若呼叫
+    `MINIMAX_BASE_URL`，連線一定落在這裡。（子行程的出網在本行程內看不到，所以用真的監聽埠驗。）"""
+
+    def __init__(self) -> None:
+        import threading
+
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(16)
+        self.sock.settimeout(0.2)
+        self.port: int = self.sock.getsockname()[1]
+        self.connections = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def _serve(self) -> None:
+        while not self._stop.is_set():
+            try:
+                conn, _addr = self.sock.accept()
+            except (TimeoutError, OSError):
+                continue
+            self.connections += 1
+            conn.close()
+
+    def __enter__(self) -> Listener:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        self._thread.join(5)
+        self.sock.close()
+
+
+def always_invalid_evidence(tmp_path: Path) -> str:
+    """research 步驟的每次嘗試都寫出不合模板的證據（R8：空 claim）：evaluator 連續失敗 ⇒ 引擎走到
+    ESCALATION 升級路徑——INT-07 實測外呼 MiniMax 的那一條。"""
+    script = custom_script(tmp_path, lambda steps: None)
+    content = tmp_path / "scripts" / "content"
+    broken = json.loads((content / "evidence_items.json").read_text(encoding="utf-8"))
+    broken["items"][0]["claim"] = ""
+    (content / "evidence_items_bad.json").write_text(json.dumps(broken), encoding="utf-8")
+    plan = json.loads(Path(script).read_text(encoding="utf-8"))
+    step = next(s for s in plan["steps"] if s["role"] == "research")
+    bad = {"path": step["writes"][0]["path"], "from": "content/evidence_items_bad.json"}
+    step["attempts"] = [{"writes": [bad]}, {"writes": [bad]}, {"writes": [bad]}]
+    Path(script).write_text(json.dumps(plan), encoding="utf-8")
+    return script
+
+
+def test_D_79_a_failing_research_run_never_calls_the_minimax_endpoint(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    """INT-07：Bridge 行程環境帶 `MINIMAX_*`（金鑰、端點）時，研究 stage 在 evaluator 連續失敗而升級
+    （ESCALATION）時，引擎原本會同步呼叫 MiniMax（資料出口，且多耗約 11 秒）。研究 run 的引擎
+    子行程不得拿到任何 `MINIMAX_*`：本機監聽埠當假端點，整個失敗路徑連線數必須是 0；stage 仍以
+    `evaluator_failed` 失敗、游標 FAILED。"""
+    script = always_invalid_evidence(tmp_path)
+    with Listener() as endpoint:
+        monkeypatch.setenv("MINIMAX_API_KEY", "sk-sentinel-" + uuid.uuid4().hex)
+        monkeypatch.setenv("MINIMAX_BASE_URL", f"http://127.0.0.1:{endpoint.port}/v1")
+        monkeypatch.setenv("MINIMAX_MODEL", "sentinel-model")
+        rig = build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb, script=script)
+        rid = create(rig)
+        run_stage(rig, rid, "research")
+        run = runs_of(rig, rid, "RESEARCH")[0]
+        assert (run["status"], run["exit_reason"]) == ("FAILED", "evaluator_failed")
+        flow = project(rig, rid)
+        assert (flow["flow_status"], flow["flow_detail"]) == ("FAILED", "evaluator_failed")
+        calls = [json.loads(x) for x in rig.trace.read_text(encoding="utf-8").splitlines()
+                 if x.strip()]
+        researched = [c for c in calls if c.get("role") == "research"]
+        assert len(researched) >= 2, "evaluator 失敗後引擎重試過"
+        assert endpoint.connections == 0, "失敗路徑不得連線到 MINIMAX_BASE_URL（MiniMax 端點）"
+
+
+def test_D_79_the_engine_child_environment_has_no_minimax_names_and_the_config_pins_the_brain_off(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, tree: Path, rdb: ThrowawayDb) -> None:
+    """兩道獨立的釘：(1) 子行程環境（假 claude 的 trace 記下它繼承到的環境鍵名）沒有任何
+    `MINIMAX_*`，連大小寫不同的也沒有；(2) 編譯出的引擎 config 明寫
+    `minimax.enable_kernel_brain: false`（引擎預設值本來就是 false，這裡不靠預設——有人改了
+    引擎預設，研究 run 仍是關的）。"""
+    import yaml
+
+    for name in ("MINIMAX_API_KEY", "MINIMAX_MODEL", "MINIMAX_GROUP_ID", "MINIMAX_EMBED_BASE_URL"):
+        monkeypatch.setenv(name, "sentinel-" + uuid.uuid4().hex)
+    # 這個端點要過 Bridge 的外呼白名單（loopback）
+    monkeypatch.setenv("MINIMAX_BASE_URL", "http://127.0.0.1:9/v1")
+    rig = build_rig(make_bridge, settings, tmp_path, monkeypatch, tree, rdb)
+    rid = create(rig)
+    run_stage(rig, rid, "research")
+    run = runs_of(rig, rid, "RESEARCH")[0]
+    assert run["status"] == "SUCCEEDED"
+    trace_lines = rig.trace.read_text(encoding="utf-8").splitlines()
+    entries = [json.loads(x) for x in trace_lines if x.strip()]
+    assert entries
+    for entry in entries:
+        leaked = [k for k in entry["env_keys"] if k.upper().startswith("MINIMAX")]
+        assert not leaked, entry["env_keys"]
+    config = yaml.safe_load((rig.settings.engine_workspace / str(run["id"]) / "config.yaml")
+                            .read_text(encoding="utf-8"))
+    assert config["minimax"] == {"enable_kernel_brain": False}
+    # 每個 stage 的編譯結果都帶這個鍵（不只 research）
+    from app.research.compile import StageRequest, compile_stage
+
+    for stage, extra in (("draft", {}), ("revise", {"round_no": 1}),
+                         ("review", {"round_no": 1, "prd_rel": "01_specs/PRD_draft.md",
+                                     "prd_sha256": "0" * 64})):
+        compiled = compile_stage(StageRequest(
+            stage=stage, slug="demo", workspace=tmp_path / "ws", framework_root=tree,
+            step_timeout_seconds=60, **extra))
+        assert compiled.config_overrides["minimax"] == {"enable_kernel_brain": False}, stage
 
 
 # ── AT-960-12-E-5：人工恢復後續跑只一輪（fake_sdd 與真 CLI 兩樹同一組斷言）───────────────────────

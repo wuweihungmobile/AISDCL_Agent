@@ -235,6 +235,40 @@ def test_the_info_block_has_the_fixed_key_set_and_marks_unmeasurable_items(
     assert research_info(cfg)["mode"] == "mock-only"
 
 
+def test_D_76_the_capabilities_block_is_the_info_block_plus_the_five_contract_keys(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-76(1)：`research_info` 維持固定的八個鍵（`/health/deep` 共用）；capabilities 另加契約
+    §2.1 的五個鍵。`repo_writable` 只在「像 monorepo 且可寫」時為真（容器內為假）；
+    `scaffold_root` 在 P0 恆為 None；`sdd_root` 未解析到框架樹時為 None。"""
+    from dataclasses import replace
+
+    cfg = load_settings(_env(tmp_path))
+    assert research_settings.INFO_KEYS == (
+        "mode", "root", "db", "claude_cli", "gh_cli", "git", "web_layer_enabled",
+        "scaffold_templates"), "八個鍵不增不減：/health/deep 的 research 欄與既有測試共用"
+    hosts = ["a.example.org", "b.example.org"]
+    caps = research_settings.research_capabilities(cfg, fetch_hosts=hosts)
+    assert tuple(caps) == (*research_settings.INFO_KEYS, *research_settings.CAPABILITY_EXTRA_KEYS)
+    assert research_settings.CAPABILITY_EXTRA_KEYS == (
+        "sdd_root", "research_root", "scaffold_root", "repo_writable", "fetch_hosts")
+    assert {k: caps[k] for k in research_settings.INFO_KEYS} == research_info(cfg)
+    assert caps["research_root"] == str(cfg.research_root) == caps["root"]
+    assert caps["fetch_hosts"] == hosts and caps["scaffold_root"] is None
+    assert research_settings.research_capabilities(replace(cfg, sdd_root=None), fetch_hosts=[])[
+        "sdd_root"] is None
+    assert research_settings.research_capabilities(
+        replace(cfg, sdd_root=tmp_path), fetch_hosts=[])["sdd_root"] == str(tmp_path)
+    # repo_writable：像 monorepo 且可寫才為真
+    monkeypatch.setattr(research_settings, "_looks_like_monorepo", lambda root: True)
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+    assert research_settings.repo_writable() is True
+    monkeypatch.setattr(os, "access", lambda path, mode: False)
+    assert research_settings.repo_writable() is False, "唯讀掛載"
+    monkeypatch.setattr(os, "access", lambda path, mode: True)
+    monkeypatch.setattr(research_settings, "_looks_like_monorepo", lambda root: False)
+    assert research_settings.repo_writable() is False, "容器內 REPO_ROOT 不是 monorepo"
+
+
 def test_the_info_block_never_spawns_a_subprocess(tmp_path: Path,
                                                   monkeypatch: pytest.MonkeyPatch) -> None:
     """能力登記鎖：研究套件無 git／gh 子行程——探測只看 PATH。"""

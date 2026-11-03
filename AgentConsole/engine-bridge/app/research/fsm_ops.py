@@ -26,6 +26,9 @@ HUMAN_PENDING 守則（D-50）刻意**不**放在這裡：`gate` 在此是忠實
 """
 from __future__ import annotations
 
+import os
+import platform
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -170,11 +173,35 @@ def snapshot(ctx: FsmCtx) -> dict[str, Any]:
             "frozen_stages": list(state.get("frozen_stages") or [])}
 
 
+_CONTAINER_MARKER = Path("/.dockerenv")
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$")
+
+
+def in_container() -> bool:
+    """Bridge 是否跑在容器內（Linux Docker 在根目錄放 `/.dockerenv`；主機上的 Bridge 一律否）。"""
+    return _CONTAINER_MARKER.is_file()
+
+
+def host_enter_command(*, container: bool, hostname: str | None) -> str | None:
+    """容器內的 Bridge：`recovery.powershell`／`posix` 的路徑是**容器內**路徑（框架樹、狀態目錄都在
+    容器裡），主機上的人直接貼會找不到；這是主機 PowerShell 進入該容器的指令（容器的主機名預設就是
+    容器 ID，`docker exec` 認得），進去後再貼 `posix` 那一行（INT-14 ④）。不在容器內、或主機名
+    不是合法的容器識別字＝None（不寫一個猜出來的指令）。"""
+    if not container or not hostname or not _HOSTNAME_RE.match(hostname):
+        return None
+    return f"docker exec -it {hostname} sh"
+
+
 def escalated_error(ctx: FsmCtx, state: Mapping[str, Any]) -> ApiError:
     """409 `escalated`：ESCALATION 類現態下自動修訂與新審查一律被擋，`details.recovery` 帶可複製的
-    恢復指令（target、powershell、posix）。恢復只有人能做，這裡不提供恢復動詞。"""
+    恢復指令（target、powershell、posix；容器內另帶 `host_powershell`，見 `host_enter_command`）。
+    恢復只有人能做，這裡不提供恢復動詞。"""
     root = ctx.sdd_root if ctx.sdd_root is not None else Path()
     recovery = recovery_commands(dict(state), sdd_root=root, fsm_dir=ctx.state_dir, key=ctx.key)
+    entry = host_enter_command(container=in_container(),
+                               hostname=os.environ.get("HOSTNAME") or platform.node())
+    if entry is not None:
+        recovery = {**recovery, "host_powershell": entry}
     return conflict("escalated", current_state=state.get("current_state"), recovery=recovery)
 
 

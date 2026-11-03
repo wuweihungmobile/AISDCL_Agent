@@ -233,6 +233,27 @@ def test_AT_960_10_3_after_and_last_event_id_resume_without_gaps_and_limits_trun
     assert env.get(f"/research/projects/{uuid.uuid4()}/events").status_code == 404
 
 
+def test_AT_960_10_3_the_events_page_size_is_capped_at_500_whatever_the_caller_asks(
+        make_env: Callable[..., Env], rdb: ThrowawayDb, fake: Path) -> None:
+    """`limit` 上限 500（API-RP-05）：要 500 給 500、要 501 與更大也只給 500（`truncated` 為真、
+    `next_seq` 指向第 500 筆），續抓從第 501 筆接上（突變把上限放寬會讓 501 回 501 筆）。"""
+    env = make_env(fake, rdb)
+    rid = create(env, "evcap")["research_id"]
+    assert router_module.EVENTS_MAX_LIMIT == 500
+    for n in range(520):                                # 建立專案時已有 1 筆 research.step
+        alert(env.db, rid, n)
+    total = int(env.db.get_project(rid)["last_event_seq"])
+    assert total == 521
+    for asked in (500, 501, 1000, 100_000):
+        body = env.get(f"/research/projects/{rid}/events?after=0&limit={asked}").json()
+        assert len(body["items"]) == 500 and body["truncated"] is True, asked
+        assert [e["seq"] for e in body["items"]] == list(range(1, 501)), asked
+        assert body["next_seq"] == 500, asked
+    rest = env.get(f"/research/projects/{rid}/events?after=500&limit=501").json()
+    assert [e["seq"] for e in rest["items"]] == list(range(501, total + 1))
+    assert rest["truncated"] is False and rest["next_seq"] == total
+
+
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 # PKG-BR-C 附加（append-only；上方既有測試一字未動）：AT-960-10-3 的另一半——完整 research＋draft＋
 # review 真流程（活 Bridge＋引擎＋假 claude）產生的事件，型別、payload 鍵集合與重播都符合契約。
