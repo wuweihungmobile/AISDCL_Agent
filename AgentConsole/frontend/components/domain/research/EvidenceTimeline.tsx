@@ -11,6 +11,8 @@
  *    重抓期間設「障壁」：只渲染障壁（缺口或訊號當下的最後處理 seq）以內的事件，重抓完成才放掉障壁、與串流事件依 seq 去重合併；補不齊就有限次重試，仍補不齊顯示警示與「重新同步」。
  *  - **重連靠同一個 EventSource**：瀏覽器自動重連時帶 `Last-Event-ID`（最後處理的 id）；連線被瀏覽器放棄（401／404 等，`readyState` 為 CLOSED）才退避重建（換新 token），並以 REST 補抓一次。
  *    連續失敗過多就停手、改以 REST 輪詢，並提供「重新連線」。
+ *  - **出過錯的連線重新開啟時也以 REST 補抓一次**：伺服器只對帶 `Last-Event-ID` 的重連重播，而第一次連線就失敗的實例沒有 id 可帶（INT-12：載入頁面時串流被擋、期間發生的事件，
+ *    解除後同一個實例自己重連成功，伺服器只送之後的事件）；不補抓的話動態欄停在斷線前，要等下一筆即時事件才靠缺口偵測補齊，而研究結束後不會再有事件。補抓與缺口同步合併去重，多抓一次無害。
  *  - **訂閱契約 §3 的全部事件名**（含 P1／P2 才出現的、畫面不顯示的）：沒訂閱的事件仍佔用 seq，會讓下一則事件被誤判成缺口。
  *  - **外部衍生的文字一律純文字**：標題、摘要、來源名、無效原因、警示說明都以文字節點渲染（沒有 Markdown、沒有原始 HTML）；來源網址只有合法 https 才成連結。
  *  - 量測 AC-R2P-06-1：串流事件若帶 `emittedAt`，在事件變成可見的當下記 `rendered_at`，延遲 P95 與量不到的筆數以 `data-latency-*` 暴露給 E2E／效能探針。
@@ -228,6 +230,8 @@ export function useResearchTimeline(researchId: string, options: TimelineOptions
     let timer: ReturnType<typeof setTimeout> | null = null;
     let failures = 0;
     let everOpened = false;
+    // 目前這個連線實例出過錯、等著瀏覽器自己重連（重連成功時要以 REST 補抓；見檔頭〈出過錯的連線重新開啟時也以 REST 補抓一次〉）
+    let erroredSinceOpen = false;
 
     const onEvent = (message: MessageEvent) => {
       let data: unknown;
@@ -290,7 +294,9 @@ export function useResearchTimeline(researchId: string, options: TimelineOptions
         everOpened = true;
         failures = 0;
         setConnection("open");
-        if (rebuilt) void refetchRef.current(); // 新連線沒有 Last-Event-ID：以 REST 補抓斷線期間的事件
+        // 新連線沒有 Last-Event-ID，出過錯的連線也可能沒有（第一次連線就失敗）：以 REST 補抓斷線期間的事件
+        if (rebuilt || erroredSinceOpen) void refetchRef.current();
+        erroredSinceOpen = false;
       };
       for (const name of RESEARCH_SSE_EVENT_TYPES) es.addEventListener(name, onEvent);
       es.addEventListener(RESEARCH_REPLAY_GAP_EVENT, onGapSignal);
@@ -305,6 +311,7 @@ export function useResearchTimeline(researchId: string, options: TimelineOptions
           failures += 1;
           retryLater();
         } else {
+          erroredSinceOpen = true;
           setConnection("reconnecting"); // 瀏覽器自己帶 Last-Event-ID 重連：同一個實例
         }
       };

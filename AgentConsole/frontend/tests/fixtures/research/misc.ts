@@ -8,6 +8,7 @@ export const CAPABILITIES_LOCAL: ResearchCapabilities = {
   claudeCli: { ok: true, version: "2.1.0" },
   ghCli: { ok: false, authenticated: false },
   git: { ok: true, version: "2.50.0" },
+  sddRoot: "<AISDLC_SDD 框架樹>",
   researchRoot: "<研究工作區根>",
   scaffoldRoot: null,
   scaffoldTemplates: [],

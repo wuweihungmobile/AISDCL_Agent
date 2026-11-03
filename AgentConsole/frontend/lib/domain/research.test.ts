@@ -26,6 +26,7 @@ import {
   READONLY_TITLE,
   RECONCILE_CHECK_LABEL,
   RESEARCH_REASONS,
+  RESEARCH_CANCELLED_REASON,
   REVIEW_RETRY_LIMIT,
   SLUG_PATTERN,
   STEP_STATE_LABEL,
@@ -48,12 +49,17 @@ import {
   isCompletedStep,
   isFlowStepId,
   isInitFailed,
+  isLicensePending,
+  isStageFailed,
   lampInputsOf,
   lampOf,
+  licensePendingCount,
   projectBadge,
+  readResearchScope,
   reconcileDriftView,
   remainingReviewBudget,
   researchErrorText,
+  researchFailureOf,
   resolveBudget,
   resolveViewStep,
   reviewRetryCount,
@@ -755,8 +761,9 @@ const summary = (patch: Partial<ResearchProjectSummary> = {}): ResearchProjectSu
 });
 
 describe("研究專案清單：徽章、篩選、主連結", () => {
-  it("projectBadge：已封存＞初始化失敗＞SCR 進行中＞已交付＞Gate 0 已核准（游標越過規格工作室）＞進行中", () => {
-    expect(Object.keys(PROJECT_BADGE_LABEL)).toEqual(["active", "frozen", "delivered", "scr", "init_failed", "archived"]);
+  it("projectBadge：已封存＞初始化失敗＞失敗（階段失敗或取消）＞SCR 進行中＞已交付＞Gate 0 已核准（游標越過規格工作室）＞進行中", () => {
+    expect(Object.keys(PROJECT_BADGE_LABEL)).toEqual(["active", "frozen", "delivered", "scr", "failed", "init_failed", "archived"]);
+    expect(PROJECT_BADGE_LABEL.failed).toBe("失敗");
     expect(projectBadge(summary())).toBe("active");
     expect(projectBadge(summary({ flowStep: "studio", flowPhase: "REVIEWING", flowStatus: "RUNNING" }))).toBe("active");
     expect(projectBadge(summary({ flowStep: "route", flowPhase: "FROZEN" }))).toBe("frozen");
@@ -764,10 +771,26 @@ describe("研究專案清單：徽章、篩選、主連結", () => {
     expect(projectBadge(summary({ flowStep: "deliver", flowStatus: "COMPLETED" }))).toBe("delivered");
     expect(projectBadge(summary({ flowStep: "studio", flowPhase: "SCR_OPEN" }))).toBe("scr");
     expect(projectBadge(summary({ flowStatus: "FAILED", flowDetail: "init_failed:fsm" }))).toBe("init_failed");
-    expect(projectBadge(summary({ flowStatus: "FAILED", flowDetail: "stage_failed" })), "FAILED 但不是初始化失敗").toBe("active");
     expect(projectBadge(summary({ archivedAt: "2026-11-02T10:00:00+08:00", flowStatus: "FAILED", flowDetail: "init_failed:fsm" }))).toBe("archived");
     expect(isInitFailed(summary({ flowStatus: "FAILED", flowDetail: "init_failed:files" }))).toBe(true);
     expect(isInitFailed(summary({ flowStatus: "IDLE", flowDetail: "init_failed:files" })), "重試成功後已回 IDLE").toBe(false);
+  });
+
+  it("INT-14⑥ 階段失敗與取消不標「進行中」：FAILED（no_evidence、evaluator_failed、cancelled…）與舊版留下的 CANCELLED 游標都是「失敗」；初始化失敗仍是自己的徽章；已封存最優先", () => {
+    for (const flowDetail of ["no_evidence", "evaluator_failed", "step_timeout", "cancelled", ""]) {
+      const failed = summary({ flowPhase: "INGESTED", flowStatus: "FAILED", flowDetail });
+      expect(projectBadge(failed), `FAILED／${flowDetail}`).toBe("failed");
+      expect(isStageFailed(failed), `FAILED／${flowDetail}`).toBe(true);
+      expect(projectBadge({ ...failed, flowStep: "studio", flowPhase: "REVISING" }), `步驟 2 的 FAILED／${flowDetail} 也不是進行中`).toBe("failed");
+    }
+    const legacyCancelled = summary({ flowPhase: "RESEARCHING", flowStatus: "CANCELLED" });
+    expect(projectBadge(legacyCancelled), "舊版 Bridge 取消後留下的游標（phase 停在 RESEARCHING）").toBe("failed");
+    expect(isStageFailed(legacyCancelled)).toBe(true);
+    for (const flowStatus of ["IDLE", "RUNNING", "WAITING_HUMAN", "BLOCKED", "ESCALATED", "COMPLETED"] as const) expect(isStageFailed(summary({ flowStatus })), flowStatus).toBe(false);
+    expect(isStageFailed(summary({ flowStatus: "FAILED", flowDetail: "init_failed:workspace" })), "初始化失敗不算階段失敗").toBe(false);
+    expect(projectBadge(summary({ flowStatus: "FAILED", flowDetail: "init_failed:workspace" }))).toBe("init_failed");
+    expect(projectBadge(summary({ archivedAt: "2026-11-02T10:00:00+08:00", flowStatus: "FAILED", flowDetail: "no_evidence" })), "已封存優先於失敗").toBe("archived");
+    expect(filterProjects([summary({ id: "f", flowStatus: "FAILED", flowDetail: "no_evidence" }), summary({ id: "a" })], { q: "", status: "failed", step: "all" }).map((p) => p.id)).toEqual(["f"]);
   });
 
   it("continueLabel 是「繼續（第 k 步：名稱）」；filterProjects：『全部』不含已封存、搜尋不分大小寫比對編號／名稱／代號、可按狀態與步驟篩", () => {
@@ -872,10 +895,10 @@ describe("新建研究專案：代號、摘要、驗證、請求本文", () => {
 // ── 錯誤原因 ──────────────────────────────────────────────────────────────────────────
 
 describe("研究 reason 與錯誤文案", () => {
-  it("RESEARCH_REASONS 為 P0 的十八個 reason（snake_case、互異、逐字等於契約表）", () => {
+  it("RESEARCH_REASONS 為二十二個 reason（snake_case、互異、逐字等於後端 ErrorReasons 的 RESEARCH_ 常數與契約勘誤後的清單：P0 原列十八個扣被 D-72 取代的 spec_digest_changed，加 Bridge 專屬的五個）", () => {
     const values = Object.values(RESEARCH_REASONS);
-    expect(values).toHaveLength(18);
-    expect(new Set(values).size).toBe(18);
+    expect(values).toHaveLength(22);
+    expect(new Set(values).size).toBe(22);
     for (const value of values) expect(value).toMatch(/^[a-z]+(_[a-z]+)*$/);
     expect([...values].sort()).toEqual(
       [
@@ -888,7 +911,6 @@ describe("研究 reason 與錯誤文案", () => {
         "stage_conflict",
         "prd_version_conflict",
         "review_not_passed",
-        "spec_digest_changed",
         "fsm_state_conflict",
         "escalated",
         "spec_frozen",
@@ -897,8 +919,24 @@ describe("研究 reason 與錯誤文案", () => {
         "terms_ack_required",
         "bridge_unreachable",
         "bridge_timeout",
+        "allowlist_exists",
+        "init_failed",
+        "not_implemented",
+        "digest_mismatch",
+        "missing_digests",
       ].sort(),
     );
+    expect(values, "D-72：409 spec_digest_changed 已由 422 digest_mismatch／missing_digests 取代，Bridge 不再回它").not.toContain("spec_digest_changed");
+  });
+
+  it("INT-13 Gate 0 核准的兩個 422：digest_mismatch 與 missing_digests 各有白話文案（不再退回伺服器訊息）；Bridge 專屬的另外三個也有", () => {
+    const text = (reason: string) => researchErrorText(new ApiError({ status: 422, message: "伺服器訊息", reason }));
+    expect(text(RESEARCH_REASONS.DIGEST_MISMATCH)).toBe("核准時的摘要與現檔不符，請重新整理後再核准");
+    expect(text(RESEARCH_REASONS.MISSING_DIGESTS)).toContain("沒有附上任何檔案摘要");
+    expect(text(RESEARCH_REASONS.ALLOWLIST_EXISTS)).toContain("已有條目");
+    expect(text(RESEARCH_REASONS.INIT_FAILED)).toContain("重試初始化");
+    expect(text(RESEARCH_REASONS.NOT_IMPLEMENTED)).toContain("尚未開放");
+    expect(text("spec_digest_changed"), "已被取代的 reason 沒有文案，退回通用訊息").toBe("伺服器訊息：spec_digest_changed");
   });
 
   it("researchErrorText：有對映的 reason 回白話原因；沒有對映或不是 ApiError 退回通用訊息；唯讀提示字樣固定", () => {
@@ -908,6 +946,133 @@ describe("研究 reason 與錯誤文案", () => {
     expect(researchErrorText(new ApiError({ status: 500, message: "壞了", reason: "unknown_reason" }))).toBe("壞了：unknown_reason");
     expect(researchErrorText(new Error("一般錯誤"))).toBe("一般錯誤");
     expect(READONLY_TITLE).toBe("權限不足（唯讀角色）");
+  });
+});
+
+// ── INT-04 研究失敗的呈現（D-77）────────────────────────────────────────────────────────
+
+describe("INT-04 researchFailureOf：失敗游標一律是 FAILED 加 exit_reason（取消為 cancelled）；只認 FAILED，不認「IDLE 加說明」", () => {
+  const topic = (flowDetail: string, flowStatus: ResearchFlowStatus = "FAILED") => ({ flowStep: "topic" as const, flowStatus, flowDetail });
+
+  it("no_evidence：「研究失敗」加「重試」（沒有任何來源，沒有 checkpoint 可續）", () => {
+    expect(researchFailureOf(topic("no_evidence"))).toEqual({ reason: "no_evidence", action: "retry", text: "研究失敗：沒有任何來源取得成功（no_evidence）" });
+  });
+
+  it("evaluator_failed：「研究未完成：evaluator_failed」加「續跑」（顯示 Bridge 給的原因代碼）", () => {
+    expect(researchFailureOf(topic("evaluator_failed"))).toEqual({ reason: "evaluator_failed", action: "resume", text: "研究未完成：evaluator_failed" });
+  });
+
+  it("cancelled：「研究已取消」加「重試」，不帶原因代碼（取消不是出錯）；已入庫的證據保留", () => {
+    const failure = researchFailureOf(topic(RESEARCH_CANCELLED_REASON));
+    expect(RESEARCH_CANCELLED_REASON).toBe("cancelled");
+    expect(failure).toEqual({ reason: "cancelled", action: "retry", text: "研究已取消：已入庫的證據會保留，可以重試" });
+    expect(failure?.text).not.toContain("研究未完成");
+    expect(researchFailureOf(topic("  cancelled  "))?.reason, "前後空白先修剪").toBe("cancelled");
+  });
+
+  it("只認 flow_status=FAILED（D-77 之前的 IDLE 加說明不再是失敗）；初始化失敗、步驟 2 的失敗、沒有說明的 FAILED 各有明確結果", () => {
+    for (const status of ["IDLE", "RUNNING", "BLOCKED", "CANCELLED", "COMPLETED"] as const) expect(researchFailureOf(topic("no_evidence", status)), status).toBeNull();
+    expect(researchFailureOf(topic("init_failed:fsm"))).toBeNull();
+    expect(researchFailureOf({ flowStep: "studio", flowStatus: "FAILED", flowDetail: "cancelled" }), "步驟 2 的失敗不是研究失敗").toBeNull();
+    expect(researchFailureOf(topic(""))).toMatchObject({ action: "resume", text: "研究未完成：後端沒有提供原因" });
+  });
+});
+
+// ── INT-03 專案範圍鍵（D-76(2)）──────────────────────────────────────────────────────────
+
+describe("INT-03 readResearchScope：鍵一律 camelCase（console-api DTO 在邊界轉換），前端只認 camelCase", () => {
+  /** API 回的 `scope` 形狀（schema.d.ts `ResearchProjectDetail.scope`：layers、techStack、inScope、outOfScope、recencyYears、applicabilityAxes、targetScopeHint）。 */
+  const API_SCOPE = {
+    layers: { academic: true, industry: false, oss: true, community: true },
+    techStack: "Python 3.11；PostgreSQL 18",
+    inScope: ["可自架的向量資料庫"],
+    outOfScope: ["只提供雲端託管的方案"],
+    recencyYears: 2,
+    applicabilityAxes: ["技術可行", "授權相容"],
+    targetScopeHint: "UNDECIDED",
+  };
+
+  it("API 形狀的 scope（camelCase）逐欄讀出，議題面板的納入範圍、排除範圍、技術棧、文獻年限與適用性軸都有值", () => {
+    expect(readResearchScope(API_SCOPE)).toEqual({
+      layers: { academic: true, industry: false, oss: true, community: true },
+      techStack: "Python 3.11；PostgreSQL 18",
+      inScope: ["可自架的向量資料庫"],
+      outOfScope: ["只提供雲端託管的方案"],
+      recencyYears: 2,
+      applicabilityAxes: ["技術可行", "授權相容"],
+    });
+  });
+
+  it("snake_case 的鍵（Bridge 內部寫入的形狀）不讀：邊界轉換是 console-api 的責任，前端若兩邊都認就掩蓋了邊界壞掉（INT-03 的成因）", () => {
+    const snake = { layers: API_SCOPE.layers, tech_stack: "x", in_scope: ["a"], out_of_scope: ["b"], recency_years: 3, applicability_axes: ["c"] };
+    expect(readResearchScope(snake)).toEqual({ layers: API_SCOPE.layers, techStack: "", inScope: [], outOfScope: [], recencyYears: null, applicabilityAxes: [] });
+  });
+});
+
+// ── F-02 授權待查（D-80；雙端對拍）──────────────────────────────────────────────────────
+
+type LicenseCase = { license_spdx: string | null; pending: boolean; why: string };
+
+describe("F-02 授權待查 isLicensePending：與 Bridge 同一條規則（D-80），同一張期望表兩端各自斷言", () => {
+  it("本端的固定列：UNKNOWN（含大小寫與空白）、null、空白、未見＝待查；LGPL、複合式（OR／AND／WITH、括號、連接詞小寫）、寬鬆授權＝不待查；GPL／AGPL 系＝待查", () => {
+    const rows: Array<[string | null | undefined, boolean]> = [
+      [null, true],
+      [undefined, true],
+      ["", true],
+      ["   ", true],
+      ["未見", true],
+      ["UNKNOWN", true],
+      ["unknown", true],
+      ["Unknown", true],
+      [" UNKNOWN ", true],
+      ["MIT", false],
+      ["Apache-2.0", false],
+      ["GPL-3.0-only", true],
+      ["gpl-3.0-only", true],
+      ["GPL-2.0-or-later", true],
+      ["AGPL-3.0-or-later", true],
+      ["agpl-3.0", true],
+      ["GPL", true],
+      ["LGPL-3.0", false],
+      ["LGPL-2.1-or-later", false],
+      ["lgpl-2.1", false],
+      ["MIT OR GPL-2.0", false],
+      ["GPL-2.0 OR MIT", false],
+      ["Apache-2.0 AND GPL-3.0-only", false],
+      ["GPL-2.0 WITH Classpath-exception-2.0", false],
+      ["(MIT OR GPL-2.0-only)", false],
+      ["mit or gpl-2.0", false],
+    ];
+    for (const [spdx, pending] of rows) expect(isLicensePending(spdx), JSON.stringify(spdx)).toBe(pending);
+  });
+
+  it("雙端對拍：讀 Bridge 棒放的期望表 engine-bridge/tests/fixtures/research/license_pending_cases.json，逐列斷言前端函式（缺檔即紅，不跳過）", () => {
+    const file = path.join(ROOT, "..", "engine-bridge", "tests", "fixtures", "research", "license_pending_cases.json");
+    expect(existsSync(file), `找不到雙端共用的期望表：${file}`).toBe(true);
+    const table = JSON.parse(readFileSync(file, "utf-8")) as { schema: number; cases: LicenseCase[] };
+    expect(table.schema).toBe(1);
+    expect(table.cases.length, "期望表不可是空的（空表會讓對拍空過）").toBeGreaterThanOrEqual(20);
+    expect(
+      table.cases.some((c) => c.license_spdx === null),
+      "表內要有 null 列",
+    ).toBe(true);
+    expect(table.cases.filter((c) => c.pending).length).toBeGreaterThan(0);
+    expect(table.cases.filter((c) => !c.pending).length).toBeGreaterThan(0);
+    for (const c of table.cases) expect(isLicensePending(c.license_spdx), `${JSON.stringify(c.license_spdx)}：${c.why}`).toBe(c.pending);
+  });
+
+  it("licensePendingCount：逐證據列取來源的授權；UNKNOWN 與複合式的判準與 isLicensePending 一致；來源清單裡找不到的列算待查（同 Bridge：缺來源＝未見）", () => {
+    const sources = [
+      { sourceNo: "S-001", licenseSpdx: "MIT" },
+      { sourceNo: "S-002", licenseSpdx: "UNKNOWN" },
+      { sourceNo: "S-003", licenseSpdx: "LGPL-3.0" },
+      { sourceNo: "S-004", licenseSpdx: "MIT OR GPL-2.0" },
+      { sourceNo: "S-005", licenseSpdx: "AGPL-3.0-or-later" },
+      { sourceNo: "S-006", licenseSpdx: null },
+    ];
+    const items = ["S-001", "S-002", "S-003", "S-004", "S-005", "S-006", "S-404"].map((sourceNo) => ({ sourceNo }));
+    expect(licensePendingCount(items, sources)).toBe(4);
+    expect(licensePendingCount(items.slice(0, 1), sources)).toBe(0);
   });
 });
 

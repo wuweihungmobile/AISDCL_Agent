@@ -205,6 +205,8 @@ const BADGE_CLASS: Readonly<Record<ProjectBadgeId, string>> = {
   frozen: "bg-wg-base text-wg-primary-strong",
   delivered: "bg-wg-base text-wg-primary-strong",
   scr: "bg-wg-alert-bg text-wg-warning-text",
+  // 階段失敗與取消（INT-14⑥）與初始化失敗同一組既有 token（accent 字坐在 draft-bg 上，對比 ≥ 4.5；FlowStepper 的「受阻」chip 同色）
+  failed: "bg-wg-draft-bg text-wg-accent",
   init_failed: "bg-wg-draft-bg text-wg-accent",
   archived: "bg-wg-base text-wg-muted",
 };

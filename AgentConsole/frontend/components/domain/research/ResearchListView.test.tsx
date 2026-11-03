@@ -6,12 +6,13 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ResearchPage, { metadata as listPageMetadata } from "@/app/research/page";
-import type { Role } from "@/lib/api/types";
-import { DEFAULT_APPLICABILITY_AXES, READONLY_TITLE, SLUG_PATTERN } from "@/lib/domain/research";
+import type { ResearchProjectSummary, Role } from "@/lib/api/types";
+import { DEFAULT_APPLICABILITY_AXES, READONLY_TITLE, SLUG_PATTERN, type ProjectBadgeId } from "@/lib/domain/research";
 import { R1, R2, R3, T1, T2 } from "@/tests/fixtures/research/ids";
 import { CAPABILITIES_LOCAL } from "@/tests/fixtures/research/misc";
 import { PROJECT_LIST, SUMMARY_R1 } from "@/tests/fixtures/research/projects";
 import { callsOf, failure, renderResearch, stubResearchApi, writeCalls } from "@/tests/helpers/research";
+import { contrastRatio, tokenHex } from "@/tests/helpers/tokens";
 import { ResearchListView } from "./ResearchListView";
 
 /**
@@ -271,6 +272,104 @@ describe("AT_960_19_1 篩選與搜尋（全在已載入的清單上做）", () =
     expect(await screen.findByText("沒有符合條件的研究專案")).toBeInTheDocument();
     expect(screen.queryByText("還沒有任何研究專案")).toBeNull();
     expect(screen.getByRole("combobox", { name: "狀態篩選" })).toBeInTheDocument();
+  });
+});
+
+// ── F-08／INT-14⑥ 狀態徽章：文字、class（設計 token）與對比 ─────────────────────────────────
+
+/** 每種徽章的樣本專案（除已封存外，都在預設的未封存清單裡）。 */
+const BADGE_SAMPLES: ReadonlyArray<{ badge: ProjectBadgeId; label: string; patch: Partial<ResearchProjectSummary>; fg: string; bg: string }> = [
+  { badge: "active", label: "進行中", patch: { flowStep: "topic", flowPhase: "RESEARCHING", flowStatus: "RUNNING" }, fg: "color-primary-strong", bg: "color-bg-base" },
+  { badge: "frozen", label: "Gate 0 已核准", patch: { flowStep: "route", flowPhase: "FROZEN", flowStatus: "IDLE" }, fg: "color-primary-strong", bg: "color-bg-base" },
+  { badge: "delivered", label: "已交付", patch: { flowStep: "deliver", flowPhase: "DELIVERED", flowStatus: "COMPLETED" }, fg: "color-primary-strong", bg: "color-bg-base" },
+  { badge: "scr", label: "SCR 進行中", patch: { flowStep: "studio", flowPhase: "SCR_OPEN", flowStatus: "RUNNING" }, fg: "color-warning-text", bg: "color-alert-bg" },
+  { badge: "failed", label: "失敗", patch: { flowStep: "topic", flowPhase: "INGESTED", flowStatus: "FAILED", flowDetail: "no_evidence" }, fg: "color-accent", bg: "color-draft-bg" },
+  { badge: "init_failed", label: "初始化失敗", patch: { flowStep: "topic", flowPhase: "INGESTED", flowStatus: "FAILED", flowDetail: "init_failed:fsm" }, fg: "color-accent", bg: "color-draft-bg" },
+];
+/** 徽章字色的 Tailwind class（token 名稱）：每一列的字色與它坐的底色必須對比 ≥ 4.5:1（WCAG AA 一般文字；真瀏覽器層級另由 a11y.mock.spec.ts 的 axe 掃描把關）。 */
+const BADGE_TEXT_CLASS: Readonly<Record<string, string>> = {
+  "color-primary-strong": "text-wg-primary-strong",
+  "color-warning-text": "text-wg-warning-text",
+  "color-accent": "text-wg-accent",
+};
+
+describe("F-08／INT-14⑥ 清單徽章：每種徽章的文字、字色 class 與底色對比", () => {
+  it("六種徽章各有一列：徽章文字與 data-badge 對得上；失敗與取消的專案標「失敗」、不標「進行中」", async () => {
+    const projects: ResearchProjectSummary[] = BADGE_SAMPLES.map((sample, i) => ({
+      ...SUMMARY_R1,
+      id: `0000000${i}-0000-4000-8000-000000000000`,
+      rpNo: `RP-010${i}`,
+      slug: `badge-${sample.badge}`,
+      ...sample.patch,
+    }));
+    projects.push({
+      ...SUMMARY_R1,
+      id: "0000000c-0000-4000-8000-000000000000",
+      rpNo: "RP-0109",
+      slug: "badge-cancelled",
+      flowStep: "topic",
+      flowPhase: "INGESTED",
+      flowStatus: "FAILED",
+      flowDetail: "cancelled",
+    });
+    renderList("OPERATOR", { projects });
+    const rows = await screen.findAllByTestId("research-row");
+    expect(rows).toHaveLength(BADGE_SAMPLES.length + 1);
+    BADGE_SAMPLES.forEach((sample, i) => {
+      expect(rows[i], sample.badge).toHaveAttribute("data-badge", sample.badge);
+      expect(within(rows[i]).getByTestId("research-badge"), sample.badge).toHaveTextContent(new RegExp(`^${sample.label}$`));
+    });
+    expect(within(rows[BADGE_SAMPLES.length]).getByTestId("research-badge"), "被取消（FAILED／cancelled）").toHaveTextContent(/^失敗$/);
+    expect(
+      screen.getAllByTestId("research-badge").filter((badge) => badge.textContent === "進行中"),
+      "只有真的在進行的那一列標進行中",
+    ).toHaveLength(1);
+  });
+
+  it.each(BADGE_SAMPLES)("F-08 $badge 徽章（$label）：字色是 $fg 對應的 token class、底色是 $bg，兩者對比 ≥ 4.5:1；主色字（對比 4.21）不得出現", async ({ badge, patch, fg, bg }) => {
+    renderList("OPERATOR", { projects: [{ ...SUMMARY_R1, ...patch }] });
+    const element = await screen.findByTestId("research-badge");
+    const classes = element.className.split(/\s+/);
+    expect(element.closest("[data-research-id]")).toHaveAttribute("data-badge", badge);
+    expect(classes, `${badge} 的字色 class`).toContain(BADGE_TEXT_CLASS[fg]);
+    expect(classes, `${badge} 的底色 class`).toContain({ "color-bg-base": "bg-wg-base", "color-alert-bg": "bg-wg-alert-bg", "color-draft-bg": "bg-wg-draft-bg" }[bg]);
+    expect(classes, "主色字坐在 bg-base 上只有 4.21:1（axe color-contrast serious）").not.toContain("text-wg-primary");
+    const fgHex = tokenHex(fg);
+    const bgHex = tokenHex(bg);
+    expect(fgHex, `找不到前景 token ${fg}`).toBeDefined();
+    expect(bgHex, `找不到底色 token ${bg}`).toBeDefined();
+    expect(contrastRatio(fgHex as string, bgHex as string), `${badge}：${fg} 坐在 ${bg} 上`).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("F-08 已封存徽章（在「已封存」篩選才看得到）：字色 text-wg-muted、底色 bg-wg-base，對比 ≥ 4.5:1", async () => {
+    const user = userEvent.setup();
+    renderList("OPERATOR", { projects: [...PROJECT_LIST, ARCHIVED] });
+    await screen.findAllByTestId("research-row");
+    await user.selectOptions(screen.getByRole("combobox", { name: "狀態篩選" }), "archived");
+    await screen.findByRole("button", { name: "復原 RP-0004" });
+    const classes = screen.getByTestId("research-badge").className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(["bg-wg-base", "text-wg-muted"]));
+    expect(contrastRatio(tokenHex("color-text-muted") as string, tokenHex("color-bg-base") as string)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("INT-14⑥ 狀態篩選有「失敗」選項：只列失敗與取消的專案", async () => {
+    const user = userEvent.setup();
+    const failed: ResearchProjectSummary = {
+      ...SUMMARY_R1,
+      id: R4,
+      rpNo: "RP-0004",
+      slug: "failed-one",
+      title: "失敗的研究",
+      flowPhase: "INGESTED",
+      flowStatus: "FAILED",
+      flowDetail: "evaluator_failed",
+    };
+    renderList("OPERATOR", { projects: [...PROJECT_LIST, failed] });
+    await screen.findAllByTestId("research-row");
+    const status = screen.getByRole("combobox", { name: "狀態篩選" });
+    expect(within(status).getByRole("option", { name: "失敗" })).toBeInTheDocument();
+    await user.selectOptions(status, "failed");
+    expect(screen.getAllByTestId("research-row").map((r) => r.getAttribute("data-research-id"))).toEqual([R4]);
   });
 });
 

@@ -10,6 +10,8 @@
  *    `minIntervalSeconds` 建立後不可改（受控更新守衛只放行 `enabled` 與停用欄），要調整間隔＝停用後重建；實際間隔取 Bridge 內建下限與條目值的較大者，這裡只能把間隔拉長。
  *  - **稽核由後端做**（D-62(1)：寫入成功後 console-api 以 `AuditTrail.note` 標註）；前端只顯示結果，不另記任何稽核。
  *  - 新增成功後清單與能力探針一併重抓（`webLayerEnabled` 會跟著變：Web 層清單有條目才算啟用）；失敗原因（含 Bridge 尚未實作的 502）以白話顯示在對話框內，不關閉、不假裝成功。
+ *  - **有效主機另列**（INT-08 前端側）：清單含已停用的條目，研究階段實際會連的主機是能力探針的 `fetchHosts`（基底加啟用中的 ADMIN 條目），所以清單下方另有一區只讀的
+ *    「目前有效的抓取主機」，並帶出框架樹、分流腳手架根與 repo 可寫（能力探針的其餘新鍵）；探針失敗只影響這一區（說明原因），清單與新增表單照常。
  */
 import { Globe } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -23,7 +25,7 @@ import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
-import { useAddResearchAllowlistEntry, useResearchAllowlist, useUpdateResearchAllowlistEntry } from "@/lib/api/queries";
+import { useAddResearchAllowlistEntry, useResearchAllowlist, useResearchCapabilities, useUpdateResearchAllowlistEntry } from "@/lib/api/queries";
 import type { ResearchAllowlistEntry } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import {
@@ -85,6 +87,62 @@ function EntryRow({ entry, busy, onToggle }: { entry: ResearchAllowlistEntry; bu
         )}
       </td>
     </tr>
+  );
+}
+
+/**
+ * 能力探針的研究環境事實（INT-08 前端側；只讀、不改任何流程）：有效的抓取主機（`fetchHosts`＝部署基底加啟用中的 ADMIN 條目，停用即消失——
+ * 上面的清單含已停用的條目，這裡才是研究階段實際會連的主機）、框架樹、分流腳手架根、目標 repo 可寫與否。新增與停用成功後能力探針會一併重抓（`useAllowlistWrite`），所以這一區跟著變。
+ */
+function EffectiveEnvironment() {
+  const capabilities = useResearchCapabilities();
+  const data = capabilities.data;
+  return (
+    <section aria-labelledby="effective-hosts-title" data-testid="effective-environment" className="flex flex-col gap-3 rounded-md border border-wg-line bg-wg-surface px-3 py-3">
+      <h3 id="effective-hosts-title" className="text-base font-semibold">
+        目前有效的抓取主機
+      </h3>
+      {data === undefined ? (
+        capabilities.isError ? (
+          <p role="note" data-testid="effective-environment-error" className="text-sm text-wg-muted">
+            無法取得研究環境狀態：{researchErrorText(capabilities.error)}。上面的清單仍是資料庫的內容。
+          </p>
+        ) : (
+          <div aria-busy="true" aria-label="研究環境載入中" role="status">
+            <Skeleton className="h-10 rounded-md" />
+          </div>
+        )
+      ) : (
+        <>
+          <p className="text-xs text-wg-muted">研究階段實際會連線的主機：部署環境變數的基底加上啟用中的管理員條目；停用的條目不在其中。</p>
+          {data.fetchHosts.length === 0 ? (
+            <p data-testid="effective-hosts-empty" className="text-sm text-wg-muted">
+              目前沒有任何有效的抓取主機。
+            </p>
+          ) : (
+            <ul aria-label="有效的抓取主機" data-testid="effective-hosts" className="flex flex-wrap gap-2">
+              {data.fetchHosts.map((host) => (
+                <li key={host} className="rounded-sm bg-wg-base px-2 py-0.5 font-mono text-xs break-all">
+                  {host}
+                </li>
+              ))}
+            </ul>
+          )}
+          <dl data-testid="effective-facts" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-wg-muted">AISDLC_SDD 框架樹</dt>
+            <dd data-testid="fact-sdd-root" className="font-mono text-xs break-all">
+              {data.sddRoot ?? "未解析到"}
+            </dd>
+            <dt className="text-wg-muted">分流腳手架根</dt>
+            <dd data-testid="fact-scaffold-root" className="font-mono text-xs break-all">
+              {data.scaffoldRoot ?? "未設定"}
+            </dd>
+            <dt className="text-wg-muted">目標 repo 可寫</dt>
+            <dd data-testid="fact-repo-writable">{data.repoWritable ? "是" : "否"}</dd>
+          </dl>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -239,6 +297,7 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
             </table>
           </div>
         )}
+        <EffectiveEnvironment />
         <AddForm />
       </DialogBody>
       <DialogFooter>

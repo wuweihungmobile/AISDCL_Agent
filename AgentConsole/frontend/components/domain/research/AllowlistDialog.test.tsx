@@ -2,9 +2,10 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { ResearchAllowlistEntry, ResearchAllowlistRequest, Role } from "@/lib/api/types";
+import type { ResearchAllowlistEntry, ResearchAllowlistRequest, ResearchCapabilities, Role } from "@/lib/api/types";
 import { allowlistFormErrors, isRedditHost, normalizeAllowlistHost, toAllowlistRequest, type AllowlistForm } from "@/lib/domain/research";
 import { T0 } from "@/tests/fixtures/research/ids";
+import { CAPABILITIES_LOCAL } from "@/tests/fixtures/research/misc";
 import { callsOf, failure, renderResearch, stubResearchApi, writeCalls, type ApiCall, type Reply } from "@/tests/helpers/research";
 import { AllowlistDialog } from "./AllowlistDialog";
 
@@ -53,13 +54,29 @@ const ADMIN_ENTRY: ResearchAllowlistEntry = {
 const ENTRIES = (): ResearchAllowlistEntry[] => [...BASE_HOSTS.map((host, i) => envEntry(host, [3, 3, 1, 3][i])), { ...ADMIN_ENTRY }];
 
 const LIST_PATH = "/api/v1/research/allowlist";
+const CAPABILITIES_PATH = "/api/v1/research/capabilities";
 
-/** 假後端：GET 回活的清單；POST 依本文建立 ADMIN 條目（或由 `post` 覆寫）；PATCH 只改 enabled（或由 `patch` 覆寫）。 */
-function mountDialog(role: Role, hooks: { post?: (call: ApiCall) => Reply; patch?: (call: ApiCall) => Reply; list?: (call: ApiCall) => Reply } = {}) {
+/**
+ * 假後端：GET 回活的清單；POST 依本文建立 ADMIN 條目（或由 `post` 覆寫）；PATCH 只改 enabled（或由 `patch` 覆寫）；
+ * 能力探針預設回夾具，`capabilities` 可依「當下的清單」算出回應（有效主機隨新增與停用變動）或回 `"error"`＝503。
+ */
+function mountDialog(
+  role: Role,
+  hooks: {
+    post?: (call: ApiCall) => Reply;
+    patch?: (call: ApiCall) => Reply;
+    list?: (call: ApiCall) => Reply;
+    capabilities?: (allowlist: ResearchAllowlistEntry[]) => ResearchCapabilities | "error";
+  } = {},
+) {
   let nextId = 100;
   const api = stubResearchApi({
     allowlist: ENTRIES(),
     overrides: (call) => {
+      if (call.path === CAPABILITIES_PATH && call.method === "GET" && hooks.capabilities !== undefined) {
+        const caps = hooks.capabilities(api.options.allowlist);
+        return caps === "error" ? failure(503, { message: "Bridge 不可用", reason: "bridge_unreachable" }) : { data: caps };
+      }
       if (call.path === LIST_PATH && call.method === "GET" && hooks.list !== undefined) return hooks.list(call);
       if (call.method === "POST" && call.path === LIST_PATH) {
         const custom = hooks.post?.(call);
@@ -153,6 +170,69 @@ describe("AT_960_19_8 清單：區分來源 ENV 與 ADMIN；ENV 條目沒有停�
   });
 });
 
+describe("INT-08 前端側：有效的抓取主機與研究環境事實（能力探針的 fetchHosts、sddRoot、scaffoldRoot、repoWritable）", () => {
+  /** 有效主機＝部署基底加啟用中的 ADMIN 條目（停用即消失；同 Bridge 的 `fetch_hosts`）。 */
+  const effective = (allowlist: ResearchAllowlistEntry[]): ResearchCapabilities => ({
+    ...CAPABILITIES_LOCAL,
+    fetchHosts: [...BASE_HOSTS, ...allowlist.filter((entry) => entry.source === "ADMIN" && entry.enabled).map((entry) => entry.host)],
+  });
+  const hostsShown = (): string[] =>
+    within(screen.getByTestId("effective-hosts"))
+      .getAllByRole("listitem")
+      .map((li) => li.textContent ?? "");
+
+  it("INT-08 開啟後列出有效的抓取主機與三個環境事實；只讀（沒有任何寫入請求）", async () => {
+    const user = userEvent.setup();
+    const { calls } = mountDialog("ADMIN");
+    await openDialog(user);
+    const section = await screen.findByTestId("effective-environment");
+    expect(within(section).getByRole("heading", { name: "目前有效的抓取主機" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("effective-hosts")).toBeInTheDocument());
+    expect(hostsShown()).toEqual(CAPABILITIES_LOCAL.fetchHosts);
+    expect(screen.getByRole("list", { name: "有效的抓取主機" })).toBe(screen.getByTestId("effective-hosts"));
+    expect(screen.getByTestId("fact-sdd-root")).toHaveTextContent("<AISDLC_SDD 框架樹>");
+    expect(screen.getByTestId("fact-scaffold-root"), "scaffoldRoot 為 null").toHaveTextContent("未設定");
+    expect(screen.getByTestId("fact-repo-writable")).toHaveTextContent("是");
+    expect(callsOf(calls, "GET", /\/capabilities$/).length, "開對話框才讀能力探針").toBeGreaterThanOrEqual(1);
+    expect(writeCalls(calls)).toEqual([]);
+  });
+
+  it("INT-08 新增 ADMIN 條目後有效主機跟著多一個、停用後少一個（新增與停用成功都會重抓能力探針）；已停用的條目仍在上面的清單裡", async () => {
+    const user = userEvent.setup();
+    mountDialog("ADMIN", { capabilities: effective });
+    await openDialog(user);
+    await waitFor(() => expect(hostsShown()).toEqual([...BASE_HOSTS, "docs.example.com"]));
+    await user.type(field(/^主機名稱/), "blog.example.com");
+    await user.click(screen.getByRole("button", { name: "新增" }));
+    await waitFor(() => expect(hostsShown()).toEqual([...BASE_HOSTS, "docs.example.com", "blog.example.com"]));
+    await user.click(within(rowOf("docs.example.com")).getByRole("button", { name: "停用 docs.example.com" }));
+    await waitFor(() => expect(hostsShown()).toEqual([...BASE_HOSTS, "blog.example.com"]));
+    expect(rowOf("docs.example.com"), "停用的條目仍在清單，只是不在有效主機裡").toHaveAttribute("data-enabled", "false");
+  });
+
+  it("INT-08 環境事實的各種值：框架樹解析不到＝「未解析到」、腳手架根有值照字顯示、repo 不可寫＝「否」；沒有任何有效主機時說明而不是空白", async () => {
+    const user = userEvent.setup();
+    mountDialog("ADMIN", { capabilities: () => ({ ...CAPABILITIES_LOCAL, sddRoot: null, scaffoldRoot: "/srv/scaffold", repoWritable: false, fetchHosts: [] }) });
+    await openDialog(user);
+    expect(await screen.findByTestId("effective-hosts-empty")).toHaveTextContent("目前沒有任何有效的抓取主機");
+    expect(screen.queryByTestId("effective-hosts")).toBeNull();
+    expect(screen.getByTestId("fact-sdd-root")).toHaveTextContent("未解析到");
+    expect(screen.getByTestId("fact-scaffold-root")).toHaveTextContent("/srv/scaffold");
+    expect(screen.getByTestId("fact-repo-writable")).toHaveTextContent("否");
+  });
+
+  it("INT-08 能力探針失敗（Bridge 連不上）：只有這一區顯示原因（不是 alert），上面的清單與新增表單照常可用", async () => {
+    const user = userEvent.setup();
+    mountDialog("ADMIN", { capabilities: () => "error" });
+    await openDialog(user);
+    expect(await screen.findByTestId("effective-environment-error")).toHaveTextContent("無法取得研究環境狀態");
+    expect(screen.queryByTestId("effective-hosts")).toBeNull();
+    expect(await screen.findAllByTestId("allowlist-row")).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "新增" })).toBeEnabled();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("AT_960_19_8 新增：產業網域與逐欄驗證", () => {
   it("AT_960_19_8 新增產業網域：主機名稱去空白並轉小寫；POST 本文為 camelCase 且欄位恰為契約欄位；成功後清單重抓、表單清空、顯示提示", async () => {
     const user = userEvent.setup();
@@ -170,7 +250,7 @@ describe("AT_960_19_8 新增：產業網域與逐欄驗證", () => {
     expect(rowOf("blog.example.com")).toHaveAttribute("data-source", "ADMIN");
     expect(field(/^主機名稱/)).toHaveValue("");
     expect(callsOf(calls, "GET", /\/allowlist$/).length, "新增成功後清單重抓").toBeGreaterThanOrEqual(2);
-    expect(callsOf(calls, "GET", /\/capabilities$/).length, "能力探針（Web 層是否啟用）也重抓").toBeGreaterThanOrEqual(0);
+    expect(callsOf(calls, "GET", /\/capabilities$/).length, "能力探針（Web 層是否啟用、有效主機）也重抓：開啟時一次、新增成功後再一次").toBeGreaterThanOrEqual(2);
   });
 
   it("AT_960_19_8 驗證：主機空白、帶 https:// 或路徑、含大寫以外的非法字元、間隔不是 1～3600 的整數、用途超過 200 字各在欄位旁顯示錯誤且不送出；改對後送出", async () => {
@@ -223,7 +303,7 @@ describe("AT_960_19_8 新增：產業網域與逐欄驗證", () => {
     expect(field(/^主機名稱/)).toHaveValue("dup.example.com");
     reply = failure(502, { message: "Bridge 端點尚未實作", reason: "not_implemented", details: { endpoint: "POST /research/allowlist" } });
     await user.click(screen.getByRole("button", { name: "新增" }));
-    await waitFor(() => expect(screen.getByTestId("allowlist-error")).toHaveTextContent("Bridge 端點尚未實作"));
+    await waitFor(() => expect(screen.getByTestId("allowlist-error")).toHaveTextContent("這個功能尚未開放"));
     expect(screen.getByRole("dialog", { name: "研究來源設定" })).toBeInTheDocument();
     expect(screen.queryByText("已新增 dup.example.com")).toBeNull();
     expect(screen.getAllByTestId("allowlist-row")).toHaveLength(5);
@@ -315,7 +395,7 @@ describe("AT_960_19_8 停用與啟用：PATCH 本文只有 enabled", () => {
     await openDialog(user);
     await screen.findAllByTestId("allowlist-row");
     await user.click(within(rowOf("docs.example.com")).getByRole("button", { name: "停用 docs.example.com" }));
-    expect(await screen.findByText(/停用失敗：Bridge 端點尚未實作/)).toBeInTheDocument();
+    expect(await screen.findByText(/停用失敗：這個功能尚未開放/)).toBeInTheDocument();
     expect(rowOf("docs.example.com")).toHaveAttribute("data-enabled", "true");
     expect(screen.queryByText("已停用 docs.example.com")).toBeNull();
   });

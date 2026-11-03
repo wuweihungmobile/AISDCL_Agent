@@ -210,6 +210,37 @@ describe("AT_960_19_7 議題面板：研究未完成（續跑、重試）不顯�
     expect(researchFailureOf({ flowStep: "topic", flowStatus: "IDLE", flowDetail: "" })).toBeNull();
   });
 
+  it("INT-04 evaluator_failed（引擎的 evaluator 判研究輸出不合格）：游標是 FAILED 加原因代碼——橫幅「研究未完成：evaluator_failed」與「續跑」鈕，不是安靜的「議題已受理（閒置）」；「生成 PRD 初稿」停用", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderTopic(detailVariant("topicReady", { flowPhase: "INGESTED", flowStatus: "FAILED", flowDetail: "evaluator_failed" }));
+    const banner = await screen.findByTestId("research-failure");
+    expect(banner).toHaveAttribute("role", "alert");
+    expect(banner).toHaveTextContent("研究未完成：evaluator_failed");
+    expect(screen.getByTestId("topic-status")).toHaveTextContent("議題已受理（失敗）");
+    expect(screen.queryByRole("button", { name: "啟動深研" }), "失敗橫幅取代主動作鈕").toBeNull();
+    expect(draftButton()).toBeDisabled();
+    const resume = within(banner).getByRole("button", { name: "續跑" });
+    await waitFor(() => expect(resume).toBeEnabled());
+    await user.click(resume);
+    await waitFor(() => expect(stagePosts(calls, "research")).toHaveLength(1));
+  });
+
+  it("INT-04 cancelled（研究被取消；D-77：取消也是 FAILED 加 exit_reason）：橫幅「研究已取消」與「重試」鈕（沒有「續跑」、不寫成研究未完成）；重試再 POST research", async () => {
+    const user = userEvent.setup();
+    const { calls } = renderTopic(detailVariant("topicReady", { flowPhase: "INGESTED", flowStatus: "FAILED", flowDetail: "cancelled" }));
+    const banner = await screen.findByTestId("research-failure");
+    expect(banner).toHaveTextContent("研究已取消");
+    expect(banner).not.toHaveTextContent("研究未完成");
+    expect(within(banner).queryByRole("button", { name: "續跑" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "啟動深研" })).toBeNull();
+    expect(draftButton()).toBeDisabled();
+    const retry = within(banner).getByRole("button", { name: "重試" });
+    await waitFor(() => expect(retry).toBeEnabled());
+    await user.click(retry);
+    await waitFor(() => expect(stagePosts(calls, "research")).toHaveLength(1));
+    expect(await screen.findByText("重試：已送出，動態欄會即時更新")).toBeInTheDocument();
+  });
+
   it("AT_960_19_7 續跑失敗（Bridge 尚未實作的 502）：以白話原因提示、橫幅仍在、不假裝成功", async () => {
     const user = userEvent.setup();
     const { calls } = renderTopic(FAILED("token_guard_halt"), {
@@ -223,7 +254,7 @@ describe("AT_960_19_7 議題面板：研究未完成（續跑、重試）不顯�
     const resume = await screen.findByRole("button", { name: "續跑" });
     await waitFor(() => expect(resume).toBeEnabled());
     await user.click(resume);
-    expect(await screen.findByText(/續跑失敗：Bridge 端點尚未實作/)).toBeInTheDocument();
+    expect(await screen.findByText(/續跑失敗：這個功能尚未開放/)).toBeInTheDocument();
     expect(screen.getByTestId("research-failure")).toHaveTextContent("研究未完成：token_guard_halt");
     expect(stagePosts(calls, "research")).toHaveLength(1);
   });
@@ -294,7 +325,7 @@ describe("AT_960_19_7 議題面板：證據閘與「生成 PRD 初稿」", () =>
     });
     await waitFor(() => expect(draftButton()).toBeEnabled());
     await user.click(draftButton());
-    expect(await screen.findByText(/生成 PRD 初稿失敗：Bridge 端點尚未實作/)).toBeInTheDocument();
+    expect(await screen.findByText(/生成 PRD 初稿失敗：這個功能尚未開放/)).toBeInTheDocument();
     expect(nav.push).not.toHaveBeenCalled();
   });
 });

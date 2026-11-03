@@ -32,7 +32,7 @@
   預覽的 Markdown 管線自 PKG-FE-D 起是非同步 chunk（不在 `/research/[researchId]` 的首屏路徑）；200KB 的夾具走精簡輸入框、編輯器套件（與它共用同一個 chunk）不會先載入，所以「預覽首次渲染」的第一次（冷啟動）含那個 chunk 的下載時間，其後為熱。
   ② AT-960-16-1 版面（1440 三欄、1000 目錄收成圖示、600 分頁籤）與工作室面板級 axe 掃描（八個狀態，有負控）；③ AT-960-16-3 真函式庫的 Mermaid（合法圖、語法錯誤、含 script 與 click 回呼者不執行、不對外發請求）。
   不需要後端、不連外網；一律對 production 建置跑（`E2E_MODE=standalone`）並帶 `--output=<自己的暫存目錄>`。
-- `a11y.mock.spec.ts`（既有；PKG-FE-D 起新增研發工作流的 3 個情境）：整頁 axe（WCAG 2.0／2.1 A／AA，零違規）——研發工作流清單 `/research`（ADMIN）、研究工作區 `/research/<id>` 的議題步（動態欄、證據矩陣表、技術優缺點矩陣）與 PRD 工作室步（1440 的編輯、預覽、Diff 三個模式，1000 目錄收合，600 分頁籤），
+- `a11y.mock.spec.ts`（既有；PKG-FE-D 起新增研發工作流的 3 個情境）：整頁 axe（WCAG 2.0／2.1 A／AA，零違規）——研發工作流清單 `/research`（ADMIN；五列，含 PKG-FIX-FE 新增的「失敗」與「初始化失敗」徽章列，真瀏覽器才量得到徽章字色對比）、研究工作區 `/research/<id>` 的議題步（動態欄、證據矩陣表、技術優缺點矩陣）與 PRD 工作室步（1440 的編輯、預覽、Diff 三個模式，1000 目錄收合，600 分頁籤），
   清單與議題步各掃 1440／1000／600 三個寬度。這把尺在 PKG-FE-D 抓到並修掉五步列「已完成」chip 的字色（主色字坐在頁面底色上只有 4.21:1，改用 `primary-strong`）；整頁掃描（而不只掃工作室面板）才看得到步驟列與清單徽章這類面板外的元件。
 
 ```bash
@@ -218,6 +218,39 @@ W7 起另有 `p9-w7-docker.stack.ts`（契約 v1.3／v1.4 的全棧側）：全�
 Push-Location AgentConsole\frontend; $env:E2E_API_URL = "http://localhost"; npx playwright test -c tests/e2e/docker.config.ts; Pop-Location
 ```
 
+### 研發工作流 Docker 全棧 E2E（`research-docker.stack.spec.ts`；ResearchToPRD P0 AT-960-22-2～22-5、22-E-1）
+
+整合代驗（PKG-INT）手動走過的路徑整理成可重跑的 spec：經 nginx 同源、真 console-api → 真 Bridge →（mock claude 的研究劇本）→ 真 PostgreSQL，沒有任何假資料；只驗「跨服務才現形」的事（對帳欄位名、範圍鍵大小寫、失敗游標語意、取消後死路都是這類，單元／mock 測試看不出）。
+五個測試：`AT_960_22_5`（UI 殼層：側欄入口與 `aria-current`、390 底部 Tab 不含它、零專案空狀態、超前 `?step=` 導回、步驟 3～5 占位、mock-only 停用啟動深研、VIEWER／OPERATOR／ADMIN 角色）、`AT_960_22_E_1`（清單、議題、工作室在 1440／1000／600 無水平溢出且 axe 無 serious／critical；Studio 600 為分頁籤；對話框焦點陷阱與歸還）、
+`AT_960_22_3`（路徑 B：pass 劇本走到 Gate 0、ADMIN 於 UI 核准、凍結四檔摘要＝FSM 視圖＝容器內檔案位元組、二次核准 409 `fsm_state_conflict`、OPERATOR 403、對帳一致）、`AT_960_22_4`（SSE 斷線重播：載入前攔串流、期間有事件、解除後自動重連、`seq` 自 1 連續無缺漏無重複、重載後動態欄由資料庫重建）、
+`AT_960_22_2`（路徑 A：fail3 劇本，三輪 79.90／82.75／84.60、第 3 輪 ESCALATE、FSM 現態 ESCALATION、ESCALATION 區塊沒有恢復動詞按鈕、R1～R5／R9／R13／R14 各至少一筆而 R6 為零）。
+
+**啟用方式**（缺任何一項＝整支略過並印 `TOOL-ABSENCE`，不當失敗；不在 CI 預設路徑——CI 只跑 `playwright.config.ts` 的 mock specs，且這支沒設 `E2E_STACK=1` 一律略過）：
+
+| 變數 | 說明 |
+|------|------|
+| `E2E_STACK=1` | 啟用旗標（沒有它整支略過） |
+| `E2E_ADMIN_USER`／`E2E_ADMIN_PASSWORD` | 必填；開發預設帳號見 [backend/README.md](../../../backend/README.md)，**不要寫進程式碼或報告** |
+| `E2E_OPERATOR_USER`／`E2E_OPERATOR_PASSWORD`、`E2E_VIEWER_USER`／`E2E_VIEWER_PASSWORD` | 選配；缺＝該角色的子斷言略過（測試註記 `OPERATOR 略過`／`VIEWER 略過`） |
+| `E2E_API_URL` | nginx 入口，預設 `http://localhost`（瀏覽器與 API 同源） |
+| `MOCK_CLAUDE_RESEARCH_SCRIPT` | 與 compose `.env` 同值（例 `/mock-research/mock_claude_script_pass.json`）：指向 fail3 才跑 `AT_960_22_2`，指向 pass 或未設跑路徑 B；**切換劇本要重啟 Bridge 容器** |
+| `E2E_BRIDGE_CONTAINER` | 預設 `aisdlc-engine-bridge`；凍結摘要對容器內檔案位元組用（沒有 docker CLI 時該子斷言略過並註記） |
+
+```bash
+(cd AgentConsole/frontend && E2E_STACK=1 E2E_API_URL=http://localhost E2E_ADMIN_USER=<管理員> E2E_ADMIN_PASSWORD=<密碼> npx playwright test -c tests/e2e/docker.config.ts tests/e2e/research-docker.stack.spec.ts --output=<自己的暫存目錄>/pw)
+```
+
+```powershell
+Push-Location AgentConsole\frontend; $env:E2E_STACK = "1"; $env:E2E_API_URL = "http://localhost"; $env:E2E_ADMIN_USER = "<管理員>"; $env:E2E_ADMIN_PASSWORD = "<密碼>"; npx playwright test -c tests/e2e/docker.config.ts tests/e2e/research-docker.stack.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
+```
+
+- **要用 `docker.config.ts`**：預設設定的 `webServer` 就緒探測打 `/api/health`，經 nginx 會被導到後端而 404；這支用絕對網址連 nginx，不依賴 `baseURL`。`docker.config.ts` 的 `testMatch` 因此加了 `**/*.stack.spec.ts`（本檔檔名依 PKG-FIX-FE 任務書為 `.stack.spec.ts`；TCS 與 RTM 寫的是 `research-docker.stack.ts`，待勘誤）。
+- **每個測試自己建專案、結束時封存**（資料庫不留未封存的測試專案，下一次的零專案空狀態才成立；`AT_960_22_5` 的空狀態子斷言在資料庫已有別人留下的未封存專案時略過並註記）。建專案一律用**六個適用性軸**：mock 劇本的證據夾具寫死全六軸，軸取子集會在證據 gate 的 R8 失敗（`evaluator_failed`，INT-11；見 [engine-bridge/README.md](../../../engine-bridge/README.md)）。
+- **帶 `[新 frontend]` 的斷言**是 PKG-FIX-FE 才有的行為（INT-08 有效抓取主機區、INT-09 凍結後不標「已過期」、INT-12 重連後沒有新事件也補齊、INT-14⑤ 工作室即時預覽沒有來源節錨點文字），用軟斷言：舊 frontend 映像上會紅在這幾條、其餘照跑；重建 frontend 映像（`docker compose … up -d --build frontend`）後應全綠。
+- **限流與並行**：每個使用者每 60 秒 100 次、UI 與 REST 共用同一個桶（一頁研究工作區載入就要 20～30 次請求）。這支的 `call` 遇 429 依 `Retry-After` 等視窗再試；導覽 ADMIN 的頁面一律經 `open()`（先讀 `X-RateLimit-Remaining`，不足就等下一個視窗，同 `realBackend.ts` 的 `ensureQuota` 手法）；階段收尾的輪詢只打事件帳一支端點、每 3 秒一次。全站同時只准一個階段 run（`stage_conflict`／`max_concurrent_runs`，D-67），所以這支 `workers: 1`（`docker.config.ts`），不可與別的真後端 spec 同時跑，也不可在別人手動跑研究時跑。
+- **Playwright 的 `context.setOffline(true)` 不會切斷已建立的 EventSource**（INT-12：離線 16 秒期間動態欄的 `data-connection` 全程是 `open`、UI＝資料庫，TCS AT-960-22-4 規定的「離線再上線」手法因此不會真的測到重連）。要驗斷線重連，**載入頁面前**先 `context.route("**/api/v1/stream/research/**", (route) => route.abort("connectionrefused"))`（頁面一開始連不上，狀態顯示「重新連線中…」），期間照常用 API 產生事件，再 `context.unroute(...)` 解除；前端會自動重連（不必按「重新連線」），事件補齊、`seq` 連續。`AT_960_22_4` 就是這個手法。
+- 為什麼重建、不重用 mock 版的斷言：mock 版（`a11y.mock.spec.ts`、vitest）驗「前端對契約形狀的行為」，真棧驗「兩端對同一份契約的讀法一致」。INT 抓到的缺陷（對帳欄位名、範圍鍵大小寫、失敗游標、取消死路）都是後者。
+
 ## 環境變數
 
 | 變數 | 預設 | 說明 |
@@ -231,7 +264,8 @@ Push-Location AgentConsole\frontend; $env:E2E_API_URL = "http://localhost"; npx 
 | `E2E_JWT_SECRET`／`E2E_RESTART_BACKEND`／`E2E_DEFECTS_FIXED`／`E2E_FAKE_BRAIN` | （空） | 真 Bridge specs 的選配項（同上節） |
 | `E2E_BRIDGE_URL`／`E2E_BRIDGE_LOG`／`E2E_PG_CONTAINER` | `http://127.0.0.1:18081`／（空）／（空） | W5、W7 複驗用：直連 Bridge 的位址、`bridge.log` 絕對路徑、本機 e2e 的 PostgreSQL 容器名（見〈W5 複驗〉） |
 | `E2E_MOCK_DELAY`／`E2E_STOP_BRIDGE`／`E2E_START_BRIDGE` | `0.6`／（空）／（空） | W7 複驗用（見〈W7 複驗〉）；後兩者只有 Windows |
-| `E2E_BRIDGE_CONTAINER`／`E2E_BACKEND_CONTAINER`／`E2E_REDIS_CONTAINER`／`E2E_BRIDGE_IMAGE` | compose 的 `container_name`／`aisdlc-engine-bridge:dev` | `p9-w7-docker.stack.ts` 用（見〈Docker 全棧〉） |
+| `E2E_BRIDGE_CONTAINER`／`E2E_BACKEND_CONTAINER`／`E2E_REDIS_CONTAINER`／`E2E_BRIDGE_IMAGE` | compose 的 `container_name`／`aisdlc-engine-bridge:dev` | `p9-w7-docker.stack.ts` 用（見〈Docker 全棧〉）；`E2E_BRIDGE_CONTAINER` 另供 `research-docker.stack.spec.ts` |
+| `E2E_STACK`／`E2E_ADMIN_USER`／`E2E_ADMIN_PASSWORD`／`E2E_OPERATOR_*`／`E2E_VIEWER_*`／`MOCK_CLAUDE_RESEARCH_SCRIPT` | （空） | `research-docker.stack.spec.ts` 用；缺必填項整支略過（見〈研發工作流 Docker 全棧 E2E〉） |
 
 前端埠上已有服務且 `/api/health` 可達時（例如先以 `docker run -p` 起了前端映像），Playwright 會直接沿用、不另起伺服器。
 

@@ -824,11 +824,14 @@ export type ResearchCapabilities = {
   claudeCli: { ok: boolean; version?: string };
   ghCli: { ok: boolean; authenticated: boolean };
   git: { ok: boolean; version?: string };
+  /** Bridge 解析到的 AISDLC_SDD 框架樹（Bridge 的 `sdd_root`）；解析不到、或舊版 Bridge 沒回為 null（schema.d.ts `CapabilitiesDto.sddRoot`，D-76(1)）。 */
+  sddRoot: string | null;
   researchRoot: string;
   scaffoldRoot: string | null;
   scaffoldTemplates: string[];
   repoWritable: boolean;
   webLayerEnabled: boolean;
+  /** 有效的 FETCH 主機清單（部署基底加啟用中的 ADMIN 條目；停用即消失）。 */
   fetchHosts: string[];
 };
 /** R1～R14 各類筆數；`missing` 為筆數 0 且該類不屬「允許為 0」（R10、R12）者。 */

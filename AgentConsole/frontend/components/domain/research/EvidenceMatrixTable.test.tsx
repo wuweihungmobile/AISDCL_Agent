@@ -204,6 +204,31 @@ describe("AT_960_10_6 證據矩陣表：標記計數、七欄展開、抓取紀�
     expect(writeCalls(calls)).toEqual([]);
   });
 
+  it("AT_960_10_6 授權待查（D-80，與 Bridge 同一條規則）：UNKNOWN（含大小寫）、null、GPL／AGPL 系＝待查；LGPL、複合式（OR／AND／WITH）、MIT＝不待查——頁頂計數與每列旗標一致", async () => {
+    const cases: Array<[string, string | null, boolean]> = [
+      ["E-021", "UNKNOWN", true],
+      ["E-022", "unknown", true],
+      ["E-023", null, true],
+      ["E-024", "未見", true],
+      ["E-025", "GPL-3.0-only", true],
+      ["E-026", "agpl-3.0", true],
+      ["E-027", "LGPL-3.0", false],
+      ["E-028", "MIT OR GPL-2.0", false],
+      ["E-029", "Apache-2.0 AND GPL-3.0-only", false],
+      ["E-030", "GPL-2.0 WITH Classpath-exception-2.0", false],
+      ["E-031", "MIT", false],
+    ];
+    const items = cases.map(([no], i) => item(no, { sourceNo: `S-0${i + 21}`, f7Verification: "V2", strength: "MEDIUM" }));
+    const sources = cases.map(([, license], i) => sourceOf(`S-0${i + 21}`, { licenseSpdx: license, tier: "T1", verification: "V2" }));
+    render("table", { evidence: matrixOf(items), sources });
+    await screen.findAllByTestId("evidence-row");
+    await waitFor(() => expect(screen.getByTestId("license-pending-count")).toHaveTextContent(`授權待查：${cases.filter(([, , pending]) => pending).length} 列`));
+    for (const [no, license, pending] of cases) {
+      const flag = within(rowOf(no)).queryByText("授權待查");
+      expect(flag !== null, `${no}（${JSON.stringify(license)}）的旗標`).toBe(pending);
+    }
+  });
+
   it("AT_960_10_6 外部文字一律純文字：含 script、Markdown 與 img 的論點逐字顯示，DOM 沒有 script／img／strong／iframe 元素", async () => {
     const { container } = render("table", { evidence: TABLE_MATRIX, sources: TABLE_SOURCES });
     await screen.findAllByTestId("evidence-row");

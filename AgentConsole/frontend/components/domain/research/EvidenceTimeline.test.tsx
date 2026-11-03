@@ -321,6 +321,47 @@ describe("AT_960_10_5 頁面重開由 REST 重建；SSE 重連首筆 id 不連�
     expect(writeCalls(t.calls), "全程只有讀取請求").toEqual([]);
   });
 
+  it("INT-12 第一次連線就失敗、期間資料庫多了事件、之後同一個連線物件自己重連成功（沒有 Last-Event-ID 可帶、也沒有後續事件觸發缺口偵測）：重新開啟時以 REST 補抓，動態欄補齊到資料庫、seq 連續", async () => {
+    const t = mount({ events: range(1, 17) });
+    await waitFor(() => expect(rows()).toHaveLength(17));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    const es = FakeEventSource.last;
+    const watch = watchInvariant();
+    // 載入頁面時串流被擋（網路層錯誤）：瀏覽器自己排程重試（readyState CONNECTING），這個實例從來沒收過事件
+    act(() => es.dropRetrying());
+    expect(screen.getByTestId("timeline-connection")).toHaveTextContent("重新連線中");
+    expect(lastEventIdOf(es), "從沒收過事件＝沒有 Last-Event-ID").toBe("");
+    // 被擋期間研究繼續跑：資料庫多了 18 至 24
+    t.options.events = range(1, 24);
+    const before = eventCalls(t.calls).length;
+    act(() => es.open());
+    await waitFor(() => expect(seqs()).toEqual(seqList(1, 24)));
+    expect(screen.getByTestId("timeline-connection")).toHaveTextContent("即時連線中");
+    expect(eventCalls(t.calls).length - before, "重新開啟時事件帳整份補抓一次").toBe(1);
+    expect(FakeEventSource.instances, "沿用同一個連線物件").toHaveLength(1);
+    // 之後的即時事件直接接續（不再被誤判成缺口）
+    send(es, ev(25));
+    await waitFor(() => expect(seqs()).toEqual(seqList(1, 25)));
+    expect(eventCalls(t.calls).length - before, "接續的事件不再重抓").toBe(1);
+    expect(watch.stop(), "每個提交後的畫面都是自 1 起連續、嚴格遞增").toEqual([]);
+  });
+
+  it("INT-12 對照：乾淨的第一次開啟（沒出過錯）不多補抓；出過錯後的每次重新開啟各補抓一次", async () => {
+    const t = mount({ events: range(1, 3) });
+    const es = await connected(3);
+    await waitFor(() => expect(screen.getByTestId("timeline-connection")).toHaveTextContent("即時連線中"));
+    const afterOpen = eventCalls(t.calls).length;
+    act(() => es.open());
+    expect(eventCalls(t.calls).length, "沒出過錯的 open 不補抓").toBe(afterOpen);
+    for (let round = 1; round <= 2; round += 1) {
+      act(() => es.dropRetrying());
+      t.options.events = range(1, 3 + round);
+      act(() => es.open());
+      await waitFor(() => expect(seqs()).toEqual(seqList(1, 3 + round)));
+      expect(eventCalls(t.calls).length - afterOpen, `第 ${round} 次斷線重連後累計補抓 ${round} 次`).toBe(round);
+    }
+  });
+
   it("AT_960_10_5 缺口補不齊（重抓一直失敗）：有限次重試後顯示警示與「重新同步」，畫面只有缺口之前的連續事件；修好後按「重新同步」補齊", async () => {
     const user = userEvent.setup();
     let broken = false;

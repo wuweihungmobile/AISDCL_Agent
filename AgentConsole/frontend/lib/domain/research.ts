@@ -538,14 +538,18 @@ export function reconcileDriftView(result: ResearchReconcileResult): ReconcileDr
 
 // ── 清單頁（FR-R2P-01；頁面 0）──────────────────────────────────────────────────────
 
-export type ProjectBadgeId = "active" | "frozen" | "delivered" | "scr" | "init_failed" | "archived";
+export type ProjectBadgeId = "active" | "frozen" | "delivered" | "scr" | "failed" | "init_failed" | "archived";
 
-/** 狀態徽章（PRD 頁面 0：進行中／Gate 0 已核准／已交付／SCR 進行中／初始化失敗／已封存）。 */
+/**
+ * 狀態徽章（PRD 頁面 0：進行中／Gate 0 已核准／已交付／SCR 進行中／初始化失敗／已封存；INT-14⑥ 加「失敗」）。
+ * 「失敗」＝階段執行失敗或被取消（D-77：兩者游標一律 `flow_status=FAILED`，原因放 `flow_detail`）；初始化失敗另有自己的徽章與重試路徑。
+ */
 export const PROJECT_BADGE_LABEL: Readonly<Record<ProjectBadgeId, string>> = {
   active: "進行中",
   frozen: "Gate 0 已核准",
   delivered: "已交付",
   scr: "SCR 進行中",
+  failed: "失敗",
   init_failed: "初始化失敗",
   archived: "已封存",
 };
@@ -566,11 +570,21 @@ export function isInitFailed(project: Pick<ResearchProjectSummary, "flowStatus" 
 }
 
 /**
- * 清單列的狀態徽章：已封存＞初始化失敗＞SCR 進行中＞已交付＞Gate 0 已核准（游標已越過規格工作室＝Gate 0 已核准，因為游標是在核准成功時才進到 route）＞進行中。
+ * 階段失敗或被取消（不含初始化失敗）：游標 `flow_status` 為 `FAILED`（D-77：失敗與取消一律 FAILED，取消的 `flow_detail` 為 `cancelled`）；
+ * 舊版 Bridge 留在資料庫裡的 `CANCELLED` 游標同樣不是「進行中」，一併算（資料庫的 `flow_status` 列舉仍含它）。
+ */
+export function isStageFailed(project: Pick<ResearchProjectSummary, "flowStatus" | "flowDetail">): boolean {
+  return (project.flowStatus === "FAILED" && !isInitFailed(project)) || project.flowStatus === "CANCELLED";
+}
+
+/**
+ * 清單列的狀態徽章：已封存＞初始化失敗＞失敗（階段失敗或取消）＞SCR 進行中＞已交付＞Gate 0 已核准（游標已越過規格工作室＝Gate 0 已核准，因為游標是在核准成功時才進到 route）＞進行中。
+ * 失敗與取消不得標成「進行中」（INT-14⑥：使用者會以為引擎還在跑）。
  */
 export function projectBadge(project: Pick<ResearchProjectSummary, "archivedAt" | "flowStatus" | "flowDetail" | "flowPhase" | "flowStep">): ProjectBadgeId {
   if (project.archivedAt !== null) return "archived";
   if (isInitFailed(project)) return "init_failed";
+  if (isStageFailed(project)) return "failed";
   if (project.flowPhase === "SCR_OPEN") return "scr";
   if (project.flowPhase === "DELIVERED" || (project.flowStep === "deliver" && project.flowStatus === "COMPLETED")) return "delivered";
   return stepIndex(project.flowStep) >= stepIndex("route") ? "frozen" : "active";
@@ -705,7 +719,9 @@ export function toCreateRequest(form: CreateResearchForm): ResearchCreateRequest
 // ── 錯誤原因（契約 §0.2、§1.4；TCS §5.1「錯誤 reason」）────────────────────────────────
 
 /**
- * 研究 reason 的前端常數（P0 的十八個，與契約、PRD §9.3、後端 `ErrorReasons` 的 `RESEARCH_` 常數集合相等；AT-960-5-6 比對三處）。
+ * 研究 reason 的前端常數（二十二個，與後端 `ErrorReasons` 的 `RESEARCH_` 常數集合、契約 §0.2 勘誤後的清單相等；AT-960-5-6 比對三處）：
+ * P0 契約原列十八個中的十七個，加 Bridge 專屬的五個（`allowlist_exists`、`init_failed`、`not_implemented`、`digest_mismatch`、`missing_digests`；F-09、INT-13）。
+ * 契約原列的 `spec_digest_changed`（409）已被 D-72 的 `digest_mismatch`／`missing_digests`（422）取代、Bridge 對研究端點不再回它，所以不再是前端常數。
  * 刻意不放進 lib/api/reasons.ts 的 REASONS：REASONS 與凍結契約附錄 B 雙向鎖（reasons.test.ts），多一個前端常數即紅（⚖12）。
  */
 export const RESEARCH_REASONS = {
@@ -718,7 +734,6 @@ export const RESEARCH_REASONS = {
   STAGE_CONFLICT: "stage_conflict",
   PRD_VERSION_CONFLICT: "prd_version_conflict",
   REVIEW_NOT_PASSED: "review_not_passed",
-  SPEC_DIGEST_CHANGED: "spec_digest_changed",
   FSM_STATE_CONFLICT: "fsm_state_conflict",
   ESCALATED: "escalated",
   SPEC_FROZEN: "spec_frozen",
@@ -727,6 +742,11 @@ export const RESEARCH_REASONS = {
   TERMS_ACK_REQUIRED: "terms_ack_required",
   BRIDGE_UNREACHABLE: "bridge_unreachable",
   BRIDGE_TIMEOUT: "bridge_timeout",
+  ALLOWLIST_EXISTS: "allowlist_exists",
+  INIT_FAILED: "init_failed",
+  NOT_IMPLEMENTED: "not_implemented",
+  DIGEST_MISMATCH: "digest_mismatch",
+  MISSING_DIGESTS: "missing_digests",
 } as const;
 
 /** 唯讀角色的停用說明（沿 TCS-ExecMonitorEntry W-E1 先例）：所有寫入類控件停用時 `title` 一律是它。 */
@@ -742,7 +762,6 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   [RESEARCH_REASONS.STAGE_CONFLICT]: "目前狀態不允許這個動作（可能已有進行中的階段），請重新整理後再試",
   [RESEARCH_REASONS.PRD_VERSION_CONFLICT]: "PRD 已有更新的版本，請重新整理後再存",
   [RESEARCH_REASONS.REVIEW_NOT_PASSED]: "最新版本沒有通過的審查輪，不能核准",
-  [RESEARCH_REASONS.SPEC_DIGEST_CHANGED]: "要凍結的檔案在確認之後被改過，請重新整理後再確認",
   [RESEARCH_REASONS.FSM_STATE_CONFLICT]: "狀態機目前的狀態不允許這個動作，請重新整理後再試",
   [RESEARCH_REASONS.ESCALATED]: "審查已升級給人工，請先處理升級",
   [RESEARCH_REASONS.SPEC_FROZEN]: "規格已凍結，不能再修改",
@@ -751,6 +770,11 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   [RESEARCH_REASONS.TERMS_ACK_REQUIRED]: "這個來源需要先勾選已接受服務條款",
   [RESEARCH_REASONS.BRIDGE_UNREACHABLE]: "連不上 Engine Bridge，請確認它是否在線",
   [RESEARCH_REASONS.BRIDGE_TIMEOUT]: "Engine Bridge 回應逾時，請稍後再試",
+  [RESEARCH_REASONS.ALLOWLIST_EXISTS]: "這個網域在同一種清單中已有條目，請直接啟用或停用既有的條目",
+  [RESEARCH_REASONS.INIT_FAILED]: "專案初始化沒有完成（工作區、檔案或狀態機其中一步失敗），專案已標為初始化失敗，請按「重試初始化」補建",
+  [RESEARCH_REASONS.NOT_IMPLEMENTED]: "這個功能尚未開放（後續階段提供）",
+  [RESEARCH_REASONS.DIGEST_MISMATCH]: "核准時的摘要與現檔不符，請重新整理後再核准",
+  [RESEARCH_REASONS.MISSING_DIGESTS]: "核准請求沒有附上任何檔案摘要，無法確認您看到的內容；請重新整理後再核准",
 };
 
 /** 研究端點錯誤的白話原因（依 `reason`；沒有對映時退回通用訊息）。 */
@@ -1111,10 +1135,27 @@ export function unanchoredCount(items: ReadonlyArray<Pick<ResearchEvidenceItem, 
   return items.filter((item) => item.unanchored).length;
 }
 
-/** 授權待查：授權條款是 GPL／AGPL 系（不含 LGPL）或缺（「未見」）；AC-R2P-05-5。 */
+/** 授權「未見」的寫法（D-70、D-80；比對一律大小寫不敏感、先修剪空白）：空字串、agent 依模板「查不到寫 UNKNOWN」的值、模板的「未見」；`null`／`undefined`（資料庫的 NULL）另判。 */
+const LICENSE_UNKNOWN_FORMS: ReadonlySet<string> = new Set(["", "unknown", "未見"]);
+/** SPDX 複合表達式的連接詞：以空白或括號與前後分隔的 `OR`／`AND`／`WITH`；`GPL-3.0-or-later` 的 `-or-` 是識別碼的一部分（前後是連字號），不算。 */
+const COMPOSITE_LICENSE = /(?:^|[\s()])(?:OR|AND|WITH)(?:[\s()]|$)/i;
+/** GPL／AGPL 系（AC-R2P-05-5）：字界 `\b` 使 `LGPL` 不命中（`GPL` 前面是字母）——LGPL 是已知授權。 */
+const GPL_FAMILY = /\bA?GPL/i;
+
+/**
+ * 授權待查（矩陣頁頂計數與證據列旗標；AC-R2P-05-5；D-80）——與 Bridge 的 `gates/evidence.py is_license_pending` 同一條規則，雙端對拍同一張期望表
+ * （`engine-bridge/tests/fixtures/research/license_pending_cases.json`，兩端的測試各自斷言；任何一端改規則必須同時改那張表）：
+ *  · 授權為「未見」（`null`、空白、`UNKNOWN`、`未見`；大小寫不敏感、先修剪空白）＝待查——待查的語意是「還不知道授權是什麼」；
+ *  · 含 `OR`／`AND`／`WITH` 的複合表達式＝知道授權、要人判，原樣顯示、**不**待查（即使內含 GPL）；
+ *  · 其餘依 GPL／AGPL 系判（`\bA?GPL`）；LGPL 等已知授權不待查。
+ * 兩端判準若相反，UI 的計數會與 matrix.md 頁頂與資安審查輸入脫鉤（SCG-4 一審 F-02）。
+ */
 export function isLicensePending(spdx: string | null | undefined): boolean {
-  const value = (spdx ?? "").trim();
-  return value === "" || value === "未見" || /\bA?GPL/i.test(value);
+  if (spdx === null || spdx === undefined) return true;
+  const value = spdx.trim();
+  if (LICENSE_UNKNOWN_FORMS.has(value.toLowerCase())) return true;
+  if (COMPOSITE_LICENSE.test(value)) return false;
+  return GPL_FAMILY.test(value);
 }
 
 export function licensePendingCount(items: ReadonlyArray<Pick<ResearchEvidenceItem, "sourceNo">>, sources: ReadonlyArray<Pick<ResearchSource, "sourceNo" | "licenseSpdx">>): number {
@@ -1167,18 +1208,23 @@ export function safeExternalHref(url: string | null | undefined): string | null 
 export type ResearchFailure = {
   /** `exit_reason`（取自游標的 `flowDetail`；沒有說明時為空字串） */
   reason: string;
-  /** `no_evidence` 沒有任何來源取得成功，沒有 checkpoint 可續，只能重試；其餘（`token_guard_halt`、`step_timeout`…）從 checkpoint 續跑 */
+  /** `no_evidence` 沒有任何來源取得成功，沒有 checkpoint 可續，只能重試；`cancelled`（使用者取消）也是重試；其餘（`token_guard_halt`、`step_timeout`…）從 checkpoint 續跑 */
   action: "resume" | "retry";
   text: string;
 };
 
+/** 研究被取消時 Bridge 寫進游標 `flow_detail` 的 `exit_reason`（D-77：取消與失敗一樣是 `flow_status=FAILED`，靠這個值分辨）。 */
+export const RESEARCH_CANCELLED_REASON = "cancelled";
+
 /**
- * 研究階段失敗（步驟 1 且 `flow_status=FAILED`，初始化失敗不算）的呈現：橫幅「研究未完成：原因」加「續跑」，`no_evidence` 則是「研究失敗」加「重試」。
- * 失敗的研究不得顯示為完成（AC-R2P-04-5）；沒有失敗回 null。
+ * 研究階段失敗（步驟 1 且 `flow_status=FAILED`，初始化失敗不算）的呈現：橫幅「研究未完成：原因」加「續跑」；`no_evidence` 是「研究失敗」加「重試」（沒有任何來源，沒有 checkpoint 可續）；
+ * 被取消（`flow_detail=cancelled`）是「研究已取消」加「重試」（取消不是出錯，不帶原因代碼；已入庫的證據保留）。
+ * 判準維持只認 `flow_status=FAILED`（D-77：游標不再把失敗寫成 IDLE 加說明，否則看不出是閒置還是失敗）；失敗的研究不得顯示為完成（AC-R2P-04-5）；沒有失敗回 null。
  */
 export function researchFailureOf(project: Pick<ResearchProjectSummary, "flowStep" | "flowStatus" | "flowDetail">): ResearchFailure | null {
   if (project.flowStep !== "topic" || project.flowStatus !== "FAILED" || isInitFailed(project)) return null;
   const reason = project.flowDetail.trim();
+  if (reason === RESEARCH_CANCELLED_REASON) return { reason, action: "retry", text: "研究已取消：已入庫的證據會保留，可以重試" };
   if (reason === "no_evidence") return { reason, action: "retry", text: `研究失敗：沒有任何來源取得成功（${reason}）` };
   return { reason, action: "resume", text: `研究未完成：${reason === "" ? "後端沒有提供原因" : reason}` };
 }
@@ -1208,7 +1254,11 @@ export type ResearchScopeView = {
   applicabilityAxes: string[];
 };
 
-/** 專案詳情的 `scope`（自由形狀的 JSON）整理成畫面要的唯讀內容；缺欄、型別不對一律當空值，不丟例外。 */
+/**
+ * 專案詳情的 `scope`（自由形狀的 JSON）整理成畫面要的唯讀內容；缺欄、型別不對一律當空值，不丟例外。
+ * 鍵一律 camelCase（`layers`、`techStack`、`inScope`、`outOfScope`、`recencyYears`、`applicabilityAxes`）：Bridge 寫入的 snake_case 鍵由 console-api 的 DTO 在邊界轉成 camelCase
+ * （D-76(2)；schema.d.ts `ResearchProjectDetail.scope`），前端**只認 camelCase**、不兩邊都認——INT-03 就是兩端各自照自己的讀法造成的錯位，邊界統一在防腐層、不在這裡再補一個讀法。
+ */
 export function readResearchScope(scope: Record<string, unknown>): ResearchScopeView {
   const layers = isRecord(scope.layers) ? scope.layers : {};
   const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim() !== "") : []);

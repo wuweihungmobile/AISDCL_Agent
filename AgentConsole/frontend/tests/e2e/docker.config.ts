@@ -16,7 +16,7 @@ const baseURL = process.env.E2E_API_URL ?? "http://localhost";
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["**/*.stack.ts", "**/crud-flow.spec.ts", "**/signoff.spec.ts", "**/design-system.spec.ts", "**/chart.spec.ts", "**/shells-and-layout.spec.ts"],
+  testMatch: ["**/*.stack.ts", "**/*.stack.spec.ts", "**/crud-flow.spec.ts", "**/signoff.spec.ts", "**/design-system.spec.ts", "**/chart.spec.ts", "**/shells-and-layout.spec.ts"],
   fullyParallel: false,
   workers: 1,
   retries: 0,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BULK_EDIT_CHARS, DEFER_ABOVE_CHARS, MAX_IMPORT_BYTES, MarkdownEditorImpl, SYNC_RENDER_MAX_CHARS, omitRawHtml, safeFileName, shouldDeferPreview } from "./MarkdownEditorImpl";
 import { MarkdownView } from "./MarkdownView";
+import { rehypeHideRawLines } from "./rehypeHideRawLines";
 import { safeUrlTransform } from "./safeUrl";
 
 /**
@@ -14,11 +15,11 @@ import { safeUrlTransform } from "./safeUrl";
  * 渲染端（表格、程式碼高亮、checklist）測 MarkdownView；編輯端（Split View、工具列、語法高亮、匯入匯出）測編輯器本體。
  */
 
-function Harness({ initial = "", onNotify }: { initial?: string; onNotify?: (m: string, t: "success" | "error") => void }) {
+function Harness({ initial = "", onNotify, previewHiddenLines }: { initial?: string; onNotify?: (m: string, t: "success" | "error") => void; previewHiddenLines?: RegExp }) {
   const [value, setValue] = useState(initial);
   return (
     <>
-      <MarkdownEditorImpl value={value} onChange={setValue} label="說明描述" exportName="專案說明" onNotify={onNotify} />
+      <MarkdownEditorImpl value={value} onChange={setValue} label="說明描述" exportName="專案說明" onNotify={onNotify} previewHiddenLines={previewHiddenLines} />
       <output data-testid="value">{value}</output>
     </>
   );
@@ -246,6 +247,87 @@ describe("UI-MD-01 預覽端不渲染內嵌 HTML（DEF-AC-013，P2 資安；與�
     expect(pre.textContent).toContain("<img src=x onerror=alert(1)>");
     expect(pre.querySelector("iframe, script, img")).toBeNull();
     expect(executableTraces(pre)).toEqual([]);
+  });
+});
+
+/**
+ * INT-14⑤：PRD 的來源節錨點 `<!-- r2p:section=N -->` 是目錄用的記號。預覽端不渲染內嵌 HTML（DEF-AC-013），HTML 節點原文會被當成文字顯示，
+ * 所以那一行註解在編輯器右側的即時預覽裡變成看得見的字；呼叫端以 `previewHiddenLines` 指定樣式，預覽把整段內容符合樣式的原始 HTML 節點拿掉。
+ * 其他 HTML／註解仍照字面顯示（安全立場不變）、圍欄內的不受影響、左欄原始碼與內容不變；不指定＝與先前完全相同。
+ */
+const SECTION_ANCHOR_PATTERN = /^\s*<!--\s*r2p:section=(\d+)\s*-->\s*$/;
+const ANCHOR_DOC = ["<!-- r2p:section=1 -->", "# 一", "<!-- r2p:section=2 -->", "文字", "<!-- 別的註解 -->", "", "```", "<!-- r2p:section=3 -->", "```", ""].join("\n");
+const countOf = (text: string, needle: string): number => text.split(needle).length - 1;
+
+describe("INT-14⑤ 預覽端拿掉整行的指定 HTML 註解（previewHiddenLines）", () => {
+  it("不指定：與先前相同——錨點與其他註解都以文字顯示（對照組：證明下一條拿掉的是這個外掛，不是別的）", () => {
+    const { container } = render(<Harness initial={ANCHOR_DOC} />);
+    const text = previewOf(container).textContent ?? "";
+    expect(countOf(text, "r2p:section=1")).toBe(1);
+    expect(countOf(text, "r2p:section=2")).toBe(1);
+    expect(text).toContain("別的註解");
+  });
+
+  it("指定錨點樣式：預覽不再顯示整行錨點（兩個）；其他註解仍以文字顯示、圍欄內的錨點照原樣、標題與段落照常；沒有任何可執行跡象", () => {
+    const { container } = render(<Harness initial={ANCHOR_DOC} previewHiddenLines={SECTION_ANCHOR_PATTERN} />);
+    const preview = previewOf(container);
+    const text = preview.textContent ?? "";
+    expect(countOf(text, "r2p:section=1"), "第 1 節的錨點").toBe(0);
+    expect(countOf(text, "r2p:section=2"), "第 2 節的錨點").toBe(0);
+    expect(countOf(text, "r2p:section=3"), "圍欄內的錨點是程式碼，原樣顯示").toBe(1);
+    expect(preview.querySelector("pre code")?.textContent).toContain("<!-- r2p:section=3 -->");
+    expect(text).toContain("別的註解");
+    expect(within(preview).getByRole("heading", { level: 1, name: "一" })).toBeInTheDocument();
+    expect(text).toContain("文字");
+    expect(executableTraces(preview)).toEqual([]);
+  });
+
+  it("只影響預覽：左欄原始碼（輸入框的值與著色）仍含所有錨點、內容一字不變", async () => {
+    const { container } = render(<Harness initial={ANCHOR_DOC} previewHiddenLines={SECTION_ANCHOR_PATTERN} />);
+    expect((textarea() as HTMLTextAreaElement).value).toBe(ANCHOR_DOC);
+    expect(screen.getByTestId("value").textContent).toBe(ANCHOR_DOC);
+    await waitFor(() => expect(container.querySelector(".w-md-editor-text-pre")?.textContent ?? "").toContain("<!-- r2p:section=1 -->"));
+    expect(countOf(container.querySelector(".w-md-editor-text-pre")?.textContent ?? "", "r2p:section=")).toBe(3);
+  });
+
+  it("輸入後預覽跟著更新：新打的整行錨點同樣不顯示、其餘內容照常渲染", async () => {
+    const { container } = render(<Harness initial="# 標題" previewHiddenLines={SECTION_ANCHOR_PATTERN} />);
+    fireEvent.change(textarea(), { target: { value: "<!-- r2p:section=7 -->\n# 標題二\n\n**粗體**" } });
+    const preview = previewOf(container);
+    await waitFor(() => expect(within(preview).getByRole("heading", { level: 1, name: "標題二" })).toBeInTheDocument());
+    expect(preview.textContent).not.toContain("r2p:section");
+    expect(preview.querySelector("strong")?.textContent).toBe("粗體");
+  });
+
+  it("樣式只刪「整段內容完整符合」的節點：註解裡夾別的字、同一行有其他內容的不刪；帶 g／y 旗標的樣式也每個節點都判得對（不帶狀態）", () => {
+    const text = (initial: string, pattern: RegExp = SECTION_ANCHOR_PATTERN) => previewOf(render(<Harness initial={initial} previewHiddenLines={pattern} />).container).textContent ?? "";
+    expect(text("<!-- r2p:section=1 附註 -->\n\n段落")).toContain("r2p:section=1 附註");
+    expect(text("<!-- 前綴 r2p:section=1 -->\n\n段落")).toContain("前綴 r2p:section=1");
+    const flagged = new RegExp(SECTION_ANCHOR_PATTERN.source, "gy");
+    const many = text("<!-- r2p:section=1 -->\n\n甲\n\n<!-- r2p:section=2 -->\n\n乙\n\n<!-- r2p:section=3 -->\n\n丙", flagged);
+    expect(many).not.toContain("r2p:section");
+    expect(many).toContain("甲");
+    expect(many).toContain("丙");
+  });
+
+  it("rehypeHideRawLines（單元）：只刪 raw 節點、巢狀（清單、引用）裡的也刪；element、text、comment 節點與非 raw 的同值節點都不動", () => {
+    const pattern = /^<!--\s*a\s*-->$/;
+    const raw = (value: string) => ({ type: "raw", value });
+    const tree = {
+      type: "root",
+      children: [
+        raw("<!-- a -->"),
+        { type: "text", value: "<!-- a -->" },
+        { type: "comment", value: " a " },
+        { type: "element", children: [raw("<!-- a -->"), raw("<!-- b -->"), { type: "element", children: [raw("<!-- a -->")] }] },
+        raw("<!-- b -->"),
+      ],
+    };
+    rehypeHideRawLines({ pattern })(tree);
+    expect(tree).toEqual({
+      type: "root",
+      children: [{ type: "text", value: "<!-- a -->" }, { type: "comment", value: " a " }, { type: "element", children: [raw("<!-- b -->"), { type: "element", children: [] }] }, raw("<!-- b -->")],
+    });
   });
 });
 

@@ -453,7 +453,8 @@ function EditorArea({
           className="resize-y font-mono text-sm leading-6"
         />
       ) : (
-        <MarkdownEditor value={value} onChange={onChange} label="PRD 內容" height={EDITOR_HEIGHT_PX} exportName="prd" onNotify={onNotify} />
+        // 編輯器套件的即時預覽與「預覽」模式、目錄同一條規則：整行的來源節錨點（`<!-- r2p:section=N -->`）是目錄用的記號，不顯示（INT-14⑤）
+        <MarkdownEditor value={value} onChange={onChange} label="PRD 內容" height={EDITOR_HEIGHT_PX} exportName="prd" onNotify={onNotify} previewHiddenLines={SECTION_ANCHOR} />
       )}
     </div>
   );

@@ -197,6 +197,33 @@ const RESEARCH_PRD_V1 = RESEARCH_PRD_V2.replace("P95 小於 100 毫秒", "P95 �
 const RESEARCH_PRD_CONTENT: Readonly<Record<number, string>> = { 1: RESEARCH_PRD_V1, 2: RESEARCH_PRD_V2 };
 
 const RESEARCH_BASE = "/api/v1/research/projects";
+/**
+ * 清單頁另掃「失敗」與「初始化失敗」兩種徽章（INT-14⑥：階段失敗與取消不標「進行中」，徽章字色 accent 坐在 draft-bg 上）：
+ * 在三個既有專案之外多兩列，真瀏覽器的 axe 才量得到新徽章的色彩對比（vitest 只能算 token 值）。
+ */
+const RESEARCH_LIST_WITH_FAILURES = [
+  ...PROJECT_LIST,
+  {
+    ...PROJECT_LIST[0],
+    id: "44444444-4444-4444-8444-444444444444",
+    rpNo: "RP-0004",
+    slug: "failed-one",
+    title: "研究失敗的專案",
+    flowPhase: "INGESTED",
+    flowStatus: "FAILED" as const,
+    flowDetail: "no_evidence",
+  },
+  {
+    ...PROJECT_LIST[0],
+    id: "55555555-5555-4555-8555-555555555555",
+    rpNo: "RP-0005",
+    slug: "init-failed",
+    title: "初始化失敗的專案",
+    flowPhase: "INGESTED",
+    flowStatus: "FAILED" as const,
+    flowDetail: "init_failed:fsm",
+  },
+];
 const researchConfigRow = (key: string, value: string) => ({ id: `cfg-${key}`, category: "execution", key, value, valueType: "LONG", isEncrypted: false, hasValue: true, effect: "CONSOLE" });
 const RESEARCH_ROUND = makeRound(1, FAIL3_SCORES[0], 2, { defects: [defect(1, 1), defect(1, 2, { severity: "P3", dimension: "PRODUCT" })] });
 
@@ -209,7 +236,7 @@ const researchBackend: MockHandler = (call) => {
   const p = call.path;
   if (p === "/api/v1/research/capabilities") return { data: CAPABILITIES_LOCAL };
   if (p === "/api/v1/research/allowlist") return { data: ALLOWLIST };
-  if (p === RESEARCH_BASE) return { data: call.query.get("archived") === "true" ? [] : PROJECT_LIST };
+  if (p === RESEARCH_BASE) return { data: call.query.get("archived") === "true" ? [] : RESEARCH_LIST_WITH_FAILURES };
   if (p === "/api/v1/settings/execution") return { data: [researchConfigRow("globalTokenBudget", "1000000"), researchConfigRow("tokenBudgetWarningThreshold", "0.8")] };
   if (p.startsWith("/api/v1/stream/research/")) return { status: 204 };
   const match = new RegExp(`^${RESEARCH_BASE}/([^/]+)(/.*)?$`).exec(p);
@@ -236,14 +263,16 @@ const researchBackend: MockHandler = (call) => {
 test.describe("無障礙掃描：研發工作流（route mock＋axe；整頁；1440／1000／600）", () => {
   test.setTimeout(180_000);
 
-  test("研發工作流清單 /research：三個寬度零違規（ADMIN 登入：含「研究來源設定」入口；三個專案各有迷你步驟列）", async ({ page }) => {
+  test("研發工作流清單 /research：三個寬度零違規（ADMIN 登入：含「研究來源設定」入口；五個專案各有迷你步驟列，含「失敗」「初始化失敗」徽章）", async ({ page }) => {
     const errors = collectConsoleErrors(page);
     await signInAs(page, "ADMIN");
     await installApiMock(page, compose(shellHandler(), researchBackend));
     await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
     await page.goto("/research");
     await expect(page.getByRole("heading", { name: "研發工作流" })).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("research-row")).toHaveCount(PROJECT_LIST.length);
+    await expect(page.getByTestId("research-row")).toHaveCount(RESEARCH_LIST_WITH_FAILURES.length);
+    await expect(page.getByTestId("research-badge").filter({ hasText: /^失敗$/ }), "階段失敗的專案標「失敗」、不標進行中").toHaveCount(1);
+    await expect(page.getByTestId("research-badge").filter({ hasText: /^初始化失敗$/ })).toHaveCount(1);
     await expect(page.getByTestId("flow-stepper").first()).toBeVisible();
     for (const width of RESEARCH_WIDTHS) {
       await page.setViewportSize({ width, height: 900 });

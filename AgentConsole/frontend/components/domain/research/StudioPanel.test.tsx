@@ -16,6 +16,7 @@ import { detailVariant } from "@/tests/fixtures/research/projects";
 import { FAIL3_SCORES, defect, makeRound } from "@/tests/fixtures/research/reviews";
 import { FakeEventSource } from "@/tests/helpers/fakeEventSource";
 import { callsOf, failure, renderResearch, stubResearchApi, writeCalls, type ApiCall, type Reply, type ResearchStubOptions } from "@/tests/helpers/research";
+import { SECTION_ANCHOR } from "./PrdOutline";
 import { ResearchWorkspaceView } from "./ResearchWorkspaceView";
 import {
   DRAFT_DEBOUNCE_MS,
@@ -55,10 +56,13 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+/** 替身編輯器收到的 `previewHiddenLines`（INT-14⑤：真編輯器的行為在 components/markdown 的測試驗，這裡只驗工作室有把規則傳進去）。 */
+const editorStub = vi.hoisted(() => ({ hiddenLines: [] as Array<RegExp | undefined> }));
 vi.mock("@/components/markdown/MarkdownEditor", () => ({
-  MarkdownEditor: (props: { value: string; onChange: (value: string) => void; label: string }) => (
-    <textarea data-testid="rich-editor-stub" aria-label={props.label} value={props.value} onChange={(event) => props.onChange(event.target.value)} />
-  ),
+  MarkdownEditor: (props: { value: string; onChange: (value: string) => void; label: string; previewHiddenLines?: RegExp }) => {
+    editorStub.hiddenLines.push(props.previewHiddenLines);
+    return <textarea data-testid="rich-editor-stub" aria-label={props.label} value={props.value} onChange={(event) => props.onChange(event.target.value)} />;
+  },
 }));
 
 const mm = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn() }));
@@ -282,6 +286,17 @@ describe("AT_960_16_1 三欄版面與響應式：寬螢幕三欄、中寬左欄�
     await user.click(await screen.findByRole("button", { name: /6\. 架構/ }));
     expect(screen.getByTestId("prd-editor"), "選了目錄項：回到編輯器").toBeVisible();
     expect(screen.getByRole("tab", { name: "編輯器" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("INT-14⑤ 編輯器套件的即時預覽與目錄、「預覽」模式同一條錨點規則：工作室把 SECTION_ANCHOR（整行的 `<!-- r2p:section=N -->`）傳給編輯器的 previewHiddenLines，每次渲染都傳", async () => {
+    editorStub.hiddenLines.length = 0;
+    mount();
+    await editor();
+    expect(editorStub.hiddenLines.length).toBeGreaterThan(0);
+    for (const pattern of editorStub.hiddenLines) expect(pattern, "傳的是目錄與預覽區塊共用的那一個樣式物件").toBe(SECTION_ANCHOR);
+    expect(SECTION_ANCHOR.test("<!-- r2p:section=3 -->")).toBe(true);
+    expect(SECTION_ANCHOR.test("<!-- 別的註解 -->")).toBe(false);
+    expect(SECTION_ANCHOR.test("前綴 <!-- r2p:section=3 -->"), "同一行有其他內容不算錨點行").toBe(false);
   });
 
   it("AT_960_16_1 預覽模式點目錄項：對該章節的區塊呼叫 scrollIntoView（區塊以標題行索引標記）", async () => {

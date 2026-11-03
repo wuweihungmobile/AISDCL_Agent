@@ -5,7 +5,7 @@ import path from "node:path";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ResearchEvent, ResearchFsmView, ResearchProjectDetail, ResearchReviewRound, Role } from "@/lib/api/types";
+import type { ResearchEvent, ResearchFsmView, ResearchPrdVersion, ResearchProjectDetail, ResearchReviewRound, Role } from "@/lib/api/types";
 import { READONLY_TITLE, scoreRadar } from "@/lib/domain/research";
 import { FSM_AFTER_RECOVERY, FSM_ESCALATION, FSM_HUMAN_PENDING, fsmView } from "@/tests/fixtures/research/fsm";
 import { R2, T1, T2, sha } from "@/tests/fixtures/research/ids";
@@ -20,6 +20,7 @@ import {
   GatekeeperPanel,
   buildExpectedDigests,
   isEscalationEvent,
+  isReviewStale,
   openDefects,
   retryHistoryCheck,
   reviewActivity,
@@ -535,7 +536,7 @@ describe("AT_960_16_5 動作區矩陣：未通過、通過、非 ADMIN、escalat
     const { calls } = mount({ role: "OPERATOR", stub: { rounds: [FRESH_FAIL], fsm: fsmView("SPEC_DRAFTING", {}, 1), overrides } });
     await waitFor(() => expect(button(ITERATE)).toBeEnabled());
     await user.click(button(ITERATE));
-    expect(await screen.findByText(/一鍵自動迭代修正失敗：.*not_implemented/)).toBeInTheDocument();
+    expect(await screen.findByText(/一鍵自動迭代修正失敗：這個功能尚未開放/)).toBeInTheDocument();
     expect(screen.queryByText(/已送出/)).toBeNull();
     expect(callsOf(calls, "POST", /\/stages\/iterate$/).map((c) => c.body)).toEqual([{}]);
   });
@@ -545,6 +546,83 @@ describe("AT_960_16_5 動作區矩陣：未通過、通過、非 ADMIN、escalat
     await screen.findByTestId("review-score");
     for (const name of [ITERATE, "核准 PRD", "退回修改"]) expect(button(name), name).toBeDisabled();
     expect(screen.getByTestId("approve-note")).toHaveTextContent("規格已凍結");
+  });
+});
+
+// ── INT-09 「已過期」以內容（sha256）判定，不比版本號 ───────────────────────────────────
+
+/** Gate 0 核准後的 BASELINE 版：版本號加一、內容與雜湊同通過的那一版（第 2 版）。 */
+const BASELINE_V3: ResearchPrdVersion = {
+  ...PRD_VERSIONS[1],
+  versionNo: 3,
+  semver: "v1.0.0",
+  kind: "BASELINE",
+  authorKind: "HUMAN",
+  author: "admin",
+  parentVersionNo: 2,
+  changeSummary: "Gate 0 核准：凍結為基線",
+  createdAt: T2,
+};
+/** 人工存檔的第 3 版：內容變了（雜湊不同）。 */
+const HUMAN_V3: ResearchPrdVersion = { ...BASELINE_V3, semver: "v0.3.0-draft", kind: "DRAFT", changeSummary: "人工修改", sha256: sha("3") };
+
+describe("INT-09 審查結果是否已過期：以被審那一版與 head 的內容（sha256）判定", () => {
+  const V = [
+    { versionNo: 1, sha256: sha("1") },
+    { versionNo: 2, sha256: sha("2") },
+    { versionNo: 3, sha256: sha("2") },
+    { versionNo: 4, sha256: sha("4") },
+  ];
+  const round = (prdVersionNo: number) => ({ prdVersionNo });
+
+  it("isReviewStale：同一版、內容相同的新版本（BASELINE）＝沒過期；內容不同的新版本＝過期；沒有任何版本＝沒東西可過期", () => {
+    expect(isReviewStale(round(2), 2, V), "審的就是 head").toBe(false);
+    expect(isReviewStale(round(2), 3, V), "head 是第 3 版（BASELINE）：內容與第 2 版相同").toBe(false);
+    expect(isReviewStale(round(2), 4, V), "head 是第 4 版：內容不同").toBe(true);
+    expect(isReviewStale(round(1), 3, V), "審的是更早、內容不同的第 1 版").toBe(true);
+    expect(isReviewStale(round(2), null, V), "還沒有任何版本").toBe(false);
+  });
+
+  it("isReviewStale：雜湊的 sha256: 前綴與大小寫不決定結果；找不到被審的版本或 head（清單不完整、尚未載入）時退回比版本號，寧可多要一次審查", () => {
+    expect(
+      isReviewStale(round(2), 3, [
+        { versionNo: 2, sha256: `sha256:${sha("a")}` },
+        { versionNo: 3, sha256: sha("A") },
+      ]),
+    ).toBe(false);
+    expect(
+      isReviewStale(round(2), 3, [
+        { versionNo: 2, sha256: sha("a") },
+        { versionNo: 3, sha256: sha("b") },
+      ]),
+    ).toBe(true);
+    expect(isReviewStale(round(2), 3, [{ versionNo: 3, sha256: sha("2") }]), "清單裡沒有被審的版本").toBe(true);
+    expect(isReviewStale(round(2), 3, [{ versionNo: 2, sha256: sha("2") }]), "清單裡沒有 head").toBe(true);
+    expect(isReviewStale(round(2), 3, undefined), "版本清單尚未載入").toBe(true);
+    expect(isReviewStale(round(3), 3, undefined), "同一版號不需要清單").toBe(false);
+  });
+
+  it("INT-09 凍結後（Gate 0 核准寫了 BASELINE 第 3 版、內容同通過的第 2 版）：通過的審查不標「已過期」，核准說明是「規格已凍結」而不是「審查已過期」", async () => {
+    mount({
+      role: "ADMIN",
+      project: detailVariant("frozen", { headPrdVersion: 3 }),
+      completed: true,
+      stub: { rounds: [FRESH_FAIL, FRESH_PASS], prdVersions: [...PRD_VERSIONS, BASELINE_V3], fsm: fsmView("SPEC_FROZEN", {}, 0) },
+    });
+    await screen.findByTestId("review-score");
+    expect(screen.getByTestId("round-label")).toHaveTextContent("第 2 輪");
+    expect(screen.queryByTestId("review-stale"), "head 是 BASELINE、內容與被審版本相同：沒有過期標示").toBeNull();
+    expect(screen.getByTestId("approve-note")).toHaveTextContent("規格已凍結");
+    expect(screen.getByTestId("approve-note")).not.toHaveTextContent("已過期");
+    expect(screen.queryByRole("button", { name: "重新審查" }), "凍結後不提供重新審查").toBeNull();
+  });
+
+  it("INT-09 人工存檔後（第 3 版內容不同）：審查標「已過期」，核准停用並說明，提供「重新審查」", async () => {
+    mount({ role: "ADMIN", project: detailVariant("studio", { headPrdVersion: 3 }), stub: { rounds: [FRESH_FAIL, FRESH_PASS], prdVersions: [...PRD_VERSIONS, HUMAN_V3], fsm: FSM_HUMAN_PENDING } });
+    await waitFor(() => expect(screen.getByTestId("review-stale")).toHaveTextContent("已過期"));
+    expect(button("核准 PRD")).toBeDisabled();
+    expect(screen.getByTestId("approve-note")).toHaveTextContent("審查已過期：PRD 已有新版本（第 3 版），審查的是第 2 版");
+    expect(button("重新審查")).toBeEnabled();
   });
 });
 
@@ -631,7 +709,7 @@ describe("AT_960_16_8 Gate 0 確認對話框內容、退回需理由、焦點陷
     const { calls } = passReady({ overrides });
     const dialog = await openApprove(user);
     await user.click(within(dialog).getByRole("button", { name: "核准並凍結" }));
-    expect(await within(dialog).findByTestId("gate-error")).toHaveTextContent("not_implemented");
+    expect(await within(dialog).findByTestId("gate-error")).toHaveTextContent("這個功能尚未開放");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.queryByText("已核准並凍結：規格進入下一步")).toBeNull();
     expect(writeCalls(calls).map((c) => c.path)).toEqual([`/api/v1/research/projects/${R2}/approve`]);

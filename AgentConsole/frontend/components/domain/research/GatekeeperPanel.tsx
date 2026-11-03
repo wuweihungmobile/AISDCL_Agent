@@ -6,7 +6,8 @@
  * ③ ESCALATION 區塊（重用 `SddEscalationBlock` 加兩顆按鈕）④ Gate 0 等待提醒 ⑤ 審查進行中與無效輸出的狀態。
  *
  * 設計要點（為什麼這樣做）：
- *  - **分數綁版本**：審查結果只對該輪的 PRD 版本有效；head 版本比最新一輪審查的版本新＝「已過期」，核准停用、提供「重新審查」。
+ *  - **分數綁內容**：審查結果只對該輪審的那份 PRD 內容有效（PRD §5.1.3：綁 `prd_sha256`）；head 的內容（`sha256`）與該輪審的版本不同＝「已過期」，核准停用、提供「重新審查」。
+ *    不是比版本號：Gate 0 核准會把通過的那一版再存成 BASELINE（版本號加一、內容不變），比版本號會把「剛通過、剛凍結」的審查誤標已過期（INT-09，見 `isReviewStale`）。
  *  - **審查狀態只由 stage run 與事件決定**（D-55、D-57）：審查沒有「進行中的輪列」，所以進行中看 REVIEW 的 `research.run` 事件，輪完成才有輪列與 `research.review`；
  *    審查者輸出無效＝`research.review_invalid`（不佔輪次、不是進行中），顯示原因與「重新審查」。事件走 `useResearchTimeline`（REST 加串流加缺口同步，與動態欄同一套）；
  *    輪表、版本、FSM 視圖在即時事件到達後重抓（頁面剛載入的歷史事件不觸發）。
@@ -164,6 +165,23 @@ export function retryHistoryCheck(rounds: readonly ResearchReviewRound[], genera
 }
 
 const withSha256 = (hex: string): string => (hex.startsWith("sha256:") ? hex : `sha256:${hex}`);
+/** 比較用的雜湊形：去掉 `sha256:` 前綴、轉小寫（兩邊同源時本來就同形；這裡只是不讓前綴與大小寫決定「過期」）。 */
+const shaKey = (hex: string): string => hex.replace(/^sha256:/i, "").toLowerCase();
+
+/**
+ * 審查結果是否「已過期」（分數綁內容；PRD §5.1.3、AC-R2P-09-6；INT-09）：該輪審的那一版與目前的 head 是同一份內容（`sha256` 相同）就沒過期。
+ * 判準取內容而不是版本號——Gate 0 核准會把通過的那一版再存成 BASELINE（版本號加一、內容與雜湊不變），比版本號會把剛通過、剛凍結的審查標成「已過期」；
+ * 人工存檔（內容變了、雜湊不同）才是真過期。審查輪只帶 `prdVersionNo`，所以先用版本號在版本清單裡找出被審的那一版取雜湊。
+ * 找不到被審的版本或 head（清單不完整）時無從確認內容相同，退回比版本號：寧可多要一次審查，也不放過一份可能不是被審內容的 PRD。
+ * `headNo` 為 null＝還沒有任何版本，沒有東西可以過期。
+ */
+export function isReviewStale(round: Pick<ResearchReviewRound, "prdVersionNo">, headNo: number | null, versions: ReadonlyArray<Pick<ResearchPrdVersion, "versionNo" | "sha256">> | undefined): boolean {
+  if (headNo === null || round.prdVersionNo === headNo) return false;
+  const reviewed = versions?.find((v) => v.versionNo === round.prdVersionNo);
+  const head = versions?.find((v) => v.versionNo === headNo);
+  if (reviewed === undefined || head === undefined) return true;
+  return shaKey(reviewed.sha256) !== shaKey(head.sha256);
+}
 
 /**
  * 核准請求的 `expectedDigests`（核准人當時看到的檔案摘要；鍵＝相對 POSIX 路徑、值＝`sha256:<64hex>`）。
@@ -508,7 +526,7 @@ function GatekeeperPanelImpl({ researchId, project, completed, onLocate, EventSo
   const head = useMemo(() => (versions === undefined || versions.length === 0 ? undefined : versions.reduce((a, v) => (v.versionNo > a.versionNo ? v : a))), [versions]);
   const headNo = head?.versionNo ?? liveProject.headPrdVersion;
   const latest = useMemo(() => (rounds === undefined || rounds.length === 0 ? undefined : rounds.reduce((a, r) => (r.roundNo > a.roundNo ? r : a))), [rounds]);
-  const stale = latest !== undefined && headNo !== null && latest.prdVersionNo !== headNo;
+  const stale = latest !== undefined && isReviewStale(latest, headNo, versions);
   const escalated = fsm !== undefined ? sddShowsEscalation(fsm) : liveProject.flowStatus === "ESCALATED";
   const frozen = completed || liveProject.flowPhase === "FROZEN" || head?.kind === "BASELINE";
 

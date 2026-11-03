@@ -25,6 +25,7 @@ import "@uiw/react-markdown-preview/markdown.css";
 import "@/styles/markdown.css";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { rehypeHideRawLines } from "./rehypeHideRawLines";
 import { rehypeTaskLabels } from "./rehypeTaskLabels";
 import { safeUrlTransform } from "./safeUrl";
 
@@ -54,6 +55,13 @@ const PREVIEW_OPTIONS: PreviewOptions = {
   pluginsFilter: omitRawHtml,
   urlTransform: safeUrlTransform,
 };
+
+/**
+ * 預覽選項：呼叫端指定 `previewHiddenLines` 時，多掛一支外掛把「整段內容符合該樣式」的原始 HTML 節點從預覽拿掉（見 rehypeHideRawLines；例：PRD 的來源節錨點，INT-14⑤）。
+ * 不指定就是 `PREVIEW_OPTIONS` 本身（其他頁面的預覽一字不變）。以樣式物件為鍵記憶：呼叫端要傳模組層級常數，每次 render 重建會讓預覽的記憶化失效。
+ */
+const previewOptionsFor = (hiddenLines: RegExp | undefined): PreviewOptions =>
+  hiddenLines === undefined ? PREVIEW_OPTIONS : { ...PREVIEW_OPTIONS, rehypePlugins: [...(PREVIEW_OPTIONS.rehypePlugins ?? []), [rehypeHideRawLines, { pattern: hiddenLines }]] };
 
 /**
  * 超過這個字數才把預覽排到輸入之後。實測（W7，真瀏覽器、production 建置、p9 同一把尺：貼入後到預覽穩定，7 次取中位數）：
@@ -92,12 +100,12 @@ export function shouldDeferPreview(sourceChars: number, shownChars: number): boo
  *  2 鍵盤可達（axe scrollable-region-focusable；DEF-AC-005 同類）：.w-md-editor-preview 是可捲動區域，裡面沒有任何可聚焦的東西，
  *    鍵盤使用者就無法捲它。這裡放一個 tabIndex=0 的區域（名稱＝「<欄位名> 預覽」，同一頁有多個編輯器時各自唯一）。
  */
-function DeferredPreview({ source, label }: { source: string; label: string }) {
+function DeferredPreview({ source, label, options }: { source: string; label: string; options: PreviewOptions }) {
   const deferred = useDeferredValue(source);
   const shown = shouldDeferPreview(source.length, deferred.length) ? deferred : source;
   // 渲染結果以 shown 為鍵記憶：輸入當下的「急件」那一輪 deferred 還是舊值，拿到同一個元素、整棵 Markdown 子樹直接跳過；
   // 沒有這一層，急件那輪也會把舊內容整份重新解析一遍（實測 20,000 字反而更慢：預覽出現 129ms→205ms）
-  const rendered = useMemo(() => <MDEditor.Markdown {...PREVIEW_OPTIONS} source={shown} />, [shown]);
+  const rendered = useMemo(() => <MDEditor.Markdown {...options} source={shown} />, [shown, options]);
   return (
     <div tabIndex={0} role="region" aria-label={`${label} 預覽`} data-testid="md-preview-region">
       {rendered}
@@ -128,6 +136,11 @@ export type MarkdownEditorProps = {
   placeholder?: string;
   /** 編輯區高度（px）；Dialog 內用小一點，整頁表單用大一點 */
   height?: number;
+  /**
+   * 預覽（右側即時渲染）要拿掉的整段原始 HTML 的樣式（例：PRD 的來源節錨點 `<!-- r2p:section=N -->`，INT-14⑤）：只影響預覽，左欄原始碼與內容不變；
+   * 其他 HTML 仍照字面以文字顯示、程式碼圍欄內的不受影響。請傳模組層級常數（換新物件會讓預覽重新渲染）；不傳＝與先前完全相同。
+   */
+  previewHiddenLines?: RegExp;
   /** 匯出檔名（不含副檔名），預設 content */
   exportName?: string;
   /** 匯入／匯出的結果訊息（成功或失敗），由呼叫端決定怎麼呈現（toast） */
@@ -156,10 +169,11 @@ export function downloadMarkdown(text: string, fileBase: string): void {
   URL.revokeObjectURL(url);
 }
 
-export function MarkdownEditorImpl({ value, onChange, label, placeholder, height = 220, exportName = "content", onNotify, className }: MarkdownEditorProps) {
+export function MarkdownEditorImpl({ value, onChange, label, placeholder, height = 220, exportName = "content", onNotify, className, previewHiddenLines }: MarkdownEditorProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const [busy, setBusy] = useState(false);
+  const previewOptions = useMemo(() => previewOptionsFor(previewHiddenLines), [previewHiddenLines]);
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -195,8 +209,8 @@ export function MarkdownEditorImpl({ value, onChange, label, placeholder, height
         extraCommands={EXTRA_TOOLBAR}
         visibleDragbar={false}
         textareaProps={{ "aria-label": label, placeholder }}
-        previewOptions={PREVIEW_OPTIONS}
-        components={{ preview: (source) => <DeferredPreview source={source} label={label} /> }}
+        previewOptions={previewOptions}
+        components={{ preview: (source) => <DeferredPreview source={source} label={label} options={previewOptions} /> }}
       />
       <div className="mt-2 flex items-center justify-end gap-2">
         <input
