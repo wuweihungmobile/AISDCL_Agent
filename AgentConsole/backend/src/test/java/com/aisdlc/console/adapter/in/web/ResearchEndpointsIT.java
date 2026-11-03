@@ -1,8 +1,10 @@
 package com.aisdlc.console.adapter.in.web;
 
+import com.aisdlc.console.adapter.in.web.dto.SiKeyNames;
 import com.aisdlc.console.support.AbstractResearchIT;
 import com.aisdlc.console.support.ApiClient;
 import com.aisdlc.console.support.ApiClient.Resp;
+import com.aisdlc.console.support.BridgeSource;
 import com.aisdlc.console.support.ResearchFixtures;
 import com.aisdlc.minibridge.MiniResearch;
 import com.aisdlc.minibridge.MiniResearch.Call;
@@ -47,8 +49,9 @@ class ResearchEndpointsIT extends AbstractResearchIT {
 
         assertThat(first.status()).isEqualTo(200);
         Map<String, Object> data = first.read("$.data");
-        assertThat(data).containsEntry("mode", "local").containsEntry("db", true).containsEntry("researchRoot", "/research-root")
-                .containsEntry("webLayerEnabled", true).containsEntry("repoWritable", true).containsKey("scaffoldRoot");
+        assertThat(data).containsEntry("mode", "local").containsEntry("db", true).containsEntry("researchRoot", MiniResearch.RESEARCH_ROOT)
+                .containsEntry("sddRoot", MiniResearch.SDD_ROOT).containsEntry("webLayerEnabled", true).containsEntry("repoWritable", true)
+                .containsKey("scaffoldRoot");
         assertThat(data.get("scaffoldRoot")).as("未設定的腳手架根是 null、不是缺鍵").isNull();
         assertThat(first.<Boolean>read("$.data.claudeCli.ok")).isTrue();
         assertThat(first.<String>read("$.data.claudeCli.version")).isEqualTo("2.1.0");
@@ -64,6 +67,38 @@ class ResearchEndpointsIT extends AbstractResearchIT {
         assertThat(noDb.status()).as("沒有 DSN 時研究端點一律 503，唯一例外是能力探針：仍 200、以 db=false 說明").isEqualTo(200);
         assertThat(noDb.<Boolean>read("$.data.db")).isFalse();
         assertThat(bridge().countCalls("GET", "/research/capabilities")).isEqualTo(2);
+    }
+
+    @Test
+    void theFetchHostsFollowTheEffectiveAllowlistSoAnAdminEntryAppearsAndDisappearsWithIt() {
+        assertThat(api.get(viewer(), RESEARCH + "/capabilities").<List<String>>read("$.data.fetchHosts")).containsExactlyElementsOf(MiniResearch.FETCH_HOSTS);
+
+        Resp added = api.post(admin(), RESEARCH + "/allowlist", map("listKind", "FETCH", "host", "docs.python.org", "layer", "OSS", "purpose", "官方文件",
+                "minIntervalSeconds", 5));
+        assertThat(added.status()).isEqualTo(201);
+        researchQuery.invalidateCapabilities();
+        assertThat(api.get(viewer(), RESEARCH + "/capabilities").<List<String>>read("$.data.fetchHosts")).as("INT-08：新增的 ADMIN 條目進有效清單")
+                .containsAll(MiniResearch.FETCH_HOSTS).contains("docs.python.org");
+
+        api.raw(admin(), HttpMethod.PATCH, RESEARCH + "/allowlist/" + added.read("$.data.id"), ApiClient.toJson(map("enabled", false)));
+        researchQuery.invalidateCapabilities();
+        assertThat(api.get(viewer(), RESEARCH + "/capabilities").<List<String>>read("$.data.fetchHosts")).as("停用即消失")
+                .containsExactlyElementsOf(MiniResearch.FETCH_HOSTS);
+    }
+
+    @Test
+    void anOlderBridgeThatOnlyKnowsRootStillYieldsTheResearchRootAndEveryMissingKeyIsADefaultNotAnError() {
+        bridge().next("capabilities", Reply.ok(200, "mode", "local", "root", "/legacy-root", "db", true));
+
+        Resp resp = api.get(viewer(), RESEARCH + "/capabilities");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.researchRoot")).as("research_root 缺席時回退 root").isEqualTo("/legacy-root");
+        Map<String, Object> data = resp.read("$.data");
+        assertThat(data).as("沒回的鍵：鍵在、值是預設（OpenAPI 的 required＋nullable）").containsKeys("sddRoot", "scaffoldRoot").containsEntry("repoWritable", false)
+                .containsEntry("webLayerEnabled", false);
+        assertThat(data.get("sddRoot")).isNull();
+        assertThat(resp.<List<String>>read("$.data.fetchHosts")).isEmpty();
     }
 
     @Test
@@ -164,8 +199,10 @@ class ResearchEndpointsIT extends AbstractResearchIT {
         assertThat(created.<String>read("$.data.targetScope")).isEqualTo("AISDLC_MODULE");
         assertThat(created.<Boolean>read("$.data.scope.layers.academic")).isTrue();
         assertThat(created.<Boolean>read("$.data.scope.layers.industry")).isFalse();
-        assertThat(created.<List<String>>read("$.data.scope.in_scope")).as("scope 是 Bridge 寫入的 snake_case 鏡像").containsExactly("範圍內一項");
-        assertThat(created.<Integer>read("$.data.scope.recency_years")).isEqualTo(2);
+        assertThat(created.<List<String>>read("$.data.scope.inScope")).as("INT-03：scope 的鍵在邊界轉成 camelCase（前端讀 inScope，不讀 Bridge 的 in_scope）")
+                .containsExactly("範圍內一項");
+        assertThat(created.<Integer>read("$.data.scope.recencyYears")).isEqualTo(2);
+        assertThat(created.<Map<String, Object>>read("$.data.scope")).doesNotContainKeys("in_scope", "recency_years");
         assertThat(created.<Integer>read("$.data.counts.sources")).isZero();
 
         Call call = onlyWriteTo("POST", "/research/projects");
@@ -181,6 +218,33 @@ class ResearchEndpointsIT extends AbstractResearchIT {
         assertThat(duplicate.<String>read("$.reason")).isEqualTo("slug_in_use");
         assertThat(duplicate.<String>read("$.details.slug")).isEqualTo("alpha-1");
         assertThat(rows("research_projects")).as("409 之後仍只有一個專案").isEqualTo(1);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theProjectScopeIsExposedInCamelCaseForEveryKeyTheBridgeKeepsInItsScopeMirror() {
+        Map<String, Object> body = validCreate("scope-keys");
+        Map<String, Object> scope = (Map<String, Object>) body.get("scope");
+        scope.put("techStack", "Java 21、Spring Boot 4");
+        scope.put("outOfScope", List.of("範圍外一項"));
+        scope.put("applicabilityAxes", List.of("技術可行", "效能邊界"));
+        body.put("targetScopeHint", "AISDLC_MODULE");
+
+        Resp created = api.post(operator(), RESEARCH + "/projects", body);
+
+        assertThat(created.status()).isEqualTo(201);
+        String id = created.read("$.data.id");
+        List<String> bridgeKeys = BridgeSource.constants("SCOPE_KEYS", "research", "export.py");
+        for (Resp resp : List.of(created, api.get(viewer(), RESEARCH + "/projects/" + id))) {
+            Map<String, Object> out = resp.read("$.data.scope");
+            assertThat(out.keySet()).as("Bridge 的 scope 鏡像有哪些鍵（export.py 的 SCOPE_KEYS），console-api 就逐一以 camelCase 轉出，建立回應與詳情一致")
+                    .containsExactlyInAnyOrderElementsOf(bridgeKeys.stream().map(SiKeyNames::camel).toList());
+            assertThat(out.keySet()).noneMatch(key -> key.contains("_"));
+            assertThat(out).containsEntry("techStack", "Java 21、Spring Boot 4").containsEntry("inScope", List.of("範圍內一項"))
+                    .containsEntry("outOfScope", List.of("範圍外一項")).containsEntry("recencyYears", 2)
+                    .containsEntry("applicabilityAxes", List.of("技術可行", "效能邊界")).containsEntry("targetScopeHint", "AISDLC_MODULE");
+            assertThat(resp.<Boolean>read("$.data.scope.layers.oss")).as("layers 的四個鍵本來就是單字").isTrue();
+        }
     }
 
     @Test
@@ -401,6 +465,33 @@ class ResearchEndpointsIT extends AbstractResearchIT {
     }
 
     @Test
+    void thePrdContentLimitIsExactlyOneMebibyteOfUtf8BytesInclusiveNotACharacterCount() {
+        UUID id = fx.project("prd-limit");
+        String url = RESEARCH + "/projects/" + id + "/prd";
+        int mebibyte = 1_048_576;
+
+        Resp exact = api.put(operator(), url, map("baseVersion", 0, "content", "a".repeat(mebibyte)));
+        assertThat(exact.status()).as("恰 1 MiB（ASCII 一字元一位元組）放行").isEqualTo(201);
+        assertThat(exact.<Integer>read("$.data.bytes")).isEqualTo(mebibyte);
+
+        Resp over = api.put(operator(), url, map("baseVersion", 1, "content", "a".repeat(mebibyte + 1)));
+        assertThat(over.status()).as("1 MiB 加 1 位元組被拒").isEqualTo(422);
+        assertThat(over.<List<String>>read("$.details.violations[*].rule")).containsExactly("too_large");
+
+        // 「字」在 UTF-8 是 3 位元組：349_525 個＝1_048_575 位元組，再加一個 ASCII 字元恰 1 MiB（放行），再加兩個就超界（被拒）——界線以位元組計、不是字元數
+        String threeByteChars = "字".repeat(349_525);
+        Resp exactMultibyte = api.put(operator(), url, map("baseVersion", 1, "content", threeByteChars + "a"));
+        assertThat(exactMultibyte.status()).as("多位元組內容以位元組計：恰 1 MiB 放行").isEqualTo(201);
+        assertThat(exactMultibyte.<Integer>read("$.data.bytes")).isEqualTo(mebibyte);
+        Resp overMultibyte = api.put(operator(), url, map("baseVersion", 2, "content", threeByteChars + "aa"));
+        assertThat(overMultibyte.status()).as("字元數遠小於 1 M 但位元組數是 1 MiB 加 1").isEqualTo(422);
+        assertThat(overMultibyte.<List<String>>read("$.details.violations[*].rule")).containsExactly("too_large");
+
+        assertThat(bridge().countCalls("PUT", "/research/projects/")).as("被拒的兩次沒有送到 Bridge").isEqualTo(2);
+        assertThat(rows("research_prd_versions")).isEqualTo(2);
+    }
+
+    @Test
     void startingAStageForwardsTheCallerAndTheOptionsAndAnUnknownStageNeverReachesTheBridge() {
         UUID id = fx.project("stages");
 
@@ -430,13 +521,17 @@ class ResearchEndpointsIT extends AbstractResearchIT {
     @Test
     void aStageTheBridgeHasNotImplementedYetIsReportedAsAnUpstreamFailureWithTheEndpointNotAFakeSuccess() {
         UUID id = fx.project("stage-skeleton");
-        bridge().next("stage:revise", Reply.error(501, "not_implemented", "endpoint", "POST /research/projects/{id}/stages/revise:start"));
+        // 真 Bridge 現在唯一還回 501 的是 P1 的 tcs-draft（routers/research.py 的 _not_implemented）：本文形狀照它——endpoint、detail、stage 三個頂層補充欄位
+        bridge().next("stage:tcs-draft", Reply.error(501, "not_implemented", "endpoint", "stages/tcs-draft:start", "detail", "尚未實作：這是 P1 功能，P0 不提供",
+                "stage", "tcs-draft"));
 
-        Resp resp = api.post(operator(), RESEARCH + "/projects/" + id + "/stages/revise", Map.of());
+        Resp resp = api.post(operator(), RESEARCH + "/projects/" + id + "/stages/tcs-draft", Map.of());
 
-        assertThat(resp.status()).as("501 骨架轉成契約 §0.2 的上游失敗（502），不假裝成功").isEqualTo(502);
+        assertThat(resp.status()).as("501 骨架轉成契約 §0.2 的上游失敗（502；主控裁決：上游未實作屬上游失敗類），不假裝成功").isEqualTo(502);
         assertThat(resp.<String>read("$.reason")).isEqualTo("not_implemented");
-        assertThat(resp.<String>read("$.details.endpoint")).isEqualTo("POST /research/projects/{id}/stages/revise:start");
+        assertThat(resp.<String>read("$.details.endpoint")).as("INT-14①：details.endpoint 指出哪個端點未實作").isEqualTo("stages/tcs-draft:start");
+        assertThat(resp.<String>read("$.details.stage")).isEqualTo("tcs-draft");
+        assertThat(resp.<Integer>read("$.details.bridgeStatus")).as("Bridge 的原狀態碼 501 留在 details").isEqualTo(501);
         assertThat(resp.has("$.data")).isFalse();
         assertThat(bridge().calls).as("不重試").hasSize(1);
     }
@@ -484,6 +579,32 @@ class ResearchEndpointsIT extends AbstractResearchIT {
         Resp missing = api.post(admin(), RESEARCH + "/projects/" + id + "/approve", Map.of());
         assertThat(missing.<List<String>>read("$.details.violations[*].field")).containsExactlyInAnyOrder("prdVersion", "expectedDigests");
         assertThat(bridge().calls).isEmpty();
+    }
+
+    @Test
+    void anApproveWithoutAnyDigestKeyIsABlindApprovalRefusedAsMissingDigestsButASingleKeyIsEnoughForTheGate() {
+        UUID id = fx.project("approve-blind", "studio", "GATE0_PENDING", "WAITING_HUMAN", "");
+        String url = RESEARCH + "/projects/" + id + "/approve";
+
+        for (Map<String, Object> blind : List.of(map("prdVersion", 1, "expectedDigests", Map.of()), map("prdVersion", 1))) {
+            Resp resp = api.post(admin(), url, blind);
+
+            assertThat(resp.status()).as(String.valueOf(blind)).isEqualTo(422);
+            assertThat(resp.<String>read("$.reason")).as("D-72：零鍵單獨出現時頂層 reason 是 missing_digests（不是 invalid_request）").isEqualTo("missing_digests");
+            assertThat(resp.<List<String>>read("$.details.violations[*].field")).containsExactly("expectedDigests");
+            assertThat(resp.<List<String>>read("$.details.violations[*].rule")).containsExactly("missing_digests");
+            assertThat(resp.errorFields()).containsExactly("expectedDigests");
+            assertThat(resp.has("$.data")).isFalse();
+        }
+        Resp combined = api.post(admin(), url, map("expectedDigests", Map.of()));
+        assertThat(combined.<String>read("$.reason")).as("另有其他違規時頂層 reason 回 invalid_request，零鍵仍列在 violations 裡").isEqualTo("invalid_request");
+        assertThat(combined.<List<String>>read("$.details.violations[*].rule")).containsExactlyInAnyOrder("required", "missing_digests");
+        assertThat(bridge().calls).as("閘擋下的請求一個都沒到 Bridge").isEmpty();
+
+        String matrix = "00_research/evidence_matrix.md";
+        Resp one = api.post(admin(), url, map("prdVersion", 1, "expectedDigests", map(matrix, "sha256:" + "a".repeat(64))));
+        assertThat(one.status()).as("只比對送來的鍵：一鍵就夠，不再要求涵蓋四個檔").isEqualTo(200);
+        assertThat(onlyWriteTo("POST", ":approve-baseline").body().get("expected_digests")).isEqualTo(Map.of(matrix, "sha256:" + "a".repeat(64)));
     }
 
     // ── 找不到專案、換世代與重試初始化 ──────────────────────────────────────────────────────

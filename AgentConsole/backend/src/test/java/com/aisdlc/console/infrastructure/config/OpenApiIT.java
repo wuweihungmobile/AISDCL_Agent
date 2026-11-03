@@ -977,4 +977,42 @@ class OpenApiIT extends AbstractApiIT {
                     .as(expected.getKey()).containsExactlyInAnyOrderElementsOf(expected.getValue());
         }
     }
+
+    /**
+     * Gate 0 核准的錯誤說明照 D-72 反映真實回應（PKG-FIX-API；INT-13、SCG-4 F-05）：摘要不符與零鍵都是 422（{@code digest_mismatch}、{@code missing_digests}），
+     * 409 清單不再有契約原列的 {@code spec_digest_changed}；請求本文的 {@code expectedDigests} 說明是「至少一鍵、只比對送來的鍵」而不是「須涵蓋四個檔」。
+     * 為什麼重要：前端依 /v3/api-docs 產生型別與錯誤處理——說明講「409 spec_digest_changed」而實際回 422，前端會為一個永遠走不到的分支寫處理。
+     */
+    @Test
+    void AT_960_5_5_theApproveOperationDocumentsTheD72DigestReasonsAs422AndNoLongerTheSpecDigestChanged409() {
+        Resp docs = docs();
+        String operation = "$.paths['/api/v1/research/projects/{id}/approve'].post";
+
+        String unprocessable = docs.read(operation + ".responses['422'].description");
+        String conflict = docs.read(operation + ".responses['409'].description");
+        String description = docs.read(operation + ".description");
+        String digests = docs.read("$.components.schemas.ResearchApproveRequest.properties.expectedDigests.description");
+
+        assertThat(unprocessable).contains("digest_mismatch", "details.files", "missing_digests");
+        assertThat(conflict).contains("review_not_passed", "fsm_state_conflict", "escalated").doesNotContain("spec_digest_changed");
+        assertThat(description).contains("422 digest_mismatch", "422 missing_digests").doesNotContain("spec_digest_changed");
+        assertThat(digests).contains("missing_digests", "只比對送來的鍵").doesNotContain("須涵蓋");
+    }
+
+    /**
+     * 能力探針與專案範圍的欄位在 OpenAPI 上與 Bridge 對齊（PKG-FIX-API；INT-03、INT-08）：{@code CapabilitiesDto} 多一個 required 且 nullable 的 {@code sddRoot}
+     * （Bridge 的 {@code sdd_root}；解析不到為 null）；專案詳情的 {@code scope} 說明是 camelCase 鍵（{@code inScope}…），不再是 Bridge 的 snake_case 鏡像。
+     */
+    @Test
+    void AT_960_5_5_theCapabilitiesAndScopeSchemasCarryTheBridgeAlignedFieldsInCamelCase() {
+        Resp docs = docs();
+
+        assertThat(docs.<List<String>>read("$.components.schemas.CapabilitiesDto.required")).contains("sddRoot", "researchRoot", "scaffoldRoot", "repoWritable", "fetchHosts");
+        assertThat(docs.<List<String>>read("$.components.schemas.CapabilitiesDto.properties.sddRoot.type")).as("sddRoot 可為 null（框架樹解析不到、或舊版 Bridge 沒回）；OpenAPI 3.1 以型別陣列表示")
+                .containsExactlyInAnyOrder("string", "null");
+        String scope = docs.read("$.components.schemas.ResearchProjectDetail.properties.scope.description");
+        assertThat(scope).contains("camelCase", "inScope", "techStack", "recencyYears", "applicabilityAxes").doesNotContain("snake_case 鍵原樣");
+        assertThat(docs.<List<String>>read("$.components.schemas.ReconcileResult.required")).containsExactlyInAnyOrder("consistent", "checks");
+        assertThat(docs.<List<String>>read("$.components.schemas.ReconcileCheckDto.required")).as("name 是 Bridge 的 id；drift 缺席時省略").containsExactlyInAnyOrder("name", "status");
+    }
 }

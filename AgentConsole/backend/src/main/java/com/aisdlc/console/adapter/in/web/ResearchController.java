@@ -237,10 +237,11 @@ public class ResearchController {
 
     @PostMapping("/projects/{id}/approve")
     @Operation(operationId = "approveResearchBaseline", summary = "Gate 0：核准 PRD 並凍結基線（API-RP-12；僅 ADMIN）",
-            description = "本文 {prdVersion（整數）, expectedDigests, reason?}；approver 取 JWT subject（本文型別沒有 approver 欄，多帶的被忽略）。Bridge 檢查序："
-                    + "權杖→prdVersion 為 head 且有通過的審查輪（409 review_not_passed）→expectedDigests 與現檔逐一比對（409 spec_digest_changed，details.pair）→FSM 現態為 "
-                    + "HUMAN_PENDING 且無 ESCALATION（409 fsm_state_conflict／escalated）→有重試史才先走 SPEC_REGRESSION_CHECK→spec-frozen。成功 200 回 "
-                    + "{gateDecisionId, stage, specDocDigests, fsmState}；非冪等：第二次＝409 fsm_state_conflict。" + WRITE_FLOW)
+            description = "本文 {prdVersion（整數）, expectedDigests（至少一鍵）, reason?}；approver 取 JWT subject（本文型別沒有 approver 欄，多帶的被忽略）。"
+                    + "expectedDigests 只比對送來的鍵（D-72）：一個鍵都沒送＝422 missing_digests（盲核；由輸入閘回、零 Bridge 請求）；其餘檔案的摘要由 Bridge 於凍結當下自工作區計算並記入凍結記錄。"
+                    + "Bridge 檢查序：權杖→prdVersion 為 head 且有通過的審查輪（409 review_not_passed）→送來的摘要與現檔逐鍵比對（422 digest_mismatch，"
+                    + "details.files[{key,expected,current}]）→FSM 現態為 HUMAN_PENDING 且無 ESCALATION（409 fsm_state_conflict／escalated）→有重試史才先走 "
+                    + "SPEC_REGRESSION_CHECK→spec-frozen。成功 200 回 {gateDecisionId, stage, specDocDigests, fsmState}；非冪等：第二次＝409 fsm_state_conflict。" + WRITE_FLOW)
     public ApiResult<ApproveResultDto> approve(@PathVariable UUID id, @RequestBody ResearchApproveRequest request, Authentication authentication) {
         return ApiResult.ok(ApproveResultDto.from(command.approve(caller(authentication), id, request.toInput())));
     }
@@ -284,7 +285,8 @@ public class ResearchController {
 
     @PostMapping("/projects/{id}/reinit")
     @Operation(operationId = "reinitResearchProject", summary = "重試初始化／換世代（API-RP-20；OPERATOR 以上，換世代僅 ADMIN）",
-            description = "本文可省略。無 generation＝重試初始化（冪等；只在 flowStatus=FAILED 且 flowDetail 以 init_failed: 起頭時可呼叫，其餘＝409 stage_conflict，"
+            description = "本文可省略。無 generation＝重試（冪等；flowStatus=FAILED 時可呼叫：初始化失敗〔flowDetail 以 init_failed: 起頭〕補建缺的目錄、檔案與外環鍵，"
+                    + "stage 失敗或取消〔flowDetail 為失敗原因或 cancelled〕以 FSM 重衍生狀態、清掉失敗標記，D-81；其餘＝409 stage_conflict，"
                     + "details.flowStatus／flowDetail，零寫入）。generation=next＝換世代（D-60）：放棄這一把外環鍵、另開新世代鍵取得全新 3 次預算；"
                     + "reason 必填（1～500 字；缺、空白、超長＝422 invalid_request）；FSM 現態須為 ESCALATION*（否則 409 fsm_state_conflict，details.current_state）。"
                     + "角色：換世代僅 ADMIN——VIEWER＝403 ACCESS_DENIED（授權鏈）、OPERATOR＝403 research_write_forbidden（服務層入口，Bridge 請求數 0）。"

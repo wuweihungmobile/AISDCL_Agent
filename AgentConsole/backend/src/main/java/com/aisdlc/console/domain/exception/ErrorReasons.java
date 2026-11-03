@@ -168,7 +168,9 @@ public final class ErrorReasons {
     // ── 研究到規格（ResearchToPRD P0；TCS-ResearchToPRD-P0-20261102 §5.1「錯誤 reason」、AT-960-5-6；契約 API_Contract_ResearchToPRD.md §0.2；前端住 lib/domain/research.ts 的 RESEARCH_REASONS）──
     // 🔴 與 SI、議題、備份類同規則：不進 lib/api/reasons.ts（它與 API_Contract_P3-6.md 附錄 B 雙向鎖）；前端 RESEARCH_REASONS、本類別的 RESEARCH_ 前綴常數與契約表三方雙向鎖。
     // 前綴一律 RESEARCH_（不得以 ISSUE_、BACKUP_ 起頭，否則兩個既有契約測試的集合鎖紅；TCS §4 #26）。值為英文識別字、逐字；Bridge 的 reason 由 console-api 原樣透傳。
-    // P0 契約範圍恰十八個（另有 Bridge 專屬的三個，見本節末）：`invalid_request`（輸入閘，400／422）是區域常數（ResearchInputGates.INVALID_REQUEST）、不入本類別與契約表（先例 SiWriteGates）。
+    // 本節的集合＝console-api 實際會回（或自 Bridge 逐字轉出）的研究 reason：P0 契約的十七個加 Bridge 專屬的五個（見本節末）；`invalid_request`（輸入閘，400／422）是區域常數
+    // （ResearchInputGates.INVALID_REQUEST）、不入本類別與契約表（先例 SiWriteGates）。契約原列的 `spec_digest_changed`（409）已被 D-72 的 `digest_mismatch`／`missing_digests`（422）取代、
+    // Bridge 對研究端點不再回它，所以不再是本類別的常數（契約與前端的清單在勘誤批次同步前仍列它，ResearchReasonsTest 以「已被取代」名單明載）。
     /** backend 或 Bridge 沒有設定研究寫入權杖（503）：研究寫入面整個停用。 */
     public static final String RESEARCH_WRITE_DISABLED = "research_write_disabled";
     /**
@@ -184,14 +186,12 @@ public final class ErrorReasons {
     public static final String RESEARCH_NOT_FOUND = "research_not_found";
     /** slug 已被未封存的研究專案使用（409）。 */
     public static final String RESEARCH_SLUG_IN_USE = "slug_in_use";
-    /** 同一研究專案已有進行中的 stage，或重試初始化的狀態前置不成立（409；details 由 Bridge 逐字帶出）。 */
+    /** 同一研究專案已有進行中的 stage，或重試（reinit 不帶 generation）的狀態前置不成立——flowStatus 不是 FAILED（D-81）（409；details 由 Bridge 逐字帶出）。 */
     public static final String RESEARCH_STAGE_CONFLICT = "stage_conflict";
     /** PRD 存檔的 baseVersion 不是目前 head（409；details.headVersion）。 */
     public static final String RESEARCH_PRD_VERSION_CONFLICT = "prd_version_conflict";
     /** head 版本沒有通過的審查輪，不能核准（409）。 */
     public static final String RESEARCH_REVIEW_NOT_PASSED = "review_not_passed";
-    /** 核准時檔案摘要與核准人看到的不同（409；details.pair）。 */
-    public static final String RESEARCH_SPEC_DIGEST_CHANGED = "spec_digest_changed";
     /** 外環 FSM 現態不允許這個動作（409；details.current_state）。 */
     public static final String RESEARCH_FSM_STATE_CONFLICT = "fsm_state_conflict";
     /** 外環 FSM 在 ESCALATION*（409；details.recovery 帶恢復指令）。 */
@@ -209,12 +209,25 @@ public final class ErrorReasons {
     /** 研究呼叫讀取逾時（504；POST 不重試，結果不明）。 */
     public static final String RESEARCH_BRIDGE_TIMEOUT = "bridge_timeout";
 
-    // ── Bridge 專屬的三個 reason（PKG-BR-A 新增、契約 API_Contract_ResearchToPRD §0.2／§3 的 reason 清單尚未列入——勘誤候選「契約 §3 reason 清單補列」）──
-    // 值逐字取自 Bridge（console-api 原樣透傳）；契約與前端 RESEARCH_REASONS 補列前，ResearchReasonsTest 以「已知待補列」名單明載這三個，補列後該名單必須清空。
+    // ── Bridge 專屬的五個 reason（契約 API_Contract_ResearchToPRD §0.2／§3 的 reason 清單與前端 RESEARCH_REASONS 尚未列入——勘誤候選「契約 §0.2／§1.4 reason 清單補列」）──
+    // 值逐字取自 Bridge（console-api 原樣透傳）；契約與前端補列前，ResearchReasonsTest 以「已知待補列」名單明載這五個，補列後該名單必須清空。
     /** allowlist 已有同 list_kind 與 host 的條目（409）。 */
     public static final String RESEARCH_ALLOWLIST_EXISTS = "allowlist_exists";
     /** 專案初始化的某一步失敗（Bridge 回 502；{@code details.step}＝workspace｜files｜fsm）：游標已標 FAILED，以重試初始化補建。 */
     public static final String RESEARCH_INIT_FAILED = "init_failed";
-    /** Bridge 端點本體尚未實作（Bridge 回 501；P0 第一波骨架）：console-api 轉成上游失敗（502），不假裝成功。 */
+    /**
+     * Bridge 端點本體尚未實作（Bridge 回 501；P0 只剩 P1 功能 {@code stages/tcs-draft}）：console-api 轉成上游失敗（<b>502</b>，主控裁決：上游未實作屬上游失敗類；
+     * {@code details} 帶 Bridge 的 {@code endpoint}、{@code stage}、{@code detail} 與 {@code bridgeStatus=501}），不假裝成功。
+     */
     public static final String RESEARCH_NOT_IMPLEMENTED = "not_implemented";
+    /**
+     * Gate 0 核准時，前端送來的檔案摘要與現檔不符（422；D-72）：只比對送來的鍵，{@code details.files[{key,expected,current}]}（{@code current} 為 null＝該檔不存在或不在
+     * 凍結的四檔內）。取代契約原列的 409 {@code spec_digest_changed}。
+     */
+    public static final String RESEARCH_DIGEST_MISMATCH = "digest_mismatch";
+    /**
+     * Gate 0 核准一個摘要鍵都沒送（422；D-72，防止盲核）：console-api 的輸入閘單獨以它回（{@code details.violations}、零 Bridge 請求）；Bridge 端同名同義
+     * （{@code details.accepted_keys} 列出可送的鍵）。
+     */
+    public static final String RESEARCH_MISSING_DIGESTS = "missing_digests";
 }

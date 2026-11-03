@@ -804,6 +804,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                     with(projectRow(UUID.randomUUID(), "t500"), "topic", "x".repeat(500))));
             expectState(soft, "直接指定 rp_no 為 RP-12", tryInsert(db, "research_projects",
                     with(projectRow(UUID.randomUUID(), "r1"), "rp_no", "RP-12")), CHECK);
+            expectState(soft, "直接指定 rp_no 為 RP-123（3 位數＝低於 4 位的下限）", tryInsert(db, "research_projects",
+                    with(projectRow(UUID.randomUUID(), "r1b"), "rp_no", "RP-123")), CHECK);
+            expectOk(soft, "直接指定 rp_no 為 RP-1234（4 位數＝下限）", tryInsert(db, "research_projects",
+                    with(projectRow(UUID.randomUUID(), "r1c"), "rp_no", "RP-1234")));
             expectState(soft, "直接指定 rp_no 為 XX-0001", tryInsert(db, "research_projects",
                     with(projectRow(UUID.randomUUID(), "r2"), "rp_no", "XX-0001")), CHECK);
             expectState(soft, "直接指定的 rp_no 與既有的重複", tryInsert(db, "research_projects",

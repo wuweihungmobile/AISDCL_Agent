@@ -5,6 +5,7 @@ import com.aisdlc.console.adapter.in.web.dto.research.ResearchReinitRequest;
 import com.aisdlc.console.support.AbstractResearchIT;
 import com.aisdlc.console.support.ApiClient;
 import com.aisdlc.console.support.ApiClient.Resp;
+import com.aisdlc.console.support.BridgeSource;
 import com.aisdlc.minibridge.MiniResearch;
 import com.aisdlc.minibridge.MiniResearch.Call;
 import com.aisdlc.minibridge.MiniResearch.Reply;
@@ -47,6 +48,15 @@ class ResearchApiIT extends AbstractResearchIT {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Pattern UTC_OFFSET_TIME = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00");
+    /** Bridge 宣告的對帳項識別與順序（{@code gates/reconcile.py} 的 {@code CHECK_IDS}）：期望值取自 Bridge 原始碼，不是測試自己猜的。 */
+    private static final List<String> RECONCILE_CHECK_IDS = BridgeSource.constants("CHECK_IDS", "research", "gates", "reconcile.py");
+    /** Gate 0 凍結的四份文件（Bridge 的 {@code APPROVE_DOCS}；{@code missing_digests} 的 {@code details.accepted_keys}）。 */
+    private static final List<String> ACCEPTED_DIGEST_KEYS = List.of("01_specs/PRD-v1.0.0.md", "00_research/evidence_matrix.md", "00_research/issue_scope.json",
+            "01_specs/adr_draft.md");
+    /** Bridge 的 {@code digest_problems} 形狀（D-72）：{@code details.files[{key, expected, current}]}。 */
+    private static final Map<String, Object> DIGEST_MISMATCH_DETAILS = map("files", List.of(map("key", "00_research/evidence_matrix.md", "expected",
+            "sha256:" + "d".repeat(64), "current", "sha256:" + "e".repeat(64))));
+    private static final Map<String, Object> MISSING_DIGESTS_DETAILS = map("accepted_keys", ACCEPTED_DIGEST_KEYS);
 
     // ── 小工具 ───────────────────────────────────────────────────────────────────────────
 
@@ -153,6 +163,30 @@ class ResearchApiIT extends AbstractResearchIT {
         Resp empty = api.get(viewer(), RESEARCH + "/projects");
         assertThat(empty.status()).isEqualTo(200);
         assertThat(empty.<List<Object>>read("$.data")).as("零專案時清單回空陣列（FE-A 勘誤 1：清單回陣列、不是分頁封包）").isEmpty();
+    }
+
+    @Test
+    void AT_960_4_1_theSlugLengthBoundaryIsOneToThirtyCharactersInclusive() {
+        // 上界：30 字放行（送到 Bridge、建立成功）、31 字被輸入閘擋下（零 Bridge 請求）；下界：1 字放行、空字串被擋（契約 §1.2：^[a-z0-9][a-z0-9-]{0,29}$）
+        for (String slug : List.of("a".repeat(30), "b")) {
+            Resp ok = api.post(operator(), RESEARCH + "/projects", validCreate(slug));
+
+            assertThat(ok.status()).as("slug 長度 " + slug.length()).isEqualTo(201);
+            assertThat(ok.<String>read("$.data.slug")).isEqualTo(slug);
+        }
+        long accepted = bridge().countCalls("POST", "/research/projects");
+        assertThat(accepted).as("兩個合法 slug 各一次 Bridge 請求").isEqualTo(2);
+
+        for (String slug : List.of("c".repeat(31), "")) {
+            Resp refused = api.post(operator(), RESEARCH + "/projects", validCreate(slug));
+
+            assertThat(refused.status()).as("slug 長度 " + slug.length()).isEqualTo(400);
+            assertThat(refused.<String>read("$.reason")).isEqualTo("invalid_request");
+            assertThat(refused.<List<String>>read("$.details.violations[*].field")).containsExactly("slug");
+            assertThat(refused.<List<String>>read("$.details.violations[*].rule")).containsExactly("pattern");
+        }
+        assertThat(bridge().countCalls("POST", "/research/projects")).as("被擋下的 slug 沒有送到 Bridge").isEqualTo(accepted);
+        assertThat(rows("research_projects")).isEqualTo(2);
     }
 
     @Test
@@ -334,11 +368,44 @@ class ResearchApiIT extends AbstractResearchIT {
             }
             if ("reconcile".equals(verb)) {
                 assertThat(ok.<Boolean>read("$.data.consistent")).isTrue();
-                assertThat(ok.<List<Map<String, Object>>>read("$.data.checks")).isNotEmpty().allSatisfy(check -> assertThat(check).containsKeys("name", "status"));
+                assertThat(ok.<List<String>>read("$.data.checks[*].name")).as("INT-01：name 取自 Bridge 的 id，不得為空；六項、順序以 Bridge 原始碼的 CHECK_IDS 為準")
+                        .allSatisfy(name -> assertThat(name).isNotBlank()).containsExactlyElementsOf(RECONCILE_CHECK_IDS);
+                assertThat(ok.<List<String>>read("$.data.checks[*].status")).containsOnly("ok");
             }
         }
         assertThat(bridge().calls.stream().map(Call::token).distinct()).as("每個寫入帶研究寫入權杖").containsExactly(MiniResearch.TOKEN);
         assertThat(bridge().calls.stream().map(Call::traceId)).allSatisfy(trace -> assertThat(trace).isNotBlank());
+    }
+
+    @Test
+    void AT_960_4_6_reconcileNamesEveryCheckByTheBridgeIdAndCarriesBothDigestsOfEveryDriftRowInCamelCase() {
+        UUID id = fx.project("demo");
+        String expected = "a".repeat(64);
+        String actual = "b".repeat(64);
+        List<Map<String, Object>> checks = new ArrayList<>(MiniResearch.consistentReconcileChecks());
+        checks.set(0, MiniResearch.reconcileCheck("fsm_flow_mapping", "drift", true, "fsm=HUMAN_PENDING flow=topic/INGESTED",
+                List.of(MiniResearch.reconcileDrift("FSM_FLOW", "flow", null, null))));
+        checks.set(1, MiniResearch.reconcileCheck("prd_sha256", "drift", true, "",
+                List.of(MiniResearch.reconcileDrift("PRD", "01_specs/PRD-v1.0.0.md", expected, actual))));
+        checks.set(3, MiniResearch.reconcileCheck("evidence_matrix", "drift", true, "file_missing",
+                List.of(MiniResearch.reconcileDrift("EVIDENCE_MATRIX", "00_research/evidence_matrix.md", expected, null))));
+        bridge().next("reconcile", new Reply(200, MiniResearch.reconcileBody(checks)));
+
+        Resp resp = api.post(operator(), RESEARCH + "/projects/" + id + "/reconcile");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<Boolean>read("$.data.consistent")).isFalse();
+        assertThat(resp.<List<String>>read("$.data.checks[*].name")).as("name 恆等於 Bridge 的 id（前端靠 fsm_flow_mapping 辨識對映漂移）")
+                .containsExactlyElementsOf(RECONCILE_CHECK_IDS);
+        assertThat(resp.<List<String>>read("$.data.checks[*].status")).containsExactly("drift", "drift", "ok", "drift", "ok", "ok");
+        assertThat(resp.<Map<String, Object>>read("$.data.checks[1].drift[0]")).as("檔案漂移列：兩個摘要都帶、鍵名是 camelCase")
+                .containsEntry("kind", "PRD").containsEntry("path", "01_specs/PRD-v1.0.0.md")
+                .containsEntry("expectedSha256", expected).containsEntry("actualSha256", actual).doesNotContainKeys("expected_sha256", "actual_sha256");
+        assertThat(resp.<Map<String, Object>>read("$.data.checks[3].drift[0]")).as("缺檔：資料庫側的摘要在、檔案側的摘要缺席（Bridge 的 null）")
+                .containsEntry("expectedSha256", expected).doesNotContainKey("actualSha256");
+        assertThat(resp.<Map<String, Object>>read("$.data.checks[0].drift[0]")).as("對映漂移不是檔案：kind＝FSM_FLOW、沒有任何摘要")
+                .containsEntry("kind", "FSM_FLOW").doesNotContainKeys("expectedSha256", "actualSha256");
+        assertThat(resp.<List<Object>>read("$.data.checks[2].drift")).as("沒有漂移的項：Bridge 的空陣列原樣轉出").isEmpty();
     }
 
     // ── AT-960-4-7：審查輪 DTO ───────────────────────────────────────────────────────────
@@ -605,7 +672,8 @@ class ResearchApiIT extends AbstractResearchIT {
         replies.put("503 research_write_disabled", Reply.error(503, "research_write_disabled", "detail", "BRIDGE_RESEARCH_WRITE_TOKEN 未設"));
         replies.put("403 research_write_forbidden", Reply.error(403, "research_write_forbidden"));
         replies.put("409 review_not_passed", Reply.error(409, "review_not_passed"));
-        replies.put("409 spec_digest_changed", Reply.error(409, "spec_digest_changed", "details", map("pair", "expected_vs_file")));
+        replies.put("422 digest_mismatch", Reply.error(422, "digest_mismatch", "details", DIGEST_MISMATCH_DETAILS));
+        replies.put("422 missing_digests", Reply.error(422, "missing_digests", "details", MISSING_DIGESTS_DETAILS));
         replies.put("409 fsm_state_conflict", Reply.error(409, "fsm_state_conflict", "details", map("current_state", "SPEC_FROZEN", "expected_state", "HUMAN_PENDING")));
         replies.put("409 escalated", Reply.error(409, "escalated", "details", map("recovery", map("target", "SPEC_DRAFTING"))));
         replies.put("503 research_requires_db", Reply.error(503, "research_requires_db"));
@@ -627,6 +695,29 @@ class ResearchApiIT extends AbstractResearchIT {
         }
         assertThat(expectedStatus).isEqualTo(replies.size());
         assertThat(api.post(admin(), url, body).<String>read("$.data.fsmState")).as("沒有腳本時回預設成功").isEqualTo("SPEC_FROZEN");
+        assertThat(rows("research_gate_decisions")).as("皆無 R6 列（console-api 不寫決定列）").isZero();
+    }
+
+    @Test
+    void AT_960_14_E_1_theDigestProblemsOfD72AreRelayedAs422WithTheirDetailsVerbatimAndNoLongerAs409SpecDigestChanged() {
+        UUID id = fx.project("demo", "studio", "GATE0_PENDING", "WAITING_HUMAN", "");
+        Map<String, Object> body = map("prdVersion", 2, "expectedDigests", map("00_research/evidence_matrix.md", "sha256:" + "d".repeat(64)));
+        String url = RESEARCH + "/projects/" + id + "/approve";
+
+        bridge().next("approve", Reply.error(422, "digest_mismatch", "details", DIGEST_MISMATCH_DETAILS));
+        Resp mismatch = api.post(admin(), url, body);
+        bridge().next("approve", Reply.error(422, "missing_digests", "details", MISSING_DIGESTS_DETAILS));
+        Resp blind = api.post(admin(), url, body);
+
+        assertThat(mismatch.status()).as("摘要不符是 422（不是契約原列的 409 spec_digest_changed）").isEqualTo(422);
+        assertThat(mismatch.<String>read("$.reason")).isEqualTo("digest_mismatch");
+        assertThat(mismatch.<List<Map<String, Object>>>read("$.details.files")).as("details.files 逐鍵列出送來的值與現值（Bridge 原樣）").singleElement()
+                .satisfies(file -> assertThat(file).containsEntry("key", "00_research/evidence_matrix.md").containsEntry("expected", "sha256:" + "d".repeat(64))
+                        .containsEntry("current", "sha256:" + "e".repeat(64)));
+        assertThat(blind.status()).isEqualTo(422);
+        assertThat(blind.<String>read("$.reason")).isEqualTo("missing_digests");
+        assertThat(blind.<List<String>>read("$.details.accepted_keys")).as("Bridge 列出可送的鍵").containsExactlyElementsOf(ACCEPTED_DIGEST_KEYS);
+        assertThat(List.of(mismatch, blind)).allSatisfy(resp -> assertThat(resp.has("$.data")).isFalse());
         assertThat(rows("research_gate_decisions")).as("皆無 R6 列（console-api 不寫決定列）").isZero();
     }
 

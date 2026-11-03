@@ -32,7 +32,8 @@ public record ResearchProjectDetail(
         @NotNull String updatedAt,
         @Schema(nullable = true, requiredMode = Schema.RequiredMode.REQUIRED) String archivedAt,
         @NotNull String topic,
-        @NotNull @Schema(description = "issue_scope.json 的鏡像（層開關、技術棧、檢索邊界…；Bridge 寫入的 snake_case 鍵原樣）") Map<String, Object> scope,
+        @NotNull @Schema(description = "issue_scope.json 的鏡像（層開關 layers、技術棧 techStack、檢索邊界 inScope／outOfScope、文獻年限 recencyYears、"
+                + "適用性軸 applicabilityAxes、落點提示 targetScopeHint）；鍵一律 camelCase（Bridge 寫入的 snake_case 鍵在邊界轉換，D-76(2)）；值原樣") Map<String, Object> scope,
         @NotNull int scopeRev,
         @NotNull @Schema(description = "外環 FSM 鍵 research-<slug>[-g<N>]") String fsmProject,
         @NotNull int fsmGeneration,
@@ -73,7 +74,7 @@ public record ResearchProjectDetail(
         Project p = detail.project();
         return new ResearchProjectDetail(p.id().toString(), p.rpNo(), p.slug(), p.title(), p.depthLevel(), p.targetScope(), p.flowStep(),
                 p.flowPhase(), p.flowStatus(), p.flowDetail(), p.consoleProjectId() == null ? null : p.consoleProjectId().toString(),
-                p.createdBy(), Iso.of(p.createdAt()), Iso.of(p.updatedAt()), Iso.of(p.archivedAt()), p.topic(), p.scope(), p.scopeRev(),
+                p.createdBy(), Iso.of(p.createdAt()), Iso.of(p.updatedAt()), Iso.of(p.archivedAt()), p.topic(), Iso.camelKeys(p.scope()), p.scopeRev(),
                 p.fsmProject(), p.fsmGeneration(), ResearchFlow.from(detail.flow()), CountsDto.from(detail.counts()), detail.headPrdVersion(),
                 LastReviewDto.from(detail.lastReview()), p.parentResearchId() == null ? null : p.parentResearchId().toString());
     }

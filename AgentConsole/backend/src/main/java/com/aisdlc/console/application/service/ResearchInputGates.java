@@ -28,7 +28,9 @@ import java.util.regex.Pattern;
  * {@value #INVALID_REQUEST}，只有「產業層需要 Web 層、而 Web 層未啟用」這一類違規單獨出現時才是 {@code layer_unavailable}。
  *
  * <p>閘的目的是<b>不把明知會被拒的請求送到 Bridge</b>（零 Bridge 請求）：Bridge 另有自己的一份檢查（防禦縱深），兩者的規則以契約 §1.2 為準；Bridge 專屬的規則
- * （{@code in_scope} 至少一項、軸標籤取自登錄表、expectedDigests 須涵蓋四個檔）不在這裡複製。
+ * （{@code in_scope} 至少一項、軸標籤取自登錄表、{@code expectedDigests} 的鍵須在凍結的四檔內且與現檔相符〔422 {@code digest_mismatch}〕）不在這裡複製。
+ * Gate 0 的 {@code expectedDigests} 只比對送來的鍵（D-72），所以閘只要求「至少一鍵」：一個鍵都沒送是盲核，單獨出現時頂層 reason 為 {@code missing_digests}
+ * （與 Bridge 同名同義，兩層都會回它）。
  */
 public final class ResearchInputGates {
 
@@ -225,7 +227,8 @@ public final class ResearchInputGates {
         }
         Map<String, String> digests = input.expectedDigests();
         if (digests == null || digests.isEmpty()) {
-            check.add("expectedDigests", "required", "expectedDigests 為必填（相對 POSIX 路徑 → sha256:<64 位小寫十六進位>）");
+            check.add("expectedDigests", Check.MISSING_DIGESTS_RULE,
+                    "expectedDigests 至少要送一個鍵（相對 POSIX 路徑 → sha256:<64 位小寫十六進位>）；只比對送來的鍵，一個都不送等於盲核");
         } else {
             digests.forEach((path, digest) -> {
                 String field = "expectedDigests." + path;
@@ -373,6 +376,10 @@ public final class ResearchInputGates {
     private static final class Check {
 
         static final String WEB_LAYER_RULE = "web_layer_disabled";
+        static final String MISSING_DIGESTS_RULE = "missing_digests";
+        /** 規則單獨出現（全部違規都是同一條規則）時，頂層 reason 改取這個專屬識別字；其餘一律 {@code invalid_request}。 */
+        private static final Map<String, String> SOLE_RULE_REASONS = Map.of(WEB_LAYER_RULE, ErrorReasons.RESEARCH_LAYER_UNAVAILABLE,
+                MISSING_DIGESTS_RULE, ErrorReasons.RESEARCH_MISSING_DIGESTS);
 
         final List<Violation> violations = new ArrayList<>();
         private final List<Map<String, Object>> items = new ArrayList<>();
@@ -391,14 +398,18 @@ public final class ResearchInputGates {
         }
 
         UnprocessableException unprocessable() {
-            return new UnprocessableException("請求欄位未通過檢查（" + violations.size() + " 項）", INVALID_REQUEST, List.of(), violations,
+            return new UnprocessableException("請求欄位未通過檢查（" + violations.size() + " 項）", headlineReason(), List.of(), violations,
                     Map.of("violations", items));
         }
 
         /** 建立端點：400。全部違規都是「Web 層未啟用」＝{@code layer_unavailable}，否則 {@code invalid_request}。 */
         ValidationException validation() {
-            String reason = rules.stream().allMatch(WEB_LAYER_RULE::equals) ? ErrorReasons.RESEARCH_LAYER_UNAVAILABLE : INVALID_REQUEST;
-            return new ValidationException("請求欄位未通過檢查（" + violations.size() + " 項）", reason, violations, Map.of("violations", items));
+            return new ValidationException("請求欄位未通過檢查（" + violations.size() + " 項）", headlineReason(), violations, Map.of("violations", items));
+        }
+
+        private String headlineReason() {
+            String first = rules.get(0);
+            return rules.stream().allMatch(first::equals) ? SOLE_RULE_REASONS.getOrDefault(first, INVALID_REQUEST) : INVALID_REQUEST;
         }
     }
 }

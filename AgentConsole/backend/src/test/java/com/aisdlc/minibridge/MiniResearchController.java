@@ -273,7 +273,7 @@ class MiniResearchController {
                     "audit_trace_id", http.getHeader("X-Trace-Id")));
             case "return" -> json(200, map("gate_decision_id", UUID.randomUUID().toString(), "fsm_retry_count", 1, "escalated", false));
             case "cancel" -> json(200, map("stopped_run_id", null, "flow", flow("topic", "RESEARCHING", "CANCELLED")));
-            case "reconcile" -> json(200, map("consistent", true, "checks", List.of(map("name", "files", "status", "ok"))));
+            case "reconcile" -> json(200, MiniResearch.reconcileBody(MiniResearch.consistentReconcileChecks()));
             case "archive" -> {
                 research.jdbc().update("update console.research_projects set archived_at = now(), updated_at = now() where id = ?", id);
                 yield json(200, map("flow", flow("topic", "INGESTED", "IDLE"), "archived", true));

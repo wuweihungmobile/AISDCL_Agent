@@ -1,5 +1,7 @@
 package com.aisdlc.console.adapter.in.web.dto.research;
 
+import com.aisdlc.console.adapter.in.web.dto.SiKeyNames;
+
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -61,5 +63,14 @@ final class Iso {
 
     static List<String> strings(Object value) {
         return list(value).stream().filter(item -> item != null).map(Object::toString).toList();
+    }
+
+    /**
+     * Bridge 寫進資料庫的 snake_case 鍵（例：{@code issue_scope.json} 的鏡像 {@code in_scope}）→ camelCase（{@code inScope}）：整棵樹所有層級的物件鍵、值不動，
+     * 規則與其他 DTO 共用 {@link SiKeyNames#camelKeys} 的單一對映（D-76(2)：console-api 是防腐層，欄名在邊界統一，前端與 Bridge 各自維持自己的慣例）。
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> camelKeys(Map<String, Object> source) {
+        return (Map<String, Object>) SiKeyNames.camelKeys(source);
     }
 }

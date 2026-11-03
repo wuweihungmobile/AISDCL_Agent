@@ -575,7 +575,7 @@ export interface paths {
         put?: never;
         /**
          * 重試初始化／換世代（API-RP-20；OPERATOR 以上，換世代僅 ADMIN）
-         * @description 本文可省略。無 generation＝重試初始化（冪等；只在 flowStatus=FAILED 且 flowDetail 以 init_failed: 起頭時可呼叫，其餘＝409 stage_conflict，details.flowStatus／flowDetail，零寫入）。generation=next＝換世代（D-60）：放棄這一把外環鍵、另開新世代鍵取得全新 3 次預算；reason 必填（1～500 字；缺、空白、超長＝422 invalid_request）；FSM 現態須為 ESCALATION*（否則 409 fsm_state_conflict，details.current_state）。角色：換世代僅 ADMIN——VIEWER＝403 ACCESS_DENIED（授權鏈）、OPERATOR＝403 research_write_forbidden（服務層入口，Bridge 請求數 0）。200 回 {flow, fsmProject?, fsmGeneration?, gateDecisionId?}（後三者只有換世代有）。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
+         * @description 本文可省略。無 generation＝重試（冪等；flowStatus=FAILED 時可呼叫：初始化失敗〔flowDetail 以 init_failed: 起頭〕補建缺的目錄、檔案與外環鍵，stage 失敗或取消〔flowDetail 為失敗原因或 cancelled〕以 FSM 重衍生狀態、清掉失敗標記，D-81；其餘＝409 stage_conflict，details.flowStatus／flowDetail，零寫入）。generation=next＝換世代（D-60）：放棄這一把外環鍵、另開新世代鍵取得全新 3 次預算；reason 必填（1～500 字；缺、空白、超長＝422 invalid_request）；FSM 現態須為 ESCALATION*（否則 409 fsm_state_conflict，details.current_state）。角色：換世代僅 ADMIN——VIEWER＝403 ACCESS_DENIED（授權鏈）、OPERATOR＝403 research_write_forbidden（服務層入口，Bridge 請求數 0）。200 回 {flow, fsmProject?, fsmGeneration?, gateDecisionId?}（後三者只有換世代有）。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
          */
         post: operations["reinitResearchProject"];
         delete?: never;
@@ -655,7 +655,7 @@ export interface paths {
         put?: never;
         /**
          * Gate 0：核准 PRD 並凍結基線（API-RP-12；僅 ADMIN）
-         * @description 本文 {prdVersion（整數）, expectedDigests, reason?}；approver 取 JWT subject（本文型別沒有 approver 欄，多帶的被忽略）。Bridge 檢查序：權杖→prdVersion 為 head 且有通過的審查輪（409 review_not_passed）→expectedDigests 與現檔逐一比對（409 spec_digest_changed，details.pair）→FSM 現態為 HUMAN_PENDING 且無 ESCALATION（409 fsm_state_conflict／escalated）→有重試史才先走 SPEC_REGRESSION_CHECK→spec-frozen。成功 200 回 {gateDecisionId, stage, specDocDigests, fsmState}；非冪等：第二次＝409 fsm_state_conflict。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
+         * @description 本文 {prdVersion（整數）, expectedDigests（至少一鍵）, reason?}；approver 取 JWT subject（本文型別沒有 approver 欄，多帶的被忽略）。expectedDigests 只比對送來的鍵（D-72）：一個鍵都沒送＝422 missing_digests（盲核；由輸入閘回、零 Bridge 請求）；其餘檔案的摘要由 Bridge 於凍結當下自工作區計算並記入凍結記錄。Bridge 檢查序：權杖→prdVersion 為 head 且有通過的審查輪（409 review_not_passed）→送來的摘要與現檔逐鍵比對（422 digest_mismatch，details.files[{key,expected,current}]）→FSM 現態為 HUMAN_PENDING 且無 ESCALATION（409 fsm_state_conflict／escalated）→有重試史才先走 SPEC_REGRESSION_CHECK→spec-frozen。成功 200 回 {gateDecisionId, stage, specDocDigests, fsmState}；非冪等：第二次＝409 fsm_state_conflict。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
          */
         post: operations["approveResearchBaseline"];
         delete?: never;
@@ -2883,7 +2883,7 @@ export interface components {
             updatedAt: string;
             archivedAt: string | null;
             topic: string;
-            /** @description issue_scope.json 的鏡像（層開關、技術棧、檢索邊界…；Bridge 寫入的 snake_case 鍵原樣） */
+            /** @description issue_scope.json 的鏡像（層開關 layers、技術棧 techStack、檢索邊界 inScope／outOfScope、文獻年限 recencyYears、適用性軸 applicabilityAxes、落點提示 targetScopeHint）；鍵一律 camelCase（Bridge 寫入的 snake_case 鍵在邊界轉換，D-76(2)）；值原樣 */
             scope: {
                 [key: string]: unknown;
             };
@@ -3007,6 +3007,7 @@ export interface components {
             traceId: string;
         };
         ReconcileCheckDto: {
+            /** @description 檢查項識別（Bridge 的 id）：fsm_flow_mapping｜prd_sha256｜review_card｜evidence_matrix｜task_decomposition｜route_decision */
             name: string;
             /** @description ok｜drift｜NOT_EVALUABLE */
             status: string;
@@ -3030,7 +3031,7 @@ export interface components {
              * @description 要核准的 PRD 版號（整數 versionNo；須為 head 且有通過的審查輪）
              */
             prdVersion: number;
-            /** @description 相對 POSIX 路徑 → sha256:<64 位小寫十六進位>；須涵蓋 head PRD、00_research/evidence_matrix.md、00_research/issue_scope.json、01_specs/adr_draft.md */
+            /** @description 相對 POSIX 路徑 → sha256:<64 位小寫十六進位>；至少一鍵（零鍵＝422 missing_digests），只比對送來的鍵（D-72）：可送 head PRD（01_specs/PRD-v1.0.0.md 或 head 草稿路徑）、00_research/evidence_matrix.md、00_research/issue_scope.json、01_specs/adr_draft.md 的任意子集，不符＝422 digest_mismatch；其餘檔案的摘要由 Bridge 於凍結當下計算並記入凍結記錄 */
             expectedDigests: {
                 [key: string]: string;
             };
@@ -4204,6 +4205,8 @@ export interface components {
             claudeCli: components["schemas"]["CapabilityToolDto"];
             ghCli: components["schemas"]["CapabilityGhCliDto"];
             git: components["schemas"]["CapabilityToolDto"];
+            /** @description Bridge 解析到的 AISDLC_SDD 框架樹（Bridge 的 sdd_root）；解析不到或舊版 Bridge 沒回為 null */
+            sddRoot: string | null;
             /** @description 研究工作區根（Bridge 的 research_root；舊版 Bridge 以 root 回） */
             researchRoot: string;
             /** @description 分流用的腳手架根；未設為 null */
@@ -4212,6 +4215,7 @@ export interface components {
             repoWritable: boolean;
             /** @description Web 層（產業層檢索）是否啟用；false 時建立請求不可勾 industry */
             webLayerEnabled: boolean;
+            /** @description 有效的 FETCH 主機清單（Bridge 的 fetch_hosts＝部署基底加啟用中的 ADMIN 條目；停用即消失） */
             fetchHosts: string[];
         };
         CapabilityGhCliDto: {
@@ -8196,7 +8200,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description stage_conflict（重試初始化：flowStatus 不是 FAILED，或 flowDetail 不以 init_failed: 起頭；details.flowStatus、flowDetail；零寫入）｜fsm_state_conflict（換世代：FSM 現態不在 ESCALATION*；details.current_state） */
+            /** @description stage_conflict（重試：flowStatus 不是 FAILED——初始化失敗與 stage 失敗、取消的專案都可重試，D-81；details.flowStatus、flowDetail；零寫入）｜fsm_state_conflict（換世代：FSM 現態不在 ESCALATION*；details.current_state） */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8603,7 +8607,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description review_not_passed（head 版本沒有通過的審查輪）｜spec_digest_changed（檔案摘要與核准人看到的不同；details.pair）｜fsm_state_conflict（FSM 現態不是 HUMAN_PENDING，或已核准過——非冪等；details.expected_state、current_state）｜escalated（FSM 在 ESCALATION*） */
+            /** @description review_not_passed（head 版本沒有通過的審查輪）｜fsm_state_conflict（FSM 現態不是 HUMAN_PENDING，或已核准過——非冪等；details.expected_state、current_state）｜escalated（FSM 在 ESCALATION*） */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -8612,7 +8616,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容），或 Bridge 拒絕此請求（reason 逐字取自 Bridge：invalid_request｜terms_ack_required｜sanitization_failed｜layer_unavailable；details.violations） */
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）；一個摘要鍵都沒送（reason missing_digests：盲核；expectedDigests 至少要送一鍵，單獨出現時由輸入閘回、details.violations、零 Bridge 請求）；摘要不符（reason digest_mismatch，D-72：只比對 expectedDigests 送來的鍵；details.files[{key,expected,current}]，current 為 null＝該檔不存在或不在凍結的四檔內）；或 Bridge 拒絕此請求（reason 逐字取自 Bridge：invalid_request｜sanitization_failed；details.violations） */
             422: {
                 headers: {
                     [name: string]: unknown;

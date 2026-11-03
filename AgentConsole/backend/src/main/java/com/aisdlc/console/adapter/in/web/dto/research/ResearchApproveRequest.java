@@ -14,8 +14,9 @@ import java.util.Map;
 @Schema(name = "ResearchApproveRequest", description = "核准 PRD（Gate 0）：prdVersion（head 版號）、expectedDigests（核准人當時看到的檔案摘要）、reason")
 public record ResearchApproveRequest(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, minimum = "1", description = "要核准的 PRD 版號（整數 versionNo；須為 head 且有通過的審查輪）") Integer prdVersion,
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "相對 POSIX 路徑 → sha256:<64 位小寫十六進位>；須涵蓋 head PRD、00_research/evidence_matrix.md、"
-                + "00_research/issue_scope.json、01_specs/adr_draft.md") Map<String, String> expectedDigests,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "相對 POSIX 路徑 → sha256:<64 位小寫十六進位>；至少一鍵（零鍵＝422 missing_digests），只比對送來的鍵（D-72）："
+                + "可送 head PRD（01_specs/PRD-v1.0.0.md 或 head 草稿路徑）、00_research/evidence_matrix.md、00_research/issue_scope.json、01_specs/adr_draft.md 的任意子集，"
+                + "不符＝422 digest_mismatch；其餘檔案的摘要由 Bridge 於凍結當下計算並記入凍結記錄") Map<String, String> expectedDigests,
         @Schema(maxLength = 500, description = "核准理由（選填；有的話 1～500 字）") String reason) {
 
     public ApproveInput toInput() {

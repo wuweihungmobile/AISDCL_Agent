@@ -35,6 +35,10 @@ public final class MiniResearch {
     public static final String TOKEN = "mock-bridge-research-write-token-for-tests-0123456789";
     /** 部署基底的 FETCH 清單（PRD：arXiv、Semantic Scholar、GitHub API、Stack Exchange API 四組主機）。 */
     public static final List<String> FETCH_HOSTS = List.of("export.arxiv.org", "api.semanticscholar.org", "api.github.com", "api.stackexchange.com");
+    /** 能力探針的研究工作區根（{@code root}＝{@code research_root}；專案的 workspace_path 是它接上 slug）。 */
+    public static final String RESEARCH_ROOT = "/research-root";
+    /** 能力探針解析到的框架樹（{@code sdd_root}）。 */
+    public static final String SDD_ROOT = "/sdd-root";
 
     /** Bridge 端的寫入權杖：預設 {@link #TOKEN}；{@code null}＝沒設；其他值＝與 console-api 附的不符。 */
     public volatile String writeToken = TOKEN;
@@ -174,25 +178,75 @@ public final class MiniResearch {
         }
         items.addAll(allowlist);
         Map<String, Object> effective = new LinkedHashMap<>();
-        effective.put("FETCH", new ArrayList<>(FETCH_HOSTS));
-        effective.put("WEB", new ArrayList<String>());
-        for (Map<String, Object> entry : allowlist) {
-            if (Boolean.TRUE.equals(entry.get("enabled"))) {
-                @SuppressWarnings("unchecked")
-                List<String> hosts = (List<String>) effective.get((String) entry.get("list_kind"));
-                if (!hosts.contains((String) entry.get("host"))) {
-                    hosts.add((String) entry.get("host"));
-                }
-            }
-        }
+        effective.put("FETCH", effectiveHosts("FETCH"));
+        effective.put("WEB", effectiveHosts("WEB"));
         return map("items", items, "effective", effective);
     }
 
+    /** 某清單的有效主機：FETCH 為部署基底加啟用中的 ADMIN 條目（停用即消失）；WEB 只有 ADMIN 條目（基底為空）。 */
+    private List<String> effectiveHosts(String listKind) {
+        List<String> hosts = "FETCH".equals(listKind) ? new ArrayList<>(FETCH_HOSTS) : new ArrayList<>();
+        for (Map<String, Object> entry : allowlist) {
+            String host = (String) entry.get("host");
+            if (Boolean.TRUE.equals(entry.get("enabled")) && listKind.equals(entry.get("list_kind")) && !hosts.contains(host)) {
+                hosts.add(host);
+            }
+        }
+        return hosts;
+    }
+
     Map<String, Object> capabilitiesBody() {
-        return map("mode", mode, "root", "/research-root", "db", db, "claude_cli", map("ok", true, "version", "2.1.0"),
+        return capabilitiesBody(mode, db, webLayerEnabled, effectiveHosts("FETCH"));
+    }
+
+    /**
+     * Bridge 的能力探針本文（{@code GET /research/capabilities}）：<b>鍵集合與順序照真 Bridge 的 {@code app/research/settings.py}</b>——
+     * {@code research_info} 的八個鍵（{@code INFO_KEYS}）加契約 §2.1 的五個（{@code CAPABILITY_EXTRA_KEYS}；D-76(1)）。{@code ResearchBridgeShapeTest}
+     * 以原始碼逐鍵鎖住這個形狀（INT 一審的根因就是迷你 Bridge 自己猜形狀）。{@code fetch_hosts} 是有效 FETCH 清單（部署基底加啟用中的 ADMIN 條目）。
+     */
+    public static Map<String, Object> capabilitiesBody(String mode, boolean db, boolean webLayerEnabled, List<String> fetchHosts) {
+        return map("mode", mode, "root", RESEARCH_ROOT, "db", db, "claude_cli", map("ok", true, "version", "2.1.0"),
                 "gh_cli", map("ok", false, "authenticated", false), "git", map("ok", true, "version", "git version 2.39.5"),
-                "scaffold_root", null, "scaffold_templates", List.of(), "repo_writable", true, "web_layer_enabled", webLayerEnabled,
-                "fetch_hosts", FETCH_HOSTS);
+                "web_layer_enabled", webLayerEnabled, "scaffold_templates", List.of(),
+                "sdd_root", SDD_ROOT, "research_root", RESEARCH_ROOT, "scaffold_root", null, "repo_writable", true, "fetch_hosts", fetchHosts);
+    }
+
+    // ── 對帳回應（形狀照真 Bridge 的 app/research/gates/reconcile.py；README〈對帳結果契約〉）──────────────────────
+
+    /** 對帳項的識別，順序固定（Bridge 的 {@code CHECK_IDS}）。 */
+    public static final List<String> RECONCILE_CHECK_IDS = List.of("fsm_flow_mapping", "prd_sha256", "review_card", "evidence_matrix",
+            "task_decomposition", "route_decision");
+
+    /** 一筆漂移列（Bridge 的 {@code _drift}）：兩個摘要欄是 camelCase；缺檔時 {@code actualSha256} 為 null。 */
+    public static Map<String, Object> reconcileDrift(String kind, String path, String expectedSha256, String actualSha256) {
+        return map("kind", kind, "path", path, "expectedSha256", expectedSha256, "actualSha256", actualSha256);
+    }
+
+    /** 一個對帳項（Bridge 的 {@code file_check}／{@code mapping_check}／{@code absent_check}）：識別鍵是 {@code id}，不是 {@code name}。 */
+    public static Map<String, Object> reconcileCheck(String id, String status, boolean present, String detail, List<Map<String, Object>> drift) {
+        return map("id", id, "status", status, "present", present, "detail", detail, "drift", drift);
+    }
+
+    /** 全部一致的六個對帳項：前四項有登記（{@code present=true}）、P0 沒有的拆解與分流兩項兩側皆缺席。 */
+    public static List<Map<String, Object>> consistentReconcileChecks() {
+        List<Map<String, Object>> checks = new ArrayList<>();
+        for (String id : RECONCILE_CHECK_IDS) {
+            checks.add(reconcileCheck(id, "ok", !"task_decomposition".equals(id) && !"route_decision".equals(id), "", List.of()));
+        }
+        return checks;
+    }
+
+    /** 對帳回應（Bridge 的 {@code reconcile_result}）：{@code consistent} 僅在全部 ok 時為真；{@code driftCount}＝非 ok 項的漂移列總數（量不到計 1）。 */
+    public static Map<String, Object> reconcileBody(List<Map<String, Object>> checks) {
+        boolean consistent = true;
+        int driftCount = 0;
+        for (Map<String, Object> check : checks) {
+            boolean ok = "ok".equals(check.get("status"));
+            consistent &= ok;
+            int rows = ((List<?>) check.get("drift")).size();
+            driftCount += rows > 0 ? rows : (ok ? 0 : 1);
+        }
+        return map("consistent", consistent, "driftCount", driftCount, "checks", checks);
     }
 
     // ── 事件帳（測試把迷你 Bridge 當事件的唯一寫入者）──────────────────────────────────────────

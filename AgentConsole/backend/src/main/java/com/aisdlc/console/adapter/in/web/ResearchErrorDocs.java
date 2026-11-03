@@ -29,6 +29,15 @@ final class ResearchErrorDocs {
     private static final String UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容），或 Bridge 拒絕此請求"
             + "（reason 逐字取自 Bridge：invalid_request｜terms_ack_required｜sanitization_failed｜layer_unavailable；details.violations）";
 
+    /**
+     * Gate 0 核准的 422（D-72：只比對前端送來的鍵）：輸入閘、一個鍵都沒送（missing_digests：盲核，單獨出現時由輸入閘回、零 Bridge 請求）、摘要不符（digest_mismatch；
+     * details.files[{key,expected,current}]，current 為 null＝該檔不存在或不在凍結的四檔內；Bridge 逐字轉出）。取代原契約的 409 spec_digest_changed。
+     */
+    private static final String APPROVE_UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）；"
+            + "一個摘要鍵都沒送（reason missing_digests：盲核；expectedDigests 至少要送一鍵，單獨出現時由輸入閘回、details.violations、零 Bridge 請求）；"
+            + "摘要不符（reason digest_mismatch，D-72：只比對 expectedDigests 送來的鍵；details.files[{key,expected,current}]，current 為 null＝該檔不存在或不在凍結的四檔內）；"
+            + "或 Bridge 拒絕此請求（reason 逐字取自 Bridge：invalid_request｜sanitization_failed；details.violations）";
+
     /** 寫入端點共用的上游失敗與輸入閘。 */
     private static Map<String, String> writeFailures(String unprocessable) {
         return Map.of("422", unprocessable, "502", UNREACHABLE, "503", DISABLED, "504", TIMEOUT);
@@ -42,11 +51,11 @@ final class ResearchErrorDocs {
                     + "前置條件未滿足〔details.unmet 逐條列出 rule 與說明〕、或全站並行上限〔details.cause=max_concurrent_runs、limit、active〕；不排隊、不重試）"
                     + "｜fsm_state_conflict（details.current_state；afterEscalation 但 FSM 仍在 ESCALATION*）｜escalated（外環 FSM 在 ESCALATION*，details.recovery 帶恢復指令）"
                     + "｜spec_frozen（Gate 0 之後）",
-            "POST /api/v1/research/projects/{id}/approve", "review_not_passed（head 版本沒有通過的審查輪）｜spec_digest_changed（檔案摘要與核准人看到的不同；details.pair）"
+            "POST /api/v1/research/projects/{id}/approve", "review_not_passed（head 版本沒有通過的審查輪）"
                     + "｜fsm_state_conflict（FSM 現態不是 HUMAN_PENDING，或已核准過——非冪等；details.expected_state、current_state）｜escalated（FSM 在 ESCALATION*）",
             "POST /api/v1/research/projects/{id}/return", "fsm_state_conflict（FSM 現態不是 HUMAN_PENDING；details.current_state）｜escalated（FSM 在 ESCALATION*）",
             "POST /api/v1/research/projects/{id}/archive", "stage_conflict（有進行中的 stage；details.reason=stage_running）",
-            "POST /api/v1/research/projects/{id}/reinit", "stage_conflict（重試初始化：flowStatus 不是 FAILED，或 flowDetail 不以 init_failed: 起頭；"
+            "POST /api/v1/research/projects/{id}/reinit", "stage_conflict（重試：flowStatus 不是 FAILED——初始化失敗與 stage 失敗、取消的專案都可重試，D-81；"
                     + "details.flowStatus、flowDetail；零寫入）｜fsm_state_conflict（換世代：FSM 現態不在 ESCALATION*；details.current_state）",
             "POST /api/v1/research/allowlist", "allowlist_exists：同 listKind 與 host 已有條目");
 
@@ -62,7 +71,7 @@ final class ResearchErrorDocs {
             Map.entry("PUT /api/v1/research/projects/{id}/prd", writeFailures(UNPROCESSABLE)),
             Map.entry("POST /api/v1/research/projects/{id}/stages/{stage}", writeFailures("stage 不在 research｜draft｜review｜revise｜iterate｜tcs-draft（reason invalid_request），"
                     + "或 Bridge 拒絕此請求（reason 逐字取自 Bridge；details.violations）")),
-            Map.entry("POST /api/v1/research/projects/{id}/approve", writeFailures(UNPROCESSABLE)),
+            Map.entry("POST /api/v1/research/projects/{id}/approve", writeFailures(APPROVE_UNPROCESSABLE)),
             Map.entry("POST /api/v1/research/projects/{id}/return", writeFailures(UNPROCESSABLE)),
             Map.entry("POST /api/v1/research/projects/{id}/cancel", Map.of("502", UNREACHABLE, "503", DISABLED, "504", TIMEOUT)),
             Map.entry("POST /api/v1/research/projects/{id}/reconcile", Map.of("502", UNREACHABLE, "503", DISABLED, "504", TIMEOUT)),
