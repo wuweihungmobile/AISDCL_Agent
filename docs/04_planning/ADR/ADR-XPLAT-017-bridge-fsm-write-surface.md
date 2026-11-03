@@ -60,7 +60,7 @@ ADR-XPLAT-016 §3.5 把 Bridge 對 FSM 的寫入收斂為 5 個動詞（`spec-fr
 - **再開症狀**：Bridge 對 `transition` 的錯誤判讀出現一次誤判（→ 採替代案 3）；掌舵者要求 Console 內恢復 ESCALATION（→ 需修憲：Rule 9 禁令 6）。
 
 ### D3　Gate 0 載具：`POST /research/projects/{id}:approve-baseline`
-- **決策**：新端點（Stage 名 `Gate-0`；`docs[]`（相對 `--root`＝研究工作區）＝`<工作區>/01_specs/PRD-v1.0.0.md`＋`<工作區>/00_research/evidence_matrix.md`＋`<工作區>/00_research/issue_scope.json`＋`<工作區>/01_specs/adr_draft.md`，**不要求 TCS**；`--digest --root <工作區>`）。檢查序（先中者定案）：①權杖 ②`prd_version` 為 head 且有 `passed=true` 的審查輪（否則 409 `review_not_passed`）③`expected_digests` 與現檔逐一比對（不符 409 `spec_digest_changed`，`details.pair=expected_vs_file`）④FSM 現態＝HUMAN_PENDING（否則 409 `fsm_state_conflict`，帶 `expected_state`）⑤〈外環鍵有重試史 `retry_history.SCG_VALIDATION.current_count>0`〉先 `transition --to SPEC_REGRESSION_CHECK`（規則＝`SDD_FSM_ENGINE.md:374-378`、`SDD_SPEC_FIRST_GATE.md:210-213`；D-25）⑥`spec-frozen --stage Gate-0 … --approver <JWT subject> --json`。`approver`＝JWT subject，由 console-api 轉傳，Bridge 驗非空、非保留字（`bridge`／`agent`／`system`）、長度 1 至 100 且符合 `^[A-Za-z0-9._@-]+$`；**任何 agent、Bridge 排程或 CLI 不得呼叫本端點**（D-19；AST 鎖）。核准後 `PRD-v1.0.0.md` 為核准當下 head 版本的位元組相同複本；非冪等（第二次 409 `fsm_state_conflict`）；既有 `:freeze` 契約（`routers/sdd.py:336-364`）不改、留給 Stage-2 TCS 凍結。
+- **決策**：新端點（Stage 名 `Gate-0`；`docs[]`（相對 `--root`＝研究工作區）＝`<工作區>/01_specs/PRD-v1.0.0.md`＋`<工作區>/00_research/evidence_matrix.md`＋`<工作區>/00_research/issue_scope.json`＋`<工作區>/01_specs/adr_draft.md`，**不要求 TCS**；`--digest --root <工作區>`）。檢查序（先中者定案）：①權杖 ②`prd_version` 為 head 且有 `passed=true` 的審查輪（否則 409 `review_not_passed`；Bridge 以版號為憑——最後一輪審查通過、其 `prd_version_no` 等於最新 DRAFT 版號、且 `prd_version` 等於該版號；前端另以 prd sha256 判「審查是否過期」只作提示，兩判準並存、以 Bridge 為權威；D-83）③`expected_digests` **只比對送來的鍵**（至少一鍵，零鍵 422 `missing_digests`；不符 422 `digest_mismatch`，`details.files[{key,expected,current}]`；缺鍵不算錯——四份文件的摘要一律由 `spec-frozen --digest --root` 於凍結當下自工作區計算並記入凍結記錄；D-72）④FSM 現態＝HUMAN_PENDING（否則 409 `fsm_state_conflict`，帶 `expected_state`；ESCALATION 時 409 `escalated`）⑤〈外環鍵有重試史 `retry_history.SCG_VALIDATION.current_count>0`〉先 `transition --to SPEC_REGRESSION_CHECK`（規則＝`SDD_FSM_ENGINE.md:374-378`、`SDD_SPEC_FIRST_GATE.md:210-213`；D-25）⑥`spec-frozen --stage Gate-0 … --approver <JWT subject> --json`。`approver`＝JWT subject，由 console-api 轉傳，Bridge 驗非空、非保留字（`bridge`／`agent`／`system`）、長度 1 至 100 且符合 `^[A-Za-z0-9._@-]+$`；**任何 agent、Bridge 排程或 CLI 不得呼叫本端點**（D-19；AST 鎖）。核准後 `PRD-v1.0.0.md` 為核准當下 head 版本的位元組相同複本；非冪等（第二次 409 `fsm_state_conflict`）；既有 `:freeze` 契約（`routers/sdd.py:336-364`）不改、留給 Stage-2 TCS 凍結。
 - **替代案**：在 `:freeze` 放寬 `missing_tcs`；Gate 0 改走 headless SDD session。
 - **WHY**：D-06 要的語意（`spec-frozen`）不變，只換載具；放寬限定在新端點內可使既有 AT 不退步。
 - **再開症狀**：Gate 0 的 `frozen_stages[-1].spec_doc_digests` 與 `research_gate_decisions.frozen_digests` 出現一次不一致。
@@ -123,6 +123,7 @@ ADR-XPLAT-016 §3.5 把 Bridge 對 FSM 的寫入收斂為 5 個動詞（`spec-fr
 | **`SDD_ENABLE_AUTO_RECOVERY`** | **`0`（僅外環鍵的呼叫）** | D4 |
 | `PYTHONPATH`／`PYTHONUTF8`／`PYTHONDONTWRITEBYTECODE` | `<SDD>`／`1`／`1` | 沿用 |
 | 其餘 | 移除所有 `BRIDGE_*`、`SDD_*`、`PYTHONPATH` 後再設 | 權杖不進子行程 |
+| 研究 stage run 的引擎子行程（非 FSM CLI；`ResearchRunHandle._child_env`） | 剝除 `BRIDGE_*`、`SDD_*`、`MINIMAX_*` 三個前綴與 `PYTHONPATH`、`GITHUB_TOKEN`、`GH_TOKEN`、`GH_ENTERPRISE_TOKEN`；請求 `config_overrides` 釘 `minimax.enable_kernel_brain=false` | D-79：研究 run 的判定全由 gate_cli evaluator 承擔，引擎 Brain 外呼既是資料出口也是無意義延遲；兩道各自獨立釘（環境剝除與設定釘關）；失敗路徑走規則引擎、零外呼 |
 | cwd／逾時／序列化 | `<SDD>`／20 s／以 `(狀態目錄, 鍵)` 為鍵的互斥鎖 | 沿用；子行程一律經 `procutil.popen_platform_kwargs()` |
 
 ## 5. 測試鎖
@@ -169,3 +170,16 @@ sdd gate --project <I> --must-exist --gate PR_REVIEW --result FAIL --reason "SCR
 2. **新增附錄 F（標題與內文）**：「附錄 F　後續 ADR 指標——ADR-XPLAT-017（Bridge 研究寫入面：雙鍵模型、FSM 動詞擴充、Gate-0 端點、框架側白名單）補充本 ADR §3.5 與 §11，不取代任何決策；§11 白名單本文不改，框架鍵 `sdd-research-to-prd` 的可改檔以 ADR-XPLAT-017 §D7 為準。」
 3. **`SDD_AUTOCLAUDE_BRIDGE.md`**（框架鍵視窗做）：§8.0 鍵前綴表加 `research`（註明「外環鍵，狀態目錄在研究工作區，不屬四個子專案標準目錄」）、新增 §9「Research-to-PRD 路徑（Console／Bridge）」。
 4. **`AgentConsole/CLAUDE.md` 鐵律 7**（主控）：白名單句尾加「ADR-XPLAT-017 §D7（僅 `sdd-research-to-prd` 鍵視窗）」。
+
+---
+
+## 勘誤記錄（凍結後的訂正；條文已原地訂正，被訂正的原文逐字保留於本表；只涵蓋 ResearchToPRD 研究面相關段；走 `spec-refreeze`）
+
+> 日期一律 2026-11-03（表內日期欄只寫月-日）；來源＝P0 實作期的勘誤候選（鍵 `agentconsole-research-to-prd-p0`）與主控裁決 D-72、D-79、D-83。
+
+<!-- 日期欄只寫月-日、不寫四位數年份：本表的列常同時引用含 passed／skipped 字樣的 reason 識別字，完整年份會讓 tools/check_pytest_baseline_sites.py 把該列誤判成測試基線數字，而它的站點棘輪不吃行內豁免標記；改寫識別字則失去可 grep 性，故改日期格式（年份見上方首句）。 -->
+
+| 號 | 日期 | 條文 | 原文 → 改文 | 來源包／裁決號 |
+|---|---|---|---|---|
+| 1 | 11-03 | §D3 Gate 0 檢查序 ③（與 ② 加註、④ 加 `escalated`） | 原文：「③`expected_digests` 與現檔逐一比對（不符 409 原 spec_digest_changed，`details.pair=expected_vs_file`）④FSM 現態＝HUMAN_PENDING（否則 409 `fsm_state_conflict`，帶 `expected_state`）」 → 改文：③只比對送來的鍵（至少一鍵；零鍵 422 `missing_digests`；不符 422 `digest_mismatch`，`details.files[{key,expected,current}]`；缺鍵不算錯，四份文件摘要由 `spec-frozen --digest --root` 於凍結當下計算並記入凍結記錄）；④ESCALATION 時 409 `escalated`；② 加註 Bridge 以版號為憑、前端 sha256 判過期只作提示（兩判準並存、Bridge 為權威） | FE-C E3／P1、BR-C、FIX-API、FIX-BR 勘誤 10；D-72、D-83 |
+| 2 | 11-03 | §4 Bridge 子行程環境（新增研究 stage run 引擎子行程列） | 原文：表只列 FSM CLI 子行程（「其餘＝移除所有 `BRIDGE_*`、`SDD_*`、`PYTHONPATH` 後再設」），沒有研究 stage run 的引擎子行程環境與引擎 Brain 設定 → 改文：新增一列：引擎子行程剝除 `BRIDGE_*`、`SDD_*`、`MINIMAX_*` 前綴與 `PYTHONPATH`、`GITHUB_TOKEN`、`GH_TOKEN`、`GH_ENTERPRISE_TOKEN`；`config_overrides` 釘 `minimax.enable_kernel_brain=false` | D-79（INT-07）；FIX-BR；`orchestrator.py` `_STRIPPED_PREFIXES`／`_STRIPPED_NAMES` |

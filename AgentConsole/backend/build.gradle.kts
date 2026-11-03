@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
@@ -84,6 +85,17 @@ dependencies {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	// ResearchReasonsTest 與 ResearchBridgeShapeTest 直接讀 repo 內的規格文件與另兩棵樹的原始碼（契約、Architecture、前端常數、Bridge 常數）
+	// 當三方雙向鎖；Gradle 看不到這些輸入 ⇒ 只改文件再跑 test 會 UP-TO-DATE，把「勘誤落地即轉紅」的警報快取掉（PKG-ERRATA 2026-11-03 實測）。
+	// 在此宣告為測試輸入：文件或另兩棵樹一變，test 任務就重跑。路徑相對本專案目錄（AgentConsole/backend）。
+	inputs.files(
+		"../docs/02_architecture/API_Contract_ResearchToPRD.md",
+		"../docs/02_architecture/Architecture.md",
+		"../frontend/lib/domain/research.ts",
+		"../frontend/lib/api/reasons.ts",
+	).withPropertyName("crossTreeSpecSources").withPathSensitivity(PathSensitivity.RELATIVE)
+	inputs.files(fileTree("../engine-bridge/app") { include("**/*.py") })
+		.withPropertyName("bridgeSources").withPathSensitivity(PathSensitivity.RELATIVE)
 	// 根 CLAUDE.md〈GitHub CI/CD 一律多 CPU 模式〉：測試分 2 個 JVM fork 平行（每 fork 各起一個 Testcontainers PG，
 	// 再多會讓 PG 容器數隨核數成長而拖慢；CI runner 4 核實測足夠）。
 	maxParallelForks = 2

@@ -170,7 +170,7 @@ public final class ErrorReasons {
     // 前綴一律 RESEARCH_（不得以 ISSUE_、BACKUP_ 起頭，否則兩個既有契約測試的集合鎖紅；TCS §4 #26）。值為英文識別字、逐字；Bridge 的 reason 由 console-api 原樣透傳。
     // 本節的集合＝console-api 實際會回（或自 Bridge 逐字轉出）的研究 reason：P0 契約的十七個加 Bridge 專屬的五個（見本節末）；`invalid_request`（輸入閘，400／422）是區域常數
     // （ResearchInputGates.INVALID_REQUEST）、不入本類別與契約表（先例 SiWriteGates）。契約原列的 `spec_digest_changed`（409）已被 D-72 的 `digest_mismatch`／`missing_digests`（422）取代、
-    // Bridge 對研究端點不再回它，所以不再是本類別的常數（契約與前端的清單在勘誤批次同步前仍列它，ResearchReasonsTest 以「已被取代」名單明載）。
+    // Bridge 對研究端點不再回它，所以不再是本類別的常數（契約與前端已於 2026-11-03 勘誤落地移除它——契約〈勘誤記錄〉第 1、2 列；ResearchReasonsTest 以退役名單鎖住它不得再出現於後端、契約、前端任一處）。
     /** backend 或 Bridge 沒有設定研究寫入權杖（503）：研究寫入面整個停用。 */
     public static final String RESEARCH_WRITE_DISABLED = "research_write_disabled";
     /**
@@ -209,8 +209,8 @@ public final class ErrorReasons {
     /** 研究呼叫讀取逾時（504；POST 不重試，結果不明）。 */
     public static final String RESEARCH_BRIDGE_TIMEOUT = "bridge_timeout";
 
-    // ── Bridge 專屬的五個 reason（契約 API_Contract_ResearchToPRD §0.2／§3 的 reason 清單與前端 RESEARCH_REASONS 尚未列入——勘誤候選「契約 §0.2／§1.4 reason 清單補列」）──
-    // 值逐字取自 Bridge（console-api 原樣透傳）；契約與前端補列前，ResearchReasonsTest 以「已知待補列」名單明載這五個，補列後該名單必須清空。
+    // ── Bridge 專屬的五個 reason（契約 API_Contract_ResearchToPRD §0.2 第 5a／7a／7b／8a／8b 列與前端 RESEARCH_REASONS 已於 2026-11-03 勘誤落地列入——契約〈勘誤記錄〉第 1 列）──
+    // 值逐字取自 Bridge（console-api 原樣透傳）；ResearchReasonsTest 以 22 個 P0 reason 做三方雙向鎖（後端常數＝前端 RESEARCH_REASONS＝契約 §0.2＝Architecture §11.1），任一處漏列即紅。
     /** allowlist 已有同 list_kind 與 host 的條目（409）。 */
     public static final String RESEARCH_ALLOWLIST_EXISTS = "allowlist_exists";
     /** 專案初始化的某一步失敗（Bridge 回 502；{@code details.step}＝workspace｜files｜fsm）：游標已標 FAILED，以重試初始化補建。 */

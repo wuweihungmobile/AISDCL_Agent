@@ -973,7 +973,7 @@ Push-Location AgentConsole; docker compose -f docker-compose.dev.yml down; Pop-L
 | `BRIDGE_RESEARCH_FETCH_ALLOWLIST` | Bridge | Bridge 原生抓取主機基底（逗號分隔）；預設 `export.arxiv.org,arxiv.org,api.semanticscholar.org,api.github.com,api.stackexchange.com`（D-17）；有效清單＝本變數 ∪ 啟用中的 ADMIN 條目 |
 | `BRIDGE_RESEARCH_WEB_ALLOWLIST` | Bridge | headless WebSearch／WebFetch 的 `allowed_domains` 基底；**預設空＝Web 層關閉**（產業層需 ADMIN 明列）；有效清單＝本變數 ∪ 啟用中的 ADMIN 條目 |
 | `BRIDGE_RESEARCH_MAX_CONCURRENT_RUNS` | Bridge | 同時 stage run 數；預設 1（額度保守；D-27） |
-| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | Bridge | 寫入 `config_overrides.playbook.step_timeout_seconds`；預設 1200 |
+| `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS` | Bridge | 寫入 `config_overrides.playbook.step_timeout_seconds`；預設 600（D-75：與引擎 Kernel 路徑固定的步驟逾時同值，Bridge 的看門狗才可能先響；真實步驟需要更久時須讓引擎 Kernel 路徑讀該設定，列 P1 候選；原預設 1200 大於引擎上限、是假保護） |
 | `BRIDGE_RESEARCH_CLAUDE_COMMAND` | Bridge | `claude.command`；Docker E2E＝`aisdlc-mock-claude` |
 | `BRIDGE_RESEARCH_FETCH_MAX_BYTES`／`BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS` | Bridge | 單檔位元組上限與逾時；預設 5 MiB／20 s |
 | `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` | 由 Bridge 寫入每個 stage run 的請求 `env`（非部署變數） | headless `claude -p` 背景等待上限（DEF-200-575）；值＝`BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS`×1000，與步驟牆鐘同源、不另立數字；`_ENV_DENY` 不含它（`security.py:41-50`）；步驟 prompt 另禁背景任務與子代理 |
@@ -1093,7 +1093,7 @@ Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 | `POST /research/projects` | P0 | 201 | 503 `research_write_disabled`／`research_requires_db`；403 `research_write_forbidden`；409 `slug_in_use`；422 |
 | `POST /research/projects/{id}/stages/{stage}:start` | P0（`research/draft/review/revise/iterate`）、P1（`tcs-draft`） | 202 `{stageRunId}` | 409 `stage_conflict`／`fsm_state_conflict`／`escalated`；503 `db_blocked` |
 | `PUT /research/projects/{id}/prd` | P0 | 201 新版 | 409 `prd_version_conflict`／`spec_frozen` |
-| `POST /research/projects/{id}:approve-baseline`、`:return` | P0 | 200 | 409 `fsm_state_conflict`／`spec_digest_changed`／`review_not_passed`／`escalated`；422 `sanitization_failed` |
+| `POST /research/projects/{id}:approve-baseline`、`:return` | P0 | 200 | 409 `fsm_state_conflict`／`review_not_passed`／`escalated`；422 `digest_mismatch`／`missing_digests`（僅 `:approve-baseline`：只比對送來的鍵、零鍵拒絕；D-72）、`sanitization_failed` |
 | `POST /research/projects/{id}:route-preview`、`:route` | P1 | 200／202 | 409 `route_conflict`／`branch_exists`；422 `target_not_empty`／`public_confirmation_required`／`route_unsupported_in_deployment`；502 `route_step_failed`（帶 `failureStep`） |
 | `POST /research/projects/{id}:scr` | P1 | 202／201 | 409 `scr_limit`／`scr_open` |
 | `POST /research/projects/{id}:gates`、`:tag`、`:pr` | P2 | 200／201 | 409 `tag_exists`；422 |
@@ -1152,11 +1152,11 @@ Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 | `POST …/{id}/approve`、`POST …/{id}/return` | **ADMIN** | 200 | Gate 0；`approver`＝JWT subject（不收請求內 approver） |
 | `POST …/{id}/route/preview` | O+ | 200 | 零副作用 |
 | `POST …/{id}/route`、`…/gates`、`…/delivery/tag`、`…/delivery/pr` | **ADMIN** | 202／200／201 | P1／P2 |
-| `POST …/{id}/scr`、`…/cancel`、`…/reconcile`、`…/reinit`（重試初始化）、`…/archive`、`…/restore` | O+ | 200／202 | `reinit`（不帶 `generation`）只在 `flow_status=FAILED` 且 `flow_detail` 以 `init_failed:` 起頭時可呼叫，其餘 409 `stage_conflict`（`details.flowStatus`／`flowDetail`）、零寫入（D-65） |
+| `POST …/{id}/scr`、`…/cancel`、`…/reconcile`、`…/reinit`（重試初始化）、`…/archive`、`…/restore` | O+ | 200／202 | `reinit`（不帶 `generation`）只在 `flow_status=FAILED` 時可呼叫（D-81 放寬 D-65：初始化失敗補建；stage 失敗或取消只清失敗標記並依 FSM 現態重衍生，D-77），其餘 409 `stage_conflict`（`details.flowStatus`／`flowDetail`）、零寫入；補建仍失敗 502 `init_failed` |
 | `POST …/{id}/reinit` 帶 `generation:"next"`（換世代） | **ADMIN**（由 `ResearchCommandService` 檢查；matcher 無法依本文分流，D-64） | 200 | D-60；FSM 現態須為 ESCALATION*、理由必填；VIEWER 回 403 `ACCESS_DENIED`（授權鏈）、OPERATOR 回 403 `research_write_forbidden`（服務層），兩者 Bridge 請求數 0 |
 | `GET／POST /api/v1/research/allowlist`、`PATCH …/{id}` | V+／**ADMIN**／**ADMIN** | 200／201／200 | D-17 |
 
-`OpenApiIT` 的 `EXPECTED` 路徑／操作計數、`schema.d.ts`、`ErrorResponseDocumentation`（先例 `:49`、`:141`）同 commit 更新；計數以當下實測為準。**研究 `reason`**（雙向鎖：前端 `lib/api/reasons.ts` 或區域常數、backend `ErrorReasons`、契約表）：`research_write_disabled`(503)、`research_write_forbidden`(403)、`research_requires_db`(503)、`db_blocked`(503)、`research_not_found`(404)、`slug_in_use`(409)、`stage_conflict`(409)、`prd_version_conflict`(409)、`review_not_passed`(409)、`spec_digest_changed`(409)、`fsm_state_conflict`(409)、`escalated`(409)、`spec_frozen`(409)、`route_conflict`(409)、`branch_exists`(409)、`scr_open`(409)、`scr_limit`(409)、`decomposition_stale`(409)、`tag_exists`(409)、`layer_unavailable`(400)、`sanitization_failed`(422)、`target_not_empty`(422)、`public_confirmation_required`(422)、`route_unsupported_in_deployment`(422)、`terms_ack_required`(422)。
+`OpenApiIT` 的 `EXPECTED` 路徑／操作計數、`schema.d.ts`、`ErrorResponseDocumentation`（先例 `:49`、`:141`）同 commit 更新；計數以當下實測為準。**研究 `reason`**（雙向鎖：前端 `lib/api/reasons.ts` 或區域常數、backend `ErrorReasons`、契約表）：`research_write_disabled`(503)、`research_write_forbidden`(403)、`research_requires_db`(503)、`db_blocked`(503)、`research_not_found`(404)、`slug_in_use`(409)、`allowlist_exists`(409)、`stage_conflict`(409)、`prd_version_conflict`(409)、`review_not_passed`(409)、`fsm_state_conflict`(409)、`escalated`(409)、`spec_frozen`(409)、`route_conflict`(409)、`branch_exists`(409)、`scr_open`(409)、`scr_limit`(409)、`decomposition_stale`(409)、`tag_exists`(409)、`layer_unavailable`(400)、`sanitization_failed`(422)、`target_not_empty`(422)、`public_confirmation_required`(422)、`route_unsupported_in_deployment`(422)、`terms_ack_required`(422)、`missing_digests`(422)、`digest_mismatch`(422)、`bridge_unreachable`(502)、`init_failed`(502)、`not_implemented`(502)、`bridge_timeout`(504)。其中 `missing_digests`／`digest_mismatch` 取代原列的 409 摘要不符（Gate 0 核准只比對送來的鍵；D-72）；`bridge_unreachable`／`bridge_timeout` 是研究呼叫的連線類失敗（契約 §0.2 第 8 列）；`init_failed`／`not_implemented` 是 Bridge 回報的上游失敗（後者 Bridge 回 501、console-api 轉 502；契約 §0.2 第 8a、8b 列）。
 
 ### 11.2 DTO 欄位表（camelCase；取自 PRD §5／§6）
 
@@ -1994,7 +1994,7 @@ WHERE es.status IN ('RETRYING', 'FAILED');
 | L-R7 | 狀態檔 load-modify-save 無跨行程鎖（同 BRIDGE §6.10:301） | 研究面只由 Bridge 單行程寫外環鍵；人在 SDD session 手動並寫＝已知競態 |
 | L-R8 | 軌道 B `gh repo create` 與建 PR 需操作者本機 `gh` 已登入或請求帶 token | `capabilities.ghCli`；V-R8 |
 | L-R9 | `research_events` 與 `research_projects.last_event_seq` 配號在單一 Bridge 行程下安全；多實例 Bridge 需改用序列或 advisory lock | 現行單 worker（`Dockerfile:57`）；再開症狀：Bridge 水平擴展 |
-| L-R10 | Stack Exchange 速率限制官方數值未現查（官方頁無法抓取；arXiv、GitHub、Semantic Scholar 已現查並回填 PRD NFR-R2P-03-6） | 保守節流初值（非事實宣稱）＋遵守伺服器回傳限流訊號；V-R9 殘餘落證 |
+| L-R10 | Stack Exchange 速率限制官方數值原先未現查（官方頁無法抓取）；2026-11-03 V-R9 已以直接 GET 官方頁現查並回填 PRD NFR-R2P-03-6（arXiv、GitHub、Semantic Scholar 先前已現查） | 3 秒為保守取值（不是官方數字）＋遵守伺服器回傳限流訊號；V-R9 已結 |
 | L-R11 | 框架對 HUMAN_PENDING 的 72 小時提醒／168 小時升級只由 hooks SessionStart 執行（`SDD_FSM_ENGINE.md:433-434`；`.claude/hooks/session_start.py:279`）；Console 路徑沒有 hooks（D-48(3)） | P0 以 UI 顯示等待時長＋滿 72 小時橫幅提醒，不轉 REMINDER、不自動升級（PRD AC-R2P-09-10、NFR-R2P-06-5）；再開症狀：掌舵者回報因 Gate 0 久未核准而錯過提醒 |
 | L-R12 | ESCALATION 人工恢復後的重試計數不歸零：引擎的 `resume-from-escalation` 不動 retry 計數（只有 `gate PASS` 與 `spec-frozen` 歸零）；`increment_retry` 見計數已達上限時把 `current_count` 夾在上限，並在該筆歷史的 `failure_reason` 標「(tamper detected: …)」字樣——這是引擎對「已達上限後再 FAIL」的既有標記（`state_loader.py:211-269`），不是研究面被竄改 | 恢復後至多再得一次審查（PASS 歸零、FAIL 立即再 ESCALATION；D-60）；歷史列照引擎原文顯示、不改寫也不隱藏；全新預算＝換世代（API-RP-20 `generation:"next"`）；再開症狀：掌舵者要求恢復後重新得 3 輪（須先改引擎 `state_loader.py` 與 TLA+，或走換世代） |
 

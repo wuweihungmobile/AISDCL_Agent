@@ -22,36 +22,30 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 研究 reason 的三方雙向鎖（TCS-ResearchToPRD-P0 AT-960-5-6；契約 API_Contract_ResearchToPRD §0.2、Architecture §11.1 的研究 reason 表、前端 {@code lib/domain/research.ts} 的
- * {@code RESEARCH_REASONS}）。為什麼重要：reason 是前端據以顯示說明與決定可否重試的機器可讀欄位——後端改了字面而前端、契約沒跟著改，使用者看到的是「未知錯誤」；
- * 而 {@code lib/api/reasons.ts} 的 {@code REASONS} 與凍結契約附錄 B 雙向鎖，研究 reason 不得進去（所以它們各住自己的常數）。
+ * 研究 reason 的四方雙向鎖（TCS-ResearchToPRD-P0 AT-960-5-6）：後端 {@code ErrorReasons} 的 {@code RESEARCH_} 前綴常數、前端 {@code lib/domain/research.ts} 的
+ * {@code RESEARCH_REASONS}、契約 API_Contract_ResearchToPRD §0.2 的 reason 表、Architecture §11.1 的研究 reason 表，四處的集合逐字相等。為什麼重要：reason 是前端據以顯示說明與決定可否重試的
+ * 機器可讀欄位——後端改了字面而前端、契約沒跟著改，使用者看到的是「未知錯誤」；而 {@code lib/api/reasons.ts} 的 {@code REASONS} 與凍結契約附錄 B 雙向鎖，研究 reason 不得進去
+ * （所以它們各住自己的常數）。
  *
- * <p><b>已知待補列</b>：Bridge 專屬的五個 reason——{@code allowlist_exists}（409）、{@code init_failed}（502）、{@code not_implemented}（501→502）、
- * {@code digest_mismatch}（422；D-72）、{@code missing_digests}（422；D-72）——契約 §0.2／§1.4 與前端常數尚未列入（勘誤候選「契約 reason 清單補列」）。
- * 它們已在後端 {@code ErrorReasons} 與 OpenAPI 說明，所以本測試把它們明載在 {@link #PENDING_ERRATUM}：後端集合＝P0 清單中仍有效的＋這五個；契約與前端兩處的集合＝P0 清單。
- * 契約與前端補列之後，本名單必須清空（否則第 {@code AT_960_5_6_pendingReasonsAreStillMissing…} 條轉紅，逼著同步）。
+ * <p>集合＝二十二個：P0 契約原列十七個仍有效者，加 Bridge 專屬的五個——{@code allowlist_exists}（409）、{@code init_failed}（502）、{@code not_implemented}（Bridge 501→console-api 502）、
+ * {@code digest_mismatch}（422；D-72）、{@code missing_digests}（422；D-72）。{@code invalid_request}（輸入閘，400／422）是區域常數（{@code ResearchInputGates.INVALID_REQUEST}），
+ * 不入本集合（先例 SiWriteGates）。
  *
- * <p><b>已被取代</b>：P0 清單的 {@code spec_digest_changed}（409）被 D-72 的 {@code digest_mismatch}／{@code missing_digests}（422）取代——Bridge 對研究端點不再回它，
- * 後端 {@code ErrorReasons} 與 OpenAPI 說明都已移除，但契約與前端在勘誤批次同步前仍列它，所以它還留在 {@link #P0_REASONS}（兩處集合要相等）並明載在
- * {@link #SUPERSEDED_BY_D72}；契約與前端移除它之後，要從兩個名單一起刪掉（第 {@code AT_960_5_6_pendingReasons…} 條在它不再出現於任何一處時轉紅）。
+ * <p><b>已退役</b>：P0 契約原列的 {@code spec_digest_changed}（409）被 D-72 的 {@code digest_mismatch}／{@code missing_digests}（422）取代——Bridge 對研究端點不再回它，
+ * 所以 {@link #RETIRED_REASONS} 鎖住它不得在任何一處復活（後端常數、前端常數、契約、Architecture 表、OpenAPI 說明）。
+ *
+ * <p><b>沿革</b>：本測試在契約與前端補列前，曾以「已知待補列」「已被取代」「Architecture 缺口」三組名單明載差異，並設計成補列後轉紅逼同步；2026-11-03 契約〈勘誤記錄〉第 1、2 列、
+ * Architecture §11.1 與前端 {@code RESEARCH_REASONS} 同步落地，三組名單已清空並移除（差異消失後留著空名單的斷言永不會紅，不是鎖）。
  */
 class ResearchReasonsTest {
 
-    /** TCS §3 AT-960-5-6 的 P0 十八個 reason（契約與前端兩處的集合必須相等；後端的集合扣掉 {@link #SUPERSEDED_BY_D72}）。 */
+    /** TCS §3 AT-960-5-6 的 P0 二十二個 reason（後端、前端、契約、Architecture 四處的集合必須相等）。 */
     private static final Set<String> P0_REASONS = new TreeSet<>(List.of("research_write_disabled", "research_write_forbidden", "research_requires_db",
-            "db_blocked", "research_not_found", "slug_in_use", "stage_conflict", "prd_version_conflict", "review_not_passed", "spec_digest_changed",
-            "fsm_state_conflict", "escalated", "spec_frozen", "layer_unavailable", "sanitization_failed", "terms_ack_required", "bridge_unreachable",
-            "bridge_timeout"));
-    /** P0 清單中已被 D-72 取代、後端不再有的 reason（契約與前端尚未移除；見類別說明）。 */
-    private static final Set<String> SUPERSEDED_BY_D72 = new TreeSet<>(List.of("spec_digest_changed"));
-    /** Bridge 專屬、契約與前端尚未列入的五個 reason（見類別說明）。 */
-    private static final Set<String> PENDING_ERRATUM = new TreeSet<>(List.of("allowlist_exists", "init_failed", "not_implemented", "digest_mismatch",
-            "missing_digests"));
-    /**
-     * Architecture §11.1 的研究 reason 表目前沒有列的兩個 P0 reason（502、504 的連線類失敗；契約 §0.2 第 8 列有）——已知的文件缺口、勘誤候選：
-     * 該表是「依端點的業務失敗」清單，連線類失敗沒有進去。補進 Architecture 後本名單必須清空。
-     */
-    private static final Set<String> ARCHITECTURE_GAP = new TreeSet<>(List.of("bridge_unreachable", "bridge_timeout"));
+            "db_blocked", "research_not_found", "slug_in_use", "stage_conflict", "prd_version_conflict", "review_not_passed", "fsm_state_conflict",
+            "escalated", "spec_frozen", "layer_unavailable", "sanitization_failed", "terms_ack_required", "bridge_unreachable", "bridge_timeout",
+            "allowlist_exists", "init_failed", "not_implemented", "digest_mismatch", "missing_digests"));
+    /** D-72 取代後退役的 reason：Bridge 對研究端點不再回它，任何一處都不得再列（見類別說明）。 */
+    private static final Set<String> RETIRED_REASONS = new TreeSet<>(List.of("spec_digest_changed"));
 
     private static String read(String... segments) {
         Path path = Path.of("..", segments);
@@ -114,21 +108,13 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_960_5_6_theBackendConstantsAreTheLiveP0ReasonsPlusTheKnownPendingBridgeReasonsAndNoSupersededOne() {
-        Set<String> backend = backendReasons();
-        Set<String> live = new TreeSet<>(P0_REASONS);
-        live.removeAll(SUPERSEDED_BY_D72);
-
-        assertThat(P0_REASONS).hasSize(18);
-        assertThat(backend).containsAll(live).containsAll(PENDING_ERRATUM);
-        assertThat(backend).as("D-72 取代的 reason 不再是後端常數（Bridge 對研究端點不再回它）").doesNotContainAnyElementsOf(SUPERSEDED_BY_D72);
-        Set<String> extra = new TreeSet<>(backend);
-        extra.removeAll(P0_REASONS);
-        assertThat(extra).as("後端的 RESEARCH_ 常數除 P0 清單外，只有已知待補列的五個").isEqualTo(PENDING_ERRATUM);
+    void AT_960_5_6_theBackendConstantsAreExactlyTheTwentyTwoP0Reasons() {
+        assertThat(P0_REASONS).hasSize(22);
+        assertThat(backendReasons()).as("後端 ErrorReasons 的 RESEARCH_ 常數").isEqualTo(P0_REASONS);
     }
 
     @Test
-    void AT_960_5_6_theFrontendConstantsAndTheContractTableEqualTheEighteenP0Reasons() {
+    void AT_960_5_6_theFrontendConstantsEqualTheTwentyTwoP0ReasonsAndTheContractAndArchitectureTablesNameEveryOne() {
         assertThat(frontendReasons()).as("前端 RESEARCH_REASONS").isEqualTo(P0_REASONS);
 
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
@@ -136,30 +122,20 @@ class ResearchReasonsTest {
             assertThat(contract).as("契約提到 reason " + reason).contains("`" + reason + "`");
         }
         Map<String, Integer> architecture = architectureReasons();
-        Set<String> inArchitecture = new TreeSet<>(P0_REASONS);
-        inArchitecture.removeAll(ARCHITECTURE_GAP);
-        assertThat(architecture.keySet()).as("Architecture §11.1 的研究 reason 表（缺 bridge_unreachable、bridge_timeout 是已知的文件缺口，勘誤候選）")
-                .containsAll(inArchitecture);
-        assertThat(architecture.keySet()).as("缺口名單只在還缺時才列：補進 Architecture 之後要從 ARCHITECTURE_GAP 移除").doesNotContainAnyElementsOf(ARCHITECTURE_GAP);
+        assertThat(architecture.keySet()).as("Architecture §11.1 的研究 reason 表").containsAll(P0_REASONS);
         assertThat(architecture).containsEntry("research_write_disabled", 503).containsEntry("research_write_forbidden", 403)
                 .containsEntry("research_not_found", 404).containsEntry("slug_in_use", 409).containsEntry("layer_unavailable", 400)
-                .containsEntry("sanitization_failed", 422).containsEntry("terms_ack_required", 422);
+                .containsEntry("sanitization_failed", 422).containsEntry("terms_ack_required", 422).containsEntry("allowlist_exists", 409)
+                .containsEntry("digest_mismatch", 422).containsEntry("missing_digests", 422).containsEntry("bridge_unreachable", 502)
+                .containsEntry("init_failed", 502).containsEntry("not_implemented", 502).containsEntry("bridge_timeout", 504);
     }
 
     @Test
-    void AT_960_5_6_everyLiveP0ReasonAndEveryPendingReasonIsNamedInTheOpenApiDescriptionsAndNoSupersededOneIs() {
+    void AT_960_5_6_everyP0ReasonIsNamedInTheOpenApiDescriptions() {
         String docs = documentation();
 
         for (String reason : P0_REASONS) {
-            if (!SUPERSEDED_BY_D72.contains(reason)) {
-                assertThat(docs).as("OpenAPI 說明提到 reason " + reason).contains(reason);
-            }
-        }
-        for (String reason : PENDING_ERRATUM) {
-            assertThat(docs).as("OpenAPI 說明提到 Bridge 專屬 reason " + reason).contains(reason);
-        }
-        for (String reason : SUPERSEDED_BY_D72) {
-            assertThat(docs).as("OpenAPI 說明不再提到已被 D-72 取代的 reason " + reason + "（說明要照實反映回應）").doesNotContain(reason);
+            assertThat(docs).as("OpenAPI 說明提到 reason " + reason).contains(reason);
         }
     }
 
@@ -169,17 +145,19 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_960_5_6_thePendingReasonsAreStillMissingFromTheContractAndTheFrontendSoThisListMustShrinkWhenTheErratumLands() {
+    void AT_960_5_6_theReasonRetiredByD72IsNowhereToBeFound() {
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
-        for (String reason : PENDING_ERRATUM) {
-            boolean inContract = contract.contains("`" + reason + "`");
-            boolean inFrontend = frontendReasons().contains(reason);
-            assertThat(inContract || inFrontend).as("%s 已進契約或前端：把它從 PENDING_ERRATUM 移到 P0_REASONS（三處同改）", reason).isFalse();
-        }
-        for (String reason : SUPERSEDED_BY_D72) {
-            boolean inContract = contract.contains("`" + reason + "`");
-            boolean inFrontend = frontendReasons().contains(reason);
-            assertThat(inContract || inFrontend).as("%s 已從契約與前端移除：把它從 SUPERSEDED_BY_D72 與 P0_REASONS 一起刪掉（三處同改）", reason).isTrue();
+        String docs = documentation();
+        Set<String> backend = backendReasons();
+        Set<String> frontend = frontendReasons();
+        Set<String> architecture = architectureReasons().keySet();
+
+        for (String reason : RETIRED_REASONS) {
+            assertThat(backend).as("後端常數不再有 " + reason).doesNotContain(reason);
+            assertThat(frontend).as("前端 RESEARCH_REASONS 不再有 " + reason).doesNotContain(reason);
+            assertThat(architecture).as("Architecture §11.1 的研究 reason 表不再有 " + reason).doesNotContain(reason);
+            assertThat(contract).as("契約不再以反引號列 " + reason + "（勘誤記錄可寫「原 " + reason + "」不加反引號）").doesNotContain("`" + reason + "`");
+            assertThat(docs).as("OpenAPI 說明不再提到 " + reason + "（說明要照實反映回應）").doesNotContain(reason);
         }
     }
 

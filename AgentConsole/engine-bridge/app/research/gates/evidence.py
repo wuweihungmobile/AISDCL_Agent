@@ -85,9 +85,10 @@ class EvidenceContext:
     """驗證的外部輸入（皆由任務書／Bridge 提供，研究者無從自算）。
 
     `issue_scope`：議題檔物件（取 `applicability_axes` 與 `scope_rev`）；
-    `issue_scope_sha256`：現行議題檔的換行正規化雜湊；`accept_template_sentinel`：部署明確指定
-    替身 claude（`BRIDGE_RESEARCH_CLAUDE_COMMAND` 有設）時，模板範例的哨兵雜湊也算過——替身劇本
-    是靜態檔、算不出含 `created_at` 的真雜湊，真 claude 的輸出仍須逐位元等於任務書給的值；
+    `issue_scope_sha256`：現行議題檔的換行正規化雜湊；`accept_template_sentinel`：研究劇本模式
+    （`MOCK_CLAUDE_RESEARCH_SCRIPT` 取值去除空白後非空；orchestrator 兩處以此設值）時，模板範例的
+    哨兵雜湊也算過——劇本是靜態檔、算不出含 `created_at` 的真雜湊，真 claude 的輸出仍須逐位元等於
+    任務書給的值；
     `fetch_index`：`F-NNNN` → 抓取列摘要；`previous`：前一版 `evidence_items.json`（增補模式）。"""
 
     issue_scope: Mapping[str, Any] | None = None
