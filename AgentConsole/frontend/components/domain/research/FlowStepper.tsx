@@ -8,7 +8,7 @@
  *  - 有連結的項（`hrefFor` 回網址）是 `<a>`，回 null 的項（超前、不可達）只顯示文字，不是連結；
  *  - `compact`：清單列的迷你版——只印序號圓點，名稱與狀態改為只給螢幕閱讀器。
  */
-import { Check, ChevronRight, Circle, CircleDot, TriangleAlert, type LucideIcon } from "lucide-react";
+import { Check, ChevronRight, Circle, CircleDot, FileDiff, TriangleAlert, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 
 import type { ResearchFlowStepId, ResearchFlowStepState } from "@/lib/api/types";
@@ -36,6 +36,8 @@ export function FlowStepper({
   compact = false,
   label = "研發工作流步驟",
   className,
+  blockedReason,
+  scrOpen = false,
 }: {
   steps: readonly ResearchStepView[];
   /** 目前顯示的步驟（標 `aria-current="step"`） */
@@ -45,6 +47,10 @@ export function FlowStepper({
   compact?: boolean;
   label?: string;
   className?: string;
+  /** 受阻步驟旁顯示的原因（取游標 `flow_detail` 的純文字；P1：分流失敗時為失敗步驟名）。只在非精簡版、狀態為受阻的那一項顯示。 */
+  blockedReason?: string;
+  /** 規格變更請求進行中（`flowPhase` 為 `SCR_OPEN`）：在步驟列尾端標示「SCR 進行中」（P1；AT-961-19-4） */
+  scrOpen?: boolean;
 }) {
   return (
     <ol aria-label={label} data-testid="flow-stepper" data-compact={compact || undefined} className={cn("flex flex-wrap items-center", compact ? "gap-1" : "gap-x-1 gap-y-2", className)}>
@@ -65,6 +71,11 @@ export function FlowStepper({
               <>
                 <span className="font-medium">{step.label}</span>
                 <span className="text-xs">{stateText}</span>
+                {step.state === "BLOCKED" && blockedReason ? (
+                  <span data-testid="flow-step-blocked-reason" title={blockedReason} className="max-w-[16rem] truncate text-xs">
+                    原因：{blockedReason}
+                  </span>
+                ) : null}
               </>
             )}
           </span>
@@ -88,6 +99,19 @@ export function FlowStepper({
           </li>
         );
       })}
+      {scrOpen ? (
+        <li data-testid="flow-scr-open" aria-label="SCR 進行中" className="flex items-center gap-1">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border border-wg-alert-border bg-wg-alert-bg font-medium text-wg-warning-text",
+              compact ? "px-1.5 py-0.5 text-xs" : "px-3 py-1.5 text-sm",
+            )}
+          >
+            <FileDiff size={compact ? 12 : 16} aria-hidden />
+            SCR 進行中
+          </span>
+        </li>
+      ) : null}
     </ol>
   );
 }

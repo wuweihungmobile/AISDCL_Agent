@@ -28,10 +28,17 @@ import type {
   ResearchFlowStepId,
   ResearchFlowStepState,
   ResearchFsmView,
+  ResearchPlacementTarget,
   ResearchProjectDetail,
   ResearchProjectSummary,
   ResearchReconcileResult,
   ResearchReviewRound,
+  ResearchRouteAction,
+  ResearchRouteConfirmRequest,
+  ResearchRouteDecision,
+  ResearchRouteRequest,
+  ResearchRouteTrack,
+  ResearchRouteVisibility,
   ResearchSource,
   ResearchSourceLayer,
 } from "@/lib/api/types";
@@ -123,7 +130,11 @@ export const FLOW_STATUS_LABEL: Readonly<Record<ResearchFlowStatus, string>> = {
   PAUSED: "已暫停",
 };
 
-/** `flow_phase` 十三個 DB 值加五個衍生相態（`FLOW_PHASE_DERIVED`；衍生值不落 DB）。 */
+/**
+ * `flow_phase` 十三個 DB 值加六個衍生相態（`FLOW_PHASE_DERIVED`；衍生值不落 DB）。P1 補 `BUILD_READY`「可開始建置」並把 `SCR_OPEN` 定為「SCR 進行中」（D-114）。
+ * 衍生相態 `PAUSED`（「已暫停」）與衍生狀態 `PAUSED` 同名同義：詞彙只登記一次在 `FLOW_STATUS_LABEL`（兩表鍵不相交、`researchFlow` 狀態表的鍵集合不重複），
+ * `flowPhaseLabel("PAUSED")` 退到狀態表取同一個標籤。
+ */
 export const FLOW_PHASE_LABEL: Readonly<Record<ResearchFlowPhase | ResearchDerivedFlowPhase, string>> = {
   INGESTED: "議題已受理",
   RESEARCHING: "研究中",
@@ -137,7 +148,8 @@ export const FLOW_PHASE_LABEL: Readonly<Record<ResearchFlowPhase | ResearchDeriv
   ROUTED: "已分流",
   TCS_DRAFTING: "測試規格草擬中",
   TCS_PENDING: "測試規格待核准",
-  SCR_OPEN: "規格變更中",
+  SCR_OPEN: "SCR 進行中",
+  BUILD_READY: "可開始建置",
   BUILDING: "建置中",
   HEALING: "自癒中",
   AWAITING_HUMAN: "等待人工審核",
@@ -146,7 +158,7 @@ export const FLOW_PHASE_LABEL: Readonly<Record<ResearchFlowPhase | ResearchDeriv
 };
 
 /** 衍生相態（由 `ResearchFlowPolicy` 自 FSM 與 `execution_runs` 即時推算，不落 DB）。 */
-export const FLOW_PHASE_DERIVED: readonly ResearchDerivedFlowPhase[] = ["BUILDING", "HEALING", "AWAITING_HUMAN", "RELEASE_PENDING", "DELIVERED"];
+export const FLOW_PHASE_DERIVED: readonly ResearchDerivedFlowPhase[] = ["BUILDING", "HEALING", "AWAITING_HUMAN", "RELEASE_PENDING", "DELIVERED", "BUILD_READY"];
 
 /** 兩張詞彙表合起來的鍵（`researchFlow` 狀態說明表的鍵集合；status 與 phase 的值域不相交）。 */
 export const FLOW_VOCABULARY_KEYS: readonly string[] = [...Object.keys(FLOW_STATUS_LABEL), ...Object.keys(FLOW_PHASE_LABEL)];
@@ -157,7 +169,7 @@ export function flowStatusLabel(status: string): string {
 }
 
 export function flowPhaseLabel(phase: string): string {
-  return (FLOW_PHASE_LABEL as Readonly<Record<string, string | undefined>>)[phase] ?? phase;
+  return (FLOW_PHASE_LABEL as Readonly<Record<string, string | undefined>>)[phase] ?? (phase === "PAUSED" ? FLOW_STATUS_LABEL.PAUSED : phase);
 }
 
 /** `researchFlow` 表的「狀態」欄名稱：先認 flow_status、再認 flow_phase，都不是就顯示原值。 */
@@ -747,6 +759,21 @@ export const RESEARCH_REASONS = {
   NOT_IMPLEMENTED: "not_implemented",
   DIGEST_MISMATCH: "digest_mismatch",
   MISSING_DIGESTS: "missing_digests",
+  // P1 九個（IFACE §2；D-111：`not_implemented` 保留供 P2 骨架）
+  ROUTE_UNSUPPORTED_IN_DEPLOYMENT: "route_unsupported_in_deployment",
+  ROUTE_CONFLICT: "route_conflict",
+  BRANCH_EXISTS: "branch_exists",
+  TARGET_NOT_EMPTY: "target_not_empty",
+  PUBLIC_CONFIRMATION_REQUIRED: "public_confirmation_required",
+  ROUTE_STEP_FAILED: "route_step_failed",
+  SCR_OPEN: "scr_open",
+  SCR_LIMIT: "scr_limit",
+  DECOMPOSITION_STALE: "decomposition_stale",
+  // P0 二審尾巴 R-2 的四個（⚖P1-25；`invalid_request` 改 RESEARCH_ 前綴常數）
+  COMPILE_FAILED: "compile_failed",
+  SDD_CLI_FAILED: "sdd_cli_failed",
+  FSM_STATE_UNREADABLE: "fsm_state_unreadable",
+  INVALID_REQUEST: "invalid_request",
 } as const;
 
 /** 唯讀角色的停用說明（沿 TCS-ExecMonitorEntry W-E1 先例）：所有寫入類控件停用時 `title` 一律是它。 */
@@ -775,11 +802,30 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   [RESEARCH_REASONS.NOT_IMPLEMENTED]: "這個功能尚未開放（後續階段提供）",
   [RESEARCH_REASONS.DIGEST_MISMATCH]: "核准時的摘要與現檔不符，請重新整理後再核准",
   [RESEARCH_REASONS.MISSING_DIGESTS]: "核准請求沒有附上任何檔案摘要，無法確認您看到的內容；請重新整理後再核准",
+  [RESEARCH_REASONS.ROUTE_UNSUPPORTED_IN_DEPLOYMENT]: "這個部署環境不支援分流，缺少必要的工具或權限；請改用本機模式，或看預演列出的缺項",
+  [RESEARCH_REASONS.ROUTE_CONFLICT]: "這個研究專案已有進行中或已完成的分流，請重新整理後再看",
+  [RESEARCH_REASONS.BRANCH_EXISTS]: "這個分支名稱已存在，請換一個分支名稱",
+  [RESEARCH_REASONS.TARGET_NOT_EMPTY]: "目標資料夾已存在而且不是空的，請換一個專案名稱",
+  [RESEARCH_REASONS.PUBLIC_CONFIRMATION_REQUIRED]: "公開的遠端庫需要重新輸入庫名確認，輸入的庫名必須與庫名完全相同",
+  [RESEARCH_REASONS.ROUTE_STEP_FAILED]: "分流有一步失敗了，已完成的步驟會保留；請看失敗步驟的原因，修好後按「重試失敗步驟」",
+  [RESEARCH_REASONS.SCR_OPEN]: "規格變更請求進行中，這個動作暫時不能做；請先完成或撤回變更",
+  [RESEARCH_REASONS.SCR_LIMIT]: "同一個研究專案的小幅規格變更已達上限，請改走大幅變更",
+  [RESEARCH_REASONS.DECOMPOSITION_STALE]: "PRD 已更新，拆解已過期；請重新拆解並再簽核",
+  [RESEARCH_REASONS.COMPILE_FAILED]: "提示詞編譯失敗，請洽管理員",
+  [RESEARCH_REASONS.SDD_CLI_FAILED]: "狀態機命令列執行失敗，請稍後再試或洽管理員",
+  [RESEARCH_REASONS.FSM_STATE_UNREADABLE]: "讀不到狀態機的現態，請確認狀態目錄是否正常",
+  [RESEARCH_REASONS.INVALID_REQUEST]: "送出的內容沒有通過檢查，請依欄位提示修正",
 };
 
-/** 研究端點錯誤的白話原因（依 `reason`；沒有對映時退回通用訊息）。 */
+/** 研究端點錯誤的白話原因（依 `reason`；沒有對映時退回通用訊息）。`route_step_failed` 另帶失敗步驟名（取 `details.failureStep` 對映 `ROUTE_STEP_LABEL`）。 */
 export function researchErrorText(error: unknown): string {
-  if (error instanceof ApiError && error.reason !== undefined && REASON_TEXT[error.reason] !== undefined) return REASON_TEXT[error.reason];
+  if (error instanceof ApiError && error.reason !== undefined && REASON_TEXT[error.reason] !== undefined) {
+    if (error.reason === RESEARCH_REASONS.ROUTE_STEP_FAILED) {
+      const raw = error.details?.failureStep ?? error.details?.failure_step;
+      if (typeof raw === "string" && raw !== "") return `分流在「${routeStepLabel(raw)}」這一步失敗了，已完成的步驟會保留；請看失敗原因，修好後按「重試失敗步驟」`;
+    }
+    return REASON_TEXT[error.reason];
+  }
   return describeError(error);
 }
 
@@ -1341,3 +1387,280 @@ export function toAllowlistRequest(form: AllowlistForm): ResearchAllowlistReques
     tosAcknowledged: isRedditHost(host) && form.tosAcknowledged,
   };
 }
+
+// ══ P1 分流（PKG-FE-D1；TCS-ResearchToPRD-P1-20261107 §5.1；IFACE §4、§8；PRD FR-R2P-11～13）═══════════════════════════════════
+// 全是純函式與常數：分流精靈（RouteDrawer）與步驟 3 面板只負責把結果畫出來。常數與契約 §1.2 的 `route.*` 列、Bridge `app/research/route.py` 逐值對拍（AT-961-17-E-2）。
+
+/** 分支名（契約 §1.2；ADR-003 D16）；預設 `feature/issue-<NNNN>`（NNNN＝`rpNo` 數字零填四位）。 */
+export const BRANCH_PATTERN = /^feature\/[a-z0-9-]{1,40}$/;
+/** 遠端庫名（契約 §1.2：2 至 39 字元；省略時取專案名稱）。 */
+export const REPO_NAME_PATTERN = /^[a-z][a-z0-9-]{1,38}$/;
+/** 專案名稱＝內環鍵（D-119：同時合 GitHub 庫名與 FSM 鍵文法，2 至 62 字元）。 */
+export const PROJECT_NAME_PATTERN = /^[a-z][a-z0-9-]{1,61}$/;
+/** GitHub owner（D-106；類推 GitHub 使用者名規則）。 */
+export const OWNER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
+/** 分流軌道與 PRD 目標範圍不同時的理由上限（契約 §1.2）。 */
+export const SCOPE_REASON_MAX = 200;
+/** SCR 理由、拆解豁免理由、補償理由上限（契約 §1.2；三者在後端是各自獨立的常數，前端同值）。 */
+export const REASON_MAX = 500;
+export const ROUTE_DEFAULT_BASE_REF = "main";
+export const ROUTE_TRACK_LABEL: Readonly<Record<ResearchRouteTrack, string>> = { A: "軌道 A：併入 AISDLC", B: "軌道 B：獨立專案" };
+
+/** 落點目標（D-100：P1 固定四值，每項附一句出處＝落點 SSOT `Root_Layout_and_Module_Placement.md` §2）。 */
+export const PLACEMENT_TARGETS: ReadonlyArray<{ id: ResearchPlacementTarget; label: string; source: string }> = [
+  { id: "autoclaude", label: "AutoClaude", source: "AutoClaude 的外掛與引擎模組落在 AutoClaude 資料夾，走該專案的新增外掛流程" },
+  { id: "agentconsole", label: "AgentConsole", source: "AgentConsole 的介面、後端與橋接模組落在 AgentConsole 資料夾，子專案內的模組不往根層放" },
+  { id: "sdd", label: "AISDLC_SDD", source: "AISDLC_SDD 的流程、角色與模板資產只改最新版本目錄，走該框架的目錄規則" },
+  { id: "monorepo", label: "整個程式庫根層", source: "只有跨專案治理工具才落根層（tools 與 docs 的編號目錄）" },
+];
+
+/** 評估維度表（來源規格 §4：五列、三欄加列頭；P1 唯一一份，元件不內嵌第二份）。 */
+export const ROUTE_EVAL_TABLE: ReadonlyArray<{ dimension: string; trackA: string; trackB: string }> = [
+  { dimension: "目標場景", trackA: "系統底層共用能力、Agent 工具鏈、工作流擴充", trackB: "獨立商用產品、獨立技術棧、外部終端專案" },
+  { dimension: "路徑規劃", trackA: "切入 Monorepo 的 packages 或 services", trackB: "建立全新資料夾或指定獨立工作目錄" },
+  { dimension: "Git 流程", trackA: "自動建立 feature/issue-<id> 分支", trackB: "執行 git init，設定 Remote Origin，推送 Initial Commit" },
+  { dimension: "CI/CD 與環境", trackA: "繼承既有 AISDLC 測試與 Token 治理管線", trackB: "自動生成 GitHub Actions Workflow、Docker Compose 與環境設定檔" },
+  { dimension: "規格掛載", trackA: "自動掛載至全域模組登錄表（Module Registry）", trackB: "將 my-project 完整移至新專案根目錄" },
+];
+
+/** 11 個分流步驟的中文名（DDL `research_route_steps.step` CHECK；IFACE §4.1）。 */
+export const ROUTE_STEP_LABEL: Readonly<Record<string, string>> = {
+  VALIDATE_TARGET: "驗證目標",
+  GIT_SWITCH: "建立分支與工作樹",
+  SCAFFOLD_FILES: "展開專案骨架",
+  GIT_INIT: "初始化 git",
+  GIT_COMMIT: "初始提交",
+  GH_REPO_CREATE: "建立 GitHub 遠端",
+  PUBLISH_DOCS: "發佈 PRD",
+  COPY_WORKSPACE: "複製研究工作區",
+  REGISTER_STUB: "登記落點提示",
+  IMPL_KEY_INIT: "建立內環鍵",
+  BASELINE_ADOPT: "採納基線",
+};
+/** 未登記的步驟名顯示原值、不丟例外。 */
+export function routeStepLabel(step: string): string {
+  return ROUTE_STEP_LABEL[step] ?? step;
+}
+
+const ROUTE_STATUS_LABEL: Readonly<Record<string, string>> = { PENDING: "等待中", RUNNING: "執行中", SUCCEEDED: "已完成", FAILED: "失敗", COMPENSATED: "已補償" };
+const ROUTE_STEP_STATUS_LABEL: Readonly<Record<string, string>> = { RUNNING: "執行中", OK: "完成", FAILED: "失敗", SKIPPED: "略過", COMPENSATED: "已補償" };
+/** 分流（整體）狀態的中文；未登記的值原樣顯示。 */
+export function routeStatusLabel(status: string): string {
+  return ROUTE_STATUS_LABEL[status] ?? status;
+}
+export function routeStepStatusLabel(status: string): string {
+  return ROUTE_STEP_STATUS_LABEL[status] ?? status;
+}
+
+/** 預演 422 `route_unsupported_in_deployment` 的缺項（`details.missing[].item`；D-122）對映中文；未登記的項目原樣顯示。 */
+export const ROUTE_MISSING_ITEM_LABEL: Readonly<Record<string, string>> = {
+  git: "git 命令不可用",
+  gh: "gh 命令不可用",
+  repo_writable: "無法寫入程式庫",
+  scaffold_root: "尚未設定專案骨架根目錄",
+  scaffold_templates: "沒有可用的專案範本",
+  worktree_root: "工作樹根目錄不可用",
+  gh_auth: "gh 尚未登入",
+};
+export function routeMissingLabels(missing: unknown): string[] {
+  if (!Array.isArray(missing)) return [];
+  return missing
+    .map((entry) => {
+      const item = typeof entry === "string" ? entry : isRecord(entry) && typeof entry.item === "string" ? entry.item : "";
+      return item === "" ? "" : (ROUTE_MISSING_ITEM_LABEL[item] ?? item);
+    })
+    .filter((label) => label !== "");
+}
+
+/** PRD 目標範圍對應的預設軌道；`UNDECIDED` 或未知回 null（兩卡皆不預選）。 */
+export function routeTrackForScope(targetScope: string): ResearchRouteTrack | null {
+  return targetScope === "AISDLC_MODULE" ? "A" : targetScope === "STANDALONE_PROJECT" ? "B" : null;
+}
+/** 所選軌道與 PRD 目標範圍不同（目標範圍未決定時不算不同）。 */
+export function routeScopeDiffers(targetScope: string, track: ResearchRouteTrack): boolean {
+  const preset = routeTrackForScope(targetScope);
+  return preset !== null && preset !== track;
+}
+/** 軌道 A 的預設分支名：`feature/issue-<NNNN>`（`rpNo` 如 `RP-0007` 取數字零填四位）。 */
+export function routeDefaultBranch(rpNo: string): string {
+  const digits = /(\d+)$/.exec(rpNo)?.[1] ?? "0";
+  return `feature/issue-${digits.padStart(4, "0").slice(-4)}`;
+}
+
+/** 分流精靈表單（字串與布林；驗證後才轉請求本文）。 */
+export type RouteForm = {
+  track: ResearchRouteTrack | null;
+  targetModule: ResearchPlacementTarget | "";
+  branchName: string;
+  baseRef: string;
+  projectName: string;
+  stackTemplate: string;
+  owner: string;
+  repoName: string;
+  visibility: ResearchRouteVisibility;
+  confirmRepoName: string;
+  createGithub: boolean;
+  ci: boolean;
+  dockerCompose: boolean;
+  scopeDiffersReason: string;
+};
+export type RouteFormField = "track" | "targetModule" | "branchName" | "baseRef" | "projectName" | "stackTemplate" | "owner" | "repoName" | "confirmRepoName" | "scopeDiffersReason";
+
+/** Public 確認：逐字完全相等（不修剪、不正規化；差一個字元、大小寫、尾端空白、不可見字元都算不符）。 */
+export function isRepoNameConfirmed(repoName: string, confirm: string): boolean {
+  return repoName !== "" && confirm === repoName;
+}
+
+/** 軌道 B 實際使用的庫名：明示輸入優先，省略時取專案名稱（D-119）。 */
+export function effectiveRepoName(form: Pick<RouteForm, "repoName" | "projectName">): string {
+  return form.repoName === "" ? form.projectName : form.repoName;
+}
+
+/** 分流表單的逐欄驗證（前端只為更早給回饋；後端輸入閘與 Bridge 入口各再擋一次）：逐欄回第一則錯誤，沒有錯誤回空物件。 */
+export function routeFormErrors(form: RouteForm, differs: boolean): Partial<Record<RouteFormField, string>> {
+  const errors: Partial<Record<RouteFormField, string>> = {};
+  if (form.track === null) {
+    errors.track = "請先選擇分流軌道";
+    return errors;
+  }
+  if (form.track === "A") {
+    if (form.targetModule === "") errors.targetModule = "請選擇掛載目標";
+    if (!BRANCH_PATTERN.test(form.branchName)) errors.branchName = "分支名須為 feature/ 開頭，後接小寫英數與連字號（1 至 40 字）";
+    if (form.baseRef.trim() === "" || /\s/.test(form.baseRef)) errors.baseRef = "請輸入基底 ref（不含空白）";
+  } else {
+    if (!PROJECT_NAME_PATTERN.test(form.projectName)) errors.projectName = "專案名稱須為小寫英文字母開頭，後接小寫英數與連字號（2 至 62 字）";
+    if (form.stackTemplate === "") errors.stackTemplate = "請選擇專案範本";
+    const repo = effectiveRepoName(form);
+    if (form.repoName !== "" && !REPO_NAME_PATTERN.test(form.repoName)) errors.repoName = "庫名須為小寫英文字母開頭，後接小寫英數與連字號（2 至 39 字）";
+    else if (form.createGithub && !REPO_NAME_PATTERN.test(repo)) errors.repoName = "要建立遠端時，庫名（省略時為專案名稱）須為 2 至 39 字的小寫英數與連字號";
+    if ((form.owner !== "" || form.createGithub) && !OWNER_PATTERN.test(form.owner)) errors.owner = "owner 須為英數與連字號（1 至 39 字），且以英數開頭";
+    if (form.visibility === "PUBLIC" && !isRepoNameConfirmed(repo, form.confirmRepoName)) errors.confirmRepoName = "請重新輸入庫名，必須與庫名完全相同";
+  }
+  if (differs) {
+    const length = Array.from(form.scopeDiffersReason).length;
+    if (length < 1) errors.scopeDiffersReason = "分流與 PRD 的目標範圍不同，請寫一句理由";
+    else if (length > SCOPE_REASON_MAX) errors.scopeDiffersReason = `理由最多 ${SCOPE_REASON_MAX} 個字`;
+  }
+  return errors;
+}
+
+/** 表單轉請求本文（camelCase；不含 `targetPath`〔D-106 退役〕與 `approver`〔後端取 JWT subject〕）。呼叫前須先通過 {@link routeFormErrors}。 */
+export function toRouteRequest(form: RouteForm, differs: boolean): ResearchRouteRequest {
+  const reason = differs ? { scopeDiffersReason: form.scopeDiffersReason } : {};
+  if (form.track === "A") {
+    return { track: "A", targetModule: form.targetModule === "" ? undefined : form.targetModule, branchName: form.branchName, baseRef: form.baseRef, ...reason };
+  }
+  const repoName = effectiveRepoName(form);
+  return {
+    track: "B",
+    projectName: form.projectName,
+    stackTemplate: form.stackTemplate,
+    repoName,
+    owner: form.owner,
+    visibility: form.visibility,
+    ...(form.visibility === "PUBLIC" ? { confirmRepoName: form.confirmRepoName } : {}),
+    createGithub: form.createGithub,
+    ci: form.ci,
+    dockerCompose: form.dockerCompose,
+    ...reason,
+  };
+}
+
+/** 預演動作是否觸及外部系統（`touchesExternal`；TCS 夾具的別名 `external` 亦認）。 */
+export function isExternalRouteAction(action: Pick<ResearchRouteAction, "touchesExternal" | "external">): boolean {
+  return action.touchesExternal === true || action.external === true;
+}
+
+/** 遠端 URL 只有符合 `https://github.com/<owner>/<repo>` 形時才可成為連結（外部資料不是指令）；其餘只顯示文字。 */
+export function safeRepoHref(url: string | null | undefined): string | null {
+  return typeof url === "string" && /^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/.test(url) ? url : null;
+}
+
+/** capabilities 對分流的停用判定（IFACE §8.3）：回「哪些停用、為什麼」的代碼，文案由說明登記表依代碼給（`ROUTE_DISABLED_TEXT`）。 */
+export type RouteBlockCode = "git" | "mock-only" | "repo" | "scaffold" | "gh";
+export type RouteBlocks = { all: RouteBlockCode | null; trackA: RouteBlockCode | null; trackB: RouteBlockCode | null; github: RouteBlockCode | null };
+export function routeCapabilityBlocks(caps: ResearchCapabilities): RouteBlocks {
+  const all: RouteBlockCode | null = !caps.git.ok ? "git" : caps.mode === "mock-only" ? "mock-only" : null;
+  return {
+    all,
+    trackA: caps.repoWritable ? null : "repo",
+    trackB: caps.scaffoldRoot === null || caps.scaffoldTemplates.length === 0 ? "scaffold" : null,
+    github: caps.ghCli.ok ? null : "gh",
+  };
+}
+
+/** 確認執行前可否再看到「分流」整體狀態：進行中（RUNNING／PENDING）不可再送；失敗可重試；完成唯讀。 */
+export function routeIsActive(status: string | undefined): boolean {
+  return status === "RUNNING" || status === "PENDING";
+}
+
+/** 掛載目標的預設值：由研究命題與代號比對模組名（不分大小寫）；比不到取清單第一項（只是預選，使用者可改）。 */
+export function resolveDefaultModule(project: Pick<ResearchProjectDetail, "topic" | "slug">): ResearchPlacementTarget {
+  const text = `${project.topic} ${project.slug}`.toLowerCase();
+  const hit = PLACEMENT_TARGETS.find((t) => t.id !== "monorepo" && text.includes(t.id));
+  return hit?.id ?? PLACEMENT_TARGETS[0].id;
+}
+
+/** 分流精靈的初始表單：軌道取預選（PRD 目標範圍）、分支取 `feature/issue-<NNNN>`、基底 `main`、可見度 Private、CI 與 compose 預設勾選；有已存在的分流列時以它還原軌道與參數（游標取自 API，不取瀏覽器儲存）。 */
+export function initialRouteForm(
+  project: Pick<ResearchProjectDetail, "rpNo" | "targetScope" | "topic" | "slug">,
+  defaultTrack: ResearchRouteTrack | null,
+  capabilities: Pick<ResearchCapabilities, "scaffoldTemplates"> | undefined,
+  row: ResearchRouteDecision | null = null,
+): RouteForm {
+  const form: RouteForm = {
+    track: defaultTrack,
+    targetModule: resolveDefaultModule(project),
+    branchName: routeDefaultBranch(project.rpNo),
+    baseRef: ROUTE_DEFAULT_BASE_REF,
+    projectName: "",
+    stackTemplate: capabilities?.scaffoldTemplates[0] ?? "",
+    owner: "",
+    repoName: "",
+    visibility: "PRIVATE",
+    confirmRepoName: "",
+    createGithub: false,
+    ci: true,
+    dockerCompose: true,
+    scopeDiffersReason: "",
+  };
+  if (row === null) return form;
+  const repo = /^https:\/\/github\.com\/([^/]+)\/([^/]+)$/.exec(row.repoUrl ?? "");
+  const known = PLACEMENT_TARGETS.find((t) => t.id === row.targetModule)?.id;
+  return {
+    ...form,
+    track: row.track,
+    targetModule: known ?? form.targetModule,
+    branchName: row.gitBranch ?? form.branchName,
+    baseRef: row.baseRef ?? form.baseRef,
+    projectName: row.track === "B" ? (row.implFsmProject ?? "") : "",
+    stackTemplate: row.stackTemplate ?? form.stackTemplate,
+    owner: repo?.[1] ?? "",
+    repoName: repo?.[2] ?? "",
+    visibility: row.repoVisibility ?? "PRIVATE",
+    createGithub: row.steps.some((s) => s.step === "GH_REPO_CREATE"),
+  };
+}
+
+/** 重試用的請求本文：由已存在的分流列推回（推不回的欄位用預設；輸入雜湊不符時由後端回 409 `route_conflict`，原因 `inputs_changed`）。 */
+export function routeRowToRequest(row: ResearchRouteDecision, project: Pick<ResearchProjectDetail, "rpNo" | "targetScope" | "topic" | "slug">): ResearchRouteConfirmRequest {
+  const form = initialRouteForm(project, row.track, undefined, row);
+  return { ...toRouteRequest(form, false), retry: true };
+}
+
+/**
+ * 分流精靈的停用說明（IFACE §8.3；TCS AT-961-16-5）：capabilities 缺項或角色不足時，受影響控件停用並顯示這裡的文字。
+ * 這是畫面字樣的單一登記處（元件只取值、不內嵌第二份；git、gh 是指令名）。住在這裡而不是 `lib/help/research-workspace.ts`：說明頁模組恰好匯出一個帶 id 的 `PageHelp`（registry.test.ts 的鎖），且說明頁文字受英文白名單約束。
+ * 鍵與 `RouteBlockCode` 對映，另加兩個角色鍵。
+ */
+export const ROUTE_DISABLED_TEXT = {
+  git: "此部署找不到 git，無法分流",
+  repo: "此部署無法寫入 monorepo（容器模式）；請改用本機模式",
+  gh: "找不到 gh；可先建本地專案，之後自行推送",
+  scaffold: "尚未設定 BRIDGE_SCAFFOLD_ROOT 或無可用範本",
+  "mock-only": "容器模式只跑 mock claude 的驗收；真分流限本機模式",
+  /** 非 ADMIN 的「確認執行」「重試」停用說明（OPERATOR；沿 CenterEntryView 體例，含「權限不足」） */
+  adminOnly: "權限不足：僅 ADMIN 可確認執行與重試",
+  /** VIEWER 的所有寫入類控件（含預演）停用說明 */
+  viewer: "權限不足（唯讀角色）",
+} as const;

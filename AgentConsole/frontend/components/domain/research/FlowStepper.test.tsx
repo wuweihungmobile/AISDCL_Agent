@@ -196,3 +196,42 @@ describe("AT_960_19_3 全工作區只有一份五步列實作（單一檔案、�
     expect(duplicateStepperProblems({ ...real, "Okay.tsx": "<FlowStepper steps={deriveSteps(a, b)} />" })).toEqual([]);
   });
 });
+
+describe("AT_961_19_4 FlowStepper 的 route 與 build 步驟狀態：進行中、失敗阻擋、SCR 進行中標示（TCS-ResearchToPRD-P1-20261107）", () => {
+  it("AT_961_19_4 route／ROUTING（RUNNING）：第 3 步為進行中、可及名稱含狀態；前兩步已完成、後兩步待做", () => {
+    render(<FlowStepper steps={deriveSteps("route", "RUNNING")} />);
+    const rows = items();
+    expect(rows[2]).toHaveAttribute("data-state", "CURRENT");
+    expect(rows[2]).toHaveAccessibleName("3 分流，進行中");
+    expect(rows[0]).toHaveAttribute("data-state", "DONE");
+    expect(rows[3]).toHaveAttribute("data-state", "TODO");
+    expect(screen.queryByTestId("flow-scr-open")).toBeNull();
+  });
+
+  it("AT_961_19_4 route 失敗（FAILED）：第 3 步為受阻並顯示 blockedReason（flow_detail 的純文字，含 HTML 字元也不解析）", () => {
+    render(<FlowStepper steps={deriveSteps("route", "FAILED")} blockedReason="GIT_SWITCH <b>x</b>" />);
+    const rows = items();
+    expect(rows[2]).toHaveAttribute("data-state", "BLOCKED");
+    expect(rows[2]).toHaveAccessibleName("3 分流，受阻");
+    const reason = within(rows[2]).getByTestId("flow-step-blocked-reason");
+    expect(reason).toHaveTextContent("原因：GIT_SWITCH <b>x</b>");
+    expect(reason.querySelector("b")).toBeNull();
+    for (const i of [0, 1, 3, 4]) expect(within(rows[i]).queryByTestId("flow-step-blocked-reason")).toBeNull();
+  });
+
+  it("AT_961_19_4 route／ROUTED 完成：第 3 步已完成、第 4 步（build）為進行中；沒有 blockedReason 時不顯示原因", () => {
+    render(<FlowStepper steps={deriveSteps("build", "IDLE")} blockedReason="不應顯示" />);
+    const rows = items();
+    expect(rows[2]).toHaveAttribute("data-state", "DONE");
+    expect(rows[3]).toHaveAttribute("data-state", "CURRENT");
+    expect(screen.queryByTestId("flow-step-blocked-reason")).toBeNull();
+  });
+
+  it("AT_961_19_4 SCR_OPEN：步驟列尾端標示「SCR 進行中」（文字加圖示，精簡版也有）；五步仍恆為五項狀態項", () => {
+    render(<FlowStepper steps={deriveSteps("build", "IDLE")} scrOpen />);
+    const marker = screen.getByTestId("flow-scr-open");
+    expect(marker).toHaveTextContent("SCR 進行中");
+    expect(marker).toHaveAccessibleName("SCR 進行中");
+    expect(screen.getAllByTestId(/^flow-step-(topic|studio|route|build|deliver)$/)).toHaveLength(5);
+  });
+});

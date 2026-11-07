@@ -234,15 +234,15 @@ describe("AT_960_18_2 說明三道鎖：HELP_ROUTES、HELP_PAGES、頁檔雙向�
 const UPSTREAM_KEYS = [...Object.keys(FLOW_STATUS_LABEL), ...Object.keys(FLOW_PHASE_LABEL)];
 
 describe("AT_960_18_3 狀態詞表 researchFlow：說明鍵、來源鍵與 flow_status／flow_phase 詞彙常數的鍵三者相等", () => {
-  it("AT_960_18_3 三者集合相等（27 個：status 九、phase 十八，其中衍生值 BUILDING、HEALING、AWAITING_HUMAN、RELEASE_PENDING、DELIVERED 標為衍生）", () => {
+  it("AT_960_18_3 三者集合相等（28 個：status 九、phase 十九，其中衍生值 BUILDING、HEALING、AWAITING_HUMAN、RELEASE_PENDING、DELIVERED 與 P1 的 BUILD_READY 標為衍生）", () => {
     const helpKeys = Object.keys(STATE_HELP.researchFlow);
     const sourceKeys = [...STATE_SOURCES.researchFlow.keys];
     expect([...helpKeys].sort()).toEqual([...UPSTREAM_KEYS].sort());
     expect([...sourceKeys].sort()).toEqual([...UPSTREAM_KEYS].sort());
-    expect(helpKeys).toHaveLength(27);
+    expect(helpKeys).toHaveLength(28);
     expect(Object.keys(FLOW_STATUS_LABEL)).toHaveLength(9);
     expect(Object.keys(FLOW_PHASE_LABEL).filter((k) => !(FLOW_PHASE_DERIVED as readonly string[]).includes(k))).toHaveLength(13);
-    expect([...FLOW_PHASE_DERIVED].sort()).toEqual(["AWAITING_HUMAN", "BUILDING", "DELIVERED", "HEALING", "RELEASE_PENDING"]);
+    expect([...FLOW_PHASE_DERIVED].sort()).toEqual(["AWAITING_HUMAN", "BUILDING", "BUILD_READY", "DELIVERED", "HEALING", "RELEASE_PENDING"]);
     for (const key of FLOW_PHASE_DERIVED) expect(STATE_HELP.researchFlow[key].meaning, `${key} 的說明標明是衍生相態`).toContain("即時推算");
     expect(STATE_SOURCES.researchFlow.title.trim()).not.toBe("");
   });

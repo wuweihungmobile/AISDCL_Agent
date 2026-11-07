@@ -22,6 +22,8 @@ import type {
   ResearchProjectSummary,
   ResearchRecordsAudit,
   ResearchReviewRound,
+  ResearchRouteDecision,
+  ResearchRoutePreview,
   ResearchSource,
 } from "@/lib/api/types";
 import { CONSOLE_PROJECT_ID, CONSOLE_PROJECT_NAME } from "@/tests/fixtures/research/ids";
@@ -29,6 +31,7 @@ import { eventPage, EVENTS } from "@/tests/fixtures/research/events";
 import { FSM_HUMAN_PENDING } from "@/tests/fixtures/research/fsm";
 import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from "@/tests/fixtures/research/misc";
 import { detailVariant, PROJECT_LIST } from "@/tests/fixtures/research/projects";
+import { PREVIEW_A } from "@/tests/fixtures/research/route";
 import { FAIL3_ROUNDS, PRD_CONTENT, PRD_VERSIONS } from "@/tests/fixtures/research/reviews";
 import { envelope, failure, makeClient, Providers, signIn, stubApi, type ApiCall, type Reply } from "./api";
 
@@ -56,6 +59,10 @@ export type ResearchStubOptions = {
   consoleProjects: Array<{ id: string; name: string }>;
   /** 系統參數 `execution.*`（字串值，同真後端）；`null`＝該分類回 503 */
   execution: { globalTokenBudget: string; tokenBudgetWarningThreshold: string } | null;
+  /** P1：`GET …/route` 回放的分流決定；`null`＝尚未分流（回 200 `null`，D-106） */
+  route: ResearchRouteDecision | null;
+  /** P1：`POST …/route/preview` 回放的預演結果 */
+  preview: ResearchRoutePreview;
   /** 先於預設回放；回 undefined＝照預設 */
   overrides?: (call: ApiCall) => Reply;
 };
@@ -75,6 +82,8 @@ const DEFAULTS = (): ResearchStubOptions => ({
   audit: RECORDS_AUDIT,
   consoleProjects: [{ id: CONSOLE_PROJECT_ID, name: CONSOLE_PROJECT_NAME }],
   execution: { globalTokenBudget: "1000000", tokenBudgetWarningThreshold: "0.8" },
+  route: null,
+  preview: PREVIEW_A,
 });
 
 const configRow = (key: string, value: string) => ({ id: `cfg-${key}`, category: "execution", key, value, valueType: "LONG", isEncrypted: false, hasValue: true, effect: "CONSOLE" });
@@ -155,6 +164,9 @@ export function stubResearchApi(patch: Partial<ResearchStubOptions> = {}): { cal
         if (rest === "/fsm") return { data: options.fsm };
         if (rest === "/records/audit") return { data: options.audit };
       }
+      if (method === "GET" && rest === "/route") return { data: options.route };
+      if (method === "POST" && rest === "/route/preview") return { data: options.preview };
+      if (method === "POST" && rest === "/route") return { data: options.route ?? { routeId: "route-new", status: "SUCCEEDED", steps: [] } };
       if (method === "POST" && /^\/stages\/[^/]+$/.test(rest)) return { status: 202, data: { stageRunId: "run-new-1", flowPhase: "RESEARCHING", flowStatus: "RUNNING" } };
       if (method === "POST" && rest === "/reconcile") return { data: { consistent: true, checks: [] } };
       if (method === "POST" && rest === "/reinit") return { data: { flow: detail?.flow } };

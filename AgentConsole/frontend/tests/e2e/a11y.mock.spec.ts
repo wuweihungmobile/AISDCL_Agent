@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 
 import { eventPage, EVENTS } from "../fixtures/research/events";
 import { fsmView } from "../fixtures/research/fsm";
-import { R1, R2 } from "../fixtures/research/ids";
+import { R1, R2, R3 } from "../fixtures/research/ids";
 import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from "../fixtures/research/misc";
 import { detailVariant, PROJECT_LIST } from "../fixtures/research/projects";
+import { CAPABILITIES_ROUTE_READY, PREVIEW_B } from "../fixtures/research/route";
 import { defect, FAIL3_SCORES, makeRound, PRD_CONTENT, PRD_VERSIONS } from "../fixtures/research/reviews";
 import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, fail, installApiMock, paged, shellHandler, signInAs, type MockHandler } from "./mockApi";
@@ -335,6 +336,60 @@ test.describe("無障礙掃描：研發工作流（route mock＋axe；整頁；1
     await page.setViewportSize({ width: RESEARCH_WIDTHS[2], height: 900 });
     await expect(page.getByTestId("studio-panel")).toHaveAttribute("data-tier", "narrow");
     await expectNoA11yViolations(page, `研究工作區 PRD 工作室 ${RESEARCH_WIDTHS[2]}（分頁籤）`);
+    expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
+  });
+});
+
+// ── 研發工作流步驟 3「分流」（ResearchToPRD P1；TCS-ResearchToPRD-P1-20261107 AT-961-22-7）─────────────────────────────────
+
+/** R3 在步驟 3（Gate 0 已核准、尚未分流）：能力全可用，預演回軌道 B 的結果（含外部系統與警示）。 */
+const routeStepBackend: MockHandler = (call) => {
+  const p = call.path;
+  if (p === "/api/v1/research/capabilities") return { data: CAPABILITIES_ROUTE_READY };
+  const match = new RegExp(`^${RESEARCH_BASE}/${R3}(/.*)?$`).exec(p);
+  if (match === null) return undefined;
+  const rest = match[1] ?? "";
+  if (rest === "" && call.method === "GET") return { data: detailVariant("frozen", { targetScope: "AISDLC_MODULE" }) };
+  if (rest === "/route" && call.method === "GET") return { data: null };
+  if (rest === "/route/preview" && call.method === "POST") return { data: PREVIEW_B };
+  if (rest === "/events") return { data: eventPage(EVENTS, Number(call.query.get("afterSeq") ?? 0), Number(call.query.get("limit") ?? 500)) };
+  return undefined;
+};
+
+test.describe("無障礙掃描：研發工作流步驟 3 分流（route mock＋axe；1440／1000／600）", () => {
+  test.setTimeout(180_000);
+
+  test("研究工作區 /research/<id>?step=route：抽屜開啟（卡 B、差異警示、公開確認、預演結果）三個寬度零違規且無水平溢出；Esc 關閉後面板頁整頁零違規；抽屜關閉後焦點回到觸發鈕", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await signInAs(page, "ADMIN");
+    await installApiMock(page, compose(shellHandler(), routeStepBackend, researchBackend));
+    await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+    await page.goto(`/research/${R3}?step=route`);
+    const dialog = page.getByRole("dialog", { name: "分流精靈" });
+    await expect(dialog).toBeVisible({ timeout: 60_000 });
+    await dialog.getByRole("radio", { name: /軌道 B/ }).click();
+    await dialog.getByLabel(/^專案名稱/).fill("demo-app");
+    await dialog.getByLabel(/差異理由/).fill("本需求是獨立產品");
+    await dialog.getByRole("combobox", { name: /可見度/ }).selectOption("PUBLIC");
+    await dialog.getByLabel(/重新輸入庫名/).fill("demo-app");
+    await dialog.getByRole("button", { name: "預演" }).click();
+    await expect(dialog.getByTestId("route-actions")).toBeVisible();
+    for (const width of RESEARCH_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `分流精靈 ${width} 無水平溢出`).toBeLessThanOrEqual(0);
+      await expectNoA11yViolations(page, `研究工作區 分流精靈 ${width}`);
+    }
+    await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expectNoA11yViolations(page, `研究工作區 步驟 3 面板 ${RESEARCH_WIDTHS[0]}`);
+    const reopen = page.getByRole("button", { name: "重新開啟分流精靈" });
+    await reopen.focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(reopen).toBeFocused();
     expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
   });
 });

@@ -206,12 +206,10 @@ describe("AT_960_19_4 網址 step 超前導回游標所在步；已完成步驟�
 
 // ── AT_960_19_5：步驟 3～5 占位面板 ────────────────────────────────────────────────────
 
-describe("AT_960_19_5 P0 步驟 3 至 5 為占位面板：說明、唯讀、無寫入、回游標步連結，不假裝有執行中心連結", () => {
-  const PLACEHOLDERS: ReadonlyArray<{ step: ResearchFlowStepId; heading: string }> = [
-    { step: "route", heading: "第 3 步：分流" },
-    { step: "build", heading: "第 4 步：拆解與執行" },
-    { step: "deliver", heading: "第 5 步：交付" },
-  ];
+describe("AT_960_19_5 步驟 5 為占位面板（P1 起；步驟 3、4 已是真面板）：說明、唯讀、無寫入、回游標步連結，不假裝有執行中心連結", () => {
+  // P1 起只有步驟 5 仍是占位面板；步驟 3、4 改驗真面板（AT_961_19_1；TCS-ResearchToPRD-P1-20261107 §4 第 25 列）
+  const PLACEHOLDERS: ReadonlyArray<{ step: ResearchFlowStepId; heading: string }> = [{ step: "deliver", heading: "第 5 步：交付" }];
+  const AHEAD_STEPS: readonly { step: ResearchFlowStepId }[] = [{ step: "route" }, { step: "build" }, { step: "deliver" }];
 
   it.each(PLACEHOLDERS)(
     "AT_960_19_5 Gate 0 已核准（可達）、網址 ?step=$step：顯示「$heading」、「本步驟於後續階段提供」、目前進度、回到游標所在步連結；沒有任何寫入按鈕與表單",
@@ -238,7 +236,7 @@ describe("AT_960_19_5 P0 步驟 3 至 5 為占位面板：說明、唯讀、無�
     },
   );
 
-  it.each(PLACEHOLDERS)("AT_960_19_5 游標在 studio（步驟 $step 超前）：導回游標所在步，不顯示占位面板（超前不可達）", async ({ step }) => {
+  it.each(AHEAD_STEPS)("AT_960_19_5 游標在 studio（步驟 $step 超前）：導回游標所在步，不顯示占位面板（超前不可達）", async ({ step }) => {
     renderWorkspace({ search: `step=${step}` });
     await screen.findByTestId("studio-stub");
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith(REPLACE(R2, "studio")));
@@ -247,7 +245,7 @@ describe("AT_960_19_5 P0 步驟 3 至 5 為占位面板：說明、唯讀、無�
 
   it("AT_960_19_5 占位面板的目前進度取自後端衍生的相態：游標在 studio 且最遠步到 deliver 時，進度寫「第 2 步」並連回 studio", async () => {
     const base = detailVariant("studio");
-    renderWorkspace({ search: "step=build", stub: { details: { [R2]: { ...base, flow: { ...base.flow, furthestStep: "deliver" } } } } });
+    renderWorkspace({ search: "step=deliver", stub: { details: { [R2]: { ...base, flow: { ...base.flow, furthestStep: "deliver" } } } } });
     const panel = await screen.findByTestId("research-placeholder");
     expect(panel).toHaveTextContent(`目前進度：第 2 步「${FLOW_STEP_LABEL.studio}」，${FLOW_PHASE_LABEL.DRAFTING}（${FLOW_STATUS_LABEL.IDLE}）。`);
     expect(within(panel).getByRole("link", { name: "回到游標所在步" })).toHaveAttribute("href", REPLACE(R2, "studio"));
@@ -260,6 +258,48 @@ describe("AT_960_19_5 P0 步驟 3 至 5 為占位面板：說明、唯讀、無�
   });
 });
 
+// ── AT_961_19_1：步驟 3、4 接真面板 ─────────────────────────────────────────────────────
+
+describe("AT_961_19_1 ?step=route 與 ?step=build 不再是占位，?step=deliver 仍為占位；Gate 0 未完成時超前導回", () => {
+  it("AT_961_19_1 Gate 0 已核准（最遠到第 5 步）：route 顯示 RoutePanel、build 顯示 BuildFrontPanel，兩者都沒有 research-placeholder；deliver 仍是占位面板", async () => {
+    const route = renderWorkspace({ id: R3, search: "step=route", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    expect(await screen.findByTestId("route-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    route.unmount();
+
+    const build = renderWorkspace({ id: R3, search: "step=build", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    expect(await screen.findByTestId("build-front-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    build.unmount();
+
+    renderWorkspace({ id: R3, search: "step=deliver", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    const placeholder = await screen.findByTestId("research-placeholder");
+    expect(placeholder).toHaveTextContent("本步驟於後續階段提供");
+    expect(within(placeholder).queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("AT_961_19_1 游標在 studio（外環未凍結）：?step=route 導回 studio，不顯示 RoutePanel（超前不可達）", async () => {
+    renderWorkspace({ search: "step=route" });
+    await screen.findByTestId("studio-stub");
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith(REPLACE(R2, "studio")));
+    expect(screen.queryByTestId("route-panel")).toBeNull();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+  });
+
+  it("AT_961_19_1 分流執行中（ROUTING／RUNNING）步驟 3 為進行中；SCR_OPEN 時步驟列尾端標示「SCR 進行中」", async () => {
+    const base = detailVariant("frozen");
+    const routing = { ...base, flowPhase: "ROUTING", flowStatus: "RUNNING" as const, flow: { ...base.flow, effective: { ...base.flow.effective, phase: "ROUTING", status: "RUNNING" as const } } };
+    const view = renderWorkspace({ id: R3, search: "step=route", stub: { details: { [R3]: routing } } });
+    await screen.findByTestId("route-panel");
+    expect(screen.getByTestId("flow-step-route")).toHaveAttribute("data-state", "CURRENT");
+    expect(FLOW_PHASE_LABEL.ROUTING).toBe("分流中");
+    view.unmount();
+    const scr = { ...base, flow: { ...base.flow, effective: { ...base.flow.effective, phase: "SCR_OPEN" } } };
+    renderWorkspace({ id: R3, search: "step=route", stub: { details: { [R3]: scr } } });
+    await screen.findByTestId("route-panel");
+    expect(screen.getByTestId("flow-scr-open")).toHaveTextContent("SCR 進行中");
+  });
+});
 // ── AT_960_19_6：VIEWER ───────────────────────────────────────────────────────────────
 
 describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動作停用且 title 為權限不足", () => {
@@ -270,6 +310,7 @@ describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動
       await screen.findByTestId(`research-panel-${step}`);
       expect(screen.getByTestId("flow-stepper")).toBeInTheDocument();
       expect(screen.getByTestId("research-flow-header")).toBeInTheDocument();
+      if (step === "route") await screen.findByTestId("route-panel");
       const buttons = within(workspace()).getAllByRole("button");
       expect(buttons.length, "至少有「對帳」鈕").toBeGreaterThanOrEqual(1);
       for (const button of buttons) {
@@ -280,7 +321,9 @@ describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動
       // 可讀：替身面板（步驟 1、2）與占位面板（步驟 3～5）的內容都在
       if (step === "topic") expect(screen.getByTestId("topic-stub")).toBeInTheDocument();
       if (step === "studio") await waitFor(() => expect(screen.getByTestId("stub-versions")).toHaveTextContent("PRD 版本 2 個"));
-      if (step === "route" || step === "build" || step === "deliver") expect(screen.getByTestId("research-placeholder")).toBeInTheDocument();
+      if (step === "route") expect(screen.getByTestId("route-panel")).toBeInTheDocument();
+      if (step === "build") expect(screen.getByTestId("build-front-panel")).toBeInTheDocument();
+      if (step === "deliver") expect(screen.getByTestId("research-placeholder")).toBeInTheDocument();
     },
   );
 

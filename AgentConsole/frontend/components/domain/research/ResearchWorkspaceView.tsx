@@ -8,7 +8,8 @@
  *  - **游標取自 API、不取自瀏覽器儲存**：進頁時讀 `GET …/{id}`（流程脊由後端衍生），離開再回來從同一步續做；本檔不讀也不寫 localStorage、sessionStorage。
  *  - **網址只決定「看哪一步」**：`?step=` 超前於 `furthestStep`、缺少或不是五步之一，一律顯示游標所在步並以 `router.replace` 補上／導回網址（不留無效網址在歷史；導回不發任何寫入請求）；
  *    指向已完成步驟＝唯讀檢視（標示「已完成，唯讀」，面板的寫入動作須停用）。沒有「推進游標」的動作——游標只由 Bridge 在引擎動作的同一交易推進（W-R1）。
- *  - **步驟 3～5 在 P0 是占位面板**（PRD §7.3.1）：步驟名、「本步驟於後續階段提供」、目前進度與回到游標所在步的連結；唯讀、沒有任何寫入動作，
+ *  - **步驟 3、4 在 P1 是真面板**（`RoutePanel`、`BuildFrontPanel`；TCS-ResearchToPRD-P1-20261107 AT-961-19-1），直接 import：兩者的相依（TanStack Query hook）本檔已在用，
+ *    不像步驟 1、2 帶編輯器與圖表。**步驟 5 仍是占位面板**（PRD §7.3.1）：步驟名、「本步驟於後續階段提供」、目前進度與回到游標所在步的連結；唯讀、沒有任何寫入動作，
  *    也不假裝有執行中心或監控中心的連結（那是 P2 的 ResearchBackLink）。
  *  - **步驟 1、2 的面板由外部接入**（`panels` 屬性）：議題面板與 PRD 工作室是各自獨立的元件，由頁殼（`app/research/[researchId]/page.tsx`）組裝並傳入，本檔不 import 它們——
  *    工作區因此可以單獨測試（面板以替身注入），也不把面板的相依（編輯器、圖表）拖進本檔的 import 圖。沒有注入面板的步驟顯示「面板尚未接入」，不是空白。
@@ -43,15 +44,17 @@ import {
   stepNumber,
   stepReachable,
 } from "@/lib/domain/research";
-import { ResearchFlowHeader } from "./ResearchFlowHeader";
+import { BuildFrontPanel } from "./BuildFrontPanel";
 import { FlowStepper } from "./FlowStepper";
+import { ResearchFlowHeader } from "./ResearchFlowHeader";
+import { RoutePanel } from "./RoutePanel";
 
 /**
  * 步驟面板（步驟 1、2）收到的屬性：`completed`＝這一步已完成（序號小於游標所在步），面板的寫入動作須停用並標示「已完成，唯讀」；
  * VIEWER 的停用（`title` 為「權限不足（唯讀角色）」）由各面板自己依 `useAuth().canWrite` 判，兩種唯讀互不取代。
  */
 export type ResearchPanelProps = { researchId: string; project: ResearchProjectDetail; completed: boolean };
-/** 外部接入的步驟面板：只有步驟 1（`topic`）與步驟 2（`studio`）；步驟 3～5 在 P0 是占位面板。 */
+/** 外部接入的步驟面板：只有步驟 1（`topic`）與步驟 2（`studio`）；步驟 3、4 由本檔直接接真面板，步驟 5 是占位面板。 */
 export type ResearchPanels = Partial<Record<"topic" | "studio", ComponentType<ResearchPanelProps>>>;
 
 const stepHref = (researchId: string, step: ResearchFlowStepId): string => `/research/${encodeURIComponent(researchId)}?step=${step}`;
@@ -59,7 +62,7 @@ const stepHref = (researchId: string, step: ResearchFlowStepId): string => `/res
 /** 檢視已完成步驟時的「對帳」說明：對帳是 POST（記事件、寫出狀態投影），已完成步驟的唯讀檢視（AT-960-19-4）不送任何寫入，請回到游標所在步再按。 */
 const COMPLETED_RECONCILE_TITLE = "這一步已完成，唯讀；請回到游標所在步再對帳";
 
-/** 占位面板（P0 的步驟 3～5；PRD §7.3.1）：唯讀、無寫入動作；目前進度取自後端衍生的相態。 */
+/** 占位面板（P1 起只剩步驟 5；PRD §7.3.1）：唯讀、無寫入動作；目前進度取自後端衍生的相態。 */
 function PlaceholderPanel({ researchId, project, step }: { researchId: string; project: ResearchProjectDetail; step: ResearchFlowStepId }) {
   const { currentStep, effective } = project.flow;
   return (
@@ -193,6 +196,8 @@ export function ResearchWorkspaceView({ panels = {} }: { panels?: ResearchPanels
       <FlowStepper
         className="mb-4"
         steps={deriveSteps(flow.effective.step, flow.effective.status)}
+        blockedReason={flow.effective.detail}
+        scrOpen={flow.effective.phase === "SCR_OPEN"}
         selected={viewed}
         hrefFor={(id) => (stepReachable(id, flow.furthestStep) ? stepHref(researchId, id) : null)}
       />
@@ -235,6 +240,10 @@ export function ResearchWorkspaceView({ panels = {} }: { panels?: ResearchPanels
               這一步的操作面板尚未接入。
             </Card>
           )
+        ) : viewed === "route" ? (
+          <RoutePanel researchId={researchId} project={project} completed={completed} />
+        ) : viewed === "build" ? (
+          <BuildFrontPanel researchId={researchId} project={project} completed={completed} />
         ) : (
           <PlaceholderPanel researchId={researchId} project={project} step={viewed} />
         )}

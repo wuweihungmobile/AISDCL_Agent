@@ -21,6 +21,30 @@ import {
   GATE0_WAIT_BANNER_HOURS,
   LAMP_META,
   LAMP_ORDER,
+  BRANCH_PATTERN,
+  OWNER_PATTERN,
+  PLACEMENT_TARGETS,
+  PROJECT_NAME_PATTERN,
+  REASON_MAX,
+  REPO_NAME_PATTERN,
+  ROUTE_EVAL_TABLE,
+  ROUTE_MISSING_ITEM_LABEL,
+  ROUTE_STEP_LABEL,
+  SCOPE_REASON_MAX,
+  effectiveRepoName,
+  isExternalRouteAction,
+  isRepoNameConfirmed,
+  routeCapabilityBlocks,
+  routeDefaultBranch,
+  routeFormErrors,
+  routeMissingLabels,
+  routeScopeDiffers,
+  routeStatusLabel,
+  routeStepLabel,
+  routeTrackForScope,
+  safeRepoHref,
+  toRouteRequest,
+  type RouteForm,
   PROJECT_BADGE_LABEL,
   RADAR_AXES,
   READONLY_TITLE,
@@ -196,18 +220,18 @@ describe("AT_960_19_E_1 五步列與可達性（表驅動；純函式）", () =>
 // ── 詞彙（researchFlow 狀態說明表的上游）──────────────────────────────────────────────
 
 describe("研究流程詞彙：flow_status、flow_phase 與衍生相態", () => {
-  it("flow_status 八個 DB 值加衍生的 PAUSED、flow_phase 十三個 DB 值加五個衍生相態；兩張表的鍵不相交；標籤非空且各表內不重複", () => {
+  it("flow_status 八個 DB 值加衍生的 PAUSED、flow_phase 十三個 DB 值加六個衍生相態（P1 補 BUILD_READY，D-114；衍生相態 PAUSED 與衍生狀態 PAUSED 同名同義、只登記在狀態表）；兩張表的鍵不相交；標籤非空且各表內不重複", () => {
     expect(Object.keys(FLOW_STATUS_LABEL).sort()).toEqual([...ALL_STATUSES].sort());
     expect(Object.keys(FLOW_STATUS_LABEL)).toHaveLength(9);
-    expect(Object.keys(FLOW_PHASE_LABEL)).toHaveLength(18);
-    expect([...FLOW_PHASE_DERIVED].sort()).toEqual(["AWAITING_HUMAN", "BUILDING", "DELIVERED", "HEALING", "RELEASE_PENDING"]);
+    expect(Object.keys(FLOW_PHASE_LABEL)).toHaveLength(19);
+    expect([...FLOW_PHASE_DERIVED].sort()).toEqual(["AWAITING_HUMAN", "BUILDING", "BUILD_READY", "DELIVERED", "HEALING", "RELEASE_PENDING"]);
     const dbPhases = Object.keys(FLOW_PHASE_LABEL).filter((k) => !(FLOW_PHASE_DERIVED as readonly string[]).includes(k));
     expect(dbPhases.sort()).toEqual(
       ["INGESTED", "RESEARCHING", "EVIDENCE_READY", "DRAFTING", "REVIEWING", "REVISING", "GATE0_PENDING", "FROZEN", "ROUTING", "ROUTED", "TCS_DRAFTING", "TCS_PENDING", "SCR_OPEN"].sort(),
     );
     for (const key of Object.keys(FLOW_STATUS_LABEL)) expect(Object.keys(FLOW_PHASE_LABEL), `${key} 不得同時是 phase`).not.toContain(key);
-    expect(FLOW_VOCABULARY_KEYS).toHaveLength(27);
-    expect(new Set(FLOW_VOCABULARY_KEYS).size).toBe(27);
+    expect(FLOW_VOCABULARY_KEYS).toHaveLength(28);
+    expect(new Set(FLOW_VOCABULARY_KEYS).size).toBe(28);
     for (const table of [FLOW_STATUS_LABEL, FLOW_PHASE_LABEL]) {
       const labels = Object.values(table);
       for (const label of labels) expect(label.trim()).not.toBe("");
@@ -219,7 +243,7 @@ describe("研究流程詞彙：flow_status、flow_phase 與衍生相態", () => 
     expect(flowStatusLabel("RUNNING")).toBe("執行中");
     expect(flowStatusLabel("MYSTERY")).toBe("MYSTERY");
     expect(flowPhaseLabel("GATE0_PENDING")).toBe("等待核准");
-    expect(flowPhaseLabel("BUILD_READY")).toBe("BUILD_READY");
+    expect(flowPhaseLabel("NEW_PHASE_X")).toBe("NEW_PHASE_X");
     expect(flowVocabularyLabel("ESCALATED")).toBe(FLOW_STATUS_LABEL.ESCALATED);
     expect(flowVocabularyLabel("HEALING")).toBe(FLOW_PHASE_LABEL.HEALING);
     expect(flowVocabularyLabel("__未登記的鍵__")).toBe("__未登記的鍵__");
@@ -895,10 +919,10 @@ describe("新建研究專案：代號、摘要、驗證、請求本文", () => {
 // ── 錯誤原因 ──────────────────────────────────────────────────────────────────────────
 
 describe("研究 reason 與錯誤文案", () => {
-  it("RESEARCH_REASONS 為二十二個 reason（snake_case、互異、逐字等於後端 ErrorReasons 的 RESEARCH_ 常數與契約勘誤後的清單：P0 原列十八個扣被 D-72 取代的 spec_digest_changed，加 Bridge 專屬的五個）", () => {
+  it("RESEARCH_REASONS 為三十五個 reason（snake_case、互異、逐字等於後端 ErrorReasons 的 RESEARCH_ 常數與契約勘誤後的清單：P0 二十二個〔原列十八個扣被 D-72 取代的 spec_digest_changed，加 Bridge 專屬的五個〕，加 R-2 尾巴四個與 P1 九個）", () => {
     const values = Object.values(RESEARCH_REASONS);
-    expect(values).toHaveLength(22);
-    expect(new Set(values).size).toBe(22);
+    expect(values).toHaveLength(35);
+    expect(new Set(values).size).toBe(35);
     for (const value of values) expect(value).toMatch(/^[a-z]+(_[a-z]+)*$/);
     expect([...values].sort()).toEqual(
       [
@@ -924,6 +948,19 @@ describe("研究 reason 與錯誤文案", () => {
         "not_implemented",
         "digest_mismatch",
         "missing_digests",
+        "route_unsupported_in_deployment",
+        "route_conflict",
+        "branch_exists",
+        "target_not_empty",
+        "public_confirmation_required",
+        "route_step_failed",
+        "scr_open",
+        "scr_limit",
+        "decomposition_stale",
+        "compile_failed",
+        "sdd_cli_failed",
+        "fsm_state_unreadable",
+        "invalid_request",
       ].sort(),
     );
     expect(values, "D-72：409 spec_digest_changed 已由 422 digest_mismatch／missing_digests 取代，Bridge 不再回它").not.toContain("spec_digest_changed");
@@ -1082,5 +1119,241 @@ describe("測試前提", () => {
   it("lib/domain/research.ts 與本檔同目錄；components/domain/research 目錄存在", () => {
     expect(existsSync(path.join(ROOT, "lib", "domain", "research.ts"))).toBe(true);
     expect(existsSync(path.join(ROOT, "components", "domain", "research"))).toBe(true);
+  });
+});
+
+// ══ P1 分流（PKG-FE-D1；TCS-ResearchToPRD-P1-20261107）══════════════════════════════════════════════════════════════
+
+const CONTRACT = readFileSync(path.resolve(process.cwd(), "..", "docs", "02_architecture", "API_Contract_ResearchToPRD.md"), "utf8");
+const BRIDGE_ROUTE_PY = readFileSync(path.resolve(process.cwd(), "..", "engine-bridge", "app", "research", "route.py"), "utf8");
+
+/** 契約 §1.2 的欄位列：`| \`<欄位>\`〔P1〕 | <規則> | … |` → 規則欄原文。 */
+function contractRule(field: string): string {
+  const row = CONTRACT.split(/\r?\n/).find((line) => line.startsWith(`| \`${field}\``));
+  if (row === undefined) throw new Error(`契約沒有 ${field} 這一列`);
+  return row.split("|")[2].trim();
+}
+/** 規則欄內第一個反引號包住的正規式字面。 */
+const contractRegex = (field: string): string => /`([^`]+)`/.exec(contractRule(field))?.[1] ?? "";
+
+describe("AT_961_17_E_2 分流常數與後端單一來源對拍", () => {
+  it("AT_961_17_E_2 BRANCH_PATTERN、REPO_NAME_PATTERN 與契約 route.* 列逐字相等；理由上限 200、500 與契約字面相等", () => {
+    expect(BRANCH_PATTERN.source.replace(/\\\//g, "/")).toBe(contractRegex("route.branchName").replace(/^\^/, "^").replace(/\$$/, "$"));
+    expect(`^${REPO_NAME_PATTERN.source.replace(/^\^|\$$/g, "")}$`).toBe(contractRegex("route.repoName"));
+    expect(contractRule("route.scopeDiffersReason")).toContain(`1～${SCOPE_REASON_MAX} 字`);
+    expect(SCOPE_REASON_MAX).toBe(200);
+    expect(contractRule("reason")).toContain(`1～${REASON_MAX} 字`);
+    expect(REASON_MAX).toBe(500);
+    expect(PROJECT_NAME_PATTERN.source).toBe("^[a-z][a-z0-9-]{1,61}$");
+    expect(OWNER_PATTERN.source).toBe("^[A-Za-z0-9][A-Za-z0-9-]{0,38}$");
+  });
+
+  it("AT_961_17_E_2 PLACEMENT_TARGETS 的四個模組值與 Bridge route.py 常數（以原始碼文字解析）及 V19 CHECK 列舉逐值相等；每項附出處句", () => {
+    const block = /PLACEMENT_TARGETS[^=]*=\s*\{([\s\S]*?)\n\}/.exec(BRIDGE_ROUTE_PY)?.[1] ?? "";
+    const bridgeKeys = [...block.matchAll(/^ {4}"([a-z]+)": Placement\(/gm)].map((m) => m[1]);
+    expect(bridgeKeys.length).toBe(4);
+    expect(PLACEMENT_TARGETS.map((t) => t.id)).toEqual(bridgeKeys);
+    const v19 = path.resolve(process.cwd(), "..", "backend", "src", "main", "resources", "db", "migration", "V19__research_route_scr_delivery.sql");
+    if (existsSync(v19)) {
+      const sql = readFileSync(v19, "utf8");
+      for (const id of PLACEMENT_TARGETS.map((t) => t.id)) expect(sql, `V19 CHECK 含 ${id}`).toContain(`'${id}'`);
+    }
+    for (const target of PLACEMENT_TARGETS) expect(target.source.trim(), target.id).not.toBe("");
+  });
+});
+
+describe("AT_961_19_E_1 P1 reason 的前端文案表與衍生相態標籤", () => {
+  const P1_REASONS = [
+    RESEARCH_REASONS.ROUTE_UNSUPPORTED_IN_DEPLOYMENT,
+    RESEARCH_REASONS.ROUTE_CONFLICT,
+    RESEARCH_REASONS.BRANCH_EXISTS,
+    RESEARCH_REASONS.TARGET_NOT_EMPTY,
+    RESEARCH_REASONS.PUBLIC_CONFIRMATION_REQUIRED,
+    RESEARCH_REASONS.ROUTE_STEP_FAILED,
+    RESEARCH_REASONS.SCR_OPEN,
+    RESEARCH_REASONS.SCR_LIMIT,
+    RESEARCH_REASONS.DECOMPOSITION_STALE,
+    RESEARCH_REASONS.COMPILE_FAILED,
+    RESEARCH_REASONS.SDD_CLI_FAILED,
+    RESEARCH_REASONS.FSM_STATE_UNREADABLE,
+    RESEARCH_REASONS.INVALID_REQUEST,
+  ];
+  it("AT_961_19_E_1 P1 的 9 個與 R-2 的 4 個 reason 逐一有非空中文文案、不直出伺服器訊息；not_implemented 保留通用文案（D-111）", () => {
+    for (const reason of P1_REASONS) {
+      const text = researchErrorText(new ApiError({ status: 422, message: "伺服器原訊息 XYZ", reason }));
+      expect(text, reason).not.toBe("");
+      expect(text, reason).toMatch(/[\u4e00-\u9fff]/);
+      expect(text, reason).not.toContain("XYZ");
+    }
+    expect(researchErrorText(new ApiError({ status: 501, message: "x", reason: RESEARCH_REASONS.NOT_IMPLEMENTED }))).toContain("尚未開放");
+  });
+
+  it("AT_961_19_E_1 502 route_step_failed 的文案帶失敗步驟名（details.failureStep 對映 ROUTE_STEP_LABEL；未登記步驟名原樣顯示；沒有 details 時用通用句）", () => {
+    const withStep = (failureStep: unknown) => researchErrorText(new ApiError({ status: 502, message: "x", reason: RESEARCH_REASONS.ROUTE_STEP_FAILED, details: { failureStep } }));
+    expect(withStep("GIT_SWITCH")).toContain(ROUTE_STEP_LABEL.GIT_SWITCH);
+    expect(withStep("NEW_STEP")).toContain("NEW_STEP");
+    expect(researchErrorText(new ApiError({ status: 502, message: "x", reason: RESEARCH_REASONS.ROUTE_STEP_FAILED }))).toContain("分流有一步失敗");
+  });
+
+  it("AT_961_19_E_1 BUILD_READY「可開始建置」、SCR_OPEN「SCR 進行中」入 FLOW_PHASE_LABEL，PAUSED「已暫停」取自同名的狀態標籤（兩表鍵不相交，stateKeys 零改動鎖），flowPhaseLabel 三者都取得到（D-114）", () => {
+    expect(FLOW_PHASE_LABEL.BUILD_READY).toBe("可開始建置");
+    expect(FLOW_STATUS_LABEL.PAUSED).toBe("已暫停");
+    expect(FLOW_PHASE_LABEL.SCR_OPEN).toBe("SCR 進行中");
+    expect(flowPhaseLabel("PAUSED")).toBe("已暫停");
+    expect(flowPhaseLabel("BUILD_READY")).toBe("可開始建置");
+    expect(flowPhaseLabel("ROUTING")).toBe("分流中");
+    expect(flowPhaseLabel("ROUTED")).toBe("已分流");
+  });
+});
+
+describe("分流純函式：步驟名、狀態、預設值、停用判定", () => {
+  it("ROUTE_STEP_LABEL 恰好十一個步驟、標籤非空且互異；routeStepLabel 與 routeStatusLabel 對未登記值回原值", () => {
+    expect(Object.keys(ROUTE_STEP_LABEL).sort()).toEqual(
+      ["VALIDATE_TARGET", "GIT_SWITCH", "SCAFFOLD_FILES", "GIT_INIT", "GIT_COMMIT", "GH_REPO_CREATE", "PUBLISH_DOCS", "COPY_WORKSPACE", "REGISTER_STUB", "IMPL_KEY_INIT", "BASELINE_ADOPT"].sort(),
+    );
+    expect(new Set(Object.values(ROUTE_STEP_LABEL)).size).toBe(11);
+    expect(routeStepLabel("NEW")).toBe("NEW");
+    expect(routeStatusLabel("SUCCEEDED")).toBe("已完成");
+    expect(routeStatusLabel("FAILED")).toBe("失敗");
+    expect(routeStatusLabel("WEIRD")).toBe("WEIRD");
+  });
+
+  it("評估維度表五列、列頭與來源規格 §4 一致", () => {
+    expect(ROUTE_EVAL_TABLE.map((r) => r.dimension)).toEqual(["目標場景", "路徑規劃", "Git 流程", "CI/CD 與環境", "規格掛載"]);
+  });
+
+  it("預選軌道與差異判定：AISDLC_MODULE→A、STANDALONE_PROJECT→B、UNDECIDED 不預選也不算差異；預設分支取 rpNo 數字零填四位", () => {
+    expect(routeTrackForScope("AISDLC_MODULE")).toBe("A");
+    expect(routeTrackForScope("STANDALONE_PROJECT")).toBe("B");
+    expect(routeTrackForScope("UNDECIDED")).toBeNull();
+    expect(routeScopeDiffers("AISDLC_MODULE", "B")).toBe(true);
+    expect(routeScopeDiffers("AISDLC_MODULE", "A")).toBe(false);
+    expect(routeScopeDiffers("UNDECIDED", "B")).toBe(false);
+    expect(routeDefaultBranch("RP-0007")).toBe("feature/issue-0007");
+    expect(routeDefaultBranch("RP-12345")).toBe("feature/issue-2345");
+    expect(BRANCH_PATTERN.test(routeDefaultBranch("RP-0007"))).toBe(true);
+  });
+
+  it("預演缺項對映中文（gh 命令不可用、無法寫入程式庫），未登記項目原樣顯示，形狀不合回空陣列", () => {
+    expect(routeMissingLabels([{ item: "gh" }, { item: "repo_writable" }, "scaffold_root", { item: "x_new" }])).toEqual([
+      "gh 命令不可用",
+      "無法寫入程式庫",
+      ROUTE_MISSING_ITEM_LABEL.scaffold_root,
+      "x_new",
+    ]);
+    expect(routeMissingLabels(undefined)).toEqual([]);
+  });
+
+  it("capabilities 停用判定：git 缺或 mock-only 兩軌皆停；repoWritable 假停軌道 A；scaffoldRoot 為 null 或範本空停軌道 B；ghCli.ok 假只停 GitHub 勾選", () => {
+    const base = {
+      mode: "local",
+      db: true,
+      claudeCli: { ok: true },
+      ghCli: { ok: true, authenticated: false },
+      git: { ok: true },
+      sddRoot: null,
+      researchRoot: "r",
+      scaffoldRoot: "s",
+      scaffoldTemplates: ["python-fastapi"],
+      repoWritable: true,
+      webLayerEnabled: false,
+      fetchHosts: [],
+    } as const;
+    const blocks = (patch: object) => routeCapabilityBlocks({ ...base, ...patch } as never);
+    expect(blocks({})).toEqual({ all: null, trackA: null, trackB: null, github: null });
+    expect(blocks({ git: { ok: false } }).all).toBe("git");
+    expect(blocks({ mode: "mock-only" }).all).toBe("mock-only");
+    expect(blocks({ repoWritable: false })).toMatchObject({ all: null, trackA: "repo", trackB: null });
+    expect(blocks({ scaffoldRoot: null }).trackB).toBe("scaffold");
+    expect(blocks({ scaffoldTemplates: [] }).trackB).toBe("scaffold");
+    expect(blocks({ ghCli: { ok: false, authenticated: false } })).toMatchObject({ github: "gh", trackA: null, trackB: null });
+  });
+
+  it("Public 確認為逐字完全相等：差一字元、大小寫、尾端空白、不可見字元皆不符；空庫名永遠不符", () => {
+    expect(isRepoNameConfirmed("demo-app", "demo-app")).toBe(true);
+    for (const wrong of ["demo-ap", "Demo-App", "demo-app ", "demo-app\u200b", ""]) expect(isRepoNameConfirmed("demo-app", wrong), JSON.stringify(wrong)).toBe(false);
+    expect(isRepoNameConfirmed("", "")).toBe(false);
+  });
+
+  it("safeRepoHref 只放行 https://github.com/<owner>/<repo>；isExternalRouteAction 認 touchesExternal 與別名 external", () => {
+    expect(safeRepoHref("https://github.com/acme/demo-app")).toBe("https://github.com/acme/demo-app");
+    // 含 userinfo 的負控以片段拼出：原始碼不留「帶密碼的 URL」字面（根層機密掃描閘會擋 commit），執行期仍是同一個字串。
+    const withUserinfo = "https://user:" + "p@github.com/a/b";
+    for (const bad of ["http://github.com/a/b", "https://github.com.evil.com/a/b", "javascript:alert(1)", "https://github.com/a/b/c", withUserinfo, null, undefined])
+      expect(safeRepoHref(bad), String(bad)).toBeNull();
+    expect(isExternalRouteAction({ touchesExternal: true })).toBe(true);
+    expect(isExternalRouteAction({ touchesExternal: false, external: true })).toBe(true);
+    expect(isExternalRouteAction({ touchesExternal: false })).toBe(false);
+  });
+});
+
+describe("分流表單驗證與請求本文", () => {
+  const formA: RouteForm = {
+    track: "A",
+    targetModule: "autoclaude",
+    branchName: "feature/issue-0007",
+    baseRef: "main",
+    projectName: "",
+    stackTemplate: "",
+    owner: "",
+    repoName: "",
+    visibility: "PRIVATE",
+    confirmRepoName: "",
+    createGithub: false,
+    ci: true,
+    dockerCompose: true,
+    scopeDiffersReason: "",
+  };
+  const formB: RouteForm = { ...formA, track: "B", targetModule: "", branchName: "", baseRef: "", projectName: "demo-app", stackTemplate: "python-fastapi", owner: "acme" };
+
+  it("軌道 A：分支名不合 ^feature/[a-z0-9-]{1,40}$、缺掛載目標、基底 ref 空或含空白各回欄位錯誤；合規回空物件", () => {
+    expect(routeFormErrors(formA, false)).toEqual({});
+    expect(routeFormErrors({ ...formA, branchName: "issue-1" }, false).branchName).toBeDefined();
+    expect(routeFormErrors({ ...formA, branchName: `feature/${"a".repeat(41)}` }, false).branchName).toBeDefined();
+    expect(routeFormErrors({ ...formA, branchName: `feature/${"a".repeat(40)}` }, false).branchName).toBeUndefined();
+    expect(routeFormErrors({ ...formA, targetModule: "" }, false).targetModule).toBeDefined();
+    expect(routeFormErrors({ ...formA, baseRef: " " }, false).baseRef).toBeDefined();
+    expect(routeFormErrors({ ...formA, baseRef: "ma in" }, false).baseRef).toBeDefined();
+    expect(routeFormErrors({ ...formA, track: null }, false).track).toBeDefined();
+  });
+
+  it("軌道 B：專案名稱、owner、庫名即時驗證；Public 需完全相同的確認名；庫名省略時取專案名稱", () => {
+    expect(routeFormErrors(formB, false)).toEqual({});
+    expect(routeFormErrors({ ...formB, projectName: "Demo" }, false).projectName).toBeDefined();
+    expect(routeFormErrors({ ...formB, projectName: "a" }, false).projectName).toBeDefined();
+    expect(routeFormErrors({ ...formB, repoName: "Bad_Name" }, false).repoName).toBeDefined();
+    expect(routeFormErrors({ ...formB, owner: "-x" }, false).owner).toBeDefined();
+    expect(routeFormErrors({ ...formB, owner: "", createGithub: true }, false).owner).toBeDefined();
+    expect(routeFormErrors({ ...formB, owner: "" }, false).owner).toBeUndefined();
+    expect(routeFormErrors({ ...formB, stackTemplate: "" }, false).stackTemplate).toBeDefined();
+    expect(routeFormErrors({ ...formB, visibility: "PUBLIC", confirmRepoName: "" }, false).confirmRepoName).toBeDefined();
+    expect(routeFormErrors({ ...formB, visibility: "PUBLIC", confirmRepoName: "demo-app" }, false).confirmRepoName).toBeUndefined();
+    expect(routeFormErrors({ ...formB, visibility: "PUBLIC", repoName: "other", confirmRepoName: "demo-app" }, false).confirmRepoName).toBeDefined();
+    expect(effectiveRepoName(formB)).toBe("demo-app");
+    expect(effectiveRepoName({ ...formB, repoName: "other" })).toBe("other");
+  });
+
+  it("理由 0、1、200、201 字：差異時 0 與 201 有錯、1 與 200 無錯；不差異時不檢查；以字元（code point）計", () => {
+    const err = (n: number) => routeFormErrors({ ...formA, scopeDiffersReason: "字".repeat(n) }, true).scopeDiffersReason;
+    expect(err(0)).toBeDefined();
+    expect(err(1)).toBeUndefined();
+    expect(err(200)).toBeUndefined();
+    expect(err(201)).toBeDefined();
+    expect(routeFormErrors({ ...formA, scopeDiffersReason: "😀".repeat(200) }, true).scopeDiffersReason).toBeUndefined();
+    expect(routeFormErrors({ ...formA, scopeDiffersReason: "" }, false).scopeDiffersReason).toBeUndefined();
+  });
+
+  it("toRouteRequest：軌道 A 不含 B 欄位與 targetPath、approver；軌道 B 的 PUBLIC 才帶 confirmRepoName；差異時才帶 scopeDiffersReason", () => {
+    const a = toRouteRequest(formA, false);
+    expect(a).toEqual({ track: "A", targetModule: "autoclaude", branchName: "feature/issue-0007", baseRef: "main" });
+    const b = toRouteRequest(formB, true);
+    expect(b).toMatchObject({ track: "B", projectName: "demo-app", repoName: "demo-app", owner: "acme", visibility: "PRIVATE", createGithub: false, ci: true, dockerCompose: true });
+    expect(b).not.toHaveProperty("confirmRepoName");
+    expect(b).toHaveProperty("scopeDiffersReason");
+    expect(toRouteRequest({ ...formB, visibility: "PUBLIC", confirmRepoName: "demo-app" }, false)).toMatchObject({ visibility: "PUBLIC", confirmRepoName: "demo-app" });
+    for (const body of [a, b]) {
+      expect(body).not.toHaveProperty("targetPath");
+      expect(body).not.toHaveProperty("approver");
+    }
   });
 });

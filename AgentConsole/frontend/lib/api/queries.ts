@@ -48,9 +48,11 @@ import {
   getProject,
   getProjectMetrics,
   getResearchCapabilities,
+  getResearchDecomposition,
   getResearchFsm,
   getResearchProject,
   getResearchRecordsAudit,
+  getResearchRoute,
   getReviewRound,
   getSddEngineStatus,
   getSiConsoleWrites,
@@ -78,7 +80,12 @@ import {
   listResearchEvents,
   listResearchEvidence,
   listResearchProjects,
+  listResearchScr,
   listResearchSources,
+  previewResearchRoute,
+  routeResearchProject,
+  signoffResearchDecomposition,
+  triggerResearchDecomposition,
   listReviewRounds,
   listSettings,
   listSettingsByCategory,
@@ -151,11 +158,14 @@ import type {
   ResearchAllowlistRequest,
   ResearchApproveRequest,
   ResearchCreateRequest,
+  ResearchDecompositionSignoffRequest,
   ResearchEvent,
   ResearchProjectDetail,
   ResearchReconcileResult,
   ResearchReinitRequest,
   ResearchReturnRequest,
+  ResearchRouteConfirmRequest,
+  ResearchRouteRequest,
   ResearchSavePrdRequest,
   ResearchStage,
   ResearchStartStageRequest,
@@ -254,6 +264,10 @@ export const qk = {
   researchRecordsAudit: (id: string) => ["research", "project", id, "records-audit"] as const,
   /** 最近一次對帳的結果（只由對帳 mutation 寫入；沒有 queryFn，所以任何重抓都不會替使用者打一次 POST）。 */
   researchReconcile: (id: string) => ["research", "project", id, "reconcile"] as const,
+  /** P1：最新分流決定（含步驟）、SCR 清單、目前拆解；都掛在專案底下，寫入成功時隨 `invalidateResearch` 一起標為過期。 */
+  researchRoute: (id: string) => ["research", "project", id, "route"] as const,
+  researchScr: (id: string) => ["research", "project", id, "scr"] as const,
+  researchDecomposition: (id: string) => ["research", "project", id, "decomposition"] as const,
 };
 
 const POLL_MS = 30_000;
@@ -1467,3 +1481,50 @@ function useAllowlistWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
 
 export const useAddResearchAllowlistEntry = () => useAllowlistWrite((body: ResearchAllowlistRequest) => addResearchAllowlistEntry(body));
 export const useUpdateResearchAllowlistEntry = () => useAllowlistWrite((v: { id: string; body: ResearchAllowlistPatch }) => updateResearchAllowlistEntry(v.id, v.body));
+
+// ── ResearchToPRD P1（分流、拆解；TCS-ResearchToPRD-P1-20261107）──────────────────────────────────────────────────────
+// 先在這裡備齊（FE-D2 的拆解與 SCR 面板只 import）；`GET …/route` 與 `GET …/decomposition` 在「尚無」時回 200 `null`（D-106、D-120）。
+
+/** 最新分流決定：執行中每 5 秒重抓（SSE 斷線時的回補；正常由 `research.route` 事件觸發重抓）；尚無回 `null`。 */
+export function useResearchRoute(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({
+    queryKey: qk.researchRoute(id ?? ""),
+    queryFn: ({ signal }) => getResearchRoute(id as string, { signal }),
+    enabled,
+    refetchInterval: (query) => ((query.state.data as { status?: string } | null | undefined)?.status === "RUNNING" ? 5_000 : false),
+  });
+}
+
+/** 預演（POST，但零副作用）：不使專案資料過期。 */
+export const usePreviewResearchRoute = () => useMutation({ mutationFn: (v: { id: string; body: ResearchRouteRequest }) => previewResearchRoute(v.id, v.body) });
+
+/** 確認執行分流（僅 ADMIN）：成功與失敗（502 `route_step_failed`，列已改 FAILED）都要重抓，所以放在 `onSettled`。 */
+export function useRouteResearchProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: ResearchRouteConfirmRequest }) => routeResearchProject(v.id, v.body),
+    onSettled: (_data, _error, v) => invalidateResearch(qc, v.id),
+  });
+}
+
+export function useResearchScr(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchScr(id ?? ""), queryFn: ({ signal }) => listResearchScr(id as string, { signal }), enabled });
+}
+
+export function useResearchDecomposition(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchDecomposition(id ?? ""), queryFn: ({ signal }) => getResearchDecomposition(id as string, { signal }), enabled });
+}
+
+export const useTriggerResearchDecomposition = () =>
+  useResearchWrite(
+    (id: string) => triggerResearchDecomposition(id),
+    (id) => id,
+  );
+export const useSignoffResearchDecomposition = () =>
+  useResearchWrite(
+    (v: { id: string; body: ResearchDecompositionSignoffRequest }) => signoffResearchDecomposition(v.id, v.body),
+    (v) => v.id,
+  );

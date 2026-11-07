@@ -63,6 +63,8 @@ import type {
   ResearchApproveResult,
   ResearchCapabilities,
   ResearchCreateRequest,
+  ResearchDecomposition,
+  ResearchDecompositionSignoffRequest,
   ResearchEventPage,
   ResearchEvidenceMatrix,
   ResearchFsmView,
@@ -76,7 +78,14 @@ import type {
   ResearchReturnRequest,
   ResearchReturnResult,
   ResearchReviewRound,
+  ResearchRouteConfirmRequest,
+  ResearchRouteDecision,
+  ResearchRoutePreview,
+  ResearchRouteRequest,
   ResearchSavePrdRequest,
+  ResearchScr,
+  ResearchScrApplyResult,
+  ResearchScrOpenRequest,
   ResearchSource,
   ResearchStage,
   ResearchStageStarted,
@@ -798,4 +807,51 @@ export function addResearchAllowlistEntry(body: ResearchAllowlistRequest): Promi
 /** 停用或啟用 allowlist 條目（API-RP-22；僅 ADMIN；PATCH）：本文只准 `enabled`，含其他欄位回 422；條目不可刪。 */
 export function updateResearchAllowlistEntry(id: string, body: ResearchAllowlistPatch): Promise<ResearchAllowlistEntry> {
   return apiRequest<ResearchAllowlistEntry>(`${RESEARCH}/allowlist/${seg(id)}`, { method: "PATCH", body });
+}
+
+// ── ResearchToPRD P1（分流、SCR、拆解；TCS-ResearchToPRD-P1-20261107 AT-961-19-5；IFACE §3.1）──────────────────────────
+// 九個函式，函式名＝契約勘誤後的 operationId（D-118 ⚖P1-24）。`tcs-draft` 階段走既有的 `startResearchStage(id, "tcs-draft")`，不另開函式。
+
+/** 預演（API-RP-14；OPERATOR 以上）：零副作用，只回動作清單與警示。 */
+export function previewResearchRoute(id: string, body: ResearchRouteRequest): Promise<ResearchRoutePreview> {
+  return apiRequest<ResearchRoutePreview>(`${researchProject(id)}/route/preview`, { method: "POST", body });
+}
+
+/** 確認執行分流（API-RP-14；僅 ADMIN；同步請求，後端讀逾時 330 秒，D-105）：成功 200，失敗 502 `route_step_failed`。 */
+export function routeResearchProject(id: string, body: ResearchRouteConfirmRequest): Promise<ResearchRouteDecision> {
+  return apiRequest<ResearchRouteDecision>(`${researchProject(id)}/route`, { method: "POST", body });
+}
+
+/** 最新一筆分流決定；尚未分流回 200 `null`（D-106）。 */
+export function getResearchRoute(id: string, opts: Opts = {}): Promise<ResearchRouteDecision | null> {
+  return apiRequest<ResearchRouteDecision | null>(`${researchProject(id)}/route`, { signal: opts.signal });
+}
+
+/** 發起規格變更請求（API-RP-15；OPERATOR 以上；202；發起鈕屬 P2，P1 只提供函式）。 */
+export function openResearchScr(id: string, body: ResearchScrOpenRequest): Promise<ResearchScr> {
+  return apiRequest<ResearchScr>(`${researchProject(id)}/scr`, { method: "POST", body });
+}
+
+export function listResearchScr(id: string, opts: Opts = {}): Promise<ResearchScr[]> {
+  return apiRequest<ResearchScr[]>(`${researchProject(id)}/scr`, { signal: opts.signal });
+}
+
+/** MINOR SCR 的套用重試（僅 ADMIN；D-103）。 */
+export function applyResearchScr(id: string, scrNo: number): Promise<ResearchScrApplyResult> {
+  return apiRequest<ResearchScrApplyResult>(`${researchProject(id)}/scr/${seg(String(scrNo))}/apply`, { method: "POST" });
+}
+
+/** 目前的拆解（API-RP-16）；尚無拆解回 200 `null`（D-120）。 */
+export function getResearchDecomposition(id: string, opts: Opts = {}): Promise<ResearchDecomposition | null> {
+  return apiRequest<ResearchDecomposition | null>(`${researchProject(id)}/decomposition`, { signal: opts.signal });
+}
+
+/** 觸發拆解（OPERATOR 以上；同步請求，後端讀逾時 330 秒，D-94、D-105）。 */
+export function triggerResearchDecomposition(id: string): Promise<ResearchDecomposition> {
+  return apiRequest<ResearchDecomposition>(`${researchProject(id)}/decomposition`, { method: "POST" });
+}
+
+/** 簽核拆解（OPERATOR 以上；approver 由後端取 JWT subject，前端不送；未覆蓋的 AC 須各附豁免理由）。 */
+export function signoffResearchDecomposition(id: string, body: ResearchDecompositionSignoffRequest): Promise<ResearchDecomposition> {
+  return apiRequest<ResearchDecomposition>(`${researchProject(id)}/decomposition/signoff`, { method: "POST", body });
 }

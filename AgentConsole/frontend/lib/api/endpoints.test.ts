@@ -262,6 +262,40 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
     { listKind: "WEB", host: "docs.example.com", layer: "INDUSTRY", purpose: "官方文件", tosNote: "", minIntervalSeconds: 5, tosAcknowledged: false },
   ],
   ["updateResearchAllowlistEntry", () => api.updateResearchAllowlistEntry("A", { enabled: false }), "PATCH", "/api/v1/research/allowlist/A", { enabled: false }],
+  // ResearchToPRD P1（九個；operationId 為 D-118 ⚖P1-24 定案）
+  [
+    "previewResearchRoute",
+    () => api.previewResearchRoute("R", { track: "A", targetModule: "autoclaude", branchName: "feature/issue-0007", baseRef: "main" }),
+    "POST",
+    "/api/v1/research/projects/R/route/preview",
+    { track: "A", targetModule: "autoclaude", branchName: "feature/issue-0007", baseRef: "main" },
+  ],
+  [
+    "routeResearchProject",
+    () => api.routeResearchProject("R", { track: "B", projectName: "demo-app", stackTemplate: "python-fastapi", owner: "acme", repoName: "demo-app", visibility: "PRIVATE", retry: true }),
+    "POST",
+    "/api/v1/research/projects/R/route",
+    { track: "B", projectName: "demo-app", stackTemplate: "python-fastapi", owner: "acme", repoName: "demo-app", visibility: "PRIVATE", retry: true },
+  ],
+  ["getResearchRoute", () => api.getResearchRoute("R"), "GET", "/api/v1/research/projects/R/route"],
+  [
+    "openResearchScr",
+    () => api.openResearchScr("R", { kind: "MINOR", sourceKind: "HUMAN", reason: "AC 需補充", reasonClass: "AC 模糊", affectedSections: ["§5"] }),
+    "POST",
+    "/api/v1/research/projects/R/scr",
+    { kind: "MINOR", sourceKind: "HUMAN", reason: "AC 需補充", reasonClass: "AC 模糊", affectedSections: ["§5"] },
+  ],
+  ["listResearchScr", () => api.listResearchScr("R"), "GET", "/api/v1/research/projects/R/scr"],
+  ["applyResearchScr", () => api.applyResearchScr("R", 2), "POST", "/api/v1/research/projects/R/scr/2/apply"],
+  ["getResearchDecomposition", () => api.getResearchDecomposition("R"), "GET", "/api/v1/research/projects/R/decomposition"],
+  ["triggerResearchDecomposition", () => api.triggerResearchDecomposition("R"), "POST", "/api/v1/research/projects/R/decomposition"],
+  [
+    "signoffResearchDecomposition",
+    () => api.signoffResearchDecomposition("R", { waivers: [{ ac: "AC-1", reason: "本期不做" }] }),
+    "POST",
+    "/api/v1/research/projects/R/decomposition/signoff",
+    { waivers: [{ ac: "AC-1", reason: "本期不做" }] },
+  ],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -282,10 +316,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），共 109 個；不多不少", () => {
+  it("AT_961_19_5 匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），再加 P1 的 9 個（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition），共 118 個；不多不少", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(109);
+    expect(names).toHaveLength(118);
   });
 
   it("研究端點（ResearchToPRD P0）：id 編成單一路徑段；省略的選項不進網址（清單的 archived 只在為 true 時帶 ?archived=true）；啟動階段與重試初始化沒給本文時送空物件；PATCH 的方法字串就是 PATCH", async () => {
