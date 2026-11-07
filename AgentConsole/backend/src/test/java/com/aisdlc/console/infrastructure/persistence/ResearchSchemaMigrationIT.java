@@ -501,10 +501,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
-                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config").containsEntry("21", "research gate details delivery snapshot");
+                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config").containsEntry("21", "research gate details delivery snapshot").containsEntry("22", "research flow phase delivered");
             soft.assertThat(afterV18).as("V16～V19 沒有拿掉任何既有的表").containsAll(afterV15).containsAll(afterV18);
             soft.assertThat(added).as("V16～V18 在 console 內恰多出 13 張表（P0 集合不退步）").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
             soft.assertThat(addedByV19).as("V19 在 console 內恰多出 5 張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
@@ -846,7 +846,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
 
             expectEnum(soft, db.jdbc, "research_projects", "flow_step", "topic", "studio", "route", "build", "deliver");
             expectEnum(soft, db.jdbc, "research_projects", "flow_phase", "INGESTED", "RESEARCHING", "EVIDENCE_READY", "DRAFTING",
-                    "REVIEWING", "REVISING", "GATE0_PENDING", "FROZEN", "ROUTING", "ROUTED", "TCS_DRAFTING", "TCS_PENDING", "SCR_OPEN");
+                    "REVIEWING", "REVISING", "GATE0_PENDING", "FROZEN", "ROUTING", "ROUTED", "TCS_DRAFTING", "TCS_PENDING", "SCR_OPEN", "DELIVERED");
             expectEnum(soft, db.jdbc, "research_projects", "flow_status", "IDLE", "RUNNING", "WAITING_HUMAN", "BLOCKED",
                     "ESCALATED", "FAILED", "CANCELLED", "COMPLETED");
             expectEnum(soft, db.jdbc, "research_projects", "depth_level", "QUICK", "STANDARD", "DEEP");
@@ -1738,9 +1738,9 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
-            soft.assertThat(history.get(18).get("description")).as("V19 描述（第 19 筆；其後還有 V20、V21）").isEqualTo("research route scr delivery");
+            soft.assertThat(history.get(18).get("description")).as("V19 描述（第 19 筆；其後還有 V20、V21、V22）").isEqualTo("research route scr delivery");
             soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
             soft.assertThat(viewsAfter18).as("V18 時還沒有視圖").isEmpty();
             soft.assertThat(viewsAfter19).as("V19 在 console 內恰多出一個視圖").containsExactly(V19_VIEW);
@@ -2314,25 +2314,28 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
     }
 
     @Test
-    void AT_962_1_1_flywayHistoryReachesTwentyOneWithoutNewTablesAndEarlierChecksumsUnchanged() {
-        Db at20 = databaseAt("20");
-        Db at21 = newDatabase();
-        List<Map<String, Object>> history = flywayHistory(at21.jdbc);
-        List<Map<String, Object>> history20 = flywayHistory(at20.jdbc);
+    void AT_962_1_1_flywayHistoryReachesTwentyTwoWithoutNewTablesAndEarlierChecksumsUnchanged() {
+        Db at21 = databaseAt("21");
+        Db at22 = newDatabase();
+        List<Map<String, Object>> history = flywayHistory(at22.jdbc);
+        List<Map<String, Object>> history21 = flywayHistory(at21.jdbc);
 
         SoftAssertions.assertSoftly(soft -> {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
-            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 21")
+            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 22")
                     .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18",
-                            "19", "20", "21");
+                            "19", "20", "21", "22");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             Map<String, Object> v21 = history.get(20);
             soft.assertThat(v21.get("script")).as("V21 檔名").isEqualTo("V21__research_gate_details_delivery_snapshot.sql");
             soft.assertThat(v21.get("description")).as("V21 描述").isEqualTo("research gate details delivery snapshot");
-            soft.assertThat(history.subList(0, 20)).extracting(row -> row.get("checksum")).as("V1～V20 的 checksum 與 20 版庫相同")
-                    .isEqualTo(history20.stream().map(row -> row.get("checksum")).toList());
-            soft.assertThat(baseTables(at21.jdbc)).as("V21 不新增任何表（只多欄位）").isEqualTo(baseTables(at20.jdbc));
+            Map<String, Object> v22 = history.get(21);
+            soft.assertThat(v22.get("script")).as("V22 檔名").isEqualTo("V22__research_flow_phase_delivered.sql");
+            soft.assertThat(v22.get("description")).as("V22 描述").isEqualTo("research flow phase delivered");
+            soft.assertThat(history.subList(0, 21)).extracting(row -> row.get("checksum")).as("V1～V21 的 checksum 與 21 版庫相同")
+                    .isEqualTo(history21.stream().map(row -> row.get("checksum")).toList());
+            soft.assertThat(baseTables(at22.jdbc)).as("V22 不新增任何表（只放寬 CHECK）").isEqualTo(baseTables(at21.jdbc));
         });
     }
 
@@ -2595,6 +2598,87 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             expectGuard(soft, "UPDATE status", run(db, jdbc -> jdbc.update("update console.research_deliveries set status = 'FAILED'")),
                     "research_deliveries", "append-only");
             expectGuard(soft, "DELETE", run(db, jdbc -> jdbc.update("delete from console.research_deliveries")), "research_deliveries", "append-only");
+        });
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // V22（P2；PKG-DB-P2b；D-162(a)；TCS AT-962-18-5 的游標 deliver／DELIVERED／COMPLETED）：flow_phase 放寬 DELIVERED
+    // 為什麼重要：V16 的列舉 CHECK 少 DELIVERED，Bridge :tag 寫不進交付完成游標；放寬必須只多這一個值，
+    // 其餘值域、大小寫嚴格性、既有列與守衛一概不退步，否則 DB 層就失去擋髒游標的能力。
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static final List<String> V22_PHASES = List.of("INGESTED", "RESEARCHING", "EVIDENCE_READY", "DRAFTING", "REVIEWING", "REVISING",
+            "GATE0_PENDING", "FROZEN", "ROUTING", "ROUTED", "TCS_DRAFTING", "TCS_PENDING", "SCR_OPEN", "DELIVERED");
+
+    @Test
+    void AT_962_1b_1_upgradingAV21DatabaseKeepsExistingProjectRowsUntouched() {
+        Db db = databaseAt("21");
+        List<UUID> ids = new ArrayList<>();
+        for (String phase : List.of("INGESTED", "FROZEN", "SCR_OPEN")) {
+            UUID id = UUID.randomUUID();
+            ids.add(id);
+            insert(db.jdbc, "research_projects", with(projectRow(id, "v22-" + id.toString().substring(0, 8)), "flow_phase", phase));
+        }
+        String before = snapshot(db.jdbc, "research_projects");
+
+        upgradeToLatest(db);
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(snapshot(db.jdbc, "research_projects")).as("升級前的專案列逐欄不變").isEqualTo(before);
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.research_projects", Integer.class)).isEqualTo(ids.size());
+            soft.assertThat(flywayHistory(db.jdbc)).extracting(row -> row.get("version")).as("升級後歷史含 22").contains("22");
+        });
+    }
+
+    @Test
+    void AT_962_1b_2_deliveredIsWritableWithDeliverAndCompletedAndEveryOldValueStillPasses() {
+        Db db = newDatabase();
+        Map<String, Object> delivered = with(projectRow(UUID.randomUUID(), "v22-dlv"), "flow_step", "deliver", "flow_phase", "DELIVERED",
+                "flow_status", "COMPLETED");
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectOk(soft, "deliver／DELIVERED／COMPLETED 組合", tryInsert(db, "research_projects", delivered));
+            for (String phase : V22_PHASES) {
+                expectOk(soft, "flow_phase " + phase, tryInsert(db, "research_projects",
+                        with(projectRow(UUID.randomUUID(), "v22-" + phase.toLowerCase().replace('_', '-')), "flow_phase", phase)));
+            }
+            expectEnum(soft, db.jdbc, "research_projects", "flow_phase", V22_PHASES.toArray(String[]::new));
+        });
+    }
+
+    @Test
+    void AT_962_1b_3_flowPhaseStillRejectsLowercaseEmptyAndUnknownValues() {
+        Db db = newDatabase();
+
+        SoftAssertions.assertSoftly(soft -> {
+            for (String bad : List.of("delivered", "Delivered", "", "DELIVERY", "DELIVERED ", "UNKNOWN")) {
+                expectState(soft, "flow_phase 為「" + bad + "」", tryInsert(db, "research_projects",
+                        with(projectRow(UUID.randomUUID(), "v22-bad"), "flow_phase", bad)), CHECK);
+            }
+        });
+    }
+
+    @Test
+    void AT_962_1b_4_theFlowPhaseCheckIsReplacedNotKeptAlongsideAndGuardsDoNotRegress() {
+        Db db = newDatabase();
+        UUID id = UUID.randomUUID();
+        insert(db.jdbc, "research_projects", projectRow(id, "v22-guard"));
+        List<Map<String, Object>> checks = db.jdbc.queryForList("select conname, pg_get_constraintdef(oid) as def from pg_constraint "
+                + "where conrelid = 'console.research_projects'::regclass and contype = 'c' order by conname");
+
+        SoftAssertions.assertSoftly(soft -> {
+            List<Map<String, Object>> named = checks.stream().filter(c -> "research_projects_flow_phase_check".equals(c.get("conname"))).toList();
+            soft.assertThat(named).as("以名 research_projects_flow_phase_check 查恰一條").hasSize(1);
+            soft.assertThat(String.valueOf(named.get(0).get("def"))).as("定義含 DELIVERED").contains("DELIVERED").contains("SCR_OPEN");
+            soft.assertThat(checks.stream().filter(c -> String.valueOf(c.get("def")).contains("SCR_OPEN")).count())
+                    .as("同一欄不得有兩條 flow_phase 列舉 CHECK").isEqualTo(1L);
+            expectOk(soft, "受控更新：flow_phase 改 DELIVERED（在允許清單內）", rolledBack(db, jdbc -> jdbc.update(
+                    "update console.research_projects set flow_step = 'deliver', flow_phase = 'DELIVERED', flow_status = 'COMPLETED' where id = ?", id)));
+            expectState(soft, "更新成列舉外值", run(db, jdbc -> jdbc.update(
+                    "update console.research_projects set flow_phase = 'delivered' where id = ?", id)), CHECK);
+            expectGuard(soft, "DELETE", run(db, jdbc -> jdbc.update("delete from console.research_projects")), "research_projects");
+            expectGuard(soft, "UPDATE 清單外欄位 slug", run(db, jdbc -> jdbc.update("update console.research_projects set slug = 'zzz'")),
+                    "research_projects");
         });
     }
 }
