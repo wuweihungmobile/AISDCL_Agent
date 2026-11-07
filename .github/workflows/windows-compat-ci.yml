@@ -2433,9 +2433,17 @@ jobs:
             New-Item -ItemType Junction -Path (Join-Path $clone '.venv') -Target $venvReal | Out-Null
             $py = Join-Path $clone '.venv\Scripts\python.exe'
             if (-not (Test-Path -LiteralPath $py)) { throw "the .venv Junction does not resolve to a python: $py" }
-            # a stale .env copy: HALT shadows env.shared (auto-fixable), NOTICE is a legitimate machine-local override
+            # a stale .env copy: HALT shadows env.shared (auto-fixable), NOTICE is a legitimate machine-local override.
+            # The planted HALT value must DIFFER from env.shared's current value, otherwise env-doctor reports
+            # [redundant] instead of [shadows-shared] and the sanity throw below goes red for a fixture reason
+            # (2026-11-02 nightly: env.shared had just moved 98→95 and the fixture also planted 95). Read the
+            # shared value first and plant a different one instead of binding a constant.
             $dotenv = Join-Path $clone '.env'
-            $original = "# env-sync-e2e: stale copy, HALT shadows env.shared, NOTICE is a machine-local override`nAUTOSDD_QUOTA_HALT_PCT=95`nAUTOSDD_QUOTA_NOTICE_PCT=55`n"
+            $sharedTxt = [IO.File]::ReadAllText((Join-Path $clone 'env.shared'), $enc)
+            $sharedHalt = [regex]::Match($sharedTxt, '(?m)^AUTOSDD_QUOTA_HALT_PCT=(\d+)')
+            if (-not $sharedHalt.Success) { throw 'env.shared (clone) has no AUTOSDD_QUOTA_HALT_PCT line' }
+            $planted = if ([int]$sharedHalt.Groups[1].Value -eq 95) { 94 } else { 95 }
+            $original = "# env-sync-e2e: stale copy, HALT shadows env.shared, NOTICE is a machine-local override`nAUTOSDD_QUOTA_HALT_PCT=$planted`nAUTOSDD_QUOTA_NOTICE_PCT=55`n"
             [IO.File]::WriteAllText($dotenv, $original, $enc)
             $before = Invoke-RawUtf8 "$py $clone\tools\lib\quota_policy.py --env-doctor" 'doctor_before'
             Write-Host $before.Text
@@ -2467,7 +2475,7 @@ jobs:
               $problems += 'the backup content differs from the original .env'
             }
             $after = [IO.File]::ReadAllText($dotenv, $enc)
-            if ($after -match '(?m)^AUTOSDD_QUOTA_HALT_PCT=95') { $problems += '.env still carries the shadowing HALT line' }
+            if ($after -match "(?m)^AUTOSDD_QUOTA_HALT_PCT=$planted") { $problems += '.env still carries the shadowing HALT line' }
             if ($after -notmatch '(?m)^AUTOSDD_QUOTA_NOTICE_PCT=55') { $problems += 'the machine-local NOTICE override was deleted (the fix must be selective)' }
             $doc = Invoke-RawUtf8 "$py $clone\tools\lib\quota_policy.py --env-doctor" 'doctor_after'
             Write-Host $doc.Text
