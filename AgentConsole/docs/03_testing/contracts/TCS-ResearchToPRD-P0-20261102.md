@@ -95,15 +95,15 @@
 | 上位檔 | 路徑（相對 monorepo 根） | sha256 |
 |--------|--------------------------|--------|
 | Console PRD（§0.9 研究指標、§8.1 導覽註） | `docs/01_requirements/Agent_ConsoleUI_PRD.md` | `87dd6c9ba917ed0296eb923e7e6122cb4d5f6afb9c5bc06ab39143a0a9924660` |
-| Architecture（本輪增補 §2.2、§3、§5.1、§5.4、§6(e)、§7.2、§8、§9.4、§10.4、§11.1、§11.3′、§12） | `AgentConsole/docs/02_architecture/Architecture.md` | `b63412812671d7586ff74d79b4d052f3f9bd8b482a3a3b4e1077f2c60577ed50` |
+| Architecture（本輪增補 §2.2、§3、§5.1、§5.4、§6(e)、§7.2、§8、§9.4、§10.4、§11.1、§11.3′、§12） | `AgentConsole/docs/02_architecture/Architecture.md` | `4ece7ab7fe57bb8c2fce4b06b3ab982d7147f27be3fc23d7cf5b4b785a8cd17d` |
 | ADR-001（技術棧鎖定；D4 SSE、D17 mock claude、D22 FSM 唯讀投影） | `AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md` | `ff0bcd0038b77e80885240d287cfc68fb55c02200dc59f62f7e59c7691094e38` |
 | ADR-002（前端設計系統） | `AgentConsole/docs/02_architecture/ADR-002-Frontend-Design-System.md` | `b0897c536bdbce19efc21bf0762240f22e054fc4ff03882276fa0ed59da6066d` |
 | API 契約 P3-6（附錄 B reason 表；`reasons.test.ts` 的雙向鎖對象） | `AgentConsole/docs/02_architecture/API_Contract_P3-6.md` | `0ada38cf4fe438c4fd572a89cc3af089711361339c62e01653ef2438cefe2300` |
 | OpenAPI 快照 P3-6 | `AgentConsole/docs/02_architecture/openapi-p3-6.yaml` | `956539977c70fe6527c7d41162cc49a6d6138c5a49d35d7a43c4852a6bf87823` |
-| ResearchToPRD PRD | `docs/01_requirements/ResearchToPRD_PRD.md` | `2237bfeb80d72d909375468e4e61b536fe8db0090fbcacc34f8d26265aaecbc7` |
-| ADR-003（載體、持久化、流程脊、相依） | `AgentConsole/docs/02_architecture/ADR-003-ResearchToPRD.md` | `b074365ed7b3cfc1cb1d49f277675d474ab6192435e7b8d82512c0a3ab85fc3e` |
-| ADR-XPLAT-017（Bridge 研究寫入面） | `docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md` | `bb8ed2319de506b0bf56441595f6002c87e704fe9464b2bd55329953f96ff257` |
-| API 契約 ResearchToPRD v1.0 | `AgentConsole/docs/02_architecture/API_Contract_ResearchToPRD.md` | `d37f01fbcfd6d62b4ec83ebfff55015b495474b19ad8f466b11602875566ec03` |
+| ResearchToPRD PRD | `docs/01_requirements/ResearchToPRD_PRD.md` | `a6d7138640a881c52d0169ee1e49c91dfabd155c76f7d3eb04a79165f8cbc31c` |
+| ADR-003（載體、持久化、流程脊、相依） | `AgentConsole/docs/02_architecture/ADR-003-ResearchToPRD.md` | `214c7920a654d0de18d5d8154dc44b3e7f009c2c78f95329c62b246adc424e5e` |
+| ADR-XPLAT-017（Bridge 研究寫入面） | `docs/04_planning/ADR/ADR-XPLAT-017-bridge-fsm-write-surface.md` | `cf24c5cdd170e230956b7faf9806ed1027678df28858ac1635fc7e689c013bb4` |
+| API 契約 ResearchToPRD v1.0 | `AgentConsole/docs/02_architecture/API_Contract_ResearchToPRD.md` | `b498fc1e3a6164669b3cc96dd434b73ebf1e7faaa2b12c048154933ab048a211` |
 
 ---
 ## 1. AC → AT 映射表

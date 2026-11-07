@@ -492,7 +492,7 @@
 > 本子表 2026-11-01 依 DEF-200-576 體例自始立於 [RTM-ExecMonitorEntry-20261101.md](RTM-ExecMonitorEntry-20261101.md)（18 列：F 1、US 1、AC 5、AT 11；鍵 `agentconsole-exec-monitor-entry`；回填義務不變）。
 
 ## 2.10 研究議題轉規格書 P0 外環（ResearchToPRD；`/research`）的 TCS 本地 ID 追溯（ResearchToPRD_PRD.md；不計入 §2 總列數）
-> 本子表 2026-11-02 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P0-20261102.md](RTM-ResearchToPRD-P0-20261102.md)（238 列：F 1、US 3、AC 24、AT 210；鍵 `agentconsole-research-to-prd-p0`；回填義務不變）。
+> 本子表 2026-11-02 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P0-20261102.md](RTM-ResearchToPRD-P0-20261102.md)（238 列：F 1、US 3、AC 24、AT 210；鍵 `agentconsole-research-to-prd-p0`；回填義務不變）。2026-11-07 起四格已依 SCG-4 一審／二審（[SCG4-REVIEW-ResearchToPRD-P0-20261107-R2.md](SCG4-REVIEW-ResearchToPRD-P0-20261107-R2.md) PASS）與 INT 證據回填（AT 列：AT PASS 209／部分 1；V-H1、V-H2 待掌舵者真機）。
 
 ## 3. 統計（建表時快照）
 
