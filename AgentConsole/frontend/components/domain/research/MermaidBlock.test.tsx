@@ -108,7 +108,8 @@ describe("AT_960_16_3 Mermaid 嚴格模式渲染、錯誤退回原始碼、逾�
     expect(within(bad).getByTestId("mermaid-error")).toHaveTextContent("Parse error on line 2");
     expect(within(bad).getByRole("alert")).toHaveTextContent("改顯示原始碼");
     expect(within(bad).getByTestId("mermaid-source").textContent, "錯誤區塊直接顯示原始碼文字").toBe(BAD);
-    expect(within(good).getByRole("region", { name: "Mermaid 圖表 2" }).querySelector("svg")).not.toBeNull();
+    // 畫布 svg 與 data-state 分屬不同次 commit：CI 負載高時 ready 先到、svg 晚一拍（200bb9b0 的 CI 假紅）
+    await waitFor(() => expect(within(good).getByRole("region", { name: "Mermaid 圖表 2" }).querySelector("svg")).not.toBeNull());
     expect(screen.getByRole("heading", { name: "PRD 標題" })).toBeInTheDocument();
     expect(screen.getByText("結尾段落")).toBeInTheDocument();
   });
