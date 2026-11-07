@@ -14,7 +14,7 @@ import static com.aisdlc.console.domain.model.config.ConfigEffect.STORED_ONLY;
 import static com.aisdlc.console.domain.model.config.ConfigEffect.UNVERIFIED;
 
 /**
- * 50 個設定鍵的程式內目錄（契約附錄 C；PRD §5.5.1）：分類順序、分類內順序、{@code effect}、數值範圍與 ENUM 選項。
+ * 51 個設定鍵的程式內目錄（契約附錄 C 的 50 個加 P1 的 research.github_token；PRD §5.5.1）：分類順序、分類內順序、{@code effect}、數值範圍與 ENUM 選項。
  *
  * <p>順序是 API 的一部分（{@code GET /settings} 的分類順序 {@code model,agent,execution,monitor,autoclaude,sdd}，
  * 分類內依附錄 C 排序）。型別／預設／{@code validation_rule}／{@code impact_note} 住在資料庫（V2＋V5），
@@ -23,7 +23,7 @@ import static com.aisdlc.console.domain.model.config.ConfigEffect.UNVERIFIED;
 public final class ConfigCatalog {
 
     /** 分類順序（API 輸出順序）。 */
-    public static final List<String> CATEGORIES = List.of("model", "agent", "execution", "monitor", "autoclaude", "sdd");
+    public static final List<String> CATEGORIES = List.of("model", "agent", "execution", "monitor", "autoclaude", "sdd", "research");
 
     /** token_guard 群組（NFR-SEC-05）：兩鍵須滿足 {@code halt > compact}。 */
     public static final String TOKEN_GUARD_CATEGORY = "execution";
@@ -127,6 +127,8 @@ public final class ConfigCatalog {
         specs.add(spec("sdd", "specFormat", UNVERIFIED, null, null, "YAML", "JSON", "TOML"));
         specs.add(spec("sdd", "workflowEngine", UNVERIFIED, null, null, "STATIC", "DYNAMIC", "ADAPTIVE"));
         specs.add(spec("sdd", "validationLevel", UNVERIFIED, null, null, "LAX", "NORMAL", "STRICT"));
+        // C.7 research（1；ResearchToPRD P1，D-98、D-132）：分流軌道 B 建立 GitHub 遠端用的加密 token，console-api 讀取後單次放進 Bridge 請求
+        specs.add(spec("research", "github_token", CONSOLE, null, null));
         return List.copyOf(specs);
     }
 

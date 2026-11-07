@@ -92,7 +92,7 @@ class IssuePriorityMigrationIT {
                 + "values (?, 'obs-add', 'admin', 'ADMIN', '2026-10-24T14:30:15Z', null, null, '{\"fixture\":true}', 'f076edf0', ?)",
                 UUID.randomUUID(), "0".repeat(64));
         String configsBefore = jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>'), ';' "
-                + "order by category, key) from console.system_configs", String.class);
+                + "order by category, key) from console.system_configs where category <> 'research'", String.class);
         assertThat(jdbc.queryForObject("select count(*) from information_schema.tables where table_schema = 'console' "
                 + "and table_name = 'issue_priority'", Integer.class)).as("V13 時還沒有這張表").isZero();
 
@@ -124,11 +124,11 @@ class IssuePriorityMigrationIT {
         assertThat(jdbc.queryForObject("select name from console.projects where id = ?", String.class, project)).isEqualTo("升級前的專案");
         assertThat(jdbc.queryForObject("select count(*) from console.si_console_writes", Integer.class)).as("V13 的稽核列原封不動").isEqualTo(1);
         assertThat(jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>'), ';' "
-                + "order by category, key) from console.system_configs", String.class)).as("既有表資料不變").isEqualTo(configsBefore);
+                + "order by category, key) from console.system_configs where category <> 'research'", String.class)).as("既有表資料不變").isEqualTo(configsBefore);
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

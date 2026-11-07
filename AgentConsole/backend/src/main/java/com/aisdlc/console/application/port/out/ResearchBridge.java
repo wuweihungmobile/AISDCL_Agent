@@ -66,6 +66,30 @@ public interface ResearchBridge {
     /** {@code POST /research/projects/{id}:reinit}（200）：本文 {@code {}}＝重試初始化；{@code {generation:"next", reason, decided_by}}＝換世代。 */
     Map<String, Object> reinit(UUID researchId, Map<String, Object> body);
 
+    /** {@code POST /research/projects/{id}:route-preview}（200；零副作用，讀取逾時 30 秒）：Bridge 的 snake_case 本文原樣。 */
+    Map<String, Object> routePreview(UUID researchId, Map<String, Object> body);
+
+    /**
+     * {@code POST /research/projects/{id}:route}（200，D-105 同步）：<b>讀取逾時 330 秒</b>（Bridge 牆鐘上限 300 秒加緩衝）。Bridge 的 502 {@code route_step_failed}
+     * 以 {@code ResearchBridgeException}（reason 與 details 原樣，含 {@code route_id}、{@code failure_step}）丟出。
+     */
+    Map<String, Object> route(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:route-compensated}（200；D-112：console-api 補償完 Console 專案列之後通知，Bridge 驗該列為 FAILED 才改 COMPENSATED）。 */
+    Map<String, Object> routeCompensated(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:scr}（MINOR／MAJOR 202、HEALING_FAILED 200）。 */
+    Map<String, Object> openScr(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:scr-apply}（200；MINOR 套用重試，D-103）。 */
+    Map<String, Object> applyScr(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:decompose}（200，D-94 同步）：<b>讀取逾時 330 秒</b>。 */
+    Map<String, Object> decompose(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:decomposition-signoff}（200；D-113：console-api 先完成既有 import／signoff 路徑，帶 {@code import_record_id} 來）。 */
+    Map<String, Object> decompositionSignoff(UUID researchId, Map<String, Object> body);
+
     /** {@code POST /research/allowlist}（201）。 */
     Map<String, Object> addAllowlistEntry(Map<String, Object> body);
 

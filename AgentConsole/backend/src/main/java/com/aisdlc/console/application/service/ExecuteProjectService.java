@@ -61,13 +61,14 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
     private final RunLauncher launcher;
     private final SddBatches sddBatches;
     private final AuditTrail audit;
+    private final ResearchExecutionGuard researchGuard;
     private final TransactionTemplate readTx;
 
     @SuppressWarnings("java:S107")
     public ExecuteProjectService(ProjectRepository projects, GoalRepository goals, TaskRepository tasks,
                                  ExecutionRunRepository runs, SettingsReader settings, RuntimeSettings runtime,
                                  RunLauncher launcher, SddBatches sddBatches, AuditTrail audit,
-                                 PlatformTransactionManager transactions) {
+                                 ResearchExecutionGuard researchGuard, PlatformTransactionManager transactions) {
         this.projects = projects;
         this.goals = goals;
         this.tasks = tasks;
@@ -77,6 +78,7 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
         this.launcher = launcher;
         this.sddBatches = sddBatches;
         this.audit = audit;
+        this.researchGuard = researchGuard;
         this.readTx = new TransactionTemplate(transactions);
         this.readTx.setReadOnly(true);
     }
@@ -108,6 +110,7 @@ public class ExecuteProjectService implements ExecuteProjectUseCase {
         List<Goal> projectGoals = goals.findByProjectId(projectId);
         List<Task> projectTasks = tasks.findByProjectId(projectId);
         requireSignedOff(project, projectGoals, projectTasks);
+        researchGuard.check(projectId);       // D-102：僅綁研究專案者生效（scr_open → decomposition_stale → fsm_state_conflict）；非研究專案零影響
 
         List<GoalWithTasks> grouped = new ArrayList<>();
         for (Goal goal : projectGoals) {

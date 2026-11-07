@@ -26,7 +26,7 @@ public record ReconcileResultDto(
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record CheckDto(
             @NotNull @Schema(description = "檢查項識別（Bridge 的 id）：fsm_flow_mapping｜prd_sha256｜review_card｜evidence_matrix｜task_decomposition｜route_decision") String name,
-            @NotNull @Schema(description = "ok｜drift｜NOT_EVALUABLE") String status,
+            @NotNull @Schema(description = "ok｜drift｜NOT_EVALUABLE｜pending_correction（D-128：build／TCS_PENDING 而內環鍵已凍結 Stage-2，待 Bridge 校正游標；不是 drift）") String status,
             List<DriftDto> drift) {
     }
 

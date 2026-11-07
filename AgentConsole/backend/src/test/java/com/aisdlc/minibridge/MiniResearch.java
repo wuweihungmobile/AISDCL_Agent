@@ -50,6 +50,12 @@ public final class MiniResearch {
     public volatile long delayMillis;
     /** true＝{@code stages/*:start} 的兩個並發請求以閘門同步：第一個回 202、第二個回 409 {@code stage_conflict}（AT-960-4-5）。 */
     public volatile boolean stageRace;
+    /** 非 null＝預演與確認回這個執行路徑（造「路徑不安全」案例）。 */
+    public volatile String executionPathOverride;
+    /** 只有 {@code :route} 請求在回應前先睡這麼久（毫秒；與 {@link #delayMillis} 相加）：造「預演成功、確認逾時」。 */
+    public volatile long routeDelayMillis;
+    /** {@code :route} 收到請求的當下呼叫（腳本回應與預設行為皆然）（例：查 projects 表，驗證「先建專案列再呼 Bridge」）。 */
+    public volatile java.util.function.Consumer<Map<String, Object>> onRoute;
 
     /** 每個收到的研究請求（依到達順序）。 */
     public final List<Call> calls = new CopyOnWriteArrayList<>();
@@ -95,6 +101,9 @@ public final class MiniResearch {
         mode = "local";
         delayMillis = 0;
         stageRace = false;
+        executionPathOverride = null;
+        routeDelayMillis = 0;
+        onRoute = null;
         calls.clear();
         allowlist.clear();
         scripted.clear();

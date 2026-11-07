@@ -8,6 +8,8 @@ import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedExcepti
 import com.aisdlc.console.application.port.out.AgentBridge.SddFreeze;
 import com.aisdlc.console.application.port.out.AuditTrail;
 import com.aisdlc.console.application.port.out.ProjectRepository;
+import com.aisdlc.console.application.port.out.ResearchBridge;
+import com.aisdlc.console.application.port.out.ResearchProjectReadPort;
 import com.aisdlc.console.application.port.out.RuntimeSettings;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.NotFoundException;
@@ -17,11 +19,14 @@ import com.aisdlc.console.domain.model.engine.SddFsmState;
 import com.aisdlc.console.domain.model.project.Project;
 import com.aisdlc.console.domain.service.SddBindingRules;
 import com.aisdlc.console.domain.service.SddFreezeRules;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -35,6 +40,8 @@ import java.util.UUID;
 @Service
 public class SddGovernanceService implements SddGovernanceUseCase {
 
+    private static final Logger LOG = LoggerFactory.getLogger(SddGovernanceService.class);
+
     private final ProjectRepository projects;
     private final AgentBridge bridge;
     private final RuntimeSettings settings;
@@ -42,10 +49,14 @@ public class SddGovernanceService implements SddGovernanceUseCase {
     private final Clock clock;
     private final TransactionTemplate tx;
     private final ManageProjectUseCase manageProjects;
+    private final ResearchBridge researchBridge;
+    private final ResearchProjectReadPort researchProjects;
 
+    @SuppressWarnings("java:S107")
     public SddGovernanceService(ProjectRepository projects, AgentBridge bridge, RuntimeSettings settings,
                                 AuditTrail audit, Clock clock, TransactionTemplate tx,
-                                ManageProjectUseCase manageProjects) {
+                                ManageProjectUseCase manageProjects, ResearchBridge researchBridge,
+                                ResearchProjectReadPort researchProjects) {
         this.projects = projects;
         this.bridge = bridge;
         this.settings = settings;
@@ -53,6 +64,8 @@ public class SddGovernanceService implements SddGovernanceUseCase {
         this.clock = clock;
         this.tx = tx;
         this.manageProjects = manageProjects;
+        this.researchBridge = researchBridge;
+        this.researchProjects = researchProjects;
     }
 
     @Override
@@ -82,11 +95,27 @@ public class SddGovernanceService implements SddGovernanceUseCase {
         // 5 綁定唯一性與寫回（獨立短交易，先於 Bridge 寫入）
         bindOnFirstUse(projectId, key);
         // 6 Bridge :freeze（approver 一律取 JWT subject；失敗不回滾第 5 項）
+        SddFsmState frozen;
         try {
-            return bridge.sddFreeze(key, new SddFreeze(project.executionPath(), checked.stage(), checked.docs(),
+            frozen = bridge.sddFreeze(key, new SddFreeze(project.executionPath(), checked.stage(), checked.docs(),
                     approver, checked.reason(), checked.expectedDigests()));
         } catch (BridgeRejectedException e) {
             throw BridgeErrors.forSddWrite(e, key);
+        }
+        reconcileResearchAfterFreeze(projectId);
+        return frozen;
+    }
+
+    /**
+     * D-125(3)：凍結成功後，若這個 Console 專案綁了研究專案（{@code research_projects.console_project_id}），呼 Bridge {@code :reconcile} 一次——TCS 經本服務於內環鍵凍結
+     * Stage-2 後 DB 游標仍是 build／TCS_PENDING，由 Bridge 的對帳校正為 build／ROUTED／IDLE（console-api 零寫入原則不破）。<b>對帳失敗只記日誌，不影響已成功的凍結</b>
+     * （含研究寫入面停用、Bridge 不可達、逾時）；未綁研究專案＝完全不呼叫、凍結行為與回應位元組不變。
+     */
+    private void reconcileResearchAfterFreeze(UUID projectId) {
+        try {
+            researchProjects.researchIdOfConsoleProject(projectId).ifPresent(researchId -> researchBridge.action(researchId, "reconcile", Map.of()));
+        } catch (RuntimeException e) {
+            LOG.warn("凍結成功，但對綁定的研究專案對帳失敗（project={}）：{}", projectId, e.getMessage());
         }
     }
 

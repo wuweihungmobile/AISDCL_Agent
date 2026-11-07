@@ -103,6 +103,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/approve").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/return").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/route").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/scr/*/apply").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/gates").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/delivery/tag").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/delivery/pr").hasRole("ADMIN")

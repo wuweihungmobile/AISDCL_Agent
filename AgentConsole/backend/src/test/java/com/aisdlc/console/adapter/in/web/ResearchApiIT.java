@@ -6,6 +6,8 @@ import com.aisdlc.console.support.AbstractResearchIT;
 import com.aisdlc.console.support.ApiClient;
 import com.aisdlc.console.support.ApiClient.Resp;
 import com.aisdlc.console.support.BridgeSource;
+import com.aisdlc.console.support.ResearchP1Fixtures;
+import com.aisdlc.minibridge.MiniBridge;
 import com.aisdlc.minibridge.MiniResearch;
 import com.aisdlc.minibridge.MiniResearch.Call;
 import com.aisdlc.minibridge.MiniResearch.Reply;
@@ -89,11 +91,12 @@ class ResearchApiIT extends AbstractResearchIT {
         }
     }
 
-    /** 研究面 FSM 視圖去掉它多出的兩個欄位（{@code humanReturnCount}、{@code retryHistory.gates}）＝既有 SddFsmState 的全部欄位。 */
+    /** 研究面 FSM 視圖去掉它多出的三個欄位（{@code humanReturnCount}、{@code stage2Frozen}、{@code retryHistory.gates}）＝既有 SddFsmState 的全部欄位。 */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> existingFields(Map<String, Object> view) {
         Map<String, Object> existing = new LinkedHashMap<>(view);
         assertThat(existing.remove("humanReturnCount")).as("研究面視圖多一個 humanReturnCount").isNotNull();
+        assertThat(existing.remove("stage2Frozen")).as("P1 起研究面視圖多一個 stage2Frozen（D-125：由 frozenStages 導出）").isNotNull();
         Map<String, Object> retry = new LinkedHashMap<>((Map<String, Object>) existing.get("retryHistory"));
         assertThat(retry.remove("gates")).as("研究面視圖的 retryHistory 多一個 gates").isNotNull();
         existing.put("retryHistory", retry);
@@ -829,5 +832,150 @@ class ResearchApiIT extends AbstractResearchIT {
         assertThat(rows.stream().map(r -> r.get("http_status"))).containsExactly(200, 200, 422, 422, 422, 409);
         assertThat(rows.stream().map(Object::toString)).noneMatch(text -> text.contains("mallory") || text.contains("放棄舊鍵"));
         assertThat(Set.of(rows.get(0).get("path"))).containsExactly("/api/v1/research/projects/" + id + "/reinit");
+    }
+
+    // ═══ ResearchToPRD P1（PKG-API-P1）══════════════════════════════════════════════════════
+
+    @Test
+    void AT_961_15_9_theDetailCarriesTheReadOnlyTargetScopeAndNothingElseChanges() {
+        ResearchP1Fixtures p1 = new ResearchP1Fixtures(jdbc);
+        for (String scope : List.of("AISDLC_MODULE", "STANDALONE_PROJECT", "UNDECIDED")) {
+            UUID id = p1.project("scope-" + scope.toLowerCase().replace('_', '-'), scope);
+            Resp resp = api.get(viewer(), RESEARCH + "/projects/" + id);
+            assertThat(resp.status()).isEqualTo(200);
+            assertThat(resp.<String>read("$.data.targetScope")).isEqualTo(scope);
+        }
+        assertThat(Arrays.stream(com.aisdlc.console.adapter.in.web.dto.research.ResearchCreateRequest.class.getRecordComponents()).map(RecordComponent::getName))
+                .as("targetScope 是唯讀欄位：不出現在建立請求").doesNotContain("targetScope");
+    }
+
+    @Test
+    void AT_961_15_E_2_anAllowlistEntry404NoLongerReadsAsAMissingResearchProject() {
+        UUID id = fx.project("e2-404");
+
+        Resp entry = api.raw(admin(), HttpMethod.PATCH, RESEARCH + "/allowlist/" + UUID.randomUUID(), "{\"enabled\":false}");
+        bridge().next("cancel", Reply.error(404, "research_not_found", "research_id", id.toString()));
+        Resp project = api.post(operator(), RESEARCH + "/projects/" + id + "/cancel");
+
+        assertThat(entry.status()).isEqualTo(404);
+        assertThat(project.status()).isEqualTo(404);
+        assertThat(entry.<String>read("$.reason")).isEqualTo("research_not_found");
+        assertThat(project.<String>read("$.reason")).isEqualTo("research_not_found");
+        assertThat(entry.<String>read("$.message")).contains("允許清單條目不存在");
+        assertThat(project.<String>read("$.message")).isEqualTo("研究專案不存在或已刪除");
+    }
+
+    @Test
+    void AT_961_21_1_recordsAuditCountsR7R8R10R11R12FromTheV19TablesAndMissingIsExactlyR11AfterRouteAndSignoff() {
+        ResearchP1Fixtures p1 = new ResearchP1Fixtures(jdbc);
+        UUID id = p1.project("v19-audit", "UNDECIDED");
+        fx.artifact(id, "ISSUE_SCOPE", 1, "{}");
+        fx.artifact(id, "EVIDENCE_ITEMS", 1, "{\"items\":[]}");
+        UUID source = fx.source(id, "S-001", "https://example.org/a", "T1");
+        fx.fetch(id, source, "F-0001", "OK");
+        fx.prdVersion(id, 1, "v1.0.0", "# PRD");
+        UUID round = fx.round(id, 1, 1, 1, "AUTO", true, new BigDecimal("85.00"), 60, 0, true, "PASS", "PASS", 0);
+        fx.scores(round, 85);
+        fx.decision(id, "GATE0", "APPROVED", "research-v19-audit", "Gate-0", "{\"01_specs/PRD-v1.0.0.md\":\"sha256:" + "a".repeat(64) + "\"}");
+        fx.event(id, 1, "research.step", "{}");
+        p1.route(id, "SUCCEEDED", null);
+        p1.decomposition(id, "SIGNED_OFF", "a".repeat(64), ResearchP1Fixtures.content("a".repeat(64), "[]", 2, 2));
+        p1.scr(id, 1, "MINOR", "APPLIED");
+
+        Resp done = api.get(viewer(), RESEARCH + "/projects/" + id + "/records/audit");
+        List<Map<String, Object>> classes = done.read("$.data.classes");
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        classes.forEach(c -> counts.put((String) c.get("id"), (Integer) c.get("count")));
+
+        assertThat(classes).hasSize(14);
+        assertThat(counts).containsEntry("R7", 1).containsEntry("R8", 1).containsEntry("R10", 0).containsEntry("R11", 0).containsEntry("R12", 1);
+        assertThat(done.<List<String>>read("$.data.missing")).as("完成分流與簽核後 missing 恰為 R11（R10、R12 允許為 0）").containsExactly("R11");
+        UUID fresh = p1.project("v19-fresh", "UNDECIDED");
+        assertThat(api.get(viewer(), RESEARCH + "/projects/" + fresh + "/records/audit").<List<String>>read("$.data.missing")).contains("R7", "R8", "R11");
+    }
+
+    @Test
+    void AT_961_21_2_confirmedRouteAndSignedOffDecompositionEachLeaveOneSuccessAuditRowWithTheBridgeTraceId() {
+        ResearchP1Fixtures p1 = new ResearchP1Fixtures(jdbc);
+        UUID routeResearch = p1.project("v19-route", "UNDECIDED");
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("track", "A");
+        request.put("targetModule", "agentconsole");
+        assertThat(api.post(admin(), RESEARCH + "/projects/" + routeResearch + "/route", request).status()).isEqualTo(200);
+
+        UUID signResearch = p1.project("v19-sign", "UNDECIDED");
+        fx.decision(signResearch, "GATE0", "APPROVED", "research-v19-sign", "Gate-0", "{\"01_specs/PRD-v1.0.0.md\":\"sha256:" + "a".repeat(64) + "\"}");
+        String console = createProject(Map.of("name", "v19-sign-console", "executionPath", "/work/v19-sign", "passCriteria", "- 通過", "draft", true));
+        p1.bind(signResearch, UUID.fromString(console));
+        p1.decomposition(signResearch, "DRAFTED", "a".repeat(64), ResearchP1Fixtures.content("a".repeat(64), "[]", 2, 2));
+        assertThat(api.post(operator(), RESEARCH + "/projects/" + signResearch + "/decomposition/signoff", Map.of()).status()).isEqualTo(200);
+
+        for (String[] c : new String[][] {{"/projects/" + routeResearch + "/route", "admin", ":route"}, {"/projects/" + signResearch + "/decomposition/signoff", "operator",
+                ":decomposition-signoff"}}) {
+            List<Map<String, Object>> rows = jdbc.queryForList("select subject, role, method, http_status, trace_id from console.audit_log where path = ?", RESEARCH + c[0]);
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0)).containsEntry("subject", c[1]).containsEntry("method", "POST").containsEntry("http_status", 200);
+            String trace = String.valueOf(rows.get(0).get("trace_id"));
+            assertThat(bridge().calls.stream().filter(call -> call.path().endsWith(c[2])).map(Call::traceId)).as("與送給 Bridge 的 X-Trace-Id 同一個").containsExactly(trace);
+        }
+    }
+
+    @Test
+    void AT_961_21_E_1_everyRejectedRouteRelatedWriteLeavesItsOwnAuditRowWithTheTrueStatus() {
+        UUID id = new ResearchP1Fixtures(jdbc).project("v19-rejected", "UNDECIDED");
+        String route = RESEARCH + "/projects/" + id + "/route";
+        String scr = RESEARCH + "/projects/" + id + "/scr";
+        bridge().next("scr", Reply.error(422, "invalid_request", "violations", List.of(map("field", "reason", "rule", "x", "message", "m"))));
+
+        int viewerRoute = api.post(viewer(), route, Map.of("track", "A")).status();
+        int operatorRoute = api.post(operator(), route, Map.of("track", "A")).status();
+        int anonymous = api.post(null, route, Map.of("track", "A")).status();
+        int scrRejected = api.post(operator(), scr, Map.of("kind", "MINOR", "sourceKind", "HUMAN", "reason", "x")).status();
+
+        assertThat(List.of(viewerRoute, operatorRoute, anonymous, scrRejected)).containsExactly(403, 403, 401, 422);
+        assertThat(jdbc.queryForList("select http_status from console.audit_log where path = ? order by occurred_at", Integer.class, route)).containsExactly(403, 403, 401);
+        assertThat(jdbc.queryForList("select http_status from console.audit_log where path = ?", Integer.class, scr)).containsExactly(422);
+    }
+
+    @Test
+    void AT_961_25_3_afterASuccessfulFreezeOnlyAResearchBoundProjectTriggersExactlyOneReconcileAndAFailingReconcileNeverBreaksTheFreeze() {
+        ResearchP1Fixtures p1 = new ResearchP1Fixtures(jdbc);
+        UUID bound = p1.project("freeze-bound", "UNDECIDED");
+        String boundProject = createProject(Map.of("name", "e2e-bravo", "executionPath", "/work/e2e-bravo", "passCriteria", "- 通過"));
+        p1.bind(bound, UUID.fromString(boundProject));
+        String doc = "docs/03_testing/contracts/TCS-Alpha-20261017.md";
+
+        Resp ok = api.post(operator(), "/api/v1/projects/" + boundProject + "/sdd/freeze", Map.of("reason", "規格已由 SDD session 走完，核准凍結", "docs", List.of(doc)));
+        assertThat(ok.status()).isEqualTo(200);
+        assertThat(bridge().countCalls("POST", "/research/projects/" + bound + ":reconcile")).as("恰一次").isEqualTo(1);
+
+        MINI.sdd.addProject("e2e-delta", "HUMAN_PENDING", 1, "sid-delta", "2026-11-02T00:00:00+00:00", new MiniBridge.Sdd.SddRetry(0, null), Map.of("count", 0, "items", List.of()));
+        String unbound = createProject(Map.of("name", "e2e-delta", "executionPath", "/work/e2e-delta", "passCriteria", "- 通過"));
+        long before = bridge().calls.size();
+        assertThat(api.post(operator(), "/api/v1/projects/" + unbound + "/sdd/freeze", Map.of("reason", "規格已由 SDD session 走完，核准凍結", "docs", List.of(doc))).status())
+                .isEqualTo(200);
+        assertThat(bridge().calls.size()).as("未綁研究專案：Bridge 的研究端點零請求").isEqualTo((int) before);
+
+        MINI.sdd.addProject("e2e-echo", "HUMAN_PENDING", 1, "sid-echo", "2026-11-02T00:00:00+00:00", new MiniBridge.Sdd.SddRetry(0, null), Map.of("count", 0, "items", List.of()));
+        UUID failing = p1.project("freeze-failing", "UNDECIDED");
+        String failingProject = createProject(Map.of("name", "e2e-echo", "executionPath", "/work/e2e-echo", "passCriteria", "- 通過"));
+        p1.bind(failing, UUID.fromString(failingProject));
+        bridge().always("reconcile", Reply.error(500, "internal"));
+        Resp survived = api.post(operator(), "/api/v1/projects/" + failingProject + "/sdd/freeze", Map.of("reason", "規格已由 SDD session 走完，核准凍結", "docs", List.of(doc)));
+        assertThat(survived.status()).as("對帳失敗只記日誌，凍結照常成功").isEqualTo(200);
+        assertThat(survived.<String>read("$.data.currentState")).isEqualTo("SPEC_FROZEN");
+    }
+
+    @Test
+    void AT_961_20_E_3_theReconcileDtoPassesThePendingCorrectionStateThroughAndTheOpenApiNamesFourValues() {
+        UUID id = fx.project("pending-correction");
+        bridge().next("reconcile", Reply.ok(200, "consistent", false, "driftCount", 0, "checks", List.of(MiniResearch.reconcileCheck("fsm_flow_mapping", "pending_correction", true, "", List.of()))));
+
+        Resp resp = api.post(operator(), RESEARCH + "/projects/" + id + "/reconcile");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.checks[0].status")).isEqualTo("pending_correction");
+        String docs = api.get(null, "/v3/api-docs").body();
+        assertThat(docs).contains("pending_correction").contains("NOT_EVALUABLE");
     }
 }

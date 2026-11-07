@@ -499,10 +499,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
-                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery");
+                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config");
             soft.assertThat(afterV18).as("V16～V19 沒有拿掉任何既有的表").containsAll(afterV15).containsAll(afterV18);
             soft.assertThat(added).as("V16～V18 在 console 內恰多出 13 張表（P0 集合不退步）").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
             soft.assertThat(addedByV19).as("V19 在 console 內恰多出 5 張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
@@ -1736,9 +1736,9 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
-            soft.assertThat(history.get(history.size() - 1).get("description")).as("V19 描述").isEqualTo("research route scr delivery");
+            soft.assertThat(history.get(history.size() - 2).get("description")).as("V19 描述").isEqualTo("research route scr delivery");
             soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
             soft.assertThat(viewsAfter18).as("V18 時還沒有視圖").isEmpty();
             soft.assertThat(viewsAfter19).as("V19 在 console 內恰多出一個視圖").containsExactly(V19_VIEW);

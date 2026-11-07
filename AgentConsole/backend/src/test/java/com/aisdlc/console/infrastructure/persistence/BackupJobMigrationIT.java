@@ -168,7 +168,7 @@ class BackupJobMigrationIT {
 
         assertThat(jdbc.queryForList("select version from console.flyway_schema_history where version is not null order by installed_rank",
                 String.class)).as("Flyway 歷史 1 至 19").containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
         assertThat(snapshotOfExistingTables(jdbc)).as("V19 套用前後既有表的欄位與約束零變動（視圖欄位已被排除）").isEqualTo(before);
         // 鑑別力：information_schema.columns 確實把視圖欄位列入；若快照沒排除，升級後會多出這些欄（還原排除條件則上一個斷言紅）
         assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' "
@@ -188,7 +188,7 @@ class BackupJobMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

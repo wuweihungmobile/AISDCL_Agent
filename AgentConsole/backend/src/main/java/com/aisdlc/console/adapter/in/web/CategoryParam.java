@@ -16,6 +16,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.PARAMETER)
 @Retention(RetentionPolicy.RUNTIME)
 @Parameter(description = "設定分類",
-        schema = @Schema(allowableValues = {"model", "agent", "execution", "monitor", "autoclaude", "sdd"}))
+        schema = @Schema(allowableValues = {"model", "agent", "execution", "monitor", "autoclaude", "sdd", "research"}))
 @interface CategoryParam {
 }

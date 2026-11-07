@@ -21,10 +21,11 @@ final class ResearchErrorDocs {
             + "或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0）";
 
     private static final String DISABLED = "research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；"
-            + "research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用";
+            + "research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；"
+            + "compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出）";
     private static final String UNREACHABLE = "bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——"
             + "not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；"
-            + "其餘 5xx＝引擎橋接服務錯誤。寫入不重試";
+            + "sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試";
     private static final String TIMEOUT = "bridge_timeout：讀取逾時（請求已送出、結果不明；寫入讀取 30 秒、不重試）";
     private static final String UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容），或 Bridge 拒絕此請求"
             + "（reason 逐字取自 Bridge：invalid_request｜terms_ack_required｜sanitization_failed｜layer_unavailable；details.violations）";
@@ -43,8 +44,31 @@ final class ResearchErrorDocs {
         return Map.of("422", unprocessable, "502", UNREACHABLE, "503", DISABLED, "504", TIMEOUT);
     }
 
-    /** 會回 409 的研究操作及其說明（reason 逐字）。 */
-    static final Map<String, String> CONFLICT = Map.of(
+    /** P1 分流、SCR、拆解的 422 說明（reason 逐字；Bridge 的 reason 與 details 原樣轉出）。 */
+    private static final String ROUTE_UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]；分流軌道與 PRD target_scope 不同而缺 scopeDiffersReason＝"
+            + "規則 scope_differs_reason_required），或 Bridge 拒絕（reason 逐字取自 Bridge）：route_unsupported_in_deployment（此部署不支援分流；details.missing[{item,reason}]）"
+            + "｜sanitization_failed（路徑或名稱未通過安全檢查）｜target_not_empty（軌道 B 目標目錄非空；details.path 只回相對於 BRIDGE_SCAFFOLD_ROOT 的路徑）"
+            + "｜public_confirmation_required（PUBLIC 遠端須重述庫名確認）";
+    private static final String ROUTE_CONFLICTS = "route_conflict（已有 PENDING、RUNNING 或 SUCCEEDED 的分流，或重試前置不成立；details.route_id、status）"
+            + "｜branch_exists（軌道 A 分支已存在；details.branch）｜fsm_state_conflict（外環鍵不在 SPEC_FROZEN＝Gate 0 未過；details.current_state）"
+            + "｜sdd_binding_conflict（同一個執行路徑與內環鍵已綁定另一個 Console 專案）";
+    private static final String SCR_UNPROCESSABLE = "輸入閘未通過（reason invalid_request；kind、sourceKind、reason〔1～500 字〕、reasonClass、affectedSections 的欄位級違規），"
+            + "或 Bridge 拒絕此請求（reason 逐字取自 Bridge；details.violations）";
+    private static final String DECOMPOSITION_UNPROCESSABLE = "invalid_request：觸發時 Bridge 的有界閘（details.violations[].rule＝max_steps｜cycle｜empty_prompt｜brain_failed｜brain_unsupported）；"
+            + "簽核時覆蓋未清零（violations[{field:coverage,rule:uncovered_ac}]；每個未覆蓋 AC 須被 task 的 covers_ac 涵蓋或附人工豁免理由）";
+
+    /** P1 新增操作的 409 說明。 */
+    private static final Map<String, String> P1_CONFLICT = Map.of(
+            "POST /api/v1/research/projects/{id}/route/preview", ROUTE_CONFLICTS,
+            "POST /api/v1/research/projects/{id}/route", ROUTE_CONFLICTS,
+            "POST /api/v1/research/projects/{id}/scr", "scr_open（已有開啟中的 SCR）｜scr_limit（同一研究專案的 MINOR SCR 已達上限）｜fsm_state_conflict（內環現態不在矩陣內；details.current_state）",
+            "POST /api/v1/research/projects/{id}/scr/{scrNo}/apply", "fsm_state_conflict（SCR 不是 APPROVED，或內環現態不在矩陣內；details.current_state）",
+            "POST /api/v1/research/projects/{id}/decomposition", "scr_open（SCR 開啟期間內環唯讀）｜stage_conflict｜fsm_state_conflict（外環鍵不在 SPEC_FROZEN 或尚未分流）",
+            "POST /api/v1/research/projects/{id}/decomposition/signoff", "decomposition_stale（拆解綁定的 PRD 摘要與現行凍結摘要不符；details.expected_sha256、actual_sha256）"
+                    + "｜fsm_state_conflict（尚未分流、尚無拆解，或拆解狀態不允許簽核；details.cause、status）");
+
+    /** P0 會回 409 的研究操作及其說明（reason 逐字）。 */
+    private static final Map<String, String> P0_CONFLICT = Map.of(
             "POST /api/v1/research/projects", "slug_in_use：slug 已被未封存的研究專案使用",
             "PUT /api/v1/research/projects/{id}/prd", "prd_version_conflict（baseVersion 不是目前 head 版號；details.headVersion）｜spec_frozen（Gate 0 之後不可再存新版）",
             "POST /api/v1/research/projects/{id}/stages/{stage}", "stage_conflict（同專案已有進行中的 stage〔details.activeStageRunId、activeStage〕、"
@@ -59,9 +83,30 @@ final class ResearchErrorDocs {
                     + "details.flowStatus、flowDetail；零寫入）｜fsm_state_conflict（換世代：FSM 現態不在 ESCALATION*；details.current_state）",
             "POST /api/v1/research/allowlist", "allowlist_exists：同 listKind 與 host 已有條目");
 
+    /** 會回 409 的研究操作及其說明（reason 逐字）：P0 加 P1。 */
+    static final Map<String, String> CONFLICT;
+
+    static {
+        Map<String, String> merged = new java.util.LinkedHashMap<>(P0_CONFLICT);
+        merged.putAll(P1_CONFLICT);
+        CONFLICT = Map.copyOf(merged);
+    }
+
     /** 研究操作的其餘狀態碼（422／502／503／504）：方法＋路徑 → 狀態碼與說明。 */
     static final Map<String, Map<String, String>> EXTRA = Map.ofEntries(
             Map.entry("GET /api/v1/research/capabilities", Map.of("502", UNREACHABLE, "504", TIMEOUT)),
+            Map.entry("POST /api/v1/research/projects/{id}/route/preview", writeFailures(ROUTE_UNPROCESSABLE)),
+            Map.entry("POST /api/v1/research/projects/{id}/route", Map.of("422", ROUTE_UNPROCESSABLE, "502", "route_step_failed：分流的某一步失敗（details.route_id、failure_step；"
+                    + "該分流列已是 FAILED、游標 route／ROUTING／FAILED，Console 專案列已補償為 ARCHIVED，不自動清理）；" + UNREACHABLE, "503", DISABLED,
+                    "504", "bridge_timeout：讀取逾時（分流與拆解的讀取逾時 330 秒、不重試；Console 專案列已補償為 ARCHIVED）")),
+            Map.entry("GET /api/v1/research/projects/{id}/route", Map.of()),
+            Map.entry("POST /api/v1/research/projects/{id}/scr", writeFailures(SCR_UNPROCESSABLE)),
+            Map.entry("GET /api/v1/research/projects/{id}/scr", Map.of()),
+            Map.entry("POST /api/v1/research/projects/{id}/scr/{scrNo}/apply", writeFailures("scrNo 不是 1 以上的整數（reason invalid_request），或 Bridge 拒絕此請求（reason 逐字取自 Bridge）")),
+            Map.entry("GET /api/v1/research/projects/{id}/decomposition", Map.of()),
+            Map.entry("POST /api/v1/research/projects/{id}/decomposition", Map.of("422", DECOMPOSITION_UNPROCESSABLE, "502", UNREACHABLE, "503", DISABLED,
+                    "504", "bridge_timeout：讀取逾時（拆解的讀取逾時 330 秒、不重試）")),
+            Map.entry("POST /api/v1/research/projects/{id}/decomposition/signoff", writeFailures(DECOMPOSITION_UNPROCESSABLE)),
             Map.entry("GET /api/v1/research/allowlist", Map.of("502", UNREACHABLE, "503", "db_blocked：研究資料庫暫時不可用；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN",
                     "504", TIMEOUT)),
             Map.entry("GET /api/v1/research/projects/{id}/fsm", Map.of(

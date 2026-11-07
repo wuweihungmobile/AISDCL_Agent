@@ -85,7 +85,7 @@ class SiConsoleWritesMigrationIT {
         jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria, status, signed_off) values "
                 + "(?, '升級前的專案', '/same/root', '標準', 'READY', true)", project);
         String configsBefore = jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>'), ';' "
-                + "order by category, key) from console.system_configs", String.class);
+                + "order by category, key) from console.system_configs where category <> 'research'", String.class);
         assertThat(jdbc.queryForObject("select count(*) from information_schema.tables where table_schema = 'console' "
                 + "and table_name = 'si_console_writes'", Integer.class)).as("V12 時還沒有這張表").isZero();
 
@@ -122,11 +122,11 @@ class SiConsoleWritesMigrationIT {
 
         assertThat(jdbc.queryForObject("select name from console.projects where id = ?", String.class, project)).isEqualTo("升級前的專案");
         assertThat(jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>'), ';' "
-                + "order by category, key) from console.system_configs", String.class)).as("既有表資料不變").isEqualTo(configsBefore);
+                + "order by category, key) from console.system_configs where category <> 'research'", String.class)).as("既有表資料不變").isEqualTo(configsBefore);
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

@@ -335,4 +335,43 @@ class BridgeHttpAdapterResearchTest {
         assertThat(unset.adapter.capabilities()).containsEntry("mode", "mock-only");
         unset.server.verify();
     }
+
+    // ── P1（AT-961-14-8、AT-961-11-7）：讀逾時表與新端點的路徑 ────────────────────────────
+
+    @Test
+    void AT_961_14_8_onlyRouteAndDecomposeUseTheThreeHundredThirtySecondReadTimeoutEveryOtherWriteStaysAtThirty() {
+        String[] verbs = {"route-preview", "route", "route-compensated", "scr", "scr-apply", "decompose", "decomposition-signoff"};
+        for (String verb : verbs) {
+            rig.server.expect(requestTo(BASE + "/research/projects/" + ID + ":" + verb)).andExpect(method(HttpMethod.POST)).andExpect(header("X-Bridge-Token", TOKEN))
+                    .andExpect(header("X-Trace-Id", not(emptyOrNullString()))).andRespond(withSuccess("{\"ok\":true}", MediaType.APPLICATION_JSON));
+        }
+
+        rig.adapter.routePreview(ID, body("track", "A"));
+        rig.adapter.route(ID, body("track", "A"));
+        rig.adapter.routeCompensated(ID, body("route_id", "r"));
+        rig.adapter.openScr(ID, body("kind", "MINOR"));
+        rig.adapter.applyScr(ID, body("scr_no", 1));
+        rig.adapter.decompose(ID, body());
+        rig.adapter.decompositionSignoff(ID, body("decomposition_id", "d"));
+
+        rig.server.verify();
+        assertThat(rig.timeouts).hasSize(7);
+        List<Long> reads = rig.timeouts.stream().map(pair -> pair[1].toSeconds()).toList();
+        assertThat(reads).as("preview、route、compensated、scr、apply、decompose、signoff 的讀逾時").containsExactly(30L, 330L, 30L, 30L, 30L, 330L, 30L);
+        assertThat(rig.timeouts).allSatisfy(pair -> assertThat(pair[0]).as("連線逾時仍是 2 秒").isEqualTo(Duration.ofSeconds(2)));
+    }
+
+    @Test
+    void AT_961_14_8_aRouteStepFailedBridgeAnswerIsRelayedVerbatimWithItsRouteIdAndFailureStep() {
+        rig.server.expect(requestTo(BASE + "/research/projects/" + ID + ":route")).andRespond(jsonStatus(HttpStatus.BAD_GATEWAY,
+                "{\"code\":502,\"reason\":\"route_step_failed\",\"details\":{\"route_id\":\"r1\",\"failure_step\":\"GIT_SWITCH\"}}"));
+
+        org.assertj.core.api.ThrowableAssert.ThrowingCallable call = () -> rig.adapter.route(ID, body("track", "A"));
+
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(call)).isInstanceOfSatisfying(com.aisdlc.console.domain.exception.ResearchBridgeException.class, e -> {
+            assertThat(e.reason()).isEqualTo("route_step_failed");
+            assertThat(e.kind()).isEqualTo(com.aisdlc.console.domain.exception.ResearchBridgeException.Kind.FAILURE);
+            assertThat(e.details()).containsEntry("route_id", "r1").containsEntry("failure_step", "GIT_SWITCH");
+        });
+    }
 }

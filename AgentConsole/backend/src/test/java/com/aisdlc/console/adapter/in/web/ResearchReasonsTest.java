@@ -27,7 +27,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 機器可讀欄位——後端改了字面而前端、契約沒跟著改，使用者看到的是「未知錯誤」；而 {@code lib/api/reasons.ts} 的 {@code REASONS} 與凍結契約附錄 B 雙向鎖，研究 reason 不得進去
  * （所以它們各住自己的常數）。
  *
- * <p>集合＝二十二個：P0 契約原列十七個仍有效者，加 Bridge 專屬的五個——{@code allowlist_exists}（409）、{@code init_failed}（502）、{@code not_implemented}（Bridge 501→console-api 502）、
+ * <p><b>P1 起集合＝三十五個</b>（AT-961-15-4）：P0 的二十二個加 R-2 尾巴四個（{@code compile_failed}、{@code sdd_cli_failed}、{@code fsm_state_unreadable}、{@code invalid_request}；
+ * ⚖P1-25——{@code invalid_request} 由區域常數改為 {@code RESEARCH_} 前綴常數）與 P1 新增九個（分流、SCR、拆解）。契約 §0.2 與 Architecture §11.1 的補列屬主控的 RELEASE_READY 勘誤
+ * （D-115）：勘誤落地前，兩份文件缺列的 reason 以 {@link #CONTRACT_ERRATUM_PENDING}、{@link #ARCHITECTURE_ERRATUM_PENDING} 具名記錄，並以「缺列集合恰等於名單」雙向鎖住——
+ * 勘誤落地後名單必須清空，否則本測試轉紅逼同步（沿本檔沿革的棘輪手法）。
+ *
+ * <p>P0 集合＝二十二個：P0 契約原列十七個仍有效者，加 Bridge 專屬的五個——{@code allowlist_exists}（409）、{@code init_failed}（502）、{@code not_implemented}（Bridge 501→console-api 502）、
  * {@code digest_mismatch}（422；D-72）、{@code missing_digests}（422；D-72）。{@code invalid_request}（輸入閘，400／422）是區域常數（{@code ResearchInputGates.INVALID_REQUEST}），
  * 不入本集合（先例 SiWriteGates）。
  *
@@ -44,8 +49,30 @@ class ResearchReasonsTest {
             "db_blocked", "research_not_found", "slug_in_use", "stage_conflict", "prd_version_conflict", "review_not_passed", "fsm_state_conflict",
             "escalated", "spec_frozen", "layer_unavailable", "sanitization_failed", "terms_ack_required", "bridge_unreachable", "bridge_timeout",
             "allowlist_exists", "init_failed", "not_implemented", "digest_mismatch", "missing_digests"));
+    /** R-2 尾巴四個（⚖P1-25；console-api 實際會回的研究 reason，P0 時以區域常數或未列入四方鎖）。 */
+    private static final Set<String> P0_TAIL_REASONS = new TreeSet<>(List.of("compile_failed", "sdd_cli_failed", "fsm_state_unreadable", "invalid_request"));
+    /** P1 新增九個（分流、SCR、拆解；IFACE §2）。 */
+    private static final Set<String> P1_REASONS = new TreeSet<>(List.of("route_unsupported_in_deployment", "branch_exists", "target_not_empty",
+            "public_confirmation_required", "route_conflict", "route_step_failed", "scr_open", "scr_limit", "decomposition_stale"));
+    /** P1 起的四方鎖集合：22＋4＋9＝35。 */
+    private static final Set<String> ALL_REASONS = union(P0_REASONS, P0_TAIL_REASONS, P1_REASONS);
+    /** 契約 §0.2 勘誤尚未落地、缺列的 reason（主控 RELEASE_READY 批次補列後清空；D-115）。 */
+    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>(List.of("scr_open", "decomposition_stale", "compile_failed", "sdd_cli_failed",
+            "fsm_state_unreadable"));
+    /** Architecture §11.1 研究 reason 表勘誤尚未落地、缺列的 reason（同上）。 */
+    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>(List.of("route_step_failed", "compile_failed", "sdd_cli_failed",
+            "fsm_state_unreadable", "invalid_request"));
     /** D-72 取代後退役的 reason：Bridge 對研究端點不再回它，任何一處都不得再列（見類別說明）。 */
     private static final Set<String> RETIRED_REASONS = new TreeSet<>(List.of("spec_digest_changed"));
+
+    @SafeVarargs
+    private static Set<String> union(Set<String>... sets) {
+        Set<String> out = new TreeSet<>();
+        for (Set<String> set : sets) {
+            out.addAll(set);
+        }
+        return out;
+    }
 
     private static String read(String... segments) {
         Path path = Path.of("..", segments);
@@ -108,14 +135,17 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_960_5_6_theBackendConstantsAreExactlyTheTwentyTwoP0Reasons() {
+    void AT_960_5_6_theBackendConstantsAreExactlyTheThirtyFiveReasonsOfP0AndP1() {
         assertThat(P0_REASONS).hasSize(22);
-        assertThat(backendReasons()).as("後端 ErrorReasons 的 RESEARCH_ 常數").isEqualTo(P0_REASONS);
+        assertThat(P0_TAIL_REASONS).hasSize(4);
+        assertThat(P1_REASONS).hasSize(9);
+        assertThat(ALL_REASONS).hasSize(35);
+        assertThat(backendReasons()).as("後端 ErrorReasons 的 RESEARCH_ 常數（P0 二十二＋R-2 尾巴四＋P1 九）").isEqualTo(ALL_REASONS);
     }
 
     @Test
-    void AT_960_5_6_theFrontendConstantsEqualTheTwentyTwoP0ReasonsAndTheContractAndArchitectureTablesNameEveryOne() {
-        assertThat(frontendReasons()).as("前端 RESEARCH_REASONS").isEqualTo(P0_REASONS);
+    void AT_960_5_6_theFrontendConstantsEqualTheThirtyFiveReasonsAndTheContractAndArchitectureTablesNameEveryP0One() {
+        assertThat(frontendReasons()).as("前端 RESEARCH_REASONS").isEqualTo(ALL_REASONS);
 
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
         for (String reason : P0_REASONS) {
@@ -128,6 +158,50 @@ class ResearchReasonsTest {
                 .containsEntry("sanitization_failed", 422).containsEntry("terms_ack_required", 422).containsEntry("allowlist_exists", 409)
                 .containsEntry("digest_mismatch", 422).containsEntry("missing_digests", 422).containsEntry("bridge_unreachable", 502)
                 .containsEntry("init_failed", 502).containsEntry("not_implemented", 502).containsEntry("bridge_timeout", 504);
+    }
+
+    @Test
+    void AT_961_15_4_theContractAndArchitectureTablesNameEveryOfTheThirtyFiveExceptTheNamedPendingErratum() {
+        String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
+        Set<String> contractMissing = new TreeSet<>();
+        for (String reason : ALL_REASONS) {
+            if (!contract.contains("`" + reason + "`")) {
+                contractMissing.add(reason);
+            }
+        }
+        Map<String, Integer> architecture = architectureReasons();
+        Set<String> architectureMissing = new TreeSet<>(ALL_REASONS);
+        architectureMissing.removeAll(architecture.keySet());
+
+        assertThat(contractMissing).as("契約 §0.2 缺列的 reason＝名單（勘誤落地後清空名單；缺列者須是 ALL 的子集）").isEqualTo(CONTRACT_ERRATUM_PENDING);
+        assertThat(architectureMissing).as("Architecture §11.1 缺列的 reason＝名單（勘誤落地後清空名單）").isEqualTo(ARCHITECTURE_ERRATUM_PENDING);
+        assertThat(architecture).as("Architecture 表已列的 P1 reason 的狀態碼").containsEntry("route_conflict", 409).containsEntry("branch_exists", 409)
+                .containsEntry("scr_open", 409).containsEntry("scr_limit", 409).containsEntry("decomposition_stale", 409)
+                .containsEntry("target_not_empty", 422).containsEntry("public_confirmation_required", 422)
+                .containsEntry("route_unsupported_in_deployment", 422);
+    }
+
+    @Test
+    void AT_961_15_4_everyReasonOfTheThirtyFiveIsNamedInTheOpenApiDescriptionsAndEveryP1ReasonByAtLeastOneP1Operation() {
+        String docs = documentation();
+        for (String reason : ALL_REASONS) {
+            assertThat(docs).as("OpenAPI 說明提到 reason " + reason).contains(reason);
+        }
+        List<String> p1Operations = new ArrayList<>();
+        ResearchErrorDocs.CONFLICT.forEach((key, text) -> {
+            if (key.contains("/route") || key.contains("/scr") || key.contains("/decomposition")) {
+                p1Operations.add(text);
+            }
+        });
+        ResearchErrorDocs.EXTRA.forEach((key, codes) -> {
+            if (key.contains("/route") || key.contains("/scr") || key.contains("/decomposition")) {
+                p1Operations.addAll(codes.values());
+            }
+        });
+        String p1Docs = String.join("\n", p1Operations);
+        for (String reason : P1_REASONS) {
+            assertThat(p1Docs).as("P1 端點的說明提到 P1 reason " + reason).contains(reason);
+        }
     }
 
     @Test

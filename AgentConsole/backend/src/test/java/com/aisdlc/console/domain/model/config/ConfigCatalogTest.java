@@ -9,24 +9,24 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 設定鍵目錄（契約附錄 C）：50 個鍵、六個分類、API 輸出順序是契約的一部分。
+ * 設定鍵目錄（契約附錄 C 的 50 個加 P1 的 research.github_token）：51 個鍵、七個分類、API 輸出順序是契約的一部分。
  * 與資料庫（V2＋V5 種子）的逐鍵一致性由 {@code SettingsApiIT} 核對。
  */
 class ConfigCatalogTest {
 
     @Test
-    void thereAreFiftyKeysInTheDocumentedCategoryCounts() {
+    void thereAreFiftyOneKeysInTheDocumentedCategoryCounts() {
         Map<String, Long> counts = ConfigCatalog.all().stream()
                 .collect(Collectors.groupingBy(ConfigSpec::category, Collectors.counting()));
-        assertThat(ConfigCatalog.all()).hasSize(50);
+        assertThat(ConfigCatalog.all()).hasSize(51);
         assertThat(counts).containsEntry("model", 10L).containsEntry("agent", 9L).containsEntry("execution", 10L)
-                .containsEntry("monitor", 6L).containsEntry("autoclaude", 11L).containsEntry("sdd", 4L);
+                .containsEntry("monitor", 6L).containsEntry("autoclaude", 11L).containsEntry("sdd", 4L).containsEntry("research", 1L);
     }
 
     @Test
     void categoriesAreInTheDocumentedOrderAndTheCatalogFollowsIt() {
         assertThat(ConfigCatalog.CATEGORIES).containsExactly("model", "agent", "execution", "monitor", "autoclaude",
-                "sdd");
+                "sdd", "research");
         List<String> catalogCategories = ConfigCatalog.all().stream().map(ConfigSpec::category).distinct().toList();
         assertThat(catalogCategories).isEqualTo(ConfigCatalog.CATEGORIES);
         assertThat(ConfigCatalog.orderOf("model", "provider")).isLessThan(ConfigCatalog.orderOf("model", "apiUrl"));

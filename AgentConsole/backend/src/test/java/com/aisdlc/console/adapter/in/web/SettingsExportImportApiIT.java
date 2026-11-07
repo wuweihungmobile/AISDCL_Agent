@@ -87,7 +87,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
         assertThat(export.<Integer>read("$.version")).isEqualTo(1);
         assertThat(export.<String>read("$.exportedAt")).endsWith("Z");
         assertThat(export.has("$.data")).as("不包 ApiResult 封包，直接是檔案").isFalse();
-        assertThat(export.<List<Object>>read("$.configs")).hasSize(50);
+        assertThat(export.<List<Object>>read("$.configs")).hasSize(51);
         assertThat(export.<List<String>>read("$.configs[?(@.key=='apiKey')].value")).containsExactly("<encrypted>");
         assertThat(export.<List<String>>read("$.configs[?(@.key=='dbDsn')].value")).containsExactly("<encrypted>");
         assertThat(export.body()).doesNotContain("sk-export-me").doesNotContain("postgresql://").doesNotContain("v1:");
@@ -101,7 +101,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
 
         assertThat(resp.status()).isEqualTo(200);
         assertThat(resp.<Integer>read("$.data.applied")).isZero();
-        assertThat(resp.<Integer>read("$.data.skipped")).isEqualTo(50);
+        assertThat(resp.<Integer>read("$.data.skipped")).isEqualTo(51);
         assertThat(resp.<List<Object>>read("$.data.errors")).isEmpty();
         assertThat(historyCount()).isZero();
     }
@@ -117,7 +117,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
 
         assertThat(unchanged.status()).isEqualTo(200);
         assertThat(unchanged.<Integer>read("$.data.applied")).isZero();
-        assertThat(unchanged.<Integer>read("$.data.skipped")).as("2 筆加密佔位＋48 筆值未變").isEqualTo(50);
+        assertThat(unchanged.<Integer>read("$.data.skipped")).as("3 筆加密佔位＋48 筆值未變").isEqualTo(51);
         assertThat(unchanged.<List<Object>>read("$.data.errors")).isEmpty();
         assertThat(historyCount()).isZero();
 
@@ -128,7 +128,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
         assertThat(changed.<List<String>>read("$.data.errors[*].key")).containsExactly("apiUrl");
         assertThat(changed.<List<String>>read("$.data.errors[*].reason")).containsExactly(OUTBOUND);
         assertThat(changed.<Integer>read("$.data.applied")).isZero();
-        assertThat(changed.<Integer>read("$.data.skipped")).isEqualTo(49);
+        assertThat(changed.<Integer>read("$.data.skipped")).isEqualTo(50);
         assertThat(dbValue("model", "apiUrl")).isEqualTo("https://not-listed.example/v1/chat");
         assertThat(historyCount()).isZero();
     }
@@ -142,7 +142,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
 
         assertThat(resp.<List<Object>>read("$.data.errors")).isEmpty();
         assertThat(resp.<Integer>read("$.data.applied")).isZero();
-        assertThat(resp.<Integer>read("$.data.skipped")).isEqualTo(50);
+        assertThat(resp.<Integer>read("$.data.skipped")).isEqualTo(51);
     }
 
     // ── 匯入：逐筆驗證與套用 ────────────────────────────────────────────────────
@@ -156,7 +156,7 @@ class SettingsExportImportApiIT extends AbstractApiIT {
 
         assertThat(resp.status()).isEqualTo(200);
         assertThat(resp.<Integer>read("$.data.applied")).isEqualTo(1);
-        assertThat(resp.<Integer>read("$.data.skipped")).as("2 筆加密佔位＋47 筆值未變").isEqualTo(49);
+        assertThat(resp.<Integer>read("$.data.skipped")).as("2 筆加密佔位＋47 筆值未變").isEqualTo(50);
         assertThat(resp.<List<Object>>read("$.data.errors")).isEmpty();
         assertThat(dbValue("monitor", "refreshIntervalMs")).isEqualTo("15000");
         assertThat(historyCount()).isEqualTo(1);

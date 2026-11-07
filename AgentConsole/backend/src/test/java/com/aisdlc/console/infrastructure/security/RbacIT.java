@@ -342,7 +342,9 @@ class RbacIT extends AbstractExecutionIT {
                 new Write("POST", RESEARCH + "/projects/" + project + "/approve", approveBody()),
                 new Write("POST", RESEARCH + "/projects/" + project + "/return", Map.of("reason", "退回修訂")),
                 new Write("POST", RESEARCH + "/allowlist", allowlistBody()),
-                new Write("PATCH", RESEARCH + "/allowlist/" + UUID.randomUUID(), Map.of("enabled", false)));
+                new Write("PATCH", RESEARCH + "/allowlist/" + UUID.randomUUID(), Map.of("enabled", false)),
+                // P1（AT-961-15-6）：SCR 套用僅 ADMIN（route 的 ADMIN 規則 P0 已預置，確認分流由 ResearchRouteApiIT 另驗）
+                new Write("POST", RESEARCH + "/projects/" + project + "/scr/1/apply", Map.of()));
 
         for (Write write : adminOnly) {
             String label = write.method() + " " + write.url();
@@ -376,6 +378,10 @@ class RbacIT extends AbstractExecutionIT {
                 new Write("POST", RESEARCH + "/projects", researchCreateBody("rbac-created")),
                 new Write("PUT", base + "/prd", Map.of("baseVersion", 0, "content", "# PRD", "changeSummary", "第一版")),
                 new Write("POST", base + "/stages/research", Map.of()),
+                // P1（AT-961-15-6）：OPERATOR 以上的四個新寫入
+                new Write("POST", base + "/route/preview", Map.of("track", "A")),
+                new Write("POST", base + "/scr", Map.of("kind", "MINOR", "sourceKind", "HUMAN", "reason", "規格調整")),
+                new Write("POST", base + "/decomposition", Map.of()),
                 new Write("POST", base + "/cancel", null),
                 new Write("POST", base + "/reconcile", null),
                 new Write("POST", base + "/archive", null),
@@ -401,9 +407,16 @@ class RbacIT extends AbstractExecutionIT {
             }
         }
 
+        // P1：簽核需要已分流與有拆解才會到 Bridge（先走既有 import 路徑），這裡只驗授權層：VIEWER 403、匿名 401、OPERATOR 與 ADMIN 通過
+        Write signoff = new Write("POST", base + "/decomposition/signoff", Map.of());
+        assertThat(call(viewer(), signoff).status()).isEqualTo(403);
+        assertThat(call(null, signoff).status()).isEqualTo(401);
+        assertThat(call(operator(), signoff).status()).isNotIn(401, 403);
+        assertThat(call(admin(), signoff).status()).isNotIn(401, 403);
+
         List<String> gets = List.of(RESEARCH + "/capabilities", RESEARCH + "/projects", RESEARCH + "/allowlist", base, base + "/events", base + "/sources",
                 base + "/evidence", base + "/prd/versions", base + "/prd/versions/1", base + "/review-rounds", base + "/review-rounds/1", base + "/fsm",
-                base + "/records/audit");
+                base + "/records/audit", base + "/route", base + "/scr", base + "/decomposition");
         for (String url : gets) {
             for (String token : List.of(viewer(), operator(), admin())) {
                 Resp resp = api.get(token, url);
@@ -454,6 +467,7 @@ class RbacIT extends AbstractExecutionIT {
                 "HttpMethod.POST, \"/api/v1/research/projects/*/approve\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/return\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/route\"",
+                "HttpMethod.POST, \"/api/v1/research/projects/*/scr/*/apply\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/gates\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/tag\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/pr\"",
@@ -482,7 +496,7 @@ class RbacIT extends AbstractExecutionIT {
 
         // 行為探針：精確路徑的 ADMIN 規則真的生效，route/preview 則是 OPERATOR 可用
         UUID project = new ResearchFixtures(jdbc).project("rbac-order");
-        for (String path : List.of("approve", "return", "route", "gates", "delivery/tag", "delivery/pr")) {
+        for (String path : List.of("approve", "return", "route", "scr/1/apply", "gates", "delivery/tag", "delivery/pr")) {
             String url = RESEARCH + "/projects/" + project + "/" + path;
             Resp operator = api.post(operator(), url, Map.of());
             assertThat(operator.status()).as("OPERATOR POST " + path).isEqualTo(403);

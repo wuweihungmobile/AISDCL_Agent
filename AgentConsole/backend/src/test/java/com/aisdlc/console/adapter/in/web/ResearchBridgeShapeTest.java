@@ -92,4 +92,41 @@ class ResearchBridgeShapeTest {
     private static List<Map<String, Object>> checksOf(Map<String, Object> body) {
         return (List<Map<String, Object>>) body.get("checks");
     }
+
+    @Test
+    void AT_961_15_8_theBridgeRouteConstantsAreRecognizedByTheConsoleContractShapeAndTheV19Checks() throws java.io.IOException {
+        List<String> stepsA = tuple("TRACK_A_STEPS");
+        List<String> stepsB = tuple("TRACK_B_STEPS");
+        String ddl = java.nio.file.Files.readString(java.nio.file.Path.of("src", "main", "resources", "db", "migration", "V19__research_route_scr_delivery.sql"),
+                java.nio.charset.StandardCharsets.UTF_8);
+        java.util.regex.Matcher steps = java.util.regex.Pattern.compile("step VARCHAR\\(24\\) NOT NULL CHECK \\(step IN \\(([^)]*)\\)\\)").matcher(ddl);
+        assertThat(steps.find()).isTrue();
+        java.util.Set<String> ddlSteps = new java.util.TreeSet<>(java.util.regex.Pattern.compile("'([A-Z_]+)'").matcher(steps.group(1)).results().map(m -> m.group(1)).toList());
+        java.util.Set<String> bridgeSteps = new java.util.TreeSet<>(stepsA);
+        bridgeSteps.addAll(stepsB);
+
+        assertThat(bridgeSteps).as("Bridge 兩軌步驟名的聯集＝V19 research_route_steps.step 的 CHECK 列舉（十一個）").isEqualTo(ddlSteps).hasSize(11);
+        assertThat(tuple("TRACKS")).containsExactlyInAnyOrderElementsOf(com.aisdlc.console.application.service.ResearchRouteGates.TRACKS);
+        String routes = BridgeSource.source("routers", "research_route.py");
+        for (String reason : List.of("route_conflict", "branch_exists", "target_not_empty", "route_unsupported_in_deployment", "route_step_failed")) {
+            assertThat(routes).as("Bridge 分流路由回 reason " + reason).contains("\"" + reason + "\"");
+            assertThat(com.aisdlc.console.domain.exception.ErrorReasons.class.getDeclaredFields()).as("console-api 認得 " + reason)
+                    .anyMatch(field -> field.getName().startsWith("RESEARCH_") && reasonValue(field).equals(reason));
+        }
+    }
+
+    /** route.py 的無型別標註元組宣告（{@code NAME = ("a", "b")}；{@code BridgeSource.constants} 只認帶型別標註的）。 */
+    private static List<String> tuple(String name) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?m)^" + name + "\\s*=\\s*\\(([^)]*)\\)").matcher(BridgeSource.source("research", "route.py"));
+        assertThat(m.find()).as("route.py 宣告 " + name).isTrue();
+        return java.util.regex.Pattern.compile("\"([A-Za-z_]+)\"").matcher(m.group(1)).results().map(r -> r.group(1)).toList();
+    }
+
+    private static String reasonValue(java.lang.reflect.Field field) {
+        try {
+            return String.valueOf(field.get(null));
+        } catch (IllegalAccessException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 }

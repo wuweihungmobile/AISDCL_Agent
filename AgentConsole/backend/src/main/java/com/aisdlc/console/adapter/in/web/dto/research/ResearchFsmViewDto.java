@@ -41,7 +41,8 @@ public record ResearchFsmViewDto(
         @Schema(description = "狀態檔名裡淨化後的標準鍵（外環鍵 research-<slug>[-g<N>]）", nullable = true) String fsmProject,
         @Schema(description = "僅 currentState 為 ESCALATION／ESCALATION_FINAL 時由 Bridge 回；其餘為 null", nullable = true) SddRecoveryDto recovery,
         @NotNull @Schema(minimum = "0", description = "目前 fsm_generation 內 research_gate_decisions 中 gate=GATE0、decision=CHANGES 的筆數（舊世代的鍵不計）")
-        int humanReturnCount) {
+        int humanReturnCount,
+        @NotNull @Schema(description = "內環鍵的 frozen_stages 是否含 Stage-2（TCS 已凍結；D-125：只由 frozenStages 導出，不另存第二份狀態）") boolean stage2Frozen) {
 
     /** 三個重試閘（FSM 的 SCG_VALIDATION、PR_REVIEW、RTM_VERIFY），回應<b>恰含</b>這三閘（Bridge 沒給的閘補 0）。 */
     public static final List<String> GATES = List.of("SCG_VALIDATION", "PR_REVIEW", "RTM_VERIFY");
@@ -69,6 +70,7 @@ public record ResearchFsmViewDto(
         RetryHistory retry = new RetryHistory(s.retryHistory().count(), s.retryHistory().last(), gates);
         return new ResearchFsmViewDto(s.project(), s.currentState(), s.currentSprint(), s.sessionId(), s.updatedAt(), s.frozenStages(),
                 s.decisionTrace(), s.source(), SddHumanPendingDto.from(s.humanPending()), retry, s.rtmCoverage(), SddFsmPhaseDto.from(s.phase()),
-                s.escalationHistory(), s.escalationProvenance(), s.fsmProject(), SddRecoveryDto.from(s.recovery()), view.humanReturnCount());
+                s.escalationHistory(), s.escalationProvenance(), s.fsmProject(), SddRecoveryDto.from(s.recovery()), view.humanReturnCount(),
+                com.aisdlc.console.domain.service.ResearchFlowPolicy.stage2Frozen(s.frozenStages()));
     }
 }

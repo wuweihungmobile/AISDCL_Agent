@@ -257,6 +257,18 @@ class MiniResearchController {
             case "approve-baseline" -> "approve";
             default -> verb;
         };
+        if ("route".equals(verb)) {
+            if (research.onRoute != null) {
+                research.onRoute.accept(body == null ? Map.of() : body);
+            }
+            if (research.routeDelayMillis > 0) {
+                try {
+                    Thread.sleep(research.routeDelayMillis);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
         boolean next = body != null && "next".equals(body.get("generation"));
         MiniResearch.Reply scripted = research.script(next ? new String[] {route + ":next", route} : new String[] {route});
         if (scripted != null) {
@@ -274,6 +286,14 @@ class MiniResearchController {
             case "return" -> json(200, map("gate_decision_id", UUID.randomUUID().toString(), "fsm_retry_count", 1, "escalated", false));
             case "cancel" -> json(200, map("stopped_run_id", null, "flow", flow("topic", "RESEARCHING", "CANCELLED")));
             case "reconcile" -> json(200, MiniResearch.reconcileBody(MiniResearch.consistentReconcileChecks()));
+            case "route-preview" -> reply(MiniRouteBehaviors.preview(research, id, body == null ? Map.of() : body));
+            case "route" -> reply(MiniRouteBehaviors.route(research, id, body == null ? Map.of() : body));
+            case "route-compensated" -> reply(MiniRouteBehaviors.compensated(research, id, body == null ? Map.of() : body));
+            case "scr" -> reply(MiniRouteBehaviors.scr(research, id, body == null ? Map.of() : body));
+            case "scr-apply" -> json(200, map("scr_no", body == null ? 1 : body.get("scr_no"), "status", "APPLIED", "impl_fsm_actions", List.of(), "flow", flow("build", "ROUTED", "IDLE")));
+            case "decompose" -> json(200, map("decomposition_id", UUID.randomUUID().toString(), "status", "DRAFTED", "tasks_count", 0,
+                    "coverage", map("total", 0, "covered", 0, "uncovered", List.of())));
+            case "decomposition-signoff" -> reply(MiniRouteBehaviors.signoff(research, id, body == null ? Map.of() : body));
             case "archive" -> {
                 research.jdbc().update("update console.research_projects set archived_at = now(), updated_at = now() where id = ?", id);
                 yield json(200, map("flow", flow("topic", "INGESTED", "IDLE"), "archived", true));

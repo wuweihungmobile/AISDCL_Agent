@@ -20,6 +20,7 @@ final class ResearchJdbc {
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() { };
+    private static final TypeReference<List<Object>> LIST = new TypeReference<>() { };
 
     private ResearchJdbc() {
     }
@@ -60,6 +61,14 @@ final class ResearchJdbc {
             return Map.of();
         }
         return JSON.readValue(json, OBJECT);
+    }
+
+    /** JSONB 陣列（以 {@code ::text} 取出）→ 清單；缺值或空白→空清單。 */
+    static List<Object> list(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        return JSON.readValue(json, LIST);
     }
 
     /** SQL 陣列欄位（text[]／varchar[]）→ 字串清單；NULL→空清單。 */

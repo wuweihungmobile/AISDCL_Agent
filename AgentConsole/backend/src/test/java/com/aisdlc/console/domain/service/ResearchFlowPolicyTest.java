@@ -153,4 +153,37 @@ class ResearchFlowPolicyTest {
                         "io.swagger..", "..application..", "..adapter..", "..infrastructure..")
                 .check(new ClassFileImporter().withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS).importPackages("com.aisdlc.console.domain"));
     }
+
+    // ── P1（AT-961-25-1、AT-961-15-7）──────────────────────────────────────────────────────
+
+    @Test
+    void AT_961_25_1_aTcsPendingCursorBecomesBuildReadyOnlyWhenTheInnerKeyHasFrozenStageTwo() {
+        Research pending = cursor("build", "TCS_PENDING", "WAITING_HUMAN");
+
+        Effective frozen = ResearchFlowPolicy.effective(pending, BOUND, null, new FsmView("SPEC_FROZEN", false, true));
+        assertThat(List.of(frozen.step(), frozen.phase(), frozen.status())).containsExactly("build", "BUILD_READY", "IDLE");
+        Effective notFrozen = ResearchFlowPolicy.effective(pending, BOUND, null, new FsmView("HUMAN_PENDING", false, false));
+        assertThat(List.of(notFrozen.phase(), notFrozen.status())).as("未凍結不衍生（負控）").containsExactly("TCS_PENDING", "WAITING_HUMAN");
+        Effective unreadable = ResearchFlowPolicy.effective(pending, BOUND, null, null);
+        assertThat(unreadable.phase()).as("視圖讀不到不假設").isEqualTo("TCS_PENDING");
+        Effective drafting = ResearchFlowPolicy.effective(cursor("build", "TCS_DRAFTING", "RUNNING"), BOUND, null, new FsmView("SPEC_DRAFTING", false, true));
+        assertThat(drafting.phase()).as("只有 TCS_PENDING 才衍生").isEqualTo("TCS_DRAFTING");
+        Effective routed = ResearchFlowPolicy.effective(cursor("build", "ROUTED", "IDLE"), BOUND, null, new FsmView("SPEC_FROZEN", false, true));
+        assertThat(routed.phase()).as("ROUTED 不被這條規則改寫（沒有談判＝取游標）").isEqualTo("ROUTED");
+        assertThat(ResearchFlowPolicy.stage2Frozen(List.of(java.util.Map.of("stage", "Stage-1"), java.util.Map.of("stage", "Stage-2")))).isTrue();
+        assertThat(ResearchFlowPolicy.stage2Frozen(List.of(java.util.Map.of("stage", "Stage-1")))).isFalse();
+        assertThat(ResearchFlowPolicy.stage2Frozen(null)).isFalse();
+    }
+
+    @Test
+    void AT_961_15_7_p1CursorPhasesAreTakenVerbatimAndScrOpenStaysAsIs() {
+        for (String phase : List.of("ROUTING", "ROUTED", "TCS_DRAFTING", "SCR_OPEN")) {
+            String step = "ROUTING".equals(phase) ? "route" : "SCR_OPEN".equals(phase) ? "studio" : "build";
+            Effective e = ResearchFlowPolicy.effective(cursor(step, phase, "IDLE"), null, null, null);
+            assertThat(List.of(e.step(), e.phase(), e.status())).as(phase).containsExactly(step, phase, "IDLE");
+        }
+        ResearchFlowPolicy.Flow flow = ResearchFlowPolicy.flow(ID, cursor("studio", "SCR_OPEN", "IDLE"), null, null, null);
+        assertThat(flow.effective().phase()).isEqualTo("SCR_OPEN");
+        assertThat(flow.furthestStep()).as("furthestStep 取游標與 effective 較後者").isEqualTo("studio");
+    }
 }

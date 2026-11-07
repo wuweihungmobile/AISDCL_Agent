@@ -98,10 +98,10 @@ class V5UpgradeMigrationIT {
         assertThat(value(jdbc, "monitor", "refreshIntervalMs", "default_value")).isEqualTo("10000");
         assertThat(value(jdbc, "execution", "compactThresholdPct", "value")).isEqualTo("70");
 
-        // 九個新鍵、共 50 個鍵，且沒有重複
-        assertThat(jdbc.queryForObject("select count(*) from console.system_configs", Integer.class)).isEqualTo(50);
+        // 九個新鍵、共 50 個鍵（再加 V20 的 research.github_token＝51 個，終版 schema），且沒有重複
+        assertThat(jdbc.queryForObject("select count(*) from console.system_configs", Integer.class)).isEqualTo(51);
         assertThat(jdbc.queryForObject("select count(distinct (category, key)) from console.system_configs",
-                Integer.class)).isEqualTo(50);
+                Integer.class)).isEqualTo(51);
         assertThat(jdbc.queryForList("select key from console.system_configs where category = 'autoclaude' "
                 + "and key in ('claudeCommand','claudeExtraArgs','claudeContinueFlag','claudeEncoding','dbDsn',"
                 + "'dualReadResolution')", String.class)).hasSize(6);
@@ -133,7 +133,7 @@ class V5UpgradeMigrationIT {
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
                 .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
-                        "16", "17", "18", "19");
+                        "16", "17", "18", "19", "20");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
     }
 
@@ -222,7 +222,7 @@ class V5UpgradeMigrationIT {
         return jdbc.queryForObject("select string_agg(category || '.' || key || '=' || coalesce(value, '<null>') || '|' || "
                 + "coalesce(default_value, '<null>') || '|' || coalesce(impact_note, '<null>'), ';' "
                 + "order by category, key) from console.system_configs "
-                + "where not (category = 'autoclaude' and key = 'healthCheckPath')", String.class);
+                + "where not (category = 'autoclaude' and key = 'healthCheckPath') and category <> 'research'", String.class);
     }
 
     /**

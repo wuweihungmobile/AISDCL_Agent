@@ -72,6 +72,7 @@ public class ExecutionControlService {
     private final ConfigMaterializer config;
     private final RunConsumers consumers;
     private final RunRegistry registry;
+    private final ResearchExecutionGuard researchGuard;
     private final TransactionTemplate tx;
     private final Clock clock;
 
@@ -80,7 +81,7 @@ public class ExecutionControlService {
                                    TaskRepository tasks, ReviewRequestRepository reviews,
                                    CheckpointRepository checkpoints, AgentBridge bridge, ConfigMaterializer config,
                                    RunConsumers consumers, RunRegistry registry,
-                                   PlatformTransactionManager transactions, Clock clock) {
+                                   ResearchExecutionGuard researchGuard, PlatformTransactionManager transactions, Clock clock) {
         this.runs = runs;
         this.projects = projects;
         this.goals = goals;
@@ -91,6 +92,7 @@ public class ExecutionControlService {
         this.config = config;
         this.consumers = consumers;
         this.registry = registry;
+        this.researchGuard = researchGuard;
         this.tx = new TransactionTemplate(transactions);
         this.clock = clock;
     }
@@ -278,6 +280,7 @@ public class ExecutionControlService {
         if (!project.signedOff() || !unsignedGoals.isEmpty() || !unsignedTasks.isEmpty()) {
             throw ExecuteProjectService.unsignedDraft(project, unsignedGoals, unsignedTasks);
         }
+        researchGuard.check(run.projectId());     // D-102：resume／restore 同一個單一前置守衛（僅綁研究專案者生效）
     }
 
     /** 呼叫 Bridge 並把 4xx 轉成契約的 409／404／422；5xx、連線失敗與逾時維持 502／504（DB 不動）。 */

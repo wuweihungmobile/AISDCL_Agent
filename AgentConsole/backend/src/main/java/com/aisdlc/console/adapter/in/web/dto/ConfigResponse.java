@@ -25,7 +25,7 @@ import java.util.UUID;
  */
 public record ConfigResponse(
         @NotNull UUID id,
-        @NotNull @Schema(allowableValues = {"model", "agent", "execution", "monitor", "autoclaude", "sdd"})
+        @NotNull @Schema(allowableValues = {"model", "agent", "execution", "monitor", "autoclaude", "sdd", "research"})
         String category,
         @NotNull String key,
         @NotNull String value,

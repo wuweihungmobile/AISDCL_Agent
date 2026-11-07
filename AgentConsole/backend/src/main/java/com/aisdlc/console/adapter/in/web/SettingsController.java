@@ -65,7 +65,7 @@ public class SettingsController {
 
     @GetMapping
     @Operation(summary = "查詢所有參數（依分類）",
-            description = "六個分類：model／agent／execution／monitor／autoclaude／sdd。加密值一律 ••••••••，並附 hasValue；"
+            description = "七個分類：model／agent／execution／monitor／autoclaude／sdd／research（research 自 P1 起，僅 github_token 一鍵）。加密值一律 ••••••••，並附 hasValue；"
                     + "reveal=true 僅 ADMIN（其他角色 403），每次揭露寫審計")
     public ApiResult<Map<String, List<ConfigResponse>>> listAll(
             @Parameter(description = "true＝揭露加密值明文（僅 ADMIN）") @RequestParam(defaultValue = "false") boolean reveal,

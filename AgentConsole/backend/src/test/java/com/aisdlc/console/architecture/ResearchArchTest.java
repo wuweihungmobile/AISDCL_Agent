@@ -133,4 +133,26 @@ class ResearchArchTest {
                 .should().dependOnClassesThat().haveFullyQualifiedName("org.springframework.web.bind.annotation.DeleteMapping").check(classes);
         classes().that().haveSimpleName("ResearchController").should().beAnnotatedWith("org.springframework.web.bind.annotation.RestController").check(classes);
     }
+
+    @Test
+    void AT_961_15_5_theP1ReadAdaptersExistReadOnlyViaJdbcClientAndNoMainSourceWritesAnyV19ResearchTable() throws IOException {
+        Map<String, String> sources = researchPersistenceSources();
+        for (String adapter : List.of("RouteReadAdapter", "ScrReadAdapter", "DecompositionReadAdapter")) {
+            assertThat(sources.keySet()).as("P1 讀配接器 " + adapter).anyMatch(name -> name.endsWith("/" + adapter + ".java"));
+            assertThat(sources.entrySet().stream().filter(e -> e.getKey().endsWith("/" + adapter + ".java")).findFirst().orElseThrow().getValue())
+                    .contains("JdbcClient").doesNotContain("@Entity").doesNotContain("JdbcTemplate");
+        }
+        Pattern v19Write = Pattern.compile("(?i)\\b(insert\\s+into|update|delete\\s+from)\\s+console\\.(research_route_decisions|research_route_steps|research_scr|"
+                + "research_decompositions|research_deliveries)\\b");
+        List<String> hits = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(Path.of("src", "main", "java"))) {
+            for (Path path : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                if (v19Write.matcher(Files.readString(path, StandardCharsets.UTF_8)).find()) {
+                    hits.add(path.toString());
+                }
+            }
+        }
+        assertThat(hits).as("console-api 對 V19 五張表的任何寫入語句為 0（只寫自己的 projects 與 audit_log）").isEmpty();
+        assertThat(v19Write.matcher("UPDATE console.research_scr set status = 'X'").find()).as("掃描器負控").isTrue();
+    }
 }

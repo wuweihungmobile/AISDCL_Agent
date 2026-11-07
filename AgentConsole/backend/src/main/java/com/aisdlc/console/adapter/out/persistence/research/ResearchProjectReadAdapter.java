@@ -32,7 +32,7 @@ class ResearchProjectReadAdapter implements ResearchProjectReadPort {
     private static final String EVENT_COLUMNS = "select seq, event_type, step, actor, ref_kind, ref_id, payload::text as payload, occurred_at "
             + "from console.research_events where research_id = :id and seq > :after order by seq limit :limit";
 
-    /** PRD §5.1.8 的 14 類記錄的名稱（R7、R8、R10、R11、R12 對應 V19 的表，P0 尚不存在，筆數恆為 0）。 */
+    /** PRD §5.1.8 的 14 類記錄的名稱（R7、R8、R10、R11、R12 對應 V19 的表與視圖；⚖P1-16 口徑見 {@link #recordClasses}）。 */
     private static final List<String> CLASS_NAMES = List.of("議題與範圍", "抓取紀錄", "證據矩陣版本", "PRD 版本", "審查輪", "Gate 0 決定",
             "分流決定與副作用步驟", "拆解結果", "stage run", "自癒嘗試", "交付", "SCR", "步驟歷史", "產物登記與對帳結果");
 
@@ -119,6 +119,10 @@ class ResearchProjectReadAdapter implements ResearchProjectReadPort {
                 .query((rs, n) -> ResearchJdbc.nullableLong(rs, 1)).optional().map(OptionalLong::of).orElseGet(OptionalLong::empty);
     }
 
+    /**
+     * R1～R14 各類的筆數。V19 口徑（⚖P1-16）：R7＝{@code research_route_decisions} 筆數、R8＝{@code research_decompositions}、R10＝視圖
+     * {@code v_research_healing_attempts}（自癒嘗試，唯讀視圖）、R11＝{@code research_deliveries}（P2 寫入）、R12＝{@code research_scr}。
+     */
     @Override
     public List<RecordClass> recordClasses(UUID id) {
         long[] counts = jdbc.sql("select "
@@ -128,12 +132,18 @@ class ResearchProjectReadAdapter implements ResearchProjectReadPort {
                 + "(select count(*) from console.research_prd_versions where research_id = :id) as r4, "
                 + "(select count(*) from console.research_review_rounds where research_id = :id) as r5, "
                 + "(select count(*) from console.research_gate_decisions where research_id = :id and gate = 'GATE0') as r6, "
+                + "(select count(*) from console.research_route_decisions where research_id = :id) as r7, "
+                + "(select count(*) from console.research_decompositions where research_id = :id) as r8, "
                 + "(select count(*) from console.research_stage_runs where research_id = :id) as r9, "
+                + "(select count(*) from console.v_research_healing_attempts where research_id = :id) as r10, "
+                + "(select count(*) from console.research_deliveries where research_id = :id) as r11, "
+                + "(select count(*) from console.research_scr where research_id = :id) as r12, "
                 + "(select count(*) from console.research_events where research_id = :id and event_type = 'research.step') as r13, "
                 + "(select count(*) from console.research_artifacts where research_id = :id) as r14")
                 .param("id", id)
                 .query((rs, n) -> new long[] {rs.getLong("r1"), rs.getLong("r2"), rs.getLong("r3"), rs.getLong("r4"), rs.getLong("r5"),
-                        rs.getLong("r6"), 0L, 0L, rs.getLong("r9"), 0L, 0L, 0L, rs.getLong("r13"), rs.getLong("r14")})
+                        rs.getLong("r6"), rs.getLong("r7"), rs.getLong("r8"), rs.getLong("r9"), rs.getLong("r10"), rs.getLong("r11"),
+                        rs.getLong("r12"), rs.getLong("r13"), rs.getLong("r14")})
                 .single();
         return java.util.stream.IntStream.range(0, CLASS_NAMES.size())
                 .mapToObj(i -> new RecordClass("R" + (i + 1), CLASS_NAMES.get(i), (int) counts[i])).toList();
@@ -144,6 +154,12 @@ class ResearchProjectReadAdapter implements ResearchProjectReadPort {
         return jdbc.sql("select count(*) from console.research_gate_decisions where research_id = :id and gate = 'GATE0' "
                 + "and decision = 'CHANGES' and fsm_project = :fsm").param("id", id).param("fsm", fsmProject)
                 .query((rs, n) -> rs.getInt(1)).single();
+    }
+
+    @Override
+    public Optional<UUID> researchIdOfConsoleProject(UUID consoleProjectId) {
+        return jdbc.sql("select id from console.research_projects where console_project_id = :project order by created_at limit 1")
+                .param("project", consoleProjectId).query((rs, n) -> ResearchJdbc.uuid(rs, "id")).optional();
     }
 
     @Override

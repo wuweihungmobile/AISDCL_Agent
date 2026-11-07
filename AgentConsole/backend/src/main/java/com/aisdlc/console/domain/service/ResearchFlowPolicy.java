@@ -45,6 +45,22 @@ public final class ResearchFlowPolicy {
     private ResearchFlowPolicy() {
     }
 
+    /**
+     * 內環鍵的 {@code frozen_stages}（FSM 檔原樣，每項帶 {@code stage}）是否含 {@value #STAGE2}（D-125：{@code stage2Frozen} 只由它導出、不另存第二份狀態）。
+     * null 或不含＝false。
+     */
+    public static boolean stage2Frozen(List<java.util.Map<String, Object>> frozenStages) {
+        if (frozenStages == null) {
+            return false;
+        }
+        for (java.util.Map<String, Object> entry : frozenStages) {
+            if (entry != null && STAGE2.equals(entry.get("stage"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** 研究列的游標欄位（取自 {@code research_projects}）。 */
     public record Research(String flowStep, String flowPhase, String flowStatus, String flowDetail) {
     }
@@ -53,9 +69,19 @@ public final class ResearchFlowPolicy {
     public record ConsoleProject(UUID id) {
     }
 
-    /** 內環 FSM 的視圖（P1 起接線；null＝沒有可用的視圖）：現態與是否已完成測試契約談判。 */
-    public record FsmView(String currentState, boolean negotiated) {
+    /**
+     * 內環 FSM 的視圖（P1 起接線；null＝沒有可用的視圖）：現態、是否已完成測試契約談判，以及 {@code stage2Frozen}（內環鍵的 {@code frozen_stages} 含
+     * {@value #STAGE2}；D-125：只由 frozen_stages 導出、不另存第二份狀態）。兩參數建構子＝{@code stage2Frozen=false}（P0 呼叫端不變）。
+     */
+    public record FsmView(String currentState, boolean negotiated, boolean stage2Frozen) {
+
+        public FsmView(String currentState, boolean negotiated) {
+            this(currentState, negotiated, false);
+        }
     }
+
+    /** TCS 凍結的 Stage 名（既有 {@code POST …/sdd/freeze} 的預設 Stage，{@code sdd_sync.py}）。 */
+    public static final String STAGE2 = "Stage-2";
 
     /** 衍生後的目前位置：{@code status} 為 DB 游標的八值加衍生的 {@code PAUSED}。 */
     public record Effective(String step, String phase, String status, String detail) {
@@ -80,6 +106,11 @@ public final class ResearchFlowPolicy {
     public static Effective effective(Research research, ConsoleProject project, RunFact latestRun, FsmView fsm) {
         Effective cursor = new Effective(research.flowStep(), research.flowPhase(), research.flowStatus(),
                 research.flowDetail() == null ? "" : research.flowDetail());
+        // D-125(1)：TCS 經既有 :freeze 於內環鍵凍結 Stage-2 後，DB 游標仍停在 build／TCS_PENDING——讀端衍生為 BUILD_READY（游標是投影，ADR-003 D5）；
+        // 視圖讀不到（null）或未凍結一律不衍生（沿 P0：FSM 讀不到不假設）
+        if ("TCS_PENDING".equals(research.flowPhase()) && fsm != null && fsm.stage2Frozen()) {
+            return new Effective("build", "BUILD_READY", "IDLE", fsm.currentState() == null ? "" : fsm.currentState());
+        }
         if (CURSOR_STEPS.contains(research.flowStep()) || TCS_PHASES.contains(research.flowPhase()) || project == null) {
             return cursor;
         }

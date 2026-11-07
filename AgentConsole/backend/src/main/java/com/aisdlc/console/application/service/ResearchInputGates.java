@@ -34,8 +34,8 @@ import java.util.regex.Pattern;
  */
 public final class ResearchInputGates {
 
-    /** 入口閘的頂層 {@code reason}（與 Bridge 層同名同義；以區域常數持有、不進 {@code ErrorReasons}，先例 {@code SiWriteGates}）。 */
-    public static final String INVALID_REQUEST = "invalid_request";
+    /** 入口閘的頂層 {@code reason}（與 Bridge 層同名同義；P1 起引用 {@code ErrorReasons.RESEARCH_INVALID_REQUEST}，R-2 尾巴併入四方鎖，⚖P1-25）。 */
+    public static final String INVALID_REQUEST = ErrorReasons.RESEARCH_INVALID_REQUEST;
 
     public static final int TITLE_MAX = 200;
     public static final int TOPIC_MAX = 500;

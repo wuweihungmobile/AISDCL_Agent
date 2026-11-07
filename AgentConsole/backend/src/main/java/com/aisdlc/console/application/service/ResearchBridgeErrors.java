@@ -47,7 +47,9 @@ final class ResearchBridgeErrors {
             return new ForbiddenException("Bridge 拒絕了 backend 的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致）", reason);
         }
         if (status == 404) {
-            return new NotFoundException("研究專案不存在或已刪除", reason.isEmpty() ? ErrorReasons.RESEARCH_NOT_FOUND : reason, details);
+            // D-123（P0 未結 R-1）：reason 仍是 research_not_found，文案依 details 區分——allowlist 條目的 404 帶 entry_id，其餘是研究專案
+            String subject = details.containsKey("entry_id") ? "允許清單條目不存在" : "研究專案不存在或已刪除";
+            return new NotFoundException(subject, reason.isEmpty() ? ErrorReasons.RESEARCH_NOT_FOUND : reason, details);
         }
         if (status == 409) {
             return new ConflictException("與研究專案目前狀態衝突（" + reason + "）", reason, details);

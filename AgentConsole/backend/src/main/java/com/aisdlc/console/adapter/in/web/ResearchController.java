@@ -221,9 +221,9 @@ public class ResearchController {
     @PostMapping("/projects/{id}/stages/{stage}")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(operationId = "startResearchStage", summary = "啟動階段（API-RP-11；OPERATOR 以上）",
-            description = "stage＝research｜draft｜review｜revise｜iterate｜tcs-draft（tcs-draft 屬 P1）；本文選填 {auto, note, afterEscalation}。前置條件由 Bridge 驗，"
+            description = "stage＝research｜draft｜review｜revise｜iterate｜tcs-draft（tcs-draft 自 P1 起可用；前置：分流成功、已有拆解、內環鍵已採納基線）；本文選填 {auto, note, afterEscalation}。前置條件由 Bridge 驗，"
                     + "未滿足＝409 stage_conflict（details.unmet 逐條列出 rule 與說明）／fsm_state_conflict／escalated／spec_frozen；同專案已有進行中的 stage 或全站並行上限"
-                    + "＝409 stage_conflict（不排隊、不重試）；DB 阻塞＝503 db_blocked。Bridge 端點本體尚未實作時回 502 not_implemented。成功 202 回 {stageRunId, flowPhase, flowStatus}；"
+                    + "＝409 stage_conflict（不排隊、不重試）；DB 阻塞＝503 db_blocked。not_implemented（Bridge 端點本體尚未實作時回 502）自 P1 起 Bridge 無觸發者，保留供 P2 骨架（D-111）。成功 202 回 {stageRunId, flowPhase, flowStatus}；"
                     + "進度看 SSE research.run 與 research.step。" + WRITE_FLOW)
     public ApiResult<StageStartedDto> startStage(
             @PathVariable UUID id,
@@ -264,7 +264,7 @@ public class ResearchController {
 
     @PostMapping("/projects/{id}/reconcile")
     @Operation(operationId = "reconcileResearch", summary = "對帳（API-RP-18；OPERATOR 以上）",
-            description = "只報告、不修復：回 {consistent, checks[{name, status(ok｜drift｜NOT_EVALUABLE), drift?}]}，結果追加 research_events（research.reconcile）。" + WRITE_FLOW)
+            description = "只報告、不修復：回 {consistent, checks[{name, status(ok｜drift｜NOT_EVALUABLE｜pending_correction), drift?}]}，結果追加 research_events（research.reconcile）。" + WRITE_FLOW)
     public ApiResult<ReconcileResultDto> reconcile(@PathVariable UUID id, Authentication authentication) {
         return ApiResult.ok(ReconcileResultDto.from(command.action(caller(authentication), id, "reconcile")));
     }

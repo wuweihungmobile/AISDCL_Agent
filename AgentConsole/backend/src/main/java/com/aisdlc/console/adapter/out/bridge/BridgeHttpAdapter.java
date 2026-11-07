@@ -102,9 +102,15 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
     private static final Set<String> RESEARCH_REJECTED_503 = Set.of(ErrorReasons.RESEARCH_WRITE_DISABLED, ErrorReasons.RESEARCH_REQUIRES_DB,
             ErrorReasons.RESEARCH_DB_BLOCKED);
     /** Bridge 自己回報的研究上游失敗（501 骨架、502 初始化失敗）：reason 與 details 原樣轉出，不併入一般的「引擎橋接服務錯誤」。 */
-    private static final Set<String> RESEARCH_UPSTREAM = Set.of(ErrorReasons.RESEARCH_NOT_IMPLEMENTED, ErrorReasons.RESEARCH_INIT_FAILED);
+    private static final Set<String> RESEARCH_UPSTREAM = Set.of(ErrorReasons.RESEARCH_NOT_IMPLEMENTED, ErrorReasons.RESEARCH_INIT_FAILED,
+            ErrorReasons.RESEARCH_ROUTE_STEP_FAILED);
     /** 研究寫入（POST／PUT／PATCH）的讀取逾時 30 秒、連線 2 秒、不重試（契約 §0.2 第 8 列）。 */
     private static final Duration RESEARCH_WRITE_READ_TIMEOUT = Duration.ofSeconds(30);
+    /**
+     * 分流確認（{@code :route}）與拆解觸發（{@code :decompose}）的讀取逾時 330 秒（D-105）：Bridge 牆鐘上限 {@code BRIDGE_ROUTE_TIMEOUT_SECONDS}＝300 秒加緩衝，
+     * 必須大於它，否則 Bridge 的 502 {@code route_step_failed} 會被這裡的 504 蓋掉。nginx 的 {@code /api/} 既有 86400 秒讀逾時，不用改。
+     */
+    private static final Duration RESEARCH_LONG_READ_TIMEOUT = Duration.ofSeconds(330);
     /** 研究讀取（能力探針、allowlist）的讀取逾時 10 秒（能力探針含外部 CLI 的版本探測）、連線 2 秒、不重試。 */
     private static final Duration RESEARCH_READ_TIMEOUT = Duration.ofSeconds(10);
     /** {@code POST /research/projects/{id}:<verb>} 允許的動詞（白名單：動詞會直接進網址）。 */
@@ -545,6 +551,41 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
     }
 
     @Override
+    public Map<String, Object> routePreview(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":route-preview", body);
+    }
+
+    @Override
+    public Map<String, Object> route(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":route", body, RESEARCH_LONG_READ_TIMEOUT);
+    }
+
+    @Override
+    public Map<String, Object> routeCompensated(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":route-compensated", body);
+    }
+
+    @Override
+    public Map<String, Object> openScr(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":scr", body);
+    }
+
+    @Override
+    public Map<String, Object> applyScr(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":scr-apply", body);
+    }
+
+    @Override
+    public Map<String, Object> decompose(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":decompose", body, RESEARCH_LONG_READ_TIMEOUT);
+    }
+
+    @Override
+    public Map<String, Object> decompositionSignoff(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":decomposition-signoff", body);
+    }
+
+    @Override
     public Map<String, Object> addAllowlistEntry(Map<String, Object> body) {
         return researchWrite(HttpMethod.POST, "/research/allowlist", body);
     }
@@ -559,6 +600,10 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
      * <b>不重試</b>。🔴 權杖只放進請求，不進日誌、例外訊息或錯誤封包。網址由呼叫端組好（id 是 UUID、其餘片段已嚴格 percent-encode），不經範本引擎。
      */
     private Map<String, Object> researchWrite(HttpMethod method, String path, Map<String, Object> body) {
+        return researchWrite(method, path, body, RESEARCH_WRITE_READ_TIMEOUT);
+    }
+
+    private Map<String, Object> researchWrite(HttpMethod method, String path, Map<String, Object> body, Duration readTimeout) {
         Map<String, String> auth = researchWriteToken();
         if (auth.isEmpty()) {
             throw new ServiceUnavailableException("backend 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面已停用",
@@ -568,7 +613,7 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
         URI uri = URI.create(endpoints.researchBase() + path);
         return research(() -> {
             try {
-                return client(RESEARCH_WRITE_READ_TIMEOUT, traceId()).method(method).uri(uri).headers(h -> auth.forEach(h::set))
+                return client(readTimeout, traceId()).method(method).uri(uri).headers(h -> auth.forEach(h::set))
                         .contentType(MediaType.APPLICATION_JSON).body(payload)
                         .exchange((request, response) -> handle(response.getStatusCode(), readBody(response.getBody())));
             } catch (ResourceAccessException e) {

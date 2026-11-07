@@ -1,7 +1,7 @@
 """研究表測試的 PostgreSQL 支援（TCS-ResearchToPRD-P0-20261102 §2 的 `RDB`；ADR-003 D2）。
 
 `make_research_db()`：在 `BRIDGE_TEST_DSN` 所指的伺服器上建一個**拋棄式資料庫**
-（名稱 `r2p_bra_<隨機>`），依數值序套用 backend 的 Flyway 檔 `V1`～`V19`（直接讀真檔，不另抄
+（名稱 `r2p_bra_<隨機>`），依數值序套用 backend 的 Flyway 檔 `V1`～`V20`（直接讀真檔，不另抄
 一份），交出該庫的 DSN；測完 `drop()`。絕不連真 `aisdlc` 資料庫、絕不碰名稱不帶本前綴的庫。
 
 `BRIDGE_TEST_DSN` 未設＝`pytest.skip("TOOL-ABSENCE: BRIDGE_TEST_DSN 不存在")`（TCS §2 的
@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = (REPO_ROOT / "AgentConsole" / "backend" / "src" / "main" / "resources" / "db"
                  / "migration")
 DB_NAME_PREFIX = "r2p_bra_"
-LAST_VERSION = 19
+LAST_VERSION = 20
 _FILE_RE = re.compile(r"^V(\d+)__.+\.sql$")
 
 

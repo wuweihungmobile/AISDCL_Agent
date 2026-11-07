@@ -5,6 +5,7 @@ import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedExcepti
 import com.aisdlc.console.application.port.out.ResearchBridge;
 import com.aisdlc.console.application.port.out.ResearchBridge.ResearchFsm;
 import com.aisdlc.console.application.port.out.ResearchEvidenceReadPort;
+import com.aisdlc.console.application.port.out.ProjectRepository;
 import com.aisdlc.console.application.port.out.ResearchProjectReadPort;
 import com.aisdlc.console.application.port.out.ResearchReviewReadPort;
 import com.aisdlc.console.domain.exception.ErrorReasons;
@@ -54,15 +55,17 @@ public class ResearchQueryService implements ResearchQueryUseCase {
     private final ResearchEvidenceReadPort evidence;
     private final ResearchReviewReadPort reviews;
     private final ResearchBridge bridge;
+    private final ProjectRepository consoleProjects;
     private final Clock clock;
     private final AtomicReference<CachedCapabilities> capabilities = new AtomicReference<>();
 
     ResearchQueryService(ResearchProjectReadPort projects, ResearchEvidenceReadPort evidence, ResearchReviewReadPort reviews,
-                         ResearchBridge bridge, Clock clock) {
+                         ResearchBridge bridge, ProjectRepository consoleProjects, Clock clock) {
         this.projects = projects;
         this.evidence = evidence;
         this.reviews = reviews;
         this.bridge = bridge;
+        this.consoleProjects = consoleProjects;
         this.clock = clock;
     }
 
@@ -82,11 +85,31 @@ public class ResearchQueryService implements ResearchQueryUseCase {
                 project.flowDetail());
         ResearchFlowPolicy.ConsoleProject bound = project.consoleProjectId() == null ? null
                 : new ResearchFlowPolicy.ConsoleProject(project.consoleProjectId());
-        // P0 沒有內環 FSM 視圖（P1 分流後才有）：傳 null，ResearchFlowPolicy 只靠游標與最新 run 衍生
-        ResearchFlowPolicy.Flow flow = ResearchFlowPolicy.flow(id, cursor, bound, run, null);
+        // 內環 FSM 視圖只在游標為 TCS_PENDING 時才讀（D-125 之一：判斷 Stage-2 是否已由既有 :freeze 凍結）；讀不到＝null，不衍生
+        ResearchFlowPolicy.Flow flow = ResearchFlowPolicy.flow(id, cursor, bound, run, innerFsmView(project));
         var head = projects.headPrdVersion(id);
         return new ProjectDetail(project, projects.counts(id), head.isPresent() ? Integer.valueOf((int) head.getAsLong()) : null,
                 projects.lastReview(id).orElse(null), flow);
+    }
+
+    /**
+     * D-125(1)：游標為 build／TCS_PENDING 且已綁 Console 專案時，唯讀取內環鍵的 FSM 視圖（Console 專案的有效 FSM 專案鍵與執行路徑；連線 2 秒、讀取 3 秒、不重試），
+     * 只取 {@code stage2Frozen}。任何失敗（專案已刪、Bridge 不可達、狀態檔缺）回 null＝不衍生（沿 P0：FSM 讀不到不假設）。
+     */
+    private ResearchFlowPolicy.FsmView innerFsmView(Project project) {
+        if (!"TCS_PENDING".equals(project.flowPhase()) || project.consoleProjectId() == null) {
+            return null;
+        }
+        try {
+            var console = consoleProjects.findById(project.consoleProjectId()).orElse(null);
+            if (console == null) {
+                return null;
+            }
+            var state = bridge.fsm(console.effectiveSddProject(), console.executionPath()).state();
+            return new ResearchFlowPolicy.FsmView(state.currentState(), false, ResearchFlowPolicy.stage2Frozen(state.frozenStages()));
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     @Override

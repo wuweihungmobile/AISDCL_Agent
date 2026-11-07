@@ -66,7 +66,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
                         + "order by installed_rank");
         assertThat(history).extracting(row -> row.get("version"))
                 .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
-                        "16", "17", "18", "19");
+                        "16", "17", "18", "19", "20");
         assertThat(history).allSatisfy(row -> assertThat(row.get("success")).isEqualTo(true));
     }
 
@@ -239,8 +239,8 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
                 });
         // 契約附錄 C：10＋9＋10＋6＋11＋4＝50（V5 補 model.enableKernelBrain、execution 兩個 token_guard 續跑鍵、autoclaude 六個）
         assertThat(counts).containsExactlyInAnyOrderEntriesOf(Map.of(
-                "model", 10, "agent", 9, "execution", 10, "monitor", 6, "autoclaude", 11, "sdd", 4));
-        assertThat(counts.values().stream().mapToInt(Integer::intValue).sum()).isEqualTo(50);
+                "model", 10, "agent", 9, "execution", 10, "monitor", 6, "autoclaude", 11, "sdd", 4, "research", 1));
+        assertThat(counts.values().stream().mapToInt(Integer::intValue).sum()).isEqualTo(51);
     }
 
     @Test
@@ -261,10 +261,13 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
                 "select category, key, value, value_type from console.system_configs where is_encrypted "
                         + "order by category, key");
         // V5 後 autoclaude.dbDsn 是第二把加密鍵（附錄 C：model.apiKey 與 autoclaude.dbDsn 皆 ENCRYPTED）。
-        assertThat(encrypted).hasSize(2);
+        assertThat(encrypted).hasSize(3);
         assertThat(encrypted.get(0)).containsEntry("category", "autoclaude").containsEntry("key", "dbDsn")
                 .containsEntry("value", "").containsEntry("value_type", "ENCRYPTED");
         assertThat(encrypted.get(1)).containsEntry("category", "model").containsEntry("key", "apiKey")
+                .containsEntry("value", "").containsEntry("value_type", "ENCRYPTED");
+        // V20（D-132）：research.github_token 是第三把加密鍵（空值種子）
+        assertThat(encrypted.get(2)).containsEntry("category", "research").containsEntry("key", "github_token")
                 .containsEntry("value", "").containsEntry("value_type", "ENCRYPTED");
     }
 
@@ -282,7 +285,7 @@ class SchemaMigrationIT extends AbstractIntegrationTest {
     void everySeededValueAndDefaultSatisfiesItsOwnValidationRule() {
         List<Map<String, Object>> rows = jdbc.queryForList(
                 "select category, key, value, default_value, validation_rule from console.system_configs");
-        assertThat(rows).hasSize(50);
+        assertThat(rows).hasSize(51);
         for (Map<String, Object> row : rows) {
             String label = row.get("category") + "." + row.get("key");
             assertThat(row.get("validation_rule")).as(label + " 必須有 validation_rule").isNotNull();

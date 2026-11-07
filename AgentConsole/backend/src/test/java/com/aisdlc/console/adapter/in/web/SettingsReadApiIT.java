@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SettingsReadApiIT extends AbstractApiIT {
 
     private static final String BASE = "/api/v1/settings";
-    private static final List<String> CATEGORIES = List.of("model", "agent", "execution", "monitor", "autoclaude", "sdd");
+    private static final List<String> CATEGORIES = List.of("model", "agent", "execution", "monitor", "autoclaude", "sdd", "research");
 
     private static Map<String, Object> config(Resp resp, String category, String key) {
         List<Map<String, Object>> found = resp.read("$.data." + category + "[?(@.key=='" + key + "')]");
@@ -50,7 +50,7 @@ class SettingsReadApiIT extends AbstractApiIT {
     // ── 分類與順序 ─────────────────────────────────────────────────────────────
 
     @Test
-    void anyRoleSeesFiftyKeysInSixCategoriesWithTheDocumentedCountsAndOrder() {
+    void anyRoleSeesFiftyOneKeysInSevenCategoriesWithTheDocumentedCountsAndOrder() {
         for (String token : List.of(viewer(), operator(), admin())) {
             Resp resp = api.get(token, BASE);
             assertThat(resp.status()).isEqualTo(200);
@@ -58,7 +58,7 @@ class SettingsReadApiIT extends AbstractApiIT {
             int[] positions = CATEGORIES.stream().mapToInt(c -> body.indexOf("\"" + c + "\":[")).toArray();
             assertThat(positions).as("分類在回應中的出現順序").doesNotContain(-1).isSorted();
             assertThat(CATEGORIES.stream().map(c -> resp.<List<Object>>read("$.data." + c).size()).toList())
-                    .containsExactly(10, 9, 10, 6, 11, 4);
+                    .containsExactly(10, 9, 10, 6, 11, 4, 1);
         }
     }
 
@@ -73,7 +73,7 @@ class SettingsReadApiIT extends AbstractApiIT {
     }
 
     @Test
-    void theProgramCatalogAndTheDatabaseDescribeExactlyTheSameFiftyKeysKeyForKey() {
+    void theProgramCatalogAndTheDatabaseDescribeExactlyTheSameFiftyOneKeysKeyForKey() {
         Resp resp = api.get(viewer(), BASE);
         Set<String> fromApi = new LinkedHashSet<>();
         for (String category : CATEGORIES) {
@@ -93,7 +93,7 @@ class SettingsReadApiIT extends AbstractApiIT {
         }
         Set<String> catalog = new LinkedHashSet<>();
         ConfigCatalog.all().forEach(s -> catalog.add(s.fullKey()));
-        assertThat(fromApi).hasSize(50).isEqualTo(catalog);
+        assertThat(fromApi).hasSize(51).isEqualTo(catalog);
     }
 
     @Test

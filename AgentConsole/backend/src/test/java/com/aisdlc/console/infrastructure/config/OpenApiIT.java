@@ -157,11 +157,18 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/research/projects/{id}/reinit", List.of("post")),
             Map.entry("/api/v1/research/projects/{id}/return", List.of("post")),
             Map.entry("/api/v1/research/allowlist", List.of("get", "post")),
-            Map.entry("/api/v1/research/allowlist/{id}", List.of("patch"))));
+            Map.entry("/api/v1/research/allowlist/{id}", List.of("patch")),
+        // ── ResearchToPRD P1（TCS-ResearchToPRD-P1 AT-961-15-3）：新增 6 條路徑、9 個操作（同路徑的 get 與 post 合併計一條）──
+        Map.entry("/api/v1/research/projects/{id}/route/preview", List.of("post")),
+        Map.entry("/api/v1/research/projects/{id}/route", List.of("get", "post")),
+        Map.entry("/api/v1/research/projects/{id}/scr", List.of("get", "post")),
+        Map.entry("/api/v1/research/projects/{id}/scr/{scrNo}/apply", List.of("post")),
+        Map.entry("/api/v1/research/projects/{id}/decomposition", List.of("get", "post")),
+        Map.entry("/api/v1/research/projects/{id}/decomposition/signoff", List.of("post"))));
 
     /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
-    private static final int EXPECTED_PATH_COUNT = 101;
-    private static final int EXPECTED_OPERATION_COUNT = 115;
+    private static final int EXPECTED_PATH_COUNT = 107;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
+    private static final int EXPECTED_OPERATION_COUNT = 124;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -346,7 +353,7 @@ class OpenApiIT extends AbstractApiIT {
     }
 
     @Test
-    void theSettingsCategoryIsDocumentedAsTheSixValueEnumInTheParametersAndTheResponse() {
+    void theSettingsCategoryIsDocumentedAsTheSevenValueEnumInTheParametersAndTheResponse() {
         Resp docs = docs();
         List<String> categories = ConfigCatalog.CATEGORIES;
         for (String path : List.of("/api/v1/settings/{category}", "/api/v1/settings/{category}/reset")) {
@@ -892,7 +899,17 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("post /api/v1/research/projects/{id}/return", "returnResearchPrd"),
             Map.entry("get /api/v1/research/allowlist", "listResearchAllowlist"),
             Map.entry("post /api/v1/research/allowlist", "addResearchAllowlistEntry"),
-            Map.entry("patch /api/v1/research/allowlist/{id}", "updateResearchAllowlistEntry"));
+            Map.entry("patch /api/v1/research/allowlist/{id}", "updateResearchAllowlistEntry"),
+            // P1 的九個 operationId（D-118 ⚖P1-24）
+            Map.entry("post /api/v1/research/projects/{id}/route/preview", "previewResearchRoute"),
+            Map.entry("post /api/v1/research/projects/{id}/route", "routeResearchProject"),
+            Map.entry("get /api/v1/research/projects/{id}/route", "getResearchRoute"),
+            Map.entry("post /api/v1/research/projects/{id}/scr", "openResearchScr"),
+            Map.entry("get /api/v1/research/projects/{id}/scr", "listResearchScr"),
+            Map.entry("post /api/v1/research/projects/{id}/scr/{scrNo}/apply", "applyResearchScr"),
+            Map.entry("get /api/v1/research/projects/{id}/decomposition", "getResearchDecomposition"),
+            Map.entry("post /api/v1/research/projects/{id}/decomposition", "triggerResearchDecomposition"),
+            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", "signoffResearchDecomposition"));
 
     private static Set<String> codes(String... codes) {
         return Set.of(codes);
@@ -929,7 +946,17 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("post /api/v1/research/projects/{id}/return", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
             Map.entry("get /api/v1/research/allowlist", codes("200", "401", "429", "502", "503", "504")),
             Map.entry("post /api/v1/research/allowlist", codes("201", "400", "401", "403", "409", "422", "429", "502", "503", "504")),
-            Map.entry("patch /api/v1/research/allowlist/{id}", codes("200", "400", "401", "403", "404", "422", "429", "502", "503", "504")));
+            Map.entry("patch /api/v1/research/allowlist/{id}", codes("200", "400", "401", "403", "404", "422", "429", "502", "503", "504")),
+            // P1 的九個操作
+            Map.entry("post /api/v1/research/projects/{id}/route/preview", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/route", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/route", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/scr", codes("202", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/scr", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/scr/{scrNo}/apply", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/decomposition", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/decomposition", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")));
 
     private static boolean isResearchPath(String path) {
         return path.startsWith("/api/v1/research/") || path.startsWith("/api/v1/stream/research/");
@@ -941,7 +968,7 @@ class OpenApiIT extends AbstractApiIT {
         Map<String, Object> paths = docs.read("$.paths");
         List<String> researchPaths = paths.keySet().stream().filter(OpenApiIT::isResearchPath).sorted().toList();
 
-        assertThat(researchPaths).as("研究路徑 24 條：/research/** 23 條與 SSE 1 條").hasSize(24);
+        assertThat(researchPaths).as("研究路徑 30 條：P0 的 24 條加 P1 的 6 條").hasSize(30);
         int operations = 0;
         for (String path : researchPaths) {
             Map<String, Object> methods = docs.read("$.paths['" + path + "']");
@@ -949,8 +976,8 @@ class OpenApiIT extends AbstractApiIT {
             assertThat(new TreeSet<>(methods.keySet())).as(path).containsExactlyElementsOf(EXPECTED.get(path));
             operations += methods.size();
         }
-        assertThat(operations).as("研究面的操作總數").isEqualTo(26);
-        assertThat(RESEARCH_OPERATION_IDS).as("契約 §1.1 有 operationId 的操作為 25 個（SSE 沒有）").hasSize(25);
+        assertThat(operations).as("研究面的操作總數（P0 的 26 加 P1 的 9）").isEqualTo(35);
+        assertThat(RESEARCH_OPERATION_IDS).as("有 operationId 的研究操作：P0 的 25 加 P1 的 9＝34（SSE 沒有）").hasSize(34);
         for (Map.Entry<String, String> expected : RESEARCH_OPERATION_IDS.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
@@ -969,7 +996,7 @@ class OpenApiIT extends AbstractApiIT {
     void AT_960_5_5_everyResearchOperationDocumentsExactlyTheStatusCodesItCanReturn() {
         Resp docs = docs();
 
-        assertThat(RESEARCH_STATUS_CODES).as("26 個研究操作").hasSize(26);
+        assertThat(RESEARCH_STATUS_CODES).as("35 個研究操作").hasSize(35);
         for (Map.Entry<String, Set<String>> expected : RESEARCH_STATUS_CODES.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);

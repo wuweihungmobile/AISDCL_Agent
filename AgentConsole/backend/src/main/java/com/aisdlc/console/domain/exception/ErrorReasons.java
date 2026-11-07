@@ -216,7 +216,7 @@ public final class ErrorReasons {
     /** 專案初始化的某一步失敗（Bridge 回 502；{@code details.step}＝workspace｜files｜fsm）：游標已標 FAILED，以重試初始化補建。 */
     public static final String RESEARCH_INIT_FAILED = "init_failed";
     /**
-     * Bridge 端點本體尚未實作（Bridge 回 501；P0 只剩 P1 功能 {@code stages/tcs-draft}）：console-api 轉成上游失敗（<b>502</b>，主控裁決：上游未實作屬上游失敗類；
+     * Bridge 端點本體尚未實作（Bridge 回 501；P1 起 Bridge 無觸發者——{@code stages/tcs-draft} 已實作，D-111 保留供 P2 骨架）：console-api 轉成上游失敗（<b>502</b>，主控裁決：上游未實作屬上游失敗類；
      * {@code details} 帶 Bridge 的 {@code endpoint}、{@code stage}、{@code detail} 與 {@code bridgeStatus=501}），不假裝成功。
      */
     public static final String RESEARCH_NOT_IMPLEMENTED = "not_implemented";
@@ -230,4 +230,34 @@ public final class ErrorReasons {
      * （{@code details.accepted_keys} 列出可送的鍵）。
      */
     public static final String RESEARCH_MISSING_DIGESTS = "missing_digests";
+
+    // ── P0 未結 R-2 的尾巴四個（ResearchToPRD P1 ⚖P1-25；契約 §0.2 勘誤補列；值逐字取自 Bridge 或 console-api 輸入閘）──
+    /** 研究 stage 的 persona／playbook 編譯失敗（503；Bridge 逐字轉出）。 */
+    public static final String RESEARCH_COMPILE_FAILED = "compile_failed";
+    /** Bridge 的 SDD CLI 子行程失敗（502；Bridge 逐字轉出）。 */
+    public static final String RESEARCH_SDD_CLI_FAILED = "sdd_cli_failed";
+    /** FSM 狀態檔壞掉、讀不出來（422；Bridge 逐字轉出）。 */
+    public static final String RESEARCH_FSM_STATE_UNREADABLE = "fsm_state_unreadable";
+    /** 輸入閘或 Bridge 拒絕此請求（400／422；{@code details.violations[{field,rule,message}]}）：P0 的區域常數 {@code ResearchInputGates.INVALID_REQUEST} 改引用本常數。 */
+    public static final String RESEARCH_INVALID_REQUEST = "invalid_request";
+
+    // ── P1 新增的九個 reason（分流、SCR、拆解；IFACE §2、D-118 ⚖P1-25；Bridge 回的由 console-api 逐字轉出）──
+    /** 此部署不支援分流（422；{@code details.missing[{item,reason}]}：git｜gh｜repo_writable｜scaffold_root｜scaffold_templates｜worktree_root｜gh_auth）。 */
+    public static final String RESEARCH_ROUTE_UNSUPPORTED_IN_DEPLOYMENT = "route_unsupported_in_deployment";
+    /** 軌道 A 的分支已存在（409；{@code details.branch}）。 */
+    public static final String RESEARCH_BRANCH_EXISTS = "branch_exists";
+    /** 軌道 B 的目標目錄非空（422；{@code details.path} 只回相對於 BRIDGE_SCAFFOLD_ROOT 的路徑）。 */
+    public static final String RESEARCH_TARGET_NOT_EMPTY = "target_not_empty";
+    /** PUBLIC 遠端須以 confirmRepoName 重述庫名確認（422）。 */
+    public static final String RESEARCH_PUBLIC_CONFIRMATION_REQUIRED = "public_confirmation_required";
+    /** 同一研究專案已有 PENDING、RUNNING 或 SUCCEEDED 的分流，或重試的前置不成立（409）。 */
+    public static final String RESEARCH_ROUTE_CONFLICT = "route_conflict";
+    /** 分流的某一步失敗（502；{@code details.failure_step}、{@code route_id}；該分流列已是 FAILED，游標 route／ROUTING／FAILED）。 */
+    public static final String RESEARCH_ROUTE_STEP_FAILED = "route_step_failed";
+    /** 有開啟中的 SCR（409）：內環唯讀，拆解觸發、TCS 草擬與內環 run 啟動皆被擋。 */
+    public static final String RESEARCH_SCR_OPEN = "scr_open";
+    /** 同一研究專案的 MINOR SCR 已達上限（409）。 */
+    public static final String RESEARCH_SCR_LIMIT = "scr_limit";
+    /** 拆解綁定的 PRD 摘要與現行凍結摘要不符（409；{@code details.expected_sha256}、{@code actual_sha256}）。 */
+    public static final String RESEARCH_DECOMPOSITION_STALE = "decomposition_stale";
 }

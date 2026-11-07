@@ -47,11 +47,14 @@ public interface ResearchProjectReadPort {
     /** 最新 {@code window} 筆事件中最小的 seq（重播視窗的起點）；沒有任何事件則 empty。 */
     OptionalLong replayWindowStart(UUID id, int window);
 
-    /** R1～R14 各類的筆數（PRD §5.1.8；V19 的表在 P0 尚不存在，其類別恆為 0）。 */
+    /** R1～R14 各類的筆數（PRD §5.1.8；R7、R8、R10、R11、R12 取 V19 的表與視圖，⚖P1-16）。 */
     List<RecordClass> recordClasses(UUID id);
 
     /** 目前 {@code fsmProject} 之下 gate 為 GATE0、decision 為 CHANGES 的決定筆數（D-59(4)：舊世代的鍵不計）。 */
     int humanReturnCount(UUID id, String fsmProject);
+
+    /** 綁定這個 Console 專案的研究專案 id（{@code research_projects.console_project_id}；沒有＝非研究專案，D-102 前置守衛與 D-125 凍結後對帳據此判斷）。 */
+    Optional<UUID> researchIdOfConsoleProject(UUID consoleProjectId);
 
     /** 該 Console 專案最新的內環 run 的衍生事實（P1 起分流後才有 Console 專案；沒有 run 則 empty）。 */
     Optional<RunFact> latestRun(UUID consoleProjectId);
