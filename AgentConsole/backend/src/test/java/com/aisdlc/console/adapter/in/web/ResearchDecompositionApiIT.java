@@ -89,6 +89,9 @@ class ResearchDecompositionApiIT extends AbstractResearchIT {
                 .containsKey("import_record_id");
         // D-143(3)／F-02：簽核本文帶 imported_tasks_count，值＝匯入落成的正式 tasks 數（同一專案 DB 實數 2）
         assertThat(sent.get("imported_tasks_count")).as("imported_tasks_count 必須是整數").isInstanceOf(Integer.class).isEqualTo(2);
+        // F-14：本文值另與 DB 實查的專案 tasks 數相等（tasks 表以 goal_id 掛專案，故 join goals），不只比字面 2
+        Long dbTasks = jdbc.queryForObject("select count(*) from console.tasks t join console.goals g on g.id = t.goal_id where g.project_id = ?::uuid", Long.class, ok.project);
+        assertThat(((Number) sent.get("imported_tasks_count")).longValue()).as("本文 imported_tasks_count 必須等於 DB 實查任務數").isEqualTo(dbTasks);
         assertThat(jdbc.queryForObject("select status from console.research_decompositions where id = ?", String.class, decomposition)).isEqualTo("SIGNED_OFF");
         assertThat(resp.<String>read("$.data.status")).isEqualTo("SIGNED_OFF");
 

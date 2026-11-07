@@ -290,6 +290,24 @@ def test_AT_961_6_E_2_redaction_covers_split_cut_encoded_and_multiple_tokens() -
             assert secret not in out and secret[:8] not in out, text[:40]
             # 百分號編碼形態：未去敏時輸出也不含明文，只判明文會恆真（F-10），所以另判編碼後的字面
             assert secret.replace("_", "%5F") not in out, text[:40]
+    # F-13(a)：十六進位小寫與大小寫交錯的 `%XX` 形態
+    def leaked(out: str) -> bool:
+        flat = "".join(out.split()).lower()
+        return "r2p1" in flat or "000000" in flat or "ghp%5f" in flat or "ghp%5ffake" in flat
+
+    lower = TOKEN.replace("_", "%5f")
+    alternating = "".join(("%5F" if n % 2 else "%5f") if c == "_" else c
+                          for n, c in enumerate(TOKEN))
+    for enc in (lower, alternating):
+        assert enc != TOKEN and "%5" in enc
+        out = gitops.redact(f"url=https://x/?t={enc}", secrets)
+        assert "***" in out and not leaked(out), enc
+    # F-13(b)：被空白切開的編碼形態（每 4 字元插空白；`%5F` 前後帶空白）
+    chunked = " ".join(TOKEN[i:i + 4] for i in range(0, len(TOKEN), 4)).replace("_", "%5F")
+    around = TOKEN.replace("_", " %5F ")
+    for enc in (chunked, around):
+        out = gitops.redact(f"t={enc}", secrets)
+        assert "***" in out and not leaked(out), enc
     kept = gitops.redact("fatal: repository not found (exit 128)", secrets)
     assert kept == "fatal: repository not found (exit 128)", "未知形態不誤遮罩"
     assert len(gitops.tail("y" * 5000)) == 2000

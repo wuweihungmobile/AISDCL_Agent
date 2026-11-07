@@ -398,11 +398,16 @@ def test_AT_961_10_6_file_sha_row_count_and_json_task_count_agree_and_drift_is_r
     import hashlib
     rid, did = partial_decomposition(renv)
     [pre] = rows(renv, rid)
-    ok = signoff(renv, rid, did, imported_tasks_count=pre[5], waivers=[
+    target = workspace(renv, rid) / "03_execution" / "task_decomposition.json"
+    # F-14：傳入值由測試自己獨立解析 JSON 的 task 數得出（不取自 DB 列、不取自回應），
+    # 三者相等才有鑑別力；不再自證式地拿 tasks_count 比自己
+    pre_doc = json.loads(target.read_bytes().decode("utf-8"))
+    json_tasks_in = sum(len(g.get("tasks", [])) for g in pre_doc["goals"])
+    assert json_tasks_in > 0
+    ok = signoff(renv, rid, did, imported_tasks_count=json_tasks_in, waivers=[
         {"ac": a, "reason": "r"} for a in ("AC-002-1", "AC-003-1", "AC-003-2")])
     assert ok.status_code == 200, ok.text
-    assert ok.json()["imported_tasks_count"] == pre[5]
-    target = workspace(renv, rid) / "03_execution" / "task_decomposition.json"
+    assert ok.json()["imported_tasks_count"] == json_tasks_in == pre[5]
     raw = target.read_bytes()
     registered = renv.rdb.one(
         "SELECT sha256 FROM console.research_artifacts WHERE research_id = %s AND "
@@ -427,3 +432,25 @@ def test_AT_961_10_6_file_sha_row_count_and_json_task_count_agree_and_drift_is_r
     assert entry["actualSha256"] == hashlib.sha256(raw + b" ").hexdigest()
     assert target.read_bytes() == raw + b" ", "Bridge 不自動修正任何一邊"
     assert rows(renv, rid) == [row]
+
+
+def test_AT_961_10_6_unequal_imported_count_is_recorded_as_given_not_corrected(
+        renv: rgs.RouteEnv) -> None:
+    """負控：傳入的 `imported_tasks_count` 與 JSON task 數不同 ⇒ Bridge 仍 200，
+    artifact 如實記傳入值，`tasks_count` 不被改寫（如實記錄、不自動修正）。
+    不相等的處置待勘誤：由對帳 `task_decomposition` 項回報（TCS 未定）。"""
+    rid, did = partial_decomposition(renv)
+    [pre] = rows(renv, rid)
+    target = workspace(renv, rid) / "03_execution" / "task_decomposition.json"
+    pre_doc = json.loads(target.read_bytes().decode("utf-8"))
+    json_tasks = sum(len(g.get("tasks", [])) for g in pre_doc["goals"])
+    odd = json_tasks + 7
+    ok = signoff(renv, rid, did, imported_tasks_count=odd, waivers=[
+        {"ac": a, "reason": "r"} for a in ("AC-002-1", "AC-003-1", "AC-003-2")])
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["imported_tasks_count"] == odd != json_tasks
+    doc = json.loads(target.read_bytes().decode("utf-8"))
+    assert doc["imported_tasks_count"] == odd, "如實記傳入值"
+    assert sum(len(g.get("tasks", [])) for g in doc["goals"]) == json_tasks
+    [row] = rows(renv, rid)
+    assert row[5] == pre[5] == json_tasks, "tasks_count 不被改寫"
