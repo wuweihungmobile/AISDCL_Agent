@@ -50,6 +50,8 @@ MATRIX_STATES: tuple[str, ...] = (*MATRIX_DIRECT, MATRIX_AUDIT, *MATRIX_GATE_FIR
 REFREEZE = sdd_cli.RESEARCH_VERB_SPEC_REFREEZE
 PR_REVIEW_FAIL_REASON = "SCR-{k}: spec changed; re-implement"
 _AC_RE = re.compile(r"(?<![\w-])(AC-[0-9][0-9A-Za-z-]*)(?![\w-])")
+_FR_RE = re.compile(r"(?<![\w-])(FR-[A-Z0-9][0-9A-Za-z-]*)(?![\w-])")
+EVIDENCE_URL_MAX = 500
 _HEADING_NO_RE = re.compile(r"^#{1,6}\s+(\d+(?:\.\d+)*)[.\s、]")
 _SECTION_REF_RE = re.compile(r"^§?\s*(\d+(?:\.\d+)*)$")
 #: 發佈檔的鏡像時鐘（測試縫：固定時間戳）；預設取 UTC 現在。
@@ -63,6 +65,8 @@ class FrozenPrd:
 
     sections: frozenset[str]
     acs: frozenset[str]
+    #: 文內所有 `FR-…` 編號（與 AC 同一條解析路徑；追溯表 `frTotal` 與 PR 標題的 FR 數同源）。
+    frs: frozenset[str] = frozenset()
 
 
 def parse_frozen_prd(text: str) -> FrozenPrd:
@@ -74,7 +78,8 @@ def parse_frozen_prd(text: str) -> FrozenPrd:
         if match:
             parts = match.group(1).split(".")
             sections.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
-    return FrozenPrd(frozenset(sections), frozenset(_AC_RE.findall(text)))
+    return FrozenPrd(frozenset(sections), frozenset(_AC_RE.findall(text)),
+                     frozenset(_FR_RE.findall(text)))
 
 
 def _v(field_name: str, rule: str, message: str) -> dict[str, str]:
@@ -108,6 +113,14 @@ def validate_request(body: Mapping[str, Any], frozen: FrozenPrd) -> list[dict[st
         found.append(_v("reason_class", "reason_class_invalid",
                         "reason_class 須為 EVIDENCE｜AC_VAGUE｜REQ_CHANGE｜INFEASIBLE｜OTHER"
                         "（或其中文名）"))
+    url = body.get("evidence_url")
+    if url is not None:                       # 選填；https 限定、至多 500 字元（V21 CHECK 同義）
+        if not isinstance(url, str) or not url.startswith("https://"):
+            found.append(_v("evidence_url", "evidence_not_https",
+                            "evidence_url 須以 https:// 起頭"))
+        if isinstance(url, str) and len(url) > EVIDENCE_URL_MAX:
+            found.append(_v("evidence_url", "evidence_too_long",
+                            f"evidence_url 不得超過 {EVIDENCE_URL_MAX} 字元"))
     sections = body.get("affected_sections", [])
     if not isinstance(sections, list) or not all(isinstance(s, str) for s in sections):
         found.append(_v("affected_sections", "affected_invalid", "須為字串清單"))
@@ -238,6 +251,7 @@ def _open_payload(rid: str, body: Mapping[str, Any], requested_by: str) -> dict[
             "source_kind": body["source_kind"], "reason": body["reason"],
             "reason_class": normalize_reason_class(body.get("reason_class", "OTHER")),
             "affected_sections": list(body.get("affected_sections") or []),
+            "evidence_url": body.get("evidence_url"),
             "requested_by": requested_by, "requested_at": NOW().isoformat()}
 
 

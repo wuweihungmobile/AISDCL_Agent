@@ -1080,3 +1080,16 @@ def test_AT_960_2_5_a_db_outage_during_a_stage_blocks_the_run_and_replay_is_exac
     assert (rdb.count("research_events"), rdb.count("research_stage_runs"),
             rdb.count("research_evidence_items")) == before, "第二次重放不新增任何列"
     assert not live.orch.writer.outbox.pending(), "重放完成後 outbox 沒有待處理記錄"
+
+
+# ══ P2（PKG-BR-P2；AT-962-5-7）：P2_OPS 只登記 delivery.record，既有三表與一一對應鎖不動 ══════════
+def test_AT_962_5_7_p2_ops_registers_only_delivery_record_and_the_write_surface_is_unchanged(
+) -> None:
+    assert set(db_module.P2_OPS) == {"delivery.record"}
+    assert set(db_module.METHOD_KINDS.values()) == set(db_module.OPS)
+    assert "delivery.record" not in db_module.OPS and "delivery.record" not in set(
+        db_module.METHOD_KINDS.values())
+    assert db_module.WRITE_METHODS == tuple(db_module.METHOD_KINDS)
+    assert len(db_module.WRITE_METHODS) == 20 and "record_gate_decision" in db_module.WRITE_METHODS
+    assert db_module.OPS["gate.decision"] is db_module._op_gate_decision
+    assert not {"record_delivery", "delivery_record"} & set(dir(db_module.ResearchDb))

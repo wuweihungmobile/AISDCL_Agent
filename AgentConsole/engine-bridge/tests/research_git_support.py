@@ -48,7 +48,7 @@ def make_route_db() -> ThrowawayDb:
     """套到 V19 的拋棄式研究庫。V19 檔在（PKG-DB-P1 已合併）就走正規路徑；不在就先套 V1～V18 再套
     Architecture K.4 的 DDL（同一份文字，DB-P1 的 V19 檔逐字取自它）。"""
     if (MIGRATION_DIR / V19_FILE).is_file():
-        return make_research_db(19)
+        return make_research_db()      # P2：套到 LAST_VERSION（V21 的 details／evidence_url 欄）
     db = make_research_db(18)
     try:
         import psycopg

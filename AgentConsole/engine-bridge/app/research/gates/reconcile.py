@@ -51,7 +51,7 @@ ACTIVE_RUN_STATUSES = frozenset({"QUEUED", "RUNNING"})
 #: 失敗游標的 `flow_status`：stage run 失敗、取消或被回收（D-77），以及初始化失敗。
 FAILED_STATUS = "FAILED"
 CHECK_IDS: tuple[str, ...] = ("fsm_flow_mapping", "prd_sha256", "review_card", "evidence_matrix",
-                              "task_decomposition", "route_decision")
+                              "task_decomposition", "route_decision", "delivery")
 #: 對帳項 `status` 的「量不到」值——拼法取 API 契約 `ReconcileResult`（底線）；能力資訊與
 #: `state.json` 投影另用連字號的 `settings.NOT_EVALUABLE`，兩處是不同介面、各依各的契約。
 NOT_EVALUABLE_STATUS = "NOT_EVALUABLE"
@@ -172,6 +172,20 @@ def mapping_check(fsm_state: str | None, flow_step: str, flow_phase: str, *,
 def absent_check(check_id: str) -> dict[str, Any]:
     """P0 沒有的產物（拆解、分流）：兩側皆缺席＝ok，標 `present: false`。"""
     return {"id": check_id, "status": "ok", "present": False, "detail": "", "drift": []}
+
+
+def delivery_check(row: Mapping[str, Any] | None, actual: str | None) -> dict[str, Any]:
+    """`delivery` 項：有 `RELEASE_TAG` `CREATED` 列時，快照檔的 sha256 對該列 `snapshot_sha256`
+    （D-139；只報告、不修復）；檔缺席＝drift 且 `actualSha256` 為 `missing`；無交付列＝未交付，
+    不算 drift。"""
+    if row is None:
+        return absent_check("delivery")
+    path, expected = str(row["rtm_report_ref"]), str(row["snapshot_sha256"]).strip()
+    if actual == expected:
+        return {"id": "delivery", "status": "ok", "present": True, "detail": "", "drift": []}
+    return {"id": "delivery", "status": "drift", "present": True,
+            "detail": "file_missing" if actual is None else "",
+            "drift": [_drift("DELIVERY", path, expected, actual or "missing")]}
 
 
 def _canon_sha(value: Any) -> str:

@@ -422,7 +422,9 @@ def test_AT_960_6_2_cursor_updates_live_only_in_the_research_package_beside_an_e
 _FSM_WRITER_WORDS = ("spec-frozen", "spec-refreeze", "underspecified", "FSM-STATE")
 #: P1 新模組中「不得是 FSM 寫入面」的檔（BR-D2 的 scr 等檔到位後自動納入）。
 _NO_FSM_WRITE_MODULES = ("research/route.py", "research/scr.py", "research/decompose_plan.py",
-                         "routers/research_route.py", "routers/research_scr.py")
+                         "routers/research_route.py", "routers/research_scr.py",
+                         # P2（BR-P2）：交付與自癒零 FSM 寫入；RELEASE 轉態住 inner_gates
+                         "research/delivery.py", "research/healing.py")
 
 
 def test_AT_961_8_6_new_p1_modules_do_not_import_the_fsm_runtime_or_name_its_write_verbs() -> None:
@@ -475,3 +477,124 @@ def test_AT_961_8_5_scaffold_templates_hold_no_python_files_under_app() -> None:
     tpl = APP_DIR / "research" / "scaffold_templates"
     assert any(tpl.rglob("*.tmpl")), "鎖要有標的：範本目錄有 .tmpl 檔"
     assert not list(tpl.rglob("*.py")), "範本目錄內不得有 .py 檔"
+
+
+# ══ P2（PKG-BR-P2；AT-962-5-1～5-4、5-E-1、5-E-2）：內環登錄的 AST 規則 ══════════════════
+_INNER_FORBIDDEN_CALLS = frozenset({"spec_frozen", "approve_baseline", "spec_refreeze",
+                                    "create_key", "bring_to_agent_load"})
+INNER_GATE_LITERALS = {"PR_REVIEW", "RTM_VERIFY", "RELEASE_READY"}
+
+
+def fsm_ops_calls(tree: ast.AST, name: str) -> list[ast.Call]:
+    return [n for n in ast.walk(tree) if isinstance(n, ast.Call) and call_name(n) == name
+            and owner_name(n) == "fsm_ops"]
+
+
+def inner_gates_violations(text: str) -> list[str]:
+    """`inner_gates.py` 的專屬規則：只呼叫 `fsm_ops.gate`／`fsm_ops.transition`（不凍結、不核准、不
+    重凍、不建檔）；`gate=` 與 `to=` 必須是字面常數；三個 gate 字面各在一個 `if` 分支內。"""
+    tree, found = ast.parse(text), []
+    parents = parent_map(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and owner_name(node) == "fsm_ops":
+            if call_name(node) in _INNER_FORBIDDEN_CALLS:
+                found.append(f"forbidden:{call_name(node)}")
+            if call_name(node) == "gate":
+                value = _kw(node, "gate")
+                if not (isinstance(value, ast.Constant) and value.value in INNER_GATE_LITERALS):
+                    found.append("gate-not-literal")
+                cur, in_if = parents.get(node), False
+                while cur is not None and not isinstance(cur, ast.FunctionDef):
+                    in_if = in_if or isinstance(cur, ast.If)
+                    cur = parents.get(cur)
+                if not in_if:
+                    found.append("gate-not-in-branch")
+            if call_name(node) == "transition" and not isinstance(_kw(node, "to"), ast.Constant):
+                found.append("transition-to-not-literal")
+    return found
+
+
+def inner_gates_source() -> str:
+    return app_sources()["research/inner_gates.py"]
+
+
+def test_AT_962_5_1_inner_gates_has_three_literal_gate_calls_each_in_a_branch() -> None:
+    tree = ast.parse(inner_gates_source())
+    calls = fsm_ops_calls(tree, "gate")
+    assert len(calls) == 3
+    assert {_kw(c, "gate").value for c in calls} == INNER_GATE_LITERALS    # type: ignore[union-attr]
+    assert not any(gate_needs_guard(c) for c in calls)
+    assert check_source("research/inner_gates.py", inner_gates_source()) == []
+    assert inner_gates_violations(inner_gates_source()) == []
+
+
+def test_AT_962_5_2_inner_gates_only_calls_gate_and_transition() -> None:
+    tree = ast.parse(inner_gates_source())
+    written = {call_name(n) for n in ast.walk(tree) if isinstance(n, ast.Call)
+               and owner_name(n) == "fsm_ops"}
+    assert not (written & _INNER_FORBIDDEN_CALLS)
+    assert {"gate", "transition"} <= written
+    assert inner_gates_violations(inner_gates_source()) == []
+
+
+def test_AT_962_5_3_delivery_and_healing_have_no_fsm_writes_and_release_lives_in_inner_gates(
+) -> None:
+    sources = app_sources()
+    for rel in ("research/delivery.py", "research/healing.py"):
+        assert rel in _NO_FSM_WRITE_MODULES
+        tree = ast.parse(sources[rel])
+        names = {call_name(n) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        assert not names & {"transition", "gate", "spec_frozen", "spec_refreeze",
+                            "approve_baseline"}, rel
+        imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        modules = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        assert not any("fsm_runtime" in m for m in imported | modules), rel
+    tree = ast.parse(sources["research/inner_gates.py"])
+    release = next(n for n in ast.walk(tree)
+                   if isinstance(n, ast.FunctionDef) and n.name == "release_transition")
+    transitions = [c for c in ast.walk(release) if isinstance(c, ast.Call)
+                   and call_name(c) == "transition"]
+    assert len(transitions) == 1 and _is_const(_kw(transitions[0], "to"), "RELEASE")
+    all_to = [_kw(c, "to") for rel, text in sources.items() for c in ast.walk(ast.parse(text))
+              if isinstance(c, ast.Call) and call_name(c) == "transition"
+              and owner_name(c) == "fsm_ops" and rel != "research/inner_gates.py"]
+    assert not [t for t in all_to if _is_const(t, "RELEASE")], "RELEASE 只住 inner_gates"
+
+
+def test_AT_962_5_4_the_new_modules_never_spawn_and_exec_modules_stay_at_six() -> None:
+    spawners = set()
+    for rel, text in app_sources().items():
+        for n in ast.walk(ast.parse(text)):
+            if isinstance(n, ast.Call) and call_name(n) in _SPAWN_NAMES and (
+                    owner_name(n) == "subprocess" or call_name(n) == "Popen"):
+                spawners.add(rel)
+    assert len(EXEC_MODULES) == 6 and spawners <= EXEC_MODULES
+    assert not spawners & {"research/delivery.py", "research/healing.py",
+                           "research/inner_gates.py", "routers/research_deliver.py"}
+
+
+def test_AT_962_5_E_1_the_new_rules_bite_on_synthetic_violations_and_pass_clean_samples() -> None:
+    variable_gate = ("def f(ctx, g):\n    fsm_ops.gate(ctx, gate=g, result='PASS', reason='x')\n")
+    assert "C7" in {h.rule for h in check_source("research/inner_gates.py", variable_gate)}
+    assert "gate-not-literal" in inner_gates_violations(variable_gate)
+    freeze = ("def f(ctx):\n    fsm_ops.spec_frozen(ctx, stage='Stage-1', docs=[], root='r',"
+              " reason='x', approver='a')\n")
+    assert "C2" in {h.rule for h in check_source("research/delivery.py", freeze)}
+    assert "forbidden:spec_frozen" in inner_gates_violations(freeze)
+    spawn = "import subprocess\nsubprocess.Popen(argv, **procutil.popen_platform_kwargs())\n"
+    assert "C5" in {h.rule for h in check_source("research/healing.py", spawn)}
+    clean = ("def f(ctx, s):\n    if s == 'a':\n        fsm_ops.gate(ctx, gate='PR_REVIEW',"
+             " result='PASS', reason='x')\n    else:\n        fsm_ops.transition(ctx, to='RELEASE',"
+             " reason='x')\n")
+    assert check_source("research/inner_gates.py", clean) == []
+    assert inner_gates_violations(clean) == []
+    no_branch = "def f(ctx):\n    fsm_ops.gate(ctx, gate='PR_REVIEW', result='PASS', reason='x')\n"
+    assert "gate-not-in-branch" in inner_gates_violations(no_branch)
+
+
+def test_AT_962_5_E_2_the_delivery_record_op_writes_an_event_beside_every_cursor_write() -> None:
+    tree = ast.parse(app_sources()["research/db.py"])
+    op = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "_op_delivery_record")
+    assert "append_event" in {call_name(c) for c in ast.walk(op) if isinstance(c, ast.Call)}
+    test_AT_960_6_2_cursor_updates_live_only_in_the_research_package_beside_an_event_insert()

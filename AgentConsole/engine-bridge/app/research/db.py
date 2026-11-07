@@ -84,7 +84,11 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "research.route": frozenset({"routeId", "stepNo", "step", "status"}),
     # P1 BR-D2：SCR 狀態轉移各一筆（契約 §3；OPEN／APPROVED／APPLIED／REJECTED／SUPERSEDED）
     "research.scr": frozenset({"scrNo", "kind", "status"}),
+    # P2：交付事件（D-145 固定六鍵；成功＝ref 非 null、failure_step 為 null，失敗相反）
+    "research.delivery": frozenset({"kind", "ref", "status", "digest", "reason", "failure_step"}),
 }
+#: `research.delivery` 的 `failure_step` 值域（契約 §3、D-144 F-10）。
+DELIVERY_FAILURE_STEPS = frozenset({"push", "pr_create", "fsm_release", "tag"})
 #: 各事件型別在必填鍵之外**可選**的鍵（`research.route` 的補償事件帶 `reason`，D-112）。
 EVENT_OPTIONAL_KEYS: dict[str, frozenset[str]] = {
     "research.route": frozenset({"reason"}),
@@ -271,8 +275,8 @@ _SQL_DECISION_EXISTS = "SELECT 1 AS hit FROM {s}.research_gate_decisions WHERE i
 _SQL_INSERT_DECISION = (
     "INSERT INTO {s}.research_gate_decisions (id, research_id, gate, decision, decided_by, "
     "decided_at, prd_version_no, review_round_no, fsm_project, fsm_stage, fsm_state_after, "
-    "frozen_digests, reason, audit_trace_id) VALUES (%s, %s, %s, %s, %s, COALESCE(%s, NOW()), "
-    "%s, %s, %s, %s, %s, %s, %s, %s)")
+    "frozen_digests, reason, audit_trace_id, details) VALUES (%s, %s, %s, %s, %s, "
+    "COALESCE(%s, NOW()), %s, %s, %s, %s, %s, %s, %s, %s, %s)")
 _SQL_INSERT_SOURCE = (
     "INSERT INTO {s}.research_sources (id, research_id, source_no, layer, tier, verification, "
     "anchor_kind, url, doi, git_commit, title, authors_org, published_at, source_type, "
@@ -355,6 +359,8 @@ class ResearchTx:
                 "event_payload", f"{event_type} 的 payload 鍵須為 "
                 f"{sorted(required)}（可另帶 {sorted(allowed - required)}），收到 "
                 f"{sorted(payload)}")
+        if event_type == "research.delivery":
+            _check_delivery_payload(payload)
         if not actor or len(actor) > 100:
             raise ResearchGuardError("actor", "actor 須為 1 至 100 字")
         bumped = self.one(_SQL_BUMP_SEQ, (research_id,))
@@ -371,6 +377,20 @@ class ResearchTx:
         if row is None:
             raise ResearchGuardError("project_not_found", str(research_id))
         return row
+
+
+def _check_delivery_payload(payload: Mapping[str, Any]) -> None:
+    """`research.delivery` 的語意檢查：成功＝ref 非 null、failure_step 為 null；失敗＝ref 為
+    null、failure_step 在四值內（鍵集合已由 `append_event` 先驗）。"""
+    if payload.get("status") == "CREATED":
+        ok = payload.get("ref") is not None and payload.get("failure_step") is None
+    elif payload.get("status") == "FAILED":
+        ok = payload.get("ref") is None and payload.get("failure_step") in DELIVERY_FAILURE_STEPS
+    else:
+        ok = False
+    if not ok:
+        raise ResearchGuardError(
+            "event_payload", "research.delivery 的 ref／failure_step 與 status 不一致")
 
 
 # ── 事件 payload（API 契約 §3；camelCase）──────────────────────────────────────────────────────
@@ -504,7 +524,7 @@ def _insert_decision(tx: ResearchTx, rid: Any, d: Mapping[str, Any]) -> bool:
         did, rid, d["gate"], d["decision"], d["decided_by"], _dt(d.get("decided_at")),
         d.get("prd_version_no"), d.get("review_round_no"), d["fsm_project"], d.get("fsm_stage"),
         d.get("fsm_state_after"), Jsonb(dict(d.get("frozen_digests") or {})),
-        d.get("reason", ""), d.get("audit_trace_id")))
+        d.get("reason", ""), d.get("audit_trace_id"), Jsonb(dict(d.get("details") or {}))))
     return True
 
 
@@ -1121,8 +1141,8 @@ _SQL_SCR_NEXT = ("SELECT COALESCE(MAX(scr_no), 0) + 1 AS n FROM {s}.research_scr
 _SQL_INSERT_SCR = (
     "INSERT INTO {s}.research_scr (id, research_id, scr_no, kind, source_kind, reason, "
     "reason_class, affected_sections, status, prd_from_version_no, successor_research_id, "
-    "requested_by, requested_at, decided_by, decided_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
-    "%s, %s, %s, %s, COALESCE(%s, NOW()), %s, %s)")
+    "requested_by, requested_at, decided_by, decided_at, evidence_url) VALUES (%s, %s, %s, %s, "
+    "%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()), %s, %s, %s)")
 _SQL_UPDATE_SCR = (
     "UPDATE {s}.research_scr SET status = %s, prd_to_version_no = %s, impl_fsm_actions = %s, "
     "decided_by = %s, decided_at = %s WHERE id = %s")
@@ -1181,7 +1201,7 @@ def _op_scr_open(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
         scr_id, rid, scr_no, p["kind"], p["source_kind"], p["reason"],
         p.get("reason_class", "OTHER"), list(p.get("affected_sections") or []), "OPEN",
         int(head["head"]) if head and head["head"] else None, None, p["requested_by"],
-        _dt(p.get("requested_at")), None, None))
+        _dt(p.get("requested_at")), None, None, p.get("evidence_url")))
     seq = _scr_event(tx, rid, scr_id, scr_no, p["kind"], "OPEN", actor=p["requested_by"])
     if p.get("flow"):
         _set_cursor(tx, rid, row, p["flow"], p["requested_by"], p.get("requested_at"))
@@ -1207,7 +1227,7 @@ def _op_scr_major(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
             scr_id, rid, scr_no, "MAJOR", p["source_kind"], p["reason"],
             p.get("reason_class", "OTHER"), list(p.get("affected_sections") or []), "SUPERSEDED",
             int(head["head"]) if head and head["head"] else None, _uid(p["successor_research_id"]),
-            p["requested_by"], now, p["requested_by"], now))
+            p["requested_by"], now, p["requested_by"], now, p.get("evidence_url")))
     except psycopg.errors.ForeignKeyViolation as exc:
         raise ResearchGuardError("successor_not_found", str(p["successor_research_id"])) from exc
     seq = _scr_event(tx, rid, scr_id, scr_no, "MAJOR", "SUPERSEDED", actor=p["requested_by"])
@@ -1350,6 +1370,50 @@ def _op_tcs_correct_cursor(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, An
     return {"applied": True, "seq": seq, "reason": "tcs_frozen_correction"}
 
 
+# ── P2：交付（`research_deliveries` 與 `research.delivery` 事件同一交易）────────────────────────
+_SQL_INSERT_DELIVERY = (
+    "INSERT INTO {s}.research_deliveries (research_id, kind, ref, commit_sha, url, rtm_run_id, "
+    "rtm_report_ref, snapshot_sha256, fsm_state_after, status, detail, created_by) VALUES (%s, %s, "
+    "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (research_id, kind, ref) DO NOTHING "
+    "RETURNING id")
+_SQL_RUN_EXISTS = "SELECT 1 AS hit FROM {s}.execution_runs WHERE id = %s"
+
+
+def _op_delivery_record(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """交付列（選填；失敗事件沒有列）＋`research.delivery`，同一交易。同 `event_ref` 已有事件＝
+    跳過；同 `(研究, kind, ref)` 已有列＝冪等跳過（表 append-only，不更新）。`rtm_run_id` 指向不存在
+    的 run 時存 NULL（FK 不得讓交付寫不進去）。"""
+    rid = _uid(p["research_id"])
+    tx.lock_project(rid)
+    ref_id = _uid(p["event_ref"]) if p.get("event_ref") else None
+    if ref_id is not None and tx.one(_SQL_EVENT_EXISTS, (
+            rid, "research.delivery", "delivery", ref_id)) is not None:
+        return {"applied": False}
+    delivery_id = None
+    row = p.get("row")
+    if row is not None:
+        run = row.get("rtm_run_id")
+        run_ok = run is not None and tx.one(_SQL_RUN_EXISTS, (_uid(run),)) is not None
+        inserted = tx.one(_SQL_INSERT_DELIVERY, (
+            rid, row["kind"], row["ref"], row.get("commit_sha"), row.get("url"),
+            _uid(run) if run_ok else None, row.get("rtm_report_ref"), row.get("snapshot_sha256"),
+            row.get("fsm_state_after"), row["status"], str(row.get("detail", ""))[:2000],
+            row["created_by"]))
+        if inserted is None:
+            return {"applied": False}
+        delivery_id = str(inserted["id"])
+    seq = tx.append_event(rid, "research.delivery", dict(p["event"]), actor=p["actor"],
+                          ref_kind="delivery", ref_id=ref_id)
+    return {"applied": True, "seq": seq, "delivery_id": delivery_id}
+
+
+#: P2 的操作登記表（體例同 `P1_OPS`：不新增公開寫入方法，只經 `DurableWriter.persist` 與
+#: `ResearchDb.apply(kind, …)` 呼叫）。
+P2_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
+    "delivery.record": _op_delivery_record,
+}
+
+
 #: P1 BR-D2 的操作登記表（與 `ROUTE_OPS` 同理：不新增公開寫入方法，只經 `DurableWriter.persist`
 #: 與 `ResearchDb.apply(kind, …)` 呼叫）。
 P1_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
@@ -1448,7 +1512,7 @@ class ResearchDb:
 
     def apply(self, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """跑一個登記的操作（一個交易）；outbox 重放與公開寫入方法都走這裡。"""
-        fn = OPS.get(kind) or ROUTE_OPS.get(kind) or P1_OPS.get(kind)
+        fn = OPS.get(kind) or ROUTE_OPS.get(kind) or P1_OPS.get(kind) or P2_OPS.get(kind)
         if fn is None:
             raise ResearchGuardError("unknown_op", f"未登記的操作：{kind!r}")
         with self.transaction() as tx:
@@ -1648,6 +1712,53 @@ class ResearchDb:
             "SELECT id FROM {s}.research_gate_decisions WHERE research_id = %s AND gate = 'GATE0' "
             "AND decision = 'APPROVED' ORDER BY decided_at DESC LIMIT 1", (_uid(research_id),))
         return str(rows[0]["id"]) if rows else None
+
+    # ── P2 的唯讀查詢（皆只 SELECT）────────────────────────────────────────────────────────
+    def get_gate_decision(self, decision_id: Any) -> dict[str, Any] | None:
+        rows = self.query("SELECT * FROM {s}.research_gate_decisions WHERE id = %s",
+                          (_uid(decision_id),))
+        return rows[0] if rows else None
+
+    def list_gate_decisions(self, research_id: Any) -> list[dict[str, Any]]:
+        """該研究專案的全部決定列（由舊到新）。"""
+        return self.query(
+            "SELECT id, gate, decision, decided_by, decided_at, fsm_state_after, reason, details "
+            "FROM {s}.research_gate_decisions WHERE research_id = %s ORDER BY decided_at, id",
+            (_uid(research_id),))
+
+    def list_deliveries(self, research_id: Any) -> list[dict[str, Any]]:
+        return self.query("SELECT * FROM {s}.research_deliveries WHERE research_id = %s "
+                          "ORDER BY created_at, id", (_uid(research_id),))
+
+    def list_task_states(self, console_project_id: Any) -> list[dict[str, Any]]:
+        """Console 專案的任務終態（`covers_ac` 與 `taskId` 在匯入時寫進 `pass_criteria_spec`）；
+        已軟刪者不列。回 `{task_id, status, completed_at, covers_ac[]}`。"""
+        rows = self.query(
+            "SELECT t.id, t.status, t.completed_at, t.pass_criteria_spec FROM {s}.tasks t "
+            "JOIN {s}.goals g ON g.id = t.goal_id WHERE g.project_id = %s AND "
+            "COALESCE(t.is_deleted, FALSE) = FALSE AND COALESCE(g.is_deleted, FALSE) = FALSE "
+            "ORDER BY t.sort_order, t.created_at, t.id", (_uid(console_project_id),))
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            spec = r["pass_criteria_spec"] if isinstance(r["pass_criteria_spec"], dict) else {}
+            covers = spec.get("coversAc")
+            out.append({"task_id": str(spec.get("taskId") or r["id"]), "status": r["status"],
+                        "completed_at": r["completed_at"],
+                        "covers_ac": [str(a) for a in covers] if isinstance(covers, list) else []})
+        return out
+
+    def list_healing_attempts(self, research_id: Any,
+                              after_key: tuple[int, int] | None = None) -> list[dict[str, Any]]:
+        """視圖 `v_research_healing_attempts` 的列（唯讀；依 `(run_number, step_number)`）。
+        `after_key`＝`(run_number, step_number)`：只回排序在它之後的列。"""
+        text = ("SELECT research_id, run_id, run_number, task_id, step_number, action, status, "
+                "error_message, tokens_used, occurred_at FROM {s}.v_research_healing_attempts "
+                "WHERE research_id = %s")
+        params: list[Any] = [_uid(research_id)]
+        if after_key is not None:
+            text += " AND (run_number, step_number) > (%s, %s)"
+            params += [int(after_key[0]), int(after_key[1])]
+        return self.query(text + " ORDER BY run_number, step_number, occurred_at", params)
 
     def list_events(self, research_id: Any, *, after_seq: int = 0,
                     limit: int = 100) -> list[dict[str, Any]]:

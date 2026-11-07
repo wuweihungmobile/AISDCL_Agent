@@ -898,7 +898,9 @@ def reconcile(research_id: str,
     with operation(ctx, "reconcile", rid, None):
         row = _project(ctx, rid)
         assert ctx.orchestrator is not None
-        return ctx.orchestrator.reconcile(row, actor="bridge")
+        result = ctx.orchestrator.reconcile(row, actor="bridge")
+        research_deliver.sync_best_effort(ctx, row)     # 順帶補寫自癒日誌（best-effort）
+        return result
 
 
 # ── 取消、封存、復原 ─────────────────────────────────────────────────────────────────────────
@@ -1155,9 +1157,19 @@ def reconcile_at_route(ctx: ResearchContext, research_id: str) -> dict[str, Any]
     return ctx.orchestrator.reconcile(_project(ctx, research_id), actor="bridge")
 
 
+def reconcile_at_delivery(ctx: ResearchContext, research_id: str) -> dict[str, Any]:
+    """交付時點的自動對帳（AC-962-23／AC-R2P-23-4）：`:tag` 成功後恰呼叫一次。呼叫點住本檔（同
+    `reconcile_at_route`；P0 的呼叫點鎖由 3 處增為 4 處）。"""
+    assert ctx.orchestrator is not None
+    return ctx.orchestrator.reconcile(_project(ctx, research_id), actor="bridge")
+
+
 # P1 BR-D2：`:scr`、`:scr-apply`、`:decompose`、`:decomposition-signoff` 住 `research_scr.py`，
 # 掛進同一個 router（`app/main.py` 已 include 本 router；不必再多一行）。放檔尾是因為那支檔
 # 從本檔 import 共用助手。
-from . import research_scr  # noqa: E402
+from . import research_deliver, research_scr  # noqa: E402
 
 router.include_router(research_scr.router)
+# P2 BR-P2：`:gates`、`:tag`、`:pr`、`:traceability-preview`、`:healing-sync` 住
+# `research_deliver.py`。
+router.include_router(research_deliver.router)

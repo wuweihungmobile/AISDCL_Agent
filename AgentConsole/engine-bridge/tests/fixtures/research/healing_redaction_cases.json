@@ -1,0 +1,72 @@
+[
+  {
+    "input": "fetch failed: token ghp_AbCdEf0123456789xyZ0 rejected",
+    "expected": "fetch failed: token *** rejected"
+  },
+  {
+    "input": "auth header was github_pat_11ABCDEFG0123456789 on retry",
+    "expected": "auth header was *** on retry"
+  },
+  {
+    "input": "client error sk-ant-api03-short for model call",
+    "expected": "client error [REDACTED] for model call"
+  },
+  {
+    "input": "Authorization: Bearer abc.def-ghi_jkl123 refused by server",
+    "expected": "[REDACTED] refused by server"
+  },
+  {
+    "input": "env AWS_SECRET=example-secret-value leaked into the log",
+    "expected": "env AWS_SECRET=[REDACTED] leaked into the log"
+  },
+  {
+    "input": "DB_PASSWORD=hunter2 connection refused",
+    "expected": "DB_PASSWORD=[REDACTED] connection refused"
+  },
+  {
+    "input": "retry with password=hunter2 failed",
+    "expected": "retry with password=[REDACTED] failed"
+  },
+  {
+    "input": "postgres://user:s3cr3tpw@db:5432/app unreachable",
+    "expected": "postgres://user:***@db:5432/app unreachable"
+  },
+  {
+    "input": "tail ... xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx ghp_AbCdEf0123456789xyZ0 end",
+    "expected": "tail ... xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx *** end"
+  },
+  {
+    "input": "兩個 token：ghp_AbCdEf0123456789xyZ0 與 ghp_ZyXwVu9876543210aBcD 都要遮",
+    "expected": "兩個 token：*** 與 *** 都要遮"
+  },
+  {
+    "input": "commit 0123456789abcdef0123456789abcdef01234567 failed to apply",
+    "expected": "commit 0123456789abcdef0123456789abcdef01234567 failed to apply",
+    "keep": true
+  },
+  {
+    "input": "run id 3f2b8c1e-9d4a-4e6f-8a7b-1c2d3e4f5a6b not found",
+    "expected": "run id 3f2b8c1e-9d4a-4e6f-8a7b-1c2d3e4f5a6b not found",
+    "keep": true
+  },
+  {
+    "input": "digest sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 mismatch",
+    "expected": "digest sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 mismatch",
+    "keep": true
+  },
+  {
+    "input": "blob QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVm length 52",
+    "expected": "blob QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU2Nzg5YWJjZGVm length 52",
+    "keep": true
+  },
+  {
+    "input": "the word password alone is not a secret",
+    "expected": "the word password alone is not a secret",
+    "keep": true
+  },
+  {
+    "input": "ordinary build error: module not found",
+    "expected": "ordinary build error: module not found",
+    "keep": true
+  }
+]

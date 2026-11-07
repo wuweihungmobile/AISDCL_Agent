@@ -296,3 +296,40 @@ def test_AT_960_10_3_a_real_research_draft_review_flow_emits_only_contract_event
     assert [json.loads(f["data"]) for f in frames[:-1]] == rows
     assert frames[-1]["event"] == "heartbeat" and all(
         f["event"] != "research.replay_gap" for f in frames)
+
+
+# ══ P2（PKG-BR-P2；AT-962-26-5）：`research.delivery` 事件登記。以下 append-only ═════════
+def test_AT_962_26_5_research_delivery_has_six_fixed_keys_and_fails_loud_outside_them(
+        make_env: Callable[..., Env], rdb: ThrowawayDb, fake: Path) -> None:
+    from app.research.db import (
+        DELIVERY_FAILURE_STEPS,
+        EVENT_OPTIONAL_KEYS,
+        ResearchGuardError,
+    )
+
+    keys = {"kind", "ref", "status", "digest", "reason", "failure_step"}
+    assert EVENT_PAYLOAD_KEYS["research.delivery"] == keys
+    assert "research.delivery" not in EVENT_OPTIONAL_KEYS
+    env = make_env(fake, rdb)
+    rid = create(env, "ev-delivery")["research_id"]
+
+    def add(payload: dict[str, Any]) -> dict[str, Any]:
+        return env.db.append_event(research_id=rid, event_type="research.delivery",
+                                   actor="bridge", payload=payload)
+
+    ok = {"kind": "RELEASE_TAG", "ref": "v1.0.0", "status": "CREATED", "digest": "a" * 64,
+          "reason": "", "failure_step": None}
+    assert add(ok)["applied"] is True
+    assert DELIVERY_FAILURE_STEPS == {"push", "pr_create", "fsm_release", "tag"}
+    for step in sorted(DELIVERY_FAILURE_STEPS):
+        failed = {**ok, "ref": None, "status": "FAILED", "failure_step": step, "reason": "x"}
+        assert add(failed)["applied"] is True
+    failed = {**ok, "ref": None, "status": "FAILED", "failure_step": "push"}
+    for bad in ({k: v for k, v in failed.items() if k != "failure_step"}, {**ok, "extra": 1},
+                {**failed, "failure_step": None}, {**failed, "failure_step": "nope"},
+                {**ok, "ref": None}):
+        with pytest.raises(ResearchGuardError):
+            add(bad)
+    payloads = [e["payload"] for e in env.db.list_events(rid, limit=500)
+                if e["event_type"] == "research.delivery"]
+    assert len(payloads) == 5 and all(set(p) == keys for p in payloads)

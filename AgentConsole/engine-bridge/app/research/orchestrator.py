@@ -58,6 +58,7 @@ from .gates.prd_schema import count_acs, precheck_draft, precheck_p1, precheck_p
 from .gates.reconcile import (
     PENDING_CORRECTION,
     decomposition_extras,
+    delivery_check,
     derive_flow_status,
     file_check,
     flow_fsm_mapping_ok,
@@ -1317,6 +1318,15 @@ class Orchestrator:
         return with_extra_drift(check, route_decision_extras(
             doc if isinstance(doc, dict) else {}, route_row, steps, stored))
 
+    def _delivery_check(self, rid: str, ws: Path) -> dict[str, Any]:
+        """`delivery` 項（P2）：最近一筆 `RELEASE_TAG` `CREATED` 列的快照 sha256 對快照檔。"""
+        row = self._one(
+            "SELECT rtm_report_ref, snapshot_sha256 FROM {s}.research_deliveries WHERE "
+            "research_id = %s AND kind = 'RELEASE_TAG' AND status = 'CREATED' "
+            "ORDER BY created_at DESC, id DESC LIMIT 1", (rid,))
+        found = layout.file_digest(ws, str(row["rtm_report_ref"])) if row else None
+        return delivery_check(row, found[0] if found else None)
+
     # ── 對帳（只報告、不修復）────────────────────────────────────────────────────────────────
     def reconcile(self, row: Mapping[str, Any], *, actor: str = "bridge") -> dict[str, Any]:
         """六項對帳：游標與 FSM 對映、PRD、審查卡、證據矩陣的檔案↔資料庫 sha256，以及 P0 沒有的
@@ -1371,7 +1381,8 @@ class Orchestrator:
             checks.append(file_check(check_id, label, expected, digests(expected["path"])
                                      if expected else None))
         checks += [self._decomposition_check(rid, ws, latest("TASK_DECOMPOSITION"), digests),
-                   self._route_check(rid, ws, route_row, latest("ROUTE_DECISION"), digests)]
+                   self._route_check(rid, ws, route_row, latest("ROUTE_DECISION"), digests),
+                   self._delivery_check(rid, ws)]
         if mapping["status"] == PENDING_CORRECTION and stage2 is not None:
             # D-125：TCS 凍結走既有 `:freeze`，凍結後游標仍是 TCS_PENDING；對帳在同一交易校正
             self.writer.persist(Op("tcs.correct_cursor", rid, {

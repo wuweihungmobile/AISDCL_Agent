@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -13,8 +14,10 @@ import pytest
 
 from app import procutil, sdd_cli
 from app.research import gitops
+from tests import research_git_support as rgs
 
 TOKEN = "ghp_FAKE_R2P1_TOKEN_000000000000000000"
+fake_gh = rgs.fake_gh
 MSG_PUBLISH = gitops.commit_message("publish", "RP-0007", "0123456789ab")
 MSG_SCAFFOLD = gitops.commit_message("scaffold", "RP-0007")
 
@@ -297,3 +300,191 @@ def test_D_134_tcs_and_scr_templates_reject_bad_sha_bad_rp_no_and_unknown_kind()
     with pytest.raises(gitops.GitopsDenied):       # 自由文字仍擋（白名單只多兩條固定句型）
         gitops.parse_git(["commit", "-m", "docs: 發佈 RP-0007 TCS（sha256 zz）"],
                          cwd=Path("."), scaffold_root=Path("."), worktree_root=Path("."))
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# P2（PKG-BR-P2；TCS AT-962-2-*）：tag 與 PR 的白名單形態。以下 append-only，上方既有測試一字未動
+# （`test_AT_961_8_1_…` 的 `tag -a v1 -m x`、缺旗標 `pr create`、`release create` 仍是拒絕案：
+# `v1` 不是 semver、`x` 不是模板訊息，所以那三項負控原封不動仍成立）。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+TAG = "v1.2.3"
+TAG_MSG = gitops.release_message(TAG, "RP-0007", "0123456789ab")
+P2_TOKEN = "ghp_FAKE_R2P2_TOKEN_000000000000000000"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TCS_P2 = REPO_ROOT / "AgentConsole" / "docs" / "03_testing" / "contracts" / (
+    "TCS-ResearchToPRD-P2-20261107.md")
+PR_CREATE = ["pr", "create", "--title", "feat: RP-0007 x（1 FR／2 AC）", "--body", "## 摘要\n內文",
+             "--base", "main", "--head", "feature/x"]
+
+
+def p2_kw(d: dict[str, Path]) -> dict[str, Any]:
+    return {"scaffold_root": d["scaffold"], "worktree_root": d["worktrees"], "cwd": d["tree"]}
+
+
+def test_AT_962_2_1_the_six_git_forms_for_tags_build_an_argv_list(dirs: dict[str, Path]) -> None:
+    forms = [["tag", "--list", TAG], ["tag", "-a", TAG, "-m", TAG_MSG], ["push", "origin", TAG],
+             ["ls-remote", "--tags", "origin", TAG], ["remote", "get-url", "origin"],
+             ["rev-parse", "--verify", f"refs/tags/{TAG}"]]
+    for tokens in forms:
+        assert gitops.parse_git(tokens, **p2_kw(dirs)) == ["git", *tokens], tokens
+    for tokens in (["tag", "-a", "v1", "-m", "x"], ["tag", "-a", TAG, "-m", "任意自由文字"],
+                   ["tag", "-a", "v9.9.9", "-m", TAG_MSG], ["release", "create"],
+                   ["pr", "create"]):          # 非模板訊息、訊息與 tag 不同名、其他動詞：仍拒
+        with pytest.raises(gitops.GitopsDenied):
+            gitops.parse_git(tokens, **p2_kw(dirs))
+
+
+def test_AT_962_2_2_gh_pr_create_and_pr_list_pass_other_gh_forms_stay_refused() -> None:
+    assert gitops.parse_gh(PR_CREATE) == ["gh", *PR_CREATE]
+    assert gitops.parse_gh(["pr", "list", "--head", "feature/x", "--json", "url"]) == [
+        "gh", "pr", "list", "--head", "feature/x", "--json", "url"]
+    swapped = ["pr", "create", "--body", "b", "--title", "t", "--base", "main", "--head", "x"]
+    for args in (["pr", "merge"], ["pr", "close"], ["release", "create", "v1"],
+                 ["repo", "delete"], ["pr", "create"], PR_CREATE[:-2], swapped,
+                 ["pr", "list", "--json", "url", "--head", "feature/x"],
+                 ["pr", "list", "--head", "feature/x"]):
+        with pytest.raises(gitops.GitopsDenied):
+            gitops.parse_gh(args)
+
+
+MESSAGE_CASES = [
+    (TAG_MSG, True),
+    (f"release: {TAG}（RP-12345，追溯快照 sha256 0123456789ab）", True),
+    (f"release: {TAG}（追溯快照 sha256 0123456789ab）", False),                  # 缺 RP 號
+    (f"release: {TAG}（RP-007，追溯快照 sha256 0123456789ab）", False),          # RP 號 3 位
+    (f"release: {TAG}（RP-0007，追溯快照 sha256 0123456789a）", False),          # sha 11 碼
+    (f"release: {TAG}（RP-0007，追溯快照 sha256 0123456789abc）", False),        # sha 13 碼
+    (f"release: {TAG}（RP-0007，追溯快照 sha256 0123456789AB）", False),         # 大寫
+    (TAG_MSG + "\n", False), (TAG_MSG + " ", False), (TAG_MSG + "\nx", False),   # 換行／尾隨空白
+    (TAG_MSG.replace("（", "(").replace("）", ")"), False),                      # 半形括號
+    ("release: 1.2（RP-0007，追溯快照 sha256 0123456789ab）", False),            # semver 不合
+]
+
+
+@pytest.mark.parametrize(("message", "ok"), MESSAGE_CASES, ids=range(len(MESSAGE_CASES)))
+def test_AT_962_2_3_the_tag_message_template_is_fullmatched(message: str, ok: bool,
+                                                            dirs: dict[str, Path]) -> None:
+    tokens = ["tag", "-a", TAG, "-m", message]
+    if ok:
+        assert gitops.parse_git(tokens, **p2_kw(dirs))[-1] == message
+    else:
+        with pytest.raises(gitops.GitopsDenied):
+            gitops.parse_git(tokens, **p2_kw(dirs))
+
+
+def test_AT_962_2_3_existing_commit_templates_do_not_regress(dirs: dict[str, Path]) -> None:
+    for message in (MSG_PUBLISH, MSG_SCAFFOLD):
+        assert gitops.parse_git(["commit", "-m", message], **p2_kw(dirs))[-1] == message
+    assert not gitops._tag_message_ok(TAG, MSG_PUBLISH)
+
+
+def test_AT_962_2_4_valid_semver_boundaries_and_the_contract_constant() -> None:
+    good = ["1.2.3", "v1.2.3", "1.2.3-rc.1", "1.2.3+b.5", "1.2.3-rc.1+b.5", "0.0.0",
+            "v1.2.3-" + "a" * 57]
+    assert len(good[-1]) == 64
+    bad = ["v1.2.3-" + "a" * 58, "1.2", "01.2.3", "1.2.3.4", "v", "", "-x", "1.2.3 ", "1.2.3;x",
+           "../1.2.3", "1.2.3\n", None, 123]
+    assert len(bad[0]) == 65
+    assert all(gitops.valid_semver(t) for t in good)
+    assert not any(gitops.valid_semver(t) for t in bad)
+    text = TCS_P2.read_text(encoding="utf-8")
+    start = text.index("| `tagName` 正規式 | `") + len("| `tagName` 正規式 | `")
+    assert text[start:text.index("`，長度至多 64", start)] == gitops.SEMVER_PATTERN, \
+        "Bridge 與契約（console-api 同源）的 tagName 正規式須逐字相同"
+    assert gitops.TAG_MAX_CHARS == 64
+
+
+def test_AT_962_2_5_push_origin_tag_is_a_separate_form_and_does_not_loosen_dash_u(
+        dirs: dict[str, Path]) -> None:
+    kw = p2_kw(dirs)
+    assert gitops.parse_git(["push", "-u", "origin", "feature/x"], **kw)[-1] == "feature/x"
+    assert gitops.parse_git(["push", "origin", TAG], **kw) == ["git", "push", "origin", TAG]
+    for tokens in (["push", "origin", "feature/x"], ["push", "origin", "refs/heads/x"],
+                   ["push", "--tags"], ["push", "origin", f"+{TAG}"], ["push", "origin", f":{TAG}"],
+                   ["push", "-f", "origin", TAG], ["push", "-u", "origin", TAG, "x"],
+                   ["push", "origin", TAG, "--force"]):
+        with pytest.raises(gitops.GitopsDenied):
+            gitops.parse_git(tokens, **kw)
+
+
+def test_AT_962_2_6_git_children_never_get_the_gh_token(spawns: Spawns,
+                                                       dirs: dict[str, Path]) -> None:
+    git_ops = gitops.Gitops(scaffold_root=dirs["scaffold"], worktree_root=dirs["worktrees"],
+                            secrets=(P2_TOKEN,), token=P2_TOKEN)
+    git_ops.git(["tag", "-a", TAG, "-m", TAG_MSG], cwd=dirs["tree"])
+    argv, _cwd, env = spawns.calls[-1]
+    assert "GH_TOKEN" not in env and P2_TOKEN not in " ".join(argv)
+    assert set(env) >= {"GIT_TERMINAL_PROMPT", "GIT_CONFIG_GLOBAL", "GIT_AUTHOR_NAME"}
+    assert gitops.child_env("git", token=P2_TOKEN, base={}).keys() == gitops.child_env(
+        "gh", base={}).keys() - {"GH_TOKEN"}, "環境白名單鍵集合與 P1 相同"
+
+
+def test_AT_962_2_6_a_leaking_gh_prints_the_token_but_every_returned_text_is_redacted(
+        tmp_path: Path, fake_gh: Any) -> None:
+    git_ops = gitops.Gitops(secrets=(P2_TOKEN,), token=P2_TOKEN)
+    fake_gh.mode("leak")
+    result = git_ops.gh(PR_CREATE, cwd=tmp_path)
+    assert result.returncode == 0 and "debug token=" in result.stdout, "leak 模式確實有印"
+    assert P2_TOKEN not in result.stdout + result.stderr + result.argv_redacted
+    last = fake_gh.calls()[-1]
+    assert last["has_gh_token"] is True and P2_TOKEN not in json.dumps(last["argv"])
+
+FORBIDDEN_P2 = [["push", "--force", "origin", "v1"], ["push", "origin", "v1", "--force"],
+                ["push", "--tags"], ["tag", "-d", "v1"], ["tag", "-f", "v1"],
+                ["tag", "-a", "v1"], ["branch", "-D", "x"]]
+FORBIDDEN_GH = [["release", "create", "v1"], ["pr", "merge", "1"], ["pr", "close", "1"]]
+
+
+@pytest.mark.parametrize("tokens", FORBIDDEN_P2, ids=lambda t: " ".join(t))
+def test_AT_962_2_E_1_destructive_tag_and_push_forms_are_refused_before_spawning(
+        tokens: list[str], spawns: Spawns, dirs: dict[str, Path]) -> None:
+    with pytest.raises(gitops.GitopsDenied) as caught:
+        ops(dirs).git(tokens, cwd=dirs["tree"])
+    assert spawns.calls == [] and P2_TOKEN not in str(caught.value)
+
+
+@pytest.mark.parametrize("args", FORBIDDEN_GH, ids=lambda t: " ".join(t))
+def test_AT_962_2_E_1_destructive_gh_forms_are_refused_before_spawning(
+        args: list[str], spawns: Spawns, dirs: dict[str, Path]) -> None:
+    with pytest.raises(gitops.GitopsDenied):
+        ops(dirs).gh(args, cwd=dirs["tree"])
+    assert spawns.calls == []
+
+
+@pytest.mark.parametrize("bad", ["-v1.2.3", "--exec=x", "v1 2", "v1\t2", "v1\n2"])
+def test_AT_962_2_E_2_tag_names_with_option_shapes_never_reach_a_process(
+        bad: str, spawns: Spawns, dirs: dict[str, Path]) -> None:
+    g = ops(dirs)
+    for tokens in (["tag", "--list", bad], ["tag", "-a", bad, "-m", TAG_MSG],
+                   ["push", "origin", bad], ["ls-remote", "--tags", "origin", bad]):
+        with pytest.raises(gitops.GitopsDenied):
+            g.git(tokens, cwd=dirs["tree"])
+    assert spawns.calls == []
+
+
+@pytest.mark.parametrize("head", ["-x", "a b", "a..b", "a\nb", ""])
+def test_AT_962_2_E_2_pr_heads_with_option_shapes_never_reach_a_process(
+        head: str, spawns: Spawns, dirs: dict[str, Path]) -> None:
+    g = ops(dirs)
+    for args in ([*PR_CREATE[:-1], head], ["pr", "list", "--head", head, "--json", "url"]):
+        with pytest.raises(gitops.GitopsDenied):
+            g.gh(args, cwd=dirs["tree"])
+    assert spawns.calls == []
+
+
+def test_AT_962_2_E_3_git_and_gh_argv_literals_live_only_in_gitops_and_exec_modules_are_unchanged(
+) -> None:
+    import ast
+
+    from tests import test_research_ast_locks as locks
+    from tests import test_research_capability as capability
+
+    assert locks.EXEC_MODULES == frozenset({
+        "runner.py", "sdd_cli.py", "si_cli.py", "health.py", "routers/sdd.py",
+        "research/gitops.py"})
+    for rel in ("research/delivery.py", "research/healing.py", "research/inner_gates.py",
+                "routers/research_deliver.py"):
+        tree = ast.parse((capability.APP_DIR / rel).read_text(encoding="utf-8"))
+        assert capability.git_gh_lines(tree) == [], f"{rel} 含 git／gh 的 argv 字面"
+    assert [rel for rel, kind in capability.CAPABILITY.items() if kind == "vcs"] == [
+        "research/gitops.py"]

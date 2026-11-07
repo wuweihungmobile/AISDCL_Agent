@@ -97,6 +97,12 @@ CAPABILITY: dict[str, str] = {
     "research/decompose_plan.py": "exec",
     "research/gates/tcs_schema.py": "exec",
     "routers/research_scr.py": "exec",
+    # P2 BR-P2：內環登錄與 RELEASE 轉態（經 fsm_ops）、交付（git 只經注入的 gitops）、自癒（取
+    # gitops 的遮蔽）與五個端點的路由都在 FSM／git 的門內＝exec；子行程仍只由 sdd_cli／gitops 起。
+    "research/inner_gates.py": "exec",
+    "research/delivery.py": "exec",
+    "research/healing.py": "exec",
+    "routers/research_deliver.py": "exec",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",
@@ -502,3 +508,20 @@ def test_AT_960_8_8_each_synthetic_violation_is_reported(
 def test_AT_960_8_8_benign_variants_are_not_reported(
         tmp_path: Path, files: dict[str, str | None]) -> None:
     assert synth(tmp_path, files) == []
+
+
+# ══ P2（PKG-BR-P2；AT-962-5-5）：四個新模組先登記再掃描 ════════════════════════════════════════
+P2_MODULES = frozenset({"research/inner_gates.py", "research/delivery.py", "research/healing.py",
+                        "routers/research_deliver.py"})
+
+
+def test_AT_962_5_5_the_four_p2_modules_are_registered_one_to_one_and_vcs_stays_gitops_only(
+) -> None:
+    files = set(surface(APP_DIR))
+    assert P2_MODULES <= files and P2_MODULES <= set(CAPABILITY)
+    assert sorted(files ^ set(CAPABILITY)) == [], "實樹與登記表一對一"
+    assert [rel for rel, kind in CAPABILITY.items() if kind == "vcs"] == [VCS_MODULE]
+    assert EXEC_DOORS == frozenset({"sdd_cli", "fsm_ops", "orchestrator", "gitops"})
+    assert capability_problems(APP_DIR, CAPABILITY) == []
+    for rel in P2_MODULES:
+        assert git_gh_lines(real_trees()[rel]) == [], f"{rel} 不得有 git／gh 的 argv 字面"

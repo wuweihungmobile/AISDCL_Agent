@@ -43,11 +43,18 @@ BRANCH_PATTERN = r"^feature/[a-z0-9-]{1,40}$"
 REPO_NAME_PATTERN = r"^[a-z][a-z0-9-]{1,38}$"
 OWNER_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$"
 VISIBILITIES = ("PRIVATE", "PUBLIC")
+#: tag 名（semver 2.0 的保守子集；與 console-api 逐字同一份字面，TCS §5.1）。
+SEMVER_PATTERN = (r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+                  r"(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
+TAG_MAX_CHARS = 64
 TAIL_CHARS = 2000
 DEFAULT_TIMEOUT_SECONDS = 120.0
 MASK = "***"
 
 _BRANCH_RE = re.compile(BRANCH_PATTERN)
+_SEMVER_RE = re.compile(SEMVER_PATTERN)
+_TAG_MESSAGE_RE = re.compile(
+    r"^release: (" + SEMVER_PATTERN[1:-1] + r")（RP-[0-9]{4,}，追溯快照 sha256 [0-9a-f]{12}）$")
 _REPO_RE = re.compile(REPO_NAME_PATTERN)
 _OWNER_RE = re.compile(OWNER_PATTERN)
 #: git ref 的保守子集：英數起頭，其後英數與 `._/-`；不含 `..`、`@{`、`//`、結尾 `/`、`.`、`.lock`。
@@ -127,6 +134,12 @@ def valid_ref(name: str) -> bool:
                 or "/." in name or ".lock/" in name)
 
 
+def valid_semver(name: object) -> bool:
+    """tag 名：semver 保守子集、至多 64 字；不以 `-` 起頭、無空白與控制字元（選項注入）。"""
+    return (isinstance(name, str) and len(name) <= TAG_MAX_CHARS
+            and _SEMVER_RE.fullmatch(name) is not None)
+
+
 def valid_branch(name: str) -> bool:
     return isinstance(name, str) and _BRANCH_RE.fullmatch(name) is not None and valid_ref(name)
 
@@ -169,6 +182,20 @@ def commit_message(kind: str, rp_no: str, sha12: str | None = None) -> str:
     if kind == "scaffold":
         return f"chore: 由 ResearchToPRD 建立 {rp_no} 專案骨架"
     raise GitopsDenied("commit", f"未知的訊息模板 {kind!r}")
+
+
+def release_message(tag: str, rp_no: str, sha12: str) -> str:
+    """Release tag 的註解訊息（模板常數；不含使用者原文）。"""
+    if not valid_semver(tag):
+        raise GitopsDenied("tag", "tag 名不合 semver")
+    if not _RP_NO_RE.fullmatch(rp_no) or not _SHA_PREFIX_RE.fullmatch(sha12):
+        raise GitopsDenied("tag", "rp_no 或 sha12 格式不合")
+    return f"release: {tag}（{rp_no}，追溯快照 sha256 {sha12}）"
+
+
+def _tag_message_ok(tag: str, message: str) -> bool:
+    match = _TAG_MESSAGE_RE.fullmatch(message)
+    return match is not None and match.group(1) == tag
 
 
 _MESSAGE_RES = (
@@ -239,12 +266,28 @@ def parse_git(tokens: Sequence[str], *, cwd: Path | None = None,
     if verb == "remote":
         if len(args) == 3 and args[:2] == ["add", "origin"] and _REMOTE_URL_RE.fullmatch(args[2]):
             return [*argv, verb, "add", "origin", args[2]]
-        raise GitopsDenied(verb, "只准 remote add origin <https://github.com/…>")
+        if args == ["get-url", "origin"]:
+            return [*argv, verb, "get-url", "origin"]
+        raise GitopsDenied(verb, "只准 remote add origin <https://github.com/…> 與 "
+                                 "remote get-url origin")
     if verb == "push":
         if len(args) == 3 and args[0] == "-u" and args[1] == "origin" and valid_ref(args[2]):
             return [*argv, verb, "-u", "origin", args[2]]
-        raise GitopsDenied(verb, "只准 push -u origin <已驗證分支>")
-    raise GitopsDenied(verb, "不在 P1 允許集合內")
+        if len(args) == 2 and args[0] == "origin" and valid_semver(args[1]):
+            return [*argv, verb, "origin", args[1]]            # P2：只推 semver tag
+        raise GitopsDenied(verb, "只准 push -u origin <已驗證分支> 與 push origin <semver tag>")
+    if verb == "tag":                                          # P2
+        if len(args) == 2 and args[0] == "--list" and valid_semver(args[1]):
+            return [*argv, verb, "--list", args[1]]
+        if (len(args) == 4 and args[0] == "-a" and args[2] == "-m" and valid_semver(args[1])
+                and _tag_message_ok(args[1], args[3])):
+            return [*argv, verb, "-a", args[1], "-m", args[3]]
+        raise GitopsDenied(verb, "只准 tag --list <semver> 與 tag -a <semver> -m <模板訊息>")
+    if verb == "ls-remote":                                    # P2
+        if len(args) == 3 and args[:2] == ["--tags", "origin"] and valid_semver(args[2]):
+            return [*argv, verb, "--tags", "origin", args[2]]
+        raise GitopsDenied(verb, "只准 ls-remote --tags origin <semver tag>")
+    raise GitopsDenied(verb, "不在允許集合內")
 
 
 def _valid_range(text: str) -> bool:
@@ -292,6 +335,13 @@ def _parse_add(args: Sequence[str], cwd: Path | None, scaffold_root: Path | None
     raise GitopsDenied("add", "只准 add -A（新專案根）或 add -- <明列路徑…>")
 
 
+def _valid_pr_text(text: str, limit: int, *, multiline: bool) -> bool:
+    """PR 標題／內文：非空、有長度上限、無 NUL 與其他控制字元（內文允許換行與 tab）。"""
+    allowed = "\n\r\t" if multiline else ""
+    return (isinstance(text, str) and 0 < len(text) <= limit
+            and all(ch >= " " or ch in allowed for ch in text))
+
+
 def parse_gh(args: Sequence[str]) -> list[str]:
     """`gh` 之後的 token → 完整 argv（首元素 `gh`）；P1 只有 `auth status` 與 `repo create`。"""
     toks = [str(t) for t in args]
@@ -303,8 +353,19 @@ def parse_gh(args: Sequence[str]) -> list[str]:
         if valid_owner(owner) and valid_repo_name(repo) and (source, dot, push) == (
                 "--source", ".", "--push"):
             return ["gh", "repo", "create", slug, toks[3], "--source", ".", "--push"]
-    raise GitopsDenied("gh", "P1 只准 auth status 與 repo create <owner>/<repo> --private|--public "
-                             "--source . --push")
+    if (len(toks) == 10 and toks[:2] == ["pr", "create"]
+            and (toks[2], toks[4], toks[6], toks[8]) == ("--title", "--body", "--base", "--head")):
+        title, body, base, head = toks[3], toks[5], toks[7], toks[9]
+        if (_valid_pr_text(title, 200, multiline=False) and _valid_pr_text(
+                body, 8000, multiline=True) and valid_ref(base) and valid_ref(head)):
+            return ["gh", "pr", "create", "--title", title, "--body", body, "--base", base,
+                    "--head", head]
+    if (len(toks) == 6 and toks[:3] == ["pr", "list", "--head"] and valid_ref(toks[3])
+            and toks[4:] == ["--json", "url"]):
+        return ["gh", "pr", "list", "--head", toks[3], "--json", "url"]
+    raise GitopsDenied("gh", "只准 auth status、repo create <owner>/<repo> --private|--public "
+                             "--source . --push、pr create --title --body --base --head 與 "
+                             "pr list --head <ref> --json url")
 
 
 def build_argv(verb: str, args: Sequence[str] = (), *, cwd: Path | None = None,
@@ -415,8 +476,10 @@ class Gitops:
         argv = parse_git(tokens, cwd=cwd, scaffold_root=self.scaffold_root,
                          worktree_root=self.worktree_root)
         verb = next((t for t in argv[1:] if t not in ("-c", "core.longpaths=true")), "")
-        readonly = verb in READONLY_GIT_VERBS or (
-            verb == "worktree" and argv[-2:] == ["list", "--porcelain"])
+        readonly = (verb in READONLY_GIT_VERBS
+                    or (verb == "worktree" and argv[-2:] == ["list", "--porcelain"])
+                    or verb == "ls-remote" or (verb == "tag" and "--list" in argv)
+                    or (verb == "remote" and argv[-2:] == ["get-url", "origin"]))
         return self._run(argv, tool="git", cwd=cwd, readonly=readonly)
 
     def gh(self, args: Sequence[str], *, cwd: Path) -> GitResult:

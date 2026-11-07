@@ -91,6 +91,7 @@ def seeded(env: Env, slug: str = "demo") -> tuple[str, str, Path]:
 
 # ── AT-960-21-1：六項對帳、漂移、缺檔 ───────────────────────────────────────────────────────
 def test_AT_960_21_1_six_checks_report_drift_with_both_digests_and_fix_nothing(env: Env) -> None:
+    # 對帳項以 `CHECK_IDS` 為準（P2 起含第七項 delivery；本測試的函式名保留 P0 原名）
     rid, head_rel, ws = seeded(env)
     first = reconcile(env, rid)
     assert [c["id"] for c in first["checks"]] == list(CHECK_IDS)
@@ -98,7 +99,8 @@ def test_AT_960_21_1_six_checks_report_drift_with_both_digests_and_fix_nothing(e
     assert all(c["status"] == "ok" for c in first["checks"])
     assert {c["id"]: c["present"] for c in first["checks"]} == {
         "fsm_flow_mapping": True, "prd_sha256": True, "review_card": True,
-        "evidence_matrix": True, "task_decomposition": False, "route_decision": False}
+        "evidence_matrix": True, "task_decomposition": False, "route_decision": False,
+        "delivery": False}
     # 未改時呼叫前後：檔案位元組與 mtime、資料列（事件除外）皆不變；每次呼叫恰追加一筆對帳事件
     files, rows, events = tree_digest(ws), counts(env), len(reconcile_events(env, rid))
     reconcile(env, rid)
@@ -336,7 +338,8 @@ def test_AT_960_21_4_p0_has_only_the_gate_0_call_site_for_reconcile() -> None:
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if re.search(r"orchestrator\.reconcile\(|\.reconcile\(", line) and "def " not in line:
                 sites.append(f"{path.relative_to(ENGINE_BRIDGE).as_posix()}:{number}")
-    assert sorted(s.split(":")[0] for s in sites) == ["app/routers/research.py"] * 3, sites
+    # P2（AC-962-23-4）：再加交付時點助手 `reconcile_at_delivery` 的呼叫點＝4 處
+    assert sorted(s.split(":")[0] for s in sites) == ["app/routers/research.py"] * 4, sites
 
 
 # ── AT-960-21-5：state.json 只寫出、不讀回 ──────────────────────────────────────────────────
@@ -632,3 +635,118 @@ def test_AT_961_20_4_the_route_flow_itself_runs_one_automatic_reconcile(
     rid, _route = routed(renv)
     events = [e for e in renv.rdb.events(rid) if e[1] == "research.reconcile"]
     assert len(events) == 2, "Gate 0 時點一筆（P0）加分流成功時點一筆"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# P2（PKG-BR-P2；AT-962-23-*）：第七項 `delivery`、交付時點對帳、補寫自癒日誌。以下 append-only。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+import json as _json  # noqa: E402
+import uuid as _uuid  # noqa: E402
+
+from app.research import delivery as delivery_mod  # noqa: E402
+from app.routers import research_deliver  # noqa: E402
+from tests import test_research_delivery as dl  # noqa: E402
+from tests import test_research_healing as hs  # noqa: E402
+from tests import test_research_inner_gates as ig  # noqa: E402
+
+rtm = ig.rtm
+SNAP_REL = delivery_mod.TRACE_REL
+
+
+def seed_delivery(renv: rgs.RouteEnv, rid: str, *, write_file: bool = True) -> Path:
+    """一列 RELEASE_TAG／CREATED 與（可選）對應的快照檔；回快照檔路徑。"""
+    path = p1_workspace(renv, rid) / SNAP_REL
+    text = _json.dumps({"rows": [], "marker": str(_uuid.uuid4())}) + "\n"
+    if write_file:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8", newline="\n")
+    renv.env.db.apply("delivery.record", {
+        "research_id": rid, "actor": "bridge", "event_ref": str(_uuid.uuid4()),
+        "row": {"kind": "RELEASE_TAG", "ref": "v1.0.0", "commit_sha": "a" * 40,
+                "rtm_report_ref": SNAP_REL, "status": "CREATED", "created_by": "admin",
+                "snapshot_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()},
+        "event": delivery_mod.delivery_event("RELEASE_TAG", "CREATED", ref="v1.0.0")})
+    return path
+
+
+def test_AT_962_23_1_check_ids_end_with_delivery_and_results_follow_them(
+        renv: rgs.RouteEnv) -> None:
+    assert CHECK_IDS[-1] == "delivery" and len(set(CHECK_IDS)) == len(CHECK_IDS)
+    rid, _route = routed(renv)
+    assert [c["id"] for c in p1_reconcile(renv, rid)["checks"]] == list(CHECK_IDS)
+
+
+def test_AT_962_23_2_the_delivery_check_compares_the_snapshot_sha256(renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv)
+    path = seed_delivery(renv, rid)
+    ok = checks_of(p1_reconcile(renv, rid))["delivery"]
+    assert (ok["status"], ok["present"], ok["drift"]) == ("ok", True, [])
+    original = path.read_bytes()
+    path.write_bytes(original + b" ")
+    result = p1_reconcile(renv, rid)
+    drift = checks_of(result)["delivery"]
+    assert drift["status"] == "drift" and result["consistent"] is False
+    assert drift["drift"] == [{
+        "kind": "DELIVERY", "path": SNAP_REL,
+        "expectedSha256": hashlib.sha256(original).hexdigest(),
+        "actualSha256": hashlib.sha256(original + b" ").hexdigest()}]
+
+
+def test_AT_962_23_3_no_delivery_is_absent_and_a_missing_snapshot_is_drift(
+        renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv)
+    absent = checks_of(p1_reconcile(renv, rid))["delivery"]
+    assert absent == {"id": "delivery", "status": "ok", "present": False, "detail": "",
+                      "drift": []}
+    seed_delivery(renv, rid, write_file=False)
+    gone = checks_of(p1_reconcile(renv, rid))["delivery"]
+    assert gone["status"] == "drift" and gone["drift"][0]["actualSha256"] == "missing"
+
+
+def test_AT_962_23_4_a_successful_tag_reconciles_exactly_once_and_is_consistent(
+        renv: rgs.RouteEnv, rtm: ig.RtmFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = dl.build_project(renv)
+    calls: list[int] = []
+    orchestrator = ig.blocking_context(renv).orchestrator
+    real = orchestrator.reconcile
+    monkeypatch.setattr(orchestrator, "reconcile",
+                        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    before = len(ig.events_of(renv, project.rid, "research.reconcile"))
+    assert project.tag().status_code == 201
+    assert len(calls) == 1
+    events = ig.events_of(renv, project.rid, "research.reconcile")
+    assert len(events) == before + 1 and events[-1]["consistent"] is True
+
+
+def test_AT_962_23_5_reconcile_also_syncs_the_log_and_a_failing_sync_changes_nothing(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    rid, _route = routed(renv)
+    hs.seed_steps(renv, rid, [("A", 1, "RETRYING", "e1")])
+    first = p1_reconcile(renv, rid)
+    assert len(hs.log_lines(renv, rid)) == 1, "補漏成功＝log 補齊"
+    other, _r2 = routed(renv, "other")
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(research_deliver.healing, "sync", boom)
+    again = p1_reconcile(renv, rid)
+    assert again == first, "對帳結果與無例外時相同"
+    assert p1_reconcile(renv, other)["consistent"] is True
+
+
+def test_AT_962_23_E_1_the_pending_correction_state_is_untouched() -> None:
+    check = mapping_check("SPEC_FROZEN", "build", "TCS_PENDING", readable=True,
+                          stage2_frozen=True)
+    assert check["status"] == PENDING_CORRECTION and check["drift"] == []
+
+
+def test_AT_962_23_E_2_reconcile_only_reports_and_never_repairs(renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv)
+    path = seed_delivery(renv, rid)
+    path.write_bytes(path.read_bytes() + b"!")
+    sql = "SELECT snapshot_sha256, rtm_report_ref FROM console.research_deliveries"
+    file_before, row_before = path.read_bytes(), renv.rdb.q(sql)
+    first, second = p1_reconcile(renv, rid), p1_reconcile(renv, rid)
+    assert checks_of(first)["delivery"] == checks_of(second)["delivery"]
+    assert path.read_bytes() == file_before and renv.rdb.q(sql) == row_before

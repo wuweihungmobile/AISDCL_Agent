@@ -412,3 +412,50 @@ def test_matrix_pre_is_table_driven_from_the_mirror_edges() -> None:
 
 
 _unused: Callable[..., Any] | None = None
+
+
+# ══ P2（PKG-BR-P2；AT-962-15-7、15-8）：`evidence_url`。以下 append-only，P1 既有 AT 零改動 ═══════
+def evidence_row(renv: rgs.RouteEnv, rid: str) -> tuple[Any, ...]:
+    row = renv.rdb.one("SELECT evidence_url, reason FROM console.research_scr "
+                       "WHERE research_id = %s", rid)
+    assert row is not None
+    return row
+
+
+def test_AT_962_15_7_the_scr_endpoint_stores_a_valid_evidence_url_verbatim(
+        renv: rgs.RouteEnv) -> None:
+    rid, route = routed(renv)
+    inner_to(renv, route, "IMPLEMENTATION")
+    for bad, rule in (("http://ci.example.com/run/1", "evidence_not_https"),
+                      ("https://x.example.com/" + "a" * 500, "evidence_too_long")):
+        resp = post_scr(renv, rid, evidence_url=bad)
+        assert (resp.status_code, resp.json()["reason"]) == (422, "invalid_request")
+        assert [v["rule"] for v in resp.json()["violations"]] == [rule]
+    assert scr_rows(renv, rid) == []
+    good = "https://ci.example.com/run/1?x=1"
+    resp = post_scr(renv, rid, evidence_url=good)
+    assert resp.status_code == 202, resp.text
+    assert evidence_row(renv, rid) == (good, scr_body()["reason"]), "reason 與輸入逐字相同"
+    other, route2 = routed(renv, "other")
+    inner_to(renv, route2, "IMPLEMENTATION")
+    assert post_scr(renv, other).status_code == 202
+    assert evidence_row(renv, other)[0] is None
+
+
+def test_AT_962_15_8_the_scr_open_insert_lists_evidence_url_and_matches_its_parameters(
+        renv: rgs.RouteEnv) -> None:
+    import re
+
+    from app.research import db as db_module
+
+    sql = db_module._SQL_INSERT_SCR
+    columns = [c.strip() for c in re.search(r"\(([^)]*)\) VALUES", sql).group(1).split(",")]
+    values = sql.split("VALUES", 1)[1]
+    assert "evidence_url" in columns and columns[-1] == "evidence_url"
+    assert values.count("%s") == len(columns)
+    rid = rgs.seed_gate0(renv, "ev-unit")
+    url = "https://ci.example.com/x"
+    renv.env.db.apply("scr.open", {
+        "research_id": rid, "scr_id": str(uuid.uuid4()), "kind": "MAJOR", "source_kind": "HUMAN",
+        "reason": "r", "requested_by": ADMIN, "evidence_url": url})
+    assert evidence_row(renv, rid)[0] == url
