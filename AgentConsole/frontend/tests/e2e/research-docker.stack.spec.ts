@@ -1,8 +1,30 @@
 import { execFileSync } from "node:child_process";
 
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 import { axeViolations, formatViolations } from "./a11y";
+import {
+  ADMIN,
+  BASE,
+  OPERATOR,
+  RUN,
+  STACK_ON,
+  VIEWER,
+  approveViaApi,
+  call,
+  dataOf,
+  detailOf,
+  eventSeqs,
+  ensureQuota,
+  hasCreds,
+  newResearchKit,
+  open,
+  poll,
+  projectPath,
+  roundsOf,
+  runStage,
+  signIn,
+} from "../helpers/research-stack";
 
 /**
  * 研發工作流（ResearchToPRD P0）的 Docker 全棧 E2E（TCS-ResearchToPRD-P0-20261102 AT-960-22-2、22-3、22-4、22-5、22-E-1；AC-R2P-04-11、06-2、06-4、08-3、10-1、10-6、21-3）——
@@ -20,19 +42,9 @@ import { axeViolations, formatViolations } from "./a11y";
  * 用軟斷言，舊映像上會紅在這幾條、其餘照跑，重建 frontend 映像後應全綠。
  * 所有測試建立的專案在結束時封存（資料庫不留未封存的測試專案，下一次的零專案空狀態才成立）；工作區目錄留在 Bridge 容器的 volume 內（封存不刪檔）。
  */
-const STACK_ON = process.env.E2E_STACK === "1";
-const BASE = (process.env.E2E_API_URL ?? "http://localhost").replace(/\/+$/, "");
-
-type Creds = { user: string; password: string };
-const credsOf = (role: string): Creds => ({ user: process.env[`E2E_${role}_USER`] ?? "", password: process.env[`E2E_${role}_PASSWORD`] ?? "" });
-const hasCreds = (c: Creds): boolean => c.user !== "" && c.password !== "";
-const ADMIN = credsOf("ADMIN");
-const OPERATOR = credsOf("OPERATOR");
-const VIEWER = credsOf("VIEWER");
 const BRIDGE_CONTAINER = process.env.E2E_BRIDGE_CONTAINER ?? "aisdlc-engine-bridge";
 const SCRIPT = process.env.MOCK_CLAUDE_RESEARCH_SCRIPT ?? "";
 const SCRIPT_KIND: "fail3" | "pass" | "unknown" = /fail3/.test(SCRIPT) ? "fail3" : /pass/.test(SCRIPT) ? "pass" : "unknown";
-const RUN = Date.now().toString(36);
 
 const ABSENCE = !STACK_ON
   ? "TOOL-ABSENCE：未設 E2E_STACK=1（這支只對 Docker 全棧跑；啟用方式見 tests/e2e/README.md〈研發工作流 Docker 全棧 E2E〉）"
@@ -42,194 +54,14 @@ const ABSENCE = !STACK_ON
 if (ABSENCE !== "") console.log(`[research-docker.stack] ${ABSENCE}`);
 test.skip(ABSENCE !== "", ABSENCE);
 
-// ── REST 與登入 ──────────────────────────────────────────────────────────────────────────
-
-type Json = Record<string, unknown>;
-type Reply = { status: number; json: Json };
-type Tokens = { accessToken: string; refreshToken: string; expiresIn: number; role: string };
-
-const tokenCache = new Map<string, { at: number; tokens: Tokens }>();
-
-/** 取該帳號的 token（快取 20 分鐘；access token 效期 30 分鐘）。 */
-async function tokensOf(request: APIRequestContext, c: Creds): Promise<Tokens> {
-  const hit = tokenCache.get(c.user);
-  if (hit !== undefined && Date.now() - hit.at < 20 * 60_000) return hit.tokens;
-  const res = await request.post(`${BASE}/api/v1/auth/login`, { data: { username: c.user, password: c.password }, failOnStatusCode: false });
-  expect(res.ok(), `登入 ${c.user} 失敗：HTTP ${res.status()}`).toBeTruthy();
-  const tokens = ((await res.json()) as { data: Tokens }).data;
-  tokenCache.set(c.user, { at: Date.now(), tokens });
-  return tokens;
-}
-
-/**
- * 呼叫 REST（任何狀態碼都回傳，由呼叫端斷言）。限流是固定視窗：每個使用者每 60 秒 100 次，UI 與 REST 共用同一個桶（總覽頁一次載入就約 30 次）；
- * 撞到 429 就等視窗過去再試（最多四次）——否則流程中途的 429 會被誤判成功能缺陷（第一次實跑的 22-5 就是這樣在載入工作區時撞牆）。
- */
-async function call(request: APIRequestContext, c: Creds, method: "GET" | "POST" | "PUT" | "PATCH", apiPath: string, body?: unknown): Promise<Reply> {
-  for (let attempt = 0; ; attempt += 1) {
-    const { accessToken } = await tokensOf(request, c);
-    const res = await request.fetch(`${BASE}${apiPath}`, { method, headers: { Authorization: `Bearer ${accessToken}` }, data: body, failOnStatusCode: false });
-    if (res.status() === 429 && attempt < 4) {
-      const retryAfter = Number(res.headers()["retry-after"] ?? "20");
-      await new Promise((resolve) => setTimeout(resolve, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 20) * 1000 + 1000));
-      continue;
-    }
-    let json: Json = {};
-    try {
-      json = (await res.json()) as Json;
-    } catch {
-      json = {};
-    }
-    return { status: res.status(), json };
-  }
-}
-
-/** 限流的餘額（`X-RateLimit-Remaining`）不夠就等視窗過去：接下來要開頁面（每頁約 30 次請求）前呼叫，不然頁面載入到一半撞 429（UI 的請求這裡沒法重試）。 */
-async function ensureQuota(request: APIRequestContext, c: Creds, need = 50): Promise<void> {
-  for (let i = 0; i < 3; i += 1) {
-    const { accessToken } = await tokensOf(request, c);
-    const res = await request.get(`${BASE}/api/v1/notifications/summary`, { headers: { Authorization: `Bearer ${accessToken}` }, failOnStatusCode: false });
-    const remaining = Number(res.headers()["x-ratelimit-remaining"] ?? "100");
-    if (res.status() === 200 && remaining >= need) return;
-    await new Promise((resolve) => setTimeout(resolve, 62_000));
-  }
-}
-
-/** 導覽到 ADMIN 的頁面：先確認限流餘額夠載入一整頁（工作區頁約 20～30 次請求，且那些請求這裡沒法重試），不夠就等下一個視窗。 */
-async function open(page: Page, request: APIRequestContext, url: string): Promise<void> {
-  await ensureQuota(request, ADMIN);
-  await page.goto(url);
-}
-const dataOf = <T = Json>(reply: Reply): T => reply.json.data as T;
-const projectPath = (id: string, rest = ""): string => `/api/v1/research/projects/${id}${rest}`;
-
-/** 登入狀態直接寫進 sessionStorage（須在 page.goto 之前呼叫）。 */
-async function signIn(page: Page, request: APIRequestContext, c: Creds): Promise<void> {
-  const t = await tokensOf(request, c);
-  const session = JSON.stringify({ accessToken: t.accessToken, refreshToken: t.refreshToken, expiresAt: Date.now() + t.expiresIn * 1000, role: t.role, username: c.user });
-  await page.addInitScript((value) => window.sessionStorage.setItem("aisdlc.console.session", value), session);
-}
-
-async function poll<T>(fn: () => Promise<T>, done: (value: T) => boolean, what: string, timeoutMs = 240_000, intervalMs = 2500): Promise<T> {
-  const start = Date.now();
-  let last: T | undefined;
-  while (Date.now() - start < timeoutMs) {
-    last = await fn();
-    if (done(last)) return last;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error(`等待逾時（${timeoutMs}ms）：${what}；最後一次值＝${JSON.stringify(last)}`);
-}
-
-// ── 專案夾具（路徑 B：pass 劇本走到 Gate 0；路徑 A：fail3 劇本走到 ESCALATION）─────────────────────────
-
-type Project = { id: string; slug: string; rpNo: string };
-type Detail = { flowStep: string; flowPhase: string; flowStatus: string; flowDetail: string; headPrdVersion: number | null; scope: Json; fsmProject: string; flow: { effective: Json } };
-type Round = { roundNo: number; weightedScore: number | null; verdict: string; passed: boolean };
-
-const created: string[] = [];
-/** 議題軸：mock 劇本的證據夾具寫死全六軸，專案軸取子集會在證據 gate 的 R8 失敗（INT-11；README 已載明），所以 API 直呼一律建六軸。 */
-const SIX_AXES = ["技術可行", "授權相容", "維護風險", "效能邊界", "資安", "成本"];
-
-async function createProject(request: APIRequestContext, tag: string): Promise<Project> {
-  const slug = `e2e-${tag}-${RUN}`.slice(0, 30);
-  const reply = await call(request, ADMIN, "POST", "/api/v1/research/projects", {
-    slug,
-    title: `E2E ${tag} ${RUN}`,
-    topic: `E2E 研發工作流 ${tag} ${RUN}`,
-    scope: {
-      layers: { academic: true, industry: false, oss: true, community: false },
-      techStack: "Python / PostgreSQL",
-      inScope: ["E2E 範圍"],
-      outOfScope: ["不在範圍的東西"],
-      recencyYears: 2,
-      applicabilityAxes: SIX_AXES,
-    },
-    depthLevel: "QUICK",
-  });
-  expect(reply.status, `建立專案 ${slug} → ${JSON.stringify(reply.json)}`).toBe(201);
-  const data = dataOf<{ id: string; rpNo: string }>(reply);
-  created.push(data.id);
-  return { id: data.id, slug, rpNo: data.rpNo };
-}
-
-const detailOf = async (request: APIRequestContext, id: string): Promise<Detail> => {
-  const reply = await call(request, ADMIN, "GET", projectPath(id));
-  expect(reply.status, `GET 專案 → ${JSON.stringify(reply.json)}`).toBe(200);
-  return dataOf<Detail>(reply);
-};
-const roundsOf = async (request: APIRequestContext, id: string): Promise<Round[]> => dataOf<Round[]>(await call(request, ADMIN, "GET", projectPath(id, "/review-rounds")));
-const eventSeqs = async (request: APIRequestContext, id: string): Promise<number[]> =>
-  dataOf<{ items: Array<{ seq: number }> }>(await call(request, ADMIN, "GET", projectPath(id, "/events?afterSeq=0&limit=500"))).items.map((e) => e.seq);
-
-/** 事件帳的一次請求取得：這個 stage run 的狀態（最後一筆 `research.run`）與游標的 `flowStatus`（最後一筆 `research.step`）；還沒有事件回空字串。 */
-async function progressOf(request: APIRequestContext, id: string, stageRunId: string): Promise<{ run: string; cursor: string }> {
-  const page = dataOf<{ items: Array<{ eventType: string; payload: { stageRunId?: string; status?: string; flowStatus?: string } }> }>(
-    await call(request, ADMIN, "GET", projectPath(id, "/events?afterSeq=0&limit=500")),
-  );
-  const run = page.items.filter((e) => e.eventType === "research.run" && e.payload.stageRunId === stageRunId).at(-1)?.payload.status;
-  const cursor = page.items.filter((e) => e.eventType === "research.step").at(-1)?.payload.flowStatus;
-  return { run: run ?? "", cursor: cursor ?? "" };
-}
-
-/**
- * 啟動一個階段並等它收尾。202 回的游標是**啟動前**的（`IDLE`，引擎在背景才開始），所以不能以「游標不是 RUNNING」判結束（會在啟動前就誤判）；
- * 判準＝這個 stage run 已到終態（事件帳的 `research.run`）**且**游標離開 RUNNING（一鍵迭代是 REVISE 接 REVIEW 兩個 run，REVISE 收尾時游標仍是 RUNNING，REVIEW 結束才離開）。
- * 輪詢只打事件帳一個端點、每 3 秒一次（限流是每使用者每分鐘 100 次，與 UI 共用）。全站同時只跑一個 stage run（`stage_conflict`／`max_concurrent_runs`，D-67）：
- * 下一個階段必須等這一個真的結束才能送。
- */
-async function runStage(request: APIRequestContext, id: string, stage: "research" | "draft" | "review" | "iterate"): Promise<Detail> {
-  const started = await call(request, ADMIN, "POST", projectPath(id, `/stages/${stage}`), {});
-  expect(started.status, `stages/${stage} → ${JSON.stringify(started.json)}`).toBe(202);
-  const { stageRunId } = dataOf<{ stageRunId: string }>(started);
-  await poll(
-    () => progressOf(request, id, stageRunId),
-    ({ run, cursor }) => ["SUCCEEDED", "FAILED", "CANCELLED"].includes(run) && cursor !== "" && cursor !== "RUNNING",
-    `${stage} 結束（stage run 到終態且游標離開 RUNNING）`,
-    300_000,
-    3000,
-  );
-  return detailOf(request, id);
-}
-
-/** 路徑 B：研究 → 草擬 → 送審（第 1 輪 79.90 未過）→ 一鍵迭代（第 2 輪 90.30 通過）→ GATE0_PENDING。 */
-async function driveToGate0(request: APIRequestContext, tag: string): Promise<Project> {
-  const project = await createProject(request, tag);
-  const researched = await runStage(request, project.id, "research");
-  expect([researched.flowPhase, researched.flowStatus], `研究結束：${JSON.stringify(researched)}`).toEqual(["EVIDENCE_READY", "IDLE"]);
-  const drafted = await runStage(request, project.id, "draft");
-  expect(drafted.headPrdVersion, "草擬後有第 1 版 PRD").toBe(1);
-  await runStage(request, project.id, "review");
-  const first = await roundsOf(request, project.id);
-  expect(
-    first.map((r) => [r.roundNo, r.weightedScore?.toFixed(2), r.verdict]),
-    "第 1 輪（pass 劇本）",
-  ).toEqual([[1, "79.90", "REVISE"]]);
-  const iterated = await runStage(request, project.id, "iterate");
-  expect([iterated.flowPhase, iterated.flowStatus], `迭代結束：${JSON.stringify(iterated)}`).toEqual(["GATE0_PENDING", "WAITING_HUMAN"]);
-  const rounds = await roundsOf(request, project.id);
-  expect(
-    rounds.map((r) => [r.roundNo, r.weightedScore?.toFixed(2), r.verdict]),
-    "第 2 輪（pass 劇本）",
-  ).toEqual([
-    [1, "79.90", "REVISE"],
-    [2, "90.30", "PASS"],
-  ]);
-  return project;
-}
-
-/** 共用的「GATE0_PENDING」專案：E-1 先用（不核准），22-3 再核准；單獨跑任一個都會自己建。 */
-let gate0: Promise<Project> | null = null;
-const gate0Project = (request: APIRequestContext): Promise<Project> => (gate0 ??= driveToGate0(request, "gate0"));
+// 專案夾具與清場封存住 `tests/helpers/research-stack.ts`（P1 起與 P1 spec 共用）；本檔建立的專案由本檔的 afterAll 封存。
+const { created, createProject, driveToGate0, gate0Project, archiveAll } = newResearchKit("research-docker.stack");
 
 test.afterAll(async ({ playwright }) => {
-  // 清場：封存所有測試建立的專案（`archived_at` 寫入、列保留）；失敗不擋收尾，但要說出來（留著未封存的測試專案，下一次的零專案空狀態就不成立）。afterAll 只能用 worker 級的 fixture，所以自建一個 request 環境
+  // afterAll 只能用 worker 級的 fixture，所以自建一個 request 環境
   const request = await playwright.request.newContext();
   try {
-    for (const id of created) {
-      const reply = await call(request, ADMIN, "POST", projectPath(id, "/archive"), {}).catch(() => null);
-      if (reply === null || reply.status !== 200) console.warn(`[research-docker.stack] 專案 ${id} 沒有封存成功（${reply === null ? "請求失敗" : `HTTP ${reply.status}`}），請手動封存`);
-    }
+    await archiveAll(request);
   } finally {
     await request.dispose();
   }
@@ -237,7 +69,7 @@ test.afterAll(async ({ playwright }) => {
 
 // ── AT-960-22-5 UI 殼層 ──────────────────────────────────────────────────────────────────
 
-test("AT_960_22_5 UI 殼層：側欄入口與 aria-current、390 底部 Tab 不含它、零專案空狀態、超前的 ?step= 導回、步驟 3～5 占位、mock-only 停用啟動深研、角色（VIEWER 唯讀、OPERATOR 無研究來源設定入口、ADMIN 有）", async ({
+test("AT_960_22_5 UI 殼層：側欄入口與 aria-current、390 底部 Tab 不含它、零專案空狀態、超前的 ?step= 導回、步驟 5 占位且步驟 3 與 4 為真面板、mock-only 停用啟動深研、角色（VIEWER 唯讀、OPERATOR 無研究來源設定入口、ADMIN 有）", async ({
   page,
   request,
   browser,
@@ -299,20 +131,22 @@ test("AT_960_22_5 UI 殼層：側欄入口與 aria-current、390 底部 Tab 不�
   await expect(page).toHaveURL(/step=topic/, { timeout: 30_000 });
   await expect(page.getByTestId("research-workspace")).toHaveAttribute("data-step", "topic");
 
-  // 步驟 3～5 占位：需要游標已過規格工作室的專案（pass 劇本走到核准；以 API 核准，UI 核准另見 AT_960_22_3）
-  test.skip(SCRIPT_KIND === "fail3", "步驟 3～5 占位面板需要游標已過規格工作室的專案：劇本是 fail3，走不到 Gate 0（其餘子斷言已完成）");
+  // 步驟 3～5：需要游標已過規格工作室的專案（pass 劇本走到核准；以 API 核准，UI 核准另見 AT_960_22_3）
+  test.skip(SCRIPT_KIND === "fail3", "步驟 3～5 的面板需要游標已過規格工作室的專案：劇本是 fail3，走不到 Gate 0（其餘子斷言已完成）");
   const frozen = await driveToGate0(request, "shell");
   await approveViaApi(request, frozen.id);
-  // P0 的游標最遠只到 route（步驟 3）：步驟 3 是占位面板；步驟 4、5 超前於游標，`?step=build|deliver` 一律導回游標所在步（同一個占位面板）——TCS 寫「看步驟 3 至 5」，P0 實際可達的只有步驟 3
+  // P1 改版（TCS-P1 §4 第 26 列、D-131）：步驟 3 是分流真面板（`route-panel`）、步驟 4 前半是 BuildFrontPanel、只有步驟 5 仍是占位。
+  // 核准後游標只到 route：步驟 4、5 超前於游標，`?step=build|deliver` 一律導回游標所在步；步驟 4 與 5 的面板本身在游標越過 route 後才看得到（Docker mock-only 無法分流，由 research-p1-docker.stack.spec.ts 的負控與 mock 版 spec 覆蓋）
   await open(page, request, `${BASE}/research/${frozen.id}?step=route`);
   await expect(page.getByTestId("research-workspace")).toHaveAttribute("data-step", "route", { timeout: 60_000 });
-  await expect(page.getByTestId("research-placeholder")).toContainText("第 3 步：分流");
-  await expect(page.getByTestId("research-placeholder")).toContainText("本步驟於後續階段提供");
+  await expect(page.getByTestId("route-panel")).toContainText("第 3 步：分流");
+  await expect(page.getByTestId("research-placeholder"), "步驟 3 不再是占位面板").toHaveCount(0);
   for (const step of ["build", "deliver"] as const) {
     await open(page, request, `${BASE}/research/${frozen.id}?step=${step}`);
     await expect(page, `超前的 ?step=${step} 導回游標所在步`).toHaveURL(/step=route/, { timeout: 30_000 });
     await expect(page.getByTestId("research-workspace")).toHaveAttribute("data-step", "route");
-    await expect(page.getByTestId("research-placeholder")).toContainText("第 3 步：分流");
+    await expect(page.getByTestId("route-panel")).toContainText("第 3 步：分流");
+    await expect(page.getByTestId("research-placeholder")).toHaveCount(0);
   }
   await open(page, request, `${BASE}/research/${frozen.id}?step=studio`);
   await expect(page.getByTestId("studio-frozen")).toBeVisible({ timeout: 60_000 });
@@ -355,25 +189,6 @@ test("AT_960_22_5 UI 殼層：側欄入口與 aria-current、390 底部 Tab 不�
     test.info().annotations.push({ type: "OPERATOR 略過", description: "TOOL-ABSENCE：缺 E2E_OPERATOR_USER／E2E_OPERATOR_PASSWORD" });
   }
 });
-
-/** 以 API 核准（head 版本、帶 PRD 與證據矩陣兩個摘要；Gate 0 的 API 側；回 API 的 `specDocDigests`）。 */
-async function approveViaApi(request: APIRequestContext, id: string): Promise<Record<string, string>> {
-  const detail = await detailOf(request, id);
-  const versions = dataOf<Array<{ versionNo: number; sha256: string }>>(await call(request, ADMIN, "GET", projectPath(id, "/prd/versions")));
-  const head = versions.reduce((a, v) => (v.versionNo > a.versionNo ? v : a));
-  const matrix = dataOf<{ sha256: string }>(await call(request, ADMIN, "GET", projectPath(id, "/evidence")));
-  const sha = (hex: string): string => (hex.startsWith("sha256:") ? hex : `sha256:${hex}`);
-  expect(detail.headPrdVersion, "head 版本").toBe(head.versionNo);
-  const reply = await call(request, ADMIN, "POST", projectPath(id, "/approve"), {
-    prdVersion: head.versionNo,
-    expectedDigests: { "01_specs/PRD-v1.0.0.md": sha(head.sha256), "00_research/evidence_matrix.md": sha(matrix.sha256) },
-    reason: "E2E 核准",
-  });
-  expect(reply.status, `approve → ${JSON.stringify(reply.json)}`).toBe(200);
-  const data = dataOf<{ specDocDigests: Record<string, string>; fsmState: string }>(reply);
-  expect(data.fsmState).toBe("SPEC_FROZEN");
-  return data.specDocDigests;
-}
 
 // ── AT-960-22-E-1 無障礙與響應式（真棧資料；共用 GATE0_PENDING 專案）────────────────────────────
 

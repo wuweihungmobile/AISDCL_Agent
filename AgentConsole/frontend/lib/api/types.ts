@@ -798,7 +798,9 @@ export type ResearchFsmView = SddFsmState & {
   retryHistory: { gates: Record<string, { currentCount: number; entries: number }> };
   /** 目前 `fsm_generation` 內 `research_gate_decisions` 中 gate=GATE0、decision=CHANGES 的筆數 */
   humanReturnCount: number;
-};
+} & Partial<Pick<S["ResearchFsmViewDto"], "stage2Frozen">>;
+// ↑ `stage2Frozen`（D-125：內環鍵 `frozen_stages` 含 Stage-2）後端必填；這裡放寬成選填只為不動 FE-D1／FE-D2 既有夾具
+//   （`tests/fixtures/research/fsm.ts` 尚未帶此鍵；勘誤候選：夾具補鍵後即可改回必填）。
 export type ResearchApproveResult = { gateDecisionId: string; stage: string; specDocDigests: Record<string, string>; fsmState: string };
 export type ResearchReturnResult = { gateDecisionId: string; fsmRetryCount: number; escalated: boolean };
 
@@ -838,7 +840,8 @@ export type ResearchCapabilities = {
 export type ResearchRecordsAudit = { classes: Array<{ id: string; name: string; count: number }>; missing: string[] };
 export type ResearchReconcileCheck = {
   name: string;
-  status: "ok" | "drift" | "NOT_EVALUABLE";
+  /** 第四值 `pending_correction`（D-121、D-125）：`TCS_PENDING` 而內環已凍結 Stage-2，待 Bridge 校正游標；不是 drift。 */
+  status: "ok" | "drift" | "NOT_EVALUABLE" | "pending_correction";
   drift?: Array<{ kind: string; path: string; expectedSha256?: string; actualSha256?: string }>;
 };
 /** 對帳只報告、不修復（AC-R2P-23-1）：`consistent` 僅在全部 check 為 ok 時為真。 */
@@ -872,117 +875,66 @@ export type ResearchAllowlistPatch = { enabled: boolean };
 export type ResearchActionResult = Record<string, unknown>;
 
 // ── ResearchToPRD P1（分流、SCR、拆解；TCS-ResearchToPRD-P1-20261107；IFACE §1、§3.1；契約 §1.3 含勘誤）──────────────────────────────
-// `schema.d.ts` 由 PKG-FE-W 於 API-P1 合併後重產，這裡先依契約手寫（FE-W 再改引生成型）。欄位一律 camelCase、時間為 ISO-8601 含 offset。
+// `schema.d.ts` 已由 PKG-FE-W 依 API-P1 的 OpenAPI 重產；下列型別一律以生成型為底（日後後端改欄位，這裡 tsc 先紅）。
+// 只在生成型較鬆處（springdoc 不標必填、字串型相態）以 Omit 疊上封閉詞彙與必填；POST scr／decomposition／apply 回應是開放物件，維持手寫。
 /** 分流軌道：A＝併入 AISDLC 模組（獨立 worktree 的 feature 分支）、B＝獨立專案（範本骨架加 git init）。 */
 export type ResearchRouteTrack = "A" | "B";
 /** 落點目標（D-100：P1 固定四值；擴充＝改落點 SSOT 與 V20 CHECK）。 */
 export type ResearchPlacementTarget = "autoclaude" | "agentconsole" | "sdd" | "monorepo";
 export type ResearchRouteVisibility = "PUBLIC" | "PRIVATE";
 /** `route/preview` 與 `route` 共用的請求本文（`target_path` 於 D-106 退役；`approver` 取後端 JWT subject，前端不送）。 */
-export type ResearchRouteRequest = {
+export type ResearchRouteRequest = Omit<S["RoutePreviewRequest"], "track" | "targetModule"> & {
   track: ResearchRouteTrack;
   /** 軌道 A 必填 */
   targetModule?: ResearchPlacementTarget;
-  branchName?: string;
-  baseRef?: string;
-  /** 軌道 B 必填；同時是內環鍵（D-119） */
-  projectName?: string;
-  stackTemplate?: string;
-  repoName?: string;
-  owner?: string;
-  visibility?: ResearchRouteVisibility;
-  /** `visibility` 為 `PUBLIC` 時必填且須與 `repoName` 完全相等 */
-  confirmRepoName?: string;
-  createGithub?: boolean;
-  ci?: boolean;
-  dockerCompose?: boolean;
-  /** 分流軌道與 PRD `targetScope` 不同時必填（1～200 字） */
-  scopeDiffersReason?: string;
 };
 /** 確認執行：同預演欄位加 `retry`（沿用最近一個 FAILED 的分流列續跑，IFACE §4.4）。 */
-export type ResearchRouteConfirmRequest = ResearchRouteRequest & { retry?: boolean };
+export type ResearchRouteConfirmRequest = ResearchRouteRequest & Pick<S["RouteConfirmRequest"], "retry">;
 /** 預演動作元素（IFACE §4.1）：`touchesExternal` 只有建遠端那一步為真；`external` 為 TCS AT-961-17-5 夾具的別名（勘誤候選，兩者任一為真即視為外部系統）。 */
-export type ResearchRouteAction = { seq: number; action: string; step: string; target: string; touchesExternal: boolean; external?: boolean; detail: string };
+export type ResearchRouteAction = Omit<S["RouteActionDto"], "target"> & { target: string; external?: boolean };
 export type ResearchRouteWarning = { code: string; message: string };
-export type ResearchRoutePreview = {
-  track: ResearchRouteTrack;
-  prd: { versionNo: number; semver: string; sha256: string; targetScope: string; scopeDiffers: boolean };
-  implFsmProject: string;
-  implStateDir?: string;
-  executionPath?: string;
-  actions: ResearchRouteAction[];
-  /** 僅軌道 B：初始 commit 預期入版控的檔案集合 */
-  expectedTrackedFiles: string[];
-  warnings: ResearchRouteWarning[];
-};
+export type ResearchRoutePreview = Omit<S["RoutePreviewResult"], "track" | "prd" | "warnings" | "actions" | "implStateDir" | "executionPath" | "scopeDiffers" | "researchId"> &
+  Partial<Pick<S["RoutePreviewResult"], "scopeDiffers" | "researchId">> & {
+    track: ResearchRouteTrack;
+    prd: { versionNo: number; semver: string; sha256: string; targetScope: string; scopeDiffers: boolean };
+    implStateDir?: string | null;
+    executionPath?: string | null;
+    actions: ResearchRouteAction[];
+    warnings: ResearchRouteWarning[];
+  };
 export type ResearchRouteStepStatus = "RUNNING" | "OK" | "FAILED" | "SKIPPED" | "COMPENSATED";
 export type ResearchRouteStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "COMPENSATED";
-export type ResearchRouteStep = {
-  stepNo: number;
-  step: string;
-  status: ResearchRouteStepStatus;
-  argvRedacted: string;
-  exitCode: number | null;
-  stdoutTail: string;
-  stderrTail: string;
-  startedAt: string;
-  finishedAt: string | null;
-};
-export type ResearchRouteDecision = {
-  routeId: string;
-  track: ResearchRouteTrack;
-  targetKind: "MODULE" | "STANDALONE";
-  targetModule: string | null;
-  targetPath: string;
-  gitBranch: string | null;
-  baseRef: string | null;
-  repoUrl: string | null;
-  repoVisibility: ResearchRouteVisibility | null;
-  stackTemplate: string | null;
-  consoleProjectId: string | null;
-  implFsmProject: string | null;
-  status: ResearchRouteStatus;
-  failureStep: string | null;
-  /** 確認執行回應才有：發佈到目標的 PRD 複本（相對路徑→sha256） */
-  publishedDocs?: Record<string, string>;
-  steps: ResearchRouteStep[];
-};
+export type ResearchRouteStep = Omit<S["RouteStepDto"], "status"> & { status: ResearchRouteStepStatus };
+export type ResearchRouteDecision = Omit<S["RouteDecisionDto"], "status" | "repoVisibility" | "publishedDocs" | "steps" | "scopeDiffersReason" | "decidedBy" | "createdAt" | "finishedAt"> &
+  Partial<Pick<S["RouteDecisionDto"], "scopeDiffersReason" | "decidedBy" | "createdAt" | "finishedAt">> & {
+    status: ResearchRouteStatus;
+    repoVisibility: ResearchRouteVisibility | null;
+    /** 確認執行回應才有：發佈到目標的 PRD 複本（相對路徑→sha256） */
+    publishedDocs?: Record<string, string>;
+    steps: ResearchRouteStep[];
+  };
 /** SSE `research.route` 的資料（IFACE §6）。 */
 export type ResearchRouteEvent = { routeId: string; stepNo: number; step: string; status: ResearchRouteStepStatus };
 
 export type ResearchScrKind = "MINOR" | "MAJOR";
 export type ResearchScrStatus = "OPEN" | "APPROVED" | "REJECTED" | "APPLIED" | "SUPERSEDED";
-export type ResearchScr = {
-  scrNo: number;
-  kind: ResearchScrKind;
-  sourceKind: string;
-  reason: string;
-  reasonClass?: string;
-  affectedSections: string[];
-  status: ResearchScrStatus;
-  prdFromVersionNo: number | null;
-  prdToVersionNo: number | null;
-  successorResearchId: string | null;
-  implFsmActions?: Array<Record<string, unknown>>;
-  requestedBy: string;
-  requestedAt: string;
-};
-export type ResearchScrOpenRequest = { kind: ResearchScrKind; sourceKind: string; reason: string; reasonClass: string; affectedSections: string[] };
+export type ResearchScr = Omit<S["ScrDto"], "status" | "implFsmActions" | "id" | "reasonClass" | "decidedBy" | "decidedAt"> &
+  Partial<Pick<S["ScrDto"], "id" | "reasonClass" | "decidedBy" | "decidedAt">> & {
+    status: ResearchScrStatus;
+    implFsmActions?: Array<Record<string, unknown>>;
+  };
+export type ResearchScrOpenRequest = Required<S["ScrOpenRequest"]>;
 export type ResearchScrApplyResult = { scrNo: number; status: string; detail?: string; implFsmActions?: Array<Record<string, unknown>> };
 
 export type ResearchDecompositionStatus = "DRAFTED" | "SCG_PASSED" | "FROZEN" | "IMPORTED" | "SIGNED_OFF" | "REJECTED" | "STALE";
-export type ResearchDecompositionWaiver = { ac: string; reason: string };
-export type ResearchDecomposition = {
-  id: string;
-  status: ResearchDecompositionStatus;
-  tasksCount: number;
-  coverage: { total: number; covered: number; uncovered: string[] };
+export type ResearchDecompositionWaiver = S["DecompositionWaiver"];
+export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goals" | "prdSha256"> & {
+  /** 拆解綁定的凍結 PRD sha256（生成型為可空；前端只在有拆解列時讀，沿 FE-D2 的非空讀法） */
   prdSha256: string;
-  stale: boolean;
-  tcs: { relPath: string | null; sha256: string | null };
+  /** 生成型的相態是字串；`IMPORTED` 於 P1 後端不產生（D-113），詞彙保留以便原樣顯示 */
+  status: ResearchDecompositionStatus;
   goals: Array<Record<string, unknown>>;
-  waivers: ResearchDecompositionWaiver[];
   signedOffBy?: string | null;
   signedOffAt?: string | null;
 };
-export type ResearchDecompositionSignoffRequest = { waivers: ResearchDecompositionWaiver[] };
+export type ResearchDecompositionSignoffRequest = { waivers: Array<Required<S["DecompositionWaiverRequest"]>> };

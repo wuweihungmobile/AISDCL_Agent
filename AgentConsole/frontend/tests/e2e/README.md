@@ -221,7 +221,7 @@ Push-Location AgentConsole\frontend; $env:E2E_API_URL = "http://localhost"; npx 
 ### 研發工作流 Docker 全棧 E2E（`research-docker.stack.spec.ts`；ResearchToPRD P0 AT-960-22-2～22-5、22-E-1）
 
 整合代驗（PKG-INT）手動走過的路徑整理成可重跑的 spec：經 nginx 同源、真 console-api → 真 Bridge →（mock claude 的研究劇本）→ 真 PostgreSQL，沒有任何假資料；只驗「跨服務才現形」的事（對帳欄位名、範圍鍵大小寫、失敗游標語意、取消後死路都是這類，單元／mock 測試看不出）。
-五個測試：`AT_960_22_5`（UI 殼層：側欄入口與 `aria-current`、390 底部 Tab 不含它、零專案空狀態、超前 `?step=` 導回、步驟 3～5 占位、mock-only 停用啟動深研、VIEWER／OPERATOR／ADMIN 角色）、`AT_960_22_E_1`（清單、議題、工作室在 1440／1000／600 無水平溢出且 axe 無 serious／critical；Studio 600 為分頁籤；對話框焦點陷阱與歸還）、
+五個測試：`AT_960_22_5`（UI 殼層：側欄入口與 `aria-current`、390 底部 Tab 不含它、零專案空狀態、超前 `?step=` 導回、步驟 5 占位且步驟 3 與 4 為真面板〔P1 改版，TCS-P1 §4 第 26 列〕、mock-only 停用啟動深研、VIEWER／OPERATOR／ADMIN 角色）、`AT_960_22_E_1`（清單、議題、工作室在 1440／1000／600 無水平溢出且 axe 無 serious／critical；Studio 600 為分頁籤；對話框焦點陷阱與歸還）、
 `AT_960_22_3`（路徑 B：pass 劇本走到 Gate 0、ADMIN 於 UI 核准、凍結四檔摘要＝FSM 視圖＝容器內檔案位元組、二次核准 409 `fsm_state_conflict`、OPERATOR 403、對帳一致）、`AT_960_22_4`（SSE 斷線重播：載入前攔串流、期間有事件、解除後自動重連、`seq` 自 1 連續無缺漏無重複、重載後動態欄由資料庫重建）、
 `AT_960_22_2`（路徑 A：fail3 劇本，三輪 79.90／82.75／84.60、第 3 輪 ESCALATE、FSM 現態 ESCALATION、ESCALATION 區塊沒有恢復動詞按鈕、R1～R5／R9／R13／R14 各至少一筆而 R6 為零）。
 
@@ -272,3 +272,14 @@ Push-Location AgentConsole\frontend; $env:E2E_STACK = "1"; $env:E2E_API_URL = "h
 ## 收尾
 
 測試不留資料；若中途被中斷，殘留的專案名稱帶「E2E」前綴，可在專案列表搜尋後刪除。報告與 trace 在 `playwright-report/`、`test-results/`（皆已 gitignore）。
+
+### 研發工作流 P1 的真棧 E2E（`research-p1-docker.stack.spec.ts`、`research-route-local.stack.spec.ts`；ResearchToPRD P1 AT-961-22-1、22-2、22-5、22-6）
+
+共用工具抽到 `tests/helpers/research-stack.ts`（登入與 429 重試、限流餘額守門、輪詢、建專案、走到 Gate 0、API 核准、清場封存；P0 候選「真棧 spec helper 合併」）；三支真棧 spec 各自 `newResearchKit()`、各自封存自己建的專案。啟用旗標與帳號變數同上節。
+
+- `research-p1-docker.stack.spec.ts`（Docker 全棧 mock-only 負控；需 pass 劇本）：`AT_961_22_5`（`capabilities` 讀回 mock-only；`route/preview` 軌道 A 回 422 `route_unsupported_in_deployment` 且 `details.missing` 含 `repo_writable`、軌道 B 回 422；`route` 同樣 422；事件序號、游標、GET route／scr／decomposition 皆零新增；UI 步驟 3 兩張卡停用並顯示 mock-only 說明）、`AT_961_22_6`（超前 `?step=build|deliver` 導回、拆解與 SCR 讀端點為空、`stages/tcs-draft` 無分流回 409）。mock-only 無法分流，游標到不了步驟 4，所以步驟 4 前半面板與步驟 5 占位的呈現只由 mock 版 spec 驗。
+- `research-route-local.stack.spec.ts`（本機模式；INT 載具乙）：Bridge 在**主機**（`BRIDGE_REPO_ROOT`＝拋棄式 clone、`BRIDGE_WORKTREE_ROOT`、暫存 `BRIDGE_SCAFFOLD_ROOT`、`BRIDGE_DB_DSN` 指同一 PG、PATH 前置假 `gh`、pass 劇本），frontend／backend／PG 在 Docker（backend 的 `ENGINE_BRIDGE_URL` 指 `http://host.docker.internal:18081`，不動 `aisdlc-*` 的容器 Bridge）。前置：`E2E_LOCAL_BRIDGE=1`；軌道 A 案例另設 `E2E_LOCAL_TRACK_A=1`、軌道 B 案例另設 `E2E_LOCAL_TRACK_B=1`；選配 `E2E_FAKE_GH_TOKEN`（命中數必為 0）、`E2E_PG_CONTAINER`／`E2E_PG_USER`／`E2E_PG_DB`（資料庫逐位核對用 `docker exec psql`）。拋棄式 clone／scaffold 根的建置與清理依 IFACE §9.1，不在 spec 內。未設旗標一律整支略過並印 `TOOL-ABSENCE`。
+
+```powershell
+Push-Location AgentConsole\frontend; $env:E2E_STACK = "1"; $env:E2E_ADMIN_USER = "<管理員>"; $env:E2E_ADMIN_PASSWORD = "<密碼>"; npx playwright test -c tests/e2e/docker.config.ts tests/e2e/research-p1-docker.stack.spec.ts --output="<自己的暫存目錄>\pw"; Pop-Location
+```
