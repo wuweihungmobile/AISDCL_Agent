@@ -67,6 +67,7 @@ _REMOTE_URL_RE = re.compile(r"^https://github\.com/[A-Za-z0-9][A-Za-z0-9-]{0,38}
 _TOKEN_PATTERNS = (
     re.compile(r"gh[pousr]_[A-Za-z0-9_]{16,}"),
     re.compile(r"github_pat_[A-Za-z0-9_]{16,}"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),             # AWS access key id（大小寫敏感；D-162(g)）
 )
 READONLY_GIT_VERBS = frozenset({"status", "rev-parse", "diff", "ls-files", "branch"})
 #: 只加在環境、不加在 argv 的固定身分（commit 作者；不寫任何 git config 檔）。

@@ -29,8 +29,8 @@ calls = dl.calls
 
 
 # ── AT-962-1-8：Bridge 兩個 INSERT 帶 V21 新欄 ───────────────────────────────────────────────────
-def test_AT_962_1_8_the_throwaway_db_reaches_v21_and_both_inserts_use_the_new_columns() -> None:
-    assert LAST_VERSION == 21 and len(migration_files()) == 21
+def test_AT_962_1_8_the_throwaway_db_reaches_last_version_and_inserts_use_new_columns() -> None:
+    assert LAST_VERSION >= 21 and len(migration_files()) == LAST_VERSION
     db = make_research_db()
     try:
         from app.research.db import ResearchDb

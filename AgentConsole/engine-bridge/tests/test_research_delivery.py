@@ -432,7 +432,7 @@ def hashlib_sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def test_AT_962_18_5_the_release_transition_uses_the_documented_reason_and_keeps_a_legal_cursor(
+def test_AT_962_18_5_the_release_transition_uses_the_documented_reason_and_writes_the_cursor(
         renv: rgs.RouteEnv, rtm: ig.RtmFixture, verbs: ig.VerbLog) -> None:
     project = build_project(renv)
     verbs.clear()
@@ -442,9 +442,8 @@ def test_AT_962_18_5_the_release_transition_uses_the_documented_reason_and_keeps
     assert verb == "transition" and args == (
         "--to", "RELEASE", "--reason", f"release tag {TAG}; research={rp_no}", "--trigger",
         "research_bridge")
-    # 游標：V21 的 flow_phase CHECK 沒有 DELIVERED，Bridge 不寫 deliver／DELIVERED（勘誤候選）；
-    # 游標維持分流後的合法相態，對帳與 FSM 現態仍一致
-    assert ig.cursor(renv, project.rid)[:2] == ("build", "ROUTED")
+    # 規格字面（V22 起 flow_phase 可為 DELIVERED；V21 庫寫入會 23514＝LAST_VERSION 落後的機械鎖）
+    assert ig.cursor(renv, project.rid)[:3] == ("deliver", "DELIVERED", "COMPLETED")
     manual = build_project(renv, "manual", origin=False)
     cli(renv, manual.route["impl_fsm_project"], manual.route["impl_state_dir"], "transition",
         "--to", "RELEASE", "--reason", "manual", "--trigger", sdk_trigger())

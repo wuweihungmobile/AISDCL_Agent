@@ -488,3 +488,10 @@ def test_AT_962_2_E_3_git_and_gh_argv_literals_live_only_in_gitops_and_exec_modu
         assert capability.git_gh_lines(tree) == [], f"{rel} 含 git／gh 的 argv 字面"
     assert [rel for rel, kind in capability.CAPABILITY.items() if kind == "vcs"] == [
         "research/gitops.py"]
+
+def test_AT_962_2_redact_masks_aws_access_key_ids_case_sensitively() -> None:
+    """D-162(g)：只認大寫 AKIA 加 16 位大寫英數；小寫與長度不足不遮。"""
+    key = "AKIA" + "IOSFODNN7EXAMPLE"            # 拆開寫：不讓機密掃描把測試字面當真 key
+    assert gitops.redact(f"id {key} end") == "id *** end"
+    assert gitops.redact(f"id {key.lower()} end") == f"id {key.lower()} end"
+    assert gitops.redact("id AKIA1234 end") == "id AKIA1234 end"

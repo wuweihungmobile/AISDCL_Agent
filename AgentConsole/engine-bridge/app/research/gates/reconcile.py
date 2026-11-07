@@ -40,6 +40,7 @@ FLOW_FSM_MAPPING: Mapping[str, Mapping[str, frozenset[str]]] = MappingProxyType(
     "SPEC_FROZEN": MappingProxyType({
         "route": frozenset({"FROZEN", "ROUTING"}),
         "build": frozenset({"ROUTED", "TCS_DRAFTING", "TCS_PENDING"}),
+        "deliver": frozenset({"DELIVERED"}),             # P2：`:tag` 成功後的游標（V22 起可寫）
         "studio": frozenset({"SCR_OPEN"})}),
 })
 #: D-125：`build／TCS_PENDING` 且內環 Stage-2 已凍結＝待校正（不是 drift）。

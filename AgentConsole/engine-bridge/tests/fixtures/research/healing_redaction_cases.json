@@ -40,6 +40,10 @@
     "expected": "兩個 token：*** 與 *** 都要遮"
   },
   {
+    "input": "aws key AKIAIOSFODNN7EXAMPLE in env",
+    "expected": "aws key *** in env"
+  },
+  {
     "input": "commit 0123456789abcdef0123456789abcdef01234567 failed to apply",
     "expected": "commit 0123456789abcdef0123456789abcdef01234567 failed to apply",
     "keep": true
@@ -67,6 +71,11 @@
   {
     "input": "ordinary build error: module not found",
     "expected": "ordinary build error: module not found",
+    "keep": true
+  },
+  {
+    "input": "aws key akiaiosfodnn7example in env",
+    "expected": "aws key akiaiosfodnn7example in env",
     "keep": true
   }
 ]

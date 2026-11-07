@@ -27,6 +27,7 @@ from .research import (
     _flow_out,
     _project,
     _research_id,
+    _set_cursor,
     _violation,
     operation,
     reconcile_at_delivery,
@@ -249,6 +250,8 @@ def create_tag(research_id: str, request: Request, body: dict[str, Any] = Body(.
             except ApiError as exc:
                 raise delivery.fail(denv, rid, "RELEASE_TAG", "fsm_release", actor=approver,
                                     reason=str(exc.body.get("reason"))) from exc
+            _set_cursor(ctx, rid, {"step": "deliver", "phase": "DELIVERED",
+                                   "status": "COMPLETED", "detail": ""}, approver)
             if ctx.orchestrator is not None:
                 ctx.orchestrator.project_state(rid)
             reconcile_at_delivery(ctx, rid)

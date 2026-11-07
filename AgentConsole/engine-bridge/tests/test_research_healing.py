@@ -60,7 +60,7 @@ def load_cases() -> list[dict[str, Any]]:
 def test_AT_962_7_1_the_shared_fixture_covers_every_secret_category() -> None:
     cases = load_cases()
     joined = "\n".join(c["input"] for c in cases)
-    for needle in ("ghp_", "github_pat_", "sk-ant-", "Bearer ", "AWS_SECRET=", "password="):
+    for needle in ("ghp_", "github_pat_", "sk-ant-", "Bearer ", "AWS_SECRET=", "password=", "AKIA"):
         assert needle in joined, f"夾具缺少類別 {needle}"
     assert any(c.get("keep") for c in cases), "夾具須含誤殺負控（keep）"
     assert all(set(c) <= {"input", "expected", "keep"} for c in cases)
