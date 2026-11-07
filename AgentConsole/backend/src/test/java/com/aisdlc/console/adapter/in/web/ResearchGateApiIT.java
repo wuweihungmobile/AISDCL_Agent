@@ -291,4 +291,26 @@ class ResearchGateApiIT extends AbstractResearchIT {
         assertThat(gateCalls()).isEqualTo(1);
         assertThat(lastGateBody()).containsEntry("run_id", full.run().toString());
     }
+
+    @Test
+    void AT_962_4_E_5_aReplayedDecisionIsRelayedWithReplayedTrueAndNullFsmStateBeforeAndRuleLiteralsPassThroughVerbatim() {
+        UUID id = bound("g4rep");
+        bridge().next("gates", new Reply(200, Map.of("gate_decision_id", "0b6f4f0e-0000-4000-8000-000000000001", "gate", "RELEASE_READY", "result", "FAIL",
+                "next_state", "RELEASE_READY", "escalated", false, "replayed", true, "flow", Map.of("step", "build", "phase", "ROUTED", "status", "IDLE", "detail", ""))));
+        Resp replay = api.post(adminAs("alice"), url(id), releaseFail());
+        assertThat(replay.status()).isEqualTo(200);
+        assertThat(replay.<Boolean>read("$.data.replayed")).isTrue();
+        assertThat(replay.body()).contains("\"fsmStateBefore\":null");
+        assertThat(replay.<String>read("$.data.gateDecisionId")).isEqualTo("0b6f4f0e-0000-4000-8000-000000000001");
+
+        Resp normal = api.post(adminAs("alice"), url(id), releaseFail());
+        assertThat(normal.body()).as("一般登錄不出現 replayed").doesNotContain("replayed");
+
+        for (String rule : List.of("release_pass_via_tag", "reason_required", "reviewer_independence_required")) {
+            bridge().next("gates", Reply.error(422, "invalid_request", "violations", List.of(Map.of("field", "x", "rule", rule, "message", "m"))));
+            Resp relayed = api.post(adminAs("alice"), url(id), releaseFail());
+            assertThat(relayed.status()).as(rule).isEqualTo(422);
+            assertThat(relayed.<String>read("$.details.violations[0].rule")).as("Bridge 的 rule 字面透傳不改寫").isEqualTo(rule);
+        }
+    }
 }

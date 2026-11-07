@@ -62,4 +62,12 @@ class HealingExcerptMaskerTest {
         String astral = "😀".repeat(301);
         assertThat(HealingExcerptMasker.excerpt(astral).codePointCount(0, HealingExcerptMasker.excerpt(astral).length())).isEqualTo(300);
     }
+
+    @Test
+    void awsAccessKeyIdIsMaskedWholeButLowercaseOrTooShortIsNotAkiaOnlyCountsWithSixteenUppercaseAlphanumerics() {
+        assertThat(HealingExcerptMasker.mask("key AKIAIOSFODNN7EXAMPLE leaked")).as("正控：整段換成 ***").isEqualTo("key *** leaked");
+        assertThat(HealingExcerptMasker.mask("key akiaiosfodnn7example leaked")).as("負控：小寫不遮").isEqualTo("key akiaiosfodnn7example leaked");
+        assertThat(HealingExcerptMasker.mask("key AKIAIOSFODNN7EXAMPL leaked")).as("負控：AKIA 後只有 15 位不遮").isEqualTo("key AKIAIOSFODNN7EXAMPL leaked");
+        assertThat(HealingExcerptMasker.excerpt("x".repeat(400) + " AKIAIOSFODNN7EXAMPLE")).doesNotContain("AKIA").endsWith("***");
+    }
 }

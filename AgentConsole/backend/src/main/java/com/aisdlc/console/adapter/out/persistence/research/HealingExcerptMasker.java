@@ -32,7 +32,9 @@ final class HealingExcerptMasker {
             Pattern.compile("(?i)authorization:\\s*\\S+"));
     private static final List<Pattern> TOKENS = List.of(
             Pattern.compile("gh[pousr]_[A-Za-z0-9_]{16,}"),
-            Pattern.compile("github_pat_[A-Za-z0-9_]{16,}"));
+            Pattern.compile("github_pat_[A-Za-z0-9_]{16,}"),
+            // AWS access key id（D-162(g)）：只認大寫 AKIA 加 16 位大寫英數，大小寫敏感；與 Bridge 端夾具同一筆對拍
+            Pattern.compile("AKIA[0-9A-Z]{16}"));
 
     private HealingExcerptMasker() {
     }

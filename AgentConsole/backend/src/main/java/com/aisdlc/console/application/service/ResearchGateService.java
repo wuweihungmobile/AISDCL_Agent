@@ -98,7 +98,8 @@ public class ResearchGateService implements ResearchGateUseCase {
         String next = body.get("next_state") == null ? null : body.get("next_state").toString();
         return new GateResult(String.valueOf(body.get("gate_decision_id")), gateOf(String.valueOf(body.get("gate"))), String.valueOf(body.get("result")).equals("FAIL") ? Result.FAIL : Result.PASS,
                 body.get("fsm_state_before") == null ? null : body.get("fsm_state_before").toString(), next, Boolean.TRUE.equals(body.get("escalated")),
-                new FlowCursor(text(flow.get("step")), text(flow.get("phase")), text(flow.get("status")), text(flow.get("detail"))));
+                new FlowCursor(text(flow.get("step")), text(flow.get("phase")), text(flow.get("status")), text(flow.get("detail"))),
+                body.get("replayed") instanceof Boolean replayed ? replayed : null);
     }
 
     private static Gate gateOf(String name) {

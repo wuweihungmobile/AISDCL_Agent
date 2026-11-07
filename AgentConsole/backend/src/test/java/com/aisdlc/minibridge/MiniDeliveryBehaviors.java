@@ -29,7 +29,8 @@ final class MiniDeliveryBehaviors {
     static MiniResearch.Reply tag(Map<String, Object> body) {
         String sha = "c".repeat(64);
         return new MiniResearch.Reply(201, map("delivery", map("kind", "RELEASE_TAG", "ref", body.get("tag_name"), "commit_sha", "d".repeat(40), "url", null,
-                "rtm_report_ref", null, "fsm_state_after", "RELEASE", "status", "CREATED", "created_by", body.get("approver"),
+                "rtm_run_id", null, "rtm_report_ref", "03_execution/traceability_matrix.json", "fsm_state_after", "RELEASE_READY", "status", "CREATED", "detail", "",
+                "created_by", body.get("approver"),
                 "created_at", OffsetDateTime.now().toString(), "snapshot_sha256", sha), "snapshot", map("relPath", "03_execution/traceability_matrix.json", "sha256", sha),
                 "flow", flow(), "fsmState", "RELEASE"));
     }

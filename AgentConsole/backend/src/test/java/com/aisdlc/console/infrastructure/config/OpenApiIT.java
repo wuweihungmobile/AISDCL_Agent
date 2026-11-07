@@ -286,6 +286,102 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<String>read("$.paths['" + base + "delivery/tag'].post.responses['502'].description")).contains("delivery_step_failed");
         assertThat(docs.<String>read("$.paths['" + base + "delivery/tag'].post.responses['409'].description")).contains("tag_exists");
     }
+    /** 一個 schema 的預期：必填鍵（出現的鍵，含可空但必出現者）與可空鍵（值可為 null）。 */
+    private record Shape(String schema, List<String> required, List<String> nullable) {
+    }
+
+    private static Shape shape(String schema, String required, String nullable) {
+        return new Shape(schema, required.isBlank() ? List.of() : List.of(required.split(",")), nullable.isBlank() ? List.of() : List.of(nullable.split(",")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static boolean isNullable(Map<String, Object> property) {
+        if (Boolean.TRUE.equals(property.get("nullable"))) {
+            return true;
+        }
+        Object type = property.get("type");
+        if (type instanceof List<?> types && types.contains("null")) {
+            return true;
+        }
+        for (String combiner : List.of("oneOf", "anyOf")) {
+            if (property.get(combiner) instanceof List<?> options && options.stream().anyMatch(o -> o instanceof Map<?, ?> m && "null".equals(m.get("type")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * AT-962-24-2（必填與可空鎖，D-160）：P2 的 DTO 在 OpenAPI 裡「必定出現的鍵」一律進 {@code required}（含可空但必出現者），值可為 null 的鍵另標可空，
+     * 只有真正可省略的鍵（請求的選填欄、只在為 true 時出現的 {@code unknown}）不在 {@code required}。FE-W3 重產型別才不會把每個欄位都變成選填，
+     * 也不會把「可空」與「可省略」混為一談。
+     */
+    @Test
+    void AT_962_24_2_theP2DtosDeclareRequiredAndNullableKeysExactly() {
+        Resp docs = docs();
+        List<Shape> shapes = List.of(
+                shape("KanbanDto", "researchId,consoleProjectId,latestRunId,generatedAt,bridgeReachable,snapshotAt,stale,scrOpen,columns,pendingReviews,gates",
+                        "consoleProjectId,latestRunId,snapshotAt"),
+                shape("Columns", "decompose,tcs,implement,healing,regression", ""),
+                shape("KanbanDecompose", "done,status,tasksCount,stale", ""),
+                shape("KanbanTcs", "done,stage2Frozen,negotiated,fsmState", "stage2Frozen,negotiated,fsmState"),
+                shape("KanbanTaskCounts", "total,running,completed,skipped,failed,escalated,retrying", ""),
+                shape("KanbanImplement", "done,fsmState,tasks", "fsmState"),
+                shape("KanbanHealing", "done,retryingSteps,escalatedTasks,maxRetries", ""),
+                shape("KanbanRtm", "runId,atPassed,atTotal,acCovered,acTotal,acPct,fullyCovered,advisory", ""),
+                shape("KanbanRegression", "done,fsmState,releaseReady,rtmAvailable,rtm", "fsmState,releaseReady,rtm"),
+                shape("KanbanPendingReview", "reviewId,runId,kind,taskId,reason,createdAt,allowedDecisions", "taskId,reason"),
+                shape("KanbanGate", "gate,decision,decidedBy,decidedAt,fsmStateAfter,reason", "fsmStateAfter"),
+                shape("GateRegisterRequest", "gate,result", "reason,reviewReportRef,reviewerIndependent"),
+                shape("GateRegisterResult", "gateDecisionId,gate,result,fsmStateBefore,nextState,escalated,flow", "fsmStateBefore,nextState"),
+                shape("ResearchFlowCursor", "step,phase,status,detail", ""),
+                shape("HealingDto", "researchId,rows,maxRetries,retryingSteps,escalatedTasks,logSyncedThrough,logLag,specChange", "logSyncedThrough,specChange"),
+                shape("HealingRow", "runId,taskId,stepNumber,attempt,status,excerpt,occurredAt,resolved,escalated,specChangeForbidden,attribution,patchResult",
+                        "attribution,patchResult"),
+                shape("HealingSpecChange", "paths,detectedAt", ""),
+                shape("DeliveryDto", "kind,ref,commitSha,url,rtmReportRef,fsmStateAfter,status,createdBy,createdAt,snapshotSha256",
+                        "commitSha,url,rtmReportRef,fsmStateAfter,snapshotSha256"),
+                shape("DeliverySnapshot", "relPath,sha256", ""),
+                shape("DeliveryPreconditions", "releaseReady,rtmFull,scrOpen,hasOrigin,ghAvailable", "hasOrigin,ghAvailable"),
+                shape("DeliveryOverviewDto", "deliveries,snapshot,projectRoot,containerMode,preconditions", "snapshot,projectRoot"),
+                shape("TagRequest", "tagName", "message,push,createGithubRelease"),
+                shape("TagResult", "delivery,snapshot,flow,fsmState", "snapshot,fsmState"),
+                shape("PrRequest", "bodyPreviewAck", "branch,title"),
+                shape("PrResult", "delivery,created", ""),
+                shape("TraceabilityGherkin", "given,when,then", ""),
+                shape("TraceabilityRow", "ac,userStory,gherkinSummary,unitStatus,e2eStatus,lastRunAt,source", "lastRunAt"),
+                shape("TraceabilityTotals", "acTotal,covered,uncovered,frTotal", ""),
+                shape("TraceabilityRtm", "runId,fullyCovered,acPct,advisory", "acPct"),
+                shape("TraceabilityDto", "rows,totals,rtm,generatedAt", "rtm"));
+
+        for (Shape shape : shapes) {
+            String base = "$.components.schemas." + shape.schema();
+            List<String> required;
+            try {
+                required = docs.read(base + ".required");
+            } catch (com.jayway.jsonpath.PathNotFoundException e) {
+                required = List.of();
+            }
+            assertThat(required).as(shape.schema() + ".required").containsExactlyInAnyOrderElementsOf(shape.required());
+            Map<String, Object> properties = docs.read(base + ".properties");
+            for (String key : properties.keySet()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> property = (Map<String, Object>) properties.get(key);
+                if (property.containsKey("$ref")) {
+                    // springdoc 不會在 $ref 旁輸出 nullable（本專案既有慣例，例：DecompositionDto.tcs）：這幾個物件型可空鍵只鎖「必填」，可空由 FE 手動收窄（交卷列出清單）
+                    assertThat(shape.nullable().contains(key) || shape.required().contains(key)).as(shape.schema() + "." + key).isTrue();
+                    continue;
+                }
+                assertThat(isNullable(property)).as(shape.schema() + "." + key + " 的可空標記").isEqualTo(shape.nullable().contains(key));
+            }
+            assertThat(properties.keySet()).as(shape.schema() + " 的鍵").containsAll(shape.required());
+        }
+        assertThat(docs.<List<String>>read("$.components.schemas.ScrDto.required")).contains("evidenceUrl");
+        assertThat(isNullable(docs.<Map<String, Object>>read("$.components.schemas.ScrDto.properties.evidenceUrl"))).isTrue();
+        assertThat(docs.<List<String>>read("$.components.schemas.KanbanTcs.required")).as("unknown 只在為 true 時出現：非必填").doesNotContain("unknown");
+        assertThat(docs.<List<String>>read("$.components.schemas.KanbanImplement.required")).doesNotContain("unknown");
+        assertThat(docs.<List<String>>read("$.components.schemas.KanbanRegression.required")).doesNotContain("unknown");
+    }
     /** AT-962-26-E-2：{@code :healing-sync} 是 console-api 的內部通知，不在任何路由與 OpenAPI 路徑（零命中）。 */
     @Test
     void AT_962_26_E_2_healingSyncIsNotAnyConsoleApiRouteOrOpenApiPath() {
@@ -308,7 +404,7 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<List<String>>read(schemas + "GateRegisterResult.properties.gate.enum")).containsExactly("PR_REVIEW", "RTM_VERIFY", "RELEASE_READY");
         assertThat(docs.<List<String>>read(schemas + "GateRegisterResult.properties.result.enum")).containsExactly("PASS", "FAIL");
         assertThat(docs.<Map<String, Object>>read(schemas + "GateRegisterResult.properties").keySet())
-                .containsExactlyInAnyOrder("gateDecisionId", "gate", "result", "fsmStateBefore", "nextState", "escalated", "flow");
+                .containsExactlyInAnyOrder("gateDecisionId", "gate", "result", "fsmStateBefore", "nextState", "escalated", "flow", "replayed");
         assertThat(docs.<Map<String, Object>>read(schemas + "TagResult.properties").keySet()).containsExactlyInAnyOrder("delivery", "snapshot", "flow", "fsmState");
         assertThat(docs.<Map<String, Object>>read(schemas + "PrResult.properties").keySet()).containsExactlyInAnyOrder("delivery", "created");
         assertThat(docs.<Map<String, Object>>read(schemas + "TagRequest.properties").keySet()).containsExactlyInAnyOrder("tagName", "message", "push", "createGithubRelease");

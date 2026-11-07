@@ -441,4 +441,25 @@ class ResearchDeliveryApiIT extends AbstractResearchIT {
         assertThat(jdbc.queryForObject("select count(*) from console.research_deliveries where research_id = ?", Long.class, ready.research()))
                 .as("console-api 零寫入（迷你 Bridge 也不寫交付列；重送冪等由 V21 的唯一約束與 Bridge 守）").isZero();
     }
+
+    @Test
+    void AT_962_19_5_theBridgeRuleLiteralsOfTagAndPrAreRelayedVerbatimAndTheTagDeliveryCarriesTheBridgeFields() {
+        ResearchP2Fixtures.Ready ready = p2().releaseReady("d195r");
+        for (String rule : List.of("not_semver", "release_not_supported", "remote_tag_diverged")) {
+            bridge().next("tag", Reply.error(422, "invalid_request", "violations", List.of(Map.of("field", "tagName", "rule", rule, "message", "m"))));
+            Resp resp = api.post(adminAs("alice"), tagUrl(ready), tag("v1.0.0"));
+            assertThat(resp.status()).as(rule).isEqualTo(422);
+            assertThat(resp.<String>read("$.details.violations[0].rule")).as(rule).isEqualTo(rule);
+        }
+        for (String rule : List.of("preview_ack_required", "title_not_template", "invalid_ref")) {
+            bridge().next("pr", Reply.error(422, "invalid_request", "violations", List.of(Map.of("field", "branch", "rule", rule, "message", "m"))));
+            Resp resp = api.post(adminAs("alice"), prUrl(ready), Map.of("bodyPreviewAck", true));
+            assertThat(resp.<String>read("$.details.violations[0].rule")).as(rule).isEqualTo(rule);
+        }
+        Resp ok = api.post(adminAs("alice"), tagUrl(ready), tag("v2.0.0"));
+        assertThat(ok.status()).isEqualTo(201);
+        assertThat(ok.<String>read("$.data.delivery.rtmReportRef")).isEqualTo("03_execution/traceability_matrix.json");
+        assertThat(ok.<String>read("$.data.delivery.fsmStateAfter")).isEqualTo("RELEASE_READY");
+        assertThat(ok.body()).contains("\"url\":null");
+    }
 }
