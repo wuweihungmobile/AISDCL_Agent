@@ -76,7 +76,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
     private static final String V19_VIEW = "v_research_healing_attempts";
 
     private static final Set<String> JSONB_COLUMNS = Set.of("scope", "payload", "prompt_manifest", "allowlist_snapshot",
-            "precheck_detail", "frozen_digests", "result_urls", "f5_applicability");
+            "precheck_detail", "frozen_digests", "result_urls", "f5_applicability", "details");
     private static final Set<String> ARRAY_COLUMNS = Set.of("f4_risk_tags", "evidence_refs");
 
     /** 受控可更新欄位表（TCS §5.1 的 CONTROLLED_UPDATE_COLUMNS）：欄位 → 把它改成另一個合法值的 SET 片段（CHECK 要求成組的欄位同句更新）。 */
@@ -150,8 +150,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
     private static final class Db {
         private final JdbcTemplate jdbc;
         private final TransactionTemplate tx;
+        private final String name;
 
         private Db(String name) {
+            this.name = name;
             DriverManagerDataSource dataSource = new DriverManagerDataSource(urlOf(name), SharedPostgres.INSTANCE.getUsername(),
                     SharedPostgres.INSTANCE.getPassword());
             this.jdbc = new JdbcTemplate(dataSource);
@@ -499,10 +501,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
-                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config");
+                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config").containsEntry("21", "research gate details delivery snapshot");
             soft.assertThat(afterV18).as("V16～V19 沒有拿掉任何既有的表").containsAll(afterV15).containsAll(afterV18);
             soft.assertThat(added).as("V16～V18 在 console 內恰多出 13 張表（P0 集合不退步）").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
             soft.assertThat(addedByV19).as("V19 在 console 內恰多出 5 張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
@@ -1029,7 +1031,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                     decisionRow(chain.project(), "GATE0", "MAYBE")), CHECK);
             expectState(soft, "決定屬於不存在的研究專案", tryInsert(db, "research_gate_decisions",
                     decisionRow(UUID.randomUUID(), "GATE0", "CHANGES")), FOREIGN_KEY);
-            expectEnum(soft, db.jdbc, "research_gate_decisions", "gate", "GATE0", "SCR", "ROUTE", "STAGE2", "SCG4", "SCG5",
+            expectEnum(soft, db.jdbc, "research_gate_decisions", "gate", "GATE0", "SCR", "ROUTE", "STAGE2", "SCG4", "SCG5", "SCG6",
                     "ABANDON_KEY");
             expectEnum(soft, db.jdbc, "research_gate_decisions", "decision", "APPROVED", "REJECTED", "CHANGES", "ABANDONED");
 
@@ -1736,9 +1738,9 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
-            soft.assertThat(history.get(history.size() - 2).get("description")).as("V19 描述").isEqualTo("research route scr delivery");
+            soft.assertThat(history.get(18).get("description")).as("V19 描述（第 19 筆；其後還有 V20、V21）").isEqualTo("research route scr delivery");
             soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
             soft.assertThat(viewsAfter18).as("V18 時還沒有視圖").isEmpty();
             soft.assertThat(viewsAfter19).as("V19 在 console 內恰多出一個視圖").containsExactly(V19_VIEW);
@@ -2275,6 +2277,307 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             // DDL 不擋非陣列 JSON：形狀由 Bridge 寫入器保證（Architecture K.4 未要求此 CHECK；TCS ⚖P1-9），此處以註記斷言固定現況
             expectOk(soft, "impl_fsm_actions 寫入非陣列 JSON：DDL 不擋、應用層擋", rolledBack(db, jdbc -> jdbc.update(
                     "update console.research_scr set impl_fsm_actions = '{\"a\":1}'::jsonb where id = ?", scr)));
+        });
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // V21（P2；PKG-DB-P2；TCS-ResearchToPRD-P2-20261107 AC-962-1；Architecture K.6 驗收段）：SCG6、決定列 details、
+    // 交付快照 sha256、SCR 證據連結
+    // 為什麼重要：這四個欄位缺口若退回「用 reason 前綴或 rtm_report_ref 夾帶」就會變成不可查詢、不可驗證的帶外約定；
+    // 結構層正解要靠 CHECK 與型別在資料庫擋住髒值（Bridge 寫入器自律不足以擔保），且升級不得動到既有資料與守衛。
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static final List<String> V21_GATES = List.of("GATE0", "SCR", "ROUTE", "STAGE2", "SCG4", "SCG5", "SCG6", "ABANDON_KEY");
+    private static final String V21_NEW_COLUMNS = "'details', 'snapshot_sha256', 'evidence_url'";
+
+    private static UUID v21Project(Db db) {
+        UUID id = UUID.randomUUID();
+        insert(db.jdbc, "research_projects", projectRow(id, "v21-" + id.toString().substring(0, 8)));
+        return id;
+    }
+
+    /** 在既有（V20）資料庫上套用其餘遷移到最新版（升級路徑；與 databaseAt 同一組 Flyway 設定）。 */
+    private static void upgradeToLatest(Db db) {
+        Flyway.configure().dataSource(urlOf(db.name), SharedPostgres.INSTANCE.getUsername(), SharedPostgres.INSTANCE.getPassword())
+                .schemas("console").defaultSchema("console").locations("classpath:db/migration").load().migrate();
+    }
+
+    /** 表快照但排除 V21 的三個新欄：升級前後「既有欄位逐位相同」的比對基準。 */
+    private static String snapshotWithoutNewColumns(JdbcTemplate jdbc, String table) {
+        return jdbc.queryForObject("select coalesce(jsonb_agg(j order by j::text), '[]'::jsonb)::text from (select to_jsonb(t) - 'details' "
+                + "- 'snapshot_sha256' - 'evidence_url' as j from console." + table + " t) s", String.class);
+    }
+
+    private static List<Map<String, Object>> flywayHistory(JdbcTemplate jdbc) {
+        return jdbc.queryForList("select version, description, script, checksum, success from console.flyway_schema_history "
+                + "where version is not null order by installed_rank");
+    }
+
+    @Test
+    void AT_962_1_1_flywayHistoryReachesTwentyOneWithoutNewTablesAndEarlierChecksumsUnchanged() {
+        Db at20 = databaseAt("20");
+        Db at21 = newDatabase();
+        List<Map<String, Object>> history = flywayHistory(at21.jdbc);
+        List<Map<String, Object>> history20 = flywayHistory(at20.jdbc);
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
+                    .isEqualTo("validate");
+            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 21")
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18",
+                            "19", "20", "21");
+            soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
+            Map<String, Object> v21 = history.get(20);
+            soft.assertThat(v21.get("script")).as("V21 檔名").isEqualTo("V21__research_gate_details_delivery_snapshot.sql");
+            soft.assertThat(v21.get("description")).as("V21 描述").isEqualTo("research gate details delivery snapshot");
+            soft.assertThat(history.subList(0, 20)).extracting(row -> row.get("checksum")).as("V1～V20 的 checksum 與 20 版庫相同")
+                    .isEqualTo(history20.stream().map(row -> row.get("checksum")).toList());
+            soft.assertThat(baseTables(at21.jdbc)).as("V21 不新增任何表（只多欄位）").isEqualTo(baseTables(at20.jdbc));
+        });
+    }
+
+    @Test
+    void AT_962_1_2_gateCheckGainsScg6AndStillRejectsAnythingElse() {
+        Db at20 = databaseAt("20");
+        UUID legacyProject = v21Project(at20);
+        insert(at20.jdbc, "research_gate_decisions", decisionRow(legacyProject, "SCG4", "CHANGES"));
+        insert(at20.jdbc, "research_gate_decisions", decisionRow(legacyProject, "SCG5", "CHANGES"));
+        String legacyBefore = snapshotWithoutNewColumns(at20.jdbc, "research_gate_decisions");
+        upgradeToLatest(at20);
+        Db db = newDatabase();
+        UUID project = v21Project(db);
+
+        SoftAssertions.assertSoftly(soft -> {
+            for (String gate : V21_GATES) {
+                expectOk(soft, "gate " + gate, tryInsert(db, "research_gate_decisions", decisionRow(project, gate, "CHANGES")));
+            }
+            for (String gate : List.of("SCG7", "scg6", "SCG", "")) {
+                expectState(soft, "gate 為「" + gate + "」", tryInsert(db, "research_gate_decisions",
+                        decisionRow(project, gate, "CHANGES")), CHECK);
+            }
+            expectEnum(soft, db.jdbc, "research_gate_decisions", "gate", V21_GATES.toArray(String[]::new));
+            soft.assertThat(columnsOf(db.jdbc, "research_gate_decisions").get("gate")).as("gate 欄寬 VARCHAR(11) 容得下全部值")
+                    .containsEntry("character_maximum_length", 11);
+            soft.assertThat(snapshotWithoutNewColumns(at20.jdbc, "research_gate_decisions")).as("升級前的 SCG4／SCG5 列升級後值不變")
+                    .isEqualTo(legacyBefore);
+        });
+    }
+
+    @Test
+    void AT_962_1_3_decisionDetailsIsANonNullJsonObjectAndTheAppendOnlyGuardStillHolds() {
+        Db at20 = databaseAt("20");
+        UUID legacyProject = v21Project(at20);
+        insert(at20.jdbc, "research_gate_decisions", decisionRow(legacyProject, "GATE0", "CHANGES"));
+        upgradeToLatest(at20);
+        Db db = newDatabase();
+        UUID project = v21Project(db);
+        Map<String, Object> base = decisionRow(project, "SCG4", "APPROVED");
+        insert(db.jdbc, "research_gate_decisions", base);
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(db.jdbc.queryForObject("select details::text from console.research_gate_decisions where research_id = ?",
+                    String.class, project)).as("省略時讀回 {}").isEqualTo("{}");
+            soft.assertThat(columnsOf(db.jdbc, "research_gate_decisions").get("details")).as("details 欄位")
+                    .containsEntry("data_type", "jsonb").containsEntry("is_nullable", "NO").containsEntry("column_default", "'{}'::jsonb");
+            expectOk(soft, "三個約定鍵的物件", tryInsert(db, "research_gate_decisions", with(base, "details",
+                    "{\"reviewer_independent\":true,\"review_report_ref\":\"a.md\",\"ci_red\":false}")));
+            for (String bad : List.of("[]", "\"x\"", "1", "null")) {
+                Outcome outcome = tryInsert(db, "research_gate_decisions", with(base, "details", bad));
+                expectState(soft, "details 為 JSON " + bad, outcome, CHECK);
+                expectMessage(soft, "details 為 JSON " + bad, outcome, "ck_research_gate_details_object");
+            }
+            expectState(soft, "details 為 SQL NULL", tryInsert(db, "research_gate_decisions", with(base, "details", null)), NOT_NULL);
+            soft.assertThat(at20.jdbc.queryForObject("select details::text from console.research_gate_decisions where research_id = ?",
+                    String.class, legacyProject)).as("升級前的既有 GATE0 決定列回填 {}").isEqualTo("{}");
+            expectGuard(soft, "UPDATE details", run(db, jdbc -> jdbc.update("update console.research_gate_decisions set details = '{}'::jsonb")),
+                    "research_gate_decisions", "append-only");
+            expectGuard(soft, "DELETE", run(db, jdbc -> jdbc.update("delete from console.research_gate_decisions")),
+                    "research_gate_decisions", "append-only");
+        });
+    }
+
+    @Test
+    void AT_962_1_4_deliverySnapshotSha256IsNullableLowercaseHex64() {
+        Db db = newDatabase();
+        UUID project = v21Project(db);
+        Map<String, Object> base = deliveryRow(project, "RELEASE_TAG", "v1.0.0", "CREATED");
+        insert(db.jdbc, "research_deliveries", with(base, "snapshot_sha256", "a".repeat(64)));
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectOk(soft, "64 位小寫十六進位", tryInsert(db, "research_deliveries", with(base, "ref", "v2", "snapshot_sha256", "0123456789abcdef".repeat(4))));
+            expectOk(soft, "NULL（TAG 列必填由應用層守，DB 不擋）", tryInsert(db, "research_deliveries", with(base, "ref", "v3", "snapshot_sha256", null)));
+            expectOk(soft, "省略（PR 列）", tryInsert(db, "research_deliveries", deliveryRow(project, "PULL_REQUEST", "7", "CREATED")));
+            for (String bad : List.of("a".repeat(63), "A".repeat(64), "a".repeat(63) + "g")) {
+                Outcome outcome = tryInsert(db, "research_deliveries", with(base, "ref", "bad", "snapshot_sha256", bad));
+                expectState(soft, "snapshot_sha256 為 " + bad.length() + " 位的「" + bad.substring(bad.length() - 1) + "」結尾", outcome, CHECK);
+                expectMessage(soft, "snapshot_sha256 壞值", outcome, "ck_research_deliveries_snapshot_sha256");
+            }
+            expectState(soft, "65 位", tryInsert(db, "research_deliveries", with(base, "ref", "bad", "snapshot_sha256", "a".repeat(65))), TOO_LONG);
+            expectGuard(soft, "UPDATE snapshot_sha256", run(db, jdbc -> jdbc.update("update console.research_deliveries set snapshot_sha256 = '"
+                    + "b".repeat(64) + "'")), "research_deliveries", "append-only");
+            expectState(soft, "同 (research_id, kind, ref) 兩次仍 23505", tryInsert(db, "research_deliveries", base), UNIQUE);
+            expectEnum(soft, db.jdbc, "research_deliveries", "kind", "RELEASE_TAG", "PULL_REQUEST", "RELEASE_NOTE");
+        });
+    }
+
+    @Test
+    void AT_962_1_5_scrEvidenceUrlIsNullableHttpsAtMost500AndNotControlledUpdatable() {
+        Db db = newDatabase();
+        UUID project = v21Project(db);
+        UUID scr = UUID.randomUUID();
+        insert(db.jdbc, "research_scr", with(scrRow(project, 1), "id", scr));
+        Map<String, Object> base = scrRow(project, 2);
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(db.jdbc.queryForObject("select evidence_url is null from console.research_scr where id = ?", Boolean.class, scr))
+                    .as("P1 既有 SCR 插入（不帶 evidence_url）通過且欄位為 NULL").isTrue();
+            expectOk(soft, "NULL", tryInsert(db, "research_scr", with(base, "evidence_url", null)));
+            expectOk(soft, "https 網址", tryInsert(db, "research_scr", with(base, "evidence_url", "https://a.example/x")));
+            expectOk(soft, "恰 500 字元", tryInsert(db, "research_scr", with(base, "evidence_url", "https://" + "a".repeat(492))));
+            for (String bad : List.of("http://a.example", "HTTPS://a.example", "javascript:alert(1)", "")) {
+                Outcome outcome = tryInsert(db, "research_scr", with(base, "evidence_url", bad));
+                expectState(soft, "evidence_url 為「" + bad + "」", outcome, CHECK);
+                expectMessage(soft, "evidence_url 壞值", outcome, "ck_research_scr_evidence_url");
+            }
+            expectState(soft, "501 字元（CHECK 含長度上限，欄位為 TEXT 故非 22001）", tryInsert(db, "research_scr",
+                    with(base, "evidence_url", "https://" + "a".repeat(493))), CHECK);
+            Outcome update = run(db, jdbc -> jdbc.update("update console.research_scr set evidence_url = 'https://b.example'"));
+            expectGuard(soft, "UPDATE evidence_url（清單外欄位）", update, "research_scr", "只准更新");
+            soft.assertThat(String.valueOf(update.message())).as("守衛訊息列出的可更新清單不含 evidence_url").doesNotContain("evidence_url");
+        });
+    }
+
+    @Test
+    void AT_962_1_6_guardsDoNotRegressEveryResearchTableStillRejectsDelete() {
+        Db at20 = databaseAt("20");
+        Db db = newDatabase();
+        Chain chain = chain(db);
+        UUID source = UUID.randomUUID();
+        insert(db.jdbc, "research_sources", sourceRow(source, chain.project(), "S-001", "https://example.org/s1"));
+        insert(db.jdbc, "research_events", eventRow(chain.project(), 1));
+        insert(db.jdbc, "research_artifacts", artifactRow(chain.project(), "ISSUE_SCOPE", 1));
+        insert(db.jdbc, "research_fetches", fetchRow(chain.project(), "F-0001"));
+        insert(db.jdbc, "research_evidence_items", evidenceRow(chain.project(), source, 1, "E-001"));
+        insert(db.jdbc, "research_review_scores", scoreRow(chain.round(), "ARCHITECTURE"));
+        insert(db.jdbc, "research_gate_decisions", decisionRow(chain.project(), "SCG6", "CHANGES"));
+        insert(db.jdbc, "research_review_defects", defectRow(UUID.randomUUID(), chain.round(), "D-1-001"));
+        insert(db.jdbc, "research_allowlist_entries", allowlistRow("export.arxiv.org"));
+        UUID route = v19Route(db, chain.project(), "PENDING");
+        insert(db.jdbc, "research_route_steps", routeStepRow(route, 1, "VALIDATE_TARGET", "OK"));
+        insert(db.jdbc, "research_scr", scrRow(chain.project(), 1));
+        insert(db.jdbc, "research_decompositions", decompositionRow(chain.project(), "A"));
+        insert(db.jdbc, "research_deliveries", deliveryRow(chain.project(), "RELEASE_TAG", "v1", "CREATED"));
+        List<String> tables = db.jdbc.queryForList("select table_name from information_schema.tables where table_schema = 'console' "
+                + "and table_type = 'BASE TABLE' and table_name like 'research\\_%' order by 1", String.class);
+        String triggerSql = "select c.relname || '/' || t.tgname || '/' || p.proname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
+                + "join pg_namespace n on n.oid = c.relnamespace join pg_proc p on p.oid = t.tgfoid where n.nspname = 'console' "
+                + "and c.relname like 'research\\_%' and not t.tgisinternal order by 1";
+        String functionSql = "select string_agg(md5(pg_get_functiondef(p.oid)), ',' order by p.proname) from pg_proc p "
+                + "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'console' and p.proname like 'research\\_%'";
+
+        SoftAssertions.assertSoftly(soft -> {
+            List<String> expectedTables = new ArrayList<>(RESEARCH_TABLES);
+            expectedTables.addAll(V19_TABLES);
+            soft.assertThat(tables).as("恰十八張 research_ 表").hasSize(18).containsExactlyInAnyOrderElementsOf(expectedTables);
+            for (String table : tables) {
+                int before = db.jdbc.queryForObject("select count(*) from console." + table, Integer.class);
+                soft.assertThat(before).as("%s 至少一列", table).isGreaterThanOrEqualTo(1);
+                Outcome delete = run(db, jdbc -> jdbc.update("delete from console." + table));
+                soft.assertThat(delete.sqlState()).as("%s DELETE 的 SQLSTATE 類別為 23：%s", table, delete).isNotNull().startsWith("23");
+                soft.assertThat(db.jdbc.queryForObject("select count(*) from console." + table, Integer.class))
+                        .as("%s 刪除前後列數相同", table).isEqualTo(before);
+            }
+            for (String table : List.of("research_gate_decisions", "research_deliveries")) {
+                String column = "research_gate_decisions".equals(table) ? "decided_by" : "created_by";
+                expectGuard(soft, table + " UPDATE", run(db, jdbc -> jdbc.update("update console." + table + " set " + column + " = " + column)),
+                        table, "append-only");
+            }
+            soft.assertThat(db.jdbc.queryForList(triggerSql, String.class)).as("觸發器名單與 V20 相同（V21 沒動任何觸發器）")
+                    .isEqualTo(at20.jdbc.queryForList(triggerSql, String.class));
+            soft.assertThat(db.jdbc.queryForObject(functionSql, String.class)).as("守衛函式本體與 V20 相同（V21 沒動任何函式）")
+                    .isEqualTo(at20.jdbc.queryForObject(functionSql, String.class));
+        });
+    }
+
+    @Test
+    void AT_962_1_E_1_upgradingADatabaseWithV20DataLeavesExistingRowsUntouched() {
+        Db db = databaseAt("20");
+        UUID project = v21Project(db);
+        for (String gate : List.of("SCR", "ROUTE", "STAGE2", "SCG4", "SCG5", "ABANDON_KEY")) {
+            insert(db.jdbc, "research_gate_decisions", decisionRow(project, gate, "CHANGES"));
+        }
+        insert(db.jdbc, "research_gate_decisions", with(decisionRow(project, "GATE0", "APPROVED"),
+                "frozen_digests", "{\"01_specs/PRD.md\":\"" + HEX64 + "\"}", "fsm_stage", "Gate-0"));
+        insert(db.jdbc, "research_scr", scrRow(project, 1));
+        insert(db.jdbc, "research_deliveries", deliveryRow(project, "RELEASE_TAG", "v1", "CREATED"));
+        insert(db.jdbc, "research_deliveries", deliveryRow(project, "PULL_REQUEST", "42", "CREATED"));
+        List<String> touched = List.of("research_gate_decisions", "research_scr", "research_deliveries");
+        Map<String, String> before = new LinkedHashMap<>();
+        touched.forEach(table -> before.put(table, snapshotWithoutNewColumns(db.jdbc, table)));
+
+        upgradeToLatest(db);
+
+        SoftAssertions.assertSoftly(soft -> {
+            touched.forEach(table -> soft.assertThat(snapshotWithoutNewColumns(db.jdbc, table)).as("%s 既有欄位逐位相同", table)
+                    .isEqualTo(before.get(table)));
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.research_gate_decisions where details = '{}'::jsonb", Integer.class))
+                    .as("七筆決定列的 details 皆回填 {}").isEqualTo(7);
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.research_deliveries where snapshot_sha256 is null", Integer.class))
+                    .as("兩筆交付列的 snapshot_sha256 為 NULL").isEqualTo(2);
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.research_scr where evidence_url is null", Integer.class))
+                    .as("SCR 列的 evidence_url 為 NULL").isEqualTo(1);
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.research_gate_decisions where gate in ('SCG4', 'SCG5')",
+                    Integer.class)).as("SCG4／SCG5 列仍在").isEqualTo(2);
+        });
+    }
+
+    @Test
+    void AT_962_1_E_2_newColumnTypesAreFixedAndEveryTimestampColumnStillHasATimeZone() {
+        Db db = newDatabase();
+        List<Map<String, Object>> nonZoned = db.jdbc.queryForList("select table_name, column_name, data_type from information_schema.columns "
+                + "where table_schema = 'console' and (table_name like 'research\\_%' or table_name like 'v\\_research\\_%') "
+                + "and data_type like 'timestamp%' and data_type <> 'timestamp with time zone'");
+        Integer zoned = db.jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' "
+                + "and table_name like 'research\\_%' and data_type = 'timestamp with time zone'", Integer.class);
+        Map<String, Object> details = columnsOf(db.jdbc, "research_gate_decisions").get("details");
+        Map<String, Object> snapshot = columnsOf(db.jdbc, "research_deliveries").get("snapshot_sha256");
+        Map<String, Object> evidence = columnsOf(db.jdbc, "research_scr").get("evidence_url");
+        List<String> newColumnOwners = db.jdbc.queryForList("select table_name || '.' || column_name from information_schema.columns "
+                + "where table_schema = 'console' and column_name in (" + V21_NEW_COLUMNS + ") order by 1", String.class);
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(newColumnOwners).as("V21 三個新欄各只落在一張表（沒有誤加到別表或重名欄）")
+                    .containsExactly("research_deliveries.snapshot_sha256", "research_gate_decisions.details", "research_scr.evidence_url");
+            soft.assertThat(details).as("details").containsEntry("data_type", "jsonb");
+            soft.assertThat(snapshot).as("snapshot_sha256").containsEntry("data_type", "character")
+                    .containsEntry("character_maximum_length", 64).containsEntry("is_nullable", "YES");
+            soft.assertThat(evidence).as("evidence_url").containsEntry("data_type", "text").containsEntry("is_nullable", "YES");
+            soft.assertThat(nonZoned).as("research_ 表與視圖沒有不帶時區的 timestamp 欄").isEmpty();
+            soft.assertThat(zoned).as("帶時區的 timestamp 欄確實存在（鑑別力：查詢不是空轉）").isGreaterThan(10);
+        });
+    }
+
+    @Test
+    void AT_962_1_E_3_v21ConstraintsAreNamedAndTheOldGateCheckWasReplacedNotKeptAlongside() {
+        Db db = newDatabase();
+        String sql = "select conname, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = ?::regclass and contype = 'c' order by conname";
+        List<Map<String, Object>> decisionChecks = db.jdbc.queryForList(sql, "console.research_gate_decisions");
+        List<Map<String, Object>> deliveryChecks = db.jdbc.queryForList(sql, "console.research_deliveries");
+        List<Map<String, Object>> scrChecks = db.jdbc.queryForList(sql, "console.research_scr");
+
+        SoftAssertions.assertSoftly(soft -> {
+            List<Map<String, Object>> gateChecks = decisionChecks.stream().filter(c -> "research_gate_decisions_gate_check".equals(c.get("conname"))).toList();
+            soft.assertThat(gateChecks).as("以名 research_gate_decisions_gate_check 查恰一條").hasSize(1);
+            soft.assertThat(String.valueOf(gateChecks.get(0).get("def"))).as("定義含 SCG6").contains("SCG6").contains("ABANDON_KEY");
+            soft.assertThat(decisionChecks.stream().filter(c -> String.valueOf(c.get("def")).contains("ABANDON_KEY")).count())
+                    .as("同一欄不得有兩條 gate 列舉 CHECK（舊約束被取代而非並存）").isEqualTo(1L);
+            soft.assertThat(decisionChecks.stream().filter(c -> !"research_gate_decisions_gate_check".equals(c.get("conname")))
+                    .map(c -> String.valueOf(c.get("def"))).toList()).as("其餘 CHECK（表級 GATE0 核准規則與 details）不含 gate 列舉")
+                    .noneMatch(def -> def.contains("ABANDON_KEY"));
+            soft.assertThat(decisionChecks).extracting(c -> c.get("conname")).as("details 的具名 CHECK").contains("ck_research_gate_details_object");
+            soft.assertThat(deliveryChecks).extracting(c -> c.get("conname")).as("snapshot_sha256 的具名 CHECK")
+                    .contains("ck_research_deliveries_snapshot_sha256");
+            soft.assertThat(scrChecks).extracting(c -> c.get("conname")).as("evidence_url 的具名 CHECK").contains("ck_research_scr_evidence_url");
         });
     }
 }

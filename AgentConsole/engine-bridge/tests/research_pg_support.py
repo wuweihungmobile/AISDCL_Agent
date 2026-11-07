@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = (REPO_ROOT / "AgentConsole" / "backend" / "src" / "main" / "resources" / "db"
                  / "migration")
 DB_NAME_PREFIX = "r2p_bra_"
-LAST_VERSION = 20
+LAST_VERSION = 21
 _FILE_RE = re.compile(r"^V(\d+)__.+\.sql$")
 
 
