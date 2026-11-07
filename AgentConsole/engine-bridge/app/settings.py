@@ -89,6 +89,20 @@
                               原生抓取單一回應的位元組上限（預設 5242880＝5 MiB）
   BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS
                               原生抓取的逾時秒數（預設 20）
+  BRIDGE_SCAFFOLD_ROOT        軌道 B（新專案）的骨架根（ADR-003 D8、D-96）。**無預設**：未設
+                              ＝軌道 B 停用（預演回 `route_unsupported_in_deployment`，缺項
+                              `scaffold_root`）。不可是檔案系統根；設了即自動併入允許根（明設了
+                              BRIDGE_ALLOWED_PATH_ROOTS 時須落在其中某個根之下，否則啟動即
+                              SettingsError）。新專案根＝`<本根>/<project_name>`
+  BRIDGE_WORKTREE_ROOT        軌道 A 的 git worktree 根（D-95）。預設
+                              `<BRIDGE_RESEARCH_ROOT>/_worktrees`（repo 外）；每個分流在其下建
+                              一個獨立 worktree，不動使用中的工作樹
+  BRIDGE_REPO_ROOT            軌道 A 要寫的 monorepo 根（D-96）。未設＝`REPO_ROOT`（Bridge 所在
+                              的 monorepo）；`repo_writable` 與 git 子行程的 cwd 都讀它（INT
+                              載具以它指向拋棄式 clone）
+  BRIDGE_ROUTE_TIMEOUT_SECONDS
+                              `:route` 同步執行的牆鐘上限（預設 300；1～3600；D-105）；逾時＝
+                              502 `route_step_failed`（`reason=route_timeout`）
 """
 from __future__ import annotations
 
@@ -119,6 +133,8 @@ RESEARCH_DEFAULT_MAX_CONCURRENT_RUNS = 1
 RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS = 600
 RESEARCH_DEFAULT_FETCH_MAX_BYTES = 5 * 1024 * 1024
 RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS = 20.0
+#: D-105：`:route` 同步執行的牆鐘（秒）；console-api 的讀逾時（330 s）必須大於它。
+RESEARCH_DEFAULT_ROUTE_TIMEOUT_SECONDS = 300
 
 # <monorepo>/AgentConsole/engine-bridge
 BRIDGE_DIR = Path(__file__).resolve().parents[1]
@@ -157,6 +173,13 @@ class Settings:
     research_claude_command: str | None = None
     research_fetch_max_bytes: int = RESEARCH_DEFAULT_FETCH_MAX_BYTES
     research_fetch_timeout_seconds: float = RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS
+    #: P1 分流（D-95／D-96／D-105）：軌道 B 骨架根（None＝停用）、軌道 A worktree 根（None＝
+    #: `<research_root>/_worktrees`，見 `worktree_root`）、monorepo 根覆寫（None＝`REPO_ROOT`，見
+    #: `repo_root`）、同步執行的牆鐘秒數。
+    research_scaffold_root: Path | None = None
+    research_worktree_root: Path | None = None
+    research_repo_root: Path | None = None
+    research_route_timeout_seconds: int = RESEARCH_DEFAULT_ROUTE_TIMEOUT_SECONDS
     log_dir: Path | None = None
     #: SDD 寫入權杖；repr=False 讓 `print(settings)`／日誌不會把它帶出去。None＝寫入面停用。
     sdd_write_token: str | None = field(default=None, repr=False)
@@ -173,6 +196,16 @@ class Settings:
     def si_write_enabled(self) -> bool:
         """SI 寫入面啟用＝權杖與稽核目錄兩者皆已設定（W1）；任一缺＝三個寫入端點一律 503。"""
         return self.si_write_token is not None and self.si_audit_dir is not None
+
+    @property
+    def worktree_root(self) -> Path:
+        """軌道 A 的 worktree 根（D-95）：明設值，否則 `<研究工作區根>/_worktrees`。"""
+        return self.research_worktree_root or (self.research_root / "_worktrees")
+
+    @property
+    def repo_root(self) -> Path:
+        """軌道 A 要寫的 monorepo 根（D-96）：明設值，否則 Bridge 所在的 `REPO_ROOT`。"""
+        return self.research_repo_root or REPO_ROOT
 
     @property
     def research_write_enabled(self) -> bool:
@@ -340,6 +373,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         research_claude_command=research.claude_command,
         research_fetch_max_bytes=research.fetch_max_bytes,
         research_fetch_timeout_seconds=research.fetch_timeout_seconds,
+        research_scaffold_root=research.scaffold_root,
+        research_worktree_root=research.worktree_root,
+        research_repo_root=research.repo_root,
+        research_route_timeout_seconds=research.route_timeout_seconds,
         log_dir=Path(raw_log_dir).resolve() if raw_log_dir else None,
         sdd_write_token=_parse_sdd_write_token(e),
         si_root=si_root,

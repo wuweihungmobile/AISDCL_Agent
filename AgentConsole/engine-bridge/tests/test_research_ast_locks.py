@@ -4,7 +4,8 @@
 合成樣本驗證「違規被抓、良性放行」（13-E-1），再對 `app/` 全樹實跑（13-7）。判準：
   C1 寫 `FSM-STATE-*.yaml`（提到該檔名的模組不得有任何寫入形態呼叫）；
   C2 核准類呼叫（`approve_baseline`、`spec_frozen`）只准住 `routers/research.py` 的 HTTP 處理函式
-     （`spec_frozen` 另准在 `fsm_ops.py` 自己的包裝內）；
+     （`spec_frozen` 另准在 `fsm_ops.py` 自己的包裝內；P1 另准 `research/adopt.py::adopt_baseline`
+     的 `spec_frozen`，限 `stage="Stage-1"` 且函式內有「非外環鍵」守衛，D-126）；
   C3 外環鍵的子行程環境必須固定 `SDD_ENABLE_AUTO_RECOVERY=0`（`build_research_env` 內）；
   C4 不得有未登記的研究面動詞；
   C5 子行程呼叫必須帶 `**procutil.popen_platform_kwargs()`，且只准出現在登記的 exec 模組；
@@ -27,7 +28,8 @@ from tests.test_sdd_integration_parity import write_shaped_calls
 
 APP_DIR = Path(sdd_cli.__file__).resolve().parent
 #: 子行程只准出現在這些模組（皆帶 procutil 旗標）；研究面新模組要起子行程＝先登記於此並說明 WHY。
-EXEC_MODULES = frozenset({"runner.py", "sdd_cli.py", "si_cli.py", "health.py", "routers/sdd.py"})
+EXEC_MODULES = frozenset({"runner.py", "sdd_cli.py", "si_cli.py", "health.py", "routers/sdd.py",
+                          "research/gitops.py"})      # P1：git／gh 子行程的唯一出口（ADR-003 D16）
 _SPAWN_NAMES = {"Popen", "run", "check_output", "check_call", "call"}
 
 
@@ -109,6 +111,17 @@ def gate_needs_guard(node: ast.Call) -> bool:
     return not _is_const(_kw(node, "result"), "FAIL")
 
 
+def is_baseline_adoption(rel: str, name: str, node: ast.Call,
+                         fn: ast.FunctionDef | None) -> bool:
+    """P1（D-126）：C2 唯一的新例外——`research/adopt.py` 的 `adopt_baseline` 以字面 `Stage-1`
+    呼叫 `spec_frozen`，且函式內有 `is_outer_key` 守衛（外環鍵一律拒）。`approve_baseline` 永遠
+    不在內。"""
+    if rel != "research/adopt.py" or name != "spec_frozen" or fn is None:
+        return False
+    guard = any(isinstance(n, ast.Call) and call_name(n) == "is_outer_key" for n in ast.walk(fn))
+    return fn.name == "adopt_baseline" and _is_const(_kw(node, "stage"), "Stage-1") and guard
+
+
 def check_source(rel: str, text: str, *, exec_modules: frozenset[str] = EXEC_MODULES,
                  verbs: frozenset[str] | None = None) -> list[Hit]:
     verbs = sdd_cli.RESEARCH_VERBS if verbs is None else verbs
@@ -134,7 +147,8 @@ def check_source(rel: str, text: str, *, exec_modules: frozenset[str] = EXEC_MOD
             fn = enclosing_function(node, parents)
             http = fn is not None and any(is_router_decorator(d) for d in fn.decorator_list)
             ok = (rel == "routers/research.py" and http) or (
-                rel == "research/fsm_ops.py" and name == "spec_frozen")
+                rel == "research/fsm_ops.py" and name == "spec_frozen") or (
+                is_baseline_adoption(rel, name, node, fn))
             if not ok:
                 hits.append(Hit("C2", node.lineno))
         if name in {"run_research_verb", "check_research_allowed", "build_research_argv"} and (
@@ -190,6 +204,28 @@ VIOLATIONS = {
         "sdd_cli.py", "C6",
         "import subprocess\nsubprocess.run('echo', shell=True, "
         "**procutil.popen_platform_kwargs())\n"),
+    "adopt.py freezes a Gate-0 stage": (
+        "research/adopt.py", "C2",
+        "def adopt_baseline(ctx):\n    if sdd_cli.is_outer_key(ctx.key):\n"
+        "        raise ValueError\n"
+        "    fsm_ops.spec_frozen(fctx, stage=\"Gate-0\", docs=[], root=\"r\", reason=\"x\", "
+        "approver=\"a\")\n"),
+    "adopt.py freezes without the inner-key guard": (
+        "research/adopt.py", "C2",
+        "def adopt_baseline(ctx):\n    fsm_ops.spec_frozen(fctx, stage=\"Stage-1\", docs=[], "
+        "root=\"r\", reason=\"x\", approver=\"a\")\n"),
+    "adopt.py freezes outside adopt_baseline": (
+        "research/adopt.py", "C2",
+        "def other(ctx):\n    if sdd_cli.is_outer_key(ctx.key):\n        raise ValueError\n"
+        "    fsm_ops.spec_frozen(fctx, stage=\"Stage-1\", docs=[], root=\"r\", reason=\"x\", "
+        "approver=\"a\")\n"),
+    "adopt.py approves the baseline": (
+        "research/adopt.py", "C2",
+        "def adopt_baseline(ctx):\n    fsm_ops.approve_baseline(fctx)\n"),
+    "another P1 module freezes Stage-1": (
+        "research/route.py", "C2",
+        "def run(ctx):\n    fsm_ops.spec_frozen(fctx, stage=\"Stage-1\", docs=[], root=\"r\", "
+        "reason=\"x\", approver=\"a\")\n"),
     "gate SCG_VALIDATION PASS without a state guard": (
         "research/orchestrator.py", "C7",
         "def judge(ctx):\n    fsm_ops.gate(ctx, gate='SCG_VALIDATION', result='PASS', "
@@ -221,6 +257,12 @@ BENIGN = {
     "approve inside a router handler": (
         "routers/research.py",
         "@router.post('/x')\ndef h():\n    fsm_ops.approve_baseline(ctx)\n"),
+    "adopt_baseline freezes Stage-1 behind the inner-key guard": (
+        "research/adopt.py",
+        "def adopt_baseline(ctx):\n    if sdd_cli.is_outer_key(ctx.key):\n"
+        "        raise ValueError\n"
+        "    fsm_ops.spec_frozen(fctx, stage=\"Stage-1\", docs=[], root=\"r\", reason=\"x\", "
+        "approver=\"a\")\n"),
     "a registered verb": (
         "research/x.py", "def f():\n    sdd_cli.run_research_verb('show', [], sdd_root=r, "
                          "state_dir=s, project='research-x')\n"),
@@ -317,7 +359,9 @@ def test_AT_960_13_3_only_one_helper_builds_a_show_without_must_exist() -> None:
         lambda n: isinstance(_kw(n, "create"), ast.Constant) and _kw(n, "create").value is True)  # type: ignore[union-attr]
     assert set(creators) == {("research/fsm_ops.py", "create_key")}
     callers = _calls_with_enclosing(lambda n: call_name(n) == "create_key")
-    assert set(callers) == {("routers/research.py", "_ensure_fsm_key")}
+    # P1（AT-961-8-6）：呼叫者終點為 P0 三處（經 _ensure_fsm_key）加分流的 adopt.adopt_baseline＝4
+    assert set(callers) == {("routers/research.py", "_ensure_fsm_key"),
+                            ("research/adopt.py", "adopt_baseline")}
     ensure = _calls_with_enclosing(lambda n: call_name(n) == "_ensure_fsm_key")
     assert set(ensure) == {("routers/research.py", "_fsm_init_step")}
     init = _calls_with_enclosing(lambda n: call_name(n) == "_fsm_init_step")
@@ -371,3 +415,60 @@ def test_AT_960_6_2_cursor_updates_live_only_in_the_research_package_beside_an_e
                     f"{rel}:{fn.name} 更新游標卻沒有在同一個交易函式內寫 research_events"
                 found += 1
     assert found >= 2, "鎖要有標的：至少兩處游標 UPDATE（一般更新與換世代）"
+
+# ══ P1：分流新模組的 FSM 單一寫入面與 git／gh 唯一出口（TCS AT-961-8-5／8-6）══════════════════════
+_FSM_WRITER_WORDS = ("spec-frozen", "spec-refreeze", "underspecified", "FSM-STATE")
+#: P1 新模組中「不得是 FSM 寫入面」的檔（BR-D2 的 scr 等檔到位後自動納入）。
+_NO_FSM_WRITE_MODULES = ("research/route.py", "research/scr.py", "research/decompose_plan.py",
+                         "routers/research_route.py", "routers/research_scr.py")
+
+
+def test_AT_961_8_6_new_p1_modules_do_not_import_the_fsm_runtime_or_name_its_write_verbs() -> None:
+    sources = app_sources()
+    present = [rel for rel in _NO_FSM_WRITE_MODULES if rel in sources]
+    assert "research/route.py" in present and "routers/research_route.py" in present
+    for rel in present:
+        tree = ast.parse(sources[rel])
+        imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        modules = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+        assert not any("fsm_runtime" in m for m in imported | modules), rel
+        literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
+                    and isinstance(n.value, str)}
+        for word in _FSM_WRITER_WORDS:
+            assert not any(word in text for text in literals), f"{rel} 含字面值 {word!r}"
+
+
+def test_AT_961_8_6_the_create_key_callers_end_at_four_places() -> None:
+    callers = _calls_with_enclosing(lambda n: call_name(n) == "create_key")
+    assert len(set(callers)) == 2, "create_key 的直接呼叫點：_ensure_fsm_key 與 adopt_baseline"
+    init = _calls_with_enclosing(lambda n: call_name(n) == "_fsm_init_step")
+    assert len(set(init)) == 3, "經 _ensure_fsm_key 的終點三處（P0）；加 adopt_baseline＝共四處"
+
+
+def test_AT_961_8_6_only_adopt_py_freezes_a_stage_outside_the_router_and_fsm_ops() -> None:
+    sites = []
+    for rel, text in app_sources().items():
+        sites += [(rel, call_name(n)) for n in ast.walk(ast.parse(text))
+                  if isinstance(n, ast.Call) and call_name(n) in {"spec_frozen", "approve_baseline"}
+                  and rel not in {"routers/research.py", "research/fsm_ops.py"}]
+    assert set(sites) == {("research/adopt.py", "spec_frozen")}, sites
+
+
+def test_AT_961_8_5_git_and_gh_subprocesses_live_only_in_gitops() -> None:
+    spawners = set()
+    for rel, text in app_sources().items():
+        for n in ast.walk(ast.parse(text)):
+            if isinstance(n, ast.Call) and call_name(n) in _SPAWN_NAMES and (
+                    owner_name(n) == "subprocess" or call_name(n) == "Popen"):
+                spawners.add(rel)
+    assert "research/gitops.py" in spawners and "research/gitops.py" in EXEC_MODULES
+    for rel in ("research/route.py", "research/adopt.py", "research/scaffold.py",
+                "routers/research_route.py"):
+        assert rel not in spawners, f"{rel} 不得自己 spawn（只經 gitops 與 fsm_ops）"
+
+
+def test_AT_961_8_5_scaffold_templates_hold_no_python_files_under_app() -> None:
+    """範本內的 Python 檔一律 `.tmpl`：否則 `app/` 全樹的 AST 鎖與能力登記會掃到它。"""
+    tpl = APP_DIR / "research" / "scaffold_templates"
+    assert any(tpl.rglob("*.tmpl")), "鎖要有標的：範本目錄有 .tmpl 檔"
+    assert not list(tpl.rglob("*.py")), "範本目錄內不得有 .py 檔"

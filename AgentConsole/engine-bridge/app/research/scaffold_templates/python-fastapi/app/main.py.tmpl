@@ -1,0 +1,24 @@
+"""{{project_name}} 的最小入口：健康檢查函式（純標準庫）與延遲建立的 FastAPI 應用。"""
+from __future__ import annotations
+
+from typing import Any
+
+PROJECT_NAME = "{{project_name}}"
+
+
+def health() -> dict[str, str]:
+    """健康檢查的本文；不依賴任何第三方套件，所以最小 pytest 在乾淨環境也能跑。"""
+    return {"status": "ok", "project": PROJECT_NAME}
+
+
+def create_app() -> Any:
+    """延遲 import fastapi：只有真的要啟動服務時才需要安裝它。"""
+    from fastapi import FastAPI
+
+    application = FastAPI(title=PROJECT_NAME)
+
+    @application.get("/health")
+    def _health() -> dict[str, str]:
+        return health()
+
+    return application

@@ -178,7 +178,9 @@ def test_AT_960_2_E_1_explicit_values_are_applied(tmp_path: Path) -> None:
 def test_AT_960_2_E_1_the_readme_and_the_settings_header_list_every_research_variable() -> None:
     readme = README.read_text(encoding="utf-8")
     header = settings_module.__doc__ or ""
-    assert len(RESEARCH_ENV_VARS) == len(set(RESEARCH_ENV_VARS)) == 9
+    # P1 新增四個（BRIDGE_SCAFFOLD_ROOT、BRIDGE_WORKTREE_ROOT、BRIDGE_REPO_ROOT、
+    # BRIDGE_ROUTE_TIMEOUT_SECONDS；D-95／D-96／D-105）：9 → 13
+    assert len(RESEARCH_ENV_VARS) == len(set(RESEARCH_ENV_VARS)) == 13
     for var in RESEARCH_ENV_VARS:
         assert var in readme, f"README 環境表缺 {var}"
         assert var in header, f"app/settings.py 檔頭缺 {var}"

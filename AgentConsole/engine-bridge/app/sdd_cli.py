@@ -377,6 +377,15 @@ def is_outer_key(key: str) -> bool:
     return OUTER_KEY_RE.fullmatch(key) is not None
 
 
+#: 內環鍵（D-119）：`^[a-z][a-z0-9-]{1,99}$` 且不是外環鍵形態（軌道 A＝`<module>-<slug>`、軌道 B＝
+#: `<project_name>`）。建檔只在分流（`research/adopt.py`）以 `inner_create=True` 明示。
+INNER_KEY_RE = re.compile(r"^[a-z][a-z0-9-]{1,99}$")
+
+
+def is_inner_key(key: str) -> bool:
+    return INNER_KEY_RE.fullmatch(key) is not None and not is_outer_key(key)
+
+
 def validate_research_approver(raw: object) -> str:
     """核准人驗證：非空、非保留字（`bridge`／`agent`／`system`，不分大小寫）、≤100 字、只含
     `[A-Za-z0-9._@-]`（所以空白與 `+` 皆不合）、且不得以 `-` 起頭（argv 注入）。不合＝422
@@ -542,7 +551,8 @@ def _research_payload(verb: str, stdout: str) -> dict[str, Any] | None:
 def run_research_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, state_dir: Path,
                       project: str, create: bool = False, timeout: float | None = None,
                       audit: AuditLog | None = None, approver: str | None = None,
-                      context: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                      context: Mapping[str, Any] | None = None,
+                      inner_create: bool = False) -> dict[str, Any]:
     """以子行程跑一個研究面動詞，回傳解析後的輸出（物件）。失敗一律是 `ApiError`。
 
     研究面的**唯一**執行入口（與 `run_verb` 平行、互不呼叫）。rc→HTTP 與 `run_verb` 同表
@@ -551,8 +561,10 @@ def run_research_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, 
     `sdd_cli`（不含環境、權杖與 `--reason` 文字）。`create=True` 只准 `show` 且須是外環鍵。
     呼叫端要序列化就自己包 `state_guard`（可重入）。"""
     check_research_allowed(verb, args, key=project)
-    if create and not (verb == RESEARCH_VERB_SHOW and is_outer_key(project)):
-        raise _usage("create is only for `show` on an outer key")
+    if create and not (verb == RESEARCH_VERB_SHOW and (
+            is_outer_key(project) or (inner_create and is_inner_key(project)))):
+        raise _usage("create is only for `show` on an outer key (or an inner key with "
+                     "inner_create=True)")
     if timeout is None:
         timeout = DEFAULT_TIMEOUT_SECONDS
     if sdd_root is None or not Path(sdd_root).is_dir():

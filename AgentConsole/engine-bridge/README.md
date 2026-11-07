@@ -95,6 +95,10 @@ Invoke-RestMethod http://localhost:8081/health
 | `BRIDGE_RESEARCH_CLAUDE_COMMAND` | （未設＝引擎預設的 `claude`） | stage run 的 `claude.command`；Docker 全棧 E2E 設 `aisdlc-mock-claude`（映像不含真 `claude` 與 `gh`） |
 | `BRIDGE_RESEARCH_FETCH_MAX_BYTES` | `5242880`（5 MiB） | 原生抓取單一回應的位元組上限；≥1 |
 | `BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS` | `20` | 原生抓取的逾時秒數；>0 的有限數字 |
+| `BRIDGE_SCAFFOLD_ROOT` | （無預設） | 軌道 B 新專案的骨架根；未設＝軌道 B 停用；自動併入允許根；不可是檔案系統根 |
+| `BRIDGE_WORKTREE_ROOT` | `<BRIDGE_RESEARCH_ROOT>/_worktrees` | 軌道 A 的 git worktree 根（repo 外） |
+| `BRIDGE_REPO_ROOT` | `<monorepo>` | 軌道 A 要寫的 monorepo 根；`repo_writable` 與 git 子行程 cwd 讀它 |
+| `BRIDGE_ROUTE_TIMEOUT_SECONDS` | `300` | `:route` 同步執行的牆鐘上限（1～3600；console-api 讀逾時 330 s 必須更大） |
 | `BRIDGE_DB_DSN` | （未設＝純檔案模式） | PostgreSQL DSN；設了才寫 DB、鎖才跨實例。**研究端點一律需要它**（見上列 `BRIDGE_RESEARCH_WRITE_TOKEN`） |
 | `BRIDGE_DB_SCHEMA` | `console` | **Console 九張表所在的 schema**。DB 模式的 SQL 一律用 schema 限定名（`console.execution_runs`、`console.execution_steps`、`console.checkpoints`），以 `psycopg.sql.Identifier` 引用；AutoClaude 自己的 alembic 在 `public` 有同名表，所以不可用 `public`。advisory lock 不是表，不受影響 |
 | `BRIDGE_INSTANCE` | `<hostname>-<pid>-<uuid8>` | 本實例識別（≤100 字，寫進 `execution_runs.bridge_instance`） |

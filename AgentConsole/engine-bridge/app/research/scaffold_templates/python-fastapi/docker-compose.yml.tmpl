@@ -1,0 +1,12 @@
+# {{project_name}} 的本機 compose（只放佔位符與環境變數引用；真值走 .env）
+services:
+  app:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    command: ["python", "-m", "uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

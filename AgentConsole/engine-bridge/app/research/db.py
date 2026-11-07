@@ -44,6 +44,12 @@ CONTROLLED_UPDATE_COLUMNS: dict[str, frozenset[str]] = {
         "status", "fixed_in_version_no", "waived_by", "waiver_reason", "resolved_at"}),
     "research_sources": frozenset({"verification"}),
     "research_allowlist_entries": frozenset({"enabled", "disabled_by", "disabled_at"}),
+    # P1（V19；與 V16 通用守衛函式的允許清單同義，`test_research_db` 對真庫逐表比對）
+    "research_route_decisions": frozenset({
+        "status", "failure_step", "finished_at", "repo_url", "published_docs",
+        "console_project_id", "impl_fsm_project", "impl_state_dir"}),
+    "research_route_steps": frozenset({
+        "status", "exit_code", "stdout_tail", "stderr_tail", "finished_at"}),
 }
 #: append-only：寫入器對這些表沒有任何 UPDATE 或 DELETE（DB 另有守衛作第二道）。
 APPEND_ONLY_TABLES = frozenset({
@@ -67,7 +73,11 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "research.gate": frozenset({"gate", "decision", "decidedBy", "fsmStage", "frozenDigests"}),
     "research.reconcile": frozenset({"consistent", "driftCount"}),
     "research.alert": frozenset({"kind", "detail"}),
+    # P1：分流每步與路由終態各一筆（契約 §3；stepNo 0＝路由列本身）
+    "research.route": frozenset({"routeId", "stepNo", "step", "status"}),
 }
+#: 各事件型別在必填鍵之外**可選**的鍵（`research.route` 的補償事件帶 `reason`，D-112）。
+EVENT_OPTIONAL_KEYS: dict[str, frozenset[str]] = {"research.route": frozenset({"reason"})}
 #: P0 事件型別（Bridge 事件帳）；`research.replay_gap` 是傳輸層訊號、不在其中（API 契約 §3）。
 EVENT_TYPES = frozenset(EVENT_PAYLOAD_KEYS)
 VERIFICATION_ORDER = {"V1": 1, "V2": 2, "V3": 3}
@@ -326,10 +336,13 @@ class ResearchTx:
         """配 `seq`（專案列 `last_event_seq`＋1，同交易；回滾不留洞）並寫事件列。"""
         if event_type not in EVENT_TYPES:
             raise ResearchGuardError("event_type", f"不在 P0 事件型別內：{event_type!r}")
-        if set(payload) != EVENT_PAYLOAD_KEYS[event_type]:
+        required = EVENT_PAYLOAD_KEYS[event_type]
+        allowed = required | EVENT_OPTIONAL_KEYS.get(event_type, frozenset())
+        if not required <= set(payload) <= allowed:
             raise ResearchGuardError(
                 "event_payload", f"{event_type} 的 payload 鍵須為 "
-                f"{sorted(EVENT_PAYLOAD_KEYS[event_type])}，收到 {sorted(payload)}")
+                f"{sorted(required)}（可另帶 {sorted(allowed - required)}），收到 "
+                f"{sorted(payload)}")
         if not actor or len(actor) > 100:
             raise ResearchGuardError("actor", "actor 須為 1 至 100 字")
         bumped = self.one(_SQL_BUMP_SEQ, (research_id,))
@@ -861,6 +874,237 @@ def _op_set_allowlist_enabled(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str,
     return {"applied": True}
 
 
+# ── P1 分流操作（V19；Bridge 是 research_route_decisions／research_route_steps 的唯一寫入者）──────
+#: 分流的步驟名（V19 CHECK 的十一個值；軌道 A 與 B 各用其中一部分，順序見 `route.py`）。
+ROUTE_STEP_NAMES: tuple[str, ...] = (
+    "VALIDATE_TARGET", "GIT_SWITCH", "SCAFFOLD_FILES", "GIT_INIT", "GIT_COMMIT", "GH_REPO_CREATE",
+    "PUBLISH_DOCS", "COPY_WORKSPACE", "REGISTER_STUB", "IMPL_KEY_INIT", "BASELINE_ADOPT")
+#: 分流列的 `status` 值域（V19 CHECK）；進行中＝部分唯一索引 `ux_research_route_active` 涵蓋的三值。
+ROUTE_ACTIVE_STATUSES = ("PENDING", "RUNNING", "SUCCEEDED")
+ROUTE_FLOW_RUNNING = {"step": "route", "phase": "ROUTING", "status": "RUNNING", "detail": ""}
+ROUTE_FLOW_DONE = {"step": "build", "phase": "ROUTED", "status": "IDLE", "detail": ""}
+_SQL_ROUTE_LOCK = ("SELECT id, research_id, status, failure_step FROM "
+                   "{s}.research_route_decisions WHERE id = %s FOR UPDATE")
+_SQL_INSERT_ROUTE = (
+    "INSERT INTO {s}.research_route_decisions (id, research_id, track, target_kind, "
+    "target_module, target_path, git_branch, base_ref, repo_visibility, stack_template, "
+    "console_project_id, scope_differs_reason, decided_by, created_at) VALUES (%s, %s, %s, %s, "
+    "%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW())) ON CONFLICT (id) DO NOTHING "
+    "RETURNING id")
+_SQL_UPDATE_ROUTE_STATUS = "UPDATE {s}.research_route_decisions SET status = %s WHERE id = %s"
+_SQL_UPDATE_ROUTE_FINISH = (
+    "UPDATE {s}.research_route_decisions SET status = %s, failure_step = %s, finished_at = %s, "
+    "published_docs = %s, repo_url = %s WHERE id = %s")
+_SQL_UPDATE_ROUTE_IMPL = ("UPDATE {s}.research_route_decisions SET impl_fsm_project = %s, "
+                          "impl_state_dir = %s WHERE id = %s")
+_SQL_UPDATE_PROJECT_CONSOLE = ("UPDATE {s}.research_projects SET console_project_id = %s, "
+                               "updated_at = NOW() WHERE id = %s")
+_SQL_STEP_LOCK = ("SELECT status, exit_code, stdout_tail, stderr_tail FROM "
+                  "{s}.research_route_steps WHERE route_id = %s AND step_no = %s FOR UPDATE")
+_SQL_INSERT_STEP = (
+    "INSERT INTO {s}.research_route_steps (route_id, step_no, step, status, argv_redacted, "
+    "exit_code, stdout_tail, stderr_tail, started_at, finished_at) VALUES (%s, %s, %s, %s, %s, "
+    "%s, %s, %s, COALESCE(%s, NOW()), %s) ON CONFLICT (route_id, step_no) DO NOTHING "
+    "RETURNING step_no")
+_SQL_UPDATE_STEP = ("UPDATE {s}.research_route_steps SET status = %s, exit_code = %s, "
+                    "stdout_tail = %s, stderr_tail = %s, finished_at = %s WHERE route_id = %s "
+                    "AND step_no = %s")
+_SQL_OPEN_STEPS = ("SELECT step_no, step FROM {s}.research_route_steps WHERE route_id = %s AND "
+                   "status = 'RUNNING' ORDER BY step_no FOR UPDATE")
+_SQL_LAST_STEP = ("SELECT step FROM {s}.research_route_steps WHERE route_id = %s "
+                  "ORDER BY step_no DESC LIMIT 1")
+
+
+def _route_event(tx: ResearchTx, rid: Any, route_id: Any, step_no: int, step: str, status: str,
+                 *, actor: str, stamp: str, reason: str | None = None) -> int | None:
+    """`research.route` 事件（契約 §3）；路由 id、步號、狀態、時間戳相同者只寫一次（重放冪等）。"""
+    ref = uuid.uuid5(uuid.NAMESPACE_URL, f"route:{route_id}:{step_no}:{status}:{stamp}")
+    if tx.one(_SQL_EVENT_EXISTS, (rid, "research.route", "route", ref)) is not None:
+        return None
+    payload: dict[str, Any] = {"routeId": str(route_id), "stepNo": step_no, "step": step,
+                               "status": status}
+    if reason is not None:
+        payload["reason"] = reason
+    return tx.append_event(rid, "research.route", payload, actor=actor, ref_kind="route",
+                           ref_id=ref)
+
+
+def _op_route_create(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """建分流列（`PENDING`）＋`research.route`。每研究專案至多一個 PENDING／RUNNING／SUCCEEDED
+    （部分唯一索引）：違反＝`route_conflict`；`console_project_id` 指向不存在的專案＝
+    `console_project_not_found`（外鍵由 DB 擋，這裡轉成結構化錯誤）。同 id 已存在＝跳過。"""
+    rid, route_id = _uid(p["research_id"]), _uid(p["route_id"])
+    tx.lock_project(rid)
+    if tx.one(_SQL_ROUTE_LOCK, (route_id,)) is not None:
+        return {"applied": False}
+    try:
+        row = tx.one(_SQL_INSERT_ROUTE, (
+            route_id, rid, p["track"], p["target_kind"], p.get("target_module"), p["target_path"],
+            p.get("git_branch"), p.get("base_ref"), p.get("repo_visibility"),
+            p.get("stack_template"), _uid(p["console_project_id"]) if p.get(
+                "console_project_id") else None, p.get("scope_differs_reason"), p["decided_by"],
+            _dt(p.get("created_at"))))
+    except psycopg.errors.UniqueViolation as exc:
+        raise ResearchConflict("route_conflict", reason="route_active") from exc
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise ResearchGuardError("console_project_not_found", str(p.get("console_project_id"))
+                                 ) from exc
+    assert row is not None
+    seq = _route_event(tx, rid, route_id, 0, "ROUTE", "PENDING", actor=p["decided_by"],
+                       stamp=str(p.get("created_at") or ""))
+    return {"applied": True, "seq": seq}
+
+
+def _op_route_start(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """`PENDING`／`FAILED` → `RUNNING`（重試沿用同列）；同交易把游標寫成 `route／ROUTING／RUNNING`。
+    已是 `RUNNING`＝跳過；其他狀態＝`route_conflict`。"""
+    rid, route_id = _uid(p["research_id"]), _uid(p["route_id"])
+    project = tx.lock_project(rid)
+    row = tx.one(_SQL_ROUTE_LOCK, (route_id,))
+    if row is None:
+        raise ResearchGuardError("route_not_found", str(route_id))
+    if row["status"] == "RUNNING":
+        return {"applied": False}
+    if row["status"] not in ("PENDING", "FAILED"):
+        raise ResearchConflict("route_conflict", status=row["status"])
+    tx.run(_SQL_UPDATE_ROUTE_STATUS, ("RUNNING", route_id))
+    _route_event(tx, rid, route_id, 0, "ROUTE", "RUNNING", actor=p["actor"],
+                 stamp=str(p.get("occurred_at") or ""))
+    _set_cursor(tx, rid, project, ROUTE_FLOW_RUNNING, p["actor"], p.get("occurred_at"))
+    return {"applied": True}
+
+
+def _op_route_step(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """步驟列（先 `RUNNING`、副作用做完再改 `OK`／`FAILED`；DB 先於副作用）＋`research.route`。
+    列已存在時只更新受控欄位（狀態、結束碼、尾端文字、結束時間）——重試失敗步驟沿用同列。"""
+    rid, route_id, step_no = _uid(p["research_id"]), _uid(p["route_id"]), int(p["step_no"])
+    tx.lock_project(rid)
+    if p["step"] not in ROUTE_STEP_NAMES:
+        raise ResearchGuardError("route_step", f"未知的分流步驟 {p['step']!r}")
+    existing = tx.one(_SQL_STEP_LOCK, (route_id, step_no))
+    finished = _dt(p.get("finished_at"))
+    if existing is None:
+        tx.one(_SQL_INSERT_STEP, (
+            route_id, step_no, p["step"], p["status"], str(p.get("argv_redacted", "")),
+            p.get("exit_code"), str(p.get("stdout_tail", ""))[-2000:],
+            str(p.get("stderr_tail", ""))[-2000:], _dt(p.get("started_at")), finished))
+        applied = True
+    else:
+        new = (p["status"], p.get("exit_code"), str(p.get("stdout_tail", ""))[-2000:],
+               str(p.get("stderr_tail", ""))[-2000:])
+        applied = new != (existing["status"], existing["exit_code"], existing["stdout_tail"],
+                          existing["stderr_tail"])
+        if applied:
+            tx.run(_SQL_UPDATE_STEP, (*new, finished, route_id, step_no))
+    seq = _route_event(tx, rid, route_id, step_no, p["step"], p["status"], actor=p["actor"],
+                       stamp=str(p.get("finished_at") or p.get("started_at") or ""))
+    return {"applied": applied, "seq": seq}
+
+
+def _op_route_bind_impl(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """內環鍵建好之後寫 `impl_fsm_project`／`impl_state_dir`（失敗前這兩欄一律為 NULL）。"""
+    route_id = _uid(p["route_id"])
+    if tx.one(_SQL_ROUTE_LOCK, (route_id,)) is None:
+        raise ResearchGuardError("route_not_found", str(route_id))
+    tx.run(_SQL_UPDATE_ROUTE_IMPL, (p["impl_fsm_project"], p["impl_state_dir"], route_id))
+    return {"applied": True}
+
+
+def _op_route_finish(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """分流終態（`SUCCEEDED`／`FAILED`）＋游標＋`research.route`，同一交易。成功：游標
+    `build／ROUTED／IDLE`、`failure_step` 清為 NULL、回填專案列的 `console_project_id`；失敗：游標
+    `route／ROUTING／FAILED` 且 `flow_detail` 為失敗步驟名（D-105）。已是該終態＝跳過。"""
+    rid, route_id = _uid(p["research_id"]), _uid(p["route_id"])
+    project = tx.lock_project(rid)
+    row = tx.one(_SQL_ROUTE_LOCK, (route_id,))
+    if row is None:
+        raise ResearchGuardError("route_not_found", str(route_id))
+    status = p["status"]
+    if status not in ("SUCCEEDED", "FAILED"):
+        raise ResearchGuardError("route_status", f"終態只准 SUCCEEDED／FAILED：{status!r}")
+    if row["status"] == status:
+        return {"applied": False}
+    failure = p.get("failure_step") if status == "FAILED" else None
+    tx.run(_SQL_UPDATE_ROUTE_FINISH, (
+        status, failure, _dt(p.get("finished_at")) or utc_now(),
+        Jsonb(dict(p.get("published_docs") or {})), p.get("repo_url"), route_id))
+    if status == "SUCCEEDED":
+        if p.get("console_project_id"):
+            try:
+                tx.run(_SQL_UPDATE_PROJECT_CONSOLE, (_uid(p["console_project_id"]), rid))
+            except psycopg.errors.UniqueViolation as exc:
+                raise ResearchConflict("route_conflict", reason="console_project_bound") from exc
+        flow = ROUTE_FLOW_DONE
+    else:
+        flow = {"step": "route", "phase": "ROUTING", "status": "FAILED",
+                "detail": str(failure or "")}
+    stamp = str(p.get("finished_at") or "")
+    seq = _route_event(tx, rid, route_id, 0, "ROUTE", status, actor=p["actor"], stamp=stamp)
+    _set_cursor(tx, rid, project, flow, p["actor"], p.get("occurred_at"))
+    return {"applied": True, "seq": seq}
+
+
+def _op_route_compensate(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """console-api 補償完 Console 專案列後的通知：只有 `FAILED` 的列才改 `COMPENSATED`（D-112）。
+    游標不動；不做任何 FSM 或檔案動作。重放（列已是 `COMPENSATED` 且事件已寫）＝跳過。"""
+    rid, route_id = _uid(p["research_id"]), _uid(p["route_id"])
+    tx.lock_project(rid)
+    row = tx.one(_SQL_ROUTE_LOCK, (route_id,))
+    if row is None:
+        raise ResearchGuardError("route_not_found", str(route_id))
+    stamp = str(p.get("occurred_at") or "")
+    ref = uuid.uuid5(uuid.NAMESPACE_URL, f"route:{route_id}:0:COMPENSATED:{stamp}")
+    if row["status"] == "COMPENSATED" and tx.one(
+            _SQL_EVENT_EXISTS, (rid, "research.route", "route", ref)) is not None:
+        return {"applied": False}
+    if row["status"] != "FAILED":
+        raise ResearchConflict("route_conflict", status=row["status"])
+    tx.run(_SQL_UPDATE_ROUTE_STATUS, ("COMPENSATED", route_id))
+    seq = _route_event(tx, rid, route_id, 0, "ROUTE", "COMPENSATED", actor=p["actor"],
+                       stamp=stamp, reason=str(p.get("reason", ""))[:500])
+    return {"applied": True, "seq": seq}
+
+
+def _op_route_reap(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """孤兒回收（Bridge 重啟時）：卡在 `PENDING`／`RUNNING` 的分流列＝上一個行程被中斷；把仍在
+    `RUNNING` 的步驟列標 `FAILED`（`stderr_tail` 為 `interrupted`）、分流列標 `FAILED` 並寫游標
+    `route／ROUTING／FAILED`，專案才不會因部分唯一索引永遠無法重試。"""
+    rid, route_id = _uid(p["research_id"]), _uid(p["route_id"])
+    project = tx.lock_project(rid)
+    row = tx.one(_SQL_ROUTE_LOCK, (route_id,))
+    if row is None or row["status"] not in ("PENDING", "RUNNING"):
+        return {"applied": False}
+    now = utc_now()
+    opened = tx.rows(_SQL_OPEN_STEPS, (route_id,))
+    for step in opened:
+        tx.run(_SQL_UPDATE_STEP, ("FAILED", None, "", "interrupted", now, route_id,
+                                  step["step_no"]))
+        _route_event(tx, rid, route_id, int(step["step_no"]), step["step"], "FAILED",
+                     actor=p["actor"], stamp=now.isoformat())
+    last = tx.one(_SQL_LAST_STEP, (route_id,))
+    failure = (opened[0]["step"] if opened else (last["step"] if last else "VALIDATE_TARGET"))
+    tx.run(_SQL_UPDATE_ROUTE_FINISH, ("FAILED", failure, now, Jsonb({}), None, route_id))
+    _route_event(tx, rid, route_id, 0, "ROUTE", "FAILED", actor=p["actor"],
+                 stamp=now.isoformat())
+    _set_cursor(tx, rid, project, {"step": "route", "phase": "ROUTING", "status": "FAILED",
+                                   "detail": failure}, p["actor"], now)
+    return {"applied": True, "failure_step": failure}
+
+
+#: P1 分流的操作登記表。刻意與 `OPS`／`METHOD_KINDS` 分開：後兩者與 P0 的「公開寫入方法一一對應、
+#: 逐方法實跑」鎖綁定（`tests/test_research_db.py`），P1 的分流操作只經 `DurableWriter.persist`
+#: 與 `ResearchDb.apply(kind, …)` 呼叫，不新增公開寫入方法。
+ROUTE_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
+    "route.create": _op_route_create,
+    "route.start": _op_route_start,
+    "route.step": _op_route_step,
+    "route.bind_impl": _op_route_bind_impl,
+    "route.finish": _op_route_finish,
+    "route.compensate": _op_route_compensate,
+    "route.reap": _op_route_reap,
+}
+
+
 Op = Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]
 #: 操作登記表（kind → 函式）。outbox 記錄的 `kind` 就是這裡的鍵。
 OPS: dict[str, Op] = {
@@ -931,7 +1175,7 @@ class ResearchDb:
 
     def apply(self, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """跑一個登記的操作（一個交易）；outbox 重放與公開寫入方法都走這裡。"""
-        fn = OPS.get(kind)
+        fn = OPS.get(kind) or ROUTE_OPS.get(kind)
         if fn is None:
             raise ResearchGuardError("unknown_op", f"未登記的操作：{kind!r}")
         with self.transaction() as tx:
@@ -1046,6 +1290,58 @@ class ResearchDb:
         rows = self.query("SELECT count(*) AS n FROM {s}.research_stage_runs "
                           "WHERE status IN ('QUEUED', 'RUNNING')")
         return int(rows[0]["n"])
+
+    # ── P1 分流的唯讀查詢 ─────────────────────────────────────────────────────────────────
+    def get_route(self, route_id: Any) -> dict[str, Any] | None:
+        rows = self.query("SELECT * FROM {s}.research_route_decisions WHERE id = %s",
+                          (_uid(route_id),))
+        return rows[0] if rows else None
+
+    def latest_route(self, research_id: Any) -> dict[str, Any] | None:
+        """該研究專案最近一筆分流列（任何狀態；`created_at` 新者優先）。"""
+        rows = self.query(
+            "SELECT * FROM {s}.research_route_decisions WHERE research_id = %s "
+            "ORDER BY created_at DESC LIMIT 1", (_uid(research_id),))
+        return rows[0] if rows else None
+
+    def active_route(self, research_id: Any) -> dict[str, Any] | None:
+        """PENDING／RUNNING／SUCCEEDED 的分流列（部分唯一索引保證至多一筆）。"""
+        rows = self.query(
+            "SELECT * FROM {s}.research_route_decisions WHERE research_id = %s AND status IN "
+            "('PENDING', 'RUNNING', 'SUCCEEDED')", (_uid(research_id),))
+        return rows[0] if rows else None
+
+    def route_steps(self, route_id: Any) -> list[dict[str, Any]]:
+        return self.query("SELECT * FROM {s}.research_route_steps WHERE route_id = %s "
+                          "ORDER BY step_no", (_uid(route_id),))
+
+    def unfinished_routes(self) -> list[dict[str, Any]]:
+        """全站卡在 PENDING／RUNNING 的分流列（孤兒回收用）。"""
+        return self.query("SELECT id, research_id, status FROM {s}.research_route_decisions "
+                          "WHERE status IN ('PENDING', 'RUNNING') ORDER BY created_at")
+
+    def latest_artifact_version(self, research_id: Any, kind: str) -> int:
+        rows = self.query("SELECT COALESCE(MAX(version), 0) AS head FROM "
+                          "{s}.research_artifacts WHERE research_id = %s AND kind = %s",
+                          (_uid(research_id), kind))
+        return int(rows[0]["head"])
+
+    def gate0_digests(self, research_id: Any) -> dict[str, str] | None:
+        """最近一筆 Gate 0 核准的凍結摘要（路徑 → 十六進位 sha256；沒有核准回 None）。"""
+        rows = self.query(
+            "SELECT id, frozen_digests FROM {s}.research_gate_decisions WHERE research_id = %s "
+            "AND gate = 'GATE0' AND decision = 'APPROVED' ORDER BY decided_at DESC LIMIT 1",
+            (_uid(research_id),))
+        if not rows:
+            return None
+        return {str(k): str(v).removeprefix("sha256:")
+                for k, v in (rows[0]["frozen_digests"] or {}).items()}
+
+    def gate0_decision_id(self, research_id: Any) -> str | None:
+        rows = self.query(
+            "SELECT id FROM {s}.research_gate_decisions WHERE research_id = %s AND gate = 'GATE0' "
+            "AND decision = 'APPROVED' ORDER BY decided_at DESC LIMIT 1", (_uid(research_id),))
+        return str(rows[0]["id"]) if rows else None
 
     def list_events(self, research_id: Any, *, after_seq: int = 0,
                     limit: int = 100) -> list[dict[str, Any]]:

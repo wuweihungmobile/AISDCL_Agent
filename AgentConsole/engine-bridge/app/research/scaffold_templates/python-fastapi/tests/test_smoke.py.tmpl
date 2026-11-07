@@ -1,0 +1,12 @@
+"""最小煙霧測試（只用標準庫與 pytest）：供 AISDLC evaluator 綁定 AT 的 `tests/test_*.py` 形態。"""
+from __future__ import annotations
+
+from app.main import PROJECT_NAME, health
+
+
+def test_health_reports_ok_for_this_project() -> None:
+    assert health() == {"status": "ok", "project": PROJECT_NAME}
+
+
+def test_project_name_is_the_one_the_scaffold_was_expanded_with() -> None:
+    assert PROJECT_NAME == "{{project_name}}"

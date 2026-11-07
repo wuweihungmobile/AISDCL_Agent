@@ -1,0 +1,19 @@
+# {{project_name}}
+
+由 ResearchToPRD 軌道 B 建立的 Python／FastAPI 專案骨架（擁有者 `{{owner}}`、庫名 `{{repo_name}}`）。
+
+## 目錄
+
+- `my-project/{{slug}}/`：研究工作區的完整副本（`00_research`～`03_execution`；`00_research/raw/` 在本機保留、
+  不入版控）。PRD 基線在 `my-project/{{slug}}/01_specs/PRD-v1.0.0.md`。
+- `app/`：最小 FastAPI 應用（`app/main.py`）。
+- `tests/`：最小 pytest（`tests/test_smoke.py`）。
+
+## 開發
+
+```bash
+python -m venv .venv
+python -m pytest -q
+```
+
+複製 `.env.example` 為 `.env` 並填入自己的值（`.env` 已被 `.gitignore` 排除，請勿提交機密）。

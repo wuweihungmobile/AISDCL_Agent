@@ -30,6 +30,7 @@ from ..settings import (
     RESEARCH_DEFAULT_FETCH_MAX_BYTES,
     RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS,
     RESEARCH_DEFAULT_MAX_CONCURRENT_RUNS,
+    RESEARCH_DEFAULT_ROUTE_TIMEOUT_SECONDS,
     RESEARCH_DEFAULT_STEP_TIMEOUT_SECONDS,
     SettingsError,
     _anchor_guard,
@@ -51,6 +52,10 @@ RESEARCH_ENV_VARS: tuple[str, ...] = (
     "BRIDGE_RESEARCH_CLAUDE_COMMAND",
     "BRIDGE_RESEARCH_FETCH_MAX_BYTES",
     "BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS",
+    "BRIDGE_SCAFFOLD_ROOT",
+    "BRIDGE_WORKTREE_ROOT",
+    "BRIDGE_REPO_ROOT",
+    "BRIDGE_ROUTE_TIMEOUT_SECONDS",
 )
 
 #: 量不到的資訊一律標這個字樣，不省略鍵（TCS AT-960-2-7）。
@@ -66,6 +71,12 @@ CAPABILITY_EXTRA_KEYS: tuple[str, ...] = (
 _HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
 #: 一個 stage 步驟牆鐘的上界（秒）：一天。再長的值只會是誤設。
 _STEP_TIMEOUT_MAX = 86_400
+#: 分流同步執行牆鐘的上界（秒）：一小時（console-api 的讀逾時另有 330 s，設更大只會被讀逾時截掉）。
+_ROUTE_TIMEOUT_MAX = 3_600
+#: 軌道 B 範本的登記目錄（P1 僅 `python-fastapi`）；測試以 monkeypatch 換成夾具樹（證明清單取自
+#: 目錄掃描、不是常數）。
+TEMPLATES_DIR = Path(__file__).resolve().parent / "scaffold_templates"
+_TEMPLATE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 @dataclass(frozen=True)
@@ -82,6 +93,10 @@ class ResearchEnv:
     fetch_max_bytes: int
     fetch_timeout_seconds: float
     allowed_roots: tuple[Path, ...]
+    scaffold_root: Path | None = None
+    worktree_root: Path | None = None
+    repo_root: Path | None = None
+    route_timeout_seconds: int = RESEARCH_DEFAULT_ROUTE_TIMEOUT_SECONDS
 
 
 def default_research_root(env: Mapping[str, str], *, windows: bool | None = None) -> Path:
@@ -175,6 +190,19 @@ def parse_research_env(env: Mapping[str, str], *, allowed_roots: tuple[Path, ...
         if root not in allowed_roots:
             merged = (*allowed_roots, root)
     command = env.get("BRIDGE_RESEARCH_CLAUDE_COMMAND", "").strip() or None
+    scaffold_root = _optional_root(env, "BRIDGE_SCAFFOLD_ROOT", "新專案會建在這個目錄之下")
+    worktree_root = _optional_root(env, "BRIDGE_WORKTREE_ROOT", "worktree 會建在這個目錄之下")
+    repo_root = _optional_root(env, "BRIDGE_REPO_ROOT", "git 子行程的 cwd 與 repo 可寫探測都讀它")
+    for var, extra in (("BRIDGE_SCAFFOLD_ROOT", scaffold_root),
+                       ("BRIDGE_WORKTREE_ROOT", worktree_root)):
+        if extra is None:
+            continue
+        if roots_explicit and not any(is_within(extra, allowed) for allowed in allowed_roots):
+            raise SettingsError(
+                f"{var}（{extra}）不在 BRIDGE_ALLOWED_PATH_ROOTS 之下：請明設於允許根之內，"
+                "或把它加進 BRIDGE_ALLOWED_PATH_ROOTS")
+        if extra not in merged and not any(is_within(extra, m) for m in merged):
+            merged = (*merged, extra)
     return ResearchEnv(
         root=root,
         write_token=token,
@@ -192,7 +220,19 @@ def parse_research_env(env: Mapping[str, str], *, allowed_roots: tuple[Path, ...
         fetch_timeout_seconds=_parse_positive_float(
             env, "BRIDGE_RESEARCH_FETCH_TIMEOUT_SECONDS", RESEARCH_DEFAULT_FETCH_TIMEOUT_SECONDS),
         allowed_roots=merged,
+        scaffold_root=scaffold_root,
+        worktree_root=worktree_root,
+        repo_root=repo_root,
+        route_timeout_seconds=_parse_int(env, "BRIDGE_ROUTE_TIMEOUT_SECONDS",
+                                         RESEARCH_DEFAULT_ROUTE_TIMEOUT_SECONDS, minimum=1,
+                                         maximum=_ROUTE_TIMEOUT_MAX),
     )
+
+
+def _optional_root(env: Mapping[str, str], name: str, why: str) -> Path | None:
+    """選填的目錄設定：未設（含全空白）＝None；有設則解析並擋檔案系統根。"""
+    raw = env.get(name, "").strip()
+    return _anchor_guard(Path(raw), name, why) if raw else None
 
 
 def research_info(cfg: Settings) -> dict[str, Any]:
@@ -214,26 +254,46 @@ def research_info(cfg: Settings) -> dict[str, Any]:
         "gh_cli": {"ok": gh, "authenticated": NOT_EVALUABLE},
         "git": {"ok": git, "version": NOT_EVALUABLE},
         "web_layer_enabled": bool(cfg.research_web_allowlist),
-        "scaffold_templates": [],
+        # P1（D-96）：軌道 B 停用（未設 BRIDGE_SCAFFOLD_ROOT）時不列範本；否則取目錄掃描結果。
+        "scaffold_templates": (list_template_ids()
+                               if cfg.research_scaffold_root is not None else []),
     }
 
 
-def repo_writable() -> bool:
-    """軌道 A（分流到既有模組）需要寫 monorepo：Bridge 在 monorepo 內且該目錄可寫＝真；容器內
-    （`REPO_ROOT` 不像 monorepo、或唯讀掛載）＝假。只做權限探測（`os.access`），不寫任何東西。"""
+def list_template_ids(base: Path | None = None) -> list[str]:
+    """範本登記目錄的掃描結果（字母序）：只認名稱合 `[A-Za-z0-9_-]` 且內含至少一個檔案的子目錄
+    （空目錄與非法名稱不列；新增合法目錄即出現、刪除即消失）。`base` 省略取 `TEMPLATES_DIR`。"""
+    root = TEMPLATES_DIR if base is None else base
+    if not root.is_dir():
+        return []
+    found = [child.name for child in root.iterdir()
+             if child.is_dir() and _TEMPLATE_ID_RE.fullmatch(child.name)
+             and any(p.is_file() for p in child.rglob("*"))]
+    return sorted(found)
+
+
+def repo_writable(cfg: Settings | None = None) -> bool:
+    """軌道 A（分流到既有模組）需要寫 monorepo：容器內（`REPO_ROOT` 不像 monorepo、或唯讀）＝假。
+    只做權限探測（`os.access`），不寫任何東西。`BRIDGE_REPO_ROOT` 明設（D-96）時讀它：目錄存在且
+    可寫即為真（INT 載具指向拋棄式 clone，不要求它像 monorepo）；未設＝Bridge 所在的 `REPO_ROOT`
+    須像 monorepo 且可寫。"""
+    override = None if cfg is None else cfg.research_repo_root
+    if override is not None:
+        return override.is_dir() and os.access(override, os.W_OK)
     return _looks_like_monorepo(REPO_ROOT) and os.access(REPO_ROOT, os.W_OK)
 
 
 def research_capabilities(cfg: Settings, *, fetch_hosts: Sequence[str]) -> dict[str, Any]:
     """`GET /research/capabilities` 的本文：`research_info` 的八個鍵，加上契約 §2.1 的五個
     （`CAPABILITY_EXTRA_KEYS`）。`fetch_hosts` 由呼叫端給（有效 FETCH 清單＝部署基底 ∪ 啟用中的
-    ADMIN 條目；後者在資料庫，這裡不查）。`scaffold_root` 在 P0 恆為 `None`（軌道 B 的
-    `BRIDGE_SCAFFOLD_ROOT` 屬 P1，未實作＝停用）。"""
+    ADMIN 條目；後者在資料庫，這裡不查）。`scaffold_root` 取 `BRIDGE_SCAFFOLD_ROOT`（P1；無預設，
+    未設＝`None`＝軌道 B 停用）。"""
     return {
         **research_info(cfg),
         "sdd_root": None if cfg.sdd_root is None else str(cfg.sdd_root),
         "research_root": str(cfg.research_root),
-        "scaffold_root": None,
-        "repo_writable": repo_writable(),
+        "scaffold_root": (None if cfg.research_scaffold_root is None
+                          else str(cfg.research_scaffold_root)),
+        "repo_writable": repo_writable(cfg),
         "fetch_hosts": list(fetch_hosts),
     }

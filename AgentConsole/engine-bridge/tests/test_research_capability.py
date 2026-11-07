@@ -5,8 +5,11 @@
   ro    不寫任何東西（無寫檔與建目錄形態），不碰子行程與網路
   rw    可寫檔案與資料庫；不碰子行程與網路
   net   可用網路庫；只准住在 `research/fetch/` 之下（PKG-BR-B 補登記列）
-  exec  可驅動子行程（自己 Popen，或經 FSM 子行程的門 `sdd_cli`／`fsm_ops`／`orchestrator`）；
-        也可寫檔
+  exec  可驅動子行程（自己 Popen，或經 FSM 子行程的門 `sdd_cli`／`fsm_ops`／`orchestrator`／
+        `gitops`）；也可寫檔
+  vcs   git／gh 子行程的**唯一出口**（P1；只有 `research/gitops.py` 可登記）：可 Popen
+        （經 procutil）、可寫檔、不碰網路庫；git／gh 的 argv 字面只准出現在這一類
+        （ADR-003 D16＋D-99）
 
 掃描範圍＝`app/research/**` 與 `app/routers/research.py`（研究面的全部原始碼）。判準函式
 `capability_problems(app_dir, registry)` 取參數，所以真樹與合成違規樹用同一份碼自證。這不是
@@ -35,9 +38,10 @@ from tests.test_research_ast_locks import call_name, owner_name
 from tests.test_sdd_integration_parity import write_shaped_calls
 
 APP_DIR = Path(__file__).resolve().parents[1] / "app"
-SURFACE_GLOBS = ("research/**/*.py", "routers/research.py")
+SURFACE_GLOBS = ("research/**/*.py", "routers/research*.py")
 FETCH_AREA = "research/fetch/"
-CATEGORIES = ("ro", "rw", "net", "exec")
+CATEGORIES = ("ro", "rw", "net", "exec", "vcs")
+VCS_MODULE = "research/gitops.py"
 
 #: fsm_ops 與路由骨架自己不 Popen，而是經 `sdd_cli` 的研究面入口驅動 FSM CLI 子行程 ⇒ exec。
 CAPABILITY: dict[str, str] = {
@@ -79,6 +83,14 @@ CAPABILITY: dict[str, str] = {
     # orchestrator 不自己 Popen（引擎由 `RunManager` 起、FSM 由 `fsm_ops`→`sdd_cli` 起），但它是驅動
     # 這兩條子行程路徑的門：import fsm_ops 的模組一律須登記為 exec。
     "research/orchestrator.py": "exec",
+    # P1 分流（BR-D1）：`gitops` 是 git／gh 的唯一出口（vcs）；`route`／`adopt` 經它與 fsm_ops
+    # 驅動子行程（自己不 Popen）＝exec；`scaffold` 只寫檔（範本展開與工作區複製；無網路、無子行程）
+    # ＝rw。
+    "research/gitops.py": "vcs",
+    "research/route.py": "exec",
+    "research/adopt.py": "exec",
+    "research/scaffold.py": "rw",
+    "routers/research_route.py": "exec",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",
@@ -96,7 +108,7 @@ OS_SPAWN = frozenset({"system", "popen", "startfile", "execl", "execle", "execlp
 ASYNC_SPAWN = frozenset({"create_subprocess_exec", "create_subprocess_shell"})
 COMMAND_CALLS = SPAWN_FUNCS | OS_SPAWN | ASYNC_SPAWN
 GIT_GH = frozenset({"git", "gh", "git.exe", "gh.exe"})
-EXEC_DOORS = frozenset({"sdd_cli", "fsm_ops", "orchestrator"})
+EXEC_DOORS = frozenset({"sdd_cli", "fsm_ops", "orchestrator", "gitops"})
 EXTRA_WRITE_NAMES = frozenset({"write_text_atomic", "mkdir", "makedirs", "rmdir", "rmtree"})
 
 Target = tuple[int, str, bool]       # (行號, 點名, 是否絕對 import)
@@ -225,15 +237,18 @@ def module_problems(rel: str, kind: str, tree: ast.AST) -> list[str]:
         out.append(f"{rel}（{kind}）：網路能力 {nets} 只准出現在 {FETCH_AREA} 下標為 net 的模組")
     if kind == "net" and not rel.startswith(FETCH_AREA):
         out.append(f"{rel}：類別 net 的模組須住在 {FETCH_AREA} 之下")
-    if kind != "exec" and uses_subprocess(tree, targets):
+    if kind not in ("exec", "vcs") and uses_subprocess(tree, targets):
         out.append(f"{rel}（{kind}）：subprocess／Popen 只准出現在標為 exec 的模組")
+    if kind == "vcs" and rel != VCS_MODULE:
+        out.append(f"{rel}：類別 vcs 只准登記給 {VCS_MODULE}（git／gh 子行程的唯一出口）")
     out += [f"{rel}:{line}：{what} 一律禁止（子行程只經 subprocess 加 procutil）"
             for line, what in forbidden_spawns(tree, targets)]
-    if kind == "exec":
-        out += [f"{rel}:{call.lineno}（exec）：子行程呼叫缺 **procutil.popen_platform_kwargs()"
+    if kind in ("exec", "vcs"):
+        out += [f"{rel}:{call.lineno}（{kind}）：子行程呼叫缺 **procutil.popen_platform_kwargs()"
                 for call in spawn_calls(tree) if not via_procutil(call)]
-    out += [f"{rel}:{line}：git／gh 的 argv 字面（研究面不呼叫 git 或 gh）"
-            for line in git_gh_lines(tree)]
+    if kind != "vcs":
+        out += [f"{rel}:{line}：git／gh 的 argv 字面（只准出現在 {VCS_MODULE}）"
+                for line in git_gh_lines(tree)]
     doors = door_imports(targets)
     if doors and kind != "exec":
         out.append(f"{rel}（{kind}）：import {doors}（FSM 子行程的門）的模組須登記為 exec")
@@ -284,7 +299,7 @@ def test_AT_960_8_8_subprocess_and_popen_appear_only_in_exec_modules_through_pro
     for rel, tree in real_trees().items():
         targets = import_targets(tree)
         if uses_subprocess(tree, targets):
-            assert CAPABILITY[rel] == "exec", f"{rel} 用了 subprocess 卻不是 exec 模組"
+            assert CAPABILITY[rel] in ("exec", "vcs"), f"{rel} 用了 subprocess 卻不是 exec／vcs"
         assert forbidden_spawns(tree, targets) == [], rel
         assert all(via_procutil(call) for call in spawn_calls(tree)), rel
     # 非空證明：掃描器認得專案真正的子行程入口形態（`**procutil.popen_platform_kwargs()`）
@@ -292,9 +307,11 @@ def test_AT_960_8_8_subprocess_and_popen_appear_only_in_exec_modules_through_pro
     assert real_spawn and all(via_procutil(call) for call in real_spawn)
 
 
-def test_AT_960_8_8_the_real_tree_has_no_git_or_gh_argv_literal() -> None:
-    assert {rel: git_gh_lines(tree) for rel, tree in real_trees().items()
-            if git_gh_lines(tree)} == {}
+def test_AT_960_8_8_git_and_gh_argv_literals_live_only_in_gitops() -> None:
+    """P1（AT-961-8-5）：原「研究面不呼叫 git 或 gh」改寫為「git／gh 的 argv 字面只准出現在
+    `research/gitops.py`」；該檔須在實樹內真的有字面（鎖要有標的）。"""
+    found = {rel for rel, tree in real_trees().items() if git_gh_lines(tree)}
+    assert found == {VCS_MODULE}, found
 
 
 # ══ 合成樹：同一份判準碼對違規逐一回報、對良性放行 ═══════════════════════════════════════════
@@ -429,6 +446,34 @@ BENIGN: list[tuple[str, dict[str, str | None]]] = [
         "sp.Popen(argv, **procutil.popen_platform_kwargs())",
         "import subprocess as sp", "from .. import procutil")}),
 ]
+
+
+# P1（AT-961-8-5）：vcs 類別與 git／gh 字面的新規則
+VIOLATIONS.extend([
+    ("vcs-category-outside-gitops", {}, {"research/settings.py": "vcs"}, "只准登記給"),
+    ("vcs-popen-without-procutil", {"research/gitops.py": spawner(
+        "subprocess.Popen(argv)", "import subprocess")}, {"research/gitops.py": "vcs"},
+     "popen_platform_kwargs"),
+    ("git-literal-in-an-exec-module", {"research/orchestrator.py": src("CMD = ['git', 'status']")},
+     {}, "只准出現在"),
+    ("a-module-importing-gitops-must-be-exec", {"research/layout.py": src("from . import gitops")},
+     {}, "須登記為 exec"),
+    ("net-library-inside-gitops", {"research/gitops.py": src("import httpx")},
+     {"research/gitops.py": "vcs"}, "網路能力"),
+])
+
+
+def test_AT_961_8_5_the_vcs_module_may_spawn_and_hold_git_literals(tmp_path: Path) -> None:
+    gitops_src = src("import subprocess", "from .. import procutil", "", "", "def go(argv):",
+                     "    return subprocess.Popen(['git', 'status'],",
+                     "                            **procutil.popen_platform_kwargs())")
+    assert synth(tmp_path, {"research/gitops.py": gitops_src},
+                 {"research/gitops.py": "vcs"}) == []
+
+
+def test_AT_961_8_5_an_unregistered_new_p1_module_is_reported(tmp_path: Path) -> None:
+    problems = synth(tmp_path, {"research/route.py": src("X = 1"), "research/adopt.py": None})
+    assert any("research/route.py：未登記" in p for p in problems), problems
 
 
 def test_AT_960_8_8_the_legal_synthetic_tree_is_clean(tmp_path: Path) -> None:

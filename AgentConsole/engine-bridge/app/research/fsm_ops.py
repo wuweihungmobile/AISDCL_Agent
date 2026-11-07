@@ -105,7 +105,12 @@ def _violation(field: str, rule: str, message: str) -> dict[str, str]:
     return {"field": field, "rule": rule, "message": message}
 
 
-def key_violations(key: object) -> list[dict[str, str]]:
+def key_violations(key: object, *, inner: bool = False) -> list[dict[str, str]]:
+    if inner:
+        if not isinstance(key, str) or not sdd_cli.is_inner_key(key):
+            return [_violation("fsm_project", "invalid_key",
+                               "內環鍵須符合 ^[a-z][a-z0-9-]{1,99}$ 且不是外環鍵形態")]
+        return []
     if not isinstance(key, str) or not sdd_cli.is_outer_key(key):
         return [_violation("fsm_project", "invalid_key",
                            "外環鍵須符合 ^research-[a-z0-9][a-z0-9-]{0,29}(-g[0-9]+)?$")]
@@ -132,10 +137,11 @@ def conflict(reason: str, **details: Any) -> ApiError:
 
 
 def _run(ctx: FsmCtx, verb: str, args: Sequence[str], *, create: bool = False,
-         approver: str | None = None) -> dict[str, Any]:
+         approver: str | None = None, inner_create: bool = False) -> dict[str, Any]:
     return sdd_cli.run_research_verb(
         verb, args, sdd_root=ctx.sdd_root, state_dir=ctx.state_dir, project=ctx.key,
-        create=create, audit=ctx.audit, approver=approver if approver is not None else ctx.actor)
+        create=create, audit=ctx.audit, approver=approver if approver is not None else ctx.actor,
+        inner_create=inner_create)
 
 
 def _bad(ctx: FsmCtx, verb: str, problem: str) -> ApiError:
@@ -211,13 +217,14 @@ def is_escalated(state: Mapping[str, Any]) -> bool:
 
 
 # ── 寫入（全部經 sdd_cli.run_research_verb）──────────────────────────────────────────────────
-def create_key(ctx: FsmCtx, *, allowed_roots: Iterable[Path]) -> str:
+def create_key(ctx: FsmCtx, *, allowed_roots: Iterable[Path], inner: bool = False) -> str:
     """**唯一建檔點**：`show` 不帶 `--must-exist`，缺檔時框架 CLI 依模板建出 INIT 狀態檔。
 
     呼叫者（P0）只有專案初始化（`POST /research/projects`；重試初始化沿用同一流程）與 `:reinit` 的
     換世代模式。鍵或目錄不合規＝422 `sanitization_failed`；建檔前檔案已存在＝409
     `fsm_state_conflict`（`details.cause=key_exists`）；建後讀回不是 INIT＝502。回傳 `"INIT"`。"""
-    violations = key_violations(ctx.key) + state_dir_violations(ctx.state_dir, allowed_roots)
+    violations = key_violations(ctx.key, inner=inner) + state_dir_violations(
+        ctx.state_dir, allowed_roots)
     if violations:
         raise sanitization_failed(violations)
     with sdd_cli.state_guard(ctx.state_dir, ctx.key):
@@ -228,7 +235,7 @@ def create_key(ctx: FsmCtx, *, allowed_roots: Iterable[Path]) -> str:
             except ApiError:
                 current = None
             raise conflict("fsm_state_conflict", current_state=current, cause="key_exists")
-        _run(ctx, sdd_cli.RESEARCH_VERB_SHOW, [], create=True)
+        _run(ctx, sdd_cli.RESEARCH_VERB_SHOW, [], create=True, inner_create=inner)
         after = current_state(ctx)
     if after != "INIT":
         raise _bad(ctx, sdd_cli.RESEARCH_VERB_SHOW, f"created state is {after!r}, expected INIT")

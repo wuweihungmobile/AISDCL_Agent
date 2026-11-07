@@ -1,0 +1,3 @@
+#!/bin/sh
+# 假 gh 的 POSIX 形態（測試夾具會複製到暫存目錄並補 exec 位元）
+exec "$FAKE_GH_PYTHON" "$(dirname "$0")/gh_fake.py" "$@"

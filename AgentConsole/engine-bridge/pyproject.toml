@@ -34,6 +34,9 @@ aisdlc-mock-claude = "app.mock_claude:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+# D-118：軌道 B 的範本目錄（含 `.tmpl`、點檔與 `.github/`）必須進 wheel／映像；以 artifacts 明列，
+# 不依賴 VCS 忽略規則的預設行為。
+artifacts = ["app/research/scaffold_templates/**"]
 
 [tool.ruff]
 line-length = 100
