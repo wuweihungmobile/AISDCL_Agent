@@ -6,6 +6,8 @@ import type { PageHelp } from "./types";
  * 欄位名是畫面字樣的逐字引用（出處鎖會到 sourceFiles 找它）：頁首與步驟列的字樣住 ResearchFlowHeader.tsx、FlowStepper.tsx，占位面板與橫幅的字樣住 ResearchWorkspaceView.tsx，
  * 第一步面板住 TopicPanel.tsx、EvidenceTimeline.tsx、EvidenceMatrixTable.tsx（研究來源設定對話框住 AllowlistDialog.tsx），
  * 第二步 PRD 工作室住 StudioPanel.tsx、PrdOutline.tsx、PrdDiffView.tsx、MermaidBlock.tsx 與審批欄 GatekeeperPanel.tsx；兩個步驟面板的欄位都登記在這一頁。
+ * P2 起 research 目錄的來源檔超過出處鎖的 30 檔上限，`sourceFiles` 改列具體檔案（每個檔至少是某個欄位名的出處）；步驟 5「交付」的字樣住 `lib/domain/research.ts` 的 `DELIVER_LABEL`
+ * （交付面板元件一律 import 它，不各寫一份），新增畫面字樣的欄位時要同步把出處檔列進來。
  * 英文只用白名單詞；數字不超過兩位。
  */
 export const researchWorkspace: PageHelp = {
@@ -16,8 +18,8 @@ export const researchWorkspace: PageHelp = {
     "第一步「研究」：寫下研究命題並啟動深研，系統會蒐集來源並整理成證據矩陣。",
     "第二步「規格工作室」：用證據草擬 PRD，經四方審查通過後，由 ADMIN 核准並凍結。",
     "第三步「分流」：選擇併入既有模組或另開新專案，OPERATOR 可預演，僅 ADMIN 可確認。",
-    "第四步「拆解與執行」：把規格拆成任務並簽核，草擬測試規格後走既有介面凍結，看板屬後續。",
-    "第五步「交付」：驗收追溯結果並發布，目前尚未開放。",
+    "第四步「拆解與執行」：把規格拆成任務並簽核，凍結測試規格後，用看板、自癒與終端監看執行。",
+    "第五步「交付」：核對追溯表，通過後建立發布標籤，也可建立合併請求。",
     "步驟列亮起的是目前做到的那一步，已完成的步驟可以點開唯讀檢視。",
     "頁首可以切換研究專案，並看到引擎狀態燈、Token 速率與預算。",
     "按「對帳」可以檢查檔案、資料庫與狀態機是否一致，只報告、不修正。",
@@ -38,7 +40,6 @@ export const researchWorkspace: PageHelp = {
       sourceNote: "預算與閾值取自執行分類的參數",
     },
     { name: "已完成，唯讀", meaning: "您打開的是已經完成的步驟，只能看，所有會寫入的動作都停用。", source: "系統自動產生" },
-    { name: "本步驟於後續階段提供", meaning: "交付這一步目前只顯示說明，還沒有可以操作的內容。", source: "系統自動產生" },
     { name: "回到游標所在步", meaning: "從說明面板回到目前真正做到的那一步。", source: "其他頁面帶入" },
     {
       name: "檔案與資料庫不一致",
@@ -138,7 +139,65 @@ export const researchWorkspace: PageHelp = {
     { name: "重新對帳", meaning: "凍結後游標沒更新時按它校正，也可以等系統自動校正。只報告差異，不修正任何一邊。", source: "您填寫或選擇" },
     { name: "規格變更中", meaning: "規格變更進行中時，拆解、簽核與草擬測試規格都暫停，執行也不能開始。", source: "系統自動產生" },
     { name: "資料可能過期", meaning: "重新載入失敗時顯示，畫面保留先前載入的內容，按重試再載入一次。", source: "系統自動產生" },
+
+    // ── 第四步其餘「看板、自癒、終端、決策彈窗、規格變更、登錄審查結果」（P2）──
+    { name: "看板", meaning: "五欄顯示拆解、測試規格、實作、自癒、回歸的進度，數字與各中心一致，連線事件到達後自動更新。", source: "執行引擎回報" },
+    { name: "諮詢視圖", meaning: "回歸驗收欄的追溯覆蓋率只供參考，是否放行以狀態機與人工審查為準。", source: "系統自動產生" },
+    { name: "Engine Bridge 無法連線", meaning: "連不上引擎橋接時，顯示資料庫的快照與快照時間；狀態機衍生的欄位標為未知，不猜。", source: "系統自動產生" },
+    { name: "未知", meaning: "狀態機的資料暫時讀不到，所以不顯示完成與否，也不顯示數字。", source: "系統自動產生" },
+    { name: "執行中心", meaning: "帶著這個研究專案前往既有的執行中心，那裡才能暫停、恢復或取消。看板不重做執行控制。", source: "其他頁面帶入" },
+    { name: "監控中心", meaning: "帶著這個研究專案前往既有的監控中心。未綁定專案或規格變更中時會停用並說明原因。", source: "其他頁面帶入" },
+    { name: "自癒監視器", meaning: "列出重試中與失敗的步驟、嘗試次數對上限，以及最近的失敗摘錄，摘錄只當純文字顯示。", source: "執行引擎回報", sourceNote: "取自執行步驟的失敗與重試紀錄" },
+    { name: "引擎未提供", meaning: "失敗歸因與補丁結果目前沒有資料來源，所以如實顯示這句，不編造內容。", source: "系統自動產生" },
+    { name: "日誌落後", meaning: "自癒日誌檔比資料庫少幾筆。按重新對帳可補寫，資料庫仍是真相來源。", source: "系統自動產生" },
+    { name: "已升級，等待人工決定", meaning: "自癒重試用盡的任務，不再自動重試；請在決策彈窗裡選通過、拒絕、重試或跳過。", source: "您填寫或選擇" },
+    { name: "補丁觸及凍結規格，請發起 SCR", meaning: "自癒的補丁動到已凍結的規格檔，系統只告警、不還原，要改規格請發起規格變更。", source: "系統自動產生" },
+    { name: "終端窗格", meaning: "與執行中心共用同一個日誌元件，收合時仍持續接收；開合狀態只存在這個瀏覽器。", source: "執行引擎回報" },
+    { name: "尚無執行批次", meaning: "這個專案還沒有執行過，所以終端窗格不連線，等第一次執行後才會有內容。", source: "系統自動產生" },
+    { name: "需要人工決定", meaning: "自癒耗盡、Agent 請求審核或引擎升級時彈出。系統不判斷是否重大，只記錄您的決定。", source: "執行引擎回報" },
+    { name: "稍後處理", meaning: "只關閉這個視窗，待辦仍留在列表與頂列徽章，這個分頁不再自動彈出。不會自動決定。", source: "您填寫或選擇" },
+    { name: "待辦決定", meaning: "尚未決定的審核請求清單，重新整理後由資料庫重建，不會因為關窗而消失。", source: "執行引擎回報" },
+    { name: "登錄 SCG", meaning: "僅 ADMIN 可用，登錄審查或追溯驗證的人工結果；失敗必填理由，結果由狀態機決定下一態。", source: "您填寫或選擇" },
+    { name: "我確認審查者未參與規格與實作", meaning: "審查關卡必勾。系統不判斷是否獨立，只記錄這份聲明與登錄者。", source: "您填寫或選擇" },
+    { name: "審查報告參照", meaning: "選填，填報告的相對路徑或網址，最多三百字，系統不驗證是否存在。", source: "您填寫或選擇" },
+    { name: "已升級，等待人工處理", meaning: "登錄結果讓狀態機進入升級狀態。恢復指令只顯示、不提供按鈕，請在 Console 外執行。", source: "系統自動產生" },
+    { name: "發起規格變更（SCR）", meaning: "OPERATOR 以上可用。小幅變更在原專案修訂，大幅變更另開後繼專案。", source: "您填寫或選擇" },
+    { name: "理由分類", meaning: "從五種中文分類選一種，系統原樣送出，供事後統計變更原因。", source: "您填寫或選擇" },
+    { name: "受影響章節", meaning: "從凍結 PRD 的章節與驗收條件挑選，最多二十項，每項最多兩百字。", source: "您填寫或選擇", sourceNote: "選項取自凍結的 PRD" },
+    { name: "證據連結", meaning: "選填，只接受安全的網址，最多五百字。顯示為純文字外部連結。", source: "您填寫或選擇" },
+    { name: "SCR 已發起", meaning: "規格變更請求已送出並開啟，流程相態改為規格變更中，等待處理。", source: "系統自動產生" },
+
+    // ── 第五步「交付」（P2；欄位釋義與第四步一次寫完）──
+    { name: "追溯表", meaning: "一個驗收條件一列，列出對應的使用者故事、單元結果與端對端結果。沒有通過的列會標紅。", source: "系統自動產生" },
+    { name: "未覆蓋", meaning: "沒有任何通過自動測試的驗收條件數。大於零時不能建立發布標籤。", source: "系統自動產生" },
+    { name: "建立 Tag", meaning: "僅 ADMIN 可用。須狀態機已達發布就緒、追溯全覆蓋且無規格變更，才能建立版本標籤。", source: "您填寫或選擇" },
+    { name: "推送到遠端", meaning: "預設不勾。勾選且有遠端時，才會把標籤推送出去，絕不使用強制推送。", source: "您填寫或選擇" },
+    { name: "建立 PR", meaning: "僅 ADMIN 可用。標題與內文由系統依資料產生，預覽後勾選確認才會送出。", source: "您填寫或選擇" },
+    { name: "開啟本地專案", meaning: "顯示專案根路徑與複製鈕。容器模式下是容器內路徑，系統不假裝能直接開啟。", source: "系統自動產生" },
+    { name: "交付紀錄", meaning: "已建立的標籤與合併請求清單，含提交編號與追溯快照的摘要值。", source: "系統自動產生" },
   ],
   states: [{ table: "researchFlow" }],
-  sourceFiles: ["components/domain/research/**"],
+  sourceFiles: [
+    "components/domain/research/BuildFrontPanel.tsx",
+    "components/domain/research/CoverageList.tsx",
+    "components/domain/research/DecisionModal.tsx",
+    "components/domain/research/EvidenceMatrixTable.tsx",
+    "components/domain/research/EvidenceTimeline.tsx",
+    "components/domain/research/FlowStepper.tsx",
+    "components/domain/research/GatekeeperPanel.tsx",
+    "components/domain/research/GateRegisterDialog.tsx",
+    "components/domain/research/HealingMonitor.tsx",
+    "components/domain/research/KanbanColumn.tsx",
+    "components/domain/research/PendingReviewList.tsx",
+    "components/domain/research/PrdOutline.tsx",
+    "components/domain/research/ResearchFlowHeader.tsx",
+    "components/domain/research/ResearchWorkspaceView.tsx",
+    "components/domain/research/RouteDrawer.tsx",
+    "components/domain/research/ScrRequestDialog.tsx",
+    "components/domain/research/StudioPanel.tsx",
+    "components/domain/research/TcsCard.tsx",
+    "components/domain/research/TerminalPane.tsx",
+    "components/domain/research/TopicPanel.tsx",
+    "lib/domain/research.ts",
+  ],
 };

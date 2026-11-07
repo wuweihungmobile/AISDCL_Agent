@@ -2,7 +2,9 @@
 
 /**
  * 步驟 4 前半面板（FR-R2P-14、19-4；TCS-ResearchToPRD-P1-20261107 AT-961-18-*、20-E-4、25-4）：拆解與簽核（{@link DecompositionCard}）、測試規格草擬（{@link TcsCard}）、
- * 到既有專案頁／執行中心／監控中心的連結（{@link InnerLoopLinks}）、「重新對帳」、「SCR 進行中」標籤（{@link ScrStateBadge}）。看板、自癒與終端屬 P2，不在本面板。
+ * 到既有專案頁／執行中心／監控中心的連結（{@link InnerLoopLinks}）、「重新對帳」、「SCR 進行中」標籤（{@link ScrStateBadge}）。
+ * P2 起內環已啟動（內環鍵已採納）時另掛看板（{@link KanbanBoard}）、自癒監視器（{@link HealingMonitor}）、終端窗格（{@link TerminalPane}）與頁頂的「發起規格變更（SCR）」；
+ * 對帳漂移橫幅整併到工作區單一 `drift-banner`（本面板只留「待校正」說明）。
  *
  * 設計要點（為什麼這樣做）：
  *  - **資料全取自 API**：拆解（`GET …/decomposition`，無拆解回 `null`）、分流（`GET …/route`）、專案詳情（本面板自己訂一份，父層 props 只作首繪；「重新對帳」成功後重抓它，相態才會從待凍結變成可開始建置）。
@@ -12,47 +14,42 @@
  *    第三態 `pending_correction` 顯示「待校正」說明而非漂移警示。
  *  - **請求失敗不顯示空白**：沒有資料時顯示錯誤態與重試；曾經載入成功、重抓失敗時保留舊資料並標示「資料可能過期」。
  */
-import { Hammer, Info, RefreshCw, TriangleAlert } from "lucide-react";
+import { Hammer, Info, RefreshCw } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorState, PageSkeleton } from "@/components/ui/states";
-import { useReconcileResearch, useResearchDecomposition, useResearchProject, useResearchReconcileCache, useResearchRoute } from "@/lib/api/queries";
+import { useReconcileResearch, useResearchDecomposition, useResearchKanban, useResearchProject, useResearchReconcileCache, useResearchRoute } from "@/lib/api/queries";
 import type { ResearchProjectDetail, ResearchReconcileResult } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { BUILD_DISABLED_TEXT, executionBlock, flowPhaseLabel, flowStatusLabel, reconcileDriftView, researchErrorText, tcsStage } from "@/lib/domain/research";
 import { DecompositionCard } from "./DecompositionCard";
+import { HealingMonitor } from "./HealingMonitor";
 import { InnerLoopLinks } from "./InnerLoopLinks";
+import { KanbanBoard } from "./KanbanBoard";
+import { ScrBanner } from "./ScrBanner";
+import { ScrLaunchButton } from "./ScrRequestDialog";
 import { ScrStateBadge } from "./ScrStateBadge";
 import { TcsCard } from "./TcsCard";
+import { TerminalPane } from "./TerminalPane";
 
-/** 對帳結果在本面板的呈現：待校正＝純文字說明（無警示橫幅）；漂移＝沿 P0 的警示文案；量不到＝沿 P0 的說明。全部一致不渲染。 */
+/**
+ * 對帳結果在本面板的呈現：只有「待校正」（pending_correction）的操作說明；**漂移與量不到的橫幅整併到工作區單一 `drift-banner`**（`ResearchWorkspaceView`；D-131(6)、AT-962-25-3），
+ * 本面板不再自己渲染第二個漂移橫幅。沒有待校正項目不渲染。
+ */
 function ReconcileNote({ result }: { result: ResearchReconcileResult }) {
   const view = reconcileDriftView(result);
-  if (!view.hasDrift && !view.pendingCorrection && view.notEvaluable.length === 0) return null;
+  if (!view.pendingCorrection) return null;
   return (
     <div data-testid="build-reconcile-note" className="flex flex-col gap-2 text-sm">
-      {view.pendingCorrection ? (
-        <p data-testid="reconcile-pending" role="note" className="flex items-start gap-2">
-          <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-wg-muted" />
-          待校正：測試規格已在既有流程凍結，流程游標還停在舊位置；按「重新對帳」即可校正，系統不會自動改任何一邊。
-        </p>
-      ) : null}
-      {view.hasDrift ? (
-        <div role="alert" data-testid="build-drift-banner" className="rounded-md border border-wg-error bg-wg-draft-bg px-4 py-3">
-          <p className="flex items-center gap-2 font-semibold text-wg-error">
-            <TriangleAlert size={16} aria-hidden />
-            檔案與資料庫不一致
-          </p>
-          <p className="mt-1">畫面上的內容一律取自資料庫版本；這裡只顯示差異，不會自動修正任何一邊。</p>
-        </div>
-      ) : null}
-      {view.notEvaluable.length > 0 ? <p className="text-wg-muted">無法比對的項目：{view.notEvaluable.join("、")}（不判成一致，也不判成不一致）。</p> : null}
+      <p data-testid="reconcile-pending" role="note" className="flex items-start gap-2">
+        <Info size={16} aria-hidden className="mt-0.5 shrink-0 text-wg-muted" />
+        待校正：測試規格已在既有流程凍結，流程游標還停在舊位置；按「重新對帳」即可校正，系統不會自動改任何一邊。
+      </p>
     </div>
   );
 }
-
 export function BuildFrontPanel({ researchId, project: initialProject, completed }: { researchId: string; project: ResearchProjectDetail; completed: boolean }) {
   const { canWrite } = useAuth();
   const projectQuery = useResearchProject(researchId);
@@ -89,22 +86,18 @@ export function BuildFrontPanel({ researchId, project: initialProject, completed
 
   return (
     <Card data-testid="build-front-panel" data-research-id={researchId} data-completed={String(completed)} data-phase={phase} className="flex flex-col gap-4 p-6">
-      <h3 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
-        <Hammer size={20} aria-hidden className="text-wg-muted" />第 4 步：拆解與執行
-        <ScrStateBadge phase={phase} />
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
+          <Hammer size={20} aria-hidden className="text-wg-muted" />第 4 步：拆解與執行
+          <ScrStateBadge phase={phase} />
+        </h3>
+        {innerKeyAdopted ? <ScrLaunchButton researchId={researchId} scrOpen={scrOpen} /> : null}
+      </div>
       <p data-testid="build-phase" className="text-sm text-wg-muted">
         目前相態：{flowPhaseLabel(phase)}（{flowStatusLabel(status)}）
       </p>
 
-      {scrOpen ? (
-        <div role="alert" data-testid="scr-banner" className="flex items-start gap-2 rounded-md border border-wg-draft-border bg-wg-draft-bg px-4 py-3 text-sm">
-          <TriangleAlert size={18} aria-hidden className="mt-0.5 shrink-0 text-wg-accent" />
-          <span>
-            <span className="font-semibold text-wg-accent">規格變更中</span>：觸發拆解、簽核與草擬測試規格都暫停，請先完成或撤回規格變更。
-          </span>
-        </div>
-      ) : null}
+      <ScrBanner researchId={researchId} scrOpen={scrOpen} />
 
       {projectQuery.isError ? (
         <div role="alert" data-testid="project-error" className="flex flex-wrap items-center gap-3 rounded-md border border-wg-draft-border bg-wg-draft-bg px-4 py-3 text-sm">
@@ -149,7 +142,20 @@ export function BuildFrontPanel({ researchId, project: initialProject, completed
       )}
 
       <TcsCard researchId={researchId} stage={stage} tcs={decomposition?.tcs ?? null} consoleProjectId={consoleProjectId} detail={detail} prerequisiteReason={prerequisite} lock={lock} />
-      <InnerLoopLinks consoleProjectId={consoleProjectId} block={block} />
+      <InnerLoopLinks consoleProjectId={consoleProjectId} block={block} researchId={researchId} />
+      {innerKeyAdopted ? <InnerLoopSection researchId={researchId} /> : null}
     </Card>
+  );
+}
+
+/** 內環（P2）：看板、自癒監視器、終端窗格。看板與自癒共用同一份看板查詢（TanStack Query 以鍵合併，不重複請求）；終端窗格取看板的最新 run。 */
+function InnerLoopSection({ researchId }: { researchId: string }) {
+  const kanban = useResearchKanban(researchId);
+  return (
+    <div data-testid="inner-loop-section" className="flex flex-col gap-4">
+      <KanbanBoard researchId={researchId} />
+      <HealingMonitor researchId={researchId} />
+      <TerminalPane runId={kanban.data?.latestRunId ?? null} />
+    </div>
   );
 }

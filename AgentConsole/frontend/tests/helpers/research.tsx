@@ -18,6 +18,10 @@ import type {
   ResearchEvent,
   ResearchEvidenceMatrix,
   ResearchFsmView,
+  ResearchDeliveryOverview,
+  ResearchHealing,
+  ResearchKanban,
+  ResearchTraceability,
   ResearchPrdVersion,
   ResearchProjectDetail,
   ResearchProjectSummary,
@@ -32,6 +36,7 @@ import { eventPage, EVENTS } from "@/tests/fixtures/research/events";
 import { FSM_HUMAN_PENDING } from "@/tests/fixtures/research/fsm";
 import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from "@/tests/fixtures/research/misc";
 import { detailVariant, PROJECT_LIST } from "@/tests/fixtures/research/projects";
+import { DELIVERY_OVERVIEW, HEALING, KANBAN, TRACEABILITY } from "@/tests/fixtures/research/p2";
 import { PREVIEW_A } from "@/tests/fixtures/research/route";
 import { FAIL3_ROUNDS, PRD_CONTENT, PRD_VERSIONS } from "@/tests/fixtures/research/reviews";
 import { envelope, failure, makeClient, Providers, signIn, stubApi, type ApiCall, type Reply } from "./api";
@@ -66,6 +71,11 @@ export type ResearchStubOptions = {
   preview: ResearchRoutePreview;
   /** P1：`GET …/decomposition` 回放的拆解；`null`＝尚無拆解（回 200 `null`，D-120） */
   decomposition: ResearchDecomposition | null;
+  /** P2：`GET …/kanban`、`…/healing`、`…/delivery`、`…/delivery/traceability` 回放的資料（只增選項；D-131 體例） */
+  kanban: ResearchKanban;
+  healing: ResearchHealing;
+  delivery: ResearchDeliveryOverview;
+  traceability: ResearchTraceability;
   /** 先於預設回放；回 undefined＝照預設 */
   overrides?: (call: ApiCall) => Reply;
 };
@@ -88,6 +98,10 @@ const DEFAULTS = (): ResearchStubOptions => ({
   route: null,
   preview: PREVIEW_A,
   decomposition: null,
+  kanban: KANBAN,
+  healing: HEALING,
+  delivery: DELIVERY_OVERVIEW,
+  traceability: TRACEABILITY,
 });
 
 const configRow = (key: string, value: string) => ({ id: `cfg-${key}`, category: "execution", key, value, valueType: "LONG", isEncrypted: false, hasValue: true, effect: "CONSOLE" });
@@ -142,6 +156,8 @@ export function stubResearchApi(patch: Partial<ResearchStubOptions> = {}): { cal
       return { status: 201, data: { ...detailVariant("topicReady"), id: "99999999-9999-4999-8999-999999999999", slug: body.slug, title: body.title, topic: body.topic, rpNo: "RP-0099" } };
     }
 
+    if (method === "POST" && /^\/api\/v1\/executions\/[^/]+\/review\/[^/]+$/.test(path)) return { status: 204 };
+
     const match = PROJECT_PATH.exec(path);
     if (match) {
       const id = decodeURIComponent(match[1]);
@@ -170,6 +186,12 @@ export function stubResearchApi(patch: Partial<ResearchStubOptions> = {}): { cal
       }
       if (method === "GET" && rest === "/route") return { data: options.route };
       if (method === "GET" && rest === "/decomposition") return { data: options.decomposition };
+      if (method === "GET" && rest === "/kanban") return { data: options.kanban };
+      if (method === "GET" && rest === "/healing") return { data: options.healing };
+      if (method === "GET" && rest === "/delivery") return { data: options.delivery };
+      if (method === "GET" && rest === "/delivery/traceability") return { data: options.traceability };
+      if (method === "POST" && rest === "/gates") return { data: { gateDecisionId: "g-1", gate: "PR_REVIEW", result: "PASS", fsmStateBefore: "PR_REVIEW", nextState: "RTM_VERIFY", escalated: false } };
+      if (method === "POST" && rest === "/scr") return { status: 202, data: { scrNo: 1, kind: "MINOR", status: "OPEN" } };
       if (method === "POST" && rest === "/route/preview") return { data: options.preview };
       if (method === "POST" && rest === "/route") return { data: options.route ?? { routeId: "route-new", status: "SUCCEEDED", steps: [] } };
       if (method === "POST" && /^\/stages\/[^/]+$/.test(rest)) return { status: 202, data: { stageRunId: "run-new-1", flowPhase: "RESEARCHING", flowStatus: "RUNNING" } };

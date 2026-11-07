@@ -918,8 +918,15 @@ export type ResearchScrStatus = "OPEN" | "APPROVED" | "REJECTED" | "APPLIED" | "
 export type ResearchScr = Omit<S["ScrDto"], "status" | "implFsmActions"> & {
   status: ResearchScrStatus;
   implFsmActions?: Array<Record<string, unknown>>;
+  /** P2（D-138 Q-12）：失敗證據連結，獨立可空欄（不附在 reason 末行；後端 V21 `evidence_url`） */
+  evidenceUrl?: string | null;
 };
-export type ResearchScrOpenRequest = Required<S["ScrOpenRequest"]>;
+export type ResearchScrOpenRequest = Required<S["ScrOpenRequest"]> & {
+  /** P2（D-138 Q-12）：選填，只接受 https、≤500；缺省不送 */
+  evidenceUrl?: string;
+};
+/** `POST …/scr` 的回應（開放物件）：MAJOR 帶 `successorResearchId`（D-145 AC-19-7）；`HEALING_FAILED` 來源為 200 並帶 `recovery`（只顯示指令、不是「已發起」）。 */
+export type ResearchScrOpenResult = ResearchScr & { successorResearchId?: string | null; recovery?: { target: string; powershell: string; posix: string } | null };
 export type ResearchScrApplyResult = { scrNo: number; status: string; detail?: string; implFsmActions?: Array<Record<string, unknown>> };
 
 export type ResearchDecompositionStatus = "DRAFTED" | "SCG_PASSED" | "FROZEN" | "IMPORTED" | "SIGNED_OFF" | "REJECTED" | "STALE";
@@ -934,3 +941,102 @@ export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goal
   signedOffAt?: string | null;
 };
 export type ResearchDecompositionSignoffRequest = { waivers: Array<Required<S["DecompositionWaiverRequest"]>> };
+
+// ── ResearchToPRD P2（看板、SCG 登錄、自癒、交付；TCS-ResearchToPRD-P2-20261107；IFACE-P2 §1～§6）──────────────────────────────
+// 手寫型：後端 P2 端點尚未落地（API-P2 在波 2），schema.d.ts 由 FE-W3 重產後再改引生成型（AT-962-27-2）；欄名以 IFACE／契約 2026-11-07 勘誤列為準。
+
+/** 內環 FSM 衍生欄在 Bridge 不可達時為 null，並帶 `unknown:true`（不猜）。 */
+export type ResearchKanbanDecompose = { done: boolean; status: string; tasksCount: number; stale: boolean };
+export type ResearchKanbanTcs = { done: boolean; stage2Frozen: boolean | null; negotiated: boolean | null; fsmState: string | null; unknown?: true };
+export type ResearchKanbanTaskCounts = { total: number; running: number; completed: number; skipped: number; failed: number; escalated: number; retrying: number };
+export type ResearchKanbanImplement = { done: boolean; fsmState: string | null; tasks: ResearchKanbanTaskCounts; unknown?: true };
+export type ResearchKanbanHealing = { done: boolean; retryingSteps: number; escalatedTasks: number; maxRetries: number };
+export type ResearchKanbanRtm = { runId: string; atPassed: number; atTotal: number; acCovered: number; acTotal: number; acPct: number; fullyCovered: boolean; advisory: true };
+export type ResearchKanbanRegression = { done: boolean; fsmState: string | null; releaseReady: boolean | null; rtm: ResearchKanbanRtm | null; rtmAvailable: boolean; unknown?: true };
+export type ResearchPendingReview = {
+  reviewId: string;
+  runId: string;
+  kind: string;
+  taskId: string | null;
+  reason: string;
+  createdAt: string;
+  allowedDecisions: string[];
+};
+export type ResearchKanbanGate = { gate: "SCG4" | "SCG5" | "SCG6"; decision: "APPROVED" | "REJECTED"; decidedBy: string; decidedAt: string; fsmStateAfter: string; reason: string };
+export type ResearchKanban = {
+  researchId: string;
+  consoleProjectId: string | null;
+  latestRunId: string | null;
+  generatedAt: string;
+  bridgeReachable: boolean;
+  snapshotAt: string | null;
+  stale: boolean;
+  scrOpen: boolean;
+  columns: {
+    decompose: ResearchKanbanDecompose;
+    tcs: ResearchKanbanTcs;
+    implement: ResearchKanbanImplement;
+    healing: ResearchKanbanHealing;
+    regression: ResearchKanbanRegression;
+  };
+  pendingReviews: ResearchPendingReview[];
+  gates: ResearchKanbanGate[];
+};
+
+export type ResearchGateName = "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
+export type ResearchGateResult = "PASS" | "FAIL";
+/** API-RP-23 請求；`reviewerIndependent`、`reviewReportRef` 前端欄位不變（D-138 Q-2：由後端映射成 details）。 */
+export type ResearchGateRegisterRequest = { gate: ResearchGateName; result: ResearchGateResult; reason: string; reviewReportRef?: string; reviewerIndependent: boolean };
+export type ResearchGateRegisterResult = { gateDecisionId: string; gate: ResearchGateName; result: ResearchGateResult; fsmStateBefore: string; nextState: string; escalated: boolean; flow?: unknown };
+
+export type ResearchHealingRow = {
+  runId: string;
+  taskId: string;
+  stepNumber: number;
+  attempt: number;
+  status: "RETRYING" | "FAILED";
+  excerpt: string;
+  occurredAt: string;
+  resolved?: boolean;
+  escalated?: boolean;
+  specChangeForbidden?: boolean;
+  /** 引擎沒有獨立資料來源，恆為 null（D-140 #5）：UI 顯示「引擎未提供」，不假造 */
+  attribution: string | null;
+  patchResult: string | null;
+};
+export type ResearchHealing = { rows: ResearchHealingRow[]; maxRetries: number; logSyncedThrough: string | null; logBehind: number };
+
+export type ResearchDeliveryKind = "RELEASE_TAG" | "PULL_REQUEST" | "RELEASE_NOTE";
+/** 契約 `DeliveryDto` 沒有 `id`：React key 用 `${kind}:${ref}`（UNIQUE(research_id, kind, ref)）。`snapshotSha256`：TAG 列為 64 位小寫十六進位、PR 列為 null。 */
+export type ResearchDelivery = {
+  kind: ResearchDeliveryKind;
+  ref: string;
+  commitSha: string | null;
+  url: string | null;
+  rtmReportRef: string | null;
+  fsmStateAfter: string | null;
+  status: "CREATED" | "FAILED";
+  createdBy: string;
+  createdAt: string;
+  snapshotSha256: string | null;
+};
+export type ResearchDeliveryOverview = {
+  deliveries: ResearchDelivery[];
+  snapshot: { relPath: string; sha256: string } | null;
+  projectRoot: string | null;
+  containerMode: boolean;
+  preconditions: { releaseReady: boolean; rtmFull: boolean; scrOpen: boolean; hasOrigin: boolean | null; ghAvailable: boolean | null };
+};
+export type ResearchTagRequest = { tagName: string; message?: string; push?: boolean; createGithubRelease?: false };
+export type ResearchTagResult = { delivery: ResearchDelivery; snapshot: { relPath: string; sha256: string }; flow?: unknown; fsmState: string };
+export type ResearchPrRequest = { branch?: string; title?: string; bodyPreviewAck: true };
+export type ResearchPrResult = { delivery: ResearchDelivery; created: boolean; flow?: unknown };
+
+export type ResearchTraceStatus = "PASS" | "FAIL" | "NOT_RUN" | "NONE";
+export type ResearchTraceRow = { ac: string; userStory: string; gherkinSummary: string; unitStatus: ResearchTraceStatus; e2eStatus: ResearchTraceStatus; lastRunAt: string | null; source: string };
+export type ResearchTraceability = {
+  rows: ResearchTraceRow[];
+  totals: { acTotal: number; covered: number; uncovered: number };
+  rtm: { runId: string; fullyCovered: boolean; acPct: number; advisory: true } | null;
+  generatedAt: string;
+};

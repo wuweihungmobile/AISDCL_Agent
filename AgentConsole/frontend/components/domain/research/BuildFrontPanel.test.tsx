@@ -1,9 +1,13 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import { qk } from "@/lib/api/queries";
 import type { ResearchDecomposition, ResearchProjectDetail, ResearchRouteDecision } from "@/lib/api/types";
+import { BUILD_DISABLED_TEXT } from "@/lib/domain/research";
 import { CONSOLE_PROJECT_ID, R3 } from "@/tests/fixtures/research/ids";
 import {
   DECOMPOSITION_COVERED,
@@ -19,16 +23,22 @@ import {
 } from "@/tests/fixtures/research/build";
 import { callsOf, failure, renderResearch, stubResearchApi, writeCalls, type ApiCall, type Reply } from "@/tests/helpers/research";
 import { BuildFrontPanel } from "./BuildFrontPanel";
+import { ResearchWorkspaceView } from "./ResearchWorkspaceView";
 
 /**
  * 步驟 4 前半面板（TCS-ResearchToPRD-P1-20261107 AT-961-18-1～18-7、18-E-1、20-E-4、25-4）。
  * 判定指令：npx vitest run components/domain/research/BuildFrontPanel.test.tsx -t "<AT 底線形>"
  */
+// 與 ResearchWorkspaceView.test.tsx 同體例：可變的路由替身（AT-962-25-3 要渲染整個工作區）
+const nav = vi.hoisted(() => {
+  const router = { push: vi.fn(), replace: vi.fn(), back: vi.fn() };
+  return { router, params: {} as { researchId?: string | string[] }, search: "" };
+});
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
-  useParams: () => ({}),
+  useRouter: () => nav.router,
+  useParams: () => nav.params,
   usePathname: () => "/research/x",
-  useSearchParams: () => new URLSearchParams(""),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
@@ -376,7 +386,7 @@ describe("AT_961_18_4 TCS 草擬面板：前置、三態與路徑雜湊、凍結
 });
 
 describe("AT_961_18_5 到既有 freeze、import、execute 的連結與執行閘說明", () => {
-  const exec = () => screen.queryByRole("link", { name: "執行中心" });
+  const exec = () => within(screen.getByTestId("inner-loop-links")).queryByRole("link", { name: "執行中心" });
   const reason = () => screen.queryByTestId("execute-block-reason");
 
   it("AT_961_18_5 四種組合：只有「已簽核、未 stale、TCS 已凍結、無 SCR」時執行連結啟用；其餘停用並顯示對應原因；連結指向既有路由", async () => {
@@ -391,7 +401,7 @@ describe("AT_961_18_5 到既有 freeze、import、execute 的連結與執行閘�
       await screen.findByTestId("inner-loop-links");
       await waitFor(() => expect(screen.getByTestId("decomposition-card")).toBeInTheDocument());
       if (c.block === null) {
-        expect(exec(), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/execute`);
+        expect(exec(), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/execute?researchId=${R3}`);
         expect(reason(), c.name).toBeNull();
       } else {
         expect(exec(), c.name).toBeNull();
@@ -400,17 +410,28 @@ describe("AT_961_18_5 到既有 freeze、import、execute 的連結與執行閘�
         expect(reason(), c.name).toHaveTextContent(c.text);
       }
       // 專案頁（凍結與匯入）、監控中心恆為連結
-      expect(screen.getByRole("link", { name: "專案頁（凍結與匯入）" }), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}`);
-      expect(screen.getByRole("link", { name: "監控中心" }), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/monitor`);
+      const links = within(screen.getByTestId("inner-loop-links"));
+      expect(links.getByRole("link", { name: "專案頁（凍結與匯入）" }), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}`);
+      expect(links.getByRole("link", { name: "監控中心" }), c.name).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/monitor?researchId=${R3}`);
       view.unmount();
     }
   });
 
-  it("AT_961_18_5 看板、自癒與終端屬 P2：本面板不渲染", async () => {
-    renderPanel({ project: buildProject("BUILD_READY"), decomposition: DECOMPOSITION_SIGNED });
+  it("AT_961_18_5 看板、自癒與終端屬 P2：內環鍵尚未採納（route 未成功）時本面板不渲染（P2 起內環啟動後才掛，見 AT_962_25_3 的整合測試）", async () => {
+    renderPanel({ project: buildProject("BUILD_READY"), route: ROUTE_NOT_ADOPTED, decomposition: DECOMPOSITION_SIGNED });
     await screen.findByTestId("inner-loop-links");
     const panel = screen.getByTestId("build-front-panel");
     for (const word of ["看板", "自癒", "終端", "交付"]) expect(panel).not.toHaveTextContent(word);
+    expect(screen.queryByTestId("inner-loop-section")).toBeNull();
+  });
+
+  it("AT_962_25_3a 內環鍵已採納：面板掛看板、自癒監視器、終端窗格與頁頂的發起規格變更（SCR）", async () => {
+    renderPanel({ project: buildProject("BUILD_READY"), decomposition: DECOMPOSITION_SIGNED });
+    const section = await screen.findByTestId("inner-loop-section");
+    await within(section).findByTestId("kanban-board");
+    expect(within(section).getByTestId("healing-monitor")).toBeInTheDocument();
+    expect(within(section).getByTestId("terminal-pane")).toBeInTheDocument();
+    expect(screen.getAllByTestId("scr-launch").length).toBeGreaterThanOrEqual(1);
   });
 
   it("AT_961_18_5 尚無 Console 專案：不給任何連結，說明分流完成後才會建立", async () => {
@@ -438,7 +459,10 @@ describe("AT_961_18_6 SCR 開啟時本面板的操作停用", () => {
     expect(screen.getByRole("button", { name: "草擬測試規格" })).toBeDisabled();
     expect(screen.getByTestId("tcs-disabled-reason")).toHaveTextContent("規格變更中");
     expect(screen.getByTestId("execute-block-reason")).toHaveAttribute("data-block", "scrOpen");
-    expect(screen.queryByRole("button", { name: /發起/ })).toBeNull();
+    // P2 起頁頂有「發起規格變更（SCR）」入口：規格變更進行中停用並顯示登記文案（不可再發起第二個）
+    const launch = await screen.findByTestId("scr-launch");
+    expect(launch).toBeDisabled();
+    expect(launch.getAttribute("title")).toBe(BUILD_DISABLED_TEXT.scrOpen);
     expect(writeCalls(calls)).toEqual([]);
   });
 });
@@ -508,8 +532,8 @@ describe("AT_961_18_E_1 覆蓋矩陣在大型 PRD 下仍可渲染", () => {
   });
 });
 
-describe("AT_961_20_E_4 步驟 4 面板渲染對帳結果", () => {
-  it("AT_961_20_E_4 pending_correction：顯示「待校正」說明、無漂移警示橫幅；drift：顯示漂移警示橫幅；NOT_EVALUABLE：沿 P0 顯示「無法比對」；皆保留「重新對帳」鈕", async () => {
+describe("AT_961_20_E_4 步驟 4 面板渲染對帳結果（P2：漂移橫幅整併到工作區單一 drift-banner，D-131(6)）", () => {
+  it("AT_961_20_E_4 pending_correction：顯示「待校正」說明、無漂移警示橫幅；drift 與 NOT_EVALUABLE：面板不再自己渲染橫幅或說明（改歸工作區 drift-banner，見 AT_962_25_3）；皆保留「重新對帳」鈕", async () => {
     const user = userEvent.setup();
     const run = async (status: "pending_correction" | "drift" | "NOT_EVALUABLE") => {
       const view = renderPanel({
@@ -518,29 +542,75 @@ describe("AT_961_20_E_4 步驟 4 面板渲染對帳結果", () => {
         overrides: (call) => (call.method === "POST" && RECONCILE_URL.test(call.path) ? { data: reconcileWith(status) } : undefined),
       });
       await user.click(await btn("重新對帳"));
-      await screen.findByTestId("build-reconcile-note");
+      await waitFor(() => expect(callsOf(view.calls, "POST", RECONCILE_URL)).toHaveLength(1));
       return view;
     };
 
     const pending = await run("pending_correction");
+    expect(await screen.findByTestId("build-reconcile-note")).toBeInTheDocument();
     expect(screen.getByTestId("reconcile-pending")).toHaveTextContent("待校正");
     expect(screen.queryByTestId("build-drift-banner")).toBeNull();
     expect(screen.getByRole("button", { name: "重新對帳" })).toBeEnabled();
     pending.unmount();
 
     const drift = await run("drift");
-    expect(screen.getByTestId("build-drift-banner")).toHaveTextContent("檔案與資料庫不一致");
+    await waitFor(() => expect(screen.getByRole("button", { name: "重新對帳" })).toBeEnabled());
+    expect(screen.queryByTestId("build-drift-banner")).toBeNull();
+    expect(screen.queryByTestId("drift-banner")).toBeNull(); // 面板自己不渲染；橫幅只在工作區
+    expect(screen.queryByTestId("build-reconcile-note")).toBeNull();
     expect(screen.queryByTestId("reconcile-pending")).toBeNull();
     drift.unmount();
 
     const missing = await run("NOT_EVALUABLE");
-    expect(screen.getByTestId("build-reconcile-note")).toHaveTextContent("無法比對的項目：狀態機與流程游標的對映");
+    await waitFor(() => expect(screen.getByRole("button", { name: "重新對帳" })).toBeEnabled());
+    expect(screen.queryByTestId("build-reconcile-note")).toBeNull();
     expect(screen.queryByTestId("build-drift-banner")).toBeNull();
     expect(screen.queryByTestId("reconcile-pending")).toBeNull();
     missing.unmount();
   });
 });
 
+describe("AT_962_25_3 兩處漂移橫幅整併為工作區單一橫幅（D-131(6)）", () => {
+  const renderWorkspaceBuild = (cache: ReturnType<typeof reconcileWith> | null) => {
+    nav.params = { researchId: R3 };
+    nav.search = "step=build";
+    stubResearchApi({ details: { [R3]: buildProject("BUILD_READY") }, route: ROUTE_ADOPTED, decomposition: DECOMPOSITION_SIGNED });
+    const view = renderResearch(<ResearchWorkspaceView />, "OPERATOR");
+    if (cache !== null) act(() => void view.client.setQueryData(qk.researchReconcile(R3), cache));
+    return view;
+  };
+
+  it("AT_962_25_3 步驟 4 在對帳 drift：整個畫面只有一個 drift-banner、build-drift-banner 不存在；一致：兩者皆無；量不到：只有工作區的黃色橫幅", async () => {
+    const drift = renderWorkspaceBuild(reconcileWith("drift"));
+    await screen.findByTestId("build-front-panel");
+    expect(await screen.findAllByTestId("drift-banner")).toHaveLength(1);
+    expect(screen.getByTestId("drift-banner")).toHaveTextContent("檔案與資料庫不一致");
+    expect(screen.queryByTestId("build-drift-banner")).toBeNull();
+    drift.unmount();
+
+    const ok = renderWorkspaceBuild(reconcileWith("ok"));
+    await screen.findByTestId("build-front-panel");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(screen.queryByTestId("drift-banner")).toBeNull();
+    expect(screen.queryByTestId("build-drift-banner")).toBeNull();
+    ok.unmount();
+
+    const missing = renderWorkspaceBuild(reconcileWith("NOT_EVALUABLE"));
+    await screen.findByTestId("build-front-panel");
+    expect(await screen.findAllByTestId("drift-banner")).toHaveLength(1);
+    expect(screen.getByTestId("drift-banner")).toHaveTextContent("無法比對的項目：狀態機與流程游標的對映");
+    expect(screen.queryByTestId("build-drift-banner")).toBeNull();
+    missing.unmount();
+  });
+
+  it("AT_962_25_3 原始碼：BuildFrontPanel 不再含 build-drift-banner；工作區 ResearchWorkspaceView 恰一處 drift-banner", () => {
+    const dir = path.resolve(process.cwd(), "components", "domain", "research");
+    const panel = readFileSync(path.join(dir, "BuildFrontPanel.tsx"), "utf8");
+    const workspace = readFileSync(path.join(dir, "ResearchWorkspaceView.tsx"), "utf8");
+    expect(panel).not.toContain("build-drift-banner");
+    expect(workspace.match(/data-testid="drift-banner"/g)).toHaveLength(1);
+  });
+});
 describe("AT_961_25_4 步驟 4 面板的「重新對帳」", () => {
   it("AT_961_25_4 TCS 已在既有流程凍結而游標仍待凍結：OPERATOR 按下送一次 POST …/reconcile，回應後重抓專案詳情並顯示「可開始建置」；不呼叫任何其他寫入端點", async () => {
     const user = userEvent.setup();

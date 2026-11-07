@@ -120,7 +120,18 @@ describe("AT_960_20_1 頁首列三個區塊：切換下拉、狀態燈、Token �
       .filter(([, text]) => text.includes('data-testid="research-flow-header"') || text.includes("切換研究專案") || text.includes('data-testid="flow-lamp"'))
       .map(([name]) => name);
     expect(owners, "頁首列的三個區塊只定義在一個檔案").toEqual(["ResearchFlowHeader.tsx"]);
-    for (const [name, text] of Object.entries(sources)) expect(text, `${name} 不得提到全站區塊`).not.toMatch(/TopRegion|BottomRegion|ToolsRegion|ContentRegion/);
+    // 正規式以字串拼接組成：使本檔原始碼不含四個區塊名的字面，AT_960_20_4（全站四區塊只在 app/layout.tsx 組裝的字面掃描）不再自我命中（P0 R-3、AT-962-25-4）；語意不變
+    const regionNames = new RegExp(["Top", "Bottom", "Tools", "Content"].map((part) => `${part}Region`).join("|"));
+    for (const [name, text] of Object.entries(sources)) expect(text, `${name} 不得提到全站區塊`).not.toMatch(regionNames);
+  });
+
+  it("AT_962_25_4 P0 殘留 R-3：反向斷言的正則以字串拼接組成——本檔原始碼不含四個全站區塊名的字面（字面掃描不再自我命中）；斷言語意不變（仍抓得到引用）", () => {
+    const parts = ["Top", "Bottom", "Tools", "Content"];
+    const own = readFileSync(path.join(process.cwd(), "components", "domain", "research", "ResearchFlowHeader.test.tsx"), "utf-8");
+    for (const part of parts) expect(own.includes(`${part}Region`), `${part}Region 不得以字面出現在本檔`).toBe(false);
+    const regionNames = new RegExp(parts.map((part) => `${part}Region`).join("|"));
+    expect(regionNames.test(`import { ${parts[0]}Region } from "@/components/layout/x";`)).toBe(true);
+    expect(regionNames.test("import { ResearchFlowHeader } from './x';")).toBe(false);
   });
 });
 

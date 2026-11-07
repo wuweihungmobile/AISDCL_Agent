@@ -282,3 +282,21 @@ describe("AT_960_18_3 狀態詞表 researchFlow：說明鍵、來源鍵與 flow_
     expect(stateKeys).toMatch(/researchFlow:\s*\{\s*keys:/);
   });
 });
+
+// ── AT_962_25_5：P2 不動導覽與詞彙 ───────────────────────────────────────────────────────
+
+describe("AT_962_25_5 導覽與詞彙不動：登記表仍是 P1 的樣子，事件層新 kind 不入流程詞彙", () => {
+  it("AT_962_25_5 登記表列數、research 列逐欄、mobile 為真恰 6；FLOW_STATUS／FLOW_PHASE 詞彙計數與 P1 相同（九＋十九）；HEALING_LOG_TRUNCATED、SPEC_CHANGE_FORBIDDEN 等事件層 kind 不在任何詞彙或衍生表", () => {
+    expect(NAV_REGISTRY).toHaveLength(10);
+    const research = byId("research");
+    expect([research.label, research.href, research.order, research.mobile, research.enabled]).toEqual(["研發工作流", "/research", 35, false, true]);
+    expect(NAV_REGISTRY.filter((e) => e.mobile === true)).toHaveLength(6);
+    expect(Object.keys(FLOW_STATUS_LABEL)).toHaveLength(9);
+    expect(Object.keys(FLOW_PHASE_LABEL)).toHaveLength(19);
+    const vocabulary = [...Object.keys(FLOW_STATUS_LABEL), ...Object.keys(FLOW_PHASE_LABEL), ...Object.keys(FLOW_STEP_LABEL), ...FLOW_PHASE_DERIVED];
+    for (const eventKind of ["HEALING_LOG_TRUNCATED", "SPEC_CHANGE_FORBIDDEN", "ESCALATED"]) {
+      // ESCALATED 是 P0 就有的流程狀態值（flow_status）；其餘兩個是 P2 事件層 kind，不能混進流程詞彙
+      expect(vocabulary.includes(eventKind), eventKind).toBe(eventKind === "ESCALATED");
+    }
+  });
+});

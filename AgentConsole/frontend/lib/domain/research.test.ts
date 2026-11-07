@@ -3,12 +3,27 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/client";
-import type { ResearchEvent, ResearchFlowStatus, ResearchFlowStepId, ResearchProjectSummary, ResearchReconcileResult, ResearchReviewRound } from "@/lib/api/types";
+import type { ResearchEvent, ResearchFlowStatus, ResearchKanban, ResearchFlowStepId, ResearchProjectSummary, ResearchReconcileResult, ResearchReviewRound } from "@/lib/api/types";
 import { sha } from "@/tests/fixtures/research/ids";
 import { RECONCILE_DRIFT, RECONCILE_OK } from "@/tests/fixtures/research/misc";
+import { KANBAN, kanbanUnreachable } from "@/tests/fixtures/research/p2";
 import {
   BLOCKING_FLOW_STATUSES,
   BUILD_DISABLED_TEXT,
+  RESEARCH_REASON_TEXT,
+  KANBAN_DEBOUNCE_MS,
+  KANBAN_SSE_TO_DOM_MAX_MS,
+  kanbanColumns,
+  isResearchUuid,
+  consoleCenterHref,
+  decisionButtons,
+  decisionKey,
+  gateRegisterView,
+  gateErrorView,
+  scrFormView,
+  evidenceUrlError,
+  scrViolationsByField,
+  DELIVERY_STEP_LABEL,
   WAIVER_REASON_MAX,
   coverageMatrix,
   coverageView,
@@ -708,11 +723,12 @@ describe("Gate 0 等待時數（D-48(3)；AC-R2P-09-10）", () => {
 // ── 對帳漂移（AC-R2P-23-1、23-2；AT_960_21_6 的純函式面）──────────────────────────────────
 
 describe("對帳結果轉畫面（reconcileDriftView）：漂移只顯示、量不到不算漂移也不算一致", () => {
-  const SIX_CHECKS = ["fsm_flow_mapping", "prd_sha256", "review_card", "evidence_matrix", "task_decomposition", "route_decision"];
+  const SIX_CHECKS = ["fsm_flow_mapping", "prd_sha256", "review_card", "evidence_matrix", "task_decomposition", "route_decision", "delivery"];
 
-  it("對帳六項檢查的中文名稱恰為契約的六個名稱（⚖16）", () => {
+  it("對帳七項檢查的中文名稱恰為契約的七個名稱（⚖16；P2 加第七項 delivery＝交付，D-144 F-03）", () => {
     expect(Object.keys(RECONCILE_CHECK_LABEL)).toEqual(SIX_CHECKS);
-    expect(new Set(Object.values(RECONCILE_CHECK_LABEL)).size).toBe(6);
+    expect(new Set(Object.values(RECONCILE_CHECK_LABEL)).size).toBe(7);
+    expect(RECONCILE_CHECK_LABEL.delivery).toBe("交付");
     for (const label of Object.values(RECONCILE_CHECK_LABEL)) expect(label.trim()).not.toBe("");
   });
 
@@ -955,10 +971,14 @@ describe("新建研究專案：代號、摘要、驗證、請求本文", () => {
 // ── 錯誤原因 ──────────────────────────────────────────────────────────────────────────
 
 describe("研究 reason 與錯誤文案", () => {
-  it("RESEARCH_REASONS 為三十五個 reason（snake_case、互異、逐字等於後端 ErrorReasons 的 RESEARCH_ 常數與契約勘誤後的清單：P0 二十二個〔原列十八個扣被 D-72 取代的 spec_digest_changed，加 Bridge 專屬的五個〕，加 R-2 尾巴四個與 P1 九個）", () => {
+  it("AT_962_24_6 RESEARCH_REASONS 為三十七個 reason（P2 加 tag_exists、delivery_step_failed；原三十五個：（snake_case、互異、逐字等於後端 ErrorReasons 的 RESEARCH_ 常數與契約勘誤後的清單：P0 二十二個〔原列十八個扣被 D-72 取代的 spec_digest_changed，加 Bridge 專屬的五個〕，加 R-2 尾巴四個與 P1 九個）", () => {
     const values = Object.values(RESEARCH_REASONS);
-    expect(values).toHaveLength(35);
-    expect(new Set(values).size).toBe(35);
+    expect(values).toHaveLength(37);
+    expect(new Set(values).size).toBe(37);
+    expect(RESEARCH_REASONS.TAG_EXISTS).toBe("tag_exists");
+    expect(RESEARCH_REASONS.DELIVERY_STEP_FAILED).toBe("delivery_step_failed");
+    expect(RESEARCH_REASON_TEXT.tag_exists.trim()).not.toBe("");
+    expect(RESEARCH_REASON_TEXT.delivery_step_failed.trim()).not.toBe("");
     for (const value of values) expect(value).toMatch(/^[a-z]+(_[a-z]+)*$/);
     expect([...values].sort()).toEqual(
       [
@@ -997,6 +1017,8 @@ describe("研究 reason 與錯誤文案", () => {
         "sdd_cli_failed",
         "fsm_state_unreadable",
         "invalid_request",
+        "tag_exists",
+        "delivery_step_failed",
       ].sort(),
     );
     expect(values, "D-72：409 spec_digest_changed 已由 422 digest_mismatch／missing_digests 取代，Bridge 不再回它").not.toContain("spec_digest_changed");
@@ -1512,5 +1534,154 @@ describe("步驟 4 前半純函式：覆蓋視圖、豁免理由、執行閘、T
     expect(decompositionErrorLines(violations)).toEqual(["閘別 cycle：任務之間的依賴有環，無法排出執行順序", "閘別 未登記：未登記的檢查"]);
     expect(decompositionErrorLines(new ApiError({ status: 422, message: "沒有 violations" })).length).toBe(1);
     expect(decompositionErrorLines(new ApiError({ status: 500, message: "壞了" })).length).toBe(1);
+  });
+});
+
+// ── ResearchToPRD P2：看板與表單純函式（TCS-ResearchToPRD-P2-20261107 AT-962-11-1）──────────────────────────────────
+
+describe("P2 kanbanColumns：五欄完成判定窮舉，FSM 衍生欄 null 時為 unknown 而不是 false（不猜）", () => {
+  const doneOf = (dto: ResearchKanban) => Object.fromEntries(kanbanColumns(dto).map((c) => [c.key, c.done]));
+  const withCols = (patch: Partial<ResearchKanban["columns"]>): ResearchKanban => ({ ...KANBAN, columns: { ...KANBAN.columns, ...patch } });
+
+  it("AT_962_11_1 欄序固定；拆解＝SIGNED_OFF 且未過期（STALE、過期、DRAFTED 都不算）", () => {
+    expect(kanbanColumns(KANBAN).map((c) => c.key)).toEqual(["decompose", "tcs", "implement", "healing", "regression"]);
+    expect(kanbanColumns(KANBAN).map((c) => c.label)).toEqual(["Task 拆解", "測試規格產生", "程式碼實作", "自癒修復", "回歸驗收"]);
+    const decomposeDone = (status: string, stale: boolean) => doneOf(withCols({ decompose: { done: false, status, tasksCount: 5, stale } })).decompose;
+    expect(decomposeDone("SIGNED_OFF", false)).toBe(true);
+    expect(decomposeDone("SIGNED_OFF", true)).toBe(false);
+    for (const status of ["NONE", "DRAFTED", "SCG_PASSED", "FROZEN", "REJECTED", "STALE"]) expect(decomposeDone(status, false), status).toBe(false);
+  });
+
+  it("AT_962_11_1 測試規格：階段 2 凍結為真才完成；null＝unknown", () => {
+    const tcs = (stage2Frozen: boolean | null) =>
+      doneOf(
+        withCols({ tcs: { done: false, stage2Frozen, negotiated: true, fsmState: stage2Frozen === null ? null : "IMPLEMENTATION", ...(stage2Frozen === null ? { unknown: true as const } : {}) } }),
+      ).tcs;
+    expect(tcs(true)).toBe(true);
+    expect(tcs(false)).toBe(false);
+    expect(tcs(null)).toBe("unknown");
+  });
+
+  it("AT_962_11_1 實作：總數大於 0 且完成加跳過等於總數（邊界 0／n-1／n／全跳過）；unknown 旗標優先", () => {
+    const tasks = (total: number, completed: number, skipped: number) => ({ total, running: 0, completed, skipped, failed: 0, escalated: 0, retrying: 0 });
+    const impl = (t: ReturnType<typeof tasks>, unknown = false) =>
+      doneOf(withCols({ implement: { done: false, fsmState: "IMPLEMENTATION", tasks: t, ...(unknown ? { unknown: true as const } : {}) } })).implement;
+    expect(impl(tasks(0, 0, 0))).toBe(false);
+    expect(impl(tasks(5, 4, 0))).toBe(false);
+    expect(impl(tasks(5, 5, 0))).toBe(true);
+    expect(impl(tasks(5, 3, 2))).toBe(true);
+    expect(impl(tasks(5, 0, 5))).toBe(true);
+    expect(impl(tasks(5, 5, 0), true)).toBe("unknown");
+  });
+
+  it("AT_962_11_1 自癒：重試中與升級任務都為 0 才完成（任一大於 0 都不算）", () => {
+    const heal = (retryingSteps: number, escalatedTasks: number) => doneOf(withCols({ healing: { done: false, retryingSteps, escalatedTasks, maxRetries: 3 } })).healing;
+    expect(heal(0, 0)).toBe(true);
+    expect(heal(1, 0)).toBe(false);
+    expect(heal(0, 1)).toBe(false);
+  });
+
+  it("AT_962_11_1 回歸：RTM 100% 且完全覆蓋且 FSM 在 RELEASE_READY／RELEASE 才完成；FSM null＝unknown；無 RTM 為 false", () => {
+    const rtm = (acPct: number, fullyCovered: boolean) => ({ runId: "r", atPassed: 1, atTotal: 1, acCovered: 1, acTotal: 1, acPct, fullyCovered, advisory: true as const });
+    const reg = (fsmState: string | null, r: ReturnType<typeof rtm> | null) =>
+      doneOf(withCols({ regression: { done: false, fsmState, releaseReady: null, rtm: r, rtmAvailable: r !== null, ...(fsmState === null ? { unknown: true as const } : {}) } })).regression;
+    expect(reg("RELEASE_READY", rtm(100, true))).toBe(true);
+    expect(reg("RELEASE", rtm(100, true))).toBe(true);
+    expect(reg("RTM_VERIFY", rtm(100, true))).toBe(false);
+    expect(reg("RELEASE_READY", rtm(99.9, true))).toBe(false);
+    expect(reg("RELEASE_READY", rtm(100, false))).toBe(false);
+    expect(reg("RELEASE_READY", null)).toBe(false);
+    expect(reg(null, rtm(100, true))).toBe("unknown");
+  });
+
+  it("AT_962_11_1 Bridge 不可達夾具：三個 FSM 欄 unknown、DB 欄（拆解、自癒）照常判定", () => {
+    expect(doneOf(kanbanUnreachable())).toEqual({ decompose: true, tcs: "unknown", implement: "unknown", healing: true, regression: "unknown" });
+  });
+
+  it("去抖與幀到 DOM 上限是單一常數（100、500）；深連結只收標準 UUID（不分大小寫），其餘不帶 query", () => {
+    expect(KANBAN_DEBOUNCE_MS).toBe(100);
+    expect(KANBAN_SSE_TO_DOM_MAX_MS).toBe(500);
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(isResearchUuid(id)).toBe(true);
+    expect(isResearchUuid(id.toUpperCase())).toBe(true);
+    for (const bad of ["../x", "<script>", id.slice(0, 35), id.replace("1111-4111", "g111-4111"), "", null, undefined]) expect(isResearchUuid(bad), String(bad)).toBe(false);
+    expect(consoleCenterHref("p/1", "execute", id)).toBe(`/projects/p%2F1/execute?researchId=${id}`);
+    expect(consoleCenterHref("p1", "monitor", "../x")).toBe("/projects/p1/monitor");
+  });
+});
+
+describe("P2 決策彈窗、SCG 登錄、SCR 表單純函式", () => {
+  it("decisionButtons 只回 allowedDecisions 內的已知決定，順序固定；decisionKey 取 reviewId，無則用 alert seq", () => {
+    expect(decisionButtons(["SKIP", "APPROVE", "RETRY", "REJECT"])).toEqual(["APPROVE", "REJECT", "RETRY", "SKIP"]);
+    expect(decisionButtons(["APPROVE", "REJECT"])).toEqual(["APPROVE", "REJECT"]);
+    expect(decisionButtons(["DELETE_ALL"])).toEqual([]);
+    expect(decisionKey({ reviewId: "r1", alertSeq: 9 })).toBe("review:r1");
+    expect(decisionKey({ alertSeq: 9 })).toBe("alert:9");
+    expect(decisionKey({})).toBeNull();
+  });
+
+  it("gateRegisterView：RELEASE_READY 只有 FAIL；FAIL 必填理由（0／1／500／501）；報告參照 300／301；PR_REVIEW 未勾獨立聲明不可送", () => {
+    const base = { gate: "PR_REVIEW" as const, result: "FAIL" as const, reason: "x", reportRef: "", independent: true };
+    expect(gateRegisterView({ ...base, gate: "RELEASE_READY" }).resultOptions).toEqual(["FAIL"]);
+    expect(gateRegisterView(base).resultOptions).toEqual(["PASS", "FAIL"]);
+    expect(gateRegisterView({ ...base, reason: "" }).canSubmit).toBe(false);
+    expect(gateRegisterView({ ...base, reason: "字".repeat(500) }).canSubmit).toBe(true);
+    expect(gateRegisterView({ ...base, reason: "字".repeat(501) }).canSubmit).toBe(false);
+    expect(gateRegisterView({ ...base, result: "PASS", reason: "" }).canSubmit).toBe(true);
+    expect(gateRegisterView({ ...base, reportRef: "r".repeat(300) }).canSubmit).toBe(true);
+    expect(gateRegisterView({ ...base, reportRef: "r".repeat(301) }).canSubmit).toBe(false);
+    expect(gateRegisterView({ ...base, independent: false }).canSubmit).toBe(false);
+    expect(gateRegisterView({ ...base, gate: "RTM_VERIFY", independent: false }).canSubmit).toBe(true);
+    expect(gateRegisterView({ ...base, gate: "RELEASE_READY", result: "PASS", independent: false }).resultOptions).toEqual(["FAIL"]);
+  });
+
+  it("gateErrorView：digest_mismatch 列漂移路徑並可發起 SCR；unmet 逐項中文；403 ACCESS_DENIED 取通用權限不足", () => {
+    const drift = gateErrorView(new ApiError({ status: 422, message: "x", reason: "digest_mismatch", details: { drift: [{ path: "docs/01.md" }, "docs/02.md"] } }));
+    expect(drift.drift).toEqual(["docs/01.md", "docs/02.md"]);
+    expect(drift.offerScr).toBe(true);
+    const unmet = gateErrorView(new ApiError({ status: 409, message: "x", reason: "fsm_state_conflict", details: { unmet: ["tasks_incomplete", "rtm_below_100"] } }));
+    expect(unmet.unmet).toEqual(["仍有任務未完成或未跳過", "追溯覆蓋率未達 100%"]);
+    expect(unmet.offerScr).toBe(false);
+    expect(gateErrorView(new ApiError({ status: 403, message: "x", reason: "ACCESS_DENIED" })).text).toContain("權限不足");
+    expect(gateErrorView(new ApiError({ status: 502, message: "x", reason: "bridge_unreachable" })).text).toBe(RESEARCH_REASON_TEXT.bridge_unreachable);
+  });
+
+  it("scrFormView 與 evidenceUrlError：reason 500／501、章節 20／21 與單項 200／201、證據連結只收 https 且 500／501；違規依欄位分組", () => {
+    const base = { kind: "MINOR" as const, sourceKind: "HUMAN", reason: "r", reasonClass: "AC 模糊", affectedSections: ["§1"], evidenceUrl: "" };
+    expect(scrFormView(base).valid).toBe(true);
+    expect(scrFormView({ ...base, reason: "字".repeat(500) }).valid).toBe(true);
+    expect(scrFormView({ ...base, reason: "字".repeat(501) }).errors.reason).not.toBeNull();
+    expect(scrFormView({ ...base, reason: "字".repeat(500) }).reasonRemaining).toBe(0);
+    expect(scrFormView({ ...base, reason: " " }).errors.reason).not.toBeNull();
+    expect(scrFormView({ ...base, reasonClass: "EVIDENCE" }).errors.reasonClass).not.toBeNull();
+    expect(scrFormView({ ...base, affectedSections: Array.from({ length: 20 }, (_, i) => `§${i}`) }).valid).toBe(true);
+    expect(scrFormView({ ...base, affectedSections: Array.from({ length: 21 }, (_, i) => `§${i}`) }).errors.affectedSections).not.toBeNull();
+    expect(scrFormView({ ...base, affectedSections: ["s".repeat(200)] }).valid).toBe(true);
+    expect(scrFormView({ ...base, affectedSections: ["s".repeat(201)] }).errors.affectedSections).not.toBeNull();
+    expect(evidenceUrlError("")).toBeNull();
+    expect(evidenceUrlError("https://a.example")).toBeNull();
+    expect(evidenceUrlError("http://a.example")).not.toBeNull();
+    expect(evidenceUrlError("javascript:alert(1)")).not.toBeNull();
+    expect(evidenceUrlError("https://a.example/" + "p".repeat(500 - 18))).toBeNull();
+    expect(evidenceUrlError("https://a.example/" + "p".repeat(500 - 17))).not.toBeNull();
+    const err = new ApiError({
+      status: 422,
+      message: "x",
+      reason: "invalid_request",
+      details: {
+        violations: [
+          { field: "reason", rule: "too_long" },
+          { field: "reason", rule: "blank" },
+          { field: "kind", rule: "x" },
+        ],
+      },
+    });
+    expect(scrViolationsByField(err)).toEqual({ reason: ["too_long", "blank"], kind: ["x"] });
+  });
+
+  it("delivery_step_failed 帶 failure_step 時文案點名失敗步驟；沒帶退回登記文案", () => {
+    const withStep = researchErrorText(new ApiError({ status: 502, message: "x", reason: "delivery_step_failed", details: { failure_step: "push" } }));
+    expect(withStep).toContain(DELIVERY_STEP_LABEL.push);
+    expect(researchErrorText(new ApiError({ status: 502, message: "x", reason: "delivery_step_failed" }))).toBe(RESEARCH_REASON_TEXT.delivery_step_failed);
   });
 });

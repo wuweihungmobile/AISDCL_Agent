@@ -28,6 +28,10 @@ import type {
   ResearchFlowStatus,
   ResearchFlowStepId,
   ResearchFlowStepState,
+  ResearchGateName,
+  ResearchGateResult,
+  ResearchKanban,
+  ResearchScrKind,
   ResearchFsmView,
   ResearchPlacementTarget,
   ResearchProjectDetail,
@@ -522,6 +526,8 @@ export const RECONCILE_CHECK_LABEL: Readonly<Record<string, string>> = {
   evidence_matrix: "證據矩陣",
   task_decomposition: "任務拆解",
   route_decision: "分流決定",
+  /** P2 第七項（FR-R2P-23、AC-23-4）：交付快照 `traceability_matrix.json` 的 sha256 對帳 */
+  delivery: "交付",
 };
 
 export type ReconcileDriftView = {
@@ -784,12 +790,16 @@ export const RESEARCH_REASONS = {
   SDD_CLI_FAILED: "sdd_cli_failed",
   FSM_STATE_UNREADABLE: "fsm_state_unreadable",
   INVALID_REQUEST: "invalid_request",
+  // P2 兩個（D-138 Q-14：四方鎖 37；字面逐字等於後端 `ErrorReasons`）
+  TAG_EXISTS: "tag_exists",
+  DELIVERY_STEP_FAILED: "delivery_step_failed",
 } as const;
 
 /** 唯讀角色的停用說明（沿 TCS-ExecMonitorEntry W-E1 先例）：所有寫入類控件停用時 `title` 一律是它。 */
 export const READONLY_TITLE = "權限不足（唯讀角色）";
 
-const REASON_TEXT: Readonly<Record<string, string>> = {
+/** 研究 reason 的白話文案（單一登記處；元件一律取這裡，不內嵌第二份）。 */
+export const RESEARCH_REASON_TEXT: Readonly<Record<string, string>> = {
   [RESEARCH_REASONS.WRITE_DISABLED]: "研究寫入面未啟用：Console 或 Bridge 沒有設定研究寫入權杖，請洽管理員",
   [RESEARCH_REASONS.WRITE_FORBIDDEN]: "權限不足：這個動作不在您的角色範圍內",
   [RESEARCH_REASONS.REQUIRES_DB]: "研究功能需要 Bridge 連上資料庫，目前沒有連線，所以沒有任何檔案或資料被寫入",
@@ -825,16 +835,25 @@ const REASON_TEXT: Readonly<Record<string, string>> = {
   [RESEARCH_REASONS.SDD_CLI_FAILED]: "狀態機命令列執行失敗，請稍後再試或洽管理員",
   [RESEARCH_REASONS.FSM_STATE_UNREADABLE]: "讀不到狀態機的現態，請確認狀態目錄是否正常",
   [RESEARCH_REASONS.INVALID_REQUEST]: "送出的內容沒有通過檢查，請依欄位提示修正",
+  [RESEARCH_REASONS.TAG_EXISTS]: "這個 Tag 名稱已存在（不是本專案已記錄的），請換一個版本號",
+  [RESEARCH_REASONS.DELIVERY_STEP_FAILED]: "交付有一步失敗了，已完成的步驟會保留（不自動回滾）；請看失敗步驟的原因，修好後可重送同一個動作",
 };
+
+/** 交付失敗步驟（`delivery_step_failed` 的 `details.failure_step`）中文。 */
+export const DELIVERY_STEP_LABEL: Readonly<Record<string, string>> = { push: "推送到遠端", pr_create: "建立 PR", fsm_release: "狀態機進入 RELEASE", tag: "建立 Tag" };
 
 /** 研究端點錯誤的白話原因（依 `reason`；沒有對映時退回通用訊息）。`route_step_failed` 另帶失敗步驟名（取 `details.failureStep` 對映 `ROUTE_STEP_LABEL`）。 */
 export function researchErrorText(error: unknown): string {
-  if (error instanceof ApiError && error.reason !== undefined && REASON_TEXT[error.reason] !== undefined) {
+  if (error instanceof ApiError && error.reason !== undefined && RESEARCH_REASON_TEXT[error.reason] !== undefined) {
     if (error.reason === RESEARCH_REASONS.ROUTE_STEP_FAILED) {
       const raw = error.details?.failureStep ?? error.details?.failure_step;
       if (typeof raw === "string" && raw !== "") return `分流在「${routeStepLabel(raw)}」這一步失敗了，已完成的步驟會保留；請看失敗原因，修好後按「重試失敗步驟」`;
     }
-    return REASON_TEXT[error.reason];
+    if (error.reason === RESEARCH_REASONS.DELIVERY_STEP_FAILED) {
+      const step = error.details?.failureStep ?? error.details?.failure_step;
+      if (typeof step === "string" && step !== "") return `交付在「${DELIVERY_STEP_LABEL[step] ?? step}」這一步失敗了，已完成的步驟會保留；請看失敗原因，修好後可重送同一個動作`;
+    }
+    return RESEARCH_REASON_TEXT[error.reason];
   }
   return describeError(error);
 }
@@ -1794,6 +1813,12 @@ export const TCS_UNMET_LABEL: Readonly<Record<string, string>> = {
   route_not_succeeded: "分流尚未完成",
   inner_key_not_adopted: "內環鍵尚未採納基線",
   decomposition_missing: "尚未觸發拆解",
+  // P2：SCG 登錄與 Tag 的前置（IFACE §2.1、§6.2）
+  tasks_incomplete: "仍有任務未完成或未跳過",
+  rtm_below_100: "追溯覆蓋率未達 100%",
+  rtm_unavailable: "尚無追溯資料（RTM）",
+  not_release_ready: "狀態機尚未達 RELEASE_READY",
+  scr_open: "規格變更進行中",
 };
 
 /** 取 `details.unmet[]`（項為字串，或帶 `item`／`name` 的物件）轉中文；沒有就回空陣列。 */
@@ -1873,4 +1898,231 @@ export function executionBlock(input: { scrOpen: boolean; decomposition: Pick<Re
   if (d.status !== "SIGNED_OFF") return "unsigned";
   if (!input.tcsFrozen) return "tcsUnfrozen";
   return null;
+}
+
+// ── ResearchToPRD P2（看板、自癒、終端、決策彈窗、SCG 登錄、SCR UI；TCS-ResearchToPRD-P2-20261107 AT-962-11～15）─────────────────────────────
+// 純函式與常數（FE-P2A 獨占；FE-P2B 只 import）。元件只負責畫；數字邊界與文案一律取這裡。
+
+/** 看板 SSE 去抖與「幀到 DOM」上限的單一常數（IFACE §1.5；AT-962-11-3、11-E-3；KanbanBoard 與測試共讀，不各寫一份）。 */
+export const KANBAN_DEBOUNCE_MS = 100;
+export const KANBAN_SSE_TO_DOM_MAX_MS = 500;
+/** 終端窗格開合（localStorage）與決策彈窗「稍後處理」（sessionStorage；⚖P2-10）的鍵。 */
+export const TERMINAL_OPEN_STORAGE_KEY = "research.terminal.open";
+export const DECISION_SNOOZE_STORAGE_KEY = "research.decision.snoozed";
+
+export const KANBAN_COLUMN_ORDER = ["decompose", "tcs", "implement", "healing", "regression"] as const;
+export type KanbanColumnKey = (typeof KANBAN_COLUMN_ORDER)[number];
+export const KANBAN_COLUMN_LABEL: Readonly<Record<KanbanColumnKey, string>> = {
+  decompose: "Task 拆解",
+  tcs: "測試規格產生",
+  implement: "程式碼實作",
+  healing: "自癒修復",
+  regression: "回歸驗收",
+};
+/** 完成判定：`unknown`＝內環 FSM 衍生欄量不到（Bridge 不可達），不猜成 false 也不猜成 true（AT-962-11-1、11-E-2）。 */
+export type KanbanDone = boolean | "unknown";
+export type KanbanColumnView = { key: KanbanColumnKey; label: string; done: KanbanDone };
+
+/**
+ * 看板五欄的完成判定（IFACE §1.2；與後端同一判定）：
+ * 拆解＝已簽核且未過期；測試規格＝階段 2 已凍結（FSM 欄）；實作＝任務總數大於 0 且完成加跳過等於總數；
+ * 自癒＝無重試中步驟且無升級任務；回歸＝RTM 100% 且完全覆蓋且 FSM 在 RELEASE_READY／RELEASE（FSM 欄）。
+ */
+export function kanbanColumns(dto: ResearchKanban): KanbanColumnView[] {
+  const { decompose, tcs, implement, healing, regression } = dto.columns;
+  const tasks = implement.tasks;
+  const implDone: KanbanDone = implement.unknown === true ? "unknown" : tasks.total > 0 && tasks.completed + tasks.skipped === tasks.total;
+  const regDone: KanbanDone =
+    regression.unknown === true || regression.fsmState === null
+      ? "unknown"
+      : regression.rtm !== null && regression.rtm.acPct === 100 && regression.rtm.fullyCovered && (regression.fsmState === "RELEASE_READY" || regression.fsmState === "RELEASE");
+  const done: Record<KanbanColumnKey, KanbanDone> = {
+    decompose: decompose.status === "SIGNED_OFF" && !decompose.stale,
+    tcs: tcs.unknown === true || tcs.stage2Frozen === null ? "unknown" : tcs.stage2Frozen,
+    implement: implDone,
+    healing: healing.retryingSteps === 0 && healing.escalatedTasks === 0,
+    regression: regDone,
+  };
+  return KANBAN_COLUMN_ORDER.map((key) => ({ key, label: KANBAN_COLUMN_LABEL[key], done: done[key] }));
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** 標準 UUID（不分大小寫）；深連結 query 只收它，其餘一律忽略（路徑穿越、腳本、長度不符都不收；D-138 Q-11）。 */
+export function isResearchUuid(value: string | null | undefined): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+/** 看板與步驟 4 面板開啟執行中心或監控中心的深連結：帶 `?researchId=<uuid>`（非 UUID 就不帶）。 */
+export function consoleCenterHref(consoleProjectId: string, center: "execute" | "monitor", researchId: string | null | undefined): string {
+  const base = `/projects/${encodeURIComponent(consoleProjectId)}/${center}`;
+  return isResearchUuid(researchId) ? `${base}?researchId=${researchId}` : base;
+}
+
+/** Bridge 不可達橫幅文字（AT-962-11-7）。 */
+export function kanbanStaleBanner(snapshotAt: string | null): string {
+  return `Engine Bridge 無法連線，以下為 ${snapshotAt ?? "未知時間"} 的 DB 快照`;
+}
+
+// 決策彈窗（AC-18-2）──
+export const DECISION_LABEL: Readonly<Record<string, string>> = { APPROVE: "通過", REJECT: "拒絕", RETRY: "重試", SKIP: "跳過" };
+export const DECISION_ORDER = ["APPROVE", "REJECT", "RETRY", "SKIP"] as const;
+/** 決定按鈕：只渲染 `allowedDecisions` 內且為已知決定者，順序固定。 */
+export function decisionButtons(allowed: readonly string[]): string[] {
+  return DECISION_ORDER.filter((d) => allowed.includes(d));
+}
+/** 決策彈窗的去重鍵：review-request 與待審取 `reviewId`；alert 幀無 reviewId 時用幀 seq（IFACE §5）。 */
+export function decisionKey(input: { reviewId?: string | null; alertSeq?: number | string | null }): string | null {
+  if (typeof input.reviewId === "string" && input.reviewId !== "") return `review:${input.reviewId}`;
+  if (input.alertSeq !== undefined && input.alertSeq !== null && input.alertSeq !== "") return `alert:${String(input.alertSeq)}`;
+  return null;
+}
+
+/** 彈窗項目：待審清單項與串流幀統一成這個形狀。`reviewId` 為 null＝引擎事件（只顯示，沒有可送出的決定）。 */
+export type DecisionItem = {
+  key: string;
+  reviewId: string | null;
+  runId: string | null;
+  kind: string;
+  taskId: string | null;
+  reason: string;
+  allowedDecisions: string[];
+};
+export function decisionKindLabel(kind: string): string {
+  return kind === "ESCALATED" ? "自癒重試耗盡（已升級，等待人工決定）" : kind === "ALERT" ? "引擎升級事件" : "Agent 請求審核";
+}
+/**
+ * 步驟 5「交付」畫面字樣的單一出處（FE-P2A 一次宣告；FE-P2B 的 DeliverPanel／TraceabilityTable／ReleaseActions／TagConfirmDialog／PrConfirmDialog 一律 import 這裡，不各寫一份）：
+ * 說明登記表（`lib/help/research-workspace.ts`）的欄位名逐字引用這些字樣，出處鎖到本檔找得到它們。
+ */
+export const DELIVER_LABEL = {
+  traceability: "追溯表",
+  uncovered: "未覆蓋",
+  createTag: "建立 Tag",
+  pushRemote: "推送到遠端",
+  createPr: "建立 PR",
+  openLocal: "開啟本地專案",
+  records: "交付紀錄",
+} as const;
+// SCG 登錄（AC-15-6）──
+export const GATE_REASON_MAX = 500;
+export const GATE_REPORT_REF_MAX = 300;
+export const GATE_LABEL: Readonly<Record<ResearchGateName, string>> = {
+  PR_REVIEW: "SCG-4 程式碼審查（PR_REVIEW）",
+  RTM_VERIFY: "SCG-5 追溯驗證（RTM_VERIFY）",
+  RELEASE_READY: "發布就緒（RELEASE_READY）",
+};
+export const GATE_INDEPENDENCE_TEXT = "我確認審查者未參與規格與實作";
+export type GateFormInput = { gate: ResearchGateName; result: ResearchGateResult; reason: string; reportRef: string; independent: boolean };
+export type GateFormView = {
+  resultOptions: ResearchGateResult[];
+  reasonRequired: boolean;
+  independenceRequired: boolean;
+  reasonError: string | null;
+  reportRefError: string | null;
+  independenceError: string | null;
+  canSubmit: boolean;
+};
+
+/** SCG 登錄表單判定：RELEASE_READY 只有 FAIL；FAIL 必填理由（1～500）；報告參照 ≤300；PR_REVIEW 必須勾獨立聲明。 */
+export function gateRegisterView(input: GateFormInput): GateFormView {
+  const resultOptions: ResearchGateResult[] = input.gate === "RELEASE_READY" ? ["FAIL"] : ["PASS", "FAIL"];
+  const result = input.gate === "RELEASE_READY" ? "FAIL" : input.result;
+  const reasonRequired = result === "FAIL";
+  const reasonLen = [...input.reason.trim()].length;
+  const reasonError = reasonLen > GATE_REASON_MAX ? `理由最多 ${GATE_REASON_MAX} 字` : reasonRequired && reasonLen === 0 ? "FAIL 必須填理由" : null;
+  const reportRefError = [...input.reportRef.trim()].length > GATE_REPORT_REF_MAX ? `報告參照最多 ${GATE_REPORT_REF_MAX} 字` : null;
+  const independenceRequired = input.gate === "PR_REVIEW";
+  const independenceError = independenceRequired && !input.independent ? "必須先勾選審查者獨立聲明" : null;
+  return {
+    resultOptions,
+    reasonRequired,
+    independenceRequired,
+    reasonError,
+    reportRefError,
+    independenceError,
+    canSubmit: reasonError === null && reportRefError === null && independenceError === null,
+  };
+}
+
+export type GateErrorView = { text: string; unmet: string[]; drift: string[]; offerScr: boolean };
+/** SCG 登錄失敗的呈現：文案取登記表；409 unmet 逐項中文；422 digest_mismatch 列出每個漂移路徑並可發起 SCR；403 ACCESS_DENIED 用通用權限不足文案。 */
+export function gateErrorView(error: unknown): GateErrorView {
+  if (error instanceof ApiError && error.status === 403 && error.reason === "ACCESS_DENIED") return { text: "權限不足：僅 ADMIN 可登錄 SCG", unmet: [], drift: [], offerScr: false };
+  const drift: string[] = [];
+  if (error instanceof ApiError && error.reason === RESEARCH_REASONS.DIGEST_MISMATCH) {
+    const raw = error.details?.drift;
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const path = typeof entry === "string" ? entry : typeof entry === "object" && entry !== null ? textOf((entry as Record<string, unknown>).path) : "";
+        if (path !== "") drift.push(path);
+      }
+    }
+  }
+  const text = error instanceof ApiError && error.reason === RESEARCH_REASONS.DIGEST_MISMATCH ? "已凍結的規格檔與凍結時的摘要不一致，請檢查下列檔案；要改規格請發起 SCR" : researchErrorText(error);
+  return { text, unmet: unmetLabels(error), drift, offerScr: drift.length > 0 || (error instanceof ApiError && error.reason === RESEARCH_REASONS.DIGEST_MISMATCH) };
+}
+
+// SCR 表單（AC-19-1、19-5）──
+export const SCR_REASON_MAX = 500;
+export const SCR_SECTIONS_MAX = 20;
+export const SCR_SECTION_ITEM_MAX = 200;
+export const SCR_EVIDENCE_MAX = 500;
+export const SCR_REASON_CLASSES = ["PRD 缺漏證據", "AC 模糊", "需求變更", "技術不可行", "其他"] as const;
+export const SCR_KIND_TEXT: Readonly<Record<ResearchScrKind, string>> = {
+  MINOR: "小幅變更：在目前研究專案內修訂，舊凍結版保留、新摘要入庫；同一專案有次數上限",
+  MAJOR: "大幅變更：另開後繼研究專案（導向新專案），原專案凍結內容不動",
+};
+export const SCR_SOURCE_LABEL: Readonly<Record<string, string>> = { HUMAN: "人工發起", REVIEW_FINDING: "審查發現", SCG4: "SCG-4 未通過", HEALING_FAILED: "自癒失敗" };
+export type ScrFormInput = { kind: ResearchScrKind; sourceKind: string; reason: string; reasonClass: string; affectedSections: string[]; evidenceUrl: string };
+export type ScrFormErrors = { reason: string | null; reasonClass: string | null; affectedSections: string | null; evidenceUrl: string | null };
+
+/** 證據連結：只接受 `https://`（含主機）、≤500；空字串＝不填，合法。 */
+export function evidenceUrlError(raw: string): string | null {
+  const value = raw.trim();
+  if (value === "") return null;
+  if ([...value].length > SCR_EVIDENCE_MAX) return `證據連結最多 ${SCR_EVIDENCE_MAX} 字`;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname !== "" ? null : "證據連結只接受 https://";
+  } catch {
+    return "證據連結只接受 https://";
+  }
+}
+
+export function scrFormView(input: ScrFormInput): { errors: ScrFormErrors; valid: boolean; reasonRemaining: number } {
+  const reasonLen = [...input.reason.trim()].length;
+  const errors: ScrFormErrors = {
+    reason: reasonLen === 0 ? "請填變更理由" : reasonLen > SCR_REASON_MAX ? `理由最多 ${SCR_REASON_MAX} 字` : null,
+    reasonClass: (SCR_REASON_CLASSES as readonly string[]).includes(input.reasonClass) ? null : "請選理由分類",
+    affectedSections:
+      input.affectedSections.length > SCR_SECTIONS_MAX
+        ? `受影響章節最多 ${SCR_SECTIONS_MAX} 項`
+        : input.affectedSections.some((s) => [...s].length > SCR_SECTION_ITEM_MAX || s.trim() === "")
+          ? `每項章節 1～${SCR_SECTION_ITEM_MAX} 字`
+          : null,
+    evidenceUrl: evidenceUrlError(input.evidenceUrl),
+  };
+  return { errors, valid: Object.values(errors).every((e) => e === null), reasonRemaining: SCR_REASON_MAX - reasonLen };
+}
+
+/** 422 `details.violations[{field, rule}]` 依欄位分組（回顯到欄位下）。 */
+export function scrViolationsByField(error: unknown): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  if (!(error instanceof ApiError)) return out;
+  const raw = error.details?.violations;
+  if (!Array.isArray(raw)) return out;
+  for (const v of raw) {
+    if (typeof v !== "object" || v === null) continue;
+    const field = textOf((v as Record<string, unknown>).field);
+    const rule = textOf((v as Record<string, unknown>).rule);
+    if (field === "") continue;
+    (out[field] ??= []).push(rule === "" ? "未通過檢查" : rule);
+  }
+  return out;
+}
+
+/** ANSI 控制序列（CSI 與孤立 ESC）：終端窗格在餵給共用日誌元件之前剝掉，使可見文字不殘留 `ESC[`（AT-962-13-3；LiveLogCard 本包不改）。 */
+const ANSI_PATTERN = new RegExp(String.raw`\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b`, "g");
+export function stripAnsi(text: string): string {
+  return text.replace(ANSI_PATTERN, "");
 }

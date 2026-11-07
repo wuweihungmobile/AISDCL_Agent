@@ -113,7 +113,7 @@ test.describe("研究工作區步驟 4 前半（mock）", () => {
     await expect(page.getByTestId("execute-block-reason")).toContainText("測試規格尚未凍結");
     await page.getByRole("button", { name: "重新對帳" }).click();
     await expect(page.getByTestId("build-phase")).toContainText("可開始建置");
-    await expect(page.getByTestId("inner-loop-links").getByRole("link", { name: "執行中心" })).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/execute`);
+    await expect(page.getByTestId("inner-loop-links").getByRole("link", { name: "執行中心" })).toHaveAttribute("href", `/projects/${CONSOLE_PROJECT_ID}/execute?researchId=${R3}`);
   });
 
   test("AT_961_18_6 SCR 進行中：橫幅、標籤與操作停用；VIEWER 的寫入鈕 title 為權限不足", async ({ page }) => {

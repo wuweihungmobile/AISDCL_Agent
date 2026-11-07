@@ -3,17 +3,18 @@
 /**
  * 內環連結（FR-R2P-14-3、14-5；TCS-ResearchToPRD-P1-20261107 AT-961-18-5）：連到既有的專案頁（凍結與匯入）、執行中心、監控中心，**不重做任何執行控制**（FR-15-2）。
  * 執行中心連結只有在 `block` 為 null（已簽核、拆解未過期、測試規格已凍結、無 SCR 進行中）時才是連結；其餘一律停用並顯示原因（與後端 409 一致）。
- * 看板、自癒與終端屬 P2，這裡不渲染；`ResearchBackLink` 同屬 P2。
+ * 看板、自癒與終端屬 P2：由 `KanbanBoard`、`HealingMonitor`、`TerminalPane` 另行渲染，不在本元件。執行中心與監控中心的連結帶 `?researchId=<uuid>`（`consoleCenterHref`；
+ * 非 UUID 一律不帶；返回連結 `ResearchBackLink` 屬 FE-P2B，本元件只負責連結端的 query；AT-962-16-4）。
  */
 import { Activity, FolderOpen, Play } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
-import { BUILD_DISABLED_TEXT } from "@/lib/domain/research";
+import { BUILD_DISABLED_TEXT, consoleCenterHref } from "@/lib/domain/research";
 
 type Block = keyof typeof BUILD_DISABLED_TEXT;
 
-export function InnerLoopLinks({ consoleProjectId, block }: { consoleProjectId: string | null; block: Block | null }) {
+export function InnerLoopLinks({ consoleProjectId, block, researchId = null }: { consoleProjectId: string | null; block: Block | null; researchId?: string | null }) {
   if (consoleProjectId === null) {
     return (
       <section data-testid="inner-loop-links" aria-label="既有流程連結" className="flex flex-col gap-2 rounded-md border border-wg-line p-4">
@@ -33,7 +34,7 @@ export function InnerLoopLinks({ consoleProjectId, block }: { consoleProjectId: 
         </Button>
         {block === null ? (
           <Button asChild variant="ghost" iconLeft={Play}>
-            <Link href={`${base}/execute`}>執行中心</Link>
+            <Link href={consoleCenterHref(consoleProjectId, "execute", researchId)}>執行中心</Link>
           </Button>
         ) : (
           // 停用的「連結」不是按鈕：它本來就不是寫入控件，不該被當成「按了會送請求但被擋」的按鈕；原因在 title 與下方說明
@@ -48,7 +49,7 @@ export function InnerLoopLinks({ consoleProjectId, block }: { consoleProjectId: 
           </span>
         )}
         <Button asChild variant="ghost" iconLeft={Activity}>
-          <Link href={`${base}/monitor`}>監控中心</Link>
+          <Link href={consoleCenterHref(consoleProjectId, "monitor", researchId)}>監控中心</Link>
         </Button>
       </div>
       {reason !== null ? (

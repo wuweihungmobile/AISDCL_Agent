@@ -48,6 +48,14 @@ import {
   getProject,
   getProjectMetrics,
   getResearchCapabilities,
+  openResearchScr,
+  getResearchTraceability,
+  createResearchPr,
+  createResearchTag,
+  getResearchDelivery,
+  getResearchHealing,
+  registerResearchGate,
+  getResearchKanban,
   getResearchDecomposition,
   getResearchFsm,
   getResearchProject,
@@ -160,6 +168,10 @@ import type {
   ResearchCreateRequest,
   ResearchDecompositionSignoffRequest,
   ResearchEvent,
+  ResearchGateRegisterRequest,
+  ResearchPrRequest,
+  ResearchScrOpenRequest,
+  ResearchTagRequest,
   ResearchProjectDetail,
   ResearchReconcileResult,
   ResearchReinitRequest,
@@ -268,6 +280,11 @@ export const qk = {
   researchRoute: (id: string) => ["research", "project", id, "route"] as const,
   researchScr: (id: string) => ["research", "project", id, "scr"] as const,
   researchDecomposition: (id: string) => ["research", "project", id, "decomposition"] as const,
+  /** P2：看板／自癒／交付概覽／追溯表（IFACE §1.5；看板鍵 `["research","kanban",id]` 是 SSE 去抖失效的目標，不在 `project` 底下，寫入成功後各 hook 自己一併失效）。 */
+  researchKanban: (id: string) => ["research", "kanban", id] as const,
+  researchHealing: (id: string) => ["research", "healing", id] as const,
+  researchDelivery: (id: string) => ["research", "delivery", id] as const,
+  researchTraceability: (id: string) => ["research", "traceability", id] as const,
 };
 
 const POLL_MS = 30_000;
@@ -1528,3 +1545,72 @@ export const useSignoffResearchDecomposition = () =>
     (v: { id: string; body: ResearchDecompositionSignoffRequest }) => signoffResearchDecomposition(v.id, v.body),
     (v) => v.id,
   );
+
+// ── ResearchToPRD P2（看板、SCG 登錄、自癒、交付；TCS-ResearchToPRD-P2-20261107）─────────────────────────────────────────
+// 共享單點（FE-P2A 獨占；FE-P2B 只 import）。看板靠 SSE 去抖失效重抓；這裡不輪詢，Bridge 不可達時 REST 仍回 DB 快照（`bridgeReachable=false`）。
+
+/** 看板投影：寫入與串流幀到達時由 `invalidateQueries(qk.researchKanban(id))` 重抓；失敗不重試（原因要讓人看到）。 */
+export function useResearchKanban(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchKanban(id ?? ""), queryFn: ({ signal }) => getResearchKanban(id as string, { signal }), enabled, retry: false });
+}
+
+export function useResearchHealing(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchHealing(id ?? ""), queryFn: ({ signal }) => getResearchHealing(id as string, { signal }), enabled, retry: false });
+}
+
+export function useResearchDelivery(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchDelivery(id ?? ""), queryFn: ({ signal }) => getResearchDelivery(id as string, { signal }), enabled, retry: false });
+}
+
+export function useResearchTraceability(id: string | undefined) {
+  const enabled = useEnabled(Boolean(id));
+  return useQuery({ queryKey: qk.researchTraceability(id ?? ""), queryFn: ({ signal }) => getResearchTraceability(id as string, { signal }), enabled, retry: false });
+}
+
+/** P2 寫入成功或失敗後：看板、自癒、交付概覽、追溯表與專案資料一起標為過期。 */
+export function invalidateResearchP2(qc: QueryClient, id: string): Promise<unknown> {
+  return Promise.all([
+    invalidateResearch(qc, id),
+    qc.invalidateQueries({ queryKey: qk.researchKanban(id) }),
+    qc.invalidateQueries({ queryKey: qk.researchHealing(id) }),
+    qc.invalidateQueries({ queryKey: qk.researchDelivery(id) }),
+    qc.invalidateQueries({ queryKey: qk.researchTraceability(id) }),
+  ]);
+}
+
+/** 登錄 SCG（僅 ADMIN）：成功與失敗（409／422／502）後都重抓看板，畫面不顯示過期值。 */
+export function useRegisterResearchGate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: ResearchGateRegisterRequest }) => registerResearchGate(v.id, v.body),
+    onSettled: (_data, _error, v) => invalidateResearchP2(qc, v.id),
+  });
+}
+
+export function useCreateResearchTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: ResearchTagRequest }) => createResearchTag(v.id, v.body),
+    onSettled: (_data, _error, v) => invalidateResearchP2(qc, v.id),
+  });
+}
+
+export function useCreateResearchPr() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: ResearchPrRequest }) => createResearchPr(v.id, v.body),
+    onSettled: (_data, _error, v) => invalidateResearchP2(qc, v.id),
+  });
+}
+
+/** 發起 SCR（OPERATOR 以上；202；`HEALING_FAILED` 為 200＋`recovery`）：成功後游標與看板重抓。 */
+export function useOpenResearchScr() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (v: { id: string; body: ResearchScrOpenRequest }) => openResearchScr(v.id, v.body),
+    onSuccess: (_data, v) => Promise.all([invalidateResearchP2(qc, v.id), qc.invalidateQueries({ queryKey: qk.researchScr(v.id) })]),
+  });
+}

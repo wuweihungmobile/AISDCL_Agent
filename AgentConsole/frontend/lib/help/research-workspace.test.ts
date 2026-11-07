@@ -27,16 +27,18 @@ describe("AT_961_19_2 研究工作區說明：第 3、4 步寫實", () => {
     expect(FIELD("建立 GitHub 遠端")?.meaning).toContain("不會存進資料庫");
   });
 
-  it("AT_961_19_2 第 4 步說明含：拆解、簽核、測試規格草擬與凍結走既有介面、看板屬後續", () => {
+  it("AT_961_19_2 第 4 步說明含：拆解、簽核、測試規格；P2 起看板、自癒與終端不再屬後續（AT-962-25-1）", () => {
     const text = stepText(4);
-    for (const word of ["拆解", "簽核", "測試規格", "既有介面", "看板屬後續"]) expect(text, word).toContain(word);
+    for (const word of ["拆解", "簽核", "測試規格", "看板", "自癒", "終端"]) expect(text, word).toContain(word);
+    expect(text).not.toContain("看板屬後續");
   });
 
   it("AT_961_19_2 步驟句與 P1 新增欄位都過 lint（無禁字、英文只用白名單詞、句長與句數界線）；步驟維持 8 項內、第 5 步仍標尚未開放", () => {
     expect(researchWorkspace.steps.length).toBeLessThanOrEqual(8);
     expect(lintText(stepText(3), { maxSentences: 1 })).toEqual([]);
     expect(lintText(stepText(4), { maxSentences: 1 })).toEqual([]);
-    expect(stepText(5)).toContain("尚未開放");
+    expect(stepText(5), "P2：交付步驟已有真面板，不再標尚未開放").not.toContain("尚未開放");
+    expect(stepText(5)).toContain("追溯表");
     for (const name of ["分流精靈", "軌道 A", "軌道 B", "掛載目標", "預演", "確認執行", "重新輸入庫名", "建立 GitHub 遠端", "差異理由", "重試失敗步驟"]) {
       const field = FIELD(name);
       expect(field, `登記了欄位 ${name}`).toBeDefined();
@@ -68,5 +70,63 @@ describe("AT_961_16_5 分流停用文案的單一登記處（IFACE §8.3 逐列�
     expect(ROUTE_DISABLED_TEXT.viewer).toBe(READONLY_TITLE);
     expect(ROUTE_DISABLED_TEXT.adminOnly).toContain("權限不足");
     expect(ROUTE_DISABLED_TEXT.adminOnly).toContain("ADMIN");
+  });
+});
+
+/** P2（AT-962-25-1、25-E-2）：步驟 4 其餘與步驟 5 的欄位釋義一次寫完，過 lint、每條 ≤60 字（lint 的句長界線）。 */
+const P2_FIELDS = [
+  "看板",
+  "諮詢視圖",
+  "Engine Bridge 無法連線",
+  "未知",
+  "執行中心",
+  "監控中心",
+  "自癒監視器",
+  "引擎未提供",
+  "日誌落後",
+  "已升級，等待人工決定",
+  "補丁觸及凍結規格，請發起 SCR",
+  "終端窗格",
+  "尚無執行批次",
+  "需要人工決定",
+  "稍後處理",
+  "待辦決定",
+  "登錄 SCG",
+  "我確認審查者未參與規格與實作",
+  "審查報告參照",
+  "已升級，等待人工處理",
+  "發起規格變更（SCR）",
+  "理由分類",
+  "受影響章節",
+  "證據連結",
+  "SCR 已發起",
+  "追溯表",
+  "未覆蓋",
+  "建立 Tag",
+  "推送到遠端",
+  "建立 PR",
+  "開啟本地專案",
+  "交付紀錄",
+];
+
+describe("AT_962_25_1 研究工作區說明：P2 欄位釋義一次寫完", () => {
+  it("AT_962_25_1 P2 欄位逐一登記、過 lint（無禁字、英文只用白名單詞、句長與句數界線）；頁數與 PENDING 清單不變", () => {
+    for (const name of P2_FIELDS) {
+      const field = FIELD(name);
+      expect(field, `登記了欄位 ${name}`).toBeDefined();
+      expect(lintText(field?.meaning ?? "", { maxSentences: 2 }), name).toEqual([]);
+    }
+    expect(Object.keys(HELP_PAGES)).toContain("research-workspace");
+    expect(Object.keys(PENDING_HELP_PAGES)).toHaveLength(0);
+  });
+
+  it("AT_962_25_1 已移除的占位欄位不再登記（交付步驟有真面板）；每個欄位名不重複", () => {
+    expect(FIELD("本步驟於後續階段提供")).toBeUndefined();
+    const names = researchWorkspace.fields.map((f) => f.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("AT_962_25_E_2 狀態表不增：本頁仍只引用 researchFlow 一張表", () => {
+    expect(researchWorkspace.states).toEqual([{ table: "researchFlow" }]);
   });
 });

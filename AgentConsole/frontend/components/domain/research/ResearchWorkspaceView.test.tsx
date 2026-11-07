@@ -9,8 +9,8 @@ import ResearchWorkspacePage, { metadata as workspacePageMetadata } from "@/app/
 import { qk, usePrdVersions, useResearchEvidence, useReviewRounds } from "@/lib/api/queries";
 import type { ResearchFlowStepId, ResearchProjectDetail, Role } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { FLOW_PHASE_LABEL, FLOW_STATUS_LABEL, FLOW_STEP_IDS, FLOW_STEP_LABEL, READONLY_TITLE, resolveViewStep, stepReachable } from "@/lib/domain/research";
-import { R1, R2, R3 } from "@/tests/fixtures/research/ids";
+import { FLOW_PHASE_LABEL, FLOW_STATUS_LABEL, FLOW_STEP_IDS, FLOW_STEP_LABEL, READONLY_TITLE, RECONCILE_CHECK_LABEL, reconcileDriftView, resolveViewStep, stepReachable } from "@/lib/domain/research";
+import { R1, R2, R3, sha } from "@/tests/fixtures/research/ids";
 import { RECONCILE_DRIFT, RECONCILE_OK } from "@/tests/fixtures/research/misc";
 import { detailVariant } from "@/tests/fixtures/research/projects";
 import { failure, renderResearch, stubResearchApi, writeCalls, callsOf } from "@/tests/helpers/research";
@@ -525,6 +525,42 @@ describe("AT_960_21_6 漂移橫幅：以資料庫為準、紅色提示檔名、�
   });
 });
 
+// ── AT_962_23_7：對帳第七項 delivery（交付快照）漂移，由單一橫幅顯示 ──────────────────────────
+
+describe("AT_962_23_7 交付項對帳：RECONCILE_CHECK_LABEL 含 delivery＝交付；單一橫幅列出交付漂移", () => {
+  it("AT_962_23_7 標籤表恰七個鍵且 delivery 為『交付』；reconcileDriftView 對 delivery drift 回檔案漂移列（label 交付、帶雙方 sha）", () => {
+    expect(Object.keys(RECONCILE_CHECK_LABEL).sort()).toEqual(["delivery", "evidence_matrix", "fsm_flow_mapping", "prd_sha256", "review_card", "route_decision", "task_decomposition"]);
+    expect(RECONCILE_CHECK_LABEL.delivery).toBe("交付");
+    const view = reconcileDriftView({
+      consistent: false,
+      checks: [{ name: "delivery", status: "drift", drift: [{ kind: "sha256_mismatch", path: "03_execution/traceability_matrix.json", expectedSha256: sha("a"), actualSha256: sha("b") }] }],
+    });
+    expect(view.hasDrift).toBe(true);
+    expect(view.files).toEqual([{ check: "delivery", label: "交付", path: "03_execution/traceability_matrix.json", expectedSha256: sha("a"), actualSha256: sha("b") }]);
+  });
+
+  it("AT_962_23_7 工作區單一 drift-banner 列出『交付』漂移：檔名、標籤與雙方 sha 前 8 碼；整個畫面只有一個橫幅", async () => {
+    const { client } = renderWorkspace({ search: "step=studio" });
+    await screen.findByTestId("studio-stub");
+    act(() => {
+      client.setQueryData(qk.researchReconcile(R2), {
+        consistent: false,
+        checks: [
+          { name: "prd_sha256", status: "ok" },
+          { name: "delivery", status: "drift", drift: [{ kind: "sha256_mismatch", path: "03_execution/traceability_matrix.json", expectedSha256: sha("a"), actualSha256: sha("b") }] },
+        ],
+      });
+    });
+    const banners = await screen.findAllByTestId("drift-banner");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]).toHaveAttribute("data-drift", "true");
+    const files = within(banners[0]).getByTestId("drift-files");
+    expect(files).toHaveTextContent("03_execution/traceability_matrix.json");
+    expect(files).toHaveTextContent("（交付）");
+    expect(files).toHaveTextContent("資料庫 aaaaaaaa，檔案 bbbbbbbb");
+    expect(screen.queryByTestId("build-drift-banner")).toBeNull();
+  });
+});
 // ── 殼層的其他狀態：載入、錯誤、初始化失敗、受阻、標題 ──────────────────────────────────────
 
 describe("研究工作區殼層：載入中、載入失敗、初始化失敗、受阻、標題", () => {

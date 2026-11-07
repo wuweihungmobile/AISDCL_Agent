@@ -85,7 +85,18 @@ import type {
   ResearchSavePrdRequest,
   ResearchScr,
   ResearchScrApplyResult,
+  ResearchKanban,
+  ResearchGateRegisterRequest,
+  ResearchGateRegisterResult,
+  ResearchHealing,
+  ResearchDeliveryOverview,
+  ResearchTagRequest,
+  ResearchTagResult,
+  ResearchPrRequest,
+  ResearchPrResult,
+  ResearchTraceability,
   ResearchScrOpenRequest,
+  ResearchScrOpenResult,
   ResearchSource,
   ResearchStage,
   ResearchStageStarted,
@@ -828,8 +839,8 @@ export function getResearchRoute(id: string, opts: Opts = {}): Promise<ResearchR
 }
 
 /** 發起規格變更請求（API-RP-15；OPERATOR 以上；202；發起鈕屬 P2，P1 只提供函式）。 */
-export function openResearchScr(id: string, body: ResearchScrOpenRequest): Promise<ResearchScr> {
-  return apiRequest<ResearchScr>(`${researchProject(id)}/scr`, { method: "POST", body });
+export function openResearchScr(id: string, body: ResearchScrOpenRequest): Promise<ResearchScrOpenResult> {
+  return apiRequest<ResearchScrOpenResult>(`${researchProject(id)}/scr`, { method: "POST", body });
 }
 
 export function listResearchScr(id: string, opts: Opts = {}): Promise<ResearchScr[]> {
@@ -854,4 +865,42 @@ export function triggerResearchDecomposition(id: string): Promise<ResearchDecomp
 /** 簽核拆解（OPERATOR 以上；approver 由後端取 JWT subject，前端不送；未覆蓋的 AC 須各附豁免理由）。 */
 export function signoffResearchDecomposition(id: string, body: ResearchDecompositionSignoffRequest): Promise<ResearchDecomposition> {
   return apiRequest<ResearchDecomposition>(`${researchProject(id)}/decomposition/signoff`, { method: "POST", body });
+}
+
+// ── ResearchToPRD P2（看板、SCG 登錄、自癒、交付；TCS-ResearchToPRD-P2-20261107 AT-962-24-5；IFACE-P2 §0）──────────────────────────
+// 七個函式，函式名＝operationId。**不新增**任何 execute／pause／resume／cancel 端點函式（AT-962-11-8）：看板決策與執行控制重用既有的 `reviewExecution`、`listExecutionSteps`。
+
+/** 看板投影（API-RP-26；VIEWER 以上；唯讀聚合）。 */
+export function getResearchKanban(id: string, opts: Opts = {}): Promise<ResearchKanban> {
+  return apiRequest<ResearchKanban>(`${researchProject(id)}/kanban`, { signal: opts.signal });
+}
+
+/** 登錄 SCG-4／SCG-5（API-RP-23；僅 ADMIN）。 */
+export function registerResearchGate(id: string, body: ResearchGateRegisterRequest): Promise<ResearchGateRegisterResult> {
+  return apiRequest<ResearchGateRegisterResult>(`${researchProject(id)}/gates`, { method: "POST", body });
+}
+
+/** 自癒嘗試（API-RP-27；VIEWER 以上）。 */
+export function getResearchHealing(id: string, opts: Opts = {}): Promise<ResearchHealing> {
+  return apiRequest<ResearchHealing>(`${researchProject(id)}/healing`, { signal: opts.signal });
+}
+
+/** 交付概覽（API-RP-17；VIEWER 以上）。 */
+export function getResearchDelivery(id: string, opts: Opts = {}): Promise<ResearchDeliveryOverview> {
+  return apiRequest<ResearchDeliveryOverview>(`${researchProject(id)}/delivery`, { signal: opts.signal });
+}
+
+/** 建立 Release Tag（API-RP-17；僅 ADMIN；201）。 */
+export function createResearchTag(id: string, body: ResearchTagRequest): Promise<ResearchTagResult> {
+  return apiRequest<ResearchTagResult>(`${researchProject(id)}/delivery/tag`, { method: "POST", body });
+}
+
+/** 建立 PR（API-RP-17；僅 ADMIN）。 */
+export function createResearchPr(id: string, body: ResearchPrRequest): Promise<ResearchPrResult> {
+  return apiRequest<ResearchPrResult>(`${researchProject(id)}/delivery/pr`, { method: "POST", body });
+}
+
+/** 追溯表（API-RP-28；VIEWER 以上；零副作用預覽）。 */
+export function getResearchTraceability(id: string, opts: Opts = {}): Promise<ResearchTraceability> {
+  return apiRequest<ResearchTraceability>(`${researchProject(id)}/delivery/traceability`, { signal: opts.signal });
 }

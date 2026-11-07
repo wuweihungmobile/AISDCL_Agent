@@ -296,6 +296,20 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
     "/api/v1/research/projects/R/decomposition/signoff",
     { waivers: [{ ac: "AC-1", reason: "本期不做" }] },
   ],
+  // P2：七個新端點（函式名＝operationId）
+  ["getResearchKanban", () => api.getResearchKanban("R"), "GET", "/api/v1/research/projects/R/kanban"],
+  [
+    "registerResearchGate",
+    () => api.registerResearchGate("R", { gate: "PR_REVIEW", result: "PASS", reason: "", reviewerIndependent: true }),
+    "POST",
+    "/api/v1/research/projects/R/gates",
+    { gate: "PR_REVIEW", result: "PASS", reason: "", reviewerIndependent: true },
+  ],
+  ["getResearchHealing", () => api.getResearchHealing("R"), "GET", "/api/v1/research/projects/R/healing"],
+  ["getResearchDelivery", () => api.getResearchDelivery("R"), "GET", "/api/v1/research/projects/R/delivery"],
+  ["createResearchTag", () => api.createResearchTag("R", { tagName: "v1.0.0", push: false }), "POST", "/api/v1/research/projects/R/delivery/tag", { tagName: "v1.0.0", push: false }],
+  ["createResearchPr", () => api.createResearchPr("R", { bodyPreviewAck: true }), "POST", "/api/v1/research/projects/R/delivery/pr", { bodyPreviewAck: true }],
+  ["getResearchTraceability", () => api.getResearchTraceability("R"), "GET", "/api/v1/research/projects/R/delivery/traceability"],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -316,10 +330,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("AT_961_19_5 匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），再加 P1 的 9 個（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition），共 118 個；不多不少", () => {
+  it("AT_962_24_5（原 AT_961_19_5）匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），再加 P1 的 9 個（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition），再加 P2 的 7 個（getResearchKanban、registerResearchGate、getResearchHealing、getResearchDelivery、createResearchTag、createResearchPr、getResearchTraceability），共 125 個；不多不少", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(118);
+    expect(names).toHaveLength(125);
   });
 
   it("研究端點（ResearchToPRD P0）：id 編成單一路徑段；省略的選項不進網址（清單的 archived 只在為 true 時帶 ?archived=true）；啟動階段與重試初始化沒給本文時送空物件；PATCH 的方法字串就是 PATCH", async () => {

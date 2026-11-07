@@ -1,11 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-import { buildProject, DECOMPOSITION_DRAFT, ROUTE_ADOPTED } from "../fixtures/research/build";
+import { buildProject, DECOMPOSITION_DRAFT, DECOMPOSITION_SIGNED, ROUTE_ADOPTED } from "../fixtures/research/build";
 import { eventPage, EVENTS } from "../fixtures/research/events";
 import { fsmView } from "../fixtures/research/fsm";
 import { R1, R2, R3 } from "../fixtures/research/ids";
 import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from "../fixtures/research/misc";
 import { detailVariant, PROJECT_LIST } from "../fixtures/research/projects";
+import { HEALING, kanbanPending, PENDING_ESCALATED, RUN_ID } from "../fixtures/research/p2";
 import { CAPABILITIES_ROUTE_READY, PREVIEW_B } from "../fixtures/research/route";
 import { defect, FAIL3_SCORES, makeRound, PRD_CONTENT, PRD_VERSIONS } from "../fixtures/research/reviews";
 import { expectNoA11yViolations } from "./a11y";
@@ -428,6 +429,56 @@ test.describe("無障礙掃描：研發工作流步驟 4 前半（route mock＋a
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow, `步驟 4 前半 ${width} 無水平溢出`).toBeLessThanOrEqual(0);
       await expectNoA11yViolations(page, `研究工作區 步驟 4 前半 ${width}`);
+    }
+    expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
+  });
+});
+
+// ── 研發工作流步驟 4 內環（ResearchToPRD P2；TCS-ResearchToPRD-P2-20261107 AT-962-11-E-4）─────────────────────────────────────
+
+/** R3 在步驟 4（內環已啟動）：看板、自癒監視器（含已升級與規格漂移列）、終端窗格、待審決策；串流回 204（靜止畫面，不需要即時事件）。 */
+const innerLoopBackend: MockHandler = (call) => {
+  const p = call.path;
+  if (call.method !== "GET") return undefined;
+  if (p.startsWith("/api/v1/stream/")) return { status: 204 };
+  if (p === "/api/v1/research/capabilities") return { data: CAPABILITIES_ROUTE_READY };
+  if (p === `/api/v1/executions/${RUN_ID}`) return undefined;
+  const match = new RegExp(`^${RESEARCH_BASE}/${R3}(/.*)?$`).exec(p);
+  if (match === null) return undefined;
+  const rest = match[1] ?? "";
+  if (rest === "") return { data: buildProject("BUILD_READY") };
+  if (rest === "/route") return { data: ROUTE_ADOPTED };
+  if (rest === "/decomposition") return { data: DECOMPOSITION_SIGNED };
+  if (rest === "/events") return { data: eventPage(EVENTS, Number(call.query.get("afterSeq") ?? 0), Number(call.query.get("limit") ?? 500)) };
+  if (rest === "/kanban") return { data: kanbanPending(PENDING_ESCALATED) };
+  if (rest === "/healing") {
+    const rows = HEALING.rows.map((r, i) => (i === 1 ? { ...r, specChangeForbidden: true, excerpt: "x".repeat(300) } : r));
+    return { data: { ...HEALING, rows, logBehind: 3 } };
+  }
+  return undefined;
+};
+
+test.describe("無障礙掃描：研發工作流步驟 4 內環（看板、自癒、終端、決策彈窗；route mock＋axe；1440／1000／600）", () => {
+  test.setTimeout(180_000);
+
+  test("AT_962_11_E_4 研究工作區 ?step=build 內環：稍後處理後的整頁在三個寬度無水平溢出、axe 零 serious／critical；決策彈窗開啟時 1440 零違規", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await signInAs(page, "ADMIN");
+    await installApiMock(page, compose(shellHandler(), innerLoopBackend, researchBackend));
+    await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+    await page.goto(`/research/${R3}?step=build`);
+    const modal = page.getByTestId("decision-modal");
+    await expect(modal).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("kanban-board")).toBeVisible();
+    await expect(page.getByTestId("healing-monitor")).toBeVisible();
+    await expectNoA11yViolations(page, `研究工作區 步驟 4 內環 決策彈窗開啟 ${RESEARCH_WIDTHS[0]}`);
+    await modal.getByTestId("decision-snooze").click();
+    await expect(modal).toBeHidden();
+    for (const width of RESEARCH_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `步驟 4 內環 ${width} 無水平溢出`).toBeLessThanOrEqual(0);
+      await expectNoA11yViolations(page, `研究工作區 步驟 4 內環 ${width}`);
     }
     expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
   });
