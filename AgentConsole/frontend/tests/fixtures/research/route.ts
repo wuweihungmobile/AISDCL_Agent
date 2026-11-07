@@ -1,5 +1,5 @@
 import type { ResearchCapabilities, ResearchRouteDecision, ResearchRoutePreview, ResearchRouteStep } from "@/lib/api/types";
-import { CONSOLE_PROJECT_ID, T0, T1 } from "./ids";
+import { CONSOLE_PROJECT_ID, R3, T0, T1 } from "./ids";
 import { CAPABILITIES_LOCAL } from "./misc";
 
 /** 分流全可用的能力探針（git、gh、可寫 monorepo、有骨架根與範本）：TCS-ResearchToPRD-P1-20261107 AT-961-16-5 的「全可用」組。 */
@@ -26,6 +26,8 @@ const PRD = { versionNo: 4, semver: "v1.0.0", sha256: "a".repeat(64), targetScop
 
 /** 軌道 A 預演：只有本地動作。 */
 export const PREVIEW_A: ResearchRoutePreview = {
+  researchId: R3,
+  scopeDiffers: false,
   track: "A",
   prd: PRD,
   implFsmProject: "autoclaude-rag-eval",
@@ -39,6 +41,8 @@ export const PREVIEW_A: ResearchRoutePreview = {
 
 /** 軌道 B 預演：含觸及外部系統的建遠端動作，與一個內含 `<script>` 字串的目標（驗證純文字渲染）。 */
 export const PREVIEW_B: ResearchRoutePreview = {
+  researchId: R3,
+  scopeDiffers: false,
   track: "B",
   prd: { ...PRD, targetScope: "STANDALONE_PROJECT" },
   implFsmProject: "demo-app",
@@ -76,15 +80,19 @@ const ROW = {
   stackTemplate: null,
   consoleProjectId: null,
   implFsmProject: "autoclaude-rag-eval",
+  scopeDiffersReason: null,
+  decidedBy: "admin",
+  createdAt: T0,
 } as const;
 
-export const ROUTE_RUNNING: ResearchRouteDecision = { ...ROW, status: "RUNNING", failureStep: null, steps: [step(1, "VALIDATE_TARGET", "OK"), step(2, "GIT_SWITCH", "RUNNING")] };
+export const ROUTE_RUNNING: ResearchRouteDecision = { ...ROW, status: "RUNNING", failureStep: null, finishedAt: null, steps: [step(1, "VALIDATE_TARGET", "OK"), step(2, "GIT_SWITCH", "RUNNING")] };
 
 /** 失敗：第二步失敗（`stderrTail` 為脫敏後原因），第一步已成功。 */
 export const ROUTE_FAILED: ResearchRouteDecision = {
   ...ROW,
   status: "FAILED",
   failureStep: "GIT_SWITCH",
+  finishedAt: T1,
   steps: [step(1, "VALIDATE_TARGET", "OK"), step(2, "GIT_SWITCH", "FAILED", { exitCode: 128, stderrTail: "fatal: 分支已存在（路徑已脫敏）" })],
 };
 
@@ -103,5 +111,6 @@ export const ROUTE_SUCCEEDED: ResearchRouteDecision = {
   implFsmProject: "demo-app",
   status: "SUCCEEDED",
   failureStep: null,
+  finishedAt: T1,
   steps: [step(1, "VALIDATE_TARGET", "OK"), step(2, "SCAFFOLD_FILES", "OK"), step(3, "GH_REPO_CREATE", "OK")],
 };

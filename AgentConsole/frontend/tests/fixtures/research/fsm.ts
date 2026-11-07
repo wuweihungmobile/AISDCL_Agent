@@ -27,6 +27,7 @@ export function fsmView(currentState: string, patch: Partial<ResearchFsmView> = 
     escalationProvenance: null,
     fsmProject: "research-vector-db",
     humanReturnCount: 0,
+    stage2Frozen: false,
     ...patch,
   };
 }
