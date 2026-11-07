@@ -95,4 +95,43 @@ class ResearchScrApiIT extends AbstractResearchIT {
         assertThat(bridge().lastCall().body()).containsEntry("scr_no", 1).containsEntry("approver", "alice");
         assertThat(api.post(admin(), RESEARCH + "/projects/" + id + "/scr/0/apply", Map.of()).status()).isEqualTo(400);
     }
+
+    /** AT-962-15-6：evidenceUrl 為獨立欄（https 限定、至多 500）；缺或空字串視同未提供；不附加「證據：」行；違規為 422 且零 Bridge 請求。 */
+    @Test
+    void AT_962_15_6_evidenceUrlIsForwardedAsItsOwnFieldAndRulesNotHttpsAndTooLongAre422WithZeroBridgeRequests() {
+        UUID id = new ResearchP1Fixtures(jdbc).project("scr156", "UNDECIDED");
+        Map<String, Object> good = body("MINOR", "HUMAN", "AC-3 描述模糊");
+        good.put("evidenceUrl", "https://example.invalid/evidence/1");
+        assertThat(api.post(operator(), url(id), good).status()).isEqualTo(202);
+        Map<String, Object> sent = bridge().calls.stream().filter(c -> c.path().endsWith(":scr")).findFirst().orElseThrow().body();
+        assertThat(sent).containsEntry("evidence_url", "https://example.invalid/evidence/1").containsEntry("reason", "AC-3 描述模糊");
+        assertThat((String) sent.get("reason")).doesNotContain("證據：");
+
+        Map<String, Object> absent = body("MINOR", "HUMAN", "沒有證據");
+        absent.put("evidenceUrl", "");
+        api.post(operator(), url(id), absent);
+        assertThat(bridge().lastCall().body()).as("空字串視同缺").doesNotContainKey("evidence_url");
+
+        long calls = bridge().calls.size();
+        Map<String, Object> http = body("MINOR", "HUMAN", "x");
+        http.put("evidenceUrl", "http://example.invalid/x");
+        Resp notHttps = api.post(operator(), url(id), http);
+        assertThat(notHttps.status()).isEqualTo(422);
+        assertThat(notHttps.<String>read("$.reason")).isEqualTo("invalid_request");
+        assertThat(notHttps.<String>read("$.details.violations[0].field")).isEqualTo("evidenceUrl");
+        assertThat(notHttps.<String>read("$.details.violations[0].rule")).isEqualTo("not_https");
+        Map<String, Object> upper = body("MINOR", "HUMAN", "x");
+        upper.put("evidenceUrl", "HTTPS://example.invalid/x");
+        assertThat(api.post(operator(), url(id), upper).<String>read("$.details.violations[0].rule")).as("大小寫敏感").isEqualTo("not_https");
+        Map<String, Object> max = body("MINOR", "HUMAN", "x");
+        max.put("evidenceUrl", "https://" + "a".repeat(500 - 8));
+        assertThat(api.post(operator(), url(new ResearchP1Fixtures(jdbc).project("scr156b", "UNDECIDED")), max).status()).as("恰 500 字元通過").isEqualTo(202);
+        calls = bridge().calls.size();
+        Map<String, Object> tooLong = body("MINOR", "HUMAN", "x");
+        tooLong.put("evidenceUrl", "https://" + "a".repeat(501 - 8));
+        Resp long501 = api.post(operator(), url(id), tooLong);
+        assertThat(long501.status()).isEqualTo(422);
+        assertThat(long501.<String>read("$.details.violations[0].rule")).isEqualTo("too_long");
+        assertThat(bridge().calls.size()).as("501 字元零 Bridge 請求").isEqualTo((int) calls);
+    }
 }

@@ -54,13 +54,15 @@ public class RunConsumers {
     private final RuntimeSettings settings;
     private final Clock clock;
     private final TransactionTemplate tx;
+    private final ResearchHealingNotifier healing;
     /** 型別是 {@link ConcurrentMap}：{@link #start} 的登記／取代靠它的 {@code compute} 對同一個 key 原子執行。 */
     private final ConcurrentMap<UUID, Consumer> consumers = new ConcurrentHashMap<>();
 
     @SuppressWarnings("java:S107")
     public RunConsumers(AgentBridge bridge, ExecutionRunRepository runs, RunEventProcessor processor, RunEventHub hub,
                         RunRegistry registry, RuntimeSettings settings, PlatformTransactionManager transactions,
-                        Clock clock) {
+                        Clock clock, ResearchHealingNotifier healing) {
+        this.healing = healing;
         this.bridge = bridge;
         this.runs = runs;
         this.processor = processor;
@@ -206,6 +208,10 @@ public class RunConsumers {
                 RunEventProcessor.Outcome outcome = tx.execute(status -> processor.process(runId, event));
                 if (outcome == null) {
                     return;
+                }
+                if (outcome.healingRelevant()) {
+                    // 順序固定：交易提交 → 通知研究面（非同步、best-effort，不拋）→ 發佈 SSE
+                    healing.notify(runId);
                 }
                 hub.publish(runId, outcome.frames());
                 for (RunEventProcessor.Action action : outcome.actions()) {

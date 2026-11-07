@@ -47,6 +47,17 @@ class ResearchBridgeShapeTest {
     }
 
     @Test
+    void AT_962_23_6_theBridgeDeclaresSevenCheckIdsEndingWithDeliveryAndTheMiniBridgeHardCodedListEqualsThem() {
+        List<String> bridge = BridgeSource.constants("CHECK_IDS", RECONCILE);
+
+        assertThat(bridge).as("Bridge 原始碼宣告七項，第七項是 delivery").hasSize(7).endsWith("delivery");
+        assertThat(MiniResearch.RECONCILE_CHECK_IDS).as("迷你 Bridge 的硬編碼清單與 Bridge 原始碼逐項逐序相等（兩端各持一份，這是唯一的對拍）")
+                .containsExactlyElementsOf(bridge);
+        assertThat(checksOf(MiniResearch.reconcileBody(MiniResearch.consistentReconcileChecks())).stream().filter(check -> "delivery".equals(check.get("id")))
+                .findFirst().orElseThrow().get("present")).as("未交付時 delivery 兩側皆缺席").isEqualTo(false);
+    }
+
+    @Test
     void theReconcileDtoReadsTheBridgeIdAndBothCamelCaseDigestsOfEveryDriftRow() {
         List<Map<String, Object>> checks = new ArrayList<>(MiniResearch.consistentReconcileChecks());
         checks.set(1, MiniResearch.reconcileCheck("prd_sha256", "drift", true, "",

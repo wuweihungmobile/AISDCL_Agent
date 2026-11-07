@@ -293,6 +293,11 @@ class MiniResearchController {
             case "scr-apply" -> json(200, map("scr_no", body == null ? 1 : body.get("scr_no"), "status", "APPLIED", "impl_fsm_actions", List.of(), "flow", flow("build", "ROUTED", "IDLE")));
             case "decompose" -> json(200, map("decomposition_id", UUID.randomUUID().toString(), "status", "DRAFTED", "tasks_count", 0,
                     "coverage", map("total", 0, "covered", 0, "uncovered", List.of())));
+            case "gates" -> reply(MiniDeliveryBehaviors.gates(body == null ? Map.of() : body));
+            case "tag" -> reply(MiniDeliveryBehaviors.tag(body == null ? Map.of() : body));
+            case "pr" -> reply(MiniDeliveryBehaviors.pr(body == null ? Map.of() : body));
+            case "traceability-preview" -> reply(MiniDeliveryBehaviors.traceability());
+            case "healing-sync" -> reply(MiniDeliveryBehaviors.healingSync());
             case "decomposition-signoff" -> reply(MiniRouteBehaviors.signoff(research, id, body == null ? Map.of() : body));
             case "archive" -> {
                 research.jdbc().update("update console.research_projects set archived_at = now(), updated_at = now() where id = ?", id);

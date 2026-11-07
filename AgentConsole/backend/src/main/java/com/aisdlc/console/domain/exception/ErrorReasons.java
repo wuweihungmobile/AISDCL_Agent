@@ -260,4 +260,8 @@ public final class ErrorReasons {
     public static final String RESEARCH_SCR_LIMIT = "scr_limit";
     /** 拆解綁定的 PRD 摘要與現行凍結摘要不符（409；{@code details.expected_sha256}、{@code actual_sha256}）。 */
     public static final String RESEARCH_DECOMPOSITION_STALE = "decomposition_stale";
+    /** Release Tag 名稱已存在（409；P2 交付 {@code :tag}，Bridge 回、console-api 原樣透傳）。 */
+    public static final String RESEARCH_TAG_EXISTS = "tag_exists";
+    /** 交付的某一步失敗（502；{@code details.failure_step}；Bridge 回、console-api 原樣透傳）。 */
+    public static final String RESEARCH_DELIVERY_STEP_FAILED = "delivery_step_failed";
 }

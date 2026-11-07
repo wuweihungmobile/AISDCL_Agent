@@ -100,7 +100,7 @@ class RunConsumersTest {
         when(settings.consumerBackoffMax()).thenReturn(Duration.ofMillis(20));
         when(settings.consumerIdleTimeout()).thenReturn(Duration.ofSeconds(45));
         consumers = new RunConsumers(bridge, runs, processor, hub, registry, settings, transactions,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), mock(ResearchHealingNotifier.class));
         hub.subscribe(runId, front);
     }
 

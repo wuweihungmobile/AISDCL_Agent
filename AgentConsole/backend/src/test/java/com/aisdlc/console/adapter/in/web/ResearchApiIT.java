@@ -274,6 +274,44 @@ class ResearchApiIT extends AbstractResearchIT {
                 .doesNotContain("R1", "R10", "R12");
     }
 
+    // ── AT-962-22-1／22-2／22-E-3：交付後的 records/audit（R11 取 research_deliveries；console-api 的讀取本來就算它，零產品碼改動）──
+
+    private void deliver(UUID id, String kind, String ref) {
+        jdbc.update("insert into console.research_deliveries (research_id, kind, ref, status, created_by) values (?, ?, ?, 'CREATED', 'admin')", id, kind, ref);
+    }
+
+    @Test
+    void AT_962_22_1_aDeliveredProjectNoLongerListsR11AsMissing() {
+        UUID id = fx.project("delivered", "route", "FROZEN", "IDLE", "");
+        deliver(id, "RELEASE_TAG", "v1.0.0");
+
+        Resp resp = api.get(viewer(), RESEARCH + "/projects/" + id + "/records/audit");
+
+        List<Map<String, Object>> classes = resp.read("$.data.classes");
+        assertThat(classes.stream().filter(c -> "R11".equals(c.get("id"))).findFirst().orElseThrow().get("count")).isEqualTo(1);
+        assertThat(resp.<List<String>>read("$.data.missing")).doesNotContain("R11");
+    }
+
+    @Test
+    void AT_962_22_2_anUndeliveredProjectStillListsR11AsMissing() {
+        UUID id = fx.project("undelivered", "route", "FROZEN", "IDLE", "");
+
+        Resp resp = api.get(viewer(), RESEARCH + "/projects/" + id + "/records/audit");
+
+        assertThat(resp.<List<String>>read("$.data.missing")).contains("R11");
+    }
+
+    @Test
+    void AT_962_22_E_3_aDeliveredProjectWithZeroR10RowsIsStillNotMissingR10() {
+        UUID id = fx.project("delivered-r10", "route", "FROZEN", "IDLE", "");
+        deliver(id, "RELEASE_TAG", "v2.0.0");
+
+        Resp resp = api.get(viewer(), RESEARCH + "/projects/" + id + "/records/audit");
+
+        List<Map<String, Object>> classes = resp.read("$.data.classes");
+        assertThat(classes.stream().filter(c -> "R10".equals(c.get("id"))).findFirst().orElseThrow().get("count")).isEqualTo(0);
+        assertThat(resp.<List<String>>read("$.data.missing")).as("R10 允許為 0（完整率不因它失敗）").doesNotContain("R10", "R11");
+    }
     // ── AT-960-4-4：409 與 details.unmet ──────────────────────────────────────────────────
 
     @Test
@@ -371,7 +409,7 @@ class ResearchApiIT extends AbstractResearchIT {
             }
             if ("reconcile".equals(verb)) {
                 assertThat(ok.<Boolean>read("$.data.consistent")).isTrue();
-                assertThat(ok.<List<String>>read("$.data.checks[*].name")).as("INT-01：name 取自 Bridge 的 id，不得為空；六項、順序以 Bridge 原始碼的 CHECK_IDS 為準")
+                assertThat(ok.<List<String>>read("$.data.checks[*].name")).as("INT-01：name 取自 Bridge 的 id，不得為空；項數與順序以 Bridge 原始碼的 CHECK_IDS 為準")
                         .allSatisfy(name -> assertThat(name).isNotBlank()).containsExactlyElementsOf(RECONCILE_CHECK_IDS);
                 assertThat(ok.<List<String>>read("$.data.checks[*].status")).containsOnly("ok");
             }
@@ -400,7 +438,7 @@ class ResearchApiIT extends AbstractResearchIT {
         assertThat(resp.<Boolean>read("$.data.consistent")).isFalse();
         assertThat(resp.<List<String>>read("$.data.checks[*].name")).as("name 恆等於 Bridge 的 id（前端靠 fsm_flow_mapping 辨識對映漂移）")
                 .containsExactlyElementsOf(RECONCILE_CHECK_IDS);
-        assertThat(resp.<List<String>>read("$.data.checks[*].status")).containsExactly("drift", "drift", "ok", "drift", "ok", "ok");
+        assertThat(resp.<List<String>>read("$.data.checks[*].status")).containsExactly("drift", "drift", "ok", "drift", "ok", "ok", "ok");
         assertThat(resp.<Map<String, Object>>read("$.data.checks[1].drift[0]")).as("檔案漂移列：兩個摘要都帶、鍵名是 camelCase")
                 .containsEntry("kind", "PRD").containsEntry("path", "01_specs/PRD-v1.0.0.md")
                 .containsEntry("expectedSha256", expected).containsEntry("actualSha256", actual).doesNotContainKeys("expected_sha256", "actual_sha256");

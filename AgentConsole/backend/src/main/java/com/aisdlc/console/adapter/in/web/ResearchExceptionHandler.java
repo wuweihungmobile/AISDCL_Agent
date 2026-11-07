@@ -23,7 +23,8 @@ import java.util.Map;
  *
  * <p>對映：連線階段失敗＝502、讀取逾時＝504、Bridge 回報的上游失敗（501 {@code not_implemented}、502 {@code init_failed}）＝502（reason 與 details 逐字取自 Bridge）。
  */
-@RestControllerAdvice(assignableTypes = {ResearchController.class, ResearchRouteController.class})
+@RestControllerAdvice(assignableTypes = {ResearchController.class, ResearchRouteController.class, ResearchGateController.class, ResearchDeliveryController.class,
+        ResearchKanbanController.class, ResearchHealingController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class ResearchExceptionHandler {
 

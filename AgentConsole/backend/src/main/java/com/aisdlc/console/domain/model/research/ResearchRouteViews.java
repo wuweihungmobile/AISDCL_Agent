@@ -31,7 +31,7 @@ public final class ResearchRouteViews {
     /** 一筆規格變更請求（{@code research_scr}）。 */
     public record Scr(UUID id, int scrNo, String kind, String sourceKind, String reason, String reasonClass, List<String> affectedSections,
                       String status, Integer prdFromVersionNo, Integer prdToVersionNo, UUID successorResearchId, List<Object> implFsmActions,
-                      String requestedBy, OffsetDateTime requestedAt, String decidedBy, OffsetDateTime decidedAt) {
+                      String requestedBy, OffsetDateTime requestedAt, String decidedBy, OffsetDateTime decidedAt, String evidenceUrl) {
     }
 
     /** 既有匯入記錄的參照（簽核冪等，D-133）：id、狀態（UPLOADED｜PARSING｜PARSED｜REVIEWING｜IMPORTED｜REJECTED）與是否已 signoff。 */

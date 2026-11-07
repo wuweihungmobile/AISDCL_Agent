@@ -90,6 +90,21 @@ public interface ResearchBridge {
     /** {@code POST /research/projects/{id}:decomposition-signoff}（200；D-113：console-api 先完成既有 import／signoff 路徑，帶 {@code import_record_id} 來）。 */
     Map<String, Object> decompositionSignoff(UUID researchId, Map<String, Object> body);
 
+    /** {@code POST /research/projects/{id}:gates}（200；內環 SCG-4／5／6 登錄；讀取逾時 330 秒）：Bridge 的 snake_case 本文原樣。 */
+    Map<String, Object> gates(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:tag}（201；Release Tag，含 push 時可能很慢；讀取逾時 330 秒）。 */
+    Map<String, Object> tag(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:pr}（200／201；讀取逾時 330 秒）：{@code github_token} 只在此呼叫的本文。 */
+    Map<String, Object> pr(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:traceability-preview}（200；零副作用，讀取逾時 30 秒）。 */
+    Map<String, Object> traceabilityPreview(UUID researchId, Map<String, Object> body);
+
+    /** {@code POST /research/projects/{id}:healing-sync}（200；{@code RunConsumers} post-commit 通知，讀取逾時 30 秒、best-effort）。 */
+    Map<String, Object> healingSync(UUID researchId, Map<String, Object> body);
+
     /** {@code POST /research/allowlist}（201）。 */
     Map<String, Object> addAllowlistEntry(Map<String, Object> body);
 

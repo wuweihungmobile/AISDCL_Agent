@@ -103,7 +103,7 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
             ErrorReasons.RESEARCH_DB_BLOCKED);
     /** Bridge 自己回報的研究上游失敗（501 骨架、502 初始化失敗）：reason 與 details 原樣轉出，不併入一般的「引擎橋接服務錯誤」。 */
     private static final Set<String> RESEARCH_UPSTREAM = Set.of(ErrorReasons.RESEARCH_NOT_IMPLEMENTED, ErrorReasons.RESEARCH_INIT_FAILED,
-            ErrorReasons.RESEARCH_ROUTE_STEP_FAILED);
+            ErrorReasons.RESEARCH_ROUTE_STEP_FAILED, ErrorReasons.RESEARCH_DELIVERY_STEP_FAILED);
     /** 研究寫入（POST／PUT／PATCH）的讀取逾時 30 秒、連線 2 秒、不重試（契約 §0.2 第 8 列）。 */
     private static final Duration RESEARCH_WRITE_READ_TIMEOUT = Duration.ofSeconds(30);
     /**
@@ -583,6 +583,31 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
     @Override
     public Map<String, Object> decompositionSignoff(UUID researchId, Map<String, Object> body) {
         return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":decomposition-signoff", body);
+    }
+
+    @Override
+    public Map<String, Object> gates(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":gates", body, RESEARCH_LONG_READ_TIMEOUT);
+    }
+
+    @Override
+    public Map<String, Object> tag(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":tag", body, RESEARCH_LONG_READ_TIMEOUT);
+    }
+
+    @Override
+    public Map<String, Object> pr(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":pr", body, RESEARCH_LONG_READ_TIMEOUT);
+    }
+
+    @Override
+    public Map<String, Object> traceabilityPreview(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":traceability-preview", body);
+    }
+
+    @Override
+    public Map<String, Object> healingSync(UUID researchId, Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/projects/" + researchId + ":healing-sync", body);
     }
 
     @Override

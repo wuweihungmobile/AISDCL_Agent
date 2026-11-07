@@ -14,7 +14,7 @@ import java.util.UUID;
 public interface ResearchScrUseCase {
 
     /** 發起請求（欄位可為 null＝請求沒給；{@code reasonClass} 為中文五分類或其 DB 碼）。 */
-    record ScrInput(String kind, String sourceKind, String reason, String reasonClass, List<String> affectedSections) {
+    record ScrInput(String kind, String sourceKind, String reason, String reasonClass, List<String> affectedSections, String evidenceUrl) {
     }
 
     /** 發起：回 Bridge 的本文（snake_case；MINOR 與 MAJOR 為 202 形態、HEALING_FAILED 帶 {@code recovery}）。 */

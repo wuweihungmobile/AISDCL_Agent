@@ -83,10 +83,17 @@ public class RunEventProcessor {
      * @param frames   要發給前端的框架（依發生順序）
      * @param actions  交易提交後要執行的動作
      * @param terminal 這則事件讓 run 進入終態：消費者處理完就結束
+     * @param healingRelevant 唯讀旗標：這則事件寫入了自癒視圖會看到的列（步驟 RETRYING／FAILED，或任務轉 ESCALATED）；
+     *                        消費者在交易提交後據此通知研究面同步自癒歷史（best-effort；處理邏輯本身與此旗標無關）
      */
-    public record Outcome(List<Frame> frames, List<Action> actions, boolean terminal) {
+    public record Outcome(List<Frame> frames, List<Action> actions, boolean terminal, boolean healingRelevant) {
 
         static final Outcome NOTHING = new Outcome(List.of(), List.of(), false);
+
+        /** 不涉及自癒列的事件（{@code healingRelevant=false}）。 */
+        public Outcome(List<Frame> frames, List<Action> actions, boolean terminal) {
+            this(frames, actions, terminal, false);
+        }
     }
 
     private final ExecutionRunRepository runs;
@@ -144,7 +151,7 @@ public class RunEventProcessor {
         }
         c.rt.lastEventAt = c.now;
         runs.updateConsoleLastSeq(runId, event.seq());
-        return new Outcome(c.frames, c.actions, c.terminal);
+        return new Outcome(c.frames, c.actions, c.terminal, c.healingRelevant);
     }
 
     // ── 單一事件的處理脈絡 ──────────────────────────────────────────────────────
@@ -168,6 +175,8 @@ public class RunEventProcessor {
         final List<Frame> frames = new ArrayList<>();
         final List<Action> actions = new ArrayList<>();
         boolean terminal;
+        /** 自癒視圖相關事件旗標（只讀，見 {@link Outcome#healingRelevant()}）。 */
+        boolean healingRelevant;
 
         Ctx(ExecutionRun run, BridgeEvent event) {
             this.run = run;
@@ -457,6 +466,7 @@ public class RunEventProcessor {
                 decideGatePause(c, node);
             }
             case "RETRYING" -> {
+                c.healingRelevant = true;
                 task.countRetry(c.now);
                 task.appendExecutionLog(message, TASK_LOG_LIMIT, c.now);
                 c.save(task);
@@ -474,6 +484,7 @@ public class RunEventProcessor {
                 evaluateTaskDuration(c, task);
             }
             case "FAILED" -> {
+                c.healingRelevant = true;
                 task.markFailed(c.now);
                 task.appendExecutionLog(message, TASK_LOG_LIMIT, c.now);
                 c.save(task);
@@ -623,6 +634,7 @@ public class RunEventProcessor {
         } else {
             reason = escalation ? engineReason : "執行失敗：" + engineReason;
         }
+        c.healingRelevant = true;
         insertReview(c, ReviewKind.ESCALATED, evidence, taskId, goalId, reason);
     }
 

@@ -23,7 +23,7 @@ class ScrReadAdapter implements ResearchScrReadPort {
     @Override
     public List<Scr> list(UUID researchId) {
         return jdbc.sql("select id, scr_no, kind, source_kind, reason, reason_class, affected_sections, status, prd_from_version_no, prd_to_version_no, "
-                + "successor_research_id, impl_fsm_actions::text as impl_fsm_actions, requested_by, requested_at, decided_by, decided_at "
+                + "successor_research_id, impl_fsm_actions::text as impl_fsm_actions, requested_by, requested_at, decided_by, decided_at, evidence_url "
                 + "from console.research_scr where research_id = :id order by scr_no").param("id", researchId).query(ScrReadAdapter::scr).list();
     }
 
@@ -38,6 +38,6 @@ class ScrReadAdapter implements ResearchScrReadPort {
                 rs.getString("reason_class"), ResearchJdbc.strings(rs, "affected_sections"), rs.getString("status"),
                 ResearchJdbc.nullableInt(rs, "prd_from_version_no"), ResearchJdbc.nullableInt(rs, "prd_to_version_no"),
                 ResearchJdbc.uuid(rs, "successor_research_id"), ResearchJdbc.list(rs.getString("impl_fsm_actions")), rs.getString("requested_by"),
-                ResearchJdbc.ts(rs, "requested_at"), rs.getString("decided_by"), ResearchJdbc.ts(rs, "decided_at"));
+                ResearchJdbc.ts(rs, "requested_at"), rs.getString("decided_by"), ResearchJdbc.ts(rs, "decided_at"), rs.getString("evidence_url"));
     }
 }

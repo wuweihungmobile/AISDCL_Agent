@@ -39,6 +39,8 @@ public class ResearchScrService implements ResearchScrUseCase {
     private static final Logger LOG = LoggerFactory.getLogger(ResearchScrService.class);
     /** SCR 理由上限（與 Bridge 的 {@code SCR_REASON_MAX} 同值；獨立常數）。 */
     public static final int SCR_REASON_MAX = 500;
+    /** evidenceUrl 長度上限（與 V21 CHECK 及 Bridge 同值）。 */
+    static final int EVIDENCE_URL_MAX = 500;
     public static final int AFFECTED_SECTION_MAX = 200;
     public static final int AFFECTED_SECTIONS_MAX_ITEMS = 20;
     public static final Set<String> KINDS = Set.of("MINOR", "MAJOR");
@@ -149,8 +151,15 @@ public class ResearchScrService implements ResearchScrUseCase {
                 }
             }
         }
+        String evidenceUrl = in.evidenceUrl() == null || in.evidenceUrl().isEmpty() ? null : in.evidenceUrl();
+        if (evidenceUrl != null && !evidenceUrl.startsWith("https://")) {
+            check.add("evidenceUrl", "not_https", "evidenceUrl 須以 https:// 開頭");
+        } else if (evidenceUrl != null && evidenceUrl.length() > EVIDENCE_URL_MAX) {
+            check.add("evidenceUrl", "too_long", "evidenceUrl 不可超過 " + EVIDENCE_URL_MAX + " 字元");
+        }
         if (!check.violations.isEmpty()) {
-            throw check.validation();
+            // evidenceUrl 的違規依 D-142 ⚖P2-11 為 422；其餘欄位維持 P1 既有的 400
+            throw check.violations.stream().anyMatch(v -> "evidenceUrl".equals(v.field())) ? check.unprocessable() : check.validation();
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("kind", in.kind());
@@ -160,6 +169,9 @@ public class ResearchScrService implements ResearchScrUseCase {
             body.put("reason_class", reasonClass);
         }
         body.put("affected_sections", sections);
+        if (evidenceUrl != null) {
+            body.put("evidence_url", evidenceUrl);
+        }
         return body;
     }
 

@@ -2580,4 +2580,21 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(scrChecks).extracting(c -> c.get("conname")).as("evidence_url 的具名 CHECK").contains("ck_research_scr_evidence_url");
         });
     }
+
+    /** AT-962-22-5：交付列不可變（append-only）且 (research_id, kind, ref) 唯一；重送冪等靠這兩條約束，不靠應用層。 */
+    @Test
+    void AT_962_22_5_deliveryRowsAreImmutableAndUniquePerResearchKindAndRef() {
+        Db db = newDatabase();
+        UUID project = v21Project(db);
+        Map<String, Object> tag = deliveryRow(project, "RELEASE_TAG", "v1.0.0", "CREATED");
+        insert(db.jdbc, "research_deliveries", tag);
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectState(soft, "同 (research_id, kind, ref) 再插一次", tryInsert(db, "research_deliveries", tag), UNIQUE);
+            expectOk(soft, "同 ref 不同 kind 可並存", tryInsert(db, "research_deliveries", deliveryRow(project, "PULL_REQUEST", "v1.0.0", "CREATED")));
+            expectGuard(soft, "UPDATE status", run(db, jdbc -> jdbc.update("update console.research_deliveries set status = 'FAILED'")),
+                    "research_deliveries", "append-only");
+            expectGuard(soft, "DELETE", run(db, jdbc -> jdbc.update("delete from console.research_deliveries")), "research_deliveries", "append-only");
+        });
+    }
 }

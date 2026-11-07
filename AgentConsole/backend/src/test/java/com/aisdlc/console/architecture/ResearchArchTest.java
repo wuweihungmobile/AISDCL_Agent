@@ -155,4 +155,35 @@ class ResearchArchTest {
         assertThat(hits).as("console-api 對 V19 五張表的任何寫入語句為 0（只寫自己的 projects 與 audit_log）").isEmpty();
         assertThat(v19Write.matcher("UPDATE console.research_scr set status = 'X'").find()).as("掃描器負控").isTrue();
     }
+
+    // ── PKG-API-P2（AT-962-26-1、26-4）──────────────────────────────────────────────────────
+
+    @Test
+    void AT_962_26_1_theP2ReadAdaptersAndControllersWriteNothingAndTheControllersNeverTouchJdbc() throws IOException {
+        Map<String, String> sources = researchPersistenceSources();
+        for (String adapter : List.of("HealingReadAdapter", "KanbanReadAdapter", "DeliveryReadAdapter", "HealingExcerptMasker")) {
+            String text = sources.entrySet().stream().filter(e -> e.getKey().endsWith("/" + adapter + ".java")).findFirst().orElseThrow().getValue();
+            assertThat(writeViolations(adapter, text)).as(adapter + " 零寫入關鍵字").isEmpty();
+        }
+        Pattern researchWrite = Pattern.compile("(?i)\\b(insert\\s+into|update|delete\\s+from)\\s+console\\.research_");
+        try (Stream<Path> files = Files.walk(Path.of("src", "main", "java"))) {
+            for (Path path : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                assertThat(researchWrite.matcher(Files.readString(path, StandardCharsets.UTF_8)).find()).as(path + " 不寫任何 research_ 表").isFalse();
+            }
+        }
+        JavaClasses classes = mainClasses();
+        noClasses().that().haveSimpleNameStartingWith("ResearchKanban").or().haveSimpleNameStartingWith("ResearchGate")
+                .or().haveSimpleNameStartingWith("ResearchHealing").or().haveSimpleNameStartingWith("ResearchDelivery")
+                .and().resideInAPackage("..adapter.in.web..")
+                .should().dependOnClassesThat().haveFullyQualifiedName("org.springframework.jdbc.core.simple.JdbcClient").check(classes);
+    }
+
+    @Test
+    void AT_962_26_4_theMaskerLivesInThePersistenceLayerNoDomainClassDependsOnItAndTheNotifierOnlyUsesPorts() {
+        JavaClasses classes = mainClasses();
+        assertThat(classes.contain("com.aisdlc.console.adapter.out.persistence.research.HealingExcerptMasker")).isTrue();
+        noClasses().that().resideInAPackage("..domain..").should().dependOnClassesThat().haveSimpleName("HealingExcerptMasker").check(classes);
+        noClasses().that().haveSimpleName("ResearchHealingNotifier").should().dependOnClassesThat().resideInAnyPackage("..adapter..", "..infrastructure..")
+                .check(classes);
+    }
 }

@@ -224,7 +224,7 @@ public final class MiniResearch {
 
     /** 對帳項的識別，順序固定（Bridge 的 {@code CHECK_IDS}）。 */
     public static final List<String> RECONCILE_CHECK_IDS = List.of("fsm_flow_mapping", "prd_sha256", "review_card", "evidence_matrix",
-            "task_decomposition", "route_decision");
+            "task_decomposition", "route_decision", "delivery");
 
     /** 一筆漂移列（Bridge 的 {@code _drift}）：兩個摘要欄是 camelCase；缺檔時 {@code actualSha256} 為 null。 */
     public static Map<String, Object> reconcileDrift(String kind, String path, String expectedSha256, String actualSha256) {
@@ -236,11 +236,11 @@ public final class MiniResearch {
         return map("id", id, "status", status, "present", present, "detail", detail, "drift", drift);
     }
 
-    /** 全部一致的六個對帳項：前四項有登記（{@code present=true}）、P0 沒有的拆解與分流兩項兩側皆缺席。 */
+    /** 全部一致的七個對帳項：前四項有登記（{@code present=true}）、尚無的拆解、分流與交付三項兩側皆缺席。 */
     public static List<Map<String, Object>> consistentReconcileChecks() {
         List<Map<String, Object>> checks = new ArrayList<>();
         for (String id : RECONCILE_CHECK_IDS) {
-            checks.add(reconcileCheck(id, "ok", !"task_decomposition".equals(id) && !"route_decision".equals(id), "", List.of()));
+            checks.add(reconcileCheck(id, "ok", !"task_decomposition".equals(id) && !"route_decision".equals(id) && !"delivery".equals(id), "", List.of()));
         }
         return checks;
     }

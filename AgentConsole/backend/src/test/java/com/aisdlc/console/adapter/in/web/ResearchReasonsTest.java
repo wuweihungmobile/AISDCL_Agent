@@ -27,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 機器可讀欄位——後端改了字面而前端、契約沒跟著改，使用者看到的是「未知錯誤」；而 {@code lib/api/reasons.ts} 的 {@code REASONS} 與凍結契約附錄 B 雙向鎖，研究 reason 不得進去
  * （所以它們各住自己的常數）。
  *
- * <p><b>P1 起集合＝三十五個</b>（AT-961-15-4）：P0 的二十二個加 R-2 尾巴四個（{@code compile_failed}、{@code sdd_cli_failed}、{@code fsm_state_unreadable}、{@code invalid_request}；
+ * <p><b>P2 起集合＝三十七個（P1 的三十五個加 P2 的 tag_exists、delivery_step_failed）</b>（AT-961-15-4）：P0 的二十二個加 R-2 尾巴四個（{@code compile_failed}、{@code sdd_cli_failed}、{@code fsm_state_unreadable}、{@code invalid_request}；
  * ⚖P1-25——{@code invalid_request} 由區域常數改為 {@code RESEARCH_} 前綴常數）與 P1 新增九個（分流、SCR、拆解）。契約 §0.2 與 Architecture §11.1 的補列屬主控的 RELEASE_READY 勘誤
  * （D-115）：勘誤落地前，兩份文件缺列的 reason 以 {@link #CONTRACT_ERRATUM_PENDING}、{@link #ARCHITECTURE_ERRATUM_PENDING} 具名記錄，並以「缺列集合恰等於名單」雙向鎖住——
  * 勘誤落地後名單必須清空，否則本測試轉紅逼同步（沿本檔沿革的棘輪手法）。
@@ -54,12 +54,14 @@ class ResearchReasonsTest {
     /** P1 新增九個（分流、SCR、拆解；IFACE §2）。 */
     private static final Set<String> P1_REASONS = new TreeSet<>(List.of("route_unsupported_in_deployment", "branch_exists", "target_not_empty",
             "public_confirmation_required", "route_conflict", "route_step_failed", "scr_open", "scr_limit", "decomposition_stale"));
-    /** P1 起的四方鎖集合：22＋4＋9＝35。 */
-    private static final Set<String> ALL_REASONS = union(P0_REASONS, P0_TAIL_REASONS, P1_REASONS);
-    /** 契約 §0.2 勘誤尚未落地、缺列的 reason（主控 RELEASE_READY 批次補列後清空；D-115）。 */
-    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>();
+    /** P2 新增兩個（交付 :tag／:pr 的 Bridge 失敗；D-138 Q-14）。 */
+    private static final Set<String> P2_REASONS = new TreeSet<>(List.of("tag_exists", "delivery_step_failed"));
+    /** P2 起的四方鎖集合：22＋4＋9＋2＝37。 */
+    private static final Set<String> ALL_REASONS = union(P0_REASONS, P0_TAIL_REASONS, P1_REASONS, P2_REASONS);
+    /** 契約 §0.2 勘誤尚未落地、缺列的 reason（主控 RELEASE_READY 批次補列後清空；D-115、D-149#10：tag_exists 契約已列，只缺 delivery_step_failed）。 */
+    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>(List.of("delivery_step_failed"));
     /** Architecture §11.1 研究 reason 表勘誤尚未落地、缺列的 reason（同上）。 */
-    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>();
+    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>(List.of("delivery_step_failed"));
     /** D-72 取代後退役的 reason：Bridge 對研究端點不再回它，任何一處都不得再列（見類別說明）。 */
     private static final Set<String> RETIRED_REASONS = new TreeSet<>(List.of("spec_digest_changed"));
 
@@ -133,16 +135,16 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_960_5_6_theBackendConstantsAreExactlyTheThirtyFiveReasonsOfP0AndP1() {
+    void AT_960_5_6_theBackendConstantsAreExactlyTheThirtySevenReasonsOfP0ToP2() {
         assertThat(P0_REASONS).hasSize(22);
         assertThat(P0_TAIL_REASONS).hasSize(4);
         assertThat(P1_REASONS).hasSize(9);
-        assertThat(ALL_REASONS).hasSize(35);
+        assertThat(ALL_REASONS).hasSize(37);
         assertThat(backendReasons()).as("後端 ErrorReasons 的 RESEARCH_ 常數（P0 二十二＋R-2 尾巴四＋P1 九）").isEqualTo(ALL_REASONS);
     }
 
     @Test
-    void AT_960_5_6_theFrontendConstantsEqualTheThirtyFiveReasonsAndTheContractAndArchitectureTablesNameEveryP0One() {
+    void AT_960_5_6_theFrontendConstantsEqualTheThirtySevenReasonsAndTheContractAndArchitectureTablesNameEveryP0One() {
         assertThat(frontendReasons()).as("前端 RESEARCH_REASONS").isEqualTo(ALL_REASONS);
 
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
@@ -159,7 +161,7 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_961_15_4_theContractAndArchitectureTablesNameEveryOfTheThirtyFiveExceptTheNamedPendingErratum() {
+    void AT_961_15_4_theContractAndArchitectureTablesNameEveryOfTheThirtySevenExceptTheNamedPendingErratum() {
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
         Set<String> contractMissing = new TreeSet<>();
         for (String reason : ALL_REASONS) {
@@ -180,7 +182,7 @@ class ResearchReasonsTest {
     }
 
     @Test
-    void AT_961_15_4_everyReasonOfTheThirtyFiveIsNamedInTheOpenApiDescriptionsAndEveryP1ReasonByAtLeastOneP1Operation() {
+    void AT_961_15_4_everyReasonOfTheThirtySevenIsNamedInTheOpenApiDescriptionsAndEveryP1ReasonByAtLeastOneP1Operation() {
         String docs = documentation();
         for (String reason : ALL_REASONS) {
             assertThat(docs).as("OpenAPI 說明提到 reason " + reason).contains(reason);
@@ -239,5 +241,33 @@ class ResearchReasonsTest {
         for (String reason : P0_REASONS) {
             assertThat(shared).as("lib/api/reasons.ts 不含研究 reason " + reason).doesNotContain("\"" + reason + "\"");
         }
+    }
+
+    @Test
+    void AT_962_24_1_theFourWayLockHoldsThirtySevenAndTheTwoP2ReasonsAreInEveryCollection() {
+        assertThat(ALL_REASONS).hasSize(37);
+        assertThat(backendReasons()).as("後端 RESEARCH_ 常數").isEqualTo(ALL_REASONS).containsAll(P2_REASONS);
+        assertThat(frontendReasons()).as("前端 RESEARCH_REASONS（FE-P2A 已加）").isEqualTo(ALL_REASONS).containsAll(P2_REASONS);
+        assertThat(architectureReasons().keySet()).as("Architecture §11.1 已含 tag_exists，delivery_step_failed 待 RELEASE_READY 批次補列").contains("tag_exists")
+                .doesNotContain("delivery_step_failed");
+    }
+
+    @Test
+    void AT_962_24_E_1_theNewConstantsKeepTheResearchPrefixSoTheOtherDomainsReasonLocksStayGreen() {
+        assertThat(ErrorReasons.RESEARCH_TAG_EXISTS).isEqualTo("tag_exists");
+        assertThat(ErrorReasons.RESEARCH_DELIVERY_STEP_FAILED).isEqualTo("delivery_step_failed");
+        long prefixed = java.util.Arrays.stream(ErrorReasons.class.getDeclaredFields()).filter(f -> f.getName().endsWith("TAG_EXISTS") || f.getName().endsWith("DELIVERY_STEP_FAILED"))
+                .filter(f -> f.getName().startsWith("RESEARCH_")).count();
+        assertThat(prefixed).as("兩個新常數都以 RESEARCH_ 起頭（否則 Issue／Backup 的 reason 集合鎖會紅）").isEqualTo(2);
+        assertThat(java.util.Arrays.stream(ErrorReasons.class.getDeclaredFields()).filter(f -> f.getName().equals("TAG_EXISTS") || f.getName().equals("DELIVERY_STEP_FAILED")))
+                .isEmpty();
+    }
+
+    @Test
+    void AT_962_24_E_2_eachNewReasonIsNamedByAtLeastOneP2OperationDescription() {
+        assertThat(ResearchErrorDocs.CONFLICT.get("POST /api/v1/research/projects/{id}/delivery/tag")).contains("tag_exists");
+        assertThat(ResearchErrorDocs.EXTRA.get("POST /api/v1/research/projects/{id}/delivery/tag").get("502")).contains("delivery_step_failed");
+        assertThat(ResearchErrorDocs.EXTRA.get("POST /api/v1/research/projects/{id}/delivery/pr").get("502")).contains("delivery_step_failed");
+        assertThat(documentation()).contains("tag_exists").contains("delivery_step_failed");
     }
 }

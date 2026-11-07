@@ -398,6 +398,31 @@ public final class MiniBridge implements AutoCloseable {
                 "weak_regex_at_ids", weakRegexAtIds, "unmapped_at_ids", unmappedAtIds, "fully_covered", fullyCovered);
     }
 
+    /**
+     * 注入內環鍵的 FSM 現態（P2：看板與閘登錄、交付前置讀它）：{@code project} 是 Console 專案的有效內環鍵（{@code sdd_project}）；{@code stage2Frozen} 為真時
+     * {@code frozen_stages} 含 {@code Stage-2}。沿用 {@link Sdd#addProject}，所以 {@code GET /sdd/fsm/{key}} 的形狀與其他研究 FSM 視圖相同。
+     */
+    public void fsmState(String project, String currentState, boolean stage2Frozen) {
+        sdd.addProject(project, currentState, 1, "p2-fixture", "2026-11-08T00:00:00+00:00", new Sdd.SddRetry(0, null), null);
+        List<Map<String, Object>> stages = new ArrayList<>();
+        stages.add(map("stage", "Stage-1"));
+        if (stage2Frozen) {
+            stages.add(map("stage", "Stage-2"));
+        }
+        sdd.states.get(canonical(project)).put("frozen_stages", stages);
+    }
+
+    /**
+     * 以 run id 為鍵注入 RTM 報告（P2：閘登錄、交付前置與看板回歸欄讀 {@code GET /autoclaude/runs/{id}/rtm}）：同時把該 id 註冊成迷你 Bridge 認得的 run
+     * （否則回 404 {@code run_not_found}）。{@code acPct} 與 {@code fullyCovered} 由呼叫端獨立指定，才能造出「99.99」「覆蓋率 100 但 fullyCovered 為假」等邊界。
+     */
+    public void rtmFor(UUID runId, boolean fullyCovered, double acPct, int atPassed, int atTotal) {
+        runs.putIfAbsent(runId, new MiniRun(this, runId, "p2-rtm-" + runId, "/e2e/p2-rtm", "p2-rtm-" + runId, List.of(), map()));
+        int acTotal = 10;
+        int covered = (int) Math.round(acTotal * acPct / 100.0);
+        sdd.rtmReports.put(runId, rtmReport("p2", atPassed, atTotal, 0, atTotal == 0 ? 0.0 : 100.0 * atPassed / atTotal, covered, acTotal, acPct, List.of(),
+                List.of(), List.of(), fullyCovered));
+    }
     private final ConfigurableApplicationContext context;
     private final JdbcTemplate jdbc;
     private final int port;

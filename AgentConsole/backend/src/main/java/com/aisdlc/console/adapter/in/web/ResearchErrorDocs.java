@@ -67,6 +67,28 @@ final class ResearchErrorDocs {
             "POST /api/v1/research/projects/{id}/decomposition/signoff", "decomposition_stale（拆解綁定的 PRD 摘要與現行凍結摘要不符；details.expected_sha256、actual_sha256）"
                     + "｜fsm_state_conflict（尚未分流、尚無拆解，或拆解狀態不允許簽核；details.cause、status）");
 
+    /** P2 新增操作的 409 說明（內環閘登錄、交付）。 */
+    private static final String GATE_CONFLICTS = "fsm_state_conflict（details.unmet：no_console_project｜tasks_incomplete｜rtm_below_100｜rtm_unavailable；零 Bridge 請求）"
+            + "｜scr_open（SCR 開啟期間內環唯讀）";
+    private static final String TAG_CONFLICTS = "fsm_state_conflict（details.unmet：not_release_ready｜rtm_below_100｜scr_open｜no_console_project；零 Bridge 請求；"
+            + "或凍結 PRD 讀不到 prd_not_frozen）｜tag_exists（Release Tag 名稱已存在；Bridge 回、原樣透傳）｜scr_open";
+    private static final Map<String, String> P2_CONFLICT = Map.ofEntries(
+            Map.entry("POST /api/v1/research/projects/{id}/gates", GATE_CONFLICTS),
+            Map.entry("POST /api/v1/research/projects/{id}/delivery/tag", TAG_CONFLICTS),
+            Map.entry("POST /api/v1/research/projects/{id}/delivery/pr", "fsm_state_conflict（分流尚未成功 details.cause＝route_not_succeeded；或凍結 PRD 讀不到）"
+                    + "｜scr_open（SCR 開啟期間內環唯讀）"),
+            Map.entry("GET /api/v1/research/projects/{id}/delivery/traceability", "fsm_state_conflict（凍結 PRD 讀不到；details.unmet：prd_not_frozen）"));
+
+    /** P2 交付與內環閘寫入的 422／502／504 說明（Bridge 的 reason 與 details 原樣透傳）。 */
+    private static final String DELIVERY_UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]：tagName not_semver、message message_too_long、"
+            + "createGithubRelease release_not_supported、bodyPreviewAck preview_ack_required）；或 Bridge 拒絕（reason 逐字取自 Bridge）：digest_mismatch（凍結 digest 漂移；details.drift"
+            + "[{path, expected_sha256, actual_sha256}]）｜route_unsupported_in_deployment（容器模式；details.missing[{item,reason}]）";
+    private static final String DELIVERY_UPSTREAM = UNREACHABLE + "；delivery_step_failed：交付的某一步失敗（details.failure_step；Bridge 回、原樣透傳；失敗的 tag 不產生交付列）";
+    private static final String LONG_TIMEOUT = "bridge_timeout：讀取逾時（內環閘登錄、Release Tag 與 Pull Request 的讀取逾時 330 秒、不重試；結果不明時請重新整理交付概覽再判斷）";
+    private static final String GATE_UNPROCESSABLE = "輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]：gate invalid_gate、result invalid_result、reason reason_required｜"
+            + "reason_too_long、reviewReportRef report_ref_too_long、result release_pass_via_tag、reviewerIndependent reviewer_independence_required）；或 Bridge 拒絕（reason 逐字取自 Bridge）："
+            + "digest_mismatch（凍結 digest 漂移；details.drift[{path, expected_sha256, actual_sha256}]）";
+
     /** P0 會回 409 的研究操作及其說明（reason 逐字）。 */
     private static final Map<String, String> P0_CONFLICT = Map.of(
             "POST /api/v1/research/projects", "slug_in_use：slug 已被未封存的研究專案使用",
@@ -89,6 +111,7 @@ final class ResearchErrorDocs {
     static {
         Map<String, String> merged = new java.util.LinkedHashMap<>(P0_CONFLICT);
         merged.putAll(P1_CONFLICT);
+        merged.putAll(P2_CONFLICT);
         CONFLICT = Map.copyOf(merged);
     }
 
@@ -107,6 +130,15 @@ final class ResearchErrorDocs {
             Map.entry("POST /api/v1/research/projects/{id}/decomposition", Map.of("422", DECOMPOSITION_UNPROCESSABLE, "502", UNREACHABLE, "503", DISABLED,
                     "504", "bridge_timeout：讀取逾時（拆解的讀取逾時 330 秒、不重試）")),
             Map.entry("POST /api/v1/research/projects/{id}/decomposition/signoff", writeFailures(DECOMPOSITION_UNPROCESSABLE)),
+            Map.entry("GET /api/v1/research/projects/{id}/kanban", Map.of()),
+            Map.entry("GET /api/v1/research/projects/{id}/healing", Map.of()),
+            Map.entry("GET /api/v1/research/projects/{id}/delivery", Map.of()),
+            Map.entry("GET /api/v1/research/projects/{id}/delivery/traceability", Map.of("502", UNREACHABLE, "503", DISABLED, "504", TIMEOUT)),
+            Map.entry("POST /api/v1/research/projects/{id}/gates", Map.of("422", GATE_UNPROCESSABLE, "502", UNREACHABLE, "503", DISABLED, "504", LONG_TIMEOUT)),
+            Map.entry("POST /api/v1/research/projects/{id}/delivery/tag", Map.of("422", DELIVERY_UNPROCESSABLE, "502", DELIVERY_UPSTREAM, "503", DISABLED,
+                    "504", LONG_TIMEOUT)),
+            Map.entry("POST /api/v1/research/projects/{id}/delivery/pr", Map.of("422", DELIVERY_UNPROCESSABLE, "502", DELIVERY_UPSTREAM, "503", DISABLED,
+                    "504", LONG_TIMEOUT)),
             Map.entry("GET /api/v1/research/allowlist", Map.of("502", UNREACHABLE, "503", "db_blocked：研究資料庫暫時不可用；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN",
                     "504", TIMEOUT)),
             Map.entry("GET /api/v1/research/projects/{id}/fsm", Map.of(

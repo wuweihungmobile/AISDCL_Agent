@@ -548,4 +548,98 @@ class RbacIT extends AbstractExecutionIT {
                 .as("SecurityConfig 的研究 ADMIN matcher 清單不含 …/reinit（同路徑同方法無法依請求本文分流，所以分流在服務層）")
                 .noneMatch(rule -> rule.matcher().contains("reinit"));
     }
+
+    // ── PKG-API-P2（TCS-ResearchToPRD-P2 AC-962-4、19、20、24）：內環閘登錄與交付寫入僅 ADMIN；四個新 GET 為 VIEWER 以上 ──
+
+    private List<Write> p2AdminWrites(UUID project) {
+        String base = RESEARCH + "/projects/" + project;
+        return List.of(
+                new Write("POST", base + "/gates", Map.of("gate", "RTM_VERIFY", "result", "PASS", "reviewerIndependent", false)),
+                new Write("POST", base + "/delivery/tag", Map.of("tagName", "v1.0.0")),
+                new Write("POST", base + "/delivery/pr", Map.of("bodyPreviewAck", true)));
+    }
+
+    private void assertDeniedBeforeAnything(String token, String who, UUID project, List<String> tables) {
+        Map<String, Long> before = new java.util.LinkedHashMap<>();
+        for (String table : tables) {
+            before.put(table, jdbc.queryForObject("select count(*) from console." + table, Long.class));
+        }
+        int callsBefore = MINI.research.calls.size();
+        for (Write write : p2AdminWrites(project)) {
+            Resp resp = call(token, write);
+            assertThat(resp.status()).as(who + " " + write.url()).isEqualTo(403);
+            assertThat(resp.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+        }
+        assertThat(MINI.research.calls.size()).as(who + "：被擋的請求一個都不到迷你 Bridge").isEqualTo(callsBefore);
+        for (String table : tables) {
+            assertThat(jdbc.queryForObject("select count(*) from console." + table, Long.class)).as(table + " 列數不變").isEqualTo(before.get(table));
+        }
+    }
+
+    /** AT-962-4-E-1：OPERATOR 呼叫 gates（與 tag、pr）回 403 授權鏈拒絕，Bridge 請求 0，研究表列數不變。 */
+    @Test
+    void AT_962_4_E_1_operatorGetsAccessDeniedOnGatesAndNothingReachesTheBridgeOrTheResearchTables() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-operator");
+        assertDeniedBeforeAnything(operator(), "OPERATOR", project, List.of("research_gate_decisions", "research_events", "research_deliveries"));
+    }
+
+    /** AT-962-4-E-2：VIEWER 同為授權鏈拒絕。 */
+    @Test
+    void AT_962_4_E_2_viewerGetsTheSameAccessDeniedAsOperatorOnGates() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-viewer");
+        assertDeniedBeforeAnything(viewer(), "VIEWER", project, List.of("research_gate_decisions", "research_events", "research_deliveries"));
+        assertThat(call(null, p2AdminWrites(project).get(0)).status()).as("匿名").isEqualTo(401);
+    }
+
+    /** AT-962-19-E-1：OPERATOR 呼叫 tag 回 403、不留任何交付列。 */
+    @Test
+    void AT_962_19_E_1_operatorCannotCreateATag() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-tag-op");
+        int callsBefore = MINI.research.calls.size();
+        Resp resp = api.post(operator(), RESEARCH + "/projects/" + project + "/delivery/tag", Map.of("tagName", "v1.0.0"));
+        assertThat(resp.status()).isEqualTo(403);
+        assertThat(resp.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+        assertThat(MINI.research.calls.size()).isEqualTo(callsBefore);
+        assertThat(jdbc.queryForObject("select count(*) from console.research_deliveries where research_id = ?", Long.class, project)).isZero();
+    }
+
+    /** AT-962-19-E-2：VIEWER 呼叫 tag 回 403（與 OPERATOR 同為授權鏈拒絕）。 */
+    @Test
+    void AT_962_19_E_2_viewerCannotCreateATag() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-tag-viewer");
+        int callsBefore = MINI.research.calls.size();
+        Resp resp = api.post(viewer(), RESEARCH + "/projects/" + project + "/delivery/tag", Map.of("tagName", "v1.0.0"));
+        assertThat(resp.status()).isEqualTo(403);
+        assertThat(resp.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+        assertThat(MINI.research.calls.size()).isEqualTo(callsBefore);
+    }
+
+    /** AT-962-20-E-1：OPERATOR 與 VIEWER 呼叫 pr 皆 403，Bridge 請求 0。 */
+    @Test
+    void AT_962_20_E_1_operatorAndViewerCannotCreateAPullRequest() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-pr");
+        int callsBefore = MINI.research.calls.size();
+        for (String token : List.of(operator(), viewer())) {
+            Resp resp = api.post(token, RESEARCH + "/projects/" + project + "/delivery/pr", Map.of("bodyPreviewAck", true));
+            assertThat(resp.status()).isEqualTo(403);
+            assertThat(resp.<String>read("$.reason")).isEqualTo("ACCESS_DENIED");
+        }
+        assertThat(MINI.research.calls.size()).isEqualTo(callsBefore);
+    }
+
+    /** AT-962-24-4：四個新 GET（kanban、healing、delivery、delivery/traceability）VIEWER 可讀、匿名 401；SecurityConfig 的 ADMIN 規則三條不動。 */
+    @Test
+    void AT_962_24_4_theFourNewReadEndpointsAreViewerUpAndAnonymousIs401() {
+        UUID project = new ResearchFixtures(jdbc).project("rbac-p2-reads");
+        for (String path : List.of("kanban", "healing", "delivery")) {
+            String url = RESEARCH + "/projects/" + project + "/" + path;
+            assertThat(api.get(viewer(), url).status()).as("VIEWER GET " + path).isEqualTo(200);
+            assertThat(api.get(null, url).status()).as("匿名 GET " + path).isEqualTo(401);
+        }
+        String trace = RESEARCH + "/projects/" + project + "/delivery/traceability";
+        assertThat(api.get(viewer(), trace).status()).as("VIEWER 通過授權層（Bridge 的 409／503 另計）").isNotIn(401, 403);
+        assertThat(api.get(null, trace).status()).isEqualTo(401);
+        assertThat(authorizationRules().stream().filter(rule -> rule.matcher().contains("/gates") || rule.matcher().contains("/delivery/tag")
+                || rule.matcher().contains("/delivery/pr"))).as("三條 ADMIN 規則已預置於 SecurityConfig").hasSize(3);
+    }
 }

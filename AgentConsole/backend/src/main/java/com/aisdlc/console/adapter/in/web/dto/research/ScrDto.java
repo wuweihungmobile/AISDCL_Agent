@@ -24,11 +24,12 @@ public record ScrDto(
         @NotNull String requestedBy,
         @NotNull String requestedAt,
         @Schema(nullable = true, requiredMode = Schema.RequiredMode.REQUIRED) String decidedBy,
-        @Schema(nullable = true, requiredMode = Schema.RequiredMode.REQUIRED) String decidedAt) {
+        @Schema(nullable = true, requiredMode = Schema.RequiredMode.REQUIRED) String decidedAt,
+        @Schema(nullable = true, description = "證據連結（https 限定、至多 500 字；P2 V21 research_scr.evidence_url）") String evidenceUrl) {
 
     public static ScrDto from(Scr s) {
         return new ScrDto(s.id().toString(), s.scrNo(), s.kind(), s.sourceKind(), s.reason(), s.reasonClass(), s.affectedSections(), s.status(),
                 s.prdFromVersionNo(), s.prdToVersionNo(), s.successorResearchId() == null ? null : s.successorResearchId().toString(), s.implFsmActions(),
-                s.requestedBy(), Iso.of(s.requestedAt()), s.decidedBy(), Iso.of(s.decidedAt()));
+                s.requestedBy(), Iso.of(s.requestedAt()), s.decidedBy(), Iso.of(s.decidedAt()), s.evidenceUrl());
     }
 }

@@ -34,6 +34,20 @@ public final class BridgeSource {
         }
     }
 
+    /** {@code engine-bridge/tests/<segments>} 的全文（UTF-8；Bridge 測試夾具，兩端各自讀同一份，不複製進 backend）。 */
+    public static String fixture(String... testSegments) {
+        String[] all = new String[testSegments.length + 2];
+        all[0] = "engine-bridge";
+        all[1] = "tests";
+        System.arraycopy(testSegments, 0, all, 2, testSegments.length);
+        Path path = Path.of("..", all);
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException("讀不到 Bridge 測試夾具 " + path.toAbsolutePath(), e);
+        }
+    }
+
     /**
      * 模組層字串常數集合，依宣告順序：{@code NAME: tuple[str, ...] = ("a", "b")} 或 {@code NAME: frozenset[str] = frozenset({"a", "b"})}
      * （後者回傳的順序是宣告順序，不是集合順序）。找不到宣告或內容為空＝丟例外。

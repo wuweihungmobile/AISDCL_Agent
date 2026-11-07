@@ -164,11 +164,19 @@ class OpenApiIT extends AbstractApiIT {
         Map.entry("/api/v1/research/projects/{id}/scr", List.of("get", "post")),
         Map.entry("/api/v1/research/projects/{id}/scr/{scrNo}/apply", List.of("post")),
         Map.entry("/api/v1/research/projects/{id}/decomposition", List.of("get", "post")),
-        Map.entry("/api/v1/research/projects/{id}/decomposition/signoff", List.of("post"))));
+        Map.entry("/api/v1/research/projects/{id}/decomposition/signoff", List.of("post")),
+            // P2＋7：kanban、gates、healing、delivery、delivery/tag、delivery/pr、delivery/traceability
+            Map.entry("/api/v1/research/projects/{id}/kanban", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/gates", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/healing", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/delivery", List.of("get")),
+            Map.entry("/api/v1/research/projects/{id}/delivery/tag", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/delivery/pr", List.of("post")),
+            Map.entry("/api/v1/research/projects/{id}/delivery/traceability", List.of("get"))));
 
     /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
-    private static final int EXPECTED_PATH_COUNT = 107;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
-    private static final int EXPECTED_OPERATION_COUNT = 124;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
+    private static final int EXPECTED_PATH_COUNT = 114;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
+    private static final int EXPECTED_OPERATION_COUNT = 131;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -252,6 +260,72 @@ class OpenApiIT extends AbstractApiIT {
                 + ".schema['$ref']")).endsWith("/SiCloseRequest");
     }
 
+    /** AT-962-24-3：七個 P2 操作的 operationId 逐字、路徑與方法固定，寫入端點文件化 409／422／502／503／504，讀端含 401 與 404（狀態碼集合另由三表逐一鎖住）。 */
+    @Test
+    void AT_962_24_3_theSevenP2OperationsDocumentTheirIdsAndFailureStatusCodes() {
+        Resp docs = docs();
+        String base = "/api/v1/research/projects/{id}/";
+        Map<String, String> ids = new java.util.LinkedHashMap<>();
+        ids.put("get kanban", "getResearchKanban");
+        ids.put("post gates", "registerResearchGate");
+        ids.put("get healing", "getResearchHealing");
+        ids.put("get delivery", "getResearchDelivery");
+        ids.put("post delivery/tag", "createResearchTag");
+        ids.put("post delivery/pr", "createResearchPr");
+        ids.put("get delivery/traceability", "getResearchTraceability");
+        ids.forEach((key, operationId) -> {
+            String method = key.substring(0, key.indexOf(' '));
+            String path = base + key.substring(key.indexOf(' ') + 1);
+            assertThat(docs.<String>read("$.paths['" + path + "']." + method + ".operationId")).as(key).isEqualTo(operationId);
+            Set<String> codes = docs.<Map<String, Object>>read("$.paths['" + path + "']." + method + ".responses").keySet();
+            assertThat(codes).as(key).contains("401", "404");
+            if ("post".equals(method)) {
+                assertThat(codes).as(key).contains("403", "409", "422", "502", "503", "504");
+            }
+        });
+        assertThat(docs.<String>read("$.paths['" + base + "delivery/tag'].post.responses['502'].description")).contains("delivery_step_failed");
+        assertThat(docs.<String>read("$.paths['" + base + "delivery/tag'].post.responses['409'].description")).contains("tag_exists");
+    }
+    /** AT-962-26-E-2：{@code :healing-sync} 是 console-api 的內部通知，不在任何路由與 OpenAPI 路徑（零命中）。 */
+    @Test
+    void AT_962_26_E_2_healingSyncIsNotAnyConsoleApiRouteOrOpenApiPath() {
+        Resp docs = docs();
+
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).noneMatch(path -> path.contains("healing-sync") || path.contains(":healing"));
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).contains("/api/v1/research/projects/{id}/healing");
+    }
+    /**
+     * AT-962-24-2（強型別）：P2 七個操作的回應與請求都是具名 schema（不是 additionalProperties 的 map），gate／result 在請求與結果都是列舉——
+     * FE-W3 重產型別時才不會退化成 {@code Record<string, unknown>}；追溯表的 gherkinSummary 是物件、source 是字串陣列；{@code prdSha256} 維持 nullable。
+     */
+    @Test
+    void AT_962_24_2_theP2OperationsUseNamedTypedSchemasWithEnumsAndNestedObjects() {
+        Resp docs = docs();
+        String schemas = "$.components.schemas.";
+
+        assertThat(docs.<List<String>>read(schemas + "GateRegisterRequest.properties.gate.enum")).containsExactly("PR_REVIEW", "RTM_VERIFY", "RELEASE_READY");
+        assertThat(docs.<List<String>>read(schemas + "GateRegisterRequest.properties.result.enum")).containsExactly("PASS", "FAIL");
+        assertThat(docs.<List<String>>read(schemas + "GateRegisterResult.properties.gate.enum")).containsExactly("PR_REVIEW", "RTM_VERIFY", "RELEASE_READY");
+        assertThat(docs.<List<String>>read(schemas + "GateRegisterResult.properties.result.enum")).containsExactly("PASS", "FAIL");
+        assertThat(docs.<Map<String, Object>>read(schemas + "GateRegisterResult.properties").keySet())
+                .containsExactlyInAnyOrder("gateDecisionId", "gate", "result", "fsmStateBefore", "nextState", "escalated", "flow");
+        assertThat(docs.<Map<String, Object>>read(schemas + "TagResult.properties").keySet()).containsExactlyInAnyOrder("delivery", "snapshot", "flow", "fsmState");
+        assertThat(docs.<Map<String, Object>>read(schemas + "PrResult.properties").keySet()).containsExactlyInAnyOrder("delivery", "created");
+        assertThat(docs.<Map<String, Object>>read(schemas + "TagRequest.properties").keySet()).containsExactlyInAnyOrder("tagName", "message", "push", "createGithubRelease");
+        assertThat(docs.<Map<String, Object>>read(schemas + "PrRequest.properties").keySet()).containsExactlyInAnyOrder("branch", "title", "bodyPreviewAck");
+        assertThat(docs.<Map<String, Object>>read(schemas + "TraceabilityRow.properties").keySet())
+                .containsExactlyInAnyOrder("ac", "userStory", "gherkinSummary", "unitStatus", "e2eStatus", "lastRunAt", "source");
+        assertThat(docs.<String>read(schemas + "TraceabilityRow.properties.source.type")).isEqualTo("array");
+        assertThat(docs.<String>read(schemas + "TraceabilityRow.properties.source.items.type")).isEqualTo("string");
+        assertThat(docs.<String>read(schemas + "TraceabilityRow.properties.gherkinSummary.$ref")).endsWith("/TraceabilityGherkin");
+        assertThat(docs.<Map<String, Object>>read(schemas + "TraceabilityTotals.properties").keySet()).containsExactlyInAnyOrder("acTotal", "covered", "uncovered", "frTotal");
+        assertThat(docs.<Map<String, Object>>read(schemas + "HealingDto.properties").keySet())
+                .containsExactlyInAnyOrder("researchId", "rows", "maxRetries", "retryingSteps", "escalatedTasks", "logSyncedThrough", "logLag", "specChange");
+        assertThat(docs.<Map<String, Object>>read(schemas + "KanbanDto.properties").keySet()).contains("columns", "pendingReviews", "gates", "bridgeReachable", "snapshotAt");
+        assertThat(docs.<String>read("$.paths['/api/v1/research/projects/{id}/gates'].post.responses['200'].content['application/json'].schema.$ref"))
+                .contains("GateRegisterResult");
+        assertThat(docs.<Map<String, Object>>read(schemas + "DecompositionDto.properties.prdSha256")).as("prdSha256 維持 nullable（DB 欄可為 NULL，D-159 追認）").isNotEmpty();
+    }
     /**
      * SelfImproving 決定重送去重（TCS-SelfImprovingDecideDedupe AT-951-6-1；W-D1、W-D3、W-D6）：對帳項 {@code SiConsoleWriteItem} 恰十一鍵（多 {@code dkind} 與
      * {@code supersededBy}，兩者皆非必填），決定端點的 409 與 operation 說明載明 {@code si_decision_duplicate}，其餘兩個寫入 POST 的 409 說明不含它，路徑與
@@ -909,7 +983,14 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("post /api/v1/research/projects/{id}/scr/{scrNo}/apply", "applyResearchScr"),
             Map.entry("get /api/v1/research/projects/{id}/decomposition", "getResearchDecomposition"),
             Map.entry("post /api/v1/research/projects/{id}/decomposition", "triggerResearchDecomposition"),
-            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", "signoffResearchDecomposition"));
+            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", "signoffResearchDecomposition"),
+            Map.entry("get /api/v1/research/projects/{id}/kanban", "getResearchKanban"),
+            Map.entry("post /api/v1/research/projects/{id}/gates", "registerResearchGate"),
+            Map.entry("get /api/v1/research/projects/{id}/healing", "getResearchHealing"),
+            Map.entry("get /api/v1/research/projects/{id}/delivery", "getResearchDelivery"),
+            Map.entry("post /api/v1/research/projects/{id}/delivery/tag", "createResearchTag"),
+            Map.entry("post /api/v1/research/projects/{id}/delivery/pr", "createResearchPr"),
+            Map.entry("get /api/v1/research/projects/{id}/delivery/traceability", "getResearchTraceability"));
 
     private static Set<String> codes(String... codes) {
         return Set.of(codes);
@@ -956,7 +1037,14 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("post /api/v1/research/projects/{id}/scr/{scrNo}/apply", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
             Map.entry("get /api/v1/research/projects/{id}/decomposition", codes("200", "400", "401", "404", "429")),
             Map.entry("post /api/v1/research/projects/{id}/decomposition", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
-            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")));
+            Map.entry("post /api/v1/research/projects/{id}/decomposition/signoff", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/kanban", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/gates", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/healing", codes("200", "400", "401", "404", "429")),
+            Map.entry("get /api/v1/research/projects/{id}/delivery", codes("200", "400", "401", "404", "429")),
+            Map.entry("post /api/v1/research/projects/{id}/delivery/tag", codes("201", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/projects/{id}/delivery/pr", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
+            Map.entry("get /api/v1/research/projects/{id}/delivery/traceability", codes("200", "400", "401", "404", "409", "429", "502", "503", "504")));
 
     private static boolean isResearchPath(String path) {
         return path.startsWith("/api/v1/research/") || path.startsWith("/api/v1/stream/research/");
@@ -968,7 +1056,7 @@ class OpenApiIT extends AbstractApiIT {
         Map<String, Object> paths = docs.read("$.paths");
         List<String> researchPaths = paths.keySet().stream().filter(OpenApiIT::isResearchPath).sorted().toList();
 
-        assertThat(researchPaths).as("研究路徑 30 條：P0 的 24 條加 P1 的 6 條").hasSize(30);
+        assertThat(researchPaths).as("研究路徑 37 條：P0 的 24 條加 P1 的 6 條加 P2 的 7 條").hasSize(37);
         int operations = 0;
         for (String path : researchPaths) {
             Map<String, Object> methods = docs.read("$.paths['" + path + "']");
@@ -976,8 +1064,8 @@ class OpenApiIT extends AbstractApiIT {
             assertThat(new TreeSet<>(methods.keySet())).as(path).containsExactlyElementsOf(EXPECTED.get(path));
             operations += methods.size();
         }
-        assertThat(operations).as("研究面的操作總數（P0 的 26 加 P1 的 9）").isEqualTo(35);
-        assertThat(RESEARCH_OPERATION_IDS).as("有 operationId 的研究操作：P0 的 25 加 P1 的 9＝34（SSE 沒有）").hasSize(34);
+        assertThat(operations).as("研究面的操作總數（P0 的 26 加 P1 的 9 加 P2 的 7）").isEqualTo(42);
+        assertThat(RESEARCH_OPERATION_IDS).as("有 operationId 的研究操作：P0 的 25 加 P1 的 9 加 P2 的 7＝41（SSE 沒有）").hasSize(41);
         for (Map.Entry<String, String> expected : RESEARCH_OPERATION_IDS.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
@@ -996,7 +1084,7 @@ class OpenApiIT extends AbstractApiIT {
     void AT_960_5_5_everyResearchOperationDocumentsExactlyTheStatusCodesItCanReturn() {
         Resp docs = docs();
 
-        assertThat(RESEARCH_STATUS_CODES).as("35 個研究操作").hasSize(35);
+        assertThat(RESEARCH_STATUS_CODES).as("42 個研究操作").hasSize(42);
         for (Map.Entry<String, Set<String>> expected : RESEARCH_STATUS_CODES.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);

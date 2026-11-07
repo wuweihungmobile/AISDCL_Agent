@@ -14,9 +14,10 @@ public record ScrOpenRequest(
         @Schema(allowableValues = {"HUMAN", "REVIEW_FINDING", "SCG4", "HEALING_FAILED"}) String sourceKind,
         @Schema(description = "理由，1～500 字") String reason,
         @Schema(description = "PRD 缺漏證據｜AC 模糊｜需求變更｜技術不可行｜其他（亦接受 EVIDENCE｜AC_VAGUE｜REQ_CHANGE｜INFEASIBLE｜OTHER）；缺＝其他") String reasonClass,
-        @Schema(description = "受影響的 PRD 章節（每項 1～200 字，至多 20 項）") List<String> affectedSections) {
+        @Schema(description = "受影響的 PRD 章節（每項 1～200 字，至多 20 項）") List<String> affectedSections,
+        @Schema(description = "證據連結（選填；https:// 開頭、至多 500 字）；缺或空字串視同未提供") String evidenceUrl) {
 
     public ScrInput toInput() {
-        return new ScrInput(kind, sourceKind, reason, reasonClass, affectedSections);
+        return new ScrInput(kind, sourceKind, reason, reasonClass, affectedSections, evidenceUrl);
     }
 }
