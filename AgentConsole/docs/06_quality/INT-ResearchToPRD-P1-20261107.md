@@ -1,6 +1,6 @@
 # INT-ResearchToPRD-P1 整合證據（2026-11-07；鍵 `agentconsole-research-to-prd-p1`）
 
-> 來源：INT-P1 整合棒（Sonnet）於 2026-11-07 16:2x～16:5x 的實跑證據（scratchpad `qa/int/INT-P1-20261107.md` 與同目錄日誌），由主控落檔。主控親驗（當回合真跑）：`tests/test_research_int_p1.py` 序列跑 **8 passed、0 skipped（163 s）**；`ruff check` engine-bridge 視角與 monorepo 根視角皆 All checks passed；根層三類平台鎖＋裸 python 登記表 96 tests OK。HEAD＝`2a5e7d5f`（P1 七包＋三補完棒皆已 push，雲端 CI 五支全綠）。
+> 來源：INT-P1 整合棒（Sonnet）於 2026-11-07 16:2x～16:5x 的實跑證據（scratchpad `qa/int/INT-P1-20261107.md` 與同目錄日誌），由主控落檔。主控親驗（當回合真跑）：`tests/test_research_int_p1.py` 序列跑 **八案全過、零略過（163 秒）**；`ruff check` engine-bridge 視角與 monorepo 根視角皆全綠；根層三類平台鎖＋裸 python 登記表 96 tests OK。HEAD＝`2a5e7d5f`（P1 七包＋三補完棒皆已 push，雲端 CI 五支全綠）。
 > 出口判準依 PRD §8.1 P1 列 (a)～(k)；載具設計依 IFACE-P1 §9（甲＝本機模式軌道 A、乙＝本機模式軌道 B＋假 gh、丙＝Docker mock-only、丁＝SCR 序列）；整合 AT 依 TCS-P1 §3.4／AC-961-22。
 
 ## 1. pytest 整合檔（載具甲／乙／丁的 pytest 形態）
