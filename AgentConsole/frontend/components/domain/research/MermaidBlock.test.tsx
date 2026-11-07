@@ -168,7 +168,8 @@ describe("AT_960_16_3 Mermaid 嚴格模式渲染、錯誤退回原始碼、逾�
     await waitFor(() => expect(mm.render).toHaveBeenCalledTimes(1));
     rerender(<MermaidBlock code={"graph LR\n  X --> Y"} />);
     await waitFor(() => expect(screen.getByTestId("mermaid-block")).toHaveAttribute("data-state", "ready"));
-    expect(within(screen.getByTestId("mermaid-canvas")).getByText("新圖")).toBeInTheDocument();
+    // 畫布內容與 data-state 分屬不同次 commit：機器負載高時 ready 先到、文字晚一拍（主控 2026-11-07 全套並跑實測假紅）
+    await waitFor(() => expect(within(screen.getByTestId("mermaid-canvas")).getByText("新圖")).toBeInTheDocument());
     await act(async () => {
       releaseOld({ svg: SVG_OK });
       await Promise.resolve();
