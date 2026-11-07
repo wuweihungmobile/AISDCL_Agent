@@ -74,19 +74,15 @@ ignore_imports =
     autoclaude.utils.checkpoint_manager -> autoclaude.infra.repositories.factory
     autoclaude.core.services.auto_resume -> autoclaude.infra.repositories.factory
 
-; Rule 3 (W4-T15 m-5) — Anti-resurrection guard (SD_Improving_06 W6 G6 維持):
-; `autoclaude.execution._runner_internals` 模組已於 SD_06 W6 G6 物理刪除
-; （2026-05-18），但本 contract 保留作為**防復活柵欄**：禁止未來任何人在
-; `autoclaude.execution` 內重新建立同名模組並被 core / plugins 直接 import。
-; 詳見 docs/08_deployment/SD06_Migration_Guide.md §7.2。
-[importlinter:contract:runner-internals-isolation]
-name = _runner_internals must not be imported by core or plugins
-type = forbidden
-source_modules =
-    autoclaude.core
-    autoclaude.plugins
-forbidden_modules =
-    autoclaude.execution._runner_internals
+; （已退役 2026-11-07）Rule 3 (W4-T15 m-5) runner-internals-isolation：
+; `autoclaude.execution._runner_internals` 已於 SD_06 W6 G6（2026-05-18）物理刪除，
+; 本檔曾保留一條 forbidden contract 作為「防復活柵欄」。import-linter 新版（CI 於
+; 2026-11-06 乾淨安裝到的版本；pyproject 只釘 >=2.0）對 contract 引用不存在的模組
+; 直接報錯「Module 'autoclaude.execution._runner_internals' does not exist.」而中止，
+; 整個 lint-imports 步驟紅（autoclaude-ci run 42256824694）。柵欄本身早已由
+; tests/contract/test_w6_deletion.py 以「存在性」守住（檔案回來即紅，含換目錄），
+; 比 forbidden import 的射程更前面；故移除本 contract、不釘舊版。
+; 詳見 docs/06_quality/Runner_Internals_Anti_Resurrection_Guard.md §1.2。
 
 ; Rule 4 (SD_Improving_06 W2 T2-14 NOTE): runner-no-checkpoint-logic
 ; mixin 不可實作 checkpoint 持久化 logic（❌13 雙寫法）。

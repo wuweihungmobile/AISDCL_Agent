@@ -328,16 +328,15 @@ tasks:
 | absolute_limit | ≤ 750 | 全域絕對紅線（任何層級不得超）|
 | special: CLAUDE.md | ≤ 400 | ADR-SD08-001 文件治理 |
 
-### importlinter Rules（目前 9 kept）
+### importlinter Rules（目前 8 kept）
 1. Plugins must not import other plugins (use EventBus instead)
 2. autoclaude.core (excl. wiring) must not depend on execution or infra layers
-3. _runner_internals must not be imported by core or plugins
-4. Brain modules must not import Executor modules (use EventBus)
-5. Executor modules must not import Brain modules (use EventBus)
-6. playbook_runner / strategy modules must not import checkpoint internal modules (use CheckpointPlugin public API)
-7. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
-8. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
-9. autoclaude must not import monorepo harness modules (consume the file contract instead)
+3. Brain modules must not import Executor modules (use EventBus)
+4. Executor modules must not import Brain modules (use EventBus)
+5. playbook_runner / strategy modules must not import checkpoint internal modules (use CheckpointPlugin public API)
+6. Plugins must not directly import utils.observability helpers (use IObservabilityPort)
+7. Plugin must not directly import IKbMetricStore (use FailureKnowledgeBase routing)
+8. autoclaude must not import monorepo harness modules (consume the file contract instead)
 
 ### Plugin 列表（18 個 active / 19 個靜態，按 wiring._REGISTER_ORDER）
 1. pre_run_validator

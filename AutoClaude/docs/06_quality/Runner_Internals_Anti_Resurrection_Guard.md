@@ -6,7 +6,7 @@
 | 建立日期 | 2026-05-18 |
 | 對應規範 | [ADR-SD06-001](../04_planning/ADR/ADR-SD06-001-coordinator-layer-boundary.md) / [SD06_Migration_Guide.md §7.2](../08_deployment/SD06_Migration_Guide.md) / SD_Improving_07 §5 v2 backlog 第 2 項 |
 | 適用版本 | SD_Improving_06 W6 G6（2026-05-18）起永久維護 |
-| 對應 importlinter Rules | Rule 3 `runner-internals-isolation` + Rule 6 `runner-no-checkpoint-logic` |
+| 對應 importlinter Rules | Rule 6 `runner-no-checkpoint-logic`（Rule 3 `runner-internals-isolation` 已於 2026-11-07 退役，見 §1.3；下文提到 Rule 3 之處為歷史敘述） |
 | 對應契約測試 | [tests/contract/test_runner_no_checkpoint_logic.py](../../tests/contract/test_runner_no_checkpoint_logic.py) |
 | 維護者 | 專案團隊（SD_07/SD_08 後不得刪除本文件） |
 
@@ -41,6 +41,12 @@
 - 「`tests/contract/test_runner_no_checkpoint_logic.py` 第 29 行 `_RUNNER_INTERNALS = Path(...)` 指向不存在的檔案，是不是 dead code？」
 
 本文件即為「**防錯誤拔除**」的單一真相來源：明確記載三層防護的設計動機、互補關係、與「絕對不可移除」的書面理由。
+
+### 1.3 Rule 3 退役記錄（2026-11-07）
+
+- **事件**：autoclaude-ci run 42256824694（commit 85b9d0b0，只動 perf 基線與 ONBOARDING 錨）的「Check import architecture」步驟紅：import-linter 新版（CI 以 `pip install -e ".[lint]"` 乾淨安裝，`pyproject` 只釘 `>=2.0`；本機 .venv 仍是 2.13／grimp 3.15 故通過）對 contract 引用不存在的模組直接中止：`Module 'autoclaude.execution._runner_internals' does not exist.`。
+- **裁決**：移除 `.importlinter` 的 `runner-internals-isolation`（原 Rule 3），**不**釘舊版 import-linter。理由：Rule 3 是 forbidden-import 契約，只在「有人 import 一個不存在的模組」時才說話，而那本來就會在匯入期失敗；真正的防復活柵欄自 R82 起由 [tests/contract/test_w6_deletion.py](../../tests/contract/test_w6_deletion.py) 以**存在性**守住（`autoclaude/execution/` 內或生產碼樹任何目錄出現 `_runner_internals.py`／`_runner_compat.py` 即紅），射程涵蓋 Rule 3 原本想擋的情境且更前面。§1.2 第 1 點、§2.1、§3 表第 1 列、§4 表的 Rule 3 敘述自此為歷史；Rule 6 與 grep contract test 不變。
+- **現況三層**：Layer 1＝`test_w6_deletion.py`（存在性）、Layer 2＝importlinter Rule 6（checkpoint 內部模組的 import 圖）、Layer 3＝`test_runner_no_checkpoint_logic.py`（grep）。CLAUDE.md Architecture Snapshot 的 importlinter 清單由 `tools/snapshot_sync.py` 重生為 8 條。
 
 ---
 
