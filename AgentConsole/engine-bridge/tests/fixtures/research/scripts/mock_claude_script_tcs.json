@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "prefetch": "content/prefetch_pass.json",
+  "steps": [
+    {"role": "tcs-draft", "round": 0, "writes": [
+      {"path": "03_execution/tcs_draft.md", "from": "content/tcs_ok.md"}]}
+  ]
+}

@@ -56,12 +56,15 @@ from .gates.evidence import EvidenceContext, validate_evidence_items
 from .gates.ingest import plan_ingest
 from .gates.prd_schema import count_acs, precheck_draft, precheck_p1, precheck_passed
 from .gates.reconcile import (
-    absent_check,
+    PENDING_CORRECTION,
+    decomposition_extras,
     derive_flow_status,
     file_check,
     flow_fsm_mapping_ok,
     mapping_check,
     reconcile_result,
+    route_decision_extras,
+    with_extra_drift,
 )
 from .gates.review_card import (
     plan_defect_transitions,
@@ -85,6 +88,7 @@ REVIEW_CARD_REL = "02_governance/review_card.json"
 MATRIX_REL = "00_research/evidence_matrix.md"
 PRD_DRAFT_REL = "01_specs/PRD_draft.md"
 ADR_DRAFT_REL = "01_specs/adr_draft.md"
+TCS_INPUTS_REL = "03_execution/tcs_inputs.json"
 LICENSE_PENDING_REL = "00_research/license_pending.json"
 DEFAULT_CLAUDE = "claude"
 #: 研究 run 的引擎子行程環境不帶的名稱前綴：Bridge 自己的設定（`BRIDGE_*`）、SDD 寫入面（`SDD_*`）、
@@ -152,6 +156,11 @@ class Outcome:
     exit_reason: str = ""
     verdict: str | None = None      # 審查輪的 PASS｜REVISE｜ESCALATE
     detail: str = ""
+
+
+def _stage_label(stage: str) -> str:
+    """`research_stage_runs.stage` 的值域是大寫底線（`tcs-draft`→`TCS_DRAFT`）。"""
+    return stage.upper().replace("-", "_")
 
 
 def derive_exit_reason(reason: str, log_tail: str = "") -> str:
@@ -253,6 +262,8 @@ class Orchestrator:
         """建好第一個 stage run 列（QUEUED）、起執行緒、立即回傳（202 的本文）。"""
         rid = str(row["id"])
         self._check_layers(row, stage)
+        if stage == "tcs-draft":
+            self._prepare_tcs(row, requested_by)
         first = "revise" if stage == "iterate" else stage
         plan = self._new_plan(row, first, requested_by=requested_by, iterate=stage == "iterate",
                               auto=auto)
@@ -355,7 +366,7 @@ class Orchestrator:
         self.project_state(rid)
 
     def settle_failed(self, rid: str, exit_reason: str, *, run_ids: Sequence[str] = (),
-                      actor: str = "bridge") -> None:
+                      actor: str = "bridge", detail: str | None = None) -> None:
         """stage run 失敗、取消或被回收之後的游標收尾（D-77；三者同一條路）：相態退回該 run
         開始前的穩定相態（RESEARCHING 這類只在 run 進行中才成立的相態不留在游標上，否則
         `stages/research` 的前置相態永遠不滿足）、`flow_status` 為 FAILED（FSM 在 ESCALATION 類時
@@ -366,7 +377,8 @@ class Orchestrator:
         prior = next((phase for phase in known if phase), None)
         row = self._project(rid)
         phase = prior or self._stable_phase(rid, str(row["flow_phase"]))
-        self._sync_flow(rid, phase=phase, detail=exit_reason, failed=True, actor=actor)
+        self._sync_flow(rid, phase=phase, detail=exit_reason if detail is None else detail,
+                        failed=True, actor=actor)
 
     def _stable_phase(self, rid: str, current: str) -> str:
         """查不到 run 開始前相態時（Bridge 重啟後的孤兒回收、直接建列的 run）的穩定相態：
@@ -433,7 +445,7 @@ class Orchestrator:
         round_no = {"review": completed + 1, "revise": completed}.get(stage, 0)
         prev = self._one("SELECT COALESCE(MAX(attempt), 0) AS n FROM {s}.research_stage_runs "
                          "WHERE research_id = %s AND stage = %s AND round_no = %s",
-                         (rid, stage.upper(), round_no))
+                         (rid, _stage_label(stage), round_no))
         attempt = int(prev["n"]) + 1 if prev else 1
         head = self.db.head_prd(rid)
         values: dict[str, Any] = {}
@@ -445,6 +457,8 @@ class Orchestrator:
             values["budget_note"] = self._budget_note(row)
             values["accept_template_sentinel"] = bool(
                 os.environ.get("MOCK_CLAUDE_RESEARCH_SCRIPT", "").strip())  # 空字串＝未設
+        elif stage == "tcs-draft":
+            values["prd_rel"] = self._frozen_ref(rid).rel
         elif stage in ("review", "revise") and head is not None:
             values["prd_rel"] = str(head["rel_path"])
             if stage == "review":
@@ -512,7 +526,7 @@ class Orchestrator:
     def _insert_run(self, rid: str, plan: StagePlan, requested_by: str) -> None:
         compiled = plan.compiled
         self.writer.persist(Op("stage_run.insert", rid, {
-            "research_id": rid, "stage_run_id": plan.run_id, "stage": plan.stage.upper(),
+            "research_id": rid, "stage_run_id": plan.run_id, "stage": _stage_label(plan.stage),
             "round_no": plan.round_no, "attempt": plan.attempt,
             "scope_rev": int(self._project(rid)["scope_rev"]), "status": "QUEUED",
             "playbook_sha256": compiled.playbook_sha256, "config_sha256": compiled.config_sha256,
@@ -582,7 +596,8 @@ class Orchestrator:
         row = self._project(rid)
         with self._guard:               # 失敗、取消、回收時游標退回這個相態（D-77）
             self._prior_phase[run_id] = str(row["flow_phase"])
-        phase = {"research": "RESEARCHING", "revise": "REVISING"}.get(plan.stage)
+        phase = {"research": "RESEARCHING", "revise": "REVISING",
+                 "tcs-draft": "TCS_DRAFTING"}.get(plan.stage)
         if plan.stage == "review" and plan.trigger_kind != "POST_HUMAN":
             phase = "REVIEWING"
         self._sync_flow(rid, phase=phase)
@@ -610,7 +625,10 @@ class Orchestrator:
         if outcome.status != "SUCCEEDED":
             # 失敗不使游標顯示為完成（D-77）：相態退回 stage 開始前的穩定相態、`flow_status` 為
             # FAILED、原因寫進 `flow_detail`——與取消、孤兒回收同一條收尾路徑
-            self.settle_failed(rid, outcome.exit_reason, run_ids=(run_id,))
+            # D-131：TCS 驗證失敗的游標說明＝`tcs_invalid: <缺項摘要>`（前端解析此前綴）
+            detail = (f"tcs_invalid: {outcome.detail}"[:500] if outcome.exit_reason == "tcs_invalid"
+                      and outcome.detail else outcome.exit_reason)
+            self.settle_failed(rid, outcome.exit_reason, run_ids=(run_id,), detail=detail)
             return outcome
         with self._guard:
             self._prior_phase.pop(run_id, None)
@@ -639,6 +657,8 @@ class Orchestrator:
             return self._author(ctx, plan, revise=False)
         if plan.stage == "revise":
             return self._author(ctx, plan, revise=True)
+        if plan.stage == "tcs-draft":
+            return self._tcs_draft(ctx, plan)
         return self._review(ctx, plan, started)
 
     def _engine(self, ctx: _Ctx, plan: StagePlan) -> int:
@@ -1139,6 +1159,163 @@ class Orchestrator:
             files=(FileRef(str(ws), REVIEW_CARD_REL, sha),)),
             writes=[FileWrite(ws, REVIEW_CARD_REL, text)])
 
+    # ── TCS_DRAFT（P1；D-97／D-109／D-110）──────────────────────────────────────────────────
+    def _frozen_ref(self, rid: str) -> Any:
+        # 延遲匯入：避免與 scr／route 的匯入循環
+        from . import decompose_plan
+
+        ref = decompose_plan.frozen_prd(self.db, rid)
+        if ref is None:
+            raise ApiError(409, "fsm_state_conflict", details={"cause": "prd_not_frozen"})
+        return ref
+
+    def _inner_fsm(self, route: Mapping[str, Any]) -> fsm_ops.FsmCtx:
+        return fsm_ops.FsmCtx(sdd_root=self.cfg.sdd_root, state_dir=Path(route["impl_state_dir"]),
+                              key=str(route["impl_fsm_project"]), audit=self.audit,
+                              actor="bridge")
+
+    def _prepare_tcs(self, row: Mapping[str, Any], requested_by: str) -> None:
+        """啟動時（同步）：預抽 `03_execution/tcs_inputs.json`（agent 只讀工作區），並把內環鍵自
+        SPEC_FROZEN 轉到 SPEC_DRAFTING（先讀現態：已在 SPEC_DRAFTING＝重試，不重複 transition）。"""
+        from . import decompose_plan
+
+        rid, ws = str(row["id"]), Path(row["workspace_path"])
+        route = self.db.active_route(rid)
+        if route is None or route["status"] != "SUCCEEDED" or not route.get("impl_fsm_project"):
+            raise ApiError(409, "fsm_state_conflict", details={"cause": "route_not_succeeded"})
+        ref = self._frozen_ref(rid)
+        prd = decompose_plan.parse_prd(
+            layout.safe_join(ws, ref.rel).read_text(encoding="utf-8"))
+        inputs = {"research": str(row["rp_no"]), "slug": row["slug"], "prd_rel": ref.rel,
+                  "prd_sha256": ref.sha256,
+                  "acs": [{"id": ac, "title": prd.ac_titles.get(ac, "")} for ac in prd.acs]}
+        layout.write_workspace_file(ws, TCS_INPUTS_REL, json.dumps(
+            inputs, ensure_ascii=False, indent=2) + "\n")
+        fctx = self._inner_fsm(route)
+        if fsm_ops.current_state(fctx) == "SPEC_FROZEN":
+            fsm_ops.transition(fctx, to="SPEC_DRAFTING",
+                               reason=f"Stage-2 TCS drafting; research={row['rp_no']}")
+
+    def _tcs_checked(self, ctx: _Ctx, plan: StagePlan) -> tuple[str, str]:
+        """讀草稿並做確定性驗證（`gates/tcs_schema`）；不過＝`research.alert` 事件（只含規則與
+        AC／AT 編號）加 `StageFailed("tcs_invalid")`。通過回 `(草稿文字, 發佈檔名)`。"""
+        from .gates import tcs_schema
+
+        rid, ws = str(ctx.row["id"]), ctx.workspace
+        try:
+            inputs = json.loads(layout.safe_join(ws, TCS_INPUTS_REL).read_text(encoding="utf-8"))
+            text = layout.safe_join(ws, tcs_schema.TCS_DRAFT_REL).read_text(encoding="utf-8")
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raise StageFailed("tcs_invalid", f"draft_unreadable:{type(exc).__name__}") from exc
+        name = tcs_schema.target_name(str(ctx.row["slug"]), utc_now().strftime("%Y%m%d"))
+        problems = tcs_schema.validate(text, [str(a["id"]) for a in inputs["acs"]],
+                                       file_name=name)
+        if problems:
+            summary = json.dumps(tcs_schema.summarize(problems), ensure_ascii=False)[:280]
+            self.writer.persist(Op("event.append", rid, {
+                "research_id": rid, "event_type": "research.alert", "actor": "bridge",
+                "payload": {"kind": "tcs_invalid", "detail": summary},
+                "ref_kind": "stage_run", "ref_id": plan.run_id}))
+            raise StageFailed("tcs_invalid", tcs_schema.human_summary(problems)[:480])
+        return text, name
+
+    def _tcs_draft(self, ctx: _Ctx, plan: StagePlan) -> int:
+        """引擎 run（agent 寫 `tcs_draft.md`）→確定性驗證（`gates/tcs_schema`）→發佈與登記→內環鍵
+        `SCG_VALIDATION`→`HUMAN_PENDING`（理由前綴 `tcs gate`）。驗證不過＝`tcs_invalid`、內環鍵留
+        在 SPEC_DRAFTING（可重試；細項只記規則與 AC／AT 編號，不含內文）。"""
+        from . import scr as scr_mod
+
+        rid = str(ctx.row["id"])
+        try:
+            tokens = self._engine(ctx, plan)
+        except StageFailed as exc:
+            # evaluator 就是同一份驗證：引擎 run 因草稿不合格而失敗時，換成 `tcs_invalid`（含細項）
+            if exc.exit_reason in ("evaluator_failed", "engine_failed"):
+                self._tcs_checked(ctx, plan)
+            raise
+        route = self.db.active_route(rid)
+        assert route is not None
+        text, name = self._tcs_checked(ctx, plan)
+        sha = layout.sha256_text(text)
+        rel = f"docs/03_testing/contracts/{name}"
+        env = scr_mod.ScrEnv(cfg=self.cfg, db=self.db, writer=self.writer, audit=self.audit)
+        try:
+            scr_mod.publish_text(env, ctx.row, route, rel, text, sha)
+        except (OSError, ValueError) as exc:
+            raise StageFailed("tcs_publish_failed", type(exc).__name__) from exc
+        fctx = self._inner_fsm(route)
+        state = fsm_ops.current_state(fctx)
+        if state == "SPEC_DRAFTING":
+            state = fsm_ops.transition(fctx, to="SCG_VALIDATION",
+                                       reason="Stage-2 TCS precheck passed")
+        if state == "SCG_VALIDATION":
+            fsm_ops.transition(fctx, to="HUMAN_PENDING",
+                               reason=f"tcs gate: Stage-2 {name} ready for human freeze")
+        decomposition = self._one(
+            "SELECT id FROM {s}.research_decompositions WHERE research_id = %s AND "
+            "status <> 'REJECTED' ORDER BY created_at DESC, id DESC LIMIT 1", (rid,))
+        if decomposition is None:
+            raise StageFailed("decomposition_missing", "沒有可承接 TCS 的拆解列")
+        self.writer.persist(Op("tcs.publish", rid, {
+            "research_id": rid, "decomposition_id": str(decomposition["id"]),
+            "artifact": {"version": self.db.latest_artifact_version(rid, "TCS") + 1,
+                         "rel_path": rel, "sha256": sha, "bytes": len(text.encode("utf-8"))},
+            "stage_run_id": plan.run_id, "actor": "bridge",
+            "flow": {"step": "build", "phase": "TCS_PENDING", "status": "IDLE", "detail": ""}}))
+        return tokens
+
+    # ── 對帳的 P1 輔助 ───────────────────────────────────────────────────────────────────────
+    def _inner_frozen(self, route_row: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+        """內環鍵已凍結的階段條目（唯讀；分流未成功或狀態檔讀不動＝空）。"""
+        if (route_row is None or route_row["status"] != "SUCCEEDED"
+                or not route_row.get("impl_fsm_project") or not route_row.get("impl_state_dir")):
+            return []
+        fctx = fsm_ops.FsmCtx(sdd_root=self.cfg.sdd_root,
+                              state_dir=Path(route_row["impl_state_dir"]),
+                              key=str(route_row["impl_fsm_project"]), audit=self.audit,
+                              actor="bridge")
+        return [s for s in fsm_ops.snapshot(fctx)["frozen_stages"] if isinstance(s, dict)]
+
+    def _decomposition_check(self, rid: str, ws: Path, expected: Mapping[str, Any] | None,
+                             digests: Callable[..., dict[str, str | None]]) -> dict[str, Any]:
+        """`task_decomposition` 項：artifact（`TASK_DECOMPOSITION` 最新版）的 sha256 對檔案；另
+        比 `tasks_count`。`STALE` 的拆解仍以其登記雜湊對帳（stale 不是 drift）。"""
+        check = file_check("task_decomposition", "TASK_DECOMPOSITION", expected,
+                           digests(expected["path"]) if expected else None)
+        if expected is None or check["status"] != "ok":
+            return check
+        row = self._one("SELECT tasks_count FROM {s}.research_decompositions WHERE "
+                        "research_id = %s AND status <> 'REJECTED' ORDER BY created_at DESC, "
+                        "id DESC LIMIT 1", (rid,))
+        try:
+            doc = json.loads((ws / str(expected["path"])).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return check
+        return with_extra_drift(check, decomposition_extras(
+            doc if isinstance(doc, dict) else {}, row))
+
+    def _route_check(self, rid: str, ws: Path, route_row: Mapping[str, Any] | None,
+                     expected: Mapping[str, Any] | None,
+                     digests: Callable[..., dict[str, str | None]]) -> dict[str, Any]:
+        """`route_decision` 項：artifact（`ROUTE_DECISION` 最新版）的 sha256 對檔案；SUCCEEDED 的
+        分流列另以 `published_docs`、步驟名序列與輸入雜湊對帳（BR-D1 交卷的規則）。"""
+        check = file_check("route_decision", "ROUTE_DECISION", expected,
+                           digests(expected["path"]) if expected else None)
+        if (expected is None or check["status"] != "ok" or route_row is None
+                or route_row["status"] != "SUCCEEDED"):
+            return check
+        # 延遲匯入：route 模組 import 較多相依
+        from . import route as route_mod
+
+        try:
+            doc = json.loads((ws / str(expected["path"])).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return check
+        steps = [str(s["step"]) for s in self.db.route_steps(route_row["id"])]
+        stored = route_mod.stored_inputs_hash(self.db, str(route_row["id"]))
+        return with_extra_drift(check, route_decision_extras(
+            doc if isinstance(doc, dict) else {}, route_row, steps, stored))
+
     # ── 對帳（只報告、不修復）────────────────────────────────────────────────────────────────
     def reconcile(self, row: Mapping[str, Any], *, actor: str = "bridge") -> dict[str, Any]:
         """六項對帳：游標與 FSM 對映、PRD、審查卡、證據矩陣的檔案↔資料庫 sha256，以及 P0 沒有的
@@ -1181,16 +1358,25 @@ class Orchestrator:
             bad = [d for c in drifts for d in c["drift"]]
             prd_check = {"id": "prd_sha256", "status": "drift" if bad else "ok", "present": True,
                          "detail": "", "drift": bad}
-        checks = [
-            mapping_check(state, row["flow_step"], row["flow_phase"], readable=readable,
-                          flow_status=row["flow_status"]),
-            prd_check]
+        route_row = self.db.active_route(rid)
+        inner_stages = self._inner_frozen(route_row)
+        stage2 = next((s for s in inner_stages if s.get("stage") == "Stage-2"), None)
+        mapping = mapping_check(state, row["flow_step"], row["flow_phase"], readable=readable,
+                                flow_status=row["flow_status"], stage2_frozen=stage2 is not None)
+        checks = [mapping, prd_check]
         for check_id, kind, label in (("review_card", "REVIEW_CARD", "REVIEW_CARD"),
                                       ("evidence_matrix", "EVIDENCE_MATRIX", "EVIDENCE_MATRIX")):
             expected = latest(kind)
             checks.append(file_check(check_id, label, expected, digests(expected["path"])
                                      if expected else None))
-        checks += [absent_check("task_decomposition"), absent_check("route_decision")]
+        checks += [self._decomposition_check(rid, ws, latest("TASK_DECOMPOSITION"), digests),
+                   self._route_check(rid, ws, route_row, latest("ROUTE_DECISION"), digests)]
+        if mapping["status"] == PENDING_CORRECTION and stage2 is not None:
+            # D-125：TCS 凍結走既有 `:freeze`，凍結後游標仍是 TCS_PENDING；對帳在同一交易校正
+            self.writer.persist(Op("tcs.correct_cursor", rid, {
+                "research_id": rid, "actor": actor[:100],
+                "stage2_digest": layout.sha256_text(json.dumps(stage2, sort_keys=True,
+                                                               default=str))}))
         result = reconcile_result(checks)
         self.writer.persist(Op("event.append", rid, {
             "research_id": rid, "event_type": "research.reconcile", "actor": actor[:100],

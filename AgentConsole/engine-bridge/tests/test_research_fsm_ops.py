@@ -654,3 +654,82 @@ def test_AT_960_13_E_3_a_pass_in_human_pending_fails_and_fails_only_move_the_cou
     assert final["current_state"] != "AUTO_RECOVERY_ATTEMPT"
     calls = [e["args"] for e in popen_log[sent:] if "transition" in verbs_of([e])]
     assert calls == [], "全程沒有任何 transition 呼叫（尤其不是 --to SPEC_DRAFTING）"
+
+
+# ══ P1 BR-D2：第二個理由前綴 `tcs gate`（D-97；AT-961-7-7）＋ GH_TOKEN 剝除（AT-961-7-6）════════
+TCS_INNER = "agentconsole-demo"
+TCS_OUTER = "research-demo"
+TCS_ARGS = ["--to", "HUMAN_PENDING", "--trigger", sdd_cli.RESEARCH_TRIGGER]
+
+
+def tcs_check(key: str, reason: str, state: str | None, stages: list[str] | None) -> None:
+    sdd_cli.check_research_allowed(
+        sdd_cli.RESEARCH_VERB_TRANSITION, [*TCS_ARGS, "--reason", reason], key=key,
+        current_state=state, frozen_stages=stages, with_context=True)
+
+
+@pytest.mark.parametrize(("key", "reason", "state", "stages", "allowed"), [
+    (TCS_INNER, "tcs gate: Stage-2 ready", "SCG_VALIDATION", ["Stage-1"], True),
+    (TCS_INNER, "tcs gate", "SCG_VALIDATION", ["Stage-1"], True),
+    (TCS_INNER, "tcs gate: Stage-2 ready", "SCG_VALIDATION", [], False),  # 沒有 Stage-1 凍結
+    (TCS_INNER, "tcs gate: Stage-2 ready", "SCG_VALIDATION", None, False),
+    (TCS_INNER, "tcs gate: Stage-2 ready", "SPEC_DRAFTING", ["Stage-1"], False),  # 現態不符
+    (TCS_INNER, "tcs gate: Stage-2 ready", None, ["Stage-1"], False),
+    (TCS_OUTER, "tcs gate: Stage-2 ready", "SCG_VALIDATION", ["Stage-1"], False),  # 外環鍵一律拒
+    (TCS_INNER, "Tcs gate: x", "SCG_VALIDATION", ["Stage-1"], False),             # 大小寫
+    (TCS_INNER, "tcs  gate: x", "SCG_VALIDATION", ["Stage-1"], False),            # 雙空白
+    (TCS_INNER, "gate tcs: x", "SCG_VALIDATION", ["Stage-1"], False),
+    (TCS_INNER, "baseline adoption: x", "SPEC_DRAFTING", [], True),               # 既有行為不變
+    (TCS_OUTER, "baseline adoption: x", "SCG_VALIDATION", [], False),
+])
+def test_AT_961_7_7_tcs_gate_prefix_only_passes_on_an_inner_key_in_scg_validation_after_stage_1(
+        key: str, reason: str, state: str | None, stages: list[str] | None,
+        allowed: bool) -> None:
+    if allowed:
+        tcs_check(key, reason, state, stages)
+        return
+    with pytest.raises(ApiError) as caught:
+        tcs_check(key, reason, state, stages)
+    assert caught.value.status_code == 500 and caught.value.body["reason"] == "sdd_cli_usage"
+
+
+def test_AT_961_7_7_without_context_only_the_static_part_is_checked() -> None:
+    args = [*TCS_ARGS, "--reason", "tcs gate: x"]
+    sdd_cli.check_research_allowed("transition", args, key=TCS_INNER)           # 靜態部分放行
+    with pytest.raises(ApiError):
+        sdd_cli.check_research_allowed("transition", args, key=TCS_OUTER)       # 外環鍵永遠拒
+
+
+def test_AT_961_7_7_the_verb_set_is_unchanged_and_the_decision_trace_is_not_lied_to() -> None:
+    assert sdd_cli.RESEARCH_VERBS == frozenset({"show", "transition", "gate", "spec-frozen",
+                                                "spec-refreeze"})
+    assert sdd_cli.TCS_GATE_REASON_PREFIX != sdd_cli.BASELINE_ADOPTION_REASON_PREFIX
+    assert sdd_cli._is_tcs_gate([*TCS_ARGS, "--reason", "tcs gate: x"])
+    assert not sdd_cli._is_tcs_gate([*TCS_ARGS, "--reason", "baseline adoption: x"])
+
+
+def test_AT_961_7_7_run_research_verb_reads_the_state_file_and_refuses_outside_scg_validation(
+        tmp_path: Path) -> None:
+    """執行入口自己讀狀態檔補上狀態條件：缺檔＝404；現態不符＝500 `sdd_cli_usage`、不起子行程。"""
+    args = [*TCS_ARGS, "--reason", "tcs gate: x"]
+    with pytest.raises(ApiError) as missing:
+        sdd_cli.run_research_verb("transition", args, sdd_root=tmp_path, state_dir=tmp_path,
+                                  project=TCS_INNER)
+    assert missing.value.status_code == 404
+    state = tmp_path / f"FSM-STATE-{TCS_INNER}.yaml"
+    state.write_text("fsm_state:\n  current_state: SPEC_DRAFTING\n  frozen_stages: []\n",
+                     encoding="utf-8", newline="\n")
+    with pytest.raises(ApiError) as wrong:
+        sdd_cli.run_research_verb("transition", args, sdd_root=tmp_path, state_dir=tmp_path,
+                                  project=TCS_INNER)
+    assert wrong.value.status_code == 500 and wrong.value.body["reason"] == "sdd_cli_usage"
+
+
+def test_AT_961_7_6_github_tokens_never_reach_the_fsm_child_environment(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "gh_token"):
+        monkeypatch.setenv(name, "t")
+    for key in (TCS_INNER, TCS_OUTER):
+        env = sdd_cli.build_research_env(os.environ, sdd_root=tmp_path, state_dir=tmp_path,
+                                         project=key)
+        assert not [k for k in env if k.upper() in sdd_cli.RESEARCH_STRIPPED_TOKENS], key

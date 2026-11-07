@@ -232,7 +232,8 @@ def test_AT_961_6_8_gh_failures_keep_the_local_steps_and_a_retry_only_redoes_the
 
 
 def test_AT_961_6_8_a_missing_token_and_a_vanished_gh_have_readable_causes(
-        renv: rgs.RouteEnv, fake_gh: rgs.FakeGh, monkeypatch: pytest.MonkeyPatch) -> None:
+        renv: rgs.RouteEnv, fake_gh: rgs.FakeGh, monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path) -> None:
     rid = rgs.seed_gate0(renv, "alpha")
     monkeypatch.setenv("FAKE_GH_REQUIRE_TOKEN", "1")
     no_token = rgs.confirm(renv, rid, rgs.body_b(renv, project_name="app-one",
@@ -244,7 +245,7 @@ def test_AT_961_6_8_a_missing_token_and_a_vanished_gh_have_readable_causes(
 
     def vanish(phase: str, step: str) -> None:
         if (phase, step) == ("before", "GH_REPO_CREATE"):
-            rgs.hide_gh(monkeypatch)             # 連本機真 gh 一起藏起來（hermetic）
+            rgs.hide_gh(monkeypatch, tmp_path)   # 連本機真 gh 一起藏起來（hermetic）
 
     monkeypatch.setattr(route, "STEP_HOOK", vanish)
     gone = rgs.confirm(renv, rid2, rgs.body_b(renv, project_name="app-two", create_github=True),

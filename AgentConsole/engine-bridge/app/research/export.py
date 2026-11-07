@@ -464,3 +464,20 @@ def _json_default(value: Any) -> Any:
 def render_review_card(card: Mapping[str, Any]) -> str:
     """`review_card.json` 的確定性渲染（鍵序依建構順序、`ensure_ascii` 為假、縮排 2、LF 結尾）。"""
     return json.dumps(card, ensure_ascii=False, indent=2, default=_json_default) + "\n"
+
+
+# ══ SCR 核准後的 PRD 版本號（PRD §5.1.9；TCS AT-961-13-6）═══════════════════════════════════════
+VERSION_BUMPS = ("MAJOR", "MINOR")
+
+
+def baseline_semver(scr_no: int, bump: str | None) -> str:
+    """SCR 核准後新基線的語意版本：預設 `v1.<n>.0`（n＝SCR 序號）；ADMIN 於核准時帶 `MAJOR`＝
+    `v2.0.0`。Gate 0 首次基線不經此處（固定 `v1.0.0`，見 `db.semver_of`）。"""
+    if bump not in (None, *VERSION_BUMPS):
+        raise ValueError(f"version_bump 須為 {VERSION_BUMPS} 或省略")
+    return "v2.0.0" if bump == "MAJOR" else f"v1.{int(scr_no)}.0"
+
+
+def baseline_rel(semver: str) -> str:
+    """工作區內新基線檔的相對路徑（與舊 `PRD-v1.0.0.md` 並存、不覆寫）。"""
+    return f"01_specs/PRD-{semver}.md"

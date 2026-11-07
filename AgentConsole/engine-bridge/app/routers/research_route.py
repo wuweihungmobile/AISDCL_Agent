@@ -32,6 +32,7 @@ from .research import (
     _research_id,
     _violation,
     operation,
+    reconcile_at_route,
     write_gate,
 )
 
@@ -241,10 +242,9 @@ def route_execute(research_id: str, body: dict[str, Any] = Body(...),
                 "route_id": route_id, "failure_step": result.failure_step,
                 "reason": result.reason, "steps": result.steps,
                 "cleanup_hint": "失敗不自動清理；需要時請人工以 git worktree remove 處置"})
-        fresh = _project(ctx, rid)
         if ctx.orchestrator is not None:
-            # 分流時點的自動對帳（AC-961-20）由 PKG-BR-D2 在此接線並更新 P0 的呼叫點鎖
-            ctx.orchestrator.project_state(rid)
+            reconcile_at_route(ctx, rid)     # 分流時點的自動對帳（AC-961-20）：成功路徑恰一次
+        fresh = _project(ctx, rid)           # 對帳可能校正游標（D-125），回應讀校正後的列
     return {"route_id": route_id, "status": "SUCCEEDED", "steps": result.steps,
             "impl_fsm_project": prep.derived.impl_key,
             "impl_state_dir": str(prep.derived.state_dir),

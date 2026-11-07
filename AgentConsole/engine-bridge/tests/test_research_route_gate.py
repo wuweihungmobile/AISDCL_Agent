@@ -442,7 +442,7 @@ def test_AT_961_3_5_missing_items_are_listed_alphabetically_and_nothing_succeeds
     assert items(rgs.body_b(renv, create_github=True)) == ["gh_auth"]
     assert rgs.preview(renv, rid, rgs.body_b(renv)).status_code == 200
     fake_gh.mode("ok")
-    rgs.hide_gh(monkeypatch)
+    rgs.hide_gh(monkeypatch, tmp_path)
     assert items(rgs.body_b(renv, create_github=True)) == ["gh"]
     assert rgs.preview(renv, rid, rgs.body_b(renv)).status_code == 200, "不建遠端時不要求 gh"
     assert world(renv) == before

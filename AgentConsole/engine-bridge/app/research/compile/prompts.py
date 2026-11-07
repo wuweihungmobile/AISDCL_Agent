@@ -33,7 +33,8 @@ PROMPT_MAX_CHARS = 1000
 PROMPTS_DIR = ".prompts"
 
 #: 各 stage 在 prompt 與事件裡的大寫名稱（`research_stage_runs.stage` 的值域）。
-STAGE_LABEL = {"research": "RESEARCH", "draft": "DRAFT", "review": "REVIEW", "revise": "REVISE"}
+STAGE_LABEL = {"research": "RESEARCH", "draft": "DRAFT", "review": "REVIEW", "revise": "REVISE",
+               "tcs-draft": "TCS_DRAFT"}
 
 #: 審查維度的 rubric 項目說明（模板 §4.2；不含權重）。
 RUBRIC_TEXT: Mapping[str, Mapping[str, tuple[str, str]]] = {

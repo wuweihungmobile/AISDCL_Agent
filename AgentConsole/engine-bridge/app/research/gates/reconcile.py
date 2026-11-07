@@ -26,15 +26,25 @@ FLOW_FSM_MAPPING: Mapping[str, Mapping[str, frozenset[str]]] = MappingProxyType(
     "AGENT_LOAD": MappingProxyType({
         "topic": frozenset({"INGESTED", "RESEARCHING", "EVIDENCE_READY"}),
         "studio": frozenset({"REVISING"})}),
-    "SPEC_DRAFTING": MappingProxyType({"studio": frozenset({"DRAFTING", "REVISING"})}),
-    "SCG_VALIDATION": MappingProxyType({"studio": frozenset({"REVIEWING"})}),
-    "HUMAN_PENDING": MappingProxyType({"studio": frozenset({"GATE0_PENDING", "REVISING"})}),
+    # P1（D-121）：SCR 期間外環鍵重走起草／審查／核准，游標停在 `studio／SCR_OPEN`（只用 DB 游標值）
+    "SPEC_DRAFTING": MappingProxyType({"studio": frozenset({"DRAFTING", "REVISING", "SCR_OPEN"})}),
+    "SCG_VALIDATION": MappingProxyType({"studio": frozenset({"REVIEWING", "SCR_OPEN"})}),
+    "HUMAN_PENDING": MappingProxyType({"studio": frozenset({
+        "GATE0_PENDING", "REVISING", "SCR_OPEN"})}),
     "SPEC_REGRESSION_CHECK": MappingProxyType({"studio": frozenset({
-        "GATE0_PENDING", "REVISING"})}),
+        "GATE0_PENDING", "REVISING", "SCR_OPEN"})}),
     "ESCALATION": MappingProxyType({"studio": frozenset({"REVIEWING", "REVISING"})}),
     "ESCALATION_FINAL": MappingProxyType({"studio": frozenset({"REVIEWING", "REVISING"})}),
-    "SPEC_FROZEN": MappingProxyType({"route": frozenset({"FROZEN"})}),
+    # P1（D-121）：分流與內環交棒的 DB 游標值；`BUILD_READY`／`PAUSED` 是衍生相態、不入表。
+    # SCR 剛發起、外環鍵尚未 transition 時外環仍是 SPEC_FROZEN，所以 `studio／SCR_OPEN` 也合法。
+    "SPEC_FROZEN": MappingProxyType({
+        "route": frozenset({"FROZEN", "ROUTING"}),
+        "build": frozenset({"ROUTED", "TCS_DRAFTING", "TCS_PENDING"}),
+        "studio": frozenset({"SCR_OPEN"})}),
 })
+#: D-125：`build／TCS_PENDING` 且內環 Stage-2 已凍結＝待校正（不是 drift）。
+PENDING_CORRECTION = "pending_correction"
+TCS_PENDING_PAIR = ("build", "TCS_PENDING")
 #: 衍生 `flow_status` 時視為「ESCALATED」的 FSM 現態（外環鍵關閉自動恢復，正常只會是前兩者）。
 ESCALATED_FSM_STATES = frozenset({"ESCALATION", "ESCALATION_FINAL", "AUTO_RECOVERY_ATTEMPT"})
 ACTIVE_RUN_STATUSES = frozenset({"QUEUED", "RUNNING"})
@@ -59,6 +69,21 @@ def flow_fsm_mapping_ok(fsm_state: str | None, flow_step: str, flow_phase: str,
         return True
     phases = FLOW_FSM_MAPPING.get(str(fsm_state), {}).get(flow_step)
     return phases is not None and flow_phase in phases
+
+
+def flow_fsm_mapping_verdict(fsm_state: str | None, flow_step: str, flow_phase: str,
+                             flow_status: str | None = None, *,
+                             stage2_frozen: bool = False) -> str:
+    """三態判定（D-121、D-125）：`ok`｜`drift`｜`pending_correction`。只在外環 SPEC_FROZEN、游標
+    `build／TCS_PENDING` 且內環 Stage-2 已凍結時回 `pending_correction`（凍結走既有 `:freeze`，
+    游標尚未校正；不是 drift）；Stage-2 未凍結時 `build／TCS_PENDING` 是合法對映。其餘同
+    `flow_fsm_mapping_ok`。衍生相態（`BUILD_READY`、`PAUSED`）不在表內＝`drift`。"""
+    if not flow_fsm_mapping_ok(fsm_state, flow_step, flow_phase, flow_status):
+        return "drift"
+    if (fsm_state == "SPEC_FROZEN" and (flow_step, flow_phase) == TCS_PENDING_PAIR
+            and stage2_frozen):
+        return PENDING_CORRECTION
+    return "ok"
 
 
 def derive_flow_status(stage_run_statuses: Iterable[str], fsm_state: str | None, *,
@@ -123,13 +148,19 @@ def file_check(check_id: str, kind: str, expected: Mapping[str, Any] | None,
 
 
 def mapping_check(fsm_state: str | None, flow_step: str, flow_phase: str, *,
-                  readable: bool, flow_status: str | None = None) -> dict[str, Any]:
+                  readable: bool, flow_status: str | None = None,
+                  stage2_frozen: bool = False) -> dict[str, Any]:
     """FSM 與游標對映項；狀態檔讀不動＝NOT_EVALUABLE（量不到不得 false-green）。`flow_status`
     只有一個用途：FAILED 游標對表內的每個 FSM 現態都合法（D-77，見 `flow_fsm_mapping_ok`）。"""
     if not readable:
         return {"id": "fsm_flow_mapping", "status": NOT_EVALUABLE_STATUS, "present": True,
                 "detail": "fsm_state_unreadable", "drift": []}
-    if flow_fsm_mapping_ok(fsm_state, flow_step, flow_phase, flow_status):
+    verdict = flow_fsm_mapping_verdict(fsm_state, flow_step, flow_phase, flow_status,
+                                       stage2_frozen=stage2_frozen)
+    if verdict == PENDING_CORRECTION:
+        return {"id": "fsm_flow_mapping", "status": PENDING_CORRECTION, "present": True,
+                "detail": "tcs_frozen_correction", "drift": []}
+    if verdict == "ok":
         return {"id": "fsm_flow_mapping", "status": "ok", "present": True, "detail": "",
                 "drift": []}
     return {"id": "fsm_flow_mapping", "status": "drift", "present": True,
@@ -143,9 +174,65 @@ def absent_check(check_id: str) -> dict[str, Any]:
     return {"id": check_id, "status": "ok", "present": False, "detail": "", "drift": []}
 
 
+def _canon_sha(value: Any) -> str:
+    import hashlib
+    import json
+
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode(
+        "utf-8")).hexdigest()
+
+
+def route_decision_extras(doc: Mapping[str, Any], route: Mapping[str, Any],
+                          step_names: Sequence[str], stored_inputs: str | None
+                          ) -> list[dict[str, Any]]:
+    """`route_decision.json` 與分流列的欄位級對帳（BR-D1 交卷的規則；只在 SUCCEEDED 才有）：
+    `results.published_docs` 等於列的 `published_docs`、`plan[].step` 序列等於步驟列的步驟名序列、
+    `inputs_sha256` 等於 `VALIDATE_TARGET` 步驟列記下的雜湊。每個不符一筆 drift（兩側的正規化
+    JSON 雜湊當 expected／actual）。"""
+    path = "02_governance/route_decision.json"
+    out: list[dict[str, Any]] = []
+    published = (doc.get("results") or {}).get("published_docs")
+    if published != dict(route.get("published_docs") or {}):
+        out.append(_drift("ROUTE_DECISION", f"{path}#results.published_docs",
+                          _canon_sha(dict(route.get("published_docs") or {})),
+                          _canon_sha(published)))
+    plan = [str(item.get("step")) for item in (doc.get("plan") or []) if isinstance(item, dict)]
+    if plan != list(step_names):
+        out.append(_drift("ROUTE_DECISION", f"{path}#plan", _canon_sha(list(step_names)),
+                          _canon_sha(plan)))
+    if stored_inputs is not None and doc.get("inputs_sha256") != stored_inputs:
+        out.append(_drift("ROUTE_DECISION", f"{path}#inputs_sha256", stored_inputs,
+                          str(doc.get("inputs_sha256"))))
+    return out
+
+
+def decomposition_extras(doc: Mapping[str, Any], row: Mapping[str, Any] | None
+                         ) -> list[dict[str, Any]]:
+    """`task_decomposition.json` 與最近拆解列的欄位級對帳：`tasks_count` 等於 JSON 內 task 數。
+    `STALE` 不是 drift（呼叫端不為它呼叫這裡）。"""
+    if row is None:
+        return []
+    tasks = [t for g in (doc.get("goals") or []) if isinstance(g, dict)
+             for t in (g.get("tasks") or []) if isinstance(t, dict)]
+    if int(row.get("tasks_count") or 0) != len(tasks):
+        return [_drift("TASK_DECOMPOSITION", "03_execution/task_decomposition.json#tasks",
+                       str(row.get("tasks_count")), str(len(tasks)))]
+    return []
+
+
+def with_extra_drift(check: Mapping[str, Any], extras: Sequence[Mapping[str, Any]]
+                     ) -> dict[str, Any]:
+    """把欄位級漂移併進檔案對帳項（有額外漂移即 drift）。"""
+    if not extras:
+        return dict(check)
+    drift = [*check["drift"], *[dict(e) for e in extras]]
+    return {**check, "status": "drift", "drift": drift}
+
+
 def reconcile_result(checks: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """`consistent` 僅在全部 ok 時為真；`driftCount`＝非 ok 項的漂移列總數（NOT_EVALUABLE
     計 1）。"""
-    drift_count = sum(len(c["drift"]) or (0 if c["status"] == "ok" else 1) for c in checks)
-    return {"consistent": all(c["status"] == "ok" for c in checks),
+    settled = ("ok", PENDING_CORRECTION)         # 待校正（D-125）不是 drift，不使 consistent 為假
+    drift_count = sum(len(c["drift"]) or (0 if c["status"] in settled else 1) for c in checks)
+    return {"consistent": all(c["status"] in settled for c in checks),
             "driftCount": drift_count, "checks": [dict(c) for c in checks]}

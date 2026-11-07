@@ -50,6 +50,13 @@ CONTROLLED_UPDATE_COLUMNS: dict[str, frozenset[str]] = {
         "console_project_id", "impl_fsm_project", "impl_state_dir"}),
     "research_route_steps": frozenset({
         "status", "exit_code", "stdout_tail", "stderr_tail", "finished_at"}),
+    # P1 BR-D2（V16 通用守衛函式的允許清單；`test_research_db` 對真庫逐表比對）
+    "research_scr": frozenset({
+        "status", "prd_to_version_no", "successor_research_id", "impl_fsm_actions", "decided_by",
+        "decided_at"}),
+    "research_decompositions": frozenset({
+        "status", "draft_id", "import_record_id", "tcs_rel_path", "tcs_sha256", "tasks_count",
+        "gate_rejection"}),
 }
 #: append-only：寫入器對這些表沒有任何 UPDATE 或 DELETE（DB 另有守衛作第二道）。
 APPEND_ONLY_TABLES = frozenset({
@@ -75,9 +82,14 @@ EVENT_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     "research.alert": frozenset({"kind", "detail"}),
     # P1：分流每步與路由終態各一筆（契約 §3；stepNo 0＝路由列本身）
     "research.route": frozenset({"routeId", "stepNo", "step", "status"}),
+    # P1 BR-D2：SCR 狀態轉移各一筆（契約 §3；OPEN／APPROVED／APPLIED／REJECTED／SUPERSEDED）
+    "research.scr": frozenset({"scrNo", "kind", "status"}),
 }
 #: 各事件型別在必填鍵之外**可選**的鍵（`research.route` 的補償事件帶 `reason`，D-112）。
-EVENT_OPTIONAL_KEYS: dict[str, frozenset[str]] = {"research.route": frozenset({"reason"})}
+EVENT_OPTIONAL_KEYS: dict[str, frozenset[str]] = {
+    "research.route": frozenset({"reason"}),
+    "research.step": frozenset({"reason"}),    # D-125：`tcs_frozen_correction` 校正事件
+}
 #: P0 事件型別（Bridge 事件帳）；`research.replay_gap` 是傳輸層訊號、不在其中（API 契約 §3）。
 EVENT_TYPES = frozenset(EVENT_PAYLOAD_KEYS)
 VERIFICATION_ORDER = {"V1": 1, "V2": 2, "V3": 3}
@@ -194,9 +206,9 @@ _SQL_ALLOCATE_RP_NO = "SELECT {s}.research_next_rp_no() AS rp_no"
 _SQL_INSERT_PROJECT = (
     "INSERT INTO {s}.research_projects (id, rp_no, slug, title, topic, scope, depth_level, "
     "target_scope, workspace_path, fsm_project, fsm_state_dir, flow_step, flow_phase, "
-    "flow_status, flow_detail, created_by, created_at) VALUES (%s, COALESCE(%s, "
-    "{s}.research_next_rp_no()), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-    "COALESCE(%s, NOW())) RETURNING rp_no")
+    "flow_status, flow_detail, created_by, created_at, parent_research_id) VALUES (%s, "
+    "COALESCE(%s, {s}.research_next_rp_no()), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+    "%s, %s, COALESCE(%s, NOW()), %s) RETURNING rp_no")
 _SQL_UPDATE_CURSOR = (
     "UPDATE {s}.research_projects SET flow_step = %s, flow_phase = %s, flow_status = %s, "
     "flow_detail = %s, updated_at = NOW() WHERE id = %s")
@@ -428,7 +440,8 @@ def _op_project_create(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
             Jsonb(dict(p.get("scope") or {})), p.get("depth_level", "STANDARD"),
             p.get("target_scope", "UNDECIDED"), p["workspace_path"], p["fsm_project"],
             p["fsm_state_dir"], flow["step"], flow["phase"], flow["status"], flow["detail"],
-            p["created_by"], _dt(p.get("created_at"))))
+            p["created_by"], _dt(p.get("created_at")),
+            _uid(p["parent_research_id"]) if p.get("parent_research_id") else None))
     except psycopg.errors.UniqueViolation as exc:      # 並發建立同 slug：部分唯一索引兜底
         raise ResearchConflict("slug_in_use", slug=p["slug"]) from exc
     assert row is not None
@@ -1091,6 +1104,266 @@ def _op_route_reap(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
     return {"applied": True, "failure_step": failure}
 
 
+# ── P1 BR-D2：SCR、拆解、TCS 的操作（D-103／D-104／D-110／D-113／D-116）──────────────────────────
+#: 同一研究專案內 kind=MINOR 且 status 為 OPEN／APPROVED／APPLIED 的 SCR 上限（D-104 保守計）。
+SCR_MINOR_MAX = 2
+SCR_LIVE_STATUSES = ("OPEN", "APPROVED", "APPLIED")
+#: 已簽核或待簽核而可被 PRD 變更標 STALE 的拆解狀態。
+DECOMP_STALEABLE = ("DRAFTED", "SCG_PASSED", "FROZEN", "SIGNED_OFF")
+_SQL_SCR_LOCK = "SELECT * FROM {s}.research_scr WHERE id = %s FOR UPDATE"
+_SQL_SCR_OPEN = ("SELECT id, scr_no, kind FROM {s}.research_scr WHERE research_id = %s AND "
+                 "status = 'OPEN'")
+_SQL_SCR_MINOR_USED = (
+    "SELECT count(*) AS n FROM {s}.research_scr WHERE research_id = %s AND kind = 'MINOR' AND "
+    "status IN ('OPEN', 'APPROVED', 'APPLIED')")
+_SQL_SCR_NEXT = ("SELECT COALESCE(MAX(scr_no), 0) + 1 AS n FROM {s}.research_scr "
+                 "WHERE research_id = %s")
+_SQL_INSERT_SCR = (
+    "INSERT INTO {s}.research_scr (id, research_id, scr_no, kind, source_kind, reason, "
+    "reason_class, affected_sections, status, prd_from_version_no, successor_research_id, "
+    "requested_by, requested_at, decided_by, decided_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
+    "%s, %s, %s, %s, COALESCE(%s, NOW()), %s, %s)")
+_SQL_UPDATE_SCR = (
+    "UPDATE {s}.research_scr SET status = %s, prd_to_version_no = %s, impl_fsm_actions = %s, "
+    "decided_by = %s, decided_at = %s WHERE id = %s")
+_SQL_STALE_DECOMPS = (
+    "UPDATE {s}.research_decompositions SET status = 'STALE' WHERE research_id = %s AND "
+    "status IN ('DRAFTED', 'SCG_PASSED', 'FROZEN', 'SIGNED_OFF') AND "
+    "prd_sha256 IS DISTINCT FROM %s")
+_SQL_DECOMP_LOCK = "SELECT * FROM {s}.research_decompositions WHERE id = %s FOR UPDATE"
+_SQL_INSERT_DECOMP = (
+    "INSERT INTO {s}.research_decompositions (id, research_id, path, draft_id, tcs_rel_path, "
+    "tcs_sha256, prd_sha256, tasks_count, gate_rejection, status, created_by, created_at) "
+    "VALUES (%s, %s, 'C', %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()))")
+_SQL_SIGNOFF_DECOMP = ("UPDATE {s}.research_decompositions SET status = 'SIGNED_OFF', "
+                       "import_record_id = %s WHERE id = %s")
+_SQL_TCS_DECOMP = ("UPDATE {s}.research_decompositions SET tcs_rel_path = %s, tcs_sha256 = %s "
+                   "WHERE id = %s")
+
+
+def _scr_event(tx: ResearchTx, rid: Any, scr_id: Any, scr_no: int, kind: str, status: str, *,
+               actor: str, stamp: str = "") -> int | None:
+    ref = uuid.uuid5(uuid.NAMESPACE_URL, f"scr:{scr_id}:{status}:{stamp}")
+    if tx.one(_SQL_EVENT_EXISTS, (rid, "research.scr", "scr", ref)) is not None:
+        return None
+    return tx.append_event(rid, "research.scr", {"scrNo": scr_no, "kind": kind, "status": status},
+                           actor=actor, ref_kind="scr", ref_id=ref)
+
+
+def _snapshot_event(tx: ResearchTx, rid: Any, actor: str, ref_key: str) -> int | None:
+    """拆解與 TCS 沒有自己的事件型別：以 `research.step` 游標快照表達（IFACE §1.4）。"""
+    row = tx.lock_project(rid)
+    ref = uuid.uuid5(uuid.NAMESPACE_URL, f"snapshot:{ref_key}")
+    if tx.one(_SQL_EVENT_EXISTS, (rid, "research.step", "snapshot", ref)) is not None:
+        return None
+    return tx.append_event(rid, "research.step", step_payload(_flow_of(row)), actor=actor,
+                           ref_kind="snapshot", ref_id=ref)
+
+
+def _op_scr_open(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """寫 `research_scr`（OPEN）＋`research.scr`＋（選填）游標。同 `scr_id` 已存在＝跳過；同專案已有
+    OPEN＝`scr_open`；MINOR 在 OPEN／APPROVED／APPLIED 已有 `SCR_MINOR_MAX` 筆＝`scr_limit`。"""
+    rid, scr_id = _uid(p["research_id"]), _uid(p["scr_id"])
+    row = tx.lock_project(rid)
+    existing = tx.one(_SQL_SCR_LOCK, (scr_id,))
+    if existing is not None:
+        return {"applied": False, "scr_no": existing["scr_no"]}
+    opened = tx.one(_SQL_SCR_OPEN, (rid,))
+    if opened is not None:
+        raise ResearchConflict("scr_open", scr_no=opened["scr_no"], kind=opened["kind"])
+    if p["kind"] == "MINOR":
+        used = int((tx.one(_SQL_SCR_MINOR_USED, (rid,)) or {"n": 0})["n"])
+        if used >= SCR_MINOR_MAX:
+            raise ResearchConflict("scr_limit", limit=SCR_MINOR_MAX, used=used, hint="改 MAJOR")
+    scr_no = int((tx.one(_SQL_SCR_NEXT, (rid,)) or {"n": 1})["n"])
+    head = tx.one(_SQL_HEAD_PRD, (rid,))
+    tx.run(_SQL_INSERT_SCR, (
+        scr_id, rid, scr_no, p["kind"], p["source_kind"], p["reason"],
+        p.get("reason_class", "OTHER"), list(p.get("affected_sections") or []), "OPEN",
+        int(head["head"]) if head and head["head"] else None, None, p["requested_by"],
+        _dt(p.get("requested_at")), None, None))
+    seq = _scr_event(tx, rid, scr_id, scr_no, p["kind"], "OPEN", actor=p["requested_by"])
+    if p.get("flow"):
+        _set_cursor(tx, rid, row, p["flow"], p["requested_by"], p.get("requested_at"))
+    return {"applied": True, "scr_no": scr_no, "seq": seq}
+
+
+def _op_scr_major(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """MAJOR：一筆直接是 `SUPERSEDED` 的列（`successor_research_id` 為新專案；新專案已先建好）＋
+    `research.scr`＋舊專案游標只改 `flow_detail`（「已被 RP-NNNN 取代」；step／phase 不動）。"""
+    rid, scr_id = _uid(p["research_id"]), _uid(p["scr_id"])
+    row = tx.lock_project(rid)
+    existing = tx.one(_SQL_SCR_LOCK, (scr_id,))
+    if existing is not None:
+        return {"applied": False, "scr_no": existing["scr_no"]}
+    opened = tx.one(_SQL_SCR_OPEN, (rid,))
+    if opened is not None:
+        raise ResearchConflict("scr_open", scr_no=opened["scr_no"], kind=opened["kind"])
+    scr_no = int((tx.one(_SQL_SCR_NEXT, (rid,)) or {"n": 1})["n"])
+    head = tx.one(_SQL_HEAD_PRD, (rid,))
+    now = _dt(p.get("requested_at")) or utc_now()
+    try:
+        tx.run(_SQL_INSERT_SCR, (
+            scr_id, rid, scr_no, "MAJOR", p["source_kind"], p["reason"],
+            p.get("reason_class", "OTHER"), list(p.get("affected_sections") or []), "SUPERSEDED",
+            int(head["head"]) if head and head["head"] else None, _uid(p["successor_research_id"]),
+            p["requested_by"], now, p["requested_by"], now))
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise ResearchGuardError("successor_not_found", str(p["successor_research_id"])) from exc
+    seq = _scr_event(tx, rid, scr_id, scr_no, "MAJOR", "SUPERSEDED", actor=p["requested_by"])
+    flow = {**_flow_of(row), "detail": str(p.get("detail", ""))[:300]}
+    _set_cursor(tx, rid, row, flow, p["requested_by"], now)
+    return {"applied": True, "scr_no": scr_no, "seq": seq}
+
+
+def _stale_decompositions(tx: ResearchTx, rid: Any, current_sha: str | None) -> int:
+    return tx.run(_SQL_STALE_DECOMPS, (rid, current_sha))
+
+
+def _op_scr_update(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """SCR 列的受控更新（狀態、`prd_to_version_no`、`impl_fsm_actions`、決定人時間；皆在 V16 允許
+    清單）。狀態有變才發 `research.scr`；`stale_prd_sha256` 有給時把摘要不同的拆解同交易標 STALE；
+    `flow` 有給時同交易寫游標。值與現況相同＝跳過（重放冪等）。"""
+    rid, scr_id = _uid(p["research_id"]), _uid(p["scr_id"])
+    row = tx.lock_project(rid)
+    current = tx.one(_SQL_SCR_LOCK, (scr_id,))
+    if current is None or str(current["research_id"]) != str(rid):
+        raise ResearchGuardError("scr_not_found", str(scr_id))
+    status = p.get("status", current["status"])
+    new = (status, p.get("prd_to_version_no", current["prd_to_version_no"]),
+           Jsonb(list(p["impl_fsm_actions"])) if "impl_fsm_actions" in p else Jsonb(
+               current["impl_fsm_actions"]),
+           p.get("decided_by", current["decided_by"]),
+           _dt(p["decided_at"]) if p.get("decided_at") else current["decided_at"], scr_id)
+    changed = (status != current["status"]
+               or new[1] != current["prd_to_version_no"]
+               or "impl_fsm_actions" in p and list(p["impl_fsm_actions"]) != list(
+                   current["impl_fsm_actions"] or [])
+               or new[3] != current["decided_by"] or new[4] != current["decided_at"])
+    seq = None
+    if changed:
+        tx.run(_SQL_UPDATE_SCR, new)
+        if status != current["status"]:
+            seq = _scr_event(tx, rid, scr_id, int(current["scr_no"]), current["kind"], status,
+                             actor=p["actor"], stamp=str(p.get("decided_at") or ""))
+    staled = 0
+    if p.get("stale_prd_sha256"):
+        staled = _stale_decompositions(tx, rid, str(p["stale_prd_sha256"]))
+    if p.get("flow"):
+        _set_cursor(tx, rid, row, p["flow"], p["actor"], p.get("decided_at"))
+    return {"applied": changed, "seq": seq, "staled": staled}
+
+
+def _op_decomp_create(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """拆解列（DRAFTED 或 REJECTED）＋（成功時）`TASK_DECOMPOSITION` 登記列（版本遞增）＋游標快照。
+    重拆＝新列、舊列不動（D-110：承接 `tcs_*` 由呼叫端帶入）。同 id 已存在＝跳過。"""
+    rid, did = _uid(p["research_id"]), _uid(p["decomposition_id"])
+    tx.lock_project(rid)
+    if tx.one(_SQL_DECOMP_LOCK, (did,)) is not None:
+        return {"applied": False}
+    tx.run(_SQL_INSERT_DECOMP, (
+        did, rid, p.get("draft_id"), p.get("tcs_rel_path"), p.get("tcs_sha256"),
+        p.get("prd_sha256"), int(p.get("tasks_count", 0)), p.get("gate_rejection"),
+        p.get("status", "DRAFTED"), p["created_by"], _dt(p.get("created_at"))))
+    art = p.get("artifact")
+    if art:
+        _register_artifact(tx, rid, kind="TASK_DECOMPOSITION", version=int(art["version"]),
+                           rel_path=art["rel_path"], sha256=art["sha256"], size=int(art["bytes"]),
+                           origin="BRIDGE", content=art["content"], stage_run_id=None,
+                           created_by=p["created_by"])
+    seq = _snapshot_event(tx, rid, p["created_by"], f"decomp:{did}:created")
+    return {"applied": True, "seq": seq}
+
+
+def _op_decomp_signoff(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """簽核（D-113 單一寫入時點）：`status=SIGNED_OFF`＋`import_record_id`（同交易）＋新版
+    `TASK_DECOMPOSITION` 登記列（含 waivers 與簽核資訊）＋游標快照。已簽核且同一 import 記錄＝跳過；
+    列非 DRAFTED／SCG_PASSED＝`fsm_state_conflict`（`details.status`）。"""
+    rid, did = _uid(p["research_id"]), _uid(p["decomposition_id"])
+    tx.lock_project(rid)
+    row = tx.one(_SQL_DECOMP_LOCK, (did,))
+    if row is None or str(row["research_id"]) != str(rid):
+        raise ResearchGuardError("decomposition_not_found", str(did))
+    if row["status"] == "SIGNED_OFF" and str(row["import_record_id"]) == str(
+            p["import_record_id"]):
+        return {"applied": False}
+    if row["status"] not in ("DRAFTED", "SCG_PASSED"):
+        raise ResearchConflict("fsm_state_conflict", status=row["status"])
+    try:
+        tx.run(_SQL_SIGNOFF_DECOMP, (_uid(p["import_record_id"]), did))
+    except psycopg.errors.ForeignKeyViolation as exc:
+        raise ResearchGuardError("import_record_not_found", str(p["import_record_id"])) from exc
+    art = p["artifact"]
+    _register_artifact(tx, rid, kind="TASK_DECOMPOSITION", version=int(art["version"]),
+                       rel_path=art["rel_path"], sha256=art["sha256"], size=int(art["bytes"]),
+                       origin="BRIDGE", content=art["content"], stage_run_id=None,
+                       created_by=p["approver"])
+    seq = _snapshot_event(tx, rid, p["approver"], f"decomp:{did}:signoff")
+    return {"applied": True, "seq": seq}
+
+
+def _op_decomp_stale(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """PRD 凍結摘要改變後，把摘要不同的拆解標 STALE（`prd_sha256` 不動、簽核事實保留）。"""
+    rid = _uid(p["research_id"])
+    tx.lock_project(rid)
+    return {"applied": True, "staled": _stale_decompositions(tx, rid, str(p["prd_sha256"]))}
+
+
+def _op_tcs_publish(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """TCS 草擬通過後的登記（D-109／D-110）：`TCS` 登記列（內容相同者不重複登記）＋最近一筆拆解列的
+    `tcs_rel_path`／`tcs_sha256`＋游標 `build／TCS_PENDING`＋事件，同一交易。"""
+    rid, did = _uid(p["research_id"]), _uid(p["decomposition_id"])
+    row = tx.lock_project(rid)
+    decomp = tx.one(_SQL_DECOMP_LOCK, (did,))
+    if decomp is None or str(decomp["research_id"]) != str(rid):
+        raise ResearchGuardError("decomposition_not_found", str(did))
+    art = p["artifact"]
+    same = tx.one("SELECT 1 AS hit FROM {s}.research_artifacts WHERE research_id = %s AND "
+                  "kind = 'TCS' AND sha256 = %s", (rid, art["sha256"]))
+    if same is None:
+        _register_artifact(tx, rid, kind="TCS", version=int(art["version"]),
+                           rel_path=art["rel_path"], sha256=art["sha256"], size=int(art["bytes"]),
+                           origin="AGENT", content=None, stage_run_id=p.get("stage_run_id"),
+                           created_by=p["actor"])
+    tx.run(_SQL_TCS_DECOMP, (art["rel_path"], art["sha256"], did))
+    if p.get("flow"):
+        _set_cursor(tx, rid, row, p["flow"], p["actor"], p.get("occurred_at"))
+    seq = _snapshot_event(tx, rid, p["actor"], f"tcs:{did}:{art['sha256']}")
+    return {"applied": True, "seq": seq}
+
+
+def _op_tcs_correct_cursor(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """D-125：`build／TCS_PENDING` 且內環 Stage-2 已凍結時，同交易把游標校正為 `build／ROUTED／IDLE`
+    並記 `research.step`（payload 另帶選填鍵 `reason=tcs_frozen_correction`）。游標已不是
+    `TCS_PENDING`＝跳過（冪等）。"""
+    rid = _uid(p["research_id"])
+    row = tx.lock_project(rid)
+    if (row["flow_step"], row["flow_phase"]) != ("build", "TCS_PENDING"):
+        return {"applied": False}
+    flow = {"step": "build", "phase": "ROUTED", "status": "IDLE", "detail": ""}
+    ref = uuid.uuid5(uuid.NAMESPACE_URL, f"tcs_frozen_correction:{rid}:{p['stage2_digest']}")
+    tx.run(_SQL_UPDATE_CURSOR, (flow["step"], flow["phase"], flow["status"], flow["detail"], rid))
+    seq = tx.append_event(rid, "research.step",
+                          {**step_payload(flow), "reason": "tcs_frozen_correction"},
+                          actor=p["actor"], step="build", ref_kind="tcs_frozen_correction",
+                          ref_id=ref)
+    return {"applied": True, "seq": seq, "reason": "tcs_frozen_correction"}
+
+
+#: P1 BR-D2 的操作登記表（與 `ROUTE_OPS` 同理：不新增公開寫入方法，只經 `DurableWriter.persist`
+#: 與 `ResearchDb.apply(kind, …)` 呼叫）。
+P1_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
+    "scr.open": _op_scr_open,
+    "scr.major": _op_scr_major,
+    "scr.update": _op_scr_update,
+    "decomp.create": _op_decomp_create,
+    "decomp.signoff": _op_decomp_signoff,
+    "decomp.stale": _op_decomp_stale,
+    "tcs.publish": _op_tcs_publish,
+    "tcs.correct_cursor": _op_tcs_correct_cursor,
+}
+
+
 #: P1 分流的操作登記表。刻意與 `OPS`／`METHOD_KINDS` 分開：後兩者與 P0 的「公開寫入方法一一對應、
 #: 逐方法實跑」鎖綁定（`tests/test_research_db.py`），P1 的分流操作只經 `DurableWriter.persist`
 #: 與 `ResearchDb.apply(kind, …)` 呼叫，不新增公開寫入方法。
@@ -1175,7 +1448,7 @@ class ResearchDb:
 
     def apply(self, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """跑一個登記的操作（一個交易）；outbox 重放與公開寫入方法都走這裡。"""
-        fn = OPS.get(kind) or ROUTE_OPS.get(kind)
+        fn = OPS.get(kind) or ROUTE_OPS.get(kind) or P1_OPS.get(kind)
         if fn is None:
             raise ResearchGuardError("unknown_op", f"未登記的操作：{kind!r}")
         with self.transaction() as tx:
@@ -1319,6 +1592,39 @@ class ResearchDb:
         """全站卡在 PENDING／RUNNING 的分流列（孤兒回收用）。"""
         return self.query("SELECT id, research_id, status FROM {s}.research_route_decisions "
                           "WHERE status IN ('PENDING', 'RUNNING') ORDER BY created_at")
+
+    # ── P1 BR-D2 的唯讀查詢 ───────────────────────────────────────────────────────────────
+    def open_scr(self, research_id: Any) -> dict[str, Any] | None:
+        rows = self.query("SELECT * FROM {s}.research_scr WHERE research_id = %s AND "
+                          "status = 'OPEN'", (_uid(research_id),))
+        return rows[0] if rows else None
+
+    def get_scr(self, research_id: Any, scr_no: int) -> dict[str, Any] | None:
+        rows = self.query("SELECT * FROM {s}.research_scr WHERE research_id = %s AND scr_no = %s",
+                          (_uid(research_id), scr_no))
+        return rows[0] if rows else None
+
+    def list_scr(self, research_id: Any) -> list[dict[str, Any]]:
+        return self.query("SELECT * FROM {s}.research_scr WHERE research_id = %s ORDER BY scr_no",
+                          (_uid(research_id),))
+
+    def latest_decomposition(self, research_id: Any) -> dict[str, Any] | None:
+        """最近一筆拆解列（任何狀態；`created_at` 新者優先）。"""
+        rows = self.query("SELECT * FROM {s}.research_decompositions WHERE research_id = %s "
+                          "ORDER BY created_at DESC, id DESC LIMIT 1", (_uid(research_id),))
+        return rows[0] if rows else None
+
+    def get_decomposition(self, decomposition_id: Any) -> dict[str, Any] | None:
+        rows = self.query("SELECT * FROM {s}.research_decompositions WHERE id = %s",
+                          (_uid(decomposition_id),))
+        return rows[0] if rows else None
+
+    def latest_artifact(self, research_id: Any, kind: str) -> dict[str, Any] | None:
+        rows = self.query(
+            "SELECT version, rel_path, sha256, bytes, content FROM {s}.research_artifacts "
+            "WHERE research_id = %s AND kind = %s ORDER BY version DESC LIMIT 1",
+            (_uid(research_id), kind))
+        return rows[0] if rows else None
 
     def latest_artifact_version(self, research_id: Any, kind: str) -> int:
         rows = self.query("SELECT COALESCE(MAX(version), 0) AS head FROM "

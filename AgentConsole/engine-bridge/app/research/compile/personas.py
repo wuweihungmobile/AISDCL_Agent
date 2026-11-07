@@ -35,6 +35,8 @@ SPEC_ENGINEER_YAML = "agent/specialized/spec-engineer-zh.yaml"
 #: 起草者要複製的 PRD 骨架（框架模板；導讀整段在嵌入時移除）。起草者只能讀工作區，所以骨架
 #: 隨 persona 檔一起交付，而不是放在步驟的輸入清單裡（輸入清單只准有議題檔與證據矩陣）。
 PRD_TEMPLATE_REL = "docs_template/sdd/requirements/PRD-SPEC-ENGINEERED-TEMPLATE.md"
+#: TCS 草擬者（P1 `tcs-draft` stage）要複製的測試契約模板（框架 `TEST-CONTRACT-SPEC-TEMPLATE.md`）。
+TCS_TEMPLATE_REL = "docs_template/sdd/testing/TEST-CONTRACT-SPEC-TEMPLATE.md"
 _GUIDE_RE = re.compile(r"<!-- r2p:template-guide:begin -->.*?<!-- r2p:template-guide:end -->\n?",
                        re.DOTALL)
 #: 起草者的 persona 不得出現的審查常數（權重三種與門檻、地板）。
@@ -84,6 +86,9 @@ def _role_specs() -> dict[str, RoleSpec]:
                           ("evidence_discipline", "draft_procedure", *_COMMON_SECTIONS[1:])),
         "revise": RoleSpec("revise", "規格工程師（修訂）", SPEC_ENGINEER_YAML,
                            ("evidence_discipline", "revision_procedure", *_COMMON_SECTIONS[1:])),
+        # P1：同一份 spec-engineer 人設的 TCS 變體（起草程序＋測試契約模板；D-109）
+        "tcs-draft": RoleSpec("tcs-draft", "規格工程師（TCS 草擬）", SPEC_ENGINEER_YAML,
+                              ("evidence_discipline", "draft_procedure", *_COMMON_SECTIONS[1:])),
     }
     for dimension in DIMENSIONS:
         entry = RUBRIC_REGISTRY[dimension]
@@ -220,6 +225,14 @@ def _prd_skeleton(framework_root: Path) -> str:
     return skeleton
 
 
+def _tcs_skeleton(framework_root: Path) -> str:
+    path = framework_root / TCS_TEMPLATE_REL
+    try:
+        return path.read_bytes().decode("utf-8").replace("\r\n", "\n")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CompileError("template_missing", f"讀不到框架 TCS 模板：{TCS_TEMPLATE_REL}") from exc
+
+
 def _body(spec: RoleSpec, doc: Mapping[str, Any], assist: Mapping[str, Any] | None) -> list[str]:
     out = _persona_block(doc, "## 人設")
     for key in spec.sections:
@@ -255,6 +268,10 @@ def compile_role(framework_root: Path, role: str) -> RolePersona:
     if role == "draft":
         parts += ["", "## 附：PRD 骨架模板（複製到 `01_specs/PRD_draft.md` 後填寫；導讀已移除）",
                   "", _prd_skeleton(framework_root).rstrip("\n")]
+    if role == "tcs-draft":
+        parts += ["", "## 附：TCS 模板（複製到 `03_execution/tcs_draft.md` 後填寫；每個 AT 區塊",
+                  "須有 `判定：<指令>` 一行，AT 的 ID 前兩段數字即所屬 AC；範例區塊必須刪除）", "",
+                  _tcs_skeleton(framework_root).rstrip("\n")]
     text = "\n".join(parts).rstrip("\n") + "\n"
     if role in AUTHOR_ROLES and (leaked := scoring_tokens_in(text)):
         raise CompileError("persona_scoring_leak", f"{role} 的 persona 含審查常數字樣 {leaked}"

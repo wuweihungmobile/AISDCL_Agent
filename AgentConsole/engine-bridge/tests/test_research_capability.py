@@ -91,6 +91,12 @@ CAPABILITY: dict[str, str] = {
     "research/adopt.py": "exec",
     "research/scaffold.py": "rw",
     "routers/research_route.py": "exec",
+    # P1 BR-D2：SCR（發佈用 gitops、驅動內環 FSM）、拆解橋（經 sdd_cli 驗核准人）、TCS 預檢（延遲取
+    # gitops.redact）與它們的路由都在 FSM／git 的門內＝exec；子行程仍只由 sdd_cli／gitops 起。
+    "research/scr.py": "exec",
+    "research/decompose_plan.py": "exec",
+    "research/gates/tcs_schema.py": "exec",
+    "routers/research_scr.py": "exec",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",

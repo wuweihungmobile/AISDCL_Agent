@@ -358,6 +358,14 @@ INNER_TRANSITION_TARGETS: frozenset[str] = OUTER_TRANSITION_TARGETS | {
 #: 內環鍵的基線採納路徑：現態為 SCG_VALIDATION 時 `--to HUMAN_PENDING`，且 `--reason` 以此起頭。
 BASELINE_ADOPTION_TARGET = "HUMAN_PENDING"
 BASELINE_ADOPTION_REASON_PREFIX = "baseline adoption"
+#: 第二個 `--to HUMAN_PENDING` 的理由前綴（D-97）：內環鍵 Stage-2 的 TCS 草擬通過後交人工凍結。
+#: 限內環鍵、現態須為 SCG_VALIDATION、且該鍵已有 Stage-1 凍結；動詞集合不變。前綴區分大小寫。
+TCS_GATE_REASON_PREFIX = "tcs gate"
+TCS_GATE_FROM_STATE = "SCG_VALIDATION"
+TCS_GATE_REQUIRES_STAGE = "Stage-1"
+#: 研究面子行程環境另外剝掉的 GitHub 權杖名（AT-961-7-6：GH_TOKEN 只准走 gitops 的 gh 子行程）。
+RESEARCH_STRIPPED_TOKENS: frozenset[str] = frozenset({
+    "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"})
 OUTER_GATES: frozenset[str] = frozenset({"SCG_VALIDATION"})
 INNER_GATES: frozenset[str] = frozenset({"PR_REVIEW", "RTM_VERIFY", "RELEASE_READY"})
 GATE_RESULTS: tuple[str, ...] = ("PASS", "FAIL")
@@ -438,12 +446,32 @@ def research_refreeze_args(*, docs: Sequence[str], root: str, reason: str,
     return [*args, "--root", root, "--reason", reason, "--approver", checked]
 
 
-def check_research_allowed(verb: str, args: Sequence[str], *, key: str) -> None:
+def tcs_gate_problem(*, key: str, current_state: str | None,
+                     frozen_stages: Sequence[str] | None) -> str | None:
+    """`tcs gate` 前綴的完整條件（純函式；D-97）：內環鍵、現態 SCG_VALIDATION、已有 Stage-1 凍結。
+    合格回 None，否則回原因。`current_state`／`frozen_stages` 為 None＝沒有脈絡，視為不合格。"""
+    if is_outer_key(key):
+        return "tcs gate is only for inner keys"
+    if current_state != TCS_GATE_FROM_STATE:
+        return f"tcs gate requires the inner key to be in {TCS_GATE_FROM_STATE}"
+    if frozen_stages is None or TCS_GATE_REQUIRES_STAGE not in frozen_stages:
+        return f"tcs gate requires a prior {TCS_GATE_REQUIRES_STAGE} freeze"
+    return None
+
+
+def check_research_allowed(verb: str, args: Sequence[str], *, key: str,
+                           current_state: str | None = None,
+                           frozen_stages: Sequence[str] | None = None,
+                           with_context: bool = False) -> None:
     """研究面動詞、旗標與值域的檢查（表驅動；依鍵類別＝外環或內環）。越界一律 500
     `sdd_cli_usage`（Bridge 自己的 bug；測試必須零次出現），且在起子行程之前。
 
     呼叫端不得帶 `--project`、`--must-exist`（由 `run_research_verb` 加）；每個旗標至多一次
-    （`--doc` 可重複）；值原樣吃掉（含以 `--` 起頭的理由）。"""
+    （`--doc` 可重複）；值原樣吃掉（含以 `--` 起頭的理由）。
+
+    `tcs gate` 前綴（D-97）的狀態條件需要內環鍵的現態與凍結階段：`with_context=True` 時完整驗證
+    （`run_research_verb` 讀狀態檔後這樣呼叫）；不帶時只驗靜態部分（內環鍵＋前綴），因為前置的
+    純檢查（`fsm_ops.transition`）沒有狀態檔脈絡——完整驗證由執行入口補上，兩處用同一個函式。"""
     if verb not in RESEARCH_VERBS:
         raise _usage(f"verb not allowed: {verb!r}")
     allowed = _RESEARCH_VERB_FLAGS[verb]
@@ -485,10 +513,21 @@ def check_research_allowed(verb: str, args: Sequence[str], *, key: str) -> None:
         if one("--trigger") != RESEARCH_TRIGGER:
             raise _usage(f"transition requires --trigger {RESEARCH_TRIGGER}")
         if target == BASELINE_ADOPTION_TARGET:
-            if outer or not reason.startswith(BASELINE_ADOPTION_REASON_PREFIX):
+            if outer:
+                raise _usage("transition --to HUMAN_PENDING is only for inner keys")
+            if reason.startswith(BASELINE_ADOPTION_REASON_PREFIX):
+                pass
+            elif reason.startswith(TCS_GATE_REASON_PREFIX):
+                problem = (tcs_gate_problem(key=key, current_state=current_state,
+                                            frozen_stages=frozen_stages)
+                           if with_context else None)
+                if problem is not None:
+                    raise _usage(problem)
+            else:
                 raise _usage("transition --to HUMAN_PENDING is only the inner-key baseline "
                              f"adoption path (reason must start with "
-                             f"{BASELINE_ADOPTION_REASON_PREFIX!r})")
+                             f"{BASELINE_ADOPTION_REASON_PREFIX!r}) or the Stage-2 TCS gate "
+                             f"(reason must start with {TCS_GATE_REASON_PREFIX!r})")
         elif target not in (OUTER_TRANSITION_TARGETS if outer else INNER_TRANSITION_TARGETS):
             raise _usage(f"transition --to {target!r} is not allowed for this key class")
     elif verb == RESEARCH_VERB_GATE:
@@ -527,6 +566,8 @@ def build_research_env(base: Mapping[str, str], *, sdd_root: Path, state_dir: Pa
     """`build_cli_env` 的固定環境，外環鍵另加 `SDD_ENABLE_AUTO_RECOVERY=0`（ADR-XPLAT-017 D4）。
     `BRIDGE_*`、`SDD_*`（除固定集合）、`PYTHONPATH` 一律先移除再重建。"""
     env = build_cli_env(base, sdd_root=sdd_root, state_dir=state_dir, project=project)
+    for name in [k for k in env if k.upper() in RESEARCH_STRIPPED_TOKENS]:
+        del env[name]                      # AT-961-7-6：GH_TOKEN 只准走 gitops 的 gh 子行程
     if is_outer_key(project):
         env[RESEARCH_AUTO_RECOVERY_ENV] = "0"
     return env
@@ -548,6 +589,25 @@ def _research_payload(verb: str, stdout: str) -> dict[str, Any] | None:
     return _last_json_line(stdout)
 
 
+def _is_tcs_gate(args: Sequence[str]) -> bool:
+    """`transition` 的 argv 是否為 `--to HUMAN_PENDING` 加 `tcs gate` 前綴的理由。"""
+    values = {str(args[i]): str(args[i + 1]) for i in range(0, len(args) - 1, 2)}
+    return (values.get("--to") == BASELINE_ADOPTION_TARGET
+            and values.get("--reason", "").startswith(TCS_GATE_REASON_PREFIX))
+
+
+def _tcs_gate_context(state_dir: Path, project: str) -> tuple[str | None, list[str]]:
+    """內環鍵狀態檔的 `(現態, 已凍結階段名清單)`；狀態檔缺或壞＝沿 `read_state` 的 404／422。"""
+    # 延遲匯入：sdd_state 自己 import 本模組（循環）
+    from .sdd_state import read_state
+
+    state = read_state(Path(state_dir), project)[1]
+    stages = [str(item.get("stage")) for item in (state.get("frozen_stages") or [])
+              if isinstance(item, dict)]
+    current = state.get("current_state")
+    return (current if isinstance(current, str) else None), stages
+
+
 def run_research_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, state_dir: Path,
                       project: str, create: bool = False, timeout: float | None = None,
                       audit: AuditLog | None = None, approver: str | None = None,
@@ -561,6 +621,10 @@ def run_research_verb(verb: str, args: Sequence[str], *, sdd_root: Path | None, 
     `sdd_cli`（不含環境、權杖與 `--reason` 文字）。`create=True` 只准 `show` 且須是外環鍵。
     呼叫端要序列化就自己包 `state_guard`（可重入）。"""
     check_research_allowed(verb, args, key=project)
+    if verb == RESEARCH_VERB_TRANSITION and _is_tcs_gate(args):
+        state, stages = _tcs_gate_context(state_dir, project)         # D-97：狀態條件在這裡驗
+        check_research_allowed(verb, args, key=project, current_state=state,
+                               frozen_stages=stages, with_context=True)
     if create and not (verb == RESEARCH_VERB_SHOW and (
             is_outer_key(project) or (inner_create and is_inner_key(project)))):
         raise _usage("create is only for `show` on an outer key (or an inner key with "

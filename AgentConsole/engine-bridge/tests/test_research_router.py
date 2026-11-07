@@ -521,7 +521,7 @@ def test_AT_960_3_4_retry_also_clears_a_stage_failure_marker_and_derives_the_sta
 
 
 # ══ 四類處理函式（原 501 骨架，BR-C 已落地）：先驗證、後動作；被拒的請求不寫任何東西 ═════════════
-def test_the_gate_0_return_and_start_handlers_validate_before_acting_and_p1_stays_501(
+def test_the_gate_0_return_and_start_handlers_validate_before_acting_and_tcs_draft_is_gated(
         env: Env) -> None:
     assert env.rdb is not None
     rid = create(env)["research_id"]
@@ -532,12 +532,12 @@ def test_the_gate_0_return_and_start_handlers_validate_before_acting_and_p1_stay
             (f"/research/projects/{rid}:return", {"approver": ALICE, "reason": "補證據"},
              (409, "fsm_state_conflict")),
             (f"/research/projects/{rid}/stages/tcs-draft:start", {"requested_by": ALICE},
-             (501, "not_implemented"))):                # P1 的 stage：形狀仍釘住，絕不是 2xx
+             (409, "fsm_state_conflict"))):             # P1 起不再 501：前置未備齊＝409（BR-D2）
         resp = env.post(path, body)
         assert (resp.status_code, resp.json()["reason"]) == want, (path, resp.text)
-        if resp.status_code == 501:
-            out = resp.json()
-            assert out["code"] == 501 and out["endpoint"] and out["detail"]
+        if path.endswith("tcs-draft:start"):       # 前置逐條列出（D-110、D-118）
+            assert [u["rule"] for u in resp.json()["details"]["unmet"]] == [
+                "route_not_succeeded", "decomposition_missing"]
     for bad in ("bridge", "Agent", "SYSTEM", "", "a b", "a+b", "x" * 101, "-rf"):
         resp = env.post(f"/research/projects/{rid}:approve-baseline", {**approve, "approver": bad})
         assert resp.status_code == 422, repr(bad)

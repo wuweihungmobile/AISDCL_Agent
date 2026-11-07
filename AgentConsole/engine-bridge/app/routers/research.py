@@ -40,6 +40,8 @@ from pydantic import BaseModel
 from .. import sdd_cli
 from ..errors import ApiError, unprocessable
 from ..research import export, fsm_ops, layout
+from ..research import route as route_mod
+from ..research import scr as scr_mod
 from ..research.db import (
     ResearchConflict,
     ResearchDb,
@@ -52,6 +54,7 @@ from ..research.fetch.allowlist import DEFAULT_ENV_MIN_INTERVAL, ENV_MIN_INTERVA
 from ..research.gates.reconcile import prd_save_cursor
 from ..research.orchestrator import (
     APPROVE_DOCS,
+    BASELINE_REL,
     Orchestrator,
     approve_input_violations,
     derive_flow_status,
@@ -69,8 +72,11 @@ logger = logging.getLogger("bridge.research")
 router = APIRouter(prefix="/research", tags=["research"])
 
 STAGES: tuple[str, ...] = ("research", "draft", "review", "revise", "iterate", "tcs-draft")
-#: P0 可啟動的 stage；`tcs-draft` 屬 P1（回 501）。
+#: P0 的 stage；`tcs-draft` 自 P1 起可啟動（不再回 501；`not_implemented` 保留供 P2，D-111）。
 P0_STAGES: tuple[str, ...] = STAGES[:5]
+TCS_STAGE = "tcs-draft"
+#: `tcs-draft` 啟動時內環鍵可在的現態（SPEC_FROZEN＝首次；其餘兩個＝驗證失敗後重試）。
+TCS_INNER_STATES: tuple[str, ...] = ("SPEC_FROZEN", "SPEC_DRAFTING", "SCG_VALIDATION")
 #: 全站「啟動 stage」臨界區的鎖名（並行上限檢查與 stage run 建列之間不得被別的啟動插入）。
 SITE_STAGE_LOCK = "site:stage-start"
 PRD_MAX_BYTES = 1_048_576
@@ -120,6 +126,10 @@ def _build_context(state: Any) -> ResearchContext:
             ctx.orchestrator.reap_orphans()      # 上一個 Bridge 行程留下的 stage run＝orphaned
         except Exception:                    # noqa: BLE001 — 回收失敗不得擋住整個 API
             logger.exception("研究 stage run 孤兒回收失敗")
+        try:                                 # P1：卡在 PENDING／RUNNING 的分流列（BR-D1 提供）
+            route_mod.reap_route_orphans(db, writer)
+        except Exception:                    # noqa: BLE001 — 回收失敗不得擋住整個 API
+            logger.exception("研究分流列孤兒回收失敗")
     return ctx
 
 
@@ -594,24 +604,63 @@ def start_stage(research_id: str, stage: str, body: StageStartIn,
                                             f"stage 須為 {'｜'.join(STAGES)}")], "invalid_request")
         _subject(body.requested_by, "requested_by")
         row = _project(ctx, rid)
-        if row["flow_phase"] == "FROZEN" or row["flow_step"] in _FROZEN_STEPS:
+        # P1：Stage-2 發生在 Gate 0 凍結之後（游標在 route／build），所以不套 spec_frozen 檢查
+        tcs = stage == TCS_STAGE
+        if not tcs and (row["flow_phase"] == "FROZEN" or row["flow_step"] in _FROZEN_STEPS):
             raise ApiError(409, "spec_frozen", details={
                 "flowStep": row["flow_step"], "flowPhase": row["flow_phase"]})
+        if tcs:
+            outer = fsm_ops.read_current(_fsm_ctx(ctx, row))
+            if fsm_ops.is_escalated(outer):
+                raise fsm_ops.escalated_error(_fsm_ctx(ctx, row), outer)
         active = ctx.db.active_stage_run(rid)
         if active is not None:
             raise ApiError(409, "stage_conflict", details={
                 "activeStageRunId": str(active["id"]), "activeStage": active["stage"]})
+        if tcs:
+            scr_mod.guard_inner_start(ctx.db, rid)
+            unmet = tcs_unmet(ctx, row)
+            if unmet:
+                raise ApiError(409, "fsm_state_conflict", details={"unmet": unmet})
         if stage in ("review", "revise", "iterate"):
             _escalation_gate(ctx, row, stage, body.after_escalation)
         unmet = stage_unmet(stage, row, ctx.db.head_prd(rid), ctx.db.review_state(rid)["last"])
         if unmet:
             raise ApiError(409, "stage_conflict", details={"unmet": unmet})
-        if stage not in P0_STAGES:
-            raise _not_implemented("stages/tcs-draft:start", stage=stage)
         with ctx.writer.project_lock(SITE_STAGE_LOCK):      # 上限檢查與 stage run 建列之間不被插入
             _check_concurrency_cap(ctx)
             return _run_stage(ctx, row, stage, body)
     raise AssertionError("unreachable")
+
+
+def tcs_unmet(ctx: ResearchContext, row: dict[str, Any]) -> list[dict[str, Any]]:
+    """`tcs-draft` 的前置（D-110／D-118 ⚖P1-11；體例沿 AC-R2P-01-3 的 `details.unmet[]`）：分流
+    `SUCCEEDED`、內環鍵已採納（現態在 SPEC_FROZEN／重試的 SPEC_DRAFTING 或 SCG_VALIDATION，且
+    `frozen_stages` 恰一筆 Stage-1）、已有拆解列。純唯讀。"""
+    assert ctx.db is not None
+    rid = str(row["id"])
+    unmet: list[dict[str, Any]] = []
+    route = ctx.db.active_route(rid)
+    ok_route = route is not None and route["status"] == "SUCCEEDED" and bool(
+        route.get("impl_fsm_project"))
+    if not ok_route:
+        unmet.append({"rule": "route_not_succeeded", "expected": "SUCCEEDED",
+                      "current": None if route is None else route["status"]})
+    else:
+        assert route is not None
+        snap = fsm_ops.snapshot(fsm_ops.FsmCtx(
+            sdd_root=ctx.cfg.sdd_root, state_dir=Path(route["impl_state_dir"]),
+            key=str(route["impl_fsm_project"])))
+        stages = [s.get("stage") for s in snap["frozen_stages"] if isinstance(s, dict)]
+        if snap["state"] not in TCS_INNER_STATES or stages != ["Stage-1"]:
+            unmet.append({"rule": "inner_key_not_adopted", "expected": {
+                "states": list(TCS_INNER_STATES), "frozen_stages": ["Stage-1"]},
+                "current": {"state": snap["state"], "frozen_stages": stages}})
+    found = ctx.db.query("SELECT 1 AS hit FROM {s}.research_decompositions WHERE research_id = "
+                         "%s AND status <> 'REJECTED' LIMIT 1", (rid,))
+    if not found:
+        unmet.append({"rule": "decomposition_missing", "expected": "exists", "current": None})
+    return unmet
 
 
 def _check_concurrency_cap(ctx: ResearchContext) -> None:
@@ -661,6 +710,8 @@ class ApproveIn(BaseModel):
     expected_digests: dict[str, str] = {}
     approver: str
     reason: str | None = None
+    #: 僅 SCR（open MINOR）核准時有效：`MAJOR`＝新基線 `v2.0.0`，省略＝`v1.<n>.0`（PRD §5.1.9）
+    version_bump: str | None = None
 
 
 def _regression_reason(ctx: ResearchContext, rid: str) -> str:
@@ -696,6 +747,16 @@ def approve_baseline(research_id: str, body: ApproveIn,
         with ctx.writer.project_lock(rid):
             row = _project(ctx, rid)
             workspace = Path(row["workspace_path"])
+            open_scr = scr_mod.scr_awaiting_approval(ctx.db, rid)    # D-103：OPEN 的 MINOR SCR
+            if body.version_bump is not None and (
+                    open_scr is None or body.version_bump not in export.VERSION_BUMPS):
+                raise unprocessable([_violation(
+                    "version_bump", "invalid_version_bump",
+                    "version_bump 只在有 OPEN 的 MINOR SCR 時可用，且須為 MAJOR 或 MINOR")],
+                    "invalid_request")
+            semver = (export.baseline_semver(int(open_scr["scr_no"]), body.version_bump)
+                      if open_scr else "v1.0.0")
+            baseline_rel = export.baseline_rel(semver) if open_scr else BASELINE_REL
             drafts = ctx.db.query(
                 "SELECT version_no, rel_path, sha256 FROM {s}.research_prd_versions WHERE "
                 "research_id = %s AND kind = 'DRAFT' ORDER BY version_no DESC LIMIT 1", (rid,))
@@ -707,9 +768,9 @@ def approve_baseline(research_id: str, body: ApproveIn,
                 raise ApiError(409, "review_not_passed", details={
                     "headVersion": None if head is None else int(head["version_no"]),
                     "requested": body.prd_version})
-            docs = APPROVE_DOCS
+            docs = (baseline_rel, *APPROVE_DOCS[1:])
             raw = (workspace / head["rel_path"]).read_bytes()
-            actual = {docs[0]: layout.sha256_bytes(raw)}
+            actual = {BASELINE_REL: layout.sha256_bytes(raw)}      # digest_problems 以此為 PRD 鍵
             for doc in docs[1:]:
                 found = layout.file_digest(workspace, doc)
                 if found is not None:
@@ -731,33 +792,53 @@ def approve_baseline(research_id: str, body: ApproveIn,
                 fsm_ops.transition(fctx, to="SPEC_REGRESSION_CHECK",
                                    reason=_regression_reason(ctx, rid))
             layout.write_workspace_file(workspace, docs[0], raw.decode("utf-8"))
-            frozen = fsm_ops.approve_baseline(
-                fctx, docs=list(docs), root=str(workspace), approver=approver,
-                reason=(body.reason or "Gate 0 approved")[:500])
+            reason_text = (body.reason or "Gate 0 approved")[:500]
+            if open_scr is None:
+                frozen = fsm_ops.approve_baseline(
+                    fctx, docs=list(docs), root=str(workspace), approver=approver,
+                    reason=reason_text)
+            else:                       # D-103：Stage 名 `Gate-0-SCR<k>`（`OUTER_FREEZE_STAGE_RE`）
+                frozen = fsm_ops.spec_frozen(
+                    fctx, stage=f"{scr_mod.SCR_STAGE_PREFIX}{open_scr['scr_no']}",
+                    docs=list(docs), root=str(workspace), approver=approver, reason=reason_text)
             digests = dict(frozen["spec_doc_digests"])
             version_no = int(head["version_no"])
             decision_id = str(uuid.uuid4())
             top = ctx.db.head_prd(rid)
             digest = layout.sha256_bytes(raw)
+            new_no = (int(top["version_no"]) if top else 0) + 1
             ctx.writer.persist(Op("prd.save", rid, dict(
-                research_id=rid, version_no=(int(top["version_no"]) if top else 0) + 1,
+                research_id=rid, version_no=new_no, semver=semver,
                 kind="BASELINE", author_kind="HUMAN", author=approver,
                 content=raw.decode("utf-8"), rel_path=docs[0], sha256=digest, bytes=len(raw),
-                change_summary="Gate 0 核准基線"),
+                change_summary="SCR 核准新基線" if open_scr else "Gate 0 核准基線"),
                 files=(FileRef(str(workspace), docs[0], digest),)))
+            # SCR：核准之後外環鍵回到 SPEC_FROZEN、內環套用成功前游標仍在 studio／SCR_OPEN
+            flow = ({"step": "studio", "phase": "SCR_OPEN", "status": "IDLE", "detail": ""}
+                    if open_scr else
+                    {"step": "route", "phase": "FROZEN", "status": "IDLE", "detail": ""})
             ctx.writer.persist(Op("gate.decision", rid, dict(
                 research_id=rid, decision_id=decision_id, gate="GATE0", decision="APPROVED",
                 decided_by=approver, decided_at=utc_now().isoformat(), prd_version_no=version_no,
                 review_round_no=int(last["round_no"]), fsm_project=row["fsm_project"],
                 fsm_stage=frozen.get("stage", "Gate-0"), fsm_state_after="SPEC_FROZEN",
                 frozen_digests=digests, reason=body.reason or "", audit_trace_id=trace_id_var.get(),
-                flow={"step": "route", "phase": "FROZEN", "status": "IDLE", "detail": ""})))
+                flow=flow)))
+            scr_apply: dict[str, Any] | None = None
+            if open_scr is not None:
+                scr_apply = scr_mod.approve_and_apply(
+                    scr_mod.ScrEnv(cfg=ctx.cfg, db=ctx.db, writer=ctx.writer, audit=ctx.audit),
+                    row, open_scr, approver=approver, text=raw.decode("utf-8"), sha256=digest,
+                    to_version_no=new_no, semver=semver, rel=docs[0], decision_id=decision_id)
             fresh = _project(ctx, rid)
             assert ctx.orchestrator is not None
             ctx.orchestrator.reconcile(fresh, actor="bridge")       # Gate 0 時點的自動對帳
             ctx.orchestrator.project_state(rid)
-    return {"gate_decision_id": decision_id, "stage": "Gate-0", "spec_doc_digests": digests,
-            "fsm_state": "SPEC_FROZEN"}
+    out = {"gate_decision_id": decision_id, "stage": frozen.get("stage", "Gate-0"),
+           "spec_doc_digests": digests, "fsm_state": "SPEC_FROZEN"}
+    if scr_apply is not None:
+        out["scr_apply"] = scr_apply
+    return out
 
 
 class ReturnIn(BaseModel):
@@ -1064,3 +1145,19 @@ def capabilities(request: Request) -> dict[str, Any]:
         except ResearchDbError:
             logger.warning("capabilities：讀不到 ADMIN allowlist，fetch_hosts 先回部署基底")
     return research_capabilities(ctx.cfg, fetch_hosts=hosts)
+
+
+def reconcile_at_route(ctx: ResearchContext, research_id: str) -> dict[str, Any]:
+    """分流時點的自動對帳（AC-961-20／AC-R2P-23-4）：分流成功路徑恰呼叫一次、失敗路徑不呼叫。呼叫點
+    住 `routers/research_route.py` 的 `route_execute` 成功之後（P0 的 AST 鎖只認 `orchestrator.
+    reconcile` 的實際呼叫點＝本檔；這支助手是它的 P1 增列呼叫點）。"""
+    assert ctx.orchestrator is not None
+    return ctx.orchestrator.reconcile(_project(ctx, research_id), actor="bridge")
+
+
+# P1 BR-D2：`:scr`、`:scr-apply`、`:decompose`、`:decomposition-signoff` 住 `research_scr.py`，
+# 掛進同一個 router（`app/main.py` 已 include 本 router；不必再多一行）。放檔尾是因為那支檔
+# 從本檔 import 共用助手。
+from . import research_scr  # noqa: E402
+
+router.include_router(research_scr.router)

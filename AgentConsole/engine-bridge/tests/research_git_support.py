@@ -174,12 +174,32 @@ def install_fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeGh:
     return FakeGh(bin_dir, log, monkeypatch)
 
 
-def hide_gh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """讓 PATH 上沒有 gh（容器模式）：丟掉含 gh 執行檔的目錄（git 與 python 另在的目錄保留）。
-    若 git 與 gh 住同一個目錄，git 也會一併消失——該環境請改用 `FAKE_GH`／別的做法。"""
-    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not any(
-        (Path(d) / name).exists() for name in ("gh", "gh.exe", "gh.cmd", "gh.bat"))]
-    monkeypatch.setenv("PATH", os.pathsep.join(dirs))
+_GH_NAMES = ("gh", "gh.exe", "gh.cmd", "gh.bat")
+
+
+def _which_in(dirs: list[str], name: str) -> str | None:
+    return shutil.which(name, path=os.pathsep.join(dirs)) if dirs else None
+
+
+def hide_gh(monkeypatch: pytest.MonkeyPatch, shim_dir: Path) -> None:
+    """讓 PATH 上沒有 gh（容器模式）：丟掉含 gh 執行檔的目錄。與 gh 同住一目錄的 git（GitHub
+    ubuntu runner 的 `/usr/bin` 兩者同住，CI 0af3a6bc 的三個測試因此 `FileNotFoundError: 'git'`；
+    Windows 的 scoop／chocolatey shims 目錄亦同）以墊片放回 `shim_dir/hidegh/`：POSIX 一支 `git`
+    sh 腳本 exec 原絕對路徑、Windows 一支 `git.cmd`，不靠 symlink（未開開發人員模式建不了）。
+    git 仍在未丟棄的目錄時不放墊片。"""
+    dirs = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d]
+    kept = [d for d in dirs if not any((Path(d) / n).exists() for n in _GH_NAMES)]
+    dropped = [d for d in dirs if d not in kept]
+    if _which_in(kept, "git") is None and (real := _which_in(dropped, "git")) is not None:
+        shim = shim_dir / "hidegh"
+        shim.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            (shim / "git.cmd").write_bytes(f'@"{real}" %*\r\n'.encode())
+        else:
+            (shim / "git").write_text(f'#!/bin/sh\nexec "{real}" "$@"\n', encoding="utf-8")
+            (shim / "git").chmod(0o755)
+        kept.insert(0, str(shim))
+    monkeypatch.setenv("PATH", os.pathsep.join(kept))
 
 # ── 掃描 ────────────────────────────────────────────────────────────────────────────────────
 def contains_secret(text: str, secret: str) -> bool:

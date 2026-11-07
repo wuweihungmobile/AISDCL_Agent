@@ -365,10 +365,12 @@ def test_AT_960_13_3_only_one_helper_builds_a_show_without_must_exist() -> None:
     ensure = _calls_with_enclosing(lambda n: call_name(n) == "_ensure_fsm_key")
     assert set(ensure) == {("routers/research.py", "_fsm_init_step")}
     init = _calls_with_enclosing(lambda n: call_name(n) == "_fsm_init_step")
+    # P1 BR-D2：MAJOR SCR 的新研究專案（同 create_project 的初始化流程；`research_scr.make`）
     assert set(init) == {("routers/research.py", "create_project"),
                          ("routers/research.py", "_retry_init"),
-                         ("routers/research.py", "_abandon_and_reinit")}, \
-        "建檔的呼叫者只有專案初始化（含重試初始化）與 :reinit 的換世代；:route 屬 P1"
+                         ("routers/research.py", "_abandon_and_reinit"),
+                         ("routers/research_scr.py", "make")}, \
+        "建檔的呼叫者只有專案初始化（含重試初始化）、:reinit 換世代與 MAJOR SCR 的新專案"
 
 
 # ══ AT-960-6-2：沒有 steps:advance 與寫游標的捷徑 ═══════════════════════════════════════════════
@@ -442,7 +444,8 @@ def test_AT_961_8_6_the_create_key_callers_end_at_four_places() -> None:
     callers = _calls_with_enclosing(lambda n: call_name(n) == "create_key")
     assert len(set(callers)) == 2, "create_key 的直接呼叫點：_ensure_fsm_key 與 adopt_baseline"
     init = _calls_with_enclosing(lambda n: call_name(n) == "_fsm_init_step")
-    assert len(set(init)) == 3, "經 _ensure_fsm_key 的終點三處（P0）；加 adopt_baseline＝共四處"
+    # P0 三處（create_project、_retry_init、_abandon_and_reinit）＋BR-D2 的 MAJOR SCR 新專案＝四處
+    assert len(set(init)) == 4, "經 _ensure_fsm_key 的終點：P0 三處加 MAJOR SCR 的新研究專案"
 
 
 def test_AT_961_8_6_only_adopt_py_freezes_a_stage_outside_the_router_and_fsm_ops() -> None:

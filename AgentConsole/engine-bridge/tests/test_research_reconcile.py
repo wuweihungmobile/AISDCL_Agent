@@ -329,13 +329,14 @@ def test_AT_960_21_4_gate_0_runs_exactly_one_reconcile_and_p95_stays_under_two_s
 
 
 def test_AT_960_21_4_p0_has_only_the_gate_0_call_site_for_reconcile() -> None:
-    """分流與交付時點屬 P1／P2：P0 的 app 內只有 Gate 0（approve）與手動端點呼叫對帳。"""
+    """對帳的呼叫點只住 `routers/research.py`：Gate 0（approve）、手動端點，加 P1 的分流時點助手
+    `reconcile_at_route`（AC-961-20；只增呼叫點，檔案不變）。"""
     sites = []
     for path in sorted((ENGINE_BRIDGE / "app").rglob("*.py")):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if re.search(r"orchestrator\.reconcile\(|\.reconcile\(", line) and "def " not in line:
                 sites.append(f"{path.relative_to(ENGINE_BRIDGE).as_posix()}:{number}")
-    assert sorted(s.split(":")[0] for s in sites) == ["app/routers/research.py"] * 2, sites
+    assert sorted(s.split(":")[0] for s in sites) == ["app/routers/research.py"] * 3, sites
 
 
 # ── AT-960-21-5：state.json 只寫出、不讀回 ──────────────────────────────────────────────────
@@ -418,3 +419,216 @@ def test_AT_960_21_5_state_json_is_rewritten_after_a_step_transition_and_after_a
     again = json.loads(target.read_text(encoding="utf-8"))
     assert again["projected_at"] >= doc["projected_at"] and again["flow"] == doc["flow"]
     assert again["fsm"] == doc["fsm"] and again["research_id"] == rid
+
+
+# ══ P1 BR-D2：route_decision／task_decomposition 兩項、對映表、TCS 凍結後校正（AC-961-20、25）══
+from app.research.gates.reconcile import (  # noqa: E402
+    PENDING_CORRECTION,
+    flow_fsm_mapping_verdict,
+)
+from tests import research_git_support as rgs  # noqa: E402
+from tests.test_decompose import step as brain_step  # noqa: E402
+from tests.test_research_decompose import (  # noqa: E402
+    FakeBrain,
+    post_decompose,
+    use_brain,
+)
+from tests.test_research_scr import cli, inner, routed  # noqa: E402
+
+route_db, real_tree, renv, fake_gh = rgs.route_db, rgs.real_tree, rgs.renv, rgs.fake_gh
+P1_RESEARCH_FILES = ("02_governance/route_decision.json", "03_execution/task_decomposition.json")
+
+
+def checks_of(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {c["id"]: c for c in result["checks"]}
+
+
+def p1_reconcile(renv: rgs.RouteEnv, rid: str) -> dict[str, Any]:
+    resp = renv.env.post(f"/research/projects/{rid}:reconcile", {})
+    assert resp.status_code == 200, resp.text
+    return dict(resp.json())
+
+
+def p1_workspace(renv: rgs.RouteEnv, rid: str) -> Path:
+    return Path(renv.env.db.get_project(rid)["workspace_path"])
+
+
+def test_AT_961_20_3_the_mapping_table_has_the_p1_db_cursor_values_and_a_third_state() -> None:
+    def verdict(fsm: str, step_: str, phase: str, stage2: bool = False) -> str:
+        return flow_fsm_mapping_verdict(fsm, step_, phase, stage2_frozen=stage2)
+
+    for step_, phase in (("route", "FROZEN"), ("route", "ROUTING"), ("build", "ROUTED"),
+                         ("build", "TCS_DRAFTING"), ("build", "TCS_PENDING"),
+                         ("studio", "SCR_OPEN")):
+        assert verdict("SPEC_FROZEN", step_, phase) == "ok", (step_, phase)
+    assert verdict("SPEC_FROZEN", "build", "TCS_PENDING", True) == PENDING_CORRECTION
+    assert verdict("SPEC_FROZEN", "build", "ROUTED", True) == "ok"
+    for step_, phase in (("studio", "DRAFTING"), ("topic", "INGESTED"),
+                         ("build", "BUILD_READY"), ("build", "PAUSED")):
+        assert verdict("SPEC_FROZEN", step_, phase) == "drift", (step_, phase)
+    for fsm in ("SPEC_DRAFTING", "SCG_VALIDATION", "HUMAN_PENDING"):
+        assert verdict(fsm, "studio", "SCR_OPEN") == "ok", fsm
+    assert verdict("ESCALATION", "route", "FROZEN") == "drift"
+    assert verdict("SPEC_DRAFTING", "route", "FROZEN") == "drift"
+    assert "BUILD_READY" not in {p for m in FLOW_FSM_MAPPING.values() for ps in m.values()
+                                 for p in ps} and "PAUSED" not in str(FLOW_FSM_MAPPING)
+    assert flow_fsm_mapping_ok("SPEC_FROZEN", "route", "FROZEN")      # P0 既有結果不變
+    check = mapping_check("SPEC_FROZEN", "build", "TCS_PENDING", readable=True,
+                          stage2_frozen=True)
+    assert check["status"] == PENDING_CORRECTION and check["drift"] == []
+
+
+def test_AT_961_20_1_route_decision_is_compared_with_its_registered_sha(
+        renv: rgs.RouteEnv) -> None:
+    other = rgs.seed_gate0(renv, "plain")
+    assert checks_of(p1_reconcile(renv, other))["route_decision"] == {
+        "id": "route_decision", "status": "ok", "present": False, "detail": "", "drift": []}
+    rid, _route = routed(renv)
+    result = p1_reconcile(renv, rid)
+    assert checks_of(result)["route_decision"]["status"] == "ok"
+    assert checks_of(result)["route_decision"]["present"] is True and result["consistent"]
+    assert [c["id"] for c in result["checks"]] == list(CHECK_IDS), "六項檢查名與順序不變"
+    path = p1_workspace(renv, rid) / P1_RESEARCH_FILES[0]
+    original = path.read_bytes()
+    path.write_bytes(original + b" ")
+    drift = checks_of(p1_reconcile(renv, rid))["route_decision"]
+    assert drift["status"] == "drift" and drift["drift"][0]["kind"] == "ROUTE_DECISION"
+    assert drift["drift"][0]["actualSha256"] != drift["drift"][0]["expectedSha256"]
+    path.write_bytes(original)
+    path.unlink()
+    gone = checks_of(p1_reconcile(renv, rid))["route_decision"]
+    assert gone["status"] == "drift" and gone["drift"][0]["actualSha256"] is None
+    events = [e for e in renv.rdb.events(rid) if e[1] == "research.reconcile"]
+    assert len(events) == 5, "Gate 0 一筆＋分流成功時點一筆（AC-961-20-4）＋本測試三次手動各一筆"
+
+
+def test_AT_961_20_1_field_level_route_drift_is_reported_without_touching_either_side(
+        renv: rgs.RouteEnv) -> None:
+    rid, route = routed(renv)
+    renv.rdb.exec("UPDATE console.research_projects SET updated_at = updated_at WHERE id = %s",
+                  rid)
+    before = tree_digest(p1_workspace(renv, rid))
+    counts = {t: renv.rdb.count(t) for t in ("research_artifacts", "research_route_steps",
+                                             "research_route_decisions", "research_scr",
+                                             "research_decompositions")}
+    result = p1_reconcile(renv, rid)
+    assert result["consistent"] is True
+    after = tree_digest(p1_workspace(renv, rid))
+    assert {k: v for k, v in after.items() if not k.endswith("state.json")} == {
+        k: v for k, v in before.items() if not k.endswith("state.json")}
+    assert counts == {t: renv.rdb.count(t) for t in counts}
+    assert route
+
+
+def test_AT_961_20_2_task_decomposition_is_compared_with_its_registered_sha(
+        renv: rgs.RouteEnv) -> None:
+    from tests.test_research_decompose import PRD
+
+    rid = rgs.seed_gate0(renv, prd=PRD)
+    assert rgs.confirm(renv, rid, rgs.body_a(renv)).status_code == 200
+    use_brain(renv, FakeBrain([brain_step(1), brain_step(2, ["S01"])]), renv.tmp)
+    assert checks_of(p1_reconcile(renv, rid))["task_decomposition"]["present"] is False
+    assert post_decompose(renv, rid).status_code == 200
+    ok = checks_of(p1_reconcile(renv, rid))["task_decomposition"]
+    assert ok["status"] == "ok" and ok["present"] is True
+    path = p1_workspace(renv, rid) / P1_RESEARCH_FILES[1]
+    original = path.read_bytes()
+    path.write_bytes(original + b"\n")
+    drift = checks_of(p1_reconcile(renv, rid))["task_decomposition"]
+    assert drift["status"] == "drift" and drift["drift"][0]["kind"] == "TASK_DECOMPOSITION"
+    path.write_bytes(original)
+    renv.rdb.exec("UPDATE console.research_decompositions SET status = 'STALE' WHERE "
+                  "research_id = %s", rid)
+    assert checks_of(p1_reconcile(renv, rid))["task_decomposition"]["status"] == "ok", \
+        "stale 不是 drift"
+    path.unlink()
+    assert checks_of(p1_reconcile(renv, rid))["task_decomposition"]["status"] == "drift"
+
+
+def freeze_stage2(renv: rgs.RouteEnv, route: dict[str, Any]) -> None:
+    """Given：內環鍵走完 Stage-2 並凍結（走框架 CLI，等同既有 `:freeze` 的結果）。"""
+    key, sdir, root = route["impl_fsm_project"], route["impl_state_dir"], route["target_path"]
+    rel = "docs/03_testing/contracts/TCS-demo-20261107.md"
+    target = Path(root) / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# TCS\n", encoding="utf-8", newline="\n")
+    trigger = ["--trigger", "research_bridge"]
+    cli(renv, key, sdir, "transition", "--to", "SPEC_DRAFTING", "--reason", "stage-2", *trigger)
+    cli(renv, key, sdir, "transition", "--to", "SCG_VALIDATION", "--reason", "stage-2", *trigger)
+    cli(renv, key, sdir, "transition", "--to", "HUMAN_PENDING", "--reason", "tcs gate: x",
+        *trigger)
+    cli(renv, key, sdir, "spec-frozen", "--stage", "Stage-2", "--doc", rel, "--digest", "--root",
+        root, "--reason", "tcs frozen", "--approver", ADMIN, "--json")
+
+
+def to_tcs_pending(renv: rgs.RouteEnv, rid: str) -> None:
+    renv.env.db.set_cursor(research_id=rid, actor="bridge", flow={
+        "step": "build", "phase": "TCS_PENDING", "status": "IDLE", "detail": ""})
+
+
+def test_AT_961_25_2_reconcile_corrects_a_tcs_pending_cursor_once_stage_2_is_frozen(
+        renv: rgs.RouteEnv) -> None:
+    rid, route = routed(renv)
+    freeze_stage2(renv, route)
+    to_tcs_pending(renv, rid)
+    before = len(renv.rdb.events(rid))
+    first = p1_reconcile(renv, rid)
+    mapping = checks_of(first)["fsm_flow_mapping"]
+    assert mapping["status"] == PENDING_CORRECTION and mapping["drift"] == []
+    assert first["consistent"] is True and first["driftCount"] == 0
+    assert renv.rdb.one("SELECT flow_step, flow_phase, flow_status FROM "
+                        "console.research_projects WHERE id = %s", rid) == (
+        "build", "ROUTED", "IDLE")
+    steps = [e for e in renv.rdb.events(rid)[before:] if e[1] == "research.step"]
+    assert len(steps) == 1 and steps[0][6]["reason"] == "tcs_frozen_correction"
+    assert steps[0][6]["flowPhase"] == "ROUTED"
+    again = p1_reconcile(renv, rid)
+    assert checks_of(again)["fsm_flow_mapping"]["status"] == "ok"
+    later = [e for e in renv.rdb.events(rid)[before:] if e[1] == "research.step"]
+    assert len(later) == 1, "第二次：無新校正事件（冪等）"
+    assert fsm_state_file_untouched(route)
+
+
+def fsm_state_file_untouched(route: dict[str, Any]) -> bool:
+    return (Path(route["impl_state_dir"]) / f"FSM-STATE-{route['impl_fsm_project']}.yaml"
+            ).is_file()
+
+
+def test_AT_961_25_E_1_an_unfrozen_stage_2_is_never_corrected(renv: rgs.RouteEnv) -> None:
+    rid, route = routed(renv)
+    to_tcs_pending(renv, rid)
+    cli(renv, route["impl_fsm_project"], route["impl_state_dir"], "transition", "--to",
+        "SPEC_DRAFTING", "--reason", "stage-2", "--trigger", "research_bridge")
+    for state in ("SPEC_DRAFTING", "HUMAN_PENDING"):
+        if state == "HUMAN_PENDING":
+            for to, reason in (("SCG_VALIDATION", "x"), ("HUMAN_PENDING", "tcs gate: x")):
+                cli(renv, route["impl_fsm_project"], route["impl_state_dir"], "transition",
+                    "--to", to, "--reason", reason, "--trigger", "research_bridge")
+        assert inner(renv, route)
+        steps_before = len([e for e in renv.rdb.events(rid) if e[1] == "research.step"])
+        result = p1_reconcile(renv, rid)
+        assert checks_of(result)["fsm_flow_mapping"]["status"] == "ok", state
+        assert renv.rdb.one("SELECT flow_phase FROM console.research_projects WHERE id = %s",
+                            rid) == ("TCS_PENDING",)
+        assert len([e for e in renv.rdb.events(rid) if e[1] == "research.step"]) == steps_before
+
+
+def test_AT_961_20_4_the_route_time_reconcile_helper_adds_exactly_one_event(
+        renv: rgs.RouteEnv) -> None:
+    from app.routers.research import reconcile_at_route
+
+    rid, _route = routed(renv)
+    ctx = renv.env.live.app.state.research
+    before = len([e for e in renv.rdb.events(rid) if e[1] == "research.reconcile"])
+    result = reconcile_at_route(ctx, rid)
+    events = [e for e in renv.rdb.events(rid) if e[1] == "research.reconcile"]
+    assert len(events) == before + 1
+    assert result["consistent"] is True and events[-1][6] == {"consistent": True,
+                                                                "driftCount": 0}
+
+
+def test_AT_961_20_4_the_route_flow_itself_runs_one_automatic_reconcile(
+        renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv)
+    events = [e for e in renv.rdb.events(rid) if e[1] == "research.reconcile"]
+    assert len(events) == 2, "Gate 0 時點一筆（P0）加分流成功時點一筆"

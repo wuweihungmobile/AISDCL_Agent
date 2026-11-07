@@ -87,7 +87,8 @@ def quote_arg(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-def evaluator_command(python: str, args: Sequence[str]) -> str:
+def evaluator_command(python: str, args: Sequence[str],
+                      module: str = "app.research.gate_cli") -> str:
     """`<python> -I -X utf8 -m app.research.gate_cli <args…>`。`-I`（隔離模式）不把工作目錄放進
     `sys.path`：引擎在工作區執行 evaluator，沒有它，agent 在工作區放一個 `app/` 套件就能偽造
     evaluator
@@ -95,7 +96,7 @@ def evaluator_command(python: str, args: Sequence[str]) -> str:
     預設
     是 ANSI 碼頁，違規說明會變亂碼並被帶進下一次重試）。
     整條指令不得含 `DENY_CHARS`（含 `~`）、換行；違反＝`CompileError`（路徑問題只有人能改）。"""
-    command = " ".join([quote_arg(python), "-I", "-X", "utf8", "-m", "app.research.gate_cli",
+    command = " ".join([quote_arg(python), "-I", "-X", "utf8", "-m", module,
                         *[quote_arg(arg) for arg in args]])
     if bad := forbidden_chars(command):
         raise CompileError("evaluator_forbidden_char", f"evaluator 指令含禁止字元 {bad}")
@@ -121,7 +122,7 @@ def allowed_tools(stage: str, workspace: Path, round_no: int,
         if web_hosts:
             tools += [*WEB_TOOLS, *[f"WebFetch(domain:{host})" for host in web_hosts]]
         return tools
-    if stage in ("draft", "revise"):
+    if stage in ("draft", "revise", "tcs-draft"):
         return [*READ_TOOLS, f"Edit({scope}/**)"]
     if stage == "review":
         return [*READ_TOOLS, f"Edit({scope}/02_governance/reviews/round-{round_no}/**)"]
@@ -274,8 +275,30 @@ def _review_steps(req: StageRequest, python: str) -> list[StepSpec]:
     return steps
 
 
+TCS_INPUTS_REL = "03_execution/tcs_inputs.json"
+TCS_DRAFT_REL = "03_execution/tcs_draft.md"
+TCS_GATE_MODULE = "app.research.gates.tcs_schema"
+
+
+def _tcs_steps(req: StageRequest, python: str) -> list[StepSpec]:
+    """P1 `tcs-draft`：輸入＝工作區內的凍結 PRD 與 Bridge 預抽的 `tcs_inputs.json`、輸出＝
+    `tcs_draft.md`；evaluator＝`gates/tcs_schema`（AT↔AC 確定性預檢）。"""
+    if not req.prd_rel:
+        raise CompileError("missing_input", "TCS_DRAFT 需要凍結 PRD 的工作區相對路徑")
+    inputs = {"prd": req.prd_rel, "tcs_inputs": TCS_INPUTS_REL}
+    outputs = (TCS_DRAFT_REL,)
+    return [StepSpec(
+        step_id="step-01-tcs-draft", role="tcs-draft", name="TCS_DRAFT：草擬測試契約規格",
+        prompt=step_prompt("tcs-draft", stage="tcs-draft", round_no=0, inputs=inputs,
+                           outputs=outputs),
+        inputs=inputs, outputs=outputs,
+        evaluator_command=evaluator_command(python, ["--workspace", long_path(req.workspace)],
+                                            TCS_GATE_MODULE),
+        max_retries=req.max_retries)]
+
+
 _BUILDERS = {"research": _research_steps, "draft": _draft_steps, "revise": _revise_steps,
-             "review": _review_steps}
+             "review": _review_steps, "tcs-draft": _tcs_steps}
 
 
 def compile_stage(req: StageRequest) -> CompiledStage:

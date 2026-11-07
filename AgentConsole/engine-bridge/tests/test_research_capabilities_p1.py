@@ -5,6 +5,10 @@
 """
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -68,7 +72,7 @@ def test_AT_961_16_2_the_deep_health_research_object_keeps_its_eight_keys(
 def test_AT_961_16_3_a_container_like_deployment_reports_honestly_and_refuses_routes(
         renv: rgs.RouteEnv, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     rid = rgs.seed_gate0(renv)
-    rgs.hide_gh(monkeypatch)
+    rgs.hide_gh(monkeypatch, tmp_path)
     set_cfg(renv, research_scaffold_root=None, research_repo_root=tmp_path / "ro-repo")
     body = caps(renv)
     assert body["gh_cli"]["ok"] is False and body["repo_writable"] is False
@@ -79,6 +83,35 @@ def test_AT_961_16_3_a_container_like_deployment_reports_honestly_and_refuses_ro
     assert {m["item"] for m in a.json()["details"]["missing"]} == {"repo_writable"}
     assert {m["item"] for m in b.json()["details"]["missing"]} == {"gh", "scaffold_root"}
     assert a.json()["reason"] == b.json()["reason"] == "route_unsupported_in_deployment"
+
+
+def test_hide_gh_keeps_git_reachable_when_it_shares_a_directory_with_gh(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """夾具契約（CI 0af3a6bc 的教訓）：GitHub ubuntu runner 的 git 與 gh 同住 `/usr/bin`，整個
+    目錄丟掉會把 git 一起藏掉（三個 AT 因 `FileNotFoundError: 'git'` 紅）。佈一個「兩者同住」且是
+    PATH 唯一目錄的情境再藏 gh：gh 必須消失、git 必須仍可解析且真的能跑。"""
+    real_git = shutil.which("git")
+    assert real_git is not None, "TOOL-ABSENCE: git"
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    if sys.platform == "win32":
+        (shared / "gh.cmd").write_bytes(b"@echo fake\r\n")
+        (shared / "git.cmd").write_bytes(f'@"{real_git}" %*\r\n'.encode())
+    else:
+        (shared / "gh").write_text("#!/bin/sh\necho fake\n", encoding="utf-8")
+        (shared / "git").write_text(f'#!/bin/sh\nexec "{real_git}" "$@"\n', encoding="utf-8")
+        for name in ("gh", "git"):
+            (shared / name).chmod(0o755)
+    monkeypatch.setenv("PATH", str(shared))
+    assert Path(shutil.which("git") or "").parent == shared, "佈置：git 只能從同住目錄解析"
+    assert shutil.which("gh") is not None
+    rgs.hide_gh(monkeypatch, tmp_path)
+    assert shutil.which("gh") is None
+    git_now = shutil.which("git")
+    assert git_now is not None and Path(git_now).parent == tmp_path / "hidegh"
+    out = subprocess.run([git_now, "--version"], capture_output=True, text=True, check=False,
+                         env={**os.environ, "PATH": os.environ["PATH"]})
+    assert out.returncode == 0 and out.stdout.startswith("git version"), out.stderr
 
 
 def test_AT_961_16_E_1_template_scanning_accepts_only_valid_non_empty_directories(
