@@ -8,6 +8,18 @@ import { sha } from "@/tests/fixtures/research/ids";
 import { RECONCILE_DRIFT, RECONCILE_OK } from "@/tests/fixtures/research/misc";
 import {
   BLOCKING_FLOW_STATUSES,
+  BUILD_DISABLED_TEXT,
+  WAIVER_REASON_MAX,
+  coverageMatrix,
+  coverageView,
+  decompositionErrorLines,
+  decompositionTree,
+  executionBlock,
+  scrBadge,
+  tcsInvalidText,
+  tcsStage,
+  unmetLabels,
+  waiverReasonError,
   DEFAULT_APPLICABILITY_AXES,
   DEFAULT_BUDGET_WARN_AT,
   DIFF_MAX_EDITS,
@@ -704,7 +716,28 @@ describe("對帳結果轉畫面（reconcileDriftView）：漂移只顯示、量�
   });
 
   it("全部 ok：三塊皆空（沒有漂移、沒有對映警示、沒有量不到的項目）", () => {
-    expect(reconcileDriftView(RECONCILE_OK)).toEqual({ files: [], fsmMapping: false, notEvaluable: [] });
+    expect(reconcileDriftView(RECONCILE_OK)).toEqual({ files: [], fsmMapping: false, notEvaluable: [], hasDrift: false, pendingCorrection: false });
+  });
+
+  it("AT_961_20_E_2 pending_correction 是第三態：不算漂移（hasDrift 假、pendingCorrection 真）；drift 與 NOT_EVALUABLE 照舊", () => {
+    const withMapping = (status: string): ResearchReconcileResult =>
+      ({
+        consistent: false,
+        checks: [
+          { name: "fsm_flow_mapping", status },
+          { name: "prd_sha256", status: "ok" },
+        ],
+      }) as unknown as ResearchReconcileResult;
+    const pending = reconcileDriftView(withMapping("pending_correction"));
+    expect(pending.hasDrift).toBe(false);
+    expect(pending.pendingCorrection).toBe(true);
+    expect(pending.fsmMapping).toBe(false);
+    expect(pending.notEvaluable).toEqual([]);
+    const drift = reconcileDriftView(withMapping("drift"));
+    expect([drift.hasDrift, drift.pendingCorrection, drift.fsmMapping]).toEqual([true, false, true]);
+    const missing = reconcileDriftView(withMapping("NOT_EVALUABLE"));
+    expect([missing.hasDrift, missing.pendingCorrection]).toEqual([false, false]);
+    expect(missing.notEvaluable).toEqual(["狀態機與流程游標的對映"]);
   });
 
   it("PRD sha 不符＋FSM 對映不合：檔案漂移列帶檔名與雙方 sha256（資料庫為期望值、檔案為實際值）；FSM 對映另成警示、不混進檔案列", () => {
@@ -712,6 +745,8 @@ describe("對帳結果轉畫面（reconcileDriftView）：漂移只顯示、量�
       files: [{ check: "prd_sha256", label: "PRD 檔案", path: "01_specs/PRD-v0.2.0-draft.md", expectedSha256: sha("2"), actualSha256: sha("9") }],
       fsmMapping: true,
       notEvaluable: [],
+      hasDrift: true,
+      pendingCorrection: false,
     });
   });
 
@@ -737,9 +772,9 @@ describe("對帳結果轉畫面（reconcileDriftView）：漂移只顯示、量�
   it("drift 檢查缺 drift 陣列時不丟例外、不憑空產生檔案列；純函式不改動輸入", () => {
     const result: ResearchReconcileResult = { consistent: false, checks: [{ name: "prd_sha256", status: "drift" }] };
     const frozen = JSON.parse(JSON.stringify(result)) as ResearchReconcileResult;
-    expect(reconcileDriftView(result)).toEqual({ files: [], fsmMapping: false, notEvaluable: [] });
+    expect(reconcileDriftView(result)).toEqual({ files: [], fsmMapping: false, notEvaluable: [], hasDrift: false, pendingCorrection: false });
     expect(result).toEqual(frozen);
-    expect(reconcileDriftView({ consistent: true, checks: [] })).toEqual({ files: [], fsmMapping: false, notEvaluable: [] });
+    expect(reconcileDriftView({ consistent: true, checks: [] })).toEqual({ files: [], fsmMapping: false, notEvaluable: [], hasDrift: false, pendingCorrection: false });
   });
 });
 
@@ -1355,5 +1390,113 @@ describe("分流表單驗證與請求本文", () => {
       expect(body).not.toHaveProperty("targetPath");
       expect(body).not.toHaveProperty("approver");
     }
+  });
+});
+
+// ── 步驟 4 前半（TCS-ResearchToPRD-P1-20261107 AT-961-18-*；純函式面）──────────────────────────────────
+
+describe("步驟 4 前半純函式：覆蓋視圖、豁免理由、執行閘、TCS 相態", () => {
+  const draft = {
+    coverage: { total: 3, covered: 1, uncovered: ["AC-2", "AC-3"] },
+    goals: [{ goal_id: "G-1", name: "g", tasks: [{ task_id: "T-1", name: "t", covers_ac: ["AC-1"] }] }],
+    waivers: [] as Array<{ ac: string; reason: string }>,
+  };
+
+  it("waiverReasonError：以 code point 計，去頭尾空白後 0 與 501 字無效、1 與 500 字有效（上限常數 500）", () => {
+    expect(WAIVER_REASON_MAX).toBe(500);
+    expect(waiverReasonError("")).not.toBeNull();
+    expect(waiverReasonError("   ")).not.toBeNull();
+    expect(waiverReasonError("字".repeat(501))).not.toBeNull();
+    expect(waiverReasonError("字")).toBeNull();
+    expect(waiverReasonError("字".repeat(500))).toBeNull();
+    expect(waiverReasonError("😀".repeat(500)), "emoji 算一個字").toBeNull();
+  });
+
+  it("coverageView：未覆蓋逐一列出；輸入優先於已存豁免；有效豁免才算完成；無效輸入帶欄位錯誤；矩陣列取樹與未覆蓋的聯集並排序", () => {
+    const empty = coverageView(draft);
+    expect(empty).toMatchObject({ total: 3, covered: 1, uncovered: ["AC-2", "AC-3"], waived: [], pending: ["AC-2", "AC-3"], complete: false, errors: {} });
+    expect(empty.acs).toEqual(["AC-1", "AC-2", "AC-3"]);
+    const partial = coverageView(draft, { "AC-2": "有理由", "AC-3": "字".repeat(501) });
+    expect(partial.waived).toEqual(["AC-2"]);
+    expect(partial.pending).toEqual(["AC-3"]);
+    expect(Object.keys(partial.errors)).toEqual(["AC-3"]);
+    expect(partial.complete).toBe(false);
+    const stored = coverageView({
+      ...draft,
+      waivers: [
+        { ac: "AC-2", reason: "舊理由" },
+        { ac: "AC-3", reason: "舊理由二" },
+      ],
+    });
+    expect(stored.complete).toBe(true);
+    // 輸入覆寫已存值：清成空字串＝回到未完成
+    expect(
+      coverageView(
+        {
+          ...draft,
+          waivers: [
+            { ac: "AC-2", reason: "舊理由" },
+            { ac: "AC-3", reason: "x" },
+          ],
+        },
+        { "AC-2": "" },
+      ).pending,
+    ).toEqual(["AC-2"]);
+    expect(coverageView({ ...draft, coverage: { total: 1, covered: 1, uncovered: [] } }).complete).toBe(true);
+  });
+
+  it("decompositionTree／coverageMatrix：snake_case 與 camelCase 鍵都認，缺欄不丟例外；矩陣格與涵蓋關係逐格一致", () => {
+    const tree = decompositionTree([{ goalId: "G-9", name: "x", tasks: [{ taskId: "T-9", name: "y", coversAc: ["AC-1", 5 as unknown as string] }, {}] }, { tasks: "壞" as unknown as [] }]);
+    expect(tree[0]).toMatchObject({
+      id: "G-9",
+      tasks: [
+        { id: "T-9", coversAc: ["AC-1"] },
+        { id: "T-1-2", name: "", coversAc: [] },
+      ],
+    });
+    expect(tree[1].tasks).toEqual([]);
+    expect(decompositionTree(null)).toEqual([]);
+    const m = coverageMatrix(decompositionTree(draft.goals), ["AC-1", "AC-2"]);
+    expect(m.tasks.map((t) => t.id)).toEqual(["T-1"]);
+    expect(m.cells).toEqual([[true], [false]]);
+  });
+
+  it("scrBadge：只有 SCR_OPEN 顯示「SCR 進行中」", () => {
+    expect(scrBadge("SCR_OPEN")).toEqual({ visible: true, label: "SCR 進行中" });
+    for (const phase of ["TCS_PENDING", "BUILD_READY", "FROZEN", ""]) expect(scrBadge(phase).visible, phase).toBe(false);
+  });
+
+  it("tcsStage：相態對映四態（BUILD_READY 起都算已凍結；TCS_DRAFTING 失敗為 failed）", () => {
+    expect(tcsStage("TCS_DRAFTING", "RUNNING")).toBe("drafting");
+    expect(tcsStage("TCS_DRAFTING", "FAILED")).toBe("failed");
+    expect(tcsStage("TCS_PENDING", "WAITING_HUMAN")).toBe("pending");
+    for (const phase of ["BUILD_READY", "BUILDING", "HEALING", "AWAITING_HUMAN", "RELEASE_PENDING", "DELIVERED"]) expect(tcsStage(phase, "IDLE"), phase).toBe("frozen");
+    for (const phase of ["FROZEN", "ROUTING", "ROUTED", "SCR_OPEN"]) expect(tcsStage(phase, "IDLE"), phase).toBe("none");
+  });
+
+  it("executionBlock：規格變更中＞拆解過期＞草稿未簽核＞測試規格未凍結；全通過回 null；每個鍵都有非空文案", () => {
+    const signed = { status: "SIGNED_OFF" as const, stale: false };
+    expect(executionBlock({ scrOpen: true, decomposition: signed, tcsFrozen: true })).toBe("scrOpen");
+    expect(executionBlock({ scrOpen: false, decomposition: null, tcsFrozen: true })).toBe("needDecomposition");
+    expect(executionBlock({ scrOpen: false, decomposition: { ...signed, stale: true }, tcsFrozen: true })).toBe("stale");
+    expect(executionBlock({ scrOpen: false, decomposition: { status: "STALE", stale: false }, tcsFrozen: true })).toBe("stale");
+    expect(executionBlock({ scrOpen: false, decomposition: { status: "DRAFTED", stale: false }, tcsFrozen: true })).toBe("unsigned");
+    expect(executionBlock({ scrOpen: false, decomposition: signed, tcsFrozen: false })).toBe("tcsUnfrozen");
+    expect(executionBlock({ scrOpen: false, decomposition: signed, tcsFrozen: true })).toBeNull();
+    for (const text of Object.values(BUILD_DISABLED_TEXT)) expect(text.trim()).not.toBe("");
+  });
+
+  it("tcsInvalidText／unmetLabels／decompositionErrorLines：缺項說明、409 缺項中文、422 閘別逐筆", () => {
+    expect(tcsInvalidText("tcs_invalid: 缺 AC-1")).toBe("缺 AC-1");
+    expect(tcsInvalidText("tcs_invalid")).toBe("");
+    expect(tcsInvalidText("別的失敗")).toBeNull();
+    const conflict = new ApiError({ status: 409, message: "x", details: { unmet: ["route_not_succeeded", { name: "inner_key_not_adopted" }, "新項目", 3] } });
+    expect(unmetLabels(conflict)).toEqual(["分流尚未完成", "內環鍵尚未採納基線", "新項目", "未知前置"]);
+    expect(unmetLabels(new Error("x"))).toEqual([]);
+    expect(unmetLabels(new ApiError({ status: 409, message: "x" }))).toEqual([]);
+    const violations = new ApiError({ status: 422, message: "x", reason: "invalid_request", details: { violations: [{ rule: "cycle" }, { rule: "未登記" }, { field: "f" }, "字串"] } });
+    expect(decompositionErrorLines(violations)).toEqual(["閘別 cycle：任務之間的依賴有環，無法排出執行順序", "閘別 未登記：未登記的檢查"]);
+    expect(decompositionErrorLines(new ApiError({ status: 422, message: "沒有 violations" })).length).toBe(1);
+    expect(decompositionErrorLines(new ApiError({ status: 500, message: "壞了" })).length).toBe(1);
   });
 });

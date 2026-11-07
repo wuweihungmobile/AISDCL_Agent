@@ -13,6 +13,7 @@ import type { ReactElement } from "react";
 import type {
   Role,
   ResearchAllowlistEntry,
+  ResearchDecomposition,
   ResearchCapabilities,
   ResearchEvent,
   ResearchEvidenceMatrix,
@@ -63,6 +64,8 @@ export type ResearchStubOptions = {
   route: ResearchRouteDecision | null;
   /** P1：`POST …/route/preview` 回放的預演結果 */
   preview: ResearchRoutePreview;
+  /** P1：`GET …/decomposition` 回放的拆解；`null`＝尚無拆解（回 200 `null`，D-120） */
+  decomposition: ResearchDecomposition | null;
   /** 先於預設回放；回 undefined＝照預設 */
   overrides?: (call: ApiCall) => Reply;
 };
@@ -84,6 +87,7 @@ const DEFAULTS = (): ResearchStubOptions => ({
   execution: { globalTokenBudget: "1000000", tokenBudgetWarningThreshold: "0.8" },
   route: null,
   preview: PREVIEW_A,
+  decomposition: null,
 });
 
 const configRow = (key: string, value: string) => ({ id: `cfg-${key}`, category: "execution", key, value, valueType: "LONG", isEncrypted: false, hasValue: true, effect: "CONSOLE" });
@@ -165,6 +169,7 @@ export function stubResearchApi(patch: Partial<ResearchStubOptions> = {}): { cal
         if (rest === "/records/audit") return { data: options.audit };
       }
       if (method === "GET" && rest === "/route") return { data: options.route };
+      if (method === "GET" && rest === "/decomposition") return { data: options.decomposition };
       if (method === "POST" && rest === "/route/preview") return { data: options.preview };
       if (method === "POST" && rest === "/route") return { data: options.route ?? { routeId: "route-new", status: "SUCCEEDED", steps: [] } };
       if (method === "POST" && /^\/stages\/[^/]+$/.test(rest)) return { status: 202, data: { stageRunId: "run-new-1", flowPhase: "RESEARCHING", flowStatus: "RUNNING" } };

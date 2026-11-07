@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { buildProject, DECOMPOSITION_DRAFT, ROUTE_ADOPTED } from "../fixtures/research/build";
 import { eventPage, EVENTS } from "../fixtures/research/events";
 import { fsmView } from "../fixtures/research/fsm";
 import { R1, R2, R3 } from "../fixtures/research/ids";
@@ -390,6 +391,44 @@ test.describe("無障礙掃描：研發工作流步驟 3 分流（route mock＋a
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(reopen).toBeFocused();
+    expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
+  });
+});
+
+// ── 研發工作流步驟 4 前半「拆解與執行」（ResearchToPRD P1；TCS-ResearchToPRD-P1-20261107 AT-961-18-1、18-4）─────────────────────
+
+/** R3 在步驟 4（測試規格待凍結）：拆解為草稿（兩個未覆蓋 AC，豁免輸入欄顯示）、分流已完成。 */
+const buildStepBackend: MockHandler = (call) => {
+  const p = call.path;
+  if (call.method !== "GET") return undefined;
+  if (p === "/api/v1/research/capabilities") return { data: CAPABILITIES_ROUTE_READY };
+  const match = new RegExp(`^${RESEARCH_BASE}/${R3}(/.*)?$`).exec(p);
+  if (match === null) return undefined;
+  const rest = match[1] ?? "";
+  if (rest === "") return { data: buildProject("TCS_PENDING", "WAITING_HUMAN") };
+  if (rest === "/route") return { data: ROUTE_ADOPTED };
+  if (rest === "/decomposition") return { data: DECOMPOSITION_DRAFT };
+  if (rest === "/events") return { data: eventPage(EVENTS, Number(call.query.get("afterSeq") ?? 0), Number(call.query.get("limit") ?? 500)) };
+  return undefined;
+};
+
+test.describe("無障礙掃描：研發工作流步驟 4 前半（route mock＋axe；1440／1000／600）", () => {
+  test.setTimeout(180_000);
+
+  test("研究工作區 /research/<id>?step=build：拆解草稿（覆蓋矩陣可捲動區、豁免輸入、簽核停用原因）、測試規格待凍結、既有流程連結，三個寬度零違規且無水平溢出", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    await signInAs(page, "OPERATOR");
+    await installApiMock(page, compose(shellHandler(), buildStepBackend, researchBackend));
+    await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+    await page.goto(`/research/${R3}?step=build`);
+    await expect(page.getByTestId("coverage-matrix")).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("tcs-facts")).toBeVisible();
+    for (const width of RESEARCH_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `步驟 4 前半 ${width} 無水平溢出`).toBeLessThanOrEqual(0);
+      await expectNoA11yViolations(page, `研究工作區 步驟 4 前半 ${width}`);
+    }
     expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
   });
 });

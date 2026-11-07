@@ -18,6 +18,7 @@ import type {
   ResearchAllowlistRequest,
   ResearchCapabilities,
   ResearchCreateRequest,
+  ResearchDecomposition,
   ResearchDepthLevel,
   ResearchDerivedFlowPhase,
   ResearchEvent,
@@ -530,21 +531,30 @@ export type ReconcileDriftView = {
   fsmMapping: boolean;
   /** 量不到的檢查（`NOT_EVALUABLE`）：不判成一致也不判成漂移，另行說明 */
   notEvaluable: string[];
+  /** 有任一檔案漂移或狀態機對映不合（`pending_correction` 不算，AT-961-20-E-2） */
+  hasDrift: boolean;
+  /** 有檢查為第三態 `pending_correction`（待校正：不是漂移，按「重新對帳」校正；D-121、D-125） */
+  pendingCorrection: boolean;
 };
 
 /**
- * 對帳結果轉成畫面要的三塊：檔案漂移（以資料庫為準，只顯示、不修）、狀態機對映警示、量不到的檢查。
- * 全部 ok 時三塊皆空；漂移只來自 `status === "drift"` 的檢查，量不到的檢查不算漂移（⚖16：量不到不得 false-green，也不得 false-red）。
+ * 對帳結果轉成畫面要的幾塊：檔案漂移（以資料庫為準，只顯示、不修）、狀態機對映警示、量不到的檢查、待校正。
+ * 全部 ok 時皆空；漂移只來自 `status === "drift"` 的檢查，量不到的檢查不算漂移（⚖16：量不到不得 false-green，也不得 false-red）；
+ * 第三態 `pending_correction`（P1 起 `fsm_flow_mapping` 可回，D-121）既不算漂移也不算一致：只標 `pendingCorrection`。
+ * `status` 的型別尚未含第三態（FE-D1 已定稿的 `ResearchReconcileCheck`），所以以字串比對。
  */
 export function reconcileDriftView(result: ResearchReconcileResult): ReconcileDriftView {
-  const view: ReconcileDriftView = { files: [], fsmMapping: false, notEvaluable: [] };
+  const view: ReconcileDriftView = { files: [], fsmMapping: false, notEvaluable: [], hasDrift: false, pendingCorrection: false };
   for (const check of result.checks) {
     const label = RECONCILE_CHECK_LABEL[check.name] ?? check.name;
-    if (check.status === "NOT_EVALUABLE") view.notEvaluable.push(label);
-    if (check.status !== "drift") continue;
+    const status: string = check.status;
+    if (status === "NOT_EVALUABLE") view.notEvaluable.push(label);
+    if (status === "pending_correction") view.pendingCorrection = true;
+    if (status !== "drift") continue;
     if (check.name === "fsm_flow_mapping") view.fsmMapping = true;
     else for (const d of check.drift ?? []) view.files.push({ check: check.name, label, path: d.path, expectedSha256: d.expectedSha256, actualSha256: d.actualSha256 });
   }
+  view.hasDrift = view.files.length > 0 || view.fsmMapping;
   return view;
 }
 
@@ -1664,3 +1674,203 @@ export const ROUTE_DISABLED_TEXT = {
   /** VIEWER 的所有寫入類控件（含預演）停用說明 */
   viewer: "權限不足（唯讀角色）",
 } as const;
+
+// ── 步驟 4 前半（FR-R2P-14、19-4；TCS-ResearchToPRD-P1-20261107 AT-961-18-*）：拆解、覆蓋、豁免、簽核、TCS 草擬、執行閘 ──────────────
+
+/** 人工豁免理由字數上限（契約 §1.3：1～500 字；以 code point 計）。 */
+export const WAIVER_REASON_MAX = 500;
+
+/** 豁免理由是否有效：去頭尾空白後 1～500 字；無效回欄位錯誤說明，有效回 null。 */
+export function waiverReasonError(reason: string): string | null {
+  const length = [...reason.trim()].length;
+  if (length === 0) return "請填一句豁免理由";
+  if (length > WAIVER_REASON_MAX) return `豁免理由最多 ${WAIVER_REASON_MAX} 字`;
+  return null;
+}
+
+export type DecompositionTaskNode = { id: string; name: string; coversAc: string[] };
+export type DecompositionGoalNode = { id: string; name: string; tasks: DecompositionTaskNode[] };
+
+const textOf = (value: unknown): string => (typeof value === "string" ? value : typeof value === "number" ? String(value) : "");
+const stringList = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : []);
+
+/** 拆解樹（`goals[].tasks[]`）的防禦式整形：鍵可能是 snake_case 或 camelCase（PRD §5.1.6 原樣或轉換後），缺欄一律退成空字串與空陣列、不丟例外。 */
+export function decompositionTree(goals: ReadonlyArray<Record<string, unknown>> | null | undefined): DecompositionGoalNode[] {
+  return (goals ?? []).map((goal, gi) => {
+    const tasks = Array.isArray(goal.tasks) ? (goal.tasks as Array<Record<string, unknown>>) : [];
+    return {
+      id: textOf(goal.goal_id ?? goal.goalId) || `G-${gi + 1}`,
+      name: textOf(goal.name),
+      tasks: tasks.map((task, ti) => ({
+        id: textOf(task.task_id ?? task.taskId) || `T-${gi + 1}-${ti + 1}`,
+        name: textOf(task.name),
+        coversAc: stringList(task.covers_ac ?? task.coversAc),
+      })),
+    };
+  });
+}
+
+/** 樹內 task 總數（與 `tasksCount` 對照用）。 */
+export function countTasks(tree: readonly DecompositionGoalNode[]): number {
+  return tree.reduce((sum, g) => sum + g.tasks.length, 0);
+}
+
+export type CoverageView = {
+  total: number;
+  covered: number;
+  uncovered: string[];
+  /** 覆蓋矩陣的列（所有 AC：被涵蓋者取自樹、未覆蓋者取自 `coverage.uncovered`；依字串序） */
+  acs: string[];
+  /** 未覆蓋且已有有效豁免理由者（輸入優先於已存的豁免） */
+  waived: string[];
+  /** 未覆蓋且豁免理由尚缺或無效者：非空即簽核停用 */
+  pending: string[];
+  /** 輸入了但無效的未覆蓋 AC → 欄位錯誤說明 */
+  errors: Record<string, string>;
+  /** 簽核條件：未覆蓋者清零，或各有有效豁免 */
+  complete: boolean;
+};
+
+/**
+ * 覆蓋視圖（AC-R2P-14-2、14-3）：未覆蓋者逐一列出；簽核在「未覆蓋清零或各有一句有效豁免理由」前停用。
+ * `inputs` 是使用者正在輸入的豁免理由（AC → 文字）；沒輸入的 AC 取已存的 `decomposition.waivers`。純函式。
+ */
+export function coverageView(decomposition: Pick<ResearchDecomposition, "coverage" | "goals" | "waivers">, inputs: Readonly<Record<string, string>> = {}): CoverageView {
+  const { total, covered, uncovered } = decomposition.coverage;
+  const tree = decompositionTree(decomposition.goals);
+  const acSet = new Set<string>(uncovered);
+  for (const g of tree) for (const t of g.tasks) for (const ac of t.coversAc) acSet.add(ac);
+  const stored = new Map(decomposition.waivers.map((w) => [w.ac, w.reason] as const));
+  const waived: string[] = [];
+  const pending: string[] = [];
+  const errors: Record<string, string> = {};
+  for (const ac of uncovered) {
+    const reason = inputs[ac] ?? stored.get(ac) ?? "";
+    const error = waiverReasonError(reason);
+    if (error === null) waived.push(ac);
+    else {
+      pending.push(ac);
+      if (reason !== "") errors[ac] = error;
+    }
+  }
+  return { total, covered, uncovered: [...uncovered], acs: [...acSet].sort(), waived, pending, errors, complete: pending.length === 0 };
+}
+
+/** 覆蓋矩陣：欄為 task、列為 AC，`cells[i][j]` 表示第 j 個 task 涵蓋第 i 個 AC（每個 task 一個 Set，200×24 不重複掃描）。 */
+export function coverageMatrix(tree: readonly DecompositionGoalNode[], acs: readonly string[]): { tasks: DecompositionTaskNode[]; cells: boolean[][] } {
+  const tasks = tree.flatMap((g) => g.tasks);
+  const sets = tasks.map((t) => new Set(t.coversAc));
+  return { tasks, cells: acs.map((ac) => sets.map((s) => s.has(ac))) };
+}
+
+/** 「SCR 進行中」標籤（AC-R2P-19-4 前端文字半）：只在 `SCR_OPEN` 相態出現；發起鈕與橫幅屬 P2。 */
+export function scrBadge(phase: string): { visible: boolean; label: string } {
+  return phase === "SCR_OPEN" ? { visible: true, label: FLOW_PHASE_LABEL.SCR_OPEN } : { visible: false, label: "" };
+}
+
+/** TCS 草擬四態（取自 `flow.effective`；`failed`＝階段失敗）。 */
+export type TcsStage = "none" | "drafting" | "pending" | "frozen" | "failed";
+/** 內環 TCS 已凍結之後的相態（讀端衍生，D-125；`BUILD_READY` 起都算已凍結）。 */
+const TCS_FROZEN_PHASES: readonly string[] = ["BUILD_READY", "BUILDING", "HEALING", "AWAITING_HUMAN", "RELEASE_PENDING", "DELIVERED"];
+
+export function tcsStage(phase: string, status: string): TcsStage {
+  if (TCS_FROZEN_PHASES.includes(phase)) return "frozen";
+  if (phase === "TCS_DRAFTING") return status === "FAILED" ? "failed" : "drafting";
+  if (phase === "TCS_PENDING") return "pending";
+  return "none";
+}
+
+/** `tcs_invalid` 失敗的缺項說明：`flow_detail` 以 `tcs_invalid` 起頭時回其後文字（純文字顯示），否則 null。 */
+export function tcsInvalidText(detail: string): string | null {
+  if (!detail.startsWith("tcs_invalid")) return null;
+  return detail
+    .slice("tcs_invalid".length)
+    .replace(/^[:：\s]+/, "")
+    .trim();
+}
+
+/** `tcs-draft` 啟動前置未成立時 409 `details.unmet[]` 的項名（⚖P1-11）對中文。 */
+export const TCS_UNMET_LABEL: Readonly<Record<string, string>> = {
+  route_not_succeeded: "分流尚未完成",
+  inner_key_not_adopted: "內環鍵尚未採納基線",
+  decomposition_missing: "尚未觸發拆解",
+};
+
+/** 取 `details.unmet[]`（項為字串，或帶 `item`／`name` 的物件）轉中文；沒有就回空陣列。 */
+export function unmetLabels(error: unknown): string[] {
+  if (!(error instanceof ApiError)) return [];
+  const raw = error.details?.unmet;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const key = typeof entry === "string" ? entry : typeof entry === "object" && entry !== null ? textOf((entry as Record<string, unknown>).item ?? (entry as Record<string, unknown>).name) : "";
+    return TCS_UNMET_LABEL[key] ?? (key === "" ? "未知前置" : key);
+  });
+}
+
+/** 拆解狀態中文（`IMPORTED` 於 P1 不使用，D-113，仍登記以免顯示英文原值）。 */
+export const DECOMPOSITION_STATUS_LABEL: Readonly<Record<string, string>> = {
+  DRAFTED: "草稿（待簽核）",
+  SCG_PASSED: "已通過預檢（待簽核）",
+  FROZEN: "已凍結",
+  IMPORTED: "已匯入",
+  SIGNED_OFF: "已簽核",
+  REJECTED: "已駁回",
+  STALE: "已過期",
+};
+
+/** 拆解 422 `details.violations[].rule` 的閘別說明（沿 `decompose.py` 的 `gate` 值，另加簽核的 `uncovered_ac`；IFACE §1.4、§1.8）。 */
+export const DECOMPOSITION_RULE_LABEL: Readonly<Record<string, string>> = {
+  max_steps: "單次拆解步驟超過上限，系統不截斷也不自動修剪，請按目標分批拆解",
+  cycle: "任務之間的依賴有環，無法排出執行順序",
+  empty_prompt: "有任務的提示詞是空的",
+  brain_failed: "拆解用的模型呼叫失敗，請稍後重試",
+  brain_unsupported: "目前的部署不支援這種拆解方式",
+  uncovered_ac: "仍有驗收條件沒被任何任務涵蓋，也沒有豁免理由",
+};
+
+/**
+ * 拆解與簽核錯誤的逐行說明（純文字）：422 結構化錯誤逐筆列「閘別 rule：說明」；其餘退回 `researchErrorText`。
+ * 回傳至少一行（不回空陣列，面板才不會顯示空白）。
+ */
+export function decompositionErrorLines(error: unknown): string[] {
+  if (error instanceof ApiError && error.status === 422) {
+    const raw = error.details?.violations;
+    const lines = Array.isArray(raw)
+      ? raw
+          .map((v) => (typeof v === "object" && v !== null ? textOf((v as Record<string, unknown>).rule) : ""))
+          .filter((rule) => rule !== "")
+          .map((rule) => `閘別 ${rule}：${DECOMPOSITION_RULE_LABEL[rule] ?? "未登記的檢查"}`)
+      : [];
+    if (lines.length > 0) return lines;
+  }
+  return [researchErrorText(error)];
+}
+
+/** 步驟 4 前半面板的停用說明（單一登記處，比照 `ROUTE_DISABLED_TEXT`；三道鎖的文字與後端 409 一致）。 */
+export const BUILD_DISABLED_TEXT = {
+  viewer: READONLY_TITLE,
+  completed: "這一步已完成，唯讀",
+  /** `flow_phase=SCR_OPEN`（後端 409 `scr_open`；D-118） */
+  scrOpen: "規格變更中：請先完成或撤回規格變更",
+  needDecomposition: "需先完成分流並觸發拆解",
+  uncovered: "仍有未覆蓋的驗收條件，請補豁免理由",
+  /** 草稿未經人工審批（後端 409 `fsm_state_conflict` 的前端文字半） */
+  unsigned: "草稿未經人工審批，不能執行",
+  tcsUnfrozen: "測試規格尚未凍結，不能執行",
+  stale: "PRD 已更新，拆解已過期；請重新拆解並再簽核",
+  signed: "拆解已簽核，唯讀",
+} as const;
+
+/**
+ * 執行連結的閘（AC-R2P-14-3、14-5；PRD FR-15-2 的前端文字半）：回第一個擋住的原因鍵，全通過回 null。
+ * 順序固定：規格變更中 → 拆解過期 → 草稿未簽核 → 測試規格未凍結。
+ */
+export function executionBlock(input: { scrOpen: boolean; decomposition: Pick<ResearchDecomposition, "status" | "stale"> | null; tcsFrozen: boolean }): keyof typeof BUILD_DISABLED_TEXT | null {
+  if (input.scrOpen) return "scrOpen";
+  const d = input.decomposition;
+  if (d === null) return "needDecomposition";
+  if (d.stale || d.status === "STALE") return "stale";
+  if (d.status !== "SIGNED_OFF") return "unsigned";
+  if (!input.tcsFrozen) return "tcsUnfrozen";
+  return null;
+}
