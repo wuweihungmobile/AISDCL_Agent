@@ -19,7 +19,7 @@ import json
 import os
 import threading
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,7 @@ from typing import Any
 from .. import fsutil
 from . import layout
 from .db import (
+    OPS,
     ResearchConflict,
     ResearchDb,
     ResearchDbError,
@@ -34,6 +35,7 @@ from .db import (
     jsonable,
     utc_now,
 )
+from .gates.reconcile import derive_flow_status
 
 OUTBOX_VERSION = 1
 #: 重放完成後 outbox 檔案超過這個大小且沒有待處理記錄時，整檔壓縮（重寫為空）。
@@ -191,6 +193,8 @@ class DurableWriter:
         self._lock = threading.RLock()
         self._project_locks: dict[str, threading.RLock] = {}
         self._project_guard = threading.Lock()
+        self._fsm_state_of: Callable[[Mapping[str, Any]], str | None] | None = None
+        self._unsettled: set[str] = set()
 
     @property
     def outbox(self) -> Outbox:
@@ -298,14 +302,57 @@ class DurableWriter:
                 raise ResearchGuardError("not_applied", op.op_id)
             return outcome
 
+    def bind_fsm_reader(self, reader: Callable[[Mapping[str, Any]], str | None]) -> None:
+        """注入「專案列 → 外環 FSM 現態」讀取器（由 orchestrator 建構時綁定）。綁定當下補校正
+        「重放時尚無讀取器」而累積的專案（`_unsettled`）。"""
+        with self._lock:
+            self._fsm_state_of = reader
+            ids, self._unsettled = sorted(self._unsettled), set()
+            if ids and not self._outbox.pending():
+                self._settle_cursors(ids)
+
+    def _settle_cursors(self, research_ids: Sequence[str]) -> None:
+        """D-128：重放完成那一刻，對每個受影響專案以 `derive_flow_status`（進行中 stage run＋FSM
+        現態）重新衍生 `flow_status`，在**同一個資料庫交易**內鎖專案列、讀 stage run、經既有
+        `project.cursor` 操作寫回（與現值相同就跳過、不發事件）。FSM 讀取（子行程）在交易之外先做，
+        不讓子行程握著列鎖。既有 `FAILED` 不被重放洗掉（沿 `derive_flow_status` 的語意：只有後續
+        成功收尾才把它衍生掉）。"""
+        reader = self._fsm_state_of
+        assert reader is not None
+        for rid in research_ids:
+            row0 = self._db.get_project(rid)
+            if row0 is None:
+                continue
+            fsm_state = reader(row0)
+            with self._db.transaction() as tx:
+                row = tx.lock_project(rid)
+                runs = tx.rows("SELECT status FROM {s}.research_stage_runs WHERE research_id = %s "
+                               "AND status IN ('QUEUED', 'RUNNING')", (rid,))
+                # 進行中的分流列（PENDING／RUNNING）與進行中的 stage run 同屬「RUNNING」
+                routes = tx.rows("SELECT status FROM {s}.research_route_decisions WHERE "
+                                 "research_id = %s AND status IN ('PENDING', 'RUNNING')", (rid,))
+                status = derive_flow_status(
+                    [r["status"] for r in runs] + ["RUNNING" for _ in routes], fsm_state,
+                    last_run_failed=row["flow_status"] == "FAILED")
+                flow = {"step": row["flow_step"], "phase": row["flow_phase"], "status": status,
+                        "detail": row["flow_detail"]}
+                OPS["project.cursor"](tx, {"research_id": rid, "actor": "bridge", "flow": flow})
+
     def replay(self) -> ReplayReport:
-        """重放全部待處理記錄（重啟時、DB 復原後、或定期重試）。可重複呼叫、冪等。"""
+        """重放全部待處理記錄（重啟時、DB 復原後、或定期重試）。可重複呼叫、冪等。重放把 outbox
+        清空的那一次，順手校正受影響專案的游標（D-128；BLOCKED_DB 期間游標不重新衍生）。"""
         report = ReplayReport()
         with self._lock:
+            affected = sorted({op.research_id for op in self._outbox.pending()})
             try:
                 self._drain(report)
             except DbBlocked:
                 return report
             if not self._outbox.pending():
                 self._outbox.compact()
+                if affected and report.applied:
+                    if self._fsm_state_of is None:
+                        self._unsettled.update(affected)
+                    else:
+                        self._settle_cursors(affected)
         return report

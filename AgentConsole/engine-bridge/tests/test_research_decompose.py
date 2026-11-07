@@ -371,3 +371,39 @@ def test_decomposition_documents_are_never_signed_off_when_built_by_the_planner(
                                         prd_sha256="a" * 64, goals=[], draft_ids=[])
     assert doc["signed_off"] is False and doc["signed_off_by"] is None
     assert doc["waivers"] == [] and doc["limits"] == {"max_steps_per_goal": 24}
+
+
+# ── AT-961-10-6：DB 與檔案逐欄相等（Bridge 側可驗的部分）────────────────────────────────────────
+def test_AT_961_10_6_file_sha_row_count_and_json_task_count_agree_and_drift_is_reported_only(
+        renv: rgs.RouteEnv) -> None:
+    """「已簽核版本落成的正式 tasks 數」在 console-api 側（Bridge 簽核本文只帶 `import_record_id`，
+    不帶落成數）：這裡只驗 Bridge 看得到的三方相等；後半子句列勘誤候選（見交卷）。"""
+    import hashlib
+    rid, did = partial_decomposition(renv)
+    ok = signoff(renv, rid, did, waivers=[{"ac": a, "reason": "r"} for a in (
+        "AC-002-1", "AC-003-1", "AC-003-2")])
+    assert ok.status_code == 200, ok.text
+    target = workspace(renv, rid) / "03_execution" / "task_decomposition.json"
+    raw = target.read_bytes()
+    registered = renv.rdb.one(
+        "SELECT sha256 FROM console.research_artifacts WHERE research_id = %s AND "
+        "kind = 'TASK_DECOMPOSITION' ORDER BY version DESC LIMIT 1", rid)
+    assert registered is not None and registered[0].strip() == hashlib.sha256(raw).hexdigest()
+    doc = json.loads(raw.decode("utf-8"))
+    json_tasks = sum(len(goal.get("tasks", [])) for goal in doc["goals"])
+    [row] = rows(renv, rid)
+    assert row[5] == json_tasks and row[2] == "SIGNED_OFF" and row[9], "tasks_count＝JSON task 數"
+    checks = {c["id"]: c for c in renv.env.post(
+        f"/research/projects/{rid}:reconcile", {}).json()["checks"]}
+    assert checks["task_decomposition"]["status"] == "ok"
+    target.write_bytes(raw + b" ")                       # 改檔一位元組
+    drifted = {c["id"]: c for c in renv.env.post(
+        f"/research/projects/{rid}:reconcile", {}).json()["checks"]}["task_decomposition"]
+    assert drifted["status"] == "drift"
+    [entry] = drifted["drift"]
+    assert entry["kind"] == "TASK_DECOMPOSITION" and entry["path"].endswith(
+        "task_decomposition.json")
+    assert entry["expectedSha256"] == hashlib.sha256(raw).hexdigest()
+    assert entry["actualSha256"] == hashlib.sha256(raw + b" ").hexdigest()
+    assert target.read_bytes() == raw + b" ", "Bridge 不自動修正任何一邊"
+    assert rows(renv, rid) == [row]

@@ -151,6 +151,12 @@ def commit_message(kind: str, rp_no: str, sha12: str | None = None) -> str:
         if sha12 is None or not _SHA_PREFIX_RE.fullmatch(sha12):
             raise GitopsDenied("commit", "sha12 格式不合")
         return f"docs: 發佈 {rp_no} PRD 與落點提示（sha256 {sha12}）"
+    if kind in ("tcs", "scr"):
+        if sha12 is None or not _SHA_PREFIX_RE.fullmatch(sha12):
+            raise GitopsDenied("commit", "sha12 格式不合")
+        if kind == "tcs":
+            return f"docs: 發佈 {rp_no} TCS（sha256 {sha12}）"
+        return f"docs: SCR 發佈 {rp_no} PRD 新版（sha256 {sha12}）"
     if kind == "scaffold":
         return f"chore: 由 ResearchToPRD 建立 {rp_no} 專案骨架"
     raise GitopsDenied("commit", f"未知的訊息模板 {kind!r}")
@@ -159,6 +165,8 @@ def commit_message(kind: str, rp_no: str, sha12: str | None = None) -> str:
 _MESSAGE_RES = (
     re.compile(r"^docs: 發佈 RP-[0-9]{4,} PRD 與落點提示（sha256 [0-9a-f]{12}）$"),
     re.compile(r"^chore: 由 ResearchToPRD 建立 RP-[0-9]{4,} 專案骨架$"),
+    re.compile(r"^docs: 發佈 RP-[0-9]{4,} TCS（sha256 [0-9a-f]{12}）$"),
+    re.compile(r"^docs: SCR 發佈 RP-[0-9]{4,} PRD 新版（sha256 [0-9a-f]{12}）$"),
 )
 
 

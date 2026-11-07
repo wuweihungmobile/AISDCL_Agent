@@ -380,6 +380,11 @@ def test_AT_961_4_E_1_blocked_writes_wait_in_the_outbox_and_replay_is_idempotent
     assert route_rows(renv, rid)[0][1] == "RUNNING", "阻塞期間路由列不顯示終態"
     first = ctx.writer.replay()
     assert not first.rejected and first.blocked is None
+    # D-128：重放完成那一刻游標已校正——路由列 SUCCEEDED、游標不殘留 BLOCKED_DB
+    cur = cursor(renv, rid)
+    assert (route_rows(renv, rid)[0][1], cur[:3]) == ("RUNNING", ("route", "ROUTING", "RUNNING"))
+    assert cur[2] != "BLOCKED_DB"
+    assert not ctx.writer.has_pending(rid)
     snapshot = (renv.rdb.count("research_route_steps"), renv.rdb.count("research_events"))
     second = ctx.writer.replay()
     assert not second.applied
@@ -388,7 +393,66 @@ def test_AT_961_4_E_1_blocked_writes_wait_in_the_outbox_and_replay_is_idempotent
     assert seqs == list(range(1, len(seqs) + 1)), "事件 seq 連續無缺漏"
 
 
-# ── AT-961-4-E-2／E-3：牆鐘 ════════════════════════════════════════════════════════════════════
+def test_AT_961_4_E_1_a_late_block_leaves_the_final_ops_queued_and_replay_settles_the_cursor(
+        renv: rgs.RouteEnv) -> None:
+    """D-128 校正點：最後一步之後才斷線，收尾操作（路由列 SUCCEEDED、游標 build／ROUTED）留在
+    outbox；重放完成的同一交易重新衍生游標，路由列與游標一致、不殘留 BLOCKED_DB。"""
+    rid = rgs.seed_gate0(renv)
+    ctx = research_ctx(renv)
+    gate = {"on": True}
+
+    def block(step: str, op: Any) -> None:     # 收尾的 route.finish(SUCCEEDED) 寫入 outbox 之後斷線
+        if (gate["on"] and step == "outbox" and op.kind == "route.finish"
+                and op.payload.get("status") == "SUCCEEDED"):
+            gate["on"] = False
+            renv.rdb.block()
+
+    ctx.writer._after = block                  # DurableWriter 的四步後中斷注入點（測試專用）
+    try:
+        resp = rgs.confirm(renv, rid, rgs.body_a(renv))
+    finally:
+        ctx.writer._after = None
+        renv.rdb.unblock()
+    assert (resp.status_code, resp.json()["reason"]) == (503, "db_blocked")
+    assert ctx.writer.has_pending(rid)
+    assert route_rows(renv, rid)[0][1] != "SUCCEEDED" and cursor(renv, rid)[1] != "ROUTED"
+    first = ctx.writer.replay()
+    assert not first.rejected and first.blocked is None and first.applied
+    assert route_rows(renv, rid)[0][1] == "SUCCEEDED"
+    assert cursor(renv, rid)[:3] == ("build", "ROUTED", "IDLE")
+    snapshot = (renv.rdb.count("research_route_steps"), renv.rdb.count("research_events"),
+                cursor(renv, rid))
+    second = ctx.writer.replay()
+    assert not second.applied
+    assert (renv.rdb.count("research_route_steps"), renv.rdb.count("research_events"),
+            cursor(renv, rid)) == snapshot
+    seqs = [e[0] for e in renv.rdb.events(rid)]
+    assert seqs == list(range(1, len(seqs) + 1)), "事件 seq 連續無缺漏"
+
+
+@pytest.mark.parametrize(("stale", "expected"), [("RUNNING", "IDLE"), ("FAILED", "FAILED")])
+def test_AT_961_4_E_1_replay_rederives_a_stale_status_but_never_washes_out_failed(
+        renv: rgs.RouteEnv, stale: str, expected: str) -> None:
+    """D-128 的校正本身：沒有進行中的 stage run 與分流列時，過期的 RUNNING 衍生回 IDLE；已寫下的
+    FAILED 不被重放洗掉（只有後續成功收尾才把它衍生掉）。"""
+    from app.research.outbox import DbBlocked
+    rid = rgs.seed_gate0(renv)
+    flow = {"step": "build", "phase": "ROUTED", "status": stale, "detail": "keep"}
+    ctx = research_ctx(renv)
+    renv.rdb.block()
+    try:
+        with pytest.raises(DbBlocked):
+            ctx.writer.persist(route.Op("project.cursor", rid, {
+                "research_id": rid, "actor": "bridge", "flow": flow}))
+    finally:
+        renv.rdb.unblock()
+    assert ctx.writer.has_pending(rid)
+    assert ctx.writer.replay().applied
+    assert cursor(renv, rid) == ("build", "ROUTED", expected, "keep")
+    assert not ctx.writer.has_pending(rid)
+
+
+# ── AT-961-4-E-2／E-3：牆鐘════════════════════════════════════════════════════════════════════
 class FakeClock:
     def __init__(self) -> None:
         self.now = 1000.0

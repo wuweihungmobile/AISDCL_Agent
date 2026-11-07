@@ -255,6 +255,7 @@ class Orchestrator:
         self._prior_phase: dict[str, str] = {}
         self._guard = threading.RLock()
         self.journal = ReviewJournal(Path(writer.outbox.path).parent / "review-pending")
+        writer.bind_fsm_reader(self._fsm_state)     # D-128：outbox 重放完成時校正游標要讀 FSM 現態
 
     # ── 對外 ─────────────────────────────────────────────────────────────────────────────────
     def start(self, row: dict[str, Any], stage: str, *, requested_by: str,
@@ -1240,7 +1241,7 @@ class Orchestrator:
         rel = f"docs/03_testing/contracts/{name}"
         env = scr_mod.ScrEnv(cfg=self.cfg, db=self.db, writer=self.writer, audit=self.audit)
         try:
-            scr_mod.publish_text(env, ctx.row, route, rel, text, sha)
+            scr_mod.publish_text(env, ctx.row, route, rel, text, sha, kind="tcs")
         except (OSError, ValueError) as exc:
             raise StageFailed("tcs_publish_failed", type(exc).__name__) from exc
         fctx = self._inner_fsm(route)

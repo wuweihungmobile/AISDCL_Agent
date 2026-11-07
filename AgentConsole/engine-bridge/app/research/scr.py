@@ -353,7 +353,7 @@ def _entry(label: str, verb: str, args: str, ok: bool, result: str) -> dict[str,
 
 
 def publish_text(env: ScrEnv, row: Mapping[str, Any], route: Mapping[str, Any], rel: str,
-                 text: str, sha256: str) -> str:
+                 text: str, sha256: str, *, kind: str | None = None) -> str:
     """把 `text` 原子寫到目標根的 `rel`＋sha256 驗證；軌道 A 另以明列路徑 `add`＋`commit`（`gitops`
     唯一出口；訊息模板取自 `gitops.commit_message`）。SCR 的 PRD 重發佈與 TCS 發佈共用。"""
     exec_path = Path(route["target_path"])
@@ -373,7 +373,7 @@ def publish_text(env: ScrEnv, row: Mapping[str, Any], route: Mapping[str, Any], 
     if added.returncode != 0:
         raise ValueError(f"git add rc={added.returncode}")
     if git.git(["status", "--porcelain"], cwd=worktree).stdout.strip():
-        message = gitops.commit_message(SCR_COMMIT_KIND, str(row["rp_no"]), sha256[:12])
+        message = gitops.commit_message(kind or SCR_COMMIT_KIND, str(row["rp_no"]), sha256[:12])
         done = git.git(["commit", "-m", message], cwd=worktree)
         if done.returncode != 0:
             raise ValueError(f"git commit rc={done.returncode}")
@@ -384,8 +384,8 @@ def _publish(env: ScrEnv, row: Mapping[str, Any], route: Mapping[str, Any], base
              ) -> str:
     return publish_text(env, row, route, publish_rel(row, route), base.text, base.sha256)
 
-#: SCR 發佈的 commit 訊息模板種類（`gitops.commit_message`；P1 只有 `publish`，見交卷勘誤候選）。
-SCR_COMMIT_KIND = "publish"
+#: SCR 發佈的 commit 訊息模板種類（`gitops.commit_message`；D-134 第 7 條）。
+SCR_COMMIT_KIND = "scr"
 
 
 def _persist_actions(env: ScrEnv, rid: str, scr: Mapping[str, Any],

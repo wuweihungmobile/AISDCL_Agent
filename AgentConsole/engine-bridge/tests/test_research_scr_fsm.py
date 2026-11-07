@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ import pytest
 from app import fsutil, sdd_cli
 from app.errors import ApiError
 from app.research import fsm_ops, scr
+from app.routers import sdd as sdd_router
 from tests import research_git_support as rgs
 from tests import test_research_approve as ap
 from tests import test_research_router as rt
@@ -102,7 +104,7 @@ def test_AT_961_13_2_each_matrix_row_runs_its_sequence_and_ends_in_implementatio
     published = Path(route["target_path"]) / "docs" / "01_requirements" / "demo_PRD.md"
     assert published.read_text(encoding="utf-8") == CHANGED_PRD
     worktree = Path(route["target_path"]).parent
-    assert rgs.git(worktree, "log", "-1", "--format=%s").startswith("docs: 發佈")
+    assert rgs.git(worktree, "log", "-1", "--format=%s").startswith("docs: SCR 發佈")
 
 
 # ── AT-961-13-1：序列與人工等價序列的 decision_trace diff ───────────────────────────────────
@@ -404,3 +406,64 @@ def test_AT_961_13_E_2_every_failing_position_stops_the_sequence_there(
         assert len(out.actions) == expected_len and out.actions[-1]["rc"] != 0
         assert len(persisted[-1]) == expected_len
     assert route and json.dumps({})
+
+
+# ── AT-961-13-5：同模式第三次 FAIL ⇒ gate 回 SPEC_AUDIT ⇒ BLOCKED（gate 恰一次）────────
+def test_AT_961_13_5_a_same_pattern_third_fail_returns_spec_audit_and_blocks(
+        renv: rgs.RouteEnv) -> None:
+    rid, route = at_state(renv, "demo", "IMPLEMENTATION")
+    key, sdir = route["impl_fsm_project"], route["impl_state_dir"]
+    same = scr.PR_REVIEW_FAIL_REASON.format(k=1)
+    for _ in range(2):                      # 預先累積兩次相同 --reason 的 PR_REVIEW FAIL
+        cli(renv, key, sdir, "transition", "--to", "PR_REVIEW", "--reason", "given", "--trigger",
+            sdd_cli.RESEARCH_TRIGGER)
+        cli(renv, key, sdir, "gate", "--gate", "PR_REVIEW", "--result", "FAIL", "--reason", same)
+    assert fsm_ops.current_state(inner(renv, route)) == "IMPLEMENTATION"
+    assert post_scr(renv, rid).status_code == 202
+    resp = outer_loop(renv, rid, CHANGED_PRD)
+    assert resp.status_code == 200, resp.text
+    out = resp.json()["scr_apply"]
+    assert out["status"] == "BLOCKED"
+    assert out["detail"] == "gate(PR_REVIEW,FAIL): next_state=SPEC_AUDIT"
+    acts = actions(renv, rid)
+    assert [a["label"] for a in acts] == [*PRE_LABELS["transition(SPEC_AUDIT)"], "publish",
+                                          "spec-refreeze", "transition(PR_REVIEW)",
+                                          "gate(PR_REVIEW,FAIL)"]
+    assert acts[-1]["blocked"] is True and acts[-1]["result"] == "ok:SPEC_AUDIT"
+    assert sum(a["label"] == "gate(PR_REVIEW,FAIL)" for a in acts) == 1
+    assert scr_rows(renv, rid)[0][2] == "APPROVED"
+    assert cursor(renv, rid)[3] == "scr_blocked:SPEC_AUDIT"
+    assert fsm_ops.current_state(inner(renv, route)) == "SPEC_AUDIT"
+
+# ── AT-961-13-E-1：SCR 核准後外環鍵的重試預算全新 ───────────────────────────────────────────────
+GATES3 = sdd_router.RETRY_GATES          # 實作登記三閘（TCS 條文寫「四閘」＝勘誤候選）
+
+
+def retry_counts(ctx: fsm_ops.FsmCtx) -> dict[str, int]:
+    gates = sdd_router._retry_gates(fsm_ops.show(ctx).get("retry_history"))
+    return {g: int(gates[g]["current_count"]) for g in GATES3}
+
+
+def test_AT_961_13_E_1_the_outer_key_retry_budget_is_fresh_after_the_gate_0_scr_approval(
+        renv: rgs.RouteEnv) -> None:
+    rid, route = at_state(renv, "demo", "IMPLEMENTATION")
+    assert post_scr(renv, rid).status_code == 202
+    ctx = outer(renv, rid)
+    fsm_ops.transition(ctx, to="SCG_VALIDATION", reason="ready for review")
+    fsm_ops.gate(ctx, gate="SCG_VALIDATION", result="FAIL", reason="first failure of the review")
+    assert retry_counts(ctx)["SCG_VALIDATION"] == 1
+    resp = outer_loop(renv, rid, CHANGED_PRD)
+    assert resp.status_code == 200, resp.text
+    assert fsm_ops.current_state(ctx) == "SPEC_FROZEN"
+    assert retry_counts(ctx) == dict.fromkeys(retry_counts(ctx), 0) and len(retry_counts(ctx)) == 3
+    assert post_scr(renv, rid).status_code == 202      # 第二張 SCR：外環鍵離開 SPEC_FROZEN
+    fsm_ops.transition(ctx, to="SCG_VALIDATION", reason="fresh budget probe")
+    for n in (1, 2, 3):                 # 預算全新：第 3 次 FAIL 才進 ESCALATION
+        assert not fsm_ops.current_state(ctx).startswith("ESCALATION"), n
+        if fsm_ops.current_state(ctx) != "SCG_VALIDATION":
+            fsm_ops.transition(ctx, to="SCG_VALIDATION", reason=f"retry {n}")
+        fsm_ops.gate(ctx, gate="SCG_VALIDATION", result="FAIL",
+                     reason=f"distinct failure {n} {uuid.uuid4().hex}")
+        assert retry_counts(ctx)["SCG_VALIDATION"] == n
+    assert fsm_ops.current_state(ctx).startswith("ESCALATION")
+    assert route

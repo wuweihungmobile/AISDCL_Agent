@@ -66,12 +66,9 @@ def _successor_factory(ctx: ResearchContext, requested_by: str
 
     def make(old: dict[str, Any], scr_no: int) -> dict[str, Any]:
         assert ctx.db is not None and ctx.writer is not None
-        slug = f"{old['slug']}-scr{scr_no}"
-        problems = layout.slug_violations(slug)
-        if problems:
-            raise unprocessable([_violation("slug", "successor_slug_invalid",
-                                            f"新專案 slug {slug!r} 不合規（長度上限 30 字）")],
-                                "invalid_request")
+        # D-136：確定性截斷（舊 slug 截到 30－len(後綴) 字、去尾端 `-`），不回 422；撞名走 409
+        suffix = f"-scr{scr_no}"
+        slug = f"{str(old['slug'])[:30 - len(suffix)].rstrip('-')}{suffix}"
         if ctx.db.find_active_project(slug) is not None:
             raise ApiError(409, "slug_in_use", details={"slug": slug})
         new_id = str(uuid.uuid4())

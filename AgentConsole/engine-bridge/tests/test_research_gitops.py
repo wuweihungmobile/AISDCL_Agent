@@ -270,3 +270,30 @@ def test_AT_961_8_E_2_only_origin_with_a_verified_branch_is_pushed(
         with pytest.raises(gitops.GitopsDenied):
             ops(dirs).git(bad, cwd=dirs["project"])
     assert spawns.calls == []
+
+
+# ── D-134 第 7 條：tcs／scr 兩模板（BR-D3）────────────────────────────────────────────────────
+def test_D_134_tcs_and_scr_templates_are_exact_and_pass_the_commit_whitelist(
+        dirs: dict[str, Path]) -> None:
+    tcs = gitops.commit_message("tcs", "RP-0007", "0123456789ab")
+    scr = gitops.commit_message("scr", "RP-0007", "0123456789ab")
+    assert tcs == "docs: 發佈 RP-0007 TCS（sha256 0123456789ab）"
+    assert scr == "docs: SCR 發佈 RP-0007 PRD 新版（sha256 0123456789ab）"
+    kw = {"scaffold_root": dirs["scaffold"], "worktree_root": dirs["worktrees"]}
+    for message in (tcs, scr):
+        argv = gitops.parse_git(["commit", "-m", message], cwd=dirs["tree"], **kw)
+        assert argv[:3] == ["git", "commit", "-m"] and argv[3] == message
+
+
+def test_D_134_tcs_and_scr_templates_reject_bad_sha_bad_rp_no_and_unknown_kind() -> None:
+    for kind in ("tcs", "scr"):
+        for sha in (None, "", "xyz", "0123456789AB", "0123456789abc"):
+            with pytest.raises(gitops.GitopsDenied):
+                gitops.commit_message(kind, "RP-0007", sha)
+        with pytest.raises(gitops.GitopsDenied):
+            gitops.commit_message(kind, "bad", "0123456789ab")
+    with pytest.raises(gitops.GitopsDenied):
+        gitops.commit_message("tcs2", "RP-0007", "0123456789ab")
+    with pytest.raises(gitops.GitopsDenied):       # 自由文字仍擋（白名單只多兩條固定句型）
+        gitops.parse_git(["commit", "-m", "docs: 發佈 RP-0007 TCS（sha256 zz）"],
+                         cwd=Path("."), scaffold_root=Path("."), worktree_root=Path("."))

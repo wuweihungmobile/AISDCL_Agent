@@ -169,6 +169,20 @@ def test_AT_961_9_1_unmet_preconditions_are_409_listed_one_by_one_with_zero_writ
     assert tcs_runs(renv, rid) == []
 
 
+def test_AT_961_9_1_an_escalated_outer_key_is_409_escalated_with_zero_writes(
+        renv: rgs.RouteEnv) -> None:
+    from tests import test_research_approve as ap
+    rid = rt.create(renv.env, "esc")["research_id"]
+    ap.seed_pending(renv.env, rid, fsm="SCG_VALIDATION")
+    rt.fail_to_escalation(rt.fsm_ctx_of(renv.env, rid))
+    assert fsm_ops.current_state(rt.fsm_ctx_of(renv.env, rid)).startswith("ESCALATION")
+    runs, events = renv.rdb.count("research_stage_runs"), renv.rdb.count("research_events")
+    resp = start(renv, rid, expect=409)
+    assert resp.json()["reason"] == "escalated"
+    assert {"target", "powershell", "posix"} <= set(resp.json()["details"]["recovery"])
+    assert (renv.rdb.count("research_stage_runs"), renv.rdb.count("research_events")) == (
+        runs, events), "409 零寫入"
+
 def test_AT_961_9_1_an_active_stage_run_is_stage_conflict(
         renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
     rid = ready(renv, monkeypatch)
@@ -276,3 +290,143 @@ def test_a_missing_mock_script_step_fails_loudly_instead_of_succeeding_silently(
     start(renv, rid)
     assert tcs_runs(renv, rid)[-1][1] == "FAILED"
     assert ADMIN
+
+
+# ── AT-961-9-5／9-6：凍結走既有 :freeze、內環鍵現態視圖 ─────────────────────────────────────────
+FREEZE_TOKEN = "r2p-br-d3-" + "freeze"          # 測試專用寫入權杖（執行期拼接，避免機密樣式）
+
+
+def enable_freeze(renv: rgs.RouteEnv) -> dict[str, str]:
+    app = renv.env.live.app
+    app.state.settings = replace(app.state.settings, sdd_write_token=FREEZE_TOKEN)
+    return {"X-Bridge-Token": FREEZE_TOKEN}
+
+
+def freeze(renv: rgs.RouteEnv, route: dict[str, Any], docs: list[str], **extra: Any) -> Any:
+    body = {"root": route["target_path"], "docs": docs, "approver": ADMIN,
+            "reason": "人工凍結 Stage-2", **extra}
+    return renv.env.live.client.post(f"/sdd/fsm/{route['impl_fsm_project']}:freeze", json=body,
+                                     headers=enable_freeze(renv))
+
+
+def view(renv: rgs.RouteEnv, route: dict[str, Any]) -> dict[str, Any]:
+    resp = renv.env.live.client.get(f"/sdd/fsm/{route['impl_fsm_project']}",
+                                    params={"root": route["target_path"]})
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def published_tcs(route: dict[str, Any]) -> str:
+    [found] = sorted((Path(route["target_path"]) / "docs" / "03_testing" / "contracts"
+                      ).glob("TCS-*.md"))
+    return found.relative_to(route["target_path"]).as_posix()
+
+
+def test_AT_961_9_5_the_bridge_never_freezes_and_the_human_freeze_goes_through_freeze_endpoint(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    rid = ready(renv, monkeypatch)
+    route = renv.env.db.active_route(rid)
+    seen: list[tuple[str, str]] = []
+    real = sdd_cli.run_research_verb
+    monkeypatch.setattr(sdd_cli, "run_research_verb", lambda verb, args, **k: (
+        seen.append((verb, k.get("project", ""))), real(verb, args, **k))[1])
+    start(renv, rid)
+    verbs = [v for v, key in seen if key == route["impl_fsm_project"] and v != "show"]
+    assert verbs == ["transition"] * 3, "沒有 spec-frozen／spec-refreeze／gate"
+    assert [t[1] for t in trace(renv, route)[-3:]] == ["SPEC_DRAFTING", "SCG_VALIDATION",
+                                                       "HUMAN_PENDING"]
+    tcs = published_tcs(route)
+    no_tcs = freeze(renv, route, ["docs/01_requirements/demo_PRD.md"])
+    assert (no_tcs.status_code, no_tcs.json()["reason"]) == (422, "sanitization_failed")
+    assert no_tcs.json()["violations"][0]["rule"] == "missing_tcs"
+    assert fsm_ops.current_state(inner(renv, route)) == "HUMAN_PENDING", "422 零寫入"
+    ok = freeze(renv, route, [tcs])
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["current_state"] == "SPEC_FROZEN"
+    stages = [s["stage"] for s in fsm_ops.show(inner(renv, route))["frozen_stages"]]
+    assert stages[-1] == "Stage-2" and "Stage-1" in stages
+
+
+def test_AT_961_9_6_the_inner_key_view_shows_the_stage_2_freeze_state_and_the_bridge_adds_no_gate(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    rid = ready(renv, monkeypatch)
+    route = renv.env.db.active_route(rid)
+    enable_freeze(renv)
+
+    def stage_names() -> list[str]:
+        return [s["stage"] for s in view(renv, route)["frozen_stages"]]
+
+    key = route["impl_fsm_project"]
+    # SPEC_DRAFTING：tcs-draft 開跑前（草稿被擋時內環鍵停在這裡）——以 tcs_invalid 的壞劇本佈置
+    set_script(renv, monkeypatch, "沒有任何 AT 標頭")
+    start(renv, rid)
+    assert fsm_ops.current_state(inner(renv, route)) == "SPEC_DRAFTING"
+    drafting = view(renv, route)
+    assert drafting["current_state"] == "SPEC_DRAFTING" and "Stage-2" not in stage_names()
+    # HUMAN_PENDING：好草稿重跑
+    set_script(renv, monkeypatch, OK_DRAFT, "good")
+    start(renv, rid)
+    pending = view(renv, route)
+    assert pending["current_state"] == "HUMAN_PENDING" and "Stage-2" not in stage_names()
+    assert pending["phase"] != drafting["phase"]
+    # SPEC_FROZEN＋Stage-2
+    assert freeze(renv, route, [published_tcs(route)]).status_code == 200
+    frozen = view(renv, route)
+    assert frozen["current_state"] == "SPEC_FROZEN" and stage_names()[-1] == "Stage-2"
+    assert key
+    diff = rgs.git(Path(__file__).resolve().parents[3], "diff", "--name-only", "--",
+                   "AgentConsole/engine-bridge/app/routers/sdd.py")
+    assert diff.strip() == "", "Bridge 不新增啟動閘：routers/sdd.py 零改動"
+
+
+# ── AT-961-9-7（pytest 半）：mock-only 下 tcs-draft 可跑；缺步驟不靜默成功 ──────────────────
+def mock_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.research import settings as research_settings
+    real = research_settings.shutil.which
+    monkeypatch.setattr(research_settings.shutil, "which",
+                        lambda name, *a, **k: None if name == "claude" else real(name, *a, **k))
+
+
+def test_AT_961_9_7_the_product_mock_claude_runs_the_tcs_draft_step_and_fails_loudly_without_it(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]) -> None:
+    from app import mock_claude
+    prompt = "請依 .prompts/tcs-draft.md 草擬 TCS（round=0）"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MOCK_CLAUDE_DELAY", "0")
+    monkeypatch.setenv("MOCK_CLAUDE_RESEARCH_SCRIPT", str(FIXTURES / "mock_claude_script_tcs.json"))
+    assert mock_claude.run(["-p", prompt]) == 0
+    assert (tmp_path / "03_execution" / "tcs_draft.md").read_text(encoding="utf-8") == OK_DRAFT
+    capsys.readouterr()
+    other = tmp_path / "script_without_tcs.json"
+    other.write_text(json.dumps({"schema": 1, "steps": [{"role": "draft", "round": 0}]}),
+                     encoding="utf-8", newline="\n")
+    monkeypatch.setenv("MOCK_CLAUDE_RESEARCH_SCRIPT", str(other))
+    assert mock_claude.run(["-p", prompt]) == 2
+    assert "tcs-draft" in capsys.readouterr().err, "stderr 說明缺哪一步（不靜默成功）"
+
+
+def test_AT_961_9_7_in_mock_only_mode_the_stage_succeeds_with_the_step(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_only(monkeypatch)
+    assert renv.env.get("/health/deep").json()["research"]["mode"] == "mock-only"
+    rid = ready(renv, monkeypatch)
+    resp = start(renv, rid)
+    assert resp.status_code == 202
+    assert tcs_runs(renv, rid)[-1][1] == "SUCCEEDED"
+
+
+def test_AT_961_9_7_in_mock_only_mode_a_script_without_the_step_fails_the_stage(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_only(monkeypatch)
+    rid = ready(renv, monkeypatch)
+    directory = renv.tmp / "tcs-missing-step"
+    directory.mkdir()
+    (directory / "script.json").write_text(
+        json.dumps({"schema": 1, "steps": [{"role": "draft", "round": 0}]}), encoding="utf-8",
+        newline="\n")
+    monkeypatch.setenv("MOCK_CLAUDE_RESEARCH_SCRIPT", str(directory / "script.json"))
+    start(renv, rid)
+    [run] = tcs_runs(renv, rid)
+    assert run[1] == "FAILED" and run[2] != "", "不靜默成功"
+    assert renv.rdb.count("research_artifacts", "kind = 'TCS'") == 0

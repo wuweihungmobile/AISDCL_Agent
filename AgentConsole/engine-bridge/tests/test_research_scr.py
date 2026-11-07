@@ -307,6 +307,41 @@ def test_AT_961_12_5_major_creates_a_successor_project_and_leaves_the_old_keys_a
     assert fsm_ops.current_state(outer(renv, rid)) == "SPEC_FROZEN"
 
 
+# ── D-136：MAJOR 後繼 slug 確定性截斷（不再有 successor_slug_invalid）──────────────────────────
+LONG_SLUG = "abcdefghij" * 2 + "abcdefg"      # 27 字：加 "-scr1" 後逾 30 字上限
+
+
+def test_D_136_a_27_char_slug_is_truncated_deterministically_for_the_major_successor(
+        renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv, LONG_SLUG)
+    resp = post_scr(renv, rid, kind="MAJOR", reason_class="EVIDENCE", affected_sections=[])
+    assert resp.status_code == 202, resp.text
+    new = renv.env.db.get_project(resp.json()["successor_research_id"])
+    assert new is not None
+    assert new["slug"] == LONG_SLUG[:25] + "-scr1" and len(new["slug"]) == 30
+    assert "successor_slug_invalid" not in resp.text
+
+
+def test_D_136_a_trailing_dash_left_by_the_cut_is_stripped(renv: rgs.RouteEnv) -> None:
+    old = "abcdefghij" * 2 + "abcd-xyz"             # 第 25 字落在 `-` 上
+    rid, _route = routed(renv, old)
+    resp = post_scr(renv, rid, kind="MAJOR", reason_class="EVIDENCE", affected_sections=[])
+    assert resp.status_code == 202, resp.text
+    new = renv.env.db.get_project(resp.json()["successor_research_id"])
+    assert new is not None and new["slug"] == "abcdefghijabcdefghijabcd-scr1"
+
+
+def test_D_136_a_truncated_slug_that_collides_is_409_slug_in_use_and_writes_nothing(
+        renv: rgs.RouteEnv) -> None:
+    rid, _route = routed(renv, LONG_SLUG)
+    clash = LONG_SLUG[:25] + "-scr1"
+    rgs.seed_gate0(renv, clash)
+    before = scr_rows(renv, rid)
+    resp = post_scr(renv, rid, kind="MAJOR", reason_class="EVIDENCE", affected_sections=[])
+    assert (resp.status_code, resp.json()["reason"]) == (409, "slug_in_use")
+    assert scr_rows(renv, rid) == before
+
+
 # ── AT-961-12-6：HEALING_FAILED ─────────────────────────────────────────────────────────────
 def test_AT_961_12_6_healing_failed_returns_a_recovery_command_and_writes_no_fsm_verb(
         renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
