@@ -57,11 +57,9 @@ class ResearchReasonsTest {
     /** P1 起的四方鎖集合：22＋4＋9＝35。 */
     private static final Set<String> ALL_REASONS = union(P0_REASONS, P0_TAIL_REASONS, P1_REASONS);
     /** 契約 §0.2 勘誤尚未落地、缺列的 reason（主控 RELEASE_READY 批次補列後清空；D-115）。 */
-    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>(List.of("scr_open", "decomposition_stale", "compile_failed", "sdd_cli_failed",
-            "fsm_state_unreadable"));
+    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>();
     /** Architecture §11.1 研究 reason 表勘誤尚未落地、缺列的 reason（同上）。 */
-    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>(List.of("route_step_failed", "compile_failed", "sdd_cli_failed",
-            "fsm_state_unreadable", "invalid_request"));
+    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>();
     /** D-72 取代後退役的 reason：Bridge 對研究端點不再回它，任何一處都不得再列（見類別說明）。 */
     private static final Set<String> RETIRED_REASONS = new TreeSet<>(List.of("spec_digest_changed"));
 

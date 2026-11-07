@@ -487,7 +487,7 @@ def test_AT_961_20_1_route_decision_is_compared_with_its_registered_sha(
     result = p1_reconcile(renv, rid)
     assert checks_of(result)["route_decision"]["status"] == "ok"
     assert checks_of(result)["route_decision"]["present"] is True and result["consistent"]
-    assert [c["id"] for c in result["checks"]] == list(CHECK_IDS), "六項檢查名與順序不變"
+    assert [c["id"] for c in result["checks"]] == list(CHECK_IDS), "對帳項名與順序以 CHECK_IDS 為準"
     path = p1_workspace(renv, rid) / P1_RESEARCH_FILES[0]
     original = path.read_bytes()
     path.write_bytes(original + b" ")

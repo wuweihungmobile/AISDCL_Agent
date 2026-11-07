@@ -390,7 +390,7 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 | R7 | 分流決定與副作用步驟 | track、參數 JSON、預演動作清單、決定者與時間、`steps[]`（動作、去敏 argv、結果、時間） | `02_governance/route_decision.json` | Bridge | 決定列的 `status` 與終態欄可更新；步驟列追加 | `research_route_decisions`、`research_route_steps` |
 | R8 | 拆解結果 | 版本、JSON、`prd_sha256`、`signed_off`／by／at、豁免理由、`console_project_id` | `03_execution/task_decomposition.json` | Bridge（正式 goals／tasks 由既有 import／signoff 路徑寫入 console-api 擁有的表） | `status` 可更新（簽核另記事件） | `research_decompositions`（＋既有 `import_records`） |
 | R9 | stage run | `stage`（RESEARCH／DRAFT／REVIEW／REVISE／TCS_DRAFT）、輪次、嘗試序號、引擎 run id、狀態轉移、起訖、token、原因（`exit_reason`；審查 run 的取消、中斷、無效輸出只記在這裡，D-57）、prompt manifest、allowlist 快照 | `.prompts/`、`playbook.yaml`、工作區 run 目錄 | Bridge | 狀態、token、時間可更新（每次轉移追加事件）；內環 run 在既有 `execution_runs` | `research_stage_runs` |
-| R10 | 自癒嘗試 | run、task、attempt 序號、失敗日誌摘錄（遮蔽後、有上限）、歸因摘要、結果、時間 | `03_execution/healing_history.log`（衍生日誌） | Bridge（日誌）；DB 真相＝既有 `execution_steps` | 唯讀視圖 | `v_research_healing_attempts`（視圖） |
+| R10 | 自癒嘗試 | run、task、attempt 序號（讀端以視窗函式導出）、失敗日誌摘錄（遮蔽後、有上限）、歸因摘要與補丁結果（**引擎未提供，一律 null 並標「引擎未提供」**；D-138 Q-6、D-140 #5）、時間 | `03_execution/healing_history.log`（衍生日誌） | Bridge（日誌）；DB 真相＝既有 `execution_steps` | 唯讀視圖 | `v_research_healing_attempts`（視圖） |
 | R11 | 交付 | tag／PR 編號、commit sha、URL、追溯快照參照、交付者與時間 | `03_execution/traceability_matrix.json` | Bridge | 只追加 | `research_deliveries` |
 | R12 | SCR | 理由與分類、受影響章節、狀態、發起者與時間、新 PRD 版本、後繼研究專案 | — | Bridge | `status` 可更新（轉移追加事件） | `research_scr` |
 | R13 | 步驟歷史 | from、to、actor、時間、理由、版本號 | `02_governance/state.json`（投影） | Bridge | 只追加 | `research_events`（`research.step`） |
@@ -535,7 +535,7 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 - **AC-R2P-06-3**（M，vitest 負控）Given 事件文字含 `<script>`、Markdown 或 HTML 片段 When 渲染 Then 原樣純文字顯示，不執行、不轉格式。
 - **AC-R2P-06-4**（M）Given 研究 run 已結束 When 重新開啟頁面 Then 動態欄由 DB 的 `research_events`（及其所指抓取與 stage run 列）重建（不依賴記憶體緩衝），內容與結束前最後畫面一致。
 - **AC-R2P-06-5**（M）Given 優缺點矩陣視圖 When 某候選技術有 ≥1 證據列 Then 顯示其優點與缺點欄，每格帶 `[E-NNN]` 連結；無證據的候選不顯示。
-**整合點**：Bridge SSE `GET /autoclaude/runs/{run_id}/stream`（`routers/autoclaude.py:214`）與 console-api `/api/v1/stream/executions/{runId}/logs`（Console PRD §7.1.7）；前端 `lib/sse/`（Architecture §5.3）；研究專用事件通道＝`GET /api/v1/stream/research/{id}`（API 契約 §3）。
+**整合點**：Bridge SSE `GET /autoclaude/runs/{run_id}/stream`（`routers/autoclaude.py:214`）與 console-api `/api/v1/stream/executions/{runId}/logs`（Console PRD §7.1.7）；前端 `lib/api/sse.ts`＋`hooks/useRunStream.ts`（Architecture §5.3；D-140 #3）；研究專用事件通道＝`GET /api/v1/stream/research/{id}`（API 契約 §3）。
 
 #### FG-C 規格：PRD 草擬、四方審查、工作室 UI、Gate 0
 ##### FR-R2P-07 PRD 草擬〔P0｜新建（框架側模板＋Console 編排）〕
@@ -656,7 +656,7 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 - **AC-R2P-11-4**（M）Given 分流與 PRD `Target Scope` 不同 When 確認 Then 要求一句理由（必填）並顯示差異警示；R7 列記載兩者；PRD 凍結檔位元組不變。
 - **AC-R2P-11-5**（M）Given 輸入含黑名單字元、`..`、逃逸 allowlist 的路徑或不合 git ref 規則的分支名 When 預演或執行 Then 422 逐欄列出違規，零副作用（沿 Architecture §8.3 消毒鏈）。
 - **AC-R2P-11-6**（M）Given Bridge 部署模式缺所需檔案系統寫入或 `gh` When 預演 Then 回 `route_unsupported_in_deployment` 並指出缺項；零副作用。
-- **AC-R2P-11-7**（M＋E）〔新增；D-22〕Given ADMIN 確認分流 When 執行 Then Bridge 於目標根建內環鍵 `<sub>-<slug>`（軌道 B 為 `<project-name>`）並採納基線：`show`（唯一建檔點）＋5 次 `transition`（`--reason` 註明「baseline adoption；SCG 已在外環鍵 <鍵> 通過：gate_decision <id>」）＋`spec-frozen --stage Stage-1 --doc <已發佈 PRD 相對路徑> --digest --root <目標根> --approver <JWT subject>`（`--reason` 引外環決定 id 與 PRD sha256）；路由確認即這一步的人工確認；`research_route_decisions.impl_fsm_project／impl_state_dir` 入庫。
+- **AC-R2P-11-7**（M＋E）〔新增；D-22〕Given ADMIN 確認分流 When 執行 Then Bridge 於目標根建內環鍵 `<sub>-<slug>`（軌道 B 為 `<project-name>`；內環鍵文法 `^[a-z][a-z0-9-]{1,99}$`、`project_name` 為 `^[a-z][a-z0-9-]{1,61}$`，D-119）並採納基線：`show`（唯一建檔點）＋5 次 `transition`（`--reason` 註明「baseline adoption；SCG 已在外環鍵 <鍵> 通過：gate_decision <id>」）＋`spec-frozen --stage Stage-1 --doc <已發佈 PRD 相對路徑> --digest --root <目標根> --approver <JWT subject>`（`--reason` 引外環決定 id 與 PRD sha256）；路由確認即這一步的人工確認；`research_route_decisions.impl_fsm_project／impl_state_dir` 入庫。
 - **AC-R2P-11-8**（M）〔新增〕Given ADMIN 確認分流 When 執行 Then console-api **先建** `projects` 列（`execution_path`、`sdd_project`＝內環鍵；V12 索引防重綁）再呼 Bridge；任一步失敗＝補償到安全態（專案列標 `ARCHIVED` 並留稽核；**不**自動 `git clean`／`stash`／刪目錄）、`research_route_decisions.status` 為 `FAILED`／`COMPENSATED`；已有 PENDING／RUNNING／SUCCEEDED 的分流＝409 `route_conflict`。
 **整合點**：`BASE_DENY_CHARS` SSOT（`AutoClaude/autoclaude/utils/shell_deny_chars.py`；Architecture §8.3）；Bridge `security.check_path`；Console PRD §0.5 NFR-SEC-03；Drawer／Dialog 體例（Console 既有 shadcn Dialog，Architecture §5.3）。
 
@@ -664,15 +664,15 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 **來源**：來源 §4（軌道 A 欄：目標場景、路徑規劃、Git 流程、CI/CD、規格掛載）、§5 AISDLC_FEATURE_SETUP（`action: git_checkout_feature_branch`）、§6.2 頁面 3 卡 A；D-03。｜**憲法對照**：鐵律五／七（共用工作樹互踩的事故成因）；`Root_Layout_and_Module_Placement.md` §2。
 **描述**：卡 A 顯示目標分支名（預設 `feature/issue-<NNNN>`，`NNNN`＝`RP-NNNN` 流水號）、掛載目標（模組落點目標）與模組登錄表條目；確認後：① 在**獨立 worktree** 建立 feature 分支（不切換使用中工作樹）；② 將 `PRD-v1.0.0.md` 的位元組相同複本發佈到目標子專案 `docs/` 編號目錄（D-03）；③ 登錄模組（落點表／Architecture 條目，作為 feature 分支上的變更）；④ 建立 Console 專案（DRAFT）並綁定 `sdd_project`／`execution_path`，回填 `console_project_id`；⑤ 建內環鍵並做 Stage-1 基線採納（AC-R2P-11-7）；⑥ 繼承既有 AISDLC 測試與 Token 治理管線（不新增 CI）。
 **邊界條件**：
-- **來源的 `packages/`、`services/` 在本 monorepo 根層不存在**（未找到：根層 `{packages,services}/*` 皆無；模組住三個子專案與根層，落點規則見 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §2）；故「掛載目標」改為由 ADMIN 維護的**模組落點目標清單**（AutoClaude plugin、AISDLC_SDD LATEST 資產、AgentConsole 的 frontend／backend／engine-bridge、根層治理工具），預設值取自 PRD 的「模組落點表」解析結果，使用者可覆寫並記錄（D-20 SA-05）。
+- **來源的 `packages/`、`services/` 在本 monorepo 根層不存在**（未找到：根層 `{packages,services}/*` 皆無；模組住三個子專案與根層，落點規則見 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §2）；故「掛載目標」改為**模組落點目標清單**（P1 固定四值常數 autoclaude／agentconsole／sdd／monorepo，每值附一句落點 SSOT 出處；擴充＝改落點 SSOT 與資料庫 CHECK 的新遷移檔，再開症狀＝掌舵者要求第五個落點目標；D-100）（AutoClaude plugin、AISDLC_SDD LATEST 資產、AgentConsole 的 frontend／backend／engine-bridge、根層治理工具），預設值取自 PRD 的「模組落點表」解析結果，使用者可覆寫並記錄（D-20 SA-05）。
 - worktree 隔離（採 SA 推薦；Windows 長路徑與檔案鎖相容性於 P1 TCS 實測）：主工作樹的 HEAD 與 `git status --porcelain` 前後不變；分支已存在＝409；基底 ref 預設 `main`。
 - 發佈檔的 sha256 必須等於 Gate 0 凍結摘要中對應項；發佈後在 feature 分支留一筆繁體中文 commit（含研究專案 id 與 PRD sha256 前 12 碼）。
 - 凍結摘要綁「root＋相對路徑＋摘要」：軌道 A 的 root 與研究工作區不同，故**內環鍵在目標根重新採納基線**（Stage-1，凍結對象是已發佈到目標 `docs/` 的 PRD 複本，其 sha256 必須等於外環 Gate 0 凍結摘要的對應項）；外環鍵與其摘要留在研究工作區作為出處、不搬遷（D-22、ADR-XPLAT-017）。
 - 同一 `(execution_path, sdd_project)` 只能綁一個未刪除的 Console 專案（`V12` 唯一索引）。
 **US-R2P-12**　身為掌舵者，我想把核准的規格掛進既有模組並自動開好 feature 分支，且不干擾我正在用的工作樹，以便直接在既有治理管線上開工。
 - **AC-R2P-12-1**（M＋E）Given 卡 A 確認 When 執行 Then 於獨立 worktree 建立 `feature/issue-<NNNN>`（基底為使用者選定 ref，預設 `main`）；主工作樹的 HEAD 與 `git status --porcelain` 前後相同；分支已存在＝409 `branch_exists` 且零變更。
-- **AC-R2P-12-2**（M＋E）Given 分支建立成功 When 發佈規格 Then `PRD-v1.0.0.md` 以位元組相同複本發佈到目標落點（目標子專案 `docs/01_requirements/`），發佈檔 sha256 等於 Gate 0 凍結摘要對應項；feature 分支上有一筆繁體中文 commit（含研究專案 id）。
-- **AC-R2P-12-3**（M）Given 掛載目標欄 When 選擇 Then 選項來自落點目標清單（非自由文字），每項附一句落點規則出處；PRD「模組落點表」解析的預設值可覆寫且覆寫被記錄於 R7。
+- **AC-R2P-12-2**（M＋E）Given 分支建立成功 When 發佈規格 Then `PRD-v1.0.0.md` 以位元組相同複本發佈到目標落點（目標子專案 `docs/01_requirements/<slug>_PRD.md`，slug 原樣、不做大小寫轉換；D-119），發佈檔 sha256 等於 Gate 0 凍結摘要對應項；feature 分支上有一筆繁體中文 commit（含研究專案 id）。
+- **AC-R2P-12-3**（M）Given 掛載目標欄 When 選擇 Then 選項來自落點目標清單（非自由文字），每項附一句落點規則出處；PRD「模組落點表」解析的預設值可覆寫且覆寫被記錄於 R7；PRD 無落點表可解析時 `target_module` 缺省＝422 `required`（不靜默取預設；D-129 第 9 條）。
 - **AC-R2P-12-4**（M）Given 軌道 A 完成 When 檢查綁定 Then Console 專案已建立（DRAFT、`signed_off=false`）、`sdd_project` 與 `execution_path` 已綁定、`console_project_id` 已回填；第二個未刪除專案綁同一 `(execution_path, sdd_project)` 被拒（沿 V12 唯一索引）。
 - **AC-R2P-12-5**（M）Given worktree 建立失敗（基底 ref 不存在等） When 失敗 Then R7 步驟列顯示失敗原因；尚未執行的後續步驟（發佈、綁定）不執行；已入庫的步驟列保留；可重試。
 - **AC-R2P-12-6**（M）〔新增〕Given 軌道 A 完成 When 檢查目標分支變更 Then 僅含發佈的規格檔與「落點 stub」（`docs/` 內，提示人去改 SSOT）；根 `CLAUDE.md`、`.claude/`、落點 SSOT、`tools/` 零變更（`git diff --name-only` 核對；治理檔不自動改）。
@@ -690,10 +690,10 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 - 本機有 `gh` 2.85.0；Bridge 容器映像現不含 `gh`（映像只裝 `git`，Architecture §10.1 深度探針列）：容器模式不支援軌道 B 的 `gh`／真 git 副作用（D-29：真研究與路由限本機模式；`GET /research/capabilities` 探針＋UI 停用並說明）。
 **US-R2P-13**　身為掌舵者，我想一次完成新專案的骨架、CI、compose 與 GitHub 初始化，且過程中絕不洩漏機密，以便核准後立刻有可開工的獨立專案。
 - **AC-R2P-13-1**（M）Given 卡 B 輸入合法 When 預演 Then 動作清單含：建立目錄、複製工作區並驗證、`git init`、設定 remote、產生 CI workflow／compose／`.env.example`、初始 commit、（若選 GitHub）建遠端與推送；零副作用。
-- **AC-R2P-13-2**（M＋E）Given 預演通過且 ADMIN 確認 When 執行 Then 新專案根含 `00_research`～`03_execution` 完整副本（逐檔 sha256 與來源相同）、`.git`（初始 commit 一筆）、`.github/workflows/*`、`docker-compose.yml`、`.env.example`；原工作區原地保留、不改名、不刪除。
+- **AC-R2P-13-2**（M＋E）Given 預演通過且 ADMIN 確認 When 執行 Then 新專案根含 `00_research`～`03_execution` 完整副本（**含 `00_research/raw/**`**，逐檔 sha256 與來源相同；raw 以範本 `.gitignore` 排除入版控，見 AC-R2P-13-5）、`.git`（初始 commit 一筆）、`.github/workflows/*`、`docker-compose.yml`、`.env.example`；原工作區原地保留、不改名、不刪除。
 - **AC-R2P-13-3**（M）Given visibility＝Public 而未完成 repo 名稱確認 When 確認 Then 422 `public_confirmation_required`，零副作用；預設值為 Private。
 - **AC-R2P-13-4**（M）Given GitHub token 缺失、權限不足或 `gh` 不存在 When 建立遠端 Then 該步失敗並顯示原因（不顯示 token），本地步驟（init、commit）結果保留且可重試遠端步驟；token 不出現在任何日誌、DB、回應或子行程 argv（以含假 token 的夾具驗證）。
-- **AC-R2P-13-5**（M）Given 初始 commit When 檢查 `git ls-files` Then 不含 `00_research/raw/**` 與 `.env`，且與預演清單相同。
+- **AC-R2P-13-5**（M）Given 初始 commit When 檢查 `git ls-files` Then 不含 `00_research/raw/**`（副本仍在磁碟上，由範本 `.gitignore` 的 `00_research/raw/` 排除入版控）與 `.env`，且與預演清單相同。
 - **AC-R2P-13-6**（M）Given 目標目錄已存在且非空 When 預演 Then 422 `target_not_empty`，不覆寫、不合併。
 - **AC-R2P-13-7**（M）〔新增；D-32〕Given 範本登記制 When `GET /research/capabilities` Then `scaffold_templates[]` 取自 `scaffold_templates/<name>/` 目錄清單；選不存在的範本 id＝422；P1 僅 `python-fastapi`；node／java 範本不在清單，依症狀（掌舵者要求時）再開。
 - **AC-R2P-13-8**（M）〔新增；D-32〕Given 範本 `python-fastapi` 展開 When 檢查新專案根 Then 含 README、`.gitignore`（含 `00_research/raw/`）、GitHub Actions workflow、`docker-compose.yml`、`.env.example`（僅 `<YOUR_…>` 佔位符）、可跑的最小 pytest（AT 綁定供既有 evaluator 使用）；展開為確定性模板代換（不用 LLM；變數只准 `[A-Za-z0-9_-]`，輸出檔路徑 `resolve()` 後須在新根之下）。
@@ -744,7 +744,7 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 - **AC-R2P-15-4**（M）Given Bridge 不可達 When 開啟看板 Then 顯示錯誤態與原因及最後一次 DB 快照（標示快照時間），不得顯示空看板或把快照當即時。
 - **AC-R2P-15-5**（M，元件測試）Given 任一欄 When 點「開啟執行中心／監控中心」 Then 導向 `/projects/{consoleProjectId}/execute|monitor`，且可由「回到研發工作流」返回（沿 AC-R2P-01-5）。
 - **AC-R2P-15-6**（M＋E）〔新增；D-23〕Given 內環 run 完成（任務皆 COMPLETED／SKIPPED、RTM 100%） When ADMIN 於「回歸驗收」欄登錄 SCG-4 結果（`POST /api/v1/research/projects/{id}/gates`：`gate=PR_REVIEW`、`result`、`reason`、審查報告參照；確認框聲明審查者未參與規格與實作） Then Bridge 於現態 IMPLEMENTATION 時先 `transition --to PR_REVIEW` 再 `gate --gate PR_REVIEW --result <R> --reason <…>`（PASS→RTM_VERIFY；FAIL→回 IMPLEMENTATION 並耗用 FSM 預算，依 FSM 規則同模式 3 次走 SPEC_AUDIT、超限走 ESCALATION，Bridge 以回傳 `next_state` 為準）；登錄 SCG-5（`gate=RTM_VERIFY`）時前置為 RTM 100%（<100% 拒絕）；雲端 CI 紅時可登錄 `gate=RELEASE_READY`＋`FAIL`＋理由；皆寫 `research_gate_decisions`（`gate`＝`SCG4`／`SCG5`）與 `research_events`；OPERATOR 呼叫回 403。
-**整合點**：既有 `ExecuteView`／`MonitorView`（`AgentConsole/frontend/components/domain/views/`）；視圖 `v_research_healing_attempts`；`GET /api/v1/engines/sdd` 與 Bridge `GET /sdd/fsm/{project}`（`routers/sdd.py:215`）；Bridge `GET /autoclaude/runs/{run_id}/rtm`（`routers/autoclaude.py:135`）；Console 任務狀態機（Console PRD §5.3.3）。
+**整合點**：既有 `ExecuteView`／`MonitorView`（`AgentConsole/frontend/components/domain/{execute,monitor}/`；D-140 #6）；視圖 `v_research_healing_attempts`；`GET /api/v1/engines/sdd` 與 Bridge `GET /sdd/fsm/{project}`（`routers/sdd.py:215`）；Bridge `GET /autoclaude/runs/{run_id}/rtm`（`routers/autoclaude.py:135`）；Console 任務狀態機（Console PRD §5.3.3）。
 
 ##### FR-R2P-16 自癒監視器〔P2｜重用 AutoClaude 重試與升級，新建紀錄與檢視〕
 **來源**：來源 §6.2 頁面 4（自癒監視器：測試失敗日誌、AutoClaude 歸因分析、補丁修復嘗試次數）、§2（`03_execution/healing_history.log`）、§5 SDD_SELF_HEALING_LOOP（`healing_failed_exceed_limit → HUMAN_ESCALATION`）。｜**憲法對照**：禁令 3（IMPLEMENTATION 期間不得改 `docs/01~03`）、禁令 4（retry 超限須升級）。
@@ -756,10 +756,10 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 - 不新增第二套重試／升級機制。
 **US-R2P-16**　身為 OPERATOR，我想看見每個失敗任務的日誌、歸因與補丁嘗試，以便判斷是該再試、該人工介入，還是規格本身有問題。
 - **AC-R2P-16-1**（M）Given 任務步驟失敗並進入重試或修正 When 事件到達 Then `v_research_healing_attempts` 出現對應列（run、task、attempt、日誌摘錄、結果、時間；資料來源＝既有 `execution_steps`，無新增寫入路徑），`healing_history.log` 追加對應行（遮蔽後）；視圖列與日誌行逐筆一致。
-- **AC-R2P-16-2**（M）Given 自癒監視器 When 渲染 Then 每個任務顯示「嘗試次數／上限」（上限取既有 `maxRetries`）、最近一次失敗摘錄、歸因文字（純文字）、補丁結果；數值與 DB 相同。
+- **AC-R2P-16-2**（M）Given 自癒監視器 When 渲染 Then 每個任務顯示「嘗試次數／上限」（上限取既有 `maxRetries`）、最近一次失敗摘錄、歸因文字（純文字）、補丁結果（引擎未提供者顯示「引擎未提供」，不假裝有值；D-140 #5）；數值與 DB 相同。
 - **AC-R2P-16-3**（M）Given 嘗試次數達上限仍失敗 When 判定 Then 任務轉 ESCALATED、觸發 FR-R2P-18 彈窗，不再自動重試。
 - **AC-R2P-16-4**（M）Given 失敗日誌含疑似機密（含假 token／金鑰樣式的夾具） When 入庫與顯示 Then API 回應與 `healing_history.log` 皆已遮蔽、無明文；視圖不改既有表內容。
-- **AC-R2P-16-5**（M）Given 補丁嘗試修改凍結規格檔 When 偵測 Then 該嘗試被拒並標 `SPEC_CHANGE_FORBIDDEN`、規格 sha256 不變，畫面引導發起 SCR。
+- **AC-R2P-16-5**（M）Given 補丁嘗試修改凍結規格檔 When 偵測 Then ①**Bridge 偵測＋標記＋告警（AT）**：Bridge 比對凍結 digest 與目標檔 sha256，於 `healing_history.log` 追加記錄、發 `research.alert{kind:"SPEC_CHANGE_FORBIDDEN"}`、視圖該列標 `specChangeForbidden`，Bridge 不還原檔（還原屬毀滅性 git），畫面引導發起 SCR；②**框架 hook 拒絕寫入（V 項）**：該嘗試「被拒」由框架 hooks 承擔、不在 Bridge AT 內驗（D-138 Q-7、D-140 #8）。
 **整合點**：AutoClaude 重試／修正與 ESCALATION（根 `CLAUDE.md` AutoClaude 快查〈架構大圖〉的狀態機閉環：EVALUATE→CORRECTION／ESCALATION；完整見 `AutoClaude/CLAUDE.md`）；Bridge `alert` 事件（Architecture §10.1「`alert` 事件」列）；`agent.maxRetries`（`V2__seed_system_configs.sql:27`）；`AISDLC_SDD/CLAUDE.md` Rule 9 禁令 3。
 
 ##### FR-R2P-17 即時終端窗格〔P2｜重用既有日誌元件與 SSE〕
@@ -768,10 +768,10 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 **邊界條件**：純文字渲染（含 ANSI 逸出處理沿既有元件）；窗格開合狀態僅存於瀏覽器（每位使用者的便利設定，不影響串流）；run 結束後以 REST 回補歷史日誌。
 **US-R2P-17**　身為 OPERATOR，我想在看板旁就看到背景命令的即時輸出並能收合，以便不離開工作流就能判斷 run 在做什麼。
 - **AC-R2P-17-1**（M＋E）Given 執行中的 run When 展開窗格 Then 以既有 SSE 串流 log 事件，≤500ms 顯示、斷線以 `Last-Event-ID`／REST 回補；最小化與展開不影響串流。
-- **AC-R2P-17-2**（M，靜態判準）Given 窗格實作 When 檢查依賴 Then 與執行中心共用同一日誌元件與 `lib/sse/` 客戶端，無第二份串流實作、不使用 WebSocket。
+- **AC-R2P-17-2**（M，靜態判準）Given 窗格實作 When 檢查依賴 Then 與執行中心共用同一日誌元件與 SSE 客戶端（`lib/api/sse.ts`＋`hooks/useRunStream.ts`；D-140 #3），無第二份串流實作、不使用 WebSocket。
 - **AC-R2P-17-3**（M，vitest）Given 日誌行含 HTML、ANSI 逸出或 `<script>` When 渲染 Then 純文字顯示、不執行：渲染後該行 DOM 只含文字節點（`script` 元素 0 個、由日誌文字解析出的元素節點 0 個、`on*` 屬性 0 個；夾具內 `<img src=x onerror=…>` 的哨兵呼叫次數為 0），ANSI 逸出序列依既有元件規則處理、不以原字元殘留於可見文字。
 - **AC-R2P-17-4**（M）Given run 已結束 When 開啟窗格 Then 以 REST 回補（`steps?afterSeq`）完整顯示歷史日誌，與結束前一致。
-**整合點**：`/api/v1/stream/executions/{runId}/logs`（Console PRD §7.1.7）；`GET /api/v1/executions/{runId}/steps`（§7.1.5）；前端 `lib/sse/`（Architecture §5.3）；既有執行頁日誌視窗（US-E-03）。
+**整合點**：`/api/v1/stream/executions/{runId}/logs`（Console PRD §7.1.7）；`GET /api/v1/executions/{runId}/steps`（§7.1.5）；前端 `lib/api/sse.ts`＋`hooks/useRunStream.ts`（Architecture §5.3；D-140 #3）；既有執行頁日誌視窗（US-E-03）。
 
 ##### FR-R2P-18 人機協同決策彈窗〔P0 起：類型 (a) 審查升級隨 P0；類型 (b)～(d) 隨 P2｜重用既有審核與升級機制，新建彈窗殼〕
 **來源**：來源 §5（`HUMAN_ESCALATION`）、§6.2 頁面 4（人機協同決策彈窗：自癒超出上限或面臨重大架構選擇時彈出）；§3.3 審查三輪未過的人工介入。｜**憲法對照**：禁令 6（ESCALATION 後不得自動恢復）、禁令 7；ADR-XPLAT-016 §5.3（Bridge 與 Console 不提供恢復動詞）；Rule 8。
@@ -792,11 +792,11 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 
 ##### FR-R2P-19 規格變更請求（SCR）〔P1 後端與 FSM 序列證據／P2 看板發起鈕與橫幅（資料表隨 V19〔P1〕）｜新建〕
 **來源**：來源 §1.1(3)（「若規格有重大瑕疵，必須發起 `Spec Change Request (SCR)` 退回 Phase 0，嚴禁實作漂移」）。｜**憲法對照**：禁令 3、12（不得自動套用 spec patch）；D-01、D-22（不動 `_HAPPY_PATH`）。
-**描述**：內環發現規格瑕疵時，OPERATOR 以上可發起 SCR（類型、來源類別、理由與分類必填，勾選受影響章節／AC，附失敗證據連結）。**兩型**（ADR-XPLAT-017 D5）：**小型（MINOR）**＝規格文字／AC 缺陷、證據與前提不變——停止進行中的 run（既有 `:stop` 路徑）、新的執行啟動回 409 `scr_open`、凍結 PRD 檔位元組不變；外環鍵 SPEC_FROZEN→SPEC_DRAFTING（Stage `Gate-0-SCR<n>`）重走起草／審查／gate 迴圈（預算重新計）與 Gate 0（ADMIN）；新版核准後，內環鍵先 `transition →SPEC_AUDIT`（允許寫規格檔的態）、再發佈到目標 `docs/`，以 `spec-refreeze` 重新凍結並回 IMPLEMENTATION（內環現態矩陣見邊界條件）；游標回 `studio`（`flow_phase=SCR_OPEN`）。**大型（MAJOR）**＝研究前提被推翻（證據錯、需求錯）——建立**新研究專案**（`parent_research_id`＝舊專案、slug `<slug>-scr<N>`、新外環鍵）重走 Phase 0；舊內環鍵不動（舊研究專案 `flow_detail` 記「已被 RP-NNNN 取代」並於清單顯示徽章，不自動 `TERMINATED`）。新版核准後版本號依 §5.1.9 遞增、既有拆解標 `stale`。
+**描述**：內環發現規格瑕疵時，OPERATOR 以上可發起 SCR（類型、來源類別、理由與分類必填，勾選受影響章節／AC，附失敗證據連結）。**兩型**（ADR-XPLAT-017 D5）：**小型（MINOR）**＝規格文字／AC 缺陷、證據與前提不變——停止進行中的 run（既有 `:stop` 路徑）、新的執行啟動回 409 `scr_open`、凍結 PRD 檔位元組不變；外環鍵 SPEC_FROZEN→SPEC_DRAFTING（Stage `Gate-0-SCR<n>`）重走起草／審查／gate 迴圈（預算重新計）與 Gate 0（ADMIN）；新版核准後，內環鍵先 `transition →SPEC_AUDIT`（允許寫規格檔的態）、再發佈到目標 `docs/`，以 `spec-refreeze` 重新凍結並回 IMPLEMENTATION（內環現態矩陣見邊界條件）；游標回 `studio`（`flow_phase=SCR_OPEN`）。**大型（MAJOR）**＝研究前提被推翻（證據錯、需求錯）——建立**新研究專案**（`parent_research_id`＝舊專案、slug＝舊 slug 截到 `30−len('-scr<N>')` 字（去尾端 `-`）加 `-scr<N>`，與既有 slug 衝突＝409 `slug_in_use`（D-136）、新外環鍵）重走 Phase 0；舊內環鍵不動（舊研究專案 `flow_detail` 記「已被 RP-NNNN 取代」並於清單顯示徽章，不自動 `TERMINATED`）。新版核准後版本號依 §5.1.9 遞增、既有拆解標 `stale`。
 **邊界條件**：
 - SCR 理由分類：`PRD 缺漏證據`、`AC 模糊`、`需求變更`、`技術不可行`、`其他`（供 M6 與 §1.1 反證條件分群）；來源類別 `HUMAN`｜`REVIEW_FINDING`｜`SCG4`｜`HEALING_FAILED`。
 - FSM 對映（D-01、D-22；不改 `_HAPPY_PATH`）：IMPLEMENTATION／PR_REVIEW／RTM_VERIFY 沒有回 SPEC_DRAFTING 的邊（`transition_rules.py:46,66,68`），SPEC_FROZEN→SPEC_DRAFTING 是合法邊（`:35`）；三條合法路徑：**MINOR**＝外環鍵 `transition →SPEC_DRAFTING`（Stage `Gate-0-SCR<n>`）→（起草／審查／gate）→ ADMIN 核准 `spec-frozen --stage Gate-0-SCR<n>` → 內環鍵 `transition →SPEC_AUDIT`（先進入允許寫規格檔的態，BRIDGE §8.3 第 3 點）→ 發佈新 PRD 到目標 `docs/`（複製＋sha256）→ `spec-refreeze --doc <目標 docs/ 相對路徑> --approver <JWT subject>` → `transition →PR_REVIEW` → `gate PR_REVIEW FAIL`（回 IMPLEMENTATION）；**內環現態矩陣**（從哪些現態、經哪條邊起跑；邊表＝`transition_rules.py:46,59,65-68,77`）：IMPLEMENTATION、EXECUTION_EVALUATION、ADVERSARIAL_EVALUATION、PR_REVIEW 有 `→SPEC_AUDIT` 邊，直接起跑（現態已是 SPEC_AUDIT 者略過第一個 `transition`）；RTM_VERIFY、RELEASE_READY 沒有該邊，須先 `gate RTM_VERIFY FAIL`／`gate RELEASE_READY FAIL`（後者 `--reason` 必填）退回 IMPLEMENTATION 再起跑（兩者各有 2 次重試預算〔`RETRY_LIMITS`〕；回傳 `next_state≠IMPLEMENTATION`〔含 ESCALATION〕即回報 `BLOCKED` 交人處置、不重試）；其餘現態（含任何 ESCALATION*）回 409 `fsm_state_conflict`（`details.current_state`），不起跑；**MAJOR**＝新研究專案；**來源是自癒耗盡**（HUMAN_ESCALATION #2）＝人手 `resume-from-escalation --to SPEC_DRAFTING`（唯一合法回邊，R-9.5），Console 的 SCR 鈕在此情境只產生指令與記錄、不代跑。完整指令序列見 ADR-XPLAT-017 附錄 A。
-- 同一 Stage 內 MINOR ≤2 次（對齊 `SPEC_AUDIT_MAX_PER_STAGE`；裸 `transition →SPEC_AUDIT` 不累加 FSM 的 `spec_audit_count`，故由 Console 層自設同值）；第 3 次回 409 `scr_limit` 並要求改 MAJOR。
+- 同一研究專案內 MINOR ≤2 次（保守計：`kind=MINOR` 且 `status∈{OPEN,APPROVED,APPLIED}`；Console 沒有內環 Stage 的穩定視圖，永不超過 FSM `SPEC_AUDIT_MAX_PER_STAGE`；D-104；裸 `transition →SPEC_AUDIT` 不累加 FSM 的 `spec_audit_count`，故由 Console 層自設同值）；第 3 次回 409 `scr_limit` 並要求改 MAJOR。
 - `gate PR_REVIEW FAIL` 的「同模式」判準若把相鄰 SCR 的 `--reason` 判為同模式 ≥3 次，FSM 會改走 SPEC_AUDIT：Bridge 讀回傳的 `next_state`，≠IMPLEMENTATION 即回報 `BLOCKED` 交人處置，不重試。
 - SCR 期間 R4～R6、R8 照常追加；舊凍結版保留可比對。
 **US-R2P-19**　身為 OPERATOR，我想在發現規格有重大瑕疵時走正式的變更請求退回外環，而不是在實作裡悄悄改規格，以便規格永遠是唯一依據。
@@ -813,7 +813,7 @@ FR-R2P-02、22、23 的資料表與對帳骨架分兩次建立：P0 建 V16～V1
 #### FG-F 交付
 ##### FR-R2P-20 交付驗收與歸檔〔P2｜重用 RTM 資料，新建追溯表與發布動作〕
 **來源**：來源 §5 SDD_REGRESSION_VERIFIED（`gate: Gate_1`、輸出 `traceability_matrix.json`）、PROJECT_DELIVERED（`create_git_tag_and_release`）、§6.2 頁面 5（規格追溯性矩陣；發布動作列 `[建立 Release Tag]`、`[開啟本地專案]`、`[檢視 GitHub PR]`）。｜**憲法對照**：Rule 9 SCG-5（RTM 100% 覆蓋）；鐵律四（宣稱附輸出）；「零發現／零測試不是 PASS」。
-**描述**：步驟 5 頁。**追溯表**：每個 PRD User Story 與其 Gherkin AC 一列，欄位含單元測試狀態、E2E 狀態、最後執行時間、來源（RTM 檔或測試名）；資料來自既有 RTM 覆蓋（AutoClaude 逆向 RTM 與 FSM `rtm_coverage`）。**發布動作列**：`[建立 Release Tag]`（RTM 100% 且 FSM 達 RELEASE_READY、ADMIN；semver 驗證；以白名單 git 建附註 tag，遠端存在且已確認才推送）；`[開啟本地專案]`（顯示並複製專案根的本機絕對路徑；容器部署模式明示「此為容器內路徑」）；`[檢視 GitHub PR]`（顯示已記錄的 PR URL；無 PR 且 `gh` 已登入或請求帶 token 時，ADMIN 可「建立 PR」：確認框預覽標題與內文〔由 PRD 與追溯表摘要確定性產生〕與推送目標，Bridge 以 argv 陣列執行 `git push -u origin <branch>` 與 `gh pr create`；機制選 `gh`（本機模式）而非 GitHub REST API，D-16、ADR-003 D15）。交付時凍結一份追溯快照入庫（R11）並寫出 `traceability_matrix.json`。
+**描述**：步驟 5 頁。**追溯表**：每個 PRD User Story 與其 Gherkin AC 一列，欄位含單元測試狀態、E2E 狀態、最後執行時間、來源（RTM 檔或測試名）；單元欄＝以 R8 `covers_ac` 找覆蓋該 AC 的 Console 任務、取其終態（全 `COMPLETED`＝通過、任一 `FAILED`／`ESCALATED`＝失敗、其餘＝未執行、無覆蓋任務＝標紅）；E2E 欄＝SCG-5 登錄 APPROVED 才通過、否則未執行（無逐 AC 的機器來源，如實標示）；RTM 彙總（`rtm.fullyCovered`、`acPct`）作全域閘（Tag 前置），不另造第二套 RTM（D-138 Q-5、D-140 #7）。**發布動作列**：`[建立 Release Tag]`（RTM 100% 且 FSM 達 RELEASE_READY、ADMIN；semver 驗證；以白名單 git 建附註 tag，遠端存在且已確認才推送）；`[開啟本地專案]`（顯示並複製專案根的本機絕對路徑；容器部署模式明示「此為容器內路徑」）；`[檢視 GitHub PR]`（顯示已記錄的 PR URL；無 PR 且 `gh` 已登入或請求帶 token 時，ADMIN 可「建立 PR」：確認框預覽標題與內文〔由 PRD 與追溯表摘要確定性產生〕與推送目標，Bridge 以 argv 陣列執行 `git push -u origin <branch>` 與 `gh pr create`；機制選 `gh`（本機模式）而非 GitHub REST API，D-16、ADR-003 D15）。交付時凍結一份追溯快照入庫（R11）並寫出 `traceability_matrix.json`。
 **邊界條件**：
 - 追溯表列數＝凍結 PRD 的 AC 總數（一個 AC 一列；無遺漏、無多餘）；AC 無通過的自動測試即標紅並列入「未覆蓋」計數，零測試不是通過。
 - 外部連結以新分頁開啟並帶 `rel="noopener noreferrer"`。
@@ -1079,7 +1079,7 @@ Bridge 在 Docker 全棧下只有 `/workspace` 可寫（`BRIDGE_ALLOWED_PATH_ROO
 | **F（框架側；先於 P0 整合驗收，P0 單元測試以夾具先行、不阻塞；D-33）** | 方法層納入 AISDLC_SDD LATEST | `workflow/sdd-research-to-prd/SDD_RESEARCH_TO_PRD.md`、2 支新 agent YAML、4 份新模板、SCG-0 評分協定與 SCR 路徑條文、`SDD_AUTOCLAUDE_BRIDGE.md` §8.0／§9 增補、框架 ADR-001；`FRAMEWORK_STATUS.md` 重生；框架側 TCS（直接引本檔 FR-R2P／AC-R2P；不產生框架側 PRD，D-41） | (a) `framework_status_snapshot.py --check` rc 0 與 `ci-gate.ps1`／`.sh` rc 0；(b) 邊界核對：`git diff --name-only <起點> HEAD -- AISDLC_SDD` 的輸出除 `AISDLC_SDD/scripts/**`、`AISDLC_SDD/CLAUDE.md`、`AISDLC_SDD/FRAMEWORK_STATUS.md`、`AISDLC_SDD/.claude/**` 與 LATEST 目錄外為空，且 `transition_rules.py` 與 `formal/` 的 diff 為空，LATEST 目錄內只准動 ADR-XPLAT-017 §D7 白名單所列檔（含 D-47 的索引與計數檔）；(c) 研究版 PRD 模板通過 AC-R2P-07-2 的結構預檢（以夾具驗）；(d) 框架側 TCS 的 AT 綠；(e) SCG-4 獨立審查 PASS | 主控、SD、框架側開發 agent（鍵 `sdd-research-to-prd`，另一視窗；D-38） |
 | **P0** | 外環：研究工作區、PRD 工作室與 Gate 0（含全程入庫骨架、工作流脊、導覽與說明、對帳） | FR-R2P-01～10、21（`/research` 與 `/research/[researchId]` 兩條路由；步驟 3～5 占位面板）、22、23；FR-R2P-18 類型 (a)；Flyway V16～V18；Bridge 研究套件（stage run 編排器、抓取、gate evaluator、FSM 研究面動詞、`:approve-baseline`；ADR-XPLAT-017 的 Bridge 側實作） | (a) 至少一個**真實**研究議題（非構造；本機模式、真 claude）端到端走到 Gate 0 核准、外環 FSM＝SPEC_FROZEN（附 sid 與 `RP-NNNN`）；(b) 該專案的 R1～R9、R13、R14 皆有記錄；M1＝100%；(c) 掌舵者真機「離開再回來從同一步續做」一次並回報（附 sid＋line；構造情境不能充當），M5＝100%；(d) 負控綠：allowlist 外／私網 URL 被拒（AC-R2P-04-2、04-8）、夾具注入文字不改變行為（AC-R2P-04-4）、三輪未過進 ESCALATION（現態不是 AUTO_RECOVERY_ATTEMPT）且無恢復動詞按鈕（AC-R2P-08-3、08-10、18-1）、既有 `:freeze` 對無 TCS 仍 422（AC-R2P-10-9）、HUMAN_PENDING 下 `gate FAIL` 態不動且計數＋1 而 `gate PASS` rc≠0（AC-R2P-10-10）；(e) 導覽登記表、說明三道鎖、`registry.test.ts` 綠且步驟 3～5 占位面板存在；(f) Gate 0 時點對帳 `consistent=true`（M4）；(g) 不可變負控：對 PRD 版本表嘗試 UPDATE 被資料庫拒絕（AC-R2P-02-7）、缺陷 `status` 非法轉移與來源 `verification` 降級被拒（AC-R2P-02-11、05-9）；(h) Docker 全棧（mock claude）E2E 兩條路徑綠——「建立→research→draft→review×3 FAIL→ESCALATED」與「建立→…→review PASS→approve→FROZEN」，SSE 斷線重播無缺漏；(i) V-R1／V-R2／V-R3／V-R4／V-R5／V-R6／V-R7 的結果與 V-R9（四來源速率限制皆已現查回填 NFR-R2P-03-6；Stack Exchange 於 2026-11-03 結案）入證據檔 | 開發 agent（鍵 `agentconsole-research-to-prd-p0`）、掌舵者（Gate 0、真機）、主控、QA（SCG-4） |
 | **P1** | 分流：分流精靈、軌道 A／B、SDD 綁定、TCS 草擬與拆解交棒、SCR 後端 | FR-R2P-11～14、FR-R2P-19 後端；步驟 3 真面板取代占位、步驟 4 前半；Flyway V19；Bridge `route`／`scaffold`／`scr`；`capabilities` 探針的 UI 停用 | (a) 軌道 A 於本 repo 的**拋棄式 clone**（真 git、不動真 repo）與軌道 B 於暫存 `BRIDGE_SCAFFOLD_ROOT`（`gh` 以假指令替身）各一次端到端，另由掌舵者以 Private 測試庫真機一次軌道 B（事後保留或移除由掌舵者決定）；(b) 預演零副作用負控綠（AC-R2P-11-2）；(c) 軌道 A 主工作樹零擾動（AC-R2P-12-1）；(d) 內環鍵 Stage-1 採納與 Stage-2 TCS 的 `show` 逐字證據（AC-R2P-11-7、14-7）；(e) 拆解經簽核且每個 AC 已覆蓋或有人工豁免（AC-R2P-14-2）；(f) token 零外洩負控綠（AC-R2P-13-4）；(g) SCR MINOR 序列證據（AC-R2P-19-8）；(h) 分流時點對帳 ok；(i) 未簽核草稿啟動執行回 409（AC-R2P-14-4）；(j) V-R8 結果入證據檔；(k) `capabilities` 缺 `gh`／scaffold 時 UI 停用的 AT 綠 | 開發 agent（鍵 `agentconsole-research-to-prd-p1`）、掌舵者（確認、真機）、主控、QA |
-| **P2** | 內環與交付：看板、自癒、終端、人機協同、SCR 發起鈕、SCG 登錄、交付 | FR-R2P-15～20（FR-R2P-18 其餘類型）；步驟 4 其餘與步驟 5 真面板取代占位；`ResearchBackLink` | (a) 至少一個研究專案走完內環到交付：內環鍵 RELEASE_READY→RELEASE（暫存專案）、Release Tag 以暫存 git 驗、PR URL 入庫（真或 `gh` 假指令替身，標明）、M2＝100%、M3＝100%；(b) 至少一次 ESCALATED 或待審彈窗事件走完（真實；構造夾具需標明且不得單獨充當）；(c) 至少一次 SCR 演練（真實或夾具，標明）驗證舊凍結版保留與新 digest 入庫；(d) 看板差分測試綠（AC-R2P-15-1）；(e) 終端窗格共用元件靜態判準綠（AC-R2P-17-2）；(f) `v_research_healing_attempts` 對真失敗步驟有列；(g) 交付時點對帳 ok；(h) `ResearchBackLink` 兩頁 AT 綠；(i) 掌舵者真機從 `/research` 走完五步一次（流程型，附 sid＋line） | 開發 agent（鍵 `agentconsole-research-to-prd-p2`）、掌舵者、主控、QA |
+| **P2** | 內環與交付：看板、自癒、終端、人機協同、SCR 發起鈕、SCG 登錄、交付 | FR-R2P-15～20（FR-R2P-18 其餘類型）；步驟 4 其餘與步驟 5 真面板取代占位；`ResearchBackLink` | (a) 至少一個研究專案走完內環到交付：內環鍵 RELEASE_READY→RELEASE（暫存專案）、Release Tag 以暫存 git 驗、PR URL 入庫（真或 `gh` 假指令替身，標明）、M2＝100%、M3＝100%；(b) 至少一次 ESCALATED 或待審彈窗事件走完（「真實」＝引擎真重試耗盡路徑，其中 `claude` 為 mock 須標明；構造夾具需標明且不得單獨充當；D-140 #13）；(c) 至少一次 SCR 演練（真實或夾具，標明）驗證舊凍結版保留與新 digest 入庫；(d) 看板差分測試綠（AC-R2P-15-1）；(e) 終端窗格共用元件靜態判準綠（AC-R2P-17-2）；(f) `v_research_healing_attempts` 對真失敗步驟有列；(g) 交付時點對帳 ok；(h) `ResearchBackLink` 兩頁 AT 綠；(i) 掌舵者真機從 `/research` 走完五步一次（流程型，附 sid＋line） | 開發 agent（鍵 `agentconsole-research-to-prd-p2`）、掌舵者、主控、QA |
 
 **流程閘（每期同序）**：SCG-0（本 PRD，QA 獨立審查）→ Stage-1 凍結 → 該期 TCS（SD）→ Stage-2 凍結 → 實作（每支程式立即編譯與測試）→ SCG-4（QA 獨立審查）→ RTM 回填 → RELEASE。開發流程中凍結的人工閘依根 `CLAUDE.md`〈凍結常態規則〉由主控代執行；與產品內的 Gate 0 是兩回事（D-19：產品內 Gate 0 永遠要求真人在 Console 點擊）。
 
@@ -1342,7 +1342,7 @@ Bridge 在 Docker 全棧下只有 `/workspace` 可寫（`BRIDGE_ALLOWED_PATH_ROO
 | 11 | 任務拆解（§5） | `GoalDecomposer`；`SddToPlaybookAdapter` | `POST /autoclaude/decompose`（`routers/autoclaude.py:227`）；匯入 signoff（Console PRD §7.1.4.1） | 重用＋新增覆蓋對映 |
 | 12 | TDD／測試規格（§5） | TEST_CONTRACT_NEGOTIATED；`TEST-CONTRACT-SPEC-TEMPLATE.md`；`negotiate-*` 動詞 | 看板欄「測試規格產生」 | 重用；新增 `TCS_DRAFT` stage run 草擬 TCS（D-33）；擁有者 BR＋SDD |
 | 13 | 程式碼實作與自癒（§5） | AutoClaude runs、修正迴圈、Token Guard、ESCALATION | 執行中心（`ExecuteView`）、監控中心（`MonitorView`） | 重用 |
-| 14 | 即時終端（§6.2 頁面 4） | Bridge SSE `…/stream`（`routers/autoclaude.py:214`） | `/api/v1/stream/executions/{runId}/logs`；`lib/sse/` | 重用（SSE，非 WebSocket） |
+| 14 | 即時終端（§6.2 頁面 4） | Bridge SSE `…/stream`（`routers/autoclaude.py:214`） | `/api/v1/stream/executions/{runId}/logs`；`lib/api/sse.ts`＋`hooks/useRunStream.ts` | 重用（SSE，非 WebSocket） |
 | 15 | 人機協同彈窗（§5 HUMAN_ESCALATION） | ESCALATION（R-9.5）；`review-request` | 審核對話框（US-E-07／08）、signoff 佇列徽章 | 重用＋新增彈窗殼 |
 | 16 | 交付與追溯（§5、§6.2 頁面 5） | RTM（SCG-5）；`rtm_coverage` | Bridge `GET …/rtm`（`routers/autoclaude.py:135`） | 重用＋新增追溯表 |
 | 17 | Release Tag／PR（§6.2 頁面 5） | 無 | 無 | 新增（`release.py`：`git tag -a`、`gh pr create`；D-16）；擁有者 BR |
@@ -1358,7 +1358,7 @@ Bridge 在 Docker 全棧下只有 `/workspace` 可寫（`BRIDGE_ALLOWED_PATH_ROO
 | 26 | `healing_history.log`（§2） | 引擎 log、`execution_steps` | 視圖 `v_research_healing_attempts` | 新增衍生日誌；DB 真相＝既有表；擁有者 BR |
 | 27 | 狀態機 CLI（§5） | `fsm_runtime.py:3638-3667` | Bridge `sdd_cli.py` | 重用＋白名單擴充（ADR-XPLAT-017）；擁有者 BR |
 | 28 | 重試預算（§3.3「≥85／≤3 次」） | `RETRY_LIMITS`（`transition_rules.py:267-275`）、`gate` | `research_review_rounds` | 重用（採 FSM 預算，語意差 1，D-24）；擁有者 BR |
-| 29 | 頁面 1 研究探索工作區（§6.2） | — | `MarkdownView`、`lib/sse/` | 新增面板（`TopicPanel`／`EvidenceTimeline`／`EvidenceMatrixTable`）；擁有者 FE |
+| 29 | 頁面 1 研究探索工作區（§6.2） | — | `MarkdownView`、`lib/api/sse.ts`＋`hooks/useRunStream.ts` | 新增面板（`TopicPanel`／`EvidenceTimeline`／`EvidenceMatrixTable`）；擁有者 FE |
 | 30 | 頁面 2 PRD Studio（§6.2） | — | `MarkdownEditor`（`@uiw/react-md-editor`）、`recharts` | 新增面板＋`mermaid`／`diff` 相依（ADR-003 D9）；擁有者 FE |
 | 31 | 頁面 3 分流精靈（§6.2） | — | `EntityDialog`／Drawer 先例 | 新增（`RouteDrawer`）；擁有者 FE＋BR |
 | 32 | 單一流程脊（D-11） | — | `ProjectDetailView`、導覽登記表、說明登記表 | 新增 `flow_*` 游標與 2 路由；擁有者 FE＋API＋BR |
@@ -1759,3 +1759,13 @@ flowchart LR
 | 14 | 11-03 | FR-R2P-06〈邊界條件〉事件欄位與優缺點矩陣 | 原文：「每筆帶 `seq`（＝`research_events.seq`）與 `emitted_at`」；「優缺點矩陣只列「有證據列」的候選，不憑空列。」 → 改文：每筆帶 `seq` 與 `occurredAt`（契約 `ResearchEvent` 沒有 `emitted_at`；延遲量測讀選填的 `emittedAt` 或 payload 內的 `emitted_at`／`emittedAt`，皆無即計為未量測）；補優缺點導出規則：優點取證據列 `claim`，缺點取 F3、F6 與反證 `WEAKEN`／`LIMIT` 的 `note` | FE-B a、c |
 | 15 | 11-03 | NFR-R2P-02 表「草擬：單次 run」列；FR-R2P-08 預算句 | 原文：「單步 ≤ `BRIDGE_RESEARCH_STEP_TIMEOUT_SECONDS`（初值 1200 秒…）」；「每輪牆鐘上限＝4×單步牆鐘（…初值 1200 s，未校準）」 → 改文：初值 600 秒（與引擎 Kernel 路徑固定的步驟逾時同值；原 1200 秒大於引擎上限，看門狗永遠不會先響；真實步驟需要更久時須讓引擎 Kernel 路徑讀 `config.playbook.step_timeout_seconds`，列 P1 候選） | D-75；SCG-4 F-13；BR-C（逾時） |
 | 16 | 11-03 | §9.2 `flow_phase` 列舉段（衍生值句） | 原文：「步驟 3 以後的 `BUILDING`／`HEALING`／`AWAITING_HUMAN`／`PAUSED`／`RELEASE_PENDING`／`DELIVERED` 是 `ResearchFlowPolicy` 的衍生值、不落 DB」 → 改文：衍生值共八個，補上 `BUILD_READY`、`ESCALATED`（與 API 契約 API-RP-04 的 `effective` 表、`ResearchFlowPolicy` 實作一致）；`PAUSED` 與 `ESCALATED` 同時也是衍生 `effective` 的 `status` 值 | FE-A（衍生相態 BUILD_READY／PAUSED／ESCALATED 詞彙）；`ResearchFlowPolicy.effective()` |
+| 17 | 11-07 | AC-R2P-13-2、AC-R2P-13-5 | 原文：「新專案根含 `00_research`～`03_execution` 完整副本（逐檔 sha256 與來源相同）」「Then 不含 `00_research/raw/**` 與 `.env`」 → 改文：副本**含** `00_research/raw/**`、以範本 `.gitignore` 排除入版控；13-5 載明副本仍在磁碟上 | D-117（RISKS (b)-6） |
+| 18 | 11-07 | AC-R2P-11-7、AC-R2P-12-2 | 原文：「內環鍵 `<sub>-<slug>`（軌道 B 為 `<project-name>`）」「發佈到目標落點（目標子專案 `docs/01_requirements/`）」 → 改文：內環鍵文法 `^[a-z][a-z0-9-]{1,99}$`、`project_name` `{1,61}`；發佈檔名 `<slug>_PRD.md`（slug 原樣） | D-119 |
+| 19 | 11-07 | FR-R2P-19 描述（MAJOR 後繼） | 原文：「slug `<slug>-scr<N>`」 → 改文：後繼 slug＝舊 slug 截到 `30−len('-scr<N>')` 字加 `-scr<N>`，衝突回 409 `slug_in_use`、不另設 reason | D-136 |
+| 20 | 11-07 | AC-R2P-12-3、FR-R2P-12 邊界（落點目標清單） | 原文：「由 ADMIN 維護的**模組落點目標清單**」；AC-12-3 預設值可覆寫 → 改文：P1 固定四值常數（擴充＝改落點 SSOT 與資料庫 CHECK 的新遷移檔）；PRD 無落點表時 `target_module` 缺省＝422 `required` | D-100、D-129 第 9 條 |
+| 21 | 11-07 | FR-R2P-19 邊界（SCR 次數） | 原文：「同一 Stage 內 MINOR ≤2 次（對齊 `SPEC_AUDIT_MAX_PER_STAGE`；」 → 改文：同一研究專案內 MINOR ≤2 次（保守計；`status∈{OPEN,APPROVED,APPLIED}`） | D-104 |
+| 22 | 11-07 | AC-R2P-17-2、FR-R2P-17 整合點、FR-R2P-15 整合點（P2）；FR-R2P-06 整合點、§11.2 整合點表第 14 列與第 29 列（同一錯誤、同一方向） | 原文：「`lib/sse/` 客戶端」「前端 `lib/sse/`」（FR-R2P-06、FR-R2P-17 整合點）「`lib/sse/`」（§11.2 第 14、29 列）「`components/domain/views/`」 → 改文：`lib/api/sse.ts`＋`hooks/useRunStream.ts`；`components/domain/{execute,monitor}/`（`lib/sse/` 目錄不存在） | D-140 #3、#6 |
+| 23 | 11-07 | §5.1.8 R10 列、AC-R2P-16-2（P2） | 原文：R10 欄位含「歸因摘要、結果」、AC-16-2「歸因文字（純文字）、補丁結果」 → 改文：`attempt` 由讀端視窗函式導出；歸因摘要與補丁結果引擎未提供，一律 null 並顯示「引擎未提供」 | D-138 Q-6、D-140 #5 |
+| 24 | 11-07 | FR-R2P-20 描述（追溯表來源，P2） | 原文：「資料來自既有 RTM 覆蓋（AutoClaude 逆向 RTM 與 FSM `rtm_coverage`）」 → 改文：單元欄取 R8 `covers_ac`＋覆蓋任務終態、E2E 欄取 SCG-5 登錄、RTM 彙總作全域閘 | D-138 Q-5、D-140 #7 |
+| 25 | 11-07 | AC-R2P-16-5（P2） | 原文：「該嘗試被拒並標 `SPEC_CHANGE_FORBIDDEN`、規格 sha256 不變，畫面引導發起 SCR」 → 改文：拆兩半——Bridge 偵測＋標記＋告警（AT）、框架 hook 拒絕寫入（V 項）；Bridge 不還原檔 | D-138 Q-7、D-140 #8 |
+| 26 | 11-07 | §8.1 P2 出口 (b) | 原文：「(b) 至少一次 ESCALATED 或待審彈窗事件走完（真實；構造夾具需標明且不得單獨充當）」 → 改文：「真實」＝引擎真重試耗盡路徑，其中 `claude` 為 mock 須標明 | D-140 #13 |
