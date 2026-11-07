@@ -495,7 +495,7 @@
 > 本子表 2026-11-02 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P0-20261102.md](RTM-ResearchToPRD-P0-20261102.md)（238 列：F 1、US 3、AC 24、AT 210；鍵 `agentconsole-research-to-prd-p0`；回填義務不變）。2026-11-07 起四格已依 SCG-4 一審／二審（[SCG4-REVIEW-ResearchToPRD-P0-20261107-R2.md](SCG4-REVIEW-ResearchToPRD-P0-20261107-R2.md) PASS）與 INT 證據回填（AT 列：AT PASS 209／部分 1；V-H1、V-H2 待掌舵者真機）。
 
 ## 2.11 研究議題轉規格書 P1 分流與交棒（ResearchToPRD；分流精靈、軌道 A／B、拆解交棒、SCR 後端、V19）的 TCS 本地 ID 追溯（ResearchToPRD_PRD.md；不計入 §2 總列數）
-> 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P1-20261107.md](RTM-ResearchToPRD-P1-20261107.md)（F 1、US 3、AC 25、AT 209，共 238 列；鍵 `agentconsole-research-to-prd-p1`；TCS 經 QA 覆蓋審四審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P1-20261107.md](SCG0-REVIEW-ResearchToPRD-P1-20261107.md)；回填義務不變：每完成一項需求即回填四格）。
+> 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P1-20261107.md](RTM-ResearchToPRD-P1-20261107.md)（F 1、US 3、AC 25、AT 209，共 238 列；鍵 `agentconsole-research-to-prd-p1`；TCS 經 QA 覆蓋審四審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P1-20261107.md](SCG0-REVIEW-ResearchToPRD-P1-20261107.md)；回填義務不變：每完成一項需求即回填四格）。2026-11-07 起四格已依 [SCG-4 一審／二審報告](SCG4-REVIEW-ResearchToPRD-P1-20261107.md)（二審 PASS）與 [INT 證據](INT-ResearchToPRD-P1-20261107.md) 回填：P1 回填完成（✅ 230／🟡 8／⬜ 0；AT 列 ✅ 205／🟡 4；🟡＝AT-961-9-E-2、23-1、23-2、23-5 及其所屬 AC-961-9、23 與 US-924、US-925、F-907；V-H3 掌舵者真機、V-D4 真 Brain 待驗；AT-961-12-E-2 為勘誤批次補列）。
 
 ## 3. 統計（建表時快照）
 
