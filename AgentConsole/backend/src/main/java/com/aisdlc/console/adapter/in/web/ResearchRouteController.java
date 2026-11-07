@@ -45,7 +45,7 @@ import java.util.UUID;
  * 置於通用規則之前）。approver、requestedBy 一律取 JWT subject，請求本文沒有這些欄位。失敗序同 {@link ResearchController}（401→403→503→400／422→404→409→502／504）。
  */
 @RestController
-@RequestMapping("/api/v1/research")
+@RequestMapping("/api/v1/research/projects/{id}")
 @Tag(name = "研發工作流（ResearchToPRD）", description = "研究→證據→PRD→四方審查→Gate 0 的 P0 端點，與 P1 的分流、規格變更請求與任務拆解端點（API-RP-14～16）；契約檔 API_Contract_ResearchToPRD.md")
 public class ResearchRouteController {
 
@@ -65,7 +65,7 @@ public class ResearchRouteController {
 
     // ── 分流（API-RP-14）──────────────────────────────────────────────────────────────────
 
-    @PostMapping("/projects/{id}/route/preview")
+    @PostMapping("/route/preview")
     @Operation(operationId = "previewResearchRoute", summary = "分流預演（API-RP-14；OPERATOR 以上；零副作用）",
             description = "本文＝軌道 A（targetModule、branchName、baseRef）或軌道 B（projectName、stackTemplate、repoName、owner、visibility、createGithub、ci、dockerCompose）；"
                     + "分流與 PRD target_scope 不同須附 scopeDiffersReason（缺＝422 invalid_request，規則 scope_differs_reason_required）。回與確認共用的動作清單（動作、目標、"
@@ -76,7 +76,7 @@ public class ResearchRouteController {
         return ApiResult.ok(RoutePreviewResult.from(route.preview(caller(authentication), id, request.toInput())));
     }
 
-    @PostMapping("/projects/{id}/route")
+    @PostMapping("/route")
     @Operation(operationId = "routeResearchProject", summary = "確認分流並同步執行（API-RP-14；僅 ADMIN）",
             description = "步驟：輸入閘與 route_conflict 預檢（409，零 Bridge 請求）→ Bridge 預演取得導出路徑 → 先建 Console projects 列（DRAFT、signed_off=false、sdd_project＝內環鍵；"
                     + "短交易先 commit）→ Bridge :route（同步，D-105；讀取逾時 330 秒）。成功 200 回 RouteDecisionDto（含 publishedDocs 與步驟）；失敗（502 route_step_failed、逾時、不可達、Bridge 拒絕）"
@@ -86,7 +86,7 @@ public class ResearchRouteController {
         return ApiResult.ok(RouteDecisionDto.from(route.confirm(caller(authentication), id, request.toInput())));
     }
 
-    @GetMapping("/projects/{id}/route")
+    @GetMapping("/route")
     @Operation(operationId = "getResearchRoute", summary = "最新一筆分流（含步驟；API-RP-14）",
             description = "JDBC 唯讀。尚無分流回 200 且 data 為 null（D-106，不是 404）。研究專案不存在＝404 research_not_found。VIEWER 以上可讀。")
     public ApiResult<RouteDecisionDto> getRoute(@PathVariable UUID id) {
@@ -95,7 +95,7 @@ public class ResearchRouteController {
 
     // ── 規格變更請求（API-RP-15）──────────────────────────────────────────────────────────
 
-    @PostMapping("/projects/{id}/scr")
+    @PostMapping("/scr")
     @ResponseStatus(HttpStatus.ACCEPTED)
     @Operation(operationId = "openResearchScr", summary = "發起規格變更請求（API-RP-15；OPERATOR 以上）",
             description = "本文 {kind（MINOR｜MAJOR）, sourceKind（HUMAN｜REVIEW_FINDING｜SCG4｜HEALING_FAILED）, reason（1～500 字）, reasonClass?, affectedSections?}。"
@@ -106,14 +106,14 @@ public class ResearchRouteController {
                 MDC.get("traceId"));
     }
 
-    @GetMapping("/projects/{id}/scr")
+    @GetMapping("/scr")
     @Operation(operationId = "listResearchScr", summary = "規格變更請求清單（API-RP-15）",
             description = "依 scrNo 遞增；JDBC 唯讀。研究專案不存在＝404 research_not_found。VIEWER 以上可讀。")
     public ApiResult<List<ScrDto>> listScr(@PathVariable UUID id) {
         return ApiResult.ok(scr.list(id).stream().map(ScrDto::from).toList());
     }
 
-    @PostMapping("/projects/{id}/scr/{scrNo}/apply")
+    @PostMapping("/scr/{scrNo}/apply")
     @Operation(operationId = "applyResearchScr", summary = "套用 MINOR SCR 的內環收尾（API-RP-15；僅 ADMIN）",
             description = "MINOR SCR 於 Gate-0-SCR<k> 核准後的內環收尾序列失敗或阻塞時，ADMIN 以本端點重試（Bridge :scr-apply）。200 回 Bridge 本文（camelCase）："
                     + "{scrNo, status（APPLIED｜BLOCKED）, implFsmActions[], flow}。SCR 非 APPROVED 或內環現態不在矩陣內＝409 fsm_state_conflict。" + WRITE_FLOW)
@@ -124,7 +124,7 @@ public class ResearchRouteController {
 
     // ── 拆解（API-RP-16）──────────────────────────────────────────────────────────────────
 
-    @GetMapping("/projects/{id}/decomposition")
+    @GetMapping("/decomposition")
     @Operation(operationId = "getResearchDecomposition", summary = "有效拆解（API-RP-16）",
             description = "有效拆解＝已簽核且 PRD 摘要仍符合凍結摘要的最新一筆，否則最新一筆（含 DRAFTED、STALE）。回覆蓋對映（total、covered、uncovered[]；取 Bridge 寫入的內容，"
                     + "console-api 不重算）、豁免、stale 旗標與 TCS 發佈資訊。尚無拆解回 200 且 data 為 null（D-120）。JDBC 唯讀。VIEWER 以上可讀。")
@@ -132,7 +132,7 @@ public class ResearchRouteController {
         return ApiResult.ok(decomposition.current(id).map(DecompositionDto::from).orElse(null));
     }
 
-    @PostMapping("/projects/{id}/decomposition")
+    @PostMapping("/decomposition")
     @Operation(operationId = "triggerResearchDecomposition", summary = "觸發任務拆解（API-RP-16；OPERATOR 以上）",
             description = "本文可省略；選填 scope.usIds（只拆指定的 US）。Bridge :decompose 同步執行（逐 US 呼叫既有拆解服務，covers_ac 由呼叫綁定的 AC 確定性賦值；讀取逾時 330 秒、不重試）。"
                     + "200 回 Bridge 本文（camelCase）：{decompositionId, status（DRAFTED）, tasksCount, coverage{total, covered, uncovered[]}}；有界閘（步驟 ≤24、無環、prompt 非空）不過＝"
@@ -143,7 +143,7 @@ public class ResearchRouteController {
         return ApiResult.ok(open(decomposition.trigger(caller(authentication), id, usIds)));
     }
 
-    @PostMapping("/projects/{id}/decomposition/signoff")
+    @PostMapping("/decomposition/signoff")
     @Operation(operationId = "signoffResearchDecomposition", summary = "簽核拆解（API-RP-16；OPERATOR 以上）",
             description = "本文可省略；選填 waivers[{ac, reason}]。approver 取 JWT subject（憑證無帳號名＝400；本文帶 approver 被忽略）。先走既有 import／signoff 路徑把拆解落為正式專案的目標與任務"
                     + "（全部 signedOff；專案層一併簽核），再呼 Bridge :decomposition-signoff（一次寫 SIGNED_OFF 與 import_record_id，D-113）。覆蓋未清零且無豁免＝"

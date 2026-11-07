@@ -53,10 +53,6 @@ class ResearchRouteApiIT extends AbstractResearchIT {
         return RESEARCH + "/projects/" + id + suffix;
     }
 
-    private long writes() {
-        return bridge().writeCount();
-    }
-
     private Map<String, Long> tableCounts() {
         Map<String, Long> out = new LinkedHashMap<>();
         for (String table : List.of("projects", "research_projects", "research_route_decisions", "research_route_steps", "research_scr", "research_decompositions",
