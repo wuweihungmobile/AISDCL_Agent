@@ -1,6 +1,7 @@
 """邊界情境：最後一步時 pause、零延遲競態、併發建立、日誌格式失效的退路、單行處理容錯。"""
 from __future__ import annotations
 
+import json
 import re
 import threading
 import uuid
@@ -185,9 +186,16 @@ def test_pause_and_stop_are_idempotent(bridge, run_body) -> None:
     first = bridge.client.post(f"/autoclaude/runs/{rid}:pause")
     again = bridge.client.post(f"/autoclaude/runs/{rid}:pause")
     assert first.json() == again.json() == {"status": "PAUSING"}
-    bridge.client.post(f"/autoclaude/runs/{rid}:stop")
-    assert bridge.client.post(f"/autoclaude/runs/{rid}:stop").json() == {"status": "CANCELLING"}
-    bridge.wait_status(rid, TERMINAL)
+    first_stop = bridge.client.post(f"/autoclaude/runs/{rid}:stop")
+    assert (first_stop.status_code, first_stop.json()) == (202, {"status": "CANCELLING"})
+    # 第二次 stop 與第一次之間只隔毫秒，但暫停中的 run 一被終止就可能立刻到 CANCELLED（CI 負載下
+    # 392fd486 實測）：冪等的誠實形態＝仍在 CANCELLING 回同一個 202，或已終態回 409 且現態 CANCELLED
+    again_stop = bridge.client.post(f"/autoclaude/runs/{rid}:stop")
+    if again_stop.status_code == 202:
+        assert again_stop.json() == {"status": "CANCELLING"}
+    else:
+        assert again_stop.status_code == 409 and "CANCELLED" in json.dumps(again_stop.json())
+    assert bridge.wait_status(rid, TERMINAL)["status"] == "CANCELLED"
 
 
 def test_run_ids_are_found_regardless_of_uuid_spelling(bridge, run_body) -> None:
