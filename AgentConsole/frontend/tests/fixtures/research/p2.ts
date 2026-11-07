@@ -73,8 +73,22 @@ export const kanbanUnreachable = (): ResearchKanban => ({
 });
 
 export const HEALING: ResearchHealing = {
+  researchId: R3,
   rows: [
-    { runId: RUN_ID, taskId: "task-3", stepNumber: 11, attempt: 1, status: "RETRYING", excerpt: "AssertionError: expected 3 got 4", occurredAt: T1, attribution: null, patchResult: null },
+    {
+      runId: RUN_ID,
+      taskId: "task-3",
+      stepNumber: 11,
+      attempt: 1,
+      status: "RETRYING",
+      excerpt: "AssertionError: expected 3 got 4",
+      occurredAt: T1,
+      resolved: false,
+      escalated: false,
+      specChangeForbidden: false,
+      attribution: null,
+      patchResult: null,
+    },
     {
       runId: RUN_ID,
       taskId: "task-3",
@@ -84,14 +98,32 @@ export const HEALING: ResearchHealing = {
       excerpt: "AssertionError: expected 3 got 5",
       occurredAt: T2,
       resolved: false,
+      escalated: false,
+      specChangeForbidden: false,
       attribution: null,
       patchResult: null,
     },
-    { runId: RUN_ID, taskId: "task-7", stepNumber: 20, attempt: 3, status: "FAILED", excerpt: "timeout after 30s", occurredAt: T2, escalated: true, attribution: null, patchResult: null },
+    {
+      runId: RUN_ID,
+      taskId: "task-7",
+      stepNumber: 20,
+      attempt: 3,
+      status: "FAILED",
+      excerpt: "timeout after 30s",
+      occurredAt: T2,
+      resolved: false,
+      escalated: true,
+      specChangeForbidden: false,
+      attribution: null,
+      patchResult: null,
+    },
   ],
   maxRetries: 3,
   logSyncedThrough: T2,
-  logBehind: 0,
+  retryingSteps: 0,
+  escalatedTasks: 0,
+  logLag: 0,
+  specChange: null,
 };
 
 export const TRACEABILITY: ResearchTraceability = {

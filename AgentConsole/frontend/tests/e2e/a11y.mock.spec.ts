@@ -453,7 +453,7 @@ const innerLoopBackend: MockHandler = (call) => {
   if (rest === "/kanban") return { data: kanbanPending(PENDING_ESCALATED) };
   if (rest === "/healing") {
     const rows = HEALING.rows.map((r, i) => (i === 1 ? { ...r, specChangeForbidden: true, excerpt: "x".repeat(300) } : r));
-    return { data: { ...HEALING, rows, logBehind: 3 } };
+    return { data: { ...HEALING, rows, logLag: 3 } };
   }
   return undefined;
 };

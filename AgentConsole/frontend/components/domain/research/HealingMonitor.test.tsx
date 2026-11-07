@@ -84,10 +84,10 @@ describe("自癒監視器", () => {
   });
 
   it("AT_962_12_5 日誌落後 3 筆顯示『日誌落後 3 筆』；0 筆不顯示", async () => {
-    const first = await mount(withRows(HEALING.rows, { logBehind: 3 }));
+    const first = await mount(withRows(HEALING.rows, { logLag: 3 }));
     expect(screen.getByTestId("healing-log-behind").textContent).toBe("日誌落後 3 筆");
     first.unmount();
-    await mount(withRows(HEALING.rows, { logBehind: 0 }));
+    await mount(withRows(HEALING.rows, { logLag: 0 }));
     expect(screen.queryByTestId("healing-log-behind")).toBeNull();
     expect(document.body.textContent).not.toContain("日誌落後");
   });

@@ -939,119 +939,50 @@ export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goal
 export type ResearchDecompositionSignoffRequest = { waivers: Array<Required<S["DecompositionWaiverRequest"]>> };
 
 // ── ResearchToPRD P2（看板、SCG 登錄、自癒、交付；TCS-ResearchToPRD-P2-20261107；IFACE-P2 §1～§6）──────────────────────────────
-// 手寫型保留（AT-962-27-2 的決策，FE-W3 重產 schema.d.ts 後實測）：後端 API-P2 的 record 未宣告必填（生成型每欄都是 `?:`，可空鍵也失去 null），整批改引會逼迫所有消費端與夾具放寬成選填（D-135 要避免的後遺症）。故以 `lib/api/types.test.ts` 逐 DTO 鎖「欄名集合與生成型相等」「去 null 後可指派給生成型」；待後端補 `requiredMode = REQUIRED`／`nullable = true` 後，再改別名或 `Omit` 交集。
+// 一律引生成型（AT-962-27-2；API-P2 FIX 起後端逐欄宣告 required／nullable，D-160）。值域放寬成 `string` 的欄位以字面聯集收窄；
+// 其餘欄位全取生成型。springdoc 對 `$ref` 型欄位不輸出 nullable，故五處（`rtm`、`specChange`、兩個 `snapshot`、追溯 `rtm`）手動補 `| null`（依 D-160／springdoc 限制）。
 
 /** 內環 FSM 衍生欄在 Bridge 不可達時為 null，並帶 `unknown:true`（不猜）。 */
-export type ResearchKanbanDecompose = { done: boolean; status: string; tasksCount: number; stale: boolean };
-export type ResearchKanbanTcs = { done: boolean; stage2Frozen: boolean | null; negotiated: boolean | null; fsmState: string | null; unknown?: true };
-export type ResearchKanbanTaskCounts = { total: number; running: number; completed: number; skipped: number; failed: number; escalated: number; retrying: number };
-export type ResearchKanbanImplement = { done: boolean; fsmState: string | null; tasks: ResearchKanbanTaskCounts; unknown?: true };
-export type ResearchKanbanHealing = { done: boolean; retryingSteps: number; escalatedTasks: number; maxRetries: number };
-export type ResearchKanbanRtm = { runId: string; atPassed: number; atTotal: number; acCovered: number; acTotal: number; acPct: number; fullyCovered: boolean; advisory: true };
-export type ResearchKanbanRegression = { done: boolean; fsmState: string | null; releaseReady: boolean | null; rtm: ResearchKanbanRtm | null; rtmAvailable: boolean; unknown?: true };
-export type ResearchPendingReview = {
-  reviewId: string;
-  runId: string;
-  kind: string;
-  taskId: string | null;
-  reason: string;
-  createdAt: string;
-  allowedDecisions: string[];
-};
-export type ResearchKanbanGate = { gate: "SCG4" | "SCG5" | "SCG6"; decision: "APPROVED" | "REJECTED"; decidedBy: string; decidedAt: string; fsmStateAfter: string; reason: string };
-export type ResearchKanban = {
-  researchId: string;
-  consoleProjectId: string | null;
-  latestRunId: string | null;
-  generatedAt: string;
-  bridgeReachable: boolean;
-  snapshotAt: string | null;
-  stale: boolean;
-  scrOpen: boolean;
-  columns: {
-    decompose: ResearchKanbanDecompose;
-    tcs: ResearchKanbanTcs;
-    implement: ResearchKanbanImplement;
-    healing: ResearchKanbanHealing;
-    regression: ResearchKanbanRegression;
-  };
-  pendingReviews: ResearchPendingReview[];
+export type ResearchKanbanDecompose = S["KanbanDecompose"];
+export type ResearchKanbanTcs = S["KanbanTcs"];
+export type ResearchKanbanTaskCounts = S["KanbanTaskCounts"];
+export type ResearchKanbanImplement = S["KanbanImplement"];
+export type ResearchKanbanHealing = S["KanbanHealing"];
+export type ResearchKanbanRtm = S["KanbanRtm"];
+/** `rtm` 手動 `| null`（依 D-160／springdoc 對 `$ref` 欄位不輸出 nullable 的限制）。 */
+export type ResearchKanbanRegression = Omit<S["KanbanRegression"], "rtm"> & { rtm: ResearchKanbanRtm | null };
+export type ResearchPendingReview = S["KanbanPendingReview"];
+export type ResearchKanbanGate = Omit<S["KanbanGate"], "gate" | "decision"> & { gate: "SCG4" | "SCG5" | "SCG6"; decision: "APPROVED" | "REJECTED" };
+export type ResearchKanban = Omit<S["KanbanDto"], "columns" | "gates"> & {
+  columns: Omit<S["Columns"], "regression"> & { regression: ResearchKanbanRegression };
   gates: ResearchKanbanGate[];
 };
 
-export type ResearchGateName = "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
-export type ResearchGateResult = "PASS" | "FAIL";
+export type ResearchGateName = NonNullable<S["GateRegisterRequest"]["gate"]>;
+export type ResearchGateResult = NonNullable<S["GateRegisterRequest"]["result"]>;
 /** API-RP-23 請求；`reviewerIndependent`、`reviewReportRef` 前端欄位不變（D-138 Q-2：由後端映射成 details）。 */
-export type ResearchGateRegisterRequest = { gate: ResearchGateName; result: ResearchGateResult; reason: string; reviewReportRef?: string; reviewerIndependent: boolean };
-export type ResearchGateRegisterResult = {
-  gateDecisionId: string;
-  gate: ResearchGateName;
-  result: ResearchGateResult;
-  fsmStateBefore: string;
-  nextState: string;
-  escalated: boolean;
-  flow?: S["ResearchFlowCursor"];
-};
+export type ResearchGateRegisterRequest = S["GateRegisterRequest"];
+export type ResearchGateRegisterResult = S["GateRegisterResult"];
 
-export type ResearchHealingRow = {
-  runId: string;
-  taskId: string;
-  stepNumber: number;
-  attempt: number;
-  status: "RETRYING" | "FAILED";
-  excerpt: string;
-  occurredAt: string;
-  resolved?: boolean;
-  escalated?: boolean;
-  specChangeForbidden?: boolean;
-  /** 引擎沒有獨立資料來源，恆為 null（D-140 #5）：UI 顯示「引擎未提供」，不假造 */
-  attribution: string | null;
-  patchResult: string | null;
-};
-export type ResearchHealing = { rows: ResearchHealingRow[]; maxRetries: number; logSyncedThrough: string | null; logBehind: number };
+export type ResearchHealingRow = Omit<S["HealingRow"], "status"> & { status: "RETRYING" | "FAILED" };
+/** `specChange` 手動 `| null`（依 D-160／springdoc 限制）；`attribution`／`patchResult` 引擎沒有獨立資料來源，恆為 null（D-140 #5）：UI 顯示「引擎未提供」，不假造。 */
+export type ResearchHealing = Omit<S["HealingDto"], "rows" | "specChange"> & { rows: ResearchHealingRow[]; specChange: S["HealingSpecChange"] | null };
 
 export type ResearchDeliveryKind = "RELEASE_TAG" | "PULL_REQUEST" | "RELEASE_NOTE";
 /** 契約 `DeliveryDto` 沒有 `id`：React key 用 `${kind}:${ref}`（UNIQUE(research_id, kind, ref)）。`snapshotSha256`：TAG 列為 64 位小寫十六進位、PR 列為 null。 */
-export type ResearchDelivery = {
-  kind: ResearchDeliveryKind;
-  ref: string;
-  commitSha: string | null;
-  url: string | null;
-  rtmReportRef: string | null;
-  fsmStateAfter: string | null;
-  status: "CREATED" | "FAILED";
-  createdBy: string;
-  createdAt: string;
-  snapshotSha256: string | null;
-};
-export type ResearchDeliveryOverview = {
-  deliveries: ResearchDelivery[];
-  snapshot: { relPath: string; sha256: string } | null;
-  projectRoot: string | null;
-  containerMode: boolean;
-  preconditions: { releaseReady: boolean; rtmFull: boolean; scrOpen: boolean; hasOrigin: boolean | null; ghAvailable: boolean | null };
-};
-export type ResearchTagRequest = { tagName: string; message?: string; push?: boolean; createGithubRelease?: false };
-export type ResearchTagResult = { delivery: ResearchDelivery; snapshot: { relPath: string; sha256: string }; flow?: S["ResearchFlowCursor"]; fsmState: string };
-export type ResearchPrRequest = { branch?: string; title?: string; bodyPreviewAck: true };
-export type ResearchPrResult = { delivery: ResearchDelivery; created: boolean };
+export type ResearchDelivery = Omit<S["DeliveryDto"], "kind" | "status"> & { kind: ResearchDeliveryKind; status: "CREATED" | "FAILED" };
+/** `snapshot` 手動 `| null`（依 D-160／springdoc 限制）。 */
+export type ResearchDeliveryOverview = Omit<S["DeliveryOverviewDto"], "deliveries" | "snapshot"> & { deliveries: ResearchDelivery[]; snapshot: S["DeliverySnapshot"] | null };
+export type ResearchTagRequest = Omit<S["TagRequest"], "createGithubRelease"> & { createGithubRelease?: false };
+/** `snapshot` 手動 `| null`（依 D-160／springdoc 限制）。 */
+export type ResearchTagResult = Omit<S["TagResult"], "delivery" | "snapshot"> & { delivery: ResearchDelivery; snapshot: S["DeliverySnapshot"] | null };
+export type ResearchPrRequest = Omit<S["PrRequest"], "bodyPreviewAck"> & { bodyPreviewAck: true };
+export type ResearchPrResult = Omit<S["PrResult"], "delivery"> & { delivery: ResearchDelivery };
 
 export type ResearchTraceStatus = "PASS" | "FAIL" | "NOT_RUN" | "NONE";
 /** Gherkin 摘要三段（Bridge `delivery.gherkin_summary`：純文字、每段至多 120 字；缺段為空字串；D-158）。 */
-export type ResearchGherkinSummary = { given: string; when: string; then: string };
+export type ResearchGherkinSummary = S["TraceabilityGherkin"];
 /** `source`：覆蓋任務（`task:<id>`）與 RTM 覆蓋檔（`RTM-COVERAGE-<key>.yaml`）清單，無覆蓋任務時為空陣列（D-158）。 */
-export type ResearchTraceRow = {
-  ac: string;
-  userStory: string;
-  gherkinSummary: ResearchGherkinSummary;
-  unitStatus: ResearchTraceStatus;
-  e2eStatus: ResearchTraceStatus;
-  lastRunAt: string | null;
-  source: string[];
-};
-export type ResearchTraceability = {
-  rows: ResearchTraceRow[];
-  totals: { acTotal: number; covered: number; uncovered: number; frTotal: number };
-  rtm: { runId: string; fullyCovered: boolean; acPct: number; advisory: true } | null;
-  generatedAt: string;
-};
+export type ResearchTraceRow = Omit<S["TraceabilityRow"], "unitStatus" | "e2eStatus"> & { unitStatus: ResearchTraceStatus; e2eStatus: ResearchTraceStatus };
+/** `rtm` 手動 `| null`（依 D-160／springdoc 限制）。 */
+export type ResearchTraceability = Omit<S["TraceabilityDto"], "rows" | "rtm"> & { rows: ResearchTraceRow[]; rtm: S["TraceabilityRtm"] | null };

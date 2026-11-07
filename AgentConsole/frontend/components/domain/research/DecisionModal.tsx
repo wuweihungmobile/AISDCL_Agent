@@ -32,7 +32,7 @@ export type { DecisionItem };
 export type DecisionTrigger = DecisionItem;
 
 export function itemFromPending(p: ResearchPendingReview): DecisionItem {
-  return { key: decisionKey({ reviewId: p.reviewId }) as string, reviewId: p.reviewId, runId: p.runId, kind: p.kind, taskId: p.taskId, reason: p.reason, allowedDecisions: p.allowedDecisions };
+  return { key: decisionKey({ reviewId: p.reviewId }) as string, reviewId: p.reviewId, runId: p.runId, kind: p.kind, taskId: p.taskId, reason: p.reason ?? "", allowedDecisions: p.allowedDecisions };
 }
 
 /** 待審與觸發合併：同鍵只留一個（待審優先，因為它是伺服器事實）。 */

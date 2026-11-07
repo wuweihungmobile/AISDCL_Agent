@@ -8,7 +8,7 @@
  *  - **純文字**：失敗摘錄（已在後端遮蔽、尾 300 字元）一律當文字渲染，長字串以 `break-all` 與 `overflow-x-auto` 不撐破容器，不截斷。
  *  - **升級＝交給人**：任務已升級（`escalated`）時只顯示「已升級，等待人工決定」徽章，點它開決策彈窗（{@link DecisionModal}，研究面唯一的決策殼）；**沒有自動重試鈕**，重試走彈窗的既有審核動作。
  *  - **規格漂移**：`specChangeForbidden` 的列顯示「補丁觸及凍結規格，請發起 SCR」並開 {@link ScrRequestDialog}（`sourceKind` 預填 `HEALING_FAILED`）；VIEWER 的發起鈕停用。
- *  - 日誌落後（`logBehind`）大於 0 時顯示「日誌落後 N 筆」；0 筆不顯示。
+ *  - 日誌落後（`logLag`）大於 0 時顯示「日誌落後 N 筆」；0 筆不顯示。
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { HeartPulse } from "lucide-react";
@@ -56,16 +56,16 @@ export function HealingMonitor({ researchId }: { researchId: string }) {
   if (healing.data === undefined) {
     return healing.isError ? <ErrorState error={healing.error} title="無法載入自癒監視器" onRetry={() => void healing.refetch()} /> : <PageSkeleton />;
   }
-  const { maxRetries, logBehind } = healing.data;
+  const { maxRetries, logLag } = healing.data;
 
   return (
     <Card data-testid="healing-monitor" className="flex flex-col gap-3 p-4">
       <h4 className="flex flex-wrap items-center gap-2 text-base font-semibold">
         <HeartPulse size={18} aria-hidden className="text-wg-muted" />
         自癒監視器
-        {logBehind > 0 ? (
+        {logLag > 0 ? (
           <span data-testid="healing-log-behind" className="rounded border border-wg-draft-border bg-wg-draft-bg px-2 py-0.5 text-xs font-medium text-wg-accent">
-            日誌落後 {logBehind} 筆
+            日誌落後 {logLag} 筆
           </span>
         ) : null}
       </h4>

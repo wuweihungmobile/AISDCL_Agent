@@ -32,7 +32,12 @@ const DELIVERY: ResearchDelivery = {
   createdAt: "2026-11-07T10:00:00+08:00",
   snapshotSha256: sha("snap"),
 };
-const RESULT: ResearchTagResult = { delivery: DELIVERY, snapshot: { relPath: "03_execution/traceability_matrix.json", sha256: sha("snap") }, fsmState: "RELEASE" };
+const RESULT: ResearchTagResult = {
+  delivery: DELIVERY,
+  snapshot: { relPath: "03_execution/traceability_matrix.json", sha256: sha("snap") },
+  flow: { step: "deliver", phase: "DELIVERED", status: "COMPLETED", detail: "" },
+  fsmState: "RELEASE",
+};
 
 function mount(role: Role = "ADMIN", reply?: (call: ApiCall) => Reply) {
   const stub = stubResearchApi({ overrides: (call) => (call.method === "POST" && TAG_URL.test(call.path) ? reply?.(call) : undefined) });

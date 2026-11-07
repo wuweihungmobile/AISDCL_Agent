@@ -99,11 +99,11 @@ export function TagConfirmDialog({ researchId, open, onOpenChange }: { researchI
                 </dd>
                 <dt className="text-wg-muted">追溯快照 sha256</dt>
                 <dd data-testid="tag-result-sha" className="font-mono break-all">
-                  {result.snapshot.sha256}
+                  {result.snapshot?.sha256 ?? ""}
                 </dd>
                 <dt className="text-wg-muted">快照路徑</dt>
                 <dd data-testid="tag-result-path" className="font-mono break-all">
-                  {result.snapshot.relPath}
+                  {result.snapshot?.relPath ?? ""}
                 </dd>
               </dl>
             </div>

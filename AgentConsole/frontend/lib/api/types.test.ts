@@ -30,11 +30,11 @@ import type {
 /**
  * AT-962-27-2／27-3（TCS-ResearchToPRD-P2 §3.3）：P2 手寫型與重產後的 `schema.d.ts` 不得漂移。
  *
- * 決策（FE-W3 實測）：後端 P2 record 未宣告必填，生成型每欄都是 `?:` 且可空鍵失去 null；
- * 手寫型因此保留（比生成型嚴格），本檔以型別層鎖兩件事——
+ * P2 手寫型一律引生成型（D-160：API-P2 FIX 起後端逐欄宣告 required／nullable）；值域收窄與五處 `| null`（springdoc 對 `$ref` 欄位不輸出 nullable）是僅有的手寫部分。
+ * 本檔以型別層鎖兩件事——
  *   ① 欄名集合與生成型逐層相等（後端增減欄位，這裡紅）；
  *   ② 去掉 null 之後，手寫型可指派給生成型（欄位型別方向沒反）。
- * 第二半由 `tsc --noEmit` 判定（vitest 執行期不檢查型別）；靜態掃描另守「夾具不以放寬型別蒙混」。
+ * 型別斷言由 `tsc --noEmit` 判定（vitest 執行期不檢查型別）；靜態掃描另守「夾具不以放寬型別蒙混」。
  */
 type S = components["schemas"];
 
@@ -65,9 +65,7 @@ describe("AT-962-27-2 P2 手寫型與生成型欄名集合相等（型別層）"
   });
 
   it("自癒", () => {
-    // 已知漂移（FE-W3 重產後揭露、需主控處理）：手寫 `ResearchHealing` 仍是 P2 前的 `logBehind`，且缺 researchId／retryingSteps／escalatedTasks／specChange；
-    // 後端送 `logLag`。`HealingMonitor` 讀 `logBehind`（元件屬 FE-P2A 持有面，W3 不改）。修完元件與手寫型後刪除此例外——屆時兩側相等判準會轉紅提醒。
-    expectTypeOf<Exclude<KeysOf<ResearchHealing>, "logBehind">>().toEqualTypeOf<Exclude<KeysOf<S["HealingDto"]>, "researchId" | "logLag" | "retryingSteps" | "escalatedTasks" | "specChange">>();
+    expectTypeOf<KeysOf<ResearchHealing>>().toEqualTypeOf<KeysOf<S["HealingDto"]>>();
     expectTypeOf<KeysOf<ResearchHealingRow>>().toEqualTypeOf<KeysOf<S["HealingRow"]>>();
     expectTypeOf<KeysOf<S["HealingSpecChange"]>>().toEqualTypeOf<"paths" | "detectedAt">();
   });
@@ -95,6 +93,7 @@ describe("AT-962-27-2 P2 手寫型與生成型欄名集合相等（型別層）"
     expectTypeOf<StripNull<ResearchKanban>>().toExtend<S["KanbanDto"]>();
     expectTypeOf<StripNull<ResearchGateRegisterRequest>>().toExtend<S["GateRegisterRequest"]>();
     expectTypeOf<StripNull<ResearchGateRegisterResult>>().toExtend<S["GateRegisterResult"]>();
+    expectTypeOf<StripNull<ResearchHealing>>().toExtend<S["HealingDto"]>();
     expectTypeOf<StripNull<ResearchDeliveryOverview>>().toExtend<S["DeliveryOverviewDto"]>();
     expectTypeOf<StripNull<ResearchTagRequest>>().toExtend<S["TagRequest"]>();
     expectTypeOf<StripNull<ResearchTagResult>>().toExtend<S["TagResult"]>();
@@ -151,6 +150,8 @@ describe("AT-962-27-1 重產結果命中七路徑與 DTO（靜態）", () => {
     for (const name of ["KanbanDto", "GateRegisterRequest", "GateRegisterResult", "HealingDto", "DeliveryOverviewDto", "DeliveryDto", "TagRequest", "PrRequest", "TraceabilityDto"]) {
       expect(schema, name).toContain(`        ${name}: {`);
     }
-    expect(schema.match(/evidenceUrl\?: string/g)?.length).toBeGreaterThanOrEqual(2);
+    // ScrOpenRequest 選填、ScrDto 必填可空（API-P2 FIX）
+    expect(schema).toContain("evidenceUrl?: string;");
+    expect(schema).toContain("evidenceUrl: string | null;");
   });
 });

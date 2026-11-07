@@ -3482,15 +3482,15 @@ export interface components {
         /** @description 登錄內環閘決定：FAIL 必填 reason；PR_REVIEW 須 reviewerIndependent＝true；RELEASE_READY 的 PASS 只經 delivery/tag */
         GateRegisterRequest: {
             /** @enum {string} */
-            gate?: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
+            gate: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
             /** @enum {string} */
-            result?: "PASS" | "FAIL";
+            result: "PASS" | "FAIL";
             /** @description FAIL 必填；1～500 字 */
-            reason?: string;
+            reason?: string | null;
             /** @description 審查報告參照，至多 300 字 */
-            reviewReportRef?: string;
+            reviewReportRef?: string | null;
             /** @description PR_REVIEW 必須為 true（Console 不判斷獨立性） */
-            reviewerIndependent?: boolean;
+            reviewerIndependent?: boolean | null;
         };
         ApiResultGateRegisterResult: {
             /** Format: int32 */
@@ -3503,29 +3503,31 @@ export interface components {
         };
         /** @description 閘登錄結果；escalated 由 Bridge 回傳值如實帶出（nextState 以 ESCALATION 起頭） */
         GateRegisterResult: {
-            gateDecisionId?: string;
+            gateDecisionId: string;
             /** @enum {string} */
-            gate?: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
+            gate: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
             /** @enum {string} */
-            result?: "PASS" | "FAIL";
-            fsmStateBefore?: string;
-            nextState?: string;
-            escalated?: boolean;
-            flow?: components["schemas"]["ResearchFlowCursor"];
+            result: "PASS" | "FAIL";
+            fsmStateBefore: string | null;
+            nextState: string | null;
+            escalated: boolean;
+            flow: components["schemas"]["ResearchFlowCursor"];
+            /** @description 同一 decisionId 重送時 Bridge 回 true（冪等重放；此時 fsmStateBefore 為 null）；一般登錄不出現 */
+            replayed?: boolean;
         };
         /** @description 研究工作流的 DB 游標（step、phase、status、detail） */
         ResearchFlowCursor: {
-            step?: string;
-            phase?: string;
-            status?: string;
-            detail?: string;
+            step: string;
+            phase: string;
+            status: string;
+            detail: string;
         };
         /** @description 建立 Release Tag：tagName 為 semver（至多 64 字）、message 至多 200 字、push 預設 false、createGithubRelease 為 true＝422 */
         TagRequest: {
-            tagName?: string;
-            message?: string;
-            push?: boolean;
-            createGithubRelease?: boolean;
+            tagName: string;
+            message?: string | null;
+            push?: boolean | null;
+            createGithubRelease?: boolean | null;
         };
         ApiResultTagResult: {
             /** Format: int32 */
@@ -3538,35 +3540,35 @@ export interface components {
         };
         /** @description 一筆交付（research_deliveries；snapshotSha256＝追溯快照 JSON 的雜湊，TAG 列必填、PR 列為 null） */
         DeliveryDto: {
-            kind?: string;
-            ref?: string;
-            commitSha?: string;
-            url?: string;
-            rtmReportRef?: string;
-            fsmStateAfter?: string;
-            status?: string;
-            createdBy?: string;
+            kind: string;
+            ref: string;
+            commitSha: string | null;
+            url: string | null;
+            rtmReportRef: string | null;
+            fsmStateAfter: string | null;
+            status: string;
+            createdBy: string;
             /** Format: date-time */
-            createdAt?: string;
-            snapshotSha256?: string;
+            createdAt: string;
+            snapshotSha256: string | null;
         };
         /** @description 追溯快照檔（03_execution/traceability_matrix.json）的相對路徑與 sha256 */
         DeliverySnapshot: {
-            relPath?: string;
-            sha256?: string;
+            relPath: string;
+            sha256: string;
         };
         /** @description Release Tag 建立結果 */
         TagResult: {
-            delivery?: components["schemas"]["DeliveryDto"];
-            snapshot?: components["schemas"]["DeliverySnapshot"];
-            flow?: components["schemas"]["ResearchFlowCursor"];
-            fsmState?: string;
+            delivery: components["schemas"]["DeliveryDto"];
+            snapshot: components["schemas"]["DeliverySnapshot"];
+            flow: components["schemas"]["ResearchFlowCursor"];
+            fsmState: string | null;
         };
         /** @description 建立 Pull Request：bodyPreviewAck 須為 true（已預覽內文）；title 只作預覽，須等於模板輸出 */
         PrRequest: {
-            branch?: string;
-            title?: string;
-            bodyPreviewAck?: boolean;
+            branch?: string | null;
+            title?: string | null;
+            bodyPreviewAck: boolean;
         };
         ApiResultPrResult: {
             /** Format: int32 */
@@ -3579,8 +3581,8 @@ export interface components {
         };
         /** @description Pull Request 建立結果；created 為 false＝同一分支的 PR 已存在（冪等） */
         PrResult: {
-            delivery?: components["schemas"]["DeliveryDto"];
-            created?: boolean;
+            delivery: components["schemas"]["DeliveryDto"];
+            created: boolean;
         };
         DecompositionScope: {
             /** @description 只拆這些 US（例 US-003） */
@@ -4502,7 +4504,7 @@ export interface components {
             decidedBy: string | null;
             decidedAt: string | null;
             /** @description 證據連結（https 限定、至多 500 字；P2 V21 research_scr.evidence_url） */
-            evidenceUrl?: string | null;
+            evidenceUrl: string | null;
         };
         ApiResultListReviewRoundDto: {
             /** Format: int32 */
@@ -4662,129 +4664,132 @@ export interface components {
             traceId: string;
         };
         Columns: {
-            decompose?: components["schemas"]["KanbanDecompose"];
-            tcs?: components["schemas"]["KanbanTcs"];
-            implement?: components["schemas"]["KanbanImplement"];
-            healing?: components["schemas"]["KanbanHealing"];
-            regression?: components["schemas"]["KanbanRegression"];
+            decompose: components["schemas"]["KanbanDecompose"];
+            tcs: components["schemas"]["KanbanTcs"];
+            implement: components["schemas"]["KanbanImplement"];
+            healing: components["schemas"]["KanbanHealing"];
+            regression: components["schemas"]["KanbanRegression"];
         };
         /** @description Task 拆解欄：done＝已簽核且非 stale */
         KanbanDecompose: {
-            done?: boolean;
-            status?: string;
+            done: boolean;
+            status: string;
             /** Format: int32 */
-            tasksCount?: number;
-            stale?: boolean;
+            tasksCount: number;
+            stale: boolean;
         };
         /** @description 看板投影（API-RP-26）；Bridge 不可達：bridgeReachable＝false、stale＝true、snapshotAt＝三個 DB 來源時間的最大值 */
         KanbanDto: {
             /** Format: uuid */
-            researchId?: string;
+            researchId: string;
             /** Format: uuid */
-            consoleProjectId?: string;
+            consoleProjectId: string | null;
             /** Format: uuid */
-            latestRunId?: string;
+            latestRunId: string | null;
             /** Format: date-time */
-            generatedAt?: string;
-            bridgeReachable?: boolean;
+            generatedAt: string;
+            bridgeReachable: boolean;
             /** Format: date-time */
-            snapshotAt?: string;
-            stale?: boolean;
-            scrOpen?: boolean;
-            columns?: components["schemas"]["Columns"];
-            pendingReviews?: components["schemas"]["KanbanPendingReview"][];
-            gates?: components["schemas"]["KanbanGate"][];
+            snapshotAt: string | null;
+            stale: boolean;
+            scrOpen: boolean;
+            columns: components["schemas"]["Columns"];
+            pendingReviews: components["schemas"]["KanbanPendingReview"][];
+            gates: components["schemas"]["KanbanGate"][];
         };
         /** @description 內環閘決定（SCG4、SCG5、SCG6 各最近 5 筆，decidedAt 新到舊） */
         KanbanGate: {
-            gate?: string;
-            decision?: string;
-            decidedBy?: string;
+            gate: string;
+            decision: string;
+            decidedBy: string;
             /** Format: date-time */
-            decidedAt?: string;
-            fsmStateAfter?: string;
-            reason?: string;
+            decidedAt: string;
+            fsmStateAfter: string | null;
+            reason: string;
         };
         /** @description 自癒修復欄：done＝retryingSteps 與 escalatedTasks 皆為 0 */
         KanbanHealing: {
-            done?: boolean;
+            done: boolean;
             /** Format: int32 */
-            retryingSteps?: number;
+            retryingSteps: number;
             /** Format: int32 */
-            escalatedTasks?: number;
+            escalatedTasks: number;
             /** Format: int32 */
-            maxRetries?: number;
+            maxRetries: number;
         };
         /** @description 程式碼實作欄：done＝total 大於 0 且 completed 加 skipped 等於 total */
         KanbanImplement: {
-            done?: boolean;
-            fsmState?: string;
+            done: boolean;
+            fsmState: string | null;
+            /** @description 只在為 true 時出現（Bridge 不可達、值未知） */
             unknown?: boolean;
-            tasks?: components["schemas"]["KanbanTaskCounts"];
+            tasks: components["schemas"]["KanbanTaskCounts"];
         };
         /** @description 待審項目（review_requests 的 PENDING） */
         KanbanPendingReview: {
             /** Format: uuid */
-            reviewId?: string;
+            reviewId: string;
             /** Format: uuid */
-            runId?: string;
-            kind?: string;
+            runId: string;
+            kind: string;
             /** Format: uuid */
-            taskId?: string;
-            reason?: string;
+            taskId: string | null;
+            reason: string | null;
             /** Format: date-time */
-            createdAt?: string;
-            allowedDecisions?: string[];
+            createdAt: string;
+            allowedDecisions: string[];
         };
         /** @description 回歸驗收欄：done 僅在 acPct 為 100、fullyCovered 為真、現態屬 RELEASE_READY 或 RELEASE */
         KanbanRegression: {
-            done?: boolean;
-            fsmState?: string;
-            releaseReady?: boolean;
+            done: boolean;
+            fsmState: string | null;
+            releaseReady: boolean | null;
+            /** @description 只在為 true 時出現（Bridge 不可達、值未知） */
             unknown?: boolean;
-            rtmAvailable?: boolean;
-            rtm?: components["schemas"]["KanbanRtm"];
+            rtmAvailable: boolean;
+            rtm: components["schemas"]["KanbanRtm"];
         };
         /** @description RTM 摘要（諮詢視圖；advisory 恆為 true） */
         KanbanRtm: {
             /** Format: uuid */
-            runId?: string;
+            runId: string;
             /** Format: int32 */
-            atPassed?: number;
+            atPassed: number;
             /** Format: int32 */
-            atTotal?: number;
+            atTotal: number;
             /** Format: int32 */
-            acCovered?: number;
+            acCovered: number;
             /** Format: int32 */
-            acTotal?: number;
+            acTotal: number;
             /** Format: double */
-            acPct?: number;
-            fullyCovered?: boolean;
-            advisory?: boolean;
+            acPct: number;
+            fullyCovered: boolean;
+            advisory: boolean;
         };
         /** @description 專案任務計數；retrying＝最新 run 內仍在重試的任務數 */
         KanbanTaskCounts: {
             /** Format: int32 */
-            total?: number;
+            total: number;
             /** Format: int32 */
-            running?: number;
+            running: number;
             /** Format: int32 */
-            completed?: number;
+            completed: number;
             /** Format: int32 */
-            skipped?: number;
+            skipped: number;
             /** Format: int32 */
-            failed?: number;
+            failed: number;
             /** Format: int32 */
-            escalated?: number;
+            escalated: number;
             /** Format: int32 */
-            retrying?: number;
+            retrying: number;
         };
         /** @description 測試規格產生欄：done＝Stage-2 已凍結；Bridge 不可達時 stage2Frozen／negotiated／fsmState 為 null 且 unknown 為 true */
         KanbanTcs: {
-            done?: boolean;
-            stage2Frozen?: boolean;
-            negotiated?: boolean;
-            fsmState?: string;
+            done: boolean;
+            stage2Frozen: boolean | null;
+            negotiated: boolean | null;
+            fsmState: string | null;
+            /** @description 只在為 true 時出現（Bridge 不可達、值未知） */
             unknown?: boolean;
         };
         ApiResultHealingDto: {
@@ -4799,45 +4804,45 @@ export interface components {
         /** @description 自癒歷史；retryingSteps＝最新 run 內 RETRYING 且其後無同任務非 RETRYING 列者的列數、escalatedTasks＝ESCALATED 任務數（與看板 healing 欄同一份計算）；logSyncedThrough 與落後筆數來自記憶體快取（無同步紀錄＝null 與 0） */
         HealingDto: {
             /** Format: uuid */
-            researchId?: string;
-            rows?: components["schemas"]["HealingRow"][];
+            researchId: string;
+            rows: components["schemas"]["HealingRow"][];
             /** Format: int32 */
-            maxRetries?: number;
+            maxRetries: number;
             /** Format: int32 */
-            retryingSteps?: number;
+            retryingSteps: number;
             /** Format: int32 */
-            escalatedTasks?: number;
+            escalatedTasks: number;
             /** Format: date-time */
-            logSyncedThrough?: string;
+            logSyncedThrough: string | null;
             /** Format: int32 */
-            logLag?: number;
-            specChange?: components["schemas"]["HealingSpecChange"];
+            logLag: number;
+            specChange: components["schemas"]["HealingSpecChange"];
         };
         /** @description 自癒視圖的一列。excerpt＝error_message 先遮蔽再取尾端 300 字元；attribution、patchResult 引擎未提供，恆為 null */
         HealingRow: {
             /** Format: uuid */
-            runId?: string;
+            runId: string;
             /** Format: uuid */
-            taskId?: string;
+            taskId: string;
             /** Format: int32 */
-            stepNumber?: number;
+            stepNumber: number;
             /** Format: int32 */
-            attempt?: number;
-            status?: string;
-            excerpt?: string;
+            attempt: number;
+            status: string;
+            excerpt: string;
             /** Format: date-time */
-            occurredAt?: string;
-            resolved?: boolean;
-            escalated?: boolean;
-            specChangeForbidden?: boolean;
-            attribution?: string;
-            patchResult?: string;
+            occurredAt: string;
+            resolved: boolean;
+            escalated: boolean;
+            specChangeForbidden: boolean;
+            attribution: string | null;
+            patchResult: string | null;
         };
         /** @description 最近一次 :healing-sync 偵測到的凍結規格漂移（只告警、不還原；唯一補救是發起 SCR） */
         HealingSpecChange: {
-            paths?: string[];
+            paths: string[];
             /** Format: date-time */
-            detectedAt?: string;
+            detectedAt: string;
         };
         ApiResultResearchFsmViewDto: {
             /** Format: int32 */
@@ -5046,19 +5051,19 @@ export interface components {
         };
         /** @description 交付概覽（API-RP-17） */
         DeliveryOverviewDto: {
-            deliveries?: components["schemas"]["DeliveryDto"][];
-            snapshot?: components["schemas"]["DeliverySnapshot"];
-            projectRoot?: string;
-            containerMode?: boolean;
-            preconditions?: components["schemas"]["DeliveryPreconditions"];
+            deliveries: components["schemas"]["DeliveryDto"][];
+            snapshot: components["schemas"]["DeliverySnapshot"];
+            projectRoot: string | null;
+            containerMode: boolean;
+            preconditions: components["schemas"]["DeliveryPreconditions"];
         };
         /** @description 交付前置：hasOrigin、ghAvailable 未知時為 null */
         DeliveryPreconditions: {
-            releaseReady?: boolean;
-            rtmFull?: boolean;
-            scrOpen?: boolean;
-            hasOrigin?: boolean;
-            ghAvailable?: boolean;
+            releaseReady: boolean;
+            rtmFull: boolean;
+            scrOpen: boolean;
+            hasOrigin: boolean | null;
+            ghAvailable: boolean | null;
         };
         ApiResultTraceabilityDto: {
             /** Format: int32 */
@@ -5071,45 +5076,45 @@ export interface components {
         };
         /** @description 追溯表預演（API-RP-17；Bridge :traceability-preview 原樣形狀，鍵轉 camelCase） */
         TraceabilityDto: {
-            rows?: components["schemas"]["TraceabilityRow"][];
-            totals?: components["schemas"]["TraceabilityTotals"];
-            rtm?: components["schemas"]["TraceabilityRtm"];
-            generatedAt?: string;
+            rows: components["schemas"]["TraceabilityRow"][];
+            totals: components["schemas"]["TraceabilityTotals"];
+            rtm: components["schemas"]["TraceabilityRtm"];
+            generatedAt: string;
         };
         /** @description Given／When／Then 各段摘要（純文字、每段至多 120 字） */
         TraceabilityGherkin: {
-            given?: string;
-            when?: string;
-            then?: string;
+            given: string;
+            when: string;
+            then: string;
         };
         /** @description 追溯表一列（一個 AC）：source 為字串陣列（task:<id>、RTM-COVERAGE-<key>.yaml） */
         TraceabilityRow: {
-            ac?: string;
-            userStory?: string;
-            gherkinSummary?: components["schemas"]["TraceabilityGherkin"];
-            unitStatus?: string;
-            e2eStatus?: string;
-            lastRunAt?: string;
-            source?: string[];
+            ac: string;
+            userStory: string;
+            gherkinSummary: components["schemas"]["TraceabilityGherkin"];
+            unitStatus: string;
+            e2eStatus: string;
+            lastRunAt: string | null;
+            source: string[];
         };
         /** @description RTM 摘要（諮詢視圖；advisory 恆為 true）；沒有 run 或報告不可得時整個物件為 null */
         TraceabilityRtm: {
-            runId?: string;
-            fullyCovered?: boolean;
+            runId: string;
+            fullyCovered: boolean;
             /** Format: double */
-            acPct?: number;
-            advisory?: boolean;
+            acPct: number | null;
+            advisory: boolean;
         };
         /** @description totals：frTotal＝凍結 PRD 的 FR 條數（與標題模板同一函式同源，D-151） */
         TraceabilityTotals: {
             /** Format: int32 */
-            acTotal?: number;
+            acTotal: number;
             /** Format: int32 */
-            covered?: number;
+            covered: number;
             /** Format: int32 */
-            uncovered?: number;
+            uncovered: number;
             /** Format: int32 */
-            frTotal?: number;
+            frTotal: number;
         };
         ApiResultCapabilitiesDto: {
             /** Format: int32 */
