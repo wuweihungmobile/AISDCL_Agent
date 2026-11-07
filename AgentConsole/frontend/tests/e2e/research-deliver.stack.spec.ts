@@ -105,12 +105,10 @@ test("AT_962_28_8 Docker 容器模式負控：寫入端點（delivery/tag、deli
   ).trim();
   console.log(`[28-8] Bridge 容器內直呼 :tag → ${direct}`);
   expect(direct.startsWith("409 "), "Bridge 對未分流專案先答 409 route_not_succeeded").toBe(true);
-  test
-    .info()
-    .annotations.push({
-      type: "TCS 偏差",
-      description: "28-8 字面要求 422 route_unsupported_in_deployment；真棧容器模式下專案分流不可能成功，故實際為 409（console-api）／409 route_not_succeeded（Bridge）；零變化判準成立",
-    });
+  test.info().annotations.push({
+    type: "TCS 偏差",
+    description: "28-8 字面要求 422 route_unsupported_in_deployment；真棧容器模式下專案分流不可能成功，故實際為 409（console-api）／409 route_not_succeeded（Bridge）；零變化判準成立",
+  });
 
   const after = { db: deliverySnapshot(project.id), seqs: await eventSeqs(request, project.id), detail: await detailOf(request, project.id) };
   expect(after.db, "研究交付列、閘決定列、事件數與游標（docker exec psql 逐位）前後相等").toBe(before.db);
