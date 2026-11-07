@@ -336,7 +336,8 @@ test("AT_960_22_3 路徑 B：審查通過、ADMIN 於 UI 核准、FSM 凍結；�
   const reconcile = await call(request, ADMIN, "POST", projectPath(project.id, "/reconcile"), {});
   expect(reconcile.status, `對帳 → ${JSON.stringify(reconcile.json)}`).toBe(200);
   const result = dataOf<{ consistent: boolean; checks: Array<{ name: string; status: string }> }>(reconcile);
-  expect(result.checks.map((c) => c.name).sort(), "對帳六項以 Bridge 的 id 命名（INT-01）").toEqual([
+  expect(result.checks.map((c) => c.name).sort(), "對帳項以 Bridge 的 CHECK_IDS 為準（INT-01）").toEqual([
+    "delivery",
     "evidence_matrix",
     "fsm_flow_mapping",
     "prd_sha256",

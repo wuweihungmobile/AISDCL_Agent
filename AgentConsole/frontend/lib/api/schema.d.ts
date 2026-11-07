@@ -692,6 +692,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/projects/{id}/gates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 登錄內環閘決定（API-RP-23；僅 ADMIN）
+         * @description 本文 {gate（PR_REVIEW｜RTM_VERIFY｜RELEASE_READY）, result（PASS｜FAIL）, reason（FAIL 必填，至多 500 字）, reviewReportRef?（至多 300 字）, reviewerIndependent}。RELEASE_READY 的 PASS 只經 POST …/delivery/tag（422 release_pass_via_tag）；PR_REVIEW 須 reviewerIndependent＝true（Console 不判斷獨立性）。失敗序：研究寫入權杖未設 503 → 輸入閘 422 → 專案不存在 404 → 未綁 Console 專案 409（unmet：no_console_project）→ OPEN SCR 409 scr_open → 服務層前置 409（unmet：tasks_incomplete、rtm_below_100、rtm_unavailable；零 Bridge 請求）→ Bridge :gates 恰一次（讀取逾時 330 秒、不重試）。凍結 digest 漂移由 Bridge 回 422 digest_mismatch（details.drift），原樣透傳；escalated 由 Bridge 回傳值如實帶出。approver 與 requestedBy 取 JWT subject。
+         */
+        post: operations["registerResearchGate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/projects/{id}/delivery/tag": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 建立 Release Tag（API-RP-28；僅 ADMIN）
+         * @description 本文 {tagName（semver，至多 64 字）, message?（至多 200 字）, push?（預設 false）, createGithubRelease?（true＝422 release_not_supported）}。前置（409 fsm_state_conflict，details.unmet：not_release_ready、rtm_below_100、scr_open、no_console_project；零 Bridge 請求）。201 回 {delivery, snapshot, flow, fsmState}。Bridge 的 409 tag_exists、502 delivery_step_failed（details.failure_step）、422 digest_mismatch、422 route_unsupported_in_deployment 原樣透傳。失敗序：研究寫入權杖未設 503 → 輸入閘 422 → 專案不存在 404 → 服務層前置 409（零 Bridge 請求）→ Bridge 恰一次（讀取逾時 330 秒、不重試；Bridge 的 409／422／502 reason 與 details 逐字透傳，連線失敗 502 bridge_unreachable、逾時 504 bridge_timeout）。approver 與 requestedBy 取 JWT subject。
+         */
+        post: operations["createResearchTag"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/projects/{id}/delivery/pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 建立 Pull Request（API-RP-28；僅 ADMIN）
+         * @description 本文 {branch?, title?, bodyPreviewAck}；bodyPreviewAck 缺或為 false＝422 preview_ack_required（Bridge 請求 0）。GitHub token 取後端設定鍵 research.github_token，只放進本端點的 Bridge 請求，不入任何回應、日誌與稽核。回 {delivery, created}。失敗序：研究寫入權杖未設 503 → 輸入閘 422 → 專案不存在 404 → 服務層前置 409（零 Bridge 請求）→ Bridge 恰一次（讀取逾時 330 秒、不重試；Bridge 的 409／422／502 reason 與 details 逐字透傳，連線失敗 502 bridge_unreachable、逾時 504 bridge_timeout）。approver 與 requestedBy 取 JWT subject。
+         */
+        post: operations["createResearchPr"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/projects/{id}/decomposition": {
         parameters: {
             query?: never;
@@ -1752,6 +1812,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/projects/{id}/kanban": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 研究專案看板投影（API-RP-26；VIEWER 以上；唯讀）
+         * @description console-api 聚合五欄（Task 拆解、測試規格產生、程式碼實作、自癒修復、回歸驗收）加待審清單與內環閘決定（SCG4、SCG5、SCG6 各最近 5 筆，decidedAt 新到舊）。各欄完成判定與來源端點共用同一份計算。Bridge 不可達：200、bridgeReachable＝false、stale＝true、FSM 衍生欄為 null 並帶 unknown＝true，任務計數、拆解、待審與決定取資料庫即時值，snapshotAt＝專案更新時間、最新事件與最新決定三者的最大值。研究專案不存在＝404 research_not_found。
+         */
+        get: operations["getResearchKanban"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/projects/{id}/healing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自癒歷史（API-RP-27；VIEWER 以上）
+         * @description 資料庫視圖 v_research_healing_attempts 的唯讀投影：每列 attempt（同任務內序號）、狀態、excerpt（error_message 先遮蔽再取尾端 300 字元）、resolved、escalated、specChangeForbidden。attribution 與 patchResult 引擎未提供，恆為 null。maxRetries 取系統參數 agent.maxRetries。logSyncedThrough 與 logLag 來自最近一次成功的 Bridge 同步（記憶體快取，重啟即空；無紀錄＝null 與 0）。專案不存在＝404 research_not_found；未綁 Console 專案＝200 空列。
+         */
+        get: operations["getResearchHealing"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research/projects/{id}/fsm": {
         parameters: {
             query?: never;
@@ -1804,6 +1904,46 @@ export interface paths {
          * @description append-only 事件帳 seq > afterSeq 的前 limit 筆（依 seq 遞增；limit 預設 100、上限 500，超過夾到 500）。回 {items, nextSeq, truncated}：truncated 為真時以 nextSeq 續抓。SSE 斷線後客戶端先以本端點回補再接串流。不存在＝404 research_not_found。VIEWER 以上可讀。
          */
         get: operations["listResearchEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/projects/{id}/delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 交付概覽（API-RP-17；VIEWER 以上；JDBC 唯讀）
+         * @description 回交付列、追溯快照（relPath、sha256；尚無 Tag 為 null）、專案根目錄、containerMode 與交付前置（releaseReady、rtmFull、scrOpen；hasOrigin 與 ghAvailable 未知為 null）。專案不存在＝404 research_not_found。
+         */
+        get: operations["getResearchDelivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/projects/{id}/delivery/traceability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 追溯表預演（API-RP-17；VIEWER 以上；零副作用）
+         * @description 轉送 Bridge :traceability-preview：回 {rows[], totals{acTotal, covered, uncovered, frTotal}, rtm{runId, fullyCovered, acPct, advisory}｜null, generatedAt}。凍結 PRD 讀不到＝409 fsm_state_conflict（unmet：prd_not_frozen）；研究寫入權杖未設＝503 research_write_disabled（與分流預演同一家族）。
+         */
+        get: operations["getResearchTraceability"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3074,6 +3214,8 @@ export interface components {
             reasonClass?: string;
             /** @description 受影響的 PRD 章節（每項 1～200 字，至多 20 項） */
             affectedSections?: string[];
+            /** @description 證據連結（選填；https:// 開頭、至多 500 字）；缺或空字串視同未提供 */
+            evidenceUrl?: string;
         };
         ApiResultMapStringObject: {
             /** Format: int32 */
@@ -3336,6 +3478,109 @@ export interface components {
         ReconcileResult: {
             consistent: boolean;
             checks: components["schemas"]["ReconcileCheckDto"][];
+        };
+        /** @description 登錄內環閘決定：FAIL 必填 reason；PR_REVIEW 須 reviewerIndependent＝true；RELEASE_READY 的 PASS 只經 delivery/tag */
+        GateRegisterRequest: {
+            /** @enum {string} */
+            gate?: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
+            /** @enum {string} */
+            result?: "PASS" | "FAIL";
+            /** @description FAIL 必填；1～500 字 */
+            reason?: string;
+            /** @description 審查報告參照，至多 300 字 */
+            reviewReportRef?: string;
+            /** @description PR_REVIEW 必須為 true（Console 不判斷獨立性） */
+            reviewerIndependent?: boolean;
+        };
+        ApiResultGateRegisterResult: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["GateRegisterResult"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 閘登錄結果；escalated 由 Bridge 回傳值如實帶出（nextState 以 ESCALATION 起頭） */
+        GateRegisterResult: {
+            gateDecisionId?: string;
+            /** @enum {string} */
+            gate?: "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
+            /** @enum {string} */
+            result?: "PASS" | "FAIL";
+            fsmStateBefore?: string;
+            nextState?: string;
+            escalated?: boolean;
+            flow?: components["schemas"]["ResearchFlowCursor"];
+        };
+        /** @description 研究工作流的 DB 游標（step、phase、status、detail） */
+        ResearchFlowCursor: {
+            step?: string;
+            phase?: string;
+            status?: string;
+            detail?: string;
+        };
+        /** @description 建立 Release Tag：tagName 為 semver（至多 64 字）、message 至多 200 字、push 預設 false、createGithubRelease 為 true＝422 */
+        TagRequest: {
+            tagName?: string;
+            message?: string;
+            push?: boolean;
+            createGithubRelease?: boolean;
+        };
+        ApiResultTagResult: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["TagResult"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 一筆交付（research_deliveries；snapshotSha256＝追溯快照 JSON 的雜湊，TAG 列必填、PR 列為 null） */
+        DeliveryDto: {
+            kind?: string;
+            ref?: string;
+            commitSha?: string;
+            url?: string;
+            rtmReportRef?: string;
+            fsmStateAfter?: string;
+            status?: string;
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            snapshotSha256?: string;
+        };
+        /** @description 追溯快照檔（03_execution/traceability_matrix.json）的相對路徑與 sha256 */
+        DeliverySnapshot: {
+            relPath?: string;
+            sha256?: string;
+        };
+        /** @description Release Tag 建立結果 */
+        TagResult: {
+            delivery?: components["schemas"]["DeliveryDto"];
+            snapshot?: components["schemas"]["DeliverySnapshot"];
+            flow?: components["schemas"]["ResearchFlowCursor"];
+            fsmState?: string;
+        };
+        /** @description 建立 Pull Request：bodyPreviewAck 須為 true（已預覽內文）；title 只作預覽，須等於模板輸出 */
+        PrRequest: {
+            branch?: string;
+            title?: string;
+            bodyPreviewAck?: boolean;
+        };
+        ApiResultPrResult: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["PrResult"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description Pull Request 建立結果；created 為 false＝同一分支的 PR 已存在（冪等） */
+        PrResult: {
+            delivery?: components["schemas"]["DeliveryDto"];
+            created?: boolean;
         };
         DecompositionScope: {
             /** @description 只拆這些 US（例 US-003） */
@@ -4256,6 +4501,8 @@ export interface components {
             requestedAt: string;
             decidedBy: string | null;
             decidedAt: string | null;
+            /** @description 證據連結（https 限定、至多 500 字；P2 V21 research_scr.evidence_url） */
+            evidenceUrl?: string | null;
         };
         ApiResultListReviewRoundDto: {
             /** Format: int32 */
@@ -4404,6 +4651,193 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
             traceId: string;
+        };
+        ApiResultKanbanDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["KanbanDto"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        Columns: {
+            decompose?: components["schemas"]["KanbanDecompose"];
+            tcs?: components["schemas"]["KanbanTcs"];
+            implement?: components["schemas"]["KanbanImplement"];
+            healing?: components["schemas"]["KanbanHealing"];
+            regression?: components["schemas"]["KanbanRegression"];
+        };
+        /** @description Task 拆解欄：done＝已簽核且非 stale */
+        KanbanDecompose: {
+            done?: boolean;
+            status?: string;
+            /** Format: int32 */
+            tasksCount?: number;
+            stale?: boolean;
+        };
+        /** @description 看板投影（API-RP-26）；Bridge 不可達：bridgeReachable＝false、stale＝true、snapshotAt＝三個 DB 來源時間的最大值 */
+        KanbanDto: {
+            /** Format: uuid */
+            researchId?: string;
+            /** Format: uuid */
+            consoleProjectId?: string;
+            /** Format: uuid */
+            latestRunId?: string;
+            /** Format: date-time */
+            generatedAt?: string;
+            bridgeReachable?: boolean;
+            /** Format: date-time */
+            snapshotAt?: string;
+            stale?: boolean;
+            scrOpen?: boolean;
+            columns?: components["schemas"]["Columns"];
+            pendingReviews?: components["schemas"]["KanbanPendingReview"][];
+            gates?: components["schemas"]["KanbanGate"][];
+        };
+        /** @description 內環閘決定（SCG4、SCG5、SCG6 各最近 5 筆，decidedAt 新到舊） */
+        KanbanGate: {
+            gate?: string;
+            decision?: string;
+            decidedBy?: string;
+            /** Format: date-time */
+            decidedAt?: string;
+            fsmStateAfter?: string;
+            reason?: string;
+        };
+        /** @description 自癒修復欄：done＝retryingSteps 與 escalatedTasks 皆為 0 */
+        KanbanHealing: {
+            done?: boolean;
+            /** Format: int32 */
+            retryingSteps?: number;
+            /** Format: int32 */
+            escalatedTasks?: number;
+            /** Format: int32 */
+            maxRetries?: number;
+        };
+        /** @description 程式碼實作欄：done＝total 大於 0 且 completed 加 skipped 等於 total */
+        KanbanImplement: {
+            done?: boolean;
+            fsmState?: string;
+            unknown?: boolean;
+            tasks?: components["schemas"]["KanbanTaskCounts"];
+        };
+        /** @description 待審項目（review_requests 的 PENDING） */
+        KanbanPendingReview: {
+            /** Format: uuid */
+            reviewId?: string;
+            /** Format: uuid */
+            runId?: string;
+            kind?: string;
+            /** Format: uuid */
+            taskId?: string;
+            reason?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            allowedDecisions?: string[];
+        };
+        /** @description 回歸驗收欄：done 僅在 acPct 為 100、fullyCovered 為真、現態屬 RELEASE_READY 或 RELEASE */
+        KanbanRegression: {
+            done?: boolean;
+            fsmState?: string;
+            releaseReady?: boolean;
+            unknown?: boolean;
+            rtmAvailable?: boolean;
+            rtm?: components["schemas"]["KanbanRtm"];
+        };
+        /** @description RTM 摘要（諮詢視圖；advisory 恆為 true） */
+        KanbanRtm: {
+            /** Format: uuid */
+            runId?: string;
+            /** Format: int32 */
+            atPassed?: number;
+            /** Format: int32 */
+            atTotal?: number;
+            /** Format: int32 */
+            acCovered?: number;
+            /** Format: int32 */
+            acTotal?: number;
+            /** Format: double */
+            acPct?: number;
+            fullyCovered?: boolean;
+            advisory?: boolean;
+        };
+        /** @description 專案任務計數；retrying＝最新 run 內仍在重試的任務數 */
+        KanbanTaskCounts: {
+            /** Format: int32 */
+            total?: number;
+            /** Format: int32 */
+            running?: number;
+            /** Format: int32 */
+            completed?: number;
+            /** Format: int32 */
+            skipped?: number;
+            /** Format: int32 */
+            failed?: number;
+            /** Format: int32 */
+            escalated?: number;
+            /** Format: int32 */
+            retrying?: number;
+        };
+        /** @description 測試規格產生欄：done＝Stage-2 已凍結；Bridge 不可達時 stage2Frozen／negotiated／fsmState 為 null 且 unknown 為 true */
+        KanbanTcs: {
+            done?: boolean;
+            stage2Frozen?: boolean;
+            negotiated?: boolean;
+            fsmState?: string;
+            unknown?: boolean;
+        };
+        ApiResultHealingDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["HealingDto"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 自癒歷史；retryingSteps＝最新 run 內 RETRYING 且其後無同任務非 RETRYING 列者的列數、escalatedTasks＝ESCALATED 任務數（與看板 healing 欄同一份計算）；logSyncedThrough 與落後筆數來自記憶體快取（無同步紀錄＝null 與 0） */
+        HealingDto: {
+            /** Format: uuid */
+            researchId?: string;
+            rows?: components["schemas"]["HealingRow"][];
+            /** Format: int32 */
+            maxRetries?: number;
+            /** Format: int32 */
+            retryingSteps?: number;
+            /** Format: int32 */
+            escalatedTasks?: number;
+            /** Format: date-time */
+            logSyncedThrough?: string;
+            /** Format: int32 */
+            logLag?: number;
+            specChange?: components["schemas"]["HealingSpecChange"];
+        };
+        /** @description 自癒視圖的一列。excerpt＝error_message 先遮蔽再取尾端 300 字元；attribution、patchResult 引擎未提供，恆為 null */
+        HealingRow: {
+            /** Format: uuid */
+            runId?: string;
+            /** Format: uuid */
+            taskId?: string;
+            /** Format: int32 */
+            stepNumber?: number;
+            /** Format: int32 */
+            attempt?: number;
+            status?: string;
+            excerpt?: string;
+            /** Format: date-time */
+            occurredAt?: string;
+            resolved?: boolean;
+            escalated?: boolean;
+            specChangeForbidden?: boolean;
+            attribution?: string;
+            patchResult?: string;
+        };
+        /** @description 最近一次 :healing-sync 偵測到的凍結規格漂移（只告警、不還原；唯一補救是發起 SCR） */
+        HealingSpecChange: {
+            paths?: string[];
+            /** Format: date-time */
+            detectedAt?: string;
         };
         ApiResultResearchFsmViewDto: {
             /** Format: int32 */
@@ -4600,6 +5034,82 @@ export interface components {
             /** Format: int64 */
             nextSeq: number;
             truncated: boolean;
+        };
+        ApiResultDeliveryOverviewDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["DeliveryOverviewDto"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 交付概覽（API-RP-17） */
+        DeliveryOverviewDto: {
+            deliveries?: components["schemas"]["DeliveryDto"][];
+            snapshot?: components["schemas"]["DeliverySnapshot"];
+            projectRoot?: string;
+            containerMode?: boolean;
+            preconditions?: components["schemas"]["DeliveryPreconditions"];
+        };
+        /** @description 交付前置：hasOrigin、ghAvailable 未知時為 null */
+        DeliveryPreconditions: {
+            releaseReady?: boolean;
+            rtmFull?: boolean;
+            scrOpen?: boolean;
+            hasOrigin?: boolean;
+            ghAvailable?: boolean;
+        };
+        ApiResultTraceabilityDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["TraceabilityDto"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 追溯表預演（API-RP-17；Bridge :traceability-preview 原樣形狀，鍵轉 camelCase） */
+        TraceabilityDto: {
+            rows?: components["schemas"]["TraceabilityRow"][];
+            totals?: components["schemas"]["TraceabilityTotals"];
+            rtm?: components["schemas"]["TraceabilityRtm"];
+            generatedAt?: string;
+        };
+        /** @description Given／When／Then 各段摘要（純文字、每段至多 120 字） */
+        TraceabilityGherkin: {
+            given?: string;
+            when?: string;
+            then?: string;
+        };
+        /** @description 追溯表一列（一個 AC）：source 為字串陣列（task:<id>、RTM-COVERAGE-<key>.yaml） */
+        TraceabilityRow: {
+            ac?: string;
+            userStory?: string;
+            gherkinSummary?: components["schemas"]["TraceabilityGherkin"];
+            unitStatus?: string;
+            e2eStatus?: string;
+            lastRunAt?: string;
+            source?: string[];
+        };
+        /** @description RTM 摘要（諮詢視圖；advisory 恆為 true）；沒有 run 或報告不可得時整個物件為 null */
+        TraceabilityRtm: {
+            runId?: string;
+            fullyCovered?: boolean;
+            /** Format: double */
+            acPct?: number;
+            advisory?: boolean;
+        };
+        /** @description totals：frTotal＝凍結 PRD 的 FR 條數（與標題模板同一函式同源，D-151） */
+        TraceabilityTotals: {
+            /** Format: int32 */
+            acTotal?: number;
+            /** Format: int32 */
+            covered?: number;
+            /** Format: int32 */
+            uncovered?: number;
+            /** Format: int32 */
+            frTotal?: number;
         };
         ApiResultCapabilitiesDto: {
             /** Format: int32 */
@@ -9342,6 +9852,355 @@ export interface operations {
             };
         };
     };
+    registerResearchGate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 研究專案 id（UUID） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GateRegisterRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultGateRegisterResult"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description fsm_state_conflict（details.unmet：no_console_project｜tasks_incomplete｜rtm_below_100｜rtm_unavailable；零 Bridge 請求）｜scr_open（SCR 開啟期間內環唯讀） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]：gate invalid_gate、result invalid_result、reason reason_required｜reason_too_long、reviewReportRef report_ref_too_long、result release_pass_via_tag、reviewerIndependent reviewer_independence_required）；或 Bridge 拒絕（reason 逐字取自 Bridge）：digest_mismatch（凍結 digest 漂移；details.drift[{path, expected_sha256, actual_sha256}]） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（內環閘登錄、Release Tag 與 Pull Request 的讀取逾時 330 秒、不重試；結果不明時請重新整理交付概覽再判斷） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createResearchTag: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultTagResult"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description fsm_state_conflict（details.unmet：not_release_ready｜rtm_below_100｜scr_open｜no_console_project；零 Bridge 請求；或凍結 PRD 讀不到 prd_not_frozen）｜tag_exists（Release Tag 名稱已存在；Bridge 回、原樣透傳）｜scr_open */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]：tagName not_semver、message message_too_long、createGithubRelease release_not_supported、bodyPreviewAck preview_ack_required）；或 Bridge 拒絕（reason 逐字取自 Bridge）：digest_mismatch（凍結 digest 漂移；details.drift[{path, expected_sha256, actual_sha256}]）｜route_unsupported_in_deployment（容器模式；details.missing[{item,reason}]） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試；delivery_step_failed：交付的某一步失敗（details.failure_step；Bridge 回、原樣透傳；失敗的 tag 不產生交付列） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（內環閘登錄、Release Tag 與 Pull Request 的讀取逾時 330 秒、不重試；結果不明時請重新整理交付概覽再判斷） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createResearchPr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultPrResult"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description fsm_state_conflict（分流尚未成功 details.cause＝route_not_succeeded；或凍結 PRD 讀不到）｜scr_open（SCR 開啟期間內環唯讀） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,rule,message}]：tagName not_semver、message message_too_long、createGithubRelease release_not_supported、bodyPreviewAck preview_ack_required）；或 Bridge 拒絕（reason 逐字取自 Bridge）：digest_mismatch（凍結 digest 漂移；details.drift[{path, expected_sha256, actual_sha256}]）｜route_unsupported_in_deployment（容器模式；details.missing[{item,reason}]） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試；delivery_step_failed：交付的某一步失敗（details.failure_step；Bridge 回、原樣透傳；失敗的 tag 不產生交付列） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（內環閘登錄、Release Tag 與 Pull Request 的讀取逾時 330 秒、不重試；結果不明時請重新整理交付概覽再判斷） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     getResearchDecomposition: {
         parameters: {
             query?: never;
@@ -13687,6 +14546,124 @@ export interface operations {
             };
         };
     };
+    getResearchKanban: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 研究專案 id（UUID） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultKanbanDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getResearchHealing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 研究專案 id（UUID） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultHealingDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     getResearchFsm: {
         parameters: {
             query?: never;
@@ -13887,6 +14864,159 @@ export interface operations {
             };
             /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getResearchDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 研究專案 id（UUID） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultDeliveryOverviewDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getResearchTraceability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultTraceabilityDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description fsm_state_conflict（凍結 PRD 讀不到；details.unmet：prd_not_frozen） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（請求已送出、結果不明；寫入讀取 30 秒、不重試） */
+            504: {
                 headers: {
                     [name: string]: unknown;
                 };

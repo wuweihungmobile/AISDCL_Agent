@@ -918,13 +918,9 @@ export type ResearchScrStatus = "OPEN" | "APPROVED" | "REJECTED" | "APPLIED" | "
 export type ResearchScr = Omit<S["ScrDto"], "status" | "implFsmActions"> & {
   status: ResearchScrStatus;
   implFsmActions?: Array<Record<string, unknown>>;
-  /** P2（D-138 Q-12）：失敗證據連結，獨立可空欄（不附在 reason 末行；後端 V21 `evidence_url`） */
-  evidenceUrl?: string | null;
 };
-export type ResearchScrOpenRequest = Required<S["ScrOpenRequest"]> & {
-  /** P2（D-138 Q-12）：選填，只接受 https、≤500；缺省不送 */
-  evidenceUrl?: string;
-};
+/** `evidenceUrl`（D-138 Q-12：選填、只接受 https、≤500、缺省不送）取自生成型的選填宣告；其餘五欄必填。 */
+export type ResearchScrOpenRequest = Required<Omit<S["ScrOpenRequest"], "evidenceUrl">> & Pick<S["ScrOpenRequest"], "evidenceUrl">;
 /** `POST …/scr` 的回應（開放物件）：MAJOR 帶 `successorResearchId`（D-145 AC-19-7）；`HEALING_FAILED` 來源為 200 並帶 `recovery`（只顯示指令、不是「已發起」）。 */
 export type ResearchScrOpenResult = ResearchScr & { successorResearchId?: string | null; recovery?: { target: string; powershell: string; posix: string } | null };
 export type ResearchScrApplyResult = { scrNo: number; status: string; detail?: string; implFsmActions?: Array<Record<string, unknown>> };
@@ -932,7 +928,7 @@ export type ResearchScrApplyResult = { scrNo: number; status: string; detail?: s
 export type ResearchDecompositionStatus = "DRAFTED" | "SCG_PASSED" | "FROZEN" | "IMPORTED" | "SIGNED_OFF" | "REJECTED" | "STALE";
 export type ResearchDecompositionWaiver = S["DecompositionWaiver"];
 export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goals" | "prdSha256"> & {
-  /** 拆解綁定的凍結 PRD sha256（生成型為可空；前端只在有拆解列時讀，沿 FE-D2 的非空讀法；backend DTO 已標必填，等 schema.d.ts 於 P2 FE-W3 重產（需 backend 在線）後移除此 narrowing（D-135）） */
+  /** 拆解綁定的凍結 PRD sha256。決策（D-152#3 第二分支，D-159）：後端宣告為必填但可為 null（資料庫欄可 NULL，`ResearchExecutionGuard` 自行處理 null），生成型因此是 `string | null`；此處以非空斷言收窄，非空前提由「拆解列存在＝已綁定凍結 PRD」保證，前端只在有拆解列時讀（沿 FE-D2 的讀法）。 */
   prdSha256: string;
   /** 生成型的相態是字串；`IMPORTED` 於 P1 後端不產生（D-113），詞彙保留以便原樣顯示 */
   status: ResearchDecompositionStatus;
@@ -943,7 +939,7 @@ export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goal
 export type ResearchDecompositionSignoffRequest = { waivers: Array<Required<S["DecompositionWaiverRequest"]>> };
 
 // ── ResearchToPRD P2（看板、SCG 登錄、自癒、交付；TCS-ResearchToPRD-P2-20261107；IFACE-P2 §1～§6）──────────────────────────────
-// 手寫型：後端 P2 端點尚未落地（API-P2 在波 2），schema.d.ts 由 FE-W3 重產後再改引生成型（AT-962-27-2）；欄名以 IFACE／契約 2026-11-07 勘誤列為準。
+// 手寫型保留（AT-962-27-2 的決策，FE-W3 重產 schema.d.ts 後實測）：後端 API-P2 的 record 未宣告必填（生成型每欄都是 `?:`，可空鍵也失去 null），整批改引會逼迫所有消費端與夾具放寬成選填（D-135 要避免的後遺症）。故以 `lib/api/types.test.ts` 逐 DTO 鎖「欄名集合與生成型相等」「去 null 後可指派給生成型」；待後端補 `requiredMode = REQUIRED`／`nullable = true` 後，再改別名或 `Omit` 交集。
 
 /** 內環 FSM 衍生欄在 Bridge 不可達時為 null，並帶 `unknown:true`（不猜）。 */
 export type ResearchKanbanDecompose = { done: boolean; status: string; tasksCount: number; stale: boolean };
@@ -987,7 +983,15 @@ export type ResearchGateName = "PR_REVIEW" | "RTM_VERIFY" | "RELEASE_READY";
 export type ResearchGateResult = "PASS" | "FAIL";
 /** API-RP-23 請求；`reviewerIndependent`、`reviewReportRef` 前端欄位不變（D-138 Q-2：由後端映射成 details）。 */
 export type ResearchGateRegisterRequest = { gate: ResearchGateName; result: ResearchGateResult; reason: string; reviewReportRef?: string; reviewerIndependent: boolean };
-export type ResearchGateRegisterResult = { gateDecisionId: string; gate: ResearchGateName; result: ResearchGateResult; fsmStateBefore: string; nextState: string; escalated: boolean; flow?: unknown };
+export type ResearchGateRegisterResult = {
+  gateDecisionId: string;
+  gate: ResearchGateName;
+  result: ResearchGateResult;
+  fsmStateBefore: string;
+  nextState: string;
+  escalated: boolean;
+  flow?: S["ResearchFlowCursor"];
+};
 
 export type ResearchHealingRow = {
   runId: string;
@@ -1028,9 +1032,9 @@ export type ResearchDeliveryOverview = {
   preconditions: { releaseReady: boolean; rtmFull: boolean; scrOpen: boolean; hasOrigin: boolean | null; ghAvailable: boolean | null };
 };
 export type ResearchTagRequest = { tagName: string; message?: string; push?: boolean; createGithubRelease?: false };
-export type ResearchTagResult = { delivery: ResearchDelivery; snapshot: { relPath: string; sha256: string }; flow?: unknown; fsmState: string };
+export type ResearchTagResult = { delivery: ResearchDelivery; snapshot: { relPath: string; sha256: string }; flow?: S["ResearchFlowCursor"]; fsmState: string };
 export type ResearchPrRequest = { branch?: string; title?: string; bodyPreviewAck: true };
-export type ResearchPrResult = { delivery: ResearchDelivery; created: boolean; flow?: unknown };
+export type ResearchPrResult = { delivery: ResearchDelivery; created: boolean };
 
 export type ResearchTraceStatus = "PASS" | "FAIL" | "NOT_RUN" | "NONE";
 /** Gherkin 摘要三段（Bridge `delivery.gherkin_summary`：純文字、每段至多 120 字；缺段為空字串；D-158）。 */
