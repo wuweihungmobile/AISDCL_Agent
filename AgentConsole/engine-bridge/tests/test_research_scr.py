@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from app import sdd_cli
+from app.errors import ApiError
 from app.research import fsm_ops, scr
 from tests import research_git_support as rgs
 from tests import test_research_router as rt
@@ -231,6 +232,27 @@ def test_AT_961_12_3_an_open_scr_blocks_both_resume_and_start_and_touches_nothin
         assert caught.value.status_code == 409 and caught.value.body["reason"] == "scr_open"
     assert file_bytes(state_file) == before
     assert scr_rows(renv, rid)[0][2] == "OPEN"
+
+
+def test_AT_961_12_E_2_outer_transition_failure_marks_the_scr_rejected_and_restores_the_cursor(
+        renv: rgs.RouteEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    """open_minor 的補償（F-09；TCS 無此條，勘誤候選 AT-961-12-E-2）：外環轉態失敗 ⇒ SCR 列標
+    REJECTED（不留永遠 OPEN 的列）、游標還原為開 SCR 之前、錯誤原樣拋出、槽位釋出可再開。"""
+    rid, route = routed(renv)
+    inner_to(renv, route, "IMPLEMENTATION")
+    before = cursor(renv, rid)
+    real = fsm_ops.transition
+
+    def broken(*args: Any, **kwargs: Any) -> str:
+        raise ApiError(502, "fsm_cli_failed")
+    monkeypatch.setattr(fsm_ops, "transition", broken)
+    resp = post_scr(renv, rid)
+    assert resp.status_code == 502, resp.text
+    [row] = scr_rows(renv, rid)
+    assert row[2] == "REJECTED", "補償：不留一筆永遠 OPEN 的 SCR"
+    assert cursor(renv, rid) == before, "游標還原"
+    monkeypatch.setattr(fsm_ops, "transition", real)
+    assert post_scr(renv, rid).status_code == 202, "REJECTED 釋出槽位，可再開"
 
 
 def test_AT_961_12_7_only_one_open_scr_per_project_and_a_closed_one_frees_the_slot(

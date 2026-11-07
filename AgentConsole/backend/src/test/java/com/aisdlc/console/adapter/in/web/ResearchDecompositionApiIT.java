@@ -87,6 +87,8 @@ class ResearchDecompositionApiIT extends AbstractResearchIT {
         Map<String, Object> sent = bridge().calls.stream().filter(c -> c.path().endsWith(":decomposition-signoff")).findFirst().orElseThrow().body();
         assertThat(sent).containsEntry("decomposition_id", decomposition.toString()).containsEntry("console_project_id", ok.project).containsEntry("approver", "operator")
                 .containsKey("import_record_id");
+        // D-143(3)／F-02：簽核本文帶 imported_tasks_count，值＝匯入落成的正式 tasks 數（同一專案 DB 實數 2）
+        assertThat(sent.get("imported_tasks_count")).as("imported_tasks_count 必須是整數").isInstanceOf(Integer.class).isEqualTo(2);
         assertThat(jdbc.queryForObject("select status from console.research_decompositions where id = ?", String.class, decomposition)).isEqualTo("SIGNED_OFF");
         assertThat(resp.<String>read("$.data.status")).isEqualTo("SIGNED_OFF");
 

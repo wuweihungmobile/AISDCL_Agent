@@ -95,6 +95,7 @@ import {
   reconcileDriftView,
   remainingReviewBudget,
   researchErrorText,
+  routeIsActive,
   researchFailureOf,
   resolveBudget,
   resolveViewStep,
@@ -1228,6 +1229,19 @@ describe("AT_961_19_E_1 P1 reason 的前端文案表與衍生相態標籤", () =
     expect(withStep("GIT_SWITCH")).toContain(ROUTE_STEP_LABEL.GIT_SWITCH);
     expect(withStep("NEW_STEP")).toContain("NEW_STEP");
     expect(researchErrorText(new ApiError({ status: 502, message: "x", reason: RESEARCH_REASONS.ROUTE_STEP_FAILED }))).toContain("分流有一步失敗");
+  });
+
+  it("AT_961_19_E_1 502 route_step_failed 的 details 以契約透傳的 snake_case failure_step 到達時同樣帶失敗步驟名（真實流量形態；F-01）", () => {
+    const withSnake = (failure_step: unknown) => researchErrorText(new ApiError({ status: 502, message: "x", reason: RESEARCH_REASONS.ROUTE_STEP_FAILED, details: { failure_step } }));
+    expect(withSnake("GIT_SWITCH")).toContain(ROUTE_STEP_LABEL.GIT_SWITCH);
+    expect(withSnake("GIT_SWITCH")).toContain("建立分支與工作樹");
+    expect(withSnake("NEW_STEP")).toContain("NEW_STEP");
+  });
+
+  it("routeIsActive：RUNNING 與 PENDING 都算進行中（不可再送），失敗／完成／未知／缺值不算（F-04）", () => {
+    expect(routeIsActive("RUNNING")).toBe(true);
+    expect(routeIsActive("PENDING")).toBe(true);
+    for (const status of ["FAILED", "SUCCEEDED", "", undefined]) expect(routeIsActive(status), String(status)).toBe(false);
   });
 
   it("AT_961_19_E_1 BUILD_READY「可開始建置」、SCR_OPEN「SCR 進行中」入 FLOW_PHASE_LABEL，PAUSED「已暫停」取自同名的狀態標籤（兩表鍵不相交，stateKeys 零改動鎖），flowPhaseLabel 三者都取得到（D-114）", () => {

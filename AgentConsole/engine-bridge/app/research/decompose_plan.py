@@ -323,6 +323,12 @@ def signoff(env: DecomposeEnv, row: Mapping[str, Any], body: Mapping[str, Any]
         raise unprocessable([_v("decomposition_id", "invalid_uuid",
                                 "decomposition_id 與 import_record_id 須為 UUID")],
                             "invalid_request") from exc
+    imported_tasks_count = body.get("imported_tasks_count")      # D-143(3)：匯入落成的正式 tasks 數
+    if isinstance(imported_tasks_count, bool) or not isinstance(imported_tasks_count, int) or (
+            imported_tasks_count < 0):
+        raise unprocessable([_v("imported_tasks_count", "imported_tasks_count_invalid",
+                                "imported_tasks_count 須為 ≥ 0 的整數（匯入落成的正式 tasks 數）")],
+                            "invalid_request")
     decomposition = env.db.get_decomposition(decomposition_id)
     if decomposition is None or str(decomposition["research_id"]) != rid:
         raise ApiError(404, "research_not_found", decomposition_id=decomposition_id)
@@ -331,7 +337,9 @@ def signoff(env: DecomposeEnv, row: Mapping[str, Any], body: Mapping[str, Any]
         done = env.db.latest_artifact(rid, "TASK_DECOMPOSITION")      # D-133：冪等，不改列不重發
         assert done is not None
         return {"decomposition_id": decomposition_id, "status": "SIGNED_OFF",
-                "artifact_sha256": str(done["sha256"]).strip()}
+                "artifact_sha256": str(done["sha256"]).strip(),
+                "imported_tasks_count": json.loads(str(done["content"])).get(
+                    "imported_tasks_count", imported_tasks_count)}
     if decomposition["status"] not in ("DRAFTED", "SCG_PASSED"):
         raise ApiError(409, "fsm_state_conflict", details={"status": decomposition["status"]})
     ref = frozen_prd(env.db, rid)
@@ -358,7 +366,8 @@ def signoff(env: DecomposeEnv, row: Mapping[str, Any], body: Mapping[str, Any]
               "signed_off_by": approver, "signed_off_at": at,
               "waivers": [{"ac": w["ac"], "reason": w["reason"], "by": approver, "at": at}
                           for w in waivers],
-              "console_project_id": str(body.get("console_project_id") or "") or None}
+              "console_project_id": str(body.get("console_project_id") or "") or None,
+              "imported_tasks_count": imported_tasks_count}
     text = render(signed)
     sha = layout.sha256_text(text)
     env.writer.persist(Op("decomp.signoff", rid, {
@@ -368,7 +377,8 @@ def signoff(env: DecomposeEnv, row: Mapping[str, Any], body: Mapping[str, Any]
                      "bytes": len(text.encode("utf-8")), "content": text}},
         files=(FileRef(str(ws), DECOMPOSITION_REL, sha),)),
         writes=[FileWrite(ws, DECOMPOSITION_REL, text)])
-    return {"decomposition_id": decomposition_id, "status": "SIGNED_OFF", "artifact_sha256": sha}
+    return {"decomposition_id": decomposition_id, "status": "SIGNED_OFF", "artifact_sha256": sha,
+            "imported_tasks_count": imported_tasks_count}
 
 
 def mark_stale(env: DecomposeEnv, rid: str) -> int:

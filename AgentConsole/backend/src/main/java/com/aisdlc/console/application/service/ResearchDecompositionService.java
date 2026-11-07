@@ -51,7 +51,7 @@ import java.util.function.Supplier;
  *   <li>覆蓋判定（{@link DecompositionCoverage}）：未覆蓋清單扣掉有理由的豁免後非空＝422 {@code invalid_request}（{@code violations[{field:coverage,rule:uncovered_ac}]}），零落庫、零 Bridge 請求；</li>
  *   <li><b>先走既有 import／signoff 路徑</b>（不走 HTTP 迴圈）：以拆解 artifact 建一筆路徑 C 的匯入記錄（{@code targetProjectId}＝已分流的 Console 專案）→ {@link ImportUseCase#signoff}
  *       → {@link ImportUseCase#confirm}（目標與任務併入該專案、全部 signedOff）→ 專案層 signoff（承襲同一個人工簽核）；</li>
- *   <li>呼 Bridge {@code :decomposition-signoff {decomposition_id, import_record_id, console_project_id, approver, waivers}}：一次寫 {@code SIGNED_OFF} 與 {@code import_record_id}。</li>
+ *   <li>呼 Bridge {@code :decomposition-signoff {decomposition_id, import_record_id, imported_tasks_count, console_project_id, approver, waivers}}：一次寫 {@code SIGNED_OFF} 與 {@code import_record_id}。</li>
  * </ol>
  * 誠實劃界：第 3 步與第 4 步之間沒有跨系統交易（匯入落庫已 commit 而 Bridge 呼叫失敗＝正式專案已有目標任務但拆解列仍是 DRAFTED；呼叫者重試簽核會因匯入記錄已是新的而再建一筆，
  * 目標任務重複的處置見交卷〈誠實劃界〉）。
@@ -146,6 +146,8 @@ public class ResearchDecompositionService implements ResearchDecompositionUseCas
         body.put("decomposition_id", decomposition.id().toString());
         body.put("import_record_id", importRecordId.toString());
         body.put("console_project_id", consoleProjectId.toString());
+        // D-143(3)：匯入落成的正式 tasks 數（與 confirm 匯入的是同一棵 parsedTree），Bridge 記進簽核版 artifact，AT-961-10-6 斷言與 tasks_count 相等
+        body.put("imported_tasks_count", importedTasksCount(decomposition, console));
         body.put("approver", approver);
         List<Map<String, Object>> waiverBody = new ArrayList<>();
         for (DecompositionCoverage.Waiver waiver : checkedWaivers) {
@@ -193,6 +195,15 @@ public class ResearchDecompositionService implements ResearchDecompositionUseCas
         imports.signoff(recordId, approver);
         imports.confirm(recordId, approver);
         return recordId;
+    }
+
+    /** 匯入落成的正式 tasks 數：confirm 把 parsedTree 的每個 task 併入專案，故以同一棵樹計（冪等重用既有匯入記錄時同樣成立）。 */
+    private static int importedTasksCount(Decomposition decomposition, Project console) {
+        int total = 0;
+        for (ParsedGoal goal : parsedTree(decomposition, console).goals()) {
+            total += goal.tasks().size();
+        }
+        return total;
     }
 
     @SuppressWarnings("unchecked")

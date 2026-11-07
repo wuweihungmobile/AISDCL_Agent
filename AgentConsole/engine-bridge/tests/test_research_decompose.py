@@ -217,8 +217,12 @@ def test_AT_961_10_8_a_whole_prd_over_24_steps_is_rejected_but_per_goal_batches_
 
 # ── AT-961-10-4：簽核 ────────────────────────────────────────────────────────────────────────
 def signoff(renv: rgs.RouteEnv, rid: str, did: str, **over: Any) -> Any:
+    # imported_tasks_count（D-143(3)）：夾具預設＝該拆解列的 tasks_count
+    # （console-api 落成數與 JSON task 數同源）
+    landed = next(r[5] for r in rows(renv, rid) if r[0] == did)
     body: dict[str, Any] = {"decomposition_id": did, "import_record_id": import_record(renv),
-                            "console_project_id": str(uuid.uuid4()), "approver": ADMIN}
+                            "console_project_id": str(uuid.uuid4()), "approver": ADMIN,
+                            "imported_tasks_count": landed}
     body.update(over)
     return renv.env.post(f"/research/projects/{rid}:decomposition-signoff", body)
 
@@ -373,16 +377,31 @@ def test_decomposition_documents_are_never_signed_off_when_built_by_the_planner(
     assert doc["waivers"] == [] and doc["limits"] == {"max_steps_per_goal": 24}
 
 
+def test_signoff_rejects_a_missing_or_malformed_imported_tasks_count(renv: rgs.RouteEnv) -> None:
+    rid, did = partial_decomposition(renv)
+    waive = [{"ac": a, "reason": "r"} for a in ("AC-002-1", "AC-003-1", "AC-003-2")]
+    for bad in (None, -1, "2", 1.5, True):
+        resp = signoff(renv, rid, did, waivers=waive, imported_tasks_count=bad)
+        assert resp.status_code == 422, (bad, resp.text)
+        assert resp.json()["reason"] == "invalid_request"
+        assert resp.json()["violations"][0]["field"] == "imported_tasks_count", bad
+    assert rows(renv, rid)[0][2] == "DRAFTED", "被拒＝零寫入"
+
+
 # ── AT-961-10-6：DB 與檔案逐欄相等（Bridge 側可驗的部分）────────────────────────────────────────
 def test_AT_961_10_6_file_sha_row_count_and_json_task_count_agree_and_drift_is_reported_only(
         renv: rgs.RouteEnv) -> None:
-    """「已簽核版本落成的正式 tasks 數」在 console-api 側（Bridge 簽核本文只帶 `import_record_id`，
-    不帶落成數）：這裡只驗 Bridge 看得到的三方相等；後半子句列勘誤候選（見交卷）。"""
+    """三方相等（檔 sha＝登記列＝JSON task 數），並（D-143(3)）簽核本文的 `imported_tasks_count`
+    （console-api 匯入落成的正式 tasks 數）記進簽核版 artifact 與回應，
+    且與 `tasks_count`、JSON task 數相等。
+    不相等時的處置 TCS 未定（勘誤候選），這裡不自定 reason。"""
     import hashlib
     rid, did = partial_decomposition(renv)
-    ok = signoff(renv, rid, did, waivers=[{"ac": a, "reason": "r"} for a in (
-        "AC-002-1", "AC-003-1", "AC-003-2")])
+    [pre] = rows(renv, rid)
+    ok = signoff(renv, rid, did, imported_tasks_count=pre[5], waivers=[
+        {"ac": a, "reason": "r"} for a in ("AC-002-1", "AC-003-1", "AC-003-2")])
     assert ok.status_code == 200, ok.text
+    assert ok.json()["imported_tasks_count"] == pre[5]
     target = workspace(renv, rid) / "03_execution" / "task_decomposition.json"
     raw = target.read_bytes()
     registered = renv.rdb.one(
@@ -393,6 +412,7 @@ def test_AT_961_10_6_file_sha_row_count_and_json_task_count_agree_and_drift_is_r
     json_tasks = sum(len(goal.get("tasks", [])) for goal in doc["goals"])
     [row] = rows(renv, rid)
     assert row[5] == json_tasks and row[2] == "SIGNED_OFF" and row[9], "tasks_count＝JSON task 數"
+    assert doc["imported_tasks_count"] == json_tasks == row[5], "tasks_count == imported"
     checks = {c["id"]: c for c in renv.env.post(
         f"/research/projects/{rid}:reconcile", {}).json()["checks"]}
     assert checks["task_decomposition"]["status"] == "ok"

@@ -288,6 +288,8 @@ def test_AT_961_6_E_2_redaction_covers_split_cut_encoded_and_multiple_tokens() -
         out = gitops.tail(gitops.redact(text, secrets))
         for secret in secrets:
             assert secret not in out and secret[:8] not in out, text[:40]
+            # 百分號編碼形態：未去敏時輸出也不含明文，只判明文會恆真（F-10），所以另判編碼後的字面
+            assert secret.replace("_", "%5F") not in out, text[:40]
     kept = gitops.redact("fatal: repository not found (exit 128)", secrets)
     assert kept == "fatal: repository not found (exit 128)", "未知形態不誤遮罩"
     assert len(gitops.tail("y" * 5000)) == 2000

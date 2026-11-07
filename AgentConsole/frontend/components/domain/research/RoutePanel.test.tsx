@@ -106,6 +106,18 @@ describe("AT_961_17_7 逐步進度與失敗重試", () => {
     expect(screen.getByRole("button", { name: "重試失敗步驟" })).toBeEnabled();
   });
 
+  it("AT_961_17_7 重試失敗：契約透傳的 snake_case details.failure_step 也顯示失敗步驟名（真實 502 形態；F-01）", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      route: ROUTE_FAILED,
+      stub: {
+        overrides: (call) => (call.method === "POST" && ROUTE_URL.test(call.path) ? failure(502, { message: "x", reason: "route_step_failed", details: { failure_step: "GIT_SWITCH" } }) : undefined),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "重試失敗步驟" }));
+    expect(await screen.findByTestId("route-retry-error")).toHaveTextContent("建立分支與工作樹");
+  });
+
   it("AT_961_17_7 完成：唯讀摘要（分支、遠端 URL 安全連結、Console 專案連結）與「前往拆解與執行」；遠端 URL 不合形時只顯示文字", async () => {
     const done = renderPanel({ route: ROUTE_SUCCEEDED });
     const summary = await screen.findByTestId("route-summary");

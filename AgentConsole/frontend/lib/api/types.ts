@@ -925,7 +925,7 @@ export type ResearchScrApplyResult = { scrNo: number; status: string; detail?: s
 export type ResearchDecompositionStatus = "DRAFTED" | "SCG_PASSED" | "FROZEN" | "IMPORTED" | "SIGNED_OFF" | "REJECTED" | "STALE";
 export type ResearchDecompositionWaiver = S["DecompositionWaiver"];
 export type ResearchDecomposition = Omit<S["DecompositionDto"], "status" | "goals" | "prdSha256"> & {
-  /** 拆解綁定的凍結 PRD sha256（生成型為可空；前端只在有拆解列時讀，沿 FE-D2 的非空讀法；backend DTO 待標必填（D-135）） */
+  /** 拆解綁定的凍結 PRD sha256（生成型為可空；前端只在有拆解列時讀，沿 FE-D2 的非空讀法；backend DTO 已標必填，等 schema.d.ts 於 P2 FE-W3 重產（需 backend 在線）後移除此 narrowing（D-135）） */
   prdSha256: string;
   /** 生成型的相態是字串；`IMPORTED` 於 P1 後端不產生（D-113），詞彙保留以便原樣顯示 */
   status: ResearchDecompositionStatus;

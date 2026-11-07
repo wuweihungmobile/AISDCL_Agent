@@ -9,6 +9,8 @@ describe("PublicRepoConfirm 公開庫名確認", () => {
     const { rerender } = render(<PublicRepoConfirm repoName="demo-app" value="" onChange={() => undefined} />);
     expect(screen.getByRole("note")).toHaveTextContent("PRD 與證據矩陣將公開");
     expect(screen.getByTestId("public-repo-confirm")).toHaveAttribute("data-confirmed", "false");
+    // 尚未輸入時不顯示錯誤（F-03：空輸入只是未確認，不是錯誤）
+    expect(screen.queryByRole("alert")).toBeNull();
     for (const wrong of ["demo-ap", "Demo-App", "demo-app ", "demo-app\u200b"]) {
       rerender(<PublicRepoConfirm repoName="demo-app" value={wrong} onChange={() => undefined} />);
       expect(screen.getByTestId("public-repo-confirm"), JSON.stringify(wrong)).toHaveAttribute("data-confirmed", "false");

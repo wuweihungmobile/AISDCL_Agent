@@ -89,6 +89,13 @@ def _percent_encode(text: str) -> str:
                    for c in text)
 
 
+def _char_or_escaped(ch: str) -> str:
+    """一個字元的「字面或百分號編碼」樣式：RFC 3986 允許把不保留字元（如 `_`）也編成 `%5F`，
+    `_percent_encode` 的正規形式不編它們，所以逐字元另認 `%XX`（十六進位大小寫皆可）。"""
+    hex_ci = "".join(f"[{c.lower()}{c.upper()}]" if c.isalpha() else c for c in f"{ord(ch):02X}")
+    return f"(?:{re.escape(ch)}|%{hex_ci})"
+
+
 def redact(text: str, secrets: Sequence[str] = ()) -> str:
     """把 token 樣式與 `secrets` 內的每個秘密值（含被空白或換行切開、百分號編碼，以及長度足夠時的
     前 8 字元）換成 `***`。先脫敏、後截尾（見 `tail`），所以截尾不會留下可還原的半截 token。"""
@@ -100,6 +107,8 @@ def redact(text: str, secrets: Sequence[str] = ()) -> str:
         for form in forms:
             spaced = r"\s*".join(re.escape(ch) for ch in form)
             out = re.sub(spaced, MASK, out)
+        # 逐字元「字面或 %XX」（含兩者混用）、且可被空白切開——涵蓋不保留字元被編碼的形態
+        out = re.sub(r"\s*".join(_char_or_escaped(ch) for ch in secret), MASK, out)
         if len(secret) >= 16:
             out = out.replace(secret[:8], MASK)
     return out
