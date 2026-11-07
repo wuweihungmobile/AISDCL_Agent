@@ -25,7 +25,8 @@ public record ResearchFlow(
     public record Step(
             @NotNull String id,
             @NotNull String label,
-            @NotNull @Schema(description = "DONE｜CURRENT｜BLOCKED｜TODO") String state,
+            @NotNull @Schema(description = ResearchFlowPolicy.STATE_DONE + "｜" + ResearchFlowPolicy.STATE_CURRENT + "｜"
+                    + ResearchFlowPolicy.STATE_BLOCKED + "｜" + ResearchFlowPolicy.STATE_TODO) String state,
             String phase,
             String blockedReason) {
     }

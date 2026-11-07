@@ -28,6 +28,14 @@ public final class ResearchFlowPolicy {
     public static final List<String> STEP_IDS = List.of("topic", "studio", "route", "build", "deliver");
 
     private static final List<String> STEP_LABELS = List.of("研究", "規格工作室", "分流", "拆解與執行", "交付");
+    /**
+     * 五步列每一步的狀態值（閉集，契約 §1.3 {@code flow.steps[].state}）：序號小於目前步、等於目前步、目前步受阻、序號大於目前步。
+     * 唯一家：DTO {@code ResearchFlow.Step} 的 Schema 描述與前端 {@code FlowStepper} 的對照表以此為準，註解一律以 {@code {@value}} 引用而不重抄字面。
+     */
+    public static final String STATE_DONE = "DONE";
+    public static final String STATE_CURRENT = "CURRENT";
+    public static final String STATE_BLOCKED = "BLOCKED";
+    public static final String STATE_TODO = "TODO";
     /** 進行中的步驟遇到這三種 {@code flow_status} 時改標「受阻」（前端 {@code BLOCKING_FLOW_STATUSES} 同一判準）。 */
     private static final Set<String> BLOCKING_STATUSES = Set.of("BLOCKED", "ESCALATED", "FAILED");
     /** 游標在這三步時，{@code effective} 一律取游標。 */
@@ -101,7 +109,10 @@ public final class ResearchFlowPolicy {
         return cursor;
     }
 
-    /** 五步流程脊：序號小於目前步＝DONE、等於＝CURRENT（{@code status} 為 BLOCKED／ESCALATED／FAILED 時 BLOCKED）、大於＝TODO。 */
+    /**
+     * 五步流程脊：序號小於目前步＝{@value #STATE_DONE}、等於＝{@value #STATE_CURRENT}（{@code status} 為 BLOCKED／ESCALATED／FAILED 時
+     * {@value #STATE_BLOCKED}）、大於＝{@value #STATE_TODO}。
+     */
     public static Flow flow(UUID researchId, Research research, ConsoleProject project, RunFact latestRun, FsmView fsm) {
         Effective effective = effective(research, project, latestRun, fsm);
         int current = Math.max(0, STEP_IDS.indexOf(effective.step()));
@@ -109,7 +120,7 @@ public final class ResearchFlowPolicy {
         boolean blocked = BLOCKING_STATUSES.contains(effective.status());
         List<Step> steps = new ArrayList<>();
         for (int i = 0; i < STEP_IDS.size(); i++) {
-            String state = i < current ? "DONE" : i > current ? "TODO" : blocked ? "BLOCKED" : "CURRENT";
+            String state = i < current ? STATE_DONE : i > current ? STATE_TODO : blocked ? STATE_BLOCKED : STATE_CURRENT;
             boolean here = i == current;
             String reason = here && blocked ? (effective.detail().isBlank() ? effective.status() : effective.detail()) : null;
             steps.add(new Step(STEP_IDS.get(i), STEP_LABELS.get(i), state, here ? effective.phase() : null, reason));
