@@ -118,12 +118,13 @@ describe("AT_960_16_3 Mermaid 嚴格模式渲染、錯誤退回原始碼、逾�
     mm.render.mockImplementation(async () => ({ svg: SVG_HOSTILE }));
     const { container } = render(<MermaidBlock code={HOSTILE} />);
     await waitFor(() => expect(screen.getByTestId("mermaid-block")).toHaveAttribute("data-state", "ready"));
+    // 畫布內容可能比 data-state 晚一拍 commit（CI 與本機負載下三次實證）：先等安全文字出現，再對已 commit 的畫布掃可執行節點，掃描才不會對空畫布空跑
+    await waitFor(() => expect(within(screen.getByTestId("mermaid-canvas")).getByText("連結文字")).toBeInTheDocument());
     expect(container.querySelector("script, iframe, object, embed")).toBeNull();
     const attrs = Array.from(container.querySelectorAll("*")).flatMap((el) => Array.from(el.attributes).map((a) => `${a.name}=${a.value}`));
     expect(attrs.filter((a) => /^on/i.test(a))).toEqual([]);
     expect(attrs.filter((a) => /javascript:/i.test(a.replace(/[\u0000- ]/g, "")))).toEqual([]);
     // 安全的內容保留：圖上的文字還在
-    expect(within(screen.getByTestId("mermaid-canvas")).getByText("連結文字")).toBeInTheDocument();
     expect(within(screen.getByTestId("mermaid-canvas")).getByText("標籤文字")).toBeInTheDocument();
     expect((window as unknown as { __mermaid_xss?: string }).__mermaid_xss, "沒有任何腳本執行").toBeUndefined();
     // 原始碼（含 <script> 字樣）只當文字顯示
