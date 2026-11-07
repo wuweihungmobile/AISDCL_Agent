@@ -9,7 +9,7 @@ import ResearchWorkspacePage, { metadata as workspacePageMetadata } from "@/app/
 import { qk, usePrdVersions, useResearchEvidence, useReviewRounds } from "@/lib/api/queries";
 import type { ResearchFlowStepId, ResearchProjectDetail, Role } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { FLOW_PHASE_LABEL, FLOW_STATUS_LABEL, FLOW_STEP_IDS, FLOW_STEP_LABEL, READONLY_TITLE, RECONCILE_CHECK_LABEL, reconcileDriftView, resolveViewStep, stepReachable } from "@/lib/domain/research";
+import { FLOW_PHASE_LABEL, FLOW_STATUS_LABEL, FLOW_STEP_IDS, READONLY_TITLE, RECONCILE_CHECK_LABEL, reconcileDriftView, resolveViewStep, stepReachable } from "@/lib/domain/research";
 import { R1, R2, R3, sha } from "@/tests/fixtures/research/ids";
 import { RECONCILE_DRIFT, RECONCILE_OK } from "@/tests/fixtures/research/misc";
 import { detailVariant } from "@/tests/fixtures/research/projects";
@@ -18,7 +18,7 @@ import { ResearchWorkspaceView, type ResearchPanelProps, type ResearchPanels } f
 
 /**
  * 研究工作區殼層（TCS-ResearchToPRD-P0-20261102 AT-960-19-4、19-5、19-6、19-E-2、21-6；AC-R2P-01-2、01-4、01-5、01-7、01-8、21-5、23-2；ADR-003 D5）：
- * 網址 `?step=` 超前導回游標所在步、已完成步驟唯讀檢視、步驟 3～5 占位面板、VIEWER 全面停用、游標取自 API 而非瀏覽器儲存、對帳漂移橫幅只顯示不修。
+ * 網址 `?step=` 超前導回游標所在步、已完成步驟唯讀檢視、步驟 3～5 真面板（P2 起占位面板為零）、VIEWER 全面停用、游標取自 API 而非瀏覽器儲存、對帳漂移橫幅只顯示不修。
  * 步驟 1、2 的真面板（議題面板、PRD 工作室）由另兩個包交付、在波次二接進頁殼，所以本檔以**替身面板**經 `panels` 屬性注入——殼層的契約是
  * 「傳對屬性（researchId、project、completed）、在對的步驟顯示、已完成與 VIEWER 兩種唯讀互不取代」，替身只需照這份契約停用自己的寫入鈕。
  * 判定指令：npx vitest run components/domain/research/ResearchWorkspaceView.test.tsx -t "<AT 底線形>"
@@ -87,7 +87,7 @@ function renderWorkspace(opts: { id?: string | string[]; search?: string; role?:
   return { ...view, ...api };
 }
 
-/** 游標在第 3 步（Gate 0 已核准）、最遠到第 5 步：三個占位步驟與已完成的前兩步都可達。 */
+/** 游標在第 3 步（Gate 0 已核准）、最遠到第 5 步：後三步與已完成的前兩步都可達。 */
 const frozenFurthestDeliver = (): ResearchProjectDetail => {
   const base = detailVariant("frozen");
   return { ...base, flow: { ...base.flow, furthestStep: "deliver" } };
@@ -185,7 +185,7 @@ describe("AT_960_19_4 網址 step 超前導回游標所在步；已完成步驟�
   it("AT_960_19_4 最遠步在游標之後（例如退回修改後）：超前於游標、但不超前於最遠步的步驟可達，不導回", async () => {
     const base = detailVariant("studio");
     renderWorkspace({ search: "step=deliver", stub: { details: { [R2]: { ...base, flow: { ...base.flow, furthestStep: "deliver" } } } } });
-    await screen.findByTestId("research-placeholder");
+    await screen.findByTestId("deliver-panel");
     expect(workspace()).toHaveAttribute("data-step", "deliver");
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(nav.router.replace).not.toHaveBeenCalled();
@@ -204,51 +204,38 @@ describe("AT_960_19_4 網址 step 超前導回游標所在步；已完成步驟�
   });
 });
 
-// ── AT_960_19_5：步驟 3～5 占位面板 ────────────────────────────────────────────────────
+// ── AT_960_19_5：步驟 5 為真面板（P2 起占位面板為零個）與反向釘 ──────────────────────────────
 
-describe("AT_960_19_5 步驟 5 為占位面板（P1 起；步驟 3、4 已是真面板）：說明、唯讀、無寫入、回游標步連結，不假裝有執行中心連結", () => {
-  // P1 起只有步驟 5 仍是占位面板；步驟 3、4 改驗真面板（AT_961_19_1；TCS-ResearchToPRD-P1-20261107 §4 第 25 列）
-  const PLACEHOLDERS: ReadonlyArray<{ step: ResearchFlowStepId; heading: string }> = [{ step: "deliver", heading: "第 5 步：交付" }];
+/** 反向釘（P0 W-R9）：整個工作區沒有通往執行中心或監控中心的連結、字樣或元件名。 */
+function expectNoCenterLinks(scope: HTMLElement, wide = true) {
+  for (const link of within(scope).queryAllByRole("link")) {
+    expect(link.getAttribute("href") ?? "", "連結不指向執行中心或監控中心").not.toMatch(/\/execute|\/monitor/);
+    expect(link.textContent ?? "").not.toMatch(wide ? /開啟執行中心|開啟監控中心|執行中心|監控中心/ : /開啟執行中心|開啟監控中心/);
+  }
+  expect(scope.textContent).not.toMatch(/ResearchBackLink|開啟執行中心|開啟監控中心/);
+}
+
+describe("AT_960_19_5 步驟 5 為真面板 DeliverPanel（P2 起；步驟 3、4 於 P1 已是真面板）：超前導回；deliver 檢視仍不假裝有執行中心連結", () => {
   const AHEAD_STEPS: readonly { step: ResearchFlowStepId }[] = [{ step: "route" }, { step: "build" }, { step: "deliver" }];
 
-  it.each(PLACEHOLDERS)(
-    "AT_960_19_5 Gate 0 已核准（可達）、網址 ?step=$step：顯示「$heading」、「本步驟於後續階段提供」、目前進度、回到游標所在步連結；沒有任何寫入按鈕與表單",
-    async ({ step, heading }) => {
-      renderWorkspace({ id: R3, search: `step=${step}`, stub: { details: { [R3]: frozenFurthestDeliver() } } });
-      const panel = await screen.findByTestId("research-placeholder");
-      expect(panel).toHaveAttribute("data-step", step);
-      expect(screen.getByTestId(`research-panel-${step}`)).toBeInTheDocument();
-      expect(within(panel).getByRole("heading", { name: heading })).toBeInTheDocument();
-      expect(panel).toHaveTextContent("本步驟於後續階段提供");
-      expect(panel).toHaveTextContent(`目前進度：第 3 步「${FLOW_STEP_LABEL.route}」，${FLOW_PHASE_LABEL.FROZEN}（${FLOW_STATUS_LABEL.IDLE}）。`);
-      expect(within(panel).getByRole("link", { name: "回到游標所在步" })).toHaveAttribute("href", REPLACE(R3, "route"));
-      // 占位面板唯讀：沒有按鈕、表單、輸入控件
-      expect(within(panel).queryAllByRole("button")).toHaveLength(0);
-      expect(panel.querySelector("form, input, textarea, select")).toBeNull();
-      // 不假裝有執行中心或監控中心的連結（那是 P2 的 ResearchBackLink）；整個工作區都沒有
-      for (const link of within(workspace()).queryAllByRole("link")) {
-        expect(link.getAttribute("href") ?? "", "連結不指向執行中心或監控中心").not.toMatch(/\/execute|\/monitor/);
-        expect(link.textContent ?? "").not.toMatch(/開啟執行中心|開啟監控中心|執行中心|監控中心/);
-      }
-      expect(workspace().textContent).not.toMatch(/ResearchBackLink|開啟執行中心|開啟監控中心/);
-      // 網址合法、可達：不導回
-      expect(nav.router.replace).not.toHaveBeenCalled();
-    },
-  );
+  it("AT_960_19_5 Gate 0 已核准（可達）、網址 ?step=deliver：顯示「第 5 步：交付」DeliverPanel；ADMIN 在前置不足時「建立 Tag」鈕停用；沒有 research-placeholder；反向釘（連結、字樣、元件名）仍成立於 deliver 檢視；不導回", async () => {
+    renderWorkspace({ id: R3, search: "step=deliver", role: "ADMIN", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    const panel = await screen.findByTestId("deliver-panel");
+    expect(screen.getByTestId("research-panel-deliver")).toBeInTheDocument();
+    expect(within(panel).getByRole("heading", { name: "第 5 步：交付" })).toBeInTheDocument();
+    expect(await within(panel).findByTestId("tag-create")).toBeDisabled();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    // :228-233 的反向釘原樣保留於 deliver 檢視（AT-962-16-5：只有步驟 4 面板放寬）
+    expectNoCenterLinks(workspace());
+    expect(nav.router.replace).not.toHaveBeenCalled();
+  });
 
-  it.each(AHEAD_STEPS)("AT_960_19_5 游標在 studio（步驟 $step 超前）：導回游標所在步，不顯示占位面板（超前不可達）", async ({ step }) => {
+  it.each(AHEAD_STEPS)("AT_960_19_5 游標在 studio（步驟 $step 超前）：導回游標所在步，不顯示該步驟面板（超前不可達）", async ({ step }) => {
     renderWorkspace({ search: `step=${step}` });
     await screen.findByTestId("studio-stub");
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith(REPLACE(R2, "studio")));
     expect(screen.queryByTestId("research-placeholder")).toBeNull();
-  });
-
-  it("AT_960_19_5 占位面板的目前進度取自後端衍生的相態：游標在 studio 且最遠步到 deliver 時，進度寫「第 2 步」並連回 studio", async () => {
-    const base = detailVariant("studio");
-    renderWorkspace({ search: "step=deliver", stub: { details: { [R2]: { ...base, flow: { ...base.flow, furthestStep: "deliver" } } } } });
-    const panel = await screen.findByTestId("research-placeholder");
-    expect(panel).toHaveTextContent(`目前進度：第 2 步「${FLOW_STEP_LABEL.studio}」，${FLOW_PHASE_LABEL.DRAFTING}（${FLOW_STATUS_LABEL.IDLE}）。`);
-    expect(within(panel).getByRole("link", { name: "回到游標所在步" })).toHaveAttribute("href", REPLACE(R2, "studio"));
+    expect(screen.queryByTestId("deliver-panel")).toBeNull();
   });
 
   it("AT_960_19_5 沒有注入面板的步驟 1、2 顯示「這一步的操作面板尚未接入。」，不是空白", async () => {
@@ -258,10 +245,38 @@ describe("AT_960_19_5 步驟 5 為占位面板（P1 起；步驟 3、4 已是真
   });
 });
 
+// ── AT_962_16_5：P1 反向釘改寫——連結字樣只在已綁 consoleProjectId 的步驟 4 面板 ───────────────
+
+describe("AT_962_16_5 反向釘改寫：工作區只在已有 consoleProjectId 的步驟 4 面板出現連結字樣，步驟 1、2、3、5 仍沒有", () => {
+  it("AT_962_16_5 步驟 4（R3 已綁 Console 專案）：面板有「監控中心」連結（href 帶 ?researchId=）與「執行中心」字樣（尚無拆解時為停用說明，不是連結）", async () => {
+    renderWorkspace({ id: R3, search: "step=build", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    const links = within(await screen.findByTestId("inner-loop-links"));
+    expect(links.getByRole("link", { name: "監控中心" }).getAttribute("href")).toMatch(/^\/projects\/[^/?]+\/monitor\?researchId=33333333-3333-4333-8333-333333333333$/);
+    expect(links.getByTestId("execute-disabled")).toHaveTextContent("執行中心");
+    expect(
+      within(workspace())
+        .getAllByRole("link")
+        .some((l) => /監控中心/.test(l.textContent ?? "")),
+    ).toBe(true);
+  });
+
+  it.each(["topic", "studio", "route"] as const)("AT_962_16_5 步驟 %s：文字不匹配 /開啟執行中心|開啟監控中心/，連結不指向 /execute、/monitor", async (step) => {
+    renderWorkspace({ id: R3, search: `step=${step}`, stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    await screen.findByTestId(`research-panel-${step}`);
+    if (step === "route") await screen.findByTestId("route-panel");
+    expectNoCenterLinks(workspace(), false);
+  });
+
+  it("AT_962_16_5 步驟 5（DeliverPanel 不放這兩個連結）：載入完成後仍整區沒有執行中心與監控中心字樣", async () => {
+    renderWorkspace({ id: R3, search: "step=deliver", stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    await screen.findByTestId("traceability-table");
+    expectNoCenterLinks(workspace());
+  });
+});
 // ── AT_961_19_1：步驟 3、4 接真面板 ─────────────────────────────────────────────────────
 
-describe("AT_961_19_1 ?step=route 與 ?step=build 不再是占位，?step=deliver 仍為占位；Gate 0 未完成時超前導回", () => {
-  it("AT_961_19_1 Gate 0 已核准（最遠到第 5 步）：route 顯示 RoutePanel、build 顯示 BuildFrontPanel，兩者都沒有 research-placeholder；deliver 仍是占位面板", async () => {
+describe("AT_961_19_1 ?step=route 與 ?step=build 不再是占位，?step=deliver 為 DeliverPanel（P2 起）；Gate 0 未完成時超前導回", () => {
+  it("AT_961_19_1 Gate 0 已核准（最遠到第 5 步）：route 顯示 RoutePanel、build 顯示 BuildFrontPanel，兩者都沒有 research-placeholder；deliver 為 DeliverPanel、research-placeholder 零個", async () => {
     const route = renderWorkspace({ id: R3, search: "step=route", stub: { details: { [R3]: frozenFurthestDeliver() } } });
     expect(await screen.findByTestId("route-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("research-placeholder")).toBeNull();
@@ -273,9 +288,8 @@ describe("AT_961_19_1 ?step=route 與 ?step=build 不再是占位，?step=delive
     build.unmount();
 
     renderWorkspace({ id: R3, search: "step=deliver", stub: { details: { [R3]: frozenFurthestDeliver() } } });
-    const placeholder = await screen.findByTestId("research-placeholder");
-    expect(placeholder).toHaveTextContent("本步驟於後續階段提供");
-    expect(within(placeholder).queryAllByRole("button")).toHaveLength(0);
+    expect(await screen.findByTestId("deliver-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
   });
 
   it("AT_961_19_1 游標在 studio（外環未凍結）：?step=route 導回 studio，不顯示 RoutePanel（超前不可達）", async () => {
@@ -300,6 +314,71 @@ describe("AT_961_19_1 ?step=route 與 ?step=build 不再是占位，?step=delive
     expect(screen.getByTestId("flow-scr-open")).toHaveTextContent("SCR 進行中");
   });
 });
+// ── AT_962_21_1：步驟 5 取代占位 ───────────────────────────────────────────────────────────
+
+describe("AT_962_21_1 步驟 5 取代占位：deliver 為 DeliverPanel，研究面占位面板為零個", () => {
+  it("AT_962_21_1 渲染五個步驟：任一步驟皆無 research-placeholder；?step=deliver 顯示 DeliverPanel（步驟 1、2 面板未接入時的 research-panel-missing 不算占位）", async () => {
+    for (const step of ["topic", "studio", "route", "build", "deliver"] as const) {
+      const view = renderWorkspace({ id: R3, search: `step=${step}`, stub: { details: { [R3]: frozenFurthestDeliver() } } });
+      await screen.findByTestId(`research-panel-${step}`);
+      expect(screen.queryByTestId("research-placeholder"), step).toBeNull();
+      if (step === "deliver") expect(await screen.findByTestId("deliver-panel")).toBeInTheDocument();
+      else expect(screen.queryByTestId("deliver-panel"), step).toBeNull();
+      view.unmount();
+    }
+    const missing = renderWorkspace({ id: R3, search: "step=topic", panels: null, stub: { details: { [R3]: frozenFurthestDeliver() } } });
+    expect(await screen.findByTestId("research-panel-missing")).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    missing.unmount();
+  });
+
+  it("AT_962_21_1 PlaceholderPanel 已刪除：工作區原始碼沒有 PlaceholderPanel、research-placeholder 與「本步驟於後續階段提供」；整個 components 與 tests 目錄也沒有指向它的測試字面（超前導回的否定斷言除外）", () => {
+    const code = readFileSync(path.join(process.cwd(), "components/domain/research/ResearchWorkspaceView.tsx"), "utf8");
+    const body = code.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const banned of ["PlaceholderPanel", 'data-testid="research-placeholder"', "本步驟於後續階段提供"]) expect(body, banned).not.toContain(banned);
+    expect(body).toContain("<DeliverPanel");
+  });
+});
+
+// ── AT_962_25_2：P2 版步驟接入——五步皆真面板；超前導回沿 P1 ───────────────────────────────────
+
+describe("AT_962_25_2 P2 版步驟接入：五步皆真面板；Gate 0 未完成時超前導回規則不變", () => {
+  const withCursor = (currentStep: ResearchFlowStepId, furthestStep: ResearchFlowStepId): ResearchProjectDetail => {
+    const base = detailVariant("frozen");
+    return { ...base, flow: { ...base.flow, currentStep, furthestStep } };
+  };
+
+  it.each([
+    { cursor: "route", step: "route", panel: "route-panel" },
+    { cursor: "route", step: "build", panel: "build-front-panel" },
+    { cursor: "route", step: "deliver", panel: "deliver-panel" },
+    { cursor: "build", step: "route", panel: "route-panel" },
+    { cursor: "build", step: "build", panel: "build-front-panel" },
+    { cursor: "build", step: "deliver", panel: "deliver-panel" },
+  ] as const)("AT_962_25_2 游標在 $cursor、最遠到 deliver：?step=$step 顯示真面板 $panel，不導回", async ({ cursor, step, panel }) => {
+    renderWorkspace({ id: R3, search: `step=${step}`, stub: { details: { [R3]: withCursor(cursor, "deliver") } } });
+    expect(await screen.findByTestId(panel)).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(nav.router.replace).not.toHaveBeenCalled();
+  });
+
+  it("AT_962_25_2 游標在 studio 但最遠步已到 deliver（退回修改後）：?step=deliver 顯示 DeliverPanel（語意由原「占位面板的目前進度」案轉移而來）", async () => {
+    const base = detailVariant("studio");
+    renderWorkspace({ search: "step=deliver", stub: { details: { [R2]: { ...base, flow: { ...base.flow, furthestStep: "deliver" } } } } });
+    expect(await screen.findByTestId("deliver-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("research-placeholder")).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(nav.router.replace).not.toHaveBeenCalled();
+  });
+
+  it.each(["route", "build", "deliver"] as const)("AT_962_25_2 Gate 0 未完成（游標與最遠步在 studio）：?step=%s 導回 studio，不渲染該步驟面板（超前導回沿 P1）", async (step) => {
+    renderWorkspace({ search: `step=${step}` });
+    await screen.findByTestId("studio-stub");
+    await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith(REPLACE(R2, "studio")));
+    for (const id of ["route-panel", "build-front-panel", "deliver-panel", "research-placeholder"]) expect(screen.queryByTestId(id), id).toBeNull();
+  });
+});
 // ── AT_960_19_6：VIEWER ───────────────────────────────────────────────────────────────
 
 describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動作停用且 title 為權限不足", () => {
@@ -311,6 +390,7 @@ describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動
       expect(screen.getByTestId("flow-stepper")).toBeInTheDocument();
       expect(screen.getByTestId("research-flow-header")).toBeInTheDocument();
       if (step === "route") await screen.findByTestId("route-panel");
+      if (step === "deliver") await screen.findByTestId("tag-create"); // 步驟 5 的寫入鈕載入後也要納入全按鈕鎖
       const buttons = within(workspace()).getAllByRole("button");
       expect(buttons.length, "至少有「對帳」鈕").toBeGreaterThanOrEqual(1);
       for (const button of buttons) {
@@ -318,12 +398,12 @@ describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動
         expect(button, `「${button.textContent}」的 title`).toHaveAttribute("title", "權限不足（唯讀角色）");
       }
       expect(within(workspace()).queryAllByRole("textbox")).toHaveLength(0);
-      // 可讀：替身面板（步驟 1、2）與占位面板（步驟 3～5）的內容都在
+      // 可讀：替身面板（步驟 1、2）與真面板（步驟 3～5）的內容都在
       if (step === "topic") expect(screen.getByTestId("topic-stub")).toBeInTheDocument();
       if (step === "studio") await waitFor(() => expect(screen.getByTestId("stub-versions")).toHaveTextContent("PRD 版本 2 個"));
       if (step === "route") expect(screen.getByTestId("route-panel")).toBeInTheDocument();
       if (step === "build") expect(screen.getByTestId("build-front-panel")).toBeInTheDocument();
-      if (step === "deliver") expect(screen.getByTestId("research-placeholder")).toBeInTheDocument();
+      if (step === "deliver") expect(screen.getByTestId("deliver-panel")).toBeInTheDocument();
     },
   );
 

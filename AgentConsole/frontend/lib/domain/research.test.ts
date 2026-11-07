@@ -10,7 +10,13 @@ import { KANBAN, kanbanUnreachable } from "@/tests/fixtures/research/p2";
 import {
   BLOCKING_FLOW_STATUSES,
   BUILD_DISABLED_TEXT,
+  PR_ADMIN_ONLY_TEXT,
   RESEARCH_REASON_TEXT,
+  TAG_ADMIN_ONLY_TEXT,
+  TAG_MESSAGE_MAX,
+  TAG_NAME_MAX,
+  TAG_NAME_PATTERN,
+  TAG_RULE_TEXT,
   KANBAN_DEBOUNCE_MS,
   KANBAN_SSE_TO_DOM_MAX_MS,
   kanbanColumns,
@@ -1683,5 +1689,26 @@ describe("P2 決策彈窗、SCG 登錄、SCR 表單純函式", () => {
     const withStep = researchErrorText(new ApiError({ status: 502, message: "x", reason: "delivery_step_failed", details: { failure_step: "push" } }));
     expect(withStep).toContain(DELIVERY_STEP_LABEL.push);
     expect(researchErrorText(new ApiError({ status: 502, message: "x", reason: "delivery_step_failed" }))).toBe(RESEARCH_REASON_TEXT.delivery_step_failed);
+  });
+});
+
+describe("D-157 Tag 確認框常數單一來源（TCS-ResearchToPRD-P2 §5.1 tagName 正規式；與 Bridge、console-api 逐字相同）", () => {
+  it("D-157 TAG_NAME_PATTERN 的字面逐字等於 TCS §5.1「tagName 正規式」；長度上限 64、備註上限 200", () => {
+    const tcs = readFileSync(path.join(process.cwd(), "..", "docs", "03_testing", "contracts", "TCS-ResearchToPRD-P2-20261107.md"), "utf8");
+    const row = /\| `tagName` 正規式 \| `([^`]+)`，長度至多 (\d+)/.exec(tcs);
+    expect(row, "TCS §5.1 找得到 tagName 正規式列").not.toBeNull();
+    expect(TAG_NAME_PATTERN.source).toBe((row as RegExpExecArray)[1]);
+    expect(TAG_NAME_MAX).toBe(Number((row as RegExpExecArray)[2]));
+    expect(TAG_NAME_MAX).toBe(64);
+    expect(TAG_MESSAGE_MAX).toBe(200);
+  });
+
+  it("D-157 正規式行為：合法與不合法版本號各表驅動；說明與停用文案非空且含「權限不足」", () => {
+    for (const ok of ["v1.2.3", "1.2.3", "v0.0.0", "v1.2.3-rc.1", "v1.2.3+b.5", "v1.2.3-rc.1+b.5"]) expect(TAG_NAME_PATTERN.test(ok), ok).toBe(true);
+    for (const bad of ["v1.2", "1.2", "v01.2.3", "vv1.2.3", "v1.2.3.4", "abc", " v1.2.3", "v1.2.3 ", ""]) expect(TAG_NAME_PATTERN.test(bad), bad).toBe(false);
+    expect(TAG_RULE_TEXT).toContain("semver");
+    expect(TAG_ADMIN_ONLY_TEXT).toContain("權限不足：僅 ADMIN");
+    expect(PR_ADMIN_ONLY_TEXT).toContain("權限不足：僅 ADMIN");
+    expect(TAG_ADMIN_ONLY_TEXT).not.toBe(PR_ADMIN_ONLY_TEXT);
   });
 });

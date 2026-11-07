@@ -96,11 +96,27 @@ export const HEALING: ResearchHealing = {
 
 export const TRACEABILITY: ResearchTraceability = {
   rows: [
-    { ac: "AC-R2P-01-1", userStory: "US-01", gherkinSummary: "Given 專案 When 開啟 Then 顯示", unitStatus: "PASS", e2eStatus: "NOT_RUN", lastRunAt: T2, source: "task:t1" },
-    { ac: "AC-R2P-01-2", userStory: "US-01", gherkinSummary: "Given 無權 When 送出 Then 拒絕", unitStatus: "FAIL", e2eStatus: "NOT_RUN", lastRunAt: T1, source: "task:t2" },
-    { ac: "AC-R2P-02-1", userStory: "US-02", gherkinSummary: "Given x When y Then z", unitStatus: "NONE", e2eStatus: "NOT_RUN", lastRunAt: null, source: "RTM-COVERAGE" },
+    {
+      ac: "AC-R2P-01-1",
+      userStory: "US-01",
+      gherkinSummary: { given: "專案", when: "開啟", then: "顯示" },
+      unitStatus: "PASS",
+      e2eStatus: "NOT_RUN",
+      lastRunAt: T2,
+      source: ["task:t1", "RTM-COVERAGE-demo.yaml"],
+    },
+    {
+      ac: "AC-R2P-01-2",
+      userStory: "US-01",
+      gherkinSummary: { given: "無權", when: "送出", then: "拒絕" },
+      unitStatus: "FAIL",
+      e2eStatus: "NOT_RUN",
+      lastRunAt: T1,
+      source: ["task:t2", "RTM-COVERAGE-demo.yaml"],
+    },
+    { ac: "AC-R2P-02-1", userStory: "US-02", gherkinSummary: { given: "x", when: "y", then: "z" }, unitStatus: "NONE", e2eStatus: "NOT_RUN", lastRunAt: null, source: [] },
   ],
-  totals: { acTotal: 3, covered: 1, uncovered: 2 },
+  totals: { acTotal: 3, covered: 1, uncovered: 2, frTotal: 2 },
   rtm: { runId: RUN_ID, fullyCovered: false, acPct: 33.3, advisory: true },
   generatedAt: T2,
 };

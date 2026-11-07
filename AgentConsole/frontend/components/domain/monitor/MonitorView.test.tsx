@@ -10,11 +10,12 @@ import { alert, metrics, projectDetail, runDetail, runSummary, TS } from "@/test
 import { FIXTURE } from "@/tests/helpers/settingsFixtures";
 import { MonitorView } from "./MonitorView";
 
+const nav = vi.hoisted(() => ({ search: "" })); // 深連結 query（預設空；AT-962-16-* 逐案注入）
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   usePathname: () => "/projects/p1/monitor",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
@@ -145,6 +146,7 @@ function view() {
 const lastOf = (calls: ApiCall[], suffix: string) => [...calls].reverse().find((c) => c.method === "GET" && c.path.endsWith(suffix));
 
 beforeEach(() => {
+  nav.search = "";
   signIn("OPERATOR", "operator");
   window.localStorage.clear();
   resetLayoutCache();
@@ -722,5 +724,36 @@ describe("監控頁：輪詢節奏（契約 §0.4 第 4 點、§1.3）", () => {
     expect(await run({ data: [FIXTURE.refreshIntervalMs("10000")] })).toBe(15_000);
     expect(await run({ data: [FIXTURE.refreshIntervalMs("60000")] })).toBe(60_000);
     expect(await run(failure(404, { message: "查無" }) as Reply)).toBe(MONITOR_DEFAULT_POLL_MS);
+  });
+});
+
+// ── ResearchBackLink 掛點（TCS-ResearchToPRD-P2-20261107 AT-962-16-3、16-E-1 的 MonitorView 半；D-150 #4）──
+const RESEARCH_UUID = "3f2b8c1e-5a47-4d09-9e61-0c7a1b2d3e4f";
+
+describe("AT_962_16_3 MonitorView 在 ?researchId=<uuid> 時頁頂顯示回到研發工作流", () => {
+  it("AT_962_16_3 有合法 researchId：主分支頁頂有回連、href 正確，「返回專案」仍在", async () => {
+    nav.search = `researchId=${RESEARCH_UUID}`;
+    backend();
+    view();
+    expect(await screen.findByRole("heading", { name: /專案監控：/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "回到研發工作流" })).toHaveAttribute("href", `/research/${RESEARCH_UUID}?step=build`);
+    expect(screen.getByRole("link", { name: "返回專案" })).toHaveAttribute("href", "/projects/p1");
+  });
+});
+
+describe("AT_962_16_E_1 無參數不顯示返回連結（MonitorView 半）", () => {
+  it("AT_962_16_E_1 MonitorView 無查詢參數：沒有回到研發工作流", async () => {
+    backend();
+    view();
+    await screen.findByRole("heading", { name: /專案監控：/ });
+    expect(screen.queryByRole("link", { name: "回到研發工作流" })).toBeNull();
+  });
+
+  it("AT_962_16_E_1 MonitorView 的 researchId 非 UUID：不顯示", async () => {
+    nav.search = "researchId=not-a-uuid";
+    backend();
+    view();
+    await screen.findByRole("heading", { name: /專案監控：/ });
+    expect(screen.queryByRole("link", { name: "回到研發工作流" })).toBeNull();
   });
 });

@@ -8,16 +8,14 @@
  *  - **游標取自 API、不取自瀏覽器儲存**：進頁時讀 `GET …/{id}`（流程脊由後端衍生），離開再回來從同一步續做；本檔不讀也不寫 localStorage、sessionStorage。
  *  - **網址只決定「看哪一步」**：`?step=` 超前於 `furthestStep`、缺少或不是五步之一，一律顯示游標所在步並以 `router.replace` 補上／導回網址（不留無效網址在歷史；導回不發任何寫入請求）；
  *    指向已完成步驟＝唯讀檢視（標示「已完成，唯讀」，面板的寫入動作須停用）。沒有「推進游標」的動作——游標只由 Bridge 在引擎動作的同一交易推進（W-R1）。
- *  - **步驟 3、4 在 P1 是真面板**（`RoutePanel`、`BuildFrontPanel`；TCS-ResearchToPRD-P1-20261107 AT-961-19-1），直接 import：兩者的相依（TanStack Query hook）本檔已在用，
- *    不像步驟 1、2 帶編輯器與圖表。**步驟 5 仍是占位面板**（PRD §7.3.1）：步驟名、「本步驟於後續階段提供」、目前進度與回到游標所在步的連結；唯讀、沒有任何寫入動作，
- *    也不假裝有執行中心或監控中心的連結（那是 P2 的 ResearchBackLink）。
+ *  - **步驟 3、4、5 都是真面板**（`RoutePanel`、`BuildFrontPanel`、`DeliverPanel`；TCS-ResearchToPRD-P1-20261107 AT-961-19-1、TCS-ResearchToPRD-P2-20261107 AT-962-21-1、25-2），直接 import：`DeliverPanel` 的相依（TanStack Query hook）本檔已在用，
+ *    `research-placeholder` 占位面板已不存在。步驟 5 的畫面沒有任何通往執行中心或監控中心的連結（P0 的反向釘：僅步驟 4 面板可有）；回連由執行中心與監控中心頁頂的 `ResearchBackLink` 負責。
  *  - **步驟 1、2 的面板由外部接入**（`panels` 屬性）：議題面板與 PRD 工作室是各自獨立的元件，由頁殼（`app/research/[researchId]/page.tsx`）組裝並傳入，本檔不 import 它們——
  *    工作區因此可以單獨測試（面板以替身注入），也不把面板的相依（編輯器、圖表）拖進本檔的 import 圖。沒有注入面板的步驟顯示「面板尚未接入」，不是空白。
  *  - **對帳結果只讀快取**：漂移橫幅（紅色「檔案與資料庫不一致」）讀 `useResearchReconcileCache`，渲染時不發任何請求；「對帳」鈕（POST，OPERATOR 以上；檢視已完成步驟的唯讀檢視時停用）才會替使用者打一次。
  *    橫幅沒有任何「修正」類動作：漂移只顯示與記錄，不自動修正任何一邊（以資料庫為準；AC-R2P-23-2）。
  */
-import { Clock, Info, Lock, ScanSearch, TriangleAlert } from "lucide-react";
-import Link from "next/link";
+import { Info, Lock, ScanSearch, TriangleAlert } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, type ComponentType } from "react";
 
@@ -31,20 +29,18 @@ import type { ResearchFlowStepId, ResearchProjectDetail, ResearchReconcileResult
 import { useAuth } from "@/lib/auth/AuthProvider";
 import {
   DEPTH_OPTIONS,
-  FLOW_STEP_LABEL,
   READONLY_TITLE,
   deriveSteps,
-  flowPhaseLabel,
   flowStatusLabel,
   isCompletedStep,
   isInitFailed,
   reconcileDriftView,
   researchErrorText,
   resolveViewStep,
-  stepNumber,
   stepReachable,
 } from "@/lib/domain/research";
 import { BuildFrontPanel } from "./BuildFrontPanel";
+import { DeliverPanel } from "./DeliverPanel";
 import { FlowStepper } from "./FlowStepper";
 import { ResearchFlowHeader } from "./ResearchFlowHeader";
 import { RoutePanel } from "./RoutePanel";
@@ -54,32 +50,13 @@ import { RoutePanel } from "./RoutePanel";
  * VIEWER 的停用（`title` 為「權限不足（唯讀角色）」）由各面板自己依 `useAuth().canWrite` 判，兩種唯讀互不取代。
  */
 export type ResearchPanelProps = { researchId: string; project: ResearchProjectDetail; completed: boolean };
-/** 外部接入的步驟面板：只有步驟 1（`topic`）與步驟 2（`studio`）；步驟 3、4 由本檔直接接真面板，步驟 5 是占位面板。 */
+/** 外部接入的步驟面板：只有步驟 1（`topic`）與步驟 2（`studio`）；步驟 3、4、5 由本檔直接接真面板。 */
 export type ResearchPanels = Partial<Record<"topic" | "studio", ComponentType<ResearchPanelProps>>>;
 
 const stepHref = (researchId: string, step: ResearchFlowStepId): string => `/research/${encodeURIComponent(researchId)}?step=${step}`;
 
 /** 檢視已完成步驟時的「對帳」說明：對帳是 POST（記事件、寫出狀態投影），已完成步驟的唯讀檢視（AT-960-19-4）不送任何寫入，請回到游標所在步再按。 */
 const COMPLETED_RECONCILE_TITLE = "這一步已完成，唯讀；請回到游標所在步再對帳";
-
-/** 占位面板（P1 起只剩步驟 5；PRD §7.3.1）：唯讀、無寫入動作；目前進度取自後端衍生的相態。 */
-function PlaceholderPanel({ researchId, project, step }: { researchId: string; project: ResearchProjectDetail; step: ResearchFlowStepId }) {
-  const { currentStep, effective } = project.flow;
-  return (
-    <Card data-testid="research-placeholder" data-step={step} className="flex flex-col gap-3 p-6">
-      <h3 className="flex items-center gap-2 text-lg font-semibold">
-        <Clock size={20} aria-hidden className="text-wg-muted" />第 {stepNumber(step)} 步：{FLOW_STEP_LABEL[step]}
-      </h3>
-      <p className="text-[15px]">本步驟於後續階段提供</p>
-      <p className="text-sm text-wg-muted">
-        目前進度：第 {stepNumber(currentStep)} 步「{FLOW_STEP_LABEL[currentStep]}」，{flowPhaseLabel(effective.phase)}（{flowStatusLabel(effective.status)}）。
-      </p>
-      <Link href={stepHref(researchId, currentStep)} className="w-fit text-sm font-medium text-wg-primary hover:underline">
-        回到游標所在步
-      </Link>
-    </Card>
-  );
-}
 
 /** 對帳漂移橫幅：以資料庫為準、只顯示差異；沒有任何動作鈕（不自動修正任何一邊）。全部一致時不渲染。 */
 function DriftBanner({ result }: { result: ResearchReconcileResult }) {
@@ -245,7 +222,7 @@ export function ResearchWorkspaceView({ panels = {} }: { panels?: ResearchPanels
         ) : viewed === "build" ? (
           <BuildFrontPanel researchId={researchId} project={project} completed={completed} />
         ) : (
-          <PlaceholderPanel researchId={researchId} project={project} step={viewed} />
+          <DeliverPanel researchId={researchId} project={project} completed={completed} />
         )}
       </div>
     </div>

@@ -10,11 +10,12 @@ import { checkpoints, dag, projectDetail, reviewItem, runDetail, runSummary, tas
 import { FIXTURE } from "@/tests/helpers/settingsFixtures";
 import { ExecuteView, parseTokenInput } from "./ExecuteView";
 
+const nav = vi.hoisted(() => ({ search: "" })); // 深連結 query（預設空；AT-962-16-* 逐案注入）
 vi.mock("next/navigation", () => ({
   useParams: () => ({ projectId: "p1" }),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   usePathname: () => "/projects/p1/execute",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
@@ -69,6 +70,7 @@ const post = (calls: ApiCall[], suffix: string) => calls.find((c) => c.method ==
 
 beforeEach(() => {
   FakeEventSource.reset();
+  nav.search = "";
   signIn("OPERATOR", "operator");
 });
 
@@ -751,5 +753,40 @@ describe("執行頁：即時更新（SSE → 畫面）", () => {
     FakeEventSource.lastOf("logs")!.emit("review-request", { seq: 41, sub: 1, ts: "2026-10-15T08:30:20Z", review: reviewItem() }, "41.1");
     expect(await screen.findByTestId("review-row")).toBeInTheDocument();
     expect(screen.getByTestId("review-count")).toHaveTextContent("1");
+  });
+});
+
+// ── ResearchBackLink 掛點（TCS-ResearchToPRD-P2-20261107 AT-962-16-2、16-E-1；D-150 #4：無參數案 Execute／Monitor 各放自己的測試檔、同掛 16-E-1）──
+const RESEARCH_UUID = "3f2b8c1e-5a47-4d09-9e61-0c7a1b2d3e4f";
+
+describe("AT_962_16_2 ExecuteView 在 ?researchId=<uuid> 時頁頂顯示回到研發工作流", () => {
+  it("AT_962_16_2 有合法 researchId：主分支頁頂有「回到研發工作流」連結、href 為 /research/<id>?step=build，且在「返回專案」之後", async () => {
+    nav.search = `researchId=${RESEARCH_UUID}`;
+    backend();
+    view();
+    expect(await screen.findByRole("heading", { name: "專案執行：AISDLC Core Platform" })).toBeInTheDocument();
+    const back = screen.getByRole("link", { name: "回到研發工作流" });
+    expect(back).toHaveAttribute("href", `/research/${RESEARCH_UUID}?step=build`);
+    expect(screen.getByRole("link", { name: "返回專案" })).toHaveAttribute("href", "/projects/p1");
+    expect(within(screen.getByTestId("execute-view")).getByRole("link", { name: "回到研發工作流" })).toBe(back);
+  });
+
+  it("AT_962_16_2 非 UUID 的 researchId（路徑穿越）不顯示回連", async () => {
+    nav.search = `researchId=${encodeURIComponent("../x")}`;
+    backend();
+    view();
+    await screen.findByRole("heading", { name: "專案執行：AISDLC Core Platform" });
+    expect(screen.queryByRole("link", { name: "回到研發工作流" })).toBeNull();
+  });
+});
+
+describe("AT_962_16_E_1 無參數（深連結直接開執行中心）不顯示返回連結，不猜", () => {
+  it("AT_962_16_E_1 ExecuteView 無查詢參數：只有「返回專案」，沒有回到研發工作流", async () => {
+    backend();
+    view();
+    await screen.findByRole("heading", { name: "專案執行：AISDLC Core Platform" });
+    expect(screen.getByRole("link", { name: "返回專案" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "回到研發工作流" })).toBeNull();
+    expect(screen.queryByTestId("research-back-link")).toBeNull();
   });
 });

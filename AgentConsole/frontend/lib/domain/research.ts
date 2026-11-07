@@ -2003,6 +2003,18 @@ export const DELIVER_LABEL = {
   openLocal: "開啟本地專案",
   records: "交付紀錄",
 } as const;
+
+/**
+ * Tag 確認框的欄位邊界與說明（D-157 單一來源；FE-P2B 的 TagConfirmDialog／ReleaseActions／PrConfirmDialog 一律 import 這裡）：
+ * `TAG_NAME_PATTERN` 與 Bridge `gitops.valid_semver`、console-api 的 `tagName` 正規式逐字相同（TCS-ResearchToPRD-P2 §5.1；`research.test.ts` 比對 TCS 檔），長度至多 64。
+ */
+export const TAG_NAME_PATTERN = /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+export const TAG_NAME_MAX = 64;
+export const TAG_MESSAGE_MAX = 200;
+export const TAG_RULE_TEXT = "版本號須符合 semver，例如 v1.2.3 或 1.2.3-rc.1（最多 64 字）";
+/** 非 ADMIN 的「建立 Tag」「建立 PR」停用說明（OPERATOR；含「權限不足」，沿 `GateRegisterDialog` 的「僅 ADMIN 可登錄 SCG」體例）。 */
+export const TAG_ADMIN_ONLY_TEXT = "權限不足：僅 ADMIN 可建立 Tag";
+export const PR_ADMIN_ONLY_TEXT = "權限不足：僅 ADMIN 可建立 PR";
 // SCG 登錄（AC-15-6）──
 export const GATE_REASON_MAX = 500;
 export const GATE_REPORT_REF_MAX = 300;

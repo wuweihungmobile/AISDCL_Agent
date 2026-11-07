@@ -9,6 +9,7 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { RunSelect } from "@/components/domain/execute/parts";
 import { BackLink, PageTitle } from "@/components/domain/PageHeader";
+import { ResearchBackLinkFromQuery } from "@/components/domain/research/ResearchBackLink";
 import { Select } from "@/components/ui/select";
 import { ErrorState, PageSkeleton } from "@/components/ui/states";
 import { useMonitorPollMs, useProject, useProjectExecutions, useProjectMetrics, useTaskTrend, useTokenTrend } from "@/lib/api/queries";
@@ -135,6 +136,7 @@ export function MonitorView() {
   return (
     <div data-testid="monitor-view">
       <BackLink href={`/projects/${projectId}`}>返回專案</BackLink>
+      <ResearchBackLinkFromQuery />
       <PageTitle
         icon={Activity}
         title={`專案監控：${project.data.name}`}

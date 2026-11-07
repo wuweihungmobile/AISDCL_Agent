@@ -1033,10 +1033,21 @@ export type ResearchPrRequest = { branch?: string; title?: string; bodyPreviewAc
 export type ResearchPrResult = { delivery: ResearchDelivery; created: boolean; flow?: unknown };
 
 export type ResearchTraceStatus = "PASS" | "FAIL" | "NOT_RUN" | "NONE";
-export type ResearchTraceRow = { ac: string; userStory: string; gherkinSummary: string; unitStatus: ResearchTraceStatus; e2eStatus: ResearchTraceStatus; lastRunAt: string | null; source: string };
+/** Gherkin 摘要三段（Bridge `delivery.gherkin_summary`：純文字、每段至多 120 字；缺段為空字串；D-158）。 */
+export type ResearchGherkinSummary = { given: string; when: string; then: string };
+/** `source`：覆蓋任務（`task:<id>`）與 RTM 覆蓋檔（`RTM-COVERAGE-<key>.yaml`）清單，無覆蓋任務時為空陣列（D-158）。 */
+export type ResearchTraceRow = {
+  ac: string;
+  userStory: string;
+  gherkinSummary: ResearchGherkinSummary;
+  unitStatus: ResearchTraceStatus;
+  e2eStatus: ResearchTraceStatus;
+  lastRunAt: string | null;
+  source: string[];
+};
 export type ResearchTraceability = {
   rows: ResearchTraceRow[];
-  totals: { acTotal: number; covered: number; uncovered: number };
+  totals: { acTotal: number; covered: number; uncovered: number; frTotal: number };
   rtm: { runId: string; fullyCovered: boolean; acPct: number; advisory: true } | null;
   generatedAt: string;
 };

@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { ConfirmDialog } from "@/components/domain/ConfirmDialog";
 import { BackLink, PageTitle } from "@/components/domain/PageHeader";
+import { ResearchBackLinkFromQuery } from "@/components/domain/research/ResearchBackLink";
 import { SignoffDialog } from "@/components/domain/SignoffDialog";
 import { ErrorState, PageSkeleton } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
@@ -269,6 +270,7 @@ export function ExecuteView() {
   return (
     <div data-testid="execute-view">
       <BackLink href={`/projects/${projectId}`}>返回專案</BackLink>
+      <ResearchBackLinkFromQuery />
       <PageTitle
         icon={Play}
         title={`專案執行：${p.name}`}
