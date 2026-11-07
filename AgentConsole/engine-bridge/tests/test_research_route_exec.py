@@ -452,6 +452,44 @@ def test_AT_961_4_E_1_replay_rederives_a_stale_status_but_never_washes_out_faile
     assert not ctx.writer.has_pending(rid)
 
 
+def test_AT_961_4_E_1_late_bound_fsm_reader_settles_unsettled_projects(
+        renv: rgs.RouteEnv) -> None:
+    """D-128 晚綁定：重放時尚無 FSM 讀取器 ⇒ 專案記進 `_unsettled`、游標不校正；之後
+    `bind_fsm_reader` 當下補校正，再重放零新增。"""
+    from app.research.outbox import DbBlocked
+    rid = rgs.seed_gate0(renv)
+    ctx = research_ctx(renv)
+    writer = ctx.writer
+    flow = {"step": "build", "phase": "ROUTED", "status": "RUNNING", "detail": "keep"}
+    renv.rdb.block()
+    try:
+        with pytest.raises(DbBlocked):
+            writer.persist(route.Op("project.cursor", rid, {
+                "research_id": rid, "actor": "bridge", "flow": flow}))
+    finally:
+        renv.rdb.unblock()
+    assert writer.has_pending(rid)
+    reader = writer._fsm_state_of
+    writer._fsm_state_of = None                 # 模擬「重放時尚無讀取器」
+    writer._unsettled = set()
+    try:
+        assert writer.replay().applied
+        assert writer._unsettled == {rid}, "無讀取器的重放：專案記入 _unsettled"
+        assert cursor(renv, rid) == ("build", "ROUTED", "RUNNING", "keep"), "游標尚未校正"
+        events_before = renv.rdb.count("research_events")
+        writer.bind_fsm_reader(lambda _row: None)   # 無進行中工作、FSM 無現態 ⇒ 衍生 IDLE
+    finally:
+        if reader is not None:
+            writer._fsm_state_of = reader
+    assert writer._unsettled == set()
+    assert cursor(renv, rid) == ("build", "ROUTED", "IDLE", "keep"), "綁定當下立即校正"
+    assert renv.rdb.count("research_events") >= events_before
+    snapshot = (renv.rdb.count("research_events"), cursor(renv, rid))
+    assert not writer.replay().applied
+    assert (renv.rdb.count("research_events"), cursor(renv, rid)) == snapshot
+    assert writer._unsettled == set()
+
+
 # ── AT-961-4-E-2／E-3：牆鐘════════════════════════════════════════════════════════════════════
 class FakeClock:
     def __init__(self) -> None:

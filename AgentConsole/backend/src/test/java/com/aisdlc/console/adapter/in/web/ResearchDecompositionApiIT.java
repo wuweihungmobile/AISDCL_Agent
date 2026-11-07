@@ -159,6 +159,25 @@ class ResearchDecompositionApiIT extends AbstractResearchIT {
     }
 
     @Test
+    void AT_961_11_4_aDecompositionInStatusStaleRefusesExecutionEvenWhenItsShaStillMatchesTheFrozenOne() {
+        Rig rig = signedRig("d11-4s");
+        stage2("p1g-d11-4s", true);
+        // 摘要與凍結摘要相同：只剩「狀態 STALE」這一條成因（F-12：STALE_STATUSES 去掉 "STALE" 必紅）
+        p1.decomposition(rig.research, "STALE", SHA, ResearchP1Fixtures.content(SHA, "[]", 2, 2));
+        int before = bridge().calls.size();
+
+        Resp stale = execute(rig.project, Map.of());
+
+        assertThat(stale.status()).isEqualTo(409);
+        assertThat(stale.<String>read("$.reason")).isEqualTo("decomposition_stale");
+        assertThat(countRuns(rig.project)).isZero();
+        assertThat(bridge().calls.size()).as("守衛在 FSM 查詢之前拒絕：Bridge 零新請求").isEqualTo(before);
+
+        p1.decomposition(rig.research, "SIGNED_OFF", SHA, ResearchP1Fixtures.content(SHA, "[]", 2, 2));
+        assertThat(execute(rig.project, Map.of()).status()).as("對照：SIGNED_OFF 放行").isEqualTo(201);
+    }
+
+    @Test
     void AT_961_11_5_anOpenScrRefusesExecutionAndItsEndLetsItThrough() {
         Rig rig = signedRig("d11-5");
         stage2("p1g-d11-5", true);
