@@ -211,7 +211,7 @@ _SHELL_SHEBANG_RE = re.compile(r"^#!.*\b(?:ba|z|da|k)?sh\b")
 # 見下方兩個函式），而是給 `test_hook_dir_roster_matches_repo_state` 當完整性自檢的
 # 對照基準：repo 長出第 4 個 hooks 目錄時要有人**當場知道**（新目錄的 hook 是否已
 # 接進根層 dispatcher 的扇出段？是否走了 Copy-on-Evolve 該排除？），而不是靜默被
-# 涵蓋。順序無意義，比對走 set。backend 條目＝gradlew（Gradle wrapper，非 hook）；fake_gh＝假 gh 夾具。
+# 涵蓋。順序無意義，比對走 set。backend 條目＝gradlew（非 hook）；fake_gh＝假 gh 夾具。
 _KNOWN_HOOK_DIRS: frozenset[str] = frozenset({
     "tools/git-hooks", "AutoClaude/tools/git-hooks", "AISDLC_SDD/.githooks",
     "AgentConsole/backend", "AgentConsole/engine-bridge/tests/fixtures/research/fake_gh",  # 非 hook
