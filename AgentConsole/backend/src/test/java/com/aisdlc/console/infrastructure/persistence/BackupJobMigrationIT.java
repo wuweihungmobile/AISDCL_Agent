@@ -82,7 +82,8 @@ class BackupJobMigrationIT {
     private static String snapshotOfExistingTables(JdbcTemplate jdbc) {
         String columns = jdbc.queryForObject("select string_agg(table_name || '.' || column_name || ':' || data_type || ':' || is_nullable || ':' "
                 + "|| coalesce(character_maximum_length::text, '-') || ':' || coalesce(column_default, '-'), ';' order by table_name, ordinal_position) "
-                + "from information_schema.columns where table_schema = 'console' and table_name <> 'backup_jobs' and table_name not like 'research\\_%'", String.class);
+                + "from information_schema.columns where table_schema = 'console' and table_name <> 'backup_jobs' and table_name not like 'research\\_%' "
+                + "and table_name not like 'v\\_research\\_%'", String.class);
         String constraints = jdbc.queryForObject("select string_agg(conrelid::regclass::text || '.' || conname || ':' || pg_get_constraintdef(oid), ';' "
                 + "order by conrelid::regclass::text, conname) from pg_constraint where connamespace = 'console'::regnamespace "
                 + "and conrelid::regclass::text <> 'console.backup_jobs' and conrelid::regclass::text not like 'console.research\\_%'", String.class);
@@ -154,6 +155,28 @@ class BackupJobMigrationIT {
         assertThat(snapshotOfExistingTables(jdbc)).as("既有各表的欄位與約束 V15 前後逐項相同（零變動）").isEqualTo(before);
     }
 
+    // ── AT-961-1-E-2：V19 視圖不得讓「既有表零變動」快照多出欄位 ───────────────────────────────
+
+    @Test
+    void AT_961_1_E_2_theV19ViewIsExcludedFromTheExistingTablesSnapshotAndTheHistoryReachesNineteen() {
+        String database = createDatabase();
+        flyway(database, "18").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        String before = snapshotOfExistingTables(jdbc);
+
+        flyway(database, null).migrate();
+
+        assertThat(jdbc.queryForList("select version from console.flyway_schema_history where version is not null order by installed_rank",
+                String.class)).as("Flyway 歷史 1 至 19").containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+                "11", "12", "13", "14", "15", "16", "17", "18", "19");
+        assertThat(snapshotOfExistingTables(jdbc)).as("V19 套用前後既有表的欄位與約束零變動（視圖欄位已被排除）").isEqualTo(before);
+        // 鑑別力：information_schema.columns 確實把視圖欄位列入；若快照沒排除，升級後會多出這些欄（還原排除條件則上一個斷言紅）
+        assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' "
+                + "and table_name = 'v_research_healing_attempts'", Integer.class)).as("視圖的十個欄位").isEqualTo(10);
+        assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' "
+                + "and table_name = 'v_research_healing_attempts' and table_name <> 'backup_jobs' and table_name not like 'research\\_%' "
+                + "and table_name not like 'v\\_research\\_%'", Integer.class)).as("排除條件確實濾掉視圖欄位").isZero();
+    }
     // ── AT-BK-10-1-2：版本與冪等 ────────────────────────────────────────────────────────────────
 
     @Test
@@ -165,7 +188,7 @@ class BackupJobMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

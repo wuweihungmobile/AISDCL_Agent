@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Function;
@@ -35,7 +36,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Flyway V16～V18（研究到規格的 13 張表；TCS-ResearchToPRD-P0-20261102 AC-960-1 的全部資料庫 AT；DDL 全文見 Architecture §11.3′ 的 K.1～K.3）。
+ * Flyway V16～V19（V16～V18 為研究到規格的 13 張表，V19 為 P1 加上的分流／SCR／拆解／交付五表與自癒視圖；TCS-ResearchToPRD-P0-20261102 AC-960-1 的全部資料庫 AT；DDL 全文見 Architecture §11.3′ 的 K.1～K.3）。
  *
  * <p>為什麼重要：掌舵者要拿這些資料去簽 Gate 0——證據列被事後改寫、審查輪被改成「通過」、缺陷被悄悄關掉、來源查證層級被降級，
  * 簽核就失去意義。所以「不可變、單向、值域」這幾條規則必須落在資料庫（觸發器、CHECK、部分唯一索引），不能只靠 Bridge 寫入器自律：
@@ -65,6 +66,14 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             "research_artifacts", "research_sources", "research_fetches", "research_evidence_items", "research_allowlist_entries",
             "research_prd_versions", "research_review_rounds", "research_review_scores", "research_review_defects",
             "research_gate_decisions");
+
+    /** V19（P1）新增的五張表；P0 的兩個常數維持原值，V19 另立（TCS-P1 §4 第 34 列）。 */
+    private static final List<String> V19_TABLES = List.of("research_route_decisions", "research_route_steps", "research_scr",
+            "research_decompositions", "research_deliveries");
+    /** V19 的四張受控可更新表（research_deliveries 是 append-only，不在其中）。 */
+    private static final List<String> V19_CONTROLLED_TABLES = List.of("research_route_decisions", "research_route_steps",
+            "research_scr", "research_decompositions");
+    private static final String V19_VIEW = "v_research_healing_attempts";
 
     private static final Set<String> JSONB_COLUMNS = Set.of("scope", "payload", "prompt_manifest", "allowlist_snapshot",
             "precheck_detail", "frozen_digests", "result_urls", "f5_applicability");
@@ -459,11 +468,14 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         Map<String, Object> descriptions = new LinkedHashMap<>();
         history.forEach(row -> descriptions.put((String) row.get("version"), row.get("description")));
-        // 表集合取自兩個拋棄式資料庫（遷到 18 與遷到 15）：同一 JVM 內別的整合測試會暫時改名或暫建表，不能拿共用的 Spring 資料庫來算「多出」
-        Set<String> afterV18 = baseTables(newDatabase().jdbc);
+        // 表集合取自拋棄式資料庫（遷到 19、18、15）：同一 JVM 內別的整合測試會暫時改名或暫建表，不能拿共用的 Spring 資料庫來算「多出」
+        Set<String> afterV19 = baseTables(newDatabase().jdbc);
+        Set<String> afterV18 = baseTables(databaseAt("18").jdbc);
         Set<String> afterV15 = baseTables(databaseAt("15").jdbc);
         Set<String> added = new TreeSet<>(afterV18);
         added.removeAll(afterV15);
+        Set<String> addedByV19 = new TreeSet<>(afterV19);
+        addedByV19.removeAll(afterV18);
         Integer leaked = springJdbc.queryForObject("select count(*) from information_schema.tables where table_schema = 'public' "
                 + "and table_name like 'research\\_%'", Integer.class);
         List<String> sequences = springJdbc.queryForList("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
@@ -486,13 +498,14 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
         SoftAssertions.assertSoftly(soft -> {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
-            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 18")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18");
+            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
-                    .containsEntry("18", "research prd review gate");
-            soft.assertThat(afterV18).as("V16～V18 沒有拿掉任何既有的表").containsAll(afterV15);
-            soft.assertThat(added).as("V16～V18 在 console 內恰多出 13 張表").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
+                    .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery");
+            soft.assertThat(afterV18).as("V16～V19 沒有拿掉任何既有的表").containsAll(afterV15).containsAll(afterV18);
+            soft.assertThat(added).as("V16～V18 在 console 內恰多出 13 張表（P0 集合不退步）").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
+            soft.assertThat(addedByV19).as("V19 在 console 內恰多出 5 張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
             soft.assertThat(leaked).as("research_ 的表不得外洩到 public").isZero();
             soft.assertThat(sequences).as("RP 編號序列").contains("research_rp_seq");
             soft.assertThat(functions).as("編號函式與兩個通用守衛函式").containsEntry("research_next_rp_no", "text")
@@ -515,7 +528,15 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(indexes.get("idx_research_defects_open@research_review_defects")).as("未結缺陷的部分索引")
                     .containsIgnoringCase("WHERE").contains("OPEN");
 
-            soft.assertThat(guardsByTable.keySet()).as("13 張表都有守衛觸發器、沒有別的表").containsExactlyInAnyOrderElementsOf(RESEARCH_TABLES);
+            List<String> allResearchTables = new ArrayList<>(RESEARCH_TABLES);
+            allResearchTables.addAll(V19_TABLES);
+            soft.assertThat(guardsByTable.keySet()).as("18 張表（P0 十三加 V19 五）都有守衛觸發器、沒有別的表")
+                    .containsExactlyInAnyOrderElementsOf(allResearchTables);
+            for (String table : V19_CONTROLLED_TABLES) {
+                soft.assertThat(guardsByTable.get(table)).as("%s 只掛受控更新通用守衛", table).containsExactly("research_controlled_update_guard");
+            }
+            soft.assertThat(guardsByTable.get("research_deliveries")).as("research_deliveries 只掛 append-only 守衛")
+                    .containsExactly("research_append_only_guard");
             for (String table : APPEND_ONLY_TABLES) {
                 soft.assertThat(guardsByTable.get(table)).as("%s 只掛 append-only 守衛", table)
                         .containsExactly("research_append_only_guard");
@@ -1385,8 +1406,10 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                 + "(t.tgtype & 16) <> 0 as on_update from pg_trigger t join pg_class c on c.oid = t.tgrelid "
                 + "join pg_proc p on p.oid = t.tgfoid join pg_namespace n on n.oid = p.pronamespace "
                 + "where n.nspname = 'console' and p.proname = 'research_controlled_update_guard' and not t.tgisinternal");
-        assertThat(wiring).extracting(trigger -> trigger.get("relname")).as("引用通用守衛的表恰為五張（不含審查輪表）")
-                .containsExactlyInAnyOrderElementsOf(CONTROLLED_TABLES);
+        List<String> allControlled = new ArrayList<>(CONTROLLED_TABLES);
+        allControlled.addAll(V19_CONTROLLED_TABLES);
+        assertThat(wiring).extracting(trigger -> trigger.get("relname")).as("引用通用守衛的表恰為九張（P0 五張加 V19 四張；不含審查輪表與 research_deliveries）")
+                .containsExactlyInAnyOrderElementsOf(allControlled);
         assertThat(wiring).allSatisfy(trigger -> {
             assertThat(trigger).as("BEFORE、FOR EACH ROW、涵蓋 UPDATE 與 DELETE、不含 INSERT")
                     .containsEntry("is_row", true).containsEntry("is_before", true).containsEntry("on_update", true)
@@ -1636,6 +1659,622 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                     .isEqualTo(List.of("https://b.example/2", "https://a.example/1"));
             expectOk(soft, "WEB_FETCH、BRIDGE、url 與 host 皆有值", tryInsert(db, "research_fetches",
                     with(fetch, "fetch_method", "WEB_FETCH")));
+        });
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // V19（P1；PKG-DB-P1；TCS-ResearchToPRD-P1-20261107 AC-961-1）：分流、SCR、拆解、交付五表與自癒視圖
+    // 為什麼重要：分流決策是「PRD 變成哪個程式碼庫」的稽核帳，同一研究專案不得同時有兩條有效分流（部分唯一索引是最後防線）、
+    // 公開倉庫只准獨立專案（軌道 B）；SCR 與交付紀錄一旦寫下不可被事後改寫；受控表只准改狀態類欄位，不准改「做了什麼決定」。
+    // 這些全落在資料庫，Bridge 寫入器自律不足以擔保。
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static Map<String, Object> routeRow(UUID project, String track) {
+        return "A".equals(track)
+                ? row("research_id", project, "track", "A", "target_kind", "MODULE", "target_module", "agentconsole",
+                        "target_path", "AgentConsole", "decided_by", "admin")
+                : row("research_id", project, "track", "B", "target_kind", "STANDALONE", "target_path", "/ws/standalone",
+                        "decided_by", "admin");
+    }
+
+    private static Map<String, Object> routeStepRow(UUID route, int stepNo, String step, String status) {
+        return row("route_id", route, "step_no", stepNo, "step", step, "status", status);
+    }
+
+    private static Map<String, Object> scrRow(UUID project, int scrNo) {
+        return row("research_id", project, "scr_no", scrNo, "kind", "MINOR", "source_kind", "HUMAN", "reason", "理由",
+                "requested_by", "admin");
+    }
+
+    private static Map<String, Object> decompositionRow(UUID project, String path) {
+        return row("research_id", project, "path", path, "created_by", "admin");
+    }
+
+    private static Map<String, Object> deliveryRow(UUID project, String kind, String ref, String status) {
+        return row("research_id", project, "kind", kind, "ref", ref, "status", status, "created_by", "admin");
+    }
+
+    private static UUID v19Project(Db db) {
+        UUID id = UUID.randomUUID();
+        insert(db.jdbc, "research_projects", projectRow(id, "v19-" + id.toString().substring(0, 8)));
+        return id;
+    }
+
+    private static UUID v19Route(Db db, UUID project, String status) {
+        UUID id = UUID.randomUUID();
+        insert(db.jdbc, "research_route_decisions", with(routeRow(project, "A"), "id", id, "status", status));
+        return id;
+    }
+
+    private static void expectMessage(SoftAssertions soft, String label, Outcome outcome, String... parts) {
+        for (String part : parts) {
+            soft.assertThat(String.valueOf(outcome.message())).as("%s：訊息應含 %s", label, part).contains(part);
+        }
+    }
+
+    @Test
+    void AT_961_1_1_flywayHistoryReachesNineteenWithFiveTablesAndTheViewOnlyInConsole() {
+        Db db = newDatabase();
+        Db at18 = databaseAt("18");
+        List<Map<String, Object>> history = db.jdbc.queryForList("select version, description, success from "
+                + "console.flyway_schema_history where version is not null order by installed_rank");
+        Set<String> added = new TreeSet<>(baseTables(db.jdbc));
+        added.removeAll(baseTables(at18.jdbc));
+        String viewSql = "select table_name from information_schema.views where table_schema = 'console' "
+                + "and table_name like 'v\\_research\\_%'";
+        List<String> viewsAfter19 = db.jdbc.queryForList(viewSql, String.class);
+        List<String> viewsAfter18 = at18.jdbc.queryForList(viewSql, String.class);
+        Integer leaked = db.jdbc.queryForObject("select count(*) from information_schema.tables where table_schema = 'public' "
+                + "and (table_name like 'research\\_%' or table_name like 'v\\_research\\_%')", Integer.class);
+        String v19Tables = "'" + String.join("', '", V19_TABLES) + "'";
+        Map<String, String> timeColumns = new TreeMap<>();
+        db.jdbc.queryForList("select table_name || '.' || column_name as col, data_type from information_schema.columns "
+                + "where table_schema = 'console' and table_name in (" + v19Tables + ") and data_type like 'timestamp%'")
+                .forEach(column -> timeColumns.put((String) column.get("col"), (String) column.get("data_type")));
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
+                    .isEqualTo("validate");
+            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
+            soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
+            soft.assertThat(history.get(history.size() - 1).get("description")).as("V19 描述").isEqualTo("research route scr delivery");
+            soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
+            soft.assertThat(viewsAfter18).as("V18 時還沒有視圖").isEmpty();
+            soft.assertThat(viewsAfter19).as("V19 在 console 內恰多出一個視圖").containsExactly(V19_VIEW);
+            soft.assertThat(leaked).as("public schema 零新物件").isZero();
+            Map<String, String> expected = new TreeMap<>();
+            for (String column : List.of("research_route_decisions.created_at", "research_route_decisions.finished_at",
+                    "research_route_steps.started_at", "research_route_steps.finished_at", "research_scr.requested_at",
+                    "research_scr.decided_at", "research_decompositions.created_at", "research_deliveries.created_at")) {
+                expected.put(column, "timestamp with time zone");
+            }
+            soft.assertThat(timeColumns).as("V19 五表的 timestamp 欄逐欄皆 timestamp with time zone（沒有 without time zone）")
+                    .isEqualTo(expected);
+        });
+    }
+
+    @Test
+    void AT_961_1_2_routeDecisionsChecks() {
+        Db db = newDatabase();
+        UUID base = v19Project(db);
+        UUID q = v19Project(db);
+        UUID baseRoute = UUID.randomUUID();
+        insert(db.jdbc, "research_route_decisions", with(routeRow(base, "A"), "id", baseRoute));
+        Map<String, Object> a = routeRow(q, "A");
+        Map<String, Object> b = routeRow(q, "B");
+        String table = "research_route_decisions";
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectState(soft, "track 為 C", tryInsert(db, table, with(a, "track", "C")), CHECK);
+            expectState(soft, "軌道 A 配 STANDALONE", tryInsert(db, table, with(a, "target_kind", "STANDALONE")), CHECK);
+            expectState(soft, "軌道 A 缺 target_module", tryInsert(db, table, without(a, "target_module")), CHECK);
+            expectState(soft, "軌道 B 帶 target_module", tryInsert(db, table, with(b, "target_module", "sdd")), CHECK);
+            expectState(soft, "軌道 B 配 MODULE", tryInsert(db, table, with(b, "target_kind", "MODULE")), CHECK);
+            expectState(soft, "target_module 為 other", tryInsert(db, table, with(a, "target_module", "other")), CHECK);
+            // TCS 字面值 INTERNAL（8 字元）超過 VARCHAR(7) 欄寬會得 22001 而非 23514，改用欄寬內的非法值 OPEN（TCS §5.1 越界值構造規則；勘誤候選）
+            expectState(soft, "repo_visibility 為 OPEN", tryInsert(db, table, with(b, "repo_visibility", "OPEN")), CHECK);
+            expectState(soft, "repo_visibility 為 INTERNAL（欄寬超界：22001）", tryInsert(db, table, with(b, "repo_visibility", "INTERNAL")), TOO_LONG);
+            Outcome publicA = tryInsert(db, table, with(a, "repo_visibility", "PUBLIC"));
+            expectState(soft, "軌道 A 配 PUBLIC", publicA, CHECK);
+            expectMessage(soft, "軌道 A 配 PUBLIC", publicA, "violates check constraint", table);
+            expectState(soft, "status 為 DONE", tryInsert(db, table, with(a, "status", "DONE")), CHECK);
+            expectState(soft, "target_path 為 NULL", tryInsert(db, table, with(a, "target_path", null)), NOT_NULL);
+            expectState(soft, "decided_by 為 NULL", tryInsert(db, table, with(a, "decided_by", null)), NOT_NULL);
+            expectState(soft, "git_branch 201 字元（欄寬超界不是 CHECK）", tryInsert(db, table,
+                    with(a, "git_branch", "x".repeat(201))), TOO_LONG);
+            expectOk(soft, "git_branch 恰 200 字元", tryInsert(db, table, with(a, "git_branch", "x".repeat(200))));
+            expectState(soft, "console_project_id 指向不存在的專案", tryInsert(db, table,
+                    with(a, "console_project_id", UUID.randomUUID())), FOREIGN_KEY);
+            expectState(soft, "research_id 指向不存在的研究專案", tryInsert(db, table, routeRow(UUID.randomUUID(), "A")), FOREIGN_KEY);
+
+            for (String module : List.of("autoclaude", "agentconsole", "sdd", "monorepo")) {
+                expectOk(soft, "軌道 A 模組 " + module, tryInsert(db, table, with(a, "target_module", module)));
+            }
+            for (String status : List.of("PENDING", "RUNNING", "SUCCEEDED", "FAILED", "COMPENSATED")) {
+                expectOk(soft, "狀態 " + status, tryInsert(db, table, with(a, "status", status)));
+            }
+            expectOk(soft, "PUBLIC 搭軌道 B", tryInsert(db, table, with(b, "repo_visibility", "PUBLIC")));
+            expectOk(soft, "PRIVATE 搭軌道 A", tryInsert(db, table, with(a, "repo_visibility", "PRIVATE")));
+            expectOk(soft, "軌道 B 基準列", tryInsert(db, table, b));
+
+            expectEnum(soft, db.jdbc, table, "track", "A", "B");
+            expectEnum(soft, db.jdbc, table, "target_kind", "MODULE", "STANDALONE");
+            expectEnum(soft, db.jdbc, table, "target_module", "autoclaude", "agentconsole", "sdd", "monorepo");
+            expectEnum(soft, db.jdbc, table, "repo_visibility", "PUBLIC", "PRIVATE");
+            expectEnum(soft, db.jdbc, table, "status", "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "COMPENSATED");
+            soft.assertThat(db.jdbc.queryForObject("select published_docs::text from console.research_route_decisions where id = ?",
+                    String.class, baseRoute)).as("published_docs 預設 {}").isEqualTo("{}");
+            soft.assertThat(db.jdbc.queryForObject("select status from console.research_route_decisions where id = ?", String.class,
+                    baseRoute)).as("status 預設 PENDING").isEqualTo("PENDING");
+        });
+    }
+
+    @Test
+    void AT_961_1_3_activeRoutePartialUniqueIndex() {
+        Db db = newDatabase();
+        UUID p = v19Project(db);
+        UUID other = v19Project(db);
+        String table = "research_route_decisions";
+        UUID pending = UUID.randomUUID();
+        UUID succeeded = UUID.randomUUID();
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectOk(soft, "第一筆 FAILED", run(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "status", "FAILED"));
+                return null;
+            }));
+            expectOk(soft, "第二筆 FAILED（可並存）", run(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "status", "FAILED"));
+                return null;
+            }));
+            expectOk(soft, "一筆 PENDING", run(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "id", pending, "status", "PENDING"));
+                return null;
+            }));
+            Outcome running = run(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "status", "RUNNING"));
+                return null;
+            });
+            expectState(soft, "PENDING 在時再插 RUNNING", running, UNIQUE);
+            expectMessage(soft, "PENDING 在時再插 RUNNING", running, "ux_research_route_active");
+            expectState(soft, "PENDING 在時再插 SUCCEEDED", rolledBack(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "status", "SUCCEEDED"));
+                return null;
+            }), UNIQUE);
+            expectState(soft, "PENDING 在時再插 PENDING", rolledBack(db, jdbc -> {
+                insert(jdbc, table, routeRow(p, "A"));
+                return null;
+            }), UNIQUE);
+            expectOk(soft, "PENDING 改 FAILED", run(db, jdbc -> jdbc.update("update console." + table
+                    + " set status = 'FAILED' where id = ?", pending)));
+            expectOk(soft, "離開有效集合後可插入 SUCCEEDED", run(db, jdbc -> {
+                insert(jdbc, table, with(routeRow(p, "A"), "id", succeeded, "status", "SUCCEEDED"));
+                return null;
+            }));
+            expectOk(soft, "SUCCEEDED 改 COMPENSATED", run(db, jdbc -> jdbc.update("update console." + table
+                    + " set status = 'COMPENSATED' where id = ?", succeeded)));
+            expectOk(soft, "補償後可重新分流（PENDING）", run(db, jdbc -> {
+                insert(jdbc, table, routeRow(p, "A"));
+                return null;
+            }));
+            expectOk(soft, "另一個研究專案互不影響", run(db, jdbc -> {
+                insert(jdbc, table, routeRow(other, "A"));
+                return null;
+            }));
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console." + table + " where research_id = ? and status in "
+                    + "('PENDING','RUNNING','SUCCEEDED')", Integer.class, p)).as("同一研究專案有效分流恰一筆").isEqualTo(1);
+            String indexDef = db.jdbc.queryForObject("select indexdef from pg_indexes where schemaname = 'console' "
+                    + "and indexname = 'ux_research_route_active'", String.class);
+            soft.assertThat(indexDef).containsIgnoringCase("UNIQUE").containsIgnoringCase("WHERE").contains("PENDING")
+                    .contains("RUNNING").contains("SUCCEEDED").doesNotContain("FAILED").doesNotContain("COMPENSATED");
+        });
+    }
+
+    @Test
+    void AT_961_1_4_routeStepsChecksAndCompositeKey() {
+        Db db = newDatabase();
+        UUID project = v19Project(db);
+        UUID route = v19Route(db, project, "PENDING");
+        String table = "research_route_steps";
+        insert(db.jdbc, table, routeStepRow(route, 1, "VALIDATE_TARGET", "OK"));
+
+        SoftAssertions.assertSoftly(soft -> {
+            expectState(soft, "step_no 為 0", tryInsert(db, table, routeStepRow(route, 0, "VALIDATE_TARGET", "OK")), CHECK);
+            expectState(soft, "step_no 為 -1", tryInsert(db, table, routeStepRow(route, -1, "VALIDATE_TARGET", "OK")), CHECK);
+            expectState(soft, "(route_id, step_no) 重複", tryInsert(db, table, routeStepRow(route, 1, "GIT_SWITCH", "OK")), UNIQUE);
+            expectState(soft, "step 為 GIT_PUSH", tryInsert(db, table, routeStepRow(route, 2, "GIT_PUSH", "OK")), CHECK);
+            expectState(soft, "status 為 DONE", tryInsert(db, table, routeStepRow(route, 2, "GIT_SWITCH", "DONE")), CHECK);
+            List<String> steps = List.of("VALIDATE_TARGET", "GIT_SWITCH", "SCAFFOLD_FILES", "GIT_INIT", "GIT_COMMIT", "GH_REPO_CREATE",
+                    "PUBLISH_DOCS", "COPY_WORKSPACE", "REGISTER_STUB", "IMPL_KEY_INIT", "BASELINE_ADOPT");
+            for (int i = 0; i < steps.size(); i++) {
+                expectOk(soft, "步驟名 " + steps.get(i), tryInsert(db, table, routeStepRow(route, 10 + i, steps.get(i), "OK")));
+            }
+            for (String status : List.of("RUNNING", "OK", "FAILED", "SKIPPED", "COMPENSATED")) {
+                expectOk(soft, "步驟狀態 " + status, tryInsert(db, table, routeStepRow(route, 2, "GIT_SWITCH", status)));
+            }
+            expectOk(soft, "stdout_tail 恰 2000 字元", tryInsert(db, table,
+                    with(routeStepRow(route, 2, "GIT_SWITCH", "OK"), "stdout_tail", sql("repeat('x', 2000)"))));
+            expectState(soft, "stdout_tail 2001 字元", tryInsert(db, table,
+                    with(routeStepRow(route, 2, "GIT_SWITCH", "OK"), "stdout_tail", sql("repeat('x', 2001)"))), TOO_LONG);
+            expectState(soft, "stderr_tail 2001 字元", tryInsert(db, table,
+                    with(routeStepRow(route, 2, "GIT_SWITCH", "OK"), "stderr_tail", sql("repeat('x', 2001)"))), TOO_LONG);
+            expectState(soft, "route_id 不存在", tryInsert(db, table, routeStepRow(UUID.randomUUID(), 1, "GIT_SWITCH", "OK")),
+                    FOREIGN_KEY);
+            expectEnum(soft, db.jdbc, table, "step", "VALIDATE_TARGET", "GIT_SWITCH", "SCAFFOLD_FILES", "GIT_INIT", "GIT_COMMIT",
+                    "GH_REPO_CREATE", "PUBLISH_DOCS", "COPY_WORKSPACE", "REGISTER_STUB", "IMPL_KEY_INIT", "BASELINE_ADOPT");
+            expectEnum(soft, db.jdbc, table, "status", "RUNNING", "OK", "FAILED", "SKIPPED", "COMPENSATED");
+            Map<String, Object> defaults = db.jdbc.queryForMap("select argv_redacted, stdout_tail, stderr_tail from console."
+                    + table + " where route_id = ? and step_no = 1", route);
+            soft.assertThat(defaults).as("argv_redacted／stdout_tail／stderr_tail 預設空字串")
+                    .containsEntry("argv_redacted", "").containsEntry("stdout_tail", "").containsEntry("stderr_tail", "");
+            List<String> pk = db.jdbc.queryForList("select a.attname from pg_index i join pg_attribute a on a.attrelid = i.indrelid "
+                    + "and a.attnum = any (i.indkey) where i.indrelid = 'console.research_route_steps'::regclass and i.indisprimary "
+                    + "order by array_position(i.indkey::int2[], a.attnum)", String.class);
+            soft.assertThat(pk).as("主鍵為 (route_id, step_no)").containsExactly("route_id", "step_no");
+        });
+    }
+
+    @Test
+    void AT_961_1_5_scrChecksAndUniqueKey() {
+        Db db = newDatabase();
+        UUID project = v19Project(db);
+        String table = "research_scr";
+        insert(db.jdbc, table, scrRow(project, 1));
+
+        SoftAssertions.assertSoftly(soft -> {
+            // TCS 字面值 MEDIUM（6 字元）超過 VARCHAR(5) 欄寬：改用欄寬內的非法值 MID（勘誤候選）
+            expectState(soft, "kind 為 MID", tryInsert(db, table, with(scrRow(project, 2), "kind", "MID")), CHECK);
+            expectState(soft, "kind 為 MEDIUM（欄寬超界：22001）", tryInsert(db, table, with(scrRow(project, 2), "kind", "MEDIUM")), TOO_LONG);
+            expectState(soft, "source_kind 為 OTHER", tryInsert(db, table, with(scrRow(project, 2), "source_kind", "OTHER")), CHECK);
+            expectState(soft, "reason_class 為 BUG", tryInsert(db, table, with(scrRow(project, 2), "reason_class", "BUG")), CHECK);
+            expectState(soft, "status 為 CLOSED", tryInsert(db, table, with(scrRow(project, 2), "status", "CLOSED")), CHECK);
+            expectState(soft, "scr_no 為 0", tryInsert(db, table, scrRow(project, 0)), CHECK);
+            expectState(soft, "scr_no 重複", tryInsert(db, table, scrRow(project, 1)), UNIQUE);
+            expectState(soft, "requested_by 為 NULL", tryInsert(db, table, with(scrRow(project, 2), "requested_by", null)), NOT_NULL);
+            expectState(soft, "reason 為 NULL", tryInsert(db, table, with(scrRow(project, 2), "reason", null)), NOT_NULL);
+            for (String kind : List.of("MINOR", "MAJOR")) {
+                expectOk(soft, "kind " + kind, tryInsert(db, table, with(scrRow(project, 2), "kind", kind)));
+            }
+            for (String source : List.of("HUMAN", "REVIEW_FINDING", "SCG4", "HEALING_FAILED")) {
+                expectOk(soft, "source_kind " + source, tryInsert(db, table, with(scrRow(project, 2), "source_kind", source)));
+            }
+            for (String reasonClass : List.of("EVIDENCE", "AC_VAGUE", "REQ_CHANGE", "INFEASIBLE", "OTHER")) {
+                expectOk(soft, "reason_class " + reasonClass, tryInsert(db, table, with(scrRow(project, 2), "reason_class", reasonClass)));
+            }
+            for (String status : List.of("OPEN", "APPROVED", "REJECTED", "APPLIED", "SUPERSEDED")) {
+                expectOk(soft, "status " + status, tryInsert(db, table, with(scrRow(project, 2), "status", status)));
+            }
+            expectState(soft, "successor_research_id 不存在", tryInsert(db, table,
+                    with(scrRow(project, 2), "successor_research_id", UUID.randomUUID())), FOREIGN_KEY);
+            expectEnum(soft, db.jdbc, table, "kind", "MINOR", "MAJOR");
+            expectEnum(soft, db.jdbc, table, "source_kind", "HUMAN", "REVIEW_FINDING", "SCG4", "HEALING_FAILED");
+            expectEnum(soft, db.jdbc, table, "reason_class", "EVIDENCE", "AC_VAGUE", "REQ_CHANGE", "INFEASIBLE", "OTHER");
+            expectEnum(soft, db.jdbc, table, "status", "OPEN", "APPROVED", "REJECTED", "APPLIED", "SUPERSEDED");
+            Map<String, Object> defaults = db.jdbc.queryForMap("select reason_class, affected_sections::text as sections, "
+                    + "impl_fsm_actions::text as actions, status from console.research_scr where scr_no = 1");
+            soft.assertThat(defaults).as("省略欄位時的預設值").containsEntry("reason_class", "OTHER")
+                    .containsEntry("sections", "{}").containsEntry("actions", "[]").containsEntry("status", "OPEN");
+        });
+    }
+
+    @Test
+    void AT_961_1_6_decompositionsChecks() {
+        Db db = newDatabase();
+        UUID project = v19Project(db);
+        String table = "research_decompositions";
+        UUID base = UUID.randomUUID();
+        insert(db.jdbc, table, with(decompositionRow(project, "C"), "id", base));
+        String upper = "A".repeat(64);
+
+        SoftAssertions.assertSoftly(soft -> {
+            for (String path : List.of("A", "B", "C")) {
+                expectOk(soft, "path " + path, tryInsert(db, table, decompositionRow(project, path)));
+            }
+            expectState(soft, "path 為 D", tryInsert(db, table, decompositionRow(project, "D")), CHECK);
+            for (String column : List.of("tcs_sha256", "prd_sha256")) {
+                expectOk(soft, column + " 64 位小寫十六進位", tryInsert(db, table, with(decompositionRow(project, "A"), column, HEX64)));
+                expectOk(soft, column + " 為 NULL", tryInsert(db, table, with(decompositionRow(project, "A"), column, null)));
+                expectState(soft, column + " 63 位", tryInsert(db, table,
+                        with(decompositionRow(project, "A"), column, "a".repeat(63))), CHECK);
+                expectState(soft, column + " 64 位含大寫", tryInsert(db, table, with(decompositionRow(project, "A"), column, upper)), CHECK);
+            }
+            expectState(soft, "tasks_count 為 -1", tryInsert(db, table, with(decompositionRow(project, "A"), "tasks_count", -1)), CHECK);
+            expectOk(soft, "tasks_count 為 0", tryInsert(db, table, with(decompositionRow(project, "A"), "tasks_count", 0)));
+            for (String status : List.of("DRAFTED", "SCG_PASSED", "FROZEN", "IMPORTED", "SIGNED_OFF", "REJECTED", "STALE")) {
+                expectOk(soft, "status " + status, tryInsert(db, table, with(decompositionRow(project, "A"), "status", status)));
+            }
+            expectState(soft, "status 為 DONE", tryInsert(db, table, with(decompositionRow(project, "A"), "status", "DONE")), CHECK);
+            expectState(soft, "import_record_id 不存在", tryInsert(db, table,
+                    with(decompositionRow(project, "A"), "import_record_id", UUID.randomUUID())), FOREIGN_KEY);
+            expectState(soft, "stage_run_id 不存在", tryInsert(db, table,
+                    with(decompositionRow(project, "A"), "stage_run_id", UUID.randomUUID())), FOREIGN_KEY);
+            expectState(soft, "created_by 為 NULL", tryInsert(db, table, with(decompositionRow(project, "A"), "created_by", null)),
+                    NOT_NULL);
+            expectEnum(soft, db.jdbc, table, "path", "A", "B", "C");
+            expectEnum(soft, db.jdbc, table, "status", "DRAFTED", "SCG_PASSED", "FROZEN", "IMPORTED", "SIGNED_OFF", "REJECTED", "STALE");
+            Map<String, Object> defaults = db.jdbc.queryForMap("select status, tasks_count from console.research_decompositions "
+                    + "where id = ?", base);
+            soft.assertThat(defaults).as("省略 status 與 tasks_count 的預設").containsEntry("status", "DRAFTED").containsEntry("tasks_count", 0);
+        });
+    }
+
+    @Test
+    void AT_961_1_7_deliveriesChecksUniqueAndAppendOnly() {
+        Db db = newDatabase();
+        UUID project = v19Project(db);
+        String table = "research_deliveries";
+        insert(db.jdbc, table, deliveryRow(project, "RELEASE_TAG", "v1.0.0", "CREATED"));
+        String before = snapshot(db.jdbc, table);
+
+        SoftAssertions.assertSoftly(soft -> {
+            for (String kind : List.of("RELEASE_TAG", "PULL_REQUEST", "RELEASE_NOTE")) {
+                expectOk(soft, "kind " + kind, tryInsert(db, table, deliveryRow(project, kind, "r-" + kind, "CREATED")));
+            }
+            // TCS 字面值 RELEASE_NOTES（13 字元）超過 VARCHAR(12) 欄寬：改用恰 12 字元的非法值 RELEASE_TAGS（勘誤候選）
+            expectState(soft, "kind 為 RELEASE_TAGS", tryInsert(db, table, deliveryRow(project, "RELEASE_TAGS", "r", "CREATED")), CHECK);
+            expectState(soft, "kind 為 RELEASE_NOTES（欄寬超界：22001）", tryInsert(db, table, deliveryRow(project, "RELEASE_NOTES", "r", "CREATED")), TOO_LONG);
+            expectOk(soft, "status FAILED", tryInsert(db, table, deliveryRow(project, "PULL_REQUEST", "42", "FAILED")));
+            expectState(soft, "status 為 PENDING", tryInsert(db, table, deliveryRow(project, "PULL_REQUEST", "42", "PENDING")), CHECK);
+            expectOk(soft, "commit_sha 40 位小寫十六進位", tryInsert(db, table,
+                    with(deliveryRow(project, "RELEASE_TAG", "v2", "CREATED"), "commit_sha", "a".repeat(40))));
+            expectState(soft, "commit_sha 39 位", tryInsert(db, table,
+                    with(deliveryRow(project, "RELEASE_TAG", "v2", "CREATED"), "commit_sha", "a".repeat(39))), CHECK);
+            expectState(soft, "commit_sha 含大寫", tryInsert(db, table,
+                    with(deliveryRow(project, "RELEASE_TAG", "v2", "CREATED"), "commit_sha", "A".repeat(40))), CHECK);
+            expectState(soft, "同 (research_id, kind, ref) 兩次", tryInsert(db, table,
+                    deliveryRow(project, "RELEASE_TAG", "v1.0.0", "FAILED")), UNIQUE);
+            expectOk(soft, "同 ref 不同 kind", tryInsert(db, table, deliveryRow(project, "PULL_REQUEST", "v1.0.0", "CREATED")));
+            expectState(soft, "rtm_run_id 不存在", tryInsert(db, table,
+                    with(deliveryRow(project, "RELEASE_TAG", "v3", "CREATED"), "rtm_run_id", UUID.randomUUID())), FOREIGN_KEY);
+            expectEnum(soft, db.jdbc, table, "kind", "RELEASE_TAG", "PULL_REQUEST", "RELEASE_NOTE");
+            expectEnum(soft, db.jdbc, table, "status", "CREATED", "FAILED");
+
+            for (String column : List.of("ref", "status", "detail", "url", "created_by", "commit_sha")) {
+                String set = switch (column) {
+                    case "status" -> "status = 'FAILED'";
+                    case "commit_sha" -> "commit_sha = '" + "b".repeat(40) + "'";
+                    default -> column + " = 'changed'";
+                };
+                expectGuard(soft, "UPDATE " + column, run(db, jdbc -> jdbc.update("update console." + table + " set " + set)),
+                        table, "append-only");
+            }
+            expectGuard(soft, "同值 UPDATE 也被拒", run(db, jdbc -> jdbc.update("update console." + table + " set ref = ref")),
+                    table, "append-only");
+            expectGuard(soft, "DELETE", run(db, jdbc -> jdbc.update("delete from console." + table)), table, "append-only");
+            soft.assertThat(snapshot(db.jdbc, table)).as("被拒之後列內容不變").isEqualTo(before);
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from pg_trigger t join pg_proc p on p.oid = t.tgfoid where t.tgrelid = "
+                    + "'console.research_deliveries'::regclass and not t.tgisinternal and p.proname = 'research_controlled_update_guard'",
+                    Integer.class)).as("research_deliveries 不在受控清單").isZero();
+        });
+    }
+
+    @Test
+    void AT_961_1_8_v19ControlledTablesGuardAllowedColumnsAgainstTheV16Function() {
+        Db db = newDatabase();
+        UUID consoleProject = UUID.randomUUID();
+        db.jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria) values (?,?,?,?)",
+                consoleProject, "console-p", "/x", "c");
+        UUID importRecord = UUID.randomUUID();
+        db.jdbc.update("insert into console.import_records (id, source_type, source_content) values (?, 'MARKDOWN', 'x')", importRecord);
+        UUID project = v19Project(db);
+        UUID successor = v19Project(db);
+        UUID route = v19Route(db, project, "PENDING");
+        insert(db.jdbc, "research_route_steps", routeStepRow(route, 1, "VALIDATE_TARGET", "RUNNING"));
+        UUID scr = UUID.randomUUID();
+        insert(db.jdbc, "research_scr", with(scrRow(project, 1), "id", scr));
+        UUID decomposition = UUID.randomUUID();
+        insert(db.jdbc, "research_decompositions", with(decompositionRow(project, "C"), "id", decomposition));
+
+        String functionDefinition = db.jdbc.queryForObject("select pg_get_functiondef('console.research_controlled_update_guard'::regproc)",
+                String.class);
+        Map<String, List<String>> allowedByFunction = new LinkedHashMap<>();
+        Matcher entry = Pattern.compile("WHEN '(\\w+)' THEN ARRAY\\[(.*?)\\]", Pattern.DOTALL).matcher(functionDefinition);
+        while (entry.find()) {
+            List<String> columns = new ArrayList<>();
+            Matcher quoted = QUOTED.matcher(entry.group(2));
+            while (quoted.find()) {
+                columns.add(quoted.group(1));
+            }
+            allowedByFunction.put(entry.group(1), columns);
+        }
+
+        // 欄位 → SET 片段（TCS AT-961-1-8 逐表逐欄；本 AT 自備列定位，不使用 P0 的 rowIds 與 CONTROLLED_UPDATE_COLUMNS）
+        Map<String, Map<String, String>> allowedSets = new LinkedHashMap<>();
+        allowedSets.put("research_route_decisions", ordered(
+                "status", "status = 'RUNNING'", "failure_step", "failure_step = 'GIT_SWITCH'", "finished_at", "finished_at = now()",
+                "repo_url", "repo_url = 'https://example.org/r.git'", "published_docs", "published_docs = '{\"docs/a.md\":\"x\"}'::jsonb",
+                "console_project_id", "console_project_id = '" + consoleProject + "'", "impl_fsm_project", "impl_fsm_project = 'agentconsole-demo'",
+                "impl_state_dir", "impl_state_dir = '/s/build/reports/fsm'"));
+        allowedSets.put("research_route_steps", ordered(
+                "status", "status = 'OK'", "exit_code", "exit_code = 0", "stdout_tail", "stdout_tail = 'o'", "stderr_tail", "stderr_tail = 'e'",
+                "finished_at", "finished_at = now()"));
+        allowedSets.put("research_scr", ordered(
+                "status", "status = 'APPROVED'", "prd_to_version_no", "prd_to_version_no = 2",
+                "successor_research_id", "successor_research_id = '" + successor + "'", "impl_fsm_actions", "impl_fsm_actions = '[\"show\"]'::jsonb",
+                "decided_by", "decided_by = 'admin'", "decided_at", "decided_at = now()"));
+        allowedSets.put("research_decompositions", ordered(
+                "status", "status = 'SCG_PASSED'", "draft_id", "draft_id = 'd-1'", "import_record_id", "import_record_id = '" + importRecord + "'",
+                "tcs_rel_path", "tcs_rel_path = '03_execution/TCS-x.md'", "tcs_sha256", "tcs_sha256 = '" + HEX64 + "'", "tasks_count", "tasks_count = 3",
+                "gate_rejection", "gate_rejection = 'cycle'"));
+        Map<String, Map<String, String>> disallowedSets = new LinkedHashMap<>();
+        disallowedSets.put("research_route_decisions", ordered("track", "track = 'B'", "target_path", "target_path = '/other'",
+                "scope_differs_reason", "scope_differs_reason = 'x'", "decided_by", "decided_by = 'someone'"));
+        disallowedSets.put("research_route_steps", ordered("step", "step = 'GIT_INIT'", "argv_redacted", "argv_redacted = 'x'"));
+        disallowedSets.put("research_scr", ordered("reason", "reason = 'new'", "kind", "kind = 'MAJOR'", "requested_by", "requested_by = 'someone'"));
+        disallowedSets.put("research_decompositions", ordered("prd_sha256", "prd_sha256 = '" + "b".repeat(64) + "'", "path", "path = 'B'",
+                "created_by", "created_by = 'someone'"));
+        Map<String, String> where = Map.of(
+                "research_route_decisions", "id = '" + route + "'",
+                "research_route_steps", "route_id = '" + route + "' and step_no = 1",
+                "research_scr", "id = '" + scr + "'",
+                "research_decompositions", "id = '" + decomposition + "'");
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(V19_CONTROLLED_TABLES).as("V19_CONTROLLED_TABLES 恰四表").hasSize(4);
+            List<String> v19InFunction = new ArrayList<>(allowedByFunction.keySet());
+            v19InFunction.removeAll(CONTROLLED_TABLES);
+            soft.assertThat(v19InFunction).as("V16 守衛函式的 V19 條目逐表等於 V19_CONTROLLED_TABLES")
+                    .containsExactlyInAnyOrderElementsOf(V19_CONTROLLED_TABLES);
+            soft.assertThat(db.jdbc.queryForList("select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
+                    + "join pg_proc p on p.oid = t.tgfoid join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'console' "
+                    + "and p.proname = 'research_controlled_update_guard' and c.relname in ('research_route_decisions', "
+                    + "'research_route_steps', 'research_scr', 'research_decompositions') and not t.tgisinternal", String.class))
+                    .as("四張 V19 受控表皆掛通用守衛").containsExactlyInAnyOrderElementsOf(V19_CONTROLLED_TABLES);
+            for (String table : V19_CONTROLLED_TABLES) {
+                soft.assertThat(allowedSets.get(table).keySet()).as("%s 測試取用的允許欄＝V16 函式內的字面清單", table)
+                        .containsExactlyElementsOf(allowedByFunction.get(table));
+                String locator = where.get(table);
+                String before = snapshot(db.jdbc, table);
+                allowedSets.get(table).forEach((column, set) -> {
+                    Outcome outcome = rolledBack(db, jdbc -> {
+                        jdbc.update("update console." + table + " set " + set + " where " + locator);
+                        return snapshot(jdbc, table);
+                    });
+                    expectOk(soft, table + " 允許欄 " + column, outcome);
+                    if (outcome.ok()) {
+                        soft.assertThat(outcome.value()).as("%s 更新 %s 之後列確實改變", table, column).isNotEqualTo(before);
+                    }
+                });
+                String companion = allowedSets.get(table).values().iterator().next();
+                disallowedSets.get(table).forEach((column, set) -> {
+                    Outcome alone = run(db, jdbc -> jdbc.update("update console." + table + " set " + set + " where " + locator));
+                    expectGuard(soft, table + " 非允許欄 " + column, alone, table);
+                    for (String allowedColumn : allowedByFunction.get(table)) {
+                        expectMessage(soft, table + " 非允許欄 " + column, alone, allowedColumn);
+                    }
+                    expectGuard(soft, table + " 允許欄夾帶非允許欄 " + column, run(db, jdbc -> jdbc.update("update console." + table
+                            + " set " + companion + ", " + set + " where " + locator)), table);
+                });
+                expectGuard(soft, table + " DELETE", run(db, jdbc -> jdbc.update("delete from console." + table + " where " + locator)), table);
+                soft.assertThat(snapshot(db.jdbc, table)).as("%s 全程列不變（被拒的語句沒有留下任何效果）", table).isEqualTo(before);
+            }
+            soft.assertThat(allowedByFunction).as("research_deliveries 不在受控清單").doesNotContainKey("research_deliveries");
+        });
+    }
+
+    @Test
+    void AT_961_1_9_healingViewShowsOnlyRetryingAndFailedStepsOfBoundProjects() {
+        Db db = newDatabase();
+        UUID consoleProject = UUID.randomUUID();
+        db.jdbc.update("insert into console.projects (id, name, execution_path, pass_criteria) values (?,?,?,?)",
+                consoleProject, "console-p", "/x", "c");
+        UUID goal = UUID.randomUUID();
+        db.jdbc.update("insert into console.goals (id, project_id, name, pass_criteria) values (?,?,?,?)", goal, consoleProject, "g", "c");
+        UUID task = UUID.randomUUID();
+        db.jdbc.update("insert into console.tasks (id, goal_id, name, pass_criteria) values (?,?,?,?)", task, goal, "t", "c");
+        UUID run = UUID.randomUUID();
+        db.jdbc.update("insert into console.execution_runs (id, project_id, run_number, autonomy_level, scope) values (?,?,7,1,'{}'::jsonb)",
+                run, consoleProject);
+        int stepNumber = 1;
+        for (String status : List.of("SUCCESS", "RETRYING", "FAILED", "PENDING")) {
+            db.jdbc.update("insert into console.execution_steps (run_id, task_id, step_number, action, status, tokens_used, error_message) "
+                    + "values (?,?,?,?,?,?,?)", run, task, stepNumber, "action-" + status, status, 10L * stepNumber, "err-" + status);
+            stepNumber++;
+        }
+        UUID bound = UUID.randomUUID();
+        insert(db.jdbc, "research_projects", with(projectRow(bound, "bound"), "console_project_id", consoleProject));
+        UUID unbound = project(db, "unbound");
+
+        List<String> columns = db.jdbc.queryForList("select column_name from information_schema.columns where table_schema = 'console' "
+                + "and table_name = 'v_research_healing_attempts' order by ordinal_position", String.class);
+        List<Map<String, Object>> rows = db.jdbc.queryForList("select research_id, run_id, run_number, step_number, status, action, "
+                + "error_message, tokens_used from console." + V19_VIEW + " order by step_number");
+        Outcome insertView = run(db, jdbc -> jdbc.update("insert into console." + V19_VIEW + " (research_id) values (gen_random_uuid())"));
+        Outcome updateView = run(db, jdbc -> jdbc.update("update console." + V19_VIEW + " set status = 'FAILED'"));
+        Outcome deleteView = run(db, jdbc -> jdbc.update("delete from console." + V19_VIEW));
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(columns).as("視圖欄位恰為十個").containsExactly("research_id", "run_id", "run_number", "task_id",
+                    "step_number", "action", "status", "error_message", "tokens_used", "occurred_at");
+            soft.assertThat(rows).as("只回 RETRYING 與 FAILED 兩筆").extracting(r -> r.get("status")).containsExactly("RETRYING", "FAILED");
+            soft.assertThat(rows).extracting(r -> r.get("research_id")).as("research_id 為經 console_project_id 綁定的研究專案")
+                    .containsOnly(bound);
+            soft.assertThat(rows).extracting(r -> r.get("run_id")).containsOnly(run);
+            soft.assertThat(rows).extracting(r -> r.get("run_number")).containsOnly(7);
+            soft.assertThat(rows).extracting(r -> r.get("error_message")).containsExactly("err-RETRYING", "err-FAILED");
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console." + V19_VIEW + " where research_id = ?", Integer.class,
+                    unbound)).as("未綁定 Console 專案的研究專案零列").isZero();
+            expectState(soft, "對視圖 INSERT", insertView, "55000");
+            expectState(soft, "對視圖 UPDATE", updateView, "55000");
+            expectState(soft, "對視圖 DELETE", deleteView, "55000");
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from pg_trigger where tgrelid = 'console.v_research_healing_attempts'::regclass "
+                    + "and not tgisinternal", Integer.class)).as("視圖上零觸發器（沒有 INSTEAD OF）").isZero();
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from pg_rules where schemaname = 'console' "
+                    + "and tablename = 'v_research_healing_attempts'", Integer.class)).as("視圖上零使用者規則").isZero();
+            soft.assertThat(db.jdbc.queryForObject("select count(*) from console.execution_steps", Integer.class)).as("視圖沒有動到底表")
+                    .isEqualTo(4);
+        });
+    }
+
+    @Test
+    void AT_961_1_E_1_everyResearchTableRejectsDeleteWithAClassTwentyThreeError() {
+        Db db = newDatabase();
+        Chain chain = chain(db);
+        UUID source = UUID.randomUUID();
+        insert(db.jdbc, "research_sources", sourceRow(source, chain.project(), "S-001", "https://example.org/s1"));
+        insert(db.jdbc, "research_events", eventRow(chain.project(), 1));
+        insert(db.jdbc, "research_artifacts", artifactRow(chain.project(), "ISSUE_SCOPE", 1));
+        insert(db.jdbc, "research_fetches", fetchRow(chain.project(), "F-0001"));
+        insert(db.jdbc, "research_evidence_items", evidenceRow(chain.project(), source, 1, "E-001"));
+        insert(db.jdbc, "research_review_scores", scoreRow(chain.round(), "ARCHITECTURE"));
+        insert(db.jdbc, "research_gate_decisions", decisionRow(chain.project(), "GATE0", "CHANGES"));
+        insert(db.jdbc, "research_review_defects", defectRow(UUID.randomUUID(), chain.round(), "D-1-001"));
+        insert(db.jdbc, "research_allowlist_entries", allowlistRow("export.arxiv.org"));
+        UUID route = v19Route(db, chain.project(), "PENDING");
+        insert(db.jdbc, "research_route_steps", routeStepRow(route, 1, "VALIDATE_TARGET", "OK"));
+        insert(db.jdbc, "research_scr", scrRow(chain.project(), 1));
+        insert(db.jdbc, "research_decompositions", decompositionRow(chain.project(), "A"));
+        insert(db.jdbc, "research_deliveries", deliveryRow(chain.project(), "RELEASE_TAG", "v1", "CREATED"));
+
+        List<String> tables = db.jdbc.queryForList("select table_name from information_schema.tables where table_schema = 'console' "
+                + "and table_type = 'BASE TABLE' and table_name like 'research\\_%' order by 1", String.class);
+        List<String> unguarded = db.jdbc.queryForList("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+                + "where n.nspname = 'console' and c.relkind = 'r' and c.relname like 'research\\_%' and not exists (select 1 from pg_trigger t "
+                + "join pg_proc p on p.oid = t.tgfoid where t.tgrelid = c.oid and not t.tgisinternal and p.proname in "
+                + "('research_append_only_guard', 'research_controlled_update_guard') and (t.tgtype & 8) <> 0) order by 1", String.class);
+
+        SoftAssertions.assertSoftly(soft -> {
+            List<String> expectedTables = new ArrayList<>(RESEARCH_TABLES);
+            expectedTables.addAll(V19_TABLES);
+            soft.assertThat(tables).as("表清單取 information_schema：恰十八張（P0 十三加 V19 五）").hasSize(18)
+                    .containsExactlyInAnyOrderElementsOf(expectedTables);
+            soft.assertThat(unguarded).as("表清單減去「掛有涵蓋 DELETE 的守衛」之表為空（新增第十九張而未掛守衛即紅）").isEmpty();
+            for (String table : tables) {
+                int before = db.jdbc.queryForObject("select count(*) from console." + table, Integer.class);
+                soft.assertThat(before).as("%s 至少一列", table).isGreaterThanOrEqualTo(1);
+                Outcome delete = run(db, jdbc -> jdbc.update("delete from console." + table));
+                soft.assertThat(delete.sqlState()).as("%s DELETE 的 SQLSTATE 類別為 23：%s", table, delete).isNotNull().startsWith("23");
+                expectMessage(soft, table + " DELETE", delete, table);
+                soft.assertThat(db.jdbc.queryForObject("select count(*) from console." + table, Integer.class))
+                        .as("%s 刪除前後列數相同", table).isEqualTo(before);
+            }
+        });
+    }
+
+    @Test
+    void AT_961_1_E_3_v19JsonbColumnsHaveObjectAndArrayDefaults() {
+        Db db = newDatabase();
+        UUID project = v19Project(db);
+        UUID route = UUID.randomUUID();
+        UUID scr = UUID.randomUUID();
+        insert(db.jdbc, "research_route_decisions", with(routeRow(project, "A"), "id", route));
+        insert(db.jdbc, "research_scr", with(scrRow(project, 1), "id", scr));
+        Map<String, Object> published = columnsOf(db.jdbc, "research_route_decisions").get("published_docs");
+        Map<String, Object> actions = columnsOf(db.jdbc, "research_scr").get("impl_fsm_actions");
+
+        SoftAssertions.assertSoftly(soft -> {
+            soft.assertThat(published).containsEntry("data_type", "jsonb").containsEntry("column_default", "'{}'::jsonb")
+                    .containsEntry("is_nullable", "NO");
+            soft.assertThat(actions).containsEntry("data_type", "jsonb").containsEntry("column_default", "'[]'::jsonb")
+                    .containsEntry("is_nullable", "NO");
+            soft.assertThat(db.jdbc.queryForObject("select published_docs::text from console.research_route_decisions where id = ?",
+                    String.class, route)).as("省略時讀回 {}").isEqualTo("{}");
+            soft.assertThat(db.jdbc.queryForObject("select impl_fsm_actions::text from console.research_scr where id = ?",
+                    String.class, scr)).as("省略時讀回 []").isEqualTo("[]");
+            // DDL 不擋非陣列 JSON：形狀由 Bridge 寫入器保證（Architecture K.4 未要求此 CHECK；TCS ⚖P1-9），此處以註記斷言固定現況
+            expectOk(soft, "impl_fsm_actions 寫入非陣列 JSON：DDL 不擋、應用層擋", rolledBack(db, jdbc -> jdbc.update(
+                    "update console.research_scr set impl_fsm_actions = '{\"a\":1}'::jsonb where id = ?", scr)));
         });
     }
 }
