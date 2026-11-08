@@ -1243,3 +1243,10 @@ $snap = Get-Content -LiteralPath <snap 檔> -Encoding utf8; $o = git -C <repo> s
 | 1-34 | §3.2 AT-BK-01-3-E-1 | mobile 為 true 項數恰 6、id 依序前六項 | 已交付列中 mobile 為 true 恰前六項（依序）、整表 ≤6、sysadmin 為 false | 同 1-32 |
 | 1-35 | §3.2 AT-BK-01-3-1（`components/layout/ToolsRegion.test.tsx`） | 九個連結、hidden 恰三項、shown 恰六項（寫死） | 連結數＝VIEWER 可見項數；hidden＝可見項中 mobile 為 false 者且含已交付三項；shown＝mobile 為 true 者＝已交付六項（顯示序）；系統管理 href 與「ToolsRegion.tsx 不含系統管理字樣」不變 | 同 1-32 |
 | 1-36 | R-BK-01（:168）、§3.2 AT-BK-01-1-1／AT-BK-01-1-2／AT-BK-01-1-E-1／AT-BK-01-3-1、§5.7 同步鎖列、勘誤 1-32「order 60<65<70 不變」與 1-35「shown＝已交付六項」 | sysadmin order 65；顯示序 settings 60 < sysadmin 65 < self-improving 70（系統設定之後、自我進化之前）；mobile 為 true 恰前六項 | 2026-11-01 導覽整併（Console PRD §0.7；鍵 `agentconsole-nav-consolidation`，`TCS-ConsoleNavConsolidation-20261101`）：sysadmin order 75、settings order 80 ⇒ self-improving 70 < sysadmin 75 < settings 80（自我進化之後、系統設定之前）；`import` 列 `enabled: false` 不渲染（mobile 為 true 的可見項 5、整表 ≤6）；sysadmin 其餘欄（label、href、icon `Database`、mobile false）與索引 8 不變；AT 標題與 id 不變，快照 `navDelivered.ts` 同步 | 掌舵者 2026-11-01 指令（互動選項裁決）；本鍵 refreeze |
+
+### 勘誤二（2026-11-09；鍵 `agentconsole-console-ux-sort-help` 的 RELEASE_READY 批次；來源 `TCS-ConsoleUxSortHelp-20261108.md` §6 BK-1；主控於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 2-1 | AT-BK-02-1-2（:596）Then 末句 | 「列序與 API 回應序完全相同（前端不另排序）」 | 「**預設時**列序與 API 回應序完全相同（前端不另排序；使用者按表頭後才改變畫面順序，且可按『還原預設排序』回到回應序）」 | 本鍵 §6 BK-1；備份清單表頭改為可點排序（AT-963-3-9），`BackupList.tsx` 檔頭「不另排序」註解已同步改為預設時 |
+| 2-2 | R-BK-04（:176）、`backups` 欄位列（:328）、AC-BK-02-1（:403）的「新到舊」 | 清單依 `finishedAt` 新到舊 | 加註「此為 API 回應序與畫面預設序；API 序不變，畫面在使用者按表頭後暫離，『還原預設排序』回到此序」；條文本身不改 | 同 2-1 |

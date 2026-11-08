@@ -313,3 +313,9 @@ export type CommonHelp = Pick<PageHelp, "fields" | "states" | "sourceFiles">;   
 | 條 | PRD 座標 | 原文 | 改文 | 理由 |
 |---|---|---|---|---|
 | 2-1 | AC-PH-06-4 | 首屏增量 ≤100,000 B | 補「量測口徑＝`route-bundle-stats` 的 `firstLoadUncompressedJsBytes`，不含 `next/dynamic` 的非同步 chunk（說明本體單一 chunk 約 102,777 B，頁面載入後即預取；要零成本須改成按下才 `import()`，另案）」 | 一審 F-08 |
+
+### 勘誤三（2026-11-09；鍵 `agentconsole-console-ux-sort-help` 的 RELEASE_READY 批次；來源 `TCS-ConsoleUxSortHelp-20261108.md` §6 PH-2；主控於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | PRD 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 3-1 | AC-PH-03-5（:93）的「`steps` 2～8 步」與對話框描述（:142）的「編號步驟，2～8 步」 | 「2～8 步」 | 「2～10 步」（同 `TCS-PageHelp-20261027.md` 勘誤二 2-1：鍵 `agentconsole-console-ux-sort-help` 起放寬，使專案管理與研發工作流能寫完整導覽；更嚴的 5～10 步與其他可讀性規則由 `readability.ts` 另守，`lint.ts` 規則不變） | 本鍵 D-UX-21；PRD 與 TCS 的界線數字須一致 |

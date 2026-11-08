@@ -20,6 +20,7 @@
 | v1.5 | 2026-10-17 | 整合輪 115：SDD 迴圈（批次治理、人工閘寫入、FSM 同步、追溯覆蓋、專案綁定） | D-115-01～13（§6.8；`AutoSDD_improving_115.md` §6） |
 | v1.5（ADR 對齊） | 2026-10-17 | v1.5 與 ADR-XPLAT-016 對齊：Console 專案為錨（凍結請求無 `binding`）、委派退出語意與回收點、AT 文法與逆向 RTM 歸屬、摘要／權杖／CLI rc／專案名規則等值落定；D-115-18：SDD run 的 `:resume`／`/restore` 也帶權杖（共四個呼叫）、含 `/` 的專案原名降級為已知邊界 | D-115-14～16、18；ADR-XPLAT-016 附錄 A、B（§6.8.6） |
 | v1.5（勘誤） | 2026-10-19 | SDD `spec-refreeze` 之後 `:freeze` 省略 `stage` 的預設階段名 `Stage-<n>`：`n` 不含 `kind` 為 `refreeze` 的重記條目（§1.10.2、§3.1.4 (d) 兩處與 openapi `SddFreezeRequest.stage` 描述；端點、schema、狀態碼不變） | OBS-SI-108／F-17 |
+| v1.5（勘誤） | 2026-11-09 | 專案列表（Phase 2 既有 `GET /api/v1/projects`）與匯入歷史 `GET /import` 的 `sort` 白名單擴充：專案加 `autonomyLevel`、匯入加 `sourceFileName`／`aiModel`／`tokenUsed`／`projectId`；兩端點預設值不變（專案 `updatedAt,desc`、匯入 `createdAt,desc`），非法欄位 400 訊息列出完整新白名單；可為空的欄位升降冪皆排最後、id 升冪 tie-break 不變（§1 匯入歷史、§1.6.2 軟刪除段與 openapi 對應 `sort` 參數描述同改；端點、schema、狀態碼不變） | 鍵 `agentconsole-console-ux-sort-help`；`TCS-ConsoleUxSortHelp-20261108.md` §6 API-1 |
 
 > **v1.5 變更摘要**（逐條對照見 §6.8；整合輪 115，主控裁決 D-115-01～16、18，契約先行；證據表見 §6.8.2；**已與 ADR-XPLAT-016〔下稱 ADR-016，Proposed〕對齊**，逐項處置與仍待確認的靜默處見 §6.8.6；環境契約、CLI 動詞與 rc、摘要、權杖與最小侵入白名單的完整規格一律以 ADR-016 為唯一真相源，本文只引用位置，並在需要機械斷言處逐字引用其值）：
 > 1. **SDD 批次（G-01、G-06、G-08；D-115-06）**：Bridge `POST /autoclaude/runs` 增選填頂層 `sdd` 區塊——Bridge 伺服端預檢（凍結、三點摘要、FSM 狀態）後注入 `workflow_type`／`workflow_path`（有 `spec_file` 時是檔案路徑）與引擎環境 `SDD_PROJECT`，外部契約仍不開 `workflow_*`；Console 對「範圍內任務全為 SDD 來源」的批次送 `sdd`，step_id 沿用規格的 `sdd-<場景>-<at id 小寫>`，混合批次不啟用並在 execute 的 201 以 `warnings[]` 出聲（§1.10.6、§3.1.6、§3.4.1）。
@@ -650,7 +651,7 @@ UPLOADED ──parse──▶ PARSING ──成功──▶ PARSED ──PUT res
 
 #### 1.1.8 `GET /api/v1/import`　查詢匯入歷史　〔API-IMP-06／US-I-06〕
 
-- **角色**：VIEWER。查詢參數：`page,size`、`status`（`ImportStatus`）、`q`（來源檔名模糊搜尋，不分大小寫，`%`／`_` 視為字面）、`sort`（`createdAt|status`，預設 `createdAt,desc`）。
+- **角色**：VIEWER。查詢參數：`page,size`、`status`（`ImportStatus`）、`q`（來源檔名模糊搜尋，不分大小寫，`%`／`_` 視為字面）、`sort`（`createdAt|status|sourceFileName|aiModel|tokenUsed|projectId`，預設 `createdAt,desc`；可為空的欄位升降冪皆排最後、id 升冪 tie-break；非法欄位 400，訊息列出完整白名單）。
 - **成功 200**：`Page<ImportRecordResponse>`（列表不含 `sourceContent`、`parsedResult`）。錯誤：400（未知 status／sort）、401／429。
 
 #### 1.1.9 `GET /api/v1/import/{id}`　查詢詳情（補）　〔API-IMP-06／US-I-03〕
@@ -1130,7 +1131,7 @@ createdAt,severity,rule,subject,message,acknowledged,acknowledgedBy,acknowledged
 
 #### 1.6.2 `GET /api/v1/projects?deleted=true`　列出已軟刪除的專案（v1.2，C-3）
 
-- Phase 2 既有的 `GET /api/v1/projects` 新增查詢參數 `deleted`（布林，預設 `false`）：`true`＝**只列軟刪除的專案**（`is_deleted=true`）；`false`／省略＝只列未軟刪除者（原行為不變）。其餘參數（`page,size,q,status,sort`）照常；`sort` 白名單不變、預設 `updatedAt,desc`——軟刪除當下會更新 `updated_at`，所以「已刪除」清單預設即「最近刪除的在前」。
+- Phase 2 既有的 `GET /api/v1/projects` 新增查詢參數 `deleted`（布林，預設 `false`）：`true`＝**只列軟刪除的專案**（`is_deleted=true`）；`false`／省略＝只列未軟刪除者（原行為不變）。其餘參數（`page,size,q,status,sort`）照常；`sort` 白名單為 `name|status|createdAt|updatedAt|autonomyLevel`（鍵 `agentconsole-console-ux-sort-help` 起加 `autonomyLevel`；欄位名不分大小寫，非法欄位 400，訊息列出完整白名單；任務數與目標數因衍生聚合值仍不開放）、預設 `updatedAt,desc` 不變——軟刪除當下會更新 `updated_at`，所以「已刪除」清單預設即「最近刪除的在前」。
 - **角色**：`deleted=true` 需 OPERATOR 以上，VIEWER → **403** `ACCESS_DENIED`（由 controller 檢查；`deleted=false` 仍是 VIEWER 以上）。`deleted` 不是布林值 → 400（格式同 B1-4）。
 - 列表項 `ProjectSummaryResponse` 新增 **`deletedAt`**（date-time；只有 `deleted=true` 的列表帶值，其餘缺席）。保留期已過（`restore_window_expired`）的專案**仍會列出**（資料還在，清除排程預設又是關的）；前端可在按「復原」得到 409 後提示，是否過期也可由 `deletedAt` 與保留期推算，列表不另帶欄位。
 

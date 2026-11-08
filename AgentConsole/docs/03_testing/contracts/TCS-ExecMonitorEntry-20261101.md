@@ -196,3 +196,4 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ExecMonitorEntry-20261101.md`（17 
 | 7 | AT-953-1-2 判準來源 | `ownPathProblems`「沿 registry.test.ts 的判準」 | 事實登記：`exec-monitor-entry.test.ts` 內是該判準的複本（附 broken 負控證明鑑別力）；日後判準演進時兩處同步，或抽到 `tests/helpers` 一次 export（與 `navDelivered.ts` 衍生常數同型的整併項） | QA 一審 F-05（P4） |
 | 8 | §6.1 | 「17 列：F 1、US 1、AC 5、AT 10」 | 18 列：F 1、US 1、AC 5、AT 11（AT-953-2-4 入列） | 勘誤 4 連動 |
 | 9 | §6.2 V2 | 兩張已追蹤響應式截圖 | `shells-and-layout.spec.ts` 真機跑會重寫 `tests/e2e/__screenshots__/20-responsive-tablet.png`、`21-responsive-mobile.png`；本鍵側欄未變、差異只是動態內容，主控以 `git show HEAD:<path>` 還原、不入庫（UI 真的變了才隨 RELEASE 提交） | V2 實跑事實 |
+| 10 | W-E3（:70）「`steps` 三句」 | 兩個頁檔 `steps` 三句 | 「`steps` 5～10 步」（鍵 `agentconsole-console-ux-sort-help` 起，D-UX-2：說明改寫為導覽文案，步驟數界線由 `lib/help/readability.ts` 與放寬後的 `lint.ts` 共同守）；兩頁 `fields` 三項不變。AT-953-3-1 現查只釘 `helpForPath` 回傳 id 與三道雙向鎖，未釘步數，故 AT 不改 | 本鍵 `TCS-ConsoleUxSortHelp-20261108.md` §6 EM-1；實作 `execute-entry`、`monitor-entry` 兩頁檔已為 5 步以上 |

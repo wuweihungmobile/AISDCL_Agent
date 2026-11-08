@@ -1068,3 +1068,12 @@ function Compare-RouteBundle([string]$before, [string]$after, [int]$limit = 1000
 | 1-17 | D-PH-13（:91）、§3.2 AT-PH-06-3-1／06-3-E-1 | 請求計數只寫新穎性規則 | 加註「詞表請求另以每路由自進路由起的全程計數判（含頁面載入；議題中心恰一、其餘零；VIEWER 每次開啟各一），不套新穎性規則」；反空轉改「clicked＋pending＝HELP_ROUTES 數、clicked＝已寫路由數；E-1 visited＝已寫路由數」 | 一審 F-05：單靠新穎性規則，非 issues 路由載入時預取只在排最後的 /issues 間接現形；二審 P22b 第一條路由即紅、Pskip3s／3e 證明新門檻嚴於 ≥3 |
 | 1-18 | R-PH-18、R-PH-34、AT-PH-05-5-E-1 | 名稱 2 個 code point 免掃 | 明定「全站共通的名詞定義列（如「唯讀」＝VIEWER）可無逐字出處、取兩字名免掃是有意設計；此類列 `source` 寫「系統自動產生」並在 `common.ts` 檔頭寫 WHY；不得用來繞過有畫面字樣的欄位名」 | 二審 e-4／N04：該列的綠完全靠免鎖，需明文以免日後複製此手法繞過出處鎖 |
 | 1-19 | §3.2 AC-PH-06-3（:383） | 載具只列 E2 | 註記「vitest 層無 AT、M22b（非 issues 路由 render 時預取）在 vitest 倖存為設計，由 e2e 的 P22b／P22e 殺」 | 二審 e-3；可選補 AT-PH-01-2-E-1「非 issues 路由 fetch 計數 0」另案 |
+
+### 勘誤二（2026-11-09；鍵 `agentconsole-console-ux-sort-help` 的 RELEASE_READY 批次；來源 `TCS-ConsoleUxSortHelp-20261108.md` §6 PH-1、PH-3 與勘誤 E-3；主控於 RELEASE_READY 以 `spec-refreeze` 記新 digest）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 2-1 | R-PH-06（:161）、AT-PH-03-5-1（:521）的 `steps` 項數界線 | 「`steps` 2～8 項」 | 「`steps` 2～10 項（鍵 `agentconsole-console-ux-sort-help` 起放寬，使專案管理與研發工作流能寫完整導覽；更嚴的 5～10 步與其他規則由 `readability.ts` 另守，`lint.ts` 規則不變）」 | 本鍵 D-UX-21；實作 `lint.ts` 的 `pageShapeProblems` 上界已放寬 |
+| 2-2 | AT-PH-03-5-E-1（:523）的 `steps` 負控 | 「`steps` 9 項」 | 「`steps` 11 項」 | 同 2-1；邊界合規頁的上界隨之為 10 項 |
+| 2-3 | AT_PH_03_5_1、AT_PH_03_5_E_1 的測試標題內界線數字 | 標題含「2～8 步」「9 項」「8 項內」 | AT id 不變；標題內界線數字隨 2-1、2-2 同步改為「2～10 步」「11 項」「10 項內」 | 本鍵勘誤 E-3（與 AT-963-8-1 的「標題字面沿 TCS、id 為判定鍵」口徑一致） |
+| 2-4 | D-PH-11（:89）`STATE_HELP` 每張表鍵順序＝顯示列序；R-PH-11（:171）詞表群順序 | 鍵序＝顯示列序、詞表群順序固定 | **不改**；加註「本鍵改寫說明文案但不動鍵序與詞表群序；說明對話框內的表不加排序（排除項）」，使鎖與排序的界線可追溯 | 本鍵 §6 PH-3 |

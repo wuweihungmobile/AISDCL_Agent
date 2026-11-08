@@ -116,7 +116,7 @@ paths:
         - name: sort
           in: query
           required: false
-          description: 欄位[,asc|desc]；欄位限 createdAt／status；預設 createdAt,desc
+          description: 欄位[,asc|desc]；欄位限 createdAt／status／sourceFileName／aiModel／tokenUsed／projectId（可為空的欄位升降冪皆排最後，id 升冪 tie-break）；預設 createdAt,desc
           schema:
             type: string
             default: createdAt,desc
@@ -1902,7 +1902,7 @@ paths:
         `deleted=true`＝**只列軟刪除的專案**（OPERATOR 以上；VIEWER → 403 `ACCESS_DENIED`，由 controller 檢查）；
         `false`／省略＝只列未軟刪除者（原行為不變）。`deleted=true` 的列表項帶 `deletedAt`（其餘缺席）。
         保留期已過（復原會得到 `restore_window_expired`）的專案仍會列出：資料還在，清除排程預設又是關的。
-        `sort` 白名單不變（name／status／createdAt／updatedAt），預設 `updatedAt,desc`——軟刪除當下會更新 `updated_at`，
+        `sort` 白名單為 name／status／createdAt／updatedAt／autonomyLevel（autonomyLevel 為鍵 agentconsole-console-ux-sort-help 新增），預設 `updatedAt,desc` 不變——軟刪除當下會更新 `updated_at`，
         所以「已刪除」清單預設即「最近刪除的在前」。`deleted` 不是布林值 → 400（Markdown 契約 §1.6.2）。
       x-required-role: VIEWER
       x-required-role-when: 'deleted=true 時需 OPERATOR 以上'
@@ -1925,7 +1925,7 @@ paths:
         - name: sort
           in: query
           required: false
-          description: 欄位[,asc|desc]；欄位限 name／status／createdAt／updatedAt；預設 updatedAt,desc
+          description: 欄位[,asc|desc]；欄位限 name／status／createdAt／updatedAt／autonomyLevel；預設 updatedAt,desc
           schema:
             type: string
             default: updatedAt,desc

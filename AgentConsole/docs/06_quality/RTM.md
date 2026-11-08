@@ -500,6 +500,9 @@
 ## 2.12 研究議題轉規格書 P2 內環與交付（ResearchToPRD；看板、自癒監視器、終端窗格、決策彈窗、SCR UI、交付歸檔、V21）的 TCS 本地 ID 追溯（ResearchToPRD_PRD.md；不計入 §2 總列數）
 > 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P2-20261107.md](RTM-ResearchToPRD-P2-20261107.md)（F 1、US 3、AC 30、AT 313，共 347 列〔RELEASE_READY 勘誤批次補列 AT-962-1b-1～1b-4〕；鍵 `agentconsole-research-to-prd-p2`；TCS 經 QA 覆蓋審三審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P2-20261107.md](SCG0-REVIEW-ResearchToPRD-P2-20261107.md)；回填義務不變：每完成一項需求即回填四格）。2026-11-08 起四格已依 [SCG-4 一審／二審報告](SCG4-REVIEW-ResearchToPRD-P2-20261108.md)（二審 PASS）與 [INT 證據](INT-ResearchToPRD-P2-20261108.md) 回填；2026-11-08 RELEASE_READY 勘誤批次後第二次回填：✅ 342／🟡 5／⬜ 0（AT 列 ✅ 311／🟡 2／⬜ 0；28-3、28-4、28-5 已於第二套拋棄式棧實跑並經主控重建棧親驗；30-2 勘誤批次已執行；非 ✅ 只剩 AT-962-30-4、30-5 及其所屬 AC-962-30、US-928、F-908＝V-S1／V-D7／V-H5／V-H6 與 PRD §8.1 (i) 掌舵者真機項）。
 
+## 2.13 Console 資料列表排序與每頁說明文案改寫（識別欄預設序、表頭可點排序、排序控制列、後端 sort 白名單、國高中程度說明文案與可讀性鎖）的 TCS 本地 ID 追溯（Console PRD §0.10；不計入 §2 總列數）
+> 本子表 2026-11-09 依 DEF-200-576 體例自始立於 [RTM-ConsoleUxSortHelp-20261108.md](RTM-ConsoleUxSortHelp-20261108.md)（F 1、US 1、AC 9、AT 56，共 67 列；鍵 `agentconsole-console-ux-sort-help`；規格經 QA 鏡 SCG-0～3 審查一審 FAIL→二審 PASS，見 [SCG0-REVIEW-ConsoleUxSortHelp-20261108.md](SCG0-REVIEW-ConsoleUxSortHelp-20261108.md)；實作經 [SCG-4 一審／二審報告](SCG4-REVIEW-ConsoleUxSortHelp-20261109.md)（二審 PASS）回填四格；AT 列 ✅ 56／🟡 0／⬜ 0；V1 真機與掌舵者目視項待 RELEASE 後映像重建；回填義務不變：每完成一項需求即回填四格）。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）
