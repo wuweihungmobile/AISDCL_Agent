@@ -1,0 +1,59 @@
+{
+  "schema_rev": 1,
+  "prop": "PROP-SI-007",
+  "rev": 1,
+  "k": 1,
+  "base": "d8f688758eca5dfdb685b41d37f4d26a305d3622",
+  "heldout_digest": "sha256:d35ad96eb9b9514525aec2369b6cda663e6a142386d2fa502eaf0c2f42009a55",
+  "carrier": {},
+  "steps": {
+    "baseline": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_memory_index_cap.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:c23bdd4f95730ce7b8356cd5e6be76662c354f8e49162f9542e22d68fad10966",
+        "out_bytes": 63,
+        "n_pop": 1,
+        "tail": "bytes=23226 cap=23040 lines=85 max_lines=200\r\nsymptom=present\r\n"
+      }
+    ],
+    "patched": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_memory_index_cap.py",
+          "{sandbox}"
+        ],
+        "rc": 0,
+        "timed_out": false,
+        "out_sha256": "sha256:ba4764c64ee6523dcbe5dc349b4ae144e6ca1a4657d7b2d21646405cedee2439",
+        "out_bytes": 62,
+        "n_pop": 1,
+        "tail": "bytes=15026 cap=23040 lines=74 max_lines=200\r\nsymptom=absent\r\n"
+      }
+    ],
+    "mutated": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_memory_index_cap.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:c23bdd4f95730ce7b8356cd5e6be76662c354f8e49162f9542e22d68fad10966",
+        "out_bytes": 63,
+        "n_pop": 1,
+        "tail": "bytes=23226 cap=23040 lines=85 max_lines=200\r\nsymptom=present\r\n"
+      }
+    ]
+  }
+}
