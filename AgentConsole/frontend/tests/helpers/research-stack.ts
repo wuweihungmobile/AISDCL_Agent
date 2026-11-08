@@ -40,7 +40,7 @@ export async function tokensOf(request: APIRequestContext, c: Creds): Promise<To
  * 呼叫 REST（任何狀態碼都回傳，由呼叫端斷言）。限流是固定視窗：每個使用者每 60 秒 100 次，UI 與 REST 共用同一個桶（總覽頁一次載入就約 30 次）；
  * 撞到 429 就等視窗過去再試（最多四次）——否則流程中途的 429 會被誤判成功能缺陷（第一次實跑的 22-5 就是這樣在載入工作區時撞牆）。
  */
-export async function call(request: APIRequestContext, c: Creds, method: "GET" | "POST" | "PUT" | "PATCH", apiPath: string, body?: unknown): Promise<Reply> {
+export async function call(request: APIRequestContext, c: Creds, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", apiPath: string, body?: unknown): Promise<Reply> {
   for (let attempt = 0; ; attempt += 1) {
     const { accessToken } = await tokensOf(request, c);
     const res = await request.fetch(`${BASE}${apiPath}`, { method, headers: { Authorization: `Bearer ${accessToken}` }, data: body, failOnStatusCode: false });
@@ -219,10 +219,27 @@ export function newResearchKit(logTag: string) {
   let gate0: Promise<Project> | null = null;
   const gate0Project = (request: APIRequestContext): Promise<Project> => (gate0 ??= driveToGate0(request, "gate0"));
 
-  /** 清場：封存所有測試建立的專案（`archived_at` 寫入、列保留）；留著未封存的測試專案，下一次的零專案空狀態就不成立。 */
+  /**
+   * 清場：封存所有測試建立的研究專案（`archived_at` 寫入、列保留），並先軟刪分流時綁上的 Console 專案（`is_deleted`，30 天內可 restore）；
+   * 封存撞 409（階段還在跑）就等它收尾再試。留著未封存的測試專案，下一次的零專案空狀態就不成立——2026-11-07 INT-P1 實例：首跑失敗的
+   * RP-0050（封存時階段未結束）與分流建立的 Console 專案 RP-0052／RP-0053（舊版只封存研究專案）留在共用棧，掌舵者在專案管理與執行中心看到不明草稿。
+   */
   async function archiveAll(request: APIRequestContext): Promise<void> {
     for (const id of created) {
-      const reply = await call(request, ADMIN, "POST", projectPath(id, "/archive"), {}).catch(() => null);
+      const route = await call(request, ADMIN, "GET", projectPath(id, "/route")).catch(() => null);
+      const consoleProjectId = route !== null && route.status === 200 ? (dataOf<{ consoleProjectId?: string | null }>(route).consoleProjectId ?? null) : null;
+      if (consoleProjectId !== null) {
+        const gone = await call(request, ADMIN, "DELETE", `/api/v1/projects/${consoleProjectId}`).catch(() => null);
+        if (gone === null || (gone.status !== 204 && gone.status !== 404)) {
+          console.warn(`[${logTag}] Console 專案 ${consoleProjectId} 沒有軟刪成功（${gone === null ? "請求失敗" : `HTTP ${gone.status}`}），請手動封存`);
+        }
+      }
+      let reply: Reply | null = null;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        reply = await call(request, ADMIN, "POST", projectPath(id, "/archive"), {}).catch(() => null);
+        if (reply === null || reply.status !== 409) break;
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
+      }
       if (reply === null || reply.status !== 200) console.warn(`[${logTag}] 專案 ${id} 沒有封存成功（${reply === null ? "請求失敗" : `HTTP ${reply.status}`}），請手動封存`);
     }
   }

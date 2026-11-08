@@ -50,7 +50,8 @@
 | D-5 | P4 | AT_960_22_2 | 在 `research-docker.stack.spec.ts` 內為 skipped（P0 既有） | 不在 P1 範圍 |
 
 ## 9. 殘留與還原
-clone／worktree／scaffold／research 根／fakebin／fake gh log 已刪（`%TEMP%` 無 `r2p1*`）；`r2p1-pgrelay` 容器已 `rm -f`；主機 Bridge 行程已結束、18081 無監聽；pytest 拋棄式庫由 teardown 自 drop（`autoclaude_pg` 查無殘留）；`aisdlc-backend` 已以不帶覆寫環境變數重建（`ENGINE_BRIDGE_URL` 回容器內 Bridge、healthy）；`aisdlc-engine-bridge` 與 `aisdlc-frontend` 全程未動；compose 與 `.env` 零改動；repo 工作樹只新增整合測試檔。
+- 補記（2026-11-08，主控現查共用棧 DB）：下文「已刪」只涵蓋主機檔案、容器與行程，**共用棧資料庫留下三筆**——`console.research_projects` 的 RP-0050（§3 首跑失敗案 D-1 的軌道 A 專案，`archived_at` 為空：清場時階段尚未結束、`archiveAll` 撞 409 未封存）與 `console.projects` 兩筆「RP-0052 E2E local-a mw65nmej」「RP-0053 E2E local-b mw65nmej」（22-1／22-2 分流時綁上的 Console 專案，DRAFT、未 signoff；舊版 `archiveAll` 只封存研究專案、不知道分流建立的 Console 專案）；掌舵者 2026-11-08 於專案管理、研發工作流與執行中心看到並回報。修法＝`frontend/tests/helpers/research-stack.ts` 的 `archiveAll` 先軟刪路由綁定的 Console 專案、封存撞 409 時等階段收尾重試（與本補記同一 commit）；三筆殘留本身的封存由掌舵者決定（主控以 API 軟刪被 auto mode 分類器判「修改共用資源」拒絕，依根 CLAUDE.md〈權限姿態〉不代跑、不繞路）。
+- clone／worktree／scaffold／research 根／fakebin／fake gh log 已刪（`%TEMP%` 無 `r2p1*`）；`r2p1-pgrelay` 容器已 `rm -f`；主機 Bridge 行程已結束、18081 無監聽；pytest 拋棄式庫由 teardown 自 drop（`autoclaude_pg` 查無殘留）；`aisdlc-backend` 已以不帶覆寫環境變數重建（`ENGINE_BRIDGE_URL` 回容器內 Bridge、healthy）；`aisdlc-engine-bridge` 與 `aisdlc-frontend` 全程未動；compose 與 `.env` 零改動；repo 工作樹只新增整合測試檔。
 
 ## 附記（主控，2026-11-07 17:0x）
 - AT-961-22-7 全套以 production 建置重跑（`E2E_MODE=standalone`、`E2E_WEB_PORT=3208`、`--output=<暫存>`）：`a11y.mock.spec.ts` **八案全過（19.9 秒）**，含 P0 既有四案與 P1 兩案（步驟 3 分流抽屜、步驟 4 前半）⇒ §5 的 dev 模式逾時（D-4）確認為載具現象、非產品缺陷。
