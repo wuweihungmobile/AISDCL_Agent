@@ -102,7 +102,8 @@ function navProblems(registry: readonly NavLike[], resolve: (pathname: string) =
 
 // ── 頁檔鎖 ────────────────────────────────────────────────────────────────────────────
 
-const RESERVED_FILES = new Set(["types", "states", "registry", "lint", "common"]);
+// readability：可讀性判定函式與詞表（TCS-ConsoleUxSortHelp-20261108 §3.3），不是頁檔
+const RESERVED_FILES = new Set(["types", "states", "registry", "lint", "common", "readability"]);
 
 /** lib/help 扣掉保留名與測試檔後的頁檔名（不含副檔名）。 */
 function pageFileNames(dir: string): string[] {

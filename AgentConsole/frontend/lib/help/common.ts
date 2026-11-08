@@ -14,7 +14,7 @@ import type { CommonHelp, HelpField } from "./types";
 export const SHARED: Record<string, HelpField> = {
   autonomy: {
     name: "自治等級",
-    meaning: "決定引擎執行時，要不要停下來等您確認，數字越大越自動。例如 Level 1 每個任務開始前都要您確認，Level 5 則全自動、只有失敗才找您。",
+    meaning: "決定引擎執行時，要不要停下來等您確認，數字越大越自動。例如 Level 1 每個任務前都要確認，Level 5 全自動，只有失敗才找您。",
     source: "您填寫或選擇",
     sourceNote: "建立或編輯專案時設定",
   },
@@ -27,7 +27,7 @@ export const HELP_COMMON: CommonHelp = {
     { name: "GitHub", meaning: "公告列上的靜態字樣，目前不能點，也不會前往任何網站。", source: "系統自動產生" },
     {
       name: "Engine Bridge",
-      meaning: "公告列與底部都有的連線點，顯示 Console 連不連得上 Engine Bridge。圓點與文字是同一個意思，狀態詞見下方的表。",
+      meaning: "公告列與底部都有的連線點，顯示 Console 連不連得上執行引擎。圓點與文字是同一個意思，狀態詞見下方的表。",
       source: "系統自動產生",
       sourceNote: "每 30 秒檢查一次",
     },

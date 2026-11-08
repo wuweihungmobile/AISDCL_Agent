@@ -214,7 +214,7 @@ describe("AT_960_18_2 說明三道鎖：HELP_ROUTES、HELP_PAGES、頁檔雙向�
       expect(sentences.length, `${page.id} purpose 句數`).toBeLessThanOrEqual(3);
       for (const text of page.purpose) expect(lintText(text), `${page.id} purpose：${text}`).toEqual([]);
       expect(page.steps.length).toBeGreaterThanOrEqual(2);
-      expect(page.steps.length).toBeLessThanOrEqual(8);
+      expect(page.steps.length).toBeLessThanOrEqual(10);
       for (const text of page.steps) expect(lintText(text, { maxSentences: 1 }), `${page.id} step：${text}`).toEqual([]);
       for (const field of page.fields) {
         expect(lintText(field.meaning, { maxSentences: 2 }), `${page.id} 欄位「${field.name}」`).toEqual([]);

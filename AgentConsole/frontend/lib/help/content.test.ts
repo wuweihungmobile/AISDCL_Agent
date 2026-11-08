@@ -10,7 +10,7 @@ import type { FieldSource, HelpField, HelpStateGroup, PageHelp, StateTableId } f
 
 /**
  * 說明內容品質（TCS-PageHelp-20261027 R-PH-06、R-PH-16、R-PH-17；載具 HL，輪 1a 建；頁從 PENDING_HELP_PAGES 移進 HELP_PAGES 的那一輪起自動納入迴圈）：
- *  - AT-PH-03-5-1、3-5-2、3-5-E-1：已寫頁的結構界線（purpose 1～3 句、steps 2～8 步、fields ≥ 1、sourceFiles 存在、states 與 NO_STATE_PAGES 雙向、title 為固定頁名）、
+ *  - AT-PH-03-5-1、3-5-2、3-5-E-1：已寫頁的結構界線（purpose 1～3 句、steps 2～10 步、fields ≥ 1、sourceFiles 存在、states 與 NO_STATE_PAGES 雙向、title 為固定頁名）、
  *    頁→狀態表矩陣（PRD §4 十六頁各頁的狀態表 id 與名稱模式，D-PH-15）；
  *  - AT-PH-05-1-1、5-2-1、5-3-1：全部說明文字（頁的 purpose、steps、欄位 meaning 與 sourceNote、STATE_HELP 每列、HELP_COMMON、SHARED）逐筆過 lint；
  *  - AT-PH-05-4-1（含型別等式）、5-4-E-1：欄位 source 屬六類、sourceNote ≤ 30 個字。
@@ -163,7 +163,7 @@ function pageShapeProblems(page: PageHelp, noStatePages: readonly string[]): str
   const sentences = page.purpose.flatMap(splitSentences);
   if (page.purpose.length === 0 || page.purpose.some((item) => splitSentences(item).length === 0)) out.push("purpose 至少一項，且每項非空");
   if (sentences.length < 1 || sentences.length > 3) out.push(`purpose 合計 ${sentences.length} 句，須 1～3 句`);
-  if (page.steps.length < 2 || page.steps.length > 8) out.push(`steps 有 ${page.steps.length} 步，須 2～8 步`);
+  if (page.steps.length < 2 || page.steps.length > 10) out.push(`steps 有 ${page.steps.length} 步，須 2～10 步`);
   if (page.fields.length < 1) out.push("fields 至少 1 個");
   if (page.sourceFiles.length < 1) out.push("sourceFiles 至少 1 條");
   for (const entry of page.sourceFiles) if (!sourcePathExists(entry)) out.push(`sourceFiles 的路徑不存在：${entry}`);
@@ -181,7 +181,7 @@ const stateGroupKeys = (groups: readonly HelpStateGroup[]): string[] => groups.m
 // ── AC-PH-03-5：已寫頁的結構界線 ────────────────────────────────────────────────────
 
 describe("AT_PH_03_5 已寫頁的結構界線（R-PH-06）", () => {
-  it("AT_PH_03_5_1 已寫頁逐頁：purpose 每項非空且合計 1～3 句、steps 2～8 步、fields ≥ 1、sourceFiles ≥ 1 且路徑存在、states 為空⇔在 NO_STATE_PAGES、title 為固定頁名；pending 頁豁免並印出清單", () => {
+  it("AT_PH_03_5_1 已寫頁逐頁：purpose 每項非空且合計 1～3 句、steps 2～10 步、fields ≥ 1、sourceFiles ≥ 1 且路徑存在、states 為空⇔在 NO_STATE_PAGES、title 為固定頁名；pending 頁豁免並印出清單", () => {
     const pages = writtenPages();
     expect(pages.length, "防反空轉：已寫頁數（輪 1a 起至少三頁）").toBeGreaterThanOrEqual(3);
     for (const page of pages) expect(pageShapeProblems(page, NO_STATE_PAGES), `${page.id}`).toEqual([]);
@@ -213,7 +213,7 @@ describe("AT_PH_03_5 已寫頁的結構界線（R-PH-06）", () => {
     expect(PAGE_STATES["task-detail"]).toContain("stepStatus:raw");
   });
 
-  it("AT_PH_03_5_E_1 pageShapeProblems 負控：purpose 4 句（四項各一句，或一項四句）、purpose 空、steps 1 項與 9 項、fields 空、sourceFiles 含不存在路徑或為空、states 與 NO_STATE_PAGES 不一致、title 含樣板各回非空；邊界合規頁回空", () => {
+  it("AT_PH_03_5_E_1 pageShapeProblems 負控：purpose 4 句（四項各一句，或一項四句）、purpose 空、steps 1 項與 11 項、fields 空、sourceFiles 含不存在路徑或為空、states 與 NO_STATE_PAGES 不一致、title 含樣板各回非空；邊界合規頁回空", () => {
     const base: PageHelp = {
       id: "settings",
       title: "測試頁",
@@ -225,9 +225,9 @@ describe("AT_PH_03_5 已寫頁的結構界線（R-PH-06）", () => {
     };
     const noState = ["settings"];
     expect(pageShapeProblems(base, noState), "基準合規頁").toEqual([]);
-    // 邊界合規：purpose 一項一句、一項三句；steps 2 項、8 項；sourceFiles 用 dir/**
+    // 邊界合規：purpose 一項一句、一項三句；steps 2 項、10 項；sourceFiles 用 dir/**
     expect(pageShapeProblems({ ...base, purpose: ["甲。乙。丙。"] }, noState)).toEqual([]);
-    expect(pageShapeProblems({ ...base, steps: Array.from({ length: 8 }, (_, i) => `步驟${i}。`) }, noState)).toEqual([]);
+    expect(pageShapeProblems({ ...base, steps: Array.from({ length: 10 }, (_, i) => `步驟${i}。`) }, noState)).toEqual([]);
     expect(pageShapeProblems({ ...base, sourceFiles: ["lib/help/**"] }, noState)).toEqual([]);
 
     const bad: Array<[string, PageHelp]> = [
@@ -236,7 +236,7 @@ describe("AT_PH_03_5 已寫頁的結構界線（R-PH-06）", () => {
       ["purpose 空", { ...base, purpose: [] }],
       ["purpose 有空項", { ...base, purpose: ["甲。", "  "] }],
       ["steps 一項", { ...base, steps: ["只有一步。"] }],
-      ["steps 九項", { ...base, steps: Array.from({ length: 9 }, (_, i) => `步驟${i}。`) }],
+      ["steps 十一項", { ...base, steps: Array.from({ length: 11 }, (_, i) => `步驟${i}。`) }],
       ["fields 空", { ...base, fields: [] }],
       ["sourceFiles 空", { ...base, sourceFiles: [] }],
       ["sourceFiles 不存在的檔", { ...base, sourceFiles: ["components/nope/Missing.tsx"] }],

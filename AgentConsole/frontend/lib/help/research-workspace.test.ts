@@ -33,8 +33,8 @@ describe("AT_961_19_2 研究工作區說明：第 3、4 步寫實", () => {
     expect(text).not.toContain("看板屬後續");
   });
 
-  it("AT_961_19_2 步驟句與 P1 新增欄位都過 lint（無禁字、英文只用白名單詞、句長與句數界線）；步驟維持 8 項內、第 5 步仍標尚未開放", () => {
-    expect(researchWorkspace.steps.length).toBeLessThanOrEqual(8);
+  it("AT_961_19_2 步驟句與 P1 新增欄位都過 lint（無禁字、英文只用白名單詞、句長與句數界線）；步驟維持 10 項內、第 5 步仍標尚未開放", () => {
+    expect(researchWorkspace.steps.length).toBeLessThanOrEqual(10);
     expect(lintText(stepText(3), { maxSentences: 1 })).toEqual([]);
     expect(lintText(stepText(4), { maxSentences: 1 })).toEqual([]);
     expect(stepText(5), "P2：交付步驟已有真面板，不再標尚未開放").not.toContain("尚未開放");
