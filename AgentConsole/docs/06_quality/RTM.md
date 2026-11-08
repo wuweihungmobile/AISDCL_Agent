@@ -498,7 +498,7 @@
 > 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P1-20261107.md](RTM-ResearchToPRD-P1-20261107.md)（F 1、US 3、AC 25、AT 210，共 239 列〔RELEASE_READY 勘誤批次補列 AT-961-12-E-2〕；鍵 `agentconsole-research-to-prd-p1`；TCS 經 QA 覆蓋審四審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P1-20261107.md](SCG0-REVIEW-ResearchToPRD-P1-20261107.md)；回填義務不變：每完成一項需求即回填四格）。2026-11-07 起四格已依 [SCG-4 一審／二審報告](SCG4-REVIEW-ResearchToPRD-P1-20261107.md)（二審 PASS）與 [INT 證據](INT-ResearchToPRD-P1-20261107.md) 回填：P1 回填完成（✅ 231／🟡 8／⬜ 0；AT 列 ✅ 207／🟡 3；🟡＝AT-961-9-E-2、23-1、23-5 及其所屬 AC-961-9、23 與 US-924、US-925、F-907；V-H3 掌舵者真機、V-D4 真 Brain 待驗）。
 
 ## 2.12 研究議題轉規格書 P2 內環與交付（ResearchToPRD；看板、自癒監視器、終端窗格、決策彈窗、SCR UI、交付歸檔、V21）的 TCS 本地 ID 追溯（ResearchToPRD_PRD.md；不計入 §2 總列數）
-> 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P2-20261107.md](RTM-ResearchToPRD-P2-20261107.md)（F 1、US 3、AC 30、AT 309，共 343 列；鍵 `agentconsole-research-to-prd-p2`；TCS 經 QA 覆蓋審三審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P2-20261107.md](SCG0-REVIEW-ResearchToPRD-P2-20261107.md)；四格一律由 ⬜ 起，回填義務不變：每完成一項需求即回填四格）。
+> 本子表 2026-11-07 依 DEF-200-576 體例自始立於 [RTM-ResearchToPRD-P2-20261107.md](RTM-ResearchToPRD-P2-20261107.md)（F 1、US 3、AC 30、AT 313，共 347 列〔RELEASE_READY 勘誤批次補列 AT-962-1b-1～1b-4〕；鍵 `agentconsole-research-to-prd-p2`；TCS 經 QA 覆蓋審三審 PASS，見 [SCG0-REVIEW-ResearchToPRD-P2-20261107.md](SCG0-REVIEW-ResearchToPRD-P2-20261107.md)；回填義務不變：每完成一項需求即回填四格）。2026-11-08 起四格已依 [SCG-4 一審／二審報告](SCG4-REVIEW-ResearchToPRD-P2-20261108.md)（二審 PASS）與 [INT 證據](INT-ResearchToPRD-P2-20261108.md) 回填：P2 回填完成（✅ 334／🟡 12／⬜ 1；AT 列 ✅ 305／🟡 7／⬜ 1；非 ✅＝AT-962-28-3、28-4、28-5〔INT 第二段第二套棧載具進行中，待補〕、29-4、30-4、30-5、30-E-1 為 🟡，30-2 為 ⬜〔RELEASE_READY 勘誤批次待執行〕，及其所屬 AC-962-28、29、30 與 US-928、F-908）。
 
 ## 3. 統計（建表時快照）
 
