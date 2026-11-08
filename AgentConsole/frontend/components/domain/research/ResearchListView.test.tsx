@@ -693,3 +693,73 @@ describe("AT_960_19_1 頁殼 app/research/page.tsx：只組裝清單元件", () 
     expect(source, "頁殼只 import 清單元件，不 import 任何查詢 hook 或端點函式").not.toMatch(/@\/lib\/api/);
   });
 });
+
+// TCS-ConsoleUxSortHelp-20261108 AC-963-4（L2 研究專案列；W-UX5）
+describe("AT_963_4 研究專案列：排序控制列（預設編號自然序升冪）", () => {
+  const mk = (id: string, rpNo: string, title: string, patch: Partial<ResearchProjectSummary>): ResearchProjectSummary => ({
+    ...SUMMARY_R1,
+    id,
+    rpNo,
+    slug: `s-${rpNo.toLowerCase()}`,
+    title,
+    ...patch,
+  });
+  // API 序與編號序不同；步驟 route、topic、deliver 各一；更新時間：P100＝11-01 16:00Z、P9＝11-01 23:00Z、P10＝11-03 02:00Z
+  const P10 = mk(R1, "RP-0010", "乙研究", { flowStep: "route", flowPhase: "FROZEN", flowStatus: "IDLE", updatedAt: "2026-11-03T10:00:00+08:00" });
+  const P9 = mk(R2, "RP-0009", "丙研究", { flowStep: "topic", updatedAt: "2026-11-01T23:00:00Z" });
+  const P100 = mk(R3, "RP-0100", "甲研究", { flowStep: "deliver", flowPhase: "DELIVERED", flowStatus: "COMPLETED", updatedAt: "2026-11-02T00:00:00+08:00" });
+  const zh = new Intl.Collator("zh-Hant", { numeric: true });
+  const rpNos = () => screen.getAllByTestId("research-row").map((row) => within(row).getByText(/^RP-\d{4}$/).textContent);
+  const group = () => screen.getByRole("group", { name: "研究專案排序" });
+  const pickSort = async (user: ReturnType<typeof userEvent.setup>, label: string) => user.selectOptions(within(group()).getByRole("combobox", { name: "排序" }), label);
+  const toggleDir = async (user: ReturnType<typeof userEvent.setup>) => user.click(within(group()).getByRole("button", { name: /^目前由/ }));
+
+  it("AT_963_4_3 預設依編號自然序升冪（RP-0009、RP-0010、RP-0100）；選標題、最近更新（ISO 時刻）、狀態（徽章文字）、步驟（步驟順序）各依語意；方向鈕切換後整列反序", async () => {
+    const user = userEvent.setup();
+    renderList("OPERATOR", { projects: [P10, P9, P100] });
+    await screen.findAllByTestId("research-row");
+    expect(rpNos()).toEqual(["RP-0009", "RP-0010", "RP-0100"]);
+    expect(
+      within(group())
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["編號", "標題", "狀態", "步驟", "最近更新"]);
+
+    await pickSort(user, "標題");
+    expect(rpNos()).toEqual([P10, P9, P100].sort((a, b) => zh.compare(a.title, b.title)).map((p) => p.rpNo));
+    await pickSort(user, "最近更新");
+    expect(rpNos()).toEqual(["RP-0100", "RP-0009", "RP-0010"]);
+    await pickSort(user, "狀態");
+    const badge = { "RP-0010": "Gate 0 已核准", "RP-0009": "進行中", "RP-0100": "已交付" } as Record<string, string>;
+    expect(rpNos()).toEqual(Object.keys(badge).sort((a, b) => zh.compare(badge[a], badge[b])));
+    await pickSort(user, "步驟");
+    expect(rpNos()).toEqual(["RP-0009", "RP-0010", "RP-0100"]); // 研究、分流、交付
+    await toggleDir(user);
+    expect(rpNos()).toEqual(["RP-0100", "RP-0010", "RP-0009"]);
+    await pickSort(user, "編號");
+    expect(rpNos()).toEqual(["RP-0100", "RP-0010", "RP-0009"]); // 方向保留（降冪）
+  });
+
+  it("AT_963_4_4 已選標題降冪：切到「已封存」再切回排序保持；搜尋縮小清單後結果仍依目前排序", async () => {
+    const user = userEvent.setup();
+    renderList("OPERATOR", { projects: [P10, P9, P100, { ...P100, id: R4, rpNo: "RP-0004", slug: "old-topic", title: "舊的研究", archivedAt: T1 }] });
+    await screen.findAllByTestId("research-row");
+    await pickSort(user, "標題");
+    await toggleDir(user);
+    const byTitleDesc = (ps: ResearchProjectSummary[]) => ps.sort((a, b) => zh.compare(b.title, a.title)).map((p) => p.rpNo);
+    expect(rpNos()).toEqual(byTitleDesc([P10, P9, P100]));
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "狀態篩選" }), "archived");
+    await waitFor(() => expect(rpNos()).toEqual(["RP-0004"]));
+    await user.selectOptions(screen.getByRole("combobox", { name: "狀態篩選" }), "all");
+    await waitFor(() => expect(rpNos()).toHaveLength(3));
+    expect(rpNos()).toEqual(byTitleDesc([P10, P9, P100]));
+    expect(within(group()).getByRole("combobox", { name: "排序" })).toHaveValue("title");
+    expect(within(group()).getByRole("button", { name: "目前由大到小，按一下改由小到大" })).toBeInTheDocument();
+
+    // 搜尋「rp-00」只留 RP-0009、RP-0010（RP-0100 不含），仍依標題降冪
+    await user.type(screen.getByRole("textbox", { name: "搜尋研究專案" }), "rp-00");
+    await waitFor(() => expect(rpNos()).toHaveLength(2));
+    expect(rpNos()).toEqual(byTitleDesc([P10, P9]));
+  });
+});

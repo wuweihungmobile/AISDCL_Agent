@@ -107,7 +107,10 @@ describe("AT_962_21_2 DeliverPanel 整體呈現", () => {
     await within(panel).findByTestId("traceability-table");
     expect(within(panel).queryByTestId("pr-create")).toBeNull();
     expect(within(panel).queryByTestId("project-root-copy")).toBeNull();
-    const buttons = within(panel).getAllByRole("button");
+    // 表頭排序鈕（data-sort-key）是唯讀操作、唯讀角色也要能用（TCS-ConsoleUxSortHelp），不在「寫入控件全停用」之列
+    const buttons = within(panel)
+      .getAllByRole("button")
+      .filter((b) => !b.hasAttribute("data-sort-key"));
     expect(buttons.length).toBeGreaterThanOrEqual(1);
     for (const button of buttons) {
       expect(button, `「${button.textContent}」`).toBeDisabled();

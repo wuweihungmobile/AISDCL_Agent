@@ -341,3 +341,115 @@ describe("AT_960_10_6 證據矩陣表：標記計數、七欄展開、抓取紀�
     expect(screen.queryByText("還沒有證據列")).toBeNull();
   });
 });
+
+// TCS-ConsoleUxSortHelp-20261108 AT-963-3-12／3-13（T10 抓取紀錄、T11 證據表）
+describe("AT_963_3_12／3_13 證據矩陣：預設編號自然序升冪與表頭排序", () => {
+  const zh = new Intl.Collator("zh-Hant", { numeric: true });
+  const ids = () => screen.getAllByTestId("evidence-row").map((r) => r.getAttribute("data-evidence-no"));
+  const pressIn = async (user: ReturnType<typeof userEvent.setup>, root: HTMLElement, name: string) =>
+    user.click(within(within(root).getByRole("columnheader", { name })).getByRole("button", { name }));
+  const MATRIX = matrixOf([
+    item("E-10", { candidate: "乙技術", claim: "丙論點", sourceNo: "S-010", f7Verification: "V3", strength: "WEAK" }),
+    item("E-100", { candidate: "甲技術", claim: "甲論點", sourceNo: "S-009", f7Verification: "V1", strength: "STRONG" }),
+    item("E-9", { candidate: "丙技術", claim: "乙論點", sourceNo: "S-100", f7Verification: "V2", strength: "MEDIUM" }),
+  ]);
+  const fetchOf = (n: string, patch: Partial<ResearchSource["fetches"][number]>): ResearchSource["fetches"][number] => ({
+    fetchNo: n,
+    method: "GET",
+    observedBy: "BRIDGE",
+    host: "example.com",
+    httpStatus: 200,
+    outcome: "OK",
+    rawSha256: "ab".repeat(32),
+    rawBytes: 100,
+    fetchedAt: "2026-11-02T10:00:00+08:00",
+    ...patch,
+  });
+  const SRC = [
+    sourceOf("S-010", { fetches: [] }),
+    sourceOf("S-009", { fetches: [] }),
+    sourceOf("S-100", {
+      fetches: [
+        fetchOf("F-10", { httpStatus: 404, rawBytes: 5, host: "b.example.com", method: "POST", outcome: "HTTP_ERROR", fetchedAt: "2026-11-02T00:00:00+08:00" }),
+        fetchOf("F-9", { httpStatus: 200, rawBytes: 900, host: "c.example.com", fetchedAt: "2026-11-01T23:00:00Z" }),
+        fetchOf("F-100", { httpStatus: null, rawBytes: null, rawSha256: null, host: "a.example.com", outcome: "DENIED_ALLOWLIST", fetchedAt: "2026-10-30T00:00:00Z" }),
+      ],
+    }),
+  ];
+
+  it("AT_963_3_13 證據表：預設編號自然序（E-9 < E-10 < E-100）、編號欄 ascending；層級依 V 序；強度與論點依文字；標記欄不可排；七欄字樣不變；優缺點矩陣表頭無排序", async () => {
+    const user = userEvent.setup();
+    render("table", { evidence: MATRIX, sources: SRC });
+    await screen.findAllByTestId("evidence-row");
+    const table = screen.getByTestId("evidence-table");
+    expect(ids()).toEqual(["E-9", "E-10", "E-100"]);
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((h) => h.textContent),
+    ).toEqual(["編號", "候選技術", "論點", "來源", "層級", "強度", "標記"]);
+    expect(within(table).getByRole("columnheader", { name: "編號" })).toHaveAttribute("aria-sort", "ascending");
+    const flag = within(table).getByRole("columnheader", { name: "標記" });
+    expect(flag.querySelector("button")).toBeNull();
+    expect(flag.hasAttribute("aria-sort")).toBe(false);
+
+    await pressIn(user, table, "層級");
+    expect(ids()).toEqual(["E-100", "E-9", "E-10"]); // V1、V2、V3
+    await pressIn(user, table, "層級");
+    expect(ids()).toEqual(["E-10", "E-9", "E-100"]);
+    await pressIn(user, table, "論點");
+    const claimOf = { "E-10": "丙論點", "E-100": "甲論點", "E-9": "乙論點" } as Record<string, string>;
+    expect(ids()).toEqual(["E-10", "E-100", "E-9"].sort((a, b) => zh.compare(claimOf[a], claimOf[b])));
+    await pressIn(user, table, "強度");
+    expect(ids().sort()).toEqual(["E-10", "E-100", "E-9"].sort());
+    // 第一次點預設欄（編號）即降冪
+    await pressIn(user, table, "編號");
+    expect(ids()).toEqual(["E-9", "E-10", "E-100"]);
+    await pressIn(user, table, "編號");
+    expect(ids()).toEqual(["E-100", "E-10", "E-9"]);
+  });
+
+  it("AT_963_3_13 同檔的優缺點矩陣（範圍外）thead 內沒有 aria-sort、沒有按鈕", async () => {
+    render("proscons");
+    const table = await screen.findByRole("table", { name: "技術優缺點矩陣" });
+    const head = table.querySelector("thead") as HTMLElement;
+    expect(head.querySelector("[aria-sort]")).toBeNull();
+    expect(head.querySelector("button")).toBeNull();
+  });
+
+  it("AT_963_3_12 抓取紀錄：預設編號自然序升冪；狀態碼與位元組依數字（空值最後）、時間依時刻、方法、觀測者、主機、結果、sha256 依文字", async () => {
+    const user = userEvent.setup();
+    render("table", { evidence: MATRIX, sources: SRC });
+    await screen.findAllByTestId("evidence-row");
+    await user.click(within(rowOf("E-9")).getByRole("button", { name: "展開 E-9 的七欄與抓取紀錄" }));
+    const table = await screen.findByTestId("fetch-records");
+    const nos = () =>
+      within(table)
+        .getAllByTestId("fetch-record")
+        .map((r) => within(r).getAllByRole("cell")[0].textContent);
+    expect(nos()).toEqual(["F-9", "F-10", "F-100"]);
+    expect(within(table).getByRole("columnheader", { name: "編號" })).toHaveAttribute("aria-sort", "ascending");
+    await pressIn(user, table, "狀態碼");
+    expect(nos()).toEqual(["F-9", "F-10", "F-100"]); // 200、404、空
+    await pressIn(user, table, "狀態碼");
+    expect(nos()).toEqual(["F-10", "F-9", "F-100"]); // 404、200、空值仍最後
+    await pressIn(user, table, "位元組");
+    expect(nos()).toEqual(["F-10", "F-9", "F-100"]); // 5、900、空
+    await pressIn(user, table, "位元組");
+    expect(nos()).toEqual(["F-9", "F-10", "F-100"]);
+    await pressIn(user, table, "時間");
+    expect(nos()).toEqual(["F-100", "F-10", "F-9"]); // 10-30、11-01 16:00Z、11-01 23:00Z
+    await pressIn(user, table, "主機");
+    expect(nos()).toEqual(["F-100", "F-10", "F-9"]); // a、b、c
+    await pressIn(user, table, "方法");
+    expect(nos()).toEqual(["F-9", "F-100", "F-10"]); // GET、GET（同值依編號）、POST
+    await pressIn(user, table, "結果");
+    expect(nos()).toEqual(["F-100", "F-10", "F-9"]); // DENIED_ALLOWLIST、HTTP_ERROR、OK
+    await pressIn(user, table, "觀測者");
+    expect(nos()).toEqual(["F-9", "F-10", "F-100"]); // 三列同值：依編號升冪
+    await pressIn(user, table, "原文 sha256");
+    expect(nos().at(-1)).toBe("F-100"); // sha256 缺值排最後
+    await pressIn(user, table, "原文 sha256");
+    expect(nos().at(-1)).toBe("F-100");
+  });
+});

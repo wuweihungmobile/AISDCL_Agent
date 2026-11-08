@@ -223,3 +223,45 @@ describe("專案列表：右上「BRD/PRD 匯入」連結（AC-952-2；W-N3）",
     expect(create).toHaveAttribute("title", "權限不足（唯讀角色）");
   });
 });
+
+// TCS-ConsoleUxSortHelp-20261108 AC-963-4（W-UX5；§2.2 L1）：專案卡片以排序控制列取代舊下拉，預設建立順序升冪
+describe("專案列表：排序控制列（AC-963-4；W-UX5）", () => {
+  const sortOf = (c: ApiCall | undefined) => c?.query.get("sort");
+
+  it("AT_963_4_1 第一個請求 sort=createdAt,asc；選項依序為 建立順序／名稱／狀態／最近更新／自治等級（無任務數、目標數）；選自治等級 → autonomyLevel,asc 且 page=0；方向鈕 → autonomyLevel,desc", async () => {
+    const { calls } = backend();
+    view();
+    await screen.findByTestId("project-list");
+    expect(sortOf(listCalls(calls)[0])).toBe("createdAt,asc");
+    const select = screen.getByRole("combobox", { name: "排序" });
+    expect(
+      within(select)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["建立順序", "名稱", "狀態", "最近更新", "自治等級"]);
+    expect(screen.queryByRole("option", { name: "任務數" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "目標數" })).toBeNull();
+
+    await userEvent.selectOptions(select, "自治等級");
+    await waitFor(() => expect(sortOf(listCalls(calls).at(-1))).toBe("autonomyLevel,asc"));
+    expect(listCalls(calls).at(-1)?.query.get("page")).toBe("0");
+
+    await userEvent.click(screen.getByRole("button", { name: "目前由小到大，按一下改由大到小" }));
+    await waitFor(() => expect(sortOf(listCalls(calls).at(-1))).toBe("autonomyLevel,desc"));
+    expect(listCalls(calls).at(-1)?.query.get("page")).toBe("0");
+  });
+
+  it("AT_963_4_2 切到「已刪除」：同一組控制列仍在、預設仍 createdAt,asc；方向鈕 aria-label 隨方向在兩句之間切換", async () => {
+    const { calls } = backend();
+    view();
+    await userEvent.click(await screen.findByTestId("deleted-filter"));
+    await waitFor(() => expect(listCalls(calls).at(-1)?.query.get("deleted")).toBe("true"));
+    expect(sortOf(listCalls(calls).at(-1))).toBe("createdAt,asc");
+    expect(screen.getByRole("group", { name: "專案排序" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "排序" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "目前由小到大，按一下改由大到小" }));
+    expect(await screen.findByRole("button", { name: "目前由大到小，按一下改由小到大" })).toBeInTheDocument();
+    await waitFor(() => expect(sortOf(listCalls(calls).at(-1))).toBe("createdAt,desc"));
+    expect(listCalls(calls).at(-1)?.query.get("deleted")).toBe("true");
+  });
+});

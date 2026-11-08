@@ -391,7 +391,10 @@ describe("AT_960_19_6 VIEWER 於每個步驟都可讀，所有寫入與推進動
       expect(screen.getByTestId("research-flow-header")).toBeInTheDocument();
       if (step === "route") await screen.findByTestId("route-panel");
       if (step === "deliver") await screen.findByTestId("tag-create"); // 步驟 5 的寫入鈕載入後也要納入全按鈕鎖
-      const buttons = within(workspace()).getAllByRole("button");
+      // 表頭排序鈕（data-sort-key）是唯讀操作、唯讀角色也要能用（TCS-ConsoleUxSortHelp），不在「寫入控件全停用」之列
+      const buttons = within(workspace())
+        .getAllByRole("button")
+        .filter((b) => !b.hasAttribute("data-sort-key"));
       expect(buttons.length, "至少有「對帳」鈕").toBeGreaterThanOrEqual(1);
       for (const button of buttons) {
         expect(button, `「${button.textContent}」`).toBeDisabled();

@@ -433,9 +433,10 @@ describe("AT_932_1_E_7 帳本推進後頁面隨之改變（R12、R14）", () => 
     const afterOrder = obsOrder(obs);
     expect(afterOrder).toHaveLength(13);
     // 共同項目逐項文字相同、順序不變；多出的一項為 OBS-SI-013
-    expect(afterOrder.slice(0, 12)).toEqual(beforeOrder);
-    expect(afterOrder[12]).toBe("si-obs-row-OBS-SI-013");
-    expect(afterOrder.slice(0, 12).map((t) => textOf(within(obs).getByTestId(t)))).toEqual(beforeTexts);
+    // TCS-ConsoleUxSortHelp W-UX3：預設 ID 升冪、壞列恆在有效列之後，所以 OBS-SI-013 落在壞列之前（改預期值，斷言數不變）
+    expect([...afterOrder.slice(0, 11), afterOrder[12]]).toEqual(beforeOrder);
+    expect(afterOrder[11]).toBe("si-obs-row-OBS-SI-013");
+    expect([...afterOrder.slice(0, 11), afterOrder[12]].map((t) => textOf(within(obs).getByTestId(t)))).toEqual(beforeTexts);
     const b13 = GB.observations.items.filter(isValid).find((o) => o.id === "OBS-SI-013") as SiObservation;
     await user.click(within(obs).getByRole("button", { name: "展開 OBS-SI-013" }));
     for (const key of ["id", "time", "context", "symptom", "evidence", "category", "severity", "disposition", "marks"] as const) {
@@ -1467,5 +1468,225 @@ describe("AT_951_4_E_2 被取代筆數不影響無待入帳的判定，orphans �
     expect(panel.queryByTestId("si-superseded-list"), "被取代列數為 0：不渲染群組").toBeNull();
     expect(panel.queryByTestId("si-superseded-toggle"), "也沒有展開鈕").toBeNull();
     expect(panelEl.textContent ?? "", "面板文字不含已被取代").not.toContain("已被取代");
+  });
+});
+
+// ── TCS-ConsoleUxSortHelp-20261108 AC-963-3（T3～T6 SI 四表；W-UX3、D-UX-17；排序只作用於已載入列） ─────────────────────
+
+describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
+  const zh = new Intl.Collator("zh-Hant", { numeric: true });
+  const obsRow = (id: string, line: number, patch: Partial<SiObservation>): SiObservation => ({ ...clone(GOLDEN_OBS[0]), id, line, ...patch });
+  const obsPage = (items: SiObservationRow[], extra: Record<string, unknown> = {}) => ({ ...clone(GA.observations), items, truncated: false, nextSince: null, ...extra });
+  const headerOf = (root: HTMLElement, name: string) => within(root).getByRole("columnheader", { name });
+  const pressIn = async (user: ReturnType<typeof userEvent.setup>, root: HTMLElement, name: string) => user.click(within(headerOf(root, name)).getByRole("button", { name }));
+  const idsByTestId = (root: HTMLElement, prefix: string) =>
+    Array.from(root.querySelectorAll<HTMLElement>(`[data-testid^="${prefix}"]`)).map((el) => (el.dataset.testid as string).replace(prefix, ""));
+  /** 依某欄值排好的 ID（空值最後，同值依 ID 升冪）。 */
+  const expectIds = (rows: Array<{ id: string; v: string }>, dir: "asc" | "desc") =>
+    [...rows].sort((a, b) => (dir === "asc" ? zh.compare(a.v, b.v) : zh.compare(b.v, a.v)) || zh.compare(a.id, b.id)).map((r) => r.id);
+
+  const CRAFTED = [
+    obsRow("OBS-SI-003", 3, { time: "2025-12-31 23:00", category: "a", severity: "中", disposition: "deferred", symptom: "乙" }),
+    obsRow("OBS-SI-001", 1, { time: "2026-01-31 23:59", category: "b", severity: "高", disposition: "open", symptom: "丙" }),
+    obsRow("OBS-SI-004", 4, { time: "2026-12-01 00:00", category: "a", severity: "緊急", disposition: "adopted", symptom: "丁" }),
+    obsRow("OBS-SI-002", 2, { time: "2026-02-01 00:01", category: "c", severity: "低", disposition: "closed", symptom: "甲" }),
+  ];
+
+  it("AT_963_3_5 觀察表：預設 ID 升冪（ID 欄 ascending）；第一次點 ID 即降冪；五欄各依語意排；時間跨月跨年依時刻；壞列恆在有效列之後；操作欄無按鈕；展開列排序後仍是同一列", async () => {
+    const user = userEvent.setup();
+    const invalid = clone(BAD)!;
+    // API 序刻意亂排，壞列夾在中間
+    renderSi({ overrides: { observations: serve(obsPage([CRAFTED[0], CRAFTED[1], invalid, CRAFTED[2], CRAFTED[3]])) } });
+    await waitForObservations();
+    const obs = panel("observations");
+    const invalidTid = `si-obs-invalid-${(invalid as { line: number }).line}`;
+    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-001", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-004", invalidTid]);
+    expect(headerOf(obs, "ID")).toHaveAttribute("aria-sort", "ascending");
+    // 操作欄（sr-only 動作欄）沒有按鈕、沒有 aria-sort
+    const heads = within(obs).getAllByRole("columnheader");
+    expect(heads[0].querySelector("button")).toBeNull();
+    expect(heads[0].hasAttribute("aria-sort")).toBe(false);
+
+    await pressIn(user, obs, "ID");
+    expect(headerOf(obs, "ID")).toHaveAttribute("aria-sort", "descending");
+    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-004", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-001", invalidTid]);
+
+    // 時間：跨年、跨月依時刻（003 的 2025-12 在 001 的 2026-01 之前）
+    await pressIn(user, obs, "時間");
+    expect(validRowIds(obs)).toEqual(["OBS-SI-003", "OBS-SI-001", "OBS-SI-002", "OBS-SI-004"]);
+    expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+    await pressIn(user, obs, "時間");
+    expect(validRowIds(obs)).toEqual(["OBS-SI-004", "OBS-SI-002", "OBS-SI-001", "OBS-SI-003"]);
+    expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+
+    for (const [name, field] of [
+      ["分類", "category"],
+      ["嚴重度", "severity"],
+      ["處置", "disposition"],
+      ["症狀", "symptom"],
+    ] as const) {
+      await pressIn(user, obs, name);
+      const rows = CRAFTED.map((r) => ({ id: r.id, v: r[field] }));
+      expect(validRowIds(obs), `${name} 升冪`).toEqual(expectIds(rows, "asc"));
+      expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+      await pressIn(user, obs, name);
+      expect(validRowIds(obs), `${name} 降冪`).toEqual(expectIds(rows, "desc"));
+      expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+    }
+
+    // 展開 OBS-SI-003 後排序：展開的仍是同一列
+    await user.click(within(obs).getByRole("button", { name: "展開 OBS-SI-003" }));
+    expect(within(obs).getByTestId("si-obs-fields-OBS-SI-003")).toBeInTheDocument();
+    await pressIn(user, obs, "時間");
+    expect(within(obs).getByTestId("si-obs-fields-OBS-SI-003")).toBeInTheDocument();
+    expect(within(obs).queryByTestId("si-obs-fields-OBS-SI-001")).toBeNull();
+    expect(within(within(obs).getByTestId("si-obs-row-OBS-SI-003")).getByRole("button", { name: /OBS-SI-003/ })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("AT_963_3_E_2 觀察表載入更多：新列併入後依目前排序重排（時間降冪下新列不接尾）；預設序下新列自然接尾", async () => {
+    limits.value = 5;
+    const user = userEvent.setup();
+    const t = (day: number) => `2026-03-0${day} 08:00`;
+    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow(`OBS-SI-00${n}`, n, { time: t(n * 2 - 1) })); // 03-01、03-03、03-05、03-07、03-09
+    const page2 = [obsRow("OBS-SI-006", 6, { time: t(4) }), obsRow("OBS-SI-007", 7, { time: t(8) })];
+    renderSi({
+      overrides: {
+        observations: (call) => ({ data: call.query.get("since") === "5" ? obsPage(page2) : obsPage(page1, { truncated: true, nextSince: 5 }) }),
+      },
+    });
+    await screen.findByRole("tab", { name: "觀察 (5+)" });
+    const obs = panel("observations");
+    await pressIn(user, obs, "時間");
+    await pressIn(user, obs, "時間"); // 降冪
+    expect(validRowIds(obs)).toEqual(["OBS-SI-005", "OBS-SI-004", "OBS-SI-003", "OBS-SI-002", "OBS-SI-001"]);
+    await user.click(screen.getByRole("button", { name: "載入更多" }));
+    await screen.findByRole("tab", { name: "觀察 (7)" });
+    // 新列 006（03-04）、007（03-08）依時間降冪插入既有列之間，而不是接在尾端
+    expect(validRowIds(obs)).toEqual(["OBS-SI-005", "OBS-SI-007", "OBS-SI-004", "OBS-SI-003", "OBS-SI-006", "OBS-SI-002", "OBS-SI-001"]);
+  });
+
+  it("AT_963_3_E_2 預設序下新列自然接尾（ID 升冪與游標序一致）", async () => {
+    limits.value = 5;
+    const user = userEvent.setup();
+    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow(`OBS-SI-00${n}`, n, {}));
+    const page2 = [obsRow("OBS-SI-006", 6, {}), obsRow("OBS-SI-007", 7, {})];
+    renderSi({ overrides: { observations: (call) => ({ data: call.query.get("since") === "5" ? obsPage(page2) : obsPage(page1, { truncated: true, nextSince: 5 }) }) } });
+    await screen.findByRole("tab", { name: "觀察 (5+)" });
+    await user.click(screen.getByRole("button", { name: "載入更多" }));
+    await screen.findByRole("tab", { name: "觀察 (7)" });
+    expect(validRowIds(panel("observations"))).toEqual(["OBS-SI-001", "OBS-SI-002", "OBS-SI-003", "OBS-SI-004", "OBS-SI-005", "OBS-SI-006", "OBS-SI-007"]);
+  });
+
+  it("AT_963_3_6 提案表：預設 ID 自然序升冪；rev 依數字（9 < 10 < 100）；digest、verdict、cooldown、狀態、類別、route 依文字；操作欄無按鈕", async () => {
+    const user = userEvent.setup();
+    const mk = (id: string, patch: Partial<SiProposal>) => proposalOf({ id, card: null, ...patch });
+    const items = [
+      mk("PX-10", { state: "zz", cls: "b", route: "r2", rev: 10, digest: "bbbb1111", verdict: "v3", cooldown: "c2" }),
+      mk("PX-100", { state: "mm", cls: "a", route: "r3", rev: 100, digest: "aaaa2222", verdict: "v1", cooldown: "c3" }),
+      mk("PX-9", { state: "aa", cls: "c", route: "r1", rev: 9, digest: "cccc3333", verdict: "v2", cooldown: "c1" }),
+    ];
+    renderSi({ overrides: { proposals: serve({ ...clone(GA.proposals), items, truncated: false, nextSince: null }) } });
+    await user.click(tabButton(/提案/));
+    const root = await screen.findByTestId("si-prop-table");
+    const ids = () => idsByTestId(root, "si-prop-row-");
+    expect(ids()).toEqual(["PX-9", "PX-10", "PX-100"]);
+    expect(headerOf(root, "ID")).toHaveAttribute("aria-sort", "ascending");
+    expect(within(root).getAllByRole("columnheader")[0].querySelector("button")).toBeNull();
+    await pressIn(user, root, "rev");
+    expect(ids()).toEqual(["PX-9", "PX-10", "PX-100"]);
+    await pressIn(user, root, "rev");
+    expect(ids()).toEqual(["PX-100", "PX-10", "PX-9"]);
+    const text = (name: string, field: keyof SiProposal) => items.map((p) => ({ id: p.id, v: String(p[field]) }));
+    for (const [name, field] of [
+      ["狀態", "state"],
+      ["類別", "cls"],
+      ["route", "route"],
+      ["digest", "digest"],
+      ["verdict", "verdict"],
+      ["cooldown", "cooldown"],
+    ] as const) {
+      await pressIn(user, root, name);
+      expect(ids(), `${name} 升冪`).toEqual(expectIds(text(name, field), "asc"));
+      await pressIn(user, root, name);
+      expect(ids(), `${name} 降冪`).toEqual(expectIds(text(name, field), "desc"));
+    }
+  });
+
+  it("AT_963_3_7／3_8 事件表與運轉表：預設 seq／ID 升冪（9 在 10 前）；t 依時刻；closedSeq 空值兩個方向都在最後；操作欄無按鈕", async () => {
+    const user = userEvent.setup();
+    const events: SiEvent[] = [
+      { seq: 10, t: "2026-02-01T00:00:00Z", kind: "b", by: "y" },
+      { seq: 9, t: "2026-03-01T00:00:00Z", kind: "c", by: "x" },
+      { seq: 100, t: "2026-01-01T00:00:00Z", kind: "a", by: "z" },
+    ];
+    const run = (
+      id: string,
+      openedSeq: number,
+      closedSeq: number | null,
+      trigger: string,
+      extra: { outcome?: Record<string, string>; propIds?: string[]; research?: { kind: string; seq: number } | null } = {},
+    ) => ({
+      id,
+      openedSeq,
+      closedSeq,
+      trigger,
+      headSha: null,
+      research: extra.research ?? null,
+      propIds: extra.propIds ?? ([] as string[]),
+      outcome: extra.outcome ?? ({} as Record<string, string>),
+    });
+    // outcome、propIds、research 三欄的值刻意讓三種排序結果彼此不同；RX-5 的 outcome 與 propIds 為空、RX-100 的 research 為空（空值兩個方向都在最後）
+    const runs = [
+      run("RX-10", 5, null, "t2", { outcome: { "PX-1": "b-state" }, propIds: ["PX-3"], research: { kind: "c", seq: 1 } }),
+      run("RX-9", 3, 7, "t1", { outcome: { "PX-1": "c-state" }, propIds: ["PX-1"], research: { kind: "a", seq: 2 } }),
+      run("RX-100", 4, 6, "t3", { outcome: { "PX-1": "a-state" }, propIds: ["PX-2"] }),
+      run("RX-5", 1, null, "t4", { research: { kind: "b", seq: 3 } }),
+    ];
+    renderSi({
+      overrides: {
+        events: serve({ ...clone(GA.events), items: events, truncated: false, nextSince: null }),
+        runs: serve({ ...clone(GA.runs), items: runs, truncated: false, nextSince: null }),
+      },
+    });
+    await user.click(tabButton(/事件/));
+    const evRoot = await screen.findByTestId("si-events-table");
+    const runRoot = await screen.findByTestId("si-runs-table");
+    const evIds = () => idsByTestId(evRoot, "si-event-row-");
+    const runIds = () => idsByTestId(runRoot, "si-run-row-");
+
+    expect(evIds()).toEqual(["9", "10", "100"]);
+    expect(headerOf(evRoot, "seq")).toHaveAttribute("aria-sort", "ascending");
+    expect(within(evRoot).getAllByRole("columnheader")[0].querySelector("button")).toBeNull();
+    await pressIn(user, evRoot, "t");
+    expect(evIds()).toEqual(["100", "10", "9"]);
+    await pressIn(user, evRoot, "kind");
+    expect(evIds()).toEqual(["100", "10", "9"]);
+    await pressIn(user, evRoot, "by");
+    expect(evIds()).toEqual(["9", "10", "100"]);
+    await pressIn(user, evRoot, "by");
+    expect(evIds()).toEqual(["100", "10", "9"]);
+
+    expect(runIds()).toEqual(["RX-5", "RX-9", "RX-10", "RX-100"]);
+    expect(headerOf(runRoot, "ID")).toHaveAttribute("aria-sort", "ascending");
+    await pressIn(user, runRoot, "closedSeq");
+    expect(runIds()).toEqual(["RX-100", "RX-9", "RX-5", "RX-10"]);
+    await pressIn(user, runRoot, "closedSeq");
+    expect(runIds()).toEqual(["RX-9", "RX-100", "RX-5", "RX-10"]);
+    await pressIn(user, runRoot, "openedSeq");
+    expect(runIds()).toEqual(["RX-5", "RX-9", "RX-100", "RX-10"]);
+    await pressIn(user, runRoot, "trigger");
+    expect(runIds()).toEqual(["RX-9", "RX-10", "RX-100", "RX-5"]);
+    await pressIn(user, runRoot, "outcome");
+    expect(runIds()).toEqual(["RX-100", "RX-10", "RX-9", "RX-5"]); // a-state、b-state、c-state、空值最後
+    await pressIn(user, runRoot, "outcome");
+    expect(runIds()).toEqual(["RX-9", "RX-10", "RX-100", "RX-5"]); // 降冪，空值仍最後
+    await pressIn(user, runRoot, "propIds");
+    expect(runIds()).toEqual(["RX-9", "RX-100", "RX-10", "RX-5"]); // PX-1、PX-2、PX-3、空值最後
+    await pressIn(user, runRoot, "propIds");
+    expect(runIds()).toEqual(["RX-10", "RX-100", "RX-9", "RX-5"]);
+    await pressIn(user, runRoot, "research");
+    expect(runIds()).toEqual(["RX-9", "RX-5", "RX-10", "RX-100"]); // a #2、b #3、c #1、空值最後
+    await pressIn(user, runRoot, "research");
+    expect(runIds()).toEqual(["RX-10", "RX-5", "RX-9", "RX-100"]);
   });
 });

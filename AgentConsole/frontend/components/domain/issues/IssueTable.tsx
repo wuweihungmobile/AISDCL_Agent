@@ -16,10 +16,53 @@ import { Pin } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { Issue } from "@/lib/api/types";
-import { EMPTY_VALUE, effectivePriority, isPinned, orDash, statusText, type IssueTabId } from "@/lib/domain/issues";
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
+import { EMPTY_VALUE, effectivePriority, isPinned, orDash, sortIssues, statusText, type IssueTabId } from "@/lib/domain/issues";
+import { sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import { cn } from "@/lib/utils";
 
-const HEADERS = ["編號", "來源", "標題", "嚴重度", "狀態", "優先順序", "最後更新", "下一步"] as const;
+/** 表頭排序欄位（TCS-ConsoleUxSortHelp §2.1 T2；欄位定義放元件內，`lib/domain/issues.ts` 的兩條顯示序一字不動）。「下一步」是動作欄，不可排。 */
+export const ISSUE_SORT_COLUMNS: ReadonlyArray<SortColumn<Issue>> = [
+  { key: "id", kind: "id", get: (i) => i.id },
+  { key: "source", kind: "text", get: (i) => i.source },
+  { key: "title", kind: "text", get: (i) => i.title },
+  { key: "severity", kind: "rank", get: (i) => (i.severityRank === null || i.severityRank === undefined ? null : String(i.severityRank)), rank: (v) => Number(v) },
+  { key: "status", kind: "text", get: (i) => statusText(i) },
+  { key: "priority", kind: "number", get: (i) => effectivePriority(i) },
+  { key: "updatedAt", kind: "iso", get: (i) => i.updatedAt },
+];
+
+/**
+ * 使用者排序後的列序（D-UX-16）：「全部」分頁的置頂列（待您決定狀態）仍留頂端、其內依佇列序，排序只作用於其下清單；
+ * 其餘分頁整張依欄排序。`sort` 為 null＝呼叫端自己的預設序（displayOrder），不經這裡。
+ */
+export function applyIssueSort(items: ReadonlyArray<Issue>, tab: IssueTabId, pinned: ReadonlySet<string>, sort: NonNullable<SortState>): Issue[] {
+  if (tab === "all") {
+    const top = sortIssues(
+      items.filter((i) => pinned.has(i.status)),
+      "decide",
+    );
+    return [
+      ...top,
+      ...sortRows(
+        items.filter((i) => !pinned.has(i.status)),
+        ISSUE_SORT_COLUMNS,
+        sort,
+      ),
+    ];
+  }
+  return sortRows(items, ISSUE_SORT_COLUMNS, sort);
+}
+
+const HEADERS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: "id", label: "編號" },
+  { key: "source", label: "來源" },
+  { key: "title", label: "標題" },
+  { key: "severity", label: "嚴重度" },
+  { key: "status", label: "狀態" },
+  { key: "priority", label: "優先順序" },
+  { key: "updatedAt", label: "最後更新" },
+];
 
 export type IssueTableProps = {
   /** 已依分頁規則排好序的列 */
@@ -28,6 +71,10 @@ export type IssueTableProps = {
   /** 全部分頁置頂的狀態名（取自圖例） */
   pinned: ReadonlySet<string>;
   isAdmin: boolean;
+  /** 使用者排序狀態；null＝預設序（四分頁的預設序都不是任一欄，起始 aria-sort 全 none） */
+  sort: SortState;
+  onSort: (key: string) => void;
+  onResetSort: () => void;
   selectedId: string | null;
   /** 正在取提案快照的議題編號（該列的「決定」鈕標 aria-busy 並改字；連點由呼叫端擋住，只取一次） */
   snapshotId: string | null;
@@ -91,18 +138,26 @@ function ActionCell({ issue, isAdmin, snapshotId, onDecide, onCloseObservation }
   );
 }
 
-export function IssueTable({ items, tab, pinned, isAdmin, selectedId, snapshotId, onOpen, onRank, onDecide, onCloseObservation }: IssueTableProps) {
+export function IssueTable({ items, tab, pinned, isAdmin, sort, onSort, onResetSort, selectedId, snapshotId, onOpen, onRank, onDecide, onCloseObservation }: IssueTableProps) {
   return (
     <div className="relative overflow-x-auto">
+      {sort ? (
+        <div className="mb-2">
+          <Button variant="ghost" size="sm" data-testid="sort-reset" onClick={onResetSort}>
+            還原預設排序
+          </Button>
+        </div>
+      ) : null}
       <table data-testid="issues-table" className="w-full min-w-[64rem] border-collapse text-left text-sm">
         <caption className="sr-only">議題清單</caption>
         <thead>
           <tr className="border-b border-wg-line text-xs text-wg-muted">
-            {HEADERS.map((header) => (
-              <th key={header} scope="col" className="py-2 pr-3">
-                {header}
-              </th>
+            {HEADERS.map((h) => (
+              <SortableHeader key={h.key} column={h.key} label={h.label} state={sort} onSort={onSort} />
             ))}
+            <th scope="col" className="py-2 pr-3">
+              下一步
+            </th>
           </tr>
         </thead>
         <tbody>

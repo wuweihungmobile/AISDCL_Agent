@@ -61,8 +61,8 @@ describe("歷史記錄（US-I-06）", () => {
     expect(rows[5]).toHaveTextContent("（貼上文字）");
     expect(rows[5]).toHaveTextContent("已放棄");
     expect(screen.getByText("共 6 筆匯入記錄")).toBeInTheDocument();
-    // 預設依建立時間新到舊、每頁 10 筆
-    expect(calls[0].url).toBe("/api/v1/import?page=0&size=10&sort=createdAt%2Cdesc");
+    // 預設依建立順序升冪（TCS-ConsoleUxSortHelp D-UX-10）、每頁 10 筆
+    expect(calls[0].url).toBe("/api/v1/import?page=0&size=10&sort=createdAt%2Casc");
   });
 
   it("只有仍有下一步的記錄（已上傳、已解析、審核中）能「開啟」；解析中與終態沒有開啟鈕", async () => {
@@ -111,5 +111,53 @@ describe("歷史記錄（US-I-06）", () => {
     expect(await screen.findByText("無法載入匯入歷史")).toBeInTheDocument();
     expect(screen.getByText("traceId：tr-500")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+  });
+});
+
+// TCS-ConsoleUxSortHelp-20261108 AT-963-3-14（T1）：匯入歷史後端排序，表頭點擊送對應 sort 並回第 1 頁
+describe("歷史記錄：表頭排序（AT-963-3-14）", () => {
+  it("AT_963_3_14 預設 createdAt,asc；各表頭送對應 sort 且 page=0；匯入時間欄起始 ascending、第一次點它送 createdAt,desc；操作欄無按鈕", async () => {
+    const { calls } = stubApi((c) => ({ data: { content: ROWS, page: 0, size: 10, totalElements: c.query.get("page") === "0" ? 25 : 25, totalPages: 3 } }));
+    renderPanel();
+    await screen.findAllByTestId("import-history-row");
+    const sortOf = () => calls.at(-1)!.query.get("sort");
+    expect(calls[0].query.get("sort")).toBe("createdAt,asc");
+    const th = (name: string) => screen.getByRole("columnheader", { name });
+    expect(th("匯入時間")).toHaveAttribute("aria-sort", "ascending");
+    expect(th("來源")).toHaveAttribute("aria-sort", "none");
+
+    // 先翻到第 2 頁，之後點排序必須回第 1 頁（page=0）
+    await userEvent.click(screen.getByRole("button", { name: "第 2 頁" }));
+    await waitFor(() => expect(calls.at(-1)!.query.get("page")).toBe("1"));
+
+    const click = async (name: string, expected: string) => {
+      const before = calls.length;
+      await userEvent.click(within(screen.getAllByRole("columnheader").find((h) => h.textContent?.includes(name))!).getByRole("button", { name }));
+      await waitFor(() => expect(calls.length).toBeGreaterThan(before));
+      expect(sortOf()).toBe(expected);
+      expect(calls.at(-1)!.query.get("page")).toBe("0");
+    };
+    await click("來源", "sourceFileName,asc");
+    await click("來源", "sourceFileName,desc");
+    await click("狀態", "status,asc");
+    await click("專案", "projectId,asc");
+    await click("AI 模型", "aiModel,asc");
+    await click("Token", "tokenUsed,asc");
+    expect(th("AI 模型 · Token")).toHaveAttribute("aria-sort", "ascending");
+    // 預設欄（匯入時間）在目前不是排序欄；點它從 asc 起算
+    await click("匯入時間", "createdAt,asc");
+
+    // 操作欄（最後一個 th）沒有按鈕
+    const last = screen.getAllByRole("columnheader").at(-1)!;
+    expect(last.querySelector("button")).toBeNull();
+  });
+
+  it("AT_963_3_14 預設狀態下第一次點「匯入時間」（預設欄）即反向送 createdAt,desc", async () => {
+    const { calls } = stubApi(() => ({ data: { content: ROWS, page: 0, size: 10, totalElements: 6, totalPages: 1 } }));
+    renderPanel();
+    await screen.findAllByTestId("import-history-row");
+    await userEvent.click(screen.getByRole("button", { name: "匯入時間" }));
+    await waitFor(() => expect(calls.at(-1)!.query.get("sort")).toBe("createdAt,desc"));
+    expect(screen.getByRole("columnheader", { name: "匯入時間" })).toHaveAttribute("aria-sort", "descending");
   });
 });

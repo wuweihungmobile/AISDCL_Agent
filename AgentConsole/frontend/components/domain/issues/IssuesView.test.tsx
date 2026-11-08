@@ -891,3 +891,130 @@ describe("頁面骨架與狀態說明", () => {
     expect(rowIds()).toEqual(["DEF-999-401"]);
   });
 });
+
+// ── TCS-ConsoleUxSortHelp-20261108 AC-963-3（T2 議題表；W-UX3、W-UX4、D-UX-16、D-UX-18） ──────────────────────
+
+describe("AT_963_3 議題表：預設序不變、表頭排序與還原預設排序", () => {
+  const headers = () => screen.getAllByRole("columnheader");
+  const ariaSorts = () => headers().map((h) => h.getAttribute("aria-sort"));
+  const allUnsorted = () => expect(ariaSorts().every((s) => s === null || s === "none")).toBe(true);
+  const sortBy = async (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(screen.getByTestId("issues-table")).getByRole("button", { name }));
+  const zh = new Intl.Collator("zh-Hant", { numeric: true });
+  /** 某欄文字在畫面列序下是否單調（「—」空值排最後）。 */
+  const monotone = (index: number, dir: "asc" | "desc") => {
+    const texts = rowIds().map((id) => cell(id, index).textContent ?? "");
+    const real = texts.filter((t) => t !== "—");
+    expect(
+      texts.slice(real.length).every((t) => t === "—"),
+      "空值排最後",
+    ).toBe(true);
+    const sorted = [...real].sort(zh.compare);
+    expect(real).toEqual(dir === "asc" ? sorted : sorted.reverse());
+  };
+
+  it("AT_963_3_1 待處理與待您決定：預設列序＝佇列規則（與改動前相同）；沒有任何欄位表頭帶非 none 的 aria-sort", async () => {
+    const { user } = await open();
+    await screen.findByTestId("issues-table");
+    expect(rowIds()).toEqual(PENDING);
+    allUnsorted();
+    await goTo(user, "待您決定");
+    expect(rowIds()).toEqual(DECIDE);
+    allUnsorted();
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+  });
+
+  it("AT_963_3_2 已完成與全部：預設列序＝最後更新降冪規則；全部分頁置頂列在前段；aria-sort 全 none", async () => {
+    const { user } = await open();
+    await goTo(user, "已完成");
+    expect(rowIds()).toEqual(DONE);
+    allUnsorted();
+    await goTo(user, "全部");
+    await waitFor(() => expect(rowIds()).toHaveLength(18));
+    expect(rowIds()).toEqual(ALL);
+    allUnsorted();
+    const pinnedIdx = rowIds().map((id) => within(row(id)).queryByTestId("issue-top-pinned") !== null);
+    expect(pinnedIdx.slice(0, 2)).toEqual([true, true]);
+    expect(pinnedIdx.slice(2).every((p) => !p)).toBe(true);
+  });
+
+  it("AT_963_3_3 依序點最後更新、嚴重度、優先順序、來源、標題、狀態：各欄語意；下一步欄沒有按鈕；八欄字樣不變；全部分頁置頂列仍在頂端", async () => {
+    const stub = newStub();
+    stub.priorities.set("OBS-SI-007", { rank: 1, note: "" });
+    stub.priorities.set("OBS-SI-006", { rank: 5, note: "" });
+    const { user } = await open({ stub });
+    await screen.findByTestId("issues-table");
+    expect(headers().map((h) => h.textContent)).toEqual(["編號", "來源", "標題", "嚴重度", "狀態", "優先順序", "最後更新", "下一步"]);
+    expect(headers()[7].querySelector("button")).toBeNull();
+    expect(headers()[7].hasAttribute("aria-sort")).toBe(false);
+
+    // 最後更新（ISO 時刻；空值最後，兩方向都是）
+    await sortBy(user, "最後更新");
+    expect(rowIds()).toEqual(["DEF-999-005", "OBS-SI-006", "OBS-SI-007", "OBS-SI-008", "OBS-SI-009"]);
+    expect(screen.getByRole("columnheader", { name: "最後更新" })).toHaveAttribute("aria-sort", "ascending");
+    await sortBy(user, "最後更新");
+    expect(rowIds()).toEqual(["OBS-SI-008", "OBS-SI-007", "OBS-SI-006", "DEF-999-005", "OBS-SI-009"]);
+    // 嚴重度（severityRank；量不到排最後；同級依編號升冪）
+    await sortBy(user, "嚴重度");
+    expect(rowIds()).toEqual(["OBS-SI-006", "DEF-999-005", "OBS-SI-007", "OBS-SI-008", "OBS-SI-009"]);
+    await sortBy(user, "嚴重度");
+    expect(rowIds()).toEqual(["DEF-999-005", "OBS-SI-007", "OBS-SI-006", "OBS-SI-008", "OBS-SI-009"]);
+    // 優先順序（無順位排最後，兩個方向都是）
+    await sortBy(user, "優先順序");
+    expect(rowIds()).toEqual(["OBS-SI-007", "OBS-SI-006", "DEF-999-005", "OBS-SI-008", "OBS-SI-009"]);
+    await sortBy(user, "優先順序");
+    expect(rowIds()).toEqual(["OBS-SI-006", "OBS-SI-007", "DEF-999-005", "OBS-SI-008", "OBS-SI-009"]);
+    // 來源／標題／狀態（文字；表中「—」空值最後）
+    await sortBy(user, "來源");
+    monotone(1, "asc");
+    await sortBy(user, "來源");
+    monotone(1, "desc");
+    await sortBy(user, "標題");
+    monotone(2, "asc");
+    await sortBy(user, "標題");
+    monotone(2, "desc");
+    await sortBy(user, "狀態");
+    monotone(4, "asc");
+    await sortBy(user, "狀態");
+    monotone(4, "desc");
+
+    // 全部分頁：排序後置頂列（待您決定）仍在頂端、其內依佇列序
+    await goTo(user, "全部");
+    await waitFor(() => expect(rowIds()).toHaveLength(18));
+    await sortBy(user, "編號");
+    await sortBy(user, "編號"); // 編號降冪
+    expect(rowIds().slice(0, 2)).toEqual(DECIDE);
+    const rest = rowIds().slice(2);
+    expect(rest).toEqual([...rest].sort(zh.compare).reverse());
+    expect(within(row(rowIds()[0])).getByTestId("issue-top-pinned")).toBeInTheDocument();
+  });
+
+  it("AT_963_3_4 排序後出現「還原預設排序」，按下回佇列序、按鈕消失；切分頁再切回排序已重置；已完成分頁同樣可還原", async () => {
+    const { user } = await open();
+    await screen.findByTestId("issues-table");
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+    await sortBy(user, "標題");
+    expect(screen.getByTestId("sort-reset")).toHaveTextContent("還原預設排序");
+    expect(rowIds()).not.toEqual(PENDING);
+    await user.click(screen.getByTestId("sort-reset"));
+    expect(rowIds()).toEqual(PENDING);
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+    allUnsorted();
+
+    await sortBy(user, "標題");
+    expect(screen.getByTestId("sort-reset")).toBeInTheDocument();
+    await goTo(user, "已完成");
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+    allUnsorted();
+    await goTo(user, "待處理");
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+    expect(rowIds()).toEqual(PENDING);
+    allUnsorted();
+
+    await goTo(user, "已完成");
+    await sortBy(user, "編號");
+    expect(screen.getByTestId("sort-reset")).toBeInTheDocument();
+    expect(rowIds()).not.toEqual(DONE);
+    await user.click(screen.getByTestId("sort-reset"));
+    expect(rowIds()).toEqual(DONE);
+  });
+});

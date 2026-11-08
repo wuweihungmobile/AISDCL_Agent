@@ -16,6 +16,7 @@
 import { Globe } from "lucide-react";
 import { useState, type FormEvent } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogBody, DialogContent, DialogFooter } from "@/components/ui/dialog";
@@ -28,6 +29,7 @@ import { useToast } from "@/components/ui/toast";
 import { useAddResearchAllowlistEntry, useResearchAllowlist, useResearchCapabilities, useUpdateResearchAllowlistEntry } from "@/lib/api/queries";
 import type { ResearchAllowlistEntry } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import {
   ALLOWLIST_DEFAULT_INTERVAL,
   ALLOWLIST_LAYER_OPTIONS,
@@ -46,10 +48,24 @@ const EMPTY_FORM: AllowlistForm = { listKind: "WEB", host: "", layer: "INDUSTRY"
 
 const entryKey = (entry: ResearchAllowlistEntry): string => `${entry.listKind}:${entry.host}`;
 
+const layerText = (entry: ResearchAllowlistEntry): string => (entry.layer === null ? "—" : ((SOURCE_LAYER_LABEL as Readonly<Record<string, string | undefined>>)[entry.layer] ?? entry.layer));
+
+/** 表頭排序（TCS-ConsoleUxSortHelp §2.1 T8、D-UX-5）：主機是條目的唯一鍵、當識別欄，預設自然序升冪；「動作」是按鈕欄，不可排。 */
+const SORT_COLUMNS: ReadonlyArray<SortColumn<ResearchAllowlistEntry> & { label: string }> = [
+  { key: "host", label: "主機", kind: "id", get: (e) => e.host },
+  { key: "listKind", label: "清單", kind: "text", get: (e) => ALLOWLIST_LIST_KIND_LABEL[e.listKind] },
+  { key: "layer", label: "層", kind: "text", get: (e) => layerText(e) },
+  { key: "purpose", label: "用途", kind: "text", get: (e) => e.purpose },
+  { key: "source", label: "來源", kind: "text", get: (e) => (e.source === "ENV" ? "ENV 部署設定" : "ADMIN 管理員新增") },
+  { key: "minIntervalSeconds", label: "最小間隔", kind: "number", get: (e) => e.minIntervalSeconds },
+  { key: "enabled", label: "狀態", kind: "text", get: (e) => (e.enabled ? "啟用中" : "已停用") },
+];
+const DEFAULT_SORT: NonNullable<SortState> = { key: "host", dir: "asc" };
+
 function EntryRow({ entry, busy, onToggle }: { entry: ResearchAllowlistEntry; busy: boolean; onToggle: (entry: ResearchAllowlistEntry, enabled: boolean) => void }) {
   // ENV 基底沒有資料列（id 為 null）：沒有任何動作
   const actionable = entry.source === "ADMIN" && entry.id !== null;
-  const layerLabel = entry.layer === null ? "—" : ((SOURCE_LAYER_LABEL as Readonly<Record<string, string | undefined>>)[entry.layer] ?? entry.layer);
+  const layerLabel = layerText(entry);
   return (
     <tr
       data-testid="allowlist-row"
@@ -245,7 +261,9 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
   const list = useResearchAllowlist(true);
   const update = useUpdateResearchAllowlistEntry();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortState>(null);
   const entries = list.data;
+  const sorted = entries ? sortRows(entries, SORT_COLUMNS, sort ?? DEFAULT_SORT) : undefined;
 
   async function toggle(entry: ResearchAllowlistEntry, enabled: boolean) {
     if (entry.id === null) return;
@@ -282,15 +300,24 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
               <caption className="sr-only">研究來源清單</caption>
               <thead>
                 <tr className="bg-wg-base text-left text-xs text-wg-muted">
-                  {["主機", "清單", "層", "用途", "來源", "最小間隔", "狀態", "動作"].map((head) => (
-                    <th key={head} scope="col" className="px-3 py-2 font-medium">
-                      {head}
-                    </th>
+                  {SORT_COLUMNS.slice(0, 7).map((c) => (
+                    <SortableHeader
+                      key={c.key}
+                      column={c.key}
+                      label={c.label}
+                      state={sort}
+                      defaultSort={DEFAULT_SORT}
+                      onSort={(key) => setSort((s) => nextSort(s, key, DEFAULT_SORT))}
+                      className="px-3 py-2 font-medium"
+                    />
                   ))}
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    動作
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {entries.map((entry) => (
+                {(sorted ?? entries).map((entry) => (
                   <EntryRow key={entryKey(entry)} entry={entry} busy={entry.id !== null && busyId === entry.id} onToggle={(e, enabled) => void toggle(e, enabled)} />
                 ))}
               </tbody>

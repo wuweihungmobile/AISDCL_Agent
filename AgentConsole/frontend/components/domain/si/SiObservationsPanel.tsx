@@ -11,6 +11,7 @@
  */
 import { Fragment, useState } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { Button } from "@/components/ui/button";
 import { useSiObservations } from "@/lib/api/queries";
 import type { SiObservation, SiObservationRow } from "@/lib/api/types";
@@ -33,6 +34,7 @@ import {
   type DateWindow,
   type ObsFilters,
 } from "@/lib/domain/si";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import {
   ExpandToggle,
   FilterSelect,
@@ -50,6 +52,17 @@ import {
 } from "./siParts";
 
 const BASE_COLUMNS = 7;
+
+/** 表頭排序（TCS-ConsoleUxSortHelp §2.1 T3）：排序只作用於已載入列；預設＝ID 自然序升冪；壞列不參與排序、恆在有效列之後依 line 升冪（W-UX3）。 */
+const SORT_COLUMNS: ReadonlyArray<SortColumn<SiObservation>> = [
+  { key: "id", kind: "id", get: (r) => r.id },
+  { key: "time", kind: "iso", get: (r) => r.time },
+  { key: "category", kind: "text", get: (r) => r.category },
+  { key: "severity", kind: "text", get: (r) => r.severity },
+  { key: "disposition", kind: "text", get: (r) => r.disposition },
+  { key: "symptom", kind: "text", get: (r) => r.symptom },
+];
+const DEFAULT_SORT: NonNullable<SortState> = { key: "id", dir: "asc" };
 
 /** P2b 的寫入入口回呼（只有 ADMIN 才會傳）：新增一列、更正某列、關閉某列（只對處置恰為 open 的有效列）。 */
 export type ObservationWriteActions = { onNew: () => void; onCorrect: (id: string) => void; onCloseObservation: (id: string) => void };
@@ -112,6 +125,7 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
   const q = useSiObservations();
   const [filters, setFilters] = useState<ObsFilters>(EMPTY_OBS_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [sort, setSort] = useState<SortState>(null);
 
   const pages = q.data?.pages;
   const last = pages?.[pages.length - 1];
@@ -139,7 +153,18 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
 
   const anchor = last.generatedAt;
   const valid = items.filter((r): r is SiObservation => !isInvalidRow(r));
-  const shown = filterObservations(items, filters, anchor);
+  const filtered = filterObservations(items, filters, anchor);
+  // 有效列依欄排序（預設 ID 升冪）；壞列（無 ID）不參與，一律排在其後、依 line 升冪，升降冪相同
+  const shown: SiObservationRow[] = [
+    ...sortRows(
+      filtered.filter((r): r is SiObservation => !isInvalidRow(r)),
+      SORT_COLUMNS,
+      sort ?? DEFAULT_SORT,
+    ),
+    ...filtered.filter(isInvalidRow).sort((a, b) => a.line - b.line),
+  ];
+  const onSort = (key: string) => setSort((s) => nextSort(s, key, DEFAULT_SORT));
+  const head = (column: string, label: string, className: string) => <SortableHeader column={column} label={label} state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={className} />;
   const bucketsPresent = hasBucketData(items);
   const set = <K extends keyof ObsFilters>(key: K, value: ObsFilters[K]) => setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -199,24 +224,12 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
                 <th scope="col" className="w-10 py-2">
                   <span className="sr-only">操作</span>
                 </th>
-                <th scope="col" className="w-28 py-2 pr-3">
-                  ID
-                </th>
-                <th scope="col" className="w-40 py-2 pr-3">
-                  時間
-                </th>
-                <th scope="col" className="w-24 py-2 pr-3">
-                  分類
-                </th>
-                <th scope="col" className="w-20 py-2 pr-3">
-                  嚴重度
-                </th>
-                <th scope="col" className="w-48 py-2 pr-3">
-                  處置
-                </th>
-                <th scope="col" className="py-2">
-                  症狀
-                </th>
+                {head("id", "ID", "w-28 py-2 pr-3")}
+                {head("time", "時間", "w-40 py-2 pr-3")}
+                {head("category", "分類", "w-24 py-2 pr-3")}
+                {head("severity", "嚴重度", "w-20 py-2 pr-3")}
+                {head("disposition", "處置", "w-48 py-2 pr-3")}
+                {head("symptom", "症狀", "py-2")}
                 {actions ? (
                   <th scope="col" className="w-36 py-2 pl-3">
                     <span className="sr-only">寫入操作</span>

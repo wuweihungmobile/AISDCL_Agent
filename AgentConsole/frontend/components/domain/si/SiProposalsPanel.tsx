@@ -12,6 +12,7 @@
  */
 import { Fragment, useState } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { Button } from "@/components/ui/button";
 import { useSiProposals } from "@/lib/api/queries";
 import type { SiProposal } from "@/lib/api/types";
@@ -35,6 +36,7 @@ import {
   propStatusClass,
   type ProposalFilters,
 } from "@/lib/domain/si";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import {
   ExpandToggle,
   FilterSelect,
@@ -52,6 +54,19 @@ import {
 } from "./siParts";
 
 const BASE_COLUMNS = 9;
+
+/** 表頭排序（TCS-ConsoleUxSortHelp §2.1 T4）：排序只作用於已載入列；預設＝ID 自然序升冪；rev 依數字、其餘依文字。 */
+const SORT_COLUMNS: ReadonlyArray<SortColumn<SiProposal> & { label: string }> = [
+  { key: "id", label: "ID", kind: "id", get: (p) => p.id },
+  { key: "state", label: "狀態", kind: "text", get: (p) => p.state },
+  { key: "cls", label: "類別", kind: "text", get: (p) => p.cls },
+  { key: "route", label: "route", kind: "text", get: (p) => p.route },
+  { key: "rev", label: "rev", kind: "number", get: (p) => p.rev },
+  { key: "digest", label: "digest", kind: "text", get: (p) => p.digest },
+  { key: "verdict", label: "verdict", kind: "text", get: (p) => describeValue(p.verdict) },
+  { key: "cooldown", label: "cooldown", kind: "text", get: (p) => describeValue(p.cooldown) },
+];
+const DEFAULT_SORT: NonNullable<SortState> = { key: "id", dir: "asc" };
 
 /** `nullIsNe`：該欄的 null 是「量不到」而不是「無」（R16）——touched／touchedCount 在 rN.patch 讀不到時為 null，空集合是 `[]` 與 `0`。 */
 const OTHER_FIELDS: ReadonlyArray<{ key: keyof SiProposal & string; label: string; nullIsNe?: boolean }> = [
@@ -94,6 +109,7 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
   const q = useSiProposals();
   const [filters, setFilters] = useState<ProposalFilters>(EMPTY_PROPOSAL_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [sort, setSort] = useState<SortState>(null);
 
   const pages = q.data?.pages;
   const last = pages?.[pages.length - 1];
@@ -120,7 +136,7 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
   if (!pages || !last) return <SiLoading what="提案" />;
 
   const ne = mergeNotes(pages.map((p) => p.ne));
-  const shown = filterProposals(items, filters);
+  const shown = sortRows(filterProposals(items, filters), SORT_COLUMNS, sort ?? DEFAULT_SORT);
   const set = <K extends keyof ProposalFilters>(key: K, value: ProposalFilters[K]) => setFilters((prev) => ({ ...prev, [key]: value }));
   // 狀態未登記的提案在快篩下照常顯示：只有快篩開著時才算「照常顯示」（沒開快篩時它與其他列一樣依正常規則顯示）
   const pinned = (p: SiProposal) => statusActive && propStatusClass(p.state) === "unknown";
@@ -156,10 +172,8 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
                 <th scope="col" className="w-10 py-2">
                   <span className="sr-only">操作</span>
                 </th>
-                {["ID", "狀態", "類別", "route", "rev", "digest", "verdict", "cooldown"].map((h) => (
-                  <th key={h} scope="col" className="py-2 pr-3">
-                    {h}
-                  </th>
+                {SORT_COLUMNS.map((c) => (
+                  <SortableHeader key={c.key} column={c.key} label={c.label} state={sort} defaultSort={DEFAULT_SORT} onSort={(key) => setSort((s) => nextSort(s, key, DEFAULT_SORT))} />
                 ))}
                 {onDecide ? (
                   <th scope="col" className="py-2">

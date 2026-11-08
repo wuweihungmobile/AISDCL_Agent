@@ -139,7 +139,8 @@ describe("AT_960_19_8 清單：區分來源 ENV 與 ADMIN；ENV 條目沒有停�
     await openDialog(user);
     expect(await screen.findAllByTestId("allowlist-row")).toHaveLength(5);
     const sources = screen.getAllByTestId("allowlist-row").map((row) => `${row.getAttribute("data-host")}｜${row.getAttribute("data-source")}`);
-    expect(sources).toEqual([...BASE_HOSTS.map((host) => `${host}｜ENV`), "docs.example.com｜ADMIN"]);
+    // 預設主機自然序升冪（TCS-ConsoleUxSortHelp D-UX-5；原為 API 回應序：基底在前、ADMIN 在後）
+    expect(sources).toEqual([...BASE_HOSTS.map((host) => `${host}｜ENV`), "docs.example.com｜ADMIN"].sort(new Intl.Collator("zh-Hant", { numeric: true }).compare));
     for (const host of BASE_HOSTS) {
       const row = rowOf(host);
       expect(within(row).getByText("ENV 部署設定")).toBeInTheDocument();
@@ -408,5 +409,38 @@ describe("AT_960_19_8 停用與啟用：PATCH 本文只有 enabled", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(openButton()).toHaveFocus();
+  });
+});
+
+// TCS-ConsoleUxSortHelp-20261108 AT-963-3-10（T8 允許清單；D-UX-5：主機是識別欄）
+describe("AT_963_3_10 允許清單：預設主機自然序升冪與表頭排序", () => {
+  const hosts = () => screen.getAllByTestId("allowlist-row").map((row) => row.getAttribute("data-host"));
+
+  it("AT_963_3_10 預設主機升冪（主機欄 ascending）；最小間隔依數字排、同值依主機升冪；動作欄無按鈕；八欄字樣依序不變", async () => {
+    const user = userEvent.setup();
+    mountDialog("ADMIN");
+    const dialog = await openDialog(user);
+    await screen.findAllByTestId("allowlist-row");
+    const table = within(dialog).getByTestId("allowlist-table");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((th) => th.textContent),
+    ).toEqual(["主機", "清單", "層", "用途", "來源", "最小間隔", "狀態", "動作"]);
+    expect(hosts()).toEqual(["api.github.com", "api.semanticscholar.org", "api.stackexchange.com", "docs.example.com", "export.arxiv.org"]);
+    expect(within(table).getByRole("columnheader", { name: "主機" })).toHaveAttribute("aria-sort", "ascending");
+    const action = within(table).getByRole("columnheader", { name: "動作" });
+    expect(action.querySelector("button")).toBeNull();
+    expect(action.hasAttribute("aria-sort")).toBe(false);
+
+    await user.click(within(within(table).getByRole("columnheader", { name: "最小間隔" })).getByRole("button"));
+    expect(hosts()).toEqual(["api.github.com", "api.semanticscholar.org", "api.stackexchange.com", "export.arxiv.org", "docs.example.com"]);
+    await user.click(within(within(table).getByRole("columnheader", { name: "最小間隔" })).getByRole("button"));
+    expect(hosts()).toEqual(["docs.example.com", "api.semanticscholar.org", "api.stackexchange.com", "export.arxiv.org", "api.github.com"]);
+    // 第一次點預設欄（主機）即反向
+    await user.click(within(within(table).getByRole("columnheader", { name: "主機" })).getByRole("button"));
+    expect(hosts()).toEqual(["api.github.com", "api.semanticscholar.org", "api.stackexchange.com", "docs.example.com", "export.arxiv.org"]);
+    await user.click(within(within(table).getByRole("columnheader", { name: "主機" })).getByRole("button"));
+    expect(hosts()).toEqual(["export.arxiv.org", "docs.example.com", "api.stackexchange.com", "api.semanticscholar.org", "api.github.com"]);
   });
 });

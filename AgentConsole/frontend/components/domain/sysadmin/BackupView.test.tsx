@@ -694,3 +694,127 @@ describe("AT_BK_08_2 涵蓋範圍表", () => {
     expect(panel.querySelectorAll("a[href], input, select, textarea, button")).toHaveLength(0);
   });
 });
+
+// ── TCS-ConsoleUxSortHelp-20261108 AT-963-3-9（T7 備份清單；W-UX3、W-UX4、勘誤 BK-1） ─────────────────────────────
+
+describe("AT_963_3_9 備份清單：預設新到舊不變、表頭排序與還原預設排序", () => {
+  // API 序（結束時間新到舊；L-A 與 L-B 結束時間相同，用來鎖 tie-break＝標籤降冪）；L-C 的開始、耗時、資料庫為缺值
+  const base = clone(BACKUPS[0]);
+  const rows = [
+    {
+      ...base,
+      kind: "full",
+      label: "L-A",
+      location: "repo1",
+      startedAt: "2026-10-26T09:50:00Z",
+      finishedAt: "2026-10-26T10:00:00Z",
+      durationSeconds: 600,
+      databaseSizeBytes: 100,
+      repoSizeBytes: 50,
+      baseLabel: null,
+      result: "ok",
+    },
+    {
+      ...base,
+      kind: "diff",
+      label: "L-B",
+      location: "repo2",
+      startedAt: "2026-10-26T09:55:00Z",
+      finishedAt: "2026-10-26T10:00:00Z",
+      durationSeconds: 300,
+      databaseSizeBytes: 200,
+      repoSizeBytes: 500,
+      baseLabel: "L-A",
+      result: "ok_with_errors",
+    },
+    {
+      ...base,
+      kind: "logical",
+      label: "L-C",
+      location: "logical",
+      startedAt: null,
+      finishedAt: "2026-10-25T10:00:00Z",
+      durationSeconds: null,
+      databaseSizeBytes: null,
+      repoSizeBytes: 70,
+      baseLabel: null,
+      result: "ok",
+    },
+    {
+      ...base,
+      kind: "full",
+      label: "L-D",
+      location: "repo1",
+      startedAt: "2026-10-24T09:00:00Z",
+      finishedAt: "2026-10-24T09:30:00Z",
+      durationSeconds: 1800,
+      databaseSizeBytes: 300,
+      repoSizeBytes: 20,
+      baseLabel: null,
+      result: "ok",
+    },
+  ] as unknown as typeof BACKUPS;
+  const API_ORDER = ["L-A", "L-B", "L-C", "L-D"];
+  const press = async (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(testId("bk-table")).getByRole("button", { name }));
+  const ariaOf = (name: string) => screen.getByRole("columnheader", { name }).getAttribute("aria-sort");
+
+  it("預設列序與表頭序不變（API 回應序）；「結束」欄起始 aria-sort=descending、其餘 none；沒有還原鈕", async () => {
+    await open({ overview: makeOverview({ backups: [...rows] }) });
+    expect(rowLabels()).toEqual(API_ORDER);
+    const heads = within(testId("bk-table")).getAllByRole("columnheader");
+    expect(heads.map((th) => th.textContent)).toEqual(["類型", "標籤", "儲存位置", "開始", "結束", "耗時", "資料庫", "備份", "基準", "結果"]);
+    expect(heads.map((th) => th.getAttribute("aria-sort"))).toEqual(["none", "none", "none", "none", "descending", "none", "none", "none", "none", "none"]);
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+  });
+
+  it("數值欄（耗時、資料庫、備份）依數值排、缺值兩個方向都在最後；開始依時刻", async () => {
+    const { user } = await open({ overview: makeOverview({ backups: [...rows] }) });
+    await press(user, "耗時");
+    expect(rowLabels()).toEqual(["L-B", "L-A", "L-D", "L-C"]);
+    await press(user, "耗時");
+    expect(rowLabels()).toEqual(["L-D", "L-A", "L-B", "L-C"]);
+    await press(user, "資料庫");
+    expect(rowLabels()).toEqual(["L-A", "L-B", "L-D", "L-C"]);
+    expect(text(within(testId("bk-row-L-C")).getAllByRole("cell")[6])).toBe("—");
+    await press(user, "資料庫");
+    expect(rowLabels()).toEqual(["L-D", "L-B", "L-A", "L-C"]);
+    await press(user, "備份");
+    expect(rowLabels()).toEqual(["L-D", "L-A", "L-C", "L-B"]);
+    await press(user, "開始");
+    expect(rowLabels()).toEqual(["L-D", "L-A", "L-B", "L-C"]);
+    await press(user, "開始");
+    expect(rowLabels()).toEqual(["L-B", "L-A", "L-D", "L-C"]);
+  });
+
+  it("標籤欄依自然序；結束時間相同的兩列與同結果的列，升降冪都依「標籤」降冪（tieDir=desc）", async () => {
+    const { user } = await open({ overview: makeOverview({ backups: [...rows] }) });
+    await press(user, "標籤");
+    expect(rowLabels()).toEqual(["L-A", "L-B", "L-C", "L-D"]);
+    await press(user, "標籤");
+    expect(rowLabels()).toEqual(["L-D", "L-C", "L-B", "L-A"]);
+    // 結束：起始是 descending，第一次點即反向為升冪；L-A、L-B 同時刻 → 標籤降冪（B 在 A 前），兩方向相同
+    await press(user, "結束");
+    expect(ariaOf("結束")).toBe("ascending");
+    expect(rowLabels()).toEqual(["L-D", "L-C", "L-B", "L-A"]);
+    await press(user, "結束");
+    expect(ariaOf("結束")).toBe("descending");
+    expect(rowLabels()).toEqual(["L-B", "L-A", "L-C", "L-D"]);
+    // 結果（文字）：「成功」三列同值 → 標籤降冪（D、C、A），「成功，但有校驗錯誤」的 B 在後；降冪時 B 在前、其餘仍標籤降冪
+    await press(user, "結果");
+    expect(rowLabels()).toEqual(["L-D", "L-C", "L-A", "L-B"]);
+    await press(user, "結果");
+    expect(rowLabels()).toEqual(["L-B", "L-D", "L-C", "L-A"]);
+  });
+
+  it("排序後出現「還原預設排序」，按下回新到舊（API 序）、按鈕消失、「結束」回 descending", async () => {
+    const { user } = await open({ overview: makeOverview({ backups: [...rows] }) });
+    await press(user, "類型");
+    expect(testId("sort-reset")).toHaveTextContent("還原預設排序");
+    expect(ariaOf("類型")).toBe("ascending");
+    await user.click(testId("sort-reset"));
+    expect(rowLabels()).toEqual(API_ORDER);
+    expect(screen.queryByTestId("sort-reset")).toBeNull();
+    expect(ariaOf("結束")).toBe("descending");
+    expect(ariaOf("類型")).toBe("none");
+  });
+});

@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 
 import { PageTitle } from "@/components/domain/PageHeader";
+import { SortBar } from "@/components/domain/common/SortBar";
 import { ConfirmDialog } from "@/components/domain/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -58,7 +59,28 @@ import {
   type ProjectBadgeId,
   type ProjectFilter,
 } from "@/lib/domain/research";
+import { sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import { cn } from "@/lib/utils";
+
+/**
+ * 排序控制列（TCS-ConsoleUxSortHelp W-UX5／§2.2 L2）：API 回應序不變（更新時間新到舊），UI 預設依編號自然序升冪；欄位定義放元件內，`filterProjects` 不排序。
+ * 排序與篩選各自獨立：切篩選不重置排序、搜尋縮小清單後仍依目前排序。
+ */
+const SORT_COLUMNS: ReadonlyArray<SortColumn<ResearchProjectSummary>> = [
+  { key: "rpNo", kind: "id", get: (p) => p.rpNo },
+  { key: "title", kind: "text", get: (p) => p.title },
+  { key: "status", kind: "text", get: (p) => PROJECT_BADGE_LABEL[projectBadge(p)] },
+  { key: "step", kind: "number", get: (p) => FLOW_STEP_IDS.indexOf(p.flowStep) },
+  { key: "updatedAt", kind: "iso", get: (p) => p.updatedAt },
+];
+const SORT_OPTIONS = [
+  { key: "rpNo", label: "編號" },
+  { key: "title", label: "標題" },
+  { key: "status", label: "狀態" },
+  { key: "step", label: "步驟" },
+  { key: "updatedAt", label: "最近更新" },
+] as const;
+const DEFAULT_SORT: NonNullable<SortState> = { key: "rpNo", dir: "asc" };
 import { FlowStepper } from "./FlowStepper";
 
 type FormErrors = Partial<Record<"topic" | "slug" | "depthLevel" | "layers", string>>;
@@ -260,6 +282,7 @@ export function ResearchListView({ extraActions }: { extraActions?: ReactNode })
   const archive = useArchiveResearchProject();
   const restore = useRestoreResearchProject();
   const [filter, setFilter] = useState<ProjectFilter>(ALL_FILTER);
+  const [sort, setSort] = useState<NonNullable<SortState>>(DEFAULT_SORT);
   const [creating, setCreating] = useState(false);
   const [archiving, setArchiving] = useState<ResearchProjectSummary | null>(null);
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -268,7 +291,7 @@ export function ResearchListView({ extraActions }: { extraActions?: ReactNode })
   const archivedList = useResearchProjects({ archived: true, enabled: filter.status === "archived" });
   const list = filter.status === "archived" ? archivedList : activeList;
   const projects = list.data;
-  const shown = projects === undefined ? [] : filterProjects(projects, filter);
+  const shown = projects === undefined ? [] : sortRows(filterProjects(projects, filter), SORT_COLUMNS, sort);
   const filtering = filter.q.trim() !== "" || filter.status !== "all" || filter.step !== "all";
   // 標題列的總數與篩選列的有無都看「未封存」那份：選到「已封存」時另一份才載入，篩選列不能跟著它消失（否則回不去）
   const activeCount = activeList.data?.length;
@@ -327,6 +350,7 @@ export function ResearchListView({ extraActions }: { extraActions?: ReactNode })
               </option>
             ))}
           </Select>
+          <SortBar options={SORT_OPTIONS} state={sort} onChange={setSort} label="研究專案排序" />
         </div>
       ) : null}
 

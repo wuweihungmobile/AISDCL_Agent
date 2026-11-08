@@ -58,11 +58,12 @@ import {
   type IssueTabId,
 } from "@/lib/domain/issues";
 import { mergeNotes, mergePages, siErrorParts } from "@/lib/domain/si";
+import { nextSort, type SortState } from "@/lib/domain/sorting";
 import { cn } from "@/lib/utils";
 import { IssueDetail } from "./IssueDetail";
 import { IssueLegend } from "./IssueLegend";
 import { IssuePriorityDialog, type PriorityTarget } from "./IssuePriorityDialog";
-import { IssueTable } from "./IssueTable";
+import { IssueTable, applyIssueSort } from "./IssueTable";
 
 const ID_BASE = "issues-tab";
 const SUMMARY_CELLS = [
@@ -200,6 +201,8 @@ export function IssuesView() {
 
   const [tab, setTab] = useState<IssueTabId>("pending");
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_ISSUE_FILTERS);
+  /** 表頭排序（只在記憶體；切分頁重置，D-UX-4）。null＝R-IC-33 的預設序。 */
+  const [sort, setSort] = useState<SortState>(null);
   const [legendOpen, setLegendOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [rankTarget, setRankTarget] = useState<PriorityTarget | null>(null);
@@ -239,10 +242,14 @@ export function IssuesView() {
   const pinned = useMemo(() => pinnedStatuses(legend), [legend]);
   // 狀態 pill 只屬於全部分頁、結果快篩只屬於已完成分頁：其他分頁不受殘留的選值影響
   const active = useMemo<IssueFilters>(() => ({ ...filters, status: tab === "all" ? filters.status : "", result: tab === "done" ? filters.result : "" }), [filters, tab]);
-  const visible = useMemo(() => displayOrder(filterIssues(items, active, legend), tab, pinned), [items, active, legend, tab, pinned]);
+  const visible = useMemo(() => {
+    const filtered = filterIssues(items, active, legend);
+    return sort ? applyIssueSort(filtered, tab, pinned, sort) : displayOrder(filtered, tab, pinned);
+  }, [items, active, legend, tab, pinned, sort]);
 
   function changeTab(next: IssueTabId) {
     setTab(next);
+    setSort(null);
     setFilters((f) => ({ ...f, status: "", result: "" }));
   }
   const setFilter = <K extends keyof IssueFilters>(key: K, value: IssueFilters[K]) => setFilters((f) => ({ ...f, [key]: value }));
@@ -336,6 +343,9 @@ export function IssuesView() {
             tab={tab}
             pinned={pinned}
             isAdmin={isAdmin}
+            sort={sort}
+            onSort={(key) => setSort((s) => nextSort(s, key))}
+            onResetSort={() => setSort(null)}
             selectedId={selectedId}
             snapshotId={snapshotId}
             onOpen={openDetail}

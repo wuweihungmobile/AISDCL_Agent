@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -155,5 +156,54 @@ describe("AT_962_21_E_2 純文字渲染：摘要含 HTML 不執行", () => {
     expect(code.length).toBeGreaterThan(500);
     expect(code.replace(/\/\*[\s\S]*?\*\//g, "")).not.toContain("dangerouslySetInnerHTML");
     expect("<div dangerouslySetInnerHTML={x} />").toContain("dangerouslySetInnerHTML");
+  });
+});
+
+// TCS-ConsoleUxSortHelp-20261108 AT-963-3-11（T9 追溯表）
+describe("AT_963_3_11 追溯表：預設 AC 自然序升冪與表頭排序", () => {
+  const acs = () => screen.getAllByTestId("trace-row").map((r) => r.getAttribute("data-ac"));
+  const press = async (user: ReturnType<typeof userEvent.setup>, name: string) => user.click(within(screen.getByRole("columnheader", { name })).getByRole("button"));
+  const DATA: ResearchTraceability = {
+    ...FIXTURE,
+    rows: [
+      row({ ac: "AC-10-1", userStory: "乙", unitStatus: "FAIL", e2eStatus: "NOT_RUN", lastRunAt: "2026-11-02T00:00:00+08:00", source: ["b"] }),
+      row({ ac: "AC-9-1", userStory: "丙", unitStatus: "PASS", e2eStatus: "PASS", lastRunAt: "2026-11-01T23:00:00Z", source: ["a"] }),
+      row({ ac: "AC-100-1", userStory: "甲", unitStatus: "NONE", e2eStatus: "FAIL", lastRunAt: null, source: [] }),
+    ],
+    totals: { acTotal: 3, covered: 1, uncovered: 2, frTotal: 1 },
+  };
+
+  it("AT_963_3_11 預設 AC 自然序（9 < 10 < 100）、AC 欄 ascending；使用者故事、單元狀態、最近執行（ISO 時刻、空值最後）、來源各依語意；列首 th scope=row 維持", async () => {
+    const user = userEvent.setup();
+    render(<TraceabilityTable data={DATA} />);
+    expect(acs()).toEqual(["AC-9-1", "AC-10-1", "AC-100-1"]);
+    expect(screen.getByRole("columnheader", { name: "AC" })).toHaveAttribute("aria-sort", "ascending");
+    expect(screen.getAllByRole("columnheader").map((h) => h.textContent)).toEqual(["AC", "使用者故事", "Gherkin 摘要", "單元狀態", "端對端狀態", "最近執行", "來源"]);
+    for (const th of screen.getAllByRole("rowheader")) expect(th).toHaveAttribute("scope", "row");
+    const zh = new Intl.Collator("zh-Hant", { numeric: true });
+    await press(user, "使用者故事");
+    expect(acs()).toEqual(
+      [...["AC-10-1", "AC-9-1", "AC-100-1"]].sort((a, b) => zh.compare({ "AC-10-1": "乙", "AC-9-1": "丙", "AC-100-1": "甲" }[a]!, { "AC-10-1": "乙", "AC-9-1": "丙", "AC-100-1": "甲" }[b]!)),
+    );
+    // 最近執行：+08:00 的 11-02 00:00 ＝ 11-01 16:00Z，早於 11-01 23:00Z；空值最後（兩個方向）
+    await press(user, "最近執行");
+    expect(acs()).toEqual(["AC-10-1", "AC-9-1", "AC-100-1"]);
+    await press(user, "最近執行");
+    expect(acs()).toEqual(["AC-9-1", "AC-10-1", "AC-100-1"]);
+    await press(user, "單元狀態");
+    expect(acs()).toEqual(
+      [...["AC-10-1", "AC-9-1", "AC-100-1"]].sort((a, b) =>
+        zh.compare({ "AC-10-1": "失敗", "AC-9-1": "通過", "AC-100-1": "無覆蓋任務" }[a]!, { "AC-10-1": "失敗", "AC-9-1": "通過", "AC-100-1": "無覆蓋任務" }[b]!),
+      ),
+    );
+    await press(user, "來源");
+    expect(acs()).toEqual(["AC-9-1", "AC-10-1", "AC-100-1"]);
+    await press(user, "來源");
+    expect(acs()).toEqual(["AC-10-1", "AC-9-1", "AC-100-1"]);
+    // 第一次點預設欄 AC 即降冪
+    await press(user, "AC");
+    expect(acs()).toEqual(["AC-9-1", "AC-10-1", "AC-100-1"]);
+    await press(user, "AC");
+    expect(acs()).toEqual(["AC-100-1", "AC-10-1", "AC-9-1"]);
   });
 });

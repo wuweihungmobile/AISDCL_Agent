@@ -12,9 +12,12 @@
  *  - `rtm`（RTM 彙總，諮詢視圖；`advisory` 恆 true）顯示「諮詢」標記：它不是閘門，閘門只看未覆蓋數與狀態機現態。
  */
 import { CircleAlert, CircleCheck } from "lucide-react";
+import { useState } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import type { ResearchTraceRow, ResearchTraceStatus, ResearchTraceability } from "@/lib/api/types";
 import { DELIVER_LABEL } from "@/lib/domain/research";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 
 /** 狀態的文字標記（單一登記處；ReleaseActions 的未覆蓋清單也用它）。 */
 export const TRACE_STATUS_TEXT: Readonly<Record<ResearchTraceStatus, string>> = {
@@ -32,8 +35,22 @@ const GHERKIN_LABEL = { given: "Given", when: "When", then: "Then" } as const;
 
 const statusText = (status: ResearchTraceStatus): string => TRACE_STATUS_TEXT[status] ?? status;
 
+/** 表頭排序（TCS-ConsoleUxSortHelp §2.1 T9）：預設 AC 自然序升冪（與 Bridge sorted(frozen.acs) 同序）；列首 `<th scope="row">` 維持。 */
+const SORT_COLUMNS: ReadonlyArray<SortColumn<ResearchTraceRow> & { label: string }> = [
+  { key: "ac", label: "AC", kind: "id", get: (r) => r.ac },
+  { key: "userStory", label: "使用者故事", kind: "text", get: (r) => r.userStory },
+  { key: "gherkin", label: "Gherkin 摘要", kind: "text", get: (r) => `${r.gherkinSummary.given} ${r.gherkinSummary.when} ${r.gherkinSummary.then}` },
+  { key: "unit", label: "單元狀態", kind: "text", get: (r) => statusText(r.unitStatus) },
+  { key: "e2e", label: "端對端狀態", kind: "text", get: (r) => statusText(r.e2eStatus) },
+  { key: "lastRunAt", label: "最近執行", kind: "iso", get: (r) => r.lastRunAt },
+  { key: "source", label: "來源", kind: "text", get: (r) => (r.source.length === 0 ? null : r.source.join(" ")) },
+];
+const DEFAULT_SORT: NonNullable<SortState> = { key: "ac", dir: "asc" };
+
 export function TraceabilityTable({ data }: { data: ResearchTraceability }) {
-  const { rows, totals, rtm } = data;
+  const { totals, rtm } = data;
+  const [sort, setSort] = useState<SortState>(null);
+  const rows = sortRows(data.rows, SORT_COLUMNS, sort ?? DEFAULT_SORT);
   return (
     <section data-testid="traceability-table" aria-label={DELIVER_LABEL.traceability} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
@@ -59,10 +76,16 @@ export function TraceabilityTable({ data }: { data: ResearchTraceability }) {
         <table aria-label={`${DELIVER_LABEL.traceability}：一個驗收條件一列`} className="w-full min-w-[720px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-wg-line text-left text-xs text-wg-muted">
-              {["AC", "使用者故事", "Gherkin 摘要", "單元狀態", "端對端狀態", "最近執行", "來源"].map((head) => (
-                <th key={head} scope="col" className="px-2 py-1.5 font-medium">
-                  {head}
-                </th>
+              {SORT_COLUMNS.map((c) => (
+                <SortableHeader
+                  key={c.key}
+                  column={c.key}
+                  label={c.label}
+                  state={sort}
+                  defaultSort={DEFAULT_SORT}
+                  onSort={(key) => setSort((s) => nextSort(s, key, DEFAULT_SORT))}
+                  className="px-2 py-1.5 font-medium"
+                />
               ))}
             </tr>
           </thead>

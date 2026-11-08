@@ -15,6 +15,7 @@
 import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
@@ -33,6 +34,7 @@ import {
   unanchoredCount,
   type ProsConsEntry,
 } from "@/lib/domain/research";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import { cn } from "@/lib/utils";
 
 export type EvidenceMatrixView = "table" | "proscons";
@@ -42,6 +44,33 @@ const panelProps = (panel: { id: string; labelledBy: string } | undefined) => (p
 
 const COUNTER_LABEL: Readonly<Record<ResearchCounterEvidence["conclusion"], string>> = { WEAKEN: "削弱", LIMIT: "限縮", IRRELEVANT: "無關", NOT_FOUND: "查無", NOT_SEARCHED: "未搜尋" };
 const OBSERVED_LABEL = { BRIDGE: "Bridge 觀測", AGENT_DECLARED: "agent 宣告" } as const;
+
+/**
+ * 表頭排序（TCS-ConsoleUxSortHelp §2.1 T10、T11）：兩張表各自預設編號自然序升冪（E-9 在 E-10 前）；「標記」是複合徽章、無單一值，不可排；
+ * 層級以 V 後的數字當序位（V0～V3 依字面升冪）。優缺點矩陣（`proscons-matrix`）是範圍外，不加排序。
+ */
+type ColumnOf<T> = SortColumn<T> & { label: string };
+const FETCH_COLUMNS: ReadonlyArray<ColumnOf<ResearchSource["fetches"][number]>> = [
+  { key: "fetchNo", label: "編號", kind: "id", get: (f) => f.fetchNo },
+  { key: "method", label: "方法", kind: "text", get: (f) => f.method },
+  { key: "observedBy", label: "觀測者", kind: "text", get: (f) => OBSERVED_LABEL[f.observedBy] ?? f.observedBy },
+  { key: "host", label: "主機", kind: "text", get: (f) => f.host },
+  { key: "httpStatus", label: "狀態碼", kind: "number", get: (f) => f.httpStatus },
+  { key: "outcome", label: "結果", kind: "text", get: (f) => f.outcome },
+  { key: "rawSha256", label: "原文 sha256", kind: "text", get: (f) => f.rawSha256 },
+  { key: "rawBytes", label: "位元組", kind: "number", get: (f) => f.rawBytes },
+  { key: "fetchedAt", label: "時間", kind: "iso", get: (f) => f.fetchedAt },
+];
+const EVIDENCE_COLUMNS: ReadonlyArray<ColumnOf<ResearchEvidenceItem>> = [
+  { key: "evidenceNo", label: "編號", kind: "id", get: (i) => i.evidenceNo },
+  { key: "candidate", label: "候選技術", kind: "text", get: (i) => i.candidate },
+  { key: "claim", label: "論點", kind: "text", get: (i) => i.claim },
+  { key: "sourceNo", label: "來源", kind: "text", get: (i) => i.sourceNo },
+  { key: "level", label: "層級", kind: "rank", get: (i) => i.f7Verification, rank: (v) => (/^V(\d+)$/.test(v) ? Number(v.slice(1)) : null) },
+  { key: "strength", label: "強度", kind: "text", get: (i) => EVIDENCE_STRENGTH_LABEL[i.strength] ?? i.strength },
+];
+const FETCH_DEFAULT: NonNullable<SortState> = { key: "fetchNo", dir: "asc" };
+const EVIDENCE_DEFAULT: NonNullable<SortState> = { key: "evidenceNo", dir: "asc" };
 
 const rowId = (evidenceNo: string): string => `evidence-row-${evidenceNo}`;
 /** 空白欄位一律顯示「未見」（框架模板：缺欄寫「未見」、不留白）。 */
@@ -68,6 +97,7 @@ function Flag({ tone, children }: { tone: "alert" | "muted"; children: ReactNode
 }
 
 function FetchRecords({ source }: { source: ResearchSource | undefined }) {
+  const [sort, setSort] = useState<SortState>(null);
   if (source === undefined || source.fetches.length === 0) return <p className="text-sm text-wg-muted">無（宣告型）：這個來源沒有 Bridge 的抓取紀錄，查證層級以 agent 宣告為準。</p>;
   return (
     <div className="overflow-x-auto">
@@ -75,15 +105,21 @@ function FetchRecords({ source }: { source: ResearchSource | undefined }) {
         <caption className="sr-only">抓取紀錄</caption>
         <thead>
           <tr className="text-left text-wg-muted">
-            {["編號", "方法", "觀測者", "主機", "狀態碼", "結果", "原文 sha256", "位元組", "時間"].map((head) => (
-              <th key={head} scope="col" className="px-2 py-1 font-medium">
-                {head}
-              </th>
+            {FETCH_COLUMNS.map((c) => (
+              <SortableHeader
+                key={c.key}
+                column={c.key}
+                label={c.label}
+                state={sort}
+                defaultSort={FETCH_DEFAULT}
+                onSort={(key) => setSort((s) => nextSort(s, key, FETCH_DEFAULT))}
+                className="px-2 py-1 font-medium"
+              />
             ))}
           </tr>
         </thead>
         <tbody>
-          {source.fetches.map((fetch) => (
+          {sortRows(source.fetches, FETCH_COLUMNS, sort ?? FETCH_DEFAULT).map((fetch) => (
             <tr key={fetch.fetchNo} data-testid="fetch-record" className="border-t border-wg-line">
               <td className="px-2 py-1 font-mono">{fetch.fetchNo}</td>
               <td className="px-2 py-1">{fetch.method}</td>
@@ -212,6 +248,7 @@ export function EvidenceMatrixTable({
   const [picked, setPicked] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [focus, setFocus] = useState<{ evidenceNo: string; n: number } | null>(null);
+  const [sort, setSort] = useState<SortState>(null);
   const rows = useRef(new Map<string, HTMLTableRowElement>());
   const latestQuery = useResearchEvidence(researchId);
   const pickedQuery = useResearchEvidence(researchId, picked ?? undefined);
@@ -320,14 +357,23 @@ export function EvidenceMatrixTable({
               <caption className="sr-only">證據矩陣表</caption>
               <thead>
                 <tr className="bg-wg-base text-left text-xs text-wg-muted">
-                  {["編號", "候選技術", "論點", "來源", "層級", "強度", "標記"].map((head) => (
-                    <th key={head} scope="col" className="px-3 py-2 font-medium">
-                      {head}
-                    </th>
+                  {EVIDENCE_COLUMNS.map((c) => (
+                    <SortableHeader
+                      key={c.key}
+                      column={c.key}
+                      label={c.label}
+                      state={sort}
+                      defaultSort={EVIDENCE_DEFAULT}
+                      onSort={(key) => setSort((s) => nextSort(s, key, EVIDENCE_DEFAULT))}
+                      className="px-3 py-2 font-medium"
+                    />
                   ))}
+                  <th scope="col" className="px-3 py-2 font-medium">
+                    標記
+                  </th>
                 </tr>
               </thead>
-              {items.map((item) => {
+              {sortRows(items, EVIDENCE_COLUMNS, sort ?? EVIDENCE_DEFAULT).map((item) => {
                 const source = sourceOf.get(item.sourceNo);
                 const open = expanded.has(item.evidenceNo);
                 const detailId = `evidence-detail-${item.evidenceNo}`;

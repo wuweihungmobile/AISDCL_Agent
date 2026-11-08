@@ -83,7 +83,7 @@ export type GateName = S36["GateName"];
 export type TextImportRequest = S36["TextImportRequest"];
 export type EditParsedResultRequest = S36["EditParsedResultRequest"];
 
-/** 匯入歷史查詢參數（對應後端 GET /api/v1/import；sort 欄位限 createdAt／status） */
+/** 匯入歷史查詢參數（對應後端 GET /api/v1/import；sort 欄位限 createdAt／status／sourceFileName／aiModel／tokenUsed／projectId） */
 export type ListImportsParams = {
   page?: number;
   size?: number;

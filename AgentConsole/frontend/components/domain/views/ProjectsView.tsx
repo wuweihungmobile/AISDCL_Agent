@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import { PageTitle } from "@/components/domain/PageHeader";
 import { ProjectCard } from "@/components/domain/ProjectCard";
+import { SortBar } from "@/components/domain/common/SortBar";
 import { describeRestoreError } from "@/components/domain/entity/apiErrors";
 import { EntityDialog } from "@/components/domain/entity/EntityDialog";
 import type { EntityTarget } from "@/components/domain/entity/EntityEditor";
@@ -14,7 +15,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { IconButton } from "@/components/ui/icon-button";
 import { Pagination } from "@/components/ui/pagination";
-import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
@@ -23,18 +23,21 @@ import { REASONS } from "@/lib/api/reasons";
 import { useProjects, useRestoreProject } from "@/lib/api/queries";
 import type { ProjectStatus, ProjectSummary } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
+import type { SortState } from "@/lib/domain/sorting";
 import { PROJECT_STATUS_TABS } from "@/lib/domain/status";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 
-/** 排序選項：設計稿第三項「任務數」後端不支援（sort 欄位白名單只有 name／status／createdAt／updatedAt），以「最近建立」取代。 */
-const SORTS = {
-  updated: { label: "最近更新", param: "updatedAt,desc" },
-  name: { label: "名稱", param: "name,asc" },
-  created: { label: "最近建立", param: "createdAt,desc" },
-} as const;
-type SortId = keyof typeof SORTS;
+/** 排序控制列選項（TCS-ConsoleUxSortHelp W-UX5／§2.2 L1）：任務數與目標數是衍生聚合值，後端白名單不開放。預設＝建立順序升冪。 */
+const SORT_OPTIONS = [
+  { key: "createdAt", label: "建立順序" },
+  { key: "name", label: "名稱" },
+  { key: "status", label: "狀態" },
+  { key: "updatedAt", label: "最近更新" },
+  { key: "autonomyLevel", label: "自治等級" },
+] as const;
+const DEFAULT_SORT: NonNullable<SortState> = { key: "createdAt", dir: "asc" };
 
 /**
  * 專案列表（設計稿 2）：標題列、Toolbar（狀態 tab／排序／mini 分頁器）、專案卡清單、底部分頁器。
@@ -50,13 +53,13 @@ export function ProjectsView() {
   const [tab, setTab] = useState<"ALL" | ProjectStatus>("ALL");
   const [showDeleted, setShowDeleted] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
-  const [sortId, setSortId] = useState<SortId>("updated");
+  const [sort, setSort] = useState<NonNullable<SortState>>(DEFAULT_SORT);
   const [entity, setEntity] = useState<EntityTarget | null>(null);
   // 已刪除清單只給 OPERATOR 以上（角色降級時自動回到一般清單，不留下會 403 的查詢）
   const deletedMode = showDeleted && canWrite;
 
   // 換條件就回第 1 頁：頁碼連同「條件鍵」一起存，鍵不符即視為第 1 頁（不需要 effect 重設）
-  const filterKey = `${q}|${tab}|${sortId}|${deletedMode}`;
+  const filterKey = `${q}|${tab}|${sort.key},${sort.dir}|${deletedMode}`;
   const [paging, setPaging] = useState({ key: filterKey, page: 1 });
   const page = paging.key === filterKey ? paging.page : 1;
   const setPage = (p: number) => setPaging({ key: filterKey, page: p });
@@ -66,7 +69,7 @@ export function ProjectsView() {
     size: PAGE_SIZE,
     q: q || undefined,
     status: deletedMode || tab === "ALL" ? undefined : tab,
-    sort: SORTS[sortId].param,
+    sort: `${sort.key},${sort.dir}`,
     deleted: deletedMode ? true : undefined,
   });
   const data = query.data;
@@ -168,13 +171,7 @@ export function ProjectsView() {
           </span>
         ) : null}
         <div className="flex-1" />
-        <Select size="sm" aria-label="排序" value={sortId} onChange={(e) => setSortId(e.target.value as SortId)}>
-          {(Object.keys(SORTS) as SortId[]).map((id) => (
-            <option key={id} value={id}>
-              {SORTS[id].label}
-            </option>
-          ))}
-        </Select>
+        <SortBar options={SORT_OPTIONS} state={sort} onChange={setSort} label="專案排序" />
         <span aria-hidden className="h-[18px] w-px bg-wg-line" />
         <div className="flex items-center gap-1 text-sm text-wg-muted" data-testid="mini-pager">
           <span className="font-semibold text-wg-primary">{page}</span>/{totalPages}

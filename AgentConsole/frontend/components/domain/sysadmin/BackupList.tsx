@@ -2,7 +2,7 @@
 
 /**
  * 「備份清單」分頁（TCS-SysAdminBackup-20261027 FR-BK-02、R-BK-04～09；PRD §5 AC-BK-02-1～02-6）：先是各 repo 的狀態列（儲存位置、pgBackRest 的狀態碼、離站是否與主機同碟），
- * 再是一張十欄表——類型、標籤、儲存位置、開始、結束、耗時、資料庫、備份、基準、結果；列序＝API 回應序（新到舊，前端不另排序）。
+ * 再是一張十欄表——類型、標籤、儲存位置、開始、結束、耗時、資料庫、備份、基準、結果；預設時列序＝API 回應序（新到舊，前端不另排序）；使用者按表頭後才改變畫面順序，且可按「還原預設排序」回到回應序（TCS-ConsoleUxSortHelp W-UX4、勘誤 BK-1）。
  *
  * 設計要點（為什麼這樣做）：
  *  - **repo 異常不當成沒有備份**：某 repo 狀態碼不是 0（例：離站不可達）＝它的狀態列顯示「狀態碼 N」與中文說明，另一個 repo 照常；沒有備份的 repo 不補佔位列。
@@ -12,14 +12,32 @@
  *    不寫「0 B」「0s」。格式化沿用既有 `formatDateTime`、`formatDuration`、`formatBytes`（本檔不自己定義同名函式）。
  *  - 備份清單只含成功建立的備份；固定一行說明「失敗的工作看狀態卡與工作紀錄」。純文字：標籤與訊息一律是 React 文字節點。
  */
+import { useState } from "react";
+
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
+import { Button } from "@/components/ui/button";
 import type { BackupRepo, BackupRow } from "@/lib/api/types";
 import { formatDuration } from "@/lib/domain/metrics";
 import { backupKindText, backupLocationText, backupResultText, isOffsiteRepo, LIST_EMPTY_TEXT, LIST_NOTE, offsiteBadgeText, repoStatusLine } from "@/lib/domain/sysadminBackup";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import { formatBytes, formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { TONE_TEXT } from "./tone";
 
-const HEADERS = ["類型", "標籤", "儲存位置", "開始", "結束", "耗時", "資料庫", "備份", "基準", "結果"] as const;
+/** 表頭排序欄位（§2.1 T7）：標籤是識別欄、tie-break 方向降冪（`tieDir`，與後端同口徑）；缺值（「—」）一律排最後。預設序＝結束時間新到舊（API 回應序）。 */
+const COLUMNS: ReadonlyArray<SortColumn<BackupRow> & { label: string }> = [
+  { key: "kind", label: "類型", kind: "text", get: (r) => backupKindText(r.kind) },
+  { key: "label", label: "標籤", kind: "id", tieDir: "desc", get: (r) => r.label },
+  { key: "location", label: "儲存位置", kind: "text", get: (r) => backupLocationText(r.location) },
+  { key: "startedAt", label: "開始", kind: "iso", get: (r) => r.startedAt },
+  { key: "finishedAt", label: "結束", kind: "iso", get: (r) => r.finishedAt },
+  { key: "durationSeconds", label: "耗時", kind: "number", get: (r) => r.durationSeconds },
+  { key: "databaseSizeBytes", label: "資料庫", kind: "number", get: (r) => r.databaseSizeBytes },
+  { key: "repoSizeBytes", label: "備份", kind: "number", get: (r) => r.repoSizeBytes },
+  { key: "baseLabel", label: "基準", kind: "text", get: (r) => r.baseLabel },
+  { key: "result", label: "結果", kind: "text", get: (r) => backupResultText(r.result).text },
+];
+const DEFAULT_SORT: NonNullable<SortState> = { key: "finishedAt", dir: "desc" };
 const DASH = "—";
 
 const sizeText = (bytes: number | null): string => (typeof bytes === "number" ? formatBytes(bytes) : DASH);
@@ -46,22 +64,29 @@ function RepoStatus({ repo }: { repo: BackupRepo }) {
 }
 
 function BackupTable({ backups }: { backups: ReadonlyArray<BackupRow> }) {
+  const [sort, setSort] = useState<SortState>(null);
+  const rows = sort ? sortRows(backups, COLUMNS, sort) : backups;
   return (
     // 窄螢幕下十欄表橫向溢出：容器要能用鍵盤抵達並捲動（tabIndex 0＋role region＋名稱；焦點環由全域 :focus-visible 提供；axe scrollable-region-focusable，SCG-4 F11）
     <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="備份清單（可橫向捲動）">
+      {sort ? (
+        <div className="mb-2">
+          <Button variant="ghost" size="sm" data-testid="sort-reset" onClick={() => setSort(null)}>
+            還原預設排序
+          </Button>
+        </div>
+      ) : null}
       <table data-testid="bk-table" className="w-full min-w-[56rem] border-collapse text-left text-sm">
         <caption className="sr-only">備份清單</caption>
         <thead>
           <tr className="border-b border-wg-line text-xs text-wg-muted">
-            {HEADERS.map((header) => (
-              <th key={header} scope="col" className="py-2 pr-3">
-                {header}
-              </th>
+            {COLUMNS.map((c) => (
+              <SortableHeader key={c.key} column={c.key} label={c.label} state={sort} defaultSort={DEFAULT_SORT} onSort={(key) => setSort((s) => nextSort(s, key, DEFAULT_SORT))} />
             ))}
           </tr>
         </thead>
         <tbody>
-          {backups.map((row) => {
+          {rows.map((row) => {
             const result = backupResultText(row.result);
             return (
               <tr key={`${row.location}:${row.label}`} data-testid={`bk-row-${row.label}`} className="border-b border-wg-line align-top">

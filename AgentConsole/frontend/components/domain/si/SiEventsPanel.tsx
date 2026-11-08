@@ -8,6 +8,7 @@
  */
 import { Fragment, useState, type ReactNode } from "react";
 
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { useSiEvents, useSiRuns } from "@/lib/api/queries";
 import type { SiEvent, SiRun } from "@/lib/api/types";
 import {
@@ -24,6 +25,7 @@ import {
   type DateWindow,
   type EventFilters,
 } from "@/lib/domain/si";
+import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import { ExpandToggle, FilterSelect, SiError, SiLoadMore, SiLoading, SiNotes, SiScopeNote, countText, useReportTabCount, withAll } from "./siParts";
 
 const EMPTY = "無";
@@ -33,9 +35,29 @@ function outcomeText(outcome: Record<string, string> | null | undefined): string
   return entries.length === 0 ? EMPTY : entries.map(([id, state]) => `${id}：${state}`).join("；");
 }
 
+/** 表頭排序（TCS-ConsoleUxSortHelp §2.1 T5、T6）：排序只作用於已載入列；運轉預設＝ID 自然序升冪，事件預設＝seq 數值升冪；空值（closedSeq 未結束）兩方向都排最後。 */
+const RUN_COLUMNS: ReadonlyArray<SortColumn<SiRun> & { label: string }> = [
+  { key: "id", label: "ID", kind: "id", get: (r) => r.id },
+  { key: "trigger", label: "trigger", kind: "text", get: (r) => r.trigger },
+  { key: "openedSeq", label: "openedSeq", kind: "number", get: (r) => r.openedSeq },
+  { key: "closedSeq", label: "closedSeq", kind: "number", get: (r) => r.closedSeq },
+  { key: "outcome", label: "outcome", kind: "text", get: (r) => (Object.keys(r.outcome ?? {}).length === 0 ? null : outcomeText(r.outcome)) },
+  { key: "propIds", label: "propIds", kind: "text", get: (r) => (r.propIds.length === 0 ? null : r.propIds.join("、")) },
+  { key: "research", label: "research", kind: "text", get: (r) => (r.research ? `${r.research.kind} #${r.research.seq}` : null) },
+];
+const RUN_DEFAULT: NonNullable<SortState> = { key: "id", dir: "asc" };
+const EVENT_COLUMNS: ReadonlyArray<SortColumn<SiEvent> & { label: string }> = [
+  { key: "seq", label: "seq", kind: "number", get: (e) => e.seq },
+  { key: "t", label: "t", kind: "iso", get: (e) => e.t },
+  { key: "kind", label: "kind", kind: "text", get: (e) => e.kind },
+  { key: "by", label: "by", kind: "text", get: (e) => e.by },
+];
+const EVENT_DEFAULT: NonNullable<SortState> = { key: "seq", dir: "asc" };
+
 /** 運轉表：欄＝id、trigger、openedSeq、closedSeq（null＝未結束）、outcome（提案→結果）、propIds、research。 */
 function RunsSection() {
   const q = useSiRuns();
+  const [sort, setSort] = useState<SortState>(null);
   const pages = q.data?.pages;
   const last = pages?.[pages.length - 1];
 
@@ -45,9 +67,13 @@ function RunsSection() {
   } else if (!pages || !last) {
     body = <SiLoading what="運轉" />;
   } else {
-    const runs: SiRun[] = mergePages(
-      pages.map((p) => p.items),
-      identityKey,
+    const runs: SiRun[] = sortRows(
+      mergePages(
+        pages.map((p) => p.items),
+        identityKey,
+      ),
+      RUN_COLUMNS,
+      sort ?? RUN_DEFAULT,
     );
     body = (
       <div>
@@ -62,10 +88,8 @@ function RunsSection() {
               <caption className="sr-only">運轉</caption>
               <thead>
                 <tr className="border-b border-wg-line text-xs text-wg-muted">
-                  {["ID", "trigger", "openedSeq", "closedSeq", "outcome", "propIds", "research"].map((h) => (
-                    <th key={h} scope="col" className="py-2 pr-3">
-                      {h}
-                    </th>
+                  {RUN_COLUMNS.map((c) => (
+                    <SortableHeader key={c.key} column={c.key} label={c.label} state={sort} defaultSort={RUN_DEFAULT} onSort={(key) => setSort((s) => nextSort(s, key, RUN_DEFAULT))} />
                   ))}
                 </tr>
               </thead>
@@ -118,6 +142,7 @@ function EventsSection({ onCount }: { onCount: (text: string | null) => void }) 
   const q = useSiEvents();
   const [filters, setFilters] = useState<EventFilters>(EMPTY_EVENT_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [sort, setSort] = useState<SortState>(null);
 
   const pages = q.data?.pages;
   const last = pages?.[pages.length - 1];
@@ -138,7 +163,7 @@ function EventsSection({ onCount }: { onCount: (text: string | null) => void }) 
   } else {
     const ne = mergeNotes(pages.map((p) => p.ne));
     const carrier = ne.filter((entry) => entry.field === "events" && entry.reason === "carrier-not-established");
-    const shown = filterEvents(items, filters, last.generatedAt);
+    const shown = sortRows(filterEvents(items, filters, last.generatedAt), EVENT_COLUMNS, sort ?? EVENT_DEFAULT, undefined, EVENT_COLUMNS[0]);
     body = (
       <div>
         <SiNotes ne={ne} problems={mergeNotes(pages.map((p) => p.problems))} />
@@ -179,10 +204,8 @@ function EventsSection({ onCount }: { onCount: (text: string | null) => void }) 
                   <th scope="col" className="w-10 py-2">
                     <span className="sr-only">操作</span>
                   </th>
-                  {["seq", "t", "kind", "by"].map((h) => (
-                    <th key={h} scope="col" className="py-2 pr-3">
-                      {h}
-                    </th>
+                  {EVENT_COLUMNS.map((c) => (
+                    <SortableHeader key={c.key} column={c.key} label={c.label} state={sort} defaultSort={EVENT_DEFAULT} onSort={(key) => setSort((s) => nextSort(s, key, EVENT_DEFAULT))} />
                   ))}
                 </tr>
               </thead>

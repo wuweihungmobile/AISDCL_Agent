@@ -11,10 +11,15 @@ import { EmptyState, ErrorState } from "@/components/ui/states";
 import { StatusLabel } from "@/components/ui/status-dot";
 import { useImports } from "@/lib/api/queries";
 import type { ImportStatus } from "@/lib/api/types";
+import { SortableHeader } from "@/components/domain/common/SortableHeader";
+import { nextSort, type SortState } from "@/lib/domain/sorting";
 import { IMPORT_STATUS, importStatus, isImportReopenable, isLive } from "@/lib/domain/status";
 import { formatDateTime, formatNumber } from "@/lib/format";
 
 const PAGE_SIZE = 10;
+/** 預設＝建立順序升冪（TCS-ConsoleUxSortHelp D-UX-10／D-UX-19）：後端排序，表頭點擊送對應 sort 並回第 1 頁。 */
+const DEFAULT_SORT: NonNullable<SortState> = { key: "createdAt", dir: "asc" };
+const HEAD = "pr-3 pb-2 font-medium";
 
 /**
  * 歷史記錄 tab（US-I-06；契約 §4.1 I-17）：匯入時間、來源檔名、狀態、產生的專案連結、aiModel／tokenUsed，分頁。
@@ -23,10 +28,17 @@ const PAGE_SIZE = 10;
  */
 export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
   const [status, setStatus] = useState<"" | ImportStatus>("");
-  // 換篩選就回第 1 頁：頁碼連同條件鍵一起存，鍵不符即視為第 1 頁
+  const [sort, setSort] = useState<SortState>(null);
+  const eff = sort ?? DEFAULT_SORT;
+  // 換篩選或排序就回第 1 頁：頁碼連同條件鍵一起存，鍵不符即視為第 1 頁
+  const filterKey = `${status}|${eff.key},${eff.dir}`;
   const [paging, setPaging] = useState({ key: "", page: 1 });
-  const page = paging.key === status ? paging.page : 1;
-  const query = useImports({ page: page - 1, size: PAGE_SIZE, status: status || undefined, sort: "createdAt,desc" });
+  const page = paging.key === filterKey ? paging.page : 1;
+  const query = useImports({ page: page - 1, size: PAGE_SIZE, status: status || undefined, sort: `${eff.key},${eff.dir}` });
+  const onSort = (key: string) => {
+    setSort((s) => nextSort(s, key, DEFAULT_SORT));
+    setPaging({ key: "", page: 1 }); // 回到先前用過的排序鍵時，不可復活舊頁碼
+  };
   const data = query.data;
   const totalPages = Math.max(1, data?.totalPages ?? 1);
 
@@ -59,11 +71,11 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
           <table className="w-full min-w-[680px] border-collapse text-sm" data-testid="import-history">
             <thead>
               <tr className="text-left text-xs text-wg-muted">
-                <th className="pr-3 pb-2 font-medium">匯入時間</th>
-                <th className="pr-3 pb-2 font-medium">來源</th>
-                <th className="pr-3 pb-2 font-medium">狀態</th>
-                <th className="pr-3 pb-2 font-medium">專案</th>
-                <th className="pr-3 pb-2 font-medium">AI 模型 · Token</th>
+                <SortableHeader column="createdAt" label="匯入時間" state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={HEAD} />
+                <SortableHeader column="sourceFileName" label="來源" state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={HEAD} />
+                <SortableHeader column="status" label="狀態" state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={HEAD} />
+                <SortableHeader column="projectId" label="專案" state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={HEAD} />
+                <SortableHeader column="aiModel" label="AI 模型" second={{ column: "tokenUsed", label: "Token" }} state={sort} defaultSort={DEFAULT_SORT} onSort={onSort} className={HEAD} />
                 <th className="pb-2" />
               </tr>
             </thead>
@@ -101,7 +113,7 @@ export function HistoryPanel({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
       )}
 
-      {totalPages > 1 ? <Pagination className="mt-5" page={page} totalPages={totalPages} onPageChange={(p) => setPaging({ key: status, page: p })} /> : null}
+      {totalPages > 1 ? <Pagination className="mt-5" page={page} totalPages={totalPages} onPageChange={(p) => setPaging({ key: filterKey, page: p })} /> : null}
     </div>
   );
 }
