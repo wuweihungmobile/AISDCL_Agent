@@ -20,6 +20,7 @@ import json
 import os
 import re
 import socket
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any
@@ -302,3 +303,353 @@ def test_AT_962_28_E_3_no_real_github_connection_in_sources_or_at_runtime(
     assert not [h for h in REAL_HOSTS if h in argv_text.replace("file:///", "")], argv_text
     assert os.environ.get("FAKE_GH_MODE") == "ok" and fake_gh.calls(), "gh 是假夾具"
     assert uuid.UUID(project.rid)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# AT-962-28-3：全棧載具（D-153#1、D-166）——pytest 作 HTTP 客戶端，打第二套拋棄式棧（project r2p2int：  # noqa: E501
+# nginx＋backend＋frontend＋PG；Bridge 在主機 local mode）。引擎真：run 的重試耗盡、review_requests 由  # noqa: E501
+# console-api 自然產生、視圖列由真資料；claude 為 mock 可執行檔（D-140 #13）。構造：內環鍵的 Stage-2 凍結  # noqa: E501
+# （框架 CLI 動詞＋Bridge 的 :freeze 端點，因真拆解需 Brain）、目標與任務由 API 建立。
+# 啟用：E2E_STACK=1、E2E_ADMIN_USER／E2E_ADMIN_PASSWORD、E2E_LOCAL_BRIDGE=1、INT_P2_PG_DSN、INT_P2_BRIDGE_URL、  # noqa: E501
+# INT_P2_SDD_TOKEN、INT_P2_MOCK_CLAUDE（缺＝TOOL-ABSENCE skip，證據須 0 skipped）。
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+def stack_absence() -> str:
+    need = ("E2E_ADMIN_USER", "E2E_ADMIN_PASSWORD", "INT_P2_PG_DSN", "INT_P2_BRIDGE_URL",
+            "INT_P2_SDD_TOKEN", "INT_P2_MOCK_CLAUDE")
+    missing = [n for n in need if not os.environ.get(n)]
+    if os.environ.get("E2E_STACK") != "1":
+        missing.insert(0, "E2E_STACK=1")
+    if os.environ.get("E2E_LOCAL_BRIDGE") != "1":
+        missing.insert(0, "E2E_LOCAL_BRIDGE=1")
+    return f"TOOL-ABSENCE：缺 {', '.join(missing)}（第二套棧＋本機模式 Bridge）" if missing else ""
+
+
+class StackClient:
+    """console-api 的最小 HTTP 客戶端（登入、429 重試、輪詢）；帳密只來自環境。"""
+
+    def __init__(self) -> None:
+        import httpx
+
+        self.base = os.environ.get("E2E_API_URL", "http://127.0.0.1:18080").rstrip("/")
+        self.http = httpx.Client(timeout=120)
+        self.token = ""
+        self.token_at = 0.0
+        self.created: list[str] = []
+
+    def call(self, method: str, path: str, body: Any = None) -> tuple[int, dict[str, Any]]:
+        import time
+
+        for attempt in range(5):
+            if time.time() - self.token_at > 1200:
+                login = self.http.post(f"{self.base}/api/v1/auth/login", json={
+                    "username": os.environ["E2E_ADMIN_USER"],
+                    "password": os.environ["E2E_ADMIN_PASSWORD"]})
+                assert login.status_code == 200, login.status_code
+                self.token, self.token_at = login.json()["data"]["accessToken"], time.time()
+            resp = self.http.request(method, f"{self.base}{path}", json=body,
+                                     headers={"Authorization": f"Bearer {self.token}"})
+            if resp.status_code == 429 and attempt < 4:
+                time.sleep(21)
+                continue
+            try:
+                return resp.status_code, resp.json()
+            except ValueError:
+                return resp.status_code, {}
+        raise AssertionError("429 重試用盡")
+
+    def data(self, method: str, path: str, body: Any = None, expect: int = 200) -> Any:
+        status, doc = self.call(method, path, body)
+        assert status == expect, f"{method} {path} → {status} {json.dumps(doc, ensure_ascii=False)[:400]}"  # noqa: E501
+        return doc.get("data")
+
+    def poll(self, fn: Any, done: Any, what: str, timeout: float = 300, interval: float = 3.0) -> Any:  # noqa: E501
+        import time
+
+        end, last = time.time() + timeout, None
+        while time.time() < end:
+            last = fn()
+            if done(last):
+                return last
+            time.sleep(interval)
+        raise AssertionError(f"等待逾時：{what}；最後值＝{json.dumps(last, ensure_ascii=False)[:300]}")  # noqa: E501
+
+    # ── 研究專案：建立、四個階段到 Gate 0、API 核准（沿 Playwright helper `driveToGate0`）──────────  # noqa: E501
+    def research_stage(self, rid: str, stage: str) -> dict[str, Any]:
+        started = self.data("POST", f"/api/v1/research/projects/{rid}/stages/{stage}", {}, 202)
+        run_id = started["stageRunId"]
+
+        def progress() -> tuple[str, str]:
+            items = self.data("GET", f"/api/v1/research/projects/{rid}/events?afterSeq=0&limit=500")["items"]  # noqa: E501
+            runs = [e["payload"].get("status") for e in items if e["eventType"] == "research.run"
+                    and e["payload"].get("stageRunId") == run_id]
+            steps = [e["payload"].get("flowStatus") for e in items if e["eventType"] == "research.step"]  # noqa: E501
+            return (runs[-1] if runs else "", steps[-1] if steps else "")
+
+        self.poll(progress, lambda p: p[0] in ("SUCCEEDED", "FAILED", "CANCELLED") and p[1] not in ("", "RUNNING"),  # noqa: E501
+                  f"{stage} 結束", 300)
+        return self.data("GET", f"/api/v1/research/projects/{rid}")
+
+    def drive_to_gate0(self, tag: str) -> str:
+        slug = f"int28-{tag}-{uuid.uuid4().hex[:6]}"[:30]
+        axes = ["技術可行", "授權相容", "維護風險", "效能邊界", "資安", "成本"]
+        made = self.data("POST", "/api/v1/research/projects", {
+            "slug": slug, "title": f"INT-P2 {tag}", "topic": f"INT-P2 整合 {tag}",
+            "scope": {"layers": {"academic": True, "industry": False, "oss": True, "community": False},  # noqa: E501
+                      "techStack": "Python / PostgreSQL", "inScope": ["INT"], "outOfScope": ["其他"],  # noqa: E501
+                      "recencyYears": 2, "applicabilityAxes": axes}, "depthLevel": "QUICK"}, 201)
+        rid = str(made["id"])
+        self.created.append(rid)
+        for stage in ("research", "draft", "review", "iterate"):
+            detail = self.research_stage(rid, stage)
+        assert (detail["flowPhase"], detail["flowStatus"]) == ("GATE0_PENDING", "WAITING_HUMAN"), detail  # noqa: E501
+        return rid
+
+    def approve(self, rid: str) -> None:
+        versions = self.data("GET", f"/api/v1/research/projects/{rid}/prd/versions")
+        head = max(versions, key=lambda v: v["versionNo"])
+        matrix = self.data("GET", f"/api/v1/research/projects/{rid}/evidence")
+
+        def sha(hex_: str) -> str:
+            return hex_ if hex_.startswith("sha256:") else f"sha256:{hex_}"
+
+        done = self.data("POST", f"/api/v1/research/projects/{rid}/approve", {
+            "prdVersion": head["versionNo"], "reason": "INT-P2 Gate 0 以 API 核准（代驗）",
+            "expectedDigests": {"01_specs/PRD-v1.0.0.md": sha(head["sha256"]),
+                                "00_research/evidence_matrix.md": sha(matrix["sha256"])}})
+        assert done["fsmState"] == "SPEC_FROZEN"
+
+    def archive_all(self) -> None:
+        for rid in self.created:
+            self.call("POST", f"/api/v1/research/projects/{rid}/archive", {})
+
+
+def stack_pg() -> Any:
+    import psycopg
+
+    return psycopg.connect(os.environ["INT_P2_PG_DSN"], autocommit=True)
+
+
+def inner_verb(route: dict[str, Any], tree: Path, verb: str, *args: str) -> str:
+    """框架 CLI 動詞（與 Bridge 同一組 argv／環境形狀；構造夾具態用）；回 stdout。"""
+    from app import sdd_cli
+
+    key = route["impl_fsm_project"]
+    argv = sdd_cli.build_research_argv(verb, list(args), key)
+    env = sdd_cli.build_research_env(os.environ, sdd_root=tree, state_dir=Path(route["impl_state_dir"]),  # noqa: E501
+                                     project=key)
+    proc = subprocess.run(argv, cwd=str(tree), env=env, capture_output=True, text=True,
+                          encoding="utf-8", check=False)
+    assert proc.returncode == 0, f"{verb} {args} rc={proc.returncode}: {proc.stderr[:300]}"
+    return proc.stdout
+
+
+def construct_stage2(rid: str, route: dict[str, Any], tree: Path) -> None:
+    """構造：內環鍵 SPEC_FROZEN(Stage-1)→SPEC_DRAFTING→SCG_VALIDATION→
+    HUMAN_PENDING（框架 CLI 動詞），再以 Bridge 的 `:freeze` 端點凍結 Stage-2
+    （真拆解需 Brain，載具不具備；證據標「構造」）。"""
+    import httpx
+
+    from app import sdd_cli
+
+    key, target = route["impl_fsm_project"], Path(route["target_path"])
+    for to in ("SPEC_DRAFTING", "SCG_VALIDATION", "HUMAN_PENDING"):
+        inner_verb(route, tree, "transition", "--to", to, "--reason", "INT-P2 構造 Stage-2",
+                   "--trigger", sdd_cli.RESEARCH_TRIGGER)
+    tcs_rel ="docs/03_testing/contracts/TCS-IntP2-20261108.md"
+    tcs = target / tcs_rel
+    tcs.parent.mkdir(parents=True, exist_ok=True)
+    tcs.write_text("# TCS（INT-P2 構造夾具）\n\n- **AT-001-1** 構造夾具\n", encoding="utf-8", newline="\n")  # noqa: E501
+    resp = httpx.post(f"{os.environ['INT_P2_BRIDGE_URL']}/sdd/fsm/{key}:freeze", timeout=120,
+                      headers={"X-Bridge-Token": os.environ["INT_P2_SDD_TOKEN"]},
+                      json={"root": str(target), "docs": [tcs_rel], "approver": "admin@example.com",
+                            "reason": "INT-P2 構造 Stage-2 凍結（夾具）"})
+    assert resp.status_code == 200, resp.text[:400]
+
+
+def inner_route(rid: str) -> dict[str, Any]:
+    with stack_pg() as conn:
+        row = conn.execute("SELECT impl_fsm_project, impl_state_dir, target_path FROM console."
+                           "research_route_decisions WHERE research_id = %s", (rid,)).fetchone()
+    assert row is not None
+    return {"impl_fsm_project": row[0], "impl_state_dir": row[1], "target_path": row[2]}
+
+
+@pytest.mark.skipif(stack_absence() != "", reason=stack_absence())
+def test_AT_962_28_3_engine_retry_exhaustion_escalates_and_the_view_has_the_failed_step(
+        real_tree: Path) -> None:
+    """引擎真、claude 為 mock：一個必失敗的任務→RETRYING→FAILED→ESCALATED，
+    console-api 自然建 review request，
+    `v_research_healing_attempts` 對真失敗步驟有列（非手寫列）。內環鍵 Stage-2 凍結為構造。"""
+    stack = StackClient()
+    try:
+        rid = stack.drive_to_gate0("e3")
+        stack.approve(rid)
+        route = stack.data("POST", f"/api/v1/research/projects/{rid}/route", {
+            "track": "A", "targetModule": "autoclaude", "branchName": f"feature/int28-3-{uuid.uuid4().hex[:5]}",  # noqa: E501
+            "scopeDiffersReason": "INT-P2 28-3"})
+        assert route["status"] == "SUCCEEDED", route["status"]
+        pid = route["consoleProjectId"]
+        with stack_pg() as conn:
+            row = conn.execute("SELECT impl_fsm_project, impl_state_dir, target_path FROM console."
+                               "research_route_decisions WHERE research_id = %s", (rid,)).fetchone()
+        assert row is not None
+        construct_stage2(rid, {"impl_fsm_project": row[0], "impl_state_dir": row[1],
+                               "target_path": row[2]}, real_tree)
+        print("AT-962-28-3 [構造] 內環鍵已構造到 Stage-2 凍結（框架 CLI＋:freeze）；[引擎真] 分流 SUCCEEDED、console 專案", pid)  # noqa: E501
+        # 系統參數（第二套棧自己的庫）：claude＝mock 可執行檔、關自動續跑、重試一次
+        for cat, key, value in (("autoclaude", "claudeCommand", os.environ["INT_P2_MOCK_CLAUDE"]),
+                                ("execution", "autoResume", "false"), ("agent", "maxRetries", "1")):
+            stack.data("PUT", f"/api/v1/settings/{cat}/{key}", {"value": value})
+        goal = stack.data("POST", f"/api/v1/projects/{pid}/goals", {
+            "name": "INT-P2 目標", "passCriteria": "任務完成", "description": "", "dependsOn": [],
+            "draft": False}, 201)
+        for number, (name, extra) in enumerate((("可成功", ""), ("必失敗", " [FAIL_ME]")), start=1):
+            stack.data("POST", f"/api/v1/goals/{goal['id']}/tasks", {
+                "name": name, "description": f"請輸出 [T{number}_DONE]{extra}", "passCriteria": "x",
+                "expectedOutputRegex": f"\\[T{number}_DONE\\]", "maxRetries": 1, "draft": False}, 201)  # noqa: E501
+        stack.data("POST", f"/api/v1/projects/{pid}/signoff", {"approver": "admin"})   # 分流建的專案是草案  # noqa: E501
+        run = stack.data("POST", f"/api/v1/projects/{pid}/execute",
+                         {"autonomyLevel": 4, "tokenBudget": 100000, "scope": {"mode": "ALL"}}, 201)
+        run_id = run["id"]
+
+        def view() -> dict[str, Any]:
+            return stack.data("GET", f"/api/v1/executions/{run_id}")
+
+        final = stack.poll(view, lambda r: r["status"] in ("FAILED", "COMPLETED") and bool(
+            r.get("pendingReviews")), "run 失敗且出現待審項", 180)
+        review = final["pendingReviews"][0]
+        print("AT-962-28-3 [引擎真，claude 為 mock] run 終態", final["status"], "原因", final.get("reason"),  # noqa: E501
+              "待審", review["kind"], review["allowedDecisions"])
+        assert final["status"] == "FAILED" and review["kind"] == "ESCALATED"
+        steps = stack.data("GET", f"/api/v1/executions/{run_id}/steps?size=200")["content"]
+        print("AT-962-28-3 步驟列:", [(s["stepId"], s["status"]) for s in steps])
+        assert "RETRYING" in {s["status"] for s in steps} and "FAILED" in {s["status"] for s in steps}  # noqa: E501
+        with stack_pg() as conn:
+            rr = conn.execute("SELECT kind, status FROM console.review_requests WHERE run_id = %s",
+                              (run_id,)).fetchall()
+            count = conn.execute("SELECT count(*) FROM console.v_research_healing_attempts WHERE "
+                                 "research_id = %s", (rid,)).fetchone()
+        print("AT-962-28-3 review_requests:", rr, "｜v_research_healing_attempts 列數:", count)
+        assert rr and rr[0][0] == "ESCALATED" and count is not None and count[0] >= 1
+        seen = stack.data("GET", f"/api/v1/research/projects/{rid}/healing")
+        print("AT-962-28-3 GET healing:", {k: seen[k] for k in ("retryingSteps", "escalatedTasks", "logLag")},  # noqa: E501
+              "列數", len(seen["rows"]))
+        assert seen["escalatedTasks"] >= 1 and seen["rows"]
+    finally:
+        stack.archive_all()
+
+def script_scr_round(prd_sha256: str, round_no: int) -> list[str]:
+    """構造：SCR 之後外環要再審一輪，pass 劇本只有第 1、2 輪。
+    把第 2 輪 PASS 審查卡複製成第 `round_no` 輪
+    （改 `round` 與 `prd_sha256`），並在劇本追加四個審查步驟（劇本目錄在 repo 外的暫存副本）。"""
+    root = Path(os.environ["INT_P2_SCRIPT_DIR"])
+    script_path = root / "mock_claude_script_pass.json"
+    script = json.loads(script_path.read_text(encoding="utf-8"))
+    written = []
+    for dim in ("architecture", "product", "qa", "security"):
+        role = f"review-{dim}"
+        card = json.loads((root / "content" / "reviews" / "pass" / "round-2" / f"{dim}.json"
+                           ).read_text(encoding="utf-8"))
+        card["round"], card["prd_sha256"] = round_no, prd_sha256
+        out = root / "content" / "reviews" / "scr" / f"round-{round_no}" / f"{dim}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(card, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")  # noqa: E501
+        script["steps"] = [s for s in script["steps"] if not (s["role"] == role and s["round"] == round_no)]  # noqa: E501
+        script["steps"].append({"role": role, "round": round_no, "writes": [{
+            "path": f"02_governance/reviews/round-{round_no}/{dim}.json",
+            "from": f"content/reviews/scr/round-{round_no}/{dim}.json"}]})
+        written.append(out.name)
+    script_path.write_text(json.dumps(script, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")  # noqa: E501
+    return written
+
+
+def scr_draft_review(stack: StackClient, rid: str) -> dict[str, Any]:
+    """SCR 之後外環的起草（人工存新版 PRD）與審查（劇本第 N 輪，PASS）；Gate 0 核准留給呼叫端（API 代驗）。"""  # noqa: E501
+    versions = stack.data("GET", f"/api/v1/research/projects/{rid}/prd/versions")
+    head = max(versions, key=lambda v: v["versionNo"])
+    body = stack.data("GET", f"/api/v1/research/projects/{rid}/prd/versions/{head['versionNo']}")
+    saved = stack.data("PUT", f"/api/v1/research/projects/{rid}/prd", {
+        "baseVersion": head["versionNo"],
+        "content": body["content"] + "\n\n<!-- INT-P2 MINOR SCR 修訂 -->\n"}, 201)
+    rounds = stack.data("GET", f"/api/v1/research/projects/{rid}/review-rounds")
+    script_scr_round(saved["sha256"], len(rounds) + 1)
+    stack.research_stage(rid, "review")
+    return saved
+
+
+def prepare_routed(stack: StackClient, tree: Path, tag: str, *, implementation: bool) -> dict[str, Any]:  # noqa: E501
+    """Gate 0 核准（API 代驗）→分流軌道 A→（構造）內環鍵 Stage-2 凍結→（選）IMPLEMENTATION。"""
+    rid = stack.drive_to_gate0(tag)
+    stack.approve(rid)
+    route = stack.data("POST", f"/api/v1/research/projects/{rid}/route", {
+        "track": "A", "targetModule": "autoclaude",
+        "branchName": f"feature/int28-{tag}-{uuid.uuid4().hex[:5]}", "scopeDiffersReason": f"INT-P2 {tag}"})  # noqa: E501
+    assert route["status"] == "SUCCEEDED", route["status"]
+    inner = inner_route(rid)
+    construct_stage2(rid, inner, tree)
+    if implementation:
+        from app import sdd_cli
+
+        inner_verb(inner, tree, "transition", "--to", "IMPLEMENTATION", "--reason", "INT-P2 構造",
+                   "--trigger", sdd_cli.RESEARCH_TRIGGER)
+    return {"rid": rid, "pid": route["consoleProjectId"], "route": inner}
+
+
+def make_escalation(stack: StackClient, pid: str) -> dict[str, Any]:
+    """引擎真、claude 為 mock：建目標與任務（含必失敗任務）、簽核、啟動 run，等到 ESCALATED 待審項。"""  # noqa: E501
+    for cat, key, value in (("autoclaude", "claudeCommand", os.environ["INT_P2_MOCK_CLAUDE"]),
+                            ("execution", "autoResume", "false"), ("agent", "maxRetries", "1")):
+        stack.data("PUT", f"/api/v1/settings/{cat}/{key}", {"value": value})
+    goal = stack.data("POST", f"/api/v1/projects/{pid}/goals", {
+        "name": "INT-P2 目標", "passCriteria": "任務完成", "description": "", "dependsOn": [],
+        "draft": False}, 201)
+    for number, (name, extra) in enumerate((("可成功", ""), ("必失敗", " [FAIL_ME]")), start=1):
+        stack.data("POST", f"/api/v1/goals/{goal['id']}/tasks", {
+            "name": name, "description": f"請輸出 [T{number}_DONE]{extra}", "passCriteria": "x",
+            "expectedOutputRegex": f"\\[T{number}_DONE\\]", "maxRetries": 1, "draft": False}, 201)
+    stack.data("POST", f"/api/v1/projects/{pid}/signoff", {"approver": "admin"})
+    run = stack.data("POST", f"/api/v1/projects/{pid}/execute",
+                     {"autonomyLevel": 4, "tokenBudget": 100000, "scope": {"mode": "ALL"}}, 201)
+    final = stack.poll(lambda: stack.data("GET", f"/api/v1/executions/{run['id']}"),
+                       lambda r: r["status"] in ("FAILED", "COMPLETED") and bool(r.get("pendingReviews")),  # noqa: E501
+                       "run 失敗且出現待審項", 180)
+    return {"runId": run["id"], "reviewId": final["pendingReviews"][0]["id"],
+            "kind": final["pendingReviews"][0]["kind"], "status": final["status"]}
+
+
+def stack_setup(kind: str, tag: str) -> dict[str, Any]:
+    """Playwright spec 的 Given 佈置（以 `python -c` 呼叫）：回 JSON 可序列化的字典。"""
+    from tests.test_research_fsm_ops import real_sdd_root
+
+    stack = StackClient()
+    tree = Path(real_sdd_root())
+    made = prepare_routed(stack, tree, tag, implementation=kind == "scr")
+    if kind == "escalated":
+        made.update(make_escalation(stack, made["pid"]))
+    elif kind == "scr-draft-review":
+        raise AssertionError("用 scr_draft_review_cli")
+    return made
+
+
+def scr_draft_review_cli(rid: str) -> dict[str, Any]:
+    stack = StackClient()
+    saved = scr_draft_review(stack, rid)
+    return {"versionNo": saved["versionNo"], "sha256": saved["sha256"]}
+
+
+def fsm_step(rid: str, step: str, reason: str = "INT-P2 V-D5") -> dict[str, Any]:
+    """V-D5 量測用：對內環鍵做一個 FSM 動作（框架 CLI），回完成時刻（epoch 毫秒）與動作後的現態。"""
+    import time
+
+    from app import sdd_cli
+    from tests.test_research_fsm_ops import real_sdd_root
+
+    tree, route = Path(real_sdd_root()), inner_route(rid)
+    verbs = {"to_pr_review": ("transition", "--to", "PR_REVIEW", "--reason", reason, "--trigger",
+                              sdd_cli.RESEARCH_TRIGGER),
+             "pr_fail": ("gate", "--gate", "PR_REVIEW", "--result", "FAIL", "--reason", reason),
+             "pr_pass": ("gate", "--gate", "PR_REVIEW", "--result", "PASS", "--reason", reason),
+             "rtm_pass": ("gate", "--gate", "RTM_VERIFY", "--result", "PASS", "--reason", reason)}
+    verb, *args = verbs[step]
+    out = inner_verb(route, tree, verb, *args)
+    return {"doneMs": int(time.time() * 1000), "out": out.strip()[:200]}

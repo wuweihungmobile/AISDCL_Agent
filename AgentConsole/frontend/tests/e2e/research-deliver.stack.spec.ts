@@ -28,7 +28,7 @@ const ABSENCE = !STACK_ON
 if (ABSENCE !== "") console.log(`[research-deliver.stack] ${ABSENCE}`);
 test.skip(ABSENCE !== "", ABSENCE);
 
-const { driveToGate0, archiveAll } = newResearchKit("research-deliver.stack");
+const { created, driveToGate0, archiveAll } = newResearchKit("research-deliver.stack");
 
 test.afterAll(async ({ playwright }) => {
   const request = await playwright.request.newContext();
@@ -160,5 +160,183 @@ test("AT_962_28_7 Docker mock-only：看板、自癒、交付概覽、追溯表�
   ).toEqual([]);
 });
 
-void TRACK_A;
-void LOCAL_BRIDGE;
+// ── 本機模式案例（第二套拋棄式棧：project r2p2int；Bridge 在主機 local mode；見 INT 證據檔〈第二套棧〉）──────────────────────────────
+const PYTHON = process.env.INT_P2_PYTHON ?? "";
+const BRIDGE_DIR = process.env.INT_P2_BRIDGE_DIR ?? "";
+const LOCAL_ABSENCE = !LOCAL_BRIDGE
+  ? "TOOL-ABSENCE：未設 E2E_LOCAL_BRIDGE=1（本機模式案例需第二套棧加主機 Bridge）"
+  : !TRACK_A
+    ? "TOOL-ABSENCE：未設 E2E_LOCAL_TRACK_A=1（BRIDGE_REPO_ROOT 須是拋棄式 clone）"
+    : PYTHON === "" || BRIDGE_DIR === ""
+      ? "TOOL-ABSENCE：缺 INT_P2_PYTHON／INT_P2_BRIDGE_DIR（Given 佈置借用 engine-bridge 的整合測試助手）"
+      : "";
+
+/** Given 佈置借用 `engine-bridge/tests/test_research_int_p2.py` 的助手（分流、構造 Stage-2、劇本審查等），回最後一行 JSON。 */
+function pyHelper(call_: string, ...args: string[]): Record<string, unknown> {
+  const code = `import json,sys;sys.path.insert(0,'.');import app.main;from tests import test_research_int_p2 as m;print(json.dumps(${call_},default=str))`;
+  const out = execFileSync(PYTHON, ["-c", code, ...args], { cwd: BRIDGE_DIR, encoding: "utf-8", timeout: 900_000, env: process.env });
+  return JSON.parse(out.trim().split("\n").at(-1) ?? "{}") as Record<string, unknown>;
+}
+
+test("AT_962_28_4 本機模式（真棧）：引擎真重試耗盡成 ESCALATED 後，步驟 4 彈窗出現，決定走既有 review 端點（review_requests 入決定欄、audit_log 一列、不寫 research_gate_decisions）", async ({
+  page,
+  request,
+}) => {
+  test.skip(LOCAL_ABSENCE !== "", LOCAL_ABSENCE);
+  test.setTimeout(1_200_000);
+  // 構造：內環鍵 Stage-2 凍結（框架 CLI＋:freeze）；引擎真、claude 為 mock：run 重試耗盡
+  const made = pyHelper("m.stack_setup(sys.argv[1], sys.argv[2])", "escalated", "e4") as { rid: string; pid: string; runId: string; reviewId: string; kind: string; status: string };
+  created.push(made.rid);
+  console.log(`[28-4] 構造＋引擎真：${JSON.stringify({ rid: made.rid, runId: made.runId, reviewId: made.reviewId, kind: made.kind, status: made.status })}`);
+  expect([made.kind, made.status]).toEqual(["ESCALATED", "FAILED"]);
+  const gatesBefore = psql(`SELECT count(*) FROM console.research_gate_decisions WHERE research_id = '${made.rid}'`);
+  const auditBefore = psql(`SELECT count(*) FROM console.audit_log WHERE method = 'POST' AND path LIKE '%${made.reviewId}%'`);
+  if (gatesBefore === null || auditBefore === null) throw new Error("TOOL-ABSENCE：沒有 docker CLI，無法 docker exec psql");
+
+  await signIn(page, request, ADMIN);
+  await open(page, request, `${BASE}/research/${made.rid}?step=build`);
+  const modal = page.getByTestId("decision-modal");
+  await expect(modal).toBeVisible({ timeout: 90_000 });
+  await expect(modal.getByTestId("decision-kind")).toHaveAttribute("data-kind", "ESCALATED");
+  await expect(page.getByTestId("kanban-board")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("28-4-escalated-modal.png") });
+  await modal.getByTestId("decision-REJECT").click();
+  await modal.getByTestId("decision-confirm").click();
+  // 決定送出後，ESCALATED 那一項消失（引擎另回報的「升級事件」是 info-only 的第二項，沒有決定鈕；稍後處理即可）
+  await expect(modal.getByTestId("decision-kind")).not.toHaveAttribute("data-kind", "ESCALATED", { timeout: 30_000 });
+
+  const review = psql(`SELECT status || '|' || coalesce(decided_by,'') || '|' || (decided_at IS NOT NULL)::text FROM console.review_requests WHERE id = '${made.reviewId}'`);
+  console.log(`[28-4] review_requests 決定欄：${review}`);
+  expect(review, "review_requests 入決定欄").toMatch(/^[A-Z]+\|admin\|true$/);
+  expect(Number(psql(`SELECT count(*) FROM console.audit_log WHERE method = 'POST' AND path LIKE '%${made.reviewId}%'`)) - Number(auditBefore), "audit_log 恰一列").toBe(1);
+  expect(psql(`SELECT count(*) FROM console.research_gate_decisions WHERE research_id = '${made.rid}'`), "不寫 research_gate_decisions").toBe(gatesBefore);
+});
+
+test("AT_962_28_5 本機模式：自看板 UI 發起 MINOR SCR，起草與審查走研究劇本，Gate 0 為 API 代驗（approveViaApi），舊凍結版保留、新 digest 入庫、SCR 轉 APPLIED", async ({ page, request }) => {
+  test.skip(LOCAL_ABSENCE !== "", LOCAL_ABSENCE);
+  test.setTimeout(1_200_000);
+  const made = pyHelper("m.stack_setup(sys.argv[1], sys.argv[2])", "scr", "e5") as { rid: string; pid: string };
+  created.push(made.rid);
+  const versionsBefore = dataOf<Array<{ versionNo: number; sha256: string }>>(await call(request, ADMIN, "GET", projectPath(made.rid, "/prd/versions")));
+  const gate0 = (): string[] =>
+    (psql(`SELECT frozen_digests::text FROM console.research_gate_decisions WHERE research_id = '${made.rid}' AND gate = 'GATE0' AND decision = 'APPROVED' ORDER BY decided_at`) ?? "")
+      .split("\n")
+      .filter((x) => x !== "");
+  const gate0Before = gate0();
+  expect(gate0Before.length, "SCR 前只有一次 Gate 0 核准").toBe(1);
+
+  // UI：看板的「發起規格變更（SCR）」→ MINOR、理由、章節、證據連結
+  await signIn(page, request, ADMIN);
+  await open(page, request, `${BASE}/research/${made.rid}?step=build`);
+  await expect(page.getByTestId("kanban-board")).toBeVisible({ timeout: 90_000 });
+  await page.getByTestId("scr-launch").first().click();
+  const dialog = page.getByTestId("scr-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel("變更理由").fill("INT-P2 28-5：MINOR 規格變更演練，補一段修訂註記並重新審查。");
+  // 缺陷 D-6：選項裡的章節標題文字（例如「1. 專案願景與目標 …」）送出會被 Bridge 以 affected_unknown 拒（422）；只有單純的 AC 編號選項（如 AC-001-1）合法，所以選那一項
+  await dialog
+    .getByTestId("scr-sections")
+    .locator("label")
+    .filter({ hasText: /^\s*AC-001-1\s*$/ })
+    .first()
+    .locator("input[type=checkbox]")
+    .check();
+  await dialog.getByPlaceholder("https://").fill("https://example.com/int-p2/evidence");
+  const [scrResponse] = await Promise.all([page.waitForResponse((r) => r.url().includes("/scr") && r.request().method() === "POST"), dialog.getByTestId("scr-submit").click()]);
+  console.log(`[28-5] UI 送出 SCR → HTTP ${scrResponse.status()} 請求 ${scrResponse.request().postData()} 回應 ${(await scrResponse.text()).slice(0, 400)}`);
+  // 發起成功（202）後游標轉 studio／SCR_OPEN，頁面回到步驟 2 並顯示「SCR 進行中」（對話框隨步驟面板卸載，不會停在 scr-started）
+  await expect(page.getByText("SCR 進行中").first()).toBeVisible({ timeout: 60_000 });
+  await page.screenshot({ path: test.info().outputPath("28-5-scr-started.png") });
+  const scrs = dataOf<Array<{ scrNo: number; status: string; evidenceUrl: string | null }>>(await call(request, ADMIN, "GET", projectPath(made.rid, "/scr")));
+  expect([scrs.length, scrs[0].status, scrs[0].evidenceUrl], "UI 發起：OPEN 且帶證據連結").toEqual([1, "OPEN", "https://example.com/int-p2/evidence"]);
+
+  // 起草（人工存新版 PRD）與審查（劇本第 N 輪）借 Python 助手；Gate 0 一律經 approveViaApi（API 代驗，構造情境，證據標明）
+  const drafted = pyHelper("m.scr_draft_review_cli(sys.argv[1])", made.rid);
+  console.log(`[28-5] 起草＋審查（劇本）：${JSON.stringify(drafted)}；Gate 0 為 API 代驗`);
+  const digests = await approveViaApi(request, made.rid);
+  const applied = await call(request, ADMIN, "POST", projectPath(made.rid, `/scr/${scrs[0].scrNo}/apply`), {});
+  console.log(`[28-5] apply → HTTP ${applied.status} ${JSON.stringify(applied.json).slice(0, 300)}`);
+  expect(applied.status, `apply → ${JSON.stringify(applied.json)}`).toBe(200);
+  const after = dataOf<Array<{ scrNo: number; status: string }>>(await call(request, ADMIN, "GET", projectPath(made.rid, "/scr")));
+  expect(after[0].status, "SCR 轉 APPLIED").toBe("APPLIED");
+
+  const gate0After = gate0();
+  expect(gate0After.length, "新增一次 Gate 0 核准列").toBe(2);
+  expect(gate0After[0], "舊凍結版（第一筆 Gate 0 的 digest）保留不變").toBe(gate0Before[0]);
+  expect(gate0After[1], "新 spec_doc_digests 入庫且不同").not.toBe(gate0Before[0]);
+  expect(Object.keys(digests).length, "approveViaApi 回新的凍結摘要").toBeGreaterThan(0);
+  const versionsAfter = dataOf<Array<{ versionNo: number; sha256: string }>>(await call(request, ADMIN, "GET", projectPath(made.rid, "/prd/versions")));
+  for (const v of versionsBefore) expect(versionsAfter.find((x) => x.versionNo === v.versionNo)?.sha256, `舊 PRD 版本 ${v.versionNo} 位元組（sha256）不變`).toBe(v.sha256);
+  const reconcile = await call(request, ADMIN, "POST", projectPath(made.rid, "/reconcile"), {});
+  console.log(`[28-5] 對帳：${JSON.stringify(reconcile.json).slice(0, 200)}`);
+  expect(dataOf<{ consistent: boolean }>(reconcile).consistent, "對帳 consistent").toBe(true);
+});
+
+// ── V-D5／SSE 看板真棧量測（不是 AT，只記錄分佈與方法，不判達標；D-138 Q-9）──────────────────────────────────────────────────────
+// 方法：開步驟 4 看板；Node 端（同一台機器的同一個時鐘 Date.now）在框架 CLI 動作返回時記 t0（Python 助手回傳完成時刻），
+// 再以 100 ms 間隔輪詢看板文字，看到「狀態機狀態」欄出現預期現態的時刻記 t1；延遲＝t1－t0（含最多一個輪詢間隔的量測誤差）。
+// 看板更新來源是 console-api 的輪詢重抓（內環 FSM 無推播，IFACE §1.5），所以這是「檔案改變到畫面更新」的全鏈上界。
+const VD5_STEPS: Array<[string, string]> = [
+  ["to_pr_review", "PR_REVIEW"],
+  ["pr_fail", "IMPLEMENTATION"],
+  ["to_pr_review", "PR_REVIEW"],
+  ["pr_fail", "IMPLEMENTATION"],
+  ["to_pr_review", "PR_REVIEW"],
+  ["pr_pass", "RTM_VERIFY"],
+  ["rtm_pass", "RELEASE_READY"],
+];
+
+test("V_D5 看板真棧量測（只記錄）：FSM 動作返回到看板「狀態機狀態」欄更新的毫秒數分佈", async ({ page, request }) => {
+  test.skip(LOCAL_ABSENCE !== "", LOCAL_ABSENCE);
+  test.setTimeout(1_800_000);
+  const samples: number[] = [];
+  const apiSamples: number[] = [];
+  for (const round of [1, 2]) {
+    const made = pyHelper("m.stack_setup(sys.argv[1], sys.argv[2])", "scr", `vd${round}`) as { rid: string };
+    created.push(made.rid);
+    await signIn(page, request, ADMIN);
+    await open(page, request, `${BASE}/research/${made.rid}?step=build`);
+    const board = page.getByTestId("kanban-board");
+    await expect(board).toBeVisible({ timeout: 90_000 });
+    const column = page.getByTestId("kanban-col-implement");
+    const text = async (): Promise<string> => column.innerText();
+    let before = await text();
+    for (const [step, expected] of VD5_STEPS) {
+      const done = pyHelper("m.fsm_step(sys.argv[1], sys.argv[2])", made.rid, step) as { doneMs: number };
+      const t0 = done.doneMs;
+      // API 層：console-api 的看板端點讀到新現態的時刻（Bridge 讀內環鍵 FSM 檔→console-api 組裝）；100 ms 間隔
+      let tApi = 0;
+      while (Date.now() - t0 < 30_000) {
+        const reply = await call(request, ADMIN, "GET", projectPath(made.rid, "/kanban"));
+        const state = dataOf<{ columns: { implement: { fsmState: string | null } } }>(reply).columns.implement.fsmState;
+        if (state === expected) {
+          tApi = Date.now();
+          break;
+        }
+        await page.waitForTimeout(100);
+      }
+      // 畫面層：已開著的看板 DOM 出現新現態的時刻（不重新整理頁面）
+      let t1 = 0;
+      while (Date.now() - t0 < 30_000) {
+        const now = await text();
+        if (now.includes(expected) && !before.includes(expected)) {
+          t1 = Date.now();
+          before = now;
+          break;
+        }
+        await page.waitForTimeout(100);
+      }
+      if (t1 === 0) before = await text();
+      console.log(`[V-D5] 輪 ${round} 動作 ${step} → 預期 ${expected}：API ${tApi === 0 ? "30 秒內未見" : `${tApi - t0} ms`}；畫面（不重整）${t1 === 0 ? "30 秒內未見更新" : `${t1 - t0} ms`}`);
+      if (tApi !== 0) apiSamples.push(tApi - t0);
+      if (t1 !== 0) samples.push(t1 - t0);
+    }
+  }
+  const dist = (xs: number[]): string => {
+    const s = [...xs].sort((a, b) => a - b);
+    return `${JSON.stringify(s)}；樣本 ${s.length}；中位數 ${s.length === 0 ? null : s[Math.floor((s.length - 1) / 2)]}；最大 ${s.at(-1) ?? null}`;
+  };
+  console.log(`[V-D5] API 層原始分佈（ms，已排序）：${dist(apiSamples)}`);
+  console.log(`[V-D5] 畫面層（不重整）原始分佈（ms，已排序）：${dist(samples)}；方法：同機 Date.now、100 ms 輪詢；API 層與畫面層各自逾時 30 秒`);
+  expect(apiSamples.length, "至少十次有效 API 層樣本（只記錄，不判延遲達標）").toBeGreaterThanOrEqual(10);
+});
