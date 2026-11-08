@@ -58,10 +58,10 @@ class ResearchReasonsTest {
     private static final Set<String> P2_REASONS = new TreeSet<>(List.of("tag_exists", "delivery_step_failed"));
     /** P2 起的四方鎖集合：22＋4＋9＋2＝37。 */
     private static final Set<String> ALL_REASONS = union(P0_REASONS, P0_TAIL_REASONS, P1_REASONS, P2_REASONS);
-    /** 契約 §0.2 勘誤尚未落地、缺列的 reason（主控 RELEASE_READY 批次補列後清空；D-115、D-149#10：tag_exists 契約已列，只缺 delivery_step_failed）。 */
-    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>(List.of("delivery_step_failed"));
-    /** Architecture §11.1 研究 reason 表勘誤尚未落地、缺列的 reason（同上）。 */
-    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>(List.of("delivery_step_failed"));
+    /** 契約 §0.2 勘誤尚未落地、缺列的 reason（P2 RELEASE_READY 勘誤批次已補列 delivery_step_failed，名單清空；D-115、D-149#10）。 */
+    private static final Set<String> CONTRACT_ERRATUM_PENDING = new TreeSet<>();
+    /** Architecture §11.1 研究 reason 表勘誤尚未落地、缺列的 reason（同上，已清空）。 */
+    private static final Set<String> ARCHITECTURE_ERRATUM_PENDING = new TreeSet<>();
     /** D-72 取代後退役的 reason：Bridge 對研究端點不再回它，任何一處都不得再列（見類別說明）。 */
     private static final Set<String> RETIRED_REASONS = new TreeSet<>(List.of("spec_digest_changed"));
 
@@ -161,7 +161,7 @@ class ResearchReasonsTest {
     }
 
     // AT-962-24-E-3（契約與 Architecture 的 reason 表缺列由具名名單鎖住，勘誤批次後清空）由本案承擔：兩份 *_ERRATUM_PENDING
-    // 恰等於缺列集合（現僅 delivery_step_failed）。SCG-4 一審 F-10 補 ID 對照；改名會動 P1 的 AT 追溯，故以註解承接。
+    // 恰等於缺列集合（P2 勘誤批次後為空）。SCG-4 一審 F-10 補 ID 對照；改名會動 P1 的 AT 追溯，故以註解承接。
     @Test
     void AT_961_15_4_theContractAndArchitectureTablesNameEveryOfTheThirtySevenExceptTheNamedPendingErratum() {
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");
@@ -250,8 +250,7 @@ class ResearchReasonsTest {
         assertThat(ALL_REASONS).hasSize(37);
         assertThat(backendReasons()).as("後端 RESEARCH_ 常數").isEqualTo(ALL_REASONS).containsAll(P2_REASONS);
         assertThat(frontendReasons()).as("前端 RESEARCH_REASONS（FE-P2A 已加）").isEqualTo(ALL_REASONS).containsAll(P2_REASONS);
-        assertThat(architectureReasons().keySet()).as("Architecture §11.1 已含 tag_exists，delivery_step_failed 待 RELEASE_READY 批次補列").contains("tag_exists")
-                .doesNotContain("delivery_step_failed");
+        assertThat(architectureReasons().keySet()).as("Architecture §11.1 已含 tag_exists 與 delivery_step_failed（RELEASE_READY 勘誤批次落地；契約面由缺列集合＝空名單的鎖承擔）").containsAll(P2_REASONS);
     }
 
     @Test

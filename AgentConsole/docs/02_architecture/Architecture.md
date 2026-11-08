@@ -1084,6 +1084,10 @@ backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，
 | 無效審查輸出 | `REVIEW_INVALID`（審查者輸出重試一次後仍不合 schema，evaluator 無法評分）：**不寫 `research_review_rounds` 列、不佔 `round_no`**，只記 REVIEW stage run（`status=FAILED`、`exit_reason=review_invalid`）與事件 `research.review_invalid`；不呼叫 FSM gate、不耗預算；重新審查沿用同一輪號（`attempt`＋1；D-55） |
 | FSM 視圖 | `GET /api/v1/research/projects/{id}/fsm`（API-RP-13）轉 Bridge `GET /sdd/fsm/{key}?root=`，回 `ResearchFsmViewDto`＝既有 `SddFsmState` 原樣、只增不減，另加 `retryHistory.gates`（各閘 `currentCount`＝FSM 檔該閘 `current_count`、`entries`＝該閘 `history` 筆數；既有 `retryHistory.count`／`last` 不動）與 `humanReturnCount`（整數：目前 `fsm_generation` 內 `research_gate_decisions` 中 `gate=GATE0`、`decision=CHANGES` 的筆數，console-api 讀 DB 計得）；各閘分項由 Bridge 在 `GET /sdd/fsm/{key}` 的投影新增同級鍵 `retry_gates`（additive；既有 `retry_history`＝`{count,last}` 與其測試不動）；供 UI 做 FR-R2P-08 邊界條件的「第 n 輪 vs retry_history」對照（D-59(4)） |
 | 內環 | 不變：`POST /autoclaude/runs`（含 `sdd`）、`POST /sdd/compile`、`POST /sdd/fsm/{project}:freeze`（Stage-2）；Gate 0 專用 `:approve-baseline` 與 `:freeze` 並存 |
+| 自癒讀取面（P2；D-149#5；勘誤 2026-11-08） | `GET /api/v1/research/projects/{id}/healing`（API-RP-27）**零 Bridge 請求**：只讀 DB（視圖 `v_research_healing_attempts` 加遮蔽）與 console-api 行程內 `ResearchHealingNotifier` 的**記憶體快取**（最近一次成功 `:healing-sync` 的回應；SSE 幀或看板觸發同步，GET 自己不觸發）。快取缺＝`logLag=0` 且 `logSyncedThrough=null`；`logLag`＝視圖列數減日誌行數。**`specChangeForbidden` 啟發式與 WHY**：快取 `spec_change` 非空時，最新 run 內每個任務「最後一列且未 resolved」者標 `true`，並另以頂層 `specChange{paths,detectedAt}` 原樣給出漂移清單——WHY：漂移是專案級事實（Bridge 只比對凍結 digest 與檔案 sha256，不知道哪個任務動的手），SCR 是唯一補救（Bridge 不還原檔，還原屬毀滅性 git），所以旗標放在使用者會看的未解列、清單另給，不假造歸因；`attribution`／`patchResult` 引擎未提供，恆 null。**V-D8 註記**：Bridge 的 stage／內環 runner 會剝除環境中的 `SDD_*` 三件組（`SDD_ACTIVE_VERSION`／`SDD_STATE_DIR`／`SDD_PROJECT`）⇒ run 內框架 hook 不生效，P2 因此**不得聲稱**自癒補丁觸及凍結規格「被拒」；P2 只做「Bridge 偵測＋標記＋告警」，hook 拒寫入屬 V 項（AC-R2P-16-5 兩半） |
+| 看板更新邊界（P2；D-7、D-138 Q-9；勘誤 2026-11-08） | **內環 FSM 以框架 CLI 直接推進時，console-api 無 SSE 幀，看板靠導航或 REST 回補**：Bridge 無推播（內環 FSM 由引擎檔推進），看板的 ≤500ms 只對「SSE 幀到達瀏覽器至看板 DOM commit」成立（TCS W-R2P10、Q-9）；這是設計邊界、不是缺陷（INT 第二段 V-D5 量測：已開著的看板在十四次 CLI 動作後三十秒內零更新，而 REST 讀端於一百一十一至三百二十五毫秒內即反映新狀態）。要看見 CLI 推進的結果＝導航離開再回來或手動重新整理，看板不輪詢 |
+| 遮蔽兩端（P2；D-162(g)；勘誤 2026-11-08） | 機密遮蔽在兩端各一份、以同一夾具（十八筆，含 `AKIA`）對拍：Bridge `gitops.redact`（Python）與 console-api `HealingExcerptMasker`（Java）皆含 `AKIA[0-9A-Z]{16}`→`***`；任一端少一個樣式，對拍夾具即紅（SCG-4 突變 B23／J9 兩端各自被殺） |
+| 交付字面單一來源（P2；D-157、D-158；勘誤 2026-11-08） | 前端 semver 正規式、Tag／PR 欄位上限、「僅 ADMIN」文案與步驟 5 字樣 `DELIVER_LABEL` 一律住 `frontend/lib/domain/research.ts`（元件 import、不留第二份字面；`research.test.ts` 鎖正規式逐字等於 TCS §5.1）；追溯列形狀＝Bridge 純函式的輸出 `{ac,userStory,gherkinSummary{given,when,then},unitStatus,e2eStatus,lastRunAt,source[]}`＋`totals{acTotal,covered,uncovered,frTotal}`，`frTotal` 與 `:tag`／`:pr` 標題模板的 `<FR 數>` 同一函式同源（D-151） |
 
 Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 
@@ -1096,7 +1100,8 @@ Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 | `POST /research/projects/{id}:approve-baseline`、`:return` | P0 | 200 | 409 `fsm_state_conflict`／`review_not_passed`／`escalated`；422 `digest_mismatch`／`missing_digests`（僅 `:approve-baseline`：只比對送來的鍵、零鍵拒絕；D-72）、`sanitization_failed` |
 | `POST /research/projects/{id}:route-preview`、`:route` | P1 | 200／200（`:route` 同步，D-105） | 409 `route_conflict`／`branch_exists`；422 `target_not_empty`／`public_confirmation_required`／`route_unsupported_in_deployment`；502 `route_step_failed`（帶 `failureStep`） |
 | `POST /research/projects/{id}:scr` | P1 | 202／201 | 409 `scr_limit`／`scr_open` |
-| `POST /research/projects/{id}:gates`、`:tag`、`:pr` | P2 | 200／201 | 409 `tag_exists`；422 |
+| `POST /research/projects/{id}:gates`、`:tag`、`:pr` | P2 | 200／201／201（`:pr` 新建 201、既有 200） | 409 `tag_exists`；502 `delivery_step_failed`；422 |
+| `POST /research/projects/{id}:traceability-preview`、`:healing-sync` | P2 | 200／200 | 409 `fsm_state_conflict`（預演前置）；`:healing-sync` 只准 `requested_by=system`、僅 console-api 的 Notifier 呼叫（30 s 讀取逾時） |
 | `POST /research/projects/{id}:cancel`、`:reconcile`、`:reinit`、`:archive`、`:restore` | P0 | 200 | 404 `research_not_found`；`:reinit` 的換世代模式另有 409 `fsm_state_conflict`（現態非 ESCALATION*）、422（缺理由） |
 | `GET／POST /research/allowlist`、`PATCH /research/allowlist/{id}` | P0 | 200／201 | 422 `terms_ack_required` |
 | `GET /research/projects/{id}/events?after=`、`/stream` | P0 | 200／SSE | 404 |
@@ -1151,12 +1156,13 @@ Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 | `POST …/{id}/stages/{stage}` | O+ | 202 | `stage` 列舉；`afterEscalation` |
 | `POST …/{id}/approve`、`POST …/{id}/return` | **ADMIN** | 200 | Gate 0；`approver`＝JWT subject（不收請求內 approver） |
 | `POST …/{id}/route/preview` | O+ | 200 | 零副作用 |
-| `POST …/{id}/route`、`…/gates`、`…/delivery/tag`、`…/delivery/pr` | **ADMIN** | 200／200／201／201 | P1／P2；`route` 為**同步**（D-105）：成功 200、Bridge 失敗 502 `route_step_failed`，Bridge 牆鐘 `BRIDGE_ROUTE_TIMEOUT_SECONDS`＝300 s、console-api 讀取逾時 330 s（nginx `/api/` 既有 86400 s，不改） |
+| `GET …/{id}/kanban｜healing｜delivery/traceability`（P2） | V+ | 200 | API-RP-26／27／17：唯讀；`healing` 零 Bridge 請求（見 §10.4〈自癒讀取面〉）；`traceability` 轉 Bridge 預演、寫入權杖未設 503 |
+| `POST …/{id}/route`、`…/gates`、`…/delivery/tag`、`…/delivery/pr` | **ADMIN** | 200／200／201／200（`pr` 本文 `created`；Bridge 新建 201、既有 200） | P1／P2；`route` 為**同步**（D-105）：成功 200、Bridge 失敗 502 `route_step_failed`，Bridge 牆鐘 `BRIDGE_ROUTE_TIMEOUT_SECONDS`＝300 s、console-api 讀取逾時 330 s（nginx `/api/` 既有 86400 s，不改） |
 | `POST …/{id}/scr`、`…/cancel`、`…/reconcile`、`…/reinit`（重試初始化）、`…/archive`、`…/restore` | O+ | 200（`scr` 一律 202；D-133） | `reinit`（不帶 `generation`）只在 `flow_status=FAILED` 時可呼叫（D-81 放寬 D-65：初始化失敗補建；stage 失敗或取消只清失敗標記並依 FSM 現態重衍生，D-77），其餘 409 `stage_conflict`（`details.flowStatus`／`flowDetail`）、零寫入；補建仍失敗 502 `init_failed` |
 | `POST …/{id}/reinit` 帶 `generation:"next"`（換世代） | **ADMIN**（由 `ResearchCommandService` 檢查；matcher 無法依本文分流，D-64） | 200 | D-60；FSM 現態須為 ESCALATION*、理由必填；VIEWER 回 403 `ACCESS_DENIED`（授權鏈）、OPERATOR 回 403 `research_write_forbidden`（服務層），兩者 Bridge 請求數 0 |
 | `GET／POST /api/v1/research/allowlist`、`PATCH …/{id}` | V+／**ADMIN**／**ADMIN** | 200／201／200 | D-17 |
 
-`OpenApiIT` 的 `EXPECTED` 路徑／操作計數、`schema.d.ts`、`ErrorResponseDocumentation`（先例 `:49`、`:141`）同 commit 更新；計數以當下實測為準。**研究 `reason`**（雙向鎖：前端 `lib/api/reasons.ts` 或區域常數、backend `ErrorReasons`、契約表）：`research_write_disabled`(503)、`research_write_forbidden`(403)、`research_requires_db`(503)、`db_blocked`(503)、`compile_failed`(503)、`research_not_found`(404)、`slug_in_use`(409)、`allowlist_exists`(409)、`stage_conflict`(409)、`prd_version_conflict`(409)、`review_not_passed`(409)、`fsm_state_conflict`(409)、`escalated`(409)、`spec_frozen`(409)、`route_conflict`(409)、`branch_exists`(409)、`scr_open`(409)、`scr_limit`(409)、`decomposition_stale`(409)、`tag_exists`(409)、`layer_unavailable`(400)、`sanitization_failed`(422)、`target_not_empty`(422)、`public_confirmation_required`(422)、`route_unsupported_in_deployment`(422)、`fsm_state_unreadable`(422)、`invalid_request`(422)、`terms_ack_required`(422)、`missing_digests`(422)、`digest_mismatch`(422)、`bridge_unreachable`(502)、`init_failed`(502)、`not_implemented`(502)、`route_step_failed`(502)、`sdd_cli_failed`(502)、`bridge_timeout`(504)。其中 `missing_digests`／`digest_mismatch` 取代原列的 409 摘要不符（Gate 0 核准只比對送來的鍵；D-72）；`bridge_unreachable`／`bridge_timeout` 是研究呼叫的連線類失敗（契約 §0.2 第 8 列）；`init_failed`／`not_implemented` 是 Bridge 回報的上游失敗（後者 Bridge 回 501、console-api 轉 502；契約 §0.2 第 8a、8b 列）；`route_step_failed`（分流某一步失敗，帶 `failureStep`）、`sdd_cli_failed`（Bridge 的 SDD CLI 子行程失敗）、`compile_failed`（stage 的 persona／playbook 編譯失敗）、`fsm_state_unreadable`（FSM 狀態檔壞掉）由 console-api 逐字轉出，`invalid_request` 是輸入閘（400）與 Bridge 拒絕（422）共用（四者為 P0 未結 R-2 尾巴，⚖P1-25；契約 §0.2 第 7c、7d、8c～8e 列同步補列；`invalid_request` 在契約第 5 列）。
+`OpenApiIT` 的 `EXPECTED` 路徑／操作計數、`schema.d.ts`、`ErrorResponseDocumentation`（先例 `:49`、`:141`）同 commit 更新；計數以當下實測為準。**研究 `reason`**（雙向鎖：前端 `lib/api/reasons.ts` 或區域常數、backend `ErrorReasons`、契約表）：`research_write_disabled`(503)、`research_write_forbidden`(403)、`research_requires_db`(503)、`db_blocked`(503)、`compile_failed`(503)、`research_not_found`(404)、`slug_in_use`(409)、`allowlist_exists`(409)、`stage_conflict`(409)、`prd_version_conflict`(409)、`review_not_passed`(409)、`fsm_state_conflict`(409)、`escalated`(409)、`spec_frozen`(409)、`route_conflict`(409)、`branch_exists`(409)、`scr_open`(409)、`scr_limit`(409)、`decomposition_stale`(409)、`tag_exists`(409)、`layer_unavailable`(400)、`sanitization_failed`(422)、`target_not_empty`(422)、`public_confirmation_required`(422)、`route_unsupported_in_deployment`(422)、`fsm_state_unreadable`(422)、`invalid_request`(422)、`terms_ack_required`(422)、`missing_digests`(422)、`digest_mismatch`(422)、`bridge_unreachable`(502)、`init_failed`(502)、`not_implemented`(502)、`route_step_failed`(502)、`delivery_step_failed`(502)、`sdd_cli_failed`(502)、`bridge_timeout`(504)。其中 `missing_digests`／`digest_mismatch` 取代原列的 409 摘要不符（Gate 0 核准只比對送來的鍵；D-72）；`bridge_unreachable`／`bridge_timeout` 是研究呼叫的連線類失敗（契約 §0.2 第 8 列）；`init_failed`／`not_implemented` 是 Bridge 回報的上游失敗（後者 Bridge 回 501、console-api 轉 502；契約 §0.2 第 8a、8b 列）；`route_step_failed`（分流某一步失敗，帶 `failureStep`）、`sdd_cli_failed`（Bridge 的 SDD CLI 子行程失敗）、`compile_failed`（stage 的 persona／playbook 編譯失敗）、`fsm_state_unreadable`（FSM 狀態檔壞掉）由 console-api 逐字轉出，`invalid_request` 是輸入閘（400）與 Bridge 拒絕（422）共用（四者為 P0 未結 R-2 尾巴，⚖P1-25；契約 §0.2 第 7c、7d、8c～8e 列同步補列；`invalid_request` 在契約第 5 列）；**〔勘誤 11-08，P2〕**`tag_exists`（建立 Release Tag 時本地已有同名 tag 且續跑判準不成立，409，契約 §0.2 第 8f 列）與 `delivery_step_failed`（`:tag`／`:pr` 的 git 或 `gh` 步驟失敗，Bridge 502 逐字轉出，`details.failure_step`，契約 §0.2 第 8g 列；D-138 Q-14、D-149#10）為 P2 新增的兩個 reason，總數三十七。
 
 **〔勘誤 2026-11-07〕對帳與游標校正（`API_Contract_ResearchToPRD.md` §1.4 API-RP-18 為 SSOT；D-121、D-125、D-128、D-140）**
 - **對帳狀態四值、三態之外另有「量不到」**：`checks[].status` 值域＝`ok`｜`drift`｜`NOT_EVALUABLE`｜`pending_correction`；第三態 `pending_correction`（D-128 F-12）專指 `fsm_flow_mapping` 的「`build／TCS_PENDING` 而內環已有 Stage-2 凍結」——它是待校正、不是 drift，`consistent` 不因它為假。對帳項數與順序一律以 Bridge `CHECK_IDS` 為準、文件不寫死數字：P1 為六項（`fsm_flow_mapping`、`prd_sha256`、`review_card`、`evidence_matrix`、`task_decomposition`、`route_decision`），P2 落地交付時點對帳時再加第七項 `delivery`（D-138 Q-15、D-140 #14）。`fsm_flow_mapping` 的 P1 增列只用 DB 游標值（`route／ROUTING`、`route／FROZEN`、`build／ROUTED`、`build／TCS_DRAFTING`、`build／TCS_PENDING`、`studio／SCR_OPEN`）；`BUILD_READY`／`PAUSED` 是衍生相態、不入對映（D-121）。
@@ -1324,7 +1330,7 @@ ALTER TABLE console.execution_runs ADD COLUMN engine_capabilities JSONB;   -- NU
 -- agent.enableSelfEvolution），文字逐字取自契約附錄 C.1／C.2
 ```
 
-### 11.3′ 研究到規格 DDL（V16～V21；〔ResearchToPRD W0 增補 2026-11-02；P1 RELEASE_READY 勘誤 2026-11-07 補 K.5、K.6〕）
+### 11.3′ 研究到規格 DDL（V16～V22；〔ResearchToPRD W0 增補 2026-11-02；P1 RELEASE_READY 勘誤 2026-11-07 補 K.5、K.6；P2 RELEASE_READY 勘誤 2026-11-08 補 K.7〕）
 
 **K.1　`V16__research_core.sql`**
 ```sql
@@ -1989,6 +1995,38 @@ ALTER TABLE console.research_scr ADD CONSTRAINT ck_research_scr_evidence_url
 | 25 | `BackupJobMigrationIT` 的既有表零變動快照 | 不變（V21 只改 `research_` 表，已被排除） | AT-962-1-7 |
 
 > **連動**：六個版本清單 IT 加 `"21"`（`SchemaMigrationIT`、`V5UpgradeMigrationIT`、`IssuePriorityMigrationIT`、`BackupJobMigrationIT`、`SiConsoleWritesMigrationIT`、`ResearchSchemaMigrationIT`，座標以 TCS-P2 §4 為準）、`ResearchSchemaMigrationIT` 的 `expectEnum` gate 期望集合加 `SCG6`、`research_pg_support.LAST_VERSION` 20→21、Bridge 兩個 INSERT（決定列、SCR 列）各加新欄；`BackupJobMigrationIT.snapshotOfExistingTables` 排除條件不需改（V21 只動 `research_` 表）；V21 不新增設定鍵。
+
+**K.7　`V22__research_flow_phase_delivered.sql`（P2 RELEASE_READY 勘誤補列；D-162(a)；DDL 全文逐字取自該檔）**
+
+> **WHY**：V16 的 `research_projects_flow_phase_check` 沒有 `DELIVERED`，P2 交付完成的游標 `deliver／DELIVERED／COMPLETED` 寫不進去（BR-P2 交卷以 TCS AT-962-18-5 實跑揭露）；游標是使用者看到的進度狀態，交付後停在 build 是產品缺陷。結構層正解＝新遷移放寬 CHECK（與 V21 對 `gate` 加 `SCG6` 同型），不改已推送的 V21。`flow_step` 的 CHECK 已含 `deliver`、`flow_status` 的 CHECK 已含 `COMPLETED`，所以只放寬 `flow_phase`；沒有新表、沒有新欄。
+> **連動**：Bridge `FLOW_FSM_MAPPING["SPEC_FROZEN"]` 增一格 `"deliver": {DELIVERED}`（外環鍵現態仍是 `SPEC_FROZEN` 時，游標步驟 `deliver` 的合法相態只有 `DELIVERED`；對帳 `fsm_flow_mapping` 項據此不誤報 drift），`:tag` 成功後游標寫 `deliver／DELIVERED／COMPLETED`——**以 V22 已套用（`LAST_VERSION`≥22）為前提**，未套用的庫寫入會被 CHECK 擋（SQLSTATE 23514）；Flyway 版本清單、六個版本清單 IT 與 `research_pg_support.LAST_VERSION` 一律至 22（TCS-P2 AC-962-1 由「21」改「22」）。
+
+```sql
+-- V22__research_flow_phase_delivered.sql — research_projects.flow_phase 放寬 DELIVERED（D-162(a)）
+-- WHY：V16 的 flow_phase CHECK 沒有 DELIVERED，TCS AT-962-18-5 要求的交付完成游標 deliver／DELIVERED／COMPLETED 寫不進來；
+-- 結構層正解＝新遷移放寬 CHECK（與 V21 對 gate 加 SCG6 同型），不改已發佈的 V16／V21。
+-- flow_step 的 CHECK 已含 deliver、flow_status 的 CHECK 已含 COMPLETED，故只放寬 flow_phase；不改其他表、沒有新表。
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint c
+                   JOIN pg_class t ON t.oid = c.conrelid
+                   JOIN pg_namespace n ON n.oid = t.relnamespace
+                   WHERE n.nspname = 'console' AND t.relname = 'research_projects'
+                     AND c.conname = 'research_projects_flow_phase_check' AND c.contype = 'c') THEN
+        RAISE EXCEPTION 'V22: 找不到 research_projects_flow_phase_check，拒絕在未確認舊 CHECK 的情況下加新 CHECK'
+            USING ERRCODE = 'integrity_constraint_violation';
+    END IF;
+END
+$$;
+ALTER TABLE console.research_projects DROP CONSTRAINT research_projects_flow_phase_check;
+ALTER TABLE console.research_projects ADD CONSTRAINT research_projects_flow_phase_check
+    CHECK (flow_phase IN (
+        'INGESTED','RESEARCHING','EVIDENCE_READY','DRAFTING','REVIEWING','REVISING','GATE0_PENDING','FROZEN',
+        'ROUTING','ROUTED','TCS_DRAFTING','TCS_PENDING','SCR_OPEN','DELIVERED'));
+```
+
+> **DDL 驗收（對應 TCS-P2 AT-962-1b-1～1b-4，測試 `ResearchSchemaMigrationIT::AT_962_1b_*`）**：①升級既有庫（V21 資料）後各表既有列逐欄不變；②`flow_phase` 取 `DELIVERED` 與 `flow_step=deliver`、`flow_status=COMPLETED` 的組合可寫，且列舉恰為十四值；③非法值（`delivered`、`DELIVER`、空字串）23514；④`pg_constraint` 以約束名 `research_projects_flow_phase_check` 查恰一條、定義含 `DELIVERED`（舊約束被取代而非並存），且 V21 的 `gate` 守衛不退步。
 
 **M　檔案 ↔ 表 對照表（工作區 `<BRIDGE_RESEARCH_ROOT>/<slug>/`）**
 
