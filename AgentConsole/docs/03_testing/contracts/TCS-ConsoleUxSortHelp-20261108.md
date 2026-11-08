@@ -524,4 +524,4 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ConsoleUxSortHelp-20261108.md`（F 
 
 | 編號 | 位置 | 原文 | 改為 | 依據 |
 |------|------|------|------|------|
-| E-1 | W-UX1(a)、AT-963-1-1（Architecture §5.5 同句同步） | 自然序範例 `OBS-SI-99` < `OBS-SI-100` | `ID-99` < `ID-100` | 2026-11-08 規格 commit 8e7cbabe 推送被 pre-push 擋：根層 `si check` 的 `ref.obs` 判 `OBS-SI-99` 為 OBS-REF-DANGLING（帳本無此 id；規格與測試碼一律不得寫真實帳本 id 樣式的範例）；凍結後訂正，於 RELEASE_READY 連同 §6 勘誤批次 refreeze |
+| E-1 | W-UX1(a)、AT-963-1-1、D-UX-8（Architecture §5.5 同句同步） | 自然序範例用了觀察帳本 id 的樣式（`OBS-SI-` 後接 99 與 100） | `ID-99` < `ID-100` | 2026-11-08 規格 commit 8e7cbabe 推送被 pre-push 擋：根層 `si check` 的 `ref.obs` 把該範例判為 OBS-REF-DANGLING（帳本無此 id；規格、勘誤表與測試碼一律不得寫真實帳本 id 樣式的範例，連本列原文欄也不能逐字引）；凍結後訂正，於 RELEASE_READY 連同 §6 勘誤批次 refreeze |
