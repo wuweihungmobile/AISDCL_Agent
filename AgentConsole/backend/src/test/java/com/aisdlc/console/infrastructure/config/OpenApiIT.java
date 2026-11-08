@@ -294,7 +294,6 @@ class OpenApiIT extends AbstractApiIT {
         return new Shape(schema, required.isBlank() ? List.of() : List.of(required.split(",")), nullable.isBlank() ? List.of() : List.of(nullable.split(",")));
     }
 
-    @SuppressWarnings("unchecked")
     private static boolean isNullable(Map<String, Object> property) {
         if (Boolean.TRUE.equals(property.get("nullable"))) {
             return true;

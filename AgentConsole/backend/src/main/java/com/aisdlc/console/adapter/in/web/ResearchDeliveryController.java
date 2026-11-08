@@ -24,7 +24,7 @@ import java.util.UUID;
 
 /** 交付（API-RP-17／28）：概覽與追溯表（VIEWER 以上可讀）、Release Tag 與 Pull Request（僅 ADMIN）。 */
 @RestController
-@RequestMapping("/api/v1/research/projects/{id}")
+@RequestMapping("/api/v1/research/projects/{id}/delivery")
 @Tag(name = "研發工作流（ResearchToPRD）")
 public class ResearchDeliveryController {
 
@@ -37,7 +37,7 @@ public class ResearchDeliveryController {
         this.delivery = delivery;
     }
 
-    @GetMapping("/delivery")
+    @GetMapping
     @Operation(operationId = "getResearchDelivery", summary = "交付概覽（API-RP-17；VIEWER 以上；JDBC 唯讀）",
             description = "回交付列、追溯快照（relPath、sha256；尚無 Tag 為 null）、專案根目錄、containerMode 與交付前置（releaseReady、rtmFull、scrOpen；hasOrigin 與 ghAvailable 未知為 null）。"
                     + "專案不存在＝404 research_not_found。")
@@ -45,7 +45,7 @@ public class ResearchDeliveryController {
         return ApiResult.ok(delivery.overview(id));
     }
 
-    @GetMapping("/delivery/traceability")
+    @GetMapping("/traceability")
     @Operation(operationId = "getResearchTraceability", summary = "追溯表預演（API-RP-17；VIEWER 以上；零副作用）",
             description = "轉送 Bridge :traceability-preview：回 {rows[], totals{acTotal, covered, uncovered, frTotal}, rtm{runId, fullyCovered, acPct, advisory}｜null, generatedAt}。"
                     + "凍結 PRD 讀不到＝409 fsm_state_conflict（unmet：prd_not_frozen）；研究寫入權杖未設＝503 research_write_disabled（與分流預演同一家族）。")
@@ -53,7 +53,7 @@ public class ResearchDeliveryController {
         return ApiResult.ok(delivery.traceability(id));
     }
 
-    @PostMapping("/delivery/tag")
+    @PostMapping("/tag")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(operationId = "createResearchTag", summary = "建立 Release Tag（API-RP-28；僅 ADMIN）",
             description = "本文 {tagName（semver，至多 64 字）, message?（至多 200 字）, push?（預設 false）, createGithubRelease?（true＝422 release_not_supported）}。"
@@ -64,7 +64,7 @@ public class ResearchDeliveryController {
                 MDC.get("traceId"));
     }
 
-    @PostMapping("/delivery/pr")
+    @PostMapping("/pr")
     @Operation(operationId = "createResearchPr", summary = "建立 Pull Request（API-RP-28；僅 ADMIN）",
             description = "本文 {branch?, title?, bodyPreviewAck}；bodyPreviewAck 缺或為 false＝422 preview_ack_required（Bridge 請求 0）。GitHub token 取後端設定鍵 research.github_token，"
                     + "只放進本端點的 Bridge 請求，不入任何回應、日誌與稽核。回 {delivery, created}。" + WRITE_FLOW)
