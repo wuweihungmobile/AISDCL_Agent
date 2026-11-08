@@ -4,6 +4,7 @@ import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { HELP_PAGES, HELP_ROUTES } from "../../lib/help/registry";
+import { STATE_HELP } from "../../lib/help/states";
 import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, type MockCall, type MockHandler } from "./mockApi";
 
@@ -373,6 +374,18 @@ test.describe("每頁說明（route mock）", () => {
       }
       await page.keyboard.press("Escape");
     }
+  });
+
+  test("AT_963_8_6 /projects「本頁說明」：「怎麼用」為編號步驟 ≥ 5 項；「狀態說明」第一張表的第一列仍＝projectStatus 鍵序的第一個狀態", async ({ page }) => {
+    await visit(page, "/projects");
+    const dialog = await openHelp(page, "projects");
+    const steps = dialog.getByTestId("page-help-steps").locator("ol > li");
+    expect(await steps.count(), "怎麼用：編號步驟 ≥ 5 項").toBeGreaterThanOrEqual(5);
+    const firstRow = dialog.getByTestId("page-help-states-projectStatus").locator("tbody tr").first();
+    const [firstKey, firstRowHelp] = Object.entries(STATE_HELP.projectStatus)[0];
+    expect(firstKey, "鍵序第一個是 DRAFT（凍結鎖：TCS-PageHelp D-PH-11）").toBe("DRAFT");
+    await expect(firstRow.locator("td").nth(1), "第一列的意思欄＝projectStatus 第一個鍵的說明").toHaveText(firstRowHelp.meaning);
+    await expect(firstRow.locator("td").nth(2)).toHaveText(firstRowHelp.next);
   });
 
   // axe：六種組合（/issues、/projects/p1、/settings × 1440×900、390×844）；待寫頁的路由跳過並斷言其無鈕

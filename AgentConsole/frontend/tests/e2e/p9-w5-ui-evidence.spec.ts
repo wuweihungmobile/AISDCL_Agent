@@ -252,13 +252,13 @@ test.describe("設計系統與覆蓋層：真瀏覽器逐項證據", () => {
     await page.waitForTimeout(800);
     const probes: Array<{ label: string; el: Locator; expectChange: Array<"bg" | "color" | "opacity"> }> = [
       { label: "主色實底按鈕（新建專案）", el: page.getByRole("button", { name: "新建專案" }), expectChange: ["bg"] },
-      { label: "專案卡的名稱連結", el: page.getByTestId("project-card").first().getByRole("link").first(), expectChange: ["color"] },
+      { label: "專案卡的名稱連結", el: page.getByTestId("project-card").filter({ hasText: long.name }).getByRole("link").first(), expectChange: ["color"] },
       { label: "側欄導覽項", el: page.getByRole("navigation", { name: "主導覽" }).getByRole("link").first(), expectChange: ["bg"] },
       {
         label: "專案卡的 ghost 按鈕",
         el: page
           .getByTestId("project-card")
-          .first()
+          .filter({ hasText: long.name })
           .getByRole("link", { name: /查看|編輯|執行|監控/ })
           .first(),
         expectChange: [],

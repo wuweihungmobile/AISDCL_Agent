@@ -106,7 +106,10 @@ function createServer(initial: Rec[] = []) {
       return { data: [{ id: "c1", category: "agent", key: "defaultAutonomyLevel", value: "4", valueType: "INTEGER", defaultValue: "3", isEncrypted: false, hasValue: true, effect: "CONSOLE" }] };
     }
     if (method === "GET" && path === "/api/v1/import") {
-      const all = [...s.records.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(summary);
+      // 依請求的 sort 排序（TCS-ConsoleUxSortHelp §5.2：歷史預設請求 createdAt,asc；未帶 sort 時維持原 API 預設 createdAt,desc）
+      const [key = "createdAt", dir = "desc"] = (call.query.get("sort") ?? "createdAt,desc").split(",");
+      const sign = dir === "asc" ? 1 : -1;
+      const all = [...s.records.values()].sort((a, b) => sign * String((a as Record<string, unknown>)[key] ?? "").localeCompare(String((b as Record<string, unknown>)[key] ?? ""))).map(summary);
       return { data: paged(all, 10) };
     }
     if (method === "POST" && (path === "/api/v1/import/text" || path === "/api/v1/import/upload")) {
@@ -460,31 +463,37 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
       parsedResult: null,
     };
     const server = createServer([parsed, stuck, done, dropped]);
-    await setup(page, server);
+    const { calls } = await setup(page, server);
 
     await page.goto("/import");
     await expect(page.getByTestId("import-step1")).toBeVisible(FIRST_LOAD);
     await page.getByRole("tab", { name: "歷史記錄" }).click();
     const rows = page.getByTestId("import-history-row");
     await expect(rows).toHaveCount(4);
-    await expect(rows.nth(0)).toContainText("parsed.md");
-    await expect(rows.nth(0)).toContainText("已解析");
-    await expect(rows.nth(0)).toContainText("e2e-model · 1,152");
-    await expect(rows.nth(1)).toContainText("（貼上文字）");
-    await expect(rows.nth(1)).toContainText("已上傳");
-    await expect(rows.nth(2)).toContainText("已匯入");
-    await expect(rows.nth(2).getByRole("link", { name: "查看專案" })).toHaveAttribute("href", `/projects/${PROJECT_ID}`);
-    await expect(rows.nth(3)).toContainText("已放棄");
+    // 預設請求 sort=createdAt,asc：列序＝建立順序（舊到新）：dropped、done、stuck、parsed
+    expect(
+      calls.some((c) => c.method === "GET" && c.path === "/api/v1/import" && c.query.get("sort") === "createdAt,asc"),
+      "歷史預設請求帶 sort=createdAt,asc",
+    ).toBe(true);
+    await expect(rows.nth(0)).toContainText("dropped.docx");
+    await expect(rows.nth(0)).toContainText("已放棄");
+    await expect(rows.nth(1)).toContainText("已匯入");
+    await expect(rows.nth(1).getByRole("link", { name: "查看專案" })).toHaveAttribute("href", `/projects/${PROJECT_ID}`);
+    await expect(rows.nth(2)).toContainText("（貼上文字）");
+    await expect(rows.nth(2)).toContainText("已上傳");
+    await expect(rows.nth(3)).toContainText("parsed.md");
+    await expect(rows.nth(3)).toContainText("已解析");
+    await expect(rows.nth(3)).toContainText("e2e-model · 1,152");
     // 只有仍有下一步的記錄能開啟
-    await expect(rows.nth(0).getByRole("button", { name: /^開啟匯入記錄/ })).toBeVisible();
-    await expect(rows.nth(1).getByRole("button", { name: /^開啟匯入記錄/ })).toBeVisible();
-    await expect(rows.nth(2).getByRole("button", { name: /^開啟匯入記錄/ })).toHaveCount(0);
-    await expect(rows.nth(3).getByRole("button", { name: /^開啟匯入記錄/ })).toHaveCount(0);
+    await expect(rows.nth(3).getByRole("button", { name: /^開啟匯入記錄/ })).toBeVisible();
+    await expect(rows.nth(2).getByRole("button", { name: /^開啟匯入記錄/ })).toBeVisible();
+    await expect(rows.nth(1).getByRole("button", { name: /^開啟匯入記錄/ })).toHaveCount(0);
+    await expect(rows.nth(0).getByRole("button", { name: /^開啟匯入記錄/ })).toHaveCount(0);
     await snap(page, "06-import-history.png");
 
     // 開啟已解析的記錄 → 步驟 2；重新整理後仍還原（?id= ＋ GET /import/{id}）
     await rows
-      .nth(0)
+      .nth(3)
       .getByRole("button", { name: /^開啟匯入記錄/ })
       .click();
     await expect(page.getByTestId("import-step2")).toBeVisible();
@@ -498,7 +507,7 @@ test.describe("BRD/PRD 匯入（route mock）", () => {
     await page.getByRole("tab", { name: "歷史記錄" }).click();
     await page
       .getByTestId("import-history-row")
-      .nth(1)
+      .nth(2)
       .getByRole("button", { name: /^開啟匯入記錄/ })
       .click();
     await expect(page.getByTestId("existing-source")).toBeVisible();
