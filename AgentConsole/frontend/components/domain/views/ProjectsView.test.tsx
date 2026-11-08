@@ -251,6 +251,27 @@ describe("專案列表：排序控制列（AC-963-4；W-UX5）", () => {
     expect(listCalls(calls).at(-1)?.query.get("page")).toBe("0");
   });
 
+  it("AT_963_4_1 多頁時：已在第 2 頁，改排序欄位與按方向鈕，下一個請求都帶 page=0（回第 1 頁）", async () => {
+    const { calls } = backend((c) =>
+      c.method === "GET" && c.path === "/api/v1/projects" ? { data: { content: LIVE, page: Number(c.query.get("page") ?? 0), size: 10, totalElements: 25, totalPages: 3 } } : undefined,
+    );
+    view();
+    await screen.findByTestId("project-list");
+    const last = () => listCalls(calls).at(-1)!;
+    await userEvent.click(within(screen.getByTestId("mini-pager")).getByRole("button", { name: "下一頁" }));
+    await waitFor(() => expect(last().query.get("page")).toBe("1"));
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "排序" }), "名稱");
+    await waitFor(() => expect(last().query.get("sort")).toBe("name,asc"));
+    expect(last().query.get("page"), "改排序欄位回第 1 頁").toBe("0");
+
+    await userEvent.click(within(screen.getByTestId("mini-pager")).getByRole("button", { name: "下一頁" }));
+    await waitFor(() => expect(last().query.get("page")).toBe("1"));
+    await userEvent.click(screen.getByRole("button", { name: "目前由小到大，按一下改由大到小" }));
+    await waitFor(() => expect(last().query.get("sort")).toBe("name,desc"));
+    expect(last().query.get("page"), "按方向鈕回第 1 頁").toBe("0");
+  });
+
   it("AT_963_4_2 切到「已刪除」：同一組控制列仍在、預設仍 createdAt,asc；方向鈕 aria-label 隨方向在兩句之間切換", async () => {
     const { calls } = backend();
     view();

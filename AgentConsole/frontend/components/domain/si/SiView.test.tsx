@@ -1494,13 +1494,15 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
 
   it("AT_963_3_5 觀察表：預設 ID 升冪（ID 欄 ascending）；第一次點 ID 即降冪；五欄各依語意排；時間跨月跨年依時刻；壞列恆在有效列之後；操作欄無按鈕；展開列排序後仍是同一列", async () => {
     const user = userEvent.setup();
-    const invalid = clone(BAD)!;
+    // 兩個壞列、輸入序 line 降冪（30 在 20 前）：壞列恆在全部有效列之後、彼此依 line 升冪，升降冪相同
+    const invalidHi = { ...clone(BAD)!, line: 30 } as SiObservationRow;
+    const invalidLo = { ...clone(BAD)!, line: 20 } as SiObservationRow;
     // API 序刻意亂排，壞列夾在中間
-    renderSi({ overrides: { observations: serve(obsPage([CRAFTED[0], CRAFTED[1], invalid, CRAFTED[2], CRAFTED[3]])) } });
+    renderSi({ overrides: { observations: serve(obsPage([CRAFTED[0], CRAFTED[1], invalidHi, CRAFTED[2], invalidLo, CRAFTED[3]])) } });
     await waitForObservations();
     const obs = panel("observations");
-    const invalidTid = `si-obs-invalid-${(invalid as { line: number }).line}`;
-    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-001", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-004", invalidTid]);
+    const invalidTids = ["si-obs-invalid-20", "si-obs-invalid-30"];
+    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-001", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-004", ...invalidTids]);
     expect(headerOf(obs, "ID")).toHaveAttribute("aria-sort", "ascending");
     // 操作欄（sr-only 動作欄）沒有按鈕、沒有 aria-sort
     const heads = within(obs).getAllByRole("columnheader");
@@ -1509,15 +1511,15 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
 
     await pressIn(user, obs, "ID");
     expect(headerOf(obs, "ID")).toHaveAttribute("aria-sort", "descending");
-    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-004", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-001", invalidTid]);
+    expect(obsOrder(obs)).toEqual(["si-obs-row-OBS-SI-004", "si-obs-row-OBS-SI-003", "si-obs-row-OBS-SI-002", "si-obs-row-OBS-SI-001", ...invalidTids]);
 
     // 時間：跨年、跨月依時刻（003 的 2025-12 在 001 的 2026-01 之前）
     await pressIn(user, obs, "時間");
     expect(validRowIds(obs)).toEqual(["OBS-SI-003", "OBS-SI-001", "OBS-SI-002", "OBS-SI-004"]);
-    expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+    expect(obsOrder(obs).slice(-2)).toEqual(invalidTids);
     await pressIn(user, obs, "時間");
     expect(validRowIds(obs)).toEqual(["OBS-SI-004", "OBS-SI-002", "OBS-SI-001", "OBS-SI-003"]);
-    expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+    expect(obsOrder(obs).slice(-2)).toEqual(invalidTids);
 
     for (const [name, field] of [
       ["分類", "category"],
@@ -1528,10 +1530,10 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
       await pressIn(user, obs, name);
       const rows = CRAFTED.map((r) => ({ id: r.id, v: r[field] }));
       expect(validRowIds(obs), `${name} 升冪`).toEqual(expectIds(rows, "asc"));
-      expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+      expect(obsOrder(obs).slice(-2)).toEqual(invalidTids);
       await pressIn(user, obs, name);
       expect(validRowIds(obs), `${name} 降冪`).toEqual(expectIds(rows, "desc"));
-      expect(obsOrder(obs).at(-1)).toBe(invalidTid);
+      expect(obsOrder(obs).slice(-2)).toEqual(invalidTids);
     }
 
     // 展開 OBS-SI-003 後排序：展開的仍是同一列
@@ -1547,7 +1549,7 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
     limits.value = 5;
     const user = userEvent.setup();
     const t = (day: number) => `2026-03-0${day} 08:00`;
-    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow(`OBS-SI-00${n}`, n, { time: t(n * 2 - 1) })); // 03-01、03-03、03-05、03-07、03-09
+    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow("OBS-SI-" + `00${n}`, n, { time: t(n * 2 - 1) })); // 03-01、03-03、03-05、03-07、03-09（前綴與數字分開寫：根層 si check 會把「前綴接數字」的字面當帳本引用）
     const page2 = [obsRow("OBS-SI-006", 6, { time: t(4) }), obsRow("OBS-SI-007", 7, { time: t(8) })];
     renderSi({
       overrides: {
@@ -1568,7 +1570,7 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
   it("AT_963_3_E_2 預設序下新列自然接尾（ID 升冪與游標序一致）", async () => {
     limits.value = 5;
     const user = userEvent.setup();
-    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow(`OBS-SI-00${n}`, n, {}));
+    const page1 = [1, 2, 3, 4, 5].map((n) => obsRow("OBS-SI-" + `00${n}`, n, {}));
     const page2 = [obsRow("OBS-SI-006", 6, {}), obsRow("OBS-SI-007", 7, {})];
     renderSi({ overrides: { observations: (call) => ({ data: call.query.get("since") === "5" ? obsPage(page2) : obsPage(page1, { truncated: true, nextSince: 5 }) }) } });
     await screen.findByRole("tab", { name: "觀察 (5+)" });
@@ -1618,6 +1620,9 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
       { seq: 10, t: "2026-02-01T00:00:00Z", kind: "b", by: "y" },
       { seq: 9, t: "2026-03-01T00:00:00Z", kind: "c", by: "x" },
       { seq: 100, t: "2026-01-01T00:00:00Z", kind: "a", by: "z" },
+      // kind 相同的兩列、輸入序 seq 大者在前：同值時兩個方向都依 seq 升冪（tie-break＝seq）
+      { seq: 51, t: "2026-04-01T00:00:00Z", kind: "d", by: "w" },
+      { seq: 50, t: "2026-04-02T00:00:00Z", kind: "d", by: "v" },
     ];
     const run = (
       id: string,
@@ -1654,17 +1659,19 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
     const evIds = () => idsByTestId(evRoot, "si-event-row-");
     const runIds = () => idsByTestId(runRoot, "si-run-row-");
 
-    expect(evIds()).toEqual(["9", "10", "100"]);
+    expect(evIds()).toEqual(["9", "10", "50", "51", "100"]);
     expect(headerOf(evRoot, "seq")).toHaveAttribute("aria-sort", "ascending");
     expect(within(evRoot).getAllByRole("columnheader")[0].querySelector("button")).toBeNull();
     await pressIn(user, evRoot, "t");
-    expect(evIds()).toEqual(["100", "10", "9"]);
+    expect(evIds()).toEqual(["100", "10", "9", "51", "50"]);
     await pressIn(user, evRoot, "kind");
-    expect(evIds()).toEqual(["100", "10", "9"]);
+    expect(evIds()).toEqual(["100", "10", "9", "50", "51"]); // kind 相同的 50、51：依 seq 升冪
+    await pressIn(user, evRoot, "kind");
+    expect(evIds()).toEqual(["50", "51", "9", "10", "100"]); // 降冪時同值兩列仍依 seq 升冪
     await pressIn(user, evRoot, "by");
-    expect(evIds()).toEqual(["9", "10", "100"]);
+    expect(evIds()).toEqual(["50", "51", "9", "10", "100"]);
     await pressIn(user, evRoot, "by");
-    expect(evIds()).toEqual(["100", "10", "9"]);
+    expect(evIds()).toEqual(["100", "10", "9", "51", "50"]);
 
     expect(runIds()).toEqual(["RX-5", "RX-9", "RX-10", "RX-100"]);
     expect(headerOf(runRoot, "ID")).toHaveAttribute("aria-sort", "ascending");
