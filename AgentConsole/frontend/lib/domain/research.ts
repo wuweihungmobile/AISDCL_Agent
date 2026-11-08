@@ -2079,6 +2079,41 @@ export const SCR_REASON_MAX = 500;
 export const SCR_SECTIONS_MAX = 20;
 export const SCR_SECTION_ITEM_MAX = 200;
 export const SCR_EVIDENCE_MAX = 500;
+/**
+ * 「受影響章節」可送出的字面（D-168）：章節**編號**（標題行 `## 5`、`### 5.2 …` 的編號）與 AC 編號。
+ * 鏡像 Bridge `app/research/scr.py` 的 `_HEADING_NO_RE`／`_AC_RE`（Bridge 只認這兩種字面，其餘一律 422 `affected_unknown`）；
+ * 兩邊改一處必同步，跨語言對拍鎖＝共用夾具 `engine-bridge/tests/fixtures/research/scr_section_options_cases.json`。
+ * `\w` 在 Python 是 Unicode、在 JS 是 ASCII，故這裡以 `\p{L}\p{N}_` 加 `u` 旗標對齊。
+ */
+export const SCR_HEADING_NO_RE = /^#{1,6}\s+(\d+(?:\.\d+)*)[.\s、]/u;
+export const SCR_AC_RE = /(?<![\p{L}\p{N}_-])(AC-[0-9][0-9A-Za-z-]*)(?![\p{L}\p{N}_-])/gu;
+const SCR_OPTION_LABEL_MAX = 60;
+
+export interface ScrSectionOption {
+  /** 送出 `affectedSections` 的元素：章節編號或 AC 編號本身。 */
+  value: string;
+  /** 顯示文字（編號＋標題，截短）；不送出。 */
+  label: string;
+}
+
+/** 凍結 PRD → 受影響章節選項（依出現順序、去重；章節編號在前、AC 編號在後；至多 200 項、每項值 ≤200 字）。 */
+export function scrSectionOptions(content: string | undefined): ScrSectionOption[] {
+  if (!content) return [];
+  const out = new Map<string, string>();
+  for (const line of content.split(/\r?\n/)) {
+    const m = SCR_HEADING_NO_RE.exec(line);
+    if (m === null || out.has(m[1])) continue;
+    const title = line.slice(m[0].length).trim();
+    const label = `${m[1]} ${title}`.trim();
+    out.set(m[1], [...label].length > SCR_OPTION_LABEL_MAX ? `${[...label].slice(0, SCR_OPTION_LABEL_MAX).join("")}…` : label);
+  }
+  for (const m of content.matchAll(SCR_AC_RE)) if (!out.has(m[1])) out.set(m[1], m[1]);
+  return [...out]
+    .filter(([value]) => [...value].length <= SCR_SECTION_ITEM_MAX)
+    .slice(0, 200)
+    .map(([value, label]) => ({ value, label }));
+}
+
 export const SCR_REASON_CLASSES = ["PRD 缺漏證據", "AC 模糊", "需求變更", "技術不可行", "其他"] as const;
 export const SCR_KIND_TEXT: Readonly<Record<ResearchScrKind, string>> = {
   MINOR: "小幅變更：在目前研究專案內修訂，舊凍結版保留、新摘要入庫；同一專案有次數上限",

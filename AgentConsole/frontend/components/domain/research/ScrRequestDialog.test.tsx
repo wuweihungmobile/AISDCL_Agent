@@ -1,12 +1,15 @@
 /**
  * SCR 發起對話框與入口（TCS-ResearchToPRD-P2-20261107 AT-962-15-1～15-4、15-E-1～15-E-4）。
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Role } from "@/lib/api/types";
-import { READONLY_TITLE, RESEARCH_REASON_TEXT, SCR_REASON_CLASSES } from "@/lib/domain/research";
+import { READONLY_TITLE, RESEARCH_REASON_TEXT, SCR_REASON_CLASSES, scrSectionOptions } from "@/lib/domain/research";
 import { R3 } from "@/tests/fixtures/research/ids";
 import { callsOf, failure, renderResearch, stubResearchApi, type ApiCall, type Reply } from "@/tests/helpers/research";
 import { ScrLaunchButton, ScrRequestDialog } from "./ScrRequestDialog";
@@ -130,6 +133,35 @@ describe("表單", () => {
     expect(body.reasonClass).toBe("技術不可行");
     expect(body).toMatchObject({ kind: "MINOR", sourceKind: "HUMAN", reason: "理由", affectedSections: [] });
     expect("evidenceUrl" in body).toBe(false);
+  });
+});
+
+describe("受影響章節選項值（D-168）", () => {
+  const cases = JSON.parse(readFileSync(resolve(process.cwd(), "..", "engine-bridge", "tests", "fixtures", "research", "scr_section_options_cases.json"), "utf-8")) as {
+    prd: string;
+    bridgeSections: string[];
+    headingSections: string[];
+    acs: string[];
+  };
+
+  it("與 Bridge 共用夾具對拍：選項值＝標題自身編號＋AC 編號（依序去重），佔位 AC-NNN-Y 與標題全文都不是值，且全被 Bridge 集合接受", () => {
+    const values = scrSectionOptions(cases.prd).map((o) => o.value);
+    expect(values).toEqual([...cases.headingSections, ...cases.acs]);
+    expect(values).not.toContain("AC-NNN-Y");
+    expect(values.some((v) => v.includes("專案願景"))).toBe(false);
+    const accepted = new Set([...cases.bridgeSections, ...cases.acs]);
+    expect(values.every((v) => accepted.has(v))).toBe(true);
+    expect(scrSectionOptions(cases.prd).find((o) => o.value === "1")?.label).toBe("1 專案願景與目標");
+  });
+
+  it("送出 payload 的 affectedSections 只含編號（勾標題項與 AC 項）", async () => {
+    const { calls } = mountDialog("HUMAN");
+    const box = within(await screen.findByTestId("scr-sections"));
+    fireEvent.click(await box.findByLabelText("1 背景"));
+    await fill("理由");
+    submit();
+    await waitFor(() => expect(callsOf(calls, "POST", SCR_URL)).toHaveLength(1));
+    expect((callsOf(calls, "POST", SCR_URL)[0].body as { affectedSections: string[] }).affectedSections).toEqual(["1"]);
   });
 });
 

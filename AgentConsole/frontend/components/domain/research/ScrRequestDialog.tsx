@@ -25,19 +25,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { useOpenResearchScr, usePrdVersion, usePrdVersions } from "@/lib/api/queries";
 import type { ResearchScrKind, ResearchScrOpenResult } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
-import { BUILD_DISABLED_TEXT, READONLY_TITLE, SCR_KIND_TEXT, SCR_REASON_CLASSES, SCR_REASON_MAX, SCR_SOURCE_LABEL, researchErrorText, scrFormView, scrViolationsByField } from "@/lib/domain/research";
-
-/** 凍結 PRD 的章節標題與 AC 編號（至多 200 項、每項 ≤200 字）：「受影響章節」的選項來源。 */
-function prdSectionOptions(content: string | undefined): string[] {
-  if (!content) return [];
-  const out: string[] = [];
-  for (const line of content.split(/\r?\n/)) {
-    const m = /^#{1,6}\s+(.+?)\s*$/.exec(line);
-    if (m) out.push(m[1]);
-  }
-  for (const ac of content.match(/AC-[A-Z0-9]+(?:-[A-Z0-9]+)+/g) ?? []) out.push(ac);
-  return [...new Set(out)].filter((s) => [...s].length <= 200).slice(0, 200);
-}
+import {
+  BUILD_DISABLED_TEXT,
+  READONLY_TITLE,
+  SCR_KIND_TEXT,
+  SCR_REASON_CLASSES,
+  SCR_REASON_MAX,
+  SCR_SOURCE_LABEL,
+  researchErrorText,
+  scrFormView,
+  scrSectionOptions,
+  scrViolationsByField,
+} from "@/lib/domain/research";
 
 export function ScrRequestDialog({ researchId, open, onOpenChange, sourceKind = "HUMAN" }: { researchId: string; open: boolean; onOpenChange: (open: boolean) => void; sourceKind?: string }) {
   const { canWrite } = useAuth();
@@ -46,7 +45,7 @@ export function ScrRequestDialog({ researchId, open, onOpenChange, sourceKind = 
   const versions = usePrdVersions(open ? researchId : undefined);
   const latest = versions.data !== undefined && versions.data.length > 0 ? versions.data[versions.data.length - 1].versionNo : null;
   const prd = usePrdVersion(open ? researchId : undefined, latest);
-  const options = useMemo(() => prdSectionOptions(prd.data?.content), [prd.data?.content]);
+  const options = useMemo(() => scrSectionOptions(prd.data?.content), [prd.data?.content]);
 
   const [kind, setKind] = useState<ResearchScrKind>("MINOR");
   const [source, setSource] = useState(sourceKind);
@@ -154,9 +153,14 @@ export function ScrRequestDialog({ researchId, open, onOpenChange, sourceKind = 
                 <div data-testid="scr-sections" className="flex max-h-40 flex-col gap-1 overflow-y-auto rounded-md border border-wg-line p-2 text-sm">
                   {options.length === 0 ? <span className="text-wg-muted">（凍結 PRD 尚無可選章節）</span> : null}
                   {options.map((o) => (
-                    <label key={o} className="flex items-center gap-2">
-                      <input type="checkbox" checked={sections.includes(o)} onChange={(e) => setSections((cur) => (e.target.checked ? [...cur, o] : cur.filter((s) => s !== o)))} />
-                      {o}
+                    <label key={o.value} className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        value={o.value}
+                        checked={sections.includes(o.value)}
+                        onChange={(e) => setSections((cur) => (e.target.checked ? [...cur, o.value] : cur.filter((s) => s !== o.value)))}
+                      />
+                      {o.label}
                     </label>
                   ))}
                 </div>

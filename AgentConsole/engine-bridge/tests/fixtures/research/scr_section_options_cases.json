@@ -1,0 +1,7 @@
+{
+  "_comment": "SCR「受影響章節」兩端對拍夾具（D-168）：Bridge scr.parse_frozen_prd 與前端 lib/domain/research.ts scrSectionOptions 必須對同一份 PRD 文字得到一致的字面集合。",
+  "prd": "# PRD 樣本\n\n## 1. 專案願景與目標\n正文。\n\n## 5 驗收標準\n### 5.2 細項標準\n- AC-001-1 正控：以數字開頭的 AC 編號\n- 範本佔位 AC-NNN-Y 不是真實編號\n- 再次引用 AC-001-1（重複）與（AC-002-3）\n- 緊貼中文的說明AC-009-1 不算\n\n## 沒有編號的標題\n### 7.1 孤兒小節（沒有 ## 7）\n",
+  "bridgeSections": ["1", "5", "5.2", "7", "7.1"],
+  "headingSections": ["1", "5", "5.2", "7.1"],
+  "acs": ["AC-001-1", "AC-002-3"]
+}

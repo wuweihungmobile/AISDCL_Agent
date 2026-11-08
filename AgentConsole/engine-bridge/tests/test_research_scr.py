@@ -459,3 +459,24 @@ def test_AT_962_15_8_the_scr_open_insert_lists_evidence_url_and_matches_its_para
         "research_id": rid, "scr_id": str(uuid.uuid4()), "kind": "MAJOR", "source_kind": "HUMAN",
         "reason": "r", "requested_by": ADMIN, "evidence_url": url})
     assert evidence_row(renv, rid)[0] == url
+
+
+# ── D-168：「受影響章節」兩端對拍（前端 scrSectionOptions 與 Bridge parse_frozen_prd 同一份夾具）──
+SECTION_CASES = Path(__file__).resolve().parent / "fixtures" / "research" / (
+    "scr_section_options_cases.json")
+
+
+def test_section_options_fixture_matches_parse_frozen_prd() -> None:
+    case = json.loads(SECTION_CASES.read_text(encoding="utf-8"))
+    parsed = scr.parse_frozen_prd(case["prd"])
+    assert parsed.sections == frozenset(case["bridgeSections"])
+    assert parsed.acs == frozenset(case["acs"])
+    # 前端選項值（標題自身編號＋AC）必須全被 Bridge 接受；佔位 AC-NNN-Y 與標題全文不被接受
+    for value in [*case["headingSections"], *case["acs"]]:
+        assert scr.validate_request(
+            {"kind": "MINOR", "source_kind": "HUMAN", "reason": "r",
+             "affected_sections": [value]}, parsed) == [], value
+    for bad in ("AC-NNN-Y", "1. 專案願景與目標"):
+        assert scr.validate_request(
+            {"kind": "MINOR", "source_kind": "HUMAN", "reason": "r",
+             "affected_sections": [bad]}, parsed), bad
