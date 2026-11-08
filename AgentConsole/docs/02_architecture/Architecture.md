@@ -490,6 +490,30 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 
 兩個既有頁的唯一改動：`app/projects/[projectId]/execute/page.tsx`、`…/monitor/page.tsx` 的**頁殼**加 `ResearchBackLink`（`?from=research:<uuid>` 且可讀該研究專案時顯示「回到研發工作流」，P2）；`ExecuteView`／`MonitorView` 本體與其凍結 TCS 零改。
 
+### 5.5 共用列表排序與說明文案標準（〔2026-11-08 設計；鍵 `agentconsole-console-ux-sort-help`；Console PRD §0.10；AC／AT 住 `TCS-ConsoleUxSortHelp-20261108.md`〕）
+
+**設計目標**：所有資料列表預設依識別欄、表頭可點排序，且全站只有一份排序邏輯與一份表頭元件（不各頁手寫 `.sort`）。
+
+| 件 | 位置 | 約定 |
+|----|------|------|
+| 排序工具（純函式） | `frontend/lib/domain/sorting.ts`＋同名 `.test.ts` | 型別安全：`SortColumn<T>` 由欄位定義 `{ key, kind, get }` 組成，`kind` 為 `id`（自然序：`Intl.Collator("zh-Hant", { numeric: true })`，使 `RP-0009` 在 `RP-0010` 前、`OBS-SI-99` 在 `OBS-SI-100` 前）、`text`（同一 collator，`numeric` 同樣開啟）、`number`、`iso`（ISO 8601 字串轉毫秒；無法解析者退回文字比較，不丟例外）、`rank`（呼叫端給序位函式，例：議題嚴重度用 `severityRank`）；`null`／`undefined` **不論升降冪一律排最後**；決定性 tie-break 一律再加識別欄（方向由欄定義 `tieDir`、預設升冪、不隨使用者升降冪翻轉；備份「標籤」降冪與後端同口徑）；回傳新陣列、不改輸入。另匯出 `nextSort(state, key, defaultSort?)`（有效狀態＝`state ?? defaultSort`；點新欄＝升冪；點目前欄（含預設欄）＝升降互換，所以第一次點預設欄就反向）與型別 `SortState = { key: string; dir: "asc" \| "desc" } \| null`（`null`＝預設序）。SI 觀察表的壞列（無 ID）不參與排序、恆在有效列之後 |
+| 表頭元件 | `frontend/components/domain/common/SortableHeader.tsx`（新目錄 `common/`，領域元件共用；不放 `components/ui/`，因為它認得 `SortState` 這個領域型別） | 輸出 `<th scope="col" aria-sort="ascending｜descending｜none">`，內含一個 `<button type="button">`；鍵盤 Enter／Space 由原生按鈕提供；圖示用 lucide（`ArrowUp`／`ArrowDown`／`ArrowUpDown`）且 `aria-hidden`；🔴 **`<th>` 的 `textContent` 必須仍等於欄名**（不加 sr-only 文字、不加 `aria-label`），否則既有「表頭字樣」鎖（議題八欄、備份十欄）會紅；目前排序狀態只由 `aria-sort` 傳達。不可排欄（操作、決定、動作、下一步按鈕欄）仍用既有純 `<th>`，不渲染按鈕、不帶 `aria-sort` |
+| 排序控制列 | 同目錄 `SortBar.tsx`（專案卡片、研究專案列用） | 一個下拉（欄位）加一顆方向按鈕（`aria-label` 含目前方向）；專案卡片沿用既有 `<Select aria-label="排序">` 位置，選項改為「建立順序／名稱／狀態／最近更新／自治等級」 |
+| 還原預設 | 例外表（議題表四分頁、備份清單）使用者排序後出現文字按鈕「還原預設排序」（`data-testid="sort-reset"`） | 其餘表的預設序＝識別欄升冪：點識別欄表頭即降冪、再點回升冪（即預設），不另設按鈕 |
+
+**每個列表的排序落在哪一層**（逐表欄位矩陣見 TCS §2）：
+
+- **不分頁或前端已載入全部的清單＝前端排**：議題表（`useIssues` 逐頁載完）、SI 四表（已載入列；游標分頁的「載入更多」進來的新列併入同一份排序）、備份清單、允許清單、追溯表、證據表、抓取紀錄、研究專案列。
+- **伺服器分頁的清單＝後端 `sort` 白名單**（排序必須跨頁才正確，前端只排當頁會誤導）：專案列表與匯入歷史。白名單擴充（欄位名不分大小寫，沿現有 `SortField` 列舉解析；非法值仍 400）：專案 `name｜status｜createdAt｜updatedAt` ＋ **`autonomyLevel`**；匯入歷史 `createdAt｜status` ＋ **`sourceFileName｜aiModel｜tokenUsed｜projectId`**。API 預設值不變（專案 `updatedAt,desc`、匯入 `createdAt,desc`）；改預設的是前端——專案卡片與匯入歷史明確送 `createdAt,asc`（「建立順序」當 ID 序，D-UX-1）。後端一律加 `id` 升冪作 tie-break（現狀已有）。
+- **衍生計數欄 `goalsCount`／`tasksCount` 不開放排序**：它們是查詢時的聚合結果，不是 `projects` 表欄位；為排序而 join 聚合會讓每次列表查詢變重，且卡片上看得到的數字不是使用者找專案的主要依據；需要時用名稱或狀態找。
+- **目標清單與任務清單不加欄位排序**：它們的順序是使用者拖曳排的（`sortOrder` 即資料）；允許欄位排序會讓畫面順序與資料順序脫鉤，拖曳結果變得不可預測。
+- **排序狀態只存在元件記憶體，不入網址、不持久化**：列表頁網址目前只表達「在哪一頁」（議題詳情之外沒有查詢參數契約）；加進網址會新增一份要與凍結契約對齊的參數面，且深連結帶著別人的排序反而造成困惑。代價＝重新整理回預設序，PRD §0.10 已明寫。
+- **議題表**：排序作用於分頁規則之後的清單；「全部」分頁的置頂列（待您決定狀態）使用者排序時**仍留在頂端**（置頂是注意力區，R-IC-66），排序只作用於其下清單；切換分頁時排序狀態重置（各分頁預設序不同）。
+
+**每頁說明文案標準與可讀性鎖**：標準全文住 Console PRD §0.10 D-UX-2。機械鎖＝`frontend/lib/help/readability.ts`（純函式：句長、步數、動作詞、欄位釋義長度、術語首次解釋、禁用詞）＋ `readability.test.ts`（逐頁、逐欄餵入 `HELP_PAGES`、`HELP_COMMON`、`SHARED`、`STATE_HELP`）。它與既有 `lint.ts`（每句 ≤ 60、英文白名單 31 詞、禁字元）**疊加**而非取代：`lint.ts` 與其凍結規則不動；`readability.ts` 不改 `lint.ts` 的任何常數，詞表由它自己持有。說明文案一律純文字節點渲染（`PageHelpDialog` 不經 Markdown），所以不新增渲染元件。
+
+**不變量**：`<th>` 字樣、`STATE_HELP` 鍵序（TCS-PageHelp D-PH-11）、備份清單預設序（AT-BK-02-1-2）、議題表顯示序兩條（R-IC-33 全條；根層 CLI `tools/lib/selfimproving/issues.py` 與前端 `lib/domain/issues.ts` 以同一張範例表兩端驗，本鍵不動任一邊，主控裁決 D-UX-18）、API 回應序與預設 `sort` 值（API_Contract 各條）都不因本鍵改變。
+
 ## 6. 資料流五條
 
 ### 6(a) CRUD（US-P／G／T、API-PRJ／GOL／TSK）
@@ -2128,6 +2152,8 @@ ALTER TABLE console.research_projects ADD CONSTRAINT research_projects_flow_phas
 | L-R10 | Stack Exchange 速率限制官方數值原先未現查（官方頁無法抓取）；2026-11-03 V-R9 已以直接 GET 官方頁現查並回填 PRD NFR-R2P-03-6（arXiv、GitHub、Semantic Scholar 先前已現查） | 3 秒為保守取值（不是官方數字）＋遵守伺服器回傳限流訊號；V-R9 已結 |
 | L-R11 | 框架對 HUMAN_PENDING 的 72 小時提醒／168 小時升級只由 hooks SessionStart 執行（`SDD_FSM_ENGINE.md:433-434`；`.claude/hooks/session_start.py:279`）；Console 路徑沒有 hooks（D-48(3)） | P0 以 UI 顯示等待時長＋滿 72 小時橫幅提醒，不轉 REMINDER、不自動升級（PRD AC-R2P-09-10、NFR-R2P-06-5）；再開症狀：掌舵者回報因 Gate 0 久未核准而錯過提醒 |
 | L-R12 | ESCALATION 人工恢復後的重試計數不歸零：引擎的 `resume-from-escalation` 不動 retry 計數（只有 `gate PASS` 與 `spec-frozen` 歸零）；`increment_retry` 見計數已達上限時把 `current_count` 夾在上限，並在該筆歷史的 `failure_reason` 標「(tamper detected: …)」字樣——這是引擎對「已達上限後再 FAIL」的既有標記（`state_loader.py:211-269`），不是研究面被竄改 | 恢復後至多再得一次審查（PASS 歸零、FAIL 立即再 ESCALATION；D-60）；歷史列照引擎原文顯示、不改寫也不隱藏；全新預算＝換世代（API-RP-20 `generation:"next"`）；再開症狀：掌舵者要求恢復後重新得 3 輪（須先改引擎 `state_loader.py` 與 TLA+，或走換世代） |
+| L-UX-1 | **SI 四表採游標分頁，欄位排序只作用於已載入的列**（§5.5；鍵 `agentconsole-console-ux-sort-help`）：後端與 Bridge 對 SI 帳本只提供遞增游標（`since`／`limit`），沒有 `sort` 參數；為跨頁排序而改 Bridge 契約會動兩引擎側的唯讀鏡像面，超出本鍵範圍 | 使用者在尚未「載入更多」時排序，看到的是已載入列的排序；表頭排序不會自動載入其餘頁。預設序（ID 升冪）與帳本游標序一致，故預設畫面無此落差。再開症狀：掌舵者回報「排序後少了某筆」且該筆在未載入頁 |
+| L-UX-2 | **後端排序與前端排序的已知差異**（§5.5；鍵 `agentconsole-console-ux-sort-help`；SCG-0～3 審查 F8）：專案與匯入歷史的 `status` 排序依列舉常數的英文名而非畫面標籤；匯入歷史 `projectId` 排序是 UUID 字串序；PostgreSQL 字串序依資料庫 collation，與前端 `Intl.Collator("zh-Hant")` 不同；`id` tie-break 在 Java（`UUID.compareTo` 帶號 long）與 PG（`uuid` 位元組序）不同，IT 一律以小寫十六進位字串比較 | 伺服器分頁的兩張清單（專案、匯入歷史）依後端序；其餘前端排的表依 collator 序。再開症狀：掌舵者回報同一欄在兩種清單排出不同順序且造成誤判 |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）
 
