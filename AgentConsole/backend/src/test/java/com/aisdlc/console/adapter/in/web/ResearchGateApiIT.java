@@ -246,6 +246,21 @@ class ResearchGateApiIT extends AbstractResearchIT {
     }
 
     @Test
+    void AT_962_4_4_rtmVerifyForwardsReviewerIndependentFalseAndTrueIsOnlyForwardedWhenTheCallerSaidSo() {
+        // F-07：reviewer_independent 取請求值（省略／false＝false），不是恆 true；Console 不替人聲明獨立性
+        ResearchP2Fixtures.Ready ready = p2().ready("g44r");
+        p2().rtm(ready, true, 100.0);
+
+        Resp omitted = api.post(adminAs("alice"), url(ready.research()), body("RTM_VERIFY", "PASS", null, null));
+        assertThat(omitted.status()).as(omitted.body()).isEqualTo(200);
+        assertThat(lastGateBody()).containsEntry("gate", "RTM_VERIFY").containsEntry("reviewer_independent", false);
+
+        Resp explicitFalse = api.post(adminAs("alice"), url(ready.research()), body("RTM_VERIFY", "PASS", null, false));
+        assertThat(explicitFalse.status()).as(explicitFalse.body()).isEqualTo(200);
+        assertThat(lastGateBody()).containsEntry("reviewer_independent", false);
+    }
+
+    @Test
     void AT_962_4_2_eachUnmetPreconditionIsListedAndMultipleCanCoexistWithZeroBridgeRequests() {
         ResearchP2Fixtures.Ready tasksOpen = p2().ready("g42a");
         p2().task(tasksOpen, "RUNNING");

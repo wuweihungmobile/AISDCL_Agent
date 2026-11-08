@@ -1164,12 +1164,11 @@ def reconcile_at_delivery(ctx: ResearchContext, research_id: str) -> dict[str, A
     return ctx.orchestrator.reconcile(_project(ctx, research_id), actor="bridge")
 
 
-# P1 BR-D2：`:scr`、`:scr-apply`、`:decompose`、`:decomposition-signoff` 住 `research_scr.py`，
-# 掛進同一個 router（`app/main.py` 已 include 本 router；不必再多一行）。放檔尾是因為那支檔
-# 從本檔 import 共用助手。
-from . import research_deliver, research_scr  # noqa: E402
-
-router.include_router(research_scr.router)
-# P2 BR-P2：`:gates`、`:tag`、`:pr`、`:traceability-preview`、`:healing-sync` 住
-# `research_deliver.py`。
-router.include_router(research_deliver.router)
+# P1 BR-D2：`:scr`、`:scr-apply`、`:decompose`、`:decomposition-signoff` 住 `research_scr.py`；
+# P2 BR-P2：`:gates`、`:tag`、`:pr`、`:traceability-preview`、`:healing-sync`
+# 住 `research_deliver.py`。
+# 兩支子模組**各自在檔尾把自己的 router 掛回本檔的 router**（`app/main.py` 已 include 本 router；
+# 不必再多一行）。本處只 import 它們以觸發註冊、**不存取 `.router`**：放檔尾是因為它們從本檔 import
+# 共用助手；不存取 `.router` 是因為單獨 `import app.routers.research_deliver` 的入口會讓本檔在
+# 子模組半初始化時執行到這裡，存取屬性會拋 AttributeError（SCG-4 一審 F-17 D-3，循環匯入）。
+from . import research_deliver, research_scr  # noqa: E402, F401

@@ -223,6 +223,22 @@ class ResearchDeliveryApiIT extends AbstractResearchIT {
     }
 
     @Test
+    void AT_962_19_1_pushOmittedOrFalseSendsPushFalseToTheBridgeSoNothingIsPushedWithoutTheUsersConsent() {
+        // 預設（省略）與明示 false 兩案：恆送 true 的實作會在使用者未勾選時把 tag 推到遠端（F-03）
+        ResearchP2Fixtures.Ready omitted = p2().releaseReady("d191o");
+        Resp first = api.post(adminAs("alice"), tagUrl(omitted), tag("v1.0.1"));
+        assertThat(first.status()).as(first.body()).isEqualTo(201);
+        assertThat(lastCall("tag").body()).containsEntry("push", false);
+
+        ResearchP2Fixtures.Ready explicitFalse = p2().releaseReady("d191f");
+        Map<String, Object> request = tag("v1.0.2");
+        request.put("push", false);
+        Resp second = api.post(adminAs("alice"), tagUrl(explicitFalse), request);
+        assertThat(second.status()).as(second.body()).isEqualTo(201);
+        assertThat(lastCall("tag").body()).containsEntry("push", false);
+    }
+
+    @Test
     void AT_962_19_2_eachUnmetPreconditionNamesItselfWhenAProjectIsAlmostReady() {
         ResearchP2Fixtures.Ready wrongState = p2().ready("d192a");
         p2().fsm(wrongState, "PR_REVIEW", true);

@@ -71,6 +71,35 @@ describe("SCG 登錄對話框", () => {
     expect(screen.getByTestId("gate-reason-counter").textContent).toContain("1 至 500");
   });
 
+  it("AT_962_4_7 RTM_VERIFY 送出本文恰為 {gate,result:PASS,reason,reviewerIndependent:false}（無報告參照時不帶該鍵）", async () => {
+    const { calls } = mount("ADMIN", {
+      reply: () => ({ data: { gateDecisionId: "g1", gate: "RTM_VERIFY", result: "PASS", fsmStateBefore: "RTM_VERIFY", nextState: "RELEASE_READY", escalated: false } }),
+    });
+    openDialog();
+    setGate("RTM_VERIFY");
+    setReason("追溯完整");
+    fireEvent.click(submitBtn());
+    await screen.findByTestId("gate-done");
+    expect(posts(calls)).toHaveLength(1);
+    expect(posts(calls)[0].body).toStrictEqual({ gate: "RTM_VERIFY", result: "PASS", reason: "追溯完整", reviewerIndependent: false });
+  });
+
+  it("AT_962_4_8 RELEASE_READY 送出本文一律 result:FAIL（UI 不提供 PASS）且 reviewerIndependent:false；即使先在別的 gate 選過 PASS", async () => {
+    const { calls } = mount("ADMIN", {
+      reply: () => ({ data: { gateDecisionId: "g1", gate: "RELEASE_READY", result: "FAIL", fsmStateBefore: "RELEASE_READY", nextState: "IMPLEMENTATION", escalated: false } }),
+    });
+    openDialog();
+    setGate("RTM_VERIFY");
+    fireEvent.click(screen.getByRole("radio", { name: /PASS/ })); // 先把 result 狀態停在 PASS
+    setGate("RELEASE_READY");
+    expect(screen.queryByRole("radio", { name: /PASS/ })).toBeNull();
+    setReason("回歸未過");
+    fireEvent.click(submitBtn());
+    await screen.findByTestId("gate-done");
+    expect(posts(calls)).toHaveLength(1);
+    expect(posts(calls)[0].body).toStrictEqual({ gate: "RELEASE_READY", result: "FAIL", reason: "回歸未過", reviewerIndependent: false });
+  });
+
   it("AT_962_4_8 scrOpen=true：送出鈕停用且顯示 BUILD_DISABLED_TEXT.scrOpen", () => {
     mount("ADMIN", { scrOpen: true });
     openDialog();

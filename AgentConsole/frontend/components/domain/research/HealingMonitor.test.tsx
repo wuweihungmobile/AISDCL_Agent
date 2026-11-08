@@ -75,6 +75,40 @@ describe("自癒監視器", () => {
     expect(RUN_ID).toBe(PENDING_ESCALATED.runId);
   });
 
+  it("AT_962_12_3 兩個任務各有一則 ESCALATED 審核：點第二個任務的徽章，彈窗是該任務的那一則（以 taskId 配對，不是第一則 ESCALATED）", async () => {
+    const reviewOf3 = { ...PENDING_ESCALATED, reviewId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", taskId: "task-3", reason: "任務三：重試耗盡" };
+    const reviewOf7 = { ...PENDING_ESCALATED, taskId: "task-7", reason: "任務七：重試耗盡" };
+    const rows = [row({ taskId: "task-3", escalated: true }), row({ taskId: "task-7", escalated: true })];
+    await mount(withRows(rows), "OPERATOR", { kanban: kanbanPending(reviewOf3, reviewOf7) });
+    const badges = await screen.findAllByRole("button", { name: "已升級，等待人工決定" });
+    expect(badges).toHaveLength(2);
+    fireEvent.click(badges[1]);
+    const modal = await screen.findByTestId("decision-modal");
+    expect(within(modal).getByTestId("decision-reason").textContent).toBe("任務七：重試耗盡");
+  });
+
+  it("AT_962_12_3 只有別的任務有 ESCALATED 審核時，本任務的徽章不是按鈕（不開錯彈窗）", async () => {
+    const rows = [row({ taskId: "task-3", escalated: true })];
+    await mount(withRows(rows), "OPERATOR", { kanban: kanbanPending(PENDING_ESCALATED) }); // 審核屬於 task-7
+    await screen.findByTestId("healing-escalated");
+    expect(screen.queryByRole("button", { name: "已升級，等待人工決定" })).toBeNull();
+  });
+
+  it("AT_962_12_1 已修復只看該任務最後一列：先 resolved 後又失敗＝重試中、先失敗後 resolved＝已修復", async () => {
+    await mount(
+      withRows([
+        row({ taskId: "task-3", attempt: 1, resolved: true }),
+        row({ taskId: "task-3", attempt: 2, resolved: false, status: "RETRYING" }),
+        row({ taskId: "task-7", attempt: 1, resolved: false, status: "RETRYING" }),
+        row({ taskId: "task-7", attempt: 2, resolved: true }),
+      ]),
+    );
+    const [first, second] = screen.getAllByTestId("healing-row");
+    expect(first.textContent).toContain("重試中");
+    expect(first.textContent).not.toContain("已修復");
+    expect(second.textContent).toContain("已修復");
+  });
+
   it("AT_962_12_4 規格漂移列：顯示引導；點發起 SCR 開對話框且 sourceKind 預填 HEALING_FAILED", async () => {
     await mount(withRows([row({ specChangeForbidden: true })]));
     expect(screen.getByTestId("healing-spec-change").textContent).toContain("補丁觸及凍結規格，請發起 SCR");

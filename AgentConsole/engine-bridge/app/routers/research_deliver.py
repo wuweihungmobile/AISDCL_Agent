@@ -33,6 +33,7 @@ from .research import (
     reconcile_at_delivery,
     write_gate,
 )
+from .research import router as _parent_router
 
 router = APIRouter(tags=["research"])
 _SYNC_KEYS = frozenset({"requested_by", "run_id"})
@@ -193,7 +194,7 @@ def _tag_violations(body: dict[str, Any]) -> list[dict[str, str]]:
     if message is not None and (not isinstance(message, str) or len(message) > _TAG_MESSAGE_MAX):
         found.append(_violation("message", "message_too_long",
                                 f"message 須為至多 {_TAG_MESSAGE_MAX} 字的字串"))
-    if body.get("push", False) not in (True, False):
+    if not isinstance(body.get("push", False), bool):      # `1 == True`：成員檢查會放行整數 1／0
         found.append(_violation("push", "invalid_boolean", "push 須為布林"))
     if body.get("create_github_release", False) is not False:
         found.append(_violation("createGithubRelease", "release_not_supported",
@@ -298,3 +299,8 @@ def create_pr(research_id: str, request: Request, body: dict[str, Any] = Body(..
             payload = {"delivery": made, "created": created}
             return JSONResponse(status_code=201 if created else 200, content=jsonable(payload))
     raise AssertionError("unreachable")
+
+
+# 自掛回父 router（檔尾；單獨 `import app.routers.research_deliver` 與經 `app.routers.research` 載入
+# 兩種入口都成立，見 research.py 檔尾的說明）。
+_parent_router.include_router(router)

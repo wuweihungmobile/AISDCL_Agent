@@ -160,6 +160,8 @@ class ResearchReasonsTest {
                 .containsEntry("init_failed", 502).containsEntry("not_implemented", 502).containsEntry("bridge_timeout", 504);
     }
 
+    // AT-962-24-E-3（契約與 Architecture 的 reason 表缺列由具名名單鎖住，勘誤批次後清空）由本案承擔：兩份 *_ERRATUM_PENDING
+    // 恰等於缺列集合（現僅 delivery_step_failed）。SCG-4 一審 F-10 補 ID 對照；改名會動 P1 的 AT 追溯，故以註解承接。
     @Test
     void AT_961_15_4_theContractAndArchitectureTablesNameEveryOfTheThirtySevenExceptTheNamedPendingErratum() {
         String contract = read("docs", "02_architecture", "API_Contract_ResearchToPRD.md");

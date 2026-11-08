@@ -146,7 +146,7 @@ function PrDialog({
                   <p>{forbidden ? PR_ADMIN_ONLY_TEXT : researchErrorText(error)}</p>
                   {failureStep !== "" ? (
                     <p data-testid="pr-failed-step">
-                      失敗步驟：{failureStep === "pr_create" ? "建立 PR" : failureStep === "push" ? "推送到遠端" : failureStep}（未建立 PR；已完成的步驟會保留，可重送）
+                      失敗步驟：{failureStep === "pr_create" ? DELIVER_LABEL.createPr : failureStep === "push" ? DELIVER_LABEL.pushRemote : failureStep}（未建立 PR；已完成的步驟會保留，可重送）
                     </p>
                   ) : null}
                   {missing.length > 0 ? (
@@ -167,7 +167,7 @@ function PrDialog({
           </Button>
           {result === null ? (
             <Button disabled={!canSubmit} loading={create.isPending} title={isAdmin ? (ack ? undefined : "請先勾選已預覽") : PR_ADMIN_ONLY_TEXT} onClick={submit} data-testid="pr-submit">
-              建立 PR
+              {DELIVER_LABEL.createPr}
             </Button>
           ) : null}
         </DialogFooter>

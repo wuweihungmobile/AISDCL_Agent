@@ -73,6 +73,17 @@ def test_AT_962_17_2_html_is_stripped_to_plain_text() -> None:
     assert "<" not in summary["given"] and summary["given"].endswith("有批次")
 
 
+def test_AT_962_17_2_markdown_fence_lines_never_enter_the_summary() -> None:
+    """F-17 D-4（SCG-4 一審）：AC 內文以圍欄收尾時，`then` 尾端曾殘留 ```；圍欄行不入摘要，
+    圍欄內的文字照常保留（只是格式標記，不是 Gherkin 內容）。"""
+    body = "```gherkin\nGiven 有批次\nWhen 提交\nThen 成功\n```\n"
+    summary = delivery.gherkin_summary(body)
+    assert summary == {"given": "有批次", "when": "提交", "then": "成功"}
+    assert all("`" not in segment for segment in summary.values())
+    indented = delivery.gherkin_summary("Given 前置\n  ```\nWhen 動作\nThen 結果\n   ```")
+    assert indented == {"given": "前置", "when": "動作", "then": "結果"}
+
+
 # ── AT-962-17-3：unitStatus 導出 ────────────────────────────────────────────────────────────────
 def test_AT_962_17_3_unit_status_follows_the_covering_tasks_terminal_states() -> None:
     later = datetime(2026, 11, 7, 13, 0, tzinfo=UTC)
@@ -402,6 +413,8 @@ def test_AT_962_18_1_the_tag_sequence_runs_in_order_and_ends_in_release(
         project.bare, "tag", "--list") == f"{TAG}\n"           # type: ignore[attr-defined]
 
 
+# AT-962-18-4（單一 DB 交易：RELEASE_TAG 列與 research.delivery 事件欄位值固定）
+# 與 18-3 合併由本案逐欄斷言（F-10 補 ID）
 def test_AT_962_18_3_4_the_snapshot_file_and_the_delivery_row_agree(
         renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: Calls) -> None:
     project = build_project(renv)
@@ -452,8 +465,12 @@ def test_AT_962_18_5_the_release_transition_uses_the_documented_reason_and_write
 
 
 # ── AT-962-18-2／18-E-4：訊息只取模板 ────────────────────────────────────────────────────────────
+# AT-962-18-E-4（argv 注入）由本參數化承擔：message 含 --exec、換行、`$(...)` 時
+# argv 仍恰為模板（F-10 補 ID）
 @pytest.mark.parametrize("message", ["一般備註 ghp_FAKE_R2P2_TOKEN_000000000000000000 結尾",
-                                     "--exec=evil", "line1\nline2", "$(touch pwned) `id`"])
+                                     "--exec=evil", "line1\nline2", "$(touch pwned) `id`"],
+                         ids=["AT_962_18_E_4-token", "AT_962_18_E_4-exec-flag",
+                              "AT_962_18_E_4-newline", "AT_962_18_E_4-subshell"])
 def test_AT_962_18_2_the_user_message_never_reaches_argv_and_is_masked_in_detail(
         renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: Calls, message: str) -> None:
     project = build_project(renv)
@@ -520,6 +537,28 @@ def test_AT_962_18_6_resending_after_a_full_success_writes_nothing_more(
     assert not calls.of("git", "push") and len(project.rows("RELEASE_TAG")) == 1
 
 
+def test_AT_962_18_6_release_transition_is_a_zero_write_no_op_when_the_fsm_is_already_release(
+        renv: rgs.RouteEnv, rtm: ig.RtmFixture, verbs: ig.VerbLog) -> None:
+    """F-08（SCG-4 一審）：FSM 已是 RELEASE 時 `release_transition` 早退、零 FSM 寫入（去早退的突變
+    存活過：AT-962-18-6 原本只走路由層的「列已存在」路徑）。"""
+    project = build_project(renv, "already")
+    assert project.tag().status_code == 201 and project.state() == "RELEASE"
+    ctx = ig.blocking_context(renv)
+    genv = inner_gates.GateEnv(cfg=ctx.cfg, db=ctx.db, writer=ctx.writer, audit=ctx.audit)
+    verbs.clear()
+    final = inner_gates.release_transition(
+        genv, renv.env.db.get_project(project.rid), TAG, ADMIN)
+    assert final == "RELEASE" and verbs.writes() == [] and project.state() == "RELEASE"
+
+
+@pytest.mark.parametrize("length", [299, 300, 301])
+def test_AT_962_18_2_the_delivery_event_reason_is_cut_at_300_characters(length: int) -> None:
+    """F-08：事件 `reason` 字界 300（299／300 原樣、301 截斷）。"""
+    event = delivery.delivery_event("RELEASE_TAG", "FAILED", ref=None, reason="字" * length,
+                                    failure_step="tag")
+    assert len(event["reason"]) == min(length, 300)
+
+
 # ── AT-962-18-7：push 失敗與續跑 ────────────────────────────────────────────────────────────────
 def test_AT_962_18_7_a_failed_push_keeps_the_local_tag_and_the_retry_succeeds_without_force(
         renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: Calls) -> None:
@@ -582,6 +621,36 @@ def test_AT_962_18_E_1_a_foreign_tag_of_the_same_name_is_409_tag_exists(
     resp = project.tag()
     assert (resp.status_code, resp.json()["reason"]) == (409, "tag_exists")
     assert project.rows() == [] and verbs.writes() == [] and project.git("rev-parse", TAG) == before
+
+
+def test_AT_962_18_E_1_a_same_named_tag_with_a_snapshot_of_another_commit_is_409_tag_exists(
+        renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: Calls, verbs: ig.VerbLog) -> None:
+    """F-01（SCG-4 一審）：續跑判準＝快照記載同一 tag **且同一 commit**；只比 tag 名會把別人的
+    同名 tag 當成「我們的」而續跑（`_resumable` 去 commit_sha 比對的突變存活過）。"""
+    project = build_project(renv, "foreignsnap")
+    project.git("tag", TAG)
+    foreign = {"research_id": project.rid, "tag_name": TAG, "commit_sha": "0" * 40}
+    path = project.snapshot_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(_json.dumps(foreign), encoding="utf-8")
+    verbs.clear(), calls.clear()
+    resp = project.tag()
+    assert (resp.status_code, resp.json()["reason"]) == (409, "tag_exists")
+    assert pushes(calls) == [] and project.rows() == [] and verbs.writes() == []
+
+
+def test_AT_962_18_E_2_exactly_one_uncovered_ac_still_blocks_the_tag_with_rtm_below_100(
+        renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: Calls) -> None:
+    """F-02（SCG-4 一審）：邊界＝RTM 差一條（3 條 AC 只覆蓋 2 條）仍 409，零 git 呼叫；
+    `uncovered > 0` 改成 `> 1` 的突變存活過。"""
+    project = build_project(renv, "onegap", covered=False)
+    seed_task(renv, project.rid, "T1", "COMPLETED", ["AC-001-1", "AC-001-2"])
+    calls.clear()
+    resp = project.tag()
+    assert (resp.status_code, resp.json()["reason"]) == (409, "fsm_state_conflict")
+    assert "rtm_below_100" in resp.json()["details"]["unmet"]
+    assert calls.of("git", "tag") == [] and calls.of("git", "push") == []
+    assert project.rows() == []
 
 
 def test_AT_962_18_E_2_unmet_preconditions_are_409_without_any_git_call(

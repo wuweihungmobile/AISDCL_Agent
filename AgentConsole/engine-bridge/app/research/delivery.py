@@ -67,7 +67,8 @@ def _clip(text: str, limit: int = GHERKIN_MAX) -> str:
 
 def gherkin_summary(body: str) -> dict[str, str]:
     """Given／When／Then 各段摘要（純文字、每段至多 120 字；超過者以省略號結尾）。"""
-    parts = _SEG_RE.split(body)
+    fenceless = "\n".join(line for line in body.splitlines() if not line.lstrip().startswith("```"))
+    parts = _SEG_RE.split(fenceless)       # Markdown 圍欄行（```…）不是 Gherkin 內容，不入摘要
     out = {"given": "", "when": "", "then": ""}
     for keyword, text in zip(parts[1::2], parts[2::2], strict=False):
         out[keyword.lower()] = _clip(text)

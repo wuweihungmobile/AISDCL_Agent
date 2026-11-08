@@ -747,7 +747,7 @@ export function toCreateRequest(form: CreateResearchForm): ResearchCreateRequest
 // ── 錯誤原因（契約 §0.2、§1.4；TCS §5.1「錯誤 reason」）────────────────────────────────
 
 /**
- * 研究 reason 的前端常數（二十二個，與後端 `ErrorReasons` 的 `RESEARCH_` 常數集合、契約 §0.2 勘誤後的清單相等；AT-960-5-6 比對三處）：
+ * 研究 reason 的前端常數（三十七個＝P0 二十二＋P1 十三＋P2 二；與後端 `ErrorReasons` 的 `RESEARCH_` 常數集合、契約 §0.2 勘誤後的清單相等；AT-960-5-6 比對三處）：
  * P0 契約原列十八個中的十七個，加 Bridge 專屬的五個（`allowlist_exists`、`init_failed`、`not_implemented`、`digest_mismatch`、`missing_digests`；F-09、INT-13）。
  * 契約原列的 `spec_digest_changed`（409）已被 D-72 的 `digest_mismatch`／`missing_digests`（422）取代、Bridge 對研究端點不再回它，所以不再是前端常數。
  * 刻意不放進 lib/api/reasons.ts 的 REASONS：REASONS 與凍結契約附錄 B 雙向鎖（reasons.test.ts），多一個前端常數即紅（⚖12）。

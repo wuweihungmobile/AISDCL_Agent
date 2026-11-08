@@ -1,3 +1,8 @@
+/**
+ * 手寫型別與生成型別（schema.d.ts）的對拍。型別層的鎖（`expectTypeOf`、`satisfies`）由 `tsc --noEmit` 承擔——
+ * vitest 不做型別檢查，這些斷言在 vitest 裡是 no-op（SCG-4 一審 F-09：W3 五個型別突變全由 tsc 殺掉、本檔 0 個）；
+ * 本檔的**執行期**斷言只鎖鍵集合（兩側欄名相等）。改型別時兩者都要跑：`npx tsc --noEmit` 與 `npx vitest run lib/api/types.test.ts`。
+ */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 

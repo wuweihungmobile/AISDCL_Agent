@@ -110,6 +110,18 @@ describe("靜態判準", () => {
     expect(importers('from "@/components/domain/execute/LiveLogCard"')).toEqual(["TerminalPane.tsx"]);
   });
 
+  it("AT_962_13_E_3 重用元件原地不分叉：LiveLogCard／useRunStream／LogPanel 三檔在正確路徑存在且不含研究面字樣（真正的零 diff 由 `git diff <基底>..HEAD -- <三檔>` 指令核對；TCS 列的 LogPanel 在 components/domain、不在 execute 目錄）", () => {
+    const reused = [
+      path.resolve(process.cwd(), "components", "domain", "execute", "LiveLogCard.tsx"),
+      path.resolve(process.cwd(), "hooks", "useRunStream.ts"),
+      path.resolve(process.cwd(), "components", "domain", "LogPanel.tsx"),
+    ];
+    for (const file of reused) {
+      expect(statSync(file).isFile(), path.basename(file)).toBe(true);
+      expect(/research/i.test(readFileSync(file, "utf8")), `${path.basename(file)} 不得被研究面分叉`).toBe(false);
+    }
+  });
+
   it("AT_962_13_E_1 負控：夾具含 WebSocket、new EventSource、dangerouslySetInnerHTML 各被判違規；合法夾具與只在註解出現的字樣通過（掃描能咬人）", () => {
     expect(violationsOf("const s = new Web" + "Socket('x');")).toEqual(["Web" + "Socket"]);
     expect(violationsOf("const e = new Event" + "Source('/x');")).toEqual(["new Event" + "Source"]);

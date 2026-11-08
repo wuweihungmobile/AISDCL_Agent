@@ -170,6 +170,49 @@ def test_AT_962_26_E_1_preview_and_pr_answer_409_when_their_prerequisites_are_mi
     assert (resp.status_code, resp.json()["details"]["cause"]) == (409, "route_not_succeeded")
 
 
+@pytest.mark.parametrize("push", [1, 0, "true", "false", None, [], {}])
+def test_AT_962_19_1_push_must_be_a_real_boolean_so_integers_and_strings_are_422(
+        renv: rgs.RouteEnv, rtm: ig.RtmFixture, calls: dl.Calls, push: Any) -> None:
+    """F-13（SCG-4 一審）：`1 == True` 讓成員檢查放行整數 1／0；`push` 只准 JSON 布林。零副作用。"""
+    project = dl.build_project(renv, "pushbool", origin=False)
+    calls.clear()
+    resp = project.tag(push=push)
+    assert (resp.status_code, resp.json()["reason"]) == (422, "invalid_request"), resp.text
+    assert [v["rule"] for v in resp.json()["violations"]] == ["invalid_boolean"]
+    assert not calls and project.rows() == []
+
+
+def _routes_after_importing(module: str) -> list[str]:
+    """乾淨行程只匯入 `module`，把 `app.routers.research.router` 掛上空 app 後回 OpenAPI 的
+    `METHOD path` 清單（排序；FastAPI 的 `router.routes` 對 include 進來的子 router 是惰性物件，
+    OpenAPI 才是展開後的真實路由面）。"""
+    import json
+    import subprocess
+    import sys
+
+    root = Path(delivery.__file__).resolve().parents[2]
+    code = ("import json, sys, importlib; importlib.import_module(sys.argv[1]); "
+            "from fastapi import FastAPI; from app.routers import research; "
+            "app = FastAPI(); app.include_router(research.router); "
+            "print(json.dumps(sorted(f'{m} {p}' for p, ops in app.openapi()['paths'].items() "
+            "for m in ops)))")
+    done = subprocess.run([sys.executable, "-c", code, module], cwd=root, capture_output=True,
+                          text=True, encoding="utf-8", timeout=120, check=False)
+    assert done.returncode == 0, done.stderr[-800:]
+    return json.loads(done.stdout.strip().splitlines()[-1])        # type: ignore[no-any-return]
+
+
+@pytest.mark.parametrize("module", ["app.routers.research_deliver", "app.routers.research_scr"])
+def test_AT_962_26_E_1_importing_a_sub_router_module_first_neither_raises_nor_changes_the_routes(
+        module: str) -> None:
+    """F-17 D-3（SCG-4 一審）：單獨 `import app.routers.research_deliver`（或 `_scr`）曾因循環匯入拋
+    AttributeError；子模組改為自掛回父 router 後，兩種匯入順序得到同一組路由。"""
+    via_parent = _routes_after_importing("app.routers.research")
+    first = _routes_after_importing(module)
+    assert first == via_parent
+    assert any(":tag" in r for r in first) and any(":scr" in r for r in first)
+
+
 def test_the_new_reasons_are_exactly_the_two_registered_ones() -> None:
     """未登記四方鎖的字面不得流出（AT-962-24-E-2 的 Bridge 半）：本包新增的 reason 只有兩個。"""
     import re

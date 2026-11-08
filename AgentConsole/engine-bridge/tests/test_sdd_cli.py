@@ -384,6 +384,18 @@ def _research_error(fake: Path, state_dir: Path, verb: str, args: list[str], *,
     return caught.value
 
 
+def test_AT_962_5_6_research_verbs_stay_five_and_transition_reaches_pr_review_and_release(
+) -> None:
+    """AT-962-5-6（SCG-4 一審 F-10 補 ID 命名）：RESEARCH_VERBS 五個、resume-from-escalation 不入；
+    內環鍵的 transition 目標含 PR_REVIEW 與 RELEASE（外環鍵拒）。"""
+    assert sdd_cli.RESEARCH_VERBS == {"show", "transition", "gate", "spec-frozen", "spec-refreeze"}
+    assert "resume-from-escalation" not in sdd_cli.RESEARCH_VERBS
+    for to in ("PR_REVIEW", "RELEASE"):
+        sdd_cli.check_research_allowed("transition", _tr(to), key=_INNER_KEY)
+        with pytest.raises(ApiError):
+            sdd_cli.check_research_allowed("transition", _tr(to), key=_OUTER_KEY)
+
+
 def test_AT_960_13_1_the_five_existing_verbs_stay_and_the_research_table_is_separate() -> None:
     assert sdd_cli.ALLOWED_VERBS == {
         "spec-frozen", "negotiate-enter", "negotiate-exit", "delegate-enter", "delegate-exit"}

@@ -2410,6 +2410,8 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             expectOk(soft, "64 位小寫十六進位", tryInsert(db, "research_deliveries", with(base, "ref", "v2", "snapshot_sha256", "0123456789abcdef".repeat(4))));
             expectOk(soft, "NULL（TAG 列必填由應用層守，DB 不擋）", tryInsert(db, "research_deliveries", with(base, "ref", "v3", "snapshot_sha256", null)));
             expectOk(soft, "省略（PR 列）", tryInsert(db, "research_deliveries", deliveryRow(project, "PULL_REQUEST", "7", "CREATED")));
+            // 63 位小寫 hex 本就在負控內（F-05 SCG-4 一審）：CHAR(64) 會把它補一格空白，bpchar 的 ~ 比對含該空白，
+            // 故 `{63,64}` 與 `{64}` 在此欄位上行為等價（突變無法被任何輸入殺死，一審 D5 屬等價突變）
             for (String bad : List.of("a".repeat(63), "A".repeat(64), "a".repeat(63) + "g")) {
                 Outcome outcome = tryInsert(db, "research_deliveries", with(base, "ref", "bad", "snapshot_sha256", bad));
                 expectState(soft, "snapshot_sha256 為 " + bad.length() + " 位的「" + bad.substring(bad.length() - 1) + "」結尾", outcome, CHECK);

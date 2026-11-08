@@ -38,6 +38,7 @@ from .research import (
     operation,
     write_gate,
 )
+from .research import router as _parent_router
 
 router = APIRouter(tags=["research"])
 
@@ -229,3 +230,8 @@ def decomposition_signoff(research_id: str, request: Request, body: dict[str, An
         with ctx.writer.project_lock(rid):
             return decompose_plan.signoff(_decompose_env(ctx, request), row, body)
     raise AssertionError("unreachable")
+
+
+# 自掛回父 router（檔尾；單獨 import 本模組與經 `app.routers.research` 載入兩種入口都成立，見
+# research.py 檔尾的說明）。
+_parent_router.include_router(router)
