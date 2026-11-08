@@ -18,7 +18,7 @@ import java.util.UUID;
 public interface ImportUseCase {
 
     /** 列表可排序欄位（契約 §1.1.8：{@code createdAt|status}）。 */
-    enum SortField { CREATED_AT, STATUS }
+    enum SortField { CREATED_AT, STATUS, SOURCE_FILE_NAME, AI_MODEL, TOKEN_USED, PROJECT_ID }
 
     /**
      * 列表查詢條件。

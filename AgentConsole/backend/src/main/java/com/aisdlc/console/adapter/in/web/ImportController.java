@@ -64,7 +64,7 @@ public class ImportController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) ImportStatus status,
             @Parameter(description = "來源檔名模糊搜尋（不分大小寫；萬用字元視為字面）") @RequestParam(required = false) String q,
-            @Parameter(description = "欄位[,asc|desc]；欄位限 createdAt／status；預設 createdAt,desc")
+            @Parameter(description = "欄位[,asc|desc]；欄位限 createdAt／status／sourceFileName／aiModel／tokenUsed／projectId（空值升降冪都排最後）；預設 createdAt,desc")
             @RequestParam(defaultValue = "createdAt,desc") String sort) {
         String[] parts = sort.split(",", 2);
         SortField field = parseSortField(parts[0]);
@@ -147,7 +147,12 @@ public class ImportController {
         return switch (raw.strip().toLowerCase(Locale.ROOT)) {
             case "createdat" -> SortField.CREATED_AT;
             case "status" -> SortField.STATUS;
-            default -> throw ValidationException.of("sort", "sort 欄位只能是 createdAt、status");
+            case "sourcefilename" -> SortField.SOURCE_FILE_NAME;
+            case "aimodel" -> SortField.AI_MODEL;
+            case "tokenused" -> SortField.TOKEN_USED;
+            case "projectid" -> SortField.PROJECT_ID;
+            default -> throw ValidationException.of("sort",
+                    "sort 欄位只能是 createdAt、status、sourceFileName、aiModel、tokenUsed、projectId");
         };
     }
 

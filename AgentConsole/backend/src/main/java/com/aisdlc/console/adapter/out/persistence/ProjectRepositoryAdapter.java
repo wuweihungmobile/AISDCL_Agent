@@ -127,6 +127,7 @@ class ProjectRepositoryAdapter implements ProjectRepository {
             case STATUS -> ProjectEntity_.STATUS;
             case CREATED_AT -> ProjectEntity_.CREATED_AT;
             case UPDATED_AT -> ProjectEntity_.UPDATED_AT;
+            case AUTONOMY_LEVEL -> ProjectEntity_.AUTONOMY_LEVEL;
         };
     }
 

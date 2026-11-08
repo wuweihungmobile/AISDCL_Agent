@@ -25,7 +25,7 @@ public interface ManageProjectUseCase {
     }
 
     /** 列表可排序欄位（PRD 任務書：updatedAt 預設，可 name／status／createdAt）。 */
-    enum SortField { NAME, STATUS, CREATED_AT, UPDATED_AT }
+    enum SortField { NAME, STATUS, CREATED_AT, UPDATED_AT, AUTONOMY_LEVEL }
 
     /**
      * 列表查詢條件。

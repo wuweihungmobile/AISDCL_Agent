@@ -143,6 +143,63 @@ class ProjectApiIT extends AbstractApiIT {
                 .containsExactly(older, newer);
     }
 
+    private String projectWithAutonomy(String name, int level) {
+        Map<String, Object> request = body(name);
+        request.put("autonomyLevel", level);
+        return createProject(request);
+    }
+
+    /** AT-963-5-1：autonomyLevel 可排序；同值以 id 升冪（小寫十六進位字串比較）決定先後。 */
+    @Test
+    void AT_963_5_1_autonomyLevelSortsBothWaysWithIdAscendingTieBreak() {
+        String firstFive = projectWithAutonomy("自治五甲", 5);
+        String two = projectWithAutonomy("自治二", 2);
+        String secondFive = projectWithAutonomy("自治五乙", 5);
+        List<String> fives = List.of(firstFive, secondFive).stream().sorted().toList();
+
+        Resp asc = api.get(viewer(), "/api/v1/projects?sort=autonomyLevel,asc");
+        assertThat(asc.status()).isEqualTo(200);
+        assertThat(asc.<List<String>>read("$.data.content[*].id")).containsExactly(two, fives.get(0), fives.get(1));
+
+        Resp desc = api.get(viewer(), "/api/v1/projects?sort=autonomyLevel,desc");
+        assertThat(desc.status()).isEqualTo(200);
+        assertThat(desc.<List<String>>read("$.data.content[*].id")).containsExactly(fives.get(0), fives.get(1), two);
+
+        Resp upper = api.get(viewer(), "/api/v1/projects?sort=AUTONOMYLEVEL,asc");
+        assertThat(upper.status()).as("欄位名不分大小寫").isEqualTo(200);
+        assertThat(upper.<List<String>>read("$.data.content[*].id")).containsExactly(two, fives.get(0), fives.get(1));
+    }
+
+    /** AT-963-5-3（專案半）：不帶 sort 仍是 updatedAt,desc。 */
+    @Test
+    void AT_963_5_3_projectDefaultSortStaysUpdatedAtDescending() throws InterruptedException {
+        String older = createProject("預設甲");
+        Thread.sleep(15);
+        String newer = createProject("預設乙");
+        assertThat(api.get(viewer(), "/api/v1/projects").<List<String>>read("$.data.content[*].id"))
+                .containsExactly(newer, older);
+        assertThat(api.get(viewer(), "/api/v1/projects?sort=updatedAt,desc").<List<String>>read("$.data.content[*].id"))
+                .containsExactly(newer, older);
+    }
+
+    /** AT-963-5-E-1：非白名單欄位 400，訊息列出完整新白名單。 */
+    @Test
+    void AT_963_5_E_1_unknownSortFieldIsRejectedWithTheFullWhitelist() {
+        createProject("白名單");
+        for (String field : List.of("goalsCount", "tasksCount", "executionPath")) {
+            Resp resp = api.get(viewer(), "/api/v1/projects?sort=" + field + ",asc");
+            assertThat(resp.status()).as(field).isEqualTo(400);
+            assertThat(resp.body()).as(field).contains("name", "status", "createdAt", "updatedAt", "autonomyLevel");
+        }
+    }
+
+    /** AT-963-5-E-2：方向非 asc／desc 仍拒收（含空方向）。 */
+    @Test
+    void AT_963_5_E_2_badSortDirectionIsStillRejected() {
+        assertThat(api.get(viewer(), "/api/v1/projects?sort=name,up").status()).isEqualTo(400);
+        assertThat(api.get(viewer(), "/api/v1/projects?sort=autonomyLevel,").status()).isEqualTo(400);
+    }
+
     @Test
     void nameSearchIsCaseInsensitiveAndTreatsWildcardCharactersLiterally() {
         createProject("Core Platform");

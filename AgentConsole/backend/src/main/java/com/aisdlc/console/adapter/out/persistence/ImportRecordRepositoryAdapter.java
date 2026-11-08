@@ -62,8 +62,9 @@ class ImportRecordRepositoryAdapter implements ImportRecordRepository {
         }
         String where = clauses.isEmpty() ? "" : " where " + String.join(" and ", clauses);
         String direction = query.ascending() ? "asc" : "desc";
-        String order = " order by " + (query.sortField() == SortField.STATUS ? "i.status " : "i.createdAt ")
-                + direction + ", i.id asc";
+        // 空值（sourceFileName／aiModel／tokenUsed／projectId 可為 null）升降冪都排最後：PostgreSQL 預設 null 最大，
+        // 降冪會跑到最前，所以一律明寫 nulls last（HQL 語法）；createdAt／status 非空，加了也無差別。
+        String order = " order by " + sortExpression(query.sortField()) + " " + direction + " nulls last, i.id asc";
 
         TypedQuery<Object[]> rows = em.createQuery(SELECT_SUMMARY + where + order, Object[].class);
         TypedQuery<Long> count = em.createQuery("select count(i) from ImportRecordEntity i" + where, Long.class);
@@ -85,6 +86,18 @@ class ImportRecordRepositoryAdapter implements ImportRecordRepository {
     @Override
     public int resetStaleParsing() {
         return jpa.resetStaleParsing();
+    }
+
+    /** 排序欄位只來自 {@link SortField} 列舉（白名單），不拼使用者字串。 */
+    private static String sortExpression(SortField field) {
+        return switch (field) {
+            case CREATED_AT -> "i.createdAt";
+            case STATUS -> "i.status";
+            case SOURCE_FILE_NAME -> "i.sourceFileName";
+            case AI_MODEL -> "i.aiModel";
+            case TOKEN_USED -> "i.tokenUsed";
+            case PROJECT_ID -> "i.projectId";
+        };
     }
 
     /** 把使用者輸入中的 LIKE 萬用字元（% _）與跳脫字元本身當成字面值。 */

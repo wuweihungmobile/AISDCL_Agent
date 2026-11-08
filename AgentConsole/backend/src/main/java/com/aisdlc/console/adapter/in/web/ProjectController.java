@@ -67,7 +67,7 @@ public class ProjectController {
             @RequestParam(defaultValue = "10") int size,
             @Parameter(description = "名稱模糊搜尋（不分大小寫）") @RequestParam(required = false) String q,
             @RequestParam(required = false) ProjectStatus status,
-            @Parameter(description = "排序：欄位[,asc|desc]，欄位可為 name／status／createdAt／updatedAt；預設 updatedAt,desc")
+            @Parameter(description = "排序：欄位[,asc|desc]，欄位可為 name／status／createdAt／updatedAt／autonomyLevel；預設 updatedAt,desc")
             @RequestParam(defaultValue = "updatedAt,desc") String sort,
             @Parameter(description = "true＝只列軟刪除的專案（OPERATOR 以上）；false／省略＝只列未軟刪除者")
             @RequestParam(defaultValue = "false") boolean deleted,
@@ -137,7 +137,9 @@ public class ProjectController {
             case "status" -> SortField.STATUS;
             case "createdat" -> SortField.CREATED_AT;
             case "updatedat" -> SortField.UPDATED_AT;
-            default -> throw ValidationException.of("sort", "sort 欄位只能是 name、status、createdAt、updatedAt");
+            case "autonomylevel" -> SortField.AUTONOMY_LEVEL;
+            default -> throw ValidationException.of("sort",
+                    "sort 欄位只能是 name、status、createdAt、updatedAt、autonomyLevel");
         };
     }
 

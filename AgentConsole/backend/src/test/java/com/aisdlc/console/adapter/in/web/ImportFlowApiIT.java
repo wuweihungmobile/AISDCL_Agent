@@ -591,6 +591,88 @@ class ImportFlowApiIT extends AbstractOutboundIT {
         assertThat(api.get(viewer(), IMPORT + "?sort=STATUS").status()).as("欄位名不分大小寫").isEqualTo(200);
     }
 
+    /** 一筆匯入夾具：欄位值可為 null（null 排最後）。 */
+    private record ImportRow(String id, String file, String model, Long tokens, String project) { }
+
+    private ImportRow importRow(String fileSeed, String file, String model, Long tokens, String project) {
+        String id = textRecord(fileSeed);
+        jdbc.update("update console.import_records set source_file_name = ?, ai_model = ?, token_used = ?, "
+                + "project_id = ?::uuid where id = ?::uuid", file, model, tokens, project, id);
+        return new ImportRow(id, file, model, tokens, project);
+    }
+
+    private static <T extends Comparable<T>> java.util.Comparator<ImportRow> byNullsLast(
+            java.util.function.Function<ImportRow, T> key, boolean ascending) {
+        java.util.Comparator<T> natural = ascending ? java.util.Comparator.<T>naturalOrder()
+                : java.util.Comparator.<T>reverseOrder();
+        return java.util.Comparator.comparing(key, java.util.Comparator.nullsLast(natural))
+                .thenComparing(ImportRow::id);
+    }
+
+    /** AT-963-5-2：四個新欄位可排序；null 升降冪都排最後；同值以 id 升冪；tokenUsed 為數值序。 */
+    @Test
+    void AT_963_5_2_newImportSortFieldsOrderValuesWithNullsLastAndIdTieBreak() {
+        String p1 = createProject("匯入排序甲");
+        String p2 = createProject("匯入排序乙");
+        List<ImportRow> rows = List.of(
+                importRow("seed-1.md", "delta.md", "gpt-b", 300L, p1),
+                importRow("seed-2.md", "alpha.md", null, null, null),
+                importRow("seed-3.md", "charlie.md", "gpt-a", 50L, p2),
+                importRow("seed-4.md", null, "gpt-b", 50L, null));
+
+        assertSorted(rows, "sourceFileName", byNullsLast(ImportRow::file, true), byNullsLast(ImportRow::file, false));
+        assertSorted(rows, "aiModel", byNullsLast(ImportRow::model, true), byNullsLast(ImportRow::model, false));
+        assertSorted(rows, "tokenUsed", byNullsLast(ImportRow::tokens, true), byNullsLast(ImportRow::tokens, false));
+        assertSorted(rows, "projectId", byNullsLast(ImportRow::project, true), byNullsLast(ImportRow::project, false));
+
+        // 數值序（不是字串序：300 在 50 之後）；null 在兩個方向都排最後。
+        assertThat(api.get(viewer(), IMPORT + "?sort=tokenUsed,asc").<List<Integer>>read("$.data.content[*].tokenUsed"))
+                .containsExactly(50, 50, 300, null);
+        assertThat(api.get(viewer(), IMPORT + "?sort=tokenUsed,desc").<List<Integer>>read("$.data.content[*].tokenUsed"))
+                .containsExactly(300, 50, 50, null);
+        assertThat(api.get(viewer(), IMPORT + "?sort=AIMODEL,desc").status()).as("欄位名不分大小寫").isEqualTo(200);
+
+        // 既有欄位不變。
+        assertThat(api.get(viewer(), IMPORT + "?sort=createdAt,asc").<List<String>>read("$.data.content[*].id"))
+                .containsExactly(rows.get(0).id(), rows.get(1).id(), rows.get(2).id(), rows.get(3).id());
+        assertThat(api.get(viewer(), IMPORT + "?sort=status,asc").status()).isEqualTo(200);
+    }
+
+    private void assertSorted(List<ImportRow> rows, String field, java.util.Comparator<ImportRow> asc,
+                              java.util.Comparator<ImportRow> desc) {
+        assertThat(api.get(viewer(), IMPORT + "?sort=" + field + ",asc").<List<String>>read("$.data.content[*].id"))
+                .as(field + " asc").containsExactlyElementsOf(rows.stream().sorted(asc).map(ImportRow::id).toList());
+        assertThat(api.get(viewer(), IMPORT + "?sort=" + field + ",desc").<List<String>>read("$.data.content[*].id"))
+                .as(field + " desc").containsExactlyElementsOf(rows.stream().sorted(desc).map(ImportRow::id).toList());
+    }
+
+    /** AT-963-5-3（匯入半）：不帶 sort 仍是 createdAt,desc。 */
+    @Test
+    void AT_963_5_3_importDefaultSortStaysCreatedAtDescending() {
+        String first = textRecord("first.md");
+        String second = textRecord("second.md");
+        assertThat(api.get(viewer(), IMPORT).<List<String>>read("$.data.content[*].id"))
+                .containsExactly(second, first);
+        assertThat(api.get(viewer(), IMPORT + "?sort=createdAt,desc").<List<String>>read("$.data.content[*].id"))
+                .containsExactly(second, first);
+    }
+
+    /** AT-963-5-E-1（匯入半）：非白名單欄位 400，訊息列出完整新白名單。 */
+    @Test
+    void AT_963_5_E_1_unknownImportSortFieldIsRejectedWithTheFullWhitelist() {
+        Resp resp = api.get(viewer(), IMPORT + "?sort=foo,asc");
+        assertThat(resp.status()).isEqualTo(400);
+        assertThat(resp.body()).contains("createdAt", "status", "sourceFileName", "aiModel", "tokenUsed", "projectId");
+    }
+
+    /** AT-963-5-E-2（匯入半）：方向非 asc／desc 仍拒收（含空方向）。 */
+    @Test
+    void AT_963_5_E_2_badImportSortDirectionIsStillRejected() {
+        assertThat(api.get(viewer(), IMPORT + "?sort=createdAt,up").status()).isEqualTo(400);
+        assertThat(api.get(viewer(), IMPORT + "?sort=aiModel,").status()).isEqualTo(400);
+        assertThat(api.get(viewer(), IMPORT + "?sort=aiModel,up").status()).isEqualTo(400);
+    }
+
     // ── 小工具 ───────────────────────────────────────────────────────────────
 
     /** 假模型端收到的請求（JsonPath 取本文欄位）。 */
