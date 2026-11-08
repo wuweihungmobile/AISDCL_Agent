@@ -27,6 +27,21 @@ location / {
     proxy_cache_bypass $http_upgrade;
 }
 
+# 匯入歷史清單 GET /api/v1/import（不帶尾斜線；frontend lib/api/endpoints.ts 的 listImports）——DEF-AC-034（主控 2026-11-09 真機探針）：
+# 下面的前綴 location 以「/」結尾且掛 proxy_pass，nginx 對「URI 等於該字串但少了尾斜線」的請求做特殊處理：回 301 轉址到
+# /api/v1/import/，而 Spring 6 起不再把 /api/v1/import/ 對映到 /api/v1/import ⇒ 經 nginx 的匯入歷史一律 404（直連後端 200）。
+# 精確比對（=）優先於前綴比對、也不做那套尾斜線特殊處理；設定比照 /api/（GET 清單不需 11m）。機械鎖：frontend
+# lib/api/nginxLocations.static.test.ts（前綴 location 的去尾斜線路徑若被前端當精確路徑呼叫、又沒有對應的 = location 即紅）。
+location = /api/v1/import {
+    proxy_pass http://backend;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Connection '';
+}
+
 # BRD/PRD 匯入（契約 §0.7 第 1 項）：10MB 檔案加 multipart 封裝 ≤ 11MB（nginx 預設只有 1m，10MB 上傳必被擋成 413）；
 # 解析是同步呼叫，最長約 model.timeout＋15 秒，所以讀取逾時放寬到 180 秒（部署時建議 model.timeout ≤ 150）。
 location /api/v1/import/ {
