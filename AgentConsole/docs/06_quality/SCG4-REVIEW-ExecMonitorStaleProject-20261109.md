@@ -37,7 +37,7 @@ TCS 勘誤 11～15 落檔且與實作一致（含上述偏離說明）；PRD §0
 ## G 誠實劃界
 未跑全套 vitest／tsc／lint（主控已跑）；未跑真後端 E2E；未驗證效應順序競態（側欄 remember effect 與 gone 元件 forget effect 的先後）——推論：即使 remember 後到，側欄在列表完整時由 W-E6 再遺忘，影響僅限列表不完整（>100 筆）時多一次補救畫面，屬設計內。副本已刪除，工作樹未動。
 
-## 主控補記（2026-11-09 11:4x +08:00；一審 PASS 後的收尾，主控親跑）
+## 主控補記（2026-11-09 11:0x +08:00；一審 PASS 後的收尾，主控親跑）
 
 - **F-01（P3）已補**：`hooks/useCurrentProjectId.test.tsx` 純函式 describe 新增 it「AT_953_6_1 純函式：最近造訪不在已載入且完整的列表內時，退到列表第一筆並標 stale」（含列表不完整時 `{id:"b",stale:false}` 的對照）。突變 M10 重放（`lastProject.ts` 的 stale 分支改回傳 `last`）：該檔 `Tests 2 failed | 4 passed`（新 it 與既有純函式 it 同時轉紅）；逐字還原後 `6 passed`。
 - **AT-953-6-9 入口頁斷言收緊**：`toHaveURL(/\/monitor$/)` 改 `/^https?:\/\/[^/]+\/monitor$/`（`/projects/<id>/monitor` 尾段同為 `/monitor`）；TCS 勘誤 16 登記。
