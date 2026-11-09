@@ -98,7 +98,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
         # 🔴 2026-10-20 重釘 79→96（SelfImproving P1 新增 6 支測試檔，實測 101，過腐化上界；
         # 腐化上界逐字指示，照填不推算）。
-        (_TESTS_DIR, True, 96),
+        # 🔴 2026-11-09 重釘 96→116（SI P4 SCHED 棒新增 3 支測試檔，實測 122，過腐化上界；
+        # 腐化上界逐字指示，照填不推算）。
+        (_TESTS_DIR, True, 116),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
         (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
         # LATEST fsm_runtime **整棵遞迴**（原本 tests/ 與頂層分兩列、頂層還是 flat

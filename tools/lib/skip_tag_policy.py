@@ -425,7 +425,10 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # 實測 113 支，89 只剩實測的 79%，前置掃描逐字指示重釘為 90 ⇒ 照填（只升不降）。
     # 收尾常態規則機械物 2026-11-01：新增 `test_check_pending_handoff.py` 後實測 114 支，
     # 90 只剩實測的 79%，前置掃描逐字指示重釘為 91 ⇒ 照填（只升不降）。
-    "tools/tests": 91,
+    # SelfImproving P4 SCHED 棒 2026-11-09（主控收尾）：新增 `_selfimproving_p4_fixtures.py`、
+    # `test_selfimproving_schedule_{model,gate}.py` 後實測 122 支，91 只剩實測的 75%，
+    # `tree_floor_problems` 逐字指示重釘為 97 ⇒ 照填（只升不降；PATROL 棒再加檔時依指示再釘）。
+    "tools/tests": 97,
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
