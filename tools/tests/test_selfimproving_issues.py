@@ -17,7 +17,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import unicodedata
 import unittest
 from datetime import datetime
@@ -166,6 +165,13 @@ def run_raw(repo, *argv):
     cp = subprocess.run([sys.executable, str(ENTRY), *argv, "--repo", str(repo)], cwd=str(repo),
                         capture_output=True, check=False)
     return cp.returncode, cp.stdout, cp.stderr
+
+
+#: 子行程自量 CPU 秒數（TCS-IssueCenter 勘誤五 5-1）：平行全套下牆鐘量到的是負載；入口照真路徑跑。
+_CPU_WRAP = ("import os, runpy, sys, time\nsys.argv = sys.argv[1:]\n"
+             "sys.path.insert(0, os.path.dirname(os.path.abspath(sys.argv[0])))\n"
+             "t = time.process_time()\ntry:\n    runpy.run_path(sys.argv[0], run_name='__main__')\n"
+             "finally:\n    sys.stderr.write('\\nCPU=%.4f\\n' % (time.process_time() - t))\n")
 
 
 def run_issues(repo, *argv):
@@ -1913,11 +1919,11 @@ class TestPerformanceAndEncoding(IssueCase):
     """`tools/lib/selfimproving/issues.py` 的效能、輸出大小與跨平台編碼（AC-IC-12-1、12-2）。"""
 
     def timed_export(self, repo, *extra):
-        start = time.monotonic()
-        rc, out, err = run_raw(repo, "export", "--json", "--kind", "issues", *extra)
-        took = time.monotonic() - start
-        self.assertEqual(rc, 0, err.decode("utf-8"))
-        return took, out
+        cp = subprocess.run([sys.executable, "-c", _CPU_WRAP, str(ENTRY), "export", "--json",
+                             "--kind", "issues", *extra, "--repo", str(repo)], cwd=str(repo),
+                            capture_output=True, check=False)
+        self.assertEqual(cp.returncode, 0, cp.stderr.decode("utf-8"))
+        return float(re.findall(rb"CPU=([0-9.]+)", cp.stderr)[-1]), cp.stdout
 
     def test_AT_IC_12_1_1_the_real_ledgers_answer_in_two_seconds_and_under_a_megabyte(self):
         runs = [self.timed_export(fx.ROOT) for _ in range(5)]  # best-of-5（勘誤三 3-1）
