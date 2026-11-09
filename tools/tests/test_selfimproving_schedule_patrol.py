@@ -191,12 +191,17 @@ class TestDueAndSkips(P4TestCase):
     """受測模組 tools/lib/selfimproving/patrol.py：到期判定、七種跳過的接線與每格至多一個運轉。"""
 
     def test_AT_436_2_E_0_patrol_real_quota_path_goes_through_measured_state(self):
-        """D-IMP-11：巡邏器不注入 deps.quota 時走 sched.measured_state（補量），不再只讀過期快取。"""
+        """D-IMP-11：巡邏器不注入 deps.quota 時走 sched.measured_state（補量），
+        不再只讀過期快取。"""
         from lib import quota_policy
         ctx = types.SimpleNamespace(now=O, deps=types.SimpleNamespace(quota=None))
         seen = []
-        with mock.patch.object(sched, "measured_state",
-                               side_effect=lambda now: seen.append(now) or types.SimpleNamespace()), \
+
+        def fake_state(now):
+            seen.append(now)
+            return types.SimpleNamespace()
+
+        with mock.patch.object(sched, "measured_state", side_effect=fake_state), \
                 mock.patch.object(quota_policy, "decide",
                                   return_value=types.SimpleNamespace(band="free")):
             band, verdict = patrol._quota(ctx)

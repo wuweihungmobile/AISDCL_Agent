@@ -240,8 +240,12 @@ class TestSkipJudging(P4TestCase):
     def test_AT_436_2_3c_quota_check_real_path_goes_through_measured_state(self):
         from lib import quota_policy
         seen = []
-        with mock.patch.object(sched, "measured_state",
-                               side_effect=lambda now: seen.append(now) or types.SimpleNamespace()), \
+
+        def fake_state(now):
+            seen.append(now)
+            return types.SimpleNamespace()
+
+        with mock.patch.object(sched, "measured_state", side_effect=fake_state), \
                 mock.patch.object(quota_policy, "decide",
                                   return_value=types.SimpleNamespace(band="free")):
             self.assertEqual(sched.quota_check(O), {"skip": False, "degrade": False})
