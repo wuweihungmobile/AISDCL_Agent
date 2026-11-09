@@ -480,8 +480,9 @@ class TestImports(unittest.TestCase):
     def test_AT_444_6_1_new_modules_import_only_stdlib_and_package(self):
         self.assertEqual(self.problems(self.real()), [])
         base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
-        cp = subprocess.run(["git", "-C", str(ROOT), "diff", "--name-only", base, "--",
-                             "AgentConsole", ".github"], capture_output=True, text=True)
+        cp = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", "diff",
+                             "--name-only", base, "--", "AgentConsole", ".github"],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         if cp.returncode == 0 and scope_touched(base):
             self.assertEqual(cp.stdout.split(), [])
 

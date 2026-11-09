@@ -173,7 +173,8 @@ class TestCoordsAndQueries(ParseCase):
 
     def escape_variants(self, R: Path) -> None:
         """座標與工具路徑的逃逸：字面判定先於任何檔案系統存取（SCG-4 P2-1）。"""
-        bad = ("../x.md:1", "C:\\Windows\\win.ini:1", "\\\\localhost\\c$\\x:1", "//host/share/x:1",
+        win = "C:\\Windows\\win.ini:1"  # platform-ok: 逃逸判定反例輸入，刻意的 Windows 磁碟路徑字面
+        bad = ("../x.md:1", win, "\\\\localhost\\c$\\x:1", "//host/share/x:1",
                "/etc/passwd:1")
         marks = ("win.ini", "localhost", "/host/share", "etc/passwd", "..")
 
@@ -355,9 +356,10 @@ class TestQ4(ParseCase):
         R = self.base()
         for text in (answers() + "## Q4-L 迴圈層\n", answers(q4=[f5.Q4_LINE, "M1：read"])):
             self.assertTrue(self.V(R, text)[0])
-        src = Path(fourqparse.__file__).read_text(encoding="utf-8")
-        self.assertNotIn("FOURQ-LOOP-MISMATCH", src)
-        self.assertNotIn("FOURQ-LOOP-MISMATCH", Path(fourq.__file__).read_text(encoding="utf-8"))
+        hits = [f"{m.__name__}:{n}" for m in (fourqparse, fourq)
+                for n, ln in enumerate(Path(m.__file__).read_text(encoding="utf-8").splitlines(), 1)
+                if "FOURQ-LOOP-MISMATCH" in ln]
+        self.assertEqual([], hits)
 
 
 class TestVerb(P5TestCase):
