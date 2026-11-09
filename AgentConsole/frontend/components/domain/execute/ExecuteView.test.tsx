@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineCapabilities, EngineCapabilityState, ExecutionRunDetail, ExecutionRunSummary, ProjectDetail } from "@/lib/api/types";
+import { forgetProjectId, getLastProjectId, rememberProjectId } from "@/lib/nav/lastProject";
 import { Providers, failure, makeClient, signIn, stubApi, type ApiCall, type Reply } from "@/tests/helpers/api";
 import { FakeEventSource } from "@/tests/helpers/fakeEventSource";
 import { checkpoints, dag, projectDetail, reviewItem, runDetail, runSummary, taskSummary } from "@/tests/helpers/runFixtures";
@@ -658,6 +659,32 @@ describe("執行頁：後端暫時不可用（DEF-AC-007；經 nginx 時 backend
     expect(screen.queryByText("無法載入專案")).toBeNull(); // 缺陷版本：整頁換成錯誤，串流狀態點與日誌一併消失
     expect(screen.getByRole("heading", { name: "專案執行：AISDLC Core Platform" })).toBeInTheDocument();
     for (const id of ["sse-status", "log-card", "review-card"]) expect(screen.getByTestId(id)).toBeInTheDocument();
+  });
+});
+
+describe("執行頁：專案不存在或已刪除（DEF-AC-035；TCS-ExecMonitorEntry 勘誤 11 W-E7）", () => {
+  it("AT_953_6_5 專案 404：顯示 project-gone-state（標題、兩個去處、沒有重試）並遺忘最近造訪", async () => {
+    rememberProjectId("p1");
+    stubApi((c) => (c.path === "/api/v1/projects/p1" ? failure(404, { message: "專案不存在或已刪除：p1" }) : undefined));
+    view();
+    const gone = await screen.findByTestId("project-gone-state");
+    expect(within(gone).getByText("專案不存在或已刪除")).toBeInTheDocument();
+    expect(within(gone).getByRole("link", { name: "選擇其他專案" })).toHaveAttribute("href", "/execute");
+    expect(within(gone).getByRole("link", { name: "回專案管理" })).toHaveAttribute("href", "/projects");
+    expect(screen.queryByRole("button", { name: "重試" })).toBeNull();
+    expect(screen.queryByText("無法載入專案")).toBeNull();
+    await waitFor(() => expect(getLastProjectId()).toBeNull());
+  });
+
+  it("AT_953_6_7 專案 500：仍是既有「無法載入專案」錯誤卡與重試；沒有 gone 畫面；最近造訪不被清", async () => {
+    rememberProjectId("p1");
+    stubApi((c) => (c.path === "/api/v1/projects/p1" ? failure(500, { message: "伺服器錯誤" }) : undefined));
+    view();
+    expect(await screen.findByText("無法載入專案")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重試" })).toBeInTheDocument();
+    expect(screen.queryByTestId("project-gone-state")).toBeNull();
+    expect(getLastProjectId()).toBe("p1");
+    forgetProjectId("p1");
   });
 });
 

@@ -7,11 +7,13 @@ import { Activity, GripVertical } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 
+import { ProjectGoneState } from "@/components/domain/entry/ProjectGoneState";
 import { RunSelect } from "@/components/domain/execute/parts";
 import { BackLink, PageTitle } from "@/components/domain/PageHeader";
 import { ResearchBackLinkFromQuery } from "@/components/domain/research/ResearchBackLink";
 import { Select } from "@/components/ui/select";
 import { ErrorState, PageSkeleton } from "@/components/ui/states";
+import { ApiError } from "@/lib/api/client";
 import { useMonitorPollMs, useProject, useProjectExecutions, useProjectMetrics, useTaskTrend, useTokenTrend } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { DEFAULT_RANGE, MONITOR_RANGES, bucketFor, isRangeId, type RangeId } from "@/lib/domain/metrics";
@@ -103,6 +105,10 @@ export function MonitorView() {
   }
 
   if (project.isError) {
+    // DEF-AC-035：專案 404（已刪除或不存在）時重試永遠失敗，改顯示專屬畫面；其他錯誤維持一般錯誤卡
+    if (project.error instanceof ApiError && project.error.status === 404) {
+      return <ProjectGoneState kind="monitor" projectId={projectId} />;
+    }
     return (
       <div>
         <BackLink href={`/projects/${projectId}`}>返回專案</BackLink>

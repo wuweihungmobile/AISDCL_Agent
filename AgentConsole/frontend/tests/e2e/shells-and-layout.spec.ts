@@ -138,3 +138,26 @@ test.describe("響應式（PRD §8.3）", () => {
     await expect(page.getByTestId("project-rail")).toBeVisible();
   });
 });
+
+// AT-953-6-9（TCS-ExecMonitorEntry-20261101 勘誤 11；DEF-AC-035）：最近造訪的專案已被刪除 → 側欄不再指向它，直連頁面見專屬畫面並有兩個去處
+test("AT-953-6-9 最近造訪的專案被刪除：監控頁顯示 project-gone-state，點「選擇其他專案」回入口頁，側欄「執行中心」不再含該專案 id", async ({ page, request }) => {
+  const tmp = (await apiPost<Created>(request, token, "/api/v1/projects", { name: uniq("E2E 將被刪除專案"), executionPath: "/tmp/e2e-gone", passCriteria: "- ok" })).id;
+  await loginViaStorage(page, request);
+  await page.goto(`/projects/${tmp}/execute`); // 記住該專案
+  await expect(page.getByTestId("execute-view")).toBeVisible();
+  await apiDelete(request, token, `/api/v1/projects/${tmp}`);
+
+  await page.goto(`/projects/${tmp}/monitor`);
+  const gone = page.getByTestId("project-gone-state");
+  await expect(gone).toBeVisible();
+  await expect(gone.getByText("專案不存在或已刪除")).toBeVisible();
+  await expect(gone.getByRole("button", { name: "重試" })).toHaveCount(0);
+
+  await gone.getByRole("link", { name: "選擇其他專案" }).click();
+  await expect(page).toHaveURL(/\/monitor$/);
+  await expect(page.getByTestId("center-entry-view")).toBeVisible();
+
+  await page.getByRole("navigation", { name: "主導覽" }).getByRole("link", { name: "執行中心" }).click();
+  await expect(page).toHaveURL(/\/(execute|projects\/[^/]+\/execute)$/);
+  expect(page.url()).not.toContain(tmp);
+});

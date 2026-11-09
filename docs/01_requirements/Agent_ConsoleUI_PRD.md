@@ -143,6 +143,8 @@
 
 本節凌駕 §8.1 表與 ADR-002 D3 的退回句；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ExecMonitorEntry-20261101.md`。
 
+**4.（2026-11-09 補述；DEF-AC-035；掌舵者真機回報，sid `f1522ddb-bdcf-4104-bb81-614c1118fa9d` line 14）** 側欄的「最近造訪」專案若已被刪除或封存（例：上一輪以 API 封存的測試殘留專案），側欄不得再指向它：專案列表已載入且完整而不含該 id 時即遺忘該記錄並退到列表第一筆（沒有就退入口頁）；直接以網址進入已刪除專案的執行／監控頁時，顯示「專案不存在或已刪除」並給「選擇其他專案」（回入口頁）與「回專案管理」兩個去處、不提供重試；專案刪除成功時（刪除入口在專案詳情頁）同步遺忘該記錄。AC／AT 住 `TCS-ExecMonitorEntry-20261101.md` 勘誤 11（AC-953-6）。
+
 ### 0.9 研發工作流（ResearchToPRD）：單一側欄入口與權威邊界（與 §8.1、§5.2、§0.4 合併；掌舵者 2026-11-02 指令，sid `245e80aa-71c4-443b-b8fe-d59f87a9f0e8`；鍵 `agentconsole-research-to-prd-p0`／`-p1`／`-p2`，框架側 `sdd-research-to-prd`）
 
 掌舵者 2026-11-02 於互動視窗貼入 ResearchSOPtoPRD.prd（逐字存檔 `docs/01_requirements/ResearchSOPtoPRD_Source_Spec.md`），原文指令「請參考以下資訊協助設計開發新功能==> ResearchSOPtoPRD.prd，並“完美整合到目前專案功能中“」；追問「不納入怎會有順暢的UI流程, 而研發的過程, 也應該納入資料庫紀錄」；授權「以上若需要我決策，請依照最佳化, 最理想, 最適當的解決方案(不需要顧慮成本)，我授權幫我決策, 若真需要我決定, 請以最簡單的解釋, 讓我互動選項決策」。主控依授權代決 D-12～D-66（`docs/01_requirements/ResearchToPRD_PRD.md` 附錄 C）。本節是**權威區塊指標**：功能的需求本文在該 PRD（FR-R2P-01～23、NFR-R2P-01～13），本節只記錄對本 PRD 既有節的**校正**：

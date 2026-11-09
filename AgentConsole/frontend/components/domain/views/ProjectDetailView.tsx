@@ -23,6 +23,7 @@ import { useDeleteProject, useProject } from "@/lib/api/queries";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { projectStatus } from "@/lib/domain/status";
 import { formatDate } from "@/lib/format";
+import { forgetProjectId } from "@/lib/nav/lastProject";
 
 /** 專案詳情（設計稿 3）：標題列、meta、signoff 警示橫幅、基本資訊／專案說明兩欄卡、目標清單（可拖曳排序）、底部行動。 */
 export function ProjectDetailView() {
@@ -125,6 +126,7 @@ export function ProjectDetailView() {
         onClose={() => setConfirmDelete(false)}
         onConfirm={async () => {
           await del.mutateAsync(p.id);
+          forgetProjectId(p.id); // DEF-AC-035：側欄的「最近造訪」不得再指向剛刪除的專案
           toast.success(`已刪除專案「${p.name}」`);
           router.replace("/projects");
         }}

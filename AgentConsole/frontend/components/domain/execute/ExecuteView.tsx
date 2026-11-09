@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { ConfirmDialog } from "@/components/domain/ConfirmDialog";
+import { ProjectGoneState } from "@/components/domain/entry/ProjectGoneState";
 import { BackLink, PageTitle } from "@/components/domain/PageHeader";
 import { ResearchBackLinkFromQuery } from "@/components/domain/research/ResearchBackLink";
 import { SignoffDialog } from "@/components/domain/SignoffDialog";
@@ -13,7 +14,7 @@ import { ErrorState, PageSkeleton } from "@/components/ui/states";
 import { useToast } from "@/components/ui/toast";
 import { useNow } from "@/hooks/useNow";
 import { useRunStream } from "@/hooks/useRunStream";
-import { describeError } from "@/lib/api/client";
+import { ApiError, describeError } from "@/lib/api/client";
 import { listTasks } from "@/lib/api/endpoints";
 import {
   qk,
@@ -247,6 +248,10 @@ export function ExecuteView() {
   // 只有「根本沒有專案資料」才換成錯誤畫面：背景重抓失敗（例如後端暫時不可用，DEF-AC-007）時 data 仍是上一份，
   // 整頁換成錯誤會讓串流狀態點、日誌與審核項消失，恢復後也不會自己回來
   if (project.isError && !project.data) {
+    // DEF-AC-035：專案 404（已刪除或不存在）時重試永遠失敗，改顯示專屬畫面；其他錯誤維持一般錯誤卡
+    if (project.error instanceof ApiError && project.error.status === 404) {
+      return <ProjectGoneState kind="execute" projectId={projectId} />;
+    }
     return (
       <div>
         <BackLink href={`/projects/${projectId}`}>返回專案</BackLink>
