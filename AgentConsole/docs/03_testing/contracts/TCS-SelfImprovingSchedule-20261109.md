@@ -117,7 +117,7 @@
 | SCG-3／API Spec、錯誤碼、Consumer Contract | 契約 v0.1（API-SI-12、API-SI-13、Bridge 兩路由、§1.4 的 `schedule_bounds_unavailable`、§3 稽核 body、§4 `status.schedule` 與對帳、§5 Flyway、§6 前端閘） | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2c.md | sha256:7e3b3d7ccdf0a5ff7910a85f6615b8a594c5718d02aa225d029e426d116dda67（主控現算 2026-11-09 21:15 +08:00） |
 | SCG-3／前代契約（P2b 的稽核管線與補償語意） | `API_Contract_SelfImproving_P2b.md` §0.1～§0.4、§1.2、§1.4、§2.1、§3.2～§3.4、§4 | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2b.md | sha256:32e60de75fda6171a452d28449567aa19e5ade8825e3fcc27e35edd795b92841（主控現算 2026-11-09 21:15 +08:00） |
 | SCG-3／上位 TCS | `TCS-SelfImprovingDecide-P2b-20261024.md`（W10、W11、W14、W15 與其 AT）；`TCS-SelfImprovingDecideDedupe-20261031.md`（對帳面板與取代群組；本檔不改其行為） | AgentConsole/docs/03_testing/contracts/TCS-SelfImprovingDecide-P2b-20261024.md | sha256:638def94d922c50801b8b64cb5eb75228111226ba36f8c8801f4b3d9e23f649a（主控現算 2026-11-09 21:15 +08:00） |
-| SCG-3／根層 TCS（接縫） | 根層 TCS 的 R139、R141、R146、R158、AT-437-1-3（本檔引用不複寫） | docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md | sha256:af7a8e6081ce3bedcaab95a52dcbfe45ba5c9b3abc8c539eeeab734c9333f177（主控現算 2026-11-09 21:15 +08:00） |
+| SCG-3／根層 TCS（接縫） | 根層 TCS 的 R139、R141、R146、R158、AT-437-1-3（本檔引用不複寫） | docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md | sha256:faee64d62948cf406beb6a860b4e70999541d4381e578c54c8d753b10d721aea（主控現算 2026-11-09 21:15 +08:00） |
 
 ---
 
