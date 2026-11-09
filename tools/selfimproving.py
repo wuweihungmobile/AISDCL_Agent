@@ -15,13 +15,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import _stdio_utf8  # noqa: F401  # stdout／stderr 強制 UTF-8 的唯一實作，本檔不另寫
-from lib.selfimproving import card, check, export, issues, scan, status
+from lib.selfimproving import card, check, export, issues, scan, sched, status, unattended
 from lib.selfimproving import events as si_events
 from lib.selfimproving import fold as si_fold
+from lib.selfimproving import params as si_params
 from lib.selfimproving.git import Git
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -44,7 +47,11 @@ _HELP = {
     "measure": "採納後量測窗：基線、開窗、關窗、更正與回滾提案卡（只追加 mea.* 事件）",
     "capacity": "有上限載入面的容量與截斷風險（唯讀）",
     "issues": "議題中心：三類帳本的中文議題清單（唯讀）",
+    "sched": "自動演化排程：show（唯讀）、set（寫 sched.set）、arm／disarm（OS 任務）",
 }
+# R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
+_P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
+             "prop-revise", "research")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -88,9 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
     iss.add_argument("--since", type=int)
     iss.add_argument("--limit", type=int)
     ro = _verb(sub, "run-open")
-    ro.add_argument("--trigger", choices=list("abcde"), required=True)
+    ro.add_argument("--trigger", choices=list("abcdef"), required=True)
     ro.add_argument("--coord", action="append", required=True)
     ro.add_argument("--by", required=True)
+    ro.add_argument("--due-at", dest="due_at", help="trigger f 必帶：本格起點（帶 offset 的 ISO）")
+    ro.add_argument("--carrier", choices=("console",))
+    ro.add_argument("--audit-ref", dest="audit_ref")
     rc = _verb(sub, "run-close")
     rc.add_argument("--run", required=True)
     rc.add_argument("--by", required=True)
@@ -174,7 +184,28 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--band")
     rs.add_argument("--sid")
     rs.add_argument("--line", type=int)
+    _sched_parser(sub)
     return parser
+
+
+def _sched_parser(sub) -> None:
+    sc = sub.add_parser("sched", help=_HELP["sched"], allow_abbrev=False)
+    ssub = sc.add_subparsers(dest="sched_cmd", required=True, metavar="<show|set|arm|disarm>",
+                             parser_class=_Parser)
+    for name in ("show", "set", "arm", "disarm"):
+        p = ssub.add_parser(name, allow_abbrev=False)
+        p.add_argument("--repo", help="repo 根目錄（預設為本檔所在 repo）")
+        p.add_argument("--json", action="store_true", help="輸出 JSON")
+    ssub.choices["show"].add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
+    st = ssub.choices["set"]
+    st.add_argument("--enabled", choices=("true", "false"))
+    st.add_argument("--period-minutes", dest="period_minutes", type=int)
+    st.add_argument("--reason")
+    st.add_argument("--by", required=True)
+    st.add_argument("--sid")
+    st.add_argument("--line", type=int)
+    st.add_argument("--carrier", choices=("console",))
+    st.add_argument("--audit-ref", dest="audit_ref")
 
 
 def _emit(text: str) -> None:
@@ -206,7 +237,7 @@ def _status(repo: Path, args: argparse.Namespace) -> int:
     from lib.selfimproving import capacity  # ro：status 的 capacity 軸只讀所需鍵（R131）
 
     params = check.params_for(repo, *capacity.PARAM_KEYS, *status.MEASURE_KEYS)
-    obj = status.build(repo, Git(repo), params)
+    obj = status.build(repo, Git(repo), params, armed=_armed)
     _emit(status.render_json(obj) if args.json else status.render_text(obj))
     return 0
 
@@ -288,7 +319,15 @@ def _write(repo: Path, args: argparse.Namespace) -> int:
     from lib.selfimproving import writeverbs as wv
 
     verb, js = args.verb, args.json
-    if verb == "run-open":
+    codes = unattended.check(repo, verb, args, os.environ) if verb in _P1_GATED else []
+    if codes:
+        out = wv.reject(repo, verb, codes, js)
+    elif verb == "run-open" and (args.trigger == "f" or args.carrier or args.audit_ref
+                                 or args.due_at is not None):
+        from lib.selfimproving import schedwrite
+
+        out = schedwrite.run_open(repo, args, js)
+    elif verb == "run-open":
         out = wv.run_open(repo, args.trigger, args.coord, args.by, js)
     elif verb == "run-close":
         out = wv.run_close(repo, args.run, args.by, js)
@@ -320,6 +359,58 @@ def _write(repo: Path, args: argparse.Namespace) -> int:
     _emit(out.text)
     sys.stderr.write(getattr(out, "err", ""))
     return out.rc
+
+
+def _armed():
+    from lib.selfimproving import runner  # exec：只在要現查 OS 任務時才載入
+
+    return sched.armed_value(runner.run_argv)
+
+
+def _sched(repo: Path, args: argparse.Namespace) -> int:
+    """`sched show|set|arm|disarm`（R137）；`show` 唯讀，`set` 只寫 `sched.set`。"""
+    if args.sched_cmd in ("arm", "disarm"):
+        from lib.selfimproving import writeverbs as wv
+
+        codes = unattended.gate(f"sched-{args.sched_cmd}", None, os.environ)
+        if codes:
+            out = wv.reject(repo, f"sched {args.sched_cmd}", codes, args.json)
+            _emit(out.text)
+            return out.rc
+        try:
+            from lib.selfimproving import schedarm
+        except ImportError as exc:
+            raise check.InputError("sched arm／disarm 的 schedarm 模組尚未建立") from exc
+        rc, text = schedarm.run(repo, args.sched_cmd, args.json)
+        _emit(text)
+        return rc
+    if args.sched_cmd == "set":
+        from lib.selfimproving import schedwrite
+
+        out = schedwrite.sched_set(repo, args, args.json)
+        _emit(out.text)
+        return out.rc
+    try:
+        now = datetime.fromisoformat(args.now) if args.now else datetime.now().astimezone()
+        sched.aware(now)
+    except ValueError as exc:
+        raise check.InputError("--now 須為帶 offset 的 ISO 8601") from exc
+    params = check.params_for(repo, *si_params.SCHED_KEYS)
+    obj = sched.schedule_obj(si_events.load_sound_events(repo / si_events.LEDGER_REL), params, now,
+                             armed=_armed())
+    if args.json:
+        _emit(json.dumps(obj, ensure_ascii=False) + "\n")
+        return 0
+    ls, sk, ar = obj["last_set"], obj["last_skip"], obj["armed"]
+    _emit("\n".join([
+        f"schedule: enabled={str(obj['enabled']).lower()} period={obj['period_minutes']} "
+        f"cell={status.tri_text(obj['cell_start'])}/{status.tri_text(obj['cell_end'])} "
+        f"overdue={status.tri_text(obj['overdue'])}",
+        "last_set: " + (f"{ls['at']} by={ls['by']} carrier={ls['carrier']}" if ls else "null"),
+        "last_skip: " + (f"{sk['at']} reason={sk['reason']} detail={sk['detail']}" if sk
+                         else "null"),
+        f"armed: present={status.tri_text(ar['present'])} credential={ar['credential']}"]) + "\n")
+    return 0
 
 
 def _research(repo: Path, args: argparse.Namespace, wv):
@@ -390,7 +481,7 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
-             "capacity": _capacity, "issues": _issues}
+             "capacity": _capacity, "issues": _issues, "sched": _sched}
 
 
 def main(argv: list[str] | None = None) -> int:

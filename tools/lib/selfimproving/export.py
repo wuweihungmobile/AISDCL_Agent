@@ -131,6 +131,8 @@ def build(repo: Path, git: Git, params: dict, kind: str, since: int | None,
         items = _runs(f)
     else:
         items = [si_status.build(repo, git, params, read_home=False)]
+        if events is None:  # R158：載體缺席時 overdue 為 null，並逐一列入量不到
+            ne.append({"field": "schedule.overdue", "reason": "carrier-not-established"})
     nxt, truncated = None, False
     if kind != "status":
         items.sort(key=lambda i: i["_cursor"])

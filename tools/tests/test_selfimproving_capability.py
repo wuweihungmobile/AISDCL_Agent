@@ -1,8 +1,9 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（51 個鍵：39 `ro`、8 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
-1 `rw`；議題中心增 3 `ro`）；判準函式 `capability_problems`
+登記表 `CAPABILITY` 住本檔（55 個鍵：42 `ro`、9 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
+1 `rw`；議題中心增 3 `ro`；P4 的 PKG-ROOT-SCHED 增 3 `ro` 與 1 `rw`，PKG-ROOT-PATROL 另增
+1 `ro` 與 3 `exec` 後為 59 鍵）；判準函式 `capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
 故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
@@ -70,12 +71,15 @@ CAPABILITY: dict[str, str] = {
             "issuemap",
             "issues",
             "issues_items",
+            "sched",
+            "unattended",
+            "schedcheck",
         )
     },
     **{
         f"{n}.py": "rw"
         for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
-            "obswrite", "meawrite")
+            "obswrite", "meawrite", "schedwrite")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
     **{f"{n}.py": "exec" for n in ("runner", "verify")},
@@ -104,6 +108,8 @@ FORBIDDEN = [
     r"os\.fork",
     r"signal\.alarm",
 ]
+# D-QA-1（TCS-P4 R160）：OS 排程器字面只准住 `schedarm.py`（ADR-SI-14 的 OS 載具封裝），其餘條不豁免
+FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}
 FORBIDDEN_RES = [re.compile(p) for p in FORBIDDEN]
 FORBIDDEN_SAMPLES = [
     "schtasks /create",
@@ -222,7 +228,8 @@ def capability_problems(
             out.append(f"{name}：含對 set_maturity 的呼叫（SDD 規則退役只經人工）")
     for name in sorted(files):
         text = (pkg_dir / name).read_bytes().decode("utf-8")
-        out += [f"{name}：④ 禁字樣 {pat.replace(chr(92), '')}" for pat in forbidden_hits(text)]
+        out += [f"{name}：④ 禁字樣 {pat.replace(chr(92), '')}"
+                for pat in forbidden_hits(text, name)]
         out += [f"{name}：平台守衛 {site} 須在 sys.platform 守衛內"
                 for site in unguarded_sites(text)]
     out += _closure_problems(pkg_dir, registry, files, closure)
@@ -288,8 +295,9 @@ def _entry_problems(pkg_dir: Path, registry: dict[str, str], entry_file: Path) -
     return out
 
 
-def forbidden_hits(text: str) -> list[str]:
-    return [p for p, rx in zip(FORBIDDEN, FORBIDDEN_RES) if rx.search(text)]
+def forbidden_hits(text: str, name: str | None = None) -> list[str]:
+    exempt = FORBIDDEN_EXEMPT.get(name, ())
+    return [p for p, rx in zip(FORBIDDEN, FORBIDDEN_RES) if rx.search(text) and p not in exempt]
 
 
 def make_pkg(files: dict[str, str], registry: dict[str, str], entry: str) -> tuple[Path, Path]:
@@ -331,7 +339,7 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 39, "rw": 8, "net": 2, "exec": 2})
+        self.assertEqual(counts, {"ro": 42, "rw": 9, "net": 2, "exec": 2})
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
             "verify.py"})
         net_importers, subproc = set(), set()
@@ -369,6 +377,20 @@ class TestCapabilityRegistry(unittest.TestCase):
         lazy = ENTRY.read_bytes().decode("utf-8")
         self.assertIn("import writeverbs", lazy.split("def _write", 1)[1])
         self.assertIn("import research", lazy.split("def _research", 1)[1])
+
+    def test_AT_143_1_E_3_forbidden_exempt_is_per_file_and_narrow(self):
+        """D-QA-1：OS 排程器三字面只在 `schedarm.py` 豁免；他檔同字樣與其內核心禁字樣仍紅。"""
+        reg = {**LEGAL_REG, "schedarm.py": "exec", "other.py": "ro"}
+        ok = synth(files={"schedarm.py": "X = 'launchctl schtasks Register-ScheduledTask'\n"},
+                   registry={**LEGAL_REG, "schedarm.py": "exec"})
+        self.assertEqual(ok, [])
+        for literal in FORBIDDEN_EXEMPT["schedarm.py"]:
+            elsewhere = synth(files={"other.py": f"X = '{literal}'\n"}, registry=reg)
+            self.assertTrue(any("other.py" in p and literal in p for p in elsewhere), literal)
+        core = synth(files={"schedarm.py": "import time\ntime.sleep(1)\n"}, registry=reg)
+        self.assertTrue(any("schedarm.py" in p and "time.sleep" in p for p in core), core)
+        self.assertEqual(set(FORBIDDEN_EXEMPT), {"schedarm.py"})
+        self.assertEqual(len(FORBIDDEN), 14)
 
     def test_AT_143_1_E_1_synthetic_violations_are_flagged(self):
         self.assertEqual(synth(), [])
@@ -410,7 +432,7 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 51)
+        self.assertEqual(len(CAPABILITY), 55)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
@@ -621,7 +643,7 @@ class TestDynamicPurity(SiTestCase):
         self.assertEqual((before, st0), (after, st1))
         res = self.check(repo)
         self.assertEqual(res["_rc"], 0)
-        self.assertEqual(len(res["items"]), 33)
+        self.assertEqual(len(res["items"]), 35)
         calls: list[list[str]] = []
         real_run = subprocess.run
 
@@ -648,7 +670,7 @@ class TestP3Registry(unittest.TestCase):
         counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
         optional = (PKG / "meaplan.py").exists()
         self.assertEqual((len(CAPABILITY), counts),
-                         (51, (39, 8, 2, 2)) if optional else (50, (38, 8, 2, 2)))
+                         (55, (42, 9, 2, 2)) if optional else (54, (41, 9, 2, 2)))
         for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
             self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
         self.assertEqual(CAPABILITY["meawrite.py"], "rw")

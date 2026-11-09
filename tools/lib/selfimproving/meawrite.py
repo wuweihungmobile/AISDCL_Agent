@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import card as si_card
 from . import events as si_events
-from . import evwrite, meacheck, meaplan, meastat
+from . import evwrite, meacheck, meaplan, meastat, unattended
 from . import mea as si_mea
 from . import props as si_props
 from . import writeverbs as wv
@@ -112,8 +112,9 @@ def measure(repo: Path, *, by: str = "main", record_check: bool = False,
     if not si_events.valid_by(by):
         raise wv.UsageError("--by 須為非空、無空白、≤32 字元的標籤")
     params = wv.params_for(repo, *_PARAM_KEYS)
-    if os.environ.get("AUTOSDD_UNATTENDED"):
-        return _reject(repo, [("UNATTENDED-REFUSED", "measure 於無人值守環境一律拒收")], as_json)
+    refused = unattended.gate("measure", None, os.environ)
+    if refused:
+        return _reject(repo, refused, as_json)
     si, git = si_events.si_dir(), Git(repo)
     try:
         evwrite.ensure_home(si)

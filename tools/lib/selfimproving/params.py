@@ -10,7 +10,8 @@ from pathlib import Path
 from .ledger import Finding, split_lines
 
 PROTOCOL_REL = "docs/06_quality/SelfImproving_Protocol"
-CHECK_RULES_REV = 4  # P3 追加 events.mea 一項（TCS-P3 R115）；P2 追加 4 項並移除 QUOTE warn
+CHECK_RULES_REV = 5  # P4 追加 sched.events 與 run.trigger_f_has_patrol_by（TCS-P4 R140）；P3 追加
+# events.mea 一項（TCS-P3 R115）；P2 追加 4 項並移除 QUOTE warn
 # 來源表不是指標定義：改它不得改判準指紋（TCS-P1 R46 (b)；只涵蓋這一個檔名）
 FINGERPRINT_EXCLUDED = frozenset({"research_sources.json"})
 
@@ -26,7 +27,16 @@ PARAM_SPECS: dict[str, str] = {
     "research_fetch_max": "int1", "research_bytes_max": "int1", "research_timeout_seconds": "int1",
     "min_events": "int1", "export_limit_max": "int1", "probe_timeout_seconds": "int1",
     "verify_runs_max": "int1", "memory_index_max_lines": "int1", "memory_index_max_bytes": "int1",
+    # P4 九鍵（TCS-P4 R159）：bool＝布林；blackout＝`HH:MM-HH:MM` 字串陣列（可空）；
+    # never＝只准 false
+    "sched_heartbeat_minutes": "int1", "sched_period_minutes_default": "int1",
+    "sched_period_minutes_min": "int1", "sched_period_minutes_max": "int1",
+    "sched_run_budget_minutes": "int1", "sched_blackout_local": "blackout",
+    "sched_driver_quiet_minutes": "int1", "sched_auto_commit": "bool",
+    "sched_auto_push": "never",
 }
+SCHED_KEYS = tuple(k for k in PARAM_SPECS if k.startswith("sched_"))
+_HHMM_RANGE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
 _LABEL_RE = re.compile(r"\((?:i|ii|iii|iv|v)\) $")
 _BRACE_RE = re.compile(
     r"^(?P<dir>[^{}\s]+/)\{(?P<names>[^{}\s]+)\}(?P<ext>\.[A-Za-z0-9]+)$")
@@ -38,6 +48,38 @@ def _is_num(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _p4_code(kind: str, v) -> str | None:
+    """P4 三種新型別規則的判級碼（None＝合）：never 只准 false；blackout 為 `HH:MM-HH:MM` 陣列。"""
+    if kind == "bool":
+        return None if isinstance(v, bool) else "PARAM-TYPE"
+    if kind == "never":
+        return "PARAM-TYPE" if not isinstance(v, bool) else None if v is False else "PARAM-RANGE"
+    if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+        return "PARAM-TYPE"
+    ok = [(m := _HHMM_RANGE.match(x)) is not None and m.group(1, 2) != m.group(3, 4) for x in v]
+    return None if all(ok) else "PARAM-RANGE"
+
+
+def _cross_findings(params: dict) -> list[Finding]:
+    """R159 跨鍵關係（只在相關兩鍵各自合法時判；違規點名被判的鍵）。"""
+    from lib import unattended_authz  # 預算上界的唯一來源（不抄數字）
+
+    def num(k):
+        v = params.get(k)
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+    lo, dflt, hi, hb, bud = (num(k) for k in (
+        "sched_period_minutes_min", "sched_period_minutes_default", "sched_period_minutes_max",
+        "sched_heartbeat_minutes", "sched_run_budget_minutes"))
+    cap = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60
+    both = lambda a, b: a is not None and b is not None  # noqa: E731
+    rules = [("sched_period_minutes_min", lo, dflt, both(lo, dflt) and lo > dflt),
+             ("sched_period_minutes_default", dflt, hi, both(dflt, hi) and dflt > hi),
+             ("sched_heartbeat_minutes", hb, lo, both(hb, lo) and hb > lo),
+             ("sched_run_budget_minutes", bud, cap, bud is not None and bud > cap)]
+    return [Finding(k, "PARAM-RANGE", "fail", f"{k} 跨鍵關係不符（{a} 對 {b}）")
+            for k, a, b, bad in rules if bad]
+
+
 def param_findings(params: dict) -> list[Finding]:
     out: list[Finding] = []
     for key, kind in PARAM_SPECS.items():
@@ -46,7 +88,9 @@ def param_findings(params: dict) -> list[Finding]:
             continue
         v = params[key]
         code = None
-        if kind == "int1":
+        if kind in ("bool", "never", "blackout"):
+            code = _p4_code(kind, v)
+        elif kind == "int1":
             if isinstance(v, bool) or not isinstance(v, int):
                 code = "PARAM-TYPE"
             elif v < 1:
@@ -65,7 +109,7 @@ def param_findings(params: dict) -> list[Finding]:
             code = "PARAM-RANGE"
         if code:
             out.append(Finding(key, code, "fail", f"{key} 的型別或範圍不符（{kind}）"))
-    return out
+    return out + _cross_findings(params)
 
 
 def valid_keys(params: dict) -> set[str]:

@@ -76,6 +76,39 @@ def expand(argv: list[str], sandbox_root: Path) -> list[str]:
     return out
 
 
+@dataclass
+class RunResult:
+    rc: int | None
+    timed_out: bool
+    out: str
+    err: str
+
+
+def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
+             cwd: Path | None = None) -> RunResult:
+    """明示環境入口（TCS-P4 R160）：`shell=False`、`communicate(timeout)`、逾時殺行程樹；
+    環境**只用呼叫端明示的 `env`**（本函式不讀 `os.environ`）；輸出原文回給呼叫端（不落檔）。"""
+    flags: dict = {}
+    if sys.platform.startswith("win"):
+        flags["creationflags"] = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                  | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    else:
+        flags["start_new_session"] = True
+    proc = subprocess.Popen(
+        argv, cwd=None if cwd is None else str(cwd), env=dict(env), shell=False,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **flags)
+    timed_out = False
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_tree(proc)
+        out, err = proc.communicate()
+    return RunResult(None if timed_out else proc.returncode, timed_out,
+                     (out or b"").decode("utf-8", errors="replace"),
+                     (err or b"").decode("utf-8", errors="replace"))
+
+
 def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float) -> ProbeResult:
     """執行一個探針；回 `ProbeResult`（逾時時 `rc` 為 None、`timed_out` 為 True）。"""
     flags: dict = {}

@@ -13,14 +13,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import card as si_card
-from . import consoleaudit, decgrammar, decverify, evwrite, obsrows
+from . import consoleaudit, decgrammar, decverify, evwrite, obsrows, unattended
 from . import events as si_events
 from . import fold as si_fold
 from . import transcript as si_transcript
 from . import writeverbs as wv
 from .git import Git
 
-UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 _NEEDS_CLASS = ("reject", "decline-promote", "return")
 _CARD_STATES = ("proposed", "verified", "promoted", "measuring", "closed")
 _KEYS = ("event_max_bytes", "stop_after_bad")
@@ -61,12 +60,11 @@ def ok_out(kind: str, seq: int, ident: str | None, extras: list, as_json: bool) 
     return Out(0, " ".join(parts + [f"{k}={_fmt(v)}" for k, v in extras]) + "\n")
 
 
-def refuse_unattended(repo: Path, verb: str, as_json: bool) -> wv.Out | None:
-    """R70：`AUTOSDD_UNATTENDED` 存在且值非空（含字面 `0`）⇒ rc 1、零寫入；先於其他一切前置檢查。"""
-    if not os.environ.get(UNATTENDED_ENV):
-        return None
-    codes = [("UNATTENDED-REFUSED", f"{UNATTENDED_ENV} 有設，{verb} 一律拒收")]
-    return wv.reject(repo, verb, codes, as_json)
+def refuse_unattended(repo: Path, verb: str, as_json: bool, ns=None) -> wv.Out | None:
+    """R153：run-scoped 授權（單一實作 `unattended.check`）；不通過⇒ rc 1、零寫入，先於其他一切前置
+    檢查。`ns` 供 A 類與 `decide` 解析所屬運轉／載體；`verb` 可為 `card-issue` 等授權閘的正規名。"""
+    codes = unattended.check(repo, verb, ns, os.environ)
+    return wv.reject(repo, verb.replace("-issue", ""), codes, as_json) if codes else None
 
 
 def preconditions(f: si_fold.Folded, target: str, dkind: str, flags) -> list[str]:
@@ -200,7 +198,7 @@ def _local_iso(ts: str | None) -> str:
 def decide(repo: Path, ns, as_json: bool) -> wv.Out:
     _usage(ns)
     params = wv.params_for(repo, *_KEYS)
-    refused = refuse_unattended(repo, "decide", as_json)
+    refused = refuse_unattended(repo, "decide", as_json, ns)
     if refused:
         return refused
     if ns.carrier == "console":
@@ -369,7 +367,7 @@ def _write(repo: Path, ns, params: dict, event: dict, prop, as_json: bool) -> wv
 def issue_card(repo: Path, ns, as_json: bool) -> Out:
     """`card --issue`（R81）：寫入鎖內重算卡面並追加 `card` 事件；stdout 與不帶旗標逐位元組相同。"""
     _label(ns.by, "--by")
-    refused = refuse_unattended(repo, "card", as_json)
+    refused = refuse_unattended(repo, "card-issue", as_json, ns)
     if refused:
         return Out(refused.rc, refused.text)
     params = wv.params_for(repo, "event_max_bytes", "stop_after_bad", "card_line_max")

@@ -357,6 +357,15 @@ def params_dict() -> dict:
         "verify_runs_max": 2,
         "memory_index_max_lines": 200,
         "memory_index_max_bytes": 25600,
+        "sched_heartbeat_minutes": 15,
+        "sched_period_minutes_default": 1440,
+        "sched_period_minutes_min": 60,
+        "sched_period_minutes_max": 10080,
+        "sched_run_budget_minutes": 90,
+        "sched_blackout_local": ["21:00-01:30"],
+        "sched_driver_quiet_minutes": 30,
+        "sched_auto_commit": True,
+        "sched_auto_push": False,
     }
 
 

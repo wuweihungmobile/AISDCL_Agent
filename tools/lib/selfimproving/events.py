@@ -33,8 +33,10 @@ KINDS = (
     "run.open", "run.close", "research.scan", "research.skip", "attr", "attr.confirm",
     "attr.reject", "prop", "card", "dec", "heldout.freeze", "app.sandbox", "app.verify",
     "app.promote", "app.rollback", "mea.open", "mea.close", "mea.amend", "mea.report",
-    "obs.add", "obs.close",
+    "obs.add", "obs.close", "sched.set", "sched.skip",
 )
+SKIP_REASONS = ("disabled", "blackout", "quota-band", "other-driver", "dirty-tree", "run-open",
+                "spawn-failed")
 PROP_STATES = ("proposed", "approved", "rejected", "returned", "handed-off", "sandboxed",
                "verified", "promoted", "measuring", "closed")
 ROOT_CAUSE_RE = re.compile(r"^[a-z][a-z0-9-]*/[a-z][a-z0-9-]*$")
@@ -181,8 +183,16 @@ def _preimage(v) -> bool:
 _SHA = _re(SHA256_RE)
 # kind → {鍵: 型別判準}；required 另列（其餘為條件鍵，由 conditional() 處理）
 _SPEC: dict[str, dict] = {
-    "run.open": {"run": _re(RUN_RE), "trigger": lambda v: v in tuple("abcde"),
-                 "coords": _list_of(_s), "head_sha": _re(SHA40_RE)},
+    "run.open": {"run": _re(RUN_RE), "trigger": lambda v: v in tuple("abcdef"),
+                 "coords": _list_of(_s), "head_sha": _re(SHA40_RE), "due_at": valid_t,
+                 "carrier": lambda v: v == "console", "audit_ref": valid_uuid,
+                 "audit_sha256": _SHA, "key_id": _re(KEY_ID_RE), "decider": _re(ACCOUNT_RE)},
+    "sched.set": {"enabled": lambda v: isinstance(v, bool), "period_minutes": lambda v: _int(v, 1),
+                  "carrier": lambda v: v in ("console", "transcript", "host"), "reason": _note,
+                  "audit_ref": valid_uuid, "audit_sha256": _SHA, "key_id": _re(KEY_ID_RE),
+                  "decider": _re(ACCOUNT_RE), "sid": valid_uuid, "line": lambda v: _int(v, 1)},
+    "sched.skip": {"due_at": valid_t, "reason": lambda v: v in SKIP_REASONS, "detail": _note,
+                   "carrier": lambda v: v == "console", "audit_ref": valid_uuid},
     "run.close": {"run": _re(RUN_RE), "outcomes": _outcomes, "no_event": lambda v: v is True},
     "research.scan": {"run": _re(RUN_RE), "sources": _list_of(_scan_src), "sources_sha256": _SHA,
                       "fetched_at": valid_t},
@@ -221,7 +231,11 @@ _CONSUMED: dict[str, dict] = {
     "mea.close": {"prop": _str, "result": _str},
     "mea.amend": {"prop": _str, "window": lambda v: _int(v, 1), "to": _str},
 }
+_CONSOLE_KEYS = {"audit_ref", "audit_sha256", "key_id", "decider"}
 _ALWAYS_OPTIONAL = {"run.close": {"outcomes", "no_event"},
+                    "run.open": {"due_at", "carrier"} | _CONSOLE_KEYS,
+                    "sched.set": {"reason", "sid", "line"} | _CONSOLE_KEYS,
+                    "sched.skip": {"carrier", "audit_ref"},
                     "research.skip": {"band", "sid", "line"},
                     "attr": {"obs", "items", "root_cause", "from", "reopens"},
                     "prop": {"preimage"}}
@@ -413,7 +427,7 @@ def validate(obj: dict) -> list[tuple[str, str]]:
     if not valid_t(obj["t"]):
         out.append(("EVENT-TYPE", "t 須帶 offset 且合 ISO 形態"))
     if obj["kind"] not in KINDS:
-        return out + [("EVENT-KIND", f"kind {obj['kind']!r} 不在 21 個詞彙內")]
+        return out + [("EVENT-KIND", f"kind {obj['kind']!r} 不在 {len(KINDS)} 個詞彙內")]
     if not valid_by(obj["by"]):
         out.append(("EVENT-TYPE", "by 須為非空、無空白、≤32 字元的標籤"))
     kind = obj["kind"]
@@ -443,8 +457,40 @@ def validate(obj: dict) -> list[tuple[str, str]]:
     return out
 
 
-def _conditional(kind: str, obj: dict, body: dict) -> list[tuple[str, str]]:
+def _p4_rules(kind: str, obj: dict, body: dict) -> list[tuple[str, str]]:
+    """P4 條件規則（R139）：載體對應的必備／不得有鍵；`due_at` 配 trigger；成對鍵。"""
     out: list[tuple[str, str]] = []
+    miss, unk = "EVENT-KEY-MISSING", "EVENT-KEY-UNKNOWN"
+    if kind == "sched.set":
+        car = _hashable(obj.get("carrier"))
+        want = {"console": _CONSOLE_KEYS, "transcript": {"sid", "line"}, "host": set()}.get(car)
+        if want is not None:
+            have = set(body) & (_CONSOLE_KEYS | {"sid", "line"})
+            out += [(miss, f"sched.set（{car}）缺 {k}") for k in sorted(want - have)]
+            out += [(unk, f"sched.set（{car}）不得有 {k}") for k in sorted(have - want)]
+            if car == "host" and obj.get("enabled") is not False:
+                out.append(("EVENT-TYPE", "sched.set 的 host 載體只限 enabled=false"))
+    elif kind == "sched.skip" and {"carrier", "audit_ref"} & set(body):
+        out += [(miss, f"sched.skip 的 {k} 與 carrier 須成對") for k in ("carrier", "audit_ref")
+                if k not in body]
+    elif kind == "run.open":
+        trig, has = obj.get("trigger"), set(body)
+        if trig == "f" and "due_at" not in has:
+            out.append((miss, "run.open（trigger f）缺 due_at"))
+        if trig in tuple("abcde") and "due_at" in has:
+            out.append((unk, "run.open 的 due_at 只限 trigger f"))
+        if "carrier" in has and trig != "a":
+            out.append(("EVENT-TYPE", "run.open 的 carrier 只限 trigger a"))
+        extra = _CONSOLE_KEYS & has
+        if "carrier" in has:
+            out += [(miss, f"run.open（console）缺 {k}") for k in sorted(_CONSOLE_KEYS - has)]
+        else:
+            out += [(unk, f"run.open 無 carrier 時不得有 {k}") for k in sorted(extra)]
+    return out
+
+
+def _conditional(kind: str, obj: dict, body: dict) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = _p4_rules(kind, obj, body)
     if kind == "run.close" and (("outcomes" in body) == ("no_event" in body)):
         out.append(("EVENT-TYPE", "run.close 的 outcomes／no_event 須恰有一個"))
     if kind == "research.scan" and obj.get("by") != "researcher":

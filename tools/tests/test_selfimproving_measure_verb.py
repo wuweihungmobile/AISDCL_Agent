@@ -77,7 +77,7 @@ class TestEventTableAndCheck(VerbTestCase):
                     rc, out, err = self.M(R, "attr-confirm", "--att", s["att_c1"], "--by", "main")
                     self.assertEqual(rc, 0, out + err)
                 res = self.check(R)
-                self.assertEqual(len(res["items"]), 33)
+                self.assertEqual(len(res["items"]), 35)
                 self.assertEqual(res["items"][32]["id"], "events.mea")
                 for item in ("events.mea", "events.transitions"):
                     self.assertEqual(self.S(res, item), "PASS", item)
@@ -160,9 +160,10 @@ class TestEventTableAndCheck(VerbTestCase):
         names = fx.P0_ITEMS21 + fx.P1_ITEMS7 + fx.P2_ITEMS4
         for label, R in (("p0", P0), ("none", R_none), ("adopt", R_adopt)):
             res = self.check(R)
-            self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 4, label)
+            self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 5, label)
             ids = [i["id"] for i in res["items"]]
             self.assertEqual((ids[:32], ids[32]), (names, "events.mea"), label)
+            self.assertEqual(ids[33:], ["sched.events", "run.trigger_f_has_patrol_by"], label)
         item = r0["_item"]["events.mea"]
         self.assertEqual((item["status"], item["blocking"]), ("NE", False))
         self.assertEqual([f["code"] for f in item["findings"]], ["CARRIER-NOT-ESTABLISHED"])
@@ -421,7 +422,7 @@ class TestStatusAndExport(VerbTestCase):
         idx.write_bytes(f3.cap_index(16))
         st = self.status(R)
         keys = list(st)
-        self.assertEqual(len(keys), 15)
+        self.assertEqual(len(keys), 16)
         self.assertEqual((keys[0], keys[13], keys[14]), ("events_detected", "console_pending",
                                                           "measure"))
         m = st["measure"]
@@ -468,7 +469,7 @@ class TestStatusAndExport(VerbTestCase):
         item = st["items"][0]
         self.assertEqual(item["capacity"], {"status": "NOT-EVALUABLE",
                                             "reason": "export-reads-no-home"})
-        self.assertEqual(len(item), 15)
+        self.assertEqual(len(item), 16)
         text = json.dumps(exp) + json.dumps(st)
         self.assertNotIn(sentinel, text)
         self.assertNotIn("INDEX-UNIQUE-CONTENT", text)

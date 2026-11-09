@@ -42,6 +42,7 @@ STATUS_KEYS = [
     "no_event",
     "console_pending",
     "measure",
+    "schedule",
 ]
 EXPORT_KEYS = [
     "schema_rev",
@@ -575,8 +576,9 @@ class TestExport(StatusCase):
         st = self.export(repo, "--kind", "status")
         outs.append(json.dumps(st))
         same = lambda o: {  # noqa: E731
-            k: v for k, v in o.items() if k not in ("console_pending", "capacity")
-        }
+            k: ({a: b for a, b in v.items() if a != "armed"} if k == "schedule" else v)
+            for k, v in o.items() if k not in ("console_pending", "capacity")
+        }  # P4：schedule.armed 在 export 為固定 NE 字串（R158）
         self.assertEqual(same(st["items"][0]), same(self.MJ(repo, "status")))  # R99 (b)
         self.assertEqual(st["items"][0]["console_pending"]["reason"], "export-reads-no-home")
         props = self.export(repo, "--kind", "proposals")

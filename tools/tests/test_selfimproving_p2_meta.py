@@ -477,7 +477,8 @@ class TestZeroRegression(P2TestCase):
         self.assertEqual(missing, [])
         self.assertEqual(set(si_params.PARAM_SPECS), {*P1_PARAMS, "probe_timeout_seconds",
                                                       "verify_runs_max", "memory_index_max_lines",
-                                                      "memory_index_max_bytes"})
+                                                      "memory_index_max_bytes",
+                                                      *si_params.SCHED_KEYS})
         prm = fx.params_dict()
         self.assertEqual(prm["non_evolvable_globs"], P1_NON_EVOLVABLE)
         self.assertEqual(prm["spec_body_globs"], P1_SPEC_BODY)

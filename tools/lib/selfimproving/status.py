@@ -8,6 +8,7 @@ P3 的 `capacity` 動詞建成前印 NOT-EVALUABLE、不得印成零。
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 from . import capacity as si_capacity
@@ -17,6 +18,7 @@ from . import fold as si_fold
 from . import mea as si_mea
 from . import params as si_params
 from . import scan as si_scan
+from . import sched as si_sched
 from . import transcript as si_transcript
 from .git import Git
 
@@ -61,7 +63,8 @@ def console_pending(events: list[dict], read_home: bool = True) -> dict:
         names = sorted(p for p in box.iterdir() if p.is_file())
     except OSError:
         return {"status": "NOT-EVALUABLE", "reason": "home-unavailable"}
-    used = {e.get("audit_ref") for e in events if e["kind"] in ("dec", "obs.add", "obs.close")}
+    used = {e.get("audit_ref") for e in events
+            if e["kind"] in ("dec", "obs.add", "obs.close", "sched.set", "run.open", "sched.skip")}
     items = []
     for p in names:
         if p.suffix != ".json" or not si_events.valid_uuid(p.stem) or p.stem in used:
@@ -98,8 +101,25 @@ def measure_value(repo: Path, git: Git, params: dict, events: list[dict] | None)
             "rollback_pending": meaplan.rollback_pending(ctx)}
 
 
-def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
-    """狀態物件；鍵序固定（R60；其後附加 `console_pending`〔R99〕與末鍵 `measure`〔R130〕）。"""
+def schedule_value(events: list[dict] | None, params: dict, read_home: bool, now=None,
+                   armed=None) -> dict:
+    """R158：`schedule` 物件；排程參數無效＝NOT-EVALUABLE；`armed` 為可呼叫者時只在排程啟用時現查
+    （避免每次 `status` 都起一個 OS 查詢行程）；`export`（`read_home` 為假）恆為固定 NE 字串。"""
+    if not set(si_params.SCHED_KEYS) <= si_params.valid_keys(params):
+        return {"status": "NOT-EVALUABLE", "reason": "params-invalid"}
+    now = now or datetime.now().astimezone()
+    obj = si_sched.schedule_obj(events, params, now)
+    if not read_home:
+        obj["armed"] = si_sched.EXPORT_ARMED
+    elif callable(armed) and obj["enabled"]:
+        obj["armed"] = armed()
+    return obj
+
+
+def build(repo: Path, git: Git, params: dict, read_home: bool = True, *, now=None,
+          armed=None) -> dict:
+    """狀態物件；鍵序固定（R60；其後附加 `console_pending`〔R99〕、`measure`〔R130〕與末鍵
+    `schedule`〔R158〕）。"""
     events = si_events.load_sound_events(repo / si_events.LEDGER_REL)
     f = si_fold.fold(events or [], params.get("stop_after_bad"))
     closes = [e["seq"] for e in events or [] if e.get("kind") == "run.close"]
@@ -133,6 +153,7 @@ def build(repo: Path, git: Git, params: dict, read_home: bool = True) -> dict:
         "no_event": not detected,
         "console_pending": console_pending(events or [], read_home),
         "measure": measure_value(repo, git, params, events),
+        "schedule": schedule_value(events, params, read_home, now, armed),
     }
 
 
@@ -144,6 +165,11 @@ def _capacity_line(cap: dict) -> str:
     if cap["status"] != "read":
         return f"capacity NOT-EVALUABLE（{cap['reason']}）"
     return "capacity read over_cap=" + ("、".join(cap["over_cap"]) or "無")
+
+
+def tri_text(v, none: str = "null") -> str:
+    """布林三態與 null 的文字形（`true`／`false`／`null`；時間字串原樣）。"""
+    return none if v is None else (str(v).lower() if isinstance(v, bool) else str(v))
 
 
 def render_text(obj: dict) -> str:
@@ -171,6 +197,11 @@ def render_text(obj: dict) -> str:
                  f"{sum(1 for w in m['windows'] if w['state'] == 'measuring')} "
                  f"candidates_unsettled={m['candidates_unsettled']}" if m["status"] == "read"
                  else f"measure: NOT-EVALUABLE（{m['reason']}）")
+    s = obj["schedule"]
+    lines.append(f"schedule: enabled={str(s['enabled']).lower()} period={s['period_minutes']} "
+                 f"cell={tri_text(s['cell_start'], 'null')}/{tri_text(s['cell_end'], 'null')} "
+                 f"overdue={tri_text(s['overdue'])}"
+                 if "enabled" in s else f"schedule: NOT-EVALUABLE（{s['reason']}）")
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

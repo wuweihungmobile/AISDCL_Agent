@@ -23,7 +23,7 @@ from . import events as si_events
 
 KEY_ENV = "AUTOSDD_SI_AUDIT_KEY"
 AUDIT_DIR = "console_audit"
-KINDS = ("decide", "obs-add", "obs-close")
+KINDS = ("decide", "obs-add", "obs-close", "sched-set", "run-request")
 _OUTER_KEYS = {"schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac"}
 _USER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _TIME_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d")
@@ -117,7 +117,7 @@ def parse(path: Path) -> Audit:
     if not (path.stem == outer["audit_ref"] == body.get("audit_ref")):
         raise AuditError("AUDIT-REF-MISMATCH", "檔名、外層、body 的 audit_ref 不一致")
     if outer["kind"] != body.get("kind") or outer["kind"] not in KINDS:
-        raise AuditError("AUDIT-KIND-MISMATCH", "外層與 body 的 kind 不等或不在三值內")
+        raise AuditError("AUDIT-KIND-MISMATCH", f"外層與 body 的 kind 不等或不在 {len(KINDS)} 值內")
     user = body.get("user")
     if not (isinstance(user, str) and _USER_RE.fullmatch(user)):
         raise AuditError("AUDIT-USER-FORMAT", "user 不合 ^[A-Za-z0-9_.-]{1,64}$ 或缺")
@@ -143,10 +143,54 @@ def _c0(text) -> bool:
     return isinstance(text, str) and any(ord(ch) < 0x20 for ch in text)
 
 
-def body_guard(kind: str, body: dict) -> list[tuple[str, str]]:
-    """R136：Console 三動詞的寫入前本文判準（純函式；在取鎖與組列之前呼叫）。回（碼, 說明）清單：
-    (a) `CTRL-CHAR`（自由文字欄含 C0 控制字元）、(b) `EVENT-KEY-UNKNOWN`／`EVENT-TYPE`
-    （與 `events.validate` 同源）、(c) `REASON-EMPTY`、(d) `DISPOSITION-INVALID`（含換行）。"""
+_COMMON_BODY = {"schema_rev", "audit_ref", "kind", "user", "role", "time"}
+_SCHED_BODY = {"sched-set": ({"enabled", "period_minutes"}, "reason"),
+               "run-request": (set(), "note")}
+_TEXT_MAX = 120
+
+
+def text_codes(name: str, value) -> list[tuple[str, str]]:
+    """R141 (c)：reason／note 共用字串規則（code point 計、拒 C0 與 U+007F、不得全空白）。"""
+    if not isinstance(value, str):
+        return [("AUDIT-BODY-INVALID", f"{name} 須為字串")]
+    out: list[tuple[str, str]] = []
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+        out.append(("CTRL-CHAR", f"{name} 含控制字元（含 CR／LF）"))
+    elif not value.strip():
+        out.append(("FIELD-BLANK", f"{name} 有值時不得全空白"))
+    if len(value) > _TEXT_MAX:
+        out.append(("FIELD-TOO-LONG", f"{name} 超過 {_TEXT_MAX} code point"))
+    return out
+
+
+def _sched_codes(kind: str, body: dict, bounds) -> list[tuple[str, str]]:
+    """R141 (b)(c)(d)：`sched-set`／`run-request` 的 body 判準（不帶卡面 digest、不走 dedupe）。"""
+    need, text_key = _SCHED_BODY[kind]
+    out: list[tuple[str, str]] = []
+    extra = set(body) - _COMMON_BODY - need - {text_key}
+    if extra or not need <= set(body):
+        out.append(("AUDIT-BODY-INVALID", f"{kind} 的 body 鍵集合不合（表外 {sorted(extra)}）"))
+    if kind == "sched-set" and need <= set(body):
+        per = body["period_minutes"]
+        if not isinstance(body["enabled"], bool):
+            out.append(("AUDIT-BODY-INVALID", "enabled 須為布林"))
+        if isinstance(per, bool) or not isinstance(per, int):
+            out.append(("AUDIT-BODY-INVALID", "period_minutes 須為整數（非布林）"))
+        elif bounds is not None and not bounds[0] <= per <= bounds[1]:
+            out.append(("PERIOD-OUT-OF-RANGE", f"period_minutes {per} 不在 {list(bounds)}"))
+    return out + (text_codes(text_key, body[text_key]) if text_key in body else [])
+
+
+def body_guard(kind: str, body: dict, *, bounds: tuple[int, int] | None = None
+               ) -> list[tuple[str, str]]:
+    """R136／R141：Console 五種 kind 的寫入前本文判準（純函式；取鎖之前呼叫）。
+    回（碼, 說明）清單：(a) `CTRL-CHAR`（自由文字欄含 C0 控制字元）、(b) `EVENT-KEY-UNKNOWN`／
+    `EVENT-TYPE`（與 `events.validate` 同源）、(c) `REASON-EMPTY`、(d) `DISPOSITION-INVALID`
+    （含換行）；P4 兩個新 kind 另有 `AUDIT-BODY-INVALID`、`FIELD-TOO-LONG`、`FIELD-BLANK`、
+    `PERIOD-OUT-OF-RANGE`（`bounds`＝`[sched_period_minutes_min, sched_period_minutes_max]`，
+    呼叫端取自 params）。"""
+    if kind in _SCHED_BODY:
+        return _sched_codes(kind, body, bounds)
     out: list[tuple[str, str]] = []
     if kind == "decide":
         dkind = body.get("dkind")

@@ -210,7 +210,7 @@ class TestSop(unittest.TestCase):
 class TestParams(f3.P3TestCase):
     def test_AT_340_4_1_two_new_parameters(self):
         real = json.loads((ROOT / f3.fx.PARAMS).read_text(encoding="utf-8"))
-        self.assertEqual(len(real), 32)
+        self.assertEqual(len(real), 41)
         self.assertEqual(list(real), sorted(real, key=lambda k: k.encode("utf-8")))
         self.assertEqual((real["memory_index_max_lines"], real["memory_index_max_bytes"]),
                          (200, 25600))
@@ -289,10 +289,10 @@ class TestZeroRegression(f3.P3TestCase):
             ids = [a for a, _, _ in parse_at_headers(real_tcs(prefix))]
             self.assertEqual([a for a in ids if underscore_form(a) not in names], [], prefix)
         import test_selfimproving_capability as cap
-        self.assertEqual(si_params.CHECK_RULES_REV, 4)
-        self.assertEqual(len(selfimproving._HELP), 24)
-        self.assertIn(len(cap.CAPABILITY), (50, 51))
-        want = {50: (38, 8, 2, 2), 51: (39, 8, 2, 2)}[len(cap.CAPABILITY)]
+        self.assertEqual(si_params.CHECK_RULES_REV, 5)
+        self.assertEqual(len(selfimproving._HELP), 25)
+        self.assertIn(len(cap.CAPABILITY), (54, 55))
+        want = {54: (41, 9, 2, 2), 55: (42, 9, 2, 2)}[len(cap.CAPABILITY)]
         got = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k)
                     for k in ("ro", "rw", "net", "exec"))
         self.assertEqual(got, want)
@@ -310,7 +310,7 @@ class TestZeroRegression(f3.P3TestCase):
         f3.promoted(R, target=f"{D3}/z.md")
         prop = self.MJ(R, "export", "--kind", "proposals")["items"][0]
         self.assertEqual((len(prop), list(prop)[-1]), (19, "window"))
-        self.assertEqual(len(list(self.MJ(R, "status"))), 15)
+        self.assertEqual(len(list(self.MJ(R, "status"))), 16)
 
     def test_AT_340_8_E_1_explicit_wrong_values_survive_the_defaults(self):
         self.new_home()

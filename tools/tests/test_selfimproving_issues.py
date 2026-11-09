@@ -65,7 +65,7 @@ ID_FORM = re.compile(r"OBS-SI-\d{3,}|PROP-SI-\d{3,}|DEF-\d+-\d+")
 LEGAL_VERBS = (
     "check", "status", "scan", "card", "export", "run-open", "run-close", "attr", "attr-confirm",
     "attr-reject", "prop-new", "prop-revise", "research", "decide", "heldout-freeze", "sandbox",
-    "verify", "promote", "rollback", "obs-add", "obs-close", "measure", "capacity",
+    "verify", "promote", "rollback", "obs-add", "obs-close", "measure", "capacity", "sched",
 )
 # TCS 契約節 C1.1～C1.4 的鍵序（逐字抄自規格）：議題匯出形狀的絕對釘；RX 組（議題匯出類別）同引
 TOP_KEYS = ["schema_rev", "kind", "generated_at", "head_sha", "items", "next_since", "truncated",
@@ -1827,7 +1827,7 @@ class TestZeroWriteAndSingleSource(IssueCase):
         import test_selfimproving_capability as cap
 
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 24)
+        self.assertEqual(len(verbs), 25)
         self.assertEqual(verbs, {*LEGAL_VERBS, "issues"})
         cp = subprocess.run([sys.executable, str(ENTRY), "--help"], capture_output=True,
                             check=False)
@@ -1861,7 +1861,7 @@ class TestZeroWriteAndSingleSource(IssueCase):
         res = json.loads(out.decode("utf-8"))
         failed = [(i["id"], [(f["subject"], f["code"]) for f in i["findings"]])
                   for i in res["items"] if i["status"] == "FAIL"]
-        self.assertEqual((rc, len(res["items"]), failed), (0, 33, []), err.decode("utf-8"))
+        self.assertEqual((rc, len(res["items"]), failed), (0, 35, []), err.decode("utf-8"))
 
     def test_AT_IC_06_5_1_the_defect_archive_files_are_never_opened(self):
         archive = [def_row(1)[:6], def_row(2), def_row(2)]  # 欄數不符與重複 ID

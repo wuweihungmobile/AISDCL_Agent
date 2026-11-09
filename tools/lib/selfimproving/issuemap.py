@@ -63,6 +63,7 @@ EVENT_LABELS = {
     "app.verify": "驗證", "app.promote": "晉升", "app.rollback": "回滾", "mea.open": "開量測窗",
     "mea.close": "關量測窗", "mea.amend": "更正量測", "mea.report": "量測報告",
     "obs.add": "新增觀察", "obs.close": "關閉觀察",
+    "sched.set": "排程設定", "sched.skip": "排程跳過",  # P4（TCS-P4 D-IMP-3）
 }
 DKIND_LABELS = {
     "approve": "核准", "reject": "否決", "return": "退回", "promote": "晉升", "rollback": "回滾",

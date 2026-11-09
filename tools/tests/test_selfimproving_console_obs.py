@@ -291,8 +291,9 @@ class TestDecideConsole(ConsoleCase):
             self.usage_error(*self.M(R, "decide", p, "--carrier", "console", "--audit-ref",
                 "12345"), "bad")
         with self.subTest("e"), mock.patch.dict(os.environ, {"AUTOSDD_UNATTENDED": "1"}):
+            os.environ.pop("AUTOSDD_SI_AUDIT_KEY", None)  # R153 ②（D-QA-9）：console 過授權閘
             rc, out, _ = self.M(R, "decide", p, "--carrier", "console", "--audit-ref", ref)
-            self.guard(R, rc, out, ["UNATTENDED-REFUSED"])
+            self.guard(R, rc, out, ["AUDIT-KEY-MISSING"])  # 無人主控不持金鑰，止於金鑰缺
         with self.subTest("f"):
             rc, out, _ = run(R, p, fx2.body_decide(new_uuid(), p, fx.H(33), "approve"))
             self.guard(R, rc, out, ["STALE-CARD"])
@@ -918,7 +919,7 @@ class TestObsClose(ObsCase):
     def test_AT_235_3_1_no_delete_or_renumber(self):
         import selfimproving
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 24)
+        self.assertEqual(len(verbs), 25)  # P4：加 sched；patrol 加入後為 26
         self.assertEqual({v for v in verbs if "obs" in v}, {"obs-add", "obs-close"})
         R = self.obs_repo(extra=open_rows(11, 1))
         snap0, l0 = fx.snap(R), obs_ledger(R)
@@ -1163,10 +1164,10 @@ class TestExportStatus(ObsCase):
         self.assertTrue(bad and all("buckets" not in i for i in bad))
         self.assertEqual(scan.bucket_of("autoclaude/tests/a.py"), "根層")
         keys = list(self.MJ(R, "status"))
-        self.assertEqual((keys[-2], keys[-1]), ("console_pending", "measure"))
-        self.assertEqual(len(keys), 15)
+        self.assertEqual((keys[-3], keys[-2], keys[-1]), ("console_pending", "measure", "schedule"))
+        self.assertEqual(len(keys), 16)
         st = self.MJ(R, "export", "--kind", "status")["items"][0]
-        self.assertEqual(list(st)[-1], "measure")
+        self.assertEqual(list(st)[-1], "schedule")
         self.assertEqual(st["console_pending"], {"status": "NOT-EVALUABLE",
                                                  "reason": "export-reads-no-home"})
 

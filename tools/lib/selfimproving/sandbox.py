@@ -347,7 +347,7 @@ def _freeze_codes(repo: Path, ns, f, events: list, si: Path) -> list:
 
 def heldout_freeze(repo: Path, ns, as_json: bool) -> wv.Out:
     """`heldout-freeze`（R83）：把 `--from` 全部檔案複製進家目錄並把 digest 記入帳本。"""
-    refused = refuse_unattended(repo, "heldout-freeze", as_json)  # R70：先於其餘一切前置檢查
+    refused = refuse_unattended(repo, "heldout-freeze", as_json, ns)  # R153：先於其餘一切前置檢查
     if refused:
         return refused
     if not si_events.valid_by(ns.by):
