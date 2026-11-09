@@ -36,7 +36,7 @@
 - After：新增 8 支套件模組（`ro`：`sched`、`unattended`、`patrolbrief`、`schedcheck`；`rw`：`schedwrite`；`exec`：`patrol`、`patrolrun`、`schedarm`）、2 個動詞（`sched`、`patrol`，共 26 個）、`run-open` 的 `--trigger f`／`--due-at`／`--carrier console --audit-ref`、`runner.run_argv`（明示環境入口）、`consoleaudit` 增 `sched-set`／`run-request` 兩個 `kind` 與其 `body` 判準；`events.KINDS` 23 個；`check` 35 項（`CHECK_RULES_REV` 5）；`params.json` 41 鍵（加九個 `sched_*`）；`status` 16 鍵（末鍵 `schedule`）；能力登記 59 鍵（43／9／2／5；若實作輪因 `events.py` 逼近 400 而拆 `evspec`〔`ro`〕則為 60 鍵、44 `ro`，兩態擇一，R160）；安裝器整組三支任務、`si_patrol_tick.ps1`、期望表加一筆；SOP〈巡邏與無人運轉（P4）〉〈無人運轉任務書範本〉兩節（PRD 提交時已落檔）與〈啟動條件〉〈P2 動詞〉增補的機器可判化；PRD §8.1 P4 出口 (a)～(f) 的真實運轉列為實跑檢核 V30～V35。
 - **本檔不含**：AgentConsole 三層（Bridge 兩個 POST、backend 兩個 POST 與 Flyway CHECK 改版、frontend 面板；見 `TCS-SelfImprovingSchedule-20261109.md`）、P4 出口 (a)～(f) 的真機運轉（V30～V35，不入 AT，AT 不碰真帳本與外網）、`sched_auto_push` 為 true 的語意（PRD §9.7 #88：只准 false）、macOS 實跑（標「未驗」）。
 
-**AC 編號規則**：PRD `AC-SI-NN-Y`（NN＝36～39）在 AT 的 ID 以 `AT-4NN-Y-…` 表示（百位 `4`＝P4，沿 P3 的 `AC-SI-22-1`→`AC-322-1` 體例；本檔 §1、§6 一律寫 PRD 全名 `AC-SI-NN-Y`，AT ID 內的 `4NN` 即其縮寫）；本檔自增 AC 帶階段前綴 `AC-P4-040-1`～`AC-P4-040-8`，其 AT 以 `AT-440-Y-…` 表示（第 Y 個自增 AC）；AT 文法 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，負控／邊界 `AT-<NNN>-<Y>-E-<n>`；判定指令的 `-k` 一律為錨定名（AT 底線形接結尾底線）。**AC 數**：PRD 23 個（FR-SI-36 六、37 五、38 七、39 五）加自增 8 個合計 31 個；其中 `AC-SI-37-4`（Console UI 控件）**在本檔無 AT**（由 Console TCS 判定，根層半的契約面以 `AT-437-3-1`、`AT-437-3-2` 釘住），其餘 30 個皆有至少一個 AT；§1 共 96 個 AT（正控 53、負控 43）。
+**AC 編號規則**：PRD `AC-SI-NN-Y`（NN＝36～39）在 AT 的 ID 以 `AT-4NN-Y-…` 表示（百位 `4`＝P4，沿 P3 的 `AC-SI-22-1`→`AC-322-1` 體例；本檔 §1、§6 一律寫 PRD 全名 `AC-SI-NN-Y`，AT ID 內的 `4NN` 即其縮寫）；本檔自增 AC 帶階段前綴 `AC-P4-040-1`～`AC-P4-040-8`，其 AT 以 `AT-440-Y-…` 表示（第 Y 個自增 AC）；AT 文法 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，負控／邊界 `AT-<NNN>-<Y>-E-<n>`；判定指令的 `-k` 一律為錨定名（AT 底線形接結尾底線）。**AC 數**：PRD 24 個（FR-SI-36 六、37 五、38 八、39 五）加自增 8 個合計 32 個；其中 `AC-SI-37-4`（Console UI 控件）**在本檔無 AT**（由 Console TCS 判定，根層半的契約面以 `AT-437-3-1`、`AT-437-3-2` 釘住），其餘 31 個皆有至少一個 AT；§1 共 105 個 AT（正控 56、負控 49）。
 
 **P4 交付物**（D1～D12）
 
@@ -44,7 +44,7 @@
 |------|--------|--------------------------|--------|----------|
 | D1 | 排程模型與狀態折疊、`schedule` 形狀、七種跳過的純判準、黑窗解析（`sched`）；`check` 兩新項（`schedcheck`）；run-scoped 授權閘（`unattended`） | `tools/lib/selfimproving/{sched,schedcheck,unattended}.py`（新，`ro`） | Developer | AC-SI-36-1、36-2、37-3、37-5、38-3 |
 | D2 | `sched set`／Console 入帳、`run-open` 增補、`sched.skip` 寫入（`schedwrite`）；`consoleaudit` 兩新 `kind`；`events.py` 的 `KINDS`／`_SPEC`；`decwrite.refuse_unattended` 與各 P2 動詞改呼叫 `unattended.gate`（單一實作） | `schedwrite.py`（新，`rw`）；`consoleaudit.py`、`events.py`、`decwrite.py`、`writeverbs.py`（改，`writeverbs` 現 382、上限 400）；入口 | Developer | AC-SI-37-1、37-2、38-3 |
-| D3 | 巡邏心跳編排、運轉執行器、任務書生成、OS 任務封裝（`patrol`、`patrolrun`、`patrolbrief`、`schedarm`）；`runner.run_argv` | `patrol.py`、`patrolrun.py`、`schedarm.py`（新，`exec`）、`patrolbrief.py`（新，`ro`）；`runner.py`（改） | Developer | AC-SI-36-3～36-6、38-1、38-2、38-4～38-7、39-1～39-5 |
+| D3 | 巡邏心跳編排、運轉執行器、任務書生成、OS 任務封裝（`patrol`、`patrolrun`、`patrolbrief`、`schedarm`）；`runner.run_argv` | `patrol.py`、`patrolrun.py`、`schedarm.py`（新，`exec`）、`patrolbrief.py`（新，`ro`）；`runner.py`（改） | Developer | AC-SI-36-3～36-6、38-1、38-2、38-4～38-8、39-1～39-5 |
 | D4 | `status.schedule`、`export` 同函式、`console_pending[]` 兩新 kind、`params` 九鍵與界驗證 | `status.py`、`export.py`、`params.py`（改）；`docs/06_quality/SelfImproving_Protocol/params.json`（加九鍵，與 `PARAM_SPECS` 同 commit） | Developer | AC-SI-37-3、37-5；AC-P4-040-2 |
 | D5 | 安裝器整組三支、期望表加一筆、包裝腳本 | `tools/install_windows_nightly.ps1`、`tools/scheduled_task_expectations.json`（改）；`tools/si_patrol_tick.ps1`（新，CRLF） | Developer | AC-SI-36-4 |
 | D6 | 入口新動詞與登記 | `tools/selfimproving.py`；`tools/tests/test_selfimproving_capability.py` 的 `CAPABILITY`（+8 鍵） | Developer | AC-P4-040-3、040-7 |
@@ -61,7 +61,7 @@
 - **鎖的持有面不得拆給並行包**（鐵律七）：PKG-ROOT-SCHED（`sched.py`、`schedcheck.py`、`unattended.py`、`schedwrite.py`、`consoleaudit.py`、`events.py`、`fold.py`〔本包不得改〕、`status.py`、`export.py`、`params.py`、`params.json`、`decwrite.py`、`writeverbs.py`、入口 `sched` 與 `run-open` 增補、`check` 兩新項、基線文件、同步站點測試）與 PKG-ROOT-PATROL（`patrol.py`、`patrolrun.py`、`patrolbrief.py`、`schedarm.py`、`runner.py`、`install_windows_nightly.ps1`、`scheduled_task_expectations.json`、`si_patrol_tick.ps1`、入口 `patrol`）。**兩包持有面不重疊**：共用檔 `events.py`、`status.py`、`params.py`、`consoleaudit.py`、`unattended.py` 歸 SCHED 包，PATROL 包只讀（`patrol.py` 只呼叫其公開函式）；`tools/selfimproving.py` 入口與 `CAPABILITY` 表兩包都要動，故**入口檔與登記表的合併由收尾單人窗口做**（PATROL 包交 handback 片段、不直接改入口）。結論：**可並行，但 PATROL 包的整合測試（`test_selfimproving_schedule_patrol.py`）須等 SCHED 包的 `events`／`sched`／`unattended` 落地後才能全綠**，故建議 SCHED 先行（約半棒）、PATROL 後接；若要並行，PATROL 棒須先以 §5.6 的函式簽章建議自備替身，合併時主控親驗。
 - 真帳本與真事件帳本只由主控寫（PRD C1）：Developer 棒不得碰真 OBS 帳本、真事件帳本、真 `SelfImproving_Proposals/`，**也不得註冊真的 OS 任務、不得 spawn 真的 `claude`、不得讀真的 `AgentConsole/.env`**；AT 一律在 tmp 的合成 repo 內進行（`AUTOSDD_SI_DIR`、`CLAUDE_CONFIG_DIR` 指向 tmp）。重釘儀式（護欄層行數棘輪、`tools/tests` 檔數下限與 E501 棘輪、兩站點 guard-total、`_REPIN_APPROVED_ROUND_OVERAGE`、compat-ci `paths` 覆蓋）由主控單人窗口於同一個 commit 收齊，**屬實作輪收尾步驟，不是設計缺口**，實作者不碰鎖檔（NFR-P4-8）。
 
-**〈P4 行為規則〉**（R137～R165；各 AT 以 R 編號引用；P0～P3 的 R1～R136 在其範圍內不變，P4 的重定與擴充見 R139〔`events`〕、R140〔`check`〕、R153〔run-scoped 授權取代 P2 R70 的「一律拒收」與 P1 動詞的「照常」〕、R158〔`status`〕、R159〔`params`〕、R160〔能力登記〕、R163〔既有測試同步站點〕）
+**〈P4 行為規則〉**（R137～R167；各 AT 以 R 編號引用；P0～P3 的 R1～R136 在其範圍內不變，P4 的重定與擴充見 R139〔`events`〕、R140〔`check`〕、R153〔run-scoped 授權取代 P2 R70 的「一律拒收」與 P1 動詞的「照常」〕、R158〔`status`〕、R159〔`params`〕、R160〔能力登記〕、R163〔既有測試同步站點〕）
 
 *A. 介面、rc 與輸出（PRD §9.3；旗標細部為本檔類推，§7.1 ⚖ 7）*
 
@@ -75,7 +75,7 @@
 | `patrol` | `--now <ISO，須帶 offset>`、`--dry-run`、`--json`；**不收 `--run`** | 寫事件、OBS 帳本、主工作樹（promote／commit）、家目錄 | 0＝心跳已跑完（含「無事可做」「有跳過」「已有巡邏在跑」「`AUTOSDD_SI_PATROL_OFF` no-op」）、1＝拒收或未預期例外（`AUTOSDD_UNATTENDED` 有設＝`UNATTENDED-REFUSED`）、3＝用法（`--now` 缺 offset、`--repo` 非目錄、`HOME-UNWRITABLE`） |
 | `run-open`（增補） | `--trigger {a｜b｜c｜d｜e｜f}`＊、`--coord`＊、`--by`＊、`--due-at <ISO>`（`f` 必帶）、`--carrier console --audit-ref <uuid>`（限 `--trigger a`） | 寫 `run.open`（或 Console 載體遇未關運轉時改寫 `sched.skip`） | 沿 P1 R27；P4 追加碼見拒收碼表 |
 
-  rc 通則沿 P1 R27／P2 R68：用法錯誤（rc 3）先於一切；`sched show`、`status`、`export` 唯讀；`sched set`、`sched arm`／`disarm`、`patrol` 於 `AUTOSDD_UNATTENDED` 有設時一律 rc 1、零寫入（R153）。成功輸出形態：`sched show` 文字首行 `schedule: enabled=<true|false> period=<N> cell=<cell_start>/<cell_end> overdue=<true|false|null>`，其後 `last_set:`、`last_skip:`、`armed:` 各一行；`--json`＝R158 的 `schedule` 物件。`sched set` 成功行沿 `decwrite.ok_out` 形（`ok sched.set seq=<N> enabled=<…> period=<…> carrier=<…>`）。`patrol` 成功輸出為逐步驟一行 `step=<入帳|到期|運轉|推進> result=<…>`；`--json` 為鍵序 `ok`、`kind`（字面 `patrol`）、`dry_run`、`steps`（`[{"step","result","detail"}…]`）、`events`（本次追加事件的 `seq` 清單）。
+  rc 通則沿 P1 R27／P2 R68：用法錯誤（rc 3）先於一切；`sched show`、`status`、`export` 唯讀；`sched set`、`sched arm`／`disarm`、`patrol` 於 `AUTOSDD_UNATTENDED` 有設時一律 rc 1、零寫入（R153）。成功輸出形態：`sched show` 文字首行 `schedule: enabled=<true|false> period=<N> cell=<cell_start>/<cell_end> overdue=<true|false|null>`，其後 `last_set:`、`last_skip:`、`armed:` 各一行；`--json`＝R158 的 `schedule` 物件。`sched set` 成功行沿 `decwrite.ok_out` 形（`ok sched.set seq=<N> enabled=<…> period=<…> carrier=<…>`）。`patrol` 成功輸出為逐步驟一行 `step=<巡視|入帳|到期|運轉|推進> result=<…>`；`--json` 為鍵序 `ok`、`kind`（字面 `patrol`）、`dry_run`、`steps`（`[{"step","result","detail"}…]`）、`events`（本次追加事件的 `seq` 清單）。
 - **R138 `sched set` 的載體與界**：(a) **停用方向**（`--enabled false`）免引言：`carrier=host`、`by` 為 `--by`（值域 P1 R27）；`--period-minutes` 缺＝沿用目前生效週期（無則 `sched_period_minutes_default`）；(b) **啟用或改週期**（`--enabled true`，或 `--period-minutes` 與現值不同）須人的引言：`--sid`＋`--line`（`carrier=transcript`，經 `decverify.verify_human_ref` 只驗載體與出處、不驗卡面）或 Console 載體（R146）；缺引言＝rc 1、碼 `SCHED-QUOTE-REQUIRED`；(c) `period_minutes` 須為整數（非布林）且在 `[sched_period_minutes_min, sched_period_minutes_max]`（取當下 `params.json`），否則 rc 1、碼 `PERIOD-OUT-OF-RANGE`；(d) `--reason` 沿 R141 的字串規則；(e) 零殘留沿 P2 R71（rc 1 時事件帳本位元組不變）；(f) `sched arm`／`disarm` 不需引言、不寫事件、憑證現查（R161）。
 
 *B. 事件欄位表與 `check`（PRD §9.2〈P4 增補〉、§9.3 `check` 列）*
@@ -89,14 +89,14 @@
 
   `run.open` 增量：`trigger` 值域 `a`～`f`；選填鍵 `due_at`（`trigger=f` 必備，且 `trigger≠f` 時不得有）、`carrier`（字面 `console`，只限 `trigger=a`）、`audit_ref`／`audit_sha256`／`key_id`／`decider`（`carrier=console` 時四者必備、否則不得有）；P4 之前的 `run.open`（缺選填鍵）判準不變。事件行仍受 `event_max_bytes` 限制（最壞行：`sched.set` 約 520、`sched.skip` 約 330 bytes，遠小於上限）。
 - **R140 `check` 的 P4 追加項與判準版本**：`check` 共 **35 項**（P0～P3 的 33 項 id、順序、語意、碼原樣，其後依序追加）：第 34 項 `sched.events`、第 35 項 `run.trigger_f_has_patrol_by`；兩項只讀事件帳本與 `params.json`（不讀 OBS／DEF 帳本、不呼叫 git、不讀家目錄）；事件帳本不在場＝nonblocking NE `CARRIER-NOT-ESTABLISHED`；無任何 `sched.*` 與 `trigger=f` 事件＝PASS。**`CHECK_RULES_REV` 由 4 增為 5**（本檔預設，⚖ 4）。判準：
-  - `sched.events`（FAIL 碼）：`SCHED-PERIOD-RANGE`（`sched.set.period_minutes` 不在界內；界取當下 `params.json`）、`SCHED-RUN-DUP`（同一格內 `run.open(trigger=f)` 超過一筆；格以該筆 `run.open` 之前最近一筆 `sched.set(enabled=true)` 的 `t` 為 origin、`period` 取該筆的 `period_minutes`）、`SCHED-SKIP-DUP`（同一格同一 `reason` 的非 Console `sched.skip` 超過一筆；Console 載體的 skip 以 `audit_ref` 判，同一 `audit_ref` 超過一筆即此碼）、`SCHED-SKIP-DUE`（非 Console 載體的 `sched.skip.due_at` 不是其 `t` 所在格的起點）。
-  - `run.trigger_f_has_patrol_by`（FAIL 碼）：`TRIGGER-F-BY`（`trigger=f` 的 `by` 不是 `patrol`）、`TRIGGER-F-DUE-AT`（`due_at` 缺，或 `(due_at − origin) mod period ≠ 0`，origin 取該 `run.open` 之前最近一筆 `sched.set(enabled=true)`）、`TRIGGER-F-NO-ORIGIN`（該 `run.open` 之前沒有任何 `sched.set(enabled=true)`）。
+  - `sched.events`（FAIL 碼）：`SCHED-PERIOD-RANGE`（`sched.set.period_minutes` 不在界內；界取當下 `params.json`）、`SCHED-RUN-DUP`（同一格內 `run.open(trigger=f)` 超過一筆；格以該筆 `run.open` 之前最近一次重置事件（R142 (b)） 的 `t` 為 origin、`period` 取該筆的 `period_minutes`）、`SCHED-SKIP-DUP`（同一格同一 `reason` 的非 Console `sched.skip` 超過一筆；Console 載體的 skip 以 `audit_ref` 判，同一 `audit_ref` 超過一筆即此碼）、`SCHED-SKIP-DUE`（非 Console 載體的 `sched.skip.due_at` 不是其 `t` 所在格的起點）。
+  - `run.trigger_f_has_patrol_by`（FAIL 碼）：`TRIGGER-F-BY`（`trigger=f` 的 `by` 不是 `patrol`）、`TRIGGER-F-DUE-AT`（`due_at` 缺，或 `(due_at − origin) mod period ≠ 0`，origin 取該 `run.open` 之前最近一次重置事件（R142 (b)））、`TRIGGER-F-NO-ORIGIN`（該 `run.open` 之前沒有任何重置事件（R142 (b)））。
 - **R141 Console 稽核檔兩個新 `kind` 與字串規則**（承 Console 側 `API_Contract_SelfImproving_P2c`，本條是 CLI 端的唯一判準；`consoleaudit.KINDS` 由 3 增為 5：`sched-set`、`run-request`）：(a) 外層七鍵與驗證步驟沿 P2 R94，外層 `subject` 一律 null（非 null＝`AUDIT-SUBJECT-MISMATCH`）；(b) `sched-set` 的 `body`：`enabled`（布林）與 `period_minutes`（整數，非布林）**兩鍵皆必備**（停用時也要帶界內週期）、`reason` 選填；`run-request` 的 `body`：`note` 選填；表外鍵一律 `AUDIT-BODY-INVALID`（含 `digest`、`card_seq` 等卡面鍵：這兩種寫入**不帶卡面 digest、不走 dedupe 重送閘**）；(c) **字串規則**（`reason`、`note` 共用）：選填、單行（不含 CR／LF）、≤120 code point（以 Unicode code point 計，不以位元組或 UTF-16 單元計）、拒 U+0000～U+001F 與 U+007F 控制字元（碼 `CTRL-CHAR`，CR／LF 亦屬之）、超長＝`FIELD-TOO-LONG`、有值時不得全空白（含空字串；碼 `FIELD-BLANK`）、**允許 `|`**（事件 JSON 不進 Markdown 表）；(d) 界：`period_minutes` 不在 `[sched_period_minutes_min, sched_period_minutes_max]`＝`PERIOD-OUT-OF-RANGE`；(e) **位元組權威與鍵序**：簽章對象的位元組權威＝根層 `consoleaudit.py`（`body` 字串逐位元組取自稽核檔；鍵序＝共通鍵之後依書寫序接專屬鍵——即 `sched-set` 為 `enabled`、`period_minutes`、`reason`，`run-request` 為 `note`，各專屬鍵位於 P2 R94 的共通鍵之後），Console 與 CLI 兩端對同一份位元組驗同一個 HMAC，CLI 不重新序列化；(f) 判準住 `consoleaudit.body_guard(kind, body)` 的純函式（沿 P3 R136 的同源原則：寫入端與 `check` 共用同一組述詞，單一實作）；碼（`CTRL-CHAR`、`FIELD-TOO-LONG`、`FIELD-BLANK`、`PERIOD-OUT-OF-RANGE`、`AUDIT-BODY-INVALID`）一併收集、rc 1、零寫入、輸出末尾印 `obs-draft:`。**與 P3 R136 的差別**：R136 對 `decide.reason` 的「只含空白者放行」不變；本條的新 `kind` 對空白一律拒收（Console 契約定案；主控裁決 D-RT-6，與 R136 並存、不回頭改 R136）。
 
 *C. 日曆格到期模型與跳過（`sched.py`；AC-SI-36-1、36-2；時間一律注入 `now`、不讀系統時鐘）*
 
-- **R142 排程狀態折疊**：輸入＝事件序列與注入的 `now`（aware）。(a) `enabled`＝最近一筆 `sched.set` 的 `enabled`（無＝false）；`period`＝其 `period_minutes`（無＝`sched_period_minutes_default`）；(b) `origin`＝最近一筆 `sched.set(enabled=true)` 的 `t`（含改週期的那筆；每次**啟用或改週期**都重置格線；`enabled=false` 的 `sched.set` 不改 origin 的歷史值，但使 `enabled` 為 false，其後再啟用的那筆 `sched.set(enabled=true)` 成為新 origin）；(c) 格 k＝`[origin＋k·period, origin＋(k＋1)·period)`（起點含、終點不含）；`k＝floor((now−origin)/period)`；`cell_start`、`cell_end`＝`now` 所在格兩端；(d) `now` 早於 origin（時鐘倒退）＝`cell_start`、`cell_end`、`ran_this_cell`、`overdue` 皆為 null（不猜）；(e) `enabled=false` 時 `cell_*`、`ran_this_cell`、`overdue`＝null／false 依 R158 表；(f) `ran_this_cell`＝該格內（`t` 落在 `[cell_start, cell_end)`）有 `run.open(trigger=f)`；`trigger` 為 a～e 的運轉不算；前一格的 `run.open(f)` 不延續到下一格；(g) 時區：以 aware 值比較，同一瞬間不論 offset 寫法結果相同（鐵律三）；`now` 缺 offset＝`ValueError`（CLI 為 rc 3）；(h) **版本號、覆蓋度、「每 N 輪」不是啟動事件**：`status.events_detected` 在排程啟用且本格未執行時不增項、不出現 `trigger` 為 `f` 的偵測項（(f) 運轉由巡邏器的 `run-open(f)` 開，不是偵測項）。
-- **R143 七種跳過的判序與判準**（純函式 `sched.decide_skip(inputs)`→`reason` 或 None；輸入全由呼叫端注入）：判序固定 `disabled`→`blackout`→`quota-band`→`other-driver`→`dirty-tree`→`run-open`→`spawn-failed`，第一個成立者即 `reason`；(a) `disabled`＝`enabled` 為 false（只供判序進行中被翻的競態，正常流程下 `enabled=false` 不嘗試、不寫事件）；(b) `blackout`＝本機 wall clock 時分（`sched.local_hm(now)`＝`now.astimezone()` 的時分）落在 `sched_blackout_local` 任一區間：區間 `HH:MM-HH:MM`、**起點含、終點不含**、起＞迄＝跨午夜、多區間聯集、空清單＝無黑窗；(c) `quota-band`＝`quota_gate.read_quota(now)` 的 `band` 為 `prepare`、`halt` 或 `unmeasured` ⇒ 跳過（fail-closed）；`free`、`notice`、`converge` ⇒ 照跑，其中 `notice`、`converge` 的任務書必帶降載聲明（R152；`converge` 為主控裁決 D-RT-3 (a)）；(d) `other-driver`＝本 repo 逐字稿目錄（`events.transcript_dir(repo)`）最近 `sched_driver_quiet_minutes` 內有**對話記錄**（`transcript_activity.newest_conversation_at`，判記錄時間戳、不是檔案 mtime）：`now − newest < quiet`（嚴格小於）才成立，恰等於＝不成立；只有 `away_summary`、`cost-state` 之類非對話記錄使 mtime 更新＝不成立；(e) `dirty-tree`＝`git status --porcelain`（含未追蹤）除 **SI 自有路徑**（事件帳本、OBS 帳本、`SelfImproving_Proposals/**`）外非空；改名條目兩端皆判；(f) `run-open`＝折疊出任何未關運轉（任何 trigger）；(g) `spawn-failed`＝`resume_route.preflight_problem()` 非空、`claude` 不在 PATH（`shutil.which`）、或 SOP 任務書範本的結構判準不過（`patrolbrief.template_problems`，detail 以 `sop-template:` 起頭）。
+- **R142 排程狀態折疊**：輸入＝事件序列與注入的 `now`（aware）。(a) `enabled`＝最近一筆 `sched.set` 的 `enabled`（無＝false）；`period`＝其 `period_minutes`（無＝`sched_period_minutes_default`）；(b) `origin`＝最近一次**重置事件**的 `t`；重置事件＝`enabled` 由 false（或尚無設定）轉為 true 的 `sched.set`，或 `enabled` 為 true 而 `period_minutes` 與前一筆生效值不同的 `sched.set`（D-QA-6）；**值不變的 `sched.set`（含值不變的重送）照記事件但不重置 origin**；`enabled=false` 的 `sched.set` 使 `enabled` 為 false 而不改 origin 的歷史值，其後再啟用的那筆（false→true）成為新的重置事件；(c) 格 k＝`[origin＋k·period, origin＋(k＋1)·period)`（起點含、終點不含）；`k＝floor((now−origin)/period)`；`cell_start`、`cell_end`＝`now` 所在格兩端；(d) `now` 早於 origin（時鐘倒退）＝`cell_start`、`cell_end`、`ran_this_cell`、`overdue` 皆為 null（不猜）；(e) `enabled=false` 時 `cell_*`、`ran_this_cell`、`overdue`＝null／false 依 R158 表；(f) `ran_this_cell`＝該格內（`t` 落在 `[cell_start, cell_end)`）有 `run.open(trigger=f)`；`trigger` 為 a～e 的運轉不算；前一格的 `run.open(f)` 不延續到下一格；(g) 時區：以 aware 值比較，同一瞬間不論 offset 寫法結果相同（鐵律三）；`now` 缺 offset＝`ValueError`（CLI 為 rc 3）；(h) **版本號、覆蓋度、「每 N 輪」不是啟動事件**：`status.events_detected` 在排程啟用且本格未執行時不增項、不出現 `trigger` 為 `f` 的偵測項（(f) 運轉由巡邏器的 `run-open(f)` 開，不是偵測項）。
+- **R143 七種跳過的判序與判準**（純函式 `sched.decide_skip(inputs)`→`reason` 或 None；輸入全由呼叫端注入）：判序固定 `disabled`→`blackout`→`quota-band`→`other-driver`→`dirty-tree`→`run-open`→`spawn-failed`，第一個成立者即 `reason`；(a) `disabled`＝`enabled` 為 false（只供判序進行中被翻的競態，正常流程下 `enabled=false` 不嘗試、不寫事件）；(b) `blackout`＝本機 wall clock 時分（`sched.local_hm(now)`＝`now.astimezone()` 的時分）落在 `sched_blackout_local` 任一區間：區間 `HH:MM-HH:MM`、**起點含、終點不含**、起＞迄＝跨午夜、多區間聯集、空清單＝無黑窗；(c) `quota-band`＝`quota_gate.read_quota(now)` 的 `band` 為 `prepare`、`halt` 或 `unmeasured` ⇒ 跳過（fail-closed）；`free`、`notice`、`converge` ⇒ 照跑，其中 `notice`、`converge` 的任務書必帶降載聲明（R152；`converge` 為主控裁決 D-RT-3 (a)）；(d) `other-driver`＝本 repo 逐字稿目錄（`events.transcript_dir(repo)`）最近 `sched_driver_quiet_minutes` 內有**對話記錄**（`transcript_activity.newest_conversation_at`，判記錄時間戳、不是檔案 mtime）：`now − newest < quiet`（嚴格小於）才成立，恰等於＝不成立；只有 `away_summary`、`cost-state` 之類非對話記錄使 mtime 更新＝不成立；(e) `dirty-tree`＝`git status --porcelain`（含未追蹤）除 **SI 自有路徑**（事件帳本、OBS 帳本、`SelfImproving_Proposals/**`）外非空；改名條目兩端皆判；(f) `run-open`＝折疊出**本運轉以外**的任何未關運轉（任何 trigger；Console (a) 運轉自己不算，與 R166 同字；D-QA-16）；(g) `spawn-failed`＝`resume_route.preflight_problem()` 非空、`claude` 不在 PATH（`shutil.which`）、或 SOP 任務書範本的結構判準不過（`patrolbrief.template_problems`，detail 以 `sop-template:` 起頭）。
 - **R144 同格同因一筆與 `due_at`**：嘗試時任一原因成立＝追加 `sched.skip{due_at＝本格起點, reason, detail}`；**同一格同一 `reason` 只寫一筆**（去重鍵＝(格, reason)）；同格內 `reason` 改變才再寫一筆（每格事件 ≤7 筆）；進入新格重新計；skip 不推進任何格線、不影響 `ran_this_cell`，下一心跳仍再試；有 skip＝巡邏活著，`overdue` 為 false（R145）；`detail` 為單行、≤120 code point（超長截斷、換行改空白）；寫入前 `events.validate` 過、`check` 的 `sched.events` 綠。**黑窗不造成永久跳過**：origin 落在黑窗內時，黑窗期間各心跳只記一筆 `blackout`，黑窗過後同格的下一心跳即可嘗試並開運轉。
 - **R145 `overdue`**：`overdue＝enabled ∧ 本格內既無 run.open(f) 也無 sched.skip ∧ now − cell_start > 2×sched_heartbeat_minutes`（嚴格大於；`cell_start` 起算整 2×心跳時 false，多一秒 true）；`enabled=false` ⇒ false；無事件帳本 ⇒ null；`now` 早於 origin ⇒ null；任何一個 skip（含 Console 載體消耗者，只要 `t` 落在本格內）使其 false。
 - **R146 Console 載體入帳**：(a) `sched set --carrier console --audit-ref <UUID>`：驗簽（金鑰缺＝`AUDIT-KEY-MISSING`，不降為 NE）、驗 R141 的 `body_guard`、同一 `audit_ref` 不得二次入帳（`AUDIT-REF-REUSED`）、於事件帳本寫入鎖內追加 `sched.set{enabled, period_minutes, by, carrier:"console", audit_ref, audit_sha256, key_id, decider}`（`reason` 有則帶）；`by` 取 `--by`（Console 入帳者：巡邏器＝`patrol`、主控手動＝`main`）；(b) `run-open --trigger a --carrier console --audit-ref <UUID> --coord console_audit/<UUID>.json --by console`：稽核檔 `kind=run-request`、驗簽與 `body_guard`；當下**無未關運轉**⇒ 追加 `run.open{trigger:"a", carrier:"console", audit_ref, audit_sha256, key_id, decider}`；**有未關運轉**⇒ 改追加 `sched.skip{reason:"run-open", carrier:"console", audit_ref, due_at, detail}`（請求被消耗、不卡在待入帳）；`due_at`＝排程啟用時為本格起點、停用時為稽核 `body` 外層 `time`（主控裁決 D-RT-3 (b)）；去重鍵＝`audit_ref`（同格內不同 `audit_ref` 各記一筆，與 R144 的 (格, reason) 去重互不取代）；(c) 兩動詞於 `AUTOSDD_UNATTENDED` 有設時一律 rc 1（R153 ③，不因 `AUTOSDD_SI_PATROL_RUN` 有設而放行，主控裁決 D-RT-1）；(d) 無金鑰的環境下兩動詞一律 rc 1 `AUDIT-KEY-MISSING`。
@@ -104,27 +104,28 @@
 
 *D. 巡邏、無人運轉與授權（`patrol`、`patrolrun`、`patrolbrief`、`unattended`；AC-SI-36-3～36-6、38、39）*
 
-- **R148 一次性心跳**：`patrol` 單次執行依序 **入帳（R149）→到期判定（R143、R144）→運轉（R150、R151）→推進（R155）** 後退出；套件不含 `while True`、`time.sleep`、`os.fork`、`signal.alarm`（沿 §9.4 全套件禁字樣，新檔照樣適用）；等待只用 `communicate(timeout)`／`subprocess.run(timeout=…)`；行程以 `apply_lock` 取 `<si>/locks/patrol.lock`（立即放棄、不等待）：取不到＝rc 0 並印「已有巡邏在跑」、零寫入；`AUTOSDD_SI_PATROL_OFF` 有設且非空（含字面 `0`）＝整次 no-op（rc 0、日誌一行、連入帳也不做、不取鎖）；`AUTOSDD_UNATTENDED` 有設＝rc 1 `UNATTENDED-REFUSED`、零寫入（先於一切，含 OFF 判斷之前）；未預期例外＝寫日誌並 rc 1、**不重試**；`--dry-run`＝零寫入（不寫事件、OBS 帳本、日誌以外的任何檔，不取鎖、不建任何家目錄子目錄、不 spawn、不入帳、不 commit）、印「此心跳會做什麼」；`--now` 缺 offset＝rc 3。
+- **R148 一次性心跳**：`patrol` 單次執行依序 **巡視進行中的無人運轉（步 0′，R167）→入帳（R149）→到期判定（R143、R144）→運轉（R150、R151；含本心跳新入帳的 Console (a) 運轉，R166）→推進（R155）** 後退出；心跳本身只做短動作（spawn 為脫離式、不等待無人主控），`patrol.lock` 於數分鐘內釋放；套件不含 `while True`、`time.sleep`、`os.fork`、`signal.alarm`（沿 §9.4 全套件禁字樣，新檔照樣適用）；等待只用 `communicate(timeout)`／`subprocess.run(timeout=…)`；行程以 `apply_lock` 取 `<si>/locks/patrol.lock`（立即放棄、不等待）：取不到＝rc 0 並印「已有巡邏在跑」、零寫入；`AUTOSDD_SI_PATROL_OFF` 有設且非空（含字面 `0`）＝整次 no-op（rc 0、日誌一行、連入帳也不做、不取鎖）；`AUTOSDD_UNATTENDED` 有設＝rc 1 `UNATTENDED-REFUSED`、零寫入（先於一切，含 OFF 判斷之前）；未預期例外＝寫日誌並 rc 1、**不重試**；`--dry-run`＝零寫入（不寫事件、OBS 帳本、日誌以外的任何檔，不取鎖、不建任何家目錄子目錄、不 spawn、不入帳、不 commit）、印「此心跳會做什麼」；`--now` 缺 offset＝rc 3。
 - **R149 入帳**：心跳第一步，對 `status.console_pending[]` 逐檔依稽核檔 `time` 升冪（同時刻依 `audit_ref` 位元組序；`sched-set` 先於 `run-request` 以 `time` 序自然成立）呼叫對應入帳路徑：`decide`→`decide --carrier console`、`obs-add`、`obs-close`、`sched-set`→`sched set --carrier console`、`run-request`→`run-open --trigger a --carrier console`；金鑰 `AUTOSDD_SI_AUDIT_KEY` 由包裝腳本自 `AgentConsole/.env` 的 `CONSOLE_SI_AUDIT_KEY` **第一把**讀入巡邏行程環境（只取該鍵、不 `source` 整檔）；入帳 rc 1＝保留稽核檔、日誌記一列 `obs-draft` 與拒收碼、不重試、不刪檔，同一 `audit_ref` 連續被拒不重複寫日誌（日誌行帶拒收碼，以 `audit_ref` 去重）；金鑰值不得出現在任何輸出、日誌、任務書、事件與 handback 目錄（以植入唯一字串的掃描判）。與互動視窗手動入帳互斥靠既有寫入鎖與「同一 `audit_ref` 不得二次入帳」。
-- **R150 運轉前置序**：到期判定全不成立後：`run-open --trigger f --coord <事件帳本路徑>:<origin 行號> --due-at <本格起點> --by patrol`（R147）→先自跑 `research --fetch --run <RUN>`（rc 1＝改跑 `research --skip --reason offline --note <一行>`；rc 2 照常繼續；有網路例外時同 rc 1 處置）→`scan`（候選只落巡邏日誌，**不入 OBS 帳本**）→生成任務目錄 `<si>/patrol/<RUN>/` 並寫 `brief.md`→spawn。`spawn-failed` 的預檢（R143 (g)）在 `run-open` **之前**，故預檢不過時不留下 `run.open`、只記一筆 `sched.skip(spawn-failed)`。
-- **R151 spawn 形態**：argv＝`resume_route.fresh_argv(claude, prompt, add_dir)` 逐元素相同（`claude -p <prompt> --permission-mode acceptEdits --settings <姿態檔> [<主控模型旗標>] --add-dir <任務目錄> <handback 目錄>`；姿態檔 `.claude/settings.unattended.json` 本 PRD 不改）；經 `runner.run_argv(argv, *, env, timeout, cwd)`（唯一子行程出口；`shell=False`、`communicate(timeout)`、逾時殺行程樹）；**環境＝明示建構、不繼承**：必含 `AUTOSDD_UNATTENDED=1`、`AUTOSDD_SI_PATROL_RUN=<RUN>`、`CLAUDE_CODE_SUBAGENT_MODEL`（取 `resume_route.spawn_env()`）、harness 背景等待上限（`unattended_authz.HARNESS_BG_WAIT_ENV`，值＝`RESUME_BG_WAIT_CEILING_SECONDS×1000`）；其餘只准下列白名單（主控裁決 D-RT-4）：`runner` 探針白名單 `PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`，加 `APPDATA`、`LOCALAPPDATA`、`CLAUDE_CONFIG_DIR`、`AUTOSDD_SI_DIR`（若父環境有設）；**絕不含** `AUTOSDD_SI_AUDIT_KEY`、任何名稱含 `KEY`、`TOKEN`、`SECRET`、`PASSWORD` 的變數、其他 `AUTOSDD_*`（含 `AUTOSDD_SI_PATROL_OFF`）；`timeout`＝`unattended_authz.RESUME_HARD_WALL_SECONDS`；`cwd`＝repo 根；任務目錄與 handback 目錄於 spawn 前存在。
-- **R152 任務書**：`patrolbrief` 自 SOP〈無人運轉任務書範本〉的程式碼圍欄取骨架（讀 `--repo` 內的 SOP 檔），把全部大寫占位符（`<RUN>`、`<HEAD_SHA>`、`<NOW_ISO>`、`<DUE_AT>`、`<BAND>`、`<DEGRADE_NOTE>`、`<BUDGET_MINUTES>`、`<EVENTS>`、`<RESEARCH_RESULT>`、`<SOURCE_FILES>`、`<SCAN_CANDIDATES>`、`<MAX_PROPOSALS>`、`<HANDBACK_PATH>`）填入現查值；小寫或中文占位符（`<來源 id>`、`<PROP>`、`<held-out 目錄>`、`<凍結者>`）原樣保留（是給無人主控的現場指令）；必含項：RUN、`trigger=f` 與到期時刻、偵測到的事件、研究結果與來源檔路徑、`scan` 候選、預算 `sched_run_budget_minutes`、角色序（8 步）、禁止事項、handback 四節標題逐字等於 `resume_route.HANDBACK_MARKERS`；額度帶為 `notice` 或 `converge` 時 `<DEGRADE_NOTE>` 為降載聲明、`free` 時不得有降載聲明；`template_problems(sop_text)` 回問題碼清單（空＝可用），缺必含項或圍欄不存在＝非空。
-- **R153 run-scoped 無人值守授權**（取代 P2 R70 的「一律拒收」與 P1 R27 動詞的「照常」；單一實作 `unattended.gate(verb, run, env)`，`decwrite.refuse_unattended` 與各動詞改呼叫它，套件內不再有第二處讀 `AUTOSDD_UNATTENDED`）：「`AUTOSDD_UNATTENDED` 有設」＝存在且值非空（含字面 `0`；空字串＝未設）。① **A 類**（`research`、`attr`、`attr-confirm`、`attr-reject`、`prop-new`、`prop-revise`、`heldout-freeze`、`card --issue`）：有設時須同時有 `AUTOSDD_SI_PATROL_RUN` 且其 `--run`（無 `--run` 的動詞取其所屬 PROP 的 `run`）等於它，否則 rc 1、碼 `UNATTENDED-REFUSED`、零寫入；② `decide` 有設時**只准** `--carrier console`（逐字稿載體一律 rc 1，不因 `PATROL_RUN` 放行）；③ **C 類**（`run-open`、`run-close`、`obs-add`、`obs-close`、`sched set`、`sched arm`、`sched disarm`、`sandbox`、`verify`、`promote`、`rollback`、`measure`、`patrol`）有設時一律 rc 1、零寫入（只由不帶 `AUTOSDD_UNATTENDED` 的巡邏器本體執行；`PATROL_RUN` 有設也不放行）；④ 未設 `AUTOSDD_UNATTENDED`＝所有動詞行為不變（`AUTOSDD_SI_PATROL_RUN` 單獨存在不改變任何動詞行為，含 `--run` 與其不相等者）；⑤ 唯讀動詞（`check`、`status`、`scan`、`card` 無 `--issue`、`export`、`capacity`、`issues`、`sched show`、`obs-add --dry-run`）不受此限。**行為放寬的負控**：A 類中 `heldout-freeze`、`card --issue` 原為一律拒收，放寬後仍須拒絕跨運轉（`--run`／所屬 PROP 的 `run` 不等於 `PATROL_RUN`）。誠實劃界：環境變數是行程自述，持有者可自設，偵測靠 `check` 的 `run.trigger_f_has_patrol_by` 與 git 歷史對 DEC 對帳，不是被擋。
+- **R150 運轉前置序**：(f) 到期判定全不成立後，或本心跳於步 1 入帳了 Console (a) 運轉（R166）後：(f) 先 `run-open --trigger f --coord <事件帳本路徑>:<origin 行號> --due-at <本格起點> --by patrol`（R147；(a) 已有 `run.open`）→先自跑 `research --fetch --run <RUN>`（rc 1＝改跑 `research --skip --reason offline --note <一行>`；rc 2 照常繼續；有網路例外時同 rc 1 處置）→`scan`（候選只落巡邏日誌，**不入 OBS 帳本**）→生成任務目錄 `<si>/patrol/<RUN>/` 並寫 `brief.md`→spawn（R151）。`spawn-failed` 的預檢（R143 (g)）在 (f) 的 `run-open` **之前**，故預檢不過時不留下 `run.open`、只記一筆 `sched.skip(spawn-failed)`；(a) 運轉的預檢不過只寫日誌（R166）。
+- **R151 spawn 形態（脫離式）**：argv＝`resume_route.fresh_argv(claude, prompt, add_dir)` 逐元素相同（`claude -p <prompt> --permission-mode acceptEdits --settings <姿態檔> [<主控模型旗標>] --add-dir <任務目錄> <handback 目錄>`；姿態檔 `.claude/settings.unattended.json` 本 PRD 不改）；經 `runner.spawn_detached(argv, *, env, cwd) -> pid`（R160、R167：新 session 或新 process group、不等待）；**環境＝明示建構、不繼承**：必含 `AUTOSDD_UNATTENDED=1`、`AUTOSDD_SI_PATROL_RUN=<RUN>`、`CLAUDE_CODE_SUBAGENT_MODEL`（取 `resume_route.spawn_env()`）、harness 背景等待上限（`unattended_authz.HARNESS_BG_WAIT_ENV`，值＝`RESUME_BG_WAIT_CEILING_SECONDS×1000`）；其餘只准下列白名單（主控裁決 D-RT-4）：`runner` 探針白名單 `PATH`、`SYSTEMROOT`、`TEMP`、`TMP`、`HOME`、`USERPROFILE`、`LANG`、`LC_ALL`，加 `APPDATA`、`LOCALAPPDATA`、`CLAUDE_CONFIG_DIR`、`AUTOSDD_SI_DIR`（若父環境有設）；**絕不含** `AUTOSDD_SI_AUDIT_KEY`、任何名稱含 `KEY`、`TOKEN`、`SECRET`、`PASSWORD` 的變數、其他 `AUTOSDD_*`（含 `AUTOSDD_SI_PATROL_OFF`）；牆鐘不由 spawn 的 timeout 管：巡邏器把 `{pid, started_at, wall_due_at}` 寫進 `spawn.json`（`wall_due_at＝started_at＋unattended_authz.RESUME_HARD_WALL_SECONDS`），逾牆由後續心跳的步 0′ 終止（R167）；`cwd`＝repo 根；任務目錄與 handback 目錄於 spawn 前存在。
+- **R152 任務書**：`patrolbrief` 自 SOP〈無人運轉任務書範本〉的程式碼圍欄取骨架（讀 `--repo` 內的 SOP 檔），把全部大寫占位符（`<RUN>`、`<HEAD_SHA>`、`<NOW_ISO>`、`<DUE_AT>`、`<BAND>`、`<DEGRADE_NOTE>`、`<BUDGET_MINUTES>`、`<EVENTS>`、`<RESEARCH_RESULT>`、`<SOURCE_FILES>`、`<SCAN_CANDIDATES>`、`<MAX_PROPOSALS>`、`<HANDBACK_PATH>`）填入現查值；小寫或中文占位符（`<來源 id>`、`<PROP>`、`<held-out 目錄>`、`<凍結者>`）原樣保留（是給無人主控的現場指令）；必含項：RUN、`trigger=f` 與到期時刻、偵測到的事件、研究結果與來源檔路徑、`scan` 候選、預算 `sched_run_budget_minutes`、角色序（8 步；步 2 為無人主控**手寫入 OBS 帳本**〔D-QA-12〕，手寫列不產生 `obs.add` 事件〔那是 Console 載體專用〕，`check` 以帳本列為準〔D-QA-13〕）、禁止事項、handback 四節標題逐字等於 `resume_route.HANDBACK_MARKERS`；額度帶為 `notice` 或 `converge` 時 `<DEGRADE_NOTE>` 為降載聲明、`free` 時不得有降載聲明；`template_problems(sop_text)` 回問題碼清單（空＝可用），缺必含項或圍欄不存在＝非空。
+- **R153 run-scoped 無人值守授權**（取代 P2 R70 的「一律拒收」與 P1 R27 動詞的「照常」；單一實作 `unattended.gate(verb, run, env)`，`decwrite.refuse_unattended` 與各動詞改呼叫它，套件內不再有第二處讀 `AUTOSDD_UNATTENDED`）：「`AUTOSDD_UNATTENDED` 有設」＝存在且值非空（含字面 `0`；空字串＝未設）。① **A 類**（`research`、`attr`、`attr-confirm`、`attr-reject`、`prop-new`、`prop-revise`、`heldout-freeze`、`card --issue`）：有設時須同時有 `AUTOSDD_SI_PATROL_RUN` 且其 `--run`（無 `--run` 的動詞取其所屬 PROP 的 `run`）等於它，否則 rc 1、碼 `UNATTENDED-REFUSED`、零寫入；② `decide` 有設時**只准** `--carrier console`（逐字稿載體一律 rc 1，不因 `PATROL_RUN` 放行；註（D-QA-9）：無人主控不持金鑰，此分支在無人主控實際上必為 `AUDIT-KEY-MISSING`，保留是為了讓規則對「巡邏器本體若誤設 `AUTOSDD_UNATTENDED`」仍 fail-closed）；③ **C 類**（`run-open`、`run-close`、`obs-add`、`obs-close`、`sched set`、`sched arm`、`sched disarm`、`sandbox`、`verify`、`promote`、`rollback`、`measure`、`patrol`）有設時一律 rc 1、零寫入（只由不帶 `AUTOSDD_UNATTENDED` 的巡邏器本體執行；`PATROL_RUN` 有設也不放行）；④ 未設 `AUTOSDD_UNATTENDED`＝所有動詞行為不變（`AUTOSDD_SI_PATROL_RUN` 單獨存在不改變任何動詞行為，含 `--run` 與其不相等者）；⑤ 唯讀動詞（`check`、`status`、`scan`、`card` 無 `--issue`、`export`、`capacity`、`issues`、`sched show`、`obs-add --dry-run`）不受此限。**行為放寬的負控**：A 類中 `heldout-freeze`、`card --issue` 原為一律拒收，放寬後仍須拒絕跨運轉（`--run`／所屬 PROP 的 `run` 不等於 `PATROL_RUN`）。誠實劃界：環境變數是行程自述，持有者可自設，偵測靠 `check` 的 `run.trigger_f_has_patrol_by` 與 git 歷史對 DEC 對帳，不是被擋。
 - **R154 DEC 只認 Console 載體與巡邏器的權限列**：巡邏器能做：到期判定、入帳 Console 稽核檔、`run-open(f)`、`research`、`scan`、spawn、`sandbox`／`verify`／`promote`／`measure`／`run-close`、本機 commit；不能做：任何 `decide`（入帳 Console 決定不是代決）、push、改 `non_evolvable_globs`、撰寫提案內容。靜態判準：`patrol*`、`schedarm`、`sched*` 原始碼對 CLI 動詞的呼叫集合 ⊆ 上述可做集合，不含 `decide --carrier transcript`、`git push`、`--no-verify`、`git add -A`／`git add .`。
-- **R155 核准後機械步驟與 commit**：(a) 前置恆為「已有人的 DEC」：本心跳入帳了 `dec(approve)`⇒`sandbox`→`verify`→`card --issue`（`verdict` 與 `reasons` 原樣進卡面，**巡邏器不改判**；`FAIL`／`NE` 的退回與否決是人的決定）；入帳了 `dec(promote)`⇒`promote`→commit→`measure`；入帳了 `dec(rollback)`⇒`rollback`→commit；無 DEC 的 PROP 零動作；`promote`／`rollback` 另受既有 `decverify` 回查（fail-closed，偽造的 DEC 被拒）；(b) 前置不成立（例如缺 `heldout.freeze`）⇒跳過該 PROP、日誌記原因、下一心跳再試，**不記 `sched.skip`**（那是到期專用）；(c) 本運轉各提案皆已離開待人工決定態（`rejected`／`handed-off`／`returned`／`promoted` 以後）⇒`run-close`（`outcomes` 記各提案狀態）；(d) **自動 commit**：`sched_auto_commit`（預設 true）且 promote 前工作樹除 SI 自有路徑外乾淨 ⇒ 只 `git add` 該 `app.promote` 的 `touched` 路徑與 SI 自有路徑、`git commit`（訊息含 PROP ID、DEC ID、APP ID）；**不 push**、不 `--no-verify`、不 `git add -A`；promote 前工作樹不乾淨⇒不 promote、記一筆 `sched.skip(dirty-tree)`（沿 R144 去重）；commit 失敗（含 git hook 拒絕）⇒日誌＋OBS 草稿列、不重試、不繞過 hook；`sched_auto_commit=false`⇒promote 照做、不 commit。
-- **R156 收尾與 handback**：spawn 返回（任何 rc、逾時或被殺）後以**事件帳本**為憑：該運轉無任何 `prop` 事件⇒巡邏器 `run-close`（`no_event:true`）；有 `prop`⇒運轉保持開啟、由 R155 於後續心跳推進；handback 缺四節標題任一⇒日誌記「handback 不完整」、不重 spawn；`resume_route.harness_bg_kill(stderr)` 為真⇒日誌記錄；逾時（`TimeoutExpired`）⇒同樣以事件帳本為憑。同日連續兩個 `no_event` 運轉不構成成效（`status.no_event` 仍只依偵測事件，AC-SI-03-2 不變）。
+- **R155 核准後機械步驟與 commit**：(a) 前置恆為「已有人的 DEC」：本心跳入帳了 `dec(approve)`⇒`sandbox`→`verify`→`card --issue`（`verdict` 與 `reasons` 原樣進卡面，**巡邏器不改判**；`FAIL`／`NE` 的退回與否決是人的決定）；入帳了 `dec(promote)`⇒`promote`→commit→`measure`；入帳了 `dec(rollback)`⇒`rollback`→commit；非 approve 的 `dec`（`reject`、`return`、`decline-promote`、`ack-handoff` 等）不觸發 `sandbox`；無 DEC 的 PROP 零動作；`promote`／`rollback` 另受既有 `decverify` 回查（fail-closed，偽造的 DEC 被拒）；(b) **推進路徑**（`sandbox`／`verify`／`promote`／`rollback`／`measure`／`run-close`）遇前置不成立（例如缺 `heldout.freeze`）或工作樹髒⇒**只寫巡邏日誌、不寫任何 `sched.skip`**（`sched.skip` 只在 (f) 到期嘗試寫，D-QA-3；下一心跳再試）；(c) 本運轉各提案皆已離開待人工決定態（`rejected`／`handed-off`／`returned`／`promoted` 以後）⇒`run-close`（`outcomes` 記各提案狀態）；(d) **自動 commit**：`sched_auto_commit`（預設 true）且 promote 前工作樹除 SI 自有路徑外乾淨 ⇒ 只 `git add` 該 `app.promote` 的 `touched` 路徑與 SI 自有路徑、`git commit`（訊息含 PROP ID、DEC ID、APP ID）；**不 push**、不 `--no-verify`、不 `git add -A`；promote 前工作樹不乾淨⇒不 promote、只寫日誌（排程啟用或停用皆然，無格線也不寫事件）；commit 失敗（含 git hook 拒絕）⇒日誌＋OBS 草稿列、不重試、不繞過 hook；`sched_auto_commit=false`⇒promote 照做、不 commit。
+- **R156 收尾與 handback**：收尾發生在**後續心跳的步 0′**（R167），不在 spawn 返回時（spawn 為脫離式）：以**事件帳本**為憑：該運轉無任何 `prop` 事件⇒巡邏器 `run-close`（`no_event:true`）；有 `prop`⇒運轉保持開啟、由 R155 於後續心跳推進；handback 缺四節標題任一⇒日誌記「handback 不完整」、不重 spawn；`resume_route.harness_bg_kill(stderr)` 為真⇒日誌記錄；子行程逾 `wall_due_at` 仍存活⇒殺行程樹後同樣以事件帳本為憑；同日連續兩個 `no_event` 運轉不構成成效（`status.no_event` 仍只依偵測事件，AC-SI-03-1 不變）。
 - **R157 日誌**：`<si>/patrol/patrol.log` 一行一筆，格式 `<ISO 帶 offset>␠step=<步驟>␠rc=<N>␠code=<碼或->␠<一行說明>`；任一步驟失敗只寫日誌、不中斷後續互不相依的步驟（入帳失敗不阻止到期判定）；日誌丟失不影響帳本；`status.schedule.overdue` 是「巡邏根本沒跑」的偵測面，日誌是「跑了但某步失敗」的偵測面。
 
 *E. `status`／`export`、參數、能力登記、OS 載具、SOP 與零退化*
 
 - **R158 `status.schedule`**：`status` 物件前 15 鍵次序與語意不變，其後附加末鍵 `schedule`（共 **16 鍵**；文字形態加一行 `schedule: enabled=… period=… cell=…/… overdue=…`）。`schedule`＝鍵序 `enabled`、`period_minutes`、`period_min`、`period_max`、`heartbeat_minutes`、`last_set`、`cell_start`、`cell_end`、`ran_this_cell`、`last_skip`、`overdue`、`armed`；`last_set`＝`{"at","by","carrier"}` 或 null（最近一筆 `sched.set`）；`last_skip`＝`{"at","reason","detail"}`（**本格**最近一筆 `sched.skip`，無＝null）；`period_min`、`period_max`、`heartbeat_minutes` 取自 `params.json`；停用（`enabled=false`）時 `cell_start`、`cell_end`＝null、`ran_this_cell`＝null、`overdue`＝false；無事件帳本時 `overdue`＝null；`armed`：`export` 與讀不到家目錄時恆為字串 `NOT-EVALUABLE：export-reads-no-home`（全形冒號，逐字），`si status` 在主機現查 OS 任務後為 `{"task":"AutoSDD_SI_Patrol","present":<布林>,"credential":"<NextRunTime 值或 launchctl 回讀摘要>"}`，查詢失敗為 `{"task":"AutoSDD_SI_Patrol","present":null,"credential":"NOT-EVALUABLE：<碼>"}`。`export --kind status` 的 `items[0]` 同 `status` 的 16 鍵（與 `status --json` 同一函式；差異只有 `capacity` 與 `armed` 的 export 固定 NE 值）；無事件帳本時 `ne` 另列 `{"field":"schedule.overdue","reason":"carrier-not-established"}`；`schema_rev` 維持 1。`status.console_pending[].kind` 值域加 `sched-set`、`run-request`（稽核檔存在而事件帳本尚無帶該 `audit_ref` 的 `sched.set`／`run.open`／`sched.skip`）。兩者唯讀、零寫入。
-- **R159 `params.json` 九個新鍵**（不可進化面；`PARAM_SPECS` 與 `params.json` 同 commit 由 Developer 加入；共 **41 鍵**）：`sched_heartbeat_minutes`＝15（正整數）、`sched_period_minutes_default`＝1440、`sched_period_minutes_min`＝60、`sched_period_minutes_max`＝10080（整數；`min ≤ default ≤ max`；`heartbeat ≤ min`）、`sched_run_budget_minutes`＝90（正整數；`≤ unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS／60`，現值上限 240）、`sched_blackout_local`＝`["21:00-00:30"]`（字串陣列，每項 `HH:MM-HH:MM`，起＝迄為違規，空陣列合法；須涵蓋 `scheduled_task_expectations.json` 每一個 `expected_trigger_time`）、`sched_driver_quiet_minutes`＝30（正整數）、`sched_auto_commit`＝true（布林）、`sched_auto_push`＝false（布林；**只准 false**，true＝`PARAM-RANGE`，PRD §9.7 #88）；缺、型別或範圍不符＝`PARAM-MISSING`／`PARAM-TYPE`／`PARAM-RANGE`（`params.keys` FAIL；布林當整數、整數當布林皆 `PARAM-TYPE`）；跨鍵違規（`min>default`、`default>max`、`heartbeat>min`、預算超界）＝`PARAM-RANGE` 並點名鍵；改鍵使指紋 manifest 部分改變（`metrics.md` 與 `metrics_rev` 不改）；`docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md` 的 `params.json` 雜湊與位元組數、指紋、`CHECK_RULES_REV` 三列須同 commit 更新（D10）。
-- **R160 能力登記、LOC 與 `runner.run_argv`**：`CAPABILITY` 由 51 鍵增為 **59 鍵（43 `ro`／9 `rw`／2 `net`／5 `exec`）**：新增 `sched`、`unattended`、`patrolbrief`、`schedcheck`（`ro`）、`schedwrite`（`rw`）、`patrol`、`patrolrun`、`schedarm`（`exec`）；**可選 `evspec.py`**（`ro`；僅當 `events.py` 斷言行將超過 380 時，Developer 把 `_SPEC` 整段拆出，擇一、不得並存）⇒60 鍵（44／9／2／5）；判準沿 P2 R105：`check`／`status`／`scan`／`export`／`card` 的相對 import 閉包 ⊆ `ro`（故 `sched`、`schedcheck`、`unattended` 必為 `ro` 且不 import `runner`、`schedwrite`）；任何相對 import `runner` 的檔須登記 `exec`；整個套件除 `git.py` 與 `runner.py` 外不得出現 `subprocess` 字樣；`runner.py` 新增 `run_argv(argv, *, env, timeout, cwd)`：`shell=False`、`communicate(timeout)`、逾時殺行程樹（平台守衛不變）、環境**只用呼叫端明示的 `env`**（不讀 `os.environ`、不 `dict(os.environ)`、不 `os.environ.copy()`），探針入口 `run_probe` 的環境白名單與行為不變；全套件禁字樣（`time.sleep`、`while True`、`os.fork`、`signal.alarm`）；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`.claude/settings.unattended.json` 本棒不改（只消費）；每檔斷言行 ≤400（`writeverbs.py` 現 382、`events.py` 現 357、`decwrite.py` 現約 348；`fold.py` 不得再加）、入口 `tools/selfimproving.py` ≤750。
-- **R161 OS 任務、包裝腳本與 `schedarm`**：(a) **任務設定集**（Windows）：名稱 `AutoSDD_SI_Patrol`；觸發＝每日 00:00 起每 `sched_heartbeat_minutes` 分鐘重複、持續一天；`StartWhenAvailable=true`、`WakeToRun=true`、`DisallowStartIfOnBatteries=false`、`StopIfGoingOnBatteries=false`、`ExecutionTimeLimit=PT5H`（> 硬牆 4.5 小時）、`MultipleInstancesPolicy=IgnoreNew`、`LogonType=S4U`；Action＝`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo>\tools\si_patrol_tick.ps1`；安裝器整組三支（`install`／`-Uninstall`／`-Status`／`-WhatIf` 骨架不變，`-Uninstall` 仍移除整組）；(b) **三層鎖的連動**（`TestScheduledTaskExpectationsSsot`）：任務集合逐字相等（其解析任務名的判準須改為認得第三支的變數名）、每項期望值↔套用手段（**逐任務、逐值**：`StopExisting`↔COM fixup `MultipleInstances = 3`〔僅 nightly、smoke〕，`IgnoreNew`↔模組參數 `-MultipleInstances IgnoreNew`〔僅 patrol〕；不再只對「全檔存在某字面」）、`PT<N>H` 與 `New-TimeSpan -Hours N` 逐任務對齊（nightly、smoke＝4、patrol＝5）；期望表對 `AutoSDD_SI_Patrol` 的 `expected` 七鍵與其他任務同鍵集、`expected_trigger_time` **省略**（`check_scheduled_task_drift.load_trigger_expectations` 已容忍缺鍵，不改該檔）、`why_each` 的 `MultipleInstancesPolicy` 與 `ExecutionTimeLimit` 補「逐任務」說明；既有 `Show-TaskDetail` 的「expected PT4H」「expected StopExisting」字樣改為逐任務期望；(c) **包裝腳本** `tools/si_patrol_tick.ps1`：行尾 CRLF、PS 5.1 語意（無 PS 6+ 專屬變數）、只自 `AgentConsole/.env` 取 `CONSOLE_SI_AUDIT_KEY` 的第一把（逐行解析，不 `source`／點號載入／`Invoke-Expression` 整檔）、只設進行程作用域環境變數 `AUTOSDD_SI_AUDIT_KEY`、值不出現在任何輸出或日誌、呼叫 `.venv\Scripts\python.exe tools\selfimproving.py patrol`、日誌輪替；(d) **`schedarm`**：`sched arm` 經 `runner.run_argv`：Windows＝呼叫安裝器（`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <installer>`；elevation 不足＝印指令並 rc 1）、macOS＝自寫 launchd plist（`plistlib`；`Label` 為 `AutoSDD_SI_Patrol`、`StartInterval`＝心跳分鐘×60、`RunAtLoad=false`、`StandardOutPath`／`StandardErrorPath` 指向家目錄痕跡目錄）並 `launchctl`；**憑證是值**：Windows 為 `NextRunTime` 非空字串、macOS 為 `launchctl` rc 與 plist 回讀；取不到憑證＝rc 1、輸出不得含「已排程」「armed」字樣；`sched disarm` 移除後須驗證任務真的不見（Windows 查無、macOS `launchctl` rc 113）才 rc 0；`schedarm` 原始碼對單平台外部執行檔 `launchctl`、`powershell.exe` 的 argv 字面須在平台守衛作用域內（不新增 `_FOREIGN_EXE_ARGV_DEBT` 與 `_FOREIGN_API_SCOPE_DEBT` 的 selfimproving 條目）；(e) OS 任務與啟用旗標**相互獨立**：`sched set` 不呼叫 OS、`sched arm`／`disarm` 不寫事件、`overdue` 只由事件折出。
+- **R159 `params.json` 九個新鍵**（不可進化面；`PARAM_SPECS` 與 `params.json` 同 commit 由 Developer 加入；共 **41 鍵**）：`sched_heartbeat_minutes`＝15（正整數）、`sched_period_minutes_default`＝1440、`sched_period_minutes_min`＝60、`sched_period_minutes_max`＝10080（整數；`min ≤ default ≤ max`；`heartbeat ≤ min`）、`sched_run_budget_minutes`＝90（正整數；`≤ unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS／60`，現值上限 240）、`sched_blackout_local`＝`["21:00-01:30"]`（D-QA-8；字串陣列，每項 `HH:MM-HH:MM`，起＝迄為違規，空陣列合法；須涵蓋 `scheduled_task_expectations.json` 每一個 `expected_trigger_time`；初值 WHY：涵蓋 smoke 21:30 與 nightly 22:30 的觸發時刻加常態歷時（5～8 分鐘）的十倍餘裕，`PT4H` 是砍掉凍住實例的上限、不是歷時；黑窗只約束巡邏的**嘗試時刻**，不保證與長跑任務零重疊，後段重疊由額度帶與 `dirty-tree` 兜）、`sched_driver_quiet_minutes`＝30（正整數）、`sched_auto_commit`＝true（布林）、`sched_auto_push`＝false（布林；**只准 false**，true＝`PARAM-RANGE`，PRD §9.7 #88）；缺、型別或範圍不符＝`PARAM-MISSING`／`PARAM-TYPE`／`PARAM-RANGE`（`params.keys` FAIL；布林當整數、整數當布林皆 `PARAM-TYPE`）；跨鍵違規（`min>default`、`default>max`、`heartbeat>min`、預算超界）＝`PARAM-RANGE` 並點名鍵；改鍵使指紋 manifest 部分改變（`metrics.md` 與 `metrics_rev` 不改）；`docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md` 的 `params.json` 雜湊與位元組數、指紋、`CHECK_RULES_REV` 三列須同 commit 更新（D10）。
+- **R160 能力登記、LOC 與 `runner.run_argv`**：`CAPABILITY` 由 51 鍵增為 **59 鍵（43 `ro`／9 `rw`／2 `net`／5 `exec`）**：新增 `sched`、`unattended`、`patrolbrief`、`schedcheck`（`ro`）、`schedwrite`（`rw`）、`patrol`、`patrolrun`、`schedarm`（`exec`）；**可選 `evspec.py`**（`ro`；僅當 `events.py` 斷言行將超過 380 時，Developer 把 `_SPEC` 整段拆出，擇一、不得並存）⇒60 鍵（44／9／2／5）；判準沿 P2 R105：`check`／`status`／`scan`／`export`／`card` 的相對 import 閉包 ⊆ `ro`（故 `sched`、`schedcheck`、`unattended` 必為 `ro` 且不 import `runner`、`schedwrite`）；任何相對 import `runner` 的檔須登記 `exec`；整個套件除 `git.py` 與 `runner.py` 外不得出現 `subprocess` 字樣；`runner.py` 新增 `run_argv(argv, *, env, timeout, cwd)`：`shell=False`、`communicate(timeout)`、逾時殺行程樹（平台守衛不變）、環境**只用呼叫端明示的 `env`**（不讀 `os.environ`、不 `dict(os.environ)`、不 `os.environ.copy()`），`spawn_detached(argv, *, env, cwd) -> int`（脫離式啟動：新 session 或新 process group、`shell=False`、不等待、回 pid；D-QA-10）同守這些不變量（環境只用明示 `env`）；探針入口 `run_probe` 的環境白名單與行為不變；全套件禁字樣（`time.sleep`、`while True`、`os.fork`、`signal.alarm`）；`capability_problems` 的 `FORBIDDEN` 清單**不動**（其中 `schtasks`、`launchctl`、`crontab`、`Register-ScheduledTask`、`ScheduleWakeup`、`CronCreate`、`apscheduler`、`threading.Timer`、`sched.scheduler`、`daemon=True` 仍是 P0 設計鎖），另加逐檔豁免表 `FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}`（D-QA-1：只豁免 OS 排程器字面、不豁免 `time.sleep`、`while True`、`os.fork`、`signal.alarm` 等其餘條；同字樣出現在 `schedarm.py` 以外任一檔仍紅；WHY：ADR-SI-14 的 OS 載具封裝須住在 `schedarm.py`，其餘守衛不削弱）；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`.claude/settings.unattended.json` 本棒不改（只消費）；每檔斷言行 ≤400（`writeverbs.py` 現 382、`events.py` 現 357、`decwrite.py` 現約 348；`fold.py` 不得再加）、入口 `tools/selfimproving.py` ≤750。
+- **R161 OS 任務、包裝腳本與 `schedarm`**：(a) **任務設定集**（Windows）：名稱 `AutoSDD_SI_Patrol`；觸發＝每日 00:00 起每 `sched_heartbeat_minutes` 分鐘重複、持續一天；`StartWhenAvailable=true`、`WakeToRun=false`（D-QA-7：心跳不喚醒睡眠機器，醒來由 `StartWhenAvailable` 補跑一次；睡著的機器不巡邏為已知邊界、與 macOS 一致；nightly、smoke 維持 `WakeToRun=true`）、`DisallowStartIfOnBatteries=false`、`StopIfGoingOnBatteries=false`、`ExecutionTimeLimit=PT1H`（D-QA-10：心跳自身的上限；無人運轉的牆鐘由 `spawn.json` 管，R167）、`MultipleInstancesPolicy=IgnoreNew`、`LogonType=S4U`；Action＝`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <repo>\tools\si_patrol_tick.ps1`；安裝器整組三支（`install`／`-Uninstall`／`-Status`／`-WhatIf` 骨架不變，`-Uninstall` 仍移除整組）；(b) **三層鎖的連動**（`TestScheduledTaskExpectationsSsot`）：任務集合逐字相等（其解析任務名的判準須改為認得第三支的變數名）、每項期望值↔套用手段（**逐任務、逐值**：`WakeToRun` 為 true 者↔`-WakeToRun`（nightly、smoke）、為 false 者↔不帶該參數（patrol）；`StopExisting`↔COM fixup `MultipleInstances = 3`〔僅 nightly、smoke〕，`IgnoreNew`↔模組參數 `-MultipleInstances IgnoreNew`〔僅 patrol〕；不再只對「全檔存在某字面」）、`PT<N>H` 與 `New-TimeSpan -Hours N` 逐任務對齊（nightly、smoke＝4、patrol＝1）；期望表對 `AutoSDD_SI_Patrol` 的 `expected` 七鍵與其他任務同鍵集、`expected_trigger_time` **省略**（`check_scheduled_task_drift.load_trigger_expectations` 已容忍缺鍵，不改該檔）、`why_each` 的 `MultipleInstancesPolicy` 與 `ExecutionTimeLimit` 補「逐任務」說明；既有 `Show-TaskDetail` 的「expected PT4H」「expected StopExisting」字樣改為逐任務期望；(c) **包裝腳本** `tools/si_patrol_tick.ps1`：行尾 CRLF、PS 5.1 語意（無 PS 6+ 專屬變數）、只自 `AgentConsole/.env` 取 `CONSOLE_SI_AUDIT_KEY` 的第一把（逐行解析，不 `source`／點號載入／`Invoke-Expression` 整檔）、只設進行程作用域環境變數 `AUTOSDD_SI_AUDIT_KEY`、值不出現在任何輸出或日誌、呼叫 `.venv\Scripts\python.exe tools\selfimproving.py patrol`、日誌輪替；(d) **`schedarm`**：`sched arm` 經 `runner.run_argv`：Windows＝呼叫安裝器（`powershell.exe -NoProfile -ExecutionPolicy Bypass -File <installer>`；elevation 不足＝印指令並 rc 1）、macOS＝自寫 launchd plist（`plistlib`；`Label` 為 `AutoSDD_SI_Patrol`、`StartInterval`＝心跳分鐘×60、`RunAtLoad=false`、`StandardOutPath`／`StandardErrorPath` 指向家目錄痕跡目錄）並 `launchctl`；**憑證是值**：Windows 為 `NextRunTime` 非空字串、macOS 為 `launchctl` rc 與 plist 回讀；取不到憑證＝rc 1、輸出不得含「已排程」「armed」字樣；`sched disarm` 移除後須驗證任務真的不見（Windows 查無、macOS `launchctl` rc 113）才 rc 0；`schedarm` 原始碼對單平台外部執行檔 `powershell.exe`、`schtasks`、`launchctl` 的 argv 字面須住在 `sys.platform` 守衛分支內（根 `CLAUDE.md` 鐵律三 `TestForeignExecutableArgvIsGuarded` 五種罩法之一；D-QA-1），`launchctl`、`schtasks`、`Register-ScheduledTask` 字面僅 `schedarm.py` 可有（`FORBIDDEN_EXEMPT`，R160）（不新增 `_FOREIGN_EXE_ARGV_DEBT` 與 `_FOREIGN_API_SCOPE_DEBT` 的 selfimproving 條目）；(e) OS 任務與啟用旗標**相互獨立**：`sched set` 不呼叫 OS、`sched arm`／`disarm` 不寫事件、`overdue` 只由事件折出。
 - **R162 SOP 條文**：SOP 已含〈巡邏與無人運轉（P4）〉（子節〈安裝與憑證〉〈每心跳做什麼〉〈停用與逃生口〉〈日誌與逾期處置〉）、〈無人運轉任務書範本〉、〈啟動條件〉第六類、〈P2 動詞〉序列條文的 run-scoped 改寫；`sop_p4_problems(text)`（§5.6）判其必含項（逐項刪去、注入、移入程式碼圍欄的自證沿 P3 R133）：〈啟動條件〉含第六類「排程巡邏到期」與字面 `日曆格`；〈P2 動詞〉序列條文**不得再含**「無人值守：有設時寫入動詞一律 rc 1」類的過度概括、須含 `run-scoped`（或等價字面 `AUTOSDD_SI_PATROL_RUN`）；〈每心跳做什麼〉的表含「入帳」「到期判定」「運轉」「推進」四列與七種跳過的全部字面；〈停用與逃生口〉含 `sched set --enabled false`、`sched disarm`、`AUTOSDD_SI_PATROL_OFF`；〈日誌與逾期處置〉含 `overdue` 與「不得手補 `sched.skip`」；〈無人運轉任務書範本〉的圍欄含 R152 的全部大寫占位符與四節 handback 標題；〈擷取者〉〈歸因者〉〈提案者〉〈研究者〉四節仍不得含 P3 R133 (e) 的禁出現片段。
 - **R163 零退化與既有測試的同步站點**：P4 夾具不改任何 P0～P3 或議題中心夾具的既有呼叫形態；既有 AT 全綠，其斷言值或預設值**只准在 §2.5 的同步表所列站點改**（每項標「檔、函式名」；行號僅供參考，以函式名為準）；本表外若有既有函式因鍵數、項數、動詞數、預設欄位表變動而紅，Developer 以 ⚖ 回報、不就地改斷言（由主控裁決後補入本表）。
 - **R164 AT 錨定與範圍**：本檔 AT 的 `-k` 一律為錨定名；檢查函式 `parse_at_headers`、`anchor_problems`、`collect_nodes` 沿用 `test_selfimproving_p2_meta.py` 的同名函式（匯入、不複製）。Developer 棒只新增或修改 §5.7 的集合；不改 `.claude/**`、凍結檔（PRD、SOP、P0～P3 TCS）、`autoclaude/` 引擎原始碼、`AgentConsole/**`、`tools/lib/{schedule_backend,resume_route,unattended_authz,model_roles}.py`、`.github/**`。
-- **R165 測試 seam（建議名）**：見 §5.6；全部時間、額度、對話時刻、git、`claude`、OS 任務一律注入或以替身取代，測試不讀系統時鐘、不連網、不註冊真 OS 任務。
+- **R166 Console 載體 (a) 運轉的執行與收尾**（D-QA-2；AC-SI-38-8）：巡邏心跳於步 1 入帳 `run-request` 得到 `run.open{trigger:"a", carrier:"console"}` 後，於**同一心跳**對該運轉走與 (f) 相同的運轉前置序（R150：`research --fetch`→`scan`→任務書→spawn；R151、R152 同形，任務書的 trigger 行寫 `trigger=a（Console 立即啟動）`）；跳過判準沿 R143 的 ②～⑦（`blackout`、`quota-band`、`other-driver`、`dirty-tree`、`run-open`〔另一未關運轉，不含本運轉自己〕、`spawn-failed`），**不看啟用旗標、不受格線限制**；被擋時**只寫巡邏日誌、不寫 `sched.skip`**，運轉保持開啟，下一心跳再試（不重新入帳，運轉已存在）；spawn 後的收尾同 R156（無 `prop`⇒`run-close(no_event)`）；既有未關 (a) 運轉（任何來源）使 (f) 到期記 `sched.skip(run-open)` 的規則不變（R143 (f)；Console 看得到 `open_runs` 與 `last_skip.reason`，不是靜默）。
+- **R167 脫離式 spawn 與步 0′ 巡視**（D-QA-10）：(a) spawn 經 `runner.spawn_detached`（不等待；`shell=False`；環境只用明示 `env`）；旗標（D-QA-14）：Windows 的 `creationflags`＝`CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`（三者各以 `getattr(subprocess, ..., 0)` 兜底），使子行程脫離排程任務的 job（任務實例結束不連帶終止它）；POSIX 為 `start_new_session=True`；**fail-closed**：breakaway 被拒（`OSError`／`PermissionError`，例如任務 job 不允許）⇒不 spawn、視同預檢失敗——(f) 記一筆 `sched.skip(spawn-failed)`（`detail` 以 `breakaway-denied` 起頭，沿 R144 去重）、(a) 只寫巡邏日誌不寫事件，兩者皆保持運轉開啟之外不留半套狀態（無 `spawn.json`），下一心跳再試；巡邏器於 spawn 後把 `{pid, started_at, wall_due_at}`（皆帶 offset 的 ISO）寫入 `<si>/patrol/<RUN>/spawn.json`（UTF-8、LF）後**立即返回**，`patrol.lock` 隨即釋放；(b) 每心跳**步 0′「巡視進行中的無人運轉」**（取鎖之後、入帳之前）：對每個 `spawn.json` 尚未結案的運轉：子行程存活（以 pid 與啟動時刻核對，pid 被重用者視為已結束）且未超 `wall_due_at`⇒不動；超過 `wall_due_at`⇒殺行程樹（`runner` 既有殺樹）後依事件收尾；已結束⇒依事件收尾（R156）；收尾後 `spawn.json` 補寫 `closed_at`；(c) **同一時間至多一個進行中的無人運轉**：存在存活且未超牆的 `spawn.json` 時，其他運轉的 spawn 延後（只寫日誌，不 spawn；(f) 到期仍依 R143 (f) 因該運轉未關而記 `run-open` skip）；(d) `ExecutionTimeLimit` 為心跳自身上限（R161），無人運轉的牆鐘只由 `spawn.json` 管。- **R165 測試 seam（建議名）**：見 §5.6；全部時間、額度、對話時刻、git、`claude`、OS 任務一律注入或以替身取代，測試不讀系統時鐘、不連網、不註冊真 OS 任務。
 
 **〈P4 判定碼表（`check` 的 P4 追加；P0～P3 的 33 項及其碼不變）〉**
 
@@ -159,13 +160,14 @@
 | US-403 | 作為掌舵者，我要在 Console 啟停排程、改週期、立即啟動一次演化，根層負責驗簽入帳 | AC-SI-37-1 | （PRD AC-SI-37-1；R141）Given 稽核檔 `sched-set`／`run-request` When CLI 驗證 Then 形狀、界、字串規則、不帶卡面 digest、Console 黃金檔 G6～G9 |
 | US-403 | 同上 | AC-SI-37-2 | （PRD AC-SI-37-2；R146）Given 稽核檔 When `sched set --carrier console`／`run-open --trigger a --carrier console` Then 驗簽、驗界、鎖內追加、不得二次入帳；已有未關運轉改記 `sched.skip` |
 | US-403 | 同上 | AC-SI-37-4 | （PRD AC-SI-37-4；Console UI 控件，**本檔無 AT**，由 Console TCS 判；根層半契約由 AC-SI-37-3 的 AT 釘住）Given `/self-improving` When ADMIN 開啟 Then 具名欄位、三個動作、確認對話框與收據 |
-| US-404 | 作為掌舵者，我要無人運轉的每一條寫入都被授權邊界限住，核准與晉升的決定永遠只有我能做 | AC-SI-38-1 | （PRD AC-SI-38-1；R150、R151）Given 到期且全不跳過 When spawn Then argv、明示環境、硬牆、任務目錄、`research`／`scan` 前置 |
+| US-404 | 作為掌舵者，我要無人運轉的每一條寫入都被授權邊界限住，核准與晉升的決定永遠只有我能做 | AC-SI-38-1 | （PRD AC-SI-38-1；R150、R151）Given 到期的 (f) 或本心跳入帳的 Console (a) 運轉且全不跳過 When 脫離式 spawn Then argv、明示環境、`spawn.json` 牆鐘、任務目錄、`research`／`scan` 前置 |
 | US-404 | 同上 | AC-SI-38-2 | （PRD AC-SI-38-2；R152）Given 任務書生成 When 檢視 Then 自 SOP 骨架填占位符，必含項齊全 |
 | US-404 | 同上 | AC-SI-38-3 | （PRD AC-SI-38-3；R153）Given `AUTOSDD_UNATTENDED` 有設 When 寫入動詞 Then A／B／C 類真值表、跨運轉拒收、未設時不變 |
 | US-404 | 同上 | AC-SI-38-4 | （PRD AC-SI-38-4；R154、R155）Given 無人運轉 When 出現核准需求 Then 只到 `card --issue` 與 handback，巡邏器不執行逐字稿載體的 `decide` |
 | US-404 | 同上 | AC-SI-38-5 | （PRD AC-SI-38-5；R155 (d)）Given promote 成功 When `sched_auto_commit` Then 只 add 白名單、不 push、不繞 hook；髒樹不 promote |
-| US-404 | 同上 | AC-SI-38-6 | （PRD AC-SI-38-6；R156）Given spawn 返回 When 收尾 Then 以事件帳本為憑：零提案 `run-close`、有提案保持開啟、handback 不完整只記日誌 |
+| US-404 | 同上 | AC-SI-38-6 | （PRD AC-SI-38-6；R156）Given 後續心跳的步 0′ 巡視到運轉結束或逾牆 When 收尾 Then 以事件帳本為憑：零提案 `run-close`、有提案保持開啟、handback 不完整只記日誌 |
 | US-404 | 同上 | AC-SI-38-7 | （PRD AC-SI-38-7；R154）Given 巡邏器權限列 When 檢視 Then 能做與不能做的拒收路徑 |
+| US-404 | 同上 | AC-SI-38-8 | （PRD AC-SI-38-8；R166，D-QA-2）Given 巡邏心跳入帳了 Console `run-request` 得到的 `run.open(a)` When 同一心跳 Then 走與 (f) 相同的運轉前置序與 spawn，跳過判準沿 ②～⑦、不看啟用旗標、被擋只寫日誌不記 skip，收尾同 AC-SI-38-6 |
 | US-405 | 作為掌舵者，我要我在 Console 做的決定被自動入帳並推進到下一個機械步驟，不必守在主機前 | AC-SI-39-1 | （PRD AC-SI-39-1；R149）Given `console_pending[]` 非空 When 心跳開始 Then 逐檔依 kind 入帳、依 `time` 升冪、金鑰不洩漏 |
 | US-405 | 同上 | AC-SI-39-2 | （PRD AC-SI-39-2；R149）Given 入帳 rc 1 When 處理 Then 保留稽核檔、日誌一列 `obs-draft`、不重試、以 `audit_ref` 去重 |
 | US-405 | 同上 | AC-SI-39-3 | （PRD AC-SI-39-3；R155）Given 入帳了 approve／promote／rollback When 同心跳 Then `sandbox`→`verify`→`card --issue`、`promote`→commit→`measure`、`rollback`、`run-close` |
@@ -182,7 +184,7 @@
 
 > 編譯相容提醒：FRD-lite 表的第一欄用 US ID；本檔除 §1 外沒有任何第一欄以 AC 起頭的表格，AT ID 於 §1 與 §2 的宣告位置之外只出現在說明性文字與表格的非第一欄。**本檔任何一行不寫出測試摘要字樣與數字同行的敘述**（`tools/check_pytest_baseline_sites.py` 的發現面），計數只放表格欄位或寫中文；測試向量與範例不含金鑰形字面，範例識別碼用 `pid(n)`、`oid(n)` 等執行期組出的形（不寫字面的 `OBS-SI-` 或 `PROP-SI-` 接數字）。
 
-**INVEST 自檢**：獨立（只依賴既有 `tools/lib/selfimproving/` 的 P0～P3 套件、`lib.apply_lock`、`lib.quota_gate`、`lib.transcript_activity`、`lib.resume_route`、`lib.unattended_authz`、git）、可協商（旗標細部、碼名、日誌格式、`run-open(f)` 的座標形態由本檔定義並列 §7.1）、有價值（PRD §8.1 P4 出口 (a)～(f) 的機制面全可由 AT 判定，真實面由 V30～V35 如實標記）、可估計（8 支新套件模組＋`runner.run_argv`＋入口 2 動詞＋既有檔小幅增量＋3 個新測試檔＋1 個新夾具模組＋既有測試的 R163 同步站點）、小（P4 根層半；Console 半與真機運轉不在本檔）、可測（AT 數見 §1；全部用 tmp 合成 repo、注入 `now`、替身 `claude`、替身 OS 後端，不碰真帳本、不連外網）。
+**INVEST 自檢**：獨立（只依賴既有 `tools/lib/selfimproving/` 的 P0～P3 套件、`lib.apply_lock`、`lib.quota_gate`、`lib.transcript_activity`、`lib.resume_route`、`lib.unattended_authz`、git）、可協商（旗標細部、碼名、日誌格式、`run-open(f)` 的座標形態由本檔定義並列 §7.1）、有價值（PRD §8.1 P4 出口 (a)～(f) 的機制面全可由 AT 判定，真實面由 V30～V35 如實標記）、可估計（8 支新套件模組＋`runner.run_argv`＋入口 2 動詞＋既有檔小幅增量＋4 個新測試檔＋1 個新夾具模組＋既有測試的 R163 同步站點）、小（P4 根層半；Console 半與真機運轉不在本檔）、可測（AT 數見 §1；全部用 tmp 合成 repo、注入 `now`、替身 `claude`、替身 OS 後端，不碰真帳本、不連外網）。
 
 **非功能需求（量化）**
 
@@ -196,10 +198,10 @@
 | NFR-P4-6 | 根層護欄相容：沿 P3 NFR-P3-4（不新增 skip／xfail、`encoding="utf-8"`、子行程與執行緒夾具必回收）；每個新測試檔不超過 35 個 AT | 根層 unittest 閘門；SCG-4 |
 | NFR-P4-7 | 測試 hermetic：tmp 合成 repo；`AUTOSDD_SI_DIR`、`CLAUDE_CONFIG_DIR`、`HOME` 指向 tmp；替身 `claude`（記錄 argv 與 env 的假腳本）、替身 `runner.run_argv`、注入的額度與對話時刻；不註冊真 OS 任務、不讀真 `AgentConsole/.env`、不連外網；合成編號於執行期組出 | V20 的字面 ID 掃描與既有鎖 |
 | NFR-P4-8 | 範圍守衛：實作者只動 §5.7 的集合；重釘根層棘輪、compat-ci `paths` 由主控收尾（**實作輪收尾步驟、不是設計缺口**）；`schedule_backend.py`、`resume_route.py`、`unattended_authz.py`、`.claude/**` 零改動 | AT-440-8-1 |
-| NFR-P4-9 | CI 與棘輪：新增 3 個測試檔與 1 個夾具模組，估新增 `tools/` 斷言行超過護欄層單輪淨額上限，須由主控以具名一次性例外重釘；compat-ci `paths` 現有 `tools/tests/**`、`tools/lib/selfimproving/**` 與 `docs/03_testing/contracts/TCS-SelfImproving-*.md` 等 glob 預期已涵蓋，實作輪現查；每個新測試檔在 CI 上小於 300 秒；全套件 xdist 多 CPU 模式不變（序列例外不新增） | V20；根層全套 unittest |
-| NFR-P4-10 | **Developer 交卷前閘門清單**（缺一即不得交卷；輸出逐字貼入）：(1) 本檔 AT 與 P0～P3、議題中心全部 AT 全綠（P4 三個新測試檔、`test_selfimproving_capability.py`、`test_install_windows_nightly.py`、`test_selfimproving_p3_meta.py`、`test_selfimproving_p2_meta.py` 及其餘既有 SI 測試檔，`-q -p no:xdist -o addopts=`）；(2) `python tools/selfimproving.py check` 對真 repo rc 0（35 項）；(3) `ruff check`；(4) `check_loc_budget.py --json` rc 0；(5) `python tools/sync_onboarding_baselines.py --check-snapshot` rc 0；(6) 官方 `python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`）rc 0；(7) 護欄層重釘做到 `--print-guard-lines` 淨差額 0（主控）；(8) 文件引用子專案檔案一律寫 monorepo 根起算路徑；(9) 交卷含〈流程摩擦〉節；(10) 新增 `tools/tests/` 檔逐項過根層鎖（檔數下限、E501 東亞寬度、腳本入口在檔尾、docstring 指名受測模組）；(11) AT-440-6-1 綠；(12) `git grep` 本檔、測試與程式碼無不存在於真帳本的字面 `OBS-SI-<數字>`、`DEF-<數字>`、`PROP-SI-<數字>`、`RUN-SI-<數字>`、`ATT-SI-<數字>` | SCG-4 實跑檢核 V17～V21 |
+| NFR-P4-9 | CI 與棘輪：新增 4 個測試檔與 1 個夾具模組，估新增 `tools/` 斷言行超過護欄層單輪淨額上限，須由主控以具名一次性例外重釘；compat-ci `paths` 現有 `tools/tests/**`、`tools/lib/selfimproving/**` 與 `docs/03_testing/contracts/TCS-SelfImproving-*.md` 等 glob 預期已涵蓋，實作輪現查；每個新測試檔在 CI 上小於 300 秒；全套件 xdist 多 CPU 模式不變（序列例外不新增） | V20；根層全套 unittest |
+| NFR-P4-10 | **Developer 交卷前閘門清單**（缺一即不得交卷；輸出逐字貼入）：(1) 本檔 AT 與 P0～P3、議題中心全部 AT 全綠（P4 四個新測試檔、`test_selfimproving_capability.py`、`test_install_windows_nightly.py`、`test_selfimproving_p3_meta.py`、`test_selfimproving_p2_meta.py` 及其餘既有 SI 測試檔，`-q -p no:xdist -o addopts=`）；(2) `python tools/selfimproving.py check` 對真 repo rc 0（35 項）；(3) `ruff check`；(4) `check_loc_budget.py --json` rc 0；(5) `python tools/sync_onboarding_baselines.py --check-snapshot` rc 0；(6) 官方 `python tools/run_root_unittests.py`（`AUTOSDD_PARALLEL_TESTS=1`）rc 0；(7) 護欄層重釘做到 `--print-guard-lines` 淨差額 0（主控）；(8) 文件引用子專案檔案一律寫 monorepo 根起算路徑；(9) 交卷含〈流程摩擦〉節；(10) 新增 `tools/tests/` 檔逐項過根層鎖（檔數下限、E501 東亞寬度、腳本入口在檔尾、docstring 指名受測模組）；(11) AT-440-6-1 綠；(12) `git grep` 本檔、測試與程式碼無不存在於真帳本的字面 `OBS-SI-<數字>`、`DEF-<數字>`、`PROP-SI-<數字>`、`RUN-SI-<數字>`、`ATT-SI-<數字>` | SCG-4 實跑檢核 V17～V21 |
 
-**追溯矩陣**：F-005 ← PRD FG-M（FR-SI-36～39）、AC-SI-03-1 (f)、AC-SI-10-3、§2.1.1 巡邏器列、§3.2、§9.1 C22／C23／C24 的根層半與〈C4 套件檔案表（P4）〉、§9.2（事件欄位表 `sched.set`／`sched.skip`、`run.open` 增補、〈P4 增補〉）、§9.3（`sched`、`patrol`、`run-open` 增補、rc 通則）、§9.4〈P4 增補〉、§9.5 ADR-SI-14／15、§9.6 P4 列、§8.1 P4 出口 (a)～(f)、附錄 C.2 #21、#22、§9.7 #82～#90；US-401～US-406 → AC-SI-36-1～AC-P4-040-8（本檔 FRD-lite）→ AT（本檔 §1）。
+**追溯矩陣**：F-005 ← PRD FG-M（FR-SI-36～39）、AC-SI-03-1 (f)、AC-SI-10-3、§2.1.1 巡邏器列、§2.2 SC-SI-6（對映 AC-SI-38-8）、§3.2、§9.1 C22／C23／C24 的根層半與〈C4 套件檔案表（P4）〉、§9.2（事件欄位表 `sched.set`／`sched.skip`、`run.open` 增補、〈P4 增補〉）、§9.3（`sched`、`patrol`、`run-open` 增補、rc 通則）、§9.4〈P4 增補〉、§9.5 ADR-SI-14／15、§9.6 P4 列、§8.1 P4 出口 (a)～(f)、附錄 C.2 #21、#22、§9.7 #82～#90；US-401～US-406 → AC-SI-36-1～AC-P4-040-8（本檔 FRD-lite）→ AT（本檔 §1）。
 
 **〈增量追溯表〉**（SCG-0～3 每個清單項一列；「已凍結上位文件」均相對 `spec-frozen --root`＝monorepo 根；單一 FSM 鍵 `monorepo-si-p4-schedule`）
 
@@ -234,13 +236,13 @@
 
 ## 1. AC → AT 映射表
 
-> **AT ID 文法**：`AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，前兩段數字＝所屬 AC（`4NN`＝PRD `AC-SI-NN-Y` 的 NN；`440`＝本檔自增 `AC-P4-040-Y`）；負控與邊界以 `AT-<NNN>-<Y>-E-<n>` 命名。測試檔縮寫（全部在 `tools/tests/`）：**SM**＝`test_selfimproving_schedule_model.py`、**SP**＝`test_selfimproving_schedule_patrol.py`、**SG**＝`test_selfimproving_schedule_gate.py`（以上三檔為本檔新增；SM、SP、SG 各不超過 35 個 AT）。
+> **AT ID 文法**：`AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*`，前兩段數字＝所屬 AC（`4NN`＝PRD `AC-SI-NN-Y` 的 NN；`440`＝本檔自增 `AC-P4-040-Y`）；負控與邊界以 `AT-<NNN>-<Y>-E-<n>` 命名。測試檔縮寫（全部在 `tools/tests/`）：**SM**＝`test_selfimproving_schedule_model.py`、**SP**＝`test_selfimproving_schedule_patrol.py`、**SA**＝`test_selfimproving_schedule_advance.py`（入帳之後的推進、commit、收尾與 Console (a) 運轉；SP 於 D-QA 增補後逾 35 個 AT，故自 SP 分出）、**SG**＝`test_selfimproving_schedule_gate.py`（以上四檔為本檔新增；SM、SP、SA、SG 各不超過 35 個 AT）。
 
 | AC ID | AC 描述 | AT ID | AT 描述 | 自動化 | 測試類型 | 狀態 |
 |-------|---------|-------|---------|-------|---------|------|
 | AC-SI-36-1 | 日曆格與到期（SM） | AT-436-1-1 | （SM）origin、period、格邊界起點含終點不含、`cell_start`／`cell_end` | ✅ | Unit | □ |
 | AC-SI-36-1 | 日曆格與到期 | AT-436-1-2 | （SM）`ran_this_cell`：格內 `run.open(f)` 算、他 trigger 不算、不延續到下一格 | ✅ | Unit | □ |
-| AC-SI-36-1 | 日曆格與到期 | AT-436-1-3 | （SM）改週期與再啟用重置 origin；停用後 `cell_*` 為 null；停用不改歷史 | ✅ | Unit | □ |
+| AC-SI-36-1 | 日曆格與到期 | AT-436-1-3 | （SM）改週期與再啟用（false 轉 true）重置 origin；值不變的重送不重置；停用後 `cell_*` 為 null | ✅ | Unit | □ |
 | AC-SI-36-1 | 日曆格與到期 | AT-436-1-4 | （SM）`run-open --trigger f` 正控：座標、`due_at`、`by patrol`、寫入的事件鍵 | ✅ | Integration | □ |
 | AC-SI-36-1 | 日曆格與到期 | AT-436-1-E-1 | （SM）`now` 缺 offset 為錯誤、早於 origin 為 null、不同 offset 同瞬間同結果 | ✅ | Unit | □ |
 | AC-SI-36-1 | 日曆格與到期 | AT-436-1-E-2 | （SM）事件帳本不在場與在場但無 `sched.set` 的區別 | ✅ | Unit | □ |
@@ -256,7 +258,7 @@
 | AC-SI-36-2 | 七種跳過與同格同因一筆 | AT-436-2-E-1 | （SP）黑窗跨格：origin 在黑窗內、黑窗期間只記一筆、過後同格下一心跳即開運轉 | ✅ | Integration | □ |
 | AC-SI-36-2 | 七種跳過與同格同因一筆 | AT-436-2-E-2 | （SM）停用時不嘗試、不寫事件；`disabled` 只由判序函式在競態輸入下產生 | ✅ | Unit | □ |
 | AC-SI-36-2 | 七種跳過與同格同因一筆 | AT-436-2-E-3 | （SM）skip 不推進格線：`ran_this_cell` 仍 false、`overdue` 因 skip 為 false、`check` 綠 | ✅ | Integration | □ |
-| AC-SI-36-3 | 巡邏為一次性行程 | AT-436-3-1 | （SP）單次心跳依序入帳、到期、運轉、推進後退出，rc 0，輸出步驟行 | ✅ | Integration | □ |
+| AC-SI-36-3 | 巡邏為一次性行程 | AT-436-3-1 | （SP）單次心跳依序巡視、入帳、到期、運轉、推進後退出，spawn 後立即返回、鎖已釋放，輸出五行步驟 | ✅ | Integration | □ |
 | AC-SI-36-3 | 巡邏為一次性行程 | AT-436-3-2 | （SP）`--dry-run` 零寫入、不取鎖、不 spawn，印此心跳會做什麼 | ✅ | Integration | □ |
 | AC-SI-36-3 | 巡邏為一次性行程 | AT-436-3-E-1 | （SP）用法：`--now` 缺 offset、未知旗標、`--repo` 非目錄、家目錄不可寫 | ✅ | Integration | □ |
 | AC-SI-36-3 | 巡邏為一次性行程 | AT-436-3-E-2 | （SP）鎖已被持有、`AUTOSDD_UNATTENDED` 有設、未預期例外不重試 | ✅ | Integration | □ |
@@ -289,10 +291,11 @@
 | AC-SI-37-5 | `check` 兩新項與對帳 | AT-437-5-E-1 | （SG）`sched.events` 四碼各恰一碼 | ✅ | Integration | □ |
 | AC-SI-37-5 | `check` 兩新項與對帳 | AT-437-5-E-2 | （SG）`run.trigger_f_has_patrol_by` 三碼與 origin 取法、k 為 0 的邊界 | ✅ | Integration | □ |
 | AC-SI-37-5 | `check` 兩新項與對帳 | AT-437-5-E-3 | （SG）載體缺席為 NE nonblocking、無 `sched.*` 事件為 PASS | ✅ | Integration | □ |
-| AC-SI-38-1 | spawn 形態 | AT-438-1-1 | （SP）替身 claude 記錄 argv 與 env：與 `fresh_argv` 逐元素相同、四個必含環境鍵、硬牆、任務目錄 | ✅ | Integration | □ |
+| AC-SI-38-1 | spawn 形態 | AT-438-1-1 | （SP）脫離式 spawn：替身記錄 argv 與 env（到期 (f) 與 Console (a) 兩種運轉）、四個必含環境鍵、`spawn.json` 的牆鐘、任務目錄 | ✅ | Integration | □ |
 | AC-SI-38-1 | spawn 形態 | AT-438-1-2 | （SP）前置序：`run-open f` 事件鍵、`research` rc 0／2／1 三分支、`scan` 候選只落日誌 | ✅ | Integration | □ |
 | AC-SI-38-1 | spawn 形態 | AT-438-1-E-1 | （SP）`claude` 不在 PATH：記 `spawn-failed` skip、不留 `run.open`、不寫任務目錄 | ✅ | Integration | □ |
 | AC-SI-38-1 | spawn 形態 | AT-438-1-E-2 | （SP）環境不洩漏：金鑰與機密類名稱與其他 `AUTOSDD_*` 不傳給子行程，白名單鍵照傳 | ✅ | Integration | □ |
+| AC-SI-38-1 | spawn 形態 | AT-438-1-E-3 | （SP）脫離旗標（breakaway）被拒時 fail-closed：(f) 記 `spawn-failed` skip、(a) 只寫日誌，皆不留 `spawn.json`、下一心跳再試 | ✅ | Integration | □ |
 | AC-SI-38-2 | 任務書必含 | AT-438-2-1 | （SP）自 SOP 骨架生成：大寫占位符全替換、小寫與中文占位符保留、必含項齊、降載聲明依額度帶 | ✅ | Unit | □ |
 | AC-SI-38-2 | 任務書必含 | AT-438-2-E-1 | （SP）SOP 範本缺必含項或圍欄：`template_problems` 非空，心跳記 `spawn-failed` skip 不 spawn | ✅ | Integration | □ |
 | AC-SI-38-3 | run-scoped 授權 | AT-438-3-1 | （SP）A 類八個動詞×環境真值表 | ✅ | Integration | □ |
@@ -301,21 +304,28 @@
 | AC-SI-38-3 | run-scoped 授權 | AT-438-3-E-2 | （SP）環境值邊界：字面 0 算有設、空字串算未設、`PATROL_RUN` 單獨存在不改行為；單一實作的靜態鎖 | ✅ | Integration | □ |
 | AC-SI-38-4 | DEC 只認 Console 載體 | AT-438-4-1 | （SP）無人值守逐字稿載體 `decide` rc 1；console 載體通過授權閘而止於金鑰缺 | ✅ | Integration | □ |
 | AC-SI-38-4 | DEC 只認 Console 載體 | AT-438-4-E-1 | （SP）心跳期間無任何逐字稿載體 `decide`；無 DEC 的核准需求只到 `card --issue` | ✅ | Integration | □ |
-| AC-SI-38-5 | 核准後自動 commit | AT-438-5-1 | （SP）乾淨樹 promote 後只 add 白名單並 commit：訊息含 PROP、DEC、APP，不 push、不繞 hook | ✅ | Integration | □ |
-| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-1 | （SP）promote 前樹不乾淨：不 promote、記 `dirty-tree` skip、無 commit | ✅ | Integration | □ |
-| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-2 | （SP）白名單之外的髒檔不被 add | ✅ | Integration | □ |
-| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-3 | （SP）commit 被 hook 拒：日誌加 OBS 草稿列、不重試、不 `--no-verify`；`sched_auto_commit` 為 false 不 commit | ✅ | Integration | □ |
-| AC-SI-38-6 | 硬牆、handback 與零提案收尾 | AT-438-6-1 | （SP）以事件帳本為憑：無 `prop` 則 `run-close`（`no_event`）、有 `prop` 保持開啟 | ✅ | Integration | □ |
-| AC-SI-38-6 | 硬牆、handback 與零提案收尾 | AT-438-6-E-1 | （SP）handback 缺節、harness 背景殺行程標記、逾時：只記日誌、不重 spawn | ✅ | Integration | □ |
+| AC-SI-38-5 | 核准後自動 commit | AT-438-5-1 | （SA）乾淨樹 promote 後只 add 白名單並 commit：訊息含 PROP、DEC、APP，不 push、不繞 hook | ✅ | Integration | □ |
+| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-1 | （SA）promote 前樹不乾淨：不 promote、只寫日誌不記 skip（排程啟用與停用兩子情境）、無 commit | ✅ | Integration | □ |
+| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-2 | （SA）白名單之外的髒檔不被 add | ✅ | Integration | □ |
+| AC-SI-38-5 | 核准後自動 commit | AT-438-5-E-3 | （SA）commit 被 hook 拒：日誌加 OBS 草稿列、不重試、不 `--no-verify`；`sched_auto_commit` 為 false 不 commit | ✅ | Integration | □ |
+| AC-SI-38-6 | 硬牆、handback 與零提案收尾 | AT-438-6-1 | （SA）以事件帳本為憑：後續心跳步 0′ 對無 `prop` 的運轉 `run-close`（`no_event`）、有 `prop` 保持開啟 | ✅ | Integration | □ |
+| AC-SI-38-6 | 硬牆、handback 與零提案收尾 | AT-438-6-2 | （SA）同一時間至多一個進行中的無人運轉：存活且未超牆時其他運轉的 spawn 延後 | ✅ | Integration | □ |
+| AC-SI-38-6 | 硬牆、handback 與零提案收尾 | AT-438-6-E-1 | （SA）handback 缺節、harness 殺行程標記、逾牆：只記日誌或終止行程、不重 spawn | ✅ | Integration | □ |
 | AC-SI-38-7 | 巡邏器的權限列 | AT-438-7-1 | （SG）靜態：巡邏相關原始碼呼叫的動詞集合 ⊆ 可做集合，無 `git push`、`--no-verify`、`git add -A`、逐字稿 `decide` | ✅ | Unit | □ |
-| AC-SI-38-7 | 巡邏器的權限列 | AT-438-7-E-1 | （SP）不能做的拒收路徑：觸及不可進化面的 PROP 不被 promote、日誌記因、無 commit | ✅ | Integration | □ |
-| AC-SI-39-1 | 心跳第一步入帳 | AT-439-1-1 | （SP）五種 kind 逐檔入帳、依 `time` 升冪、金鑰取自環境 | ✅ | Integration | □ |
-| AC-SI-39-1 | 心跳第一步入帳 | AT-439-1-E-1 | （SP）植入的金鑰字串不出現在輸出、日誌、任務書、事件與 handback 目錄；同心跳改週期加立即啟動依操作序 | ✅ | Integration | □ |
-| AC-SI-39-2 | 拒收處置 | AT-439-2-1 | （SP）入帳 rc 1：保留稽核檔、日誌一列 `obs-draft`、不重試不刪檔、以 `audit_ref` 去重；互動視窗手動入帳互斥 | ✅ | Integration | □ |
-| AC-SI-39-3 | 核准後機械步驟 | AT-439-3-1 | （SP）`approve`→`sandbox`→`verify`→`card --issue`；FAIL 不自動否決；缺 `heldout.freeze` 跳過且不記 skip | ✅ | Integration | □ |
-| AC-SI-39-3 | 核准後機械步驟 | AT-439-3-2 | （SP）`promote`→commit→`measure`；`rollback`；全部離開待人工決定態則 `run-close` 並記 `outcomes` | ✅ | Integration | □ |
-| AC-SI-39-4 | 只推進人已決定的步驟 | AT-439-4-1 | （SP）無 DEC 零動作；偽造的 DEC 被 `decverify` 回查擋下（fail-closed） | ✅ | Integration | □ |
-| AC-SI-39-5 | 失敗可偵測 | AT-439-5-1 | （SP）日誌行格式；某步失敗不中斷互不相依的後續步驟；日誌丟失不影響帳本 | ✅ | Integration | □ |
+| AC-SI-38-7 | 巡邏器的權限列 | AT-438-7-E-1 | （SA）不能做的拒收路徑：觸及不可進化面的 PROP 不被 promote、日誌記因、無 commit | ✅ | Integration | □ |
+| AC-SI-38-8 | Console 載體 (a) 運轉的執行與收尾 | AT-438-8-1 | （SA）排程停用下入帳 `run-request` 後同心跳 spawn，無 `prop` 則 `run-close`，無 `sched.skip` | ✅ | Integration | □ |
+| AC-SI-38-8 | Console 載體 (a) 運轉的執行與收尾 | AT-438-8-E-1 | （SA）額度帶準備、有人在開車、黑窗、預檢不過：只寫日誌、運轉仍開、不記 skip，解除後下一心跳 spawn | ✅ | Integration | □ |
+| AC-SI-39-1 | 心跳第一步入帳 | AT-439-1-1 | （SA）五種 kind 逐檔入帳、依 `time` 升冪、金鑰取自環境 | ✅ | Integration | □ |
+| AC-SI-39-1 | 心跳第一步入帳 | AT-439-1-E-1 | （SA）植入的金鑰字串不出現在輸出、日誌、任務書、事件與 handback 目錄；同心跳改週期加立即啟動依操作序 | ✅ | Integration | □ |
+| AC-SI-39-2 | 拒收處置 | AT-439-2-1 | （SA）入帳 rc 1：保留稽核檔、日誌一列 `obs-draft`、不重試不刪檔、以 `audit_ref` 去重；互動視窗手動入帳互斥 | ✅ | Integration | □ |
+| AC-SI-39-2 | 拒收處置 | AT-439-2-E-1 | （SA）四種拒收碼逐一保留稽核檔、各一行日誌與 obs-draft、不重試 | ✅ | Integration | □ |
+| AC-SI-39-3 | 核准後機械步驟 | AT-439-3-1 | （SA）`approve`→`sandbox`→`verify`→`card --issue`；FAIL 不自動否決；缺 `heldout.freeze` 跳過且不記 skip | ✅ | Integration | □ |
+| AC-SI-39-3 | 核准後機械步驟 | AT-439-3-2 | （SA）`promote`→commit→`measure`；`rollback`；全部離開待人工決定態則 `run-close` 並記 `outcomes` | ✅ | Integration | □ |
+| AC-SI-39-3 | 核准後機械步驟 | AT-439-3-E-1 | （SA）reject、return、decline-promote、ack-handoff 不觸發 sandbox；缺凍結者跳過且無 skip | ✅ | Integration | □ |
+| AC-SI-39-4 | 只推進人已決定的步驟 | AT-439-4-1 | （SA）無 DEC 零動作；偽造的 DEC 被 `decverify` 回查擋下（fail-closed） | ✅ | Integration | □ |
+| AC-SI-39-4 | 只推進人已決定的步驟 | AT-439-4-E-1 | （SA）promote 前置缺 `heldout.freeze` 跳過、不記 skip，補上後下一心跳推進 | ✅ | Integration | □ |
+| AC-SI-39-5 | 失敗可偵測 | AT-439-5-1 | （SA）日誌行格式；某步失敗不中斷互不相依的後續步驟；日誌丟失不影響帳本 | ✅ | Integration | □ |
+| AC-SI-39-5 | 失敗可偵測 | AT-439-5-E-1 | （SA）日誌行格式逐欄、成功與失敗步驟的 rc 與碼、說明單行、不含金鑰 | ✅ | Integration | □ |
 | AC-P4-040-1 | 事件詞彙與欄位表 | AT-440-1-1 | （SG）`KINDS` 為 23 個、`sched.set`／`sched.skip` 欄位表正控、`run.open` 選填鍵 | ✅ | Unit | □ |
 | AC-P4-040-1 | 事件詞彙與欄位表 | AT-440-1-E-1 | （SG）欄位表負控表：缺鍵、表外鍵、型別、載體組合、`due_at` 與 trigger 的配對 | ✅ | Unit | □ |
 | AC-P4-040-1 | 事件詞彙與欄位表 | AT-440-1-E-2 | （SG）舊事件不變：P4 之前的 `run.open` 照過；訊息為 23 個詞彙；`trigger` g 拒收 | ✅ | Unit | □ |
@@ -325,6 +335,7 @@
 | AC-P4-040-3 | 能力登記與 runner | AT-440-3-1 | （SG）登記 59 或 60 鍵、類別計數、閉包全 `ro`、`runner` 匯入者恰為四個 exec 檔 | ✅ | Unit | □ |
 | AC-P4-040-3 | 能力登記與 runner | AT-440-3-2 | （SG）`run_argv` 靜態不變量、禁字樣、外部執行檔字面守衛、`subprocess` 字樣只在兩檔 | ✅ | Unit | □ |
 | AC-P4-040-3 | 能力登記與 runner | AT-440-3-E-1 | （SG）注入副本自證：新檔未登記、`sched` 匯入 `runner`、`patrol` 登記為 `ro`、`run_argv` 讀 `os.environ` 各被抓到 | ✅ | Unit | □ |
+| AC-P4-040-3 | 能力登記與 runner | AT-440-3-3 | （SG）`schedarm.py` 的 `powershell.exe`、`schtasks`、`launchctl` argv 住在 `sys.platform` 守衛分支內，注入副本被判出 | ✅ | Unit | □ |
 | AC-P4-040-4 | SOP 條文 | AT-440-4-1 | （SG）`sop_p4_problems` 對真 SOP 為空、四節標題與範本占位符齊全 | ✅ | Unit | □ |
 | AC-P4-040-4 | SOP 條文 | AT-440-4-E-1 | （SG）逐項刪去、注入過度概括句、移入圍欄各被判出 | ✅ | Unit | □ |
 | AC-P4-040-5 | 零退化與同步 | AT-440-5-1 | （SG）P1 與 P2 與 P3 情境表在升級後夾具上重放：結構 PASS、折疊狀態不變 | ✅ | Integration | □ |
@@ -373,16 +384,16 @@ Scenario: 只認格內的 trigger 為 f 的 run.open
 ```
 ```gherkin
 # AT-436-1-3
-# 對應 AC: AC-SI-36-1（R142 (b)(e)）改週期與再啟用重置 origin；停用後格欄位為 null
+# 對應 AC: AC-SI-36-1（R142 (b)(e)；D-QA-6）改週期與再啟用重置 origin；值不變的重送不重置；停用後格欄位為 null
 # 測試類型: Unit
 # 自動化工具: unittest（純函式、注入 now）
 # 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_model.py -k AT_436_1_3_ -q -p no:xdist -o addopts=
 
 Feature: origin 重置
-Scenario: 每次啟用或改週期都重置格線
-  Given 事件依序：`sched.set`（啟用、週期 1440、`t`＝`O`）、`run.open(f)`（`O＋1 小時`）、`sched.set`（啟用、週期 720、`t`＝`O＋20 小時`）、`sched.set`（停用、週期 720、`t`＝`O＋30 小時`）、`sched.set`（啟用、週期 720、`t`＝`O＋40 小時`）
-  When 以 `now` 為 `O＋21 小時`、`O＋35 小時`、`O＋41 小時` 呼叫 `SCH`
-  Then 第一次 `cell_start` 為 `O＋20 小時`、`cell_end` 為 `O＋32 小時`、`period_minutes` 為 `720`、`ran_this_cell` 為 `false`（改週期前那筆 `run.open(f)` 不算）；第二次 `enabled` 為 `false`、`cell_start`／`cell_end`／`ran_this_cell` 為 `null`、`overdue` 為 `false`；第三次 `cell_start` 為 `O＋40 小時`（再啟用重置）
+Scenario: 只有 false 轉 true 或週期改變才重置格線
+  Given 事件依序：`sched.set`（啟用、週期 1440、`t`＝`O`）、`run.open(f)`（`O＋1 小時`）、`sched.set`（啟用、週期 720、`t`＝`O＋20 小時`）、`sched.set`（停用、週期 720、`t`＝`O＋30 小時`）、`sched.set`（啟用、週期 720、`t`＝`O＋40 小時`）、`sched.set`（啟用、週期 720、`t`＝`O＋45 小時`，值與前一筆生效值完全相同）
+  When 以 `now` 為 `O＋21 小時`、`O＋35 小時`、`O＋41 小時`、`O＋46 小時` 呼叫 `SCH`
+  Then 第一次 `cell_start` 為 `O＋20 小時`、`cell_end` 為 `O＋32 小時`、`period_minutes` 為 `720`、`ran_this_cell` 為 `false`（改週期前那筆 `run.open(f)` 不算）；第二次 `enabled` 為 `false`、`cell_start`／`cell_end`／`ran_this_cell` 為 `null`、`overdue` 為 `false`；第三次 `cell_start` 為 `O＋40 小時`（false 轉 true 重置）；第四次 `cell_start` 仍為 `O＋40 小時`（值不變的重送照記事件、`last_set.at` 為 `O＋45 小時`，但不重置 origin）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_436_1_3]"
 ```
 ```gherkin
@@ -792,7 +803,7 @@ Scenario: 嚴格大於 2×心跳；載體缺席為 null；export 的 ne 列
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_437_3_E_1]"
 ```
 
-**B. 巡邏心跳、無人運轉與授權（SP）**
+**B. 巡邏心跳、無人運轉與授權（SP；入帳之後的推進、commit、收尾與 Console (a) 運轉一族在 SA）**
 
 > SP 的共通佈置：`HEARTBEAT(R4, now, **deps)`＝呼叫 `patrol.main(["--now", now, "--repo", R4], deps=Deps(...))` 並回 `(rc, out, err)`；`Deps` 可注入 `quota`（回 `QuotaState` 替身）、`driver_quiet`（回布林）、`which`、`preflight`、`run_argv`（預設換成呼叫 `STUB` 的包裝）、`verbs`（記錄巡邏器對 CLI 動詞的呼叫，預設走真入口）；環境變數 `AUTOSDD_SI_AUDIT_KEY` 以測試金鑰設於測試行程；全部家目錄在 tmp。
 
@@ -812,16 +823,16 @@ Scenario: 22:00 啟用、黑窗 21:00-00:30
 ```
 ```gherkin
 # AT-436-3-1
-# 對應 AC: AC-SI-36-3（R148）一次性心跳的步驟序
+# 對應 AC: AC-SI-36-3（R148、R167）一次性心跳的步驟序，spawn 後立即返回
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git + 替身（hermetic）
 # 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_436_3_1_ -q -p no:xdist -o addopts=
 
 Feature: 單次心跳
-Scenario: 入帳、到期、運轉、推進後退出
-  Given `R4` 啟用且本格到期；`console_pending[]` 有一份合法 `sched-set` 稽核檔；`Deps.verbs` 記錄呼叫序
+Scenario: 巡視、入帳、到期、運轉、推進後退出，不等待無人主控
+  Given `R4` 啟用且本格到期；`console_pending[]` 有一份合法 `sched-set` 稽核檔；`Deps.verbs` 記錄呼叫序；`Deps.spawn_detached` 替身記錄呼叫並回假 pid
   When `HEARTBEAT` 一次
-  Then rc 為 `0`；輸出含四行 `step=` 依序 `入帳`、`到期`、`運轉`、`推進`；`verbs` 記錄中 `sched set --carrier console` 先於 `run-open`、`run-open` 先於 `research`、`research` 先於 `scan`；函式在 spawn 返回與推進後即返回（呼叫次數：`patrol.heartbeat` 一次、`STUB` 一次）；`--json` 的 `steps` 長度為 4
+  Then rc 為 `0`；輸出含五行 `step=` 依序 `巡視`、`入帳`、`到期`、`運轉`、`推進`；`verbs` 記錄中 `sched set --carrier console` 先於 `run-open`、`run-open` 先於 `research`、`research` 先於 `scan`；`spawn_detached` 恰被呼叫一次、其後函式立即返回（沒有對子行程的等待呼叫），返回時 `<si>/locks/patrol.lock` 已釋放、`spawn.json` 已寫；`--json` 的 `steps` 長度為 5
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_436_3_1]"
 ```
 ```gherkin
@@ -910,16 +921,16 @@ Scenario: prepare 帶跳過、兩個 no_event 不算成效
 ```
 ```gherkin
 # AT-438-1-1
-# 對應 AC: AC-SI-38-1（R151）spawn 的 argv、環境、硬牆
+# 對應 AC: AC-SI-38-1（R151、R167）spawn 的 argv、環境、spawn.json（脫離式）
 # 測試類型: Integration
-# 自動化工具: pytest + 替身 claude + tmp 目錄（hermetic）
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
 # 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_1_1_ -q -p no:xdist -o addopts=
 
 Feature: spawn 形態
-Scenario: argv 逐元素等於 fresh_argv，環境含四個必含鍵
-  Given `R4` 啟用到期；`STUB` 把收到的 argv、env 鍵值、cwd 與 timeout 寫到 tmp 記錄檔；`run_argv` 包裝記錄傳入的 `timeout`
-  When `HEARTBEAT` 一次
-  Then 記錄的 argv 逐元素等於 `resume_route.fresh_argv(<STUB 路徑>, <prompt>, <任務目錄>)`（以同參數重算比較）；env 含 `AUTOSDD_UNATTENDED` 為 `1`、`AUTOSDD_SI_PATROL_RUN` 為本次 RUN 號、`CLAUDE_CODE_SUBAGENT_MODEL` 與 `resume_route.spawn_env()` 的值相同、`unattended_authz.HARNESS_BG_WAIT_ENV` 為 `RESUME_BG_WAIT_CEILING_SECONDS×1000` 的字串；`timeout` 等於 `unattended_authz.RESUME_HARD_WALL_SECONDS`；cwd 的 `realpath` 等於 `R4` 的 `realpath`；任務目錄 `<si>/patrol/<RUN>/` 內有 `brief.md`；`brief.md` 的位元組等於傳入 prompt 所指檔案
+Scenario: argv 逐元素等於 fresh_argv，環境含四個必含鍵，牆鐘寫進 spawn.json
+  Given 兩種運轉各一次：到期的 (f) 運轉，與本心跳入帳的 Console (a) 運轉；`Deps.spawn_detached` 替身把收到的 argv、env 鍵值、cwd 寫到 tmp 記錄檔並回執行期組出的假 pid
+  When 各 `HEARTBEAT` 一次
+  Then 記錄的 argv 逐元素等於 `resume_route.fresh_argv(<claude 路徑>, <prompt>, <任務目錄>)`（以同參數重算比較）；env 含 `AUTOSDD_UNATTENDED` 為 `1`、`AUTOSDD_SI_PATROL_RUN` 為本次 RUN 號、`CLAUDE_CODE_SUBAGENT_MODEL` 與 `resume_route.spawn_env()` 的值相同、`unattended_authz.HARNESS_BG_WAIT_ENV` 為 `RESUME_BG_WAIT_CEILING_SECONDS×1000` 的字串；`spawn_detached` 的簽章不含 timeout；替身記錄的旗標：以替身平臺為 Windows 時 `creationflags` 為 `CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS` 的聯集（三個常數取自 `subprocess` 或 `getattr` 兜底值），以替身平臺為 POSIX 時 `start_new_session` 為 True 且無 `creationflags`（兩種平臺各跑一次）；`<si>/patrol/<RUN>/spawn.json` 含 `pid`（等於假 pid）、`started_at`、`wall_due_at`，且 `wall_due_at` 減 `started_at` 恰為 `unattended_authz.RESUME_HARD_WALL_SECONDS` 秒；cwd 的 `realpath` 等於 `R4` 的 `realpath`；任務目錄內有 `brief.md`；`brief.md` 的位元組等於傳入 prompt 所指檔案
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_1_1]"
 ```
 ```gherkin
@@ -963,6 +974,20 @@ Scenario: 機密與其他 AUTOSDD 變數不傳
   When `HEARTBEAT` 一次，`STUB` 記錄 env 的鍵與值
   Then 記錄的鍵集合 ⊆ `runner` 探針白名單 ∪ {`APPDATA`、`LOCALAPPDATA`、`CLAUDE_CONFIG_DIR`、`AUTOSDD_SI_DIR`} ∪ 四個必含鍵；不含 `AUTOSDD_SI_AUDIT_KEY`、`ANTHROPIC_API_KEY`、`MY_SERVICE_TOKEN`、`DB_PASSWORD`、`AUTOSDD_QUOTA_HALT_PCT`、`AUTOSDD_SI_PATROL_OFF`；各唯一值字串不出現在記錄檔的任何位置（含 argv 與 prompt）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_1_E_2]"
+```
+```gherkin
+# AT-438-1-E-3
+# 對應 AC: AC-SI-38-1（R167 (a)；D-QA-14）breakaway 被拒時 fail-closed
+# 測試類型: Integration
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_1_E_3_ -q -p no:xdist -o addopts=
+
+Feature: 脫離旗標被拒
+Scenario: 不 spawn、不留 spawn.json，(f) 記 spawn-failed，(a) 只寫日誌，下一心跳再試
+  Given 兩種運轉各一個 repo：到期的 (f)，與本心跳入帳的 Console (a)；`Deps.spawn_detached` 替身對第一次呼叫拋 `PermissionError`（模擬 breakaway 被拒）、其後正常
+  When 各 `HEARTBEAT` 兩次
+  Then (f)：第一次新增恰一筆 `sched.skip`（`reason` 為 `spawn-failed`、`detail` 以 `breakaway-denied` 起頭）、無 `spawn.json`、`STUB` 與 research 以外的後續步驟未進行；第二次（同格）不重複記 skip，`spawn_detached` 被呼叫並成功；(a)：第一次只在 `patrol.log` 寫一行（`step=運轉`、碼含 `breakaway-denied`）、**無任何新增 `sched.skip`**、`run.open` 保持為一筆、無 `spawn.json`；第二次 `spawn_detached` 成功、`run.open` 總數仍為一
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_1_E_3]"
 ```
 ```gherkin
 # AT-438-2-1
@@ -1081,7 +1106,7 @@ Scenario: 無 DEC 的待決 PROP 只到 card --issue
 # 對應 AC: AC-SI-38-5（R155 (d)）核准晉升後的自動 commit
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_5_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_5_1_ -q -p no:xdist -o addopts=
 
 Feature: 本機 commit
 Scenario: 白名單、訊息、不 push、不繞 hook
@@ -1092,16 +1117,16 @@ Scenario: 白名單、訊息、不 push、不繞 hook
 ```
 ```gherkin
 # AT-438-5-E-1
-# 對應 AC: AC-SI-38-5（R155 (d)、R144）promote 前樹不乾淨
+# 對應 AC: AC-SI-38-5（R155 (b)(d)；D-QA-3）promote 前樹不乾淨：只寫日誌，不寫 sched.skip
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_5_E_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_5_E_1_ -q -p no:xdist -o addopts=
 
 Feature: 髒樹不 promote
-Scenario: SI 自有路徑以外有改動
-  Given 同 AT-438-5-1，但工作樹另有未提交的 `notes/dirty.txt`
-  When `HEARTBEAT` 兩次（同格）
-  Then 無 `app.promote` 事件、`verbs` 無 `promote` 呼叫、無新 commit；新增恰一筆 `sched.skip`（`reason` 為 `dirty-tree`，第二次不重複）；`notes/dirty.txt` 內容不變；DEC 仍在、下一心跳（清乾淨後）可 promote
+Scenario: SI 自有路徑以外有改動，排程啟用與停用兩個子情境皆然
+  Given 同 AT-438-5-1，但工作樹另有未提交的 `notes/dirty.txt`；兩個子情境：(甲)排程啟用且本格有 (f) 到期；(乙)排程停用（無格線，只有人的 DEC 待推進）
+  When 各 `HEARTBEAT` 兩次
+  Then 兩子情境皆無 `app.promote` 事件、`verbs` 無 `promote` 呼叫、無新 commit；兩子情境皆**零新增 `sched.skip`**（推進路徑只寫日誌；(甲)若有 (f) 到期被其他原因擋下才有 skip，與本情境無關，夾具使其他六種跳過皆不成立）；乙情境事件帳本在兩次心跳後與前逐位元組相同；`patrol.log` 每次心跳各一行帶 `step=推進` 與原因 `dirty-tree`；`notes/dirty.txt` 內容不變；清乾淨後下一心跳可 promote
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_5_E_1]"
 ```
 ```gherkin
@@ -1109,7 +1134,7 @@ Scenario: SI 自有路徑以外有改動
 # 對應 AC: AC-SI-38-5（R155 (d)）touched 之外的髒檔不被 add
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 替身 promote（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_5_E_2_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_5_E_2_ -q -p no:xdist -o addopts=
 
 Feature: 提交白名單
 Scenario: promote 期間冒出的多餘檔
@@ -1123,7 +1148,7 @@ Scenario: promote 期間冒出的多餘檔
 # 對應 AC: AC-SI-38-5（R155 (d)、R157）commit 失敗與 auto_commit 為 false
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_5_E_3_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_5_E_3_ -q -p no:xdist -o addopts=
 
 Feature: commit 的失敗處置
 Scenario: hook 拒絕不重試、不繞過；關閉自動 commit
@@ -1134,30 +1159,44 @@ Scenario: hook 拒絕不重試、不繞過；關閉自動 commit
 ```
 ```gherkin
 # AT-438-6-1
-# 對應 AC: AC-SI-38-6（R156）以事件帳本為憑的收尾
+# 對應 AC: AC-SI-38-6（R156、R167）以事件帳本為憑的收尾，發生在後續心跳的步 0′
 # 測試類型: Integration
-# 自動化工具: pytest + 替身 claude + tmp 目錄（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_6_1_ -q -p no:xdist -o addopts=
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_6_1_ -q -p no:xdist -o addopts=
 
 Feature: 零提案與有提案
-Scenario: STUB 的自述不算數
-  Given 兩個格：甲格 `STUB` 在 handback 寫「已完成」但事件帳本無 `prop`；乙格 `STUB` 在運轉內經真 CLI 寫出一個 `prop`（帶 `--run`）
-  When 各跑一次心跳
-  Then 甲格 `run-close` 被巡邏器呼叫、`run.close` 為 `no_event` 為 `true`；乙格運轉保持開啟（無 `run.close`）、`status.open_runs` 含該運轉
+Scenario: 替身行程的自述不算數
+  Given 兩個運轉：甲運轉 spawn 後其 handback 寫已完成但事件帳本無 `prop`；乙運轉 spawn 後替身經真 CLI 寫出一個 `prop`（帶 `--run`）；`Deps.pid_alive` 先回存活、再回已結束
+  When 各跑兩次心跳：第一次使其 spawn（返回後立即結束），第二次（`pid_alive` 已回已結束）
+  Then 第一次心跳 rc 為 `0`、`spawn.json` 含 `pid`、`started_at`、`wall_due_at`、`patrol.lock` 已釋放、尚無 `run.close`；第二次心跳步 0′ 後：甲 `run-close` 被巡邏器呼叫、`run.close` 的 `no_event` 為 `true`；乙運轉保持開啟（無 `run.close`）、`status.open_runs` 含該運轉；兩者 `spawn.json` 補寫 `closed_at`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_6_1]"
 ```
 ```gherkin
-# AT-438-6-E-1
-# 對應 AC: AC-SI-38-6（R156）handback 缺節、harness 殺行程、逾時
+# AT-438-6-2
+# 對應 AC: AC-SI-38-6（R167 (c)；D-QA-10）同一時間至多一個進行中的無人運轉
 # 測試類型: Integration
-# 自動化工具: pytest + 替身 claude + tmp 目錄（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_6_E_1_ -q -p no:xdist -o addopts=
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_6_2_ -q -p no:xdist -o addopts=
 
-Feature: 只記日誌的三種收尾
-Scenario: 不重 spawn
-  Given 三個格：(甲)`STUB` 的 handback 缺 `## 卡在哪`；(乙)`STUB` 的 stderr 含 `unattended_authz.HARNESS_BG_KILL_MARK`；(丙)`STUB` 睡過替身縮短的硬牆而逾時（以 `run_argv` 包裝拋 `TimeoutExpired`）
-  When 各跑一次心跳
-  Then 三格 `STUB` 各只被呼叫一次；`patrol.log` 依序有「handback 不完整」「harness 背景殺行程」「逾時」各一行；三格運轉的收尾仍依事件帳本（零提案者 `run-close`）；無重新 spawn
+Feature: 單一進行中運轉
+Scenario: spawn.json 存活且未超牆時其他運轉的 spawn 延後
+  Given 運轉 `RUN_A` 已 spawn，`Deps.pid_alive` 回存活、`now` 早於 `wall_due_at`；另有一份本心跳入帳的 Console `run-request` 與下一格的 (f) 到期
+  When 在 `RUN_A` 進行中跑兩次心跳（第二次跨到下一格）
+  Then 兩次心跳的步 0′ 皆不動 `RUN_A`；`spawn_detached` 總呼叫仍為 `1`（不為新運轉 spawn）；`patrol.log` 各有一行延後原因（已有進行中的無人運轉）；Console 的 `run-request` 仍被入帳為 `run.open` 或依 R146 記 `sched.skip(run-open)`；(f) 到期因 `RUN_A` 未關而至多記一筆 `sched.skip(run-open)`；`RUN_A` 結束後的下一心跳才為延後的運轉 spawn
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_6_2]"
+```
+```gherkin
+# AT-438-6-E-1
+# 對應 AC: AC-SI-38-6（R156、R167 (b)）handback 缺節、harness 殺行程、逾牆
+# 測試類型: Integration
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_6_E_1_ -q -p no:xdist -o addopts=
+
+Feature: 只記日誌與終止的三種收尾
+Scenario: 不重 spawn，逾牆才殺行程樹
+  Given 三個運轉 spawn 後：(甲)行程已結束、handback 缺 `## 卡在哪`；(乙)行程已結束、stderr 檔含 `unattended_authz.HARNESS_BG_KILL_MARK`；(丙)行程仍存活而 `now` 晚於 `wall_due_at`（`Deps.kill_tree` 替身記錄呼叫）
+  When 各跑一次步 0′ 所在的心跳
+  Then 三運轉各只 spawn 過一次；`patrol.log` 依序有「handback 不完整」「harness 背景殺行程」「逾牆終止」各一行；(丙)的 `kill_tree` 恰被呼叫一次、其後依事件帳本收尾；三運轉零提案者皆 `run-close`；無重新 spawn
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_6_E_1]"
 ```
 ```gherkin
@@ -1165,7 +1204,7 @@ Scenario: 不重 spawn
 # 對應 AC: AC-SI-38-7（R154）巡邏器不能做的拒收路徑
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_438_7_E_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_7_E_1_ -q -p no:xdist -o addopts=
 
 Feature: 守衛面不經巡邏器修改
 Scenario: 觸及不可進化面的 PROP
@@ -1175,11 +1214,94 @@ Scenario: 觸及不可進化面的 PROP
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_7_E_1]"
 ```
 ```gherkin
+# AT-438-8-1
+# 對應 AC: AC-SI-38-8（R166；D-QA-2）Console 載體 (a) 運轉在同一心跳執行並收尾
+# 測試類型: Integration
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_8_1_ -q -p no:xdist -o addopts=
+
+Feature: 立即啟動一次演化的執行者
+Scenario: 入帳 run-request 後同心跳 spawn，無 prop 則 run-close
+  Given `R4` 的排程為**停用**（證明不看啟用旗標、不受格線限制）；`console_pending[]` 有一份合法 `run-request` 稽核檔；七種跳過皆不成立；`Deps.spawn_detached` 替身
+  When 先 `HEARTBEAT` 一次，再於替身行程已結束後 `HEARTBEAT` 一次
+  Then 第一次：事件序含 `run.open`（`trigger` 為 `a`、`carrier` 為 `console`、帶該 `audit_ref`），其後有 `research` 事件，`spawn_detached` 恰被呼叫一次（任務書 trigger 行含 `trigger=a`）、`spawn.json` 已寫；第二次：該運轉 `run-close` 的 `no_event` 為 `true`；兩次心跳皆無任何新增 `sched.skip`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_8_1]"
+```
+```gherkin
+# AT-438-8-E-1
+# 對應 AC: AC-SI-38-8（R166、R143 ②～⑦）被擋時只寫日誌、運轉保持開啟、下一心跳再試
+# 測試類型: Integration
+# 自動化工具: pytest + 替身 spawn_detached + tmp 目錄（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_438_8_E_1_ -q -p no:xdist -o addopts=
+
+Feature: (a) 運轉被擋
+Scenario: 額度帶準備等原因擋下不寫 sched.skip
+  Given 與 AT-438-8-1 同一情境，但 `Deps.quota` 回 `prepare` 帶；另三個子情境：`driver_quiet` 為假（有人在開車）、黑窗內、`which` 回 `None`（spawn-failed 預檢）
+  When 各 `HEARTBEAT` 一次，再把阻擋原因解除後 `HEARTBEAT` 一次
+  Then 第一次：`run.open`（`a`）已寫入、`spawn_detached` 未被呼叫、`patrol.log` 有一行帶 `step=運轉` 與對應原因碼（`quota-band`、`other-driver`、`blackout`、`spawn-failed`）、**無任何新增 `sched.skip`**、運轉仍開；第二次：`spawn_detached` 恰被呼叫一次、`run.open` 總數仍為 `1`（不重新入帳、不重開運轉）
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_438_8_E_1]"
+```
+```gherkin
+# AT-439-2-E-1
+# 對應 AC: AC-SI-39-2（R149；D-QA-11）入帳拒收碼逐一保留稽核檔
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_2_E_1_ -q -p no:xdist -o addopts=
+
+Feature: 拒收碼
+Scenario: 每種拒收保留稽核檔、一行日誌、不重試
+  Given 四份稽核檔：已入帳過的重複 `audit_ref`（`AUDIT-REF-REUSED`）、金鑰變數缺席下的合法檔（`AUDIT-KEY-MISSING`）、外層 `kind` 與入帳路徑不符（`AUDIT-KIND-MISMATCH`）、外層 `audit_ref` 與檔名不符（`AUDIT-REF-MISMATCH`）
+  When `HEARTBEAT` 連續兩次
+  Then 四份檔皆仍在、`status.console_pending` 仍含它們（重複者除外，其對應事件已存在）；`patrol.log` 每份各一行帶各自拒收碼與一列 `obs-draft`，第二次不重複；每份每心跳入帳呼叫至多一次；事件帳本與 OBS 帳本無由這些檔造成的新增
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_2_E_1]"
+```
+```gherkin
+# AT-439-3-E-1
+# 對應 AC: AC-SI-39-3（R155 (a)；D-QA-11）非 approve 的 dec 不觸發 sandbox
+# 測試類型: Integration
+# 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_3_E_1_ -q -p no:xdist -o addopts=
+
+Feature: 只有 approve 推進 sandbox
+Scenario: reject、return、decline-promote、ack-handoff 不被推進
+  Given 四個 PROP 各有一個已入帳的 `dec`：`reject`、`return`、`decline-promote`（針對 `verified` 者）、`ack-handoff`；另一個 `approve` 但缺 `heldout.freeze` 的 PROP
+  When `HEARTBEAT` 兩次
+  Then 四個非 approve 的 PROP 無任何 `app.sandbox`、`app.verify`、`app.promote` 事件、無 `card` 新事件；巡邏器未寫任何 `dec`；缺 `heldout.freeze` 的 PROP 被跳過、日誌記原因、無 `sched.skip`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_3_E_1]"
+```
+```gherkin
+# AT-439-4-E-1
+# 對應 AC: AC-SI-39-4（R155 (a)(b)；D-QA-11）promote 前置缺 heldout.freeze 跳過且不記 skip
+# 測試類型: Integration
+# 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_4_E_1_ -q -p no:xdist -o addopts=
+
+Feature: 前置缺件跳過
+Scenario: 缺 heldout.freeze 的 PROP 不 promote，補上後下一心跳可推進
+  Given 一個 `verified` 的 PROP 有已入帳的 `dec(promote)`，但夾具刪去其 `heldout.freeze` 事件；排程啟用且本格另有 (f) 到期的其他六種跳過皆不成立
+  When `HEARTBEAT` 兩次；補回 `heldout.freeze` 後再 `HEARTBEAT` 一次
+  Then 前兩次無 `app.promote`、無 commit、無新增 `sched.skip`、日誌各一行記缺 `heldout.freeze`；補回後的心跳 `promote` 成功並 commit
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_4_E_1]"
+```
+```gherkin
+# AT-439-5-E-1
+# 對應 AC: AC-SI-39-5（R157；D-QA-11）日誌行格式負控
+# 測試類型: Integration
+# 自動化工具: pytest + tmp 目錄 + 替身（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_5_E_1_ -q -p no:xdist -o addopts=
+
+Feature: 日誌格式
+Scenario: 成功與失敗步驟的欄位、單行、不含金鑰
+  Given 一個必拒的稽核檔（入帳步驟失敗，說明文字含換行）、其餘步驟成功；測試金鑰為執行期組出的唯一字串 `K`
+  When `HEARTBEAT` 一次並逐行解析 `patrol.log`
+  Then 每行符合 `<ISO 帶 offset> step=<巡視|入帳|到期|運轉|推進|commit> rc=<整數> code=<非空字串> <說明>` 的單行形；成功步驟為 `rc=0` 且 `code=-`；失敗的入帳步驟 `rc` 非 0 且 `code` 為拒收碼（不為 `-`）；說明中的換行被改為空白；全檔不含 `K`
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_5_E_1]"
+``````gherkin
 # AT-439-1-1
 # 對應 AC: AC-SI-39-1（R149）五種 kind 的入帳與排序
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_1_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_1_1_ -q -p no:xdist -o addopts=
 
 Feature: 逐檔入帳
 Scenario: decide、obs-add、obs-close、sched-set、run-request 依 time 升冪
@@ -1193,7 +1315,7 @@ Scenario: decide、obs-add、obs-close、sched-set、run-request 依 time 升冪
 # 對應 AC: AC-SI-39-1（R149、NFR-P4-3）金鑰不洩漏；同心跳改週期加立即啟動
 # 測試類型: Integration
 # 自動化工具: pytest + 替身 claude + 全樹掃描（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_1_E_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_1_E_1_ -q -p no:xdist -o addopts=
 
 Feature: 金鑰面
 Scenario: 植入唯一字串後全樹掃描為零
@@ -1207,7 +1329,7 @@ Scenario: 植入唯一字串後全樹掃描為零
 # 對應 AC: AC-SI-39-2（R149）入帳被拒的處置
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 真 git（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_2_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_2_1_ -q -p no:xdist -o addopts=
 
 Feature: 拒收處置
 Scenario: 保留稽核檔、一列 obs-draft、不重試、去重、與手動入帳互斥
@@ -1221,7 +1343,7 @@ Scenario: 保留稽核檔、一列 obs-draft、不重試、去重、與手動入
 # 對應 AC: AC-SI-39-3（R155 (a)(b)）approve 後的推進
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_3_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_3_1_ -q -p no:xdist -o addopts=
 
 Feature: sandbox、verify、card --issue
 Scenario: 原樣進卡面；缺凍結者就跳過
@@ -1235,7 +1357,7 @@ Scenario: 原樣進卡面；缺凍結者就跳過
 # 對應 AC: AC-SI-39-3（R155 (a)(c)）promote、rollback 與 run-close
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_3_2_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_3_2_ -q -p no:xdist -o addopts=
 
 Feature: 晉升、回滾與收尾
 Scenario: 依序推進，皆離開待人工決定態後 run-close
@@ -1249,7 +1371,7 @@ Scenario: 依序推進，皆離開待人工決定態後 run-close
 # 對應 AC: AC-SI-39-4（R155 (a)）無 DEC 零動作、偽造 DEC 被擋
 # 測試類型: Integration
 # 自動化工具: pytest + 真 git + 夾具 repo（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_4_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_4_1_ -q -p no:xdist -o addopts=
 
 Feature: 前置恆為人的決定
 Scenario: 缺 DEC 與偽造 DEC
@@ -1263,7 +1385,7 @@ Scenario: 缺 DEC 與偽造 DEC
 # 對應 AC: AC-SI-39-5（R157）日誌格式與步驟獨立
 # 測試類型: Integration
 # 自動化工具: pytest + tmp 目錄 + 替身（hermetic）
-# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_patrol.py -k AT_439_5_1_ -q -p no:xdist -o addopts=
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_advance.py -k AT_439_5_1_ -q -p no:xdist -o addopts=
 
 Feature: 失敗可偵測
 Scenario: 入帳失敗不阻止到期判定；日誌丟失不影響帳本
@@ -1286,7 +1408,7 @@ Feature: 期望表與安裝器
 Scenario: 任務集合、逐任務逐值、小時數
   Given `tools/install_windows_nightly.ps1` 與 `tools/scheduled_task_expectations.json` 的現況；`test_install_windows_nightly.py` 的三層鎖已依 R163 同步
   When 解析安裝器註冊的任務名（含第三支）、期望表、套用手段；對安裝器副本逐項改動（刪去 `IgnoreNew` 的套用、把 patrol 的小時數改成 4、把 patrol 的 `MultipleInstancesPolicy` 期望改成 `StopExisting`、任務集合少一支）
-  Then 期望表任務集合等於安裝器註冊集合且恰含 `AutoClaude_Nightly`、`AutoClaude_WindowsSmoke`、`AutoSDD_SI_Patrol`；三支的 `expected` 鍵集合相同（七鍵）；patrol 的期望值為 `Settings/ExecutionTimeLimit` 是 `PT5H`、`Settings/MultipleInstancesPolicy` 是 `IgnoreNew`、`Principals/Principal/LogonType` 是 `S4U`，且 `expected_trigger_time` 缺省；nightly 與 smoke 的 `StopExisting` 對應 COM fixup（`MultipleInstances = 3`）、patrol 的 `IgnoreNew` 對應模組參數 `-MultipleInstances IgnoreNew`，兩種套用手段各只出現在其任務上；`Register-ScheduledTask` 恰三處且各帶 `-Principal $principal`；四個副本改動各使對應鎖轉紅（逐項 `assertFalse` 於鎖函式回傳）；`schedule_backend.py` 與 `check_scheduled_task_drift.py` 的位元組與 HEAD 相同
+  Then 期望表任務集合等於安裝器註冊集合且恰含 `AutoClaude_Nightly`、`AutoClaude_WindowsSmoke`、`AutoSDD_SI_Patrol`；三支的 `expected` 鍵集合相同（七鍵）；patrol 的期望值為 `Settings/ExecutionTimeLimit` 是 `PT1H`、`Settings/WakeToRun` 是 `false`（nightly、smoke 為 `true`）、`Settings/MultipleInstancesPolicy` 是 `IgnoreNew`、`Principals/Principal/LogonType` 是 `S4U`，且 `expected_trigger_time` 缺省；nightly 與 smoke 的 `StopExisting` 對應 COM fixup（`MultipleInstances = 3`）、patrol 的 `IgnoreNew` 對應模組參數 `-MultipleInstances IgnoreNew`，兩種套用手段各只出現在其任務上；`Register-ScheduledTask` 恰三處且各帶 `-Principal $principal`；四個副本改動各使對應鎖轉紅（逐項 `assertFalse` 於鎖函式回傳）；`schedule_backend.py` 與 `check_scheduled_task_drift.py` 的位元組與 HEAD 相同
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_436_4_1]"
 ```
 ```gherkin
@@ -1412,7 +1534,7 @@ Feature: trigger f 的守衛
 Scenario: by、due_at、origin
   Given 對照組：啟用於 `O`、`run.open(f)` 的 `due_at` 為 `O`（k 為 0）與 `O＋1 天`（k 為 1），`by` 皆 `patrol`；違規：(甲)`by` 為 `main`；(乙)缺 `due_at`；(丙)`due_at` 為 `O＋1 天＋1 分`；(丁)`run.open(f)` 之前無任何 `sched.set(enabled=true)`；(戊)週期改為 720 後的 `run.open(f)` 其 `due_at` 為舊週期的格起點而非新 origin 的整數倍
   When 各跑 `check --json`
-  Then 對照組 `PASS`（含 k 為 0 的邊界）；違規依序為 `TRIGGER-F-BY`、`TRIGGER-F-DUE-AT`、`TRIGGER-F-DUE-AT`、`TRIGGER-F-NO-ORIGIN`、`TRIGGER-F-DUE-AT`；origin 取該 `run.open` 之前最近一筆 `sched.set(enabled=true)`
+  Then 對照組 `PASS`（含 k 為 0 的邊界）；違規依序為 `TRIGGER-F-BY`、`TRIGGER-F-DUE-AT`、`TRIGGER-F-DUE-AT`、`TRIGGER-F-NO-ORIGIN`、`TRIGGER-F-DUE-AT`；origin 取該 `run.open` 之前最近一次重置事件（R142 (b)）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_437_5_E_2]"
 ```
 ```gherkin
@@ -1496,7 +1618,7 @@ Feature: 參數九鍵
 Scenario: 鍵集合與預設值
   Given 真 `params.json` 與 `params.PARAM_SPECS`
   When 比對
-  Then 兩者鍵集合相等且共 41 個；頂層鍵依位元組序；九鍵值為 `sched_heartbeat_minutes` 15、`sched_period_minutes_default` 1440、`sched_period_minutes_min` 60、`sched_period_minutes_max` 10080、`sched_run_budget_minutes` 90、`sched_blackout_local` 為 `["21:00-00:30"]`、`sched_driver_quiet_minutes` 30、`sched_auto_commit` 為 `true`、`sched_auto_push` 為 `false`；`param_findings(真值)` 為空；對真 repo `check` 的 `params.keys` 為 `PASS`
+  Then 兩者鍵集合相等且共 41 個；頂層鍵依位元組序；九鍵值為 `sched_heartbeat_minutes` 15、`sched_period_minutes_default` 1440、`sched_period_minutes_min` 60、`sched_period_minutes_max` 10080、`sched_run_budget_minutes` 90、`sched_blackout_local` 為 `["21:00-01:30"]`、`sched_driver_quiet_minutes` 30、`sched_auto_commit` 為 `true`、`sched_auto_push` 為 `false`；`param_findings(真值)` 為空；對真 repo `check` 的 `params.keys` 為 `PASS`
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_2_1]"
 ```
 ```gherkin
@@ -1524,7 +1646,7 @@ Feature: 連動
 Scenario: 黑窗涵蓋每個期望觸發時刻；指紋與基線三列
   Given `check_scheduled_task_drift.load_trigger_expectations` 回傳的每個 `HH:mm`；`params.json` 的黑窗；`params.fingerprint`；`SelfImproving_LedgerDb_P0_Baseline.md`
   When 對每個觸發時刻以 `sched.blackout_hit` 判；把黑窗改成不涵蓋 21:30 的副本重判；把九鍵之一改值後重算指紋；比對基線文件三列
-  Then 每個期望觸發時刻（現為 21:30 與 22:30）皆在黑窗內；副本判出未涵蓋；改任一 `sched_*` 值使指紋改變、`metrics.md` 與 `metrics_rev` 不改；基線文件的 `params.json` 雜湊與位元組數、指紋、`CHECK_RULES_REV` 三列與活值相等（沿既有鎖 `test_AT_LD_02_6_1`）
+  Then 每個期望觸發時刻（現為 21:30 與 22:30）皆在黑窗內，且各觸發時刻加 80 分鐘（十倍常態歷時的下限）仍在黑窗內；副本判出未涵蓋；改任一 `sched_*` 值使指紋改變、`metrics.md` 與 `metrics_rev` 不改；基線文件的 `params.json` 雜湊與位元組數、指紋、`CHECK_RULES_REV` 三列與活值相等（沿既有鎖 `test_AT_LD_02_6_1`）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_2_E_2]"
 ```
 ```gherkin
@@ -1552,7 +1674,7 @@ Feature: runner.run_argv
 Scenario: 靜態不變量
   Given `runner.py` 與全套件原始碼
   When 掃描
-  Then 出現 `subprocess` 字樣的檔恰為 `git.py`、`runner.py`；`run_argv` 的 `Popen` 或 `run` 呼叫 `shell` 為 `False`（或缺省）、`communicate` 帶 `timeout`；`run_argv` 函式本體不含 `os.environ`；`run_probe` 的環境白名單與 `_ENV_KEYS` 不變；`forbidden_hits` 對全部新檔為空（無 `time.sleep`、`while True`、`os.fork`、`signal.alarm`）；`schedarm.py` 內 `launchctl` 與 `powershell.exe` 的 argv 字面位於平台守衛作用域內，`test_platform_neutral_paths.py` 的 `TestForeignExecutableArgvIsGuarded`、`TestForeignPlatformApiIsGuarded`、`TestForeignApiVocabularyOnlyGrows` 仍綠，兩張債表無 selfimproving 條目
+  Then 出現 `subprocess` 字樣的檔恰為 `git.py`、`runner.py`；`run_argv` 的 `Popen` 或 `run` 呼叫 `shell` 為 `False`（或缺省）、`communicate` 帶 `timeout`；`run_argv` 函式本體不含 `os.environ`；`run_probe` 的環境白名單與 `_ENV_KEYS` 不變；`forbidden_hits` 對全部新檔為空（經 `FORBIDDEN_EXEMPT` 豁免後：`schedarm.py` 的 `schtasks`、`launchctl`、`Register-ScheduledTask` 不算命中，其餘 `FORBIDDEN` 條目照判，含 `time.sleep`、`while True`、`os.fork`、`signal.alarm`）；`run_argv` 與 `spawn_detached` 兩函式本體皆不含 `os.environ`、`shell` 皆為 False；`schedarm.py` 內 `launchctl` 與 `powershell.exe` 的 argv 字面位於平台守衛作用域內，`test_platform_neutral_paths.py` 的 `TestForeignExecutableArgvIsGuarded`、`TestForeignPlatformApiIsGuarded`、`TestForeignApiVocabularyOnlyGrows` 仍綠，兩張債表無 selfimproving 條目
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_3_2]"
 ```
 ```gherkin
@@ -1564,12 +1686,25 @@ Scenario: 靜態不變量
 
 Feature: 判準有牙
 Scenario: 四個注入各被抓到、對照組綠
-  Given 真套件的副本；對照組不改；注入：(甲)新增未登記檔；(乙)`sched.py` 加 `from . import runner`；(丙)登記表把 `patrol.py` 標為 `ro`；(丁)`runner.run_argv` 加讀 `os.environ`
+  Given 真套件的副本；對照組不改；注入：(甲)新增未登記檔；(乙)`sched.py` 加 `from . import runner`；(丙)登記表把 `patrol.py` 標為 `ro`；(丁)`runner.run_argv` 加讀 `os.environ`；(戊)`sched.py` 加 `launchctl` 字面（`schedarm.py` 以外仍被抓）；(己)`schedarm.py` 加 `time.sleep`（豁免表不豁免核心禁字樣）
   When 各跑 `capability_problems` 與 AT-440-3-2 的靜態掃描函式
-  Then 對照組為空；(甲)含「未登記」；(乙)含 `②′` 或「import 閉包」；(丙)含 `②′`；(丁)被靜態掃描判出 `os.environ`
+  Then 對照組為空；(甲)含「未登記」；(乙)含 `②′` 或「import 閉包」；(丙)含 `②′`；(丁)被靜態掃描判出 `os.environ`；(戊)(己)各被 `capability_problems` 判出（戊含 `launchctl`、己含 `time.sleep`）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_3_E_1]"
 ```
 ```gherkin
+# AT-440-3-3
+# 對應 AC: AC-P4-040-3（R161 (d)；D-QA-1）schedarm 的平台專屬 argv 住在 sys.platform 守衛內
+# 測試類型: Unit
+# 自動化工具: unittest + AST（hermetic）
+# 判定指令: python -m pytest tools/tests/test_selfimproving_schedule_gate.py -k AT_440_3_3_ -q -p no:xdist -o addopts=
+
+Feature: 平台守衛
+Scenario: powershell.exe、schtasks、launchctl 字面只出現在守衛分支
+  Given `schedarm.py` 原始碼與 `test_platform_neutral_paths.py` 的 `TestForeignExecutableArgvIsGuarded` 判準（五種罩法）；注入副本：把 `launchctl` argv 搬到無守衛的模組層、把 `powershell.exe` argv 搬到 `if sys.platform` 以外的分支
+  When 對真檔與注入副本各以 AST 判定每個單平台 argv 字面的所在作用域，並執行 `TestForeignExecutableArgvIsGuarded`
+  Then 真檔每個 `powershell.exe`、`schtasks`、`launchctl` 字面都位於 `sys.platform`（或等價守衛函式）分支內；`TestForeignExecutableArgvIsGuarded` 仍綠且 `_FOREIGN_EXE_ARGV_DEBT` 沒有 selfimproving 條目；兩個注入副本各被判出
+  And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_3_3]"
+``````gherkin
 # AT-440-4-1
 # 對應 AC: AC-P4-040-4（R162）SOP 條文必含項
 # 測試類型: Unit
@@ -1635,8 +1770,8 @@ Scenario: 每個站點的斷言值正確、其餘函式不變
 Feature: 錨定
 Scenario: 每個 AT 恰一個測試函式
   Given 本檔文字（以 `real_tcs("P4")` 取，glob 恰命中一檔）；`parse_at_headers`、`anchor_problems`、`collect_nodes`（匯入）
-  When 解析 §2 全部 AT 標頭並於三個新測試檔收集節點
-  Then 解析出 96 個 AT；`anchor_problems` 為空；每個 AT 的 `-k` 為錨定名、恰收一個節點；三個檔各不超過 35 個 AT；AT 清單的 ID 集合等於 §1 映射表的 ID 集合
+  When 解析 §2 全部 AT 標頭並於四個新測試檔收集節點
+  Then 解析出 105 個 AT；`anchor_problems` 為空；每個 AT 的 `-k` 為錨定名、恰收一個節點；四個檔各不超過 35 個 AT；AT 清單的 ID 集合等於 §1 映射表的 ID 集合
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_6_1]"
 ```
 ```gherkin
@@ -1692,7 +1827,7 @@ Feature: 變更面
 Scenario: 只動允許集合
   Given 實作輪起點的基準 commit（以環境變數 `SI_P4_BASE_SHA` 提供；未設時以 `HEAD` 的父 commit 為界並於輸出註明）
   When `git diff --name-only <基準>` 與 `git ls-files --others --exclude-standard`
-  Then 每個路徑 ⊆ §5.7 的允許集合；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`tools/check_scheduled_task_drift.py`、PRD、SOP、P0～P3 TCS、`AgentConsole/**`、`.github/**` 的差異為空；本檔三個新測試檔與夾具不含 `skip`、`skipTest`、`xfail` 字樣
+  Then 每個路徑 ⊆ §5.7 的允許集合；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`tools/check_scheduled_task_drift.py`、PRD、SOP、P0～P3 TCS、`AgentConsole/**`、`.github/**` 的差異為空；本檔四個新測試檔與夾具不含 `skip`、`skipTest`、`xfail` 字樣
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_8_1]"
 ```
 
@@ -1710,6 +1845,9 @@ Scenario: 只動允許集合
 | 安裝器三層鎖 | `test_install_windows_nightly.py`：`TestScheduledTaskExpectationsSsot::test_ssot_covers_exactly_the_tasks_the_installer_registers`（任務名解析 regex 須認得第三支）、`::test_every_expected_value_is_actually_applied_by_the_installer`（改逐任務逐值）、`::test_execution_time_limit_expectation_matches_installer_hours`（改逐任務）、`TestUnattendedExecutionHardening` 的 `test_principal_is_s4u_and_applied_to_both_tasks`（`Register-ScheduledTask` 兩處→三處）、`test_stop_existing_applied_via_com_because_module_enum_cannot_express_it`（呼叫名單仍為 nightly、smoke，不含 patrol）、`test_execution_time_limit_is_bounded`（取值改逐任務並維持 ≤8）、`test_status_surfaces_the_three_regression_prone_fields`、`TestStatusExitCodeRuntime`／`test_whatif_previews_every_task_without_touching_scheduler`（預覽三支） | 見 R161 (b)；期望表 `why_each` 補逐任務說明 |
 | SOP 相關 | `test_selfimproving_events.py::TestSopArticles`、`test_selfimproving_p3_meta.py` 的 `sop_p3_problems` 相關、`test_selfimproving_p2_meta.py` 的 `sop_p2_problems` 相關：以標題切段者須對 SOP 新增的兩個 `##` 節（位於檔尾）仍成立 | 預期零改；若紅以 ⚖ 回報 |
 | Console 稽核 `kind` | `test_selfimproving_console_obs.py` 內斷言 `consoleaudit.KINDS` 為三值或列舉 `kind` 的站點（現查） | 3 改 5 |
+| 能力登記禁字樣（D-QA-1） | `test_selfimproving_capability.py`：`FORBIDDEN`（現約 91～106 行，內容**不動**）旁新增常數 `FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}`，`capability_problems` 對每檔的 `forbidden_hits` 先扣除該檔豁免項；`FORBIDDEN_SAMPLES`（現約 108 行起）與負控加「同字樣出現在 `schedarm.py` 以外仍紅」「`schedarm.py` 內 `time.sleep` 仍紅」兩例 | 加豁免表與兩個負控；既有 14 條禁字樣與其樣本逐位不變 |
+| 單平台外部執行檔 argv 守衛（D-QA-1） | `test_platform_neutral_paths.py::TestForeignExecutableArgvIsGuarded`（及 `TestForeignPlatformApiIsGuarded`、`TestForeignApiVocabularyOnlyGrows`）：`schedarm.py` 的 `powershell.exe`、`schtasks`、`launchctl` 字面須住在 `sys.platform` 守衛內，`_FOREIGN_EXE_ARGV_DEBT`、`_FOREIGN_API_SCOPE_DEBT` 不新增 selfimproving 條目 | 預期零改（以 AT-440-3-3 與 `test_selfimproving_capability.py::test_AT_240_5_E_2_runner_static_invariants` 守）；若該測試因新檔而紅，以 ⚖ 回報 |
+| `runner` 靜態不變量 | `test_selfimproving_capability.py::test_AT_240_5_1_exec_registry`、`test_AT_240_5_E_2_runner_static_invariants`：`runner.py` 新增 `run_argv` 與 `spawn_detached` 後，`Popen` 的 `shell` 與 `communicate` 的 timeout 斷言涵蓋新函式（`spawn_detached` 不等待、不呼叫 `communicate`，以其為豁免並釘「不等待」）、`CREATE_BREAKAWAY_FROM_JOB`、`CREATE_NEW_PROCESS_GROUP`、`DETACHED_PROCESS` 的 `getattr` 兜底字面 | 預期值增列 |
 | 護欄層與棘輪 | `tools/tests` 檔數下限、E501 棘輪、兩站點 guard-total、`_REPIN_APPROVED_ROUND_OVERAGE`、compat-ci `paths` | **主控收尾重釘（實作輪收尾步驟，不是設計缺口）** |
 | `test_context_budget_guard.py::PrintModeBgCeilingTest` | 本棒不改 `unattended_authz` 常數 | 預期零改；`SG` 以 AT-440-8-1 守 |
 
@@ -1717,13 +1855,16 @@ Scenario: 只動允許集合
 
 > 依測試檔的閱讀索引（權威清單是 §1；各 AT 的測試類型見 §1 與 §2 標頭）；測試函式名樣式 `test_<AT 底線形>_<slug>`（R164）。本節表格第一欄是測試檔、不是 AC ID。
 
-### 3.1 新增測試檔（`tools/tests/`；三檔，各不超過 35 個 AT）
+### 3.1 新增測試檔（`tools/tests/`；四檔，各不超過 35 個 AT）
 
 | 測試檔 | AT 數 | AT ID |
 |--------|-------|-------|
 | test_selfimproving_schedule_model.py（SM） | 32 | AT-436-1-1、AT-436-1-2、AT-436-1-3、AT-436-1-4、AT-436-1-E-1～AT-436-1-E-4、AT-436-2-1～AT-436-2-7、AT-436-2-E-2、AT-436-2-E-3、AT-436-5-1、AT-436-5-E-2、AT-437-1-1、AT-437-1-2、AT-437-1-3、AT-437-1-E-1、AT-437-1-E-2、AT-437-2-1、AT-437-2-2、AT-437-2-3、AT-437-2-E-1、AT-437-2-E-2、AT-437-3-1、AT-437-3-2、AT-437-3-E-1 |
-| test_selfimproving_schedule_patrol.py（SP） | 34 | AT-436-2-E-1、AT-436-3-1、AT-436-3-2、AT-436-3-E-1、AT-436-3-E-2、AT-436-5-E-1、AT-436-6-1、AT-436-6-E-1、AT-438-1-1、AT-438-1-2、AT-438-1-E-1、AT-438-1-E-2、AT-438-2-1、AT-438-2-E-1、AT-438-3-1、AT-438-3-2、AT-438-3-E-1、AT-438-3-E-2、AT-438-4-1、AT-438-4-E-1、AT-438-5-1、AT-438-5-E-1、AT-438-5-E-2、AT-438-5-E-3、AT-438-6-1、AT-438-6-E-1、AT-438-7-E-1、AT-439-1-1、AT-439-1-E-1、AT-439-2-1、AT-439-3-1、AT-439-3-2、AT-439-4-1、AT-439-5-1 |
-| test_selfimproving_schedule_gate.py（SG） | 30 | AT-436-4-1、AT-436-4-2、AT-436-4-3、AT-436-4-E-1、AT-436-4-E-2、AT-436-5-2、AT-437-5-1、AT-437-5-2、AT-437-5-E-1～AT-437-5-E-3、AT-438-7-1、AT-440-1-1、AT-440-1-E-1、AT-440-1-E-2、AT-440-2-1、AT-440-2-E-1、AT-440-2-E-2、AT-440-3-1、AT-440-3-2、AT-440-3-E-1、AT-440-4-1、AT-440-4-E-1、AT-440-5-1、AT-440-5-E-1、AT-440-6-1、AT-440-6-E-1、AT-440-7-1、AT-440-7-E-1、AT-440-8-1 |
+| test_selfimproving_schedule_patrol.py（SP） | 21 | AT-436-2-E-1、AT-436-3-1、AT-436-3-2、AT-436-3-E-1、AT-436-3-E-2、AT-436-5-E-1、AT-436-6-1、AT-436-6-E-1、AT-438-1-1、AT-438-1-2、AT-438-1-E-1、AT-438-1-E-2、AT-438-1-E-3、AT-438-2-1、AT-438-2-E-1、AT-438-3-1、AT-438-3-2、AT-438-3-E-1、AT-438-3-E-2、AT-438-4-1、AT-438-4-E-1 |
+| test_selfimproving_schedule_advance.py（SA） | 21 | AT-438-5-1、AT-438-5-E-1、AT-438-5-E-2、AT-438-5-E-3、AT-438-6-1、AT-438-6-2、AT-438-6-E-1、AT-438-7-E-1、AT-438-8-1、AT-438-8-E-1、AT-439-1-1、AT-439-1-E-1、AT-439-2-1、AT-439-2-E-1、AT-439-3-1、AT-439-3-2、AT-439-3-E-1、AT-439-4-1、AT-439-4-E-1、AT-439-5-1、AT-439-5-E-1 |
+| test_selfimproving_schedule_gate.py（SG） | 31 | AT-436-4-1、AT-436-4-2、AT-436-4-3、AT-436-4-E-1、AT-436-4-E-2、AT-436-5-2、AT-437-5-1、AT-437-5-2、AT-437-5-E-1～AT-437-5-E-3、AT-438-7-1、AT-440-1-1、AT-440-1-E-1、AT-440-1-E-2、AT-440-2-1、AT-440-2-E-1、AT-440-2-E-2、AT-440-3-1、AT-440-3-2、AT-440-3-3、AT-440-3-E-1、AT-440-4-1、AT-440-4-E-1、AT-440-5-1、AT-440-5-E-1、AT-440-6-1、AT-440-6-E-1、AT-440-7-1、AT-440-7-E-1、AT-440-8-1 |
+
+> SA 為 D-QA 增補後新增：SP 原 34 個，增補 AC-SI-38-8、38-6 的新 AT 與 AC-SI-39-2～39-5 的獨立負控後逾 35，故把入帳之後的推進、commit、收尾與 Console (a) 運轉一族分出（主控裁決 D-QA-2、D-QA-10、D-QA-11；§5.7 已登記新檔，SG 31 個仍未逾上限，不需拆分）。
 
 **3.3 Contract Tests 與 3.4 E2E Tests**：（均無：P4 根層半沒有鍵 B 的 AutoClaude 契約測試；出口 (a)～(f) 的真機運轉屬實跑檢核 V30～V35，不入 AT，因為 AT 不碰真帳本、真 OS 任務、真 `claude` 與外網。Console 側的 Docker 全棧 V 系列在 Console TCS。）
 
@@ -1776,7 +1917,7 @@ Scenario: 只動允許集合
 
 ### 5.6 測試 seam、函式級入口、判準函式與逐字清單
 
-- **被測函式級入口**（建議名）：`sched.schedule_obj(events, params, now, *, armed)`（回 R158 的 `schedule` 物件）；`sched.decide_skip(inputs) -> str | None`（R143）；`sched.attempt_plan(events, now, inputs)`、`sched.skip_plan(events, now, reason, detail)`（回要追加的事件 dict 或 `None`）；`sched.local_hm(now)`（R143 (b) 的唯一本機時分來源，供替身）；`sched.blackout_hit(hm, ranges)`；`sched.quota_verdict(state)`（回 `skip`、`degrade`）；`sched.other_driver(repo, now, params)`；`sched.dirty_paths(repo)`；`sched.spawn_problem(repo, *, which, preflight)`；`sched.armed_value(runner)`；`unattended.gate(verb, run, env)`；`consoleaudit.body_guard(kind, body)`；`patrolbrief.render(template, fields)`、`patrolbrief.template_problems(sop_text)`；`patrol.main(argv, deps=None) -> int`（CLI 與測試共用；`deps` 缺省取真依賴）；`runner.run_argv(argv, *, env, timeout, cwd)`；`schedarm.arm(...)`、`schedarm.disarm(...)`（以注入的 `run_argv` 取代 `runner.run_argv`）；既有 seam `evwrite.PAUSE_HOOK`、`evwrite.LOCK_TIMEOUT_SECONDS`、`resume_route.fresh_argv`、`resume_route.preflight_problem`、`quota_gate.read_quota`、`transcript_activity.newest_conversation_at`。
+- **被測函式級入口**（建議名）：`sched.schedule_obj(events, params, now, *, armed)`（回 R158 的 `schedule` 物件）；`sched.decide_skip(inputs) -> str | None`（R143）；`sched.attempt_plan(events, now, inputs)`、`sched.skip_plan(events, now, reason, detail)`（回要追加的事件 dict 或 `None`）；`sched.local_hm(now)`（R143 (b) 的唯一本機時分來源，供替身）；`sched.blackout_hit(hm, ranges)`；`sched.quota_verdict(state)`（回 `skip`、`degrade`）；`sched.other_driver(repo, now, params)`；`sched.dirty_paths(repo)`；`sched.spawn_problem(repo, *, which, preflight)`；`sched.armed_value(runner)`；`unattended.gate(verb, run, env)`；`consoleaudit.body_guard(kind, body)`；`patrolbrief.render(template, fields)`、`patrolbrief.template_problems(sop_text)`；`patrol.main(argv, deps=None) -> int`（CLI 與測試共用；`deps` 缺省取真依賴）；`runner.run_argv(argv, *, env, timeout, cwd)`、`runner.spawn_detached(argv, *, env, cwd) -> int`；`patrol.main` 的 `deps` 另含 `spawn_detached`（替身記錄 argv、env、cwd 並回假 pid）、`pid_alive(pid, started_at)`、`kill_tree(pid)`；`schedarm.arm(...)`、`schedarm.disarm(...)`（以注入的 `run_argv` 取代 `runner.run_argv`）；既有 seam `evwrite.PAUSE_HOOK`、`evwrite.LOCK_TIMEOUT_SECONDS`、`resume_route.fresh_argv`、`resume_route.preflight_problem`、`quota_gate.read_quota`、`transcript_activity.newest_conversation_at`。
 - **測試自有判準函式**：`sop_p4_problems(text)`（碼 `SOP-P4-REQ-MISSING`、`SOP-P4-STALE-WORDING`、`SOP-P4-FENCE`、`SOP-P4-FORBIDDEN`、`SOP-P4-PLACEHOLDER`）；`patrol_verb_calls(src)`（AST；碼 `V-PUSH`、`V-NOVERIFY`、`V-ADD-ALL`、`V-DECIDE-TRANSCRIPT`、`V-UNKNOWN-VERB`）；`secret_scan(root, needle)`（全樹位元組掃描）。沿用既有：`capability_problems`、`forbidden_hits`（`test_selfimproving_capability.py`）；`parse_at_headers`、`anchor_problems`、`collect_nodes`（`test_selfimproving_p2_meta.py`，匯入不複製）；`_ps_engine`（`test_install_windows_nightly.py`）。
 - **SOP-P4-REQ**（〈巡邏與無人運轉（P4）〉與相關節須含；字面須位於程式碼圍欄之外，除另註）：1 四個子節標題；2 〈每心跳做什麼〉表的四個步驟列與七種跳過字面 `disabled`、`blackout`、`quota-band`、`other-driver`、`dirty-tree`、`run-open`、`spawn-failed`；3 〈停用與逃生口〉的 `sched set --enabled false`、`sched disarm`、`AUTOSDD_SI_PATROL_OFF`；4 〈日誌與逾期處置〉的 `overdue` 與「不得手補 `sched.skip`」；5 〈無人運轉任務書範本〉圍欄（位於圍欄內）含 R152 的全部大寫占位符與四個 handback 標題；6 〈啟動條件〉含第六類與 `日曆格`；7 〈P2 動詞〉序列條文含 `run-scoped`（或 `AUTOSDD_SI_PATROL_RUN`）。另：〈P2 動詞〉不含「無人值守：有設時寫入動詞一律 rc 1」；〈擷取者〉〈歸因者〉〈提案者〉〈研究者〉四節不含 P3 `SOP-P3-FORBID` 清單的片段。
 
@@ -1785,7 +1926,7 @@ Scenario: 只動允許集合
 | 類別 | 路徑 |
 |------|------|
 | 新增（程式） | `tools/lib/selfimproving/{sched,unattended,schedcheck,schedwrite,patrolbrief,patrol,patrolrun,schedarm}.py`，可選 `evspec.py`（R160 兩態擇一）；`tools/si_patrol_tick.ps1` |
-| 新增（測試） | `tools/tests/{_selfimproving_p4_fixtures,test_selfimproving_schedule_model,test_selfimproving_schedule_patrol,test_selfimproving_schedule_gate}.py` |
+| 新增（測試） | `tools/tests/{_selfimproving_p4_fixtures,test_selfimproving_schedule_model,test_selfimproving_schedule_patrol,test_selfimproving_schedule_advance,test_selfimproving_schedule_gate}.py` |
 | 修改（程式） | `tools/lib/selfimproving/{events,status,export,params,check,evcheck,decwrite,writeverbs,consoleaudit,runner}.py`（增量上限依 PRD §9.1〈C4 套件檔案表（P4）〉與 R160：`writeverbs.py` 總數 ≤400、`events.py` 總數 ≤400 否則拆 `evspec`；`fold.py` 不得改）；`tools/selfimproving.py`（入口，合併由收尾單人窗口做）；其他 P2 動詞檔（`sandbox.py`、`verify.py`、`promote.py`、`obswrite.py` 等）僅限把 `refuse_unattended` 呼叫改為 `unattended.gate` 的站點 |
 | 修改（OS 載具與資料） | `tools/install_windows_nightly.ps1`、`tools/scheduled_task_expectations.json`；`docs/06_quality/SelfImproving_Protocol/params.json`（加九鍵，與 `PARAM_SPECS` 同 commit）；`docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md`（三列，同 commit） |
 | 修改（測試） | R163／§2.5 同步表所列既有測試檔的指名函式與常數；`test_selfimproving_capability.py` 的 `CAPABILITY` 表與計數 |
@@ -1796,7 +1937,7 @@ Scenario: 只動允許集合
 
 ## 6. RTM 連結確認
 
-追溯鏈（US→AC→AT→測試檔→規則→NFR）已在 §1（AC→AT）、FRD-lite（US→AC、NFR）與下表閉合；根層 RTM 檔由主控於 SCG-4 依落點 SSOT 落 `docs/06_quality/RTM-SelfImproving-P4-<日期>.md`（本檔不代寫）。**覆蓋核對**：PRD AC 23 個中 22 個有至少一個 AT，`AC-SI-37-4` 在本檔無 AT（委 Console TCS）；自增 AC 8 個皆有至少一個正控與一個負控；全檔 AT 96 個（正控 53、負控 43），分佈於三個測試檔（SM 32、SP 34、SG 30），每個新檔不超過 35 個 AT（NFR-P4-6）。
+追溯鏈（US→AC→AT→測試檔→規則→NFR）已在 §1（AC→AT）、FRD-lite（US→AC、NFR）與下表閉合；根層 RTM 檔由主控於 SCG-4 依落點 SSOT 落 `docs/06_quality/RTM-SelfImproving-P4-<日期>.md`（本檔不代寫）。**覆蓋核對**：PRD AC 24 個中 23 個有至少一個 AT，`AC-SI-37-4` 在本檔無 AT（委 Console TCS）；自增 AC 8 個皆有至少一個正控與一個負控；全檔 AT 105 個（正控 56、負控 49），分佈於四個測試檔（SM 32、SP 21、SA 21、SG 31），每個新檔不超過 35 個 AT（NFR-P4-6）。
 
 ### 6.1 US → AC → AT
 
@@ -1805,11 +1946,11 @@ Scenario: 只動允許集合
 | US-401 | AC-SI-36-1（8）、36-2（10）、36-5（4）、36-6（2）、37-3（3）、37-5（5） | 32 | SM、SP、SG | R138、R140～R145、R158；NFR-P4-1、4 |
 | US-402 | AC-SI-36-3（4）、36-4（5） | 9 | SP、SG | R148、R161；NFR-P4-2、5 |
 | US-403 | AC-SI-37-1（5）、37-2（5）、37-4（0） | 10 | SM | R141、R146 |
-| US-404 | AC-SI-38-1（4）、38-2（2）、38-3（4）、38-4（2）、38-5（4）、38-6（2）、38-7（2） | 20 | SP、SG | R150～R156；NFR-P4-3 |
-| US-405 | AC-SI-39-1（2）、39-2（1）、39-3（2）、39-4（1）、39-5（1） | 7 | SP | R149、R155、R157；NFR-P4-3、4 |
-| US-406 | AC-P4-040-1（3）、040-2（3）、040-3（3）、040-4（2）、040-5（2）、040-6（2）、040-7（2）、040-8（1） | 18 | SG | R137、R139、R159、R160、R162～R164；NFR-P4-6～10 |
+| US-404 | AC-SI-38-1（5）、38-2（2）、38-3（4）、38-4（2）、38-5（4）、38-6（3）、38-7（2）、38-8（2） | 24 | SP、SA、SG | R150～R156、R166、R167；NFR-P4-3 |
+| US-405 | AC-SI-39-1（2）、39-2（2）、39-3（3）、39-4（2）、39-5（2） | 11 | SA | R149、R155、R157；NFR-P4-3、4 |
+| US-406 | AC-P4-040-1（3）、040-2（3）、040-3（4）、040-4（2）、040-5（2）、040-6（2）、040-7（2）、040-8（1） | 19 | SG | R137、R139、R159、R160、R162～R164；NFR-P4-6～10 |
 
-### 6.2 行為規則 → AT（R137～R165 每條至少一個 AT）
+### 6.2 行為規則 → AT（R137～R167 每條至少一個 AT）
 
 | 規則 | 主題 | AT |
 |------|------|----|
@@ -1823,24 +1964,37 @@ Scenario: 只動允許集合
 | R145 | `overdue` | AT-437-3-E-1、AT-436-2-E-3 |
 | R146 | Console 載體入帳 | AT-437-2-1、AT-437-2-2、AT-437-2-3、AT-437-2-E-1、AT-437-2-E-2 |
 | R147 | `run-open --trigger f` | AT-436-1-4、AT-436-1-E-3 |
-| R148 | 一次性心跳 | AT-436-3-1、AT-436-3-2、AT-436-3-E-1、AT-436-3-E-2、AT-436-5-E-1、AT-436-6-1 |
-| R149 | 入帳 | AT-439-1-1、AT-439-1-E-1、AT-439-2-1 |
-| R150 | 運轉前置序 | AT-438-1-2、AT-438-1-E-1 |
+| R148 | 一次性心跳 | AT-436-3-1、AT-436-3-2、AT-436-3-E-1、AT-436-3-E-2、AT-436-5-E-1、AT-436-6-1、AT-438-6-2 |
+| R149 | 入帳 | AT-439-1-1、AT-439-1-E-1、AT-439-2-1、AT-439-2-E-1 |
+| R150 | 運轉前置序 | AT-438-1-2、AT-438-1-E-1、AT-438-8-1 |
 | R151 | spawn 形態 | AT-438-1-1、AT-438-1-E-2 |
 | R152 | 任務書 | AT-438-2-1、AT-438-2-E-1 |
 | R153 | run-scoped 授權 | AT-438-3-1、AT-438-3-2、AT-438-3-E-1、AT-438-3-E-2、AT-438-4-1 |
 | R154 | DEC 只認 Console、權限列 | AT-438-4-E-1、AT-438-7-1、AT-438-7-E-1 |
-| R155 | 機械步驟與 commit | AT-438-5-1、AT-438-5-E-1、AT-438-5-E-2、AT-438-5-E-3、AT-439-3-1、AT-439-3-2、AT-439-4-1 |
-| R156 | 收尾與 handback | AT-438-6-1、AT-438-6-E-1 |
-| R157 | 日誌 | AT-439-5-1 |
+| R155 | 機械步驟與 commit | AT-438-5-1、AT-438-5-E-1、AT-438-5-E-2、AT-438-5-E-3、AT-439-3-1、AT-439-3-2、AT-439-3-E-1、AT-439-4-1、AT-439-4-E-1 |
+| R156 | 收尾與 handback | AT-438-6-1、AT-438-6-2、AT-438-6-E-1 |
+| R157 | 日誌 | AT-439-5-1、AT-439-5-E-1 |
 | R158 | `status.schedule`、`export`、`console_pending` | AT-437-3-1、AT-437-3-2、AT-437-5-1 |
 | R159 | `params` 九鍵 | AT-440-2-1、AT-440-2-E-1、AT-440-2-E-2 |
-| R160 | 能力登記、LOC、`runner.run_argv` | AT-440-3-1、AT-440-3-2、AT-440-3-E-1 |
+| R160 | 能力登記、LOC、`runner.run_argv`、`spawn_detached`、`FORBIDDEN_EXEMPT` | AT-440-3-1、AT-440-3-2、AT-440-3-3、AT-440-3-E-1 |
 | R161 | OS 任務、包裝腳本、`schedarm` | AT-436-4-1、AT-436-4-2、AT-436-4-3、AT-436-4-E-1、AT-436-4-E-2、AT-436-5-2 |
 | R162 | SOP 條文 | AT-440-4-1、AT-440-4-E-1 |
 | R163 | 零退化與同步站點 | AT-440-5-1、AT-440-5-E-1 |
 | R164 | AT 錨定與範圍 | AT-440-6-1、AT-440-6-E-1、AT-440-8-1 |
 | R165 | 測試 seam | AT-436-2-2、AT-437-3-2（seam 注入的代表 AT） |
+| R166 | Console 載體 (a) 運轉的執行與收尾 | AT-438-8-1、AT-438-8-E-1 |
+| R167 | 脫離式 spawn 與步 0′ 巡視 | AT-438-1-1、AT-438-1-E-3、AT-438-6-1、AT-438-6-2、AT-438-6-E-1 |
+
+### 6.3 實跑檢核 V30～V35（**不是 AT**；主控與掌舵者於真機做，結果寫進 SCG-4 報告；未驗者如實標「未驗」，構造情境不得充當）
+
+| 編號 | 實查項 | 步驟與通過判準 |
+|------|--------|----------------|
+| V30 | 真機 spawn：`claude -p` 能起且心跳結束後仍存活（D-QA-14；兼驗 D-RT-4 的環境白名單） | 於真 OS 任務下觸發一次到期心跳；心跳行程結束後 `<si>/patrol/<RUN>/spawn.json` 的 pid 仍可查（Windows `Get-Process -Id`、macOS `ps -p`）且**心跳結束後存活至少 1 分鐘**；`claude` 因缺環境變數而起不來、或因 breakaway 被拒而記 `spawn-failed` 皆為不通過 |
+| V31 | 出口 (a)：真實到期巡邏開 `run.open(f)` 並 `run-close` | 事件帳本有 `run.open(trigger=f, by=patrol)` 與對應 `run.close`；日誌有各步驟行 |
+| V32 | 出口 (b)：Console `sched-set`／`run-request` 真機走完入帳 | 兩種稽核檔經巡邏器或手動入帳；`status.schedule.last_set.carrier` 為 console；(a) 運轉依 AC-SI-38-8 被執行 |
+| V33 | 出口 (c)：Console `approve` 被自動入帳並推進到 `verify` | `dec(approve)` 之後有 `app.sandbox`、`app.verify` 與 `card` 事件，verdict 原樣進卡面 |
+| V34 | 出口 (d)(f)：停用 OS 任務後 `overdue` 翻 true；`unmeasured` 額度帶確實跳過 | `sched show` 的 `overdue` 為 true 且指令與憑證輸出貼入；`unmeasured` 時有一筆 `sched.skip(quota-band)`、無 `run.open` |
+| V35 | 出口 (e)：git 歷史對 DEC 對帳（含巡邏器 commit） | 每個 `app.promote` 皆有對應人的 DEC；巡邏器 commit 只含 `touched` 與 SI 自有路徑、無 push |
 
 ---
 
@@ -1858,6 +2012,22 @@ Scenario: 只動允許集合
 | D-RT-5（原 ⚖ 6） | `tools/si_patrol_tick.ps1` 讀金鑰，但不在 PRD NFR-SI-02-1 的 `non_evolvable_globs` 與守衛面清單 | **主控裁決：**不列入 `non_evolvable_globs`（不擴守衛面，沿〈守衛面准入〉須暴露證據）；包裝腳本以 AT-436-4-3 靜態釘金鑰讀取面 | 替代：PRD 修訂把它列入不可進化面。再開：提案者的 PROP 觸及該腳本 |
 | ⚖ 7 | 旗標細部與碼名（PRD 只定動詞與行為）：`sched`／`patrol` 的旗標、`SCHED-QUOTE-REQUIRED` 等新碼、`sched show` 文字首行、`patrol` 輸出形態、`patrol.log` 行格式 | 本檔 R137、R138、R147、R157 與兩張碼表（本檔類推） | 再開：掌舵者看過真輸出後要求改版面 |
 | D-RT-6（原 ⚖ 8） | Console 契約規定 `reason`／`note` 有值時不得全空白，而 P3 R136 對 `decide.reason` 「只含空白者放行」 | **主控裁決：**新 kind 拒收全空白（`FIELD-BLANK`）、`decide` 維持放行；兩者並存，AT-437-1-E-2 釘新 kind | 替代：統一為拒收（需改 R136 與其 AT）。再開：Console 與 CLI 對同一份空白字串結論不一致 |
+| D-QA-1 | 能力登記 `FORBIDDEN` 的 OS 排程器字面與 `schedarm.py` 互斥 | **主控裁決（乙）**：`FORBIDDEN` 清單不動，加逐檔豁免表 `FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}`（只豁免這三條）與負控（`schedarm.py` 以外仍紅、`schedarm.py` 內核心禁字樣仍紅）；`schedarm.py` 的平台專屬 argv 須在 `sys.platform` 守衛內。落點 R160、R161 (d)、AT-440-3-2、AT-440-3-3、AT-440-3-E-1、§2.5 | 替代甲（全域移除三條）不採：削弱整個套件的守衛 |
+| D-QA-2 | Console (a) 運轉無人執行 | **主控裁決**：新增 AC-SI-38-8；巡邏心跳於同一心跳執行入帳的 Console (a) 運轉，不看啟用旗標、被擋只寫日誌不記 `sched.skip`。落點 R166、AT-438-8-1、AT-438-8-E-1、AT-438-1-1（Given 兩種運轉）；SC-SI-6 對映見追溯矩陣 | 替代（只由互動主控接手）不採：無人時按鈕等於失效 |
+| D-QA-3 | 推進路徑髒樹記 `sched.skip` | **主控裁決**：推進路徑只寫日誌、不寫任何 `sched.skip`；刪原 R155 (d) 的 skip 字樣。落點 R155、AT-438-5-E-1（加排程停用子情境）、AT-439-4-E-1 | 替代（專屬 reason、`due_at` 可為 null）不採 |
+| D-QA-4 | 無人值守 rc 1 清單三處不一致 | 以 AC-SI-38-3 ③ 為唯一真值表，補 `patrol`、`sched arm`、`sched disarm`；本檔 R153 與 AT-438-3-2 原本即含，不需改 | — |
+| D-QA-5 | (a)～(e) 殘字 | PRD 側修正，本檔無落點 | — |
+| D-QA-6 | 值不變的重送重置格線 | **主控裁決**：origin 只在 false 轉 true 或 `period_minutes` 改變時重置。落點 R142 (b)、R140、AT-436-1-3（加值不變重送子情境）、AT-437-5-E-2 | — |
+| D-QA-7 | `WakeToRun` 每日喚醒 | **主控裁決**：`AutoSDD_SI_Patrol` 的 `WakeToRun=false`，nightly、smoke 維持 true。落點 R161 (a)(b)、AT-436-4-1 | 再開：睡著的機器長期不巡邏（已知邊界，`overdue` 偵測） |
+| D-QA-8 | 黑窗只涵蓋觸發時刻 | **主控裁決**：`sched_blackout_local` 初值 `["21:00-01:30"]`，WHY 與「只約束嘗試時刻」寫入 R159。落點 R159、AT-440-2-1、AT-440-2-E-2 | — |
+| D-QA-9 | 無人值守 `decide --carrier console` 為實質死許可 | **主控裁決**：維持字面並加註（無人主控不持金鑰、實際為 `AUDIT-KEY-MISSING`、保留以 fail-closed）。落點 R153 ② | — |
+| D-QA-10 | 巡邏長跑擋入帳 | **主控裁決**：脫離式 spawn、`spawn.json`、步 0′ 巡視、同時至多一個進行中運轉、`ExecutionTimeLimit` 改 `PT1H`、`runner.spawn_detached`。落點 R148、R151、R156、R160、R161、R167、AT-436-3-1、AT-438-1-1、AT-438-6-1、AT-438-6-2、AT-438-6-E-1 | — |
+| D-QA-11 | AC-SI-39-2～39-5 缺獨立負控 AT | **主控裁決**：各補一個 `-E-` AT。落點 AT-439-2-E-1、AT-439-3-E-1、AT-439-4-E-1、AT-439-5-E-1 | — |
+| D-QA-12 | AC-SI-38-2 的 `obs` 入帳用詞 | 改「手寫入 OBS 帳本」。落點 R152 | — |
+| D-QA-13 | 手寫列無 `obs.add` 的說明 | SOP 範本步 2 補一句；本檔 R152 同註 | — |
+| D-QA-14 | 脫離式 spawn 在 Windows 的存活性（SD 提出） | **主控裁決**：旗標 `CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`、POSIX `start_new_session=True`；breakaway 被拒 fail-closed（(f) 記 `sched.skip(spawn-failed)`、(a) 只寫日誌，下一心跳再試）。落點 R167 (a)、AT-438-1-1（替身記錄旗標）、AT-438-1-E-3、§6.3 V30 | 再開：真機任務 job 不允許 breakaway 而永遠 spawn-failed（V30 現形） |
+| D-QA-15 | 黑窗內 Console 立即啟動被擋（SD 提出） | **主控裁決**：Console TCS 已加註，不另增 AT | — |
+| D-QA-16 | `run-open` 跳過判準應排除運轉自己 | **主控裁決**：R143 (f) 改為「本運轉以外的任何未關運轉」，與 R166 同字 | — |
 
 ### 7.2 P3 TCS 承接項與刻意不做
 
@@ -1872,7 +2042,7 @@ Scenario: 只動允許集合
 
 ## 📋 SCG-4 通過標準
 
-- [ ] 本檔 96 個 AT 全綠（SM 32、SP 34、SG 30；`-q -p no:xdist -o addopts=`），且 P0～P3、議題中心既有 AT 全綠（斷言值只在 §2.5 站點改）。
+- [ ] 本檔 105 個 AT 全綠（SM 32、SP 21、SA 21、SG 31；`-q -p no:xdist -o addopts=`），且 P0～P3、議題中心既有 AT 全綠（斷言值只在 §2.5 站點改）。
 - [ ] `python tools/selfimproving.py check` 對真 repo rc 為 0（35 項，`CHECK_RULES_REV` 為 5）；`params.json` 41 鍵；`status` 16 鍵；動詞 26 個；能力登記 59（或 60）鍵且分類計數與 R160 一致。
 - [ ] NFR-P4-10 閘門清單 (1)～(12) 逐項輸出貼入（ruff、LOC 分級、onboarding 基線快照、官方根層全套 unittest 多 CPU 模式、字面 ID 掃描）。
 - [ ] QA 獨立審查：突變驗證（對 `sched` 的格邊界、`decide_skip` 判序、`unattended.gate` 真值表、commit 白名單、金鑰面各做至少一個突變並確認對應 AT 轉紅）；斷言強度審查（不接受「rc 為 0」單獨作為判準的 AT）。

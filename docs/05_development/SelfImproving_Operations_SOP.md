@@ -417,7 +417,8 @@ launchctl list | grep AutoSDD_SI_Patrol
 ```
 
 - 安裝後仍須**啟用**：OS 任務只決定巡邏有沒有被叫醒，啟用旗標（`sched.set`）才決定巡邏做不做事；預設停用。啟用與設定週期：Console（`/self-improving` 的「自動演化排程」，ADMIN）；或主機 `sched set --enabled true --period-minutes <N> --sid <UUID> --line <N> --by main`（須掌舵者的引言，座標取得同〈座標取得〉；週期須在 `sched_period_minutes_min`～`sched_period_minutes_max` 內，值一律現查 `params.json`）。
-- 睡著或關機的機器不會觸發：Windows 任務有 `StartWhenAvailable`（開機後補跑一次），macOS 不補（`pmset -g custom` 現查）；漏跑由 `overdue` 偵測（見〈日誌與逾期處置〉）。
+- 巡邏任務設定：`WakeToRun=false`（心跳不喚醒睡眠機器；nightly／smoke 兩支維持 `WakeToRun=true`）、`ExecutionTimeLimit=PT1H`（心跳自身上限；無人運轉牆鐘由 `spawn.json` 管）、`MultipleInstancesPolicy=IgnoreNew`、`StartWhenAvailable=true`；期望值逐任務住 `tools/scheduled_task_expectations.json`。
+- 睡著或關機的機器不會觸發（睡著的機器不巡邏＝已知邊界）：Windows 任務有 `StartWhenAvailable`（醒來後補跑一次），macOS 不補（`pmset -g custom` 現查）；漏跑由 `overdue` 偵測（見〈日誌與逾期處置〉）。
 - 安裝／解除 Windows 任務需 elevation；`-Status`、`-WhatIf` 唯讀。
 
 ### 每心跳做什麼（順序固定：入帳→到期判定→運轉→推進）
@@ -425,10 +426,11 @@ launchctl list | grep AutoSDD_SI_Patrol
 | 步 | 做什麼 | 失敗處置 |
 |---|---|---|
 | 0 | 取 `~/.autosdd/selfimproving/locks/patrol.lock`（取不到＝rc 0「已有巡邏在跑」）；`AUTOSDD_SI_PATROL_OFF` 有設＝整次 no-op | — |
-| 1 入帳 | 對 `status` 的 `console_pending[]` 依 `time` 升冪逐檔入帳：`decide --carrier console`、`obs-add`、`obs-close`、`sched set --carrier console`、`run-open --trigger a --carrier console`（`run-request`；已有未關運轉時改記 `sched.skip(run-open)`） | rc 1＝保留稽核檔、日誌記一列 `obs-draft`（拒收碼）、不重試、不刪檔；Console 仍顯示「待入帳」 |
+| 0′ 巡視 | 讀 `patrol/<RUN>/spawn.json`：子行程存活且未超硬牆⇒不動；超過 `RESUME_HARD_WALL_SECONDS`⇒殺行程樹並依事件收尾；已結束⇒依事件收尾（無 `prop`⇒`run-close(no_event)`；handback 缺四節＝日誌記「不完整」） | 同一時間至多一個進行中的無人運轉；存活中則其他運轉的 spawn 延後（日誌記） |
+| 1 入帳 | 對 `status` 的 `console_pending[]` 依 `time` 升冪逐檔入帳：`decide --carrier console`、`obs-add`、`obs-close`、`sched set --carrier console`、`run-open --trigger a --carrier console`（`run-request`；已有未關運轉時改記 `sched.skip(run-open)`；入帳得到的 (a) 運轉於本心跳步 3 同序執行） | rc 1＝保留稽核檔、日誌記一列 `obs-draft`（拒收碼）、不重試、不刪檔；Console 仍顯示「待入帳」 |
 | 2 到期判定 | `enabled` 且本格（日曆格）尚無 `run.open(f)` 時，每心跳依序判：`disabled`→`blackout`（`sched_blackout_local`，本機時分）→`quota-band`（準備／停止／量不到）→`other-driver`（近 `sched_driver_quiet_minutes` 有對話）→`dirty-tree`（SI 自有路徑除外）→`run-open`（已有未關運轉）→`spawn-failed`（預檢不過） | 任一成立＝記 `sched.skip{due_at＝格起點,reason,detail}`（同一格同一原因只記一筆；原因改變才再記）；本格未執行即下一心跳再試，不推進格線 |
-| 3 運轉 | 全不成立：`run-open --trigger f --by patrol`→`research --fetch --run <RUN>`（rc 1＝`research --skip --reason offline`；rc 2 照常繼續）→`scan`（候選只落日誌）→生成 `~/.autosdd/selfimproving/patrol/<RUN>/brief.md`（自〈無人運轉任務書範本〉）→spawn 無人主控（`claude -p` fresh session，Sonnet，姿態檔 `.claude/settings.unattended.json`，環境 `AUTOSDD_UNATTENDED=1`＋`AUTOSDD_SI_PATROL_RUN=<RUN>`，外層硬牆） | spawn 返回後以**事件帳本**為憑：該運轉無 `prop`＝`run-close`（`no_event`）；有 `prop`＝保持開啟；handback 缺四節＝日誌記「不完整」、不重 spawn |
-| 4 推進 | 本心跳入帳了 `dec(approve)`：`sandbox`→`verify`→`card --issue`（verdict 原樣進卡面，不改判）；入帳了 `dec(promote)`：`promote`→（`sched_auto_commit` 且 promote 前工作樹乾淨）只 `git add` `touched` 路徑與 SI 自有路徑並 `git commit`（訊息引 PROP、DEC、APP；不 push）→`measure`；入帳了 `dec(rollback)`：`rollback`（同形 commit）；本運轉各提案皆已離開待人工決定態＝`run-close` | 前置不成立（例如尚缺 `heldout.freeze`）＝跳過該 PROP、日誌記因、下一心跳再試；commit 失敗（含 git hook 拒絕）＝日誌＋OBS 草稿列、不重試、不用 `--no-verify` |
+| 3 運轉 | (f)：全不成立才 `run-open --trigger f --by patrol`；Console (a) 運轉（步 1 入帳得到）同序執行，不看啟用旗標、不受格線限制，被擋只寫日誌、不寫 `sched.skip`、運轉保持開啟下一心跳再試。同序：`run-open --trigger f --by patrol`→`research --fetch --run <RUN>`（rc 1＝`research --skip --reason offline`；rc 2 照常繼續）→`scan`（候選只落日誌）→生成 `~/.autosdd/selfimproving/patrol/<RUN>/brief.md`（自〈無人運轉任務書範本〉）→**脫離式** spawn 無人主控（新 session／process group 的 `claude -p`〔Windows `CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`、POSIX `start_new_session`；breakaway 被拒或啟動失敗＝fail-closed：(f) 記 `sched.skip(spawn-failed)`、(a) 只日誌下心跳再試〕，Sonnet，姿態檔 `.claude/settings.unattended.json`，環境 `AUTOSDD_UNATTENDED=1`＋`AUTOSDD_SI_PATROL_RUN=<RUN>`；寫 `patrol/<RUN>/spawn.json`〔pid、啟動時刻、硬牆到期時刻〕後立即返回，心跳不等待） | 之後由步 0′ 巡視收尾，以**事件帳本**為憑：該運轉無 `prop`＝`run-close`（`no_event`）；有 `prop`＝保持開啟；handback 缺四節＝日誌記「不完整」、不重 spawn |
+| 4 推進 | 本心跳入帳了 `dec(approve)`：`sandbox`→`verify`→`card --issue`（verdict 原樣進卡面，不改判）；入帳了 `dec(promote)`：`promote`→（`sched_auto_commit` 且 promote 前工作樹乾淨）只 `git add` `touched` 路徑與 SI 自有路徑並 `git commit`（訊息引 PROP、DEC、APP；不 push）→`measure`；入帳了 `dec(rollback)`：`rollback`（同形 commit）；本運轉各提案皆已離開待人工決定態＝`run-close` | 前置不成立（例如尚缺 `heldout.freeze`）或髒工作樹不 promote＝跳過該 PROP、**只寫日誌、不寫 `sched.skip`**（`sched.skip` 只在 (f) 到期嘗試寫）、下一心跳再試；commit 失敗（含 git hook 拒絕）＝日誌＋OBS 草稿列、不重試、不用 `--no-verify` |
 
 - 沒有 DEC 的 PROP 巡邏器零動作；NE／FAIL 的退回與否決是人的決定。
 - 每個動詞的 rc 契約同〈rc 契約表〉與〈P2 動詞〉：先存 rc 再判停、不接管線；`patrol` 的 rc 0 只代表心跳跑完，成效讀日誌與事件、不讀 rc。
@@ -439,7 +441,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 1. **停 (f) 運轉**：Console 開關，或 `python tools/selfimproving.py sched set --enabled false --by main`（停用方向免引言；入帳與推進照常，因為人的決定仍要被處理）。
 2. **移除 OS 任務**：`python tools/selfimproving.py sched disarm`（只移除巡邏任務並驗證它真的不見：Windows `Get-ScheduledTask` 查無、macOS `launchctl` rc 113）。注意：`install_windows_nightly.ps1 -Uninstall` 會把 nightly 與 smoke 一併移除，只想停巡邏時不要用它。
 3. **整次 no-op**：環境變數 `AUTOSDD_SI_PATROL_OFF=1`（設在巡邏行程環境，例如包裝腳本或使用者環境；有設且非空即巡邏 rc 0、日誌一行，連入帳也不做）。
-4. 已在跑的無人運轉由外層硬牆保證終止（`RESUME_HARD_WALL_SECONDS`，值現查 `tools/lib/unattended_authz.py`）；要提早收掉：先停用（第 1 項），再由人 `run-close`；不要砍 OS 任務的實例當作停（可能留下半套 `app.*` 事件，改由 `check` 與 `status` 標出）。
+4. 已在跑的無人運轉由 `spawn.json` 記的硬牆到期時刻與步 0′ 巡視保證終止（`RESUME_HARD_WALL_SECONDS`，值現查 `tools/lib/unattended_authz.py`）；要提早收掉：先停用（第 1 項），再由人 `run-close`；不要砍 OS 任務的實例當作停（可能留下半套 `app.*` 事件，改由 `check` 與 `status` 標出）。
 5. 想讓巡邏暫不碰某段時間：用 `sched_blackout_local`（`params.json`，改值屬 T1／PRD 修訂；預設涵蓋 smoke 與 nightly 時段）。
 
 ### 日誌與逾期處置
@@ -468,7 +470,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 
 ## 角色序（每一步的子代理一律 Sonnet；零遞迴；不同角色用不同代理實例與不同 context）
 1. 研究者：讀 changed=true 的來源檔，文字交卷 OBS 候選（外部衍生=是；src=<來源 id>）；無 Web 工具、不 Write／Edit。
-2. 你（單一寫入窗口）：把候選與體檢發現手寫入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 `|`）；你沒有 obs-add／obs-close／run-open／run-close 動詞（會 rc 1），也不入帳 Console 稽核檔。
+2. 你（單一寫入窗口）：把候選與體檢發現手寫入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 `|`）；你沒有 obs-add／obs-close／run-open／run-close 動詞（會 rc 1），也不入帳 Console 稽核檔；手寫列沒有 obs.add 事件（那是 Console 載體專用），check 以帳本列為準。
 3. 歸因者：python tools/selfimproving.py attr --run <RUN> …
 4. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm --run <RUN> …
 5. 提案者：python tools/selfimproving.py prop-new --run <RUN> …；本運轉至多 <MAX_PROPOSALS> 張；前置檢查拒收就依碼修正，不原封重試。
