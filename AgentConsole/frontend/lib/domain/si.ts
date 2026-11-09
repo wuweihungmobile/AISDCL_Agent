@@ -896,8 +896,6 @@ export const SCHEDULE_OVERDUE_ALERT = "逾期未巡邏：請在主機執行 pyth
 export const SCHEDULE_OVERDUE_UNKNOWN = "量不到（事件帳本不在場，無法推算是否逾期）";
 /** 界取不到時的說明（送出停用）。 */
 export const SCHEDULE_BOUNDS_UNKNOWN = "量不到界值";
-/** 寫入收據的主文（不是「已生效」：入帳前尚未生效；NFR-SC-1）。 */
-export const SCHEDULE_PENDING_TEXT = "稽核檔已落地，待入帳";
 export const SCHEDULE_NOTE_MAX = 120;
 
 export type ScheduleFieldKey = "enabled" | "period" | "lastSet" | "cell" | "ranThisCell" | "lastSkip" | "overdue" | "armed";

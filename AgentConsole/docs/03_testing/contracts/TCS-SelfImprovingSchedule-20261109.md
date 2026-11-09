@@ -109,15 +109,15 @@
 
 | 清單項（閘門／項目） | 追溯 ID | 已凍結上位文件（路徑） | 凍結摘要 |
 |---------------------|---------|----------------------|---------|
-| SCG-0／PRD 版本已鎖定、FRD 覆蓋、利害關係人已簽核 | Console PRD §0.11（F-910、US-930、AC-964-1～10）；授權＝sid f1522ddb-bdcf-4104-bb81-614c1118fa9d line 14；凍結常態規則（根 CLAUDE.md） | docs/01_requirements/Agent_ConsoleUI_PRD.md | sha256:a8fae6931f22c4b3680137d075e62a2aa4166cf773811148fc2a9e2aa89ed547（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-0／根層 PRD（契約的唯一定稿處） | v0.13 FR-SI-37、§9.2〈P4 增補〉、§9.3〈P4 寫入端點〉 | docs/01_requirements/SelfImproving_PRD.md | sha256:1466e0359c76f15274dfdf1909a4e5d1aefd9eab281b9e13f7fc6ca615068de0（主控現算 2026-11-09 13:43 +08:00；與根層 TCS 追溯表同值） |
+| SCG-0／PRD 版本已鎖定、FRD 覆蓋、利害關係人已簽核 | Console PRD §0.11（F-910、US-930、AC-964-1～10）；授權＝sid f1522ddb-bdcf-4104-bb81-614c1118fa9d line 14；凍結常態規則（根 CLAUDE.md） | docs/01_requirements/Agent_ConsoleUI_PRD.md | sha256:a8fae6931f22c4b3680137d075e62a2aa4166cf773811148fc2a9e2aa89ed547（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-0／根層 PRD（契約的唯一定稿處） | v0.13 FR-SI-37、§9.2〈P4 增補〉、§9.3〈P4 寫入端點〉 | docs/01_requirements/SelfImproving_PRD.md | sha256:1466e0359c76f15274dfdf1909a4e5d1aefd9eab281b9e13f7fc6ca615068de0（主控現算 2026-11-09 19:56 +08:00；與根層 TCS 追溯表同值） |
 | SCG-0／NFR 已量化、User Story INVEST、RTM 初版 | NFR-SC-1～8；US-930；本檔 §1 與 §6（RTM 本地子表於 SCG-5 回填） | （本檔；隨 Stage 凍結，非上位文件） | n/a（自引） |
-| SCG-1／整合架構、NFR 對應 | Architecture §5.6、§10.3、§12.1 L-SI-1／L-SI-2 | AgentConsole/docs/02_architecture/Architecture.md | sha256:e61039ade8453f8ba78a92dcc0276b8dd949260b3de140a2c086a228d0b48978（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-1／技術選型與偏離清單 | ADR-001（Spring Boot 4.1、JDBC adapter 體例、PG18、Flyway） | AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md | sha256:ff0bcd0038b77e80885240d287cfc68fb55c02200dc59f62f7e59c7691094e38（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-3／API Spec、錯誤碼、Consumer Contract | 契約 v0.1（API-SI-12、API-SI-13、Bridge 兩路由、§1.4 的 `schedule_bounds_unavailable`、§3 稽核 body、§4 `status.schedule` 與對帳、§5 Flyway、§6 前端閘） | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2c.md | sha256:ec93e6199dfd356bad589ff4f16ef467a3d59536441cbec18320a71c7a5366ef（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-3／前代契約（P2b 的稽核管線與補償語意） | `API_Contract_SelfImproving_P2b.md` §0.1～§0.4、§1.2、§1.4、§2.1、§3.2～§3.4、§4 | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2b.md | sha256:32e60de75fda6171a452d28449567aa19e5ade8825e3fcc27e35edd795b92841（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-3／上位 TCS | `TCS-SelfImprovingDecide-P2b-20261024.md`（W10、W11、W14、W15 與其 AT）；`TCS-SelfImprovingDecideDedupe-20261031.md`（對帳面板與取代群組；本檔不改其行為） | AgentConsole/docs/03_testing/contracts/TCS-SelfImprovingDecide-P2b-20261024.md | sha256:638def94d922c50801b8b64cb5eb75228111226ba36f8c8801f4b3d9e23f649a（主控現算 2026-11-09 13:43 +08:00） |
-| SCG-3／根層 TCS（接縫） | 根層 TCS 的 R139、R141、R146、R158、AT-437-1-3（本檔引用不複寫） | docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md | sha256:a8671d0f3d6e50f191ff04e53d3c684468fc603a4689754f4cbcbeb890f64b30（主控現算 2026-11-09 13:43 +08:00） |
+| SCG-1／整合架構、NFR 對應 | Architecture §5.6、§10.3、§12.1 L-SI-1／L-SI-2 | AgentConsole/docs/02_architecture/Architecture.md | sha256:388abdd7499d85375ca08e5c295e2b018c6a3942dab2210b15565c1b234cb471（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-1／技術選型與偏離清單 | ADR-001（Spring Boot 4.1、JDBC adapter 體例、PG18、Flyway） | AgentConsole/docs/02_architecture/ADR-001-TechStack-Lock.md | sha256:ff0bcd0038b77e80885240d287cfc68fb55c02200dc59f62f7e59c7691094e38（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-3／API Spec、錯誤碼、Consumer Contract | 契約 v0.1（API-SI-12、API-SI-13、Bridge 兩路由、§1.4 的 `schedule_bounds_unavailable`、§3 稽核 body、§4 `status.schedule` 與對帳、§5 Flyway、§6 前端閘） | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2c.md | sha256:7e3b3d7ccdf0a5ff7910a85f6615b8a594c5718d02aa225d029e426d116dda67（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-3／前代契約（P2b 的稽核管線與補償語意） | `API_Contract_SelfImproving_P2b.md` §0.1～§0.4、§1.2、§1.4、§2.1、§3.2～§3.4、§4 | AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2b.md | sha256:32e60de75fda6171a452d28449567aa19e5ade8825e3fcc27e35edd795b92841（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-3／上位 TCS | `TCS-SelfImprovingDecide-P2b-20261024.md`（W10、W11、W14、W15 與其 AT）；`TCS-SelfImprovingDecideDedupe-20261031.md`（對帳面板與取代群組；本檔不改其行為） | AgentConsole/docs/03_testing/contracts/TCS-SelfImprovingDecide-P2b-20261024.md | sha256:638def94d922c50801b8b64cb5eb75228111226ba36f8c8801f4b3d9e23f649a（主控現算 2026-11-09 19:56 +08:00） |
+| SCG-3／根層 TCS（接縫） | 根層 TCS 的 R139、R141、R146、R158、AT-437-1-3（本檔引用不複寫） | docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md | sha256:95c6888c83e31058288d439ae9c0de18dd0434f5cfa55aba8e6ec85ab775e4c6（主控現算 2026-11-09 19:56 +08:00） |
 
 ---
 

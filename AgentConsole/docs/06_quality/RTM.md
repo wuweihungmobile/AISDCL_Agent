@@ -503,6 +503,9 @@
 ## 2.13 Console 資料列表排序與每頁說明文案改寫（識別欄預設序、表頭可點排序、排序控制列、後端 sort 白名單、國高中程度說明文案與可讀性鎖）的 TCS 本地 ID 追溯（Console PRD §0.10；不計入 §2 總列數）
 > 本子表 2026-11-09 依 DEF-200-576 體例自始立於 [RTM-ConsoleUxSortHelp-20261108.md](RTM-ConsoleUxSortHelp-20261108.md)（F 1、US 1、AC 9、AT 56，共 67 列；鍵 `agentconsole-console-ux-sort-help`；規格經 QA 鏡 SCG-0～3 審查一審 FAIL→二審 PASS，見 [SCG0-REVIEW-ConsoleUxSortHelp-20261108.md](SCG0-REVIEW-ConsoleUxSortHelp-20261108.md)；實作經 [SCG-4 一審／二審報告](SCG4-REVIEW-ConsoleUxSortHelp-20261109.md)（二審 PASS）回填四格；AT 列 ✅ 56／🟡 0／⬜ 0；V1 真機探針於 RELEASE 前（重建映像、經 nginx）API 7 項／UI 26 項全 OK，並發現修復 DEF-AC-034（nginx `location /api/v1/import/` 尾斜線 301 ⇒ 匯入歷史清單 404；修於 `b4508aac`，見 Implementation_Plan §5.1 本輪列）；掌舵者目視待辦；回填義務不變：每完成一項需求即回填四格）。
 
+## 2.14 SelfImproving P4 自動演化排程 Console 半（排程面板、三控件兩對話框、兩個寫入端點、Bridge 兩路由、稽核 kind 五值）的 TCS 本地 ID 追溯（Console PRD §0.11；不計入 §2 總列數）
+> 本子表 2026-11-09 依 DEF-200-576 體例自始立於 [RTM-SelfImprovingSchedule-20261109.md](RTM-SelfImprovingSchedule-20261109.md)（AC 10、AT 69，共 69 列；鍵 `agentconsole-si-schedule`；規格經 QA 鏡 SCG-0～3 一審 FAIL→二審 PASS，見根層 [SCG0-REVIEW-SelfImprovingSchedule-20261109.md](../../../docs/06_quality/SCG0-REVIEW-SelfImprovingSchedule-20261109.md)；實作經 [SCG-4 一審報告](SCG4-REVIEW-SelfImprovingSchedule-20261109.md)（PASS：P1 0／P2 0／P3 1／P4 5；P3 F-4 與 P4 F-1 由主控當場修）回填四格；AT 列 ✅ 69／🟡 0／⬜ 0；真機 V1／V7 由主控真機棒、V2／V3 由掌舵者在 `/self-improving` 實做（改週期送出→下一心跳入帳；立即啟動→`run.open` trigger a）、V8 於 push 後現查 CI；根層半見根層 `docs/06_quality/RTM-SelfImproving-P4-20261109.md`；回填義務不變：每完成一項需求即回填四格）。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）
