@@ -4,7 +4,7 @@
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
 與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀）；
-P4 加 `sched`（排程）與 `patrol`（巡邏心跳），共 26 個；未列動詞 rc 3。
+P4 加 `sched`（排程）與 `patrol`（巡邏心跳）；P5 加 `fourq`（四問入帳），共 27 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -49,6 +49,7 @@ _HELP = {
     "issues": "議題中心：三類帳本的中文議題清單（唯讀）",
     "sched": "自動演化排程：show（唯讀）、set（寫 sched.set）、arm／disarm（OS 任務）",
     "patrol": "巡邏心跳（OS 排程器每心跳叫醒一次的一次性行程：入帳、到期判定、運轉、推進）",
+    "fourq": "四問審視答案檔入帳（--answers-file）、免審（--skip）或語料清單（--corpus）",
 }
 # R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
 _P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
@@ -186,6 +187,12 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--sid")
     rs.add_argument("--line", type=int)
     _sched_parser(sub)
+    fq = _verb(sub, "fourq")
+    for flag in ("--run", "--answers-file", "--by", "--reason", "--note", "--band", "--sid"):
+        fq.add_argument(flag, dest=flag[2:].replace("-", "_"))
+    fq.add_argument("--line", type=int)
+    for flag in ("--dry-run", "--skip", "--corpus"):
+        fq.add_argument(flag, dest=flag[2:].replace("-", "_"), action="store_true")
     pt = _verb(sub, "patrol")
     pt.add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
     pt.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -427,6 +434,29 @@ def _sched(repo: Path, args: argparse.Namespace) -> int:
     return 0
 
 
+def _fourq(repo: Path, args: argparse.Namespace) -> int:
+    """`fourq`（P5）：入帳、`--skip`、`--corpus`；A 類閘（`--dry-run` 亦走）在 `unattended`。"""
+    from lib.selfimproving import fourq
+    from lib.selfimproving import writeverbs as wv
+
+    modes = [args.corpus, args.skip, args.answers_file is not None]
+    if sum(modes) != 1 or (args.corpus and args.run):
+        raise check.InputError("fourq 須恰一種模式：--answers-file、--skip 或 --corpus（無 --run）")
+    if not args.corpus and (not args.run or (not args.skip and not args.by)):
+        raise check.InputError("fourq 入帳須帶 --run 與 --by；--skip 須帶 --run")
+    if args.skip and (args.dry_run or args.by or args.answers_file):
+        raise check.InputError("fourq --skip 不收 --dry-run／--by／--answers-file")
+    codes = unattended.check(repo, "fourq-corpus" if args.corpus else "fourq", args, os.environ)
+    if codes:
+        out = wv.reject(repo, "fourq", codes, args.json)
+    elif args.corpus:
+        out = fourq.corpus(repo, args.json)
+    else:
+        out = (fourq.skip if args.skip else fourq.review)(repo, args, args.json)
+    _emit(out.text)
+    return out.rc
+
+
 def _research(repo: Path, args: argparse.Namespace, wv):
     if args.skip:
         if args.reason is None:
@@ -495,7 +525,8 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
-             "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol}
+             "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol,
+             "fourq": _fourq}
 
 
 def main(argv: list[str] | None = None) -> int:

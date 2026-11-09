@@ -27,7 +27,7 @@ from lib import resume_route, unattended_authz  # noqa: E402
 from . import check as si_check  # noqa: E402
 from . import events as si_events  # noqa: E402
 from . import fold as si_fold  # noqa: E402
-from . import patrolbrief, runner, sched  # noqa: E402
+from . import fourqparse, patrolbrief, runner, sched  # noqa: E402
 
 ENV_ALLOW = (*runner._ENV_KEYS, "APPDATA", "LOCALAPPDATA", "CLAUDE_CONFIG_DIR", "AUTOSDD_SI_DIR")
 _SECRET_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.IGNORECASE)
@@ -136,6 +136,8 @@ def _finish(ctx, run: str, path: Path, data: dict) -> None:
         err = ""
     if resume_route.harness_bg_kill(err):
         ctx.log("巡視", 0, "HARNESS-BG-KILL", f"{run} harness 背景殺行程（背景等待上限）")
+    if fourqparse.applicable(run, ctx.params) and run not in fourqparse.fourq_events(ctx.load()):
+        ctx.log("巡視", 0, "FOURQ-NOT-RUN", f"{run} 適用運轉結束而無 fourq 事件（不重 spawn）")
     r = ctx.fold().runs.get(run)
     if r is not None and r.closed_seq is None and not r.prop_ids:
         rc, _, _ = ctx.verb("run-close", "--run", run, "--by", "patrol")

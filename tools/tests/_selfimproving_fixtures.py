@@ -353,6 +353,9 @@ def params_dict() -> dict:
         "research_timeout_seconds": 20,
         "min_events": 1,
         "export_limit_max": 500,
+        "fourq_from_run": 5000,  # 大於夾具內所有運轉號（P5 前的夾具不受四問閘影響）
+        "fourq_items_max": 3,
+        "fourq_degrade_items_max": 1,
         "probe_timeout_seconds": 600,
         "verify_runs_max": 2,
         "memory_index_max_lines": 200,

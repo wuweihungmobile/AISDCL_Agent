@@ -1,7 +1,7 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（59 個鍵：43 `ro`、9 `rw`、2 `net`、5 `exec`；55 鍵時為 42／9／2／2；
+登記表 `CAPABILITY` 住本檔（62 個鍵：45 `ro`、10 `rw`、2 `net`、5 `exec`；55 鍵時為 42／9／2／2；
 P3 增 7 `ro` 與 1 `rw`；議題中心增 3 `ro`；P4 的 PKG-ROOT-SCHED 增 3 `ro` 與 1 `rw`，
 PKG-ROOT-PATROL 另增 1 `ro` 與 3 `exec` 後為 59 鍵）；判準函式 `capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
@@ -75,12 +75,14 @@ CAPABILITY: dict[str, str] = {
             "unattended",
             "schedcheck",
             "patrolbrief",
+            "evspec",
+            "fourqparse",
         )
     },
     **{
         f"{n}.py": "rw"
         for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
-            "obswrite", "meawrite", "schedwrite")
+            "obswrite", "meawrite", "schedwrite", "fourq")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
     **{f"{n}.py": "exec" for n in ("runner", "verify", "patrol", "patrolrun", "schedarm")},
@@ -340,7 +342,7 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 43, "rw": 9, "net": 2, "exec": 5})
+        self.assertEqual(counts, {"ro": 45, "rw": 10, "net": 2, "exec": 5})
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {
             "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
         net_importers, subproc = set(), set()
@@ -433,7 +435,7 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 59)
+        self.assertEqual(len(CAPABILITY), 62)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
@@ -675,7 +677,7 @@ class TestP3Registry(unittest.TestCase):
         counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
         optional = (PKG / "meaplan.py").exists()
         self.assertEqual((len(CAPABILITY), counts),
-                         (59, (43, 9, 2, 5)) if optional else (58, (42, 9, 2, 5)))
+                         (62, (45, 10, 2, 5)) if optional else (61, (44, 10, 2, 5)))
         for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
             self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
         self.assertEqual(CAPABILITY["meawrite.py"], "rw")

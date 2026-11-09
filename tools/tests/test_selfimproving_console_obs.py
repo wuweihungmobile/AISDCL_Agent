@@ -919,7 +919,7 @@ class TestObsClose(ObsCase):
     def test_AT_235_3_1_no_delete_or_renumber(self):
         import selfimproving
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 26)  # P4：加 sched 與 patrol
+        self.assertEqual(len(verbs), 27)  # P5：加 fourq
         self.assertEqual({v for v in verbs if "obs" in v}, {"obs-add", "obs-close"})
         R = self.obs_repo(extra=open_rows(11, 1))
         snap0, l0 = fx.snap(R), obs_ledger(R)
@@ -1164,10 +1164,10 @@ class TestExportStatus(ObsCase):
         self.assertTrue(bad and all("buckets" not in i for i in bad))
         self.assertEqual(scan.bucket_of("autoclaude/tests/a.py"), "根層")
         keys = list(self.MJ(R, "status"))
-        self.assertEqual((keys[-3], keys[-2], keys[-1]), ("console_pending", "measure", "schedule"))
-        self.assertEqual(len(keys), 16)
+        self.assertEqual((keys[-3], keys[-2], keys[-1]), ("measure", "schedule", "fourq"))
+        self.assertEqual(len(keys), 17)
         st = self.MJ(R, "export", "--kind", "status")["items"][0]
-        self.assertEqual(list(st)[-1], "schedule")
+        self.assertEqual(list(st)[-1], "fourq")
         self.assertEqual(st["console_pending"], {"status": "NOT-EVALUABLE",
                                                  "reason": "export-reads-no-home"})
 

@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from fractions import Fraction
 
-from . import churn, cooldown, retire
+from . import churn, cooldown, fourqparse, retire
 from . import fold as si_fold
 from . import paths as si_paths
 from .events import DEF_ID_RE, OBS_ID_RE
@@ -199,6 +199,8 @@ def _state_codes(c: Ctx) -> list[Code]:
         out.append(("RUN-NOT-OPEN", f"{c.run} 不是 open 運轉"))
     if not any(r == c.run for _, _, r, _ in f.research_events):
         out.append(("RESEARCH-MISSING", f"{c.run} 內沒有研究事件"))
+    out += fourqparse.gate_codes(c.events, c.run, c.proposer, c.params)
+    out += fourqparse.body_codes(c.fields, c.run, c.params)
     if f.suspended is not None:
         out.append(("SUSPENDED", f"連續壞窗（所在運轉 {f.suspended['run']}），須先 dec resume"))
     if c.self_prop is None:

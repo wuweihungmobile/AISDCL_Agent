@@ -43,6 +43,7 @@ STATUS_KEYS = [
     "console_pending",
     "measure",
     "schedule",
+    "fourq",
 ]
 EXPORT_KEYS = [
     "schema_rev",

@@ -160,7 +160,7 @@ class TestEventTableAndCheck(VerbTestCase):
         names = fx.P0_ITEMS21 + fx.P1_ITEMS7 + fx.P2_ITEMS4
         for label, R in (("p0", P0), ("none", R_none), ("adopt", R_adopt)):
             res = self.check(R)
-            self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 5, label)
+            self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 6, label)
             ids = [i["id"] for i in res["items"]]
             self.assertEqual((ids[:32], ids[32]), (names, "events.mea"), label)
             self.assertEqual(ids[33:], ["sched.events", "run.trigger_f_has_patrol_by"], label)
@@ -422,7 +422,7 @@ class TestStatusAndExport(VerbTestCase):
         idx.write_bytes(f3.cap_index(16))
         st = self.status(R)
         keys = list(st)
-        self.assertEqual(len(keys), 16)
+        self.assertEqual(len(keys), 17)
         self.assertEqual((keys[0], keys[13], keys[14]), ("events_detected", "console_pending",
                                                           "measure"))
         m = st["measure"]
@@ -469,7 +469,7 @@ class TestStatusAndExport(VerbTestCase):
         item = st["items"][0]
         self.assertEqual(item["capacity"], {"status": "NOT-EVALUABLE",
                                             "reason": "export-reads-no-home"})
-        self.assertEqual(len(item), 16)
+        self.assertEqual(len(item), 17)
         text = json.dumps(exp) + json.dumps(st)
         self.assertNotIn(sentinel, text)
         self.assertNotIn("INDEX-UNIQUE-CONTENT", text)

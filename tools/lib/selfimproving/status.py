@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import capacity as si_capacity
-from . import consoleaudit, meaplan
+from . import consoleaudit, fourqparse, meaplan
 from . import events as si_events
 from . import fold as si_fold
 from . import mea as si_mea
@@ -154,6 +154,7 @@ def build(repo: Path, git: Git, params: dict, read_home: bool = True, *, now=Non
         "console_pending": console_pending(events or [], read_home),
         "measure": measure_value(repo, git, params, events),
         "schedule": schedule_value(events, params, read_home, now, armed),
+        "fourq": fourqparse.status_value(repo, events, params),
     }
 
 
@@ -202,6 +203,8 @@ def render_text(obj: dict) -> str:
                  f"cell={tri_text(s['cell_start'], 'null')}/{tri_text(s['cell_end'], 'null')} "
                  f"overdue={tri_text(s['overdue'])}"
                  if "enabled" in s else f"schedule: NOT-EVALUABLE（{s['reason']}）")
+    if "fourq" in obj:
+        lines.append(fourqparse.status_line(obj["fourq"]))
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

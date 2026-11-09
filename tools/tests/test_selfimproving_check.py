@@ -299,6 +299,7 @@ def params_dict() -> dict:
         "verify_runs_max": 2,
         "memory_index_max_lines": 200,  # P3 新增兩鍵（TCS-P3 R131）：與 PARAM_SPECS 同步
         "memory_index_max_bytes": 25600,
+        "fourq_from_run": 5000, "fourq_items_max": 3, "fourq_degrade_items_max": 1,  # P5 三鍵
         "sched_heartbeat_minutes": 15,  # P4 新增九鍵（TCS-P4 R159）：與 PARAM_SPECS 同步
         "sched_period_minutes_default": 1440,
         "sched_period_minutes_min": 60,

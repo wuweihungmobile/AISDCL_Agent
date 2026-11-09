@@ -1193,7 +1193,7 @@ class TestCheckAdditions(SiTestCase):
                 self.assertEqual((item["status"], item["blocking"]), ("NE", False))
             else:
                 self.assertEqual((item["status"], item["findings"]), ("PASS", []), item["id"])
-        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 5)
+        self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 6)
         keys = list(res["items"][0])
         self.assertTrue(all(list(i) == keys for i in res["items"]))
         rc, text, _ = self.M(repo, "check")
@@ -1876,7 +1876,7 @@ class TestSopArticles(SiTestCase):
 WEIRD_STATUS_KEYS = [
     "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
     "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
-    "friction_reconcile", "no_event", "console_pending", "measure", "schedule",
+    "friction_reconcile", "no_event", "console_pending", "measure", "schedule", "fourq",
 ]  # fmt: skip
 
 

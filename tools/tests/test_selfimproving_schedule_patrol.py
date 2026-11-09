@@ -415,10 +415,10 @@ class TestBrief(P4TestCase):
                     self.assertIn(f"〈{k}〉", text)
                 self.assertIn("trigger=f", text)
                 self.assertIn("## 禁止事項", text)
-                self.assertEqual(len(re.findall(r"(?m)^[1-8]\. ", text)), 8)
+                self.assertEqual(len(re.findall(r"(?m)^[1-9]\. ", text)), 9)
                 for marker in resume_route.HANDBACK_MARKERS:
                     self.assertIn(marker, text.splitlines())
-                self.assertEqual("降載聲明" in text, band != "free")
+                self.assertEqual("降載聲明：額度帶" in text, band != "free")
 
     def test_AT_438_2_E_1_template_defects_refuse_spawn(self):
         sop = fx.REAL_SOP.read_text(encoding="utf-8")
@@ -427,7 +427,7 @@ class TestBrief(P4TestCase):
         variants = {
             "heading": sop.replace("## 做了什麼", ""),
             "forbidden": sop.replace("## 禁止事項\n", ""),
-            "step6": re.sub(r"(?m)^6\. .*\n", "", sop),
+            "step7": re.sub(r"(?m)^7\. .*\n", "", sop),
             "run": sop.replace("<RUN>", ""),
             "fence": fence_free.replace("```text\n", "").replace("\n```\n", "\n"),
         }

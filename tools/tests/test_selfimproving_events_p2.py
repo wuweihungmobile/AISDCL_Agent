@@ -140,7 +140,7 @@ class TestEventTables(SiTestCase):
     """受測：`tools/lib/selfimproving/events.py`（R72 欄位表）。"""
 
     def test_AT_240_1_1_vocabulary_and_conforming_events(self):
-        self.assertEqual(len(si_events.KINDS), 23)
+        self.assertEqual(len(si_events.KINDS), 25)
         self.assertTrue({"obs.add", "obs.close"} <= set(si_events.KINDS))
         bad = {}
         for label, event in ok_events().items():
@@ -158,7 +158,7 @@ class TestEventTables(SiTestCase):
             self.assertEqual(si_events.validate(comp(event)), [], event)
         problems = si_events.validate(comp(ev("x.y")))
         self.assertEqual([c for c, _ in problems], ["EVENT-KIND"])
-        self.assertIn("23 個詞彙", problems[0][1])
+        self.assertIn("25 個詞彙", problems[0][1])
 
     def test_AT_240_1_E_1_field_table_negatives(self):
         base = {label: comp(event) for label, event in ok_events().items()}
@@ -880,7 +880,7 @@ class TestP2Checks(P2TestCase):
                               codes_set(res0, k)), ("NE", False, set(cne)))
             self.assertEqual(self.S(res1, k), "PASS")
         self.assertEqual((res0["overall"], res0["_rc"]), ("PASS", 0))
-        self.assertEqual(self.MJ(R1, "check")["fingerprint_parts"]["check_rules_rev"], 5)
+        self.assertEqual(self.MJ(R1, "check")["fingerprint_parts"]["check_rules_rev"], 6)
 
     def test_AT_240_3_E_1_new_items_fail_and_ne(self):
         def run_check(chain, rows=()):
@@ -988,7 +988,7 @@ class TestP2Checks(P2TestCase):
         self.assertEqual(self.S(self.check(R), "params.keys"), "PASS")
         real = json.loads(fx.REAL_PARAMS.read_text(encoding="utf-8"))
         self.assertEqual((real["probe_timeout_seconds"], real["verify_runs_max"]), (600, 2))
-        self.assertEqual(len(real), 41)
+        self.assertEqual(len(real), 44)
         p = fx2.drive_to(R, "sandboxed")
         fx.set_params(R, verify_runs_max=1)
         self.assertEqual(self.M(R, "verify", p)[0], 0)

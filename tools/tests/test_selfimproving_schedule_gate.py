@@ -82,7 +82,7 @@ class TestConsolePending(P4TestCase):
         self.assertEqual(ids[:33], list(si_check.ITEM_IDS[:33]))
         self.assertEqual(ids[33:], ["sched.events", "run.trigger_f_has_patrol_by"])
         self.assertEqual([self.S(res, i) for i in ids[33:]], ["PASS", "PASS"])
-        self.assertEqual((si_params.CHECK_RULES_REV, res["_rc"]), (5, 0), res["overall"])
+        self.assertEqual((si_params.CHECK_RULES_REV, res["_rc"]), (6, 0), res["overall"])
         real = self.run_main(["check", "--repo", str(ROOT), "--json"])
         self.assertEqual(real[0], 0, real[1][-400:])
         self.assertEqual(len(json.loads(real[1])["items"]), 35)
@@ -175,7 +175,7 @@ def composed(ev: dict) -> dict:
 
 class TestEventTables(unittest.TestCase):
     def test_AT_440_1_1_vocabulary_23_and_legal_events(self):
-        self.assertEqual(len(si_events.KINDS), 23)
+        self.assertEqual(len(si_events.KINDS), 25)
         self.assertTrue({"sched.set", "sched.skip"} <= set(si_events.KINDS))
         for label, ev in good_events().items():
             self.assertEqual(si_events.validate(composed(ev)), [], label)
@@ -237,7 +237,7 @@ class TestEventTables(unittest.TestCase):
                    "kind": "sched.bogus"}
         out = si_events.validate(unknown)
         self.assertEqual([c for c, _ in out], ["EVENT-KIND"])
-        self.assertIn("23 個詞彙", out[0][1])
+        self.assertIn("25 個詞彙", out[0][1])
         lines = si_events.read_lines((ROOT / si_events.LEDGER_REL).read_bytes())
         self.assertEqual([x for ln in lines if ln.obj for x in si_events.validate(ln.obj)], [])
 
@@ -257,7 +257,7 @@ class TestParamsNine(unittest.TestCase):
     def test_AT_440_2_1_41_keys_defaults_and_real_check_green(self):
         real = self.real()
         self.assertEqual(set(real), set(si_params.PARAM_SPECS))
-        self.assertEqual(len(real), 41)
+        self.assertEqual(len(real), 44)
         raw = fx.REAL_PARAMS.read_bytes()
         self.assertEqual(si_params.params_file_problems(raw), [])
         self.assertEqual({k: real[k] for k in self.NINE}, self.NINE)
@@ -767,8 +767,8 @@ class TestCapabilityP4(unittest.TestCase):
         self.assertEqual(cap.capability_problems(cap.PKG, cap.CAPABILITY, cap.ENTRY), [])
         n = len(cap.CAPABILITY)
         counts = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k) for k in cap.CATEGORIES)
-        self.assertIn((n, counts), {(59, (43, 9, 2, 5)), (60, (44, 9, 2, 5))})
-        if n == 60:
+        self.assertIn((n, counts), {(61, (44, 10, 2, 5)), (62, (45, 10, 2, 5))})
+        if n == 62:
             self.assertEqual(cap.CAPABILITY["evspec.py"], "ro")
         self.assertEqual({p.name for p in cap.PKG.glob("*.py")}, set(cap.CAPABILITY))
         reg = cap.CAPABILITY
@@ -1024,7 +1024,7 @@ class TestZeroRegression(P4TestCase):
         fx.write_events(R, events, seqs=seqs)
         self.assertEqual(self.S(self.check(R), "events.structure"), "PASS")
         self.assertEqual(len(json.loads((fx4.p4_base() / fx.PARAMS).read_text(encoding="utf-8"))),
-            41)
+            44)
         sigs = {"make_p1_repo": ("dest", "events", "sources", "extra_obs", "defs", "prm", "rows",
             "commit"),
                 "make_p2_repo": ("dest", "commit", "kw")}
@@ -1039,19 +1039,19 @@ class TestZeroRegression(P4TestCase):
         from lib.selfimproving import check as si_check
         from lib.selfimproving import events as si_events
         from lib.selfimproving import params as si_params
-        self.assertEqual(len(selfimproving._HELP), 26)
-        self.assertEqual(len(si_events.KINDS), 23)
+        self.assertEqual(len(selfimproving._HELP), 27)
+        self.assertEqual(len(si_events.KINDS), 25)
         self.assertEqual(len(si_check.ITEM_IDS), 35)
-        self.assertEqual(len(si_params.PARAM_SPECS), 41)
-        self.assertEqual(si_params.CHECK_RULES_REV, 5)
-        self.assertEqual(len(cap.CAPABILITY), 59)
-        self.assertEqual(len(self.status(fx4.p4_base())), 16)
+        self.assertEqual(len(si_params.PARAM_SPECS), 44)
+        self.assertEqual(si_params.CHECK_RULES_REV, 6)
+        self.assertEqual(len(cap.CAPABILITY), 62)
+        self.assertEqual(len(self.status(fx4.p4_base())), 17)
         spec = json.loads(EXPECT.read_text(encoding="utf-8"))
         self.assertEqual(len(spec["tasks"]), 3)
         tests = ROOT / "tools" / "tests"
-        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 26"),
-                             ("test_selfimproving_issues.py", "len(verbs), 26"),
-                             ("test_selfimproving_console_obs.py", "len(verbs), 26")):
+        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 27"),
+                             ("test_selfimproving_issues.py", "len(verbs), 27"),
+                             ("test_selfimproving_console_obs.py", "len(verbs), 27")):
             self.assertIn(needle, (tests / name).read_text(encoding="utf-8"), name)
         base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
         ok = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
@@ -1125,7 +1125,7 @@ class TestEntry(P4TestCase):
 
     def test_AT_440_7_1_twenty_six_verbs_and_new_flags(self):
         import selfimproving
-        self.assertEqual(len(selfimproving._HELP), 26)
+        self.assertEqual(len(selfimproving._HELP), 27)
         rc, out, _ = self.run_main(["--help"])
         self.assertEqual(rc, 0)
         self.assertTrue(all(v in out for v in selfimproving._HELP), out)

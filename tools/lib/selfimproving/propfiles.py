@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .events import PROPOSALS_REL
@@ -39,6 +40,35 @@ def write(repo: Path, pid: str, rev: int, patch: bytes, body_text: str) -> list[
     except OSError:
         remove(created)
         raise
+    return created
+
+
+def write_new(repo: Path, rel: str, data: bytes) -> list[Path]:
+    """以 `O_EXCL` 新建單一檔（缺的上層目錄一併建）；回「本次新建」的目錄與檔供 `remove` 刪回。
+    已存在拋 FileExistsError（既有檔不變）；四問答案檔 `_fourq/<RUN>.md` 的唯一落地路徑。"""
+    path = repo / rel
+    missing, top = [], path.parent
+    while not top.exists():
+        missing.append(top)
+        top = top.parent
+    path.parent.mkdir(parents=True, exist_ok=True)
+    created = list(reversed(missing))
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                     0o644)
+    except OSError:
+        remove(created)
+        raise
+    created.append(path)
+    try:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view):]
+    except OSError:
+        os.close(fd)
+        remove(created)
+        raise
+    os.close(fd)
     return created
 
 

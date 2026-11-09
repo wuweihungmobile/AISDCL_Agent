@@ -10,8 +10,9 @@ from pathlib import Path
 from .ledger import Finding, split_lines
 
 PROTOCOL_REL = "docs/06_quality/SelfImproving_Protocol"
-CHECK_RULES_REV = 5  # P4 追加 sched.events 與 run.trigger_f_has_patrol_by（TCS-P4 R140）；P3 追加
-# events.mea 一項（TCS-P3 R115）；P2 追加 4 項並移除 QUOTE warn
+CHECK_RULES_REV = 6  # P5 於 events.research 併入四問判準（TCS-P5 D-EFQ-18）；P4 追加 sched.events
+# 與 run.trigger_f_has_patrol_by（R140）；P3 追加 events.mea 一項（R115）；
+# P2 追加 4 項並移除 QUOTE warn
 # 來源表不是指標定義：改它不得改判準指紋（TCS-P1 R46 (b)；只涵蓋這一個檔名）
 FINGERPRINT_EXCLUDED = frozenset({"research_sources.json"})
 
@@ -34,6 +35,8 @@ PARAM_SPECS: dict[str, str] = {
     "sched_run_budget_minutes": "int1", "sched_blackout_local": "blackout",
     "sched_driver_quiet_minutes": "int1", "sched_auto_commit": "bool",
     "sched_auto_push": "never",
+    # P5 三鍵（TCS-P5 R179；PRD AC-SI-43-4）：fourq_from_run＝適用起點運轉號
+    "fourq_from_run": "int1", "fourq_items_max": "int1", "fourq_degrade_items_max": "int1",
 }
 SCHED_KEYS = tuple(k for k in PARAM_SPECS if k.startswith("sched_"))
 _HHMM_RANGE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
@@ -158,9 +161,13 @@ def glob_findings(params: dict, valid: set[str], repo: Path) -> list[Finding]:
 
 
 def coupling_findings(params: dict, valid: set[str]) -> list[Finding]:
-    if not {"w_opp", "w_min", "ledger_warn_bytes", "ledger_fail_bytes"} <= valid:
-        return ne_findings("參與耦合的鍵無效")
     out = []
+    if {"fourq_items_max", "fourq_degrade_items_max"} <= valid and (
+            params["fourq_degrade_items_max"] > params["fourq_items_max"]):
+        out.append(Finding("fourq_degrade_items_max", "COUPLING-FOURQ-DEGRADE-GT-MAX", "fail",
+                           "fourq_degrade_items_max 不得大於 fourq_items_max"))
+    if not {"w_opp", "w_min", "ledger_warn_bytes", "ledger_fail_bytes"} <= valid:
+        return out + ne_findings("參與耦合的鍵無效")
     if params["w_opp"] < params["w_min"]:
         out.append(Finding("w_opp", "COUPLING-W-OPP-LT-W-MIN", "fail", "w_opp 不得小於 w_min"))
     if params["ledger_warn_bytes"] >= params["ledger_fail_bytes"]:

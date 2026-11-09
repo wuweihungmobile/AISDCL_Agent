@@ -18,6 +18,9 @@ if _LIB not in sys.path:
 
 from lib import resume_route  # noqa: E402
 
+from . import fourqparse  # noqa: E402
+
+_FOURQ_CMD = "selfimproving.py fourq --run"
 SECTION = "## 無人運轉任務書範本"
 UPPER_FIELDS = ("RUN", "HEAD_SHA", "NOW_ISO", "DUE_AT", "BAND", "DEGRADE_NOTE", "BUDGET_MINUTES",
                 "EVENTS", "RESEARCH_RESULT", "SOURCE_FILES", "SCAN_CANDIDATES", "MAX_PROPOSALS",
@@ -52,7 +55,8 @@ def template_of(sop_text: str) -> str | None:
 def template_problems(sop_text: str) -> list[str]:
     """問題碼清單（空＝可用）：`FENCE-MISSING`、`PLACEHOLDER-MISSING:<X>`、
     `HANDBACK-HEADING-MISSING:<標題>`、`FORBIDDEN-SECTION-MISSING`、`ROLE-STEP-MISSING:<N>`、
-    `TRIGGER-LINE-MISSING`。"""
+    `TRIGGER-LINE-MISSING`、`ROLE-STEP-ORDER`（步序 1～9 須遞增）、`FOURQ-TEXT-MISSING:<Q1～Q4|CMD>`
+    （P5：四問原句與 fourq 指令句；對舊範本 fail-closed）。"""
     body = template_of(sop_text)
     if body is None:
         return ["FENCE-MISSING"]
@@ -62,8 +66,13 @@ def template_problems(sop_text: str) -> list[str]:
             if m not in lines]
     if "## 禁止事項" not in lines:
         out.append("FORBIDDEN-SECTION-MISSING")
-    have = {int(n) for n in _STEP_RE.findall(body)}
-    out += [f"ROLE-STEP-MISSING:{n}" for n in range(1, 9) if n not in have]
+    steps = [int(n) for n in _STEP_RE.findall(body)]
+    out += [f"ROLE-STEP-MISSING:{n}" for n in range(1, 10) if n not in steps]
+    if steps != sorted(steps):
+        out.append("ROLE-STEP-ORDER")
+    out += [f"FOURQ-TEXT-MISSING:Q{i}" for i, q in enumerate(fourqparse.QS, 1) if q not in body]
+    if _FOURQ_CMD not in body:
+        out.append("FOURQ-TEXT-MISSING:CMD")
     if _F_LINE not in body:
         out.append("TRIGGER-LINE-MISSING")
     return out

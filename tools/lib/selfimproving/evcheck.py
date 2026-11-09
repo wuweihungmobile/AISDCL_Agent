@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import decheck, meacheck, schedcheck
+from . import decheck, fourqparse, meacheck, schedcheck
 from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
@@ -178,7 +178,8 @@ def _patch_findings(sub: str, ev: dict, raw: bytes) -> list[Finding]:
     return []
 
 
-def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None) -> list[Finding]:
+def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None,
+              params: dict) -> list[Finding]:
     f = si_fold.fold(events)
     out: list[Finding] = []
     runs = {r for _, _, r, _ in f.research_events if r} | set(f.runs)
@@ -199,7 +200,8 @@ def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None) -
                                    f"研究事件 seq={rs[0]} 不介於 run.open 與第一筆 prop 之間"))
     scans = [ev for _, k, _, ev in f.research_events if k == "research.scan"]
     out += _scan_findings(git, scans, src_raw)
-    return out + decheck.helmsman_refs(repo, events)
+    out += decheck.helmsman_refs(repo, events)
+    return out + fourqparse.check_findings(repo, events, params)
 
 
 def _scan_findings(git: Git, scans: list[dict], src_raw: bytes | None) -> list[Finding]:
@@ -273,7 +275,7 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
         "events.mutated": (muts, mut_detail),
         "events.vacuity": (_vacuity(events, params, valid), ""),
         "events.prop_files": (_prop_files(repo, sound), ""),
-        "events.research": (_research(repo, git, sound, src_raw), ""),
+        "events.research": (_research(repo, git, sound, src_raw, params), ""),
         "events.dec_quote": (decheck.dec_quote(repo, sound, params, git), ""),
         "events.dec_console": (decheck.dec_console(repo, sound, params, git), ""),
         "events.verdict": (decheck.verdict_item(sound, params, valid), ""),

@@ -19,10 +19,11 @@ from . import fold as si_fold
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 PATROL_RUN_ENV = "AUTOSDD_SI_PATROL_RUN"
 A_CLASS = ("research", "attr", "attr-confirm", "attr-reject", "prop-new", "prop-revise",
-           "heldout-freeze", "card-issue")
+           "heldout-freeze", "card-issue", "fourq")
 C_CLASS = ("run-open", "run-close", "obs-add", "obs-close", "sched-set", "sched-arm",
            "sched-disarm", "sandbox", "verify", "promote", "rollback", "measure", "patrol")
-READONLY = ("check", "status", "scan", "card", "export", "capacity", "issues", "sched-show")
+READONLY = ("check", "status", "scan", "card", "export", "capacity", "issues", "sched-show",
+            "fourq-corpus")
 
 
 def is_set(env: Mapping) -> bool:

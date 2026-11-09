@@ -75,6 +75,8 @@ def render(v: dict) -> tuple[str, int, list[str]]:
         f"{v['patch_rel']}｜冷卻狀態：{'冷卻中' if v['cooldown'] else '無'}"
         f"｜轉交通道：{v['route'].split(':', 1)[1] if handoff else '無'}",
     ]
+    if v.get("method") and v.get("proof"):  # P5 D-EQA-2：兩欄皆有才渲染（舊卡面位元組不變）
+        tail.append(f"方法與工具：{v['method']}｜成效與收斂：{v['proof']}")
     if v["cls"] == "R" and v["action"] == "retire":  # R127 (f)：SDD 規則退役須經人工 set_maturity
         tail.append(R_RETIRE_HINT)
     return "\n".join(core + tail) + "\n", len(core), core
@@ -153,7 +155,8 @@ def assemble(repo: Path, git: Git, f: si_fold.Folded, ev: dict, p: si_fold.Prop,
          "added": sum(len(b.added) for b in blocks), "removed": sum(len(b.removed) for b in blocks),
          "ratio": ratio, "touched_count": ev["touched_count"], "extra": extra,
          "sources": ev["sources"], "budget": fields.get("budget", ""), "patch_rel": patch_rel,
-         "cooldown": any(c["prop"] == p.id for c in f.cooldowns)}
+         "cooldown": any(c["prop"] == p.id for c in f.cooldowns),
+         "method": fields.get("method", ""), "proof": fields.get("proof", "")}
     text, n, core = render(v)
     parsed = parse(text)
     if check:

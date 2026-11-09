@@ -541,7 +541,7 @@ class TestScheduleStatus(P4TestCase):
             fx4.sched_set_ev(now - 30 * MIN, carrier="console", by="patrol")])
         st = self.status(R)
         keys = list(st)
-        self.assertEqual((len(keys), keys[-1]), (16, "schedule"))
+        self.assertEqual((len(keys), keys[-1]), (17, "fourq"))
         self.assertEqual(keys[:15], ["events_detected", "unavailable", "open_runs", "pending_props",
                                     "suspended", "cooldowns", "skip_reasons", "capacity",
                                     "root_cause_changes", "reopen_candidates", "pending_windows",
@@ -557,7 +557,7 @@ class TestScheduleStatus(P4TestCase):
         rc, out, err = self.M(R, "export", "--json", "--kind", "status")
         self.assertEqual(rc, 0, err)
         item = json.loads(out)["items"][0]
-        self.assertEqual(len(item), 16)
+        self.assertEqual(len(item), 17)
         self.assertEqual({k: v for k, v in item["schedule"].items() if k != "armed"},
                          {k: v for k, v in s.items() if k != "armed"})
 
