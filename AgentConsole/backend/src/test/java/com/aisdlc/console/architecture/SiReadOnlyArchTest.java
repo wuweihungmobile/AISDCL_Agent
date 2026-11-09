@@ -92,13 +92,13 @@ class SiReadOnlyArchTest {
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count())
                 .as("恰七個 @GetMapping（status、observations、events、proposals、proposals/{id}、runs、console-writes）").isEqualTo(7);
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count())
-                .as("恰四個 @PostMapping（decide、observations、close、validate）").isEqualTo(4);
+                .as("恰六個 @PostMapping（decide、observations、close、validate、schedule/set、runs/request）").isEqualTo(6);
 
         JavaClass bridge = classes.get(AgentBridge.class);
         List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
-        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰五個").extracting(JavaMethod::getName)
+        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰七個").extracting(JavaMethod::getName)
                 .containsExactlyInAnyOrder("siExport", "siWriteDecide", "siWriteObservation", "siWriteObservationClose",
-                        "siValidateObservation");
+                        "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).extracting(JavaClass::getName)
                 .containsExactly(String.class.getName(), Integer.class.getName(), Integer.class.getName(), String.class.getName(),
@@ -135,6 +135,43 @@ class SiReadOnlyArchTest {
                 "JPA", ArchitectureRulesTest.jpa_entities_live_only_in_infrastructure_persistence,
                 "WEB", ArchitectureRulesTest.controllers_live_only_in_inbound_web_adapter);
         existing.forEach((name, rule) -> rule.check(classes));
+    }
+
+    // ── AT-964-7-9：P4 兩個新 handler 的結構鎖（TCS-SelfImprovingSchedule W-S7 (j)）──────────────────────────
+
+    @Test
+    void AT_964_7_9_theTwoScheduleHandlersArePostsWithoutAMethodAndOnlyTheWriteServiceCallsTheirBridgeMethodsAndTheDmlLockIsUnchanged()
+            throws IOException {
+        JavaClasses classes = mainClasses();
+        JavaClass controller = classes.get("com.aisdlc.console.adapter.in.web.SiController");
+        Map<String, String> handlers = Map.of("/schedule/set", "setSchedule", "/runs/request", "requestRun");
+        handlers.forEach((path, name) -> {
+            List<JavaMethod> found = controller.getMethods().stream()
+                    .filter(m -> m.tryGetAnnotationOfType(PostMapping.class).map(a -> Arrays.asList(a.value()).contains(path)).orElse(false))
+                    .toList();
+            assertThat(found).as("恰一個 @PostMapping(\"%s\")", path).hasSize(1);
+            assertThat(found.get(0).getName()).isEqualTo(name);
+            assertThat(found.get(0).isAnnotatedWith(RequestMapping.class)).as("%s 不帶 @RequestMapping（沒有 method 屬性）", name).isFalse();
+            assertThat(found.get(0).isAnnotatedWith(PutMapping.class) || found.get(0).isAnnotatedWith(PatchMapping.class)
+                    || found.get(0).isAnnotatedWith(DeleteMapping.class)).isFalse();
+        });
+        // 用例方法集合：寫入用例新增 setSchedule、requestRun（其餘四個不變）
+        assertThat(methodNames(com.aisdlc.console.application.port.in.SiWriteUseCase.class)).as("SiWriteUseCase 的方法集合")
+                .containsExactlyInAnyOrder("decide", "addObservation", "closeObservation", "validateObservation", "setSchedule", "requestRun");
+        // 呼叫兩個新 Bridge 方法的類別只有 SiConsoleWriteService（含方法參照）
+        for (String bridgeMethod : List.of("siWriteScheduleSet", "siWriteRunRequest")) {
+            assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals(bridgeMethod)))
+                    .as("%s 只經 SiConsoleWriteService", bridgeMethod).containsExactly(SiConsoleWriteService.class.getSimpleName());
+        }
+        // 取界讀的是 SiMirrorUseCase.status()；寫入服務對 AgentBridge 沒有新增讀取呼叫（siExport 仍只在唯讀鏡像與對帳）
+        assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals("siExport")))
+                .as("siExport 的使用者不含寫入服務（序 5′ 經 SiMirrorUseCase）").doesNotContain(SiConsoleWriteService.class.getSimpleName());
+        // DML 三條鎖與「唯一存取該表的類別」不變
+        Map<String, String> sources = mainSources();
+        assertThat(sources.entrySet().stream().filter(e -> e.getValue().contains(TABLE)).map(Map.Entry::getKey).sorted().toList())
+                .containsExactly(ADAPTER_PATH);
+        assertThat(count(sources.get(ADAPTER_PATH), "(?is)\\b(insert|update|delete)\\b[^;\"]*console\\." + TABLE)).as("DML 敘述總數").isEqualTo(3);
+        assertThat(methodNames(SiConsoleWriteRepository.class)).containsExactlyInAnyOrder("insert", "deleteByAuditRef", "findDecideAuditRefs");
     }
 
     // ── AT-950-8-2：表的寫入面只有三條 ───────────────────────────────────────────────────────────────

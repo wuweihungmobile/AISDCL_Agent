@@ -6,6 +6,8 @@ import com.aisdlc.console.adapter.in.web.dto.SiConsoleWritesResponse;
 import com.aisdlc.console.adapter.in.web.dto.SiDecideRequest;
 import com.aisdlc.console.adapter.in.web.dto.SiExportResponse;
 import com.aisdlc.console.adapter.in.web.dto.SiObservationRequest;
+import com.aisdlc.console.adapter.in.web.dto.SiRunRequest;
+import com.aisdlc.console.adapter.in.web.dto.SiScheduleSetRequest;
 import com.aisdlc.console.adapter.in.web.dto.SiValidationResponse;
 import com.aisdlc.console.adapter.in.web.dto.SiWriteReceiptResponse;
 import com.aisdlc.console.application.port.in.SiMirrorUseCase;
@@ -31,7 +33,8 @@ import java.security.Principal;
  * SelfImproving 的端點：P1b 的六個唯讀鏡像 {@code GET}（TCS-SelfImprovingMirror-P1b R7、R9、R10；PRD AC-SI-32-1～32-4）加 P2b 的寫入載體——
  * 四個 {@code POST}（決定、新增觀察、關閉觀察、預檢）與一個對帳讀面 {@code GET /console-writes}（TCS-SelfImprovingDecide-P2b W10、W11、W14；
  * PRD AC-SI-33、AC-SI-35）。<b>Console 不寫帳本</b>：四個 POST 只簽稽核 JSON、寫 Console 自己的稽核列、經 Bridge 落稽核檔，由主機端根層 CLI 入帳。
- * <b>沒有任何 PUT、PATCH、DELETE 對映</b>（{@code @RequestMapping} 不帶 {@code method}，ArchUnit 鎖住）。
+ * <b>沒有任何 PUT、PATCH、DELETE 對映</b>（{@code @RequestMapping} 不帶 {@code method}，ArchUnit 鎖住）。P4 另加兩個 {@code POST}（排程設定
+ * {@code /schedule/set}、立即啟動 {@code /runs/request}；TCS-SelfImprovingSchedule W-S7；同一條稽核管線、不走重送閘）。
  *
  * <p>權限：GET＝VIEWER 以上（無有效 JWT＝401）；<b>四個 POST＝僅 ADMIN</b>（{@code SecurityConfig}：VIEWER／OPERATOR＝403 {@code ACCESS_DENIED}），
  * 帳號另須在 {@code console.si.deciders} 名單內（403 {@code si_write_forbidden}）；PUT／PATCH／DELETE 對 VIEWER＝403、對 OPERATOR／ADMIN＝405（沒有對映）。
@@ -68,6 +71,12 @@ public class SiController {
             + "details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、不呼叫 Bridge；同 subject 與 digest 但 dkind 不同照常受理；"
             + "rollback、unblock、resume 沒有卡面 digest，不受此閘）→ " + WRITE_EXECUTION
             + "重送一律新 auditRef（帶 digest 的六個動詞除外：同一決定已被重送閘擋下）。" + WRITE_RESULT;
+
+    /** P4 兩個 POST 的閘門序：序 1～4 同上，序 5 輸入閘之後僅排程設定多一關序 5′（取界）；兩者都沒有重送閘。 */
+    private static final String SCHEDULE_GATES = "驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ "
+            + "寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；"
+            + "details.violations[{field,message}] 一次全列）→ ";
+    private static final String SCHEDULE_NO_DEDUPE = "不設重送閘：同一份請求連送兩次各得 201 與不同 auditRef（沒有決定那種卡面 digest 可綁）。";
 
     private final SiMirrorUseCase si;
     private final SiWriteUseCase write;
@@ -184,6 +193,29 @@ public class SiController {
                     + "不寫帳本。與新增觀察同一關（授權、停用、輸入閘）；Bridge 回 503 si_unavailable 時原因逐字轉出。" + WRITE_FLOW)
     public ApiResult<SiValidationResponse> validateObservation(@RequestBody SiObservationRequest request, Principal principal) {
         return ApiResult.ok(SiValidationResponse.from(write.validateObservation(principal.getName(), request.toInput())));
+    }
+
+    // ── P4：排程設定與立即啟動（僅 ADMIN；API-SI-12、API-SI-13；不走決定重送閘）────────────────────────────
+
+    @PostMapping("/schedule/set")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(operationId = "postSiScheduleSet", summary = "設定自動演化排程：啟用或停用、週期（P4；僅 ADMIN）",
+            description = "body {enabled, periodMinutes, reason?}：enabled 與 periodMinutes 兩鍵皆必備（停用時也須帶界內週期）。"
+                    + SCHEDULE_GATES + "週期的界（schedule.periodMin～periodMax，含端點）每次由 GET /si/status 現取、不快取不寫死："
+                    + "界外＝422 invalid_request（violations 的 periodMinutes，訊息帶當下的界）；取不到界（schedule 缺席、界鍵缺席或非整數、min 大於 max）＝503 si_unavailable"
+                    + "（details.cause＝schedule_bounds_unavailable、details.detail 指出缺哪個鍵）；GET status 自己失敗則沿 GET /si/status 的 502、504、503 對映逐字轉出。"
+                    + SCHEDULE_NO_DEDUPE + WRITE_EXECUTION + WRITE_RESULT)
+    public ApiResult<SiWriteReceiptResponse> setSchedule(@RequestBody SiScheduleSetRequest request, Principal principal) {
+        return ApiResult.created(SiWriteReceiptResponse.from(write.setSchedule(principal.getName(), request.toInput())));
+    }
+
+    @PostMapping("/runs/request")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(operationId = "postSiRunRequest", summary = "請求主機立即啟動一次自我進化運轉（P4；僅 ADMIN）",
+            description = "body {note?}（可為空物件）。" + SCHEDULE_GATES + "沒有週期可驗，所以沒有取界那一關。" + SCHEDULE_NO_DEDUPE
+                    + "主機端對多餘的請求以「已有未關運轉改記 sched.skip」消化。" + WRITE_EXECUTION + WRITE_RESULT)
+    public ApiResult<SiWriteReceiptResponse> requestRun(@RequestBody SiRunRequest request, Principal principal) {
+        return ApiResult.created(SiWriteReceiptResponse.from(write.requestRun(principal.getName(), request.toInput())));
     }
 
     // ── P2b：對帳讀面 ───────────────────────────────────────────────────────────────────────────

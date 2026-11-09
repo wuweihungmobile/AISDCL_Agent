@@ -125,6 +125,9 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/si/observations/{id}/close", List.of("post")),
             Map.entry("/api/v1/si/observations/validate", List.of("post")),
             Map.entry("/api/v1/si/console-writes", List.of("get")),
+            // ── SelfImproving P4（TCS-SelfImprovingSchedule W-S7）：排程設定與立即啟動（僅 ADMIN；路徑 114→116、操作 131→133）──
+            Map.entry("/api/v1/si/schedule/set", List.of("post")),
+            Map.entry("/api/v1/si/runs/request", List.of("post")),
             // ── 議題中心：兩個唯讀 GET 與僅 ADMIN 的優先順序寫入（PUT、DELETE）──
             Map.entry("/api/v1/issues", List.of("get")),
             Map.entry("/api/v1/issues/{id}", List.of("get")),
@@ -175,8 +178,8 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/research/projects/{id}/delivery/traceability", List.of("get"))));
 
     /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
-    private static final int EXPECTED_PATH_COUNT = 114;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
-    private static final int EXPECTED_OPERATION_COUNT = 131;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
+    private static final int EXPECTED_PATH_COUNT = 116;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
+    private static final int EXPECTED_OPERATION_COUNT = 133;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -212,7 +215,8 @@ class OpenApiIT extends AbstractApiIT {
         List<String> si = paths.keySet().stream().filter(p -> p.startsWith("/api/v1/si/")).sorted().toList();
         assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
                 "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
-                "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes");
+                "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes",
+                "/api/v1/si/schedule/set", "/api/v1/si/runs/request");
         assertThat(paths).hasSize(EXPECTED_PATH_COUNT);
         for (String path : si) {
             Map<String, Object> operations = docs.read("$.paths['" + path + "']");
@@ -258,6 +262,45 @@ class OpenApiIT extends AbstractApiIT {
                 .endsWith("/SiObservationRequest");
         assertThat(docs.<String>read("$.paths['/api/v1/si/observations/{id}/close'].post.requestBody.content['application/json']"
                 + ".schema['$ref']")).endsWith("/SiCloseRequest");
+    }
+
+    /**
+     * AT-964-7-7（TCS-SelfImprovingSchedule W-S7 (j)）：P4 兩個 POST 的 operationId、請求本文型別、狀態碼集合與說明。為什麼重要：前端以 /v3/api-docs 產生型別——
+     * 狀態碼集合漏了 503，畫面就沒有 schedule_bounds_unavailable 的型別；多了 409 重送閘或 404，前端會寫出永遠走不到的分支。
+     */
+    @Test
+    void AT_964_7_7_theTwoScheduleOperationsDocumentTheirIdsStatusCodesAndTheBoundsCause() {
+        Resp docs = docs();
+        Set<String> codes = Set.of("201", "400", "401", "403", "409", "422", "429", "502", "503", "504");
+        Map<String, String> ids = new java.util.LinkedHashMap<>();
+        ids.put("/api/v1/si/schedule/set", "postSiScheduleSet");
+        ids.put("/api/v1/si/runs/request", "postSiRunRequest");
+        ids.forEach((path, operationId) -> {
+            String op = "$.paths['" + path + "'].post";
+            assertThat(docs.<Map<String, Object>>read("$.paths['" + path + "']").keySet()).as(path).containsExactly("post");
+            assertThat(docs.<String>read(op + ".operationId")).as(path).isEqualTo(operationId);
+            assertThat(docs.<Map<String, Object>>read(op + ".responses").keySet()).as(path).containsExactlyInAnyOrderElementsOf(codes);
+            assertThat(docs.<Boolean>read(op + ".requestBody.required")).as(path).isTrue();
+            String doc = docs.<String>read(op + ".description") + " " + docs.<Map<String, Object>>read(op + ".responses");
+            assertThat(doc).as("%s 的說明與回應不得提及重送閘的 reason，也不得用絕對說法", path).doesNotContain("si_decision_duplicate")
+                    .doesNotContain("唯一帶 reason").doesNotContain("唯一例外");
+        });
+        assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.requestBody.content['application/json'].schema['$ref']"))
+                .endsWith("/SiScheduleSetRequest");
+        assertThat(docs.<String>read("$.paths['/api/v1/si/runs/request'].post.requestBody.content['application/json'].schema['$ref']"))
+                .endsWith("/SiRunRequest");
+        assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.responses['503'].description"))
+                .as("取不到界的 503 載明 cause").contains("schedule_bounds_unavailable");
+        assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.description")).contains("schedule_bounds_unavailable");
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("路徑總數＝修改前現值 114 加 2").hasSize(116);
+        int operations = 0;
+        for (Object path : docs.<Map<String, Object>>read("$.paths").values()) {
+            operations += ((Map<?, ?>) path).size();
+        }
+        assertThat(operations).as("操作總數＝修改前現值 131 加 2").isEqualTo(133);
+        assertThat(java.util.Arrays.stream(com.aisdlc.console.domain.model.si.SiWriteKind.values())
+                .map(com.aisdlc.console.domain.model.si.SiWriteKind::wire).toList())
+                .as("SiWriteKind 全等為五值").containsExactly("decide", "obs-add", "obs-close", "sched-set", "run-request");
     }
 
     /** AT-962-24-3：七個 P2 操作的 operationId 逐字、路徑與方法固定，寫入端點文件化 409／422／502／503／504，讀端含 401 與 404（狀態碼集合另由三表逐一鎖住）。 */

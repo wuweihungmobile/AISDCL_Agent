@@ -4,6 +4,8 @@ import com.aisdlc.console.domain.model.si.SiAuditKeyRing;
 import com.aisdlc.console.domain.model.si.SiCloseCommand;
 import com.aisdlc.console.domain.model.si.SiDecideCommand;
 import com.aisdlc.console.domain.model.si.SiObservationCommand;
+import com.aisdlc.console.domain.model.si.SiRunRequestCommand;
+import com.aisdlc.console.domain.model.si.SiSchedSetCommand;
 import com.aisdlc.console.domain.model.si.SiWriteKind;
 import org.springframework.stereotype.Component;
 
@@ -124,6 +126,28 @@ public class SiAuditSigner {
     public String closeBody(String auditRef, String user, String time, SiCloseCommand command) {
         return header(auditRef, SiWriteKind.OBS_CLOSE, user, time).string("obs_id", command.obsId())
                 .string("disposition", command.disposition()).end();
+    }
+
+    /**
+     * 排程設定的 body（TCS-SelfImprovingSchedule W-S9、D-CS-3）：{@code …,time,enabled,period_minutes,[reason]}；共通鍵之後依書寫序接專屬鍵，
+     * 選用鍵缺席則略過。位元組權威＝根層 {@code consoleaudit.py}。
+     */
+    public String schedSetBody(String auditRef, String user, String time, SiSchedSetCommand command) {
+        SiAuditJson json = header(auditRef, SiWriteKind.SCHED_SET, user, time).bool("enabled", command.enabled())
+                .number("period_minutes", command.periodMinutes());
+        if (command.reason() != null) {
+            json.string("reason", command.reason());
+        }
+        return json.end();
+    }
+
+    /** 立即啟動請求的 body：{@code …,time,[note]}。 */
+    public String runRequestBody(String auditRef, String user, String time, SiRunRequestCommand command) {
+        SiAuditJson json = header(auditRef, SiWriteKind.RUN_REQUEST, user, time);
+        if (command.note() != null) {
+            json.string("note", command.note());
+        }
+        return json.end();
     }
 
     private static SiAuditJson header(String auditRef, SiWriteKind kind, String user, String time) {

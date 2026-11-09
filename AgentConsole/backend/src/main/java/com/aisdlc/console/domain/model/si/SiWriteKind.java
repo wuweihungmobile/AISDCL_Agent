@@ -3,14 +3,17 @@ package com.aisdlc.console.domain.model.si;
 import java.util.Optional;
 
 /**
- * Console 對 SelfImproving 帳本的三種寫入（稽核 JSON 外層的 {@code kind}；TCS-SelfImprovingDecide-P2b W7、W13）：
- * 決定（{@code decide}）、新增觀察列（{@code obs-add}）、關閉觀察列（{@code obs-close}）。{@link #wire()} 是線上與資料庫共用的字面值。
+ * Console 對 SelfImproving 的五種寫入（稽核 JSON 外層的 {@code kind}；TCS-SelfImprovingDecide-P2b W7、W13；TCS-SelfImprovingSchedule W-S7）：
+ * 決定（{@code decide}）、新增觀察列（{@code obs-add}）、關閉觀察列（{@code obs-close}），以及 P4 的排程設定（{@code sched-set}）與立即啟動請求
+ * （{@code run-request}）。{@link #wire()} 是線上與資料庫共用的字面值。
  */
 public enum SiWriteKind {
 
     DECIDE("decide"),
     OBS_ADD("obs-add"),
-    OBS_CLOSE("obs-close");
+    OBS_CLOSE("obs-close"),
+    SCHED_SET("sched-set"),
+    RUN_REQUEST("run-request");
 
     private final String wire;
 

@@ -435,6 +435,16 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
         return siWrite("/si/observations/" + pathSegment(id) + ":close", audit);
     }
 
+    @Override
+    public SiWriteAck siWriteScheduleSet(String audit) {
+        return siWrite("/si/schedule:set", audit);
+    }
+
+    @Override
+    public SiWriteAck siWriteRunRequest(String audit) {
+        return siWrite("/si/runs:request", audit);
+    }
+
     /**
      * 稽核檔落地的共同路徑：附 {@code X-Bridge-Token}（沒有權杖就不發出請求）、本文為稽核 JSON 全文的 UTF-8 位元組、不重試。
      * 2xx 但本文不是 {@code {audit_ref, stored:true}} → {@link UpstreamException.Failure}（{@code bridgeStatus}＝200：檔可能已落地，結果不明）。

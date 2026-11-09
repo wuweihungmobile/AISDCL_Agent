@@ -184,6 +184,119 @@ class SiConsoleWritesReadApiIT extends AbstractSiWriteIT {
         assertThat(orphans).extracting(o -> o.get("auditRef")).doesNotHaveDuplicates();
     }
 
+    // ══ P4 兩種新 kind 的對帳（TCS-SelfImprovingSchedule：AT-964-9-4、9-5、9-E-2、9-E-3；W-S9 (e)；契約 P2c §4.2）══════════════════
+    // 為什麼重要：排程設定與立即啟動請求的「待入帳」狀態是掌舵者唯一看得到的回饋——判準若把 run-request 以 sched.skip 入帳誤判成待入帳，
+    // 畫面會永遠顯示「已送出待入帳」並讓軟停用鎖死按鈕；若把量不到判成已入帳或待入帳，掌舵者會被誤導。
+
+    /** 帳本事件（P4 的三種新事件；{@code subject} 鍵一律省略：兩種新 kind 沒有對象）。 */
+    private static Map<String, Object> schedEvent(int seq, String kind, String carrier, String auditRef) {
+        return event(seq, kind, carrier, auditRef, null, null);
+    }
+
+    @Test
+    void AT_964_9_4_theTwoNewKindsListWithNullSubjectDigestDkindAndSupersededByAndIngestedFollowsTheThreeEventKinds() {
+        String a = ref("d9", 1);
+        String b = ref("d9", 2);
+        String c = ref("d9", 3);
+        String d = ref("d9", 4);
+        String decide = ref("d9", 5);
+        insertWrite(a, "sched-set", null, null, "2026-10-24T14:30:11Z");
+        insertWrite(b, "sched-set", null, null, "2026-10-24T14:30:12Z");
+        insertWrite(c, "run-request", null, null, "2026-10-24T14:30:13Z");
+        insertWrite(d, "run-request", null, null, "2026-10-24T14:30:14Z");
+        insertDecide(decide, PROP, D0, "approve", "2026-10-24T14:30:15Z");
+        MINI.si.payloads.put("events", export("events", List.of(schedEvent(1, "sched.set", "console", a),
+                schedEvent(2, "run.open", "console", c), schedEvent(3, "sched.skip", "console", d),
+                event(4, "dec", "console", decide, "prop", PROP)), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+
+        Resp resp = read(viewer(), "");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.reconcile.status")).isEqualTo("ok");
+        for (String ref : List.of(a, b, c, d)) {
+            Map<String, Object> item = itemOf(resp, ref);
+            assertThat(item.get("kind")).as(ref).isIn("sched-set", "run-request");
+            assertThat(item).as("%s：無對象、無 digest、不取代", ref).containsEntry("subjectId", null).containsEntry("digest", null)
+                    .containsEntry("dkind", null).containsEntry("supersededBy", null);
+            assertThat(item.keySet()).as("鍵集合仍為十一鍵")
+                    .containsExactlyInAnyOrder("auditRef", "kind", "dkind", "user", "role", "time", "subjectId", "digest", "keyId", "ingested",
+                            "supersededBy");
+        }
+        assertThat(itemOf(resp, a)).containsEntry("kind", "sched-set").containsEntry("ingested", true);
+        assertThat(itemOf(resp, b)).containsEntry("kind", "sched-set").containsEntry("ingested", false);
+        assertThat(itemOf(resp, c)).containsEntry("kind", "run-request").containsEntry("ingested", true);
+        assertThat(itemOf(resp, d)).containsEntry("kind", "run-request").containsEntry("ingested", true);
+        assertThat(itemOf(resp, decide)).as("既有 decide 列的判準與值不變").containsEntry("kind", "decide").containsEntry("dkind", "approve")
+                .containsEntry("subjectId", PROP).containsEntry("ingested", true);
+        assertThat(list(resp.read("$.data.orphans"))).as("四個新 kind 列都有對應列：沒有 orphan").isEmpty();
+    }
+
+    @Test
+    void AT_964_9_5_orphansMapTheThreeEventKindsToTheTwoNewKindsInSeqOrderDeduplicateByAuditRefAndSkipNonConsoleCarriers() {
+        String x1 = ref("d9", 11);
+        String x2 = ref("d9", 12);
+        String x3 = ref("d9", 13);
+        String x4 = ref("d9", 14);
+        MINI.si.payloads.put("events", export("events", List.of(
+                schedEvent(1, "sched.set", "console", x1),
+                schedEvent(2, "sched.set", "console", x1),
+                schedEvent(3, "run.open", "console", x2),
+                schedEvent(4, "sched.skip", "console", x3),
+                schedEvent(5, "sched.set", "transcript", x4)), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+
+        Resp resp = read(viewer(), "");
+
+        assertThat(resp.status()).isEqualTo(200);
+        List<Map<String, Object>> orphans = list(resp.read("$.data.orphans"));
+        assertThat(orphans).as("兩筆同 audit_ref 的 sched.set 去重為一；carrier 非 console 者不入列").hasSize(3);
+        assertThat(orphans.get(0)).containsEntry("auditRef", x1).containsEntry("kind", "sched-set").containsEntry("subject", null);
+        assertThat(orphans.get(1)).containsEntry("auditRef", x2).containsEntry("kind", "run-request").containsEntry("subject", null);
+        assertThat(orphans.get(2)).containsEntry("auditRef", x3).containsEntry("kind", "run-request").containsEntry("subject", null);
+        assertThat(orphans).extracting(o -> o.get("auditRef")).doesNotContain(x4).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void AT_964_9_E_2_whenTheLedgerCannotBeReadTheNewKindsAreNeitherIngestedNorPending() {
+        String sched = ref("d9", 21);
+        String run = ref("d9", 22);
+        insertWrite(sched, "sched-set", null, null, "2026-10-24T14:30:11Z");
+        insertWrite(run, "run-request", null, null, "2026-10-24T14:30:12Z");
+
+        MINI.si.unavailable = Map.of("cause", "nonzero_rc", "detail", "rc=3; stderr=壞了");
+        Resp unavailable = read(viewer(), "");
+        MINI.si.reset();
+        MINI.si.payloads.put("events", export("events", List.of(schedEvent(1, "sched.set", "console", sched)), true, 5));
+        Resp capped = read(viewer(), "");
+
+        for (Resp resp : List.of(unavailable, capped)) {
+            assertThat(resp.status()).isEqualTo(200);
+            assertThat(resp.<String>read("$.data.reconcile.status")).isEqualTo("NOT-EVALUABLE");
+            assertThat(list(resp.read("$.data.items"))).hasSize(2).allSatisfy(item -> assertThat(item).containsEntry("ingested", null)
+                    .containsEntry("supersededBy", null));
+            assertThat(resp.data()).containsEntry("orphans", null);
+        }
+        assertThat(unavailable.<String>read("$.data.reconcile.reason")).isEqualTo("si_unavailable");
+        assertThat(capped.<String>read("$.data.reconcile.reason")).isEqualTo("scan_cap_exceeded");
+    }
+
+    @Test
+    void AT_964_9_E_3_aRunRequestIngestedAsASchedSkipCountsAsIngestedAndIsNotAnOrphan() {
+        String run = ref("d9", 31);
+        insertWrite(run, "run-request", null, null, "2026-10-24T14:30:12Z");
+        Map<String, Object> skip = schedEvent(3, "sched.skip", "console", run);
+        skip.put("reason", "run-open");
+        MINI.si.payloads.put("events", export("events", List.of(skip), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+
+        Resp resp = read(viewer(), "");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(itemOf(resp, run)).as("只有 sched.skip、沒有 run.open：請求已被消耗，算已入帳").containsEntry("ingested", true);
+        assertThat(list(resp.read("$.data.orphans"))).as("有對應列：不是 orphan").isEmpty();
+    }
+
     // ── AT-935-5-E-2：量不到＝NOT-EVALUABLE，絕不冒充沒有 ─────────────────────────────────────────
 
     @Test

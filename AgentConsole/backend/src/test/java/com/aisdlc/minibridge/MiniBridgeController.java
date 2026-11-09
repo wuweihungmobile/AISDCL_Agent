@@ -367,8 +367,14 @@ class MiniBridgeController {
     @PostMapping("/si/{segment}")
     ResponseEntity<Object> siValidate(HttpServletRequest http, @PathVariable String segment, @RequestBody byte[] raw,
                                       @RequestHeader(value = "X-Bridge-Token", required = false) String token) {
-        return "observations:validate".equals(segment) ? siWrite(http, "/si/observations:validate", token, raw, true)
-                : error(404, "not_found");
+        if ("observations:validate".equals(segment)) {
+            return siWrite(http, "/si/observations:validate", token, raw, true);
+        }
+        // P4：排程設定與立即啟動的稽核檔落地（無路徑參數；對照 routers/si.py 的 /si/schedule:set、/si/runs:request）
+        if ("schedule:set".equals(segment) || "runs:request".equals(segment)) {
+            return siWrite(http, "/si/" + segment, token, raw, false);
+        }
+        return error(404, "not_found");
     }
 
     // ── 寫入面（契約 §3.1.4 (d)、共通規則 2）：權杖、:freeze、RTM ──────────────────────────────────

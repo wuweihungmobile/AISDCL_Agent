@@ -356,8 +356,8 @@ public interface AgentBridge {
     ExecutionRtm getRunRtm(UUID runId);
 
     // ── SelfImproving（P1b 唯讀鏡像；P2b 加稽核檔落地與預檢）────────────────────────────────────────────
-    // 本介面上名稱以 si 接大寫字母起頭的方法恰五個（ArchUnit 鎖住）：siExport（P1b，唯讀）、三個 siWrite…（P2b，只落稽核檔、不寫帳本）
-    // 與 siValidateObservation（P2b，唯讀預檢）。呼叫三個 siWrite… 的類別只有 SiConsoleWriteService。
+    // 本介面上名稱以 si 接大寫字母起頭的方法恰七個（ArchUnit 鎖住）：siExport（P1b，唯讀）、五個 siWrite…（P2b 三個、P4 兩個，只落稽核檔、不寫帳本）
+    // 與 siValidateObservation（P2b，唯讀預檢）。呼叫 siWrite… 的類別只有 SiConsoleWriteService。
 
     /**
      * {@code GET /si/<kind>[/<id>]}（連線 2 秒／讀取 20 秒、<b>不重試</b>、不帶 {@code X-Bridge-Token}）：回 Bridge 的 export 物件原樣
@@ -401,6 +401,12 @@ public interface AgentBridge {
 
     /** {@code POST /si/observations/<id>:close}（關閉觀察列的稽核檔落地）；其餘同 {@link #siWriteDecide}。 */
     SiWriteAck siWriteObservationClose(String id, String audit);
+
+    /** {@code POST /si/schedule:set}（P4：排程設定的稽核檔落地；無路徑參數、外層 subject 為 null）；其餘同 {@link #siWriteDecide}。 */
+    SiWriteAck siWriteScheduleSet(String audit);
+
+    /** {@code POST /si/runs:request}（P4：立即啟動請求的稽核檔落地；無路徑參數、外層 subject 為 null）；其餘同 {@link #siWriteDecide}。 */
+    SiWriteAck siWriteRunRequest(String audit);
 
     /**
      * {@code POST /si/observations:validate}（P2b；W4、W11）：唯讀預檢＝根層 {@code obs-add --dry-run}。<b>不帶權杖</b>、不落檔；

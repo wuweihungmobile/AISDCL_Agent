@@ -134,6 +134,33 @@ class BridgeHttpAdapterSiWriteTest {
                 });
     }
 
+    /** P4（TCS-SelfImprovingSchedule §4.1）：兩個新呼叫的路徑是字面的 {@code /si/schedule:set}、{@code /si/runs:request}（無路徑參數），其餘同三個舊呼叫。 */
+    @Test
+    void AT_964_7_theTwoScheduleWritesPostTheRawAuditBytesToTheLiteralColonPathsWithTheTokenAndTheSameTimeouts() {
+        byte[] audit = AUDIT.getBytes(StandardCharsets.UTF_8);
+        rig.server.expect(requestTo(BASE + "/si/schedule:set")).andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Bridge-Token", TOKEN)).andExpect(header("X-Trace-Id", not(emptyOrNullString())))
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON)).andExpect(content().bytes(audit))
+                .andRespond(jsonStatus(HttpStatus.CREATED, ACK));
+        rig.server.expect(requestTo(BASE + "/si/runs:request")).andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Bridge-Token", TOKEN)).andExpect(content().bytes(audit))
+                .andRespond(jsonStatus(HttpStatus.CREATED, ACK));
+
+        SiWriteAck set = rig.adapter.siWriteScheduleSet(AUDIT);
+        SiWriteAck run = rig.adapter.siWriteRunRequest(AUDIT);
+
+        rig.server.verify();
+        assertThat(List.of(set, run)).allSatisfy(ack -> assertThat(ack).isEqualTo(new SiWriteAck(REF, true)));
+        assertThat(rig.timeouts).hasSize(2).allSatisfy(pair -> {
+            assertThat(pair[0]).isEqualTo(Duration.ofSeconds(2));
+            assertThat(pair[1]).isEqualTo(Duration.ofSeconds(20));
+        });
+        Rig tokenless = new Rig(null);
+        Throwable thrown = catchThrowable(() -> tokenless.adapter.siWriteScheduleSet(AUDIT));
+        assertThat(thrown).as("沒有權杖就不發出請求").isInstanceOf(ServiceUnavailableException.class);
+        tokenless.server.verify();
+    }
+
     @Test
     void AT_950_6_1_theIdIsEncodedAsOneStrictPathSegmentBeforeTheLiteralAction() {
         Map<String, String> expected = new LinkedHashMap<>();

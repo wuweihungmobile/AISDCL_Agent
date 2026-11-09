@@ -36,9 +36,20 @@ public interface SiWriteUseCase {
     }
 
     /**
+     * 排程設定的請求欄位（P4；未驗證）。欄位刻意保留 JSON 解出的原始型別（{@code Object}），使「字串 {@code "true"}」「小數」「布林充當整數」
+     * 都能被輸入閘當成違規回報（422），而不是被序列化器悄悄轉型。
+     */
+    record ScheduleSetInput(Object enabled, Object periodMinutes, Object reason) {
+    }
+
+    /** 立即啟動請求的欄位（P4；未驗證；同 {@link ScheduleSetInput} 保留原始型別）。 */
+    record RunRequestInput(Object note) {
+    }
+
+    /**
      * 成功收據（不含 body 與 mac）。
      *
-     * @param kind    {@code decide}｜{@code obs-add}｜{@code obs-close}
+     * @param kind    {@code decide}｜{@code obs-add}｜{@code obs-close}｜{@code sched-set}｜{@code run-request}
      * @param subject decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝{@code null}
      * @param time    稽核 body 的 {@code time}（秒精度、{@code ±HH:MM}）
      * @param keyId   簽章金鑰的 sha256 前 8 碼
@@ -54,6 +65,16 @@ public interface SiWriteUseCase {
 
     /** 把處置為 open 的觀察列一次關成終值。 */
     Receipt closeObservation(String user, String id, CloseInput input);
+
+    /**
+     * 排程設定（P4；{@code sched-set}）：閘門序同上，輸入閘（序 5）之後多一關序 5′——自 {@code GET status} 取
+     * {@code schedule.period_min／period_max} 驗 {@code periodMinutes}（讀取、零副作用）；取不到界＝503 {@code si_unavailable}
+     * （{@code details.cause=schedule_bounds_unavailable}）。<b>不走重送閘</b>（沒有卡面 digest）。
+     */
+    Receipt setSchedule(String user, ScheduleSetInput input);
+
+    /** 立即啟動請求（P4；{@code run-request}）：閘門序同上，沒有序 5′、<b>不走重送閘</b>（防連點只靠前端的軟停用）。 */
+    Receipt requestRun(String user, RunRequestInput input);
 
     /** 唯讀預檢（根層 {@code obs-add --dry-run}）：不取 ref、不簽章、不寫資料庫、不落檔。 */
     SiValidation validateObservation(String user, ObservationInput input);

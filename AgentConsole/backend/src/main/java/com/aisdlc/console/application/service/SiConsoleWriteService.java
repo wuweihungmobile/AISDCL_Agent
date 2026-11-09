@@ -1,5 +1,6 @@
 package com.aisdlc.console.application.service;
 
+import com.aisdlc.console.application.port.in.SiMirrorUseCase;
 import com.aisdlc.console.application.port.in.SiWriteUseCase;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedException;
@@ -15,6 +16,8 @@ import com.aisdlc.console.domain.model.si.SiCloseCommand;
 import com.aisdlc.console.domain.model.si.SiConsoleWrite;
 import com.aisdlc.console.domain.model.si.SiDecideCommand;
 import com.aisdlc.console.domain.model.si.SiObservationCommand;
+import com.aisdlc.console.domain.model.si.SiRunRequestCommand;
+import com.aisdlc.console.domain.model.si.SiSchedSetCommand;
 import com.aisdlc.console.domain.model.si.SiValidation;
 import com.aisdlc.console.domain.model.si.SiWriteKind;
 import org.slf4j.Logger;
@@ -60,14 +63,16 @@ public class SiConsoleWriteService implements SiWriteUseCase {
     private final SiAuditRefSource refs;
     private final SiConsoleWriteRepository repository;
     private final AgentBridge bridge;
+    private final SiMirrorUseCase mirror;
 
     public SiConsoleWriteService(SiWriteSettings settings, SiAuditSigner signer, SiAuditRefSource refs,
-                                 SiConsoleWriteRepository repository, AgentBridge bridge) {
+                                 SiConsoleWriteRepository repository, AgentBridge bridge, SiMirrorUseCase mirror) {
         this.settings = settings;
         this.signer = signer;
         this.refs = refs;
         this.repository = repository;
         this.bridge = bridge;
+        this.mirror = mirror;
     }
 
     @Override
@@ -94,6 +99,73 @@ public class SiConsoleWriteService implements SiWriteUseCase {
         SiCloseCommand command = SiWriteGates.close(user, id, input);
         return write(SiWriteKind.OBS_CLOSE, user, command.obsId(), null, (ref, time) -> signer.closeBody(ref, user, time, command),
                 audit -> bridge.siWriteObservationClose(command.obsId(), audit));
+    }
+
+    /**
+     * 排程設定（P4；TCS-SelfImprovingSchedule W-S7）：授權 → 停用檢查 → 序 5 輸入閘 → <b>序 5′ 界檢查</b>（先於一切副作用）→ 執行。
+     * <b>不走重送閘</b>：沒有卡面 digest，每次是「把排程設成這樣」的新請求。
+     */
+    @Override
+    public Receipt setSchedule(String user, ScheduleSetInput input) {
+        authorize(user);
+        SiSchedSetCommand command = SiWriteGates.schedSet(user, input);
+        int[] bounds = scheduleBounds();
+        SiWriteGates.requirePeriodInBounds(command.periodMinutes(), bounds[0], bounds[1]);
+        return write(SiWriteKind.SCHED_SET, user, null, null, (ref, time) -> signer.schedSetBody(ref, user, time, command),
+                bridge::siWriteScheduleSet);
+    }
+
+    /** 立即啟動請求（P4）：同一關但<b>沒有序 5′</b>（無界可驗），也不走重送閘（防連點只靠前端軟停用，D-CS-5）。 */
+    @Override
+    public Receipt requestRun(String user, RunRequestInput input) {
+        authorize(user);
+        SiRunRequestCommand command = SiWriteGates.runRequest(user, input);
+        return write(SiWriteKind.RUN_REQUEST, user, null, null, (ref, time) -> signer.runRequestBody(ref, user, time, command),
+                bridge::siWriteRunRequest);
+    }
+
+    /**
+     * 序 5′ 的界：<b>每次</b>經 {@link SiMirrorUseCase#status()}（沿 GET 的連線 2 秒、讀取 20 秒、不重試與失敗對映）讀
+     * {@code items[0].schedule.period_min／period_max}——不快取、不用上一次的值、不退回預設界。{@code GET status} 自己失敗（502、504、503 原因）
+     * 原樣丟出；取得了但讀不出兩個整數界（{@code schedule} 缺席、鍵缺席或非整數、min 大於 max）＝503 {@code si_unavailable}、
+     * {@code details.cause=schedule_bounds_unavailable}（D-CS-2；不新增 reason）。
+     */
+    private int[] scheduleBounds() {
+        Map<String, Object> raw = mirror.status().raw();
+        if (!(raw.get("items") instanceof List<?> items) || items.isEmpty() || !(items.get(0) instanceof Map<?, ?> first)) {
+            throw boundsUnavailable("status.items[0] 缺席或不是物件");
+        }
+        if (!(first.get("schedule") instanceof Map<?, ?> schedule)) {
+            throw boundsUnavailable("status.items[0].schedule 缺席或不是物件（根層尚未升版或量不到）");
+        }
+        int min = boundOf(schedule, "period_min");
+        int max = boundOf(schedule, "period_max");
+        if (min > max) {
+            throw boundsUnavailable("schedule.period_min（" + min + "）大於 schedule.period_max（" + max + "）");
+        }
+        return new int[] {min, max};
+    }
+
+    private static int boundOf(Map<?, ?> schedule, String key) {
+        Object value = schedule.get(key);
+        if (value == null) {
+            throw boundsUnavailable("schedule." + key + " 缺席或為 null");
+        }
+        if (value instanceof Integer || value instanceof Long || value instanceof Short || value instanceof Byte) {
+            long bound = ((Number) value).longValue();
+            if (bound >= 1 && bound <= Integer.MAX_VALUE) {
+                return (int) bound;
+            }
+        }
+        throw boundsUnavailable("schedule." + key + " 不是正整數（" + value.getClass().getSimpleName() + "）");
+    }
+
+    private static ServiceUnavailableException boundsUnavailable(String detail) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("cause", "schedule_bounds_unavailable");
+        details.put("detail", detail);
+        return new ServiceUnavailableException("取不到排程週期的界（status.schedule.period_min／period_max），無法驗證週期", ErrorReasons.SI_UNAVAILABLE,
+                details);
     }
 
     /**

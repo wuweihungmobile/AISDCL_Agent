@@ -5,6 +5,8 @@ import com.aisdlc.console.domain.model.si.SiAuditKeyRing;
 import com.aisdlc.console.domain.model.si.SiCloseCommand;
 import com.aisdlc.console.domain.model.si.SiDecideCommand;
 import com.aisdlc.console.domain.model.si.SiObservationCommand;
+import com.aisdlc.console.domain.model.si.SiRunRequestCommand;
+import com.aisdlc.console.domain.model.si.SiSchedSetCommand;
 import com.aisdlc.console.domain.model.si.SiWriteKind;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -315,5 +317,116 @@ class SiAuditSignerTest {
         assertThat(SiAuditSigner.formatTime(new SiAuditSigner(Clock.fixed(Instant.parse("2026-10-24T14:30:15.500Z"), ZoneOffset.UTC)).now()))
                 .as("四捨五入會進到 :16；截斷停在 :15").endsWith("T14:30:15+00:00");
         assertThat(VECTOR_TIME).as("與 §5.1 向量的 time 同形").matches("\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d[+-]\\d\\d:\\d\\d");
+    }
+
+    // ── AT-964-9-1／9-2：P4 兩種新 kind 的向量 V5～V8 與黃金檔 G6～G9（TCS-SelfImprovingSchedule W-S9；D-CS-3）──────────────
+    // 值由 Java 序列化器產出，並經根層 consoleaudit.py 的 parse＋verify＋body_guard 以 K0 收下後入表（不是憑空預填）。
+
+    private static final String REF6 = "a1000000-0000-4000-8000-000000000006";
+    private static final String REF7 = "a1000000-0000-4000-8000-000000000007";
+    private static final String REF8 = "a1000000-0000-4000-8000-000000000008";
+    private static final String REF9 = "a1000000-0000-4000-8000-000000000009";
+
+    /** V5～V8；{@code golden} 是對映的黃金檔（G6～G9）檔名。 */
+    private record SchedVector(String name, String golden, SiWriteKind kind, String ref, String body, String mac, int bodyBytes,
+                               int fileBytes, String fileSha) {
+    }
+
+    private static List<SchedVector> schedVectors() {
+        String head = "{\"schema_rev\":1,\"audit_ref\":\"%s\",\"kind\":\"%s\",\"user\":\"admin\",\"role\":\"ADMIN\",\"time\":\"" + STD_TIME + "\"";
+        return List.of(
+                new SchedVector("V5", "sched-set-enable.json", SiWriteKind.SCHED_SET, REF6,
+                        head.formatted(REF6, "sched-set") + ",\"enabled\":true,\"period_minutes\":120,\"reason\":\"夾具啟用\"}",
+                        "6c6d224682b1e06279d9709169e490911fb84f338595de94fab4f8c55774e868", 211, 445,
+                        "sha256:55cf567acf52711cd398f1095c16ab0eb11b6791d8b7ca228d19d7559b3791b0"),
+                new SchedVector("V6", "sched-set-disable.json", SiWriteKind.SCHED_SET, REF7,
+                        head.formatted(REF7, "sched-set") + ",\"enabled\":false,\"period_minutes\":1440}",
+                        "856c7afef2cbedaf0486740f56a46c65f7870a3b59ff538c21939ce06bae3b94", 189, 419,
+                        "sha256:7210a5245f4515978c460f916c63731f7c5d442f16397ef587b4cd5160c7b6c5"),
+                new SchedVector("V7", "run-request-note.json", SiWriteKind.RUN_REQUEST, REF8,
+                        head.formatted(REF8, "run-request") + ",\"note\":\"夾具立即啟動\"}",
+                        "437b37eec00f7607f67fd5c05c6fe31a8564197d332f47b32952f9ea0b2976f3", 181, 413,
+                        "sha256:59256ad432b075c64bcce93e61054ba72492aeec3cbfc2d29c8ffb8ce7970969"),
+                new SchedVector("V8", "run-request.json", SiWriteKind.RUN_REQUEST, REF9,
+                        head.formatted(REF9, "run-request") + "}",
+                        "a68bb7614508d7cb7a9a2fd4cf6645d1af584a8cd3b23107e2794b843f842784", 153, 381,
+                        "sha256:9977906f0432ba767bd5de24e35db05a50e0a760309924fba91a347e97a66f58"));
+    }
+
+    private String composeSchedBody(SchedVector v) {
+        return switch (v.name()) {
+            case "V5" -> signer.schedSetBody(v.ref(), "admin", STD_TIME, new SiSchedSetCommand(true, 120, "夾具啟用"));
+            case "V6" -> signer.schedSetBody(v.ref(), "admin", STD_TIME, new SiSchedSetCommand(false, 1440, null));
+            case "V7" -> signer.runRequestBody(v.ref(), "admin", STD_TIME, new SiRunRequestCommand("夾具立即啟動"));
+            default -> signer.runRequestBody(v.ref(), "admin", STD_TIME, new SiRunRequestCommand(null));
+        };
+    }
+
+    @Test
+    void AT_964_9_1_theFourScheduleVectorsKeepTheCommonKeysFirstThenTheKindSpecificKeysInWritingOrder() throws Exception {
+        for (SchedVector v : schedVectors()) {
+            String body = composeSchedBody(v);
+
+            assertThat(body).as("%s 的 body 字串逐字相等", v.name()).isEqualTo(v.body());
+            assertThat(utf8(body)).as("%s 的 body 位元組數", v.name()).isEqualTo(v.bodyBytes());
+            SignedAudit signed = signer.sign(v.kind(), v.ref(), null, body, RING);
+            assertThat(signed.mac()).as("%s 的 mac（等於獨立 JDK 重算）", v.name()).isEqualTo(v.mac()).isEqualTo(hmacHex(K0, body));
+            assertThat(signed.keyId()).isEqualTo(K0_ID);
+            assertThat(signed.fileBytes()).as("%s 的外層檔位元組數", v.name()).hasSize(v.fileBytes());
+            assertThat(signed.fileSha256()).as("%s 的外層檔 sha256", v.name()).isEqualTo(v.fileSha());
+            List<String> bodyKeys = new ArrayList<>();
+            for (Iterator<String> it = JSON.readTree(body).propertyNames().iterator(); it.hasNext();) {
+                bodyKeys.add(it.next());
+            }
+            List<String> expected = new ArrayList<>(List.of("schema_rev", "audit_ref", "kind", "user", "role", "time"));
+            switch (v.name()) {
+                case "V5" -> expected.addAll(List.of("enabled", "period_minutes", "reason"));
+                case "V6" -> expected.addAll(List.of("enabled", "period_minutes"));
+                case "V7" -> expected.add("note");
+                default -> { }
+            }
+            assertThat(bodyKeys).as("%s 的 body 鍵序", v.name()).containsExactlyElementsOf(expected);
+            JsonNode outer = JSON.readTree(signed.file());
+            assertThat(outer.get("subject").isNull()).as("兩種新 kind 的外層 subject 恆為 JSON null").isTrue();
+            assertThat(outer.get("kind").asString()).isEqualTo(v.kind().wire());
+        }
+    }
+
+    @Test
+    void AT_964_9_1_swappingTheSpecificKeyOrderChangesTheMacSoTheCliWouldRefuseIt() throws Exception {
+        SchedVector v5 = schedVectors().get(0);
+        String swapped = v5.body().replace("\"enabled\":true,\"period_minutes\":120", "\"period_minutes\":120,\"enabled\":true");
+
+        assertThat(swapped).isNotEqualTo(v5.body());
+        assertThat(signer.sign(SiWriteKind.SCHED_SET, v5.ref(), null, swapped, RING).mac()).isNotEqualTo(v5.mac())
+                .isEqualTo(hmacHex(K0, swapped));
+    }
+
+    private static byte[] goldenBytes(String name) throws Exception {
+        try (java.io.InputStream in = SiAuditSignerTest.class.getResourceAsStream("/si/audit/" + name)) {
+            assertThat(in).as("找不到黃金檔 si/audit/%s", name).isNotNull();
+            return in.readAllBytes();
+        }
+    }
+
+    @Test
+    void AT_964_9_2_theSerializerReproducesGoldenFilesG6ToG9ByteForByteUnderTheFixedClockAndKey() throws Exception {
+        for (SchedVector v : schedVectors()) {
+            byte[] golden = goldenBytes(v.golden());
+            SignedAudit regenerated = signer.sign(v.kind(), v.ref(), null, composeSchedBody(v), RING);
+
+            assertThat(regenerated.fileBytes()).as("%s 對映的黃金檔 %s 逐位元組相同", v.name(), v.golden()).isEqualTo(golden);
+            assertThat(golden[0]).as("UTF-8 無 BOM（首位元組是左大括號）").isEqualTo((byte) '{');
+            assertThat(golden[golden.length - 1]).as("無結尾換行").isNotEqualTo((byte) '\n');
+            JsonNode outer = JSON.readTree(new String(golden, StandardCharsets.UTF_8));
+            List<String> keys = new ArrayList<>();
+            for (Iterator<String> it = outer.propertyNames().iterator(); it.hasNext();) {
+                keys.add(it.next());
+            }
+            assertThat(keys).containsExactly("schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac");
+            assertThat(outer.get("subject").isNull()).isTrue();
+            String sha = "sha256:" + HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(golden));
+            assertThat(sha).as("audit_sha256 的對象＝檔位元組").isEqualTo(v.fileSha()).isEqualTo(regenerated.fileSha256());
+        }
     }
 }

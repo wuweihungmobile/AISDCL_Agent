@@ -57,6 +57,8 @@ public class ErrorResponseDocumentation {
             // P2b：SelfImproving 的三個寫入 POST——Bridge 以獨佔建檔拒絕覆寫同名稽核檔（si_audit_exists；每次新 ref，正常不會發生）；
             // 決定端點另有 backend 的重送閘（si_decision_duplicate；說明見 CONFLICT_DESCRIPTION）
             "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close",
+            // P4：排程設定與立即啟動（TCS-SelfImprovingSchedule W-S7）——同一條稽核管線，409 只有 si_audit_exists（這兩個端點不設重送閘）
+            "POST /api/v1/si/schedule/set", "POST /api/v1/si/runs/request",
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：設定順位時議題的狀態不可排（issue_not_rankable）
             "PUT /api/v1/issues/{id}/priority",
             // 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.4）：已有進行中的工作、頻率上限
@@ -71,6 +73,9 @@ public class ErrorResponseDocumentation {
             // 議題中心：清除順位是冪等的刪列（不呼叫 Bridge；列不存在也是 204），不會回 404（TCS-IssueCenter-20261027 D-C14）
             "DELETE /api/v1/issues/{id}/priority");
 
+    /** P4 兩個寫入 POST 的 409 說明：只有 Bridge 的稽核檔已存在。 */
+    private static final String SI_SCHEDULE_CONFLICT = "與目前狀態衝突（reason 說明原因）：si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生）";
+
     /**
      * 409 的說明有端點專屬版本時的覆寫（預設是「與目前狀態衝突（reason 說明原因）」）。決定端點有兩種 409（TCS-SelfImprovingDecideDedupe W-D1）：backend 自己的重送閘
      * {@code si_decision_duplicate}，與 Bridge 的 {@code si_audit_exists}；其餘兩個寫入 POST 只有後者，說明維持預設、不載明重送閘。
@@ -79,7 +84,9 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/si/proposals/{id}/decide", "與目前狀態衝突（reason 說明原因）：si_decision_duplicate＝同一張卡的同一決定已送出過"
                     + "（僅帶 digest 的六個動詞 approve、reject、return、promote、decline-promote、ack-handoff；表內已有 subject、digest、dkind 都相同的 decide 列，"
                     + "不論該列是否已入帳、哪個帳號送的、理由是否相同；details.existingAuditRef、dkind、subject、digest8；零副作用——不取 auditRef、不簽章、不寫表、"
-                    + "不呼叫 Bridge；rollback、unblock、resume 沒有卡面 digest，不受此閘）；si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生）");
+                    + "不呼叫 Bridge；rollback、unblock、resume 沒有卡面 digest，不受此閘）；si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生）",
+            "POST /api/v1/si/schedule/set", SI_SCHEDULE_CONFLICT,
+            "POST /api/v1/si/runs/request", SI_SCHEDULE_CONFLICT);
 
     /** 404 的說明有端點專屬版本時的覆寫（預設是「資源不存在或已軟刪除」）。 */
     private static final Map<String, String> NOT_FOUND_DESCRIPTION = Map.of(
@@ -116,6 +123,19 @@ public class ErrorResponseDocumentation {
             "503", "si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）"
                     + "或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除",
             "504", "引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true");
+
+    /**
+     * P4 排程設定的失敗（TCS-SelfImprovingSchedule W-S7）：同 {@link #SI_WRITE_FAILURES}，另加序 5′——422 含週期超出界、503 含取不到界
+     * （schedule_bounds_unavailable）、502／504 含取界的 GET status 自己失敗（零副作用、沒有稽核列）。
+     */
+    private static final Map<String, String> SI_SCHEDULE_FAILURES = Map.of(
+            "422", "輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容；含序 5′：periodMinutes 超出當下 status 的界，"
+                    + "訊息「須在 <min>～<max> 分鐘之間」）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations）",
+            "502", SI_WRITE_FAILURES.get("502") + "；取界的 GET status 失敗亦同（零副作用、沒有稽核列）",
+            "503", "si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）"
+                    + "或 si_unavailable：details.cause＝schedule_bounds_unavailable（取不到 status.schedule 的 period_min／period_max：schedule 缺席、界鍵缺席或非整數、"
+                    + "min 大於 max；details.detail 指出缺哪個鍵；零副作用）或 Bridge 的稽核目錄寫入失敗等／status 本身不可用（details.cause、details.detail 逐字）",
+            "504", "引擎橋接服務逾時（讀取 20 秒、不重試）：取界的 GET status 逾時＝零副作用；執行階段的請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true");
 
     /** 預檢的失敗：同一關（授權、停用、輸入閘），沒有稽核列也不落檔，所以沒有補償或結果不明的問題。 */
     private static final Map<String, String> SI_VALIDATE_FAILURES = Map.of(
@@ -166,6 +186,9 @@ public class ErrorResponseDocumentation {
             Map.entry("POST /api/v1/si/observations", SI_WRITE_FAILURES),
             Map.entry("POST /api/v1/si/observations/{id}/close", SI_WRITE_FAILURES),
             Map.entry("POST /api/v1/si/observations/validate", SI_VALIDATE_FAILURES),
+            // P4：排程設定（含序 5′ 取界）與立即啟動（無序 5′，失敗表同決定端點）
+            Map.entry("POST /api/v1/si/schedule/set", SI_SCHEDULE_FAILURES),
+            Map.entry("POST /api/v1/si/runs/request", SI_WRITE_FAILURES),
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：兩個 GET 與 PUT 呼叫 Bridge（422／502／503／504）；DELETE 不呼叫 Bridge，只有 id 格式的 422
             Map.entry("GET /api/v1/issues", issueFailures("引擎拒絕此請求（details.bridgeReason=invalid_request；status、source 超過 64 字元、以 - 起頭"
                     + "或含控制字元）。篩選值本身不認得（含空字串）不是 422，而是 503 si_unavailable（cause=nonzero_rc）")),

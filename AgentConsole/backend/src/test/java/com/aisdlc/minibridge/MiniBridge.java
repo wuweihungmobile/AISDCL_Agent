@@ -300,6 +300,49 @@ public final class MiniBridge implements AutoCloseable {
             }
         }
 
+        // ── P4：排程控制載體（TCS-SelfImprovingSchedule §5.5；對照 routers/si.py 的 :set 與 :request 兩個寫入 POST 與 status 的 schedule 鍵）──
+
+        /** {@link #status(Object)} 的哨兵：把 {@code items[0].schedule} 鍵整個拿掉（「根層尚未升版」的缺席情境）。 */
+        public static final Object DROP = new Object();
+
+        /**
+         * 設定 {@code GET /si/status} 回應的 {@code items[0].schedule}（snake_case 的原樣值；含「鍵缺席」{@link #DROP}、型別錯的變形）。
+         * 其餘欄位維持黃金檔狀態 A；{@link #reset()} 復原。
+         */
+        @SuppressWarnings("unchecked")
+        public void status(Object schedule) {
+            Map<String, Object> status = payloads.get("status");
+            Map<String, Object> item = ((List<Map<String, Object>>) status.get("items")).get(0);
+            if (schedule == DROP) {
+                item.remove("schedule");
+            } else {
+                item.put("schedule", schedule);
+            }
+        }
+
+        /** 完整的 snake_case {@code schedule}（根層 R158 的十二鍵），界為 {@code [min, max]}；測試再逐鍵變形。 */
+        public static Map<String, Object> scheduleWithBounds(Object min, Object max) {
+            Map<String, Object> schedule = new java.util.LinkedHashMap<>();
+            schedule.put("enabled", true);
+            schedule.put("period_minutes", 1440);
+            schedule.put("period_min", min);
+            schedule.put("period_max", max);
+            schedule.put("heartbeat_minutes", 15);
+            schedule.put("last_set", map("at", "2026-11-09T10:00:00+08:00", "by", "admin", "carrier", "console"));
+            schedule.put("cell_start", "2026-11-09T00:00:00+08:00");
+            schedule.put("cell_end", "2026-11-10T00:00:00+08:00");
+            schedule.put("ran_this_cell", false);
+            schedule.put("last_skip", null);
+            schedule.put("overdue", false);
+            schedule.put("armed", "NOT-EVALUABLE：export-reads-no-home");
+            return schedule;
+        }
+
+        /** 迷你 Bridge 收到的 {@code GET /si/status} 次數（零副作用與「{@code run-request} 不取界」的斷言用）。 */
+        public long statusRequests() {
+            return seen.stream().filter(request -> "/si/status".equals(request.uri())).count();
+        }
+
         public static Map<String, Object> defaultValidateReply() {
             return map("ok", true, "row", "| 預覽列（測試替身）|", "row_bytes", 287, "row_max_bytes", 700, "findings", List.of());
         }

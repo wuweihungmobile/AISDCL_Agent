@@ -42,9 +42,9 @@ class IssueBridgeArchTest {
         JavaClasses classes = mainClasses();
         JavaClass bridge = classes.get(AgentBridge.class);
         List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
-        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法仍恰五個").extracting(JavaMethod::getName)
+        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰七個（P4 加兩個 siWrite…）").extracting(JavaMethod::getName)
                 .containsExactlyInAnyOrder("siExport", "siWriteDecide", "siWriteObservation", "siWriteObservationClose",
-                        "siValidateObservation");
+                        "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).as("siExport(kind, since, limit, id, status, source)").extracting(JavaClass::getName)
                 .containsExactly(String.class.getName(), Integer.class.getName(), Integer.class.getName(), String.class.getName(),
@@ -56,7 +56,7 @@ class IssueBridgeArchTest {
         assertThat(siControllers).as("防反空轉：至少有 SiController").extracting(JavaClass::getSimpleName).contains("SiController");
         List<JavaMethod> methods = siControllers.stream().flatMap(c -> c.getMethods().stream()).toList();
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count()).as("SiController 的 GET 仍恰七個").isEqualTo(7);
-        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count()).as("SiController 的 POST 仍恰四個").isEqualTo(4);
+        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count()).as("SiController 的 POST 恰六個（P4 加兩個）").isEqualTo(6);
         for (JavaMethod method : methods) {
             assertThat(method.isAnnotatedWith(PutMapping.class) || method.isAnnotatedWith(PatchMapping.class)
                     || method.isAnnotatedWith(DeleteMapping.class)).as("%s 沒有 PUT／PATCH／DELETE 映射", method.getFullName()).isFalse();

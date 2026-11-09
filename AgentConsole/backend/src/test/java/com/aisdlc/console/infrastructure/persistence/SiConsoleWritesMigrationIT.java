@@ -126,9 +126,93 @@ class SiConsoleWritesMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
+    }
+
+    // ── AT-964-7-6：P4 放寬 kind 的 CHECK 為五值（版本號與約束實名一律現查，不寫死）─────────────────────────────────
+
+    private static final String SCHED_MIGRATION_SUFFIX = "__si_console_writes_kind_sched.sql";
+    private static final List<String> FIVE_KINDS = List.of("decide", "obs-add", "obs-close", "sched-set", "run-request");
+
+    private static void insertKind(JdbcTemplate jdbc, UUID ref, String kind) {
+        jdbc.update("insert into console.si_console_writes (audit_ref, kind, \"user\", role, \"time\", subject_id, digest, body, "
+                + "key_id, mac) values (?, ?, 'admin', 'ADMIN', '2026-10-24T14:30:15Z', null, null, ?, ?, ?)", ref, kind, BODY, KEY_ID,
+                MAC);
+    }
+
+    /** {@code kind} 欄上的 CHECK（約束名 → 定義）；現查 {@code pg_constraint}，不憑記憶寫約束名。 */
+    private static Map<String, String> kindChecks(JdbcTemplate jdbc) {
+        Map<String, String> out = new java.util.LinkedHashMap<>();
+        jdbc.queryForList("select conname, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = "
+                + "'console.si_console_writes'::regclass and contype = 'c' order by conname").forEach(row -> {
+                    String def = (String) row.get("def");
+                    if (def.contains("kind")) {
+                        out.put((String) row.get("conname"), def);
+                    }
+                });
+        return out;
+    }
+
+    @Test
+    void AT_964_7_6_theKindCheckIsWidenedToFiveValuesByTheNextVersionAndOldRowsStayUntouched() throws Exception {
+        org.springframework.core.io.Resource[] files = new org.springframework.core.io.support.PathMatchingResourcePatternResolver()
+                .getResources("classpath:db/migration/V*__*.sql");
+        List<Integer> versions = java.util.Arrays.stream(files).map(file -> file.getFilename())
+                .map(name -> Integer.parseInt(name.substring(1, name.indexOf("__")))).sorted().toList();
+        int newest = versions.get(versions.size() - 1);
+        for (int i = 0; i < versions.size(); i++) {
+            assertThat(versions.get(i)).as("目錄的遷移版本嚴格遞增且無缺號（第 %d 個）", i + 1).isEqualTo(i + 1);
+        }
+        String schedFile = java.util.Arrays.stream(files).map(file -> file.getFilename()).filter(n -> n.endsWith(SCHED_MIGRATION_SUFFIX))
+                .findFirst().orElseThrow(() -> new AssertionError("找不到 *" + SCHED_MIGRATION_SUFFIX));
+        int schedVersion = Integer.parseInt(schedFile.substring(1, schedFile.indexOf("__")));
+
+        String database = createDatabase();
+        flyway(database, String.valueOf(schedVersion - 1)).migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        Map<String, String> before = kindChecks(jdbc);
+        assertThat(before).as("放寬前恰一條 kind 的 CHECK（V13 欄位內聯的匿名 CHECK）").hasSize(1);
+        String constraintName = before.keySet().iterator().next();
+        assertThat(before.get(constraintName)).as("放寬前只認三值").contains("decide", "obs-add", "obs-close")
+                .doesNotContain("sched-set").doesNotContain("run-request");
+        List<UUID> oldRefs = List.of(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+        for (int i = 0; i < 3; i++) {
+            insertKind(jdbc, oldRefs.get(i), FIVE_KINDS.get(i));
+        }
+        assertThatThrownBy(() -> insertKind(jdbc, UUID.randomUUID(), "sched-set")).as("放寬前 sched-set 被 CHECK 拒絕")
+                .isInstanceOf(DataAccessException.class);
+        String rowsBefore = jdbc.queryForObject("select string_agg(audit_ref::text || kind || body || key_id || mac, ';' order by "
+                + "audit_ref) from console.si_console_writes", String.class);
+
+        flyway(database, null).migrate();
+
+        List<Map<String, Object>> history = jdbc.queryForList("select version, script, success from console.flyway_schema_history "
+                + "where version is not null order by installed_rank");
+        assertThat(history).extracting(row -> row.get("script")).as("已套用版本集合等於目錄版本集合")
+                .containsExactlyElementsOf(java.util.Arrays.stream(files).map(file -> file.getFilename())
+                        .sorted(java.util.Comparator.comparingInt(n -> Integer.parseInt(n.substring(1, n.indexOf("__"))))).toList());
+        assertThat(history.get(history.size() - 1).get("version")).as("最新已套用版本等於目錄最大版本").isEqualTo(String.valueOf(newest));
+        assertThat(history.get(schedVersion - 1)).as("新增檔的版本恰為其前一版加 1").containsEntry("version", String.valueOf(schedVersion))
+                .containsEntry("script", schedFile);
+        assertThat(history.get(schedVersion - 2)).containsEntry("version", String.valueOf(schedVersion - 1));
+        Map<String, String> after = kindChecks(jdbc);
+        assertThat(after).as("放寬後仍恰一條 kind 的 CHECK、約束名不變").hasSize(1).containsKey(constraintName);
+        FIVE_KINDS.forEach(kind -> assertThat(after.get(constraintName)).contains(kind));
+        for (String kind : FIVE_KINDS) {
+            UUID ref = UUID.randomUUID();
+            insertKind(jdbc, ref, kind);
+            assertThat(jdbc.queryForObject("select kind from console.si_console_writes where audit_ref = ?", String.class, ref))
+                    .as("五值皆可 INSERT（subject_id 與 digest 為 NULL）").isEqualTo(kind);
+        }
+        assertThatThrownBy(() -> insertKind(jdbc, UUID.randomUUID(), "bogus")).as("第六個值被 CHECK 拒絕")
+                .isInstanceOf(DataAccessException.class);
+        assertThat(jdbc.queryForObject("select string_agg(audit_ref::text || kind || body || key_id || mac, ';' order by audit_ref) "
+                + "from console.si_console_writes where audit_ref in (?, ?, ?)", String.class, oldRefs.get(0), oldRefs.get(1),
+                oldRefs.get(2))).as("遷移前就存在的三種列內容不變").isEqualTo(rowsBefore);
+        assertThatThrownBy(() -> jdbc.update("update console.si_console_writes set kind = 'sched-set' where audit_ref = ?",
+                oldRefs.get(0))).as("對既有列改 kind 仍被 trigger 拒絕").isInstanceOf(DataAccessException.class).hasMessageContaining("不可改");
     }
 
     // ── AT-950-8-E-1：列不可改 ─────────────────────────────────────────────────────────────────────

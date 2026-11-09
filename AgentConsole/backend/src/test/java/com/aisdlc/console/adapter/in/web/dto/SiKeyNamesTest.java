@@ -76,6 +76,60 @@ class SiKeyNamesTest {
         assertThat(root.keySet()).as("不改輸入").containsExactly("schema_rev", "head_sha", "items", "x_meta", "next_since");
     }
 
+    /** AT-964-7-8：根層 R158 的 {@code status.schedule} 十二鍵經同一個通則函式深層轉出（P4 不需要新增任何特例表）。 */
+    @Test
+    void AT_964_7_8_theTwelveScheduleKeysAreMappedAtEveryLevelAndUnknownKeysAreForwardedWithoutDroppingNulls() {
+        Map<String, Object> lastSet = new LinkedHashMap<>();
+        lastSet.put("at", "2026-11-09T10:00:00+08:00");
+        lastSet.put("by", "admin");
+        lastSet.put("carrier", "console");
+        Map<String, Object> lastSkip = new LinkedHashMap<>();
+        lastSkip.put("at", "2026-11-09T10:15:00+08:00");
+        lastSkip.put("reason", "run-open");
+        lastSkip.put("detail", null);
+        Map<String, Object> schedule = new LinkedHashMap<>();
+        schedule.put("enabled", true);
+        schedule.put("period_minutes", 1440);
+        schedule.put("period_min", 60);
+        schedule.put("period_max", 10080);
+        schedule.put("heartbeat_minutes", 15);
+        schedule.put("last_set", lastSet);
+        schedule.put("cell_start", "2026-11-09T00:00:00+08:00");
+        schedule.put("cell_end", "2026-11-10T00:00:00+08:00");
+        schedule.put("ran_this_cell", false);
+        schedule.put("last_skip", lastSkip);
+        schedule.put("overdue", null);
+        schedule.put("armed", "NOT-EVALUABLE：export-reads-no-home");
+        schedule.put("future_key", "x");
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("schedule", schedule);
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("items", List.of(item));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mappedRoot = (Map<String, Object>) SiKeyNames.camelKeys(root);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mappedItem = (Map<String, Object>) ((List<Object>) mappedRoot.get("items")).get(0);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> out = (Map<String, Object>) mappedItem.get("schedule");
+
+        assertThat(out.keySet()).containsExactly("enabled", "periodMinutes", "periodMin", "periodMax", "heartbeatMinutes", "lastSet",
+                "cellStart", "cellEnd", "ranThisCell", "lastSkip", "overdue", "armed", "futureKey");
+        assertThat(out).containsEntry("overdue", null).containsEntry("futureKey", "x").containsEntry("periodMinutes", 1440);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mappedLastSet = (Map<String, Object>) out.get("lastSet");
+        assertThat(mappedLastSet.keySet()).as("內層鍵不變").containsExactly("at", "by", "carrier");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mappedLastSkip = (Map<String, Object>) out.get("lastSkip");
+        assertThat(mappedLastSkip.keySet()).as("內層鍵不變").containsExactly("at", "reason", "detail");
+        assertThat(mappedLastSkip).as("null 值不丟失").containsEntry("detail", null);
+        Map<String, Object> missing = new LinkedHashMap<>(schedule);
+        missing.remove("last_skip");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mappedMissing = (Map<String, Object>) SiKeyNames.camelKeys(missing);
+        assertThat(mappedMissing).as("缺鍵不補成 null").doesNotContainKey("lastSkip").doesNotContainKey("last_skip");
+    }
+
     @Test
     void AT_932_1_4_twoSourceKeysThatMapToOneNameNeverLoseAField() {
         Map<String, Object> source = new LinkedHashMap<>();

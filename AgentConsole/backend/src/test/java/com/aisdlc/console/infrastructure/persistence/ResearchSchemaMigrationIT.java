@@ -501,7 +501,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
                     .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config").containsEntry("21", "research gate details delivery snapshot").containsEntry("22", "research flow phase delivered");
@@ -1738,7 +1738,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(history.get(18).get("description")).as("V19 描述（第 19 筆；其後還有 V20、V21、V22）").isEqualTo("research route scr delivery");
             soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
@@ -2323,9 +2323,9 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
         SoftAssertions.assertSoftly(soft -> {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
-            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 22")
+            soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 23")
                     .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18",
-                            "19", "20", "21", "22");
+                            "19", "20", "21", "22", "23");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             Map<String, Object> v21 = history.get(20);
             soft.assertThat(v21.get("script")).as("V21 檔名").isEqualTo("V21__research_gate_details_delivery_snapshot.sql");

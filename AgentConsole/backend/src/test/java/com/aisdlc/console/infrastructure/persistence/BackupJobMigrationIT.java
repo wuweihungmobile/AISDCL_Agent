@@ -86,7 +86,9 @@ class BackupJobMigrationIT {
                 + "and table_name not like 'v\\_research\\_%'", String.class);
         String constraints = jdbc.queryForObject("select string_agg(conrelid::regclass::text || '.' || conname || ':' || pg_get_constraintdef(oid), ';' "
                 + "order by conrelid::regclass::text, conname) from pg_constraint where connamespace = 'console'::regnamespace "
-                + "and conrelid::regclass::text <> 'console.backup_jobs' and conrelid::regclass::text not like 'console.research\\_%'", String.class);
+                + "and conrelid::regclass::text <> 'console.backup_jobs' and conrelid::regclass::text not like 'console.research\\_%' "
+                // V23 有意放寬 si_console_writes.kind 的 CHECK 為五值（TCS-SelfImprovingSchedule W-S7）：這一條是宣告過的變動，其餘約束仍逐項比對
+                + "and conname <> 'si_console_writes_kind_check'", String.class);
         return columns + "|" + constraints;
     }
 
@@ -168,7 +170,7 @@ class BackupJobMigrationIT {
 
         assertThat(jdbc.queryForList("select version from console.flyway_schema_history where version is not null order by installed_rank",
                 String.class)).as("Flyway 歷史 1 至 19").containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
         assertThat(snapshotOfExistingTables(jdbc)).as("V19 套用前後既有表的欄位與約束零變動（視圖欄位已被排除）").isEqualTo(before);
         // 鑑別力：information_schema.columns 確實把視圖欄位列入；若快照沒排除，升級後會多出這些欄（還原排除條件則上一個斷言紅）
         assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' "
@@ -191,7 +193,7 @@ class BackupJobMigrationIT {
 
         assertThat(jdbc.queryForList("select version from console.flyway_schema_history where version is not null order by installed_rank",
                 String.class)).as("Flyway 歷史 1 至 22").containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
         assertThat(snapshotOfExistingTables(jdbc)).as("V21 套用前後既有表（排除 research_ 與其視圖）的欄位與約束零變動").isEqualTo(before);
         // 鑑別力：V21 確實改了 research_ 表（三個新欄在位），所以「零變動」是靠排除條件而非 V21 沒做事
         assertThat(jdbc.queryForObject("select count(*) from information_schema.columns where table_schema = 'console' and "
@@ -210,7 +212,7 @@ class BackupJobMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }

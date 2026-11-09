@@ -125,6 +125,9 @@ public class SiReconcileService implements SiReconcileUseCase {
                 case "dec" -> "decide";
                 case "obs.add" -> "obs-add";
                 case "obs.close" -> "obs-close";
+                // P4（契約 P2c §4.2）：排程設定入帳為 sched.set；立即啟動入帳為 run.open，已有未關運轉時改記 sched.skip（請求已被消耗，同樣算已入帳）
+                case "sched.set" -> "sched-set";
+                case "run.open", "sched.skip" -> "run-request";
                 default -> null;
             };
             if (wire == null) {
@@ -132,7 +135,11 @@ public class SiReconcileService implements SiReconcileUseCase {
             }
             ingested.add(ref);
             if ("console".equals(event.get("carrier"))) {
-                String subject = "decide".equals(wire) ? firstText(event.get("prop"), event.get("run")) : text(event.get("obs"));
+                String subject = switch (wire) {
+                    case "decide" -> firstText(event.get("prop"), event.get("run"));
+                    case "sched-set", "run-request" -> null;        // 兩種新 kind 沒有對象（subject 恆 null）
+                    default -> text(event.get("obs"));
+                };
                 consoleEntries.putIfAbsent(ref, new Orphan(ref, wire, subject));
             }
         }

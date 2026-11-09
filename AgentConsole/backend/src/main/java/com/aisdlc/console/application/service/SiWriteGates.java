@@ -3,11 +3,15 @@ package com.aisdlc.console.application.service;
 import com.aisdlc.console.application.port.in.SiWriteUseCase.CloseInput;
 import com.aisdlc.console.application.port.in.SiWriteUseCase.DecideInput;
 import com.aisdlc.console.application.port.in.SiWriteUseCase.ObservationInput;
+import com.aisdlc.console.application.port.in.SiWriteUseCase.RunRequestInput;
+import com.aisdlc.console.application.port.in.SiWriteUseCase.ScheduleSetInput;
 import com.aisdlc.console.domain.exception.UnprocessableException;
 import com.aisdlc.console.domain.exception.Violation;
 import com.aisdlc.console.domain.model.si.SiCloseCommand;
 import com.aisdlc.console.domain.model.si.SiDecideCommand;
 import com.aisdlc.console.domain.model.si.SiObservationCommand;
+import com.aisdlc.console.domain.model.si.SiRunRequestCommand;
+import com.aisdlc.console.domain.model.si.SiSchedSetCommand;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -238,6 +242,113 @@ public final class SiWriteGates {
             return null;
         }
         return text == null ? null : terminal + "：" + text;
+    }
+
+    // ── 排程設定與立即啟動（P4；表 M-S、M-R；TCS-SelfImprovingSchedule W-S7 (b)；與根層 R141 (c) 同一組字串規則）────────────────────
+
+    /** {@code reason}（排程設定）與 {@code note}（立即啟動）的長度上限（code point；根層 {@code consoleaudit._TEXT_MAX}）。 */
+    public static final int SCHED_TEXT_MAX = 120;
+
+    /**
+     * 驗帳號名與排程設定欄位（序 5 的靜態輸入閘；序 5′ 的界檢查在用例內、需要 {@code GET status}）：{@code enabled} 必須是 JSON 布林、
+     * {@code periodMinutes} 必須是 JSON 整數（小數、字串、布林、0、負數＝違規）、{@code reason} 選填。一次回報全部違規。
+     */
+    public static SiSchedSetCommand schedSet(String user, ScheduleSetInput input) {
+        Check check = new Check();
+        account(check, user);
+        Boolean enabled = null;
+        if (input.enabled() == null) {
+            check.add("enabled", "enabled 為必填（JSON 布林 true 或 false）");
+        } else if (input.enabled() instanceof Boolean flag) {
+            enabled = flag;
+        } else {
+            check.add("enabled", "enabled 須為 JSON 布林（true 或 false），不接受字串或數字");
+        }
+        Integer period = periodMinutes(check, input.periodMinutes());
+        String reason = freeText(check, "reason", input.reason());
+        check.throwIfAny();
+        return new SiSchedSetCommand(enabled, period, reason);
+    }
+
+    /** 驗帳號名與立即啟動欄位：{@code note} 選填，規則同 {@code reason}。 */
+    public static SiRunRequestCommand runRequest(String user, RunRequestInput input) {
+        Check check = new Check();
+        account(check, user);
+        String note = freeText(check, "note", input.note());
+        check.throwIfAny();
+        return new SiRunRequestCommand(note);
+    }
+
+    /**
+     * 序 5′：週期須在 {@code [min, max]}（含端點）；界取自當下的 {@code GET status}（不在任何地方寫死），違規＝422、
+     * {@code violations[{field:periodMinutes, message:須在 <min>～<max> 分鐘之間}]}。
+     */
+    public static void requirePeriodInBounds(int periodMinutes, int min, int max) {
+        if (periodMinutes < min || periodMinutes > max) {
+            Check check = new Check();
+            check.add("periodMinutes", "須在 " + min + "～" + max + " 分鐘之間");
+            check.throwIfAny();
+        }
+    }
+
+    private static Integer periodMinutes(Check check, Object raw) {
+        if (raw == null) {
+            check.add("periodMinutes", "periodMinutes 為必填（JSON 整數；停用時也須帶界內的週期）");
+            return null;
+        }
+        if (raw instanceof Integer || raw instanceof Long || raw instanceof Short || raw instanceof Byte) {
+            long value = ((Number) raw).longValue();
+            if (value < 1) {
+                check.add("periodMinutes", "periodMinutes 須為正整數（不接受 0 或負數）");
+                return null;
+            }
+            if (value > Integer.MAX_VALUE) {
+                check.add("periodMinutes", "periodMinutes 超出整數範圍");
+                return null;
+            }
+            return (int) value;
+        }
+        if (raw instanceof java.math.BigInteger) {
+            check.add("periodMinutes", "periodMinutes 超出整數範圍");
+            return null;
+        }
+        check.add("periodMinutes", "periodMinutes 須為 JSON 整數（不接受小數、字串或布林）");
+        return null;
+    }
+
+    /**
+     * 排程類自由文字（{@code reason}、{@code note}）：選填；須為字串；不得含控制字元（U+0000～U+001F、DEL）或孤立代理字元（先判原值，所以首尾換行也拒收）；
+     * 有值不得全空白（<b>空字串與全空白一律違規</b>，D-CS-10；空白的判準與根層 Python 的 {@code str.strip()} 同義，免得這裡放行而 CLI 以
+     * {@code FIELD-BLANK} 拒收）；去前後空白後以 code point 計長度、上限 {@value #SCHED_TEXT_MAX}；允許豎線。
+     */
+    private static String freeText(Check check, String field, Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (!(raw instanceof String text)) {
+            check.add(field, field + " 須為字串");
+            return null;
+        }
+        if (hasForbiddenChar(text)) {
+            check.add(field, field + " 不可含控制字元（換行、TAB 等）或無效字元");
+            return null;
+        }
+        if (text.codePoints().allMatch(SiWriteGates::isPythonSpace)) {
+            check.add(field, field + " 不可全為空白");
+            return null;
+        }
+        String value = text.strip();
+        int length = value.codePointCount(0, value.length());
+        if (length > SCHED_TEXT_MAX) {
+            check.add(field, field + " 為 " + length + " 個字元，超過上限 " + SCHED_TEXT_MAX);
+            return null;
+        }
+        return value;
+    }
+
+    /** Python {@code str.isspace()} 的近似：Java 的 {@code isWhitespace} 與 {@code isSpaceChar}（Zs、Zl、Zp；含 U+00A0）聯集，外加 U+0085。 */
+    private static boolean isPythonSpace(int codePoint) {
+        return codePoint == 0x85 || Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint);
     }
 
     // ── 共用 ────────────────────────────────────────────────────────────────────────────────
