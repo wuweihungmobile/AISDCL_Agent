@@ -620,7 +620,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p3_fixtures.py": 518,
     "_selfimproving_p4_fixtures.py": 317,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 8972,
+    "test_adr_xplat001_c1c2_lock.py": 8989,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -658,7 +658,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_guard_line_taxonomy_r99.py": 148,
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
-    "test_install_windows_nightly.py": 1385,
+    "test_install_windows_nightly.py": 1396,
     "test_mac_endurance_r83.py": 2391,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
@@ -712,10 +712,10 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_props.py": 1556,
     "test_selfimproving_research_scan.py": 2068,
     "test_selfimproving_sandbox.py": 850,
-    "test_selfimproving_schedule_advance.py": 659,
-    "test_selfimproving_schedule_gate.py": 1165,
+    "test_selfimproving_schedule_advance.py": 675,
+    "test_selfimproving_schedule_gate.py": 1172,
     "test_selfimproving_schedule_model.py": 603,
-    "test_selfimproving_schedule_patrol.py": 681,
+    "test_selfimproving_schedule_patrol.py": 697,
     "test_selfimproving_verify.py": 1066,
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1544,
@@ -2901,6 +2901,16 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "註解、本列、回歸鎖軌同輪列、接鏈列、名冊句）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝"
      "docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md §7.1 D-IMP-7。"),
+    ("R214", 148311, 148378, +67,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第十七列（SelfImproving P4 OS 任務真機首跳 2026-11-09 的修法，"
+     "TCS-P4 §7.1 D-IMP-9）：test_selfimproving_schedule_patrol.py 入口路徑序回歸測試、"
+     "test_selfimproving_schedule_advance.py M 類 MEMORY-DIR 判準回歸測試、"
+     "test_selfimproving_schedule_gate.py 載具 UTF-8 回存斷言與字碼頁模擬、"
+     "test_install_windows_nightly.py 新裝任務結構預設值與 never_ran 回歸測試＋本檔自身漂移"
+     "（本列、回歸鎖軌同輪列、接鏈列、名冊句）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；證據＝"
+     "docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md §7.1 D-IMP-9。"),
 )
 
 
@@ -3002,7 +3012,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (19799, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (19866, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3037,7 +3047,9 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "SI 同步站點、安裝器三層鎖逐任務＋本檔自身漂移）再 +3541，精確淨額為 19749；"
         "同標籤第十六列（P4 收尾全套實跑的鎖修法 2026-11-09，TCS-P4 D-IMP-7：夾具 STUB 常數、"
         "AT-436-4-2 逐旗標、逐行判定、裸 python 名冊、AC 釘選、B-1 夾具反向＋本檔自身漂移）再 +50，"
-        "精確淨額為 19799。"
+        "精確淨額為 19799；同標籤第十七列（P4 OS 任務真機首跳的修法 2026-11-09，TCS-P4 D-IMP-9："
+        "入口路徑序、M 類判準、載具 UTF-8、新裝任務判讀四組回歸測試＋本檔自身漂移）再 +67，"
+        "精確淨額為 19866。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3518,6 +3530,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "SelfImproving P4 收尾單人窗口 2026-11-09 根層全套實跑的鎖修法（TCS-P4 D-IMP-7）："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok
+     "SelfImproving P4 OS 任務真機首跳的修法 2026-11-09（TCS-P4 D-IMP-9）："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3693,10 +3709,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 363
+_REPIN_LOG_FROZEN_PREFIX_LEN = 364
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "4ad27e63abfbeee97929bfd5b9a3859ca9f0add512e13fd6967dd9308b5b7823")
+    "b8748f1d8bd690ebd0b0bd2a4a9873bffb2ce93bc8be18e403165caa7770cab8")
 
 
 def repin_log_history_digest(
@@ -3901,6 +3917,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "cb5f7c64b61d", "0ba64df8e3a8", "DEF-200-573"),  # round-label-ok：SI P4 排程收尾
     # 同上借用 DEF-200-573；本列＝P4 收尾全套實跑的鎖修法（TCS-P4 §7.1 D-IMP-7）。
     ("R214", "0ba64df8e3a8", "4ad27e63abfb", "DEF-200-573"),  # round-label-ok：SI P4 D-IMP-7／8
+    ("R214", "4ad27e63abfb", "b8748f1d8bd6", "DEF-200-573"),  # round-label-ok：SI P4 D-IMP-9
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
