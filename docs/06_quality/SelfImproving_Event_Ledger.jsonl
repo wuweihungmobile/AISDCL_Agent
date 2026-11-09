@@ -69,3 +69,4 @@
 {"seq":69,"t":"2026-11-09T21:00:00+08:00","kind":"sched.set","by":"patrol","enabled":true,"period_minutes":1440,"carrier":"console","reason":"掌舵者選定每天一次（主控代送，取代 V1 測試的 120 分鐘）","audit_ref":"c289a25a-fee0-43f9-afe2-1b4ba15eca48","audit_sha256":"sha256:d2affeb453d2074bb46775fb003514f878dfd2babbc94333afdadca9064f48a3","key_id":"ca09e52f","decider":"admin"}
 {"seq":70,"t":"2026-11-09T21:00:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-09T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
 {"seq":71,"t":"2026-11-09T21:00:51+08:00","kind":"run.close","by":"main","run":"RUN-SI-005","no_event":true}
+{"seq":72,"t":"2026-11-10T01:30:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-09T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}

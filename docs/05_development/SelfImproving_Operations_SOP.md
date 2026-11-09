@@ -6,6 +6,7 @@
 **P1 定稿**：歸因者、提案者、審查者、凍結者四個角色節與研究者節已於 P1 定稿（2026-10-20）；關鍵片段由 `tools/tests/test_selfimproving_events.py` 以標題切段判準釘住（只判片段是否存在，語意由實跑檢核對照 PRD）。
 **P3 定稿**：〈P3 動詞〉節（`measure`、`capacity`、退役配方、回滾序列、讀值紀律與提案者隔離）已於 P3 定稿；關鍵片段由 `tools/tests/test_selfimproving_p3_meta.py` 以標題切段判準釘住。
 **P4 增補（2026-11-09，T1 掌舵者問題 2；PRD v0.13 FG-M、附錄 C.2 #21）**：〈啟動條件〉加第六類「排程巡邏到期」與 Console「立即啟動一次演化」載體、改寫「沒有排程」兩句；〈P2 動詞〉序列條文的「無人值守」一條改為 run-scoped；新增〈巡邏與無人運轉（P4）〉〈無人運轉任務書範本〉兩節（位於檔尾）。判準的唯一真相源仍是 PRD（FR-SI-36～39、§9.2、§9.4）；P4 動詞與巡邏器於實作輪落地前，本增補的指令為規格形態（以 `python tools/selfimproving.py <動詞> --help` 現查為準）。
+**P5 增補（2026-11-10，T1 掌舵者「頂尖專家四問」；PRD v0.14 FG-N、附錄 C.2 #24）**：新增〈四問審視者〉節（〈研究者〉節之後；〈研究者〉節不改）；〈rc 契約表〉加 `fourq` 列；〈最小序列〉加 `fourq`；〈提案檔〉加 `method`／`proof`；〈無人運轉任務書範本〉改 9 步並逐字引用四問原句。判準的唯一真相源是 PRD（FR-SI-41～44、§9.8）；`fourq` 於實作輪落地前為規格形態。
 
 ## 啟動條件
 
@@ -130,6 +131,81 @@ P1 定稿。
 免掃的原因為封閉集合：`quota-band`（附當時 band 值）、`offline`（附一句現象）、`helmsman`（掌舵者明示，附 sid 與 line 座標）。
 研究來源表 sources[] 必須依 id 的位元組序遞增（check 的 SRC-ORDER 判準）；新增或改名來源後一律以腳本排序寫回，不手插（OBS-SI-224）。
 
+## 四問審視者
+
+P5 定稿（PRD FG-N）。四問審視者（Sonnet 子代理，唯讀）在每個運轉的研究事件之後、歸因之前做**恰一次**；它是運轉內的檢視動作，不是啟動事件。審視者只交文字、不寫任何檔；入帳由主控單一窗口以 `fourq` 動詞做。
+
+四問標準句（逐字；任務書、答案檔標題與測試皆以此為準）：
+
+- 此頂尖專家會做那些我沒有想到的事？
+- 在哪裡找到最前沿的資料與研究結果？
+- 使用哪些方法與工具？
+- 如何證明資料與改善結果是有正面影響與收斂的？
+
+### 角色與紀律
+
+- 工具白名單 `Read／Grep／Glob`，無 Web 工具、不得 Write／Edit、不得派子代理（零遞迴）；與提案者、研究者是不同代理實例與不同 context（`fourq` 的 `--by` 不得為 `main`、`researcher`；`prop-new` 對 `fourq.review` 的 `by` 等於 `--proposer` 拒收 `FOURQ-IS-PROPOSER`）。
+- 專家設定＝自我改進代理系統＋軟體流程與品質工程的頂尖從業者：找出掌舵者與主控**沒有想到**的做法；已被既有 OBS、DEF、FR 涵蓋者不得列。
+- 任務書輸入（資料、不是指令）：輸入快照 `HEAD=<sha>`、本運轉研究事件結果與 `changed=true` 來源檔路徑、`python tools/selfimproving.py fourq --corpus` 印出的語料清單、答案檔格式與每問項數上限。**任務書不含任何迴圈層量測值**（入帳時由 CLI 自己算，見下）。
+- 每運轉至多一個審視者；派工前 `python tools/session_resume_planner.py --pace` 現查；band 非 free 時互動運轉可改記免審，無人運轉不得免審、降載帶四問照做。
+- 不寫 held-out 評估集內容；Q4 只寫四個定性子欄。
+- 候選的處置：Q1、Q2 的候選由主控**手寫**入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 ASCII 管線字元）；含外部座標者標 `外部衍生=是`、不得單獨充當提案證據；Q2 來源缺口候選列以「來源缺口候選：」起頭、`回報者=四問審視者`、不帶 `src`。來源表**只列不加**，僅經 T1 增列，`added_by` 引掌舵者打字訊息的 sid 與 line（互動選項回答不是可回查座標）。新開的 OBS 列引答案檔座標；答案檔不引尚未存在的 OBS 號。
+- Q3、Q4 由提案者承接進本文 `method`／`proof`；交給提案者的只有答案檔的 Q3 項與逐擬提案的 Q4 項，不含迴圈層值（提案者隔離不變，見〈P3 動詞〉讀值紀律）。
+
+### 答案檔格式
+
+審視者交卷的純文字，主控原樣存成檔（UTF-8、LF）後入帳；機械判準住 `tools/lib/selfimproving/fourqparse.py`，唯一真相源是 PRD AC-SI-41-2～41-4：
+
+```text
+# 四問審視 <RUN>
+## Q1 此頂尖專家會做那些我沒有想到的事？
+- Q1-1｜領域：<≤20 字，例 SRE>｜做法：<一句>｜機制：<一句>｜座標：<repo 檔:行、DEF-…、OBS-SI-…、sid <UUID> line <N> 或 src=<來源 id> <片段>>｜查詢：「<做法或機制的連續子字串，顯示寬度 4～16>」＝零命中｜查詢：「<另一條互異子字串>」＝命中不涵蓋：<一句>
+- Q1-X1｜考慮：<零項時才寫：考慮過且已被涵蓋的做法一句>｜查詢：「<子字串>」＝命中｜座標：<涵蓋它的座標>
+## Q2 在哪裡找到最前沿的資料與研究結果？
+- Q2-F1｜來源：<來源 id>｜座標：src=<來源 id> <片段>｜發現：<一句>
+- Q2-G1｜URL：<https 網址>｜分級：<T1 或 T2>｜為何前沿：<一句>｜更新頻率：<一句>
+## Q3 使用哪些方法與工具？
+- Q3-1｜對象：<Q1-1 或擬提案標題>｜方法：<具名方法>｜工具：<repo 內既有路徑>、外部：<名稱>（src=<來源 id>）
+## Q4 如何證明資料與改善結果是有正面影響與收斂的？
+- Q4-1｜擬提案：<標題>｜指標類別：<M1、M4、M5 或 症狀：具名>｜症狀定義：<`可重跑的計數指令` 或可定位座標>｜反證：<一句>｜收斂：<一句，引 PRD 的定義名，不寫數字>
+```
+
+- 四個二級標題逐字；欄位以全形 `｜` 分隔；Q1 項與 Q2-G 行**不得含 ASCII 管線字元**（它們會被抄成 OBS 列），反引號內不判，計數指令建議不接管線（讀 rc 不接管線）；單行 ≤700 bytes；每問項數 ≤ 任務書寫明的上限（CLI 入帳時依額度帶現讀決定）；編號自 1 連號；無發現但免掃者寫 `Q2-F0｜免掃：<原因>`。
+- 零項 Q1 是合法結果，但須舉證：至少 2 筆 `Q1-X`（考慮過且已被涵蓋的做法、子字串查詢宣稱命中、涵蓋它的座標；座標所指的那一行必須真的含該查詢字串）；寫「無事件」，不是「通過」。
+- 查詢：Q1 每項至少 2 條互異查詢，每條必須是該項 `做法` 或 `機制` 文字的連續子字串、顯示寬度 4～16（中日韓字算 2）；狀態只有 `零命中` 或 `命中不涵蓋：<一句>`；CLI 在固定語料上重算，只在零或非零與宣稱不符時拒收。
+- 全文引用：凡 `OBS-SI-`、`ATT-SI-`、`PROP-SI-`、`DEC-SI-`、`APP-SI-`、`RUN-SI-` 加數字的字面都必須真的存在，否則 `FOURQ-REF-DANGLING`；範例與說明文字不要寫不存在的編號。
+- Q4 四個子欄只准定性內容：不寫指標值、基線數字、門檻、`W_` 開頭參數鍵名或任何參數檔路徑，不以觀察筆數、提案筆數、採納率、駁回率、四問項數、發現數、零發現、自評、信心當成效（被「不以」「不得以」「並非以」緊鄰包住者除外）。
+
+### 入帳與免審
+
+主控先 `--dry-run`（零寫入，只印問題碼）再入帳（先存 rc 再判停、不接管線；`<…>` 換成真值）：
+
+```powershell
+$root = (git rev-parse --show-toplevel)
+$py = Join-Path $root '.venv\Scripts\python.exe'
+$si = Join-Path $root 'tools\selfimproving.py'
+& $py $si fourq --corpus                                   # 印語料清單，放進審視者任務書
+& $py $si fourq --run $run --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤> --dry-run
+$rc = $LASTEXITCODE            # 0＝會被收；1＝依碼處理（見下）
+& $py $si fourq --run $run --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤>
+$rc = $LASTEXITCODE            # 0 已寫並印迴圈層快照；1 拒收；3 用法錯誤
+& $py $si fourq --skip --run $run --reason quota-band --band <值> --note <一句>   # 互動運轉才可用
+```
+
+```bash
+root="$(git rev-parse --show-toplevel)"; py="$root/.venv/bin/python"; si="$root/tools/selfimproving.py"
+"$py" "$si" fourq --corpus
+"$py" "$si" fourq --run "$run" --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤> --dry-run; rc=$?
+"$py" "$si" fourq --run "$run" --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤>; rc=$?
+```
+
+- **被拒的處理**：主控**只能**修格式（標題、空白），不得改內容；內容被拒就把問題碼交回**同一個**審視者重寫一次；仍不過＝本運轉不入帳四問（因此不能提案，`check` 記缺漏），不另開免審原因。
+- 入帳成功後 CLI 印**迴圈層快照**（M1、M4、M5a、M5b 的值、n 或 NE 理由；同時寫進 `fourq.review` 事件）；無人主控把印出的那幾行原樣抄進 handback「做了什麼」，NE 照抄、不改寫為達標。
+- 答案檔住 `docs/06_quality/SelfImproving_Proposals/_fourq/<RUN>.md`（CLI 複製，審視者與主控都不直接寫該路徑）；之後才派歸因者。
+- 免審：`quota-band`（互動運轉；CLI 現讀額度帶須非 free，否則 `FOURQ-SKIP-BAND-FREE`）、`helmsman`（掌舵者明示，附 `--sid`、`--line`）；**無人值守下 `fourq --skip` 一律拒收**（`FOURQ-SKIP-REFUSED`）。
+- 無人值守：`fourq` 屬 run-scoped 動詞（須 `AUTOSDD_SI_PATROL_RUN` 且 `--run` 等於它）；`fourq --corpus` 唯讀。
+- 適用範圍：只對 `params.json` 的 `fourq_from_run` 之後開的運轉生效；`prop-new` 在同運轉無 fourq 事件時拒收 `FOURQ-MISSING`；`si check` 重放同判，已關閉而無 fourq 事件的運轉只記資訊項 `FOURQ-NOT-RUN`；`si status` 的 `fourq:` 行印最近運轉狀態與缺漏數。
+
 ## 運轉配方
 
 本節是把一個運轉從頭跑到尾的最小配方：動詞的 rc 契約表與 PowerShell、bash 兩形態的最小序列。動詞語意與判準的唯一真相源是 PRD（§7.2、§9.3）與各階段 TCS；本節只收操作順序與 rc 處置，不複寫判準。表內動詞與 rc 取自 `tools/selfimproving.py` 檔頭與寫入動詞原始碼的現況（SA 讀碼取得，未實跑寫入動詞）。
@@ -143,6 +219,7 @@ P1 定稿。
 | `run-open` | 已寫，印 `RUN-SI-NNN` | 拒收：座標不可定位、git 不可用 | — | 用法錯誤 | 取回 `RUN-SI-NNN`，其後各動詞顯式帶 `--run` |
 | `research --fetch` | 全部來源成功，事件已寫 | 整次未寫：來源表驗證失敗、工作樹的來源表有未提交的改動、現役來源超界、零來源成功、運轉不合、取鎖逾時 | 部分成功：事件已寫、至少一個來源失敗（逐一印出，並各附一列 OBS 草稿） | 用法錯誤 | rc 0 與 2 都**繼續**（rc 2 的失敗來源草稿列入帳，來源表的修正經 T1）；rc 1 → 記 `research --skip --reason offline`，或經 T1 修表後重跑 |
 | `research --skip` | 已寫 | 拒收：運轉不合、該運轉已有研究事件 | — | 附帶旗標不符（免掃原因見〈研究者〉節） | 繼續 |
+| `fourq` | 已寫：入帳（事件一筆、答案檔進 `_fourq/`、印迴圈層快照）或 `--skip`；`--dry-run`／`--corpus` 零寫入 | 拒收（未寫、零殘留、印 `obs-draft:`）：運轉不合、無研究事件、已有 fourq 事件、`--by` 保留字、答案檔格式／座標／查詢／引用／Q4 判準不合、無人值守下 `--skip` | — | 用法或輸入錯誤 | 依拒收碼把問題交回同一審視者重寫一次，不就地改內容；rc 0 才派歸因者 |
 | `scan` | 已執行（零候選印「無事件」，不是綠） | — | — | 無法執行 | 候選草稿列先過 `check` 再由主控入帳；`scan` 不接閘門 |
 | `attr`、`attr-confirm`、`attr-reject` | 已寫 | 拒收：OBS 不在帳本、座標不可定位、根因鍵格式不合、確認者等於提出者、已落定 | — | 用法或輸入錯誤 | 依拒收碼修正後重送 |
 | `prop-new`、`prop-revise` | 已寫，印 `PROP-SI-NNN`、`route`、`digest` 前 8 碼 | 前置檢查拒收（未寫）：例如同運轉無研究事件、無內部來源、觸及比例超界、事件行過長、SUSPENDED | — | 用法或輸入錯誤 | 依拒收碼修 patch 或本文後重送（`prop-revise` 受 `max_revisions` 限制），不原封重試 |
@@ -153,7 +230,7 @@ P1 定稿。
 
 ### 最小序列（有提案的運轉）
 
-運轉內的固定順序：`run-open` → 研究事件（`research --fetch`，或 `research --skip`）→ 體檢與歸因 → `prop-new` → `card` → `run-close`；有提案的運轉在 `prop-new` 之前必須已有恰一筆研究事件（見〈研究者〉節）。零提案的運轉只走 `run-open`、研究事件、`scan` 與 `run-close`（記 `no_event`）。派工前先現查 `python tools/session_resume_planner.py --pace`（不沿用上次的值）；band 非 free 時研究事件改記 `research --skip --reason quota-band --band <值> --note <一句>`。下列占位符（`<…>`）須換成真值；座標須是可定位形態（例：`DEF-200-559`、`docs/06_quality/檔名.md:行`、sid 加 line）；根因鍵須是 ASCII 小寫連字號的 `<面>/<機制>`（例 `process/short-lived-coordinate`）。
+運轉內的固定順序：`run-open` → 研究事件（`research --fetch`，或 `research --skip`）→ 四問審視（`fourq`，或 `fourq --skip`；P5）→ 體檢與歸因 → `prop-new` → `card` → `run-close`；有提案的運轉在 `prop-new` 之前必須已有恰一筆研究事件（見〈研究者〉節）與恰一筆 fourq 事件（`fourq_from_run` 之後的運轉；見〈四問審視者〉節）。零提案的運轉只走 `run-open`、研究事件、四問審視、`scan` 與 `run-close`（記 `no_event`）。派工前先現查 `python tools/session_resume_planner.py --pace`（不沿用上次的值）；band 非 free 時研究事件改記 `research --skip --reason quota-band --band <值> --note <一句>`。下列占位符（`<…>`）須換成真值；座標須是可定位形態（例：`DEF-200-559`、`docs/06_quality/檔名.md:行`、sid 加 line）；根因鍵須是 ASCII 小寫連字號的 `<面>/<機制>`（例 `process/short-lived-coordinate`）。
 
 PowerShell 形態（Windows；只用 PowerShell 工具、一律絕對路徑、不裸 `cd`）：
 
@@ -170,6 +247,8 @@ $run = ($out | ConvertFrom-Json).id              # RUN-SI-NNN
 $rc = $LASTEXITCODE                              # 0 或 2 都繼續；1 → 改記 research --skip（見上表）
 & $py $si scan
 $rc = $LASTEXITCODE                              # 0；3＝無法執行
+& $py $si fourq --run $run --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤>
+$rc = $LASTEXITCODE                              # 0 才派歸因者；1＝依碼交回同一審視者重寫一次（見〈四問審視者〉節）
 
 $out = & $py $si attr --type root --by attributor --obs OBS-SI-NNN --item 'DOC=<座標>' --root-cause 'process/<mechanism>' --json
 $rc  = $LASTEXITCODE
@@ -202,6 +281,7 @@ run="$(printf '%s' "$out" | getid)"              # RUN-SI-NNN
 
 "$py" "$si" research --fetch --run "$run"; rc=$?  # 0 或 2 都繼續；1 → 改記 research --skip（見上表）
 "$py" "$si" scan; rc=$?                           # 0；3＝無法執行
+"$py" "$si" fourq --run "$run" --answers-file '<絕對路徑 fourq_answers.md>' --by <審視者標籤>; rc=$?   # 0 才派歸因者；1＝依碼交回同一審視者
 
 out="$("$py" "$si" attr --type root --by attributor --obs OBS-SI-NNN --item 'DOC=<座標>' --root-cause 'process/<mechanism>' --json)"; rc=$?
 att="$(printf '%s' "$out" | getid)"               # ATT-SI-NNN
@@ -360,7 +440,7 @@ for no, raw in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
 ### 提案檔（`prop-new --patch-file <r.patch> --body-file <r.md>`）
 
 - `r1.patch`：git diff 格式（`git diff --no-index <before> <after>` 或 `git diff`），路徑相對 repo 根；M 類以 `memory/<檔名>` 為前綴（對應 `claude_home()/projects/<slug>/memory/<檔名>`）。
-- `r1.md`：五個 `## ` 骨架標題（反例證據、Before、After、影響面、欄位）；〈欄位〉節的第一個表至少有 `symptom`、`risk`、`rollback`、`budget`、`result_label`（失敗／成功／升級）、`scope`，M 類另有 `source_obs`、`retire_when`；退役提案本文另填 `retire_when` 與 `reopen_symptom`。範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/r1.md`。
+- `r1.md`：五個 `## ` 骨架標題（反例證據、Before、After、影響面、欄位）；〈欄位〉節的第一個表至少有 `symptom`、`risk`、`rollback`、`budget`、`result_label`（失敗／成功／升級）、`scope`，M 類另有 `source_obs`、`retire_when`；退役提案本文另填 `retire_when` 與 `reopen_symptom`；`fourq_from_run` 之後的運轉（P5），欄位表另須 `method`（方法與工具）與 `proof`（格式 `指標類別：…；症狀定義：…；反證：…；收斂：…`，只准定性內容，不含指標值、基線數字、門檻與參數鍵名，`PROOF-LEAK`），缺或空＝`BODY-FIELD-MISSING`；卡面 tail 多一行「方法與工具：…｜成效與收斂：…」（核心區不變）。範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/r1.md`。
 - 提案者**直接呼叫** `prop-new`（不經包裝腳本），暴露掃描才找得到提案者逐字稿（P2 TCS 勘誤三）；凍結後提案者不得再讀 `params.json` 與量測腳本。
 
 ### M 類旗標
@@ -453,7 +533,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 
 ## 無人運轉任務書範本
 
-巡邏器（`patrolbrief`）自本節的逐字骨架生成每個無人運轉的 `brief.md`；占位符以 `<…>` 表示、由巡邏器填入現查值（PRD AC-SI-38-2）。本節屬 SOP（不可進化面）：改骨架＝改無人運轉的任務書，須走 PRD 修訂。必含項（缺一＝巡邏器拒絕 spawn）：RUN、trigger 與偵測到的事件、研究結果與來源檔路徑、`scan` 候選、預算、角色序、禁止事項、handback 四節。
+巡邏器（`patrolbrief`）自本節的逐字骨架生成每個無人運轉的 `brief.md`；占位符以 `<…>` 表示、由巡邏器填入現查值（PRD AC-SI-38-2）。本節屬 SOP（不可進化面）：改骨架＝改無人運轉的任務書，須走 PRD 修訂。必含項（缺一＝巡邏器拒絕 spawn）：RUN、trigger 與偵測到的事件、研究結果與來源檔路徑、`scan` 候選、預算、四問原句逐字（P5）、角色序九步（P5）、禁止事項、handback 四節。`DEGRADE_TEXT` 及其呼叫形態不變；降載帶每問項數上限寫在步 2 的靜態文字並由入帳機械保證。
 
 ```text
 # 無人運轉任務書：<RUN>
@@ -470,19 +550,26 @@ launchctl list | grep AutoSDD_SI_Patrol
 
 ## 角色序（每一步的子代理一律 Sonnet；零遞迴；不同角色用不同代理實例與不同 context）
 1. 研究者：讀 changed=true 的來源檔，文字交卷 OBS 候選（外部衍生=是；src=<來源 id>）；無 Web 工具、不 Write／Edit。
-2. 你（單一寫入窗口）：把候選與體檢發現手寫入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 `|`）；你沒有 obs-add／obs-close／run-open／run-close 動詞（會 rc 1），也不入帳 Console 稽核檔；手寫列沒有 obs.add 事件（那是 Console 載體專用），check 以帳本列為準。
-3. 歸因者：python tools/selfimproving.py attr --run <RUN> …
-4. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm --run <RUN> …
-5. 提案者：python tools/selfimproving.py prop-new --run <RUN> …；本運轉至多 <MAX_PROPOSALS> 張；前置檢查拒收就依碼修正，不原封重試。
-6. 凍結者（≠提案者）：python tools/selfimproving.py heldout-freeze <PROP> --from <held-out 目錄> --by <凍結者>；提案者看不到評估集。
-7. 你：python tools/selfimproving.py card --issue <PROP> --by main，把卡面逐字寫進 handback。
-8. 交卷：handback。
+2. 四問審視者（≠研究者、≠提案者；工具 Read／Grep／Glob，無 Web 工具、不 Write／Edit、零遞迴）：讀本任務書輸入節與研究結果，依 SOP〈四問審視者〉節的答案檔格式文字交卷；四問原句逐字如下（答案檔四個二級標題以這四句為準）：
+   - 此頂尖專家會做那些我沒有想到的事？
+   - 在哪裡找到最前沿的資料與研究結果？
+   - 使用哪些方法與工具？
+   - 如何證明資料與改善結果是有正面影響與收斂的？
+   每問項數上限：額度帶行有降載聲明時 1 項，否則 3 項（入帳時 CLI 依現讀額度帶機械判定，超過即拒收）；零項須舉證；任務書不含迴圈層量測值。
+3. 你（單一寫入窗口）：把審視者交卷存成任務目錄（handback 所在目錄）下的 fourq_answers.md，先 python tools/selfimproving.py fourq --run <RUN> --answers-file <絕對路徑> --by <審視者標籤> --dry-run，再去掉 --dry-run 入帳；被拒時只能修格式（標題、空白），內容問題把問題碼交回同一個審視者重寫一次，仍不過就不入帳四問（本運轉不能提案）；不用 --skip（無人值守一律拒收）；入帳成功印出的迴圈層快照原樣抄進 handback「做了什麼」；再把研究者候選、體檢發現、Q1 盲點、Q2 來源候選手寫入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 `|`；Q2 來源候選列以「來源缺口候選：」起頭、不帶 src）；你沒有 obs-add／obs-close／run-open／run-close 動詞（會 rc 1），也不入帳 Console 稽核檔；手寫列沒有 obs.add 事件（那是 Console 載體專用），check 以帳本列為準。
+4. 歸因者：python tools/selfimproving.py attr --run <RUN> …
+5. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm --run <RUN> …
+6. 提案者（≠審視者）：python tools/selfimproving.py prop-new --run <RUN> …；本運轉至多 <MAX_PROPOSALS> 張；本文欄位表須含 method 與 proof（只准定性子欄），內容取自答案檔的 Q3 項與逐擬提案的 Q4 項；前置檢查拒收就依碼修正，不原封重試。
+7. 凍結者（≠提案者）：python tools/selfimproving.py heldout-freeze <PROP> --from <held-out 目錄> --by <凍結者>；提案者看不到評估集。
+8. 你：python tools/selfimproving.py card --issue <PROP> --by main，把卡面逐字寫進 handback。
+9. 交卷：handback；四問摘要（入帳結果、迴圈層快照、Q1／Q2 候選數、來源缺口候選）寫在「做了什麼」節內。
 
 ## 禁止事項
 - 不 commit、不 push；不 decide（核准與晉升是掌舵者的決定，由 Console 送出、巡邏器之後入帳）；不 sandbox／verify／promote／rollback／measure。
 - 不碰 non_evolvable_globs（PROP 觸及即轉交，不繞過）；不改 .claude/** 與任何守衛面。
 - 所有 SI 寫入動詞都帶 --run <RUN>；不跨運轉寫入。
 - 子代理一律 Sonnet、零遞迴；不用 Web 工具。
+- 不用 fourq --skip；不把來源缺口候選加進 research_sources.json（只列不加，僅經 T1 增列）；不把四問項數、OBS 候選數當成效。
 - 每個指令先存 rc 再判，不接管線；貼不出輸出者一律標「未驗證」。
 - 零提案是合法結果（寫「無事件」，不是「通過」）；不為了有產出而構造提案。
 
