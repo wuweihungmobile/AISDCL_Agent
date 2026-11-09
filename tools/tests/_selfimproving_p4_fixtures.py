@@ -149,7 +149,7 @@ def with_key(key: str = TEST_KEY):
 
 
 # --------------------------------------------------------------------------- 測試基底
-class P4Case(fx2.P2TestCase):
+class P4TestCase(fx2.P2TestCase):  # 名稱含 TestCase：discover 守門不解析跨檔基底鏈（OBS-SI-162）
     def at(self, when: datetime):
         return mock.patch.object(schedwrite, "current_time", return_value=when)
 

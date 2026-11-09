@@ -21,7 +21,7 @@ import unittest
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p4_fixtures as fx4
-from _selfimproving_p4_fixtures import D1, MIN, H, O, P4Case, iso
+from _selfimproving_p4_fixtures import D1, MIN, H, O, P4TestCase, iso
 
 from lib.selfimproving import check as si_check
 from lib.selfimproving import events as si_events
@@ -45,7 +45,7 @@ def raw_events(*items) -> list[dict]:
     return fx.compose(list(items), "0" * 40)
 
 
-class TestConsolePending(P4Case):
+class TestConsolePending(P4TestCase):
     def test_AT_437_5_1_new_kinds_appear_then_vanish(self):
         R = fx4.p4_base()
         sref = self.audit("sched-set", lambda r: fx4.body_sched_set(r, True, 120))
@@ -78,7 +78,7 @@ class TestConsolePending(P4Case):
         self.assertEqual(len(json.loads(real[1])["items"]), 35)
 
 
-class TestSchedCheckCodes(P4Case):
+class TestSchedCheckCodes(P4TestCase):
     def codes(self, *items, item: str = "sched.events"):
         res = self.check(fx4.p4_base(events=list(items)))
         self.assertEqual(self.S(res, "events.structure"), "PASS" if item == "sched.events"
@@ -233,6 +233,9 @@ class TestEventTables(unittest.TestCase):
 
 
 class TestParamsNine(unittest.TestCase):
+    """受測模組 tools/lib/selfimproving/params.py：PARAM_SPECS 九鍵、界與跨鍵關係；
+    對表 docs/06_quality/SelfImproving_Protocol/params.json 與基線文件三列。"""
+
     NINE = {"sched_heartbeat_minutes": 15, "sched_period_minutes_default": 1440,
             "sched_period_minutes_min": 60, "sched_period_minutes_max": 10080,
             "sched_run_budget_minutes": 90, "sched_blackout_local": ["21:00-01:30"],
@@ -366,7 +369,7 @@ class TestScope(unittest.TestCase):
                 + ("" if has_base else "；父 commit 不可得，只看未追蹤檔") + "）")
         touched = [n for n in names if any(rx.match(n) for rx in ALLOWED)]
         if not touched:  # D-IMP-5：差異不含 P4 面＝範圍守衛未觸發，不把無關 commit 判紅
-            print(f"[AT-440-8-1] {note}：差異不含 P4 面，範圍守衛未觸發")
+            print(f"[AT-440-8-1] base={base} has_base={has_base} p4=0 guard-not-triggered")
         else:
             outside = sorted(n for n in names if not any(rx.match(n) for rx in ALLOWED))
             self.assertEqual(outside, [], note)

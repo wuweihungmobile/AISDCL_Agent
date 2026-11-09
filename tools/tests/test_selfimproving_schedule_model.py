@@ -22,7 +22,7 @@ from unittest import mock
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p4_fixtures as fx4
-from _selfimproving_p4_fixtures import D1, MIN, H, O, P4Case, iso
+from _selfimproving_p4_fixtures import D1, MIN, H, O, P4TestCase, iso
 
 from lib.selfimproving import consoleaudit, runner, sched, schedwrite
 from lib.selfimproving import events as si_events
@@ -54,7 +54,7 @@ def inputs(**kw) -> sched.Inputs:
     return sched.Inputs(**kw)
 
 
-class TestCalendarCells(P4Case):
+class TestCalendarCells(P4TestCase):
     def test_AT_436_1_1_cell_start_inclusive_end_exclusive(self):
         ev = E(fx4.sched_set_ev(O))
         nows = (O, O + D1 - 1 * MIN * 0 - timedelta(seconds=1), O + D1, O + 3 * D1 + 5 * MIN)
@@ -174,7 +174,7 @@ def timezone_plus8():
     return timezone(timedelta(hours=8))
 
 
-class TestSkipJudging(P4Case):
+class TestSkipJudging(P4TestCase):
     ORDER = ("disabled", "blackout", "quota-band", "other-driver", "dirty-tree", "run-open",
              "spawn-failed")
     KW = {"disabled": {"enabled": False}, "blackout": {"blackout": True},
@@ -317,7 +317,7 @@ class TestSkipJudging(P4Case):
         self.assertEqual(self.S(self.check(R), "sched.events"), "PASS")
 
 
-class TestSchedSet(P4Case):
+class TestSchedSet(P4TestCase):
     def test_AT_436_5_1_disable_needs_no_quote(self):
         R = fx4.p4_base(events=[fx4.sched_set_ev(O, period=720)])
         rc, out, err = self.M(R, "sched", "set", "--enabled", "false", "--by", "main")
@@ -339,7 +339,7 @@ class TestSchedSet(P4Case):
             self.refused(R, argv, {"UNATTENDED-REFUSED"}, env=env)
 
 
-class TestConsoleAudits(P4Case):
+class TestConsoleAudits(P4TestCase):
     def test_AT_437_1_1_sched_set_body_bounds_and_types(self):
         R = fx4.p4_base()
         ok = ((60, True), (10080, True))
@@ -529,7 +529,7 @@ class TestConsoleAudits(P4Case):
         self.rejected(rc, out, {"AUDIT-KEY-MISSING"})
 
 
-class TestScheduleStatus(P4Case):
+class TestScheduleStatus(P4TestCase):
     def test_AT_437_3_1_schedule_object_and_export_difference(self):
         now = datetime.now().astimezone().replace(microsecond=0)
         origin = now - 3 * H
