@@ -2905,12 +2905,12 @@ export interface components {
         /** @description 設定自動演化排程（啟用或停用、週期）。enabled 與 periodMinutes 兩鍵皆必備（停用時也須帶界內週期）；週期的界取自 GET /si/status 的 schedule.periodMin～periodMax（含端點），不寫死在前後端 */
         SiScheduleSetRequest: {
             /** @description true＝啟用、false＝停用；必須是 JSON 布林（字串 "true" 不收） */
-            enabled: string;
+            enabled: boolean;
             /**
              * Format: int32
              * @description 週期（分鐘）；必須是 JSON 整數（小數、字串、布林、0、負數不收），且須在當下 status.schedule 的界內（含端點）
              */
-            periodMinutes: string;
+            periodMinutes: number;
             /** @description 理由（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵 */
             reason?: string;
         };
@@ -2931,7 +2931,7 @@ export interface components {
              */
             auditRef: string;
             /** @enum {string} */
-            kind: "decide" | "obs-add" | "obs-close";
+            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
             /** @description decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝null（入帳後才知道新列號） */
             subject?: string | null;
             /** @description 稽核 body 的 time（秒精度、±HH:MM，UTC 為 +00:00） */
@@ -4344,7 +4344,7 @@ export interface components {
             /** Format: uuid */
             auditRef: string;
             /** @enum {string} */
-            kind: "decide" | "obs-add" | "obs-close";
+            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
             /** @description kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null */
             dkind?: string | null;
             user: string;
@@ -4371,7 +4371,7 @@ export interface components {
         SiConsoleWriteOrphan: {
             auditRef: string;
             /** @enum {string} */
-            kind: "decide" | "obs-add" | "obs-close";
+            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
             /** @description dec 的 prop（resume 為 run）、觀察列的 id、obs.close 的 obs */
             subject?: string | null;
         };
