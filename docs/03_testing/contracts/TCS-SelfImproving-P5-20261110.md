@@ -171,8 +171,18 @@ seam（建議）：`fourqparse.parse／validate／CORPUS`；`fourq.review／skip
   - 整串為 ASCII，≤256 bytes。
 - **勘誤五（AT-443-4-E-1，fail-closed）**：`fourq_from_run` 缺失或無效（非整數、布林、<1）時，`prop-new` 回 rc 1、碼 `FOURQ-PARAM-INVALID`。做法是 `gate_codes` 先判參數；`applicable()` 給 `check`／`status` 用，行為不變，無效參數由 `params.keys` 另判。WHY：`prop-new` 的 `PROP_KEYS` 不含 `fourq_from_run`（`writeverbs.py` 不在允許集合），否則參數一壞，閘門就靜默失效。AT 數不變，此變體併入 AT-443-4-E-1。
 - **勘誤六**：`Q2-F0`（免掃）不計入 q2 項數。WHY：降載帶上限為 1 時，才容得下「免掃＋1 個來源缺口候選」。
-- **勘誤八（AT-445-5-1 的「無跳過類字樣」判準）**：限定為真正會跳過或預期失敗的寫法，即 `skipTest`／`skipIf`／`skipUnless`（需字界）、`unittest.skip`、`pytest.skip`、`mark.skip`、`SkipTest`、`xfail`。WHY：實作初版用 `skip[A-Z(]`，把 AT-443-1-1 函式名 `…_review_or_skip(self)` 裡的免審動詞誤判成跳過測試；開發期排除了這個 AT，到 tip 才紅。修法是收斂判準，函式名不改；正反各樣本已驗。
 - **勘誤七（細部）**：
   - `fourq --skip` 同樣要求同運轉已有研究事件。
   - 答案檔不存在或非 UTF-8 時 rc 3。
   - Q1 項的「做法」「機制」含 ASCII 管線字元時回 `FOURQ-PIPE`。
+- **勘誤八（AT-445-5-1 的「無跳過類字樣」判準）**：限定為真正會跳過或預期失敗的寫法，即 `skipTest`／`skipIf`／`skipUnless`（需字界）、`unittest.skip`、`pytest.skip`、`mark.skip`、`SkipTest`、`xfail`。WHY：實作初版用 `skip[A-Z(]`，把 AT-443-1-1 函式名 `…_review_or_skip(self)` 裡的免審動詞誤判成跳過測試；開發期排除了這個 AT，到 tip 才紅。修法是收斂判準，函式名不改；正反各樣本已驗。
+- **勘誤九（SCG-4 一審 P2-1，安全）AT-441-3-E-1：座標與工具路徑的逃逸判定**：
+  - 範圍：座標（`<repo 檔>:<行>`）與 Q3 工具路徑共用同一個判定。
+  - 判定時機：在任何檔案系統存取**之前**先做字面判定。下列情形一律拒收，回 `FOURQ-COORD-ESCAPE`：
+    - 含 `..` 片段（以 `/` 或 `\` 切分）；
+    - 以 `/` 或 `\` 開頭，含 UNC 的 `\\`、`//`；
+    - 以磁碟代號開頭；
+    - 含 NUL 或控制字元。
+  - 字面判定通過後，再以 `resolve()` 確認路徑仍在 repo 根之下。
+  - WHY：答案檔內容來自讀過外部來源的模型，可能被注入。UNC 路徑在 Windows 上會觸發 SMB 存取，可能外洩憑證；「座標所指那一行含查詢字串」判準也會變成探測 repo 外內容的手段。
+  - AT 數不變，變體併入 AT-441-3-E-1。
