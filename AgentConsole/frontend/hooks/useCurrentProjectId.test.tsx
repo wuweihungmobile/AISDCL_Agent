@@ -53,6 +53,12 @@ describe("resolveCurrentProjectId 純函式", () => {
     expect(resolveCurrentProjectId({ fromPath: null, last: null, page: undefined })).toEqual({ id: null, stale: false });
     expect(resolveCurrentProjectId({ fromPath: null, last: "b", page: page([]) })).toEqual({ id: null, stale: true });
   });
+
+  it("AT_953_6_1 純函式：最近造訪不在已載入且完整的列表內時，退到列表第一筆並標 stale（SCG-4 一審 F-01：殺「stale 時不退第一筆」突變）", () => {
+    expect(resolveCurrentProjectId({ fromPath: null, last: "b", page: page(["c", "d"]) })).toEqual({ id: "c", stale: true });
+    // 列表不完整（總數大於已載入筆數）時不判定：沿用最近造訪、不標 stale
+    expect(resolveCurrentProjectId({ fromPath: null, last: "b", page: page(["c", "d"], 150) })).toEqual({ id: "b", stale: false });
+  });
 });
 
 describe("useCurrentProjectId 最近造訪的存在性判斷", () => {

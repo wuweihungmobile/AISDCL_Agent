@@ -154,7 +154,7 @@ test("AT-953-6-9 最近造訪的專案被刪除：監控頁顯示 project-gone-s
   await expect(gone.getByRole("button", { name: "重試" })).toHaveCount(0);
 
   await gone.getByRole("link", { name: "選擇其他專案" }).click();
-  await expect(page).toHaveURL(/\/monitor$/);
+  await expect(page).toHaveURL(/^https?:\/\/[^/]+\/monitor$/); // 入口頁本身，不是 /projects/<id>/monitor（尾段同為 /monitor，故釘整段）
   await expect(page.getByTestId("center-entry-view")).toBeVisible();
 
   await page.getByRole("navigation", { name: "主導覽" }).getByRole("link", { name: "執行中心" }).click();
