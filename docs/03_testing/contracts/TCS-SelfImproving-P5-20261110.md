@@ -157,3 +157,22 @@ seam（建議）：`fourqparse.parse／validate／CORPUS`；`fourq.review／skip
 **SCG-4 通過標準**：☐ 58 個 AT 全綠（開發期排除兩個範圍守衛；**commit 後在 tip 以預設基準重跑 `test_AT_440_8_1` 與 AT-445-5-1 驗綠**）且 P0～P4、議題中心既有 AT 全綠 ☐ `si check` rc 0（35 項、`CHECK_RULES_REV` 6、44 鍵、`status` 17 鍵、動詞 27、`KINDS` 25、`CAPABILITY` 62）☐ LOC 與 ruff、onboarding 基線、根層全套多 CPU 輸出貼入 ☐ **突變驗證（repo 外 worktree，不與主控並行動共用樹）**：`fourqparse` 標題逐字、`｜`／ASCII 管線判準與 Q4 反引號例外、項數上限、查詢綁定與零／非零比對、全文引用檢查、`gate_codes` 適用判斷與 `FOURQ-IS-PROPOSER`、`check` 順序判準、卡面 tail「兩欄皆有才渲染」、`loop` 快照不寫 `mea.*`、`unattended` 真值表 `fourq` 列、`patrolbrief` 四問逐字與舊範本 fail-closed、**步 0′ `FOURQ-NOT-RUN` 適用判斷**、`DEGRADE_TEXT` 呼叫形態（AT-444-2-1）、**`fourq_from_run` 整數比較（1000 對 999）**、無人環境 `--skip` 拒收（D-EQA-8）各至少一個並確認對應 AT 轉紅 ☐ 範圍守衛綠 ☐ V36～V39 如實標記 ☐ 重釘儀式於獨立 commit 收齊。
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空；日後勘誤單獨 commit）
+
+- **勘誤一（2026-11-10，實作棒回報、主控裁決）AT-443-2-E-2 的級別**：原文要求 info 級 `FOURQ-NOT-RUN`、`check` rc 不變。改為 **warn** 級：`events.research` 項仍 PASS，rc 不變。WHY：`check.py` 的 info 若不在 `_NONBLOCKING`，該項會轉成 blocking NE（rc 2），而 `check.py` 不在 §3 允許集合。warn 達成同一意圖（不阻斷、看得見）。PRD AC-SI-43-2 的「資訊項」以本勘誤為準。
+- **勘誤二（§2 站點補列）**：
+  - `test_selfimproving_check.py` 的本地 `params_dict` 加三鍵。
+  - `test_selfimproving_schedule_patrol.py::test_AT_438_2_1` 的斷言由「降載聲明」改為 `DEGRADE_TEXT` 前綴「降載聲明：額度帶」。WHY：新範本步 2 的靜態文字本身含「降載聲明」，free 帶也會命中。
+  - `::test_AT_438_2_E_1` 的 `step6` 變體改為刪步 7，變體名改為 `step7`。WHY：新步 6 含 `<MAX_PROPOSALS>`，刪掉後與 `run` 變體同碼。
+  - `p2_meta`、`schedule_model`、`console_obs` 等鍵數與動詞數的機械同步，屬 P5 同步，P4 各 AT 語意不變。
+- **勘誤三（AT-441-3-2 與 PRD「固定語料」）**：`fourqparse.CORPUS` 是固定的檔名與 glob 樣式清單，因為缺陷帳本的 archive 無法逐檔列舉。「語料多放一個 archive 或備份檔不影響結果」改讀為「多放**不符清單樣式**的檔（例 `*.bak`、其他筆記檔）不影響結果」。審視者與 CLI 在入帳當下看到的是同一組檔（`fourq --corpus` 印出解析後的清單），所以兩者計數一致。
+- **勘誤四（`loop` 格式；把 PRD §9.8.2 的「…」具體化）**：格式為 `M1=<status>(<值，.4g>,n=<N>);M4=<status>(<值>);M5a=NE(<理由 ≤24 字元>);M5b=…`。
+  - status 取 `meastat` 的原值。
+  - M4 沒有 n 時不帶 `n=`。
+  - 整串為 ASCII，≤256 bytes。
+- **勘誤五（AT-443-4-E-1，fail-closed）**：`fourq_from_run` 缺失或無效（非整數、布林、<1）時，`prop-new` 回 rc 1、碼 `FOURQ-PARAM-INVALID`。做法是 `gate_codes` 先判參數；`applicable()` 給 `check`／`status` 用，行為不變，無效參數由 `params.keys` 另判。WHY：`prop-new` 的 `PROP_KEYS` 不含 `fourq_from_run`（`writeverbs.py` 不在允許集合），否則參數一壞，閘門就靜默失效。AT 數不變，此變體併入 AT-443-4-E-1。
+- **勘誤六**：`Q2-F0`（免掃）不計入 q2 項數。WHY：降載帶上限為 1 時，才容得下「免掃＋1 個來源缺口候選」。
+- **勘誤八（AT-445-5-1 的「無跳過類字樣」判準）**：限定為真正會跳過或預期失敗的寫法，即 `skipTest`／`skipIf`／`skipUnless`（需字界）、`unittest.skip`、`pytest.skip`、`mark.skip`、`SkipTest`、`xfail`。WHY：實作初版用 `skip[A-Z(]`，把 AT-443-1-1 函式名 `…_review_or_skip(self)` 裡的免審動詞誤判成跳過測試；開發期排除了這個 AT，到 tip 才紅。修法是收斂判準，函式名不改；正反各樣本已驗。
+- **勘誤七（細部）**：
+  - `fourq --skip` 同樣要求同運轉已有研究事件。
+  - 答案檔不存在或非 UTF-8 時 rc 3。
+  - Q1 項的「做法」「機制」含 ASCII 管線字元時回 `FOURQ-PIPE`。
