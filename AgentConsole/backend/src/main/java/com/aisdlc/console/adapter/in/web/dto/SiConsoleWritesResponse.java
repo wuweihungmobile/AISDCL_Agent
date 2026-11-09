@@ -24,7 +24,7 @@ public record SiConsoleWritesResponse(
     @Schema(name = "SiConsoleWriteItem")
     public record Item(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "uuid") String auditRef,
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close"}) String kind,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request"}) String kind,
             @Schema(nullable = true, description = "kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null") String dkind,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String user,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String role,
@@ -41,7 +41,7 @@ public record SiConsoleWritesResponse(
     @Schema(name = "SiConsoleWriteOrphan")
     public record Orphan(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String auditRef,
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close"}) String kind,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request"}) String kind,
             @Schema(nullable = true, description = "dec 的 prop（resume 為 run）、觀察列的 id、obs.close 的 obs") String subject) {
     }
 

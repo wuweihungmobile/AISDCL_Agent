@@ -12,12 +12,12 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(name = "SiScheduleSetRequest", description = "設定自動演化排程（啟用或停用、週期）。enabled 與 periodMinutes 兩鍵皆必備（停用時也須帶界內週期）；"
         + "週期的界取自 GET /si/status 的 schedule.periodMin～periodMax（含端點），不寫死在前後端")
 public record SiScheduleSetRequest(
-        @Schema(type = "boolean", requiredMode = Schema.RequiredMode.REQUIRED, description = "true＝啟用、false＝停用；必須是 JSON 布林（字串 \"true\" 不收）")
+        @Schema(implementation = Boolean.class, requiredMode = Schema.RequiredMode.REQUIRED, description = "true＝啟用、false＝停用；必須是 JSON 布林（字串 \"true\" 不收）")
         Object enabled,
-        @Schema(type = "integer", format = "int32", minimum = "1", requiredMode = Schema.RequiredMode.REQUIRED,
+        @Schema(implementation = Integer.class, minimum = "1", requiredMode = Schema.RequiredMode.REQUIRED,
                 description = "週期（分鐘）；必須是 JSON 整數（小數、字串、布林、0、負數不收），且須在當下 status.schedule 的界內（含端點）")
         Object periodMinutes,
-        @Schema(type = "string", minLength = 1, maxLength = 120, description = "理由（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵")
+        @Schema(implementation = String.class, minLength = 1, maxLength = 120, description = "理由（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵")
         Object reason) {
 
     public ScheduleSetInput toInput() {

@@ -10,7 +10,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 @Schema(name = "SiWriteReceipt", description = "稽核檔已落地的收據；待入帳，由主機端根層 CLI 驗簽入帳")
 public record SiWriteReceiptResponse(
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "uuid", description = "稽核編號（小寫正規 UUID；入帳指令的 --audit-ref）") String auditRef,
-        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close"}) String kind,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request"}) String kind,
         @Schema(nullable = true, description = "decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝null（入帳後才知道新列號）") String subject,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "稽核 body 的 time（秒精度、±HH:MM，UTC 為 +00:00）") String time,
         @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "簽章金鑰的 sha256 前 8 碼") String keyId) {
