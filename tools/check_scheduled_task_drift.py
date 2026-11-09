@@ -110,6 +110,20 @@ def _strip_ns(tag: str) -> str:
     return tag.split("}", 1)[-1] if "}" in tag else tag
 
 
+#: Task Scheduler 結構（taskSchedulerSchema）對選填 Settings 元素的預設值：匯出 XML 省略＝取此值。
+#: 實測 2026-11-09：`AutoSDD_SI_Patrol` 以 WakeToRun=false 註冊後，`Export-ScheduledTask` 的 XML
+#: 根本沒有 `<WakeToRun>`（nightly 的 true 才會寫出），讀成 `<missing>` 會把合規任務判成 drift。
+#: 只列結構文件載明預設的項目；期望值若就是預設值，缺席＝符合。
+_XML_SCHEMA_DEFAULTS: dict[str, str] = {
+    "Settings/WakeToRun": "false",
+    "Settings/StartWhenAvailable": "false",
+    "Settings/DisallowStartIfOnBatteries": "true",
+    "Settings/StopIfGoingOnBatteries": "true",
+    "Settings/MultipleInstancesPolicy": "IgnoreNew",
+    "Settings/ExecutionTimeLimit": "PT72H",
+}
+
+
 def parse_task_xml(xml_text: str) -> dict[str, str]:
     """Task Scheduler XML → {'Settings/WakeToRun': 'true', …}（去命名空間、路徑不含根）。
 
@@ -134,6 +148,8 @@ def parse_task_xml(xml_text: str) -> dict[str, str]:
             walk(child, path)
 
     walk(root, "")
+    for key, default in _XML_SCHEMA_DEFAULTS.items():  # 省略的選填元素＝結構預設值
+        found.setdefault(key, default)
     return found
 
 
@@ -287,7 +303,8 @@ def stale_run_days(info: dict[str, Any] | None, now: _dt.datetime) -> float | No
     「沒跑過」刻意不判紅：fresh clone／剛裝好還沒到第一次觸發的機器都是這一格，
     判紅等於讓新機器開箱即紅（同本檔「全缺席＝skip」那一段的理由）。
     """
-    if not info:
+    if not info or classify_last_result(info)[0] == "never_ran":
+        # 未執行過時 LastRunTime 是 1999-11-30 哨兵值、不是上次執行（2026-11-09 sched arm 後實測）
         return None
     last = _parse_iso_utc(str(info.get("LastRunTime") or ""))
     if last is None:
