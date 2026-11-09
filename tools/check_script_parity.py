@@ -821,24 +821,25 @@ _SINGLE_SIDED_EXEMPT: dict[str, tuple[str, str]] = {
         "install_windows_nightly.ps1（stem 刻意不同，ONBOARDING §8）；"
         "ADR-XPLAT-002 §3.3 #1：launchd／schtasks 兩排程機制無共同 API"
     ),
-    # Windows nightly 排程一鍵安裝器（R19 修復包 D）：對等品=install_mac_nightly.sh，
-    # stem 刻意不同（install_mac_nightly ↔ install_windows_nightly，同上 macos/windows
-    # smoke 先例）；本檔（check_script_parity）只比對 step 標籤序列，兩者本質是「兩種
-    # 平台慣例、部分能力靠語言原生機制承載」的不同形態，不適合塞進本檔的字面比對。
-    # 跨檔能力對照（R22 DEF-101-233 修復，訂正 R19~R21 舊註解「行為對等由
-    # test_install_windows_nightly.py 守門」之誤——該檔實際只驗證 Windows 側自身結構，
-    # 從未跨檔比對 mac 側能力集合）改由 tools/tests/test_schedule_capability_parity.py
-    # 以語意能力對照表比對（install/uninstall/status/render-preview 四能力，非字面
-    # 旗標字串集合——mac `--render-only` 與 windows `-WhatIf` 語意對等但字面不同）。
-    # 措辭刻意不含「schtasks」/「§8」字面——本項屬 macOS/Windows stem 相異對等品，
-    # 不屬 test_onboarding_parity_interlock.py 鎖住的「§8 ops 排程家族（無 .sh 對等
-    # 的純 Windows-only 三支）」清單語意，避免誤觸該互鎖交叉比對。R63 補 tier3 硬理由
-    # 關鍵詞時延續這條刻意排除（用「launchd」而非「schtasks」，見下方 reason）。
+    # Windows nightly 一鍵安裝器（R19 修復包 D）：對等品=install_mac_nightly.sh、stem 刻意不同
+    # （同 smoke 先例）；能力對照由 tools/tests/test_schedule_capability_parity.py 以語意能力表
+    # 比對（R22 DEF-101-233）。措辭刻意不含「schtasks」/「§8」字面：本項屬 stem 相異對等品、
+    # 不屬 test_onboarding_parity_interlock.py 鎖的「§8 ops 排程家族」清單語意（R63 補硬理由時
+    # 用「launchd」延續）。沿革全文搬至
+    # docs/06_quality/CrossPlatform_R122_Guard_Prose_Migration.md〈check_script_parity.py〉。
     "tools/install_windows_nightly.ps1": (
         _TIER3_OS_PRIMITIVE,
         "對等品=install_mac_nightly.sh（stem 刻意不同，如 macos/windows_smoke_local 先例）；"
         "能力對照由 test_schedule_capability_parity.py 守門；ADR-XPLAT-002 §3.3 #1："
         "對等 mac 側走 launchd，兩排程原語無共同 API"
+    ),
+    # SelfImproving P4 巡邏載具（TCS-P4 §7.1 D-IMP-7）：mac 對等＝schedarm.py 寫出的 launchd plist
+    # 直呼 venv python、無 .sh 殼；reason 比照上一筆不含 ONBOARDING 第 8 節字樣與 Windows 排程器名。
+    "tools/si_patrol_tick.ps1": (
+        _TIER3_OS_PRIMITIVE,
+        "Windows 工作排程器載具（AutoSDD_SI_Patrol；S4U 下以 venv python 跑 selfimproving.py "
+        "patrol）；macOS 對等=schedarm.py 寫出的 launchd plist 直接呼叫 venv python、無 .sh 殼；"
+        "ADR-XPLAT-002 §3.3 #1：launchd 與 Windows 排程原語無共同 API"
     ),
     # Windows schtasks 排程家族兩支（ONBOARDING.md §8 明文 Windows-only、無 .sh 對等；
     # run_local_nightly 於 R11 已成對——mac .sh 薄聚合器落地——移登記至 _EXEMPT_PAIRS）
@@ -1171,6 +1172,7 @@ _TIER_BASELINE: dict[str, str] = {
     "tools/lib/windowsapps_guard.sh": _TIER2_SPEC,
     "tools/install_mac_nightly.sh": _TIER3_OS_PRIMITIVE,
     "tools/install_windows_nightly.ps1": _TIER3_OS_PRIMITIVE,
+    "tools/si_patrol_tick.ps1": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/fix_nightly_catchup.ps1": _TIER3_OS_PRIMITIVE,
     "AutoClaude/tools/g0_gate_check.ps1": _TIER3_OS_PRIMITIVE,
     # R76 已整支刪除（真孤兒），依上方維護規則「已收斂移出活體表的 key 刻意保留」留存；
@@ -1216,7 +1218,8 @@ _UNPINNED_CEILING = 8
 #   · 降級（key 還在、tier 被改成別的，不論基準有沒有同步改）⇒ 課責數 -1 ⇒ 紅。
 # 唯一會合法讓課責數下降的動作是「連基準那一筆也刪掉」，而基準的維護規則本來就寫著
 # 已收斂的 key **刻意保留**（永久記憶）；真要刪就得連同下修本行，在 diff 上現形。
-_TIER34_FLOOR = 10
+# SelfImproving P4（D-IMP-7）：si_patrol_tick.ps1 入 tier3 ⇒ 課責數 10→11，地板同步上修。
+_TIER34_FLOOR = 11
 
 
 def _extract_tier_map_from_source(source: str, dict_name: str) -> dict[str, str] | None:

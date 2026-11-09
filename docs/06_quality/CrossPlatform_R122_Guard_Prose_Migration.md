@@ -1861,3 +1861,25 @@ Windows 主機（含本專案開發常用的 macOS/Linux pwsh）無法真的執�
 # 與否取決於 runner 映像缺件（pwsh/gh/ruff）與 act 0.2.89 對 `services:` 的上游 panic，
 # 兩者由 `run_act_core.preflight()` 在燒掉幾分鐘之前逐項講明，不由本節代為裁決。
 ```
+
+## check_script_parity.py
+
+### install_windows_nightly.ps1 單邊登記的註解史料（R214 搬遷）
+
+> 原住 `tools/check_script_parity.py` 的 `_SINGLE_SIDED_EXEMPT["tools/install_windows_nightly.ps1"]` 之上（R19～R63 累積的十三行註解）。2026-11-09 SelfImproving P4 收尾（`docs/03_testing/contracts/TCS-SelfImproving-P4-20261109.md` §7.1 D-IMP-7）為 `tools/si_patrol_tick.ps1` 新增單邊登記時撞到 `AutoClaude/tools/check_loc_budget.py` `SPECIAL_FILES` 對該檔的逐檔棘輪（門檻＝納管當下實際行數、只准往下；`test_check_defect_log_crossref.py` 的餘裕鎖明文「正解是瘦身、不得調高上限」），依該紀律把史料搬到本節、原處留六行摘要（操作性的措辭規則——reason 刻意不含「schtasks」/「§8」字面以免誤觸 `test_onboarding_parity_interlock.py`——仍留在原處）。逐字原文：
+
+```text
+    # Windows nightly 排程一鍵安裝器（R19 修復包 D）：對等品=install_mac_nightly.sh，
+    # stem 刻意不同（install_mac_nightly ↔ install_windows_nightly，同上 macos/windows
+    # smoke 先例）；本檔（check_script_parity）只比對 step 標籤序列，兩者本質是「兩種
+    # 平台慣例、部分能力靠語言原生機制承載」的不同形態，不適合塞進本檔的字面比對。
+    # 跨檔能力對照（R22 DEF-101-233 修復，訂正 R19~R21 舊註解「行為對等由
+    # test_install_windows_nightly.py 守門」之誤——該檔實際只驗證 Windows 側自身結構，
+    # 從未跨檔比對 mac 側能力集合）改由 tools/tests/test_schedule_capability_parity.py
+    # 以語意能力對照表比對（install/uninstall/status/render-preview 四能力，非字面
+    # 旗標字串集合——mac `--render-only` 與 windows `-WhatIf` 語意對等但字面不同）。
+    # 措辭刻意不含「schtasks」/「§8」字面——本項屬 macOS/Windows stem 相異對等品，
+    # 不屬 test_onboarding_parity_interlock.py 鎖住的「§8 ops 排程家族（無 .sh 對等
+    # 的純 Windows-only 三支）」清單語意，避免誤觸該互鎖交叉比對。R63 補 tier3 硬理由
+    # 關鍵詞時延續這條刻意排除（用「launchd」而非「schtasks」，見下方 reason）。
+```

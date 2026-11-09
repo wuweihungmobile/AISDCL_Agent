@@ -1675,11 +1675,15 @@ class TestR67AcCoverage(unittest.TestCase):
 
     def test_ac_value_is_pinned(self) -> None:
         """AC 活體值釘選（比照 UEP 的等值釘選）。
+
+        R214 SelfImproving P4：47→48，`_SINGLE_SIDED_EXEMPT` +1（tools/si_patrol_tick.ps1）；
+        UEP 未動，依 ADR-XPLAT-002 §4.2 規則 2 這一步不計為收斂成果、但非禁止——
+        理由見 check_script_parity.py 該筆登記與 test_adr_xplat001_c1c2_lock.py 的凍結對註解。
         """
         ac = sum(len(reg) for reg in m.ac_registries().values())
         self.assertEqual(
-            ac, 47,
-            f"AC 由 47 變為 {ac} —— 上升請依 ADR-XPLAT-002 §4.2 規則 2 具名對應一筆 "
+            ac, 48,
+            f"AC 由 48 變為 {ac} —— 上升請依 ADR-XPLAT-002 §4.2 規則 2 具名對應一筆 "
             f"UEP 下降後同步本釘選值；下降請一併下修本值",
         )
 

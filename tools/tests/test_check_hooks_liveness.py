@@ -3433,9 +3433,9 @@ def _action_scan_sources() -> dict[str, str]:
 
 
 class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
-    """🔴 R84 訴求 7／B1-B2：schtasks 的兩支 Action 是 console 的 `powershell.exe`。
-    🔴 誠實劃界：本輪**無 Windows 真機** ⇒ 本類守的是「這兩行寫進去了、而且不准有人拿
-    掉」，**不是**「彈窗真的消失了」。LogonType=S4U 漂移沿革搬至 R213 證據檔〈附錄 C〉。
+    """🔴 R84 訴求 7／B1-B2：schtasks 的三支 Action（nightly／smoke／SelfImproving P4 巡邏）都是
+    console 的 `powershell.exe`。🔴 誠實劃界：本輪**無 Windows 真機** ⇒ 本類守的是「這幾行寫進去
+    了、而且不准有人拿掉」，**不是**「彈窗真的消失了」。S4U 漂移沿革搬至 R213 證據檔〈附錄 C〉。
     """
 
     def setUp(self) -> None:
@@ -3443,8 +3443,8 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
         self.actions = _ACTION_RE.findall(self.text)
 
     def test_the_scan_face_is_not_vacuous(self) -> None:
-        self.assertEqual(len(self.actions), 2,
-                         f"預期抓到 nightly／smoke 兩支 Action，實得 {self.actions}")
+        self.assertEqual(len(self.actions), 3,
+                         f"預期抓到 nightly／smoke／巡邏三支 Action，實得 {self.actions}")
 
     def test_every_action_hides_its_window(self) -> None:
         missing = [a for a in self.actions if "-WindowStyle Hidden" not in a]
@@ -3456,7 +3456,7 @@ class TestNightlyTaskActionsAreWindowless(unittest.TestCase):
     def test_the_criterion_catches_a_stripped_flag(self) -> None:
         """合成注入：把旗標拿掉 ⇒ 必紅（證明上一格不是因為 regex 抓不到而恆綠）。"""
         stripped = _ACTION_RE.findall(self.text.replace(" -WindowStyle Hidden", ""))
-        self.assertEqual(len(stripped), 2, "注入後 regex 就抓不到了 ⇒ 判準沒有牙")
+        self.assertEqual(len(stripped), 3, "注入後 regex 就抓不到了 ⇒ 判準沒有牙")
         self.assertEqual([a for a in stripped if "-WindowStyle Hidden" in a], [])
 
     # ── R84／C3-B：同一個性質，掃描面由「這一支安裝器」擴到全庫 ──────────────

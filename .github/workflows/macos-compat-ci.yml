@@ -385,7 +385,9 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
-      - "tools/si_patrol_tick.ps1"  # SelfImproving P4：巡邏 OS 載具；tools/tests/test_selfimproving_schedule_gate.py AT-436-4-3 直接讀它解析（TCS-P4 R161 (c)）
+      # SelfImproving P4：巡邏 OS 載具；tools/tests/test_selfimproving_schedule_gate.py AT-436-4-3 直接讀它解析（TCS-P4 R161 (c)）。
+      # 條目後不得接行內註解：test_workflow_permission_concurrency_lock 的 paths 抽取器只認整行 `- "…"`。
+      - "tools/si_patrol_tick.ps1"
       # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
       # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。
@@ -875,7 +877,9 @@ on:
       - "tools/_cli_flags.py"
       - "tools/check_scheduled_task_drift.py"
       - "tools/scheduled_task_expectations.json"
-      - "tools/si_patrol_tick.ps1"  # SelfImproving P4：巡邏 OS 載具；tools/tests/test_selfimproving_schedule_gate.py AT-436-4-3 直接讀它解析（TCS-P4 R161 (c)）
+      # SelfImproving P4：巡邏 OS 載具；tools/tests/test_selfimproving_schedule_gate.py AT-436-4-3 直接讀它解析（TCS-P4 R161 (c)）。
+      # 條目後不得接行內註解：test_workflow_permission_concurrency_lock 的 paths 抽取器只認整行 `- "…"`。
+      - "tools/si_patrol_tick.ps1"
       # 本輪：tools/probe/ 是量測配方的唯一可執行家（M6），其下的 session 逐字稿稽核器
       # 被 tools/tests/ 的 hook 存活性鎖消費，故只改該目錄時那道鎖也必須跑。由
       # test_ci_paths_cover_root_consumers.py 當場攔下並要求雙邊補列（DEF-101-042 同構）。

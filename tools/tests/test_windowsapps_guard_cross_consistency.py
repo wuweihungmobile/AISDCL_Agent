@@ -1379,6 +1379,12 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "不經 PATH 解析。粗粒度判準看不出「字面值當路徑片段」與「當指令首 token」的差別，"
         "此筆即該取捨的成本"
     ),
+    "tools/lib/selfimproving/schedarm.py": (
+        "非呼叫：`repo / \".venv\" / \"bin\" / \"python\"` 的**路徑片段**（`_write_plist` 把 venv "
+        "內絕對路徑寫進 macOS launchd plist 的 ProgramArguments），不經 PATH 解析；與同表 "
+        "`tools/lib/platform_utils.py` 逐字同型。Windows 側載具 `tools/si_patrol_tick.ps1` 自行"
+        "解析 venv python，本檔一次都不 spawn 裸名（SelfImproving P4 收尾全套實跑時被本鎖抓到）"
+    ),
     "tools/lib/script_interface_parity.py": (
         "非呼叫：`_EXTERNAL_BINS` 是「兩平台同名外部執行檔」的**比對用白名單資料**"
         "（`\"python\", \"python3\"` 與 act／docker／ruff 等並列），供 .sh／.ps1 介面等價"
