@@ -66,6 +66,7 @@ LEGAL_VERBS = (
     "check", "status", "scan", "card", "export", "run-open", "run-close", "attr", "attr-confirm",
     "attr-reject", "prop-new", "prop-revise", "research", "decide", "heldout-freeze", "sandbox",
     "verify", "promote", "rollback", "obs-add", "obs-close", "measure", "capacity", "sched",
+    "patrol",
 )
 # TCS 契約節 C1.1～C1.4 的鍵序（逐字抄自規格）：議題匯出形狀的絕對釘；RX 組（議題匯出類別）同引
 TOP_KEYS = ["schema_rev", "kind", "generated_at", "head_sha", "items", "next_since", "truncated",
@@ -1827,7 +1828,7 @@ class TestZeroWriteAndSingleSource(IssueCase):
         import test_selfimproving_capability as cap
 
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 25)
+        self.assertEqual(len(verbs), 26)
         self.assertEqual(verbs, {*LEGAL_VERBS, "issues"})
         cp = subprocess.run([sys.executable, str(ENTRY), "--help"], capture_output=True,
                             check=False)

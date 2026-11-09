@@ -290,9 +290,9 @@ class TestZeroRegression(f3.P3TestCase):
             self.assertEqual([a for a in ids if underscore_form(a) not in names], [], prefix)
         import test_selfimproving_capability as cap
         self.assertEqual(si_params.CHECK_RULES_REV, 5)
-        self.assertEqual(len(selfimproving._HELP), 25)
-        self.assertIn(len(cap.CAPABILITY), (54, 55))
-        want = {54: (41, 9, 2, 2), 55: (42, 9, 2, 2)}[len(cap.CAPABILITY)]
+        self.assertEqual(len(selfimproving._HELP), 26)
+        self.assertIn(len(cap.CAPABILITY), (58, 59))
+        want = {58: (42, 9, 2, 5), 59: (43, 9, 2, 5)}[len(cap.CAPABILITY)]
         got = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k)
                     for k in ("ro", "rw", "net", "exec"))
         self.assertEqual(got, want)

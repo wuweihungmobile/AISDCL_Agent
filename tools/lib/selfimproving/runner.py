@@ -14,6 +14,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -107,6 +108,75 @@ def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
     return RunResult(None if timed_out else proc.returncode, timed_out,
                      (out or b"").decode("utf-8", errors="replace"),
                      (err or b"").decode("utf-8", errors="replace"))
+
+
+def spawn_detached(argv: list[str], *, env: dict[str, str], cwd: Path | None = None,
+                   out_dir: Path | None = None) -> int:
+    """脫離式啟動（TCS-P4 R160、R167、D-QA-14）：新 session／process group、`shell=False`、不等待、
+    回 pid；環境**只用呼叫端明示的 `env`**（不讀 `os.environ`）。`out_dir` 給了就把 stdout／stderr
+    各接到該目錄的 `stdout.txt`／`stderr.txt`（供後續心跳判 harness 殺行程）。Windows 旗標三個各以
+    `getattr` 兜底（breakaway 被任務 job 拒絕時 `OSError`／`PermissionError` 原樣穿出，由呼叫端
+    fail-closed）。本函式不呼叫 `communicate`、不殺行程。"""
+    flags: dict = {}
+    if sys.platform.startswith("win"):
+        flags["creationflags"] = (getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+                                  | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                  | getattr(subprocess, "DETACHED_PROCESS", 0))
+    else:
+        flags["start_new_session"] = True
+    sink = {}
+    opened = []
+    try:
+        if out_dir is not None:
+            for name in ("stdout", "stderr"):
+                fh = open(out_dir / f"{name}.txt", "wb")  # noqa: SIM115  # 交給子行程後立即關本端
+                opened.append(fh)
+                sink[name] = fh
+        proc = subprocess.Popen(argv, cwd=None if cwd is None else str(cwd), env=dict(env),
+                                shell=False, stdin=subprocess.DEVNULL,
+                                stdout=sink.get("stdout", subprocess.DEVNULL),
+                                stderr=sink.get("stderr", subprocess.DEVNULL), **flags)
+    finally:
+        for fh in opened:
+            fh.close()
+    return proc.pid
+
+
+def kill_pid_tree(pid: int) -> None:
+    """依 pid 殺行程樹（逾牆終止用）；找不到行程＝已結束，不拋。兩條各在平台守衛作用域內。"""
+    if sys.platform.startswith("win"):
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False,
+                       capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    else:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def pid_started_at(pid: int) -> float | None:
+    """行程啟動時刻（epoch 秒）；不存在或量不到＝None（供「pid 被重用」核對：呼叫端比對 spawn.json
+    記的啟動時刻）。Windows 問 PowerShell、POSIX 問 `ps`（經過秒數換算）。"""
+    if sys.platform.startswith("win"):
+        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                f"$p = Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue; "
+                "if ($p) { [DateTimeOffset]::new($p.StartTime).ToUnixTimeSeconds() }"]
+    else:
+        argv = ["ps", "-o", "etimes=", "-p", str(int(pid))]
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
+    try:
+        cp = subprocess.run(argv, capture_output=True, encoding="utf-8", errors="replace",
+                            timeout=20, shell=False, check=False, creationflags=flags)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    text = cp.stdout.strip()
+    if cp.returncode != 0 or not text.isdigit():
+        return None
+    value = int(text)
+    if sys.platform.startswith("win"):
+        return float(value)
+    return time.time() - value
 
 
 def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float) -> ProbeResult:

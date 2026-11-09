@@ -1,9 +1,9 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（55 個鍵：42 `ro`、9 `rw`、2 `net`、2 `exec`；P3 增 7 `ro` 與
-1 `rw`；議題中心增 3 `ro`；P4 的 PKG-ROOT-SCHED 增 3 `ro` 與 1 `rw`，PKG-ROOT-PATROL 另增
-1 `ro` 與 3 `exec` 後為 59 鍵）；判準函式 `capability_problems`
+登記表 `CAPABILITY` 住本檔（59 個鍵：43 `ro`、9 `rw`、2 `net`、5 `exec`；55 鍵時為 42／9／2／2；
+P3 增 7 `ro` 與 1 `rw`；議題中心增 3 `ro`；P4 的 PKG-ROOT-SCHED 增 3 `ro` 與 1 `rw`，
+PKG-ROOT-PATROL 另增 1 `ro` 與 3 `exec` 後為 59 鍵）；判準函式 `capability_problems`
 取參數（套件目錄 `tools/lib/selfimproving/`、登記表、入口檔 `tools/selfimproving.py`），
 故真樹與合成樹用同一份碼自證。這不是新增守衛碼：測試檔在
 `tools/tests/`、不在守衛面清單、不是 hook（PRD §9.7 #47）。
@@ -74,6 +74,7 @@ CAPABILITY: dict[str, str] = {
             "sched",
             "unattended",
             "schedcheck",
+            "patrolbrief",
         )
     },
     **{
@@ -82,7 +83,7 @@ CAPABILITY: dict[str, str] = {
             "obswrite", "meawrite", "schedwrite")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
-    **{f"{n}.py": "exec" for n in ("runner", "verify")},
+    **{f"{n}.py": "exec" for n in ("runner", "verify", "patrol", "patrolrun", "schedarm")},
 }
 CATEGORIES = ("ro", "rw", "net", "exec")
 CLOSURE_ONLY_RO = ("check.py", "status.py", "scan.py", "export.py", "card.py")
@@ -339,9 +340,9 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 42, "rw": 9, "net": 2, "exec": 2})
-        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
-            "verify.py"})
+        self.assertEqual(counts, {"ro": 43, "rw": 9, "net": 2, "exec": 5})
+        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {
+            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
         net_importers, subproc = set(), set()
         for n in names:
             text = (PKG / n).read_bytes().decode("utf-8")
@@ -432,22 +433,25 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 55)
+        self.assertEqual(len(CAPABILITY), 59)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
-        self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("runner", "verify")}, {"exec"})
+        self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("runner", "verify", "patrol", "patrolrun",
+                                                          "schedarm")}, {"exec"})
         texts = {p.name: p.read_bytes().decode("utf-8") for p in PKG.glob("*.py")}
         self.assertEqual({n for n, t in texts.items() if "subprocess" in t}, {"git.py",
             "runner.py"})
         self.assertEqual({n for n, t in texts.items() if "runner" in _rel_imports(t,
             "selfimproving")},
-                         {"verify.py"})
-        self.assertTrue(all(not forbidden_hits(t) for t in texts.values()))
+                         {"verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+        self.assertTrue(all(not forbidden_hits(t, n) for n, t in texts.items()))
         self.assertEqual(unguarded_sites(texts["runner.py"]), [])
         self.assertIn('getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)', texts["runner.py"])
         self.assertNotIn("subprocess.CREATE_NEW_PROCESS_GROUP", texts["runner.py"].replace(
             'getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)', ""))
+        for flag in ("CREATE_BREAKAWAY_FROM_JOB", "DETACHED_PROCESS"):  # R167 脫離式 spawn 旗標
+            self.assertIn(f'getattr(subprocess, "{flag}", 0)', texts["runner.py"])
 
     def test_AT_240_5_E_1_injections_are_caught(self):
         import shutil
@@ -632,7 +636,8 @@ class TestDynamicPurity(SiTestCase):
                 self.assertIn(rc, (0, 1, 2), (argv, out, err))
             self.cli_ok(repo, "run-close", "--run", rid2, "--by", "main")
         for path in [ENTRY, *PKG.glob("*.py")]:
-            self.assertEqual(forbidden_hits(path.read_bytes().decode("utf-8")), [], path.name)
+            self.assertEqual(forbidden_hits(path.read_bytes().decode("utf-8"), path.name), [],
+                             path.name)
         for sample, pattern in zip(FORBIDDEN_SAMPLES, FORBIDDEN):
             self.assertEqual(forbidden_hits(sample)[:1], [pattern], sample)
         settings = (fx.ROOT / ".claude/settings.json").read_bytes().decode("utf-8")
@@ -670,12 +675,12 @@ class TestP3Registry(unittest.TestCase):
         counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
         optional = (PKG / "meaplan.py").exists()
         self.assertEqual((len(CAPABILITY), counts),
-                         (55, (42, 9, 2, 2)) if optional else (54, (41, 9, 2, 2)))
+                         (59, (43, 9, 2, 5)) if optional else (58, (42, 9, 2, 5)))
         for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
             self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
         self.assertEqual(CAPABILITY["meawrite.py"], "rw")
-        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {"runner.py",
-                                                                              "verify.py"})
+        self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {
+            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
         self.assertEqual(sorted(p for p, _ in forbid_calls(PKG, ENTRY)), [])
         loaded = {
             "status": ["status", "--repo"], "export": ["export", "--kind", "events", "--json",

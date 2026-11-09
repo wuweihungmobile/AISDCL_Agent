@@ -1374,8 +1374,10 @@ class TestScopeAndSop(SiCase):
         for s, p in zip(samples, forbidden):
             self.assertEqual(hits(s)[:1], [p], s)
         self.assertEqual(hits("print('clean')"), [])
+        exempt = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}  # D-QA-1
         for src in si_sources():
-            self.assertEqual(hits(src.read_bytes().decode("utf-8")), [], src.name)
+            self.assertEqual([p for p in hits(src.read_bytes().decode("utf-8"))
+                              if p not in exempt.get(src.name, ())], [], src.name)
         for verb in ("decide", "promote"):  # P1 已實作 status／prop-new，改選仍未實作的動詞
             rc, out, _ = self.run_main([verb])
             self.assertEqual((rc, out), (3, ""))

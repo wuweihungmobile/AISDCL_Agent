@@ -600,7 +600,7 @@ class TestStatusExitCodeRuntime(unittest.TestCase):
     def _declared_task_names() -> tuple[str, ...]:
         """從腳本原始碼抽出它實際會註冊的任務名（不在測試裡複製第二份字面清單）。"""
         text = _read(_SCRIPT)
-        names = re.findall(r"\$(?:Smoke)?TaskName = '([^']+)'", text)
+        names = re.findall(r"\$(?:Smoke|Patrol)?TaskName = '([^']+)'", text)
         return tuple(names)
 
     def test_status_exits_nonzero_when_tasks_absent(self) -> None:
@@ -712,8 +712,8 @@ class TestUnattendedExecutionHardening(unittest.TestCase):
             ln for ln in text.splitlines() if not ln.lstrip().startswith("#")
         )
 
-    def test_principal_is_s4u_and_applied_to_both_tasks(self) -> None:
-        """(1) 兩支任務都必須顯式帶 S4U principal。
+    def test_principal_is_s4u_and_applied_to_every_task(self) -> None:
+        """(1) 整組三支任務都必須顯式帶 S4U principal。
 
         意圖（Rule 9）：S4U＝以該使用者身分執行但不需其登入。少了它，nightly 只在
         「剛好有人登入著」時才跑——而 nightly 的整個存在理由就是無人值守。
@@ -731,8 +731,9 @@ class TestUnattendedExecutionHardening(unittest.TestCase):
             self.code,
         )
         self.assertEqual(
-            len(registers), 2,
-            f"預期恰好 2 處 Register-ScheduledTask（nightly + smoke），實得 {len(registers)}",
+            len(registers), 3,
+            "預期恰好 3 處 Register-ScheduledTask（nightly + smoke + 巡邏），"
+            f"實得 {len(registers)}",
         )
         for i, reg in enumerate(registers):
             self.assertIn(
@@ -747,17 +748,18 @@ class TestUnattendedExecutionHardening(unittest.TestCase):
         意圖：預設 PT72H 讓「凍住的實例」活過整整一個排程週期，於是它吃掉隔日觸發，
         當日觀察期三軌全部零進帳——這正是 AC4 從 10/14 退回 7/14 的機制。
         """
-        m = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", self.text)
-        self.assertIsNotNone(
-            m, "New-ScheduledTaskSettingsSet 必須帶 -ExecutionTimeLimit (New-TimeSpan -Hours N)"
+        found = re.findall(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", self.text)
+        self.assertEqual(
+            len(found), 2,
+            "兩個 New-ScheduledTaskSettingsSet 建構（nightly 與 smoke 共用的 $settings、巡邏的 "
+            "$patrolSettings）都必須帶 -ExecutionTimeLimit (New-TimeSpan -Hours N)",
         )
-        assert m is not None
-        hours = int(m.group(1))
-        self.assertLessEqual(
-            hours, 8,
-            f"ExecutionTimeLimit={hours}h 過寬——正常整輪 5~8 分鐘，上限須遠小於 24h "
-            "排程週期，否則凍住的實例仍會吃掉隔日觸發",
-        )
+        for hours in map(int, found):
+            self.assertLessEqual(
+                hours, 8,
+                f"ExecutionTimeLimit={hours}h 過寬——正常整輪 5~8 分鐘，上限須遠小於 24h "
+                "排程週期，否則凍住的實例仍會吃掉隔日觸發",
+            )
 
     def test_stop_existing_applied_via_com_because_module_enum_cannot_express_it(self) -> None:
         """(3) StopExisting 必須走 COM，且兩支任務都要套用。
@@ -863,56 +865,91 @@ class TestScheduledTaskExpectationsSsot(unittest.TestCase):
         self.tasks = self.spec["tasks"]
 
     def test_ssot_covers_exactly_the_tasks_the_installer_registers(self) -> None:
-        """SSOT 的任務集合必須逐字等於安裝器註冊的兩支。
+        """SSOT 的任務集合必須逐字等於安裝器註冊的三支（nightly、smoke、巡邏；TCS-P4 R161）。
 
         意圖（Rule 9）：若安裝器多註冊一支而 SSOT 沒跟上，那支新任務的設定就回到
         「只以機器狀態存在」的失明狀態——本缺陷會原地復發，只是換一個任務名。
         """
-        registered = set(re.findall(r"^\$(?:Smoke)?TaskName\s*=\s*'([^']+)'",
+        registered = set(re.findall(r"^\$(?:Smoke|Patrol)?TaskName\s*=\s*'([^']+)'",
                                     self.installer, re.MULTILINE))
         self.assertEqual(
             set(self.tasks), registered,
             f"SSOT 任務集合 {sorted(self.tasks)} 與安裝器註冊的 {sorted(registered)} 不一致",
         )
 
+    def _task_vars(self) -> dict[str, str]:
+        """任務名 → 安裝器內保存該名的變數（`$TaskName`／`$SmokeTaskName`／`$PatrolTaskName`）。"""
+        pairs = re.findall(r"^\$((?:Smoke|Patrol)?TaskName)\s*=\s*'([^']+)'", self.installer,
+                           re.MULTILINE)
+        return {name: var for var, name in pairs}
+
+    def _settings_block(self, task: str) -> str:
+        """該任務的 `New-ScheduledTaskSettingsSet` 建構區塊（nightly、smoke 共用 `$settings`，
+        巡邏用自己的 `$patrolSettings`：兩者的設定集刻意不同，故逐任務取）。"""
+        var = "patrolSettings" if self._task_vars()[task] == "PatrolTaskName" else "settings"
+        m = re.search(rf"\${var}\s*=\s*New-ScheduledTaskSettingsSet((?:[^\n]*`[ \t]*\n)*[^\n]*)",
+                      self.installer)
+        self.assertIsNotNone(m, f"{task} 找不到 ${var} 的 New-ScheduledTaskSettingsSet 區塊")
+        return m.group(1)
+
     def test_every_expected_value_is_actually_applied_by_the_installer(self) -> None:
-        """七項期望值逐項都要能在安裝器裡找到對應的套用手段。
+        """七項期望值逐項都要能在安裝器裡找到對應的套用手段，且**逐任務逐值**（TCS-P4 R161 (b)）。
 
         意圖：SSOT 若寫了安裝器做不到的期望值，比對器會永久紅（沒有修法），
-        人就會把它關掉——期望值必須與唯一的套用途徑同源。
+        人就會把它關掉——期望值必須與唯一的套用途徑同源。第三支（巡邏）的設定集與前兩支刻意不同
+        （WakeToRun 為 false、IgnoreNew、PT1H），故不再只對「全檔存在某字面」。
         對照表刻意寫死在測試裡：它就是「期望值 ↔ 套用手段」的橋，兩邊任一改動都會紅。
         """
-        applied = {
+        fixed = {
             "Settings/StartWhenAvailable": r"-StartWhenAvailable",
-            "Settings/WakeToRun": r"-WakeToRun",
             # 建構 cmdlet 的參數名極性相反（DEF-101-249），故期望 false ↔ Allow/DontStop
             "Settings/DisallowStartIfOnBatteries": r"-AllowStartIfOnBatteries",
             "Settings/StopIfGoingOnBatteries": r"-DontStopIfGoingOnBatteries",
-            "Settings/ExecutionTimeLimit": r"-ExecutionTimeLimit\s+\(New-TimeSpan",
-            "Settings/MultipleInstancesPolicy": r"\$def\.Settings\.MultipleInstances\s*=\s*3",
-            "Principals/Principal/LogonType": r"-LogonType\s+S4U",
         }
+        keys = {"Settings/StartWhenAvailable", "Settings/WakeToRun",
+                "Settings/DisallowStartIfOnBatteries", "Settings/StopIfGoingOnBatteries",
+                "Settings/ExecutionTimeLimit", "Settings/MultipleInstancesPolicy",
+                "Principals/Principal/LogonType"}
+        variables = self._task_vars()
+        self.assertEqual(set(variables), set(self.tasks))
         for task, spec in self.tasks.items():
-            self.assertEqual(
-                set(spec["expected"]), set(applied),
-                f"{task} 的期望值欄位集合與「安裝器套用手段」對照表不一致",
-            )
-            for key, pattern in applied.items():
-                self.assertRegex(
-                    self.installer, pattern,
-                    f"{task} 期望 {key}={spec['expected'][key]}，"
-                    f"但安裝器找不到套用手段（pattern={pattern}）",
-                )
+            exp, block = spec["expected"], self._settings_block(task)
+            self.assertEqual(set(exp), keys, f"{task} 的期望值欄位集合與對照表不一致")
+            for key, pattern in fixed.items():
+                self.assertRegex(block, pattern, f"{task} 期望 {key}，安裝器找不到套用手段")
+            wake = exp["Settings/WakeToRun"]
+            self.assertIn(wake, ("true", "false"))
+            self.assertEqual("-WakeToRun" in block, wake == "true",
+                             f"{task} 期望 WakeToRun={wake}，但套用手段（-WakeToRun）有無不對應")
+            hours = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", block)
+            self.assertIsNotNone(hours, f"{task} 的 ExecutionTimeLimit 套用手段不在其設定區塊")
+            self.assertEqual(exp["Settings/ExecutionTimeLimit"], f"PT{hours.group(1)}H")
+            com = re.findall(r"Set-MultipleInstancesStopExisting\s+-Name\s+\$(\w+)", self.installer)
+            policy = exp["Settings/MultipleInstancesPolicy"]
+            if policy == "StopExisting":  # 模組 enum 表達不出：只能走 COM fixup（逐任務呼叫）
+                self.assertIn(variables[task], com, f"{task} 期望 StopExisting，找不到 COM 套用")
+                self.assertNotRegex(block, r"-MultipleInstances\s+IgnoreNew")
+            else:  # IgnoreNew：模組原生參數，且**不得**有 COM 套用
+                self.assertEqual(policy, "IgnoreNew")
+                self.assertRegex(block, r"-MultipleInstances\s+IgnoreNew")
+                self.assertNotIn(variables[task], com,
+                                 f"{task} 期望 IgnoreNew，卻被套了 StopExisting")
+            self.assertRegex(self.installer, r"-LogonType\s+S4U")
+        self.assertRegex(self.installer, r"\$def\.Settings\.MultipleInstances\s*=\s*3")
 
     def test_execution_time_limit_expectation_matches_installer_hours(self) -> None:
-        """PT<N>H 的 N 必須等於安裝器 New-TimeSpan -Hours 的 N（數值層對齊，非只有形狀）。"""
-        m = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)", self.installer)
-        assert m is not None
+        """PT<N>H 的 N 必須等於**該任務**安裝器 New-TimeSpan -Hours 的 N（逐任務數值層對齊）：
+        nightly、smoke＝4、巡邏＝1。"""
+        want = {"AutoClaude_Nightly": 4, "AutoClaude_WindowsSmoke": 4, "AutoSDD_SI_Patrol": 1}
         for task, spec in self.tasks.items():
+            m = re.search(r"-ExecutionTimeLimit\s+\(New-TimeSpan\s+-Hours\s+(\d+)\)",
+                          self._settings_block(task))
+            assert m is not None
             self.assertEqual(
                 spec["expected"]["Settings/ExecutionTimeLimit"], f"PT{m.group(1)}H",
                 f"{task} 的 ExecutionTimeLimit 期望值與安裝器實際套用的小時數不一致",
             )
+            self.assertEqual(int(m.group(1)), want[task], task)
 
     def test_every_expected_setting_has_a_recorded_why(self) -> None:
         """每一項期望值都要有 WHY——沒有理由的期望值遲早被當成雜訊刪掉。"""
@@ -929,6 +966,21 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         self.mod = _load_drift_module()
         self.expectations = self.mod.load_expectations(_EXPECTATIONS_JSON)
 
+    def _parsed_per_task(self, xml: str = _SAMPLE_TASK_XML) -> dict[str, Any]:
+        """逐任務的「實況」：以樣本 XML 為底，巡邏任務改成它的期望值（WakeToRun 為 false、
+        PT1H、IgnoreNew）——三支任務的設定集刻意不同（TCS-P4 R161）。"""
+        out: dict[str, Any] = {}
+        for task in self.expectations:
+            body = xml
+            if task == "AutoSDD_SI_Patrol":
+                body = (body.replace("<WakeToRun>true</WakeToRun>", "<WakeToRun>false</WakeToRun>")
+                        .replace("<ExecutionTimeLimit>PT4H</ExecutionTimeLimit>",
+                                 "<ExecutionTimeLimit>PT1H</ExecutionTimeLimit>")
+                        .replace("<MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>",
+                                 "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"))
+            out[task] = self.mod.parse_task_xml(body)
+        return out
+
     def test_parses_namespaced_task_xml(self) -> None:
         """Task Scheduler XML 帶命名空間，解析必須去前綴後仍取得七項值。"""
         parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
@@ -938,8 +990,7 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         self.assertEqual(parsed["Principals/Principal/LogonType"], "S4U")
 
     def test_all_settings_matching_is_ok(self) -> None:
-        parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
-        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        report = self.mod.evaluate(self.expectations, self._parsed_per_task())
         self.assertEqual(report["status"], "ok", report)
         self.assertEqual(report["drifts"], [])
 
@@ -949,9 +1000,10 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         意圖（Rule 9）：這是本缺陷五項之二的真實形態。若比對器只在「值不同」時判紅、
         對「欄位缺席」放行，那兩項就會永久隱形——正是它要治的病。
         """
-        parsed = self.mod.parse_task_xml(_SAMPLE_TASK_XML)
-        del parsed["Settings/ExecutionTimeLimit"]
-        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        actuals = self._parsed_per_task()
+        for parsed in actuals.values():
+            del parsed["Settings/ExecutionTimeLimit"]
+        report = self.mod.evaluate(self.expectations, actuals)
         self.assertEqual(report["status"], "drift")
         self.assertTrue(
             any(d["setting"] == "Settings/ExecutionTimeLimit" and d["actual"] == "<missing>"
@@ -961,11 +1013,9 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
 
     def test_interactive_logon_type_is_drift(self) -> None:
         """smoke 的實機現況 InteractiveToken 必須被判紅（未登入時整輪不跑）。"""
-        parsed = self.mod.parse_task_xml(
-            _SAMPLE_TASK_XML.replace("<LogonType>S4U</LogonType>",
-                                     "<LogonType>InteractiveToken</LogonType>")
-        )
-        report = self.mod.evaluate(self.expectations, dict.fromkeys(self.expectations, parsed))
+        actuals = self._parsed_per_task(_SAMPLE_TASK_XML.replace(
+            "<LogonType>S4U</LogonType>", "<LogonType>InteractiveToken</LogonType>"))
+        report = self.mod.evaluate(self.expectations, actuals)
         self.assertEqual(report["status"], "drift")
 
     def test_absent_tasks_are_skip_not_drift(self) -> None:

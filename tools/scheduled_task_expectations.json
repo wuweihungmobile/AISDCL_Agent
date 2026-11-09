@@ -44,6 +44,18 @@
         "Settings/MultipleInstancesPolicy": "StopExisting",
         "Principals/Principal/LogonType": "S4U"
       }
+    },
+    "AutoSDD_SI_Patrol": {
+      "role": "SelfImproving 自動演化巡邏心跳（tools/si_patrol_tick.ps1；TCS-SelfImproving-P4 R161）",
+      "expected": {
+        "Settings/StartWhenAvailable": "true",
+        "Settings/WakeToRun": "false",
+        "Settings/DisallowStartIfOnBatteries": "false",
+        "Settings/StopIfGoingOnBatteries": "false",
+        "Settings/ExecutionTimeLimit": "PT1H",
+        "Settings/MultipleInstancesPolicy": "IgnoreNew",
+        "Principals/Principal/LogonType": "S4U"
+      }
     }
   },
   "_why_trigger_time": [
@@ -64,11 +76,11 @@
   ],
   "why_each": {
     "Settings/StartWhenAvailable": "關機錯過觸發時，開機後補跑（DEF-101-002 四項之一）",
-    "Settings/WakeToRun": "睡眠/休眠時喚醒機器準時執行（另需 powercfg RTCWAKE）",
+    "Settings/WakeToRun": "睡眠/休眠時喚醒機器準時執行（另需 powercfg RTCWAKE）。逐任務：nightly、smoke 為 true；AutoSDD_SI_Patrol 為 false（心跳不喚醒睡眠機器，醒來由 StartWhenAvailable 補跑一次）",
     "Settings/DisallowStartIfOnBatteries": "筆電吃電池時不擋啟動（/create 預設不利）",
     "Settings/StopIfGoingOnBatteries": "執行中切到電池不中途砍掉（R71 實機第 4 風險）",
-    "Settings/ExecutionTimeLimit": "預設 PT72H 讓被睡眠凍住 35.6h 的實例仍存活，隔日觸發被吃掉 → 該日觀察期三軌零進帳（2026-08-01 實測事故）。正常整輪 5~8 分鐘，PT4H 已極寬鬆",
-    "Settings/MultipleInstancesPolicy": "IgnoreNew 會讓凍住的實例吃掉後續所有觸發；StopExisting 是 ExecutionTimeLimit 之外的第二道防線",
+    "Settings/ExecutionTimeLimit": "預設 PT72H 讓被睡眠凍住 35.6h 的實例仍存活，隔日觸發被吃掉 → 該日觀察期三軌零進帳（2026-08-01 實測事故）。正常整輪 5~8 分鐘，PT4H 已極寬鬆。逐任務：nightly、smoke 為 PT4H；AutoSDD_SI_Patrol 為 PT1H（心跳自身的上限；無人運轉的牆鐘由 spawn.json 管）",
+    "Settings/MultipleInstancesPolicy": "IgnoreNew 會讓凍住的實例吃掉後續所有觸發；StopExisting 是 ExecutionTimeLimit 之外的第二道防線。逐任務：nightly、smoke 為 StopExisting；AutoSDD_SI_Patrol 為 IgnoreNew（巡邏在跑時下一心跳不得砍它，砍掉可能留下半套 app.* 事件；`expected_trigger_time` 省略：觸發是每日 00:00 起的重複間隔）",
     "Principals/Principal/LogonType": "InteractiveToken 在「符合啟動條件時使用者未登入」會整輪不跑（2026-08-02 事件 332 實測 NumberOfMissedRuns=1）；S4U＝以該使用者身分執行但不需登入、不需存密碼"
   }
 }

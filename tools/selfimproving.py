@@ -3,8 +3,8 @@
 用法：python tools/selfimproving.py <動詞> [旗標]。P1 的 13 個動詞：`check`（唯讀檢查帳本與協定）、
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
-與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀），
-共 24 個；未列動詞 rc 3。
+與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀）；
+P4 加 `sched`（排程）與 `patrol`（巡邏心跳），共 26 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -48,6 +48,7 @@ _HELP = {
     "capacity": "有上限載入面的容量與截斷風險（唯讀）",
     "issues": "議題中心：三類帳本的中文議題清單（唯讀）",
     "sched": "自動演化排程：show（唯讀）、set（寫 sched.set）、arm／disarm（OS 任務）",
+    "patrol": "巡邏心跳（OS 排程器每心跳叫醒一次的一次性行程：入帳、到期判定、運轉、推進）",
 }
 # R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
 _P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
@@ -185,6 +186,10 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--sid")
     rs.add_argument("--line", type=int)
     _sched_parser(sub)
+    pt = _verb(sub, "patrol")
+    pt.add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
+    pt.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="零寫入，印此心跳會做什麼")
     return parser
 
 
@@ -362,9 +367,18 @@ def _write(repo: Path, args: argparse.Namespace) -> int:
 
 
 def _armed():
-    from lib.selfimproving import runner  # exec：只在要現查 OS 任務時才載入
+    from lib.selfimproving import schedarm  # exec：只在要現查 OS 任務時才載入
 
-    return sched.armed_value(runner.run_argv)
+    return schedarm.armed()
+
+
+def _patrol(repo: Path, args: argparse.Namespace) -> int:
+    """`patrol`（R137）：參數原樣交給 `patrol.main`（授權閘、鎖、OFF 與用法錯誤都在那裡）。"""
+    from lib.selfimproving import patrol  # exec：巡邏心跳才載入
+
+    argv = ["--repo", str(repo)] + (["--now", args.now] if args.now else [])
+    return patrol.main(argv + (["--dry-run"] if args.dry_run else [])
+                       + (["--json"] if args.json else []))
 
 
 def _sched(repo: Path, args: argparse.Namespace) -> int:
@@ -481,7 +495,7 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
-             "capacity": _capacity, "issues": _issues, "sched": _sched}
+             "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,6 +9,8 @@ PKG-ROOT-PATROL 於同檔追加。
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import secrets
@@ -22,7 +24,7 @@ import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 
 from lib.selfimproving import events as si_events
-from lib.selfimproving import runner, schedwrite
+from lib.selfimproving import evwrite, patrol, runner, sched, schedwrite
 
 O = datetime(2026, 11, 2, 8, 0, 0, tzinfo=UTC)  # noqa: E741  # 預設 origin（TCS §2 簡寫 O）
 D1 = timedelta(days=1)
@@ -38,9 +40,20 @@ def iso(dt: datetime) -> str:
     return dt.isoformat(timespec="seconds")
 
 
-def make_p4_repo(dest: Path, *, events=None, prm=None, commit: bool = True) -> Path:
-    """P2 基線 repo（params.json 已含九個 sched 鍵）；`events` 為手寫事件（時間以 `t` 明給）。"""
-    return fx2.make_p2_repo(dest, events=events, prm=prm, commit=commit)
+SOP_REL = "docs/05_development/SelfImproving_Operations_SOP.md"
+
+
+def make_p4_repo(dest: Path, *, events=None, prm=None, commit: bool = True,
+                 sop: bool = True) -> Path:
+    """P2 基線 repo（params.json 已含九個 sched 鍵）＋真 SOP 的〈無人運轉任務書範本〉節位元組
+    複本（巡邏器自 `--repo` 讀任務書範本）；不複製整份 SOP：它引用的 OBS 編號不在夾具帳本內，
+    `check` 的 `ref.obs` 會因此紅。`events` 為手寫事件（時間以 `t` 明給）。"""
+    repo = fx2.make_p2_repo(dest, events=events, prm=prm, commit=commit)
+    if sop and commit:
+        real = fx.REAL_SOP.read_bytes()
+        fx.putb(repo, SOP_REL, real[real.index("## 無人運轉任務書範本".encode()):])
+        fx.commit_all(repo, "C4")
+    return repo
 
 
 def p4_base(events=None, prm=None) -> Path:
@@ -182,6 +195,106 @@ class P4TestCase(fx2.P2TestCase):  # 名稱含 TestCase：discover 守門不解�
 
     def audit(self, kind: str, body_fn, **kw) -> str:
         return audit_file(self.home, kind, body_fn, key=fx2.AUDIT_KEY, **kw)
+
+    def beat(self, R: Path, now: datetime, rig: Rig | None = None, *args: str, hm: str = "12:00"):
+        """`HEARTBEAT`（TCS §2 B 節）：回 (rc, out, err)；`now`、事件 `t`、本機時分三者一律注入。"""
+        rig = rig or getattr(self, "rig", None) or Rig()
+        self.rig, rig.now = rig, now
+        out, err = io.StringIO(), io.StringIO()
+        with (mock.patch.object(schedwrite, "current_time", return_value=now),
+              mock.patch.object(evwrite, "now_iso", return_value=iso(now)),
+              mock.patch.object(sched, "local_hm", return_value=hm),
+              contextlib.redirect_stdout(out), contextlib.redirect_stderr(err)):
+            rc = patrol.main(["--now", iso(now), "--repo", str(R), *args], rig.deps(R))
+        return rc, out.getvalue(), err.getvalue()
+
+    def stub_env(self, key: str = TEST_KEY):
+        return mock.patch.dict(os.environ, {"AUTOSDD_SI_AUDIT_KEY": key})
+
+    def enabled_repo(self, *extra, prm=None) -> Path:
+        """S-CELL：啟用、週期 1440、origin 為 `O`；其餘手寫事件由 `extra` 給。"""
+        return p4_base(events=[sched_set_ev(O), *extra], prm=prm)
+
+    def logs(self) -> list[str]:
+        return log_lines(self.home)
+
+
+# --------------------------------------------------------------------------- 巡邏心跳替身
+# （PKG-ROOT-PATROL）
+class Spawner:
+    """`runner.spawn_detached` 的替身：記錄 argv／env／cwd 並回假 pid；前 `fail` 次呼叫拋
+    `PermissionError`
+    （模擬脫離旗標被任務 job 拒絕）。"""
+
+    def __init__(self, *, fail: int = 0, base: int = 424200) -> None:
+        self.calls: list[dict] = []
+        self.attempts, self.fail, self.base = 0, fail, base
+
+    def __call__(self, argv, *, env, cwd=None, out_dir=None) -> int:
+        self.attempts += 1
+        if self.attempts <= self.fail:
+            raise PermissionError("breakaway denied")
+        self.calls.append({"argv": list(argv), "env": dict(env), "cwd": str(cwd),
+                           "out_dir": None if out_dir is None else Path(out_dir)})
+        return self.base + len(self.calls)
+
+
+class Rig:
+    """心跳替身包：額度帶、對話靜默、`claude` 路徑、動詞呼叫記錄、spawn 記錄、存活 pid
+    集合與殺行程記錄；
+    `research --fetch` 以預設 rc 序列替身（rc 0／2 另落一筆 `research.scan`，rc 1 回拒收）。"""
+
+    def __init__(self, *, band: str = "free", quiet: bool = True,
+        which: str | None = "/stub/claude",
+                 preflight: str | None = None, fetch_rcs=(0,), changed: bool = True) -> None:
+        self.band, self.quiet, self.which, self.preflight = band, quiet, which, preflight
+        self.fetch_rcs, self.changed = list(fetch_rcs), changed
+        self.verbs_log: list[list[str]] = []
+        self.spawner, self.live, self.killed = Spawner(), set(), []
+        self.now = O
+        self.boom: Exception | None = None
+        self.scan_rows: list[str] | None = None
+
+    def deps(self, R: Path):
+        def verbs(argv):
+            self.verbs_log.append(list(argv))
+            if self.boom is not None:
+                err, self.boom = self.boom, None
+                raise err
+            return self._run(R, list(argv))
+        return patrol.Deps(
+            quota=lambda now: types.SimpleNamespace(band=self.band),
+            driver_quiet=lambda: self.quiet, which=lambda name: self.which,
+            preflight=lambda: self.preflight, verbs=verbs, spawn_detached=self.spawner,
+            pid_alive=lambda pid, started: pid in self.live, kill_tree=self.killed.append)
+
+    def _run(self, R: Path, argv: list[str]):
+        if argv[0] == "scan" and self.scan_rows is not None:
+            return 0, json.dumps({"candidates": [{"row": r} for r in self.scan_rows]}), ""
+        if argv[:2] != ["research", "--fetch"]:
+            return patrol._real_verbs(argv)
+        rc = self.fetch_rcs.pop(0) if len(self.fetch_rcs) > 1 else self.fetch_rcs[0]
+        if rc in (0, 2):
+            run = argv[argv.index("--run") + 1]
+            src = {"id": "src-a", "sha256": fx.H(11), "bytes": 10, "changed": self.changed,
+                   "http_status": 200}
+            fx.append_events(R, [fx.ev("research.scan", "researcher", t=iso(self.now), run=run,
+                                       sources=[src], sources_sha256=fx.H(12),
+                                       fetched_at=iso(self.now))])
+            return rc, f"ok research.scan run={run}\n", ""
+        return 1, "reject research ZERO-SUCCESS\n", ""
+
+    def verbs_named(self, *head: str) -> list[list[str]]:
+        return [a for a in self.verbs_log if a[:len(head)] == list(head)]
+
+
+def ledger_text(R: Path) -> bytes:
+    return (R / fx.EVL).read_bytes() if (R / fx.EVL).exists() else b""
+
+
+def log_lines(home: Path) -> list[str]:
+    path = home / "patrol" / "patrol.log"
+    return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
 # --------------------------------------------------------------------------- 雜項

@@ -15,6 +15,16 @@ AutoClaude/tools/fix_nightly_catchup.ps1——假設 AutoClaude_Nightly 這個 s
 本安裝器管理的是一**組**任務（不是單一任務），四個模式一律作用於整組：
   ① AutoClaude_Nightly      每日 $NightlyAt → AutoClaude/tools/run_local_nightly.ps1
   ② AutoClaude_WindowsSmoke 每日 $SmokeAt   → tools/windows_smoke_local.ps1
+  ③ AutoSDD_SI_Patrol       每日午夜起每 sched_heartbeat_minutes 分鐘重複一天 → tools/si_patrol_tick.ps1
+     （SelfImproving 自動演化排程的巡邏心跳；TCS-SelfImproving-P4 R161。分鐘數從
+     docs/06_quality/SelfImproving_Protocol/params.json 讀、不寫死第二份。）
+  🔴 ③ 的設定集與 ①② **刻意不同**，且逐任務住 tools/scheduled_task_expectations.json：
+     WakeToRun=false（心跳不喚醒睡眠機器，醒來由 StartWhenAvailable 補跑一次）、
+     ExecutionTimeLimit=PT1H（心跳自身的上限；無人運轉的牆鐘由 spawn.json 管）、
+     MultipleInstancesPolicy=IgnoreNew——WHY 與 ①② 的 StopExisting 相反：巡邏在跑時，下一個心跳
+     不得砍掉它（砍掉＝可能留下半套 app.* 事件）；①② 是凍住實例會吃掉隔日觸發，所以要 StopExisting。
+     IgnoreNew 是 ScheduledTasks 模組原生可表達的值（走 New-ScheduledTaskSettingsSet 的
+     -MultipleInstances），不經 COM fixup。
   🔴 R73（DEF-101-779）：時間改由參數提供；本檔原先把兩個時刻寫死在程式碼裡，
   **預設值一律見 param 區塊**（那裡有取捨 WHY）；**現行排程一律現查**
   `Get-ScheduledTask ... | Get-ScheduledTaskInfo`——本段刻意不寫任何 HH:mm 字面值。
@@ -132,10 +142,13 @@ $TaskName = 'AutoClaude_Nightly'
 # 常駐排程任務。R76 訂正：原寫「兩支腳本」，reschedule_g0_gatecheck.ps1 已刪＝真孤兒。
 # 本 installer 從未管理 G0 任務，故無需新增移除邏輯——它只管 Nightly + WindowsSmoke。
 $SmokeTaskName = 'AutoClaude_WindowsSmoke'
+$PatrolTaskName = 'AutoSDD_SI_Patrol'
 $ScriptDir = $PSScriptRoot
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptDir '..'))
 $NightlyPs1 = Join-Path $RepoRoot 'AutoClaude\tools\run_local_nightly.ps1'
 $SmokePs1 = Join-Path $RepoRoot 'tools\windows_smoke_local.ps1'
+$PatrolPs1 = Join-Path $RepoRoot 'tools\si_patrol_tick.ps1'
+$SchedParamsJson = Join-Path $RepoRoot 'docs\06_quality\SelfImproving_Protocol\params.json'
 # 排序設計意圖：smoke 是便宜的 tripwire（PASS=12，R73 隨選觸發實測 **88 秒**），
 # nightly 是七軌深度回歸（R73 由 8/3 22:30 那輪 log 實測 **5 分 38 秒**）。若機器當晚
 # 只醒著很短的時間，先跑完便宜那支才是對的順序；兩支彼此無資料相依（smoke 全在 OS
@@ -171,7 +184,10 @@ function Show-TaskDetail {
   # 只印報表，**刻意不回傳任何值**（回傳值由 Test-TaskPresent 負責，見其註解）。
   param(
     [Parameter(Mandatory = $true)][string]$Name,
-    [Parameter(Mandatory = $true)][string]$Role
+    [Parameter(Mandatory = $true)][string]$Role,
+    [string]$ExpectedWake = 'True',
+    [string]$ExpectedLimit = 'PT4H',
+    [string]$ExpectedPolicy = 'StopExisting'
   )
   $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
   if (-not $task) {
@@ -185,7 +201,7 @@ function Show-TaskDetail {
   Write-Output "  NextRunTime    = $($info.NextRunTime)"
   $s = $task.Settings
   Write-Output "  StartWhenAvailable         = $($s.StartWhenAvailable)   (expected True)"
-  Write-Output "  WakeToRun                  = $($s.WakeToRun)   (expected True)"
+  Write-Output "  WakeToRun                  = $($s.WakeToRun)   (expected ${ExpectedWake})"
   Write-Output "  DisallowStartIfOnBatteries = $($s.DisallowStartIfOnBatteries)   (expected False)"
   Write-Output "  StopIfGoingOnBatteries     = $($s.StopIfGoingOnBatteries)   (expected False)"
   # R69（S-5）：這三項是 2026-08-01/02 漏跑事故的直接成因，必須在 -Status 就看得見，
@@ -193,15 +209,17 @@ function Show-TaskDetail {
   # MultipleInstancesPolicy 刻意讀 XML 而非 $s.MultipleInstances：後者對 StopExisting
   # （值 3）會印**空白**，空白會被誤讀成沒設定（見 Set-MultipleInstancesStopExisting 註解）。
   Write-Output "  LogonType                  = $($task.Principal.LogonType)   (expected S4U — Interactive 在使用者未登入時整輪不跑)"
-  Write-Output "  ExecutionTimeLimit         = $($s.ExecutionTimeLimit)   (expected PT4H)"
+  Write-Output "  ExecutionTimeLimit         = $($s.ExecutionTimeLimit)   (expected ${ExpectedLimit})"
   $policy = try { ([xml](Export-ScheduledTask -TaskName $Name)).Task.Settings.MultipleInstancesPolicy } catch { '<unreadable>' }
-  Write-Output "  MultipleInstancesPolicy    = ${policy}   (expected StopExisting)"
+  Write-Output "  MultipleInstancesPolicy    = ${policy}   (expected ${ExpectedPolicy})"
 }
 
 function Show-NightlyStatus {
   # 印整組任務的報表；同上，**不回傳值**。
   Show-TaskDetail -Name $TaskName -Role 'nightly 七軌深度回歸'
   Show-TaskDetail -Name $SmokeTaskName -Role 'Windows smoke 執行級補償控制（DEF-101-139/517）'
+  Show-TaskDetail -Name $PatrolTaskName -Role 'SelfImproving 自動演化巡邏心跳（TCS-SelfImproving-P4）' `
+    -ExpectedWake 'False' -ExpectedLimit 'PT1H' -ExpectedPolicy 'IgnoreNew'
 }
 
 if ($Status) {
@@ -209,7 +227,8 @@ if ($Status) {
     Write-Warning "-Status 與 -Uninstall 同時給出，-Uninstall 已被忽略（僅查詢狀態，不做任何變更）。"
   }
   Show-NightlyStatus
-  $loaded = (Test-TaskPresent -Name $TaskName) -and (Test-TaskPresent -Name $SmokeTaskName)
+  $loaded = (Test-TaskPresent -Name $TaskName) -and (Test-TaskPresent -Name $SmokeTaskName) -and
+    (Test-TaskPresent -Name $PatrolTaskName)
   if ($loaded) { exit 0 } else { exit 1 }
 }
 
@@ -227,6 +246,16 @@ if ($Uninstall) {
       } else {
         Write-Output "✅ 無事可做：${name} 不存在（冪等）"
       }
+    }
+  }
+  # 整組的第三支（SelfImproving 巡邏）：只想停巡邏時用 `sched disarm`，不要用本模式。
+  $patrolGone = Get-ScheduledTask -TaskName $PatrolTaskName -ErrorAction SilentlyContinue
+  if ($PSCmdlet.ShouldProcess($PatrolTaskName, 'Unregister-ScheduledTask')) {
+    if ($patrolGone) {
+      Unregister-ScheduledTask -TaskName $PatrolTaskName -Confirm:$false
+      Write-Output "✅ 已解除安裝：移除排程任務 ${PatrolTaskName}"
+    } else {
+      Write-Output "✅ 無事可做：${PatrolTaskName} 不存在（冪等）"
     }
   }
   exit 0
@@ -252,6 +281,14 @@ if (-not (Test-Path -LiteralPath $NightlyPs1)) {
 }
 if (-not (Test-Path -LiteralPath $SmokePs1)) {
   Write-Error "找不到 Windows smoke 載體：${SmokePs1}"
+  exit 1
+}
+if (-not (Test-Path -LiteralPath $PatrolPs1)) {
+  Write-Error "找不到 SelfImproving 巡邏載體：${PatrolPs1}"
+  exit 1
+}
+if (-not (Test-Path -LiteralPath $SchedParamsJson)) {
+  Write-Error "找不到心跳參數檔（sched_heartbeat_minutes 的唯一來源）：${SchedParamsJson}"
   exit 1
 }
 
@@ -359,6 +396,26 @@ $settings = New-ScheduledTaskSettingsSet `
   -DontStopIfGoingOnBatteries `
   -ExecutionTimeLimit (New-TimeSpan -Hours 4)
 
+# ③ 巡邏任務：心跳分鐘從 params.json 讀（不寫死第二份）；每日 00:00 起每 N 分鐘重複、持續一天。
+# 設定集與 ①② 逐項不同（見檔頭）：不帶 -WakeToRun、ExecutionTimeLimit 為 PT1H、
+# MultipleInstances 走模組原生的 IgnoreNew（巡邏在跑時下一心跳不得砍它，與 StopExisting 相反）。
+$HeartbeatMinutes = [int](Get-Content -LiteralPath $SchedParamsJson -Raw -Encoding UTF8 |
+    ConvertFrom-Json).sched_heartbeat_minutes
+$patrolAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"${PatrolPs1}`""
+# 每日 00:00 的 Daily 觸發＋重複間隔：重複設定借用 -Once 觸發建構出的 Repetition 物件（模組沒有
+# 「Daily 加重複」的單一參數組合）。
+$patrolTrigger = New-ScheduledTaskTrigger -Daily -At '00:00'
+$patrolTrigger.Repetition = (New-ScheduledTaskTrigger -Once -At '00:00' `
+    -RepetitionInterval (New-TimeSpan -Minutes $HeartbeatMinutes) `
+    -RepetitionDuration (New-TimeSpan -Days 1)).Repetition
+$patrolSettings = New-ScheduledTaskSettingsSet `
+  -StartWhenAvailable `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -ExecutionTimeLimit (New-TimeSpan -Hours 1) `
+  -MultipleInstances IgnoreNew
+
 if ($PSCmdlet.ShouldProcess($TaskName, 'Register-ScheduledTask')) {
   $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
   if ($existing) {
@@ -383,6 +440,17 @@ if ($PSCmdlet.ShouldProcess($SmokeTaskName, 'Register-ScheduledTask')) {
   Set-MultipleInstancesStopExisting -Name $SmokeTaskName
   Write-Output "✅ 已安裝並註冊排程任務：${SmokeTaskName}（每日 ${SmokeAt} → ${SmokePs1}）"
   Write-Output "   這是 CI 停擺期間 Windows 側唯一的執行級活體驗證管道，此前只能手動觸發"
+}
+if ($PSCmdlet.ShouldProcess($PatrolTaskName, 'Register-ScheduledTask')) {
+  $patrolExisting = Get-ScheduledTask -TaskName $PatrolTaskName -ErrorAction SilentlyContinue
+  if ($patrolExisting) {
+    Unregister-ScheduledTask -TaskName $PatrolTaskName -Confirm:$false
+  }
+  Register-ScheduledTask -TaskName $PatrolTaskName -Action $patrolAction -Trigger $patrolTrigger `
+    -Settings $patrolSettings -Principal $principal `
+    -Description 'SelfImproving 自動演化巡邏心跳（見 tools/si_patrol_tick.ps1；TCS-SelfImproving-P4 R161）' | Out-Null
+  Write-Output "✅ 已安裝並註冊排程任務：${PatrolTaskName}（每 ${HeartbeatMinutes} 分鐘 → ${PatrolPs1}）"
+  Write-Output "   WakeToRun=False／ExecutionTimeLimit=PT1H／MultipleInstancesPolicy=IgnoreNew（巡邏在跑時下一心跳不砍它）"
 }
 Write-Output "   驗證：powershell -File tools\install_windows_nightly.ps1 -Status"
 exit 0
