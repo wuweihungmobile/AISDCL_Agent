@@ -1344,3 +1344,9 @@ $snap = Get-Content -LiteralPath <snap 檔> -Encoding utf8; $o = git -C <repo> s
 |---|---|---|---|---|
 | 2-1 | R-IC-33（:235）顯示序兩條 | 四分頁預設顯示序兩條規則 | **不改**（本鍵 D-UX-18）；只加註「表頭可點排序後畫面序暫離兩條規則，『還原預設排序』回到規則序」；四分頁預設序維持 R-IC-33 兩條，表頭排序是使用者動作、不改預設；根層 CLI `tools/lib/selfimproving/issues.py` 與前端 `lib/domain/issues.ts` 的「同表兩端驗」對拍鎖（`tools/tests/test_selfimproving_issues.py` 的 AT-IC-05-1-1、前端 `issues.test.ts`）不動 | 本鍵 §6 IC-1；SCG-4 一審確認實作四分頁 `aria-sort` 全 none、預設序未改 |
 | 2-2 | R-IC-65（:292）八欄、R-IC-66（:293）置頂 | 八欄表頭字樣與順序、全部分頁置頂列 | **不改字樣**；加註「八欄表頭 `textContent` 與順序不變（`SortableHeader` 保 `textContent`）；表頭另帶 `aria-sort` 與按鈕；全部分頁使用者排序時置頂列仍在頂端（W-UX4）」 | 本鍵 §6 IC-2；AT-963-3-1～3-4 |
+
+### 勘誤三（2026-11-09；主控；pre-push 閘門兩次被 AT-IC-12-1-1 擋下的量法訂正；兩鍵 `monorepo-issue-center`、`agentconsole-issue-center` 依〈凍結後修訂路由〉同次 refreeze，最終 digest 須相同）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 3-1 | AT-IC-12-1-1（:981）、AT-IC-12-1-2（:982）、§5.5 規模夾具段（:1102） | 「連跑 5 次 … 每次 ≤ 2 秒」「同樣 ≤ 2 秒」（單次量測） | 量法改為 **best-of-N**：AT-IC-12-1-1 連跑 5 次取最佳值 ≤ 2 秒（每次仍驗單頁 ≤ 1 MB）、AT-IC-12-1-2 連跑 3 次取最佳值 ≤ 2 秒；門檻 2 秒與輸出上限不變，AT 標題與 id 不變；實作於 `tools/tests/test_selfimproving_issues.py` 兩個測試本體（連跑後取 `min`；護欄層行數棘輪要求淨額不上升，故不另抽輔助函式），失敗訊息列出各次秒數 | 真機事實（2026-11-09，20 邏輯核、cpu_budget 廣播 18 worker）：pre-push 根層全套平行跑時單次量到 2.27 秒（第 4 次）與 2.42 秒（第 1 次），同機閒置單跑 `export --kind issues` 0.72 秒、該測試類 5 支 4.9 秒全綠——單次門檻量到的是機器負載不是匯出能力；根 `CLAUDE.md`〈GitHub CI/CD 一律多 CPU〉把 perf 量測列為唯一允許的序列例外，本檔不改執行形態、改估計量（取最小值：負載噪音只把單次往上推）；真正變慢到連最佳一次都超過 2 秒仍紅。OBS-SI-369 |
