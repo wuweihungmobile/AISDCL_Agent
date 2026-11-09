@@ -59,3 +59,13 @@ MIN_TESTS = 5058  # 🔴 重釘 5046 → 5058（方向＝收緊；2026-10-03，�
 ```text
 MIN_TESTS = 5755  # 🔴 重釘 5542 → 5755（方向＝收緊；2026-10-22，SelfImproving P2 新增測試檔與擴充；discovery 實測直接填入）。上一次 🔴 重釘 5326 → 5542（方向＝收緊；2026-10-20，SelfImproving P1 新增 6 支測試檔、158 個測試方法；discovery 實測直接填入、零加減推算）。上一次 5273 → 5326（方向＝收緊；2026-10-11，DEF-200-516 家族與 DEF-200-520 收尾單人窗口：test_quota_env_layers 31＋喚醒鏈回歸鎖與讀者鎖擴充；discovery 實測直接填入、零加減推算）。上一次：improving_113 收尾單人窗口（W1 test_model_roles 60＋W2 test_resume_cost 6＋讀者鎖擴充；discovery 實測直接填入、零加減推算）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
 ```
+
+### 5996 → 6207（2026-11-10，SelfImproving P5 頂尖專家四問收尾單人窗口）
+
+成長來源＝`test_selfimproving_fourq_model.py`＋`test_selfimproving_fourq_gate.py`（TCS-P5 的 AT）與既有 SI 測試檔的同步擴充（discovery 實測 6207、零加減推算）；觸發＝pre-push 閘門 `RatchetDriftWarningTest.test_current_pin_still_has_zero_dep_discrimination_headroom` 回報零相依鑑別力餘裕只剩 12／223（門檻 55），訊息本身指示重釘值。
+
+被取代的原行（逐字）：
+
+```text
+MIN_TESTS = 5996  # 🔴 重釘 5755 → 5996（方向＝收緊；2026-10-27，議題中心階段一＋二收尾：新增 test_selfimproving_issues.py／test_selfimproving_issuemap.py 兩支測試檔與 SCG-4 修復棒擴充；零相依餘裕 −18 使 floor 探針不再塌縮而逾時，min_tests_margin.headroom_message 指示值；discovery 實測直接填入、零加減推算）。上一次 🔴 重釘 5542 → 5755（方向＝收緊；2026-10-22，SelfImproving P2 新增測試檔與擴充；discovery 實測直接填入）。上一次 🔴 重釘 5326 → 5542（方向＝收緊；2026-10-20，SelfImproving P1 新增 6 支測試檔、158 個測試方法；discovery 實測直接填入、零加減推算）。歷來完整逐輪沿革（含每次重釘理由）已搬至 docs/06_quality/CrossPlatform_Guard_Line_History_MinTests.md，本行不再原地累加。
+```
