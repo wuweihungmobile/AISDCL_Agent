@@ -110,6 +110,8 @@
 
 ### 2.2 靜態鎖（`tests/test_si_readonly_lock.py`；P2b §2.3 判準 1′～5′ **不變**）
 
+> v1.0 實作輪補充（Console TCS D-CS-21／22）：測試另加「判準 6」——兩個新路由函式本體只呼叫 `_store_signed_audit`、不碰 `si_cli`，且路由檔不得含組 argv 的函式；1′～5′ 的常數與判準一字未改。`subject` 非 null 的 422 違規 rule 名沿既有 `must_be_null`（訊息「此端點的 subject 須為 null」）。
+
 - 兩個新路由**不呼叫任何 CLI 動詞、不組 argv**：組 argv 的函式仍恰兩個（`export`、`obs-add --dry-run`）；`si_cli.py` 的 argv 動詞白名單不變。
 - 寫入形態仍只准出現在 `app/si_audit.py` 且路徑引數源自 `audit_dir` 參數；新路由對 `_store_signed_audit` 的呼叫是新增呼叫點，不是新增寫入形態。
 - 測試增補（實作輪）：兩個新路由的行為測試（權杖、405、409、422〔`subject` 非 null〕、原樣落檔、檔名安全）以 `test_si_write_routes.py` 的既有夾具擴充，不改既有斷言。
