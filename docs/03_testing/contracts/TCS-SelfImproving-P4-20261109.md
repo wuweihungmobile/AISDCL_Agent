@@ -1251,9 +1251,9 @@ Scenario: 額度帶準備等原因擋下不寫 sched.skip
 
 Feature: 拒收碼
 Scenario: 每種拒收保留稽核檔、一行日誌、不重試
-  Given 四份稽核檔：已入帳過的重複 `audit_ref`（`AUDIT-REF-REUSED`）、金鑰變數缺席下的合法檔（`AUDIT-KEY-MISSING`）、外層 `kind` 與入帳路徑不符（`AUDIT-KIND-MISMATCH`）、外層 `audit_ref` 與檔名不符（`AUDIT-REF-MISMATCH`）
+  Given 四份稽核檔：已入帳過的重複 `audit_ref`（其事件已存在，不在 `console_pending`——巡邏器不會再碰它，`AUDIT-REF-REUSED` 由 CLI 面的 AT-437-1-E-x 覆蓋；D-IMP-6 (4)）、金鑰變數缺席下的合法檔（`AUDIT-KEY-MISSING`）、外層 `kind` 與入帳路徑不符（`AUDIT-KIND-MISMATCH`）、外層 `audit_ref` 與檔名不符（`AUDIT-REF-MISMATCH`）
   When `HEARTBEAT` 連續兩次
-  Then 四份檔皆仍在、`status.console_pending` 仍含它們（重複者除外，其對應事件已存在）；`patrol.log` 每份各一行帶各自拒收碼與一列 `obs-draft`，第二次不重複；每份每心跳入帳呼叫至多一次；事件帳本與 OBS 帳本無由這些檔造成的新增
+  Then 四份檔皆仍在、`status.console_pending` 仍含後三份（重複者不在其中，斷言它不再被重試）；`patrol.log` 對後三份每份各一行帶各自拒收碼與一列 `obs-draft`，第二次不重複；每份每心跳入帳呼叫至多一次；事件帳本與 OBS 帳本無由這些檔造成的新增
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_2_E_1]"
 ```
 ```gherkin
@@ -1378,7 +1378,7 @@ Feature: 前置恆為人的決定
 Scenario: 缺 DEC 與偽造 DEC
   Given `Pc`（`approved` 之前、無 `dec`）、`Pd`（事件帳本中被手寫了一筆 `dec(promote)`，但無對應稽核檔與逐字稿，`decverify` 回查會失敗）
   When `HEARTBEAT` 兩次
-  Then `Pc` 無任何 `app.*` 事件；`Pd` 的 `promote` 被拒（rc 1、`decverify` 的失敗碼）、無 `app.promote`、無 commit、日誌記碼；`check` 的 `events.dec_console` 為紅（偵測面仍在）
+  Then `Pc` 無任何 `app.*` 事件；`Pd` 的 `promote` 被拒（rc 1、`decverify` 的失敗碼）、無 `app.promote`、無 commit、日誌記碼；`check` 的 `events.dec_console` **非 PASS**（手寫 Console 載體 `dec` 無稽核檔時該項為非阻塞 NE `CONSOLE-AUDIT-MISSING`；偵測面仍在——D-IMP-6 (5)）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_439_4_1]"
 ```
 ```gherkin
@@ -1758,7 +1758,7 @@ Feature: 同步表
 Scenario: 每個站點的斷言值正確、其餘函式不變
   Given §2.5 同步表；對每個站點自測試檔 AST 取其斷言常數
   When 逐站點比對
-  Then 每站點的值等於新值（動詞數 26、`check` 35 項、`params` 41 鍵、`status` 16 鍵、能力登記 59 或 60 鍵與計數、`CHECK_RULES_REV` 為 5、`KINDS` 23、安裝器任務 3 支）；以 `git diff -U0` 判定既有 SI 測試檔中被修改的函式集合 ⊆ 同步表所列函式集合
+  Then 每站點的值等於新值（動詞數 26、`check` 35 項、`params` 41 鍵、`status` 16 鍵、能力登記 59 或 60 鍵與計數、`CHECK_RULES_REV` 為 5、`KINDS` 23、安裝器任務 3 支）；被修改的既有 SI 測試檔集合 ⊆ §2.5 允許檔集合（檔級；函式級對帳由實作輪交卷的站點清單與 §2.5 表人讀核對——D-IMP-6 (10)）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_5_E_1]"
 ```
 ```gherkin
@@ -1847,6 +1847,8 @@ Scenario: 只動允許集合
 | SOP 相關 | `test_selfimproving_events.py::TestSopArticles`、`test_selfimproving_p3_meta.py` 的 `sop_p3_problems` 相關、`test_selfimproving_p2_meta.py` 的 `sop_p2_problems` 相關：以標題切段者須對 SOP 新增的兩個 `##` 節（位於檔尾）仍成立 | 預期零改；若紅以 ⚖ 回報 |
 | Console 稽核 `kind` | `test_selfimproving_console_obs.py` 內斷言 `consoleaudit.KINDS` 為三值或列舉 `kind` 的站點（現查） | 3 改 5 |
 | Console `decide` 無人值守（D-IMP-4 追認） | `test_selfimproving_console_obs.py::test_AT_233_1_E_2` 子案 (e) | `UNATTENDED-REFUSED` 改 `AUDIT-KEY-MISSING`（R153 ②／D-QA-9：過授權閘、止於金鑰缺） |
+| 常駐機制禁字樣豁免（D-IMP-6 追認） | `test_selfimproving_check.py::test_AT_003_1_1_no_resident_mechanism` | 加 `schedarm.py` 對 `schtasks`／`launchctl`／`Register-ScheduledTask` 三字樣的豁免（與 R160 `FORBIDDEN_EXEMPT` 同源） |
+| 安裝器任務名與漂移檢查器（D-IMP-6 追認） | `test_install_windows_nightly.py::_declared_task_names`（regex 加 Patrol）；同檔 `test_all_settings_matching_is_ok`、`test_missing_execution_time_limit_is_drift_not_ok`、`test_interactive_logon_type_is_drift`（改用 `_parsed_per_task()` 逐任務解析） | 三支任務逐任務逐值 |
 | 議題中心事件標籤（D-IMP-3） | `tools/lib/selfimproving/issuemap.py::EVENT_LABELS`（`test_selfimproving_issuemap.py` 的 AT-IC-01-1-1／01-1-E-1／01-1-E-2 閉包對帳）；`test_selfimproving_issuemap.py::test_AT_IC_01_7_2_channel_event_and_decision_dictionaries` 的 `len(EVENT_LABELS)` | 加 `sched.set`＝排程設定、`sched.skip`＝排程跳過；計數 21 改 23（TCS-IssueCenter 勘誤同步） |
 | 能力登記禁字樣（D-QA-1） | `test_selfimproving_capability.py`：`FORBIDDEN`（現約 91～106 行，內容**不動**）旁新增常數 `FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}`，`capability_problems` 對每檔的 `forbidden_hits` 先扣除該檔豁免項；`FORBIDDEN_SAMPLES`（現約 108 行起）與負控加「同字樣出現在 `schedarm.py` 以外仍紅」「`schedarm.py` 內 `time.sleep` 仍紅」兩例 | 加豁免表與兩個負控；既有 14 條禁字樣與其樣本逐位不變 |
 | 單平台外部執行檔 argv 守衛（D-QA-1） | `test_platform_neutral_paths.py::TestForeignExecutableArgvIsGuarded`（及 `TestForeignPlatformApiIsGuarded`、`TestForeignApiVocabularyOnlyGrows`）：`schedarm.py` 的 `powershell.exe`、`schtasks`、`launchctl` 字面須住在 `sys.platform` 守衛內，`_FOREIGN_EXE_ARGV_DEBT`、`_FOREIGN_API_SCOPE_DEBT` 不新增 selfimproving 條目 | 預期零改（以 AT-440-3-3 與 `test_selfimproving_capability.py::test_AT_240_5_E_2_runner_static_invariants` 守）；若該測試因新檔而紅，以 ⚖ 回報 |
@@ -2035,6 +2037,7 @@ Scenario: 只動允許集合
 | D-IMP-2（實作輪） | `events.py` 斷言行到 400（R160 寫「將超過 380 即拆 `evspec.py`」）；SCHED 棒回報 `_SPEC` 與 `events.py` 的謂詞互相依賴，拆出會循環匯入且要動熱檔 | **主控裁決**：本輪接受 400（LOC 絕對上限 ≤400 成立、`check_loc_budget` rc 0）；PATROL 棒不得再往 `events.py` 加一行，任何後續增量先拆 `evspec.py`（R160 兩態擇一） | 再開：`check_loc_budget` 對 `events.py` 轉紅 |
 | D-IMP-3（實作輪） | `issuemap.py` 的 `EVENT_LABELS` 缺兩新 kind，`test_selfimproving_issuemap.py` 四個 AT（AT-IC-01-1-1／01-1-E-1／01-1-E-2／01-7-2）以閉包對帳轉紅；該檔不在 §5.7 | **主控裁決**：§5.7 修改（程式）加 `issuemap.py`（僅 `EVENT_LABELS` 兩列：`sched.set`＝排程設定、`sched.skip`＝排程跳過），§2.5 加站點；由主控落地 | — |
 | D-IMP-4（實作輪） | `test_selfimproving_console_obs.py::test_AT_233_1_E_2` 子案 (e) 為 §2.5 表外站點（R153 ②／D-QA-9：無人值守下 `decide --carrier console` 過授權閘、止於 `AUDIT-KEY-MISSING`），Developer 已就地改 | **主控裁決**：追認並補進 §2.5（R163：表外改動由主控裁決後補表） | — |
+| D-IMP-6（實作輪 PATROL 棒交卷 2026-11-09） | PATROL 棒對 TCS 字面的十二點偏離／再決 | **主控裁決（全部接受，字面同步）**：(1) `patrol.Deps` 無 `run_argv` 欄（spawn 走 `spawn_detached`、OS 任務走 `schedarm` 注入；欄位＝`quota`、`driver_quiet`、`which`、`preflight`、`verbs`、`spawn_detached`、`pid_alive`、`kill_tree`）；(2) `runner.spawn_detached` 多選填 `out_dir`（stdout／stderr 接到任務目錄供步 0′ 判 harness 殺行程），另增 `runner.kill_pid_tree`、`runner.pid_started_at`；(3) 預設 `verbs`＝行程內 `importlib.import_module("selfimproving")` 呼叫入口、不另起行程；(4) AT-439-2-E-1 的 `AUDIT-REF-REUSED` 子案改斷言「已入帳的 ref 不在 `console_pending`、不再被重試」（該碼由 CLI 面 AT 覆蓋）；(5) AT-439-4-1 的 `events.dec_console`「為紅」改「非 PASS」（手寫 Console 載體 `dec` 為非阻塞 NE `CONSOLE-AUDIT-MISSING`）；(6) 已有進行中無人運轉時每心跳寫一行 `code=BUSY`，Console `run-request` 依 R146 消耗成 `sched.skip(run-open)`、不留待延後的 (a) 運轉；(7) M 類 PROP 巡邏器不帶 `--memory-dir`，只寫日誌 `MEMORY-DIR`、人工推進；(8) `sandbox`／`verify` 在樹外沙盒不受髒樹阻擋，只有 `promote`／`rollback` 遇髒樹只寫日誌；(9) AT-436-4-2 安裝器 `-WhatIf` 於本機真跑；(10) AT-440-5-E-1 改檔級對帳（函式級由交卷站點清單人讀）；(11) 每心跳日誌格式 `step=<步> rc=<N> code=<碼|-> <說明>`、入帳拒收以 (audit_ref, 碼) 去重；(12) AT-440-8-1 本機並行紅屬 D-IMP-5 預期。另：主控把 `patrol.py` 的 `sys.path.insert` 迴圈變數形態改成兩句可靜態解析形態（SDD `test_ci_paths_cover_root_consumers` R67 鎖）；表外站點追認見 §2.5 新列 | 再開：(3) 若入口模組狀態殘留跨心跳污染 ⇒ 改子行程 |
 | D-IMP-5（實作輪） | AT-440-8-1 以 `HEAD~1` 為基準常駐於 CI，後續任何無關 commit（Console、`.github/`、護欄層重釘）都會被判紅；淺層 clone 無父 commit | **主控裁決**：常駐形態＝差異（基準→工作樹＋未追蹤）**觸及 §5.7 允許集合**時才強制「⊆ 允許集合」與守衛面為空，未觸及＝輸出註明並通過；父 commit 不可得＝只看未追蹤檔；`skip`／`xfail` 字樣掃描恆跑；本檔（P4 TCS）的主控勘誤追加不屬守衛面。AT-440-8-1 的 Given／Then 同步改寫；護欄層重釘、compat-ci `paths` 等主控專屬變更一律另開 commit | 再開：P4 面的 commit 混入守衛面檔仍會紅（這是設計，不是誤報） |
 
 ### 7.2 P3 TCS 承接項與刻意不做
