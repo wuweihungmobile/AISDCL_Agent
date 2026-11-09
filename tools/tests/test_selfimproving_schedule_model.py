@@ -398,10 +398,12 @@ class TestConsoleAudits(P4TestCase):
                 last = fx.EV(R)[-1]
                 import hashlib
                 self.assertEqual(last["audit_sha256"], "sha256:" + hashlib.sha256(raw).hexdigest())
-                broken = raw.replace(b'"admin"', b'"admiN"', 1)
+                broken = raw.replace(b"admin", b"admiN", 1)  # 改到 body 內 user 的位元組
+                self.assertNotEqual(broken, raw, f"{src.name}: tamper 必須真的改到位元組")
                 dest.write_bytes(broken)
                 rc, out, _ = self.ingest(fx4.p4_base(), ref, verb=verb)
                 self.assertEqual(rc, 1, out)
+                self.assertIn("AUDIT-MAC-MISMATCH", out)
 
     def test_AT_437_1_E_1_no_card_digest_keys(self):
         R = fx4.p4_base()
