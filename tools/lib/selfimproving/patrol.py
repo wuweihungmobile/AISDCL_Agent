@@ -97,9 +97,9 @@ def _quota(ctx) -> tuple[str, dict]:
         if ctx.deps.quota is not None:
             state = ctx.deps.quota(ctx.now)
         else:
-            from lib import quota_gate, quota_policy  # 延遲：只有真讀額度才載入
+            from lib import quota_policy  # 延遲：只有真讀額度才載入
 
-            state = quota_policy.decide(quota_gate.read_quota(ctx.now), ctx.now,
+            state = quota_policy.decide(sched.measured_state(ctx.now), ctx.now,
                                         quota_policy.DEFAULT_POLICY)
         return getattr(state, "band", "unmeasured"), sched.quota_verdict(state)
     except Exception:  # noqa: BLE001  # 量不到一律跳過（fail-closed）

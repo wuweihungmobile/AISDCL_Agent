@@ -219,6 +219,34 @@ class TestSkipJudging(P4TestCase):
         self.assertEqual(sched.quota_check(O, read=lambda _n: types.SimpleNamespace(band="free")),
                          {"skip": False, "degrade": False})
 
+    def test_AT_436_2_3b_unattended_stale_cache_is_remeasured_once(self):
+        """D-IMP-11：無人時快取必過期；無軸才補量一次，補量失敗仍 fail-closed，有軸不補量。"""
+        empty, full = types.SimpleNamespace(axes=[]), types.SimpleNamespace(axes=[object()])
+        reads, calls = iter([empty, full]), []
+        got = sched.measured_state(O, read=lambda _n: next(reads),
+                                   refresh=lambda: calls.append(1) or True)
+        self.assertIs(got, full)
+        self.assertEqual(calls, [1])
+        calls.clear()
+        got = sched.measured_state(O, read=lambda _n: empty,
+                                   refresh=lambda: calls.append(1) or False)
+        self.assertIs(got, empty)
+        self.assertEqual(calls, [1])
+        self.assertTrue(sched.quota_verdict(types.SimpleNamespace(band="unmeasured"))["skip"])
+        calls.clear()
+        sched.measured_state(O, read=lambda _n: full, refresh=lambda: calls.append(1) or True)
+        self.assertEqual(calls, [])
+
+    def test_AT_436_2_3c_quota_check_real_path_goes_through_measured_state(self):
+        from lib import quota_policy
+        seen = []
+        with mock.patch.object(sched, "measured_state",
+                               side_effect=lambda now: seen.append(now) or types.SimpleNamespace()), \
+                mock.patch.object(quota_policy, "decide",
+                                  return_value=types.SimpleNamespace(band="free")):
+            self.assertEqual(sched.quota_check(O), {"skip": False, "degrade": False})
+        self.assertEqual(seen, [O])
+
     def test_AT_436_2_4_other_driver_by_conversation_record_not_mtime(self):
         R = fx4.p4_base()
         now = O + 10 * H

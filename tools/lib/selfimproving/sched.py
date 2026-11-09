@@ -231,15 +231,32 @@ def quota_verdict(state) -> dict:
             "degrade": band in ("notice", "converge")}
 
 
+def measured_state(now: datetime, read=None, refresh=None):
+    """額度快取的「讀，量不到就補量一次再讀」唯一入口（TCS-P4 D-IMP-11）。無人操作時快取必過期
+    （只有互動視窗 statusLine 刷新、TTL 180 秒），只讀會讓無人運轉永遠判 `unmeasured`；補量＝
+    `quota_gate.refresh_quota_blocking()`（HTTP 一次、零 token、fail-soft）。已有軸不補量；補量
+    失敗或仍無軸＝回無軸狀態，由 `decide` 照舊判 `unmeasured`（fail-closed）。`read`／`refresh`
+    為注入縫。"""
+    if read is None or refresh is None:
+        from lib import quota_gate  # 延遲：只有真讀額度才載入
+
+        read = quota_gate.read_quota if read is None else read
+        refresh = quota_gate.refresh_quota_blocking if refresh is None else refresh
+    state = read(now)
+    if not state.axes and refresh():
+        state = read(now)
+    return state
+
+
 def quota_check(now: datetime, read=None) -> dict:
     """`quota_gate.read_quota(now)` 的帶判讀（`read` 為注入縫，回帶 `.band` 的物件）；讀取或判讀
     的任何例外＝fail-closed（跳過）。預設以 `quota_policy.DEFAULT_POLICY` 取帶。"""
     try:
         if read is not None:
             return quota_verdict(read(now))
-        from lib import quota_gate, quota_policy  # 延遲：只有真讀額度才載入
+        from lib import quota_policy  # 延遲：只有真讀額度才載入
 
-        state = quota_gate.read_quota(now)
+        state = measured_state(now)
         return quota_verdict(quota_policy.decide(state, now, quota_policy.DEFAULT_POLICY))
     except Exception:  # noqa: BLE001  # 量不到＝跳過（fail-closed），不當機
         return {"skip": True, "degrade": False}
