@@ -15,7 +15,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Select } from "@/components/ui/select";
 import { ErrorState } from "@/components/ui/states";
 import type { SiNeEntry, SiProblem, SiWriteKind, SiWriteReceipt } from "@/lib/api/types";
-import { SI_AUTO_LOAD_MAX_PAGES, formatNe, formatProblem, ingestCommands, siErrorParts, siErrorSummary } from "@/lib/domain/si";
+import { SI_AUTO_LOAD_MAX_PAGES, formatNe, formatProblem, ingestCommands, scheduleFields, siErrorParts, siErrorSummary } from "@/lib/domain/si";
 import { cn } from "@/lib/utils";
 
 /** 面板載入中：`role="status"`、文字含「載入中」（R12）。`compact`＝夾在內容之間的一行小字（狀態快篩載其餘頁時用），不是整塊空白的初次載入。 */
@@ -336,9 +336,10 @@ export function SiIngestCommands({ kind, subject, auditRef }: { kind: SiWriteKin
 
 /**
  * 寫入成功的收據（待入帳）：稽核編號、說明與入帳指令。對話框不自動關閉——掌舵者要先複製指令（關掉＝收據消失，只能到對帳面板再找）。
- * `testId` 是各對話框自己的結果容器（`si-decide-result`、`si-obs-result`、`si-close-result`）。
+ * `testId` 是各對話框自己的結果容器（`si-decide-result`、`si-obs-result`、`si-close-result`、`si-schedule-result`、`si-run-request-result`）。
+ * P4 兩個對話框另給 `meta`（多列出種類與時間）與 `extra`（一句補充，例：巡邏心跳會自動入帳）；兩者缺席時與 P2b 逐位元組相同。
  */
-export function SiWriteResult({ testId, receipt }: { testId: string; receipt: SiWriteReceipt }) {
+export function SiWriteResult({ testId, receipt, meta = false, extra }: { testId: string; receipt: SiWriteReceipt; meta?: boolean; extra?: string }) {
   return (
     <div data-testid={testId} className="rounded-md border border-wg-line bg-wg-base px-4 py-3">
       <p className="font-semibold">稽核檔已落地，待入帳</p>
@@ -348,10 +349,54 @@ export function SiWriteResult({ testId, receipt }: { testId: string; receipt: Si
           {receipt.auditRef}
         </code>
       </p>
+      {meta ? (
+        <p className="mt-1 text-sm">
+          {"種類："}
+          <code data-testid="si-receipt-kind" className="font-mono">
+            {receipt.kind}
+          </code>
+          {"｜時間："}
+          <time data-testid="si-receipt-time" dateTime={receipt.time}>
+            {receipt.time}
+          </time>
+        </p>
+      ) : null}
       <p className="mt-1 text-[13px] text-wg-muted">Console 不寫帳本：請在 monorepo 根、已設主機端 AUTOSDD_SI_AUDIT_KEY 的 shell 執行下列指令入帳（金鑰不出現在指令；入帳前這筆寫入尚未生效）。</p>
+      {extra ? (
+        <p data-testid="si-receipt-extra" className="mt-1 text-[13px] text-wg-muted">
+          {extra}
+        </p>
+      ) : null}
       <div className="mt-3">
         <SiIngestCommands kind={receipt.kind} subject={receipt.subject} auditRef={receipt.auditRef} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * 自動演化排程的欄位組（P4；TCS-SelfImprovingSchedule W-S1、W-S5）：狀態橫幅與排程面板**共用**（同一個 `scheduleFields`，兩處內容逐字相同；`scope` 只區分 testid）。
+ * 具名欄位逐欄顯示，量不到一律「量不到」（不顯示成無、否、false）；`overdue` 為真時另有醒目警示（`role="alert"`），文案只說「逾期未巡邏」。全部純文字節點。
+ */
+export function ScheduleFieldList({ schedule, scope }: { schedule: unknown; scope: "banner" | "panel" }) {
+  const view = scheduleFields(schedule);
+  return (
+    <div data-testid={`si-schedule-fields-${scope}`}>
+      {view.alert ? (
+        <p role="alert" data-testid={`si-schedule-alert-${scope}`} className="mb-2 rounded-md border border-wg-draft-border bg-wg-draft-bg px-3 py-2 text-sm font-semibold text-wg-accent">
+          {view.alert}
+        </p>
+      ) : null}
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm md:grid-cols-2">
+        {view.fields.map((f) => (
+          <div key={f.key} data-schedule-field={f.key} data-known={f.known ? "true" : "false"} className="min-w-0">
+            <dt className="text-xs font-medium text-wg-muted">{f.label}</dt>
+            <dd data-testid={`si-schedule-${scope}-${f.key}`} className="mt-0.5 break-words">
+              {f.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }

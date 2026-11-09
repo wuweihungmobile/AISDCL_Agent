@@ -328,3 +328,33 @@ describe("AT_PH_05_4 欄位資料來源（R-PH-17）", () => {
     for (const source of FIELD_SOURCES) expect(fieldProblems({ ...base, source }), source).toEqual([]);
   });
 });
+
+// ── TCS-SelfImprovingSchedule AC-964-10：自我進化頁說明補排程步驟與欄位（W-S10 (a)）──────────────────────────
+
+describe("AT_964_10_1 自我進化頁說明含排程步驟與欄位字樣", () => {
+  it("AT_964_10_1 步驟含啟用排程、改週期、立即啟動一次演化；欄位名含 自動演化排程、立即啟動一次演化、待入帳、逾期未巡邏（逐字取自畫面字樣）；說明沒有宣稱已生效或任務已停用（待主控補 lib/help/self-improving.ts 後轉綠）", () => {
+    const page = HELP_PAGES["self-improving"];
+    expect(page, "self-improving 頁說明已寫").toBeDefined();
+    const steps = (page as PageHelp).steps.join("\n");
+    expect(steps, "步驟要教怎麼啟用排程").toMatch(/啟用.*排程|排程.*啟用/);
+    expect(steps, "步驟要教怎麼改週期").toContain("週期");
+    expect(steps, "步驟要教怎麼立即啟動一次").toContain("立即啟動一次演化");
+    const names = (page as PageHelp).fields.map((f) => f.name);
+    for (const must of ["自動演化排程", "立即啟動一次演化", "待入帳", "逾期未巡邏"]) {
+      expect(
+        names.some((n) => n.includes(must)),
+        `欄位名缺 ${must}`,
+      ).toBe(true);
+    }
+    // 待入帳與逾期各要有一段白話解釋
+    const meaning = (key: string) =>
+      (page as PageHelp).fields
+        .filter((f) => f.name.includes(key))
+        .map((f) => f.meaning)
+        .join("\n");
+    expect(meaning("待入帳").length, "待入帳的解釋").toBeGreaterThan(0);
+    expect(meaning("逾期未巡邏").length, "逾期未巡邏的解釋").toBeGreaterThan(0);
+    const all = [...(page as PageHelp).purpose, ...(page as PageHelp).steps, ...(page as PageHelp).fields.map((f) => f.meaning)].join("\n");
+    expect(all).not.toMatch(/任務已停用|任務已壞/);
+  });
+});

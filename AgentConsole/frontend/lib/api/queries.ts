@@ -105,6 +105,8 @@ import {
   postSiObservation,
   postSiObservationClose,
   postSiObservationValidate,
+  postSiRunRequest,
+  postSiScheduleSet,
   putIssuePriority,
   reconcileResearch,
   reinitResearchProject,
@@ -190,6 +192,8 @@ import type {
   SiListParams,
   SiObservationRequest,
   SiPage,
+  SiRunRequest,
+  SiScheduleSetRequest,
   StartExecutionRequest,
   TestConnectionRequest,
   TextImportRequest,
@@ -1181,6 +1185,9 @@ export const useSiDecide = () => useSiWrite((v: { id: string; body: SiDecideRequ
 export const useSiAddObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservation(body));
 export const useSiCloseObservation = () => useSiWrite((v: { id: string; body: SiCloseRequest }) => postSiObservationClose(v.id, v.body));
 export const useSiValidateObservation = () => useSiWrite((body: SiObservationRequest) => postSiObservationValidate(body), { invalidate: false });
+/** P4 排程設定與立即啟動（TCS-SelfImprovingSchedule W-S3、W-S4）：成功後同樣使全部 SI 查詢（含 status 與 console-writes）失效重取。 */
+export const usePostSiScheduleSet = () => useSiWrite((body: SiScheduleSetRequest) => postSiScheduleSet(body));
+export const usePostSiRunRequest = () => useSiWrite((body: SiRunRequest) => postSiRunRequest(body));
 
 // ══ 議題中心（TCS-IssueCenter-20261027 R-IC-67、R-IC-70；PRD §6.6）══════════════════════════════════════
 /**

@@ -3,7 +3,7 @@
 /**
  * 狀態橫幅（P1b；TCS-SelfImprovingMirror-P1b R12、R13、R16）：資料＝`GET /api/v1/si/status` 的 `items[0]`（欄名為 camelCase）。
  * 自成一個查詢、一個 loading／error／ok 三態：error 時只顯示錯誤（絕不渲染成「無事件」），ok 時橫幅**每個**頂層鍵都至少有一個可見呈現——
- * 已知九個鍵各有固定位置，其餘鍵（例：日後根層加的 consolePending）以「鍵：緊湊 JSON」純文字列在 si-status-extra，不丟欄位。
+ * 已知十個鍵（P4 起含 `schedule`：自動演化排程欄位組，整鍵缺席＝整組量不到）各有固定位置，其餘鍵（例：日後根層加的 consolePending）以「鍵：緊湊 JSON」純文字列在 si-status-extra，不丟欄位。
  * 量不到（NOT-EVALUABLE）一律以「量不到」加原因呈現，不顯示成 0、無或通過；帳本字串全部以文字節點渲染。
  * P2b：給了 `onResume`（只有 ADMIN）且 `suspended` 帶運轉號時，暫停狀態旁多一個「恢復運轉」鈕（`si-resume-open`），把該運轉號交給呼叫端開啟決定對話框
  * （恢復綁 `suspended.run`）；沒給＝與 P1b 逐位元組相同的唯讀畫面。
@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useSiStatus } from "@/lib/api/queries";
 import type { SiStatusItem } from "@/lib/api/types";
 import { SI_STATUS_KNOWN_KEYS, compactJson, describeValue, noEventText, notEvaluableText, suspendedRun } from "@/lib/domain/si";
-import { SiError, SiLoading, SiNotes } from "./siParts";
+import { ScheduleFieldList, SiError, SiLoading, SiNotes } from "./siParts";
 
 const KNOWN: ReadonlySet<string> = new Set(SI_STATUS_KNOWN_KEYS);
 
@@ -117,6 +117,12 @@ function StatusItem({ item, onResume }: { item: SiStatusItem; onResume?: (run: s
       <Field statusKey="frictionReconcile" title="摩擦對帳">
         <span data-testid="si-friction">{valueText(item.frictionReconcile)}</span>
       </Field>
+      <div data-status-key="schedule" className="min-w-0 md:col-span-2 xl:col-span-3">
+        <dt className="text-xs font-medium text-wg-muted">自動演化排程</dt>
+        <dd className="mt-1">
+          <ScheduleFieldList schedule={item.schedule} scope="banner" />
+        </dd>
+      </div>
       {extras.length > 0 ? (
         <div className="min-w-0 md:col-span-2 xl:col-span-3">
           <dt className="text-xs font-medium text-wg-muted">其他欄位（原樣列出，不丟欄位）</dt>

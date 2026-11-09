@@ -116,6 +116,8 @@ import type {
   SiPage,
   SiProposal,
   SiRun,
+  SiRunRequest,
+  SiScheduleSetRequest,
   SiStatusItem,
   SiValidation,
   SiWriteReceipt,
@@ -633,6 +635,15 @@ export function postSiObservationValidate(body: SiObservationRequest): Promise<S
   return apiRequest<SiValidation>("/api/v1/si/observations/validate", { method: "POST", body });
 }
 
+/** 排程設定（P4；API-SI-12；僅 ADMIN）：本文 `{ enabled, periodMinutes, reason? }`，兩鍵皆必備；201 是稽核檔已落地、待入帳，不是已生效。 */
+export function postSiScheduleSet(body: SiScheduleSetRequest): Promise<SiWriteReceipt> {
+  return apiRequest<SiWriteReceipt>("/api/v1/si/schedule/set", { method: "POST", body });
+}
+
+/** 立即啟動一次自我進化運轉（P4；API-SI-13；僅 ADMIN）：本文 `{ note? }`（可為空物件）；backend 不設重送閘，防連點靠前端對帳快取軟停用。 */
+export function postSiRunRequest(body: SiRunRequest): Promise<SiWriteReceipt> {
+  return apiRequest<SiWriteReceipt>("/api/v1/si/runs/request", { method: "POST", body });
+}
 /** Console 稽核列與帳本的對帳（VIEWER 以上可讀，Console 只讓 ADMIN 看見）；`limit` 為 1～500，undefined 不進網址（backend 預設 100）。 */
 export function getSiConsoleWrites(opts: { limit?: number } & Opts = {}): Promise<SiConsoleWrites> {
   return apiRequest<SiConsoleWrites>("/api/v1/si/console-writes", { query: { limit: opts.limit }, signal: opts.signal });

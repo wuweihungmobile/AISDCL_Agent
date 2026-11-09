@@ -18,6 +18,8 @@ import type {
   SiObservationRow,
   SiProblem,
   SiProposal,
+  SiRunRequest,
+  SiScheduleSetRequest,
   SiWriteKind,
 } from "@/lib/api/types";
 
@@ -60,7 +62,7 @@ export const SI_REASONS = {
 export const BUCKET_DISPLAY_ORDER = ["SelfImproving", "AutoClaude", "AISDLC_SDD", "AgentConsole", "根層", "未分類"] as const;
 
 /** `status` 單項的已知鍵（R13）；表外的鍵一律原樣列在 `si-status-extra`，不丟欄位。 */
-export const SI_STATUS_KNOWN_KEYS = ["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile"] as const;
+export const SI_STATUS_KNOWN_KEYS = ["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile", "schedule"] as const;
 
 /** `status` 內「量不到」物件的標記值：`{ status: "NOT-EVALUABLE", reason }`。 */
 export const NOT_EVALUABLE = "NOT-EVALUABLE";
@@ -758,16 +760,24 @@ export type IngestCommands = { powershell: string; posix: string };
 
 /**
  * 由稽核檔收據組入帳指令（pull 模式：Console 只把稽核檔落進目錄，由掌舵者在主機端以根層 CLI 入帳）。
- * decide 帶 PROP 號（resume 為 RUN 號）；obs-add 與 obs-close 的對象在稽核檔內，指令不帶。
+ * decide 帶 PROP 號（resume 為 RUN 號）；obs-add 與 obs-close 的對象在稽核檔內，指令不帶；P4 的 sched-set 走 `sched set`、run-request 走 `run-open --trigger a`（旗標以根層 R146 為準）。
  */
 export function ingestCommands(kind: SiWriteKind, subject: string | null | undefined, auditRef: string): IngestCommands {
   const base = "python tools/selfimproving.py";
   const tail = `--carrier console --audit-ref ${auditRef}`;
-  const command = kind === "decide" ? `${base} decide ${subject ?? "<PROP-SI-NNN>"} ${tail}` : `${base} ${kind} ${tail}`;
+  const command =
+    kind === "decide"
+      ? `${base} decide ${subject ?? "<PROP-SI-NNN>"} ${tail}`
+      : kind === "sched-set"
+        ? `${base} sched set ${tail}`
+        : kind === "run-request"
+          ? `${base} run-open --trigger a ${tail} --coord console_audit/${auditRef}.json --by console`
+          : `${base} ${kind} ${tail}`;
   return { powershell: command, posix: command };
 }
 
-const SI_WRITE_KIND_LABELS: Readonly<Record<SiWriteKind, string>> = { decide: "決定", "obs-add": "新增觀察", "obs-close": "關閉觀察" };
+/** 五個寫入種類的人話；鍵集合即 `SiWriteKind` 的值域（Record 型別保證不漏）。 */
+export const SI_WRITE_KIND_LABELS: Readonly<Record<SiWriteKind, string>> = { decide: "決定", "obs-add": "新增觀察", "obs-close": "關閉觀察", "sched-set": "排程設定", "run-request": "立即啟動" };
 
 /** 寫入種類的人話（畫面上與原值並列，不取代原值）。 */
 export function siWriteKindLabel(kind: SiWriteKind): string {
@@ -868,4 +878,176 @@ export function siWriteErrorText(error: unknown): string {
     }
   }
   return parts.join("；");
+}
+
+// ══ 自動演化排程（P4；TCS-SelfImprovingSchedule W-S1～W-S5；PRD §0.11）═══════════════════════════════════════════
+// 資料＝`status.items[0].schedule`（camelCase，欄名由 backend 的 SiKeyNames 對映；Console 不新增 GET）。Console 只看事件折出的欄位（Architecture §12.1 L-SI-1）：
+// 看不到主機上的 OS 排程任務，所以 `armed` 恆顯示量不到；`overdue` 是推算值（L-SI-2），文案只說「逾期未巡邏」。
+// 週期的合法界只來自 `schedule.periodMin／periodMax`（根層 CLI 為權威）：本模組與元件**不放任何界值常數**（靜態掃描判）；
+// 60 與 1440 只出現在 `periodHint` 的換算（小時與天的換算因子，不是界）。
+
+/** 欄位量不到的固定字樣：缺席、null、型別不符都顯示它，絕不顯示成無、否或 false（NFR-SC-2）。 */
+export const SCHEDULE_UNKNOWN = "量不到";
+/** `armed` 恆顯示此句：Console 看不到主機上的排程任務（L-SI-1），不論回應給了什麼。 */
+export const SCHEDULE_ARMED_TEXT = "量不到：Console 看不到主機上的排程任務";
+/** `overdue` 為真時的警示句（逐字含主機現查指令）。 */
+export const SCHEDULE_OVERDUE_ALERT = "逾期未巡邏：請在主機執行 python tools/selfimproving.py sched show";
+/** `overdue` 為 null 或缺席時的說明：推算值要靠事件帳本，帳本不在場就推不出——不得顯示成「沒有逾期」。 */
+export const SCHEDULE_OVERDUE_UNKNOWN = "量不到（事件帳本不在場，無法推算是否逾期）";
+/** 界取不到時的說明（送出停用）。 */
+export const SCHEDULE_BOUNDS_UNKNOWN = "量不到界值";
+/** 寫入收據的主文（不是「已生效」：入帳前尚未生效；NFR-SC-1）。 */
+export const SCHEDULE_PENDING_TEXT = "稽核檔已落地，待入帳";
+export const SCHEDULE_NOTE_MAX = 120;
+
+export type ScheduleFieldKey = "enabled" | "period" | "lastSet" | "cell" | "ranThisCell" | "lastSkip" | "overdue" | "armed";
+/** 一個欄位：`known` 為 false＝量不到（value 即量不到字樣）。 */
+export type ScheduleField = { key: ScheduleFieldKey; label: string; value: string; known: boolean };
+export type ScheduleBounds = { periodMin: number; periodMax: number };
+export type ScheduleView = {
+  fields: ScheduleField[];
+  /** `overdue === true` 時的警示句；其餘（false、null、缺席）為 null。 */
+  alert: string | null;
+  /** 橫幅給的界；缺席、非整數或 min 大於 max 為 null（＝量不到界值）。 */
+  bounds: ScheduleBounds | null;
+  /** 目前啟用與週期（預填用）；量不到為 null。 */
+  enabled: boolean | null;
+  periodMinutes: number | null;
+  /** 巡邏心跳間隔（分鐘；收據的說明用），缺席為 null。 */
+  heartbeatMinutes: number | null;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isInt(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+/**
+ * 週期（分鐘）的人話換算：整天 `≈N 天`、整小時 `≈N 小時`、其餘 `約 X.X 小時`（一位小數、四捨五入）。純文字；非正整數回空字串。
+ * 60 與 1440 是換算因子（小時、天），不是界或預設週期。
+ */
+export function periodHint(minutes: number): string {
+  if (!isInt(minutes) || minutes < 1) return "";
+  if (minutes % 1440 === 0) return `≈${minutes / 1440} 天`;
+  if (minutes % 60 === 0) return `≈${minutes / 60} 小時`;
+  return `約 ${(minutes / 60).toFixed(1)} 小時`;
+}
+
+const yesNo = (value: boolean) => (value ? "是" : "否");
+
+/**
+ * 橫幅與排程面板共用的欄位組（同一個函式，兩處內容逐字相同）：具名欄位逐欄判型，缺席、null（`lastSet`、`lastSkip` 除外——那兩者為 null 顯示「尚無」）、
+ * 型別不符一律量不到；`schedule` 整鍵缺席或不是物件＝整組量不到。`armed` 恆為 {@link SCHEDULE_ARMED_TEXT}。
+ */
+export function scheduleFields(schedule: unknown): ScheduleView {
+  const s = isRecord(schedule) ? schedule : {};
+  const unknown = (key: ScheduleFieldKey, label: string): ScheduleField => ({ key, label, value: SCHEDULE_UNKNOWN, known: false });
+  const known = (key: ScheduleFieldKey, label: string, value: string): ScheduleField => ({ key, label, value, known: true });
+
+  const enabled = typeof s.enabled === "boolean" ? s.enabled : null;
+  const periodMinutes = isInt(s.periodMinutes) && s.periodMinutes >= 1 ? s.periodMinutes : null;
+  const lastSet = s.lastSet;
+  const lastSkip = s.lastSkip;
+  const ran = typeof s.ranThisCell === "boolean" ? s.ranThisCell : null;
+  const overdue = typeof s.overdue === "boolean" ? s.overdue : null;
+
+  const fields: ScheduleField[] = [
+    enabled === null ? unknown("enabled", "啟用") : known("enabled", "啟用", yesNo(enabled)),
+    periodMinutes === null ? unknown("period", "週期（分鐘）") : known("period", "週期（分鐘）", `${periodMinutes}（${periodHint(periodMinutes)}）`),
+    lastSet === null
+      ? known("lastSet", "最近一次設定", "尚無")
+      : isRecord(lastSet) && typeof lastSet.at === "string" && typeof lastSet.by === "string" && typeof lastSet.carrier === "string"
+        ? known("lastSet", "最近一次設定", `${lastSet.at}｜${lastSet.by}｜${lastSet.carrier}`)
+        : unknown("lastSet", "最近一次設定"),
+    typeof s.cellStart === "string" && typeof s.cellEnd === "string" ? known("cell", "本格起訖", `${s.cellStart} ～ ${s.cellEnd}`) : unknown("cell", "本格起訖"),
+    ran === null ? unknown("ranThisCell", "本格已執行") : known("ranThisCell", "本格已執行", yesNo(ran)),
+    lastSkip === null
+      ? known("lastSkip", "本格最近一次略過", "尚無")
+      : isRecord(lastSkip) &&
+          typeof lastSkip.at === "string" &&
+          typeof lastSkip.reason === "string" &&
+          (lastSkip.detail === undefined || lastSkip.detail === null || typeof lastSkip.detail === "string")
+        ? known("lastSkip", "本格最近一次略過", `${lastSkip.at}｜${lastSkip.reason}${typeof lastSkip.detail === "string" ? `｜${lastSkip.detail}` : ""}`)
+        : unknown("lastSkip", "本格最近一次略過"),
+    overdue === null ? { key: "overdue", label: "逾期", value: SCHEDULE_OVERDUE_UNKNOWN, known: false } : known("overdue", "逾期", yesNo(overdue)),
+    { key: "armed", label: "主機排程任務是否武裝", value: SCHEDULE_ARMED_TEXT, known: false },
+  ];
+
+  const min = s.periodMin;
+  const max = s.periodMax;
+  const bounds = isInt(min) && isInt(max) && min <= max ? { periodMin: min, periodMax: max } : null;
+  const heartbeat = isInt(s.heartbeatMinutes) && s.heartbeatMinutes >= 1 ? s.heartbeatMinutes : null;
+  return { fields, alert: overdue === true ? SCHEDULE_OVERDUE_ALERT : null, bounds, enabled, periodMinutes, heartbeatMinutes: heartbeat };
+}
+
+/**
+ * 選填單行文字（排程設定的 `reason`、立即啟動的 `note`；D-CS-4，與根層入帳驗證同一組規則）：空字串＝未填（省略該鍵，不算違規）；
+ * 有值時先判原值——不可含控制字元（U+0000～U+001F、U+007F、孤立代理字元；換行、TAB 都在內），去前後空白後不可為空（全空白為違規；含 NEL，對齊 backend），
+ * 長度以 code point 計、至多 {@link SCHEDULE_NOTE_MAX}。豎線允許。回錯誤訊息，通過回 null。
+ */
+function optionalLineProblem(label: string, raw: string): string | null {
+  if (raw === "") return null;
+  if (hasForbiddenChar(raw)) return `${label} 不可含控制字元（換行、TAB 等）或無效字元`;
+  if (/^[\s\u0085]*$/u.test(raw)) return `${label} 有填時不可全為空白`;
+  const length = codePointLength(raw.trim());
+  if (length > SCHEDULE_NOTE_MAX) return `${label} 為 ${length} 個字元，超過上限 ${SCHEDULE_NOTE_MAX}`;
+  return null;
+}
+
+/** 排程設定表單（週期為輸入框的原始文字）。 */
+export type ScheduleForm = { enabled: boolean; periodText: string; reason: string };
+
+/**
+ * 排程設定表單驗證（表 M-S；前端先擋、backend 為權威）：週期須為正整數字串（小數、`1e3`、負數、零、空白都拒）且在呼叫端傳入的界內（含端點）；
+ * 界缺席（`null`／`undefined`）＝量不到界值，不放行。停用方向同樣要帶界內週期（D-CS-6，不開例外）。回欄位→訊息；空物件＝通過。
+ */
+export function validateScheduleForm(form: ScheduleForm, bounds?: ScheduleBounds | null): FieldErrors {
+  const errors: FieldErrors = {};
+  const text = form.periodText.trim();
+  if (!bounds) errors.periodMinutes = SCHEDULE_BOUNDS_UNKNOWN;
+  else if (!/^[0-9]+$/.test(text) || !Number.isSafeInteger(Number(text)) || Number(text) < 1) errors.periodMinutes = "週期須為正整數（分鐘）";
+  else if (Number(text) < bounds.periodMin || Number(text) > bounds.periodMax) errors.periodMinutes = `週期須在 ${bounds.periodMin}～${bounds.periodMax} 分鐘之間`;
+  const reason = optionalLineProblem("理由", form.reason);
+  if (reason) errors.reason = reason;
+  return errors;
+}
+
+/** 由（已通過驗證的）表單組請求本文：`{ enabled, periodMinutes, reason? }`（`reason` 空則省略該鍵、有值去前後空白）。 */
+export function buildScheduleRequest(form: ScheduleForm): SiScheduleSetRequest {
+  const body: SiScheduleSetRequest = { enabled: form.enabled, periodMinutes: Number(form.periodText.trim()) };
+  if (form.reason !== "") body.reason = form.reason.trim();
+  return body;
+}
+
+/** 立即啟動表單驗證（備註規則與 `reason` 同一組）。 */
+export function validateRunRequestForm(form: { note: string }): FieldErrors {
+  const note = optionalLineProblem("備註", form.note);
+  return note ? { note } : {};
+}
+
+/** 立即啟動的請求本文：備註空則 `{}`，有值為 `{ note }`（去前後空白）。 */
+export function buildRunRequest(form: { note: string }): SiRunRequest {
+  return form.note === "" ? {} : { note: form.note.trim() };
+}
+
+/**
+ * 對帳快取裡已送出而待入帳的立即啟動（W-S4 (b)）：第一個 `kind` 為 run-request、`ingested` 為 false、沒有被取代的列（`time` 最早者），否則 null。
+ * 只有 `sched-set` 待入帳、已入帳（true）或對帳量不到（null）都不算；快取缺席與對帳不是 ok 由呼叫端判（量不到就不停用，以 backend 為準）。不改動輸入。
+ */
+export function pendingRunRequest(items: ReadonlyArray<SiConsoleWrite>): SiConsoleWrite | null {
+  return pendingWrites(items).find((item) => item.kind === "run-request") ?? null;
+}
+
+/**
+ * 排程寫入失敗的畫面文字：{@link siWriteErrorText}（message、reason、violations 逐項、503 `si_unavailable` 的 cause 與 detail）加 503 `si_write_disabled` 的
+ * `details.cause`／`details.detail` 逐字（缺哪一項設定要看得到）。既有 `siWriteErrorText` 的輸出不動（決定、觀察的既有案例釘著它）。
+ */
+export function siScheduleErrorText(error: unknown): string {
+  const text = siWriteErrorText(error);
+  if (!(error instanceof ApiError) || error.status !== 503 || error.reason !== SI_REASONS.WRITE_DISABLED) return text;
+  const { cause, detail } = siErrorParts(error);
+  return [text, ...(cause ? [`cause：${cause}`] : []), ...(detail ? [`detail：${detail}`] : [])].join("；");
 }

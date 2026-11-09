@@ -118,13 +118,21 @@ function importedNames(source: string, fromPattern: RegExp): string[] {
   return names;
 }
 
-/** 三個寫入元件：`<form`、mutation hook 與非 GET 字樣只准出現在它們（W22）。 */
-const WRITE_COMPONENTS: ReadonlyArray<string> = ["components/domain/si/SiDecideDialog.tsx", "components/domain/si/SiObsForm.tsx", "components/domain/si/SiObsCloseDialog.tsx"];
+/** 五個寫入元件（P2b 的三個加 P4 排程的兩個對話框）：`<form`、mutation hook 與非 GET 字樣只准出現在它們（W22；TCS-SelfImprovingSchedule §4.1）。 */
+const WRITE_COMPONENTS: ReadonlyArray<string> = [
+  "components/domain/si/SiDecideDialog.tsx",
+  "components/domain/si/SiObsForm.tsx",
+  "components/domain/si/SiObsCloseDialog.tsx",
+  "components/domain/si/SiScheduleDialog.tsx",
+  "components/domain/si/SiRunRequestDialog.tsx",
+];
 /** 各寫入元件預期 import 的寫入 hook（防反空轉：掃描器看得到 import；少了＝元件不再走這條路）。 */
 const EXPECTED_WRITE_HOOKS: Readonly<Record<string, string[]>> = {
   "components/domain/si/SiDecideDialog.tsx": ["useSiDecide"],
   "components/domain/si/SiObsForm.tsx": ["useSiAddObservation", "useSiValidateObservation"],
   "components/domain/si/SiObsCloseDialog.tsx": ["useSiCloseObservation"],
+  "components/domain/si/SiScheduleDialog.tsx": ["usePostSiScheduleSet"],
+  "components/domain/si/SiRunRequestDialog.tsx": ["usePostSiRunRequest"],
 };
 /** 寫入型 query hook：P1b 的「寫入動詞開頭」加 P2b 的四個 useSi 寫入 hook（`useSiConsoleWrites` 是讀取，不在內）。 */
 const WRITE_HOOK = /^(use(Create|Update|Delete|Post|Put|Patch|Retry|Approve|Signoff|Execute)|useSi(Decide|AddObservation|CloseObservation|ValidateObservation))/;
@@ -155,7 +163,7 @@ function everywhereViolations(source: string): string[] {
 }
 
 describe("AT_950_9_E_2 SI 前端寫入形態只在三個寫入元件，全樹無直接 fetch 與 PUT／PATCH／DELETE（W22）", () => {
-  it("AT_950_9_E_2 `<form`、mutation hook 呼叫與非 GET 字樣只出現在 SiDecideDialog、SiObsForm、SiObsCloseDialog；其餘檔案（SiView、各面板、對帳面板、共用小件）一個都沒有，也不 import 寫入型 query hook", () => {
+  it("AT_950_9_E_2 `<form`、mutation hook 呼叫與非 GET 字樣只出現在 SiDecideDialog、SiObsForm、SiObsCloseDialog、SiScheduleDialog、SiRunRequestDialog；其餘檔案（SiView、各面板、對帳面板、共用小件）一個都沒有，也不 import 寫入型 query hook", () => {
     const sources = siSources();
     expect(sources.length, "掃描範圍太小：防反空轉").toBeGreaterThanOrEqual(10);
     expect(sources.map((s) => s.file)).toEqual(expect.arrayContaining([...WRITE_COMPONENTS, "components/domain/si/SiWritesPanel.tsx", "components/domain/si/SiView.tsx"]));
@@ -172,7 +180,7 @@ describe("AT_950_9_E_2 SI 前端寫入形態只在三個寫入元件，全樹無
       expect(writeFormViolations(text), `${file} 應被掃描器看見寫入形態`).toEqual(expect.arrayContaining(["<form", ...EXPECTED_WRITE_HOOKS[file].map((h) => `import ${h}`)]));
       imported.forEach((n) => allWriteHooks.add(n));
     }
-    expect([...allWriteHooks].sort()).toEqual(["useSiAddObservation", "useSiCloseObservation", "useSiDecide", "useSiValidateObservation"]);
+    expect([...allWriteHooks].sort()).toEqual(["usePostSiRunRequest", "usePostSiScheduleSet", "useSiAddObservation", "useSiCloseObservation", "useSiDecide", "useSiValidateObservation"]);
     // 讀取 hook 不受限：對帳面板與 SiView 照常 import 讀取型的 useSiConsoleWrites 等
     const reads = sources.flatMap((s) => importedNames(s.text, /(^|\/)queries$/)).filter((n) => !WRITE_HOOK.test(n));
     expect(reads).toEqual(expect.arrayContaining(["useSiStatus", "useSiObservations", "useSiProposals", "useSiEvents", "useSiRuns", "useSiConsoleWrites"]));
@@ -312,5 +320,117 @@ describe("AT_932_4_3 前端原始碼不含 Bridge 路徑字面（R11）", () => 
     for (const sample of [...keptFromOriginal, ...secondBranchOnly, ...templateFragmentOnly]) expect(bridgeLeaks(sample), sample).not.toEqual([]);
     const clean = ['const u = "/api/v1/si/status";', 'import { SiView } from "@/components/domain/si/SiView";'];
     for (const sample of clean) expect(bridgeLeaks(sample), sample).toEqual([]);
+  });
+});
+
+// ── P4 排程（TCS-SelfImprovingSchedule AT-964-6-E-1、6-E-2、10-3）─────────────────────────────────────────────
+
+const SCHEDULE_COMPONENTS = ["components/domain/si/SiSchedulePanel.tsx", "components/domain/si/SiScheduleDialog.tsx", "components/domain/si/SiRunRequestDialog.tsx"] as const;
+const SCHEDULE_SURFACE = [...SCHEDULE_COMPONENTS, "lib/domain/si.ts"] as const;
+const readSource = (file: string) => readFileSync(path.join(ROOT, file), "utf-8");
+
+/**
+ * 界值不得有第二份（NFR-SC-4）：數值字面 60、1440、10080 只准出現在換算函式 `periodHint` 內（小時、天的換算因子，具名白名單）；
+ * 任何其他位置（界、預設週期、元件內常數）一律違規。以 AST 判（註解與字串內的數字不算）。
+ */
+const BOUND_NUMBERS = new Set(["60", "1440", "10080"]);
+const CONVERSION_WHITELIST = new Set(["periodHint"]);
+function boundConstantViolations(source: string): string[] {
+  const found: string[] = [];
+  const visit = (node: ts.Node, inWhitelisted: boolean) => {
+    const here = inWhitelisted || (ts.isFunctionDeclaration(node) && node.name !== undefined && CONVERSION_WHITELIST.has(node.name.text));
+    if (ts.isNumericLiteral(node) && BOUND_NUMBERS.has(node.text) && !here) found.push(`數值字面 ${node.text}`);
+    ts.forEachChild(node, (child) => visit(child, here));
+  };
+  visit(parse(source), false);
+  return found;
+}
+
+/** 寫入 hook：自 queries import 且屬寫入型者的名稱清單。 */
+const writeHooksOf = (source: string) => importedNames(source, /(^|\/)queries$/).filter((n) => WRITE_HOOK.test(n));
+
+function scheduleSurfaceViolations(file: string, source: string): string[] {
+  const found = [...everywhereViolations(source), ...boundConstantViolations(source)];
+  const expected = file.endsWith("SiScheduleDialog.tsx") ? ["usePostSiScheduleSet"] : file.endsWith("SiRunRequestDialog.tsx") ? ["usePostSiRunRequest"] : [];
+  if (file.startsWith("components/")) {
+    const hooks = writeHooksOf(source).sort();
+    if (JSON.stringify(hooks) !== JSON.stringify(expected)) found.push(`寫入 hook ${JSON.stringify(hooks)}（預期 ${JSON.stringify(expected)}）`);
+  }
+  return found;
+}
+
+describe("AT_964_6_E_1 排程元件靜態：不直接 fetch、無 PUT 等字樣、寫入 hook 恰各一個、界值零常數", () => {
+  it("AT_964_6_E_1 三個排程元件與 lib/domain/si.ts 的真檔無違規；設定對話框 import 的寫入 hook 恰為 usePostSiScheduleSet、立即啟動對話框恰為 usePostSiRunRequest、面板沒有寫入 hook", () => {
+    for (const file of SCHEDULE_SURFACE) expect(scheduleSurfaceViolations(file, readSource(file)), file).toEqual([]);
+    expect(writeHooksOf(readSource("components/domain/si/SiScheduleDialog.tsx"))).toEqual(["usePostSiScheduleSet"]);
+    expect(writeHooksOf(readSource("components/domain/si/SiRunRequestDialog.tsx"))).toEqual(["usePostSiRunRequest"]);
+    expect(writeHooksOf(readSource("components/domain/si/SiSchedulePanel.tsx"))).toEqual([]);
+    // 防反空轉：白名單內確實有 60 與 1440（掃描器看得到換算因子，只是放行）；si.ts 的 periodHint 存在
+    expect(readSource("lib/domain/si.ts")).toMatch(/function periodHint[\s\S]*1440[\s\S]*60/);
+  });
+
+  it("AT_964_6_E_1 四個注入副本（加 fetch、加 PUT 字樣、加第二個寫入 hook、加字面 10080 常數）各被判出；白名單函式外的 60 與 1440 也被判出", () => {
+    const dialog = readSource("components/domain/si/SiScheduleDialog.tsx");
+    const siTs = readSource("lib/domain/si.ts");
+    const cases: Array<[string, string, string, RegExp]> = [
+      ["加 fetch", "components/domain/si/SiScheduleDialog.tsx", `${dialog}\nvoid fetch("/api/v1/si/status");\n`, /fetch\(/],
+      ["加 PUT 字樣", "components/domain/si/SiScheduleDialog.tsx", `${dialog}\nconst verb = "PUT";\n`, /方法字樣：PUT/],
+      ["加第二個寫入 hook", "components/domain/si/SiScheduleDialog.tsx", dialog.replace("usePostSiScheduleSet, useSiStatus", "usePostSiScheduleSet, usePostSiRunRequest, useSiStatus"), /寫入 hook/],
+      ["加字面 10080 常數", "components/domain/si/SiScheduleDialog.tsx", `${dialog}\nconst MAX = 10080;\n`, /數值字面 10080/],
+      ["在 si.ts 白名單函式外加 60", "lib/domain/si.ts", `${siTs}\nexport const DEFAULT_PERIOD = 1440;\nexport const MIN = 60;\n`, /數值字面 (1440|60)/],
+    ];
+    for (const [name, file, mutated, expected] of cases) {
+      expect(mutated, `${name}：注入沒有生效`).not.toBe(file === "lib/domain/si.ts" ? siTs : dialog);
+      expect(scheduleSurfaceViolations(file, mutated).join("；"), name).toMatch(expected);
+    }
+  });
+});
+
+/** 不得使用危險 HTML 注入，也不得以瀏覽器儲存另存界值或草稿。 */
+function storageOrHtmlViolations(source: string): string[] {
+  const found: string[] = [];
+  if (source.includes("dangerouslySetInnerHTML")) found.push("dangerouslySetInnerHTML");
+  for (const word of ["localStorage", "sessionStorage", "indexedDB"]) if (new RegExp(`\\b${word}\\b`).test(source)) found.push(word);
+  return found;
+}
+
+describe("AT_964_6_E_2 排程元件靜態：不使用危險 HTML 注入、不以瀏覽器儲存另存界值或草稿", () => {
+  it("AT_964_6_E_2 真檔無 dangerouslySetInnerHTML、localStorage、sessionStorage、indexedDB；兩個注入副本（加危險 HTML、加 localStorage 寫入界值）各被判出", () => {
+    for (const file of SCHEDULE_SURFACE) expect(storageOrHtmlViolations(readSource(file)), file).toEqual([]);
+    const panel = readSource("components/domain/si/SiSchedulePanel.tsx");
+    expect(storageOrHtmlViolations(`${panel}\nconst x = <div dangerouslySetInnerHTML={{ __html: s }} />;\n`)).toContain("dangerouslySetInnerHTML");
+    expect(storageOrHtmlViolations(`${panel}\nwindow.localStorage.setItem("periodMax", "1");\n`)).toContain("localStorage");
+  });
+});
+
+describe("AT_964_10_3 文件掃描：Architecture 去規劃註、契約升 v1.0、兩條已知限制仍在", () => {
+  const docRoot = path.resolve(ROOT, "..", "docs", "02_architecture");
+  const architecture = readFileSync(path.join(docRoot, "Architecture.md"), "utf-8");
+  const contract = readFileSync(path.join(docRoot, "API_Contract_SelfImproving_P2c.md"), "utf-8");
+
+  /** 自 `### <編號> ` 標題起、到下一個 `## ` 或 `### ` 標題前的小節文字。 */
+  function section(text: string, number: string): string {
+    const start = text.search(new RegExp(`^### ${number.replace(".", "\\.")} `, "m"));
+    expect(start, `Architecture 找不到 §${number}`).toBeGreaterThan(-1);
+    const rest = text.slice(start + 4);
+    const next = rest.search(/^#{2,3} /m);
+    return text.slice(start, next === -1 ? undefined : start + 4 + next);
+  }
+
+  it("AT_964_10_3 §5.6 與 §10.3 不再含 P4 規劃 與 規劃，實作輪落地後去註 字樣", () => {
+    for (const number of ["5.6", "10.3"]) {
+      const body = section(architecture, number);
+      expect(body, `§${number} 不得再有 P4 規劃`).not.toContain("P4 規劃");
+      expect(body, `§${number} 不得再有去註待辦`).not.toContain("規劃，實作輪落地後去註");
+    }
+  });
+
+  it("AT_964_10_3 契約版本沿革含 v1.0 一列且文件首行版本非 v0.1；§12.1 的 L-SI-1 與 L-SI-2 兩列仍在", () => {
+    expect(contract).toMatch(/^\| v1\.0 \|/m);
+    const versionLine = contract.split("\n").find((l) => l.startsWith("**版本**")) ?? "";
+    expect(versionLine).toMatch(/v1\.0/);
+    expect(versionLine).not.toMatch(/v0\.1/);
+    const limits = section(architecture, "12.1");
+    for (const id of ["L-SI-1", "L-SI-2"]) expect(limits, `${id} 被刪`).toMatch(new RegExp(`^\\| ${id} \\|`, "m"));
   });
 });

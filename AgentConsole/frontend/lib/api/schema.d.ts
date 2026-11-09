@@ -296,6 +296,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/si/schedule/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 設定自動演化排程：啟用或停用、週期（P4；僅 ADMIN）
+         * @description body {enabled, periodMinutes, reason?}：enabled 與 periodMinutes 兩鍵皆必備（停用時也須帶界內週期）。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 週期的界（schedule.periodMin～periodMax，含端點）每次由 GET /si/status 現取、不快取不寫死：界外＝422 invalid_request（violations 的 periodMinutes，訊息帶當下的界）；取不到界（schedule 缺席、界鍵缺席或非整數、min 大於 max）＝503 si_unavailable（details.cause＝schedule_bounds_unavailable、details.detail 指出缺哪個鍵）；GET status 自己失敗則沿 GET /si/status 的 502、504、503 對映逐字轉出。不設重送閘：同一份請求連送兩次各得 201 與不同 auditRef（沒有決定那種卡面 digest 可綁）。簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiScheduleSet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/runs/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 請求主機立即啟動一次自我進化運轉（P4；僅 ADMIN）
+         * @description body {note?}（可為空物件）。驗證順序固定：角色（僅 ADMIN；否則 403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled；details.cause＝audit_key_unset｜bridge_token_unset）→ 輸入閘（422 invalid_request；details.violations[{field,message}] 一次全列）→ 沒有週期可驗，所以沒有取界那一關。不設重送閘：同一份請求連送兩次各得 201 與不同 auditRef（沒有決定那種卡面 digest 可綁）。主機端對多餘的請求以「已有未關運轉改記 sched.skip」消化。簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。201 的意思是稽核檔已落地、待入帳（由主機端根層 CLI 以 --carrier console 驗簽入帳），不是已入帳。
+         */
+        post: operations["postSiRunRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/si/proposals/{id}/decide": {
         parameters: {
             query?: never;
@@ -2862,24 +2902,17 @@ export interface components {
             /** @description 要求時間（UTC，ISO-8601 帶 Z） */
             requestedAt: string;
         };
-        /** @description 對待決提案（或暫停的運轉）下決定。九種動詞：approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；各動詞必填與禁止的欄位見表 M-D（多帶或缺帶一律 422，一次全列）。沒有批次核准 */
-        SiDecideRequest: {
+        /** @description 設定自動演化排程（啟用或停用、週期）。enabled 與 periodMinutes 兩鍵皆必備（停用時也須帶界內週期）；週期的界取自 GET /si/status 的 schedule.periodMin～periodMax（含端點），不寫死在前後端 */
+        SiScheduleSetRequest: {
+            /** @description true＝啟用、false＝停用；必須是 JSON 布林（字串 "true" 不收） */
+            enabled: string;
             /**
-             * @description 動詞
-             * @enum {string}
+             * Format: int32
+             * @description 週期（分鐘）；必須是 JSON 整數（小數、字串、布林、0、負數不收），且須在當下 status.schedule 的界內（含端點）
              */
-            dkind: "approve" | "reject" | "return" | "promote" | "decline-promote" | "rollback" | "unblock" | "resume" | "ack-handoff";
-            /** @description 開啟決定當下看到的卡面 digest（綁定它，過期由根層 CLI 以 STALE-CARD 拒收）。approve、reject、return、promote、decline-promote、ack-handoff 必填；rollback、unblock、resume 不可帶 */
-            digest?: string;
-            /** @description 理由（1～500 個 code point 的單行字串，不含控制字元）。reject、decline-promote、return、rollback、resume 必填；其餘不可帶 */
+            periodMinutes: string;
+            /** @description 理由（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵 */
             reason?: string;
-            /**
-             * @description 理由類別。reject、decline-promote、return 必填；其餘不可帶
-             * @enum {string}
-             */
-            reasonClass?: "證據不足" | "風險過高" | "工件類別錯" | "已被涵蓋" | "範圍外" | "卡面不清" | "未說明";
-            /** @description 晉升後式（verdict 為 NE 的晉升）的勾選；true 只准 promote，稽核 body 的 flags 因此帶 unverified_ack */
-            unverifiedAck?: boolean;
         };
         ApiResultSiWriteReceipt: {
             /** Format: int32 */
@@ -2905,6 +2938,30 @@ export interface components {
             time: string;
             /** @description 簽章金鑰的 sha256 前 8 碼 */
             keyId: string;
+        };
+        /** @description 請求主機立即啟動一次自我進化運轉（觸發 a）。本文可為空物件；note 選填。201 是稽核檔已落地、待入帳，不是已啟動 */
+        SiRunRequest: {
+            /** @description 備註（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵 */
+            note?: string;
+        };
+        /** @description 對待決提案（或暫停的運轉）下決定。九種動詞：approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；各動詞必填與禁止的欄位見表 M-D（多帶或缺帶一律 422，一次全列）。沒有批次核准 */
+        SiDecideRequest: {
+            /**
+             * @description 動詞
+             * @enum {string}
+             */
+            dkind: "approve" | "reject" | "return" | "promote" | "decline-promote" | "rollback" | "unblock" | "resume" | "ack-handoff";
+            /** @description 開啟決定當下看到的卡面 digest（綁定它，過期由根層 CLI 以 STALE-CARD 拒收）。approve、reject、return、promote、decline-promote、ack-handoff 必填；rollback、unblock、resume 不可帶 */
+            digest?: string;
+            /** @description 理由（1～500 個 code point 的單行字串，不含控制字元）。reject、decline-promote、return、rollback、resume 必填；其餘不可帶 */
+            reason?: string;
+            /**
+             * @description 理由類別。reject、decline-promote、return 必填；其餘不可帶
+             * @enum {string}
+             */
+            reasonClass?: "證據不足" | "風險過高" | "工件類別錯" | "已被涵蓋" | "範圍外" | "卡面不清" | "未說明";
+            /** @description 晉升後式（verdict 為 NE 的晉升）的勾選；true 只准 promote，稽核 body 的 flags 因此帶 unverified_ack */
+            unverifiedAck?: boolean;
         };
         /** @description 新增觀察列（或預檢）。三個字串欄各 1～300 個 code point、UTF-8 位元組和不得超過 700（必要條件；權威是預檢與根層 CLI 的列位元組上限），且不得含豎線與控制字元（觀察列是 Markdown 九欄表） */
         SiObservationRequest: {
@@ -7740,6 +7797,216 @@ export interface operations {
             };
         };
     };
+    postSiScheduleSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiScheduleSetRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiWriteReceipt"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因）：si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容；含序 5′：periodMinutes 超出當下 status 的界，訊息「須在 <min>～<max> 分鐘之間」）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致）；取界的 GET status 失敗亦同（零副作用、沒有稽核列） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）或 si_unavailable：details.cause＝schedule_bounds_unavailable（取不到 status.schedule 的 period_min／period_max：schedule 缺席、界鍵缺席或非整數、min 大於 max；details.detail 指出缺哪個鍵；零副作用）或 Bridge 的稽核目錄寫入失敗等／status 本身不可用（details.cause、details.detail 逐字） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試）：取界的 GET status 逾時＝零副作用；執行階段的請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    postSiRunRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiWriteReceipt"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因）：si_audit_exists＝Bridge 的稽核檔已存在（每次新 ref，正常不會發生） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（reason invalid_request；details.violations[{field,message}] 一次全列，errors[] 同內容）或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：連線階段失敗與 5xx 已補償刪除稽核列；送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset；或 Bridge 的寫入面停用，details.detail 逐字）或 si_unavailable（Bridge 的稽核目錄寫入失敗等；details.cause、details.detail 逐字）。稽核列已補償刪除 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     postSiDecide: {
         parameters: {
             query?: never;
@@ -10987,7 +11254,7 @@ export interface operations {
                 /** @description 名稱模糊搜尋（不分大小寫） */
                 q?: string;
                 status?: "DRAFT" | "READY" | "EXECUTING" | "COMPLETED" | "FAILED" | "ARCHIVED";
-                /** @description 排序：欄位[,asc|desc]，欄位可為 name／status／createdAt／updatedAt；預設 updatedAt,desc */
+                /** @description 排序：欄位[,asc|desc]，欄位可為 name／status／createdAt／updatedAt／autonomyLevel；預設 updatedAt,desc */
                 sort?: string;
                 /** @description true＝只列軟刪除的專案（OPERATOR 以上）；false／省略＝只列未軟刪除者 */
                 deleted?: boolean;
@@ -15840,7 +16107,7 @@ export interface operations {
                 status?: "UPLOADED" | "PARSING" | "PARSED" | "REVIEWING" | "IMPORTED" | "REJECTED";
                 /** @description 來源檔名模糊搜尋（不分大小寫；萬用字元視為字面） */
                 q?: string;
-                /** @description 欄位[,asc|desc]；欄位限 createdAt／status；預設 createdAt,desc */
+                /** @description 欄位[,asc|desc]；欄位限 createdAt／status／sourceFileName／aiModel／tokenUsed／projectId（空值升降冪都排最後）；預設 createdAt,desc */
                 sort?: string;
             };
             header?: never;

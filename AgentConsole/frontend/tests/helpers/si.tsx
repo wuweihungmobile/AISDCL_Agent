@@ -5,6 +5,7 @@
  *    以 saveSession 設定角色與帳號，以 fetch 替身依網址與方法回放黃金檔，並記錄每次呼叫的方法、網址與本文；另掛 ToastHost（寫入失敗以 toast 顯示原因，測試要讀得到）。
  * 回放的 since／limit 語意與 CLI 相同：`since` 是嚴格大於的游標（取項目 ID 的數字部分，事件取 seq），`limit` 是單頁筆數；
  * 回應帶 truncated 與 nextSince（末頁為 false 與 null）。ne／problems 原樣隨每一頁回傳。
+ * P4 排程的兩個 POST（`schedule-set`、`run-request`）預設回 201 收據（kind 為 sched-set、run-request，subject 為 null）。
  * P2b 的五個端點預設回應：三個寫入 POST 回 201 的收據 `{ auditRef, kind, subject, time, keyId }`（kind 與 subject 取自路徑）；預檢回 `ok: true` 的預覽列；
  * `console-writes` 回「已對帳、沒有待入帳」。測試以 `overrides` 逐端點覆寫（回 Response 原樣，或 `{ status, data }` 包成封包）。
  * 不被 vitest 收集、不在 design-rules 掃描面（tests/ 目錄；沿 tests/helpers/api.tsx 與 sddFixtures.ts 先例）。
@@ -17,7 +18,7 @@ import { vi } from "vitest";
 import { SiView } from "@/components/domain/si/SiView";
 import { Providers } from "@/components/providers/Providers";
 import { ToastHost } from "@/components/ui/toast";
-import type { Role, SiConsoleWrite, SiEvent, SiObservationRow, SiPage, SiProposal, SiRun, SiStatusItem } from "@/lib/api/types";
+import type { Role, SiConsoleWrite, SiEvent, SiObservationRow, SiPage, SiProposal, SiRun, SiStatusItem, SiWriteKind } from "@/lib/api/types";
 import { clearSession, resetSessionCache, saveSession } from "@/lib/auth/store";
 import { envelope, failure } from "./api";
 
@@ -45,7 +46,8 @@ export function clone<T>(value: T): T {
 
 /** `body`：請求本文的原始字串（沒有本文為 null），供斷言送出的 JSON；`hasBody` 沿 P1b（只看有沒有）。 */
 export type SiCall = { method: string; url: string; path: string; query: URLSearchParams; hasBody: boolean; body: string | null };
-export type SiEndpoint = "status" | "observations" | "events" | "proposals" | "proposal" | "runs" | "decide" | "observation-add" | "observation-close" | "validate" | "console-writes";
+export type SiEndpoint =
+  "status" | "observations" | "events" | "proposals" | "proposal" | "runs" | "decide" | "observation-add" | "observation-close" | "validate" | "console-writes" | "schedule-set" | "run-request";
 /** 逐端點覆寫：回 Response（原樣）、或回 { status, data }（包成封包）；回 undefined＝照黃金檔回放。可為 async（延遲回應）。 */
 export type SiOverride = (call: SiCall) => Response | { status?: number; data?: unknown } | undefined | Promise<Response | { status?: number; data?: unknown } | undefined>;
 
@@ -93,6 +95,8 @@ function endpointOf(method: string, pathname: string): { endpoint: SiEndpoint; i
     if (decide) return { endpoint: "decide", id: decodeURIComponent(decide[1]) };
     const close = /^\/api\/v1\/si\/observations\/([^/]+)\/close$/.exec(pathname);
     if (close) return { endpoint: "observation-close", id: decodeURIComponent(close[1]) };
+    if (pathname === "/api/v1/si/schedule/set") return { endpoint: "schedule-set" };
+    if (pathname === "/api/v1/si/runs/request") return { endpoint: "run-request" };
     if (pathname === "/api/v1/si/observations/validate") return { endpoint: "validate" };
     if (pathname === "/api/v1/si/observations") return { endpoint: "observation-add" };
     return null;
@@ -110,7 +114,7 @@ export const VALIDATE_ROW =
   "| OBS-SI-013 | 2026-10-24 22:30 +08:00 | Console・自我進化頁 | 待入帳徽章在入帳後仍顯示 | AgentConsole/frontend/components/domain/si/SiView.tsx:88 | bug | P3 | open | 面=產品;來源=人;回報者=admin;carrier=console;audit_ref=00000000-0000-4000-8000-000000000000 |";
 
 /** 預設收據：`kind` 與 `subject` 取自請求（路徑）；auditRef 依序為 a1000000-0000-4000-8000-000000000001、…002。 */
-function receipt(stub: SiStub, kind: "decide" | "obs-add" | "obs-close", subject: string | null): Response {
+function receipt(stub: SiStub, kind: SiWriteKind, subject: string | null): Response {
   stub.auditSeq = (stub.auditSeq ?? 0) + 1;
   const auditRef = `a1000000-0000-4000-8000-${String(stub.auditSeq).padStart(12, "0")}`;
   return envelope({ auditRef, kind, subject, time: "2026-10-24T22:30:15+08:00", keyId: "f076edf0" }, 201);
@@ -140,6 +144,10 @@ function replay(stub: SiStub, endpoint: SiEndpoint, id: string | undefined, quer
       return receipt(stub, "obs-add", null);
     case "observation-close":
       return receipt(stub, "obs-close", id ?? null);
+    case "schedule-set":
+      return receipt(stub, "sched-set", null);
+    case "run-request":
+      return receipt(stub, "run-request", null);
     case "validate":
       return envelope({ ok: true, row: VALIDATE_ROW, rowBytes: 287, rowMaxBytes: 700, findings: [] });
     case "console-writes":
@@ -219,3 +227,54 @@ export function renderSi(options: RenderSiOptions = {}): RenderResult & { stub: 
   );
   return { ...view, stub, urls: () => stub.calls.map((c) => c.url) };
 }
+
+// ── 自動演化排程（P4；TCS-SelfImprovingSchedule §5.6）────────────────────────────────────────────────
+
+/** `sched(over)` 的鍵覆寫值：表示刪除該鍵（鍵缺席與值為 null 是兩件事，AT 要分得開）。 */
+export const DROP = Symbol("DROP");
+
+/** 界夾具：測試的預期值一律由夾具設定值導出，不在斷言中另寫一份常數（NFR-SC-4）。 */
+export const BOUNDS = { periodMin: 60, periodMax: 10080, heartbeatMinutes: 15, periodMinutes: 1440 } as const;
+
+/** camelCase 的完整 `schedule` 物件（`status.items[0].schedule`）；`over` 逐鍵覆寫，`DROP` 表示刪鍵。 */
+export function sched(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    enabled: true,
+    periodMinutes: BOUNDS.periodMinutes,
+    periodMin: BOUNDS.periodMin,
+    periodMax: BOUNDS.periodMax,
+    heartbeatMinutes: BOUNDS.heartbeatMinutes,
+    lastSet: { at: "2026-11-09T10:00:00+08:00", by: "admin", carrier: "console" },
+    cellStart: "2026-11-09T00:00:00+08:00",
+    cellEnd: "2026-11-10T00:00:00+08:00",
+    ranThisCell: false,
+    lastSkip: null,
+    overdue: false,
+    armed: "NOT-EVALUABLE：export-reads-no-home",
+  };
+  for (const [key, value] of Object.entries(over)) {
+    if (value === DROP) delete base[key];
+    else base[key] = value;
+  }
+  return base;
+}
+
+/** 狀態 A 的 `items[0]` 加上（可選的）`schedule` 與額外鍵；不給 `schedule` 鍵＝不含該鍵（既有呼叫不變）；`schedule: DROP` 同樣不含。 */
+export function statusItem(opts: { schedule?: unknown; extra?: Record<string, unknown> } = {}): SiStatusItem {
+  const item = clone(GA.status.items[0]) as Record<string, unknown>;
+  if ("schedule" in opts && opts.schedule !== DROP) item.schedule = opts.schedule;
+  Object.assign(item, opts.extra ?? {});
+  return item as SiStatusItem;
+}
+
+/** 把 `status.items[0]` 換成給定項的黃金檔副本（交給 `renderSi({ fixture })`）。 */
+export function fixtureWithStatus(item: SiStatusItem): SiFixture {
+  const fixture = clone(GA);
+  fixture.status.items[0] = item;
+  return fixture;
+}
+
+/** 三種角色的渲染設定（交給 `renderSi`）。 */
+export const ADMIN_UI = { role: "ADMIN", username: "admin" } as const;
+export const VIEWER_UI = { role: "VIEWER", username: "viewer" } as const;
+export const OPERATOR_UI = { role: "OPERATOR", username: "operator" } as const;

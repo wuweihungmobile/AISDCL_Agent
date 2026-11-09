@@ -9,7 +9,8 @@
  *    任何一個失敗都只顯示該面板的錯誤態與原因，絕不渲染成空表、零筆、「無事件」或「通過」，也不渲染過期資料（SI 查詢不重試、不留快取）。
  *  - **Console 不寫帳本**：P1b 沒有任何非 GET 請求；P2b 起只有 ADMIN 看得到寫入入口（決定、新增觀察、更正、關閉、恢復），它們只把「簽好章的稽核檔」落到主機端的目錄，
  *    入帳由掌舵者在主機端用根層 CLI 做（pull 模式）。非 ADMIN：零控件、零 POST、零 `console-writes` 請求、沒有待入帳或警示字樣。是否在決定者名單由 backend 判（403 原因逐字 toast）。
- *  - 三個寫入對話框掛在這一層（不掛在各面板裡）：面板因重新整理或分頁切換卸載時，對話框與它已顯示的收據不會跟著消失；內容元件隨對話框卸載，所以關閉後重開不沿用上次結果。
+ *  - P4 起 ADMIN 另有「自動演化排程」面板（啟用或停用、改週期、立即啟動一次演化三個控件鈕）與兩個對話框（排程設定、立即啟動）；欄位組與狀態橫幅共用，寫入同樣只落稽核檔、入帳後才生效。
+ *  - 五個寫入對話框掛在這一層（不掛在各面板裡）：面板因重新整理或分頁切換卸載時，對話框與它已顯示的收據不會跟著消失；內容元件隨對話框卸載，所以關閉後重開不沿用上次結果。
  *  - 純文字：帳本字串（九欄、marks、卡面、事件 JSON、ne／problems）一律以 React 文字節點渲染，不經 HTML 或 Markdown，
  *    含 `<script>` 與 Markdown 語法的候選列原樣顯示為字面文字。
  *  - 只有目前分頁的面板掛載：切分頁即卸載舊面板（gcTime 為 0，資料隨之丟棄），回到該分頁時重新載入，不顯示上一次的資料。
@@ -29,6 +30,9 @@ import { SiObsCloseDialog, type CloseTarget } from "./SiObsCloseDialog";
 import { SiObsForm, type ObsFormTarget } from "./SiObsForm";
 import { SiObservationsPanel } from "./SiObservationsPanel";
 import { SiProposalsPanel } from "./SiProposalsPanel";
+import { SiRunRequestDialog } from "./SiRunRequestDialog";
+import { SiScheduleDialog, type ScheduleTarget } from "./SiScheduleDialog";
+import { SiSchedulePanel } from "./SiSchedulePanel";
 import { SiStatusBanner } from "./SiStatusBanner";
 import { SiWritesPanel } from "./SiWritesPanel";
 
@@ -52,6 +56,8 @@ export function SiView() {
   const [decideTarget, setDecideTarget] = useState<DecideTarget | null>(null);
   const [obsTarget, setObsTarget] = useState<ObsFormTarget | null>(null);
   const [closeTarget, setCloseTarget] = useState<CloseTarget | null>(null);
+  const [scheduleTarget, setScheduleTarget] = useState<ScheduleTarget | null>(null);
+  const [runRequestOpen, setRunRequestOpen] = useState(false);
 
   return (
     <div data-testid="si-view">
@@ -73,6 +79,8 @@ export function SiView() {
       </div>
 
       <SiStatusBanner onResume={isAdmin ? (run) => setDecideTarget({ kind: "run", run }) : undefined} />
+
+      {isAdmin ? <SiSchedulePanel onSetSchedule={(enabled) => setScheduleTarget({ enabled })} onRequestRun={() => setRunRequestOpen(true)} /> : null}
 
       {isAdmin ? <SiWritesPanel /> : null}
 
@@ -111,6 +119,8 @@ export function SiView() {
           <SiDecideDialog target={decideTarget} onClose={() => setDecideTarget(null)} />
           <SiObsForm target={obsTarget} onClose={() => setObsTarget(null)} />
           <SiObsCloseDialog target={closeTarget} onClose={() => setCloseTarget(null)} />
+          <SiScheduleDialog target={scheduleTarget} onClose={() => setScheduleTarget(null)} />
+          <SiRunRequestDialog open={runRequestOpen} onClose={() => setRunRequestOpen(false)} />
         </>
       ) : null}
     </div>

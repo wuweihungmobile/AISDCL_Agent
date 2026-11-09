@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { REASONS } from "@/lib/api/reasons";
 import { ApiError } from "@/lib/api/client";
+import { DROP, sched } from "@/tests/helpers/si";
 import type { SiConsoleWrite, SiInvalidRow, SiNeEntry, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
 import {
   BUCKET_DISPLAY_ORDER,
@@ -18,11 +19,16 @@ import {
   SI_PAGE_LIMIT,
   SI_REASONS,
   SI_STATUS_KNOWN_KEYS,
+  SI_WRITE_KIND_LABELS,
+  SCHEDULE_ARMED_TEXT,
+  SCHEDULE_OVERDUE_ALERT,
   TOUCHED_NE_REASON,
   bucketOptions,
   buildCloseRequest,
   buildDecideRequest,
   buildObservationRequest,
+  buildRunRequest,
+  buildScheduleRequest,
   cardNeEntries,
   decideKindLabel,
   decideVerbOptions,
@@ -51,9 +57,12 @@ import {
   notEvaluableText,
   obsStatusClass,
   pendingDecision,
+  pendingRunRequest,
   pendingWrites,
+  periodHint,
   prettyJson,
   propStatusClass,
+  scheduleFields,
   siErrorParts,
   siErrorSummary,
   siWriteErrorText,
@@ -62,6 +71,8 @@ import {
   validateCloseForm,
   validateDecideForm,
   validateObservationForm,
+  validateRunRequestForm,
+  validateScheduleForm,
   type CloseForm,
   type DateWindow,
   type DecideCard,
@@ -335,8 +346,8 @@ describe("lib/domain/si.ts 的補充單元（身分鍵、選項、提案與事�
     expect(prettyJson({ a: 1 })).toBe('{\n  "a": 1\n}');
   });
 
-  it("SI_STATUS_KNOWN_KEYS 恰為 R13 列的九個已知鍵（其餘鍵走 si-status-extra）", () => {
-    expect([...SI_STATUS_KNOWN_KEYS]).toEqual(["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile"]);
+  it("SI_STATUS_KNOWN_KEYS 恰為 R13 列的九個已知鍵加 P4 的 schedule（其餘鍵走 si-status-extra）", () => {
+    expect([...SI_STATUS_KNOWN_KEYS]).toEqual(["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile", "schedule"]);
   });
 });
 
@@ -1184,5 +1195,268 @@ describe("AT_950_9_3 estimateRowBytes：受控輸入的估計值等於真 CLI �
       for (const bad of ["含|豎線", "兩行\n第二行", "含\tTAB", "\u0000"]) expect(estimateRowBytes({ ...O1, [field]: bad }, ADMIN), `${field}＝${JSON.stringify(bad)}`).toBeNull();
     }
     expect(estimateRowBytes({ ...O1, corrects: "OBS-SI-001" }, ADMIN)).not.toBeNull();
+  });
+});
+
+// ══ 自動演化排程（P4；TCS-SelfImprovingSchedule）══════════════════════════════════════════════════════════
+
+/** 字串規則向量表 M-X（reason 與 note 共用；與根層 TCS 的 R141 (c) 同表同結果）：[名稱, 值, 是否放行]。空字串視為未填（放行：本文省略該鍵）。 */
+const M_X: Array<[name: string, value: string, ok: boolean]> = [
+  ["120 個 U+4E2D", "\u4e2d".repeat(120), true],
+  ["121 個 U+4E2D", "\u4e2d".repeat(121), false],
+  ["120 個 U+1F600（補充平面算一個）", "\u{1f600}".repeat(120), true],
+  ["121 個 U+1F600", "\u{1f600}".repeat(121), false],
+  ["含豎線 a|b", "a|b", true],
+  ["含 LF", "x\ny", false],
+  ["含 CR", "x\ry", false],
+  ["含 U+0000", "x\u0000y", false],
+  ["含 U+001F", "x\u001fy", false],
+  ["含 U+007F", "x\u007fy", false],
+  ["空字串（視為未填）", "", true],
+  ["三個空格（全空白）", "   ", false],
+  ["一個 TAB", "\t", false],
+  ["前後有空白", "  ok  ", true],
+];
+
+const BOUND = { periodMin: 60, periodMax: 10080 };
+
+describe("AT_964_1_E_1 scheduleFields 對缺席、null、型別不符逐欄回量不到，不回無或 false（NFR-SC-2）", () => {
+  const field = (view: ReturnType<typeof scheduleFields>, key: string) => view.fields.find((f) => f.key === key)!;
+  /** 鍵→它影響的欄位 */
+  const AFFECTS: Array<[key: string, fieldKey: string]> = [
+    ["enabled", "enabled"],
+    ["periodMinutes", "period"],
+    ["cellStart", "cell"],
+    ["cellEnd", "cell"],
+    ["ranThisCell", "ranThisCell"],
+    ["overdue", "overdue"],
+  ];
+  const WRONG: unknown[] = ["x", 7, { a: 1 }, true];
+
+  it("AT_964_1_E_1 逐鍵刪除、設為 null、設為錯型別：對應欄位 known 為 false 且文字以量不到起頭（不是空字串、無、否、false、0），其餘欄位與基準相同", () => {
+    const base = scheduleFields(sched());
+    for (const [key, fieldKey] of AFFECTS) {
+      const variants: Array<[string, unknown]> = [
+        ["刪鍵", DROP],
+        ["null", null],
+        ...WRONG.filter((w) => typeof w !== typeof sched()[key]).map((w): [string, unknown] => [`錯型別 ${JSON.stringify(w)}`, w]),
+      ];
+      for (const [label, value] of variants) {
+        const view = scheduleFields(sched({ [key]: value }));
+        const f = field(view, fieldKey);
+        expect(f.known, `${key} ${label}`).toBe(false);
+        expect(f.value.startsWith("量不到"), `${key} ${label}：${f.value}`).toBe(true);
+        expect(["", "無", "否", "false", "0"], `${key} ${label}`).not.toContain(f.value);
+        for (const other of base.fields.filter((x) => x.key !== fieldKey)) expect(field(view, other.key), `${key} ${label}：${other.key} 不受影響`).toEqual(other);
+      }
+    }
+    // armed 恆為固定量不到句，不論給什麼
+    for (const armed of [DROP, null, "NOT-EVALUABLE：export-reads-no-home", { task: "t", present: true }, true])
+      expect(field(scheduleFields(sched({ armed })), "armed").value).toBe(SCHEDULE_ARMED_TEXT);
+  });
+
+  it("AT_964_1_E_1 lastSet 與 lastSkip 為 null 時顯示尚無（不是量不到）；缺席或型別不符才是量不到；schedule 整鍵缺席或不是物件＝整組量不到", () => {
+    for (const key of ["lastSet", "lastSkip"]) {
+      const fieldKey = key;
+      expect(field(scheduleFields(sched({ [key]: null })), fieldKey)).toMatchObject({ value: "尚無", known: true });
+      expect(field(scheduleFields(sched({ [key]: DROP })), fieldKey).known).toBe(false);
+      expect(field(scheduleFields(sched({ [key]: "x" })), fieldKey).known).toBe(false);
+    }
+    for (const bad of [undefined, null, "x", 7, [], true]) {
+      const view = scheduleFields(bad);
+      expect(
+        view.fields.every((f) => !f.known),
+        JSON.stringify(bad),
+      ).toBe(true);
+      expect(
+        view.fields.every((f) => f.value.startsWith("量不到")),
+        JSON.stringify(bad),
+      ).toBe(true);
+      expect(view.alert).toBeNull();
+      expect(view.bounds).toBeNull();
+    }
+  });
+});
+
+describe("AT_964_2_1 periodHint 換算：整天、整小時、其餘一位小數", () => {
+  it("AT_964_2_1 1440、2880、60、120、90、100、75、61、10080 依序回 ≈1 天、≈2 天、≈1 小時、≈2 小時、約 1.5 小時、約 1.7 小時、約 1.3 小時、約 1.0 小時、≈7 天；回傳皆為字串", () => {
+    const got = [1440, 2880, 60, 120, 90, 100, 75, 61, 10080].map(periodHint);
+    expect(got).toEqual(["≈1 天", "≈2 天", "≈1 小時", "≈2 小時", "約 1.5 小時", "約 1.7 小時", "約 1.3 小時", "約 1.0 小時", "≈7 天"]);
+    for (const text of got) expect(typeof text).toBe("string");
+    for (const bad of [0, -60, 1.5, Number.NaN]) expect(periodHint(bad), `非正整數 ${bad} 不換算`).toBe("");
+  });
+});
+
+describe("AT_964_3_2 ingestCommands 對兩新 kind 的指令字串逐字相同，既有三 kind 不變；標籤五個皆有", () => {
+  const ref = "b2000000-0000-4000-8000-000000000001";
+  it("AT_964_3_2 sched-set 與 run-request 兩形態字串相同且逐字如 W-S3 (f)；decide、obs-add、obs-close 與 P2b 逐字相同；標籤含 排程設定 與 立即啟動", () => {
+    const setCmd = `python tools/selfimproving.py sched set --carrier console --audit-ref ${ref}`;
+    const run = `python tools/selfimproving.py run-open --trigger a --carrier console --audit-ref ${ref} --coord console_audit/${ref}.json --by console`;
+    expect(ingestCommands("sched-set", null, ref)).toEqual({ powershell: setCmd, posix: setCmd });
+    expect(ingestCommands("run-request", null, ref)).toEqual({ powershell: run, posix: run });
+    expect(ingestCommands("decide", "PROP-SI-004", ref).posix).toBe(`python tools/selfimproving.py decide PROP-SI-004 --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("obs-add", null, ref).posix).toBe(`python tools/selfimproving.py obs-add --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("obs-close", "OBS-SI-005", ref).posix).toBe(`python tools/selfimproving.py obs-close --carrier console --audit-ref ${ref}`);
+    expect(SI_WRITE_KIND_LABELS["sched-set"]).toBe("排程設定");
+    expect(SI_WRITE_KIND_LABELS["run-request"]).toBe("立即啟動");
+  });
+});
+
+describe("AT_964_3_E_3 reason 規則負控表（表 M-X）：超長、換行、控制字元、全空白拒，豎線與補充平面字元放行", () => {
+  it.each(M_X)("AT_964_3_E_3 reason：%s", (name, value, ok) => {
+    const errors = validateScheduleForm({ enabled: true, periodText: "120", reason: value }, BOUND);
+    expect(Object.keys(errors).includes("reason"), `${name}：${JSON.stringify(errors)}`).toBe(!ok);
+    // 週期本身合法，所以通過與否只取決於 reason
+    expect(Object.keys(errors).includes("periodMinutes")).toBe(false);
+  });
+
+  it("AT_964_3_E_3 建請求時 reason 去前後空白；空字串省略該鍵；鍵序為 enabled、periodMinutes、reason", () => {
+    expect(JSON.stringify(buildScheduleRequest({ enabled: true, periodText: "120", reason: "  ok  " }))).toBe('{"enabled":true,"periodMinutes":120,"reason":"ok"}');
+    expect(JSON.stringify(buildScheduleRequest({ enabled: false, periodText: " 1440 ", reason: "" }))).toBe('{"enabled":false,"periodMinutes":1440}');
+  });
+
+  it("AT_964_3_E_3 NEL（U+0085）單獨一個＝全空白而拒（對齊 backend 與根層以 Python strip 判全空白）", () => {
+    expect(Object.keys(validateScheduleForm({ enabled: true, periodText: "120", reason: "\u0085" }, BOUND))).toContain("reason");
+  });
+});
+
+describe("AT_964_4_E_2 note 規則負控表與空備註時本文為空物件", () => {
+  it.each(M_X)("AT_964_4_E_2 note：%s（與 reason 同一張表）", (name, value, ok) => {
+    expect(Object.keys(validateRunRequestForm({ note: value })).includes("note"), name).toBe(!ok);
+    expect(Object.keys(validateScheduleForm({ enabled: true, periodText: "120", reason: value }, BOUND)).includes("reason"), `${name}：與 reason 結果相同`).toBe(!ok);
+  });
+
+  it("AT_964_4_E_2 備註空字串時 buildRunRequest 回空物件；有值回 { note } 且去前後空白", () => {
+    expect(JSON.stringify(buildRunRequest({ note: "" }))).toBe("{}");
+    expect(JSON.stringify(buildRunRequest({ note: "  先跑一次  " }))).toBe('{"note":"先跑一次"}');
+  });
+});
+
+describe("AT_964_5_E_1 逾期三態乘略過兩態的矩陣：無誤報，文案不含任務已停用字樣", () => {
+  const SKIP = { at: "2026-11-09T11:00:00+08:00", reason: "blackout", detail: "黑窗中" };
+  it.each([
+    ["true", true],
+    ["false", false],
+    ["null", null],
+    ["缺席", DROP],
+  ] as Array<[string, unknown]>)("AT_964_5_E_1 overdue 為 %s：略過為 null 與非 null 兩格", (_name, overdue) => {
+    for (const lastSkip of [null, SKIP]) {
+      const view = scheduleFields(sched({ overdue, lastSkip }));
+      const f = view.fields.find((x) => x.key === "overdue")!;
+      // 只有 overdue 為 true 才有警示，且不因 lastSkip 而抑制或新增
+      expect(view.alert, `lastSkip＝${JSON.stringify(lastSkip)}`).toBe(overdue === true ? SCHEDULE_OVERDUE_ALERT : null);
+      if (overdue === null || overdue === DROP) {
+        expect(f.known).toBe(false);
+        expect(f.value).toContain("量不到");
+        expect(f.value).not.toMatch(/沒有逾期|未逾期/);
+      } else {
+        expect(f.value).toBe(overdue ? "是" : "否");
+      }
+      const everything = [view.alert ?? "", ...view.fields.map((x) => x.value)].join("\n");
+      expect(everything).not.toMatch(/任務已停用|任務已壞/);
+    }
+  });
+
+  it("AT_964_5_E_1 警示句逐字含主機現查指令", () => {
+    expect(SCHEDULE_OVERDUE_ALERT).toBe("逾期未巡邏：請在主機執行 python tools/selfimproving.py sched show");
+  });
+});
+
+describe("AT_964_2_E_1 validateScheduleForm：界只由呼叫端傳入，缺界回量不到界值", () => {
+  it("AT_964_2_E_1 端點通過；界外、非整數、小數、空白、負數、零、1e3 皆拒；界缺席（null 與 undefined）＝量不到界值", () => {
+    const check = (periodText: string, bounds: typeof BOUND | null | undefined = BOUND) =>
+      Object.keys(validateScheduleForm({ enabled: true, periodText, reason: "" }, bounds)).includes("periodMinutes");
+    for (const ok of ["60", "10080", " 120 "]) expect(check(ok), ok).toBe(false);
+    for (const bad of ["59", "10081", "90.5", "abc", "", "   ", "-60", "0", "1e3", "０６０"]) expect(check(bad), bad).toBe(true);
+    for (const missing of [null, undefined]) expect(validateScheduleForm({ enabled: true, periodText: "120", reason: "" }, missing).periodMinutes).toBe("量不到界值");
+    expect(validateScheduleForm({ enabled: false, periodText: "", reason: "" }, BOUND).periodMinutes, "停用方向週期仍必填（D-CS-6）").toBeTruthy();
+  });
+});
+
+describe("AT_964_4_3 pendingRunRequest：只有待入帳的 run-request 算數", () => {
+  const row = (auditRef: string, patch: Partial<SiConsoleWrite>): SiConsoleWrite =>
+    ({
+      auditRef,
+      kind: "run-request",
+      dkind: null,
+      user: "admin",
+      role: "ADMIN",
+      time: "2026-11-09T10:00:00Z",
+      subjectId: null,
+      digest: null,
+      keyId: "f076edf0",
+      ingested: false,
+      supersededBy: null,
+      ...patch,
+    }) as SiConsoleWrite;
+  it("AT_964_4_3 待入帳的 run-request 回該列；已入帳（true）、量不到（null）、被取代、只有 sched-set 待入帳都回 null；多列回 time 最早者", () => {
+    expect(pendingRunRequest([row("a", {})])?.auditRef).toBe("a");
+    expect(pendingRunRequest([row("a", { ingested: true })])).toBeNull();
+    expect(pendingRunRequest([row("a", { ingested: null })])).toBeNull();
+    expect(pendingRunRequest([row("a", { supersededBy: "z" })])).toBeNull();
+    expect(pendingRunRequest([row("a", { kind: "sched-set" })])).toBeNull();
+    expect(pendingRunRequest([row("b", { time: "2026-11-09T10:05:00Z" }), row("a", { time: "2026-11-09T10:00:00Z" })])?.auditRef).toBe("a");
+    expect(pendingRunRequest([])).toBeNull();
+  });
+});
+
+describe("AT_964_10_E_1 既有純函式的行為回歸表：三種舊 kind 的指令字串、對帳面板函式、SI_REASONS 順序不變", () => {
+  const REF = "b2000000-0000-4000-8000-000000000001";
+  const item = (auditRef: string, patch: Record<string, unknown>) =>
+    ({
+      auditRef,
+      kind: "decide",
+      user: "admin",
+      role: "ADMIN",
+      time: "2026-10-24T14:30:15Z",
+      subjectId: "PROP-SI-004",
+      digest: null,
+      keyId: "f076edf0",
+      ingested: false,
+      supersededBy: null,
+      ...patch,
+    }) as unknown as SiConsoleWrite;
+
+  it("AT_964_10_E_1 三個舊 kind 的 ingestCommands（修改前錄下的字串）與 decideKindLabel、SI_REASONS 鍵序逐位相同", () => {
+    expect(ingestCommands("decide", "PROP-SI-004", REF).powershell).toBe(`python tools/selfimproving.py decide PROP-SI-004 --carrier console --audit-ref ${REF}`);
+    expect(ingestCommands("decide", null, REF).posix).toBe(`python tools/selfimproving.py decide <PROP-SI-NNN> --carrier console --audit-ref ${REF}`);
+    expect(ingestCommands("obs-add", null, REF).posix).toBe(`python tools/selfimproving.py obs-add --carrier console --audit-ref ${REF}`);
+    expect(ingestCommands("obs-close", "OBS-SI-005", REF).posix).toBe(`python tools/selfimproving.py obs-close --carrier console --audit-ref ${REF}`);
+    expect(["approve", "reject", "return", "promote", "decline-promote", "rollback", "unblock", "resume", "ack-handoff"].map(decideKindLabel)).toEqual([
+      "核准",
+      "否決",
+      "退回",
+      "晉升",
+      "不晉升",
+      "回滾",
+      "解除",
+      "恢復",
+      "轉交",
+    ]);
+    expect(Object.keys(SI_REASONS)).toEqual(["UNAVAILABLE", "NOT_FOUND", "WRITE_DISABLED", "WRITE_FORBIDDEN", "AUDIT_EXISTS", "DECISION_DUPLICATE"]);
+    expect(SI_WRITE_KIND_LABELS.decide).toBe("決定");
+    expect(SI_WRITE_KIND_LABELS["obs-add"]).toBe("新增觀察");
+    expect(SI_WRITE_KIND_LABELS["obs-close"]).toBe("關閉觀察");
+  });
+
+  it("AT_964_10_E_1 pendingWrites、supersededWrites、pendingDecision 對同一組輸入的結果與修改前相同（新 kind 的列不影響舊 kind 的判定）", () => {
+    const D = `sha256:${"a".repeat(64)}`;
+    const items = [
+      item("c1", { time: "2026-10-24T14:30:20Z", dkind: "approve", digest: D }),
+      item("c2", { time: "2026-10-24T14:30:10Z", ingested: true }),
+      item("c3", { time: "2026-10-24T14:30:12Z", supersededBy: "c2" }),
+    ];
+    expect(pendingWrites(items).map((i) => i.auditRef)).toEqual(["c1"]);
+    expect(supersededWrites(items).map((i) => i.auditRef)).toEqual(["c3"]);
+    expect(pendingDecision(items, { subject: "PROP-SI-004", digest: D, dkind: "approve" })?.auditRef).toBe("c1");
+    // 加入兩個新 kind 的待入帳列：舊函式的舊 kind 判定結果不變（pendingWrites 照樣列出它們，這是對帳面板要的）
+    const withNew = [...items, item("n1", { kind: "sched-set", subjectId: null }), item("n2", { kind: "run-request", subjectId: null })];
+    expect(supersededWrites(withNew).map((i) => i.auditRef)).toEqual(["c3"]);
+    expect(pendingDecision(withNew, { subject: "PROP-SI-004", digest: D, dkind: "approve" })?.auditRef).toBe("c1");
+    expect(
+      pendingWrites(withNew)
+        .map((i) => i.auditRef)
+        .sort(),
+    ).toEqual(["c1", "n1", "n2"]);
   });
 });

@@ -17,8 +17,8 @@ import { Providers } from "@/components/providers/Providers";
 import { ApiError } from "@/lib/api/client";
 import { SI_QUERY_OPTIONS } from "@/lib/api/queries";
 import type { SiConsoleWrites, SiEvent, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
-import { ingestCommands } from "@/lib/domain/si";
-import { GA, GB, clone, renderSi, signInAs, siUnavailable, stubSiApi, writeItem, type SiStub } from "@/tests/helpers/si";
+import { SI_STATUS_KNOWN_KEYS, ingestCommands } from "@/lib/domain/si";
+import { GA, GB, clone, fixtureWithStatus, renderSi, sched, signInAs, siUnavailable, statusItem, stubSiApi, writeItem, type SiStub } from "@/tests/helpers/si";
 import { SiView } from "./SiView";
 import { SiError } from "./siParts";
 
@@ -981,7 +981,7 @@ describe("SiView 補充：骨架、分頁標籤與狀態橫幅各欄", () => {
 // 為什麼重要：寫入入口只該給 ADMIN——非 ADMIN 多看到一個「決定」鈕，就多一條會被 403 的路、也多一個誤按的風險；而對帳面板若把「量不到」顯示成「無待入帳」，
 // 掌舵者會以為所有決定都已入帳。所以這裡逐角色驗控件與請求，並釘住「量不到不是沒有」。控件的 testid 前綴＝W21：si-decide-open-、si-resume-open、si-obs-new、si-obs-correct-、si-close-open-。
 
-const WRITE_TESTID = /^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-)/;
+const WRITE_TESTID = /^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-|schedule-toggle-open|schedule-period-open|run-request-open)/;
 const FORBIDDEN_NAME = /刪除|移除|清除|delete|remove/i;
 const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === "/api/v1/si/console-writes");
 const AUDIT_A = "b2000000-0000-4000-8000-00000000000a";
@@ -1131,7 +1131,7 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
         if (READ_ONLY_TESTIDS.has(testId)) seenReadOnly.add(testId);
         if (el.tagName === "BUTTON" && testId.startsWith("si-") && !READ_ONLY_TESTIDS.has(testId)) {
           expect(testId, `未列名的 si- 按鈕 testid：${testId}`).toMatch(WRITE_TESTID);
-          seenPrefixes.add(/^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-)/.exec(testId)?.[1] as string);
+          seenPrefixes.add(/^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-|schedule-toggle-open|schedule-period-open|run-request-open)/.exec(testId)?.[1] as string);
         }
       }
     };
@@ -1149,8 +1149,8 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
     await user.click(tabButton(/^事件/));
     await screen.findByTestId("si-events-table");
     sweep();
-    // 防反空轉：五個前綴都真的出現過；狀態快篩的八顆 pill 也都真的被掃到（觀察分頁四顆、提案分頁四顆）——否則上面的封閉集合是死名單
-    expect([...seenPrefixes].sort()).toEqual(["close-open-", "decide-open-", "obs-correct-", "obs-new", "resume-open"].sort());
+    // 防反空轉：八個前綴（P4 加排程面板的三個控件鈕）都真的出現過；狀態快篩的八顆 pill 也都真的被掃到（觀察分頁四顆、提案分頁四顆）——否則上面的封閉集合是死名單
+    expect([...seenPrefixes].sort()).toEqual(["close-open-", "decide-open-", "obs-correct-", "obs-new", "resume-open", "run-request-open", "schedule-period-open", "schedule-toggle-open"].sort());
     expect([...seenReadOnly].filter((id) => id.startsWith("si-status-")).sort()).toEqual(
       [
         "si-status-observations-all",
@@ -1695,5 +1695,45 @@ describe("AT_963_3 SI 四表：預設 ID／seq 升冪與表頭排序", () => {
     expect(runIds()).toEqual(["RX-9", "RX-5", "RX-10", "RX-100"]); // a #2、b #3、c #1、空值最後
     await pressIn(user, runRoot, "research");
     expect(runIds()).toEqual(["RX-10", "RX-5", "RX-9", "RX-100"]);
+  });
+});
+
+// ── 自動演化排程的橫幅欄位組（P4；TCS-SelfImprovingSchedule AT-964-1-3、1-E-2；W-S1 (d)(e)）──────────────────────
+
+describe("AT_964_1_3 SI_STATUS_KNOWN_KEYS 含 schedule：不再列入其他欄位，其餘未知鍵仍列入", () => {
+  it("AT_964_1_3 status 帶 schedule 與虛構未知鍵 futureKey：其他欄位區含 futureKey、不含 schedule；已知鍵含 schedule 且既有九鍵一個不少", async () => {
+    renderSi({ fixture: fixtureWithStatus(statusItem({ schedule: sched(), extra: { futureKey: { a: 1 } } })) });
+    const banner = await screen.findByTestId("si-status-banner");
+    const extra = await within(banner).findByTestId("si-status-extra");
+    expect(extra.textContent).toContain("futureKey");
+    expect(extra.querySelector('[data-status-key="schedule"]'), "schedule 不在其他欄位區").toBeNull();
+    expect(extra.textContent).not.toContain("schedule：");
+    // schedule 仍有自己的可見位置（具名欄位組）
+    expect(banner.querySelector('[data-status-key="schedule"]')).not.toBeNull();
+    expect([...SI_STATUS_KNOWN_KEYS]).toEqual(
+      expect.arrayContaining(["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile", "schedule"]),
+    );
+  });
+});
+
+describe("AT_964_1_E_2 schedule 整鍵缺席：整組量不到，橫幅其餘欄位不受影響", () => {
+  it("AT_964_1_E_2 status 不含 schedule：排程欄位組每個欄位皆量不到；橫幅其餘具名欄位與缺席前（含 schedule 時）逐字相同；頁面不丟例外、不空白", async () => {
+    const withSchedule = renderSi({ fixture: fixtureWithStatus(statusItem({ schedule: sched() })) });
+    const bannerWith = await screen.findByTestId("si-status-banner");
+    await within(bannerWith).findByTestId("si-schedule-fields-banner");
+    const otherKeys = ["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile"];
+    const before = otherKeys.map((k) => textOf(bannerWith.querySelector(`[data-status-key="${k}"]`) as HTMLElement));
+    withSchedule.unmount();
+
+    renderSi({ fixture: fixtureWithStatus(statusItem()) });
+    const banner = await screen.findByTestId("si-status-banner");
+    const group = await within(banner).findByTestId("si-schedule-fields-banner");
+    const values = Array.from(group.querySelectorAll<HTMLElement>("[data-schedule-field]"));
+    expect(values.length).toBeGreaterThanOrEqual(8);
+    for (const el of values) expect(textOf(el.querySelector("dd") as HTMLElement), `欄位 ${el.dataset.scheduleField}`).toMatch(/^量不到/);
+    expect(within(group).queryAllByRole("alert")).toHaveLength(0);
+    const after = otherKeys.map((k) => textOf(banner.querySelector(`[data-status-key="${k}"]`) as HTMLElement));
+    expect(after, "橫幅其餘欄位不受影響").toEqual(before);
+    expect(textOf(banner).trim().length).toBeGreaterThan(0);
   });
 });

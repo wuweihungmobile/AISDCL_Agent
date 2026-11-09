@@ -365,14 +365,22 @@ export type SiDecideKind = SiDecideRequest["dkind"];
 export type SiObservationRequest = S["SiObservationRequest"];
 export type SiCloseRequest = S["SiCloseRequest"];
 /** 稽核檔已落地的收據（待入帳）：`subject` 對 obs-add 為 null（入帳後才知道新列號）。 */
-export type SiWriteReceipt = S["SiWriteReceipt"];
-export type SiWriteKind = SiWriteReceipt["kind"];
+/**
+ * 寫入種類五值（P2b 的三個加 P4 的 `sched-set`、`run-request`；TCS-SelfImprovingSchedule W-S3 (g)）。刻意不取 schema.d.ts 的 `SiWriteReceipt["kind"]`：
+ * 產生型別的 kind 列舉只有三值（backend 的 @Schema 允許值尚未涵蓋兩個新種類，登記為後續校對項），取它會讓兩個新種類在型別層被當成不可能。
+ */
+export type SiWriteKind = "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
+export type SiWriteReceipt = Omit<S["SiWriteReceipt"], "kind"> & { kind: SiWriteKind };
+/** 排程設定的請求本文（API-SI-12）：`enabled` 與 `periodMinutes` 兩鍵皆必備（停用方向也要帶界內週期，D-CS-6）；`reason` 選填、空則省略該鍵。 */
+export type SiScheduleSetRequest = { enabled: boolean; periodMinutes: number; reason?: string };
+/** 立即啟動的請求本文（API-SI-13）：可為空物件；`note` 選填、空則省略該鍵。 */
+export type SiRunRequest = { note?: string };
 export type SiValidation = S["SiValidation"];
 export type SiValidationFinding = S["SiValidationFinding"];
 /** `GET /si/console-writes` 的一項（不含 body 與 mac）：`ingested` 為 null＝對帳量不到，不是「已入帳」也不是「待入帳」。 */
-export type SiConsoleWrite = S["SiConsoleWriteItem"];
-export type SiConsoleWriteOrphan = S["SiConsoleWriteOrphan"];
-export type SiConsoleWrites = S["SiConsoleWrites"];
+export type SiConsoleWrite = Omit<S["SiConsoleWriteItem"], "kind"> & { kind: SiWriteKind };
+export type SiConsoleWriteOrphan = Omit<S["SiConsoleWriteOrphan"], "kind"> & { kind: SiWriteKind };
+export type SiConsoleWrites = Omit<S["SiConsoleWrites"], "items" | "orphans"> & { items: SiConsoleWrite[]; orphans?: SiConsoleWriteOrphan[] | null };
 
 // ── 議題中心（TCS-IssueCenter-20261027 §C1、§C4；PRD §5）──────────────────────────────────────────────
 // `GET /api/v1/issues*` 原樣轉出根層 `si export --kind issues` 的物件（只經欄名 snake_case→camelCase 對映；值一律不動，null 保留），
