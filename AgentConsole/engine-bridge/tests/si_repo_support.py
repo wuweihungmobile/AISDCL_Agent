@@ -32,7 +32,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 MONOREPO = TESTS_DIR.parents[2]
 FIXTURE_REPO = TESTS_DIR / "fixtures" / "si_repo"
 GOLDEN_DIR = TESTS_DIR / "fixtures" / "si_golden"
-#: 稽核檔黃金檔 G1～G5（P2b §5.3；與 backend/src/test/resources/si/audit/ 逐位元組相同）。
+#: 稽核檔黃金檔 G1～G9（P2b §5.3、Console 排程 TCS §5.1；
+#: 與 backend/src/test/resources/si/audit/ 逐位元組相同）。
 AUDIT_GOLDEN_DIR = TESTS_DIR / "fixtures" / "si_audit"
 
 #: 根層 `export` 的 import 閉包（現查：以真 CLI 在複本倉實跑五個 kind 皆 rc 0、無 `__pycache__`）。
@@ -43,6 +44,19 @@ CLI_CLOSURE: tuple[str, ...] = (
     "tools/_stdio_utf8.py",
     "tools/lib/platform_utils.py",
     "tools/lib/selfimproving/",
+    # P4（根層 commit 9baf53e9）起 `selfimproving/sched.py` 頂層
+    # `from lib import transcript_activity`，後者以裸名載入下列九個同目錄模組
+    # （現查：逐輪補缺檔直到真 CLI `export` 與入帳動詞皆 rc 0）：
+    "tools/lib/transcript_activity.py",
+    "tools/lib/quota_limits.py",
+    "tools/lib/quota_messages.py",
+    "tools/lib/model_roles.py",
+    "tools/lib/quota_policy.py",
+    "tools/lib/quota_policy_env.py",
+    "tools/lib/quota_pace.py",
+    "tools/lib/quota_burndown.py",
+    "tools/lib/endurance_env.py",
+    "tools/lib/unattended_authz.py",
 )
 #: 只被寫入動詞 import 的根層檔（SA 實測：缺任一個，寫入動詞即 `ImportError`——`evwrite` 要
 #: `apply_lock`、`writeverbs` 頂層要 `sdd_latest`）。
@@ -54,10 +68,13 @@ WRITE_CLOSURE: tuple[str, ...] = (*CLI_CLOSURE, *WRITE_ONLY_FILES)
 K0 = "si-p2-vector-key-0123456789-abcdefghijklmnopqrstuvwxyz"
 K0_ID = "f076edf0"
 T0 = "si-write-token-for-tests-0123456789-abcdef"
-#: 黃金檔 G1～G5 的檔名（§5.3 的順序）。
+#: 黃金檔 G1～G9 的檔名（G1～G5：P2b §5.3 的順序；G6～G9：Console 排程 TCS §5.1，由 backend 產出、
+#: 主控複製，本棒只讀）。
 GOLDEN_AUDIT_FILES: dict[str, str] = {
     "G1": "decide-approve.json", "G2": "decide-reject.json", "G3": "obs-add.json",
-    "G4": "obs-add-corrects.json", "G5": "obs-close.json"}
+    "G4": "obs-add-corrects.json", "G5": "obs-close.json",
+    "G6": "sched-set-enable.json", "G7": "sched-set-disable.json",
+    "G8": "run-request-note.json", "G9": "run-request.json"}
 _PLACEHOLDER_REF = "00000000-0000-4000-8000-000000000000"
 #: 建倉時自真 repo 複製（使 `params.json` 的結構演進會讓 Bridge 測試誠實變紅）。
 PARAMS_SRC = "docs/06_quality/SelfImproving_Protocol/params.json"
@@ -131,7 +148,7 @@ def ingest_run(root: Path, home: Path, key: str | None, *args: str,
 
 
 def read_audit_golden(code: str) -> bytes:
-    """黃金檔 G1～G5 的位元組（`code` 為 `G1`～`G5`）。"""
+    """黃金檔 G1～G9 的位元組（`code` 為 `G1`～`G9`）。"""
     return (AUDIT_GOLDEN_DIR / GOLDEN_AUDIT_FILES[code]).read_bytes()
 
 

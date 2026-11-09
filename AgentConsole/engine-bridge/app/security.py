@@ -142,8 +142,8 @@ def require_sdd_write_token(configured: str | None, provided: str | None, *,
 # si_audit.py。
 def require_si_write_token(configured: str | None, audit_dir: Path | None, provided: str | None, *,
                            audit: AuditLog | None, verb: str, subject: str | None = None) -> None:
-    """SI 三個寫入端點（`:decide`、`POST /si/observations`、`:close`）的入口檢查，**先於**本文的
-    任何檢查。
+    """SI 五個寫入端點（`:decide`、`POST /si/observations`、`:close`、`/si/schedule:set`、
+    `/si/runs:request`）的入口檢查，**先於**本文的任何檢查。
 
     寫入面停用（權杖或稽核目錄任一未設）＝503 `si_write_disabled`（fail-closed；先於權杖比對）；設了
     而標頭缺漏或不符＝403 `si_write_forbidden`（缺與錯同一個回應，不給探測者區分）。以

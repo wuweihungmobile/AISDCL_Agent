@@ -13,14 +13,17 @@
 404 `si_not_found`。`limit` 的上限住在協定參數檔，不在此複製：超過上限時 CLI 回 rc 3，
 依 `si_cli` 的判定表回 503（`cause=nonzero_rc`）。
 
-**三個寫入 POST**：`/si/proposals/{id}:decide`、`/si/observations`、`/si/observations/{id}:close`。
+**五個寫入 POST**：`/si/proposals/{id}:decide`、`/si/observations`、`/si/observations/{id}:close`，
+加 P4 排程控制載體的 `/si/schedule:set`（kind `sched-set`）與 `/si/runs:request`（kind
+`run-request`；兩者無路徑 id，外層 `subject` 一律須為 null，比照 obs-add）。
 Bridge **不寫帳本、不呼叫寫入型 CLI**；它只把 backend 簽好的稽核 JSON 原樣落成
 `BRIDGE_SI_AUDIT_DIR/<audit_ref>.json`（`si_audit.store_audit`），由主機端 CLI 驗簽入帳。檢查順序
 （先中者定案；W3）：①寫入面停用＝503 `si_write_disabled`（先於權杖與本文）②`X-Bridge-Token` 缺或
 錯＝403 `si_write_forbidden`③本文須為單一 UTF-8 JSON 物件且 ≤`SI_WRITE_BODY_MAX_BYTES`（超過即
 422，不讀完）④外層恰七鍵、`schema_rev` 為整數 1、`kind` 等於端點、`audit_ref` 為小寫正規 UUID、
-`subject` 與路徑 `{id}` 相符（obs-add 為 null）、`body`／`key_id`／`mac` 為字串，違規一律 422
-`invalid_request`（`violations[{field,rule,message}]`；**不解內層 `body`、不驗簽**）⑤落檔
+`subject` 與路徑 `{id}` 相符（obs-add、sched-set、run-request 為 null）、`body`／`key_id`／`mac`
+為字串，違規一律 422 `invalid_request`（`violations[{field,rule,message}]`；
+**不解內層 `body`、不驗簽**）⑤落檔
 ⑥201 `{"audit_ref","stored"}`。
 
 **一個預檢 POST**：`/si/observations:validate`——不需權杖、不看寫入設定、不落檔，本文須為單一 JSON
@@ -127,7 +130,7 @@ def si_runs(request: Request, since: int | None = Query(default=None, ge=0),
     return JSONResponse(_export(request, "runs", since=since, limit=limit))
 
 
-# ── P2b：稽核檔落地（三個寫入 POST）與唯讀預檢 ──────────────────────────────────────────────────
+# ── P2b／P4：稽核檔落地（五個寫入 POST）與唯讀預檢 ────────────────────────────────────────────────
 def _violation(field: str, rule: str, message: str) -> dict[str, str]:
     return {"field": field, "rule": rule, "message": message}
 
@@ -171,7 +174,8 @@ def _outer_violations(obj: dict[str, Any], kind: str, path_id: str | None,
                       id_pattern: re.Pattern[str] | None) -> list[dict[str, str]]:
     """W3 ④：外層形態（不解內層 `body`、不驗簽、不驗 `key_id`／`mac` 的形態）。`path_id` 為 None
     ＝obs-add（`subject` 須為 null）；否則 `subject` 須為字串且等於路徑 `{id}`，`{id}` 另須合
-    `id_pattern`。一次全列。"""
+    `id_pattern`。一次全列。無路徑 id 的端點（obs-add、sched-set、run-request）`subject` 一律須為
+    null。"""
     out: list[dict[str, str]] = []
     if path_id is not None and (id_pattern is None or not id_pattern.fullmatch(path_id)):
         out.append(_violation("id", "invalid_format", "路徑 id 格式不合"))
@@ -189,7 +193,7 @@ def _outer_violations(obj: dict[str, Any], kind: str, path_id: str | None,
     if "subject" in obj:
         if path_id is None:
             if obj["subject"] is not None:
-                out.append(_violation("subject", "must_be_null", "obs-add 的 subject 須為 null"))
+                out.append(_violation("subject", "must_be_null", "此端點的 subject 須為 null"))
         elif not isinstance(obj["subject"], str) or obj["subject"] != path_id:
             out.append(_violation("subject", "subject_mismatch", "subject 須為字串且等於路徑 id"))
     out += [_violation(name, "must_be_string", f"{name} 須為字串")
@@ -250,6 +254,24 @@ async def si_observation_close(request: Request, id: str,
     ident = id
     return await _store_signed_audit(request, x_bridge_token, verb="obs-close", kind="obs-close",
                                      path_id=ident, id_pattern=_OBS_ID)
+
+
+@router.post("/schedule:set", status_code=201)
+async def si_schedule_set(request: Request,
+                          x_bridge_token: str | None = Header(default=None)) -> JSONResponse:
+    """排程設定的稽核檔落地（`sched.set` 的入帳來源）；外層 `subject` 須為 null、`kind` 須為
+    `sched-set`。Bridge 只落檔，入帳由主機端 `sched set --carrier console` 完成。"""
+    return await _store_signed_audit(request, x_bridge_token, verb="sched-set", kind="sched-set",
+                                     path_id=None, id_pattern=None)
+
+
+@router.post("/runs:request", status_code=201)
+async def si_run_request(request: Request,
+                         x_bridge_token: str | None = Header(default=None)) -> JSONResponse:
+    """立即啟動一次演化的稽核檔落地（`run.open`／`sched.skip` 的入帳來源）；外層 `subject` 須為
+    null、`kind` 須為 `run-request`。入帳由主機端 `run-open --trigger a --carrier console` 完成。"""
+    return await _store_signed_audit(request, x_bridge_token, verb="run-request",
+                                     kind="run-request", path_id=None, id_pattern=None)
 
 
 @router.post("/observations:validate")

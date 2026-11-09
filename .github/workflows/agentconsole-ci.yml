@@ -35,6 +35,17 @@ on:
       - "tools/lib/selfimproving/**"
       - "tools/lib/apply_lock.py"         # P2b 寫入動詞閉包（evwrite 要 apply_lock；TCS W6、W24，AT-950-11-2）
       - "tools/lib/sdd_latest.py"         # P2b 寫入動詞閉包（writeverbs 頂層要 sdd_latest）
+      # P4 CLI 閉包（selfimproving/sched.py 頂層 `from lib import transcript_activity` 連鎖載入；Bridge tests/si_repo_support.py CLI_CLOSURE 同 commit；TCS-P4 R143、Console TCS AT-940-4-1／950-11-2）
+      - "tools/lib/transcript_activity.py"
+      - "tools/lib/quota_limits.py"
+      - "tools/lib/quota_messages.py"
+      - "tools/lib/model_roles.py"
+      - "tools/lib/quota_policy.py"
+      - "tools/lib/quota_policy_env.py"
+      - "tools/lib/quota_pace.py"
+      - "tools/lib/quota_burndown.py"
+      - "tools/lib/endurance_env.py"
+      - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
   pull_request:
     branches: [main]
@@ -55,6 +66,17 @@ on:
       - "tools/lib/selfimproving/**"
       - "tools/lib/apply_lock.py"         # P2b 寫入動詞閉包（evwrite 要 apply_lock；TCS W6、W24，AT-950-11-2）
       - "tools/lib/sdd_latest.py"         # P2b 寫入動詞閉包（writeverbs 頂層要 sdd_latest）
+      # P4 CLI 閉包（selfimproving/sched.py 頂層 `from lib import transcript_activity` 連鎖載入；Bridge tests/si_repo_support.py CLI_CLOSURE 同 commit；TCS-P4 R143、Console TCS AT-940-4-1／950-11-2）
+      - "tools/lib/transcript_activity.py"
+      - "tools/lib/quota_limits.py"
+      - "tools/lib/quota_messages.py"
+      - "tools/lib/model_roles.py"
+      - "tools/lib/quota_policy.py"
+      - "tools/lib/quota_policy_env.py"
+      - "tools/lib/quota_pace.py"
+      - "tools/lib/quota_burndown.py"
+      - "tools/lib/endurance_env.py"
+      - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
   workflow_dispatch:
 

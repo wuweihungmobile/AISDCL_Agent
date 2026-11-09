@@ -620,3 +620,241 @@ def test_AT_950_3_E_2_a_malformed_validate_request_never_starts_the_subprocess(
     ok = live.client.post(VALIDATE, content=padded, headers={"Content-Type": "application/json"})
     assert ok.status_code == 200, f"恰 65536 位元組的合法物件得 200：{ok.status_code}"
     assert len(read_calls(fake)) == 1
+
+
+# ═══ P4 排程控制載體：`/si/schedule:set`、`/si/runs:request`（Console 排程 TCS AC-964-8） ═════════
+SCHEDULE_SET = "/si/schedule:set"
+RUN_REQUEST = "/si/runs:request"
+#: 兩個新端點：名稱 → (路徑, 外層 kind, 對映的黃金檔代號)。外層 `subject` 一律為 null。
+P4_ENDPOINTS: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    "sched-set": (SCHEDULE_SET, "sched-set", ("G6", "G7")),
+    "run-request": (RUN_REQUEST, "run-request", ("G8", "G9"))}
+
+
+def p4_outer(name: str, n: int, **over: Any) -> bytes:
+    """新端點 `name` 的合法外層位元組（ref 取 `ref_of(n)`、`subject` 為 null）；`over` 的值為
+    `...` 表示刪掉該鍵。"""
+    _path, kind, _golds = P4_ENDPOINTS[name]
+    obj = outer_dict(kind, None, ref_of(n))
+    for key, value in over.items():
+        if value is ...:
+            obj.pop(key, None)
+        else:
+            obj[key] = value
+    return dump(obj)
+
+
+def ref_of_golden(raw: bytes) -> str:
+    return json.loads(raw.decode("utf-8"))["audit_ref"]
+
+
+# ── AT-964-8-1：`POST /si/schedule:set`——201、原樣位元組、獨佔建立 ─────────────────────────────
+@pytest.mark.parametrize("code", ["G6", "G7"])
+def test_AT_964_8_1_schedule_set_stores_the_request_bytes_verbatim_and_exclusively(
+        live: Any, audit_dir: Path, fake: Path, code: str) -> None:
+    raw = sup.read_audit_golden(code)
+    ref = ref_of_golden(raw)
+    resp = post(live, SCHEDULE_SET, raw)
+    assert resp.status_code == 201, f"{code}：{resp.status_code} {resp.text}"
+    assert resp.json() == {"audit_ref": ref, "stored": True}
+    assert list(resp.json()) == ["audit_ref", "stored"], "鍵序固定、恰兩鍵"
+    assert str(audit_dir) not in resp.text and audit_dir.name not in resp.text, "回應不含絕對路徑"
+    assert listing(audit_dir) == [f"{ref}.json"], "稽核目錄內恰多一個檔"
+    assert (audit_dir / f"{ref}.json").read_bytes() == raw, "落檔位元組逐位等於請求"
+    again = post(live, SCHEDULE_SET, raw + b" ")          # 同名、不同位元組：409 且檔內容不變
+    assert again.status_code == 409 and again.json()["reason"] == "si_audit_exists"
+    assert (audit_dir / f"{ref}.json").read_bytes() == raw, "獨佔建立：同名再 POST 不覆寫"
+    assert listing(audit_dir) == [f"{ref}.json"]
+    assert read_calls(fake) == [], "Bridge 不啟動任何子行程（不呼叫 CLI 動詞）"
+
+
+# ── AT-964-8-2：`POST /si/runs:request`——201、原樣位元組；body 字串不被解析 ───────────────────
+@pytest.mark.parametrize("code", ["G8", "G9"])
+def test_AT_964_8_2_run_request_stores_the_request_bytes_verbatim(
+        live: Any, audit_dir: Path, fake: Path, code: str) -> None:
+    raw = sup.read_audit_golden(code)
+    ref = ref_of_golden(raw)
+    resp = post(live, RUN_REQUEST, raw)
+    assert resp.status_code == 201, f"{code}：{resp.status_code} {resp.text}"
+    assert resp.json() == {"audit_ref": ref, "stored": True}
+    assert (audit_dir / f"{ref}.json").read_bytes() == raw
+    assert listing(audit_dir) == [f"{ref}.json"]
+    assert read_calls(fake) == []
+
+
+def test_AT_964_8_2_the_inner_body_string_is_neither_parsed_nor_rewritten(
+        live: Any, audit_dir: Path) -> None:
+    """Bridge 不解內層 body：非 JSON、鍵序亂、多餘鍵的 body 字串照樣原樣落檔（不重排、不補鍵）。"""
+    odd = '{"z":1,"a":2, "note":"不重排"}  trailing'
+    for n, (name, (path, _kind, _golds)) in enumerate(P4_ENDPOINTS.items(), start=1):
+        raw = p4_outer(name, n, body=odd)
+        resp = post(live, path, raw)
+        assert resp.status_code == 201, f"{name}：{resp.text}"
+        stored = (audit_dir / f"{ref_of(n)}.json").read_bytes()
+        assert stored == raw
+        assert json.loads(stored.decode("utf-8"))["body"] == odd
+
+
+# ── AT-964-8-3：外層恰七鍵、kind 相符、subject 為 null 時接受 ──────────────────────────────────
+def test_AT_964_8_3_the_outer_seven_keys_with_matching_kind_and_null_subject_are_accepted(
+        live: Any, audit_dir: Path) -> None:
+    for n, (name, (path, kind, _golds)) in enumerate(P4_ENDPOINTS.items(), start=1):
+        raw = p4_outer(name, n)
+        assert list(json.loads(raw.decode("utf-8"))) == [
+            "schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac"]
+        assert json.loads(raw.decode("utf-8"))["kind"] == kind
+        resp = post(live, path, raw)
+        assert resp.status_code == 201, f"{name}：{resp.status_code} {resp.text}"
+    assert len(listing(audit_dir)) == 2
+
+
+@pytest.mark.parametrize("name", list(P4_ENDPOINTS))
+def test_AT_964_8_3_a_missing_or_extra_outer_key_is_422(
+        live: Any, audit_dir: Path, name: str) -> None:
+    path = P4_ENDPOINTS[name][0]
+    keys = ("schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac")
+    for missing in keys:
+        resp = post(live, path, p4_outer(name, 1, **{missing: ...}))
+        assert resp.status_code == 422, f"{name} 缺 {missing}：{resp.status_code} {resp.text[:200]}"
+        assert resp.json()["reason"] == "invalid_request"
+        assert any(v["field"] == missing and v["rule"] == "required"
+                   for v in resp.json()["violations"]), resp.json()["violations"]
+    extra = post(live, path, p4_outer(name, 1, extra="x"))
+    assert extra.status_code == 422 and extra.json()["reason"] == "invalid_request"
+    assert any(v["field"] == "extra" and v["rule"] == "unknown_key"
+               for v in extra.json()["violations"])
+    assert listing(audit_dir) == [], "違規請求不得落檔"
+
+
+# ── AT-964-8-E-1：subject 非 null 與 kind 不符——422 與 violations，不落檔 ─────────────────────
+@pytest.mark.parametrize("name", list(P4_ENDPOINTS))
+def test_AT_964_8_E_1_a_non_null_subject_is_422_with_a_subject_violation(
+        live: Any, audit_dir: Path, name: str) -> None:
+    path = P4_ENDPOINTS[name][0]
+    for label, subject in (("string", "PROP-SI-004"), ("empty-string", ""), ("number", 0)):
+        resp = post(live, path, p4_outer(name, 1, subject=subject))
+        assert resp.status_code == 422, f"{name} {label}：{resp.status_code} {resp.text[:200]}"
+        body = resp.json()
+        assert body["reason"] == "invalid_request"
+        hits = [v for v in body["violations"] if v["field"] == "subject"]
+        assert hits and set(hits[0]) == {"field", "rule", "message"}, body["violations"]
+        assert hits[0]["rule"] == "must_be_null"
+    assert listing(audit_dir) == []
+
+
+@pytest.mark.parametrize("name", list(P4_ENDPOINTS))
+def test_AT_964_8_E_1_a_mismatched_kind_is_422_with_a_kind_violation(
+        live: Any, audit_dir: Path, name: str) -> None:
+    path = P4_ENDPOINTS[name][0]
+    other = next(k for k in P4_ENDPOINTS if k != name)
+    for wrong in ("decide", "obs-add", "obs-close", P4_ENDPOINTS[other][1]):
+        resp = post(live, path, p4_outer(name, 1, kind=wrong))
+        assert resp.status_code == 422, f"{name} kind={wrong}：{resp.status_code} {resp.text[:200]}"
+        assert resp.json()["reason"] == "invalid_request"
+        assert any(v["field"] == "kind" and v["rule"] == "kind_mismatch"
+                   for v in resp.json()["violations"]), resp.json()["violations"]
+    assert listing(audit_dir) == []
+
+
+# ── AT-964-8-E-2：權杖、大小、非 JSON、同名 409、落檔 I/O 失敗的逐級對映 ──────────────────────
+@pytest.mark.parametrize("name", list(P4_ENDPOINTS))
+def test_AT_964_8_E_2_the_gates_answer_in_order_and_the_first_hit_decides(
+        make_bridge: Callable[..., Any], settings: Settings, fake: Path, tmp_path: Path,
+        name: str) -> None:
+    path = P4_ENDPOINTS[name][0]
+    audit = tmp_path / f"audit-e2-{name}"
+    audit.mkdir()
+    # ① 寫入面停用（權杖或稽核目錄未設）：先於權杖與本文——垃圾本文、缺權杖也是 503
+    for label, over in (("no-token", {"si_write_token": None, "si_audit_dir": audit}),
+                        ("no-dir", {"si_write_token": T0, "si_audit_dir": None}),
+                        ("neither", {"si_write_token": None, "si_audit_dir": None})):
+        off = make_bridge(replace(settings, si_root=fake, **over))
+        for token in (None, T0, "wrong"):
+            resp = post(off, path, GARBAGE, token=token)
+            assert resp.status_code == 503, f"{label} token={token!r}：{resp.status_code}"
+            assert resp.json()["reason"] == "si_write_disabled", label
+            assert T0 not in resp.text
+    live = make_bridge(replace(settings, si_root=fake, si_write_token=T0, si_audit_dir=audit))
+    # ② 缺權杖與錯權杖：同一個 403，先於本文檢查
+    for label, token in (("missing", None), ("wrong", "w" * len(T0))):
+        resp = post(live, path, GARBAGE, token=token)
+        assert resp.status_code == 403, f"{label}：{resp.status_code}"
+        assert resp.json() == {"code": 403, "reason": "si_write_forbidden"}
+    # ③ 本文：超過 65536 位元組＝422 `too_large`（不是 413；D-CS-11），非 JSON 物件＝422
+    big = post(live, path, p4_outer(name, 1, body="p" * 65537))
+    assert big.status_code == 422 and big.json()["reason"] == "invalid_request"
+    assert big.json()["violations"][0]["rule"] == "too_large"
+    for label, raw, rule in (("array", b"[]", "not_object"), ("string", b'"s"', "not_object"),
+                             ("two-objects", p4_outer(name, 1) + p4_outer(name, 1), "not_json"),
+                             ("not-json", b"nope", "not_json")):
+        resp = post(live, path, raw)
+        assert resp.status_code == 422, f"{label}：{resp.status_code} {resp.text[:200]}"
+        assert resp.json()["violations"][0]["rule"] == rule, label
+    assert listing(audit) == [], "至此被拒的請求都不得落檔"
+    # ④ 同名＝409，檔案內容仍是第一次的
+    first = p4_outer(name, 2)
+    assert post(live, path, first).status_code == 201
+    dup = post(live, path, p4_outer(name, 2, body="第二次"))
+    assert (dup.status_code, dup.json()["reason"]) == (409, "si_audit_exists")
+    assert (audit / f"{ref_of(2)}.json").read_bytes() == first
+    assert listing(audit) == [f"{ref_of(2)}.json"]
+
+
+@pytest.mark.parametrize("name", list(P4_ENDPOINTS))
+def test_AT_964_8_E_2_an_io_failure_while_storing_is_503_audit_write_failed(
+        live: Any, audit_dir: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    path = P4_ENDPOINTS[name][0]
+    real_open = os.open
+
+    def deny(target: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        if under(target, audit_dir):
+            raise OSError(errno.EACCES, "denied by the test", str(target))
+        return real_open(target, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", deny)
+    resp = post(live, path, p4_outer(name, 1))
+    body = resp.json()
+    assert resp.status_code == 503, f"{name}：{resp.status_code} {resp.text}"
+    assert (body["reason"], body["cause"]) == ("si_unavailable", "audit_write_failed")
+    assert str(audit_dir) not in resp.text
+    assert listing(audit_dir) == []
+
+
+def test_AT_964_8_E_2_an_oversized_body_is_refused_without_reading_the_rest_of_the_stream() -> None:
+    """D-CS-11：超量＝422 `too_large` 且**不讀完**——分塊上傳（無 Content-Length）時，累計一超過上限
+    就拒，不再消費後面的塊（把整份讀進記憶體再判，等於讓攻擊者決定 Bridge 的記憶體用量）。"""
+    import asyncio
+
+    from app.routers import si as si_router
+
+    chunk = 8192
+    limit_chunks = si_router.SI_WRITE_BODY_MAX_BYTES // chunk          # 8
+    consumed: list[int] = []
+
+    class FakeRequest:
+        headers: dict[str, str] = {}                                    # 分塊：沒有 Content-Length
+
+        async def stream(self) -> Any:
+            for i in range(1000):                                       # 假想的 8 MB 本文
+                consumed.append(i)
+                yield b"x" * chunk
+
+    with pytest.raises(ApiError) as caught:
+        asyncio.run(si_router._read_limited_body(FakeRequest()))        # type: ignore[arg-type]
+    assert (caught.value.status_code, caught.value.body["reason"]) == (422, "invalid_request")
+    assert caught.value.body["violations"][0]["rule"] == "too_large"
+    assert len(consumed) <= limit_chunks + 1, f"超量後不得繼續讀：已消費 {len(consumed)} 塊"
+
+
+# ── AT-964-8-E-3：其餘方法一律 405 ─────────────────────────────────────────────────────────────
+def test_AT_964_8_E_3_other_methods_on_the_two_new_paths_are_405(
+        live: Any, fake: Path, audit_dir: Path) -> None:
+    wrong = []
+    for path in (SCHEDULE_SET, RUN_REQUEST):
+        for method in ("GET", "PUT", "PATCH", "DELETE"):
+            resp = live.client.request(method, path, headers={"X-Bridge-Token": T0}, content=b"{}")
+            if resp.status_code != 405:
+                wrong.append((method, path, resp.status_code))
+    assert wrong == [], f"兩條新路徑乘四種非 POST 方法必須全是 405：{wrong}"
+    assert listing(audit_dir) == [], "405 不得落任何檔"
+    assert read_calls(fake) == [], "405 不得啟動任何子行程"

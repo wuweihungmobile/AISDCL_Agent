@@ -753,6 +753,94 @@ def test_AT_933_1_E_3_criterion_4_accepts_the_whitelisted_two_builder_shape(name
     assert_flagged("single-builder", crit4_argv("si_cli.py", one), "判準4")
 
 
+# ── AT-964-8-4：P4 兩個新路由（`/si/schedule:set`、`/si/runs:request`）的靜態鎖 ───────────────
+#: 修改前的路由總數（五個寫入以前：六個 GET、議題兩個 GET、三個寫入 POST、一個預檢 POST）。
+SI_ROUTES_BEFORE_P4 = 12
+#: P4 新增的兩個寫入路由：處理函式名 → (方法, 路徑)。
+P4_ROUTES: dict[str, tuple[str, str]] = {
+    "si_schedule_set": ("POST", "/si/schedule:set"),
+    "si_run_request": ("POST", "/si/runs:request")}
+P4_ROUTE_BUILDER = "_store_signed_audit"
+
+
+def p4_route_violations(rel: str, source: str) -> list[str]:
+    """兩個新路由的形態：函式必須存在、各只呼叫 `_store_signed_audit`（不碰 `si_cli`、不組 argv、不
+    直接寫檔）；`routers/si.py` 整檔不得有組 argv 的函式（argv 只准住 `si_cli.py`）。"""
+    tree = ast.parse(source)
+    out: list[str] = [f"判準6 {rel} 不得有組 argv 的函式：{fn.name}" for fn in argv_functions(tree)]
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, FUNC_TYPES)}
+    for name in P4_ROUTES:
+        fn = funcs.get(name)
+        if fn is None:
+            out.append(f"判準6 {rel} 缺少新路由處理函式 {name}")
+            continue
+        body = [n for stmt in fn.body for n in ast.walk(stmt)]    # 不含裝飾器與參數預設值
+        called = {_call_name(c) for c in body if isinstance(c, ast.Call)}
+        if called != {P4_ROUTE_BUILDER}:
+            out.append(f"判準6 {rel}:{name} 只准呼叫 {P4_ROUTE_BUILDER}，"
+                       f"實際 {sorted(called - {None})}")
+        if any(isinstance(n, ast.Name) and n.id == "si_cli" for n in body):
+            out.append(f"判準6 {rel}:{name} 不得碰 si_cli（Bridge 不呼叫任何 CLI 動詞）")
+    return out
+
+
+def test_AT_964_8_4_the_route_census_grows_by_exactly_the_two_new_post_routes() -> None:
+    from app.routers import si as si_router
+
+    routes = {(m, r.path) for r in si_router.router.routes for m in sorted(r.methods)}
+    assert len(si_router.router.routes) == SI_ROUTES_BEFORE_P4 + 2 == 14
+    assert len(routes) == 14, "每條路由恰一個方法"
+    posts = sorted(path for method, path in routes if method == "POST")
+    assert posts == sorted([
+        "/si/proposals/{id}:decide", "/si/observations", "/si/observations/{id}:close",
+        "/si/schedule:set", "/si/runs:request", "/si/observations:validate"]), posts
+    assert {v for v in P4_ROUTES.values()} <= routes
+
+
+def test_AT_964_8_4_the_real_router_keeps_the_five_criteria_and_the_new_routes_only_store_audits(
+) -> None:
+    source = (APP_DIR / "routers" / "si.py").read_text(encoding="utf-8")
+    assert p4_route_violations("routers/si.py", source) == []
+    assert crit1_writes("routers/si.py", source) == [], "判準 1′：零寫入形態、引數不變"
+    sources = app_sources()
+    assert crit4_argv("si_cli.py", sources["si_cli.py"]) == [], "動詞白名單與兩個 builder 不變"
+    assert crit5_dynamic(dynamic_argvs(si_cli)) == [], "動態對照不變"
+    assert sorted(f.name for f in argv_functions(ast.parse(sources["si_cli.py"]))) == [
+        "build_argv", "build_validate_argv"], "組 argv 的函式仍恰兩個"
+    for banned in ("sched", "run-open", "decide", "obs-close"):
+        assert banned not in string_constants(sources["si_cli.py"]), banned
+
+
+def _router_with(body: str) -> str:
+    """真路由檔，把 `si_schedule_set` 的呼叫那一行換成 `body`（注入副本）。"""
+    real = (APP_DIR / "routers" / "si.py").read_text(encoding="utf-8")
+    indent = " " * 37
+    marker = ('return await _store_signed_audit(request, x_bridge_token, verb="sched-set", '
+              f'kind="sched-set",\n{indent}path_id=None, id_pattern=None)')
+    assert marker in real, "注入點必須存在（真路由檔改形態時本鎖要跟著改）"
+    return real.replace(marker, body)
+
+
+P4_INJECTIONS = {
+    "argv-assembly": 'cmd = [sys.executable, "x.py", "sched", "set"]\n    return cmd',
+    "cli-call": 'return JSONResponse(si_cli.run_export(request.app.state.settings.si_root, '
+                '"status"))',
+    "write-call": 'open("/tmp/x", "w")\n    return await _store_signed_audit(request, '
+                  'x_bridge_token, verb="sched-set", kind="sched-set", path_id=None, '
+                  'id_pattern=None)',
+}
+
+
+@pytest.mark.parametrize("name", list(P4_INJECTIONS))
+def test_AT_964_8_4_injected_copies_of_the_router_are_each_flagged(name: str) -> None:
+    bad = _router_with(P4_INJECTIONS[name])
+    hits = p4_route_violations("routers/si.py", bad) + crit1_writes("routers/si.py", bad)
+    assert hits and all(h.startswith(("判準6", "判準1")) for h in hits), f"{name}：{hits}"
+    assert p4_route_violations("routers/si.py", _router_with(
+        'return await _store_signed_audit(request, x_bridge_token, verb="sched-set", '
+        'kind="sched-set", path_id=None, id_pattern=None)')) == [], "良性副本不被誤判"
+
+
 def test_AT_933_1_E_3_criterion_5_flags_a_dynamic_repo_flag_a_wrong_verb_and_swapped_pairing(
         tmp_path: Path) -> None:
     with_repo = variant(export_tail=', "--repo", str(root)')

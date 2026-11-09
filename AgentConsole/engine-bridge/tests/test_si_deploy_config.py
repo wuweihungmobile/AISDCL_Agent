@@ -577,7 +577,13 @@ def _workflow(paths: list[str], *, push_paths: list[str] | None = None) -> dict[
 
 FULL_PATHS = ["tools/selfimproving.py", "tools/_stdio_utf8.py", "tools/lib/platform_utils.py",
               "tools/lib/selfimproving/**", "tools/lib/apply_lock.py", "tools/lib/sdd_latest.py",
-              "docs/06_quality/SelfImproving_Protocol/params.json"]
+              "docs/06_quality/SelfImproving_Protocol/params.json",
+              # P4 閉包（Console TCS D-CS-23）：sched.py 頂層 import transcript_activity 連鎖
+              "tools/lib/transcript_activity.py", "tools/lib/quota_limits.py",
+              "tools/lib/quota_messages.py", "tools/lib/model_roles.py",
+              "tools/lib/quota_policy.py", "tools/lib/quota_policy_env.py",
+              "tools/lib/quota_pace.py", "tools/lib/quota_burndown.py",
+              "tools/lib/endurance_env.py", "tools/lib/unattended_authz.py"]
 
 
 def test_AT_940_4_E_1_the_coverage_checker_names_what_is_missing_and_where() -> None:

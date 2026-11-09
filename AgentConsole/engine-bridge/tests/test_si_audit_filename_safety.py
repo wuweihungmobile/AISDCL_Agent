@@ -88,6 +88,43 @@ def test_AT_950_1_E_3_the_http_endpoints_reject_the_same_refs_with_422(
     assert listing(audit_dir.parent) == parent_before
 
 
+#: P4 排程控制載體的兩個端點（Console 排程 TCS AC-964-8）：無路徑 id，外層 `subject` 恆為 null。
+P4_ENDPOINTS = {
+    "sched-set": ("/si/schedule:set", "sched-set", None),
+    "run-request": ("/si/runs:request", "run-request", None),
+}
+
+
+def test_AT_964_8_5_the_two_new_endpoints_reject_the_same_illegal_refs_and_accept_a_good_one(
+        make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
+        audit_dir: Path) -> None:
+    live = make_bridge(replace(settings, si_root=make_fake_si(tmp_path), si_write_token=T0,
+                               si_audit_dir=audit_dir))
+    parent_before, dir_before = listing(audit_dir.parent), listing(audit_dir)
+    statuses: dict[str, set[int]] = {}
+    for name, value in ILLEGAL_REFS.items():
+        for endpoint, (path, kind, subject) in P4_ENDPOINTS.items():
+            resp = live.client.post(
+                path, content=outer_with(kind, subject, value),
+                headers={"Content-Type": "application/json", "X-Bridge-Token": T0})
+            label = f"{name} @ {endpoint}"
+            assert resp.status_code == 422, f"{label}：{resp.status_code} {resp.text[:200]}"
+            assert resp.json()["reason"] == "invalid_request", label
+            assert any(v["field"] == "audit_ref" for v in resp.json()["violations"]), \
+                f"{label}：{resp.json()['violations']}"
+            statuses.setdefault(name, set()).add(resp.status_code)
+    assert all(len(codes) == 1 for codes in statuses.values()), "兩個端點的結果一致"
+    assert listing(audit_dir) == dir_before == [], "非法 audit_ref 一個檔都不落"
+    assert listing(audit_dir.parent) == parent_before, "目錄外也沒有任何新檔"
+    for n, (endpoint, (path, kind, subject)) in enumerate(P4_ENDPOINTS.items(), start=1):
+        good = f"d1000000-0000-4000-8000-{n:012d}"
+        resp = live.client.post(
+            path, content=outer_with(kind, subject, good),
+            headers={"Content-Type": "application/json", "X-Bridge-Token": T0})
+        assert resp.status_code == 201, f"{endpoint}：對照組合法小寫 UUID 必須 201：{resp.text}"
+        assert (audit_dir / f"{good}.json").is_file()
+
+
 def test_AT_950_1_E_3_a_lowercase_canonical_uuid_is_the_control_that_succeeds(
         make_bridge: Callable[..., Any], settings: Settings, tmp_path: Path,
         audit_dir: Path) -> None:

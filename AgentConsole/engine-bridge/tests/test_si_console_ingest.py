@@ -398,6 +398,19 @@ GOLDEN_TABLE: dict[str, tuple[str, str]] = {
                               "ccbc3e7aa73925b976a553dc2e062b758d556c7e5d27a2ded8202334b7b012b9"),
     "obs-close.json": ("4c5985a35c6da9189ab0277149c67f745c9977b5b5694f229e03c95910af5b57",
                        "fb9c251546f9f40bbe303579c40c39ea2a3e53e09acea60317a0e72533e24410"),
+    # G6～G9：Console 排程 TCS §5.1（D-CS-18）；sha256 由本棒對檔案現算、mac 以 K0 重算並與檔內相符
+    "sched-set-enable.json": (
+        "55cf567acf52711cd398f1095c16ab0eb11b6791d8b7ca228d19d7559b3791b0",
+        "6c6d224682b1e06279d9709169e490911fb84f338595de94fab4f8c55774e868"),
+    "sched-set-disable.json": (
+        "7210a5245f4515978c460f916c63731f7c5d442f16397ef587b4cd5160c7b6c5",
+        "856c7afef2cbedaf0486740f56a46c65f7870a3b59ff538c21939ce06bae3b94"),
+    "run-request-note.json": (
+        "59256ad432b075c64bcce93e61054ba72492aeec3cbfc2d29c8ffb8ce7970969",
+        "437b37eec00f7607f67fd5c05c6fe31a8564197d332f47b32952f9ea0b2976f3"),
+    "run-request.json": (
+        "9977906f0432ba767bd5de24e35db05a50e0a760309924fba91a347e97a66f58",
+        "a68bb7614508d7cb7a9a2fd4cf6645d1af584a8cd3b23107e2794b843f842784"),
 }
 BACKEND_AUDIT_DIR = (sup.MONOREPO / "AgentConsole" / "backend" / "src" / "test" / "resources" / "si"
                      / "audit")
@@ -455,6 +468,100 @@ def test_AT_950_4_3_the_checker_names_the_copy_that_drifted(tmp_path: Path) -> N
     assert problems and all(p.startswith("漂移的那份") for p in problems)
     assert any("obs-close.json" in p and "sha256" in p for p in problems)
     assert any("obs-close.json" in p and "mac" in p for p in problems)
+
+
+# ── P4 排程控制載體：G6～G9 被真 CLI 收下（Console 排程 TCS AT-964-9-3、AT-964-9-E-1）────────────
+#: 黃金檔代號 → (檔名, 入帳動詞族, 期望的事件種類集合)。`run-request` 入帳為 `run.open`，當下已有
+#: 未關運轉時改記 `sched.skip`，兩者皆算已入帳（TCS W-S9 (e)）。
+P4_GOLDENS: dict[str, tuple[str, str, frozenset[str]]] = {
+    "G6": ("sched-set-enable.json", "sched", frozenset({"sched.set"})),
+    "G7": ("sched-set-disable.json", "sched", frozenset({"sched.set"})),
+    "G8": ("run-request-note.json", "open", frozenset({"run.open", "sched.skip"})),
+    "G9": ("run-request.json", "open", frozenset({"run.open", "sched.skip"}))}
+#: Python 端向量 V5～V8（與 backend 端 `SiAuditSignerTest` 的向量逐字相同；body 為簽章對象字串）。
+P4_VECTORS: dict[str, tuple[str, str]] = {
+    "V5": ('{"schema_rev":1,"audit_ref":"a1000000-0000-4000-8000-000000000006",'
+           '"kind":"sched-set","user":"admin","role":"ADMIN","time":"2026-10-24T22:30:15+08:00",'
+           '"enabled":true,"period_minutes":120,"reason":"夾具啟用"}',
+           "6c6d224682b1e06279d9709169e490911fb84f338595de94fab4f8c55774e868"),
+    "V6": ('{"schema_rev":1,"audit_ref":"a1000000-0000-4000-8000-000000000007",'
+           '"kind":"sched-set","user":"admin","role":"ADMIN","time":"2026-10-24T22:30:15+08:00",'
+           '"enabled":false,"period_minutes":1440}',
+           "856c7afef2cbedaf0486740f56a46c65f7870a3b59ff538c21939ce06bae3b94"),
+    "V7": ('{"schema_rev":1,"audit_ref":"a1000000-0000-4000-8000-000000000008",'
+           '"kind":"run-request","user":"admin","role":"ADMIN",'
+           '"time":"2026-10-24T22:30:15+08:00","note":"夾具立即啟動"}',
+           "437b37eec00f7607f67fd5c05c6fe31a8564197d332f47b32952f9ea0b2976f3"),
+    "V8": ('{"schema_rev":1,"audit_ref":"a1000000-0000-4000-8000-000000000009",'
+           '"kind":"run-request","user":"admin","role":"ADMIN",'
+           '"time":"2026-10-24T22:30:15+08:00"}',
+           "a68bb7614508d7cb7a9a2fd4cf6645d1af584a8cd3b23107e2794b843f842784")}
+
+
+def p4_ingest(root: Path, home: Path, family: str, ref: str,
+              key: str | None = K0) -> tuple[int, dict[str, Any], str]:
+    """以真 CLI 入帳一份 Console 排程稽核檔：`sched` 族＝`sched set --carrier console`；`open` 族＝
+    `run-open --trigger a --carrier console`（`--coord` 指向稽核檔本身）。"""
+    if family == "sched":
+        args = ("sched", "set", "--carrier", "console", "--audit-ref", ref, "--by", "main",
+                "--json")
+    else:
+        args = ("run-open", "--trigger", "a", "--carrier", "console", "--audit-ref", ref,
+                "--coord", f"console_audit/{ref}.json", "--by", "console", "--json")
+    rc, out, err = sup.ingest_run(root, home, key, *args)
+    return rc, (json.loads(out) if out.strip().startswith("{") else {}), out + err
+
+
+def test_AT_964_9_3_the_p4_golden_copies_equal_the_backend_files_and_the_real_cli_ingests_them(
+        tmp_path: Path) -> None:
+    assert BACKEND_AUDIT_DIR.is_dir(), "backend 黃金檔目錄缺（不 skip）"
+    for code, (name, family, kinds) in P4_GOLDENS.items():
+        bridge_file, backend_file = sup.AUDIT_GOLDEN_DIR / name, BACKEND_AUDIT_DIR / name
+        assert bridge_file.is_file() and backend_file.is_file(), f"{code}：黃金檔缺（不 skip）"
+        raw = bridge_file.read_bytes()
+        assert raw == backend_file.read_bytes(), f"{code}：Bridge 副本與 backend 位元組不同"
+        assert raw == sup.read_audit_golden(code)
+        root, home = new_repo(tmp_path, code)
+        ref = place(home, raw)
+        before = events_items(root)
+        rc, result, text = p4_ingest(root, home, family, ref)
+        assert rc == 0, f"{code}：入帳 rc={rc}（釘收下、不釘數值）：{text[-300:]}"
+        after = events_items(root)
+        assert after[:-1] == before and len(after) == len(before) + 1, f"{code}：只准多一筆事件"
+        event = after[-1]
+        assert event["kind"] in kinds, f"{code}：事件種類 {event['kind']}"
+        assert event["audit_ref"] == ref, code
+        assert event["audit_sha256"] == "sha256:" + hashlib.sha256(raw).hexdigest(), code
+        assert (home / "console_audit" / f"{ref}.json").read_bytes() == raw, "稽核檔入帳後仍在"
+    assert len(P4_GOLDENS) == 4
+
+
+def test_AT_964_9_E_1_the_python_vectors_verify_and_a_swapped_body_key_order_is_a_mac_mismatch(
+        tmp_path: Path) -> None:
+    for vector, (code, (name, _family, _kinds)) in zip(P4_VECTORS, P4_GOLDENS.items(),
+                                                       strict=True):
+        body, mac = P4_VECTORS[vector]
+        assert sup.hmac_hex(K0, body) == mac, f"{vector}：以標準庫 HMAC 重算必須等於表內 mac"
+        outer = json.loads((sup.AUDIT_GOLDEN_DIR / name).read_bytes().decode("utf-8"))
+        assert (outer["body"], outer["mac"], outer["key_id"]) == (body, mac, sup.K0_ID), \
+            f"{vector}↔{code}：向量與黃金檔必須逐字相同"
+    swaps = {"sched": ('"user":"admin","role":"ADMIN"', '"role":"ADMIN","user":"admin"'),
+             "open": ('"user":"admin","role":"ADMIN"', '"role":"ADMIN","user":"admin"')}
+    for code, (name, family, _kinds) in P4_GOLDENS.items():
+        good = (sup.AUDIT_GOLDEN_DIR / name).read_bytes()
+        swapped = sup.audit_variant(good, body_replace=swaps[family])       # mac 不重簽
+        flipped = good.replace(b"admin", b"admiN", 1)                       # 改到 body 內位元組
+        for label, raw in (("swapped-order", swapped), ("one-byte-flip", flipped)):
+            assert raw != good, f"{code} {label}：變形必須真的改了位元組"
+            root, home = new_repo(tmp_path, f"{code}-{label}")
+            ref = place(home, raw)
+            before = ledgers(root)
+            rc, result, text = p4_ingest(root, home, family, ref)
+            assert rc == 1, f"{code} {label}：rc={rc} {text[-300:]}"
+            assert result.get("ok") is False and codes_of(result) == ["AUDIT-MAC-MISMATCH"], \
+                f"{code} {label}：{result.get('codes')}"
+            assert ledgers(root) == before, f"{code} {label}：拒收不得改動任何一本帳"
+            assert (home / "console_audit" / f"{ref}.json").read_bytes() == raw, "稽核檔仍在"
 
 
 # ── AT-950-11-E-2：寫入閉包缺檔時大聲失敗 ──────────────────────────────────────────────────────
