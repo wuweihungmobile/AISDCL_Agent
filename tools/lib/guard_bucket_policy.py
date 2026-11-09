@@ -401,8 +401,17 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # 與塊對階段）與 F-07（案文檢查器六變體反例）兩項偵測力補強，受測對象仍是散文、無法移出；
     # 由獨立 QA 鏡一審指名（報告 SCG4-REVIEW-SelfImprovingLedgerDb-P0-20261031.md §B／§C），主控依
     # 凍結常態規則裁定重釘。值取自當回合 census 實測（exclusive 5253），零加減推算。
+    # 🔴 SelfImproving P4 自動演化排程實作收尾單人窗口（護欄層記帳＝同標籤 R214 第十五列；主控依
+    # 凍結常態規則裁定）：prose 5253 實測未動（新鎖檔的 TestParamsNine／TestSopP4／_build_a／
+    # _build_n／a_calls 五個 chunk 原落 prose，於 docstring 指名受測模組 tools/lib/selfimproving/
+    # {params,patrolbrief,sched,unattended}.py 後轉 mixed——正確分類，不是繞）、guard_self
+    # 3250→3353（+103）——成長全在 test_selfimproving_schedule_gate.py 的 TestZeroRegression
+    # （AT-440-5-x：§2.5 同步表站點的斷言值與既有 SI 測試檔集合對帳，守的是測試自己）與
+    # TestAnchors（AT-440-6-x：全部 AT 的 -k 錨定唯一與有牙自證，與 P3 TestAnchors 同型），
+    # 守自己＝只能是 guard_self、無法移出；SD 於 TCS §3.1 預告、QA SCG-0～3 二審 PASS。
+    # 兩值取自當回合 `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
     "prose": 5253,
-    "guard_self": 3250,
+    "guard_self": 3353,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種
