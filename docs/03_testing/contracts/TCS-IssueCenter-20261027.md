@@ -877,7 +877,7 @@ Given（夾具）與 Then（判定）；R 條文對應見 R 條文表的 AT 欄�
 | AT-IC-07-4-E-1 | BI | 無 JWT；`since`＝-1、`limit`＝0、`since`＝abc、`since`＝2147483648；對照 `since`＝2147483647；帶 `status`、`source` | 401；前四個 `since`／`limit` 例皆 400 且 MiniBridge 零呼叫（型別不符不觸及 Bridge）；`since`＝2147483647 為 200 並原樣轉發；`status`、`source` 原樣轉發（MiniBridge 見到解碼後的同值） |
 | AT-IC-07-5-1 | BI | `GET /api/v1/issues/{id}`（存在） | 含 `raw`、`timeline`、`links` 與 `priority`、`priorityNote`；沒有 `legend`、`summary` |
 | AT-IC-07-5-E-1 | BI | 查無；格式不合 | 404 reason `si_not_found`、訊息「查無此議題」、`details.id`；422（頂層 reason `引擎拒絕此請求`、`details.bridgeReason`＝`invalid_request`） |
-| AT-IC-07-6-1 | BB | ArchUnit 檢查 `AgentBridge`、`SiController` | `si` 起頭方法仍恰五個；`siExport` 參數型別依序 String、Integer、Integer、String、String、String；`SiController` 的 GET 七與 POST 四不變 |
+| AT-IC-07-6-1 | BB | ArchUnit 檢查 `AgentBridge`、`SiController` | `si` 起頭方法仍恰五個（勘誤四 4-2：P4 後為七個）；`siExport` 參數型別依序 String、Integer、Integer、String、String、String；`SiController` 的 GET 七與 POST 四不變（勘誤四 4-2：P4 後 POST 六） |
 | AT-IC-07-6-E-1 | BB | ArchUnit 檢查 Issue* 類別 | 它們呼叫 `AgentBridge` 的方法只有 `siExport`；`IssueController` 名稱不符 `Si*Controller`（不受該組計數鎖） |
 | AT-IC-07-7-1 | BI | MiniBridge 停用（連線拒絕）、讀取逾時、優先順序表讀取失敗（`IssuePriorityRepository` 替身拋 `DataAccessException`） | `GET /api/v1/issues` 非 2xx 且本文沒有 `data`（不回空表、不回缺 priority 的清單） |
 | AT-IC-07-7-E-1 | BI | Bridge 503、連線拒絕、逾時、順位表失敗各一 | 依序 503 `si_unavailable`、502、504、5xx；皆無 `data`；Bridge 單次呼叫（逾時不重試） |
@@ -1356,3 +1356,4 @@ $snap = Get-Content -LiteralPath <snap 檔> -Encoding utf8; $o = git -C <repo> s
 | 條 | TCS 座標 | 原文 | 改文 | 理由 |
 |---|---|---|---|---|
 | 4-1 | AT-IC-01-7-2（:735） | 「動作鍵恰為 `events.KINDS`（21）」 | 「動作鍵恰為 `events.KINDS`（**23**）」；`issuemap.EVENT_LABELS` 加 `sched.set`＝排程設定、`sched.skip`＝排程跳過；`tools/tests/test_selfimproving_issuemap.py::test_AT_IC_01_7_2_channel_event_and_decision_dictionaries` 的計數斷言 21→23（AT 標題、id、其餘判準不變） | 上游 `events.KINDS` 由 21 增為 23（SelfImproving PRD v0.13.1 FG-M、TCS-SelfImproving-P4 R139），閉包對帳 AT-IC-01-1-1／01-1-E-1／01-1-E-2 要求字典鍵集合與 KINDS 全等，否則四個 AT 轉紅 ⇒ 字典隨上游加列（TCS-SelfImproving-P4 §7.1 D-IMP-3）；計數字面隨上游、不是放寬 |
+| 4-2 | AT-IC-07-6-1（:880） | 「`si` 起頭方法仍恰五個」「`SiController` 的 GET 七與 POST 四不變」 | `AgentBridge` 的 `si` 起頭方法 **七個**（加 `siWriteScheduleSet`、`siWriteRunRequest`）、`SiController` **POST 六**（加 `/schedule/set`、`/runs/request`），GET 七不變；`IssueBridgeArchTest.AT_IC_07_6_1` 的計數斷言 5→7、4→6（AT 標題、id、`siExport` 參數型別斷言不變） | 本 AT 是議題中心增量的「不擴張 SI 寫入面」鎖；SelfImproving P4 Console 半（鍵 `agentconsole-si-schedule`、Console TCS-SelfImprovingSchedule-20261109 W-S7／D-CS-19）依凍結契約 API_Contract_SelfImproving_P2c 新增兩個 POST 與兩個 Bridge 呼叫，計數隨上游契約更新；鎖的語意（除契約明列者外不得再長）不變 |

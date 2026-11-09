@@ -1,6 +1,6 @@
 # API 契約 — SelfImproving 排程控制載體（P2c／P4 Console 半：排程設定、立即啟動、排程狀態顯示）
 
-**版本**：v0.1（規格稿）｜**日期**：2026-11-09｜**作者角色**：SA／Architect 合一（規格棒）；實作輪落地後由 Developer 依實作如實校對並升 v1.0（先例：P2b v1.0）
+**版本**：v1.0（實作輪校對；PKG-BE 2026-11-09 落地）｜**日期**：2026-11-09｜**作者角色**：SA／Architect 合一（規格棒）；v1.0 由主控依 PKG-BE 交卷如實校對（Console TCS §7.1 D-CS-14～20；先例：P2b v1.0）
 **讀者**：後端開發者（Spring Boot 4.1／Java 21）、前端開發者（Next.js 16）、Bridge 維護者（Python）、主機端入帳者（根層 CLI 與巡邏器）、QA
 **與前代契約的關係**：本檔**後繼並補充** [API_Contract_SelfImproving_P2b.md](API_Contract_SelfImproving_P2b.md)（v1.0 與 §8 增補一字不改；其 §0 共通約定、§1.2 通則、§2.1 Bridge 步驟、§3.2 簽章、§5 組態在本檔一律引用、不複寫）與 [API_Contract_SelfImproving_P1b.md](API_Contract_SelfImproving_P1b.md)（`GET /si/status` 的 `items[0]` 多一個 `schedule` 鍵，見 §4）。
 **機器可讀版**：同 P2b——runtime 的 `/v3/api-docs` 與入庫快照 `frontend/lib/api/schema.d.ts`；與本文衝突時以本文為準並回報修正（實作輪校對後以實作為準）。
@@ -13,6 +13,7 @@
 | 版本 | 日期 | 範圍 | 對應來源 |
 |------|------|------|----------|
 | v0.1 | 2026-11-09 | 規格稿：console-api 兩個 POST；Bridge 兩個 POST；稽核 JSON 兩種新 `kind` 的 Console 側落點；`status.schedule` 與對帳 `kind` 新值；`si_console_writes.kind` CHECK 改版 | Console PRD §0.11（鍵 `agentconsole-si-schedule`） |
+| v1.0 | 2026-11-09 | 實作輪校對（只改字面、不改語意）：GET 對兩新路徑的角色回應改為「已登入角色一律 405」（§1.1）；未知欄位忽略不入 body、DTO 以 `Object` 接收使型別錯走 422 一次全列、「全空白」對齊 Python `str.strip()`（§1.2）；`SiKeyNames` 既有通則涵蓋九鍵、無特例表（§4.1）；Flyway 實名 `V23__si_console_writes_kind_sched.sql`、約束實名 `si_console_writes_kind_check`（§5）；黃金檔 G6～G9 定稿值見 Console TCS §5.1 | PKG-BE 交卷（`gradlew clean build` 全綠）；Console TCS §7.1 D-CS-14～20 |
 
 > **v0.1 變更摘要**：
 > 1. **新路徑**：console-api 2 個（`POST /api/v1/si/schedule/set`、`POST /api/v1/si/runs/request`）；Bridge 2 個（`POST /si/schedule:set`、`POST /si/runs:request`）；既有 `GET /api/v1/si/status` 回應的 `items[0].schedule` 為新增鍵（加鍵、`schema_rev` 不變）。
@@ -55,11 +56,11 @@
 | API-SI-12 | `POST /api/v1/si/schedule/set` | 僅 ADMIN 且在 `console.si.deciders` | 201 收據 | `postSiScheduleSet` |
 | API-SI-13 | `POST /api/v1/si/runs/request` | 同上 | 201 收據 | `postSiRunRequest` |
 
-`SecurityConfig` 既有 `POST /api/v1/si/**`→`ADMIN` 已涵蓋，不新增規則；PUT／PATCH／DELETE 對兩個新路徑：VIEWER 403、OPERATOR 與 ADMIN 405（沿 P2b §1.1 通則，`@RequestMapping` 不帶 `method`、ArchUnit `SiReadOnlyArchTest` 擴充覆蓋）。GET 對這兩個路徑：ADMIN 405、其餘沿既有（無 token 401、VIEWER 與 OPERATOR 403）。沒有批次。
+`SecurityConfig` 既有 `POST /api/v1/si/**`→`ADMIN` 已涵蓋，不新增規則；PUT／PATCH／DELETE 對兩個新路徑：VIEWER 403、OPERATOR 與 ADMIN 405（沿 P2b §1.1 通則，`@RequestMapping` 不帶 `method`、ArchUnit `SiReadOnlyArchTest` 擴充覆蓋）。GET 對這兩個路徑：無 token 401、已登入角色（VIEWER／OPERATOR／ADMIN）一律 405（v1.0 實測：`SecurityConfig` 對 `GET /api/v1/**` 放行 VIEWER 以上、兩路徑無 GET 對映；原 v0.1「VIEWER 與 OPERATOR 403」為規格稿推定；Console TCS D-CS-14）。沒有批次。
 
 ### 1.2 請求欄位表（backend 輸入閘＝前端 `lib/domain/si.ts` 表 M-S／M-R 同一張表；前端先擋、backend 為權威）
 
-通則沿 P2b §1.2：字串欄先判原值（控制字元 U+0000～U+001F、DEL、孤立代理字元＝拒收，含首尾換行）→去前後空白→（有值則）不可全空白→長度以 **code point** 計；一次回報全部違規：422、`reason=invalid_request`、`details.violations[{field, message}]`（camelCase 欄名；帳號 `user`）。本文須為單一 JSON 物件（`run-request` 可為 `{}`）；未知欄位的處置沿 P2b 兩個 POST 現行行為（實作輪現查 DTO 並於 v1.0 回寫）。
+通則沿 P2b §1.2：字串欄先判原值（控制字元 U+0000～U+001F、DEL、孤立代理字元＝拒收，含首尾換行）→去前後空白→（有值則）不可全空白→長度以 **code point** 計；一次回報全部違規：422、`reason=invalid_request`、`details.violations[{field, message}]`（camelCase 欄名；帳號 `user`）。本文須為單一 JSON 物件（`run-request` 可為 `{}`）；未知欄位：**忽略、不入稽核 body**（Spring Boot 預設；v1.0 現查回寫，Console TCS D-CS-17）；DTO 欄位（`enabled`、`periodMinutes`、`reason`、`note`）以 `Object` 接收，字串 `"true"`、小數、布林充當整數等型別錯一律走輸入閘 422 一次全列，不被序列化器悄悄轉型（D-CS-20 (a)）；「全空白」判準對齊 Python `str.strip()`（Java `isWhitespace`∪`isSpaceChar`∪U+0085，例：全是 U+00A0 也拒；D-CS-20 (b)），避免 Console 放行而 CLI 以 `FIELD-BLANK` 拒收。
 
 **1.2.1 `POST /schedule/set`（表 M-S）**：body `{enabled, periodMinutes, reason?}`
 
@@ -140,7 +141,7 @@
 ### 4.1 `status.items[0].schedule`
 
 - 形狀＝根層 PRD §9.2〈P4 增補〉「`status.schedule`」逐字（`enabled`、`period_minutes`、`period_min`、`period_max`、`heartbeat_minutes`、`last_set{at,by,carrier}`、`cell_start`、`cell_end`、`ran_this_cell`、`last_skip{at,reason,detail}|null`、`overdue`、`armed`）；`export` 路徑的 `armed` 恆為字串 `NOT-EVALUABLE：export-reads-no-home`（Console 只看事件折出的欄位）；`overdue` 於量不到時為 `null` 並入 `ne`。
-- **backend 經既有 `GET /api/v1/si/status` 原樣轉出**，`SiKeyNames` 深層欄名對映擴充（`period_minutes→periodMinutes`、`period_min→periodMin`、`period_max→periodMax`、`heartbeat_minutes→heartbeatMinutes`、`last_set→lastSet`、`cell_start→cellStart`、`cell_end→cellEnd`、`ran_this_cell→ranThisCell`、`last_skip→lastSkip`；`last_set.at／by／carrier` 與 `last_skip.at／reason／detail` 內層鍵本即單字）；缺鍵≠null、未知鍵透傳的既有規則不變（P1b §0.2）。`schema_rev` 維持 1，Bridge 常數 `SI_EXPORT_SCHEMA_REV` 不變。
+- **backend 經既有 `GET /api/v1/si/status` 原樣轉出**，`SiKeyNames` 深層欄名對映擴充（`period_minutes→periodMinutes`、`period_min→periodMin`、`period_max→periodMax`、`heartbeat_minutes→heartbeatMinutes`、`last_set→lastSet`、`cell_start→cellStart`、`cell_end→cellEnd`、`ran_this_cell→ranThisCell`、`last_skip→lastSkip`；`last_set.at／by／carrier` 與 `last_skip.at／reason／detail` 內層鍵本即單字；v1.0 現查：既有 `camel()` 通則已涵蓋九鍵，`SiKeyNames` 主程式零改動、無特例表，`SiKeyNamesTest.AT_964_7_8` 釘住——Console TCS D-CS-15）；缺鍵≠null、未知鍵透傳的既有規則不變（P1b §0.2）。`schema_rev` 維持 1，Bridge 常數 `SI_EXPORT_SCHEMA_REV` 不變。
 - 序 5′ 取界使用同一份轉出結果的 `schedule.periodMin／periodMax`（backend 內部以 `SiExport` 取用，不另開查詢路徑）。
 
 ### 4.2 `GET /api/v1/si/console-writes` 的變更

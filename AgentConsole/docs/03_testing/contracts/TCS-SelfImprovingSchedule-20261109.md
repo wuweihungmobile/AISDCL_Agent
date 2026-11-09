@@ -641,7 +641,7 @@ Scenario: （BE）序 5′ 界檢查：端點 201、端點外 422 且訊息取�
 Scenario: （BE）不走重送閘：同一請求連送各得 201 與不同 `auditRef`，無 409 重送 reason
   Given `ADMIN`；`SEAM` 排入四個不同 ref；同一份 `sched-set` 請求與同一份 `run-request` 請求
   When 各連送兩次
-  Then 四次皆 201；每個端點兩次的 `auditRef` 互異；表內共新增四列；沒有任何回應的 `reason` 為 `si_decision_duplicate`；`ErrorReasons` 與兩端點的 OpenAPI 說明不含該 reason
+  Then 四次皆 201；每個端點兩次的 `auditRef` 互異；表內共新增四列；沒有任何回應的 `reason` 為 `si_decision_duplicate`；兩端點的 OpenAPI 說明與回應碼表不含該 reason（`ErrorReasons` 全域表仍含它——`decide` 在用；D-CS-16）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_964_7_5]"
 ```
 ```gherkin
@@ -731,7 +731,7 @@ Scenario: （BE）補償與結果不明：Bridge 非 2xx 補償刪列、逾時�
 Scenario: （BE）其餘方法：PUT、PATCH、DELETE 的 403 與 405，GET 的 405
   Given 兩個新路徑；三種角色 Viewer、Operator、ADMIN
   When 各以 PUT、PATCH、DELETE、GET 呼叫
-  Then PUT、PATCH、DELETE：Viewer 為 403、Operator 與 ADMIN 為 405；GET：無 token 為 401、Viewer 與 Operator 為 403、ADMIN 為 405；所有情境零副作用
+  Then PUT、PATCH、DELETE：Viewer 為 403、Operator 與 ADMIN 為 405；GET：無 token 為 401、已登入角色（Viewer、Operator、ADMIN）一律 405（D-CS-14：`SecurityConfig` 對 `GET /api/v1/**` 放行 VIEWER 以上且兩路徑無 GET 對映，原寫 Viewer／Operator 403 為規格稿推定）；所有情境零副作用
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_964_7_E_5]"
 ```
 ```gherkin
@@ -987,6 +987,7 @@ Scenario: （PW）ADMIN 啟用開關流程：開對話框、送出、顯示待�
 | PKG-BE | `SiMirrorApiIT`（既有）：`AT_940_5_2` 會讀 `ErrorResponseDocumentation.java`、`ErrorReasons.java` 的原始碼——新增的兩端點說明文字不得含「唯一帶 reason」「唯一例外」字樣，`si_not_found`、`si_unavailable` 的常數字面格式不得改動；`status` 透傳的既有案例加 `schedule` 鍵 | 守住既有字樣鎖 |
 | PKG-BE | `SiKeyNamesTest`、`BridgeHttpAdapterSiWriteTest`（既有）：深層對映表與兩個新 Bridge 呼叫（路徑 `/si/schedule:set`、`/si/runs:request`）的釘選 | 增列 |
 | PKG-BE | `SiConsoleWritesReadApiIT`（既有）：`items[].kind` 值域與 `orphans` 判準的既有斷言（既有三 kind 不變） | 預期值增列 |
+| PKG-BE（D-CS-19 追認；實作輪表外站點） | `IssueBridgeArchTest.AT_IC_07_6_1`（`AgentBridge` 的 `si` 方法 5→7、`SiController` POST 4→6；TCS-IssueCenter 勘誤四 4-2）；`BackupJobMigrationIT.snapshotOfExistingTables`（約束快照排除 `si_console_writes_kind_check`——V23 為宣告過的有意變動，其餘約束仍逐項比對）；`BackupJobMigrationIT`（3 處）、`IssuePriorityMigrationIT`、`ResearchSchemaMigrationIT`（3 處）的 Flyway 版本清單加 `"23"`；測試替身 `com/aisdlc/minibridge/MiniBridge.java`（`Si.status(Object)`、`Si.DROP`、`Si.scheduleWithBounds`、`Si.statusRequests()`）與 `MiniBridgeController.java`（`/si/schedule:set`、`/si/runs:request`）——§5.5 `MINI.status` 與計數所需 | 預期值更新／替身增列 |
 | PKG-BR | `tests/test_si_readonly_lock.py`：路由總數與寫入路由清單釘選加兩個新路由；判準 1′～5′ 不改；`tests/test_si_write_routes.py`、`test_si_audit_filename_safety.py`：路由清單與檔名安全參數化表加兩個新路由；`tests/test_si_routes.py`、`test_si_cli.py`（唯讀 GET 與 CLI 白名單）預期零改 | 預期值增列；零改者以現查確認 |
 
 ## 5. 測試資料規格
@@ -996,7 +997,7 @@ Scenario: （PW）ADMIN 啟用開關流程：開對話框、送出、顯示待�
 - 測試資料不使用真帳本識別碼；稽核 `audit_ref` 於執行期組出小寫 UUID；`user` 一律 `admin`、`role` 為 `ADMIN`、`key_id` 為 8 碼 hex 夾具。
 - **界夾具**：`BOUNDS`＝`periodMin` 60、`periodMax` 10080、`heartbeatMinutes` 15、預設 `periodMinutes` 1440；另一組 `BOUNDS2`＝30 至 120（AT-964-7-4、AT-964-2-2 用）。**測試的預期值一律由夾具設定值導出，不在斷言中另寫一份常數**（NFR-SC-4）。
 - **字串規則向量表 M-X**（reason 與 note 共用；前端與 backend 各一份表驅動副本，與根層 TCS 的 R141 (c) 同表）：放行＝120 個 U+4E2D、120 個 U+1F600、`a|b`、前後有空白的 `  ok  `（前後空白去除後放行）；拒收＝121 個 U+4E2D、121 個 U+1F600、含 LF、含 CR、含 U+0000、含 U+001F、含 U+007F、孤立代理字元（backend）、全空白、TAB。**空值語意**：前端把未填或空字串視為未填、省略該鍵；backend 收到字串型的空字串或全空白＝422（有值不得全空白）。
-- **黃金檔與向量**：G6～G9 對映 V5～V8（V5 sched-set 啟用含 reason、V6 sched-set 停用不含 reason、V7 run-request 含 note、V8 run-request 不含 note）；`Clock.fixed`、金鑰 K0、帳號 admin；位元組與 mac 值由實作輪產出，**本檔不預填**。
+- **黃金檔與向量**：G6～G9 對映 V5～V8（V5 sched-set 啟用含 reason、V6 sched-set 停用不含 reason、V7 run-request 含 note、V8 run-request 不含 note）；`Clock.fixed`、金鑰 K0、帳號 admin；位元組與 mac 值由實作輪產出，**本檔不預填**。**實作輪入表（D-CS-18；PKG-BE 產出、主控以根層 CLI 收下、2026-11-09）**：檔案住 `backend/src/test/resources/si/audit/`，副本住 `engine-bridge/tests/fixtures/si_audit/`（主控複製，逐位元組同）——G6 `sched-set-enable.json`（`audit_ref` a1000000-0000-4000-8000-000000000006、enabled true、period_minutes 120、reason「夾具啟用」；445 位元組，sha256 55cf567a…）、G7 `sched-set-disable.json`（…0007、false、1440、無 reason；419 位元組，7210a524…）、G8 `run-request-note.json`（…0008、note「夾具立即啟動」；413 位元組，59256ad4…）、G9 `run-request.json`（…0009、無 note；381 位元組，9977906f…）；`time` 皆 `2026-10-24T22:30:15+08:00`、`key_id` f076edf0。PKG-BR／PKG-FE 對同一組輸入一律引用這四檔。
 
 ### 5.5 backend 測試設施（沿 P2b TCS §5.4 與 DecideDedupe TCS §5.5；只增不改）
 
@@ -1016,7 +1017,7 @@ Scenario: （PW）ADMIN 啟用開關流程：開對話框、送出、顯示待�
 | 區 | 允許新增或修改的路徑（相對 monorepo 根） |
 |----|--------------------------------------------|
 | PKG-BE 主程式 | `AgentConsole/backend/src/main/java/com/aisdlc/console/` 下與兩個 POST、`SiWriteKind`、稽核簽章、Bridge 呼叫、`SiKeyNames`、對帳讀面、`ErrorResponseDocumentation` 相關的類別（D1、D3；實作輪現查檔名）；`AgentConsole/backend/src/main/resources/db/migration/V<現查＋1>__*.sql`（新檔，D2） |
-| PKG-BE 測試與黃金檔 | `AgentConsole/backend/src/test/java/com/aisdlc/console/` 下 §3.1 所列測試檔與 `support/AbstractSiWriteIT.java`；`AgentConsole/backend/src/test/resources/si/audit/`（G6～G9 與向量檔，D4） |
+| PKG-BE 測試與黃金檔 | `AgentConsole/backend/src/test/java/com/aisdlc/console/` 下 §3.1 所列測試檔與 `support/AbstractSiWriteIT.java`；`AgentConsole/backend/src/test/resources/si/audit/`（G6～G9 與向量檔，D4）；測試替身 `AgentConsole/backend/src/test/java/com/aisdlc/minibridge/**`（§5.5 `MINI.status` 與兩新路由；D-CS-19） |
 | PKG-BR | `AgentConsole/engine-bridge/app/routers/si.py`（改）；`AgentConsole/engine-bridge/tests/` 下 §3.2 所列測試檔與 `tests/fixtures/si_audit/`（G6～G9 副本，由主控自 PKG-BE 複製） |
 | PKG-FE | `AgentConsole/frontend/components/domain/si/` 下 `SiSchedulePanel.tsx`、`SiScheduleDialog.tsx`、`SiRunRequestDialog.tsx`（或合一形）、`SiStatusBanner.tsx`、`SiWritesPanel.tsx`、`SiView.tsx`、`siParts.tsx` 與 §3.3 所列測試檔；`lib/domain/si.ts`、`lib/api/{endpoints,queries,types}.ts`、`lib/api/schema.d.ts`（重產）、`lib/api/si.endpoints.test.ts`、`lib/domain/si.test.ts`、`lib/help/content.test.ts`、`tests/helpers/si.tsx`、`tests/e2e/self-improving-schedule.mock.spec.ts` |
 | 不屬開發 agent（主控代做） | `AgentConsole/docs/02_architecture/Architecture.md` §5.6、§10.3 去規劃註；契約 `API_Contract_SelfImproving_P2c.md` 升 v1.0；RTM 本地子表（預定 §2.14；DEF-200-576 體例）；SCG-4 報告；`AgentConsole/frontend/lib/help/self-improving.ts`（與 UI 同 commit）；黃金檔自 PKG-BE 複製到 PKG-BR；凍結上位的勘誤與 refreeze；黃金檔與向量的經根層 CLI 驗簽定稿 |
@@ -1088,6 +1089,13 @@ Scenario: （PW）ADMIN 啟用開關流程：開對話框、送出、顯示待�
 | D-CS-11 | Bridge 本文超過 64 KB 的狀態碼 | **主控裁決**：422 `invalid_request`、`rule=too_large`（主控現查 `engine-bridge/app/routers/si.py` `_read_limited_body`：宣告或累計超過 `SI_WRITE_BODY_MAX_BYTES` 即 422 且不讀完）；AT-964-8-E-2 已釘 | — |
 | D-CS-12 | 現值落界外時的畫面 | **主控裁決**：預填現值並標紅、提示先改成界內週期再送出停用（D-CS-6 不開例外） | 再開：掌舵者回報無法停用 |
 | D-CS-13（實作輪 2026-11-09） | 開工前置「根層鍵 RELEASE」與根層 AT-437-1-3（真 CLI 收下黃金檔 G6～G9）互為前置（循環；根層 TCS D-IMP-1） | **主控裁決（依授權代決）**：PKG-BE 的前置降為「根層 SCHED 棒 commit」（黃金檔只依賴凍結契約與根層 `consoleaudit` 驗簽實作），根層鍵 RELEASE 改為本鍵 RELEASE 的前置；黃金檔仍由 BE 產出、主控以根層 CLI 驗簽後複製到 Bridge fixtures（§依賴序同步改寫） | 再開：黃金檔被根層 CLI 拒收 ⇒ 回 SD 對齊契約 §3 |
+| D-CS-14（PKG-BE 交卷） | GET 打兩個新路徑：契約 §1.1 與 AT-964-7-E-5 寫「VIEWER、OPERATOR 403、ADMIN 405」，實測 `SecurityConfig` 對 `GET /api/v1/**` 放行 VIEWER 以上且無 GET 對映 ⇒ 已登入角色一律 405 | **主控裁決**：以實測為準——無 token 401、已登入角色（VIEWER／OPERATOR／ADMIN）一律 405；AT-964-7-E-5 的 Then 與契約 v1.0 §1.1 同步改字面；不動 `SecurityConfig`（P2b 既有通則） | 再開：資安審查要求未授權角色對寫入路徑必回 403 |
+| D-CS-15（PKG-BE 交卷） | `SiKeyNames` 深層欄名對映：既有 `camel()` 通則已涵蓋 W-S7 (k) 九個鍵，主程式零改動 | **主控裁決**：接受；AT-964-7-8 釘住通則涵蓋；契約 v1.0 §4.1 註明「通則涵蓋、無特例表」 | — |
+| D-CS-16（PKG-BE 交卷） | AT-964-7-5 字面「`ErrorReasons` 與兩端點的 OpenAPI 說明不含 `si_decision_duplicate`」，但 `ErrorReasons` 全域表必含該 reason（`decide` 在用） | **主控裁決**：Then 改為只判兩端點的 OpenAPI 說明與回應碼表（AT-964-7-7、7-5 皆斷言）；`ErrorReasons` 不在判準內 | — |
+| D-CS-17（PKG-BE 交卷；承 D-CS-8） | 未知欄位處置：Spring Boot 預設忽略，稽核 body 只由已驗欄位組成、不會簽進未知欄位 | **主控裁決**：接受現狀、不補差分 AT；契約 v1.0 §1.2 回寫「未知欄位忽略、不入 body」 | 再開：契約改為拒收未知欄位 |
+| D-CS-18（PKG-BE 交卷） | 黃金檔輸入值（reason「夾具啟用」、period 120／1440、note「夾具立即啟動」、`audit_ref` a1…06～09）由 BE 自定，TCS §5.1 未預填 | **主控裁決**：以 BE 產出為定稿並入表 §5.1（根層 AT-437-1-3 已以真 CLI 收下四檔並以位元組 tamper 驗 MAC 負控）；PKG-BR／PKG-FE 一律引用這四檔 | 再開：契約 §3 鍵序變更 ⇒ 重產 |
+| D-CS-19（PKG-BE 交卷） | §4.1 表外因本鍵轉紅而補改的既有測試與替身：`IssueBridgeArchTest.AT_IC_07_6_1`（5→7、4→6）、`BackupJobMigrationIT.snapshotOfExistingTables`（排除 `si_console_writes_kind_check`）、三支 MigrationIT 的版本清單、`com/aisdlc/minibridge/**` 替身 | **主控裁決**：追認並補進 §4.1 與 §5.7（PKG-BE 列加 `com/aisdlc/minibridge/**`）；TCS-IssueCenter 勘誤四 4-2 同步、兩把 issue-center 鍵 refreeze | — |
+| D-CS-20（PKG-BE 交卷；實作備註） | (a) 請求 DTO 的 `enabled`／`periodMinutes`／`reason`／`note` 以 `Object` 接收，型別錯走輸入閘 422 一次全列（OpenAPI 以 `@Schema(type=…)` 標型）；(b) 「全空白」判準對齊 Python `str.strip()`（含 U+00A0、U+0085），避免 Console 放行而 CLI 以 `FIELD-BLANK` 拒收；(c) `SiConsoleWriteService` 新增依賴 `SiMirrorUseCase`、序 5′ 每次現取 `status()` 不快取（AT-964-7-9 釘 ArchUnit） | **主控裁決**：三項接受為實作決策並記錄於此（契約 v1.0 §1.2 註 (a)(b)） | — |
 | ⚖ 1 | 兩個對話框分立或合一 | 預設分立（`SiScheduleDialog`、`SiRunRequestDialog`，共用 `siParts.tsx` 的收據與錯誤元件）；AT 的檔名依此；合一時 Developer 於勘誤登記對照 | 再開：LOC 或可讀性壓力 |
 | ⚖ 2 | 請求本文的未知欄位處置（契約 §1.2 只說「沿 P2b 兩個 POST 現行行為」） | 本檔 AT 不釘未知欄位；實作輪現查 DTO 行為並於契約 v1.0 回寫，必要時補一個與既有 `POST /observations` 的差分 AT 經勘誤登記 | 再開：未知欄位被靜默收下卻簽進 body |
 | ⚖ 3 | Playwright mock 的替身形態 | 沿既有 `tests/e2e/mockApi.ts` 與 `*.mock.spec.ts` 體例（`E2E_MODE=standalone`）；三個 PW AT 各一個動作 | 再開：既有體例無法替身 POST |
