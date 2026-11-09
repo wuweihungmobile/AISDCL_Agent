@@ -191,6 +191,27 @@
 
 本節凌駕 §5 各頁「列表預設排序」的隱含敘述與 §8.3 的步數上限；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-ConsoleUxSortHelp-20261108.md`。
 
+### 0.11 自我進化排程控制與立即啟動（與 §8.1、§5.x 合併；掌舵者 2026-11-09 指令，sid `f1522ddb-bdcf-4104-bb81-614c1118fa9d` line 14；鍵 `agentconsole-si-schedule`；Feature F-910、US-930）
+
+**編號現查證據（2026-11-09 寫稿時）**：本 PRD 現存最大為 §0.10 的 F-909／US-929／AC-963；`AgentConsole/docs/06_quality/RTM.md` 最大本地子表為 §2.13（對映 F-909）；全 repo（不含 AISDLC_SDD 框架樹，其 F-970／US-970 屬框架 ResearchToPRD）查無 F-910、US-930、AC-964，故本鍵取 **F-910、US-930、AC-964-1～10**；RTM 子表預定為 §2.14。實作輪動工前再現查一次最大號。
+
+**事實（寫稿時現查）**：根層 SelfImproving PRD v0.13 的 FG-M 立案段（掌舵者問題 2 原文見該 PRD §14：自我進化機制是否定期啟動、沒有的話如何啟動〔UI 可以啟動控制〕、設計定期自動演化並可參數化設定週期）答案是：v0.12 以前**不會**定期啟動，Console `/self-improving` 只有鏡像與決定／觀察的寫入載體，**沒有任何啟動或排程控制**；`SiStatusBanner` 對未知的狀態鍵一律列在「其他欄位」。v0.13 新增 (f) 排程巡邏到期與 Console 載體（FR-SI-36～39），契約（事件欄位、`status.schedule`、稽核 JSON 兩種新 `kind`）在該 PRD §9.2、§9.3 一次定稿，**本節只引用、不複寫**；Console 鍵依賴根層鍵 `monorepo-si-p4-schedule` RELEASE。
+
+**校正**（凌駕 §8.1 對自我進化頁的描述與 SelfImproving PRD FR-SI-32 的「橫幅未知鍵列為其他欄位」；對映 SelfImproving PRD AC-SI-37-1、37-4、37-5）：
+
+1. **狀態橫幅新增「自動演化排程」欄位組**：取 `GET /api/v1/si/status` 的 `items[0].schedule`（形狀見 SelfImproving PRD §9.2〈P4 增補〉；camelCase 對映由 `SiKeyNames` 承擔），以具名欄位呈現：是否啟用、週期（分鐘，並列「≈N 小時／N 天」換算）、最近一次設定（時間、角色、載體）、本格起訖、本格是否已執行、本格最近一次略過（時間、原因、細節）、是否逾期、OS 任務是否武裝。`armed` 在 `export` 恆為量不到，畫面明寫「量不到：Console 看不到主機上的排程任務」，**不得**顯示成「已武裝」或「未武裝」；任何欄位缺席或型別不符一律照「量不到」呈現（沿既有橫幅規則，不顯示成「無」或 `false`）；`schedule` 整鍵缺席（根層尚未升版）＝整組顯示量不到，其餘橫幅欄位不受影響。`SI_STATUS_KNOWN_KEYS` 加入 `schedule`，使它不再落入「其他欄位」。
+2. **ADMIN 控件（三個，只對 ADMIN 顯示；非 ADMIN 唯讀）**：(a) 啟用／停用開關；(b) 週期輸入（單位分鐘；合法界＝橫幅取得的 `schedule.periodMin`～`schedule.periodMax`，**前端不寫死任何界值**；輸入旁即時顯示「≈N 小時」或「≈N 天」換算；界外值即時標紅並停用送出）；(c)「立即啟動一次演化」鈕。每個動作一律先開**確認對話框**（與 `SiDecideDialog` 同型：標題、摘要〔本次會把排程改成什麼／會要求啟動一次〕、可選理由或備註一行、送出鈕；失敗不關窗，reason 逐字顯示）。
+3. **寫入一律走簽章稽核載體**：啟停與週期＝`sched-set`、立即啟動＝`run-request`；成功＝201 收據「稽核檔已落地，待入帳」（**不是已生效**），並顯示入帳指令（PowerShell 與 bash 兩形態字串相同）與一句「若主機上的巡邏任務已武裝，下一次心跳（約 N 分鐘內）會自動入帳；Console 看不到該任務是否武裝，所以仍列出手動入帳指令」。兩者**不帶卡面 digest、不走決定重送閘**（`si_decision_duplicate` 只管卡面決定）；為防連點與誤重送，「立即啟動一次演化」鈕在對帳面板已有一筆待入帳的 `run-request` 時停用並顯示「已送出待入帳（稽核編號 …）」（只讀既有對帳查詢快取，不發新請求；快取缺席時不停用、以 backend 為準）。
+4. **`overdue` 警示**：`schedule.overdue === true` 時橫幅顯示醒目警示「逾期未巡邏：請在主機執行 `python tools/selfimproving.py sched show`」；`overdue` 為 `null`（量不到）時顯示「量不到」並註明原因，**不得**顯示成「沒有逾期」；`overdue` 是事件帳本折出的**推算值**（本格內既無自動運轉也無略過事件、且已超過兩個心跳），只說「巡邏看來沒跑」，不證明任務壞了（睡眠、關機、登出都會造成）。有略過事件＝巡邏活著只是被擋，橫幅顯示略過原因而不是逾期。
+5. **待入帳與對帳**：兩種新寫入與既有三種共用同一張 `si_console_writes` 與同一個對帳面板；「待入帳」＝表內有列、而事件帳本尚無帶該 `audit_ref` 的 `sched.set`、`run.open` 或 `sched.skip`（SelfImproving PRD AC-SI-37-5）；對帳面板的種類標籤加「排程設定」「立即啟動」；`status.consolePending` 的種類值域加兩值時，橫幅沿既有規則原樣列出。
+6. **資格與閘門**：沿 P2b——Admin 且帳號在 `console.si.deciders`；`POST /api/v1/si/**` 的其餘規則（405、403 `si_write_forbidden`、503 `si_write_disabled`）不變。`period_minutes` 的界由 backend 於簽章前自 `status.schedule.periodMin／periodMax` 取得並驗（取不到＝503，不放行、不用快取值、不另存第二份界值）；根層 CLI 入帳時同界再驗為權威。
+7. **每頁說明**：`self-improving` 說明補步驟與欄位——怎麼啟用排程、怎麼改週期、怎麼立即啟動一次、「待入帳」與「逾期」各代表什麼（國高中程度，沿 §0.10 D-UX-2，走既有三道雙向鎖）。
+8. **誠實劃界**：Console 只經稽核檔「請求」排程變更與啟動；生效要等主機端入帳（巡邏器自動或掌舵者手動）；Console 看不到主機 OS 任務是否存在；自動啟動的運轉所產生的提案，核准與晉升仍是掌舵者的人工決定（SelfImproving PRD 禁令 11、12 不變），本節不新增任何「無人決定的採納」。
+
+**AC 清單（AT 住新 TCS）**：AC-964-1 橫幅排程欄位組與量不到規則；AC-964-2 啟停開關與週期輸入（界取自橫幅、換算提示、界外停用）；AC-964-3 排程設定確認對話框與收據；AC-964-4「立即啟動一次演化」對話框、待入帳停用與收據；AC-964-5 逾期警示與略過原因；AC-964-6 非 ADMIN 唯讀與 403／503／422 的逐字呈現；AC-964-7 backend 兩個 POST（閘門序、輸入閘、界取得失敗 503、不重送閘、補償、405）與 Flyway CHECK 改版；AC-964-8 Bridge 兩個 POST（形態、外層 `subject` 為 null、原樣落檔、AST 鎖不變）；AC-964-9 稽核 JSON 兩種新 `kind` 的跨語言向量與黃金檔、對帳與 `orphans` 的新 kind 判準；AC-964-10 文件與說明連動（每頁說明、Architecture、RTM、既有快照與鎖只改預期值）。
+
+本節凌駕 §8.1 對自我進化頁的描述；AC／AT 住 `AgentConsole/docs/03_testing/contracts/TCS-SelfImprovingSchedule-20261109.md`；契約細節住 `AgentConsole/docs/02_architecture/API_Contract_SelfImproving_P2c.md`。
+
 ---
 
 ## 1. 文件概述

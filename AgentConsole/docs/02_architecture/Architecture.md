@@ -359,7 +359,7 @@ app/
 ├── monitor/page.tsx                # 監控中心無專案入口頁（同上，kind="monitor"）
 ├── import/page.tsx                 # BRD/PRD 匯入解析（UI-SCR-06）
 ├── settings/page.tsx               # 系統參數設定（UI-SCR-09）
-├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4）
+├── self-improving/page.tsx         # 自我進化：SelfImproving 帳本／提案／事件鏡像（〔P1b 已落地 2026-10-22〕；SelfImproving PRD §9.1 C18、C20；只殼，見 §5.4；〔P4 規劃〕排程面板見 §5.6）
 ├── issues/page.tsx                 # 議題中心：三類帳本的中文議題清單、順位與決定（〔IssueCenter 已落地 2026-10-27〕；左列第八項；本行 2026-10-31 補入，OBS-SI-321 文件漂移）
 ├── sysadmin/
 │   ├── page.tsx                    # 系統管理入口（〔SysAdminBackup F1 已落地 2026-10-28〕；只殼；左列第九項「系統管理」Database 圖示、底部 Tab 不顯示；order 原 65 介於系統設定與自我進化之間，〔導覽整併 2026-11-01〕改 75 介於自我進化與系統設定（80）之間）
@@ -513,6 +513,23 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 **每頁說明文案標準與可讀性鎖**：標準全文住 Console PRD §0.10 D-UX-2。機械鎖＝`frontend/lib/help/readability.ts`（純函式：句長、步數、動作詞、欄位釋義長度、術語首次解釋、禁用詞）＋ `readability.test.ts`（逐頁、逐欄餵入 `HELP_PAGES`、`HELP_COMMON`、`SHARED`、`STATE_HELP`）。它與既有 `lint.ts`（每句 ≤ 60、英文白名單 31 詞、禁字元）**疊加**而非取代：`lint.ts` 與其凍結規則不動；`readability.ts` 不改 `lint.ts` 的任何常數，詞表由它自己持有。說明文案一律純文字節點渲染（`PageHelpDialog` 不經 Markdown），所以不新增渲染元件。
 
 **不變量**：`<th>` 字樣、`STATE_HELP` 鍵序（TCS-PageHelp D-PH-11）、備份清單預設序（AT-BK-02-1-2）、議題表顯示序兩條（R-IC-33 全條；根層 CLI `tools/lib/selfimproving/issues.py` 與前端 `lib/domain/issues.ts` 以同一張範例表兩端驗，本鍵不動任一邊，主控裁決 D-UX-18）、API 回應序與預設 `sort` 值（API_Contract 各條）都不因本鍵改變。
+
+### 5.6 自我進化頁的排程面板與兩個對話框（〔2026-11-09 設計；P4 規劃，實作輪落地後去註〕；鍵 `agentconsole-si-schedule`；Console PRD §0.11；契約 `API_Contract_SelfImproving_P2c.md`；AC／AT 住 `TCS-SelfImprovingSchedule-20261109.md`）
+
+**設計目標**：自我進化頁多一組「自動演化排程」的顯示與 ADMIN 控制，資料只來自事件折出的 `status.schedule`（根層 SelfImproving PRD §9.2〈P4 增補〉；本節只引用、不複寫形狀），寫入只走既有 P2b 稽核管線（先寫 `si_console_writes` 列→簽章→Bridge 原樣落檔），**不新增任何 Console 自有狀態與新資料表**。`page.tsx` 仍只殼（§5.4）；新元件只加在 `components/domain/si/`，不動導覽登記表與 `ToolsRegion.tsx`。
+
+| 件 | 位置 | 約定 |
+|----|------|------|
+| 排程面板 | `frontend/components/domain/si/SiSchedulePanel.tsx`（新；由 `SiView` 於 `SiStatusBanner` 之下、`SiWritesPanel` 之上掛載；ADMIN 才渲染三個控件，非 ADMIN 只渲染唯讀欄位組） | 以 `useSiStatus()` 既有查詢取 `items[0].schedule`（不新增 GET）；欄位組＝啟用、週期＋換算、最近設定、本格起訖、本格已執行、最近略過、逾期、武裝；`armed` 為 `NOT-EVALUABLE` 字串時固定顯示「量不到：Console 看不到主機上的排程任務」；`overdue===true` 顯示警示、`null` 顯示量不到；欄位組亦可由 `SiStatusBanner` 呼叫（橫幅「自動演化排程」欄位組與面板共用同一個純函式 `scheduleFields(schedule)`，避免兩處各自解讀） |
+| 設定對話框 | `SiScheduleDialog.tsx`（新；啟用／停用開關、週期輸入、理由一行；與 `SiDecideDialog` 同型） | 草稿狀態在元件內；送出前以 `lib/domain/si.ts` 的輸入閘驗；成功顯示收據（`auditRef`、`kind`、`time`、入帳指令）；失敗不關窗、reason 逐字顯示；呼叫 `usePostSiScheduleSet`（`useWrite` 包裝，成功使 `status`、`console-writes` 查詢失效重取） |
+| 立即啟動對話框 | `SiRunRequestDialog.tsx`（新；備註一行、確認摘要） | 與設定對話框共用同一個收據與錯誤元件（`siParts.tsx` 增 `SiWriteReceipt` 抽出；兩者合一成單一對話框元件亦可，實作輪依 LOC 與測試可讀性二擇一並回寫本表）；對帳快取已有待入帳 `run-request` 時主鈕停用（只讀 `console-writes` 既有查詢快取，不發新請求） |
+| 已知鍵與輸入閘表 | `frontend/lib/domain/si.ts` | `SI_STATUS_KNOWN_KEYS` 加 `schedule`；新增表 M-S（`sched-set`：`enabled` 布林必備、`periodMinutes` 整數必備且在 `[periodMin, periodMax]`〔界由呼叫端傳入、模組內**無任何界值常數**〕、`reason` 選填單行 ≤120 code point、拒控制字元）與表 M-R（`run-request`：`note` 選填單行 ≤120 code point、拒控制字元）；純函式 `validateScheduleForm`、`buildScheduleRequest`、`validateRunRequestForm`、`buildRunRequest`、`periodHint(minutes)`（`%1440===0`→「≈N 天」、`%60===0`→「≈N 小時」、其餘「約 X.X 小時」；純文字）、`scheduleFields(schedule)`；`SiWriteKind` 加 `"sched-set"`、`"run-request"`，`SI_WRITE_KIND_LABELS` 加「排程設定」「立即啟動」，`ingestCommands` 對兩新 kind 各自組指令（`sched set --carrier console --audit-ref <ref>`；`run-open --trigger a --carrier console --audit-ref <ref> --coord console_audit/<ref>.json --by console`，PowerShell 與 POSIX 字串相同） |
+| API 條目 | `lib/api/endpoints.ts`／`queries.ts`／`types.ts` | `postSiScheduleSet`、`postSiRunRequest` 兩個函式（端點 79→81 個，數字實作輪現查）；`types.ts` 加 `SiScheduleStatus`（`schedule` 型別，鍵全部可缺席以承接量不到）、`SiScheduleRequest`、`SiRunRequestRequest`；`schema.d.ts` 重產入庫 |
+| 說明 | `frontend/lib/help/self-improving.ts` | 補步驟與欄位（排程啟用、改週期、立即啟動、待入帳、逾期；國高中程度，Console PRD §0.10 D-UX-2），欄位名逐字取自畫面字樣；走既有三道雙向鎖與可讀性鎖 |
+
+**資料流**：瀏覽器→`POST /api/v1/si/schedule/set`｜`/si/runs/request`（backend；JWT、`ADMIN`＋`console.si.deciders`）→（`sched-set` 才有）backend 以既有 `SiMirrorUseCase` 讀 `status` 取 `schedule.periodMin／periodMax` 驗界→寫 DB 列→簽章→Bridge `POST /si/schedule:set`｜`/si/runs:request` 原樣落稽核檔→201 收據；入帳在主機端（巡邏器每心跳自動或掌舵者手動），不經 Console。Bridge 不呼叫任何 CLI 動詞（§10.3）。
+
+**不變量**：`status` 的 `schedule` 只經既有 `GET /si/status` 的 `items[0]` 原樣轉出（`schema_rev` 不變）；Console 不寫帳本、不存排程狀態副本；導覽登記表與七項導覽不變；P2b 的四個 POST、`SiDecideDialog`、決定重送閘行為不變。
 
 ## 6. 資料流五條
 
@@ -1088,8 +1105,12 @@ Bridge 回 snake_case、backend 轉 camelCase；SI 資料面取不到一律明�
 | `POST /si/observations` | P2b | 落稽核 JSON（`kind=obs-add`） | 同上 | 同上 |
 | `POST /si/observations/{id}:close` | P2b | 落稽核 JSON（`kind=obs-close`）；`{id}` 為 `OBS-SI-NNN` 且須等於稽核外層 `subject`（Bridge 只解外層鍵；`body.obs_id` 的一致性由 backend 與 CLI 驗）〔訂正（SA 修復棒；SelfImproving PRD v0.10 的 QA 複審 F-12）：原文「須等於稽核 `body.obs_id`」；Bridge 不解 `body` 無從比對〕 | 同上 | 同上 |
 | `POST /si/observations:validate` | P2b | 唯讀預檢（**不需權杖、不落檔**）：請求＝未簽的 `body` 物件；子行程 `obs-add --dry-run --body-file -`（stdin 餵入） | 200：`{"ok","row","row_bytes","row_max_bytes","findings":[{code,detail}]}`（`ok=false` 仍 200） | 503 `si_unavailable`、422 `invalid_request` |
+| `POST /si/schedule:set` | P4（〔P4 規劃 2026-11-09，實作輪落地後去註〕） | 落稽核 JSON（`kind=sched-set`）；外層 `subject` 須為 null（不符＝422）；無路徑參數；步驟與 P2b 三個寫入端點逐字同（權杖、形態驗證、≤64KB、`O_EXCL` 原樣落檔） | 201：`{"audit_ref","stored":true}` | 同 P2b 寫入端點（503 `si_write_disabled`、403 `si_write_forbidden`、409 `si_audit_exists`、422 `invalid_request`、503 `si_unavailable`） |
+| `POST /si/runs:request` | P4（同上） | 落稽核 JSON（`kind=run-request`）；外層 `subject` 須為 null；同上 | 同上 | 同上 |
 
 backend 對應 `GET /api/v1/si/**`（JWT；Viewer 以上可讀；逐一代理，連線 2 秒、讀取 20 秒、不重試）與 `POST /api/v1/si/proposals/{id}/decide`、`POST /api/v1/si/observations`、`POST /api/v1/si/observations/{id}/close`、`POST /api/v1/si/observations/validate`（`ADMIN` 且帳號名在 `console.si.deciders`；DB 表 `si_console_writes`）；瀏覽器不直連 Bridge（§10.1 消費者列）。
+
+**〔P4 規劃 2026-11-09〕** backend 另有 `POST /api/v1/si/schedule/set`、`POST /api/v1/si/runs/request`（同一關：`ADMIN`＋`console.si.deciders`；先寫 DB 列→簽章→Bridge 落檔→Bridge 非 2xx 補償刪列；`sched-set` 於簽章前另自 `GET status` 的 `schedule.periodMin／periodMax` 驗 `periodMinutes` 界，取不到＝503 `si_unavailable`；不走決定重送閘）；`si_console_writes.kind` 由三值擴為五值（`sched-set`、`run-request`），其 CHECK 以 Flyway 新版本改版（版本號實作輪現查最大號＋1）；**Bridge 這兩個 POST 不呼叫任何 CLI 動詞，`si_cli.py` 的 argv 動詞白名單（只准 `export` 與 `obs-add --dry-run`）與 `tests/test_si_readonly_lock.py` 的 AST 鎖不變**。形狀的唯一細節來源＝`docs/01_requirements/SelfImproving_PRD.md` §9.3〈P4 寫入端點〉，Console 側契約＝[API_Contract_SelfImproving_P2c.md](API_Contract_SelfImproving_P2c.md)，前端落點見 §5.6。
 
 ### 10.4 研究寫入面（ResearchToPRD；ADR-003、ADR-XPLAT-017；形狀細節見 `API_Contract_ResearchToPRD.md` §2）
 
@@ -2153,6 +2174,8 @@ ALTER TABLE console.research_projects ADD CONSTRAINT research_projects_flow_phas
 | L-R11 | 框架對 HUMAN_PENDING 的 72 小時提醒／168 小時升級只由 hooks SessionStart 執行（`SDD_FSM_ENGINE.md:433-434`；`.claude/hooks/session_start.py:279`）；Console 路徑沒有 hooks（D-48(3)） | P0 以 UI 顯示等待時長＋滿 72 小時橫幅提醒，不轉 REMINDER、不自動升級（PRD AC-R2P-09-10、NFR-R2P-06-5）；再開症狀：掌舵者回報因 Gate 0 久未核准而錯過提醒 |
 | L-R12 | ESCALATION 人工恢復後的重試計數不歸零：引擎的 `resume-from-escalation` 不動 retry 計數（只有 `gate PASS` 與 `spec-frozen` 歸零）；`increment_retry` 見計數已達上限時把 `current_count` 夾在上限，並在該筆歷史的 `failure_reason` 標「(tamper detected: …)」字樣——這是引擎對「已達上限後再 FAIL」的既有標記（`state_loader.py:211-269`），不是研究面被竄改 | 恢復後至多再得一次審查（PASS 歸零、FAIL 立即再 ESCALATION；D-60）；歷史列照引擎原文顯示、不改寫也不隱藏；全新預算＝換世代（API-RP-20 `generation:"next"`）；再開症狀：掌舵者要求恢復後重新得 3 輪（須先改引擎 `state_loader.py` 與 TLA+，或走換世代） |
 | L-UX-1 | **SI 四表採游標分頁，欄位排序只作用於已載入的列**（§5.5；鍵 `agentconsole-console-ux-sort-help`）：後端與 Bridge 對 SI 帳本只提供遞增游標（`since`／`limit`），沒有 `sort` 參數；為跨頁排序而改 Bridge 契約會動兩引擎側的唯讀鏡像面，超出本鍵範圍 | 使用者在尚未「載入更多」時排序，看到的是已載入列的排序；表頭排序不會自動載入其餘頁。預設序（ID 升冪）與帳本游標序一致，故預設畫面無此落差。再開症狀：掌舵者回報「排序後少了某筆」且該筆在未載入頁 |
+| L-SI-1 | **Console 看不到主機上的排程任務是否武裝**（〔P4 規劃 2026-11-09〕；鍵 `agentconsole-si-schedule`；SelfImproving PRD AC-SI-37-3）：`status.schedule.armed` 在 `export` 路徑恆為 `NOT-EVALUABLE：export-reads-no-home`（`export` 不讀家目錄、不查 OS 任務；沿 `console_pending` 的同一體例）；Console 的排程資料**只來自事件帳本折出的欄位** | 畫面對 `armed` 一律顯示「量不到」，不得顯示成已武裝或未武裝；使用者以「`overdue` 是否為真」與主機端 `python tools/selfimproving.py sched show`（現查 OS 任務憑證）判斷。再開症狀：掌舵者回報「Console 說正常、主機任務其實不在」且 `overdue` 未翻真（代表折疊判準有洞，回根層 PRD 修訂，不在 Console 另做查詢） |
+| L-SI-2 | **`overdue` 是推算值、不是任務狀態**（〔P4 規劃 2026-11-09〕；SelfImproving PRD NFR-SI-09-5）：`overdue` ＝啟用且本格內既無自動運轉也無略過事件、且 `now − 本格起點 > 2×心跳`；`now` 由 `export` 呼叫時刻決定，故重新整理前的畫面可能已過時；機器睡眠、關機、登出都使它為真，與「任務壞了」無法區分；`overdue` 為 `null`（無事件帳本）時是量不到 | 畫面文案只說「逾期未巡邏」並指向主機現查指令，不說「任務已停用」；`overdue` 為 `null` 不顯示成「沒有逾期」。再開症狀：掌舵者回報逾期警示頻繁出現在筆電睡眠後（可接受，非缺陷）或在巡邏確實跑過後仍不消（折疊判準缺陷，回根層） |
 | L-UX-2 | **後端排序與前端排序的已知差異**（§5.5；鍵 `agentconsole-console-ux-sort-help`；SCG-0～3 審查 F8）：專案與匯入歷史的 `status` 排序依列舉常數的英文名而非畫面標籤；匯入歷史 `projectId` 排序是 UUID 字串序；PostgreSQL 字串序依資料庫 collation，與前端 `Intl.Collator("zh-Hant")` 不同；`id` tie-break 在 Java（`UUID.compareTo` 帶號 long）與 PG（`uuid` 位元組序）不同，IT 一律以小寫十六進位字串比較 | 伺服器分頁的兩張清單（專案、匯入歷史）依後端序；其餘前端排的表依 collator 序。再開症狀：掌舵者回報同一欄在兩種清單排出不同順序且造成誤判 |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）
