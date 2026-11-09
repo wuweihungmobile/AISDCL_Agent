@@ -70,3 +70,4 @@
 {"seq":70,"t":"2026-11-09T21:00:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-09T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
 {"seq":71,"t":"2026-11-09T21:00:51+08:00","kind":"run.close","by":"main","run":"RUN-SI-005","no_event":true}
 {"seq":72,"t":"2026-11-10T01:30:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-09T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":73,"t":"2026-11-10T06:30:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-09T21:00:00+08:00","reason":"quota-band","detail":"額度帶 unmeasured"}
