@@ -1826,9 +1826,9 @@ Scenario: 先於一切
 
 Feature: 變更面
 Scenario: 只動允許集合
-  Given 實作輪起點的基準 commit（以環境變數 `SI_P4_BASE_SHA` 提供；未設時以 `HEAD` 的父 commit 為界並於輸出註明）
+  Given 實作輪起點的基準 commit（以環境變數 `SI_P4_BASE_SHA` 提供；未設時以 `HEAD` 的父 commit 為界並於輸出註明；父 commit 不可得〔淺層 clone〕＝只看未追蹤檔並註明；D-IMP-5）
   When `git diff --name-only <基準>` 與 `git ls-files --others --exclude-standard`
-  Then 每個路徑 ⊆ §5.7 的允許集合；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`tools/check_scheduled_task_drift.py`、PRD、SOP、P0～P3 TCS、`AgentConsole/**`、`.github/**` 的差異為空；本檔四個新測試檔與夾具不含 `skip`、`skipTest`、`xfail` 字樣
+  Then 差異**觸及 §5.7 允許集合**時：每個路徑 ⊆ §5.7 的允許集合；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`tools/check_scheduled_task_drift.py`、PRD、SOP、P0～P3 TCS、`AgentConsole/**`、`.github/**` 的差異為空（本檔的主控勘誤追加不計）；差異未觸及允許集合＝輸出「範圍守衛未觸發」並通過（常駐於 CI 不得把無關 commit 判紅）；本檔四個新測試檔與夾具不含 `skip`、`skipTest`、`xfail` 字樣（恆查）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_8_1]"
 ```
 
@@ -1846,6 +1846,8 @@ Scenario: 只動允許集合
 | 安裝器三層鎖 | `test_install_windows_nightly.py`：`TestScheduledTaskExpectationsSsot::test_ssot_covers_exactly_the_tasks_the_installer_registers`（任務名解析 regex 須認得第三支）、`::test_every_expected_value_is_actually_applied_by_the_installer`（改逐任務逐值）、`::test_execution_time_limit_expectation_matches_installer_hours`（改逐任務）、`TestUnattendedExecutionHardening` 的 `test_principal_is_s4u_and_applied_to_both_tasks`（`Register-ScheduledTask` 兩處→三處）、`test_stop_existing_applied_via_com_because_module_enum_cannot_express_it`（呼叫名單仍為 nightly、smoke，不含 patrol）、`test_execution_time_limit_is_bounded`（取值改逐任務並維持 ≤8）、`test_status_surfaces_the_three_regression_prone_fields`、`TestStatusExitCodeRuntime`／`test_whatif_previews_every_task_without_touching_scheduler`（預覽三支） | 見 R161 (b)；期望表 `why_each` 補逐任務說明 |
 | SOP 相關 | `test_selfimproving_events.py::TestSopArticles`、`test_selfimproving_p3_meta.py` 的 `sop_p3_problems` 相關、`test_selfimproving_p2_meta.py` 的 `sop_p2_problems` 相關：以標題切段者須對 SOP 新增的兩個 `##` 節（位於檔尾）仍成立 | 預期零改；若紅以 ⚖ 回報 |
 | Console 稽核 `kind` | `test_selfimproving_console_obs.py` 內斷言 `consoleaudit.KINDS` 為三值或列舉 `kind` 的站點（現查） | 3 改 5 |
+| Console `decide` 無人值守（D-IMP-4 追認） | `test_selfimproving_console_obs.py::test_AT_233_1_E_2` 子案 (e) | `UNATTENDED-REFUSED` 改 `AUDIT-KEY-MISSING`（R153 ②／D-QA-9：過授權閘、止於金鑰缺） |
+| 議題中心事件標籤（D-IMP-3） | `tools/lib/selfimproving/issuemap.py::EVENT_LABELS`（`test_selfimproving_issuemap.py` 的 AT-IC-01-1-1／01-1-E-1／01-1-E-2 閉包對帳）；`test_selfimproving_issuemap.py::test_AT_IC_01_7_2_channel_event_and_decision_dictionaries` 的 `len(EVENT_LABELS)` | 加 `sched.set`＝排程設定、`sched.skip`＝排程跳過；計數 21 改 23（TCS-IssueCenter 勘誤同步） |
 | 能力登記禁字樣（D-QA-1） | `test_selfimproving_capability.py`：`FORBIDDEN`（現約 91～106 行，內容**不動**）旁新增常數 `FORBIDDEN_EXEMPT = {"schedarm.py": ("schtasks", "launchctl", "Register-ScheduledTask")}`，`capability_problems` 對每檔的 `forbidden_hits` 先扣除該檔豁免項；`FORBIDDEN_SAMPLES`（現約 108 行起）與負控加「同字樣出現在 `schedarm.py` 以外仍紅」「`schedarm.py` 內 `time.sleep` 仍紅」兩例 | 加豁免表與兩個負控；既有 14 條禁字樣與其樣本逐位不變 |
 | 單平台外部執行檔 argv 守衛（D-QA-1） | `test_platform_neutral_paths.py::TestForeignExecutableArgvIsGuarded`（及 `TestForeignPlatformApiIsGuarded`、`TestForeignApiVocabularyOnlyGrows`）：`schedarm.py` 的 `powershell.exe`、`schtasks`、`launchctl` 字面須住在 `sys.platform` 守衛內，`_FOREIGN_EXE_ARGV_DEBT`、`_FOREIGN_API_SCOPE_DEBT` 不新增 selfimproving 條目 | 預期零改（以 AT-440-3-3 與 `test_selfimproving_capability.py::test_AT_240_5_E_2_runner_static_invariants` 守）；若該測試因新檔而紅，以 ⚖ 回報 |
 | `runner` 靜態不變量 | `test_selfimproving_capability.py::test_AT_240_5_1_exec_registry`、`test_AT_240_5_E_2_runner_static_invariants`：`runner.py` 新增 `run_argv` 與 `spawn_detached` 後，`Popen` 的 `shell` 與 `communicate` 的 timeout 斷言涵蓋新函式（`spawn_detached` 不等待、不呼叫 `communicate`，以其為豁免並釘「不等待」）、`CREATE_BREAKAWAY_FROM_JOB`、`CREATE_NEW_PROCESS_GROUP`、`DETACHED_PROCESS` 的 `getattr` 兜底字面 | 預期值增列 |
@@ -1928,7 +1930,7 @@ Scenario: 只動允許集合
 |------|------|
 | 新增（程式） | `tools/lib/selfimproving/{sched,unattended,schedcheck,schedwrite,patrolbrief,patrol,patrolrun,schedarm}.py`，可選 `evspec.py`（R160 兩態擇一）；`tools/si_patrol_tick.ps1` |
 | 新增（測試） | `tools/tests/{_selfimproving_p4_fixtures,test_selfimproving_schedule_model,test_selfimproving_schedule_patrol,test_selfimproving_schedule_advance,test_selfimproving_schedule_gate}.py` |
-| 修改（程式） | `tools/lib/selfimproving/{events,status,export,params,check,evcheck,decwrite,writeverbs,consoleaudit,runner}.py`（增量上限依 PRD §9.1〈C4 套件檔案表（P4）〉與 R160：`writeverbs.py` 總數 ≤400、`events.py` 總數 ≤400 否則拆 `evspec`；`fold.py` 不得改）；`tools/selfimproving.py`（入口，合併由收尾單人窗口做）；其他 P2 動詞檔（`sandbox.py`、`verify.py`、`promote.py`、`obswrite.py` 等）僅限把 `refuse_unattended` 呼叫改為 `unattended.gate` 的站點 |
+| 修改（程式） | `tools/lib/selfimproving/{events,status,export,params,check,evcheck,decwrite,writeverbs,consoleaudit,runner}.py`（增量上限依 PRD §9.1〈C4 套件檔案表（P4）〉與 R160：`writeverbs.py` 總數 ≤400、`events.py` 總數 ≤400 否則拆 `evspec`；`fold.py` 不得改）；`tools/selfimproving.py`（入口，合併由收尾單人窗口做）；其他 P2 動詞檔（`sandbox.py`、`verify.py`、`promote.py`、`obswrite.py` 等）僅限把 `refuse_unattended` 呼叫改為 `unattended.gate` 的站點；`tools/lib/selfimproving/issuemap.py` 僅限 `EVENT_LABELS` 加 `sched.set`／`sched.skip` 兩列（D-IMP-3；主控落地） |
 | 修改（OS 載具與資料） | `tools/install_windows_nightly.ps1`、`tools/scheduled_task_expectations.json`；`docs/06_quality/SelfImproving_Protocol/params.json`（加九鍵，與 `PARAM_SPECS` 同 commit）；`docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md`（三列，同 commit） |
 | 修改（測試） | R163／§2.5 同步表所列既有測試檔的指名函式與常數；`test_selfimproving_capability.py` 的 `CAPABILITY` 表與計數 |
 | 主控專屬 | 真帳本與真事件帳本；真 OS 任務註冊；護欄層重釘、compat-ci `paths`、`tools/tests` 棘輪（**實作輪收尾步驟**）；RTM 檔 `docs/06_quality/RTM-SelfImproving-P4-<日期>.md`；SCG-4 報告 |
@@ -2029,6 +2031,11 @@ Scenario: 只動允許集合
 | D-QA-14 | 脫離式 spawn 在 Windows 的存活性（SD 提出） | **主控裁決**：旗標 `CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`、POSIX `start_new_session=True`；breakaway 被拒 fail-closed（(f) 記 `sched.skip(spawn-failed)`、(a) 只寫日誌，下一心跳再試）。落點 R167 (a)、AT-438-1-1（替身記錄旗標）、AT-438-1-E-3、§6.3 V30 | 再開：真機任務 job 不允許 breakaway 而永遠 spawn-failed（V30 現形） |
 | D-QA-15 | 黑窗內 Console 立即啟動被擋（SD 提出） | **主控裁決**：Console TCS 已加註，不另增 AT | — |
 | D-QA-16 | `run-open` 跳過判準應排除運轉自己 | **主控裁決**：R143 (f) 改為「本運轉以外的任何未關運轉」，與 R166 同字 | — |
+| D-IMP-1（實作輪 2026-11-09 14:3x） | AT-437-1-3 的黃金檔 G6～G9 由 Console PKG-BE 產出，而 Console TCS 原寫「根層鍵 RELEASE（前置）→ PKG-BE」⇒ 根層 RELEASE ← AT-437-1-3 ← PKG-BE ← 根層 RELEASE 的循環；且 pre-push 跑根層全套，該 AT 紅會擋住根層任何 push（SCHED 棒回報） | **主控裁決（依授權代決）**：黃金檔只依賴凍結契約（API_Contract_P2c §3、PRD §9.2）與根層 `consoleaudit` 兩新 kind 的驗簽（SCHED 棒已落地），不依賴根層 RELEASE ⇒ PKG-BE 於 SCHED 棒 commit 後即開工並先產黃金檔；主控以根層 CLI 驗簽（AT-437-1-3 轉綠）、複製到 Bridge fixtures 後才 push 根層 commit；「根層鍵 RELEASE」只維持為 Console 鍵 RELEASE 的前置。產出者仍為 BE（沿 P2b G1～G5 先例）。§SCG-4 通過標準末列同步改寫 | 再開：BE 黃金檔無法被根層 CLI 收下（契約兩端解讀分歧）⇒ 回 SD 對齊 §3 字面後重產 |
+| D-IMP-2（實作輪） | `events.py` 斷言行到 400（R160 寫「將超過 380 即拆 `evspec.py`」）；SCHED 棒回報 `_SPEC` 與 `events.py` 的謂詞互相依賴，拆出會循環匯入且要動熱檔 | **主控裁決**：本輪接受 400（LOC 絕對上限 ≤400 成立、`check_loc_budget` rc 0）；PATROL 棒不得再往 `events.py` 加一行，任何後續增量先拆 `evspec.py`（R160 兩態擇一） | 再開：`check_loc_budget` 對 `events.py` 轉紅 |
+| D-IMP-3（實作輪） | `issuemap.py` 的 `EVENT_LABELS` 缺兩新 kind，`test_selfimproving_issuemap.py` 四個 AT（AT-IC-01-1-1／01-1-E-1／01-1-E-2／01-7-2）以閉包對帳轉紅；該檔不在 §5.7 | **主控裁決**：§5.7 修改（程式）加 `issuemap.py`（僅 `EVENT_LABELS` 兩列：`sched.set`＝排程設定、`sched.skip`＝排程跳過），§2.5 加站點；由主控落地 | — |
+| D-IMP-4（實作輪） | `test_selfimproving_console_obs.py::test_AT_233_1_E_2` 子案 (e) 為 §2.5 表外站點（R153 ②／D-QA-9：無人值守下 `decide --carrier console` 過授權閘、止於 `AUDIT-KEY-MISSING`），Developer 已就地改 | **主控裁決**：追認並補進 §2.5（R163：表外改動由主控裁決後補表） | — |
+| D-IMP-5（實作輪） | AT-440-8-1 以 `HEAD~1` 為基準常駐於 CI，後續任何無關 commit（Console、`.github/`、護欄層重釘）都會被判紅；淺層 clone 無父 commit | **主控裁決**：常駐形態＝差異（基準→工作樹＋未追蹤）**觸及 §5.7 允許集合**時才強制「⊆ 允許集合」與守衛面為空，未觸及＝輸出註明並通過；父 commit 不可得＝只看未追蹤檔；`skip`／`xfail` 字樣掃描恆跑；本檔（P4 TCS）的主控勘誤追加不屬守衛面。AT-440-8-1 的 Given／Then 同步改寫；護欄層重釘、compat-ci `paths` 等主控專屬變更一律另開 commit | 再開：P4 面的 commit 混入守衛面檔仍會紅（這是設計，不是誤報） |
 
 ### 7.2 P3 TCS 承接項與刻意不做
 
@@ -2050,7 +2057,7 @@ Scenario: 只動允許集合
 - [ ] 範圍守衛：AT-440-8-1 綠；`schedule_backend.py`、`resume_route.py`、`unattended_authz.py`、`.claude/**` 零差異。
 - [ ] 實跑檢核 V30～V35 由主控與掌舵者於真機完成並如實標記（出口 (a) 真實到期巡邏、(b) Console 兩種寫入真機入帳、(c) Console `approve` 被自動入帳並推進到 `verify`、(d) 停用 OS 任務後 `overdue` 翻 true、(e) git 歷史對 DEC 對帳含巡邏器 commit、(f) `unmeasured` 額度帶確實跳過）；未達成者標「未達成（前置未成立）」，不以構造資料充當。
 - [ ] 重釘儀式（護欄層行數棘輪、`tools/tests` 檔數下限與 E501 棘輪、兩站點 guard-total、`_REPIN_APPROVED_ROUND_OVERAGE`、compat-ci `paths`）由主控單人窗口於同一 commit 收齊。
-- [ ] Console 半鍵 `agentconsole-si-schedule` 於本鍵 RELEASE 後才啟動；AT-437-1-3 的黃金檔由 Console 半交付後全綠。
+- [ ] Console 半鍵 `agentconsole-si-schedule` 的 **RELEASE** 以本鍵 RELEASE 為前置；其 PKG-BE 於根層 SCHED 棒 commit 後即開工並先交付黃金檔 G6～G9（D-IMP-1），AT-437-1-3 於主控以根層 CLI 收下黃金檔後全綠——本鍵 RELEASE 前 105 AT 必須全綠（不得以 Console 未交付為由留紅）。
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 

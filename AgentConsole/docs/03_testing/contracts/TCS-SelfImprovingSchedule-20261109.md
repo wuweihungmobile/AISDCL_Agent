@@ -60,7 +60,7 @@
 
 **提交順序與責任**
 
-- 依賴序：**根層鍵 RELEASE（前置）→ PKG-BE（黃金檔與向量先產出）→ PKG-BR（消費黃金檔）；PKG-FE 可與 PKG-BE 並行開工純函式與元件，但 `schema.d.ts` 須待 PKG-BE 完成後以拋棄式 IT 倒 `/v3/api-docs` 餵 `scripts/gen-api.mjs` 重產入庫**（沿 P2b 勘誤 9 作法）。每支程式完成即編譯並跑該區 AT，不累積（`AgentConsole/CLAUDE.md` 鐵律 11）。
+- 依賴序：**根層 SCHED 棒 commit（`consoleaudit` 兩新 kind 可驗簽；D-CS-13）→ PKG-BE（黃金檔與向量先產出，主控以根層 CLI 驗簽後定稿）→ PKG-BR（消費黃金檔）；根層鍵 RELEASE 只為本鍵 RELEASE 的前置；PKG-FE 可與 PKG-BE 並行開工純函式與元件，但 `schema.d.ts` 須待 PKG-BE 完成後以拋棄式 IT 倒 `/v3/api-docs` 餵 `scripts/gen-api.mjs` 重產入庫**（沿 P2b 勘誤 9 作法）。每支程式完成即編譯並跑該區 AT，不累積（`AgentConsole/CLAUDE.md` 鐵律 11）。
 - **三包持有面互不重疊、可並行**（鐵律七）：PKG-BE＝`AgentConsole/backend/**`（含 Flyway 新檔與黃金檔產出）；PKG-BR＝`AgentConsole/engine-bridge/**`；PKG-FE＝`AgentConsole/frontend/**`。唯一共用物是**黃金檔 G6～G9 與向量 V5～V8**：由 PKG-BE 產出（Java 序列化器、`Clock.fixed`、金鑰 K0、帳號 admin）並經根層 `consoleaudit.py` 驗簽收下後定稿，**主控**把同一份位元組複製到 PKG-BR 的 `tests/fixtures/si_audit/`（逐位元組相同；PKG-BR 不得自行重造），故 PKG-BR 的 AT-964-9-3、AT-964-9-E-1 須待此交接後才能全綠；三包之間不得互相修改對方的目錄。
 - 開發 agent **不 commit／push**、不動根層 `tools/`、`.github/`、`.claude/`、凍結檔與既有 TCS（鐵律 7；本鍵的 Flyway 新檔屬 PKG-BE 的允許集合，這與前一個增量「零 Flyway」不同）。`Architecture.md` §5.6／§10.3 去「規劃」註、契約升 v1.0、RTM 本地子表（預定 §2.14）、SCG-4 報告、`lib/help/self-improving.ts` 的頁面說明（與 UI 實作同 commit，出處鎖到 `sourceFiles`）由主控代做。
 - 真帳本、真事件帳本、真 `~/.autosdd/` 一律唯讀：AT 只用 Testcontainers PG、迷你 Bridge、jsdom、fetch 替身與 Playwright 的路由替身；Docker 全棧 V 系列由主控跑、不由 AT 充當。
@@ -1087,6 +1087,7 @@ Scenario: （PW）ADMIN 啟用開關流程：開對話框、送出、顯示待�
 | D-CS-10 | 空字串語意 | **主控裁決**：前端把空字串視為未填並省略該鍵；backend 對字串型空字串與全空白一律 422（與根層 R141 (c) 一致；表 M-X） | — |
 | D-CS-11 | Bridge 本文超過 64 KB 的狀態碼 | **主控裁決**：422 `invalid_request`、`rule=too_large`（主控現查 `engine-bridge/app/routers/si.py` `_read_limited_body`：宣告或累計超過 `SI_WRITE_BODY_MAX_BYTES` 即 422 且不讀完）；AT-964-8-E-2 已釘 | — |
 | D-CS-12 | 現值落界外時的畫面 | **主控裁決**：預填現值並標紅、提示先改成界內週期再送出停用（D-CS-6 不開例外） | 再開：掌舵者回報無法停用 |
+| D-CS-13（實作輪 2026-11-09） | 開工前置「根層鍵 RELEASE」與根層 AT-437-1-3（真 CLI 收下黃金檔 G6～G9）互為前置（循環；根層 TCS D-IMP-1） | **主控裁決（依授權代決）**：PKG-BE 的前置降為「根層 SCHED 棒 commit」（黃金檔只依賴凍結契約與根層 `consoleaudit` 驗簽實作），根層鍵 RELEASE 改為本鍵 RELEASE 的前置；黃金檔仍由 BE 產出、主控以根層 CLI 驗簽後複製到 Bridge fixtures（§依賴序同步改寫） | 再開：黃金檔被根層 CLI 拒收 ⇒ 回 SD 對齊契約 §3 |
 | ⚖ 1 | 兩個對話框分立或合一 | 預設分立（`SiScheduleDialog`、`SiRunRequestDialog`，共用 `siParts.tsx` 的收據與錯誤元件）；AT 的檔名依此；合一時 Developer 於勘誤登記對照 | 再開：LOC 或可讀性壓力 |
 | ⚖ 2 | 請求本文的未知欄位處置（契約 §1.2 只說「沿 P2b 兩個 POST 現行行為」） | 本檔 AT 不釘未知欄位；實作輪現查 DTO 行為並於契約 v1.0 回寫，必要時補一個與既有 `POST /observations` 的差分 AT 經勘誤登記 | 再開：未知欄位被靜默收下卻簽進 body |
 | ⚖ 3 | Playwright mock 的替身形態 | 沿既有 `tests/e2e/mockApi.ts` 與 `*.mock.spec.ts` 體例（`E2E_MODE=standalone`）；三個 PW AT 各一個動作 | 再開：既有體例無法替身 POST |

@@ -732,7 +732,7 @@ Given（夾具）與 Then（判定）；R 條文對應見 R 條文表的 AT 欄�
 | AT-IC-01-6-1 | RI | 三個觀察列各有一個表外處置值（兩個同為 later、一個為 soon） | `problems` 恰三筆 `UNMAPPED`（subject 各為其議題 ID）、不合併不彙總；三者 `status` 皆顯示「未歸類：<原值>」（later、later、soon） |
 | AT-IC-01-6-E-1 | RI | 同上夾具 | `summary.unmapped`＝3 且 `total`＝七狀態件數和＋`unmapped`；`problems` 長度為 3（不是 2） |
 | AT-IC-01-7-1 | RI | 探針夾具逐一觸發五個 problems 碼與九個 ne 理由（含無 git 的夾具觸發 `git-unavailable`：夾具不是 git repo；另一例 `PATH` 無 git） | 實際產出的碼與理由 ⊆ `issuemap` 表，且各有非空中文；無 git 兩例 `head_sha`＝null、其餘議題照常、rc 0 |
-| AT-IC-01-7-2 | RM | 通道、時間線動作、決定動詞三本字典 | 通道鍵恰為 `events.ROUTES` 的 `handoff:` 後綴（DEF、R、T1、PRD）；動作鍵恰為 `events.KINDS`（21）、決定動詞恰為 `events.DKINDS`（9）；中文非空且互異 |
+| AT-IC-01-7-2 | RM | 通道、時間線動作、決定動詞三本字典 | 通道鍵恰為 `events.ROUTES` 的 `handoff:` 後綴（DEF、R、T1、PRD）；動作鍵恰為 `events.KINDS`（23；勘誤四 4-1，隨上游）、決定動詞恰為 `events.DKINDS`（9）；中文非空且互異 |
 | AT-IC-01-7-E-1 | RI | 表 ⊆ 產出：夾具清單覆蓋表中每個碼與理由；合成表多一碼（無夾具）、產出多一碼（patch 產出 `FOO`） | 表中每項至少被一個夾具觸發；兩種合成變體各使自證測試轉紅 |
 | AT-IC-01-8-1 | RI | 觀察主檔缺檔夾具 | 觀察議題整批缺席；`ne` 恰多一筆 `OBS-LEDGER-UNAVAILABLE`（field `ledger.observation`）；其餘帳本議題照常；rc 0；`by_tab` 三格皆 `null` |
 | AT-IC-01-8-2 | RI | 缺陷主檔缺檔夾具 | `ne` 恰多一筆 `DEFECT-LEDGER-UNAVAILABLE`；`by_tab` 待處理、已完成為 `null`、待您決定非 `null`；其餘議題照常 |
@@ -1350,3 +1350,9 @@ $snap = Get-Content -LiteralPath <snap 檔> -Encoding utf8; $o = git -C <repo> s
 | 條 | TCS 座標 | 原文 | 改文 | 理由 |
 |---|---|---|---|---|
 | 3-1 | AT-IC-12-1-1（:981）、AT-IC-12-1-2（:982）、§5.5 規模夾具段（:1102） | 「連跑 5 次 … 每次 ≤ 2 秒」「同樣 ≤ 2 秒」（單次量測） | 量法改為 **best-of-N**：AT-IC-12-1-1 連跑 5 次取最佳值 ≤ 2 秒（每次仍驗單頁 ≤ 1 MB）、AT-IC-12-1-2 連跑 3 次取最佳值 ≤ 2 秒；門檻 2 秒與輸出上限不變，AT 標題與 id 不變；實作於 `tools/tests/test_selfimproving_issues.py` 兩個測試本體（連跑後取 `min`；護欄層行數棘輪要求淨額不上升，故不另抽輔助函式），失敗訊息列出各次秒數 | 真機事實（2026-11-09，20 邏輯核、cpu_budget 廣播 18 worker）：pre-push 根層全套平行跑時單次量到 2.27 秒（第 4 次）與 2.42 秒（第 1 次），同機閒置單跑 `export --kind issues` 0.72 秒、該測試類 5 支 4.9 秒全綠——單次門檻量到的是機器負載不是匯出能力；根 `CLAUDE.md`〈GitHub CI/CD 一律多 CPU〉把 perf 量測列為唯一允許的序列例外，本檔不改執行形態、改估計量（取最小值：負載噪音只把單次往上推）；真正變慢到連最佳一次都超過 2 秒仍紅。OBS-SI-369 |
+
+### 勘誤四（2026-11-09；主控；SelfImproving P4 加兩個事件 kind 的連動；兩鍵 `monorepo-issue-center`、`agentconsole-issue-center` 依〈凍結後修訂路由〉同次 refreeze，最終 digest 須相同）
+
+| 條 | TCS 座標 | 原文 | 改文 | 理由 |
+|---|---|---|---|---|
+| 4-1 | AT-IC-01-7-2（:735） | 「動作鍵恰為 `events.KINDS`（21）」 | 「動作鍵恰為 `events.KINDS`（**23**）」；`issuemap.EVENT_LABELS` 加 `sched.set`＝排程設定、`sched.skip`＝排程跳過；`tools/tests/test_selfimproving_issuemap.py::test_AT_IC_01_7_2_channel_event_and_decision_dictionaries` 的計數斷言 21→23（AT 標題、id、其餘判準不變） | 上游 `events.KINDS` 由 21 增為 23（SelfImproving PRD v0.13.1 FG-M、TCS-SelfImproving-P4 R139），閉包對帳 AT-IC-01-1-1／01-1-E-1／01-1-E-2 要求字典鍵集合與 KINDS 全等，否則四個 AT 轉紅 ⇒ 字典隨上游加列（TCS-SelfImproving-P4 §7.1 D-IMP-3）；計數字面隨上游、不是放寬 |
