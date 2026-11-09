@@ -410,8 +410,14 @@ _FROZEN_SHRINK_ONLY_BUCKET_LINES: dict[str, int] = {
     # TestAnchors（AT-440-6-x：全部 AT 的 -k 錨定唯一與有牙自證，與 P3 TestAnchors 同型），
     # 守自己＝只能是 guard_self、無法移出；SD 於 TCS §3.1 預告、QA SCG-0～3 二審 PASS。
     # 兩值取自當回合 `guard_layer_bucket_census.py --grain chunk` 實測（exclusive），零加減推算。
+    # 🔴 SelfImproving P5 收尾單人窗口（護欄層記帳＝同標籤 R214 第十九列；主控依凍結常態規則
+    # 裁定）：prose 5253 實測未動、guard_self 3353→3416（+63）——成長全在兩個新 chunk：
+    # test_selfimproving_fourq_gate.py 的 TestScopeAndTable（AT-445-5-x 範圍守衛與 AT 對照表
+    # 自檢，受測對象就是該檔自己）與 test_selfimproving_fourq_model.py 的 TestSopRole（受測
+    # 為測試夾具 _selfimproving_p5_fixtures.py 的判準函式），守自己＝只能是 guard_self、無法
+    # 移出。值取自當回合 `guard_layer_bucket_census.py --grain chunk` 實測（exclusive）。
     "prose": 5253,
-    "guard_self": 3353,
+    "guard_self": 3416,
 }
 
 #: 棘輪吃的粒度與估計量。寫成常數而不是散文，是為了讓 probe 與棘輪不可能各讀一種
