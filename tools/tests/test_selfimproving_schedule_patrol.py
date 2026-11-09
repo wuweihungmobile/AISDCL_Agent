@@ -24,7 +24,7 @@ from unittest import mock
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p4_fixtures as fx4
-from _selfimproving_p4_fixtures import D1, MIN, H, O, P4TestCase, Rig, iso
+from _selfimproving_p4_fixtures import D1, MIN, STUB, H, O, P4TestCase, Rig, iso
 
 from lib import resume_route, unattended_authz
 from lib.selfimproving import evwrite, patrolbrief, runner, sched, status
@@ -89,8 +89,9 @@ class TestHeartbeatShape(P4TestCase):
         obj = json.loads(out)
         self.assertEqual((rc, obj["kind"], len(obj["steps"])), (0, "patrol", 5))
         self.assertEqual(list(obj), ["ok", "kind", "dry_run", "steps", "events"])
-        src = (PKG / "patrol.py").read_text(encoding="utf-8")
-        self.assertNotIn("communicate", src, "心跳本身不等待子行程")
+        src = (PKG / "patrol.py").read_text(encoding="utf-8").splitlines()
+        code = [ln for ln in src if not ln.lstrip().startswith("#")]
+        self.assertEqual([ln for ln in code if "communicate" in ln], [], "心跳本身不等待子行程")
 
     def test_AT_436_3_2_dry_run_writes_nothing(self):
         R = self.enabled_repo()
@@ -227,10 +228,10 @@ class TestSpawnShape(P4TestCase):
     def spawn_checks(self, R: Path, rig: Rig) -> dict:
         call = rig.spawner.calls[0]
         argv = call["argv"]
-        self.assertEqual(argv[:2], ["/stub/claude", "-p"])
+        self.assertEqual(argv[:2], [STUB, "-p"])
         run = re.search(r"無人運轉 (RUN-SI-\d+)", argv[2]).group(1)
         tdir = self.home / "patrol" / run
-        self.assertEqual(argv, resume_route.fresh_argv("/stub/claude", argv[2], tdir))
+        self.assertEqual(argv, resume_route.fresh_argv(STUB, argv[2], tdir))
         brief = tdir / "brief.md"
         self.assertIn(str(brief), argv[2])
         self.assertTrue(brief.read_bytes())

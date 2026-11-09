@@ -481,7 +481,7 @@ class TestRunLifecycle(P4TestCase):
                 self.assertTrue(any("step=運轉" in ln and f"code={code}" in ln
                     for ln in self.logs()),
                                 self.logs())
-                rig.band, rig.quiet, rig.which = "free", True, "/stub/claude"
+                rig.band, rig.quiet, rig.which = "free", True, fx4.STUB
                 with fx4.with_key(fx2.AUDIT_KEY):
                     self.assertEqual(self.beat(R, O + H + 15 * MIN, rig)[0], 0)
                 self.assertEqual((len(evs(R, "run.open")), len(rig.spawner.calls)), (1, 1))
@@ -501,13 +501,17 @@ class TestIngestAndLog(P4TestCase):
         R = fx4.p4_base()
         prop = fx2.new_prop(R)
         digest = fx2.prop_event(R, prop)["digest"]
-        self.audit("run-request", lambda r: fx4.body_run_request(r, time=self.t(1)))
-        self.audit("obs-add", lambda r: fx2.body_obs_add(r, time=self.t(2)))
-        self.audit("sched-set", lambda r: fx4.body_sched_set(r, False, 1440, time=self.t(3)))
+        # audit_ref 遞減、time 遞增：排序鍵若只看 audit_ref（SCG-4 一審 B-1 存活突變）入帳序反轉
+        refs = sorted((fx2.new_uuid() for _ in range(5)), reverse=True)
+        self.audit("run-request", lambda r: fx4.body_run_request(r, time=self.t(1)), ref=refs[0])
+        self.audit("obs-add", lambda r: fx2.body_obs_add(r, time=self.t(2)), ref=refs[1])
+        self.audit("sched-set", lambda r: fx4.body_sched_set(r, False, 1440, time=self.t(3)),
+                   ref=refs[2])
         self.audit("decide", lambda r: fx2.body_decide(r, prop, digest, "approve", time=self.t(4)),
-                   subject=prop)
+                   subject=prop, ref=refs[3])
         self.audit("obs-close", lambda r: fx2.body_obs_close(r, fx.obs_id(1), "decided：測試",
-                                                             time=self.t(5)), subject=fx.obs_id(1))
+                                                             time=self.t(5)), subject=fx.obs_id(1),
+                   ref=refs[4])
         nokey = fx4.clone(R)
         self.assertEqual(self.beat(nokey, NOW, Rig())[0], 0)  # 無金鑰變數：全部拒收、稽核檔保留
         self.assertEqual(status.console_pending(fx4.ledger(nokey), True)["count"], 5)
@@ -648,7 +652,7 @@ class TestIngestAndLog(P4TestCase):
         failing = [ln for ln in raw.splitlines() if ref in ln]
         self.assertEqual(len(failing), 1)
         self.assertRegex(failing[0], r"step=入帳 rc=[1-9]\d* code=AUDIT-MAC-MISMATCH ")
-        self.assertNotIn(fx2.AUDIT_KEY, raw)
+        self.assertEqual([ln for ln in raw.splitlines() if fx2.AUDIT_KEY in ln], [])
 
 
 if __name__ == "__main__":

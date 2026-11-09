@@ -402,7 +402,7 @@ $settings = New-ScheduledTaskSettingsSet `
 $HeartbeatMinutes = [int](Get-Content -LiteralPath $SchedParamsJson -Raw -Encoding UTF8 |
     ConvertFrom-Json).sched_heartbeat_minutes
 $patrolAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"${PatrolPs1}`""
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"${PatrolPs1}`""
 # 每日 00:00 的 Daily 觸發＋重複間隔：重複設定借用 -Once 觸發建構出的 Repetition 物件（模組沒有
 # 「Daily 加重複」的單一參數組合）。
 $patrolTrigger = New-ScheduledTaskTrigger -Daily -At '00:00'

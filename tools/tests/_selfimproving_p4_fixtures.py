@@ -221,6 +221,11 @@ class P4TestCase(fx2.P2TestCase):  # 名稱含 TestCase：discover 守門不解�
 
 # --------------------------------------------------------------------------- 巡邏心跳替身
 # （PKG-ROOT-PATROL）
+#: 替身 `claude` 路徑：`Deps.which` 原樣回傳、`patrolrun` 原樣放進 argv[0]，全程不經 Path 渲染，
+#: 故測試以同一常數比對（不是 POSIX 絕對路徑字面值比對 Path 產物）。
+STUB = "/stub/claude"
+
+
 class Spawner:
     """`runner.spawn_detached` 的替身：記錄 argv／env／cwd 並回假 pid；前 `fail` 次呼叫拋
     `PermissionError`
@@ -245,7 +250,7 @@ class Rig:
     `research --fetch` 以預設 rc 序列替身（rc 0／2 另落一筆 `research.scan`，rc 1 回拒收）。"""
 
     def __init__(self, *, band: str = "free", quiet: bool = True,
-        which: str | None = "/stub/claude",
+        which: str | None = STUB,
                  preflight: str | None = None, fetch_rcs=(0,), changed: bool = True) -> None:
         self.band, self.quiet, self.which, self.preflight = band, quiet, which, preflight
         self.fetch_rcs, self.changed = list(fetch_rcs), changed

@@ -485,7 +485,11 @@ class TestOsCarrier(P4TestCase):
         self.assertNotRegex(code_only(installer), r"-Minutes\s+\d+")  # 不寫死第二份心跳分鐘數
         self.assertIn("New-ScheduledTaskTrigger -Daily -At '00:00'", installer)
         self.assertIn("-RepetitionDuration (New-TimeSpan -Days 1)", installer)
-        self.assertIn("-NoProfile -ExecutionPolicy Bypass -File", installer)
+        arg_re = r"\$patrolAction = New-ScheduledTaskAction[^\n]*\n\s*-Argument \"([^\"]*)\""
+        patrol_arg = re.search(arg_re, installer)
+        self.assertIsNotNone(patrol_arg, "找不到巡邏任務 Action 的 -Argument 字串")
+        for flag in ("-NoProfile", "-WindowStyle Hidden", "-ExecutionPolicy Bypass", "-File"):
+            self.assertIn(flag, patrol_arg.group(1))  # D-IMP-7：逐旗標判在場（R84 同型）
         self.assertIn(r"tools\si_patrol_tick.ps1", installer)
         import test_install_windows_nightly as inst
         engine = inst._ps_engine()

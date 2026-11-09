@@ -46,8 +46,13 @@ if (Test-Path -LiteralPath $EnvFile) {
 }
 
 $stamp = [DateTimeOffset]::Now.ToString('o')
+# PS 5.1：$ErrorActionPreference='Stop' 下以 2>&1 接原生指令，python 一寫 stderr 就成終止錯誤、本心跳的
+# tick.log 不落（SCG-4 一審 B-3，TCS-P4 D-IMP-8）⇒ 只在原生呼叫段放寬為 Continue，取 rc 後還原。
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 $out = & $Python $Entry patrol 2>&1
 $rc = $LASTEXITCODE
+$ErrorActionPreference = $prevEap
 $text = ($out | ForEach-Object { "$_" }) -join "`n"
 [System.IO.File]::AppendAllText((Join-Path $LogDir 'tick.log'), "$stamp rc=$rc`n$text`n", (New-Object System.Text.UTF8Encoding($false)))
 exit $rc
