@@ -492,9 +492,9 @@ class TestOsCarrier(P4TestCase):
             self.assertIn(flag, patrol_arg.group(1))  # D-IMP-7：逐旗標判在場（R84 同型）
         self.assertIn(r"tools\si_patrol_tick.ps1", installer)
         import test_install_windows_nightly as inst
-        engine = inst._ps_engine()
+        engine = inst._ps_engine() if sys.platform == "win32" else None
         if engine is None:
-            return  # 無引擎的平台只走靜態判準（不 skip）
+            return  # 非 Windows 或無引擎：只走靜態判準（不 skip；安裝器 Windows 專屬）
         listing = [engine, "-NoProfile", "-Command",
                    "(Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object TaskName | "
                    "Sort-Object) -join ','"]
