@@ -509,6 +509,8 @@ FORBIDDEN = (".claude/", "AgentConsole/", ".github/", "docs/05_development/SelfI
              "docs/03_testing/contracts/TCS-SelfImproving-P4", "tools/lib/schedule_backend.py",
              "tools/lib/resume_route.py", "tools/lib/unattended_authz.py",
              "tools/lib/model_roles.py")
+SKIP_RE = re.compile(r"\bskip(?:Test|If|Unless)\b|unittest\.skip|pytest\.skip|mark\.skip|Sk"
+                     r"ipTest|xf" "ail")
 
 
 def scope_names(base: str) -> set[str]:
@@ -537,7 +539,7 @@ class TestScopeAndTable(unittest.TestCase):
         for name in ("test_selfimproving_fourq_model", "test_selfimproving_fourq_gate",
                      "_selfimproving_p5_fixtures"):
             text = (TESTS / f"{name}.py").read_text(encoding="utf-8")
-            self.assertIsNone(re.search(r"skip[A-Z(]|unittest\.skip|pytest\.skip|xf" "ail", text))
+            self.assertIsNone(SKIP_RE.search(text), name)
 
     def table(self) -> list[tuple[str, str]]:
         return re.findall(r"\| (AT-44\d-[\dE-]+) \| (FM|FG) \|", TCS.read_text(encoding="utf-8"))
