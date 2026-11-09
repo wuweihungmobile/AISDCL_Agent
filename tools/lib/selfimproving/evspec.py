@@ -429,3 +429,47 @@ def gate_codes(events: list[dict], run: str, proposer: str, params: dict) -> _Is
     if got[0] == "fourq.review" and got[2].get("by") == proposer:
         return [("FOURQ-IS-PROPOSER", f"{run} 的審視者與提案者同為 {proposer}")]
     return []
+
+
+# ---- Q4／proof 禁字（`FOURQ-Q4-LEAK` 與 `PROOF-LEAK` 共用；自 fourqparse 搬來以守 LOC 上限）----
+_TICK_RE = re.compile(r"`[^`]*`")
+
+LEAK_RES = (re.compile(r"n\s*=\s*\d"), re.compile(r"\d\s*%"), re.compile("基線|門檻|閾值"),
+            re.compile(r"params\.json|W_N|W_MIN|W_EVT|W_OPP"))
+GOODHART = ("觀察筆數", "OBS 筆數", "提案筆數", "採納率", "駁回率", "四問項數", "發現數", "零發現",
+            "自評", "信心")
+_NEG = ("不以", "不得以", "並非以")
+
+
+def _outside_ticks(text: str) -> str:
+    return _TICK_RE.sub("", text)
+
+
+def leak_codes(text: str, keys=()) -> list[str]:
+    """Q4／proof 禁字（`FOURQ-Q4-LEAK` 與 `PROOF-LEAK` 共用）：回命中的片段（空＝乾淨）。"""
+    out, body = [], _outside_ticks(text)
+    out += [m.group(0) for rx in LEAK_RES if (m := rx.search(body))]
+    out += [k for k in sorted(keys)
+            if re.search(rf"(?<![A-Za-z0-9_]){re.escape(k)}(?![A-Za-z0-9_])", body)]
+    for term in GOODHART:
+        for m in re.finditer(re.escape(term), body):
+            if not body[:m.start()].endswith(_NEG):
+                out.append(term)
+                break
+    return out
+
+
+def safe_path(repo, rel: str):
+    """答案檔座標或工具路徑 → （repo 內的 Path 或 None, 是否逃逸）。字面判定**先於任何檔案系統
+    存取**（含 `..` 片段、`/` 或 `\\` 起頭〔含 UNC〕、磁碟代號、NUL 與控制字元一律拒收），通過後
+    才以 `resolve()` 確認仍在 `repo.resolve()` 之下（PRD 附錄 C.2 #24 之 SCG-4 P2-1）。"""
+    if (not rel or rel[0] in "/\\" or re.match(r"^[A-Za-z]:", rel)
+            or ".." in re.split(r"[/\\]", rel)
+            or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in rel)):
+        return None, True
+    p = repo / rel
+    try:
+        p.resolve().relative_to(repo.resolve())
+    except (ValueError, OSError):
+        return None, True
+    return p, False

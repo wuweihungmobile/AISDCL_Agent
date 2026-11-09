@@ -18,7 +18,17 @@ from . import fold as si_fold
 from . import params as si_params
 from . import refs as si_refs
 from . import sources as si_sources
-from .evspec import applicable, fourq_all, fourq_events, gate_codes, run_num  # noqa: F401
+from .evspec import (  # noqa: F401
+    _TICK_RE,
+    _outside_ticks,
+    applicable,
+    fourq_all,
+    fourq_events,
+    gate_codes,
+    leak_codes,
+    run_num,
+    safe_path,
+)
 from .ledger import Finding
 
 QS = ("此頂尖專家會做那些我沒有想到的事？", "在哪裡找到最前沿的資料與研究結果？",
@@ -38,19 +48,13 @@ _REQUIRED = (CORPUS[0], CORPUS[6], CORPUS[7])
 _ITEM_RE = re.compile(r"^- (Q1-X\d+|Q1-\d+|Q2-F\d+|Q2-G\d+|Q3-\d+|Q4-\d+)｜(.+)$")
 _QUERY_RE = re.compile(r"^「(.+)」＝(.+)$")
 _REF_RE = re.compile(r"(?<![A-Za-z0-9])(OBS|ATT|PROP|DEC|APP|RUN|MEA)-SI-\d+")
-_COORD_RE = re.compile(r"^(?P<p>[^\s:]+):(?P<a>\d+)(?:[-–]\d+)?$")
+_COORD_RE = re.compile(r"^(?P<p>\S+?):(?P<a>\d+)(?:[-–]\d+)?$")
 _SID_RE = re.compile(r"^sid (?P<u>\S+) line (?P<n>\d+)$")
 _EXT_RE = re.compile(r"^外部：(.+)（src=([a-z0-9-]+)）$")
-_TICK_RE = re.compile(r"`[^`]*`")
 _URL_RE = re.compile(r"^https://[^/@\s?#]+(?:[/?#]\S*)?$")
 _FIELDS = {"Q1": ("領域", "做法", "機制", "座標"), "Q2G": ("URL", "分級", "為何前沿", "更新頻率"),
            "Q2F": ("來源", "座標", "發現"), "Q3": ("對象", "方法", "工具"),
            "Q4": ("擬提案", "指標類別", "症狀定義", "反證", "收斂")}
-LEAK_RES = (re.compile(r"n\s*=\s*\d"), re.compile(r"\d\s*%"), re.compile("基線|門檻|閾值"),
-            re.compile(r"params\.json|W_N|W_MIN|W_EVT|W_OPP"))
-GOODHART = ("觀察筆數", "OBS 筆數", "提案筆數", "採納率", "駁回率", "四問項數", "發現數", "零發現",
-            "自評", "信心")
-_NEG = ("不以", "不得以", "並非以")
 Prob = tuple[str, str]
 
 
@@ -141,24 +145,6 @@ def counts(items: list[Item]) -> dict:
             "gaps": n("Q2G"), "q1x": n("Q1X")}
 
 
-def _outside_ticks(text: str) -> str:
-    return _TICK_RE.sub("", text)
-
-
-def leak_codes(text: str, keys=()) -> list[str]:
-    """Q4／proof 禁字（`FOURQ-Q4-LEAK` 與 `PROOF-LEAK` 共用）：回命中的片段（空＝乾淨）。"""
-    out, body = [], _outside_ticks(text)
-    out += [m.group(0) for rx in LEAK_RES if (m := rx.search(body))]
-    out += [k for k in sorted(keys)
-            if re.search(rf"(?<![A-Za-z0-9_]){re.escape(k)}(?![A-Za-z0-9_])", body)]
-    for term in GOODHART:
-        for m in re.finditer(re.escape(term), body):
-            if not body[:m.start()].endswith(_NEG):
-                out.append(term)
-                break
-    return out
-
-
 def _read(p: Path) -> str:
     return p.read_bytes().decode("utf-8", "replace").replace("\r\n", "\n")
 
@@ -195,10 +181,14 @@ def _coord_ok(c: str, repo: Path, obs: dict, defs: set, srcs: set | None, q: str
     if c in obs or c in defs:
         return q is None or any(q in ln and c in ln for ls in (corp or {}).values()
                                 for ln in ls), ""
-    if m and (repo / m["p"]).is_file():
-        ls = _read(repo / m["p"]).split("\n")
-        n = int(m["a"])
-        return 1 <= n <= len(ls) and (q is None or q in ls[n - 1]), ""
+    if m:
+        path, esc = safe_path(repo, m["p"])  # 字面判定先於任何檔案系統存取
+        if esc:
+            return False, "ESCAPE"
+        if path is not None and path.is_file():
+            ls = _read(path).split("\n")
+            n = int(m["a"])
+            return 1 <= n <= len(ls) and (q is None or q in ls[n - 1]), ""
     return False, ""
 
 
@@ -206,6 +196,8 @@ def _coords(it: Item, repo, obs, defs, srcs, q=None, corp=None) -> list[Prob]:
     segs = [s.strip() for s in it.get("座標").split("、") if s.strip()]
     got = [_coord_ok(s, repo, obs, defs, srcs, q, corp) for s in segs]
     out = [("FOURQ-SRC-UNKNOWN", f"{it.num} 的 src={g[1]} 不在來源表") for g in got if g[0] is None]
+    if any(g[1] == "ESCAPE" for g in got):
+        out.append(("FOURQ-COORD-ESCAPE", f"{it.num} 的座標路徑逃出 repo 根"))
     if not any(g[0] for g in got) and not out:
         out.append(("FOURQ-COORD-MISSING", f"{it.num} 沒有可定位的座標"))
     return out
@@ -253,9 +245,11 @@ def _kind_probs(items: list[Item], repo: Path, srcs: set | None) -> list[Prob]:
                 m = _EXT_RE.match(tool)
                 if m and srcs is not None and m.group(2) in srcs:
                     continue
-                if not m and tool and ".." not in tool and (repo / tool).exists():
-                    continue
-                out.append(("FOURQ-TOOL-UNKNOWN", f"{it.num} 的工具 {tool} 不存在或缺 src"))
+                path, esc = (None, False) if m or not tool else safe_path(repo, tool)
+                if esc:
+                    out.append(("FOURQ-COORD-ESCAPE", f"{it.num} 的工具路徑逃出 repo 根：{tool}"))
+                elif path is None or not path.exists():
+                    out.append(("FOURQ-TOOL-UNKNOWN", f"{it.num} 的工具 {tool} 不存在或缺 src"))
         if it.kind == "Q4":
             cat, sym = it.get("指標類別"), it.get("症狀定義")
             cat_ok = bool(re.match(r"^(M1|M4|M5)(?![A-Za-z0-9])", cat)) or (
@@ -309,8 +303,9 @@ def validate(raw: bytes, repo: Path | None = None, *, run: str | None = None,
         if it.kind in ("Q1", "Q2F") and it.num != "Q2-F0":
             probs += _coords(it, repo, obs, defs, srcs)
         if it.kind == "Q1X" and corp is not None:
-            probs += [("FOURQ-Q1-EMPTY-UNJUSTIFIED", d) for q, _ in it.queries
-                      for _, d in _coords(it, repo, obs, defs, srcs, q, corp)]
+            probs += [(c if c == "FOURQ-COORD-ESCAPE" else "FOURQ-Q1-EMPTY-UNJUSTIFIED", d)
+                      for q, _ in it.queries
+                      for c, d in _coords(it, repo, obs, defs, srcs, q, corp)]
     if c["q1"] == 0 and c["q1x"] < 2:
         probs.append(("FOURQ-Q1-EMPTY-UNJUSTIFIED", "零項 Q1 須至少 2 筆 Q1-X"))
     probs += _ref_probs(text, obs, events or [])

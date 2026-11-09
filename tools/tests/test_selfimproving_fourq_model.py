@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import re
 import unittest
@@ -125,19 +126,22 @@ class TestFormat(ParseCase):
         self.assertIn("FOURQ-FORMAT", codes(probs))
 
     def test_AT_441_2_E_3_items_cap_by_band(self):
-        R = self.base()
-        many = answers(q3=[f5.Q3_LINE.replace("Q3-1", f"Q3-{i}") for i in (1, 2, 3, 4)])
-        self.assertEqual(
-            [c for c, _ in self.V(R, many, items_max=3)[0] if c == "FOURQ-ITEMS-OVER"],
-            ["FOURQ-ITEMS-OVER"])
-        self.assertNotIn("FOURQ-ITEMS-OVER", codes(self.V(R, many, items_max=4)[0]))
-        two = answers(q3=[f5.Q3_LINE, f5.Q3_LINE.replace("Q3-1", "Q3-2")])
-        for band, cap in (("free", 3), ("notice", 1), ("converge", 1), ("stop", 1)):
+        R = f5.p5_base()
+        run = fx2.open_run(R)
+        many = answers(run, q3=[f5.Q3_LINE.replace("Q3-1", f"Q3-{i}") for i in (1, 2, 3, 4)])
+        self.assertEqual([c for c, _ in fourqparse.validate(many.encode(), R, run=run,
+                                                            items_max=3)[0]
+                          if c == "FOURQ-ITEMS-OVER"], ["FOURQ-ITEMS-OVER"])
+        self.assertNotIn("FOURQ-ITEMS-OVER", codes(fourqparse.validate(
+            many.encode(), R, run=run, items_max=4)[0]))
+        two = answers(run, q3=[f5.Q3_LINE, f5.Q3_LINE.replace("Q3-1", "Q3-2")])
+        for band in ("notice", "converge", "stop"):  # 真入口：非 free 帶＝降載上限 1
             with f5.free_band(band):
-                got = fourq.review  # 以真入口驗證上限來源
-            self.assertIsNotNone(got)
-            probs, _, _ = self.V(R, two, items_max=cap)
-            self.assertEqual("FOURQ-ITEMS-OVER" in codes(probs), cap == 1, band)
+                rc, out, _ = self.fq(R, two, run=run)
+            self.rejected(rc, out, {"FOURQ-ITEMS-OVER"}, band)
+        with f5.free_band("free"):  # 同一檔在 free 帶＝上限 3，入帳成功
+            rc, out, err = self.fq(R, two, run=run)
+        self.assertEqual(rc, 0, out + err)
 
 
 class TestCoordsAndQueries(ParseCase):
@@ -165,7 +169,34 @@ class TestCoordsAndQueries(ParseCase):
                      ("https://example.org/feed", "https://u@example.org/feed"),
                      ("分級：T1", "分級：T3")):
             self.assertIn("FOURQ-FORMAT", codes(self.V(R, good.replace(a, b))[0]), b)
+        self.escape_variants(R)
 
+    def escape_variants(self, R: Path) -> None:
+        """座標與工具路徑的逃逸：字面判定先於任何檔案系統存取（SCG-4 P2-1）。"""
+        bad = ("../x.md:1", "C:\\Windows\\win.ini:1", "\\\\localhost\\c$\\x:1", "//host/share/x:1",
+               "/etc/passwd:1")
+        marks = ("win.ini", "localhost", "/host/share", "etc/passwd", "..")
+
+        def guard(orig):
+            def wrapped(self, *a, **k):
+                text = str(self).replace("\\", "/")
+                if any(m in text for m in marks):
+                    raise AssertionError(f"touched {text}")
+                return orig(self, *a, **k)
+            return wrapped
+        names = ("exists", "is_file", "is_dir", "read_bytes", "read_text", "open", "resolve",
+                 "stat")
+        with contextlib.ExitStack() as stack:
+            for n in names:
+                stack.enter_context(mock.patch.object(Path, n, guard(getattr(Path, n))))
+            for coord in bad:
+                text = answers(q1=[f5.Q1_LINE.replace(f"{SOP}:1", coord)])
+                self.assertIn("FOURQ-COORD-ESCAPE", codes(self.V(R, text)[0]), coord)
+                tool = coord.rsplit(":", 1)[0]
+                text = answers(q3=[f5.Q3_LINE.replace("playbooks/demo.yaml", tool)])
+                self.assertIn("FOURQ-COORD-ESCAPE", codes(self.V(R, text)[0]), tool)
+            ctl = answers(q1=[f5.Q1_LINE.replace(f"{SOP}:1", "a\x07b:1")])
+            self.assertIn("FOURQ-COORD-ESCAPE", codes(self.V(R, ctl)[0]))
     def test_AT_441_3_2_corpus_is_fixed_and_replay_is_zero_nonzero(self):
         R = self.base()
         fx.put(R, "docs/06_quality/SelfImproving_Observation_Ledger.md.bak", "金絲雀回滾演練\n")
@@ -191,6 +222,9 @@ class TestCoordsAndQueries(ParseCase):
         self.assertIn("FOURQ-QUERY-DUP", codes(self.V(R, answers(q1=[same]))[0]))
         short = f5.Q1_LINE.replace("「漸進放量比對」", "「漸」")
         self.assertIn("FOURQ-QUERY-TOO-SHORT", codes(self.V(R, answers(q1=[short]))[0]))
+        three = f5.Q1_LINE.replace("錯誤率｜座標", "錯誤率abc｜座標")
+        three = three.replace("「漸進放量比對」", "「abc」")
+        self.assertIn("FOURQ-QUERY-TOO-SHORT", codes(self.V(R, answers(q1=[three]))[0]))
         long_ = "做法：" + "漸進放量比對錯誤率的長查詢"
         for q, code in (("漸進放量比對錯誤率", "FOURQ-QUERY-TOO-LONG"),
                         ("漸進放量比對錯", None), ("漸進放量比對錯誤", None)):
@@ -259,6 +293,8 @@ class TestQ4(ParseCase):
             self.assertIn("FOURQ-Q4-LEAK", codes(self.V(R, answers(q4=[line]))[0]), bad)
         ok = f5.Q4_LINE.replace("演練後症狀仍再現", "不以觀察筆數為成效；並非以採納率判斷")
         self.assertEqual(self.V(R, answers(q4=[ok]))[0], [])
+        single = f5.Q4_LINE.replace("演練後症狀仍再現", "非觀察筆數為準")
+        self.assertIn("FOURQ-Q4-LEAK", codes(self.V(R, answers(q4=[single]))[0]))
         sneaky = f5.Q4_LINE.replace("演練後症狀仍再現", "非常看重觀察筆數")
         self.assertIn("FOURQ-Q4-LEAK", codes(self.V(R, answers(q4=[sneaky]))[0]))
         inside = f5.Q4_LINE.replace("`git grep -c x`", "`git grep -c 基線 n=5`")
@@ -276,15 +312,29 @@ class TestQ4(ParseCase):
         from lib.selfimproving.git import Git
 
         prm = json.loads(fx.read(R, fx.PARAMS))
-        direct = fourqparse.loop_text(fourqparse.loop_snapshot(R, prm, after[:-1]))
-        self.assertEqual(ev["loop"], direct)
+        before_ev = after[:-1]
+        git = Git(R)
+        s = meastat.metrics(R, git, mea.build_ctx(R, git, prm, before_ev), carrier=True)["success"]
+
+        def one(name, it):  # 測試自己的格式化：與被測函式獨立書寫
+            if it["status"] != "read":
+                return f"{name}=NE({str(it.get('reason', ''))[:24]})"
+            n = it.get("n")
+            return f"{name}=read({it['value']:.4g}" + ("" if n is None else f",n={n}") + ")"
+        want = ";".join([one("M1", s["m1"]), one("M4", s["m4"]), one("M5a", s["m5"]["main"]),
+                         one("M5b", s["m5"]["all"])])
+        self.assertEqual(ev["loop"], want)
         self.assertTrue(all(k in ev["loop"] for k in ("M1=", "M4=", "M5a=", "M5b=")))
         for line in ev["loop"].split(";"):
             self.assertIn(line, out_json)
-        git = Git(R)
-        rep = meastat.metrics(R, git, mea.build_ctx(R, git, prm, after[:-1]), carrier=True)
-        self.assertEqual(rep["success"]["m1"]["status"], fourqparse.loop_snapshot(
-            R, prm, after[:-1])["m1"]["status"])
+        fake = {"success": {
+            "m1": {"status": "read", "value": 0.1, "n": 3}, "m4": {"status": "read", "value": 2},
+            "m5": {"main": {"status": "read", "value": 0.25, "n": 4},
+                   "all": {"status": "read", "value": 0.5, "n": 8}}}}
+        with mock.patch.object(meastat, "metrics", return_value=fake):
+            snap = fourqparse.loop_snapshot(R, prm, before_ev)
+        self.assertEqual(fourqparse.loop_text(snap),
+                         "M1=read(0.1,n=3);M4=read(2);M5a=read(0.25,n=4);M5b=read(0.5,n=8)")
         none = fourqparse.loop_snapshot(R, prm, None)
         self.assertTrue(all(v["reason"] == "carrier-not-established" for v in none.values()))
         bad = {k: v for k, v in prm.items() if k != "w_min"}

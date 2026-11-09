@@ -104,6 +104,12 @@ class TestPropNewGate(GateCase):
         params = json.loads(fx.read(R, fx.PARAMS))
         self.assertEqual([c for c, _ in fourqparse.gate_codes(events, run, "SA", params)],
                          ["FOURQ-IS-PROPOSER"])
+        R2 = f5.p5_base()
+        run2 = fx2.open_run(R2)  # skip 運轉不判 IS-PROPOSER：--proposer main 照放行
+        with f5.free_band("notice"):
+            self.assertEqual(self.M(R2, "fourq", "--skip", "--run", run2, "--reason", "quota-band",
+                                    "--band", "notice", "--note", "x")[0], 0)
+        self.assertEqual(self.prop_new(R2, run2, proposer="main")[0], 0)
         skip = [e for e in events if e["kind"] != "fourq.review"]
         self.assertEqual(fourqparse.gate_codes(skip, run, "SA", params)[0][0], "FOURQ-MISSING")
 
