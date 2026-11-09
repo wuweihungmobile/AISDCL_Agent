@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import importlib
+import importlib.util
 import io
 import json
 import os
@@ -69,8 +69,22 @@ class Deps:
     kill_tree: Callable | None = None
 
 
+def _entry():
+    """入口薄殼 tools/selfimproving.py，以檔案路徑載入、不靠名字：入口以腳本執行時上面把 tools/lib
+    排在 tools 前，名字 `selfimproving` 先解析到同名套件 tools/lib/selfimproving/（2026-11-09 OS
+    任務真機首跳起每心跳入帳 AttributeError；TCS-P4 D-IMP-9）。"""
+    mod = sys.modules.get("selfimproving")
+    if getattr(mod, "main", None) is None:
+        path = Path(_TOOLS) / "selfimproving.py"
+        spec = importlib.util.spec_from_file_location("selfimproving", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        sys.modules["selfimproving"] = mod
+    return mod
+
+
 def _real_verbs(argv: list[str]) -> tuple[int, str, str]:
-    entry = importlib.import_module("selfimproving")  # 入口薄殼：同一組動詞實作，行程內呼叫
+    entry = _entry()  # 入口薄殼：同一組動詞實作，行程內呼叫
 
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

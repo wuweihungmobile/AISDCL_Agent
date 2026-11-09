@@ -27,7 +27,7 @@ from _selfimproving_p4_fixtures import MIN, H, O, P4TestCase, Rig, iso
 
 from lib import apply_lock, unattended_authz
 from lib.selfimproving import events as si_events
-from lib.selfimproving import evwrite, promote, sandbox, sched, status
+from lib.selfimproving import evwrite, patrolrun, promote, sandbox, sched, status
 from lib.selfimproving.git import Git
 
 NOW = datetime.now().astimezone().replace(microsecond=0)
@@ -653,6 +653,22 @@ class TestIngestAndLog(P4TestCase):
         self.assertEqual(len(failing), 1)
         self.assertRegex(failing[0], r"step=入帳 rc=[1-9]\d* code=AUDIT-MAC-MISMATCH ")
         self.assertEqual([ln for ln in raw.splitlines() if fx2.AUDIT_KEY in ln], [])
+
+    def test_D_IMP_9_m_class_asks_for_memory_dir_only_when_a_step_is_pending(self):
+        """真機首跳 21:00：已晉升、量測中、無待回滾的 M 類 PROP（PROP-SI-004／006／007）
+        每心跳被記「須人工給 --memory-dir」，其實無事可做；只有待 sandbox／promote／rollback
+        才記（D-IMP-6 (7) 的原意）。"""
+        cases = (("measuring", 0, []), ("promoted", 0, []), ("closed", 0, []),
+                 ("approved", 0, ["MEMORY-DIR"]), ("verified", 0, ["MEMORY-DIR"]),
+                 ("measuring", 1, ["MEMORY-DIR"]))
+        for state, rollbacks, want in cases:
+            p = mock.Mock(cls="M", state=state, pending_promote=None, pending_rollbacks=rollbacks)
+            codes, ctx = [], mock.Mock()
+            ctx.fold.return_value.props = {"P": p}
+            ctx.log.side_effect = lambda *a, codes=codes: codes.append(a[2])
+            with self.subTest(state=state, rollbacks=rollbacks):
+                self.assertFalse(patrolrun._advance_prop(ctx, "P"))
+                self.assertEqual(codes, want)
 
 
 if __name__ == "__main__":

@@ -548,10 +548,15 @@ class TestOsCarrier(P4TestCase):
             encoding="utf-8")
         (tmp / "tools" / "selfimproving.py").write_text(
             "import os, sys\nopen(os.path.join(os.path.dirname(__file__), '..', 'seen.txt'), 'w')."
-            "write(os.environ.get('AUTOSDD_SI_AUDIT_KEY', 'ABSENT'))\n", encoding="utf-8")
+            "write(os.environ.get('AUTOSDD_SI_AUDIT_KEY', 'ABSENT'))\n"
+            "sys.stdout.buffer.write('step=巡視 取證中文\\n'.encode('utf-8'))\n", encoding="utf-8")
         script = text.replace(r"Join-Path $RepoRoot '.venv\Scripts\python.exe'",
             f"'{sys.executable}'")
         self.assertNotEqual(script, text)
+        # 模擬排程任務的主控台字碼頁（繁中＝950、CI＝437；本機互動殼常是 UTF-8 而看不出亂碼）
+        eap = "$ErrorActionPreference = 'Stop'"
+        script = script.replace(eap, eap + "\ntry { [Console]::OutputEncoding = "
+                                "[Text.Encoding]::GetEncoding(437) } catch { }")
         (tmp / "tools" / "si_patrol_tick.ps1").write_bytes(
             b"\xef\xbb\xbf" + script.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8"))
         env = {k: v for k, v in os.environ.items() if k != "AUTOSDD_SI_AUDIT_KEY"}
@@ -561,6 +566,8 @@ class TestOsCarrier(P4TestCase):
                             capture_output=True, encoding="utf-8", errors="replace", check=False)
         self.assertEqual(cp.returncode, 0, cp.stdout + cp.stderr)
         self.assertEqual((tmp / "seen.txt").read_text(encoding="utf-8"), k1)
+        tick = (tmp / "si" / "patrol" / "tick.log").read_text(encoding="utf-8")
+        self.assertIn("step=巡視 取證中文", tick)  # D-IMP-9 (e)：主控台字碼頁解碼即亂碼
         blob = cp.stdout + cp.stderr + "".join(
             p.read_text(encoding="utf-8", errors="replace") for p in (tmp / "si").rglob("*")
             if p.is_file())

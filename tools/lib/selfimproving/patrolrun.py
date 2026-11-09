@@ -274,7 +274,9 @@ def _advance_prop(ctx, pid: str) -> bool:
     promoted = False
     for _ in range(4):
         p = ctx.fold().props[pid]
-        if p.cls == "M" and p.state in ("approved", "verified", *_POST):
+        # 已晉升／量測中／已關且無待回滾＝無事可做，不得每心跳要人給 --memory-dir（D-IMP-9 (d)）
+        if p.cls == "M" and (p.state in ("approved", "verified")
+                             or (p.state in _POST and p.pending_rollbacks >= 1)):
             ctx.log("推進", 0, "MEMORY-DIR", f"{pid} 為 M 類，須人工給 --memory-dir")
             return promoted
         if p.state == "approved":

@@ -46,13 +46,23 @@ if (Test-Path -LiteralPath $EnvFile) {
 }
 
 $stamp = [DateTimeOffset]::Now.ToString('o')
-# PS 5.1：$ErrorActionPreference='Stop' 下以 2>&1 接原生指令，python 一寫 stderr 就成終止錯誤、本心跳的
-# tick.log 不落（SCG-4 一審 B-3，TCS-P4 D-IMP-8）⇒ 只在原生呼叫段放寬為 Continue，取 rc 後還原。
-$prevEap = $ErrorActionPreference
-$ErrorActionPreference = 'Continue'
-$out = & $Python $Entry patrol 2>&1
-$rc = $LASTEXITCODE
-$ErrorActionPreference = $prevEap
-$text = ($out | ForEach-Object { "$_" }) -join "`n"
-[System.IO.File]::AppendAllText((Join-Path $LogDir 'tick.log'), "$stamp rc=$rc`n$text`n", (New-Object System.Text.UTF8Encoding($false)))
+# 以 .NET Process 直接收子行程 stdout／stderr、指定 UTF-8 解碼，不經 PowerShell 的原生指令管線：那條管線以
+# 主控台字碼頁（繁中 Windows＝CP950）解碼 python 寫的 UTF-8 ⇒ tick.log 亂碼（2026-11-09 真機首跳，TCS-P4
+# D-IMP-9 (e)），且在 'Stop' 下把 stderr 當終止錯誤、該次 tick.log 不落（SCG-4 一審 B-3）。不需主控台。
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+$psi = New-Object System.Diagnostics.ProcessStartInfo
+$psi.FileName = $Python
+$psi.Arguments = '"' + $Entry + '" patrol'
+$psi.UseShellExecute = $false
+$psi.CreateNoWindow = $true
+$psi.RedirectStandardOutput = $true
+$psi.RedirectStandardError = $true
+$psi.StandardOutputEncoding = $utf8
+$psi.StandardErrorEncoding = $utf8
+$proc = [System.Diagnostics.Process]::Start($psi)
+$errTask = $proc.StandardError.ReadToEndAsync()
+$text = ($proc.StandardOutput.ReadToEnd() + $errTask.Result) -replace "`r`n", "`n"
+$proc.WaitForExit()
+$rc = $proc.ExitCode
+[System.IO.File]::AppendAllText((Join-Path $LogDir 'tick.log'), "$stamp rc=$rc`n$text`n", $utf8)
 exit $rc

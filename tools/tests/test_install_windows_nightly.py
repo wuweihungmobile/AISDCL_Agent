@@ -989,6 +989,17 @@ class TestScheduledTaskDriftChecker(unittest.TestCase):
         self.assertEqual(parsed["Settings/MultipleInstancesPolicy"], "StopExisting")
         self.assertEqual(parsed["Principals/Principal/LogonType"], "S4U")
 
+    def test_fresh_install_reads_as_neither_drift_nor_stale(self) -> None:
+        """2026-11-09 sched arm 後真機：匯出 XML 省略等於結構預設的選填元素（巡邏任務無
+        <WakeToRun>）＝取預設；未跑過的 LastRunTime 是 1999 哨兵＝不算 stale（同一時間戳
+        改回成功碼仍要算——判準看 LastTaskResult、不是看日期）。"""
+        xml = _SAMPLE_TASK_XML.replace("<WakeToRun>true</WakeToRun>", "")
+        self.assertEqual(self.mod.parse_task_xml(xml)["Settings/WakeToRun"], "false")
+        now = self.mod._dt.datetime.now(self.mod._dt.UTC)
+        never = {"LastTaskResult": 267011, "LastRunTime": "1999-11-29T16:00:00Z"}
+        self.assertIsNone(self.mod.stale_run_days(never, now))
+        self.assertGreater(self.mod.stale_run_days({**never, "LastTaskResult": 0}, now), 9000)
+
     def test_all_settings_matching_is_ok(self) -> None:
         report = self.mod.evaluate(self.expectations, self._parsed_per_task())
         self.assertEqual(report["status"], "ok", report)

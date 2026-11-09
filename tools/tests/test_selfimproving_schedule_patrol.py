@@ -27,7 +27,7 @@ import _selfimproving_p4_fixtures as fx4
 from _selfimproving_p4_fixtures import D1, MIN, STUB, H, O, P4TestCase, Rig, iso
 
 from lib import resume_route, unattended_authz
-from lib.selfimproving import evwrite, patrolbrief, runner, sched, status
+from lib.selfimproving import evwrite, patrol, patrolbrief, runner, sched, status
 
 ROOT = fx.ROOT
 PKG = ROOT / "tools" / "lib" / "selfimproving"
@@ -149,6 +149,22 @@ class TestHeartbeatShape(P4TestCase):
         self.assertTrue(any("PATROL-EXCEPTION" in ln for ln in self.logs()), self.logs())
         self.assertEqual(len(rig.verbs_log), 1, "例外不重試")
         self.assertFalse(lock.exists(), "鎖已釋放")
+
+    def test_D_IMP_9_real_verbs_find_the_entry_whatever_the_path_order(self):
+        """OS 任務真機首跳（2026-11-09 20:30）：入口以腳本執行時 tools/lib 排在 tools 前，名字
+        `selfimproving` 解析成同名套件 tools/lib/selfimproving/ ⇒ 每心跳入帳 AttributeError。"""
+        R, saved = str(fx4.p4_base()), sys.modules.pop("selfimproving", None)
+        try:
+            order = [str(ROOT / "tools" / "lib"), str(ROOT / "tools"), *sys.path]
+            with (mock.patch.object(sys, "path", order), mock.patch.object(runner, "run_argv",
+                  return_value=types.SimpleNamespace(rc=0, out="ABSENT", err="", timed_out=False))):
+                rc, out, err = patrol._real_verbs(["status", "--json", "--repo", R])
+        finally:  # 不讓同名套件留在 sys.modules（後面的 `import selfimproving` 要拿到入口）
+            if saved is not None:
+                sys.modules["selfimproving"] = saved
+            elif getattr(sys.modules.get("selfimproving"), "main", None) is None:
+                sys.modules.pop("selfimproving", None)
+        self.assertEqual((rc, "schedule" in json.loads(out)), (0, True), err)
 
     def test_AT_436_5_E_1_patrol_off_is_a_whole_no_op(self):
         R = self.enabled_repo()
