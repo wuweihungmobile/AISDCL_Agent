@@ -495,7 +495,7 @@ class TestLeakAudit(BtCase):
         self.assertEqual(self.audit([*c[:-1], bash, *self.handback()]), "tool-not-allowed:Bash")
 
     def test_AT_646_5_E_4_handback_closure_needs_a_matching_ok_result(self):
-        """tools/lib/selfimproving/btscore.py `_closed`：交卷收尾只認同 id 的非錯誤 tool_result。"""
+        """tools/lib/selfimproving/btscore.py `_closed`：收尾只認緊鄰交卷 id 的非錯誤回應。"""
         c = self.clean()[:-1]
         for flag in (True, False):
             self.assertIsNone(self.audit([*c, *self.handback(flag=flag)]), flag)
@@ -506,10 +506,10 @@ class TestLeakAudit(BtCase):
         self.assertEqual(self.audit([*c, *self.handback(err=True)]), "transcript-open")
         use, res = self.handback()
         res["message"]["content"][0]["tool_use_id"] = "toolu_other"
-        self.assertEqual(self.audit([*c, use, res]), "transcript-open")
         other = {"type": "user", "timestamp": "t", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": "toolu_x", "content": "x"}]}}
-        self.assertEqual(self.audit([*c, other]), "transcript-open")
+        for t in ([*c, use, res], [*c, use, c[-1], self.handback()[1]], [*c, other]):
+            self.assertEqual(self.audit(t), "transcript-open", len(t))
 
     def test_AT_646_5_E_5_handback_alone_is_not_a_read(self):
         """tools/lib/selfimproving/btscore.py：只交卷、零讀取＝no-reads（交卷不計入讀取）。"""
