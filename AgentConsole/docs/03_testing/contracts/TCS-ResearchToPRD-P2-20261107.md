@@ -338,7 +338,7 @@
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-3 | research_gate_decisions.details：JSONB NOT NULL 預設空物件，CHECK 限物件型別；三個約定鍵可寫入。 | ✅ | Integration | □ |
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-4 | research_deliveries.snapshot_sha256：CHAR(64) 可空，64 位小寫十六進位才合法。 | ✅ | Integration | □ |
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-5 | research_scr.evidence_url：可空，限 https 開頭且長度不超過 500；不在受控更新清單內。 | ✅ | Integration | □ |
-| AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-6 | P0／P1 的守衛不退步：十八張 research_ 表逐表 DELETE 仍被擋、受控表清單與 append-only 清單不變。 | ✅ | Integration | □ |
+| AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-6 | P0／P1 的守衛不退步：十九張 research_ 表逐表 DELETE 仍被擋、受控表清單加 `research_watch_sources`、append-only 清單不變。 | ✅ | Integration | □ |
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-7 | 六處 Flyway 版本清單加 21，且既有表零變動快照不受 V21 影響。 | ✅ | Integration | □ |
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-8 | Bridge 的拋棄式資料庫夾具套到 V21，且 Bridge 兩個 INSERT 帶新欄位。 | ✅ | Integration | □ |
 | AC-962-1 | 資料庫 V21：gate 加 SCG6、決定列 details、交付列 snapshot_sha256、SCR 列 evidence_url | AT-962-1-E-1 | 升級不改既有資料：在已有 V20 資料（含各 gate 值的決定列、SCR 列、交付列）的庫上套 V21，既有列逐欄不變。 | ✅ | Integration | □ |
@@ -593,7 +593,7 @@
 | AC-962-23 | 對帳第七項 delivery：快照 sha256 對 snapshot_sha256、交付時點自動對帳 | AT-962-23-E-1 | P1 的 pending_correction 第三態不受影響。 | ✅ | Integration | □ |
 | AC-962-23 | 對帳第七項 delivery：快照 sha256 對 snapshot_sha256、交付時點自動對帳 | AT-962-23-E-2 | 只報告不修復：對帳後快照檔與 DB 列位元組不變。 | ✅ | Integration | □ |
 | AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-1 | reason 由 35 增為 37：新增 tag_exists（409）、delivery_step_failed（502），四方集合相等。 | ✅ | Unit | □ |
-| AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-2 | OpenApiIT 計數：路徑 107 變 114、操作 124 變 131；研究路徑 30 變 37、操作 35 變 42、operationId 34 變 41、狀態碼表 35 變 42。 | ✅ | Integration | □ |
+| AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-2 | OpenApiIT 計數：路徑 107 變 114、操作 124 變 131；研究路徑 30 變 37、操作 35 變 42、operationId 34 變 41、狀態碼表 35 變 42（鍵 `agentconsole-research-registry` 起再加 `/api/v1/research/watch-sources*` 兩條路徑、三個操作：研究路徑 39、操作 45、operationId 44、狀態碼表 45；`OpenApiIT` 的預期值同步改，P2 條文的增量敘述不變）。 | ✅ | Integration | □ |
 | AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-3 | 七個新操作的狀態碼表逐一登記：gates、tag、pr 含 403、404、409、422、502，讀端含 401、403、404。 | ✅ | Integration | □ |
 | AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-4 | RBAC 矩陣：gates、tag、pr 為 ADMIN 專屬（OPERATOR 與 VIEWER 皆 403）；kanban、healing、delivery、traceability 的 GET 為 VIEWER 以上。 | ✅ | Integration | □ |
 | AC-962-24 | 契約鎖：reason 37、OpenAPI 114／131、RBAC、端點函式 125 | AT-962-24-5 | 端點函式總數與 operationId 一一對應：118 增為 125。 | ✅ | Unit | □ |
@@ -1258,8 +1258,8 @@ Push-Location AgentConsole\frontend; npx vitest run components/domain/research/K
   - When 插入 SCR 列：evidence_url 為 NULL、`https://a.example/x`、`http://a.example`、`HTTPS://a.example`、`javascript:alert(1)`、`https://` 補到恰 500 字元、501 字元、空字串；對既有列 UPDATE evidence_url
   - Then NULL 與 https 開頭且 500 字元以內者通過；`http://`、大寫 `HTTPS://`、`javascript:`、空字串為 23514；500 字元通過、501 字元為 23514（CHECK 含長度上限，欄位為 TEXT 故非 22001）；UPDATE evidence_url 被 `research_controlled_update_guard` 拒（清單外欄位）；P1 既有 SCR 插入（不帶此欄）仍通過
   - 判定：gradlew test --tests "com.aisdlc.console.infrastructure.persistence.ResearchSchemaMigrationIT.AT_962_1_5*"（cwd＝AgentConsole/backend）
-- **AT-962-1-6**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）P0／P1 的守衛不退步：十八張 research_ 表逐表 DELETE 仍被擋、受控表清單與 append-only 清單不變。
-  - Given 套用 V1～V21；十八張 research_ 表各一合法列
+- **AT-962-1-6**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）P0／P1 的守衛不退步：十九張 research_ 表逐表 DELETE 仍被擋、受控表清單加 `research_watch_sources`、append-only 清單不變。
+  - Given 套用 V1～V21；十九張 research_ 表各一合法列
   - When 逐表 DELETE；對 research_gate_decisions、research_deliveries 做 UPDATE；對四張受控表做清單內與清單外欄位 UPDATE
   - Then DELETE 一律類別 23；兩張 append-only 表 UPDATE 被拒；受控表清單內欄位可更新、清單外被拒；V21 未改任何觸發器與函式（觸發器名單與 V20 相同）
   - 判定：gradlew test --tests "com.aisdlc.console.infrastructure.persistence.ResearchSchemaMigrationIT.AT_962_1_6*"（cwd＝AgentConsole/backend）
@@ -1643,7 +1643,7 @@ Push-Location AgentConsole\frontend; npx vitest run components/domain/research/K
   - When 跑 `ResearchReasonsTest`（`ALL_REASONS` 加 `P2_REASONS` 兩項；`hasSize(35)` 改 37，`:142`）
   - Then 後端與前端集合等於 37 個的 ALL；每個 reason 有 HTTP 狀態與文案；兩份 `*_ERRATUM_PENDING` 名單（`:60`、`:63`）加入兩項並以『缺列集合恰等於名單』雙向鎖住，勘誤落地後清空（⚖P2-14：前端常數實住 `lib/domain/research.ts:749`，非 PACKAGES 所稱的 `lib/api/reasons.ts`）
   - 判定：gradlew test --tests "com.aisdlc.console.adapter.in.web.ResearchReasonsTest.AT_962_24_1*"（cwd＝AgentConsole/backend）
-- **AT-962-24-2**（JUnit｜`OpenApiIT`｜Integration｜AC-R2P-15-1、AC-R2P-20-3）OpenApiIT 計數：路徑 107 變 114、操作 124 變 131；研究路徑 30 變 37、操作 35 變 42、operationId 34 變 41、狀態碼表 35 變 42。
+- **AT-962-24-2**（JUnit｜`OpenApiIT`｜Integration｜AC-R2P-15-1、AC-R2P-20-3）OpenApiIT 計數：路徑 107 變 114、操作 124 變 131；研究路徑 30 變 37、操作 35 變 42、operationId 34 變 41、狀態碼表 35 變 42（鍵 `agentconsole-research-registry` 起再加 `/api/v1/research/watch-sources*` 兩條路徑、三個操作：研究路徑 39、操作 45、operationId 44、狀態碼表 45；`OpenApiIT` 的預期值同步改，P2 條文的增量敘述不變）。
   - Given `OpenApiIT.java:170-171,:971,:979,:980,:999` 與 `EXPECTED`、`RESEARCH_OPERATION_IDS`、`RESEARCH_STATUS_CODES` 各加七項
   - When 跑 OpenApiIT
   - Then 自算法：新增路徑七條（`/kanban`、`/gates`、`/healing`、`/delivery`、`/delivery/tag`、`/delivery/pr`、`/delivery/traceability`；同路徑 GET 與 POST 合併計一）；新增操作七個（`getResearchKanban`、`registerResearchGate`、`getResearchHealing`、`getResearchDelivery`、`createResearchTag`、`createResearchPr`、`getResearchTraceability`）；以實際新增數為準並於證據註明差異；`:healing-sync` 不入 OpenAPI
@@ -2271,8 +2271,8 @@ Push-Location AgentConsole\frontend; npx vitest run components/domain/research/K
 | 5 | `BackupJobMigrationIT.java:82-106,:154`（`snapshotOfExistingTables` 排除 `research_` 起頭之表） | 既有表零變動快照排除 `research_%` | **不變**（V21 只改 `research_` 表，已被排除） | 確認不紅（AT-962-1-7）；視圖排除條件 `v\_research\_` 為 P1 已加 | PKG-DB-P2 |
 | 6 | `OpenApiIT.java:170`（`EXPECTED_PATH_COUNT = 107`） | 107 | 114 | 新增七條路徑（AT-962-24-2） | PKG-API-P2 |
 | 7 | `OpenApiIT.java:171`（`EXPECTED_OPERATION_COUNT = 124`） | 124 | 131 | 新增七個操作 | PKG-API-P2 |
-| 8 | `OpenApiIT.java:971`（研究路徑 `hasSize(30)`） | 30 | 37 | 同上 | PKG-API-P2 |
-| 9 | `OpenApiIT.java:979-980`（研究操作 `isEqualTo(35)`、有 operationId `hasSize(34)`） | 35／34 | 42／41 | 同上 | PKG-API-P2 |
+| 8 | `OpenApiIT.java:971`（研究路徑 `hasSize(30)`） | 30 | 37 | 同上（鍵 `agentconsole-research-registry` 起再加 `/api/v1/research/watch-sources*` 兩條路徑、三個操作：研究路徑 39、操作 45、operationId 44、狀態碼表 45；`OpenApiIT` 的預期值同步改，P2 條文的增量敘述不變） | PKG-API-P2 |
+| 9 | `OpenApiIT.java:979-980`（研究操作 `isEqualTo(35)`、有 operationId `hasSize(34)`） | 35／34 | 42／41 | 同上（鍵 `agentconsole-research-registry` 起再加 `/api/v1/research/watch-sources*` 兩條路徑、三個操作：研究路徑 39、操作 45、operationId 44、狀態碼表 45；`OpenApiIT` 的預期值同步改，P2 條文的增量敘述不變） | PKG-API-P2 |
 | 10 | `OpenApiIT.java:877`（`RESEARCH_OPERATION_IDS`）、`:923`（`RESEARCH_STATUS_CODES`）、`:999`（`hasSize(35)`）、`:45`（`EXPECTED` 路徑表） | 各 34／35／35 項 | 各加七項；`:999` 改 42；`EXPECTED` 加七條路徑 | AT-962-24-2、24-3 | PKG-API-P2 |
 | 11 | `ResearchReasonsTest.java:142`（`ALL_REASONS hasSize(35)`）與 `:53-58`（`P0_REASONS`、`P0_TAIL_REASONS`、`P1_REASONS`、`ALL_REASONS = union(...)`） | 35 | 新增 `P2_REASONS`（`tag_exists`、`delivery_step_failed`）併入 union，`hasSize(37)` | AT-962-24-1 | PKG-API-P2 |
 | 12 | `ResearchReasonsTest.java:60`（`CONTRACT_ERRATUM_PENDING`）、`:63`（`ARCHITECTURE_ERRATUM_PENDING`） | P1 缺列名單 | 各加兩項（契約 §0.2 與 Architecture §11.1 尚未補列） | 雙向鎖：缺列集合恰等於名單，勘誤落地後清空 | PKG-API-P2 |
@@ -2550,3 +2550,5 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ResearchToPRD-P2-20261107.md`（列
 | E-26 | 11-08 | V-D5 與 AC-R2P-15-3 劃界（§1.2、§1.3、§6.2 對應處，只登記量測字樣） | 原文：「V-D5：『FSM 檔改變→看板更新』端到端上界量測；INT 量測中位數與最大值並記錄；不充當 AT」 | 登記量測結果（INT 第二段，第二套拋棄式棧）：內環 FSM 由框架 CLI 直接推進時 console-api 無 SSE 幀 ⇒ 已開著的看板在十四次動作後三十秒內零更新；REST 讀端於一百一十一至三百二十五毫秒內即反映新狀態。判讀：這是 W-R2P10、Q-9 已載明的設計邊界（Bridge 無推播；≤500ms 只對 SSE 幀到達之後成立），**不是缺陷**，不改條文、不加 AT；Architecture §10.4 已補一句「無 SSE 幀，看板靠導航或 REST 回補」 | D-7、D-138 Q-9；INT 證據檔第二段 |
 | E-27 | 11-08 | 後續 FIX 候選（P4，不改條文；續 E-22） | 原文：（無） | 登記：D-8＝同一次 ESCALATED 升級在步驟 4 彈兩次（先是可決定的審核項，決定後再彈 info-only 的「引擎升級事件」、沒有決定鈕；AT-962-28-4 真棧截圖）；修復棒 PKG-FIX-INT 只做 D-6、未讀彈窗映射，候選＝`HealingMonitor`／看板的事件→彈窗映射以 taskId 去重並補單元測試 | INT 第二段 D-8；D-168 |
 | E-28 | 11-09 | AT-962-21-2（`DeliverPanel.test.tsx`；§1 AC-962-21 列與 AT 清單條文） | 原文：「DeliverPanel 整體呈現：追溯表、發布動作列、交付紀錄、對帳狀態」（未提及唯讀角色的停用集合） | 加註：VIEWER 下「每個 button 都停用且 title 為權限不足」的集合不含表頭排序鈕（帶 `data-sort-key` 的 button；排序是唯讀操作）；該測試檔 expect／it 數不變。另 RP-1 現查：本檔 :403、:863 為 attempt 導出（依 step_number 升冪）、:1464 為閘門決定紀錄（依 decidedAt 由新到舊），皆非研究專案清單畫面序，條文不改 | 鍵 `agentconsole-console-ux-sort-help` 勘誤 E-6、§6 RP-1；FE-SORT 交卷候選 1，主控裁決成立 |
+| E-29 | 11-10 | `AT-962-1-6` 標題、Given、Then（§1 AC-962-1 列與 AT 清單條文） | 原文：「十八張 research_ 表逐表 DELETE 仍被擋、受控表清單與 append-only 清單不變」 | 訂正：「十九張 research_ 表……受控表清單加 `research_watch_sources`、append-only 清單不變」；Given 的「十八張 research_ 表各一合法列」同改為十九張 | 鍵 `agentconsole-research-registry`（研究來源單一化，追蹤來源表 V24、kind 放寬 V25）；TCS-ResearchRegistry-20261110 §4 R-2；主控裁決 D-RR-18、QA1_RULINGS |
+| E-30 | 11-10 | `AT-962-24-2`（§1 AC-962-24 列、AT 清單條文）；§4 第 8、9 列 | 原文：「研究路徑 30 變 37、操作 35 變 42、operationId 34 變 41、狀態碼表 35 變 42」；§4 第 8 列「30 ｜ 37」、第 9 列「35／34 ｜ 42／41」 | 澄清型（原數字不改，歷史增量仍真）：各處後加註「鍵 `agentconsole-research-registry` 起再加 `/api/v1/research/watch-sources*` 兩條路徑、三個操作：研究路徑 39、操作 45、operationId 44、狀態碼表 45；`OpenApiIT` 的預期值同步改，P2 條文的增量敘述不變」 | 鍵 `agentconsole-research-registry`（研究來源單一化，追蹤來源表 V24、kind 放寬 V25）；TCS-ResearchRegistry-20261110 §4 R-5；主控裁決 D-RR-18、QA1_RULINGS |

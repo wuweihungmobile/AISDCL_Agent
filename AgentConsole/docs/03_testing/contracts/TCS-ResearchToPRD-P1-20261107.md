@@ -365,7 +365,7 @@
 | AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-7 | research_deliveries：列舉、雜湊格式、(research_id, kind, ref) 唯一、append-only（P2 寫入，表於 P1 建立）。 | ✅ | Integration | □ |
 | AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-8 | 四張 V19 受控可更新表的通用守衛：清單內欄可更新、清單外欄位與任何 DELETE 被拒；含複合主鍵表的列定位（與 V16 函式內的允許清單逐表對拍；不併入 P0 的受控表迴圈）。 | ✅ | Integration | □ |
 | AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-9 | 視圖 v_research_healing_attempts：只含 RETRYING 與 FAILED 步驟、經 console_project_id 連結、不提供任何寫入路徑。 | ✅ | Integration | □ |
-| AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-E-1 | 所有十八張 research_ 表（P0 十三張加 V19 五張）逐表 DELETE 一律被擋，守衛錯誤的 SQLSTATE 一律為類別 23。 | ✅ | Integration | □ |
+| AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-E-1 | 所有十九張 research_ 表（P0 十三張、V19 五張、V24 一張〔`research_watch_sources`〕）逐表 DELETE 一律被擋，SQLSTATE 一律為類別 23。 | ✅ | Integration | □ |
 | AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-E-2 | 既有五個 Flyway IT 的版本清單改為 1 至 19，且 BackupJobMigrationIT 的「既有表零變動」快照把視圖排除。 | ✅ | Integration | □ |
 | AC-961-1 | 資料庫 V19：分流、SCR、拆解、交付表與自癒視圖的不可變與 CHECK（Flyway V19） | AT-961-1-E-3 | V19 的預設值與 JSONB 欄位型別：published_docs 預設 {}、impl_fsm_actions 預設 []、型別皆為 jsonb。 | ✅ | Integration | □ |
 | AC-961-2 | 分流輸入閘與消毒（Bridge route 驗證層） | AT-961-2-1 | 分流請求本文的欄位驗證表：軌道、分支名、庫名、可見性、確認名、範本、理由長度的界內與界外，違規逐欄列出。 | ✅ | Unit | □ |
@@ -1267,10 +1267,10 @@ Push-Location AgentConsole\frontend; npx vitest run components/domain/research/R
   - When 查視圖；對視圖做 INSERT、UPDATE、DELETE
   - Then 視圖欄位恰為 research_id、run_id、run_number、task_id、step_number、action、status、error_message、tokens_used、occurred_at；只回 `RETRYING` 與 `FAILED` 兩筆且 `research_id` 為綁定的那個專案；未綁定專案零列；INSERT、UPDATE、DELETE 皆被資料庫拒絕（視圖含 join 而不可更新，不得有任何 INSTEAD OF 觸發器或規則：`pg_trigger` 與 `pg_rules` 對該視圖為零）
   - 判定：gradlew test --tests "com.aisdlc.console.infrastructure.persistence.ResearchSchemaMigrationIT.AT_961_1_9*"（cwd＝AgentConsole/backend）
-- **AT-961-1-E-1**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）所有十八張 research_ 表（P0 十三張加 V19 五張）逐表 DELETE 一律被擋，守衛錯誤的 SQLSTATE 一律為類別 23。
+- **AT-961-1-E-1**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）所有十九張 research_ 表（P0 十三張、V19 五張、V24 一張〔`research_watch_sources`〕）逐表 DELETE 一律被擋，SQLSTATE 一律為類別 23。
   - Given 套用 V1～V19；每張表至少一列（P0 十三張沿既有夾具、V19 五張以 1-2 至 1-7 的合法列）
   - When 對每張 `console.research_*` 表（表清單取 information_schema，不手抄）做 DELETE
-  - Then 表清單恰十八張；每次 DELETE 皆被拒、SQLSTATE 類別為 23（`integrity_constraint_violation`）、訊息含表名；刪除前後列數相同；新增第十九張而未掛守衛時本 AT 紅（以表清單與守衛掛載清單相減為空斷言）
+  - Then 表清單恰十九張；每次 DELETE 皆被拒、SQLSTATE 類別為 23（`integrity_constraint_violation`）、訊息含表名；刪除前後列數相同；新增第十九張而未掛守衛時本 AT 紅（以表清單與守衛掛載清單相減為空斷言）
   - 判定：gradlew test --tests "com.aisdlc.console.infrastructure.persistence.ResearchSchemaMigrationIT.AT_961_1_E_1*"（cwd＝AgentConsole/backend）
 - **AT-961-1-E-2**（JUnit｜`BackupJobMigrationIT`｜Integration｜AC-R2P-02-7）既有五個 Flyway IT 的版本清單改為 1 至 19，且 BackupJobMigrationIT 的「既有表零變動」快照把視圖排除。
   - Given 既有 `SchemaMigrationIT`、`V5UpgradeMigrationIT`、`IssuePriorityMigrationIT`、`BackupJobMigrationIT`、`SiConsoleWritesMigrationIT`、`ResearchSchemaMigrationIT`（§4 第 1 列）
@@ -1944,3 +1944,4 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ResearchToPRD-P1-20261107.md`（列
 | E-24 | 11-08 | AT-961-18-5、18-6（Then 字面） | 原文：18-5「…看板、自癒與終端屬 P2，本面板不渲染」；18-6「…發起 SCR 的按鈕屬 P2、不在本面板（⚖P1-17）」 | 訂正：P2 起看板、SCR 鈕與橫幅接進同一面板——18-5 改「內環鍵未採納時不渲染看板」（並加 AT-962-25-3a）；18-6 改「有發起 SCR 的鈕，規格變更中停用並顯示登記文案」；SCR 橫幅整併為單一 `scr-banner`（`BuildFrontPanel` 的 P1 位置渲染 `ScrBanner`、根元素保留 `data-testid="scr-banner"`，文案為 P1 斷言與 AT-962-15-5 的超集）；斷言只擴不縮 | D-155（FE-P2A，commit 28d36d6f）；連動 TCS-P2 §4.6 第 48 列 |
 | E-25 | 11-08 | AT-961-20-E-4（Then 字面） | 原文：「…`drift`：顯示漂移警示橫幅（沿 P0 文案）…」（橫幅位於步驟 4 面板內的 `build-drift-banner`） | 訂正：依 D-131(6) 兩處漂移橫幅整併，面板內的 `build-drift-banner` 刪除、歸工作區單一 `drift-banner`；本 AT 對 `pending_correction` 與 `NOT_EVALUABLE` 的斷言不變，`drift` 的橫幅斷言改掛工作區 | D-155、D-131(6)；PKG-FE-P2A |
 | E-26 | 11-08 | P0 `AT_960_19_6`（連動，不改 TCS-P0 條文） | 原文：P0 工作區按鈕停用鎖 | 訂正：鎖只增不減——P2 新增的 `tag-create` 等操作鈕納入「VIEWER 下停用」清單；「開啟本地專案」複製鈕在 VIEWER 下**不渲染**（只顯示可選取的路徑文字），P0 `AT_960_19_6` 的既有斷言一字不動 | D-150#1、D-157（FE-P2B，commit 10daf683） |
+| E-27 | 11-10 | `AT-961-1-E-1` 標題與 Then（§1 AC-961-1 列與 AT 清單條文） | 原文：「所有十八張 research_ 表（P0 十三張加 V19 五張）逐表 DELETE 一律被擋」 | 訂正：「所有十九張 research_ 表（P0 十三張、V19 五張、V24 一張〔`research_watch_sources`〕）逐表 DELETE 一律被擋，SQLSTATE 一律為類別 23」；Then 的「表清單恰十八張」同改為十九張 | 鍵 `agentconsole-research-registry`（研究來源單一化，追蹤來源表 V24、kind 放寬 V25）；TCS-ResearchRegistry-20261110 §4 R-1；主控裁決 D-RR-18、QA1_RULINGS；W-R1 |

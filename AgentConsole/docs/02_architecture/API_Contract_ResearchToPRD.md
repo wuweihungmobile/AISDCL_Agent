@@ -16,6 +16,7 @@
 | v1.0.0-rc3 | 2026-11-02 | 依 SCG-0 一審 FAIL 與主控裁決 D-60～D-64 修訂：D-60——ESCALATION 人工恢復後預算不歸零（API-RP-11 `iterate` 說明、§4 控件表剩餘預算改 `max(0, 3 − currentCount)`）與「換世代」＝API-RP-20 的 `generation:"next"` 模式（僅 ADMIN，D-64；VIEWER 由既有授權鏈擋〔403 `ACCESS_DENIED`〕、OPERATOR 由服務層擋〔403 `research_write_forbidden`〕，兩者 Bridge 請求數 0；§0.1、§0.2 第 2a 列、§0.3、§1.1、§1.2、§4、§5 Bridge 端點表）；D-62(1)——API-RP-22 稽核落 V6 `audit_log` 的 `entity_type`／`entity_id`（無 `note` 欄）；F-20——`minIntervalSeconds` 建立後不可 PATCH（§1.2、API-RP-22）；D-61——`ReviewRoundDto.fsmRetryCount` 註記（`gate PASS` 輪為 0、POST_HUMAN 通過輪為 null）；QA 二審 D-65——API-RP-20 不帶 `generation` 的重試初始化只在 `flowStatus=FAILED` 且 `flowDetail` 以 `init_failed:` 起頭時可呼叫，其餘 409 `stage_conflict`（`details.flowStatus`／`flowDetail`）、零寫入（§1.4、§2.2 Bridge 端點表） |
 | v1.0.0-rc3＋勘誤 | 2026-11-03 | P0 實作期勘誤批次（PKG-ERRATA；D-67～D-85）：條文已原地訂正，被訂正的原文逐字保留於文末〈勘誤記錄〉，走 `spec-refreeze` |
 | v1.0.0-rc3＋勘誤二 | 2026-11-07 | P1 RELEASE_READY 勘誤批次（PKG-ERRATA-P1；D-94～D-146）：§0.2 補五個 reason、§1.1 補 API-RP-24／25 與 `scr apply`、`route` 改同步 200、`targetPath` 退役、`DecompositionDto`、對帳第四值 `pending_correction`、P2 預備（API-RP-17／23、`research.delivery`、`SCG6`）；條文已原地訂正，原文見〈勘誤記錄〉第 22 列起 |
+| 增量 v0.1 | 2026-11-10 | 研究來源單一化（鍵 `agentconsole-research-registry`；PRD FR-R2P-24、D-169～D-176）：新增 §5A（追蹤來源 API-RP-29、同步狀態 API-SI-14、同步 API-SI-15、Bridge 五個端點、登記快照正規化規則與黃金檔 G-R1／G-R2、稽核 body 與 kind `src-registry`、冪等與狀態判定、大小上限、錯誤碼、稽核）；§0.1／§0.2／§0.3／§1.1／§2.2／§4 各補指標列。**R2P 既有端點（含 API-RP-22）行為不變** |
 
 ---
 
@@ -24,7 +25,7 @@
 ### 0.1　封包、認證、角色
 
 - 認證：Bearer JWT。成功 `{code, message, data, timestamp, traceId}`；錯誤 `{code, message, errors[], reason?, details?, traceId}`（P2b §0.2:40）。
-- 角色（Architecture §8.2 增列）：**`GET`＝VIEWER 以上；`POST／PUT／PATCH` 預設＝OPERATOR 以上（`SecurityConfig` 通用規則，`SecurityConfig.java:97`）；下列動作僅 ADMIN（D-12）**：`POST …/approve`、`POST …/return`、`POST …/route`、`POST …/scr/{scrNo}/apply`、`POST …/gates`、`POST …/delivery/tag`、`POST …/delivery/pr`、`POST /research/allowlist`、`PATCH /research/allowlist/{id}`。ADMIN 規則在 `SecurityConfig` 以 `requestMatchers(HttpMethod.POST／PATCH, …).hasRole("ADMIN")` 逐條置於通用 `/api/v1/**` 規則**之前**（先中者定案；先例 `POST /api/v1/si/**`＝`SecurityConfig.java:88`、`PUT／DELETE /api/v1/issues/**`＝`:91-92`、`POST /api/v1/sysadmin/**`＝`:95`）：`/api/v1/research/projects/*/approve`、`…/*/return`、`…/*/route`（精確路徑；`…/route/preview` 不在此列＝OPERATOR）、`…/*/scr/*/apply`、`…/*/gates`、`…/*/delivery/tag`、`…/*/delivery/pr`、`/api/v1/research/allowlist`（POST）、`/api/v1/research/allowlist/*`（PATCH）。VIEWER／OPERATOR 呼叫＝403 `ACCESS_DENIED`。**例外（D-64）**：`POST …/reinit` 帶 `generation:"next"`（換世代）亦僅 ADMIN，但同一路徑的重試初始化模式為 OPERATOR 以上，`SecurityConfig` 的 matcher 無法依請求本文分流，所以角色檢查分兩段：**VIEWER**＝既有授權鏈就擋（通用 POST 規則要求 OPERATOR 以上，`SecurityConfig.java:97`）⇒ 403 `ACCESS_DENIED`（與 `RbacIT` 現行 VIEWER 寫入斷言同一條：`$.code`＝403、`$.reason`＝`ACCESS_DENIED`，`RbacIT.java:99-102`）；**OPERATOR**＝通過授權鏈後由 console-api 的 `ResearchCommandService` 在服務層檢查 ⇒ 403 `research_write_forbidden`（不是 matcher 層的 `ACCESS_DENIED`）；兩者的 Bridge 請求數皆為 0（角色檢查先於任何 Bridge 呼叫），`RbacIT` 對兩者各釘一個斷言。**`approver` 一律取 JWT subject，請求本文不收 approver**（先例 `SddFreezeRequest.java:11`）。
+- 角色（Architecture §8.2 增列）：**`GET`＝VIEWER 以上；`POST／PUT／PATCH` 預設＝OPERATOR 以上（`SecurityConfig` 通用規則，`SecurityConfig.java:97`）；下列動作僅 ADMIN（D-12）**：`POST …/approve`、`POST …/return`、`POST …/route`、`POST …/scr/{scrNo}/apply`、`POST …/gates`、`POST …/delivery/tag`、`POST …/delivery/pr`、`POST /research/allowlist`、`PATCH /research/allowlist/{id}`、〔增量〕`POST /research/watch-sources`、`PATCH /research/watch-sources/{slug}`（同步端點 API-SI-15 沿既有 `POST /api/v1/si/**` 僅 ADMIN 規則，不新增 matcher；§5A.4）。ADMIN 規則在 `SecurityConfig` 以 `requestMatchers(HttpMethod.POST／PATCH, …).hasRole("ADMIN")` 逐條置於通用 `/api/v1/**` 規則**之前**（先中者定案；先例 `POST /api/v1/si/**`＝`SecurityConfig.java:88`、`PUT／DELETE /api/v1/issues/**`＝`:91-92`、`POST /api/v1/sysadmin/**`＝`:95`）：`/api/v1/research/projects/*/approve`、`…/*/return`、`…/*/route`（精確路徑；`…/route/preview` 不在此列＝OPERATOR）、`…/*/scr/*/apply`、`…/*/gates`、`…/*/delivery/tag`、`…/*/delivery/pr`、`/api/v1/research/allowlist`（POST）、`/api/v1/research/allowlist/*`（PATCH）、〔增量〕`/api/v1/research/watch-sources`（POST）、`/api/v1/research/watch-sources/*`（PATCH）。VIEWER／OPERATOR 呼叫＝403 `ACCESS_DENIED`。**例外（D-64）**：`POST …/reinit` 帶 `generation:"next"`（換世代）亦僅 ADMIN，但同一路徑的重試初始化模式為 OPERATOR 以上，`SecurityConfig` 的 matcher 無法依請求本文分流，所以角色檢查分兩段：**VIEWER**＝既有授權鏈就擋（通用 POST 規則要求 OPERATOR 以上，`SecurityConfig.java:97`）⇒ 403 `ACCESS_DENIED`（與 `RbacIT` 現行 VIEWER 寫入斷言同一條：`$.code`＝403、`$.reason`＝`ACCESS_DENIED`，`RbacIT.java:99-102`）；**OPERATOR**＝通過授權鏈後由 console-api 的 `ResearchCommandService` 在服務層檢查 ⇒ 403 `research_write_forbidden`（不是 matcher 層的 `ACCESS_DENIED`）；兩者的 Bridge 請求數皆為 0（角色檢查先於任何 Bridge 呼叫），`RbacIT` 對兩者各釘一個斷言。**`approver` 一律取 JWT subject，請求本文不收 approver**（先例 `SddFreezeRequest.java:11`）。
 - 時間：ISO-8601 含 offset，UTC 輸出 `+00:00`，不得 naive。
 - 識別碼：`id`（研究專案）＝UUID，由 console-api 在建立時配號並同時是 Bridge 的 `research_id`；`rpNo`＝顯示編號 `RP-NNNN`（DB 序列配號）；`stageRunId`＝引擎 `run_id`；證據 `E-NNN`、來源 `S-NNN`、缺陷 `D-<輪>-<序>`。
 - 機密：GitHub token、權杖、金鑰不出現在任何回應、`details`、日誌、DTO `toString`。
@@ -43,6 +44,7 @@
 | 6 | 404 | `research_not_found` | `{id}` 不存在或已封存且端點不收封存 |
 | 7 | 409 | 端點專屬（§1.4） | 狀態衝突 |
 | 7a | 409 | `allowlist_exists` | `POST /research/allowlist`（API-RP-22）：同 `listKind` 與 `host` 已有條目（Bridge 逐字轉出；`details.host`） |
+| 7a′ | 409／422／422 | `watch_source_exists`／`host_not_allowed`／`registry_too_large` | 〔增量 §5A〕`POST /research/watch-sources`（API-RP-29）：`slug` 已存在（409，`details.slug`）；追蹤來源的 host 不在有效網域清單（422，`details.host`；`PATCH` 重新啟用時同）；登記快照超過 `REGISTRY_TEXT_MAX_BYTES` 或同步的外層稽核檔超過 `SI_WRITE_BODY_MAX_BYTES`（422，`details.limit`、`details.size`、`details.what`∈`registry_text｜audit_file`；API-SI-15 同名）。三者屬**登記 reason 家族**（backend `ErrorReasons` 以 `REGISTRY_` 為常數前綴、前端獨立常數 `RESEARCH_REGISTRY_REASONS`），**刻意不進**既有的三十七個研究 reason 集合（`ResearchReasonsTest` 以 `RESEARCH_` 前綴常數與前端 `RESEARCH_REASONS` 區塊做集合全等，加入會連動 Architecture §11.1 與凍結 AT；§5A.5） |
 | 7b | 422 | `digest_mismatch` | Gate 0 核准（API-RP-12；D-72）：`expectedDigests` 送來的鍵與核准當下的現檔不符；只比對送來的鍵；`details.files[{key,expected,current}]`，`current` 為 null＝該檔不存在或不在凍結的四檔內。檢查序在 `review_not_passed` 之後、`escalated`／`fsm_state_conflict` 之前（先中者定案） |
 | 7c | 409 | `scr_open` | 研究專案有開啟中（OPEN）的 SCR：內環唯讀——拆解觸發、TCS 草擬與內環 run 啟動（execute／resume）皆被擋（D-102；P1） |
 | 7d | 409 | `decomposition_stale` | 拆解綁定的 PRD 摘要與現行凍結摘要不符（`details.expected_sha256`、`actual_sha256`）：簽核與內環 run 啟動被擋，須重新拆解（P1） |
@@ -67,6 +69,8 @@
 | **Gate 0 核准、退回修改** | — | — | ✓ | API-RP-12、21 |
 | **分流確認、SCG 登錄、建立 Release Tag、建立 PR** | — | — | ✓ | API-RP-14（route）、23、17 |
 | **管理研究來源 allowlist（新增／停用）** | — | — | ✓ | API-RP-22 |
+| **管理追蹤來源（新增／停用／重新啟用）**〔增量〕 | — | — | ✓ | API-RP-29（`GET` 三角色皆可） |
+| **同步登記到自我進化**〔增量〕 | — | — | ✓ 且帳號在 `console.si.deciders` | API-SI-15（`GET` 狀態 API-SI-14 三角色皆可；403 層次見 §5A.4） |
 
 ---
 
@@ -103,6 +107,9 @@
 | API-RP-25 | `POST /research/projects/{id}/decomposition/signoff` | O+ | 200 | P1 | `signoffResearchDecomposition` | FR-14／AC-14-2、14-3（D-94、D-113） |
 | API-RP-26 | `GET /research/projects/{id}/kanban` | V+ | 200 | P2 | `getResearchKanban` | FR-15／AC-15-1、15-2、15-4、15-6（D-138 Q-1） |
 | API-RP-27 | `GET /research/projects/{id}/healing` | V+ | 200 | P2 | `getResearchHealing` | FR-16／AC-16-1～16-4（D-138 Q-6、D-149#5） |
+| API-RP-29 | `GET /research/watch-sources`（V+，200）、`POST /research/watch-sources`（**ADMIN**，201）、`PATCH /research/watch-sources/{slug}`（**ADMIN**，200） | 見左 | 見左 | 增量 | `listResearchWatchSources`、`addResearchWatchSource`、`updateResearchWatchSource` | FR-24／AC-24-3、24-5（§5A.2） |
+| API-SI-14 | `GET /si/research-registry`（V+，200；路徑在 `/api/v1/si/**`） | V+ | 200 | 增量 | `getResearchRegistrySyncStatus` | FR-24／AC-24-7（§5A.4） |
+| API-SI-15 | `POST /si/research-registry/sync`（**ADMIN**＋`console.si.deciders`；200 或 201） | ADMIN | 201／200 | 增量 | `syncResearchRegistry` | FR-24／AC-24-6（§5A.4） |
 
 ### 1.2　輸入閘（Architecture §8.3 增列第 1 層）
 
@@ -369,6 +376,7 @@ interface KanbanDto { researchId: string; consoleProjectId: string|null; latestR
 | `POST /research/projects/{id}:reinit` | `{}`（重試初始化）｜`{generation:"next", reason, decided_by}`（換世代；D-60） | 200 `{flow}`｜200 `{flow, fsm_project, fsm_generation, gate_decision_id}`；重試：409 `stage_conflict`（`flow_status` 非 FAILED；`details.flowStatus`／`flowDetail`；零寫入，D-65、D-81）、補建仍失敗 502 `init_failed`（`details.step`）；換世代：409 `fsm_state_conflict`（現態非 ESCALATION*）、422（缺理由） |
 | `GET /research/allowlist`、`POST /research/allowlist`、`PATCH /research/allowlist/{id}` | `{list_kind, host, layer, purpose, tos_note, min_interval_seconds, tos_acknowledged, added_by}`（`added_by`＝console-api 轉入的 JWT subject，必填）／`{enabled, disabled_by?}`（`disabled_by`＝JWT subject；本文只准這兩鍵，其餘鍵 422） | `GET` 200 `{items: AllowlistEntry[], effective: {FETCH: string[], WEB: string[]}}`（`items` 含 `source=ENV` 的部署基底條目，其 `id`、`layer` 為 null；`effective`＝部署基底與啟用中條目的主機清單）；`POST` 201、`PATCH` 200 回 `AllowlistEntry`；422 `terms_ack_required` |
 | `GET /research/projects/{id}/events?after=&limit=`、`/stream?after=` | — | `research_events` 重播／SSE |
+| 〔增量〕`GET／POST／PATCH /research/watch-sources`、`GET /research/registry`、（SI 通道）`POST /si/registry:sync` | 形狀見 §5A.2、§5A.3、§5A.4（snake_case；POST／PATCH 與 `/si/registry:sync` 須寫入權杖：前四者 `X-Bridge-Token`＝`BRIDGE_RESEARCH_WRITE_TOKEN`、後者＝`BRIDGE_SI_WRITE_TOKEN`；兩個 GET 為讀取，不帶權杖） | 見 §5A |
 
 寫檔與入庫的持久化協定（寫檔→outbox→DB 交易→標 done）、fail-loud 行為見 ADR-003 D2 與 Architecture §10.2′。
 
@@ -405,6 +413,7 @@ interface KanbanDto { researchId: string; consoleProjectId: string|null; latestR
 |---|---|---|
 | 議題輸入面板 `[啟動深研]` | API-RP-03＋API-RP-11(`research`) | `capabilities.mode=local` 且 `claudeCli.ok`；層開關受 `webLayerEnabled` 限制 |
 | 研究來源設定對話框（ADMIN） | API-RP-22 | 僅 ADMIN 顯示；Reddit 須勾選條款確認 |
+| 〔增量〕研究來源設定的「自我進化追蹤來源」區、同步狀態列、「同步到自我進化」鈕 | 清單＝API-RP-29；新增／停用＝API-RP-29；狀態＝API-SI-14；同步＝API-SI-15 | 僅 ADMIN 看得到（入口沿既有）；新增或停用或重新啟用成功後自動呼叫 API-SI-15 一次；403 `si_write_forbidden` 顯示「此帳號不在自我進化寫入名單，未同步」；前端不自持 deciders 名單 |
 | 證據鏈即時動態欄 | API-RP-05／06（`research.source／evidence／run`） | — |
 | `[生成 PRD 初稿 →]` | API-RP-11(`draft`)；成功後 `?step=studio` | 需 `EVIDENCE_READY` |
 | PRD 目錄樹／編輯器／Diff | API-RP-08（兩版本 content 於前端 `diff`）、API-RP-09 | 保存＝新版；未存稿僅 `localStorage` 便利層 |
@@ -424,6 +433,165 @@ interface KanbanDto { researchId: string; consoleProjectId: string|null; latestR
 ## 5　DB 對應與驗收
 
 DDL 與所有權見 Architecture §11.3／§7；console-api 以 JDBC 讀、零寫入（ArchUnit 字串掃描測試釘住）。驗收 AT 命名沿既有：`AT-96N-…`（編號由各期 TCS 配）。**P0 必備 AT**：①建立→`research_events seq=1`、`flow=topic/INGESTED`、`rpNo` 配號；②同一 `slug` 第二次 409；③VIEWER 打 POST 403、匿名 401、OPERATOR 打 ADMIN 專屬端點 403；④Bridge 無 DSN→503 `research_requires_db`；⑤斷 DB 時 stage 進 `BLOCKED_DB`、復原後 outbox 重放、事件不重不漏；⑥SSE 斷線以 `Last-Event-ID` 重播無缺漏；⑦三輪 FAIL→`ESCALATED` 且 FSM 現態＝ESCALATION（不是 AUTO_RECOVERY_ATTEMPT）；⑧Gate 0 核准：`research_gate_decisions` 一列、`frozen_digests` 與 `show` 的 `frozen_stages[-1].spec_doc_digests` 逐位元相同、第二次核准 409；⑨核准前改檔（送來的 `expectedDigests` 與現檔不符）→422 `digest_mismatch`、零鍵→422 `missing_digests`（D-72）；⑩`tier=T3` 且非線索被 DB 擋；⑪PRD 200 KB 預覽 ≤2 s；⑫`PUT …/prd` 兩個併發請求，一個 201 一個 409；⑬allowlist：ADMIN 新增生效且入下一個 stage 快照、OPERATOR 403、Reddit 無條款確認 422；⑭人工退回與自動 FAIL 共用 3 次預算（第 3 次＝ESCALATION）；⑮既有 `:freeze` 對無 TCS 仍 422；⑯無 DSN 時 `GET /research/capabilities` 仍 200 且 `db:false`、其餘端點 503；⑰HUMAN_PENDING 守則負控（`gate SCG_VALIDATION FAIL` 態不動且計數＋1、`gate … PASS` rc≠0；退回後再審通過 `fsmGateResult=null`）；⑱DB 觸發器：缺陷 `status` 單向、來源 `verification` 只升不降、通用守衛擋清單外欄位與任何 DELETE；⑲伺服器重播不完整時送 `research.replay_gap` 且客戶端全量重抓；⑳`weightedScore` 表驅動：85／85／84／86 → 84.95 且未通過、85／85／85／85 → 85.00 且 `weightedGeThreshold=true`。
+
+---
+
+## 5A　研究來源單一化：追蹤來源與自我進化同步（增量；鍵 `agentconsole-research-registry`；PRD FR-R2P-24、附錄 C.8 D-169～D-176）
+
+> 本節是增量，**不改 §0～§5 任何既有端點、DTO 或計數**；R2P 既有 allowlist 三個端點（API-RP-22）的行為與 Bridge 請求數不變。SI 側（根層）的入帳細節、鏡像檔與事件欄位以根層 PRD v0.15 與 TCS-P6 為準，本節只定 Console 側與兩側的共用介面。
+
+### 5A.1　資料模型與種子（Flyway V24、V25）
+
+**V24 `V24__research_watch_sources.sql`**（版號＝實作時 `db/migration/` 現查最大版本＋1；現為 V23，故 V24）：
+
+```sql
+CREATE TABLE console.research_watch_sources (
+    slug VARCHAR(32) PRIMARY KEY CHECK (slug ~ '^[a-z0-9][a-z0-9-]{0,31}$'),
+    url VARCHAR(500) NOT NULL
+        CHECK (url ~ '^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?([/?][^[:space:]#]*)?$'),     -- https；host 小寫 ASCII、無 userinfo／埠（含顯式 :443）／尾點／方括號 IPv6；無空白與片段
+    CONSTRAINT research_watch_sources_url_no_idna CHECK (url !~ '^https://([^/?]*\.)?xn--'),            -- 拒 IDNA／xn-- 任一 label（D-EQA-1）
+    CONSTRAINT research_watch_sources_url_no_localhost CHECK (url !~ '^https://([^/?]*\.)?localhost([/?]|$)'),  -- 拒 localhost 與 *.localhost
+    CONSTRAINT research_watch_sources_url_no_ipv4 CHECK (url !~ '^https://[0-9.]+([/?]|$)'),          -- 拒 IPv4 字面（任何 IP 字面皆拒；IPv6 已被 host 字元集擋下）
+    kind VARCHAR(9) NOT NULL CHECK (kind IN ('changelog','docs','release','blog','sitemap','search')),
+    extract VARCHAR(200) NOT NULL CHECK (char_length(extract) >= 1 AND extract !~ '[[:cntrl:]]'),
+    layer VARCHAR(9) NOT NULL CHECK (layer IN ('ACADEMIC','INDUSTRY','OSS','COMMUNITY')),
+    expand_mode VARCHAR(7) CHECK (expand_mode IN ('links','sitemap')),
+    expand_prefix VARCHAR(200) CHECK (expand_prefix ~ '^/[^[:space:]?#[:cntrl:]]*$'),
+    expand_max SMALLINT CHECK (expand_max BETWEEN 1 AND 3),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    added_by VARCHAR(100) NOT NULL,
+    added_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    disabled_by VARCHAR(100),
+    disabled_at TIMESTAMP WITH TIME ZONE,
+    CHECK ((expand_mode IS NULL) = (expand_prefix IS NULL) AND (expand_mode IS NULL) = (expand_max IS NULL)),
+    CHECK (enabled OR (disabled_by IS NOT NULL AND disabled_at IS NOT NULL))
+);
+-- 受控更新：以 CREATE OR REPLACE 擴充既有通用守衛 console.research_controlled_update_guard()（V16 定義）的允許清單，
+-- 只增一條 WHEN 'research_watch_sources' THEN ARRAY['enabled','disabled_by','disabled_at']；其餘九條既有 WHEN 與函式其餘文字逐字不動。
+CREATE TRIGGER trg_research_watch_sources_guard BEFORE UPDATE OR DELETE ON console.research_watch_sources
+    FOR EACH ROW EXECUTE FUNCTION console.research_controlled_update_guard();
+-- 種子（見下表）：INSERT … ON CONFLICT DO NOTHING；網域種子 INSERT INTO console.research_allowlist_entries … ON CONFLICT (list_kind, host) DO NOTHING
+```
+
+- 通用守衛的函式本體以「`CREATE OR REPLACE FUNCTION`＋完整複製既有本體＋一條新 WHEN」形態重定義（Flyway 已發佈檔不改，V16 原文不動）；重定義前以 `pg_get_functiondef` 的 AT 對拍「九條既有允許清單一字未變」。
+- 重新啟用（`enabled` false→true）時由 Bridge 同一個 UPDATE 把 `disabled_by`、`disabled_at` 設回 NULL（兩欄在允許清單內）；`CHECK (enabled OR …)` 在 `enabled=true` 時不約束這兩欄，所以快照對「從未停用」與「停用後重新啟用」的列給出相同內容。
+- 沒有 `research_id`：追蹤來源與 `research_allowlist_entries` 一樣是**全域資源**，不寫 `research_events`。
+
+**V25 `V25__si_console_writes_kind_src_registry.sql`**（與 V23 同型，現查 `si_console_writes_kind_check` 存在才動）：`DROP CONSTRAINT` 後 `ADD CONSTRAINT si_console_writes_kind_check CHECK (kind IN ('decide','obs-add','obs-close','sched-set','run-request','src-registry'))`；不改欄寬（`src-registry` 恰 12 字元＝`VARCHAR(12)` 上限，再加 kind 須先放寬欄寬並在此註記）、不改 `si_console_writes_guard()`。
+
+**種子**（V24；17 列追蹤來源；`added_at`、`disabled_at` 固定 `2026-11-10T00:00:00+00:00`）：
+
+| slug | kind | layer | url（節錄） | 啟用 | `expand` | `added_by`／`disabled_by` |
+|---|---|---|---|---|---|---|
+| `anthropic-engineering` | blog | INDUSTRY | `https://www.anthropic.com/engineering` | 停用 | — | 匯入／`migration:V24（以 anthropic-research 取代）` |
+| `anthropic-research` | sitemap | INDUSTRY | `https://www.anthropic.com/sitemap.xml` | 啟用 | `{sitemap, /research/, 3}` | 單一化種子 |
+| `anthropic-sdk-python-releases` | release | OSS | `https://github.com/anthropics/anthropic-sdk-python/releases.atom` | 啟用 | — | 匯入 |
+| `arxiv-agents` | search | ACADEMIC | `https://export.arxiv.org/api/query?search_query=%28abs:%22self-improving%22+OR+abs:%22self-evolving%22+OR+abs:%22agent+memory%22%29+AND+%28cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.SE%29&sortBy=submittedDate&sortOrder=descending&max_results=10`（主控 D-RR-16 逐字；2026-11-10 實測 200、10 筆） | 啟用 | — | 單一化種子 |
+| `cc-changelog` | changelog | OSS | `https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md` | 停用（retired） | — | 匯入／匯入 |
+| `cc-docs-hooks` | docs | INDUSTRY | `https://code.claude.com/docs/en/hooks-guide` | 停用（retired） | — | 匯入／匯入 |
+| `cc-docs-hooks-md` | docs | INDUSTRY | `https://code.claude.com/docs/en/hooks-guide.md` | 啟用 | — | 匯入 |
+| `cc-docs-index` | docs | INDUSTRY | `https://code.claude.com/docs/llms.txt` | 啟用 | — | 匯入 |
+| `cc-docs-memory` | docs | INDUSTRY | `https://code.claude.com/docs/en/memory` | 停用（retired） | — | 匯入／匯入 |
+| `cc-docs-memory-md` | docs | INDUSTRY | `https://code.claude.com/docs/en/memory.md` | 啟用 | — | 匯入 |
+| `cc-docs-skills` | docs | INDUSTRY | `https://code.claude.com/docs/en/skills` | 停用（retired） | — | 匯入／匯入 |
+| `cc-docs-skills-md` | docs | INDUSTRY | `https://code.claude.com/docs/en/skills.md` | 啟用 | — | 匯入 |
+| `cc-releases` | release | OSS | `https://github.com/anthropics/claude-code/releases.atom` | 啟用 | — | 匯入 |
+| `openai-agents-releases` | release | OSS | `https://github.com/openai/openai-agents-python/releases.atom` | 停用（retired） | — | 匯入／匯入 |
+| `openai-agents-tags` | release | OSS | `https://github.com/openai/openai-agents-python/tags.atom` | 啟用 | — | 匯入 |
+| `openai-api-changelog` | changelog | INDUSTRY | `https://platform.openai.com/docs/changelog` | 停用（retired） | — | 匯入／匯入 |
+| `openai-api-changelog-md` | changelog | INDUSTRY | `https://developers.openai.com/api/docs/changelog.md` | 啟用 | — | 匯入 |
+
+「匯入」＝`migration:V24（SI research_sources.json 匯入）`；「單一化種子」＝`migration:V24（研究來源單一化種子）`；`extract` 取 SI 舊表逐字（兩個新列：`anthropic-research`＝「最新 3 篇研究文章的全文（逐字）」、`arxiv-agents`＝「最新 10 篇論文的標題、作者、日期與摘要首句（逐字）」）。啟用 10、停用 7。原 `added_by`（含 sid 座標的長字串）不入庫——歷史由 git 歷史保存。停用列的網域（`raw.githubusercontent.com`、`platform.openai.com`）**不種入** allowlist（停用列不受單一閘約束；重新啟用時須先開放網域，否則 422 `host_not_allowed`）。
+
+**網域種子**（`research_allowlist_entries`，`list_kind='FETCH'`、`min_interval_seconds=5`、`enabled=true`、`tos_acknowledged=false`、`added_by='migration:V24（自我進化研究來源種子）'`、`added_at` 同上固定值）：`www.anthropic.com`（INDUSTRY）、`github.com`（OSS）、`code.claude.com`（INDUSTRY）、`developers.openai.com`（INDUSTRY）；`export.arxiv.org` 已在部署基底，不另種。**WEB 零新增。**
+
+### 5A.2　追蹤來源端點（API-RP-29）
+
+**Bridge（snake_case；讀取端點走 `read_gate`、寫入走 `write_gate("watch.add"／"watch.patch")` 與 `X-Bridge-Token`；無 DSN＝503 `research_requires_db`；內部以 `ctx.db.apply(...)` 寫入，沿 `add_allowlist_entry` 形態）**
+
+| 端點 | 請求 | 回應 |
+|---|---|---|
+| `GET /research/watch-sources` | — | 200 `{items: WatchSource[]}`，依 `slug` 位元組序（SQL `ORDER BY slug COLLATE "C"`）；含停用列 |
+| `POST /research/watch-sources` | `{slug, url, kind, extract, layer, expand?, added_by}`（`expand` 缺省或 null＝無；物件須恰含 `mode`、`prefix`、`max`；多餘鍵 422） | 201 `WatchSource`；422 `invalid_request`（`violations[{field,rule,message}]`，規則名見下）；422 `host_not_allowed`；409 `watch_source_exists`；422 `registry_too_large` |
+| `PATCH /research/watch-sources/{slug}` | `{enabled, disabled_by?}`（`extra=forbid`；`enabled=false` 須帶 `disabled_by`） | 200 `WatchSource`；404 `research_not_found`（`details.slug`）；`enabled=true` 而 host 不在有效清單＝422 `host_not_allowed` |
+
+`WatchSource`＝`{slug, url, host, kind, extract, layer, expand: null | {mode, prefix, max}, enabled, host_allowed, added_by, added_at, disabled_by, disabled_at}`（時間 UTC `+00:00` 秒精度；`host` 由 `url` 衍生；`host_allowed`＝host ∈ 當前有效網域清單〔FETCH ∪ WEB，只計啟用者〕）。
+
+**POST 輸入閘規則名**（Bridge 一次全列；console-api 輸入閘以 400 `errors[]` 先擋同一批形狀）：`invalid_slug`（`^[a-z0-9][a-z0-9-]{0,31}$`）、`invalid_url`（見下）、`invalid_kind`（六值）、`invalid_layer`（四值）、`invalid_extract`（1～200 code point、無控制字元）、`invalid_expand`（`mode`∈`links｜sitemap`、`prefix` 以 `/` 起頭且≤200 字元、無空白／`?`／`#`／控制字元、`max` 整數 1～3；缺省整組 null）。**`invalid_url`（原樣判定，不做任何正規化；D-EQA-1：Console 接受集合 ⊆ SI 接受集合，逐列等於根層 TCS 附錄 D 的 CON 欄）**：scheme 必為 `https`；host 須原樣合 `^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$`（**大寫 host 拒絕、不小寫化**；尾點拒絕；任何非 ASCII 字元含全形數字與 `。` 拒絕）；**任何顯式埠拒絕（含 `:443`，不去掉）**；userinfo 拒絕；**任何 IP 字面拒絕**（IPv4 與方括號 IPv6，即使是公網位址）；`localhost` 與 `*.localhost` 拒絕；host 任一 label 為 `xn--` 開頭（IDNA）拒絕；含空白、控制字元或 `#` 片段拒絕；總長≤500 字元（比 SI 的 2048 更嚴，屬 Console 較嚴）。DB `url` CHECK 與 Bridge 判定在附錄 D 逐列一致（§5A.1 的基本形狀 CHECK 加三條附加 CHECK）；使用者輸入含大寫 host 或 `:443` 時得 422 `invalid_url`，由使用者自行改寫後重送（前端同函式同訊息）。**單一閘**（通過上列規則之後才判，錯誤碼獨立）：host ∈ 當前有效網域清單，否則 `host_not_allowed`（`details.host`）。**大小閘**：假設寫入成功後的快照 UTF-8 位元組數＞`REGISTRY_TEXT_MAX_BYTES`（24576）＝`registry_too_large`（`details.what="registry_text"`、`details.limit`、`details.size`），零寫入。
+
+**console-api（camelCase；沿 API-RP-22 形態）**：`GET /api/v1/research/watch-sources`（VIEWER 以上）→ `ApiResult<List<WatchSourceDto>>`（`WatchSourceDto` 同上欄位 camelCase：`hostAllowed`、`addedBy`、`addedAt`、`disabledBy`、`disabledAt`）；`POST`（ADMIN）→ 201；`PATCH /api/v1/research/watch-sources/{slug}`（ADMIN）→ 200；`added_by`／`disabled_by` 取 JWT subject，**請求本文不收**；成功後 `AuditTrail.note("research.watch_source", "research_watch_source", <slug>)`——`audit` 日誌行帶 `action=research.watch_source`、`entity=research_watch_source:<slug>`，V6 `audit_log` 恆一列（含 401／403／422／429）`entity_type='research_watch_source'`、`entity_id=<slug>`；不寫 `research_events`、不新增 V6 欄位。逾時沿 §0.2 第 8 列（寫入 30 s、清單讀取 10 s、POST 不重試）。VIEWER／OPERATOR 打 POST／PATCH＝403 `ACCESS_DENIED`、Bridge 請求數 0。
+
+### 5A.3　登記快照 `GET /research/registry`
+
+回應恰兩鍵：`{registry_text: string, registry_sha256: string}`（200；無 DSN 503 `research_requires_db`；超界 422 `registry_too_large`）。console-api **不對瀏覽器開放**這個端點（前端只用 API-SI-14／15）。
+
+**登記快照正規化規則（主控定死；Bridge 唯一產生者，其他語言不得重新序列化；SI 側 TCS 逐字同文）**
+
+1. 頂層鍵恰 `schema_rev`（整數 1）、`hosts`、`watch`。快照內**不放產生時間**。
+2. `hosts` 元素鍵恰 `host`、`layer`（字串或 null）、`list_kind`、`min_interval_seconds`（整數＝有效間隔，同 `EffectiveAllowlist.interval(host)` 預設路徑 `/`、未帶權杖）、`source`（`ENV`｜`ADMIN`）；**只列啟用者**；同一 (`list_kind`, `host`) 只出現一次（部署基底有者記 `ENV`、`layer` 為 null；否則 `ADMIN` 並帶該條目的 `layer`）；依 (`host`, `list_kind`) 的 UTF-8 位元組序遞增。`min_interval_seconds` 的算式（FETCH 與 WEB 同式）＝`max(builtin_floor(host, "/"), 同 (list_kind, host) 啟用中 ADMIN 條目的 min_interval_seconds)`；`builtin_floor` 取 `fetch/allowlist.py` 之值（GitHub API 未帶權杖一般端點 60；基底表內 host 取 `ENV_MIN_INTERVALS`；表外取 `DEFAULT_ENV_MIN_INTERVAL`＝3）。
+3. `watch` 元素鍵恰 `id`（＝`slug`）、`url`、`kind`、`extract`、`layer`、`expand`（null 或物件，物件鍵恰 `mode`、`prefix`、`max`）、`enabled`（布林）、`added_by`、`added_at`、`disabled_by`、`disabled_at`（後三者可 null）；**全列含停用**；依 `id` 的 UTF-8 位元組序遞增。
+4. 時間一律 UTC、秒精度、`YYYY-MM-DDTHH:MM:SS+00:00`。
+5. 序列化＝Python `json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True) + "\n"`；`registry_text` 即該字串（UTF-8、LF、結尾恰一個換行）；`registry_sha256`＝`"sha256:" + hex(sha256(registry_text 的 UTF-8 位元組))`。
+6. 上限：`registry_text` UTF-8 位元組數≤`REGISTRY_TEXT_MAX_BYTES`（24576）。
+
+**黃金檔**（兩支 TCS 與兩側測試共用；位元組以此處為準）。**G-R1**：一個部署基底主機、零追蹤來源，`registry_sha256`＝`sha256:73123a2bf0275448928199a72895297c77d6af8773ffa14b7cf453d19dc393a3`（205 位元組）：
+
+```json
+{
+  "hosts": [
+    {
+      "host": "export.arxiv.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    }
+  ],
+  "schema_rev": 1,
+  "watch": []
+}
+```
+
+**附錄 B golden（取代原 G-R2；D-EQA-3）**：含兩個主機（基底 `export.arxiv.org`、ADMIN `www.anthropic.com` 間隔 5）與三列追蹤來源（停用的 `anthropic-engineering`、帶 `expand` 的 `anthropic-research`、`arxiv-agents`）的完整快照，**唯一本文住根層 `docs/03_testing/contracts/TCS-SelfImproving-P6-20261110.md` 附錄 B**（2039 位元組，`registry_text` 的 sha256＝`147fccd6a1b9efb61423579e26fbbc7437366a937806e239c69f334732aff0e8`，即 `registry_sha256`＝`sha256:147fccd6a1b9efb61423579e26fbbc7437366a937806e239c69f334732aff0e8`）；本契約不複製全文，Console 端測試取該附錄圍欄內文字的複本（TCS-ResearchRegistry §5.1），並先驗複本 sha256。
+
+（G-R1 由 `json.dumps(…, ensure_ascii=False, indent=2, sort_keys=True)+"\n"` 現算並以 SHA-256 核對，存放 `AgentConsole/engine-bridge/tests/fixtures/research_registry/golden-r1.json`；附錄 A（公網位址表，441 位元組，sha256 `3101fd6a…0afd`）、附錄 C（稽核檔位元組表，1681 位元組，sha256 `91f13738…1d87`）、附錄 D（追蹤來源 URL parity 表，1797 位元組，sha256 `25fd334d…1e89`）同樣以根層 TCS 為唯一本文、本契約不複製；主控把圍欄內文字抽成檔複製到 Console 側夾具，各側測試先驗複本 sha256；Bridge 與根層各自不得重造。）
+
+### 5A.4　同步與同步狀態（API-SI-14、API-SI-15；SI 寫入通道）
+
+**稽核檔**（kind＝`src-registry`；沿 P2b §3 的簽章管線，位元組權威＝根層 `consoleaudit.py`）：
+- 外層檔恰七鍵、序固定 `schema_rev`、`kind`、`audit_ref`、`subject`、`body`、`key_id`、`mac`；`kind`＝`src-registry`、`subject`＝null。
+- `body`（緊湊 JSON 文字，**簽 body 字串本身**）鍵序：`schema_rev`、`audit_ref`、`kind`、`user`、`role`（恆 `ADMIN`）、`time`（`±HH:MM`，不得 `Z`）、`registry_text`、`registry_sha256`。`registry_text`、`registry_sha256` 兩欄的值**逐位元組取自 Bridge `GET /research/registry` 的回應**，console-api 只做 JSON 字串跳脫，不解析、不重新序列化。（`registry_text` 與 `registry_sha256` 的鍵序以根層 TCS 的 `src-registry` 位元組表為準，兩側黃金檔交叉核對；本節採用決策書列舉順序。）
+- 外層檔位元組數須≤Bridge `SI_WRITE_BODY_MAX_BYTES`（65536）；超過＝422 `registry_too_large`（`details.what="audit_file"`）、零副作用（跳脫使外層檔約為 `registry_text` 的 1.4～2 倍；以位元組數現算，不以估計替代）。
+
+**Bridge `POST /si/registry:sync`**（寫入權杖 `BRIDGE_SI_WRITE_TOKEN`；沿 `_store_signed_audit`：本文單一 UTF-8 JSON 物件、外層七鍵、`kind=src-registry`、`audit_ref` 小寫 UUID、`subject` 為 null；Bridge 不解讀 `body`）：201 `{audit_ref, stored:true}`，落 `BRIDGE_SI_AUDIT_DIR/<audit_ref>.json`。
+
+**API-SI-15 `POST /api/v1/si/research-registry/sync`**（本文：空物件 `{}`；ADMIN；200 或 201）。**閘門序**（先中者定案，每一關拒絕前後表內列數、Bridge 寫入請求數、ref 取用數的變動量皆為 0；序 3 為讀取）：
+
+| 序 | 條件 | 回應 |
+|---|---|---|
+| 1 | 角色須 ADMIN（安全層） | 403 `ACCESS_DENIED` |
+| 2 | 帳號須在 `console.si.deciders` | 403 `si_write_forbidden` |
+| 3 | 簽章金鑰與 Bridge 寫入權杖須已設 | 503 `si_write_disabled`（`details.cause`＝`audit_key_unset`｜`bridge_token_unset`） |
+| 4 | 取 Bridge 快照（`GET /research/registry`） | 失敗逐字沿 §0.2 第 4、8 列：503 `research_requires_db`、502 `bridge_unreachable`、504 `bridge_timeout`；超界 422 `registry_too_large`（`details.what="registry_text"`） |
+| 5 | 冪等檢查：讀 SI 鏡像 `status.items[0].research_registry`（最新已入帳者）、`research.registry` 事件的已入帳 ref 集合（沿 `SiReconcileService.scan()` 的分頁掃描與上限）與表內 `src-registry` 列 | 鏡像讀不到（`scan_cap_exceeded`、Bridge／SI 讀取失敗）＝503 `si_unavailable`（`details.cause`）；依下列**冪等規則（D-EQA-7）**判定：令 `I`＝`research_registry.registry_sha256`（最新已入帳 digest；null＝從未）、`P`＝「最新待入帳寫入」（見下）；**有 `P` 時，當前 digest＝`P.digest` 才是 `unchanged`（`state=pending`）；沒有 `P` 時，當前 digest＝`I` 才是 `unchanged`（`state=synced`）；其餘一律照常送出新稽核檔（201）**——即使當前 digest＝`I`，只要有更新的待入帳寫入（內容不同）就必須送出，否則 D→E（待入帳）→D 會讓 E 在入帳後覆寫掉使用者要的 D（200 `outcome=unchanged`，零副作用）。**`P` 的定義**：表內 `kind='src-registry'` 且 `audit_ref` 不在鏡像已入帳集合的列中、`time` 最大者；若最新已入帳者（`research_registry.audit_ref`）在表內有對應列，只計 `time` 晚於該列的未入帳列（更舊的未入帳列會被根層以 `REG-STALE` 拒收，不算「更新的待入帳寫入」）；該 ref 不在表內（他處寫入）時計全部未入帳列 |
+| 6 | 簽章 body 與外層檔，量位元組數 | 外層檔＞65536＝422 `registry_too_large`（`details.what="audit_file"`）；此時尚未取 ref、未寫資料庫 |
+| 7 | 取 `audit_ref`、簽章、INSERT 稽核列（`kind=src-registry`、`subject_id`＝NULL、`digest`＝`registry_sha256`、`body` 原樣）、單次 Bridge 落檔 | 201 `outcome=written`；補償與結果不明語意同 P2b（Bridge 4xx／503／其他 5xx／連線階段失敗＝補償刪列；讀取逾時／送出後連線重設／2xx 無法解析＝保留並於 `details.outcomeUnknown` 標明） |
+
+回應 `ResearchRegistrySyncResult`＝`{outcome: "written"|"unchanged", state: "pending"|"synced", registrySha256, auditRef, kind, time, keyId}`；`unchanged` 時 `auditRef` 為 `P` 的 ref（`state=pending`）或 `research_registry.audit_ref`（`state=synced`），`kind`／`time`／`keyId` 為 null；`written` 時 `state` 恆 `pending`。收據文案一律為「稽核檔已落地，待入帳」，不得出現「已同步」「已生效」字樣（NFR-SC-1 同型）。**為何冪等只比「最新」**：同一份登記內容不可能同時是「已入帳」與「未入帳」的最新；回到舊內容（A→B→A、D→E→D）是新的同步事件，必須重送（時間較晚的稽核檔入帳後才會讓鏡像回到使用者要的內容；根層以 `time` 單調性拒收較舊者，D-EQA-17）。**為何不提供 force**：未入帳的稽核檔由主機巡邏每輪重試入帳，重送不會讓它更快入帳；卡住的原因（金鑰不符等）在根層日誌，不在這裡。
+
+**API-SI-14 `GET /api/v1/si/research-registry`**（VIEWER 以上；200）：回 `ResearchRegistrySyncStatus`＝`{state: "synced"|"unsynced"|"pending"|"unknown", unknownCause: null|"scan_cap_exceeded"|"si_unavailable"|"bridge_unreachable"|"bridge_timeout", currentSha256, ingestedSha256: string|null, ingestedAuditRef: string|null, pendingAuditRef: string|null, pendingTime: string|null, researchFetchMax: integer|null}`。判定序：
+1. 取 Bridge 快照取得 `currentSha256`（失敗＝沿 §0.2 的 502／503／504，不降級——沒有當前 digest 就沒有狀態）。
+2. 讀 SI 鏡像 `status`（`items[0].research_registry`：物件 `{seq, audit_ref, registry_sha256, watch_enabled}`，尚無同步＝null；D-RR-15）取最新已入帳者：`registry_sha256`→`ingestedSha256`、`audit_ref`→`ingestedAuditRef`（null＝從未同步，兩者為 null）；另以 `SiReconcileService.scan()` 掃 `research.registry` 事件（必帶 `audit_ref` 與 `registry_sha256`，D-RR-14）取「已入帳 ref 集合」供第 4 步判未入帳列。兩者任一讀不到＝200、`state=unknown`、`unknownCause` 為原因，其餘欄 null；`research_registry` 缺鍵（根層尚未升版）同樣視為讀不到（`si_unavailable`），不當成「從未同步」。
+3. 求「最新待入帳寫入」`P`（定義同 API-SI-15 閘門序第 5 關）。
+4. **有 `P`**：`P.digest == currentSha256` ⇒ `pending`（`pendingAuditRef`、`pendingTime` 取 `P`）；否則 ⇒ `unsynced`（即使 `ingestedSha256 == currentSha256`：更新的待入帳寫入入帳後會覆寫鏡像，故此刻不得宣稱已同步，D-EQA-7）。
+5. **沒有 `P`**：`ingestedSha256 == currentSha256` ⇒ `synced`；否則 ⇒ `unsynced`（含從未同步：`ingestedSha256` 為 null）。
+`researchFetchMax`：取 SI `status.items[0].research_fetch_max`（整數，D-RR-15；Console 不自持常數），只有正整數才轉，缺鍵或型別不符＝null；回應不含金鑰、權杖、稽核 body。
+
+**對帳讀面延伸**：`SiReconcileService.scan()` 的事件種類對映加 `research.registry`→`src-registry`（無對象，subject 恆 null；carrier 為 console 者登入 `orphans`）；`GET /api/v1/si/console-writes` 的 `items[].kind` 值域加 `src-registry`；`SiWriteKind` 加 `SRC_REGISTRY("src-registry")`；前端 `SiWriteKind`、`SI_WRITE_KIND_LABELS`（「研究來源同步」）與 `ingestCommands`（動詞以根層 TCS-P6 為準）同步。
+
+### 5A.5　錯誤碼與既有測試碼的連動
+
+新增 reason 三個（`watch_source_exists`、`host_not_allowed`、`registry_too_large`）自成**登記 reason 家族**：backend `ErrorReasons` 常數前綴 `REGISTRY_`（`REGISTRY_WATCH_SOURCE_EXISTS`、`REGISTRY_HOST_NOT_ALLOWED`、`REGISTRY_TOO_LARGE`）、前端 `lib/domain/researchRegistry.ts` 的獨立常數 `RESEARCH_REGISTRY_REASONS`、本契約 §0.2 第 7a′ 列三處集合相等（新鎖，TCS-ResearchRegistry AT-965-3-7）。**不進**既有三十七個研究 reason：`ResearchReasonsTest` 以 `RESEARCH_` 前綴常數與前端 `RESEARCH_REASONS` 區塊做「集合全等」並逐項要求 Architecture §11.1 研究 reason 表列出，若加入則須同改 Architecture 並重凍多把鍵；獨立家族讓既有鎖零改動（SI 的 `SI_REASONS` 先例同型）。同步端點沿用既有 `si_write_forbidden`、`si_write_disabled`、`si_unavailable`、`invalid_request`。OpenAPI：新增路徑與操作使 `OpenApiIT` 的總數與研究路徑數增加（逐項見 TCS-ResearchRegistry §4.1）。
 
 ---
 

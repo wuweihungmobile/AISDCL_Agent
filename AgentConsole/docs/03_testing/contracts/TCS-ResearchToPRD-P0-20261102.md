@@ -454,7 +454,7 @@
 
 | AC | AC 描述 | AT | AT 描述 | 自動化 | 測試類型 | 狀態 |
 |----|---------|----|---------|-------|---------|------|
-| AC-960-1 | 資料庫不可變與 CHECK（Flyway V16～V18） | AT-960-1-1 | Flyway 歷史 1～18 全成功、13 張新表與序列／函式／守衛函式齊備且只在 console schema | ✅ | Integration | □ |
+| AC-960-1 | 資料庫不可變與 CHECK（Flyway V16～V18） | AT-960-1-1 | Flyway 歷史 1～18 全成功、13 張新表與序列／函式／守衛函式齊備且只在 console schema（本 AT 的程式碼自 P1 起以最新版斷言版本清單與守衛表集合；V24 起加第十九張表 `research_watch_sources`，其守衛掛既有通用守衛函式） | ✅ | Integration | □ |
 | AC-960-1 | 資料庫不可變與 CHECK（Flyway V16～V18） | AT-960-1-2 | 八張 append-only 表的 UPDATE 與 DELETE 一律被觸發器拒絕且列不變 | ✅ | Integration | □ |
 | AC-960-1 | 資料庫不可變與 CHECK（Flyway V16～V18） | AT-960-1-3 | research_sources 禁刪但允許查證層級升級，T3 非線索、DOI 與 COMMIT 缺欄、V0 皆被 CHECK 擋下 | ✅ | Integration | □ |
 | AC-960-1 | 資料庫不可變與 CHECK（Flyway V16～V18） | AT-960-1-4 | research_allowlist_entries 只准動 enabled 與停用欄，Reddit 網域須條款確認，值域與唯一性被擋 | ✅ | Integration | □ |
@@ -916,7 +916,7 @@ Push-Location AgentConsole\frontend; npx vitest run lib/nav/research-nav.test.ts
 - **AT-960-8-9**（pytest｜`test_research_router.py`｜Integration｜AC-R2P-04-7）有效清單＝環境基底加啟用中的 ADMIN 條目，Reddit 預設不在任何清單，快照入 stage run。
   - Given `LB` 與 `RDB`；ADMIN 條目 CRUD 經 Bridge allowlist 端點
   - When GET allowlist；POST 一個產業網域；POST `reddit.com`（tos_acknowledged 假與真）；PATCH enabled 為假；啟動 stage 前後各取有效清單
-  - Then 預設有效 FETCH 清單恰為五個基底主機、WEB 清單為空、不含 reddit，各基底主機的有效 `min_interval_seconds` 等於 §5.1 的 V-R9 現查值；新增條目於下一個 stage 的 `allowlist_snapshot` 出現、停用後不再出現；Reddit 假條款 422 `terms_ack_required`；PATCH 只改 enabled 與停用欄；新增與停用寫入的 `added_by`、`disabled_by` 等於 console-api 轉傳的 JWT subject，且不寫 `research_events`（D-52）；每次變更使 `bridge.audit` 多一筆；條目的 `min_interval_seconds` 合 1 至 3600
+  - Then 預設有效 FETCH 清單恰為五個基底主機（限 `source=ENV` 條目；含 V24 種子的庫另有四個 `source=ADMIN`、FETCH 條目；本 AT 的夾具〔替身〕不含種子，程式碼零改）、WEB 清單為空、不含 reddit，各基底主機的有效 `min_interval_seconds` 等於 §5.1 的 V-R9 現查值；新增條目於下一個 stage 的 `allowlist_snapshot` 出現、停用後不再出現；Reddit 假條款 422 `terms_ack_required`；PATCH 只改 enabled 與停用欄；新增與停用寫入的 `added_by`、`disabled_by` 等於 console-api 轉傳的 JWT subject，且不寫 `research_events`（D-52）；每次變更使 `bridge.audit` 多一筆；條目的 `min_interval_seconds` 合 1 至 3600
   - 判定：python -m pytest tests/test_research_router.py -k AT_960_8_9 -q（cwd＝AgentConsole/engine-bridge）
 - **AT-960-8-E-1**（pytest｜`test_research_fetch_security.py`｜Integration｜AC-R2P-04-4）GitHub token 只在抓取行程內，不入 argv、日誌、DB、回應、.prompts。
   - Given 以哨兵 `ghp_SENTINEL`（假值）為 token 傳給抓取；`caplog`；`RDB`
@@ -1256,7 +1256,7 @@ Push-Location AgentConsole\frontend; npx vitest run lib/nav/research-nav.test.ts
 
 ### 3.2 backend（JUnit；徑②）
 
-- **AT-960-1-1**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）Flyway 歷史 1～18 全成功、13 張新表與序列／函式／守衛函式齊備且只在 console schema。
+- **AT-960-1-1**（JUnit｜`ResearchSchemaMigrationIT`｜Integration｜AC-R2P-02-7）Flyway 歷史 1～18 全成功、13 張新表與序列／函式／守衛函式齊備且只在 console schema（本 AT 的程式碼自 P1 起以最新版斷言版本清單與守衛表集合；V24 起加第十九張表 `research_watch_sources`，其守衛掛既有通用守衛函式）。
   - Given 以 `AbstractIntegrationTest`（Testcontainers PG18）啟動，Flyway 已自動套用全部遷移
   - When 查 `console.flyway_schema_history`、`information_schema.tables`、`pg_proc`、`pg_class`（序列）
   - Then 版本依序恰為 1 至 18 且 `success` 皆為真；V16、V17、V18 的 description 依序含 `research core`、`research evidence`、`research prd review gate`；console schema 內恰多出 13 張表（research_projects、research_events、research_stage_runs、research_artifacts、research_sources、research_fetches、research_evidence_items、research_allowlist_entries、research_prd_versions、research_review_rounds、research_review_scores、research_review_defects、research_gate_decisions）；序列 `research_rp_seq` 與函式 `research_next_rp_no`、`research_append_only_guard`、`research_controlled_update_guard` 存在；public schema 沒有任何 research_ 起頭的表；`ddl-auto=validate` 下 context 啟動成功；`pg_indexes` 中 `ux_research_projects_slug_active` 與 `ux_research_projects_console_project` 的定義含 `UNIQUE` 與 `WHERE`（部分唯一索引），另 `idx_research_projects_flow`、`idx_research_events_type`、`idx_research_stage_runs_status`、`idx_research_fetches_research`、`idx_research_evidence_source`、`idx_research_gate_research`、`idx_research_defects_open` 與部分唯一索引 `ux_research_fetches_search_no`（`WHERE search_no IS NOT NULL`）皆存在；`pg_trigger`（排除內部觸發器）依表登記守衛函式：八張 append-only 表（research_events、research_artifacts、research_fetches、research_evidence_items、research_prd_versions、research_review_rounds、research_review_scores、research_gate_decisions）皆掛 `research_append_only_guard`；五張受控可更新表（research_projects、research_stage_runs、research_sources、research_review_defects、research_allowlist_entries）皆掛 `research_controlled_update_guard`（審查輪表於 D-57 改掛 append-only 守衛，不在此集合）；research_review_defects 另掛缺陷 status 單向守衛、research_sources 另掛查證層級單向守衛（兩個專用守衛的函式名與全部觸發器名由 V16 至 V18 定，不在本 AT 釘住，其行為由專屬 AT 驗）
@@ -1399,7 +1399,7 @@ Push-Location AgentConsole\frontend; npx vitest run lib/nav/research-nav.test.ts
 - **AT-960-5-4**（JUnit｜`ResearchApiIT`｜Integration｜AC-R2P-04-1、AC-R2P-04-7）allowlist API：ADMIN 新增與停用、OPERATOR 與 VIEWER 403、Reddit 無條款 422；每個寫入請求恆多一列 audit_log（成功者標 research_allowlist 實體），不寫事件帳。
   - Given ADMIN、OPERATOR、VIEWER 憑證與迷你 Bridge（回放 Bridge 的規則：成功回 201 或 200，Reddit 未確認回 422）；各步前後的 `audit_log` 與 `research_events` 列數；`audit` logger 的日誌擷取
   - When GET allowlist；ADMIN POST 一個產業網域；ADMIN POST `reddit.com`（tosAcknowledged 為假與真各一次）；ADMIN PATCH enabled 為假；OPERATOR 與 VIEWER 各 POST
-  - Then GET 在預設部署回恰四組基底主機且 Web 清單為空、不含 Reddit；ADMIN 新增回 201、停用 PATCH 回 200，各使 `audit_log` 多恰一列：`entity_type` 為 `research_allowlist`、`entity_id` 為該條目的 id（由既有 `AuditTrail.note(research.allowlist, research_allowlist, <條目 id>)` 於 Bridge 回應成功後標註）、`subject` 為 JWT subject、`role` 為 ADMIN、`http_status` 依序為 201 與 200、帶 trace_id、不含請求本文；`audit` logger 的日誌行帶 `action=research.allowlist` 與 `entity=research_allowlist:<條目 id>`（V6 `audit_log` 沒有 `note` 與 `action` 欄，`action` 只以日誌行斷言；D-62(1)）；每個 `/api/` 寫入請求恆多一列，與有無標註無關：Reddit 未確認 422 `terms_ack_required` 亦多恰一列（`http_status` 為 422）、確認後 201 並再多一列；PATCH 只收 enabled；OPERATOR 與 VIEWER 回 403 亦各多恰一列（`http_status` 為 403、`subject` 與 `role` 為其自身）、迷你 Bridge 請求數為 0；全程 `research_events` 列數不變（allowlist 為全域資源，事件帳只承載單一研究專案；D-52 的「不寫 research_events」維持）
+  - Then GET 在預設部署回恰四組基底主機（限 `source=ENV` 條目；含 V24 種子的庫另有四個 `source=ADMIN`、FETCH 條目；本 AT 的夾具〔迷你 Bridge〕不含種子，程式碼零改）且 Web 清單為空、不含 Reddit；ADMIN 新增回 201、停用 PATCH 回 200，各使 `audit_log` 多恰一列：`entity_type` 為 `research_allowlist`、`entity_id` 為該條目的 id（由既有 `AuditTrail.note(research.allowlist, research_allowlist, <條目 id>)` 於 Bridge 回應成功後標註）、`subject` 為 JWT subject、`role` 為 ADMIN、`http_status` 依序為 201 與 200、帶 trace_id、不含請求本文；`audit` logger 的日誌行帶 `action=research.allowlist` 與 `entity=research_allowlist:<條目 id>`（V6 `audit_log` 沒有 `note` 與 `action` 欄，`action` 只以日誌行斷言；D-62(1)）；每個 `/api/` 寫入請求恆多一列，與有無標註無關：Reddit 未確認 422 `terms_ack_required` 亦多恰一列（`http_status` 為 422）、確認後 201 並再多一列；PATCH 只收 enabled；OPERATOR 與 VIEWER 回 403 亦各多恰一列（`http_status` 為 403、`subject` 與 `role` 為其自身）、迷你 Bridge 請求數為 0；全程 `research_events` 列數不變（allowlist 為全域資源，事件帳只承載單一研究專案；D-52 的「不寫 research_events」維持）
   - 判定：gradlew test --tests "com.aisdlc.console.adapter.in.web.ResearchApiIT.AT_960_5_4*"（cwd＝AgentConsole/backend）
 - **AT-960-5-5**（JUnit｜`OpenApiIT`｜Contract｜AC-R2P-10-3、AC-R2P-01-1）OpenAPI 路徑與操作計數、operationId 與研究路徑方法集合。
   - Given `OpenApiIT.EXPECTED` 與 `/v3/api-docs`
@@ -1645,7 +1645,7 @@ Push-Location AgentConsole\frontend; npx vitest run lib/nav/research-nav.test.ts
   - Then mock-only 時「啟動深研」`disabled` 並顯示「容器模式只跑 mock claude 的驗收；真研究限本機模式」；Web 層關時「官方文獻與業界」勾選停用並說明；stage 失敗顯示橫幅「研究未完成：step_timeout」與「續跑」鈕（再 POST research，不顯示為完成）；取消顯示「研究已取消：已入庫的證據會保留，可以重試」（INT-04；D-77）；證據閘過時「生成 PRD 初稿」啟用，不過時停用並說明缺什麼
   - 判定：npx vitest run components/domain/research/TopicPanel.test.tsx -t AT_960_19_7（cwd＝AgentConsole/frontend）
 - **AT-960-19-8**（vitest｜`AllowlistDialog.test.tsx`｜Integration｜AC-R2P-04-7）ADMIN 研究來源設定對話框：清單、新增、停用、Reddit 條款勾選。
-  - Given ADMIN、OPERATOR、VIEWER；allowlist GET 回四組基底主機與一個 ADMIN 條目
+  - Given ADMIN、OPERATOR、VIEWER；allowlist GET 回四組基底主機（限 `source=ENV` 條目；含 V24 種子的庫另有四個 `source=ADMIN`、FETCH 條目；本 AT 的夾具〔替身〕不含種子，程式碼零改）與一個 ADMIN 條目
   - When 開對話框；新增產業網域；新增 reddit.com 未勾與已勾；停用條目
   - Then 僅 ADMIN 看得到開啟入口（其他角色不渲染）；清單區分來源 ENV 與 ADMIN；Reddit 未勾條款時送出鈕停用並提示；已勾送出本文含 `tosAcknowledged: true`；停用呼叫 `PATCH …/allowlist/<id>` 本文只有 `enabled`；ENV 條目無停用鈕（重新啟用〔`enabled` false→true〕的畫面路徑本 AT 未涵蓋，列為已知缺口）
   - 判定：npx vitest run components/domain/research/AllowlistDialog.test.tsx -t AT_960_19_8（cwd＝AgentConsole/frontend）
@@ -2066,3 +2066,5 @@ RTM 子表 `AgentConsole/docs/06_quality/RTM-ResearchToPRD-P0-20261102.md`（238
 | 55 | 11-07 | `AT-960-19-5` Then | 「P0 步驟 3 至 5 為占位面板」「步驟 4 面板不含「開啟執行中心」「開啟監控中心」連結」 | P1 起占位面板只留步驟 5（deliver）；步驟 3 與 4 為真面板（`RoutePanel`、`BuildFrontPanel`），AT 的占位參數只留 `deliver`；超前導回案例沿用 | TCS-ResearchToPRD-P1 §4 第 25 列與 §4.4 E1；AT-961-19-1 |
 | 56 | 11-07 | `AT-960-22-5` Then | 「步驟 3 為占位面板、步驟 4 與 5 占位並導回步驟 3」 | P1 起預期為「步驟 5 占位、步驟 3 與 4 為真面板」；其餘斷言不變 | TCS-ResearchToPRD-P1 §4 第 26 列與 §4.4 E1；AT-961-22-8 |
 | 57 | 11-09 | AT-960-19-6（`ResearchWorkspaceView.test.tsx`；§1 AC-960-19 列與 AT 清單條文） | 原文：「VIEWER 於每個步驟面板可讀產物，所有寫入與推進動作停用且 title 為權限不足」 | 加註：所稱「動作」不含表頭排序鈕（帶 `data-sort-key` 的 button；排序是唯讀操作，唯讀角色也要能用）；測試的停用按鈕集合排除該屬性，expect／it 數不變 | 鍵 `agentconsole-console-ux-sort-help` 勘誤 E-6；FE-SORT 交卷候選 1，主控裁決成立 |
+| 58 | 11-10 | `AT-960-1-1` 標題（§1 AC-960-1 列與 AT 清單條文） | 原文：「Flyway 歷史 1～18 全成功、13 張新表與序列／函式／守衛函式齊備且只在 console schema」 | 加註（澄清型，原句保留）：「（本 AT 的程式碼自 P1 起以最新版斷言版本清單與守衛表集合；V24 起加第十九張表 `research_watch_sources`，其守衛掛既有通用守衛函式）」 | 鍵 `agentconsole-research-registry`（研究來源單一化，追蹤來源表 V24、kind 放寬 V25）；TCS-ResearchRegistry-20261110 §4 R-3；主控裁決 D-RR-18、QA1_RULINGS |
+| 59 | 11-10 | `AT-960-5-4` Then、`AT-960-8-9` Then、`AT-960-19-8` Given | 原文：「GET 在預設部署回恰四組基底主機」「預設有效 FETCH 清單恰為五個基底主機」「allowlist GET 回四組基底主機與一個 ADMIN 條目」 | 澄清型：各句的「基底主機」限定為 `source=ENV` 條目；加註「含 V24 種子的庫另有四個 `source=ADMIN`、FETCH 條目；本 AT 的夾具（迷你 Bridge／替身）不含種子，程式碼零改」 | 鍵 `agentconsole-research-registry`（研究來源單一化，追蹤來源表 V24、kind 放寬 V25）；TCS-ResearchRegistry-20261110 §4 R-4；主控裁決 D-RR-18、QA1_RULINGS；D-173；PRD 勘誤第 32 列 |
