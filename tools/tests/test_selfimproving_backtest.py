@@ -469,16 +469,65 @@ class TestLeakAudit(BtCase):
             self.assertEqual(btscore.audit_case(self.repo, self.aid, str(snap), self.NONCE),
                              "transcript-missing")  # 不可解析
 
+    def handback(self, hid="toolu_h1", *, err=False, flag=True, echo=True):
+        """真實交卷收尾形狀：assistant 的 SubagentHandback tool_use＋user 的同 id tool_result。"""
+        use = px.line("tool", name="SubagentHandback", input_={"message": "{}"})
+        use["message"]["content"][0]["id"] = hid
+        res = {"type": "user", "timestamp": "2026-11-10T09:00:01.000Z", "message": {
+            "role": "user", "content": [{"type": "tool_result", "tool_use_id": hid,
+                                         **({"is_error": True} if err else {}),
+                                         "content": "Report delivered"}]}}
+        if flag:
+            res["toolEndsTurn"] = True
+        return [use, res] if echo else [use]
+
+    def real(self):
+        """真實形狀乾淨逐字稿：交卷後沒有結尾 text。"""
+        return [*self.clean()[:-1], *self.handback()]
+
     def test_AT_646_5_E_3_harness_handback_tool_is_not_a_leak(self):
         """tools/lib/selfimproving/btscore.py：交卷工具不算洩漏，路徑與其他工具判準不變。"""
         c = self.clean()
-        hand = px.line("tool", name="SubagentHandback", input_={"message": "{}"})
-        bad_read = px.line("tool", name="Read",
-                           input_={"file_path": str(self.repo / "a.py")})
+        bad_read = px.line("tool", name="Read", input_={"file_path": str(self.repo / "a.py")})
         bash = px.line("tool", name="Bash", input_={"command": "ls"})
-        self.assertIsNone(self.audit([*c[:-1], hand, c[-1]]))
-        self.assertEqual(self.audit([*c[:-1], hand, bad_read, c[-1]]), "outside-snapshot")
-        self.assertEqual(self.audit([*c[:-1], hand, bash, c[-1]]), "tool-not-allowed:Bash")
+        self.assertIsNone(self.audit(self.real()))
+        self.assertEqual(self.audit([*c[:-1], bad_read, *self.handback()]), "outside-snapshot")
+        self.assertEqual(self.audit([*c[:-1], bash, *self.handback()]), "tool-not-allowed:Bash")
+
+    def test_AT_646_5_E_4_handback_closure_needs_a_matching_ok_result(self):
+        """tools/lib/selfimproving/btscore.py `_closed`：交卷收尾只認同 id 的非錯誤 tool_result。"""
+        c = self.clean()[:-1]
+        for flag in (True, False):
+            self.assertIsNone(self.audit([*c, *self.handback(flag=flag)]), flag)
+        noise = {"type": "api-request", "timestamp": "2026-11-10T09:00:02.000Z"}
+        self.assertIsNone(self.audit([*c, *self.handback(), noise]))
+        self.assertIsNone(self.audit([*c, self.handback()[0], noise, self.handback()[1]]))
+        self.assertEqual(self.audit([*c, *self.handback(echo=False)]), "transcript-open")
+        self.assertEqual(self.audit([*c, *self.handback(err=True)]), "transcript-open")
+        use, res = self.handback()
+        res["message"]["content"][0]["tool_use_id"] = "toolu_other"
+        self.assertEqual(self.audit([*c, use, res]), "transcript-open")
+        other = {"type": "user", "timestamp": "t", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_x", "content": "x"}]}}
+        self.assertEqual(self.audit([*c, other]), "transcript-open")
+
+    def test_AT_646_5_E_5_handback_alone_is_not_a_read(self):
+        """tools/lib/selfimproving/btscore.py：只交卷、零讀取＝no-reads（交卷不計入讀取）。"""
+        c = self.clean()
+        self.assertEqual(self.audit([c[0], *self.handback()]), "no-reads")
+
+    def test_AT_646_5_E_6_read_target_falls_back_to_path_key(self):
+        """tools/lib/selfimproving/btscore.py `_tool_verdict`：file_path 優先、其次 path。"""
+        c, snap = self.clean(), self.snap
+        inside, outside = str(snap / "src" / "a.py"), str(self.repo / "a.py")
+
+        def read(**kw):
+            return [*c[:-1], px.line("tool", name="Read", input_=kw), c[-1]]
+        self.assertIsNone(self.audit(read(path=inside)))
+        self.assertEqual(self.audit(read(path=outside)), "outside-snapshot")
+        self.assertEqual(self.audit(read(offset=1)), "outside-snapshot")
+        self.assertEqual(self.audit(read(file_path=outside, path=inside)), "outside-snapshot")
+        self.assertEqual(self.audit(read(file_path=7, path=outside)), "outside-snapshot")
 
     def test_AT_646_5_E_2_missing_dir_or_renamed_layout_fails_closed(self):
         empty = fx.new_dir("emptyhome")

@@ -147,6 +147,8 @@ def _tool_verdict(call: dict, cwd, snap, ins) -> str | None:
         return f"tool-not-allowed:{name}"
     if name == "Read":
         fp = inp.get("file_path")
+        if not isinstance(fp, str):
+            fp = inp.get("path")  # harness 會拒收此錯鍵呼叫，但仍以其目標判定
         return None if isinstance(fp, str) and ins(snap, fp) else "outside-snapshot"
     path = inp.get("path")
     if path is None:
@@ -185,14 +187,29 @@ def audit_case(repo: Path, agent_id: str, snap: str, nonce: str, *, pathmod=os.p
             why = _tool_verdict(call, rec.obj.get("cwd"), snap, ins)
             if why:
                 return why
-            reads += 1
+            reads += call.get("name") != HARNESS_HANDBACK_TOOL
     if reads == 0:
         return "no-reads"
-    last = records[-1]
-    if not (last.obj.get("type") == "assistant"
-            and any(b.get("type") == "text" for b in _blocks(last))):
+    if not _closed([r for r in records if r.obj.get("type") in ("assistant", "user")]):
         return "transcript-open"
     return None
+
+
+def _closed(turns: list) -> bool:
+    """回合已收尾：末筆是含 text 的 assistant 行，或是回應「緊接其前 assistant 行的交卷呼叫」的
+    非錯誤 tool_result（真實交卷式逐字稿沒有結尾 text；不倚賴 harness 內部欄位 toolEndsTurn）。"""
+    if not turns:
+        return False
+    last = turns[-1]
+    if last.obj.get("type") == "assistant":
+        return any(b.get("type") == "text" for b in _blocks(last))
+    if len(turns) < 2 or turns[-2].obj.get("type") != "assistant":
+        return False
+    ids = {b.get("id") for b in _blocks(turns[-2])
+           if b.get("type") == "tool_use" and b.get("name") == HARNESS_HANDBACK_TOOL}
+    return any(b.get("type") == "tool_result" and b.get("tool_use_id") in ids
+               and b.get("tool_use_id") is not None and b.get("is_error") is not True
+               for b in _blocks(last))
 
 
 def models_of(repo: Path, agent_id: str) -> str | None:
