@@ -46,7 +46,7 @@
 **編號**：FR 30、45、46＋自增 AC `AC-P6-090-1`～`-4`；AT 編號 `AT-6<FR 兩位>-<AC 序>-<序>`（承 `AT-130-*`、`AT-445-*` 先例：前三位＝階段碼與 FR 號）：`AT-630-*`（FR-SI-30）、`AT-645-*`、`AT-646-*`、`AT-690-*`（自增）；`E` 為負控。**AT 共 95（正控 58、負控 37）**；測試檔：RG＝`tools/tests/test_selfimproving_registry.py`（登記、入帳、check、舊表、事件）、NF＝`tools/tests/test_selfimproving_netfetch.py`（netguard、fetch、expand、htmltext、patrolrun 複製）、BT＝`tools/tests/test_selfimproving_backtest.py`（回測）、SY＝既有測試檔的同步編修與自增 AC（§2）；夾具＝`tools/tests/_selfimproving_p6_fixtures.py`（`px`，§3）。
 
 **交付物與順序**：①夾具與既有測試同步站點（§2）先行（先把 `KINDS`／`CAPABILITY`／`EVENT_LABELS` 的期望值改為新值再寫碼，使紅燈來自「碼未到位」）→②`evspec6.py`＋`evspec.py`／`events.py` 併表（零行為變更：既有 AT 全綠才往下）→③`netguard`、`htmltext`、`expand`（純函式，先寫先測）→④`registry`（`validate`、`known_ids`、`mirror_binding`）→⑤`fetch.py` 改寫（釘 IP；注入縫 `resolver`／`connector`）→⑥`research.py`（預檢、展開、旁檔、`_scans`）→⑦`regwrite`＋入口 `registry-ingest`＋巡邏與 `status.console_pending` 接線→⑧`check` 三項判準與 `known_ids` 換呼叫→⑨`btcases`、`btscore`、`btwrite`、`btrecord`＋入口 `backtest`→⑩`status`／`PROOF-BACKTEST`／`issuemap` 標籤→⑪能力登記與重釘。每支程式完成立即跑該區 AT。
-**提交程序（沿 TCS-P5 D-EQA-5、D-EQA-9）**：①規格 commit（PRD、SOP、`Root_Layout`、本 TCS）不含允許集合路徑；②規格與實作 commit 連續、同一次 push；③實作 commit 不得含 PRD、SOP、TCS；本機跑範圍守衛（AT-690-4-1）時才設 `SI_P4_BASE_SHA=<規格 commit>`；開發期以 `-k "not AT_690_4_"` 排除；④本檔日後勘誤單獨 commit；⑤重釘儀式（`tools/tests` 新檔的 12 道鎖）另一 commit（主控收尾）。
+**提交程序（沿 TCS-P5 D-EQA-5、D-EQA-9）**：①規格 commit（PRD、SOP、`Root_Layout`、本 TCS）不含允許集合路徑；②規格與實作 commit 連續、同一次 push；③實作 commit 不得含 PRD、SOP、TCS；本機跑範圍守衛（AT-690-4-1）時才設 `SI_SCOPE_BASE=<規格 commit>`（相容舊名 `SI_P4_BASE_SHA`；可選 `SI_SCOPE_TIP`；勘誤 E-7）；開發期以 `-k "not AT_690_4_"` 排除；④本檔日後勘誤單獨 commit；⑤重釘儀式（`tools/tests` 新檔的 12 道鎖）另一 commit（主控收尾）。
 
 ---
 
@@ -108,6 +108,7 @@
 | AT-630-8-4 | NF | 最壞行長：10 來源（`id` 32 字元、`bytes=524288`）＋`articles_n=30`＋5 位數 `seq`／`registry_seq` ⇒ `len(json.dumps(ev, ensure_ascii=False, separators=(",",":")).encode())`＝**2119**（≤4096）；再把明細擴為 30 篇、每篇 URL 2048 字元，事件長度不變；參數（皆於 §9.2 列明）：`run=RUN-SI-999`、`t`／`fetched_at` 各 25 字元、`registry_seq` 與 `seq` 各 5 位數 | 事件欄位增減而未同步 §9.2 ⇒ 數字紅 |
 | AT-630-8-5 | NF | **展開每次掃描都做（D-EQA-8）**：連跑兩次掃描，第 2 次索引 `sha256` 與第 1 次相同（`changed=false`）⇒ 第 2 次仍展開並抓 3 篇文章；文章 `changed` 對上一次明細同 URL 的 `sha256` 判定（同＝`false`、異＝`true`、URL 不在上次明細＝`true`）；上次明細檔缺失或雜湊與事件 `articles_sha256` 不符 ⇒ 全部 `changed=true`；第 1 次某篇失敗（`http-status`）⇒ 第 2 次自然重試並記為 `changed=true` | 以索引 `changed` 為展開條件 ⇒ 第 2 次無文章而紅 |
 | AT-630-8-E-2 | NF | `research.scan` 驗證：`articles_n=100`、`articles_n` 無 `articles_sha256`、`articles_*` 搭 `sources_sha256` ⇒ `EVENT-TYPE`／`EVENT-KEY-*`（`sound()` 濾掉） | `evspec6` 條件規則被刪 ⇒ 紅 |
+| AT-630-8-E-3（非 UTF-8 XML；SCG-4 QA4R-01，勘誤 E-6；測試函式 `test_AT_630_8_E_3_non_utf8_xml_is_refused_before_parse`） | NF | 非 UTF-8 系 XML（UTF-16／UTF-32 BOM、前段 NUL、宣告 `encoding` 非 `utf-8`／`us-ascii`）一律在解析前 `ExpandRefused` | 未在解析前拒收非 UTF-8 系 XML ⇒ 紅 |
 
 ### AC-SI-30-9 HTML→純文字（NF）
 | AT | 檔 | 夾具；Given／When／Then | 預期突變 |
@@ -251,7 +252,7 @@
 | AT-690-2-1 | SY | `params.json` 位元組 `sha256`＝`594494910f77f029060aa1b0f79767f1f74927331a81a14a14dc24ca86398e9c`；`len(PARAM_SPECS)==44`；`CHECK_RULES_REV==6`；`non_evolvable_globs` 與 PRD〈實體 glob〉行對表（`glob_findings` 回空） | 有人改了 `params.json` ⇒ 紅（P6 禁止） |
 | AT-690-3-1 | SY | 不退化：既有 SI 測試檔全綠（§2 清單，已改期望值）；`check` 項目數 35；`status` 鍵數 20；`research --skip` 行為位元組不變；舊格式 `research.scan` 夾具全數照舊綠 | 任一既有行為被改 ⇒ 既有 AT 紅 |
 | AT-690-3-2 | SY | SOP 機械判準對 P6 版 SOP 回空：`patrolbrief.template_problems`、`_selfimproving_fixtures.sop_problems`、`_selfimproving_p5_fixtures.sop_p5_problems`（常數已依 §2 同步）；負控：把〈研究者〉節還原成 v0.14 文字 ⇒ `sop_p5_problems` 回 `SOP-P5-RESEARCHER-CHANGED`；把〈反事實回測〉節移到〈無人運轉任務書範本〉之後 ⇒ `patrolbrief.template_of` 取到錯誤圍欄而 `template_problems` 非空（證明新節必須置於範本節之前） | 判準常數未同步、或新節放錯位置 ⇒ 紅 |
-| AT-690-4-1 | SY | 範圍守衛（允許集合見 §4 表）：差分觸及允許集合時，差分 ⊆ 允許集合且 PRD、SOP、`TCS-SelfImproving-P*`、`Root_Layout` 差異為空（基準＝`SI_P4_BASE_SHA`，缺省 `HEAD~1`；承 `test_AT_440_8_1`／AT-445-5-1 形態）；**不得改**：`fold.py`、`writeverbs.py`、`params.json`、`.claude/**`、`AgentConsole/**`、`.github/**`、`research_sources.json` | 實作 commit 夾帶 PRD ⇒ 紅 |
+| AT-690-4-1 | SY | 範圍守衛（允許集合見 §4 表）：差分觸及允許集合時，差分 ⊆ 允許集合且 PRD、SOP、`TCS-SelfImproving-P*`、`Root_Layout` 差異為空（基準讀 `SI_SCOPE_BASE`〔相容舊名 `SI_P4_BASE_SHA`〕、終點讀可選 `SI_SCOPE_TIP`〔缺省 `HEAD`〕，只比對已提交差異；未設基準＝guard-not-triggered；驗法＝本鍵各 commit 逐一以 `SI_SCOPE_BASE=<c>^`、`SI_SCOPE_TIP=<c>` 驗，交錯的他鍵 commit 不驗；勘誤 E-6、E-7；承 `test_AT_440_8_1`／AT-445-5-1 形態）；**不得改**：`fold.py`、`writeverbs.py`、`params.json`、`.claude/**`、`AgentConsole/**`、`.github/**`、`research_sources.json` | 實作 commit 夾帶 PRD ⇒ 紅 |
 
 ---
 
@@ -290,6 +291,9 @@
 | 改程式（各限 PRD §9.1〈C4 套件檔案表（P6）〉所列呼叫點） | `tools/lib/selfimproving/{fetch,research,evspec,events,evcheck,check,fourqparse,params,consoleaudit,patrol,patrolrun,status,unattended,sched,issuemap}.py`、`tools/selfimproving.py` |
 | 新測試與夾具 | `tools/tests/test_selfimproving_registry.py`、`tools/tests/test_selfimproving_netfetch.py`、`tools/tests/test_selfimproving_backtest.py`、`tools/tests/_selfimproving_p6_fixtures.py`、`tools/tests/fixtures/selfimproving/G-S1.audit.json`、`tools/tests/fixtures/selfimproving/html_golden.html`、`tools/tests/fixtures/selfimproving/html_golden.txt` |
 | 既有測試同步（§2 表所列，且僅限列明的站點） | `tools/tests/test_selfimproving_{capability,fourq_gate,issuemap,fourq_model,events_p2,schedule_gate,export_status,events,research_scan}.py`、`tools/tests/_selfimproving_fixtures.py`、`tools/tests/_selfimproving_p5_fixtures.py`、`tools/tests/test_root_module_layout.py`（落點鎖，實作 commit 後加反引號路徑）、`tools/tests/test_adr_xplat001_c1c2_lock.py` 與其他重釘儀式檔（主控收尾另一 commit，不在實作 commit） |
+| 既有測試同步（勘誤 E-6 補列；QA4R-02） | `tools/tests/test_selfimproving_{sandbox,p2_meta,measure_verb,schedule_model,check,ledgerdb_p0}.py`（範圍守衛 `ALLOWED` 補入） |
+| 重釘三檔（勘誤 E-6；重釘儀式另一 commit，範圍守衛 `ALLOWED` 補入） | `tools/tests/test_adr_xplat001_c1c2_lock.py`、`docs/04_planning/AutoSDD_improving_112.md`、`docs/06_quality/CrossPlatform_R145_Scan_Findings.md` |
+| §2 表外的既有測試同步站點（勘誤 E-3；預期值同步、非弱化） | events.research PASS→NE（AC-SI-45-3／AT-645-3-E-1）於 events、events_p2、fourq_gate、research_scan；status 17→20 鍵（AC-SI-45-8／46-8）於 export_status、events `WEIRD_STATUS_KEYS`、schedule_model、schedule_gate、measure_verb、console_obs、p3_meta、fourq_gate；事件種類與標籤 25→27（AC-SI-45-7）；動詞數 27→28（registry-ingest；BT 再 29）；CAPABILITY 62→72（52／13／2／5） |
 | 運行期資料（真機 V-P6-1／V-P6-2 產生，隨實作輪收尾提交） | `docs/06_quality/SelfImproving_Protocol/research_registry.json`、`docs/06_quality/SelfImproving_Backtest/**`、`docs/06_quality/SelfImproving_Event_Ledger.jsonl` |
 | 凍結鎖 | `research_sources.json` **不在允許集合**（位元組不變，AT-645-6-1） |
 | **不得改** | PRD、SOP、`TCS-SelfImproving-P*`、`Root_Layout_and_Module_Placement.md`、`fold.py`、`writeverbs.py`、`params.json`、`.claude/**`、`AgentConsole/**`（含 G-S1 的 Console 副本，由 Console 鍵提交）、`.github/**` |
@@ -305,7 +309,7 @@
 
 ## 5. 計數與對照
 
-**AT 共 95（正控 58、負控 37）**；各檔：RG 41、NF 24、BT 24、SY 6。
+**AT 共 96（正控 58、負控 38）**；各檔：RG 41、NF 25、BT 24、SY 6（勘誤 E-6：新增 AT-630-8-E-3〔非 UTF-8 XML〕；原文「AT 共 95（正控 58、負控 37）；各檔：RG 41、NF 24、BT 24、SY 6」）。
 
 **每條 FR／AC → AT 對照表**（機械產生：由 §1 每列的 AT 編號推得；每條 AC 至少一個 AT）
 
@@ -317,7 +321,7 @@
 | AC-SI-30-5 | AT-630-5-1 |
 | AC-SI-30-6 | AT-630-6-1 |
 | AC-SI-30-7 | AT-630-7-1、AT-630-7-2、AT-630-7-E-1、AT-630-7-E-2、AT-630-7-3、AT-630-7-E-3、AT-630-7-E-4 |
-| AC-SI-30-8 | AT-630-8-1、AT-630-8-2、AT-630-8-E-1、AT-630-8-3、AT-630-8-4、AT-630-8-5、AT-630-8-E-2 |
+| AC-SI-30-8 | AT-630-8-1、AT-630-8-2、AT-630-8-E-1、AT-630-8-3、AT-630-8-4、AT-630-8-5、AT-630-8-E-2、AT-630-8-E-3（勘誤 E-6） |
 | AC-SI-30-9 | AT-630-9-1、AT-630-9-2、AT-630-9-E-1 |
 | AC-SI-30-10 | AT-630-10-1、AT-630-10-E-1 |
 | AC-SI-45-1 | AT-645-1-1、AT-645-1-E-1、AT-645-1-2、AT-645-1-3、AT-645-1-6、AT-645-1-7、AT-645-1-8、AT-645-1-9、AT-645-1-4、AT-645-1-5 |
@@ -348,7 +352,7 @@
 | FR-SI-46 | AC-SI-46-1～46-8（8 條） |
 | 自增 | AC-P6-090-1～090-4（4 條） |
 
-AC 共 29 條（PRD 新增或改寫 25 條＋自增 4 條），皆有 AT；AT 共 95。
+AC 共 29 條（PRD 新增或改寫 25 條＋自增 4 條），皆有 AT；AT 共 96（原文 95；勘誤 E-6）。
 
 ---
 
@@ -544,3 +548,17 @@ https://export.arxiv.org/api/query?search_query=%28abs:%22self-improving%22+OR+a
 | B golden 鏡像（`registry_text`） | 附錄 B | 2039 | `147fccd6a1b9efb61423579e26fbbc7437366a937806e239c69f334732aff0e8` |
 | C 稽核檔位元組表（圍欄內文字） | 附錄 C | 1681 | `91f137380530a5959138597add7b145ab7760611a7cca0ac1d7861062d321d87` |
 | D URL parity 表（圍欄內文字） | 附錄 D | 1797 | `25fd334dc97b8d135393849851962abfb54a621f11f9f0b1ba80eb27f4de1e89` |
+
+---
+
+## 勘誤（凍結後的訂正；內文已就地訂正、被訂正的原文逐字保留於下表；走 spec-refreeze）
+
+| 編號 | 日期 | 位置 | 原文 | 訂正 | 原因與證據 |
+|------|------|------|------|------|------------|
+| E-1 | 11-10 | 文章失敗與 OBS 草稿（登記型） | 原文：無 | 登記：文章失敗（索引成功）時 `research --fetch` rc=2，且不產 OBS 草稿（實作選擇） | 主控同意 |
+| E-2 | 11-10 | 夾具 `p1_base()`（登記型） | 原文：無 | 登記：`p1_base()` 的 `research_fetch_max` 為 8（夾具），故 `px.repo` 設為 10 | 實作輪回報 |
+| E-3 | 11-10 | §2 表外的既有測試同步（登記型；已補入 §4 列） | 原文：§2 表無下列站點 | 登記（預期值同步、非弱化）：events.research PASS→NE（AC-SI-45-3／AT-645-3-E-1）於 events、events_p2、fourq_gate、research_scan；status 17→20 鍵（AC-SI-45-8／46-8）於 export_status、events `WEIRD_STATUS_KEYS`、schedule_model、schedule_gate、measure_verb、console_obs、p3_meta、fourq_gate；事件種類與標籤 25→27（AC-SI-45-7）；動詞數 27→28（registry-ingest；BT 再 29）；CAPABILITY 62→72（52／13／2／5） | 根層第一棒交卷 |
+| E-4 | 11-10 | `test_selfimproving_research_scan.py` 的 AT-130 系列（登記型） | 原文：無 | 登記：20 條移除、檔頂加「舊 AT→P6 AT」對照表（同表在 `_selfimproving_p6_fixtures.py::SUPERSEDED_P1`，p2_meta／p3_meta 元測試據以豁免並要求取代者存在）；AT-130-3-E-5、5-E-5 改走 `fetch_chain`＋`px.net`；AT-130-5-E-4 保留 `_DeadlineRaw` 前半；AT-230-2-E-2 以 P6 版恢復；新增 AT-630-3-E-5（`--json` 形狀、全失敗 rc 1）、AT-630-3-E-6（抓取不持鎖） | 實作輪回報 |
+| E-5 | 11-10 | 舊死碼（登記型） | 原文：無 | 登記：舊 `fetch_source` 等死碼已移除（無產品呼叫點） | 實作輪回報 |
+| E-6 | 11-10 | SCG-4 一審（QA4R-01～04）：§1 AT-630-8-E-3 新列、§4 允許集合、§5 計數與對照、AT-690-4-1 驗法 | 原文：§1 無非 UTF-8 XML 拒收列；§4 ALLOWED 無 sandbox、p2_meta、measure_verb、schedule_model、check、ledgerdb_p0 與重釘三檔；§5「AT 共 95（正控 58、負控 37）；各檔：RG 41、NF 24、BT 24、SY 6」「AT 共 95」；AT-690-4-1「（基準＝`SI_P4_BASE_SHA`，缺省 `HEAD~1`；承 `test_AT_440_8_1`／AT-445-5-1 形態）」 | 內文就地訂正：①QA4R-01 `expand` 對非 UTF-8 系 XML（UTF-16／32 BOM、前段 NUL、宣告 encoding 非 utf-8／us-ascii）一律在解析前 `ExpandRefused`，§1 新增 AT-630-8-E-3（`test_AT_630_8_E_3_non_utf8_xml_is_refused_before_parse`；原擬 E-2 與既有 research.scan 驗證列撞號，主控改 E-3）；②QA4R-02 §4 允許集合補入上列六個測試檔與重釘三檔（c1c2 lock、AutoSDD_improving_112、CrossPlatform_R145_Scan_Findings）；③§5 AT 總數 95→96（負控 37→38、NF 24→25）；④AT-690-4-1 驗法＝逐 commit `SI_SCOPE_BASE=<c>^`、`SI_SCOPE_TIP=<c>` 驗本鍵各 commit，交錯的他鍵 commit 不驗；⑤QA4R-03 重釘 commit 11067dd1 為分桶分類補一行 fixtures docstring（儀式所需）；⑥QA4R-04 `fetch.py` 空白行 | SCG-4 一審 FAIL P2×2；22 組突變全殺（M13 白名單判準只由 registry 檔一條 AT 殺，記為鑑別力集中） |
+| E-7 | 11-10 | AT-690-4-1 與 §提交程序③（範圍守衛結構修正） | 「基準＝`SI_P4_BASE_SHA`，缺省 `HEAD~1`」「本機跑範圍守衛（AT-690-4-1）時才設 `SI_P4_BASE_SHA=<規格 commit>`」 | 內文就地訂正：有 `SI_SCOPE_BASE`（相容舊名 `SI_P4_BASE_SHA`）才啟用，可選 `SI_SCOPE_TIP`；只比對已提交差異；未設基準＝guard-not-triggered。P4（AT-440-8-1、AT-440-5-E-1）、P5（AT-444-6-1、AT-445-5-1）TCS 同步勘誤，三鍵 refreeze | 兩把鍵 commit 交錯時舊判準對後續工作常駐誤紅（實作 commit 0bea20e4，主控裁決） |

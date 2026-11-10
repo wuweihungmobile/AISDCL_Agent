@@ -94,7 +94,7 @@
 | AT-444-4-E-1 | FG | 無事件帳本／OBS 帳本讀不到／無運轉 ⇒ `fourq` NE（`carrier-not-established`）／`gaps_open` NE（不是 0）／`state`＝`none`；`EVENT_LABELS` 25、含兩新標籤、`closure_problems()` 空；刪一標籤時點名 | 標籤 23 |
 | AT-444-5-1 | FG | `AUTOSDD_UNATTENDED`＋`PATROL_RUN`＝A：`gate("fourq","A",env)` 空、`A_CLASS` 含 `fourq`；`fourq-corpus` 在 `READONLY`；真入口入帳成功；**`fourq --dry-run` 走同一道 A 類閘**（`--run`＝`PATROL_RUN` 放行）| 舊 `gate` 回 `UNATTENDED-REFUSED` |
 | AT-444-5-E-1 | FG | `--run` 為 B／`PATROL_RUN` 未設、空字串、字面 `0` ⇒ rc 1、`UNATTENDED-REFUSED`、零寫入零落地檔；`--dry-run` 的 `--run` 為 B 亦 rc 1、`UNATTENDED-REFUSED`（D-EQA-21）；未設 `AUTOSDD_UNATTENDED` 行為不變 | 子命令不存在 |
-| AT-444-6-1 | FG | 三支新／拆檔以 `ast` 掃 import（含延遲 import）只含標準庫、套件內相對 import、`si_repo_support.CLI_CLOSURE` 既有 `lib` 頂層檔（`sched.quota_check` 的 `quota_gate` 為 `sched.py` 既有延遲載入）；`git diff --name-only <基準> -- AgentConsole .github` 為空（觸及 P5 允許集合時才強制） | 檔不存在 |
+| AT-444-6-1 | FG | 三支新／拆檔以 `ast` 掃 import（含延遲 import）只含標準庫、套件內相對 import、`si_repo_support.CLI_CLOSURE` 既有 `lib` 頂層檔（`sched.quota_check` 的 `quota_gate` 為 `sched.py` 既有延遲載入）；`git diff --name-only <基準> <終點> -- AgentConsole .github` 為空（觸及 P5 允許集合時才強制；基準讀 `SI_SCOPE_BASE`〔相容 `SI_P4_BASE_SHA`〕、終點讀可選 `SI_SCOPE_TIP`〔缺省 `HEAD`〕，只比對已提交差異，未設基準＝guard-not-triggered；勘誤十二） | 檔不存在 |
 | AT-444-6-E-1 | FG | 注入副本：新模組多 `from lib import quota_ledger`／`import subprocess` ⇒ 掃描點名；`CLI_CLOSURE` 第四項仍是目錄 `tools/lib/selfimproving/`（讀文字斷言） | 同上 |
 
 ### 自增 AC-P5-045-1～5（R179、R186～R189）
@@ -108,7 +108,7 @@
 | AT-445-3-E-1 | FG | 變體：刪 rc 列／`fourq` 移到 `attr` 之後／刪 `proof`／改〈研究者〉一字 ⇒ `SOP-P5-*`（含 `SOP-P5-RESEARCHER-CHANGED`） | 判準不存在 |
 | AT-445-4-1 | FG | `CAPABILITY` 62 鍵、`fourqparse`＝`ro`、`fourq`＝`rw`、`evspec`＝`ro`；`fourq.py` 不 import `runner`／`fetch`、無網路與子行程字樣；`check_loc_budget.py --json` 無違規（`events.py` 拆後餘量為正） | 未登記 |
 | AT-445-4-E-1 | FG | 注入：`fourq.py` 含 `import subprocess`／`urllib`／`time.sleep`；`fourqparse.py` 含 `open(…,"w")`；`evspec` 登記為 `rw` ⇒ 各回登記碼（沿 P4 `AT-440-3-E-1`） | 同上 |
-| AT-445-5-1 | FG | 差分觸及 §3 允許集合時：⊆ 允許集合；`.claude/**`、`AgentConsole/**`、`.github/**`、研究方法論 SOP、P0～P4 TCS、`schedule_backend.py`、`resume_route.py`、`unattended_authz.py`、`model_roles.py` 差異為空；未觸及＝「範圍守衛未觸發」；兩測試檔與夾具無跳過類字樣 | 測試檔不存在 |
+| AT-445-5-1 | FG | 差分（基準讀 `SI_SCOPE_BASE`〔相容 `SI_P4_BASE_SHA`〕、終點讀可選 `SI_SCOPE_TIP`〔缺省 `HEAD`〕，只比對已提交差異，不含工作樹與未追蹤檔；未設基準＝guard-not-triggered；勘誤十二）觸及 §3 允許集合時：⊆ 允許集合；`.claude/**`、`AgentConsole/**`、`.github/**`、研究方法論 SOP、P0～P4 TCS、`schedule_backend.py`、`resume_route.py`、`unattended_authz.py`、`model_roles.py` 差異為空；未觸及＝「範圍守衛未觸發」；兩測試檔與夾具無跳過類字樣 | 測試檔不存在 |
 | AT-445-5-E-1 | FG | 本表每個 AT 有名為 `test_<底線形>_…` 的函式、`-k` 錨定不誤中兄弟（`AT_441_2_1_` 不命中 `AT_441_2_E_1_`）、AT 總數 58（FM 26、FG 32）；缺函式的副本回缺 | 同上 |
 
 （AT 數：FM 26＝AT-441×16＋AT-442×10；FG 32＝AT-443×11＋AT-444×11＋AT-445×10。）
@@ -194,3 +194,4 @@ seam（建議）：`fourqparse.parse／validate／CORPUS`；`fourq.review／skip
   - 原文「`fourq_from_run` 大於事件帳本現有最大運轉號」只在實作 commit 當下成立，首個真實運轉入帳後必紅。
   - 改為常駐不變式 `1 ≤ fourq_from_run ≤ 最大運轉號＋1`，意即不得把門檻設到未來而豁免新運轉。實作當下的「＝最大＋1」由 D-EQA-15 程序保證。
   - 運轉號改以「最後一個 `-` 之後的整數」解析，`RUN-SI-1000` 不會被截成 0。
+- **勘誤十二（2026-11-10，P6 實作 commit 0bea20e4，主控裁決）範圍守衛基準**：AT-444-6-1 與 AT-445-5-1 的差分原文為「`HEAD~1` 對工作樹加未追蹤檔」（AT-444-6-1 原文：`git diff --name-only <基準> -- AgentConsole .github` 為空；AT-445-5-1 原文：差分觸及 §3 允許集合時…）。改為：讀 `SI_SCOPE_BASE`（相容舊名 `SI_P4_BASE_SHA`）與可選 `SI_SCOPE_TIP`，只比對已提交差異；未設基準＝guard-not-triggered。條文已就地訂正。WHY：兩把鍵 commit 交錯時，舊判準對其後所有工作常駐誤紅。

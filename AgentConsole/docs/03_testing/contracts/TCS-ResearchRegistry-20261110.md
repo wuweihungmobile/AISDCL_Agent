@@ -452,7 +452,7 @@
 - **AT-965-5-6**（JUnit｜`OpenApiIT`｜Integration｜AC-965-5、W-R5；AC-R2P-24-5）OpenAPI：三個操作、DTO 必填鍵、失敗碼文件化。
   - Given `/v3/api-docs`
   - When 讀 `/api/v1/research/watch-sources` 與 `/{slug}` 路徑及 `WatchSourceDto` 結構描述
-  - Then `operationId` 恰 `listResearchWatchSources`、`addResearchWatchSource`、`updateResearchWatchSource`；方法與路徑固定、無 DELETE；`WatchSourceDto` 的 `required` 含 `slug`、`url`、`host`、`kind`、`extract`、`layer`、`expand`（可空）、`enabled`、`hostAllowed`、`addedBy`、`addedAt`、`disabledBy`（可空）、`disabledAt`（可空）；POST／PATCH 文件化 400／403／404／409／422／502／503／504；GET 含 401 與 502／503／504；每個狀態碼說明非空
+  - Then `operationId` 恰 `listResearchWatchSources`、`addResearchWatchSource`、`updateResearchWatchSource`；方法與路徑固定、無 DELETE；`WatchSourceDto` 的 `required` 含 `slug`、`url`、`host`、`kind`、`extract`、`layer`、`expand`（可空）、`enabled`、`hostAllowed`、`addedBy`、`addedAt`、`disabledBy`（可空）、`disabledAt`（可空）；POST 文件化 400／403／409／422／502／503／504、PATCH 文件化 400／403／404／422／502／503／504（409 只列 POST，PATCH 不撞 slug；勘誤 E-2）；GET 含 401 與 502／503／504；每個狀態碼說明非空
   - 判定：`gradlew test --tests "com.aisdlc.console.infrastructure.config.OpenApiIT.AT_965_5_6*"`；預期突變：加 DELETE、DTO 欄名 snake_case，皆紅
   - 驗收字樣：[AT_OK_965_5_6]
 - **AT-965-5-E-1**（JUnit｜`ResearchArchTest`｜Unit｜AC-965-5、W-R5；AC-R2P-24-5）ArchUnit：呼叫面與零寫入掃描。
@@ -464,7 +464,7 @@
 - **AT-965-6-1**（JUnit｜`SiRegistrySyncApiIT`、`SiAuditSignerTest`｜Integration｜AC-965-6、W-R6、D-172；AC-R2P-24-6）同步正控：簽章、原樣嵌入、落檔位元組。
   - Given `ADMIN`、`K0`、`Clock.fixed`、`SEAM` 排入一個 ref；`MINI.registry(text, sha)` 回放根層附錄 B golden（複本 `appendix-b.json`，2039 位元組、sha256 `147fccd6…f0e8`）的 `registry_text` 與 `registry_sha256`（含換行與非 ASCII）；`MINI.status` 的 `research_registry` 為 null、鏡像事件空
   - When `POST /api/v1/si/research-registry/sync`
-  - Then 201、`outcome=written`、`state=pending`、收據含 `auditRef`、`kind="src-registry"`、`time`（`±HH:MM`、不含 `Z`）、`keyId`、`registrySha256`；`si_console_writes` 多恰一列（`kind=src-registry`、`user=admin`、`role=ADMIN`、`subject_id` 為 NULL、`digest`＝附錄 B golden 的 sha、`body` 為簽章 body 逐字）；`MINI.si.writes` 收到的位元組＝外層檔（恰七鍵、序固定 `schema_rev,kind,audit_ref,subject,body,key_id,mac`、`subject` 為 null、緊湊、無 BOM、無結尾換行）；解開外層 `body` 後的鍵序為 `schema_rev,audit_ref,kind,user,role,time,registry_text,registry_sha256`，且 `registry_text`、`registry_sha256` 兩欄的值與 `MINI.registry` 回放逐位元組相同（含 `\n`、中文、引號）；`mac` 以 `K0` 對 body 位元組重算相等；收據與回應文案不含「已同步」「已生效」字樣
+  - Then 201、`outcome=written`、`state=pending`、收據含 `auditRef`、`kind="src-registry"`、`time`（`±HH:MM`、不含 `Z`）、`keyId`、`registrySha256`；`si_console_writes` 多恰一列（`kind=src-registry`、`user=admin`、`role=ADMIN`、`subject_id` 為 NULL、`digest`＝附錄 B golden 的 sha、`body` 為簽章 body 逐字）；`MINI.si.writes` 收到的位元組＝外層檔（恰七鍵、序固定 `schema_rev,kind,audit_ref,subject,body,key_id,mac`、`subject` 為 null、緊湊、無 BOM、結尾恰一個 LF〔以附錄 C 為準，勘誤 E-1〕）；解開外層 `body` 後的鍵序為 `schema_rev,audit_ref,kind,user,role,time,registry_text,registry_sha256`，且 `registry_text`、`registry_sha256` 兩欄的值與 `MINI.registry` 回放逐位元組相同（含 `\n`、中文、引號）；`mac` 以 `K0` 對 body 位元組重算相等；收據與回應文案不含「已同步」「已生效」字樣
   - 判定：`gradlew test --tests "com.aisdlc.console.adapter.in.web.SiRegistrySyncApiIT.AT_965_6_1*" --tests "com.aisdlc.console.application.service.SiAuditSignerTest"`；預期突變：console-api 重新序列化 `registry_text`、body 鍵序對調、`subject` 填值、digest 欄存成不含前綴，皆紅
   - 驗收字樣：[AT_OK_965_6_1]
 - **AT-965-6-2**（JUnit｜`SiRegistrySyncApiIT`｜Integration｜AC-965-6、W-R6、NFR-RR-1；AC-R2P-24-6）閘門序表驅動；每關拒絕零副作用。
@@ -639,9 +639,9 @@
   - 判定：`npx vitest run lib/api/si.endpoints.test.ts lib/api/research.endpoints.test.ts -t AT_965_9_4`；預期突變：reason 常數漏一個，皆紅
   - 驗收字樣：[AT_OK_965_9_4]
 - **AT-965-9-5**（vitest｜`SiStatusBanner.test.tsx`｜Integration｜AC-965-9、W-R9、D-EQA-5；AC-R2P-24-9）橫幅三鍵具名呈現（仿 `AT_964_1_3`）。
-  - Given `renderSi` 以 `ADMIN_UI`；`statusItem()` 夾具含 SI `status.items[0]` 的 `research_fetch_max`（整數）、`research_registry`（`{seq, audit_ref, registry_sha256, watch_enabled}`，D-RR-15）與 `backtest`（根層 PRD v0.15 AC-SI-46-8 欄位：`cases_version`、`cases_sha256`〔全值 `sha256:`＋64 位十六進位，夾具照此給；橫幅才取前 12 碼顯示〕、`n`、`hit1`、`hit3`、`hit5`、`prec_pm`、`rec_pm`、`contaminated`、`hit5_trend`〔本 AT 不顯示〕，無事件＝null）；依序六組：三鍵齊全；`research_registry` 為 null；`backtest` 為 null；`research_fetch_max` 缺鍵；三鍵全 null／缺；`backtest` 欄位型別不符（例 `hit3` 為字串）
+  - Given `renderSi` 以 `ADMIN_UI`；`statusItem()` 夾具含 SI `status.items[0]` 的 `researchFetchMax`（整數）、`researchRegistry`（`{seq, auditRef, registrySha256, watchEnabled}`，D-RR-15；鍵一律 camelCase，勘誤 E-7）與 `backtest`（根層 PRD v0.15 AC-SI-46-8 欄位：`casesVersion`、`casesSha256`〔全值 `sha256:`＋64 位十六進位，夾具照此給；橫幅才取前 12 碼顯示〕、`n`、`hit1`、`hit3`、`hit5`、`precPm`、`recPm`、`contaminated`、`hit5Trend`〔本 AT 不顯示〕，無事件＝null）；依序六組：三鍵齊全；`researchRegistry` 為 null；`backtest` 為 null；`researchFetchMax` 缺鍵；三鍵全 null／缺；`backtest` 欄位型別不符（例 `hit3` 為字串）
   - When 檢視橫幅
-  - Then `SI_STATUS_KNOWN_KEYS` 含 `research_fetch_max`、`research_registry`、`backtest`（三鍵**不出現**在「其他欄位」）；齊全時顯示兩個具名欄位：「研究來源：啟用 N／上限 M；最近同步 seq S（sha 前 12 碼）」（`N`＝`research_registry.watch_enabled`、`M`＝`research_fetch_max`、`S`＝`seq`、sha 取 `registry_sha256` 去 `sha256:` 前綴後前 12 碼）與「反事實回測：案例集 v`cases_version`（sha 前 12 碼）；hit@3＝`hit3`／`n` 案、污染 `contaminated`」；值為 null 的鍵顯示「尚無」（不顯示成 0 或空白）；缺鍵或型別不符一律顯示「量不到」（沿 NFR-SC-2，不顯示成「尚無」或 0）；全部為純文字節點；與研究來源設定的同步狀態文案互不混用（本欄位只呈現 SI 鏡像的事實，不判斷 synced）
+  - Then `SI_STATUS_KNOWN_KEYS` 含 `researchFetchMax`、`researchRegistry`、`backtest`（三鍵**不出現**在「其他欄位」）；齊全時顯示兩個具名欄位：「研究來源：啟用 N／上限 M；最近同步 seq S（sha 前 12 碼）」（`N`＝`researchRegistry.watchEnabled`、`M`＝`researchFetchMax`、`S`＝`seq`、sha 取 `registrySha256` 去 `sha256:` 前綴後前 12 碼）與「反事實回測：案例集 v`casesVersion`（sha 前 12 碼）；hit@3＝`hit3`／`n` 案、污染 `contaminated`」；值為 null 的鍵顯示「尚無」（不顯示成 0 或空白）；缺鍵或型別不符一律顯示「量不到」（沿 NFR-SC-2，不顯示成「尚無」或 0）；全部為純文字節點；與研究來源設定的同步狀態文案互不混用（本欄位只呈現 SI 鏡像的事實，不判斷 synced）
   - 判定：`npx vitest run components/domain/si/SiStatusBanner.test.tsx -t AT_965_9_5`；預期突變：未把三鍵加入 `SI_STATUS_KNOWN_KEYS`（落入「其他欄位」）、null 顯示成 0、缺鍵顯示成「尚無」，皆紅
   - 驗收字樣：[AT_OK_965_9_5]
 
@@ -708,6 +708,8 @@
 | `lib/help/research-workspace.ts`、`self-improving.ts` 與 `content.test.ts`／`pageFacts.test.ts` 的釘選（名詞表列數、`sourceFiles` 清單、說明字樣） | 無新名詞 | 加兩個名詞列、`sourceFiles` 加 `WatchSourcesSection.tsx`、`pageFacts` 的對應事實 | 每頁說明同步（AT-965-9-3） |
 | `lib/api/schema.d.ts`（入庫快照） | 無新操作 | 重產 | 新 operationId |
 | Bridge `tests/test_research_router.py` `AT_960_8_9*`（`:817` 起） | 有效 FETCH 清單為「五個基底主機」 | 若該案以含種子的真 PG 建庫則加四個種子網域；若以替身 DB 則零改動（**撰寫時未逐行確認 `Env`／`RDB` 夾具是否跑遷移，開發 agent 先跑該案、以紅燈為準回報**） | 種子網域 |
+
+**實作輪補註（勘誤 E-4）**：`WATCH_OPS` 另立為獨立集合，不併入 `OPS`／`METHOD_KINDS`（保留既有 20 方法鎖）。
 
 **本鍵沒有找到因「種子加入 4 個 FETCH 網域」而必然失效的既有 AT**：撰寫時逐一讀過 `AT-960-5-4`（迷你 Bridge 回放，與資料庫種子無關）、`AT-960-19-8`（fetch 替身）、`AT-960-1-4`（自行 INSERT 的 host 為 `export.arxiv.org` 與 `reddit.com` 等，不與種子 host 衝突）、`ResearchSchemaMigrationIT:703-752`（逐列快照比對，不計總列數）；失效面來自「遷移版本清單」「`research_` 表數十八」「OpenAPI 計數」。唯一未確認的是上表最後一列（Bridge `AT_960_8_9*`）。
 
@@ -821,6 +823,7 @@
 ### 7.3 已知邊界（不是待修缺陷）
 
 - 並行同 digest 同步可能各落一列（§4）；對帳讀面標示即可。
+- PATCH 停用路徑不做 24576 位元組大小閘（停用使快照多出 `disabled_*` 欄，可能超界；勘誤 E-3）：屆時同步端點回 422 `registry_too_large`、根層入帳拒收。使用者端處置＝重新啟用被停用的列以縮回快照，或停用／換掉 `extract` 較長的列。
 - 追蹤來源與稽核檔只增不刪：E2E 與真機測試列只能停用、無法清除（設計）。
 - 重新啟用被擋在「網域未開放」時，使用者須先到上方網域清單開放該網域（UI 以文案與停用鈕說明）。
 - 被根層 `REG-STALE` 拒收而保留的稽核檔（Console 時鐘回撥或人工亂序入帳時才會發生）：Console 仍可能把它當成最新待入帳 P，當前登記恰等於 P 的 digest 時同步端點回 `unchanged`、狀態顯示待入帳，而鏡像停在已入帳的另一版。出口＝改動登記使 digest 不同再同步（新稽核檔 `time` 晚於最新已入帳者即可入帳）；被拒收的檔在 `si status` 的 Console 待入帳計數與巡邏日誌可見（QA2-03、QA2-05）。不設 force 端點（避免繞過單調性）。
@@ -841,4 +844,15 @@
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
-（空）
+| 編號 | 日期 | 位置 | 原文 | 訂正 | 原因與證據 |
+|------|------|------|------|------|------------|
+| E-1 | 11-10 | AT-965-6-1 Then（約 L467） | 「緊湊、無 BOM、無結尾換行」 | 內文就地訂正為「緊湊、無 BOM、結尾恰一個 LF〔以附錄 C 為準，勘誤 E-1〕」 | 原文與附錄 C 及 G-S1 副本（結尾一個 LF）矛盾；以附錄 C 為準 |
+| E-2 | 11-10 | AT-965-3 OpenAPI 文件化 AT（約 L455） | 「POST／PATCH 文件化 400／403／404／409／422／502／503／504」 | 內文就地訂正：POST 文件化 400／403／409／422／502／503／504；PATCH 文件化 400／403／404／422／502／503／504；409 只列 POST | `PATCH /research/watch-sources/{slug}` 只切 `enabled`、不撞 slug，無 409；契約同步訂正 |
+| E-3 | 11-10 | §7.3 已知邊界（登記型；已在 §7.3 加一條） | 原文：無 | 登記：PATCH 停用路徑不做 24576 位元組大小閘（停用使快照多出 `disabled_*` 欄，可能超界）；屆時同步端點回 422 `registry_too_large`、根層入帳拒收。使用者端處置＝重新啟用被停用的列以縮回快照，或停用／換掉 `extract` 較長的列 | 實作輪發現的已知邊界，非待修缺陷 |
+| E-4 | 11-10 | §4.1 說明（登記型；已在 §4.1 末加補註） | 原文：無 | 登記：`WATCH_OPS` 另立，不併入 `OPS`／`METHOD_KINDS` | 保留既有 20 方法鎖 |
+| E-5 | 11-10 | §4.1 表外的既有測試同步（登記型） | 原文：§4.1 表無下列列 | 登記（預期值同步，非弱化）：ArchTest（`SiReadOnlyArchTest` GET 7→8、POST 6→7、si 方法 7→8、寫入埠加 `findRegistryWrites`；`IssueBridgeArchTest` 同）；`RbacIT.AT_960_5_3` 加兩條 matcher；`OpenApiIT.AT_950_10_1` SI path 清單加兩條；`ResearchSchemaMigrationIT` 的 V19／V22／守衛案例；Bridge `test_research_capability`（registry.py＝ro）；`test_si_readonly_lock`（普查 14→15）；`test_si_console_ingest.golden_problems`（排除 G-S1）；`test_si_export_differential::test_AT_932_1_E_2`（glob 排除 `*.audit.json`）；`research_pg_support.LAST_VERSION` 22→25；`test_research_router`／`orchestrator`／`db` 加四個種子 FETCH 網域 | 實作輪回報，主控裁決補入 |
+| E-6 | 11-10 | 契約註記（登記型） | 原文：無 | 登記：`ResearchExceptionHandler.assignableTypes` 加 `SiController` | 同步取快照走研究面，否則 502／504 變 500 |
+| E-7 | 11-10 | AT-965-9-5 Given 與 Then（約 L642、L644） | 「`research_fetch_max`、`research_registry`（`{seq, audit_ref, registry_sha256, watch_enabled}`」「`cases_version`、`cases_sha256`」「`prec_pm`、`rec_pm`、`contaminated`、`hit5_trend`」「`SI_STATUS_KNOWN_KEYS` 含 `research_fetch_max`、`research_registry`、`backtest`」「`research_registry.watch_enabled`」「`registry_sha256` 去 `sha256:` 前綴」「案例集 v`cases_version`」 | 內文就地訂正為 camelCase：`researchFetchMax`、`researchRegistry`（`watchEnabled`、`registrySha256`、`seq`、`auditRef`）、`backtest`（`casesVersion`、`casesSha256`、`hit3`、`n`、`contaminated`、`precPm`、`recPm`、`hit5Trend`） | backend `SiKeyNames.camelKeys` 把整棵樹轉 camelCase，前端實作用 camelCase 鍵；根層 SI status 仍是 snake_case，兩者以 Bridge／console-api 轉換相接 |
+| E-8 | 11-10 | 前端 SI 寫入名單判定（登記型） | 原文：無 | 登記：前端不另判 SI 寫入名單，只判 ADMIN；名單外由 backend 回 403 `si_write_forbidden`，前端顯示原因、不重試（沿 P2b／P4） | 避免前後端名單分叉 |
+| E-9 | 11-10 | commit 座標（登記型） | 原文：無 | 登記：根層規格 d7c1eeee、Console 規格 dfa55632、根層 RR 914e0adc、Console 實作 9e07a54e（原 ed0ee779 混入根層 45 檔，已以 reset --soft 拆回） | 追溯 |
+| E-10 | 11-10 | AT-965-10-1（登記型；§2 規則本文不變） | 原文：AT 以 `test.skip` 處理 docker 缺席（實作面作法，違反 §2「不得新增 skip」） | 登記：已改為直接拋錯失敗（commit d0a750bd，SCG-4 QA4C-01） | §2 明定「Docker 缺席視為環境壞、直接失敗」 |

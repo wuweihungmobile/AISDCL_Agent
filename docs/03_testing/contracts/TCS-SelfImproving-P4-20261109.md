@@ -1758,7 +1758,7 @@ Feature: 同步表
 Scenario: 每個站點的斷言值正確、其餘函式不變
   Given §2.5 同步表；對每個站點自測試檔 AST 取其斷言常數
   When 逐站點比對
-  Then 每站點的值等於新值（動詞數 26、`check` 35 項、`params` 41 鍵、`status` 16 鍵、能力登記 59 或 60 鍵與計數、`CHECK_RULES_REV` 為 5、`KINDS` 23、安裝器任務 3 支）；被修改的既有 SI 測試檔集合 ⊆ §2.5 允許檔集合（檔級；函式級對帳由實作輪交卷的站點清單與 §2.5 表人讀核對——D-IMP-6 (10)）
+  Then 每站點的值等於新值（動詞數 26、`check` 35 項、`params` 41 鍵、`status` 16 鍵、能力登記 59 或 60 鍵與計數、`CHECK_RULES_REV` 為 5、`KINDS` 23、安裝器任務 3 支）；被修改的既有 SI 測試檔集合 ⊆ §2.5 允許檔集合（此子判準與 AT-440-8-1 同一基準：讀 `SI_SCOPE_BASE`〔相容 `SI_P4_BASE_SHA`〕與可選 `SI_SCOPE_TIP`、只比對已提交差異、未設＝guard-not-triggered；勘誤一）（檔級；函式級對帳由實作輪交卷的站點清單與 §2.5 表人讀核對——D-IMP-6 (10)）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_5_E_1]"
 ```
 ```gherkin
@@ -1826,8 +1826,8 @@ Scenario: 先於一切
 
 Feature: 變更面
 Scenario: 只動允許集合
-  Given 實作輪起點的基準 commit（以環境變數 `SI_P4_BASE_SHA` 提供；未設時以 `HEAD` 的父 commit 為界並於輸出註明；父 commit 不可得〔淺層 clone〕＝只看未追蹤檔並註明；D-IMP-5）
-  When `git diff --name-only <基準>` 與 `git ls-files --others --exclude-standard`
+  Given 實作輪起點的基準 commit（以環境變數 `SI_SCOPE_BASE` 提供，相容舊名 `SI_P4_BASE_SHA`；可選 `SI_SCOPE_TIP` 指定終點 commit；未設基準＝輸出「guard-not-triggered」並通過；D-IMP-5；勘誤一）
+  When 只比對已提交差異：`git diff --name-only <基準> <終點，缺省 HEAD>`（不含工作樹與未追蹤檔）
   Then 差異**觸及 §5.7 允許集合**時：每個路徑 ⊆ §5.7 的允許集合；`.claude/**`、`tools/lib/schedule_backend.py`、`tools/lib/resume_route.py`、`tools/lib/unattended_authz.py`、`tools/lib/model_roles.py`、`tools/check_scheduled_task_drift.py`、PRD、SOP、P0～P3 TCS、`AgentConsole/**`、`.github/**` 的差異為空（本檔的主控勘誤追加不計）；差異未觸及允許集合＝輸出「範圍守衛未觸發」並通過（常駐於 CI 不得把無關 commit 判紅）；本檔四個新測試檔與夾具不含 `skip`、`skipTest`、`xfail` 字樣（恆查）
   And 完成後在最後一則回覆逐字輸出驗收字樣 "[AT_OK_440_8_1]"
 ```
@@ -2070,4 +2070,4 @@ Scenario: 只動允許集合
 
 ## 勘誤（本檔凍結之後的訂正；凍結前留空）
 
-（留空）
+- **勘誤一（2026-11-10，P6 實作 commit 0bea20e4，主控裁決）範圍守衛基準**：AT-440-8-1 與 AT-440-5-E-1 的「被修改檔案集合」子判準，原文為「`SI_P4_BASE_SHA`（未設時以 `HEAD` 的父 commit 為界；父 commit 不可得＝只看未追蹤檔）；`git diff --name-only <基準>` 與 `git ls-files --others --exclude-standard`」（即 `HEAD~1` 對工作樹加未追蹤檔）。改為：讀 `SI_SCOPE_BASE`（相容舊名 `SI_P4_BASE_SHA`）與可選 `SI_SCOPE_TIP`，只比對已提交差異；未設基準＝guard-not-triggered（輸出註明並通過）。條文已就地訂正。WHY：兩把鍵（P4／P5／P6）的 commit 交錯時，舊判準對其後所有工作常駐誤紅。§「D-IMP-5」列為歷史裁決原文，不改。
