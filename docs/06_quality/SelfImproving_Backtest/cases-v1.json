@@ -1,0 +1,822 @@
+{
+  "cases": [
+    {
+      "changed_files": [
+        "AutoClaude/autoclaude/core/ports/rtm_feedback.py",
+        "AutoClaude/autoclaude/core/ports/rtm_sink.py",
+        "AutoClaude/autoclaude/core/ports/spec_source.py",
+        "AutoClaude/autoclaude/core/wiring.py",
+        "AutoClaude/autoclaude/infra/adapters/playbook_to_rtm_adapter.py",
+        "AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py",
+        "AutoClaude/autoclaude/tools/sdd_compile.py"
+      ],
+      "fix_commit": "7197c3ca0468d1b37b8e9fc07aba73c7fd151afd",
+      "id": "DEF-200-536",
+      "pre_commit": "8117e6b08cc04a42f7a9db041349da10c2ed776c",
+      "source": "DEF",
+      "symptom": "**TCS 模板 §4 的 `AT-{NNN}-E-n` 與 adapter `AT-[\\d\\-]+` 不相容，邊界 AT 被靜默丟棄**（探針：5 個 AT 只編出 2 步、無 audit；R-9.38 為 manual）"
+    },
+    {
+      "changed_files": [
+        "AutoClaude/autoclaude/core/ports/rtm_feedback.py",
+        "AutoClaude/autoclaude/core/ports/rtm_sink.py",
+        "AutoClaude/autoclaude/core/ports/spec_source.py",
+        "AutoClaude/autoclaude/core/wiring.py",
+        "AutoClaude/autoclaude/infra/adapters/playbook_to_rtm_adapter.py",
+        "AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py",
+        "AutoClaude/autoclaude/tools/sdd_compile.py"
+      ],
+      "fix_commit": "7197c3ca0468d1b37b8e9fc07aba73c7fd151afd",
+      "id": "DEF-200-537",
+      "pre_commit": "8117e6b08cc04a42f7a9db041349da10c2ed776c",
+      "source": "DEF",
+      "symptom": "**模板規定每 Feature 一份 TCS 同目錄，adapter／Bridge 同 spec_dir 兩份即 `spec_ambiguous`**（Bridge 只收 spec_dir）"
+    },
+    {
+      "changed_files": [
+        "AutoClaude/autoclaude/core/ports/rtm_feedback.py",
+        "AutoClaude/autoclaude/core/ports/rtm_sink.py",
+        "AutoClaude/autoclaude/core/ports/spec_source.py",
+        "AutoClaude/autoclaude/core/wiring.py",
+        "AutoClaude/autoclaude/infra/adapters/playbook_to_rtm_adapter.py",
+        "AutoClaude/autoclaude/infra/adapters/sdd_to_playbook_adapter.py",
+        "AutoClaude/autoclaude/tools/sdd_compile.py"
+      ],
+      "fix_commit": "7197c3ca0468d1b37b8e9fc07aba73c7fd151afd",
+      "id": "DEF-200-538",
+      "pre_commit": "8117e6b08cc04a42f7a9db041349da10c2ed776c",
+      "source": "DEF",
+      "symptom": "**Spec-First 硬閘選檔取字母序第一份 FSM-STATE，不認專案**（探針：alpha 已凍結、zeta INIT，zeta 仍過閘＝fail-open）"
+    },
+    {
+      "changed_files": [
+        "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py",
+        "AISDLC_SDD/scripts/sync_exposed_skills.py"
+      ],
+      "fix_commit": "9f2d36c873c5e08e32aace43590a9fc1fdc1ce6b",
+      "id": "DEF-200-544",
+      "pre_commit": "cf0d72e1d50c714e1dd3258fe64414405f0ed494",
+      "source": "DEF",
+      "symptom": "**外部專案模式的恢復指令指錯目標**：ESCALATION 時 hook 印的 `resume-from-escalation` 不帶 `SDD_STATE_DIR`／`SDD_PROJECT`／`--project`，第二終端照貼會打到框架預設目錄的 INIT 檔、回 noop rc=0 假成功，子專案仍鎖死"
+    },
+    {
+      "changed_files": [
+        "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py",
+        "AISDLC_SDD/scripts/sync_exposed_skills.py"
+      ],
+      "fix_commit": "9f2d36c873c5e08e32aace43590a9fc1fdc1ce6b",
+      "id": "DEF-200-545",
+      "pre_commit": "cf0d72e1d50c714e1dd3258fe64414405f0ed494",
+      "source": "DEF",
+      "symptom": "**三支 skill 規定報告與 RTM 寫 `docs/03_testing/`，而 Rule 9.6 #3 在 SCG_VALIDATION／PR_REVIEW／RTM_VERIFY／IMPLEMENTATION 擋寫該前綴**（115 的 DEF-AC-018 六列 BLOCKED 即此）"
+    },
+    {
+      "changed_files": [
+        "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py",
+        "AISDLC_SDD/scripts/sync_exposed_skills.py"
+      ],
+      "fix_commit": "9f2d36c873c5e08e32aace43590a9fc1fdc1ce6b",
+      "id": "DEF-200-548",
+      "pre_commit": "cf0d72e1d50c714e1dd3258fe64414405f0ed494",
+      "source": "DEF",
+      "symptom": "**`AISDLC_SDD/CLAUDE.md` 兩處把專案層文件指向框架樹 `AISDLC_SDD_v<LATEST>/docs/`**，與外部專案模式矛盾（根 session 讀到它會把子專案規格寫進框架樹）"
+    },
+    {
+      "changed_files": [
+        "AISDLC_SDD/AISDLC_SDD_v0.30/tools/fsm_runtime/recovery_hint.py",
+        "AISDLC_SDD/scripts/sync_exposed_skills.py"
+      ],
+      "fix_commit": "9f2d36c873c5e08e32aace43590a9fc1fdc1ce6b",
+      "id": "DEF-200-549",
+      "pre_commit": "cf0d72e1d50c714e1dd3258fe64414405f0ed494",
+      "source": "DEF",
+      "symptom": "**`AutoClaude/.claude/skills` 是 33 支 AISDLC v0.09 舊版**（缺 sdd-gate、rtm-generate 等 9 支 SDD 專屬 skill；2026-07 後未動），harness「最具體者優先」⇒ 在 AutoClaude 檔案上叫到非 SDD 版"
+    },
+    {
+      "changed_files": [
+        "AutoClaude/autoclaude/utils/token_tracker.py",
+        "tools/lib/skip_tag_policy.py"
+      ],
+      "fix_commit": "d9dc1ff00cf0e8383ddba9e5fe615abb45b1bac9",
+      "id": "DEF-200-550",
+      "pre_commit": "e73749bf06f910d3f3bdaa19dbbc4f685bc30d81",
+      "source": "DEF",
+      "symptom": "**引擎把 `claude -p` JSON 頂層 usage 的跨回合累計值當目前 context**：真實樹每回合載入 CLAUDE.md 約 86k，16 回合累計 1,465,541÷1M 夾成 100% ⇒ 偽 TOKEN_HALT、run FAILED；同次 `usage.iterations[-1]` 實為 130,123（13.0%）"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "DEF-200-563",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "DEF",
+      "symptom": "**無人姿態檔讓無頭視窗每次 PowerShell 呼叫被拒**：`.claude/settings.unattended.json` 的 `PowerShell(<pattern>)` allow 規則在 `claude -p` 評估時 pwsh 解析器失敗「命令列太長。」（詳證據檔〈七〉）；互動視窗正常；探針 A～J：工具層 `\"PowerShell\"` allow 即可且 deny 仍有效"
+    },
+    {
+      "changed_files": [
+        "AgentConsole/frontend/components/domain/issues/IssuesView.test.tsx",
+        "AgentConsole/frontend/components/domain/issues/IssuesView.tsx"
+      ],
+      "fix_commit": "23d207fd718da4f4e7caf851c71975d1a55437a0",
+      "id": "DEF-200-570",
+      "pre_commit": "488d8e663b2ecbb2c27a5acaf895d67a92fbe426",
+      "source": "DEF",
+      "symptom": "**TCS R 條文的突變欄沒被機械驗證**：R-IC-20／29／42／34 所寫突變由「所列 AT」殺不到（06-2-1 同行程、同雜湊種子看不到 dict 序）；`docs/03_testing/contracts/TCS-IssueCenter-20261027.md:212/226/236/249`"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "tools/lib/skip_tag_policy.py"
+      ],
+      "fix_commit": "13e87b749721cae25a6782005df73587c73baf21",
+      "id": "OBS-SI-059",
+      "pre_commit": "eaed744b1cacfc35c122ca95897c4510d4d07f19",
+      "source": "OBS",
+      "symptom": "全套第一次剩 1 紅：E501 存量 138＞136（AT 測試檔 1573 行 103 欄＋`test_platform_neutral_paths.py` 註解 104 欄）；SD 折行／縮註解清零"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "tools/lib/skip_tag_policy.py"
+      ],
+      "fix_commit": "13e87b749721cae25a6782005df73587c73baf21",
+      "id": "OBS-SI-062",
+      "pre_commit": "eaed744b1cacfc35c122ca95897c4510d4d07f19",
+      "source": "OBS",
+      "symptom": "測試碼用字串拼接避開 ID 字面，仍留下「`OBS-SI-` 接 0／00」的片段，被 R18 (a) 掃成 OBS-REF-DANGLING（V2 要求 N 前清零）"
+    },
+    {
+      "changed_files": [
+        "tools/lib/si_refs.py"
+      ],
+      "fix_commit": "968e827bcd78b7a1774246f4594d3598ffd2e395",
+      "id": "OBS-SI-082",
+      "pre_commit": "4eb912d095f2e2d81cbff5a656dae6eb074cbab5",
+      "source": "OBS",
+      "symptom": "R18 (c)「絕對路徑視同不存在」在 Windows 對 rooted 路徑（`/x`，無磁碟機代號）不成立：`Path(\"/x\").is_absolute()` 為 False，被接到 repo 下解析成同磁碟機根的 repo 外檔而放行；POSIX 判 MISSING——鐵律三跨平台自問漏掉；`..`／絕對路徑皆無 AT（突變存活）"
+    },
+    {
+      "changed_files": [
+        "tools/lib/si_refs.py"
+      ],
+      "fix_commit": "968e827bcd78b7a1774246f4594d3598ffd2e395",
+      "id": "OBS-SI-083",
+      "pre_commit": "4eb912d095f2e2d81cbff5a656dae6eb074cbab5",
+      "source": "OBS",
+      "symptom": "AT-030-1-1 只斷言縮排 finding 行非空，沒比對文字形態與 `--json` 的 (subject, code) 集合；「文字形態不印 finding 行」的突變仍全綠"
+    },
+    {
+      "changed_files": [
+        "tools/lib/si_refs.py"
+      ],
+      "fix_commit": "968e827bcd78b7a1774246f4594d3598ffd2e395",
+      "id": "OBS-SI-084",
+      "pre_commit": "4eb912d095f2e2d81cbff5a656dae6eb074cbab5",
+      "source": "OBS",
+      "symptom": "三處規則無 AT 鑑別（突變存活）：R3 的 `[warn]` 前綴、NE 行 blocking／nonblocking 字樣、R15 守衛面 P2＋暴露=無；TCS 未要求這些斷言（規格面缺口）"
+    },
+    {
+      "changed_files": [
+        "tools/lib/si_refs.py"
+      ],
+      "fix_commit": "968e827bcd78b7a1774246f4594d3598ffd2e395",
+      "id": "OBS-SI-085",
+      "pre_commit": "4eb912d095f2e2d81cbff5a656dae6eb074cbab5",
+      "source": "OBS",
+      "symptom": "測試衛生：恆真斷言、AT-001-3-E-2 未直接證明引言不被比對、模組層級 `tempfile.mkdtemp()` 於 import 即建暫存目錄、AT-030-2-1 記錄器看不到 `os.system`"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/check.py",
+        "tools/lib/selfimproving/git.py",
+        "tools/lib/selfimproving/params.py",
+        "tools/lib/selfimproving/refs.py",
+        "tools/lib/selfimproving/rows.py",
+        "tools/lib/skip_tag_policy.py",
+        "tools/run_root_unittests.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "68aa01aef65abfb967b372305971b8abb509faf2",
+      "id": "OBS-SI-162",
+      "pre_commit": "c854c4cd81b4a73a8e7845a7fc3cd0a4f6c9e18b",
+      "source": "OBS",
+      "symptom": "測試基底 `SiCase` 自夾具檔匯入，守門只認基底名含 TestCase、跨檔基底鏈不解析 ⇒ 23 個類別被判「未繼承 TestCase」；P0 檔同檔定義的 `SiCase` 不受影響"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-192",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "EscalationDump 處置清單建議 `git stash`（無警語）與 `git checkout HEAD -- .`，與根層鐵律五（毀滅性 git 形態由 PreToolUse 阻斷、stash 為共用工作樹事故源）不一致"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-193",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "DEF-200-518 以「已揭露」結案，Kernel 路徑 dump 四處不精確（Playbook 欄空白、重啟指令 `autoclaude \"\"`、最後 log 檔名、「從 checkpoint 繼續」措辭）只寫在 CLAUDE.md、未拆獨立 DEF 承接，產生點仍在碼內（models/escalation.py:140）"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-194",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "同檔兩個「最後更新」互相矛盾（第 3 行 Last Updated 2026-07-19、Status 停在 Improving_012；第 314 行 最後更新 2026-10-20）"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-197",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "〈115／S-15 訂正〉末句稱 tools/AISDLC_CLAUDE_RULES.md 第 103～104 行「未動」，但 LATEST 該檔已於整合輪 116 補做訂正（AISDLC_SDD_v0.30/tools/AISDLC_CLAUDE_RULES.md:103-108）"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-199",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "檔頭仍寫「狀態: W1（架構文件＋Engine Bridge）」「Last Updated: 2026-10-14」，進度帳已到 W7／W8、整合輪 115／116、FsmTrail"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-200",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "鐵律 9「Write 被擋（例如檔名含 report）就改用 Bash heredoc 落檔」與根層鐵律一（Windows 禁用 Bash）及 OBS-SI-004 決議（子代理一律文字交卷）衝突，且教人繞過 harness 對報告檔的攔阻"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-204",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "L-8 要求 UI 提示「Docker 全棧下執行路徑是 Bridge 容器內路徑、本機才是主機路徑」，專案表單「執行路徑」欄只有 placeholder /home/user/projects/… 與絕對路徑驗證，無兩模式提示"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-215",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "OBS-SI-110 (iii) 結構條件仍在：兩支 compat-ci paths 不含 SelfImproving 測試實際讀取的 PRD／SOP／params.json／TCS，僅動 PRD 的 push（例 2b994518、66ad0edd）不觸發 Windows／macOS compat"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-220",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "SSOT §3 SelfImproving 列仍把事件帳本與提案目錄寫成「預定落點…建立前不加反引號」，兩者已由 8a0860d8 建立 ⇒ 落點鎖未涵蓋這兩條真實路徑"
+    },
+    {
+      "changed_files": [
+        ".github/workflows/macos-compat-ci.yml",
+        ".github/workflows/windows-compat-ci.yml",
+        "AgentConsole/frontend/components/domain/entity/EntityForms.tsx",
+        "AutoClaude/autoclaude/execution/cross_step_validator.py",
+        "AutoClaude/autoclaude/models/escalation.py",
+        "AutoClaude/autoclaude/plugins/checkpoint/_escalation.py",
+        "tools/check_pytest_baseline_sites.py"
+      ],
+      "fix_commit": "5593d0bb4c6c1d0df9fdcb7863ad192604aa314f",
+      "id": "OBS-SI-251",
+      "pre_commit": "ecf4d2ba7be74539564eacfd8e7ae49fefb1dba3",
+      "source": "OBS",
+      "symptom": "Architect 棒改寫的 Architecture.md V-4 列含任務狀態字 `SKIPPED` 與現查日期，被 `check_pytest_baseline_sites` 的 `_line_is_claim` 判成 pytest 基線宣稱（未納管站點 114→115）；行內 `baseline-ok:` 對站點數棘輪無效"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-308",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "transcript.exposure 只掃 projects/<slug>/subagents/**；真機子代理逐字稿住 <slug>/<sid>/subagents/（workflow 再深一層），該目錄不存在 ⇒ 暴露永遠判不到（靜默假陰性）"
+    },
+    {
+      "changed_files": [
+        "AgentConsole/docker/minio/init-bucket.sh",
+        "AgentConsole/frontend/components/domain/si/SiObservationsPanel.tsx",
+        "AgentConsole/frontend/components/domain/si/SiProposalsPanel.tsx"
+      ],
+      "fix_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "id": "OBS-SI-310",
+      "pre_commit": "5997bb1a0f060c5b881230b3d38e3073c430457b",
+      "source": "OBS",
+      "symptom": "ADMIN 在 375 寬 /self-improving 整頁可橫向捲動（觀察分頁文件寬 801、提案分頁 1250；Operator／Viewer 為 375）：ADMIN 專屬表頭的 sr-only span（position:absolute）落在非定位的 overflow-x-auto 容器內不被裁切"
+    },
+    {
+      "changed_files": [
+        "AgentConsole/docker/minio/init-bucket.sh",
+        "AgentConsole/frontend/components/domain/si/SiObservationsPanel.tsx",
+        "AgentConsole/frontend/components/domain/si/SiProposalsPanel.tsx"
+      ],
+      "fix_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "id": "OBS-SI-311",
+      "pre_commit": "5997bb1a0f060c5b881230b3d38e3073c430457b",
+      "source": "OBS",
+      "symptom": "minio-init 日誌含 AWS_ACCESS_KEY_ID 整值 3 次（mc admin user add／policy attach 回印帳號名＋腳本結尾 echo）；secret 本體 0 命中；SI 權杖、稽核金鑰、JWT、PG 密碼的 8 字元視窗皆 0 命中"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-312",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "暴露掃描掃全部子代理逐字稿：凍結後與提案無關的代理讀 params.json（5 檔）或量測腳本（3 檔）即判 HELDOUT-EXPOSED，真機 PROP-SI-004／005 的 verify 結構性只能 NE、PASS 不可達；與 PRD AC-SI-20-4 ② 字面「提案者逐字稿」不符"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-313",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "無 origin 的 sdk 提示記錄判 ORIGIN-MISSING（NE、nonblocking）：手寫 dec（resume／unblock／reject／return）指向這類記錄可逃過 check 而被 fold 採用；真機 117 筆 claude -p 提示皆帶 turnOrigin=sdk"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-314",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "Operations SOP 從零走不通：M 類序列缺 --memory-dir、九動詞語法表、held-out manifest 格式、sid／line 取得法、reason-class 七值、提案檔範本、Console 主機金鑰供應法、卡面送達規則皆未寫；主機 AUTOSDD_SI_AUDIT_KEY 三範圍皆未設"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-316",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "M 類 verify 在沙盒樹遺失時以 git archive 重建（無記憶目錄）必得 SANDBOX-TREE-DRIFT，且 sandboxed 態無恢復路徑"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-318",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "PRD 漂移：§3.1 狀態欄 FG-D／E／F 仍寫「P2 本輪開鍵」、FG-G／H／L 仍 Planning；§8.2 要求每階段 FR 與 AC 落四格，只有 P3 報告做過；P1～P3 無獨立 RTM"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-320",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "真人附件 prompt 為區塊清單（含圖片）時判 TEXT-EMPTY，真人決定被 fail-closed 拒（真機 23 筆附件中 1 筆）"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/evwrite.py",
+        "tools/lib/selfimproving/transcript.py",
+        "tools/lib/selfimproving/verify.py",
+        "tools/selfimproving.py"
+      ],
+      "fix_commit": "d644589008bd8439e294a7243b8bf23240ba1202",
+      "id": "OBS-SI-322",
+      "pre_commit": "08f5c331e1e26485c4a95e79f7dc6b0f5ec8cb57",
+      "source": "OBS",
+      "symptom": "事件帳本追加 os.write 未檢回傳長度、未 fsync，短寫只能事後由 LEDGER-TORN 偵測"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/sandbox.py",
+        "tools/lib/selfimproving/verify.py"
+      ],
+      "fix_commit": "36af87c5628bcaa0306b73c6f79089d6b5b5b77a",
+      "id": "OBS-SI-324",
+      "pre_commit": "47be7ca180fc858efde9aa17c6804c0115ba26dc",
+      "source": "OBS",
+      "symptom": "Windows 上家目錄（C:）與 repo（D:）不同磁碟機：R85 (a) 沙盒根判準用 os.path.commonpath，拋 ValueError（Paths don't have the same drive）⇒ traceback、零事件；verify 載具自證同形態；合成 AT 的 repo 與家目錄同磁碟機所以看不到"
+    },
+    {
+      "changed_files": [
+        "AgentConsole/frontend/components/markdown/rehypePrismLinear.test.ts"
+      ],
+      "fix_commit": "9f94e68a9f23d47c7a32125614cc248006617163",
+      "id": "OBS-SI-359",
+      "pre_commit": "712ee3a984f36b81afe7c78bf9303b1fbba6967b",
+      "source": "OBS",
+      "symptom": "vitest 複雜度測試「大區塊的耗時隨行數線性成長」在 ubuntu runner 實測 5,058ms 撞 vitest 預設 5,000ms 逾時而紅；該 it 量的是 8,000÷2,000 行的耗時比值（<10），絕對牆鐘隨機器與同機 worker 數而變、與斷言無關；修法＝該 it 顯式 timeout 60s、比值門檻不動"
+    },
+    {
+      "changed_files": [
+        "tools/lib/skip_tag_policy.py"
+      ],
+      "fix_commit": "a1386e52c482bee734ff922ec90ad77bdf48ab74",
+      "id": "OBS-SI-363",
+      "pre_commit": "92f969ad48dd2670db2b639b824dd3ec794b17a2",
+      "source": "OBS",
+      "symptom": "主控把刪三份多餘稽核檔的決定與 V2 目視寫成「人工決定」就結束回合，未依 03:45 授權句（line 12）代決或給互動選項；六小時零撞額度／API 中斷（只有 03:15 閒置壓縮）、哨兵巡邏 rc 0 無撞線可續，續航架構把「主控結束回合」當「沒事可做」"
+    },
+    {
+      "changed_files": [
+        "AgentConsole/frontend/components/domain/entry/CenterEntryView.test.tsx"
+      ],
+      "fix_commit": "2b13c96092023a70ee09b5f54d9a9af97eaadaeb",
+      "id": "OBS-SI-366",
+      "pre_commit": "b8c29146d554ba3bab30442431b5929ff66fb246",
+      "source": "OBS",
+      "symptom": "兩入口在三層解析皆空時退回 /projects，只見專案管理空狀態，掌舵者回報「UI 無法執行」；兩中心頁零請求零錯誤＝設計上的靜默退回（ADR-002 D3），非程式錯誤"
+    },
+    {
+      "changed_files": [
+        "tools/lib/selfimproving/patrol.py",
+        "tools/lib/selfimproving/sched.py"
+      ],
+      "fix_commit": "26f3aedeb8a377550d1b51e23430fe52b5a87515",
+      "id": "OBS-SI-374",
+      "pre_commit": "7f772a0c1930b4adf86864dc6316504b58ccebc4",
+      "source": "OBS",
+      "symptom": "無人時巡邏器到期判定記 sched.skip(quota-band, unmeasured)：額度快取只由互動視窗 statusLine 刷新（TTL 180 秒），開運轉又要求 30 分鐘無對話 ⇒ 每日運轉在真機永遠開不起來；手動 dry-run 時快取新鮮故看不到；與 OBS-SI-373 同型"
+    }
+  ],
+  "excluded": [
+    {
+      "id": "DEF-200-163",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-534",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-535",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-539",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-540",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-541",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-542",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-543",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-546",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-547",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-551",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-552",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-553",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-554",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-555",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "DEF-200-556",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-557",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-558",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-559",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-560",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-561",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-562",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-564",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-565",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-566",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-567",
+      "reason": "symptom-names-file"
+    },
+    {
+      "id": "DEF-200-568",
+      "reason": "files-over"
+    },
+    {
+      "id": "DEF-200-569",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-009",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-012",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-014",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-020",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-023",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-031",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-035",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-041",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-043",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-081",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-116",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-124",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-134",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-145",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-147",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-206",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-208",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-217",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-218",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-237",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-261",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-266",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-272",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-273",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-283",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-285",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-293",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-299",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-300",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-304",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-305",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-326",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-329",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-360",
+      "reason": "files-over"
+    },
+    {
+      "id": "OBS-SI-365",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-372",
+      "reason": "no-code-file"
+    },
+    {
+      "id": "OBS-SI-375",
+      "reason": "no-code-file"
+    }
+  ],
+  "generated_at": "2026-11-10T17:04:03+08:00",
+  "head_sha": "1e9d8a8dad6db6dc342151cd80a94fa8ad1f0c3b",
+  "ledgers": {
+    "def_sha256": "sha256:9778f7771dfcf0f510f99f39cb98402ea962c6471f8234e7d75583a37dec936f",
+    "obs_sha256": "sha256:9ab5afec4c7bffff5d45259328f764590c50fb5abad7a2a5e863bb78a97fcda1"
+  },
+  "schema_rev": 1,
+  "version": 1
+}
