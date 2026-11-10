@@ -186,3 +186,11 @@ seam（建議）：`fourqparse.parse／validate／CORPUS`；`fourq.review／skip
   - 字面判定通過後，再以 `resolve()` 確認路徑仍在 repo 根之下。
   - WHY：答案檔內容來自讀過外部來源的模型，可能被注入。UNC 路徑在 Windows 上會觸發 SMB 存取，可能外洩憑證；「座標所指那一行含查詢字串」判準也會變成探測 repo 外內容的手段。
   - AT 數不變，變體併入 AT-441-3-E-1。
+- **勘誤十（首個真實無人運轉 RUN-SI-006 的 handback）SOP〈無人運轉任務書範本〉第 4、5 步與〈禁止事項〉**：
+  - 第 4、5 步由 `attr --run <RUN> …`、`attr-confirm --run <RUN> …` 改為 `attr …`、`attr-confirm …`。這兩個動詞沒有 `--run` 旗標，以 `--help` 為準；此錯誤自 P4 範本就存在。
+  - 禁止事項改為「凡有 `--run` 旗標的 SI 寫入動詞都帶 `--run <RUN>`（`attr`／`attr-confirm` 沒有此旗標，靠事件帳本的運轉脈絡）；不跨運轉寫入」。
+  - 改後 `template_problems`、`sop_p2`～`sop_p5` 判準與 AT-444-1-1 仍綠。
+- **勘誤十一（RUN-SI-006 入帳後實跑揭露）AT-445-1-1 的常駐不變式**：
+  - 原文「`fourq_from_run` 大於事件帳本現有最大運轉號」只在實作 commit 當下成立，首個真實運轉入帳後必紅。
+  - 改為常駐不變式 `1 ≤ fourq_from_run ≤ 最大運轉號＋1`，意即不得把門檻設到未來而豁免新運轉。實作當下的「＝最大＋1」由 D-EQA-15 程序保證。
+  - 運轉號改以「最後一個 `-` 之後的整數」解析，`RUN-SI-1000` 不會被截成 0。

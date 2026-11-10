@@ -557,8 +557,8 @@ launchctl list | grep AutoSDD_SI_Patrol
    - 如何證明資料與改善結果是有正面影響與收斂的？
    每問項數上限：額度帶行有降載聲明時 1 項，否則 3 項（入帳時 CLI 依現讀額度帶機械判定，超過即拒收）；零項須舉證；任務書不含迴圈層量測值。
 3. 你（單一寫入窗口）：把審視者交卷存成任務目錄（handback 所在目錄）下的 fourq_answers.md，先 python tools/selfimproving.py fourq --run <RUN> --answers-file <絕對路徑> --by <審視者標籤> --dry-run，再去掉 --dry-run 入帳；被拒時只能修格式（標題、空白），內容問題把問題碼交回同一個審視者重寫一次，仍不過就不入帳四問（本運轉不能提案）；不用 --skip（無人值守一律拒收）；入帳成功印出的迴圈層快照原樣抄進 handback「做了什麼」；再把研究者候選、體檢發現、Q1 盲點、Q2 來源候選手寫入 OBS 帳本（每列 ≤700 bytes、座標可定位、不含 `|`；Q2 來源候選列以「來源缺口候選：」起頭、不帶 src）；你沒有 obs-add／obs-close／run-open／run-close 動詞（會 rc 1），也不入帳 Console 稽核檔；手寫列沒有 obs.add 事件（那是 Console 載體專用），check 以帳本列為準。
-4. 歸因者：python tools/selfimproving.py attr --run <RUN> …
-5. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm --run <RUN> …
+4. 歸因者：python tools/selfimproving.py attr …
+5. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm …
 6. 提案者（≠審視者）：python tools/selfimproving.py prop-new --run <RUN> …；本運轉至多 <MAX_PROPOSALS> 張；本文欄位表須含 method 與 proof（只准定性子欄），內容取自答案檔的 Q3 項與逐擬提案的 Q4 項；前置檢查拒收就依碼修正，不原封重試。
 7. 凍結者（≠提案者）：python tools/selfimproving.py heldout-freeze <PROP> --from <held-out 目錄> --by <凍結者>；提案者看不到評估集。
 8. 你：python tools/selfimproving.py card --issue <PROP> --by main，把卡面逐字寫進 handback。
@@ -567,7 +567,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 ## 禁止事項
 - 不 commit、不 push；不 decide（核准與晉升是掌舵者的決定，由 Console 送出、巡邏器之後入帳）；不 sandbox／verify／promote／rollback／measure。
 - 不碰 non_evolvable_globs（PROP 觸及即轉交，不繞過）；不改 .claude/** 與任何守衛面。
-- 所有 SI 寫入動詞都帶 --run <RUN>；不跨運轉寫入。
+- 凡有 `--run` 旗標的 SI 寫入動詞都帶 `--run <RUN>`（`attr`／`attr-confirm` 沒有此旗標，靠事件帳本的運轉脈絡）；不跨運轉寫入。
 - 子代理一律 Sonnet、零遞迴；不用 Web 工具。
 - 不用 fourq --skip；不把來源缺口候選加進 research_sources.json（只列不加，僅經 T1 增列）；不把四問項數、OBS 候選數當成效。
 - 每個指令先存 rc 再判，不接管線；貼不出輸出者一律標「未驗證」。
