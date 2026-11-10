@@ -357,7 +357,7 @@ class TestExpand(NfCase):
         self.assertEqual(expand.select(expand.link_targets(rss, "application/rss+xml", base),
                                        base, P_BLOG, 9), ["https://www.x.org/blog/c"])
 
-    def test_AT_630_8_E_2_non_utf8_xml_is_refused_before_parse(self):
+    def test_AT_630_8_E_3_non_utf8_xml_is_refused_before_parse(self):
         """tools/lib/selfimproving/expand.py：非 UTF-8 系文件不得繞過 DOCTYPE 位元組搜尋。"""
         xml = ('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "A">]>'
                "<urlset><url><loc>https://www.x.org/a</loc></url></urlset>")
