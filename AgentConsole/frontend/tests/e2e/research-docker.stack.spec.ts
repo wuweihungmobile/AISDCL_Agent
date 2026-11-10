@@ -438,8 +438,8 @@ test("AT_965_10_1 研究來源單一化（Docker 全棧）：種子 17 列、新
 }) => {
   test.setTimeout(900_000);
   const before = auditDirSnapshot();
-  test.skip(before === null, "TOOL-ABSENCE：沒有 docker CLI，無法讀稽核目錄（AT_965_10_1 需 docker exec）");
-  if (before === null) return;
+  // TCS §2：不得新增 skip；Docker 缺席＝環境壞，直接失敗（SCG-4 QA4C-01）
+  if (before === null) throw new Error("TOOL-ABSENCE：沒有 docker CLI，無法讀稽核目錄（AT_965_10_1 需 docker exec）");
   const slug = `e2e-${Date.now().toString(36)}`;
 
   // 掛載來源：稽核目錄是容器卷，不是主機真實 SI 家目錄（~/.autosdd）
