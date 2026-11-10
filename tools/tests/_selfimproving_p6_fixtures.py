@@ -214,7 +214,12 @@ import contextlib  # noqa: E402
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
 import json  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import shutil  # noqa: E402
 import socket  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
 import uuid  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest import mock  # noqa: E402
@@ -433,3 +438,249 @@ SUPERSEDED_P1 = {
     "AT-130-3-E-4": "AT-630-2-E-1", "AT-130-5-1": "AT-630-5-1", "AT-130-5-E-1": "AT-630-3-E-1",
     "AT-130-5-E-2": "AT-630-3-E-2", "AT-130-5-E-3": "AT-630-3-E-4",
 }
+
+
+# ----------------------------------------------------------------- 回測夾具（TCS-P6 §3：BT 半）
+SOP_REL = "docs/05_development/SelfImproving_Operations_SOP.md"
+BT_DIR = "docs/06_quality/SelfImproving_Backtest"
+BT_RESULTS = BT_DIR + "/results.jsonl"
+_BT_DEF_HDR = fx.DEF_HDR
+_BT_OBS_COORD = "`python tools/selfimproving.py check` rc=1"
+
+
+def commit(repo: Path, files: dict, msg: str) -> str:
+    """寫入（值為 None＝刪除）並提交；回 40 碼 commit（時間固定，相同輸入得相同 sha）。"""
+    for rel, data in files.items():
+        if data is None:
+            (repo / rel).unlink(missing_ok=True)
+        else:
+            fx.putb(repo, rel, data if isinstance(data, bytes) else data.encode("utf-8"))
+    return fx.commit_all(repo, msg)
+
+
+def merge_commit(repo: Path, side_files: dict, msg: str) -> str:
+    """從目前分支分出側枝提交 `side_files`、主線再前進一步、`--no-ff` 合併；回合併 commit。"""
+    cur = fx.git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+    fx.git(repo, "checkout", "-q", "-b", "side")
+    commit(repo, side_files, "side")
+    fx.git(repo, "checkout", "-q", cur)
+    commit(repo, {"main_advance.txt": "x\n"}, "main-advance")
+    fx.git(repo, "merge", "-q", "--no-ff", "-m", msg, "side")
+    return fx.head(repo)
+
+
+def _src(name: str, v: int) -> str:
+    return f"# {name}\nVALUE = {v}\n"
+
+
+def _obs_row(n: int, symptom: str, sha: str) -> list[str]:
+    return [fx.obs_id(n), "2026-10-19 01:00", f"回測夾具 {n:03d}", symptom, _BT_OBS_COORD,
+            "tooling", "P3", f"fixed@{sha[:12]}", "面=流程;來源=人;回報者=掌舵者"]
+
+
+def bt_sop_section() -> str:
+    """真 SOP 的〈反事實回測〉節（至下一個二級標題）：夾具 repo 的 SOP 只放它，避免整份 SOP 內的
+    歷史 OBS 號在夾具帳本中懸空（`OBS-REF-DANGLING`）。"""
+    text = (fx.ROOT / SOP_REL).read_bytes().decode("utf-8").replace("\r\n", "\n")
+    m = re.search(r"(?ms)^## 反事實回測.*?(?=^## 無人運轉任務書範本)", text)
+    if m is None:
+        raise AssertionError("真 SOP 缺〈反事實回測〉節")
+    return m.group(0)
+
+
+def bt_repo(*, matrix: bool = True) -> tuple[Path, dict]:
+    """真 git 的回測夾具 repo（`fx.p1_base()` 之上多個 commit）；回（repo, 各 commit 與案例對照）。
+
+    `matrix=True`：另含各種排除原因的修復 commit（OBS 11 起）；`matrix=False`：只含合格案例，
+    使 `check` 可全綠（含偽造 sha 的列會使 `FIXED-SHA-UNRESOLVED`）。回傳的 `info["obs"]`／
+    `info["def"]` 為 id → 期望原因（`None`＝合格）。"""
+    r = fx.p1_base()
+    fx.put(r, SOP_REL, bt_sop_section())
+    base = {f"src/{n}.py": _src(n, 1) for n in "abcde"}
+    base.update({f"src/m{i}.py": _src(f"m{i}", 1) for i in range(1, 10)})
+    base.update({"tests/test_a.py": "t\n", "docs/y.md": "y\n", "src/d.py": _src("d", 1)})
+    commit(r, base, "base code")
+    info: dict = {"obs": {}, "def": {}}
+    f1 = commit(r, {"src/a.py": _src("a", 2), "tests/test_a2.py": "t\n", "docs/y.md": "z\n"}, "f1")
+    f2 = commit(r, {"src/b.py": _src("b", 2), "src/c.py": _src("c", 2)}, "f2")
+    fd = commit(r, {"src/e.py": _src("e", 2)}, "fd")
+    info.update(f1=f1, f2=f2, fd=fd)
+    obs = [(11, "回測症狀一：計數偏差", f1, None), (12, "回測症狀二：兩處同時錯", f2, None)]
+    if matrix:
+        info["nocode"] = commit(r, {"docs/y.md": "q\n", "tests/test_a.py": "t2\n"}, "nocode")
+        info["newonly"] = commit(r, {"src/new.py": "x\n"}, "newonly")
+        info["over"] = commit(r, {f"src/m{i}.py": "# changed\n" for i in range(1, 10)}, "over")
+        info["named"] = commit(r, {"src/d.py": _src("d", 2)}, "named")
+        info["merge"] = merge_commit(r, {"src/side.py": "s\n"}, "merge")
+        sha_sym = "回測症狀：fix 於 {sha7} 之後"
+        obs += [(13, "回測症狀：只動文件", info["nocode"], "no-code-file"),
+                (14, "回測症狀：只新增檔", info["newonly"], "no-code-file"),
+                (15, "回測症狀：改了九個檔", info["over"], "files-over"),
+                (16, "回測症狀：壞在 src/d.py 附近", info["named"], "symptom-names-file"),
+                (17, "回測症狀：合併修復", info["merge"], "merge"),
+                (18, sha_sym.format(sha7=info["f2"][:7]), info["f2"], "symptom-has-sha"),
+                (19, "回測症狀：假 commit", "deadbeefcafe0000", "commit-missing"),
+                (20, "", info["f1"], "symptom-empty")]
+    rows = [list(x) for x in fx.base_rows()]
+    root_commit = fx.git(r, "rev-list", "--max-parents=0", "HEAD").split()[0]
+    rows[1][7] = f"fixed@{root_commit[:12]}"  # 基線列 002 指向根 commit（無 first parent）
+    info["obs"][fx.obs_id(2)] = "commit-missing"
+    for n, sym, sha, why in obs:
+        rows.append(_obs_row(n, sym, sha))
+        info["obs"][fx.obs_id(n)] = why
+    fx.put(r, fx.LEDGER, fx.render_ledger(rows))
+    defrows = [[fx.def_id(1), "2026-09-01", "夾具", "tools/lib/si_demo.py:12", "P2", "-",
+                "fixed@abc1234"],
+               [fx.def_id(2), "2026-09-02", "夾具", "回測症狀 DEF：另一個計數現象", "P2", "-",
+                "fixed@" + fd[:12]]]
+    fx.put(r, fx.DEFLOG, "\n".join([_BT_DEF_HDR, "|---|---|---|---|---|---|---|",
+                                    *[fx.line(x) for x in defrows]]) + "\n")
+    info["def"] = {fx.def_id(1): "commit-missing", fx.def_id(2): None}
+    info["head"] = fx.commit_all(r, "ledgers")
+    return r, info
+
+
+def write_cases(repo: Path, cases: list[dict], version: int = 1) -> Path:
+    """把 `cases` 以正規化序列化寫成 `cases-v<version>.json`（不 commit）。"""
+    obj = {"schema_rev": 1, "version": version, "generated_at": "2026-11-10T09:00:00+08:00",
+           "head_sha": "0" * 40, "ledgers": {"obs_sha256": "sha256:" + "0" * 64,
+                                             "def_sha256": "sha256:" + "0" * 64},
+           "cases": sorted(cases, key=lambda c: c["id"]), "excluded": []}
+    path = repo / BT_DIR / f"cases-v{version}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes((json.dumps(obj, ensure_ascii=False, indent=2, sort_keys=True)
+                      + "\n").encode("utf-8"))
+    return path
+
+
+def synthetic_cases(repo: Path, n: int) -> list[dict]:
+    """`n` 個合成案例：每案一個真 commit 當 `pre_commit`（供 `prepare` 建快照）。"""
+    out = []
+    for i in range(1, n + 1):
+        pre = commit(repo, {f"src/s{i}.py": _src(f"s{i}", 1)}, f"pre{i}")
+        fix = commit(repo, {f"src/s{i}.py": _src(f"s{i}", 2)}, f"fix{i}")
+        out.append({"id": fx.obs_id(900 + i), "source": "OBS", "symptom": f"合成症狀 {i}",
+                    "fix_commit": fix, "pre_commit": pre, "changed_files": [f"src/s{i}.py"]})
+    return out
+
+
+def line(kind: str, text: str = "", *, name: str = "", input_: dict | None = None,
+         cwd: str | None = None, ts: str = "2026-11-10T09:00:00.000Z") -> dict:
+    """子代理逐字稿的一行（只造結構，不抄真實內容）：`user`／`tool`（assistant 的 tool_use）／
+    `say`（assistant 的 text 區塊）。"""
+    if kind == "user":
+        out = {"type": "user", "message": {"role": "user", "content": text}}
+    elif kind == "tool":
+        out = {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_x", "name": name, "input": input_ or {}}]}}
+    else:
+        out = {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "text", "text": text}]}}
+    out["timestamp"] = ts
+    if cwd is not None:
+        out["cwd"] = cwd
+    return out
+
+
+def clean_lines(nonce: str, snap: Path, answer: str = "{}") -> list[dict]:
+    """合規的子代理逐字稿：user 行含 nonce、Read 與 Grep 都在快照內、末行為含 text 的 assistant。"""
+    return [line("user", f"任務碼：{nonce}"),
+            line("tool", name="Read", input_={"file_path": str(snap / "src" / "a.py")}),
+            line("tool", name="Grep", input_={"path": str(snap), "pattern": "VALUE"}),
+            line("say", answer)]
+
+
+@contextlib.contextmanager
+def claude_home(repo: Path, sid: str, agents: dict, *, model: str | None = "sonnet",
+                folder: str = "subagents"):
+    """暫存 `claude_home()`（`CLAUDE_CONFIG_DIR`）下造
+    `projects/<slug>/<sid>/<folder>/agent-<id>.jsonl`；
+    `agents`＝{agent_id: [line…]}。測試不讀真實家目錄。"""
+    root = Path(tempfile.mkdtemp(prefix="si_ch_"))
+    base = root / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(repo.resolve())) / sid / folder
+    base.mkdir(parents=True)
+    for aid, lines in agents.items():
+        raw = "".join(json.dumps({"agentId": aid, "sessionId": sid, "isSidechain": True,
+                                  "cwd": str(repo), **ln}, ensure_ascii=False) + "\n"
+                      for ln in lines)
+        (base / f"agent-{aid}.jsonl").write_bytes(raw.encode("utf-8"))
+        if model:
+            (base / f"agent-{aid}.meta.json").write_bytes(
+                json.dumps({"agentType": "general-purpose", "model": model}).encode("utf-8"))
+    try:
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(root)}):
+            yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# ----------------------------------------------------------------- 範圍守衛（有明確基準才啟用）
+def scope_base() -> str | None:
+    """範圍守衛的基準 commit：`SI_SCOPE_BASE`（相容舊名 `SI_P4_BASE_SHA`）；未設＝None＝守衛不啟用。
+
+    WHY：舊寫法以 `HEAD~1` 對整個工作樹比對，只要最新 commit 或工作樹碰到 `AgentConsole/**` 就紅
+    ——守衛本意是「該鍵的實作 commit 不越界」，常駐執行等於對所有後續工作下隱形限制。"""
+    return os.environ.get("SI_SCOPE_BASE") or os.environ.get("SI_P4_BASE_SHA") or None
+
+
+def scope_tip() -> str:
+    """範圍守衛的終點 commit：`SI_SCOPE_TIP`（預設 `HEAD`）；兩把鍵的 commit 交錯時，QA 可只對
+    單一 commit 驗（例 `SI_SCOPE_BASE=<sha>^`、`SI_SCOPE_TIP=<sha>`）。"""
+    return os.environ.get("SI_SCOPE_TIP") or "HEAD"
+
+
+def committed_names(root: Path, base: str, tip: str | None = None) -> set[str]:
+    """`<base>..<tip>`（`tip` 缺省＝`scope_tip()`）的**已提交**差異路徑（不含工作樹與未追蹤檔）；
+    `base` 或 `tip` 解不開＝拋 AssertionError。"""
+    tip = tip or scope_tip()
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", "-C", str(root), "-c", "core.quotepath=false", *args],
+                              capture_output=True, encoding="utf-8", errors="replace",
+                              check=False)
+    for label, rev in (("基準", base), ("終點", tip)):
+        if run("rev-parse", "--verify", "--quiet", rev + "^{commit}").returncode != 0:
+            raise AssertionError(f"範圍守衛{label} {rev!r} 不是可解析的 commit")
+    cp = run("diff", "--name-only", base, tip)
+    if cp.returncode != 0:
+        raise AssertionError(f"git diff 失敗：{cp.stderr}")
+    return {n for n in cp.stdout.splitlines() if n.strip()}
+
+
+def scope_verdict(names: set[str], allowed, frozen=(), exempt=()
+                  ) -> tuple[bool, list[str], list[str]]:
+    """（是否觸及允許集合, 允許集合之外的路徑, 落在凍結前綴的路徑）；未觸及＝守衛不觸發。"""
+    touched = any(rx.match(n) for n in names for rx in allowed)
+    outside = sorted(n for n in names if not any(rx.match(n) for rx in allowed))
+    frozen_hits = sorted(n for n in names if n.startswith(tuple(frozen))
+                         and not n.startswith(tuple(exempt)))
+    return touched, outside, frozen_hits
+
+
+def scope_fixture(base_files: dict, head_files: dict, later_files: dict | None = None
+                  ) -> tuple[Path, str]:
+    """暫存 git repo：基準 commit 後再提交 `head_files`，可再提交 `later_files`（使 HEAD 晚於
+    `HEAD~1`，驗終點早於 HEAD）；回（repo, 基準 sha）。呼叫端負責清理。"""
+    root = Path(tempfile.mkdtemp(prefix="si_scope_"))
+    cfg = root / "gitconfig"
+    cfg.write_bytes(b"[gc]\n\tauto=0\n")
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": str(cfg), "GIT_CONFIG_NOSYSTEM": "1"}
+    repo = root / "r"
+    repo.mkdir()
+
+    def git(*args: str) -> str:
+        cp = subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c",
+                             "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c",
+                             "core.autocrlf=false", *args], capture_output=True, encoding="utf-8",
+                            errors="replace", env=env, check=True)
+        return cp.stdout.strip()
+
+    git("init", "-q")
+    for step, files in enumerate((base_files, head_files, *([later_files] if later_files else []))):
+        for rel, text in files.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_bytes(text.encode("utf-8"))
+        git("add", "-A")
+        git("commit", "-q", "--allow-empty", "-m", f"step{step}")
+        if step == 0:
+            base = git("rev-parse", "HEAD")
+    return repo, base

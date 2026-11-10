@@ -89,6 +89,8 @@ def backtest_rules(obj: dict) -> _Issues:
     h1, h3, h5, n = (obj.get(k) for k in ("hit1", "hit3", "hit5", "n"))
     if all(_int(v) for v in (h1, h3, h5, n)) and not h1 <= h3 <= h5 <= n:
         out.append((_TYPE, "backtest.result 須 hit1 ≤ hit3 ≤ hit5 ≤ n"))
+    if obj.get("by") != "main":  # 回測結果只由主控入帳（FR-SI-46；`by` 上界 32 字元只用於最壞行長）
+        out.append((_TYPE, "backtest.result 的 by 恆為 main"))
     return out
 
 

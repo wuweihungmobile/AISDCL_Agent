@@ -11,6 +11,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from . import btscore as si_btscore
 from . import capacity as si_capacity
 from . import consoleaudit, fourqparse, meaplan
 from . import events as si_events
@@ -127,8 +128,8 @@ def registry_value(events: list[dict] | None, params: dict) -> dict:
     reg = None if ev is None else {
         "seq": ev["seq"], "audit_ref": ev["audit_ref"], "registry_sha256": ev["registry_sha256"],
         "watch_enabled": ev["watch_on"]}
-    # `backtest` 鍵（AC-SI-46-8）由回測實作棒接手；在那之前恆為 null（＝無 backtest.result 事件）
-    return {"research_fetch_max": mx, "research_registry": reg, "backtest": None}
+    return {"research_fetch_max": mx, "research_registry": reg,
+            "backtest": si_btscore.status_value(events)}  # AC-SI-46-8：無事件＝null
 
 
 def build(repo: Path, git: Git, params: dict, read_home: bool = True, *, now=None,
@@ -227,6 +228,8 @@ def render_text(obj: dict) -> str:
         lines.append("research_registry: " + ("null" if rg is None else (
             f"seq={rg['seq']} watch_enabled={rg['watch_enabled']} "
             f"sha={rg['registry_sha256'][7:19]}")))
+    if "backtest" in obj:
+        lines.append(si_btscore.status_line(obj["backtest"]))
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

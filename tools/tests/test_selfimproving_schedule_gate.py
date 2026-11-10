@@ -27,6 +27,7 @@ from unittest import mock
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p4_fixtures as fx4
+import _selfimproving_p6_fixtures as px
 from _selfimproving_p4_fixtures import D1, MIN, H, O, P4TestCase, iso
 
 from lib.selfimproving import check as si_check
@@ -369,28 +370,66 @@ def git_names(*args: str) -> list[str]:
     return [ln for ln in cp.stdout.splitlines() if ln.strip()] if cp.returncode == 0 else []
 
 
+def scope_problems(root: Path, base: str) -> list[str]:
+    """`<base>..HEAD` 的已提交差異觸及 P4 面時：集合之外與凍結前綴的路徑（空＝守衛綠；D-IMP-5：
+    差異不含 P4 面＝守衛未觸發，不把無關 commit 判紅）。"""
+    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base), ALLOWED, FROZEN,
+                                                FROZEN_EXEMPT)
+    return [*outside, *frozen] if touched else []
+
+
 class TestScope(unittest.TestCase):
     def test_AT_440_8_1_changes_stay_inside_the_allowed_set(self):
-        base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
-        has_base = _git("rev-parse", "--verify", "--quiet", base + "^{commit}").returncode == 0
-        names = {*(git_names("diff", "--name-only", base) if has_base else []),
-                 *git_names("ls-files", "--others", "--exclude-standard")}
-        note = (f"基準 {base}（未設 SI_P4_BASE_SHA 時取 HEAD 的父 commit"
-                + ("" if has_base else "；父 commit 不可得，只看未追蹤檔") + "）")
-        touched = [n for n in names if any(rx.match(n) for rx in ALLOWED)]
-        if not touched:  # D-IMP-5：差異不含 P4 面＝範圍守衛未觸發，不把無關 commit 判紅
-            print(f"[AT-440-8-1] base={base} has_base={has_base} p4=0 guard-not-triggered")
+        base = px.scope_base()  # 有明確基準（SI_SCOPE_BASE）才啟用；未設＝守衛不啟用
+        if base is None:
+            print("[AT-440-8-1] guard-not-triggered (no SI_SCOPE_BASE)")
         else:
-            outside = sorted(n for n in names if not any(rx.match(n) for rx in ALLOWED))
-            self.assertEqual(outside, [], note)
-            frozen = sorted(n for n in names
-                            if n.startswith(FROZEN) and not n.startswith(FROZEN_EXEMPT))
-            self.assertEqual(frozen, [], note)
+            self.assertEqual(scope_problems(ROOT, base), [], f"基準 {base}")
         for name in ("test_selfimproving_schedule_model", "test_selfimproving_schedule_gate",
                      "test_selfimproving_schedule_patrol", "test_selfimproving_schedule_advance",
                      "_selfimproving_p4_fixtures"):
             text = (ROOT / "tools" / "tests" / f"{name}.py").read_text(encoding="utf-8")
             self.assertIsNone(NO_SKIP.search(text), name)
+
+    def test_scope_guard_negative_control_a_base_makes_out_of_set_commits_red(self):
+        """tools/tests/_selfimproving_p6_fixtures.py 的範圍守衛機制（AT-440-8-1 與 AT-440-5-E-1 的
+        已改測試檔判準共用）：夾具 git repo 上「設了基準且越界＝紅」「只改允許集合＝綠」。"""
+        bad, base = px.scope_fixture(
+            {"README.md": "x\n"}, {"tools/selfimproving.py": "a\n", "AgentConsole/x.txt": "b\n",
+                                   "docs/05_development/SelfImproving_Operations_SOP.md": "s\n"})
+        good, gbase = px.scope_fixture({"README.md": "x\n"}, {"tools/selfimproving.py": "a\n"})
+        for repo in (bad, good):
+            self.addCleanup(shutil.rmtree, repo.parent, True)
+        self.assertEqual(scope_problems(bad, base), [
+            "AgentConsole/x.txt", "docs/05_development/SelfImproving_Operations_SOP.md",
+            "AgentConsole/x.txt", "docs/05_development/SelfImproving_Operations_SOP.md"])
+        self.assertEqual(scope_problems(good, gbase), [])
+        tipped, tbase = px.scope_fixture({"README.md": "x\n"}, {"tools/selfimproving.py": "a\n"},
+                                         {"AgentConsole/late.txt": "z\n"})
+        self.addCleanup(shutil.rmtree, tipped.parent, True)
+        self.assertNotEqual(scope_problems(tipped, tbase), [])
+        with mock.patch.dict(os.environ, {"SI_SCOPE_TIP": "HEAD~1"}):  # 終點早於 HEAD
+            self.assertEqual(scope_problems(tipped, tbase), [])
+        stem = "tools/tests/test_" "selfimproving_"
+        XFILE, GHOST = stem + "x.py", stem + "ghost.py"
+        edited, ebase = px.scope_fixture({XFILE: "a\n"},
+                                         {XFILE: "b\n",
+                                          GHOST: "c\n"})
+        self.addCleanup(shutil.rmtree, edited.parent, True)
+        okfile = {XFILE}
+        self.assertEqual(changed_test_problems(edited, ebase, okfile),
+                         [GHOST])
+        self.assertEqual(changed_test_problems(good, gbase, set()), [])
+
+
+def changed_test_problems(root: Path, base: str, allowed: set[str]) -> list[str]:
+    """`<base>..HEAD` 已提交差異中被改的 `test_selfimproving_*`／`_selfimproving_*` 測試檔，扣掉
+    `allowed`（AT-440-5-E-1：同步站點之外的測試檔不得被動）。"""
+    changed = [n for n in px.committed_names(root, base) if (
+        n.startswith("tools/tests/test_selfimproving_")
+        or n.startswith("tools/tests/test_install_windows")
+        or n.startswith("tools/tests/_selfimproving_"))]
+    return sorted(set(changed) - allowed)
 
 
 # --------------------------------------------------------------------------- OS 任務載具（R161）
@@ -1039,7 +1078,7 @@ class TestZeroRegression(P4TestCase):
         from lib.selfimproving import check as si_check
         from lib.selfimproving import events as si_events
         from lib.selfimproving import params as si_params
-        self.assertEqual(len(selfimproving._HELP), 28)
+        self.assertEqual(len(selfimproving._HELP), 29)
         self.assertEqual(len(si_events.KINDS), 27)
         self.assertEqual(len(si_check.ITEM_IDS), 35)
         self.assertEqual(len(si_params.PARAM_SPECS), 44)
@@ -1049,18 +1088,10 @@ class TestZeroRegression(P4TestCase):
         spec = json.loads(EXPECT.read_text(encoding="utf-8"))
         self.assertEqual(len(spec["tasks"]), 3)
         tests = ROOT / "tools" / "tests"
-        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 28"),
-                             ("test_selfimproving_issues.py", "len(verbs), 28"),
-                             ("test_selfimproving_console_obs.py", "len(verbs), 28")):
+        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 29"),
+                             ("test_selfimproving_issues.py", "len(verbs), 29"),
+                             ("test_selfimproving_console_obs.py", "len(verbs), 29")):
             self.assertIn(needle, (tests / name).read_text(encoding="utf-8"), name)
-        base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
-        ok = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
-            base + "^{commit}"],
-                            capture_output=True, check=False).returncode == 0
-        changed = [n for n in git_names("diff", "--name-only", base) if (
-            n.startswith("tools/tests/test_selfimproving_")
-            or n.startswith("tools/tests/test_install_windows")
-            or n.startswith("tools/tests/_selfimproving_"))] if ok else []
         new_files = {f"tools/tests/test_selfimproving_schedule_{x}.py" for x in
                      ("model", "patrol", "advance",
                      "gate")} | {"tools/tests/_selfimproving_p4_fixtures.py"}
@@ -1079,7 +1110,11 @@ class TestZeroRegression(P4TestCase):
                    "tools/tests/test_selfimproving_p2_meta.py",
                    "tools/tests/_selfimproving_fixtures.py",
                    "tools/tests/_selfimproving_p2_fixtures.py"} | new_files
-        self.assertEqual(sorted(set(changed) - allowed), [])
+        base = px.scope_base()  # 有明確基準（SI_SCOPE_BASE）才啟用；未設＝守衛不啟用
+        if base is None:
+            print("[AT-440-5-E-1] changed-test-files guard-not-triggered (no SI_SCOPE_BASE)")
+        else:
+            self.assertEqual(changed_test_problems(ROOT, base, allowed), [], f"基準 {base}")
 
 
 TARGET_FILES = ("test_selfimproving_schedule_model.py", "test_selfimproving_schedule_patrol.py",
@@ -1125,7 +1160,7 @@ class TestEntry(P4TestCase):
 
     def test_AT_440_7_1_twenty_six_verbs_and_new_flags(self):
         import selfimproving
-        self.assertEqual(len(selfimproving._HELP), 28)
+        self.assertEqual(len(selfimproving._HELP), 29)
         rc, out, _ = self.run_main(["--help"])
         self.assertEqual(rc, 0)
         self.assertTrue(all(v in out for v in selfimproving._HELP), out)

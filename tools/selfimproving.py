@@ -4,7 +4,9 @@
 `status`／`scan`／`card`／`export`（唯讀）、`run-open`／`run-close`／`attr`／`attr-confirm`／
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
 與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀）；
-P4 加 `sched`（排程）與 `patrol`（巡邏心跳）；P5 加 `fourq`（四問入帳），共 27 個；未列動詞 rc 3。
+P4 加 `sched`（排程）與 `patrol`（巡邏心跳）；P5 加 `fourq`（四問入帳）；P6 加 `registry-ingest`
+（研究來源登記入帳）與 `backtest`（歷史缺陷反事實回測：cases／prepare／answer／score／cleanup），
+共 29 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -51,6 +53,7 @@ _HELP = {
     "patrol": "巡邏心跳（OS 排程器每心跳叫醒一次的一次性行程：入帳、到期判定、運轉、推進）",
     "fourq": "四問審視答案檔入帳（--answers-file）、免審（--skip）或語料清單（--corpus）",
     "registry-ingest": "Console 研究來源登記稽核檔入帳為唯讀鏡像與 research.registry 事件",
+    "backtest": "歷史缺陷反事實回測：cases（案例庫）、prepare、answer、score、cleanup",
 }
 # R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
 _P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
@@ -188,6 +191,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rs.add_argument("--sid")
     rs.add_argument("--line", type=int)
     _sched_parser(sub)
+    _backtest_parser(sub)
     fq = _verb(sub, "fourq")
     for flag in ("--run", "--answers-file", "--by", "--reason", "--note", "--band", "--sid"):
         fq.add_argument(flag, dest=flag[2:].replace("-", "_"))
@@ -219,6 +223,31 @@ def _sched_parser(sub) -> None:
     st.add_argument("--line", type=int)
     st.add_argument("--carrier", choices=("console",))
     st.add_argument("--audit-ref", dest="audit_ref")
+
+
+def _backtest_parser(sub) -> None:
+    bt = sub.add_parser("backtest", help=_HELP["backtest"], allow_abbrev=False)
+    bsub = bt.add_subparsers(dest="bt_cmd", required=True, metavar="<cases|prepare|answer|score|"
+                             "cleanup>", parser_class=_Parser)
+    for name in ("cases", "prepare", "answer", "score", "cleanup"):
+        p = bsub.add_parser(name, allow_abbrev=False)
+        p.add_argument("--repo", help="repo 根目錄（預設為本檔所在 repo）")
+        p.add_argument("--json", action="store_true", help="輸出 JSON")
+        if name != "cases":
+            p.add_argument("--root", help="批次根目錄（預設家目錄 backtest；須在 repo 之外）")
+    mode = bsub.choices["cases"].add_mutually_exclusive_group(required=True)
+    mode.add_argument("--build", action="store_true", help="產生新版案例檔")
+    mode.add_argument("--check", action="store_true", help="唯讀驗最新案例檔")
+    bsub.choices["cases"].add_argument("--version", type=int, help="案例檔版號（預設現有最大＋1）")
+    pr = bsub.choices["prepare"]
+    pr.add_argument("--seed", type=int, required=True)
+    pr.add_argument("--k", type=int)
+    for name in ("answer", "score", "cleanup"):
+        bsub.choices[name].add_argument("--batch", required=True)
+    an = bsub.choices["answer"]
+    an.add_argument("--case", required=True)
+    an.add_argument("--file", required=True)
+    an.add_argument("--agent-id", dest="agent_id", required=True)
 
 
 def _emit(text: str) -> None:
@@ -509,6 +538,49 @@ def _obs_write(repo: Path, args: argparse.Namespace) -> int:
     return rc
 
 
+def _backtest(repo: Path, args: argparse.Namespace) -> int:
+    """`backtest`（P6，FR-SI-46）：C 類（`AUTOSDD_UNATTENDED` 有設一律拒收，連 `cases --check`）；
+    判準與寫檔在 `btcases`／`btwrite`／`btrecord`，只在此延遲 import。"""
+    from lib.selfimproving import btcases
+    from lib.selfimproving import writeverbs as wv
+
+    js, cmd = args.json, args.bt_cmd
+    codes = unattended.gate("backtest", None, os.environ)
+    if codes:
+        out = wv.reject(repo, "backtest", codes, js)
+        _emit(out.text)
+        return out.rc
+    try:
+        if cmd == "cases" and args.check:
+            got = btcases.check_latest(repo, Git(repo))
+            obj = {"ok": True, "verb": "backtest", "sub": "cases-check", **got}
+            out = wv.Out(0, json.dumps(obj, ensure_ascii=False) + "\n" if js else
+                         "ok backtest cases-check " + " ".join(f"{k}={v}" for k, v in got.items())
+                         + "\n")
+        elif cmd == "cases":
+            from lib.selfimproving import btwrite
+
+            out = btwrite.cases_build(repo, args.version, js)
+        elif cmd == "prepare":
+            from lib.selfimproving import btwrite
+
+            out = btwrite.prepare(repo, args.seed, args.k, args.root, js)
+        elif cmd == "cleanup":
+            from lib.selfimproving import btwrite
+
+            out = btwrite.cleanup(repo, args.batch, args.root, js)
+        else:
+            from lib.selfimproving import btrecord
+
+            out = (btrecord.score(repo, args.batch, args.root, js) if cmd == "score" else
+                   btrecord.answer(repo, args.batch, args.case, args.file, args.agent_id,
+                                   args.root, js))
+    except btcases.BtError as exc:
+        out = wv.reject(repo, "backtest", exc.codes, js)
+    _emit(out.text)
+    return out.rc
+
+
 def _registry_ingest(repo: Path, args: argparse.Namespace) -> int:
     if args.carrier != "console" or not args.audit_ref or not si_events.valid_uuid(args.audit_ref):
         raise check.InputError("registry-ingest 須帶 --carrier console 與 --audit-ref（UUID）")
@@ -539,7 +611,7 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
              "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol,
-             "fourq": _fourq, "registry-ingest": _registry_ingest}
+             "fourq": _fourq, "registry-ingest": _registry_ingest, "backtest": _backtest}
 
 
 def main(argv: list[str] | None = None) -> int:

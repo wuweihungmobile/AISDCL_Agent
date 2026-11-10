@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import events as si_events
+from . import evspec6
 from . import fold as si_fold
 from . import params as si_params
 from . import refs as si_refs
@@ -423,6 +424,8 @@ def body_codes(fields: dict, run: str, params: dict) -> list[Prob]:
     bad = leak_codes(proof, si_params.PARAM_SPECS) if proof else []
     if bad:
         out.append(("PROOF-LEAK", "proof 含禁字：" + "、".join(dict.fromkeys(bad))))
+    if evspec6.proof_backtest_codes(proof):  # 回測分數不得當成效（AC-SI-46-8）
+        out.append(("PROOF-BACKTEST", "proof 不得引用回測分數當成效"))
     return out
 
 

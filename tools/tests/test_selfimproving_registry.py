@@ -794,7 +794,8 @@ class TestEventSpec(unittest.TestCase):
                             seed=2147483647, k=10, n=10, unanswered=10, contaminated=10,
                             hit1=10, hit3=10, hit5=10, prec_pm=1000, rec_pm=1000,
                             ledger_line=123456)
-        self.assertEqual(si_events.validate(bt), [])
+        self.assertEqual(si_events.validate({**bt, "by": "main"}), [])  # by 恆為 main
+        self.assertTrue(si_events.validate(bt))  # 32 字元的 by 只是最壞行長的上界、不是合法值
         self.assertEqual(size(bt), 472)
         srcs = [{"id": "a" * 32, "sha256": "sha256:" + "d" * 64, "bytes": 524288,
                  "changed": False, "http_status": 200} for _ in range(10)]

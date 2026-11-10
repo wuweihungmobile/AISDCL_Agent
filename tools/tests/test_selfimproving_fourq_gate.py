@@ -15,6 +15,7 @@ import inspect
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import types
@@ -24,6 +25,7 @@ from unittest import mock
 
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
+import _selfimproving_p6_fixtures as px
 import _selfimproving_p5_fixtures as f5
 from _selfimproving_p5_fixtures import P5TestCase, answers
 
@@ -481,12 +483,11 @@ class TestImports(unittest.TestCase):
 
     def test_AT_444_6_1_new_modules_import_only_stdlib_and_package(self):
         self.assertEqual(self.problems(self.real()), [])
-        base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
-        cp = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", "diff",
-                             "--name-only", base, "--", "AgentConsole", ".github"],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace")
-        if cp.returncode == 0 and scope_touched(base):
-            self.assertEqual(cp.stdout.split(), [])
+        base = px.scope_base()  # 有明確基準（SI_SCOPE_BASE）才啟用；未設＝守衛不啟用
+        if base is None:
+            print("[AT-444-6-1] guard-not-triggered (no SI_SCOPE_BASE)")
+        else:
+            self.assertEqual(console_problems(ROOT, base), [], f"基準 {base}")
 
     def test_AT_444_6_E_1_injected_imports_are_named(self):
         files = self.real()
@@ -498,12 +499,6 @@ class TestImports(unittest.TestCase):
         src = (ROOT / "AgentConsole/engine-bridge/si_repo_support.py")
         if src.is_file():
             self.assertIn("tools/lib/selfimproving/", src.read_text(encoding="utf-8"))
-
-
-def git_names(*args: str) -> list[str]:
-    cp = subprocess.run(["git", "-C", str(ROOT), "-c", "core.quotepath=false", *args],
-                        capture_output=True, text=True, encoding="utf-8")
-    return cp.stdout.split("\n") if cp.returncode == 0 else []
 
 
 ALLOWED = tuple(re.compile(p) for p in (
@@ -522,33 +517,63 @@ SKIP_RE = re.compile(r"\bskip(?:Test|If|Unless)\b|unittest\.skip|pytest\.skip|ma
                      r"ipTest|xf" "ail")
 
 
-def scope_names(base: str) -> set[str]:
-    ok = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
-                         base + "^{commit}"], capture_output=True).returncode == 0
-    return {n for n in [*(git_names("diff", "--name-only", base) if ok else []),
-                        *git_names("ls-files", "--others", "--exclude-standard")] if n}
+def scope_problems(root: Path, base: str) -> list[str]:
+    """`<base>..<tip>` 的已提交差異觸及允許集合時：集合之外與落在凍結前綴的路徑（空＝守衛綠）。"""
+    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base), ALLOWED, FORBIDDEN)
+    return [*outside, *frozen] if touched else []
 
 
-def scope_touched(base: str) -> bool:
-    return any(rx.match(n) for n in scope_names(base) for rx in ALLOWED)
+def console_problems(root: Path, base: str) -> list[str]:
+    """同上基準：觸及允許集合時，`AgentConsole`／`.github` 不得有已提交差異。"""
+    names = px.committed_names(root, base)
+    if not px.scope_verdict(names, ALLOWED)[0]:
+        return []
+    return sorted(n for n in names if n.startswith(("AgentConsole", ".github")))
 
 
 class TestScopeAndTable(unittest.TestCase):
     """受測：`tools/tests/test_selfimproving_fourq_gate.py`（範圍守衛與 AT 對照表自檢）。"""
 
     def test_AT_445_5_1_changes_stay_inside_the_allowed_set(self):
-        base = os.environ.get("SI_P4_BASE_SHA") or "HEAD~1"
-        names = scope_names(base)
-        if not scope_touched(base):
-            print("[AT-445-5-1] guard-not-triggered")
+        base = px.scope_base()  # 有明確基準（SI_SCOPE_BASE）才啟用；未設＝守衛不啟用
+        if base is None:
+            print("[AT-445-5-1] guard-not-triggered (no SI_SCOPE_BASE)")
         else:
-            outside = sorted(n for n in names if not any(rx.match(n) for rx in ALLOWED))
-            self.assertEqual(outside, [], f"基準 {base}")
-            self.assertEqual(sorted(n for n in names if n.startswith(FORBIDDEN)), [])
+            self.assertEqual(scope_problems(ROOT, base), [], f"基準 {base}")
         for name in ("test_selfimproving_fourq_model", "test_selfimproving_fourq_gate",
                      "_selfimproving_p5_fixtures"):
             text = (TESTS / f"{name}.py").read_text(encoding="utf-8")
             self.assertIsNone(SKIP_RE.search(text), name)
+
+    def test_scope_guard_negative_control_a_base_makes_out_of_set_commits_red(self):
+        """tools/tests/_selfimproving_p6_fixtures.py 的範圍守衛機制（AT-445-5-1、AT-444-6-1 共用）：
+        以夾具 git repo 驗「設了基準且越界＝紅」「只改允許集合＝綠」「未設基準＝不啟用」。"""
+        bad, base = px.scope_fixture({"README.md": "x\n"}, {"tools/selfimproving.py": "a\n",
+                                                           "AgentConsole/x.txt": "b\n"})
+        good, gbase = px.scope_fixture({"README.md": "x\n"}, {"tools/selfimproving.py": "a\n"})
+        for repo in (bad, good):
+            self.addCleanup(shutil.rmtree, repo.parent, True)
+        self.assertEqual(scope_problems(bad, base), ["AgentConsole/x.txt", "AgentConsole/x.txt"])
+        self.assertEqual(console_problems(bad, base), ["AgentConsole/x.txt"])
+        self.assertEqual((scope_problems(good, gbase), console_problems(good, gbase)), ([], []))
+        with mock.patch.dict(os.environ, {"SI_SCOPE_BASE": "", "SI_P4_BASE_SHA": ""}):
+            self.assertIsNone(px.scope_base())
+        with mock.patch.dict(os.environ, {"SI_SCOPE_BASE": "", "SI_P4_BASE_SHA": "abc"}):
+            self.assertEqual(px.scope_base(), "abc")  # 舊名同義相容
+        with self.assertRaises(AssertionError):
+            px.committed_names(good, "0" * 40)  # 基準解不開＝大聲失敗，不靜默放行
+        # SI_SCOPE_TIP：終點早於 HEAD 時只看 BASE..TIP（HEAD 之前的 commit 乾淨、最新 commit 越界）
+        tipped, tbase = px.scope_fixture({"README.md": "x\n"}, {"tools/selfimproving.py": "a\n"},
+                                         {"AgentConsole/late.txt": "z\n"})
+        self.addCleanup(shutil.rmtree, tipped.parent, True)
+        self.assertNotEqual(scope_problems(tipped, tbase), [])  # 預設終點 HEAD：越界
+        with mock.patch.dict(os.environ, {"SI_SCOPE_TIP": "HEAD~1"}):
+            self.assertEqual(px.scope_tip(), "HEAD~1")
+            self.assertEqual((scope_problems(tipped, tbase), console_problems(tipped, tbase)),
+                             ([], []))
+        with mock.patch.dict(os.environ, {"SI_SCOPE_TIP": "0" * 40}):
+            with self.assertRaises(AssertionError):
+                px.committed_names(tipped, tbase)
 
     def table(self) -> list[tuple[str, str]]:
         return re.findall(r"\| (AT-44\d-[\dE-]+) \| (FM|FG) \|", TCS.read_text(encoding="utf-8"))
@@ -627,7 +652,7 @@ class TestRepoState(unittest.TestCase):
         from lib.selfimproving import check as si_check
 
         self.assertEqual((len(selfimproving._HELP), len(si_events.KINDS), len(si_check.ITEM_IDS)
-                          if hasattr(si_check, "ITEM_IDS") else 35), (28, 27, 35))
+                          if hasattr(si_check, "ITEM_IDS") else 35), (29, 27, 35))
         self.assertEqual((len(si_params.PARAM_SPECS), si_params.CHECK_RULES_REV), (44, 6))
         self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (72, 27))
         from lib.selfimproving import status

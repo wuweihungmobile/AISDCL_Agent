@@ -480,6 +480,10 @@ class TestSandbox(P2TestCase):
         sites = 0
         for path in sorted(pkg.glob("*.py")):
             found = git_forms(path.read_text(encoding="utf-8"))
+            if path.name == "btwrite.py":  # P6 回測（FR-SI-46）：快照 worktree 只准住這一檔
+                self.assertFalse(set(found) & (GIT_FORBIDDEN - {"worktree"}), found)
+                self.assertIn("worktree", found)
+                continue
             sites += len(found)
             static += found
         self.assertFalse(set(static) & GIT_FORBIDDEN, set(static) & GIT_FORBIDDEN)

@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from . import decheck, fourqparse, meacheck, schedcheck
+from . import btscore, decheck, fourqparse, meacheck, schedcheck
 from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
@@ -144,7 +144,7 @@ def _prop_files(repo: Path, events: list[dict]) -> list[Finding]:
             sha = "sha256:" + hashlib.sha256(body.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
             if sha != ev.get("body_sha256"):
                 out.append(Finding(sub, "PROP-BODY-SHA-MISMATCH", "fail", ".md 雜湊與事件不符"))
-    return out + _verify_files(repo, events)
+    return out + _verify_files(repo, events) + btscore.ledger_findings(repo, events)
 
 
 def _verify_files(repo: Path, events: list[dict]) -> list[Finding]:

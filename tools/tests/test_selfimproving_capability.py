@@ -78,18 +78,20 @@ CAPABILITY: dict[str, str] = {
             "patrolbrief",
             "evspec",
             "fourqparse",
-            # P6（RR 半；BT 半 btcases／btscore 由回測實作棒登記）
+            # P6（RR 半＋BT 半）
             "registry",
             "netguard",
             "htmltext",
             "expand",
             "evspec6",
+            "btcases",
+            "btscore",
         )
     },
     **{
         f"{n}.py": "rw"
         for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
-            "obswrite", "meawrite", "schedwrite", "fourq", "regwrite")
+            "obswrite", "meawrite", "schedwrite", "fourq", "regwrite", "btwrite", "btrecord")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
     **{f"{n}.py": "exec" for n in ("runner", "verify", "patrol", "patrolrun", "schedarm")},

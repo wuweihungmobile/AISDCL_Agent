@@ -1834,8 +1834,8 @@ class TestZeroWriteAndSingleSource(IssueCase):
         import test_selfimproving_capability as cap
 
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 28)
-        self.assertEqual(verbs, {*LEGAL_VERBS, "issues", "fourq", "registry-ingest"})
+        self.assertEqual(len(verbs), 29)
+        self.assertEqual(verbs, {*LEGAL_VERBS, "issues", "fourq", "registry-ingest", "backtest"})
         cp = subprocess.run([sys.executable, str(ENTRY), "--help"], capture_output=True,
                             check=False)
         text = cp.stdout.decode("utf-8")

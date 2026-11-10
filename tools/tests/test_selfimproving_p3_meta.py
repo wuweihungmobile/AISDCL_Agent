@@ -296,12 +296,11 @@ class TestZeroRegression(f3.P3TestCase):
                               and underscore_form(a) not in names], [], prefix)
         import test_selfimproving_capability as cap
         self.assertEqual(si_params.CHECK_RULES_REV, 6)
-        self.assertEqual(len(selfimproving._HELP), 28)
-        self.assertIn(len(cap.CAPABILITY), (71, 72))  # P6：62→72（回測 4 檔由 BT 棒登記）
-        want = {71: (51, 13, 2, 5), 72: (52, 13, 2, 5)}[len(cap.CAPABILITY)]
+        self.assertEqual(len(selfimproving._HELP), 29)
+        self.assertEqual(len(cap.CAPABILITY), 72)  # P6：62→72（RR 6 檔＋回測 4 檔）
         got = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k)
                     for k in ("ro", "rw", "net", "exec"))
-        self.assertEqual(got, want)
+        self.assertEqual(got, (52, 13, 2, 5))
         body = fx.body_md("D")
         self.assertTrue("| retire_when |" in body and "| reopen_symptom |" in body)
         props_src = (TESTS / "test_selfimproving_props.py").read_text(encoding="utf-8")
