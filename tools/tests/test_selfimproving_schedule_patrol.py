@@ -339,6 +339,47 @@ class TestSpawnShape(P4TestCase):
             encoding="utf-8"))
         self.assertEqual((R / fx.LEDGER).read_bytes(), obs0)
 
+    def test_AT_438_1_3_changed_sources_are_copied_into_the_task_dir(self):
+        """D-IMP-12：研究者只讀得到 --add-dir 的任務目錄，brief 只能列任務目錄下的副本。"""
+        R = self.enabled_repo()
+        rig = Rig()
+        self.assertEqual(self.beat(R, O + H, rig)[0], 0)
+        run = opens_f(R)[0]["run"]
+        tdir = self.home / "patrol" / run
+        orig = next((self.home / "research").rglob("*.txt"))
+        copy = tdir / "research" / orig.name
+        self.assertEqual(copy.read_bytes(), orig.read_bytes())
+        self.assertTrue(copy.read_bytes())
+        brief = (tdir / "brief.md").read_text(encoding="utf-8")
+        self.assertIn(str(copy), brief)
+        self.assertNotIn(str(orig), brief)
+        self.assertEqual(len(rig.spawner.calls), 1)
+
+    def test_AT_438_1_E_4_source_copy_failure_does_not_spawn(self):
+        R = self.enabled_repo()
+        rig = Rig()
+        rig.write_source = False  # 原檔不存在＝複製必失敗
+        self.assertEqual(self.beat(R, O + H, rig)[0], 0)
+        self.assertEqual([(s["reason"], s["detail"].startswith("sources-copy-failed"))
+                          for s in skips(R)], [("spawn-failed", True)])
+        run = opens_f(R)[0]["run"]
+        tdir = self.home / "patrol" / run
+        self.assertEqual(len(rig.spawner.calls), 0)
+        self.assertFalse((tdir / "spawn.json").exists())
+        self.assertFalse((tdir / "research").exists())
+
+    def test_AT_438_1_E_5_research_skip_has_no_copies_and_no_source_files(self):
+        R = self.enabled_repo()
+        rig = Rig(fetch_rcs=[1])
+        self.assertEqual(self.beat(R, O + H, rig)[0], 0)
+        run = opens_f(R)[0]["run"]
+        tdir = self.home / "patrol" / run
+        self.assertEqual(len(evs(R, "research.skip")), 1)
+        self.assertFalse((tdir / "research").exists())
+        brief = (tdir / "brief.md").read_text(encoding="utf-8")
+        self.assertNotIn(str(self.home / "research"), brief)
+        self.assertEqual(len(rig.spawner.calls), 1)
+
     def test_AT_438_1_E_1_missing_claude_is_a_skip_before_any_run(self):
         R = self.enabled_repo()
         rig = Rig(which=None)

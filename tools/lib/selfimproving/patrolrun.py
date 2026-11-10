@@ -46,9 +46,11 @@ def child_env(run: str, parent) -> dict[str, str]:
     return env
 
 
-def _research_text(events: list[dict], run: str) -> tuple[str, list[str], str]:
-    """（研究結果一句、changed=true 來源檔路徑、研究狀態）；來源檔在
-    `<si>/research/<id>/<sha12>.txt`。"""
+def _research_text(events: list[dict], run: str,
+                   tdir: Path | None = None) -> tuple[str, list[str], str]:
+    """（研究結果一句、changed=true 來源檔路徑、研究狀態）；原檔在
+    `<si>/research/<id>/<sha12>.txt`。帶 `tdir` 時列任務目錄下的副本路徑（D-IMP-12：
+    研究者與四問審視者只讀得到 `--add-dir` 的任務目錄）。"""
     r = si_fold.fold(events).runs.get(run)
     ev = next((e for e in events if r and r.research and e["seq"] == r.research[1]), None)
     if ev is None:
@@ -59,7 +61,25 @@ def _research_text(events: list[dict], run: str) -> tuple[str, list[str], str]:
     files = [str(si / "research" / s["id"] / f"{s['sha256'].split(':')[1][:12]}.txt")
              for s in ev["sources"] if s["changed"]]
     note = f"來源 {len(ev['sources'])} 筆，changed {len(files)} 筆"
+    if tdir is not None:
+        files = [str(tdir / "research" / Path(f).name) for f in files]
     return f"research.scan seq={ev['seq']}（{note}）", files, "scan"
+
+
+def stage_sources(events: list[dict], run: str, tdir: Path) -> None:
+    """把 changed=true 來源檔逐位元組複製到 `tdir/research/`（D-IMP-12）；任一檔失敗＝
+    清掉半套副本並拋 `OSError`（呼叫端據此不 spawn）。"""
+    srcs = _research_text(events, run)[1]
+    if not srcs:
+        return
+    dest = tdir / "research"
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        for s in srcs:
+            (dest / Path(s).name).write_bytes(Path(s).read_bytes())
+    except OSError:
+        shutil.rmtree(dest, ignore_errors=True)
+        raise
 
 
 def _events_text(ctx) -> str:
@@ -89,8 +109,8 @@ def compose(ctx, run: str, trigger: str, due_at: str, scan_rows: list[str]) -> s
     tpl = patrolbrief.template_of(sop)
     if tpl is None or patrolbrief.template_problems(sop):
         raise ValueError("sop-template:" + ",".join(patrolbrief.template_problems(sop)))
-    result, files, _ = _research_text(events, run)
     tdir = task_dir(ctx.si, run)
+    result, files, _ = _research_text(events, run, tdir)
     fields = {
         "RUN": run, "HEAD_SHA": ctx.git().head() or "unknown", "NOW_ISO": sched.iso(ctx.now),
         "DUE_AT": due_at, "BAND": ctx.band,
@@ -185,6 +205,10 @@ def launch(ctx, run: str, *, trigger: str, due_at: str) -> tuple[str, str]:
     rows = _scan_rows(ctx)
     for row in rows:
         ctx.log("運轉", 0, "-", f"{run} scan 候選：{row}")
+    try:
+        stage_sources(ctx.load(), run, tdir)
+    except OSError as exc:  # 副本不齊就不 spawn：研究者讀不到來源檔等於白跑
+        return "failed", f"sources-copy-failed: {type(exc).__name__}"
     try:
         brief = compose(ctx, run, trigger, due_at, rows)
     except (OSError, ValueError) as exc:

@@ -259,6 +259,7 @@ class Rig:
         self.now = O
         self.boom: Exception | None = None
         self.scan_rows: list[str] | None = None
+        self.write_source = True
 
     def deps(self, R: Path):
         def verbs(argv):
@@ -283,6 +284,12 @@ class Rig:
             run = argv[argv.index("--run") + 1]
             src = {"id": "src-a", "sha256": fx.H(11), "bytes": 10, "changed": self.changed,
                    "http_status": 200}
+            if self.changed and self.write_source:  # 真 fetch 會落原檔（D-IMP-12 複製來源）
+                from lib.selfimproving import events as si_events
+                sha12 = src["sha256"].split(":")[1][:12]
+                f = si_events.si_dir() / "research" / "src-a" / f"{sha12}.txt"
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_bytes(b"source-bytes \x00\xff " + run.encode())
             fx.append_events(R, [fx.ev("research.scan", "researcher", t=iso(self.now), run=run,
                                        sources=[src], sources_sha256=fx.H(12),
                                        fetched_at=iso(self.now))])

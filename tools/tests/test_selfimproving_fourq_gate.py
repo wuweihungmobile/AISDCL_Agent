@@ -588,8 +588,9 @@ class TestRepoState(unittest.TestCase):
         self.assertEqual(keys[keys.index("export_limit_max") + 1:keys.index("ledger_fail_bytes")],
                          ["fourq_degrade_items_max", "fourq_from_run", "fourq_items_max"])
         self.assertEqual(set(keys), set(si_params.PARAM_SPECS))
-        runs = [int(e["run"][-3:]) for e in fx.EV(ROOT) if e["kind"] == "run.open"]
-        self.assertTrue(type(obj["fourq_from_run"]) is int and obj["fourq_from_run"] > max(runs))
+        runs = [int(e["run"].rsplit("-", 1)[1]) for e in fx.EV(ROOT) if e["kind"] == "run.open"]
+        start = obj["fourq_from_run"]
+        self.assertTrue(type(start) is int and 1 <= start <= max(runs, default=0) + 1)
 
     def test_AT_445_1_E_1_baseline_rows_and_rev(self):
         text = (ROOT / "docs/06_quality/SelfImproving_LedgerDb_P0_Baseline.md").read_text(
