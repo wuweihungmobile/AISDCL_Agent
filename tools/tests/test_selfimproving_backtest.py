@@ -27,7 +27,7 @@ from unittest import mock
 import _selfimproving_fixtures as fx
 import _selfimproving_p6_fixtures as px
 
-from lib.selfimproving import btcases, btrecord, btscore, evspec, fourqparse
+from lib.selfimproving import btcases, btscore, evspec, fourqparse
 from lib.selfimproving import events as si_events
 from lib.selfimproving import writeverbs as wv
 from lib.selfimproving.git import Git

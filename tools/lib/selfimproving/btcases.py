@@ -13,9 +13,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from . import defs
+from . import defs, refs, rows
 from . import events as si_events
-from . import refs, rows
 from .git import Git
 
 BT_DIR_REL = "docs/06_quality/SelfImproving_Backtest"

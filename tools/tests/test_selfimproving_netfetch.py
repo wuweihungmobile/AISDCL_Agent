@@ -202,7 +202,6 @@ class TestDigest(NfCase):
 
     def test_AT_630_3_E_6_fetch_runs_outside_the_ledger_lock(self):
         from lib import apply_lock
-
         from lib.selfimproving import evwrite
         repo = px.repo(mirror=mirror_of(watch("a", "https://a.example.org/x")))
         held = []

@@ -25,8 +25,8 @@ from unittest import mock
 
 import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
-import _selfimproving_p6_fixtures as px
 import _selfimproving_p5_fixtures as f5
+import _selfimproving_p6_fixtures as px
 from _selfimproving_p5_fixtures import P5TestCase, answers
 
 import selfimproving

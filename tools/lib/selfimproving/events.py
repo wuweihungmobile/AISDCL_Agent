@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import evspec6 as _p6
 from .evspec import (  # noqa: F401  # 再匯出：既有呼叫端以 si_events.<名> 取用
     _ALWAYS_OPTIONAL,
     _ATTR_KEYS,
@@ -83,7 +84,6 @@ from .evspec import (  # noqa: F401  # 再匯出：既有呼叫端以 si_events.
     valid_t,
     valid_uuid,
 )
-from . import evspec6 as _p6
 
 # P6 併表：兩個新 kind 與 `research.scan` 的新欄位／選填（規格唯一住 `evspec6.py`）
 _SPEC.update(_p6.SPEC)

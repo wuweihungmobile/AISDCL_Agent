@@ -18,9 +18,9 @@ import unittest
 from pathlib import Path
 
 import _selfimproving_fixtures as fx
-import _selfimproving_p6_fixtures as px
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p3_fixtures as f3
+import _selfimproving_p6_fixtures as px
 from _selfimproving_p3_fixtures import D3, win
 from test_selfimproving_p2_meta import (
     anchor_problems,

@@ -1,10 +1,10 @@
 """SelfImproving 外聯：對研究來源抓原始位元組（P1 R58；P6 改為 `fetch_chain`）。
 
 能力類別 `net`：整個套件**唯一** import `urllib`／`http`／`socket`／`ssl` 的檔。
-`fetch_chain` 只准 https:443、不帶任何認證標頭、`Accept-Encoding: identity`、DNS 解析一次且全部位址須公網、以驗證過的 IP 連線
-（SNI／Host 為原主機名）、重導向逐跳重驗（至多 5 跳）、每條請求鏈的牆鐘與位元組有界（超界即中止、
-不截斷）。失敗原因為封閉集合：timeout、http-status、too-large、non-text、encoding、redirect-refused、
-blocked、private-ip、network。
+`fetch_chain` 只准 https:443、不帶認證標頭、`Accept-Encoding: identity`；DNS 只解析一次、
+全部位址須公網、以驗證過的 IP 連線（SNI／Host 為原主機名）、重導向逐跳重驗（至多 5 跳）、
+每條請求鏈的牆鐘與位元組有界（超界即中止、不截斷）。失敗原因為封閉集合：timeout、http-status、
+too-large、non-text、encoding、redirect-refused、blocked、private-ip、network。
 """
 
 from __future__ import annotations

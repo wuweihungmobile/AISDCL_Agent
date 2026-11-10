@@ -16,8 +16,8 @@ import unittest
 from pathlib import Path
 
 import _selfimproving_fixtures as fx
-import _selfimproving_p6_fixtures as px
 import _selfimproving_p2_fixtures as fx2
+import _selfimproving_p6_fixtures as px
 from _selfimproving_p2_fixtures import P2TestCase
 
 from lib.selfimproving import events as si_events

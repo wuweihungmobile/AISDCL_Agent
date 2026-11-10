@@ -20,9 +20,19 @@ from unittest import mock
 import _selfimproving_fixtures as fx
 import _selfimproving_p6_fixtures as px
 
-from lib.selfimproving import consoleaudit, evwrite, patrol, registry, regwrite, sched, status
+from lib.selfimproving import (
+    consoleaudit,
+    evspec6,
+    evwrite,
+    issuemap,
+    params,
+    patrol,
+    registry,
+    regwrite,
+    sched,
+    status,
+)
 from lib.selfimproving import events as si_events
-from lib.selfimproving import evspec6, issuemap, params
 from lib.selfimproving import sources as si_sources
 from lib.selfimproving import writeverbs as wv
 
