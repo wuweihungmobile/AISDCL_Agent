@@ -17,7 +17,7 @@ from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
 from . import refs as si_refs
-from . import sources as si_sources
+from . import registry as si_registry
 from .evspec import (  # noqa: F401
     _TICK_RE,
     _outside_ticks,
@@ -291,8 +291,7 @@ def validate(raw: bytes, repo: Path | None = None, *, run: str | None = None,
               for k in ("q1", "q1x", "q2", "q3", "q4") if c[k] > items_max]
     if not replay or repo is None:
         return probs, items, []
-    srcs = si_sources.ids_or_none((repo / si_sources.SOURCES_REL).read_bytes()
-                                  if (repo / si_sources.SOURCES_REL).is_file() else None)
+    srcs = si_registry.known_ids(repo)  # P6：鏡像全列 ∪ 凍結舊表全列
     corp = load_corpus(repo)
     obs, defs = si_refs.obs_rows(repo), si_refs.def_ids(repo)
     if corp is None and any(i.queries for i in items):

@@ -508,7 +508,7 @@ class TestVerb(P5TestCase):
         self.assertIn("FOURQ-SHA-MISMATCH", {c for _, c in self.F(res, "events.research")})
 
     def test_AT_442_4_1_kinds_and_events_validate(self):
-        self.assertEqual(len(si_events.KINDS), 25)
+        self.assertEqual(len(si_events.KINDS), 27)
         for name in ("validate", "sound", "read_lines", "KINDS", "SKIP_REASONS", "LEDGER_REL",
                      "PROPOSALS_REL", "OBS_ID_RE", "RUN_RE", "PROP_RE", "DKINDS", "valid_by"):
             self.assertIs(getattr(si_events, name), getattr(evspec, name, getattr(

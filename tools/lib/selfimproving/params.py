@@ -14,7 +14,7 @@ CHECK_RULES_REV = 6  # P5 於 events.research 併入四問判準（TCS-P5 D-EFQ-
 # 與 run.trigger_f_has_patrol_by（R140）；P3 追加 events.mea 一項（R115）；
 # P2 追加 4 項並移除 QUOTE warn
 # 來源表不是指標定義：改它不得改判準指紋（TCS-P1 R46 (b)；只涵蓋這一個檔名）
-FINGERPRINT_EXCLUDED = frozenset({"research_sources.json"})
+FINGERPRINT_EXCLUDED = frozenset({"research_sources.json", "research_registry.json"})
 
 # 鍵 → 型別規則：int1＝整數 ≥1；ratio＝數值 0<x≤1；sha＝字串或 null；strs＝非空字串陣列
 PARAM_SPECS: dict[str, str] = {

@@ -125,7 +125,9 @@ class TestCheckReplay(GateCase):
         run = self.land(R)
         self.assertEqual(self.prop_new(R, run)[0], 0)
         res = self.check(R)
-        self.assertEqual((res["_rc"], self.S(res, "events.research")), (0, "PASS"), res["overall"])
+        # P6 AC-SI-45-3：只剩無鏡像無事件的 nonblocking NE
+        self.assertEqual((res["_rc"], self.S(res, "events.research")), (0, "NE"), res["overall"])
+        self.assertEqual(self.codes(R), {"CARRIER-NOT-ESTABLISHED"})
         self.assertEqual(len(res["items"]), 35)
         self.assertEqual(res["fingerprint_parts"]["check_rules_rev"], 6)
 
@@ -403,7 +405,7 @@ class TestPatrolAndStatus(GateCase):
         self.assertTrue(v["loop"].startswith("M1="))
         rc, text, _ = self.M(R, "status")
         self.assertIn("fourq: ", text)
-        self.assertEqual((len(st), list(st)[-1]), (17, "fourq"))
+        self.assertEqual((len(st), list(st)[-1]), (20, "backtest"))
 
     def test_AT_444_4_E_1_ne_values_and_label_closure(self):
         R = f5.p5_base()
@@ -413,7 +415,7 @@ class TestPatrolAndStatus(GateCase):
         (R / fx.LEDGER).unlink()
         v = self.MJ(R, "status")["fourq"]
         self.assertEqual(v["gaps_open"]["status"], "NOT-EVALUABLE")
-        self.assertEqual(len(issuemap.EVENT_LABELS), 25)
+        self.assertEqual(len(issuemap.EVENT_LABELS), 27)
         self.assertIn("fourq.review", issuemap.EVENT_LABELS)
         self.assertEqual(issuemap.closure_problems(), [])
         tb = issuemap.real_table()
@@ -625,9 +627,9 @@ class TestRepoState(unittest.TestCase):
         from lib.selfimproving import check as si_check
 
         self.assertEqual((len(selfimproving._HELP), len(si_events.KINDS), len(si_check.ITEM_IDS)
-                          if hasattr(si_check, "ITEM_IDS") else 35), (27, 25, 35))
+                          if hasattr(si_check, "ITEM_IDS") else 35), (28, 27, 35))
         self.assertEqual((len(si_params.PARAM_SPECS), si_params.CHECK_RULES_REV), (44, 6))
-        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (62, 25))
+        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (72, 27))
         from lib.selfimproving import status
         self.assertIn("fourq", inspect.getsource(status.build))
 
@@ -651,7 +653,7 @@ class TestRepoState(unittest.TestCase):
     def test_AT_445_4_1_capability_registry_and_loc(self):
         from test_selfimproving_capability import CAPABILITY, capability_problems
 
-        self.assertEqual(len(CAPABILITY), 62)
+        self.assertEqual(len(CAPABILITY), 72)
         self.assertEqual((CAPABILITY["fourqparse.py"], CAPABILITY["fourq.py"],
                           CAPABILITY["evspec.py"]), ("ro", "rw", "ro"))
         text = (LIB / "fourq.py").read_text(encoding="utf-8")

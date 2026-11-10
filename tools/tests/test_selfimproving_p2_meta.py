@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 import _selfimproving_fixtures as fx
+import _selfimproving_p6_fixtures as px
 import _selfimproving_p2_fixtures as fx2
 from _selfimproving_p2_fixtures import P2TestCase
 
@@ -473,7 +474,9 @@ class TestZeroRegression(P2TestCase):
             ids += sorted({m for m in re.findall(r"^# (AT-[\d-]+(?:-E-\d+|-\d+)?)\s*$",
                                                  real_tcs(prefix), re.M)})
         self.assertEqual(len(ids), 205)
-        missing = [a for a in ids if underscore_form(a) not in names]
+        sup = px.SUPERSEDED_P1  # P6：舊抓取 AT 由 P6 AT 取代（取代者須存在）
+        self.assertEqual([b for b in sup.values() if underscore_form(b) not in names], [])
+        missing = [a for a in ids if a not in sup and underscore_form(a) not in names]
         self.assertEqual(missing, [])
         self.assertEqual(set(si_params.PARAM_SPECS), {*P1_PARAMS, "probe_timeout_seconds",
                                                       "verify_runs_max", "memory_index_max_lines",

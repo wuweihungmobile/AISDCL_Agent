@@ -10,6 +10,7 @@ KEY／TOKEN／SECRET／PASSWORD 的變數）。
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
@@ -57,26 +58,79 @@ def _research_text(events: list[dict], run: str,
         return "尚無研究事件", [], "none"
     if ev["kind"] == "research.skip":
         return f"research.skip（reason={ev['reason']}）", [], "skip"
-    si = si_events.si_dir()
-    files = [str(si / "research" / s["id"] / f"{s['sha256'].split(':')[1][:12]}.txt")
-             for s in ev["sources"] if s["changed"]]
-    note = f"來源 {len(ev['sources'])} 筆，changed {len(files)} 筆"
-    if tdir is not None:
-        files = [str(tdir / "research" / Path(f).name) for f in files]
+    try:
+        plan = _staged(ev)
+    except ScansMismatch:  # 呼叫端（`launch`）隨後的 `stage_sources` 會以同一例外拒絕 spawn
+        plan = []
+    changed = sum(1 for s in ev["sources"] if s["changed"])
+    note = f"來源 {len(ev['sources'])} 筆，changed {changed} 筆"
+    files = [str(src) if tdir is None else str(tdir / "research" / name) for src, name in plan]
     return f"research.scan seq={ev['seq']}（{note}）", files, "scan"
 
 
+class ScansMismatch(ValueError):
+    """`_scans/<RUN>.json` 缺或位元組雜湊不等於事件的 `articles_sha256`（不 spawn）。"""
+
+
+def _article_paths(ev: dict, si: Path) -> list[tuple[Path, str]]:
+    """明細檔（先驗雜湊）中 changed=true 的文章檔：純文字旁檔優先，非 HTML 取原檔。"""
+    if "articles_sha256" not in ev:
+        return []
+    try:
+        raw = (si / "research" / "_scans" / f"{ev['run']}.json").read_bytes()
+        items = json.loads(raw.decode("utf-8"))["items"]
+    except (OSError, ValueError, KeyError):
+        raise ScansMismatch("sources-scans-mismatch") from None
+    if "sha256:" + hashlib.sha256(raw).hexdigest() != ev["articles_sha256"]:
+        raise ScansMismatch("sources-scans-mismatch")
+    out = []
+    for it in items:
+        if it.get("status") != "ok" or not it.get("changed"):
+            continue
+        sha12 = it["sha256"].split(":")[1][:12]
+        folder = si / "research" / it["source"] / "articles"
+        out.append((folder / (f"{sha12}.plain.txt" if it.get("plain_sha256") else f"{sha12}.txt"),
+                    it["source"]))
+    return out
+
+
+def _staged(ev: dict) -> list[tuple[Path, str]]:
+    """（原檔, 任務目錄內檔名）：changed=true 來源的 `<sha12>.txt` 與（若有）`.plain.txt`，再加
+    changed=true 文章檔；檔名衝突者後來者以 `<id>__<檔名>` 前綴避開（AC-SI-30-10）。"""
+    si = si_events.si_dir()
+    pairs: list[tuple[Path, str]] = []
+    for s in ev["sources"]:
+        if not s["changed"]:
+            continue
+        base = si / "research" / s["id"] / f"{s['sha256'].split(':')[1][:12]}.txt"
+        pairs.append((base, s["id"]))
+        plain = base.with_name(base.stem + ".plain.txt")
+        if plain.is_file():
+            pairs.append((plain, s["id"]))
+    pairs += _article_paths(ev, si)
+    taken: set[str] = set()
+    out = []
+    for src, owner in pairs:
+        name = src.name if src.name not in taken else f"{owner}__{src.name}"
+        taken.add(name)
+        out.append((src, name))
+    return out
+
+
 def stage_sources(events: list[dict], run: str, tdir: Path) -> None:
-    """把 changed=true 來源檔逐位元組複製到 `tdir/research/`（D-IMP-12）；任一檔失敗＝
-    清掉半套副本並拋 `OSError`（呼叫端據此不 spawn）。"""
-    srcs = _research_text(events, run)[1]
-    if not srcs:
+    """把 changed=true 來源檔（含純文字旁檔）與 changed=true 文章檔逐位元組複製到 `tdir/research/`
+    （D-IMP-12、AC-SI-30-10）；任一檔失敗＝清掉半套副本並拋 `OSError`；明細雜湊不符拋
+    `ScansMismatch`（呼叫端據此不 spawn）。"""
+    r = si_fold.fold(events).runs.get(run)
+    ev = next((e for e in events if r and r.research and e["seq"] == r.research[1]), None)
+    plan = _staged(ev) if ev is not None and ev["kind"] == "research.scan" else []
+    if not plan:
         return
     dest = tdir / "research"
     try:
         dest.mkdir(parents=True, exist_ok=True)
-        for s in srcs:
-            (dest / Path(s).name).write_bytes(Path(s).read_bytes())
+        for src, name in plan:
+            (dest / name).write_bytes(src.read_bytes())
     except OSError:
         shutil.rmtree(dest, ignore_errors=True)
         raise
@@ -207,6 +261,8 @@ def launch(ctx, run: str, *, trigger: str, due_at: str) -> tuple[str, str]:
         ctx.log("運轉", 0, "-", f"{run} scan 候選：{row}")
     try:
         stage_sources(ctx.load(), run, tdir)
+    except ScansMismatch as exc:  # 篇目明細與事件不符：不 spawn（AC-SI-30-10）
+        return "failed", str(exc)
     except OSError as exc:  # 副本不齊就不 spawn：研究者讀不到來源檔等於白跑
         return "failed", f"sources-copy-failed: {type(exc).__name__}"
     try:

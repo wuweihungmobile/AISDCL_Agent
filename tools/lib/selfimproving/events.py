@@ -83,6 +83,12 @@ from .evspec import (  # noqa: F401  # 再匯出：既有呼叫端以 si_events.
     valid_t,
     valid_uuid,
 )
+from . import evspec6 as _p6
+
+# P6 併表：兩個新 kind 與 `research.scan` 的新欄位／選填（規格唯一住 `evspec6.py`）
+_SPEC.update(_p6.SPEC)
+_SPEC["research.scan"].update(_p6.SCAN_EXTRA)
+_ALWAYS_OPTIONAL["research.scan"] = _p6.SCAN_OPTIONAL
 
 
 @dataclass
@@ -227,6 +233,7 @@ def _conditional(kind: str, obj: dict, body: dict) -> list[tuple[str, str]]:
         out += fourq_rules(kind, obj, body)
     if kind == "run.close" and (("outcomes" in body) == ("no_event" in body)):
         out.append(("EVENT-TYPE", "run.close 的 outcomes／no_event 須恰有一個"))
+    out += _p6.rules(kind, obj, body)
     if kind == "research.scan" and obj.get("by") != "researcher":
         out.append(("EVENT-TYPE", "research.scan 的 by 恆為 researcher"))
     if kind == "research.skip":

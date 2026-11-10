@@ -23,7 +23,7 @@ from . import events as si_events
 
 KEY_ENV = "AUTOSDD_SI_AUDIT_KEY"
 AUDIT_DIR = "console_audit"
-KINDS = ("decide", "obs-add", "obs-close", "sched-set", "run-request")
+KINDS = ("decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry")
 _OUTER_KEYS = {"schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac"}
 _USER_RE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _TIME_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d")

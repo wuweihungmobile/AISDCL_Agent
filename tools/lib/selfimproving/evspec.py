@@ -30,6 +30,7 @@ KINDS = (
     "attr.reject", "prop", "card", "dec", "heldout.freeze", "app.sandbox", "app.verify",
     "app.promote", "app.rollback", "mea.open", "mea.close", "mea.amend", "mea.report",
     "obs.add", "obs.close", "sched.set", "sched.skip", "fourq.review", "fourq.skip",
+    "research.registry", "backtest.result",  # P6：欄位表併表見 `events.py`／`evspec6.py`
 )
 SKIP_REASONS = ("disabled", "blackout", "quota-band", "other-driver", "dirty-tree", "run-open",
                 "spawn-failed")

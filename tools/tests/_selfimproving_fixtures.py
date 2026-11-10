@@ -1582,8 +1582,8 @@ FRAGMENTS: list[tuple[str, str]] = (
             "每運轉至多一個",
             "--pace",
             "quota-band",
-            "research_sources.json",
-            "僅 T1",
+            "research_registry.json",
+            "唯一設定處是 Console",
         )
     ]
 )

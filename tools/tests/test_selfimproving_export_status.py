@@ -44,6 +44,9 @@ STATUS_KEYS = [
     "measure",
     "schedule",
     "fourq",
+    "research_fetch_max",
+    "research_registry",
+    "backtest",
 ]
 EXPORT_KEYS = [
     "schema_rev",

@@ -104,7 +104,7 @@ class P5TestCase(fx2.P2TestCase):  # 名稱含 TestCase：discover 守門不解�
 
 
 # ---- SOP 判準（TCS-P5 AT-441-1／AT-445-3；圍欄感知：答案檔範本圍欄內含 `# `／`## `）----
-RESEARCHER_SHA = "e961796c0a61ab4281db40c6d52a0f7274ff880048bb6883c65deefd526b1593"
+RESEARCHER_SHA = "ac696ba9cd30adbe7ac689b466172ab655c6914a4fc3851160a956217a8ea212"
 METHODOLOGY_SHA = "deb9716bb56cdd6f9cf47a28fa62aa1a869d71b0ab6a4aa8146dab5f8f69b2b2"
 METHODOLOGY_REL = "docs/05_development/SelfImproving_Research_Methodology_SOP.md"
 REQ = ("Read／Grep／Glob", "無 Web", "不得 Write／Edit", "零遞迴", "不同代理實例", "--pace",

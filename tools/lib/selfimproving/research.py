@@ -1,70 +1,159 @@
-"""SelfImproving `research --fetch`：鎖外抓取、鎖內重驗與追加（TCS-SelfImproving-P1 R57、R58）。
+"""SelfImproving `research --fetch`：鎖外抓取、鎖內重驗與追加（AC-SI-30-2～30-9；P6 改寫）。
 
 能力類別 `net`（因 import `fetch` 而歸此類；本檔自身不直接 import 網路模組）。流程：預檢（發出任何
-請求之前，任一失敗＝整次拒收、零請求、零事件）→ 依來源表順序逐一抓取（不併發、不持鎖）→ 取寫入鎖
-→ 鎖內重驗（運轉仍 open、仍無研究事件、來源表雜湊未變）→ 以鎖內最新事件重算 `changed` → 追加
-`research.scan`。失敗的來源不入事件、不以舊 digest 代填；成功的來源檔先落地、事件後追加。
+請求之前，任一失敗＝整次拒收、零請求、零事件；讀 Console 登記鏡像，不讀凍結舊表）→ 依鏡像順序逐一
+抓取（不併發、不持鎖；每筆啟用來源再驗 host ∈ 鏡像網域）→ 文章展開（每次掃描都做）→ 取寫入鎖 →
+鎖內重驗（運轉仍 open、仍無研究事件、鏡像仍綁定同一筆 `research.registry`）→ 以鎖內最新事件重算
+`changed` → 追加 `research.scan`（新格式：`registry_seq`／`registry_sha256`，無 `sources_sha256`）。
+失敗的來源不入事件、不以舊 digest 代填；成功的來源檔先落地、事件後追加。
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import time
 from pathlib import Path
 
 from . import events as si_events
-from . import evwrite
+from . import evwrite, expand, htmltext, registry
 from . import fetch as si_fetch
 from . import fold as si_fold
-from . import sources as si_sources
-from .git import Git
 from .writeverbs import Out, UsageError, append, draft_for, obs_top, ok_text, params_for, reject
 
 _KEYS = ("research_fetch_max", "research_bytes_max", "research_timeout_seconds", "event_max_bytes")
-_NE_COMMIT = {"field": "sources-commit-check", "reason": "git-unavailable"}
+SCAN_WALL_SECONDS = 600
+PAUSE_HOOK = None  # 測試鉤子：全部來源抓取完成、取寫入鎖之前（不沿用 evwrite.PAUSE_HOOK）
+CLOCK = time.monotonic  # 單調時鐘縫（測試注入偽時鐘）
+now_iso = evwrite.now_iso
+_HTML = ("text/html", "application/xhtml+xml")
 
 
-def _precheck(repo: Path, run: str, params: dict, git: Git) -> tuple[list, bytes | None, list]:
-    """預檢：回（問題碼, 換行正規化後的來源表位元組, ne 提示）。"""
+def _precheck(repo: Path, run: str, params: dict) -> tuple[list, bytes | None, dict | None]:
+    """預檢：回（問題碼, 鏡像位元組, 鏡像物件）。碼序見 AC-SI-30-2。"""
     codes: list = []
-    ne: list = []
-    f = si_fold.fold(si_events.load_sound_events(repo / si_events.LEDGER_REL) or [])
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL) or []
+    f = si_fold.fold(events)
     r = f.runs.get(run)
     if r is None or r.closed_seq is not None:
         codes.append(("RUN-NOT-OPEN", f"{run} 不是已開未關的運轉"))
     if any(rn == run for _, _, rn, _ in f.research_events):
         codes.append(("RESEARCH-ALREADY", f"{run} 已有研究事件"))
-    path = repo / si_sources.SOURCES_REL
-    if not path.is_file():
-        return codes + [("SOURCES-ABSENT", "來源表不存在")], None, ne
-    raw = path.read_bytes().replace(b"\r\n", b"\n")
-    codes += [(code, f"{sub} {detail}") for code, sub, detail in
-              si_sources.validate_table(raw, si_sources.DEFAULT_POLICY)]
-    active = si_sources.active_entries(raw)
-    if len(active) > params["research_fetch_max"]:
-        codes.append(("FETCH-MAX", f"現役來源 {len(active)} 筆 > {params['research_fetch_max']}"))
-    if git.available:
-        head = git.show("HEAD", si_sources.SOURCES_REL)
-        if head is None or head.replace("\r\n", "\n").encode("utf-8") != raw:
-            codes.append(("SOURCES-UNCOMMITTED", "來源表有未提交的改動（或未入 HEAD）"))
-    else:
-        ne.append(dict(_NE_COMMIT))
-    if not active:
-        codes.append(("ZERO-SUCCESS", "沒有現役來源可抓"))
-    return codes, raw, ne
+    raw = registry.read_mirror(repo)
+    if raw is None:
+        absent = ("REGISTRY-ABSENT", "研究來源登記鏡像不存在（由 Console 同步入帳）")
+        return codes + [absent], None, None
+    bad = registry.validate(raw)
+    codes += [(code, f"{sub} {detail}") for code, sub, detail in bad]
+    ev = registry.latest_event(events)
+    if ev is None or ev.get("registry_sha256") != registry.sha_of(raw):
+        codes.append(("REGISTRY-UNBOUND", "鏡像位元組雜湊不等於最新 research.registry 事件"))
+    obj = None if bad else registry.parse(raw)
+    if obj is not None:
+        on = [w for w in obj["watch"] if w["enabled"]]
+        if len(on) > params["research_fetch_max"]:
+            codes.append(("FETCH-MAX", f"啟用來源 {len(on)} 筆 > {params['research_fetch_max']}"))
+        if not on:
+            codes.append(("ZERO-SUCCESS", "沒有啟用來源可抓"))
+    return codes, raw, obj
 
 
-def _land(si: Path, ident: str, raw: bytes) -> str:
+def _land(folder: Path, raw: bytes, ctype: str, latest: bool) -> tuple[str, str | None]:
+    """原始位元組落地 `<sha12>.txt`（HTML 類另落確定性純文字旁檔）；回（sha256, 純文字 sha）。"""
     sha = hashlib.sha256(raw).hexdigest()
-    folder = si / "research" / ident
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{sha[:12]}.txt").write_bytes(raw)
-    (folder / "latest").write_bytes(sha[:12].encode("ascii"))
-    return sha
+    plain = None
+    if ctype in _HTML:
+        text = htmltext.to_plain(raw)
+        (folder / f"{sha[:12]}.plain.txt").write_bytes(text)
+        plain = hashlib.sha256(text).hexdigest()
+    if latest:
+        (folder / "latest").write_bytes(sha[:12].encode("ascii"))
+    return sha, plain
+
+
+def _prev_items(si: Path, events: list[dict]) -> dict[str, str]:
+    """上一次有明細的掃描：url → sha256；明細檔缺或雜湊不符＝空（全部 changed）。"""
+    for ev in sorted(events, key=lambda e: -e["seq"]):
+        if ev.get("kind") == "research.scan" and "articles_sha256" in ev:
+            try:
+                raw = (si / "research" / "_scans" / f"{ev['run']}.json").read_bytes()
+                if registry.sha_of(raw) != ev["articles_sha256"]:
+                    return {}
+                return {i["url"]: i["sha256"] for i in json.loads(raw)["items"] if "sha256" in i}
+            except (OSError, ValueError, KeyError, TypeError):
+                return {}
+    return {}
+
+
+class _Scan:
+    """一次掃描的可變狀態：牆鐘、已抓來源、失敗、文章明細。"""
+
+    def __init__(self, si: Path, params: dict, hosts: set, prev: dict[str, str]) -> None:
+        self.si, self.params, self.hosts, self.prev = si, params, hosts, prev
+        self.deadline = CLOCK() + SCAN_WALL_SECONDS
+        self.got: list[dict] = []
+        self.failed: list[dict] = []
+        self.items: list[dict] = []
+
+    def get(self, url: str):
+        if CLOCK() >= self.deadline:
+            raise si_fetch.FetchError("timeout", "整次掃描牆鐘已到")
+        return si_fetch.fetch_chain(url, hosts=self.hosts, clock=CLOCK,
+                                    timeout=self.params["research_timeout_seconds"],
+                                    max_bytes=self.params["research_bytes_max"])
+
+    def source(self, w: dict) -> None:
+        try:
+            res = self.get(w["url"])
+        except si_fetch.FetchError as exc:
+            self.failed.append({"id": w["id"], "reason": exc.reason, "detail": exc.detail})
+            return
+        sha, _ = _land(self.si / "research" / w["id"], res.raw, res.ctype, True)
+        self.got.append({"id": w["id"], "sha256": f"sha256:{sha}", "bytes": len(res.raw),
+                         "http_status": res.status})
+        if w["expand"]:
+            self.articles(w, res)
+
+    def articles(self, w: dict, res) -> None:
+        ex, ident = w["expand"], w["id"]
+        try:
+            ents = (expand.sitemap_entries(res.raw) if ex["mode"] == "sitemap"
+                    else expand.link_targets(res.raw, res.ctype, w["url"]))
+        except expand.ExpandRefused:
+            self.items.append({"source": ident, "status": "expand-refused"})
+            return
+        except expand.ExpandFailed:
+            self.items.append({"source": ident, "status": "expand-failed"})
+            return
+        for rank, url in enumerate(expand.select(ents, w["url"], ex["prefix"], ex["max"]), 1):
+            item = {"source": ident, "url": url, "rank": rank}
+            try:
+                art = self.get(url)
+            except si_fetch.FetchError as exc:
+                self.items.append({**item, "status": exc.reason})
+                self.failed.append({"id": f"{ident}#{rank}", "reason": exc.reason,
+                                    "detail": exc.detail, "article": True})
+                continue
+            sha, plain = _land(self.si / "research" / ident / "articles", art.raw, art.ctype, False)
+            self.items.append({**item, "sha256": f"sha256:{sha}", "bytes": len(art.raw),
+                               "plain_sha256": None if plain is None else f"sha256:{plain}",
+                               "changed": self.prev.get(url) != f"sha256:{sha}", "status": "ok"})
+
+
+def _write_items(si: Path, run: str, items: list[dict]) -> str:
+    """篇目明細 `research/_scans/<RUN>.json`（UTF-8、LF）；回位元組 sha256（`sha256:` 前綴）。"""
+    raw = (json.dumps({"schema_rev": 1, "run": run, "items": items}, ensure_ascii=False,
+                      indent=2, sort_keys=True) + "\n").encode("utf-8")
+    folder = si / "research" / "_scans"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{run}.json").write_bytes(raw)
+    return registry.sha_of(raw)
 
 
 def _lines(ok: list[dict], failed: list[dict], order: list[str]) -> list[str]:
-    by_id = {s["id"]: s for s in ok} | {f["id"]: f for f in failed}
+    by_id = {s["id"]: s for s in ok} | {f["id"]: f for f in failed if not f.get("article")}
     out = []
     for ident in order:
         s = by_id[ident]
@@ -74,6 +163,7 @@ def _lines(ok: list[dict], failed: list[dict], order: list[str]) -> list[str]:
         else:
             out.append(f"source {ident} ok sha256={s['sha256'].split(':')[1][:12]} "
                        f"bytes={s['bytes']} changed={'true' if s['changed'] else 'false'}")
+    out += [f"article {f['id']} FAIL {f['reason']}" for f in failed if f.get("article")]
     return out
 
 
@@ -81,59 +171,54 @@ def run_fetch(repo: Path, run: str, as_json: bool) -> Out:
     if not si_events.RUN_RE.match(run):
         raise UsageError("--run 須為 RUN-SI-NNN")
     params = params_for(repo, *_KEYS)
-    git = Git(repo)
-    codes, raw, ne = _precheck(repo, run, params, git)
+    codes, raw, obj = _precheck(repo, run, params)
     if codes:
-        out = reject(repo, "research", codes, as_json, extra={"ne": ne} if as_json else None)
-        return Out(1, out.text + "".join(f"ne {n['field']} {n['reason']}\n" for n in ne
-                                         if not as_json))
+        return reject(repo, "research", codes, as_json)
     si = si_events.si_dir()
     try:
         evwrite.ensure_home(si)
     except evwrite.HomeUnwritable as exc:
         raise UsageError(f"HOME-UNWRITABLE {exc}") from exc
-    active = si_sources.active_entries(raw)
-    table_sha = si_sources.sha256_lf(raw)
-    allowed = {si_fetch.host_port(e["url"]) for e in active}
-    got: list[dict] = []
-    failed: list[dict] = []
-    for e in active:
-        try:
-            res = si_fetch.fetch_source(
-                e["url"], policy=si_sources.DEFAULT_POLICY,
-                timeout=params["research_timeout_seconds"],
-                max_bytes=params["research_bytes_max"], allowed_hosts=allowed)
-        except si_fetch.FetchError as exc:
-            failed.append({"id": e["id"], "reason": exc.reason, "detail": exc.detail})
-            continue
-        sha = _land(si, e["id"], res.raw)
-        got.append({"id": e["id"], "sha256": f"sha256:{sha}", "bytes": len(res.raw),
-                    "http_status": res.status})
-    order = [e["id"] for e in active]
-    if not got:
+    events = si_events.load_sound_events(repo / si_events.LEDGER_REL) or []
+    reg_ev = registry.latest_event(events)
+    hosts = {h["host"] for h in obj["hosts"]}
+    scan = _Scan(si, params, hosts, _prev_items(si, events))
+    active = [w for w in obj["watch"] if w["enabled"]]
+    for w in active:
+        scan.source(w)
+    order = [w["id"] for w in active]
+    if not scan.got:
         return _failure(repo, "ZERO-SUCCESS", "零來源成功，未寫事件（可改記 skip offline）",
-                        order, failed, as_json, ne)
-    return _commit(repo, run, params, table_sha, got, failed, order, as_json, ne)
+                        order, scan.failed, as_json)
+    arts = None
+    if scan.items:
+        arts = (len(scan.items), _write_items(si, run, scan.items))
+    if PAUSE_HOOK is not None:
+        PAUSE_HOOK()
+    return _commit(repo, run, params, (reg_ev["seq"], registry.sha_of(raw)), scan, arts, order,
+                   as_json)
 
 
 def _drafts(repo: Path, failed: list[dict], rc: int) -> list[str]:
     top = obs_top(repo)
+    src = [f for f in failed if not f.get("article")]
     return [draft_for(repo, "research", [], num=top + 1 + i, rc=rc,
                       symptom=f"si research --fetch 來源 {f['id']} 失敗（{f['reason']}）")
-            for i, f in enumerate(failed)]
+            for i, f in enumerate(src)]
 
 
-def _failure(repo, code, detail, order, failed, as_json, ne) -> Out:
+def _failure(repo, code, detail, order, failed, as_json) -> Out:
     drafts = _drafts(repo, failed, 1) or None
-    extra = {"failed": failed, "obs_drafts": drafts or [], "ne": ne}
+    extra = {"failed": failed, "obs_drafts": drafts or []}
     out = reject(repo, "research", [(code, detail)], as_json, drafts, extra if as_json else None)
     if as_json:
         return out
     return Out(1, "\n".join(_lines([], failed, order)) + "\n" + out.text)
 
 
-def _commit(repo, run, params, table_sha, got, failed, order, as_json, ne) -> Out:
-    path = repo / si_sources.SOURCES_REL
+def _commit(repo, run, params, reg, scan: _Scan, arts, order, as_json) -> Out:
+    reg_seq, reg_sha = reg
+    path = repo / registry.REGISTRY_REL
 
     def build(state):
         f = si_fold.fold(state.events)
@@ -143,9 +228,10 @@ def _commit(repo, run, params, table_sha, got, failed, order, as_json, ne) -> Ou
             codes.append(("RUN-NOT-OPEN", f"{run} 於抓取期間已不是 open 運轉"))
         if any(rn == run for _, _, rn, _ in f.research_events):
             codes.append(("RESEARCH-ALREADY", f"{run} 於抓取期間已有研究事件"))
-        now = path.read_bytes() if path.is_file() else b""
-        if si_sources.sha256_lf(now) != table_sha:
-            codes.append(("SOURCES-CHANGED", "來源表於抓取期間被改動"))
+        now = registry.latest_event(state.events)
+        cur = path.read_bytes() if path.is_file() else b""
+        if registry.sha_of(cur) != reg_sha or now is None or now["seq"] != reg_seq:
+            codes.append(("REGISTRY-CHANGED", "登記鏡像於抓取期間被改動或重新入帳"))
         if codes:
             raise evwrite.Reject(codes)
         prior: dict[str, str] = {}
@@ -155,28 +241,28 @@ def _commit(repo, run, params, table_sha, got, failed, order, as_json, ne) -> Ou
                     prior[s["id"]] = s["sha256"]
         srcs = [{"id": s["id"], "sha256": s["sha256"], "bytes": s["bytes"],
                  "changed": prior.get(s["id"]) != s["sha256"], "http_status": s["http_status"]}
-                for s in got]
-        return {"kind": "research.scan", "by": "researcher", "run": run, "sources": srcs,
-                "sources_sha256": table_sha, "fetched_at": evwrite.now_iso()}
-    rc_after = 2 if failed else 0
+                for s in sorted(scan.got, key=lambda x: x["id"].encode("utf-8"))]
+        ev = {"kind": "research.scan", "by": "researcher", "run": run, "sources": srcs,
+              "registry_seq": reg_seq, "registry_sha256": reg_sha, "fetched_at": now_iso()}
+        if arts:
+            ev.update({"articles_n": arts[0], "articles_sha256": arts[1]})
+        return ev
+    rc_after = 2 if scan.failed else 0
 
     def render(ev) -> str:
-        drafts = _drafts(repo, failed, rc_after)
+        drafts = _drafts(repo, scan.failed, rc_after)
         if as_json:
             return json.dumps({"ok": True, "kind": "research.scan", "seq": ev["seq"], "id": None,
                                "run": run, "rc": rc_after, "sources": ev["sources"],
-                               "failed": failed, "obs_drafts": drafts, "ne": ne},
+                               "failed": scan.failed, "obs_drafts": drafts},
                               ensure_ascii=False) + "\n"
-        text = "\n".join(_lines(ev["sources"], failed, order)) + "\n"
+        text = "\n".join(_lines(ev["sources"], scan.failed, order)) + "\n"
         text += ok_text("research.scan", ev["seq"], None, [("run", run)], False)
-        text += "".join(f"ne {n['field']} {n['reason']}\n" for n in ne)
-        return text + ("obs-draft:\n" + "\n".join(drafts) + "\n" if failed else "")
+        return text + ("obs-draft:\n" + "\n".join(drafts) + "\n" if drafts else "")
     out = append(repo, "research", build, params, as_json, render)
     if out.rc == 0:
         return Out(rc_after, out.text)
-    return Out(1, "\n".join(_lines(_ok_stub(got), failed, order)) + "\n" + out.text) \
-        if not as_json else out
+    return out
 
 
-def _ok_stub(got: list[dict]) -> list[dict]:
-    return [{**s, "changed": True} for s in got]
+__all__ = ["run_fetch", "SCAN_WALL_SECONDS", "PAUSE_HOOK", "CLOCK"]

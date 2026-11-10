@@ -25,6 +25,7 @@ from pathlib import Path
 from unittest import mock
 
 import _selfimproving_fixtures as fx
+import _selfimproving_p6_fixtures as px
 from _selfimproving_fixtures import (
     EVL,
     LEDGER,
@@ -1219,6 +1220,11 @@ class TestCheckAdditions(SiTestCase):
         res = self.check(repo)
         self.assertEqual((res["_rc"], res["overall"]), (0, "PASS"))
         for item in P1_ITEMS7[:6]:
+            if item == "events.research":  # P6（AC-SI-45-3）：鏡像與 research.registry 事件皆無＝NE
+                codes = [f["code"] for f in res["_item"][item]["findings"]]
+                self.assertEqual((self.S(res, item), codes, res["_item"][item]["blocking"]),
+                                 ("NE", ["CARRIER-NOT-ESTABLISHED"], False), item)
+                continue
             self.assertEqual(
                 (self.S(res, item), res["_item"][item]["findings"]), ("PASS", []), item
             )
@@ -1877,6 +1883,7 @@ WEIRD_STATUS_KEYS = [
     "events_detected", "unavailable", "open_runs", "pending_props", "suspended", "cooldowns",
     "skip_reasons", "capacity", "root_cause_changes", "reopen_candidates", "pending_windows",
     "friction_reconcile", "no_event", "console_pending", "measure", "schedule", "fourq",
+    "research_fetch_max", "research_registry", "backtest",
 ]  # fmt: skip
 
 
@@ -2406,7 +2413,8 @@ class TestCorruptEventMatrix(CorruptLedgerTestCase):
         want_t = {("seq=6", c) for c in case[4]} if case else set()
         self.assertEqual((rc, got_s, got_t), (1 if case else 0, want_s, want_t), (label, out))
         for key in ("events.mutated", "events.vacuity", "events.prop_files", "events.research"):
-            self.assertEqual(items[key]["status"], "PASS", (label, key))
+            want = "NE" if key == "events.research" else "PASS"  # P6 AC-SI-45-3：無鏡像無事件＝NE
+            self.assertEqual(items[key]["status"], want, (label, key))
 
     def test_AT_140_1_E_5_corrupt_prop_and_scan_do_not_reach_consumers(self):
         p = base_prop(self.corrupt_base())
@@ -2431,24 +2439,23 @@ class TestCorruptEventMatrix(CorruptLedgerTestCase):
         self.fetch_corrupt_scan()
 
     def fetch_corrupt_scan(self):
-        srv = fx.serve({"/a": (200, {"Content-Type": "text/plain"}, b"hello")})
-        self.addCleanup(srv.close)
-        tpl = fx.p1_base()
-        self.cli_ok(tpl, *run_open_args())
-        fx.write_table(tpl, srv, [("a-src", "/a")])
+        # P6（AC-SI-30-2、30-3）：改用登記鏡像＋registry 事件與 `px.net` 注入縫
+        mirror = px.mirror_of(px.watch_entry("a-src", "https://a.example.org/a"))
+        table = {("a.example.org", "/a"): px.response(body=b"hello")}
+        tpl = px.repo(mirror=mirror)
         sources = {"S0": None, "S1": 5, "S2": [1, 2], "S3": [{"id": "a-src"}]}
         for label, bad in sources.items():
             with self.subTest(label):
                 repo = fx.new_dir("fc")
                 shutil.copytree(tpl, repo)
                 if bad is not None:
-                    append_raw(repo, raw_line(2, "research.scan", "researcher",
+                    append_raw(repo, raw_line(3, "research.scan", "researcher",
                                               {"run": rid(1), "sources": bad}))
                 before = (repo / EVL).read_bytes()
-                with fx.relaxed():
+                with px.net(table):
                     rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
                 self.assertEqual(rc, 0, (label, out, err))
-                seq = 2 if label == "S0" else 3
+                seq = 3 if label == "S0" else 4
                 self.assertIn("source a-src ok", out)
                 self.assertIn("changed=true", out)
                 self.assertIn(f"ok research.scan seq={seq} run=RUN-SI-001", out)
@@ -2461,7 +2468,7 @@ class TestCorruptEventMatrix(CorruptLedgerTestCase):
                     continue
                 res = self.check(repo)
                 self.assertEqual(self.S(res, "events.structure"), "FAIL")
-                self.assertEqual({s for s, _ in self.F(res, "events.structure")}, {"seq=2"})
+                self.assertEqual({s for s, _ in self.F(res, "events.structure")}, {"seq=3"})
                 self.assertEqual(self.S(res, "events.research"), "PASS")
 
 

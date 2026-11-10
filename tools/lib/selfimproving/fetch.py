@@ -1,9 +1,10 @@
-"""SelfImproving 外聯：對單一研究來源抓原始位元組（TCS-SelfImproving-P1 R58）。
+"""SelfImproving 外聯：對研究來源抓原始位元組（P1 R58；P6 改為 `fetch_chain`）。
 
-能力類別 `net`：整個套件**唯一** import `urllib`／`http`／`socket`／`ssl` 的檔。只准 http／https、
-不帶任何認證標頭、`Accept-Encoding: identity`、重導向手動處理（至多 5 跳；目標 `hostname:port` 須在
-允許集合、scheme 不得改變）、整個來源的牆鐘與位元組有界（超界即中止、不截斷）。
-失敗原因為封閉集合：timeout、http-status、too-large、non-text、encoding、redirect-refused、network。
+能力類別 `net`：整個套件**唯一** import `urllib`／`http`／`socket`／`ssl` 的檔。
+`fetch_chain` 只准 https:443、不帶任何認證標頭、`Accept-Encoding: identity`、DNS 解析一次且全部位址須公網、以驗證過的 IP 連線
+（SNI／Host 為原主機名）、重導向逐跳重驗（至多 5 跳）、每條請求鏈的牆鐘與位元組有界（超界即中止、
+不截斷）。失敗原因為封閉集合：timeout、http-status、too-large、non-text、encoding、redirect-refused、
+blocked、private-ip、network。
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from __future__ import annotations
 import http.client
 import io
 import socket
+import ssl
 import time
 import urllib.parse
 from dataclasses import dataclass
 
-from .sources import Policy, parse_url
+from . import netguard
 
 USER_AGENT = "selfimproving-research/1"
 MAX_REDIRECTS = 5
@@ -23,7 +25,6 @@ _TEXT_TYPES = {"application/json", "application/xml", "application/atom+xml",
                "application/rss+xml", "application/xhtml+xml"}
 _REDIRECT_STATUS = (301, 302, 303, 307, 308)
 _CHUNK = 8192
-_DEFAULT_PORT = {"http": 80, "https": 443}
 
 
 class FetchError(Exception):
@@ -38,26 +39,13 @@ class FetchError(Exception):
 class Fetched:
     raw: bytes
     status: int
+    ctype: str = ""
 
 
-def host_port(url: str) -> str:
-    scheme, host, _, port, _ = parse_url(url)
-    return f"{host}:{port if port is not None else _DEFAULT_PORT.get(scheme, 0)}"
 
 
-def check_redirect(from_url: str, to_url: str, allowed_hosts) -> str | None:
-    """逐跳判定：可放行回 None，否則回 `redirect-refused`。scheme 須為 http／https 且不得改變
-    （https 降 http 是降級；跨 scheme 一律拒，保守）；目標 `hostname:port` 須在允許集合。"""
-    s_from, s_to = parse_url(from_url)[0], parse_url(to_url)[0]
-    if s_to not in ("http", "https") or s_from != s_to:
-        return "redirect-refused"
-    return None if host_port(to_url) in allowed_hosts else "redirect-refused"
 
 
-def _reason(exc: BaseException) -> str:
-    """等回應逾時才是 timeout，其餘一律 network（建連線與送出請求階段的錯誤由 `_open` 直接歸
-    network；Windows 對無人監聽的本機埠要約 2 秒才回拒絕，不能因此誤判為逾時）。"""
-    return "timeout" if isinstance(exc, (socket.timeout, TimeoutError)) else "network"
 
 
 class _DeadlineRaw(io.RawIOBase):
@@ -65,15 +53,15 @@ class _DeadlineRaw(io.RawIOBase):
     即拋 `TimeoutError`。狀態列、標頭、分塊大小行、trailer 行與本文走同一個出口，慢滴回應（每次
     只來一點、永遠不超過單次逾時）也無法把牆鐘拖過期限（R58 (d)）。"""
 
-    def __init__(self, sock, deadline: float) -> None:
+    def __init__(self, sock, deadline: float, clock=time.monotonic) -> None:
         super().__init__()
-        self._sock, self._deadline = sock, deadline
+        self._sock, self._deadline, self._clock = sock, deadline, clock
 
     def readable(self) -> bool:
         return True
 
     def readinto(self, buf) -> int:
-        left = self._deadline - time.monotonic()
+        left = self._deadline - self._clock()
         if left <= 0:
             raise TimeoutError("牆鐘期限已到")
         self._sock.settimeout(left)
@@ -83,11 +71,11 @@ class _DeadlineRaw(io.RawIOBase):
 class _DeadlineSock:
     """只換掉 `makefile`（回應讀取走 `_DeadlineRaw`）；其餘（送出、關閉）委派給底層 socket。"""
 
-    def __init__(self, sock, deadline: float) -> None:
-        self._sock, self._deadline = sock, deadline
+    def __init__(self, sock, deadline: float, clock=time.monotonic) -> None:
+        self._sock, self._deadline, self._clock = sock, deadline, clock
 
     def makefile(self, *_args, **_kwargs):
-        return io.BufferedReader(_DeadlineRaw(self._sock, self._deadline), _CHUNK)
+        return io.BufferedReader(_DeadlineRaw(self._sock, self._deadline, self._clock), _CHUNK)
 
     def __getattr__(self, name):
         return getattr(self._sock, name)
@@ -106,93 +94,118 @@ def _read_body(resp, max_bytes: int) -> bytes:
     return bytes(buf)
 
 
-def _conn_class(scheme: str, deadline: float):
-    """連線建好後把 socket 換成 `_DeadlineSock`。`will_close` 的回應會在 `getresponse` 內自動關掉
-    連線物件的 socket，而回應的緩衝讀取器仍要用它；故把 `close` 延後、改由 `shut` 明確收尾。"""
-    base = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
-
-    class Conn(base):
-        def connect(self) -> None:
-            base.connect(self)
-            self.sock = _DeadlineSock(self.sock, deadline)
-
-        def close(self) -> None:  # noqa: D401  # getresponse 的自動關閉改成什麼都不做
-            return None
-
-        def shut(self) -> None:
-            base.close(self)
-
-    return Conn
 
 
-def _open(url: str, deadline: float):
-    """對單一 URL 送 GET（不帶認證、不走代理、`Connection: close`）；回 (連線, 回應)。
-    建連線與送出請求的錯誤一律 network；等回應逾時才是 timeout。URL 剖析或連線物件建構失敗
-    （空 host、host 含空白、連接埠越界等）同樣歸 network（R58 (c)）。"""
+
+
+
+
+# ── P6：登記鏡像驅動的安全請求鏈（AC-SI-30-7；DNS 一次、釘 IP、SNI／Host＝原主機名）──────────
+_CHARSETS = ("utf-8", "utf8", "us-ascii", "ascii")
+
+
+def _resolve(host: str) -> list[str]:
+    """預設解析縫：`getaddrinfo` 的全部位址（去重、保序）；測試以 `RESOLVER` 注入。"""
+    infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    return list(dict.fromkeys(str(i[4][0]) for i in infos))
+
+
+def _connect(ip: str, port: int, server_hostname: str, deadline: float):
+    """預設連線縫：對**驗證過的 IP** 建 TCP，TLS 的 SNI 與憑證主機名驗證用原主機名。"""
+    sock = socket.create_connection((ip, port), timeout=max(deadline - time.monotonic(), 0.001))
     try:
-        parts = urllib.parse.urlsplit(url)
-        if not parts.hostname:
-            raise ValueError("host 為空")
-        conn = _conn_class(parts.scheme, deadline)(
-            parts.hostname, parts.port, timeout=max(deadline - time.monotonic(), 0.001))
-    except (ValueError, TypeError, AttributeError, http.client.HTTPException) as exc:
-        raise FetchError("network", "URL 無法解析") from exc
-    try:
-        conn.request("GET", (parts.path or "/") + (f"?{parts.query}" if parts.query else ""),
-                     headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity",
-                              "Connection": "close"})
-    except (OSError, ValueError, http.client.HTTPException) as exc:  # ValueError 含 UnicodeError
-        conn.shut()
-        raise FetchError("network") from exc
-    try:
-        return conn, conn.getresponse()
-    except (OSError, http.client.HTTPException) as exc:
-        conn.shut()
-        raise FetchError(_reason(exc)) from exc
+        return ssl.create_default_context().wrap_socket(sock, server_hostname=server_hostname)
+    except BaseException:
+        sock.close()
+        raise
 
 
-def fetch_source(url: str, *, policy: Policy, timeout: float, max_bytes: int,
-                 allowed_hosts) -> Fetched:
-    """抓單一來源（含全部重導向跳）的原始位元組；失敗拋 FetchError。"""
+RESOLVER = _resolve
+CONNECTOR = _connect
+
+
+def _target_of(cur: str, loc: str, hosts, hops: int) -> str:
+    """重導目標逐跳重驗：跳數、字面形態、host ∈ 有效網域；失敗＝`redirect-refused`（不連線）。"""
     try:
-        scheme = parse_url(url)[0]
-    except (ValueError, TypeError, AttributeError) as exc:
-        raise FetchError("network", "URL 無法解析") from exc
-    if scheme != "https" and not (scheme == "http" and policy.allow_http):
-        raise FetchError("network", f"scheme {scheme!r} 不被政策允許")
-    deadline = time.monotonic() + timeout
+        target = urllib.parse.urljoin(cur, loc)
+    except ValueError as exc:
+        raise FetchError("redirect-refused", "Location 無法解析") from exc
+    hp = netguard.split_host(target)
+    if (hops > MAX_REDIRECTS or netguard.url_shape_problems(target) or hp is None
+            or hp[0].lower() not in hosts):
+        raise FetchError("redirect-refused", target)
+    return target
+
+
+def _request_bytes(host: str, path: str) -> bytes:
+    return (f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {USER_AGENT}\r\n"
+            "Accept-Encoding: identity\r\nConnection: close\r\n\r\n").encode("ascii")
+
+
+def _checked_body(resp, max_bytes: int) -> bytes:
+    if not 200 <= resp.status < 300:
+        raise FetchError("http-status", str(resp.status))
+    if (resp.headers.get("Content-Encoding") or "identity").strip().lower() != "identity":
+        raise FetchError("encoding", "Content-Encoding")
+    head = resp.headers.get("Content-Type") or ""
+    ctype = head.split(";")[0].strip().lower()
+    if not (ctype.startswith("text/") or ctype in _TEXT_TYPES):
+        raise FetchError("non-text", ctype or "缺 Content-Type")
+    for part in head.split(";")[1:]:
+        key, _, val = part.partition("=")
+        if key.strip().lower() == "charset" and val.strip().strip('"').lower() not in _CHARSETS:
+            raise FetchError("encoding", val.strip())
+    return _read_body(resp, max_bytes)
+
+
+def fetch_chain(url: str, *, hosts, timeout: float, max_bytes: int, resolver=None,
+                connector=None, clock=time.monotonic) -> Fetched:
+    """一條請求鏈（一次 GET 加其全部重導向）；牆鐘 ≤ `timeout`、位元組 ≤ `max_bytes`。
+    每一跳：字面形態 → host ∈ `hosts`（`blocked`）→ 解析一次、全部位址須公網（`private-ip`）→ 以
+    驗證過的 IP 連線、`Host` 與 SNI 用原主機名。失敗拋 `FetchError`（封閉集合）。"""
+    resolver, connector = resolver or RESOLVER, connector or CONNECTOR
+    deadline = clock() + timeout
     cur, hops = url, 0
-    for _ in range(MAX_REDIRECTS + 2):  # 初始請求加至多 5 跳重導向
-        if deadline - time.monotonic() <= 0:
+    for _ in range(MAX_REDIRECTS + 2):  # 初始請求加至多 5 跳（第 6 跳於 `_target_of` 拒絕）
+        if deadline - clock() <= 0:
             raise FetchError("timeout")
-        conn, resp = _open(cur, deadline)
+        if netguard.url_shape_problems(cur):
+            raise FetchError("network", "url 形態不合")
+        host, port = netguard.split_host(cur)
+        host = host.lower()
+        if host not in hosts:
+            raise FetchError("blocked", host)
         try:
-            status = resp.status
+            addrs = resolver(host)
+        except (OSError, ValueError) as exc:
+            raise FetchError("network", "解析失敗") from exc
+        if not addrs:
+            raise FetchError("network", "解析無位址")
+        if not all(netguard.is_public_ip(a) for a in addrs):
+            raise FetchError("private-ip", host)
+        parts = urllib.parse.urlsplit(cur)
+        path = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+        try:
+            conn = connector(addrs[0], 443, host, deadline)
+        except TimeoutError as exc:
+            raise FetchError("timeout") from exc
+        except (OSError, ValueError) as exc:
+            raise FetchError("network", "連線失敗") from exc
+        try:
+            conn.sendall(_request_bytes(host, path))
+            resp = http.client.HTTPResponse(_DeadlineSock(conn, deadline, clock))
+            resp.begin()
             loc = resp.headers.get("Location")
-            if status in _REDIRECT_STATUS and loc:
+            if resp.status in _REDIRECT_STATUS and loc:
                 hops += 1
-                try:
-                    target = urllib.parse.urljoin(cur, loc)
-                    _ = urllib.parse.urlsplit(target).port  # 只為觸發剖析錯誤
-                except ValueError as exc:  # 無法證明目標合規即 fail-closed
-                    raise FetchError("redirect-refused", "Location 無法解析") from exc
-                if hops > MAX_REDIRECTS or check_redirect(cur, target, allowed_hosts):
-                    raise FetchError("redirect-refused", target)
-                cur = target
+                cur = _target_of(cur, loc, hosts, hops)
                 continue
-            if not 200 <= status < 300:
-                raise FetchError("http-status", str(status))
-            enc = (resp.headers.get("Content-Encoding") or "identity").strip().lower()
-            if enc != "identity":
-                raise FetchError("encoding", enc)
-            ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-            if not (ctype.startswith("text/") or ctype in _TEXT_TYPES):
-                raise FetchError("non-text", ctype or "缺 Content-Type")
-            return Fetched(_read_body(resp, max_bytes), status)
+            return Fetched(_checked_body(resp, max_bytes), resp.status,
+                           (resp.headers.get("Content-Type") or "").split(";")[0].strip().lower())
         except TimeoutError as exc:
             raise FetchError("timeout") from exc
         except (OSError, http.client.HTTPException) as exc:
             raise FetchError("network") from exc
         finally:
-            conn.shut()
+            conn.close()
     raise FetchError("redirect-refused", "重導向跳數超過上限")

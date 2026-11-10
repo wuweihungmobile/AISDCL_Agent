@@ -50,6 +50,7 @@ _HELP = {
     "sched": "自動演化排程：show（唯讀）、set（寫 sched.set）、arm／disarm（OS 任務）",
     "patrol": "巡邏心跳（OS 排程器每心跳叫醒一次的一次性行程：入帳、到期判定、運轉、推進）",
     "fourq": "四問審視答案檔入帳（--answers-file）、免審（--skip）或語料清單（--corpus）",
+    "registry-ingest": "Console 研究來源登記稽核檔入帳為唯讀鏡像與 research.registry 事件",
 }
 # R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
 _P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
@@ -161,7 +162,7 @@ def _build_parser() -> argparse.ArgumentParser:
         pr.add_argument("prop", help="PROP-SI-NNN")
         pr.add_argument("--memory-dir", dest="memory_dir")
         pr.add_argument("--by", default="main")
-    for name in ("obs-add", "obs-close"):
+    for name in ("obs-add", "obs-close", "registry-ingest"):
         ob = _verb(sub, name)
         ob.add_argument("--carrier", choices=("console",))
         ob.add_argument("--audit-ref", dest="audit_ref")
@@ -508,6 +509,18 @@ def _obs_write(repo: Path, args: argparse.Namespace) -> int:
     return rc
 
 
+def _registry_ingest(repo: Path, args: argparse.Namespace) -> int:
+    if args.carrier != "console" or not args.audit_ref or not si_events.valid_uuid(args.audit_ref):
+        raise check.InputError("registry-ingest 須帶 --carrier console 與 --audit-ref（UUID）")
+    if not si_events.valid_by(args.by):
+        raise check.InputError("--by 須為非空、無空白、≤32 字元的標籤")
+    from lib.selfimproving import regwrite
+
+    rc, text = regwrite.ingest(repo, args.audit_ref, args.by, args.json)
+    _emit(text)
+    return rc
+
+
 def _measure(repo: Path, args: argparse.Namespace) -> int:
     from lib.selfimproving import meawrite
 
@@ -526,7 +539,7 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
              "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol,
-             "fourq": _fourq}
+             "fourq": _fourq, "registry-ingest": _registry_ingest}
 
 
 def main(argv: list[str] | None = None) -> int:

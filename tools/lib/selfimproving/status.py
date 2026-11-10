@@ -17,6 +17,7 @@ from . import events as si_events
 from . import fold as si_fold
 from . import mea as si_mea
 from . import params as si_params
+from . import registry as si_registry
 from . import scan as si_scan
 from . import sched as si_sched
 from . import transcript as si_transcript
@@ -64,7 +65,8 @@ def console_pending(events: list[dict], read_home: bool = True) -> dict:
     except OSError:
         return {"status": "NOT-EVALUABLE", "reason": "home-unavailable"}
     used = {e.get("audit_ref") for e in events
-            if e["kind"] in ("dec", "obs.add", "obs.close", "sched.set", "run.open", "sched.skip")}
+            if e["kind"] in ("dec", "obs.add", "obs.close", "sched.set", "run.open", "sched.skip",
+                             "research.registry")}
     items = []
     for p in names:
         if p.suffix != ".json" or not si_events.valid_uuid(p.stem) or p.stem in used:
@@ -116,6 +118,19 @@ def schedule_value(events: list[dict] | None, params: dict, read_home: bool, now
     return obj
 
 
+def registry_value(events: list[dict] | None, params: dict) -> dict:
+    """D-RR-15：`research_fetch_max`（參數無效＝null）與 `research_registry`（最新一筆
+    `research.registry` 事件的 seq／audit_ref／registry_sha256／watch_on；尚無＝null）。"""
+    mx = params.get("research_fetch_max")
+    mx = mx if isinstance(mx, int) and not isinstance(mx, bool) and mx >= 1 else None
+    ev = si_registry.latest_event(events or [])
+    reg = None if ev is None else {
+        "seq": ev["seq"], "audit_ref": ev["audit_ref"], "registry_sha256": ev["registry_sha256"],
+        "watch_enabled": ev["watch_on"]}
+    # `backtest` 鍵（AC-SI-46-8）由回測實作棒接手；在那之前恆為 null（＝無 backtest.result 事件）
+    return {"research_fetch_max": mx, "research_registry": reg, "backtest": None}
+
+
 def build(repo: Path, git: Git, params: dict, read_home: bool = True, *, now=None,
           armed=None) -> dict:
     """狀態物件；鍵序固定（R60；其後附加 `console_pending`〔R99〕、`measure`〔R130〕與末鍵
@@ -155,6 +170,7 @@ def build(repo: Path, git: Git, params: dict, read_home: bool = True, *, now=Non
         "measure": measure_value(repo, git, params, events),
         "schedule": schedule_value(events, params, read_home, now, armed),
         "fourq": fourqparse.status_value(repo, events, params),
+        **registry_value(events, params),  # P6：research_fetch_max、research_registry
     }
 
 
@@ -205,6 +221,12 @@ def render_text(obj: dict) -> str:
                  if "enabled" in s else f"schedule: NOT-EVALUABLE（{s['reason']}）")
     if "fourq" in obj:
         lines.append(fourqparse.status_line(obj["fourq"]))
+    if "research_fetch_max" in obj:
+        rg = obj["research_registry"]
+        lines.append(f"research_fetch_max: {tri_text(obj['research_fetch_max'])}")
+        lines.append("research_registry: " + ("null" if rg is None else (
+            f"seq={rg['seq']} watch_enabled={rg['watch_enabled']} "
+            f"sha={rg['registry_sha256'][7:19]}")))
     if obj["no_event"]:
         lines.append("無事件" + (f"（{k} 個來源量不到）" if k else ""))
     return "\n".join(lines) + "\n"

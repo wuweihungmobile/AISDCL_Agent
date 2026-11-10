@@ -140,7 +140,7 @@ class TestEventTables(SiTestCase):
     """受測：`tools/lib/selfimproving/events.py`（R72 欄位表）。"""
 
     def test_AT_240_1_1_vocabulary_and_conforming_events(self):
-        self.assertEqual(len(si_events.KINDS), 25)
+        self.assertEqual(len(si_events.KINDS), 27)
         self.assertTrue({"obs.add", "obs.close"} <= set(si_events.KINDS))
         bad = {}
         for label, event in ok_events().items():
@@ -158,7 +158,7 @@ class TestEventTables(SiTestCase):
             self.assertEqual(si_events.validate(comp(event)), [], event)
         problems = si_events.validate(comp(ev("x.y")))
         self.assertEqual([c for c, _ in problems], ["EVENT-KIND"])
-        self.assertIn("25 個詞彙", problems[0][1])
+        self.assertIn("27 個詞彙", problems[0][1])  # P6：KINDS 25→27
 
     def test_AT_240_1_E_1_field_table_negatives(self):
         base = {label: comp(event) for label, event in ok_events().items()}
@@ -865,8 +865,10 @@ class TestP2Checks(P2TestCase):
         ne0 = {14, 22, 23, 24, 25, 26, 27, 28}
         want0 = [(ids[k], "NE" if k + 1 in ne0 else "PASS", False,
                   cne if k + 1 in ne0 else []) for k in range(28)]
-        want1 = [(ids[k], "NE" if k + 1 == 28 else "PASS", False,
-                  cne if k + 1 == 28 else (["FAMILY-REF-DANGLING"] if k + 1 == 14 else []))
+        rk = ids.index("events.research") + 1  # P6（AC-SI-45-3）：無鏡像無事件＝NE
+        ne1 = {28, rk}
+        want1 = [(ids[k], "NE" if k + 1 in ne1 else "PASS", False,
+                  cne if k + 1 in ne1 else (["FAMILY-REF-DANGLING"] if k + 1 == 14 else []))
                  for k in range(28)]
         self.assertEqual(items(R0), want0)
         self.assertEqual(items(R1), want1)
@@ -970,7 +972,10 @@ class TestP2Checks(P2TestCase):
             self.assertIn("HELMSMAN-REF-INVALID", codes_set(res, "events.research"))
             no_p1_warn(res)
             ok = helmsman_check([fx2.rec_user_human("掌舵者原話", fx2.ts(0))])  # 合規對照
-            self.assertEqual(self.S(ok, "events.research"), "PASS", self.F(ok, "events.research"))
+            # P6（AC-SI-45-3）：合規對照僅剩「無鏡像無事件」的 nonblocking NE，無任何 fail
+            self.assertEqual(self.S(ok, "events.research"), "NE", self.F(ok, "events.research"))
+            self.assertEqual({c for _, c in self.F(ok, "events.research")},
+                             {"CARRIER-NOT-ESTABLISHED"})
             no_p1_warn(ok)
         with self.subTest("h"):
             res = helmsman_check(None, with_dec=False)

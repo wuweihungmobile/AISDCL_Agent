@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 
 import _selfimproving_fixtures as fx
+import _selfimproving_p6_fixtures as px
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p3_fixtures as f3
 from _selfimproving_p3_fixtures import D3, win
@@ -285,14 +286,19 @@ class TestZeroRegression(f3.P3TestCase):
                    ROOT / "AutoClaude" / "tests" / "contract" / "test_evolution_propose_only.py"]
         names = "\n".join(n for p in surface if p.is_file()
                           for n in re.findall(r"def (test_\w+)", p.read_text(encoding="utf-8")))
+        # P6：舊 loopback＋舊表抓取路徑已退役，下列 P1 AT 由登記鏡像版的 P6 AT 取代（TCS-P6 §2、
+        # AC-SI-45-6；對照見 test_selfimproving_research_scan.py 檔頂）；取代者本身必須存在。
+        superseded = px.SUPERSEDED_P1
+        self.assertEqual([b for b in superseded.values() if underscore_form(b) not in names], [])
         for prefix in ("P0", "P1", "P2"):
             ids = [a for a, _, _ in parse_at_headers(real_tcs(prefix))]
-            self.assertEqual([a for a in ids if underscore_form(a) not in names], [], prefix)
+            self.assertEqual([a for a in ids if a not in superseded
+                              and underscore_form(a) not in names], [], prefix)
         import test_selfimproving_capability as cap
         self.assertEqual(si_params.CHECK_RULES_REV, 6)
-        self.assertEqual(len(selfimproving._HELP), 27)
-        self.assertIn(len(cap.CAPABILITY), (61, 62))
-        want = {61: (44, 10, 2, 5), 62: (45, 10, 2, 5)}[len(cap.CAPABILITY)]
+        self.assertEqual(len(selfimproving._HELP), 28)
+        self.assertIn(len(cap.CAPABILITY), (71, 72))  # P6：62→72（回測 4 檔由 BT 棒登記）
+        want = {71: (51, 13, 2, 5), 72: (52, 13, 2, 5)}[len(cap.CAPABILITY)]
         got = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k)
                     for k in ("ro", "rw", "net", "exec"))
         self.assertEqual(got, want)
@@ -310,7 +316,7 @@ class TestZeroRegression(f3.P3TestCase):
         f3.promoted(R, target=f"{D3}/z.md")
         prop = self.MJ(R, "export", "--kind", "proposals")["items"][0]
         self.assertEqual((len(prop), list(prop)[-1]), (19, "window"))
-        self.assertEqual(len(list(self.MJ(R, "status"))), 17)
+        self.assertEqual(len(list(self.MJ(R, "status"))), 20)
 
     def test_AT_340_8_E_1_explicit_wrong_values_survive_the_defaults(self):
         self.new_home()

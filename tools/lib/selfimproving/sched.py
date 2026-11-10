@@ -28,7 +28,9 @@ NE_PREFIX = "NOT-EVALUABLE："
 EXPORT_ARMED = NE_PREFIX + "export-reads-no-home"
 SOP_REL = "docs/05_development/SelfImproving_Operations_SOP.md"
 OBS_LEDGER_PREFIX = "docs/06_quality/SelfImproving_Observation_Ledger"
-_OWN_PREFIXES = (si_events.LEDGER_REL, si_events.PROPOSALS_REL + "/", OBS_LEDGER_PREFIX)
+BACKTEST_PREFIX = "docs/06_quality/SelfImproving_Backtest/"  # P6：回測案例檔與結果帳本（SI 自有）
+_OWN_PREFIXES = (si_events.LEDGER_REL, si_events.PROPOSALS_REL + "/", OBS_LEDGER_PREFIX,
+                 "docs/06_quality/SelfImproving_Protocol/research_registry.json", BACKTEST_PREFIX)
 _PS_QUERY = (f"$t = Get-ScheduledTask -TaskName '{ARMED_TASK}' -ErrorAction SilentlyContinue; "
              "if (-not $t) { 'ABSENT'; exit 0 }; $i = $t | Get-ScheduledTaskInfo; "
              "if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { 'NONEXT' }")

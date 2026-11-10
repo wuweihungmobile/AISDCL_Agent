@@ -422,7 +422,7 @@ class TestStatusAndExport(VerbTestCase):
         idx.write_bytes(f3.cap_index(16))
         st = self.status(R)
         keys = list(st)
-        self.assertEqual(len(keys), 17)
+        self.assertEqual(len(keys), 20)
         self.assertEqual((keys[0], keys[13], keys[14]), ("events_detected", "console_pending",
                                                           "measure"))
         m = st["measure"]
@@ -469,7 +469,7 @@ class TestStatusAndExport(VerbTestCase):
         item = st["items"][0]
         self.assertEqual(item["capacity"], {"status": "NOT-EVALUABLE",
                                             "reason": "export-reads-no-home"})
-        self.assertEqual(len(item), 17)
+        self.assertEqual(len(item), 20)  # P6：+research_fetch_max／research_registry／backtest
         text = json.dumps(exp) + json.dumps(st)
         self.assertNotIn(sentinel, text)
         self.assertNotIn("INDEX-UNIQUE-CONTENT", text)

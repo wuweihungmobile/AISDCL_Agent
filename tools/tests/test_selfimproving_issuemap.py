@@ -154,7 +154,7 @@ class TestIssueMapDictionaries(unittest.TestCase):
         self.assertEqual(suffixes, {"DEF", "R", "T1", "PRD"})
         self.assertEqual(set(im.ROUTE_LABELS), suffixes)
         self.assertEqual(set(im.EVENT_LABELS), set(si_events.KINDS))
-        self.assertEqual(len(im.EVENT_LABELS), 25)  # P5：加 fourq.review／fourq.skip
+        self.assertEqual(len(im.EVENT_LABELS), 27)  # P5 加 fourq.*；P6 加 2 個
         self.assertEqual(set(im.DKIND_LABELS), set(si_events.DKINDS))
         self.assertEqual(len(im.DKIND_LABELS), 9)
         for name, book in (("通道", im.ROUTE_LABELS), ("事件", im.EVENT_LABELS),

@@ -16,6 +16,7 @@ from . import events as si_events
 from . import fold as si_fold
 from . import params as si_params
 from . import paths as si_paths
+from . import registry as si_registry
 from . import sources as si_sources
 from .git import Git
 from .ledger import Finding
@@ -178,8 +179,17 @@ def _patch_findings(sub: str, ev: dict, raw: bytes) -> list[Finding]:
     return []
 
 
+def _registry_findings(events: list[dict], scans: list[dict],
+                       mirror: bytes | None) -> list[Finding]:
+    """P6：鏡像與最新 `research.registry` 事件綁定；新格式 `research.scan` 的 `registry_seq`。"""
+    out = [Finding("-", code, "info" if code == _CARRIER else "fail", detail)
+           for code, detail in si_registry.mirror_binding(mirror, events)]
+    return out + [Finding(sub, "SCAN-REGISTRY-MISMATCH", "fail", detail)
+                  for sub, detail in si_registry.scan_problems(events, scans)]
+
+
 def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None,
-              params: dict) -> list[Finding]:
+              params: dict, mirror: bytes | None = None) -> list[Finding]:
     f = si_fold.fold(events)
     out: list[Finding] = []
     runs = {r for _, _, r, _ in f.research_events if r} | set(f.runs)
@@ -199,9 +209,21 @@ def _research(repo: Path, git: Git, events: list[dict], src_raw: bytes | None,
                 out.append(Finding(run, "RESEARCH-ORDER", "fail",
                                    f"研究事件 seq={rs[0]} 不介於 run.open 與第一筆 prop 之間"))
     scans = [ev for _, k, _, ev in f.research_events if k == "research.scan"]
-    out += _scan_findings(git, scans, src_raw)
+    out += _scan_findings(git, [s for s in scans if "sources_sha256" in s], src_raw)
+    fresh = [s for s in scans if "sources_sha256" not in s]
+    out += _new_scan_ids(fresh, si_registry.known_ids(repo))
+    out += _registry_findings(events, scans, mirror)
     out += decheck.helmsman_refs(repo, events)
     return out + fourqparse.check_findings(repo, events, params)
+
+
+def _new_scan_ids(scans: list[dict], ids: set[str] | None) -> list[Finding]:
+    """新格式 `research.scan`（無 `sources_sha256`）：`sources[].id` 須在鏡像全列∪舊表全列。"""
+    if ids is None:
+        return []
+    return [Finding(f"seq={ev.get('seq')} {s.get('id')}", "SRC-UNKNOWN", "fail",
+                    "sources[].id 不在登記鏡像與來源表")
+            for ev in scans for s in ev.get("sources", []) if s.get("id") not in ids]
 
 
 def _scan_findings(git: Git, scans: list[dict], src_raw: bytes | None) -> list[Finding]:
@@ -244,18 +266,24 @@ def _history_finding(git: Git, ev: dict, times: list[tuple[str, int]]) -> list[F
     return []
 
 
-def _sources_item(src_raw: bytes | None) -> list[Finding]:
+def _sources_item(src_raw: bytes | None, mirror: bytes | None = None) -> list[Finding]:
+    """`research.sources`：凍結舊表（在場照舊驗）＋ P6 登記鏡像（在場才驗）；項數不變。"""
+    reg = [] if mirror is None else [Finding(sub, code, "fail", detail)
+                                     for code, sub, detail in si_registry.validate(mirror)]
     if src_raw is None:
-        return [Finding("-", _CARRIER, "info", "research_sources.json 不存在")]
-    return [Finding(sub, code, "fail", detail)
-            for code, sub, detail in si_sources.validate_table(src_raw, si_sources.DEFAULT_POLICY)]
+        return reg or ([] if mirror is not None else
+                       [Finding("-", _CARRIER, "info", "research_sources.json 不存在")])
+    return reg + [Finding(sub, code, "fail", detail)
+                  for code, sub, detail in si_sources.validate_table(src_raw,
+                                                                      si_sources.DEFAULT_POLICY)]
 
 
 def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
     ledger = repo / si_events.LEDGER_REL
     src_path = repo / si_sources.SOURCES_REL
     src_raw = src_path.read_bytes() if src_path.is_file() else None
-    out: Result = {"research.sources": (_sources_item(src_raw), "")}
+    mirror = si_registry.read_mirror(repo)
+    out: Result = {"research.sources": (_sources_item(src_raw, mirror), "")}
     if not ledger.is_file():
         carrier = [Finding("-", _CARRIER, "info", "事件帳本不存在")]
         out.update({item: (list(carrier), "") for item in
@@ -275,7 +303,7 @@ def compute(repo: Path, params: dict, valid: set[str], git: Git) -> Result:
         "events.mutated": (muts, mut_detail),
         "events.vacuity": (_vacuity(events, params, valid), ""),
         "events.prop_files": (_prop_files(repo, sound), ""),
-        "events.research": (_research(repo, git, sound, src_raw, params), ""),
+        "events.research": (_research(repo, git, sound, src_raw, params, mirror), ""),
         "events.dec_quote": (decheck.dec_quote(repo, sound, params, git), ""),
         "events.dec_console": (decheck.dec_console(repo, sound, params, git), ""),
         "events.verdict": (decheck.verdict_item(sound, params, valid), ""),

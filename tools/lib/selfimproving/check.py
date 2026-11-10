@@ -14,7 +14,7 @@ from . import evcheck as si_evcheck
 from . import history as si_history
 from . import params as si_params
 from . import refs as si_refs
-from . import sources as si_sources
+from . import registry as si_registry
 from .git import Git
 from .ledger import Finding, max_valid_id, parse_ledger, structure_findings
 from .rows import evaluate_rows
@@ -111,8 +111,7 @@ def build_items(repo: Path, ledger: Path, params: dict, text: str, size: int,
                 git: Git) -> tuple[list[Item], int, int]:
     led = parse_ledger(text)
     valid = si_params.valid_keys(params)
-    src_path = repo / si_sources.SOURCES_REL
-    src_ids = si_sources.ids_or_none(src_path.read_bytes() if src_path.is_file() else None)
+    src_ids = si_registry.known_ids(repo)  # P6：鏡像全列 ∪ 凍結舊表全列
     ev = evaluate_rows(led, params["row_max_bytes"] if "row_max_bytes" in valid else None, src_ids)
     rel = _rel(repo, ledger)
     ev["row.markers"] += si_refs.reopen_findings(repo, rel, led, text, git)

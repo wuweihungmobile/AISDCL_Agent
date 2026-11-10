@@ -177,6 +177,7 @@ def _ingest_argv(ctx: Ctx, kind: str | None, ref: str) -> list[str] | None:
             target = None
         return ["decide", target or "PROP-SI-000", *car, "--by", "patrol"]
     return {"obs-add": ["obs-add", *car, "--by", "patrol"],
+            "src-registry": ["registry-ingest", *car, "--by", "patrol"],
             "obs-close": ["obs-close", *car, "--by", "patrol"],
             "sched-set": ["sched", "set", *car, "--by", "patrol"],
             "run-request": ["run-open", "--trigger", "a", *car, "--coord",

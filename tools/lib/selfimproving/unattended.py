@@ -21,7 +21,8 @@ PATROL_RUN_ENV = "AUTOSDD_SI_PATROL_RUN"
 A_CLASS = ("research", "attr", "attr-confirm", "attr-reject", "prop-new", "prop-revise",
            "heldout-freeze", "card-issue", "fourq")
 C_CLASS = ("run-open", "run-close", "obs-add", "obs-close", "sched-set", "sched-arm",
-           "sched-disarm", "sandbox", "verify", "promote", "rollback", "measure", "patrol")
+           "sched-disarm", "sandbox", "verify", "promote", "rollback", "measure", "patrol",
+           "registry-ingest", "backtest")
 READONLY = ("check", "status", "scan", "card", "export", "capacity", "issues", "sched-show",
             "fourq-corpus")
 

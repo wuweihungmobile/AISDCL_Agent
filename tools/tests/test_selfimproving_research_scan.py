@@ -1,12 +1,29 @@
 """SelfImproving P1 研究掃描與模組體檢的驗收測試（TCS-P1 RS 檔：AT-130、AT-131 系列）。
 
-方法名含 AT 底線形。網路測試只用本機 loopback HTTP 夾具（不連外網）；合成 repo 於 tmp 目錄。
+方法名含 AT 底線形。合成 repo 於 tmp 目錄；P6 的抓取測試一律走
+`_selfimproving_p6_fixtures.net` 的注入縫。
+
+P6 的 `research --fetch` 改讀 Console 登記鏡像、只收 https:443、DNS 一次並釘 IP；舊表與 loopback
+http 夾具的抓取路徑已退役，舊表凍結為史料（TCS-SelfImproving-P6 §2、AC-SI-45-6）。
+舊 AT（本檔已移除）→ 取代它的 P6 AT（TCS-SelfImproving-P6）：
+- AT-130-2-1 → AT-630-2-E-2、AT-645-3-1（鏡像未提交也通過預檢）
+- AT-130-2-E-1 → AT-645-1-2、AT-630-2-E-1（驗證變體表、預檢碼序零請求）
+- AT-130-2-E-2 → AT-645-6-3、AT-645-6-4、AT-630-2-1（舊事件回查照舊、新格式綁事件）
+- AT-130-2-E-3 → AT-630-7-E-3、AT-630-3-E-3（重導向逐跳重驗）
+- AT-130-2-E-4 → AT-645-6-4（提交時刻比對只屬舊格式）
+- AT-130-2-E-5～E-9 → AT-630-7-E-1、AT-645-1-6、AT-645-1-7（附錄 D 逐列）
+- AT-130-3-1 → AT-630-3-1；AT-130-3-E-1 → AT-630-3-E-1
+- AT-130-3-E-2 → AT-630-3-E-1、AT-630-3-E-5（全失敗 rc 1、JSON 形狀）
+- AT-130-3-E-3 → AT-630-3-E-6（抓取在鎖外）、AT-630-2-E-4
+- AT-130-3-E-4 → AT-630-2-E-1、AT-630-3-E-1（零成功）
+- AT-130-5-1、E-1 → AT-630-5-1、AT-630-3-E-1（too-large）、AT-630-3-E-4
+- AT-130-5-E-2、E-3 → AT-630-3-E-2、AT-630-3-E-4（整次與請求鏈牆鐘）
+- AT-230-2-E-2 → AT-630-7-E-1、AT-630-7-E-2（壞 host 零連線）
+舊 `fetch_source` 已無產品呼叫點，連同 `_open`、`_conn_class` 一併自 `fetch.py` 移除。
 """
 
 from __future__ import annotations
 
-import ast
-import hashlib
 import json
 import os
 import re
@@ -14,15 +31,14 @@ import shutil
 import socket
 import subprocess
 import sys
-import threading
 import time
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
 import _selfimproving_fixtures as fx
+import _selfimproving_p6_fixtures as px
 from _selfimproving_fixtures import (
     EVL,
     LEDGER,
@@ -35,9 +51,7 @@ from _selfimproving_fixtures import (
     write_table,
 )
 
-from lib import apply_lock
 from lib.selfimproving import defs as si_defs
-from lib.selfimproving import evwrite
 from lib.selfimproving import fetch as si_fetch
 from lib.selfimproving import scan as si_scan
 from lib.selfimproving import sources as si_sources
@@ -151,13 +165,12 @@ class TestResearchEvents(ResearchCase):
             r = fx.p1_base()
             fx.write_events(r, events)
             res = self.check(r)
-            self.assertEqual(self.F(res, "events.research"), want[key], key)
-            if key in ("d", "e"):
-                self.assertEqual(
-                    (self.S(res, "events.research"), res["_item"]["events.research"]["findings"]),
-                    ("PASS", []),
-                    key,
-                )
+            carrier = {("-", "CARRIER-NOT-ESTABLISHED")}  # P6 AC-SI-45-3：各例皆有
+            self.assertEqual(self.F(res, "events.research") - carrier, want[key], key)
+            if key in ("d", "e"):  # P6（AC-SI-45-3）：無鏡像無事件＝nonblocking NE，別無 finding
+                codes = [f["code"] for f in res["_item"]["events.research"]["findings"]]
+                self.assertEqual((self.S(res, "events.research"), codes),
+                                 ("NE", ["CARRIER-NOT-ESTABLISHED"]), key)
             if key == "c":
                 detail = res["_item"]["events.research"]["findings"][0]["detail"]
                 self.assertTrue("2" in detail and "3" in detail, detail)
@@ -250,7 +263,8 @@ class TestResearchEvents(ResearchCase):
         # P2 R98：QUOTE warn 移除；helmsman 免掃改由座標回查（逐字稿取不到＝nonblocking NE）
         found = self.F(res, "events.research")
         self.assertNotIn(("-", "QUOTE-VERIFIER-NOT-ESTABLISHED"), found)
-        self.assertEqual({c for _, c in found}, {"TRANSCRIPT-UNAVAILABLE"})
+        self.assertEqual({c for _, c in found},  # P6 加 CARRIER-NOT-ESTABLISHED（AC-SI-45-3）
+                         {"TRANSCRIPT-UNAVAILABLE", "CARRIER-NOT-ESTABLISHED"})
         self.assertEqual((res["overall"], res["_rc"]), ("PASS", 0))
         self.assertTrue(snap0 and n0)
 
@@ -305,118 +319,6 @@ class TestSourceTable(ResearchCase):
         self.assertIn(("s0", "SRC-URL-HOST"), self.F(res, "research.sources"))
         self.assertEqual(res["_rc"], 1)
 
-    def test_AT_130_2_E_1_table_codes_and_preflight(self):
-        policy = si_sources.DEFAULT_POLICY
-        self.assertEqual(si_sources.validate_table(self.raw(), policy), [])
-
-        def first(raw):
-            return [c for c, _, _ in si_sources.validate_table(raw, policy)]
-
-        good = self.raw()
-        e = self.good_entry
-        hosts = [
-            "localhost",
-            "127.0.0.1",
-            "10.0.0.1",
-            "172.16.0.1",
-            "192.168.0.1",
-            "169.254.0.1",
-            "[::1]",
-            "[fe80::1]",
-            "[fc00::1]",
-            "[::ffff:10.0.0.1]",
-        ]
-        cases = [
-            (b"\xef\xbb\xbf" + good, "SRC-FILE-FORMAT"),
-            (good.replace(b"\n", b"\r\n"), "SRC-FILE-FORMAT"),
-            (good.rstrip(b"\n"), "SRC-FILE-FORMAT"),
-            (b"[1]\n", "SRC-FILE-FORMAT"),
-            (self.raw({"schema_rev": 2, "sources": [e()]}), "SRC-SCHEMA"),
-            (self.raw({"schema_rev": 1}), "SRC-SCHEMA"),
-            (self.raw({"schema_rev": 1, "sources": [e(extra=1)]}), "SRC-SCHEMA"),
-            (
-                self.raw(
-                    {"schema_rev": 1, "sources": [{k: v for k, v in e().items() if k != "extract"}]}
-                ),
-                "SRC-FIELD-MISSING",
-            ),
-            (self.raw(id="Src-A"), "SRC-ID-FORMAT"),
-            (self.raw({"schema_rev": 1, "sources": [e(), e()]}), "SRC-ID-DUP"),
-            (self.raw({"schema_rev": 1, "sources": [e(id="b-src"), e(id="a-src")]}), "SRC-ORDER"),
-            (self.raw(kind="news"), "SRC-KIND"),
-            (self.raw(retired="yes"), "SRC-RETIRED-TYPE"),
-            (self.raw(url="http://example.com/x.md"), "SRC-URL-SCHEME"),
-            (self.raw(url="https://user:pw@example.com/x.md"), "SRC-URL-USERINFO"),
-            *[(self.raw(url=f"https://{h}/x.md"), "SRC-URL-HOST") for h in hosts],
-        ]
-        for raw, code in cases:
-            with self.subTest(code=code, raw=raw[:60]):
-                self.assertEqual(first(raw)[0], code)
-        self.assertEqual(first(self.raw(url="http://example.com/x.md")), ["SRC-URL-SCHEME"])
-        self.assertEqual(first(self.raw(id="Src-A")), ["SRC-ID-FORMAT"])
-        srv = self.serving({f"/s{i}": (200, TEXT, b"ok") for i in range(9)})
-        entries = [(f"s{i}", f"/s{i}") for i in range(9)]
-
-        def prep(table=None, commit=True, runs=1):
-            repo = fx.p1_base()
-            self.open_only(repo, runs)
-            if table is not None:
-                fx.putb(repo, SRC_REL, table)
-                if commit:
-                    fx.commit_all(repo, "t")
-            return repo
-
-        def reject(repo, code, run=None):
-            n = len(srv.requests)
-            before = ledger_bytes(repo)
-            with fx.relaxed():
-                rc, out, _ = self.M(repo, "research", "--fetch", "--run", run or rid(1))
-            self.rejected(rc, out, None)
-            self.assertIn(code, fx.codes_of(out))
-            self.assertEqual((len(srv.requests), ledger_bytes(repo)), (n, before))
-            self.assertEqual(sum(1 for ln in out.split("\n") if ln.startswith("| OBS")), 1)
-            self.draft_ok(repo, out)
-
-        reject(prep(), "SOURCES-ABSENT")
-        reject(prep(b"\xef\xbb\xbf" + good), "SRC-FILE-FORMAT")
-        nine = fx.table_bytes(srv, entries)
-        reject(prep(nine), "FETCH-MAX")
-        reject(
-            prep(fx.table_bytes(srv, entries, retired=[f"s{i}" for i in range(9)])), "ZERO-SUCCESS"
-        )
-        repo = prep(good)
-        fx.putb(repo, SRC_REL, self.raw(extract="改過"))
-        reject(repo, "SOURCES-UNCOMMITTED")
-        reject(prep(good, commit=False), "SOURCES-UNCOMMITTED")
-        reject(prep(good), "RUN-NOT-OPEN", run=rid(901))
-        repo = prep(good)
-        self.cli_ok(
-            repo, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "x"
-        )
-        reject(repo, "RESEARCH-ALREADY")
-        repo = prep(fx.table_bytes(srv, entries, retired=["s7", "s8"]))
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 0, out + err)
-        two = [(f"s{i}", f"/s{i}") for i in range(2)]
-        repo = prep(fx.table_bytes(srv, two))
-        fx.putb(repo, SRC_REL, fx.table_bytes(srv, two).replace(b"\n", b"\r\n"))
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 0, out + err)
-        repo = prep(fx.table_bytes(srv, two))
-        nogit = fx.new_dir("nogit")
-        shutil.copytree(repo, nogit, ignore=shutil.ignore_patterns(".git"))
-        rc, out, err = self.fetch(nogit)
-        self.assertEqual(rc, 0, out + err)
-        self.assertIn("ne sources-commit-check git-unavailable", out)
-        nogit2 = fx.new_dir("nogit")
-        shutil.copytree(repo, nogit2, ignore=shutil.ignore_patterns(".git"))
-        with fx.relaxed():
-            rc, out, _ = self.M(nogit2, "research", "--fetch", "--run", rid(1), "--json")
-        self.assertEqual(rc, 0, out)
-        self.assertIn(
-            {"field": "sources-commit-check", "reason": "git-unavailable"}, json.loads(out)["ne"]
-        )
-
 
 class TestSourcesHistory(ResearchCase):
     @staticmethod
@@ -435,433 +337,8 @@ class TestSourcesHistory(ResearchCase):
             t=t,
         )
 
-    def test_AT_130_2_E_2_sources_sha_against_history(self):
-        b = (datetime.now().astimezone() - timedelta(days=10)).replace(microsecond=0)
-        t1, t2, t3, t4 = (b + timedelta(days=d) for d in range(4))
-        iso = lambda d: d.isoformat(timespec="seconds")  # noqa: E731
-        v1 = {
-            "schema_rev": 1,
-            "sources": [
-                {
-                    "id": "s-live",
-                    "url": "https://example.com/a.md",
-                    "kind": "docs",
-                    "extract": "讀",
-                    "added_by": "T1",
-                },
-                {
-                    "id": "s-old",
-                    "url": "https://example.com/b.md",
-                    "kind": "docs",
-                    "extract": "讀",
-                    "added_by": "T1",
-                    "retired": True,
-                },
-            ],
-        }
-        v2 = {
-            "schema_rev": 1,
-            "sources": [
-                *v1["sources"],
-                {
-                    "id": "s-new",
-                    "url": "https://example.com/c.md",
-                    "kind": "docs",
-                    "extract": "讀",
-                    "added_by": "T1",
-                },
-            ],
-        }
-
-        def dump(o):
-            return (json.dumps(o, ensure_ascii=False, indent=2) + "\n").encode()
-
-        h1 = fx.sha(dump(v1))
-
-        def build(extra=None):
-            repo = fx.p1_base()
-            fx.putb(repo, SRC_REL, dump(v1))
-            fx.commit_all(repo, "C1", when=iso(t1))
-            events = [
-                fx.run_open_ev(1),
-                self.scan_event(1, h1, iso(t2)),
-                fx.run_open_ev(2),
-                self.scan_event(2, h1, iso(t4)),
-            ]
-            events += extra or []
-            fx.write_events(repo, events)
-            fx.putb(repo, SRC_REL, dump(v2))
-            fx.commit_all(repo, "C2", when=iso(t3))
-            return repo
-
-        res = self.check(build())
-        self.assertEqual(self.F(res, "events.research"), {("seq=4", "SOURCES-SHA-MISMATCH")})
-        repo = fx.p1_base()
-        fx.putb(repo, SRC_REL, dump(v1))
-        fx.commit_all(repo, "C1", when=iso(t1))
-        fx.write_events(
-            repo, [fx.run_open_ev(1), self.scan_event(1, h1, iso(t1 - timedelta(days=1)))]
-        )
-        self.assertIn(
-            ("seq=2", "SOURCES-SHA-MISMATCH"), self.F(self.check(repo), "events.research")
-        )
-        extra = [
-            fx.run_open_ev(3),
-            self.scan_event(3, fx.sha(dump(v2)), iso(t4), ids=("zz-unknown",)),
-            fx.run_open_ev(4),
-            self.scan_event(4, fx.sha(dump(v2)), iso(t4), ids=("s-old",)),
-        ]
-        res = self.check(build(extra))
-        found = self.F(res, "events.research")
-        self.assertIn(("seq=6 zz-unknown", "SRC-UNKNOWN"), found)
-        self.assertFalse([s for s, c in found if "s-old" in s])
-        repo = build()
-        fx.putb(repo, SRC_REL, dump({**v2, "sources": v2["sources"][:1]}))
-        self.assertEqual(
-            self.F(self.check(repo), "events.research"), {("seq=4", "SOURCES-SHA-MISMATCH")}
-        )
-        nogit = fx.new_dir("nogit")
-        shutil.copytree(build(), nogit, ignore=shutil.ignore_patterns(".git"))
-        item = self.check(nogit)["_item"]["events.research"]
-        self.assertEqual((item["status"], item["blocking"]), ("NE", False))
-        self.assertEqual(
-            [(f["subject"], f["code"]) for f in item["findings"]],
-            [("-", "SOURCES-HISTORY-NOT-ESTABLISHED")],
-        )
-        repo = build()
-        (repo / SRC_REL).unlink()
-        item = self.check(repo)["_item"]["events.research"]
-        self.assertEqual(
-            (item["status"], item["blocking"], item["findings"][0]["code"]),
-            ("NE", True, "SOURCE-UNAVAILABLE"),
-        )
-
-    def test_AT_130_2_E_3_redirect_guard(self):
-        srv = self.serving({})
-        other = self.serving({"/ok": (200, TEXT, b"x")})
-        p = srv.port
-        routes = {
-            "/ok": (200, TEXT, b"ok"),
-            "/to-ok": (302, {"Location": srv.url("/ok")}, b""),
-            "/to-localhost": (302, {"Location": f"http://localhost:{p}/ok"}, b""),
-            "/to-otherport": (302, {"Location": other.url("/ok")}, b""),
-            "/to-ftp": (302, {"Location": "ftp://127.0.0.1/x"}, b""),
-            "/to-file": (302, {"Location": "file:///x"}, b""),
-        }
-        for i in range(5):
-            routes[f"/c{i}"] = (302, {"Location": srv.url(f"/c{i + 1}")}, b"")
-        routes["/c5"] = (200, TEXT, b"end")
-        for i in range(6):
-            routes[f"/d{i}"] = (302, {"Location": srv.url(f"/d{i + 1}")}, b"")
-        routes["/d6"] = (200, TEXT, b"end")
-        srv.routes.update(routes)
-        for path, ok in (
-            ("/to-ok", True),
-            ("/to-localhost", False),
-            ("/to-otherport", False),
-            ("/to-ftp", False),
-            ("/to-file", False),
-            ("/c0", True),
-            ("/d0", False),
-        ):
-            repo = fx.p1_base()
-            self.open_only(repo)
-            write_table(repo, srv, [("s1", path)])
-            before = ledger_bytes(repo)
-            rc, out, err = self.fetch(repo)
-            if ok:
-                self.assertEqual(rc, 0, (path, out, err))
-                self.assertIn("source s1 ok", out)
-            else:
-                self.assertEqual(rc, 1, (path, out))
-                self.assertIn("source s1 FAIL redirect-refused", out)
-                self.assertEqual(ledger_bytes(repo), before)
-        # URL 一律帶顯式同埠：預設埠下 https 與 http 的 host:port 本來就不同，會被連接埠判準先拒而
-        # 遮住 scheme 判準（`fetch.check_redirect` 的「scheme 不得改變」）
-        allowed = {"example.com:8443"}
-        cr = si_fetch.check_redirect
-        for src, dst in (
-            ("https://example.com:8443/a", "https://example.com:8443/b"),
-            ("http://example.com:8443/a", "http://example.com:8443/b"),
-        ):
-            self.assertIsNone(cr(src, dst, allowed), (src, dst))
-        for src, dst in (
-            ("https://example.com:8443/a", "http://example.com:8443/b"),
-            ("http://example.com:8443/a", "https://example.com:8443/b"),
-            ("https://example.com:8443/a", "https://other.example:8443/b"),
-            ("https://example.com:8443/a", "ftp://example.com:8443/b"),
-            ("https://example.com:8443/a", "file:///b"),
-        ):
-            self.assertEqual(cr(src, dst, allowed), "redirect-refused", dst)
-
-    def test_AT_130_2_E_4_commit_time_equal_to_event_time_passes(self):
-        """受測 `tools/lib/selfimproving/evcheck.py`：來源表提交時間不晚於事件 t（等號放行）。"""
-        tc = (datetime.now().astimezone() - timedelta(days=1)).replace(microsecond=0)
-        iso = lambda d: d.isoformat(timespec="seconds")  # noqa: E731
-        table = {
-            "schema_rev": 1,
-            "sources": [
-                {
-                    "id": "s-live",
-                    "url": "https://example.com/a.md",
-                    "kind": "docs",
-                    "extract": "讀",
-                    "added_by": "T1",
-                }
-            ],
-        }
-        raw = (json.dumps(table, ensure_ascii=False, indent=2) + "\n").encode()
-        for delta, want in ((0, set()), (-1, {("seq=2", "SOURCES-SHA-MISMATCH")}), (1, set())):
-            repo = fx.p1_base()
-            fx.putb(repo, SRC_REL, raw)
-            t = iso(tc + timedelta(seconds=delta))
-            fx.write_events(
-                repo, [fx.run_open_ev(1), self.scan_event(1, fx.sha(raw), t)]
-            )
-            fx.commit_all(repo, "C", when=iso(tc))
-            res = self.check(repo)
-            self.assertEqual(self.F(res, "events.research"), want, delta)
-            if not want:
-                self.assertEqual(self.S(res, "events.research"), "PASS", delta)
-
 
 class TestFetching(ResearchCase):
-    def test_AT_130_2_1_compliant_committed_table_passes_preflight(self):
-        srv = self.serving({})
-        srv.routes.update(
-            {
-                "/a": (200, TEXT, b"A"),
-                "/b": (302, {"Location": srv.url("/b2")}, b""),
-                "/b2": (200, TEXT, b"B"),
-                "/unlisted": (200, TEXT, b"U"),
-            }
-        )
-        repo = self.fetch_repo(srv, [("src-a", "/a"), ("src-b", "/b")])
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 0, out + err)
-        want = ["/" + name for name in ("a", "b", "b2")]
-        self.assertEqual([r["path"] for r in srv.requests], want)
-        self.assertEqual(srv.max_inflight, 1)
-        (event,) = self.scan_events(repo)
-        self.assertEqual([s["id"] for s in event["sources"]], ["src-a", "src-b"])
-        with fx.relaxed():
-            res = self.check(repo)
-        self.assertEqual(self.S(res, "research.sources"), "PASS")
-        self.assertEqual(self.S(res, "events.research"), "PASS")
-
-    def test_AT_130_3_1_fetch_raw_bytes_and_changed(self):
-        a = bytes(range(97, 123)) * 40
-        a = a[:1000]
-        routes = {
-            "/a": (200, TEXT, a),
-            "/b": (200, {"Content-Type": "application/json"}, b'{"v": 1}'),
-            "/c": (200, {"Content-Type": "application/atom+xml"}, b"<feed/>"),
-        }
-        srv = self.serving(routes)
-        repo = fx.p1_base()
-        runs = self.open_only(repo, 3)
-        table = write_table(repo, srv, [("s-a", "/a"), ("s-b", "/b"), ("s-c", "/c")])
-        rc, out, err = self.fetch(repo, runs[0])
-        self.assertEqual(rc, 0, out + err)
-        lines = out.strip().split("\n")
-        self.assertEqual(len(lines), 4)
-        for line, ident, body in zip(
-            lines, ("s-a", "s-b", "s-c"), (a, routes["/b"][2], routes["/c"][2])
-        ):
-            digest = hashlib.sha256(body).hexdigest()
-            self.assertEqual(
-                line, f"source {ident} ok sha256={digest[:12]} bytes={len(body)} changed=true"
-            )
-        self.assertRegex(lines[3], rf"^ok research\.scan seq=\d+ run={runs[0]}$")
-        e = self.scan_events(repo)[0]
-        self.assertEqual(
-            list(e)[:8],
-            ["seq", "t", "kind", "by", "run", "sources", "sources_sha256", "fetched_at"],
-        )
-        self.assertEqual(e["by"], "researcher")
-        self.assertTrue(
-            all(
-                list(s) == ["id", "sha256", "bytes", "changed", "http_status"] for s in e["sources"]
-            )
-        )
-        self.assertNotIn("url", json.dumps(e))
-        self.assertEqual(
-            e["sources_sha256"],
-            "sha256:" + hashlib.sha256(table.replace(b"\r\n", b"\n")).hexdigest(),
-        )
-        self.assertIsNotNone(datetime.fromisoformat(e["fetched_at"]).utcoffset())
-        for s, body in zip(e["sources"], (a, routes["/b"][2], routes["/c"][2])):
-            self.assertEqual(s["sha256"], "sha256:" + hashlib.sha256(body).hexdigest())
-            folder = self.home / "research" / s["id"]
-            sha12 = s["sha256"].split(":")[1][:12]
-            self.assertEqual((folder / f"{sha12}.txt").read_bytes(), body)
-            self.assertEqual((folder / "latest").read_bytes(), sha12.encode())
-        self.fetch(repo, runs[1])
-        routes["/b"] = (200, {"Content-Type": "application/json"}, b'{"v": 2}')
-        self.fetch(repo, runs[2])
-        e2, e3 = self.scan_events(repo)[1:]
-        self.assertEqual([s["changed"] for s in e2["sources"]], [False, False, False])
-        self.assertEqual([s["changed"] for s in e3["sources"]], [False, True, False])
-        for r in srv.requests:
-            h = r["headers"]
-            self.assertEqual(
-                (h["user-agent"], h["accept-encoding"]), ("selfimproving-research/1", "identity")
-            )
-            self.assertFalse({"cookie", "authorization", "proxy-authorization"} & set(h))
-        self.assertEqual(srv.max_inflight, 1)
-        order = ["/" + name for name in "abc"]
-        self.assertEqual([r["path"] for r in srv.requests[:3]], order)
-
-    def test_AT_130_3_E_1_failure_matrix(self):
-        dead = socket.socket()
-        dead.bind(("127.0.0.1", 0))
-        dead_port = dead.getsockname()[1]
-        dead.close()
-        routes = {
-            "/s-ok": (200, TEXT, b"o" * 100),
-            "/s-edge": (200, TEXT, b"e" * 1000),
-            "/s-big": (200, TEXT, b"b" * 1001),
-            "/s-404": (404, TEXT, b"no"),
-            "/s-500": (500, TEXT, b"no"),
-            "/s-bin": (200, {"Content-Type": "image/png"}, b"x"),
-            "/s-noct": (200, {}, b"x"),
-            "/s-gz": (200, {**TEXT, "Content-Encoding": "gzip"}, b"x"),
-            "/s-slow": (200, TEXT, b"x", {"delay": 3}),
-        }
-        srv = self.serving(routes)
-
-        def setup():
-            repo = fx.p1_base()
-            self.open_only(repo)
-            fx.set_params(
-                repo, research_fetch_max=20, research_bytes_max=1000, research_timeout_seconds=1
-            )
-            entries = [(k.lstrip("/"), k) for k in routes] + [("s-refused", "/dead")]
-            raw = fx.table_bytes(srv, entries).replace(
-                srv.url("/dead").encode(), f"http://127.0.0.1:{dead_port}/x".encode()
-            )
-            fx.putb(repo, SRC_REL, raw)
-            fx.commit_all(repo, "t")
-            return repo
-
-        repo = setup()
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 2, out + err)
-        reasons = dict(re.findall(r"(?m)^source (\S+) FAIL (\S+)", out))
-        self.assertEqual(
-            reasons,
-            {
-                "s-404": "http-status",
-                "s-500": "http-status",
-                "s-big": "too-large",
-                "s-bin": "non-text",
-                "s-noct": "non-text",
-                "s-gz": "encoding",
-                "s-slow": "timeout",
-                "s-refused": "network",
-            },
-        )
-        self.assertIn("source s-404 FAIL http-status 404", out)
-        self.assertIn("source s-500 FAIL http-status 500", out)
-        self.assertIn("source s-edge ok", out)
-        e = self.scan_events(repo)[0]
-        self.assertEqual([s["id"] for s in e["sources"]], ["s-edge", "s-ok"])
-        rows = out.split("obs-draft:\n")[1].strip().split("\n")
-        self.assertEqual(len(rows), 8)
-        for row in rows:
-            self.assertIn("rc=2", row)
-        self.draft_ok(repo, "obs-draft:\n" + "\n".join(rows) + "\n")
-        repo2 = setup()
-        rc, out, err = self.fetch(repo2, rid(1), "--json")
-        obj = json.loads(out)
-        self.assertEqual((rc, len(obj["failed"])), (2, 8))
-        self.assertTrue(all(list(f) == ["id", "reason", "detail"] for f in obj["failed"]))
-
-    def test_AT_130_3_E_2_zero_success_and_json_shape(self):
-        srv = self.serving(
-            {
-                "/a": (404, TEXT, b"no"),
-                "/b": (404, TEXT, b"no"),
-                "/ok1": (200, TEXT, b"1"),
-                "/ok2": (200, TEXT, b"2"),
-                "/ok3": (200, TEXT, b"3"),
-            }
-        )
-        repo = self.fetch_repo(srv, [("a", "/a"), ("b", "/b")])
-        before = ledger_bytes(repo)
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 1, out + err)
-        self.assertEqual(ledger_bytes(repo), before)
-        self.assertEqual(len(re.findall(r"(?m)^source \S+ FAIL", out)), 2)
-        self.assertIn("obs-draft:", out)
-        self.cli_ok(
-            repo, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "離線驗證"
-        )
-        repo = self.fetch_repo(srv, [("a", "/ok1"), ("b", "/ok2"), ("c", "/ok3")])
-        fx.set_params(repo, event_max_bytes=200)
-        before = ledger_bytes(repo)
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("EVENT-BYTES-OVER", fx.codes_of(out))
-        self.assertEqual(ledger_bytes(repo), before)
-        for ident in "abc":
-            folder = self.home / "research" / ident
-            self.assertTrue((folder / "latest").is_file(), ident)
-        repo = self.fetch_repo(srv, [("a", "/ok1"), ("b", "/ok2")])
-        rc, out, err = self.fetch(repo, rid(1), "--json")
-        self.assertEqual(rc, 0, out + err)
-        obj = json.loads(out)
-        self.assertEqual(
-            list(obj),
-            ["ok", "kind", "seq", "id", "run", "rc", "sources", "failed", "obs_drafts", "ne"],
-        )
-        self.assertEqual(
-            (obj["kind"], obj["id"], obj["failed"], obj["obs_drafts"]),
-            ("research.scan", None, [], []),
-        )
-
-    def test_AT_130_3_E_4_zero_success_code_on_both_paths(self):
-        """受測 `tools/lib/selfimproving/research.py`：抓取零成功與預檢零現役皆 ZERO-SUCCESS。"""
-        srv = self.serving({"/a": (404, TEXT, b"no"), "/b": (500, TEXT, b"no")})
-        repo = self.fetch_repo(srv, [("s1", "/a"), ("s2", "/b")])
-        again = fx.new_dir("zs")
-        shutil.copytree(repo, again)
-        before = ledger_bytes(repo)
-        rc, out, err = self.fetch(repo)
-        self.zero_success(rc, out)
-        self.assertTrue(out.split("\n")[0].startswith("source s1 FAIL"), out)  # R57 (e)
-        order = [
-            out.index(m)
-            for m in (
-                "source s1 FAIL http-status 404",
-                "source s2 FAIL http-status 500",
-                "reject research ZERO-SUCCESS",
-            )
-        ]
-        self.assertEqual(order, sorted(order))
-        drafts = [r for r in out.split("\n") if r.startswith("| OBS")]
-        self.assertEqual(len(drafts), 2, out)
-        for row, ident in zip(drafts, ("s1", "s2")):
-            self.assertIn(ident, row)
-            self.assertIn("http-status", row)
-        self.assertEqual(ledger_bytes(repo), before)
-        with fx.relaxed():
-            rc, out, err = self.M(again, "research", "--fetch", "--run", rid(1), "--json")
-        obj = json.loads(out)
-        self.assertEqual((rc, obj["ok"]), (1, False), out)
-        self.assertEqual([c["code"] for c in obj["codes"]], ["ZERO-SUCCESS"])
-        self.assertEqual(
-            [(f["id"], f["reason"]) for f in obj["failed"]],
-            [("s1", "http-status"), ("s2", "http-status")],
-        )
-        repo = self.fetch_repo(srv, [("s1", "/a"), ("s2", "/b")], retired=("s1", "s2"))
-        n, before = len(srv.requests), ledger_bytes(repo)
-        rc, out, err = self.fetch(repo)
-        self.zero_success(rc, out)
-        self.assertEqual((len(srv.requests), ledger_bytes(repo)), (n, before))
-        self.cli_ok(
-            repo, "research", "--skip", "--run", rid(1), "--reason", "offline", "--note", "離線驗證"
-        )
 
     def test_AT_130_3_E_5_content_type_allowlist_is_pinned(self):
         """受測 `tools/lib/selfimproving/fetch.py`：可接受的 Content-Type 集合逐一釘住。"""
@@ -881,96 +358,19 @@ class TestFetching(ResearchCase):
             "application/x-ndjson",
             "application/javascript",
         )
-        routes = {f"/t{i}": (200, {"Content-Type": c}, b"12345") for i, c in enumerate(ok + bad)}
-        srv = self.serving(routes)
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
+        def call(ctype):  # P6：改走 `fetch_chain` 與 `px.net` 注入縫（舊 `fetch_source` 已移除）
+            table = {("www.x.org", "/t"): px.response(ctype=ctype, body=b"12345")}
+            with px.net(table):
+                return si_fetch.fetch_chain("https://www.x.org/t", hosts={"www.x.org"},
+                                            timeout=5, max_bytes=1000)
 
-        def call(i):
-            return si_fetch.fetch_source(
-                srv.url(f"/t{i}"), policy=policy, timeout=5, max_bytes=1000, allowed_hosts=allowed
-            )
-
-        for i, ctype in enumerate(ok):
-            got = call(i)
+        for ctype in ok:
+            got = call(ctype)
             self.assertEqual((got.status, got.raw), (200, b"12345"), ctype)
-        for i, ctype in enumerate(bad, start=len(ok)):
+        for ctype in bad:
             with self.assertRaises(si_fetch.FetchError, msg=ctype) as cm:
-                call(i)
+                call(ctype)
             self.assertEqual((cm.exception.reason, cm.exception.detail), ("non-text", ctype))
-
-    def test_AT_130_3_E_3_fetch_outside_lock(self):
-        for scenario in (1, 2, 3, 4):
-            hold = threading.Event()
-            srv = self.serving({"/hold": (200, TEXT, b"held", {"hold": hold})})
-            repo = fx.p1_base()
-            self.open_only(repo)
-            write_table(repo, srv, [("s-hold", "/hold")])
-            ledger = repo / EVL
-            lock = evwrite.lock_path_for(self.home, ledger)
-            result: list = []
-
-            def work():
-                buf, err = __import__("io").StringIO(), __import__("io").StringIO()
-                with redirect_stdout(buf), redirect_stderr(err):
-                    import selfimproving
-
-                    rc = selfimproving.main(
-                        ["research", "--fetch", "--run", rid(1), "--repo", str(repo)]
-                    )
-                result.append((rc, buf.getvalue()))
-
-            with fx.relaxed():
-                t = threading.Thread(target=work)
-                t.start()
-                hold_path = "/" + "hold"
-                self.assertTrue(srv.arrived(hold_path).wait(15))
-                n0 = len(fx.EV(repo))
-                if scenario == 1:
-                    t0 = time.monotonic()
-                    with apply_lock.acquire(lock, 2, 300):
-                        pass
-                    self.assertLess(time.monotonic() - t0, 2)
-                elif scenario == 2:
-                    evwrite.append_event(
-                        ledger,
-                        lock,
-                        lambda s: {
-                            "kind": "research.skip",
-                            "by": "main",
-                            "run": rid(1),
-                            "reason": "offline",
-                            "note": "測試插入",
-                        },
-                    )
-                elif scenario == 3:
-                    evwrite.append_event(
-                        ledger,
-                        lock,
-                        lambda s: {
-                            "kind": "run.close",
-                            "by": "main",
-                            "run": rid(1),
-                            "no_event": True,
-                        },
-                    )
-                else:
-                    other = self.serving({})
-                    write_table(
-                        repo, other, [("s-hold", "/hold"), ("s-zzz", "/x")], retired=["s-zzz"]
-                    )
-                hold.set()
-                t.join(30)
-            rc, out = result[0]
-            kinds = [e["kind"] for e in fx.EV(repo)[n0:]]
-            if scenario == 1:
-                self.assertEqual((rc, kinds), (0, ["research.scan"]))
-            else:
-                self.assertEqual(rc, 1, out)
-                want = {2: "RESEARCH-ALREADY", 3: "RUN-NOT-OPEN", 4: "SOURCES-CHANGED"}[scenario]
-                self.assertIn(want, fx.codes_of(out))
-                self.assertNotIn("research.scan", kinds)
-                self.assertEqual(kinds, {2: ["research.skip"], 3: ["run.close"], 4: []}[scenario])
 
 
 class TestResearcherRows(ResearchCase):
@@ -1058,193 +458,6 @@ class TestResearcherRows(ResearchCase):
 class TestBudgetsAndFingerprint(ResearchCase):
     """受測：`tools/lib/selfimproving/fetch.py`／`research.py`（抓取預算與來源表指紋）。"""
 
-    def test_AT_130_5_1_budget_boundaries_pass(self):
-        body = b"x" * 500
-        srv = self.serving(
-            {
-                "/a": (200, TEXT, body),
-                "/b": (200, TEXT, body),
-                "/late": (200, TEXT, body, {"delay": 0.3}),
-            }
-        )
-        repo = fx.p1_base()
-        self.open_only(repo)
-        fx.set_params(
-            repo, research_fetch_max=3, research_bytes_max=500, research_timeout_seconds=2
-        )
-        write_table(repo, srv, [("a", "/a"), ("b", "/b"), ("c", "/late")])
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 0, out + err)
-        self.assertEqual(len(re.findall(r"(?m)^source \S+ ok", out)), 3)
-        net = {"socket", "urllib", "http", "ssl", "ftplib", "smtplib", "asyncio", "requests"}
-        importers = set()
-        for path in (TOOLS / "lib" / "selfimproving").glob("*.py"):
-            tree = ast.parse(path.read_bytes().decode("utf-8"))
-            for node in ast.walk(tree):
-                mods = (
-                    [a.name.split(".")[0] for a in node.names]
-                    if isinstance(node, ast.Import)
-                    else [node.module.split(".")[0]]
-                    if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
-                    else []
-                )
-                if net & set(mods):
-                    importers.add(path.name)
-        self.assertEqual(importers, {"fetch.py"})
-
-    def test_AT_130_5_E_1_budget_overruns(self):
-        srv = self.serving({f"/p{i}": (200, TEXT, b"ok") for i in range(6)})
-        srv.routes["/big"] = (200, TEXT, b"b" * 501)
-        srv.routes["/slow"] = (200, TEXT, b"x", {"delay": 3})
-
-        def setup(entries, retired=(), **prm):
-            repo = fx.p1_base()
-            self.open_only(repo)
-            fx.set_params(
-                repo,
-                research_fetch_max=3,
-                research_bytes_max=500,
-                research_timeout_seconds=1,
-                **prm,
-            )
-            write_table(repo, srv, entries, retired=retired)
-            return repo
-
-        repo = setup([(f"s{i}", f"/p{i}") for i in range(4)])
-        n, before = len(srv.requests), ledger_bytes(repo)
-        rc, out, _ = self.fetch(repo)
-        self.rejected(rc, out, {"FETCH-MAX"})
-        self.assertEqual((len(srv.requests), ledger_bytes(repo)), (n, before))
-        repo = setup([(f"s{i}", f"/p{i}") for i in range(5)], retired=["s3", "s4"])
-        n = len(srv.requests)
-        rc, out, err = self.fetch(repo)
-        self.assertEqual((rc, len(srv.requests) - n), (0, 3), out + err)
-        repo = setup([("big", "/big")])
-        rc, out, _ = self.fetch(repo)
-        self.assertEqual(rc, 1)
-        self.assertIn("source big FAIL too-large", out)
-        self.assertFalse((self.home / "research" / "big").exists())
-        repo = setup([("slow", "/slow")])
-        rc, out, _ = self.fetch(repo)
-        self.assertEqual(rc, 1)
-        self.assertIn("source slow FAIL timeout", out)
-        for key in ("research_fetch_max", "research_bytes_max", "research_timeout_seconds"):
-            repo = setup([("s0", "/p0")])
-            fx.set_params(repo, **{key: KeyError})
-            n = len(srv.requests)
-            rc, out, err = self.fetch(repo)
-            self.usage_error(rc, out, err)
-            self.assertIn(key, err)
-            self.assertEqual(len(srv.requests), n)
-
-    def test_AT_130_5_E_2_wallclock_holds_for_drip_and_stall(self):
-        hdr = {**TEXT, "Content-Length": "8"}  # 有限本文：期限機制失效時以斷言紅收場而非掛住
-        body = b"d" * 8
-        srv = self.serving(
-            {
-                "/drip": (200, hdr, body, {"drip": True}),
-                "/stall": (200, hdr, body, {"stall": True}),
-                "/late-stall": (200, hdr, body, {"delay": 1.2, "stall": True}),
-            }
-        )
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
-        for path in ("/drip", "/stall", "/late-stall"):
-            t0 = time.monotonic()
-            with self.assertRaises(si_fetch.FetchError, msg=path) as cm:
-                si_fetch.fetch_source(
-                    srv.url(path), policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
-                )
-            spent = time.monotonic() - t0
-            self.assertEqual(cm.exception.reason, "timeout", path)
-            self.assertTrue(1.5 <= spent <= 2.5, f"{path} {spent:.2f}s")
-        repo = fx.p1_base()
-        self.open_only(repo)
-        fx.set_params(repo, research_timeout_seconds=2, research_bytes_max=262144)
-        write_table(repo, srv, [("s-drip", "/drip")])
-        before = ledger_bytes(repo)
-        t0 = time.monotonic()
-        rc, out, err = self.fetch(repo)
-        spent = time.monotonic() - t0
-        self.zero_success(rc, out)
-        self.assertIn("source s-drip FAIL timeout", out)
-        self.assertEqual(ledger_bytes(repo), before)
-        self.assertLess(spent, 6, f"整個指令 {spent:.2f}s")
-
-    def test_AT_130_5_E_3_wallclock_holds_in_every_framing_stage(self):
-        """受測 `tools/lib/selfimproving/fetch.py`：框架各階段慢滴皆 timeout。"""
-        srv = self.serving(fx.raw_routes())
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
-        for path in ("/status-drip", "/hdr-drip", "/hdr-many-lines", "/chunk-size-drip",
-                     "/trailer-drip"):
-            t0, got = time.monotonic(), None
-            try:
-                got = si_fetch.fetch_source(
-                    srv.url(path), policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
-                )
-            except si_fetch.FetchError as exc:
-                reason = exc.reason
-            spent = time.monotonic() - t0
-            self.assertIsNone(got, f"{path} 不得回傳成功")
-            self.assertEqual(reason, "timeout", path)
-            self.assertTrue(1.5 <= spent <= 2.5, f"{path} {spent:.2f}s")
-        t0 = time.monotonic()
-        ok = si_fetch.fetch_source(
-            srv.url("/chunked-ok"), policy=policy, timeout=2, max_bytes=262144,
-            allowed_hosts=allowed,
-        )
-        self.assertEqual(ok.raw, b"abcde")
-        self.assertLess(time.monotonic() - t0, 1)
-        repo = fx.p1_base()
-        self.open_only(repo)
-        fx.set_params(repo, research_timeout_seconds=2, research_bytes_max=262144)
-        write_table(repo, srv, [("s-hdr", "/hdr-drip")])
-        before = ledger_bytes(repo)
-        t0 = time.monotonic()
-        rc, out, err = self.fetch(repo)
-        spent = time.monotonic() - t0
-        self.zero_success(rc, out)
-        self.assertIn("source s-hdr FAIL timeout", out)
-        self.assertEqual(ledger_bytes(repo), before)
-        self.assertLess(spent, 6, f"整個指令 {spent:.2f}s")
-
-    def test_AT_130_2_E_5_unparsable_urls_stay_in_the_closed_failure_set(self):
-        """受測 `tools/lib/selfimproving/fetch.py`：無法剖析的 URL 不拋 ValueError。"""
-        locs = ["http://[::1/x", "http://::1]/x", "http://127.0.0.1:99999/x",
-                "http://127.0.0.1:abc/x", f"http://127.0.0.1:{P_BIG}/x", "http://127.0.0.1:²/x"]
-        srv = self.serving({
-            f"/r{i}": (302, {"Location": loc, "Content-Length": "0"}, b"")
-            for i, loc in enumerate(locs, 1)
-        })
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        here = f"127.0.0.1:{srv.port}"
-
-        def reason(url, allowed):
-            with self.assertRaises(si_fetch.FetchError, msg=url[:60]) as cm:
-                si_fetch.fetch_source(
-                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
-                )
-            return cm.exception.reason
-
-        for allowed in ({here}, {here, "127.0.0.1:80"}):
-            for i in range(1, 7):
-                msg = f"r{i} {sorted(allowed)}"
-                self.assertEqual(reason(srv.url(f"/r{i}"), allowed), "redirect-refused", msg)
-        self.assertEqual(
-            [reason("http://[::1/x", {here}), reason("http://::1]/x", {here})], ["network"] * 2
-        )
-        repo = fx.p1_base()
-        self.open_only(repo)
-        fx.set_params(repo, research_timeout_seconds=2)
-        write_table(repo, srv, [("s-r1", "/r1")])
-        before = ledger_bytes(repo)
-        rc, out, err = self.fetch(repo)
-        self.zero_success(rc, out)
-        self.assertIn("source s-r1 FAIL redirect-refused", out)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual(ledger_bytes(repo), before)
-
     def table_url_repo(self, url: str) -> Path:
         repo = fx.p1_base()
         self.open_only(repo)
@@ -1265,210 +478,23 @@ class TestBudgetsAndFingerprint(ResearchCase):
         self.assertEqual(bytes(buf[:5]), b"hello")
         self.assertEqual([c[0] for c in sock.calls], ["settimeout", "recv_into"])
         self.assertTrue(0 < sock.calls[0][1] <= 5.0, sock.calls)
-        hdr = {"Content-Type": "text/plain", "Content-Length": "8"}
-        srv = self.serving({
-            f"/d{i}": (200, hdr, b"", {"delay": 0.25 - 0.010 + 0.0004 * i, "stall": True})
-            for i in range(50)
-        })
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
-        t0, results = time.monotonic(), []
-        for i in range(50):
-            try:
-                si_fetch.fetch_source(
-                    srv.url(f"/d{i}"), policy=policy, timeout=0.25, max_bytes=100,
-                    allowed_hosts=allowed,
-                )
-                results.append("ok")
-            except si_fetch.FetchError as exc:
-                results.append(exc.reason)
-            except Exception as exc:  # noqa: BLE001  # 逸出的例外型別本身就是失敗證據
-                results.append(type(exc).__name__)
-        self.assertEqual(results, ["timeout"] * 50, results)
-        self.assertLess(time.monotonic() - t0, 30)
+        # 滴流／停滯的牆鐘：改由 AT-630-3-E-4（請求鏈牆鐘）以偽時鐘驗，見檔頂對照表
 
     def test_AT_130_5_E_5_unparsable_content_length_counts_as_absent(self):
         """受測 `tools/lib/selfimproving/fetch.py`：無法解析的 Content-Length 視同未提供。"""
-        text = {"Content-Type": "text/plain"}
-        srv = self.serving({
-            "/sup2": (200, {**text, "Content-Length": "²"}, b"hello"),
-            "/sup1": (200, {**text, "Content-Length": "¹"}, b"hello"),
-            "/mixed": (200, {**text, "Content-Length": "5²"}, b"hello"),
-            "/abc": (200, {**text, "Content-Length": "abc"}, b"hello"),
-            "/ok": (200, {**text, "Content-Length": "5"}, b"hello"),
-            "/big": (200, {**text, "Content-Length": "²"}, b"b" * 101),
-        })
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
+        def get(content_length: str, body: bytes):
+            table = {("www.x.org", "/p"): px.response(
+                headers={"Content-Length": content_length}, body=body)}
+            with px.net(table):
+                return si_fetch.fetch_chain("https://www.x.org/p", hosts={"www.x.org"},
+                                            timeout=2, max_bytes=100)
 
-        def get(path):
-            return si_fetch.fetch_source(
-                srv.url(path), policy=policy, timeout=2, max_bytes=100,
-                allowed_hosts={f"127.0.0.1:{srv.port}"},
-            )
-
-        for path in ("/sup2", "/sup1", "/mixed", "/abc", "/ok"):
-            got = get(path)
-            self.assertEqual((got.raw, got.status), (b"hello", 200), path)
+        for length in ("²", "¹", "5²", "abc", "5"):  # 無法解析的 Content-Length 視同未提供
+            got = get(length, b"hello")
+            self.assertEqual((got.raw, got.status), (b"hello", 200), length)
         with self.assertRaises(si_fetch.FetchError) as cm:
-            get("/big")
+            get("²", b"b" * 101)
         self.assertEqual(cm.exception.reason, "too-large")
-
-    def test_AT_130_2_E_6_initial_url_failures_are_network(self):
-        """受測 `tools/lib/selfimproving/fetch.py`：初始 URL 的任何失敗只拋 FetchError。"""
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        forms = ["http:///x", "http://", "http://:80/x", "http://exa mple.com/x",
-                 "http://exa\x00mple.com/x", "http://exa\x7fmple.com/x",
-                 f"http://127.0.0.1:{P_BIG}/x", "http://127.0.0.1:99999/x",
-                 "http://127.0.0.1:abc/x", "http://127.0.0.1:²/x"]
-        for url in forms:
-            t0, reason = time.monotonic(), None
-            try:
-                si_fetch.fetch_source(
-                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=set()
-                )
-            except si_fetch.FetchError as exc:
-                reason = exc.reason
-            self.assertEqual(reason, "network", url[:60])
-            self.assertLess(time.monotonic() - t0, 1, url[:60])
-        repo = self.table_url_repo("https://[2001:db8::1/docs")
-        res = self.check(repo)
-        self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
-        before = ledger_bytes(repo)
-        rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
-        self.zero_success(rc, out)
-        self.assertIn("source a-typo FAIL network", out)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual(ledger_bytes(repo), before)
-
-    def test_AT_130_2_E_7_host_characters_and_port_text(self):
-        """受測 `tools/lib/selfimproving/sources.py`：host 字元判準與連接埠文字全函式。"""
-        bad, none = ["SRC-URL-HOST"], []
-        cases = [
-            ("https://example.com/docs", none), ("https://exa mple.com/docs", bad),
-            ("https://exa\tmple.com/docs", bad), ("https://exa\nmple.com/docs", bad),
-            ("https://exa\x00mple.com/docs", bad), ("https://exa\x7fmple.com/docs", bad),
-            ("https://exa　mple.com/docs", bad), ("https://example.com /docs", bad),
-            ("https:// example.com/docs", bad), ("https://127.0.0.1\t/x", bad),
-            ("https://localhost\t/x", bad), ("https://10.0.0.1\r/x", bad),
-            ("https://127.0.\t0.1/x", bad), ("https:///docs", bad), ("https://:443/docs", bad),
-            ("https://example.com/a b", none), ("https://[2001:db8::1/docs", none),
-            ("https://example.com:abc/docs", none), ("https://example.com:99999/docs", none),
-            (f"https://example.com:{P_BIG}/docs", none), ("https://example.com:²/docs", none),
-        ]
-        for url, want in cases:
-            problems = si_sources.validate_table(raw_table(url), si_sources.DEFAULT_POLICY)
-            self.assertEqual([c for c, _, _ in problems], want, repr(url[:60]))
-        for url in ("https://exa mple.com/docs", "https://127.0.0.1\t/x"):
-            repo = self.table_url_repo(url)
-            res, before = self.check(repo), ledger_bytes(repo)
-            self.assertEqual((res["_rc"], self.S(res, "research.sources")), (1, "FAIL"), url)
-            self.assertEqual(self.F(res, "research.sources"), {("a-typo", "SRC-URL-HOST")}, url)
-            with mock.patch.object(
-                socket.socket, "connect", side_effect=AssertionError("不得連線")
-            ) as conn:
-                rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
-            self.assertEqual(
-                (rc, fx.codes_of(out), conn.call_count), (1, {"SRC-URL-HOST"}, 0), url
-            )
-            self.assertNotIn("Traceback", err)
-            self.assertEqual(ledger_bytes(repo), before)
-        repo = self.table_url_repo(f"https://example.com:{P_BIG}/docs")
-        res, before = self.check(repo), ledger_bytes(repo)
-        self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
-        with mock.patch.object(socket.socket, "connect", side_effect=OSError("拒絕")):
-            rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
-        self.zero_success(rc, out)
-        self.assertIn("source a-typo FAIL network", out)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual(ledger_bytes(repo), before)
-
-    def test_AT_130_2_E_8_non_ascii_targets_and_initial_urls_are_network(self):
-        """受測 `tools/lib/selfimproving/fetch.py`：非 ASCII 的下一跳與初始 URL 歸 network。"""
-
-        def loc(value: bytes):
-            head = b"HTTP/1.0 302 Found\r\nLocation: " + value + b"\r\nContent-Length: 0\r\n\r\n"
-            return (302, {}, b"", {"raw": lambda: [(head, 0)]})
-
-        routes = {
-            "/n0": loc(b"/ok"), "/n1": loc("/文件".encode()), "/n2": loc("/é".encode()),
-            "/n3": loc("/x?q=文".encode()), "/n4": loc(b"\xff\xfe"),
-            "/ok": (200, TEXT, b"hello"),
-        }
-        srv = self.serving(routes)
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        allowed = {f"127.0.0.1:{srv.port}"}
-
-        def get(url):
-            t0 = time.monotonic()
-            try:
-                got = si_fetch.fetch_source(
-                    url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=allowed
-                )
-                result = ("ok", got.raw)
-            except si_fetch.FetchError as exc:
-                result = ("FetchError", exc.reason)
-            self.assertLess(time.monotonic() - t0, 1, url[:60])
-            return result
-
-        control = get(srv.url("/n0"))
-        self.assertEqual(control, ("ok", b"hello"))
-        for url in (srv.url("/n1"), srv.url("/n2"), srv.url("/n3"), srv.url("/n4"),
-                    srv.url("/文件"), srv.url("/x?q=文")):
-            self.assertEqual(get(url), ("FetchError", "network"), url[:60])
-        repo = fx.p1_base()
-        self.open_only(repo)
-        fx.set_params(repo, research_timeout_seconds=2)
-        write_table(repo, srv, [("a-bad", "/n1"), ("b-ok", "/ok")])
-        n0 = len(fx.EV(repo))
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 2, out)
-        lines = out.split("\n")
-        pos = [next(i for i, ln in enumerate(lines) if ln.startswith(p)) for p in
-               ("source a-bad FAIL network", "source b-ok ok", "ok research.scan")]
-        self.assertEqual(pos, sorted(pos), out)
-        self.assertIn("obs-draft:", lines)
-        self.assertNotIn("Traceback", err)
-        scans = self.scan_events(repo)
-        self.assertEqual(len(fx.EV(repo)) - n0, 1)
-        self.assertEqual([s["id"] for s in scans[-1]["sources"]], ["b-ok"])
-
-    def test_AT_130_2_E_9_idna_invalid_hosts_fail_before_dns_as_network(self):
-        """受測 `tools/lib/selfimproving/fetch.py`：IDNA 無效 host 不查 DNS、不連線、歸 network。"""
-        hits = []
-
-        def dns_guard(host, *args, **kwargs):
-            if isinstance(host, str):
-                host.encode("idna")  # 與真函式同一步；失敗拋同一個 UnicodeError
-            hits.append(host)
-            raise AssertionError("不得查 DNS")
-
-        policy = si_sources.Policy(allow_http=True, allow_loopback=True)
-        forms = ["http://docs..example.com/x", "http://.example.com/x",
-                 f"http://{'a' * 64}.example.com/x", f"http://{'a' * 70}.example.com/x",
-                 "http://a。。b/x", "https://docs..example.com/x"]
-        repo = self.table_url_repo("https://docs..example.com/docs")
-        with mock.patch("socket.getaddrinfo", side_effect=dns_guard), mock.patch.object(
-            socket.socket, "connect", side_effect=AssertionError("不得連線")
-        ) as conn:
-            for url in forms:
-                t0, reason = time.monotonic(), None
-                try:
-                    si_fetch.fetch_source(
-                        url, policy=policy, timeout=2, max_bytes=262144, allowed_hosts=set()
-                    )
-                except si_fetch.FetchError as exc:
-                    reason = exc.reason
-                self.assertEqual(reason, "network", url[:60])
-                self.assertLess(time.monotonic() - t0, 1, url[:60])
-            res = self.check(repo)
-            self.assertEqual((res["_rc"], self.S(res, "research.sources")), (0, "PASS"))
-            before = ledger_bytes(repo)
-            rc, out, err = self.M(repo, "research", "--fetch", "--run", rid(1))
-        self.assertEqual((hits, conn.call_count), ([], 0))
-        self.zero_success(rc, out)
-        self.assertIn("source a-typo FAIL network", out)
-        self.assertNotIn("Traceback", err)
-        self.assertEqual(ledger_bytes(repo), before)
 
     def test_AT_130_6_1_sources_excluded_from_fingerprint(self):
         repo = fx.p1_base()
@@ -1987,33 +1013,6 @@ class TestResearcherAndTemplateArticles(SiTestCase):
         self.assertEqual(fx.tree_state(repo), before)
 
 
-class TestP2Closures(ResearchCase):
-    def test_AT_230_2_E_2_bad_host_means_zero_connections(self):
-        srv = self.serving({"/ok": (200, TEXT, b"ok")})
-        repo = self.fetch_repo(srv, [("s-ok", "/ok")])
-        raw = json.loads(fx.read(repo, fx.SRC_REL))
-        good = list(raw["sources"])
-        raw["sources"] = [*good, {"id": "s-zz-bad", "url": "https://１２７.0.0.1/x", "kind": "docs",
-                                  "extract": "x", "added_by": "夾具"}]
-        fx.put(repo, fx.SRC_REL, json.dumps(raw, ensure_ascii=False, indent=2) + "\n")
-        fx.commit_all(repo, "bad host")
-        ev0, snap0 = (repo / fx.EVL).read_bytes(), fx.snap(repo)
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 1, out + err)
-        self.assertIn("SRC-URL-HOST", fx.codes_of(out))
-        self.assertEqual(len(srv.requests), 0)
-        self.assertEqual(((repo / fx.EVL).read_bytes(), fx.snap(repo)), (ev0, snap0))
-        lines = out.split("\n")
-        self.assertTrue(lines[lines.index("obs-draft:") + 1].startswith("| OBS"))
-        raw["sources"] = good
-        fx.put(repo, fx.SRC_REL, json.dumps(raw, ensure_ascii=False, indent=2) + "\n")
-        fx.commit_all(repo, "good only")
-        rc, out, err = self.fetch(repo)
-        self.assertEqual(rc, 0, out + err)
-        self.assertGreater(len(srv.requests), 0)
-        self.assertEqual(len(self.scan_events(repo)), 1)
-
-
 class TestScanP2(ScanCase):
     # 受測面：tools/lib/selfimproving/sandbox.py（程式碼鎖，非散文）
     def _candidates(self, repo):
@@ -2062,6 +1061,23 @@ class TestScanP2(ScanCase):
         row = out.split("obs-draft:\n")[1].strip()
         cells = [c.strip() for c in row.strip("|").split("|")]
         self.assertEqual(cells[5:8], ["bug", "P3", "open"])
+
+
+class TestP6BadHost(ResearchCase):
+    """受測：`tools/lib/selfimproving/registry.py`、`research.py`（壞 host 的零連線；P6 版）。"""
+
+    def test_AT_230_2_E_2_bad_host_means_zero_connections(self):
+        # P2 TCS 的 AT-230-2-E-2：壞 host 一律在連線前被擋。P6 版＝鏡像內的壞 URL 於預檢以
+        # REG-WATCH-URL 整次拒收，`px.net` 的解析與連線次數皆為 0（對應 TCS-P6 AT-630-7-E-1）。
+        bad = ["https://xn--e1afmkfd.example/x", "https://例え.jp/x", "https://127.0.0.1/x",
+               "https://localhost/x", "https://example.org./x", "https://u@example.org/x"]
+        for url in bad:
+            repo = px.repo(mirror=px.mutate(lambda o: o["watch"][1].update(url=url)))
+            with px.net({}) as n:
+                rc, out, _ = self.M(repo, "research", "--fetch", "--run", rid(1))
+            self.assertEqual(rc, 1, url)
+            self.assertIn("REG-WATCH-URL", fx.codes_of(out), url)
+            self.assertEqual((n.resolved, n.connects), ([], []), url)
 
 
 if __name__ == "__main__":
