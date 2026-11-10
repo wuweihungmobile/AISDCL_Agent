@@ -311,6 +311,7 @@ def reg_event(text: str = None, *, ref=REF, when=TIME, seq_kw=None, **kw) -> dic
 
 
 def set_params(r: Path, **kw) -> None:
+    """改沙盒的 params.json，供 tools/lib/selfimproving/registry.py 讀取。"""
     p = r / "docs/06_quality/SelfImproving_Protocol/params.json"
     obj = json.loads(p.read_text(encoding="utf-8"))
     obj.update(kw)
