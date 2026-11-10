@@ -30,7 +30,23 @@ def _parse_xml(raw: bytes):
     return ET.fromstring(raw)
 
 
+_NON_UTF8_BOMS = (b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")
+_ENCODING_DECL = re.compile(rb"""^\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def _is_utf8_family(raw: bytes) -> bool:
+    """UTF-8 系才放行：位元組搜尋只對 UTF-8／ASCII 有意義，UTF-16／32 會繞過它。"""
+    head = raw[:4096]
+    if raw.startswith(_NON_UTF8_BOMS) or b"\x00" in head:
+        return False
+    body = raw[3:] if raw.startswith(b"\xef\xbb\xbf") else raw
+    m = _ENCODING_DECL.match(body[:4096])
+    return m is None or m.group(1).lower() in (b"utf-8", b"us-ascii")
+
+
 def _checked_root(raw: bytes):
+    if not _is_utf8_family(raw):
+        raise ExpandRefused("XML 非 UTF-8 系編碼")
     low = raw.lower()
     if len(raw) > XML_LOAD_MAX or b"<!doctype" in low or b"<!entity" in low:
         raise ExpandRefused("XML 含 DOCTYPE／ENTITY 或超過載入上限")

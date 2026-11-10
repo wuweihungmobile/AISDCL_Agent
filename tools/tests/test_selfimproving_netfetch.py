@@ -357,6 +357,32 @@ class TestExpand(NfCase):
         self.assertEqual(expand.select(expand.link_targets(rss, "application/rss+xml", base),
                                        base, P_BLOG, 9), ["https://www.x.org/blog/c"])
 
+    def test_AT_630_8_E_2_non_utf8_xml_is_refused_before_parse(self):
+        """tools/lib/selfimproving/expand.py：非 UTF-8 系文件不得繞過 DOCTYPE 位元組搜尋。"""
+        xml = ('<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "A">]>'
+               "<urlset><url><loc>https://www.x.org/a</loc></url></urlset>")
+        plain = "<urlset><url><loc>https://www.x.org/a</loc></url></urlset>"
+        bad = {
+            "utf16le-bom": b"\xff\xfe" + xml.encode("utf-16-le"),
+            "utf16be-bom": b"\xfe\xff" + xml.encode("utf-16-be"),
+            "utf16le-nobom": xml.encode("utf-16-le"),
+            "utf16be-nobom": xml.encode("utf-16-be"),
+            "utf32le-bom": b"\xff\xfe\x00\x00" + xml.encode("utf-32-le"),
+            "utf32be-bom": b"\x00\x00\xfe\xff" + xml.encode("utf-32-be"),
+            "decl-utf16": b'<?xml version="1.0" encoding="UTF-16"?>' + plain.encode(),
+            "nul-byte": plain.encode()[:10] + b"\x00" + plain.encode()[10:],
+        }
+        for name, raw in bad.items():
+            with self.subTest(name), mock.patch.object(
+                    expand, "_parse_xml", wraps=expand._parse_xml) as spy:
+                with self.assertRaises(expand.ExpandRefused):
+                    expand.sitemap_entries(raw)
+                self.assertEqual(spy.call_count, 0)
+        ok = (b"\xef\xbb\xbf" + b'<?xml version="1.0" encoding="UTF-8"?>' + plain.encode())
+        ascii_decl = b'<?xml version="1.0" encoding="us-ascii"?>' + plain.encode()
+        for raw in (ok, plain.encode(), ascii_decl):
+            self.assertEqual(expand.sitemap_entries(raw), [("https://www.x.org/a", None)])
+
     def test_AT_630_8_E_1_doctype_never_reaches_the_parser(self):
         bomb = (b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "' + b"A" * 100 + b'">]>'
                 b"<urlset><url><loc>https://www.x.org/a</loc></url></urlset>")

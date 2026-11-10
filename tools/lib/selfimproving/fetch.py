@@ -42,12 +42,6 @@ class Fetched:
     ctype: str = ""
 
 
-
-
-
-
-
-
 class _DeadlineRaw(io.RawIOBase):
     """回應讀取的最底層：**每一次**向 socket 取位元組之前都依整個來源的剩餘期限重設逾時，期限已過
     即拋 `TimeoutError`。狀態列、標頭、分塊大小行、trailer 行與本文走同一個出口，慢滴回應（每次
@@ -92,12 +86,6 @@ def _read_body(resp, max_bytes: int) -> bytes:
         if len(buf) > max_bytes:
             raise FetchError("too-large", f"超過 {max_bytes} 位元組")
     return bytes(buf)
-
-
-
-
-
-
 
 
 # ── P6：登記鏡像驅動的安全請求鏈（AC-SI-30-7；DNS 一次、釘 IP、SNI／Host＝原主機名）──────────

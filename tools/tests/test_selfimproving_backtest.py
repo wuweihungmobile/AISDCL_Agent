@@ -694,7 +694,11 @@ ALLOWED = tuple(re.compile(p) for p in (
     # 既有測試同步（TCS §2 所列；§4 漏列的動詞數／能力登記同步站點＝issues、console_obs、p3_meta）
     r"^tools/tests/test_selfimproving_(capability|fourq_gate|issuemap|fourq_model|events_p2"
     r"|schedule_gate|export_status|events|research_scan|issues|console_obs|p3_meta|p2_meta"
-    r"|measure_verb|schedule_model|check|ledgerdb_p0)\.py$",
+    r"|measure_verb|schedule_model|check|ledgerdb_p0|sandbox)\.py$",
+    # 重釘三檔（護欄層行數棘輪與兩站點 doc-total）
+    r"^tools/tests/test_adr_xplat001_c1c2_lock\.py$",
+    r"^docs/04_planning/AutoSDD_improving_112\.md$",
+    r"^docs/06_quality/CrossPlatform_R145_Scan_Findings\.md$",
     r"^tools/tests/_selfimproving_(fixtures|p5_fixtures)\.py$",
     r"^tools/tests/test_root_module_layout\.py$",
     r"^docs/06_quality/SelfImproving_Protocol/research_registry\.json$",
