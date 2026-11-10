@@ -2,7 +2,7 @@
 
 **檔頭說明**：本檔依 DEF-200-576 體例自始獨立成檔（`RTM.md` §2.15 只留存根）。鍵 `agentconsole-research-registry`；規格 `AgentConsole/docs/03_testing/contracts/TCS-ResearchRegistry-20261110.md`（AC-965-1～10、AT 72 個，含勘誤 E-1～E-10）；根層接縫見 `docs/03_testing/contracts/TCS-SelfImproving-P6-20261110.md`（共享附錄 A～D 的唯一本文）。實作 commit `9e07a54e`，SCG-4 修正 `d0a750bd`（QA4C-01）；SCG-4 獨立審查報告 `AgentConsole/docs/06_quality/SCG4-REVIEW-ResearchRegistry-20261110.md`：PASS（P1 0／P2 0／P3 2）。ID 為 TCS 本地編號（AC-965-x／AT-965-x），一律加反引號、不計入 RTM.md §3 總列數。
 
-**自動測試證據（本輪實跑）**：backend `gradlew clean build` 為 `BUILD SUCCESSFUL`，共 2572 條、0 失敗；Bridge 全套僅一條紅，為與本鍵無關的 `test_AT_961_22_E_2…[archive]` 負載逾時，單跑為綠（QA4C-02）；前端 vitest 共 2840 條全綠；mock E2E AT-965-10-2、AT-965-10-E-1 綠。**AT-965-10-1（真棧 E2E）待主控以拋棄式棧執行，不得視為已驗。**
+**自動測試證據（本輪實跑）**：backend `gradlew clean build` 為 `BUILD SUCCESSFUL`，共 2572 條、0 失敗；Bridge 全套僅一條紅，為與本鍵無關的 `test_AT_961_22_E_2…[archive]` 負載逾時，單跑為綠（QA4C-02）；前端 vitest 共 2840 條全綠；mock E2E AT-965-10-2、AT-965-10-E-1 綠。**AT-965-10-1（真棧 E2E）待主控以拋棄式棧執行，不得視為已驗。**（原文保留）**更新（2026-11-10 夜，拋棄式棧 `e2ereg`）**：`-g AT_965_10_1` 單跑 1 passed——前置要一次性 chmod 稽核具名卷（卷為 root 擁有、Bridge uid 10001 寫入 EACCES ⇒ 同步 503；產品缺口 DEF-AC-036：映像未預建 `/si-audit`）；同 spec 整檔跑兩次本案皆紅（未見「有變更尚未同步」中間態，疑限流時序，DEF-AC-037，待以 trace 查證）；同檔 AT_960_22_5／22_E_1／22_3／22_4 通過、22_2 依設計略過；長駐棧 before／after 零變動。
 
 **表格約定**：測試欄寫 `檔（AT 底線形前綴）`；backend 類別位於 `AgentConsole/backend/src/test/java/com/aisdlc/console/` 之下，Bridge 測試位於 `AgentConsole/engine-bridge/tests/`，前端測試位於 `AgentConsole/frontend/` 之下。實作檔摘要：D1＝Flyway V24／V25；D2／D3＝backend 追蹤來源與同步端點；D4＝Bridge `app/research/registry.py` 等；D5／D6＝前端純函式與元件；D7＝E2E。
 
@@ -77,7 +77,7 @@
 | `AT-965-9-3` | `AC-965-9` | 每頁說明與既有說明鎖 | frontend | R2P | D6：`lib/help/research-workspace.ts`、`self-improving.ts` | `lib/help/research-workspace.test.ts`（`AT_965_9_3`） | — | ✅ 實作+測試（SCG-4 PASS 2026-11-10） |
 | `AT-965-9-4` | `AC-965-9` | `schema.d.ts` 與端點函式 | frontend | R2P | D5：`lib/api/{endpoints,queries,types}.ts`、`schema.d.ts` | `lib/api/research.endpoints.test.ts`、`lib/domain/researchRegistry.test.ts`（`AT_965_9_4`） | — | ✅ 實作+測試（SCG-4 PASS 2026-11-10） |
 | `AT-965-9-5` | `AC-965-9` | 橫幅三鍵具名呈現（研究來源、同步、反事實回測） | frontend | R2P | D6 | `components/domain/si/SiStatusBanner.test.tsx`（`AT_965_9_5`） | — | ✅ 實作+測試（SCG-4 PASS 2026-11-10） |
-| `AT-965-10-1` | `AC-965-10` | Docker 全棧：種子、新增、同步、稽核檔 | E2E | R2P | D7：`tests/e2e/research-docker.stack.spec.ts` | `frontend/tests/e2e/research-docker.stack.spec.ts`（`AT_965_10_1`；SCG-4 修正 `d0a750bd`：docker 缺席直接失敗，不再 `test.skip`） | **待主控拋棄式棧執行**（真棧；未執行前不得視為已驗） | 🟡 實作完成；真棧 E2E 待執行 |
+| `AT-965-10-1` | `AC-965-10` | Docker 全棧：種子、新增、同步、稽核檔 | E2E | R2P | D7：`tests/e2e/research-docker.stack.spec.ts` | `frontend/tests/e2e/research-docker.stack.spec.ts`（`AT_965_10_1`；SCG-4 修正 `d0a750bd`：docker 缺席直接失敗，不再 `test.skip`） | 拋棄式棧單跑 1 passed（2026-11-10；稽核卷需 chmod，DEF-AC-036）；整檔跑本案紅（DEF-AC-037） | 🟡 單跑通過；DEF-AC-036／037 待修 |
 | `AT-965-10-2` | `AC-965-10` | 三寬度 axe 與溢出 | E2E | R2P | D7：`tests/e2e/a11y.mock.spec.ts` | `frontend/tests/e2e/a11y.mock.spec.ts`（`AT_965_10_2`；mock） | mock E2E 綠（2026-11-10） | ✅ 實作+測試（SCG-4 PASS 2026-11-10） |
 | `AT-965-10-E-1` | `AC-965-10` | 非名單 ADMIN 的同步被拒（mock） | E2E | R2P | D7：`tests/e2e/research-registry.mock.spec.ts` | `frontend/tests/e2e/research-registry.mock.spec.ts`（`AT_965_10_E_1`；mock） | mock E2E 綠（2026-11-10） | ✅ 實作+測試（SCG-4 PASS 2026-11-10） |
 
@@ -85,9 +85,9 @@
 
 | 編號 | 內容 | 目前狀態 |
 |------|------|----------|
-| `V1` | 主控真機：Windows 本機真全棧，ADMIN 開研究來源設定，目視 17 列種子、10 啟用；新增一筆呈「待入帳」；等根層巡邏入帳後轉「已同步」（需根層半真機） | 待驗 |
-| `V2` | 入帳後主機 SI 鏡像檔位元組等於 Console 當下 `registry_text`（sha256 比對） | 待驗 |
-| `V3` | 根層 SI 實抓 `anthropic-research` 的 sitemap 取得三篇文章純文字（屬根層 V-P6-1） | 待驗 |
-| `V4`～`V6` | 既有研究 AT 預期值改動恰等於 §4.1；全套建置；Linux 與 Windows 各一次（macOS 未驗） | 本輪全套已跑（見檔頭）；CI 與 macOS 待驗 |
+| `V1` | 主控真機：Windows 本機真全棧，ADMIN 開研究來源設定，目視 17 列種子、10 啟用；新增一筆呈「待入帳」；等根層巡邏入帳後轉「已同步」（需根層半真機） | 部分已驗：API 讀回 17 列／啟用 10；同步 201 → 待入帳 → 手動 `registry-ingest`（根層 seq 88）→ 已同步（根層 V-P6-1）；巡邏自動入帳與介面目視未做 |
+| `V2` | 入帳後主機 SI 鏡像檔位元組等於 Console 當下 `registry_text`（sha256 比對） | ✅ 已驗：鏡像 sha＝Console digest（根層 V-P6-1，seq 88） |
+| `V3` | 根層 SI 實抓 `anthropic-research` 的 sitemap 取得三篇文章純文字（屬根層 V-P6-1） | ✅ 已驗：網站地圖展開 3 篇文章含 `.plain.txt`（RUN-SI-008，seq 89～91） |
+| `V4`～`V6` | 既有研究 AT 預期值改動恰等於 §4.1；全套建置；Linux 與 Windows 各一次（macOS 未驗） | 本輪全套已跑（見檔頭）；雲端 agentconsole-ci 綠（`89766d18`）；macOS 本機未驗 |
 | `V7` | 掌舵者目視研究來源設定對話框版面與文案 | 待驗 |
 | `V8` | 以種子加十個新增逼近大小上限，確認 422 `registry_too_large` 出現在預期處 | 待驗 |
