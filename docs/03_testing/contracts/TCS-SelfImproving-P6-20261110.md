@@ -222,6 +222,7 @@
 | AT-646-5-1 | BT | 合成 `claude_home`（`px.claude_home()`）：`<slug>/<sid>/subagents/agent-<id>.jsonl`（每行含 `agentId`、`sessionId`、`cwd`、`type`、`timestamp`、`message`）；乾淨逐字稿（user 行含 `nonce`；assistant 的 `Read`／`Grep`／`Glob` 皆在 `snap/s1` 內且 `Grep` 帶 `path`；末行為含 text 的 assistant）⇒ `ok` | 稽核誤判乾淨逐字稿 ⇒ 紅 |
 | AT-646-5-E-1 | BT | 髒樣本各一（每例斷言原因碼）：逐字稿缺／同 id 兩檔／不可解析／零 assistant 行（`transcript-missing`）；user 行無 `nonce`（`binding-mismatch`）；用了 `Bash`／`Write`／`PowerShell`／`WebFetch`（`tool-not-allowed:<name>`）；`Read` 路徑在 `snap/s1x`（同前綴不同目錄）、含 `..` 逃逸、快照外、大小寫不同的根、指向快照外的連結（`outside-snapshot`）——**零 skip、平台中立**：`btscore.inside(snap, target, *, pathmod, realpath)` 的 `pathmod` 與 `realpath` 為注入參數，同一個測試在**同一平台**對 `ntpath`（反斜線與磁碟代號、`normcase` 小寫化）與 `posixpath`（正斜線、大小寫敏感）**各跑一組**路徑表，連結逃逸以注入的假 `realpath`（把指定路徑映射到快照外）表達，不建真連結；`Grep` 無 `path` 且 `cwd` 為 repo 根（`path-missing`）；`Glob` 的 `pattern` 為 `..\..\*`（`pattern-escape`）；零個快照內讀取（`no-reads`）；末行為 `tool_use` 無 text（`transcript-open`） | 少一種判準 ⇒ 該例紅 |
 | AT-646-5-E-2 | BT | fail-closed：`transcript_dir` 不存在、佈局改名（`subagents`→`workers`）⇒ 全部 `contaminated(transcript-missing)`、彙總 `n=0`、rc 0 不拋例外 | 找不到逐字稿時放行 ⇒ 紅 |
+| AT-646-5-E-3 | BT | harness 回報工具（勘誤 E-8）：含 `SubagentHandback` 的乾淨逐字稿 ⇒ `None`；同時含讀快照外路徑的 `Read` ⇒ `outside-snapshot`；含 `Bash` ⇒ `tool-not-allowed:Bash` | 白名單放寬到其他工具或路徑判準被放寬 ⇒ 紅 |
 
 ### AC-SI-46-6 結果帳本與事件（BT）
 | AT | 檔 | 夾具；Given／When／Then | 預期突變 |
@@ -309,7 +310,7 @@
 
 ## 5. 計數與對照
 
-**AT 共 96（正控 58、負控 38）**；各檔：RG 41、NF 25、BT 24、SY 6（勘誤 E-6：新增 AT-630-8-E-3〔非 UTF-8 XML〕；原文「AT 共 95（正控 58、負控 37）；各檔：RG 41、NF 24、BT 24、SY 6」）。
+**AT 共 97（正控 58、負控 39）**；各檔：RG 41、NF 25、BT 25、SY 6（勘誤 E-8：新增 AT-646-5-E-3；原文「AT 共 96（正控 58、負控 38）；各檔：RG 41、NF 25、BT 24、SY 6」）（勘誤 E-6：新增 AT-630-8-E-3〔非 UTF-8 XML〕；原文「AT 共 95（正控 58、負控 37）；各檔：RG 41、NF 24、BT 24、SY 6」）。
 
 **每條 FR／AC → AT 對照表**（機械產生：由 §1 每列的 AT 編號推得；每條 AC 至少一個 AT）
 
@@ -336,7 +337,7 @@
 | AC-SI-46-2 | AT-646-2-1、AT-646-2-E-1、AT-646-2-2 |
 | AC-SI-46-3 | AT-646-3-1、AT-646-3-E-1 |
 | AC-SI-46-4 | AT-646-4-1、AT-646-4-E-1、AT-646-4-2 |
-| AC-SI-46-5 | AT-646-5-1、AT-646-5-E-1、AT-646-5-E-2 |
+| AC-SI-46-5 | AT-646-5-1、AT-646-5-E-1、AT-646-5-E-2、AT-646-5-E-3 |
 | AC-SI-46-6 | AT-646-6-1、AT-646-6-E-1、AT-646-6-2 |
 | AC-SI-46-7 | AT-646-7-1、AT-646-7-E-1 |
 | AC-SI-46-8 | AT-646-8-1、AT-646-8-E-1、AT-646-8-2、AT-646-8-3 |
@@ -352,7 +353,7 @@
 | FR-SI-46 | AC-SI-46-1～46-8（8 條） |
 | 自增 | AC-P6-090-1～090-4（4 條） |
 
-AC 共 29 條（PRD 新增或改寫 25 條＋自增 4 條），皆有 AT；AT 共 96（原文 95；勘誤 E-6）。
+AC 共 29 條（PRD 新增或改寫 25 條＋自增 4 條），皆有 AT；AT 共 97（原文 95、96；勘誤 E-6、E-8）。
 
 ---
 
@@ -562,3 +563,4 @@ https://export.arxiv.org/api/query?search_query=%28abs:%22self-improving%22+OR+a
 | E-5 | 11-10 | 舊死碼（登記型） | 原文：無 | 登記：舊 `fetch_source` 等死碼已移除（無產品呼叫點） | 實作輪回報 |
 | E-6 | 11-10 | SCG-4 一審（QA4R-01～04）：§1 AT-630-8-E-3 新列、§4 允許集合、§5 計數與對照、AT-690-4-1 驗法 | 原文：§1 無非 UTF-8 XML 拒收列；§4 ALLOWED 無 sandbox、p2_meta、measure_verb、schedule_model、check、ledgerdb_p0 與重釘三檔；§5「AT 共 95（正控 58、負控 37）；各檔：RG 41、NF 24、BT 24、SY 6」「AT 共 95」；AT-690-4-1「（基準＝`SI_P4_BASE_SHA`，缺省 `HEAD~1`；承 `test_AT_440_8_1`／AT-445-5-1 形態）」 | 內文就地訂正：①QA4R-01 `expand` 對非 UTF-8 系 XML（UTF-16／32 BOM、前段 NUL、宣告 encoding 非 utf-8／us-ascii）一律在解析前 `ExpandRefused`，§1 新增 AT-630-8-E-3（`test_AT_630_8_E_3_non_utf8_xml_is_refused_before_parse`；原擬 E-2 與既有 research.scan 驗證列撞號，主控改 E-3）；②QA4R-02 §4 允許集合補入上列六個測試檔與重釘三檔（c1c2 lock、AutoSDD_improving_112、CrossPlatform_R145_Scan_Findings）；③§5 AT 總數 95→96（負控 37→38、NF 24→25）；④AT-690-4-1 驗法＝逐 commit `SI_SCOPE_BASE=<c>^`、`SI_SCOPE_TIP=<c>` 驗本鍵各 commit，交錯的他鍵 commit 不驗；⑤QA4R-03 重釘 commit 11067dd1 為分桶分類補一行 fixtures docstring（儀式所需）；⑥QA4R-04 `fetch.py` 空白行 | SCG-4 一審 FAIL P2×2；22 組突變全殺（M13 白名單判準只由 registry 檔一條 AT 殺，記為鑑別力集中） |
 | E-7 | 11-10 | AT-690-4-1 與 §提交程序③（範圍守衛結構修正） | 「基準＝`SI_P4_BASE_SHA`，缺省 `HEAD~1`」「本機跑範圍守衛（AT-690-4-1）時才設 `SI_P4_BASE_SHA=<規格 commit>`」 | 內文就地訂正：有 `SI_SCOPE_BASE`（相容舊名 `SI_P4_BASE_SHA`）才啟用，可選 `SI_SCOPE_TIP`；只比對已提交差異；未設基準＝guard-not-triggered。P4（AT-440-8-1、AT-440-5-E-1）、P5（AT-444-6-1、AT-445-5-1）TCS 同步勘誤，三鍵 refreeze | 兩把鍵 commit 交錯時舊判準對後續工作常駐誤紅（實作 commit 0bea20e4，主控裁決） |
+| E-8 | 11-10 | OBS-SI-383／382 修正：AT-646-5-E-3 新列、`btscore.py` 白名單、SOP〈回測子代理任務書範本〉交卷格式、§5 計數 | 原文：§1 無 AT-646-5-E-3；`ALLOWED_TOOLS` 僅 Read／Grep／Glob，`SubagentHandback` 判 `tool-not-allowed`；SOP 範本交卷格式「一句話根因假說」「一句話修法方向」；§5「AT 共 96（正控 58、負控 38）；各檔：RG 41、NF 25、BT 24、SY 6」「AT 共 96」 | 內文就地訂正：①`btscore.py` 新增具名常數 `HARNESS_HANDBACK_TOOL="SubagentHandback"`（harness 2.1.322 子代理交卷工具，不帶路徑、不讀檔），`_tool_verdict` 只對它回 None，路徑判準與其他工具名判準不變；②§1 新增 AT-646-5-E-3（`test_AT_646_5_E_3_harness_handback_tool_is_not_a_leak`）；③SOP 範本交卷格式兩欄補「，≤400 字元」（占位符不動；`test_AT_646_2_1` 補斷言任務書含新字樣；SOP 變更併登於此）；④§5 AT 總數 96→97（負控 38→39、BT 24→25） | 真機首跑 BT-002 三案正常作答全判污染（OBS-SI-383，P2）；範本缺判準實際強制的 ≤400 上限（OBS-SI-382，P3；PRD AC-SI-46-3 已有此上限） |

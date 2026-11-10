@@ -569,7 +569,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 - 預算：<BUDGET>；超出就以目前最佳答案交卷並寫明已超出。
 
 ## 交卷格式（只輸出一個 JSON 物件，不要其他文字）
-{"case":"<CASE>","suspects":["相對於快照根目錄的路徑，至多 <TOP_N> 個"],"hypothesis":"一句話根因假說","direction":"一句話修法方向"}
+{"case":"<CASE>","suspects":["相對於快照根目錄的路徑，至多 <TOP_N> 個"],"hypothesis":"一句話根因假說，≤400 字元","direction":"一句話修法方向，≤400 字元"}
 ```
 
 ### 規則
