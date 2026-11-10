@@ -37,10 +37,12 @@ COPY AgentConsole/engine-bridge/ /opt/engine-bridge/
 # /app/logs＝BRIDGE_LOG_DIR 的落點（compose 與 backend 共用 app_logs 卷）。具名卷還空著時，Docker 會把容器映像內該目錄
 # 的擁有者與權限複製進卷根；backend 以另一個 uid（1001）寫同一個卷，所以給 1777（同 /tmp：人人可寫、不可刪別人的檔），
 # 且 compose 讓 backend 以 :nocopy 掛載——否則最後 create 的 backend 會把卷根蓋成它自己的 0755（docker/README.md〈9〉#32）。
+# /si-audit＝BRIDGE_SI_AUDIT_DIR 的落點（DEF-AC-036）：全棧 E2E 把它掛成全新具名卷時，卷根繼承映像內該目錄的擁有者；
+# 映像沒預建就是 root 擁有，Bridge（uid 10001）寫稽核檔 EACCES ⇒ 同步 503。長駐棧以主機 bind 覆蓋，不受影響。
 RUN pip install /opt/AutoClaude /opt/engine-bridge \
  && useradd --create-home --uid 10001 bridge \
- && mkdir -p /workspace /app/logs \
- && chown bridge:bridge /workspace /app/logs \
+ && mkdir -p /workspace /app/logs /si-audit \
+ && chown bridge:bridge /workspace /app/logs /si-audit \
  && chmod 1777 /app/logs
 
 USER bridge

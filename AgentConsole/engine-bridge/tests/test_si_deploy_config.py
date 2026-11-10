@@ -506,6 +506,79 @@ def test_AT_950_11_E_1_the_deploy_checker_names_each_of_nine_broken_variants() -
     assert not re.search(r"sk-[A-Za-z0-9_\-]{20,}", env_text)
 
 
+# ── 稽核目錄的映像前提（AT-965-10-3；勘誤 E-11，DEF-AC-036）──────────────────────────────────────
+DOCKERFILE = CONSOLE_DIR / "engine-bridge" / "Dockerfile"
+
+
+def _run_commands(dockerfile_text: str) -> tuple[list[str], int]:
+    """把續行（行尾反斜線）併成一行後，回傳 `USER bridge` 之前所有 RUN 以 `&&` 切出的子指令，與
+    `USER bridge` 是否出現（0＝沒有）。`USER bridge` 之後的 RUN 不計入（已非 root，chown 無效）。"""
+    joined = re.sub(r"\\\n", " ", dockerfile_text)
+    before: list[str] = []
+    seen_user = 0
+    for line in joined.splitlines():
+        stripped = line.strip()
+        if re.match(r"USER\s+bridge\s*$", stripped):
+            seen_user = 1
+            continue
+        if seen_user or not stripped.startswith("RUN "):
+            continue
+        before.extend(part.strip() for part in stripped[4:].split("&&"))
+    return before, seen_user
+
+
+def audit_dir_image_problems(dockerfile_text: str, compose: dict[str, Any]) -> list[str]:
+    """具名卷首次掛載會繼承映像內該目錄的擁有者：compose 裡 engine-bridge 的 `BRIDGE_SI_AUDIT_DIR`
+    必須在 `USER bridge` 之前同時出現在 `mkdir -p` 與 `chown bridge:bridge` 的目錄清單中，否則
+    全新具名卷為 root 擁有，Bridge（uid 10001）寫稽核檔 EACCES ⇒ 同步 503。"""
+    svc = (compose.get("services") or {}).get("engine-bridge") or {}
+    audit_dir = _env_of(svc).get(AUDIT_ENV, "").rstrip("/")
+    if not audit_dir:
+        return [f"engine-bridge 缺環境變數 {AUDIT_ENV}"]
+    commands, saw_user = _run_commands(dockerfile_text)
+    out: list[str] = []
+    if not saw_user:
+        out.append("Dockerfile 沒有 USER bridge（chown 時序無從判定）")
+    mkdirs = [c.split()[3:] for c in commands if re.match(r"mkdir\s+-p\s", c)]
+    chowns = [c.split()[2:] for c in commands if re.match(r"chown\s+bridge:bridge\s", c)]
+    if not any(audit_dir in (d.rstrip("/") for d in dirs) for dirs in mkdirs):
+        out.append(f"Dockerfile 的 mkdir -p 沒有預建 {audit_dir}")
+    if not any(audit_dir in (d.rstrip("/") for d in dirs) for dirs in chowns):
+        out.append(f"Dockerfile 在 USER bridge 之前沒有 chown bridge:bridge {audit_dir}")
+    return out
+
+
+def test_AT_965_10_3_the_bridge_image_owns_the_audit_dir_for_named_volumes() -> None:
+    compose = load_compose()
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert audit_dir_image_problems(text, compose) == []
+    audit_dir = _env_of(compose["services"]["engine-bridge"])[AUDIT_ENV]
+    assert audit_dir == "/si-audit" and audit_dir in text
+    # 負控一：mkdir 缺稽核目錄
+    no_mkdir = text.replace("mkdir -p /workspace /app/logs /si-audit",
+                            "mkdir -p /workspace /app/logs")
+    assert no_mkdir != text
+    assert any("mkdir" in p for p in audit_dir_image_problems(no_mkdir, compose))
+    # 負控二：chown 缺稽核目錄
+    no_chown = text.replace("chown bridge:bridge /workspace /app/logs /si-audit",
+                            "chown bridge:bridge /workspace /app/logs")
+    assert no_chown != text
+    assert any("chown" in p for p in audit_dir_image_problems(no_chown, compose))
+    # 負控三：chown 搬到 USER bridge 之後（已非 root，不算數）
+    late = text.replace(" \\\n && chown bridge:bridge /workspace /app/logs /si-audit", "")
+    assert late != text
+    late = late.replace("USER bridge\n", "USER bridge\nRUN chown bridge:bridge /si-audit\n")
+    assert any("chown" in p for p in audit_dir_image_problems(late, compose))
+    # 負控四：compose 改路徑而 Dockerfile 沒跟上
+    moved = _mutate(compose, lambda c: c["services"]["engine-bridge"]["environment"].update(
+        {AUDIT_ENV: "/audit-v2"}))
+    problems = audit_dir_image_problems(text, moved)
+    assert any("mkdir" in p for p in problems) and any("chown" in p for p in problems)
+    # 負控五：compose 缺該變數
+    gone = _mutate(compose, lambda c: c["services"]["engine-bridge"]["environment"].pop(AUDIT_ENV))
+    assert any(AUDIT_ENV in p for p in audit_dir_image_problems(text, gone))
+
+
 # ── CI paths 兩處都涵蓋根層輸入 ────────────────────────────────────────────────────────────────
 def glob_regex(glob: str) -> re.Pattern[str]:
     """GitHub paths 的 glob：`**` 比對零至多段（含斜線），`*` 只比對單段內任意字元。"""
