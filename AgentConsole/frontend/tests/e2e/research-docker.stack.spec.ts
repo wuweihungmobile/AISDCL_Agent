@@ -458,6 +458,7 @@ test("AT_965_10_1 研究來源單一化（Docker 全棧）：種子 17 列、新
   const dialog = page.getByRole("dialog", { name: "研究來源設定" });
   const section = dialog.getByTestId("watch-sources-section");
   await expect(section.getByTestId("watch-row").first()).toBeVisible({ timeout: 60_000 });
+  await expect(section.getByTestId("registry-status"), "初次狀態載入完成後才新增（DEF-AC-037：避免與飛行中的初次請求競態）").toBeVisible({ timeout: 60_000 });
   const total = await section.getByTestId("watch-row").count();
   expect(total, "種子至少 17 列（全新全棧恰 17、啟用 10）").toBeGreaterThanOrEqual(17);
   const countText = (await section.getByTestId("watch-count").textContent()) ?? "";

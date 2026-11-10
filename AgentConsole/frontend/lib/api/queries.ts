@@ -1529,12 +1529,24 @@ export function useRegistrySyncStatus(enabledByCaller = true) {
   return useQuery({ queryKey: qk.researchRegistryStatus, queryFn: ({ signal }) => getRegistrySyncStatus({ signal }), enabled, retry: false });
 }
 
+/**
+ * 同步狀態重抓：先取消飛行中的狀態請求再失效（DEF-AC-037）。TanStack Query v5 只在「已有資料」時才依 cancelRefetch 取消飛行中請求；
+ * 初次載入尚無資料時，失效重抓會併入那支舊請求，拿到寫入前的舊狀態、狀態列跳過「有變更尚未同步」。
+ */
+async function refreshRegistryStatus(qc: QueryClient): Promise<void> {
+  await qc.cancelQueries({ queryKey: qk.researchRegistryStatus });
+  await qc.invalidateQueries({ queryKey: qk.researchRegistryStatus });
+}
+
 /** 追蹤來源新增、停用成功後：清單與同步狀態（登記快照變了 ⇒ `unsynced`）一併重抓。 */
 function useWatchSourceWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: qk.researchWatchSources }), qc.invalidateQueries({ queryKey: qk.researchRegistryStatus })]),
+    onSuccess: async () => {
+      await refreshRegistryStatus(qc);
+      await qc.invalidateQueries({ queryKey: qk.researchWatchSources });
+    },
   });
 }
 
@@ -1546,7 +1558,7 @@ export function useRegistrySync() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => postRegistrySync(),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.researchRegistryStatus }),
+    onSuccess: () => refreshRegistryStatus(qc),
   });
 }
 

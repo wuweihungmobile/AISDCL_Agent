@@ -187,6 +187,41 @@ describe("AT_965_8_3 新增流程與自動同步", () => {
     expect(screen.getByLabelText(/識別碼/)).toHaveValue("");
   });
 
+  it("AT_965_8_3 初次狀態請求尚在飛行時新增成功（DEF-AC-037）：失效重抓不得併入舊請求——會再發一次狀態查詢，狀態列取新回應而非停在舊值", async () => {
+    const user = userEvent.setup();
+    const api = stubResearchApi({ watchSources: WATCH_SOURCES_17(), registryStatus: REGISTRY_STATUS("synced") });
+    const real = globalThis.fetch;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const isStatusGet = String(input).endsWith("/si/research-registry") && (init?.method ?? "GET") === "GET";
+        if (isStatusGet && !held) {
+          held = true;
+          await gate; // 初次狀態請求懸住：回的是「新增前」的舊狀態（synced）
+        }
+        return real(input, init);
+      }),
+    );
+    renderResearch(<WatchSourcesSection />, "ADMIN");
+    await screen.findAllByTestId("watch-row");
+    expect(held).toBe(true);
+    await fillValid(user);
+    // 新增後後端狀態變為 unsynced；初次請求仍懸住
+    api.options.registryStatus = REGISTRY_STATUS("unsynced");
+    await user.click(submitButton());
+    await waitFor(() => expect(callsOf(api.calls, "POST", /\/research\/watch-sources$/)).toHaveLength(1));
+    // 取消後會另發一次新請求（未懸住）：狀態列說「有變更尚未同步」，且該請求發生在舊請求放行之前
+    await waitFor(() => expect(screen.getByTestId("registry-status").textContent ?? "").toMatch(/有變更尚未同步|已送出，待入帳/));
+    release();
+    await screen.findByText("已送出，待入帳");
+    expect(callsOf(api.calls, "GET", /\/si\/research-registry$/).length).toBeGreaterThanOrEqual(1);
+  });
+
   it("AT_965_8_3 展開三欄全填：本文帶 expand 物件（max 為數字）", async () => {
     const user = userEvent.setup();
     const { calls } = mount("ADMIN");
