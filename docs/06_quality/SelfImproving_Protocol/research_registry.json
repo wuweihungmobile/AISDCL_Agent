@@ -1,0 +1,295 @@
+{
+  "hosts": [
+    {
+      "host": "api.github.com",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 60,
+      "source": "ENV"
+    },
+    {
+      "host": "api.semanticscholar.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    },
+    {
+      "host": "api.stackexchange.com",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    },
+    {
+      "host": "arxiv.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    },
+    {
+      "host": "code.claude.com",
+      "layer": "INDUSTRY",
+      "list_kind": "FETCH",
+      "min_interval_seconds": 5,
+      "source": "ADMIN"
+    },
+    {
+      "host": "developers.openai.com",
+      "layer": "INDUSTRY",
+      "list_kind": "FETCH",
+      "min_interval_seconds": 5,
+      "source": "ADMIN"
+    },
+    {
+      "host": "export.arxiv.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    },
+    {
+      "host": "github.com",
+      "layer": "OSS",
+      "list_kind": "FETCH",
+      "min_interval_seconds": 5,
+      "source": "ADMIN"
+    },
+    {
+      "host": "www.anthropic.com",
+      "layer": "INDUSTRY",
+      "list_kind": "FETCH",
+      "min_interval_seconds": 5,
+      "source": "ADMIN"
+    }
+  ],
+  "schema_rev": 1,
+  "watch": [
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（以 anthropic-research 取代）",
+      "enabled": false,
+      "expand": null,
+      "extract": "最新 5 篇文章的標題與日期（逐字）",
+      "id": "anthropic-engineering",
+      "kind": "blog",
+      "layer": "INDUSTRY",
+      "url": "https://www.anthropic.com/engineering"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（研究來源單一化種子）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": {
+        "max": 3,
+        "mode": "sitemap",
+        "prefix": "/research/"
+      },
+      "extract": "最新 3 篇研究文章的全文（逐字）",
+      "id": "anthropic-research",
+      "kind": "sitemap",
+      "layer": "INDUSTRY",
+      "url": "https://www.anthropic.com/sitemap.xml"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 5 個 release 的編號與日期，以及其中提到的新模型 ID 或 API 參數名（逐字）",
+      "id": "anthropic-sdk-python-releases",
+      "kind": "release",
+      "layer": "OSS",
+      "url": "https://github.com/anthropics/anthropic-sdk-python/releases.atom"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（研究來源單一化種子）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 10 篇論文的標題、作者、日期與摘要首句（逐字）",
+      "id": "arxiv-agents",
+      "kind": "search",
+      "layer": "ACADEMIC",
+      "url": "https://export.arxiv.org/api/query?search_query=%28abs:%22self-improving%22+OR+abs:%22self-evolving%22+OR+abs:%22agent+memory%22%29+AND+%28cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.SE%29&sortBy=submittedDate&sortOrder=descending&max_results=10"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "最新 5 個版本的編號與各版首行（逐字，不改寫）",
+      "id": "cc-changelog",
+      "kind": "changelog",
+      "layer": "OSS",
+      "url": "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "標題清單＋事件名清單（逐字）",
+      "id": "cc-docs-hooks",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/hooks-guide"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "標題清單＋事件名清單（逐字）",
+      "id": "cc-docs-hooks-md",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/hooks-guide.md"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "與上次相比新增或改名的頁面標題清單（逐字）",
+      "id": "cc-docs-index",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/llms.txt"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "頁面標題清單＋含數字上限的句子（逐字）",
+      "id": "cc-docs-memory",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/memory"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "頁面標題清單＋含數字上限的句子（逐字）",
+      "id": "cc-docs-memory-md",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/memory.md"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "標題清單＋frontmatter 欄位名清單（逐字）",
+      "id": "cc-docs-skills",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/skills"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "標題清單＋frontmatter 欄位名清單（逐字）",
+      "id": "cc-docs-skills-md",
+      "kind": "docs",
+      "layer": "INDUSTRY",
+      "url": "https://code.claude.com/docs/en/skills.md"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 5 個 release 的編號、日期與各版首行（逐字，不改寫）",
+      "id": "cc-releases",
+      "kind": "release",
+      "layer": "OSS",
+      "url": "https://github.com/anthropics/claude-code/releases.atom"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "最新 5 個 release 的編號與日期（逐字）",
+      "id": "openai-agents-releases",
+      "kind": "release",
+      "layer": "OSS",
+      "url": "https://github.com/openai/openai-agents-python/releases.atom"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 5 個 release 的編號與日期（逐字）",
+      "id": "openai-agents-tags",
+      "kind": "release",
+      "layer": "OSS",
+      "url": "https://github.com/openai/openai-agents-python/tags.atom"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（SI research_sources.json 匯入）",
+      "enabled": false,
+      "expand": null,
+      "extract": "最新 5 筆變更的日期與標題（逐字）",
+      "id": "openai-api-changelog",
+      "kind": "changelog",
+      "layer": "INDUSTRY",
+      "url": "https://platform.openai.com/docs/changelog"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 5 筆變更的日期與標題（逐字）",
+      "id": "openai-api-changelog-md",
+      "kind": "changelog",
+      "layer": "INDUSTRY",
+      "url": "https://developers.openai.com/api/docs/changelog.md"
+    }
+  ]
+}
