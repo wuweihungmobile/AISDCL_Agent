@@ -173,3 +173,21 @@
 
 ## 收場
 `_wt_p5qa2`、`_wt_p5qa3` 以 `git worktree remove`（不帶 --force）移除，rc=0；無 junction；共用工作樹未動。
+
+## 真機實跑檢核 V36～V39（主控，2026-11-10；TCS-P5 §4）
+
+| 編號 | 結果 | 證據 |
+|---|---|---|
+| V36（無人） | 通過（兩次） | RUN-SI-006（08:00，排程到期 (f)，HEAD 2ce3d2c6）：`fourq.review` seq 76（by fourq-reviewer，q1～q4 各 1，gaps 0），答案檔 `_fourq/RUN-SI-006.md` sha256 f369b85c…；RUN-SI-007（09:45，Console 立即啟動 (a)，HEAD 945204a0）：`fourq.review` seq 86，答案檔 `_fourq/RUN-SI-007.md` sha256 e1f334c0…。兩次皆 `--dry-run` 先行再入帳、`si check` rc 0，迴圈層快照由 CLI 算出：`M1=NE(no-evaluable-window);M4=read(0);M5a=NE(sample-below-w-min);M5b=NE(sample-below-w-min)`。CLI 在 `AUTOSDD_UNATTENDED=1` 下落地答案檔，未被治理檔禁寫守衛攔下。Q1／Q2 候選入 OBS（OBS-SI-375～380）；Console 議題中心 API `GET /api/v1/issues/OBS-SI-377` 回 200，來源為觀察帳本第 386 行 |
+| V36（互動） | 未驗 | 本輪沒有開互動運轉。互動路徑由 AT 覆蓋（AT-442-1-1、AT-442-2-1 等），下一次互動運轉時補驗 |
+| V37 | 部分通過 | SCG-4 實跑 Bridge `test_si_export_differential.py` 與 `test_si_deploy_config.py`，19 通過；`git diff --name-only d864d638 <tip> -- AgentConsole .github` 為空；Console 真棧在 P5 推送後照常回應議題 API。`tsc --noEmit` 與狀態橫幅「其他欄位」目視未做 |
+| V38 | 未達成（前置未成立） | 兩次運轉的 Q2-G 來源缺口候選皆為 0（gaps 0），沒有候選可交掌舵者決定 |
+| V39 | 通過 | `si status` 的 `fourq.missing_runs` 為 0，`si check` 沒有 `FOURQ-NOT-RUN` 條目，兩者一致 |
+
+**首跑揭露、已修並推送**：
+- D-IMP-11：無人時額度帶永遠量不到，巡邏器因此永遠不開運轉；修正 26f3aede。
+- D-IMP-12：研究者讀不到研究來源目錄；修正 f5619dbc。
+- 勘誤十：範本寫了不存在的 `attr --run`。
+- 勘誤十一：AT-445-1-1 原本是只在實作當下成立的斷言。
+
+前兩項由 RUN-SI-007 真機確認有效：無人時補量成功、研究者直接讀到副本。
