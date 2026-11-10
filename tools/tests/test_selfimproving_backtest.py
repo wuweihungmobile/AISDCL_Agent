@@ -200,6 +200,8 @@ class TestPrepare(BtCase):
             task = (root / "BT-001" / "tasks" / f"{c['slot']}.md").read_text(encoding="utf-8")
             self.assertIn(c["nonce"], task)
             self.assertIn(c["snap"], task)
+            self.assertIn("一句話根因假說，≤400 字元", task)
+            self.assertIn("一句話修法方向，≤400 字元", task)
             self.assertIn(by_id["symptom"], task)
             lines = task.splitlines()
             for secret in (*by_id["changed_files"], by_id["id"], by_id["fix_commit"]):
@@ -466,6 +468,17 @@ class TestLeakAudit(BtCase):
             (sib / f"agent-{self.aid}.jsonl").unlink()
             self.assertEqual(btscore.audit_case(self.repo, self.aid, str(snap), self.NONCE),
                              "transcript-missing")  # 不可解析
+
+    def test_AT_646_5_E_3_harness_handback_tool_is_not_a_leak(self):
+        """tools/lib/selfimproving/btscore.py：交卷工具不算洩漏，路徑與其他工具判準不變。"""
+        c = self.clean()
+        hand = px.line("tool", name="SubagentHandback", input_={"message": "{}"})
+        bad_read = px.line("tool", name="Read",
+                           input_={"file_path": str(self.repo / "a.py")})
+        bash = px.line("tool", name="Bash", input_={"command": "ls"})
+        self.assertIsNone(self.audit([*c[:-1], hand, c[-1]]))
+        self.assertEqual(self.audit([*c[:-1], hand, bad_read, c[-1]]), "outside-snapshot")
+        self.assertEqual(self.audit([*c[:-1], hand, bash, c[-1]]), "tool-not-allowed:Bash")
 
     def test_AT_646_5_E_2_missing_dir_or_renamed_layout_fails_closed(self):
         empty = fx.new_dir("emptyhome")

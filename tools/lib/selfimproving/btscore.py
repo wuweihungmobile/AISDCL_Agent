@@ -20,6 +20,9 @@ from .ledger import Finding
 ANSWER_KEYS = {"case", "suspects", "hypothesis", "direction"}
 AGENT_ID_RE = re.compile(r"^[0-9a-f]{8,32}$")
 ALLOWED_TOOLS = ("Read", "Grep", "Glob")
+# WHY：harness 2.1.322 的子代理交卷一律經 `SubagentHandback` 工具；它不帶檔案路徑、不讀檔，
+# 故不算洩漏。路徑判準（Read／Grep／Glob 必須在快照內）一字不放寬，其餘工具名仍判不允許。
+HARNESS_HANDBACK_TOOL = "SubagentHandback"
 _TEXT_MAX = 400
 
 
@@ -138,6 +141,8 @@ def _tool_verdict(call: dict, cwd, snap, ins) -> str | None:
     """單一 `tool_use` 的違規原因碼；合規回 None。"""
     name, inp = call.get("name"), call.get("input")
     inp = inp if isinstance(inp, dict) else {}
+    if name == HARNESS_HANDBACK_TOOL:
+        return None
     if name not in ALLOWED_TOOLS:
         return f"tool-not-allowed:{name}"
     if name == "Read":
