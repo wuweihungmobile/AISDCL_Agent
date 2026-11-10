@@ -2,6 +2,7 @@ package com.aisdlc.console.application.port.out;
 
 import com.aisdlc.console.domain.model.si.SiConsoleWrite;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,4 +27,14 @@ public interface SiConsoleWriteRepository {
      * 沒有卡面 digest 的動詞（rollback、unblock、resume）不受重送閘，所以不提供 null 比對。
      */
     List<UUID> findDecideAuditRefs(String subject, String digest, String dkind);
+
+    /** 登記同步的一列（只取冪等判定與狀態需要的三欄；不含 body 與 mac）。 */
+    record RegistryWrite(UUID auditRef, String digest, OffsetDateTime time) {
+    }
+
+    /**
+     * 登記同步的冪等與狀態查詢（唯讀；研究來源單一化 W-R6、W-R7）：全部 {@code kind='src-registry'} 的列，依 {@code time} 升冪、同刻依 {@code audit_ref}
+     * 升冪（小寫 UUID 字串的字典序，等同 PostgreSQL uuid 的位元組序；呼叫端不得重排）。
+     */
+    List<RegistryWrite> findRegistryWrites();
 }

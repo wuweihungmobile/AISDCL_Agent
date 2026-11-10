@@ -320,6 +320,18 @@ const EXPECTED: Array<[fn: keyof typeof api, call: () => Promise<unknown>, metho
   ["createResearchTag", () => api.createResearchTag("R", { tagName: "v1.0.0", push: false }), "POST", "/api/v1/research/projects/R/delivery/tag", { tagName: "v1.0.0", push: false }],
   ["createResearchPr", () => api.createResearchPr("R", { bodyPreviewAck: true }), "POST", "/api/v1/research/projects/R/delivery/pr", { bodyPreviewAck: true }],
   ["getResearchTraceability", () => api.getResearchTraceability("R"), "GET", "/api/v1/research/projects/R/delivery/traceability"],
+  // 研究來源單一化（TCS-ResearchRegistry-20261110 AT-965-9-4）：五個新端點（函式名＝契約 §5A 的端點用途；路徑與方法在此逐一鎖）
+  ["listWatchSources", () => api.listWatchSources(), "GET", "/api/v1/research/watch-sources"],
+  [
+    "addWatchSource",
+    () => api.addWatchSource({ slug: "s1", url: "https://example.org/x", kind: "blog", extract: "全文", layer: "INDUSTRY", expand: null }),
+    "POST",
+    "/api/v1/research/watch-sources",
+    { slug: "s1", url: "https://example.org/x", kind: "blog", extract: "全文", layer: "INDUSTRY", expand: null },
+  ],
+  ["patchWatchSource", () => api.patchWatchSource("a/b", { enabled: false }), "PATCH", "/api/v1/research/watch-sources/a%2Fb", { enabled: false }],
+  ["getRegistrySyncStatus", () => api.getRegistrySyncStatus(), "GET", "/api/v1/si/research-registry"],
+  ["postRegistrySync", () => api.postRegistrySync(), "POST", "/api/v1/si/research-registry/sync", {}],
 ];
 
 /** 不走 JSON 的端點：上傳（multipart）與下載（Blob）。 */
@@ -340,10 +352,10 @@ function okJson(data: unknown = {}): Response {
 }
 
 describe("endpoints：每個後端端點一個函式", () => {
-  it("AT_962_24_5（原 AT_961_19_5）匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview，再加 P4 排程的 postSiScheduleSet、postSiRunRequest）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），再加 P1 的 9 個（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition），再加 P2 的 7 個（getResearchKanban、registerResearchGate、getResearchHealing、getResearchDelivery、createResearchTag、createResearchPr、getResearchTraceability），共 127 個；不多不少", () => {
+  it("AT_962_24_5（原 AT_961_19_5）匯出的函式恰好是 Phase 1～6 對應的 84 個（Phase 1+2 共 23、匯入 9、通知 1、設定 10、執行 11、監控 8，加 v1.4 的登出、待審批清單、SDD 引擎各 1，再加 v1.5 的核准凍結、編輯 FSM 專案、追溯覆蓋各 1，再加 P1b 的六個 getSi*，再加 P2b 的四個 postSi* 與 getSiConsoleWrites，再加議題中心的 getIssues、getIssue、putIssuePriority、deleteIssuePriority，再加備份總覽的 getBackupOverview，再加 P4 排程的 postSiScheduleSet、postSiRunRequest）加 ResearchToPRD P0 的 25 個研究端點函式（函式名＝契約 §1.1 的 operationId），再加 P1 的 9 個（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition），再加 P2 的 7 個（getResearchKanban、registerResearchGate、getResearchHealing、getResearchDelivery、createResearchTag、createResearchPr、getResearchTraceability），再加研究來源單一化的 5 個（listWatchSources、addWatchSource、patchWatchSource、getRegistrySyncStatus、postRegistrySync；TCS-ResearchRegistry AT-965-9-4），共 132 個；不多不少", () => {
     const names = [...EXPECTED.map(([name]) => name), ...MULTIPART, ...DOWNLOAD];
     expect(Object.keys(api).sort()).toEqual(names.sort());
-    expect(names).toHaveLength(127);
+    expect(names).toHaveLength(132);
   });
 
   it("研究端點（ResearchToPRD P0）：id 編成單一路徑段；省略的選項不進網址（清單的 archived 只在為 true 時帶 ?archived=true）；啟動階段與重試初始化沒給本文時送空物件；PATCH 的方法字串就是 PATCH", async () => {

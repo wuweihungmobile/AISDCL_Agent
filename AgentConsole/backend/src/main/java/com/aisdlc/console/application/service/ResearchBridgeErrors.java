@@ -48,10 +48,13 @@ final class ResearchBridgeErrors {
         }
         if (status == 404) {
             // D-123（P0 未結 R-1）：reason 仍是 research_not_found，文案依 details 區分——allowlist 條目的 404 帶 entry_id，其餘是研究專案
-            String subject = details.containsKey("entry_id") ? "允許清單條目不存在" : "研究專案不存在或已刪除";
+            String subject = details.containsKey("entry_id") ? "允許清單條目不存在" : details.containsKey("slug") ? "追蹤來源不存在" : "研究專案不存在或已刪除";
             return new NotFoundException(subject, reason.isEmpty() ? ErrorReasons.RESEARCH_NOT_FOUND : reason, details);
         }
         if (status == 409) {
+            if (ErrorReasons.REGISTRY_WATCH_SOURCE_EXISTS.equals(reason)) {
+                return new ConflictException("追蹤來源 slug 已存在（slug 永不重用，含已停用者）", reason, details);
+            }
             return new ConflictException("與研究專案目前狀態衝突（" + reason + "）", reason, details);
         }
         if (status == 400 || status == 422) {

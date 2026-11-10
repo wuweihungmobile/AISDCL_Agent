@@ -1016,4 +1016,26 @@ class ResearchApiIT extends AbstractResearchIT {
         String docs = api.get(null, "/v3/api-docs").body();
         assertThat(docs).contains("pending_correction").contains("NOT_EVALUABLE");
     }
+
+    // ── 研究來源單一化 AT-965-5-5：R2P 既有 allowlist 三端點的行為與 Bridge 請求數不變 ──────────────────────────────
+
+    @Test
+    void AT_965_5_5_theThreeAllowlistEndpointsStillMakeExactlyOneBridgeCallEachAndNeverTouchTheNewEndpoints() {
+        Resp list = api.get(viewer(), RESEARCH + "/allowlist");
+        assertThat(list.status()).isEqualTo(200);
+        assertThat(list.<List<String>>read("$.data[*].host")).containsExactlyInAnyOrderElementsOf(MiniResearch.FETCH_HOSTS);
+        Resp added = api.post(admin(), RESEARCH + "/allowlist", map("listKind", "WEB", "host", "example.com", "layer", "INDUSTRY", "purpose", "x", "tosNote", "",
+                "minIntervalSeconds", 5, "tosAcknowledged", false));
+        assertThat(added.status()).isEqualTo(201);
+        String entryId = added.read("$.data.id");
+        Resp patched = api.raw(admin(), HttpMethod.PATCH, RESEARCH + "/allowlist/" + entryId, ApiClient.toJson(map("enabled", false)));
+        assertThat(patched.status()).isEqualTo(200);
+
+        assertThat(bridge().calls).extracting(Call::method).containsExactly("GET", "POST", "PATCH");
+        assertThat(bridge().calls).extracting(Call::path).containsExactly("/research/allowlist", "/research/allowlist", "/research/allowlist/" + entryId);
+        assertThat(bridge().countCalls("GET", "/research/watch-sources")).isZero();
+        assertThat(bridge().countCalls("GET", "/research/registry")).isZero();
+        assertThat(added.data().keySet()).as("回應鍵集合與升級前相同").containsExactlyInAnyOrder("id", "listKind", "host", "layer", "purpose", "tosNote", "minIntervalSeconds",
+                "enabled", "tosAcknowledged", "source", "addedBy", "addedAt");
+    }
 }

@@ -331,7 +331,8 @@ def test_AT_960_6_7_each_update_method_writes_an_event_in_the_same_transaction_a
     assert any(s.startswith(event_insert) for s in round_statements)
     for name in ("add_allowlist_entry", "set_allowlist_enabled"):
         assert not any(event_insert in s for s in seen[name]), f"{name} 不寫 research_events"
-    row = rdb.one("SELECT added_by, disabled_by, enabled FROM console.research_allowlist_entries")
+    row = rdb.one("SELECT added_by, disabled_by, enabled FROM console.research_allowlist_entries "
+                  "WHERE host = 'docs.example.com'")       # V24 另種四個 FETCH 網域：只看本測試那列
     assert row == (ADMIN, ADMIN, False), "added_by／disabled_by 取自傳入的 JWT subject"
     assert rdb.count("research_review_rounds") == 1
 

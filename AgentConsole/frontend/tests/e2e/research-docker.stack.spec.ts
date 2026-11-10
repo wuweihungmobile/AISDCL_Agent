@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 
 import { expect, test } from "@playwright/test";
 
@@ -415,6 +416,101 @@ test("AT_960_22_4 SSE 斷線重播無缺漏：載入前 route.abort 串流（Pla
   await expect(feed).toBeVisible({ timeout: 60_000 });
   await expect.poll(async () => JSON.stringify(await uiSeqs()), { message: "重載後動態欄＝重載前最後畫面", timeout: 60_000 }).toBe(JSON.stringify(lastScreen));
   expect(JSON.stringify(lastScreen), "重載前最後畫面＝資料庫").toBe(JSON.stringify(await eventSeqs(request, project.id)));
+});
+
+// ── AT-965-10-1 研究來源單一化：追蹤來源、同步、稽核檔（TCS-ResearchRegistry-20261110；AC-965-10；NFR-RR-9）──────────
+
+/** 稽核目錄快照：容器內 `BRIDGE_SI_AUDIT_DIR` 底下的 `<audit_ref>.json` 檔名集合；沒有 docker CLI 回 null（呼叫端註記略過）。 */
+function auditDirSnapshot(): { dir: string; files: Set<string> } | null {
+  const dir = inContainer(["printenv", "BRIDGE_SI_AUDIT_DIR"]);
+  if (dir === null) return null;
+  const listing = inContainer(["ls", "-1", dir]);
+  return { dir, files: new Set((listing ?? "").split("\n").filter((f) => f.endsWith(".json"))) };
+}
+
+const PG_CONTAINER = process.env.E2E_PG_CONTAINER ?? "aisdlc-pg-primary";
+const PG_USER = process.env.E2E_PG_USER ?? "aisdlc";
+const PG_DB = process.env.E2E_PG_DB ?? "aisdlc";
+
+test("AT_965_10_1 研究來源單一化（Docker 全棧）：種子 17 列、新增追蹤來源後狀態先「有變更尚未同步」再「待入帳」、稽核檔落進容器卷（kind src-registry、外層七鍵、digest 重算相等、資料庫有對應列）、收尾以 UI 停用", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(900_000);
+  const before = auditDirSnapshot();
+  test.skip(before === null, "TOOL-ABSENCE：沒有 docker CLI，無法讀稽核目錄（AT_965_10_1 需 docker exec）");
+  if (before === null) return;
+  const slug = `e2e-${Date.now().toString(36)}`;
+
+  // 掛載來源：稽核目錄是容器卷，不是主機真實 SI 家目錄（~/.autosdd）
+  const mounts = JSON.parse(execFileSync("docker", ["inspect", BRIDGE_CONTAINER, "--format", "{{json .Mounts}}"], { encoding: "utf-8", timeout: 30_000 }).trim()) as Array<{
+    Destination: string;
+    Source: string;
+    Name?: string;
+  }>;
+  const mount = mounts.find((m) => before.dir === m.Destination || before.dir.startsWith(`${m.Destination}/`));
+  expect(mount, `稽核目錄 ${before.dir} 沒有對應的掛載`).toBeDefined();
+  expect((mount?.Source ?? "").replace(/\\/g, "/").toLowerCase(), "稽核卷不得指向主機的 ~/.autosdd").not.toContain(".autosdd");
+
+  await signIn(page, request, ADMIN);
+  await open(page, request, `${BASE}/research`);
+  await page.getByRole("button", { name: "研究來源設定" }).click();
+  const dialog = page.getByRole("dialog", { name: "研究來源設定" });
+  const section = dialog.getByTestId("watch-sources-section");
+  await expect(section.getByTestId("watch-row").first()).toBeVisible({ timeout: 60_000 });
+  const total = await section.getByTestId("watch-row").count();
+  expect(total, "種子至少 17 列（全新全棧恰 17、啟用 10）").toBeGreaterThanOrEqual(17);
+  const countText = (await section.getByTestId("watch-count").textContent()) ?? "";
+  expect(countText).toMatch(/^啟用 \d+／共 \d+$/);
+  if (total === 17) expect.soft(countText, "全新全棧：啟用 10／共 17").toBe("啟用 10／共 17");
+
+  // 讓 sync 慢一點，才看得到「有變更尚未同步」這個中間態
+  await page.route("**/api/v1/si/research-registry/sync", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await route.continue();
+  });
+  await section.getByLabel(/識別碼/).fill(slug);
+  await section.getByLabel(/^網址/).fill(`https://www.anthropic.com/${slug}`);
+  await section.getByLabel(/抓取說明/).fill("E2E 追蹤來源（收尾會停用）");
+  await section.getByRole("button", { name: "新增追蹤來源" }).click();
+  await expect(section.getByTestId("registry-status"), "新增後、同步完成前：有變更尚未同步").toContainText("有變更尚未同步", { timeout: 30_000 });
+  await expect(section.getByTestId("registry-status"), "自動同步後：待自我進化入帳（全棧沒有主機巡邏，不會自動變已同步）").toContainText("待自我進化入帳", { timeout: 60_000 });
+  await expect(section.getByTestId("registry-sync-message")).toContainText("已送出，待入帳");
+
+  // 稽核目錄恰多一個檔
+  const afterAdd = auditDirSnapshot();
+  expect(afterAdd, "稽核目錄可讀").not.toBeNull();
+  const added = [...(afterAdd?.files ?? [])].filter((f) => !before.files.has(f));
+  expect(added, "新增後稽核目錄恰多一個 <audit_ref>.json").toHaveLength(1);
+  const auditRef = added[0].replace(/\.json$/, "");
+  const outer = JSON.parse(inContainer(["cat", `${before.dir}/${added[0]}`]) ?? "{}") as Record<string, unknown>;
+  expect(Object.keys(outer), "外層七鍵、序固定").toEqual(["schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac"]);
+  expect(outer.kind).toBe("src-registry");
+  expect(outer.audit_ref).toBe(auditRef);
+  expect(outer.subject, "src-registry 的 subject 為 null").toBeNull();
+  const body = JSON.parse(String(outer.body)) as { registry_text: string; registry_sha256: string };
+  const digest = createHash("sha256").update(body.registry_text, "utf-8").digest("hex");
+  expect(body.registry_sha256.replace(/^sha256:/, ""), "sha256(body.registry_text) 等於 body.registry_sha256").toBe(digest);
+  expect(body.registry_text, "登記快照含新增的 slug").toContain(slug);
+
+  // 資料庫的稽核列
+  const row = execFileSync(
+    "docker",
+    ["exec", PG_CONTAINER, "psql", "-U", PG_USER, "-d", PG_DB, "-At", "-c", `select kind || '|' || digest from console.si_console_writes where audit_ref = '${auditRef}'`],
+    {
+      encoding: "utf-8",
+      timeout: 30_000,
+    },
+  ).trim();
+  expect(row, "console.si_console_writes 有對應列、digest 等於 registry_sha256").toBe(`src-registry|${body.registry_sha256}`);
+
+  // 收尾：以 UI 停用該列（並自動同步，稽核目錄再多一個檔）
+  await section.getByRole("button", { name: `停用 ${slug}` }).click();
+  await expect(section.getByTestId("watch-row").filter({ hasText: slug }).getByText("已停用")).toBeVisible({ timeout: 60_000 });
+  await expect(section.getByTestId("registry-sync-message")).toContainText(/已送出，待入帳|已是最新，未重送/, { timeout: 60_000 });
+  await expect.poll(() => [...(auditDirSnapshot()?.files ?? [])].filter((f) => !before.files.has(f)).length, { message: "收尾停用後稽核目錄再多一個檔（共 N＋2）", timeout: 60_000 }).toBe(2);
+  await page.unroute("**/api/v1/si/research-registry/sync");
+  await page.keyboard.press("Escape");
 });
 
 // ── AT-960-22-2 路徑 A：fail3 劇本、三輪 FAIL、ESCALATION ──────────────────────────────────────

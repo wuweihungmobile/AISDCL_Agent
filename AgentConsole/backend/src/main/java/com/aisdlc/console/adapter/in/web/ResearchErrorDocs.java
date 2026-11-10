@@ -16,7 +16,7 @@ final class ResearchErrorDocs {
             + "已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出";
 
     /** 研究寫入端點的 403：通用說明加研究專屬的 research_write_forbidden。 */
-    static final String FORBIDDEN = "角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；"
+    static final String FORBIDDEN = "角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；"
             + "另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），"
             + "或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0）";
 
@@ -112,6 +112,7 @@ final class ResearchErrorDocs {
         Map<String, String> merged = new java.util.LinkedHashMap<>(P0_CONFLICT);
         merged.putAll(P1_CONFLICT);
         merged.putAll(P2_CONFLICT);
+        merged.put("POST /api/v1/research/watch-sources", "watch_source_exists：slug 已存在（slug 永不重用，含已停用者；details.slug）");
         CONFLICT = Map.copyOf(merged);
     }
 
@@ -158,7 +159,14 @@ final class ResearchErrorDocs {
                     + "或 Bridge 拒絕此請求（reason 逐字取自 Bridge）")),
             Map.entry("POST /api/v1/research/allowlist", writeFailures("輸入閘未通過（reason invalid_request：listKind、host、layer、purpose、minIntervalSeconds）；"
                     + "Reddit 網域未確認條款（reason terms_ack_required；tosAcknowledged 須為 true）；或 Bridge 拒絕此請求（reason 逐字取自 Bridge）")),
-            Map.entry("PATCH /api/v1/research/allowlist/{id}", writeFailures("本文含 enabled 以外的鍵（含 minIntervalSeconds；建立後不可改）或 enabled 不是布林（reason invalid_request；條目不變）")));
+            Map.entry("PATCH /api/v1/research/allowlist/{id}", writeFailures("本文含 enabled 以外的鍵（含 minIntervalSeconds；建立後不可改）或 enabled 不是布林（reason invalid_request；條目不變）")),
+            // 研究來源單一化（API-RP-29）：追蹤來源清單、新增、停用／啟用；POST 的 409 在 CONFLICT
+            Map.entry("GET /api/v1/research/watch-sources", Map.of("502", UNREACHABLE, "503", "db_blocked：研究資料庫暫時不可用；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN",
+                    "504", TIMEOUT)),
+            Map.entry("POST /api/v1/research/watch-sources", writeFailures("輸入閘未通過（400，不在此列）之外，Bridge 拒絕此請求（reason 逐字取自 Bridge）：host_not_allowed（網域不在當前有效網域清單；"
+                    + "details.host）｜registry_too_large（假設寫入成功後的登記快照超過 24576 位元組；details.what=registry_text、limit、size；零寫入）｜invalid_request（details.violations）")),
+            Map.entry("PATCH /api/v1/research/watch-sources/{slug}", writeFailures("本文含 enabled 以外的鍵或 enabled 不是布林（reason invalid_request；條目不變）；"
+                    + "重新啟用時 host 已不在當前有效網域清單（reason host_not_allowed；details.host；須先在網域清單開放）")));
 
     private ResearchErrorDocs() {
     }

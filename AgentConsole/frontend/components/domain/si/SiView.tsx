@@ -17,6 +17,7 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { Dna, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,18 @@ export function SiView() {
       </div>
 
       <SiStatusBanner onResume={isAdmin ? (run) => setDecideTarget({ kind: "run", run }) : undefined} />
+
+      <p data-testid="si-research-sources-note" className="-mt-2 mb-5 text-sm text-wg-muted">
+        研究來源在『
+        {isAdmin ? (
+          <Link href="/research" className="text-wg-primary underline underline-offset-2">
+            研發工作流 → 研究來源設定
+          </Link>
+        ) : (
+          "研發工作流 → 研究來源設定"
+        )}
+        』統一管理
+      </p>
 
       {isAdmin ? <SiSchedulePanel onSetSchedule={(enabled) => setScheduleTarget({ enabled })} onRequestRun={() => setRunRequestOpen(true)} /> : null}
 

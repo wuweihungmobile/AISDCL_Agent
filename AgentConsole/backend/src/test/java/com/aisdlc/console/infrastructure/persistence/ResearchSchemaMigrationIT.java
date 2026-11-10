@@ -73,6 +73,8 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
     /** V19 的四張受控可更新表（research_deliveries 是 append-only，不在其中）。 */
     private static final List<String> V19_CONTROLLED_TABLES = List.of("research_route_decisions", "research_route_steps",
             "research_scr", "research_decompositions");
+    /** V24（研究來源單一化）新增的一張表：追蹤來源，掛既有的受控更新通用守衛（TCS-ResearchRegistry §4.1）。 */
+    private static final List<String> V24_TABLES = List.of("research_watch_sources");
     private static final String V19_VIEW = "v_research_healing_attempts";
 
     private static final Set<String> JSONB_COLUMNS = Set.of("scope", "payload", "prompt_manifest", "allowlist_snapshot",
@@ -478,6 +480,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
         added.removeAll(afterV15);
         Set<String> addedByV19 = new TreeSet<>(afterV19);
         addedByV19.removeAll(afterV18);
+        addedByV19.removeAll(V24_TABLES);                    // 拋棄式庫遷到最新版：V24 的追蹤來源表不是 V19 的
         Integer leaked = springJdbc.queryForObject("select count(*) from information_schema.tables where table_schema = 'public' "
                 + "and table_name like 'research\\_%'", Integer.class);
         List<String> sequences = springJdbc.queryForList("select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace "
@@ -501,7 +504,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(descriptions).containsEntry("16", "research core").containsEntry("17", "research evidence")
                     .containsEntry("18", "research prd review gate").containsEntry("19", "research route scr delivery").containsEntry("20", "research github token config").containsEntry("21", "research gate details delivery snapshot").containsEntry("22", "research flow phase delivered");
@@ -532,7 +535,8 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
 
             List<String> allResearchTables = new ArrayList<>(RESEARCH_TABLES);
             allResearchTables.addAll(V19_TABLES);
-            soft.assertThat(guardsByTable.keySet()).as("18 張表（P0 十三加 V19 五）都有守衛觸發器、沒有別的表")
+            allResearchTables.addAll(V24_TABLES);
+            soft.assertThat(guardsByTable.keySet()).as("19 張表（P0 十三加 V19 五加 V24 一）都有守衛觸發器、沒有別的表")
                     .containsExactlyInAnyOrderElementsOf(allResearchTables);
             for (String table : V19_CONTROLLED_TABLES) {
                 soft.assertThat(guardsByTable.get(table)).as("%s 只掛受控更新通用守衛", table).containsExactly("research_controlled_update_guard");
@@ -1410,7 +1414,8 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                 + "where n.nspname = 'console' and p.proname = 'research_controlled_update_guard' and not t.tgisinternal");
         List<String> allControlled = new ArrayList<>(CONTROLLED_TABLES);
         allControlled.addAll(V19_CONTROLLED_TABLES);
-        assertThat(wiring).extracting(trigger -> trigger.get("relname")).as("引用通用守衛的表恰為九張（P0 五張加 V19 四張；不含審查輪表與 research_deliveries）")
+        allControlled.addAll(V24_TABLES);
+        assertThat(wiring).extracting(trigger -> trigger.get("relname")).as("引用通用守衛的表恰為十張（P0 五張加 V19 四張加 V24 一張；不含審查輪表與 research_deliveries）")
                 .containsExactlyInAnyOrderElementsOf(allControlled);
         assertThat(wiring).allSatisfy(trigger -> {
             assertThat(trigger).as("BEFORE、FOR EACH ROW、涵蓋 UPDATE 與 DELETE、不含 INSERT")
@@ -1722,6 +1727,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                 + "console.flyway_schema_history where version is not null order by installed_rank");
         Set<String> added = new TreeSet<>(baseTables(db.jdbc));
         added.removeAll(baseTables(at18.jdbc));
+        added.removeAll(V24_TABLES);                         // 最新版庫另有 V24 的追蹤來源表
         String viewSql = "select table_name from information_schema.views where table_schema = 'console' "
                 + "and table_name like 'v\\_research\\_%'";
         List<String> viewsAfter19 = db.jdbc.queryForList(viewSql, String.class);
@@ -1738,7 +1744,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(env.getProperty("spring.jpa.hibernate.ddl-auto")).as("ddl-auto=validate（本 context 能啟動即代表 validate 通過）")
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 19")
-                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
+                    .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             soft.assertThat(history.get(18).get("description")).as("V19 描述（第 19 筆；其後還有 V20、V21、V22）").isEqualTo("research route scr delivery");
             soft.assertThat(added).as("V19 在 console 內恰多出五張表").containsExactlyInAnyOrderElementsOf(V19_TABLES);
@@ -2116,6 +2122,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(V19_CONTROLLED_TABLES).as("V19_CONTROLLED_TABLES 恰四表").hasSize(4);
             List<String> v19InFunction = new ArrayList<>(allowedByFunction.keySet());
             v19InFunction.removeAll(CONTROLLED_TABLES);
+            v19InFunction.removeAll(V24_TABLES);             // V24 在同一個函式再加一條（AT-965-1-6 另鎖）
             soft.assertThat(v19InFunction).as("V16 守衛函式的 V19 條目逐表等於 V19_CONTROLLED_TABLES")
                     .containsExactlyInAnyOrderElementsOf(V19_CONTROLLED_TABLES);
             soft.assertThat(db.jdbc.queryForList("select c.relname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
@@ -2239,7 +2246,8 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
         SoftAssertions.assertSoftly(soft -> {
             List<String> expectedTables = new ArrayList<>(RESEARCH_TABLES);
             expectedTables.addAll(V19_TABLES);
-            soft.assertThat(tables).as("表清單取 information_schema：恰十八張（P0 十三加 V19 五）").hasSize(18)
+            expectedTables.addAll(V24_TABLES);
+            soft.assertThat(tables).as("表清單取 information_schema：恰十九張（P0 十三加 V19 五加 V24 一）").hasSize(19)
                     .containsExactlyInAnyOrderElementsOf(expectedTables);
             soft.assertThat(unguarded).as("表清單減去「掛有涵蓋 DELETE 的守衛」之表為空（新增第十九張而未掛守衛即紅）").isEmpty();
             for (String table : tables) {
@@ -2325,7 +2333,7 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                     .isEqualTo("validate");
             soft.assertThat(history).extracting(row -> row.get("version")).as("Flyway 歷史依序為 1 至 23")
                     .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18",
-                            "19", "20", "21", "22", "23");
+                            "19", "20", "21", "22", "23", "24", "25");
             soft.assertThat(history).extracting(row -> row.get("success")).as("每一版都成功").containsOnly(true);
             Map<String, Object> v21 = history.get(20);
             soft.assertThat(v21.get("script")).as("V21 檔名").isEqualTo("V21__research_gate_details_delivery_snapshot.sql");
@@ -2335,7 +2343,9 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
             soft.assertThat(v22.get("description")).as("V22 描述").isEqualTo("research flow phase delivered");
             soft.assertThat(history.subList(0, 21)).extracting(row -> row.get("checksum")).as("V1～V21 的 checksum 與 21 版庫相同")
                     .isEqualTo(history21.stream().map(row -> row.get("checksum")).toList());
-            soft.assertThat(baseTables(at22.jdbc)).as("V22 不新增任何表（只放寬 CHECK）").isEqualTo(baseTables(at21.jdbc));
+            Set<String> at22Tables = new TreeSet<>(baseTables(at22.jdbc));
+            at22Tables.removeAll(V24_TABLES);                // 最新版庫另有 V24 的追蹤來源表
+            soft.assertThat(at22Tables).as("V22 不新增任何表（只放寬 CHECK）").isEqualTo(baseTables(at21.jdbc));
         });
     }
 
@@ -2476,14 +2486,16 @@ class ResearchSchemaMigrationIT extends AbstractIntegrationTest {
                 + "and table_type = 'BASE TABLE' and table_name like 'research\\_%' order by 1", String.class);
         String triggerSql = "select c.relname || '/' || t.tgname || '/' || p.proname from pg_trigger t join pg_class c on c.oid = t.tgrelid "
                 + "join pg_namespace n on n.oid = c.relnamespace join pg_proc p on p.oid = t.tgfoid where n.nspname = 'console' "
-                + "and c.relname like 'research\\_%' and not t.tgisinternal order by 1";
+                + "and c.relname like 'research\\_%' and c.relname <> 'research_watch_sources' and not t.tgisinternal order by 1";
         String functionSql = "select string_agg(md5(pg_get_functiondef(p.oid)), ',' order by p.proname) from pg_proc p "
-                + "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'console' and p.proname like 'research\\_%'";
+                + "join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'console' and p.proname like 'research\\_%' "
+                + "and p.proname <> 'research_controlled_update_guard'";      // V24 刻意重定義通用守衛（AT-965-1-6 另鎖）
 
         SoftAssertions.assertSoftly(soft -> {
             List<String> expectedTables = new ArrayList<>(RESEARCH_TABLES);
             expectedTables.addAll(V19_TABLES);
-            soft.assertThat(tables).as("恰十八張 research_ 表").hasSize(18).containsExactlyInAnyOrderElementsOf(expectedTables);
+            expectedTables.addAll(V24_TABLES);
+            soft.assertThat(tables).as("恰十九張 research_ 表").hasSize(19).containsExactlyInAnyOrderElementsOf(expectedTables);
             for (String table : tables) {
                 int before = db.jdbc.queryForObject("select count(*) from console." + table, Integer.class);
                 soft.assertThat(before).as("%s 至少一列", table).isGreaterThanOrEqualTo(1);

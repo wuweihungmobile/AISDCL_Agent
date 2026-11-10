@@ -43,6 +43,7 @@ import {
   type AllowlistFormField,
 } from "@/lib/domain/research";
 import { cn } from "@/lib/utils";
+import { WatchSourcesSection } from "./WatchSourcesSection";
 
 const EMPTY_FORM: AllowlistForm = { listKind: "WEB", host: "", layer: "INDUSTRY", purpose: "", tosNote: "", minIntervalSeconds: String(ALLOWLIST_DEFAULT_INTERVAL), tosAcknowledged: false };
 
@@ -284,6 +285,9 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-wg-muted">
           有效清單＝部署環境變數設定的基底加上這裡啟用中的條目；每個階段開始執行時會記下當時的快照。產業網域（Web 層）要先加進來，研究才能勾選「官方文獻與業界」。
         </p>
+        <p data-testid="allowlist-shared-note" className="text-sm font-medium">
+          研發工作流與自我進化共用這份網域清單。
+        </p>
         {entries === undefined ? (
           list.isError ? (
             <ErrorState error={list.error} title="無法載入研究來源清單" onRetry={() => void list.refetch()} />
@@ -326,6 +330,7 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
         )}
         <EffectiveEnvironment />
         <AddForm />
+        <WatchSourcesSection />
       </DialogBody>
       <DialogFooter>
         <Button variant="ghost" onClick={onClose}>

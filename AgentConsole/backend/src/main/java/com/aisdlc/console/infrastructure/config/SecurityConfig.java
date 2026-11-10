@@ -50,7 +50,8 @@ import java.util.List;
  *   <li>{@code POST /api/v1/sysadmin/**}：僅 ADMIN（系統管理／資料庫備份的手動觸發，TCS-SysAdminBackup-20261027 R-BK-57；<b>置於通用規則之前</b>）。
  *       所有 GET 為 VIEWER 以上；{@code /sysadmin/**} 的 PUT、PATCH、DELETE 沒有對映（VIEWER 403、OPERATOR／ADMIN 404 或 405）。</li>
  *   <li>{@code POST /api/v1/research/projects/{id}/approve｜return｜route｜gates｜delivery/tag｜delivery/pr}、{@code POST /api/v1/research/allowlist}、
- *       {@code PATCH /api/v1/research/allowlist/{id}}：僅 ADMIN（ResearchToPRD；各一條規則，<b>置於通用規則之前</b>；{@code route/preview} 是 OPERATOR；
+ *       {@code PATCH /api/v1/research/allowlist/{id}}、{@code POST /api/v1/research/watch-sources}、{@code PATCH /api/v1/research/watch-sources/{slug}}：
+ *       僅 ADMIN（ResearchToPRD；各一條規則，<b>置於通用規則之前</b>；{@code route/preview} 是 OPERATOR；
  *       {@code reinit} 的換世代模式由 {@code ResearchCommandService} 另判，D-64）。所有研究 GET 與研究事件串流為 VIEWER 以上。</li>
  *   <li>{@code /api/v1/settings/**} 的<b>非 GET</b>：僅 ADMIN（含 {@code POST /settings/export｜import｜test-connection}：
  *       它們是 POST，但屬 ADMIN 專用）；{@code GET …?reveal=true} 由 Controller 檢查角色。</li>
@@ -109,6 +110,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/projects/*/delivery/pr").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/research/allowlist").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/v1/research/allowlist/*").hasRole("ADMIN")
+                        // 研究來源單一化（TCS-ResearchRegistry W-R5）：追蹤來源的新增與停用／啟用僅 ADMIN；同樣必須在通用規則之前。
+                        // 登記同步（POST /api/v1/si/research-registry/sync）已由上方 /api/v1/si/** 的 ADMIN 規則涵蓋，不另開 matcher
+                        .requestMatchers(HttpMethod.POST, "/api/v1/research/watch-sources").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.PATCH, "/api/v1/research/watch-sources/*").hasRole("ADMIN")
                         .requestMatchers("/api/v1/settings/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/**").hasAnyRole("OPERATOR", "ADMIN")
                         .requestMatchers("/actuator/**").hasRole("ADMIN")

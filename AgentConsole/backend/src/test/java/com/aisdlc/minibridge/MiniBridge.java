@@ -284,6 +284,11 @@ public final class MiniBridge implements AutoCloseable {
         public volatile long writeDelayMillis;
         /** 收到寫入請求的<b>當下</b>（回應之前）的回呼：AT-933-2-1 在這裡以 JDBC 讀稽核列。 */
         public volatile java.util.function.Consumer<Write> onWrite;
+        /**
+         * 收到 {@code GET /si/*} 的<b>當下</b>（回應之前）的回呼，參數為路徑（例 {@code /si/events}）：登記同步在「讀完鏡像之後、落檔之前」才讓 Bridge 位址失效
+         * （連線階段失敗、送出後連線重設），這兩個落檔階段的失敗情境要等讀取都成功了才造得出來。
+         */
+        public volatile java.util.function.Consumer<String> onRead;
         /** 預檢成功的回應物件（Bridge 形狀）：預設 ok 為 true、row_bytes 287、row_max_bytes 700、findings 空。 */
         public volatile Map<String, Object> validateReply;
 
@@ -365,6 +370,7 @@ public final class MiniBridge implements AutoCloseable {
             validateFailure = null;
             writeDelayMillis = 0;
             onWrite = null;
+            onRead = null;
             validateReply = defaultValidateReply();
             payloads.clear();
             Map<String, Map<String, Object>> golden = golden("A.snake");

@@ -61,6 +61,18 @@ public final class MiniResearch {
     public final List<Call> calls = new CopyOnWriteArrayList<>();
     /** ADMIN 新增的 allowlist 條目（Bridge 形狀，snake_case）。 */
     public final List<Map<String, Object>> allowlist = new CopyOnWriteArrayList<>();
+    /** 研究來源單一化：追蹤來源（Bridge 形狀 {@code WatchSource}，snake_case；{@code GET /research/watch-sources} 回 {@code {items}}）。 */
+    public final List<Map<String, Object>> watchSources = new CopyOnWriteArrayList<>();
+    /** {@code GET /research/registry} 回放的 {@code registry_text}（逐位元組）。 */
+    public volatile String registryText = "{}\n";
+    /** {@code GET /research/registry} 回放的 {@code registry_sha256}。 */
+    public volatile String registrySha = "sha256:" + "0".repeat(64);
+
+    /** 設定登記快照的回放內容（{@code registry_text} 與 {@code registry_sha256}；原樣，含換行與非 ASCII）。 */
+    public void registry(String text, String sha) {
+        this.registryText = text;
+        this.registrySha = sha;
+    }
 
     private final Map<String, Queue<Reply>> scripted = new ConcurrentHashMap<>();
     private final Map<String, Reply> sticky = new ConcurrentHashMap<>();
@@ -106,6 +118,9 @@ public final class MiniResearch {
         onRoute = null;
         calls.clear();
         allowlist.clear();
+        watchSources.clear();
+        registryText = "{}\n";
+        registrySha = "sha256:" + "0".repeat(64);
         scripted.clear();
         sticky.clear();
         raceArrivals.set(0);

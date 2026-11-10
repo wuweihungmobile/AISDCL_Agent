@@ -1,0 +1,13 @@
+{
+  "hosts": [
+    {
+      "host": "export.arxiv.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    }
+  ],
+  "schema_rev": 1,
+  "watch": []
+}

@@ -8,6 +8,7 @@ import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from 
 import { detailVariant, PROJECT_LIST } from "../fixtures/research/projects";
 import { HEALING, kanbanPending, PENDING_ESCALATED, RUN_ID } from "../fixtures/research/p2";
 import { CAPABILITIES_ROUTE_READY, PREVIEW_B } from "../fixtures/research/route";
+import { REGISTRY_STATUS, WATCH_SOURCES_17, type RegistryStatusKind } from "../fixtures/research/registry";
 import { defect, FAIL3_SCORES, makeRound, PRD_CONTENT, PRD_VERSIONS } from "../fixtures/research/reviews";
 import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, fail, installApiMock, paged, shellHandler, signInAs, type MockHandler } from "./mockApi";
@@ -262,6 +263,86 @@ const researchBackend: MockHandler = (call) => {
   if (rest === "/fsm") return { data: fsmView("SPEC_DRAFTING", {}, 1) };
   return undefined;
 };
+
+/**
+ * 研究來源設定的追蹤來源區（TCS-ResearchRegistry-20261110 AT-965-10-2）：種子 17 列夾具與可切換的同步狀態；POST 新增回 201（掃描只看靜止畫面，不走 sync）。
+ * 狀態由 `registry.status` 控制（測試中途改它＋重新整理頁面即換成另一態）。
+ */
+function registryBackend(registry: { status: RegistryStatusKind }): MockHandler {
+  return (call) => {
+    if (call.path === "/api/v1/research/watch-sources" && call.method === "GET") return { data: WATCH_SOURCES_17() };
+    if (call.path === "/api/v1/si/research-registry" && call.method === "GET") return { data: REGISTRY_STATUS(registry.status) };
+    return undefined;
+  };
+}
+
+test.describe("無障礙掃描：研究來源設定的追蹤來源區（route mock＋axe；1440／1000／600）", () => {
+  test.setTimeout(240_000);
+
+  test("AT_965_10_2 追蹤來源區：種子 17 列、新增表單、錯誤狀態、unknown 狀態在三個寬度 axe 零違規；對話框與頁面無橫向溢出；表格在窄寬於自己的捲動容器內", async ({ page }) => {
+    const errors = collectConsoleErrors(page);
+    const registry: { status: RegistryStatusKind } = { status: "unsynced" };
+    await signInAs(page, "ADMIN");
+    await installApiMock(page, compose(shellHandler(), registryBackend(registry), researchBackend));
+
+    const openDialog = async () => {
+      await page.goto("/research");
+      await expect(page.getByTestId("research-list-view")).toBeVisible({ timeout: 60_000 });
+      await page.getByRole("button", { name: "研究來源設定" }).click();
+      const dialog = page.getByRole("dialog", { name: "研究來源設定" });
+      await expect(dialog.getByTestId("watch-row")).toHaveCount(17, { timeout: 60_000 });
+      await expect(dialog.getByTestId("registry-status")).toBeVisible();
+      return dialog;
+    };
+    const noOverflow = async (label: string) => {
+      const dims = await page.evaluate(() => {
+        const dialog = document.querySelector<HTMLElement>('[data-testid="allowlist-dialog"]');
+        const wrapper = document.querySelector<HTMLElement>('[data-testid="watch-table"]')?.parentElement ?? null;
+        return {
+          dialog: dialog ? [dialog.scrollWidth, dialog.clientWidth] : null,
+          doc: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+          wrapper: wrapper ? [wrapper.scrollWidth, wrapper.clientWidth, getComputedStyle(wrapper).overflowX] : null,
+        };
+      });
+      expect(dims.dialog, `${label}：找到對話框`).not.toBeNull();
+      expect(dims.dialog?.[0] ?? 0, `${label}：對話框內無橫向溢出（scrollWidth ${dims.dialog?.[0]}／clientWidth ${dims.dialog?.[1]}）`).toBeLessThanOrEqual((dims.dialog?.[1] ?? 0) + 1);
+      expect(dims.doc[0], `${label}：頁面無橫向捲動`).toBeLessThanOrEqual(dims.doc[1] + 1);
+      expect(dims.wrapper?.[2], `${label}：表格在 overflow-x 容器內`).toMatch(/auto|scroll/);
+    };
+
+    await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+    let dialog = await openDialog();
+    for (const width of RESEARCH_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      await dialog.getByTestId("watch-sources-section").scrollIntoViewIfNeeded();
+      await noOverflow(`追蹤來源區 ${width}`);
+      await expectNoA11yViolations(page, `研究來源設定 追蹤來源區 ${width}（種子 17 列、新增表單）`);
+    }
+
+    // 錯誤狀態：空表單送出 ⇒ 逐欄錯誤與摘要
+    for (const width of RESEARCH_WIDTHS) {
+      await page.setViewportSize({ width, height: 900 });
+      await dialog.getByRole("button", { name: "新增追蹤來源" }).click();
+      await expect(dialog.getByTestId("watch-form-summary")).toBeVisible();
+      await expect(dialog.getByLabel(/識別碼/)).toHaveAttribute("aria-invalid", "true");
+      await noOverflow(`錯誤狀態 ${width}`);
+      await expectNoA11yViolations(page, `研究來源設定 追蹤來源區 ${width}（驗證錯誤）`);
+    }
+
+    // unknown 狀態與 pending 狀態（狀態徽章對比度由 axe 的 color-contrast 規則量）
+    for (const status of ["unknown-scan_cap_exceeded", "pending", "synced"] as const) {
+      registry.status = status;
+      await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });
+      dialog = await openDialog();
+      for (const width of RESEARCH_WIDTHS) {
+        await page.setViewportSize({ width, height: 900 });
+        await noOverflow(`${status} ${width}`);
+        await expectNoA11yViolations(page, `研究來源設定 追蹤來源區 ${width}（${status}）`);
+      }
+    }
+    expect(errors, "瀏覽器主控台不應有錯誤").toEqual([]);
+  });
+});
 
 test.describe("無障礙掃描：研發工作流（route mock＋axe；整頁；1440／1000／600）", () => {
   test.setTimeout(180_000);

@@ -415,13 +415,16 @@ GOLDEN_TABLE: dict[str, tuple[str, str]] = {
 BACKEND_AUDIT_DIR = (sup.MONOREPO / "AgentConsole" / "backend" / "src" / "test" / "resources" / "si"
                      / "audit")
 OUTER_KEYS = ["schema_rev", "kind", "audit_ref", "subject", "body", "key_id", "mac"]
+G_S1 = "G-S1.audit.json"
 
 
 def golden_problems(label: str, directory: Path) -> list[str]:
     """一份黃金檔目錄的問題清單（空＝合格）：檔名集合、sha256、外層鍵與鍵序、body 為字串、以標準庫
     重算 mac 與 key_id。訊息一律帶 `label`，指出是哪一份。"""
     out: list[str] = []
-    names = {p.name for p in directory.glob("*.json")} if directory.is_dir() else set()
+    #: G-S1（登記同步黃金檔，研究來源單一化）同住本目錄但屬另一張表，由 `AT_965_6_7` 驗證。
+    names = ({p.name for p in directory.glob("*.json") if p.name != G_S1}
+             if directory.is_dir() else set())
     if names != set(GOLDEN_TABLE):
         out.append(f"{label}：檔名集合 {sorted(names)} 不等於 {sorted(GOLDEN_TABLE)}")
     for name, (sha, mac) in GOLDEN_TABLE.items():
@@ -581,3 +584,40 @@ def test_AT_950_11_E_2_a_complete_write_closure_builds_and_ingests(tmp_path: Pat
     ref = place(home, sup.read_audit_golden("G1"))
     rc, result, err = decide(root, home, ref)
     assert rc == 0 and result["ok"] is True, f"{result} {err[-300:]}"
+
+
+# ── 研究來源單一化：G-S1（登記同步稽核檔黃金檔；TCS-ResearchRegistry AT-965-6-7）──────────────
+GS1_KEY = "si-test-key-g-s1-0123456789abcdef"
+GS1_REF = "00000000-0000-4000-8000-0000000000a1"
+GS1_BODY_KEYS = ["schema_rev", "audit_ref", "kind", "user", "role", "time", "registry_text",
+                 "registry_sha256"]
+GS1_BRIDGE = sup.AUDIT_GOLDEN_DIR / G_S1
+GS1_BACKEND = BACKEND_AUDIT_DIR.parent / G_S1
+GS1_ROOT = sup.MONOREPO / "tools" / "tests" / "fixtures" / "selfimproving" / G_S1
+
+
+def test_AT_965_6_7_the_g_s1_copy_is_recomputable_and_equals_the_backend_copy() -> None:
+    """Console 不自產 G-S1：副本由主控自根層檔原樣複製；本 AT 以標準庫重算 mac 與 sha，並比對兩份
+    副本。副本不存在＝失敗（不得 skip）。"""
+    from tests.research_registry_support import fixture_bytes
+
+    for label, path in (("Bridge 副本", GS1_BRIDGE), ("backend 副本", GS1_BACKEND)):
+        assert path.is_file(), f"{label}不存在（{path}）：主控須先自根層檔複製"
+    raw = GS1_BRIDGE.read_bytes()
+    assert raw == GS1_BACKEND.read_bytes(), "Bridge 與 backend 兩副本須逐位元組相同"
+    if GS1_ROOT.is_file():
+        assert raw == GS1_ROOT.read_bytes(), "副本須與根層黃金檔逐位元組相同"
+    assert raw.endswith(b"\n") and b"\n" not in raw[:-1], "緊湊且結尾恰一個 LF"
+    outer = json.loads(raw.decode("utf-8"))
+    assert list(outer) == OUTER_KEYS and outer["kind"] == "src-registry"
+    assert outer["subject"] is None and outer["audit_ref"] == GS1_REF
+    assert outer["key_id"] == sup.key_id_of(GS1_KEY)
+    assert outer["mac"] == sup.hmac_hex(GS1_KEY, outer["body"]), "mac 以附錄 C 的金鑰重算須相等"
+    body = json.loads(outer["body"])
+    assert list(body) == GS1_BODY_KEYS, "body 鍵序固定"
+    assert (body["user"], body["role"], body["time"]) == (
+        "admin", "ADMIN", "2026-11-10T09:00:00+08:00")
+    golden_text = fixture_bytes("appendix-b.json").decode("utf-8")
+    assert body["registry_text"] == golden_text, "registry_text 須逐字取自附錄 B"
+    digest = hashlib.sha256(body["registry_text"].encode("utf-8")).hexdigest()
+    assert body["registry_sha256"] == "sha256:" + digest

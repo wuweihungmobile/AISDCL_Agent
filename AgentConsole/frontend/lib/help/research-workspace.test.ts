@@ -130,3 +130,20 @@ describe("AT_962_25_1 研究工作區說明：P2 欄位釋義一次寫完", () =
     expect(researchWorkspace.states).toEqual([{ table: "researchFlow" }]);
   });
 });
+
+describe("AT_965_9_3 研究來源單一化的說明：追蹤來源與同步到自我進化", () => {
+  it("AT_965_9_3 名詞表新增「追蹤來源」「同步到自我進化」兩列，過 lint；sourceFiles 含 WatchSourcesSection.tsx 與 researchRegistry.ts", () => {
+    for (const name of ["追蹤來源", "同步到自我進化"]) {
+      const field = FIELD(name);
+      expect(field, `登記了欄位 ${name}`).toBeDefined();
+      expect(lintText(field?.meaning ?? "", { maxSentences: 2 }), name).toEqual([]);
+    }
+    expect(researchWorkspace.sourceFiles).toContain("components/domain/research/WatchSourcesSection.tsx");
+    expect(researchWorkspace.sourceFiles).toContain("lib/domain/researchRegistry.ts");
+  });
+
+  it("AT_965_9_3 新增名詞與畫面字樣逐字一致（出處檔內找得到）", () => {
+    const sources = ["components/domain/research/WatchSourcesSection.tsx", "lib/domain/researchRegistry.ts"].map((f) => readFileSync(path.resolve(process.cwd(), f), "utf8")).join("\n");
+    for (const name of ["追蹤來源", "同步到自我進化"]) expect(sources, name).toContain(name);
+  });
+});

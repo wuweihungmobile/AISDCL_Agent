@@ -366,10 +366,11 @@ export type SiObservationRequest = S["SiObservationRequest"];
 export type SiCloseRequest = S["SiCloseRequest"];
 /** 稽核檔已落地的收據（待入帳）：`subject` 對 obs-add 為 null（入帳後才知道新列號）。 */
 /**
- * 寫入種類五值（P2b 的三個加 P4 的 `sched-set`、`run-request`；TCS-SelfImprovingSchedule W-S3 (g)），直接取 schema.d.ts 的收據列舉：
- * backend 的 @Schema 允許值已涵蓋五值（Console TCS D-CS-25 校正後重產），日後後端加減種類這裡會在 tsc 紅燈。
+ * 寫入種類六值（P2b 的三個加 P4 的 `sched-set`、`run-request`，再加研究來源單一化的 `src-registry`；TCS-SelfImprovingSchedule W-S3 (g)、
+ * TCS-ResearchRegistry AT-965-9-2），取 schema.d.ts 的對帳項列舉（對帳讀面的 kind 是六值；收據 `SiWriteReceipt` 仍是前五值的子集，不會產出 `src-registry`，
+ * 它走獨立的 `POST /si/research-registry/sync`）：日後後端加減種類這裡會在 tsc 紅燈。
  */
-export type SiWriteKind = S["SiWriteReceipt"]["kind"];
+export type SiWriteKind = S["SiConsoleWriteItem"]["kind"];
 export type SiWriteReceipt = S["SiWriteReceipt"];
 /** 排程設定的請求本文（API-SI-12）：`enabled` 與 `periodMinutes` 兩鍵皆必備（停用方向也要帶界內週期，D-CS-6）；`reason` 選填、空則省略該鍵。 */
 export type SiScheduleSetRequest = S["SiScheduleSetRequest"];
@@ -878,6 +879,20 @@ export type ResearchReinitResult = { flow: ResearchFlow; fsmProject?: string; fs
 export type ResearchAllowlistRequest = { listKind: "FETCH" | "WEB"; host: string; layer: string; purpose: string; tosNote: string; minIntervalSeconds: number; tosAcknowledged: boolean };
 /** `PATCH …/allowlist/<id>`：只准改 `enabled`（本文含其他欄位回 422）。 */
 export type ResearchAllowlistPatch = { enabled: boolean };
+
+// ── 研究來源單一化（TCS-ResearchRegistry-20261110；API_Contract_ResearchToPRD §5A）──
+/** 展開設定；沒有展開為 null（schema 把 `expand` 標成物件，實際回 null，這裡以聯集如實反映）。 */
+export type WatchSourceExpand = { mode: string; prefix: string; max: number };
+/** 自我進化追蹤來源（研究來源設定的網址層）。 */
+export type WatchSource = Omit<S["WatchSourceDto"], "expand"> & { expand: WatchSourceExpand | null };
+/** `POST …/research/watch-sources`：操作人取 JWT subject，本文沒有 addedBy；`expand` 恆在本文內（null＝無展開）。 */
+export type WatchSourceRequest = Omit<S["ResearchWatchSourceRequest"], "expand"> & { expand: WatchSourceExpand | null };
+/** `PATCH …/research/watch-sources/{slug}`：只准 `enabled`。 */
+export type WatchSourcePatch = { enabled: boolean };
+/** `GET /api/v1/si/research-registry`：Console 登記快照與自我進化鏡像的同步狀態。 */
+export type RegistrySyncStatus = S["ResearchRegistrySyncStatus"];
+/** `POST /api/v1/si/research-registry/sync` 的結果（200 `unchanged`／201 `written`）。 */
+export type RegistrySyncResult = S["ResearchRegistrySyncResult"];
 /** 取消、封存、復原的回應本文契約未定形狀（只保證 200）：呼叫端只看成功與否。 */
 export type ResearchActionResult = Record<string, unknown>;
 

@@ -264,4 +264,14 @@ public final class ErrorReasons {
     public static final String RESEARCH_TAG_EXISTS = "tag_exists";
     /** 交付的某一步失敗（502；{@code details.failure_step}；Bridge 回、console-api 原樣透傳）。 */
     public static final String RESEARCH_DELIVERY_STEP_FAILED = "delivery_step_failed";
+
+    // ── 研究來源單一化（登記）reason 家族（TCS-ResearchRegistry；契約 API_Contract_ResearchToPRD §5A.5；前端住 lib/domain/researchRegistry.ts 的 RESEARCH_REGISTRY_REASONS）──
+    // 🔴 刻意不以 RESEARCH_ 為前綴：ResearchReasonsTest 以 RESEARCH_ 前綴常數與前端 RESEARCH_REASONS 做集合全等並逐項要求 Architecture §11.1 列出，
+    // 加入它們須連動重凍多把鍵；獨立家族讓既有鎖零改動（SI_ 先例同型）。後端常數＝前端 RESEARCH_REGISTRY_REASONS＝契約 §5A.5 三處集合相等。
+    /** 追蹤來源 slug 已存在（409；slug 永不重用，含已停用者；{@code details.slug}；Bridge 回、console-api 逐字透傳）。 */
+    public static final String REGISTRY_WATCH_SOURCE_EXISTS = "watch_source_exists";
+    /** 追蹤來源的 host 不在有效網域清單（422；{@code details.host}；Bridge 回、逐字透傳）。 */
+    public static final String REGISTRY_HOST_NOT_ALLOWED = "host_not_allowed";
+    /** 登記快照或稽核檔超過上限（422；{@code details.what}＝{@code registry_text}｜{@code audit_file}、{@code limit}、{@code size}）。 */
+    public static final String REGISTRY_TOO_LARGE = "registry_too_large";
 }

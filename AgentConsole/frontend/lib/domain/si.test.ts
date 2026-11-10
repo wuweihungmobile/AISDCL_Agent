@@ -346,8 +346,40 @@ describe("lib/domain/si.ts 的補充單元（身分鍵、選項、提案與事�
     expect(prettyJson({ a: 1 })).toBe('{\n  "a": 1\n}');
   });
 
-  it("SI_STATUS_KNOWN_KEYS 恰為 R13 列的九個已知鍵加 P4 的 schedule（其餘鍵走 si-status-extra）", () => {
-    expect([...SI_STATUS_KNOWN_KEYS]).toEqual(["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile", "schedule"]);
+  it("SI_STATUS_KNOWN_KEYS 恰為 R13 列的九個已知鍵加 P4 的 schedule、加研究來源單一化的三鍵（其餘鍵走 si-status-extra）", () => {
+    expect([...SI_STATUS_KNOWN_KEYS]).toEqual([
+      "eventsDetected",
+      "unavailable",
+      "openRuns",
+      "pendingProps",
+      "suspended",
+      "cooldowns",
+      "skipReasons",
+      "capacity",
+      "frictionReconcile",
+      "schedule",
+      "researchFetchMax",
+      "researchRegistry",
+      "backtest",
+    ]);
+  });
+
+  it("AT_965_9_2 SiWriteKind 六值：src-registry 標籤為「研究來源同步」，入帳指令為 registry-ingest（與根層 patrol 同動詞同旗標；其餘五種逐字不變）", () => {
+    expect(Object.keys(SI_WRITE_KIND_LABELS).sort()).toEqual(["decide", "obs-add", "obs-close", "run-request", "sched-set", "src-registry"]);
+    expect(SI_WRITE_KIND_LABELS["src-registry"]).toBe("研究來源同步");
+    const ref = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const expected = `python tools/selfimproving.py registry-ingest --carrier console --audit-ref ${ref}`;
+    expect(ingestCommands("src-registry", null, ref)).toEqual({ powershell: expected, posix: expected });
+    expect(ingestCommands("src-registry", "ignored", ref).posix, "subject 不進指令").toBe(expected);
+    expect(expected).not.toContain("registry-sync");
+    // 其餘五種既有指令不變
+    expect(ingestCommands("decide", "PROP-SI-004", ref).posix).toBe(`python tools/selfimproving.py decide PROP-SI-004 --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("obs-add", null, ref).posix).toBe(`python tools/selfimproving.py obs-add --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("obs-close", "OBS-SI-005", ref).posix).toBe(`python tools/selfimproving.py obs-close --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("sched-set", null, ref).posix).toBe(`python tools/selfimproving.py sched set --carrier console --audit-ref ${ref}`);
+    expect(ingestCommands("run-request", null, ref).posix).toBe(
+      `python tools/selfimproving.py run-open --trigger a --carrier console --audit-ref ${ref} --coord console_audit/${ref}.json --by console`,
+    );
   });
 });
 

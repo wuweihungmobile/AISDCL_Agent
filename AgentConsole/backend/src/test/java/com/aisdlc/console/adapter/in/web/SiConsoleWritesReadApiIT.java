@@ -575,4 +575,37 @@ class SiConsoleWritesReadApiIT extends AbstractSiWriteIT {
         assertThat(list(resp.read("$.data.orphans"))).as("(e) 那一筆帳本項出現在 orphans").singleElement()
                 .satisfies(orphan -> assertThat(orphan).containsEntry("auditRef", eOrphan).containsEntry("kind", "decide").containsEntry("subject", PROP5));
     }
+
+    // ── 研究來源單一化 AT-965-7-5：對帳讀面認得 src-registry（research.registry 事件）──────────────────────────────
+
+    @Test
+    void AT_965_7_5_theReconcileViewKnowsTheSrcRegistryKindAndItsLedgerEvent() {
+        String ingestedRef = ref("c7", 1);
+        String pendingRef = ref("c7", 2);
+        String orphanRef = ref("c7", 3);
+        String foreignRef = ref("c7", 4);
+        String digest = "sha256:" + "a".repeat(64);
+        insertAudit(ingestedRef, "src-registry", null, digest, "{\"registry_text\":\"x\"}", "2026-11-10T09:00:00+08:00");
+        insertAudit(pendingRef, "src-registry", null, digest, "{\"registry_text\":\"x\"}", "2026-11-10T09:10:00+08:00");
+        Map<String, Object> consoleEvent = event(7, "research.registry", "console", ingestedRef, null, null);
+        consoleEvent.put("registry_sha256", digest);
+        Map<String, Object> orphanEvent = event(8, "research.registry", "console", orphanRef, null, null);
+        orphanEvent.put("registry_sha256", digest);
+        Map<String, Object> foreignEvent = event(9, "research.registry", "cli", foreignRef, null, null);
+        foreignEvent.put("registry_sha256", digest);
+        MINI.si.payloads.put("events", export("events", List.of(consoleEvent, orphanEvent, foreignEvent), false, null));
+        MINI.si.payloads.put("observations", export("observations", List.of(), false, null));
+
+        Resp resp = read(viewer(), "");
+
+        assertThat(resp.status()).isEqualTo(200);
+        assertThat(resp.<String>read("$.data.reconcile.status")).isEqualTo("ok");
+        assertThat(itemOf(resp, ingestedRef)).containsEntry("kind", "src-registry").containsEntry("ingested", true).containsEntry("subjectId", null)
+                .containsEntry("digest", digest);
+        assertThat(itemOf(resp, pendingRef)).containsEntry("kind", "src-registry").containsEntry("ingested", false);
+        assertThat(list(resp.read("$.data.orphans"))).as("carrier 為 console 而表內沒有對應列者＝orphan；carrier 非 console 者不是").singleElement()
+                .satisfies(orphan -> assertThat(orphan).containsEntry("auditRef", orphanRef).containsEntry("kind", "src-registry").containsEntry("subject", null));
+        assertThat(java.util.Arrays.stream(com.aisdlc.console.domain.model.si.SiWriteKind.values()).map(com.aisdlc.console.domain.model.si.SiWriteKind::wire).toList())
+                .as("wire() 清單為六值").containsExactly("decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry");
+    }
 }

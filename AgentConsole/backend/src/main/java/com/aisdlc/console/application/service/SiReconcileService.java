@@ -128,6 +128,8 @@ public class SiReconcileService implements SiReconcileUseCase {
                 // P4（契約 P2c §4.2）：排程設定入帳為 sched.set；立即啟動入帳為 run.open，已有未關運轉時改記 sched.skip（請求已被消耗，同樣算已入帳）
                 case "sched.set" -> "sched-set";
                 case "run.open", "sched.skip" -> "run-request";
+                // 研究來源單一化：登記入帳為 research.registry（無對象，subject 恆 null；事件帶 audit_ref 與 registry_sha256）
+                case "research.registry" -> "src-registry";
                 default -> null;
             };
             if (wire == null) {
@@ -137,7 +139,7 @@ public class SiReconcileService implements SiReconcileUseCase {
             if ("console".equals(event.get("carrier"))) {
                 String subject = switch (wire) {
                     case "decide" -> firstText(event.get("prop"), event.get("run"));
-                    case "sched-set", "run-request" -> null;        // 兩種新 kind 沒有對象（subject 恆 null）
+                    case "sched-set", "run-request", "src-registry" -> null;        // 這三種 kind 沒有對象（subject 恆 null）
                     default -> text(event.get("obs"));
                 };
                 consoleEntries.putIfAbsent(ref, new Orphan(ref, wire, subject));

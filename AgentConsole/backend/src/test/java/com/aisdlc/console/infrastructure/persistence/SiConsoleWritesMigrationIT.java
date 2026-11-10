@@ -126,7 +126,7 @@ class SiConsoleWritesMigrationIT {
         List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history "
                 + "where version is not null order by installed_rank");
         assertThat(history).extracting(row -> row.get("version")).containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23");
+                "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25");
         assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
         assertThat(flyway(database, null).migrate().migrationsExecuted).as("再跑一次沒有新遷移").isZero();
     }
@@ -284,5 +284,67 @@ class SiConsoleWritesMigrationIT {
                 .isInstanceOf(DataAccessException.class);
 
         assertThat(jdbc.queryForObject("select count(*) from console.si_console_writes", Integer.class)).as("表內仍恰一列").isEqualTo(1);
+    }
+
+    // ── 研究來源單一化（V25；TCS-ResearchRegistry AT-965-2-1～2-3）：kind 放寬為六值，欄寬與觸發器不變 ─────────────────────────
+
+    private static final List<String> SIX_KINDS = List.of("decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry");
+
+    private static void insertRegistry(JdbcTemplate jdbc, UUID ref, String kind, String digest) {
+        jdbc.update("insert into console.si_console_writes (audit_ref, kind, \"user\", role, \"time\", subject_id, digest, body, key_id, mac) "
+                + "values (?, ?, 'admin', 'ADMIN', '2026-11-10T01:00:00Z', null, ?, ?, ?, ?)", ref, kind, digest, "{\"registry_text\":\"{}\\n\"}", KEY_ID, MAC);
+    }
+
+    @Test
+    void AT_965_2_1_theKindCheckHasExactlySixValuesAndTheNameAndWidthStay() {
+        JdbcTemplate jdbc = migratedDatabase();
+        Map<String, String> checks = kindChecks(jdbc);
+        assertThat(checks).as("恰一條 kind 的 CHECK、約束名不變").hasSize(1).containsKey("si_console_writes_kind_check");
+        SIX_KINDS.forEach(kind -> assertThat(checks.get("si_console_writes_kind_check")).contains("'" + kind + "'"));
+        assertThat(jdbc.queryForObject("select character_maximum_length from information_schema.columns where table_schema = 'console' "
+                + "and table_name = 'si_console_writes' and column_name = 'kind'", Integer.class)).isEqualTo(12);
+        assertThat(SIX_KINDS.stream().mapToInt(String::length).max().orElseThrow()).as("六值的最大字元長度不超過欄寬 12（再加 kind 須先放寬欄寬）").isEqualTo(12);
+        for (String kind : SIX_KINDS) {
+            insertKind(jdbc, UUID.randomUUID(), kind);
+        }
+        for (String bad : List.of("bogus", "src-registry-x", "SRC-REGISTRY")) {
+            assertThatThrownBy(() -> insertKind(jdbc, UUID.randomUUID(), bad)).as(bad).isInstanceOf(DataAccessException.class);
+        }
+    }
+
+    @Test
+    void AT_965_2_2_aRegistryRowCanBeWrittenAndStillCannotBeChanged() {
+        JdbcTemplate jdbc = migratedDatabase();
+        UUID ref = UUID.randomUUID();
+        String digest = "sha256:" + "c".repeat(64);
+        insertRegistry(jdbc, ref, "src-registry", digest);
+        assertThatThrownBy(() -> jdbc.update("update console.si_console_writes set kind = 'decide' where audit_ref = ?", ref)).hasMessageContaining("不可改");
+        assertThatThrownBy(() -> jdbc.update("update console.si_console_writes set digest = ? where audit_ref = ?", "sha256:" + "d".repeat(64), ref))
+                .hasMessageContaining("不可改");
+        assertThatThrownBy(() -> jdbc.update("update console.si_console_writes set body = '{}' where audit_ref = ?", ref)).hasMessageContaining("不可改");
+        assertThat(jdbc.update("update console.si_console_writes set subject_id = 'X' where audit_ref = ?", ref)).as("subject_id 由 NULL 填值允許（沿 V13 規則）").isEqualTo(1);
+        assertThatThrownBy(() -> insertRegistry(jdbc, UUID.randomUUID(), "src-registry", "sha256:" + "c".repeat(65))).as("digest 為 72 字元被欄寬擋")
+                .isInstanceOf(DataAccessException.class);
+        assertThat(jdbc.update("delete from console.si_console_writes where audit_ref = ?", ref)).as("DELETE 允許（補償路徑）").isEqualTo(1);
+    }
+
+    @Test
+    void AT_965_2_3_anUpgradeFromV23LeavesTheFiveExistingKindsRowForRowUntouched() {
+        String database = createDatabase();
+        flyway(database, "23").migrate();
+        JdbcTemplate jdbc = jdbcOf(database);
+        for (String kind : FIVE_KINDS) {
+            insertKind(jdbc, UUID.randomUUID(), kind);
+        }
+        String before = jdbc.queryForObject("select string_agg(audit_ref::text || kind || body || key_id || mac, ';' order by audit_ref) "
+                + "from console.si_console_writes", String.class);
+        flyway(database, null).migrate();
+        assertThat(jdbc.queryForObject("select string_agg(audit_ref::text || kind || body || key_id || mac, ';' order by audit_ref) "
+                + "from console.si_console_writes", String.class)).isEqualTo(before);
+        List<Map<String, Object>> history = jdbc.queryForList("select version, success from console.flyway_schema_history where version is not null "
+                + "order by installed_rank");
+        assertThat(history.subList(23, 25)).as("V24、V25 依序成功套用（位置不受日後更新的遷移影響）").extracting(row -> row.get("version")).containsExactly("24", "25");
+        assertThat(history).extracting(row -> row.get("success")).containsOnly(true);
+        assertThat(flyway(database, null).migrate().migrationsExecuted).isZero();
     }
 }

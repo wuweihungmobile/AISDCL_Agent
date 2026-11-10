@@ -274,6 +274,16 @@ async def si_run_request(request: Request,
                                      kind="run-request", path_id=None, id_pattern=None)
 
 
+@router.post("/registry:sync", status_code=201)
+async def si_registry_sync(request: Request,
+                           x_bridge_token: str | None = Header(default=None)) -> JSONResponse:
+    """研究來源登記同步的稽核檔落地（`research.registry` 的入帳來源）；外層 `subject` 須為 null、
+    `kind` 須為 `src-registry`。Bridge 不解讀 `body`（`registry_text` 與其 sha 原樣躺在內層）；
+    入帳由主機端 CLI 完成。"""
+    return await _store_signed_audit(request, x_bridge_token, verb="registry-sync",
+                                     kind="src-registry", path_id=None, id_pattern=None)
+
+
 @router.post("/observations:validate")
 async def si_observation_validate(request: Request) -> JSONResponse:
     """唯讀預檢（`obs-add --dry-run`）：不需權杖、不看寫入設定、不落檔。

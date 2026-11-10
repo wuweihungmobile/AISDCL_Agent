@@ -322,7 +322,11 @@ def test_D_76_capabilities_carry_the_contract_keys_and_fetch_hosts_follow_the_ad
     `fetch_hosts`。`fetch_hosts`＝有效 FETCH 清單：部署基底，加上 ADMIN 新增且啟用中的條目
     （停用即消失；WEB 條目不算）；無資料庫時仍 200、回部署基底。"""
     cfg = env.settings
-    base = list(cfg.research_fetch_allowlist)
+    env_only = list(cfg.research_fetch_allowlist)
+    seeded = ["code.claude.com", "developers.openai.com", "github.com", "www.anthropic.com"]
+    base = [*env_only, *seeded]          # V24 另種四個 FETCH 網域（ADMIN 條目，依 host 序）
+    with_docs = [*env_only, "code.claude.com", "developers.openai.com", "docs.example.com",
+                 "github.com", "www.anthropic.com"]
     cap = env.get("/research/capabilities").json()
     assert cap["sdd_root"] == str(cfg.sdd_root) and cap["research_root"] == str(cfg.research_root)
     assert cap["scaffold_root"] is None, "軌道 B（BRIDGE_SCAFFOLD_ROOT）屬 P1：P0 一律停用"
@@ -334,17 +338,17 @@ def test_D_76_capabilities_carry_the_contract_keys_and_fetch_hosts_follow_the_ad
     web = env.post("/research/allowlist", {
         "list_kind": "WEB", "host": "blog.example.org", "layer": "INDUSTRY", "added_by": ADMIN})
     assert web.status_code == 201, web.text
-    assert env.get("/research/capabilities").json()["fetch_hosts"] == [*base, "docs.example.com"]
+    assert env.get("/research/capabilities").json()["fetch_hosts"] == with_docs
     off = env.patch(f"/research/allowlist/{added.json()['id']}",
                     {"enabled": False, "disabled_by": ADMIN})
     assert off.status_code == 200
     assert env.get("/research/capabilities").json()["fetch_hosts"] == base, "停用即消失"
     on = env.patch(f"/research/allowlist/{added.json()['id']}", {"enabled": True})
     assert on.status_code == 200
-    assert env.get("/research/capabilities").json()["fetch_hosts"] == [*base, "docs.example.com"]
+    assert env.get("/research/capabilities").json()["fetch_hosts"] == with_docs
     nodb = make_env(fake, None).get("/research/capabilities")
     assert nodb.status_code == 200 and nodb.json()["db"] is False
-    assert nodb.json()["fetch_hosts"] == base
+    assert nodb.json()["fetch_hosts"] == env_only
 
 
 # ══ AT-960-3-1：合法建立 ════════════════════════════════════════════════════════════════════
@@ -822,7 +826,9 @@ def test_AT_960_8_9_the_allowlist_is_env_base_plus_enabled_admin_entries(env: En
                    if e["source"] == "ENV"}
     assert env_entries == {"export.arxiv.org": 3, "arxiv.org": 3, "api.semanticscholar.org": 3,
                            "api.github.com": 60, "api.stackexchange.com": 3}
-    assert got["effective"] == {"FETCH": list(env_entries), "WEB": []}
+    seeded = ["code.claude.com", "developers.openai.com", "github.com", "www.anthropic.com"]
+    assert got["effective"] == {"FETCH": [*env_entries, *seeded], "WEB": []}, \
+        "V24 種子：部署基底＋四個 FETCH 網域（WEB 零新增）"
     assert "reddit" not in json.dumps(got).lower()
     events = env.rdb.count("research_events")
     audit = len([e for e in _audit_lines(env) if e["result"] == "ok"])
@@ -1065,7 +1071,8 @@ def test_AT_960_8_9_the_fetch_layer_builds_its_list_from_the_endpoint_rows_and_v
     assert list(after.hosts) == env.get("/research/allowlist").json()["effective"]["FETCH"]
     assert [row["host"] for row in after.snapshot()] == [
         "export.arxiv.org", "arxiv.org", "api.semanticscholar.org", "api.github.com",
-        "api.stackexchange.com", "export.arxiv.org"], "快照逐條列出基底與啟用中的 ADMIN 條目"
+        "api.stackexchange.com", "code.claude.com", "developers.openai.com", "export.arxiv.org",
+        "github.com", "www.anthropic.com"], "快照逐條列出基底與啟用中的 ADMIN 條目（含 V24 種子）"
     assert "reddit.com" not in after.hosts, "Reddit 預設不在任何清單"
 
 
@@ -1147,7 +1154,10 @@ def test_AT_960_8_9_the_stage_snapshot_follows_the_effective_allowlist_entry_by_
     base = {("FETCH", host, "ENV") for host in rig.settings.research_fetch_allowlist}
     assert len(base) == 5 and not any("reddit" in host for _k, host, _s in base)
     orch.run_stage(rig, rid, "research")
-    assert snapshot() == {*base, ("WEB", "base.example.org", "ENV")}, "預設：五個基底主機＋環境 WEB"
+    v24_hosts = ("code.claude.com", "developers.openai.com", "github.com", "www.anthropic.com")
+    seeded = {("FETCH", h, "ADMIN") for h in v24_hosts}      # V24 的四個種子網域
+    assert snapshot() == {*base, *seeded, ("WEB", "base.example.org", "ENV")}, \
+        "預設：五個基底主機＋四個種子網域＋環境 WEB"
     audit = rig.settings.engine_workspace / "_audit.jsonl"
     audits = audit.read_text(encoding="utf-8").count("\n") if audit.is_file() else 0
     events = rig.rdb.count("research_events")

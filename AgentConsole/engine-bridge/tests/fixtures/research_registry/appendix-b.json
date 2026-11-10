@@ -1,0 +1,64 @@
+{
+  "hosts": [
+    {
+      "host": "export.arxiv.org",
+      "layer": null,
+      "list_kind": "FETCH",
+      "min_interval_seconds": 3,
+      "source": "ENV"
+    },
+    {
+      "host": "www.anthropic.com",
+      "layer": "INDUSTRY",
+      "list_kind": "FETCH",
+      "min_interval_seconds": 5,
+      "source": "ADMIN"
+    }
+  ],
+  "schema_rev": 1,
+  "watch": [
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（SI research_sources.json 匯入）",
+      "disabled_at": "2026-11-10T00:00:00+00:00",
+      "disabled_by": "migration:V24（以 anthropic-research 取代）",
+      "enabled": false,
+      "expand": null,
+      "extract": "最新 5 篇文章的標題與日期（逐字）",
+      "id": "anthropic-engineering",
+      "kind": "blog",
+      "layer": "INDUSTRY",
+      "url": "https://www.anthropic.com/engineering"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（研究來源單一化種子）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": {
+        "max": 3,
+        "mode": "sitemap",
+        "prefix": "/research/"
+      },
+      "extract": "最新 3 篇研究文章的全文（逐字）",
+      "id": "anthropic-research",
+      "kind": "sitemap",
+      "layer": "INDUSTRY",
+      "url": "https://www.anthropic.com/sitemap.xml"
+    },
+    {
+      "added_at": "2026-11-10T00:00:00+00:00",
+      "added_by": "migration:V24（研究來源單一化種子）",
+      "disabled_at": null,
+      "disabled_by": null,
+      "enabled": true,
+      "expand": null,
+      "extract": "最新 10 篇論文的標題、作者、日期與摘要首句（逐字）",
+      "id": "arxiv-agents",
+      "kind": "search",
+      "layer": "ACADEMIC",
+      "url": "https://export.arxiv.org/api/query?search_query=%28abs:%22self-improving%22+OR+abs:%22self-evolving%22+OR+abs:%22agent+memory%22%29+AND+%28cat:cs.AI+OR+cat:cs.CL+OR+cat:cs.SE%29&sortBy=submittedDate&sortOrder=descending&max_results=10"
+    }
+  ]
+}

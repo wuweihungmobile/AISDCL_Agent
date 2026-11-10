@@ -456,6 +456,22 @@ class RbacIT extends AbstractExecutionIT {
         return rules;
     }
 
+    /** AT-965-5-1：追蹤來源的兩條 ADMIN 規則置於通用規則之前（先中者定案）；同步端點由既有的 /api/v1/si/** ADMIN 規則涵蓋、不另開 matcher。 */
+    @Test
+    void AT_965_5_1_theTwoWatchSourceAdminRulesPrecedeTheGenericRuleAndTheSyncEndpointNeedsNoMatcherOfItsOwn() {
+        List<Rule> rules = authorizationRules();
+        Rule generic = rules.stream().filter(rule -> rule.matcher().equals("\"/api/v1/**\"")).findFirst().orElseThrow();
+        List<Rule> watch = rules.stream().filter(rule -> rule.matcher().contains("/api/v1/research/watch-sources")).toList();
+        assertThat(watch).extracting(Rule::matcher).containsExactly("HttpMethod.POST, \"/api/v1/research/watch-sources\"",
+                "HttpMethod.PATCH, \"/api/v1/research/watch-sources/*\"");
+        assertThat(watch).extracting(Rule::role).containsOnly("hasRole(\"ADMIN\")");
+        assertThat(watch).allSatisfy(rule -> assertThat(rule.line()).as("置於通用 /api/v1/** 規則之前").isLessThan(generic.line()));
+        assertThat(rules.stream().filter(rule -> rule.matcher().contains("research-registry"))).as("同步端點不另開 matcher（沿 POST /api/v1/si/**）").isEmpty();
+        Rule si = rules.stream().filter(rule -> rule.matcher().equals("HttpMethod.POST, \"/api/v1/si/**\"")).findFirst().orElseThrow();
+        assertThat(si.role()).isEqualTo("hasRole(\"ADMIN\")");
+        assertThat(si.line()).isLessThan(generic.line());
+    }
+
     /** AT-960-5-3：研究 ADMIN 規則逐條置於通用規則之前；route/preview 不在其中；既有規則的內容與次序不變。 */
     @Test
     void AT_960_5_3_everyResearchAdminRuleSitsBeforeTheGenericRuleAndTheExistingRulesKeepTheirOrder() {
@@ -472,7 +488,10 @@ class RbacIT extends AbstractExecutionIT {
                 "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/tag\"",
                 "HttpMethod.POST, \"/api/v1/research/projects/*/delivery/pr\"",
                 "HttpMethod.POST, \"/api/v1/research/allowlist\"",
-                "HttpMethod.PATCH, \"/api/v1/research/allowlist/*\"");
+                "HttpMethod.PATCH, \"/api/v1/research/allowlist/*\"",
+                // 研究來源單一化（TCS-ResearchRegistry W-R5）：追蹤來源的新增與停用／啟用
+                "HttpMethod.POST, \"/api/v1/research/watch-sources\"",
+                "HttpMethod.PATCH, \"/api/v1/research/watch-sources/*\"");
         assertThat(research).as("每條研究規則都是 ADMIN 專屬").extracting(Rule::role).containsOnly("hasRole(\"ADMIN\")");
         assertThat(research).as("每條研究規則的行號都小於通用 /api/v1/** 規則（先中者定案）").allSatisfy(rule -> assertThat(rule.line()).isLessThan(generic.line()));
         assertThat(research).as("…/reinit 與 …/route/preview 都不在 ADMIN 規則內").noneMatch(rule -> rule.matcher().contains("reinit") || rule.matcher().contains("preview"));

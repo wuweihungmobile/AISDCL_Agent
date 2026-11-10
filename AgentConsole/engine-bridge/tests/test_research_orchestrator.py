@@ -246,7 +246,9 @@ def test_AT_960_7_4_research_run_row_snapshot_and_no_execution_tables_touched(
     assert all(len(run[k]) == 64 for k in ("playbook_sha256", "config_sha256"))
     snapshot = {(e["list_kind"], e["host"], e["source"]) for e in run["allowlist_snapshot"]}
     base = {("FETCH", h, "ENV") for h in rig.settings.research_fetch_allowlist}
-    assert snapshot == {*base, ("WEB", "base.example.org", "ENV"),
+    seeded = {("FETCH", h, "ADMIN") for h in ("www.anthropic.com", "github.com", "code.claude.com",
+                                              "developers.openai.com")}      # V24 的四個種子網域
+    assert snapshot == {*base, *seeded, ("WEB", "base.example.org", "ENV"),
                         ("WEB", "blog.example.org", "ADMIN")}
     statuses = [e["payload"]["status"] for e in events(rig, rid, "research.run")
                 if e["payload"]["stageRunId"] == str(run["id"])]

@@ -156,6 +156,38 @@ class ResearchArchTest {
         assertThat(v19Write.matcher("UPDATE console.research_scr set status = 'X'").find()).as("掃描器負控").isTrue();
     }
 
+    // ── 研究來源單一化（TCS-ResearchRegistry AT-965-5-E-1）──────────────────────────────────────
+
+    /** 對 {@code target} 型別中名稱符合 {@code method} 的方法的任何存取（呼叫、方法參照）的起點類別簡名。 */
+    private static java.util.Set<String> callersOf(JavaClasses classes, Class<?> target, String method) {
+        return classes.stream().flatMap(c -> c.getAccessesFromSelf().stream())
+                .filter(a -> a.getTargetOwner().getName().equals(target.getName()) && a.getName().equals(method))
+                .map(a -> a.getOriginOwner().getSimpleName()).collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+    }
+
+    @Test
+    void AT_965_5_E_1_theWatchSourceBridgeMethodsHaveOnlyTheirOwnCallersAndConsoleApiNeverWritesTheTable() throws IOException {
+        JavaClasses classes = mainClasses();
+        Class<?> bridge = com.aisdlc.console.application.port.out.ResearchBridge.class;
+        for (String method : List.of("watchSources", "addWatchSource", "patchWatchSource")) {
+            assertThat(callersOf(classes, bridge, method)).as("%s 只被 ResearchRegistryService 呼叫", method).containsExactly("ResearchRegistryService");
+        }
+        assertThat(callersOf(classes, bridge, "registry")).as("registry() 只被同步服務（僅讀取）呼叫").containsExactly("SiConsoleWriteService");
+        Pattern tableWrite = Pattern.compile("(?i)\\b(insert\\s+into|update|delete\\s+from|merge\\s+into|truncate(\\s+table)?)\\s+console\\.research_watch_sources\\b");
+        List<String> hits = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(Path.of("src", "main", "java"))) {
+            for (Path path : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                if (tableWrite.matcher(Files.readString(path, StandardCharsets.UTF_8)).find()) {
+                    hits.add(path.toString());
+                }
+            }
+        }
+        assertThat(hits).as("console-api 對 research_watch_sources 零寫入（含 persistence.research 套件）").isEmpty();
+        assertThat(tableWrite.matcher("UPDATE console.research_watch_sources set enabled = false").find()).as("掃描器負控").isTrue();
+        assertThat(researchPersistenceSources()).as("掃描範圍非空").isNotEmpty();
+        researchPersistenceSources().forEach((file, source) -> assertThat(writeViolations(file, source)).as(file).isEmpty());
+    }
+
     // ── PKG-API-P2（AT-962-26-1、26-4）──────────────────────────────────────────────────────
 
     @Test

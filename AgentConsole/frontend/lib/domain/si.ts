@@ -61,8 +61,67 @@ export const SI_REASONS = {
 /** 模組桶選項的顯示次序（只管排序，不管歸屬：比對恆用資料自帶的 `buckets` 成員關係）；表外的值依出現序附在後面。 */
 export const BUCKET_DISPLAY_ORDER = ["SelfImproving", "AutoClaude", "AISDLC_SDD", "AgentConsole", "根層", "未分類"] as const;
 
-/** `status` 單項的已知鍵（R13）；表外的鍵一律原樣列在 `si-status-extra`，不丟欄位。 */
-export const SI_STATUS_KNOWN_KEYS = ["eventsDetected", "unavailable", "openRuns", "pendingProps", "suspended", "cooldowns", "skipReasons", "capacity", "frictionReconcile", "schedule"] as const;
+/**
+ * `status` 單項的已知鍵（R13）；表外的鍵一律原樣列在 `si-status-extra`，不丟欄位。
+ * 後三個（`researchFetchMax`、`researchRegistry`、`backtest`；TCS-ResearchRegistry AT-965-9-5）是根層 `research_fetch_max`／`research_registry`／`backtest` 經 backend
+ * snake_case→camelCase 對映後的鍵名（巢狀鍵同樣轉換：`watchEnabled`、`registrySha256`、`casesVersion`…），各有具名欄位。
+ */
+export const SI_STATUS_KNOWN_KEYS = [
+  "eventsDetected",
+  "unavailable",
+  "openRuns",
+  "pendingProps",
+  "suspended",
+  "cooldowns",
+  "skipReasons",
+  "capacity",
+  "frictionReconcile",
+  "schedule",
+  "researchFetchMax",
+  "researchRegistry",
+  "backtest",
+] as const;
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const shaHead = (v: unknown): string | null => (typeof v === "string" ? v.replace(/^sha256:/, "").slice(0, 12) : null);
+const UNMEASURED = "量不到";
+const NONE_YET = "尚無";
+
+/**
+ * 狀態橫幅「研究來源」欄（AT-965-9-5）：`研究來源：啟用 N／上限 M；最近同步 seq S（sha 前 12 碼）`。
+ * `N`＝`researchRegistry.watchEnabled`、`M`＝`researchFetchMax`（只顯示鏡像值，沒有任何預設數字）、`S`＝`researchRegistry.seq`。
+ * 鍵值為 null＝「尚無」；鍵缺席或型別不符＝「量不到」（不顯示成「尚無」或 0）。只呈現 SI 鏡像的事實，不判斷 synced。
+ */
+export function researchSourcesStatusText(item: Record<string, unknown>): string {
+  const registry = item.researchRegistry;
+  let enabled = UNMEASURED;
+  let synced = UNMEASURED;
+  if (registry === null) {
+    enabled = NONE_YET;
+    synced = NONE_YET;
+  } else if (isPlainRecord(registry)) {
+    const sha = shaHead(registry.registrySha256);
+    if (isCount(registry.watchEnabled)) enabled = String(registry.watchEnabled);
+    if (isCount(registry.seq) && sha !== null) synced = `seq ${registry.seq}（${sha}）`;
+  }
+  const max = item.researchFetchMax;
+  const limit = max === null ? NONE_YET : isCount(max) && max > 0 ? String(max) : UNMEASURED;
+  return `研究來源：啟用 ${enabled}／上限 ${limit}；最近同步 ${synced}`;
+}
+
+/** 狀態橫幅「反事實回測」欄（AT-965-9-5）：`反事實回測：案例集 vV（sha 前 12 碼）；hit@3＝H／N 案、污染 C`；null＝「尚無」；缺鍵或型別不符＝「量不到」。 */
+export function backtestStatusText(item: Record<string, unknown>): string {
+  const bt = item.backtest;
+  if (bt === null) return `反事實回測：${NONE_YET}`;
+  if (isPlainRecord(bt)) {
+    const sha = shaHead(bt.casesSha256);
+    if (isCount(bt.casesVersion) && sha !== null && isCount(bt.hit3) && isCount(bt.n) && isCount(bt.contaminated)) {
+      return `反事實回測：案例集 v${bt.casesVersion}（${sha}）；hit@3＝${bt.hit3}／${bt.n} 案、污染 ${bt.contaminated}`;
+    }
+  }
+  return `反事實回測：${UNMEASURED}`;
+}
 
 /** `status` 內「量不到」物件的標記值：`{ status: "NOT-EVALUABLE", reason }`。 */
 export const NOT_EVALUABLE = "NOT-EVALUABLE";
@@ -772,12 +831,21 @@ export function ingestCommands(kind: SiWriteKind, subject: string | null | undef
         ? `${base} sched set ${tail}`
         : kind === "run-request"
           ? `${base} run-open --trigger a ${tail} --coord console_audit/${auditRef}.json --by console`
-          : `${base} ${kind} ${tail}`;
+          : kind === "src-registry"
+            ? `${base} registry-ingest ${tail}`
+            : `${base} ${kind} ${tail}`;
   return { powershell: command, posix: command };
 }
 
-/** 五個寫入種類的人話；鍵集合即 `SiWriteKind` 的值域（Record 型別保證不漏）。 */
-export const SI_WRITE_KIND_LABELS: Readonly<Record<SiWriteKind, string>> = { decide: "決定", "obs-add": "新增觀察", "obs-close": "關閉觀察", "sched-set": "排程設定", "run-request": "立即啟動" };
+/** 六個寫入種類的人話；鍵集合即 `SiWriteKind` 的值域（Record 型別保證不漏）。 */
+export const SI_WRITE_KIND_LABELS: Readonly<Record<SiWriteKind, string>> = {
+  decide: "決定",
+  "obs-add": "新增觀察",
+  "obs-close": "關閉觀察",
+  "sched-set": "排程設定",
+  "run-request": "立即啟動",
+  "src-registry": "研究來源同步",
+};
 
 /** 寫入種類的人話（畫面上與原值並列，不取代原值）。 */
 export function siWriteKindLabel(kind: SiWriteKind): string {

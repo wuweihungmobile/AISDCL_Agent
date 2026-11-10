@@ -80,6 +80,16 @@ export const researchWorkspace: PageHelp = {
     { name: "新增", meaning: "在研究來源設定裡，把填好的網域加入允許清單。", source: "您填寫或選擇" },
     { name: "停用", meaning: "停用後，下一個研究階段的有效清單就不含這個網域。部署設定的基底條目不能停用。", source: "您填寫或選擇" },
     { name: "啟用", meaning: "重新啟用一個已停用的網域條目。", source: "您填寫或選擇" },
+    {
+      name: "追蹤來源",
+      meaning: "研究來源設定裡的第二區，列出自我進化要抓取的網址，網域要先在網域清單開放。新增或停用後會自動同步。",
+      source: "系統參數",
+    },
+    {
+      name: "同步到自我進化",
+      meaning: "把追蹤來源清單送去自我進化。內容沒變時不會重送，送出後要等主機入帳才算同步完成。",
+      source: "您填寫或選擇",
+    },
 
     // ── 第二步「規格工作室」：目錄、編輯器、預覽、版本差異 ──
     { name: "PRD 目錄", meaning: "由 PRD 的標題整理成目錄，點一項會捲到對應的章節。視窗較窄時會收成一顆圖示鈕。", source: "系統自動產生", sourceNote: "由 PRD 的標題整理出來" },
@@ -205,6 +215,8 @@ export const researchWorkspace: PageHelp = {
     "components/domain/research/TerminalPane.tsx",
     "components/domain/research/TopicPanel.tsx",
     "components/domain/research/TraceabilityTable.tsx",
+    "components/domain/research/WatchSourcesSection.tsx",
     "lib/domain/research.ts",
+    "lib/domain/researchRegistry.ts",
   ],
 };

@@ -59,6 +59,11 @@ import type {
   ResearchAllowlistEntry,
   ResearchAllowlistPatch,
   ResearchAllowlistRequest,
+  RegistrySyncResult,
+  RegistrySyncStatus,
+  WatchSource,
+  WatchSourcePatch,
+  WatchSourceRequest,
   ResearchApproveRequest,
   ResearchApproveResult,
   ResearchCapabilities,
@@ -829,6 +834,34 @@ export function addResearchAllowlistEntry(body: ResearchAllowlistRequest): Promi
 /** 停用或啟用 allowlist 條目（API-RP-22；僅 ADMIN；PATCH）：本文只准 `enabled`，含其他欄位回 422；條目不可刪。 */
 export function updateResearchAllowlistEntry(id: string, body: ResearchAllowlistPatch): Promise<ResearchAllowlistEntry> {
   return apiRequest<ResearchAllowlistEntry>(`${RESEARCH}/allowlist/${seg(id)}`, { method: "PATCH", body });
+}
+
+// ── 研究來源單一化（TCS-ResearchRegistry-20261110 AT-965-9-4；契約 §5A）──────────────────────────────────────────────
+// 三個追蹤來源端點（研究側）加兩個同步端點（SI 側）；瀏覽器只呼叫 console-api。操作人由 backend 取 JWT subject，前端不送。
+
+/** 追蹤來源清單（VIEWER 以上；含已停用，依 slug 位元組序；`hostAllowed`＝host 是否仍在有效網域清單）。 */
+export function listWatchSources(opts: Opts = {}): Promise<WatchSource[]> {
+  return apiRequest<WatchSource[]>(`${RESEARCH}/watch-sources`, { signal: opts.signal });
+}
+
+/** 新增追蹤來源（僅 ADMIN；201）：URL 原樣判定、不正規化；slug 永不重用。 */
+export function addWatchSource(body: WatchSourceRequest): Promise<WatchSource> {
+  return apiRequest<WatchSource>(`${RESEARCH}/watch-sources`, { method: "POST", body });
+}
+
+/** 停用或重新啟用追蹤來源（僅 ADMIN；PATCH）：本文只准 `enabled`；`disabledBy` 由 backend 取 JWT subject。 */
+export function patchWatchSource(slug: string, body: WatchSourcePatch): Promise<WatchSource> {
+  return apiRequest<WatchSource>(`${RESEARCH}/watch-sources/${seg(slug)}`, { method: "PATCH", body });
+}
+
+/** 登記同步狀態（VIEWER 以上）：`synced｜pending｜unsynced｜unknown`（`unknown` 帶 `unknownCause`）。 */
+export function getRegistrySyncStatus(opts: Opts = {}): Promise<RegistrySyncStatus> {
+  return apiRequest<RegistrySyncStatus>("/api/v1/si/research-registry", { signal: opts.signal });
+}
+
+/** 把登記快照同步到自我進化（ADMIN 且在 SI 寫入名單）：本文恆為 `{}`；200 `unchanged`（零副作用）／201 `written`（稽核檔已落地、待入帳）。 */
+export function postRegistrySync(): Promise<RegistrySyncResult> {
+  return apiRequest<RegistrySyncResult>("/api/v1/si/research-registry/sync", { method: "POST", body: {} });
 }
 
 // ── ResearchToPRD P1（分流、SCR、拆解；TCS-ResearchToPRD-P1-20261107 AT-961-19-5；IFACE §3.1）──────────────────────────

@@ -2,6 +2,8 @@ package com.aisdlc.console.adapter.in.web;
 
 import com.aisdlc.console.adapter.in.web.dto.ApiResult;
 import com.aisdlc.console.adapter.in.web.dto.SiCloseRequest;
+import com.aisdlc.console.adapter.in.web.dto.ResearchRegistrySyncResultResponse;
+import com.aisdlc.console.adapter.in.web.dto.ResearchRegistrySyncStatusResponse;
 import com.aisdlc.console.adapter.in.web.dto.SiConsoleWritesResponse;
 import com.aisdlc.console.adapter.in.web.dto.SiDecideRequest;
 import com.aisdlc.console.adapter.in.web.dto.SiExportResponse;
@@ -15,9 +17,13 @@ import com.aisdlc.console.application.port.in.SiReconcileUseCase;
 import com.aisdlc.console.application.port.in.SiWriteUseCase;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -216,6 +222,36 @@ public class SiController {
                     + "主機端對多餘的請求以「已有未關運轉改記 sched.skip」消化。" + WRITE_EXECUTION + WRITE_RESULT)
     public ApiResult<SiWriteReceiptResponse> requestRun(@RequestBody SiRunRequest request, Principal principal) {
         return ApiResult.created(SiWriteReceiptResponse.from(write.requestRun(principal.getName(), request.toInput())));
+    }
+
+    // ── 研究來源單一化：登記同步與同步狀態（API-SI-14、API-SI-15；同步＝僅 ADMIN；不走決定重送閘，改以「最新」冪等）──────────────
+
+    @GetMapping("/research-registry")
+    @Operation(operationId = "getSiResearchRegistry", summary = "研究來源登記的同步狀態（API-SI-14；VIEWER 以上可讀）",
+            description = "Console 的研究來源登記（網域層＋追蹤來源）與自我進化鏡像的同步狀態：synced（鏡像最新已入帳的登記 digest＝當前）｜pending（稽核檔已落地、待入帳）｜"
+                    + "unsynced（當前登記尚未同步）｜unknown（鏡像讀不到；unknownCause：scan_cap_exceeded｜si_unavailable｜bridge_unreachable｜bridge_timeout——不當成已同步或零）。"
+                    + "判定序：取 Bridge 當前快照（失敗照 502／503／504，沒有當前 digest 就沒有狀態）→ 讀鏡像 → 有最新待入帳寫入 P 時其 digest 等於當前才是 pending、否則 unsynced（即使鏡像 digest 等於當前："
+                    + "更新的待入帳寫入入帳後會覆寫鏡像）→ 沒有 P 時鏡像 digest 等於當前才是 synced。researchFetchMax 只轉鏡像值（缺席或非正整數為 null）。不回稽核 body、mac 與金鑰。")
+    public ApiResult<ResearchRegistrySyncStatusResponse> researchRegistryStatus() {
+        return ApiResult.ok(ResearchRegistrySyncStatusResponse.from(write.researchRegistryStatus()));
+    }
+
+    @PostMapping("/research-registry/sync")
+    @ApiResponses({@ApiResponse(responseCode = "200", description = "unchanged：內容沒變（零副作用）；auditRef 是已存在的那一份，kind、time、keyId 為 null",
+            content = @Content(schema = @Schema(implementation = ResearchRegistrySyncResultResponse.class))),
+            @ApiResponse(responseCode = "201", description = "written：新稽核檔已落地、待入帳（不是已同步或已生效）",
+                    content = @Content(schema = @Schema(implementation = ResearchRegistrySyncResultResponse.class)))})
+    @Operation(operationId = "postSiResearchRegistrySync", summary = "把研究來源登記同步給自我進化（API-SI-15；僅 ADMIN）",
+            description = "本文為空物件 {}。閘門序（先中者定案；序 4～6 任一拒絕＝零副作用）：角色（僅 ADMIN；403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ "
+                    + "寫入面啟用（503 si_write_disabled）→ 取 Bridge 登記快照（503 research_requires_db｜502 bridge_unreachable｜504 bridge_timeout｜422 registry_too_large，details.what=registry_text）→ "
+                    + "冪等檢查（讀 SelfImproving 鏡像：讀不到＝503 si_unavailable，details.cause；只比「最新」：有更新的待入帳寫入時其 digest 須等於當前才算 unchanged）→ "
+                    + "簽章後外層檔位元組數（超過 65536＝422 registry_too_large，details.what=audit_file）→ 簽章、寫 Console 稽核列、單次 Bridge 落檔。"
+                    + "registry_text 與 registry_sha256 逐位元組取自 Bridge 快照、原樣嵌入稽核 body（console-api 不重新序列化）。" + WRITE_EXECUTION
+                    + "201 的意思是稽核檔已落地、待入帳，不是已同步或已生效；沒有 force：未入帳的稽核檔由主機端巡邏每輪重試入帳。")
+    public ResponseEntity<ApiResult<ResearchRegistrySyncResultResponse>> syncResearchRegistry(Principal principal) {
+        ResearchRegistrySyncResultResponse result = ResearchRegistrySyncResultResponse.from(write.syncResearchRegistry(principal.getName()));
+        return "written".equals(result.outcome()) ? ResponseEntity.status(HttpStatus.CREATED).body(ApiResult.created(result))
+                : ResponseEntity.ok(ApiResult.ok(result));
     }
 
     // ── P2b：對帳讀面 ───────────────────────────────────────────────────────────────────────────

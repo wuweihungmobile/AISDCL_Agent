@@ -214,6 +214,10 @@ class MiniBridgeController {
     private ResponseEntity<Object> si(HttpServletRequest http, String logged, String payloadKey, String id) {
         bridge.record("GET " + logged);
         bridge.si.seen.add(new MiniBridge.Si.Seen(http.getRequestURI(), http.getQueryString()));
+        java.util.function.Consumer<String> readHook = bridge.si.onRead;
+        if (readHook != null) {
+            readHook.accept(logged);
+        }
         long delay = bridge.si.delayMillis;
         if (delay > 0) {
             try {
@@ -371,7 +375,8 @@ class MiniBridgeController {
             return siWrite(http, "/si/observations:validate", token, raw, true);
         }
         // P4：排程設定與立即啟動的稽核檔落地（無路徑參數；對照 routers/si.py 的 /si/schedule:set、/si/runs:request）
-        if ("schedule:set".equals(segment) || "runs:request".equals(segment)) {
+        // 研究來源單一化：登記同步的稽核檔落地（對照 routers/si.py 的 /si/registry:sync）
+        if ("schedule:set".equals(segment) || "runs:request".equals(segment) || "registry:sync".equals(segment)) {
             return siWrite(http, "/si/" + segment, token, raw, false);
         }
         return error(404, "not_found");

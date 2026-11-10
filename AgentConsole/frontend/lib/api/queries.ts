@@ -16,6 +16,11 @@ import { isRunTerminal } from "@/lib/domain/status";
 import {
   acknowledgeAlert,
   addResearchAllowlistEntry,
+  addWatchSource,
+  getRegistrySyncStatus,
+  listWatchSources,
+  patchWatchSource,
+  postRegistrySync,
   approveResearchBaseline,
   archiveResearchProject,
   cancelExecution,
@@ -202,6 +207,8 @@ import type {
   UpdateGoalRequest,
   UpdateProjectRequest,
   UpdateTaskRequest,
+  WatchSourcePatch,
+  WatchSourceRequest,
 } from "./types";
 
 export const qk = {
@@ -264,6 +271,9 @@ export const qk = {
   researchAll: ["research"] as const,
   researchCapabilities: ["research", "capabilities"] as const,
   researchAllowlist: ["research", "allowlist"] as const,
+  /** 研究來源單一化：追蹤來源清單與登記同步狀態（兩者都掛在 ["research"] 底下，但不屬任何專案）。 */
+  researchWatchSources: ["research", "watch-sources"] as const,
+  researchRegistryStatus: ["research", "registry-status"] as const,
   researchProjects: ["research", "projects"] as const,
   /** 已封存清單（`researchProjects` 的子鍵：前綴失效時兩份一起重抓） */
   researchProjectsArchived: ["research", "projects", "archived"] as const,
@@ -1505,6 +1515,40 @@ function useAllowlistWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
 
 export const useAddResearchAllowlistEntry = () => useAllowlistWrite((body: ResearchAllowlistRequest) => addResearchAllowlistEntry(body));
 export const useUpdateResearchAllowlistEntry = () => useAllowlistWrite((v: { id: string; body: ResearchAllowlistPatch }) => updateResearchAllowlistEntry(v.id, v.body));
+
+// ── 研究來源單一化（TCS-ResearchRegistry-20261110）──────────────────────────────────────────────────────────────────
+/** 追蹤來源清單（VIEWER 以上可讀；對話框開著且為 ADMIN 才需要，所以由呼叫端以 `enabled` 控制）。 */
+export function useWatchSources(enabledByCaller = true) {
+  const enabled = useEnabled(enabledByCaller);
+  return useQuery({ queryKey: qk.researchWatchSources, queryFn: ({ signal }) => listWatchSources({ signal }), enabled });
+}
+
+/** 登記同步狀態；不重試（失敗原因要讓人看到：後端自己把「量不到」編成 `unknown` 回 200，連不上才會到這裡）。 */
+export function useRegistrySyncStatus(enabledByCaller = true) {
+  const enabled = useEnabled(enabledByCaller);
+  return useQuery({ queryKey: qk.researchRegistryStatus, queryFn: ({ signal }) => getRegistrySyncStatus({ signal }), enabled, retry: false });
+}
+
+/** 追蹤來源新增、停用成功後：清單與同步狀態（登記快照變了 ⇒ `unsynced`）一併重抓。 */
+function useWatchSourceWrite<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => Promise.all([qc.invalidateQueries({ queryKey: qk.researchWatchSources }), qc.invalidateQueries({ queryKey: qk.researchRegistryStatus })]),
+  });
+}
+
+export const useAddWatchSource = () => useWatchSourceWrite((body: WatchSourceRequest) => addWatchSource(body));
+export const usePatchWatchSource = () => useWatchSourceWrite((v: { slug: string; body: WatchSourcePatch }) => patchWatchSource(v.slug, v.body));
+
+/** 同步到自我進化：成功（200／201）後同步狀態重抓；失敗不動快取（狀態仍是原值）。 */
+export function useRegistrySync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => postRegistrySync(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.researchRegistryStatus }),
+  });
+}
 
 // ── ResearchToPRD P1（分流、拆解；TCS-ResearchToPRD-P1-20261107）──────────────────────────────────────────────────────
 // 先在這裡備齊（FE-D2 的拆解與 SCR 面板只 import）；`GET …/route` 與 `GET …/decomposition` 在「尚無」時回 200 `null`（D-106、D-120）。

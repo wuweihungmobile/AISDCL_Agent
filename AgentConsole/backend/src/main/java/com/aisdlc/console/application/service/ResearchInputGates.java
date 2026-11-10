@@ -372,8 +372,8 @@ public final class ResearchInputGates {
         return out;
     }
 
-    /** 收集違規、一次丟出。 */
-    private static final class Check {
+    /** 收集違規、一次丟出（套件內可見：登記的輸入閘 {@code ResearchRegistryGates} 共用同一個收集器，違規形狀與頂層 reason 規則一致）。 */
+    static final class Check {
 
         static final String WEB_LAYER_RULE = "web_layer_disabled";
         static final String MISSING_DIGESTS_RULE = "missing_digests";

@@ -429,4 +429,64 @@ class SiAuditSignerTest {
             assertThat(sha).as("audit_sha256 的對象＝檔位元組").isEqualTo(v.fileSha()).isEqualTo(regenerated.fileSha256());
         }
     }
+
+    // ── 研究來源單一化 AT-965-6-1、6-7：登記同步的 body 鍵序與黃金檔 G-S1 ───────────────────────────────────────────
+
+    private static final String GS1_KEY = "si-test-key-g-s1-0123456789abcdef";
+    private static final String GS1_REF = "00000000-0000-4000-8000-0000000000a1";
+    private static final String GS1_TIME = "2026-11-10T09:00:00+08:00";
+
+    private static byte[] resourceBytes(String path) throws java.io.IOException {
+        try (java.io.InputStream in = SiAuditSignerTest.class.getResourceAsStream(path)) {
+            assertThat(in).as("測試資源 %s 存在（副本不存在＝失敗，不得 skip；依賴序見 TCS 提交順序）", path).isNotNull();
+            return in.readAllBytes();
+        }
+    }
+
+    @Test
+    void AT_965_6_1_theRegistrySyncBodyKeepsTheContractKeyOrderAndEmbedsTheTextVerbatim() throws Exception {
+        String text = "{\n  \"hosts\": [],\n  \"中文\": \"引號\\\\\\\"與斜線/\"\n}\n";
+        String sha = "sha256:" + "a".repeat(64);
+
+        String body = signer.registrySyncBody(GS1_REF, "admin", GS1_TIME, text, sha);
+
+        JsonNode parsed = JSON.readTree(body);
+        List<String> keys = new ArrayList<>();
+        for (Iterator<String> it = parsed.propertyNames().iterator(); it.hasNext();) {
+            keys.add(it.next());
+        }
+        assertThat(keys).containsExactly("schema_rev", "audit_ref", "kind", "user", "role", "time", "registry_text", "registry_sha256");
+        assertThat(parsed.get("kind").asString()).isEqualTo("src-registry");
+        assertThat(parsed.get("role").asString()).isEqualTo("ADMIN");
+        assertThat(parsed.get("registry_text").asString()).as("原樣嵌入（含換行、引號、反斜線、中文）").isEqualTo(text);
+        assertThat(body).as("非 ASCII 不跳脫、/ 不跳脫、換行跳脫為 \\n").contains("中文").contains("/").doesNotContain("\\/").contains("\\n").doesNotContain("\\u4e2d");
+        assertThat(signer.sign(SiWriteKind.SRC_REGISTRY, GS1_REF, null, body, RING).fileBytes().length).isLessThan(SiAuditSigner.AUDIT_FILE_MAX_BYTES);
+    }
+
+    /**
+     * G-S1：Console 不自產黃金檔，只以根層 TCS 附錄 C 的同一組輸入重新產生，並與副本比對。根層黃金檔是文字檔（結尾恰一個 LF）；Console 送出的外層檔
+     * <b>無結尾換行</b>（與其他五種 kind 同；TCS AT-965-6-1 明文）——所以比對的是「送出的位元組＋恰一個 LF＝副本」。這個接縫是規格內的矛盾（附錄 C 把 LF 算進
+     * 外層檔，AT-965-6-1 說無結尾換行），回報主控裁決；根層驗簽不依賴結尾換行（解析後對 body 字串驗 HMAC）。
+     */
+    @Test
+    void AT_965_6_7_theSerializerReproducesGoldenFileGS1AndTheCopyMatchesTheRootFile() throws Exception {
+        byte[] copy = resourceBytes("/si/G-S1.audit.json");
+        byte[] appendixB = resourceBytes("/research-registry/appendix-b.json");
+        assertThat(HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(appendixB))).as("附錄 B 複本的 sha256")
+                .isEqualTo("147fccd6a1b9efb61423579e26fbbc7437366a937806e239c69f334732aff0e8");
+        String text = new String(appendixB, StandardCharsets.UTF_8);
+        String sha = "sha256:" + HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(appendixB));
+        SiAuditKeyRing key = SiAuditKeyRing.parse(GS1_KEY);
+
+        SignedAudit regenerated = signer.sign(SiWriteKind.SRC_REGISTRY, GS1_REF, null, signer.registrySyncBody(GS1_REF, "admin", GS1_TIME, text, sha), key);
+
+        byte[] expected = (regenerated.file() + "\n").getBytes(StandardCharsets.UTF_8);
+        assertThat(copy).as("Java 以附錄 C 的同一組輸入重新產生的外層檔（加文字檔結尾 LF）與 backend 副本逐位元組相等").isEqualTo(expected);
+        assertThat(copy[copy.length - 1]).isEqualTo((byte) '\n');
+        assertThat(copy[copy.length - 2]).as("結尾恰一個 LF").isNotEqualTo((byte) '\n');
+        JsonNode outer = JSON.readTree(new String(copy, StandardCharsets.UTF_8));
+        assertThat(outer.get("key_id").asString()).isEqualTo(regenerated.keyId());
+        assertThat(outer.get("mac").asString()).isEqualTo(hmacHex(GS1_KEY, outer.get("body").asString()));
+        assertThat(JSON.readTree(outer.get("body").asString()).get("registry_sha256").asString()).isEqualTo(sha);
+    }
 }

@@ -18,7 +18,7 @@ import { ApiError } from "@/lib/api/client";
 import { SI_QUERY_OPTIONS } from "@/lib/api/queries";
 import type { SiConsoleWrites, SiEvent, SiObservation, SiObservationRow, SiProposal } from "@/lib/api/types";
 import { SI_STATUS_KNOWN_KEYS, ingestCommands } from "@/lib/domain/si";
-import { GA, GB, clone, fixtureWithStatus, renderSi, sched, signInAs, siUnavailable, statusItem, stubSiApi, writeItem, type SiStub } from "@/tests/helpers/si";
+import { ADMIN_UI, GA, GB, OPERATOR_UI, VIEWER_UI, clone, fixtureWithStatus, renderSi, sched, signInAs, siUnavailable, statusItem, stubSiApi, writeItem, type SiStub } from "@/tests/helpers/si";
 import { SiView } from "./SiView";
 import { SiError } from "./siParts";
 
@@ -1235,6 +1235,55 @@ describe("AT_935_5_3 待入帳面板：項目、三種 kind 的入帳指令、�
     expect(await within(panel).findByTestId("si-writes-empty")).toHaveTextContent("無待入帳（僅涵蓋最新 100 筆稽核列）");
     expect(within(panel).queryByTestId("si-pending-list")).toBeNull();
     expect(within(panel).getByTestId("si-writes-truncated")).toBeInTheDocument();
+  });
+});
+
+describe("AT_965_9_1 自我進化頁的一行說明（研究來源統一管理；TCS-ResearchRegistry-20261110 W-R9）", () => {
+  const SENTENCE = "研究來源在『研發工作流 → 研究來源設定』統一管理";
+
+  it("AT_965_9_1 三種角色皆顯示該句（逐字）；ADMIN 該句內有連結（href=/research、可存取名稱含「研發工作流」）；OPERATOR 與 VIEWER 為純文字、無連結；說明列位於狀態橫幅之後", async () => {
+    for (const ui of [ADMIN_UI, OPERATOR_UI, VIEWER_UI]) {
+      const view = renderSi(ui);
+      const note = await screen.findByTestId("si-research-sources-note");
+      expect(note.textContent, ui.role).toBe(`${SENTENCE}`);
+      const links = within(note).queryAllByRole("link");
+      if (ui.role === "ADMIN") {
+        expect(links).toHaveLength(1);
+        expect(links[0]).toHaveAttribute("href", "/research");
+        expect(links[0]).toHaveAccessibleName(/研發工作流/);
+      } else {
+        expect(links, `${ui.role} 無連結`).toHaveLength(0);
+      }
+      const banner = await screen.findByTestId("si-status-banner");
+      expect(banner.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING, `${ui.role} 說明列在橫幅之後`).toBeTruthy();
+      view.unmount();
+    }
+  });
+});
+
+describe("AT_965_9_2 對帳面板新 kind：src-registry（研究來源同步）", () => {
+  it("AT_965_9_2 待入帳項與 orphan 都顯示標籤「研究來源同步」；展開入帳指令逐字為 registry-ingest（對象為破折號）", async () => {
+    const user = userEvent.setup();
+    renderSi({
+      ...ADMIN_UI,
+      overrides: {
+        "console-writes": () =>
+          writesData({
+            items: [writeItem({ auditRef: AUDIT_A, kind: "src-registry", subjectId: null, ingested: false })],
+            orphans: [{ auditRef: AUDIT_B, kind: "src-registry", subject: null }],
+          }),
+      },
+    });
+    const panel = await screen.findByTestId("si-writes-panel");
+    const row = await within(panel).findByTestId(`si-pending-${AUDIT_A}`);
+    expect(row).toHaveTextContent("研究來源同步");
+    expect(row).toHaveTextContent("src-registry");
+    expect(row).toHaveTextContent("對象：—");
+    await user.click(within(row).getByRole("button", { name: "入帳指令" }));
+    const expected = `python tools/selfimproving.py registry-ingest --carrier console --audit-ref ${AUDIT_A}`;
+    expect(within(row).getByTestId("sdd-recovery-command-powershell").textContent).toBe(expected);
+    expect(within(row).getByTestId("sdd-recovery-command-posix").textContent).toBe(expected);
+    expect(within(panel).getByTestId(`si-orphan-${AUDIT_B}`)).toHaveTextContent(`${AUDIT_B}｜src-registry｜—`);
   });
 });
 

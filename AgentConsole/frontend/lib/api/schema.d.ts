@@ -336,6 +336,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/si/research-registry/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把研究來源登記同步給自我進化（API-SI-15；僅 ADMIN）
+         * @description 本文為空物件 {}。閘門序（先中者定案；序 4～6 任一拒絕＝零副作用）：角色（僅 ADMIN；403 ACCESS_DENIED）→ 帳號須在 console.si.deciders（403 si_write_forbidden）→ 寫入面啟用（503 si_write_disabled）→ 取 Bridge 登記快照（503 research_requires_db｜502 bridge_unreachable｜504 bridge_timeout｜422 registry_too_large，details.what=registry_text）→ 冪等檢查（讀 SelfImproving 鏡像：讀不到＝503 si_unavailable，details.cause；只比「最新」：有更新的待入帳寫入時其 digest 須等於當前才算 unchanged）→ 簽章後外層檔位元組數（超過 65536＝422 registry_too_large，details.what=audit_file）→ 簽章、寫 Console 稽核列、單次 Bridge 落檔。registry_text 與 registry_sha256 逐位元組取自 Bridge 快照、原樣嵌入稽核 body（console-api 不重新序列化）。簽章、寫 Console 稽核列、單次 Bridge 呼叫（連線 2 秒／讀取 20 秒、不重試）。Bridge 明確拒絕或確定未落檔時補償刪除稽核列；結果不明（504、送出後連線重設的 502、2xx 本文無法解析的 502）時保留該列並在 details.outcomeUnknown 標明。201 的意思是稽核檔已落地、待入帳，不是已同步或已生效；沒有 force：未入帳的稽核檔由主機端巡邏每輪重試入帳。
+         */
+        post: operations["postSiResearchRegistrySync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/si/proposals/{id}/decide": {
         parameters: {
             query?: never;
@@ -514,6 +534,30 @@ export interface paths {
          * @description 不包 ApiResult 封包，直接回檔案；加密參數的 value 一律輸出佔位字串 <encrypted>（匯入時略過）
          */
         post: operations["export"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/research/watch-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自我進化追蹤來源清單（API-RP-29；研究來源單一化）
+         * @description 研究來源設定的第二層（網址層）：全部追蹤來源（含已停用；依 slug 位元組序）。hostAllowed＝host 是否仍在當前有效網域清單（停用網域後追蹤來源列不動，只是 hostAllowed 轉假）。轉 Bridge GET /research/watch-sources。VIEWER 以上可讀。
+         */
+        get: operations["listResearchWatchSources"];
+        put?: never;
+        /**
+         * 新增自我進化追蹤來源（API-RP-29；僅 ADMIN）
+         * @description 本文 {slug, url, kind, extract, layer, expand?}（expand 缺省或 null＝無；物件須恰含 mode、prefix、max）；本文含任何其他鍵（含 addedBy）＝400 unknown_field。輸入閘（400，errors[] 一次全列；規則名 invalid_slug｜invalid_url｜invalid_kind｜invalid_layer｜invalid_extract｜invalid_expand）先於 Bridge；url 原樣判定、不做任何正規化（大寫 host、顯式 :443、IP 字面一律拒絕，請自行改寫後重送）。單一閘：host 須在當前有效網域清單，否則 422 host_not_allowed（details.host）；同 slug 已存在（含已停用者；slug 永不重用）＝409 watch_source_exists（details.slug）；假設寫入成功後的登記快照超過 24576 位元組＝422 registry_too_large（零寫入）。成功 201 回條目，並以 AuditTrail 標註（audit_log 的 entity_type=research_watch_source、entity_id＝slug；不寫 research_events：全域資源）。新增後不會自動生效——須再呼叫 POST /api/v1/si/research-registry/sync 把登記簽成稽核檔、待自我進化入帳。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
+         */
+        post: operations["addResearchWatchSource"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1392,6 +1436,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/research/watch-sources/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 停用／重新啟用追蹤來源（API-RP-29；僅 ADMIN）
+         * @description 只准改 enabled（不可刪除；slug 永不重用）：本文含 enabled 以外的任何鍵＝422 invalid_request、條目不變。停用人取 JWT subject；重新啟用清空停用欄，且 host 須仍在當前有效網域清單（否則 422 host_not_allowed）。slug 不存在＝404 research_not_found（details.slug）。成功 200 回條目，並以 AuditTrail 標註（entity_type=research_watch_source）。失敗序：研究寫入權杖未設（503 research_write_disabled）→ 輸入閘（422 invalid_request；details.violations[{field,rule,message}] 一次全列，errors[] 同內容）→ 專案不存在（404 research_not_found）→ 恰一次 Bridge 呼叫（連線 2 秒、讀取 30 秒、不重試；Bridge 的 409／422／503 reason 逐字透傳，連線失敗 502 bridge_unreachable、讀取逾時 504 bridge_timeout）。操作人（approver、decided_by、author、requested_by、added_by…）一律取 JWT subject，請求本文沒有這些欄位。
+         */
+        patch: operations["updateResearchWatchSource"];
+        trace?: never;
+    };
     "/api/v1/research/allowlist/{id}": {
         parameters: {
             query?: never;
@@ -1564,6 +1628,26 @@ export interface paths {
          * @description Bridge GET /si/runs 的原樣轉遞：運轉的開關事件序號、觸發、研究事件、提案結果（outcome）。游標分頁同 observations。失敗沒有 data。VIEWER 以上可讀。
          */
         get: operations["getSiRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/si/research-registry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 研究來源登記的同步狀態（API-SI-14；VIEWER 以上可讀）
+         * @description Console 的研究來源登記（網域層＋追蹤來源）與自我進化鏡像的同步狀態：synced（鏡像最新已入帳的登記 digest＝當前）｜pending（稽核檔已落地、待入帳）｜unsynced（當前登記尚未同步）｜unknown（鏡像讀不到；unknownCause：scan_cap_exceeded｜si_unavailable｜bridge_unreachable｜bridge_timeout——不當成已同步或零）。判定序：取 Bridge 當前快照（失敗照 502／503／504，沒有當前 digest 就沒有狀態）→ 讀鏡像 → 有最新待入帳寫入 P 時其 digest 等於當前才是 pending、否則 unsynced（即使鏡像 digest 等於當前：更新的待入帳寫入入帳後會覆寫鏡像）→ 沒有 P 時鏡像 digest 等於當前才是 synced。researchFetchMax 只轉鏡像值（缺席或非正整數為 null）。不回稽核 body、mac 與金鑰。
+         */
+        get: operations["getSiResearchRegistry"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2944,6 +3028,25 @@ export interface components {
             /** @description 備註（選填；1～120 個 code point 的單行字串，不含控制字元，有值不得全空白；允許豎線）。省略則稽核 body 不含該鍵 */
             note?: string;
         };
+        /** @description 登記同步的結果；written＝稽核檔已落地、待入帳；unchanged＝內容沒變、零副作用 */
+        ResearchRegistrySyncResult: {
+            /** @enum {string} */
+            outcome: "written" | "unchanged";
+            /** @enum {string} */
+            state: "pending" | "synced";
+            registrySha256: string;
+            /**
+             * Format: uuid
+             * @description 稽核編號（written＝新的；unchanged＝已存在的）
+             */
+            auditRef: string;
+            /** @enum {string|null} */
+            kind: "src-registry" | null;
+            /** @description 稽核 body 的 time（±HH:MM） */
+            time: string | null;
+            /** @description 簽章金鑰的 sha256 前 8 碼 */
+            keyId: string | null;
+        };
         /** @description 對待決提案（或暫停的運轉）下決定。九種動詞：approve、reject、return、promote、decline-promote、rollback、unblock、resume、ack-handoff；各動詞必填與禁止的欄位見表 M-D（多帶或缺帶一律 422，一次全列）。沒有批次核准 */
         SiDecideRequest: {
             /**
@@ -3093,6 +3196,60 @@ export interface components {
             /** Format: date-time */
             exportedAt: string;
             configs: components["schemas"]["ExportedConfig"][];
+        };
+        /** @description 新增追蹤來源；操作人取 JWT subject，本文沒有 addedBy */
+        ResearchWatchSourceRequest: {
+            /** @description ^[a-z0-9][a-z0-9-]{0,31}$；永不重用 */
+            slug: string;
+            /** @description https 網址；小寫 host、無埠與 userinfo 與 IP 字面與片段；≤500 字元；原樣判定、不正規化 */
+            url: string;
+            /** @enum {string} */
+            kind: "changelog" | "docs" | "release" | "blog" | "sitemap" | "search";
+            /** @description 1～200 字、無控制字元 */
+            extract: string;
+            /** @enum {string} */
+            layer: "ACADEMIC" | "INDUSTRY" | "OSS" | "COMMUNITY";
+            /** @description 缺省或 null＝無展開；物件須恰含 mode、prefix、max */
+            expand?: components["schemas"]["WatchSourceExpand"];
+        };
+        WatchSourceExpand: {
+            mode: string;
+            prefix: string;
+            /** Format: int32 */
+            max: number;
+        };
+        ApiResultWatchSourceDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["WatchSourceDto"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 自我進化追蹤來源（研究來源設定的第二層：網址層；slug 永不重用、只增不刪） */
+        WatchSourceDto: {
+            /** @description 識別碼（小寫英數與連字號，1～32 字） */
+            slug: string;
+            /** @description https 網址（小寫 host、無埠與 IP 字面與片段） */
+            url: string;
+            /** @description 網址的主機名（由 url 衍生） */
+            host: string;
+            /** @description changelog｜docs｜release｜blog｜sitemap｜search */
+            kind: string;
+            /** @description 要抓取並逐字保留的內容說明（1～200 字） */
+            extract: string;
+            /** @description ACADEMIC｜INDUSTRY｜OSS｜COMMUNITY */
+            layer: string;
+            /** @description 展開設定；沒有展開為 null */
+            expand: components["schemas"]["WatchSourceExpand"];
+            enabled: boolean;
+            /** @description host 是否仍在當前有效網域清單（FETCH 或 WEB；只計啟用者） */
+            hostAllowed: boolean;
+            addedBy: string;
+            addedAt: string;
+            disabledBy: string | null;
+            disabledAt: string | null;
         };
         ResearchCreateLayers: {
             academic: boolean;
@@ -4331,6 +4488,39 @@ export interface components {
             timestamp: string;
             traceId: string;
         };
+        ApiResultResearchRegistrySyncStatus: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["ResearchRegistrySyncStatus"];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
+        };
+        /** @description 研究來源登記與自我進化鏡像的同步狀態 */
+        ResearchRegistrySyncStatus: {
+            /** @enum {string} */
+            state: "synced" | "unsynced" | "pending" | "unknown";
+            /**
+             * @description state=unknown 時的原因
+             * @enum {string|null}
+             */
+            unknownCause: "scan_cap_exceeded" | "si_unavailable" | "bridge_unreachable" | "bridge_timeout" | null;
+            /** @description Console 當下登記快照的 digest（sha256:…） */
+            currentSha256: string;
+            /** @description 自我進化鏡像最新已入帳的登記 digest；從未同步為 null */
+            ingestedSha256: string | null;
+            ingestedAuditRef: string | null;
+            /** @description state=pending 時：最新待入帳的稽核檔編號 */
+            pendingAuditRef: string | null;
+            /** @description state=pending 時：該稽核檔的 time（±HH:MM） */
+            pendingTime: string | null;
+            /**
+             * Format: int32
+             * @description 自我進化每次抓取上限（只轉鏡像值；缺席或非正整數為 null）
+             */
+            researchFetchMax: number | null;
+        };
         ApiResultSiConsoleWrites: {
             /** Format: int32 */
             code: number;
@@ -4344,7 +4534,7 @@ export interface components {
             /** Format: uuid */
             auditRef: string;
             /** @enum {string} */
-            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
+            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request" | "src-registry";
             /** @description kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null */
             dkind?: string | null;
             user: string;
@@ -4356,7 +4546,7 @@ export interface components {
             time: string;
             /** @description decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 null） */
             subjectId?: string | null;
-            /** @description 卡面 digest（只有六種決定動詞才有） */
+            /** @description 卡面 digest（只有六種決定動詞才有）；src-registry 列存登記快照的 registry_sha256 */
             digest?: string | null;
             /** @description 簽章金鑰的 sha256 前 8 碼 */
             keyId: string;
@@ -4371,7 +4561,7 @@ export interface components {
         SiConsoleWriteOrphan: {
             auditRef: string;
             /** @enum {string} */
-            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request";
+            kind: "decide" | "obs-add" | "obs-close" | "sched-set" | "run-request" | "src-registry";
             /** @description dec 的 prop（resume 為 run）、觀察列的 id、obs.close 的 obs */
             subject?: string | null;
         };
@@ -4442,6 +4632,15 @@ export interface components {
             totalElements: number;
             /** Format: int32 */
             totalPages: number;
+        };
+        ApiResultListWatchSourceDto: {
+            /** Format: int32 */
+            code: number;
+            message: string;
+            data: components["schemas"]["WatchSourceDto"][];
+            /** Format: date-time */
+            timestamp: string;
+            traceId: string;
         };
         ApiResultListResearchProjectSummary: {
             /** Format: int32 */
@@ -6576,7 +6775,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -8007,6 +8206,107 @@ export interface operations {
             };
         };
     };
+    postSiResearchRegistrySync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description unchanged：內容沒變（零副作用）；auditRef 是已存在的那一份，kind、time、keyId 為 null */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRegistrySyncResult"];
+                };
+            };
+            /** @description written：新稽核檔已落地、待入帳（不是已同步或已生效） */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRegistrySyncResult"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；系統參數寫入與 reveal 僅 ADMIN；已刪除專案清單需 OPERATOR 以上） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 與目前狀態衝突（reason 說明原因） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description registry_too_large：Bridge 的登記快照超過 24576 位元組（details.what=registry_text、limit、size），或簽章後的外層稽核檔超過 65536 位元組（details.what=audit_file、limit、size；以位元組數現算）。零副作用；或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤：取快照階段零副作用；落檔階段連線階段失敗與 5xx 已補償刪除稽核列，送出後連線重設與 2xx 本文無法解析的結果不明，稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset）；research_requires_db（Bridge 沒有 BRIDGE_DB_DSN）；si_unavailable（讀不到 SelfImproving 鏡像：details.cause＝scan_cap_exceeded｜si_unavailable｜bridge_unreachable｜bridge_timeout；零副作用——不把讀不到當成從未同步） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：取快照逾時（零副作用）；或落檔讀取逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     postSiDecide: {
         parameters: {
             query?: never;
@@ -8852,6 +9152,176 @@ export interface operations {
             };
         };
     };
+    listResearchWatchSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultListWatchSourceDto"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description db_blocked：研究資料庫暫時不可用；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（請求已送出、結果不明；寫入讀取 30 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    addResearchWatchSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchWatchSourceRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultWatchSourceDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description watch_source_exists：slug 已存在（slug 永不重用，含已停用者；details.slug） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 輸入閘未通過（400，不在此列）之外，Bridge 拒絕此請求（reason 逐字取自 Bridge）：host_not_allowed（網域不在當前有效網域清單；details.host）｜registry_too_large（假設寫入成功後的登記快照超過 24576 位元組；details.what=registry_text、limit、size；零寫入）｜invalid_request（details.violations） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（請求已送出、結果不明；寫入讀取 30 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     listResearchProjects: {
         parameters: {
             query?: {
@@ -8942,7 +9412,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9051,7 +9521,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9225,7 +9695,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9339,7 +9809,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9513,7 +9983,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9630,7 +10100,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9746,7 +10216,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9858,7 +10328,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9956,7 +10426,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10068,7 +10538,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10167,7 +10637,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10283,7 +10753,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10399,7 +10869,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10573,7 +11043,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10689,7 +11159,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10801,7 +11271,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -10895,7 +11365,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11002,7 +11472,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11181,7 +11651,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13297,6 +13767,114 @@ export interface operations {
             };
         };
     };
+    updateResearchWatchSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 追蹤來源 slug */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchAllowlistPatch"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultWatchSourceDto"];
+                };
+            };
+            /** @description 請求格式或欄位驗證失敗（errors 列出每個欄位的問題） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 研究專案不存在，或指定的版本、輪、矩陣版本、條目不存在（reason research_not_found；「404 的 reason 省略」慣例的例外之一）。已封存的專案仍可讀；Bridge 的 404（例：fsm_not_found）reason 逐字轉出 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 本文含 enabled 以外的鍵或 enabled 不是布林（reason invalid_request；條目不變）；重新啟用時 host 已不在當前有效網域清單（reason host_not_allowed；details.host；須先在網域清單開放） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗，請求確定沒有送達；連線 2 秒）；或 Bridge 回報上游失敗——not_implemented（Bridge 端點本體尚未實作，details.endpoint，console-api 不假裝成功）、init_failed（專案初始化的某一步失敗，details.step；游標已標 FAILED，以 reinit 補建）；sdd_cli_failed（Bridge 的 SDD CLI 子行程失敗，逐字轉出）；其餘 5xx＝引擎橋接服務錯誤。寫入不重試 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_write_disabled：backend 或 Bridge 沒有設定研究寫入權杖（BRIDGE_RESEARCH_WRITE_TOKEN），研究寫入面停用（backend 未設時不發出任何請求）；research_requires_db：Bridge 沒有 BRIDGE_DB_DSN（研究端點不降級成純檔案模式）；db_blocked：研究資料庫暫時不可用；compile_failed：研究 stage 的 persona／playbook 編譯失敗（Bridge 逐字轉出） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（請求已送出、結果不明；寫入讀取 30 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     updateResearchAllowlistEntry: {
         parameters: {
             query?: never;
@@ -13340,7 +13918,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return 與 allowlist 的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
+            /** @description 角色不足（reason ACCESS_DENIED：VIEWER 只能讀取；寫入需要 OPERATOR 或 ADMIN；approve、return、allowlist 與追蹤來源的新增／停用僅 ADMIN）；另有 research_write_forbidden：Bridge 拒絕 backend 附的研究寫入權杖（兩端的 BRIDGE_RESEARCH_WRITE_TOKEN 設定不一致），或 OPERATOR 嘗試換世代（reinit 帶 generation=next 僅 ADMIN；服務層入口檢查、Bridge 請求數 0） */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13911,6 +14489,71 @@ export interface operations {
                 };
             };
             /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getSiResearchRegistry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultResearchRegistrySyncStatus"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_unreachable：連不上 Engine Bridge（連線階段失敗）；或 Bridge 回了非預期的錯誤 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description research_requires_db：Bridge 沒有 BRIDGE_DB_DSN；db_blocked：研究資料庫暫時不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description bridge_timeout：讀取逾時（讀取 10 秒、不重試） */
             504: {
                 headers: {
                     [name: string]: unknown;

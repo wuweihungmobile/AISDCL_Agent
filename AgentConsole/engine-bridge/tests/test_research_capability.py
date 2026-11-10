@@ -103,6 +103,8 @@ CAPABILITY: dict[str, str] = {
     "research/delivery.py": "exec",
     "research/healing.py": "exec",
     "routers/research_deliver.py": "exec",
+    # 研究來源單一化：追蹤來源輸入閘與登記快照（純函式；無網路、無檔案、無時鐘、無子行程）。
+    "research/registry.py": "ro",
 }
 
 NET_ROOTS = frozenset({"socket", "ssl", "urllib", "urllib3", "httpx", "requests", "aiohttp",

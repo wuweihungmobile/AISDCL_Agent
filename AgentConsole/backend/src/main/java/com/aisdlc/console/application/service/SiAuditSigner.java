@@ -41,6 +41,8 @@ public class SiAuditSigner {
     public static final int SCHEMA_REV = 1;
     /** Console 寫入者的角色：恆為 ADMIN（K=1 掌舵者；PRD AC-SI-35-4）。 */
     public static final String ROLE = "ADMIN";
+    /** 外層檔的位元組上限＝Bridge 的 {@code SI_WRITE_BODY_MAX_BYTES}（超過即 422 too_large）；登記同步以簽章後的真位元組數對它檢查。 */
+    public static final int AUDIT_FILE_MAX_BYTES = 65_536;
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx", Locale.ROOT);
     private static final String HMAC = "HmacSHA256";
@@ -148,6 +150,16 @@ public class SiAuditSigner {
             json.string("note", command.note());
         }
         return json.end();
+    }
+
+    /**
+     * 登記同步的 body（研究來源單一化；位元組權威＝根層 {@code consoleaudit.py}，黃金檔 G-S1）：
+     * {@code schema_rev,audit_ref,kind,user,role,time,registry_text,registry_sha256}。{@code registryText}、{@code registrySha256} 兩欄<b>逐位元組取自
+     * Bridge 的快照回應</b>，這裡只做 JSON 字串逸出，不解析、不重新序列化。
+     */
+    public String registrySyncBody(String auditRef, String user, String time, String registryText, String registrySha256) {
+        return header(auditRef, SiWriteKind.SRC_REGISTRY, user, time).string("registry_text", registryText)
+                .string("registry_sha256", registrySha256).end();
     }
 
     private static SiAuditJson header(String auditRef, SiWriteKind kind, String user, String time) {

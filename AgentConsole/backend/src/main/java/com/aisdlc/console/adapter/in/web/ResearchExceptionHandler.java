@@ -22,9 +22,12 @@ import java.util.Map;
  * （{@code {code,message,reason,errors[],details?,timestamp,traceId}}，固定 JSON）。優先於全域處理器，才不會被它的 {@code DomainException} 通用分支吃掉。
  *
  * <p>對映：連線階段失敗＝502、讀取逾時＝504、Bridge 回報的上游失敗（501 {@code not_implemented}、502 {@code init_failed}）＝502（reason 與 details 逐字取自 Bridge）。
+ *
+ * <p>{@code SiController} 也在其中：登記同步（API-SI-14、API-SI-15）取 Bridge 的登記快照走研究面（{@code ResearchBridge.registry()}），其連線失敗與逾時依契約 §5A.4
+ * 序 4 沿 §0.2 第 8 列回英文識別字 {@code bridge_unreachable}、{@code bridge_timeout}；SI 自己的 Bridge 失敗仍是 {@code UpstreamException}、由全域處理器處理。
  */
 @RestControllerAdvice(assignableTypes = {ResearchController.class, ResearchRouteController.class, ResearchGateController.class, ResearchDeliveryController.class,
-        ResearchKanbanController.class, ResearchHealingController.class})
+        ResearchKanbanController.class, ResearchHealingController.class, SiController.class})
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class ResearchExceptionHandler {
 

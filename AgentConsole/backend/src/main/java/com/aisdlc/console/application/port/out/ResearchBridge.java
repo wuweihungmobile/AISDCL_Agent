@@ -110,4 +110,25 @@ public interface ResearchBridge {
 
     /** {@code PATCH /research/allowlist/{id}}（200）：本文 {@code {enabled, disabled_by?}}；{@code entryId} 原樣嚴格 percent-encode 成單一路徑段。 */
     Map<String, Object> patchAllowlistEntry(String entryId, Map<String, Object> body);
+
+    // ── 研究來源單一化（API 契約 §5A）：追蹤來源與登記快照。呼叫者只有 ResearchRegistryService（四個方法）與 SiConsoleWriteService（僅 registry()）──
+
+    /** {@code GET /research/watch-sources}（連線 2 秒、讀取 10 秒、不重試）：Bridge 的本文原樣（{@code {items:[…]}}）。 */
+    Map<String, Object> watchSources();
+
+    /** {@code POST /research/watch-sources}（201；寫入權杖、讀取 30 秒、不重試）：本文 {@code {slug,url,kind,extract,layer,expand?,added_by}}。 */
+    Map<String, Object> addWatchSource(Map<String, Object> body);
+
+    /** {@code PATCH /research/watch-sources/{slug}}（200）：本文 {@code {enabled, disabled_by?}}；{@code slug} 原樣嚴格 percent-encode 成單一路徑段。 */
+    Map<String, Object> patchWatchSource(String slug, Map<String, Object> body);
+
+    /**
+     * 登記快照（{@code GET /research/registry}；連線 2 秒、讀取 10 秒、不重試）。{@code registryText} 與 {@code registrySha256} 是<b>Bridge 的逐位元組</b>回應：
+     * console-api 不解析、不重新序列化（稽核檔原樣嵌入）。
+     */
+    RegistrySnapshot registry();
+
+    /** 登記快照：Bridge 唯一產生者（正規化規則見契約 §5A.3）。 */
+    record RegistrySnapshot(String registryText, String registrySha256) {
+    }
 }

@@ -90,15 +90,15 @@ class SiReadOnlyArchTest {
         }
         List<JavaMethod> methods = controllers.stream().flatMap(c -> c.getMethods().stream()).toList();
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count())
-                .as("恰七個 @GetMapping（status、observations、events、proposals、proposals/{id}、runs、console-writes）").isEqualTo(7);
+                .as("恰八個 @GetMapping（status、observations、events、proposals、proposals/{id}、runs、console-writes、research-registry）").isEqualTo(8);
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count())
-                .as("恰六個 @PostMapping（decide、observations、close、validate、schedule/set、runs/request）").isEqualTo(6);
+                .as("恰七個 @PostMapping（decide、observations、close、validate、schedule/set、runs/request、research-registry/sync）").isEqualTo(7);
 
         JavaClass bridge = classes.get(AgentBridge.class);
         List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
-        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰七個").extracting(JavaMethod::getName)
+        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰八個").extracting(JavaMethod::getName)
                 .containsExactlyInAnyOrder("siExport", "siWriteDecide", "siWriteObservation", "siWriteObservationClose",
-                        "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest");
+                        "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest", "siWriteRegistrySync");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).extracting(JavaClass::getName)
                 .containsExactly(String.class.getName(), Integer.class.getName(), Integer.class.getName(), String.class.getName(),
@@ -157,7 +157,8 @@ class SiReadOnlyArchTest {
         });
         // 用例方法集合：寫入用例新增 setSchedule、requestRun（其餘四個不變）
         assertThat(methodNames(com.aisdlc.console.application.port.in.SiWriteUseCase.class)).as("SiWriteUseCase 的方法集合")
-                .containsExactlyInAnyOrder("decide", "addObservation", "closeObservation", "validateObservation", "setSchedule", "requestRun");
+                .containsExactlyInAnyOrder("decide", "addObservation", "closeObservation", "validateObservation", "setSchedule", "requestRun",
+                        "syncResearchRegistry", "researchRegistryStatus");
         // 呼叫兩個新 Bridge 方法的類別只有 SiConsoleWriteService（含方法參照）
         for (String bridgeMethod : List.of("siWriteScheduleSet", "siWriteRunRequest")) {
             assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals(bridgeMethod)))
@@ -171,7 +172,27 @@ class SiReadOnlyArchTest {
         assertThat(sources.entrySet().stream().filter(e -> e.getValue().contains(TABLE)).map(Map.Entry::getKey).sorted().toList())
                 .containsExactly(ADAPTER_PATH);
         assertThat(count(sources.get(ADAPTER_PATH), "(?is)\\b(insert|update|delete)\\b[^;\"]*console\\." + TABLE)).as("DML 敘述總數").isEqualTo(3);
-        assertThat(methodNames(SiConsoleWriteRepository.class)).containsExactlyInAnyOrder("insert", "deleteByAuditRef", "findDecideAuditRefs");
+        assertThat(methodNames(SiConsoleWriteRepository.class)).containsExactlyInAnyOrder("insert", "deleteByAuditRef", "findDecideAuditRefs",
+                "findRegistryWrites");
+    }
+
+    // ── 研究來源單一化 AT-965-6-E-1：登記同步的唯一呼叫面與唯讀鎖不退步 ──────────────────────────────────────────
+
+    @Test
+    void AT_965_6_E_1_onlyTheWriteServiceCallsTheRegistrySyncBridgeMethodAndTheRepositoryAndTheControllerStaysOnTheUseCase() {
+        JavaClasses classes = mainClasses();
+        assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals("siWriteRegistrySync")))
+                .as("siWriteRegistrySync 只經 SiConsoleWriteService").containsExactly(SiConsoleWriteService.class.getSimpleName());
+        assertThat(accessorsOf(classes, SiConsoleWriteRepository.class, a -> true)).as("寫入埠的使用者仍只有 SiConsoleWriteService")
+                .containsExactly(SiConsoleWriteService.class.getSimpleName());
+        JavaClass controller = classes.get("com.aisdlc.console.adapter.in.web.SiController");
+        List<String> dependencies = controller.getDirectDependenciesFromSelf().stream().map(d -> d.getTargetClass().getName()).toList();
+        assertThat(dependencies).as("SiController 不直接依賴 Bridge 或 repository（新兩方法只依賴用例介面）")
+                .doesNotContain(AgentBridge.class.getName(), SiConsoleWriteRepository.class.getName(), SiConsoleWriteQueries.class.getName(),
+                        "com.aisdlc.console.application.port.out.ResearchBridge");
+        assertThat(methodNames(com.aisdlc.console.application.port.in.SiWriteUseCase.class)).contains("syncResearchRegistry", "researchRegistryStatus");
+        assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals("siExport")))
+                .as("siExport 的使用者仍不含寫入服務（鏡像讀取經 SiMirrorUseCase）").doesNotContain(SiConsoleWriteService.class.getSimpleName());
     }
 
     // ── AT-950-8-2：表的寫入面只有三條 ───────────────────────────────────────────────────────────────
@@ -243,8 +264,8 @@ class SiReadOnlyArchTest {
 
         Set<String> repositoryMethods = methodNames(SiConsoleWriteRepository.class);
         Set<String> queryMethods = methodNames(SiConsoleWriteQueries.class);
-        assertThat(repositoryMethods).as("寫入埠的方法：兩個寫入加重送閘的唯讀查詢").containsExactlyInAnyOrder("insert", "deleteByAuditRef",
-                "findDecideAuditRefs");
+        assertThat(repositoryMethods).as("寫入埠的方法：兩個寫入加重送閘與登記同步的唯讀查詢").containsExactlyInAnyOrder("insert", "deleteByAuditRef",
+                "findDecideAuditRefs", "findRegistryWrites");
         assertThat(queryMethods).as("讀埠的方法：回填與唯讀查詢").containsExactlyInAnyOrder("findRecent", "findExistingAuditRefs",
                 "findObsAddRefsWithoutSubject", "fillSubjectId", "findDecideRows");
         Set<String> all = new TreeSet<>(repositoryMethods);
@@ -340,7 +361,7 @@ class SiReadOnlyArchTest {
 
         // 兩個埠的方法集合同步，且新方法名同時出現在介面與配接器
         assertThat(methodNames(SiConsoleWriteRepository.class)).as("寫入埠的方法集合").containsExactlyInAnyOrder("insert", "deleteByAuditRef",
-                "findDecideAuditRefs");
+                "findDecideAuditRefs", "findRegistryWrites");
         assertThat(methodNames(SiConsoleWriteQueries.class)).as("對帳讀埠的方法集合").containsExactlyInAnyOrder("findRecent",
                 "findExistingAuditRefs", "findObsAddRefsWithoutSubject", "fillSubjectId", "findDecideRows");
         assertThat(repositorySource).as("寫入埠介面").contains("findDecideAuditRefs");

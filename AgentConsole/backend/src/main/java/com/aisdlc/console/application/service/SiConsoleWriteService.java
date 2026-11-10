@@ -4,6 +4,7 @@ import com.aisdlc.console.application.port.in.SiMirrorUseCase;
 import com.aisdlc.console.application.port.in.SiWriteUseCase;
 import com.aisdlc.console.application.port.out.AgentBridge;
 import com.aisdlc.console.application.port.out.AgentBridge.BridgeRejectedException;
+import com.aisdlc.console.application.port.out.ResearchBridge;
 import com.aisdlc.console.application.port.out.SiAuditRefSource;
 import com.aisdlc.console.application.port.out.SiConsoleWriteRepository;
 import com.aisdlc.console.application.port.out.SiWriteSettings;
@@ -11,6 +12,7 @@ import com.aisdlc.console.domain.exception.ConflictException;
 import com.aisdlc.console.domain.exception.ErrorReasons;
 import com.aisdlc.console.domain.exception.ForbiddenException;
 import com.aisdlc.console.domain.exception.ServiceUnavailableException;
+import com.aisdlc.console.domain.exception.UnprocessableException;
 import com.aisdlc.console.domain.exception.UpstreamException;
 import com.aisdlc.console.domain.model.si.SiCloseCommand;
 import com.aisdlc.console.domain.model.si.SiConsoleWrite;
@@ -64,15 +66,20 @@ public class SiConsoleWriteService implements SiWriteUseCase {
     private final SiConsoleWriteRepository repository;
     private final AgentBridge bridge;
     private final SiMirrorUseCase mirror;
+    private final ResearchBridge researchBridge;
+    private final SiRegistryMirror registryMirror;
 
     public SiConsoleWriteService(SiWriteSettings settings, SiAuditSigner signer, SiAuditRefSource refs,
-                                 SiConsoleWriteRepository repository, AgentBridge bridge, SiMirrorUseCase mirror) {
+                                 SiConsoleWriteRepository repository, AgentBridge bridge, SiMirrorUseCase mirror,
+                                 ResearchBridge researchBridge, SiRegistryMirror registryMirror) {
         this.settings = settings;
         this.signer = signer;
         this.refs = refs;
         this.repository = repository;
         this.bridge = bridge;
         this.mirror = mirror;
+        this.researchBridge = researchBridge;
+        this.registryMirror = registryMirror;
     }
 
     @Override
@@ -184,6 +191,121 @@ public class SiConsoleWriteService implements SiWriteUseCase {
         }
     }
 
+    // ── 研究來源登記同步（研究來源單一化；API-SI-14、API-SI-15）─────────────────────────────────────
+
+    /** 取外層檔位元組數用的佔位 ref（與真 ref 同長，所以不影響位元組數）；絕不寫入任何地方。 */
+    private static final String PROBE_REF = "00000000-0000-4000-8000-000000000000";
+
+    /**
+     * 閘門序（先中者定案；序 4 至 6 任一拒絕＝零副作用）：授權、停用（序 1～3）→ 序 4 取 Bridge 快照 → 序 5 冪等檢查（讀 SI 鏡像與表內 src-registry 列）→ 序 6 外層檔位元組數
+     * （以簽章後的真位元組數現算，不用 {@code registry_text} 長度估計）→ 序 7 取 ref、簽章、INSERT、單次 Bridge 落檔（補償與結果不明同其他寫入）。
+     *
+     * <p>冪等只比「最新」（{@link #pendingOf}）：有最新待入帳寫入 {@code P} 時，當前 digest 等於 {@code P} 才是 {@code unchanged}（pending）；沒有 {@code P} 時，等於最新已入帳
+     * digest 才是 {@code unchanged}（synced）；其餘照常送出。{@code time} 取「時鐘現在」與「表內最晚一列的 time 加一秒」的較大者：根層以 {@code time} 單調性拒收較舊的稽核檔
+     * （REG-STALE），同一秒內的兩次不同內容同步若 time 相同，後者可能被誤當較舊而拒收。
+     */
+    @Override
+    public RegistrySyncResult syncResearchRegistry(String user) {
+        authorize(user);
+        ResearchBridge.RegistrySnapshot snapshot = snapshot();
+        SiRegistryMirror.Mirror ingested = readRegistryMirror();
+        List<SiConsoleWriteRepository.RegistryWrite> writes = repository.findRegistryWrites();
+        SiConsoleWriteRepository.RegistryWrite pending = pendingOf(writes, ingested);
+        String current = snapshot.registrySha256();
+        if (pending != null && current.equals(pending.digest())) {
+            return new RegistrySyncResult("unchanged", "pending", current, pending.auditRef().toString(), null, null, null);
+        }
+        if (pending == null && ingested.latest() != null && current.equals(ingested.latest().registrySha256())) {
+            return new RegistrySyncResult("unchanged", "synced", current, ingested.latest().auditRef(), null, null, null);
+        }
+        OffsetDateTime time = signer.now();
+        if (!writes.isEmpty() && !time.isAfter(writes.get(writes.size() - 1).time())) {
+            time = writes.get(writes.size() - 1).time().plusSeconds(1);
+        }
+        String timeText = SiAuditSigner.formatTime(time);
+        int size = signer.sign(SiWriteKind.SRC_REGISTRY, PROBE_REF, null,
+                signer.registrySyncBody(PROBE_REF, user, timeText, snapshot.registryText(), current), settings.keyRing()).fileBytes().length;
+        if (size > SiAuditSigner.AUDIT_FILE_MAX_BYTES) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("what", "audit_file");
+            details.put("limit", SiAuditSigner.AUDIT_FILE_MAX_BYTES);
+            details.put("size", size);
+            throw new UnprocessableException("簽章後的稽核檔 " + size + " 位元組，超過上限 " + SiAuditSigner.AUDIT_FILE_MAX_BYTES,
+                    ErrorReasons.REGISTRY_TOO_LARGE, details);
+        }
+        Receipt receipt = write(SiWriteKind.SRC_REGISTRY, user, null, current,
+                (ref, t) -> signer.registrySyncBody(ref, user, t, snapshot.registryText(), current), bridge::siWriteRegistrySync, time);
+        return new RegistrySyncResult("written", "pending", current, receipt.auditRef(), receipt.kind(), receipt.time(), receipt.keyId());
+    }
+
+    /**
+     * 狀態判定序：取快照（失敗照 502／503／504 丟出，沒有當前 digest 就沒有狀態）→ 讀鏡像（讀不到＝200 的 {@code unknown}）→ 求最新待入帳寫入 {@code P} →
+     * 有 {@code P}：digest 等於當前＝pending、否則 unsynced；沒有 {@code P}：最新已入帳 digest 等於當前＝synced、否則 unsynced。
+     */
+    @Override
+    public RegistrySyncStatus researchRegistryStatus() {
+        String current = snapshot().registrySha256();
+        SiRegistryMirror.Mirror ingested;
+        try {
+            ingested = registryMirror.read();
+        } catch (SiRegistryMirror.Unreadable e) {
+            return new RegistrySyncStatus("unknown", e.cause(), current, null, null, null, null, null);
+        }
+        SiConsoleWriteRepository.RegistryWrite pending = pendingOf(repository.findRegistryWrites(), ingested);
+        String ingestedSha = ingested.latest() == null ? null : ingested.latest().registrySha256();
+        String ingestedRef = ingested.latest() == null ? null : ingested.latest().auditRef();
+        String state;
+        if (pending != null) {
+            state = current.equals(pending.digest()) ? "pending" : "unsynced";
+        } else {
+            state = current.equals(ingestedSha) ? "synced" : "unsynced";
+        }
+        boolean showPending = pending != null && "pending".equals(state);
+        return new RegistrySyncStatus(state, null, current, ingestedSha, ingestedRef,
+                showPending ? pending.auditRef().toString() : null, showPending ? SiAuditSigner.formatTime(pending.time()) : null,
+                ingested.researchFetchMax());
+    }
+
+    private ResearchBridge.RegistrySnapshot snapshot() {
+        try {
+            return researchBridge.registry();
+        } catch (BridgeRejectedException e) {
+            throw ResearchBridgeErrors.map(e);
+        }
+    }
+
+    private SiRegistryMirror.Mirror readRegistryMirror() {
+        try {
+            return registryMirror.read();
+        } catch (SiRegistryMirror.Unreadable e) {
+            throw new ServiceUnavailableException("讀不到 SelfImproving 鏡像，無法判定登記是否已同步（不當成「從未同步」）", ErrorReasons.SI_UNAVAILABLE,
+                    Map.of("cause", e.cause()));
+        }
+    }
+
+    /**
+     * 「最新待入帳寫入」{@code P}：表內 src-registry 列中 {@code audit_ref} 不在已入帳集合者裡 {@code time} 最大的一列（{@code writes} 已依 time、audit_ref 升冪，取最後一個）。
+     * 最新已入帳者在表內有對應列時，只計 {@code time} 晚於該列者——更舊的未入帳列會被根層以 REG-STALE 拒收，不算「更新的待入帳寫入」；該 ref 不在表內（他處寫入）時計全部未入帳列。
+     */
+    private static SiConsoleWriteRepository.RegistryWrite pendingOf(List<SiConsoleWriteRepository.RegistryWrite> writes, SiRegistryMirror.Mirror mirrorState) {
+        OffsetDateTime floor = null;
+        if (mirrorState.latest() != null) {
+            for (SiConsoleWriteRepository.RegistryWrite write : writes) {
+                if (write.auditRef().toString().equals(mirrorState.latest().auditRef())) {
+                    floor = write.time();
+                }
+            }
+        }
+        SiConsoleWriteRepository.RegistryWrite pending = null;
+        for (SiConsoleWriteRepository.RegistryWrite write : writes) {
+            if (mirrorState.ingestedRefs().contains(write.auditRef().toString()) || (floor != null && !write.time().isAfter(floor))) {
+                continue;
+            }
+            pending = write;
+        }
+        return pending;
+    }
+
     // ── 閘門序的前兩關（授權、停用）────────────────────────────────────────────────────────────
 
     private void authorize(String user) {
@@ -237,12 +359,16 @@ public class SiConsoleWriteService implements SiWriteUseCase {
 
     private Receipt write(SiWriteKind kind, String user, String subject, String digest,
                           BiFunction<String, String, String> bodyOf, Consumer<String> send) {
+        return write(kind, user, subject, digest, bodyOf, send, signer.now());
+    }
+
+    private Receipt write(SiWriteKind kind, String user, String subject, String digest,
+                          BiFunction<String, String, String> bodyOf, Consumer<String> send, OffsetDateTime time) {
         String ref = refs.next();
         UUID auditRef = UUID.fromString(ref);
         if (!ref.equals(auditRef.toString())) {
             throw new IllegalStateException("audit_ref 須為小寫正規 UUID（Bridge 與根層 CLI 都只收這個形態）");
         }
-        OffsetDateTime time = signer.now();
         String timeText = SiAuditSigner.formatTime(time);
         SiAuditSigner.SignedAudit signed = signer.sign(kind, ref, subject, bodyOf.apply(ref, timeText), settings.keyRing());
         repository.insert(new SiConsoleWrite(auditRef, kind, user, SiAuditSigner.ROLE, time, subject, digest, signed.body(),

@@ -445,6 +445,11 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
         return siWrite("/si/runs:request", audit);
     }
 
+    @Override
+    public SiWriteAck siWriteRegistrySync(String audit) {
+        return siWrite("/si/registry:sync", audit);
+    }
+
     /**
      * 稽核檔落地的共同路徑：附 {@code X-Bridge-Token}（沒有權杖就不發出請求）、本文為稽核 JSON 全文的 UTF-8 位元組、不重試。
      * 2xx 但本文不是 {@code {audit_ref, stored:true}} → {@link UpstreamException.Failure}（{@code bridgeStatus}＝200：檔可能已落地，結果不明）。
@@ -628,6 +633,34 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
     @Override
     public Map<String, Object> patchAllowlistEntry(String entryId, Map<String, Object> body) {
         return researchWrite(HttpMethod.PATCH, "/research/allowlist/" + pathSegment(entryId), body);
+    }
+
+    @Override
+    public Map<String, Object> watchSources() {
+        Object doc = research(() -> getJson(endpoints.researchBase() + "/research/watch-sources", Map.of(), RESEARCH_READ_TIMEOUT, 0));
+        if (!(doc instanceof Map<?, ?>)) {
+            throw malformed("GET /research/watch-sources");
+        }
+        return asMap(doc);
+    }
+
+    @Override
+    public Map<String, Object> addWatchSource(Map<String, Object> body) {
+        return researchWrite(HttpMethod.POST, "/research/watch-sources", body);
+    }
+
+    @Override
+    public Map<String, Object> patchWatchSource(String slug, Map<String, Object> body) {
+        return researchWrite(HttpMethod.PATCH, "/research/watch-sources/" + pathSegment(slug), body);
+    }
+
+    @Override
+    public RegistrySnapshot registry() {
+        Map<String, Object> doc = asMap(research(() -> getJson(endpoints.researchBase() + "/research/registry", Map.of(), RESEARCH_READ_TIMEOUT, 0)));
+        if (!(doc.get("registry_text") instanceof String text) || !(doc.get("registry_sha256") instanceof String sha)) {
+            throw malformed("GET /research/registry");
+        }
+        return new RegistrySnapshot(text, sha);
     }
 
     /**

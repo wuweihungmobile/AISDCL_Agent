@@ -409,6 +409,12 @@ public interface AgentBridge {
     SiWriteAck siWriteRunRequest(String audit);
 
     /**
+     * {@code POST /si/registry:sync}（研究來源單一化：登記同步的稽核檔落地；無路徑參數、外層 subject 為 null、kind 為 {@code src-registry}）；其餘同
+     * {@link #siWriteDecide}。外層檔上限 65536 位元組（Bridge 的 {@code SI_WRITE_BODY_MAX_BYTES}），呼叫端先以位元組數現算。
+     */
+    SiWriteAck siWriteRegistrySync(String audit);
+
+    /**
      * {@code POST /si/observations:validate}（P2b；W4、W11）：唯讀預檢＝根層 {@code obs-add --dry-run}。<b>不帶權杖</b>、不落檔；
      * 本文是<b>未簽</b>的觀察 body（無 {@code audit_ref}、{@code key_id}、{@code mac}）。連線 2 秒／讀取 20 秒、不重試。
      * 錯誤約定同 {@link #siExport}（503 {@code si_unavailable} 與 4xx 為 {@link BridgeRejectedException}）。

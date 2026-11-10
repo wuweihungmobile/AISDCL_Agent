@@ -128,6 +128,9 @@ class OpenApiIT extends AbstractApiIT {
             // ── SelfImproving P4（TCS-SelfImprovingSchedule W-S7）：排程設定與立即啟動（僅 ADMIN；路徑 114→116、操作 131→133）──
             Map.entry("/api/v1/si/schedule/set", List.of("post")),
             Map.entry("/api/v1/si/runs/request", List.of("post")),
+            // ── 研究來源單一化（TCS-ResearchRegistry）：登記同步狀態（GET）與同步（POST，僅 ADMIN）──
+            Map.entry("/api/v1/si/research-registry", List.of("get")),
+            Map.entry("/api/v1/si/research-registry/sync", List.of("post")),
             // ── 議題中心：兩個唯讀 GET 與僅 ADMIN 的優先順序寫入（PUT、DELETE）──
             Map.entry("/api/v1/issues", List.of("get")),
             Map.entry("/api/v1/issues/{id}", List.of("get")),
@@ -161,6 +164,9 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/research/projects/{id}/return", List.of("post")),
             Map.entry("/api/v1/research/allowlist", List.of("get", "post")),
             Map.entry("/api/v1/research/allowlist/{id}", List.of("patch")),
+            // 研究來源單一化（TCS-ResearchRegistry）：追蹤來源 2 條路徑、3 個操作（沒有 delete）
+            Map.entry("/api/v1/research/watch-sources", List.of("get", "post")),
+            Map.entry("/api/v1/research/watch-sources/{slug}", List.of("patch")),
         // ── ResearchToPRD P1（TCS-ResearchToPRD-P1 AT-961-15-3）：新增 6 條路徑、9 個操作（同路徑的 get 與 post 合併計一條）──
         Map.entry("/api/v1/research/projects/{id}/route/preview", List.of("post")),
         Map.entry("/api/v1/research/projects/{id}/route", List.of("get", "post")),
@@ -178,8 +184,8 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/research/projects/{id}/delivery/traceability", List.of("get"))));
 
     /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
-    private static final int EXPECTED_PATH_COUNT = 116;   // P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
-    private static final int EXPECTED_OPERATION_COUNT = 133;   // P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
+    private static final int EXPECTED_PATH_COUNT = 120;   // 研究來源單一化＋4（watch-sources、watch-sources/{slug}、si/research-registry、si/research-registry/sync）；P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
+    private static final int EXPECTED_OPERATION_COUNT = 138;   // 研究來源單一化＋5（watch 三個、SI 兩個）；P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -216,7 +222,7 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
                 "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
                 "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes",
-                "/api/v1/si/schedule/set", "/api/v1/si/runs/request");
+                "/api/v1/si/schedule/set", "/api/v1/si/runs/request", "/api/v1/si/research-registry", "/api/v1/si/research-registry/sync");
         assertThat(paths).hasSize(EXPECTED_PATH_COUNT);
         for (String path : si) {
             Map<String, Object> operations = docs.read("$.paths['" + path + "']");
@@ -292,15 +298,15 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.responses['503'].description"))
                 .as("取不到界的 503 載明 cause").contains("schedule_bounds_unavailable");
         assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.description")).contains("schedule_bounds_unavailable");
-        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("路徑總數＝修改前現值 114 加 2").hasSize(116);
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("路徑總數＝修改前現值 116 加 4（研究來源單一化）").hasSize(120);
         int operations = 0;
         for (Object path : docs.<Map<String, Object>>read("$.paths").values()) {
             operations += ((Map<?, ?>) path).size();
         }
-        assertThat(operations).as("操作總數＝修改前現值 131 加 2").isEqualTo(133);
+        assertThat(operations).as("操作總數＝修改前現值 133 加 5（研究來源單一化）").isEqualTo(138);
         assertThat(java.util.Arrays.stream(com.aisdlc.console.domain.model.si.SiWriteKind.values())
                 .map(com.aisdlc.console.domain.model.si.SiWriteKind::wire).toList())
-                .as("SiWriteKind 全等為五值").containsExactly("decide", "obs-add", "obs-close", "sched-set", "run-request");
+                .as("SiWriteKind 全等為六值").containsExactly("decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry");
     }
 
     /** AT-962-24-3：七個 P2 操作的 operationId 逐字、路徑與方法固定，寫入端點文件化 409／422／502／503／504，讀端含 401 與 404（狀態碼集合另由三表逐一鎖住）。 */
@@ -1112,6 +1118,10 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("get /api/v1/research/allowlist", "listResearchAllowlist"),
             Map.entry("post /api/v1/research/allowlist", "addResearchAllowlistEntry"),
             Map.entry("patch /api/v1/research/allowlist/{id}", "updateResearchAllowlistEntry"),
+            // 研究來源單一化的三個 operationId（TCS-ResearchRegistry AT-965-5-6）
+            Map.entry("get /api/v1/research/watch-sources", "listResearchWatchSources"),
+            Map.entry("post /api/v1/research/watch-sources", "addResearchWatchSource"),
+            Map.entry("patch /api/v1/research/watch-sources/{slug}", "updateResearchWatchSource"),
             // P1 的九個 operationId（D-118 ⚖P1-24）
             Map.entry("post /api/v1/research/projects/{id}/route/preview", "previewResearchRoute"),
             Map.entry("post /api/v1/research/projects/{id}/route", "routeResearchProject"),
@@ -1166,6 +1176,10 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("get /api/v1/research/allowlist", codes("200", "401", "429", "502", "503", "504")),
             Map.entry("post /api/v1/research/allowlist", codes("201", "400", "401", "403", "409", "422", "429", "502", "503", "504")),
             Map.entry("patch /api/v1/research/allowlist/{id}", codes("200", "400", "401", "403", "404", "422", "429", "502", "503", "504")),
+            // 研究來源單一化的三個操作（PATCH 沒有 409：只有 enabled 一鍵、不存在是 404）
+            Map.entry("get /api/v1/research/watch-sources", codes("200", "401", "429", "502", "503", "504")),
+            Map.entry("post /api/v1/research/watch-sources", codes("201", "400", "401", "403", "409", "422", "429", "502", "503", "504")),
+            Map.entry("patch /api/v1/research/watch-sources/{slug}", codes("200", "400", "401", "403", "404", "422", "429", "502", "503", "504")),
             // P1 的九個操作
             Map.entry("post /api/v1/research/projects/{id}/route/preview", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
             Map.entry("post /api/v1/research/projects/{id}/route", codes("200", "400", "401", "403", "404", "409", "422", "429", "502", "503", "504")),
@@ -1194,7 +1208,7 @@ class OpenApiIT extends AbstractApiIT {
         Map<String, Object> paths = docs.read("$.paths");
         List<String> researchPaths = paths.keySet().stream().filter(OpenApiIT::isResearchPath).sorted().toList();
 
-        assertThat(researchPaths).as("研究路徑 37 條：P0 的 24 條加 P1 的 6 條加 P2 的 7 條").hasSize(37);
+        assertThat(researchPaths).as("研究路徑 39 條：P0 的 24 條加 P1 的 6 條加 P2 的 7 條加研究來源單一化的 2 條").hasSize(39);
         int operations = 0;
         for (String path : researchPaths) {
             Map<String, Object> methods = docs.read("$.paths['" + path + "']");
@@ -1202,8 +1216,8 @@ class OpenApiIT extends AbstractApiIT {
             assertThat(new TreeSet<>(methods.keySet())).as(path).containsExactlyElementsOf(EXPECTED.get(path));
             operations += methods.size();
         }
-        assertThat(operations).as("研究面的操作總數（P0 的 26 加 P1 的 9 加 P2 的 7）").isEqualTo(42);
-        assertThat(RESEARCH_OPERATION_IDS).as("有 operationId 的研究操作：P0 的 25 加 P1 的 9 加 P2 的 7＝41（SSE 沒有）").hasSize(41);
+        assertThat(operations).as("研究面的操作總數（P0 的 26 加 P1 的 9 加 P2 的 7 加研究來源單一化的 3）").isEqualTo(45);
+        assertThat(RESEARCH_OPERATION_IDS).as("有 operationId 的研究操作：P0 的 25 加 P1 的 9 加 P2 的 7 加研究來源單一化的 3＝44（SSE 沒有）").hasSize(44);
         for (Map.Entry<String, String> expected : RESEARCH_OPERATION_IDS.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);
@@ -1222,7 +1236,7 @@ class OpenApiIT extends AbstractApiIT {
     void AT_960_5_5_everyResearchOperationDocumentsExactlyTheStatusCodesItCanReturn() {
         Resp docs = docs();
 
-        assertThat(RESEARCH_STATUS_CODES).as("42 個研究操作").hasSize(42);
+        assertThat(RESEARCH_STATUS_CODES).as("45 個研究操作").hasSize(45);
         for (Map.Entry<String, Set<String>> expected : RESEARCH_STATUS_CODES.entrySet()) {
             String method = expected.getKey().substring(0, expected.getKey().indexOf(' '));
             String path = expected.getKey().substring(expected.getKey().indexOf(' ') + 1);

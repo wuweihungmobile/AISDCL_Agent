@@ -413,6 +413,46 @@ describe("AT_960_19_8 停用與啟用：PATCH 本文只有 enabled", () => {
 });
 
 // TCS-ConsoleUxSortHelp-20261108 AT-963-3-10（T8 允許清單；D-UX-5：主機是識別欄）
+describe("AT_965_8_8 角色、共用說明與追蹤來源區（TCS-ResearchRegistry-20261110；既有 AT_960_19_8 案例不退步）", () => {
+  it("AT_965_8_8 OPERATOR 與 VIEWER 不渲染入口，也不發任何 watch-sources 或 research-registry 請求（含開啟前後）", () => {
+    for (const role of ["OPERATOR", "VIEWER"] as const) {
+      const { calls, unmount } = mountDialog(role);
+      expect(openButton(), role).toBeNull();
+      expect(
+        calls.filter((c) => /\/watch-sources|\/research-registry/.test(c.path)),
+        role,
+      ).toEqual([]);
+      unmount();
+    }
+  });
+
+  it("AT_965_8_8 ADMIN 開啟後：網域清單區有說明句「研發工作流與自我進化共用這份網域清單」；追蹤來源區位於網域區之後且有獨立標題與 aria-labelledby", async () => {
+    const user = userEvent.setup();
+    mountDialog("ADMIN");
+    const dialog = await openDialog(user);
+    const note = await within(dialog).findByTestId("allowlist-shared-note");
+    expect(note).toHaveTextContent("研發工作流與自我進化共用這份網域清單");
+    const section = within(dialog).getByTestId("watch-sources-section");
+    const heading = within(section).getByRole("heading", { name: "自我進化追蹤來源" });
+    expect(section.getAttribute("aria-labelledby")).toBe(heading.id);
+    // 文件順序：網域清單表、有效主機區、新增網域表單，最後才是追蹤來源區
+    const domainTable = await within(dialog).findByTestId("allowlist-table");
+    const addForm = within(dialog).getByRole("form", { name: "新增研究來源" });
+    expect(domainTable.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(addForm.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(note.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("AT_965_8_8 ADMIN 開啟時會讀追蹤來源清單與同步狀態（各一次以上），開啟前不讀", async () => {
+    const user = userEvent.setup();
+    const { calls } = mountDialog("ADMIN");
+    expect(calls.filter((c) => /\/watch-sources|\/research-registry/.test(c.path))).toEqual([]);
+    await openDialog(user);
+    await waitFor(() => expect(callsOf(calls, "GET", /\/research\/watch-sources$/).length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(callsOf(calls, "GET", /\/si\/research-registry$/).length).toBeGreaterThanOrEqual(1));
+  });
+});
+
 describe("AT_963_3_10 允許清單：預設主機自然序升冪與表頭排序", () => {
   const hosts = () => screen.getAllByTestId("allowlist-row").map((row) => row.getAttribute("data-host"));
 

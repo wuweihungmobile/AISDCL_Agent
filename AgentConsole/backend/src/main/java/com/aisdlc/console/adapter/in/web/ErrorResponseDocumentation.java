@@ -59,6 +59,8 @@ public class ErrorResponseDocumentation {
             "POST /api/v1/si/proposals/{id}/decide", "POST /api/v1/si/observations", "POST /api/v1/si/observations/{id}/close",
             // P4：排程設定與立即啟動（TCS-SelfImprovingSchedule W-S7）——同一條稽核管線，409 只有 si_audit_exists（這兩個端點不設重送閘）
             "POST /api/v1/si/schedule/set", "POST /api/v1/si/runs/request",
+            // 研究來源單一化：登記同步（同一條稽核管線；409 只有 si_audit_exists，冪等改以 200 unchanged 回報、不是 409）
+            "POST /api/v1/si/research-registry/sync",
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：設定順位時議題的狀態不可排（issue_not_rankable）
             "PUT /api/v1/issues/{id}/priority",
             // 系統管理／資料庫備份（TCS-SysAdminBackup-20261027 §C3.4）：已有進行中的工作、頻率上限
@@ -137,6 +139,25 @@ public class ErrorResponseDocumentation {
                     + "min 大於 max；details.detail 指出缺哪個鍵；零副作用）或 Bridge 的稽核目錄寫入失敗等／status 本身不可用（details.cause、details.detail 逐字）",
             "504", "引擎橋接服務逾時（讀取 20 秒、不重試）：取界的 GET status 逾時＝零副作用；執行階段的請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true");
 
+    /** 登記同步狀態與同步序 4（取 Bridge 登記快照）的上游失敗：沒有當前 digest 就沒有狀態，不降級成 unknown。 */
+    private static final Map<String, String> REGISTRY_UPSTREAM = Map.of(
+            "502", "bridge_unreachable：連不上 Engine Bridge（連線階段失敗）；或 Bridge 回了非預期的錯誤",
+            "503", "research_requires_db：Bridge 沒有 BRIDGE_DB_DSN；db_blocked：研究資料庫暫時不可用",
+            "504", "bridge_timeout：讀取逾時（讀取 10 秒、不重試）");
+
+    /**
+     * 登記同步（API-SI-15）的失敗：序 4 取快照（502／503／504，422 registry_too_large〔details.what=registry_text〕）、序 5 讀鏡像（503 si_unavailable，details.cause）、
+     * 序 6 外層檔超界（422 registry_too_large〔details.what=audit_file、limit、size〕），以及落檔階段（結果不明者保留稽核列並於 details.outcomeUnknown 標明）。序 4～6 零副作用。
+     */
+    private static final Map<String, String> REGISTRY_SYNC_FAILURES = Map.of(
+            "422", "registry_too_large：Bridge 的登記快照超過 24576 位元組（details.what=registry_text、limit、size），或簽章後的外層稽核檔超過 65536 位元組"
+                    + "（details.what=audit_file、limit、size；以位元組數現算）。零副作用；或 Bridge 拒絕此請求（reason 引擎拒絕此請求；details.bridgeReason、violations）",
+            "502", "引擎橋接服務無法連線／回了非預期的錯誤：取快照階段零副作用；落檔階段連線階段失敗與 5xx 已補償刪除稽核列，送出後連線重設與 2xx 本文無法解析的結果不明，"
+                    + "稽核列保留、details.outcomeUnknown＝true；含 Bridge 的 403 si_write_forbidden（兩端權杖設定不一致）",
+            "503", "si_write_disabled（backend 的金鑰或權杖未設：details.cause＝audit_key_unset｜bridge_token_unset）；research_requires_db（Bridge 沒有 BRIDGE_DB_DSN）；"
+                    + "si_unavailable（讀不到 SelfImproving 鏡像：details.cause＝scan_cap_exceeded｜si_unavailable｜bridge_unreachable｜bridge_timeout；零副作用——不把讀不到當成從未同步）",
+            "504", "bridge_timeout：取快照逾時（零副作用）；或落檔讀取逾時（讀取 20 秒、不重試）：請求已送出、結果不明，稽核列保留、details.outcomeUnknown＝true");
+
     /** 預檢的失敗：同一關（授權、停用、輸入閘），沒有稽核列也不落檔，所以沒有補償或結果不明的問題。 */
     private static final Map<String, String> SI_VALIDATE_FAILURES = Map.of(
             "422", "輸入閘未通過（reason invalid_request；details.violations 一次全列）或 Bridge 拒絕此請求（reason 引擎拒絕此請求）",
@@ -189,6 +210,9 @@ public class ErrorResponseDocumentation {
             // P4：排程設定（含序 5′ 取界）與立即啟動（無序 5′，失敗表同決定端點）
             Map.entry("POST /api/v1/si/schedule/set", SI_SCHEDULE_FAILURES),
             Map.entry("POST /api/v1/si/runs/request", SI_WRITE_FAILURES),
+            // 研究來源單一化：同步狀態（GET；快照失敗照研究面的 502／503／504，鏡像讀不到不是錯誤——200 的 unknown）與登記同步（POST）
+            Map.entry("GET /api/v1/si/research-registry", REGISTRY_UPSTREAM),
+            Map.entry("POST /api/v1/si/research-registry/sync", REGISTRY_SYNC_FAILURES),
             // 議題中心（TCS-IssueCenter-20261027 D-C14）：兩個 GET 與 PUT 呼叫 Bridge（422／502／503／504）；DELETE 不呼叫 Bridge，只有 id 格式的 422
             Map.entry("GET /api/v1/issues", issueFailures("引擎拒絕此請求（details.bridgeReason=invalid_request；status、source 超過 64 字元、以 - 起頭"
                     + "或含控制字元）。篩選值本身不認得（含空字串）不是 422，而是 503 si_unavailable（cause=nonzero_rc）")),

@@ -30,7 +30,11 @@ import type {
   ResearchRouteDecision,
   ResearchRoutePreview,
   ResearchSource,
+  RegistrySyncStatus,
+  WatchSource,
+  WatchSourceRequest,
 } from "@/lib/api/types";
+import { REGISTRY_STATUS, SYNC_WRITTEN } from "@/tests/fixtures/research/registry";
 import { CONSOLE_PROJECT_ID, CONSOLE_PROJECT_NAME } from "@/tests/fixtures/research/ids";
 import { eventPage, EVENTS } from "@/tests/fixtures/research/events";
 import { FSM_HUMAN_PENDING } from "@/tests/fixtures/research/fsm";
@@ -60,6 +64,9 @@ export type ResearchStubOptions = {
   rounds: ResearchReviewRound[];
   fsm: ResearchFsmView;
   allowlist: ResearchAllowlistEntry[];
+  /** 研究來源單一化：追蹤來源清單（活物件；POST／PATCH 會改它）與同步狀態 */
+  watchSources: WatchSource[];
+  registryStatus: RegistrySyncStatus;
   audit: ResearchRecordsAudit;
   /** Console 專案清單（頁首依 `consoleProjectId` 顯示關聯的專案名） */
   consoleProjects: Array<{ id: string; name: string }>;
@@ -92,6 +99,8 @@ const DEFAULTS = (): ResearchStubOptions => ({
   rounds: FAIL3_ROUNDS,
   fsm: FSM_HUMAN_PENDING,
   allowlist: ALLOWLIST,
+  watchSources: [],
+  registryStatus: REGISTRY_STATUS("unsynced"),
   audit: RECORDS_AUDIT,
   consoleProjects: [{ id: CONSOLE_PROJECT_ID, name: CONSOLE_PROJECT_NAME }],
   execution: { globalTokenBudget: "1000000", tokenBudgetWarningThreshold: "0.8" },
@@ -146,6 +155,32 @@ export function stubResearchApi(patch: Partial<ResearchStubOptions> = {}): { cal
       return options.capabilities === "error" ? failure(503, { message: "Bridge 不可用", reason: "bridge_unreachable" }) : { data: options.capabilities };
     }
     if (method === "GET" && path === "/api/v1/research/allowlist") return { data: options.allowlist };
+    // 研究來源單一化（TCS-ResearchRegistry-20261110 §4.1）：追蹤來源清單（預設空）與同步狀態（預設 unsynced）；POST／PATCH 改活物件、sync 回 201 written
+    if (method === "GET" && path === "/api/v1/research/watch-sources") return { data: options.watchSources };
+    if (method === "POST" && path === "/api/v1/research/watch-sources") {
+      const body = call.body as WatchSourceRequest;
+      const created: WatchSource = {
+        ...body,
+        host: body.url.slice("https://".length).split(/[/?]/)[0],
+        enabled: true,
+        hostAllowed: true,
+        addedBy: "admin",
+        addedAt: "2026-11-10T08:00:00Z",
+        disabledBy: null,
+        disabledAt: null,
+      };
+      options.watchSources = [...options.watchSources, created];
+      return { status: 201, data: created };
+    }
+    const watchPatch = /^\/api\/v1\/research\/watch-sources\/([^/]+)$/.exec(path);
+    if (method === "PATCH" && watchPatch) {
+      const slug = decodeURIComponent(watchPatch[1]);
+      const enabled = (call.body as { enabled: boolean }).enabled;
+      options.watchSources = options.watchSources.map((r) => (r.slug === slug ? { ...r, enabled, disabledBy: enabled ? null : "admin", disabledAt: enabled ? null : "2026-11-10T08:00:00Z" } : r));
+      return { data: options.watchSources.find((r) => r.slug === slug) };
+    }
+    if (method === "GET" && path === "/api/v1/si/research-registry") return { data: options.registryStatus };
+    if (method === "POST" && path === "/api/v1/si/research-registry/sync") return { status: 201, data: SYNC_WRITTEN };
     if (method === "GET" && path === "/api/v1/research/projects") {
       // 同真後端：清單預設不含已封存的專案，帶 `archived=true` 才列已封存的（TCS AT-960-4-6）
       const archived = call.query.get("archived") === "true";

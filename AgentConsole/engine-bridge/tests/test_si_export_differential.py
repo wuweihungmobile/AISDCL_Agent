@@ -185,7 +185,7 @@ def test_AT_932_1_E_2_the_golden_chain_is_a_real_subset_and_the_three_copies_agr
                     f"副本漂移：{copy} 與 {source} 不同。{REGEN_HINT}"
     # 四、黃金檔不含任何由 commit sha 衍生的值；可重現性負控
     texts = [p.read_text(encoding="utf-8") for d in (sup.GOLDEN_DIR, BACKEND_COPY, FRONTEND_COPY)
-             for p in sorted(d.glob("*.json"))]
+             for p in sorted(d.glob("*.json")) if not p.name.endswith(".audit.json")]  # G-S1 另有鎖
     assert len(texts) == 4 + 4 + 2
     for head in (head_a, head_b):
         assert re.fullmatch(r"[0-9a-f]{40}", head)

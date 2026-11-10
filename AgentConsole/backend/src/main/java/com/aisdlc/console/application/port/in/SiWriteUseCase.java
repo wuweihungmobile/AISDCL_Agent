@@ -78,4 +78,34 @@ public interface SiWriteUseCase {
 
     /** 唯讀預檢（根層 {@code obs-add --dry-run}）：不取 ref、不簽章、不寫資料庫、不落檔。 */
     SiValidation validateObservation(String user, ObservationInput input);
+
+    // ── 研究來源單一化（API 契約 §5A.4；API-SI-14、API-SI-15）──────────────────────────────────────
+
+    /**
+     * 登記同步的結果。
+     *
+     * @param outcome        {@code written}（201；新稽核檔已落地）｜{@code unchanged}（200；零副作用）
+     * @param state          {@code pending}（稽核檔已落地、待入帳）｜{@code synced}（只有 unchanged 且已入帳時）
+     * @param registrySha256 本次同步的登記快照 digest
+     * @param auditRef       written＝新稽核檔的編號；unchanged＝已存在那一份（待入帳者或最新已入帳者）的編號
+     * @param kind           {@code src-registry}（unchanged 時 null）
+     * @param time           稽核 body 的 time（unchanged 時 null）
+     * @param keyId          簽章金鑰 sha256 前 8 碼（unchanged 時 null）
+     */
+    record RegistrySyncResult(String outcome, String state, String registrySha256, String auditRef, String kind, String time, String keyId) {
+    }
+
+    /** 登記同步狀態（API-SI-14）：{@code state}＝{@code synced｜unsynced｜pending｜unknown}；{@code unknown} 時 {@code unknownCause} 非 null、其餘欄皆 null（{@code currentSha256} 除外）。 */
+    record RegistrySyncStatus(String state, String unknownCause, String currentSha256, String ingestedSha256, String ingestedAuditRef,
+                              String pendingAuditRef, String pendingTime, Integer researchFetchMax) {
+    }
+
+    /**
+     * 把 Bridge 當下的登記快照簽成稽核檔送去落地（API-SI-15）。閘門序（先中者定案）：授權→停用→取 Bridge 快照→冪等檢查（讀鏡像與表內列）→外層檔位元組數→取 ref、簽章、INSERT、單次
+     * Bridge 落檔；序 4 至 6 任一拒絕＝零副作用。冪等只比「最新」：有更新的待入帳寫入時，當前 digest 須等於它才算 {@code unchanged}。
+     */
+    RegistrySyncResult syncResearchRegistry(String user);
+
+    /** 登記同步狀態（API-SI-14；VIEWER 以上可讀）：沒有當前 digest 就沒有狀態——取快照失敗照 502／503／504 丟出，不降級成 unknown。 */
+    RegistrySyncStatus researchRegistryStatus();
 }

@@ -161,6 +161,74 @@ class MiniResearchController {
         return json(200, entry);
     }
 
+    // ── 研究來源單一化：追蹤來源與登記快照（對照 routers/research.py 的 /research/watch-sources 與 /research/registry）────────────
+
+    @GetMapping("/research/watch-sources")
+    ResponseEntity<Object> watchList(HttpServletRequest http) {
+        arrive(http, null);
+        MiniResearch.Reply scripted = research.script("watch.list");
+        if (scripted != null) {
+            return reply(scripted);
+        }
+        return research.db ? json(200, map("items", research.watchSources)) : error(503, "research_requires_db");
+    }
+
+    @PostMapping("/research/watch-sources")
+    ResponseEntity<Object> watchAdd(HttpServletRequest http, @RequestBody Map<String, Object> body) {
+        arrive(http, body);
+        MiniResearch.Reply scripted = research.script("watch.add");
+        if (scripted != null) {
+            return reply(scripted);
+        }
+        ResponseEntity<Object> denied = writeGate(http);
+        if (denied != null) {
+            return denied;
+        }
+        String slug = text(body.get("slug"));
+        if (research.watchSources.stream().anyMatch(w -> w.get("slug").equals(slug))) {
+            return error(409, "watch_source_exists", "details", map("slug", slug));
+        }
+        String url = text(body.get("url"));
+        String host = url == null ? "" : url.replaceFirst("^https://", "").split("[/?]", 2)[0];
+        Map<String, Object> entry = map("slug", slug, "url", url, "host", host, "kind", body.get("kind"), "extract", body.get("extract"), "layer", body.get("layer"),
+                "expand", body.get("expand"), "enabled", true, "host_allowed", true, "added_by", body.get("added_by"), "added_at", "2026-11-10T01:00:00+00:00",
+                "disabled_by", null, "disabled_at", null);
+        research.watchSources.add(entry);
+        return json(201, entry);
+    }
+
+    @PatchMapping("/research/watch-sources/{slug}")
+    ResponseEntity<Object> watchPatch(HttpServletRequest http, @PathVariable String slug, @RequestBody Map<String, Object> body) {
+        arrive(http, body);
+        MiniResearch.Reply scripted = research.script("watch.patch");
+        if (scripted != null) {
+            return reply(scripted);
+        }
+        ResponseEntity<Object> denied = writeGate(http);
+        if (denied != null) {
+            return denied;
+        }
+        Map<String, Object> entry = research.watchSources.stream().filter(w -> w.get("slug").equals(slug)).findFirst().orElse(null);
+        if (entry == null) {
+            return error(404, "research_not_found", "details", map("slug", slug));
+        }
+        entry.put("enabled", body.get("enabled"));
+        entry.put("disabled_by", Boolean.TRUE.equals(body.get("enabled")) ? null : body.get("disabled_by"));
+        entry.put("disabled_at", Boolean.TRUE.equals(body.get("enabled")) ? null : "2026-11-10T02:00:00+00:00");
+        return json(200, entry);
+    }
+
+    @GetMapping("/research/registry")
+    ResponseEntity<Object> registry(HttpServletRequest http) {
+        arrive(http, null);
+        MiniResearch.Reply scripted = research.script("registry");
+        if (scripted != null) {
+            return reply(scripted);
+        }
+        return research.db ? json(200, map("registry_text", research.registryText, "registry_sha256", research.registrySha))
+                : error(503, "research_requires_db");
+    }
+
     // ── 專案 ─────────────────────────────────────────────────────────────────────────────
 
     @PostMapping("/research/projects")

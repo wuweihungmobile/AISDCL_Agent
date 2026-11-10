@@ -44,6 +44,8 @@ CONTROLLED_UPDATE_COLUMNS: dict[str, frozenset[str]] = {
         "status", "fixed_in_version_no", "waived_by", "waiver_reason", "resolved_at"}),
     "research_sources": frozenset({"verification"}),
     "research_allowlist_entries": frozenset({"enabled", "disabled_by", "disabled_at"}),
+    # 研究來源單一化（V24；追蹤來源只准改這三欄，同 allowlist）
+    "research_watch_sources": frozenset({"enabled", "disabled_by", "disabled_at"}),
     # P1（V19；與 V16 通用守衛函式的允許清單同義，`test_research_db` 對真庫逐表比對）
     "research_route_decisions": frozenset({
         "status", "failure_step", "finished_at", "repo_url", "published_docs",
@@ -311,6 +313,18 @@ _SQL_UPDATE_ALLOWLIST_ON = ("UPDATE {s}.research_allowlist_entries SET enabled =
 _SQL_UPDATE_ALLOWLIST_OFF = (
     "UPDATE {s}.research_allowlist_entries SET enabled = %s, disabled_by = %s, "
     "disabled_at = NOW() WHERE id = %s")
+_SQL_INSERT_WATCH = (
+    "INSERT INTO {s}.research_watch_sources (slug, url, kind, extract, layer, expand_mode, "
+    "expand_prefix, expand_max, added_by) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+    "RETURNING slug")
+_SQL_LOCK_WATCH = ("SELECT slug, enabled FROM {s}.research_watch_sources WHERE slug = %s "
+                   "FOR UPDATE")
+_SQL_UPDATE_WATCH_ON = (
+    "UPDATE {s}.research_watch_sources SET enabled = %s, disabled_by = NULL, disabled_at = NULL "
+    "WHERE slug = %s")
+_SQL_UPDATE_WATCH_OFF = (
+    "UPDATE {s}.research_watch_sources SET enabled = %s, disabled_by = %s, disabled_at = NOW() "
+    "WHERE slug = %s")
 
 
 # ── 交易 ───────────────────────────────────────────────────────────────────────────────────
@@ -907,6 +921,38 @@ def _op_set_allowlist_enabled(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str,
     return {"applied": True}
 
 
+def _op_add_watch_source(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """ADMIN 新增追蹤來源（研究來源單一化）。全域資源：**不寫 research_events**；slug 永不重用
+    （同 slug 一律 `watch_source_exists`，停用列也算）。輸入已由路由驗證。"""
+    expand = p.get("expand")
+    try:
+        row = tx.one(_SQL_INSERT_WATCH, (
+            p["slug"], p["url"], p["kind"], p["extract"], p["layer"],
+            expand["mode"] if expand else None, expand["prefix"] if expand else None,
+            expand["max"] if expand else None, p["added_by"]))
+    except psycopg.errors.UniqueViolation as exc:
+        raise ResearchConflict("watch_source_exists", slug=p["slug"]) from exc
+    assert row is not None
+    return {"applied": True, "slug": row["slug"]}
+
+
+def _op_set_watch_enabled(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
+    """停用／重新啟用追蹤來源（只改 enabled 與停用欄；重新啟用清空 `disabled_by`／`disabled_at`，
+    使快照對「從未停用」與「停用後重新啟用」給出相同內容）。不寫 research_events。"""
+    slug = str(p["slug"])
+    row = tx.one(_SQL_LOCK_WATCH, (slug,))
+    if row is None:
+        raise ResearchGuardError("watch_source_not_found", slug, slug=slug)
+    enabled = bool(p["enabled"])
+    if enabled == row["enabled"]:
+        return {"applied": False}
+    if enabled:
+        tx.run(_SQL_UPDATE_WATCH_ON, (True, slug))
+    else:
+        tx.run(_SQL_UPDATE_WATCH_OFF, (False, p["disabled_by"], slug))
+    return {"applied": True}
+
+
 # ── P1 分流操作（V19；Bridge 是 research_route_decisions／research_route_steps 的唯一寫入者）──────
 #: 分流的步驟名（V19 CHECK 的十一個值；軌道 A 與 B 各用其中一部分，順序見 `route.py`）。
 ROUTE_STEP_NAMES: tuple[str, ...] = (
@@ -1407,6 +1453,13 @@ def _op_delivery_record(tx: ResearchTx, p: Mapping[str, Any]) -> dict[str, Any]:
     return {"applied": True, "seq": seq, "delivery_id": delivery_id}
 
 
+#: 研究來源單一化的操作登記表（體例同 `P2_OPS`：不新增公開寫入方法，只經 `ResearchDb.apply`）。
+WATCH_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
+    "watch.add": _op_add_watch_source,
+    "watch.set_enabled": _op_set_watch_enabled,
+}
+
+
 #: P2 的操作登記表（體例同 `P1_OPS`：不新增公開寫入方法，只經 `DurableWriter.persist` 與
 #: `ResearchDb.apply(kind, …)` 呼叫）。
 P2_OPS: dict[str, Callable[[ResearchTx, Mapping[str, Any]], dict[str, Any]]] = {
@@ -1512,7 +1565,8 @@ class ResearchDb:
 
     def apply(self, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         """跑一個登記的操作（一個交易）；outbox 重放與公開寫入方法都走這裡。"""
-        fn = OPS.get(kind) or ROUTE_OPS.get(kind) or P1_OPS.get(kind) or P2_OPS.get(kind)
+        fn = (OPS.get(kind) or ROUTE_OPS.get(kind) or P1_OPS.get(kind) or P2_OPS.get(kind)
+              or WATCH_OPS.get(kind))
         if fn is None:
             raise ResearchGuardError("unknown_op", f"未登記的操作：{kind!r}")
         with self.transaction() as tx:
@@ -1772,3 +1826,10 @@ class ResearchDb:
             "SELECT id, list_kind, host, layer, purpose, tos_note, min_interval_seconds, "
             "enabled, tos_acknowledged, added_by, added_at, disabled_by, disabled_at "
             "FROM {s}.research_allowlist_entries ORDER BY list_kind, host")
+
+    def list_watch_sources(self) -> list[dict[str, Any]]:
+        """全部追蹤來源（含停用），依 `slug` 位元組序（`COLLATE "C"`）。"""
+        return self.query(
+            "SELECT slug, url, kind, extract, layer, expand_mode, expand_prefix, expand_max, "
+            "enabled, added_by, added_at, disabled_by, disabled_at "
+            'FROM {s}.research_watch_sources ORDER BY slug COLLATE "C"')

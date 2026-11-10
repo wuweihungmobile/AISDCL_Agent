@@ -22,13 +22,16 @@ import com.aisdlc.console.adapter.in.web.dto.research.ResearchReinitRequest;
 import com.aisdlc.console.adapter.in.web.dto.research.ResearchReturnRequest;
 import com.aisdlc.console.adapter.in.web.dto.research.ResearchSavePrdRequest;
 import com.aisdlc.console.adapter.in.web.dto.research.ResearchStageRequest;
+import com.aisdlc.console.adapter.in.web.dto.research.ResearchWatchSourceRequest;
 import com.aisdlc.console.adapter.in.web.dto.research.ReturnResultDto;
 import com.aisdlc.console.adapter.in.web.dto.research.ReviewRoundDto;
 import com.aisdlc.console.adapter.in.web.dto.research.SourceDto;
 import com.aisdlc.console.adapter.in.web.dto.research.StageStartedDto;
+import com.aisdlc.console.adapter.in.web.dto.research.WatchSourceDto;
 import com.aisdlc.console.application.port.in.ResearchCommandUseCase;
 import com.aisdlc.console.application.port.in.ResearchCommandUseCase.Caller;
 import com.aisdlc.console.application.port.in.ResearchQueryUseCase;
+import com.aisdlc.console.application.port.in.ResearchRegistryUseCase;
 import com.aisdlc.console.domain.model.auth.Role;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -80,10 +83,12 @@ public class ResearchController {
 
     private final ResearchQueryUseCase query;
     private final ResearchCommandUseCase command;
+    private final ResearchRegistryUseCase registry;
 
-    public ResearchController(ResearchQueryUseCase query, ResearchCommandUseCase command) {
+    public ResearchController(ResearchQueryUseCase query, ResearchCommandUseCase command, ResearchRegistryUseCase registry) {
         this.query = query;
         this.command = command;
+        this.registry = registry;
     }
 
     // ── 唯讀（VIEWER 以上）──────────────────────────────────────────────────────────────
@@ -194,6 +199,41 @@ public class ResearchController {
                     + "VIEWER 以上可讀。")
     public ApiResult<List<AllowlistEntryDto>> allowlist() {
         return ApiResult.ok(query.allowlist().stream().map(AllowlistEntryDto::from).toList());
+    }
+
+    @GetMapping("/watch-sources")
+    @Operation(operationId = "listResearchWatchSources", summary = "自我進化追蹤來源清單（API-RP-29；研究來源單一化）",
+            description = "研究來源設定的第二層（網址層）：全部追蹤來源（含已停用；依 slug 位元組序）。hostAllowed＝host 是否仍在當前有效網域清單（停用網域後追蹤來源列不動，"
+                    + "只是 hostAllowed 轉假）。轉 Bridge GET /research/watch-sources。VIEWER 以上可讀。")
+    public ApiResult<List<WatchSourceDto>> watchSources() {
+        return ApiResult.ok(registry.watchSources().stream().map(WatchSourceDto::from).toList());
+    }
+
+    @PostMapping("/watch-sources")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(operationId = "addResearchWatchSource", summary = "新增自我進化追蹤來源（API-RP-29；僅 ADMIN）",
+            description = "本文 {slug, url, kind, extract, layer, expand?}（expand 缺省或 null＝無；物件須恰含 mode、prefix、max）；本文含任何其他鍵（含 addedBy）＝400 unknown_field。"
+                    + "輸入閘（400，errors[] 一次全列；規則名 invalid_slug｜invalid_url｜invalid_kind｜invalid_layer｜invalid_extract｜invalid_expand）先於 Bridge；url 原樣判定、"
+                    + "不做任何正規化（大寫 host、顯式 :443、IP 字面一律拒絕，請自行改寫後重送）。單一閘：host 須在當前有效網域清單，否則 422 host_not_allowed（details.host）；"
+                    + "同 slug 已存在（含已停用者；slug 永不重用）＝409 watch_source_exists（details.slug）；假設寫入成功後的登記快照超過 24576 位元組＝422 registry_too_large（零寫入）。"
+                    + "成功 201 回條目，並以 AuditTrail 標註（audit_log 的 entity_type=research_watch_source、entity_id＝slug；不寫 research_events：全域資源）。新增後不會自動生效——"
+                    + "須再呼叫 POST /api/v1/si/research-registry/sync 把登記簽成稽核檔、待自我進化入帳。" + WRITE_FLOW,
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(required = true,
+                    content = @Content(schema = @Schema(implementation = ResearchWatchSourceRequest.class))))
+    public ApiResult<WatchSourceDto> addWatchSource(@RequestBody Map<String, Object> request, Authentication authentication) {
+        return ApiResult.created(WatchSourceDto.from(registry.addWatchSource(caller(authentication), request)));
+    }
+
+    @PatchMapping("/watch-sources/{slug}")
+    @Operation(operationId = "updateResearchWatchSource", summary = "停用／重新啟用追蹤來源（API-RP-29；僅 ADMIN）",
+            description = "只准改 enabled（不可刪除；slug 永不重用）：本文含 enabled 以外的任何鍵＝422 invalid_request、條目不變。停用人取 JWT subject；重新啟用清空停用欄，"
+                    + "且 host 須仍在當前有效網域清單（否則 422 host_not_allowed）。slug 不存在＝404 research_not_found（details.slug）。成功 200 回條目，並以 AuditTrail 標註"
+                    + "（entity_type=research_watch_source）。" + WRITE_FLOW,
+            requestBody = @io.swagger.v3.oas.annotations.parameters.RequestBody(required = true,
+                    content = @Content(schema = @Schema(implementation = ResearchAllowlistPatchRequest.class))))
+    public ApiResult<WatchSourceDto> updateWatchSource(@Parameter(description = "追蹤來源 slug") @PathVariable String slug,
+                                                       @RequestBody Map<String, Object> body, Authentication authentication) {
+        return ApiResult.ok(WatchSourceDto.from(registry.patchWatchSource(caller(authentication), slug, body)));
     }
 
     // ── 寫入（OPERATOR 以上；ADMIN 專屬者見各端點）──────────────────────────────────────────

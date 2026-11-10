@@ -788,12 +788,14 @@ def test_AT_964_8_4_the_route_census_grows_by_exactly_the_two_new_post_routes() 
     from app.routers import si as si_router
 
     routes = {(m, r.path) for r in si_router.router.routes for m in sorted(r.methods)}
-    assert len(si_router.router.routes) == SI_ROUTES_BEFORE_P4 + 2 == 14
-    assert len(routes) == 14, "每條路由恰一個方法"
+    # 研究來源單一化再加一條 POST：`/si/registry:sync`（登記同步稽核檔落地）
+    assert len(si_router.router.routes) == SI_ROUTES_BEFORE_P4 + 2 + 1 == 15
+    assert len(routes) == 15, "每條路由恰一個方法"
     posts = sorted(path for method, path in routes if method == "POST")
     assert posts == sorted([
         "/si/proposals/{id}:decide", "/si/observations", "/si/observations/{id}:close",
-        "/si/schedule:set", "/si/runs:request", "/si/observations:validate"]), posts
+        "/si/schedule:set", "/si/runs:request", "/si/observations:validate",
+        "/si/registry:sync"]), posts
     assert {v for v in P4_ROUTES.values()} <= routes
 
 

@@ -72,6 +72,13 @@ class SiConsoleWriteAdapter implements SiConsoleWriteRepository, SiConsoleWriteQ
     }
 
     @Override
+    public List<RegistryWrite> findRegistryWrites() {
+        return jdbc.query("select audit_ref, digest, \"time\" from console.si_console_writes where kind = 'src-registry' "
+                + "order by \"time\" asc, audit_ref asc",
+                (rs, n) -> new RegistryWrite(JdbcSupport.uuid(rs, "audit_ref"), rs.getString("digest"), rs.getObject("time", OffsetDateTime.class)));
+    }
+
+    @Override
     public List<SiConsoleWriteSummary> findRecent(int limit) {
         return jdbc.query("select " + SUMMARY_COLUMNS + " from console.si_console_writes order by \"time\" desc, audit_ref asc limit ?",
                 SUMMARY, limit);

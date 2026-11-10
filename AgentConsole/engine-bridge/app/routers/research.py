@@ -62,6 +62,13 @@ from ..research.orchestrator import (
     human_reason,
 )
 from ..research.outbox import DbBlocked, DurableWriter, FileRef, FileWrite, Op, Outbox
+from ..research.registry import (
+    RegistryTooLarge,
+    build_registry,
+    host_of,
+    utc_text,
+    watch_violations,
+)
 from ..research.settings import research_capabilities
 from ..sdd_state import ESCALATION_STATES
 from ..security import AuditLog, is_within
@@ -1131,6 +1138,145 @@ def patch_allowlist(entry_id: str, body: AllowlistPatchIn,
             raise
         entry = next(r for r in ctx.db.list_allowlist() if str(r["id"]) == entry_uuid)
     return _entry_out(entry)
+
+
+# ── 追蹤來源（研究來源單一化；API 契約 §5A.2、§5A.3；全域資源、不寫 research_events）──────────────
+_WATCH_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+
+
+def _valid_hosts(ctx: ResearchContext) -> set[str]:
+    """當前有效網域清單（FETCH ∪ WEB；部署基底 ∪ 啟用中的 ADMIN 條目）。"""
+    assert ctx.db is not None
+    effective = effective_allowlist(ctx.cfg, ctx.db.list_allowlist())
+    return {*effective["FETCH"], *effective["WEB"]}
+
+
+def _watch_out(row: dict[str, Any], hosts: set[str]) -> dict[str, Any]:
+    host = host_of(row["url"])
+    expand = None
+    if row["expand_mode"] is not None:
+        expand = {"mode": row["expand_mode"], "prefix": row["expand_prefix"],
+                  "max": int(row["expand_max"])}
+    return {"slug": row["slug"], "url": row["url"], "host": host, "kind": row["kind"],
+            "extract": row["extract"], "layer": row["layer"], "expand": expand,
+            "enabled": bool(row["enabled"]), "host_allowed": host in hosts,
+            "added_by": row["added_by"], "added_at": utc_text(row["added_at"]),
+            "disabled_by": row["disabled_by"], "disabled_at": utc_text(row["disabled_at"])}
+
+
+def _too_large(exc: RegistryTooLarge) -> ApiError:
+    return ApiError(422, "registry_too_large",
+                    details={"what": "registry_text", "limit": exc.limit, "size": exc.size})
+
+
+def _host_not_allowed(host: str) -> ApiError:
+    return ApiError(422, "host_not_allowed", details={"host": host},
+                    detail="這個網域還沒開放：請先在網域清單新增")
+
+
+@router.get("/watch-sources")
+def list_watch_sources(ctx: ResearchContext = Depends(read_gate)) -> dict[str, Any]:
+    assert ctx.db is not None
+    try:
+        rows, hosts = ctx.db.list_watch_sources(), _valid_hosts(ctx)
+    except ResearchDbError as exc:
+        raise ApiError(503, "db_blocked", detail=str(exc)[:300]) from exc
+    return {"items": [_watch_out(r, hosts) for r in rows]}
+
+
+@router.post("/watch-sources", status_code=201)
+def add_watch_source(body: dict[str, Any],
+                     ctx: ResearchContext = Depends(write_gate("watch.add"))) -> dict[str, Any]:
+    """檢查序（先中者定案）：輸入閘（六條規則一次全列，422 `invalid_request`）→ 單一閘（host 須在
+    有效網域清單，422 `host_not_allowed`）→ slug 重複（409 `watch_source_exists`）→ 大小閘（假設
+    寫入成功後的快照超過上限，422 `registry_too_large`）→ 寫入。任一關被拒＝零寫入。"""
+    assert ctx.db is not None
+    approver = body.get("added_by")
+    with operation(ctx, "watch.add", None, approver if isinstance(approver, str) else None):
+        problems = watch_violations({k: v for k, v in body.items() if k != "added_by"})
+        if not isinstance(approver, str) or not approver.strip() or len(approver) > 100 \
+                or any(ord(c) < 32 for c in approver):
+            problems.append(_violation("added_by", "invalid_subject", "added_by 須為 1～100 字"))
+        if problems:
+            raise unprocessable(problems, "invalid_request")
+        host = host_of(body["url"])
+        allow_rows, rows = ctx.db.list_allowlist(), ctx.db.list_watch_sources()
+        effective = effective_allowlist(ctx.cfg, allow_rows)
+        if host not in {*effective["FETCH"], *effective["WEB"]}:
+            raise _host_not_allowed(host)
+        if any(r["slug"] == body["slug"] for r in rows):
+            raise ApiError(409, "watch_source_exists", details={"slug": body["slug"]})
+        expand = body.get("expand")
+        candidate = {
+            "slug": body["slug"], "url": body["url"], "kind": body["kind"],
+            "extract": body["extract"], "layer": body["layer"],
+            "expand_mode": expand["mode"] if expand else None,
+            "expand_prefix": expand["prefix"] if expand else None,
+            "expand_max": expand["max"] if expand else None, "enabled": True,
+            "added_by": approver, "added_at": utc_now(), "disabled_by": None,
+            "disabled_at": None}
+        try:
+            build_registry(ctx.cfg.research_fetch_allowlist, ctx.cfg.research_web_allowlist,
+                           allow_rows, [*rows, candidate])
+        except RegistryTooLarge as exc:
+            raise _too_large(exc) from exc
+        ctx.db.apply("watch.add", {
+            "slug": body["slug"], "url": body["url"], "kind": body["kind"],
+            "extract": body["extract"], "layer": body["layer"], "expand": expand,
+            "added_by": approver})
+        row = next(r for r in ctx.db.list_watch_sources() if r["slug"] == body["slug"])
+    return _watch_out(row, _valid_hosts(ctx))
+
+
+class WatchPatchIn(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    enabled: bool
+    disabled_by: str | None = None
+
+
+@router.patch("/watch-sources/{slug}")
+def patch_watch_source(slug: str, body: WatchPatchIn,
+                       ctx: ResearchContext = Depends(write_gate("watch.patch"))
+                       ) -> dict[str, Any]:
+    """只准改 `enabled`（停用須帶 `disabled_by`；重新啟用清空停用欄並檢 host 仍在有效清單）。"""
+    assert ctx.db is not None
+    with operation(ctx, "watch.patch", None, body.disabled_by):
+        not_found = ApiError(404, "research_not_found", details={"slug": slug})
+        if not _WATCH_SLUG_RE.fullmatch(slug):
+            raise not_found
+        if not body.enabled:
+            _subject(body.disabled_by, "disabled_by")
+        row = next((r for r in ctx.db.list_watch_sources() if r["slug"] == slug), None)
+        if row is None:
+            raise not_found
+        if body.enabled:
+            host = host_of(row["url"])
+            if host not in _valid_hosts(ctx):
+                raise _host_not_allowed(host)
+        try:
+            ctx.db.apply("watch.set_enabled", {
+                "slug": slug, "enabled": body.enabled, "disabled_by": body.disabled_by})
+        except ResearchGuardError as exc:
+            if exc.rule == "watch_source_not_found":
+                raise not_found from exc
+            raise
+        row = next(r for r in ctx.db.list_watch_sources() if r["slug"] == slug)
+    return _watch_out(row, _valid_hosts(ctx))
+
+
+@router.get("/registry")
+def get_registry(ctx: ResearchContext = Depends(read_gate)) -> dict[str, str]:
+    """登記快照：Bridge 唯一產生者；不讀時鐘、不回部分內容。"""
+    assert ctx.db is not None
+    try:
+        text, sha = build_registry(ctx.cfg.research_fetch_allowlist, ctx.cfg.research_web_allowlist,
+                                   ctx.db.list_allowlist(), ctx.db.list_watch_sources())
+    except RegistryTooLarge as exc:
+        raise _too_large(exc) from exc
+    except ResearchDbError as exc:
+        raise ApiError(503, "db_blocked", detail=str(exc)[:300]) from exc
+    return {"registry_text": text, "registry_sha256": sha}
 
 
 # ── 能力探針（無 DSN 仍 200；D-49）──────────────────────────────────────────────────────────

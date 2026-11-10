@@ -24,13 +24,13 @@ public record SiConsoleWritesResponse(
     @Schema(name = "SiConsoleWriteItem")
     public record Item(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "uuid") String auditRef,
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request"}) String kind,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry"}) String kind,
             @Schema(nullable = true, description = "kind 為 decide 的列＝該決定的動詞（九個之一，原樣透傳）；其餘 kind 與看不出動詞的列為 null") String dkind,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String user,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String role,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, format = "date-time", description = "稽核 body 的 time（同一瞬間；以 UTC 表示）") OffsetDateTime time,
             @Schema(nullable = true, description = "decide＝PROP 號（resume 為 RUN 號）、obs-close＝OBS 號、obs-add＝入帳後回填的新列號（入帳前為 null）") String subjectId,
-            @Schema(nullable = true, description = "卡面 digest（只有六種決定動詞才有）") String digest,
+            @Schema(nullable = true, description = "卡面 digest（只有六種決定動詞才有）；src-registry 列存登記快照的 registry_sha256") String digest,
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED, description = "簽章金鑰的 sha256 前 8 碼") String keyId,
             @Schema(nullable = true, description = "帳本是否已有同 auditRef 的 dec／obs.add／obs.close 事件或觀察列標記；量不到時為 null") Boolean ingested,
             @Schema(nullable = true, format = "uuid", description = "待入帳的帶 digest 的決定列，若同一決定（同對象、同 digest、同動詞）已有另一列入帳＝那一列的 auditRef"
@@ -41,7 +41,7 @@ public record SiConsoleWritesResponse(
     @Schema(name = "SiConsoleWriteOrphan")
     public record Orphan(
             @Schema(requiredMode = Schema.RequiredMode.REQUIRED) String auditRef,
-            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request"}) String kind,
+            @Schema(requiredMode = Schema.RequiredMode.REQUIRED, allowableValues = {"decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry"}) String kind,
             @Schema(nullable = true, description = "dec 的 prop（resume 為 run）、觀察列的 id、obs.close 的 obs") String subject) {
     }
 

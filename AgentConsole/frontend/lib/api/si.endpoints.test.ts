@@ -42,9 +42,9 @@ describe("AT_950_9_E_1 endpoints.ts 的 SI 匯出受限：get 加 Si 恰七個�
     expect(names).toHaveLength(SI_READ_FUNCTIONS.length + SI_WRITE_FUNCTIONS.length);
   });
 
-  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選為 127（P2b 由 74 加五個 SI 函式成 79，議題中心再加四個，備份總覽再加一個成 84，ResearchToPRD P0 再加 25 個研究端點函式成 109，P1 再加 9 個成 118，P2 再加 7 個成 125，P4 排程再加 2 個成 127）、EXPECTED 的 SI 十三列只增不減：讀原始碼逐項核對，不靠記憶", () => {
+  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選為 132（P2b 由 74 加五個 SI 函式成 79，議題中心再加四個，備份總覽再加一個成 84，ResearchToPRD P0 再加 25 個研究端點函式成 109，P1 再加 9 個成 118，P2 再加 7 個成 125，P4 排程再加 2 個成 127，研究來源單一化再加 5 個成 132）、EXPECTED 的 SI 十三列只增不減：讀原始碼逐項核對，不靠記憶", () => {
     const source = readFileSync(path.join(ROOT, "lib", "api", "endpoints.test.ts"), "utf-8");
-    expect(source, "總數釘選必須是 127").toContain("expect(names).toHaveLength(127);");
+    expect(source, "總數釘選必須是 132").toContain("expect(names).toHaveLength(132);");
     expect(source, "總數釘選不得還留著 79").not.toContain("toHaveLength(79)");
     for (const fn of [...SI_READ_FUNCTIONS.filter((n) => n !== "getSiConsoleWrites"), "getSiConsoleWrites", ...SI_WRITE_FUNCTIONS]) {
       expect(source, `EXPECTED 缺 ${fn}`).toContain(`"${fn}"`);
@@ -238,6 +238,9 @@ describe("AT_950_10_2 已入庫的 schema.d.ts 含十二個 SI 路徑，各自�
     ["/api/v1/si/console-writes", { get: "getSiConsoleWrites" }],
     ["/api/v1/si/schedule/set", { post: "postSiScheduleSet" }],
     ["/api/v1/si/runs/request", { post: "postSiRunRequest" }],
+    // 研究來源單一化（TCS-ResearchRegistry AT-965-9-4）：兩個新路徑（狀態讀面＋同步寫入）
+    ["/api/v1/si/research-registry", { get: "getSiResearchRegistry" }],
+    ["/api/v1/si/research-registry/sync", { post: "postSiResearchRegistrySync" }],
   ];
 
   /** openapi-typescript 的 paths 區塊：`"<路徑>": {` 起、下一個縮排四格的 `};` 止。 */
@@ -346,6 +349,8 @@ describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵�
         "/api/v1/si/proposals",
         "/api/v1/si/proposals/{id}",
         "/api/v1/si/proposals/{id}/decide",
+        "/api/v1/si/research-registry",
+        "/api/v1/si/research-registry/sync",
         "/api/v1/si/runs",
         "/api/v1/si/runs/request",
         "/api/v1/si/schedule/set",
@@ -366,6 +371,8 @@ describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵�
       "getSiConsoleWrites",
       "postSiScheduleSet",
       "postSiRunRequest",
+      "getSiResearchRegistry",
+      "postSiResearchRegistrySync",
     ];
     for (const id of operationIds) expect(schema, `operationId ${id}`).toContain(`${id}: {`);
     expect([...schema.matchAll(/operations\["((?:get|post|put|patch|delete)Si\w*)"\]/g)].map((m) => m[1]).sort()).toEqual([...operationIds].sort());
@@ -385,10 +392,12 @@ describe("AT_964_10_2 既有釘選的新預期值：端點數、已知鍵、寫�
 
     const source = readFileSync(path.join(ROOT, "lib", "api", "endpoints.test.ts"), "utf-8");
     const PRIOR_TOTAL = 125;
-    expect(source).toContain(`expect(names).toHaveLength(${PRIOR_TOTAL + 2});`);
+    // 125＋2（P4 排程）＋5（研究來源單一化：listWatchSources、addWatchSource、patchWatchSource、getRegistrySyncStatus、postRegistrySync）
+    expect(source).toContain(`expect(names).toHaveLength(${PRIOR_TOTAL + 2 + 5});`);
 
     expect([...SI_STATUS_KNOWN_KEYS]).toContain("schedule");
-    expect(Object.keys(SI_WRITE_KIND_LABELS).sort()).toEqual(["decide", "obs-add", "obs-close", "run-request", "sched-set"]);
+    // 六值：五個 P2b／P4 種類加研究來源單一化的 `src-registry`（TCS-ResearchRegistry AT-965-9-2）
+    expect(Object.keys(SI_WRITE_KIND_LABELS).sort()).toEqual(["decide", "obs-add", "obs-close", "run-request", "sched-set", "src-registry"]);
     for (const label of Object.values(SI_WRITE_KIND_LABELS)) expect(label.length).toBeGreaterThan(0);
     expect(Object.keys(SI_REASONS)).toEqual(["UNAVAILABLE", "NOT_FOUND", "WRITE_DISABLED", "WRITE_FORBIDDEN", "AUDIT_EXISTS", "DECISION_DUPLICATE"]);
   });
