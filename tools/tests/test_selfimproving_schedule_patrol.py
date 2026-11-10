@@ -352,7 +352,8 @@ class TestSpawnShape(P4TestCase):
         self.assertTrue(copy.read_bytes())
         brief = (tdir / "brief.md").read_text(encoding="utf-8")
         self.assertIn(str(copy), brief)
-        self.assertNotIn(str(orig), brief)
+        hits = [ln for ln in brief.splitlines() if str(orig) in ln]
+        self.assertEqual([], hits)
         self.assertEqual(len(rig.spawner.calls), 1)
 
     def test_AT_438_1_E_4_source_copy_failure_does_not_spawn(self):
@@ -377,7 +378,8 @@ class TestSpawnShape(P4TestCase):
         self.assertEqual(len(evs(R, "research.skip")), 1)
         self.assertFalse((tdir / "research").exists())
         brief = (tdir / "brief.md").read_text(encoding="utf-8")
-        self.assertNotIn(str(self.home / "research"), brief)
+        hits = [ln for ln in brief.splitlines() if str(self.home / "research") in ln]
+        self.assertEqual([], hits)
         self.assertEqual(len(rig.spawner.calls), 1)
 
     def test_AT_438_1_E_1_missing_claude_is_a_skip_before_any_run(self):
