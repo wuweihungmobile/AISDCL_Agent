@@ -550,7 +550,8 @@ sdd spec-frozen --project "$SDD_PROJECT" --must-exist --stage Stage-1 --doc CLAU
 1. `transition --to PR_REVIEW --reason "SCG-4 PR 審查開始"`；審查者必須是**未參與規格撰寫與實作**的角色（AI 自寫自驗的補償控制，§6.4 C-3），以 `AISDLC_SDD:sdd-review` 產報告 → `docs/06_quality/SCG4-REVIEW-<Feature>-<日期>.md`。
 2. `gate --gate PR_REVIEW --result PASS --reason "SCG-4 PASS"` → RTM_VERIFY；`AISDLC_SDD:rtm-generate verify` 產 `docs/06_quality/RTM-<System>.md`／`RTM-VERIFY-<System>.md`；`gate --gate RTM_VERIFY --result PASS --reason "SCG-5 PASS"` → RELEASE_READY。
    失敗與重試上限照 GATE〈FSM 寫入指令〉第 11、12 列（PR 5 次、同模式 3 次 → SPEC_AUDIT；RTM 2 次）。
-3. **RELEASE**：功能合併進 main 且雲端 CI 綠之後，由**收尾者**執行一次 `transition --to RELEASE --reason "SCG-6 PASS；已合併 <commit>，雲端 CI 綠"`（終態；`RELEASE: set()`，不重開）。下一個功能用新鍵、新視窗。雲端 CI 紅時**不要**直接記 `RELEASE`：`gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`（理由必填；上限 2——第 1 次失敗退回 IMPLEMENTATION 修，修好照步驟 1～2 再走 PR_REVIEW → RTM_VERIFY → RELEASE_READY，第 2 次失敗進 ESCALATION、不自動恢復；OBS-SI-117，GATE〈FSM 寫入指令〉第 14 列）。
+3. **RELEASE**：功能合併進 main 且雲端 CI 綠之後，由**收尾者**執行一次 `transition --to RELEASE --reason "SCG-6 PASS；已合併 <commit>，雲端 CI 綠"`（終態；`RELEASE: set()`，不重開）。下一個功能用新鍵、新視窗。
+   **真機待驗的鍵停在 RELEASE_READY**（RTM 有列標「真機待驗」，或 TCS 把真機項排在 RELEASE 之前）：真機項驗完並回填 RTM 之前，不記 `RELEASE`，也**不打** `gate --gate RELEASE_READY --result PASS`——該 gate 的 PASS 與 `transition --to RELEASE` 同效，回 `next_state=RELEASE` 直接進終態、不再等人（GATE〈FSM 寫入指令〉第 13 列；實例 OBS-SI-372，鍵 `monorepo-si-p4-schedule` 在真機 V30～V35 未驗時就這樣進了 RELEASE）。真機驗完才照本步記 `RELEASE`，reason 帶真機驗收座標；驗收期間規格有勘誤就照第 15 列 `spec-refreeze`（RELEASE_READY 合法）。雲端 CI 紅時**不要**直接記 `RELEASE`：`gate --gate RELEASE_READY --result FAIL --reason "<CI 失敗摘要>"`（理由必填；上限 2——第 1 次失敗退回 IMPLEMENTATION 修，修好照步驟 1～2 再走 PR_REVIEW → RTM_VERIFY → RELEASE_READY，第 2 次失敗進 ESCALATION、不自動恢復；OBS-SI-117，GATE〈FSM 寫入指令〉第 14 列）。
 4. 收尾時把 `show --must-exist` 的逐字輸出與 `frozen_stages[*].spec_doc_digests` 引進證據檔（狀態在被忽略的 `build/` 下，不入庫；§8.12）。
 
 ### 8.8 阻塞態三層處置（D-116-08；不改任何 hook）
