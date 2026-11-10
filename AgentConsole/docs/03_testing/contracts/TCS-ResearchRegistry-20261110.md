@@ -42,7 +42,7 @@
 1. **編譯文法**：AC 為 `AC-[\d\-]+`、AT 為 `AT-\d{3}-\d+(?:-[A-Za-z0-9]+)*` 且 AT 前兩段數字＝所屬 AC（ADR-XPLAT-016 §8.1）。
 2. **對映**：AC 取 `AC-965-1`～`AC-965-10`，與 PRD `AC-R2P-24-1`～`AC-R2P-24-10` 逐一對映（`AC-965-k` ↔ `AC-R2P-24-k`）；本檔不自增 AC。
 3. **AT 命名**：`AT-<AC 數字 id>-<序>`；負控與邊界 `AT-<AC 數字 id>-E-<序>`；測試名含其底線形（`AT-965-6-3`→`AT_965_6_3`；Java 方法名以底線形開頭加駝峰敘述）。每個 AC 內數字序與 E 序各不超過 9，使 `-t`、`--tests`、`-k`、`-g` 的子字串比對不會誤收其他 AT。
-4. **計數**：AC 10 個、AT 72 個（其中編號含 `E` 的負控與邊界 9 個；分佈見 §3 末）。
+4. **計數**：AC 10 個、AT 73 個（其中編號含 `E` 的負控與邊界 9 個；分佈見 §3 末）。
 
 **FRD-lite 表**（第一欄為 US ID；AC 的完整 Given／When／Then 住 PRD FR-R2P-24 與 §2 各 AT，本表給摘要）
 
@@ -202,10 +202,11 @@
 | AC-965-9 | | AT-965-9-4 | `schema.d.ts` 與端點函式 | ✅ | Unit | □ |
 | AC-965-9 | | AT-965-9-5 | 橫幅三鍵具名呈現（研究來源、同步、反事實回測） | ✅ | Integration | □ |
 | AC-965-10 | E2E 與無障礙 | AT-965-10-1 | Docker 全棧：種子、新增、同步、稽核檔 | ✅ | E2E | □ |
+| AC-965-10 | | AT-965-10-3 | Bridge 映像預建稽核目錄（具名卷擁有者；E-11） | ✅ | Unit | □ |
 | AC-965-10 | | AT-965-10-2 | 三寬度 axe 與溢出 | ✅ | E2E | □ |
 | AC-965-10 | | AT-965-10-E-1 | 非名單 ADMIN 的同步被拒（mock） | ✅ | E2E | □ |
 
-**覆蓋率統計**：總 AC 數 10；已映射 AT 數 72；映射覆蓋率 100%。
+**覆蓋率統計**：總 AC 數 10；已映射 AT 數 73；映射覆蓋率 100%。
 
 ---
 
@@ -653,6 +654,12 @@
   - Then 看到種子 17 列（啟用 10）；新增後狀態列先顯示「有變更尚未同步」、自動 sync 後顯示「待入帳」（全棧沒有主機巡邏，故不會自動變「已同步」）；稽核目錄恰多一個 `<audit_ref>.json`（N＋1；收尾停用後再多一個）、外層 `kind` 為 `src-registry`、外層七鍵、`subject` 為 null；以 Python 一行重算 `sha256(body.registry_text)` 等於 `body.registry_sha256`，且 `registry_text` 含該 `e2e-` slug；DB `console.si_console_writes` 多對應列且 `digest` 等於 `registry_sha256`；該容器卷路徑不在主機 `~/.autosdd` 之下（斷言掛載來源）；收尾後該列在清單中為停用
   - 判定：`npx playwright test tests/e2e/research-docker.stack.spec.ts -g AT_965_10_1`（cwd＝`AgentConsole/frontend`；全棧需先 `docker compose --profile db --profile app --profile full up -d --build`）；預期突變：同步未送出、稽核檔 kind 錯、digest 不等，皆紅
   - 驗收字樣：[AT_OK_965_10_1]
+- **AT-965-10-3**（pytest｜`engine-bridge/tests/test_si_deploy_config.py`｜結構鎖｜AC-965-10、NFR-RR-9；勘誤 E-11）Bridge 映像預建並 chown 稽核目錄。
+  - Given `docker-compose.yml` 的 engine-bridge 服務設有 `BRIDGE_SI_AUDIT_DIR`（現值 `/si-audit`）；`AgentConsole/engine-bridge/Dockerfile` 文字
+  - When 純函式 `audit_dir_image_problems(dockerfile_text, compose)` 檢視
+  - Then 該目錄同時出現在 `USER bridge` 之前的 `mkdir -p` 與 `chown bridge:bridge` 目錄清單（具名卷首次掛載繼承映像內目錄擁有者，否則卷為 root 擁有、Bridge uid 10001 寫入 EACCES ⇒ 同步 503）；真檔回空清單；負控逐一回對應訊息：缺 mkdir、缺 chown、chown 在 `USER bridge` 之後、compose 改路徑而 Dockerfile 未跟上、compose 缺該變數
+  - 判定：`python -m pytest tests/test_si_deploy_config.py -q -k AT_965_10_3`（cwd＝`AgentConsole/engine-bridge`）；預期突變：Dockerfile 的 chown 清單拿掉 `/si-audit`，紅
+  - 驗收字樣：[AT_OK_965_10_3]
 - **AT-965-10-2**（Playwright｜`a11y.mock.spec.ts`｜E2E｜AC-965-10、W-R10；AC-R2P-24-10）三寬度 axe 零違規與無橫向溢出。
   - Given `E2E_MODE=standalone` 的 mock API（路由含 `watch-sources`、`si/research-registry` 與既有 allowlist；種子 17 列夾具與四種狀態）
   - When 以 `RESEARCH_WIDTHS`（1440、1000、600）開研究來源設定對話框（含追蹤來源區、新增表單展開、錯誤狀態、`unknown` 狀態）
@@ -673,11 +680,11 @@
 依「測試住在哪一側」分類（AT 6-7 跨 backend 與 Bridge，兩側各有一個測試函式、計入兩側各一次但只算一個 AT）：
 
 - **3.1 backend（JUnit）**：AT-965-1-1～1-7、1-E-1（8）；AT-965-2-1～2-3（3）；AT-965-5-1～5-6、5-E-1（7）；AT-965-6-1～6-5、6-7（Java 端）、6-8、6-9、6-E-1（9）；AT-965-7-1～7-5（5）；合計 32 個 AT（含 6-7）。
-- **3.2 Bridge（pytest）**：AT-965-3-1～3-9、3-E-1（10）；AT-965-4-1～4-9、4-E-1、4-E-2（11）；AT-965-6-6（1）；AT-965-6-7（Python 端，與 3.1 同一個 AT）；合計 22 個 AT（不含 6-7）。
+- **3.2 Bridge（pytest）**：AT-965-3-1～3-9、3-E-1（10）；AT-965-4-1～4-9、4-E-1、4-E-2（11）；AT-965-6-6（1）；AT-965-10-3（1，結構鎖；勘誤 E-11）；AT-965-6-7（Python 端，與 3.1 同一個 AT）；合計 23 個 AT（不含 6-7）。
 - **3.3 frontend（vitest）**：AT-965-8-1～8-8、8-E-1、8-E-2（10）；AT-965-9-1～9-5（5）；合計 15 個 AT。
 - **3.4 Playwright**：AT-965-10-1、10-2、10-E-1；合計 3 個 AT。
 
-**計數核對**：32＋22＋15＋3＝72；亦等於各 AC 分項加總：AC-965-1（8）＋AC-965-2（3）＋AC-965-3（10）＋AC-965-4（11）＋AC-965-5（7）＋AC-965-6（10）＋AC-965-7（5）＋AC-965-8（10）＋AC-965-9（5）＋AC-965-10（3）＝72。編號含 `E` 者 9 個：1-E-1、3-E-1、4-E-1、4-E-2、5-E-1、6-E-1、8-E-1、8-E-2、10-E-1。（QA 一審前為 68，D-EQA-3、5、7 新增 4-E-1、4-E-2、9-5、6-9 共 4 個。）
+**計數核對**：32＋23＋15＋3＝73；亦等於各 AC 分項加總：AC-965-1（8）＋AC-965-2（3）＋AC-965-3（10）＋AC-965-4（11）＋AC-965-5（7）＋AC-965-6（10）＋AC-965-7（5）＋AC-965-8（10）＋AC-965-9（5）＋AC-965-10（4）＝73。編號含 `E` 者 9 個：1-E-1、3-E-1、4-E-1、4-E-2、5-E-1、6-E-1、8-E-1、8-E-2、10-E-1。（QA 一審前為 68，D-EQA-3、5、7 新增 4-E-1、4-E-2、9-5、6-9 共 4 個。）
 
 ---
 
@@ -832,7 +839,7 @@
 
 ## 📋 SCG-4 通過標準
 
-- [ ] 72 個 AT 全數通過，輸出逐字貼入證據；本檔 §4.1 預期值改動恰等於實際改動（QA 以 `git diff` 核對，不多不少）
+- [ ] 73 個 AT 全數通過，輸出逐字貼入證據；本檔 §4.1 預期值改動恰等於實際改動（QA 以 `git diff` 核對，不多不少）
 - [ ] 既有研究 AT 與 SI AT 零弱化（V4）；`ResearchReasonsTest` 零改動仍綠
 - [ ] 黃金檔 G-R1、附錄 B golden 位元組與 sha 相符；G-S1 經根層 `consoleaudit.py` 驗簽收下
 - [ ] `gradlew clean build`、Bridge `pytest` 與 `ruff check`（兩視角）、前端 lint／`tsc`／build／vitest 全綠（V5）
@@ -856,3 +863,4 @@
 | E-8 | 11-10 | 前端 SI 寫入名單判定（登記型） | 原文：無 | 登記：前端不另判 SI 寫入名單，只判 ADMIN；名單外由 backend 回 403 `si_write_forbidden`，前端顯示原因、不重試（沿 P2b／P4） | 避免前後端名單分叉 |
 | E-9 | 11-10 | commit 座標（登記型） | 原文：無 | 登記：根層規格 d7c1eeee、Console 規格 dfa55632、根層 RR 914e0adc、Console 實作 9e07a54e（原 ed0ee779 混入根層 45 檔，已以 reset --soft 拆回） | 追溯 |
 | E-10 | 11-10 | AT-965-10-1（登記型；§2 規則本文不變） | 原文：AT 以 `test.skip` 處理 docker 缺席（實作面作法，違反 §2「不得新增 skip」） | 登記：已改為直接拋錯失敗（commit d0a750bd，SCG-4 QA4C-01） | §2 明定「Docker 缺席視為環境壞、直接失敗」 |
+| E-11 | 11-10 | AT-965-10 群（新增 AT-965-10-3；§1 計數、§2 覆蓋表、§3 清單、§5 檢核同步 72→73） | 原文：無 AT 守 Bridge 映像的稽核目錄；NFR-RR-9 要求稽核目錄為全棧自帶容器卷 | 新增 AT-965-10-3（Bridge pytest 結構鎖）：`BRIDGE_SI_AUDIT_DIR` 必須在 `USER bridge` 之前被 Dockerfile `mkdir -p` 並 `chown bridge:bridge`；`engine-bridge/Dockerfile` 同步預建 `/si-audit`；AT 總數 72→73、Bridge 側 22→23、AC-965-10 3→4 | 真棧 E2E（AT-965-10-1）實跑：全新具名卷為 root 擁有、Bridge uid 10001 寫稽核檔 EACCES ⇒ 同步回 503（DEF-AC-036）；成因＝映像未預建該目錄，具名卷首次掛載繼承映像內擁有者 |
