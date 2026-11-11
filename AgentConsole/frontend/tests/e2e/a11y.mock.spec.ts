@@ -298,7 +298,11 @@ test.describe("無障礙掃描：研究來源設定的追蹤來源區（route mo
       const dims = await page.evaluate(() => {
         const dialog = document.querySelector<HTMLElement>('[data-testid="allowlist-dialog"]');
         const wrapper = document.querySelector<HTMLElement>('[data-testid="watch-table"]')?.parentElement ?? null;
+        // DEV-COPY S6：網域清單表（八欄）同樣必須在自己的橫向捲動容器內，窄寬不得撐破對話框
+        const domainTable = document.querySelector<HTMLElement>('[data-testid="allowlist-table"]');
+        const domainWrapper = domainTable?.parentElement ?? null;
         return {
+          domainWrapper: domainWrapper ? [domainWrapper.scrollWidth, domainWrapper.clientWidth, getComputedStyle(domainWrapper).overflowX, domainTable?.getBoundingClientRect().width ?? 0] : null,
           dialog: dialog ? [dialog.scrollWidth, dialog.clientWidth] : null,
           doc: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
           wrapper: wrapper ? [wrapper.scrollWidth, wrapper.clientWidth, getComputedStyle(wrapper).overflowX] : null,
@@ -308,6 +312,9 @@ test.describe("無障礙掃描：研究來源設定的追蹤來源區（route mo
       expect(dims.dialog?.[0] ?? 0, `${label}：對話框內無橫向溢出（scrollWidth ${dims.dialog?.[0]}／clientWidth ${dims.dialog?.[1]}）`).toBeLessThanOrEqual((dims.dialog?.[1] ?? 0) + 1);
       expect(dims.doc[0], `${label}：頁面無橫向捲動`).toBeLessThanOrEqual(dims.doc[1] + 1);
       expect(dims.wrapper?.[2], `${label}：表格在 overflow-x 容器內`).toMatch(/auto|scroll/);
+      expect(dims.domainWrapper?.[2], `${label}：網域清單表在 overflow-x 容器內`).toMatch(/auto|scroll/);
+      // 容器內表格保有可讀寬度（不被擠壓到比容器還窄），多出來的由容器橫向捲動
+      expect(dims.domainWrapper?.[3] ?? 0, `${label}：網域清單表保有最小可讀寬度`).toBeGreaterThanOrEqual(700);
     };
 
     await page.setViewportSize({ width: RESEARCH_WIDTHS[0], height: 900 });

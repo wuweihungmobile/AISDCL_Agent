@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { expectNoA11yViolations } from "./a11y";
 import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, type MockCall, type MockHandler } from "./mockApi";
 
 /**
@@ -93,6 +94,14 @@ async function open(page: Page) {
   await expect(page.getByTestId("si-schedule-panel")).toBeVisible();
   return { errors, world };
 }
+
+test("AT_965_10_4 ADMIN 自我進化頁（含「研究來源設定」內文連結）：axe 無 serious／critical 違規（DEF-AC-039：連結小字原用主色、在頁面底色上對比 4.21 低於 4.5）", async ({ page }) => {
+  const { errors } = await open(page);
+  // 連結只在 ADMIN 渲染；先確認它真的在畫面上，掃描才量得到它（成因：過去沒有任何 mock a11y spec 掃過 /self-improving）
+  await expect(page.getByTestId("si-research-sources-note").getByRole("link", { name: "研發工作流 → 研究來源設定" })).toBeVisible();
+  await expectNoA11yViolations(page, "自我進化頁（ADMIN、預設分頁）");
+  expect(errors, "主控台錯誤").toEqual([]);
+});
 
 const closeResult = (page: Page) => page.getByRole("dialog").locator("button", { hasText: /^關閉$/ });
 

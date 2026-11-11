@@ -116,7 +116,7 @@ describe("AT_965_8_2 清單渲染與警示", () => {
     mount("ADMIN");
     await load();
     const closed = rowOf("openai-changelog-md");
-    expect(closed.textContent).toContain("網域未開放");
+    expect(within(closed).getByTestId("watch-host-closed").textContent?.trim()).toBe("網域未開放，所以不會抓取：請到上方網域清單開放 developers.openai.com");
     expect(closed.textContent).toContain("上方網域清單");
     expect(within(rowOf("anthropic-engineering")).queryByTestId("watch-host-closed")).toBeNull();
   });
@@ -227,7 +227,19 @@ describe("AT_965_8_3 新增流程與自動同步", () => {
     const { calls } = mount("ADMIN");
     await load();
     await fillValid(user);
-    await user.selectOptions(screen.getByLabelText(/展開方式/), "links");
+    const modeSelect = screen.getByLabelText(/展開方式/);
+    // DEV-COPY S4：顯示字白話化，送出的值不變
+    expect(
+      within(modeSelect)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["不展開", "links（從這一頁的連結找文章）", "sitemap（從網站地圖找文章）"]);
+    expect(
+      within(modeSelect)
+        .getAllByRole("option")
+        .map((o) => (o as HTMLOptionElement).value),
+    ).toEqual(["", "links", "sitemap"]);
+    await user.selectOptions(modeSelect, "links");
     await user.type(screen.getByLabelText(/路徑前綴/), "/blog/");
     await user.type(screen.getByLabelText(/最多幾頁/), "2");
     await user.click(submitButton());

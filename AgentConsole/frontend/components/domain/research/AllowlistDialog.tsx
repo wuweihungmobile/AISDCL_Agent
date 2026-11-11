@@ -57,7 +57,7 @@ const SORT_COLUMNS: ReadonlyArray<SortColumn<ResearchAllowlistEntry> & { label: 
   { key: "listKind", label: "清單", kind: "text", get: (e) => ALLOWLIST_LIST_KIND_LABEL[e.listKind] },
   { key: "layer", label: "層", kind: "text", get: (e) => layerText(e) },
   { key: "purpose", label: "用途", kind: "text", get: (e) => e.purpose },
-  { key: "source", label: "來源", kind: "text", get: (e) => (e.source === "ENV" ? "ENV 部署設定" : "ADMIN 管理員新增") },
+  { key: "source", label: "來源", kind: "text", get: (e) => (e.source === "ENV" ? "部署設定" : "管理員新增") },
   { key: "minIntervalSeconds", label: "最小間隔", kind: "number", get: (e) => e.minIntervalSeconds },
   { key: "enabled", label: "狀態", kind: "text", get: (e) => (e.enabled ? "啟用中" : "已停用") },
 ];
@@ -80,7 +80,7 @@ function EntryRow({ entry, busy, onToggle }: { entry: ResearchAllowlistEntry; bu
       <td className="px-3 py-2">{layerLabel}</td>
       <td className="px-3 py-2 break-words">{entry.purpose === "" ? "—" : entry.purpose}</td>
       <td className="px-3 py-2 whitespace-nowrap">
-        {entry.source === "ENV" ? "ENV 部署設定" : "ADMIN 管理員新增"}
+        {entry.source === "ENV" ? "部署設定" : "管理員新增"}
         {entry.tosAcknowledged ? <span className="block text-xs text-wg-muted">已確認條款</span> : null}
       </td>
       <td className="px-3 py-2 whitespace-nowrap">{entry.minIntervalSeconds} 秒</td>
@@ -234,7 +234,7 @@ function AddForm() {
           <Input value={form.tosNote} onChange={(e) => change({ tosNote: e.target.value })} />
         </Field>
       </div>
-      <p className="text-xs text-wg-muted">實際抓取間隔取 Bridge 內建下限與這裡填的值中較大者；間隔建立後不能改，要調整請停用後重建。</p>
+      <p className="text-xs text-wg-muted">實際抓取間隔取系統內建下限與這裡填的值中較大者；間隔建立後不能改，要調整請停用後重建。</p>
       {reddit ? (
         <div className="flex flex-col gap-1.5 rounded-md border border-wg-line bg-wg-surface px-3 py-2.5">
           <label className="flex items-center gap-2 text-sm">
@@ -283,7 +283,8 @@ function AllowlistBody({ onClose }: { onClose: () => void }) {
     <>
       <DialogBody>
         <p className="text-sm text-wg-muted">
-          有效清單＝部署環境變數設定的基底加上這裡啟用中的條目；每個階段開始執行時會記下當時的快照。產業網域（Web 層）要先加進來，研究才能勾選「官方文獻與業界」。
+          有效清單＝部署環境變數設定的基底加上這裡啟用中的條目；每個階段開始執行時會記下當時的快照。「Web
+          層」是研究用網頁搜尋官方文獻與業界資料時可以用的產業網域清單；要先在這裡加入至少一個產業網域，研究才能勾選「官方文獻與業界」。
         </p>
         <p data-testid="allowlist-shared-note" className="text-sm font-medium">
           研發工作流與自我進化共用這份網域清單。

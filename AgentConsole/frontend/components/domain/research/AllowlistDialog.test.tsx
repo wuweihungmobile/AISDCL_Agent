@@ -143,13 +143,21 @@ describe("AT_960_19_8 清單：區分來源 ENV 與 ADMIN；ENV 條目沒有停�
     expect(sources).toEqual([...BASE_HOSTS.map((host) => `${host}｜ENV`), "docs.example.com｜ADMIN"].sort(new Intl.Collator("zh-Hant", { numeric: true }).compare));
     for (const host of BASE_HOSTS) {
       const row = rowOf(host);
-      expect(within(row).getByText("ENV 部署設定")).toBeInTheDocument();
+      expect(within(row).getByText("部署設定")).toBeInTheDocument(); // 精確比對：不得退回帶 ENV 英文縮寫的舊字面
       expect(within(row).queryByRole("button"), `${host} 沒有停用鈕`).toBeNull();
       expect(within(row).getByText("不可變更")).toBeInTheDocument();
       expect(within(row).getAllByText("—"), "ENV 條目沒有層與用途：兩格都是破折號").toHaveLength(2);
     }
     const admin = rowOf("docs.example.com");
-    expect(within(admin).getByText("ADMIN 管理員新增")).toBeInTheDocument();
+    expect(within(admin).getByText("管理員新增")).toBeInTheDocument();
+    // 白話文案（DEV-COPY S2／S3）：內部名詞「Bridge」不外露；「Web 層」有一句白話解釋
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("實際抓取間隔取系統內建下限與這裡填的值中較大者；間隔建立後不能改，要調整請停用後重建。")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "有效清單＝部署環境變數設定的基底加上這裡啟用中的條目；每個階段開始執行時會記下當時的快照。「Web 層」是研究用網頁搜尋官方文獻與業界資料時可以用的產業網域清單；要先在這裡加入至少一個產業網域，研究才能勾選「官方文獻與業界」。",
+      ),
+    ).toBeInTheDocument();
     expect(within(admin).getByText("產業層")).toBeInTheDocument();
     expect(within(admin).getByRole("button", { name: "停用 docs.example.com" })).toBeEnabled();
     expect(within(rowOf("api.github.com")).getByText("1 秒")).toBeInTheDocument();

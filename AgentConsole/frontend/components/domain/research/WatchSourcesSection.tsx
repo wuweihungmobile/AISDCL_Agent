@@ -50,6 +50,12 @@ import { cn } from "@/lib/utils";
 const layerText = (layer: string): string => (SOURCE_LAYER_LABEL as Readonly<Record<string, string | undefined>>)[layer] ?? layer;
 const kindText = (kind: string): string => (WATCH_KIND_LABEL as Readonly<Record<string, string | undefined>>)[kind] ?? kind;
 
+/** 展開方式下拉的顯示字（值仍是 `links`／`sitemap`；清單表「展開設定」欄的顯示由 `watchExpandText` 管、不受影響）。 */
+const EXPAND_MODE_OPTION_TEXT: Readonly<Record<(typeof EXPAND_MODES)[number], string>> = {
+  links: "links（從這一頁的連結找文章）",
+  sitemap: "sitemap（從網站地圖找文章）",
+};
+
 /** 同步到自我進化的協調器：單線＋尾隨去重（見檔頭）；回傳目前訊息、進行中旗標與兩個入口（自動排程、手動）。 */
 function useRegistrySyncRunner() {
   const sync = useRegistrySync();
@@ -148,7 +154,7 @@ function WatchRow({ row, busy, onToggle }: { row: WatchSource; busy: boolean; on
         <span className="whitespace-nowrap">{row.enabled ? "啟用中" : "已停用"}</span>
         {row.hostAllowed ? null : (
           <span className="block text-xs text-wg-warning-text" data-testid="watch-host-closed">
-            網域未開放：請到上方網域清單開放 {row.host}
+            網域未開放，所以不會抓取：請到上方網域清單開放 {row.host}
           </span>
         )}
       </td>
@@ -280,7 +286,7 @@ function AddWatchForm({ onAdded }: { onAdded: () => void }) {
               <option value="">不展開</option>
               {EXPAND_MODES.map((mode) => (
                 <option key={mode} value={mode}>
-                  {mode}
+                  {EXPAND_MODE_OPTION_TEXT[mode]}
                 </option>
               ))}
             </Select>

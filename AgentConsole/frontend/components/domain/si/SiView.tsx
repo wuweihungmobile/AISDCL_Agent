@@ -84,7 +84,7 @@ export function SiView() {
       <p data-testid="si-research-sources-note" className="-mt-2 mb-5 text-sm text-wg-muted">
         研究來源在『
         {isAdmin ? (
-          <Link href="/research" className="text-wg-primary underline underline-offset-2">
+          <Link href="/research" className="text-wg-primary-strong underline underline-offset-2">
             研發工作流 → 研究來源設定
           </Link>
         ) : (
