@@ -227,7 +227,8 @@ export function newResearchKit(logTag: string) {
   async function archiveAll(request: APIRequestContext): Promise<void> {
     for (const id of created) {
       const route = await call(request, ADMIN, "GET", projectPath(id, "/route")).catch(() => null);
-      const consoleProjectId = route !== null && route.status === 200 ? (dataOf<{ consoleProjectId?: string | null }>(route).consoleProjectId ?? null) : null;
+      // 尚未分流的專案 `GET /route` 回 200 而 data 為 null（設計如此）⇒ 型別明寫可為 null，否則清場本身拋 TypeError、被記在該 spec 最後一案（INT 2026-11-11）
+      const consoleProjectId = route !== null && route.status === 200 ? (dataOf<{ consoleProjectId?: string | null } | null>(route)?.consoleProjectId ?? null) : null;
       if (consoleProjectId !== null) {
         const gone = await call(request, ADMIN, "DELETE", `/api/v1/projects/${consoleProjectId}`).catch(() => null);
         if (gone === null || (gone.status !== 204 && gone.status !== 404)) {
