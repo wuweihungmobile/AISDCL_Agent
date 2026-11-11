@@ -120,3 +120,5 @@
 {"seq":120,"t":"2026-11-11T16:51:52+08:00","kind":"app.promote","by":"main","id":"APP-SI-015","prop":"PROP-SI-008","rev":1,"head_sha":"3b1e65c7ba7e6c33a922b19f615031ab628c44d7","pre_sha256":"sha256:5b237a71228266db4cb775de064ca8f3f988e75a19c0e7fe63e375e6ae820df5","post_sha256":"sha256:613fb2530cb47ba2fbdcfa1bb718a75867ce906d70cb74e25b1c09d151c96732","unverified_ack":true}
 {"seq":121,"t":"2026-11-11T16:53:30+08:00","kind":"mea.report","by":"main","prop":"PROP-SI-008","report":"baseline","promote_seq":120,"opp":["OBS-SI-065","OBS-SI-340","OBS-SI-367","OBS-SI-380"],"events":0,"pending":0,"w_opp":5,"w_evt":2,"w_min":5,"anchor":"2026-10-19T07:08:16+00:00"}
 {"seq":122,"t":"2026-11-11T16:53:30+08:00","kind":"mea.open","by":"main","prop":"PROP-SI-008","w_opp":5,"promote_seq":120}
+{"seq":123,"t":"2026-11-11T21:00:18+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":124,"t":"2026-11-12T01:30:14+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
