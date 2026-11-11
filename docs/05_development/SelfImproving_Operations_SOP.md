@@ -7,6 +7,7 @@
 **P3 定稿**：〈P3 動詞〉節（`measure`、`capacity`、退役配方、回滾序列、讀值紀律與提案者隔離）已於 P3 定稿；關鍵片段由 `tools/tests/test_selfimproving_p3_meta.py` 以標題切段判準釘住。
 **P4 增補（2026-11-09，T1 掌舵者問題 2；PRD v0.13 FG-M、附錄 C.2 #21）**：〈啟動條件〉加第六類「排程巡邏到期」與 Console「立即啟動一次演化」載體、改寫「沒有排程」兩句；〈P2 動詞〉序列條文的「無人值守」一條改為 run-scoped；新增〈巡邏與無人運轉（P4）〉〈無人運轉任務書範本〉兩節（位於檔尾）。判準的唯一真相源仍是 PRD（FR-SI-36～39、§9.2、§9.4）；P4 動詞與巡邏器於實作輪落地前，本增補的指令為規格形態（以 `python tools/selfimproving.py <動詞> --help` 現查為準）。
 **P5 增補（2026-11-10，T1 掌舵者「頂尖專家四問」；PRD v0.14 FG-N、附錄 C.2 #24）**：新增〈四問審視者〉節（〈研究者〉節之後；〈研究者〉節不改）；〈rc 契約表〉加 `fourq` 列；〈最小序列〉加 `fourq`；〈提案檔〉加 `method`／`proof`；〈無人運轉任務書範本〉改 9 步並逐字引用四問原句。判準的唯一真相源是 PRD（FR-SI-41～44、§9.8）；`fourq` 於實作輪落地前為規格形態。
+**P7 增補（2026-11-11，T1 掌舵者「核准流程全程 UI 化」；PRD v0.16 FG-P、附錄 C.2 #26）**：〈held-out 目錄〉〈提案檔〉〈無人運轉任務書範本〉第 7 步三處勘誤；〈M 類旗標〉補巡邏器自動帶旗標；〈巡邏與無人運轉（P4）〉開頭句改為「巡邏器本體不 push」、〈安裝與憑證〉〈每心跳做什麼〉〈停用與逃生口〉補 P7；〈rc 契約表〉加 `push-run`；新增〈自動推送（P7）〉〈巡邏快照與 M 類自動推進（P7）〉兩節（位於〈反事實回測〉之前、〈無人運轉任務書範本〉之前）。判準的唯一真相源是 PRD（FR-SI-47～49、§9.9）與 TCS-SelfImproving-P7；`push-run` 與快照於實作輪落地前為規格形態。
 
 ## 啟動條件
 
@@ -221,6 +222,7 @@ root="$(git rev-parse --show-toplevel)"; py="$root/.venv/bin/python"; si="$root/
 | `run-open` | 已寫，印 `RUN-SI-NNN` | 拒收：座標不可定位、git 不可用 | — | 用法錯誤 | 取回 `RUN-SI-NNN`，其後各動詞顯式帶 `--run` |
 | `research --fetch` | 全部來源成功，事件已寫 | 整次未寫：預檢被拒（`REGISTRY-ABSENT`、`REG-*`、`REGISTRY-UNBOUND`、`FETCH-MAX`、`ZERO-SUCCESS`）、運轉不合、鎖內重驗失敗（含 `REGISTRY-CHANGED`）、取鎖逾時 | 部分成功：事件已寫、至少一個來源失敗（含 `blocked`、`private-ip`；逐一印出，並各附一列 OBS 草稿） | 用法錯誤 | rc 0 與 2 都**繼續**（rc 2 的失敗來源草稿列入帳；來源登記的修正由掌舵者在 Console 做）；rc 1 → 依〈研究者〉節「預檢被拒時」處置，記 `research --skip --reason offline --note "<預檢碼>"` |
 | `registry-ingest` | 已寫：鏡像（內容未變則不改檔）與 `research.registry` 事件，印 `changed=<true｜false>` | 拒收（零寫入、印 `obs-draft:`）：稽核檔驗證碼（`AUDIT-*`、`REGISTRY-*`、`REG-*`）、`audit_ref` 已入帳 | — | 用法錯誤 | 巡邏器自動呼叫；手動只在互動窗口、不在無人運轉內（C 類動詞）；被拒的稽核檔保留，修正在 Console 重新同步，不改檔 |
+| `push-run` | 推送成功，或無事可做（含任何守門未放行碼：`PUSH-OFF`、`PUSH-NOT-AHEAD`、`PUSH-DIRTY-TREE`、`PUSH-FOREIGN-COMMITS`、`PUSH-RETRY-WAIT`、`PUSH-ATTEMPTS-EXHAUSTED`…，輸出印該碼） | 授權拒收（`UNATTENDED-REFUSED`）、推送失敗（`PUSH-AUTH`、`PUSH-REJECTED`、`PUSH-HOOK-FAILED`、`PUSH-WALL-EXCEEDED`、`PUSH-FAILED`、`PUSH-RESULT-WRITE-FAILED`）或未處理例外（`PUSH-INTERNAL-ERROR`） | — | 用法錯誤 | 由互動登入型任務每心跳自動呼叫；手動只在互動窗口（C 類動詞，無人運轉內一律拒收）；`--dry-run` 只印判定；處置依〈自動推送（P7）〉碼表 |
 | `backtest` | 子命令已執行（`score` 已入帳） | 拒收（碼見 PRD AC-SI-46；零寫入或已回退） | — | 用法錯誤 | 依〈反事實回測〉節；無人運轉內一律拒收 |
 | `research --skip` | 已寫 | 拒收：運轉不合、該運轉已有研究事件 | — | 附帶旗標不符（免掃原因見〈研究者〉節） | 繼續 |
 | `fourq` | 已寫：入帳（事件一筆、答案檔進 `_fourq/`、印迴圈層快照）或 `--skip`；`--dry-run`／`--corpus` 零寫入 | 拒收（未寫、零殘留、印 `obs-draft:`）：運轉不合、無研究事件、已有 fourq 事件、`--by` 保留字、答案檔格式／座標／查詢／引用／Q4 判準不合、無人值守下 `--skip` | — | 用法或輸入錯誤 | 依拒收碼把問題交回同一審視者重寫一次，不就地改內容；rc 0 才派歸因者 |
@@ -438,18 +440,19 @@ for no, raw in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
 
 ### held-out 目錄（`heldout-freeze --from <dir>`；凍結者≠提案者；提案者看不到）
 
-- `<dir>/manifest.json`（UTF-8 無 BOM、LF）：`{"schema_rev": 1, "cases": [{"id": "<唯一>", "ref": "OBS-SI-NNN 或 DEF-…"}], "probes": [{"id": "<唯一>", "argv": ["{python}", "{heldout}/probe_x.py", "{sandbox}"], "module": "<選用>", "n_pop": 0}], "mutation": "<選用的相對檔名>"}`；`argv[0]` 恰為 `{python}`；`probes` 可為空（M／D 類多無確定性探針 ⇒ verdict NE，掌舵者以「未驗採納」晉升）；沒有突變檔就**省略** `mutation` 鍵（不是 null）；探針慣例 rc 0＝症狀不在、非 0＝症狀在；凍結無 dry-run、每 PROP 只能凍結一次。
+- `<dir>/manifest.json`（UTF-8 無 BOM、LF）：`{"schema_rev": 1, "cases": [{"id": "<唯一>", "ref": "OBS-SI-NNN 或 DEF-…"}], "probes": [{"id": "<唯一>", "argv": ["{python}", "{heldout}/probe_x.py", "{sandbox}"], "module": "<選用>", "n_pop": 0}], "mutation": "<選用的相對檔名>"}`；`argv[0]` 恰為 `{python}`；`probes` 可為空（M／D 類多無確定性探針 ⇒ `verify` 判 NE 且 `reasons` 為 `NO-PROBES`，掌舵者以「未驗採納」式晉升）；**案例數 n（`cases` 筆數）低於 `min_heldout`（`params.json`，值現查）時 `heldout-freeze` 不拒收**、rc 0、事件照寫，並在 stderr 印 `warn HELDOUT-BELOW-MIN n=<n> min=<m>`（stdout 形態不變）；之後驗證**必判 NE**（`reasons` 含 `HELDOUT-TOO-SMALL`，PASS 不可能），晉升只能走「未驗採納」式——Console 提案詳情的評估集分頁會標「案例數低於下限，驗證必判 NE」。要拿到 PASS 就湊足案例數是 Goodhart，不要為了過下限而灌水；沒有突變檔就**省略** `mutation` 鍵（不是 null）；探針慣例 rc 0＝症狀不在、非 0＝症狀在；凍結無 dry-run、每 PROP 只能凍結一次。
 - 範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/`（`verify<K>.json` 內 `cmd` 保留未展開佔位）。
 
 ### 提案檔（`prop-new --patch-file <r.patch> --body-file <r.md>`）
 
 - `r1.patch`：git diff 格式（`git diff --no-index <before> <after>` 或 `git diff`），路徑相對 repo 根；M 類以 `memory/<檔名>` 為前綴（對應 `claude_home()/projects/<slug>/memory/<檔名>`）。
 - `r1.md`：五個 `## ` 骨架標題（反例證據、Before、After、影響面、欄位）；〈欄位〉節的第一個表至少有 `symptom`、`risk`、`rollback`、`budget`、`result_label`（失敗／成功／升級）、`scope`，M 類另有 `source_obs`、`retire_when`；退役提案本文另填 `retire_when` 與 `reopen_symptom`；`fourq_from_run` 之後的運轉（P5），欄位表另須 `method`（方法與工具）與 `proof`（格式 `指標類別：…；症狀定義：…；反證：…；收斂：…`，只准定性內容，不含指標值、基線數字、門檻與參數鍵名，`PROOF-LEAK`），缺或空＝`BODY-FIELD-MISSING`；卡面 tail 多一行「方法與工具：…｜成效與收斂：…」（核心區不變）。範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/r1.md`。
+- `prop-new` 的**兩項前置**（先於本文判準；缺一即拒收、未寫）：①目標運轉須為 open（`RUN-NOT-OPEN`；先 `run-open` 或由巡邏器開）；②該運轉內須已有研究事件（`research.scan`／`research.skip`，缺＝`RESEARCH-MISSING`；P5 起另須四問事件，見〈四問審視者〉與 `FOURQ-*` 碼）。其後才是前置檢查的其餘各碼（觸及比例、來源、預算、SUSPENDED…）。
 - 提案者**直接呼叫** `prop-new`（不經包裝腳本），暴露掃描才找得到提案者逐字稿（P2 TCS 勘誤三）；凍結後提案者不得再讀 `params.json` 與量測腳本。
 
 ### M 類旗標
 
-`sandbox`、`verify`、`promote`、`rollback` 對 M 類一律帶 `--memory-dir <claude_home()/projects/<slug>/memory>`；少了＝`MEMORY-DIR-MISSING` 拒收（`verify` 在沙盒樹遺失需重建時同判）。
+`sandbox`、`verify`、`promote`、`rollback` 對 M 類一律帶 `--memory-dir <claude_home()/projects/<slug>/memory>`；少了＝`MEMORY-DIR-MISSING` 拒收（`verify` 在沙盒樹遺失需重建時同判）。**P7 起巡邏器自動帶這個旗標**（目錄解析＝`transcript_dir(repo)/memory`，須為目錄且含 `MEMORY.md`，解析不到記 `MEMORY-DIR-UNRESOLVED` 並不推進）；互動窗口手動推進時仍須自己帶。見〈巡邏快照與 M 類自動推進（P7）〉。
 
 ### Console 載體的主機金鑰（P2b）
 
@@ -477,7 +480,7 @@ unset AUTOSDD_SI_AUDIT_KEY
 
 ## 巡邏與無人運轉（P4）
 
-本節是自動演化排程（PRD FG-M；T1 2026-11-09）的操作配方。判準的唯一真相源是 PRD（FR-SI-36～39、§9.2〈P4 增補〉、§9.4〈P4 增補〉、ADR-SI-14／15），本節只收安裝、每心跳做什麼、停用與逃生、日誌與逾期處置。**巡邏器能自動入帳、`sandbox`、`verify`、`promote` 與本機 `git commit`，前提都是人已經決定（DEC）；核准與晉升的決定永遠是掌舵者的（Console 或逐字稿）。** 巡邏器不 `decide`、不 push（`sched_auto_push` 只准 false，由互動主控 push）。
+本節是自動演化排程（PRD FG-M；T1 2026-11-09）的操作配方。判準的唯一真相源是 PRD（FR-SI-36～39、§9.2〈P4 增補〉、§9.4〈P4 增補〉、ADR-SI-14／15），本節只收安裝、每心跳做什麼、停用與逃生、日誌與逾期處置。**巡邏器能自動入帳、`sandbox`、`verify`、`promote` 與本機 `git commit`，前提都是人已經決定（DEC）；核准與晉升的決定永遠是掌舵者的（Console 或逐字稿）。** 巡邏器不 `decide`；**巡邏器本體不 push**（S4U 任務拿不到 Git 憑證）——推送由〈自動推送（P7）〉的互動登入型任務 `AutoSDD_SI_Push` 執行 `push-run`（`sched_auto_push` 預設 true、可關）。
 
 ### 安裝與憑證
 
@@ -504,17 +507,19 @@ launchctl list | grep AutoSDD_SI_Patrol
 - 巡邏任務設定：`WakeToRun=false`（心跳不喚醒睡眠機器；nightly／smoke 兩支維持 `WakeToRun=true`）、`ExecutionTimeLimit=PT1H`（心跳自身上限；無人運轉牆鐘由 `spawn.json` 管）、`MultipleInstancesPolicy=IgnoreNew`、`StartWhenAvailable=true`；期望值逐任務住 `tools/scheduled_task_expectations.json`。
 - 睡著或關機的機器不會觸發（睡著的機器不巡邏＝已知邊界）：Windows 任務有 `StartWhenAvailable`（醒來後補跑一次），macOS 不補（`pmset -g custom` 現查）；漏跑由 `overdue` 偵測（見〈日誌與逾期處置〉）。
 - 安裝／解除 Windows 任務需 elevation；`-Status`、`-WhatIf` 唯讀。
+- **第二支任務 `AutoSDD_SI_Push`（P7；`sched_auto_push` 為 true 時）**：`python tools\selfimproving.py sched arm` 在安裝巡邏任務之後一併註冊（推送段與巡邏段獨立：巡邏段因權限失敗時推送段仍會嘗試；只裝推送任務用 `sched arm --push-only`，不需提權；互動登入型、非 S4U；動作＝`.venv\Scripts\pythonw.exe tools\selfimproving.py push-run`；每 `sched_heartbeat_minutes` 分鐘一次）。憑證同樣是值：`Get-ScheduledTask -TaskName 'AutoSDD_SI_Push' | Get-ScheduledTaskInfo | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime`（`NextRunTime` 非空才算建立）；`sched disarm` 兩支一併移除（`--push-only` 只移除推送任務）。註冊失敗時：`SCHED-ELEVATION-REQUIRED`＝改在**系統管理員** PowerShell 重跑同一條 `sched arm`（任務主體仍是登入使用者）；`SCHED-PUSH-TASK-FAILED`＝輸出會說明巡邏任務是否已裝好。詳見〈自動推送（P7）〉。
 
 ### 每心跳做什麼（順序固定：入帳→到期判定→運轉→推進）
 
 | 步 | 做什麼 | 失敗處置 |
 |---|---|---|
-| 0 | 取 `~/.autosdd/selfimproving/locks/patrol.lock`（取不到＝rc 0「已有巡邏在跑」）；`AUTOSDD_SI_PATROL_OFF` 有設＝整次 no-op | — |
+| 0 | 取 `~/.autosdd/selfimproving/locks/patrol.lock`（取不到＝rc 0「已有巡邏在跑」）；`AUTOSDD_SI_PATROL_OFF` 有設＝整次 no-op〔訂正（P7）：另多寫一份 `off:true` 快照；OFF 路徑不取鎖、不呼叫 `pushguard`、寫入成功不加日誌行，日誌仍恰一行 `PATROL-OFF`〕 | — |
 | 0′ 巡視 | 讀 `patrol/<RUN>/spawn.json`：子行程存活且未超硬牆⇒不動；超過 `RESUME_HARD_WALL_SECONDS`⇒殺行程樹並依事件收尾；已結束⇒依事件收尾（無 `prop`⇒`run-close(no_event)`；handback 缺四節＝日誌記「不完整」） | 同一時間至多一個進行中的無人運轉；存活中則其他運轉的 spawn 延後（日誌記） |
-| 1 入帳 | 對 `status` 的 `console_pending[]` 依 `time` 升冪逐檔入帳：`decide --carrier console`、`obs-add`、`obs-close`、`sched set --carrier console`、`run-open --trigger a --carrier console`（`run-request`；已有未關運轉時改記 `sched.skip(run-open)`；入帳得到的 (a) 運轉於本心跳步 3 同序執行） | rc 1＝保留稽核檔、日誌記一列 `obs-draft`（拒收碼）、不重試、不刪檔；Console 仍顯示「待入帳」 |
+| 1 入帳 | 對 `status` 的 `console_pending[]` 依 `time` 升冪逐檔入帳：`decide --carrier console`、`obs-add`、`obs-close`、`sched set --carrier console`、`run-open --trigger a --carrier console`（`run-request`；已有未關運轉時改記 `sched.skip(run-open)`；入帳得到的 (a) 運轉於本心跳步 3 同序執行） | rc 1＝保留稽核檔、日誌記一列 `obs-draft`（拒收碼）、不重試、不刪檔；Console 仍顯示「待入帳」，且**自 P7 起拒收碼同時進快照 `ingest[]`**（每心跳重新得到，Console 顯示碼與白話；日誌仍「同碼只記一次」） |
 | 2 到期判定 | `enabled` 且本格（日曆格）尚無 `run.open(f)` 時，每心跳依序判：`disabled`→`blackout`（`sched_blackout_local`，本機時分）→`quota-band`（準備／停止／量不到）→`other-driver`（近 `sched_driver_quiet_minutes` 有對話）→`dirty-tree`（SI 自有路徑除外）→`run-open`（本運轉以外已有未關運轉，含 Console (a) 的未關運轉；D-QA-16）→`spawn-failed`（預檢不過） | 任一成立＝記 `sched.skip{due_at＝格起點,reason,detail}`（同一格同一原因只記一筆；原因改變才再記）；本格未執行即下一心跳再試，不推進格線 |
 | 3 運轉 | (f)：全不成立才 `run-open --trigger f --by patrol`；Console (a) 運轉（步 1 入帳得到）同序執行，不看啟用旗標、不受格線限制，被擋只寫日誌、不寫 `sched.skip`、運轉保持開啟下一心跳再試。同序：`run-open --trigger f --by patrol`→`research --fetch --run <RUN>`（rc 1＝`research --skip --reason offline`；rc 2 照常繼續）→`scan`（候選只落日誌）→生成 `~/.autosdd/selfimproving/patrol/<RUN>/brief.md`（自〈無人運轉任務書範本〉）→**脫離式** spawn 無人主控（新 session／process group 的 `claude -p`〔Windows `CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`、POSIX `start_new_session`；breakaway 被拒或啟動失敗＝fail-closed：(f) 記 `sched.skip(spawn-failed)`、(a) 只日誌下心跳再試〕，Sonnet，姿態檔 `.claude/settings.unattended.json`，環境 `AUTOSDD_UNATTENDED=1`＋`AUTOSDD_SI_PATROL_RUN=<RUN>`；寫 `patrol/<RUN>/spawn.json`〔pid、啟動時刻、硬牆到期時刻〕後立即返回，心跳不等待） | 之後由步 0′ 巡視收尾，以**事件帳本**為憑：該運轉無 `prop`＝`run-close`（`no_event`）；有 `prop`＝保持開啟；handback 缺四節＝日誌記「不完整」、不重 spawn |
-| 4 推進 | 本心跳入帳了 `dec(approve)`：`sandbox`→`verify`→`card --issue`（verdict 原樣進卡面，不改判）；入帳了 `dec(promote)`：`promote`→（`sched_auto_commit` 且 promote 前工作樹乾淨）只 `git add` `touched` 路徑與 SI 自有路徑並 `git commit`（訊息引 PROP、DEC、APP；不 push）→`measure`；入帳了 `dec(rollback)`：`rollback`（同形 commit）；本運轉各提案皆已離開待人工決定態＝`run-close` | 前置不成立（例如尚缺 `heldout.freeze`）或髒工作樹不 promote＝跳過該 PROP、**只寫日誌、不寫 `sched.skip`**（`sched.skip` 只在 (f) 到期嘗試寫）、下一心跳再試；commit 失敗（含 git hook 拒絕）＝日誌＋OBS 草稿列、不重試、不用 `--no-verify` |
+| 4 推進 | 本心跳入帳了 `dec(approve)`：`sandbox`→`verify`→`card --issue`（verdict 原樣進卡面，不改判）；入帳了 `dec(promote)`：`promote`→（`sched_auto_commit` 且 promote 前工作樹乾淨）只 `git add` `touched` 路徑與 SI 自有路徑並 `git commit`（訊息引 PROP、DEC、APP；**巡邏器本體不 push**）→`measure`；入帳了 `dec(rollback)`：`rollback`（同形 commit）；本運轉各提案皆已離開待人工決定態＝`run-close` | 前置不成立（例如尚缺 `heldout.freeze`）或髒工作樹不 promote＝跳過該 PROP、**只寫日誌、不寫 `sched.skip`**（`sched.skip` 只在 (f) 到期嘗試寫）、下一心跳再試；commit 失敗（含 git hook 拒絕）＝日誌＋OBS 草稿列、不重試、不用 `--no-verify`。**P7**：M 類對 `sandbox`／`verify`／`promote`／`rollback` 自動帶 `--memory-dir`（解析不到＝`MEMORY-DIR-UNRESOLVED`、不推進）、promote 後立即驗後像（`POSTIMAGE-MISMATCH` 只記不回滾）；commit 訊息末尾帶兩行 trailer（`SI-Patrol-App`、`SI-Patrol-Prop`）；推送工作存活時 promote／rollback 記 `PUSH-IN-PROGRESS` 不執行；每個被擋的 PROP 的原因碼進快照 `props[]` |
+| 快照寫入（P7；**心跳之後，不是第六步**，不進 stdout 與 `--json` 的 `steps`） | 心跳末尾（含未預期例外與 `AUTOSDD_SI_PATROL_OFF`）以 tmp＋`os.replace` 原子覆寫 `~/.autosdd/selfimproving/console_report/patrol.json`：本心跳的步驟結果、`ingest[]`、`props[]`、進行中運轉、`push` 區塊（呼叫 `pushguard.evaluate` 一次；巡邏器不推送）；`--dry-run` 不寫 | 寫失敗＝日誌 `REPORT-WRITE-FAILED`、舊檔不變、不改心跳 rc；Console 以 `generated_at` 超過 `2×心跳＋5 分` 判「巡邏可能沒在跑」 |
 
 - 沒有 DEC 的 PROP 巡邏器零動作；NE／FAIL 的退回與否決是人的決定。
 - 每個動詞的 rc 契約同〈rc 契約表〉與〈P2 動詞〉：先存 rc 再判停、不接管線；`patrol` 的 rc 0 只代表心跳跑完，成效讀日誌與事件、不讀 rc。
@@ -524,7 +529,8 @@ launchctl list | grep AutoSDD_SI_Patrol
 
 1. **停 (f) 運轉**：Console 開關，或 `python tools/selfimproving.py sched set --enabled false --by main`（停用方向免引言；入帳與推進照常，因為人的決定仍要被處理）。
 2. **移除 OS 任務**：`python tools/selfimproving.py sched disarm`（只移除巡邏任務並驗證它真的不見：Windows `Get-ScheduledTask` 查無、macOS `launchctl` rc 113）。注意：`install_windows_nightly.ps1 -Uninstall` 會把 nightly 與 smoke 一併移除，只想停巡邏時不要用它。
-3. **整次 no-op**：環境變數 `AUTOSDD_SI_PATROL_OFF=1`（設在巡邏行程環境，例如包裝腳本或使用者環境；有設且非空即巡邏 rc 0、日誌一行，連入帳也不做）。
+3. **整次 no-op**：環境變數 `AUTOSDD_SI_PATROL_OFF=1`（設在巡邏行程環境，例如包裝腳本或使用者環境；有設且非空即巡邏 rc 0、日誌一行，連入帳也不做；**P7 起唯一多做的一件事**：寫一份 `off:true` 的快照，Console 才分得出「暫停」與「沒在跑」）。
+3b. **停自動推送**：`params.json` 的 `sched_auto_push` 改 `false`（屬 T1／PRD 修訂的參數）後重跑 `sched arm` 會移除 `AutoSDD_SI_Push`；只想暫停推送：`sched disarm --push-only`（只移除推送任務；巡邏照常）。不要靠在工作樹留未提交改動來暫停——那會同時擋住巡邏器的 promote／rollback。
 4. 已在跑的無人運轉由 `spawn.json` 記的硬牆到期時刻與步 0′ 巡視保證終止（`RESUME_HARD_WALL_SECONDS`，值現查 `tools/lib/unattended_authz.py`）；要提早收掉：先停用（第 1 項），再由人 `run-close`；不要砍 OS 任務的實例當作停（可能留下半套 `app.*` 事件，改由 `check` 與 `status` 標出）。
 5. 想讓巡邏暫不碰某段時間：用 `sched_blackout_local`（`params.json`，改值屬 T1／PRD 修訂；預設涵蓋 smoke 與 nightly 時段）。
 
@@ -534,6 +540,42 @@ launchctl list | grep AutoSDD_SI_Patrol
 - 讀 `sched.skip` 的 `reason` 與 `detail` 判斷為何沒跑（黑窗、額度帶、有人在開車、髒工作樹、已有未關運轉、預檢不過）；同一原因連續出現＝設定或環境問題，不是巡邏壞了。
 - **`overdue=true`（Console 橫幅警示或 `sched show`）的人工處置**：(1) `python tools/selfimproving.py sched show` 看 `cell_start`／`cell_end`、`ran_this_cell`、`last_skip` 與 `armed` 憑證（本格既無 run.open(f) 也無 sched.skip 才算逾期；有 skip＝巡邏活著只是被擋）；(2) 查 OS 任務：Windows `Get-ScheduledTask -TaskName 'AutoSDD_SI_Patrol' | Get-ScheduledTaskInfo`（`NextRunTime`、`LastTaskResult`），macOS `launchctl list | grep AutoSDD_SI_Patrol`；(3) 讀日誌末段；(4) 依因處理——任務被停用或不存在→重新 `sched arm`（或安裝器）；機器睡眠／關機→等待下一次心跳或 `StartWhenAvailable` 補跑；包裝腳本壞或金鑰缺→修復後 `python tools/selfimproving.py patrol --dry-run`（零寫入，印此心跳會做什麼）驗證；`AUTOSDD_SI_PATROL_OFF` 有設→移除；(5) **不得**手補 `sched.skip`、不得手改事件帳本偽造格線 origin。
 - 卡在「待入帳」的稽核檔：日誌的 `obs-draft` 列與拒收碼；原因多為金鑰未配置（`AUDIT-KEY-MISSING`）、列規則不合或重複入帳；人工入帳依〈Console 載體的主機金鑰〉。
+
+## 自動推送（P7；PRD FR-SI-49、ADR-SI-19；判準的唯一真相源是 PRD 與 TCS-SelfImproving-P7，本節只收操作與處置）
+
+**是什麼**：巡邏器依人的決定 promote／rollback 並本機 commit 之後，不必再由人手動 `git push`。**巡邏器本體（S4U 任務）永不推送**——S4U 拿不到 Git Credential Manager 的憑證保管庫；推送由另一支**互動登入型**任務 `AutoSDD_SI_Push` 每心跳執行一次 `python tools/selfimproving.py push-run`，沒有待推送就零動作。不在磁碟存任何權杖。**使用者未登入或機器睡眠時不推送**（Console 巡邏狀態卡顯示「等使用者登入後自動推送」，登入後下一心跳自動推）。
+
+**守門條件**（三條件加兩道：提交紀錄與帳本差分規則；每次 `push-run` 與每心跳的快照都重新判，領先 `origin/main` 的**每個**提交都要過，任一人工提交即整次跳過）：①commit 訊息末段有 `SI-Patrol-App: APP-SI-NNN` 與 `SI-Patrol-Prop: PROP-SI-NNN` 兩行；②事件帳本有該 APP 且其 PROP 對得上；③該提交 `git diff-tree` 的路徑只在該 PROP 的觸及檔與 SI 自有路徑（事件帳本、OBS 帳本、提案目錄）之內；④該提交的完整 sha 必須在巡邏器自己的提交紀錄 `~/.autosdd/selfimproving/push/commits.jsonl`（巡邏器 commit 成功後記，不在 repo 內；amend、rebase、照抄格式的提交 sha 不同，必被擋）且 APP 相符；⑤對每個提交的 diff：事件帳本只准尾端追加、OBS 帳本只准追加新列或把既有列處置欄由 open 轉終值一次、本 PROP 提案目錄只准新增檔；路徑允許清單與巡邏器 commit 的範圍是同一份常數（事件帳本、OBS 帳本、本 PROP 提案目錄、非 M 類時本 PROP 觸及的檔）；另須目前在 `main`（上游 `origin/main`）、非 merge、工作樹乾淨。推送明寫 sha（`git push origin <sha>:refs/heads/main`）、不推裸 `HEAD`、不 force、不 `--no-verify`、不設 `AUTOCLAUDE_SKIP_HOOKS`；本 repo 的 pre-push 閘門（可能十分鐘以上）照常跑，牆鐘 `sched_push_wall_minutes`（預設 45，上限 120）。
+
+**碼表與處置**（Console 顯示的白話以 `nextstep.py` 為準；下表只收你要做的事）：
+
+| 碼（快照 `push.code`） | 意思 | 你要做的事 |
+|---|---|---|
+| `PUSH-OK` | 已推送 | 無 |
+| `PUSH-NOT-AHEAD`／`PUSH-OFF` | 沒有待推送／已關閉自動推送 | 無 |
+| `PUSH-DIRTY-TREE` | 工作樹有未提交改動 | 提交或還原後自動推（pre-push 測的是工作樹） |
+| `PUSH-FOREIGN-COMMITS`／`PUSH-APP-KIND-INVALID`／`PUSH-APP-REUSED`／`PUSH-PATH-OUTSIDE`／`PUSH-CONTENT-MISMATCH` | 領先提交含非巡邏器產生者，或照抄巡邏格式但 APP 種類、一對一、路徑、內容與帳本不符（輸出附第一個不符 sha 前 8 碼） | 由互動主控照平常流程 `git push`（遷移期內舊的無 trailer 提交也是這個碼；第一次啟用自動推送前先推一次） |
+| `PUSH-NOT-MAIN` | 不在 `main` 或上游不是 `origin/main` | 切回 `main` 或修上游 |
+| `PUSH-HOOK-FAILED` | pre-push 閘門沒過（輸出含 `[pre-push dispatcher]`） | 讀閘門輸出修好後由人推送；**同 sha 不再自動重試**，新的巡邏提交才再試 |
+| `PUSH-REJECTED` | 遠端有新提交（non-fast-forward） | 先整合（rebase／merge）再由人推送；同 sha 不再自動重試 |
+| `PUSH-AUTH` | 遠端認證失敗 | 在互動視窗手動 `git push` 一次更新憑證；同 sha 不再自動重試 |
+| `PUSH-WALL-EXCEEDED`／`PUSH-FAILED` | 逾時被終止／網路等其他失敗 | 自動重試，最多 `sched_push_attempts_max` 次、間隔 `sched_push_retry_minutes`；用盡＝`PUSH-ATTEMPTS-EXHAUSTED`，改由人推送 |
+| `PUSH-RETRY-WAIT`／`PUSH-ATTEMPTS-EXHAUSTED` | 等重試間隔／已用盡 | 等待／由人推送 |
+| `PUSH-NOT-RECORDED`／`PUSH-RECORD-MISMATCH` | 提交沒有（或不符）巡邏器的紀錄（amend、rebase、照抄格式的提交，或紀錄寫入失敗） | 人工檢查該提交內容無誤後由人推送；巡邏器不會自動推送它 |
+| `PUSH-LEDGER-RULE` | 提交改了不該改的帳本列或提案檔（事件帳本非追加、OBS 既有列被改寫、提案檔被改） | 人工檢查後由人推送 |
+| `PUSH-GIT-UNAVAILABLE` | git 不可用或逾時 | 查 git 與磁碟 |
+| `PUSH-INTERNAL-ERROR` | 推送程式未預期錯誤（`push/last_error.json`） | 讀該檔；修好後下一心跳自動重試 |
+| `PUSH-PENDING`／`PUSH-WAITING-LOGIN`（快照態） | 等推送任務下一次執行／等使用者登入 | 登入後自動推；長期 waiting-login＝推送任務沒在跑，查 `Get-ScheduledTask` |
+
+**手動與除錯**：`python tools/selfimproving.py push-run --dry-run` 只印判定（零寫入）；結果檔在 `~/.autosdd/selfimproving/push/results/<sha12>.json`、最近一次任務執行時刻在 `push/tick.json`（不入 git、可丟棄）；`Get-ScheduledTask -TaskName AutoSDD_SI_Push | Get-ScheduledTaskInfo` 看 `LastTaskResult`（0＝上次推成功或無事可做；非 0＝上次推送失敗）。**macOS**：對等載具是 launchd 使用者層 agent `AutoSDD_SI_Push`（`sched arm` 寫 plist，憑證是 `launchctl list` 的 rc 與 plist 回讀，不是時間值；agent 在登入的 gui 網域內拿得到 keychain；**未實機驗**；睡著的 Mac 不推送）。**停用**：見〈停用與逃生口〉3b。
+
+## 巡邏快照與 M 類自動推進（P7；PRD FR-SI-47、FR-SI-48；判準的唯一真相源是 PRD 與 TCS-SelfImproving-P7）
+
+**快照**：巡邏器每心跳結束時原子覆寫 `~/.autosdd/selfimproving/console_report/patrol.json`（Console 經唯讀 bind 讀）。欄位：`generated_at`／`heartbeat_minutes`（超過 `2×心跳＋5 分`＝Console 警示「巡邏可能沒在跑」）、`ledger_seq`、`steps[]`（本心跳各步結果）、`ingest[]`（被主機拒收或延後的 Console 稽核檔：碼、白話、`permanent`——false＝條件解除後自動入帳）、`props[]`（每個待推進提案「下一步在等誰、卡在哪」）、`runs.live[]`／`runs.waiting[]`、`schedule`（為什麼沒有啟動運轉：停用、黑窗、額度帶、有人在互動視窗、已有未關運轉〔含被消耗成跳過的 Console「立即啟動」請求〕、工作樹髒、無法啟動；只顯示，第二波才改行為）、`push`（推送狀態，見〈自動推送（P7）〉）。**原因碼→白話**只住 `tools/lib/selfimproving/nextstep.py`（規格＝TCS-P7 附錄 A）；你在 Console 看到的字就是它。快照只描述「這一心跳量到的事實」，不是任何寫入的依據；Console 另可看提案詳情（patch、本文、評估集狀態、沙盒與驗證證據、時間線，來自 `export --kind proposals --id <PROP>` 的 `detail`）。
+
+**卡點碼速查**（你要做的事）：`NO-HELDOUT`＝尚未凍結評估集，需有人 `heldout-freeze`（凍結者≠提案者，見〈held-out 目錄〉）；`HELDOUT-BELOW-MIN`＝會照常驗證但必判 NE；`dirty-tree`＝工作樹有非 SI 自有改動，提交或還原；`MEMORY-DIR-UNRESOLVED`＝巡邏器找不到記憶目錄（見下）；`PREIMAGE-MISMATCH`＝記憶檔在驗證後被改過，需 `prop-revise` 重新上卡；`POSTIMAGE-MISMATCH`＝晉升後記憶檔與預期不符，人工檢查（**不自動回滾**，回滾是你的決定）；`COMMIT-FAILED`＝本機 commit 失敗（多為 hook 拒絕），巡邏器不重試、不用 `--no-verify`，修好後人工提交；`PUSH-IN-PROGRESS`＝正在推送，等它結束；沙盒／驗證拒收碼＝提案需退回或修訂；`WAIT-REVISION`＝被退回，需有人 `prop-revise`（第二波起可由 Console 請求）。
+
+**M 類自動推進**：approve 後巡邏器對 M 類同 P 類一樣 `sandbox`→`verify`→`card --issue`，掌舵者決定 promote／rollback 後 `promote`／`rollback`→commit→`measure`；差別只有四個動詞自動帶 `--memory-dir <claude_home()/projects/<slug>/memory>`（`<slug>` 由 repo 路徑算，與〈M 類旗標〉同式）。目錄不存在、不是目錄或無 `MEMORY.md`＝記 `MEMORY-DIR-UNRESOLVED`、**不呼叫任何動詞**。S4U 巡邏任務與互動視窗是同一使用者、同一 `USERPROFILE`；若你在互動視窗用 `CLAUDE_CONFIG_DIR` 把記憶挪到別處，巡邏任務看不到該變數會解析到預設位置——此時把該變數設進使用者環境（不是只設在 shell），不要寫死路徑。M 類不需要「互動視窗安靜」前置：記憶被他人改動由前像（`PREIMAGE-MISMATCH`）與後像比對偵測。
 
 ## 反事實回測（P6；PRD FR-SI-46；只在掌舵者或主控明示要量提案器基準時做，不是啟動事件、不排程）
 
@@ -606,7 +648,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 4. 歸因者：python tools/selfimproving.py attr …
 5. 審查者（≠歸因者）：python tools/selfimproving.py attr-confirm …
 6. 提案者（≠審視者）：python tools/selfimproving.py prop-new --run <RUN> …；本運轉至多 <MAX_PROPOSALS> 張；本文欄位表須含 method 與 proof（只准定性子欄），內容取自答案檔的 Q3 項與逐擬提案的 Q4 項；前置檢查拒收就依碼修正，不原封重試。
-7. 凍結者（≠提案者）：python tools/selfimproving.py heldout-freeze <PROP> --from <held-out 目錄> --by <凍結者>；提案者看不到評估集。
+7. 凍結者（≠提案者）：python tools/selfimproving.py heldout-freeze <PROP> --from <held-out 目錄> --by <凍結者>；提案者看不到評估集。案例數對照下限 <MIN_HELDOUT>：不足時照實凍結（凍結不會被拒），並在 handback〈卡在哪〉寫「案例 n＜下限，驗證必判 NE」；不得為過下限而灌水湊案例。
 8. 你：python tools/selfimproving.py card --issue <PROP> --by main，把卡面逐字寫進 handback。
 9. 交卷：handback；四問摘要（入帳結果、迴圈層快照、Q1／Q2 候選數、來源缺口候選）寫在「做了什麼」節內。
 
