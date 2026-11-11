@@ -47,6 +47,7 @@ on:
       - "tools/lib/endurance_env.py"
       - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
+      - "tools/tests/fixtures/selfimproving/p7/**"   # Bridge 測試讀根層黃金樣本（P7；TCS-P7 §3、AT-790-5-1）
   pull_request:
     branches: [main]
     paths:
@@ -78,6 +79,7 @@ on:
       - "tools/lib/endurance_env.py"
       - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
+      - "tools/tests/fixtures/selfimproving/p7/**"   # Bridge 測試讀根層黃金樣本（P7；TCS-P7 §3、AT-790-5-1）
   workflow_dispatch:
 
 concurrency:

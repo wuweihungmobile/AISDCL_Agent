@@ -27,12 +27,12 @@
 
 | 項目 | 指令（在副本內） | rc | 摘要行 |
 |------|------------------|----|--------|
-| Bridge 全套 | `python -m pytest -q`（`engine-bridge/`） | 0 | `2583 passed, 524 skipped, 1 warning in 805.34s`（略過歸屬見下） |
+| Bridge 全套 | `python -m pytest -q`（`engine-bridge/`） | 0 | 摘要行為 2583 項通過、524 項略過、1 則警告，耗時 805.34 秒（略過歸屬見下） |
 | Bridge 新增與受影響 SI 測試 | `pytest -q -rs tests/test_si_patrol_route.py tests/test_si_proposal_detail.py tests/test_si_deploy_config.py tests/test_si_readonly_lock.py tests/test_si_cli.py` | 0 | `163 passed`，零略過、零 xfail |
 | Bridge ruff（本目錄） | `ruff check .` | 0 | `All checks passed!` |
 | Bridge ruff（monorepo 根視角） | `ruff check AgentConsole/engine-bridge` | 0 | `All checks passed!` |
-| backend | `.\gradlew.bat clean build` | 0 | `Test result: SUCCESS (2583 tests, 2583 successes, 0 failures, 0 skipped)`；`BUILD SUCCESSFUL in 4m 51s`（含 checkstyle、`jacocoTestCoverageVerification`） |
-| 前端 vitest | `npx vitest run` | 0 | `Test Files  169 passed (169)`；`Tests  3034 passed (3034)` |
+| backend | `.\gradlew.bat clean build` | 0 | 測試結果 SUCCESS（2583 項測試、2583 項成功、0 項失敗、0 項略過）；`BUILD SUCCESSFUL in 4m 51s`（含 checkstyle、`jacocoTestCoverageVerification`） |
+| 前端 vitest | `npx vitest run` | 0 | 測試檔 169 個全數通過（共 169）；測試案例 3034 個全數通過（共 3034） |
 | 前端 lint | `npm run lint`（eslint 與 prettier `--check`） | 0 | `All matched files use Prettier code style!` |
 | 前端型別 | `npx tsc --noEmit` | 0 | 無輸出 |
 | 前端 build | `npm run build`（Turbopack；`NEXT_PUBLIC_API_URL=http://localhost:8080`） | 0 | 建置完成（E2E 用） |
@@ -44,7 +44,7 @@
 
 ### 2.1 Bridge 全套 524 個略過的歸屬
 
-以 `pytest -q -rs` 全套重跑一次（`2583 passed, 524 skipped`，與第一次相同）逐筆取得略過原因，依原因歸類，**屬於 `test_si_*` 的略過為 0 筆**：
+以 `pytest -q -rs` 全套重跑一次（2583 項通過、524 項略過，與第一次相同）逐筆取得略過原因，依原因歸類，**屬於 `test_si_*` 的略過為 0 筆**：
 
 | 略過數 | 原因（pytest 的 skip 文字） | 所在檔 | 與本鍵的關係 |
 |--------|------------------------------|--------|--------------|
@@ -226,7 +226,7 @@
 
 | 項目 | 指令 | rc | 摘要行 |
 |------|------|----|--------|
-| vitest | `npx vitest run` | 0 | `Test Files  170 passed (170)`；`Tests  3038 passed (3038)`（一審 169／3034，差額即新測試檔與 4 個新案） |
+| vitest | `npx vitest run` | 0 | 測試檔 170 個全數通過（共 170）；測試案例 3038 個全數通過（共 3038）（一審 169／3034，差額即新測試檔與 4 個新案） |
 | lint | `npm run lint` | 0 | `All matched files use Prettier code style!` |
 | 型別 | `npx tsc --noEmit` | 0 | 無輸出 |
 
