@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RootLayout from "@/app/layout";
 import { LEGEND } from "@/components/domain/issues/tests/issues.fixtures";
@@ -81,6 +81,13 @@ beforeEach(() => {
 });
 
 /** 讓動態載入與查詢有機會跑完（TCS §5.1 非同步慣例）。 */
+// 暖機說明鈕模組：TopRegion 以 next/dynamic 動態 import PageHelpButton（連同說明文字登記表與對話框），檔內第一個渲染 RootLayout 的案例（AT_PH_01_1_1）
+// 要付冷載入的轉譯成本；同機高負載（CI 多 CPU 平行）時超過 findBy 的 1 秒預設等待而偶發「找不到 page-help-open」。
+// 先載進模組快取，案例等的只剩「元件掛上」這個條件——斷言、等待條件與逾時都不變。
+beforeAll(async () => {
+  await import("@/components/domain/help/PageHelpButton");
+}, 60_000);
+
 const settle = () =>
   act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
