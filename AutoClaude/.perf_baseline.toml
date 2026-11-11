@@ -3,12 +3,12 @@
 # Environment provenance（DEF-200-298／ADR-SD08-003 §2.7）：本檔各 section 之 environment 欄位＝win32-local；跨環境比對之 advisory 分流見 tools/perf_regression_check.py
 
 [decide_correction]
-p50_ms = 1.66
-p95_ms = 2.207
-p99_ms = 2.207
+p50_ms = 1.717
+p95_ms = 2.362
+p99_ms = 2.362
 samples = 20
-git_sha = "c3f43217"
-captured_at = "2026-11-10T14:44:00.711586+00:00"
+git_sha = "ba1e6e9b"
+captured_at = "2026-11-11T15:04:35.069215+00:00"
 environment = "win32-local"
 
 [dry_run_e2e]
@@ -21,11 +21,11 @@ captured_at = "2026-11-09T14:42:11.047206+00:00"
 environment = "win32-local"
 
 [token_halt_roundtrip]
-p50_ms = 0.502
-p95_ms = 0.548
-p99_ms = 0.548
+p50_ms = 0.499
+p95_ms = 0.526
+p99_ms = 0.526
 samples = 20
-git_sha = "c3f43217"
-captured_at = "2026-11-10T14:44:00.711586+00:00"
+git_sha = "ba1e6e9b"
+captured_at = "2026-11-11T15:04:35.069215+00:00"
 environment = "win32-local"
 
