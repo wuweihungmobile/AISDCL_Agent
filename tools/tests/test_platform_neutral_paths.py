@@ -126,7 +126,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # 實測 103，過腐化上界；腐化上界逐字指示，照填不推算）。
         # 🔴 2026-10-25 重釘 98→122（SelfImproving P3 `tools/lib/selfimproving/` 新增 8 支，
         # 實測 128，過腐化上界 122；腐化上界逐字指示，照填不推算）。
-        (_REPO_ROOT / "tools" / "lib", True, 122),
+        # 🔴 2026-11-12 重釘 122→150（SelfImproving P7 `tools/lib/selfimproving/` 新增 6 支，
+        # 實測 158，過腐化上界 152；腐化上界逐字指示，照填不推算）。
+        (_REPO_ROOT / "tools" / "lib", True, 150),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -2171,7 +2173,9 @@ class TestTextIoDeclaresEncoding(unittest.TestCase):
         # 🔴 2026-09-26 重釘 812→965（DEF-200-316 方案 B 新增 tools/lib/hook_carrier_
         # symlink.py，掃描檔數 1016 已過腐化上界，`tree_count_verdict()` 逐字指示重釘為
         # 965 ⇒ 照填，零加減推算）。
-        surface = tree_count_verdict("encoding 掃描面", scanned, 965)
+        # 🔴 2026-11-12 重釘 965→1155（SelfImproving P7 新增檔，掃描檔數 1216 已過腐化上界
+        # 1206，`tree_count_verdict()` 逐字指示重釘為 1155 ⇒ 照填，零加減推算）。
+        surface = tree_count_verdict("encoding 掃描面", scanned, 1155)
         self.assertIsNone(surface, surface or "")
         self.assertEqual(
             stale, [],
@@ -2436,8 +2440,9 @@ class TestScanSurfaceParityWithSisterLock(unittest.TestCase):
 
         🔴 2026-09-26 重釘 812→965（同姊妹格：DEF-200-316 方案 B 新增
         tools/lib/hook_carrier_symlink.py，掃描檔數過腐化上界，逐字指示重釘為 965）。
+        🔴 2026-11-12 重釘 965→1155（同姊妹格：SelfImproving P7 新增檔，逐字指示 1155）。
         """
-        verdict = tree_count_verdict("兩鎖共同掃描面", len(self._own_files()), 965)
+        verdict = tree_count_verdict("兩鎖共同掃描面", len(self._own_files()), 1155)
         self.assertIsNone(verdict, verdict or "")
 
 
