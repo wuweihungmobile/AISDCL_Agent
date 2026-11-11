@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Link from "next/link";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -123,6 +123,9 @@ beforeEach(() => {
   window.localStorage.clear();
 });
 afterEach(() => {
+  // 先卸載再拿掉閒置排程替身：全域 setup 的 cleanup 排在本檔 afterEach 之後，若這裡先刪掉 cancelIdleCallback，
+  // 卸載時元件還有未完成的閒置排程（高負載下分批渲染來不及跑完）就會呼叫到已被刪除的 `window.cancelIdleCallback` 而丟 TypeError。
+  cleanup();
   window.localStorage.clear();
   Reflect.deleteProperty(window, "requestIdleCallback");
   Reflect.deleteProperty(window, "cancelIdleCallback");

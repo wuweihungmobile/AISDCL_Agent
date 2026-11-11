@@ -165,7 +165,9 @@ describe("AT_960_19_1 清單：空狀態、新建入口、VIEWER 停用、每列
 
 describe("AT_960_19_1 篩選與搜尋（全在已載入的清單上做）", () => {
   it("AT_960_19_1 搜尋：比對 RP 編號、名稱與代號，不分大小寫；沒有符合時顯示「沒有符合條件的研究專案」，清掉搜尋回到全部", async () => {
-    const user = userEvent.setup();
+    // 逐字輸入多組搜尋字再清除：userEvent 預設每個動作之間等一個巨集任務（delay: 0），同機高負載時累積超過 vitest 預設 5 秒單案上限而偶發逾時；
+    // 沒有真實時序要等，所以關掉動作間等待並放寬單案上限到 30 秒，斷言不變。
+    const user = userEvent.setup({ delay: null });
     renderList();
     await screen.findAllByTestId("research-row");
     const search = screen.getByRole("textbox", { name: "搜尋研究專案" });
@@ -190,7 +192,7 @@ describe("AT_960_19_1 篩選與搜尋（全在已載入的清單上做）", () =
     expect(screen.queryByText("還沒有任何研究專案")).toBeNull();
     await user.clear(search);
     expect(await screen.findAllByTestId("research-row")).toHaveLength(3);
-  });
+  }, 30_000);
 
   it("AT_960_19_1 狀態與步驟篩選：選「Gate 0 已核准」只剩 R3、選步驟「研究」只剩 R1；兩者疊加取交集", async () => {
     const user = userEvent.setup();

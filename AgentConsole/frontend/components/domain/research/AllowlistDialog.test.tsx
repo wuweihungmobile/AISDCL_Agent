@@ -263,7 +263,9 @@ describe("AT_960_19_8 新增：產業網域與逐欄驗證", () => {
   });
 
   it("AT_960_19_8 驗證：主機空白、帶 https:// 或路徑、含大寫以外的非法字元、間隔不是 1～3600 的整數、用途超過 200 字各在欄位旁顯示錯誤且不送出；改對後送出", async () => {
-    const user = userEvent.setup();
+    // 這個案例要逐字輸入、清除、送出十幾輪；userEvent 預設每個動作之間還要等一個巨集任務（delay: 0），同機高負載時累積就吃光 vitest 預設的 5 秒單案上限而偶發
+    // 「Test timed out in 5000ms」。沒有任何要等的真實時序（狀態更新由 userEvent 自己包進 act），所以關掉動作間等待並放寬單案上限到 30 秒；斷言不變。
+    const user = userEvent.setup({ delay: null });
     const { calls } = mountDialog("ADMIN");
     await openDialog(user);
     await screen.findAllByTestId("allowlist-row");
@@ -298,7 +300,7 @@ describe("AT_960_19_8 新增：產業網域與逐欄驗證", () => {
     await submit();
     await waitFor(() => expect(callsOf(calls, "POST", /\/allowlist$/)).toHaveLength(1));
     expect(callsOf(calls, "POST", /\/allowlist$/)[0].body).toMatchObject({ host: "blog.example.com", minIntervalSeconds: 10, purpose: "" });
-  });
+  }, 30_000);
 
   it("AT_960_19_8 後端拒絕（重複條目 409、Bridge 尚未實作 502）：原因顯示在對話框內、不關閉、不假裝成功、表單內容保留", async () => {
     const user = userEvent.setup();

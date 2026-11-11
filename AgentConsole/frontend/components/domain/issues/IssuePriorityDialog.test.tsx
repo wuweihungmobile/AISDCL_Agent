@@ -181,7 +181,11 @@ describe("AT_IC_09_9_E_1 不可排的列與表單驗證", () => {
 
 describe("AT_IC_12_5_E_1 排序對話框的鍵盤與 aria", () => {
   it("AT_IC_12_5_E_1 Tab 焦點循環困在對話框內；分頁、對話框、輸入與按鈕皆有 aria 名稱；Esc 關閉並把焦點還給「排序」鈕", async () => {
-    const { user } = await renderAdmin();
+    // 這個案例要連續送出約 30 次鍵盤事件；userEvent 預設每個動作之間還要等一個巨集任務（delay: 0），同機高負載時累積就吃光 vitest 預設的 5 秒單案上限而偶發
+    // 「Test timed out in 5000ms」。這裡沒有任何要等的真實時序——每個動作後的狀態更新由 userEvent 自己包進 act——所以關掉動作間的等待，並把單案上限
+    // 放到與本專案其他長互動案例一致的 30 秒作為負載下的緩衝；斷言與焦點循環次數都不變。
+    await renderAdmin();
+    const user = userEvent.setup({ delay: null });
     // 頁面上的分頁與按鈕以名稱取得
     expect(screen.getByRole("tablist", { name: "議題分頁" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "待處理" })).toHaveAttribute("aria-selected", "true");
@@ -211,5 +215,5 @@ describe("AT_IC_12_5_E_1 排序對話框的鍵盤與 aria", () => {
     await user.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByTestId("issue-priority-dialog")).toBeNull());
     expect(trigger).toHaveFocus();
-  });
+  }, 30_000);
 });

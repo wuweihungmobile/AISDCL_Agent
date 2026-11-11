@@ -89,7 +89,9 @@ function proposalOf(patch: Partial<SiProposal>): SiProposal {
 
 describe("AT_932_1_5 頁面逐欄顯示黃金檔資料（R12～R14）", () => {
   it("AT_932_1_5 橫幅、觀察九欄、壞列、運轉與事件的文字逐欄等於 camelCase 黃金檔，且請求網址集合恰為所需", async () => {
-    const user = userEvent.setup();
+    // 逐一展開十一列觀察並逐欄比對：userEvent 預設每個動作之間等一個巨集任務（delay: 0），同機高負載時累積超過 vitest 預設 5 秒單案上限而偶發逾時；
+    // 沒有真實時序要等，所以關掉動作間等待並放寬單案上限到 30 秒，斷言不變。
+    const user = userEvent.setup({ delay: null });
     const { urls } = renderSi();
     const L = limits.value;
 
@@ -171,7 +173,7 @@ describe("AT_932_1_5 頁面逐欄顯示黃金檔資料（R12～R14）", () => {
 
     // 請求：status（無查詢參數）、observations、runs、events；沒打開的提案分頁不發請求
     expect([...urls()].sort()).toEqual([`/api/v1/si/events?limit=${L}`, `/api/v1/si/observations?limit=${L}`, `/api/v1/si/runs?limit=${L}`, "/api/v1/si/status"].sort());
-  });
+  }, 30_000);
 });
 
 describe("AT_932_1_6 提案卡面逐位元組顯示（R14）", () => {
@@ -463,7 +465,9 @@ describe("AT_932_1_E_7 帳本推進後頁面隨之改變（R12、R14）", () => 
 describe("AT_932_2_6 完整操作序列只產生 GET 請求，沒有寫入型控制項（R11、R12）", () => {
   it("AT_932_2_6 分頁、篩選、展開、載入更多、重新整理與錯誤重試之後，每個 fetch 都是不帶本文的 GET，畫面沒有表單與寫入型按鈕", async () => {
     limits.value = 5;
-    const user = userEvent.setup();
+    // 三十幾個連續動作：userEvent 預設每個動作之間等一個巨集任務（delay: 0），同機高負載時累積超過 vitest 預設 5 秒單案上限而偶發逾時；
+    // 沒有真實時序要等，所以關掉動作間等待並放寬單案上限到 30 秒，斷言不變。
+    const user = userEvent.setup({ delay: null });
     const { stub, container } = renderSi();
     const forbidden = /新增|刪除|核准|否決|決定|儲存|送出/;
     const seenButtons = new Set<string>();
@@ -521,7 +525,7 @@ describe("AT_932_2_6 完整操作序列只產生 GET 請求，沒有寫入型控
     }
     // 防反空轉：序列確實出現過這些按鈕（展開、載入更多、重新整理、重試）
     for (const must of ["重新整理", "重試", "展開 事件 1", "展開 PROP-SI-004"]) expect(seenButtons.has(must), `序列中沒看到按鈕 ${must}`).toBe(true);
-  });
+  }, 30_000);
 });
 
 describe("AT_932_3_6 SI 全面失敗時各面板顯示錯誤態與原因（R12、R19）", () => {
