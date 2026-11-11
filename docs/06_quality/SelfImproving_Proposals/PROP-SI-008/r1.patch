@@ -1,0 +1,27 @@
+diff --git a/memory/MEMORY.md b/memory/MEMORY.md
+--- a/memory/MEMORY.md
++++ b/memory/MEMORY.md
+@@ -3,6 +3,7 @@
+ > 排序原則（2026-10-19，OBS-SI-030）：索引若被截斷是從尾端吃起，所以常青的〈工作方式教訓〉〈機制與環境事實〉放前面、會一直長的〈近期輪次〉殿後；舊輪次指標歸檔到 `archive-index-*.md`。
+ 
+ ## 工作方式教訓
++> 保留／淘汰：某條教訓已被機械物（hook、測試、規則檔）守住、或被較新的指令取代時，併入該機械物或新條目後移出；掌舵者指令與尚無機械物的教訓保留。
+ - [所有顯示、解說、互動一律繁體中文（掌舵者 2026-11-11 再指令「記住!」）](always-traditional-chinese.md) — 進度短句、互動選項、收尾都算；壓縮續跑後第一則特別檢查（曾整段改用英文）
+ - [子代理 git add 後主控 `git commit` 會吃整個 index（2026-11-10 混入 45 檔，已拆回）](git-commit-takes-whole-index-when-agents-stage.md) — 提交前看 `git diff --cached --name-only`；拆錯用 `reset --soft`＋`restore --staged`
+ - [測試／審查用完的東西慣例移除：subst Q/R/S、QA 副本、閒置行程、suite_tmp_*、Docker build cache／懸空 volume／舊標籤（掌舵者 2026-11-07 指令）](cleanup-after-tests-convention.md) — 任務書寫收尾條款、主控收卷後現查；先確認沒人在用再拆；基底與 act 映像保留
+@@ -40,6 +41,7 @@
+ - [PowerShell 的 & 被守衛誤判成背景符號](powershell-ampersand-misread-as-background.md) — 出口＝行內 `# waitform-ok: <理由>`
+ 
+ ## 機制與環境事實
++> 保留／淘汰：所指的環境事實已失效或被新事實取代時，就地更新或移出；多條講同一機制時併成一條。
+ - [全套洩漏 OpenConsole 拖垮機器](windows-console-leak-openconsole.md) — pythonw 下 git 沒帶 CREATE_NO_WINDOW；量建立事件不量存量；大量跑測試後現查 OpenConsole 數
+ - [「選取應用程式以開啟 python」對話框真因](openwith-dialog-extensionless-python.md) — PowerShell `&` 對無副檔名檔案回退 ShellExecute；Get-RepoPython 已加 PATHEXT 過濾
+ - [ci-gate.sh REPO_ROOT 是子專案根](ci-gate-repo-root-is-subproject.md) — 接線類修復的鎖必須驗到路徑解得到＋執行得出值
+@@ -62,6 +64,7 @@
+ - [三條改進軌道](three-improvement-tracks.md) — 整合迭代走根層 AutoSDD_improving_NN
+ 
+ ## 近期輪次（新→舊）
++> 保留／淘汰：輪次結案、其教訓已沉入前兩段或機械物後，整段連續條目搬入歸檔指標；歸檔指標列是通往舊輪次的路，不退役。
+ - [2026-11-11 P6 收尾輪（Console 鍵 research-registry 發布收尾：拋棄式全棧整檔 E2E、V1 巡邏自動入帳、長駐棧部署、V7 文案改善；掌舵者打「核准 OBS-SI-380」⇒ 開 (a) 運轉做成正式提案；結論見檔）](windows-20261111-registry-release-obs380-round.md) — 對 OBS 打「核准」不是 K=1 決定；文章不在最新 3 篇就加直指來源（啟用上限 10 先停一筆）；額度帶用 `--pace --model sonnet` 查；E2E 映像取自 repo 外短路徑 worktree
+ - [2026-11-10 P6 研究來源單一化＋反事實回測（OBS-SI-377 結案：BT-003 n=5 hit5=3；稽核三連修 OBS-SI-383／384；根層鍵 RELEASE；Console 鍵停 RELEASE_READY 待拋棄式棧重跑＋V7 目視，DEF-AC-036／037 已修；交棒任務書在 session scratchpad rr\RESTART_POINT.md）](windows-20261110-si-p6-registry-backtest-round.md) — 稽核判準要用真實 harness 逐字稿驗；重量用新 seed；QA 要實跑突變；E2E 起點要乾淨（假通過）；passed＋四位數同行＝基線站點；TanStack 先 cancel 再 invalidate
+ - [2026-11-10 P5 頂尖專家四問輪（鍵 monorepo-si-p5-expert-review RELEASE；首個真實每日無人運轉 RUN-SI-006＋Console 立即啟動 RUN-SI-007 驗 V30／V31／V32／V36；真機揭露 D-IMP-11 無人時額度量不到、D-IMP-12 研究者讀不到來源，皆已修）](windows-20261110-si-p5-fourq-round.md) — 開發期用使用者層 AUTOSDD_SI_PATROL_OFF 壓住巡邏、推送後再驗；凡「沒人在時才跑」要自己補量額度；重釘 MIN_TESTS 同批跑 sync_onboarding_baselines；推送前跑九個鎖檔
