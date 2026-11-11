@@ -362,7 +362,7 @@ export function nextStepLine(step: NextStep): string {
   if (step.source === "none") return T.nextStepUnknown;
   if (step.who === "無") return `${T.nextStepNobody}${step.text}`;
   const who = labelOfWho(step.who);
-  return fillText(T.nextStepWaitFmt, { who: who.known ? who.text : who.text, text: step.text });
+  return fillText(T.nextStepWaitFmt, { who: who.text, text: step.text });
 }
 
 // ── diff ────────────────────────────────────────────────────────────────────────────────────────

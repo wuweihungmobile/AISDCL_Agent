@@ -18,6 +18,7 @@ import {
   labelOfVerdict,
   labelOfWho,
   maskCredentials,
+  nextStepLine,
   parseDiff,
   patrolFreshness,
   pushStateInfo,
@@ -109,6 +110,13 @@ describe("AT_966_5_2 resolveNextStep 來源序", () => {
 });
 
 describe("AT_966_5_3 列舉已知判定與未知值保底", () => {
+  it("下一步那一行：未知等待對象走未知值保底、已知對象原樣、缺席為量不到", () => {
+    const line = (who: unknown) => nextStepLine({ source: "detail", who, text: "說明", warnPatrolMayBeDown: false });
+    expect(line("外星人")).toBe("下一步：等未知值『外星人』｜說明");
+    expect(line("掌舵者")).toBe("下一步：等掌舵者｜說明");
+    expect(line(undefined)).toBe("下一步：等量不到｜說明");
+    expect(line("無")).toBe("目前不需要任何人動作：說明");
+  });
   it("已知值", () => {
     expect(labelOfPurpose("scheduled")).toEqual({ known: true, text: "排程啟動" });
     expect(labelOfPurpose("console").text).toBe("從畫面按『立即啟動』");

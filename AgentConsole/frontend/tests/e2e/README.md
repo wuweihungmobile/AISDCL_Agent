@@ -27,6 +27,7 @@
   匯入到既有專案（`targetProjectId`、SDD 規格資訊與警告）、執行頁追溯覆蓋（諮詢）面板（200／404／非終態／無綁定）與 execute 201 的 `warnings[]`、
   監控頁 SDD 卡（專案模式 `?projectId=`、階段進度、ESCALATION 橫幅與兩段恢復指令的複製鈕；人工恢復後不誤報）。專案詳情的假後端是檔內自帶的 `SddProjectWorld`，執行與監控情境借用 `Engine`／`MonitorWorld`。
   設環境變數 `E2E_SHOTS_DIR` 才會把重點畫面存成 png（不進 repo）；情境數以 `--list` 現查。對 production 建置跑（`E2E_MODE=standalone`），並一律帶 `--output=<自己的暫存目錄>`，避免與別的 Playwright 行程共用、清掉 `test-results`。
+- **standalone（production 建置）的 E2E 必須在實體 `node_modules` 目錄下建置**（SCG-4 審查 Q-06）：`node_modules` 是連結目錄時，Turbopack 無法解析套件、`--webpack` 建置則缺 Tailwind 工具類別，會產生看似產品缺陷的假紅（版面與樣式類別失效）。先確認 `node_modules` 不是 symlink 或 junction（必要時在乾淨的實體目錄 `npm ci`），再 `npm run build`。
 - `research-studio-perf.mock.spec.ts`（ResearchToPRD P0 PKG-FE-C；5 個）：研發工作流「PRD 工作室」的真瀏覽器驗證，假資料取 `tests/fixtures/research/**`（與 vitest 共用）。
   ① AT-960-17-1 效能量測（200KB PRD）：輸入延遲 P95 小於 100 毫秒、Diff 計算小於 1 秒、預覽首次渲染不超過 2 秒三道門檻，量測值與機器規格落 `testInfo.outputPath` 的 JSON 與主控台的 `[perf]` 行；另一支量編輯器套件的輸入延遲隨文件大小成長，是 `RICH_EDIT_MAX_BYTES` 門檻的實測依據。
   預覽的 Markdown 管線自 PKG-FE-D 起是非同步 chunk（不在 `/research/[researchId]` 的首屏路徑）；200KB 的夾具走精簡輸入框、編輯器套件（與它共用同一個 chunk）不會先載入，所以「預覽首次渲染」的第一次（冷啟動）含那個 chunk 的下載時間，其後為熱。
