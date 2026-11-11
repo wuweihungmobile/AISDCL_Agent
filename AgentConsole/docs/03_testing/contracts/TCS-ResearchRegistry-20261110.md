@@ -664,7 +664,7 @@
 - **AT-965-10-2**（Playwright｜`a11y.mock.spec.ts`｜E2E｜AC-965-10、W-R10；AC-R2P-24-10）三寬度 axe 零違規與無橫向溢出。
   - Given `E2E_MODE=standalone` 的 mock API（路由含 `watch-sources`、`si/research-registry` 與既有 allowlist；種子 17 列夾具與四種狀態）
   - When 以 `RESEARCH_WIDTHS`（1440、1000、600）開研究來源設定對話框（含追蹤來源區、新增表單展開、錯誤狀態、`unknown` 狀態）
-  - Then 各寬度 `expectNoA11yViolations`（serious／critical 零）；對話框內 `scrollWidth ≤ clientWidth`、頁面無橫向捲動；表格在窄寬可橫向捲動容器內且不撐破對話框；焦點可見；狀態徽章對比度≥4.5
+  - Then 各寬度 `expectNoA11yViolations`（serious／critical 零）；對話框內 `scrollWidth ≤ clientWidth`、頁面無橫向捲動；表格在窄寬可橫向捲動容器內且不撐破對話框；網域表（上半）同樣在可橫捲容器內、表寬不被擠壓〔勘誤 E-13 補〕；焦點可見；狀態徽章對比度≥4.5
   - 判定：`npx playwright test tests/e2e/a11y.mock.spec.ts -g AT_965_10_2`；預期突變：追蹤來源表在 600 寬撐出橫向溢出、按鈕無可存取名稱，皆紅
   - 驗收字樣：[AT_OK_965_10_2]
 - **AT-965-10-4**（Playwright｜`self-improving-schedule.mock.spec.ts`｜E2E｜AC-965-10、AC-965-9；勘誤 E-14、DEF-AC-039）ADMIN 自我進化頁的研究來源說明連結無對比違規。
