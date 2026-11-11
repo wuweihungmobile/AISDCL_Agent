@@ -4,7 +4,7 @@ import Link from "next/link";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { invalidateResearch } from "@/lib/api/queries";
 import type { ResearchEvent, ResearchPrdVersion, ResearchProjectDetail, Role } from "@/lib/api/types";
@@ -99,6 +99,13 @@ function setViewport(width: number): void {
 const scrolled: Element[] = [];
 /** 只看預覽區塊的捲動（以標題行索引標記者），不受其他元件偶發的捲動影響。 */
 const blocksScrolled = (): Element[] => scrolled.filter((el) => el.hasAttribute("data-prd-line"));
+
+// 暖機預覽的 Markdown 管線：工作室預覽是 `next/dynamic` 延遲載入真的 MarkdownView（react-markdown、remark-gfm、rehype-highlight 與語言表），
+// 檔內第一個走預覽的案例會付冷載入的轉譯成本；同機高負載（CI 多 CPU 平行）時超過 findBy 的 1 秒預設等待而偶發「找不到 prd-preview」。
+// 先載進模組快取，案例等的只剩「渲染完成」這個條件——斷言、等待條件與逾時都不變。
+beforeAll(async () => {
+  await import("@/components/markdown/MarkdownView");
+}, 60_000);
 
 beforeEach(() => {
   setViewport(1440);

@@ -490,5 +490,13 @@ describe("AT_963_3_10 允許清單：預設主機自然序升冪與表頭排序"
     expect(hosts()).toEqual(["api.github.com", "api.semanticscholar.org", "api.stackexchange.com", "docs.example.com", "export.arxiv.org"]);
     await user.click(within(within(table).getByRole("columnheader", { name: "主機" })).getByRole("button"));
     expect(hosts()).toEqual(["export.arxiv.org", "docs.example.com", "api.stackexchange.com", "api.semanticscholar.org", "api.github.com"]);
+
+    // DEV-COPY：「來源」欄的排序鍵（SORT_COLUMNS.source.get）要與列內顯示字一致——升冪時「部署設定」（ENV）列全在「管理員新增」（ADMIN）列之前，
+    // 再點一次相反。排序鍵不直接顯示，若它退回舊字面（「ENV …」「ADMIN …」，A 排在 E 前）順序會翻轉，沒有這條斷言就沒人發現。
+    const sourcesOf = () => screen.getAllByTestId("allowlist-row").map((row) => row.getAttribute("data-source"));
+    await user.click(within(within(table).getByRole("columnheader", { name: "來源" })).getByRole("button"));
+    expect(sourcesOf()).toEqual(["ENV", "ENV", "ENV", "ENV", "ADMIN"]);
+    await user.click(within(within(table).getByRole("columnheader", { name: "來源" })).getByRole("button"));
+    expect(sourcesOf()).toEqual(["ADMIN", "ENV", "ENV", "ENV", "ENV"]);
   });
 });

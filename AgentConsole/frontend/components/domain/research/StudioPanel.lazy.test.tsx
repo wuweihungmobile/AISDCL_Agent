@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { ReactNode } from "react";
 import ts from "typescript";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ResearchPrdVersion } from "@/lib/api/types";
 import { fsmView } from "@/tests/fixtures/research/fsm";
@@ -88,6 +88,12 @@ function setViewport(width: number): void {
 /** 被呼叫 scrollIntoView 的預覽區塊（以標題行索引標記者）。 */
 const scrolled: Element[] = [];
 const blocksScrolled = (): Element[] => scrolled.filter((el) => el.hasAttribute("data-prd-line"));
+
+// 暖機真模組（不經閘門、不計 gate.imports）：放行後 `importOriginal()` 要載入 react-markdown 等整條管線，冷載入在同機高負載（CI 多 CPU 平行）時會超過
+// findBy 的 1 秒預設等待而偶發「找不到 prd-preview」。先把真模組載進快取，測試等的就只剩「渲染完成」這個條件，斷言與等待條件都不變。
+beforeAll(async () => {
+  await vi.importActual("@/components/markdown/MarkdownView");
+}, 60_000);
 
 beforeEach(() => {
   setViewport(1440);
