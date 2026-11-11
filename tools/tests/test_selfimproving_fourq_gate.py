@@ -27,6 +27,7 @@ import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p5_fixtures as f5
 import _selfimproving_p6_fixtures as px
+import _selfimproving_p7_fixtures as p7x
 from _selfimproving_p5_fixtures import P5TestCase, answers
 
 import selfimproving
@@ -519,7 +520,8 @@ SKIP_RE = re.compile(r"\bskip(?:Test|If|Unless)\b|unittest\.skip|pytest\.skip|ma
 
 def scope_problems(root: Path, base: str) -> list[str]:
     """`<base>..<tip>` 的已提交差異觸及允許集合時：集合之外與落在凍結前綴的路徑（空＝守衛綠）。"""
-    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base), ALLOWED, FORBIDDEN)
+    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base),
+                                                (*ALLOWED, *p7x.P7_ALLOWED), FORBIDDEN)
     return [*outside, *frozen] if touched else []
 
 
@@ -611,7 +613,8 @@ class TestRepoState(unittest.TestCase):
         raw = (ROOT / fx.PARAMS).read_bytes()
         obj = json.loads(raw)
         keys = list(obj)
-        self.assertEqual((len(keys), keys == sorted(keys, key=lambda k: k.encode())), (44, True))
+        # P7：44→47
+        self.assertEqual((len(keys), keys == sorted(keys, key=lambda k: k.encode())), (47, True))
         self.assertEqual(keys[keys.index("export_limit_max") + 1:keys.index("ledger_fail_bytes")],
                          ["fourq_degrade_items_max", "fourq_from_run", "fourq_items_max"])
         self.assertEqual(set(keys), set(si_params.PARAM_SPECS))
@@ -652,9 +655,9 @@ class TestRepoState(unittest.TestCase):
         from lib.selfimproving import check as si_check
 
         self.assertEqual((len(selfimproving._HELP), len(si_events.KINDS), len(si_check.ITEM_IDS)
-                          if hasattr(si_check, "ITEM_IDS") else 35), (29, 27, 35))
-        self.assertEqual((len(si_params.PARAM_SPECS), si_params.CHECK_RULES_REV), (44, 6))
-        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (72, 27))
+                          if hasattr(si_check, "ITEM_IDS") else 35), (30, 27, 35))
+        self.assertEqual((len(si_params.PARAM_SPECS), si_params.CHECK_RULES_REV), (47, 6))
+        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (78, 27))
         from lib.selfimproving import status
         self.assertIn("fourq", inspect.getsource(status.build))
 
@@ -678,7 +681,7 @@ class TestRepoState(unittest.TestCase):
     def test_AT_445_4_1_capability_registry_and_loc(self):
         from test_selfimproving_capability import CAPABILITY, capability_problems
 
-        self.assertEqual(len(CAPABILITY), 72)
+        self.assertEqual(len(CAPABILITY), 78)
         self.assertEqual((CAPABILITY["fourqparse.py"], CAPABILITY["fourq.py"],
                           CAPABILITY["evspec.py"]), ("ro", "rw", "ro"))
         text = (LIB / "fourq.py").read_text(encoding="utf-8")

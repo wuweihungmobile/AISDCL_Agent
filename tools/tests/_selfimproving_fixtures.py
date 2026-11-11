@@ -368,7 +368,10 @@ def params_dict() -> dict:
         "sched_blackout_local": ["21:00-01:30"],
         "sched_driver_quiet_minutes": 30,
         "sched_auto_commit": True,
-        "sched_auto_push": False,
+        "sched_auto_push": False,  # 夾具預設不推送（真 params.json 為 true；P7 AC-SI-49-1）
+        "sched_push_wall_minutes": 45,
+        "sched_push_attempts_max": 3,
+        "sched_push_retry_minutes": 360,
     }
 
 

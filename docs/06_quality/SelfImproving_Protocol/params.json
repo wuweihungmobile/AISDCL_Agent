@@ -55,7 +55,7 @@
   "research_timeout_seconds": 20,
   "row_max_bytes": 700,
   "sched_auto_commit": true,
-  "sched_auto_push": false,
+  "sched_auto_push": true,
   "sched_blackout_local": [
     "21:00-01:30"
   ],
@@ -64,6 +64,9 @@
   "sched_period_minutes_default": 1440,
   "sched_period_minutes_max": 10080,
   "sched_period_minutes_min": 60,
+  "sched_push_attempts_max": 3,
+  "sched_push_retry_minutes": 360,
+  "sched_push_wall_minutes": 45,
   "sched_run_budget_minutes": 90,
   "spec_body_globs": [
     "**/docs/01_requirements/**",

@@ -993,7 +993,7 @@ class TestP2Checks(P2TestCase):
         self.assertEqual(self.S(self.check(R), "params.keys"), "PASS")
         real = json.loads(fx.REAL_PARAMS.read_text(encoding="utf-8"))
         self.assertEqual((real["probe_timeout_seconds"], real["verify_runs_max"]), (600, 2))
-        self.assertEqual(len(real), 44)
+        self.assertEqual(len(real), 47)  # P7：44→47（TCS-P7 AC-SI-49-1）
         p = fx2.drive_to(R, "sandboxed")
         fx.set_params(R, verify_runs_max=1)
         self.assertEqual(self.M(R, "verify", p)[0], 0)

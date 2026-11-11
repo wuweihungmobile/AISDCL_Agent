@@ -25,10 +25,17 @@ if _LIB not in sys.path:
 
 from lib import resume_route, unattended_authz  # noqa: E402
 
-from . import check as si_check  # noqa: E402
 from . import events as si_events  # noqa: E402
 from . import fold as si_fold  # noqa: E402
-from . import fourqparse, patrolbrief, runner, sched  # noqa: E402
+from . import (  # noqa: E402
+    fourqparse,
+    memdir,
+    patrolbrief,
+    patrolreport,
+    pushguard,
+    runner,
+    sched,
+)
 
 ENV_ALLOW = (*runner._ENV_KEYS, "APPDATA", "LOCALAPPDATA", "CLAUDE_CONFIG_DIR", "AUTOSDD_SI_DIR")
 _SECRET_RE = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.IGNORECASE)
@@ -173,7 +180,8 @@ def compose(ctx, run: str, trigger: str, due_at: str, scan_rows: list[str]) -> s
         "RESEARCH_RESULT": result, "SOURCE_FILES": "、".join(files) or "無",
         "SCAN_CANDIDATES": f"{len(scan_rows)} 筆：" + " ／ ".join(scan_rows) if scan_rows else "無",
         "MAX_PROPOSALS": ctx.status_params().get("max_proposals_per_run", 3),
-        "HANDBACK_PATH": str(tdir / "handback.md")}
+        "HANDBACK_PATH": str(tdir / "handback.md"),
+        "MIN_HELDOUT": ctx.status_params().get("min_heldout", "未知")}
     return patrolbrief.render(tpl, fields, trigger=trigger)
 
 
@@ -301,7 +309,10 @@ _POST = ("promoted", "measuring", "closed")
 # ── 步 4 推進（R154、R155）────────────────────────────────────────────────────────
 def _step(ctx, pid: str, verb: str, *extra: str) -> bool:
     rc, out, err = ctx.verb(verb, pid, *extra, "--by", "patrol")
-    ctx.log("推進", rc, None if rc == 0 else first_code(out, err), f"{pid} {verb} rc={rc}")
+    code = None if rc == 0 else first_code(out, err)
+    ctx.log("推進", rc, code, f"{pid} {verb} rc={rc}")
+    if code:
+        ctx.note(pid, code)  # 本心跳的卡點（快照 props[] 覆蓋帳本推導，TCS-P7 AC-SI-47-10）
     return rc == 0
 
 
@@ -312,37 +323,42 @@ def _commit(ctx, pid: str, verb: str) -> None:
 
     events = ctx.load()
     prop = next(e for e in reversed(events) if e["kind"] == "prop" and e["id"] == pid)
-    own = [si_events.LEDGER_REL, si_check.LEDGER_REL, si_events.PROPOSALS_REL]
-    cands = list(dict.fromkeys([*sandbox.prop_context(ctx.repo, prop)[1], *own]))
-    cp = ctx.git().run("-c", "core.quotepath=false", "status", "--porcelain", "-z",
-                       "--untracked-files=all", "--", *cands)
-    toks, changed, i = ((cp.stdout.split("\0") if cp else []), [], 0)
-    while i < len(toks):
-        tok, i = toks[i], i + 1
-        if len(tok) < 4:
-            continue
-        changed.append(tok[3:])
-        if tok[0] in "RC":
-            changed.append(toks[i])
-            i += 1
+    allow = pushguard.commit_allow(pid, sandbox.prop_context(ctx.repo, prop)[1], prop["cls"])
+    found, left = pushguard.pending(ctx.git(), allow)
+    changed = [p for p, _ in found]
     if not changed:
         ctx.log("commit", 0, None, f"{pid} {verb}：沒有可提交的改動")
         return
+    bad = pushguard.rule_problem(ctx.git(), ctx.repo, pid, found)  # git add 之前、與守門同一套
+    if bad:
+        ctx.log("commit", 0, "COMMIT-LEDGER-RULE", f"{pid} {verb} 不提交：{bad}；請人工檢查")
+        ctx.note(pid, "COMMIT-LEDGER-RULE", bad)
+        return
     dec = next(e["id"] for e in reversed(events) if e["kind"] == "dec" and e.get("prop") == pid
                and e.get("dkind") == verb)
-    app = next(e["id"] for e in reversed(ctx.load()) if e["kind"] == f"app.{verb}"
+    app = next(e["id"] for e in reversed(events) if e["kind"] == f"app.{verb}"
                and e.get("prop") == pid)
-    msg = (f"chore(selfimproving): {verb} {pid}（{dec}、{app}）\n\n"
-           "巡邏器依人的決定機械推進後的本機 commit；不 push。")
+    msg = pushguard.commit_message(verb, pid, dec, app)
     add = ctx.git().run("add", "--", *changed)
-    done = ctx.git().run("commit", "-m", msg) if add and add.returncode == 0 else add
+    ok = add and add.returncode == 0
+    done = ctx.git().run("commit", "-m", msg, "--", *changed) if ok else add
     rc = done.returncode if done else 1
     if rc != 0:
         row = ctx.draft("patrol-commit", "COMMIT-FAILED", f"{pid} {verb} 的 commit 失敗（rc={rc}）")
         ctx.log("commit", rc, "COMMIT-FAILED",
                 f"{pid} {verb} commit 失敗，不重試；obs-draft: {row}")
+        ctx.note(pid, "COMMIT-FAILED")
+        return
+    ctx.log("commit", 0, None, f"{pid} {verb} 已本機 commit（{dec}、{app}）")
+    try:  # 紀錄的 sha 取自 commit 成功「之後」的 HEAD；寫入失敗＝該提交不可自動推送，不重試、不回滾
+        patrolreport.record_commit(ctx.si, ctx.git().head(), app, pid, ctx.now)
+    except OSError as exc:
+        ctx.log("commit", 0, "COMMIT-RECORD-FAILED", f"{pid} {verb} 提交紀錄寫入失敗（{exc}）")
+        ctx.note(pid, "COMMIT-RECORD-FAILED")
     else:
-        ctx.log("commit", 0, None, f"{pid} {verb} 已本機 commit（{dec}、{app}）")
+        if left:
+            ctx.log("commit", 0, "COMMIT-LEFTOVER", f"{pid} {verb} 清單外髒檔留在工作樹：{left[0]}")
+            ctx.note(pid, "COMMIT-LEFTOVER", left[0])
 
 
 def _carded(events: list[dict], pid: str) -> bool:
@@ -356,19 +372,24 @@ def _advance_prop(ctx, pid: str) -> bool:
     promoted = False
     for _ in range(4):
         p = ctx.fold().props[pid]
-        # 已晉升／量測中／已關且無待回滾＝無事可做，不得每心跳要人給 --memory-dir（D-IMP-9 (d)）
-        if p.cls == "M" and (p.state in ("approved", "verified")
-                             or (p.state in _POST and p.pending_rollbacks >= 1)):
-            ctx.log("推進", 0, "MEMORY-DIR", f"{pid} 為 M 類，須人工給 --memory-dir")
+        # M 類只在真有待推進步驟時才解析記憶目錄（D-IMP-9 (d)）；解析不到＝不呼叫任何動詞（P7）
+        want = memdir.pending(p)
+        mem = memdir.resolve(ctx.repo) if want else None
+        if want and mem is None:
+            where = memdir.target(ctx.repo)
+            ctx.log("推進", 0, "MEMORY-DIR-UNRESOLVED", f"{pid} 找不到記憶目錄：{where}")
+            ctx.note(pid, "MEMORY-DIR-UNRESOLVED", where)
             return promoted
+        mflag = ("--memory-dir", mem) if mem else ()
         if p.state == "approved":
             if p.freeze_seq is None:
                 ctx.log("推進", 0, "NO-HELDOUT", f"{pid} 缺 heldout.freeze，跳過（不記 skip）")
+                ctx.note(pid, "NO-HELDOUT")
                 return promoted
-            if not _step(ctx, pid, "sandbox"):
+            if not _step(ctx, pid, "sandbox", *mflag):
                 return promoted
         elif p.state == "sandboxed":
-            if not _step(ctx, pid, "verify"):
+            if not _step(ctx, pid, "verify", *mflag):
                 return promoted
         elif (p.state == "verified" and p.pending_promote is None) or (
                 p.state in _POST and p.pending_rollbacks < 1):
@@ -379,12 +400,21 @@ def _advance_prop(ctx, pid: str) -> bool:
             verb = "promote" if p.state == "verified" else "rollback"
             if p.freeze_seq is None:
                 ctx.log("推進", 0, "NO-HELDOUT", f"{pid} 缺 heldout.freeze，不 {verb}（不記 skip）")
+                ctx.note(pid, "NO-HELDOUT")
+                return promoted
+            if pushguard.running(ctx.si, ctx.now, ctx.deps.pid_alive or _alive):  # 推送中不改工作樹
+                ctx.log("推進", 0, "PUSH-IN-PROGRESS", f"{pid} 推送進行中，不 {verb}")
+                ctx.note(pid, "PUSH-IN-PROGRESS")
                 return promoted
             if sched.dirty_paths(ctx.repo):
                 ctx.log("推進", 0, "dirty-tree", f"{pid} {verb} 前樹不乾淨：不 {verb}，只寫日誌")
+                ctx.note(pid, "dirty-tree")
                 return promoted
-            if not _step(ctx, pid, verb):
+            if not _step(ctx, pid, verb, *mflag):
                 return promoted
+            if mem and memdir.post_image_problems(ctx.repo, ctx.load(), pid, mem):
+                ctx.log("推進", 0, "POSTIMAGE-MISMATCH", f"{pid} {verb} 後記憶檔不符（不回滾）")
+                ctx.note(pid, "POSTIMAGE-MISMATCH")  # 回滾是人的決定；measure 與 commit 照做
             promoted = promoted or verb == "promote"
             if ctx.params["sched_auto_commit"]:
                 _commit(ctx, pid, verb)

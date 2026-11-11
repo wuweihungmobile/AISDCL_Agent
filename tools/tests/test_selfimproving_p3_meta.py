@@ -211,7 +211,7 @@ class TestSop(unittest.TestCase):
 class TestParams(f3.P3TestCase):
     def test_AT_340_4_1_two_new_parameters(self):
         real = json.loads((ROOT / f3.fx.PARAMS).read_text(encoding="utf-8"))
-        self.assertEqual(len(real), 44)
+        self.assertEqual(len(real), 47)  # P7：44→47
         self.assertEqual(list(real), sorted(real, key=lambda k: k.encode("utf-8")))
         self.assertEqual((real["memory_index_max_lines"], real["memory_index_max_bytes"]),
                          (200, 25600))
@@ -296,11 +296,12 @@ class TestZeroRegression(f3.P3TestCase):
                               and underscore_form(a) not in names], [], prefix)
         import test_selfimproving_capability as cap
         self.assertEqual(si_params.CHECK_RULES_REV, 6)
-        self.assertEqual(len(selfimproving._HELP), 29)
-        self.assertEqual(len(cap.CAPABILITY), 72)  # P6：62→72（RR 6 檔＋回測 4 檔）
+        self.assertEqual(len(selfimproving._HELP), 30)
+        # P7：72→75（RD）→76（MM）→77（pushguard）→78（patrolpush）
+        self.assertEqual(len(cap.CAPABILITY), 78)
         got = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k)
                     for k in ("ro", "rw", "net", "exec"))
-        self.assertEqual(got, (52, 13, 2, 5))
+        self.assertEqual(got, (56, 14, 2, 6))
         body = fx.body_md("D")
         self.assertTrue("| retire_when |" in body and "| reopen_symptom |" in body)
         props_src = (TESTS / "test_selfimproving_props.py").read_text(encoding="utf-8")

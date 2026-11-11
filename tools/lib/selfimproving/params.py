@@ -28,16 +28,19 @@ PARAM_SPECS: dict[str, str] = {
     "research_fetch_max": "int1", "research_bytes_max": "int1", "research_timeout_seconds": "int1",
     "min_events": "int1", "export_limit_max": "int1", "probe_timeout_seconds": "int1",
     "verify_runs_max": "int1", "memory_index_max_lines": "int1", "memory_index_max_bytes": "int1",
-    # P4 九鍵（TCS-P4 R159）：bool＝布林；blackout＝`HH:MM-HH:MM` 字串陣列（可空）；
-    # never＝只准 false
+    # P4 九鍵（TCS-P4 R159）：bool＝布林；blackout＝`HH:MM-HH:MM` 字串陣列（可空）
     "sched_heartbeat_minutes": "int1", "sched_period_minutes_default": "int1",
     "sched_period_minutes_min": "int1", "sched_period_minutes_max": "int1",
     "sched_run_budget_minutes": "int1", "sched_blackout_local": "blackout",
     "sched_driver_quiet_minutes": "int1", "sched_auto_commit": "bool",
-    "sched_auto_push": "never",
+    # P7 四鍵（TCS-P7 AC-SI-49-1）：自動推送由 P4 的 never 改 bool；牆鐘／重試次數／重試間隔
+    "sched_auto_push": "bool", "sched_push_wall_minutes": "int1",
+    "sched_push_attempts_max": "int1", "sched_push_retry_minutes": "int1",
     # P5 三鍵（TCS-P5 R179；PRD AC-SI-43-4）：fourq_from_run＝適用起點運轉號
     "fourq_from_run": "int1", "fourq_items_max": "int1", "fourq_degrade_items_max": "int1",
 }
+# 推送牆鐘的跨鍵上限（PRD AC-SI-49-1）：OS 任務 `ExecutionTimeLimit`（PT3H）須高於它
+PUSH_WALL_MAX_MINUTES = 120
 SCHED_KEYS = tuple(k for k in PARAM_SPECS if k.startswith("sched_"))
 _HHMM_RANGE = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$")
 _LABEL_RE = re.compile(r"\((?:i|ii|iii|iv|v)\) $")
@@ -52,11 +55,9 @@ def _is_num(v) -> bool:
 
 
 def _p4_code(kind: str, v) -> str | None:
-    """P4 三種新型別規則的判級碼（None＝合）：never 只准 false；blackout 為 `HH:MM-HH:MM` 陣列。"""
+    """P4 兩種新型別規則的判級碼（None＝合）：bool 為布林；blackout 為 `HH:MM-HH:MM` 陣列。"""
     if kind == "bool":
         return None if isinstance(v, bool) else "PARAM-TYPE"
-    if kind == "never":
-        return "PARAM-TYPE" if not isinstance(v, bool) else None if v is False else "PARAM-RANGE"
     if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
         return "PARAM-TYPE"
     ok = [(m := _HHMM_RANGE.match(x)) is not None and m.group(1, 2) != m.group(3, 4) for x in v]
@@ -70,15 +71,17 @@ def _cross_findings(params: dict) -> list[Finding]:
     def num(k):
         v = params.get(k)
         return v if isinstance(v, int) and not isinstance(v, bool) else None
-    lo, dflt, hi, hb, bud = (num(k) for k in (
+    lo, dflt, hi, hb, bud, wall = (num(k) for k in (
         "sched_period_minutes_min", "sched_period_minutes_default", "sched_period_minutes_max",
-        "sched_heartbeat_minutes", "sched_run_budget_minutes"))
+        "sched_heartbeat_minutes", "sched_run_budget_minutes", "sched_push_wall_minutes"))
     cap = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60
     both = lambda a, b: a is not None and b is not None  # noqa: E731
     rules = [("sched_period_minutes_min", lo, dflt, both(lo, dflt) and lo > dflt),
              ("sched_period_minutes_default", dflt, hi, both(dflt, hi) and dflt > hi),
              ("sched_heartbeat_minutes", hb, lo, both(hb, lo) and hb > lo),
-             ("sched_run_budget_minutes", bud, cap, bud is not None and bud > cap)]
+             ("sched_run_budget_minutes", bud, cap, bud is not None and bud > cap),
+             ("sched_push_wall_minutes", wall, PUSH_WALL_MAX_MINUTES,
+              wall is not None and wall > PUSH_WALL_MAX_MINUTES)]
     return [Finding(k, "PARAM-RANGE", "fail", f"{k} 跨鍵關係不符（{a} 對 {b}）")
             for k, a, b, bad in rules if bad]
 
@@ -91,7 +94,7 @@ def param_findings(params: dict) -> list[Finding]:
             continue
         v = params[key]
         code = None
-        if kind in ("bool", "never", "blackout"):
+        if kind in ("bool", "blackout"):
             code = _p4_code(kind, v)
         elif kind == "int1":
             if isinstance(v, bool) or not isinstance(v, int):

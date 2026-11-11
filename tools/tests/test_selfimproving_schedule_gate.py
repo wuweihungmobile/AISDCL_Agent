@@ -28,6 +28,7 @@ import _selfimproving_fixtures as fx
 import _selfimproving_p2_fixtures as fx2
 import _selfimproving_p4_fixtures as fx4
 import _selfimproving_p6_fixtures as px
+import _selfimproving_p7_fixtures as p7x
 from _selfimproving_p4_fixtures import D1, MIN, H, O, P4TestCase, iso
 
 from lib.selfimproving import check as si_check
@@ -250,7 +251,10 @@ class TestParamsNine(unittest.TestCase):
     NINE = {"sched_heartbeat_minutes": 15, "sched_period_minutes_default": 1440,
             "sched_period_minutes_min": 60, "sched_period_minutes_max": 10080,
             "sched_run_budget_minutes": 90, "sched_blackout_local": ["21:00-01:30"],
-            "sched_driver_quiet_minutes": 30, "sched_auto_commit": True, "sched_auto_push": False}
+            "sched_driver_quiet_minutes": 30, "sched_auto_commit": True,
+            # P7（TCS-P7 AC-SI-49-1）：自動推送預設 true，並新增三個推送參數；SCHED_KEYS 共 12 鍵
+            "sched_auto_push": True, "sched_push_wall_minutes": 45,
+            "sched_push_attempts_max": 3, "sched_push_retry_minutes": 360}
 
     def real(self) -> dict:
         return json.loads(fx.REAL_PARAMS.read_text(encoding="utf-8"))
@@ -258,7 +262,7 @@ class TestParamsNine(unittest.TestCase):
     def test_AT_440_2_1_41_keys_defaults_and_real_check_green(self):
         real = self.real()
         self.assertEqual(set(real), set(si_params.PARAM_SPECS))
-        self.assertEqual(len(real), 44)
+        self.assertEqual(len(real), 47)  # P7：44→47（TCS-P7 AC-SI-49-1）
         raw = fx.REAL_PARAMS.read_bytes()
         self.assertEqual(si_params.params_file_problems(raw), [])
         self.assertEqual({k: real[k] for k in self.NINE}, self.NINE)
@@ -286,7 +290,8 @@ class TestParamsNine(unittest.TestCase):
             "short-hour": ({"sched_blackout_local": ["9:00-10:00"]}, ("sched_blackout_local",
                                                                       "PARAM-RANGE")),
             "non-str": ({"sched_blackout_local": [1]}, ("sched_blackout_local", "PARAM-TYPE")),
-            "push-true": ({"sched_auto_push": True}, ("sched_auto_push", "PARAM-RANGE")),
+            # P7：true 不再紅
+            "push-int": ({"sched_auto_push": 1}, ("sched_auto_push", "PARAM-TYPE")),
             "min>default": ({"sched_period_minutes_min": 2000},
                             ("sched_period_minutes_min", "PARAM-RANGE")),
             "default>max": ({"sched_period_minutes_default": 20000},
@@ -373,8 +378,8 @@ def git_names(*args: str) -> list[str]:
 def scope_problems(root: Path, base: str) -> list[str]:
     """`<base>..HEAD` 的已提交差異觸及 P4 面時：集合之外與凍結前綴的路徑（空＝守衛綠；D-IMP-5：
     差異不含 P4 面＝守衛未觸發，不把無關 commit 判紅）。"""
-    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base), ALLOWED, FROZEN,
-                                                FROZEN_EXEMPT)
+    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base),
+                                                (*ALLOWED, *p7x.P7_ALLOWED), FROZEN, FROZEN_EXEMPT)
     return [*outside, *frozen] if touched else []
 
 
@@ -618,20 +623,25 @@ class FakeOS:
     """`runner.run_argv` 的替身：安裝、移除、查詢三種呼叫各給可設的結果，記錄每個 argv。"""
 
     def __init__(self, *, install_rc=0, install_err="", query_out="2026-11-09T00:15:00+08:00",
-                 remove_rc=0, list_rc=0) -> None:
+                 remove_rc=0, list_rc=0, push_query_out="ABSENT", push_list_rc=113) -> None:
         self.calls: list[list[str]] = []
         self.install_rc, self.install_err, self.query_out = install_rc, install_err, query_out
-        self.remove_rc, self.list_rc = remove_rc, list_rc
+        self.remove_rc, self.list_rc, self.push_query_out = remove_rc, list_rc, push_query_out
+        self.push_list_rc = push_list_rc
 
     def __call__(self, argv, *, env, timeout, cwd=None):
         self.calls.append(list(argv))
         out, rc, err = "", 0, ""
         if argv[0] == "launchctl":
-            rc = self.list_rc if argv[1] == "list" else 0
+            rc = (self.push_list_rc if argv[-1] == "AutoSDD_SI_Push" else self.list_rc
+                  ) if argv[1] == "list" else 0
         elif "-File" in argv:
             rc, err = self.install_rc, self.install_err
         elif any("Unregister-ScheduledTask" in a for a in argv):
             rc = self.remove_rc
+        elif any("Get-ScheduledTask -TaskName 'AutoSDD_SI_Push'" in a for a in argv):
+            # P7：推送任務的現查預設不存在（sched_auto_push 夾具為 false）
+            out = self.push_query_out
         else:
             out = self.query_out
         return types.SimpleNamespace(rc=rc, out=out, err=err, timed_out=False)
@@ -806,7 +816,10 @@ class TestCapabilityP4(unittest.TestCase):
         self.assertEqual(cap.capability_problems(cap.PKG, cap.CAPABILITY, cap.ENTRY), [])
         n = len(cap.CAPABILITY)
         counts = tuple(sum(1 for v in cap.CAPABILITY.values() if v == k) for k in cap.CATEGORIES)
-        self.assertIn((n, counts), {(71, (51, 13, 2, 5)), (72, (52, 13, 2, 5))})  # P6：+10
+        self.assertIn((n, counts), {(75, (54, 14, 2, 5)), (76, (55, 14, 2, 5)),
+                                    (77, (56, 14, 2, 5)),
+                                    # P7：RD +3、MM +1、PU +1（pushguard）、+1（patrolpush）
+                                    (78, (56, 14, 2, 6))})
         if n >= 62:
             self.assertEqual(cap.CAPABILITY["evspec.py"], "ro")
         self.assertEqual({p.name for p in cap.PKG.glob("*.py")}, set(cap.CAPABILITY))
@@ -817,10 +830,12 @@ class TestCapabilityP4(unittest.TestCase):
         for name in ("patrol", "patrolrun", "schedarm"):
             self.assertEqual(reg[f"{name}.py"], "exec", name)
         self.assertEqual({k for k, v in reg.items() if v == "exec"},
-                         {"runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+                         {"runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py",
+                          "patrolpush.py"})
         users = {p.name for p in cap.PKG.glob("*.py") if "runner" in cap._rel_imports(
             p.read_text(encoding="utf-8"), "selfimproving")}
-        self.assertEqual(users, {"verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+        self.assertEqual(users, {"verify.py", "patrol.py", "patrolrun.py", "schedarm.py",
+                                 "patrolpush.py"})
         for start in cap.CLOSURE_ONLY_RO:
             seen, todo = set(), [start]
             while todo:
@@ -1063,7 +1078,7 @@ class TestZeroRegression(P4TestCase):
         fx.write_events(R, events, seqs=seqs)
         self.assertEqual(self.S(self.check(R), "events.structure"), "PASS")
         self.assertEqual(len(json.loads((fx4.p4_base() / fx.PARAMS).read_text(encoding="utf-8"))),
-            44)
+            47)  # P7：44→47
         sigs = {"make_p1_repo": ("dest", "events", "sources", "extra_obs", "defs", "prm", "rows",
             "commit"),
                 "make_p2_repo": ("dest", "commit", "kw")}
@@ -1078,19 +1093,20 @@ class TestZeroRegression(P4TestCase):
         from lib.selfimproving import check as si_check
         from lib.selfimproving import events as si_events
         from lib.selfimproving import params as si_params
-        self.assertEqual(len(selfimproving._HELP), 29)
+        self.assertEqual(len(selfimproving._HELP), 30)
         self.assertEqual(len(si_events.KINDS), 27)
         self.assertEqual(len(si_check.ITEM_IDS), 35)
-        self.assertEqual(len(si_params.PARAM_SPECS), 44)
+        self.assertEqual(len(si_params.PARAM_SPECS), 47)  # P7：44→47
         self.assertEqual(si_params.CHECK_RULES_REV, 6)
-        self.assertEqual(len(cap.CAPABILITY), 72)
+        # P7 RD +3、MM +1、PU +1（pushguard）、+1（patrolpush）
+        self.assertEqual(len(cap.CAPABILITY), 78)
         self.assertEqual(len(self.status(fx4.p4_base())), 20)
         spec = json.loads(EXPECT.read_text(encoding="utf-8"))
         self.assertEqual(len(spec["tasks"]), 3)
         tests = ROOT / "tools" / "tests"
-        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 29"),
-                             ("test_selfimproving_issues.py", "len(verbs), 29"),
-                             ("test_selfimproving_console_obs.py", "len(verbs), 29")):
+        for name, needle in (("test_selfimproving_p3_meta.py", "len(selfimproving._HELP), 30"),
+                             ("test_selfimproving_issues.py", "len(verbs), 30"),
+                             ("test_selfimproving_console_obs.py", "len(verbs), 30")):
             self.assertIn(needle, (tests / name).read_text(encoding="utf-8"), name)
         new_files = {f"tools/tests/test_selfimproving_schedule_{x}.py" for x in
                      ("model", "patrol", "advance",
@@ -1160,7 +1176,7 @@ class TestEntry(P4TestCase):
 
     def test_AT_440_7_1_twenty_six_verbs_and_new_flags(self):
         import selfimproving
-        self.assertEqual(len(selfimproving._HELP), 29)
+        self.assertEqual(len(selfimproving._HELP), 30)
         rc, out, _ = self.run_main(["--help"])
         self.assertEqual(rc, 0)
         self.assertTrue(all(v in out for v in selfimproving._HELP), out)

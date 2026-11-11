@@ -83,12 +83,82 @@ class RunResult:
     timed_out: bool
     out: str
     err: str
+    note: str = ""  # 逾時收尾字樣：job-terminated／taskkill-fallback:<原因>／output-incomplete
+
+
+KILL_GRACE_SECONDS = 5  # 逾時殺完後再收輸出的寬限；仍收不完就放棄讀取並在 `note` 如實報告
+
+
+def _job_open(pid: int):
+    """Windows：建 Job Object 並把子行程指派進去（不設 KILL_ON_JOB_CLOSE、不設 BREAKAWAY_OK：
+    正常結束只關句柄、不殺任何東西）。回（句柄或 None, 失敗原因）。誠實劃界：`Popen` 回來到本函式
+    指派完成之間有一小段競態窗——這段時間內子行程若已 fork 出孫行程，孫行程不在 job 裡；只用文件化
+    的 `OpenProcess`／`AssignProcessToJobObject`，不用未文件化 API 去消它（逾時時 `_kill_tree` 的
+    `taskkill /T` 仍會再補殺一次仍連得上的子樹）。非 Windows 一律回 (None, "not-windows")。"""
+    if sys.platform != "win32":
+        return None, "not-windows"
+    try:
+        import ctypes
+
+        vp, u32, ci = ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = k32.OpenProcess.restype = vp
+        k32.CreateJobObjectW.argtypes = [vp, ctypes.c_wchar_p]
+        k32.OpenProcess.argtypes = [u32, ci, u32]
+        k32.AssignProcessToJobObject.argtypes = [vp, vp]
+        k32.AssignProcessToJobObject.restype = ci
+        k32.TerminateJobObject.argtypes = [vp, u32]
+        k32.TerminateJobObject.restype = ci
+        k32.CloseHandle.argtypes = [vp]
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return None, f"CreateJobObjectW winerror={ctypes.get_last_error()}"
+        proc = k32.OpenProcess(0x0101, 0, pid)  # PROCESS_SET_QUOTA｜PROCESS_TERMINATE
+        assigned = bool(proc) and bool(k32.AssignProcessToJobObject(job, proc))
+        why = "" if assigned else f"assign winerror={ctypes.get_last_error()}"
+        if proc:
+            k32.CloseHandle(proc)
+        if not assigned:
+            k32.CloseHandle(job)
+            return None, why
+        return job, ""
+    except Exception as exc:  # noqa: BLE001  # Job 建不起來一律退回 taskkill，不得讓外呼本身失敗
+        return None, type(exc).__name__
+
+
+def _job_end(job, *, terminate: bool) -> bool:
+    """Windows：（可選）終結整個 job 後關句柄；回終結是否成功。句柄一律關閉。"""
+    if job is None or sys.platform != "win32":
+        return False
+    import ctypes
+
+    vp = ctypes.c_void_p
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.TerminateJobObject.argtypes = [vp, ctypes.c_uint32]
+    k32.TerminateJobObject.restype = ctypes.c_int
+    k32.CloseHandle.argtypes = [vp]
+    try:
+        return bool(terminate and k32.TerminateJobObject(job, 1))
+    finally:
+        k32.CloseHandle(job)
+
+
+def _timeout_kill(proc: subprocess.Popen, job, why: str) -> str:
+    """逾時收尾：有 job 先終結整個 job（含父行程鏈斷掉的孫行程），否則退回 `_kill_tree`
+    （`taskkill /T`／`killpg`）；POSIX 子行程自成行程群組，`killpg` 即整棵樹。回 `note` 字樣。"""
+    if job is not None and _job_end(job, terminate=True):
+        proc.kill()
+        return "job-terminated"
+    _kill_tree(proc)
+    return "" if sys.platform != "win32" else f"taskkill-fallback:{why or 'terminate-failed'}"
 
 
 def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
              cwd: Path | None = None) -> RunResult:
     """明示環境入口（TCS-P4 R160）：`shell=False`、`communicate(timeout)`、逾時殺行程樹；
-    環境**只用呼叫端明示的 `env`**（本函式不讀 `os.environ`）；輸出原文回給呼叫端（不落檔）。"""
+    環境**只用呼叫端明示的 `env`**（本函式不讀 `os.environ`）；輸出原文回給呼叫端（不落檔）。
+    逾時後第二次收輸出帶 `KILL_GRACE_SECONDS` 寬限，仍收不完就放棄讀取（`note` 含
+    output-incomplete）。"""
     flags: dict = {}
     if sys.platform.startswith("win"):
         flags["creationflags"] = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -98,16 +168,24 @@ def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
     proc = subprocess.Popen(
         argv, cwd=None if cwd is None else str(cwd), env=dict(env), shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **flags)
-    timed_out = False
+    job, why = _job_open(proc.pid)
+    timed_out, note = False, ""
     try:
-        out, err = proc.communicate(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        _kill_tree(proc)
-        out, err = proc.communicate()
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            note = _timeout_kill(proc, job, why)
+            job = None  # 已在 `_timeout_kill` 內關閉
+            try:
+                out, err = proc.communicate(timeout=KILL_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                out, err, note = b"", b"", (note + " output-incomplete").strip()
+    finally:
+        _job_end(job, terminate=False)  # 正常結束只關句柄；留下的背景行程不動
     return RunResult(None if timed_out else proc.returncode, timed_out,
                      (out or b"").decode("utf-8", errors="replace"),
-                     (err or b"").decode("utf-8", errors="replace"))
+                     (err or b"").decode("utf-8", errors="replace"), note)
 
 
 def spawn_detached(argv: list[str], *, env: dict[str, str], cwd: Path | None = None,

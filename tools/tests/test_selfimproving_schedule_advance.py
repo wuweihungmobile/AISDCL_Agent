@@ -656,17 +656,20 @@ class TestIngestAndLog(P4TestCase):
 
     def test_D_IMP_9_m_class_asks_for_memory_dir_only_when_a_step_is_pending(self):
         """真機首跳 21:00：已晉升、量測中、無待回滾的 M 類 PROP（PROP-SI-004／006／007）
-        每心跳被記「須人工給 --memory-dir」，其實無事可做；只有待 sandbox／promote／rollback
-        才記（D-IMP-6 (7) 的原意）。"""
-        cases = (("measuring", 0, []), ("promoted", 0, []), ("closed", 0, []),
-                 ("approved", 0, ["MEMORY-DIR"]), ("verified", 0, ["MEMORY-DIR"]),
-                 ("measuring", 1, ["MEMORY-DIR"]))
-        for state, rollbacks, want in cases:
-            p = mock.Mock(cls="M", state=state, pending_promote=None, pending_rollbacks=rollbacks)
+        每心跳被記「須人工給 --memory-dir」，其實無事可做；只有待 sandbox／verify／promote／
+        rollback 才解析記憶目錄（D-IMP-6 (7) 的原意；P7 起解析不到記 `MEMORY-DIR-UNRESOLVED`，
+        舊碼 `MEMORY-DIR` 已移除，TCS-P7 AC-SI-48-2／48-5）。"""
+        un = "MEMORY-DIR-UNRESOLVED"
+        cases = (("measuring", 0, None, []), ("promoted", 0, None, []), ("closed", 0, None, []),
+                 ("approved", 0, None, [un]), ("sandboxed", 0, None, [un]),
+                 ("verified", 0, "dec", [un]), ("measuring", 1, None, [un]))
+        for state, rollbacks, pend, want in cases:
+            p = mock.Mock(cls="M", state=state, pending_promote=pend, pending_rollbacks=rollbacks)
             codes, ctx = [], mock.Mock()
             ctx.fold.return_value.props = {"P": p}
             ctx.log.side_effect = lambda *a, codes=codes: codes.append(a[2])
-            with self.subTest(state=state, rollbacks=rollbacks):
+            with self.subTest(state=state, rollbacks=rollbacks), \
+                    mock.patch.object(patrolrun.memdir, "resolve", return_value=None):
                 self.assertFalse(patrolrun._advance_prop(ctx, "P"))
                 self.assertEqual(codes, want)
 

@@ -26,6 +26,7 @@ from unittest import mock
 
 import _selfimproving_fixtures as fx
 import _selfimproving_p6_fixtures as px
+import _selfimproving_p7_fixtures as p7x
 
 from lib.selfimproving import btcases, btscore, evspec, fourqparse
 from lib.selfimproving import events as si_events
@@ -771,13 +772,14 @@ FORBIDDEN = ("docs/01_requirements/SelfImproving_PRD.md",
              "docs/05_development/SelfImproving_Operations_SOP.md",
              "docs/03_testing/contracts/TCS-SelfImproving-P", "docs/02_architecture/Root_Layout",
              "tools/lib/selfimproving/fold.py", "tools/lib/selfimproving/writeverbs.py",
-             "docs/06_quality/SelfImproving_Protocol/params.json", ".claude/", "AgentConsole/",
-             ".github/", "docs/06_quality/SelfImproving_Protocol/research_sources.json")
+             ".claude/", "AgentConsole/", ".github/",
+             "docs/06_quality/SelfImproving_Protocol/research_sources.json")
 
 
 def scope_problems(root: Path, base: str) -> list[str]:
     """`<base>..<tip>` 已提交差異觸及允許集合時：集合之外與不得改路徑（空＝守衛綠）。"""
-    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base), ALLOWED, FORBIDDEN)
+    touched, outside, frozen = px.scope_verdict(px.committed_names(root, base),
+                                                (*ALLOWED, *p7x.P7_ALLOWED), FORBIDDEN)
     return [*outside, *frozen] if touched else []
 
 
@@ -788,8 +790,8 @@ class TestSystem(BtCase):
         c = cap()
         self.assertEqual(c.capability_problems(c.PKG, c.CAPABILITY, c.ENTRY), [])
         counts = {k: sum(1 for v in c.CAPABILITY.values() if v == k) for k in c.CATEGORIES}
-        want = {"ro": 52, "rw": 13, "net": 2, "exec": 5}
-        self.assertEqual((len(c.CAPABILITY), counts), (72, want))
+        want = {"ro": 56, "rw": 14, "net": 2, "exec": 6}
+        self.assertEqual((len(c.CAPABILITY), counts), (78, want))
         for n in ("registry", "netguard", "htmltext", "expand", "evspec6", "btcases", "btscore"):
             self.assertEqual(c.CAPABILITY[f"{n}.py"], "ro", n)
         for n in ("regwrite", "btwrite", "btrecord"):

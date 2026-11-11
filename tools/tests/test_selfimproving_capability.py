@@ -1,7 +1,9 @@
 """SelfImproving 能力登記與純度判準（TCS-SelfImproving-P1 R63、R64；P2 R105 增第四類 `exec`；
 AT-143 系列）。
 
-登記表 `CAPABILITY` 住本檔（72 個鍵：52 `ro`、13 `rw`、2 `net`、5 `exec`；
+登記表 `CAPABILITY` 住本檔（78 個鍵：56 `ro`、14 `rw`、2 `net`、6 `exec`；P7 PU 後半增 1
+`exec`（patrolpush）；P7 PU 前半增 1 `ro`（pushguard）；P7 MM 增 1 `ro`（memdir）；P7 RD 增 2
+`ro`（nextstep、propdetail）與 1 `rw`（patrolreport），72 鍵時為 52／13／2／5；
 P6 增 7 `ro` 與 3 `rw`，62 鍵時為 45／10／2／5；55 鍵時為 42／9／2／2；
 P3 增 7 `ro` 與 1 `rw`；議題中心增 3 `ro`；P4 的 PKG-ROOT-SCHED 增 3 `ro` 與 1 `rw`，
 PKG-ROOT-PATROL 另增 1 `ro` 與 3 `exec` 後為 59 鍵）；判準函式 `capability_problems`
@@ -86,15 +88,24 @@ CAPABILITY: dict[str, str] = {
             "evspec6",
             "btcases",
             "btscore",
+            # P7（RD 半）
+            "nextstep",
+            "propdetail",
+            # P7（MM 半）
+            "memdir",
+            # P7（PU 前半：推送守門）
+            "pushguard",
         )
     },
     **{
         f"{n}.py": "rw"
         for n in ("evwrite", "propfiles", "writeverbs", "decwrite", "sandbox", "promote",
-            "obswrite", "meawrite", "schedwrite", "fourq", "regwrite", "btwrite", "btrecord")
+            "obswrite", "meawrite", "schedwrite", "fourq", "regwrite", "btwrite", "btrecord",
+            "patrolreport")
     },
     **{f"{n}.py": "net" for n in ("fetch", "research")},
-    **{f"{n}.py": "exec" for n in ("runner", "verify", "patrol", "patrolrun", "schedarm")},
+    **{f"{n}.py": "exec" for n in ("runner", "verify", "patrol", "patrolrun", "schedarm",
+                                   "patrolpush")},
 }
 CATEGORIES = ("ro", "rw", "net", "exec")
 CLOSURE_ONLY_RO = ("check.py", "status.py", "scan.py", "export.py", "card.py")
@@ -351,9 +362,9 @@ class TestCapabilityRegistry(unittest.TestCase):
         names = {p.name for p in PKG.glob("*.py")}
         self.assertEqual(names, set(CAPABILITY))
         counts = {k: sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES}
-        self.assertEqual(counts, {"ro": 52, "rw": 13, "net": 2, "exec": 5})
+        self.assertEqual(counts, {"ro": 56, "rw": 14, "net": 2, "exec": 6})
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {
-            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py", "patrolpush.py"})
         net_importers, subproc = set(), set()
         for n in names:
             text = (PKG / n).read_bytes().decode("utf-8")
@@ -444,18 +455,18 @@ class TestExecRegistry(unittest.TestCase):
 
     def test_AT_240_5_1_exec_registry(self):
         self.assertEqual(capability_problems(PKG, CAPABILITY, ENTRY), [])
-        self.assertEqual(len(CAPABILITY), 72)
+        self.assertEqual(len(CAPABILITY), 78)
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in self.P2_RO}, {"ro"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("decwrite", "sandbox", "promote",
                                                           "obswrite")}, {"rw"})
         self.assertEqual({CAPABILITY[f"{n}.py"] for n in ("runner", "verify", "patrol", "patrolrun",
-                                                          "schedarm")}, {"exec"})
+                                                          "schedarm", "patrolpush")}, {"exec"})
         texts = {p.name: p.read_bytes().decode("utf-8") for p in PKG.glob("*.py")}
         self.assertEqual({n for n, t in texts.items() if "subprocess" in t}, {"git.py",
             "runner.py"})
         self.assertEqual({n for n, t in texts.items() if "runner" in _rel_imports(t,
             "selfimproving")},
-                         {"verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+                         {"verify.py", "patrol.py", "patrolrun.py", "schedarm.py", "patrolpush.py"})
         self.assertTrue(all(not forbidden_hits(t, n) for n, t in texts.items()))
         self.assertEqual(unguarded_sites(texts["runner.py"]), [])
         self.assertIn('getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)', texts["runner.py"])
@@ -686,12 +697,12 @@ class TestP3Registry(unittest.TestCase):
         counts = tuple(sum(1 for v in CAPABILITY.values() if v == k) for k in CATEGORIES)
         optional = (PKG / "meaplan.py").exists()
         self.assertEqual((len(CAPABILITY), counts),
-                         (72, (52, 13, 2, 5)) if optional else (71, (51, 13, 2, 5)))
+                         (78, (56, 14, 2, 6)) if optional else (75, (54, 14, 2, 5)))
         for n in (*self.P3_RO, *(("meaplan",) if optional else ())):
             self.assertEqual(CAPABILITY[f"{n}.py"], "ro", n)
         self.assertEqual(CAPABILITY["meawrite.py"], "rw")
         self.assertEqual({n for n, k in CAPABILITY.items() if k == "exec"}, {
-            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py"})
+            "runner.py", "verify.py", "patrol.py", "patrolrun.py", "schedarm.py", "patrolpush.py"})
         self.assertEqual(sorted(p for p, _ in forbid_calls(PKG, ENTRY)), [])
         loaded = {
             "status": ["status", "--repo"], "export": ["export", "--kind", "events", "--json",

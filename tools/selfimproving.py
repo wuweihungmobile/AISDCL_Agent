@@ -5,8 +5,8 @@
 `attr-reject`／`prop-new`／`prop-revise`／`research`（寫入事件帳本），加 P2 的 `decide` 等八個動詞
 與 `card --issue`；P3 加 `measure`（寫 `mea.*`）與 `capacity`（唯讀）；議題中心加 `issues`（唯讀）；
 P4 加 `sched`（排程）與 `patrol`（巡邏心跳）；P5 加 `fourq`（四問入帳）；P6 加 `registry-ingest`
-（研究來源登記入帳）與 `backtest`（歷史缺陷反事實回測：cases／prepare／answer／score／cleanup），
-共 29 個；未列動詞 rc 3。
+（研究來源登記入帳）與 `backtest`（歷史缺陷反事實回測：cases／prepare／answer／score／cleanup）；
+P7 加 `push-run`（把守門放行的巡邏提交推上遠端），共 30 個；未列動詞 rc 3。
 rc：唯讀非閘門動詞 0＝已執行、3＝無法執行；寫入動詞 0＝已寫、1＝拒收（未寫）、3＝用法或輸入錯誤，
 `research --fetch` 另有 2＝事件已寫而至少一個來源失敗；`check` 沿 P0（0／1／2／3）。
 規格＝docs/03_testing/contracts/TCS-SelfImproving-P0-20261019.md、…-P1-20261020.md。
@@ -54,6 +54,7 @@ _HELP = {
     "fourq": "四問審視答案檔入帳（--answers-file）、免審（--skip）或語料清單（--corpus）",
     "registry-ingest": "Console 研究來源登記稽核檔入帳為唯讀鏡像與 research.registry 事件",
     "backtest": "歷史缺陷反事實回測：cases（案例庫）、prepare、answer、score、cleanup",
+    "push-run": "把守門放行的巡邏提交推上遠端（互動登入型任務每心跳呼叫；--dry-run 只印判定）",
 }
 # R153：P1 動詞也過 run-scoped 授權閘（單一實作 `unattended`）
 _P1_GATED = ("run-open", "run-close", "attr", "attr-confirm", "attr-reject", "prop-new",
@@ -202,6 +203,9 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
     pt.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="零寫入，印此心跳會做什麼")
+    pr = _verb(sub, "push-run")
+    pr.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="只評估、印碼，不寫任何檔、不推送")
     return parser
 
 
@@ -213,6 +217,9 @@ def _sched_parser(sub) -> None:
         p = ssub.add_parser(name, allow_abbrev=False)
         p.add_argument("--repo", help="repo 根目錄（預設為本檔所在 repo）")
         p.add_argument("--json", action="store_true", help="輸出 JSON")
+        if name in ("arm", "disarm"):
+            p.add_argument("--push-only", dest="push_only", action="store_true",
+                           help="只處理推送任務 AutoSDD_SI_Push（不動巡邏任務）")
     ssub.choices["show"].add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
     st = ssub.choices["set"]
     st.add_argument("--enabled", choices=("true", "false"))
@@ -418,6 +425,24 @@ def _patrol(repo: Path, args: argparse.Namespace) -> int:
                        + (["--json"] if args.json else []))
 
 
+def _push_run(repo: Path, args: argparse.Namespace) -> int:
+    """`push-run`（P7）：C 類動詞，授權閘在此（`AUTOSDD_UNATTENDED` 有設＝rc 1、零寫入）；其餘在
+    `patrolpush`（exec，延遲載入）。"""
+    from lib.selfimproving import writeverbs as wv
+
+    codes = unattended.gate("push-run", None, os.environ)
+    if codes:
+        out = wv.reject(repo, "push-run", codes, args.json)
+        _emit(out.text)
+        return out.rc
+    from lib.selfimproving import patrolpush
+
+    rc, text = patrolpush.run(repo, as_json=args.json, dry_run=args.dry_run)
+    if sys.stdout is not None:  # `pythonw`（推送任務的載具）沒有 stdout：不印，rc 照回
+        _emit(text)
+    return rc
+
+
 def _sched(repo: Path, args: argparse.Namespace) -> int:
     """`sched show|set|arm|disarm`（R137）；`show` 唯讀，`set` 只寫 `sched.set`。"""
     if args.sched_cmd in ("arm", "disarm"):
@@ -432,7 +457,7 @@ def _sched(repo: Path, args: argparse.Namespace) -> int:
             from lib.selfimproving import schedarm
         except ImportError as exc:
             raise check.InputError("sched arm／disarm 的 schedarm 模組尚未建立") from exc
-        rc, text = schedarm.run(repo, args.sched_cmd, args.json)
+        rc, text = schedarm.run(repo, args.sched_cmd, args.json, args.push_only)
         _emit(text)
         return rc
     if args.sched_cmd == "set":
@@ -611,7 +636,8 @@ def _capacity(repo: Path, args: argparse.Namespace) -> int:
 _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "export": _export,
              "obs-add": _obs_write, "obs-close": _obs_write, "measure": _measure,
              "capacity": _capacity, "issues": _issues, "sched": _sched, "patrol": _patrol,
-             "fourq": _fourq, "registry-ingest": _registry_ingest, "backtest": _backtest}
+             "push-run": _push_run, "fourq": _fourq, "registry-ingest": _registry_ingest,
+             "backtest": _backtest}
 
 
 def main(argv: list[str] | None = None) -> int:

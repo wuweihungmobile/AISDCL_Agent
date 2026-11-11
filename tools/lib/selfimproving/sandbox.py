@@ -396,9 +396,14 @@ def heldout_freeze(repo: Path, ns, as_json: bool) -> wv.Out:
             ("prop", ns.prop), ("n", e["n"]), ("digest8", e["digest"].split(":", 1)[-1][:8])],
             as_json)
     try:
-        return wv.append(repo, "heldout-freeze", build, params, as_json, render)
+        out = wv.append(repo, "heldout-freeze", build, params, as_json, render)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    minimum = params.get("min_heldout")  # AC-SI-47-13：低於下限只警告（stderr），不拒收
+    if out.rc == 0 and isinstance(minimum, int) and not isinstance(minimum, bool) \
+            and info["n"] < minimum:
+        return Out(0, out.text, f"warn HELDOUT-BELOW-MIN n={info['n']} min={minimum}\n")
+    return out
 
 
 __all__ = ["heldout_freeze", "SandboxError", "precheck_members", "extract_checked", "apply_patch",

@@ -25,6 +25,7 @@ SECTION = "## 無人運轉任務書範本"
 UPPER_FIELDS = ("RUN", "HEAD_SHA", "NOW_ISO", "DUE_AT", "BAND", "DEGRADE_NOTE", "BUDGET_MINUTES",
                 "EVENTS", "RESEARCH_RESULT", "SOURCE_FILES", "SCAN_CANDIDATES", "MAX_PROPOSALS",
                 "HANDBACK_PATH")
+MIN_FIELD = "MIN_HELDOUT"  # P7：評估集下限占位符；缺＝問題碼附在清單末尾（不改既有問題碼的先後）
 _UPPER_RE = re.compile(r"<([A-Z][A-Z_]*)>")
 _FENCE_RE = re.compile(r"^```[a-z]*[ \t]*$", re.MULTILINE)
 _STEP_RE = re.compile(r"^(\d+)\. ", re.MULTILINE)
@@ -75,6 +76,8 @@ def template_problems(sop_text: str) -> list[str]:
         out.append("FOURQ-TEXT-MISSING:CMD")
     if _F_LINE not in body:
         out.append("TRIGGER-LINE-MISSING")
+    if f"<{MIN_FIELD}>" not in body:
+        out.append(f"PLACEHOLDER-MISSING:{MIN_FIELD}")
     return out
 
 

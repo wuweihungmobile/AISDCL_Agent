@@ -22,13 +22,19 @@ A_CLASS = ("research", "attr", "attr-confirm", "attr-reject", "prop-new", "prop-
            "heldout-freeze", "card-issue", "fourq")
 C_CLASS = ("run-open", "run-close", "obs-add", "obs-close", "sched-set", "sched-arm",
            "sched-disarm", "sandbox", "verify", "promote", "rollback", "measure", "patrol",
-           "registry-ingest", "backtest")
+           "registry-ingest", "backtest", "push-run")
 READONLY = ("check", "status", "scan", "card", "export", "capacity", "issues", "sched-show",
             "fourq-corpus")
 
 
 def is_set(env: Mapping) -> bool:
     return bool(env.get(UNATTENDED_ENV))
+
+
+def without_run_scope(env: Mapping) -> dict:
+    """子行程環境：去掉無人值守自述與運轉範圍兩個變數（`push-run` 給 git 的環境用；單一實作的
+    一部分——整個套件讀這兩個名字的站點只有本檔）。"""
+    return {k: v for k, v in env.items() if k not in (UNATTENDED_ENV, PATROL_RUN_ENV)}
 
 
 def _refuse(why: str) -> list[tuple[str, str]]:

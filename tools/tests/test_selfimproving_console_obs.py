@@ -919,7 +919,8 @@ class TestObsClose(ObsCase):
     def test_AT_235_3_1_no_delete_or_renumber(self):
         import selfimproving
         verbs = set(selfimproving._build_parser()._subparsers._group_actions[0].choices)
-        self.assertEqual(len(verbs), 29)  # P5 加 fourq；P6 加 registry-ingest、backtest
+        # P5 加 fourq；P6 加 registry-ingest、backtest；P7 加 push-run
+        self.assertEqual(len(verbs), 30)
         self.assertEqual({v for v in verbs if "obs" in v}, {"obs-add", "obs-close"})
         R = self.obs_repo(extra=open_rows(11, 1))
         snap0, l0 = fx.snap(R), obs_ledger(R)

@@ -37,6 +37,7 @@ from . import check as si_check  # noqa: E402
 from . import (  # noqa: E402  # noqa: E402
     consoleaudit,
     evwrite,
+    patrolreport,
     patrolrun,
     runner,
     sched,
@@ -113,6 +114,11 @@ class Ctx:
         self.band, self.degrade = "unmeasured", False
         self.drafts: list[str] = []
         self._git = Git(repo)
+        # 快照素材（TCS-P7 AC-SI-47-9／10／15）：只活一個心跳，由 `patrolreport` 讀、不進日誌
+        self.notes, self.run_notes, self.ingest_rows, self.due_info = {}, {}, [], None
+
+    def note(self, pid: str, code: str, detail: str = "") -> None:
+        self.notes[pid] = (code, detail)
 
     def git(self) -> Git:
         return self._git
@@ -205,6 +211,7 @@ def ingest(ctx: Ctx) -> str:
             continue
         bad += 1
         code = patrolrun.first_code(out, err) if argv else "AUDIT-KIND-UNKNOWN"
+        ctx.ingest_rows.append((ref, kind, code))  # 無狀態：每心跳重列，不受日誌去重影響
         if not ctx.logged(ref, code):
             new_bad += 1
             row = ctx.draft("patrol-ingest", code, f"{kind} 入帳被拒")
@@ -252,17 +259,21 @@ def due(ctx: Ctx) -> tuple[str, str | None]:
     st = sched.state_of(events, ctx.params["sched_period_minutes_default"])
     cell = sched.cell_bounds(st, ctx.now)
     if not st.enabled or cell is None:
+        ctx.due_info = ("SCHED-DISABLED", "")
         ctx.log("到期", 0, None, "排程停用或無日曆格，不嘗試")
         return "停用", None
     if sched.cell_events(events, "run.open", cell, trigger="f"):
+        ctx.due_info = ("SCHED-CELL-RAN", "")
         ctx.log("到期", 0, None, "本格已有 (f) 運轉")
         return "本格已執行", None
     inp = _inputs(ctx, events, None)
     reason = sched.decide_skip(inp)
     if reason is None:
+        ctx.due_info = ("SCHED-DUE", "")
         ctx.log("到期", 0, None, f"本格 {sched.iso(cell[0])} 到期，七種跳過皆不成立")
         return "到期", sched.iso(cell[0])
     detail = (inp.details or {}).get(reason, reason)
+    ctx.due_info = ("SKIP-" + reason.upper(), detail)  # 快照 schedule.current（TCS-P7 AC-SI-47-15）
     wrote = None if ctx.dry else schedwrite.append_skip(ctx.repo, ctx.now, reason, detail,
                                                         ctx.params)
     note = "（已記 sched.skip）" if wrote else "（同格同因已記）"
@@ -292,6 +303,7 @@ def _start(ctx: Ctx, run: str, trigger: str, due_at: str, first_f: bool) -> str:
         ctx.log("運轉", 0, None, why)
         return why
     ctx.log("運轉", 1, why.split(":")[0].split(" ")[0], f"{run} 未 spawn：{why}")
+    ctx.run_notes[run] = ("SKIP-SPAWN-FAILED", why)
     if first_f:  # (f) 才記 sched.skip；(a) 只寫日誌、運轉保持開啟下一心跳再試
         schedwrite.append_skip(ctx.repo, ctx.now, "spawn-failed", why, ctx.params)
     return f"{run} 未 spawn（{why}）"
@@ -314,6 +326,7 @@ def launch_all(ctx: Ctx, cell_start: str | None, busy: bool) -> str:
     notes, waiting = [], _pending(ctx)
     if busy:  # 同一時間至多一個進行中的無人運轉：其他運轉的 spawn 延後（只寫日誌）
         names = "、".join(waiting) or "無待啟動者"
+        ctx.run_notes.update(dict.fromkeys(waiting, ("RUN-BUSY", "")))
         ctx.log("運轉", 0, "BUSY", f"已有進行中的無人運轉，延後 spawn：{names}")
         return "已有進行中的無人運轉，延後"
     for run in waiting:
@@ -322,6 +335,7 @@ def launch_all(ctx: Ctx, cell_start: str | None, busy: bool) -> str:
         reason = sched.decide_skip(inp)
         if reason is not None:
             why = (inp.details or {})[reason]
+            ctx.run_notes[run] = ("SKIP-" + reason.upper(), why)
             ctx.log("運轉", 0, reason, f"{run} 被擋（只寫日誌、運轉保持開啟）：{why}")
             notes.append(f"{run} 被擋（{reason}）")
             continue
@@ -383,6 +397,7 @@ def run(repo: Path, now: datetime, dry: bool, as_json: bool, deps: Deps) -> tupl
     if os.environ.get(OFF_ENV):
         if not dry:
             write_log(si, now, "巡視", 0, "PATROL-OFF", f"{OFF_ENV} 有設，整次 no-op")
+            patrolreport.emit_off(repo, si, now, write_log)  # 只多一份 off:true 快照（不取鎖）
         return 0, f"{OFF_ENV} 有設：整次 no-op\n", ""
     params = si_check.params_for(repo, *si_params.SCHED_KEYS, "stop_after_bad", "event_max_bytes",
                                  "max_proposals_per_run")
@@ -392,7 +407,8 @@ def run(repo: Path, now: datetime, dry: bool, as_json: bool, deps: Deps) -> tupl
         if held is None:
             return 0, "已有巡邏在跑\n", ""
         steps = heartbeat(ctx)
-    new = [e["seq"] for e in ctx.load() if e["seq"] > before]
+        patrolreport.emit(ctx, steps, _pending, ctx.deps.pid_alive or patrolrun._alive)
+    new =[e["seq"] for e in ctx.load() if e["seq"] > before]
     failed = any(s.get("exc") for s in steps)
     if as_json:
         text = json.dumps({"ok": not failed, "kind": "patrol", "dry_run": dry, "steps": [

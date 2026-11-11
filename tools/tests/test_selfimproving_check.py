@@ -309,6 +309,9 @@ def params_dict() -> dict:
         "sched_driver_quiet_minutes": 30,
         "sched_auto_commit": True,
         "sched_auto_push": False,
+        "sched_push_wall_minutes": 45,  # P7 新增三鍵（TCS-P7 AC-SI-49-1）：與 PARAM_SPECS 同步
+        "sched_push_attempts_max": 3,
+        "sched_push_retry_minutes": 360,
         "metrics_rev": 1,
         "min_obs_rows": 10,
         "ledger_warn_bytes": 245760,

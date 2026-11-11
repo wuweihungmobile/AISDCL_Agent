@@ -17,6 +17,7 @@ from . import fold as si_fold
 from . import issues as si_issues
 from . import meaplan as si_meaplan
 from . import paths as si_paths
+from . import propdetail as si_propdetail
 from . import refs as si_refs
 from . import rows as si_rows
 from . import scan as si_scan
@@ -71,7 +72,8 @@ def _events(repo: Path, problems: list) -> list[dict]:
 
 
 def _proposals(repo: Path, git: Git, events: list[dict], f: si_fold.Folded,
-               params: dict, ne: list) -> list[dict]:
+               params: dict, ne: list, ident: str | None = None) -> list[dict]:
+    """帶 `ident`（`--id`）時，該筆多一鍵 `detail`（P7；清單模式不讀 N 個 patch）。"""
     out = []
     for p in f.props.values():
         patch = repo / si_events.PROPOSALS_REL / p.id / f"r{p.rev}.patch"
@@ -94,6 +96,8 @@ def _proposals(repo: Path, git: Git, events: list[dict], f: si_fold.Folded,
                     "sources": p.sources, "created_seq": p.created_seq, "last_seq": p.last_seq,
                     "verdict": p.verdict, "flags": p.flags, "cooldown": cool, "card": card,
                     "window": si_meaplan.export_window(events, f, p.id), "_cursor": _num(p.id)})
+        if ident is not None and p.id == ident:
+            out[-1]["detail"] = si_propdetail.build(repo, events, f, p, params, ne)
     return out
 
 
@@ -126,7 +130,7 @@ def build(repo: Path, git: Git, params: dict, kind: str, since: int | None,
     elif kind == "events":
         items = _events(repo, problems)
     elif kind == "proposals":
-        items = _proposals(repo, git, events or [], f, params, ne)
+        items = _proposals(repo, git, events or [], f, params, ne, ident)
     elif kind == "runs":
         items = _runs(f)
     else:
