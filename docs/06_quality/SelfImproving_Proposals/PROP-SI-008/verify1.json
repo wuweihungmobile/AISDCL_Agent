@@ -1,0 +1,59 @@
+{
+  "schema_rev": 1,
+  "prop": "PROP-SI-008",
+  "rev": 1,
+  "k": 1,
+  "base": "b35a4c8ae0c5c78dd6ab70ac7c45bd2f3ca8506b",
+  "heldout_digest": "sha256:c7152dea15a9530990066344cf4e9b7b23eab3792bbf5aa09bb2d4696d4e8cfd",
+  "carrier": {},
+  "steps": {
+    "baseline": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_tiered_retention.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:9839eb9f2e77fa390e5e631dc65054aa90463d50b0f75a362390ed389116a4f3",
+        "out_bytes": 168,
+        "n_pop": 1,
+        "tail": "bytes=19317 lines=82 archive_pointers=3\r\nsymptom=present no-retention-rule:工作方式教訓; no-retention-rule:機制與環境事實; no-retention-rule:近期輪次\r\n"
+      }
+    ],
+    "patched": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_tiered_retention.py",
+          "{sandbox}"
+        ],
+        "rc": 0,
+        "timed_out": false,
+        "out_sha256": "sha256:f3760bc7beebec52b6ff0dd4f55c62e732992720fa9bfb71c6b4b357056c50c9",
+        "out_bytes": 57,
+        "n_pop": 1,
+        "tail": "bytes=19846 lines=85 archive_pointers=3\r\nsymptom=absent\r\n"
+      }
+    ],
+    "mutated": [
+      {
+        "id": "P1",
+        "cmd": [
+          "{python}",
+          "{heldout}/probe_tiered_retention.py",
+          "{sandbox}"
+        ],
+        "rc": 1,
+        "timed_out": false,
+        "out_sha256": "sha256:712c782c5a646c6aa0b232401519e430bcddeebec0aed60dea9c696215b27fc2",
+        "out_bytes": 89,
+        "n_pop": 1,
+        "tail": "bytes=19672 lines=84 archive_pointers=3\r\nsymptom=present no-retention-rule:近期輪次\r\n"
+      }
+    ]
+  }
+}
