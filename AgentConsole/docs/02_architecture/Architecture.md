@@ -531,6 +531,24 @@ export const NAV_REGISTRY: ReadonlyArray<NavEntry> = [/* … */];
 
 **不變量**：`status` 的 `schedule` 只經既有 `GET /si/status` 的 `items[0]` 原樣轉出（`schema_rev` 不變）；Console 不寫帳本、不存排程狀態副本；導覽登記表與七項導覽不變；P2b 的四個 POST、`SiDecideDialog`、決定重送閘行為不變。
 
+### 5.7 自我進化頁的提案詳情對話框、巡邏狀態卡與入帳結果（2026-11-11 設計；鍵 `agentconsole-si-flow-visibility`；Console PRD §0.12；AC／AT 與介面契約 C-1～C-6 住 `TCS-SiFlowVisibility-20261111.md`）
+
+**設計目標**：讓掌舵者不開命令列就看得到「提案的完整內容、現在卡在哪、等誰、巡邏器有沒有在跑、送出的決定有沒有被主機接受」。**只看、不寫**：不新增任何非 GET 請求、DB 表、Flyway 版本或稽核 kind；Console 從不把巡邏快照當寫入依據。`page.tsx` 仍只殼（§5.4）；新元件只加在 `components/domain/si/`，不動導覽登記表與 `ToolsRegion.tsx`。
+
+| 件 | 位置 | 約定 |
+|----|------|------|
+| 提案詳情對話框 | `SiProposalDetail.tsx`（新）；由 `SiView` 掛載（對話框狀態在 `SiView`，與既有五個寫入對話框同理：分頁切換卸載面板時不消失）；`SiProposalsPanel` 每列第一欄（與展開鈕同格，**不新增欄**）加「詳情」鈕（`si-detail-open-<ID>`，所有角色可見、唯讀） | 使用既有 `components/ui/dialog.tsx`（焦點捕捉與歸還）；五分頁用 `PillTabs`（卡面／變更內容／提案本文／評估集與驗證／時間線）；開啟才取數：`useSiProposalDetail(id)`＝既有 `getSiProposal`（`GET /api/v1/si/proposals/{id}`）取 `items[0].detail`，**只有這一個請求**——時間線取自 `detail.timeline`、來源觀察摘要取自 `detail.sourceObs`（根層 TCS-P7 §2.1；不再呼叫議題端點）；沿 `SI_QUERY_OPTIONS`（不重試、不留快取），關閉即丟 |
+| diff 元件 | `SiDiffView.tsx`（新） | 逐行原文＋種類（`add`／`del`／`hunk`／`file`／`meta`／`ctx`）；顏色以外的標示＝行首符號、左邊框實線／虛線、讀屏前綴；預設前 400 行、可展開全部、可下載（Blob，不打網路）；截斷（主機端超過 256 KiB）明寫並標示下載為截斷版；全部純文字、單一容器內橫向捲動 |
+| 巡邏狀態卡 | `SiPatrolCard.tsx`（新；由 `SiView` 於 `SiStatusBanner` 之後、研究來源說明列之前掛載；**所有角色可見、零寫入控件**） | `useSiPatrol()`＝新 `getSiPatrol`（`GET /api/v1/si/patrol`），`qk.siPatrol` 屬 `qk.siAll` 家族（「重新整理」與寫入成功後一併重取）；呈現上次心跳（相對時間）、新鮮度警示、環境變數暫停、每提案卡住原因、「為什麼沒有啟動運轉」（快照 `schedule` 與 `runs.waiting[]`）、進行中運轉、步驟、推送狀態（顯示根層 `push.text`，不建狀態對照）；快照缺席／未掛載／壞檔各有專屬畫面；相對時間與過時警示由 `useMinuteTick` 每分鐘本地重算（不發請求），頁面放久了自動轉過時 |
+| 純函式庫 | `frontend/lib/domain/siFlow.ts`（新；不 import React 與 `lib/api/*`） | `patrolFreshness`（`stale ⇔ age > 2×heartbeat+5`；age＝`readAt − generatedAt` 加上資料抵達後經過的時間）、`resolveNextStep`（快照可用→快照；否則詳情 `next`；皆無→量不到）、三組小列舉標籤（運轉目的第一波三值、驗證結果、入帳狀態）與未知值保底句、`reasonText`、`maskCredentials`、`parseDiff`／`diffWindow`／`downloadSpec`、`joinHostRejections`、`heldoutView`（低於下限顯示根層 `neNote`）／`verifyView`／`sandboxView`（`failText`）／`pushView`／`scheduleView`／`waitingView`、`sectionState`（缺席＝量不到、空陣列＝無）；常數 `STALE_FACTOR`、`STALE_GRACE_MINUTES`、`DIFF_WINDOW_LINES`、`RECENT_INGESTED_SHOWN` 只住此檔 |
+| 入帳結果 | `SiWritesPanel.tsx`（改） | 以 `auditRef` 對照巡邏快照 `ingest[].audit_ref`（前端結合；**不改** `GET /api/v1/si/console-writes` 的十一鍵回應，那十一鍵被 P2b／DecideDedupe 的 AT 逐字釘住）；待入帳列顯示被拒收／延後的碼與白話並分「需要人處理」「條件解除後自動入帳」；回報量不到時面板層級說明一次；另列最近 5 筆已入帳（收合） |
+| 來源觀察跳轉 | `SiObservationsPanel.tsx`（加 `highlightId` 屬性） | 詳情的來源 OBS 按鈕：關閉對話框、切到觀察分頁、高亮並聚焦該列（一次性）；列不在已載入頁時顯示說明 |
+| 說明 | `frontend/lib/help/self-improving.ts` | 補「提案詳情」「下一步」「巡邏狀態」「自動推送」四段，欄位名逐字取自畫面字樣；走既有三道雙向鎖與可讀性鎖 |
+
+**資料流**：瀏覽器→`GET /api/v1/si/patrol`（VIEWER 以上；backend `SiController.patrol`→`SiMirrorUseCase.patrol`→`AgentBridge.siPatrol`→Bridge `GET /si/patrol`；每請求恰一次 Bridge 呼叫，連線 2 秒、讀取 20 秒、不重試、零 DB 寫入）→Bridge 唯讀開 `BRIDGE_SI_REPORT_DIR/patrol.json`（`app/si_report.py`：只驗頂層為物件、`schema_rev` 為整數 1、`generated_at` 為帶 offset 的 ISO 字串、大小 ≤ 1048576 位元組；回 `{schema_rev,kind:"patrol",read_at,report}`（backend 轉 `readAt`，前端收到 `readAt`），`report` 逐值透傳；欄位以根層 TCS-P7 §2.2 為準）。單筆提案：瀏覽器→`GET /api/v1/si/proposals/{id}`→Bridge 既有路由→根層 `export --kind proposals --id`（子行程；backend **零邏輯改動**，Bridge 只多一個純函式 `app/si_detail.py::filter_detail`：對 `items[0].detail` 只放行契約列出的鍵、其餘丟棄，作為評估集與未列欄位不外送的真防線）。主機端巡邏器每心跳以「寫新檔→`os.replace`」原子覆寫快照；Bridge 因此永遠讀到完整舊檔或完整新檔。
+
+**不變量**：快照不是任何寫入的依據（主機端與 Console 皆然）；Bridge 的 `si_cli.py` argv 白名單（只准 `export` 與 `obs-add --dry-run`）與 `tests/test_si_readonly_lock.py` 的五判準不變，新模組 `si_report.py` 只含唯讀檔案操作；engine-bridge 的**唯一可寫 SI bind 仍是稽核目錄**；評估集內容永不經 Console（`detail.heldout` 只有六個衍生欄）；Console 不持有任何原因碼→白話對照表（白話字住根層 `nextstep` 與快照／匯出的 `text`、`failText`、`neNote`，Console 只持有三組小列舉標籤與保底句；推送狀態不建對照）；導覽登記表與七項導覽不變；既有 SI 查詢的「不輪詢」做法不變。
+
 ## 6. 資料流五條
 
 ### 6(a) CRUD（US-P／G／T、API-PRJ／GOL／TSK）
@@ -1007,6 +1025,7 @@ Push-Location AgentConsole; docker compose -f docker-compose.dev.yml down; Pop-L
 | `BRIDGE_INSTANCE`／`BRIDGE_STOP_GRACE_SECONDS` | Bridge | 預設 hostname＋pid＋uuid4／30 |
 | `BRIDGE_ALLOWED_PATH_ROOTS`／`BRIDGE_OUTBOUND_ALLOWLIST` | Bridge | 路徑 allowlist 以 `os.pathsep` 分隔（POSIX `:`、Windows `;`）；外呼 allowlist 以逗號分隔（§8.3、§8.4） |
 | `MINIMAX_API_KEY`／`MINIMAX_BASE_URL`／`MINIMAX_MODEL` | Bridge | 修正腦；`MINIMAX_API_KEY` 只放環境變數，不入 config |
+| `BRIDGE_SI_REPORT_DIR` | Bridge | **〔鍵 `agentconsole-si-flow-visibility`；Console PRD §0.12〕**主機巡邏器每心跳原子覆寫 `patrol.json` 的目錄（容器內路徑；compose 設 `/si-report`，**唯讀** bind 自主機 `<AUTOSDD_SI_DIR>/console_report`）；**未設＝`GET /si/patrol` 回 503 `si_unavailable`／`cause=report_dir_unset`**，其他 SI 功能不受影響；不得與 `BRIDGE_SI_AUDIT_DIR` 相同、不得在 `/repo` 之下（§10.5） |
 | `NEXT_PUBLIC_API_URL` | frontend | 後端 origin（不含 `/api/v1`）；全棧同源為空 |
 | `BRIDGE_RESEARCH_ROOT` | Bridge | **〔ResearchToPRD〕**研究工作區根；預設 **repo 外**（D-28）：Windows `%USERPROFILE%\.autosdd\my-project\`、POSIX `~/.autosdd/my-project/`、Docker `/workspace/my-project`；必須在 `BRIDGE_ALLOWED_PATH_ROOTS` 之下（自動併入允許根），啟動時驗證並於 `GET /health/deep` 的 `research.root` 揭露；根 `.gitignore` 仍加 `/my-project/` |
 | `BRIDGE_SCAFFOLD_ROOT` | Bridge | 軌道 B 新專案的父目錄；未設＝軌道 B 停用（`capabilities.scaffoldRoot=null`）；自動併入允許根 |
@@ -1150,6 +1169,16 @@ Bridge 端點表（僅 console-api 呼叫；寫入端須 `X-Bridge-Token`）：
 | `POST /research/projects/{id}:cancel`、`:reconcile`、`:reinit`、`:archive`、`:restore` | P0 | 200 | 404 `research_not_found`；`:reinit` 的換世代模式另有 409 `fsm_state_conflict`（現態非 ESCALATION*）、422（缺理由） |
 | `GET／POST /research/allowlist`、`PATCH /research/allowlist/{id}` | P0 | 200／201 | 422 `terms_ack_required` |
 | `GET /research/projects/{id}/events?after=`、`/stream` | P0 | 200／SSE | 404 |
+
+### 10.5 SelfImproving 巡邏快照讀取與提案詳情（〔2026-11-11 設計〕鍵 `agentconsole-si-flow-visibility`；Console PRD §0.12；形狀的 Console 側唯一定稿處＝`TCS-SiFlowVisibility-20261111.md` §0.2 C-1～C-6，根層欄位語意見 SelfImproving PRD v0.16；本節只是簡表）
+
+| 端點 | 階段 | 說明 | 成功 | 失敗（`reason`） |
+|------|------|------|------|-------------------|
+| Bridge `GET /si/patrol` | 第一波 | **不呼叫任何 CLI**：唯讀開 `BRIDGE_SI_REPORT_DIR/patrol.json`（固定檔名；路徑須含於該目錄）；無查詢參數；只驗形狀與大小（≤ 1048576 位元組）；每請求讀一次、不快取、不寫檔 | 200：`{"schema_rev":1,"kind":"patrol","read_at":"<ISO+offset>","report":{…}}`（backend 轉 `readAt`）（`report` 逐值透傳，鍵序保留） | 503 `si_unavailable`（`cause`∈`report_dir_unset`／`report_missing`／`report_unreadable`／`report_invalid`）、422 `invalid_request`（任何查詢參數） |
+| backend `GET /api/v1/si/patrol`（API-SI-16；operationId `getSiPatrol`） | 第一波 | Bridge 上列端點的原樣轉遞（snake_case→camelCase）；VIEWER 以上；每請求恰一次 Bridge 呼叫（連線 2 秒、讀取 20 秒、不重試）；零 DB 寫入 | 200：`ApiResult<SiExportResponse>`（無型別樹） | 503（`details.cause` 逐字）、502、504；沒有 `data` |
+| `GET /api/v1/si/proposals/{id}`（API-SI-05 擴充） | 第一波 | 回應的 `items[0]` 多一個根層帶出的 `detail` 物件（八欄：`patch`／`body`／`sourceObs`／`heldout`／`sandbox`／`verify`／`next`／`timeline`）；backend 原樣透傳；Bridge 只放行契約列出的鍵（`filter_detail`，其餘丟棄）；清單端點不含；缺席（舊根層）時原樣缺席 | 200 | 同 §10.3 單筆提案 |
+
+compose 對應：engine-bridge 新增第七條 SI 相關 bind（**唯讀**）——主機 `${AUTOSDD_SI_DIR:-${USERPROFILE:-${HOME}}/.autosdd/selfimproving}/console_report` → 容器 `/si-report`，長語法、`read_only: true`、`create_host_path: false`（主機目錄須先建，`.env.example` 與 `docker/README.md` 給雙 shell 預建指令）；環境變數 `BRIDGE_SI_REPORT_DIR=/si-report`（§9.4）。**「不得再加第二條可寫 bind」不變**：本 bind 唯讀，engine-bridge 唯一可寫的 SI bind 仍是 `/si-audit`。主機端巡邏器負責建立並以原子覆寫寫入 `patrol.json`（根層 PRD v0.16）；Bridge 只讀。
 
 ## 11. 後端 API
 
@@ -2176,6 +2205,7 @@ ALTER TABLE console.research_projects ADD CONSTRAINT research_projects_flow_phas
 | L-UX-1 | **SI 四表採游標分頁，欄位排序只作用於已載入的列**（§5.5；鍵 `agentconsole-console-ux-sort-help`）：後端與 Bridge 對 SI 帳本只提供遞增游標（`since`／`limit`），沒有 `sort` 參數；為跨頁排序而改 Bridge 契約會動兩引擎側的唯讀鏡像面，超出本鍵範圍 | 使用者在尚未「載入更多」時排序，看到的是已載入列的排序；表頭排序不會自動載入其餘頁。預設序（ID 升冪）與帳本游標序一致，故預設畫面無此落差。再開症狀：掌舵者回報「排序後少了某筆」且該筆在未載入頁 |
 | L-SI-1 | **Console 看不到主機上的排程任務是否武裝**（P4 2026-11-09 已實作；鍵 `agentconsole-si-schedule`；SelfImproving PRD AC-SI-37-3）：`status.schedule.armed` 在 `export` 路徑恆為 `NOT-EVALUABLE：export-reads-no-home`（`export` 不讀家目錄、不查 OS 任務；沿 `console_pending` 的同一體例）；Console 的排程資料**只來自事件帳本折出的欄位** | 畫面對 `armed` 一律顯示「量不到」，不得顯示成已武裝或未武裝；使用者以「`overdue` 是否為真」與主機端 `python tools/selfimproving.py sched show`（現查 OS 任務憑證）判斷。再開症狀：掌舵者回報「Console 說正常、主機任務其實不在」且 `overdue` 未翻真（代表折疊判準有洞，回根層 PRD 修訂，不在 Console 另做查詢） |
 | L-SI-2 | **`overdue` 是推算值、不是任務狀態**（P4 2026-11-09 已實作；SelfImproving PRD NFR-SI-09-5）：`overdue` ＝啟用且本格內既無自動運轉也無略過事件、且 `now − 本格起點 > 2×心跳`；`now` 由 `export` 呼叫時刻決定，故重新整理前的畫面可能已過時；機器睡眠、關機、登出都使它為真，與「任務壞了」無法區分；`overdue` 為 `null`（無事件帳本）時是量不到 | 畫面文案只說「逾期未巡邏」並指向主機現查指令，不說「任務已停用」；`overdue` 為 `null` 不顯示成「沒有逾期」。再開症狀：掌舵者回報逾期警示頻繁出現在筆電睡眠後（可接受，非缺陷）或在巡邏確實跑過後仍不消（折疊判準缺陷，回根層） |
+| L-SI-3 | **「巡邏有沒有在跑」只能由快照新鮮度推算，Console 仍看不到主機 OS 任務**（2026-11-11 設計；鍵 `agentconsole-si-flow-visibility`；Console PRD §0.12）：巡邏狀態卡的新鮮度判準為 `generated_at` 距 Bridge 讀取時間超過「2×心跳＋5 分」（嚴格大於）；快照是每心跳的重新量測，不是事件串流；機器睡眠、關機、登出、任務被移除、環境變數暫停都使快照過時，彼此無法區分；`off:true` 是巡邏自己寫下的暫停旗標（有快照才看得到）。L-SI-1 的結論不變（OS 任務是否武裝仍量不到）：快照能寫出來只證明「過去某時刻巡邏跑過」 | 畫面文案只說「巡邏可能沒在跑」並列出可能原因，不說「任務已停用」；相對時間與過時判斷由瀏覽器每分鐘本地重算（不發請求），畫面放久了不會停在讀取當時的數字；缺週期、時鐘異常、時間無法解析各有「無法判斷」文案、不顯示成正常。再開症狀：掌舵者回報「卡片說正常但巡邏其實沒跑」且快照時間持續更新（代表主機端有別的程序在寫快照，回根層查）或「卡片頻繁說沒在跑但任務其實在跑」（心跳週期與快照寫入不同步，回根層修訂） |
 | L-UX-2 | **後端排序與前端排序的已知差異**（§5.5；鍵 `agentconsole-console-ux-sort-help`；SCG-0～3 審查 F8）：專案與匯入歷史的 `status` 排序依列舉常數的英文名而非畫面標籤；匯入歷史 `projectId` 排序是 UUID 字串序；PostgreSQL 字串序依資料庫 collation，與前端 `Intl.Collator("zh-Hant")` 不同；`id` tie-break 在 Java（`UUID.compareTo` 帶號 long）與 PG（`uuid` 位元組序）不同，IT 一律以小寫十六進位字串比較 | 伺服器分頁的兩張清單（專案、匯入歷史）依後端序；其餘前端排的表依 collator 序。再開症狀：掌舵者回報同一欄在兩種清單排出不同順序且造成誤判 |
 
 ### 12.2 待驗證項（誰在哪一波負責驗；結論須回寫本表）

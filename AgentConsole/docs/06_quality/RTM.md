@@ -509,6 +509,9 @@
 ## 2.15 研究來源單一化 Console 半（追蹤來源表 V24／V25、Bridge 追蹤來源端點與登記快照、console-api 追蹤來源與同步端點、稽核 kind `src-registry`、研究來源設定對話框追蹤來源區）的 TCS 本地 ID 追溯（對映 FR-R2P-24；不計入 §2 總列數）
 > 本子表 2026-11-10 依 DEF-200-576 體例自始立於 [RTM-ResearchRegistry-20261110.md](RTM-ResearchRegistry-20261110.md)（AC 10、AT 74，含勘誤 E-11 新增的 AT-965-10-3 與 E-14 新增的 AT-965-10-4；鍵 `agentconsole-research-registry`）。四格回填：實作檔＝V24／V25 遷移、backend 追蹤來源與同步端點、Bridge 登記快照與追蹤來源端點、前端追蹤來源區與同步狀態；自動測試＝backend `gradlew clean build` 共 2572 條、0 失敗，Bridge 全套（唯一紅為與本次無關的 `test_AT_961_22_E_2…[archive]` 負載逾時，單跑為綠），前端 vitest 共 2840 條全綠，AT 對照見上列子表；E2E 驗證＝mock E2E（AT-965-10-2、AT-965-10-E-1）綠，真棧 AT-965-10-1 於全新拋棄式棧（映像建自 `e9d047cc`）單跑 1 通過，DEF-AC-036／037 修正皆真棧驗證（先前「單跑通過」為假通過，已訂正）；整檔跑的 afterAll 清場 TypeError 為測試輔助缺陷 DEF-AC-038，已修並於 2026-11-11 全新拋棄式棧整檔重跑通過（兩輪皆 5 通過、零略過）；同輪全棧 E2E 抓到並修掉 DEF-AC-039（自我進化頁說明連結對比不足，新增 AT-965-10-4）、文案白話化（勘誤 E-13）；狀態＝實作完成、真機全數已驗（V1～V8；見子表檔末），新映像已部署長駐棧，鍵於 2026-11-11 **RELEASE**。SCG-4：[SCG4-REVIEW-ResearchRegistry-20261110.md](SCG4-REVIEW-ResearchRegistry-20261110.md)（PASS：P1 0／P2 0／P3 2）；根層半見根層 `docs/06_quality/RTM-SelfImproving-P6-20261110.md`；回填義務不變：每完成一項需求即回填四格。
 
+## 2.16 自我進化核准流程全程可見 Console 半（Bridge 巡邏快照讀取端點與唯讀掛載、backend 巡邏端點、單筆提案詳情透傳、提案詳情對話框、巡邏狀態卡、入帳結果、每頁說明）的 TCS 本地 ID 追溯（Console PRD §0.12；不計入 §2 總列數）
+> 本子表（鍵 `agentconsole-si-flow-visibility`；F-911、US-931、AC-966-1～17、AT 113，含編號帶 `E` 的負控 22；規格＝`docs/03_testing/contracts/TCS-SiFlowVisibility-20261111.md`）預定依 DEF-200-576 體例自始立於 `RTM-SiFlowVisibility-20261111.md`（共 132 列：F 1、US 1、AC 17、AT 113；SCG-5 由主控建立並回填四格）。**現況（2026-11-11 規格階段）**：全部 ⬜ 未開始；依賴根層鍵 `monorepo-si-p7-flow-visibility` 規格已凍結。編號現查證據：`AC-965-*` 已被 §2.15 占用，故本鍵取 AC-966；API 編號接續 `API-SI-16`。回填義務不變：每完成一項需求即回填四格。
+
 ## 3. 統計（建表時快照）
 
 ### 3.1 PRD 使用者故事對帳（58 條一條不漏）
