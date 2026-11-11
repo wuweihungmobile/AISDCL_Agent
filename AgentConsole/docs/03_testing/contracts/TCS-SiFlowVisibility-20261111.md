@@ -84,7 +84,7 @@
 
 - 依賴序：根層實作輪先產出黃金樣本 `tools/tests/fixtures/selfimproving/p7/patrol.golden.json` 與 `detail.golden.json`（根層 TCS-P7 §3、AT-790-5-1／5-E-1 鎖；LF、無 BOM、結尾一個 LF）→ 主控原樣複製到 `AgentConsole/engine-bridge/tests/fixtures/si_report/`、`AgentConsole/backend/src/test/resources/si/p7/`、`AgentConsole/frontend/tests/fixtures/si/flow/`（複本檔名同）。**位元組一致性由測試機械判定**：各側有一個先行測試，以 repo 根相對路徑讀根層檔與本地複本，斷言逐位元組相等（任一方改動即紅；複製時主控另以 `Get-FileHash -Algorithm SHA256 <根層檔>,<複本>` 目視核對）→ PKG-BR（Bridge、compose）→ PKG-BE（backend；需 PKG-BR 的路由契約，但以迷你 Bridge 自足，可並行）→ PKG-FE（純函式與元件可與 PKG-BE 並行開工；`schema.d.ts` 須待 PKG-BE 完成後以拋棄式 IT 倒 `/v3/api-docs` 餵 `scripts/gen-api.mjs` 重產入庫，沿 P2b 勘誤 9 作法）。每支程式完成即編譯並跑該區 AT，不累積（`AgentConsole/CLAUDE.md` 鐵律 11）。
 - **三包持有面互不重疊、可並行**（根鐵律七）：PKG-BR＝`AgentConsole/engine-bridge/**` 與 `AgentConsole/docker-compose.yml`、`.env.example`、`docker/README.md`；PKG-BE＝`AgentConsole/backend/**`；PKG-FE＝`AgentConsole/frontend/**`。共用物只有黃金樣本複本（主控複製）；三包不得互改對方目錄。
-- 開發 agent **不 commit／push**、不動根層 `tools/`、`.github/`、`.claude/`、凍結檔與既有 TCS（鐵律 7）。`Architecture.md` 與 Console PRD 本鍵已由 SA 棒改好（凍結前一併進 refreeze）；RTM 本地子表、SCG-4 報告、`lib/help/*` 的頁面說明（與 UI 實作同 commit）由主控代做。
+- 開發 agent **不 commit／push**、不動根層 `tools/`、`.github/`、`.claude/`、凍結檔與既有 TCS（鐵律 7）。`Architecture.md` 與 Console PRD 本鍵已由 SA 棒改好（凍結前一併進 refreeze）；RTM 本地子表與 SCG-4 報告由主控代做；`lib/help/*` 的頁面說明由前端開發者實作（與 UI 同 commit，文案由 SCG-4 人讀把關）。
 - 真 SI 家目錄 `~/.autosdd/`、真帳本、真事件帳本、真 `patrol.json` 一律唯讀且**不得被任何 AT 寫入**：AT 只用暫存目錄、迷你 Bridge、jsdom、fetch 替身與 Playwright 路由替身；Docker 全棧 E2E 的 `BRIDGE_SI_REPORT_DIR` 對應的 bind 來源必須是全棧自帶的拋棄式目錄（不得掛真 SI 家目錄；AT-966-17-3 斷言之）。
 
 **〈增量行為規則〉**（W-F0～W-F12；各 AT 以 W-F 編號引用。實查依據：`routers/si.py`、`si_cli.py`（stdout 上限 8 MiB、逾時 15 秒）、`settings.py`（`si_audit_dir` 與 `_anchor_guard`）、`docker-compose.yml`、`SiController.java`、`SiConsoleWritesResponse.java`、`SiReadOnlyArchTest`、`OpenApiIT`、`SiProposalsPanel.tsx`、`SiWritesPanel.tsx`、`SiView.tsx`、`SiStatusBanner.tsx`、`queries.ts`〔`SI_QUERY_OPTIONS`〕、`tests/helpers/si.tsx`、`dialog.tsx`、`pill-tabs.tsx`）
@@ -116,7 +116,7 @@
 | NFR-FV-5 | **零退步與範圍**：既有 AT 在其角色下仍綠，釘選數字只改預期值（§4.1）；只動 §5.7 允許集合 | AT-966-3-6、AT-966-14-2、V4 |
 | NFR-FV-6 | **無障礙**：三寬度（1440／1000／600，取自既有無障礙 E2E 的 `RESEARCH_WIDTHS`，不另立數字）axe 零 serious／critical、無橫向溢出；diff 與狀態的意義不只靠顏色；對話框焦點管理沿 `dialog.tsx` | AT-966-7-2、AT-966-16-2 |
 | NFR-FV-7 | **跨平台**（根鐵律三）：新程式與測試不引入平台專屬假設（路徑分隔符、換行、檔案鎖、`os.replace` 需 `try/except OSError`）；Windows 與 Linux（CI）皆須全綠；macOS 未驗 | V6 |
-| NFR-FV-8 | **開發 agent 交卷前閘門**（輸出逐字貼入）：(1) 本檔各 AT 逐一單跑；(2) `gradlew clean build`；(3) 前端 lint、`tsc --noEmit`、build、vitest；(4) Bridge `pytest`、`ruff check`（本目錄與 monorepo 根視角各一次）；(5) 讀 rc 先存變數再讀；(6) 不 commit、不碰根層 `tools/`、`.claude/`、凍結檔；(7) 夾具與測試中不得出現不存在於真帳本的字面 `PROP-SI-`、`OBS-SI-`、`RUN-SI-` 接數字（本檔夾具一律用 §5.1 具名的 `PROP-SI-901` 起的測試號）；(8) 不得有 `sk-` 形態字串與真機密；(9) 契約與實作不符處以純文字回報；(10) 交卷含流程摩擦節 | SCG-4 實跑檢核 |
+| NFR-FV-8 | **開發 agent 交卷前閘門**（輸出逐字貼入）：(1) 本檔各 AT 逐一單跑；(2) `gradlew clean build`；(3) 前端 lint、`tsc --noEmit`、build、vitest；(4) Bridge `pytest`、`ruff check`（本目錄與 monorepo 根視角各一次）；(5) 讀 rc 先存變數再讀；(6) 不 commit、不碰根層 `tools/`、`.claude/`、凍結檔；(7) 夾具與測試中不得出現不存在於真帳本的編號字面（見 §5.1「給所有實作者的規定」：用真實存在的編號，或在執行期拼出；`si check` 的 `ref.obs` 掃全 repo）；(8) 不得有 `sk-` 形態字串與真機密；(9) 契約與實作不符處以純文字回報；(10) 交卷含流程摩擦節 | SCG-4 實跑檢核 |
 | NFR-FV-9 | **hermetic**：AT 不得寫真 SI 家目錄；全棧 E2E 的快照目錄為拋棄式目錄；E2E 寫入的 `patrol.json` 僅在該目錄 | AT-966-17-3 |
 
 **追溯矩陣**：F-911 ← Console PRD §0.12、§8.1；根層 SelfImproving PRD v0.16 的 FR-SI-47～49（detail、巡邏快照、M 類與推送的顯示面）與根層 TCS 的接縫條文；P1b 的唯讀鏡像（R5～R19）、P2b 的對帳面板（W14～W21）、P4 的排程面板與 `SI_QUERY_OPTIONS` 慣例；US-931 → AC-966-1～17（本檔 FRD-lite）→ AT（本檔 §1）。
@@ -284,7 +284,7 @@
 >
 > **判定指令的四種形態**（PowerShell 不用裸 `cd`，用 `Push-Location … Pop-Location` 同行成對，讀 rc 先存變數再讀）：backend `gradlew test --tests "<類別全名>.<AT 底線形>*"`（cwd＝`AgentConsole/backend`；整合測試需 Docker）；Bridge `python -m pytest <檔> -k <AT 底線形> -q`（cwd＝`AgentConsole/engine-bridge`，根層 `.venv`）；frontend `npx vitest run <檔> -t <AT 底線形>`（cwd＝`AgentConsole/frontend`）；Playwright `npx playwright test <檔> -g <AT 底線形>`（cwd＝`AgentConsole/frontend`；mock 情境 `E2E_MODE=standalone`、先 `npm run build`，真棧 `E2E_STACK=1` 並帶 `E2E_ADMIN_*` 與拋棄式棧的環境變數）。
 >
-> **斷言簡寫**（資料與設施細節見 §5）：**Bridge**：`LB`（本機 Bridge 測試夾具，沿 `test_si_routes.py`）、`RD`（暫存的快照目錄，設為 `BRIDGE_SI_REPORT_DIR`）、`PR(over)`（C-1 的 `report` 夾具，逐鍵覆寫；基準＝§5.1）、`FAKE_CLI`（`tests/fake_si.py` 替身 export 行程）；**backend**：`ADMIN`／`OPERATOR`／`VIEWER`（沿 `AbstractApiIT` 帳號）、`MINI`（迷你 Bridge；本鍵加 `MINI.patrol(status, body)` 設定 `GET /si/patrol` 的回應、`MINI.proposalDetail(id, item)` 設定 `GET /si/proposals/{id}`、`MINI.requests()` 記錄收到的請求）、`rows()`（`si_console_writes` 逐列）；**frontend**：`renderSi`、`stubSiApi`、`ADMIN_UI`／`VIEWER_UI`／`OPERATOR_UI`（沿 `tests/helpers/si.tsx`；本鍵加 `patrol` 端點與 `proposalDetail`、`issue` 路由）、`NOW`＝`2026-11-11T14:00:00+08:00`（固定 `readAt`）、`PATROL(over)`（C-2 的 `data` 夾具，基準＝§5.1）、`DETAIL(over)`（C-3 的 `detail` 夾具）、`P901`＝提案 `PROP-SI-901`（狀態 `verified`、rev 2、`lastSeq` 120、`sources:["OBS-SI-901"]`）。
+> **斷言簡寫**（資料與設施細節見 §5）：**Bridge**：`LB`（本機 Bridge 測試夾具，沿 `test_si_routes.py`）、`RD`（暫存的快照目錄，設為 `BRIDGE_SI_REPORT_DIR`）、`PR(over)`（C-1 的 `report` 夾具，逐鍵覆寫；基準＝§5.1）、`FAKE_CLI`（`tests/fake_si.py` 替身 export 行程）；**backend**：`ADMIN`／`OPERATOR`／`VIEWER`（沿 `AbstractApiIT` 帳號）、`MINI`（迷你 Bridge；本鍵加 `MINI.patrol(status, body)` 設定 `GET /si/patrol` 的回應、`MINI.proposalDetail(id, item)` 設定 `GET /si/proposals/{id}`、`MINI.requests()` 記錄收到的請求）、`rows()`（`si_console_writes` 逐列）；**frontend**：`renderSi`、`stubSiApi`、`ADMIN_UI`／`VIEWER_UI`／`OPERATOR_UI`（沿 `tests/helpers/si.tsx`；本鍵加 `patrol` 端點與 `proposalDetail`、`issue` 路由）、`NOW`＝`2026-11-11T14:00:00+08:00`（固定 `readAt`）、`PATROL(over)`（C-2 的 `data` 夾具，基準＝§5.1）、`DETAIL(over)`（C-3 的 `detail` 夾具）、`P901`＝提案 `PROP-SI-901`（狀態 `verified`、rev 2、`lastSeq` 120、`sources:["OBS-SI-<901>"]`）。
 
 **A. Bridge（pytest；`tests/test_si_patrol_route.py`、`tests/test_si_deploy_config.py`、`tests/test_si_proposal_detail.py`、`tests/test_si_readonly_lock.py`）**
 
@@ -400,7 +400,7 @@
   - Given `FAKE_CLI` 對單筆提案輸出的 `items[0]` 內，`detail` 多帶合成的未列鍵：`detail.evalset:"CANARY-TOP"`、`detail.heldout.cases:["CANARY-CASE"]`、`heldout.probes`、`heldout.files`、`patch.raw:"CANARY-RAW"`、`sandbox.log`、`verify.secret`、`verify.reasons[0].trace`、`sourceObs[0].internal`、`timeline[0].pid`；另備 `detail` 為字串、為陣列、為 null 三份；以及只含契約鍵的黃金樣本複本（整個 `items[0]`，非只 `detail`）
   - When `GET /si/proposals/PROP-SI-901`
   - Then 多帶的鍵**在回應任何位置都不存在**（回應原始文字不含任何 `CANARY`）；契約列出的鍵與值逐值不變且鍵序保留（`heldout` 八鍵含 `digest8`、`neNote`）；`detail` 為字串、陣列、null 時回應的 `items[0]` 沒有 `detail` 鍵；黃金樣本列與未過濾時逐位元組相同（白名單不誤傷契約鍵）；`items[0]` 的其他鍵（`id`、`state`、`card` 等）、`ne`、`problems` 不受影響
-  - 判定：`python -m pytest tests/test_si_proposal_detail.py -k AT_966_4_6 -q`；預期突變：拿掉白名單（直接透傳）即紅（哨兵出現）；白名單漏列 `neNote`、`digest8`、`kind`，或漏列 `sourceObs` 缺列形態的 `missing` 鍵（`{id,missing:true}` 被削成 `{id}`），亦紅；Given 另含一份 `sourceObs:[{id:"OBS-SI-902",missing:true}]` 並斷言原樣保留
+  - 判定：`python -m pytest tests/test_si_proposal_detail.py -k AT_966_4_6 -q`；預期突變：拿掉白名單（直接透傳）即紅（哨兵出現）；白名單漏列 `neNote`、`digest8`、`kind`，或漏列 `sourceObs` 缺列形態的 `missing` 鍵（`{id,missing:true}` 被削成 `{id}`），亦紅；Given 另含一份 `sourceObs:[{id:"OBS-SI-<902>",missing:true}]` 並斷言原樣保留
   - 驗收字樣：[AT_OK_966_4_6]
 - **AT-966-4-E-1**（pytest｜同檔｜Unit｜AC-966-4）上限內的大 patch 與錯誤路徑不變。
   - Given `FAKE_CLI` 輸出 256 KiB（262144 位元組）的 `patch.text` 加 256 KiB 的 `body.text`（皆 `truncated:true`），總輸出小於 8 MiB；另備輸出 8 MiB 加 1 位元組的替身
@@ -523,9 +523,9 @@
   - 判定：`npx vitest run lib/domain/siFlow.test.ts -t AT_966_5_8`；預期突變：`n<=min` 當低於、前端自寫低於下限句而忽略 `neNote`、忽略 `failText`、額外鍵漏入輸出，皆紅
   - 驗收字樣：[AT_OK_966_5_8]
 - **AT-966-5-9**（vitest｜同檔｜Unit｜AC-966-5、W-F7、W-F13）`pushView(push)`、`scheduleView(schedule)`、`waitingView(waiting)`、`relativeMinutesText`。
-  - Given `push` 八態各一份，內容取自根層 TCS-P7 附錄 A.4／A.4b 的固定句：`off`＋`PUSH-OFF`「自動推送已關閉」；`idle`＋`PUSH-NOT-AHEAD`「沒有待推送的提交」；`pending`＋`PUSH-PENDING`「等推送任務下一次執行（每個心跳一次）」；`waiting-login`＋`PUSH-WAITING-LOGIN`「等使用者登入後自動推送」；`running`＋`PUSH-RUNNING`；`ok`＋`PUSH-OK`＋`sha`＋`finishedAt`；`failed`＋`PUSH-FAILED`＋`retry:"wait"`＋`attempts:2`；`blocked`＋`PUSH-DIRTY-TREE`；另 `blocked`＋`PUSH-FOREIGN-COMMITS` 的 `text` 含 `{detail}` 已填的 sha 前 8 碼；`blocked`＋`PUSH-NOT-RECORDED`、`PUSH-RECORD-MISMATCH`、`PUSH-LEDGER-RULE`（`retry:null`，根層附錄 A.4 的固定句）各一份——三者與其他 `blocked` 碼走同一條路徑、不需特例；未知 `state:"skipped"`＋有 `text`、`state:"zzz"`＋無 `text`；`text` 缺席或空字串的已知態；`null`；`enabled` 缺席。`schedule`：`null`、`{enabled:false,current:{code:"SCHED-DISABLED",text:"…"},lastSkip:null}`、`current:null`、`lastSkip:{seq:99,t:"…",code:"SKIP-RUN-OPEN",text:"…",auditRef:null}`、`lastSkip.auditRef` 為 UUID。`waiting`：`[{run:"RUN-SI-902",code:"SKIP-OTHER-DRIVER",text:"…"}]`、`[]`、缺席。分鐘數 0、0.5、1、59、61、125、1500、負數、NaN
+  - Given `push` 八態各一份，內容取自根層 TCS-P7 附錄 A.4／A.4b 的固定句：`off`＋`PUSH-OFF`「自動推送已關閉」；`idle`＋`PUSH-NOT-AHEAD`「沒有待推送的提交」；`pending`＋`PUSH-PENDING`「等推送任務下一次執行（每個心跳一次）」；`waiting-login`＋`PUSH-WAITING-LOGIN`「等使用者登入後自動推送」；`running`＋`PUSH-RUNNING`；`ok`＋`PUSH-OK`＋`sha`＋`finishedAt`；`failed`＋`PUSH-FAILED`＋`retry:"wait"`＋`attempts:2`；`blocked`＋`PUSH-DIRTY-TREE`；另 `blocked`＋`PUSH-FOREIGN-COMMITS` 的 `text` 含 `{detail}` 已填的 sha 前 8 碼；`blocked`＋`PUSH-NOT-RECORDED`、`PUSH-RECORD-MISMATCH`、`PUSH-LEDGER-RULE`（`retry:null`，根層附錄 A.4 的固定句）各一份——三者與其他 `blocked` 碼走同一條路徑、不需特例；未知 `state:"（已廢止的設計稿第五態名）"`＋有 `text`、`state:"zzz"`＋無 `text`；`text` 缺席或空字串的已知態；`null`；`enabled` 缺席。`schedule`：`null`、`{enabled:false,current:{code:"SCHED-DISABLED",text:"…"},lastSkip:null}`、`current:null`、`lastSkip:{seq:99,t:"…",code:"SKIP-RUN-OPEN",text:"…",auditRef:null}`、`lastSkip.auditRef` 為 UUID。`waiting`：`[{run:"RUN-SI-902",code:"SKIP-OTHER-DRIVER",text:"…"}]`、`[]`、缺席。分鐘數 0、0.5、1、59、61、125、1500、負數、NaN
   - When 呼叫
-  - Then `pushView`：顯示句**逐字等於 `push.text`**（`{detail}` 已由根層填入，Console 不二次處理），並依 `state` 決定樣式：`ok` 成功樣式、`failed`／`blocked` 警示樣式、其餘中性；`ok` 補「（提交 <sha 前 8 碼>）」與完成時間；`failed` 補「已嘗試 N 次」；`retry` 不另加句子（句子已含「稍後自動重試」等語意）；`text` 缺席或空字串＝保底句「主機沒有提供白話說明（原因碼 <code>）。」；未知 `state`（含 `skipped`）＝「未知的推送狀態『X』」並附 `text`（若有）、不套成功樣式；`null`＝「量不到」；所有輸出經 `maskCredentials`。`scheduleView(schedule, off)`：`schedule` 為 null 且 `off:true`＝「巡邏已暫停，沒有排程資訊」；`schedule` 為 null 而 `off` 不是 true（含缺席）＝「這份回報沒有排程資訊」（不說成暫停、也不說成排程停用）；`enabled:false`＝取 `current.text`；`current:null`＝「目前這一格的排程狀態量不到」；`lastSkip` 非 null 時回「最近一次略過：<時間> <text>」，`auditRef` 非 null 時另加「這次略過的是你從畫面按的『立即啟動』（稽核編號 <auditRef>）」；`waitingView`：每筆「<run> 等待中：<text>」；空陣列＝「目前沒有在等待啟動的運轉」；缺席＝「等待中的運轉量不到」。`relativeMinutesText`：0 與小於 1＝「剛剛」、1＝「1 分鐘前」、59＝「59 分鐘前」、61＝「1 小時 1 分鐘前」、125＝「2 小時 5 分鐘前」、1500＝「1 天 1 小時前」、負數與 NaN＝「時間量不到」
+  - Then `pushView`：顯示句**逐字等於 `push.text`**（`{detail}` 已由根層填入，Console 不二次處理），並依 `state` 決定樣式：`ok` 成功樣式、`failed`／`blocked` 警示樣式、其餘中性；`ok` 補「（提交 <sha 前 8 碼>）」與完成時間；`failed` 補「已嘗試 N 次」；`retry` 不另加句子（句子已含「稍後自動重試」等語意）；`text` 缺席或空字串＝保底句「主機沒有提供白話說明（原因碼 <code>）。」；未知 `state`（含 （已廢止的設計稿第五態名））＝「未知的推送狀態『X』」並附 `text`（若有）、不套成功樣式；`null`＝「量不到」；所有輸出經 `maskCredentials`。`scheduleView(schedule, off)`：`schedule` 為 null 且 `off:true`＝「巡邏已暫停，沒有排程資訊」；`schedule` 為 null 而 `off` 不是 true（含缺席）＝「這份回報沒有排程資訊」（不說成暫停、也不說成排程停用）；`enabled:false`＝取 `current.text`；`current:null`＝「目前這一格的排程狀態量不到」；`lastSkip` 非 null 時回「最近一次略過：<時間> <text>」，`auditRef` 非 null 時另加「這次略過的是你從畫面按的『立即啟動』（稽核編號 <auditRef>）」；`waitingView`：每筆「<run> 等待中：<text>」；空陣列＝「目前沒有在等待啟動的運轉」；缺席＝「等待中的運轉量不到」。`relativeMinutesText`：0 與小於 1＝「剛剛」、1＝「1 分鐘前」、59＝「59 分鐘前」、61＝「1 小時 1 分鐘前」、125＝「2 小時 5 分鐘前」、1500＝「1 天 1 小時前」、負數與 NaN＝「時間量不到」
   - 判定：`npx vitest run lib/domain/siFlow.test.ts -t AT_966_5_9`；預期突變：自建推送狀態對照句、對 `PUSH-NOT-RECORDED` 等新碼寫特例、把 `skipped` 當已知、`text` 缺席時回空字串、`auditRef` 非 null 時不加註、未遮罩 text，皆紅
   - 驗收字樣：[AT_OK_966_5_9]
 - **AT-966-5-E-1**（vitest｜同檔｜Unit｜AC-966-5、NFR-FV-3）缺席、`null`、空陣列三者區分。
@@ -540,7 +540,7 @@
 - **AT-966-6-1**（vitest｜`SiProposalDetail.test.tsx`｜Unit｜AC-966-6、W-F11）每列「詳情」鈕、開關與焦點歸還。
   - Given 提案分頁有三列（含 `P901`），以 `VIEWER_UI`、`OPERATOR_UI`、`ADMIN_UI` 各渲染
   - When 點 `P901` 的「詳情」鈕（`data-testid="si-detail-open-PROP-SI-901"`、`aria-label="詳情 PROP-SI-901"`）；按 Esc
-  - Then 三種角色皆有三個「詳情」鈕；開啟後出現 `role="dialog"`、`aria-modal="true"`、名稱為「提案詳情 PROP-SI-901」；Esc 關閉；焦點回到該鈕（沿 `dialog.tsx` 的歸還行為）；ADMIN 另有的「決定」鈕不受影響
+  - Then 三種角色皆有三個「詳情」鈕；開啟後出現 `role="dialog"`、`aria-modal="true"`（Radix 預設不帶，元件須顯式設定）、名稱為「提案詳情 PROP-SI-901」；Esc 關閉；焦點回到該鈕（沿 `dialog.tsx` 的歸還行為）；ADMIN 另有的「決定」鈕不受影響
   - 判定：`npx vitest run components/domain/si/SiProposalDetail.test.tsx -t AT_966_6_1`；預期突變：只對 ADMIN 顯示、關閉後焦點落到 `<body>`，皆紅
   - 驗收字樣：[AT_OK_966_6_1]
 - **AT-966-6-2**（vitest｜同檔｜Unit｜AC-966-6）五分頁順序與鍵盤。
@@ -640,21 +640,21 @@
   - 判定：`npx vitest run components/domain/si/SiProposalDetail.test.tsx -t AT_966_8_2`；預期突變：兩者同句，紅
   - 驗收字樣：[AT_OK_966_8_2]
 - **AT-966-8-3**（vitest｜同檔｜Unit｜AC-966-8）來源觀察跳轉與高亮。
-  - Given `DETAIL({sourceObs:[{id:"OBS-SI-901",context:"…",symptom:"…",severity:"P2",disposition:"proposed"}]})`；觀察分頁已載入含 `OBS-SI-901` 的列（`si-obs-row-OBS-SI-901`）；整個 `SiView` 渲染
-  - When 開詳情→「提案本文」分頁→按「看觀察 OBS-SI-901」
-  - Then 對話框關閉；分頁切到「觀察」；該列有 `data-highlight="true"` 並取得焦點（`tabIndex=-1`＋`focus()`），其餘列沒有；再切離並回到觀察分頁後高亮消失（一次性）；跳轉零新增請求
+  - Given `DETAIL({sourceObs:[{id:"OBS-SI-<901>",context:"…",symptom:"…",severity:"P2",disposition:"proposed"}]})`；觀察分頁已載入含 `OBS-SI-<901>` 的列（`si-obs-row-OBS-SI-<901>`）；整個 `SiView` 渲染
+  - When 開詳情→「提案本文」分頁→按「看觀察 OBS-SI-<901>」
+  - Then 對話框關閉；分頁切到「觀察」；該列有 `data-highlight="true"` 並取得焦點（`tabIndex=-1`＋`focus()`），其餘列沒有；再切離並回到觀察分頁後高亮消失（一次性）；跳轉全程**不新增**詳情（`/api/v1/si/proposals/{id}`）、巡邏（`/api/v1/si/patrol`）與議題（`/api/v1/issues/`）請求，觀察清單（`/api/v1/si/observations`）**至多重取一次**（觀察分頁在提案分頁時是卸載的，SI 查詢 `gcTime: 0`，重掛必然重取；不得重取兩次以上）
   - 判定：`npx vitest run components/domain/si/SiProposalDetail.test.tsx -t AT_966_8_3`；預期突變：只切分頁不高亮、高亮永久殘留，皆紅
   - 驗收字樣：[AT_OK_966_8_3]
 - **AT-966-8-4**（vitest｜同檔｜Unit｜AC-966-8）跳轉目標不在已載入頁、非 OBS 來源、無來源。
-  - Given 三個提案：`sourceObs=[{id:"OBS-SI-777",…}]`（該觀察不在已載入的觀察頁）、`sources=["DEF-200-575","手寫說明"]` 且 `sourceObs` 缺席、`sources=[]` 且 `sourceObs=[]`
+  - Given 三個提案：`sourceObs=[{id:"OBS-SI-<777>",…}]`（該觀察不在已載入的觀察頁）、`sources=["DEF-200-575","手寫說明"]` 且 `sourceObs` 缺席、`sources=[]` 且 `sourceObs=[]`
   - When 分別看來源區並對第一個按跳轉鈕
-  - Then 第一個跳到觀察分頁後顯示一條說明「找不到 OBS-SI-777（可能在更舊的頁，請按『載入更多』）」，無例外；第二個 `DEF-…` 與手寫文字以純文字顯示、**沒有**跳轉鈕（只有符合 `OBS-SI-\d{3,}` 者有鈕）；第三個顯示「這個提案沒有登記來源觀察」；`sources` 與 `sourceObs` 皆缺席＝「來源量不到」
+  - Then 第一個跳到觀察分頁後顯示一條說明「找不到 OBS-SI-<777>（可能在更舊的頁，請按『載入更多』）」，無例外；第二個 `DEF-…` 與手寫文字以純文字顯示、**沒有**跳轉鈕（只有符合 `OBS-SI-\d{3,}` 者有鈕）；第三個顯示「這個提案沒有登記來源觀察」；`sources` 與 `sourceObs` 皆缺席＝「來源量不到」
   - 判定：`npx vitest run components/domain/si/SiProposalDetail.test.tsx -t AT_966_8_4`；預期突變：對任何字串都出鈕、找不到時丟例外，皆紅
   - 驗收字樣：[AT_OK_966_8_4]
 - **AT-966-8-5**（vitest｜同檔｜Unit｜AC-966-8、W-F14）來源觀察摘要與缺列。
-  - Given `sourceObs=[{id:"OBS-SI-901",context:"巡邏日誌",symptom:"提案卡了三天沒人處理 <b>x</b>",severity:"P2",disposition:"open"},{id:"OBS-SI-902",missing:true}]`；另一情境 `ne` 含 `OBS-LEDGER-UNREADABLE`（帶 `text`）而 `sourceObs` 為空陣列
+  - Given `sourceObs=[{id:"OBS-SI-<901>",context:"巡邏日誌",symptom:"提案卡了三天沒人處理 <b>x</b>",severity:"P2",disposition:"open"},{id:"OBS-SI-<902>",missing:true}]`；另一情境 `ne` 含 `OBS-LEDGER-UNREADABLE`（帶 `text`）而 `sourceObs` 為空陣列
   - When 切到「提案本文」
-  - Then 每筆來源顯示編號、嚴重度、處置、情境與症狀（純文字原文、不截斷）；`missing:true` 者顯示「找不到這筆觀察 OBS-SI-902（觀察帳本裡沒有）」；`ne` 的 `OBS-LEDGER-UNREADABLE` 項顯示其 `text`（根層白話），不顯示成「沒有來源」；整段不發任何請求
+  - Then 每筆來源顯示編號、嚴重度、處置、情境與症狀（純文字原文、不截斷）；`missing:true` 者顯示「找不到這筆觀察 OBS-SI-<902>（觀察帳本裡沒有）」；`ne` 的 `OBS-LEDGER-UNREADABLE` 項顯示其 `text`（根層白話），不顯示成「沒有來源」；整段不發任何請求
   - 判定：`npx vitest run components/domain/si/SiProposalDetail.test.tsx -t AT_966_8_5`；預期突變：缺列者顯示成空白、讀不到帳本時顯示「沒有登記來源觀察」，皆紅
   - 驗收字樣：[AT_OK_966_8_5]
 - **AT-966-8-E-1**（vitest｜同檔｜Unit｜AC-966-8）大量與重複來源。
@@ -731,18 +731,18 @@
   - 驗收字樣：[AT_OK_966_10_E_1]
 - **AT-966-11-1**（vitest｜`SiPatrolCard.test.tsx`｜Unit｜AC-966-11、W-F11、W-F12）掛載位置、角色、請求次數。
   - Given 整個 `SiView` 以 `VIEWER_UI`、`OPERATOR_UI`、`ADMIN_UI` 各渲染；`patrol` 端點回 `PATROL()`
-  - When 載入；按頁首「重新整理」；以假計時器前進 1 小時
-  - Then 三種角色皆有 `data-testid="si-patrol-card"` 區塊，位置在狀態橫幅之後、「研究來源」說明列之前（DOM 順序）；載入時 `GET /api/v1/si/patrol` 恰 1 次；按「重新整理」後累計 2 次；**前進 1 小時網路請求仍為 2 次**（無輪詢；畫面時間由本地每分鐘重算，不發請求）；視窗聚焦不重抓；區塊標題「巡邏狀態」；區塊內無 `button`（除「這一輪做了什麼」展開切換，其 `aria-expanded` 存在）
+  - When 載入；按頁首「重新整理」；以可控時鐘替身（見 §5.6）前進 60 分鐘
+  - Then 三種角色皆有 `data-testid="si-patrol-card"` 區塊，位置在狀態橫幅之後、「研究來源」說明列之前（DOM 順序）；載入時 `GET /api/v1/si/patrol` 恰 1 次；按「重新整理」後累計 2 次；**前進 60 分鐘網路請求仍為 2 次**（無輪詢；畫面時間由本地每分鐘重算，不發請求）；另以靜態斷言 `SI_QUERY_OPTIONS.refetchInterval === false` 且 `patrol` 查詢沿用它（「不輪詢」＝靜態斷言加請求數不變，兩者並用）；視窗聚焦不重抓；區塊標題「巡邏狀態」；區塊內無 `button`（除「這一輪做了什麼」展開切換，其 `aria-expanded` 存在）
   - 判定：`npx vitest run components/domain/si/SiPatrolCard.test.tsx -t AT_966_11_1`；預期突變：只對 ADMIN 渲染、加 `refetchInterval`，皆紅
   - 驗收字樣：[AT_OK_966_11_1]
 - **AT-966-11-2**（vitest｜同檔｜Unit｜AC-966-11、W-F5）新鮮呈現與時間前進。
-  - Given `generatedAt` 比 `readAt`（＝`NOW`）早 3 分鐘、`heartbeatMinutes:15`、`off:false`；假計時器
+  - Given `generatedAt` 比 `readAt`（＝`NOW`）早 3 分鐘、`heartbeatMinutes:15`、`off:false`；可控時鐘替身（`tests/helpers/siClock.ts`，見 §5.6）
   - When 檢視；再把時間前進 10 分鐘（不重抓）
   - Then 初始顯示「上次心跳：3 分鐘前」、一個 `<time dateTime=generatedAt>`、「巡邏每 15 分鐘一次」、「資料讀取於 <readAt>」；**無**警示區；狀態標籤為「巡邏正常」（文字）；前進 10 分鐘後相對時間變為「13 分鐘前」（**不得停在 3 分鐘前**），仍無警示、網路請求次數不變
   - 判定：`npx vitest run components/domain/si/SiPatrolCard.test.tsx -t AT_966_11_2`；預期突變：相對時間固定為讀取當時的值，紅
   - 驗收字樣：[AT_OK_966_11_2]
 - **AT-966-11-3**（vitest｜同檔｜Unit｜AC-966-11、W-F5）過時警示邊界與自動轉警示。
-  - Given 週期 15；`generatedAt` 比 `NOW` 早 35 分 00 秒、35 分 01 秒；週期 60 且早 125 分 01 秒；另一情境：早 3 分鐘、載入後以假計時器前進到抵達後第 32 分 00 秒再前進 1 分鐘（不重抓）
+  - Given 週期 15；`generatedAt` 比 `NOW` 早 35 分 00 秒、35 分 01 秒；週期 60 且早 125 分 01 秒；另一情境：早 3 分鐘、載入後以可控時鐘替身前進到抵達後第 32 分 00 秒再前進 1 分鐘（不重抓）
   - When 檢視
   - Then 35:00 無警示；35:01 出現 `data-testid="si-patrol-stale"`（`role="status"`）文字「巡邏可能沒在跑：已超過 35 分鐘沒有新的回報（巡邏每 15 分鐘一次）。可能原因：電腦睡眠、排程任務被移除、巡邏被環境變數暫停。請按『重新整理』取得最新回報。」；週期 60 的情境限度顯示 125；警示與狀態標籤「巡邏可能沒在跑」並存（文字，不只靠顏色）；仍顯示快照內容並註明「以下是 X 分鐘前的回報」；另一情境在 32:00 無警示、再過 1 分鐘（35:01 起算）**自動出現警示**，網路請求次數不變
   - 判定：`npx vitest run components/domain/si/SiPatrolCard.test.tsx -t AT_966_11_3`；預期突變：邊界改 `>=`、過時時隱藏快照內容、不隨時間重算，皆紅
@@ -798,7 +798,7 @@
 - **AT-966-12-3**（vitest｜同檔｜Unit｜AC-966-12、W-F7）進行中的運轉與第二波值不當成已知。
   - Given `runs.live=[{run:"RUN-SI-901",purpose:"scheduled",startedAt:<NOW 前 12 分>,wallDueAt:<NOW 後 48 分>},{run:"RUN-SI-902",purpose:"console",…},{run:"RUN-SI-903",purpose:"manual",…}]`；另情境：`live=[]`；`purpose:"freeze"`、`"zzz"`；`live` 缺席；`runs.queued=[{purpose:"revise",target:"PROP-SI-902",why:"x"}]`（W1 不應出現的元素）
   - When 檢視
-  - Then 顯示「進行中：RUN-SI-901（排程啟動），12 分鐘前開始，預計最晚 48 分鐘後結束」；`console`＝「從畫面按『立即啟動』」、`manual`＝「手動啟動」；`freeze`、`zzz` 一律「未知值『…』」；`live=[]`（且 `waiting` 也空）＝「目前沒有進行中的運轉」；`live` 缺席＝「進行中的運轉量不到」；`runs.queued` 的內容**完全不渲染**（畫面不出現「revise」「PROP-SI-902」「排隊」字樣）
+  - Then 顯示兩個短句「進行中：RUN-SI-901（排程啟動）。」「12 分鐘前開始，預計最晚 48 分鐘後結束。」（每句不超過可讀性鎖的 40 字）；`console`＝「從畫面按『立即啟動』」、`manual`＝「手動啟動」；`freeze`、`zzz` 一律「未知值『…』」；`live=[]`（且 `waiting` 也空）＝「目前沒有進行中的運轉」；`live` 缺席＝「進行中的運轉量不到」；`runs.queued` 的內容**完全不渲染**（畫面不出現「revise」「PROP-SI-902」「排隊」字樣）
   - 判定：`npx vitest run components/domain/si/SiPatrolCard.test.tsx -t AT_966_12_3`；預期突變：把 `freeze` 當已知標籤、渲染 `queued`，皆紅
   - 驗收字樣：[AT_OK_966_12_3]
 - **AT-966-12-4**（vitest｜同檔｜Unit｜AC-966-12）步驟與入帳摘要。
@@ -828,7 +828,7 @@
 - **AT-966-12-E-1**（vitest｜同檔｜Unit｜AC-966-12、NFR-FV-3）段落缺席＝量不到，與 `truncated`。
   - Given `report` 只有 `{schemaRev:1,generatedAt:…}`（其餘全缺）；另一情境 `truncated:true` 的完整快照
   - When 檢視
-  - Then 「每個提案現在卡在哪」「進行中的運轉」「為什麼沒有啟動運轉」「這一輪做了什麼」「自動推送」五區各顯示對應的「…量不到」，不顯示任何「沒有」「無」字樣；上次心跳區仍正常；`truncated:true` 時卡片頂端顯示「這份回報太長，被截短了，清單可能不完整」，`false` 或缺席時不顯示
+  - Then 「每個提案現在卡在哪」「進行中的運轉」「為什麼沒有啟動運轉」「這一輪做了什麼」「自動推送」五區各顯示對應的「…量不到」；**各區內文**（斷言範圍＝各區去掉固定區塊標題與標題旁固定說明後的文字；區塊標題「為什麼沒有啟動運轉」本身含「沒有」，不納入比對）不含「沒有」「無」字樣；上次心跳區仍正常；`truncated:true` 時卡片頂端顯示「這份回報太長，被截短了，清單可能不完整」，`false` 或缺席時不顯示
   - 判定：`npx vitest run components/domain/si/SiPatrolCard.test.tsx -t AT_966_12_E_1`；預期突變：缺席當空陣列、忽略 `truncated`，皆紅
   - 驗收字樣：[AT_OK_966_12_E_1]
 - **AT-966-12-E-2**（vitest｜同檔｜Unit｜AC-966-12）兩百個提案的捲動區。
@@ -861,11 +861,11 @@
   - Then 面板層級各顯示一次「拒收原因量不到：這個部署沒有掛載巡邏回報目錄」「…：還沒有收到巡邏回報」「…：巡邏回報檔有問題」「…：連不上後端服務」；各待入帳列維持「待入帳」（不顯示「被拒收」也不顯示「主機還沒處理」）；既有待入帳功能（入帳指令展開）不受影響
   - 判定：`npx vitest run components/domain/si/SiWritesPanel.test.tsx -t AT_966_13_4`；預期突變：量不到時各列顯示「主機還沒處理這筆」、出現「Bridge」字樣，皆紅
   - 驗收字樣：[AT_OK_966_13_4]
-- **AT-966-13-5**（vitest｜同檔｜Unit｜AC-966-13、W-F10）最近已入帳。
-  - Given 對帳 `items` 有 8 筆 `ingested:true`（時間各異）與 2 筆待入帳；另情境 `ingested:null`（量不到）
-  - When 檢視；展開「最近已入帳（8）」
-  - Then 預設收合；展開後只列時間最新的 5 筆（`RECENT_INGESTED_SHOWN`），每列有「已入帳」標籤、種類標籤、對象、時間、稽核編號；標題計數顯示 8 並註明「只列最近 5 筆」；`ingested:null` 時整段不出現（沿既有「量不到」訊息）；已入帳列不出現入帳指令鈕
-  - 判定：`npx vitest run components/domain/si/SiWritesPanel.test.tsx -t AT_966_13_5`；預期突變：列出全部、`null` 當已入帳，皆紅
+- **AT-966-13-5**（vitest｜同檔｜Unit｜AC-966-13、W-F10）最近已入帳（常駐顯示、**不加展開鈕**）。
+  - Given 對帳 `items` 有 8 筆 `ingested:true`（時間各異）與 2 筆待入帳；另情境 `ingested:null`（量不到）；另情境 `ingested:true` 為 0 筆
+  - When 檢視面板（不需任何操作）
+  - Then 待入帳清單之下有一段 `data-testid="si-recent-ingested"`，標題「最近已入帳（8）」並註明「只列最近 5 筆」，內容直接顯示（**沒有展開／收合按鈕**，面板內按鈕集合與本鍵實作前相同——這是刻意的設計，避免動到既有 AT-935-3-2、AT-951-4-1 的面板按鈕清點），只列時間最新的 5 筆（`RECENT_INGESTED_SHOWN`），每列有「已入帳」標籤、種類標籤、對象、時間、稽核編號；`ingested:null` 時整段不出現（沿既有「量不到」訊息）；0 筆時整段不出現；已入帳列不出現入帳指令鈕；整段內無任何 `button`
+  - 判定：`npx vitest run components/domain/si/SiWritesPanel.test.tsx -t AT_966_13_5`；預期突變：列出全部、`null` 當已入帳、加上展開鈕，皆紅
   - 驗收字樣：[AT_OK_966_13_5]
 - **AT-966-13-6**（vitest｜同檔｜Unit｜AC-966-13、W-F10）只結合未入帳列。
   - Given 一筆 `ingested:true` 的列 A3，快照 `ingest[]` 仍含 A3 的舊拒收項（快照比帳本舊）
@@ -909,16 +909,16 @@
   - Then 三角色的詳情對話框與巡邏卡（不含 ADMIN 專屬的「看待入帳清單」鈕）`textContent` 逐字相同（無角色遮蔽）；401 走既有全域處理（`AuthProvider` 的登出導向），元件不自訂處理也不顯示技術字樣
   - 判定：`npx vitest run components/domain/si/SiFlowRoles.test.tsx -t AT_966_14_E_1`；預期突變：對 VIEWER 隱藏 patch，紅
   - 驗收字樣：[AT_OK_966_14_E_1]
-- **AT-966-15-1**（vitest｜`lib/help/content.test.ts`、`lib/help/pageFacts.test.ts`、`lib/help/readability` 既有測試｜Unit｜AC-966-15）四段說明與三道雙向鎖。
-  - Given `lib/help/self-improving.ts`（本鍵修改後）
-  - When 跑既有三道鎖（`content.test.ts` 的名詞表／欄位雙向、`pageFacts.test.ts` 的 `sourceFiles` 與事實雙向、可讀性鎖）
-  - Then 說明含四段，標題逐字為「提案詳情」「下一步」「巡邏狀態」「自動推送」；每段的欄位名逐字取自畫面字樣（「詳情」「變更內容」「提案本文」「評估集與驗證」「時間線」「上次心跳」「巡邏可能沒在跑」「為什麼沒有啟動運轉」…）；`sourceFiles` 含 `SiProposalDetail.tsx`、`SiDiffView.tsx`、`SiPatrolCard.tsx`；名詞表新增「巡邏快照」「評估集」「下一步」「沙盒」「探針」五列（白話解釋）；**全段不得出現「自動凍結」「會自動修訂」「按鈕推送」等第二波或不存在的功能字樣**；三道鎖全綠且既有 SI 說明字樣不退步
-  - 判定：`npx vitest run lib/help -t AT_966_15_1`（測試檔內新案含此底線形；另整目錄 `npx vitest run lib/help` 全綠）；預期突變：少一段、欄位名與畫面不一致、說明暗示自動凍結，皆紅
+- **AT-966-15-1**（vitest｜`lib/help/content.test.ts`、`lib/help/pageFacts.test.ts`、`lib/help/readability` 既有測試｜Unit｜AC-966-15）說明頁含四段與五個名詞的白話釋義，且落在既有說明頁結構內（`PageHelp` 只有 `purpose`／`steps`／`fields`／`states`／`sourceFiles`，**不新增名詞表結構**）。
+  - Given `lib/help/self-improving.ts`（本鍵修改後；由前端開發者實作）
+  - When 跑既有三道鎖（`content.test.ts` 的欄位雙向、`pageFacts.test.ts` 的 `sourceFiles` 與事實雙向、可讀性鎖），並以 `HELP_PAGES["self-improving"]` 讀取
+  - Then (a) `fields[].name` 含四段標題「提案詳情」「下一步」「巡邏狀態」「自動推送」，以及「詳情」「變更內容」「提案本文」「評估集與驗證」「時間線」「上次心跳」「巡邏可能沒在跑」「為什麼沒有啟動運轉」，皆逐字取自畫面字樣（本鍵新增欄位共 12 個）；(b) 五個名詞的白話釋義各落在既有結構內，以字串片段機械判定（比對 `purpose`、`steps`、`fields[].meaning` 串接後的文字）：「評估集（用來驗證的考題）」、「隔離試跑（沙盒）」、「檢查項目（探針）」、「巡邏快照」（出現在「巡邏狀態」欄位的釋義內，並附半句白話，例如「巡邏器每個心跳留下的回報檔」）、「下一步」（出現在欄位名，且其釋義說明「現在輪到誰做什麼」）；沙盒與探針只准以括號形態出現；(c) `sourceFiles` 含 `SiProposalDetail.tsx`、`SiDiffView.tsx`、`SiPatrolCard.tsx`；(d) 全段不得出現「自動凍結」「會自動修訂」「按鈕推送」「立即推送」等第二波或不存在的功能字樣；(e) 三道鎖全綠且既有 SI 說明字樣不退步
+  - 判定：`npx vitest run lib/help -t AT_966_15_1`（測試檔內新案含此底線形；另整目錄 `npx vitest run lib/help` 全綠）；預期突變：少一段、欄位名與畫面不一致、說明暗示自動凍結、拿掉「檢查項目（探針）」或「巡邏快照」片段，皆紅
   - 驗收字樣：[AT_OK_966_15_1]
 - **AT-966-15-2**（vitest｜`lib/domain/siFlow.test.ts`｜Unit｜AC-966-15）新字串可讀性鎖與禁用技術詞。
   - Given `siFlow.ts` 匯出 `SI_FLOW_TEXTS`（所有固定句、標籤、保底句模板的物件常數）；元件內的固定句一律取自此物件（元件原始碼不含寫死的中文句子，掃描判定）
   - When 逐句過 `lib/help/readability.ts` 現行規則（句長、禁用詞、國高中程度；以該檔匯出的檢查函式為準，不另寫規則），並另外檢查禁用詞表
-  - Then 全部通過；每個值為非空字串；不含「null」「undefined」「NaN」「object」字樣；**不含未經說明的技術詞**：`Bridge`、`carrierProof`、`probe`、`sandbox`、`digest`、`schema`、`payload`、`HMAC`（「沙盒」「探針」只准以「隔離試跑（沙盒）」「檢查項目（探針）」的括號形態出現）；含 `{…}` 佔位者以測試值代入後再檢查
+  - Then 全部通過（**鎖只管 Console 自己寫的固定句與保底句模板**；根層在執行期提供的白話——`text`、`neNote`、`failText`、`ne[].text`、`push.text` 等——Console 逐字顯示、不得改寫，因此**明確豁免**，不進 `SI_FLOW_TEXTS`；Console 組合句〔如運轉列、相對時間句〕必須拆成每句不超過 40 字，含佔位值代入後仍成立，代入值取實際可能的最長形態，例如完整的運轉編號）；每個值為非空字串；不含「null」「undefined」「NaN」「object」字樣；**不含未經說明的技術詞**：`Bridge`、`carrierProof`、`probe`、`sandbox`、`digest`、`schema`、`payload`、`HMAC`（「沙盒」「探針」只准以「隔離試跑（沙盒）」「檢查項目（探針）」的括號形態出現）；含 `{…}` 佔位者以測試值代入後再檢查
   - 判定：`npx vitest run lib/domain/siFlow.test.ts -t AT_966_15_2`；預期突變：塞進一句超長艱澀句、保底句出現「Bridge」，皆紅
   - 驗收字樣：[AT_OK_966_15_2]
 - **AT-966-15-E-1**（vitest｜`SiFlowRoles.test.tsx`｜Unit｜AC-966-15）垃圾輸入不洩漏技術字樣。
@@ -1015,11 +1015,11 @@
 | backend `AbstractApiIT` 迷你 Bridge | 無 `/si/patrol` | 加路由與 `MINI.patrol(...)`、`MINI.proposalDetail(...)` | 測試設施（只增不改） |
 | frontend `lib/api/si.endpoints.test.ts`（`SI_READ_FUNCTIONS`） | 七個 | 加 `getSiPatrol`（八個）；`endpoints.test.ts` 表加一列 `GET /api/v1/si/patrol` | 新讀取函式 |
 | frontend `lib/api/schema.d.ts`（入庫快照） | 無 `getSiPatrol` | 重產 | 新 operationId |
-| frontend `SiView.test.tsx`（`AT_935_3_2` 的唯讀按鈕白名單與各案例的請求集合／次數斷言）、`SiStatusFilter.test.tsx`、`SiSchedulePanel.test.tsx`、`SiStatusBanner.test.tsx` 中對 `SiView` 整體請求次數的斷言 | 不含 `patrol`、不含「詳情」鈕 | 請求集合加 `GET /api/v1/si/patrol`（所有角色）；白名單加 `si-detail-open-<ID>`（唯讀、非寫入控件）；`stubSiApi` 的預設 `patrol` 回 503 `report_missing` 以免舊案例收到未處理請求 | SI 頁多一個唯讀請求與一個唯讀按鈕 |
+| frontend `SiView.test.tsx`（`AT_935_3_2` 的唯讀按鈕白名單與各案例的請求集合／次數斷言）、`SiStatusFilter.test.tsx`、`SiSchedulePanel.test.tsx`、`SiStatusBanner.test.tsx` 中對 `SiView` 整體請求次數的斷言 | 不含 `patrol`、不含「詳情」鈕 | 請求集合加 `GET /api/v1/si/patrol`（所有角色）；測試內部的唯讀按鈕 testid 白名單加三個封閉項：`si-detail-open-<ID>`、`si-patrol-steps-toggle`、`si-patrol-open-writes`（皆唯讀、非寫入控件；沿該白名單「封閉集合逐個列名」的既有做法）；**對帳面板內不新增任何按鈕**（AT-966-13-5 已改為常駐顯示、無展開鈕），故 `AT_935_3_2` 的面板按鈕名稱清單與 `AT_951_4_1` 的面板按鈕數**維持原預期值、不改**；`stubSiApi` 的預設 `patrol` 回 503 `report_missing` 以免舊案例收到未處理請求 | SI 頁多一個唯讀請求與一個唯讀按鈕 |
 | frontend `tests/helpers/si.tsx` | 無 `patrol`、`proposalDetail` 端點 | 加 `patrol`、`proposalDetail` 兩條可覆寫路由（預設值如上；**不加 `issue` 端點**，本鍵不打議題端點） | 測試設施（只增不改） |
 | frontend `tests/e2e/a11y.ts`、`tests/e2e/a11y.mock.spec.ts`（`:177` 附近）、`tests/e2e/research-deliver.mock.spec.ts`（`:20` 附近） | `RESEARCH_WIDTHS` 在後兩支各自宣告、皆未匯出 | 在 `a11y.ts` 新增匯出 `RESEARCH_WIDTHS`（值 1440／1000／600 不變），兩支既有 spec 改為 import 它——**只動常數宣告，不動任何斷言與情境，既有 spec 行為不變**（AT-966-16-2 因此與既有無障礙 E2E 同源，不另立數字） | AT-966-16-2 的同源要求（C-16） |
 | frontend `tests/e2e/self-improving-schedule.mock.spec.ts`、`a11y.mock.spec.ts`（若掃自我進化頁）等凡 mock `/api/v1/si/**` 的 spec | 無 `patrol` 路由 | 補 `/api/v1/si/patrol`（回 503 `report_missing`，預設）；斷言語意不變 | 頁面新增請求 |
-| frontend `lib/help/self-improving.ts` 與 `content.test.ts`／`pageFacts.test.ts` 的釘選（名詞表列數、`sourceFiles`、說明字樣） | 無本鍵段落 | 加四段、五個名詞列（巡邏快照、評估集、下一步、沙盒、探針）、三個 `sourceFiles` | 每頁說明同步（AT-966-15-1） |
+| frontend `lib/help/self-improving.ts` 與 `content.test.ts`／`pageFacts.test.ts` 的釘選（欄位列數、`sourceFiles`、說明字樣） | 無本鍵段落 | 加四段（本鍵新增 12 個欄位）、五個名詞的白話片段（評估集、沙盒、探針、巡邏快照、下一步，落在既有 `fields[].meaning`）、`sourceFiles` 加三個元件與 `lib/domain/siFlow.ts`；不新增名詞表結構 | 每頁說明同步（AT-966-15-1） |
 | frontend `SiProposalsPanel` 既有測試（欄數、`colSpan`） | 9（ADMIN 10）欄 | **不變**：「詳情」鈕放在既有第一欄（與展開鈕同格），不新增欄 | 避免連動排序與欄寬釘選 |
 
 **本鍵沒有找到因本增量而必然失效的既有 AT**：`console-writes` 的 `items[]` 十一鍵與頂層鍵集合不變（前端結合，§7.1 第 3 項）；`si_cli.py` argv 白名單不變；既有 Bridge 路由行為不變；失效面只來自上表五類「計數、清單、請求集合、白名單」預期值。
@@ -1035,9 +1035,9 @@
 
 ### 5.1 常數與資料
 
-- 測試提案編號一律 `PROP-SI-901`、`PROP-SI-902`、觀察 `OBS-SI-901`、運轉 `RUN-SI-901`、稽核編號 `A1`～`A3` 以固定 UUID 形（`a1000000-0000-4000-8000-00000000000N`）；皆**不存在於真帳本**（NFR-FV-8 第 7 項）。
+- 測試提案編號一律 `PROP-SI-901`、`PROP-SI-902`、觀察 `OBS-SI-<901>`、運轉 `RUN-SI-901`、稽核編號 `A1`～`A3` 以固定 UUID 形（`a1000000-0000-4000-8000-00000000000N`）；皆**不存在於真帳本**（NFR-FV-8 第 7 項）。**給所有實作者的規定**：測試資料與原始碼（含測試檔、夾具、註解）不得寫出形似帳本編號而帳本裡查無的字面（觀察編號 `OBS-SI-` 接數字最危險：根層 `si check` 的 `ref.obs` 會掃全 repo，查無即 `OBS-REF-DANGLING` 紅；其他前綴〔`PROP-SI-`、`RUN-SI-`、`DEF-`〕若根層對應檢查同樣掃到，處理方式相同）；要用帳本裡真實存在的編號，或在執行期拼出（例如 `["OBS-SI", 901].join("-")`，前綴與數字不相鄰寫成字面）。本檔以 `OBS-SI-<901>` 的形式書寫觀察範例編號（數字不緊接前綴）。
 - `PATROL(over)` 基準（C-2 形，**前端實際收到的 camelCase 鍵名**，全檔前端 AT 的 Given 一律用此形態；Bridge／backend 層的 `PR(over)` 為同內容 snake_case）：`{schemaRev:1, kind:"patrol", readAt:NOW, report:{generatedAt:<NOW 前 3 分>, off:false, heartbeatMinutes:15, ledgerSeq:130, truncated:false, steps:[<恆 5 項：巡視、入帳、到期、運轉、推進>], schedule:{enabled:true, current:{code:"SCHED-CELL-RAN",text:"本期已經跑過一次，等下一期"}, lastSkip:null}, ingest:[], props:[{id:"PROP-SI-901",state:"verified",code:"WAIT-PROMOTE-DECISION",who:"掌舵者",text:"驗證通過，等你決定是否晉升"}], runs:{live:[],waiting:[],queued:[]}, push:{enabled:true,state:"idle",code:"PUSH-NOT-AHEAD",text:"沒有待推送的提交",retry:null,sha:null,ahead:0,attempts:0,finishedAt:null,tickAt:null}}}`；`ingest[]` 項為 `{auditRef,kind,status,code,text,permanent}`，`runs.live[]` 項為 `{run,purpose,startedAt,wallDueAt}`，`lastSkip` 為 `{seq,t,code,text,auditRef}`。白話字句取自根層 TCS-P7 附錄 A 的固定句或其語意。
-- `DETAIL(over)` 基準（C-3 形；根層 §2.1 八欄俱全）：`patch={rel:"docs/06_quality/SelfImproving_Proposals/PROP-SI-901/r2.patch",bytes:<實長>,text:<patch-mixed.diff>,truncated:false}`、`body={rel:"…/r2.md",bytes:…,text:"# 提案 901\n\n症狀…\n",truncated:false}`、`sourceObs=[{id:"OBS-SI-901",context:"巡邏日誌",symptom:"提案卡了三天沒人處理",severity:"P2",disposition:"proposed"}]`、`heldout={frozen:true,seq:60,n:7,min:5,belowMin:false,frozenBy:"凍結者甲",digest8:"0a1b2c3d",neNote:null}`、`sandbox={seq:61,id:"APP-SI-901",applied:true,touchedOk:true,rollbackOk:true,failCode:null,failText:null}`、`verify={seq:62,id:"APP-SI-901",verdict:"PASS",baselineRed:true,patchedGreen:true,mutatedRed:true,probesN:6,carrierProof:true,reasons:[]}`、`next={code:"WAIT-PROMOTE-DECISION",who:"掌舵者",text:"驗證通過，等你決定是否晉升"}`、`timeline=[{seq:12,t:"2026-11-10T09:00:00+08:00",by:"巡邏器",kind:"prop",action:"提出提案"},…]`。- 夾具檔：`frontend/tests/fixtures/si/flow/`：`patrol-fresh.json`、`patrol-stale.json`（`generated_at` 早 40 分）、`patrol-off.json`、`patrol-minimal.json`、`detail-full.json`、`detail-minimal.json`（無 `detail` 鍵）、`detail-hostile.json`、`patch-mixed.diff`（見 AT-966-5-5 描述）、`patch-big.diff`（262144 位元組、約 6000 行；由測試以固定種子**產生並寫入暫存**，不入庫大檔；僅 `patch-mixed.diff` 入庫）；Bridge：`engine-bridge/tests/fixtures/si_report/`：`valid.json`、`invalid-*.json`（以測試內字串產生為主）。**黃金樣本**（裁決 11；根層 TCS-P7 §3 定義，路徑固定 `tools/tests/fixtures/selfimproving/p7/patrol.golden.json`、`tools/tests/fixtures/selfimproving/p7/detail.golden.json`；LF、無 BOM、結尾一個 LF）：主控複製到 `engine-bridge/tests/fixtures/si_report/`、`backend/src/test/resources/si/p7/`、`frontend/tests/fixtures/si/flow/`（檔名同）；**每一側有先行測試**以 repo 根相對路徑讀根層檔與本地複本，斷言逐位元組相等（不相等即紅）；AT-966-1-1、4-1、4-3 另以黃金樣本再跑一次（`it.each`／`parametrize` 的第二列），前端 AT-966-12-1、12-7、9-1、9-4 的 `PATROL`／`DETAIL` 夾具亦各有一列取黃金樣本：黃金樣本複本是 snake_case（根層原樣），由 PKG-FE 在 `tests/helpers/siFlow.tsx` 實作轉換輔助函式 `camelKeys`（規則逐字等同 backend `SiKeyNames.camel`：鍵符合 `^[a-z][a-z0-9]*(_[a-z0-9]+)+$` 才依 `_` 切段轉駝峰、其餘鍵恆等，遞迴整棵樹），並以黃金樣本的轉換結果與 `PATROL()`／`DETAIL()` 基準的鍵集合相等作為該輔助函式的自檢（包在 AT-966-12-1 的黃金列內）；黃金 `detail` 樣本是整個 `items[0]`（含 `detail`），前端取其 `detail`。
+- `DETAIL(over)` 基準（C-3 形；根層 §2.1 八欄俱全）：`patch={rel:"docs/06_quality/SelfImproving_Proposals/PROP-SI-901/r2.patch",bytes:<實長>,text:<patch-mixed.diff>,truncated:false}`、`body={rel:"…/r2.md",bytes:…,text:"# 提案 901\n\n症狀…\n",truncated:false}`、`sourceObs=[{id:"OBS-SI-<901>",context:"巡邏日誌",symptom:"提案卡了三天沒人處理",severity:"P2",disposition:"proposed"}]`、`heldout={frozen:true,seq:60,n:7,min:5,belowMin:false,frozenBy:"凍結者甲",digest8:"0a1b2c3d",neNote:null}`、`sandbox={seq:61,id:"APP-SI-901",applied:true,touchedOk:true,rollbackOk:true,failCode:null,failText:null}`、`verify={seq:62,id:"APP-SI-901",verdict:"PASS",baselineRed:true,patchedGreen:true,mutatedRed:true,probesN:6,carrierProof:true,reasons:[]}`、`next={code:"WAIT-PROMOTE-DECISION",who:"掌舵者",text:"驗證通過，等你決定是否晉升"}`、`timeline=[{seq:12,t:"2026-11-10T09:00:00+08:00",by:"巡邏器",kind:"prop",action:"提出提案"},…]`。- 夾具檔：`frontend/tests/fixtures/si/flow/`：`patrol-fresh.json`、`patrol-stale.json`（`generated_at` 早 40 分）、`patrol-off.json`、`patrol-minimal.json`、`detail-full.json`、`detail-minimal.json`（無 `detail` 鍵）、`detail-hostile.json`、`patch-mixed.diff`（見 AT-966-5-5 描述）、`patch-big.diff`（262144 位元組、約 6000 行；由測試以固定種子**產生並寫入暫存**，不入庫大檔；僅 `patch-mixed.diff` 入庫）；Bridge：`engine-bridge/tests/fixtures/si_report/`：`valid.json`、`invalid-*.json`（以測試內字串產生為主）。**黃金樣本**（裁決 11；根層 TCS-P7 §3 定義，路徑固定 `tools/tests/fixtures/selfimproving/p7/patrol.golden.json`、`tools/tests/fixtures/selfimproving/p7/detail.golden.json`；LF、無 BOM、結尾一個 LF）：主控複製到 `engine-bridge/tests/fixtures/si_report/`、`backend/src/test/resources/si/p7/`、`frontend/tests/fixtures/si/flow/`（檔名同）；**每一側有先行測試**以 repo 根相對路徑讀根層檔與本地複本，斷言逐位元組相等（不相等即紅）；AT-966-1-1、4-1、4-3 另以黃金樣本再跑一次（`it.each`／`parametrize` 的第二列），前端 AT-966-12-1、12-7、9-1、9-4 的 `PATROL`／`DETAIL` 夾具亦各有一列取黃金樣本：黃金樣本複本是 snake_case（根層原樣），由 PKG-FE 在 `tests/helpers/siFlow.tsx` 實作轉換輔助函式 `camelKeys`（規則逐字等同 backend `SiKeyNames.camel`：鍵符合 `^[a-z][a-z0-9]*(_[a-z0-9]+)+$` 才依 `_` 切段轉駝峰、其餘鍵恆等，遞迴整棵樹），並以黃金樣本的轉換結果與 `PATROL()`／`DETAIL()` 基準的鍵集合相等作為該輔助函式的自檢（包在 AT-966-12-1 的黃金列內）；黃金 `detail` 樣本是整個 `items[0]`（含 `detail`），前端取其 `detail`。
 - 常數單一定義處：`PATROL_REPORT_MAX_BYTES`（`app/si_report.py`）；`STALE_FACTOR`、`STALE_GRACE_MINUTES`、`DIFF_WINDOW_LINES`、`RECENT_INGESTED_SHOWN`（`lib/domain/siFlow.ts`）。測試以 import 取值並另斷言其值（防被悄悄改動）。
 
 ### 5.5 backend 測試設施（沿 P2b TCS §5.4、P4 TCS §5.5；只增不改）
@@ -1046,7 +1046,7 @@
 
 ### 5.6 frontend 與 Playwright 測試設施
 
-`tests/helpers/si.tsx` 加 `patrol`、`proposalDetail` 兩個 `SiEndpoint` 與 `renderSi` 的 `overrides`（不加議題端點）；`PATROL`、`DETAIL` 夾具建構函式放 `tests/helpers/siFlow.tsx`（新檔）；jsdom 下 `URL.createObjectURL`、`URL.revokeObjectURL` 以替身；固定時間以 `readAt` 夾具而非假時鐘（不依賴 `Date.now`，例外只有用假計時器的 AT-966-11-1（「無輪詢」）、11-2、11-3（時間前進）與 11-E-1 (d)）；Playwright mock spec 沿 `self-improving-schedule.mock.spec.ts`；真棧 spec 沿 `research-docker.stack.spec.ts` 的拋棄式棧與登入輔助，快照目錄 `E2E_SI_REPORT_DIR` 由 spec 以暫存目錄建立並於收尾刪除。
+`tests/helpers/si.tsx` 加 `patrol`、`proposalDetail` 兩個 `SiEndpoint` 與 `renderSi` 的 `overrides`（不加議題端點）；`PATROL`、`DETAIL` 夾具建構函式放 `tests/helpers/siFlow.tsx`（新檔）；jsdom 下 `URL.createObjectURL`、`URL.revokeObjectURL` 以替身；固定時間以 `readAt` 夾具而非假時鐘（不依賴 `Date.now`，例外只有需要「時間前進」的 AT-966-11-1（「無輪詢」）、11-2、11-3 與 11-E-1 (d)，它們一律使用**可控時鐘替身** `tests/helpers/siClock.ts`（以測試可手動前進分鐘的時間來源取代 `useMinuteTick` 的內部時鐘與 `Date.now`，**不使用假計時器**：假計時器會讓 Testing Library 的 `waitFor` 停擺））；Playwright mock spec 沿 `self-improving-schedule.mock.spec.ts`；真棧 spec 沿 `research-docker.stack.spec.ts` 的拋棄式棧與登入輔助，快照目錄 `E2E_SI_REPORT_DIR` 由 spec 以暫存目錄建立並於收尾刪除。
 
 ### 5.7 hermetic 環境與允許變更的檔案集合
 
@@ -1138,4 +1138,12 @@
 
 | 編號 | 日期 | 位置 | 原文 | 訂正 | 原因與證據 |
 |------|------|------|------|------|------------|
-
+| E-1 | 11-11 | 範例編號與狀態名措辭（文件文字，非語意；測試與程式不動） | 原文：範例觀察編號寫成 OBS-SI-<901>、OBS-SI-<902>、OBS-SI-<777>（共 13 處）；第 526、528 行「未知 state」例以舊設計稿第五態的英文字面命名 | 訂正：範例編號改為 OBS-SI-<901>／<902>／<777>（數字不緊接前綴）；兩行改稱「已廢止的設計稿第五態名」。測試夾具中的實際字串不變 | si check 的 ef.obs 會掃全 repo 內形似帳本編號的字串，範例編號不在帳本即 OBS-REF-DANGLING（紅，根層 	est_AT_IC_06_4_1、	est_AT_437_5_2 連帶紅）；check_pytest_baseline_sites 以「狀態字樣＋四位數字」判基線宣稱，兩行誤中而使未納管站點由 114 增為 115。屬既有機械鎖，改文字不改鎖 |
+| E-2 | 11-12 | AT-966-15-1（含 §4.1 說明列） | 「名詞表新增『巡邏快照』『評估集』『下一步』『沙盒』『探針』五列」；「名詞表列數」 | 改為「五個名詞的白話釋義落在既有 `fields[].meaning`／欄位名內（字串片段機械判定），不新增名詞表結構」，並列出五個必含片段；說明檔由前端開發者實作（§提交順序原寫「由主控代做」，同步訂正） | `PageHelp` 只有 `purpose`／`steps`／`fields`／`states`／`sourceFiles`，沒有名詞表結構（`lib/help/types.ts`、`self-improving.ts`）；前端交卷偏離 3、4。前端需補：「評估集與驗證」釋義加「檢查項目（探針）」、「巡邏狀態」釋義加「巡邏快照」及半句白話 |
+| E-3 | 11-12 | AT-966-13-5（§1 映射、§4 邊界不變） | 「展開『最近已入帳（8）』；預設收合；展開後只列最新 5 筆」 | 改為「常駐顯示、不加展開鈕；待入帳清單之下直接列最新 5 筆；段內無 button」 | 展開鈕使對帳面板按鈕數由 3 變 4，牽動已發布的 AT-951-4-1（TCS-SelfImprovingDecideDedupe）與 AT-935-3-2（TCS-SelfImprovingDecide-P2b）的面板按鈕清點；常駐顯示最多 5 列、不損害可用性，且不需為既有 AT 另寫勘誤、不增加重凍鍵。前端需移除 `si-recent-ingested-toggle`，把清單常駐，並把 `AT_951_4_1` 面板按鈕數與 `AT_935_3_2` 面板按鈕名稱清單還原為原預期值 |
+| E-4 | 11-12 | §4.1 `SiView.test.tsx` 列 | 「白名單加 `si-detail-open-<ID>`」 | 補列 `si-patrol-steps-toggle`、`si-patrol-open-writes` 兩個唯讀按鈕 testid；明寫此白名單為測試內部封閉集合，既有 AT-935-3-2／AT-951-4-1 的規格文字（Then：名稱與 testid 不含刪除類字樣、寫入類 testid 前綴恰為五個、面板內無刪除類控件）不變，故不修訂已發布 TCS | 已發布 TCS 的 Then 未列舉唯讀按鈕清單，新增唯讀鈕不改其語意；先例＝狀態快篩 pill 與 `si-superseded-toggle` 以同法加入白名單 |
+| E-5 | 11-12 | AT-966-8-3 | 「跳轉零新增請求」 | 「不新增詳情、巡邏、議題請求；觀察清單至多重取一次」 | 觀察分頁在提案分頁時卸載（SI 查詢 `gcTime: 0`），跳轉重掛必然重取一次觀察清單 |
+| E-6 | 11-12 | AT-966-12-3、AT-966-15-2 | 12-3 的「進行中：RUN-…（排程啟動），12 分鐘前開始，預計最晚 48 分鐘後結束」為單句超過 40 字；15-2 以短值代入檢查 | 12-3 拆成兩個短句；15-2 明寫鎖只管 Console 自寫的固定句與保底句模板，根層執行期提供的白話（`text`、`neNote`、`failText`、`ne[].text`、`push.text`）逐字顯示、不得改寫而明確豁免；Console 組合句代入最長形態仍須每句 ≤ 40 字 | 根層給的白話句 Console 不能改（裁決 8）；Console 自寫句才受可讀性鎖。前端需把運轉列句子拆成兩句並以完整運轉編號代入檢查 |
+| E-7 | 11-12 | AT-966-12-E-1 | 「各區不顯示任何『沒有』『無』字樣」 | 斷言範圍限各區內文，不含固定區塊標題與標題旁固定說明 | 區塊標題「為什麼沒有啟動運轉」本身含「沒有」 |
+| E-8 | 11-12 | AT-966-11-1／11-2／11-3／11-E-1 (d)、§5.6、AT-966-6-1（確認登記） | 「以假計時器前進」；「固定時間不依賴 Date.now，例外用假計時器」；對話框 `aria-modal="true"` | 改為「可控時鐘替身 `tests/helpers/siClock.ts`（不用假計時器，因其使 `waitFor` 停擺）」；「不輪詢」＝靜態斷言 `SI_QUERY_OPTIONS.refetchInterval === false` 加前進 60 分鐘請求數不變；`aria-modal="true"` 本就是 6-1 的 Then，補註「Radix 預設不帶，須顯式設定」（登記型，語意不變） | 前端交卷偏離 2、5；兩項實作與規格意圖一致，只是測試手法與註記的措辭需明文 |
+| E-9 | 11-12 | §5.1、NFR-FV-8 (7) | 「夾具與測試中不得出現不存在於真帳本的字面…（夾具一律用 `PROP-SI-901` 起的測試號）」 | 改為「不得寫出形似帳本編號而帳本查無的字面；用真實存在的編號，或在執行期拼出（前綴與數字不相鄰）；`si check` 的 `ref.obs` 掃全 repo」 | 兩句互相矛盾（901 不在帳本）；根層 `si check` 對查無編號紅燈（見勘誤 E-1 的機械鎖說明） |

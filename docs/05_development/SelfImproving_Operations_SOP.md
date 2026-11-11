@@ -8,6 +8,7 @@
 **P4 增補（2026-11-09，T1 掌舵者問題 2；PRD v0.13 FG-M、附錄 C.2 #21）**：〈啟動條件〉加第六類「排程巡邏到期」與 Console「立即啟動一次演化」載體、改寫「沒有排程」兩句；〈P2 動詞〉序列條文的「無人值守」一條改為 run-scoped；新增〈巡邏與無人運轉（P4）〉〈無人運轉任務書範本〉兩節（位於檔尾）。判準的唯一真相源仍是 PRD（FR-SI-36～39、§9.2、§9.4）；P4 動詞與巡邏器於實作輪落地前，本增補的指令為規格形態（以 `python tools/selfimproving.py <動詞> --help` 現查為準）。
 **P5 增補（2026-11-10，T1 掌舵者「頂尖專家四問」；PRD v0.14 FG-N、附錄 C.2 #24）**：新增〈四問審視者〉節（〈研究者〉節之後；〈研究者〉節不改）；〈rc 契約表〉加 `fourq` 列；〈最小序列〉加 `fourq`；〈提案檔〉加 `method`／`proof`；〈無人運轉任務書範本〉改 9 步並逐字引用四問原句。判準的唯一真相源是 PRD（FR-SI-41～44、§9.8）；`fourq` 於實作輪落地前為規格形態。
 **P7 增補（2026-11-11，T1 掌舵者「核准流程全程 UI 化」；PRD v0.16 FG-P、附錄 C.2 #26）**：〈held-out 目錄〉〈提案檔〉〈無人運轉任務書範本〉第 7 步三處勘誤；〈M 類旗標〉補巡邏器自動帶旗標；〈巡邏與無人運轉（P4）〉開頭句改為「巡邏器本體不 push」、〈安裝與憑證〉〈每心跳做什麼〉〈停用與逃生口〉補 P7；〈rc 契約表〉加 `push-run`；新增〈自動推送（P7）〉〈巡邏快照與 M 類自動推進（P7）〉兩節（位於〈反事實回測〉之前、〈無人運轉任務書範本〉之前）。判準的唯一真相源是 PRD（FR-SI-47～49、§9.9）與 TCS-SelfImproving-P7；`push-run` 與快照於實作輪落地前為規格形態。
+**P7 勘誤（2026-11-11，既有機械鎖；只改文字）**：原文〈提案檔〉第二項前置寫出「esearch.scan／esearch.skip」，〈停用與逃生口〉3b 寫出「sched disarm --push-only」。訂正：前者改為「事件種類見〈研究者〉節」，後者改為「用 --push-only 旗標只移除推送任務」。理由：_selfimproving_fixtures.sop_problems 以「全文某一行同時含研究事件五個片段」判研究者節未被改動（我方新行使既有同行判準失去鑑別力），sop_p4_problems 以「停用與逃生口節在程式碼圍欄之外含 sched disarm」判圍欄位移（我方新行使圍欄判準失去鑑別力）；TCS-P7 §7 SOP-REQ-4 的「--push-only」片段仍成立。
 
 ## 啟動條件
 
@@ -447,7 +448,7 @@ for no, raw in enumerate(open(sys.argv[1], encoding="utf-8"), 1):
 
 - `r1.patch`：git diff 格式（`git diff --no-index <before> <after>` 或 `git diff`），路徑相對 repo 根；M 類以 `memory/<檔名>` 為前綴（對應 `claude_home()/projects/<slug>/memory/<檔名>`）。
 - `r1.md`：五個 `## ` 骨架標題（反例證據、Before、After、影響面、欄位）；〈欄位〉節的第一個表至少有 `symptom`、`risk`、`rollback`、`budget`、`result_label`（失敗／成功／升級）、`scope`，M 類另有 `source_obs`、`retire_when`；退役提案本文另填 `retire_when` 與 `reopen_symptom`；`fourq_from_run` 之後的運轉（P5），欄位表另須 `method`（方法與工具）與 `proof`（格式 `指標類別：…；症狀定義：…；反證：…；收斂：…`，只准定性內容，不含指標值、基線數字、門檻與參數鍵名，`PROOF-LEAK`），缺或空＝`BODY-FIELD-MISSING`；卡面 tail 多一行「方法與工具：…｜成效與收斂：…」（核心區不變）。範例＝`docs/06_quality/SelfImproving_Proposals/PROP-SI-005/r1.md`。
-- `prop-new` 的**兩項前置**（先於本文判準；缺一即拒收、未寫）：①目標運轉須為 open（`RUN-NOT-OPEN`；先 `run-open` 或由巡邏器開）；②該運轉內須已有研究事件（`research.scan`／`research.skip`，缺＝`RESEARCH-MISSING`；P5 起另須四問事件，見〈四問審視者〉與 `FOURQ-*` 碼）。其後才是前置檢查的其餘各碼（觸及比例、來源、預算、SUSPENDED…）。
+- `prop-new` 的**兩項前置**（先於本文判準；缺一即拒收、未寫）：①目標運轉須為 open（`RUN-NOT-OPEN`；先 `run-open` 或由巡邏器開）；②該運轉內須已有研究事件（事件種類見〈研究者〉節，缺＝`RESEARCH-MISSING`；P5 起另須四問事件，見〈四問審視者〉與 `FOURQ-*` 碼）。其後才是前置檢查的其餘各碼（觸及比例、來源、預算、SUSPENDED…）。
 - 提案者**直接呼叫** `prop-new`（不經包裝腳本），暴露掃描才找得到提案者逐字稿（P2 TCS 勘誤三）；凍結後提案者不得再讀 `params.json` 與量測腳本。
 
 ### M 類旗標
@@ -530,7 +531,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 1. **停 (f) 運轉**：Console 開關，或 `python tools/selfimproving.py sched set --enabled false --by main`（停用方向免引言；入帳與推進照常，因為人的決定仍要被處理）。
 2. **移除 OS 任務**：`python tools/selfimproving.py sched disarm`（只移除巡邏任務並驗證它真的不見：Windows `Get-ScheduledTask` 查無、macOS `launchctl` rc 113）。注意：`install_windows_nightly.ps1 -Uninstall` 會把 nightly 與 smoke 一併移除，只想停巡邏時不要用它。
 3. **整次 no-op**：環境變數 `AUTOSDD_SI_PATROL_OFF=1`（設在巡邏行程環境，例如包裝腳本或使用者環境；有設且非空即巡邏 rc 0、日誌一行，連入帳也不做；**P7 起唯一多做的一件事**：寫一份 `off:true` 的快照，Console 才分得出「暫停」與「沒在跑」）。
-3b. **停自動推送**：`params.json` 的 `sched_auto_push` 改 `false`（屬 T1／PRD 修訂的參數）後重跑 `sched arm` 會移除 `AutoSDD_SI_Push`；只想暫停推送：`sched disarm --push-only`（只移除推送任務；巡邏照常）。不要靠在工作樹留未提交改動來暫停——那會同時擋住巡邏器的 promote／rollback。
+3b. **停自動推送**：`params.json` 的 `sched_auto_push` 改 `false`（屬 T1／PRD 修訂的參數）後重跑 `sched arm` 會移除 `AutoSDD_SI_Push`；只想暫停推送：用 `--push-only` 旗標只移除推送任務（巡邏照常）。不要靠在工作樹留未提交改動來暫停——那會同時擋住巡邏器的 promote／rollback。
 4. 已在跑的無人運轉由 `spawn.json` 記的硬牆到期時刻與步 0′ 巡視保證終止（`RESUME_HARD_WALL_SECONDS`，值現查 `tools/lib/unattended_authz.py`）；要提早收掉：先停用（第 1 項），再由人 `run-close`；不要砍 OS 任務的實例當作停（可能留下半套 `app.*` 事件，改由 `check` 與 `status` 標出）。
 5. 想讓巡邏暫不碰某段時間：用 `sched_blackout_local`（`params.json`，改值屬 T1／PRD 修訂；預設涵蓋 smoke 與 nightly 時段）。
 

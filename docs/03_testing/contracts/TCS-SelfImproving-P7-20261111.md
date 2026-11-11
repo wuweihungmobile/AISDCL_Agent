@@ -482,7 +482,7 @@ AC 共 38 條（PRD 新增 33 條＋自增 5 條），皆有 AT。
 | SOP-REQ-1 | 〈held-out 目錄〉 | `min_heldout`（值現查 `params.json`）、`HELDOUT-TOO-SMALL`（n<下限⇒驗證必判 NE、晉升只能走「未驗採納」式）、`NO-PROBES`、`warn HELDOUT-BELOW-MIN`（stderr、rc 0、凍結照寫） |
 | SOP-REQ-2 | 〈提案檔〉 | `prop-new` 兩項前置：目標運轉須 open（`RUN-NOT-OPEN`）、運轉內須已有研究事件（`RESEARCH-MISSING`）；並指向 P5 的四問前置 |
 | SOP-REQ-3 | 〈無人運轉任務書範本〉第 7 步 | 占位符 `<MIN_HELDOUT>`；「案例數對照下限；不足時照實凍結並在 handback〈卡在哪〉寫『案例 n＜下限，驗證必判 NE』」 |
-| SOP-REQ-4 | 〈巡邏與無人運轉（P4）〉開頭句、〈安裝與憑證〉、〈每心跳做什麼〉、〈停用與逃生口〉 | 「巡邏器本體不 push」；第二支任務 `AutoSDD_SI_Push` 的安裝（`sched arm` 一併）與憑證（`Get-ScheduledTask … NextRunTime`）；步 1 入帳碼進快照、步 4 M 類帶 `--memory-dir`、快照寫入（心跳之後，**不是第六步**、不進 stdout 與 `--json` 的 `steps`）；`AUTOSDD_SI_PATROL_OFF` 時快照 `off:true`（OFF 路徑不取鎖、不加日誌行）；`sched arm --push-only`、`sched disarm --push-only` |
+| SOP-REQ-4 | 〈巡邏與無人運轉（P4）〉開頭句、〈安裝與憑證〉、〈每心跳做什麼〉、〈停用與逃生口〉 | 「巡邏器本體不 push」；第二支任務 `AutoSDD_SI_Push` 的安裝（`sched arm` 一併）與憑證（`Get-ScheduledTask … NextRunTime`）；步 1 入帳碼進快照、步 4 M 類帶 `--memory-dir`、快照寫入（心跳之後，**不是第六步**、不進 stdout 與 `--json` 的 `steps`）；`AUTOSDD_SI_PATROL_OFF` 時快照 `off:true`（OFF 路徑不取鎖、不加日誌行）；`sched arm --push-only`、移除推送任務的 `--push-only` 旗標用法 |
 | SOP-REQ-5 | 新節〈自動推送（P7）〉 | 守門三條件與前置序、`push-run` rc 契約、結果碼與處置表、同 sha 不重試、遷移期須互動主控推一次舊提交、macOS 對等載具、「使用者未登入時不推送」、停用（`sched_auto_push=false`）與逃生 |
 | SOP-REQ-6 | 新節〈巡邏快照與 M 類自動推進（P7）〉 | `patrol.json` 讀法、原因碼→處置對照（指向 `nextstep` 為單一真相源）、M 類記憶目錄解析與 `MEMORY-DIR-UNRESOLVED`、前／後像碼處置 |
 | SOP-REQ-7 | 〈rc 契約表〉 | `push-run` 一列（0／1／3） |
@@ -648,4 +648,4 @@ AC 共 38 條（PRD 新增 33 條＋自增 5 條），皆有 AT。
 
 | 編號 | 日期 | 位置 | 原文 | 訂正 | 原因與證據 |
 |------|------|------|------|------|------------|
-| （凍結前留空） | | | | | |
+| E-1 | 11-11 | §7 SOP-REQ-4（SOP 片段措辭）；AT-749-12-2／12-6 描述的指令字面不變 | 原文：SOP-REQ-4 要求 SOP 含「sched arm --push-only、sched disarm --push-only」 | 訂正：改為「sched arm --push-only、移除推送任務的 --push-only 旗標用法」；SOP 〈停用與逃生口〉不再逐字出現 sched disarm --push-only（見 SOP P7 勘誤） | 既有機械鎖 sop_p4_problems 的 REQ-3 以「該節程式碼圍欄之外含 sched disarm」判圍欄位移，新增的逐字片段使其失去鑑別力；指令本身（sched disarm --push-only）的行為與 AT 不變 |
