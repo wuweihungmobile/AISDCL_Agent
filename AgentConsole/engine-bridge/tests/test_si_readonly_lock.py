@@ -788,9 +788,10 @@ def test_AT_964_8_4_the_route_census_grows_by_exactly_the_two_new_post_routes() 
     from app.routers import si as si_router
 
     routes = {(m, r.path) for r in si_router.router.routes for m in sorted(r.methods)}
-    # 研究來源單一化再加一條 POST：`/si/registry:sync`（登記同步稽核檔落地）
-    assert len(si_router.router.routes) == SI_ROUTES_BEFORE_P4 + 2 + 1 == 15
-    assert len(routes) == 15, "每條路由恰一個方法"
+    # 研究來源單一化再加一條 POST：`/si/registry:sync`（登記同步稽核檔落地）；
+    # 核准流程可見（TCS-SiFlowVisibility）再加一條 GET：`/si/patrol`
+    assert len(si_router.router.routes) == SI_ROUTES_BEFORE_P4 + 2 + 1 + 1 == 16
+    assert len(routes) == 16, "每條路由恰一個方法"
     posts = sorted(path for method, path in routes if method == "POST")
     assert posts == sorted([
         "/si/proposals/{id}:decide", "/si/observations", "/si/observations/{id}:close",
@@ -863,3 +864,87 @@ def test_AT_933_1_E_3_criterion_5_flags_a_dynamic_repo_flag_a_wrong_verb_and_swa
     assert any("與配對" in h for h in hits), "動詞都在白名單內，但與函式配對不符也要被指出"
     clean = crit5_dynamic(dynamic_argvs(load_variant(tmp_path, variant(), "clean")))
     assert clean == []
+
+
+# ── AT-966-1-8：巡邏快照與詳情過濾兩個新模組、新路由進入唯讀鎖的普查（TCS-SiFlowVisibility）──────
+NEW_MODULES = ("si_report.py", "si_detail.py")
+#: `si_detail` 是純函式模組：不得 import 這些（行程、檔案、環境）。
+PURE_MODULE_BANNED_IMPORTS = frozenset({"subprocess", "os", "shutil", "pathlib", "tempfile", "io"})
+PATROL_HANDLER = "si_patrol"
+
+
+def patrol_handler_violations(source: str) -> list[str]:
+    """`/si/patrol` 的處理函式不得碰 `si_cli`（不啟動子行程、不組 argv）：本文只准是對 `si_report`
+    的讀取呼叫。"""
+    tree = ast.parse(source)
+    funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, FUNC_TYPES)}
+    fn = funcs.get(PATROL_HANDLER)
+    if fn is None:
+        return [f"判準7 缺少處理函式 {PATROL_HANDLER}"]
+    body = [n for stmt in fn.body for n in ast.walk(stmt)]
+    out = [f"判準7 {PATROL_HANDLER} 不得碰 si_cli" for n in body
+           if isinstance(n, ast.Name) and n.id == "si_cli"]
+    out += [f"判準7 {PATROL_HANDLER} 不得呼叫 {_call_name(c)}" for c in body
+            if isinstance(c, ast.Call) and _call_name(c) in (
+                "run_export", "run_validate", "build_argv", "Popen")]
+    return out
+
+
+def pure_module_violations(source: str) -> list[str]:
+    out: list[str] = []
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots = {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            roots = {(node.module or "").split(".")[0]} if node.level == 0 else set()
+        else:
+            continue
+        out += [f"判準8 純函式模組不得 import {r}"
+                for r in sorted(roots & PURE_MODULE_BANNED_IMPORTS)]
+    out += [f"判準8 純函式模組不得呼叫 {_call_name(c)}" for c in ast.walk(tree)
+            if isinstance(c, ast.Call) and _call_name(c) in ("open", "Popen", "run", "system")]
+    return out
+
+
+def test_AT_966_1_8_the_two_new_modules_and_the_patrol_route_are_inside_the_readonly_lock() -> None:
+    from app.routers import si as si_router
+
+    sources = app_sources()
+    assert set(NEW_MODULES) <= set(sources), "鎖要有標的：兩個新模組必須存在"
+    for rel in NEW_MODULES:
+        text = sources[rel]
+        assert is_si_related(rel, text), f"{rel} 必須被普查為 SI 相關模組（含 selfimproving 字樣）"
+        assert crit1_writes(rel, text) == [], f"{rel}：判準 1′（零寫入形態呼叫）"
+        assert crit2_imports(rel, text) == [], f"{rel}：判準 2"
+        assert crit3_literal(rel, text) == [], f"{rel}：判準 3"
+        assert write_shaped_calls(ast.parse(text)) == [], rel
+        assert SCRIPT_LITERAL not in text.lower(), rel
+    assert pure_module_violations(sources["si_detail.py"]) == [], "si_detail 必須是純函式模組"
+    # si_cli.py 的 argv 白名單與兩個 builder 逐字不變
+    assert crit4_argv("si_cli.py", sources["si_cli.py"]) == []
+    assert crit5_dynamic(dynamic_argvs(si_cli)) == []
+    funcs = argv_functions(ast.parse(sources["si_cli.py"]))
+    assert sorted(f.name for f in funcs) == ["build_argv", "build_validate_argv"]
+    verbs = {verb_of(next(n for n in ast.walk(fn) if isinstance(n, ast.Return)).value.elts)
+             for fn in funcs}                                    # type: ignore[union-attr]
+    assert verbs == set(ALLOWED_VERBS) == {("export",), ("obs-add", "--dry-run")}
+    # 路由數＝修改前現值（15）加一，每條路由恰一個方法；patrol 處理函式不碰 si_cli
+    routes = [(m, r.path) for r in si_router.router.routes for m in sorted(r.methods)]
+    assert len(si_router.router.routes) == 16 == len(routes)
+    assert ("GET", "/si/patrol") in routes
+    router_source = sources["routers/si.py"]
+    assert patrol_handler_violations(router_source) == []
+    assert crit1_writes("routers/si.py", router_source) == []
+
+    # 負控：注入的變體必須各自被指出
+    writes = 'import json\n\n\ndef f(p):\n    open(p, "w").write("x")\n'
+    assert crit1_writes("si_report.py", "# selfimproving\n" + writes), "si_report 寫入形態必紅"
+    assert crit1_writes("si_detail.py", "# selfimproving\n" + writes), "si_detail 寫入形態必紅"
+    assert pure_module_violations("import subprocess\n"), "si_detail import subprocess 必紅"
+    assert pure_module_violations("def f(p):\n    return open(p).read()\n"), "si_detail 開檔必紅"
+    bad_handler = router_source.replace(
+        "return JSONResponse(si_report.read_patrol(request.app.state.settings.si_report_dir))",
+        'return JSONResponse(si_cli.run_export(request.app.state.settings.si_root, "status"))')
+    assert bad_handler != router_source, "注入點必須存在（路由檔改形態時本鎖要跟著改）"
+    assert patrol_handler_violations(bad_handler), "patrol 處理函式呼叫 run_export 必紅"

@@ -296,8 +296,9 @@ def test_AT_940_1_1_si_root_settings_resolution(
     assert base.allowed_path_roots == (workspace.resolve(), mono.resolve())
     assert base.outbound_allowlist == settings_module.DEFAULT_OUTBOUND_ALLOWLIST
     # P2b 起 Settings 末尾另增 si_write_token（repr=False）與 si_audit_dir；既有欄位的相對順序不變
-    assert [f.name for f in fields(Settings)][-5:] == [
-        "log_dir", "sdd_write_token", "si_root", "si_write_token", "si_audit_dir"]
+    assert [f.name for f in fields(Settings)][-6:] == [
+        "log_dir", "sdd_write_token", "si_root", "si_write_token", "si_audit_dir",
+        "si_report_dir"]
     assert "si_root" in repr(base) and "sdd_write_token" not in repr(base)
     assert "si_write_token" not in repr(base) and "si_audit_dir" in repr(base)
     assert (base.si_write_token, base.si_audit_dir) == (None, None), "兩個新設定預設為停用"

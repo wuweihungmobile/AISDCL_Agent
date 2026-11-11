@@ -58,6 +58,15 @@ public class SiMirrorQueryService implements SiMirrorUseCase {
         return fetch("runs", since, limit, null);
     }
 
+    @Override
+    public SiExport patrol() {
+        try {
+            return bridge.siPatrol();
+        } catch (BridgeRejectedException e) {
+            throw SiBridgeErrors.map(e);
+        }
+    }
+
     private SiExport fetch(String kind, Integer since, Integer limit, String id) {
         if (since != null && since < 0) {
             throw ValidationException.of("since", "since 須為 0 以上的整數");

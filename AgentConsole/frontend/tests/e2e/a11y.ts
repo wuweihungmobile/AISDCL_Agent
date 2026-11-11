@@ -15,6 +15,9 @@ import { expect, type Page } from "@playwright/test";
 const requireFromApp = createRequire(path.join(process.cwd(), "package.json"));
 let axeSource: string | undefined;
 
+/** 整頁掃描的三個寬度：與工作室的版面階層同界線（≥1280 三欄、768～1279 目錄收成圖示、<768 改分頁籤），側欄與頁首在三種寬度下的排版也各掃一次；各 mock spec 同源引用，不另立數字。 */
+export const RESEARCH_WIDTHS = [1440, 1000, 600] as const;
+
 /** QA 掃描用的規則集：WCAG 2.0／2.1 的 A 與 AA。 */
 const WCAG_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
 

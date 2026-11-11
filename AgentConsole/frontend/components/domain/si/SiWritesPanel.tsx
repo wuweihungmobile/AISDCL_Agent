@@ -20,9 +20,97 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useSiConsoleWrites } from "@/lib/api/queries";
 import { SI_CONSOLE_WRITES_LIMIT, decideKindLabel, notEvaluableText, pendingWrites, siWriteKindLabel, supersededWrites, writeSubjectText } from "@/lib/domain/si";
+import type { SiConsoleWrite } from "@/lib/api/types";
+import { ApiError } from "@/lib/api/client";
+import { RECENT_INGESTED_SHOWN, SI_FLOW_TEXTS as T, fillText, joinHostRejections, labelOfIngestStatus, maskCredentials, reasonText, relativeMinutesText, type Join } from "@/lib/domain/siFlow";
 import { SiError, SiIngestCommands, SiLoading } from "./siParts";
+import { usePatrolView, type PatrolView } from "./usePatrolView";
 
 const SHELL = "mb-5 rounded-lg border border-wg-line bg-wg-surface px-5 py-4";
+
+/** 巡邏回報量不到的原因（面板層級說一次）：四種各自一句，不把「量不到」畫成「主機還沒處理」。 */
+function unavailableWhy(error: unknown): string {
+  const cause = error instanceof ApiError && error.status === 503 && typeof error.details?.cause === "string" ? error.details.cause : null;
+  if (cause === "report_dir_unset") return T.ingestWhyUnset;
+  if (cause === "report_missing") return T.ingestWhyMissing;
+  if (cause === "report_invalid" || cause === "report_unreadable") return T.ingestWhyBad;
+  return T.ingestWhyOther;
+}
+
+/** 單一待入帳列的入帳結果（只對未入帳列、以稽核編號結合快照 `ingest[]`；主機回報的原因逐字顯示）。 */
+function IngestOutcome({ join }: { join: Join | null }) {
+  if (join === null)
+    return (
+      <p data-testid="si-ingest-not-yet" className="mt-1 text-sm text-wg-muted">
+        {T.ingestNotYet}
+      </p>
+    );
+  const status = labelOfIngestStatus(join.status);
+  const statusText = status.known ? status.text : fillText(T.ingestUnknownStatusFmt, { value: typeof join.status === "string" && join.status !== "" ? join.status : T.unmeasurable });
+  const code = typeof join.code === "string" && join.code !== "" ? join.code : null;
+  return (
+    <div data-testid="si-ingest-outcome" className="mt-1 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="rounded-md border border-wg-alert-border bg-wg-alert-bg px-2 py-0.5 text-xs text-wg-warning-text">{statusText}</span>
+        {code ? <code className="font-mono text-xs">{code}</code> : null}
+      </div>
+      <p className="mt-0.5 break-words whitespace-pre-wrap">{maskCredentials(reasonText(join.code, join.text))}</p>
+      <p className="mt-0.5 text-wg-muted">{join.mode === "human" ? T.ingestHuman : join.mode === "auto" ? T.ingestAuto : T.ingestUnsure}</p>
+    </div>
+  );
+}
+
+/** 最近已入帳（常駐顯示、不加展開鈕；待入帳清單之下直接列時間最新的 `RECENT_INGESTED_SHOWN` 筆；段內沒有按鈕，TCS 勘誤 E-3）。 */
+function RecentIngested({ items }: { items: ReadonlyArray<SiConsoleWrite> }) {
+  const done = items.filter((w) => w.ingested === true);
+  if (done.length === 0) return null;
+  const ms = (t: string) => {
+    const v = Date.parse(t);
+    return Number.isNaN(v) ? 0 : v;
+  };
+  const shown = [...done].sort((a, b) => ms(b.time) - ms(a.time)).slice(0, RECENT_INGESTED_SHOWN);
+  return (
+    <section data-testid="si-recent-ingested" aria-label={fillText(T.recentIngestedFmt, { n: done.length })} className="mt-3">
+      <h3 className="text-sm font-semibold">{fillText(T.recentIngestedFmt, { n: done.length })}</h3>
+      <p className="text-xs text-wg-muted">{fillText(T.recentIngestedNote, { shown: RECENT_INGESTED_SHOWN })}</p>
+      <ul>
+        {shown.map((w) => (
+          <li key={w.auditRef} data-testid={`si-ingested-${w.auditRef}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-wg-line py-2 text-sm last:border-b-0">
+            <span className="rounded-md border border-wg-line px-2 py-0.5 text-xs">{T.ingestedBadge}</span>
+            <span>
+              {`${siWriteKindLabel(w.kind)} `}
+              <code className="font-mono text-xs">{w.kind}</code>
+            </span>
+            <span className="font-mono">{writeSubjectText(w.subjectId)}</span>
+            <time dateTime={w.time} className="text-wg-muted">
+              {w.time}
+            </time>
+            <code className="font-mono text-xs break-all text-wg-muted">{w.auditRef}</code>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+/** 面板層級的回報說明：量不到（四種原因各一句）或已過時（原因可能已改變）。 */
+function PatrolNote({ patrol }: { patrol: PatrolView }) {
+  const { q, freshness } = patrol;
+  if (q.isError)
+    return (
+      <p data-testid="si-ingest-unavailable" className="mt-3 text-sm text-wg-warning-text">
+        {fillText(T.ingestUnavailableFmt, { why: unavailableWhy(q.error) })}
+      </p>
+    );
+  if (freshness?.state === "stale") {
+    const age = freshness.ageMinutes === null ? null : Math.round(freshness.ageMinutes);
+    return (
+      <p data-testid="si-ingest-stale" className="mt-3 text-sm text-wg-warning-text">
+        {fillText(T.ingestStaleFmt, { ago: relativeMinutesText(age) })}
+      </p>
+    );
+  }
+  return null;
+}
 
 /** 決定動詞（中文標籤加原文，例 `核准 approve`）；`dkind` 為 null（非 decide 列或看不出動詞）時不渲染。 */
 function Dkind({ auditRef, dkind }: { auditRef: string; dkind: string | null | undefined }) {
@@ -38,11 +126,12 @@ function Dkind({ auditRef, dkind }: { auditRef: string; dkind: string | null | u
 
 export function SiWritesPanel() {
   const q = useSiConsoleWrites();
+  const patrol = usePatrolView();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [supersededOpen, setSupersededOpen] = useState(false);
 
   const frame = (children: React.ReactNode) => (
-    <section data-testid="si-writes-panel" aria-label="Console 寫入對帳" className={SHELL}>
+    <section id="si-writes-panel" tabIndex={-1} data-testid="si-writes-panel" aria-label="Console 寫入對帳" className={SHELL}>
       <h2 className="text-base font-semibold">Console 寫入（待入帳與對帳）</h2>
       <p className="mt-0.5 text-[13px] text-wg-muted">決定與新增觀察只落稽核檔，由主機端 CLI 驗簽入帳；入帳前它們尚未寫進帳本。</p>
       {children}
@@ -58,6 +147,9 @@ export function SiWritesPanel() {
   const pending = evaluable ? pendingWrites(items) : [];
   const superseded = evaluable ? supersededWrites(items) : [];
   const orphanList = evaluable ? (orphans ?? []) : [];
+  // 入帳結果：只對未入帳的待入帳列、以稽核編號結合巡邏快照（W-F10）；快照量不到時各列維持「待入帳」、面板層級說一次原因
+  const joins = new Map(joinHostRejections(pending, patrol.report).map((j) => [j.auditRef, j.join] as const));
+  const reportUsable = patrol.report !== null && !patrol.q.isError;
 
   return frame(
     <>
@@ -80,6 +172,8 @@ export function SiWritesPanel() {
           </ul>
         </div>
       ) : null}
+
+      {evaluable && pending.length > 0 ? <PatrolNote patrol={patrol} /> : null}
 
       {pending.length > 0 ? (
         <ul data-testid="si-pending-list" className="mt-3">
@@ -107,6 +201,7 @@ export function SiWritesPanel() {
                     入帳指令
                   </Button>
                 </div>
+                {reportUsable ? <IngestOutcome join={joins.get(w.auditRef) ?? null} /> : null}
                 {expanded ? (
                   <div id={panelId} className="mt-2">
                     <SiIngestCommands kind={w.kind} subject={w.subjectId} auditRef={w.auditRef} />
@@ -155,6 +250,8 @@ export function SiWritesPanel() {
           ) : null}
         </div>
       ) : null}
+
+      {evaluable ? <RecentIngested items={items} /> : null}
 
       {evaluable && pending.length === 0 && orphanList.length === 0 ? (
         <p data-testid="si-writes-empty" className="mt-3 text-sm text-wg-muted">

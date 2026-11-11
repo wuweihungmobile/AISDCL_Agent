@@ -120,6 +120,7 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/si/proposals", List.of("get")),
             Map.entry("/api/v1/si/proposals/{id}", List.of("get")),
             Map.entry("/api/v1/si/runs", List.of("get")),
+            Map.entry("/api/v1/si/patrol", List.of("get")),
             // ── SelfImproving P2b：寫入載體（僅 ADMIN）與對帳讀面 ──
             Map.entry("/api/v1/si/proposals/{id}/decide", List.of("post")),
             Map.entry("/api/v1/si/observations/{id}/close", List.of("post")),
@@ -184,8 +185,8 @@ class OpenApiIT extends AbstractApiIT {
             Map.entry("/api/v1/research/projects/{id}/delivery/traceability", List.of("get"))));
 
     /** 路徑總數與操作總數的期望值（既有 77 條、89 個，加研究面 24 條、26 個；只增不減）。 */
-    private static final int EXPECTED_PATH_COUNT = 120;   // 研究來源單一化＋4（watch-sources、watch-sources/{slug}、si/research-registry、si/research-registry/sync）；P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
-    private static final int EXPECTED_OPERATION_COUNT = 138;   // 研究來源單一化＋5（watch 三個、SI 兩個）；P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
+    private static final int EXPECTED_PATH_COUNT = 121;   // 核准流程可見＋1（si/patrol）；研究來源單一化＋4（watch-sources、watch-sources/{slug}、si/research-registry、si/research-registry/sync）；P1 自算：101＋6（route/preview、route、scr、scr/{scrNo}/apply、decomposition、decomposition/signoff）
+    private static final int EXPECTED_OPERATION_COUNT = 139;   // 核准流程可見＋1（getSiPatrol）；研究來源單一化＋5（watch 三個、SI 兩個）；P1 自算：115＋9（previewResearchRoute、routeResearchProject、getResearchRoute、openResearchScr、listResearchScr、applyResearchScr、getResearchDecomposition、triggerResearchDecomposition、signoffResearchDecomposition）
 
     private Resp docs() {
         Resp resp = api.get(null, "/v3/api-docs");
@@ -220,7 +221,7 @@ class OpenApiIT extends AbstractApiIT {
         Map<String, Object> paths = docs.read("$.paths");
         List<String> si = paths.keySet().stream().filter(p -> p.startsWith("/api/v1/si/")).sorted().toList();
         assertThat(si).containsExactlyInAnyOrder("/api/v1/si/status", "/api/v1/si/observations", "/api/v1/si/events",
-                "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/proposals/{id}/decide",
+                "/api/v1/si/proposals", "/api/v1/si/proposals/{id}", "/api/v1/si/runs", "/api/v1/si/patrol", "/api/v1/si/proposals/{id}/decide",
                 "/api/v1/si/observations/{id}/close", "/api/v1/si/observations/validate", "/api/v1/si/console-writes",
                 "/api/v1/si/schedule/set", "/api/v1/si/runs/request", "/api/v1/si/research-registry", "/api/v1/si/research-registry/sync");
         assertThat(paths).hasSize(EXPECTED_PATH_COUNT);
@@ -298,15 +299,42 @@ class OpenApiIT extends AbstractApiIT {
         assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.responses['503'].description"))
                 .as("取不到界的 503 載明 cause").contains("schedule_bounds_unavailable");
         assertThat(docs.<String>read("$.paths['/api/v1/si/schedule/set'].post.description")).contains("schedule_bounds_unavailable");
-        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("路徑總數＝修改前現值 116 加 4（研究來源單一化）").hasSize(120);
+        assertThat(docs.<Map<String, Object>>read("$.paths").keySet()).as("路徑總數＝修改前現值 116 加 4（研究來源單一化）再加 1（核准流程可見的 si/patrol）").hasSize(121);
         int operations = 0;
         for (Object path : docs.<Map<String, Object>>read("$.paths").values()) {
             operations += ((Map<?, ?>) path).size();
         }
-        assertThat(operations).as("操作總數＝修改前現值 133 加 5（研究來源單一化）").isEqualTo(138);
+        assertThat(operations).as("操作總數＝修改前現值 133 加 5（研究來源單一化）再加 1（getSiPatrol）").isEqualTo(139);
         assertThat(java.util.Arrays.stream(com.aisdlc.console.domain.model.si.SiWriteKind.values())
                 .map(com.aisdlc.console.domain.model.si.SiWriteKind::wire).toList())
                 .as("SiWriteKind 全等為六值").containsExactly("decide", "obs-add", "obs-close", "sched-set", "run-request", "src-registry");
+    }
+
+    /**
+     * AT-966-3-5（TCS-SiFlowVisibility W-F3）：巡邏快照端點在 OpenAPI 恰一個操作（GET）、operationId、tag、說明與狀態碼，且路徑與操作總數各只增加一。為什麼重要：前端以
+     * /v3/api-docs 產生型別——operationId 變了，產生的函式名跟著變；多註冊第二個操作（例如 POST）就是多了一個沒規劃的寫入入口。
+     */
+    @Test
+    void AT_966_3_5_theSiPatrolOperationIsDocumentedAndTheTotalsGrewByExactlyOne() {
+        Resp docs = docs();
+        String path = "$.paths['/api/v1/si/patrol']";
+        assertThat(docs.<Map<String, Object>>read(path).keySet()).as("恰一個操作（GET）").containsExactly("get");
+        assertThat(docs.<String>read(path + ".get.operationId")).isEqualTo("getSiPatrol");
+        assertThat(docs.<List<String>>read(path + ".get.tags")).containsExactly("自我進化（SelfImproving）");
+        String description = docs.<String>read(path + ".get.description");
+        assertThat(description).contains("唯讀", "巡邏快照", "report_dir_unset", "report_missing", "report_unreadable", "report_invalid");
+        assertThat(docs.<Map<String, Object>>read(path + ".get.responses").keySet()).as("文件化的狀態碼")
+                .contains("200", "401", "502", "503", "504");
+        assertThat(docs.<String>read(path + ".get.responses['503'].description")).contains("report_dir_unset", "report_invalid");
+        Map<String, Object> paths = docs.read("$.paths");
+        assertThat(paths).hasSize(EXPECTED_PATH_COUNT);
+        assertThat(paths.keySet().stream().filter(p -> !p.equals("/api/v1/si/patrol")).count())
+                .as("路徑總數＝不含 patrol 的現值加一").isEqualTo(EXPECTED_PATH_COUNT - 1L);
+        int operations = 0;
+        for (Object entry : paths.values()) {
+            operations += ((Map<?, ?>) entry).size();
+        }
+        assertThat(operations).as("操作總數＝現值加一").isEqualTo(EXPECTED_OPERATION_COUNT);
     }
 
     /** AT-962-24-3：七個 P2 操作的 operationId 逐字、路徑與方法固定，寫入端點文件化 409／422／502／503／504，讀端含 401 與 404（狀態碼集合另由三表逐一鎖住）。 */

@@ -90,14 +90,14 @@ class SiReadOnlyArchTest {
         }
         List<JavaMethod> methods = controllers.stream().flatMap(c -> c.getMethods().stream()).toList();
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count())
-                .as("恰八個 @GetMapping（status、observations、events、proposals、proposals/{id}、runs、console-writes、research-registry）").isEqualTo(8);
+                .as("恰九個 @GetMapping（status、observations、events、proposals、proposals/{id}、runs、patrol、console-writes、research-registry）").isEqualTo(9);
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count())
                 .as("恰七個 @PostMapping（decide、observations、close、validate、schedule/set、runs/request、research-registry/sync）").isEqualTo(7);
 
         JavaClass bridge = classes.get(AgentBridge.class);
         List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
-        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰八個").extracting(JavaMethod::getName)
-                .containsExactlyInAnyOrder("siExport", "siWriteDecide", "siWriteObservation", "siWriteObservationClose",
+        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰九個").extracting(JavaMethod::getName)
+                .containsExactlyInAnyOrder("siExport", "siPatrol", "siWriteDecide", "siWriteObservation", "siWriteObservationClose",
                         "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest", "siWriteRegistrySync");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).extracting(JavaClass::getName)
@@ -116,13 +116,13 @@ class SiReadOnlyArchTest {
         assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals("siValidateObservation")))
                 .as("預檢只經 SiConsoleWriteService").containsExactly(SiConsoleWriteService.class.getSimpleName());
 
-        // 唯讀鏡像不依賴任何寫入埠，也只呼叫 siExport
+        // 唯讀鏡像不依賴任何寫入埠，也只呼叫 siExport 與 siPatrol
         JavaClass mirror = classes.get(SiMirrorQueryService.class);
         assertThat(mirror.getDirectDependenciesFromSelf().stream().map(d -> d.getTargetClass().getName()).toList())
                 .as("SiMirrorQueryService 不依賴任何寫入埠").doesNotContain(SiConsoleWriteRepository.class.getName(),
                         SiConsoleWriteQueries.class.getName());
         assertThat(mirror.getAccessesFromSelf().stream().filter(a -> a.getTargetOwner().getName().equals(AgentBridge.class.getName()))
-                .map(a -> a.getTarget().getName()).collect(Collectors.toSet())).containsExactly("siExport");
+                .map(a -> a.getTarget().getName()).collect(Collectors.toSet())).containsExactlyInAnyOrder("siExport", "siPatrol");
 
         // 既有的分層規則（A1～A6 與兩條落點規則）在加入 SI 類別後仍全綠：同一批類別、同一組規則，由本 AT 一併驗
         Map<String, ArchRule> existing = Map.of(
@@ -135,6 +135,41 @@ class SiReadOnlyArchTest {
                 "JPA", ArchitectureRulesTest.jpa_entities_live_only_in_infrastructure_persistence,
                 "WEB", ArchitectureRulesTest.controllers_live_only_in_inbound_web_adapter);
         existing.forEach((name, rule) -> rule.check(classes));
+    }
+
+    // ── AT-966-3-6：巡邏快照端點的結構鎖（TCS-SiFlowVisibility W-F3、NFR-FV-5）──────────────────────────────
+
+    @Test
+    void AT_966_3_6_thePatrolEndpointIsOneMoreGetThatOnlyTouchesTheMirrorUseCaseAndTheWritePortsKeepTheirUsers() {
+        JavaClasses classes = mainClasses();
+        List<JavaMethod> methods = classes.stream()
+                .filter(c -> c.getPackageName().equals(WEB) && c.getSimpleName().matches("Si(?![a-z]).*Controller"))
+                .flatMap(c -> c.getMethods().stream()).toList();
+        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count()).as("@GetMapping 恰九個（原八個加 patrol）").isEqualTo(9);
+        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count()).as("@PostMapping 仍恰七個").isEqualTo(7);
+        List<JavaMethod> patrol = methods.stream()
+                .filter(m -> m.tryGetAnnotationOfType(GetMapping.class).map(a -> Arrays.asList(a.value()).contains("/patrol")).orElse(false)).toList();
+        assertThat(patrol).as("恰一個 @GetMapping(\"/patrol\")").hasSize(1);
+        Set<String> touched = patrol.get(0).getAccessesFromSelf().stream().map(a -> a.getTargetOwner().getSimpleName())
+                .collect(Collectors.toCollection(TreeSet::new));
+        assertThat(touched).as("patrol 處理函式只碰用例介面、回應包裝與結果信封（不碰寫入服務、寫入埠、Bridge）")
+                .containsOnly("SiController", "SiMirrorUseCase", "SiExportResponse", "ApiResult");
+
+        JavaClass bridge = classes.get(AgentBridge.class);
+        List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
+        assertThat(siMethods).as("AgentBridge 上 si 接大寫字母起頭的方法恰九個（加 siPatrol）").hasSize(9).extracting(JavaMethod::getName).contains("siPatrol");
+        JavaMethod siPatrol = siMethods.stream().filter(m -> m.getName().equals("siPatrol")).findFirst().orElseThrow();
+        assertThat(siPatrol.getRawParameterTypes()).as("siPatrol 不收任何參數（沒有查詢參數、沒有權杖）").isEmpty();
+        assertThat(siPatrol.getRawReturnType().getName()).isEqualTo(SiExport.class.getName());
+
+        assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().equals("siPatrol")))
+                .as("只有唯讀鏡像服務呼叫 siPatrol（不經 SiConsoleWriteService）").containsExactly(SiMirrorQueryService.class.getSimpleName());
+        assertThat(accessorsOf(classes, SiConsoleWriteRepository.class, a -> true)).as("寫入埠的使用者不變")
+                .containsExactly(SiConsoleWriteService.class.getSimpleName());
+        assertThat(accessorsOf(classes, SiConsoleWriteQueries.class, a -> true)).as("對帳讀埠的使用者不變")
+                .containsExactly(SiReconcileService.class.getSimpleName());
+        assertThat(accessorsOf(classes, AgentBridge.class, a -> a.getTarget().getName().startsWith("siWrite")))
+                .as("siWrite… 的呼叫者不變").containsExactly(SiConsoleWriteService.class.getSimpleName());
     }
 
     // ── AT-964-7-9：P4 兩個新 handler 的結構鎖（TCS-SelfImprovingSchedule W-S7 (j)）──────────────────────────

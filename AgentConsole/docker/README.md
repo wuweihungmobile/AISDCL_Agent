@@ -733,3 +733,60 @@ Remove-Item AgentConsole\docker\nginx\conf.d\https.conf
   ```powershell
   Push-Location AgentConsole; docker compose logs engine-bridge | Select-String 'trace_id=<值>'; Pop-Location
   ```
+
+## 16. 巡邏回報目錄（自我進化核准流程可見；TCS-SiFlowVisibility W-F2；長駐棧升級序列）
+
+主機端的自我進化巡邏器每個心跳把 `patrol.json` 原子覆寫到 `<AUTOSDD_SI_DIR>/console_report/`；engine-bridge 以**唯讀** bind 把該目錄掛成容器內的 `/si-report`（環境變數 `BRIDGE_SI_REPORT_DIR`），`GET /si/patrol`（console-api 為 `GET /api/v1/si/patrol`）只讀它。`AUTOSDD_SI_DIR` 未設時預設 `~/.autosdd/selfimproving`（Windows 為 `%USERPROFILE%\.autosdd\selfimproving`）。Bridge 對這個目錄**只讀**：engine-bridge 唯一可寫的 bind 仍是 `console_audit`。
+
+**升級順序不可換**（長駐棧從舊版升到有本功能的版本；四步依序做）：
+
+1. **建目錄**（必須先於 `docker compose up`：bind 設了 `create_host_path: false`；巡邏第一次心跳才會寫入檔案，所以剛建好時目錄是空的）：
+
+   ```bash
+   mkdir -p "${AUTOSDD_SI_DIR:-$HOME/.autosdd/selfimproving}/console_report"
+   ```
+
+   ```powershell
+   New-Item -ItemType Directory -Force -Path (Join-Path $(if ($env:AUTOSDD_SI_DIR) { $env:AUTOSDD_SI_DIR } else { Join-Path $env:USERPROFILE '.autosdd\selfimproving' }) 'console_report')
+   ```
+
+2. **重建三個映像**（engine-bridge 有新模組、backend 有新端點、frontend 有新畫面，三者缺一則畫面或 API 對不上；nginx 與資料庫映像不動、不需重建）：
+
+   ```bash
+   (cd AgentConsole && docker compose --profile db --profile app --profile full build engine-bridge backend frontend)
+   ```
+
+   ```powershell
+   Push-Location AgentConsole; docker compose --profile db --profile app --profile full build engine-bridge backend frontend; Pop-Location
+   ```
+
+3. **啟動**：
+
+   ```bash
+   (cd AgentConsole && docker compose --profile db --profile app --profile full up -d)
+   ```
+
+   ```powershell
+   Push-Location AgentConsole; docker compose --profile db --profile app --profile full up -d; Pop-Location
+   ```
+
+4. **驗證**：以 ADMIN 登入取得 token 後打 `GET /api/v1/si/patrol`。快照尚未寫出時應回 503 `si_unavailable`（`details.cause` 為 `report_missing`），自我進化頁顯示「還沒有收到巡邏回報」；等主機巡邏的第一個心跳（最多一個心跳週期）寫出快照後再打一次，應回 200，頁面顯示「上次心跳：N 分鐘前」。
+
+   ```bash
+   curl -s -i -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" http://localhost/api/v1/si/patrol
+   ```
+
+   ```powershell
+   curl.exe -s -i -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" http://localhost/api/v1/si/patrol
+   ```
+
+**失敗表徵**（都是明確失敗，不是靜默）：
+
+- 目錄沒建就 `up`：compose 以「bind source path does not exist」類訊息拒絕啟動 engine-bridge（`create_host_path: false` 的設計）；先做第 1 步再 `up` 即可。
+- 只重建 engine-bridge 而漏了 backend：`GET /api/v1/si/patrol` 回 404；漏了 frontend：畫面沒有巡邏狀態卡與「詳情」鈕；漏了 engine-bridge：`/api/v1/si/patrol` 回 503（Bridge 沒有這個路由，cause 不是 `report_*`）。
+- 映像都是新的，但 `BRIDGE_SI_REPORT_DIR` 沒進容器（例如用了舊的 `docker-compose.yml`）：卡片顯示「這個部署沒有掛載巡邏回報目錄」（Bridge 回 503 `report_dir_unset`）；其他自我進化功能照常。
+- 目錄存在但 `patrol.json` 壞了或過大：503 `report_invalid`（卡片顯示回報檔壞掉）；不是檔案而是目錄、或權限不足：503 `report_unreadable`。
+
+**未掛載時的畫面**：沒有 `BRIDGE_SI_REPORT_DIR`（或舊部署）時，自我進化頁的巡邏狀態卡顯示「這個部署沒有掛載巡邏回報目錄」，提案詳情的「下一步」改用該提案自己的資料；提案、觀察、決定、排程等既有功能完全不受影響。
+
+**退回**：還原 `docker-compose.yml` 到升級前的版本（移除 `/si-report` 的 bind 與環境變數 `BRIDGE_SI_REPORT_DIR`），再 `docker compose --profile db --profile app --profile full up -d`；舊畫面不受影響（Bridge 對未設環境變數降級為 503 `report_dir_unset`，其他自我進化功能照常）。`console_report` 目錄與其中的檔案由主機巡邏器擁有，退回時不必刪。

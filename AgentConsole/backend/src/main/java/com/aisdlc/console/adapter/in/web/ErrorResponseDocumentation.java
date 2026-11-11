@@ -113,6 +113,13 @@ public class ErrorResponseDocumentation {
                     + "1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料",
             "504", "引擎橋接服務逾時（讀取 20 秒、不重試）");
 
+    /** 巡邏快照（鍵 agentconsole-si-flow-visibility；API-SI-16）的上游失敗：沒有 export 子行程，503 的 cause 是四個 report_*；沒有 422（Bridge 對查詢參數的 422 不會發生）。 */
+    private static final Map<String, String> SI_PATROL_FAILURES = Map.of(
+            "502", SI_UPSTREAM.get("502"),
+            "503", "si_unavailable：巡邏快照不可用（details.cause 為 report_dir_unset〔此部署沒有掛載巡邏回報目錄〕、report_missing〔還沒有快照檔〕、"
+                    + "report_unreadable〔讀不了〕、report_invalid〔壞檔、形狀不符或過大〕之一；details.detail 逐字取自 Bridge）。不回空表、不回舊資料",
+            "504", SI_UPSTREAM.get("504"));
+
     /**
      * SelfImproving 三個寫入 POST 的失敗（TCS-SelfImprovingDecide-P2b W10、W15）：輸入閘 422、Bridge 的 422、各種 502／503／504。結果不明的三種
      * （504、送出後連線重設的 502、2xx 本文無法解析的 502）保留 Console 稽核列並在 details.outcomeUnknown 標明；其餘補償刪除。
@@ -202,6 +209,7 @@ public class ErrorResponseDocumentation {
                     "422", "引擎拒絕此請求（details.bridgeReason=invalid_request；id 不符 PROP-SI-<三位以上數字>）",
                     "502", SI_UPSTREAM.get("502"), "503", SI_UPSTREAM.get("503"), "504", SI_UPSTREAM.get("504"))),
             Map.entry("GET /api/v1/si/runs", SI_UPSTREAM),
+            Map.entry("GET /api/v1/si/patrol", SI_PATROL_FAILURES),
             // P2b：寫入載體（僅 ADMIN）與對帳讀面——對帳永遠回 200（Bridge 失敗＝reconcile.status 為 NOT-EVALUABLE），沒有 502／503／504
             Map.entry("POST /api/v1/si/proposals/{id}/decide", SI_WRITE_FAILURES),
             Map.entry("POST /api/v1/si/observations", SI_WRITE_FAILURES),

@@ -4,7 +4,7 @@ import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 
 import { expectNoA11yViolations } from "./a11y";
-import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, type MockCall, type MockHandler } from "./mockApi";
+import { collectConsoleErrors, compose, fail, installApiMock, shellHandler, signInAs, type MockCall, type MockHandler } from "./mockApi";
 
 /**
  * 自動演化排程（TCS-SelfImprovingSchedule AT-964-2-4／3-4／4-4；D-CS-9）——route mock 版：ADMIN 在 /self-improving 的排程面板走完三個動作（啟用、改週期、立即啟動），
@@ -58,6 +58,9 @@ function siBackend(world: { posts: MockCall[]; runRequests: string[] }): MockHan
         return { data: whole(A.events) };
       case "/api/v1/si/runs":
         return { data: whole(A.runs) };
+      case "/api/v1/si/patrol":
+        // 核准流程全程可見（TCS-SiFlowVisibility §4.1）：本 spec 不驗巡邏卡，預設巡邏回報還沒有（503 report_missing）
+        return fail(503, { message: "SI 資料面不可用", reason: "si_unavailable", details: { cause: "report_missing", detail: "patrol.json 不存在" } });
       case "/api/v1/si/console-writes":
         return {
           data: {

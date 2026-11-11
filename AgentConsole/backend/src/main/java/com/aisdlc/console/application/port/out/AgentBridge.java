@@ -380,6 +380,14 @@ public interface AgentBridge {
     SiExport siExport(String kind, Integer since, Integer limit, String id, String status, String source);
 
     /**
+     * {@code GET /si/patrol}（鍵 {@code agentconsole-si-flow-visibility}；TCS-SiFlowVisibility W-F3）：主機巡邏器寫的快照 {@code patrol.json} 經 Bridge
+     * 唯讀讀出的原樣（本文 {@code {schema_rev, kind, read_at, report}}，snake_case 鍵、值未動）。連線 2 秒／讀取 20 秒、<b>不重試</b>、不帶任何查詢參數與
+     * {@code X-Bridge-Token}。Bridge 的 503 {@code si_unavailable}（{@code cause} 為 {@code report_dir_unset}｜{@code report_missing}｜
+     * {@code report_unreadable}｜{@code report_invalid}）與 422 為 {@link BridgeRejectedException}；連線失敗、逾時與其他 5xx 同 {@link #siExport}。
+     */
+    SiExport siPatrol();
+
+    /**
      * {@code POST /si/proposals/<id>:decide}（P2b；TCS-SelfImprovingDecide-P2b W3、W11）：把<b>已簽章的稽核 JSON 全文</b>原樣送出
      * （位元組＝字串的 UTF-8，不經 JSON 重新序列化——它是 {@code audit_sha256} 的對象）。附 {@code X-Bridge-Token}（SelfImproving 寫入權杖），
      * 連線 2 秒／讀取 20 秒、<b>不重試</b>；Bridge 只把這份位元組落成 {@code <audit_ref>.json}，不寫帳本。

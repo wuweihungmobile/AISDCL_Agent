@@ -125,6 +125,78 @@ sys.exit(int(control.get("rc", 0)))
 '''
 
 
+#: 固定的快照時間（TCS-SiFlowVisibility §5.1 的 NOW；`generated_at` 為其前 3 分鐘）。
+PATROL_NOW = "2026-11-11T14:00:00+08:00"
+PATROL_GENERATED_AT = "2026-11-11T13:57:00+08:00"
+
+
+def patrol_report(**over: Any) -> dict[str, Any]:
+    """`PR(over)`：C-1 的 `report` 基準夾具（Bridge／backend 層＝snake_case；逐鍵覆寫）。測試號一律
+    `PROP-SI-901` 起（不存在於真帳本）。鍵序刻意讓 `generated_at` 在 `schema_rev` 之後。"""
+    base: dict[str, Any] = {
+        "schema_rev": 1, "generated_at": PATROL_GENERATED_AT, "off": False,
+        "heartbeat_minutes": 15, "ledger_seq": 130, "truncated": False,
+        "steps": [{"step": name, "result": "完成"}
+                  for name in ("巡視", "入帳", "到期", "運轉", "推進")],
+        "schedule": {"enabled": True,
+                     "current": {"code": "SCHED-CELL-RAN", "text": "本期已經跑過一次，等下一期"},
+                     "last_skip": None},
+        "ingest": [],
+        "props": [{"id": "PROP-SI-901", "state": "verified", "code": "WAIT-PROMOTE-DECISION",
+                   "who": "掌舵者", "text": "驗證通過，等你決定是否晉升"}],
+        "runs": {"live": [], "waiting": [], "queued": []},
+        "push": {"enabled": True, "state": "idle", "code": "PUSH-NOT-AHEAD",
+                 "text": "沒有待推送的提交", "retry": None, "sha": None, "ahead": 0,
+                 "attempts": 0, "finished_at": None, "tick_at": None},
+    }
+    base.update(over)
+    return base
+
+
+def detail_full(**over: Any) -> dict[str, Any]:
+    """`DETAIL(over)`：C-3 的 `detail` 基準夾具（根層以 camelCase 輸出；八欄俱全，含 `heldout` 八鍵
+    與 `sandbox.failText`）。`patch.text` 含 `\\r\\n`、Tab、U+2028、emoji、中文與一行字面
+    `+++ b/x`，結尾無換行。"""
+    patch_text = ("diff --git a/x b/x\r\n--- a/x\r\n+++ b/x\r\n@@ -1,2 +1,2 @@\r\n"
+                  "-舊行\t含 Tab\r\n+新行 \U0001F600 與 U+2028   之後\r\n+++ b/x")
+    base: dict[str, Any] = {
+        "patch": {"rel": "docs/06_quality/SelfImproving_Proposals/PROP-SI-901/r2.patch",
+                  "bytes": len(patch_text.encode("utf-8")), "text": patch_text, "truncated": False},
+        "body": {"rel": "docs/06_quality/SelfImproving_Proposals/PROP-SI-901/r2.md",
+                 "bytes": 28, "text": "# 提案 901\n\n症狀…\n", "truncated": False},
+        "sourceObs": [{"id": "OBS-SI-001", "context": "巡邏日誌", "symptom": "提案卡了三天沒人處理",
+                       "severity": "P2", "disposition": "proposed"}],
+        "heldout": {"frozen": True, "seq": 60, "n": 7, "min": 5, "belowMin": False,
+                    "frozenBy": "凍結者甲", "digest8": "0a1b2c3d", "neNote": None},
+        "sandbox": {"seq": 61, "id": "APP-SI-901", "applied": True, "touchedOk": True,
+                    "rollbackOk": True, "failCode": None, "failText": "（無失敗）"},
+        "verify": {"seq": 62, "id": "APP-SI-901", "verdict": "PASS", "baselineRed": True,
+                   "patchedGreen": True, "mutatedRed": True, "probesN": 6, "carrierProof": True,
+                   "reasons": [{"code": "VERIFY-OK", "text": "三步證據齊全，驗證通過"}]},
+        "next": {"code": "WAIT-PROMOTE-DECISION", "who": "掌舵者",
+                 "text": "驗證通過，等你決定是否晉升"},
+        "timeline": [{"seq": 12, "t": "2026-11-10T09:00:00+08:00", "by": "巡邏器",
+                      "kind": "prop", "action": "提出提案"}],
+    }
+    base.update(over)
+    return base
+
+
+#: `proposal_item` 的 `detail` 預設值哨兵（None 是合法的 detail 值：null）。
+DEFAULT_DETAIL: Any = object()
+
+
+def proposal_item(detail: Any = DEFAULT_DETAIL, *, with_detail: bool = True,
+                  **over: Any) -> dict[str, Any]:
+    """單筆提案 `items[0]`：既有的卡面鍵加 `detail`（`with_detail=False`＝舊根層，沒有該鍵）。"""
+    item: dict[str, Any] = {"id": "PROP-SI-901", "state": "verified", "rev": 2, "lastSeq": 120,
+                            "sources": ["OBS-SI-001"], "card": None}
+    if with_detail:
+        item["detail"] = detail_full() if detail is DEFAULT_DETAIL else detail
+    item.update(over)
+    return item
+
+
 def make_fake_si(tmp_path: Path) -> Path:
     """在 `tmp_path` 造假 CLI 樹（`<R>/tools/selfimproving.py`），回傳樹根 `R`。"""
     root = tmp_path / "fake-si"

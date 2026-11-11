@@ -71,6 +71,8 @@ import {
   getSiConsoleWrites,
   getSiEvents,
   getSiObservations,
+  getSiPatrol,
+  getSiProposal,
   getSiProposals,
   getSiRuns,
   getSiStatus,
@@ -197,6 +199,7 @@ import type {
   SiListParams,
   SiObservationRequest,
   SiPage,
+  SiProposal,
   SiRunRequest,
   SiScheduleSetRequest,
   StartExecutionRequest,
@@ -256,6 +259,9 @@ export const qk = {
   siProposals: ["si", "proposals"] as const,
   siEvents: ["si", "events"] as const,
   siRuns: ["si", "runs"] as const,
+  /** 巡邏快照與單筆提案詳情也掛在 ["si"] 底下：頁首「重新整理」與寫入成功後的失效一併重抓（TCS-SiFlowVisibility W-F12、AT-966-14-2）。 */
+  siPatrol: ["si", "patrol"] as const,
+  siProposalDetail: (id: string) => ["si", "proposal-detail", id] as const,
   /** P2b 的對帳讀面也掛在 ["si"] 底下：頁首的「重新整理」與寫入成功後的失效都以 siAll 一併重抓它（只有 ADMIN 有這個查詢）。 */
   siConsoleWrites: ["si", "console-writes"] as const,
   /** 議題中心：全部掛在 ["issues"] 底下，頁首的「重新整理」以 issuesAll 重抓目前顯示的清單與詳情（type: active）；清單依 status 各一份，詳情依議題編號。 */
@@ -1126,6 +1132,28 @@ export function useSiStatus() {
   });
 }
 
+/** 巡邏快照（所有角色）：沿 SI_QUERY_OPTIONS，不輪詢；`dataUpdatedAt` 是新鮮度計算用的「資料抵達瀏覽器的時刻」。 */
+export function useSiPatrol() {
+  const enabled = useEnabled();
+  return useQuery({
+    queryKey: qk.siPatrol,
+    queryFn: ({ signal }) => getSiPatrol({ signal }),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
+/** 單筆提案詳情（`detail` 八欄；時間線與來源觀察也取自這裡）：只有開啟對話框（`id` 非 null）才取數，關閉即丟棄（gcTime 0）。 */
+export function useSiProposalDetail(id: string | null) {
+  const enabled = useEnabled(id !== null);
+  return useQuery({
+    queryKey: qk.siProposalDetail(id ?? ""),
+    queryFn: ({ signal }) => getSiProposal(id as string, { signal }),
+    enabled,
+    ...SI_QUERY_OPTIONS,
+  });
+}
+
 /**
  * 游標分頁的清單查詢：第一頁只帶 `limit`，之後每頁帶 `since=<上一頁的 nextSince>` 與同一個 `limit`（R15）。
  * 只有「回應 truncated 為真且 nextSince 是數字」才有下一頁；合併（依身分鍵去重）由呼叫端用 lib/domain/si.ts 的 mergePages 做。
@@ -1172,6 +1200,17 @@ export function useSiConsoleWritesCache(): SiConsoleWrites | undefined {
   const qc = useQueryClient();
   const subscribe = useCallback((onChange: () => void) => qc.getQueryCache().subscribe(onChange), [qc]);
   const snapshot = useCallback(() => qc.getQueryData<SiConsoleWrites>(qk.siConsoleWrites), [qc]);
+  return useSyncExternalStore(subscribe, snapshot, () => undefined);
+}
+
+/**
+ * 提案清單的**唯讀快取**（巡邏狀態卡用；TCS-SiFlowVisibility AC-966-12）：只讀「提案」分頁已放進查詢快取的資料，**不建立查詢、不發任何請求**——
+ * 沒開過提案分頁（或分頁已卸載，gcTime 為 0）時回 `undefined`，卡上的提案編號就維持純文字。
+ */
+export function useSiProposalsCache(): InfiniteData<SiPage<SiProposal>> | undefined {
+  const qc = useQueryClient();
+  const subscribe = useCallback((onChange: () => void) => qc.getQueryCache().subscribe(onChange), [qc]);
+  const snapshot = useCallback(() => qc.getQueryData<InfiniteData<SiPage<SiProposal>>>(qk.siProposals), [qc]);
   return useSyncExternalStore(subscribe, snapshot, () => undefined);
 }
 

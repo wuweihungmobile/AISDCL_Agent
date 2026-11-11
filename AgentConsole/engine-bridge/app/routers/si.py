@@ -30,6 +30,9 @@ Bridge **不寫帳本、不呼叫寫入型 CLI**；它只把 backend 簽好的�
 物件且 ≤65536 位元組（否則 422，不啟動子行程），以子行程 `obs-add --dry-run` 回預覽（`ok` 為 false
 仍是 200）。
 
+**巡邏快照 GET**（`/si/patrol`；TCS-SiFlowVisibility）：不經子行程，唯讀讀 `patrol.json`
+（`si_report.read_patrol`）。單筆提案的 `items[0].detail` 另經 `si_detail` 白名單過濾。
+
 其餘方法（DELETE、PUT、PATCH）對所有 `/si/` 路徑一律 405（FastAPI 對已知路徑的其他方法回 405）。
 """
 from __future__ import annotations
@@ -42,7 +45,7 @@ from fastapi import APIRouter, Header, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
-from .. import security, si_audit, si_cli
+from .. import security, si_audit, si_cli, si_detail, si_report
 from ..errors import ApiError
 from ..tracing import trace_id_var
 
@@ -120,7 +123,17 @@ def si_proposal(request: Request, id: str) -> JSONResponse:
     obj = _export(request, "proposals", ident=ident)
     if not obj["items"]:
         raise ApiError(404, "si_not_found", id=ident)
-    return JSONResponse(obj)
+    # `items[0].detail` 只放行契約列出的鍵（TCS-SiFlowVisibility W-F4；評估集內容永不外送）
+    return JSONResponse(si_detail.sanitize_single_proposal(obj))
+
+
+@router.get("/patrol")
+def si_patrol(request: Request) -> JSONResponse:
+    """巡邏快照（TCS-SiFlowVisibility W-F1）：唯讀 `BRIDGE_SI_REPORT_DIR/patrol.json`，
+    驗形狀與大小後
+    逐值透傳；不呼叫 CLI、不寫任何檔、不快取。任何查詢參數一律 422。"""
+    _reject_unknown_params(request, frozenset())
+    return JSONResponse(si_report.read_patrol(request.app.state.settings.si_report_dir))
 
 
 @router.get("/runs")

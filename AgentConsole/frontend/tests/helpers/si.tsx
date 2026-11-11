@@ -47,7 +47,20 @@ export function clone<T>(value: T): T {
 /** `body`：請求本文的原始字串（沒有本文為 null），供斷言送出的 JSON；`hasBody` 沿 P1b（只看有沒有）。 */
 export type SiCall = { method: string; url: string; path: string; query: URLSearchParams; hasBody: boolean; body: string | null };
 export type SiEndpoint =
-  "status" | "observations" | "events" | "proposals" | "proposal" | "runs" | "decide" | "observation-add" | "observation-close" | "validate" | "console-writes" | "schedule-set" | "run-request";
+  | "status"
+  | "observations"
+  | "events"
+  | "proposals"
+  | "proposal"
+  | "runs"
+  | "patrol"
+  | "decide"
+  | "observation-add"
+  | "observation-close"
+  | "validate"
+  | "console-writes"
+  | "schedule-set"
+  | "run-request";
 /** 逐端點覆寫：回 Response（原樣）、或回 { status, data }（包成封包）；回 undefined＝照黃金檔回放。可為 async（延遲回應）。 */
 export type SiOverride = (call: SiCall) => Response | { status?: number; data?: unknown } | undefined | Promise<Response | { status?: number; data?: unknown } | undefined>;
 
@@ -103,7 +116,7 @@ function endpointOf(method: string, pathname: string): { endpoint: SiEndpoint; i
   }
   if (method !== "GET") return null;
   if (pathname === "/api/v1/si/console-writes") return { endpoint: "console-writes" };
-  const m = /^\/api\/v1\/si\/(status|observations|events|proposals|runs)(?:\/([^/]+))?$/.exec(pathname);
+  const m = /^\/api\/v1\/si\/(status|observations|events|proposals|runs|patrol)(?:\/([^/]+))?$/.exec(pathname);
   if (!m) return null;
   if (m[1] === "proposals" && m[2]) return { endpoint: "proposal", id: decodeURIComponent(m[2]) };
   return { endpoint: m[1] as SiEndpoint };
@@ -138,6 +151,9 @@ function replay(stub: SiStub, endpoint: SiEndpoint, id: string | undefined, quer
       const items = source.items.filter((p) => p.id === id);
       return items.length > 0 ? envelope({ ...source, items, truncated: false, nextSince: null }) : siNotFound(id ?? "");
     }
+    case "patrol":
+      // 預設：巡邏回報還沒有（舊案例不必認得這個請求；TCS-SiFlowVisibility §4.1）；要有快照的案例以 overrides.patrol 給 PATROL()
+      return siUnavailable("report_missing", "patrol.json 不存在");
     case "decide":
       return receipt(stub, "decide", id ?? null);
     case "observation-add":
@@ -276,5 +292,6 @@ export function fixtureWithStatus(item: SiStatusItem): SiFixture {
 
 /** 三種角色的渲染設定（交給 `renderSi`）。 */
 export const ADMIN_UI = { role: "ADMIN", username: "admin" } as const;
+// 「核准流程全程可見」的夾具（PATROL、DETAIL、NOW…）在 ./siFlow（與本檔分開，避免循環）。
 export const VIEWER_UI = { role: "VIEWER", username: "viewer" } as const;
 export const OPERATOR_UI = { role: "OPERATOR", username: "operator" } as const;

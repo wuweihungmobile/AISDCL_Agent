@@ -172,7 +172,7 @@ describe("AT_932_1_5 頁面逐欄顯示黃金檔資料（R12～R14）", () => {
     expect(textOf(screen.getByTestId("si-event-json-5"))).toBe(JSON.stringify(e5, null, 2));
 
     // 請求：status（無查詢參數）、observations、runs、events；沒打開的提案分頁不發請求
-    expect([...urls()].sort()).toEqual([`/api/v1/si/events?limit=${L}`, `/api/v1/si/observations?limit=${L}`, `/api/v1/si/runs?limit=${L}`, "/api/v1/si/status"].sort());
+    expect([...urls()].sort()).toEqual([`/api/v1/si/events?limit=${L}`, `/api/v1/si/observations?limit=${L}`, `/api/v1/si/runs?limit=${L}`, "/api/v1/si/status", "/api/v1/si/patrol"].sort());
   }, 30_000);
 });
 
@@ -950,7 +950,8 @@ describe("SiView 補充：骨架、分頁標籤與狀態橫幅各欄", () => {
     const row = await screen.findByTestId("si-prop-row-PROP-SI-004");
     const cells = within(row).getAllByRole("cell");
     const p = GA.proposals.items[0];
-    expect(cells.map((c) => c.textContent)).toEqual(["", p.id, p.state, p.cls, p.route, String(p.rev), "d21ae6f5", "無", "無"]);
+    // 第一格是「詳情」鈕（TCS-SiFlowVisibility §4.1：與展開鈕同格，不新增欄；展開鈕只有圖示、無文字）
+    expect(cells.map((c) => c.textContent)).toEqual(["詳情", p.id, p.state, p.cls, p.route, String(p.rev), "d21ae6f5", "無", "無"]);
     expect(within(row).getByTitle(p.digest)).toHaveTextContent("d21ae6f5");
     await screen.findByRole("tab", { name: "提案 (1)" });
     // 展開區另列其餘欄位
@@ -986,6 +987,8 @@ describe("SiView 補充：骨架、分頁標籤與狀態橫幅各欄", () => {
 // 掌舵者會以為所有決定都已入帳。所以這裡逐角色驗控件與請求，並釘住「量不到不是沒有」。控件的 testid 前綴＝W21：si-decide-open-、si-resume-open、si-obs-new、si-obs-correct-、si-close-open-。
 
 const WRITE_TESTID = /^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-|schedule-toggle-open|schedule-period-open|run-request-open)/;
+// TCS-SiFlowVisibility §4.1（勘誤 E-4）：封閉的三個唯讀按鈕 testid（提案列「詳情」鈕、巡邏卡的展開鈕與看待入帳清單鈕）不是寫入控件，列入測試內部白名單
+const FLOW_READ_ONLY_TESTID = /^si-(detail-open-|patrol-steps-toggle|patrol-open-writes)/;
 const FORBIDDEN_NAME = /刪除|移除|清除|delete|remove/i;
 const consoleWriteCalls = (stub: SiStub) => stub.calls.filter((c) => c.path === "/api/v1/si/console-writes");
 const AUDIT_A = "b2000000-0000-4000-8000-00000000000a";
@@ -1133,7 +1136,7 @@ describe("AT_935_3_2 沒有刪除 UI：ADMIN 畫面無刪除、移除、清除�
         expect(name, `按鈕名稱：${name}`).not.toMatch(FORBIDDEN_NAME);
         expect(testId, `testid：${testId}`).not.toMatch(FORBIDDEN_NAME);
         if (READ_ONLY_TESTIDS.has(testId)) seenReadOnly.add(testId);
-        if (el.tagName === "BUTTON" && testId.startsWith("si-") && !READ_ONLY_TESTIDS.has(testId)) {
+        if (el.tagName === "BUTTON" && testId.startsWith("si-") && !READ_ONLY_TESTIDS.has(testId) && !FLOW_READ_ONLY_TESTID.test(testId)) {
           expect(testId, `未列名的 si- 按鈕 testid：${testId}`).toMatch(WRITE_TESTID);
           seenPrefixes.add(/^si-(decide-open-|resume-open|obs-new|obs-correct-|close-open-|schedule-toggle-open|schedule-period-open|run-request-open)/.exec(testId)?.[1] as string);
         }

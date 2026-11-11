@@ -343,6 +343,36 @@ public final class MiniBridge implements AutoCloseable {
             return schedule;
         }
 
+        // ── 鍵 agentconsole-si-flow-visibility（TCS-SiFlowVisibility §5.5；對照 routers/si.py 的 GET /si/patrol）──
+
+        /** {@code GET /si/patrol} 的回應覆蓋；{@code null}＝預設 503 {@code si_unavailable}（{@code cause=report_missing}）。 */
+        public volatile PatrolReply patrolReply;
+        /** 每個收到的 {@code GET /si/patrol} 請求（依到達順序）：方法、原始路徑與查詢字串、是否帶 {@code X-Bridge-Token}、本文位元組數。 */
+        public final List<PatrolSeen> patrolSeen = new CopyOnWriteArrayList<>();
+
+        /** 巡邏快照端點的回應：狀態碼與本文（Bridge 形狀；失敗時含 {@code reason}、{@code cause}、{@code detail}，缺 {@code code} 時補上）。 */
+        public record PatrolReply(int status, Map<String, Object> body) {
+        }
+
+        /** 一個收到的巡邏快照請求。 */
+        public record PatrolSeen(String method, String uri, String query, boolean tokenHeader, long bodyBytes) {
+        }
+
+        /** 單筆提案 export 物件（Bridge 形狀）：{@code items} 恰一筆，{@code detail} 等鍵由呼叫端的 {@code item} 決定。 */
+        public static Map<String, Object> proposalExport(Map<String, Object> item) {
+            Map<String, Object> out = new java.util.LinkedHashMap<>();
+            out.put("schema_rev", 1);
+            out.put("kind", "proposals");
+            out.put("generated_at", "2026-11-11T14:00:00+08:00");
+            out.put("head_sha", null);
+            out.put("items", List.of(item));
+            out.put("next_since", null);
+            out.put("truncated", false);
+            out.put("ne", List.of());
+            out.put("problems", List.of());
+            return out;
+        }
+
         /** 迷你 Bridge 收到的 {@code GET /si/status} 次數（零副作用與「{@code run-request} 不取界」的斷言用）。 */
         public long statusRequests() {
             return seen.stream().filter(request -> "/si/status".equals(request.uri())).count();
@@ -365,6 +395,8 @@ public final class MiniBridge implements AutoCloseable {
             arrayBody = false;
             delayMillis = 0;
             seen.clear();
+            patrolReply = null;
+            patrolSeen.clear();
             writes.clear();
             writeReply = null;
             validateFailure = null;
@@ -543,6 +575,16 @@ public final class MiniBridge implements AutoCloseable {
 
     public long countRequests(String prefix) {
         return requestLog.stream().filter(r -> r.startsWith(prefix)).count();
+    }
+
+    /** 設定 {@code GET /si/patrol} 的回應（狀態碼與 Bridge 形狀的本文；TCS-SiFlowVisibility §5.5）。 */
+    public void patrol(int status, Map<String, Object> body) {
+        si.patrolReply = new Si.PatrolReply(status, body);
+    }
+
+    /** 設定 {@code GET /si/proposals/{id}} 回放的單筆 export 物件：{@code items} 恰一筆（{@code item}，含或不含 {@code detail}）。 */
+    public void proposalDetail(String id, Map<String, Object> item) {
+        si.payloads.put("proposal:" + id, Si.proposalExport(item));
     }
 
     /** 每個收到的請求與它帶的 {@code X-Trace-Id}（依到達順序；SSE 串流請求在建立連線時就記下）。 */

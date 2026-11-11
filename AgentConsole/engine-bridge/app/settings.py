@@ -51,6 +51,15 @@
                               BRIDGE_SI_WRITE_TOKEN 皆有設（未啟用時三個寫入端點一律 503
                               `si_write_disabled`）。docker compose 把它以可寫 bind 掛到主機的
                               `<AUTOSDD_SI_DIR>/console_audit`（其餘 SI bind 皆唯讀）
+  BRIDGE_SI_REPORT_DIR        巡邏快照目錄（容器內路徑；TCS-SiFlowVisibility W-F1、W-F2）：
+                              根層巡邏器
+                              把 `patrol.json` 寫在這裡，`GET /si/patrol` 只讀它
+                              （`app/si_report.py`）。
+                              須為絕對路徑、不可是檔案系統根、不可與 BRIDGE_SI_AUDIT_DIR 相同；
+                              不檢查存在性。未設＝此部署沒有掛載（`/si/patrol` 回 503
+                              `report_dir_unset`，其他 SI 端點與 `/health` 不受影響）。docker
+                              compose 把它以**唯讀** bind 掛到主機的
+                              `<AUTOSDD_SI_DIR>/console_report`
   BRIDGE_RESEARCH_ROOT        ResearchToPRD 研究工作區根（ADR-003 D8）。預設在 **repo 外**：
                               Windows 為家目錄（USERPROFILE）下的 .autosdd/my-project，
                               POSIX 為 ~/.autosdd/my-project（Docker 由 compose 明設
@@ -191,6 +200,10 @@ class Settings:
     #: 稽核檔落地目錄（P2b W1；已 resolve、不檢查存在性、不併入 allowed_path_roots）。
     #: None＝寫入面停用。
     si_audit_dir: Path | None = None
+    #: 巡邏快照目錄（TCS-SiFlowVisibility W-F1；已 resolve、不檢查存在性、**唯讀**、不併入
+    #: allowed_path_roots、不得與稽核目錄相同）。None＝此部署沒有掛載（`/si/patrol` 回 503
+    #: `report_dir_unset`，其他 SI 功能不受影響）。
+    si_report_dir: Path | None = None
 
     @property
     def si_write_enabled(self) -> bool:
@@ -274,6 +287,24 @@ def _parse_si_write_token(env: Mapping[str, str]) -> str | None:
     return _parse_write_token(env, "BRIDGE_SI_WRITE_TOKEN", "SI 寫入面")
 
 
+def _parse_si_report_dir(env: Mapping[str, str], audit_dir: Path | None) -> Path | None:
+    """`BRIDGE_SI_REPORT_DIR`：未設（含全空白）＝None；須為絕對路徑（Windows 的 `/x` 這種「無磁碟機
+    代號但有根」也算，故以 `anchor` 判斷）、不可是檔案系統根、不可與稽核目錄相同（兩個目錄一個唯讀
+    一個可寫，同一個就等於把稽核目錄當快照來源）。不檢查存在性、不建立目錄。"""
+    raw = env.get("BRIDGE_SI_REPORT_DIR", "").strip()
+    if not raw:
+        return None
+    if Path(raw).anchor == "":
+        raise SettingsError(f"BRIDGE_SI_REPORT_DIR 須為絕對路徑（實際 {raw!r}）")
+    resolved = _anchor_guard(Path(raw), "BRIDGE_SI_REPORT_DIR",
+                             "快照目錄是唯讀來源，檔案系統根等於把整個磁碟當作回報目錄")
+    if audit_dir is not None and os.path.normcase(str(resolved)) == os.path.normcase(
+            str(audit_dir)):
+        raise SettingsError("BRIDGE_SI_REPORT_DIR 不得與 BRIDGE_SI_AUDIT_DIR 相同"
+                            "（一個唯讀的回報目錄、一個可寫的稽核目錄，必須是兩個目錄）")
+    return resolved
+
+
 def _parse_float(env: Mapping[str, str], name: str, default: float) -> float:
     raw = env.get(name, "").strip()
     if not raw:
@@ -352,6 +383,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         Path(raw_audit), "BRIDGE_SI_AUDIT_DIR",
         "稽核檔會寫在這個目錄之下，檔案系統根等於整個磁碟都可寫") if raw_audit else None
 
+    si_report_dir = _parse_si_report_dir(e, si_audit_dir)
+
     return Settings(
         host=e.get("BRIDGE_HOST", "").strip() or "127.0.0.1",
         port=port,
@@ -382,4 +415,5 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         si_root=si_root,
         si_write_token=_parse_si_write_token(e),
         si_audit_dir=si_audit_dir,
+        si_report_dir=si_report_dir,
     )

@@ -412,10 +412,19 @@ class BridgeHttpAdapter implements AgentBridge, ResearchBridge {
             }
         }
         // 網址已是完整、已編碼的 URI：不再交給範本引擎（它會把已編好的 % 再編一次，也無法表達「整段為 .／.. 時點字元編成 %2E」）
-        URI uri = URI.create(url.toString());
+        return getSiObject(URI.create(url.toString()), "GET /si/" + kind);
+    }
+
+    /** {@code GET /si/patrol}：無查詢參數、不重試、連線 2 秒／讀取 20 秒；回 Bridge 本文原樣（鍵與值都不動）。 */
+    @Override
+    public SiExport siPatrol() {
+        return getSiObject(URI.create(endpoints.siBase() + "/si/patrol"), "GET /si/patrol");
+    }
+
+    private SiExport getSiObject(URI uri, String what) {
         Object doc = getJson(rest -> rest.get().uri(uri), SI_READ_TIMEOUT, 0);
         if (!(doc instanceof Map<?, ?>)) {
-            throw malformed("GET /si/" + kind);
+            throw malformed(what);
         }
         return new SiExport(asMap(doc));
     }

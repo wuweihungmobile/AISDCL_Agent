@@ -36,6 +36,7 @@ import {
   propStatusClass,
   type ProposalFilters,
 } from "@/lib/domain/si";
+import { SI_FLOW_TEXTS as T, fillText } from "@/lib/domain/siFlow";
 import { nextSort, sortRows, type SortColumn, type SortState } from "@/lib/domain/sorting";
 import {
   ExpandToggle,
@@ -104,7 +105,16 @@ function ProposalDetail({ p, id }: { p: SiProposal; id: string }) {
   );
 }
 
-export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string | null) => void; onDecide?: (proposal: SiProposal) => void }) {
+export function SiProposalsPanel({
+  onCount,
+  onDecide,
+  onOpenDetail,
+}: {
+  onCount: (text: string | null) => void;
+  onDecide?: (proposal: SiProposal) => void;
+  /** 開啟提案詳情對話框（所有角色；唯讀，按下才取數）。沒給＝沒有「詳情」鈕（與修改前相同）。 */
+  onOpenDetail?: (proposal: SiProposal) => void;
+}) {
   const columns = onDecide ? BASE_COLUMNS + 1 : BASE_COLUMNS;
   const q = useSiProposals();
   const [filters, setFilters] = useState<ProposalFilters>(EMPTY_PROPOSAL_FILTERS);
@@ -169,7 +179,7 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
             <caption className="sr-only">提案</caption>
             <thead>
               <tr className="border-b border-wg-line text-xs text-wg-muted">
-                <th scope="col" className="w-10 py-2">
+                <th scope="col" className="w-24 py-2">
                   <span className="sr-only">操作</span>
                 </th>
                 {SORT_COLUMNS.map((c) => (
@@ -191,7 +201,14 @@ export function SiProposalsPanel({ onCount, onDecide }: { onCount: (text: string
                   <Fragment key={identityKey(p)}>
                     <tr data-testid={`si-prop-row-${p.id}`} className="border-b border-wg-line align-top">
                       <td className="py-1.5">
-                        <ExpandToggle name={p.id} expanded={expanded} controls={detailId} onToggle={() => setOpen((prev) => ({ ...prev, [p.id]: !expanded }))} />
+                        <div className="flex items-center gap-1">
+                          <ExpandToggle name={p.id} expanded={expanded} controls={detailId} onToggle={() => setOpen((prev) => ({ ...prev, [p.id]: !expanded }))} />
+                          {onOpenDetail ? (
+                            <Button variant="ghost" size="sm" aria-label={fillText(T.detailButtonLabelFmt, { id: p.id })} data-testid={`si-detail-open-${p.id}`} onClick={() => onOpenDetail(p)}>
+                              {T.detailButton}
+                            </Button>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">
                         {p.id}

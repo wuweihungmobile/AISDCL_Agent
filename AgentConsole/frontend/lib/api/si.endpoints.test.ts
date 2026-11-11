@@ -30,11 +30,11 @@ function stubFetch() {
   return () => fetchMock.mock.calls.map((c) => c as unknown as [string, RequestInit]);
 }
 
-const SI_READ_FUNCTIONS = ["getSiConsoleWrites", "getSiEvents", "getSiObservations", "getSiProposal", "getSiProposals", "getSiRuns", "getSiStatus"];
+const SI_READ_FUNCTIONS = ["getSiConsoleWrites", "getSiEvents", "getSiObservations", "getSiPatrol", "getSiProposal", "getSiProposals", "getSiRuns", "getSiStatus"];
 const SI_WRITE_FUNCTIONS = ["postSiDecide", "postSiObservation", "postSiObservationClose", "postSiObservationValidate", "postSiRunRequest", "postSiScheduleSet"];
 
-describe("AT_950_9_E_1 endpoints.ts 的 SI 匯出受限：get 加 Si 恰七個、post 加 Si 恰六個（P4 加排程設定與立即啟動），沒有 put、patch、delete，總數受同步", () => {
-  it("AT_950_9_E_1 名稱符合 ^(get|post|put|patch|delete)Si 的匯出恰為七個 getSi*（P1b 的六個加 getSiConsoleWrites）與六個 postSi*（P2b 的四個加 P4 的 postSiScheduleSet、postSiRunRequest），沒有任何 putSi、patchSi、deleteSi", () => {
+describe("AT_950_9_E_1 endpoints.ts 的 SI 匯出受限：只有 get 與 post 兩類，沒有 put、patch、delete，總數受同步", () => {
+  it("AT_950_9_E_1 名稱符合 ^(get|post|put|patch|delete)Si 的匯出恰為 SI_READ_FUNCTIONS 列的 getSi* 與 SI_WRITE_FUNCTIONS 列的 postSi*，沒有任何 putSi、patchSi、deleteSi", () => {
     const names = Object.keys(api).filter((n) => /^(get|post|put|patch|delete)Si/.test(n));
     expect(names.filter((n) => n.startsWith("get")).sort()).toEqual(SI_READ_FUNCTIONS);
     expect(names.filter((n) => n.startsWith("post")).sort()).toEqual(SI_WRITE_FUNCTIONS);
@@ -42,9 +42,9 @@ describe("AT_950_9_E_1 endpoints.ts 的 SI 匯出受限：get 加 Si 恰七個�
     expect(names).toHaveLength(SI_READ_FUNCTIONS.length + SI_WRITE_FUNCTIONS.length);
   });
 
-  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選為 132（P2b 由 74 加五個 SI 函式成 79，議題中心再加四個，備份總覽再加一個成 84，ResearchToPRD P0 再加 25 個研究端點函式成 109，P1 再加 9 個成 118，P2 再加 7 個成 125，P4 排程再加 2 個成 127，研究來源單一化再加 5 個成 132）、EXPECTED 的 SI 十三列只增不減：讀原始碼逐項核對，不靠記憶", () => {
+  it("AT_950_9_E_1 endpoints.test.ts 的總數釘選與現行匯出一致、EXPECTED 的 SI 各列只增不減：讀原始碼逐項核對，不靠記憶", () => {
     const source = readFileSync(path.join(ROOT, "lib", "api", "endpoints.test.ts"), "utf-8");
-    expect(source, "總數釘選必須是 132").toContain("expect(names).toHaveLength(132);");
+    expect(source, "總數釘選必須是 133（核准流程全程可見再加 getSiPatrol）").toContain("expect(names).toHaveLength(133);");
     expect(source, "總數釘選不得還留著 79").not.toContain("toHaveLength(79)");
     for (const fn of [...SI_READ_FUNCTIONS.filter((n) => n !== "getSiConsoleWrites"), "getSiConsoleWrites", ...SI_WRITE_FUNCTIONS]) {
       expect(source, `EXPECTED 缺 ${fn}`).toContain(`"${fn}"`);
@@ -223,7 +223,7 @@ describe("AT_950_9_1 五個新端點函式：方法、網址、本文與 id 編�
 /** 一個 SI 路徑期望的方法與 operationId（其餘方法一律不得出現）。 */
 type PathSpec = Partial<Record<"get" | "post", string>>;
 
-describe("AT_950_10_2 已入庫的 schema.d.ts 含十二個 SI 路徑，各自只有規劃過的方法（含七個新 operationId）", () => {
+describe("AT_950_10_2 已入庫的 schema.d.ts 的 SI 路徑，各自只有規劃過的方法", () => {
   const schema = readFileSync(path.join(ROOT, "lib", "api", "schema.d.ts"), "utf-8");
   const PATHS: Array<[path: string, spec: PathSpec]> = [
     ["/api/v1/si/status", { get: "getSiStatus" }],
@@ -241,6 +241,8 @@ describe("AT_950_10_2 已入庫的 schema.d.ts 含十二個 SI 路徑，各自�
     // 研究來源單一化（TCS-ResearchRegistry AT-965-9-4）：兩個新路徑（狀態讀面＋同步寫入）
     ["/api/v1/si/research-registry", { get: "getSiResearchRegistry" }],
     ["/api/v1/si/research-registry/sync", { post: "postSiResearchRegistrySync" }],
+    // 核准流程全程可見（TCS-SiFlowVisibility §4.1）：巡邏狀態讀面
+    ["/api/v1/si/patrol", { get: "getSiPatrol" }],
   ];
 
   /** openapi-typescript 的 paths 區塊：`"<路徑>": {` 起、下一個縮排四格的 `};` 止。 */
@@ -260,7 +262,7 @@ describe("AT_950_10_2 已入庫的 schema.d.ts 含十二個 SI 路徑，各自�
     for (const operationId of Object.values(spec)) expect(schema).toContain(`${operationId}: {`);
   });
 
-  it("AT_950_10_2 schema.d.ts 中以 /api/v1/si/ 起頭的路徑鍵恰為這十二個（不多不少）；六個新路徑與七個新 operationId 都在", () => {
+  it("AT_950_10_2 schema.d.ts 中以 /api/v1/si/ 起頭的路徑鍵恰為 PATHS 列的那些（不多不少）；各新路徑與新 operationId 都在", () => {
     const keys = [...schema.matchAll(/^ {4}"(\/api\/v1\/si\/[^"]*)": \{/gm)].map((m) => m[1]);
     expect(keys.sort()).toEqual(PATHS.map(([key]) => key).sort());
     for (const key of [
@@ -337,7 +339,7 @@ describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵�
     expect("dkind" in legacy).toBe(false);
   });
 
-  it("AT_951_6_2 以 /api/v1/si/ 起頭的路徑鍵與 operationId 與重產前相同，只多 P4 的兩個排程路徑與兩個操作（十二個路徑、十三個操作）", () => {
+  it("AT_951_6_2 以 /api/v1/si/ 起頭的路徑鍵與 operationId 與重產前相同，只多 P4 的排程路徑與操作", () => {
     const keys = [...schema.matchAll(/^ {4}"(\/api\/v1\/si\/[^"]*)": \{/gm)].map((m) => m[1]);
     expect(keys.sort()).toEqual(
       [
@@ -346,6 +348,7 @@ describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵�
         "/api/v1/si/observations",
         "/api/v1/si/observations/validate",
         "/api/v1/si/observations/{id}/close",
+        "/api/v1/si/patrol",
         "/api/v1/si/proposals",
         "/api/v1/si/proposals/{id}",
         "/api/v1/si/proposals/{id}/decide",
@@ -373,6 +376,7 @@ describe("AT_951_6_2 已入庫的 schema.d.ts：SiConsoleWriteItem 恰十一鍵�
       "postSiRunRequest",
       "getSiResearchRegistry",
       "postSiResearchRegistrySync",
+      "getSiPatrol",
     ];
     for (const id of operationIds) expect(schema, `operationId ${id}`).toContain(`${id}: {`);
     expect([...schema.matchAll(/operations\["((?:get|post|put|patch|delete)Si\w*)"\]/g)].map((m) => m[1]).sort()).toEqual([...operationIds].sort());
@@ -393,7 +397,8 @@ describe("AT_964_10_2 既有釘選的新預期值：端點數、已知鍵、寫�
     const source = readFileSync(path.join(ROOT, "lib", "api", "endpoints.test.ts"), "utf-8");
     const PRIOR_TOTAL = 125;
     // 125＋2（P4 排程）＋5（研究來源單一化：listWatchSources、addWatchSource、patchWatchSource、getRegistrySyncStatus、postRegistrySync）
-    expect(source).toContain(`expect(names).toHaveLength(${PRIOR_TOTAL + 2 + 5});`);
+    // ＋1（核准流程全程可見：getSiPatrol，TCS-SiFlowVisibility §4.1）
+    expect(source).toContain(`expect(names).toHaveLength(${PRIOR_TOTAL + 2 + 5 + 1});`);
 
     expect([...SI_STATUS_KNOWN_KEYS]).toContain("schedule");
     // 六值：五個 P2b／P4 種類加研究來源單一化的 `src-registry`（TCS-ResearchRegistry AT-965-9-2）

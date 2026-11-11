@@ -358,3 +358,25 @@ describe("AT_964_10_1 自我進化頁說明含排程步驟與欄位字樣", () =
     expect(all).not.toMatch(/任務已停用|任務已壞/);
   });
 });
+
+describe("AT_966_15_1 自我進化頁說明含提案詳情、下一步、巡邏狀態、自動推送四段（TCS-SiFlowVisibility）", () => {
+  it("AT_966_15_1 四段標題與欄位名逐字取自畫面字樣；sourceFiles 含三個新元件；沒有第二波或不存在的功能字樣", () => {
+    const page = HELP_PAGES["self-improving"] as PageHelp;
+    const names = page.fields.map((f) => f.name);
+    for (const title of ["提案詳情", "下一步", "巡邏狀態", "自動推送"]) expect(names, `缺段落 ${title}`).toContain(title);
+    for (const name of ["詳情", "變更內容", "提案本文", "評估集與驗證", "時間線", "上次心跳", "巡邏可能沒在跑", "為什麼沒有啟動運轉"]) expect(names, `欄位名缺 ${name}`).toContain(name);
+    for (const file of ["SiProposalDetail.tsx", "SiDiffView.tsx", "SiPatrolCard.tsx"]) {
+      expect(
+        page.sourceFiles.some((s) => s.endsWith(file)),
+        `sourceFiles 缺 ${file}`,
+      ).toBe(true);
+    }
+    const all = [...page.purpose, ...page.steps, ...page.fields.map((f) => f.meaning)].join("\n");
+    expect(all).not.toMatch(/自動凍結|會自動修訂|按鈕推送|立即推送/);
+    // (b) 五個名詞的白話釋義落在既有結構內（比對 purpose、steps、fields[].meaning 串接後的文字）；沙盒與探針只准以括號形態出現
+    for (const fragment of ["評估集（用來驗證的考題）", "隔離試跑（沙盒）", "檢查項目（探針）", "巡邏快照（巡邏器每個心跳留下的回報檔）"]) expect(all, `缺片段 ${fragment}`).toContain(fragment);
+    const next = page.fields.find((f) => f.name === "下一步");
+    expect(next?.meaning, "下一步要說明現在輪到誰做什麼").toContain("現在輪到誰做什麼");
+    expect(all.replaceAll("隔離試跑（沙盒）", "").replaceAll("檢查項目（探針）", ""), "沙盒與探針只准以括號形態出現").not.toMatch(/沙盒|探針/);
+  });
+});

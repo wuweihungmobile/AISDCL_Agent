@@ -1696,6 +1696,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/si/patrol": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 主機巡邏器的巡邏快照（唯讀；API-SI-16）
+         * @description 唯讀轉遞 Bridge GET /si/patrol：主機巡邏器每個心跳寫出的巡邏快照（patrol.json；readAt 是 Bridge 讀檔的時間，report 是快照內容）。欄名只經 snake_case→camelCase，值不動；未知鍵原樣透傳；不分頁、不收任何查詢參數。每個請求恰一次 Bridge 呼叫（連線 2 秒、讀取 20 秒、不重試），不快取、不寫任何資料；失敗沒有 data：503 si_unavailable 的 details.cause 為 report_dir_unset（此部署沒有掛載巡邏回報目錄）、report_missing（還沒有快照檔）、report_unreadable（讀不了）、report_invalid（壞檔、形狀不符或過大）之一。VIEWER 以上可讀。
+         */
+        get: operations["getSiPatrol"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/si/events": {
         parameters: {
             query?: never;
@@ -14719,6 +14739,71 @@ export interface operations {
                 };
             };
             /** @description si_unavailable：Bridge 的 SelfImproving 資料面不可用（details.cause 為 si_root_unset、si_script_missing、spawn_failed、timeout、stdout_too_large、nonzero_rc、bad_json、schema_rev_mismatch、bad_shape 之一；details.detail 為 rc 與 stderr 末 1,000 字元，逐字取自 Bridge）。不回空表、不回舊資料 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務逾時（讀取 20 秒、不重試） */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getSiPatrol: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiResultSiExportResponse"];
+                };
+            };
+            /** @description 未登入，或 access token 無效／過期 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 超過每分鐘 100 次請求上限（reason：超過每分鐘 100 次請求上限；帶 Retry-After） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description 引擎橋接服務無法連線／回了非預期的錯誤（含 Bridge 的其他 4xx 與 5xx、200 但本文不是 JSON 物件） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description si_unavailable：巡邏快照不可用（details.cause 為 report_dir_unset〔此部署沒有掛載巡邏回報目錄〕、report_missing〔還沒有快照檔〕、report_unreadable〔讀不了〕、report_invalid〔壞檔、形狀不符或過大〕之一；details.detail 逐字取自 Bridge）。不回空表、不回舊資料 */
             503: {
                 headers: {
                     [name: string]: unknown;

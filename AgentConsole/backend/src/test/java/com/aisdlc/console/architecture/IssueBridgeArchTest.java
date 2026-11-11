@@ -42,8 +42,8 @@ class IssueBridgeArchTest {
         JavaClasses classes = mainClasses();
         JavaClass bridge = classes.get(AgentBridge.class);
         List<JavaMethod> siMethods = bridge.getMethods().stream().filter(m -> m.getName().matches("si[A-Z].*")).toList();
-        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰八個（P4 加兩個 siWrite…、研究來源單一化加 siWriteRegistrySync）").extracting(JavaMethod::getName)
-                .containsExactlyInAnyOrder("siExport", "siWriteDecide", "siWriteObservation", "siWriteObservationClose", "siWriteRegistrySync",
+        assertThat(siMethods).as("AgentBridge 上名稱以 si 接大寫字母起頭的方法恰九個（P4 加兩個 siWrite…、研究來源單一化加 siWriteRegistrySync、核准流程可見加 siPatrol）").extracting(JavaMethod::getName)
+                .containsExactlyInAnyOrder("siExport", "siPatrol", "siWriteDecide", "siWriteObservation", "siWriteObservationClose", "siWriteRegistrySync",
                         "siValidateObservation", "siWriteScheduleSet", "siWriteRunRequest");
         JavaMethod siExport = siMethods.stream().filter(m -> m.getName().equals("siExport")).findFirst().orElseThrow();
         assertThat(siExport.getRawParameterTypes()).as("siExport(kind, since, limit, id, status, source)").extracting(JavaClass::getName)
@@ -55,7 +55,7 @@ class IssueBridgeArchTest {
                 .filter(c -> c.getPackageName().equals(WEB) && c.getSimpleName().matches("Si(?![a-z]).*Controller")).toList();
         assertThat(siControllers).as("防反空轉：至少有 SiController").extracting(JavaClass::getSimpleName).contains("SiController");
         List<JavaMethod> methods = siControllers.stream().flatMap(c -> c.getMethods().stream()).toList();
-        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count()).as("SiController 的 GET 恰八個（研究來源單一化加 research-registry）").isEqualTo(8);
+        assertThat(methods.stream().filter(m -> m.isAnnotatedWith(GetMapping.class)).count()).as("SiController 的 GET 恰九個（研究來源單一化加 research-registry、核准流程可見加 patrol）").isEqualTo(9);
         assertThat(methods.stream().filter(m -> m.isAnnotatedWith(PostMapping.class)).count()).as("SiController 的 POST 恰七個（P4 加兩個、研究來源單一化加 research-registry/sync）").isEqualTo(7);
         for (JavaMethod method : methods) {
             assertThat(method.isAnnotatedWith(PutMapping.class) || method.isAnnotatedWith(PatchMapping.class)

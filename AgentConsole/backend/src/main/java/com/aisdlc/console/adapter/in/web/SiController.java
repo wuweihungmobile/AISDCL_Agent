@@ -161,6 +161,16 @@ public class SiController {
         return ApiResult.ok(SiExportResponse.from(si.runs(since, limit)));
     }
 
+    @GetMapping("/patrol")
+    @Operation(operationId = "getSiPatrol", summary = "主機巡邏器的巡邏快照（唯讀；API-SI-16）",
+            description = "唯讀轉遞 Bridge GET /si/patrol：主機巡邏器每個心跳寫出的巡邏快照（patrol.json；readAt 是 Bridge 讀檔的時間，report 是快照內容）。"
+                    + "欄名只經 snake_case→camelCase，值不動；未知鍵原樣透傳；不分頁、不收任何查詢參數。每個請求恰一次 Bridge 呼叫（連線 2 秒、讀取 20 秒、不重試），"
+                    + "不快取、不寫任何資料；失敗沒有 data：503 si_unavailable 的 details.cause 為 report_dir_unset（此部署沒有掛載巡邏回報目錄）、"
+                    + "report_missing（還沒有快照檔）、report_unreadable（讀不了）、report_invalid（壞檔、形狀不符或過大）之一。VIEWER 以上可讀。")
+    public ApiResult<SiExportResponse> patrol() {
+        return ApiResult.ok(SiExportResponse.from(si.patrol()));
+    }
+
     // ── P2b：寫入載體（僅 ADMIN；Console 不寫帳本，只落經簽章的稽核檔）──────────────────────────────────
 
     @PostMapping("/proposals/{id}/decide")

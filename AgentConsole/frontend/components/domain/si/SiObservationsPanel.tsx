@@ -9,10 +9,12 @@
  * P2b：給了寫入回呼（只有 ADMIN）時多出三個入口——工具列的「新增觀察」（`si-obs-new`）、每個**有效列**的「更正」（`si-obs-correct-<ID>`；壞列沒有 id、不提供）、
  * 以及處置**恰為 open** 的有效列的「關閉」（`si-close-open-<ID>`）。沒給＝與 P1b 逐位元組相同的唯讀畫面。
  */
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { SortableHeader } from "@/components/domain/common/SortableHeader";
 import { Button } from "@/components/ui/button";
+import { SI_FLOW_TEXTS as T, fillText } from "@/lib/domain/siFlow";
+import { cn } from "@/lib/utils";
 import { useSiObservations } from "@/lib/api/queries";
 import type { SiObservation, SiObservationRow } from "@/lib/api/types";
 import {
@@ -120,9 +122,22 @@ function ObservationFields({ row, id }: { row: SiObservation; id: string }) {
   );
 }
 
-export function SiObservationsPanel({ onCount, actions }: { onCount: (text: string | null) => void; actions?: ObservationWriteActions }) {
+export function SiObservationsPanel({
+  onCount,
+  actions,
+  highlightId,
+}: {
+  onCount: (text: string | null) => void;
+  actions?: ObservationWriteActions;
+  /** 從提案詳情的來源觀察跳轉來的目標（一次性；呼叫端在切離分頁時清掉） */ highlightId?: string | null;
+}) {
   const columns = actions ? BASE_COLUMNS + 1 : BASE_COLUMNS;
   const q = useSiObservations();
+  const highlightRef = useRef<HTMLTableRowElement | null>(null);
+  // 跳轉目標的列一出現就取得焦點（tabIndex=-1，只供程式聚焦）；列還沒載入時下方顯示說明
+  useEffect(() => {
+    if (highlightId) highlightRef.current?.focus();
+  }, [highlightId, q.data]);
   const [filters, setFilters] = useState<ObsFilters>(EMPTY_OBS_FILTERS);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [sort, setSort] = useState<SortState>(null);
@@ -171,6 +186,12 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
   return (
     <div>
       <SiNotes ne={mergeNotes(pages.map((p) => p.ne))} problems={mergeNotes(pages.map((p) => p.problems))} />
+
+      {highlightId && !items.some((r) => !isInvalidRow(r) && r.id === highlightId) ? (
+        <p data-testid="si-obs-highlight-missing" role="status" className="mb-3 text-sm text-wg-warning-text">
+          {fillText(T.sourceNotLoaded, { id: highlightId })}
+        </p>
+      ) : null}
 
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2">
         <StatusFilter
@@ -254,7 +275,13 @@ export function SiObservationsPanel({ onCount, actions }: { onCount: (text: stri
                 const unparsable = filters.window !== "all" && inDateWindow(row.time, anchor, filters.window) === "unparsable";
                 return (
                   <Fragment key={identityKey(row)}>
-                    <tr data-testid={`si-obs-row-${row.id}`} className="border-b border-wg-line align-top">
+                    <tr
+                      data-testid={`si-obs-row-${row.id}`}
+                      ref={highlightId === row.id ? highlightRef : undefined}
+                      tabIndex={highlightId === row.id ? -1 : undefined}
+                      data-highlight={highlightId === row.id ? "true" : undefined}
+                      className={cn("border-b border-wg-line align-top", highlightId === row.id ? "bg-wg-draft-bg outline-2 outline-wg-primary" : "")}
+                    >
                       <td className="py-1.5">
                         <ExpandToggle name={row.id} expanded={expanded} controls={fieldsId} onToggle={() => setOpen((prev) => ({ ...prev, [row.id]: !expanded }))} />
                       </td>

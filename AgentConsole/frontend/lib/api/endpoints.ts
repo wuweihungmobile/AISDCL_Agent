@@ -119,7 +119,9 @@ import type {
   SiObservationRequest,
   SiObservationRow,
   SiPage,
+  SiPatrol,
   SiProposal,
+  SiProposalWithDetail,
   SiRun,
   SiRunRequest,
   SiScheduleSetRequest,
@@ -589,6 +591,11 @@ export function downloadProjectReport(projectId: string, params: ReportParams = 
 // 瀏覽器只呼叫 console-api 的 /api/v1/si/**，從不直連 Bridge（Architecture §10.1）。
 type SiOpts = SiListParams & Opts;
 
+/** 巡邏快照（API-SI-16）：不收任何查詢參數（Bridge 對任何參數回 422）；缺席與壞檔是 503 `si_unavailable` 加 cause。 */
+export function getSiPatrol(opts: Opts = {}): Promise<SiPatrol> {
+  return apiRequest<SiPatrol>("/api/v1/si/patrol", { signal: opts.signal });
+}
+
 /** 狀態橫幅：不收任何查詢參數（`since`、`limit` 會被 Bridge 以 422 擋下）。 */
 export function getSiStatus(opts: Opts = {}): Promise<SiPage<SiStatusItem>> {
   return apiRequest<SiPage<SiStatusItem>>("/api/v1/si/status", { signal: opts.signal });
@@ -608,8 +615,8 @@ export function getSiProposals(opts: SiOpts = {}): Promise<SiPage<SiProposal>> {
 }
 
 /** 單筆提案：`id` 以 encodeURIComponent 編成單一路徑段；不收查詢參數；查無回 404 `si_not_found`。 */
-export function getSiProposal(id: string, opts: Opts = {}): Promise<SiPage<SiProposal>> {
-  return apiRequest<SiPage<SiProposal>>(`/api/v1/si/proposals/${seg(id)}`, { signal: opts.signal });
+export function getSiProposal(id: string, opts: Opts = {}): Promise<SiPage<SiProposalWithDetail>> {
+  return apiRequest<SiPage<SiProposalWithDetail>>(`/api/v1/si/proposals/${seg(id)}`, { signal: opts.signal });
 }
 
 export function getSiRuns(opts: SiOpts = {}): Promise<SiPage<SiRun>> {

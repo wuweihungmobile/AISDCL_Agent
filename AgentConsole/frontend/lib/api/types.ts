@@ -355,6 +355,15 @@ export type SiStatusItem = {
 /** 清單查詢的參數：`since` 為嚴格大於的游標（整數 ≥0）、`limit` 為整數 ≥1；undefined 不進網址。 */
 export type SiListParams = { since?: number; limit?: number };
 
+/**
+ * 巡邏快照（`GET /api/v1/si/patrol`；TCS-SiFlowVisibility C-1、C-2）：`readAt` 是 Bridge 讀檔當下的時間；`report` 是主機寫的 `patrol.json` 逐值透傳
+ * （前端收到的是 camelCase 鍵）。形狀由 `lib/domain/siFlow.ts` 的純函式逐欄驗證（缺席、null、錯型別一律「量不到」），所以這裡只宣告外層。
+ */
+export type SiPatrol = { schemaRev: number; kind: string; readAt?: string; report: Record<string, unknown> } & Record<string, unknown>;
+
+/** 單筆提案回應的 `items[0]`：清單端點沒有 `detail`；舊根層也沒有（缺席＝量不到，不是空物件）。 */
+export type SiProposalWithDetail = SiProposal & { detail?: unknown };
+
 // ── SelfImproving 寫入載體（P2b；TCS-SelfImprovingDecide-P2b W16）──────────────────────────────────
 // 與上面的鏡像型別不同：寫入端點的請求與回應在 backend 是有型別的 DTO（不是「任意物件」），所以直接取 schema.d.ts 的產生型別（單一出處）——
 // 日後後端改欄位，這裡與 lib/domain/si.ts 會在 tsc 紅燈，而不是到執行期才錯。稽核簽章在 backend、落檔在 Bridge，前端沒有任何金鑰、不組稽核 JSON。

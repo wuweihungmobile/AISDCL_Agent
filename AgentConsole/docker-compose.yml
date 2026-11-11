@@ -241,6 +241,10 @@ services:
       # 權杖與 backend 的 BRIDGE_SI_WRITE_TOKEN 同值；預設空＝SI 寫入面停用（寫入端點回 503 si_write_disabled）。Bridge 不持有簽章金鑰。
       BRIDGE_SI_WRITE_TOKEN: ${BRIDGE_SI_WRITE_TOKEN:-}
       BRIDGE_SI_AUDIT_DIR: /si-audit
+      # 🔴 SelfImproving 巡邏快照（TCS-SiFlowVisibility W-F1、W-F2）：根層巡邏器把 patrol.json 寫在主機的
+      # <AUTOSDD_SI_DIR>/console_report，Bridge 只讀它（`GET /si/patrol`）；容器內路徑固定 /si-report（下面的**唯讀** bind）。
+      # 未設＝此部署沒有掛載（`/si/patrol` 回 503 report_dir_unset），其他 SI 功能不受影響。不得與 BRIDGE_SI_AUDIT_DIR 相同。
+      BRIDGE_SI_REPORT_DIR: /si-report
       # 🔴 ResearchToPRD 研究面（ADR-003 D8／D10、ADR-XPLAT-017；Architecture §9.4）：工作區在唯一可寫的 /workspace 之下（自動併入允許根）；
       # 全棧只跑 mock claude 的 E2E（真研究限本機模式）；權杖與 backend 同值、預設空＝研究寫入端點停用；研究端點另需上面的 BRIDGE_DB_DSN。
       BRIDGE_RESEARCH_ROOT: /workspace/my-project
@@ -306,6 +310,15 @@ services:
         source: ${AUTOSDD_SI_DIR:-${USERPROFILE:-${HOME}}/.autosdd/selfimproving}/console_audit
         target: /si-audit
         read_only: false
+        bind:
+          create_host_path: false
+      # 🔴 巡邏回報目錄（TCS-SiFlowVisibility W-F2；**唯讀**）：主機的 <AUTOSDD_SI_DIR>/console_report → 容器的 BRIDGE_SI_REPORT_DIR。
+      # 來源前綴運算式與上面稽核 bind 逐字相同（同一個 AUTOSDD_SI_DIR）；長語法、read_only、create_host_path: false＝目錄缺席時
+      # `docker compose up` 明確失敗（要先建，步驟見 docker/README.md〈巡邏回報目錄〉）。engine-bridge 唯一可寫的 bind 仍只有稽核目錄。
+      - type: bind
+        source: ${AUTOSDD_SI_DIR:-${USERPROFILE:-${HOME}}/.autosdd/selfimproving}/console_report
+        target: /si-report
+        read_only: true
         bind:
           create_host_path: false
     healthcheck:

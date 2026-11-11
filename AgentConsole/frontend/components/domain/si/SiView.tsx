@@ -24,12 +24,15 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { pillPanelId, pillTabId, PillTabs } from "@/components/ui/pill-tabs";
 import { qk } from "@/lib/api/queries";
+import type { SiProposal } from "@/lib/api/types";
 import { useAuth } from "@/lib/auth/AuthProvider";
 import { SiDecideDialog, type DecideTarget } from "./SiDecideDialog";
 import { SiEventsPanel } from "./SiEventsPanel";
 import { SiObsCloseDialog, type CloseTarget } from "./SiObsCloseDialog";
 import { SiObsForm, type ObsFormTarget } from "./SiObsForm";
 import { SiObservationsPanel } from "./SiObservationsPanel";
+import { SiPatrolCard } from "./SiPatrolCard";
+import { SiProposalDetail } from "./SiProposalDetail";
 import { SiProposalsPanel } from "./SiProposalsPanel";
 import { SiRunRequestDialog } from "./SiRunRequestDialog";
 import { SiScheduleDialog, type ScheduleTarget } from "./SiScheduleDialog";
@@ -59,6 +62,9 @@ export function SiView() {
   const [closeTarget, setCloseTarget] = useState<CloseTarget | null>(null);
   const [scheduleTarget, setScheduleTarget] = useState<ScheduleTarget | null>(null);
   const [runRequestOpen, setRunRequestOpen] = useState(false);
+  // 提案詳情（所有角色、唯讀）：目標為 null＝關閉；來源觀察跳轉的高亮目標是一次性的（切分頁即清掉）
+  const [detailTarget, setDetailTarget] = useState<SiProposal | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   return (
     <div data-testid="si-view">
@@ -81,6 +87,8 @@ export function SiView() {
 
       <SiStatusBanner onResume={isAdmin ? (run) => setDecideTarget({ kind: "run", run }) : undefined} />
 
+      <SiPatrolCard onOpenProposal={setDetailTarget} />
+
       <p data-testid="si-research-sources-note" className="-mt-2 mb-5 text-sm text-wg-muted">
         研究來源在『
         {isAdmin ? (
@@ -102,7 +110,10 @@ export function SiView() {
         idBase={ID_BASE}
         tabs={TABS.map((t) => ({ id: t.id, label: t.id === tab && count ? `${t.label} ${count}` : t.label }))}
         value={tab}
-        onChange={setTab}
+        onChange={(next) => {
+          setTab(next);
+          setHighlightId(null);
+        }}
         className="mb-4"
       />
 
@@ -110,6 +121,7 @@ export function SiView() {
         {tab === "observations" ? (
           <SiObservationsPanel
             onCount={setCount}
+            highlightId={highlightId}
             actions={
               isAdmin
                 ? {
@@ -121,11 +133,20 @@ export function SiView() {
             }
           />
         ) : tab === "proposals" ? (
-          <SiProposalsPanel onCount={setCount} onDecide={isAdmin ? (proposal) => setDecideTarget({ kind: "prop", proposal }) : undefined} />
+          <SiProposalsPanel onCount={setCount} onOpenDetail={setDetailTarget} onDecide={isAdmin ? (proposal) => setDecideTarget({ kind: "prop", proposal }) : undefined} />
         ) : (
           <SiEventsPanel onCount={setCount} />
         )}
       </Card>
+
+      <SiProposalDetail
+        proposal={detailTarget}
+        onClose={() => setDetailTarget(null)}
+        onJumpToObservation={(obsId) => {
+          setTab("observations");
+          setHighlightId(obsId);
+        }}
+      />
 
       {isAdmin ? (
         <>

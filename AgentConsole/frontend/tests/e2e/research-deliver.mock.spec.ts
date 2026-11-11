@@ -6,7 +6,7 @@ import { R3 } from "../fixtures/research/ids";
 import { ALLOWLIST, CAPABILITIES_LOCAL, EVIDENCE, RECORDS_AUDIT, SOURCES } from "../fixtures/research/misc";
 import { DELIVERY_OVERVIEW, TRACEABILITY } from "../fixtures/research/p2";
 import { detailVariant, flowOf, PROJECT_LIST } from "../fixtures/research/projects";
-import { expectNoA11yViolations } from "./a11y";
+import { expectNoA11yViolations, RESEARCH_WIDTHS } from "./a11y";
 import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, type MockHandler } from "./mockApi";
 
 /**
@@ -16,8 +16,6 @@ import { collectConsoleErrors, compose, installApiMock, shellHandler, signInAs, 
  * 判定指令：npx playwright test tests/e2e/research-deliver.mock.spec.ts --output=<各自目錄>（cwd＝AgentConsole/frontend；production 建置形態用 E2E_MODE=standalone）
  */
 const BASE = `/api/v1/research/projects/${R3}`;
-/** 與 a11y.mock.spec.ts 的 RESEARCH_WIDTHS 同值（該檔屬 FE-P2A，這裡重宣告同一組）。 */
-const RESEARCH_WIDTHS = [1440, 1000, 600] as const;
 
 const LONG_TEXT = "Given 一個很長很長的情境描述 When 使用者在狹窄的視窗開啟追溯表 Then 版面必須自己換行而不是把頁面撐出水平捲軸，".repeat(3);
 const LONG_SOURCE = `task:${"t".repeat(80)}／RTM-COVERAGE-${"x".repeat(60)}.yaml`;

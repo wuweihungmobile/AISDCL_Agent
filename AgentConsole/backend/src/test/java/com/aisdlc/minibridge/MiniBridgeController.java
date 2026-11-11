@@ -280,6 +280,40 @@ class MiniBridgeController {
         return si(http, "/si/runs", "runs", null);
     }
 
+    /**
+     * 鍵 agentconsole-si-flow-visibility（TCS-SiFlowVisibility §5.5；對照 routers/si.py 的 {@code GET /si/patrol}）：記錄請求（{@code MINI.requests()} 記
+     * {@code GET /si/patrol}；{@code si.patrolSeen} 記方法、原始路徑與查詢、是否帶權杖標頭、本文位元組數）→ 回呼 {@code si.onRead} → 延遲 →
+     * {@code si.patrolReply}（{@code null}＝503 {@code report_missing}）。
+     */
+    @GetMapping("/si/patrol")
+    ResponseEntity<Object> siPatrol(HttpServletRequest http) {
+        bridge.record("GET /si/patrol");
+        bridge.si.patrolSeen.add(new MiniBridge.Si.PatrolSeen(http.getMethod(), http.getRequestURI(), http.getQueryString(),
+                http.getHeader("X-Bridge-Token") != null, http.getContentLengthLong()));
+        java.util.function.Consumer<String> readHook = bridge.si.onRead;
+        if (readHook != null) {
+            readHook.accept("/si/patrol");
+        }
+        long delay = bridge.si.delayMillis;
+        if (delay > 0) {
+            try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        MiniBridge.Si.PatrolReply reply = bridge.si.patrolReply;
+        if (reply == null) {
+            return error(503, "si_unavailable", "cause", "report_missing", "detail", "patrol.json 不存在");
+        }
+        Map<String, Object> body = new java.util.LinkedHashMap<>();
+        if (reply.status() >= 400) {
+            body.put("code", reply.status());
+        }
+        body.putAll(reply.body());
+        return ResponseEntity.status(reply.status()).contentType(MediaType.APPLICATION_JSON).body(body);
+    }
+
     // 議題中心（TCS-IssueCenter-20261027 D-C12；對照 routers/si.py 的兩個議題 GET）：失敗旋鈕與回放規則同上
     @GetMapping("/si/issues")
     ResponseEntity<Object> siIssues(HttpServletRequest http) {

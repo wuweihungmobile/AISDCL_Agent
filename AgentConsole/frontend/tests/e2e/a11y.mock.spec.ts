@@ -10,7 +10,7 @@ import { HEALING, kanbanPending, PENDING_ESCALATED, RUN_ID } from "../fixtures/r
 import { CAPABILITIES_ROUTE_READY, PREVIEW_B } from "../fixtures/research/route";
 import { REGISTRY_STATUS, WATCH_SOURCES_17, type RegistryStatusKind } from "../fixtures/research/registry";
 import { defect, FAIL3_SCORES, makeRound, PRD_CONTENT, PRD_VERSIONS } from "../fixtures/research/reviews";
-import { expectNoA11yViolations } from "./a11y";
+import { expectNoA11yViolations, RESEARCH_WIDTHS } from "./a11y";
 import { collectConsoleErrors, compose, fail, installApiMock, paged, shellHandler, signInAs, type MockHandler } from "./mockApi";
 
 /**
@@ -173,8 +173,7 @@ test.describe("無障礙掃描（route mock＋axe）", () => {
 
 // ── 研發工作流（ResearchToPRD P0；TCS-ResearchToPRD-P0-20261102 AC-R2P-01、09）─────────────────────────────────────────
 
-/** 整頁掃描的三個寬度：與工作室的版面階層同界線（≥1280 三欄、768～1279 目錄收成圖示、<768 改分頁籤），側欄與頁首在三種寬度下的排版也各掃一次。 */
-const RESEARCH_WIDTHS = [1440, 1000, 600] as const;
+// 整頁掃描的三個寬度 RESEARCH_WIDTHS 住 ./a11y（匯出；與其他 mock spec 同源）。
 
 /**
  * 工作室的 PRD 內容：標題、清單、核取清單、GFM 表格、程式碼圍欄（預覽的渲染元素各有一個）；v1 是同一份的稍改版本（Diff 模式有差異可畫）。

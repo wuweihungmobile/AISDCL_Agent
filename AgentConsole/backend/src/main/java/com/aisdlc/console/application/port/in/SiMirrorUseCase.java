@@ -34,4 +34,10 @@ public interface SiMirrorUseCase {
 
     /** {@code GET /si/runs}：運轉（開關與提案結果）。 */
     SiExport runs(Integer since, Integer limit);
+
+    /**
+     * {@code GET /si/patrol}：主機巡邏器的快照（Bridge 唯讀讀 {@code patrol.json}；TCS-SiFlowVisibility W-F3）。回的是 Bridge 本文原樣
+     * （{@code readAt} 與 {@code report}）；失敗同其他讀取（503 {@code si_unavailable} 帶 {@code cause}）、沒有部分資料；零 DB 寫入。
+     */
+    SiExport patrol();
 }

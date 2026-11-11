@@ -14,6 +14,7 @@ import ast
 import copy
 import re
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -705,3 +706,261 @@ def test_AT_950_11_2_ci_paths_cover_the_write_closure_inputs_in_both_triggers() 
               for p in FULL_PATHS]
     assert any("tools/lib/selfimproving/" in p
                for p in ci_path_problems(_workflow(narrow), SI_INPUTS)), "glob 只涵蓋單層必須被指出"
+
+
+# ── 巡邏回報目錄（TCS-SiFlowVisibility-20261111：AT-966-2-1～2-5、2-E-1）──────────────
+REPORT_ENV, REPORT_TARGET = "BRIDGE_SI_REPORT_DIR", "/si-report"
+DOCKER_README = CONSOLE_DIR / "docker" / "README.md"
+ARCHITECTURE = CONSOLE_DIR / "docs" / "02_architecture" / "Architecture.md"
+
+
+def report_bind_problems(compose: dict[str, Any]) -> list[str]:
+    """巡邏回報目錄的部署前提（W-F2）：engine-bridge 的 `BRIDGE_SI_REPORT_DIR` 等於 `/si-report`，
+    不在 `/repo` 之下、不等於稽核目錄；恰一條 target 為該值的 bind，長語法、`type: bind`、
+    `read_only: true`、`create_host_path: false`、來源以 `console_report` 結尾且不寫死
+    磁碟路徑、與稽核 bind 的來源使用同一個 `${AUTOSDD_SI_DIR:-…}` 前綴運算式但不是同一個
+    目錄；engine-bridge 唯一可寫的 bind 仍是稽核目錄。"""
+    svc = (compose.get("services") or {}).get("engine-bridge") or {}
+    env = _env_of(svc)
+    volumes = svc.get("volumes") or []
+    out: list[str] = []
+    report_dir, audit_dir = env.get(REPORT_ENV, ""), env.get(AUDIT_ENV, "")
+    audit = [v for v in volumes
+             if audit_dir and _volume_target(v).rstrip("/") == audit_dir.rstrip("/")]
+    report: list[Any] = []
+    if not report_dir:
+        out.append(f"engine-bridge 缺環境變數 {REPORT_ENV}")
+    else:
+        if report_dir != REPORT_TARGET:
+            out.append(f"{REPORT_ENV} 須為 {REPORT_TARGET}，實際 {report_dir!r}")
+        if report_dir.startswith("/repo"):
+            out.append(f"{REPORT_ENV} 不得落在 /repo 之下（那是唯讀鏡像）")
+        if report_dir.rstrip("/") == audit_dir.rstrip("/"):
+            out.append(f"{REPORT_ENV} 不得等於 {AUDIT_ENV}")
+        report = [v for v in volumes if _volume_target(v).rstrip("/") == report_dir.rstrip("/")]
+        if len(report) != 1:
+            out.append(f"{REPORT_ENV} 必須恰有一條對應的 bind，實際 {len(report)}")
+    for vol in report[:1]:
+        if not isinstance(vol, dict):
+            out.append("巡邏回報 bind 須用長語法（才能明寫 read_only 與 create_host_path）")
+            continue
+        if vol.get("type") != "bind":
+            out.append("巡邏回報 bind 的 type 必須是 bind")
+        if vol.get("read_only") is not True:
+            out.append("巡邏回報 bind 必須唯讀（read_only: true；Bridge 對快照只讀）")
+        if (vol.get("bind") or {}).get("create_host_path") is not False:
+            out.append("巡邏回報 bind 的 create_host_path 必須明寫 false（缺席時要明確失敗）")
+        source = str(vol.get("source", ""))
+        flat = source.replace("\\", "/").rstrip("/")
+        if not flat.endswith("console_report"):
+            out.append(f"巡邏回報 bind 的 source 必須以 console_report 結尾，實際 {flat!r}")
+        if HARD_CODED_DISK.match(flat):
+            out.append(f"巡邏回報 bind 的 source 不得寫死磁碟路徑：{flat!r}")
+        for avol in audit[:1]:
+            asrc = str(avol.get("source", "")) if isinstance(avol, dict) else ""
+            if asrc and asrc == source:
+                out.append("巡邏回報 bind 的 source 與稽核 bind 的 source 相同（須是兩個目錄）")
+            elif (asrc.endswith("console_audit") and source.endswith("console_report")
+                  and asrc[:-len("console_audit")] != source[:-len("console_report")]):
+                out.append("巡邏回報 bind 與稽核 bind 的 AUTOSDD_SI_DIR 前綴運算式不一致")
+    writable = [v for v in volumes if _is_bind(v) and _is_writable(v)]
+    if writable != audit[:1]:
+        out.append(f"engine-bridge 只能有一條可寫的 bind（稽核目錄），實際 {writable}")
+    return out
+
+
+def test_AT_966_2_1_compose_has_the_read_only_report_bind_and_the_env_var() -> None:
+    compose = load_compose()
+    assert report_bind_problems(compose) == []
+    bridge = compose["services"]["engine-bridge"]
+    env = _env_of(bridge)
+    assert env[REPORT_ENV] == "/si-report" and not env[REPORT_ENV].startswith("/repo")
+    assert env[REPORT_ENV] != env[AUDIT_ENV]
+    mounts = [v for v in bridge["volumes"] if _volume_target(v) == "/si-report"]
+    assert len(mounts) == 1 and isinstance(mounts[0], dict)
+    assert mounts[0]["type"] == "bind" and mounts[0]["read_only"] is True
+    assert mounts[0]["bind"]["create_host_path"] is False
+    assert str(mounts[0]["source"]).endswith("console_report")
+    assert not HARD_CODED_DISK.match(str(mounts[0]["source"]))
+    audit = next(v for v in bridge["volumes"] if _volume_target(v) == env[AUDIT_ENV])
+    assert str(audit["source"]).removesuffix("console_audit") == \
+        str(mounts[0]["source"]).removesuffix("console_report"), "同一個 AUTOSDD_SI_DIR 前綴運算式"
+    assert audit_bind_problems(compose) == [], "engine-bridge 唯一可寫的 bind 仍是稽核目錄"
+    assert si_mount_problems(compose) == [], "既有六條 /repo 唯讀 bind 與設計 A 逐條不變"
+    assert design_of(compose) == "A"
+    writable = [v for v in bridge["volumes"] if _is_bind(v) and _is_writable(v)]
+    assert writable == [audit]
+
+
+def test_AT_966_2_2_settings_parse_the_report_dir_with_the_anchor_guard(tmp_path: Path) -> None:
+    from app.settings import SettingsError, load_settings
+
+    audit = tmp_path / "audit"
+    report = tmp_path / "report"
+    assert load_settings({}).si_report_dir is None
+    assert load_settings({REPORT_ENV: "   "}).si_report_dir is None
+    got = load_settings({REPORT_ENV: "/si-report"}).si_report_dir
+    assert got == Path("/si-report").resolve()
+    assert load_settings({REPORT_ENV: str(report)}).si_report_dir == report.resolve()
+    assert not report.exists(), "設定解析不得建立目錄、不檢查存在性"
+    for name, raw in {"relative": "relative/path", "disk-root": "/",
+                      "anchor": str(Path(tmp_path.anchor))}.items():
+        with pytest.raises(SettingsError) as caught:
+            load_settings({REPORT_ENV: raw})
+        assert REPORT_ENV in str(caught.value), name
+    with pytest.raises(SettingsError) as same:
+        load_settings({REPORT_ENV: str(audit), AUDIT_ENV: str(audit)})
+    assert "BRIDGE_SI_AUDIT_DIR" in str(same.value) and REPORT_ENV in str(same.value)
+    both = load_settings({REPORT_ENV: str(report), AUDIT_ENV: str(audit)})
+    assert both.si_report_dir == report.resolve() and both.si_audit_dir == audit.resolve()
+    # 既有稽核目錄與寫入面行為不變
+    assert both.si_write_enabled is False
+    assert load_settings({AUDIT_ENV: str(audit)}).si_audit_dir == audit.resolve()
+    assert load_settings({AUDIT_ENV: str(audit)}).si_report_dir is None
+
+
+def test_AT_966_2_3_the_report_checker_names_each_of_nine_broken_variants() -> None:
+    base = load_compose()
+    assert report_bind_problems(base) == []
+    audit_target = _env_of(base["services"]["engine-bridge"])[AUDIT_ENV]
+    audit_source = str(_entry(base, audit_target)["source"])
+
+    def report_entry(compose: dict[str, Any]) -> dict[str, Any]:
+        return _entry(compose, REPORT_TARGET)
+
+    def short_syntax(compose: dict[str, Any]) -> None:
+        vols = _volumes(compose)
+        entry = report_entry(compose)
+        vols[vols.index(entry)] = f"{entry['source']}:{REPORT_TARGET}:ro"
+
+    def under_repo(compose: dict[str, Any]) -> None:
+        compose["services"]["engine-bridge"]["environment"][REPORT_ENV] = "/repo/si-report"
+        report_entry(compose)["target"] = "/repo/si-report"
+
+    variants: dict[str, tuple[Any, str]] = {
+        "report-writable": (lambda c: report_entry(c).pop("read_only"), "read_only"),
+        "create-host-path-true": (lambda c: report_entry(c)["bind"].update(
+            create_host_path=True), "create_host_path"),
+        "short-syntax": (short_syntax, "長語法"),
+        "under-repo": (under_repo, "/repo"),
+        "missing-env": (lambda c: c["services"]["engine-bridge"]["environment"].pop(REPORT_ENV),
+                        "缺環境變數"),
+        "wrong-source-suffix": (lambda c: report_entry(c).update(
+            source=str(report_entry(c)["source"]).replace("console_report", "console_audit")),
+            "console_report"),
+        "hard-coded-disk": (lambda c: report_entry(c).update(
+            source="C:\\Users\\someone\\.autosdd\\selfimproving\\console_report"), "寫死磁碟路徑"),
+        "same-as-audit": (lambda c: report_entry(c).update(source=audit_source),
+                          "與稽核 bind 的 source 相同"),
+        "second-writable-bind": (lambda c: _volumes(c).append(
+            {**_long("../docs", "/repo/docs"), "read_only": False}), "可寫的 bind"),
+    }
+    assert len(variants) == 9
+    for name, (change, needle) in variants.items():
+        problems = report_bind_problems(_mutate(base, change))
+        assert problems, f"{name}：壞變體沒有被指出"
+        assert any(needle in p for p in problems), f"{name}：沒有指出 {needle!r}：{problems}"
+
+
+def _section(text: str, heading: str) -> str:
+    start = text.index(heading)
+    nxt = text.find("\n## ", start + 1)
+    return text[start:] if nxt < 0 else text[start:nxt]
+
+
+def test_AT_966_2_4_env_example_readme_and_architecture_describe_the_report_dir() -> None:
+    env_text = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert env_example_problems(env_text) == [], ".env.example 只准有 <YOUR_…> 佔位、無真機密"
+    lines = env_text.splitlines()
+    ps = [ln for ln in lines
+          if "New-Item -ItemType Directory -Force" in ln and "console_report" in ln]
+    sh = [ln for ln in lines if "mkdir -p" in ln and "console_report" in ln]
+    assert len(ps) == 1 and len(sh) == 1, "雙 shell 預建指令各一條"
+    for ln in (*ps, *sh):
+        assert "AUTOSDD_SI_DIR" in ln, "使用 AUTOSDD_SI_DIR 預設運算式的展開寫法"
+        assert not re.search(r"[A-Za-z]:[\\/]|/Users/|/home/|/Volumes/|/mnt/", ln), "不寫死磁碟路徑"
+    assert "docker compose up" in env_text and "console_report" in env_text
+
+    readme = DOCKER_README.read_text(encoding="utf-8")
+    section = _section(readme, "巡邏回報目錄")
+    markers = ["console_report", "build engine-bridge backend frontend", "up -d",
+               "/api/v1/si/patrol"]
+    positions: list[int] = []
+    cursor = 0
+    for marker in markers:
+        found = section.find(marker, cursor)
+        assert found >= 0, f"README〈巡邏回報目錄〉缺少 {marker!r}（或順序不對）"
+        positions.append(found)
+        cursor = found + 1
+    assert positions == sorted(positions), "順序須為 建目錄→重建映像→啟動→驗證"
+    assert "mkdir -p" in section and "New-Item -ItemType Directory -Force" in section
+    assert "report_missing" in section and "report_dir_unset" in section
+    for heading in ("**失敗表徵**", "**退回**", "**未掛載時的畫面**"):
+        assert heading in section, f"缺少 {heading} 一段"
+    assert "bind source path does not exist" in section, "目錄未建時 compose 拒絕啟動的訊息"
+    assert "漏了 backend" in section and "漏了 frontend" in section, "漏重建某映像的症狀"
+
+    arch = ARCHITECTURE.read_text(encoding="utf-8")
+    rows = [ln for ln in arch.splitlines() if ln.startswith("| `BRIDGE_SI_REPORT_DIR`")]
+    assert len(rows) == 1, "Architecture §9.4 表須有 BRIDGE_SI_REPORT_DIR 一列"
+    assert "report_dir_unset" in rows[0]
+    three = {".env.example": env_text, "docker/README.md": readme, "§9.4 列": rows[0]}
+    for name, text in three.items():
+        assert "第二條可寫 bind" not in text, f"{name} 不得出現「第二條可寫 bind」字樣"
+
+
+def test_AT_966_2_5_unset_report_dir_only_affects_the_patrol_endpoint(
+        tmp_path: Path, settings: Any, make_bridge: Any) -> None:
+    from dataclasses import replace
+
+    from tests.fake_si import make_fake_si, proposal_item, set_control
+
+    fake = make_fake_si(tmp_path)
+    set_control(fake, items=[proposal_item(with_detail=False)])
+    legacy = replace(settings, si_root=fake, si_report_dir=None)
+    live = make_bridge(legacy)
+    assert live.client.get("/si/status").status_code == 200
+    assert live.client.get("/si/proposals").status_code == 200
+    assert live.client.get("/health").status_code == 200
+    deep_legacy = live.client.get("/health/deep")
+    patrol = live.client.get("/si/patrol")
+    assert patrol.status_code == 503 and patrol.json()["cause"] == "report_dir_unset"
+    # 設了目錄的部署，深度探針的項目集合與未設者完全相同（巡邏回報目錄不進深度探針）
+    configured = make_bridge(replace(legacy, si_report_dir=tmp_path / "console_report"))
+    deep_configured = configured.client.get("/health/deep")
+    assert set(deep_legacy.json()) == set(deep_configured.json())
+    checks_a = set(deep_legacy.json().get("checks", {}))
+    checks_b = set(deep_configured.json().get("checks", {}))
+    assert checks_a == checks_b
+    assert "patrol" not in deep_configured.text and "si-report" not in deep_configured.text
+
+
+def test_AT_966_2_E_1_docker_compose_config_expands_the_read_only_report_volume(
+        tmp_path: Path) -> None:
+    import json
+    import os
+    import subprocess
+
+    sentinel = {name: f"sentinel-{name.lower()}" for name in (
+        "POSTGRES_PASSWORD", "JWT_SECRET", "CONSOLE_ENCRYPTION_KEY", "MINIMAX_API_KEY",
+        "REPLICATION_PASSWORD", "PGBACKREST_CIPHER_PASS", "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD", "PGADMIN_PASSWORD",
+        "GRAFANA_PASSWORD")}
+    env = {**os.environ, **sentinel, "AUTOSDD_SI_DIR": str(tmp_path)}
+    proc = subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE), "--profile", "db", "--profile", "app",
+         "--profile", "full", "config", "--format", "json"],
+        capture_output=True, env=env, timeout=120, check=False)
+    rc = proc.returncode
+    assert rc == 0, f"docker compose config rc={rc}：{proc.stderr.decode('utf-8', 'replace')[:400]}"
+    expanded = json.loads(proc.stdout.decode("utf-8"))
+    volumes = expanded["services"]["engine-bridge"]["volumes"]
+    by_target = {v["target"]: v for v in volumes}
+    report, audit = by_target["/si-report"], by_target["/si-audit"]
+    assert report["type"] == "bind" and report["read_only"] is True
+    assert report["bind"]["create_host_path"] is False
+    assert os.path.normcase(os.path.normpath(report["source"])) == os.path.normcase(
+        os.path.normpath(str(tmp_path / "console_report")))
+    assert audit.get("read_only", False) is False
+    assert os.path.normcase(os.path.normpath(audit["source"])) == os.path.normcase(
+        os.path.normpath(str(tmp_path / "console_audit")))
