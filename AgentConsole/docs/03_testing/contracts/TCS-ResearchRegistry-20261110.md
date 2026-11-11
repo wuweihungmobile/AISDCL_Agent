@@ -795,7 +795,7 @@
 - **V4（QA）**：既有研究 AT 全套（`ResearchApiIT`、`RbacIT`、`ResearchReasonsTest`、`ResearchArchTest`、Bridge `test_research_*`、前端 research 元件測試）逐檔重跑，列出預期值改動恰等於 §4.1。
 - **V5（主控）**：全套 `gradlew clean build`、Bridge `pytest` 與 `ruff check`（兩視角）、前端 `lint`／`tsc --noEmit`／`build`／`vitest`。
 - **V6（QA）**：Linux（CI）與 Windows 各跑一次本鍵新增 AT；macOS 未驗（如實標）。
-- **V7（掌舵者，目視）**：研究來源設定對話框的版面與文案（國高中白話）；窄寬可用。
+- **V7（掌舵者，目視）**：研究來源設定對話框的版面與文案（國高中白話）；窄寬可用。〔訂正（勘誤 E-12）：改由代理截圖代驗——長駐棧以 ADMIN 唯讀開啟對話框（不新增、不停用、不同步），於 1440／1000／375 三種寬度截圖並跑 axe（無 serious／critical）、確認無水平溢出且控制項在 375 寬可用、逐段對照文案是否國高中白話並與規格用語一致；結果與截圖路徑寫 RTM 的 V7 列〕
 - **V8（QA）**：`SI_WRITE_BODY_MAX_BYTES` 與 `REGISTRY_TEXT_MAX_BYTES` 的餘裕：以種子加十個典型新增逼近上限，確認 422 `registry_too_large` 出現在預期處並有清楚文案。
 
 ---
@@ -864,3 +864,4 @@
 | E-9 | 11-10 | commit 座標（登記型） | 原文：無 | 登記：根層規格 d7c1eeee、Console 規格 dfa55632、根層 RR 914e0adc、Console 實作 9e07a54e（原 ed0ee779 混入根層 45 檔，已以 reset --soft 拆回） | 追溯 |
 | E-10 | 11-10 | AT-965-10-1（登記型；§2 規則本文不變） | 原文：AT 以 `test.skip` 處理 docker 缺席（實作面作法，違反 §2「不得新增 skip」） | 登記：已改為直接拋錯失敗（commit d0a750bd，SCG-4 QA4C-01） | §2 明定「Docker 缺席視為環境壞、直接失敗」 |
 | E-11 | 11-10 | AT-965-10 群（新增 AT-965-10-3；§1 計數、§2 覆蓋表、§3 清單、§5 檢核同步 72→73） | 原文：無 AT 守 Bridge 映像的稽核目錄；NFR-RR-9 要求稽核目錄為全棧自帶容器卷 | 新增 AT-965-10-3（Bridge pytest 結構鎖）：`BRIDGE_SI_AUDIT_DIR` 必須在 `USER bridge` 之前被 Dockerfile `mkdir -p` 並 `chown bridge:bridge`；`engine-bridge/Dockerfile` 同步預建 `/si-audit`；AT 總數 72→73、Bridge 側 22→23、AC-965-10 3→4 | 真棧 E2E（AT-965-10-1）實跑：全新具名卷為 root 擁有、Bridge uid 10001 寫稽核檔 EACCES ⇒ 同步回 503（DEF-AC-036）；成因＝映像未預建該目錄，具名卷首次掛載繼承映像內擁有者 |
+| E-12 | 11-11 | §6.2 V7（不是 AT；AT 總數不變） | 原文：「V7（掌舵者，目視）：研究來源設定對話框的版面與文案（國高中白話）；窄寬可用。」 | 改由代理截圖代驗：長駐棧 ADMIN 唯讀開啟對話框，1440／1000／375 三寬截圖、axe 無 serious／critical、無水平溢出、375 寬控制項可用、文案逐段對照國高中白話與規格用語；結果寫 RTM V7 列 | 掌舵者 2026-11-11 互動選項裁決「改用截圖代驗」（sid `58ce5ccd-13fb-47fc-8a46-b04fa73257d7`） |
