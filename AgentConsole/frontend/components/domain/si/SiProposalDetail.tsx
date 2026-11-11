@@ -18,7 +18,19 @@ import { ApiError } from "@/lib/api/client";
 import { useSiProposalDetail } from "@/lib/api/queries";
 import type { SiNeEntry, SiProposal } from "@/lib/api/types";
 import { cardNeEntries, formatNe } from "@/lib/domain/si";
-import { SI_FLOW_TEXTS as T, fillText, heldoutView, nextStepLine, obsSourceIds, reasonText, resolveNextStep, sandboxView, verifyView } from "@/lib/domain/siFlow";
+import {
+  CODE_SOURCE_LEDGER_UNREADABLE,
+  CODE_TIMELINE_TRUNCATED,
+  SI_FLOW_TEXTS as T,
+  fillText,
+  heldoutView,
+  nextStepLine,
+  obsSourceIds,
+  reasonText,
+  resolveNextStep,
+  sandboxView,
+  verifyView,
+} from "@/lib/domain/siFlow";
 import { cn } from "@/lib/utils";
 import { SiDiffView, type NeWithText } from "./SiDiffView";
 import { SiError, SiLoading } from "./siParts";
@@ -61,7 +73,7 @@ function BodyTab({ item, detail, ne, onJump }: { item: Rec; detail: Rec; ne: Rea
   const sourceObs = detail.sourceObs;
   // 只看單筆回應自己帶的 `sources`（不退用清單列的值：兩者皆缺席才是「來源量不到」）
   const sources = item.sources;
-  const ledgerNe = ne.find((e) => e.reason === "OBS-LEDGER-UNREADABLE");
+  const ledgerNe = ne.find((e) => e.reason === CODE_SOURCE_LEDGER_UNREADABLE);
 
   let sourcesNode: React.ReactNode;
   if (Array.isArray(sourceObs) && sourceObs.length > 0) {
@@ -247,7 +259,7 @@ function TimelineTab({ detail, ne, propId }: { detail: Rec; ne: ReadonlyArray<Ne
   const seqKey = (r: Rec) => (typeof r.seq === "number" && Number.isFinite(r.seq) ? r.seq : Number.POSITIVE_INFINITY);
   // 穩定排序（Array.prototype.sort 自 ES2019 起穩定）：依 seq 升冪，重複 seq 保持輸入相對序
   const sorted = [...rows].sort((a, b) => seqKey(a) - seqKey(b));
-  const cut = ne.filter((e) => e.reason === "TIMELINE-TRUNCATED" && (e.field === "" || e.field.includes(propId)));
+  const cut = ne.filter((e) => e.reason === CODE_TIMELINE_TRUNCATED && (e.field === "" || e.field.includes(propId)));
   return (
     <div className="flex flex-col gap-2">
       {cut.map((e, i) => (

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { failure } from "@/tests/helpers/api";
 import { ADMIN_UI, OPERATOR_UI, VIEWER_UI } from "@/tests/helpers/si";
+import { LAYOUT_BRANCH_CODES } from "@/lib/domain/siFlow";
 import { DETAIL, NOW, PATROL, openDetail, proposalResponse, renderFlow } from "@/tests/helpers/siFlow";
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -116,6 +117,32 @@ describe("AT_966_14_3 新元件靜態無寫入引用", () => {
   });
 });
 
+describe("AT_966_14_3 原因碼字面只准版面分支鍵（TCS 勘誤 E-20）", () => {
+  // 原因碼形字面：全大寫字母段以連字號相連（至少兩段、首段 ≥ 3 字母）。排除：帳本編號前綴（OBS-SI 等）、既有的量不到狀態字 NOT-EVALUABLE；
+  // 規格編號（AC-、AT-、W-F、NFR-；NFR- 字首另行排除）、UTF-8、SHA-256 與 data-testid 值（小寫）本來就不符合這個形態
+  const CODE_LIKE = /\b[A-Z]{3,}(?:-[A-Z]{2,})+\b/g;
+  const LEDGER_PREFIX = /^(OBS|PROP|APP|DEC|RUN|ATT)-SI$/;
+  const SPEC_ID = /^NFR-/;
+  const FILES = [
+    "components/domain/si/SiProposalDetail.tsx",
+    "components/domain/si/SiDiffView.tsx",
+    "components/domain/si/SiPatrolCard.tsx",
+    "components/domain/si/SiWritesPanel.tsx",
+    "lib/domain/siFlow.ts",
+  ];
+  it("LAYOUT_BRANCH_CODES 恰兩個；五支原始碼的原因碼形字面只有這兩個", () => {
+    expect([...LAYOUT_BRANCH_CODES]).toEqual(["OBS-LEDGER-UNREADABLE", "TIMELINE-TRUNCATED"]);
+    expect(LAYOUT_BRANCH_CODES).toHaveLength(2);
+    const allowed = new Set<string>(LAYOUT_BRANCH_CODES);
+    for (const rel of FILES) {
+      const hits = (readFileSync(path.join(process.cwd(), rel), "utf-8").match(CODE_LIKE) ?? []).filter((h) => !LEDGER_PREFIX.test(h) && !SPEC_ID.test(h) && h !== "NOT-EVALUABLE");
+      const extra = hits.filter((h) => !allowed.has(h));
+      expect(extra, `${rel} 出現不在版面分支鍵內的原因碼字面`).toEqual([]);
+    }
+    // 版面分支只在 SiProposalDetail 以常數引用，不再寫字面
+    expect(readFileSync(path.join(process.cwd(), "components/domain/si/SiProposalDetail.tsx"), "utf-8")).not.toMatch(/OBS-LEDGER-UNREADABLE|TIMELINE-TRUNCATED/);
+  });
+});
 describe("AT_966_14_E_1 角色一視同仁與 401", () => {
   it("三角色的詳情與巡邏卡文字逐字相同", async () => {
     const seen: Array<{ role: string; card: string; dialog: string }> = [];

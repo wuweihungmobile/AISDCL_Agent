@@ -19,6 +19,14 @@ export const RECENT_INGESTED_SHOWN = 5;
 /** 快照時間比讀取時間晚超過這麼多分鐘＝時鐘異常。 */
 export const CLOCK_SKEW_MINUTES = 5;
 
+/**
+ * 版面分支鍵（TCS 勘誤 E-20；W-F7 的唯一例外）：Console 不列舉原因碼，唯有這兩個 `ne` 碼決定「是否顯示提示區塊」
+ * （來源觀察帳本讀不到、時間線被截短——根層 §2.1 沒有可取代的結構欄位）。封閉、只減不增；白話仍逐字取主機的 `text`；
+ * 與 Bridge 的 `filter_detail` 同步修訂。前端原始碼的其餘原因碼字面由 AT-966-14-3 的靜態掃描擋下。
+ */
+export const LAYOUT_BRANCH_CODES = ["OBS-LEDGER-UNREADABLE", "TIMELINE-TRUNCATED"] as const;
+export const [CODE_SOURCE_LEDGER_UNREADABLE, CODE_TIMELINE_TRUNCATED] = LAYOUT_BRANCH_CODES;
+
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 /** 非空字串才回字串，其餘 null。 */
