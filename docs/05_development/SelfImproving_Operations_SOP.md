@@ -8,7 +8,7 @@
 **P4 增補（2026-11-09，T1 掌舵者問題 2；PRD v0.13 FG-M、附錄 C.2 #21）**：〈啟動條件〉加第六類「排程巡邏到期」與 Console「立即啟動一次演化」載體、改寫「沒有排程」兩句；〈P2 動詞〉序列條文的「無人值守」一條改為 run-scoped；新增〈巡邏與無人運轉（P4）〉〈無人運轉任務書範本〉兩節（位於檔尾）。判準的唯一真相源仍是 PRD（FR-SI-36～39、§9.2、§9.4）；P4 動詞與巡邏器於實作輪落地前，本增補的指令為規格形態（以 `python tools/selfimproving.py <動詞> --help` 現查為準）。
 **P5 增補（2026-11-10，T1 掌舵者「頂尖專家四問」；PRD v0.14 FG-N、附錄 C.2 #24）**：新增〈四問審視者〉節（〈研究者〉節之後；〈研究者〉節不改）；〈rc 契約表〉加 `fourq` 列；〈最小序列〉加 `fourq`；〈提案檔〉加 `method`／`proof`；〈無人運轉任務書範本〉改 9 步並逐字引用四問原句。判準的唯一真相源是 PRD（FR-SI-41～44、§9.8）；`fourq` 於實作輪落地前為規格形態。
 **P7 增補（2026-11-11，T1 掌舵者「核准流程全程 UI 化」；PRD v0.16 FG-P、附錄 C.2 #26）**：〈held-out 目錄〉〈提案檔〉〈無人運轉任務書範本〉第 7 步三處勘誤；〈M 類旗標〉補巡邏器自動帶旗標；〈巡邏與無人運轉（P4）〉開頭句改為「巡邏器本體不 push」、〈安裝與憑證〉〈每心跳做什麼〉〈停用與逃生口〉補 P7；〈rc 契約表〉加 `push-run`；新增〈自動推送（P7）〉〈巡邏快照與 M 類自動推進（P7）〉兩節（位於〈反事實回測〉之前、〈無人運轉任務書範本〉之前）。判準的唯一真相源是 PRD（FR-SI-47～49、§9.9）與 TCS-SelfImproving-P7；`push-run` 與快照於實作輪落地前為規格形態。
-**P7 勘誤（2026-11-11，既有機械鎖；只改文字）**：原文〈提案檔〉第二項前置寫出「esearch.scan／esearch.skip」，〈停用與逃生口〉3b 寫出「sched disarm --push-only」。訂正：前者改為「事件種類見〈研究者〉節」，後者改為「用 --push-only 旗標只移除推送任務」。理由：_selfimproving_fixtures.sop_problems 以「全文某一行同時含研究事件五個片段」判研究者節未被改動（我方新行使既有同行判準失去鑑別力），sop_p4_problems 以「停用與逃生口節在程式碼圍欄之外含 sched disarm」判圍欄位移（我方新行使圍欄判準失去鑑別力）；TCS-P7 §7 SOP-REQ-4 的「--push-only」片段仍成立。
+**P7 勘誤（2026-11-11，既有機械鎖；只改文字）**：原文〈提案檔〉第二項前置寫出「research.scan／research.skip」，〈停用與逃生口〉3b 寫出「sched disarm --push-only」。訂正：前者改為「事件種類見〈研究者〉節」，後者改為「用 --push-only 旗標只移除推送任務」。理由：_selfimproving_fixtures.sop_problems 以「全文某一行同時含研究事件五個片段」判研究者節未被改動（我方新行使既有同行判準失去鑑別力），sop_p4_problems 以「停用與逃生口節在程式碼圍欄之外含 sched disarm」判圍欄位移（我方新行使圍欄判準失去鑑別力）；TCS-P7 §7 SOP-REQ-4 的「--push-only」片段仍成立。
 
 ## 啟動條件
 
@@ -565,6 +565,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 | `PUSH-RETRY-WAIT`／`PUSH-ATTEMPTS-EXHAUSTED` | 等重試間隔／已用盡 | 等待／由人推送 |
 | `PUSH-NOT-RECORDED`／`PUSH-RECORD-MISMATCH` | 提交沒有（或不符）巡邏器的紀錄（amend、rebase、照抄格式的提交，或紀錄寫入失敗） | 人工檢查該提交內容無誤後由人推送；巡邏器不會自動推送它 |
 | `PUSH-LEDGER-RULE`／`PUSH-FILE-MODE-INVALID`／`PUSH-SECRET-PATTERN` | 提交改了不該改的帳本列或提案檔（事件帳本非追加、OBS 既有列被改寫、提案檔被改、提案檔名或大小不合、帳本新增行格式不合），或含符號連結、子模組、檔案模式變更，或新增內容疑似含機密（輸出附 sha 前 8 碼與卡在哪；機密只給路徑與樣式名、不顯示值） | 人工檢查後由人推送 |
+| `PUSH-PROPOSAL-MISMATCH` | 提案目錄的新檔內容與帳本記錄的雜湊不符（或帳本沒有對應事件）；輸出附 sha 前 8 碼、檔名與 `no-event`／`sha-mismatch` | 人工檢查該檔是否被動過手腳後由人推送 |
 | `PUSH-GIT-CONFIG-UNSAFE`／`PUSH-REMOTE-URL-CHANGED` | repo 本地 git 設定含不允許的項目（憑證輔助程式、`core.hooksPath` 與預期不符、`core.fsmonitor`、`pushurl`、`insteadOf` 等；輸出只給鍵名），或遠端網址與安裝推送任務時記錄的不同 | 人檢查並還原設定或確認新網址（確認後重跑 `sched arm --push-only` 更新記錄）；巡邏器不會自動推送 |
 | `PUSH-REMOTE-DRIFT`／`PUSH-REMOTE-DIVERGED` | 遠端 main 的實際位置與本機記錄不同，或不是待推送提交的祖先（推送會覆寫遠端） | 人先 `git fetch` 並檢查遠端發生什麼事，整合後由人推送；巡邏器不會自動推送，也不會強推 |
 | `PUSH-HEAD-MOVED`（輸出碼） | 判定之後本機分支或 HEAD 被改動 | 無；這次不推，下個心跳重判 |
@@ -574,7 +575,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 
 **推送前的額外檢查**（TCS-P7 勘誤 E-18～E-21；全部通過才推）：①`push-run` 先以 `ls-remote` 取遠端 main 的實際值，必須等於守門所用的本機追蹤值，且是待推送提交的祖先；②送出前復查 HEAD 仍是判定過的那個 sha 且在 main；③推送帶 `--force-with-lease=refs/heads/main:<遠端實值>`——這裡的 lease 是收緊條件（已證明只會是快轉，lease 讓「遠端恰為該值」由遠端伺服器原子確認），不是強推；④repo 本地 git 設定出現危險鍵（封閉清單）、遠端網址與 `sched arm` 記錄不同，或 git 解析不到可信的絕對路徑，一律不推；⑤提交新增的內容（檔案模式、提案檔名與大小、帳本行格式、機密樣式）不合就不推；機密掃描只認封閉樣式，自由文字的語意無法驗證。殘餘的極短競態（復查之後、`git push` 之前，毫秒級）影響限於推出判定過的那個 sha。
 
-**啟用條件與殘餘風險**（PRD FR-SI-49〈殘餘風險與啟用條件〉為準）：自動推送**預設關閉**（`params.json` 的 `sched_auto_push`＝`false`），因為有兩項短期內無法根治的風險：(1) 同一使用者身分下，被追蹤的程式或 `.venv` 被竄改，無法靠程式自我檢查防住；(2) 無人運轉讀得到 `AgentConsole/.env` 的稽核簽章金鑰，理論上可自走完整條核准鏈（尚未實測）。目前緩解：預設關閉、逐提交嚴格判準、遠端實值綁定、內容約束與機密掃描、危險設定檢查。後續結構性對策（未實作）：金鑰隔離、由真人在 Console 授權推送特定 sha。**啟用步驟**（人做，無人窗口對治理檔唯讀）：讀過本段並接受上述兩項風險、完成 TCS-P7 的真機驗證項後，把 `params.json` 的 `sched_auto_push` 改為 `true` 並提交，再執行 `python tools/selfimproving.py sched arm --push-only`（以互動登入使用者身分，非提權殼；`sched arm` 會記下遠端網址與 git 路徑到 `push/armed.json`）。以另一個管理員帳號提權重跑會被拒（`SCHED-PUSH-USER-MISMATCH`）。
+**啟用條件與殘餘風險**（PRD FR-SI-49〈殘餘風險與啟用條件〉為準）：自動推送**預設關閉**（`params.json` 的 `sched_auto_push`＝`false`），因為有兩項短期內無法根治的風險：(1) 同一使用者身分下，被追蹤的程式或 `.venv` 被竄改，無法靠程式自我檢查防住；(2) 無人運轉讀得到 `AgentConsole/.env` 的稽核簽章金鑰，理論上可自走完整條核准鏈（尚未實測）。目前緩解：預設關閉、逐提交嚴格判準、遠端實值綁定、內容約束與機密掃描、危險設定檢查。後續結構性對策（未實作）：金鑰隔離、由真人在 Console 授權推送特定 sha。**另有兩項須知**（TCS-P7 勘誤 E-37）：同一使用者可自行註冊互動登入型排程，「巡邏器永不推送」不是隔離保證；推送綁定值 `push/armed.json` 與提交紀錄 `push/commits.jsonl` 都在同一使用者可寫的家目錄。**注意**：`params.json` 目前**不在**無人窗口的寫入保護內，無人主控可直接改它；實際擋點是改了未提交會被 `PUSH-DIRTY-TREE` 擋下、已提交會被當外來提交（`PUSH-FOREIGN-COMMITS`）；人手動 `git push` 前請確認沒有夾帶「開啟自動推送」的提交。**啟用步驟**（人做）：讀過本段並接受上述兩項風險、完成 TCS-P7 的真機驗證項後，把 `params.json` 的 `sched_auto_push` 改為 `true` 並提交，再執行 `python tools/selfimproving.py sched arm --push-only`（以互動登入使用者身分，非提權殼；`sched arm` 會記下遠端網址與 git 路徑到 `push/armed.json`）。以另一個管理員帳號提權重跑會被拒（`SCHED-PUSH-USER-MISMATCH`）。
 
 **手動與除錯**：`python tools/selfimproving.py push-run --dry-run` 只印判定（零寫入）；結果檔在 `~/.autosdd/selfimproving/push/results/<sha12>.json`、最近一次任務執行時刻在 `push/tick.json`（不入 git、可丟棄）；`Get-ScheduledTask -TaskName AutoSDD_SI_Push | Get-ScheduledTaskInfo` 看 `LastTaskResult`（0＝上次推成功或無事可做；非 0＝上次推送失敗）。**macOS**：對等載具是 launchd 使用者層 agent `AutoSDD_SI_Push`（`sched arm` 寫 plist，憑證是 `launchctl list` 的 rc 與 plist 回讀，不是時間值；agent 在登入的 gui 網域內拿得到 keychain；**未實機驗**；睡著的 Mac 不推送）。**停用**：見〈停用與逃生口〉3b。
 
