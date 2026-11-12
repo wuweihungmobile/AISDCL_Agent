@@ -481,7 +481,7 @@ unset AUTOSDD_SI_AUDIT_KEY
 
 ## 巡邏與無人運轉（P4）
 
-本節是自動演化排程（PRD FG-M；T1 2026-11-09）的操作配方。判準的唯一真相源是 PRD（FR-SI-36～39、§9.2〈P4 增補〉、§9.4〈P4 增補〉、ADR-SI-14／15），本節只收安裝、每心跳做什麼、停用與逃生、日誌與逾期處置。**巡邏器能自動入帳、`sandbox`、`verify`、`promote` 與本機 `git commit`，前提都是人已經決定（DEC）；核准與晉升的決定永遠是掌舵者的（Console 或逐字稿）。** 巡邏器不 `decide`；**巡邏器本體不 push**（S4U 任務拿不到 Git 憑證）——推送由〈自動推送（P7）〉的互動登入型任務 `AutoSDD_SI_Push` 執行 `push-run`（`sched_auto_push` 預設 true、可關）。
+本節是自動演化排程（PRD FG-M；T1 2026-11-09）的操作配方。判準的唯一真相源是 PRD（FR-SI-36～39、§9.2〈P4 增補〉、§9.4〈P4 增補〉、ADR-SI-14／15），本節只收安裝、每心跳做什麼、停用與逃生、日誌與逾期處置。**巡邏器能自動入帳、`sandbox`、`verify`、`promote` 與本機 `git commit`，前提都是人已經決定（DEC）；核准與晉升的決定永遠是掌舵者的（Console 或逐字稿）。** 巡邏器不 `decide`；**巡邏器本體不 push**（S4U 任務拿不到 Git 憑證）——推送由〈自動推送（P7）〉的互動登入型任務 `AutoSDD_SI_Push` 執行 `push-run`（`sched_auto_push` **預設 false，明確開啟才生效**，啟用條件與殘餘風險見〈自動推送（P7）〉）。
 
 ### 安裝與憑證
 
@@ -508,7 +508,7 @@ launchctl list | grep AutoSDD_SI_Patrol
 - 巡邏任務設定：`WakeToRun=false`（心跳不喚醒睡眠機器；nightly／smoke 兩支維持 `WakeToRun=true`）、`ExecutionTimeLimit=PT1H`（心跳自身上限；無人運轉牆鐘由 `spawn.json` 管）、`MultipleInstancesPolicy=IgnoreNew`、`StartWhenAvailable=true`；期望值逐任務住 `tools/scheduled_task_expectations.json`。
 - 睡著或關機的機器不會觸發（睡著的機器不巡邏＝已知邊界）：Windows 任務有 `StartWhenAvailable`（醒來後補跑一次），macOS 不補（`pmset -g custom` 現查）；漏跑由 `overdue` 偵測（見〈日誌與逾期處置〉）。
 - 安裝／解除 Windows 任務需 elevation；`-Status`、`-WhatIf` 唯讀。
-- **第二支任務 `AutoSDD_SI_Push`（P7；`sched_auto_push` 為 true 時）**：`python tools\selfimproving.py sched arm` 在安裝巡邏任務之後一併註冊（推送段與巡邏段獨立：巡邏段因權限失敗時推送段仍會嘗試；只裝推送任務用 `sched arm --push-only`，不需提權；互動登入型、非 S4U；動作＝`.venv\Scripts\pythonw.exe tools\selfimproving.py push-run`；每 `sched_heartbeat_minutes` 分鐘一次）。憑證同樣是值：`Get-ScheduledTask -TaskName 'AutoSDD_SI_Push' | Get-ScheduledTaskInfo | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime`（`NextRunTime` 非空才算建立）；`sched disarm` 兩支一併移除（`--push-only` 只移除推送任務）。註冊失敗時：`SCHED-ELEVATION-REQUIRED`＝改在**系統管理員** PowerShell 重跑同一條 `sched arm`（任務主體仍是登入使用者）；`SCHED-PUSH-TASK-FAILED`＝輸出會說明巡邏任務是否已裝好。詳見〈自動推送（P7）〉。
+- **第二支任務 `AutoSDD_SI_Push`（P7；預設不裝，只在 `sched_auto_push` 明確改為 true 之後才安裝；為 false 時 `sched arm` 只裝巡邏並印「自動推送未啟用」，`sched arm --push-only` 會拒絕並說明啟用方式）**：`python tools\selfimproving.py sched arm` 在安裝巡邏任務之後一併註冊（推送段與巡邏段獨立：巡邏段因權限失敗時推送段仍會嘗試；只裝推送任務用 `sched arm --push-only`，不需提權；互動登入型、非 S4U；動作＝`.venv\Scripts\pythonw.exe tools\selfimproving.py push-run`；每 `sched_heartbeat_minutes` 分鐘一次）。憑證同樣是值：`Get-ScheduledTask -TaskName 'AutoSDD_SI_Push' | Get-ScheduledTaskInfo | Select-Object TaskName,LastRunTime,LastTaskResult,NextRunTime`（`NextRunTime` 非空才算建立）；`sched disarm` 兩支一併移除（`--push-only` 只移除推送任務）。註冊失敗時：`SCHED-ELEVATION-REQUIRED`＝改在**系統管理員** PowerShell 重跑同一條 `sched arm`（任務主體仍是登入使用者）；`SCHED-PUSH-TASK-FAILED`＝輸出會說明巡邏任務是否已裝好。詳見〈自動推送（P7）〉。
 
 ### 每心跳做什麼（順序固定：入帳→到期判定→運轉→推進）
 
@@ -553,7 +553,8 @@ launchctl list | grep AutoSDD_SI_Patrol
 | 碼（快照 `push.code`） | 意思 | 你要做的事 |
 |---|---|---|
 | `PUSH-OK` | 已推送 | 無 |
-| `PUSH-NOT-AHEAD`／`PUSH-OFF` | 沒有待推送／已關閉自動推送 | 無 |
+| `PUSH-NOT-AHEAD` | 沒有待推送 | 無 |
+| `PUSH-OFF` | 自動推送未啟用（預設關閉） | 無；要啟用先讀下面〈啟用條件與殘餘風險〉 |
 | `PUSH-DIRTY-TREE` | 工作樹有未提交改動 | 提交或還原後自動推（pre-push 測的是工作樹） |
 | `PUSH-FOREIGN-COMMITS`／`PUSH-APP-KIND-INVALID`／`PUSH-APP-REUSED`／`PUSH-PATH-OUTSIDE`／`PUSH-CONTENT-MISMATCH` | 領先提交含非巡邏器產生者，或照抄巡邏格式但 APP 種類、一對一、路徑、內容與帳本不符（輸出附第一個不符 sha 前 8 碼） | 由互動主控照平常流程 `git push`（遷移期內舊的無 trailer 提交也是這個碼；第一次啟用自動推送前先推一次） |
 | `PUSH-NOT-MAIN` | 不在 `main` 或上游不是 `origin/main` | 切回 `main` 或修上游 |
@@ -563,10 +564,17 @@ launchctl list | grep AutoSDD_SI_Patrol
 | `PUSH-WALL-EXCEEDED`／`PUSH-FAILED` | 逾時被終止／網路等其他失敗 | 自動重試，最多 `sched_push_attempts_max` 次、間隔 `sched_push_retry_minutes`；用盡＝`PUSH-ATTEMPTS-EXHAUSTED`，改由人推送 |
 | `PUSH-RETRY-WAIT`／`PUSH-ATTEMPTS-EXHAUSTED` | 等重試間隔／已用盡 | 等待／由人推送 |
 | `PUSH-NOT-RECORDED`／`PUSH-RECORD-MISMATCH` | 提交沒有（或不符）巡邏器的紀錄（amend、rebase、照抄格式的提交，或紀錄寫入失敗） | 人工檢查該提交內容無誤後由人推送；巡邏器不會自動推送它 |
-| `PUSH-LEDGER-RULE` | 提交改了不該改的帳本列或提案檔（事件帳本非追加、OBS 既有列被改寫、提案檔被改） | 人工檢查後由人推送 |
+| `PUSH-LEDGER-RULE`／`PUSH-FILE-MODE-INVALID`／`PUSH-SECRET-PATTERN` | 提交改了不該改的帳本列或提案檔（事件帳本非追加、OBS 既有列被改寫、提案檔被改、提案檔名或大小不合、帳本新增行格式不合），或含符號連結、子模組、檔案模式變更，或新增內容疑似含機密（輸出附 sha 前 8 碼與卡在哪；機密只給路徑與樣式名、不顯示值） | 人工檢查後由人推送 |
+| `PUSH-GIT-CONFIG-UNSAFE`／`PUSH-REMOTE-URL-CHANGED` | repo 本地 git 設定含不允許的項目（憑證輔助程式、`core.hooksPath` 與預期不符、`core.fsmonitor`、`pushurl`、`insteadOf` 等；輸出只給鍵名），或遠端網址與安裝推送任務時記錄的不同 | 人檢查並還原設定或確認新網址（確認後重跑 `sched arm --push-only` 更新記錄）；巡邏器不會自動推送 |
+| `PUSH-REMOTE-DRIFT`／`PUSH-REMOTE-DIVERGED` | 遠端 main 的實際位置與本機記錄不同，或不是待推送提交的祖先（推送會覆寫遠端） | 人先 `git fetch` 並檢查遠端發生什麼事，整合後由人推送；巡邏器不會自動推送，也不會強推 |
+| `PUSH-HEAD-MOVED`（輸出碼） | 判定之後本機分支或 HEAD 被改動 | 無；這次不推，下個心跳重判 |
 | `PUSH-GIT-UNAVAILABLE` | git 不可用或逾時 | 查 git 與磁碟 |
 | `PUSH-INTERNAL-ERROR` | 推送程式未預期錯誤（`push/last_error.json`） | 讀該檔；修好後下一心跳自動重試 |
 | `PUSH-PENDING`／`PUSH-WAITING-LOGIN`（快照態） | 等推送任務下一次執行／等使用者登入 | 登入後自動推；長期 waiting-login＝推送任務沒在跑，查 `Get-ScheduledTask` |
+
+**推送前的額外檢查**（TCS-P7 勘誤 E-18～E-21；全部通過才推）：①`push-run` 先以 `ls-remote` 取遠端 main 的實際值，必須等於守門所用的本機追蹤值，且是待推送提交的祖先；②送出前復查 HEAD 仍是判定過的那個 sha 且在 main；③推送帶 `--force-with-lease=refs/heads/main:<遠端實值>`——這裡的 lease 是收緊條件（已證明只會是快轉，lease 讓「遠端恰為該值」由遠端伺服器原子確認），不是強推；④repo 本地 git 設定出現危險鍵（封閉清單）、遠端網址與 `sched arm` 記錄不同，或 git 解析不到可信的絕對路徑，一律不推；⑤提交新增的內容（檔案模式、提案檔名與大小、帳本行格式、機密樣式）不合就不推；機密掃描只認封閉樣式，自由文字的語意無法驗證。殘餘的極短競態（復查之後、`git push` 之前，毫秒級）影響限於推出判定過的那個 sha。
+
+**啟用條件與殘餘風險**（PRD FR-SI-49〈殘餘風險與啟用條件〉為準）：自動推送**預設關閉**（`params.json` 的 `sched_auto_push`＝`false`），因為有兩項短期內無法根治的風險：(1) 同一使用者身分下，被追蹤的程式或 `.venv` 被竄改，無法靠程式自我檢查防住；(2) 無人運轉讀得到 `AgentConsole/.env` 的稽核簽章金鑰，理論上可自走完整條核准鏈（尚未實測）。目前緩解：預設關閉、逐提交嚴格判準、遠端實值綁定、內容約束與機密掃描、危險設定檢查。後續結構性對策（未實作）：金鑰隔離、由真人在 Console 授權推送特定 sha。**啟用步驟**（人做，無人窗口對治理檔唯讀）：讀過本段並接受上述兩項風險、完成 TCS-P7 的真機驗證項後，把 `params.json` 的 `sched_auto_push` 改為 `true` 並提交，再執行 `python tools/selfimproving.py sched arm --push-only`（以互動登入使用者身分，非提權殼；`sched arm` 會記下遠端網址與 git 路徑到 `push/armed.json`）。以另一個管理員帳號提權重跑會被拒（`SCHED-PUSH-USER-MISMATCH`）。
 
 **手動與除錯**：`python tools/selfimproving.py push-run --dry-run` 只印判定（零寫入）；結果檔在 `~/.autosdd/selfimproving/push/results/<sha12>.json`、最近一次任務執行時刻在 `push/tick.json`（不入 git、可丟棄）；`Get-ScheduledTask -TaskName AutoSDD_SI_Push | Get-ScheduledTaskInfo` 看 `LastTaskResult`（0＝上次推成功或無事可做；非 0＝上次推送失敗）。**macOS**：對等載具是 launchd 使用者層 agent `AutoSDD_SI_Push`（`sched arm` 寫 plist，憑證是 `launchctl list` 的 rc 與 plist 回讀，不是時間值；agent 在登入的 gui 網域內拿得到 keychain；**未實機驗**；睡著的 Mac 不推送）。**停用**：見〈停用與逃生口〉3b。
 
