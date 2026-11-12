@@ -122,3 +122,9 @@
 {"seq":122,"t":"2026-11-11T16:53:30+08:00","kind":"mea.open","by":"main","prop":"PROP-SI-008","w_opp":5,"promote_seq":120}
 {"seq":123,"t":"2026-11-11T21:00:18+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
 {"seq":124,"t":"2026-11-12T01:30:14+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":125,"t":"2026-11-12T02:00:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}
+{"seq":126,"t":"2026-11-12T16:30:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-11T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AgentConsole/frontend/tests/e2e/self-improving-flow-docker.stack.ts"}
+{"seq":127,"t":"2026-11-12T21:00:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":128,"t":"2026-11-13T01:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"quota-band","detail":"額度帶 halt"}
+{"seq":129,"t":"2026-11-13T02:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AutoClaude/.perf_baseline.toml, ONBOARDING.md, docs/01_requirements/SelfImproving_PRD.md"}
+{"seq":130,"t":"2026-11-13T02:45:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
