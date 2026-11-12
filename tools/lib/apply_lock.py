@@ -43,6 +43,7 @@ Python 都映成 `PermissionError`（errno 13），POSIX 兩者皆無。修法�
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -69,39 +70,51 @@ def _read_holder(lock_path: Path) -> str:
     return text.replace("\n", " / ") if text else "（鎖檔為空）"
 
 
-def _try_acquire(lock_path: Path) -> OSError | None:
+def _try_acquire(lock_path: Path, record: dict | None = None) -> OSError | None:
     """獨佔建檔：成功回 `None`；忙碌回該例外——`FileExistsError`（鎖已被別人持有），或 Windows 的刪除
-    待決／共享違規（`PermissionError`）。其他 `OSError` 立即穿出、不納入重試。"""
+    待決／共享違規（`PermissionError`）。其他 `OSError` 立即穿出、不納入重試。`record` 給了（守護
+    版）鎖檔內容為 JSON `{pid, process_started_utc, acquired_at}`，否則維持 `<pid>\\n<時間>\\n`。"""
     try:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except (FileExistsError, PermissionError) as exc:
         return exc
     try:
-        payload = f"{os.getpid()}\n{datetime.now(UTC).isoformat()}\n"
+        now = datetime.now(UTC).isoformat()
+        payload = (f"{os.getpid()}\n{now}\n" if record is None else json.dumps(
+            {"pid": os.getpid(), "process_started_utc": record.get("process_started_utc"),
+             "acquired_at": now}) + "\n")
         os.write(fd, payload.encode("utf-8"))
     finally:
         os.close(fd)
     return None
 
 
-def _holder_pid(lock_path: Path) -> int | None:
+def _holder_info(lock_path: Path) -> dict | None:
+    """鎖檔內容→`{pid, process_started_utc?, acquired_at?}`（JSON 或舊兩行格式）；讀不到＝None。"""
     try:
-        head = lock_path.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0].strip()
+        text = lock_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
-    return int(head) if head.isdigit() else None
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except ValueError:
+        pass
+    head = text.split("\n", 1)[0].strip()
+    return {"pid": int(head)} if head.isdigit() else None
 
 
 def _reap_if_stale(lock_path: Path, stale_after: float, holder_alive=None) -> None:
-    """鎖檔 mtime 超過 `stale_after` 秒即視為持鎖行程已死並回收；`holder_alive(pid)` 有給且回真
-    （持鎖行程還活著）就不回收（審查 F-13）。"""
+    """鎖檔 mtime 超過 `stale_after` 秒即視為持鎖行程已死並回收；`holder_alive(鎖檔內容)` 有給且回真
+    （持鎖行程還活著）就不回收（審查 F-13；E-34：呼叫端以行程身分判活）。"""
     try:
         mtime = lock_path.stat().st_mtime
         age = time.time() - mtime
         seen = lock_path.read_bytes()
     except (FileNotFoundError, PermissionError):
         return  # 鎖已被持有者釋放、被另一個回收者清掉，或處於刪除待決，屬正常狀態
-    holder = _holder_pid(lock_path)
+    holder = _holder_info(lock_path)
     if age <= stale_after or (holder_alive is not None and holder is not None
                               and holder_alive(holder)):
         return
@@ -145,24 +158,25 @@ def acquire(
 @contextmanager
 def acquire_guarded(
     lock_path: Path, timeout: float, stale_after: float, poll_interval: float = 0.2,
-    *, holder_alive,
+    *, holder_alive, process_started_utc: str | None = None,
 ) -> Iterator[None]:
-    """同 `acquire`，另依 `holder_alive(pid)`（回真＝持鎖行程還活著）決定陳舊鎖要不要回收：
-    持鎖行程還活著時，陳舊判準即使過了也不回收（審查 F-13；`acquire` 簽章不動）。"""
-    with _hold(lock_path, timeout, stale_after, poll_interval, holder_alive):
+    """同 `acquire`，另寫 JSON 鎖檔（`pid`、`process_started_utc`、`acquired_at`）並依
+    `holder_alive(鎖檔內容)`（回真＝持鎖行程還活著）決定陳舊鎖要不要回收：持鎖行程還活著時，陳舊
+    判準即使過了也不回收（審查 F-13、E-34；`acquire` 簽章不動）。"""
+    record = {"process_started_utc": process_started_utc}
+    with _hold(lock_path, timeout, stale_after, poll_interval, holder_alive, record):
         yield
 
 
 @contextmanager
 def _hold(lock_path: Path, timeout: float, stale_after: float, poll_interval: float,
-          holder_alive) -> Iterator[None]:
+          holder_alive, record: dict | None = None) -> Iterator[None]:
     deadline = time.monotonic() + timeout
-    while (busy := _try_acquire(lock_path)) is not None:
+    while (busy := _try_acquire(lock_path, record)) is not None:
         _reap_if_stale(lock_path, stale_after, holder_alive)
         if time.monotonic() >= deadline:
-            if holder_alive is not None and (busy := _try_acquire(lock_path)) is None:
+            if holder_alive is not None and (busy := _try_acquire(lock_path, record)) is None:
                 break  # 活性判斷本身（外呼行程）吃掉了等待時間：回收成功就最後再取一次
-
             if isinstance(busy, PermissionError):
                 raise busy  # 原始例外：真正的「不可寫」不被誤報成「別的行程持有」
             raise LockBusyError(

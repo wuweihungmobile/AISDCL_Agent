@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import types
 from datetime import datetime, timedelta, timezone
@@ -24,6 +26,7 @@ from _selfimproving_p4_fixtures import P4TestCase, Rig, iso
 
 from lib.selfimproving import manifest, patrolreport, pushguard, transcript
 from lib.selfimproving import paths as si_paths
+from lib.selfimproving.git import resolve_git
 
 MIN = timedelta(minutes=1)
 TZ8 = timezone(timedelta(hours=8))
@@ -288,7 +291,7 @@ def golden_patrol(case) -> bytes:
     report = case.report()
     guard = {"ahead": 1, "head": "a" * 40, "code": None, "detail": None}
     report["push"] = patrolreport.push_block(home, {"sched_heartbeat_minutes": 15}, NOW, True,
-                                             guard, lambda pid, started: False)
+                                             guard, lambda pid, started, *_a: False)
     return dump(report)
 
 
@@ -296,7 +299,7 @@ def golden_patrol(case) -> bytes:
 # §3）
 APP_BASE = 500  # 夾具自造 APP 編號的起點（`PushRepo.app_id`）
 DEC_ID = "DEC" + "-SI-001"  # 執行期拼出（帳本編號字面掃描）
-HOOKS_DIR = ".git/hooks"  # 暫存 repo 的 hooks 目錄（測試縫 `pushcontent.EXPECTED_HOOKS` 同步替換）
+HOOKS_DIR = ".git/hooks"  # 暫存 repo 的 hooks 目錄（測試縫 `git.EXPECTED_HOOKS` 同步替換）
 
 
 class PushRepo:
@@ -345,7 +348,8 @@ class PushRepo:
         if url is None:
             path.unlink(missing_ok=True)
         else:
-            path.write_text(json.dumps({"remote_url": url}), encoding="utf-8")
+            path.write_text(json.dumps({"remote_url": url, "git": resolve_git(os.environ),
+                                        "config_pins": {}}), encoding="utf-8")
 
     # ---- 基本動作
     def app_id(self) -> str:
@@ -389,15 +393,49 @@ class PushRepo:
             self.record(sha, *(rec or (app, prop or self.prop)))
         return sha
 
+    def bind(self, files: dict, claims: dict | None = None) -> None:
+        """替提案目錄的新檔追加帳本事件，使其位元組雜湊被事件綁定（TCS-P7 E-30）：
+        `r<N>.patch／.md`＝`rev==N` 的 `prop` 事件、`verify<N>.json`＝第 N 筆 `app.verify`；
+        `claims`＝{檔名: 事件宣稱的位元組}（缺省＝實際內容；造「雜湊不符」用）。
+        目錄外的路徑略過。"""
+        pdir, claims = f"{fx.PROPS_REL}/{self.prop}/", claims or {}
+        sha = lambda raw: "sha256:" + hashlib.sha256(raw).hexdigest()  # noqa: E731
+        revs: dict[int, dict] = {}
+        verifies: dict[int, str] = {}
+        for rel, data in files.items():
+            if not rel.startswith(pdir):
+                continue
+            name = rel[len(pdir):]
+            raw = claims.get(name, data)
+            raw = raw.encode("utf-8") if isinstance(raw, str) else raw
+            m = re.fullmatch(r"r(\d+)\.(patch|md)", name)
+            v = re.fullmatch(r"verify(\d+)\.json", name)
+            if m:
+                key = "patch_sha256" if m.group(2) == "patch" else "body_sha256"
+                revs.setdefault(int(m.group(1)), {})[key] = sha(
+                    raw if key == "patch_sha256" else raw.replace(b"\r\n", b"\n"))
+            elif v:
+                verifies[int(v.group(1))] = sha(raw)
+        events = [fx.prop_ev(self.n, 1, rev=rev, **kw) for rev, kw in sorted(revs.items())]
+        have = sum(1 for e in fx.EV(self.R) if e["kind"] == "app.verify" and e["prop"] == self.prop)
+        for k in sorted(verifies):
+            events += [fx.verify_ev(self.n, "NE") for _ in range(max(0, k - 1 - have))]
+            have = max(have, k - 1)
+            events.append(fx.verify_ev(self.n, "PASS", verify_sha256=verifies[k]))
+            have += 1
+        if events:
+            fx.append_events(self.R, events)
+
     def patrol(self, kind: str = "promote", *, extra: dict | None = None, tamper: str | None = None,
-               **kw) -> types.SimpleNamespace:
-        """一個合規的巡邏提交；`extra`＝{路徑: 內容} 一併提交；`tamper`＝算完 post_sha256
-        之後再多寫進
+               claims: dict | None = None, **kw) -> types.SimpleNamespace:
+        """一個合規的巡邏提交；`extra`＝{路徑: 內容} 一併提交（提案目錄的新檔會被事件綁定，
+        `claims` 可改宣稱的位元組）；`tamper`＝算完 post_sha256之後再多寫進
         touched 的文字（造「內容與結果摘要不符」）。"""
         app = kw.pop("app", None) or self.app_id()
         if self.touched:
             self.write_touched()
         self.event(kind, app, post=self.post())
+        self.bind(extra or {}, claims)
         if tamper is not None and self.touched:
             fx.put(self.R, self.touched[0], fx.read(self.R, self.touched[0]) + tamper)
         for rel, text in (extra or {}).items():

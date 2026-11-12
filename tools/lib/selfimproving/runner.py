@@ -16,6 +16,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 from .git import mask as git_mask
@@ -33,9 +34,8 @@ class ProbeResult:
     tail: str
 
 
-def mask(text: str) -> str:
-    """探針輸出尾段的遮罩：與推送結果共用 `git.mask` 的單一實作，只是標記字樣不同。"""
-    return git_mask(text, "[REDACTED]")
+#: 探針輸出尾段的遮罩：與推送結果共用 `git.mask` 的單一實作，只是標記字樣不同（不另定義函式）
+mask = partial(git_mask, mark="[REDACTED]")
 
 
 def _tail(raw: bytes) -> str:
@@ -273,30 +273,60 @@ def pid_started_at(pid: int) -> float | None:
 IDENTITY_TOLERANCE_SECONDS = 5  # 行程建立時間與 `spawn.json` 記的實測值允許的誤差（秒）
 
 
+def _ts(value) -> float | None:
+    """ISO 字串→epoch 秒；非字串、空字串、無法解析＝None（不拋例外，E-46）。"""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
 def process_identity(pid: int, started_at: str, created: str | None = None, *,
-                     window: bool = True) -> str:
-    """pid 的身分判定：`gone`（不存在或量不到）／`match`／`mismatch`（pid 已被別的行程使用）／
-    `unverified`（`window=False` 且沒有 `created`：不退回寬鬆窗，呼叫端不得據以終止，TCS-P7 E-23）。
+                     window_seconds: float | None) -> str:
+    """pid 的身分判定，值域四值：`gone`（不存在或量不到）／`match`／`mismatch`（pid 已被別的行程
+    使用）／`unverified`（`created` 或 `started_at` 不是可解析的 ISO，或沒有 `created` 而
+    `window_seconds` 為 None：不退回寬鬆窗，呼叫端殺行程時不殺、判活與回收時視為活著；E-23、E-46）。
     有 `created`（spawn 當下實測的行程建立時間，UTC ISO）時只准 `IDENTITY_TOLERANCE_SECONDS`
-    的誤差；沒有（舊 spawn.json、或當時量不到）才沿用寬鬆窗：`started_at` 是心跳開始時刻，之後
-    才做 research／scan 再 spawn，行程建立時間因此晚於它（窗的 +3600 秒就是為這段前置時間；
-    審查 F-07）。"""
-    start = pid_started_at(pid)
+    的誤差；沒有時以窗 `[started_at−120 秒, started_at＋window_seconds]` 判（`window_seconds` 必填、
+    無預設值，由記錄自己的牆鐘長度加 600 秒推得，不寫死）。"""
+    try:
+        start = pid_started_at(int(pid))
+    except (TypeError, ValueError):
+        return "unverified"
     if start is None:
         return "gone"
-    if created:
-        near = abs(start - datetime.fromisoformat(created).timestamp())
-        return "match" if near <= IDENTITY_TOLERANCE_SECONDS else "mismatch"
-    if not window:
+    want = _ts(started_at)
+    if want is None or (created is not None and _ts(created) is None):
         return "unverified"
-    want = datetime.fromisoformat(started_at).timestamp()
-    return "match" if want - 120 <= start <= want + 3600 else "mismatch"
+    if created is not None:
+        return "match" if abs(start - _ts(created)) <= IDENTITY_TOLERANCE_SECONDS else "mismatch"
+    if window_seconds is None:
+        return "unverified"
+    return "match" if want - 120 <= start <= want + window_seconds else "mismatch"
+
+
+def alive(pid: int, started_at: str, created: str | None = None,
+          window_seconds: float | None = None) -> bool:
+    """判活與回收：身分 `match` 與 `unverified`（無法驗證）都算活著——安全側；逾牆終止另走
+    `spawn_identity`，那裡 `unverified` 是不殺。"""
+    return process_identity(pid, started_at, created,
+                            window_seconds=window_seconds) in ("match", "unverified")
+
+
+def overdue(now: datetime, wall_due_at) -> bool:
+    """`now` 已到或超過牆鐘到期時刻；到期時刻被竄改（不是可解析的帶時區 ISO）＝視為逾牆（E-46）。"""
+    try:
+        return now >= datetime.fromisoformat(wall_due_at)
+    except (TypeError, ValueError):
+        return True
 
 
 def spawn_identity(data: dict) -> str:
     """`spawn.json` 內容對應的行程身分（只認實測建立時間，不退回寬鬆窗；逾牆終止前用）。"""
     return process_identity(data["pid"], data["started_at"], data.get("process_started_utc"),
-                            window=False)
+                            window_seconds=None)
 
 
 def spawn_record(pid: int, started: datetime, wall_due: datetime) -> dict:

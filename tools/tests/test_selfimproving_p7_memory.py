@@ -301,6 +301,31 @@ class TestImages(MemoryTestCase):
         self.assertEqual(memdir.post_image_problems(R, events, pid, str(mem)), "POSTIMAGE-MISMATCH")
         self.assertEqual(memdir.post_image_problems(R, [], pid, str(mem)), "POSTIMAGE-MISMATCH")
 
+    def test_AT_748_4_E_2_unmeasurable_postimage_is_always_a_mismatch(self):
+        pid = fx.pid(910)
+        R, mem = p7x.repo_m(self, "decided", prm={"sched_auto_commit": True})
+        self.beat_spy(R, AppRig(910, mem))
+        events = fx.EV(R)
+        self.assertIsNone(memdir.post_image_problems(R, events, pid, str(mem)))  # 基準：可量且相符
+        def problem(evs):
+            return memdir.post_image_problems(R, evs, pid, str(mem))
+        # ① 記憶檔讀取失敗 ⇒ 不回 None
+        with mock.patch.object(memdir.manifest, "paths_manifest", side_effect=OSError("boom")):
+            self.assertEqual(problem(events), "POSTIMAGE-MISMATCH")
+        # ① 補丁檔讀取失敗 ⇒ 同碼
+        with mock.patch.object(Path, "read_bytes", side_effect=OSError("boom")):
+            self.assertEqual(problem(events), "POSTIMAGE-MISMATCH")
+        # ② 帳本找不到對應 app.* 事件（含：只剩別的 PROP 的事件）⇒ 同碼
+        kept = [e for e in events if e["kind"] not in ("app.promote", "app.rollback")]
+        self.assertEqual(memdir.post_image_problems(R, kept, pid, str(mem)), "POSTIMAGE-MISMATCH")
+        other = [dict(e, prop=fx.pid(911)) if e["kind"].startswith("app.") else e for e in events]
+        self.assertEqual(memdir.post_image_problems(R, other, pid, str(mem)), "POSTIMAGE-MISMATCH")
+        # ③ 判準只看該 PROP 最後一筆 app.*（closed 亦以已晉升態為準）：其後的非 app 事件不影響
+        tail = events + [{"kind": "prop.state", "prop": pid, "state": "closed"}]
+        self.assertIsNone(memdir.post_image_problems(R, tail, pid, str(mem)))
+        (mem / "demo.md").write_bytes(b"drift\n")
+        self.assertEqual(memdir.post_image_problems(R, tail, pid, str(mem)), "POSTIMAGE-MISMATCH")
+
     def test_AT_748_4_E_1_p_class_is_never_checked_and_m_rollback_is(self):
         R = self.enabled_repo(prm=NO_AUTO_COMMIT)
         add_prop(R, 124, "decided")

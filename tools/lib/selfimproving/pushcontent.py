@@ -9,15 +9,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
 import sys
 from collections import Counter
 from pathlib import Path
 
 from . import check as si_check
 from . import events as si_events
+from . import git as si_git
 from . import rows as ledger_rows
-from .git import Git, scan_names
+from .git import ENV_RULES, Git, config_rule_hit, scan_names
 from .ledger import parse_ledger, split_lines, structure_findings
 
 _CELL_RE = re.compile(r"(?<!\\)\|")
@@ -60,7 +64,9 @@ _PROP_FILE_RE = re.compile(r"^(?:r\d+\.(?:patch|md)|verify\d+\.json)$")
 PROPOSAL_FILE_MAX_BYTES = 1_048_576
 CODE_MODE = "PUSH-FILE-MODE-INVALID"  # 提交含符號連結、子模組或檔案模式變更（審查 F-03）
 CODE_SECRET = "PUSH-SECRET-PATTERN"  # 提交新增的內容命中機密樣式表（審查 F-03）
+CODE_PROPOSAL = "PUSH-PROPOSAL-MISMATCH"  # 提案目錄新檔內容與帳本雜湊不符（E-30）
 CODE_CONFIG = "PUSH-GIT-CONFIG-UNSAFE"  # 本機 git 設定含不允許的鍵（審查 F-04）
+_LOCAL_SCOPES = si_git.LOCAL_LAYERS
 CODE_URL = "PUSH-REMOTE-URL-CHANGED"  # 遠端網址與 `sched arm` 記錄的不同（審查 F-04）
 CODE_DIVERGED = "PUSH-REMOTE-DIVERGED"  # 遠端 main 不是待推提交的祖先
 
@@ -86,13 +92,19 @@ def _new_rows_problem(old: str, new: str, row_max) -> str | None:
     """OBS 帳本新增的列要通過 `check` 的列驗證（必填、枚舉、座標、時間、位元組…）。"""
     led, first = parse_ledger(new), len(parse_ledger(old).rows)
     fresh = {r.subject: r.lineno for r in led.rows[first:]}
+    # 被改動的既有列（處置欄由 open 轉終值）也要過同一套列驗證，違反詞表＝處置欄不合（E-31）
+    changed = {b.subject: b.lineno for a, b in zip(parse_ledger(old).rows, led.rows[:first],
+                                                   strict=False) if a.raw != b.raw}
+    fresh.update(changed)
     for f in structure_findings(led):  # 欄數、ID 形、重複與遞增（與 `check` 的結構判準同一函式）
         if f.level == "fail" and f.subject in fresh:
             return f"OBS 帳本 第 {fresh[f.subject]} 行 {f.code}"
     for item, found in ledger_rows.evaluate_rows(led, row_max).items():
         for f in found:
             if f.level == "fail" and f.subject in fresh:
-                return f"OBS 帳本 第 {fresh[f.subject]} 行 {item} {f.code}"
+                where = f"{f.subject} 處置欄" if f.subject in changed else ""
+                text = f"OBS 帳本 第 {fresh[f.subject]} 行 {where} {item} {f.code}"
+                return text.replace("  ", " ")
     return None
 
 
@@ -126,12 +138,14 @@ def ledger_rule_problems(prop: str, changes, row_max=None) -> str | None:
 
 
 def added_text(path: str, old: str | None, new: str | None, raw: bytes | None) -> str:
-    """這次提交「新增」的文字（供機密掃描）：帳本只取追加的部分，其他檔取全文；無法解碼＝空字串。"""
+    """這次提交「新增」的文字（供機密掃描）：事件帳本只取追加的部分；OBS 帳本取新增列加「被改動的
+    既有列」（處置欄也要掃，E-31）；既有檔的修改只取新增的行；其他檔取全文。"""
     if path == si_events.LEDGER_REL and new is not None:
         return new[len(old or ""):]
     if path == _LEDGERS[1] and new is not None:
-        led = parse_ledger(new)
-        return "\n".join(r.raw for r in led.rows[len(parse_ledger(old or "").rows):])
+        before, after = parse_ledger(old or "").rows, parse_ledger(new).rows
+        changed = [b.raw for a, b in zip(before, after, strict=False) if a.raw != b.raw]
+        return "\n".join([*changed, *(r.raw for r in after[len(before):])])
     if old is not None and new is not None:  # 既有檔的修改：只掃新增的行（舊行有同樣字樣不算）
         left, fresh = Counter(old.split("\n")), []
         for line in new.split("\n"):
@@ -140,104 +154,152 @@ def added_text(path: str, old: str | None, new: str | None, raw: bytes | None) -
             else:
                 fresh.append(line)
         return "\n".join(fresh)
-    try:
-        return (raw or b"").decode("utf-8")
-    except UnicodeDecodeError:
-        return ""
+    return (raw or b"").decode("utf-8", "replace")
 
 
-def content_problems(prop: str, items, row_max=None) -> tuple[str, str] | None:
+def events_of(text: str | None) -> list[dict]:
+    """事件帳本文字中解得出的事件物件（壞行略過；內容規則已另判格式）。"""
+    if not text:
+        return []
+    return [ln.obj for ln in si_events.read_lines(text.encode("utf-8")) if ln.obj is not None]
+
+
+def _sha(raw: bytes) -> str:
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
+def _proposal_problem(prop: str, items, events) -> str | None:
+    """提案目錄每個**新增**檔的位元組雜湊必須等於帳本事件記的值（E-30）：`r<N>.patch`＝`rev==N` 的
+    `prop` 事件 `patch_sha256`、`r<N>.md`（CRLF 先正規化）＝`body_sha256`、`verify<N>.json`＝該 PROP
+    第 N 筆 `app.verify` 的 `verify_sha256`。回 `<檔名> no-event` 或 `<檔名> sha-mismatch`。"""
+    pdir = f"{si_events.PROPOSALS_REL}/{prop}/"
+    props = [e for e in events if e.get("kind") == "prop" and e.get("id") == prop]
+    verifies = [e for e in events if e.get("kind") == "app.verify" and e.get("prop") == prop]
+    for path, status, *_mid, raw in items:
+        if status != "A" or not path.startswith(pdir):
+            continue
+        name = path[len(pdir):]
+        m = re.fullmatch(r"r(\d+)\.(patch|md)", name)
+        v = re.fullmatch(r"verify(\d+)\.json", name)
+        if m:
+            ev = next((e for e in props if e.get("rev") == int(m.group(1))), None)
+            want = (ev or {}).get("patch_sha256" if m.group(2) == "patch" else "body_sha256")
+        elif v:
+            k = int(v.group(1))
+            ev = verifies[k - 1] if 1 <= k <= len(verifies) else None
+            want = (ev or {}).get("verify_sha256")
+        else:
+            continue  # 檔名不合另由帳本規則擋下
+        if ev is None or want is None:
+            return f"{name} no-event"
+        data = raw or b""
+        if m and m.group(2) == "md":
+            data = data.replace(b"\r\n", b"\n")
+        if _sha(data) != want:
+            return f"{name} sha-mismatch"
+    return None
+
+
+def mode_verdict(status: str, old_mode: str | None, new_mode: str | None) -> bool:
+    """檔案模式的**單一判準**（`rule_problem` 與 `judge` 共用；E-36）：`D` 恆合；新模式須 `100644`；
+    唯一例外＝`M` 且舊新模式皆 `100755`（既有可執行檔只改內容）。"""
+    if status == "D" or new_mode == "100644":
+        return True
+    return status == "M" and old_mode == new_mode == "100755"
+
+
+def content_problems(prop: str, items, row_max=None, events=None) -> tuple[str, str] | None:
     """內容規則的**單一函式**（`_commit`（經 `rule_problem`）與守門 `judge` 共用；TCS-P7 E-20）：
-    `items`＝[(路徑, 狀態, 新模式或 None, 舊內容或 None, 新內容或 None, 新位元組或 None)]（帳本的
-    內容為 LF 正規化文字）。依序判：檔案模式（只准 100644，回 `PUSH-FILE-MODE-INVALID`，描述
-    `<路徑> <新模式>`）→帳本與提案目錄規則（含檔名、大小、帳本行格式，回 `PUSH-LEDGER-RULE`）→
-    新增內容的機密樣式（回 `PUSH-SECRET-PATTERN`，描述 `<路徑> <樣式名>`、不含值）。
-    回（碼, 描述）。"""
-    for path, status, mode, _old, _new, _raw in items:
-        if status != "D" and mode is not None and mode != "100644":
-            return CODE_MODE, f"{path} {mode}"
-    broken = ledger_rule_problems(prop, [(p, s, o, n) for p, s, _m, o, n, _r in items], row_max)
+    `items`＝[(路徑, 狀態, 新模式, 模式合規, 舊內容或 None, 新內容或 None, 新位元組或 None)]（帳本的
+    內容為 LF 正規化文字；「模式合規」由呼叫端以 `mode_verdict` 算好——兩個呼叫端各自取得舊模式的
+    方式不同，判準本身只有一份）；`events`＝該提交的事件帳本事件。依序判：檔案模式
+    （`PUSH-FILE-MODE-INVALID`，描述 `<路徑> <新模式>`）→帳本與提案目錄規則（`PUSH-LEDGER-RULE`）
+    →提案檔雜湊綁定（`PUSH-PROPOSAL-MISMATCH`）→所有非刪除路徑須可 UTF-8 解碼且無 NUL、新增內容
+    不含機密樣式（`PUSH-SECRET-PATTERN`，描述 `<路徑> <樣式名>`、不含值）。回（碼, 描述）。"""
+    for path, _status, nmode, mode_ok, *_rest in items:  # `mode_ok`＝呼叫端以 `mode_verdict` 算好
+        if not mode_ok:
+            return CODE_MODE, f"{path} {nmode}"
+    changes = [(p, s, o, n) for p, s, _m, _ok, o, n, _r in items]
+    broken = ledger_rule_problems(prop, changes, row_max)
     if broken:
         return "PUSH-LEDGER-RULE", broken
     pdir = f"{si_events.PROPOSALS_REL}/{prop}/"
-    for path, status, _mode, _old, _new, raw in items:
+    for path, status, *_mid, raw in items:
         if status != "D" and path.startswith(pdir) and len(raw or b"") > PROPOSAL_FILE_MAX_BYTES:
             return "PUSH-LEDGER-RULE", f"提案檔 {path[len(pdir):]} 超過大小上限"
-    for path, status, _mode, old, new, raw in items:
+    bound = _proposal_problem(prop, items, events or [])
+    if bound:
+        return CODE_PROPOSAL, bound
+    for path, status, _nm, _om, old, new, raw in items:
         if status == "D":
             continue
-        if path in _LEDGERS or path.startswith(pdir):  # 文字檔：讀不到或無法解碼＝fail-closed
-            try:
-                (raw if raw is not None else b"\xff").decode("utf-8")
-            except UnicodeDecodeError:
-                return CODE_SECRET, f"{path} undecodable"
+        if raw is None or b"\x00" in raw:  # 讀不到、二進位：fail-closed（含 touched，E-31）
+            return CODE_SECRET, f"{path} undecodable"
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return CODE_SECRET, f"{path} undecodable"
         names = scan_names(added_text(path, old, new, raw))
         if names:
             return CODE_SECRET, f"{path} {names[0]}"
     return None
 
 
-def _wt_mode(path: Path) -> str | None:
-    """工作樹檔的 git 模式近似值：符號連結 120000、目錄（子模組）160000、POSIX 可執行位元 100755；
-    其餘 100644；不存在＝None。"""
-    if path.is_symlink():
-        return "120000"
-    if path.is_dir():
-        return "160000"
-    if not path.exists():
+_lstat = os.lstat  # 測試縫：符號連結判準在 Windows 也要能被驗（E-41）
+_REPARSE = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
+def _wt_mode(path: Path, old_mode: str | None = None) -> str | None:
+    """工作樹檔的 git 模式：符號連結（`S_ISLNK`，Windows 另判 reparse point）120000、目錄（子模組）
+    160000；常規檔 POSIX 取 `st_mode&0o111`，Windows 沒有可執行位、取 HEAD 的舊模式（無則 100644）；
+    不存在＝None。"""
+    try:
+        st = _lstat(str(path))
+    except FileNotFoundError:
         return None
-    return "100755" if sys.platform != "win32" and path.stat().st_mode & 0o111 else "100644"
+    if stat.S_ISLNK(st.st_mode) or getattr(st, "st_file_attributes", 0) & _REPARSE:
+        return "120000"
+    if stat.S_ISDIR(st.st_mode):
+        return "160000"
+    if sys.platform == "win32":
+        return old_mode or "100644"
+    return "100755" if st.st_mode & 0o111 else "100644"
+
+
+def _head_mode(git: Git, path: str) -> str | None:
+    """HEAD 樹中該路徑的模式（`git ls-tree HEAD -- <path>`）；沒有＝None。"""
+    cp = git.run("ls-tree", "HEAD", "--", path)
+    ok = cp is not None and cp.returncode == 0 and cp.stdout
+    first = cp.stdout.split(None, 1)[0] if ok else ""
+    return first if re.fullmatch(r"\d{6}", first) else None
 
 
 def rule_problem(git: Git, repo: Path, prop: str, changes) -> str | None:
     """`_commit` 用：對「將要提交的差分」（HEAD 內容 vs 工作樹內容）跑 `content_problems`；
     `changes`＝`pending` 回的（路徑, 狀態）清單。回第一句違規描述。"""
-    items = []
+    items, events = [], []
     for path, status in changes:
         old = new = raw = None
         try:
             raw = (repo / path).read_bytes() if status != "D" and (repo / path).is_file() else None
         except OSError:
             raw = None
+        omode = None if status == "A" else _head_mode(git, path)
         if path in _LEDGERS or (status == "M" and raw is not None):
             head = git.show("HEAD", path) if status != "A" else None
             old = None if head is None else _norm(head.encode("utf-8"))
             new = None if raw is None else _norm(raw)
-        items.append((path, status, _wt_mode(repo / path), old, new, raw))
-    hit = content_problems(prop, items)
+        if path == si_events.LEDGER_REL:
+            events = events_of(new)
+        nmode = _wt_mode(repo / path, omode)
+        items.append((path, status, nmode, mode_verdict(status, omode, nmode), old, new, raw))
+    if not events:  # 本次沒有動事件帳本：事件取工作樹現況
+        try:
+            events = events_of((repo / si_events.LEDGER_REL).read_text(encoding="utf-8"))
+        except OSError:
+            events = []
+    hit = content_problems(prop, items, events=events)
     return hit[1] if hit else None
-
-
-#: repo 既定的 hooks 目錄（`core.hookspath` 須存在且等於它；測試縫：夾具以 mock 替換）
-EXPECTED_HOOKS = "tools/git-hooks"
-#: 會被 git 當成子命令別名而執行外部程式的子命令（`alias.<子命令>` 命中即不合；TCS-P7 E-21）
-ALIAS_GUARDED = frozenset(
-    "push status rev-parse rev-list ls-remote diff-tree show cat-file log symbolic-ref "
-    "for-each-ref merge-base config add commit diff".split())
-
-
-def _unsafe_key(key: str, val: str) -> str | None:
-    """封閉危險鍵清單（`UNSAFE_KEYS` 的判準函式）：回要顯示的鍵名（子區段以 `*` 代替，避免把網址
-    或帳號帶進輸出）；不危險回 None。`key` 已轉小寫（git 對區段與變數名不分大小寫）。"""
-    parts = key.split(".")
-    sec, name, sub = parts[0], parts[-1], len(parts) > 2
-    shown = f"{sec}.*.{name}" if sub else key
-    if ((sec == "credential" and name == "helper")
-            or (sec == "core" and not sub and name in ("sshcommand", "askpass", "gitproxy"))
-            or (sec == "core" and not sub and name == "fsmonitor"
-                and val.strip().lower() not in ("false", ""))
-            or (sec == "http" and not sub and name == "proxy")
-            or (sec == "remote" and sub and name in ("proxy", "pushurl"))
-            or (sec == "url" and sub and name in ("insteadof", "pushinsteadof"))
-            or (sec == "include" and not sub and name == "path")
-            or (sec == "includeif" and sub and name == "path")
-            or (sec == "filter" and sub and name in ("clean", "smudge", "process"))
-            or (sec == "diff" and ((sub and name == "textconv")
-                                   or (not sub and name == "external")))):
-        return shown
-    if sec == "alias" and key[len("alias."):] in ALIAS_GUARDED:
-        return key
-    return None
 
 
 def _norm_hooks(path: str) -> str:
@@ -262,26 +324,33 @@ def _host_of(url: str) -> str:
     return f"ssh://{scp.group(1)}"[:60] if scp and len(scp.group(1)) > 1 else "本機路徑"
 
 
-def config_problem(j, armed_doc: dict | None) -> tuple[str, str] | None:
-    """推送前的 git 設定與遠端網址檢查（審查 F-04）：repo 本機設定含憑證 helper／fsmonitor／
-    sshCommand／非預設 hooksPath／pushurl／insteadOf 之一，或遠端網址與 `sched arm` 記錄
-    （`push/armed.json` 的內容 `armed_doc`）不同，一律不放行。詳述不含值，只列鍵名或主機名。"""
-    cp = j.run("config", "--local", "--list")
+parse_config_list = si_git.parse_config_list  # 單一家在 git.py（`sched arm` 與守門共用）
+
+
+def config_problem(j, armed_doc: dict | None, env=None) -> tuple[str, str] | None:
+    """推送前的 git 設定與遠端網址檢查（審查 F-04；E-29）：行程環境含 `GIT_CONFIG_*` 注入、任一層
+    （system／global／local／worktree／command，含 `--includes` 展開）的設定依 `git.CONFIG_RULES`
+    不合、或遠端網址與 `sched arm` 記錄（`push/armed.json`）不同，一律不放行。詳述不含值，只列鍵名
+    （子區段以 `*`）、`env:<變數名>` 或主機名。設定檢查那一次不帶任何 `-c` 覆寫。"""
+    for name in sorted(os.environ if env is None else env):
+        if ENV_RULES.match(name):
+            return CODE_CONFIG, f"env:{name}"
+    cp = j.run_plain("config", "--list", "--show-scope", "--includes", "-z")
     if cp is None or cp.returncode not in (0, 1):
         raise OSError("git config 讀取失敗")
     bad, hooks = [], []
-    for ln in cp.stdout.split("\n"):
-        key, _, val = ln.strip().partition("=")
-        key = key.lower()
-        if key == "core.hookspath":
+    entries = parse_config_list(cp.stdout)
+    bad += si_git.recorded_problems(entries, armed_doc)  # 乙類鍵：現值須等於 arm 時記錄
+    for scope, key, val in entries:
+        if key == "core.hookspath" and scope in _LOCAL_SCOPES:
             hooks.append(_norm_hooks(val))
-        elif (shown := _unsafe_key(key, val)) is not None:
+        elif (shown := config_rule_hit(scope, key, val)) is not None:
             bad.append(shown)
-    if hooks != [_norm_hooks(EXPECTED_HOOKS)]:  # 不存在、重複或不等於既定目錄，一律不合
+    if hooks != [_norm_hooks(si_git.EXPECTED_HOOKS)]:  # 不存在、重複或不等於既定目錄，一律不合
         bad.append("core.hookspath")
     if bad:
         return CODE_CONFIG, " ".join(sorted(set(bad))[:3])
-    url = j.run("config", "--get", "remote.origin.url")
+    url = j.run_plain("config", "--get", "remote.origin.url")
     now_url = url.stdout.strip() if url is not None and url.returncode == 0 else ""
     armed = (armed_doc or {}).get("remote_url")
     if not isinstance(armed, str) or _norm_url(armed) != _norm_url(now_url):

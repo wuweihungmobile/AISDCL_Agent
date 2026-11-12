@@ -31,12 +31,11 @@ from lib import apply_lock
 from . import check as si_check
 from . import events as si_events
 from . import patrolrun, pushguard, runner, sched, unattended
-from .git import Git, resolve_git, scrub_env
+from .git import PIN_ARGS, Git, armed_pins, resolve_git, scrub_env
 
 AFTER_GUARD_HOOK = None  # 測試縫（僅測試設定）：守門之後、查遠端之前呼叫 `hook(repo)`
 AFTER_LSREMOTE_HOOK = None  # 測試縫：查完遠端、推送前核對之前
 BEFORE_SEND_HOOK = None  # 測試縫：核對之後、送出 `git push` 之前（最後一道 HEAD 重核）
-BLOCK_CODES = ("PUSH-REMOTE-DRIFT", "PUSH-REMOTE-DIVERGED")  # 寫 `push/blocked.json` 的碼
 WALL_SECONDS_OVERRIDE = None  # 測試縫：縮短牆鐘（秒）
 LOCK_SLACK_SECONDS = 600  # 陳舊鎖＝牆鐘＋此值
 LOCK_WAIT_SECONDS = 1  # 取鎖等待（秒）：逾時＝另一個 push-run 在跑；也讓陳舊鎖在一輪內回收
@@ -59,41 +58,53 @@ def push_env(parent) -> dict[str, str]:
     return env
 
 
-def push_argv(repo: Path, sha: str, remote_sha: str, git_exe: str = "git") -> list[str]:
+MULTI = "<多筆>"  # `ls-remote` 有多行恰為 `refs/heads/main`：不明確，不採任何一行
+
+
+def push_argv(repo: Path, sha: str, remote_sha: str, git_exe: str = "git",
+              pin: tuple[str, ...] = ()) -> list[str]:
     """推送 argv：明寫判定過的 sha 為來源、`refs/heads/main` 為目的，並以 `--force-with-lease`
     把「遠端此刻恰為 `remote_sha`」變成伺服器端的原子條件（審查 F-01；`remote_sha` 已驗證是
-    `sha` 的祖先，仍只可能是快轉，lease 是收緊不是放寬）。`git_exe`＝絕對路徑（F-10）。"""
+    `sha` 的祖先，仍只可能是快轉，lease 是收緊不是放寬）。`git_exe`＝絕對路徑（F-10）；`pin`＝
+    `git.PIN_ARGS`，在子命令之前（E-29）。"""
     lease = f"--force-with-lease={pushguard.BRANCH_REF}:{remote_sha}"
-    return [git_exe, "-C", str(repo), "push", lease, "origin", f"{sha}:{pushguard.BRANCH_REF}"]
+    return [git_exe, "-C", str(repo), *pin, "push", lease, "origin",
+            f"{sha}:{pushguard.BRANCH_REF}"]
 
 
-def remote_main(repo: Path, env: dict, run_argv,
-                git_exe: str = "git") -> tuple[str | None, object]:
-    """`git ls-remote origin refs/heads/main`：回（遠端實值 sha；遠端沒有該分支＝""；
-    查不到＝None, 原始執行結果）。"""
-    run = run_argv([git_exe, "-C", str(repo), "ls-remote", "origin", pushguard.BRANCH_REF],
+def remote_main(repo: Path, env: dict, run_argv, git_exe: str = "git",
+                pin: tuple[str, ...] = ()) -> tuple[str | None, object]:
+    """`git ls-remote origin refs/heads/main`：回（遠端實值 sha；遠端沒有該分支＝""；多行恰為該
+    分支＝`MULTI`；查不到＝None, 原始執行結果）。逐行以空白或 tab 切成恰兩欄，只採第二欄**完全等於**
+    `refs/heads/main` 且第一欄為 40 碼小寫十六進位的行（E-35）。"""
+    run = run_argv([git_exe, "-C", str(repo), *pin, "ls-remote", "origin", pushguard.BRANCH_REF],
                    env=env, timeout=LS_REMOTE_SECONDS, cwd=repo)
     if getattr(run, "timed_out", False) or getattr(run, "rc", 1) != 0:
         return None, run
-    first = (getattr(run, "out", "") or "").split()
-    return (first[0] if first and re.fullmatch(r"[0-9a-f]{40}", first[0]) else ""), run
+    hits = []
+    for line in (getattr(run, "out", "") or "").splitlines():
+        cols = line.split()
+        if (len(cols) == 2 and cols[1] == pushguard.BRANCH_REF
+                and re.fullmatch(r"[0-9a-f]{40}", cols[0])):
+            hits.append(cols[0])
+    return (hits[0] if len(hits) == 1 else MULTI if hits else ""), run
 
 
-def head_moved(repo: Path, sha: str) -> bool:
-    """HEAD 不再是判定過的 `sha`，或不再在 `refs/heads/main` 上。"""
-    git = Git(repo)
+def head_moved(git: Git, sha: str) -> bool:
+    """HEAD 不再是判定過的 `sha`，或不再在 `refs/heads/main` 上（`git`＝絕對路徑加釘定的實例）。"""
     branch = git.run("symbolic-ref", "-q", "HEAD")
     return (git.head() != sha or branch is None
             or branch.stdout.strip() != pushguard.BRANCH_REF)
 
 
-def pre_push_problem(repo: Path, res: dict, remote: str) -> tuple[str, str] | None:
+def pre_push_problem(repo: Path, res: dict, remote: str,
+                     git: Git | None = None) -> tuple[str, str] | None:
     """遠端核對（審查 F-01／F-02）：遠端實值須等於守門固定的追蹤參照 `base`，且是被推 sha 的
     祖先。回（碼, 說明）或 None；說明＝`<遠端前8碼> <本機前8碼>`（空遠端寫「<空>」）。"""
     sha, base = res["sha"], res["base"]
     if remote != base:
         return pushguard.CODE_REMOTE_DRIFT, f"{remote[:8] or '<空>'} {base[:8]}"
-    anc = Git(repo).run("merge-base", "--is-ancestor", remote, sha)
+    anc = (git or Git(repo)).run("merge-base", "--is-ancestor", remote, sha)
     if anc is None or anc.returncode != 0:
         return pushguard.CODE_DIVERGED, f"{remote[:8]} {sha[:8]}"
     return None
@@ -147,30 +158,35 @@ def _push(repo: Path, si: Path, res: dict, params: dict, now: datetime, run_argv
         if AFTER_GUARD_HOOK is not None:
             AFTER_GUARD_HOOK(repo)
         env = push_env(os.environ)
-        if head_moved(repo, sha):
+        armed = patrolrun.read_json(folder / "armed.json") or {}
+        pin = tuple(PIN_ARGS(repo, armed_pins(armed)))
+        git = Git(repo, exe, pin)  # 絕對路徑加釘定覆寫（E-29、E-33）
+        if head_moved(git, sha):
             return moved()
-        remote, run = remote_main(repo, env, remote_run or runner.run_argv, exe)
+        remote, run = remote_main(repo, env, remote_run or runner.run_argv, exe, pin)
         if AFTER_LSREMOTE_HOOK is not None:
             AFTER_LSREMOTE_HOOK(repo)
         if remote is not None:
-            if head_moved(repo, sha):
+            if head_moved(git, sha):
                 return moved()
-            bad = pre_push_problem(repo, res, remote)
+            bad = pre_push_problem(repo, res, remote, git)
             if bad:
-                if bad[0] in BLOCK_CODES:
+                if bad[0] in pushguard.BLOCK_CODES:
                     _put(folder / "blocked.json", {"code": bad[0], "detail": bad[1], "head": sha,
                                                    "at": sched.iso(sched.aware(clock()))})
                 return _out(bad[0], as_json, 0, sha=sha, ahead=res["ahead"], text=bad[1])
             (folder / "blocked.json").unlink(missing_ok=True)
-            if head_moved(repo, sha):  # 最後一道復查；其後只剩推送送出前的極短競態（E-19）
+            if head_moved(git, sha):  # 最後一道復查；其後只剩推送送出前的極短競態（E-19）
                 return moved()
+            if (unsafe := pushguard.config_recheck(repo, si, exe)):  # 送出前再驗設定（E-29 TOCTOU）
+                return _out(unsafe[0], as_json, 0, sha=sha, ahead=res["ahead"], text=unsafe[1])
             if BEFORE_SEND_HOOK is not None:
                 BEFORE_SEND_HOOK(repo)
-            run = run_argv(push_argv(repo, sha, remote, exe), env=env, timeout=wall, cwd=repo)
+            run = run_argv(push_argv(repo, sha, remote, exe, pin), env=env, timeout=wall, cwd=repo)
         output = (getattr(run, "out", "") or "") + "\n" + (getattr(run, "err", "") or "")
         code = pushguard.classify(getattr(run, "rc", None), getattr(run, "timed_out", False),
                                   output)
-        changed = bool(sched.dirty_paths(repo))  # 推送期間人的改動會影響閘門結果：只偵測、不改碼
+        changed = bool(sched.dirty_paths(repo, git))  # 推送期間人的改動：只偵測、不改碼
         text = pushguard.last_line(output) + (TREE_CHANGED_NOTE if changed else "")
         notes = [pushguard.mask(n) for n in (getattr(run, "note", "") or "").split() if n]
         note = "；".join(notes)[:RUNNER_NOTE_MAX] or None  # runner 的終止／Job 說明（F-05）
@@ -226,7 +242,10 @@ def run(repo: Path, *, as_json: bool = False, dry_run: bool = False,
         try:
             with apply_lock.acquire_guarded(
                     si / "locks" / "push.lock", LOCK_WAIT_SECONDS, wall + LOCK_SLACK_SECONDS,
-                    holder_alive=lambda p: runner.pid_started_at(p) is not None):
+                    holder_alive=lambda info: runner.process_identity(
+                        info.get("pid"), info.get("acquired_at"), info.get("process_started_utc"),
+                        window_seconds=wall + LOCK_SLACK_SECONDS) in ("match", "unverified"),
+                    process_started_utc=runner.started_utc(os.getpid())):
                 res = pushguard.evaluate(repo, params, si, now, alive=alive, gate_retry=True)
                 if not res["ok"]:
                     return _out(res["code"], as_json, 0, ahead=res["ahead"], text=res["text"])

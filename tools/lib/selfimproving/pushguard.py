@@ -20,27 +20,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import check as si_check
 from . import events as si_events
 from . import evspec, manifest, nextstep, pushcontent, sched
 from . import paths as si_paths
-from .git import SECRET_PATTERNS, Git, mask, resolve_git  # 單一實作住 git.py
+from .git import PIN_ARGS, SECRET_PATTERNS, Git, armed_pins, mask, resolve_git  # 單一實作住 git.py
 from .pushcontent import (  # noqa: F401  # 內容判準自 pushcontent 拆出，對外名稱不變
+    _KINDS,
+    _LEDGERS,
     CODE_CONFIG,
     CODE_DIVERGED,
     CODE_MODE,
+    CODE_PROPOSAL,
     CODE_SECRET,
     CODE_URL,
     PROPOSAL_FILE_MAX_BYTES,
     _norm,
     added_text,
     content_problems,
+    events_of,
     ledger_rule_problems,
+    mode_verdict,
     rule_problem,
 )
 
@@ -53,9 +58,9 @@ CODE_REMOTE_DRIFT = "PUSH-REMOTE-DRIFT"  # 遠端 main 與守門固定的追蹤�
 CODE_HEAD_MOVED = "PUSH-HEAD-MOVED"  # 判定之後 HEAD 或分支被移動（審查 F-02）
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*): (\S.*)$")
 _PARA_RE = re.compile(r"\n[ \t]*\n")
-_CELL_RE = re.compile(r"(?<!\\)\|")
-_KINDS = ("app.promote", "app.rollback")
-_LEDGERS = (si_events.LEDGER_REL, si_check.LEDGER_REL)
+#: 寫 `push/blocked.json` 的碼（網路前置與提案雜湊不符之外的守門碼不在此；E-45：全套件單一來源）
+BLOCK_CODES = ("PUSH-REMOTE-DRIFT", "PUSH-REMOTE-DIVERGED", "PUSH-PROPOSAL-MISMATCH")
+RECORD_SLACK_SECONDS = 600  # 判活窗口＝記錄自己的牆鐘長度加這個寬限（E-34）
 
 
 class _GitFail(Exception):
@@ -144,9 +149,18 @@ def _running(cur: dict | None, now: datetime, alive) -> bool:
     if wall is None or now >= wall:
         return False
     try:
-        return alive is None or bool(alive(cur["pid"], cur["started_at"]))
+        return alive is None or bool(alive(cur["pid"], cur["started_at"],
+                                           cur.get("process_started_utc"),
+                                           record_window(cur["started_at"], cur["wall_due_at"])))
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def record_window(started_at, wall_due_at) -> float | None:
+    """記錄自己的牆鐘長度加 `RECORD_SLACK_SECONDS`＝無建立時間時的判活窗口上界（秒）；兩個時刻有
+    一個不是帶 offset 的 ISO＝None（呼叫端據此得到 `unverified`，不寫死任何窗口；E-34）。"""
+    a, b = _t(started_at), _t(wall_due_at)
+    return None if a is None or b is None else (b - a).total_seconds() + RECORD_SLACK_SECONDS
 
 
 def running(si: Path, now: datetime, alive) -> bool:
@@ -226,10 +240,9 @@ def parse_trailers(message: str) -> tuple[str, str] | None:
     if len(got) != 2 or not all(got):
         return None
     pairs = {m.group(1): m.group(2).strip() for m in got}
-    if set(pairs) != {TRAILER_APP, TRAILER_PROP}:
-        return None
-    app, prop = pairs[TRAILER_APP], pairs[TRAILER_PROP]
-    if not evspec.APP_RE.match(app) or not si_events.PROP_RE.match(prop):
+    # 恰兩行且兩把鍵都取得到＝鍵集合恰為這兩把（`.get`：缺鍵一律 None，不拋例外）
+    app, prop = pairs.get(TRAILER_APP), pairs.get(TRAILER_PROP)
+    if not app or not prop or not evspec.APP_RE.match(app) or not si_events.PROP_RE.match(prop):
         return None
     return app, prop
 
@@ -257,14 +270,18 @@ def _app_line(line: str, app_ev: dict) -> bool:
     except ValueError:
         return False
     return (isinstance(obj, dict) and obj.get("id") == app_ev.get("id")
-            and obj.get("kind") == app_ev["kind"])
+            and obj.get("kind") == app_ev.get("kind"))
 
 
 class _Judge:
     """單次 `evaluate` 的 git 讀取面（帶總牆鐘預算）與逐提交判準。"""
 
-    def __init__(self, repo: Path, si: Path, events: list[dict]) -> None:
-        self.g, self.si, self.events = Git(repo), si, events
+    def __init__(self, repo: Path, si: Path, events: list[dict], exe: str | None = None,
+                 pin: tuple[str, ...] = ()) -> None:
+        """`exe`＝git 絕對路徑、`pin`＝`PIN_ARGS`：除 `run_plain`（設定檢查，不帶任何 `-c`）外，
+        每個 git 呼叫都以 `exe` 為 argv[0] 並在子命令之前帶 `pin`（E-29、E-33）。"""
+        self.g, self.si, self.events = Git(repo, exe, pin), si, events
+        self.plain = Git(repo, exe)
         self.t0, self.records = time.monotonic(), _records(si)
         self.seen: set[str] = set()
         self.base: str | None = None  # `evaluate` 固定下來的追蹤參照 sha（`remote_has` 用）
@@ -274,6 +291,15 @@ class _Judge:
         if time.monotonic() - self.t0 > TOTAL_BUDGET:
             raise _GitFail
         cp = self.g.run(*args, timeout=CALL_TIMEOUT)
+        if cp is None:
+            raise _GitFail
+        return cp
+
+    def run_plain(self, *args: str):
+        """設定檢查專用：不帶釘定覆寫（檢查要看見真實設定）；仍受總預算與逾時約束。"""
+        if time.monotonic() - self.t0 > TOTAL_BUDGET:
+            raise _GitFail
+        cp = self.plain.run(*args, timeout=CALL_TIMEOUT)
         if cp is None:
             raise _GitFail
         return cp
@@ -314,6 +340,7 @@ class _Judge:
             else:
                 i += 1
         return out
+
     def remote_has(self, app: str) -> bool:
         cp = self.run("log", self.base, "-n", "1", "--format=%H", "-F",
                       f"--grep={TRAILER_APP}: {app}")
@@ -329,8 +356,8 @@ class _Judge:
             raise _GitFail
         tr = None if len(parents) > 1 else parse_trailers(msg.stdout)
         app_ev = None if tr is None else next(
-            (e for e in self.events if e["kind"].startswith("app.") and e.get("id") == tr[0]),
-            None)
+            (e for e in self.events if str(e.get("kind", "")).startswith("app.")
+             and e.get("id") == tr[0]), None)
         if tr is None or app_ev is None or app_ev.get("prop") != tr[1]:
             return "PUSH-FOREIGN-COMMITS", ""
         app, prop = tr
@@ -339,15 +366,15 @@ class _Judge:
             return "PUSH-NOT-RECORDED", ""
         if (recs[-1].get("app"), recs[-1].get("prop")) != (app, prop):
             return "PUSH-RECORD-MISMATCH", ""
-        if app_ev["kind"] not in _KINDS:
-            return "PUSH-APP-KIND-INVALID", f"{app} {app_ev['kind']}"
+        if app_ev.get("kind") not in _KINDS:
+            return "PUSH-APP-KIND-INVALID", f"{app} {app_ev.get('kind')}"
         reused = app in self.seen or self.remote_has(app)
         self.seen.add(app)
         if reused:
             return "PUSH-APP-REUSED", app
         changes = self.diff(sha, parents)
-        pev = next((e for e in reversed(self.events) if e["kind"] == "prop" and e["id"] == prop
-                    and e.get("rev") == app_ev.get("rev")), None)
+        pev = next((e for e in reversed(self.events) if e.get("kind") == "prop"
+                    and e.get("id") == prop and e.get("rev") == app_ev.get("rev")), None)
         if pev is None:
             return "PUSH-FOREIGN-COMMITS", ""
         patch = self.blob(sha, f"{si_events.PROPOSALS_REL}/{prop}/r{pev['rev']}.patch")
@@ -358,15 +385,16 @@ class _Judge:
             return "PUSH-PATH-OUTSIDE", outside
         items = []
         for path, status, nmode, omode in changes:
-            keep = nmode in ("100644", "000000") or (status == "M" and omode == nmode == "100755")
+            keep = mode_verdict(status, omode, nmode)  # 與提交端同一個模式判準（E-36）
             raw = self.raw_blob(sha, path) if status != "D" and keep else None
             old = new = None
             if path in _LEDGERS or (status == "M" and raw is not None):  # 既有檔：掃新增行用
                 old = self.maybe_blob(parents[0], path) if parents and status != "A" else None
                 new = None if raw is None else _norm(raw)
-            items.append((path, status, None if keep else nmode, old, new, raw))
-        rows = [(p, s, o, n) for p, s, _m, o, n, _r in items]
-        hit = content_problems(prop, items, self.row_max)
+            items.append((path, status, nmode, keep, old, new, raw))
+        rows = [(p, s, o, n) for p, s, _m, _ok, o, n, _r in items]
+        hit = content_problems(prop, items, self.row_max,
+                               events_of(self.maybe_blob(sha, si_events.LEDGER_REL)))
         if hit:
             return hit
         why = self.content_problem(sha, app_ev, pev, touched, rows)
@@ -389,6 +417,16 @@ class _Judge:
                           else hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()))
         same = manifest._digest(pairs) == app_ev.get("post_sha256")  # noqa: SLF001  # 同一個公式
         return None if same else "觸及檔內容與 post_sha256 不符"
+
+
+def config_recheck(repo: Path, si: Path, exe: str) -> tuple[str, str] | None:
+    """送出前的設定再驗（E-29）：同 `evaluate` 的設定檢查；不合回（碼, 說明），讀取失敗回
+    `PUSH-GIT-UNAVAILABLE`，合規 None。"""
+    try:
+        return pushcontent.config_problem(_Judge(repo, si, [], exe),
+                                          _read_json(si / "push" / "armed.json"))
+    except (_GitFail, OSError):
+        return "PUSH-GIT-UNAVAILABLE", "git 設定讀取失敗"
 
 
 def _result(code: str | None, detail=None, *, ahead: int = 0, head: str | None = None,
@@ -419,17 +457,24 @@ def evaluate(repo: Path, params: dict, si: Path, now: datetime, *, alive=None,
     try:
         loaded = events if events is not None else (
             si_events.load_sound_events(repo / si_events.LEDGER_REL) or [])
-        j = _Judge(repo, si, loaded)
+        exe = resolve_git(os.environ)  # 守門與推送共用同一個絕對路徑（E-33）；解析不到：fail-closed
+        if exe is None:
+            raise _GitFail
+        armed = _read_json(si / "push" / "armed.json")
+        recorded = (armed or {}).get("git")  # 沒有 armed.json／沒記 git：交由網址檢查回「未記錄」
+        if isinstance(recorded, str) and os.path.normcase(os.path.normpath(recorded)) != \
+                os.path.normcase(os.path.normpath(exe)):
+            return _result("PUSH-GIT-UNAVAILABLE", "git 路徑與安裝時記錄不同")
+        j = _Judge(repo, si, loaded, exe, tuple(PIN_ARGS(repo, armed_pins(armed))))
         j.row_max = params.get("row_max_bytes")
-        if not j.g.available:
+        if (bad := pushcontent.config_problem(j, armed)):  # 設定檢查最先（在任何其他 git 呼叫之前）
+            return _result(bad[0], bad[1])
+        inside = j.run("rev-parse", "--is-inside-work-tree")  # 與其餘呼叫同走總預算
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
             raise _GitFail
         # HEAD 與遠端追蹤參照各只解析一次、固定成 sha；之後所有查詢都用這兩個 sha，不再用符號
         # `HEAD`／`origin/main`（審查 F-01／F-02：符號參照在判定途中被移動，守門就判到別的範圍）
-        head = j.g.head()
-        if resolve_git() is None:  # git 絕對路徑解析不到（排除 repo／venv 內目錄）：fail-closed
-            raise _GitFail
-        if (bad := pushcontent.config_problem(j, _read_json(si / "push" / "armed.json"))):
-            return _result(bad[0], bad[1])
+        head = _sha_of(j.run("rev-parse", "HEAD"))
         base = _sha_of(j.run("rev-parse", "--verify", "-q", f"{REMOTE}^{{commit}}"))
         j.base = base
         rng = f"{base}..{head}" if base and head else None
@@ -446,7 +491,7 @@ def evaluate(repo: Path, params: dict, si: Path, now: datetime, *, alive=None,
             return _result("PUSH-NOT-AHEAD", head=head, base=base)
         if _running(_read_json(si / "push" / "current.json"), now, alive):
             return _result("PUSH-RUNNING", ahead=ahead, head=head, base=base)
-        if sched.dirty_paths(repo):
+        if sched.dirty_paths(repo, j.g):
             return _result("PUSH-DIRTY-TREE", ahead=ahead, head=head, base=base)
         lines = j.run("rev-list", "--reverse", "--parents", rng)
         if lines.returncode != 0:

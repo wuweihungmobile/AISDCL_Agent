@@ -15,7 +15,7 @@ import json
 import re
 import shutil
 import sys
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 # `resume_route` 以頂層名 import 同層的 endurance_env，故先把 tools/lib 放進 sys.path
@@ -193,9 +193,7 @@ def read_json(path: Path) -> dict | None:
     return obj if isinstance(obj, dict) else None
 
 
-def _alive(pid: int, started_at: str) -> bool:
-    """pid 存活且啟動時刻與 `spawn.json` 記的相近（pid 被重用者視為已結束）。"""
-    return runner.process_identity(pid, started_at) == "match"
+_alive = runner.alive  # pid 存活且身分相符（被重用者視為已結束）；無法驗證視為活著（安全側）
 
 
 def _finish(ctx, run: str, path: Path, data: dict) -> None:
@@ -237,7 +235,7 @@ def watch(ctx) -> tuple[str, bool]:
         who = None if ctx.deps.pid_alive else runner.spawn_identity(data)
         alive = who in ("match", "unverified") if who else ctx.deps.pid_alive(
             data["pid"], data["started_at"])
-        over = ctx.now >= datetime.fromisoformat(data["wall_due_at"])
+        over = runner.overdue(ctx.now, data["wall_due_at"])  # 被竄改的記錄視為逾牆（E-46）
         if alive and not over:
             busy = True
             notes.append(f"{run} 進行中")

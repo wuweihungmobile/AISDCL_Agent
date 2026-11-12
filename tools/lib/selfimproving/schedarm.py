@@ -32,7 +32,7 @@ from . import events as si_events
 from . import params as si_params
 from . import runner, sched
 from . import writeverbs as wv
-from .git import safe_path
+from .git import Git, arm_record, resolve_git, safe_path
 
 LABEL = sched.ARMED_TASK
 PUSH_LABEL = "AutoSDD_SI_Push"
@@ -282,28 +282,41 @@ def _session_argv() -> list[str]:
     擁有者的帳號與 SID（以另一個管理員帳號提權執行時，環境變數是那個管理員，桌面擁有者仍是真正
     登入的使用者）、本指令行程的 SID、已安裝的巡邏任務主體的 SID（不存在則無該行）。"""
     sid = "[Security.Principal.SecurityIdentifier]"
-    return _ps("$o = Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | "
-               "Select-Object -First 1; "
-               "$n = if ($o) { $o | Invoke-CimMethod -MethodName GetOwner }; "
-               "$s = if ($o) { $o | Invoke-CimMethod -MethodName GetOwnerSid }; "
+    return _ps("$cur = [System.Diagnostics.Process]::GetCurrentProcess().SessionId; "
+               "'SESSIONID=' + $cur; "
+               "Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | "
+               "Where-Object { $_.SessionId -eq $cur } | ForEach-Object { "
+               "$n = $_ | Invoke-CimMethod -MethodName GetOwner; "
+               "$s = $_ | Invoke-CimMethod -MethodName GetOwnerSid; "
                "if ($n -and $n.User) { 'NAME=' + $n.Domain + '\\' + $n.User }; "
-               "if ($s -and $s.Sid) { 'OWNERSID=' + $s.Sid }; "
+               "if ($s -and $s.Sid) { 'OWNERSID=' + $s.Sid } }; "
                "'MINESID=' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
                f"$p = Get-ScheduledTask -TaskName '{LABEL}' -ErrorAction SilentlyContinue; "
                "if ($p) { try { 'PATROLSID=' + (New-Object Security.Principal.NTAccount("
                f"$p.Principal.UserId)).Translate({sid}).Value }} catch {{}} }}")
 
 
-def _session(run_argv) -> dict[str, str]:
-    """`_session_argv` 的鍵值（量不到的鍵缺席；不因量不到而拒絕，事後以回讀的 SID 再比一次）。"""
+def _session(run_argv) -> dict:
+    """`_session_argv` 的結果：`OWNERSIDS`／`NAMES`（本行程工作階段內每個 `explorer.exe` 的擁有者，
+    可多筆）加 `SESSIONID`、`MINESID`、`PATROLSID`；量不到＝空 dict（呼叫端 fail-closed，E-38）。"""
     try:
         res = run_argv(_session_argv(), env=_env(), timeout=30, cwd=None)
     except Exception:  # noqa: BLE001
         return {}
     if getattr(res, "rc", 1) != 0:
         return {}
-    kv = (ln.strip().split("=", 1) for ln in (getattr(res, "out", "") or "").splitlines())
-    return {k: v.strip() for k, v in (p for p in kv if len(p) == 2) if v.strip()}
+    out: dict = {"OWNERSIDS": [], "NAMES": []}
+    for line in (getattr(res, "out", "") or "").splitlines():
+        key, _, val = line.strip().partition("=")
+        if not val.strip():
+            continue
+        if key == "OWNERSID":
+            out["OWNERSIDS"].append(val.strip())
+        elif key == "NAME":
+            out["NAMES"].append(val.strip())
+        else:
+            out[key] = val.strip()
+    return out
 
 
 def _rollback_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, why: str) -> str:
@@ -322,14 +335,22 @@ def _arm_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, minutes: 
     mac 的 rc＋plist）。驗證失敗一律回復成未安裝；以另一個帳號提權執行（桌面擁有者與目前使用者
     不同）時拒絕註冊——推送任務必須屬於登入使用者，才拿得到他的憑證保管庫。"""
     want, who = _expected_user(), {}
+    record, why_not = arm_record(repo)  # 乙類鍵（憑證輔助程式、CA、ssh 命令）的有效值，E-48
+    if record is None:  # 在 repo 層出現、或憑證輔助程式不在安全清單：不註冊、不留 armed.json
+        return "SCHED-PUSH-CONFIG-UNSAFE", (
+            "git 設定含不允許的項目（憑證輔助程式請改用 manager 或系統鑰匙圈，"
+            f"且這類設定不可放在 repo 層），請修正後重跑（{why_not}）")
     if win:
         who = _session(run_argv)
-        owner, mine = who.get("OWNERSID"), who.get("MINESID")
-        patrol = who.get("PATROLSID")
-        if (owner and mine and owner != mine) or (owner and patrol and owner != patrol):
+        owners = set(who.get("OWNERSIDS") or [])
+        if who.get("SESSIONID") in (None, "0") or len(owners) != 1:  # fail-closed（E-38）
+            return "SCHED-PUSH-USER-MISMATCH", "無法判定當前互動工作階段的擁有者"
+        owner, mine, patrol = next(iter(owners)), who.get("MINESID"), who.get("PATROLSID")
+        if owner != mine or (patrol and owner != patrol):
             return "SCHED-PUSH-USER-MISMATCH", (
                 "推送任務必須由互動登入的同一個使用者安裝；請以該使用者提權後的同一帳號重跑"
-                f"（登入的使用者是 {who.get('NAME', '未知')}）")
+                f"（登入的使用者是 {(who.get('NAMES') or ['未知'])[0]}）")
+        who["OWNERSID"] = owner
         res = run_argv(_push_register_argv(repo, minutes), env=_env(), timeout=_TIMEOUT, cwd=repo)
     else:
         res, _ = _arm_mac(repo, run_argv, plist_dir, label=PUSH_LABEL, verb="push-run", logs=False)
@@ -347,15 +368,14 @@ def _arm_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, minutes: 
         why = _rollback_push(repo, run_argv, plist_dir, win,
                              f"推送任務現查拿不到憑證（{cred}）；不得宣稱任務已建立")
         return "SCHED-NO-CREDENTIAL", why
-    expect_sid = who.get("OWNERSID") or who.get("MINESID")  # 以 SID 比（本機帳號回讀常不帶網域）
+    expect_sid = who.get("OWNERSID")  # 以 SID 比（本機帳號回讀常不帶網域）
     if win and ((expect_sid and value.get("sid") and value["sid"] != expect_sid)
                 or (not (expect_sid and value.get("sid")) and want
                     and not _same_user(value["user"], want))):
-        why = _rollback_push(repo, run_argv, plist_dir, win,
-                             "推送任務的使用者與互動登入的使用者不同")
-        return "SCHED-PUSH-USER-MISMATCH", why
+        return "SCHED-PUSH-USER-MISMATCH", _rollback_push(
+            repo, run_argv, plist_dir, win, "推送任務的使用者與互動登入的使用者不同")
     try:
-        _write_armed(repo)
+        _write_armed(repo, record)
     except OSError as exc:
         why = _rollback_push(repo, run_argv, plist_dir, win,
                              f"armed.json 寫入失敗（{type(exc).__name__}）")
@@ -363,16 +383,15 @@ def _arm_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, minutes: 
     return None, cred
 
 
-def _write_armed(repo: Path) -> None:
-    """記下安裝當下的遠端網址與 git 絕對路徑（`push/armed.json`）：守門之後比對網址是否被改
-    （審查 F-04）；`push-run` 只用這裡記的 git 解析結果同一規則解析（F-10）。"""
-    from .git import Git, resolve_git
-
+def _write_armed(repo: Path, record: dict | None = None) -> None:
+    """記下安裝當下的遠端網址、git 絕對路徑與乙類鍵的有效值 `config_pins`（`push/armed.json`）：
+    守門之後比對網址、git 路徑與乙類鍵是否被改（審查 F-04、E-33、E-49），推送以記錄值釘定。"""
     cp = Git(repo).run("config", "--get", "remote.origin.url")
     url = cp.stdout.strip() if cp is not None and cp.returncode == 0 else ""
     url = re.sub(r"(://)[^/@\s]*@", r"\1", url)  # 去 userinfo（帳密不落地）
-    doc = {"remote_url": url, "git": resolve_git(), "armed_at": sched.iso(sched.aware(
-        datetime.now().astimezone()))}
+    doc = {"remote_url": url, "git": resolve_git(os.environ),
+           "armed_at": sched.iso(sched.aware(datetime.now().astimezone())),
+           "config_pins": dict(record or {})}
     path = si_events.si_dir() / "push" / "armed.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(doc, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")

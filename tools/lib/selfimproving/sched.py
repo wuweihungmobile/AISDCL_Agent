@@ -277,11 +277,12 @@ def other_driver(repo: Path, now: datetime, params: dict) -> bool:
         "sched_driver_quiet_minutes"] * 60
 
 
-def dirty_paths(repo: Path) -> list[str]:
+def dirty_paths(repo: Path, git: Git | None = None) -> list[str]:
     """`git status --porcelain`（含未追蹤）除 SI 自有路徑（事件帳本、OBS 帳本、提案目錄）外的條目；
-    改名兩端皆判；git 不可用＝以哨兵條目回傳（fail-closed 視為髒）。"""
-    cp = Git(repo).run("-c", "core.quotepath=false", "status", "--porcelain", "-z",
-                       "--untracked-files=all")
+    改名兩端皆判；git 不可用＝以哨兵條目回傳（fail-closed 視為髒）。`git`＝推送守門傳入的絕對路徑
+    加釘定覆寫的實例。"""
+    cp = (git or Git(repo)).run("-c", "core.quotepath=false", "status", "--porcelain", "-z",
+                                "--untracked-files=all")
     if cp is None or cp.returncode != 0:
         return ["<git-unavailable>"]
     toks, out, i = cp.stdout.split("\0"), [], 0

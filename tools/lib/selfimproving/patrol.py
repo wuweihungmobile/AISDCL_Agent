@@ -414,7 +414,7 @@ def run(repo: Path, now: datetime, dry: bool, as_json: bool, deps: Deps) -> tupl
             return 0, "已有巡邏在跑\n", ""
         steps = heartbeat(ctx)
         patrolreport.emit(ctx, steps, _pending, ctx.deps.pid_alive or patrolrun._alive)
-    new =[e["seq"] for e in ctx.load() if e["seq"] > before]
+    new = [e["seq"] for e in ctx.load() if e["seq"] > before]
     failed = any(s.get("exc") for s in steps)
     if as_json:
         text = json.dumps({"ok": not failed, "kind": "patrol", "dry_run": dry, "steps": [

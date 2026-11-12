@@ -15,6 +15,7 @@ from __future__ import annotations
 import ast
 import contextlib
 import hashlib
+import inspect
 import json
 import os
 import plistlib
@@ -116,7 +117,7 @@ class GuardTestCase(P7TestCase):
 
     def setUp(self) -> None:
         super().setUp()  # 暫存 repo 的 hooks 目錄不是 tools/git-hooks：替換既定值（測試縫）
-        self.enterContext(mock.patch.object(pushcontent, "EXPECTED_HOOKS", p7x.HOOKS_DIR))
+        self.enterContext(mock.patch.object(si_git, "EXPECTED_HOOKS", p7x.HOOKS_DIR))
 
     def rr(self, **kw) -> p7x.PushRepo:
         return p7x.push_repo(self, **kw)
@@ -126,6 +127,7 @@ class GuardTestCase(P7TestCase):
         "PUSH-APP-REUSED": r"APP-SI-\d+",
         "PUSH-PATH-OUTSIDE": r"\S.*",
         "PUSH-LEDGER-RULE": r"\S.*",
+        "PUSH-PROPOSAL-MISMATCH": r"\S+ (?:no-event|sha-mismatch)",
         "PUSH-FILE-MODE-INVALID": r"\S.* \d{6}",
         "PUSH-SECRET-PATTERN": r"\S.* [a-z-]+",
         "PUSH-CONTENT-MISMATCH": "事件帳本沒有該 APP 的事件行|觸及檔內容與 post_sha256 不符"}
@@ -258,7 +260,8 @@ class ChainTestCase(GuardTestCase):
         fx.git(R, "push", "-q", "-u", "origin", "main")
         arm = self.home / "push" / "armed.json"  # 模擬 `sched arm` 記下的遠端網址
         arm.parent.mkdir(parents=True, exist_ok=True)
-        arm.write_text(json.dumps({"remote_url": str(bare)}), encoding="utf-8")
+        arm.write_text(json.dumps({"remote_url": str(bare), "git": si_git.resolve_git(),
+                           "config_pins": {}}), encoding="utf-8")
         fx.git(R, "config", "core.hooksPath", p7x.HOOKS_DIR)
         return bare
 
@@ -458,7 +461,9 @@ class TestCommit(ChainTestCase):
         obs_edit(R, lambda ls: [set_cell(ln, 7, "fixed@abcdef0") if ln.startswith(
             f"| {fx.obs_id(1)} |") else ln for ln in ls[:-1]] + [new1, new2, ""])
         fx.put(R, f"{PROPS}/{prop}/verify2.json", "{}\n")
-        fx.append_events(R, [fx.card_ev(int(prop[-3:]))])
+        fx.append_events(R, [fx.card_ev(int(prop[-3:])),  # 第 2 筆驗證事件綁定該檔的位元組雜湊
+                             fx.verify_ev(int(prop[-3:]), "PASS", verify_sha256=(
+                                 "sha256:" + hashlib.sha256(b"{}\n").hexdigest()))])
         n0 = int(fx.git(R, "rev-list", "--count", "HEAD"))
         patrolrun._commit(ctx, prop, "promote")
         self.assertEqual(int(fx.git(R, "rev-list", "--count", "HEAD")), n0 + 1, ctx.notes)
@@ -900,8 +905,8 @@ class TestPreconditionOrder(GuardTestCase):
         cur.write_text(json.dumps({"sha": "a" * 40, "pid": 4242, "started_at": NOW.isoformat(),
                                    "wall_due_at": (NOW + timedelta(minutes=30)).isoformat()}),
                        encoding="utf-8")
-        self.assertEqual(rq.evaluate(alive=lambda pid, started: True)["code"], "PUSH-RUNNING")
-        self.assertEqual(rq.evaluate(alive=lambda pid, started: False)["ok"], True)  # 行程已死
+        self.assertEqual(rq.evaluate(alive=lambda pid, started, *_a: True)["code"], "PUSH-RUNNING")
+        self.assertEqual(rq.evaluate(alive=lambda pid, started, *_a: False)["ok"], True)  # 行程已死
         self.assertEqual(rq.evaluate(now=NOW + timedelta(hours=2))["ok"], True)  # 牆鐘已過
         cur.unlink()  # 同一測試內的家目錄共用：清掉，免得影響後面的子案
         rd = self.rr()
@@ -954,7 +959,7 @@ class TestSnapshotWiring(GuardTestCase):
         h = rr.human()
         params = {**fx.params_dict(), "sched_auto_push": True}
         ctx = patrol.Ctx(rr.R, NOW, False, patrol.Deps(), params)
-        got = patrolreport.push_inputs(ctx, lambda pid, started: False)
+        got = patrolreport.push_inputs(ctx, lambda pid, started, *_a: False)
         self.assertEqual(list(got), ["ahead", "head", "code", "detail"])
         self.assertEqual((got["ahead"], got["head"], got["code"], got["detail"]),
                          (1, h, "PUSH-FOREIGN-COMMITS", h[:8]))
@@ -1066,7 +1071,8 @@ class TestPushExecution(RunTestCase):
         self.assertEqual((rc, len(spy.calls)), (0, 1), out)
         call = spy.calls[0]
         base = self.remote_main(rr)  # 推前 ls-remote 的實值；lease 把它變成伺服器端條件
-        self.assertEqual(call["argv"], [si_git.resolve_git(), "-C", str(rr.R), "push",
+        self.assertEqual(call["argv"], [si_git.resolve_git(), "-C", str(rr.R),
+                                        *si_git.PIN_ARGS(rr.R), "push",
                                         f"--force-with-lease=refs/heads/main:{base}", "origin",
                                         f"{sha}:refs/heads/main"])
         for bad in ("--force", "-f", "--no-verify", "--delete", "HEAD"):
@@ -1277,7 +1283,7 @@ class TestRetryPolicy(RunTestCase):
         self.assertEqual((got["code"], got["attempts"]), ("PUSH-OK", 2))
         prm = {**real_params(), "sched_auto_push": True}
         ctx = patrol.Ctx(rr.R, later, False, patrol.Deps(), prm)
-        guard = patrolreport.push_inputs(ctx, lambda pid, started: False)
+        guard = patrolreport.push_inputs(ctx, lambda pid, started, *_a: False)
         block = patrolreport.push_block(self.home, prm, later, True, guard, lambda *a: False)
         self.assertEqual((block["state"], block["code"], block["attempts"]), ("ok", "PUSH-OK", 2))
 
@@ -1400,22 +1406,22 @@ class TestLockAndWall(RunTestCase):
         prm = {**real_params(), "sched_auto_push": True}
         residue()
         spy = p7x.run_argv_spy()
-        rc, out = self.go(rr, spy, alive=lambda pid, started: True)  # 存活且未逾牆
+        rc, out = self.go(rr, spy, alive=lambda pid, started, *_a: True)  # 存活且未逾牆
         self.assertEqual((rc, spy.calls), (0, []), out)
         self.assertIn("PUSH-RUNNING", out)
         residue()
-        self.assertEqual(self.go(rr, spy, alive=lambda pid, started: False)[0], 0)  # 行程已死
+        self.assertEqual(self.go(rr, spy, alive=lambda pid, started, *_a: False)[0], 0)  # 行程已死
         self.assertEqual(len(spy.calls), 1)
         self.assertFalse(cur.exists())  # 覆寫後一律刪除
         self.put_result(sha, "PUSH-FAILED", 1, NOW - timedelta(days=1))
         residue(wall_min=30)
         later = NOW + timedelta(hours=2)  # pid 存活但已逾 wall_due_at：視為不在跑，且不殺他人行程
         self.assertTrue(pushguard.evaluate(rr.R, prm, self.home, later,
-                                           alive=lambda pid, started: True)["ok"])
+                                           alive=lambda pid, started, *_a: True)["ok"])
         cur.write_text("{ 損壞", encoding="utf-8")
         self.assertTrue(pushguard.evaluate(rr.R, prm, self.home, NOW,
-                                           alive=lambda pid, started: True)["ok"])
-        self.assertEqual(self.go(rr, spy, alive=lambda pid, started: True)[0], 0)
+                                           alive=lambda pid, started, *_a: True)["ok"])
+        self.assertEqual(self.go(rr, spy, alive=lambda pid, started, *_a: True)[0], 0)
 
     def test_AT_749_9_E_1_a_failed_result_write_never_re_pushes(self):
         rr = self.prr()
@@ -1452,7 +1458,7 @@ class TestLockAndWall(RunTestCase):
         self.assertNotIn("abc123", self.home_blob() + out)
         prm = {**real_params(), "sched_auto_push": True}
         ctx = patrol.Ctx(rr.R, NOW, False, patrol.Deps(), prm)
-        guard = patrolreport.push_inputs(ctx, lambda pid, started: False)
+        guard = patrolreport.push_inputs(ctx, lambda pid, started, *_a: False)
         block = patrolreport.push_block(self.home, prm, NOW, True, guard, lambda *a: False)
         self.assertEqual((block["state"], block["code"]), ("failed", "PUSH-INTERNAL-ERROR"))
         # 守門本身拋
@@ -1770,9 +1776,13 @@ class OsFake:
     def __init__(self, *, patrol_rc=0, patrol_err="", push_rc=0, push_err="", push_user=None,
                  push_next="2026-11-11T12:15:00+08:00", stuck_push=False, push_present=False,
                  patrol_present=True, owner=None, owner_sid=None, mine_sid=None,
-                 patrol_sid=None, push_sid=None) -> None:
+                 patrol_sid=None, push_sid=None, sessions=None, cur_session=1) -> None:
         self.owner = owner or self.USER  # 互動桌面（explorer.exe）的擁有者
         self.owner_sid, self.mine_sid = owner_sid or self.SID, mine_sid or self.SID
+        # {工作階段: [(帳號, SID), …]}：每個工作階段的 explorer.exe 擁有者；
+        # `cur_session`＝本行程所在
+        self.sessions = sessions or {cur_session: [(self.owner, self.owner_sid)]}
+        self.cur_session = cur_session
         self.patrol_sid = patrol_sid or self.SID
         self.push_sid = push_sid or (self.OTHER_SID if push_user else self.SID)
         self.calls: list[list[str]] = []
@@ -1804,7 +1814,10 @@ class OsFake:
         else:
             text = argv[-1]
             if "GetOwner" in text:
-                out = (f"NAME={self.owner}\nOWNERSID={self.owner_sid}\nMINESID={self.mine_sid}\n"
+                # PowerShell 端依 SessionId 過濾後的結果
+                owners = "".join(f"NAME={n}\nOWNERSID={s}\n"
+                                 for n, s in self.sessions.get(self.cur_session, []))
+                out = (f"SESSIONID={self.cur_session}\n{owners}MINESID={self.mine_sid}\n"
                        + (f"PATROLSID={self.patrol_sid}\n" if self.patrol_present else ""))
             elif "New-ScheduledTaskAction" in text:
                 rc, err = self.push_rc, self.push_err
@@ -2058,8 +2071,10 @@ class TestSecMask(RunTestCase):
             for line in lines:
                 got = fn(line)
                 for secret in (*secrets, *prefixes):
-                    self.assertNotIn(secret, got, f"{fn.__module__}.{fn.__name__}: {line}")
-                self.assertEqual(fn(got), got)  # 冪等：遮兩次＝遮一次
+                    self.assertNotIn(secret, got, f"{fn.__module__}: {line}")
+                # 預設標記 `***` 冪等（runner 的 `[REDACTED]` 含 `]`，不在此列）
+                if fn is pushguard.mask:
+                    self.assertEqual(fn(got), got)  # 冪等：遮兩次＝遮一次
         for prose in ("請設定 token", "password policy", "path: /usr/bin and patch applied"):
             self.assertEqual(pushguard.mask(prose), prose)  # 不含值的散文不被改寫
         self.assertIs(pushguard.mask, si_git.mask)  # 同一個函式物件
@@ -2137,16 +2152,19 @@ class TestSecIdentityAndLock(RunTestCase):
         self.assertEqual(tol, 5)
         near = datetime.fromtimestamp(real - 3, UTC).isoformat()  # 差 3 秒＝相符；差 6 秒＝不符
         far6 = datetime.fromtimestamp(real - 6, UTC).isoformat()
-        self.assertEqual(runner.process_identity(os.getpid(), NOW.isoformat(), near), "match")
-        self.assertEqual(runner.process_identity(os.getpid(), NOW.isoformat(), far6), "mismatch")
-        self.assertEqual(runner.process_identity(os.getpid(), NOW.isoformat(), None, window=False),
-                         "unverified")  # 缺值：不退回寬鬆窗
-        started = datetime.fromtimestamp(real - 60, UTC)  # 落在舊的寬鬆窗內
+        def ident(*a, **kw):
+            return runner.process_identity(os.getpid(), *a, window_seconds=None, **kw)
+        self.assertEqual(ident(NOW.isoformat(), near), "match")
+        self.assertEqual(ident(NOW.isoformat(), far6), "mismatch")
+        self.assertEqual(ident(NOW.isoformat(), None), "unverified")  # 缺值：不退回寬鬆窗
+        started = datetime.fromtimestamp(real - 60, UTC)  # 落在窗內
         exact = datetime.fromtimestamp(real, UTC).isoformat()
         far = datetime.fromtimestamp(real + 3000, UTC).isoformat()  # 窗內、但不是這個行程
-        self.assertEqual(runner.process_identity(os.getpid(), started.isoformat(), exact), "match")
-        self.assertEqual(runner.process_identity(os.getpid(), started.isoformat(), far), "mismatch")
-        self.assertEqual(runner.process_identity(os.getpid(), started.isoformat()), "match")  # 舊檔
+        self.assertEqual(ident(started.isoformat(), exact), "match")
+        self.assertEqual(ident(started.isoformat(), far), "mismatch")
+        self.assertEqual(runner.process_identity(os.getpid(), started.isoformat(),
+                                                 # 舊檔：窗口由呼叫端給
+                                                 window_seconds=3300), "match")
         rr = self.rr()
         prm = fx.params_dict()
         for label, created, killed in (("exact", exact, [os.getpid()]), ("reused", far, [])):
@@ -2184,11 +2202,12 @@ class TestSecIdentityAndLock(RunTestCase):
             os.utime(lock, (old, old))
         write_old()
         with self.assertRaises(apply_lock.LockBusyError):  # 陳舊但持鎖行程還活著：不回收
-            with apply_lock.acquire_guarded(lock, 0.3, 10, holder_alive=lambda pid: pid == 4242):
+            with apply_lock.acquire_guarded(lock, 0.3, 10,
+                                            holder_alive=lambda info: info.get("pid") == 4242):
                 pass
         self.assertTrue(lock.exists())
         with apply_lock.acquire_guarded(lock, 5, 10, poll_interval=0.01,  # 持鎖行程已死：回收
-                                        holder_alive=lambda pid: False):
+                                        holder_alive=lambda info: False):
             pass
         write_old()
         fresh = "999\n2099-01-01T00:00:00+00:00\n"
@@ -2196,7 +2215,7 @@ class TestSecIdentityAndLock(RunTestCase):
         def swapped(path):  # 別人在我們判陳舊與刪除之間重建了新鎖
             path.write_text(fresh, encoding="utf-8")
             return None
-        with mock.patch.object(apply_lock, "_holder_pid", swapped):
+        with mock.patch.object(apply_lock, "_holder_info", swapped):
             apply_lock._reap_if_stale(lock, 10)  # noqa: SLF001
         self.assertEqual(lock.read_text(encoding="utf-8"), fresh)  # 新鎖還在，沒被刪
 
@@ -2237,7 +2256,7 @@ class TestSecOsTasks(RunTestCase):
         ok = OsFake(push_user="tester", push_sid=OsFake.SID)
         self.assertEqual(self.arm(R, ok, push_only=True)[0], 0)
         doc = json.loads(armed.read_text(encoding="utf-8"))
-        self.assertEqual(list(doc), ["remote_url", "git", "armed_at"])
+        self.assertEqual(list(doc), ["remote_url", "git", "armed_at", "config_pins"])
         self.assertIsNotNone(datetime.fromisoformat(doc["armed_at"]).utcoffset())
 
     def test_AT_749_12_E_2_another_admin_account_or_a_foreign_patrol_principal_is_refused(self):
@@ -2260,9 +2279,11 @@ class TestSecOsTasks(RunTestCase):
     def test_AT_749_12_7_macos_agent_carries_path_and_the_si_dir(self):
         R = self.repo()
         plist_dir = fx.new_dir("plist")
-        outside = [str(fx.new_dir(f"bin{n}")) for n in range(4)]
+        # 安裝時要讀 git 設定：真 git 的目錄在 PATH 內
+        gitdir = str(Path(si_git.resolve_git()).parent)
+        outside = [str(fx.new_dir(f"bin{n}")) for n in range(4)] + [gitdir]
         env_path = os.pathsep.join([str(ROOT / ".venv" / "bin"), outside[0], outside[1],
-                                    str(ROOT / "tools"), outside[2], outside[3]])
+                                    str(ROOT / "tools"), outside[2], outside[3], gitdir])
         with (mock.patch.dict(os.environ, {"PATH": env_path}),
               mock.patch.object(schedarm.sys, "platform", "darwin")):
             rc, text = schedarm.arm(R, OsFake(), as_json=False, plist_dir=plist_dir)
@@ -2273,7 +2294,7 @@ class TestSecOsTasks(RunTestCase):
         self.assertEqual(env["AUTOSDD_SI_DIR"], str(self.home))
         self.assertFalse([k for k in env if re.search(r"(?i)token|key|secret|passw", k)])
         self.assertNotIn("StandardOutPath", data)  # 不新增 log 檔
-        self.assertIn("push_task_path=4-dirs:" + os.pathsep.join(outside[:3]), text)
+        self.assertIn("push_task_path=5-dirs:" + os.pathsep.join(outside[:3]), text)
         self.assertIn(f"push_task_si_dir={self.home}", text)
 
 
@@ -2301,12 +2322,18 @@ class TestSecAcceptance(RunTestCase):
         fx.git(other, "push", "-q", "origin", "HEAD:main")
         return self.remote_main(rr)
 
-    def manual(self, rr: p7x.PushRepo, files=None, touched_extra: str = "", stage=None) -> str:
-        """合規巡邏提交的骨架（touched＋事件行），可再夾帶檔案（str／bytes）與索引動作；回 sha。"""
+    def manual(self, rr: p7x.PushRepo, files=None, touched_extra: str = "", stage=None,
+               claims=None, touched_bytes: bytes | None = None) -> str:
+        """合規巡邏提交的骨架（touched＋事件行），可再夾帶檔案（str／bytes）與索引動作；回 sha。
+        提案目錄的新檔一律補上綁定雜湊的事件（`claims` 可改宣稱的位元組）；`touched_bytes`＝以位元組
+        寫入 touched 檔。"""
         app = rr.app_id()
-        if rr.touched:
+        if touched_bytes is not None:
+            fx.putb(rr.R, rr.touched[0], touched_bytes)
+        elif rr.touched:
             rr.write_touched(fx.read(rr.R, rr.touched[0]) + f"patrol {rr.k}\n" + touched_extra)
         rr.event("promote", app, post=rr.post())
+        rr.bind(files or {}, claims)
         paths = [EVL, *rr.touched]
         for rel, data in (files or {}).items():
             (fx.putb if isinstance(data, bytes) else fx.put)(rr.R, rel, data)
@@ -2509,8 +2536,12 @@ class TestSecAcceptance(RunTestCase):
                 rr.event("promote", app, post=rr.post())  # 結果摘要依「晉升當下」的位元組
                 fx.putb(rr.R, rel, base + now)
                 sha = rr.commit([EVL, rel], app=app)
-                self.blocked(rr.evaluate(), "PUSH-CONTENT-MISMATCH", sha, label,
-                             frag="觸及檔內容與 post_sha256 不符")
+                if label == "lone-cr":
+                    self.blocked(rr.evaluate(), "PUSH-CONTENT-MISMATCH", sha, label,
+                                 frag="觸及檔內容與 post_sha256 不符")
+                else:  # E-31 取代 E-28：非 UTF-8 的 touched 檔先判無法解碼（判序先於內容比對）
+                    self.blocked(rr.evaluate(), "PUSH-SECRET-PATTERN", sha, label,
+                                 frag=f"{rel} undecodable")
         repo = fx.new_dir("textconv")  # textconv 與 .gitattributes 命中，取到的仍是原始位元組
         fx.git(fx.TMP, "init", "-q", str(repo))
         fx.put(repo, ".gitattributes", "*.md diff=x\n")
@@ -2537,14 +2568,7 @@ class TestSecAcceptance(RunTestCase):
             ("remote.origin.pushurl", "https://x/y.git", "remote.*.pushurl"),
             ("url.https://z/.insteadOf", "https://a/", "url.*.insteadof"),
             ("url.https://z/.pushInsteadOf", "https://a/", "url.*.pushinsteadof"),
-            ("alias.push", "!echo", "alias.push"), ("alias.status", "!echo", "alias.status"),
-            ("include.path", "x.cfg", "include.path"),
-            ("includeIf.gitdir:/x/.path", "x.cfg", "includeif.*.path"),
-            ("filter.f.clean", "cat", "filter.*.clean"), ("filter.f.smudge", "cat",
-                                                          "filter.*.smudge"),
-            ("filter.f.process", "cat", "filter.*.process"),
-            ("diff.d.textconv", "cat", "diff.*.textconv"), ("diff.external", "cat",
-                                                            "diff.external"))
+            ("http.sslCAPath", "x", "http.sslcapath"), ("http.sslBackend", "x", "http.sslbackend"))
         for key, value, shown in cases:
             with self.subTest(key=key):
                 fx.git(rr.R, "config", "--local", key, value)
@@ -2594,7 +2618,7 @@ class TestSecAcceptance(RunTestCase):
         schedarm._write_armed(rr.R)  # noqa: SLF001  # `sched arm` 成功安裝時寫的檔
         path = self.home / "push" / "armed.json"
         doc = json.loads(path.read_text(encoding="utf-8"))
-        self.assertEqual(list(doc), ["remote_url", "git", "armed_at"])
+        self.assertEqual(list(doc), ["remote_url", "git", "armed_at", "config_pins"])
         self.assertEqual((doc["remote_url"], doc["git"]),
                          ("https://example.com/x/y.git", si_git.resolve_git()))
         self.assertEqual([ln for ln in path.read_text(encoding="utf-8").splitlines() if tok in ln],
@@ -2699,12 +2723,13 @@ class TestSecAcceptance(RunTestCase):
                 self.assertIsNone(re.search(r"(?<![0-9a-f])HEAD|origin/main", " ".join(a)), a)
             self.assertNotEqual(sub_of(a), "fetch")  # 全程不改本機追蹤參照
         call = ls.calls[0]
-        self.assertEqual(call["argv"][1:], ["-C", str(rr.R), "ls-remote", "origin",
-                                            "refs/heads/main"])
+        self.assertEqual(call["argv"][1:], ["-C", str(rr.R), *si_git.PIN_ARGS(rr.R),
+                                            "ls-remote", "origin", "refs/heads/main"])
         self.assertEqual(call["timeout"], patrolpush.LS_REMOTE_SECONDS)
-        self.assertEqual([sub_of(a) for a in mid[-3:]], ["merge-base", "symbolic-ref", "rev-parse"])
-        # 祖先檢查在 push 之前
-        self.assertEqual(mid[-3], ("merge-base", "--is-ancestor", base, sha))
+        # 祖先檢查→最後一道 HEAD 復查→送出前的設定再驗（兩次 config）→push
+        self.assertEqual([sub_of(a) for a in mid[-5:]],
+                         ["merge-base", "symbolic-ref", "rev-parse", "config", "config"])
+        self.assertEqual(mid[-5], ("merge-base", "--is-ancestor", base, sha))
 
     def test_AT_749_6_5_head_moved_while_judging_is_judged_against_fixed_shas(self):
         rr = self.prr()
@@ -2846,6 +2871,955 @@ class TestSecAcceptance(RunTestCase):
         self.assertIn("PUSH-REMOTE-DRIFT", out)
 
 
+# ===================== 第三輪勘誤（E-29～E-47）的驗收測試 =====================
+def global_cfg(case, text: str) -> Path:
+    """寫一份使用者層（`GIT_CONFIG_GLOBAL`）設定檔，回路徑。"""
+    folder = fx.new_dir("gcfg")
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "global.cfg"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+class TestSecRound3(RunTestCase):
+    """TCS-P7 E-29～E-46 新增的 AT（受測 tools/lib/selfimproving/
+    {git,pushcontent,pushguard,patrolpush,
+    apply_lock,runner,schedarm}.py）。"""
+
+    ENV = TestOsTasks.ENV
+    win = TestOsTasks.win
+
+    def pdir(self, rr: p7x.PushRepo) -> str:
+        return f"{PROPS}/{rr.prop}"
+
+    def manual(self, rr, files=None, **kw) -> str:
+        return TestSecAcceptance.manual(self, rr, files, **kw)
+
+    def unsafe(self, rr) -> tuple[str | None, str | None]:
+        res = rr.evaluate()
+        return res["code"], res["detail"]
+
+    def with_global(self, text: str):
+        return mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_cfg(self, text))})
+
+    @contextlib.contextmanager
+    def with_system(self, text: str):
+        """系統層設定（`GIT_CONFIG_SYSTEM`）；夾具預設的 `GIT_CONFIG_NOSYSTEM` 會讓它被忽略。"""
+        path = str(global_cfg(self, text))
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_SYSTEM": path}):
+            os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
+            yield
+
+    def arm_now(self, rr) -> None:
+        """模擬 `sched arm` 成功後寫的 `armed.json`：記下當下 system＋global 的乙類鍵有效值。"""
+        record, why = si_git.arm_record(rr.R)
+        self.assertIsNotNone(record, why)
+        schedarm._write_armed(rr.R, record)  # noqa: SLF001
+
+    # ---- E-29：git 設定全層、環境變數、釘定、送出前復驗、安裝時記錄
+    def test_AT_749_5_E_5_config_is_checked_in_every_layer(self):
+        rr = self.prr()
+        rr.patrol()
+        git_dir = rr.R / ".git"
+        fx.git(rr.R, "config", "extensions.worktreeConfig", "true")  # ①worktree 層
+        (git_dir / "config.worktree").write_text(
+            "[credential]\n\thelper = !evil\n", encoding="utf-8")
+        self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "credential.helper"))
+        (git_dir / "config.worktree").unlink()
+        fx.git(rr.R, "config", "--unset", "extensions.worktreeConfig")
+        # ②不可釘定：任何層都擋
+        with self.with_global('[url "https://x/"]\n\tinsteadOf = https://y/\n'):
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "url.*.insteadof"))
+        with self.with_global("[credential]\n\thelper = manager\n"):  # ③全域層：arm 時記下才放行
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "credential.helper"))
+            self.arm_now(rr)
+            self.assertTrue(rr.evaluate()["ok"])
+        for bad in ("!evil", "C" + ":/tools/git-credential-x.exe", "store"):
+            with self.with_global(f"[credential]\n\thelper = {bad}\n"):
+                self.assertEqual(self.unsafe(rr),
+                    ("PUSH-GIT-CONFIG-UNSAFE", "credential.helper"), bad)
+        self.arm_now(rr)  # 回到「沒有 helper」的記錄
+        with self.with_global("[http]\n\tsslVerify = false\n"):  # ④全域層的甲類鍵被釘成安全值：不擋
+            self.assertTrue(rr.evaluate()["ok"])
+        # 乙類：arm 時沒有值，任何層出現即擋
+        for text, shown in (("[core]\n\tsshCommand = evil\n", "core.sshcommand"),
+                            ("[http]\n\tproxy = http://p:1\n", "http.proxy")):
+            with self.with_global(text):
+                self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown))
+        for key, value, shown in (("core.sshCommand", "evil", "core.sshcommand"),
+                                  ("http.sslVerify", "false", "http.sslverify"),
+                                  ("http.proxy", "http://p:1", "http.proxy")):
+            fx.git(rr.R, "config", "--local", key, value)  # 同鍵在 local 層：擋
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown), key)
+            fx.git(rr.R, "config", "--local", "--unset-all", key)
+        for key, value, shown in (  # ⑤補齊的危險鍵（local 層）
+                ("http.https://h.example.proxy", "http://p:1", "http.*.proxy"),
+                ("http.sslCAInfo", "x.crt", "http.sslcainfo"),
+                ("http.sslCAPath", "x", "http.sslcapath"),
+                ("http.sslBackend", "x", "http.sslbackend"),
+                ("remote.origin.vcs", "evil", "remote.*.vcs"),
+                ("remote.origin.uploadpack", "evil", "remote.*.uploadpack"),
+                ("remote.origin.receivepack", "evil", "remote.*.receivepack"),
+                ("push.gpgSign", "true", "push.gpgsign")):
+            fx.git(rr.R, "config", "--local", key, value)
+            res = rr.evaluate()
+            self.assertEqual((res["code"], res["detail"]), ("PUSH-GIT-CONFIG-UNSAFE", shown), key)
+            fx.git(rr.R, "config", "--local", "--unset-all", key)
+        secret = "tok" + "en-value-" + "q" * 12  # 偵測訊息不含值
+        fx.git(rr.R, "config", "--local", "http.proxy", f"http://u:{secret}@p:1")
+        self.assertNotIn(secret, json.dumps(rr.evaluate(), ensure_ascii=False))
+        fx.git(rr.R, "config", "--local", "--unset-all", "http.proxy")
+        self.assertTrue(rr.evaluate()["ok"])
+
+    def test_AT_749_5_E_6_config_injected_through_the_environment_is_refused(self):
+        rr = self.prr()
+        rr.patrol()
+        for name in ("GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_KEY_0",
+                     "GIT_CONFIG_VALUE_0"):
+            with mock.patch.dict(os.environ, {name: "1"}), git_calls() as seen:
+                res = rr.evaluate()
+            self.assertEqual((res["code"], res["detail"]),
+                ("PUSH-GIT-CONFIG-UNSAFE", f"env:{name}"))
+            self.assertEqual(seen, [], name)  # 不呼叫任何 git
+            # 傳給 git 的環境仍剔除
+            self.assertNotIn(name, si_git.scrub_env({name: "1", "PATH": "p"}))
+            with mock.patch.dict(os.environ, {name: "1"}):
+                self.assertNotIn(name, Git(rr.R)._env())  # noqa: SLF001
+        quiet = {"GIT_CONFIG_SYSTEM": str(global_cfg(self, "")), "GIT_ASKPASS": "echo"}
+        with mock.patch.dict(os.environ, quiet):  # 使用者既有的設定來源：不擋（經所有層檢查把關）
+            self.assertTrue(rr.evaluate()["ok"])
+
+    def test_AT_749_6_E_8_every_git_call_carries_the_pinned_overrides(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        exe, pin = si_git.resolve_git(os.environ), si_git.PIN_ARGS(rr.R)
+        self.assertEqual(pin[:2], ["-c", "credential.helper="])  # 清空在最前
+        self.assertEqual(si_git.PIN_ARGS(rr.R, {"credential.helper": ["manager", "cache"]})[2:6],
+                         ["-c", "credential.helper=manager", "-c", "credential.helper=cache"])
+        for key in ("http.sslVerify=true", "push.gpgSign=false", "core.fsmonitor=false",
+                    "protocol.ext.allow=never", "core.gitProxy=", "core.askPass="):
+            self.assertIn(key, pin)  # 甲類
+        # 空值會讓 git 找名為空字串的 helper（vcs），或蓋掉合法的 CA／ssh／proxy（乙類不釘空值）；
+        # 丙類（pushurl／proxy）只偵測不釘
+        for key in ("remote.origin.vcs=", "core.sshCommand=", "http.sslCAInfo=", "http.proxy=",
+                    "http.sslBackend=", "http.sslCAPath=", "remote.origin.pushurl=",
+                    "remote.origin.proxy=", "diff.external=", "gpg.program="):
+            self.assertNotIn(key, pin)
+        argvs: list[list[str]] = []
+        real = subprocess.run
+
+        def rec(argv, *a, **kw):
+            argvs.append(list(argv))
+            return real(argv, *a, **kw)
+        with self.with_global("[http]\n\tsslVerify = false\n"), \
+                mock.patch.object(si_git.subprocess, "run", rec):
+            res = rr.evaluate()
+            self.assertTrue(res["ok"], res)  # 全域層 sslVerify 不被擋（甲類，推送端釘回 true）
+        for argv in argvs:
+            self.assertEqual(argv[:3], [exe, "-C", str(rr.R.resolve())])
+            if argv[3] == "config":  # 設定檢查的兩次讀取不帶覆寫（看見真實設定）
+                self.assertIn(argv[3:5], (["config", "--list"], ["config", "--get"]))
+                if argv[4] == "--list":
+                    self.assertEqual(argv[3:7], ["config", "--list", "--show-scope", "--includes"])
+            else:
+                self.assertEqual(argv[3:3 + len(pin)], pin, argv)
+        with self.with_global("[core]\n\tsshCommand = ssh -i k\n[http]\n\tsslVerify = false\n"):
+            self.arm_now(rr)  # 乙類 sshCommand：以 arm 時的記錄值釘定（不釘空值）
+            pin = si_git.PIN_ARGS(rr.R, si_git.armed_pins(json.loads(
+                (self.home / "push" / "armed.json").read_text(encoding="utf-8"))))
+            self.assertIn("core.sshCommand=ssh -i k", pin)
+
+            def effective(key):  # 釘定後實際生效的值（沒有釘定時 sslVerify 會是 false）
+                cp = real([exe, "-C", str(rr.R), *pin, "config", "--get", key], capture_output=True,
+                          encoding="utf-8", check=False)
+                return cp.stdout.strip()
+            self.assertEqual((effective("core.sshCommand"), effective("http.sslVerify")),
+                ("ssh -i k", "true"))
+            push, ls = p7x.run_argv_spy(), p7x.run_argv_spy(
+                out=f"{self.remote_main(rr)}\trefs/heads/main\n")
+            self.go(rr, push, remote_run=ls)
+        self.assertEqual(push.calls[0]["argv"], patrolpush.push_argv(
+            rr.R, sha, self.remote_main(rr), exe, tuple(pin)))
+        self.assertEqual(push.calls[0]["argv"][3:3 + len(pin)], pin)
+        self.assertEqual(ls.calls[0]["argv"][3:3 + len(pin)], pin)
+
+    # ---- E-48：git 設定三類（甲＝可釘定、乙＝arm 時記錄有效值、丙＝任何層出現即擋）
+    TYPICAL_SYSTEM = (
+        "[http]\n\tsslcainfo = " + "C" + ":/Git/mingw64/etc/ssl/certs/ca-bundle.crt\n"
+        "\tsslbackend = schannel\n"
+        '[filter "lfs"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n'
+        "\tprocess = git-lfs filter-process\n\trequired = true\n"
+        '[diff "astextplain"]\n\ttextconv = astextplain\n[credential]\n\thelper = manager\n')
+
+    def test_AT_749_5_9_typical_git_for_windows_system_layer_passes_after_arm(self):
+        rr = self.prr()
+        rr.patrol()
+        with self.with_system(self.TYPICAL_SYSTEM):
+            # arm 之前：乙類鍵（CA、credential helper）沒有記錄，出現即擋；filter／textconv 不在清單
+            self.assertEqual(self.unsafe(rr)[0], "PUSH-GIT-CONFIG-UNSAFE")
+            self.arm_now(rr)
+            doc = json.loads((self.home / "push" / "armed.json").read_text(encoding="utf-8"))
+            pins = doc["config_pins"]
+            self.assertEqual(pins["credential.helper"], ["manager"])
+            self.assertEqual(sorted(pins),
+                             ["credential.helper", "http.sslbackend", "http.sslcainfo"])
+            res = rr.evaluate()
+            self.assertTrue(res["ok"], res)  # 典型系統層不再讓自動推送恆被擋
+            pin = si_git.PIN_ARGS(rr.R, si_git.armed_pins(doc))
+            self.assertIn("http.sslCAInfo=" + pins["http.sslcainfo"][0], pin)
+            self.assertIn("http.sslBackend=schannel", pin)
+            for empty in ("http.sslCAInfo=", "http.sslBackend=", "core.sshCommand="):
+                self.assertNotIn(empty, pin)  # 乙類不釘空值
+
+    def test_AT_749_5_E_9_recorded_keys_changed_after_arm_are_refused(self):
+        rr = self.prr()
+        rr.patrol()
+        with self.with_system(self.TYPICAL_SYSTEM):
+            self.arm_now(rr)
+            for label, text, shown in (
+                    ("global-cainfo", "[http]\n\tsslCAInfo = other.crt\n", "http.sslcainfo"),
+                    ("global-backend", "[http]\n\tsslBackend = openssl\n", "http.sslbackend"),
+                    ("global-helper", "[credential]\n\thelper = cache\n", "credential.helper"),
+                    ("global-ssh", "[core]\n\tsshCommand = ssh -i k\n", "core.sshcommand"),
+                    ("global-proxy", "[http]\n\tproxy = http://p:1\n", "http.proxy")):
+                with self.subTest(label), self.with_global(text):
+                    self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown))
+        other = self.TYPICAL_SYSTEM.replace("ca-bundle.crt", "other-bundle.crt")
+        with self.with_system(other):  # 系統層的值本身被換掉：現值與記錄不同
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "http.sslcainfo"))
+        with self.with_system(self.TYPICAL_SYSTEM):
+            self.assertTrue(rr.evaluate()["ok"])  # 回到記錄值即放行
+        # 記錄檔被改成不安全的 helper、現值也一致：helper 仍須屬安全清單
+        schedarm._write_armed(rr.R, {"credential.helper": ["store"]})  # noqa: SLF001
+        with self.with_global("[credential]\n\thelper = store\n"):
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "credential.helper"))
+
+    def test_AT_749_5_E_5_b_class_c_keys_are_refused_in_every_layer_and_arm_repo_layer(self):
+        rr = self.prr()
+        rr.patrol()
+        with self.with_system('[url "https://x/"]\n\tinsteadOf = https://y/\n'):
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "url.*.insteadof"))
+        with self.with_global('[url "https://x/"]\n\tpushInsteadOf = https://y/\n'):
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "url.*.pushinsteadof"))
+        for scope_ctx in (self.with_system, self.with_global):
+            for body, shown in (('[remote "origin"]\n\tvcs = evil\n', "remote.*.vcs"),
+                                ('[remote "origin"]\n\tpushurl = https://x/y\n',
+                                 "remote.*.pushurl"),
+                                ('[remote "origin"]\n\tproxy = http://p:1\n', "remote.*.proxy")):
+                with scope_ctx(body):
+                    self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown))
+        for key in ("http.sslCAInfo", "core.sshCommand", "http.sslBackend", "credential.helper"):
+            fx.git(rr.R, "config", "--local", key, "manager" if "helper" in key else "x")
+            record, why = si_git.arm_record(rr.R)  # arm 時 repo 層出現乙類鍵：拒絕
+            self.assertEqual((record, why), (None, key.lower()), key)
+            fx.git(rr.R, "config", "--local", "--unset-all", key)
+        with self.with_system(self.TYPICAL_SYSTEM):
+            record, why = si_git.arm_record(rr.R)
+        self.assertEqual((sorted(record), why),
+                         (["credential.helper", "http.sslbackend", "http.sslcainfo"], ""))
+
+    def test_AT_749_6_E_9_config_changed_after_the_remote_query_is_caught_before_sending(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        base = self.remote_main(rr)
+        push, ls = p7x.run_argv_spy(), p7x.run_argv_spy(out=f"{base}\trefs/heads/main\n")
+        def hook(repo):
+            return fx.git(rr.R, "config", "--local", "credential.helper", "!evil")
+        with mock.patch.object(patrolpush, "AFTER_LSREMOTE_HOOK", hook):
+            rc, out = self.go(rr, push, remote_run=ls)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUSH-GIT-CONFIG-UNSAFE", out)
+        self.assertEqual(push.calls, [])  # 不 push
+        self.assertFalse(self.result_path(sha).exists())  # 不寫結果檔、不計 attempts
+        self.assertFalse((self.home / "push" / "blocked.json").exists())  # 下一心跳由 evaluate 顯示
+
+    def test_AT_749_12_E_4_credential_helpers_are_recorded_and_limited_at_arm_time(self):
+        arm = TestOsTasks.arm
+        R = TestOsTasks.repo(self)
+        armed = self.home / "push" / "armed.json"
+        with self.with_global("[credential]\n\thelper = manager\n\thelper = cache\n"):
+            fake = OsFake()
+            self.assertEqual(arm(self, R, fake, push_only=True)[0], 0)
+        self.assertEqual(json.loads(armed.read_text(encoding="utf-8"))["config_pins"],
+                         {"credential.helper": ["manager", "cache"]})  # 保留順序
+        armed.unlink()
+        with self.with_system(self.TYPICAL_SYSTEM), \
+                self.with_global("[core]\n\tsshCommand = ssh -i k\n"):  # 其餘乙類鍵一併記錄
+            self.assertEqual(arm(self, R, OsFake(), push_only=True)[0], 0)
+        self.assertEqual(
+            sorted(json.loads(armed.read_text(encoding="utf-8"))["config_pins"]),
+            ["core.sshcommand", "credential.helper", "http.sslbackend", "http.sslcainfo"])
+        armed.unlink()
+        for label, text in (("bang", "!evil"), ("absolute", "C" + ":/x/git-credential-x.exe"),
+                            ("store", "store")):
+            with self.with_global(f"[credential]\n\thelper = {text}\n"):
+                fake = OsFake()
+                rc, out = arm(self, R, fake, push_only=True)
+            self.assertEqual(rc, 1, label)
+            self.assertIn("SCHED-PUSH-CONFIG-UNSAFE", out)
+            self.assertIn("改用 manager 或系統鑰匙圈", out)
+            self.assertFalse(any("Register-ScheduledTask" in s for s in fake.script()), label)
+            self.assertFalse(armed.exists(), label)
+        fx.git(R, "config", "--local", "credential.helper", "manager")  # local 層有 helper 一律不合
+        fake = OsFake()
+        self.assertEqual(arm(self, R, fake, push_only=True)[0], 1)
+        self.assertFalse(any("Register-ScheduledTask" in s for s in fake.script()))
+
+    # ---- E-30、E-31、E-36、E-41、E-42：內容約束
+    def test_AT_749_4_E_23_proposal_files_are_bound_to_the_event_hashes(self):
+        good = {"r2.patch": b"diff content\n", "r2.md": b"body\n", "verify2.json": b'{"a": 1}\n'}
+        cases = (("no-event-rev", {"r9.md": b"x\n"}, {}, "r9.md no-event"),
+                 ("no-event-verify", {"verify7.json": b"{}\n"}, {}, "verify7.json no-event"),
+                 ("patch-differs", {"r2.patch": b"diff content!\n"}, {"r2.patch": good["r2.patch"]},
+                  "r2.patch sha-mismatch"),
+                 ("body-differs", {"r2.md": b"body?\n"}, {"r2.md": good["r2.md"]},
+                     "r2.md sha-mismatch"),
+                 ("verify-differs", {"verify2.json": b'{"a": 2}\n'},
+                     {"verify2.json": good["verify2.json"]},
+                  "verify2.json sha-mismatch"))
+        for label, files, claims, frag in cases:
+            with self.subTest(label):
+                rr = self.rr()
+                d = self.pdir(rr)
+                data = {f"{d}/{n}": v for n, v in files.items()}
+                if label.startswith("no-event"):  # 沒有對應事件：不補綁定事件
+                    rr_events = lambda *a, **k: None  # noqa: E731
+                    with mock.patch.object(rr, "bind", rr_events):
+                        sha = self.manual(rr, data)
+                else:
+                    sha = self.manual(rr, data, claims=claims)
+                self.blocked(rr.evaluate(), "PUSH-PROPOSAL-MISMATCH", sha, label, frag=frag)
+        rr = self.rr()  # ⑤正向：三種檔的位元組都與事件相符
+        d = self.pdir(rr)
+        self.manual(rr, {f"{d}/{n}": v for n, v in good.items()})
+        self.assertTrue(rr.evaluate()["ok"])
+
+    def test_AT_749_4_E_24_undecodable_binary_and_obs_disposition(self):
+        rr = self.rr()  # ①既有 touched 檔改成非 UTF-8
+        sha = self.manual(rr, touched_bytes=(rr.R / rr.touched[0]).read_bytes() + b"\xff\xfe")
+        self.blocked(rr.evaluate(), "PUSH-SECRET-PATTERN", sha, frag=f"{rr.touched[0]} undecodable")
+        for label, name, data in (("nul-in-proposal", "r2.patch", b"a\x00b\n"),
+                                   ("bad-utf8-in-proposal", "r2.md", b"\xff\xfe bad")):
+            rr = self.rr()  # ②含 NUL、③無法解碼的新增檔（雜湊綁定通過，才輪到解碼判準）
+            rel = f"{self.pdir(rr)}/{name}"
+            sha = self.manual(rr, {rel: data})
+            self.blocked(rr.evaluate(), "PUSH-SECRET-PATTERN", sha, label,
+                frag=f"{rel} undecodable")
+        rr = self.rr()  # ④處置欄寫入任意文字
+        text = obs_edit(rr.R, lambda ls: [set_cell(ln, 7, "隨便寫的字") if ln.startswith(
+            f"| {fx.obs_id(1)} |") else ln for ln in ls])
+        sha = self.manual(rr, {OBS: text})
+        res = rr.evaluate()
+        self.blocked(res, "PUSH-LEDGER-RULE", sha)
+        self.assertIn("處置欄", res["detail"])
+        self.assertIn(fx.obs_id(1), res["detail"])
+        rr = self.rr()  # ⑤處置欄寫入植入的機密樣式（詞表內的形態，值為權杖）
+        token = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
+        text = obs_edit(rr.R, lambda ls: [set_cell(ln, 7,
+                f"retired；依據 {token}:1") if ln.startswith(
+            f"| {fx.obs_id(1)} |") else ln for ln in ls])
+        sha = self.manual(rr, {OBS: text})
+        res = rr.evaluate()
+        self.assertIn(res["code"], ("PUSH-SECRET-PATTERN", "PUSH-LEDGER-RULE"), res)
+        self.assertNotIn(token, json.dumps(res, ensure_ascii=False))
+
+    def test_AT_749_4_E_25_mode_verdict_is_one_function_for_commit_and_guard(self):
+        table = (("D", "100644", "000000", True), ("A", None, "100644", True),
+                 ("A", None, "100755", False),
+                 ("M", "100644", "100644", True), ("M", "100755", "100755", True),
+                 ("M", "100644", "100755", False), ("M", "100755", "100644", True),
+                 ("A", None, "120000", False), ("T", "100644", "120000", False),
+                 ("A", None, "160000", False))
+        for status, old, new, want in table:
+            self.assertEqual(pushcontent.mode_verdict(status, old, new), want, (status, old, new))
+        callers = set()
+        for name in ("pushguard", "pushcontent"):
+            tree = ast.parse((PKG / f"{name}.py").read_text(encoding="utf-8"))
+            callers |= {fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+                        for c in ast.walk(fn) if isinstance(c, ast.Call)
+                        and ast.unparse(c.func) == "mode_verdict"}
+        self.assertEqual(callers, {"rule_problem", "judge"})
+        rr = self.rr()  # 提交端：既有 100755 的 touched 檔只改內容 ⇒ 放行（真變體與替身變體皆跑）
+        rel = rr.touched[0]
+        fx.git(rr.R, "update-index", "--chmod=+x", "--", rel)
+        fx.git(rr.R, "commit", "-q", "-m", "exec bit")
+        rr.push()
+        fx.put(rr.R, rel, fx.read(rr.R, rel) + "改內容\n")
+        if sys.platform != "win32":
+            os.chmod(rr.R / rel, 0o755)  # POSIX 的真檔：可執行位元隨檔案
+        git = Git(rr.R)
+        self.assertIsNone(pushcontent.rule_problem(git, rr.R, rr.prop, [(rel, "M")]))
+        with mock.patch.object(pushcontent, "_wt_mode", lambda path, old=None: "100755"):
+            self.assertIsNone(pushcontent.rule_problem(git, rr.R, rr.prop, [(rel, "M")]))  # 替身
+            new = f"{self.pdir(rr)}/r4.md"
+            fx.put(rr.R, new, "x\n")
+            problem = pushcontent.rule_problem(git, rr.R, rr.prop, [(new, "A")])  # ③新增 100755
+            self.assertIn("100755", problem or "")
+        fx.git(rr.R, "checkout", "-q", "--", rel)  # 回到乾淨再造 100644→100755
+        rr2 = self.rr()
+        fx.put(rr2.R, rr2.touched[0], fx.read(rr2.R, rr2.touched[0]) + "x\n")
+        with mock.patch.object(pushcontent, "_wt_mode", lambda path, old=None: "100755"):
+            self.assertIn("100755", pushcontent.rule_problem(
+                Git(rr2.R), rr2.R, rr2.prop, [(rr2.touched[0], "M")]) or "")  # ②兩邊皆拒
+        fake_reg = types.SimpleNamespace(st_mode=0o100755)  # ④Windows 規則：新模式取舊模式
+        with mock.patch.object(pushcontent, "_lstat", lambda p: fake_reg), \
+                mock.patch.object(pushcontent.sys, "platform", "win32"):
+            self.assertEqual(pushcontent._wt_mode(Path("x"), "100644"), "100644")  # noqa: SLF001
+            self.assertEqual(pushcontent._wt_mode(Path("x"), None), "100644")  # noqa: SLF001
+            self.assertEqual(pushcontent._wt_mode(Path("x"), "100755"), "100755")  # noqa: SLF001
+        with mock.patch.object(pushcontent, "_lstat", lambda p: fake_reg), \
+                mock.patch.object(pushcontent.sys, "platform", "linux"):
+            self.assertEqual(pushcontent._wt_mode(Path("x"), "100644"), "100755")  # noqa: SLF001
+
+    def test_AT_749_4_E_31_quoted_and_json_forms_are_scanned_and_masked_alike(self):
+        v = "AbCdEf0123456789xyzQ"
+        hits = (f'api_key = "{v}"', f"SECRET_KEY='{v}'", f'"token":"{v}"', f'"token": "{v}",',
+                f'key: "{v}"', f"password = {v};", f"secret={v},")
+        for text in hits:
+            self.assertIn("key-value", si_git.scan_names(text), text)
+            masked = si_git.mask(text)
+            self.assertNotIn(v, masked, text)
+            self.assertIn("***", masked)
+            self.assertEqual(si_git.mask(masked), masked)  # 冪等
+        self.assertEqual(si_git.mask('"token": "' + v + '",'), '"token": "***",')  # 引號與標點保留
+        for text in ("token: str", '"token": null', 'password = ""', "key: Optional[str]",
+                     'api_key = os.environ["X"]'):
+            self.assertEqual(si_git.scan_names(text), [], text)
+            self.assertEqual(si_git.mask(text), text, text)  # 不命中、不改寫
+
+    def test_AT_749_4_E_32_aws_and_sk_patterns_have_scan_samples(self):
+        aws = "AKI" + "A" + "ABCDEFGH" + "IJKLMNOP"
+        sk = "sk" + "-" + "A1b2C3d4E5f6G7h8I9j0K1"
+        for name, secret in (("aws-key", aws), ("sk-token", sk)):
+            rr = self.rr()
+            rel = f"{self.pdir(rr)}/r2.md"
+            sha = self.manual(rr, {rel: f"說明 {secret}\n"})
+            res = rr.evaluate()
+            self.blocked(res, "PUSH-SECRET-PATTERN", sha, frag=f"{rel} {name}")
+            self.assertNotIn(secret, json.dumps(res, ensure_ascii=False))
+            self.assertEqual(si_git.mask(f"x {secret} y"), "x *** y")  # 遮罩輸出皆為 ***
+            self.assertIn(name, si_git.scan_names(secret))
+        # 15 字元：不命中
+        self.assertEqual(si_git.scan_names("AKI" + "A" + "ABCDEFGH" + "IJKLMNO"), [])
+        # 19 字元
+        self.assertEqual(si_git.scan_names("sk" + "-" + "A1b2C3d4E5f6G7h8I9j0K"[:19]), [])
+
+    def test_AT_749_7_4_mask_shapes_are_a_closed_list_with_legacy_regression(self):
+        names = {name for name, *_rest in si_git.SECRET_PATTERNS}
+        self.assertEqual(names, {"key-value", "auth-header", "bearer", "basic", "github-token",
+                                 "sk-token", "aws-key", "private-key", "url-userinfo"})
+        tcs = (ROOT / "docs/03_testing/contracts/TCS-SelfImproving-P7-20261111.md").read_text(
+            encoding="utf-8")
+        section = tcs.split("### A.8", 1)[1].split("### A.9", 1)[0]
+        listed = {m for m in re.findall(r"^\| `([a-z-]+)` \|", section, re.M)}
+        self.assertEqual(listed, names)  # 附錄 A.8 的樣式名集合逐字相等
+        b64 = "dXNl" + "cjpwYXNz" + "d29yZA=="
+        tok = "tok" + SECRET + "x1y2z3"
+        legacy = (  # 子案 a～n：舊 pushguard／runner 兩套 _MASKS 的每一條樣式各構造一個輸入
+            ("a", f"https://u:{tok}@h/x.git", tok), ("b", f"ssh://{tok}@h/x.git", tok),
+            ("c", f"token={tok}", tok), ("d", f"password: {tok}", tok), ("e", f"passwd={tok}", tok),
+            ("f", f"secret = {tok}", tok), ("g", f"key={tok}", tok), ("h", f"Bearer {tok}", tok),
+            ("i", f"bearer {tok}", tok), ("j", f"Authorization: Bearer {tok}", tok),
+            ("k", f"Authorization: Basic {b64}", b64), ("l", f"Authorization: Digest {tok}", tok),
+            ("m", "sk" + "-" + "A1b2C3d4E5f6G7h8I9j0K1", "A1b2C3d4E5f6G7h8I9j0K1"),
+            ("n", f"curl -H 'Authorization: token {tok}' x", tok))
+        for label, text, secret in legacy:
+            got = si_git.mask(text)
+            self.assertNotIn(secret, got, label)
+            self.assertEqual(si_git.mask(got), got, label)  # 冪等
+        # 不帶 Authorization 前綴、保留字樣
+        self.assertEqual(si_git.mask(f"Bearer {tok}"), "Bearer ***")
+        self.assertEqual(si_git.mask(f"Basic {b64} z"), "Basic *** z")
+        self.assertEqual(si_git.mask(f"Authorization: Bearer {tok}"), "Authorization: Bearer ***")
+
+    # ---- E-33、E-34、E-35、E-38、E-46
+    def test_AT_749_5_E_7_guard_reads_use_the_absolute_git_path(self):
+        rr = self.prr()
+        rr.patrol()
+        exe = si_git.resolve_git(os.environ)
+        argvs: list[list[str]] = []
+        real = subprocess.run
+
+        def rec(argv, *a, **kw):
+            argvs.append(list(argv))
+            return real(argv, *a, **kw)
+        with mock.patch.object(si_git.subprocess, "run", rec):
+            self.assertTrue(rr.evaluate()["ok"])
+        subs = {sub_of(tuple(a[3:])) for a in argvs}
+        self.assertLessEqual({"rev-parse", "rev-list", "diff-tree", "cat-file",
+            "symbolic-ref", "status",
+                              "config"}, subs | {"config"})
+        self.assertEqual({a[0] for a in argvs}, {exe})  # argv[0] 全為 exe
+        for name in ("git", "pushguard", "pushcontent", "patrolpush", "runner", "schedarm"):
+            tree = ast.parse((PKG / f"{name}.py").read_text(encoding="utf-8"))
+            bare = [ast.unparse(n) for n in ast.walk(tree) if isinstance(n, ast.List) and n.elts
+                    and isinstance(n.elts[0], ast.Constant)
+                    and n.elts[0].value in ("git", "taskkill")]
+            self.assertEqual(bare, [], name)
+        rows = (PKG / "git.py").read_text(encoding="utf-8").splitlines()
+        # 不用 shutil.which（逐行判定，不對整份檔案斷言缺席）
+        self.assertEqual([ln for ln in rows if "which(" in ln or "import shutil" in ln], [])
+        cwd_repo = fx.new_dir("cwdrepo")  # 任務 cwd 放假 git：不被選中
+        cwd_repo.mkdir(parents=True, exist_ok=True)
+        for fake in ("git.bat", "git.cmd", "git"):
+            (cwd_repo / fake).write_text("echo evil\n", encoding="utf-8")
+            (cwd_repo / fake).chmod(0o755)
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        os.chdir(cwd_repo)
+        path = os.pathsep.join([str(cwd_repo), os.environ.get("PATH", "")])
+        got = si_git.resolve_git({"PATH": path,
+            "PATHEXT": os.environ.get("PATHEXT", ".EXE;.BAT;.CMD")})
+        self.assertTrue(got and not Path(got).resolve().is_relative_to(cwd_repo.resolve()), got)
+        with mock.patch.object(pushguard, "resolve_git",
+            return_value=str(Path(exe).with_name("git2"))):
+            res = rr.evaluate()  # armed.json 記錄的 git 與解析出的不同
+        self.assertEqual((res["code"], res["detail"]),
+            ("PUSH-GIT-UNAVAILABLE", "git 路徑與安裝時記錄不同"))
+        shouted = exe.upper() if sys.platform == "win32" else exe
+        with mock.patch.object(pushguard, "resolve_git", return_value=shouted):
+            self.assertTrue(rr.evaluate()["ok"])  # Windows 不分大小寫；POSIX 本來就相同
+
+    def test_AT_749_9_E_3_lock_liveness_uses_process_identity(self):
+        from lib import apply_lock
+        wall = fx.params_dict()["sched_push_wall_minutes"] * 60
+        real = runner.pid_started_at(os.getpid())
+        iso = lambda off: datetime.fromtimestamp(real + off, UTC).isoformat()  # noqa: E731
+        stale = wall + patrolpush.LOCK_SLACK_SECONDS + 400
+        cases = (("reused-pid-and-old", iso(-6), stale, True),
+                 ("same-process", iso(-3), stale, False),
+                 ("legacy-format", None, stale, False), ("not-old-enough", iso(-6), 5, False))
+        for label, created, age, reclaimed in cases:
+            with self.subTest(label):
+                self.new_home()
+                rr = self.prr()
+                rr.patrol()
+                lock = self.home / "locks" / "push.lock"
+                lock.parent.mkdir(parents=True, exist_ok=True)
+                body = {"pid": os.getpid(), "acquired_at": iso(-stale)}
+                if created is not None:
+                    body["process_started_utc"] = created
+                if label == "legacy-format":  # 舊格式：兩行 `<pid>\n<時間>`，沒有建立時間欄
+                    lock.write_text(f"{os.getpid()}\n{iso(-stale)}\n", encoding="utf-8")
+                else:
+                    lock.write_text(json.dumps(body), encoding="utf-8")
+                old = time.time() - age
+                os.utime(lock, (old, old))
+                push = p7x.run_argv_spy()
+                ls = p7x.run_argv_spy(out=f"{self.remote_main(rr)}\trefs/heads/main\n")
+                rc, out = self.go(rr, push, remote_run=ls)
+                self.assertEqual(rc, 0, out)
+                self.assertEqual(len(push.calls), 1 if reclaimed else 0, out)
+                if not reclaimed:
+                    self.assertIn("PUSH-RUNNING", out)
+        path = self.home / "locks" / "fmt.lock"
+        with apply_lock.acquire_guarded(path, 1, 10, holder_alive=lambda info: False,
+                                        process_started_utc="2026-01-01T00:00:00+00:00"):
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(doc), ["acquired_at", "pid", "process_started_utc"])
+        self.assertEqual(doc["pid"], os.getpid())
+
+    def test_AT_749_9_6_the_running_window_comes_from_the_record_not_a_constant(self):
+        sig = inspect.signature(runner.process_identity)
+        self.assertEqual(sig.parameters["window_seconds"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(sig.parameters["window_seconds"].default, inspect.Parameter.empty)
+        for name in ("pushguard", "patrolpush", "patrolrun", "runner"):
+            src = (PKG / f"{name}.py").read_text(encoding="utf-8")
+            self.assertIsNone(re.search(r"(?<![0-9.])3600(?![0-9])", src), name)  # 沒有寫死的一小時
+        real = runner.pid_started_at(os.getpid())
+        wall = 45 * 60
+        cur = self.home / "push" / "current.json"
+        cur.parent.mkdir(parents=True, exist_ok=True)
+
+        def put(started_off, created=None):
+            started = datetime.fromtimestamp(real + started_off, UTC)
+            doc = {"sha": "a" * 40, "pid": os.getpid(), "started_at": started.isoformat(),
+                   "wall_due_at": (started + timedelta(seconds=wall)).isoformat()}
+            if created is not None:
+                doc["process_started_utc"] = datetime.fromtimestamp(real + created, UTC).isoformat()
+            cur.write_text(json.dumps(doc), encoding="utf-8")
+            return started + timedelta(seconds=60)
+        alive = patrolrun._alive  # noqa: SLF001
+        now = put(-60, created=0)
+        self.assertTrue(pushguard.running(self.home, now, alive))  # 有建立時間：身分相符
+        now = put(-60, created=100)
+        self.assertFalse(pushguard.running(self.home, now, alive))  # 差 >5 秒＝pid 被重用
+        now = put(-60)
+        self.assertTrue(pushguard.running(self.home, now, alive))  # 無建立時間：窗口內
+        now = put(500)
+        self.assertFalse(pushguard.running(self.home, now, alive))  # 行程早於 started_at−120
+        now = put(-(wall + 600 + 100))  # 行程晚於 started_at＋牆鐘＋600
+        self.assertFalse(pushguard.running(self.home, now, alive))
+        self.assertEqual(pushguard.record_window("2026-01-01T00:00:00+00:00",
+                                                 "2026-01-01T00:10:00+00:00"), 600 + 600)
+
+    def test_AT_749_6_E_10_ls_remote_lines_are_matched_by_ref_name(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        base = self.remote_main(rr)
+        other = "b" * 40
+
+        def ask(out):
+            got, _run = patrolpush.remote_main(rr.R, {}, p7x.run_argv_spy(out=out), "git")
+            return got
+        decoy = f"{other}\trefs/heads/x/refs/heads/main\n"
+        self.assertEqual(ask(decoy + f"{base}\trefs/heads/main\n"), base)  # ①取正確那一行
+        self.assertEqual(ask(decoy), "")  # ②只有誘餌＝遠端沒有該分支
+        self.assertEqual(ask(f"{base}\trefs/heads/main\n{other} refs/heads/main\n"),
+            patrolpush.MULTI)
+        for bad in ("G" * 40, "A" * 40, "a" * 39, "a" * 41):  # ④sha 欄不是 40 碼小寫十六進位
+            self.assertEqual(ask(f"{bad}\trefs/heads/main\n"), "", bad)
+        res = {"sha": sha, "base": base}
+        self.assertEqual(patrolpush.pre_push_problem(rr.R, res, ""), ("PUSH-REMOTE-DRIFT",
+                                                                       f"<空> {base[:8]}"))
+        self.assertEqual(patrolpush.pre_push_problem(rr.R, res, patrolpush.MULTI),
+                         ("PUSH-REMOTE-DRIFT", f"<多筆> {base[:8]}"))
+        push = p7x.run_argv_spy()
+        rc, out = self.go(rr, push, remote_run=p7x.run_argv_spy(out=decoy))
+        self.assertEqual((rc, push.calls), (0, []))
+        self.assertIn("PUSH-REMOTE-DRIFT", out)
+
+    def test_AT_749_12_E_3_the_owner_comes_from_the_current_interactive_session(self):
+        arm = TestOsTasks.arm
+        R = TestOsTasks.repo(self)
+        a = ("TESTDOM" + "\\" + "alice", OsFake.SID)
+        b = ("TESTDOM" + "\\" + "bob", OsFake.OTHER_SID)
+        fake = OsFake(sessions={1: [a], 2: [b]}, cur_session=2, mine_sid=OsFake.OTHER_SID,
+                      patrol_sid=OsFake.OTHER_SID, push_user="x", push_sid=OsFake.OTHER_SID)
+        # ①預期 SID 為本工作階段的擁有者 B
+        self.assertEqual(arm(self, R, fake, push_only=True)[0], 0)
+        with self.win():
+            script = schedarm._session_argv()[-1]  # noqa: SLF001
+        for needle in ("GetCurrentProcess().SessionId", "Where-Object { $_.SessionId -eq $cur }"):
+            self.assertIn(needle, script)
+        refused = (("session-3-has-no-explorer", dict(sessions={1: [a], 2: [b]}, cur_session=3)),
+                   ("two-owners-in-one-session", dict(sessions={2: [a, b]}, cur_session=2)),
+                   ("session-zero", dict(sessions={0: [a]}, cur_session=0)),
+                   ("elevated-as-another-account", dict(sessions={1: [a]}, cur_session=1,
+                                                        mine_sid=OsFake.OTHER_SID)))
+        for label, kw in refused:
+            fake = OsFake(**kw)
+            rc, out = arm(self, R, fake, push_only=True)
+            self.assertEqual(rc, 1, label)
+            self.assertIn("SCHED-PUSH-USER-MISMATCH", out, label)
+            self.assertFalse(any("Register-ScheduledTask" in s for s in fake.script()), label)
+            if label != "elevated-as-another-account":
+                self.assertIn("無法判定當前互動工作階段的擁有者", out, label)
+        same_name = OsFake(push_user=OsFake.USER, push_sid=OsFake.OTHER_SID)  # 名稱相同、SID 不同
+        rc, out = arm(self, R, same_name, push_only=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("SCHED-PUSH-USER-MISMATCH", out)
+        self.assertFalse(same_name.push_present)  # 回復為未安裝
+        spelled = OsFake(owner="TESTDOM" + "\\" + "Tester", push_user="testdom" + "\\" + "TESTER",
+                         push_sid=OsFake.SID)  # SID 相同、拼法不同：通過
+        self.assertEqual(arm(self, R, spelled, push_only=True)[0], 0)
+
+    def test_AT_749_9_E_4_malformed_identity_strings_never_raise_and_fail_closed(self):
+        from lib import apply_lock
+        pid, ok_iso = os.getpid(), datetime.now(UTC).isoformat()
+        for bad in ("garbage", "", 123, None, ["x"]):
+            for created, started in ((bad, ok_iso), (ok_iso, bad), (bad, bad)):
+                if created is None and started is not None:
+                    continue  # created 缺席是合法的另一條路
+                got = runner.process_identity(pid, started, created, window_seconds=100)
+                self.assertEqual(got, "unverified", (created, started))
+        self.assertIn(runner.process_identity(2 ** 31 - 7, ok_iso, ok_iso, window_seconds=1),
+                      ("gone", "unverified"))
+        self.assertEqual(runner.process_identity("x", ok_iso, window_seconds=1), "unverified")
+        rr = self.rr()  # ①patrolrun 逾牆：不殺、記 RUN-KILL-SKIPPED
+        tdir = self.home / "patrol" / "RUN-SI-001"
+        tdir.mkdir(parents=True, exist_ok=True)
+        started = datetime.now(UTC) - timedelta(hours=6)
+        (tdir / "spawn.json").write_text(json.dumps({
+            "pid": pid, "started_at": started.isoformat(), "wall_due_at": "也不是時間",
+            "process_started_utc": "garbage"}), encoding="utf-8")
+        kills: list[int] = []
+        ctx = patrol.Ctx(rr.R, datetime.now(UTC), False, patrol.Deps(kill_tree=kills.append),
+                         fx.params_dict())
+        patrolrun.watch(ctx)
+        self.assertEqual(kills, [])
+        self.assertIn("code=RUN-KILL-SKIPPED", (self.home / "patrol" / "patrol.log").read_text(
+            encoding="utf-8"))
+        lock = self.home / "locks" / "bad.lock"  # ②acquire_guarded：視為活著、不回收
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(json.dumps({"pid": pid, "process_started_utc": "garbage",
+                                    "acquired_at": ok_iso}), encoding="utf-8")
+        old = time.time() - 100000
+        os.utime(lock, (old, old))
+        alive = lambda info: runner.process_identity(  # noqa: E731
+            info.get("pid"), info.get("acquired_at"), info.get("process_started_utc"),
+            window_seconds=10) in ("match", "unverified")
+        with self.assertRaises(apply_lock.LockBusyError), apply_lock.acquire_guarded(
+                lock, 0.3, 10, holder_alive=alive):
+            pass
+        cur = self.home / "push" / "current.json"  # ③pushguard._running：視為推送中
+        cur.parent.mkdir(parents=True, exist_ok=True)
+        now = datetime.now(UTC)
+        cur.write_text(json.dumps({"sha": "a" * 40, "pid": pid, "started_at": "壞的",
+                                   "wall_due_at": (now + timedelta(minutes=30)).isoformat(),
+                                   "process_started_utc": "garbage"}), encoding="utf-8")
+        self.assertTrue(pushguard.running(self.home, now, patrolrun._alive))  # noqa: SLF001
+
+    # ---- E-39：trailer／紀錄綁定的判別測試
+    def test_AT_749_4_E_26_the_trailer_prop_must_equal_the_event_prop(self):
+        rr = self.rr(other_prop=True)
+        app = rr.app_id()
+        rr.write_touched()
+        rr.event("promote", app, post=rr.post())
+        other = fx.pid(2)
+        # trailer 與紀錄皆寫 B，事件的 prop 是 A
+        sha = rr.commit([EVL, *rr.touched], app=app, prop=other)
+        res = rr.evaluate()
+        self.blocked(res, "PUSH-FOREIGN-COMMITS", sha)
+
+    def test_AT_749_4_E_27_the_last_record_wins_not_the_first(self):
+        for label, order, ok in (("first-ok-last-bad", ("good", "bad"), False),
+                                 ("first-bad-last-ok", ("bad", "good"), True)):
+            with self.subTest(label):
+                rr = self.rr()
+                p = rr.patrol(record=False)
+                rows = {"good": {"sha": p.sha, "app": p.app, "prop": rr.prop},
+                        "bad": {"sha": p.sha, "app": p.app, "prop": fx.pid(9)}}
+                for key in order:
+                    rr.raw_record((json.dumps(rows[key]) + "\n").encode("utf-8"))
+                res = rr.evaluate()
+                if ok:
+                    self.assertTrue(res["ok"], res)
+                else:
+                    self.blocked(res, "PUSH-RECORD-MISMATCH", p.sha)
+
+    def test_AT_749_4_E_28_a_merge_commit_is_always_foreign(self):
+        rr = self.rr()
+        fx.git(rr.R, "checkout", "-q", "-b", "side")
+        fx.put(rr.R, "side.txt", "側枝\n")
+        fx.git(rr.R, "add", "--", "side.txt")
+        fx.git(rr.R, "commit", "-q", "-m", "side")
+        fx.git(rr.R, "push", "-q", "origin", "side:main")
+        fx.git(rr.R, "checkout", "-q", "main")
+        p = rr.patrol()
+        msg = pushguard.commit_message("promote", rr.prop, p7x.DEC_ID, p.app)  # 合法的兩行 trailer
+        fx.git(rr.R, "merge", "-q", "--no-ff", "origin/main", "-m", msg)
+        merged = head_of(rr.R)
+        rr.record(merged, p.app)  # 紀錄與事件皆合法
+        self.assertEqual(len(fx.git(rr.R, "log", "-1", "--format=%P").split()), 2)
+        self.blocked(rr.evaluate(), "PUSH-FOREIGN-COMMITS", merged)
+
+    def test_AT_749_4_E_29_trailer_shapes_are_closed_and_never_raise(self):
+        app, prop = "APP" + "-SI-123", "PROP" + "-SI-001"
+        shapes = {
+            "foreign-key": f"chore: x\n\n{APP_T}: {app}\nSigned-off-by: A <a@x>",
+            "other-key": f"chore: x\n\n{APP_T}: {app}\nSI-Patrol-Other: {prop}",
+            "three-lines": f"chore: x\n\n{APP_T}: {app}\n{PROP_T}: {prop}\nExtra: y",
+            "three-same-keys": f"chore: x\n\n{APP_T}: {app}\n{PROP_T}: {prop}\n{APP_T}: {app}",
+            "single-paragraph": f"{APP_T}: {app}\n{PROP_T}: {prop}",
+            "blank-between": f"chore: x\n\n{APP_T}: {app}\n\n{PROP_T}: {prop}",
+            "duplicate-key": f"chore: x\n\n{APP_T}: {app}\n{APP_T}: {app}",
+            "one-line": f"chore: x\n\n{APP_T}: {app}"}
+        for label, msg in shapes.items():
+            self.assertIsNone(pushguard.parse_trailers(msg), label)
+        for order in (f"{APP_T}: {app}\n{PROP_T}: {prop}", f"{PROP_T}: {prop}\n{APP_T}: {app}"):
+            self.assertEqual(pushguard.parse_trailers(f"chore: x\n\n{order}"), (app, prop))
+        for label, make in shapes.items():
+            with self.subTest(label):  # 經守門：外來提交，不是 PUSH-GIT-UNAVAILABLE
+                rr = self.rr()
+                real_app = rr.app_id()
+                rr.write_touched()
+                rr.event("promote", real_app, post=rr.post())
+                msg = make.replace(app, real_app).replace(prop, rr.prop)
+                sha = rr.commit([EVL, *rr.touched], app=real_app, message=msg)
+                self.blocked(rr.evaluate(), "PUSH-FOREIGN-COMMITS", sha, label)
+        rr = self.rr()  # 正向：兩個次序都放行
+        for order in (0, 1):
+            real_app = rr.app_id()
+            rr.write_touched()
+            rr.event("promote", real_app, post=rr.post())
+            lines = [f"{APP_T}: {real_app}", f"{PROP_T}: {rr.prop}"][::1 if order == 0 else -1]
+            rr.commit([EVL, *rr.touched], app=real_app, message="chore: x\n\n" + "\n".join(lines))
+        self.assertTrue(rr.evaluate()["ok"])
+
+    # ---- E-40：fail-closed 分支
+    def test_AT_749_5_E_8_failures_never_become_a_pass(self):
+        rr = self.prr()
+        rr.patrol()
+        real, calls = Git.run, []
+
+        def count(git_self, *a, **kw):
+            calls.append(a)
+            return real(git_self, *a, **kw)
+        with mock.patch.object(Git, "run", count):
+            self.assertTrue(rr.evaluate()["ok"])
+        normal = len(calls)
+
+        def failing(match, result):
+            def run(git_self, *a, **kw):
+                if match(a):
+                    return result
+                return real(git_self, *a, **kw)
+            return run
+        bad_rc = subprocess.CompletedProcess([], 128, "", "fatal")
+        for label, match, result in (
+                ("rev-list-rc", lambda a: "rev-list" in a, bad_rc),
+                ("rev-list-timeout", lambda a: "rev-list" in a, None),
+                ("rev-list-list-rc", lambda a: "--reverse" in a, bad_rc),  # 只壞「列提交」那一次
+                ("config-rc-2", lambda a: a[:1] == ("config",) and "--list" in a,
+                 subprocess.CompletedProcess([], 2, "", "x")),
+                ("config-none", lambda a: a[:1] == ("config",) and "--list" in a, None)):
+            with self.subTest(label), mock.patch.object(Git, "run", failing(match, result)):
+                res = rr.evaluate()  # 不拋例外
+            self.assertEqual((res["ok"], res["code"]), (False, "PUSH-GIT-UNAVAILABLE"), label)
+        seen = []
+
+        def slow(git_self, *a, **kw):  # 第 3 次呼叫後總預算用盡
+            seen.append(a)
+            if len(seen) == 3:
+                time.sleep(0.6)
+            return real(git_self, *a, **kw)
+        with mock.patch.object(pushguard, "TOTAL_BUDGET", 0.5), mock.patch.object(Git, "run", slow):
+            res = rr.evaluate()
+        self.assertEqual((res["ok"], res["code"]), (False, "PUSH-GIT-UNAVAILABLE"))
+        self.assertEqual(len(seen), 3)  # 其後不再呼叫 git
+        self.assertLess(len(seen), normal)
+
+    # ---- E-44：單點斷言
+    def test_AT_749_1_E_2_default_off_touches_nothing(self):
+        rr = self.rr()
+        fx.set_params(rr.R, sched_auto_push=False)
+        rr.arm_url(None)  # 夾具記的網址檔不算「推送寫的」
+        rr.patrol()
+        push, ls = p7x.run_argv_spy(), p7x.run_argv_spy()
+        with mock.patch.object(patrolpush, "resolve_git", wraps=patrolpush.resolve_git) as rg, \
+                mock.patch.object(patrolpush.apply_lock, "acquire_guarded") as lock:
+            rc, out = self.go(rr, push, remote_run=ls)
+        self.assertEqual((rc, push.calls, ls.calls, rg.call_count, lock.call_count),
+            (0, [], [], 0, 0))
+        self.assertIn("PUSH-OFF", out)
+        self.assertFalse((self.home / "locks" / "push.lock").exists())
+        names = sorted(p.name for p in (self.home / "push").iterdir() if p.name != "commits.jsonl")
+        self.assertEqual(names, ["tick.json"])
+
+    def test_AT_749_6_E_11_pre_send_checks_each_have_a_witness(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        base = self.remote_main(rr)
+        blocked = self.home / "push" / "blocked.json"
+        blocked.parent.mkdir(parents=True, exist_ok=True)
+        blocked.write_text(json.dumps({"code": "PUSH-REMOTE-DRIFT", "head": sha}), encoding="utf-8")
+        push = p7x.run_argv_spy()
+        ls = p7x.run_argv_spy(out=f"{base}\trefs/heads/main\n")
+        self.assertEqual(self.go(rr, push, remote_run=ls)[0], 0)
+        self.assertFalse(blocked.exists())  # ①預檢通過後舊的 blocked.json 被刪
+        self.new_home()
+        rr = self.prr()
+        sha = rr.patrol().sha
+        push = p7x.run_argv_spy()
+        ls = p7x.run_argv_spy(out=f"{self.remote_main(rr)}\trefs/heads/main\n")
+        with mock.patch.object(patrolpush, "AFTER_LSREMOTE_HOOK", lambda repo: rr.human()):
+            rc, out = self.go(rr, push, remote_run=ls)  # ②ls-remote 之後 HEAD 移動
+        self.assertIn("PUSH-HEAD-MOVED", out)
+        self.assertEqual(push.calls, [])
+        self.new_home()
+        rr = self.prr()  # ②b遠端也漂移時 HEAD 移動優先：不寫 blocked.json（排除只靠最後一道復查）
+        rr.patrol()
+        push, ls = p7x.run_argv_spy(), p7x.run_argv_spy(out="a" * 40 + "\trefs/heads/main\n")
+        with mock.patch.object(patrolpush, "AFTER_LSREMOTE_HOOK", lambda repo: rr.human()):
+            rc, out = self.go(rr, push, remote_run=ls)
+        self.assertIn("PUSH-HEAD-MOVED", out)
+        self.assertFalse((self.home / "push" / "blocked.json").exists())
+        self.assertEqual(push.calls, [])
+        self.new_home()
+        rr = self.prr()
+        rr.patrol()
+        push = p7x.run_argv_spy()
+        rc, out = self.go(rr, push,
+            remote_run=p7x.run_argv_spy(out="g" * 40 + "\trefs/heads/main\n"))
+        self.assertIn("PUSH-REMOTE-DRIFT", out)  # ③sha 欄不是 40 碼十六進位＝視為沒有該分支
+        self.assertIn("<空>", out)  # 說明寫「遠端為空」，而不是把那串非十六進位字元當成遠端值
+        self.assertNotIn("gggg", out)
+        self.assertEqual(push.calls, [])
+
+    def test_AT_749_9_7_runner_notes_are_masked_and_last_line_is_the_last_nonblank(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        planted = "tok" + SECRET + "x1y2z3"
+        self.go(rr, p7x.run_argv_spy(note=f"job-unavailable:boom token={planted}"))
+        note = self.result(sha)["runner_note"]
+        self.assertNotIn(planted, note)
+        self.assertIn("token=***", note)
+        text = "第一行不同\n\n最後一行含 token=" + planted + " 尾巴\n\n"
+        got = pushguard.last_line(text)
+        self.assertTrue(got.startswith("最後一行含 token=***"), got)
+        self.assertNotIn(planted, got)
+        self.assertNotIn("第一行", got)
+        self.assertEqual(len(pushguard.last_line("x" * 500)), 160)
+
+    def test_AT_749_10_5_commit_records_and_running_state_are_strict(self):
+        si = self.home
+        for bad in ("abc123", "G" * 40, "A" * 40, "a" * 41):  # ①短 sha／非小寫十六進位：拒收
+            with self.assertRaises(OSError, msg=bad):
+                patrolreport.record_commit(si, bad, "APP" + "-SI-123", fx.pid(1), NOW)
+        self.assertFalse(commits_file(si).exists())
+        flags: list[int] = []
+        real_open = os.open
+
+        def rec(path, fl, *a, **kw):
+            flags.append(fl)
+            return real_open(path, fl, *a, **kw)
+        with mock.patch.object(patrolreport.os, "open", rec):
+            patrolreport.record_commit(si, "a" * 40, "APP" + "-SI-123", fx.pid(1), NOW)
+        self.assertTrue(flags and flags[-1] & os.O_APPEND)  # 以 O_APPEND 單行追加
+        self.assertEqual(len(commits_file(si).read_text(encoding="utf-8").splitlines()), 1)
+        prm = {**fx.params_dict(), "sched_auto_push": True}
+        cur = {"sha": "b" * 40, "pid": os.getpid(), "started_at": NOW.isoformat()}
+        folder = si / "push"
+        folder.mkdir(parents=True, exist_ok=True)
+        guard = {"ahead": 1, "head": "b" * 40, "code": None, "detail": None}
+
+        def state(due_off):
+            (folder / "current.json").write_text(json.dumps(
+                {**cur, "wall_due_at": (NOW + timedelta(minutes=due_off)).isoformat()}),
+                encoding="utf-8")
+            return patrolreport.push_block(si, prm, NOW, True, guard, lambda *a: True)["state"]
+        self.assertEqual(state(30), "running")  # ②牆鐘未到且存活
+        self.assertNotEqual(state(-1), "running")  # 牆鐘已到
+        (folder / "current.json").unlink()
+        idle = patrolreport.push_block(si, prm, NOW, True, {**guard, "ahead": 0}, lambda *a: False)
+        self.assertEqual((idle["state"], idle["code"]), ("idle", "PUSH-NOT-AHEAD"))  # ③不是 blocked
+
+    def test_AT_790_6_1_constants_and_predicates_have_a_single_home(self):
+        trees = {p.name: ast.parse(p.read_text(encoding="utf-8")) for p in PKG.glob("*.py")}
+
+        def defined(name, kinds=(ast.Assign, ast.AnnAssign, ast.FunctionDef)):
+            out = []
+            for fname, tree in trees.items():
+                for node in tree.body:
+                    if isinstance(node, ast.FunctionDef) and node.name == name:
+                        out.append(fname)
+                    elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+                            out.append(fname)
+            return out
+        for name in ("_KINDS", "_LEDGERS", "_CELL_RE"):  # 本套件的推送面：pushcontent 一家
+            homes = set(defined(name))
+            self.assertIn("pushcontent.py", homes, name)
+            self.assertFalse(homes & {"pushguard.py", "patrolpush.py", "patrolreport.py"}, name)
+        for name in ("NEVER_RETRY", "RETRYABLE", "BLOCK_CODES"):
+            self.assertEqual(defined(name), ["pushguard.py"], name)
+        for name in ("SECRET_PATTERNS", "STRIP_ENV"):
+            self.assertEqual(defined(name), ["git.py"], name)
+        self.assertEqual([f for f in defined("mask") if f != "runner.py"], ["git.py"])
+        for name in ("mode_verdict", "content_problems", "ledger_rule_problems"):
+            self.assertEqual(defined(name), ["pushcontent.py"], name)
+        guard = {tuple(getattr(pushguard, n)) for n in ("NEVER_RETRY", "RETRYABLE", "BLOCK_CODES")}
+        # 這兩檔沒有同值的 tuple／set／frozenset 定義
+        for fname in ("patrolreport.py", "patrolpush.py"):
+            for node in ast.walk(trees[fname]):
+                if isinstance(node, (ast.Tuple, ast.Set)) and node.elts and all(
+                        isinstance(e, ast.Constant) and isinstance(e.value, str)
+                        for e in node.elts):
+                    self.assertNotIn(tuple(e.value for e in node.elts), guard, fname)
+
+
 class TestSecCommitSide(ChainTestCase):
     """`_commit` 與守門共用同一個內容約束函式（AC-SI-49-2；受測 tools/lib/selfimproving/
     pushcontent.py）。"""
@@ -2878,6 +3852,51 @@ class TestSecCommitSide(ChainTestCase):
                  if isinstance(fn, ast.FunctionDef) for c in ast.walk(fn) if isinstance(c, ast.Call)
                  and ast.unparse(c.func) == "content_problems"}
         self.assertEqual(calls, {"rule_problem", "judge"})  # 全套件單一函式，沒有第二份
+
+    # ---- E-41：提交端符號連結（真變體與替身變體都跑）
+    def test_AT_749_4_E_30_commit_side_refuses_links_on_every_platform(self):
+        ran = []
+
+        def attempt(label, mutate, expect_mode):
+            self.new_home()
+            R, prop, ctx = self.promoted_tree()
+            mutate(R, prop)
+            head0 = self.head(R)
+            patrolrun._commit(ctx, prop, "promote")  # noqa: SLF001
+            self.assertEqual(self.head(R), head0, label)
+            self.assertEqual(ctx.notes[prop][0], "COMMIT-LEDGER-RULE", label)
+            self.assertIn(expect_mode, ctx.notes[prop][1], label)
+            ran.append(label)
+        real_lstat = os.lstat
+
+        def real_link(R, prop):
+            (R / PROPS / prop / "r9.md").symlink_to("r1.md")
+        try:
+            tmp = fx.new_dir("symprobe")
+            tmp.mkdir(parents=True, exist_ok=True)
+            (tmp / "l").symlink_to("x")
+            (tmp / "l").unlink()
+            can_link = True
+        except (OSError, NotImplementedError):
+            can_link = False  # 建立失敗（Windows 無權限）：不略過，改走替身變體
+        if can_link:
+            attempt("real-symlink", real_link, "120000")
+
+        def fake_link(R, prop):
+            fx.put(R, f"{PROPS}/{prop}/r9.md", "x\n")
+            self.enterContext(mock.patch.object(pushcontent, "_lstat", lambda p: (
+                types.SimpleNamespace(st_mode=0o120777)
+                    if str(p).endswith("r9.md") else real_lstat(p))))
+        attempt("fake-S_IFLNK", fake_link, "120000")
+
+        def fake_reparse(R, prop):
+            fx.put(R, f"{PROPS}/{prop}/r9.md", "x\n")
+            self.enterContext(mock.patch.object(pushcontent, "_lstat", lambda p: (
+                types.SimpleNamespace(st_mode=0o100644, st_file_attributes=0x400)
+                if str(p).endswith("r9.md") else real_lstat(p))))
+        attempt("fake-reparse-point", fake_reparse, "120000")
+        self.assertIn("fake-S_IFLNK", ran)
+        self.assertIn("fake-reparse-point", ran)
 
 
 if __name__ == "__main__":

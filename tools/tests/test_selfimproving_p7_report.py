@@ -11,6 +11,7 @@ AT-790-*
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -345,6 +346,33 @@ class TestDetail(P7TestCase):
 class TestReasons(P7TestCase):
     """AC-SI-47-6、47-12：`nextstep` 的判定與白話表單一家。"""
 
+    def test_AT_747_12_4_elision_and_plain_text_pointwise_assertions(self):
+        raw = "0123456789" * 30
+        out = nextstep.sanitize(raw)
+        self.assertEqual(len(out), 80)
+        self.assertEqual(out[:20], raw[:20])
+        self.assertNotEqual(out[:20], raw[5:25])  # 分得出頭 20 與頭 25
+        self.assertEqual(out[20], "…")
+        self.assertEqual(out[-59:], raw[-59:])
+        for n in (79, 80):  # ② 恰 80 與 79 原樣不改
+            s = ("abcdefghij" * 9)[:n]
+            self.assertEqual(nextstep.sanitize(s), s)
+        # ③ 單句上限：構造超長細節 ⇒ 白話被裁到恰為 LINE_MAX，且規格上限不得超過 80
+        # 單句上限容得下一個完整細節
+        self.assertGreaterEqual(nextstep.LINE_MAX, nextstep.DETAIL_MAX)
+        text = nextstep.reason("SKIP-RUN-OPEN", raw).text
+        self.assertEqual(len(text), nextstep.LINE_MAX)
+        self.assertEqual(len(nextstep.reason("PUSH-REMOTE-DRIFT", raw).text), nextstep.LINE_MAX)
+        # ④ 永久旗標
+        for code in ("PUSH-REJECTED", "PUSH-AUTH", "PUSH-HOOK-FAILED"):
+            self.assertIs(nextstep.REASON[code]["permanent"], True, code)
+        # ⑤ 占位未給 detail ⇒ 填 `-`，不留花括號與空白
+        t = nextstep.reason("SKIP-RUN-OPEN").text
+        self.assertNotIn("{", t)
+        self.assertNotIn("}", t)
+        self.assertTrue(t.endswith("-") or "-" in t)
+        self.assertEqual(t, nextstep.REASON["SKIP-RUN-OPEN"]["text"].replace("{detail}", "-"))
+
     def chains(self) -> list[tuple[str, list[dict], str, str, dict]]:
         """（說明, 事件鏈, 碼, who, 要在 PROP 上做的修改）——附錄 A.2 的每一列。"""
         c, n = p7x.prop_chain, 124
@@ -612,6 +640,20 @@ class TestSnapshot(P7TestCase):
         self.assertEqual(self.report_path().read_bytes(), old)
         self.assertEqual(len([ln for ln in self.logs() if "code=REPORT-WRITE-FAILED" in ln]), 2)
 
+    def test_AT_747_8_E_3_snapshot_emit_does_not_swallow_nothing_but_the_heartbeat_survives(self):
+        R = self.repo()
+        self.assertEqual(self.beat7(R, O + H)[0], 0)
+        old = self.report_path().read_bytes()
+        n = len(self.logs())
+        with mock.patch.object(patrolreport, "build", side_effect=RuntimeError("abc123")):
+            rc, out, err = self.beat7(R, O + H + MIN)
+        self.assertEqual(rc, 0, out + err)  # 心跳 rc 不變
+        self.assertEqual(self.report_path().read_bytes(), old)
+        fails = [ln for ln in self.logs()[n:] if "code=REPORT-WRITE-FAILED" in ln]
+        self.assertEqual(len(fails), 1, fails)
+        self.assertNotIn("abc123", fails[0])
+        self.assertNotIn("abc123", out + err)
+
     def test_AT_747_8_3_size_caps_and_single_line_texts(self):
         R = self.repo()
         fx.append_events(R, [fx.run_open_ev(1), fx.skip_ev(1),
@@ -802,6 +844,13 @@ class TestSnapshot(P7TestCase):
     def test_AT_747_10_2_b_a_failed_commit_is_a_note(self):
         R = self.repo()
         pid = add_prop(R, 124, "promoted")
+        committed(R)
+        # 新增的提案檔須綁事件雜湊（E-30）：先把記著 rev 2 `body_sha256` 的 prop 事件提交進去
+        sha = lambda raw: "sha256:" + hashlib.sha256(raw).hexdigest()  # noqa: E731
+        patch = (R / fx.PROPS_REL / pid / "r1.patch").read_bytes()
+        (R / fx.PROPS_REL / pid / "r2.patch").write_bytes(patch)  # rev 2 沿用同一份補丁
+        fx.append_events(R, [fx.prop_ev(124, 1, rev=2, body_sha256=sha(b"changed\n"),
+                                        patch_sha256=sha(patch))])
         committed(R)
         fx.put(R, f"{fx.PROPS_REL}/{pid}/r2.md", "changed\n")  # 提案目錄只准新增檔（AC-SI-49-2）
         params = si_check.params_for(R, *si_params.SCHED_KEYS, "stop_after_bad")

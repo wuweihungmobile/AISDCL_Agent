@@ -272,7 +272,7 @@ class Rig:
             quota=lambda now: types.SimpleNamespace(band=self.band),
             driver_quiet=lambda: self.quiet, which=lambda name: self.which,
             preflight=lambda: self.preflight, verbs=verbs, spawn_detached=self.spawner,
-            pid_alive=lambda pid, started: pid in self.live, kill_tree=self.killed.append)
+            pid_alive=lambda pid, started, *_a: pid in self.live, kill_tree=self.killed.append)
 
     def _run(self, R: Path, argv: list[str]):
         if argv[0] == "scan" and self.scan_rows is not None:

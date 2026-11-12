@@ -14,7 +14,7 @@ WHO = ("掌舵者", "巡邏器", "無人運轉", "主機管理者", "無")
 TEXT_MAX = 80
 DETAIL_MAX = 80
 HEAD_KEEP = 20  # 超長細節保留的頭段字元數（其餘額度給尾段）
-LINE_MAX = 120  # 快照單句白話的上界（含填入的細節）
+LINE_MAX = 120  # 快照單句白話的上界（含填入的細節；須容得下 80 字元的細節加最長前綴）
 UNKNOWN_STATE = "UNKNOWN-STATE"
 MIN_KEY = "min_heldout"  # 評估集案例數下限的參數鍵（`propdetail` 經此取名，不自持字面）
 
@@ -140,6 +140,8 @@ def _build() -> dict[str, dict]:
                "提交與巡邏器的紀錄不符（{detail}），請人工檢查後推送", "PUSH-RECORD-MISMATCH")
     t |= _rows(admin, True, "提交對帳本或提案檔的改動超出允許規則（{detail}），不自動推送",
                "PUSH-LEDGER-RULE")
+    t |= _rows(admin, True, "提案目錄的新檔內容與帳本記錄的雜湊不符（{detail}），不自動推送",
+               "PUSH-PROPOSAL-MISMATCH")
     t |= _rows(admin, True, "git 不可用或逾時，無法判定推送條件", "PUSH-GIT-UNAVAILABLE")
     t |= _rows(admin, True, "提交含符號連結、子模組或檔案模式變更（{detail}），不自動推送",
                "PUSH-FILE-MODE-INVALID")

@@ -31,9 +31,6 @@ TEXT_MAX = 120
 REPORT_DIR, REPORT_NAME = "console_report", "patrol.json"
 _LISTED = ("proposed", "returned", "approved", "sandboxed", "verified")
 _POST = ("promoted", "measuring", "closed")
-_NEVER = ("PUSH-HOOK-FAILED", "PUSH-REJECTED", "PUSH-AUTH")
-_RETRY = ("PUSH-WALL-EXCEEDED", "PUSH-FAILED")
-_BLOCKED = ("PUSH-REMOTE-DRIFT", "PUSH-REMOTE-DIVERGED")  # `push/blocked.json` 的碼
 _NOTE_TOTAL = 130  # 帶 runner_note 後 push.text 的總長上限
 _PUSH_KEYS = ("enabled", "state", "code", "text", "retry", "sha", "ahead", "attempts",
               "finished_at", "tick_at")
@@ -123,8 +120,9 @@ def _runs(ctx, events: list[dict], pending: list[str], alive) -> dict:
             continue
         wall = _t(data.get("wall_due_at"))
         try:
-            running = wall is not None and ctx.now < wall and alive(data["pid"],
-                                                                    data["started_at"])
+            running = wall is not None and ctx.now < wall and alive(
+                data["pid"], data["started_at"], data.get("process_started_utc"),
+                pushguard.record_window(data["started_at"], data["wall_due_at"]))
         except (KeyError, TypeError, ValueError):
             running = False
         if not running:
@@ -202,7 +200,8 @@ def push_block(home: Path, params: dict, now: datetime, enabled: bool, guard: di
     wall = _t(cur.get("wall_due_at")) if cur else None
     try:
         running = cur is not None and wall is not None and now < wall and alive(
-            cur["pid"], cur["started_at"])
+            cur["pid"], cur["started_at"], cur.get("process_started_utc"),
+            pushguard.record_window(cur["started_at"], cur["wall_due_at"]))
     except (KeyError, TypeError, ValueError):
         running = False
     if running:
@@ -220,14 +219,15 @@ def push_block(home: Path, params: dict, now: datetime, enabled: bool, guard: di
     fresh = _t(tick_at)
     limit = timedelta(minutes=2 * params["sched_heartbeat_minutes"] + 5)
     blk = _read_json(d / "blocked.json")
-    if (blk and blk.get("head") == head and blk.get("code") in _BLOCKED  # HEAD 改變即自然失效
+    if (blk and blk.get("head") == head  # HEAD 改變即自然失效
+            and blk.get("code") in pushguard.BLOCK_CODES
             and fresh is not None and now - fresh <= limit):  # push-run 仍在跑，否則視為過期（4b）
         return done("blocked", blk["code"], blk.get("detail"), sha=head)
     code, fin = (last or {}).get("code"), _t((last or {}).get("finished_at"))
     mx, gap = params.get("sched_push_attempts_max"), params.get("sched_push_retry_minutes")
-    if code in _NEVER:
+    if code in pushguard.NEVER_RETRY:
         return done("failed", code, retry="never", sha=head)
-    if code in _RETRY:
+    if code in pushguard.RETRYABLE:
         if isinstance(mx, int) and out["attempts"] >= mx:
             return done("failed", code, retry="exhausted", sha=head)
         if fin is not None and isinstance(gap, int) and now - fin < timedelta(minutes=gap):
