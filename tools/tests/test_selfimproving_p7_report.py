@@ -1131,9 +1131,10 @@ class TestSystem(P7TestCase):
         import test_selfimproving_capability as cap
         reg = cap.CAPABILITY
         self.assertEqual(cap.capability_problems(cap.PKG, reg, cap.ENTRY), [])
-        self.assertEqual(len(reg), 72 + 6)  # P6 現值 72＋本鍵六個新檔
+        self.assertEqual(len(reg), 72 + 7)  # P6 現值 72＋本鍵六個新檔＋資安修復拆出的 pushcontent
         want = {"nextstep.py": "ro", "propdetail.py": "ro", "memdir.py": "ro",
-                "pushguard.py": "ro", "patrolreport.py": "rw", "patrolpush.py": "exec"}
+                "pushguard.py": "ro", "patrolreport.py": "rw", "patrolpush.py": "exec",
+                "pushcontent.py": "ro"}
         self.assertEqual({k: reg.get(k) for k in want}, want)
         texts = {p.name: p.read_text(encoding="utf-8") for p in cap.PKG.glob("*.py")}
         self.assertEqual({n for n, t in texts.items() if "subprocess" in t},

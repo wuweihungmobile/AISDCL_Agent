@@ -871,10 +871,11 @@ class TestNoRegression(RgCase):
     """tools/lib/selfimproving/params.py 與 SOP 判準（AC-P6-090-2、090-3；RR 側）。"""
 
     def test_AT_690_2_1_params_json_is_untouched(self):
-        # P7（TCS-P7 AC-SI-49-1）改版：sched_auto_push→true 並加三個 sched_push_* 鍵，活值 sha 更新
+        # P7（TCS-P7 AC-SI-49-1）改版加三個 sched_push_* 鍵；2026-11-12 資安審查修復把
+        # sched_auto_push 預設改回 false（明確開啟才生效），活值 sha 更新
         raw = (ROOT / "docs/06_quality/SelfImproving_Protocol/params.json").read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         "74faeb3966772a8f931d4508bfe113834ec58524995eaeba72027bc05bdfff71")
+                         "e458bcadcc05bc9c997c587c8967339389956135508c2d0c1f018a6078df0019")
         self.assertEqual(len(params.PARAM_SPECS), 47)
         self.assertEqual(params.CHECK_RULES_REV, 6)
         self.assertEqual(self.check(ROOT)["_item"]["params.globs"]["status"], "PASS")

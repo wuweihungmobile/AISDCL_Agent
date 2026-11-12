@@ -27,15 +27,30 @@ from pathlib import Path
 
 from . import check as si_check
 from . import events as si_events
-from . import evspec, manifest, nextstep, sched
+from . import evspec, manifest, nextstep, pushcontent, sched
 from . import paths as si_paths
-from .git import Git
-from .ledger import parse_ledger, split_lines
+from .git import SECRET_PATTERNS, Git, mask, resolve_git  # 單一實作住 git.py
+from .pushcontent import (  # noqa: F401  # 內容判準自 pushcontent 拆出，對外名稱不變
+    CODE_CONFIG,
+    CODE_DIVERGED,
+    CODE_MODE,
+    CODE_SECRET,
+    CODE_URL,
+    PROPOSAL_FILE_MAX_BYTES,
+    _norm,
+    added_text,
+    content_problems,
+    ledger_rule_problems,
+    rule_problem,
+)
 
 CALL_TIMEOUT = 20  # 單一 git 呼叫的牆鐘上限（秒）
 TOTAL_BUDGET = 60  # 一次 `evaluate` 的總牆鐘上限（秒；不拖慢心跳）
 TRAILER_APP, TRAILER_PROP = "SI-Patrol-App", "SI-Patrol-Prop"
-REMOTE = "origin/main"
+REMOTE = "refs/remotes/origin/main"  # 完整名稱（`origin/main` 會被同名 tag／分支搶先解析）
+BRANCH_REF = "refs/heads/main"
+CODE_REMOTE_DRIFT = "PUSH-REMOTE-DRIFT"  # 遠端 main 與守門固定的追蹤參照不同（審查 F-01）
+CODE_HEAD_MOVED = "PUSH-HEAD-MOVED"  # 判定之後 HEAD 或分支被移動（審查 F-02）
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*): (\S.*)$")
 _PARA_RE = re.compile(r"\n[ \t]*\n")
 _CELL_RE = re.compile(r"(?<!\\)\|")
@@ -106,75 +121,6 @@ def pending(git: Git, allow) -> tuple[list[tuple[str, str]], list[str]]:
     return mine, left
 
 
-# ── 單一來源二：帳本差分規則 ──────────────────────────────────────────────────────────
-def _norm(raw: bytes) -> str:
-    return raw.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
-
-
-def _obs_problem(old: str, new: str) -> str | None:
-    """OBS 帳本：表頭與表外文字不變；舊列依序保留；既有列只准把處置欄由 `open` 轉為終值一次；其
-    餘為追加。"""
-    lo, ln = parse_ledger(old), parse_ledger(new)
-    skeleton = []
-    for text, led in ((old, lo), (new, ln)):
-        taken = {r.lineno for r in led.rows}
-        lines = split_lines(text)
-        while lines and not lines[-1].strip():
-            lines.pop()
-        skeleton.append([x for no, x in enumerate(lines, 1) if no not in taken])
-    if skeleton[0] != skeleton[1]:
-        return "OBS 帳本的表頭或表外文字被改動"
-    if len(ln.rows) < len(lo.rows):
-        return "OBS 帳本刪除了既有列"
-    for a, b in zip(lo.rows, ln.rows, strict=False):
-        if a.raw == b.raw:
-            continue
-        pa, pb = _CELL_RE.split(a.raw), _CELL_RE.split(b.raw)  # ['', 九欄…, '']；處置欄在索引 8
-        same = len(pa) == len(pb) == 11 and pa[:8] == pb[:8] and pa[9:] == pb[9:]
-        if not (same and pa[8].strip() == "open" and pb[8].strip() not in ("", "open")):
-            return f"OBS 帳本既有列 {a.ident} 被改動（只准處置欄由 open 轉終值一次）"
-    return None
-
-
-def ledger_rule_problems(prop: str, changes) -> str | None:
-    """帳本差分規則（R-26 b、R-31）：`changes`＝[(路徑, 狀態 A／M／D, 舊內容或 None, 新內容或
-    None)]（內容為 LF 正規化文字；只有兩份帳本需要內容）。事件帳本只准尾端追加（舊內容為新內容的
-    前綴）；OBS 帳本見 `_obs_problem`；該 PROP 的提案目錄只准新增檔。合規回 None，否則回一句違規
-    描述。"""
-    pdir = f"{si_events.PROPOSALS_REL}/{prop}/"
-    for path, status, old, new in changes:
-        if path in _LEDGERS:
-            name = "事件帳本" if path == si_events.LEDGER_REL else "OBS 帳本"
-            if status not in ("A", "M") or (status == "M" and (old is None or new is None)):
-                return f"{name}被刪除或無法比對"
-            if status == "M" and path == si_events.LEDGER_REL and not new.startswith(old):
-                return "事件帳本既有內容被改動（只准尾端追加）"
-            problem = _obs_problem(old, new) if status == "M" and path == _LEDGERS[1] else None
-            if problem:
-                return problem
-        elif path.startswith(pdir) and status != "A":
-            what = "刪除" if status == "D" else "修改"
-            return f"提案檔 {path[len(pdir):]} 被{what}（只准新增檔）"
-    return None
-
-
-def rule_problem(git: Git, repo: Path, prop: str, changes) -> str | None:
-    """`_commit` 用：對「將要提交的差分」（HEAD 內容 vs 工作樹內容）跑 `ledger_rule_problems`；
-    `changes`＝`pending` 回的（路徑, 狀態）清單。"""
-    rows = []
-    for path, status in changes:
-        old = new = None
-        if path in _LEDGERS:
-            head = git.show("HEAD", path) if status != "A" else None
-            old = None if head is None else _norm(head.encode("utf-8"))
-            try:
-                new = _norm((repo / path).read_bytes()) if status != "D" else None
-            except OSError:
-                new = None
-        rows.append((path, status, old, new))
-    return ledger_rule_problems(prop, rows)
-
-
 # ── 守門 ──────────────────────────────────────────────────────────────────────────────
 def _t(value) -> datetime | None:
     try:
@@ -216,13 +162,10 @@ RETRYABLE = ("PUSH-WALL-EXCEEDED", "PUSH-FAILED")
 TEXT_MAX = 160
 _AUTH_RE = re.compile(r"Authentication failed|could not read Username|terminal prompts disabled"
                       r"|Permission denied \(publickey\)|returned error: 40[13]", re.I)
-_REJECT_RE = re.compile(r"! \[(?:remote )?rejected\]|non-fast-forward|fetch first"
+_REJECT_RE = re.compile(r"! \[(?:remote )?rejected\]|non-fast-forward|fetch first|stale info"
                         r"|Updates were rejected|protected branch", re.I)
 _NET_RE = re.compile(r"Could not resolve host|Connection (?:timed out|refused)|unable to access"
                      r"|early EOF|RPC failed", re.I)
-_MASKS = ((re.compile(r"://[^/\s]*@"), "://***@"),
-          (re.compile(r"(?i)\b(token|password|passwd|secret|key)(\s*[=:]\s*)\S+"), r"\1\2***"),
-          (re.compile(r"(?i)\b(bearer)\s+\S+"), r"\1 ***"))
 _WAIT_TEXT = {"PUSH-RETRY-WAIT": "上一次推送失敗，還沒到重試時間",
               "PUSH-ATTEMPTS-EXHAUSTED": "同一個提交的自動推送次數已用盡，請由人推送"}
 
@@ -245,13 +188,6 @@ def classify(rc, timed_out: bool, output: str) -> str:
     if _NET_RE.search(text) or not hooked:
         return "PUSH-FAILED"
     return "PUSH-HOOK-FAILED"
-
-
-def mask(text: str) -> str:
-    """URL userinfo 整段、`token|password|secret|key` 之值、Bearer 值遮為 `***`。"""
-    for rx, repl in _MASKS:
-        text = rx.sub(repl, text)
-    return text
 
 
 def last_line(output: str, limit: int = TEXT_MAX) -> str:
@@ -331,6 +267,8 @@ class _Judge:
         self.g, self.si, self.events = Git(repo), si, events
         self.t0, self.records = time.monotonic(), _records(si)
         self.seen: set[str] = set()
+        self.base: str | None = None  # `evaluate` 固定下來的追蹤參照 sha（`remote_has` 用）
+        self.row_max = None  # `row_max_bytes` 參數（OBS 新列的位元組驗證）
 
     def run(self, *args: str):
         if time.monotonic() - self.t0 > TOTAL_BUDGET:
@@ -340,9 +278,19 @@ class _Judge:
             raise _GitFail
         return cp
 
+    def raw_blob(self, rev: str, path: str) -> bytes | None:
+        """`git cat-file blob` 的位元組（不經文字解碼，也不經 textconv；審查 F-08）；
+        沒有該物件＝None。"""
+        if time.monotonic() - self.t0 > TOTAL_BUDGET:
+            raise _GitFail
+        cp = self.g.run_bytes("cat-file", "blob", f"{rev}:{path}", timeout=CALL_TIMEOUT)
+        if cp is None:
+            raise _GitFail
+        return None if cp.returncode != 0 else cp.stdout
+
     def maybe_blob(self, rev: str, path: str) -> str | None:
-        cp = self.run("show", f"{rev}:{path}")
-        return None if cp.returncode != 0 else _norm(cp.stdout.encode("utf-8"))
+        raw = self.raw_blob(rev, path)
+        return None if raw is None else _norm(raw)
 
     def blob(self, rev: str, path: str) -> str:
         text = self.maybe_blob(rev, path)
@@ -350,17 +298,24 @@ class _Judge:
             raise _GitFail
         return text
 
-    def diff(self, sha: str, parents: list[str]) -> list[tuple[str, str]]:
+    def diff(self, sha: str, parents: list[str]) -> list[tuple[str, str, str, str]]:
+        """（路徑, 狀態, 新模式, 舊模式）；`diff-tree --raw -z` 取模式（審查 F-03／F-08）。"""
         root = () if parents else ("--root",)
-        cp = self.run("-c", "core.quotepath=false", "diff-tree", "--no-commit-id",
-                      "--name-status", "-r", "-z", "--no-renames", *root, sha)
+        cp = self.run("-c", "core.quotepath=false", "diff-tree", "--no-commit-id", "--raw", "-r",
+                      "-z", "--no-renames", *root, sha)
         if cp.returncode != 0:
             raise _GitFail
-        toks = cp.stdout.split("\0")
-        return [(toks[i + 1], toks[i]) for i in range(0, len(toks) - 1, 2) if toks[i]]
-
+        toks, out, i = cp.stdout.split("\0"), [], 0
+        while i < len(toks) - 1:
+            if toks[i].startswith(":"):
+                m = toks[i][1:].split()
+                out.append((toks[i + 1], m[4][0], m[1], m[0]))
+                i += 2
+            else:
+                i += 1
+        return out
     def remote_has(self, app: str) -> bool:
-        cp = self.run("log", REMOTE, "-n", "1", "--format=%H", "-F",
+        cp = self.run("log", self.base, "-n", "1", "--format=%H", "-F",
                       f"--grep={TRAILER_APP}: {app}")
         if cp.returncode != 0:
             raise _GitFail
@@ -398,19 +353,22 @@ class _Judge:
         patch = self.blob(sha, f"{si_events.PROPOSALS_REL}/{prop}/r{pev['rev']}.patch")
         touched = si_paths.touched_of(patch.encode("utf-8"))
         allow = commit_allow(prop, touched, pev.get("cls", ""))
-        outside = next((path for path, _ in changes if not covered(path, allow)), None)
+        outside = next((c[0] for c in changes if not covered(c[0], allow)), None)
         if outside is not None:
             return "PUSH-PATH-OUTSIDE", outside
-        rows = []
-        for path, status in changes:
+        items = []
+        for path, status, nmode, omode in changes:
+            keep = nmode in ("100644", "000000") or (status == "M" and omode == nmode == "100755")
+            raw = self.raw_blob(sha, path) if status != "D" and keep else None
             old = new = None
-            if path in _LEDGERS:
+            if path in _LEDGERS or (status == "M" and raw is not None):  # 既有檔：掃新增行用
                 old = self.maybe_blob(parents[0], path) if parents and status != "A" else None
-                new = self.blob(sha, path) if status != "D" else None
-            rows.append((path, status, old, new))
-        broken = ledger_rule_problems(prop, rows)
-        if broken:
-            return "PUSH-LEDGER-RULE", broken
+                new = None if raw is None else _norm(raw)
+            items.append((path, status, None if keep else nmode, old, new, raw))
+        rows = [(p, s, o, n) for p, s, _m, o, n, _r in items]
+        hit = content_problems(prop, items, self.row_max)
+        if hit:
+            return hit
         why = self.content_problem(sha, app_ev, pev, touched, rows)
         return ("PUSH-CONTENT-MISMATCH", why) if why else None
 
@@ -425,19 +383,26 @@ class _Judge:
         if pev.get("cls") == "M":
             return None
         pairs = []
-        for rel in touched:
-            text = self.maybe_blob(sha, rel)
-            pairs.append((rel, "absent" if text is None
-                          else hashlib.sha256(text.encode("utf-8")).hexdigest()))
+        for rel in touched:  # 與 `manifest.paths_manifest(lf=True)` 同規則：位元組、只換 CRLF
+            raw = self.raw_blob(sha, rel)
+            pairs.append((rel, "absent" if raw is None
+                          else hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest()))
         same = manifest._digest(pairs) == app_ev.get("post_sha256")  # noqa: SLF001  # 同一個公式
         return None if same else "觸及檔內容與 post_sha256 不符"
 
 
-def _result(code: str | None, detail=None, *, ahead: int = 0, head: str | None = None) -> dict:
-    """守門結果（`ok` 只在 `code is None`）；`text`＝經 `nextstep.reason` 的白話。"""
+def _result(code: str | None, detail=None, *, ahead: int = 0, head: str | None = None,
+            base: str | None = None) -> dict:
+    """守門結果（`ok` 只在 `code is None`）；`text`＝經 `nextstep.reason` 的白話。`base`＝判定時
+    固定下來的 `refs/remotes/origin/main` 的 sha（推送前據以核對遠端實值）。"""
     text = _WAIT_TEXT.get(code) or (nextstep.reason(code, detail).text if code else "")
     return {"ok": code is None, "code": code, "detail": detail, "text": text, "ahead": ahead,
-            "head": head, "sha": head if code is None else None}
+            "head": head, "sha": head if code is None else None, "base": base}
+
+
+def _sha_of(cp) -> str | None:
+    out = cp.stdout.strip() if cp.returncode == 0 else ""
+    return out if re.fullmatch(r"[0-9a-f]{40}", out) else None
 
 
 def evaluate(repo: Path, params: dict, si: Path, now: datetime, *, alive=None,
@@ -455,38 +420,50 @@ def evaluate(repo: Path, params: dict, si: Path, now: datetime, *, alive=None,
         loaded = events if events is not None else (
             si_events.load_sound_events(repo / si_events.LEDGER_REL) or [])
         j = _Judge(repo, si, loaded)
+        j.row_max = params.get("row_max_bytes")
         if not j.g.available:
             raise _GitFail
+        # HEAD 與遠端追蹤參照各只解析一次、固定成 sha；之後所有查詢都用這兩個 sha，不再用符號
+        # `HEAD`／`origin/main`（審查 F-01／F-02：符號參照在判定途中被移動，守門就判到別的範圍）
         head = j.g.head()
-        cp = j.run("rev-list", "--count", f"{REMOTE}..HEAD")
-        ahead = int(cp.stdout.strip()) if cp.returncode == 0 and cp.stdout.strip().isdigit() else 0
-        branch = j.run("symbolic-ref", "--short", "-q", "HEAD")
-        upstream = j.run("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-        if (branch.stdout.strip(), upstream.stdout.strip()) != ("main", REMOTE):
-            return _result("PUSH-NOT-MAIN", ahead=ahead, head=head)
-        if head is None or cp.returncode != 0:
+        if resolve_git() is None:  # git 絕對路徑解析不到（排除 repo／venv 內目錄）：fail-closed
+            raise _GitFail
+        if (bad := pushcontent.config_problem(j, _read_json(si / "push" / "armed.json"))):
+            return _result(bad[0], bad[1])
+        base = _sha_of(j.run("rev-parse", "--verify", "-q", f"{REMOTE}^{{commit}}"))
+        j.base = base
+        rng = f"{base}..{head}" if base and head else None
+        cp = j.run("rev-list", "--count", rng) if rng else None
+        cnt = cp.stdout.strip() if cp and cp.returncode == 0 else ""
+        ahead = int(cnt) if cnt.isdigit() else 0
+        branch = j.run("symbolic-ref", "-q", "HEAD")  # 完整名稱：tag／同名分支不得頂替
+        upstream = j.run("rev-parse", "--symbolic-full-name", "@{u}")
+        if base is None or (branch.stdout.strip(), upstream.stdout.strip()) != (BRANCH_REF, REMOTE):
+            return _result("PUSH-NOT-MAIN", ahead=ahead, head=head, base=base)
+        if head is None or cp is None or cp.returncode != 0:
             raise _GitFail
         if ahead == 0:
-            return _result("PUSH-NOT-AHEAD", head=head)
+            return _result("PUSH-NOT-AHEAD", head=head, base=base)
         if _running(_read_json(si / "push" / "current.json"), now, alive):
-            return _result("PUSH-RUNNING", ahead=ahead, head=head)
+            return _result("PUSH-RUNNING", ahead=ahead, head=head, base=base)
         if sched.dirty_paths(repo):
-            return _result("PUSH-DIRTY-TREE", ahead=ahead, head=head)
-        lines = j.run("rev-list", "--reverse", "--parents", f"{REMOTE}..HEAD")
+            return _result("PUSH-DIRTY-TREE", ahead=ahead, head=head, base=base)
+        lines = j.run("rev-list", "--reverse", "--parents", rng)
         if lines.returncode != 0:
             raise _GitFail
         for ln in lines.stdout.split("\n"):
             parts = ln.split()
             if parts and (hit := j.judge(parts[0], parts[1:])):
                 detail = f"{parts[0][:8]} {hit[1]}".strip()  # sha8＋卡在哪（TCS-P7 E-9）
-                return _result(hit[0], detail, ahead=ahead, head=head)
+                return _result(hit[0], detail, ahead=ahead, head=head, base=base)
     except (_GitFail, OSError, ValueError, TypeError, KeyError):
         return _result("PUSH-GIT-UNAVAILABLE", ahead=ahead, head=head)
     wait = retry_verdict(result_of(si, head), params, now) if gate_retry else None
-    return _result(wait, ahead=ahead, head=head)
+    return _result(wait, ahead=ahead, head=head, base=base)
 
 
 __all__ = ["CALL_TIMEOUT", "TOTAL_BUDGET", "TRAILER_APP", "TRAILER_PROP", "si_own_allow",
            "commit_allow", "commit_message", "covered", "pending", "ledger_rule_problems",
            "rule_problem", "parse_trailers", "evaluate", "running", "classify", "mask",
-           "last_line", "result_of", "retry_verdict", "NEVER_RETRY", "RETRYABLE", "HOOK_MARK"]
+           "last_line", "result_of", "retry_verdict", "NEVER_RETRY", "RETRYABLE", "HOOK_MARK",
+           "SECRET_PATTERNS"]

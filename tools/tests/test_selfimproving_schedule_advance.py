@@ -372,7 +372,7 @@ class TestRunLifecycle(P4TestCase):
 
     def test_AT_438_6_1_close_follows_the_event_ledger_not_the_self_report(self):
         R, rig, run, tdir, sj = self.spawned()
-        self.assertEqual(set(sj), {"pid", "started_at", "wall_due_at"})
+        self.assertEqual(set(sj), {"pid", "started_at", "wall_due_at", "process_started_utc"})
         self.assertFalse((self.home / "locks" / "patrol.lock").exists())
         self.assertEqual(evs(R, "run.close"), [])
         self.write_handback(tdir)

@@ -998,7 +998,8 @@ class TestExposureAndEvidence(VerifyHelpers, P2TestCase):
             self.assertEqual(os.path.realpath(value), os.path.realpath(self.home / "sandbox" / p))
             self.assertNotIn(os.pathsep, value)
             self.assertIn("AUTOSDD_NAMES=\n", tail + "\n")
-            self.assertIn("HAS_SECRET=False", tail)
+            # 標籤避開遮罩關鍵字（單一遮罩實作會遮 `…SECRET=值`）
+            self.assertIn("HAS_VAR=False", tail)
             self.assertIn("PYTHONUTF8=1", tail)
             self.assertIn("PYTHONDONTWRITEBYTECODE=1", tail)
             R2, p2 = self.fresh(heldout=self.held(probes="secrets"))

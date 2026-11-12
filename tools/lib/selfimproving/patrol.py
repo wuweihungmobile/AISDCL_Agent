@@ -120,6 +120,12 @@ class Ctx:
     def note(self, pid: str, code: str, detail: str = "") -> None:
         self.notes[pid] = (code, detail)
 
+    def kill_skipped(self, run: str, pid: int) -> None:
+        """逾牆但行程身分對不上：不殺，日誌一行，卡點記到該運轉的每個提案（快照 props[] 帶出）。"""
+        self.log("巡視", 0, "RUN-KILL-SKIPPED", f"{run} pid={pid} 身分不符，不終止")
+        for pid_ in getattr(self.fold().runs.get(run), "prop_ids", ()):
+            self.note(pid_, "RUN-KILL-SKIPPED")
+
     def git(self) -> Git:
         return self._git
 

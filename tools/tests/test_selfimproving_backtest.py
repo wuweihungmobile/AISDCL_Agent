@@ -790,8 +790,8 @@ class TestSystem(BtCase):
         c = cap()
         self.assertEqual(c.capability_problems(c.PKG, c.CAPABILITY, c.ENTRY), [])
         counts = {k: sum(1 for v in c.CAPABILITY.values() if v == k) for k in c.CATEGORIES}
-        want = {"ro": 56, "rw": 14, "net": 2, "exec": 6}
-        self.assertEqual((len(c.CAPABILITY), counts), (78, want))
+        want = {"ro": 57, "rw": 14, "net": 2, "exec": 6}
+        self.assertEqual((len(c.CAPABILITY), counts), (79, want))
         for n in ("registry", "netguard", "htmltext", "expand", "evspec6", "btcases", "btscore"):
             self.assertEqual(c.CAPABILITY[f"{n}.py"], "ro", n)
         for n in ("regwrite", "btwrite", "btrecord"):

@@ -118,7 +118,7 @@ def _build() -> dict[str, dict]:
                "SANDBOX-NOT-APPLIED", "SANDBOX-EXPORT-FAILED", "SANDBOX-APPLY-TIMEOUT",
                "TOUCHED-SUPERSET", "ROLLBACK-DRYRUN-FAILED")
     # ── A.4 推送（固定白話句） ──
-    t |= _rows("無", False, "自動推送已關閉", "PUSH-OFF")
+    t |= _rows(admin, True, "自動推送未啟用（預設關閉；需由主機管理者明確開啟）", "PUSH-OFF")
     t |= _rows(host, False, "正在推送，請稍候", "PUSH-RUNNING")
     t |= _rows("無", False, "已推送成功", "PUSH-OK")
     t |= _rows("無", False, "沒有待推送的提交", "PUSH-NOT-AHEAD")
@@ -141,6 +141,22 @@ def _build() -> dict[str, dict]:
     t |= _rows(admin, True, "提交對帳本或提案檔的改動超出允許規則（{detail}），不自動推送",
                "PUSH-LEDGER-RULE")
     t |= _rows(admin, True, "git 不可用或逾時，無法判定推送條件", "PUSH-GIT-UNAVAILABLE")
+    t |= _rows(admin, True, "提交含符號連結、子模組或檔案模式變更（{detail}），不自動推送",
+               "PUSH-FILE-MODE-INVALID")
+    t |= _rows(admin, True, "提交新增的內容疑似含機密（{detail}），不自動推送，請人工檢查",
+               "PUSH-SECRET-PATTERN")
+    t |= _rows(admin, True, "repo 的 git 設定含不允許的項目（{detail}），不自動推送，請人檢查",
+               "PUSH-GIT-CONFIG-UNSAFE")
+    t |= _rows(admin, True, "遠端網址與安裝推送排程時記錄的不同（{detail}），不自動推送",
+               "PUSH-REMOTE-URL-CHANGED")
+    t |= _rows(admin, True,
+               "遠端 main 的實際位置與本機記錄不同（{detail}），請先 fetch 並確認，不自動推送",
+               "PUSH-REMOTE-DRIFT")
+    t |= _rows(admin, True,
+               "遠端 main 不是待推送提交的祖先（{detail}），推送會覆寫遠端，不自動推送",
+               "PUSH-REMOTE-DIVERGED")
+    t |= _rows(host, False, "判定之後本機分支或 HEAD 被改動，這次不推送，下個心跳重判",
+               "PUSH-HEAD-MOVED")
     t |= _rows(admin, True, "推送前的本機檢查沒通過，請看檢查輸出後由人推送", "PUSH-HOOK-FAILED")
     t |= _rows(admin, True, "遠端有新提交，請先整合（rebase 或 merge）再由人推送", "PUSH-REJECTED")
     t |= _rows(admin, True, "遠端認證失敗，請在互動視窗手動 git push 一次更新憑證", "PUSH-AUTH")
@@ -176,6 +192,9 @@ def _build() -> dict[str, dict]:
                "SKIP-RUN-OPEN")
     t |= _rows(admin, True, "無人運轉主控無法啟動（{detail}），請查巡邏日誌", "SKIP-SPAWN-FAILED")
     t |= _rows(host, False, "已有進行中的無人運轉，這個運轉等它結束後再啟動", "RUN-BUSY")
+    t |= _rows(admin, True,
+               "運轉逾時但行程身分與記錄不符，沒有終止它（避免誤殺他人行程），請人工檢查",
+               "RUN-KILL-SKIPPED")
     # ── A.7 匯出 ne 新碼 ──
     t |= _rows(admin, True, "讀不到提案的 patch 檔", "PATCH-UNREADABLE")
     t |= _rows(admin, True, "讀不到提案本文檔", "BODY-UNREADABLE")

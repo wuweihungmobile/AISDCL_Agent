@@ -10,22 +10,18 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import signal
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+
+from .git import mask as git_mask
 
 _ENV_KEYS = ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE", "LANG", "LC_ALL")
 TAIL_BYTES = 300
-_MASKS = (
-    (re.compile(r"Bearer\s+\S+"), "Bearer [REDACTED]"),
-    (re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}"), "[REDACTED]"),
-    (re.compile(r"(?i)Authorization:[^\r\n]*"), "Authorization: [REDACTED]"),
-    (re.compile(r"://[^/\s:@]+:[^/\s@]+@"), "://[REDACTED]@"),
-)
 
 
 @dataclass
@@ -38,9 +34,8 @@ class ProbeResult:
 
 
 def mask(text: str) -> str:
-    for rx, repl in _MASKS:
-        text = rx.sub(repl, text)
-    return text
+    """探針輸出尾段的遮罩：與推送結果共用 `git.mask` 的單一實作，只是標記字樣不同。"""
+    return git_mask(text, "[REDACTED]")
 
 
 def _tail(raw: bytes) -> str:
@@ -57,11 +52,24 @@ def _env(sandbox_root: Path) -> dict[str, str]:
     return env
 
 
+def _taskkill_exe() -> str:
+    """`taskkill` 的絕對路徑（`%SystemRoot%\\System32`；審查 F-10：裸名會先在目前目錄與 venv 找）。
+    找不到系統目錄時退回裸名。"""
+    if sys.platform.startswith("win"):
+        root = os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT")
+        return str(Path(root) / "System32" / "taskkill.exe") if root else "taskkill"
+    return ""
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     """殺行程樹（含孫行程）；兩條各在平台守衛作用域內。"""
     if sys.platform.startswith("win"):
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], check=False,
-                       capture_output=True)
+        try:  # 不開視窗（pythonw 載具）；taskkill 找不到不得讓逾時收尾本身拋例外（審查 F-11／F-12）
+            subprocess.run([_taskkill_exe(), "/T", "/F", "/PID", str(proc.pid)], check=False,
+                           capture_output=True,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except OSError:
+            pass
     else:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -83,7 +91,9 @@ class RunResult:
     timed_out: bool
     out: str
     err: str
-    note: str = ""  # 逾時收尾字樣：job-terminated／taskkill-fallback:<原因>／output-incomplete
+    # 空格分隔的可查字樣：job-unavailable:<原因>（Job 沒建起來，不論逾時與否）、job-terminated、
+    # taskkill-fallback:<原因>、output-incomplete；`push-run` 把它寫進結果檔（F-05）
+    note: str = ""
 
 
 KILL_GRACE_SECONDS = 5  # 逾時殺完後再收輸出的寬限；仍收不完就放棄讀取並在 `note` 如實報告
@@ -150,7 +160,7 @@ def _timeout_kill(proc: subprocess.Popen, job, why: str) -> str:
         proc.kill()
         return "job-terminated"
     _kill_tree(proc)
-    return "" if sys.platform != "win32" else f"taskkill-fallback:{why or 'terminate-failed'}"
+    return "killpg" if sys.platform != "win32" else f"taskkill-fallback:{why or 'terminate-failed'}"
 
 
 def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
@@ -169,23 +179,26 @@ def run_argv(argv: list[str], *, env: dict[str, str], timeout: float,
         argv, cwd=None if cwd is None else str(cwd), env=dict(env), shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **flags)
     job, why = _job_open(proc.pid)
-    timed_out, note = False, ""
+    notes = [f"job-unavailable:{why}"] if job is None and sys.platform == "win32" else []
+    timed_out = False
     try:
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
-            note = _timeout_kill(proc, job, why)
-            job = None  # 已在 `_timeout_kill` 內關閉
+            held, job = job, None  # 句柄交給 `_timeout_kill`：它關一次，之後 finally 不再碰（F-12）
+            notes.append(_timeout_kill(proc, held, why))
             try:
                 out, err = proc.communicate(timeout=KILL_GRACE_SECONDS)
             except subprocess.TimeoutExpired:
-                out, err, note = b"", b"", (note + " output-incomplete").strip()
+                out, err = b"", b""
+                notes.append("output-incomplete")
     finally:
         _job_end(job, terminate=False)  # 正常結束只關句柄；留下的背景行程不動
     return RunResult(None if timed_out else proc.returncode, timed_out,
                      (out or b"").decode("utf-8", errors="replace"),
-                     (err or b"").decode("utf-8", errors="replace"), note)
+                     (err or b"").decode("utf-8", errors="replace"),
+                     " ".join(n for n in notes if n))
 
 
 def spawn_detached(argv: list[str], *, env: dict[str, str], cwd: Path | None = None,
@@ -223,7 +236,7 @@ def spawn_detached(argv: list[str], *, env: dict[str, str], cwd: Path | None = N
 def kill_pid_tree(pid: int) -> None:
     """依 pid 殺行程樹（逾牆終止用）；找不到行程＝已結束，不拋。兩條各在平台守衛作用域內。"""
     if sys.platform.startswith("win"):
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], check=False,
+        subprocess.run([_taskkill_exe(), "/T", "/F", "/PID", str(pid)], check=False,
                        capture_output=True,
                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     else:
@@ -255,6 +268,49 @@ def pid_started_at(pid: int) -> float | None:
     if sys.platform.startswith("win"):
         return float(value)
     return time.time() - value
+
+
+IDENTITY_TOLERANCE_SECONDS = 5  # 行程建立時間與 `spawn.json` 記的實測值允許的誤差（秒）
+
+
+def process_identity(pid: int, started_at: str, created: str | None = None, *,
+                     window: bool = True) -> str:
+    """pid 的身分判定：`gone`（不存在或量不到）／`match`／`mismatch`（pid 已被別的行程使用）／
+    `unverified`（`window=False` 且沒有 `created`：不退回寬鬆窗，呼叫端不得據以終止，TCS-P7 E-23）。
+    有 `created`（spawn 當下實測的行程建立時間，UTC ISO）時只准 `IDENTITY_TOLERANCE_SECONDS`
+    的誤差；沒有（舊 spawn.json、或當時量不到）才沿用寬鬆窗：`started_at` 是心跳開始時刻，之後
+    才做 research／scan 再 spawn，行程建立時間因此晚於它（窗的 +3600 秒就是為這段前置時間；
+    審查 F-07）。"""
+    start = pid_started_at(pid)
+    if start is None:
+        return "gone"
+    if created:
+        near = abs(start - datetime.fromisoformat(created).timestamp())
+        return "match" if near <= IDENTITY_TOLERANCE_SECONDS else "mismatch"
+    if not window:
+        return "unverified"
+    want = datetime.fromisoformat(started_at).timestamp()
+    return "match" if want - 120 <= start <= want + 3600 else "mismatch"
+
+
+def spawn_identity(data: dict) -> str:
+    """`spawn.json` 內容對應的行程身分（只認實測建立時間，不退回寬鬆窗；逾牆終止前用）。"""
+    return process_identity(data["pid"], data["started_at"], data.get("process_started_utc"),
+                            window=False)
+
+
+def spawn_record(pid: int, started: datetime, wall_due: datetime) -> dict:
+    """`patrol/<RUN>/spawn.json` 的內容：pid、心跳時刻、硬牆到期，加 spawn 當下實測的行程建立時間
+    （`process_started_utc`，UTC ISO；量不到＝None）供逾牆終止前核對身分（審查 F-07）。"""
+    return {"pid": pid, "started_at": started.isoformat(timespec="seconds"),
+            "wall_due_at": wall_due.isoformat(timespec="seconds"),
+            "process_started_utc": started_utc(pid)}
+
+
+def started_utc(pid: int) -> str | None:
+    """行程建立時間（UTC ISO 秒）；量不到＝None。"""
+    real = pid_started_at(pid)
+    return None if real is None else datetime.fromtimestamp(real, UTC).isoformat(timespec="seconds")
 
 
 def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float) -> ProbeResult:

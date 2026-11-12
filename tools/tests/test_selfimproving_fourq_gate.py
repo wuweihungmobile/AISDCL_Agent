@@ -657,7 +657,7 @@ class TestRepoState(unittest.TestCase):
         self.assertEqual((len(selfimproving._HELP), len(si_events.KINDS), len(si_check.ITEM_IDS)
                           if hasattr(si_check, "ITEM_IDS") else 35), (30, 27, 35))
         self.assertEqual((len(si_params.PARAM_SPECS), si_params.CHECK_RULES_REV), (47, 6))
-        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (78, 27))
+        self.assertEqual((len(CAPABILITY), len(issuemap.EVENT_LABELS)), (79, 27))
         from lib.selfimproving import status
         self.assertIn("fourq", inspect.getsource(status.build))
 
@@ -681,7 +681,7 @@ class TestRepoState(unittest.TestCase):
     def test_AT_445_4_1_capability_registry_and_loc(self):
         from test_selfimproving_capability import CAPABILITY, capability_problems
 
-        self.assertEqual(len(CAPABILITY), 78)
+        self.assertEqual(len(CAPABILITY), 79)
         self.assertEqual((CAPABILITY["fourqparse.py"], CAPABILITY["fourq.py"],
                           CAPABILITY["evspec.py"]), ("ro", "rw", "ro"))
         text = (LIB / "fourq.py").read_text(encoding="utf-8")

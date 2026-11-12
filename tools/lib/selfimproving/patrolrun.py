@@ -195,9 +195,7 @@ def read_json(path: Path) -> dict | None:
 
 def _alive(pid: int, started_at: str) -> bool:
     """pid 存活且啟動時刻與 `spawn.json` 記的相近（pid 被重用者視為已結束）。"""
-    start = runner.pid_started_at(pid)
-    want = datetime.fromisoformat(started_at).timestamp()
-    return start is not None and want - 120 <= start <= want + 3600
+    return runner.process_identity(pid, started_at) == "match"
 
 
 def _finish(ctx, run: str, path: Path, data: dict) -> None:
@@ -236,7 +234,9 @@ def watch(ctx) -> tuple[str, bool]:
         data, run = read_json(path), path.parent.name
         if data is None or "closed_at" in data:
             continue
-        alive = (ctx.deps.pid_alive or _alive)(data["pid"], data["started_at"])
+        who = None if ctx.deps.pid_alive else runner.spawn_identity(data)
+        alive = who in ("match", "unverified") if who else ctx.deps.pid_alive(
+            data["pid"], data["started_at"])
         over = ctx.now >= datetime.fromisoformat(data["wall_due_at"])
         if alive and not over:
             busy = True
@@ -245,7 +245,9 @@ def watch(ctx) -> tuple[str, bool]:
         notes.append(f"{run} {'逾牆終止' if alive else '已結束，依事件收尾'}")
         if ctx.dry:
             continue
-        if alive:
+        if who in ("mismatch", "unverified"):  # 身分對不上或缺建立時間：不殺（審查 F-07）
+            ctx.kill_skipped(run, data["pid"])
+        elif alive:
             ctx.log("巡視", 0, "WALL-EXCEEDED", f"{run} 逾牆終止（pid={data['pid']}）")
             (ctx.deps.kill_tree or runner.kill_pid_tree)(data["pid"])
         _finish(ctx, run, path, data)
@@ -287,11 +289,9 @@ def launch(ctx, run: str, *, trigger: str, due_at: str) -> tuple[str, str]:
         pid = ctx.spawn(argv, env=child_env(run, ctx.environ), cwd=ctx.repo, out_dir=tdir)
     except OSError as exc:  # PermissionError 亦屬之：脫離旗標被拒＝fail-closed，不留 spawn.json
         return "failed", f"breakaway-denied: {type(exc).__name__}"
-    started = ctx.now
-    wall = started + timedelta(seconds=unattended_authz.RESUME_HARD_WALL_SECONDS)
-    (tdir / "spawn.json").write_bytes(json.dumps(
-        {"pid": pid, "started_at": sched.iso(started), "wall_due_at": sched.iso(wall)},
-        ensure_ascii=False).encode("utf-8") + b"\n")
+    wall = ctx.now + timedelta(seconds=unattended_authz.RESUME_HARD_WALL_SECONDS)
+    (tdir / "spawn.json").write_bytes(json.dumps(runner.spawn_record(pid, ctx.now, wall),
+                                                 ensure_ascii=False).encode("utf-8") + b"\n")
     return "spawned", f"{run} pid={pid}"
 
 

@@ -33,6 +33,8 @@ _LISTED = ("proposed", "returned", "approved", "sandboxed", "verified")
 _POST = ("promoted", "measuring", "closed")
 _NEVER = ("PUSH-HOOK-FAILED", "PUSH-REJECTED", "PUSH-AUTH")
 _RETRY = ("PUSH-WALL-EXCEEDED", "PUSH-FAILED")
+_BLOCKED = ("PUSH-REMOTE-DRIFT", "PUSH-REMOTE-DIVERGED")  # `push/blocked.json` 的碼
+_NOTE_TOTAL = 130  # 帶 runner_note 後 push.text 的總長上限
 _PUSH_KEYS = ("enabled", "state", "code", "text", "retry", "sha", "ahead", "attempts",
               "finished_at", "tick_at")
 
@@ -189,7 +191,11 @@ def push_block(home: Path, params: dict, now: datetime, enabled: bool, guard: di
            "finished_at": last.get("finished_at") if last else None, "tick_at": tick_at}
 
     def done(state, code, detail=None, retry=None, sha=None):
-        out.update(state=state, code=code, text=_text(code, detail), retry=retry, sha=sha)
+        text = _text(code, detail)
+        note = (last or {}).get("runner_note") if state == "failed" else None
+        if note and isinstance(note, str):  # runner 的終止／Job 說明接在白話句後（總長 ≤130）
+            text = sched.line1(f"{text}（備註：{nextstep.clip(note, 40)}）", _NOTE_TOTAL)
+        out.update(state=state, code=code, text=text, retry=retry, sha=sha)
         return out
     if not enabled:
         return done("off", "PUSH-OFF")
@@ -211,6 +217,12 @@ def push_block(home: Path, params: dict, now: datetime, enabled: bool, guard: di
             "idle", "PUSH-NOT-AHEAD")
     if guard.get("code"):
         return done("blocked", guard["code"], guard.get("detail"), sha=head)
+    fresh = _t(tick_at)
+    limit = timedelta(minutes=2 * params["sched_heartbeat_minutes"] + 5)
+    blk = _read_json(d / "blocked.json")
+    if (blk and blk.get("head") == head and blk.get("code") in _BLOCKED  # HEAD 改變即自然失效
+            and fresh is not None and now - fresh <= limit):  # push-run 仍在跑，否則視為過期（4b）
+        return done("blocked", blk["code"], blk.get("detail"), sha=head)
     code, fin = (last or {}).get("code"), _t((last or {}).get("finished_at"))
     mx, gap = params.get("sched_push_attempts_max"), params.get("sched_push_retry_minutes")
     if code in _NEVER:
@@ -222,8 +234,6 @@ def push_block(home: Path, params: dict, now: datetime, enabled: bool, guard: di
             return done("failed", code, retry="wait", sha=head)
     if err is not None and (fin is None or (_t(err.get("at")) or fin) > fin):
         return done("failed", "PUSH-INTERNAL-ERROR", err.get("text"), sha=head)
-    fresh = _t(tick_at)
-    limit = timedelta(minutes=2 * params["sched_heartbeat_minutes"] + 5)
     if fresh is not None and now - fresh <= limit:
         return done("pending", "PUSH-PENDING", sha=head)
     return done("waiting-login", "PUSH-WAITING-LOGIN", sha=head)

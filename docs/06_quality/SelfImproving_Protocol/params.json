@@ -55,7 +55,7 @@
   "research_timeout_seconds": 20,
   "row_max_bytes": 700,
   "sched_auto_commit": true,
-  "sched_auto_push": true,
+  "sched_auto_push": false,
   "sched_blackout_local": [
     "21:00-01:30"
   ],

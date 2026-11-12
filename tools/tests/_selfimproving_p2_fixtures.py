@@ -512,7 +512,7 @@ PROBE_SCRIPTS = {
         "print('PYTHONPATH=' + os.environ.get('PYTHONPATH', ''))\n"
         "names = sorted(k for k in os.environ if k.startswith('AUTOSDD_'))\n"
         "print('AUTOSDD_NAMES=' + ','.join(names))\n"
-        "print('HAS_SECRET=' + str('MY_SECRET_TOKEN' in os.environ))\n"
+        "print('HAS_VAR=' + str('MY_SECRET_TOKEN' in os.environ))\n"
         "print('PYTHONUTF8=' + os.environ.get('PYTHONUTF8', ''))\n"
         "print('PYTHONDONTWRITEBYTECODE=' + os.environ.get('PYTHONDONTWRITEBYTECODE', ''))\n"
         "sys.exit(_count(sys.argv[1], sys.argv[2]))\n"),

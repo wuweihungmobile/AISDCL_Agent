@@ -252,8 +252,9 @@ class TestParamsNine(unittest.TestCase):
             "sched_period_minutes_min": 60, "sched_period_minutes_max": 10080,
             "sched_run_budget_minutes": 90, "sched_blackout_local": ["21:00-01:30"],
             "sched_driver_quiet_minutes": 30, "sched_auto_commit": True,
-            # P7（TCS-P7 AC-SI-49-1）：自動推送預設 true，並新增三個推送參數；SCHED_KEYS 共 12 鍵
-            "sched_auto_push": True, "sched_push_wall_minutes": 45,
+            # P7（TCS-P7 AC-SI-49-1、E-17）：自動推送預設 false（明確開啟才生效），並新增三個推送
+            # 參數；SCHED_KEYS 共 12 鍵
+            "sched_auto_push": False, "sched_push_wall_minutes": 45,
             "sched_push_attempts_max": 3, "sched_push_retry_minutes": 360}
 
     def real(self) -> dict:
@@ -819,7 +820,8 @@ class TestCapabilityP4(unittest.TestCase):
         self.assertIn((n, counts), {(75, (54, 14, 2, 5)), (76, (55, 14, 2, 5)),
                                     (77, (56, 14, 2, 5)),
                                     # P7：RD +3、MM +1、PU +1（pushguard）、+1（patrolpush）
-                                    (78, (56, 14, 2, 6))})
+                                    (78, (56, 14, 2, 6)),
+                                    (79, (57, 14, 2, 6))})  # +1（pushcontent，自 pushguard 拆出）
         if n >= 62:
             self.assertEqual(cap.CAPABILITY["evspec.py"], "ro")
         self.assertEqual({p.name for p in cap.PKG.glob("*.py")}, set(cap.CAPABILITY))
@@ -1099,7 +1101,7 @@ class TestZeroRegression(P4TestCase):
         self.assertEqual(len(si_params.PARAM_SPECS), 47)  # P7：44→47
         self.assertEqual(si_params.CHECK_RULES_REV, 6)
         # P7 RD +3、MM +1、PU +1（pushguard）、+1（patrolpush）
-        self.assertEqual(len(cap.CAPABILITY), 78)
+        self.assertEqual(len(cap.CAPABILITY), 79)
         self.assertEqual(len(self.status(fx4.p4_base())), 20)
         spec = json.loads(EXPECT.read_text(encoding="utf-8"))
         self.assertEqual(len(spec["tasks"]), 3)

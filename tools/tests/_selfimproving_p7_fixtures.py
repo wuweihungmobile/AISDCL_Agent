@@ -34,9 +34,12 @@ GOLDEN_PROP = fx.pid(901)
 
 # §4 允許集合（單一來源；AT-790-4-1、AT-790-4-2 的四個範圍守衛取聯集）
 P7_ALLOWED = tuple(re.compile(p) for p in (
-    r"^tools/lib/selfimproving/(nextstep|propdetail|memdir|pushguard|patrolreport|patrolpush)\.py$",
+    r"^tools/lib/selfimproving/(nextstep|propdetail|memdir|pushguard|patrolreport|patrolpush"
+    r"|pushcontent)\.py$",  # pushcontent：自 pushguard 拆出的內容與設定判準（TCS-P7 E-20、E-21）
     r"^tools/lib/selfimproving/(export|params|sandbox|patrol|patrolrun|patrolbrief|schedarm"
-    r"|unattended|runner)\.py$",  # runner 限 AT-749-9-2 的樹終止機制（TCS-P7 E-10）
+    # runner：樹終止（E-10）；git：STRIP_ENV 等共用常數與解析（E-21）
+    r"|unattended|runner|git)\.py$",
+    r"^tools/lib/apply_lock\.py$",  # 陳舊鎖回收（審查 F-13）
     r"^tools/selfimproving\.py$",
     r"^docs/06_quality/SelfImproving_Protocol/params\.json$",
     r"^docs/06_quality/SelfImproving_LedgerDb_P0_Baseline\.md$",
@@ -293,6 +296,7 @@ def golden_patrol(case) -> bytes:
 # §3）
 APP_BASE = 500  # 夾具自造 APP 編號的起點（`PushRepo.app_id`）
 DEC_ID = "DEC" + "-SI-001"  # 執行期拼出（帳本編號字面掃描）
+HOOKS_DIR = ".git/hooks"  # 暫存 repo 的 hooks 目錄（測試縫 `pushcontent.EXPECTED_HOOKS` 同步替換）
 
 
 class PushRepo:
@@ -327,10 +331,21 @@ class PushRepo:
         fx.git(fx.TMP, "init", "-q", "--bare", str(self.bare))
         fx.git(self.R, "remote", "add", "origin", str(self.bare))
         fx.git(self.R, "push", "-q", "-u", "origin", "main")
+        fx.git(self.R, "config", "core.hooksPath", HOOKS_DIR)  # 守門要求 hooksPath 存在且等於既定值
+        self.arm_url(str(self.bare))
         patch_raw = (self.R / fx.PROPS_REL / self.prop / "r1.patch").read_bytes()
         self.touched = [] if cls == "M" else si_paths.touched_of(patch_raw)
 
     dangling = "APP" + "-SI-777"
+
+    def arm_url(self, url: str | None) -> None:
+        """模擬 `sched arm` 記下的遠端網址（`push/armed.json`）；`None`＝不留記錄。"""
+        path = self.si / "push" / "armed.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if url is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_text(json.dumps({"remote_url": url}), encoding="utf-8")
 
     # ---- 基本動作
     def app_id(self) -> str:
@@ -412,9 +427,11 @@ class RunArgvSpy:
     `on_call`
     於回傳前執行（造「推送期間工作樹變動」）；`raises` 非 None 則拋出。"""
 
-    def __init__(self, rc=0, out="", err="", timed_out=False, on_call=None, raises=None) -> None:
+    def __init__(self, rc=0, out="", err="", timed_out=False, on_call=None, raises=None,
+                 note="") -> None:
         self.calls: list[dict] = []
-        self.result = types.SimpleNamespace(rc=rc, out=out, err=err, timed_out=timed_out)
+        self.result = types.SimpleNamespace(rc=rc, out=out, err=err, timed_out=timed_out,
+                                            note=note)
         self.on_call, self.raises = on_call, raises
 
     def __call__(self, argv, *, env, timeout, cwd=None):

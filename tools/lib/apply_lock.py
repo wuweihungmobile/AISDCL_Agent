@@ -84,15 +84,33 @@ def _try_acquire(lock_path: Path) -> OSError | None:
     return None
 
 
-def _reap_if_stale(lock_path: Path, stale_after: float) -> None:
-    """鎖檔 mtime 超過 `stale_after` 秒即視為持鎖行程已死，嘗試刪除以便下一輪重試。"""
+def _holder_pid(lock_path: Path) -> int | None:
     try:
-        age = time.time() - lock_path.stat().st_mtime
+        head = lock_path.read_text(encoding="utf-8", errors="replace").split("\n", 1)[0].strip()
+    except OSError:
+        return None
+    return int(head) if head.isdigit() else None
+
+
+def _reap_if_stale(lock_path: Path, stale_after: float, holder_alive=None) -> None:
+    """鎖檔 mtime 超過 `stale_after` 秒即視為持鎖行程已死並回收；`holder_alive(pid)` 有給且回真
+    （持鎖行程還活著）就不回收（審查 F-13）。"""
+    try:
+        mtime = lock_path.stat().st_mtime
+        age = time.time() - mtime
+        seen = lock_path.read_bytes()
     except (FileNotFoundError, PermissionError):
         return  # 鎖已被持有者釋放、被另一個回收者清掉，或處於刪除待決，屬正常狀態
-    if age <= stale_after:
+    holder = _holder_pid(lock_path)
+    if age <= stale_after or (holder_alive is not None and holder is not None
+                              and holder_alive(holder)):
         return
     try:
+        # 刪除前再核對一次：鎖檔內容與 mtime 仍是判陳舊時看到的那一把才刪（判陳舊之後被別人換成新鎖
+        # 就不刪）。誠實劃界：核對到 `unlink` 之間仍有微秒級窗，窗內被換的新鎖會被刪；呼叫端的第二道
+        # 判準（例如推送的 `current.json`）會擋下兩個持鎖者同時做事。
+        if lock_path.read_bytes() != seen or lock_path.stat().st_mtime != mtime:
+            return
         lock_path.unlink()
     except (FileNotFoundError, PermissionError):
         pass  # TOCTOU 已被搶先清掉，或 Windows 刪除待決／共享違規：這輪沒收成，下一輪有界重試
@@ -120,10 +138,31 @@ def acquire(
     lock_path: Path, timeout: float, stale_after: float, poll_interval: float = 0.2,
 ) -> Iterator[None]:
     """取得 `lock_path` 這把鎖；逾時拋 `LockBusyError`，成功則離開區塊時自動釋放。"""
+    with _hold(lock_path, timeout, stale_after, poll_interval, None):
+        yield
+
+
+@contextmanager
+def acquire_guarded(
+    lock_path: Path, timeout: float, stale_after: float, poll_interval: float = 0.2,
+    *, holder_alive,
+) -> Iterator[None]:
+    """同 `acquire`，另依 `holder_alive(pid)`（回真＝持鎖行程還活著）決定陳舊鎖要不要回收：
+    持鎖行程還活著時，陳舊判準即使過了也不回收（審查 F-13；`acquire` 簽章不動）。"""
+    with _hold(lock_path, timeout, stale_after, poll_interval, holder_alive):
+        yield
+
+
+@contextmanager
+def _hold(lock_path: Path, timeout: float, stale_after: float, poll_interval: float,
+          holder_alive) -> Iterator[None]:
     deadline = time.monotonic() + timeout
     while (busy := _try_acquire(lock_path)) is not None:
-        _reap_if_stale(lock_path, stale_after)
+        _reap_if_stale(lock_path, stale_after, holder_alive)
         if time.monotonic() >= deadline:
+            if holder_alive is not None and (busy := _try_acquire(lock_path)) is None:
+                break  # 活性判斷本身（外呼行程）吃掉了等待時間：回收成功就最後再取一次
+
             if isinstance(busy, PermissionError):
                 raise busy  # 原始例外：真正的「不可寫」不被誤報成「別的行程持有」
             raise LockBusyError(

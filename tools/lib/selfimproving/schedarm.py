@@ -25,12 +25,14 @@ import os
 import plistlib
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from . import events as si_events
 from . import params as si_params
 from . import runner, sched
 from . import writeverbs as wv
+from .git import safe_path
 
 LABEL = sched.ARMED_TASK
 PUSH_LABEL = "AutoSDD_SI_Push"
@@ -149,7 +151,9 @@ def _push_query_argv() -> list[str]:
     return _ps(f"$t = Get-ScheduledTask -TaskName '{PUSH_LABEL}' -ErrorAction SilentlyContinue; "
                "if (-not $t) { 'ABSENT'; exit 0 }; $i = $t | Get-ScheduledTaskInfo; "
                "if ($i.NextRunTime) { 'NEXT=' + $i.NextRunTime.ToString('o') } "
-               "else { 'NEXT=NONEXT' }; 'USER=' + $t.Principal.UserId")
+               "else { 'NEXT=NONEXT' }; 'USER=' + $t.Principal.UserId; "
+               "try { 'SID=' + (New-Object Security.Principal.NTAccount($t.Principal.UserId))"
+               ".Translate([Security.Principal.SecurityIdentifier]).Value } catch {}")
 
 
 def _push_value(run_argv, plist_dir: Path | None) -> dict:
@@ -171,7 +175,8 @@ def _push_value(run_argv, plist_dir: Path | None) -> dict:
     kv = dict(ln.split("=", 1) for ln in lines if "=" in ln)
     nxt = kv.get("NEXT", lines[-1])
     cred = sched.NE_PREFIX + "no-next-run-time" if nxt == "NONEXT" else nxt
-    return {"task": PUSH_LABEL, "present": True, "credential": cred, "user": kv.get("USER")}
+    return {"task": PUSH_LABEL, "present": True, "credential": cred, "user": kv.get("USER"),
+            "sid": kv.get("SID")}
 
 
 # ── arm ───────────────────────────────────────────────────────────────────────
@@ -187,6 +192,10 @@ def _write_plist(repo: Path, plist_dir: Path | None, *, label: str = LABEL, verb
         folder.mkdir(parents=True, exist_ok=True)
         plist["StandardOutPath"] = str(folder / "launchd.out.log")
         plist["StandardErrorPath"] = str(folder / "launchd.err.log")
+    else:  # 推送 agent：launchd 預設 PATH 只有系統目錄，找不到 Homebrew 的 git（審查 F-16）
+        plist["EnvironmentVariables"] = {
+            "PATH": safe_path() or "/usr/bin:/bin:/usr/sbin:/sbin",
+            "AUTOSDD_SI_DIR": str(si_events.si_dir())}
     path = _plist_path(plist_dir, label)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "wb") as fh:
@@ -260,11 +269,67 @@ def _expected_user() -> str | None:
     return f"{dom}\\{name}" if dom and name else None
 
 
+def _same_user(a: str | None, b: str | None) -> bool:
+    """帳號比對：不分大小寫；兩邊都帶網域才比網域（`Principal.UserId` 對本機帳號可能不帶網域）。"""
+    if not a or not b:
+        return False
+    (da, _, na), (db, _, nb) = (x.rpartition("\\") for x in (a.lower(), b.lower()))
+    return na == nb and (not da or not db or da == db)
+
+
+def _session_argv() -> list[str]:
+    """Windows：身分現查一次問完（SID 比對，審查 F-15／TCS-P7 E-25）：互動桌面（`explorer.exe`）
+    擁有者的帳號與 SID（以另一個管理員帳號提權執行時，環境變數是那個管理員，桌面擁有者仍是真正
+    登入的使用者）、本指令行程的 SID、已安裝的巡邏任務主體的 SID（不存在則無該行）。"""
+    sid = "[Security.Principal.SecurityIdentifier]"
+    return _ps("$o = Get-CimInstance Win32_Process -Filter \"Name='explorer.exe'\" | "
+               "Select-Object -First 1; "
+               "$n = if ($o) { $o | Invoke-CimMethod -MethodName GetOwner }; "
+               "$s = if ($o) { $o | Invoke-CimMethod -MethodName GetOwnerSid }; "
+               "if ($n -and $n.User) { 'NAME=' + $n.Domain + '\\' + $n.User }; "
+               "if ($s -and $s.Sid) { 'OWNERSID=' + $s.Sid }; "
+               "'MINESID=' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+               f"$p = Get-ScheduledTask -TaskName '{LABEL}' -ErrorAction SilentlyContinue; "
+               "if ($p) { try { 'PATROLSID=' + (New-Object Security.Principal.NTAccount("
+               f"$p.Principal.UserId)).Translate({sid}).Value }} catch {{}} }}")
+
+
+def _session(run_argv) -> dict[str, str]:
+    """`_session_argv` 的鍵值（量不到的鍵缺席；不因量不到而拒絕，事後以回讀的 SID 再比一次）。"""
+    try:
+        res = run_argv(_session_argv(), env=_env(), timeout=30, cwd=None)
+    except Exception:  # noqa: BLE001
+        return {}
+    if getattr(res, "rc", 1) != 0:
+        return {}
+    kv = (ln.strip().split("=", 1) for ln in (getattr(res, "out", "") or "").splitlines())
+    return {k: v.strip() for k, v in (p for p in kv if len(p) == 2) if v.strip()}
+
+
+def _rollback_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, why: str) -> str:
+    """註冊後驗證失敗：同一呼叫內移除並現查不見，才說「已回復為未安裝」（審查 F-15）。"""
+    _gone(repo, run_argv, plist_dir, win, PUSH_LABEL)
+    gone = _push_value(run_argv, plist_dir)["present"] is False
+    if gone:
+        (si_events.si_dir() / "push" / "armed.json").unlink(missing_ok=True)
+    return f"{why}；" + ("推送任務已回復為未安裝" if gone else
+                         "回復失敗：推送任務可能仍存在，請手動 sched disarm --push-only")
+
+
 def _arm_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, minutes: int
               ) -> tuple[str | None, str]:
     """推送任務安裝並驗證：回（失敗碼或 None, 詳情或憑證值）；憑證是值（NextRunTime／
-    mac 的 rc＋plist）。"""
+    mac 的 rc＋plist）。驗證失敗一律回復成未安裝；以另一個帳號提權執行（桌面擁有者與目前使用者
+    不同）時拒絕註冊——推送任務必須屬於登入使用者，才拿得到他的憑證保管庫。"""
+    want, who = _expected_user(), {}
     if win:
+        who = _session(run_argv)
+        owner, mine = who.get("OWNERSID"), who.get("MINESID")
+        patrol = who.get("PATROLSID")
+        if (owner and mine and owner != mine) or (owner and patrol and owner != patrol):
+            return "SCHED-PUSH-USER-MISMATCH", (
+                "推送任務必須由互動登入的同一個使用者安裝；請以該使用者提權後的同一帳號重跑"
+                f"（登入的使用者是 {who.get('NAME', '未知')}）")
         res = run_argv(_push_register_argv(repo, minutes), env=_env(), timeout=_TIMEOUT, cwd=repo)
     else:
         res, _ = _arm_mac(repo, run_argv, plist_dir, label=PUSH_LABEL, verb="push-run", logs=False)
@@ -274,15 +339,52 @@ def _arm_push(repo: Path, run_argv, plist_dir: Path | None, win: bool, minutes: 
             return "SCHED-ELEVATION-REQUIRED", (
                 "以系統管理員身分重跑 sched arm（任務主體仍為目前使用者的互動登入型）")
         return "SCHED-PUSH-TASK-FAILED", (f"推送任務註冊失敗（rc={getattr(res, 'rc', None)}）；"
-                                          + " ".join(body.split())[:200])
+                                          + " ".join(body.split())[:200]
+                                          + "；先前的推送任務（若有）已被移除，不會保留")
     value = _push_value(run_argv, plist_dir)
     cred = value["credential"]
     if value["present"] is not True or cred.startswith(sched.NE_PREFIX) or not cred.strip():
-        return "SCHED-NO-CREDENTIAL", f"推送任務現查拿不到憑證（{cred}）；不得宣稱任務已建立"
-    want = _expected_user()
-    if win and want and (value["user"] or "").lower() != want.lower():
-        return "SCHED-PUSH-TASK-FAILED", (f"推送任務的使用者是 {value['user']}，不是預期的 {want}")
+        why = _rollback_push(repo, run_argv, plist_dir, win,
+                             f"推送任務現查拿不到憑證（{cred}）；不得宣稱任務已建立")
+        return "SCHED-NO-CREDENTIAL", why
+    expect_sid = who.get("OWNERSID") or who.get("MINESID")  # 以 SID 比（本機帳號回讀常不帶網域）
+    if win and ((expect_sid and value.get("sid") and value["sid"] != expect_sid)
+                or (not (expect_sid and value.get("sid")) and want
+                    and not _same_user(value["user"], want))):
+        why = _rollback_push(repo, run_argv, plist_dir, win,
+                             "推送任務的使用者與互動登入的使用者不同")
+        return "SCHED-PUSH-USER-MISMATCH", why
+    try:
+        _write_armed(repo)
+    except OSError as exc:
+        why = _rollback_push(repo, run_argv, plist_dir, win,
+                             f"armed.json 寫入失敗（{type(exc).__name__}）")
+        return "SCHED-PUSH-TASK-FAILED", why
     return None, cred
+
+
+def _write_armed(repo: Path) -> None:
+    """記下安裝當下的遠端網址與 git 絕對路徑（`push/armed.json`）：守門之後比對網址是否被改
+    （審查 F-04）；`push-run` 只用這裡記的 git 解析結果同一規則解析（F-10）。"""
+    from .git import Git, resolve_git
+
+    cp = Git(repo).run("config", "--get", "remote.origin.url")
+    url = cp.stdout.strip() if cp is not None and cp.returncode == 0 else ""
+    url = re.sub(r"(://)[^/@\s]*@", r"\1", url)  # 去 userinfo（帳密不落地）
+    doc = {"remote_url": url, "git": resolve_git(), "armed_at": sched.iso(sched.aware(
+        datetime.now().astimezone()))}
+    path = si_events.si_dir() / "push" / "armed.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+
+
+def _mac_env_detail() -> dict[str, str]:
+    """macOS 推送任務帶進 launchd 的環境（現查輸出列出）：`PATH` 只列目錄個數與前 3 段。"""
+    if sys.platform != "darwin":
+        return {}
+    dirs = [d for d in safe_path().split(os.pathsep) if d]
+    return {"push_task_path": f"{len(dirs)}-dirs:" + os.pathsep.join(dirs[:3]),
+            "push_task_si_dir": str(si_events.si_dir())}
 
 
 def _remove_push_if_present(repo: Path, run_argv, plist_dir: Path | None, win: bool
@@ -311,12 +413,16 @@ def arm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
     if push_only:
         if not enabled:
             return _reject(repo, "SCHED-PUSH-OFF",
-                           "sched_auto_push 為 false，不安裝推送任務（參數屬 T1／PRD 修訂）",
+                           "sched_auto_push 為 false（預設關閉），不安裝推送任務。要開啟：先讀 "
+                           "SOP〈自動推送（P7）〉的殘餘風險；再把 docs/06_quality/"
+                           "SelfImproving_Protocol/params.json 的 sched_auto_push 改成 true "
+                           "並提交（屬 T1／PRD 修訂的參數）；再重跑 sched arm --push-only",
                            as_json, "arm")
         code, detail = _arm_push(repo, run_argv, plist_dir, win, minutes)
         if code:
             return _reject(repo, code, detail, as_json, "arm")
-        return _ok("arm", {"task": PUSH_LABEL, "push_task_credential": detail}, as_json)
+        return _ok("arm", {"task": PUSH_LABEL, "push_task_credential": detail,
+                           **_mac_env_detail()}, as_json)
     p_code, p_detail = _arm_patrol(repo, run_argv, plist_dir, win)
     s_code, s_detail = (_arm_push(repo, run_argv, plist_dir, win, minutes) if enabled
                         else _remove_push_if_present(repo, run_argv, plist_dir, win))
@@ -331,7 +437,9 @@ def arm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
         return _reject(repo, s_code, note, as_json, "arm")
     detail = {"task": LABEL, "credential": p_detail}
     if enabled:
-        detail["push_task_credential"] = s_detail
+        detail.update(push_task_credential=s_detail, **_mac_env_detail())
+    else:
+        detail["push"] = "自動推送未啟用，未安裝推送任務"
     return _ok("arm", detail, as_json)
 
 
