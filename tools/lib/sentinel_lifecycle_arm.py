@@ -172,6 +172,16 @@ def superseding_session(project_dir: Path, own_sid: str, halt_marker: dict | Non
     since = _epoch_of(halt_marker.get("at")) if isinstance(halt_marker, dict) else None
     if since is None:
         return None
+    return superseding_since(project_dir, own_sid, since, min_turns=min_turns, min_span=min_span)
+
+
+def superseding_since(project_dir: Path, own_sid: str, since: float, *,
+                      min_turns: int = MIN_TURNS,
+                      min_span: float = MIN_SPAN_SECONDS) -> dict | None:
+    """`superseding_session` 的掃描本體（sessionctl WP2 抽出 `since`，不留第二份掃描碼）：
+    同專案是否有**別的** session 在 `since`（epoch 秒）之後累積了夠多活動。halt 版（`since`＝
+    halt 標記的 `at`）與過期 session 版（`switch.superseded_by`，`since`＝本 session 最後對話
+    記錄）共用它；判準與 fail 方向（讀不動一律 `None`）見 `superseding_session` 的 docstring。"""
     try:
         found = sorted(((p.stat().st_mtime, p) for p in project_dir.glob("*.jsonl")
                         if p.stem != own_sid), key=lambda row: row[0], reverse=True)

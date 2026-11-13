@@ -2421,6 +2421,44 @@ class SentinelDecisionTest(unittest.TestCase):
         self.assertEqual(decision["action"], "escalate")
         self.assertIn("提額", decision["reason"])
 
+    _STALE = {"sid": "peer-0001", "turns": 30, "span_seconds": 928.0,
+              "last_at": "2026-11-14T00:00:00Z"}
+
+    def test_at_sc_25_a_stale_session_disarms_before_the_limit_branch(self) -> None:
+        """AT-SC-25（`switch.stale_verdict` 的優先序；WHY＝E2）：未處理撞線（非 SPEND）＋
+        `stale` ⇒ `disarm`＋`state=superseded`＋`superseded_by`＋`clear_halt`。E2 那支
+        waiting 哨兵醒來時撞線事件仍「未處理」，SUPERSEDED 若排在撞線分支之後（reset 已過
+        ⇒ probe），舊 session 會被無人續跑。"""
+        event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT)
+        for hour in (0, 7):  # reset 未到（arm_reset）與已過（probe）兩側都要被攔
+            with self.subTest(hour=hour):
+                decision = planner.sentinel_decide(event, "", 10.0, self._now(hour, 45),
+                                                   stale=self._STALE)
+                self.assertEqual((decision["action"], decision["state"]), ("disarm", "superseded"))
+                self.assertEqual(decision["superseded_by"], "peer-0001")
+                self.assertTrue(decision["clear_halt"])
+                self.assertIsNone(decision["at"])
+
+    def test_at_sc_26_a_spend_limit_still_escalates_even_when_stale(self) -> None:
+        """AT-SC-26：`LIMIT_SPEND`＋stale ⇒ 仍 escalate（錢的事只有人能解，不得被吞掉）。"""
+        decision = planner.sentinel_decide(
+            _sentinel_event(guard.LIMIT_SPEND, _REAL_SPEND_LIMIT), "", 10.0, self._now(7),
+            stale=self._STALE)
+        self.assertEqual(decision["action"], "escalate")
+
+    def test_at_sc_27_a_week_with_nobody_else_is_byte_identical_to_before(self) -> None:
+        """AT-SC-27（整週無人對照）：`stale=None`（沒有更新的 session）⇒ 撞線／idle 各分支
+        與修前逐位元組相同——不得因為新增參數就把整週無人的續航也拆掉。"""
+        event = _sentinel_event(guard.LIMIT_SESSION, _REAL_SESSION_LIMIT)
+        idle = planner.SENTINEL_IDLE_SECONDS + 1
+        for args in ((event, "", 10.0, self._now(0, 45)), (event, "", 10.0, self._now(7)),
+                     (None, "", 60.0, self._now(7)), (None, "", idle, self._now(7))):
+            before = planner.sentinel_decide(*args)
+            self.assertEqual(before, planner.sentinel_decide(*args, stale=None))
+            self.assertNotIn("state", before)
+        self.assertEqual(planner.sentinel_decide(event, "", 10.0, self._now(0, 45))["action"],
+                         "arm_reset")
+
     def test_an_unparseable_reset_refuses_to_guess(self) -> None:
         """解不出時刻就叫人，**不准**退回固定間隔——猜出來的排程會醒在錯的時間，
         而 `NextRunTime` 照樣拿得到＝取證規則全綠的假綠。"""
@@ -10627,7 +10665,10 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
             _REPO_ROOT / "tools" / "lib" / "relay_machine.py",
             # improving_113 W1：三個模型角色鍵（AUTOSDD_MODEL_*）由 model_roles.py 讀。
             _REPO_ROOT / "tools" / "lib" / "model_roles.py",
-            _REPO_ROOT / "tools" / "lib" / "quota_burndown.py"))  # DEF-200-528：清倉 kill-switch
+            _REPO_ROOT / "tools" / "lib" / "quota_burndown.py",  # DEF-200-528：清倉 kill-switch
+            # sessionctl WP0：喚醒選路本體（含 AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES 的讀取點）自
+            # planner 搬到這裡；WP1 的成本門檻鍵也由它讀。讀取點搬家，判準（要有消費者）不放寬。
+            _REPO_ROOT / "tools" / "lib" / "sessionctl" / "switch.py"))
         fields = set(quota_policy.Policy.__dataclass_fields__)
         for spec in quota_policy.ENV_SPEC:
             with self.subTest(key=spec.name):
@@ -11792,7 +11833,7 @@ class SentinelArmingCriterionTest(unittest.TestCase):
     # ── R84／C3-C：每一條「醒來之後」的路徑都必須處置掉自己的排程 ──────────────
     # 史料搬至 CrossPlatform_R189_SessionGate_Family_Lock_Audit_Evidence.md〈九-F〉§56。
     _TICK_DISPOSALS = ("_schtasks_remove", "_register_and_record", "_resume_tick",
-                       "_abort_and_unregister", "settle_window")
+                       "_abort_and_unregister", "settle_window", "settle_superseded")
     #: 受判準約束的 tick 函式。兩支都要判：`_sentinel_tick` 的 probe 分支會交棒給
     #: `_resume_tick`，只判前者等於把一半的路徑交給運氣。
     _TICK_FUNCS = ("_sentinel_tick", "_resume_tick")
@@ -11913,6 +11954,22 @@ class SentinelArmingCriterionTest(unittest.TestCase):
                 f"settle_window 第 {lineno} 行的 return 沒有先處置排程"
                 f"（支配集合={sorted(dominators)}）⇒ `_TICK_DISPOSALS` 裡的 settle_window "
                 "只是好聽的名字，跨檔委派實際上沒有處置排程")
+
+    def test_the_settle_superseded_delegate_really_disposes(self) -> None:
+        """sessionctl WP2：`settle_superseded`（`tools/lib/sessionctl/switch.py`）進了
+        `_TICK_DISPOSALS` ⇒ 同 `settle_window` 判例，釘住它**自己**每一條 return 路徑真的先拆
+        排程（planner 把 `_schtasks_remove` 當參數傳進去，函式內以 `remove_task` 呼叫）。
+        否則過期 session 的兩處接線（哨兵、續航）只是好聽的名字，排程原封不動留著。"""
+        src = (_REPO_ROOT / "tools" / "lib" / "sessionctl" / "switch.py").read_text(
+            encoding="utf-8")
+        fn = next(n for n in ast.walk(ast.parse(src))
+                  if isinstance(n, ast.FunctionDef) and n.name == "settle_superseded")
+        rets = self._returns_with_dominators(fn)
+        self.assertTrue(rets, "settle_superseded 一個 return 都掃不到 ⇒ 判準空轉")
+        for lineno, dominators in rets:
+            self.assertIn("remove_task", dominators,
+                          f"settle_superseded 第 {lineno} 行的 return 沒有先拆排程"
+                          f"（支配集合={sorted(dominators)}）")
 
     def test_the_dominator_criterion_is_not_satisfied_by_a_sibling_branch(self) -> None:
         """🔴 注入自證：處置動作寫在**另一個分支**時必須紅（否則判準退化成「檔內出現過」）。"""
@@ -14609,6 +14666,69 @@ class LeakFenceTest(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()):
             rc = sentinel_lifecycle.leak_fence(_fake_run)
         self.assertEqual(rc, 0, "暫時性工作被誤判成洩漏——會誤傷的判死面活不過一輪")
+
+    def _real_session(self, projects: Path, sid: str, offset_seconds: float) -> None:
+        """造「真 session」逐字稿：`<projects>/<slug>/<sid>.jsonl`，一筆 assistant 對話記錄
+        （時間＝現在＋offset）。"""
+        stamp = (datetime.now(UTC) + timedelta(seconds=offset_seconds)).isoformat()
+        path = projects / "slug" / f"{sid}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"type": "assistant", "timestamp": stamp, "message": {
+            "model": "claude-opus-5", "usage": {"input_tokens": 1}}}) + "\n", encoding="utf-8")
+
+    def _fence_with(self, labels: list[str], projects: Path, tag: str):
+        """`run()` 期間種下 `labels`（收尾仍在）；回 `(rc, 痕跡末列, stderr, stdout)`。"""
+        tmp = _tmpdir(self, f"leak-fence-{tag}-")
+        backend = self._fence_backend([])
+        err, out = io.StringIO(), io.StringIO()
+
+        def _fake_run() -> int:
+            backend.jobs.extend(labels)
+            return 0
+
+        with unittest.mock.patch.object(tempfile, "gettempdir", return_value=str(tmp)), \
+                unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(tmp)}), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
+            rc = sentinel_lifecycle.leak_fence(_fake_run, projects_dir=projects)
+        trace = tmp / sentinel_lifecycle.LEAK_FENCE_LOG_NAME
+        record = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+        return rc, record, err.getvalue(), out.getvalue()
+
+    def test_a_live_session_arming_mid_run_is_said_but_not_judged_dead(self) -> None:
+        """🔴 假陽性修正（2026-11-13 20:48 實證：`rc:0, fence_rc:1`，洩漏清單只有發起全套的
+        互動 session 自己的哨兵）：圍籬期間另一個**真** session 合法武裝＝其真實逐字稿在
+        圍籬起點之後有對話記錄（`transcript_activity` 的尺）⇒ 只出聲、rc 不動、痕跡另記
+        `live_session_jobs`。"""
+        projects = _tmpdir(self, "leak-fence-projects-")
+        sid = "aaaaaaaa-1111-2222-3333-444444444444"
+        label = f"{sentinel_lifecycle.TASK_PREFIX}{sid}"
+        self._real_session(projects, sid, +120)
+        rc, record, err, out = self._fence_with([label], projects, "live")
+        self.assertEqual(rc, 0, "真 session 的合法武裝被判洩漏＝這個判死面會被整個關掉")
+        self.assertEqual((record["leaked_jobs"], record["live_session_jobs"], record["fence_rc"]),
+                         ([], [label], 0))
+        self.assertIn("不判死", out)
+        self.assertNotIn("排程洩漏", err)
+
+    def test_a_seeded_fake_job_or_a_stale_transcript_is_still_judged_a_leak(self) -> None:
+        """鑑別力（修正不得變成漏洞）：測試種下的假 job（沒有真實逐字稿）、以及真實逐字稿的
+        活動全在圍籬起點**之前**的 job，照舊判死；與合法武裝並存時只有假的被點名。"""
+        projects = _tmpdir(self, "leak-fence-projects2-")
+        live_sid = "bbbbbbbb-1111-2222-3333-444444444444"
+        old_sid = "cccccccc-1111-2222-3333-444444444444"
+        live = f"{sentinel_lifecycle.TASK_PREFIX}{live_sid}"
+        old = f"{sentinel_lifecycle.TASK_PREFIX}{old_sid}"
+        fake = f"{sentinel_lifecycle.TASK_PREFIX}T-fake-seeded"
+        self._real_session(projects, live_sid, +120)
+        self._real_session(projects, old_sid, -3600)
+        rc, record, err, _out = self._fence_with([live, old, fake], projects, "mixed")
+        self.assertEqual(rc, 1)
+        self.assertEqual(sorted(record["leaked_jobs"]), sorted([old, fake]))
+        self.assertEqual(record["live_session_jobs"], [live])
+        self.assertIn(fake, err)
+        self.assertNotIn(live, err, "合法武裝的 session 不得被點名成洩漏")
+        rc2, record2, _e, _o = self._fence_with([fake], projects, "fake-only")
+        self.assertEqual((rc2, record2["leaked_jobs"]), (1, [fake]))
 
     def test_unmeasurable_enumeration_is_said_out_loud_and_never_reds(self) -> None:
         """控制組（fail-open）：`list_jobs()` 回 `None`＝量不到 ⇒ **不判死**（沒有證據不能

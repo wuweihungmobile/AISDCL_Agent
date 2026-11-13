@@ -231,6 +231,7 @@ on:
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
+      - "tools/lib/sessionctl/**"  # sessionctl（續跑成本選路、過期 session 不續跑）：tools/tests/test_sessionctl_switch.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/lib/selfimproving/**"  # SelfImproving P0／P1：判準與運轉函式庫套件（P0 ledger／rows／git／refs／history／params／check；P1 events／fold／evwrite／defs／sources／paths／props／propfiles／card／status／scan／export／evcheck／fetch／research／writeverbs），tools/tests/test_selfimproving_*.py 經 selfimproving.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/selfimproving.py"  # SelfImproving P0／P1：CLI 薄殼（13 個動詞），tools/tests/test_selfimproving_*.py 直接 import
       # OBS-SI-110 (iii)／OBS-SI-215：tools/tests/test_selfimproving_*.py 與 test_root_module_layout.py 直接讀取下列文件與協定資料
@@ -732,6 +733,7 @@ on:
       - "tools/run_root_unittests.py"
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
+      - "tools/lib/sessionctl/**"  # sessionctl（續跑成本選路、過期 session 不續跑）：tools/tests/test_sessionctl_switch.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/lib/selfimproving/**"  # SelfImproving P0／P1：判準與運轉函式庫套件（P0 ledger／rows／git／refs／history／params／check；P1 events／fold／evwrite／defs／sources／paths／props／propfiles／card／status／scan／export／evcheck／fetch／research／writeverbs），tools/tests/test_selfimproving_*.py 經 selfimproving.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/selfimproving.py"  # SelfImproving P0／P1：CLI 薄殼（13 個動詞），tools/tests/test_selfimproving_*.py 直接 import
       # OBS-SI-110 (iii)／OBS-SI-215：tools/tests/test_selfimproving_*.py 與 test_root_module_layout.py 直接讀取下列文件與協定資料

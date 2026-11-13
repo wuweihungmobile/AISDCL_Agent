@@ -138,6 +138,24 @@ def _locate(state: dict, relay_seq: int, log: object = None) -> tuple[dict | Non
     return (first_assistant_usage_after(source, anchor), "") if anchor else (None, "no-anchor")
 
 
+def last_cost(session_id: str, path: Path | None = None) -> int | None:
+    """唯讀：成本帳該 sid **最近一筆**的 `cache_creation_input_tokens`（R3 資料源，sessionctl D2）。
+
+    取「上次續跑」那一列（檔案順序最後者），不取最大／平均；該列沒量到（None／非 int）、
+    無該 sid 的列、檔不在／讀不動 ⇒ `None`（量不到≠不貴——呼叫端不觸發 R3）。不寫檔。
+    """
+    target = path or endurance_env.trace_dir() / RECORD_NAME
+    last: object = None
+    with contextlib.suppress(OSError), Path(target).open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if session_id in line:
+                with contextlib.suppress(ValueError, AttributeError):
+                    rec = json.loads(line)
+                    if rec.get("session_id") == session_id:
+                        last = rec.get("cache_creation_input_tokens")
+    return last if type(last) is int else None
+
+
 def record_window(state: dict, path: Path | None = None, log: object = None) -> dict:
     """settle_window 的單一接線點：量本窗首個請求並落一行；永不拋（旁路落帳不得讓收窗失敗）。"""
     sid, seq, stamp = str(state.get("session_id") or ""), None, ""

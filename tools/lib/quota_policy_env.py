@@ -125,6 +125,29 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # choose_resume_route() os.environ 直讀（attr=None 不進 Policy）；選值見 Resume 證據檔 §2。
     EnvVar("AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES", None, None, "int", 1.0, None,
            "喚醒選路：逐字稿超此位元組數即降級 FRESH（留空＝內建 32MiB）", "policy"),
+    # 🔴 sessionctl（ADR-XPLAT-004 §2.13，WP1）：成本選路 R1～R3、過期 session、續棒閘、
+    # 交接包與名冊門檻。消費端＝`tools/lib/sessionctl/switch.py`（`attr=None`，同上一鍵判例）。
+    # R1～R3 與 RESUME_AGENT_TOKENS **只准下修**：覆寫值大於出廠值就退回出廠值並出聲
+    # （放寬＝退回 E1 事故）。
+    EnvVar("AUTOSDD_SWITCH_R1_CTX_TOKENS", None, 250000, "int", 1.0, None,
+           "切新 session R1：續跑前上下文達此 token 數 ⇒ 改開新 session（只准下修）", "policy"),
+    EnvVar("AUTOSDD_SWITCH_R2_COMPACTIONS", None, 2, "int", 1.0, None,
+           "切新 session R2：逐字稿已壓縮達此次數 ⇒ 改開新 session（只准下修）", "policy"),
+    EnvVar("AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS", None, 100000, "int", 1.0, None,
+           "切新 session R3：上次續跑首回合寫入快取達此 token 數 ⇒ 改開新 session"
+           "（只准下修）", "policy"),
+    EnvVar("AUTOSDD_STALE_SESSION_HOURS", None, 24, "int", 1.0, None,
+           "過期 session：閒置達此小時數且同專案有更新的 session 做過事 ⇒ 不續跑、"
+           "哨兵自我解除", "policy"),
+    EnvVar("AUTOSDD_RESUME_AGENT_TOKENS", None, 150000, "int", 1.0, None,
+           "續棒成本閘：SendMessage 目標代理上下文達此 token 數 ⇒ 無人窗口阻斷"
+           "（只准下修）", "policy"),
+    EnvVar("AUTOSDD_HANDOFF_TTL_HOURS", None, 72, "int", 1.0, None,
+           "交接包公告的存活小時數（逾時不再於 SessionStart 出聲）", "policy"),
+    EnvVar("AUTOSDD_ROSTER_QUIET_MINUTES", None, 10, "int", 1.0, None,
+           "名冊：背景代理超過此分鐘數無新記錄 ⇒ 標為「安靜」", "policy"),
+    EnvVar("AUTOSDD_SESSION_SWITCH_MODE", None, "auto", "str", None, None,
+           "互動視窗自動切換 session：auto（出聲＋可 spawn）／notify（只出聲）／off", "policy"),
     # 🔴 v2.1.13 G3（PRD_Amendment_R113_WakeChain_LastMile.md §3(c)）：接力狀態機的
     # 兩個常數。消費端＝`tools/lib/relay_machine.py`（`attr=None`：不進 `Policy`，那支
     # 檔自己讀 `os.environ`，同 `AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES` 既有判例）。

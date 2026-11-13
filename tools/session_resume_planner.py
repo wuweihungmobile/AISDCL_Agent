@@ -100,6 +100,7 @@ import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活�
 import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
+from lib.sessionctl import switch  # noqa: E402  # WP0：選路與過期判準的家
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -608,7 +609,7 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: float | None,
-                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None, driver: dict | None = None) -> dict:  # noqa: E501
+                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None, driver: dict | None = None, stale: dict | None = None) -> dict:  # noqa: E501
     """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
 
     🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
@@ -623,6 +624,10 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
     DEF-200-560／562：`idle_seconds` 一律是**對話**靜止秒數（`transcript_activity`，
     非檔案 mtime）；`grace`＝未處理的 harness 寬限提示（`unhandled_grace_note`）。優先序＝
     撞線事件 ＞ halt 標記 ＞ 寬限提示 ＞ idle；`grace=None` 時既有五分支逐位元組同行為。
+    sessionctl WP2（D3）：`stale`＝本 session 已閒置逾 `STALE_SESSION_HOURS` 且同專案更新的
+    session 於其後有真實活動（`switch.superseded_by`）；有 ⇒ 排在撞線分支**之前**（月度上限
+    escalate 仍先；E2 那支 waiting 哨兵醒來時撞線事件仍「未處理」，排在後面永遠輪不到）判
+    `disarm`＋`state=superseded`；`stale=None` 逐位元組同舊行為。
     DEF-200-564：`driver`＝撞線事件之後另一駕駛的對話記錄（`transcript_activity.live_driver`，
     一個巡邏間隔內仍有動靜）；有 ⇒ 撞線分支在 reset 判斷**之前**先 patrol（由它接手，不花探測、
     不 spawn 第二個駕駛）；月度上限仍 escalate（錢的事人才能解）；`driver=None` 逐位元組同舊行為。
@@ -630,6 +635,7 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
             return {"action": "escalate", "at": None, "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}  # noqa: E501
+        if stale: return switch.stale_verdict(stale)  # noqa: E701 — sessionctl WP2：過期 session 不續跑（優先於撞線分支，LIMIT_SPEND 除外）
         if (v := transcript_activity.driver_verdict(event, driver, now)) is not None: return v  # noqa: E501,E701 — DEF-200-564
         reset_at = guard.parse_reset_at(event["text"], local_time(event["timestamp"], now.tzinfo) or now)  # noqa: E501
         if reset_at is None:
@@ -1088,88 +1094,24 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     return 0
 
 
-#: ── R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）─────────────────────────────
-#: `-r <sessionId>` 的前提是逐字稿可用；缺檔／為空／超上限時整條喚醒鏈此前**沒有退路**
-#: （指令直接失敗且靜默）。降級目標＝FRESH_SESSION_WITH_STATE：不帶 `-r` 的全新
-#: session，state 由磁碟任務書交棒（〈可重啟點四條件〉第 2 條本來就要求它落盤）。
-#: 上限預設 32MiB 是量出來的：本機 ~/.claude/projects/ 全量 1,108 支 .jsonl，
-#: p50=403KB、p99=3.1MB、max=6.0MB ⇒ 32MiB 只攔病態值（≈觀測 max 的 5 倍）——假降級
-#: 會把可用的 session context 丟掉，判準刻意窄。量測逐字與選值理由住
-#: docs/06_quality/CrossPlatform_R95_Resume_Strategy_Evidence.md §2。
-#: 🔴 ENV 以 `os.environ` 直讀（消費端住本檔）；`quota_policy.ENV_SPEC` 的宣告列已由
-#: R95 收尾窗口補上（attr=None ⇒ 不進 Policy——宣告面與消費面刻意分居兩檔）。
-RESUME_MAX_TRANSCRIPT_ENV = "AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES"
-RESUME_MAX_TRANSCRIPT_DEFAULT = 32 * 1024 * 1024
-STRATEGY_RESUME = "SESSION_RESUME"
-STRATEGY_FRESH = "FRESH_SESSION_WITH_STATE"
-STRATEGY_REFUSE = "REFUSE"
-#: 兩條路共用的護欄尾段（重驗＋禁 commit/push）。住常數而不是兩處各自內嵌：降級路
-#: 少帶護欄句＝FRESH 那一跑比 RESUME 少一層約束，而漏帶是靜默的。
-_RESUME_RULES = ("🔴 第一件事是重驗，不採信該檔任何「已通過」宣稱。遵守第 4 節〈禁止事項〉。任務書 §3 為 TODO 時，先讀 handback 與記憶檔〈可重啟點〉再行動。"  # noqa: E501 — DEF-200-567：只加一句指引，不含任何指令內容
-                 "🔴 本回合無人看管，禁止 commit／push"
-                 "（已由 PreToolUse 守衛硬擋，不是請求）——改動留在工作樹讓人回來收。🔴 收窗前必寫 handback 檔（路徑由 prompt 注入），四節齊備：## 做了什麼／## 驗了什麼（附實測 rc）／## 卡在哪／## 下一步指令。" f"🔴 本回合是無頭 print 模式（claude -p）：收尾回合後 harness 最多再等背景任務（子代理／背景 shell）{unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS // 60} 分鐘，逾時全部停掉、成果歸零 ⇒ 派棒總預算必須小於它、每棒邊做邊把成果寫進 handback 目錄；等待期間不要自造輪詢迴圈。")  # noqa: E501 — v2.1.13 G2 批 (b)：收尾義務句行內擴寫（planner LOC 餘裕 1，不開新行）；DEF-200-575：背景等待上限告知句（數字取同源常數，同行不開新行）
+# 🔴 WP0（sessionctl，ADR-XPLAT-004 §2.13.1）：喚醒選路本體（RESUME／FRESH／REFUSE、逐字稿上限、
+# `_RESUME_RULES`、R1～R4 成本規則）搬進 `tools/lib/sessionctl/switch.py`——本檔 `guardrail_cli` LOC
+# 餘裕只剩 2 行，新判準不可能長在這裡。以下只留**同名委派**與公開名稱（測試與 probe 對
+# `planner.choose_resume_route`／`planner.STRATEGY_*`／`planner._RESUME_RULES` 的引用不動）。
+STRATEGY_RESUME = switch.STRATEGY_RESUME
+STRATEGY_FRESH = switch.STRATEGY_FRESH
+STRATEGY_REFUSE = switch.STRATEGY_REFUSE
+RESUME_MAX_TRANSCRIPT_ENV = switch.RESUME_MAX_TRANSCRIPT_ENV
+RESUME_MAX_TRANSCRIPT_DEFAULT = switch.RESUME_MAX_TRANSCRIPT_DEFAULT
+_RESUME_RULES = switch.RESUME_RULES
+_transcript_cap = switch._transcript_cap
 
 
-# m5（R95 修復包）：ENV 病態值（非整數字串／零／負值）此前直接 `int()` 炸在喚醒路徑上
-# ——那正是「無人看管、沒有人看 stderr」的一跑。退回內建預設並出聲一次，比照「量不到
-# ≠不設限」慣例；空字串＝未設，走預設不出聲（`or` 語意本來就如此，不是病態值）。
-def _transcript_cap() -> tuple[int, str]:
-    """ENV 上限解析：回 `(limit, note)`；`note` 非空＝病態值已退回預設（呼叫端進 reason）。"""
-    raw = str(os.environ.get(RESUME_MAX_TRANSCRIPT_ENV) or "").strip()
-    try:
-        val = int(raw) if raw else RESUME_MAX_TRANSCRIPT_DEFAULT
-    except ValueError:
-        val = 0
-    if val >= 1:
-        return val, ""
-    note = (f"{RESUME_MAX_TRANSCRIPT_ENV}={raw!r} 是病態值（非正整數）⇒ 退回預設 "
-            f"{RESUME_MAX_TRANSCRIPT_DEFAULT:,}B")
-    print(f"⚠️ {note}", file=sys.stderr)
-    return RESUME_MAX_TRANSCRIPT_DEFAULT, note
-
-
-# 🔴 選路近乎純函式（stat 一次逐字稿，不 spawn；m5 起病態 ENV 會印一行 stderr，那是出聲
-# 不是副作用升級；G2 起另有一次**冪等 mkdir**——handback 目錄解析經 resume_route→
-# endurance_env，「不寫檔」的舊宣稱已據實訂正）：四種輸入態都要能在測試裡注入。
-# 方向鎖：降級只准 RESUME→FRESH 單向——逐字稿可用且 `weekly` 為空時**必須**回 SESSION_RESUME
-# （把可用的 session context 丟掉＝資訊損失），且 FRESH 的 argv 不得帶 `-r`。任務書缺席＝REFUSE：
-# 兩條路的 prompt 都指向任務書，它缺席時派出去的是一個空承諾（R59 事故同形），呼叫端
-# 必須 fail-loud，不得靜默派空 prompt。argv 順序（prompt 必在 `--add-dir` 之前，且
-# --add-dir 後只能有一個值）的立案見 `_run_resume` 上方 R80 段與姊妹鎖
-# test_the_variadic_add_dir_does_not_swallow_the_prompt。
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                         plan_path: str, max_bytes: int | None = None, weekly: str = "") -> dict:
-    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。
-
-    🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：此前有一個 `followup_ok` 參數
-    （＝INV3「前一窗確實起來」的判準結果，往下傳成 `resume_argv(allow_followup=…)`），
-    連同 INV2 一併移除——無人續跑一旦確認 spawn 成功即與互動 session 同等信任，不分窗次。
-    兩路的 argv 因此只差 `-r <session_id>`，權限姿態逐字相同。
-    `weekly`＝週軸已達 converge 帶的理由（PRD §4.5.4；`resume_route.weekly_why()` 取數、呼叫端
-    注入）：非空 ⇒ 逐字稿可用也降級 FRESH（省額度優先），空＝不強制。
-    """
-    plan = Path(str(plan_path or ""))
-    if not plan.is_file():
-        return {"strategy": STRATEGY_REFUSE, "argv": None,
-                "reason": f"任務書不存在：{plan_path!r}——state 交棒載體缺席，RESUME 與 "
-                          "FRESH 兩條路都無法成立 ⇒ 拒絕武裝（不得靜默派空 prompt）"}
-    limit, cap_note = (max_bytes, "") if max_bytes is not None else _transcript_cap()
-    suffix = f"；{cap_note}" if cap_note else ""
-    # G2：交接檔路徑在**這裡**算一次（prompt 注入與 `_run_resume` 後檢共用 route["handback"]
-    # 同一份字串）；解析經 resume_route→endurance_env（冪等 mkdir，見上方純函式註記的訂正）。
-    # session id 缺席（FRESH 降級因之一）時退 plan.stem——任務書檔名本就以 sid 命名。
-    hb = resume_route.handback_report(str(session_id or "") or plan.stem)
-    size = transcript.stat().st_size if (transcript and transcript.is_file()) else None
-    if session_id and size and size <= limit and not weekly:
-        return {"strategy": STRATEGY_RESUME, "handback": str(hb),
-                "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
-                # v2.1.13 G1：argv 組裝（含 --permission-mode/--settings 權限姿態旗標）
-                # 下沉 tools/lib/resume_route.py——兩路同一份真相，旗標不可能只補到一路。
-                "argv": resume_route.resume_argv(claude, str(session_id), f"讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
-    why = resume_route.fresh_why(session_id, size, limit, weekly)
-    return {"strategy": STRATEGY_FRESH, "handback": str(hb),
-            "reason": f"{why} ⇒ 降級開全新 session，state 由磁碟任務書交棒{suffix}",
-            "argv": resume_route.fresh_argv(claude, f"按磁碟任務書繼續：讀 {plan}，照它第 3 節做。{_RESUME_RULES}🔴 handback 檔路徑＝{hb}", plan.parent)}  # noqa: E501
+    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None。本體＝`switch.choose_resume_route`。"""  # noqa: E501
+    return switch.choose_resume_route(claude, session_id, transcript, plan_path, max_bytes, weekly,
+                                      guard=guard)
 
 
 # 真的開一個無人看管的模型回合（R79 起**預設開啟**，見上方 Auto Pilot 區塊的 WHY 與
@@ -1297,6 +1239,9 @@ def _resume_tick(args) -> int:
     problems = relay_problems(state)
     if problems:
         return _abort_and_unregister(log, args.task_name, "；".join(problems), "aborted", "❌ 狀態塊體檢不過：\n  - " + "\n  - ".join(problems))  # noqa: E501
+    # sessionctl WP2（D3）：`-Once` 續航路不經 `sentinel_decide`——探測額度**之前**套同一個判準
+    # （命中＝不探測、不 spawn）。
+    if (stale := switch.stale_for(Path(str(state.get("transcript") or "")), str(state["session_id"]), datetime.now().astimezone(), project_transcript_dir(_REPO_ROOT))): return switch.settle_superseded(plan, state, switch.stale_verdict(stale), log, append_log, _schtasks_remove, _write_relay_best_effort, _cleared_credentials())  # noqa: E501,E701
 
     # DEF-200-516：被叫醒 ≠ 時刻已到（launchd 的 `StartInterval` 會早於 calendar 叫醒本 tick）。
     # reset 還沒到 ⇒ 不探測、不 spawn、不動計數，依 reset 重掛等待（PRD §4.5.10「去等一個事件」）。
@@ -1506,9 +1451,10 @@ def _sentinel_tick(args) -> int:
     fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
     idle, grace = transcript_activity.conversation_view(transcript, now); driver = transcript_activity.live_driver(transcript, now, event) if event else None  # noqa: E501,E702 — DEF-200-560／562；DEF-200-564：撞線事件之後另一駕駛（一個巡邏間隔內仍在動）
     halt = quota_gate.read_halt_marker(sid := state.get("session_id") or "")
-    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver)  # noqa: E501
+    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver, stale=switch.stale_for(transcript, sid, now, project_transcript_dir(_REPO_ROOT)))  # noqa: E501
     append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, driver_after=driver, anchor={"timestamp": event["timestamp"], "source": "limit_event"} if event else None, plan_in_temp=plan.parent.resolve() == Path(tempfile.gettempdir()).resolve(), **fan)  # noqa: E501 — DEF-200-566：修前武裝的哨兵任務書仍在系統暫存 ⇒ 痕跡出聲（不自動搬）
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
+    if decision.get("state") == "superseded": return switch.settle_superseded(plan, state, decision, log, append_log, _schtasks_remove, _write_relay_best_effort, _cleared_credentials())  # noqa: E501,E701 — sessionctl WP2（D3）：過期 session 不續跑、自我解除
     if decision["action"] == "probe":
         # 🔴 交棒給既有的續航機器，不另寫一份：`--resume-tick` 已經有探測、`tick_plan`
         # 判定、重排／硬停、終態收掉排程的完整實作。它重排時掛的是 `--resume-tick`，

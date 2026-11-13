@@ -59,7 +59,9 @@ GC_IDLE_SECONDS = 6 * 3600.0
 #: 🔴 R97（round-label-ok：非帳本追蹤的正式輪，僅沿用便於追蹤的標籤）：`resume_failed`＝`_run_resume()` 的 `subprocess.run` 本身炸掉（例外，不是  # noqa: E501
 #: `claude` 自己的非零 rc）——同 `resumed` 一樣不會再被重試（`-Once` 觸發器已燒過），
 #: 故同屬終態；漏列會讓 GC 把它誤判成「可能還在等額度」而永遠不收。
-TERMINAL_STATES = frozenset({"disarmed", "abandoned", "resumed", "resume_failed", "done"})
+#: sessionctl WP2：`superseded`＝過期 session 被同專案更新的 session 接手
+#: （`switch.settle_superseded`）。
+TERMINAL_STATES = frozenset({"disarmed", "abandoned", "resumed", "resume_failed", "done", "superseded"})  # noqa: E501
 
 #: 「閒置夠久就可以收」的狀態集合＝終態 ＋ **巡邏中**（`armed`／`sentinel`）。
 #: 🔴 為什麼巡邏中的也算（本輪實跑 dry-run 才發現第一版漏了它）：一支 `armed` 的哨兵
@@ -238,8 +240,8 @@ def plan_state(plan: Path) -> str | None:
 
 
 def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
-                 state: str | None, protected: bool,
-                 min_idle: float = GC_IDLE_SECONDS) -> tuple[bool, str]:
+                 state: str | None, protected: bool, min_idle: float = GC_IDLE_SECONDS,
+                 superseded: bool = False) -> tuple[bool, str]:
     """純判準：這支哨兵可以收掉嗎。回 `(要不要收, 理由)`。
 
     順序即優先序，**最保守的先判**：
@@ -254,6 +256,9 @@ def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
       ⑤ 閒置達門檻 **且** 任務書是終態／根本讀不出來 ⇒ 收。
       ⑥ 其餘（閒置達門檻但狀態是 `waiting`／`sentinel`）⇒ **不收**：等額度的那段期間
          逐字稿本來就不會更新，這一格就是「不要在它最需要的時候把它拆掉」。
+         唯一例外＝`superseded`（sessionctl WP2）：呼叫端（`gc`，只對 `waiting` 才算）已判定
+         同專案有更新的 session 接手 ⇒ 收；判準本體只有 `switch.superseded_by` 一個家，
+         本函式不重寫。
 
     🔴 ② 是本輪 dry-run 當場抓到的**我自己寫的缺陷**，照實留在這裡當判例：第一版把
     `transcript_exists` 宣告成 `bool`，於是「逐字稿目錄定位不到」（`_transcript_dir()`
@@ -276,6 +281,8 @@ def reap_verdict(*, transcript_exists: bool | None, idle_seconds: float | None,
         return False, f"逐字稿仍活躍（閒置 {idle} < {min_idle / 3600:.0f}h）"
     if state is None or state in REAPABLE_WHEN_IDLE:
         return True, f"閒置 {idle_seconds / 3600:.1f}h 且任務書狀態＝{state or '讀不出來'}"
+    if superseded:
+        return True, f"閒置 {idle_seconds / 3600:.1f}h，任務書狀態＝{state}，但已被同專案更新的 session 接手（superseded）"  # noqa: E501
     return False, (f"閒置已久，但任務書狀態是 `{state}`（不在可收清單內）"
                    "⇒ 可能還在等額度，不收")
 
@@ -397,6 +404,17 @@ def _record_reap(plan: Path, **fields: object) -> str:
     return str(trace) if after > before else ""
 
 
+def _superseded(transcript: Path, sid: str) -> bool:
+    """`gc` 對 `waiting` 的哨兵才問：同專案是否有更新的 session 接手。判準唯一的家＝
+    `switch.superseded_by`（取 planner 已載入的同一個模組物件）；載不進來／例外 ⇒ `False`。"""
+    planner = _planner_module()
+    try:
+        return bool(planner and planner.switch.stale_for(
+            transcript, sid, planner.datetime.now().astimezone()))
+    except Exception:  # noqa: BLE001 — 量不到不收（量不到≠已接手）
+        return False
+
+
 def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
        min_idle: float = GC_IDLE_SECONDS, tmp_dir: str | None = None) -> list[dict] | None:
     """列出每支哨兵的處置；`apply=False`（預設）只看不動。`None`＝**列舉量不到**。
@@ -439,7 +457,8 @@ def gc(*, apply: bool = False, keep: tuple[str, ...] = (),
         idle = (now - transcript.stat().st_mtime) if exists else None
         reap, why = reap_verdict(transcript_exists=exists, idle_seconds=idle,
                                  state=state, protected=sid in protected_ids,
-                                 min_idle=min_idle)
+                                 min_idle=min_idle,
+                                 superseded=state == "waiting" and bool(exists) and _superseded(transcript, sid))  # noqa: E501
         row = {"task": task, "session_id": sid, "reap": reap, "why": why,
                "state": state, "idle_hours": None if idle is None else round(idle / 3600, 2)}
         if reap and apply:
@@ -521,8 +540,19 @@ def _leak_fence_jobs(backend) -> list[str] | None:
         return None
 
 
-def leak_fence(run):
-    """底線防護 ＋ **決定性**排程洩漏判死（M-04 A 面）。
+def _live_armed(labels: list[str], since: float, projects_dir: Path | None) -> list[str]:
+    """`labels` 裡屬於「真 session 在 `since` 之後有對話記錄」者（判準唯一的家＝
+    `transcript_activity`；只認哨兵前綴的 label，其餘一律不算）。讀不動 ⇒ 空（量不到不脫罪）。"""
+    import transcript_activity  # noqa: PLC0415 — lazy：圍籬是 CLI／測試側，hook 鏈不載入
+
+    sids = {session_of(label): label for label in labels if session_of(label)}
+    return sorted(sids[sid] for sid in transcript_activity.sessions_active_since(
+        list(sids), since, projects_dir))
+
+
+def leak_fence(run, projects_dir: Path | None = None):
+    """底線防護 ＋ **決定性**排程洩漏判死（M-04 A 面）。`projects_dir`＝逐字稿根目錄的注入縫
+    （預設 `claude_home()/projects`；測試不讀真實家目錄）。
 
     三件事，會讓 rc 變非零的只有第二件：
 
@@ -555,6 +585,7 @@ def leak_fence(run):
     jobs_before = _leak_fence_jobs(backend)
     tmp = Path(tempfile.gettempdir())
     before = set(tmp.glob("autosdd_*"))
+    started = time.time()
     rc = run()
     after = set(tmp.glob("autosdd_*"))
     jobs_after = _leak_fence_jobs(backend)
@@ -565,13 +596,24 @@ def leak_fence(run):
         for p in new_files:
             print(f"  {p}")
     leaked: list[str] = []
+    live: list[str] = []
     fence_rc = 0
     if jobs_before is None or jobs_after is None:
         print(f"[leak_fence] ⚠️  排程面**量不到**（載具＝{backend.name}）⇒ 本輪不判排程"
               "洩漏。不要把「量不到」讀成「沒有洩漏」。"
               f"現查：{backend.evidence_hint()}", file=sys.stderr)
     elif leaked := sorted(set(jobs_after) - set(jobs_before)):
-        fence_rc = 1
+        # 假陽性修正（sessionctl，2026-11-13 20:48 實證：`fence_rc:1` 的洩漏清單只有發起
+        # 全套的互動 session 自己的哨兵）：另一個**真** session 在全套跑到一半合法武裝＝它的
+        # 真實逐字稿在圍籬起點之後有對話記錄（`transcript_activity` 的尺）⇒ 只出聲、不判死；
+        # 測試種下的假 job 沒有真實逐字稿，照舊判死。
+        live = _live_armed(leaked, started, projects_dir)
+        leaked = [label for label in leaked if label not in live]
+        if live:
+            print(f"[leak_fence] ℹ️  新增的 {len(live)} 支哨兵屬於圍籬期間有真實對話記錄的 session"
+                  f"（合法武裝，只出聲、不判死）：{'、'.join(live)}")
+        fence_rc = int(bool(leaked))
+    if leaked:
         print(f"[leak_fence] ❌ 排程洩漏（決定性）：本次執行期間真排程器（載具＝"
               f"{backend.name}）多了 {len(leaked)} 支 {LEAK_FENCE_JOB_PREFIX}* 工作，"
               "且收尾時仍然在（沒有人收）⇒ 本次 rc 判非零：", file=sys.stderr)
@@ -584,7 +626,7 @@ def leak_fence(run):
               "new_temp_files": len(new_files), "carrier": backend.name,
               "jobs_before": None if jobs_before is None else len(jobs_before),
               "jobs_after": None if jobs_after is None else len(jobs_after),
-              "leaked_jobs": leaked, "fence_rc": fence_rc}
+              "leaked_jobs": leaked, "live_session_jobs": live, "fence_rc": fence_rc}
     try:
         path = endurance_env.trace_dir() / LEAK_FENCE_LOG_NAME
         with path.open("a", encoding="utf-8", newline="\n") as handle:

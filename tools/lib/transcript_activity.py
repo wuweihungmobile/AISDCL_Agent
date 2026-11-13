@@ -127,6 +127,33 @@ def newest_conversation_at(paths: list[Path]) -> float | None:
     return best
 
 
+def sessions_active_since(sids, since_epoch: float, projects_dir: Path | None = None) -> set[str]:
+    """這些 sid 裡，**真實**逐字稿（`<projects>/<slug>/<sid>.jsonl`，跨 slug 找）在
+    `since_epoch` 之後有對話記錄者（尺與 `newest_conversation_at` 同一把）。
+    `projects_dir` 缺省＝`claude_home()/projects`。
+
+    消費者＝`sentinel_lifecycle.leak_fence`（測試期間另一個真 session 合法武裝的哨兵不算洩漏）：
+    測試種下的假 sid 沒有真實逐字稿 ⇒ 不在回傳集合內；sid 含非 ASCII 英數／`-`／`_` 一律不查
+    （不讓它變成 glob 樣式）；目錄讀不動 ⇒ 空集合（量不到不替任何 job 脫罪）。
+    """
+    import platform_utils  # noqa: PLC0415 — lazy：只有圍籬這條冷路徑需要
+
+    root = projects_dir if projects_dir is not None else platform_utils.claude_home() / "projects"
+    found: set[str] = set()
+    for sid in sids:
+        if not (sid.replace("-", "").replace("_", "").isalnum() and sid.isascii()):
+            continue
+        try:
+            hits = [p for p in root.glob(f"*/{sid}.jsonl") if p.is_file()]
+        except OSError:
+            return set()
+        for path in hits:
+            stamp = newest_conversation_at(quota_limits.session_transcripts(path))
+            if stamp is not None and stamp > since_epoch:
+                found.add(sid)
+    return found
+
+
 def _driver_kind(record: dict) -> str:
     """非合成的對話記錄回其種類（`assistant`／`human`／`auto-continuation`）；其餘回 `""`。
 
