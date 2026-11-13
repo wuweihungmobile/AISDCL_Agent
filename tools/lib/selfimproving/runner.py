@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -276,15 +277,26 @@ def pid_started_at(pid: int) -> float | None:
         except Exception:  # noqa: BLE001  # 量不到＝None（呼叫端 fail-closed）
             return None
     try:
-        cp = subprocess.run(["ps", "-o", "etimes=", "-p", str(int(pid))], capture_output=True,
+        # `etime`（`[[DD-]hh:]mm:ss`）而非 `etimes`：macOS 的 BSD ps 沒有 `etimes` 欄位，
+        # procps（Linux）兩者皆有
+        cp = subprocess.run(["ps", "-o", "etime=", "-p", str(int(pid))], capture_output=True,
                             encoding="utf-8", errors="replace", timeout=20, shell=False,
                             check=False)
     except (OSError, subprocess.SubprocessError):
         return None
-    text = cp.stdout.strip()
-    if cp.returncode != 0 or not text.isdigit():
+    elapsed = _parse_etime(cp.stdout)
+    if cp.returncode != 0 or elapsed is None:
         return None
-    return time.time() - int(text)
+    return time.time() - elapsed
+
+
+def _parse_etime(text: str) -> int | None:
+    """`ps -o etime=` 的 `[[DD-]hh:]mm:ss`→秒；格式不符＝None。"""
+    m = re.fullmatch(r"\s*(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s*", text)
+    if m is None:
+        return None
+    days, hours, mins, secs = (int(g or 0) for g in m.groups())
+    return ((days * 24 + hours) * 60 + mins) * 60 + secs
 
 
 IDENTITY_TOLERANCE_SECONDS = 5  # 行程建立時間與 `spawn.json` 記的實測值允許的誤差（秒）

@@ -309,6 +309,22 @@ def _norm_hooks(path: str) -> str:
     return out.rstrip("/")
 
 
+def _same_dir(configured: str, expected: Path) -> bool:
+    """絕對路徑的 `core.hooksPath` 與既定 hooks 目錄是不是同一個實體目錄（經符號連結正規化後
+    相等；macOS 的 `/var`→`/private/var`、使用者把 repo 放在符號連結路徑下都屬此類）。相對路徑與
+    解析失敗一律不等。"""
+    text = configured.strip()
+    if re.match(r"^[\\/]{2}\?[\\/][A-Za-z]:", text):  # Windows 擴充長度前綴 `\\?\C:\…`（不含 UNC）
+        text = text[4:]
+    path = Path(text)
+    if not path.is_absolute():
+        return False
+    try:
+        return path.resolve() == expected.resolve()
+    except OSError:
+        return False
+
+
 def _norm_url(url: str) -> str:
     """遠端網址正規化：去 userinfo、結尾 `/` 與 `.git`、轉小寫（比對用）。"""
     url = re.sub(r"(://)[^/@\s]*@", r"\1", url.strip())
@@ -390,7 +406,8 @@ def config_problem(j, armed_doc: dict | None, env=None) -> tuple[str, str] | Non
             bad.append(shown)
     want = _norm_hooks(si_git.EXPECTED_HOOKS)
     absolute = _norm_hooks(str(j.g.repo / si_git.EXPECTED_HOOKS))  # 安裝腳本寫的是絕對路徑
-    if len(hooks) != 1 or hooks[0].lower() not in (want.lower(), absolute.lower()):
+    if len(hooks) != 1 or not (hooks[0].lower() in (want.lower(), absolute.lower())
+                               or _same_dir(hooks[0], j.g.repo / si_git.EXPECTED_HOOKS)):
         bad.append("core.hookspath")  # 不存在、重複或不等於既定目錄，一律不合
     if bad:
         return CODE_CONFIG, " ".join(sorted(set(bad))[:3])

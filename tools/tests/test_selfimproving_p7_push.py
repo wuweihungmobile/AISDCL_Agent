@@ -1340,6 +1340,7 @@ class TestLockAndWall(RunTestCase):
         sha2 = rr2.patrol().sha
         nap = [sys.executable, "-c", "import time; time.sleep(30)"]
         wants = "job-unavailable:boom taskkill-fallback:boom"
+        posix = "killpg"  # POSIX：行程自成群組、整群 SIGKILL，note 如實報告所用手法
         for patched, want in ((None, "job-terminated"), ((None, "boom"), wants)):
             t1 = time.monotonic()
             with (mock.patch.object(runner, "_job_open", return_value=patched) if patched
@@ -1347,7 +1348,8 @@ class TestLockAndWall(RunTestCase):
                 res = runner.run_argv(nap, env=dict(os.environ), timeout=1)
             self.assertTrue(res.timed_out)
             self.assertLess(time.monotonic() - t1, 1 + runner.KILL_GRACE_SECONDS)
-            self.assertEqual(res.note, want if sys.platform == "win32" else "")  # 可查字樣、不靜默
+            # 可查字樣、不靜默
+            self.assertEqual(res.note, want if sys.platform == "win32" else posix)
         self.require_sleep_tool()
         tag, wall = "27.31", 3
         started = fx.new_dir("hookstarted")
@@ -1364,12 +1366,21 @@ class TestLockAndWall(RunTestCase):
                 stop.wait(0.5)
         watcher = threading.Thread(target=watch, daemon=True)
         watcher.start()
-        t0 = time.monotonic()
+        spans: list[float] = []  # 牆鐘那一次 `run_argv` 自己的耗時（不含守門的 git 呼叫與收尾）
+        real_run = runner.run_argv
+
+        def timed(*a, **kw):
+            t_in = time.monotonic()
+            try:
+                return real_run(*a, **kw)
+            finally:
+                if kw.get("timeout") == wall:
+                    spans.append(time.monotonic() - t_in)
         try:
-            with mock.patch.object(patrolpush, "WALL_SECONDS_OVERRIDE", wall):
+            with (mock.patch.object(patrolpush, "WALL_SECONDS_OVERRIDE", wall),
+                  mock.patch.object(runner, "run_argv", timed)):
                 rc, out = patrolpush.run(rr2.R, now=NOW)
         finally:
-            elapsed = time.monotonic() - t0
             stop.set()
             watcher.join(5)
         survivors = sleeper_pids(tag)
@@ -1382,7 +1393,10 @@ class TestLockAndWall(RunTestCase):
         self.assertTrue(seen, "測試載具沒看到 hook 的孫行程（sleep），鑑別力不成立")
         self.assertEqual(survivors, [], "逾時後孫行程仍在")  # (i) 整棵樹都被收掉
         grace = getattr(runner, "KILL_GRACE_SECONDS", 5)
-        self.assertLess(elapsed, wall + grace, "run_argv 沒在逾時＋寬限內返回")  # (ii)
+        # (ii) 量 run_argv 自己：整段 patrolpush.run 還含守門的數十次 git 呼叫（共用 runner 上
+        # 這部分不受本實作控制）；砍樹沒生效時 run_argv 會再等滿 grace，必 ≥ wall + grace
+        self.assertEqual(len(spans), 1, spans)
+        self.assertLess(spans[0], wall + grace, "run_argv 沒在逾時＋寬限內返回")
         self.assertNotEqual(self.remote_main(rr2), sha2)
         self.normal_completion_leaves_background_alone()  # (iii)
 
@@ -1857,8 +1871,15 @@ class TestOsTasks(RunTestCase):
         fx.set_params(R, sched_auto_push=push)
         return R
 
+    @contextlib.contextmanager
     def win(self):
-        return mock.patch.object(schedarm.sys, "platform", "win32")
+        """把 `sys.platform` 偽成 win32（`schedarm.sys` 即全域 `sys`）；`resolve_git` 依該值改找
+        `git.com`／`.exe`…，在 POSIX 上會解析不到 git 而讓 arm 誤報設定讀取失敗，所以先解析真實
+        git 再釘住：本組要驗的是排程註冊流程，不是 git 的尋找。"""
+        real_git = si_git.resolve_git(os.environ)
+        with mock.patch.object(schedarm.sys, "platform", "win32"), \
+                mock.patch.object(si_git, "resolve_git", return_value=real_git):
+            yield
 
     def arm(self, R, fake, **kw):
         with self.win(), mock.patch.dict(os.environ, self.ENV):
@@ -3213,6 +3234,23 @@ class TestSecRound3(RunTestCase):
         self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
         fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
 
+    @unittest.skipUnless(sys.platform == "win32", "[WINDOWS-NATIVE-ONLY] 8.3 短檔名與長度前綴")
+    def test_AT_749_5_E_2_c_hooks_path_in_windows_alias_forms_is_the_same_directory(self):
+        import ctypes
+        rr = self.prr()
+        rr.patrol()
+        hooks = rr.R / si_git.EXPECTED_HOOKS
+        buf = ctypes.create_unicode_buffer(1024)
+        ctypes.windll.kernel32.GetShortPathNameW(str(rr.R), buf, 1024)
+        forms = [str(Path(buf.value) / si_git.EXPECTED_HOOKS),  # 8.3 短名（runner 的 RUNNER~1）
+                 "\\\\?\\" + str(hooks), str(hooks).upper(), str(hooks).replace("\\", "/")]
+        for form in forms:
+            fx.git(rr.R, "config", "core.hooksPath", form)
+            self.assertTrue(rr.evaluate()["ok"], form)  # 解析後同一目錄＝接受
+        fx.git(rr.R, "config", "core.hooksPath", str(rr.R / "elsewhere"))
+        self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
+        fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
+
     def test_AT_749_6_E_12_the_guard_reads_the_real_objects_even_with_detection_off(self):
         rr, h, patrol, _base = self.replaced_repo()
         shown = lambda **kw: self.real_git(rr, "show", "-s", "--format=%s", h, **kw)  # noqa: E731
@@ -3306,7 +3344,9 @@ class TestSecRound3(RunTestCase):
                    | set(si_git.ENV_TEST_PASSTHROUGH) | set(si_git._PUSH_AUTOSDD))  # noqa: SLF001
         for env in envs:
             fold = (lambda k: k.upper()) if plat == "win32" else (lambda k: k)
-            self.assertEqual({k for k in env if fold(k) not in allowed}, set())
+            lc = () if plat == "win32" else si_git._ENV_PREFIX["posix"]  # noqa: SLF001  # LC_* 前綴
+            self.assertEqual({k for k in env if fold(k) not in allowed
+                              and not k.startswith(lc)}, set())
         # 結構鎖：git 子行程的 env 引數來源只有 env_for_git（直接、或經 push_env／self._env）
         calls = []
         for name in ("git.py", "patrolpush.py"):
@@ -3454,8 +3494,13 @@ class TestSecRound3(RunTestCase):
         gmark = marker / "gpg_ran"
         gpg.write_text(f"import sys\nopen(r'{gmark}', 'a').write('x')\nsys.exit(1)\n",
                        encoding="utf-8")
-        gcmd = prog / "fakegpg.cmd"
-        gcmd.write_text(f'@"{sys.executable}" "{gpg}" %*\r\n', encoding="utf-8")
+        if os.name == "nt":  # 假驗章程式：Windows 用 .cmd、POSIX 用有執行位的 sh 腳本
+            gcmd = prog / "fakegpg.cmd"
+            gcmd.write_text(f'@"{sys.executable}" "{gpg}" %*\r\n', encoding="utf-8")
+        else:
+            gcmd = prog / "fakegpg"
+            gcmd.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{gpg}" "$@"\n', encoding="utf-8")
+            gcmd.chmod(0o755)
         tree = fx.git(rr.R, "rev-parse", "HEAD^{tree}")
         raw = (f"tree {tree}\nauthor t <t@x> 1700000000 +0000\ncommitter t <t@x> 1700000000 +0000\n"
                "gpgsig -----BEGIN PGP SIGNATURE-----\n \n abc\n -----END PGP SIGNATURE-----\n\n"
