@@ -108,10 +108,16 @@ _ENV_PREFIX = {"win32": (), "posix": ("LC_",)}
 #: 只在 push profile（pre-push 閘門要用的變數）：名稱、前綴（前綴另排除名稱含下列字樣者：無人值守
 #: 自述、運轉範圍、稽核金鑰；整個套件讀前兩個變數名的站點只有 `unattended.py`，這裡只用字樣）
 _PUSH_NAMES = ("PYTHONUTF8", "PYTHONIOENCODING")
-_PUSH_PREFIX = "AUTOSDD_"
-_PUSH_EXCLUDE_WORDS = ("UNATTENDED", "PATROL_RUN", "AUDIT_KEY")
-#: 固定值（覆寫）；各 profile 另加
-ENV_FIXED = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_ATTR_NOSYSTEM": "1"}
+#: push profile 的 `AUTOSDD_*` 逐一列名（E-67；不再前綴放行）：pre-push 閘門實際讀的變數＝
+#: 序列腿數、平行測試工作數、headless CPU 預算旗標、事件根目錄；其餘（含無人值守自述、運轉範圍、
+#: 稽核金鑰）一律不傳
+_PUSH_AUTOSDD = ("AUTOSDD_PREPUSH_SERIAL_LEGS", "AUTOSDD_PARALLEL_TESTS_WORKERS",
+                 "AUTOSDD_CPU_HEADLESS", "AUTOSDD_SI_DIR")
+#: 固定值（覆寫）；各 profile 另加。`GIT_GRAFT_FILE` 指向本模組檔案底下的路徑＝父層是一般檔案，
+#: 任何行程都建不出它 ⇒ `info/grafts` 失效（E-66；暫存目錄下的路徑可被同一使用者預建，不用）
+NO_GRAFTS = str(Path(__file__).resolve() / "grafts")
+ENV_FIXED = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_ATTR_NOSYSTEM": "1",
+             "GIT_GRAFT_FILE": NO_GRAFTS}
 _PROFILE_FIXED = {"read": {"GIT_OPTIONAL_LOCKS": "0"}, "push": {"GCM_INTERACTIVE": "never"}}
 #: 測試縫：額外放行的變數名（測試夾具用它把 `GIT_CONFIG_GLOBAL` 等隔離變數傳給 git）；正式環境恆空
 ENV_TEST_PASSTHROUGH: tuple[str, ...] = ()
@@ -128,7 +134,7 @@ def env_for_git(parent, profile: str, *, platform: str | None = None,
     plat = "win32" if win else "posix"
     names = set(ENV_ALLOW[plat]) | {n.upper() if win else n for n in extra}
     if profile == "push":
-        names |= set(_PUSH_NAMES)
+        names |= set(_PUSH_NAMES) | set(_PUSH_AUTOSDD)  # win32 的 kk 已轉大寫，名稱本就是大寫
     out: dict[str, str] = {}
     path_value = ""
     for key, value in parent.items():
@@ -136,9 +142,6 @@ def env_for_git(parent, profile: str, *, platform: str | None = None,
         if kk == "PATH":
             path_value = value
         elif kk in names or kk.startswith(_ENV_PREFIX[plat]):
-            out[key] = value
-        elif (profile == "push" and kk.startswith(_PUSH_PREFIX)
-              and not any(w in kk for w in _PUSH_EXCLUDE_WORDS)):
             out[key] = value
     segments = []
     try:
@@ -197,7 +200,6 @@ CONFIG_RULES: tuple[Rule, ...] = (
     Rule(r"http\.sslcapath", LOCAL_LAYERS, _any),
     Rule(r"http\.sslbackend", LOCAL_LAYERS, _any),
     Rule(r"http\.proxy", LOCAL_LAYERS, _any),
-    Rule(r"http\..+\.proxy", LOCAL_LAYERS, _any),
     # ── 甲
     Rule(r"core\.hookspath", LOCAL_LAYERS, _any, (("core.hooksPath", "<hooks>"),)),
     Rule(r"core\.fsmonitor", LOCAL_LAYERS, lambda s, v: v.strip().lower() not in ("false", ""),
@@ -223,6 +225,10 @@ CONFIG_RULES: tuple[Rule, ...] = (
     Rule(r"remote\..+\.pushurl", None, _any),
     Rule(r"remote\..+\.proxy", None, _any),
     Rule(r"remote\..+\.vcs", None, _any),
+    # 網址限定的 http 鍵（`http.<網址>.<變數>`，全部變數）與 `http.curloptResolve`：前者能讓甲類
+    # `http.sslVerify=true` 的釘定對特定網址失效、後者能把主機名指到別的位址（E-65）
+    Rule(r"http\..+\..+", None, _any),
+    Rule(r"http\.curloptresolve", None, _any),
 )
 #: 行程環境中任一存在即不合的變數（`detail`＝`env:<名>`）
 ENV_RULES = re.compile(r"^GIT_CONFIG_(?:COUNT|PARAMETERS|KEY_.*|VALUE_.*)$")
@@ -230,7 +236,7 @@ ENV_RULES = re.compile(r"^GIT_CONFIG_(?:COUNT|PARAMETERS|KEY_.*|VALUE_.*)$")
 #: 釘定的單一鍵（其餘乙類鍵以原鍵名釘定）
 RECORDED_PATTERN = re.compile(
     r"credential\..+|core\.sshcommand|core\.attributesfile|filter\..+|http\.sslcainfo"
-    r"|http\.sslcapath|http\.sslbackend|http\.proxy|http\..+\.proxy")
+    r"|http\.sslcapath|http\.sslbackend|http\.proxy")
 PINNABLE = {"http.sslcainfo": "http.sslCAInfo", "http.sslcapath": "http.sslCAPath",
             "http.sslbackend": "http.sslBackend", "core.sshcommand": "core.sshCommand",
             "http.proxy": "http.proxy", "core.attributesfile": "core.attributesFile"}
@@ -276,6 +282,12 @@ def _is_recorded(key: str) -> bool:
     return RECORDED_PATTERN.fullmatch(key.lower()) is not None
 
 
+def _is_http_scoped(key: str) -> bool:
+    """丙類的網址限定 http 鍵（`http.<網址>.<變數>`）或 `http.curloptResolve`（E-65）。"""
+    low = key.lower()
+    return low == "http.curloptresolve" or re.fullmatch(r"http\..+\..+", low) is not None
+
+
 def _is_helper(key: str) -> bool:
     return key.startswith("credential.") and key.rsplit(".", 1)[-1] == "helper"
 
@@ -301,6 +313,8 @@ def arm_record(repo: Path) -> tuple[dict | None, str]:
         return None, "git 設定讀取失敗"
     pins: dict[str, list[str]] = {}
     for scope, key, val in parse_config_list(cp.stdout):
+        if _is_http_scoped(key):  # 丙類：任何層出現即拒（E-65）
+            return None, _shown(key)
         if not _is_recorded(key):
             continue
         val = val.strip()

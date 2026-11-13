@@ -57,6 +57,7 @@ from lib.selfimproving import (
     unattended,
 )
 from lib.selfimproving import git as si_git
+from lib.selfimproving import manifest as si_manifest
 from lib.selfimproving import params as si_params
 from lib.selfimproving.git import Git
 
@@ -1100,7 +1101,7 @@ class TestPushExecution(RunTestCase):
                 self.assertEqual(env[name], os.environ[name], name)
         gitenv = patrolpush.push_env({"GIT_DIR": "a", "GIT_WORK_TREE": "b", "GIT_INDEX_FILE": "c",
                                       "PATH": "p", "AUTOSDD_UNATTENDED": "1"})
-        self.assertEqual(sorted(gitenv), ["GCM_INTERACTIVE", "GIT_ATTR_NOSYSTEM",
+        self.assertEqual(sorted(gitenv), ["GCM_INTERACTIVE", "GIT_ATTR_NOSYSTEM", "GIT_GRAFT_FILE",
                                           "GIT_NO_REPLACE_OBJECTS", "GIT_TERMINAL_PROMPT", "PATH"])
         wall = json.loads(fx.read(rr.R, fx.PARAMS))["sched_push_wall_minutes"] * 60
         self.assertEqual((call["timeout"], call["cwd"]), (wall, rr.R))
@@ -1533,7 +1534,7 @@ class TestSnapshotPushBlock(ChainTestCase):
         self.assertEqual(rc, 0, out + err)
         subs = {sub_of(a) for a in seen}
         allowed = {"status", "add", "commit", "rev-parse", "diff", "log", "show", "rev-list",
-                   "diff-tree", "symbolic-ref", "for-each-ref", "config"}
+                   "diff-tree", "symbolic-ref", "for-each-ref", "config", "ls-files"}
         self.assertNotIn("push", subs)
         self.assertLessEqual(subs - {None}, allowed)
         tree = ast.parse((PKG / "patrol.py").read_text(encoding="utf-8"))
@@ -2055,10 +2056,11 @@ class TestNoCredentialsOnDisk(RunTestCase):
 
     def test_AT_749_13_E_1_the_audit_key_never_reaches_git(self):
         env = patrolpush.push_env({"AUTOSDD_SI_AUDIT_KEY": "k", "AUTOSDD_X_AUDIT_KEY_2": "k2",
-                                   "AUTOSDD_KEEP": "v", "GIT_ASKPASS": "a", "SSH_ASKPASS": "b",
-                                   "GITHUB_TOKEN": "t"})
+                                   "AUTOSDD_SI_DIR": "v", "AUTOSDD_KEEP": "w", "GIT_ASKPASS": "a",
+                                   "SSH_ASKPASS": "b", "GITHUB_TOKEN": "t"})
         self.assertFalse([k for k in env if "AUDIT_KEY" in k])
-        self.assertEqual(env["AUTOSDD_KEEP"], "v")  # push profile：閘門用的 AUTOSDD_* 保留
+        self.assertEqual(env["AUTOSDD_SI_DIR"], "v")  # push profile：閘門用的 AUTOSDD_* 逐一列名
+        self.assertNotIn("AUTOSDD_KEEP", env)  # 沒列名的一律不傳（E-67）
         for name in ("GIT_ASKPASS", "SSH_ASKPASS", "GITHUB_TOKEN"):
             self.assertNotIn(name, env)  # 憑證類變數不再傳（走 credential helper）
 
@@ -2116,13 +2118,14 @@ class TestSecMask(RunTestCase):
                                    "GIT_CONFIG_VALUE_0", "GIT_ASKPASS")}
         parent["PATH"] = "p"
         pushed = sorted(patrolpush.push_env(parent))
-        self.assertEqual(pushed, ["GCM_INTERACTIVE", "GIT_ATTR_NOSYSTEM", "GIT_NO_REPLACE_OBJECTS",
-                                  "GIT_TERMINAL_PROMPT", "PATH"])
+        self.assertEqual(pushed, ["GCM_INTERACTIVE", "GIT_ATTR_NOSYSTEM", "GIT_GRAFT_FILE",
+                                  "GIT_NO_REPLACE_OBJECTS", "GIT_TERMINAL_PROMPT", "PATH"])
         with mock.patch.dict(os.environ, parent, clear=True), \
                 mock.patch.object(si_git, "ENV_TEST_PASSTHROUGH", ()):
             env = Git(fx.new_dir("g"), "git")._env()  # noqa: SLF001  # 守門用的 git 環境
-        self.assertEqual(sorted(env), ["GIT_ATTR_NOSYSTEM", "GIT_NO_REPLACE_OBJECTS",
-                                       "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "PATH"])
+        self.assertEqual(sorted(env), ["GIT_ATTR_NOSYSTEM", "GIT_GRAFT_FILE",
+                                       "GIT_NO_REPLACE_OBJECTS", "GIT_OPTIONAL_LOCKS",
+                                       "GIT_TERMINAL_PROMPT", "PATH"])
 
 
 class TestSecRunner(RunTestCase):
@@ -2742,10 +2745,12 @@ class TestSecAcceptance(RunTestCase):
         self.assertEqual(call["argv"][1:], ["-C", str(rr.R), *si_git.PIN_ARGS(rr.R),
                                             "ls-remote", "origin", "refs/heads/main"])
         self.assertEqual(call["timeout"], patrolpush.LS_REMOTE_SECONDS)
-        # 祖先檢查→最後一道 HEAD 復查→送出前的設定再驗（兩次 config）→push
-        self.assertEqual([sub_of(a) for a in mid[-5:]],
-                         ["merge-base", "symbolic-ref", "rev-parse", "config", "config"])
-        self.assertEqual(mid[-5], ("merge-base", "--is-ancestor", base, sha))
+        # 祖先檢查→最後一道 HEAD 復查→送出前的設定再驗（兩次 config）與 repo 狀態再驗（replace、
+        # 共用目錄／shallow／attributes 路徑、hooks 目錄 ls-files；E-65）→push
+        self.assertEqual([sub_of(a) for a in mid[-8:]],
+                         ["merge-base", "symbolic-ref", "rev-parse", "config", "config",
+                          "for-each-ref", "rev-parse", "ls-files"])
+        self.assertEqual(mid[-8], ("merge-base", "--is-ancestor", base, sha))
 
     def test_AT_749_6_5_head_moved_while_judging_is_judged_against_fixed_shas(self):
         rr = self.prr()
@@ -3262,8 +3267,7 @@ class TestSecRound3(RunTestCase):
                     ok = self.allow_names(platform, profile)
                     if profile == "push":
                         ok |= {"PYTHONUTF8", "PYTHONIOENCODING"}
-                        ok |= {k.upper() if win else k for k in env
-                               if k.upper().startswith("AUTOSDD_")}
+                        ok |= set(si_git._PUSH_AUTOSDD)  # noqa: SLF001  # 逐一列名（E-67）
                     if not win:
                         ok |= {k for k in env if k.startswith("LC_")}
                     extra = {k for k in env if (k.upper() if win else k) not in ok}
@@ -3299,10 +3303,10 @@ class TestSecRound3(RunTestCase):
         plat = "win32" if sys.platform.startswith("win") else "linux"
         allowed = (self.allow_names(plat, "read") | self.allow_names(plat, "push")
                    | {"PYTHONUTF8", "PYTHONIOENCODING", "LC_ALL", "LC_TIME"}
-                   | set(si_git.ENV_TEST_PASSTHROUGH))
+                   | set(si_git.ENV_TEST_PASSTHROUGH) | set(si_git._PUSH_AUTOSDD))  # noqa: SLF001
         for env in envs:
-            self.assertEqual({k for k in env if (k.upper() if plat == "win32" else k) not in allowed
-                              and not k.startswith("AUTOSDD_")}, set())
+            fold = (lambda k: k.upper()) if plat == "win32" else (lambda k: k)
+            self.assertEqual({k for k in env if fold(k) not in allowed}, set())
         # 結構鎖：git 子行程的 env 引數來源只有 env_for_git（直接、或經 push_env／self._env）
         calls = []
         for name in ("git.py", "patrolpush.py"):
@@ -3574,6 +3578,242 @@ class TestSecRound3(RunTestCase):
         self.assertFalse(self.result_path(sha).exists())  # 不寫結果檔、不計 attempts
         self.assertFalse((self.home / "push" / "blocked.json").exists())  # 下一心跳由 evaluate 顯示
 
+    # ---- E-65～E-67：網址限定 http 鍵、送出前復驗 repo 狀態、git 子行程環境（第五輪）
+    def test_AT_749_6_E_15_url_scoped_http_keys_and_curlopt_resolve_are_refused(self):
+        rr = self.prr()
+        rr.patrol()
+        url = "https://h.example/"
+        cases = (("sslVerify", "false", "http.*.sslverify"),
+                 ("sslVerify", "true", "http.*.sslverify"),
+                 ("sslCAInfo", "x.crt", "http.*.sslcainfo"),
+                 ("proxy", "http://p:1", "http.*.proxy"),
+                 ("followRedirects", "true", "http.*.followredirects"))
+        for var, value, shown in cases:  # 值為 true 也擋：網址限定的鍵沒有「安全覆寫」這回事
+            fx.git(rr.R, "config", "--local", f"http.{url}.{var}", value)
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown), ("local", var))
+            fx.git(rr.R, "config", "--local", "--unset-all", f"http.{url}.{var}")
+            with self.with_global(f'[http "{url}"]\n\t{var} = {value}\n'):
+                self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", shown), var)
+                self.assertEqual(si_git.arm_record(rr.R), (None, shown), ("arm", var))
+        resolve = "h.example:443:127.0.0.1"
+        fx.git(rr.R, "config", "--local", "http.curloptResolve", resolve)
+        self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "http.curloptresolve"))
+        fx.git(rr.R, "config", "--local", "--unset-all", "http.curloptResolve")
+        with self.with_global(f"[http]\n\tcurloptResolve = {resolve}\n"):
+            self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "http.curloptresolve"))
+            self.assertEqual(si_git.arm_record(rr.R), (None, "http.curloptresolve"))
+        self.assertTrue(rr.evaluate()["ok"])  # 防假紅：不帶網址的 http 鍵（甲類、已釘定）照舊放行
+        with self.with_global("[http]\n\tsslVerify = false\n\tpostBuffer = 524288000\n"):
+            self.assertTrue(rr.evaluate()["ok"])
+            self.assertIsNotNone(si_git.arm_record(rr.R)[0])
+
+    def test_AT_749_6_E_16_repo_state_is_rechecked_right_before_sending(self):
+        rr = self.prr()
+        sha = rr.patrol().sha
+        base = self.remote_main(rr)
+        push, ls = p7x.run_argv_spy(), p7x.run_argv_spy(out=f"{base}\trefs/heads/main\n")
+        grafts = rr.R / ".git" / "info" / "grafts"
+
+        def hook(repo):  # 遠端查詢之後才出現的狀態：evaluate 看不到、只有送出前的復驗看得到
+            grafts.parent.mkdir(exist_ok=True)
+            grafts.write_text(f"{sha} {base}\n", encoding="utf-8")
+        try:
+            with mock.patch.object(patrolpush, "AFTER_LSREMOTE_HOOK", hook):
+                rc, out = self.go(rr, push, remote_run=ls)
+        finally:
+            grafts.unlink(missing_ok=True)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("PUSH-REPO-STATE-UNSAFE", out)
+        self.assertEqual(push.calls, [])
+        self.assertFalse(self.result_path(sha).exists())
+
+    def test_AT_749_6_E_17_hidden_or_untracked_files_in_the_hooks_directory_are_refused(self):
+        rr = self.prr()
+        with mock.patch.object(si_git, "EXPECTED_HOOKS", "hk"):  # 暫存 repo 的 hooks 目錄放進工作樹
+            fx.git(rr.R, "config", "core.hooksPath", "hk")
+            fx.put(rr.R, "hk/pre-push", "#!/bin/sh\nexit 0\n")
+            fx.commit_all(rr.R, "hooks dir")
+            rr.push()
+            rr.patrol()
+            self.assertTrue(rr.evaluate()["ok"])  # 防假紅：追蹤、未隱藏、目錄內沒有別的檔
+            expect = ("PUSH-REPO-STATE-UNSAFE", "hooks")
+            for flag in ("skip-worktree", "assume-unchanged"):
+                fx.git(rr.R, "update-index", f"--{flag}", "--", "hk/pre-push")
+                self.assertEqual(self.unsafe(rr), expect, flag)
+                fx.git(rr.R, "update-index", f"--no-{flag}", "--", "hk/pre-push")
+            self.assertTrue(rr.evaluate()["ok"])
+            (rr.R / "hk" / "extra-hook").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            self.assertEqual(self.unsafe(rr), expect, "untracked")
+            (rr.R / "hk" / "extra-hook").unlink()
+            fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
+
+    def test_AT_749_5_E_14_git_child_env_neutralises_grafts_and_names_each_autosdd_variable(self):
+        self.assertEqual(si_git.ENV_FIXED["GIT_GRAFT_FILE"], si_git.NO_GRAFTS)
+        self.assertTrue(Path(si_git.NO_GRAFTS).parent.is_file())  # 父層是一般檔案＝這個路徑建不出來
+        parent = {"AUTOSDD_PREPUSH_SERIAL_LEGS": "1", "AUTOSDD_PARALLEL_TESTS_WORKERS": "4",
+                  "AUTOSDD_CPU_HEADLESS": "1", "AUTOSDD_SI_DIR": "x", "AUTOSDD_OTHER": "v",
+                  "AUTOSDD_UNATTENDED": "1", "GIT_GRAFT_FILE": "evil"}
+        with mock.patch.object(si_git, "ENV_TEST_PASSTHROUGH", ()):
+            for platform in ("win32", "linux"):
+                read = si_git.env_for_git(parent, "read", platform=platform)
+                push = si_git.env_for_git(parent, "push", platform=platform)
+                self.assertEqual({k for k in read if k.startswith("AUTOSDD_")}, set(), platform)
+                self.assertEqual({k for k in push if k.startswith("AUTOSDD_")},
+                                 set(si_git._PUSH_AUTOSDD), platform)  # noqa: SLF001
+                for env in (read, push):
+                    self.assertEqual(env["GIT_GRAFT_FILE"], si_git.NO_GRAFTS, platform)
+        rr = self.prr()  # 真 git：嫁接檔存在時，帶此環境的 git 看不到它（不帶則看得到＝探針有效）
+        grafts = rr.R / ".git" / "info" / "grafts"
+        head = fx.git(rr.R, "rev-parse", "HEAD")
+        grafts.parent.mkdir(exist_ok=True)
+        grafts.write_text(f"{head}\n", encoding="utf-8")  # 把 HEAD 嫁接成沒有父提交
+        try:
+            exe = si_git.resolve_git(os.environ)
+            count = lambda env: subprocess.run(  # noqa: E731
+                [exe, "-C", str(rr.R), "rev-list", "--count", head], env=env, capture_output=True,
+                encoding="utf-8", check=True).stdout.strip()
+            bare = {k: v for k, v in os.environ.items() if k != "GIT_NO_REPLACE_OBJECTS"}
+            self.assertEqual(count(bare), "1")
+            self.assertGreater(int(count({**bare, "GIT_GRAFT_FILE": si_git.NO_GRAFTS})), 1)
+        finally:
+            grafts.unlink(missing_ok=True)
+
+    # ---- E-68：SCG-4 二審補的斷言（P2-1～3、P3-1～3）
+    def test_AT_749_4_E_33_covered_is_exact_for_files_and_prefix_for_directories(self):
+        allow = ["docs/L.md", "docs/props/PROP-1/"]
+        for path, want in (("docs/L.md", True), ("docs/L.md.bak", False), ("docs/L.mdx", False),
+                           ("docs/props/PROP-1/r1.md", True), ("docs/props/PROP-10/r1.md", False),
+                           ("docs/props/PROP-1", False), ("other/L.md", False)):
+            self.assertEqual(pushguard.covered(path, allow), want, path)
+
+    def test_AT_749_4_E_34_content_binding_digest_is_the_manifest_formula(self):
+        rr = self.rr()
+        root = fx.new_dir("p23")
+        root.mkdir(parents=True, exist_ok=True)
+        files = {"a.txt": b"alpha\n", "crlf.txt": b"x\r\ny\r\n"}  # gone.txt 沒有檔（已刪除）
+        for name, data in files.items():
+            (root / name).write_bytes(data)
+        touched = ["a.txt", "crlf.txt", "gone.txt"]
+        ev = {"id": "APP-1", "kind": "app.promote"}
+        rows = [(EVL, "M", "", json.dumps(ev) + "\n")]
+        exe = si_git.resolve_git(os.environ)
+        judge = pushguard._Judge(rr.R, self.home, [], exe)  # noqa: SLF001
+        judge.raw_blob = lambda rev, rel: files.get(rel)
+        want = si_manifest.paths_manifest(root, touched, lf=True)
+        mismatch = "觸及檔內容與 post_sha256 不符"
+
+        def verdict(digest: str):
+            return judge.content_problem("s", {**ev, "post_sha256": digest}, {"cls": "P"}, touched,
+                                         rows)
+        self.assertIsNone(verdict(want))  # 缺檔記 absent、CRLF 先換成 LF：與 manifest 同值
+        self.assertEqual(verdict(si_manifest.paths_manifest(root, touched, lf=False)), mismatch)
+        self.assertEqual(verdict(si_manifest.paths_manifest(root, touched[:2], lf=True)), mismatch)
+        self.assertEqual(verdict("sha256:" + "0" * 64), mismatch)
+
+    def test_AT_749_4_E_35_the_row_bytes_parameter_reaches_the_new_row_check(self):
+        rr = self.rr()
+        row = fx.line([fx.obs_id(21), "2026-11-11 12:00", "長列 " + "字" * 200, "症狀",
+                       "tools/lib/si_demo.py:12", "doc", "P3", "open",
+                       "面=文件;來源=代理;回報者=SA"])
+        text = obs_edit(rr.R, lambda ls: ls[:-1] + [row, ""])
+        sha = self.manual(rr, {OBS: text})
+        loose = pushguard.evaluate(rr.R, {"sched_auto_push": True}, rr.si, NOW)
+        self.assertTrue(loose["ok"], loose)  # 沒設上限：不驗位元組
+        params = {"sched_auto_push": True, "row_max_bytes": 100}
+        tight = pushguard.evaluate(rr.R, params, rr.si, NOW)
+        self.blocked(tight, "PUSH-LEDGER-RULE", sha)
+        self.assertIn("ROW-BYTES-OVER", tight["detail"])
+
+    def test_AT_749_5_E_15_single_key_rules_judge_the_right_direction(self):
+        hit = si_git.config_rule_hit
+        for key, bad, good in (("core.usereplacerefs", "true", "false"),
+                               ("protocol.ext.allow", "always", "never"),
+                               ("log.showsignature", "true", "false"),
+                               ("push.gpgsign", "true", "false")):
+            self.assertIsNotNone(hit("local", key, bad), key)  # 回要顯示的鍵名（子區段以 * 代）
+            self.assertIsNone(hit("local", key, good), key)
+            self.assertIsNone(hit("global", key, bad), key)  # 甲類：system／global 層被釘定、不擋
+        for var in ("COUNT", "PARAMETERS", "KEY_0", "VALUE_0"):
+            self.assertIsNotNone(si_git.ENV_RULES.match(f"GIT_CONFIG_{var}"), var)
+
+    def test_AT_749_5_E_16_pins_take_the_last_value_and_keys_normalise_by_segment(self):
+        pin = si_git.PIN_ARGS(fx.new_dir("pin2"), {"http.sslcainfo": ["first.crt", "last.crt"]})
+        self.assertIn("http.sslCAInfo=last.crt", pin)
+        self.assertNotIn("http.sslCAInfo=first.crt", pin)
+        norm = si_git._norm_key  # noqa: SLF001
+        self.assertEqual(norm("Core.SshCommand"), "core.sshcommand")
+        self.assertEqual(norm("Remote.Origin.URL"), "remote.Origin.url")
+        self.assertEqual(norm("http.HTTPS://H.Ex/.SslVerify"), "http.HTTPS://H.Ex/.sslverify")
+
+    def test_AT_749_5_E_17_arm_stops_when_the_config_cannot_be_read(self):
+        rr = self.prr()
+        for fake in (None, types.SimpleNamespace(returncode=128, stdout="")):
+            with mock.patch.object(Git, "run", return_value=fake):
+                self.assertEqual(si_git.arm_record(rr.R), (None, "git 設定讀取失敗"))
+
+    def test_AT_749_5_E_18_safe_path_drops_directories_that_cannot_be_resolved(self):
+        real = Path.resolve
+
+        def resolve(self, *a, **kw):
+            if self.name == "unresolvable-dir":
+                raise OSError("boom")
+            return real(self, *a, **kw)
+        env = {"PATH": os.pathsep.join(["unresolvable-dir", str(Path(sys.base_prefix) / "keep")])}
+        with mock.patch.object(Path, "resolve", resolve):
+            kept = si_git.safe_path(env).split(os.pathsep)
+        self.assertNotIn("unresolvable-dir", kept)
+
+    def test_AT_749_5_E_19_a_duplicated_hooks_path_is_refused(self):
+        rr = self.prr()
+        rr.patrol()
+        fx.git(rr.R, "config", "--add", "core.hooksPath", p7x.HOOKS_DIR)  # 兩筆都等於既定值
+        self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
+        fx.git(rr.R, "config", "--unset-all", "core.hooksPath")
+        fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
+        self.assertTrue(rr.evaluate()["ok"])
+
+    def test_AT_749_2_E_4_markdown_proposals_are_hashed_after_crlf_normalisation(self):
+        prop = "PROP-001"
+        body = b"line one\nline two\n"
+        sha = lambda raw: "sha256:" + hashlib.sha256(raw).hexdigest()  # noqa: E731
+        pdir = f"{si_events.PROPOSALS_REL}/{prop}/"
+        events = [{"kind": "prop", "id": prop, "rev": 1, "body_sha256": sha(body),
+                   "patch_sha256": sha(body)}]
+        check = lambda name, raw: pushcontent._proposal_problem(  # noqa: E731, SLF001
+            prop, [(pdir + name, "A", "100644", True, None, None, raw)], events)
+        self.assertIsNone(check("r1.md", b"line one\r\nline two\r\n"))  # .md：CRLF 先正規化
+        self.assertEqual(check("r1.patch", b"line one\r\nline two\r\n"), "r1.patch sha-mismatch")
+        self.assertEqual(check("r1.md", b"line one\r\nline 2\r\n"), "r1.md sha-mismatch")
+
+    def test_AT_749_6_E_18_runner_grace_and_job_termination_contract(self):
+        self.assertLessEqual(runner.KILL_GRACE_SECONDS, 10)  # 寬限遠小於推送牆鐘與 hook 預算
+        timeouts, kills = [], []
+
+        class Proc:
+            pid, returncode = 4321, None
+
+            def communicate(self, timeout=None):
+                timeouts.append(timeout)
+                raise subprocess.TimeoutExpired("x", timeout)
+
+            def kill(self):
+                kills.append(1)
+        with (mock.patch.object(runner.subprocess, "Popen", return_value=Proc()),
+              mock.patch.object(runner, "_job_open", return_value=(object(), "")),
+              mock.patch.object(runner, "_job_end", return_value=True),
+              mock.patch.object(runner, "_kill_tree") as tree):
+            res = runner.run_argv(["x"], env={}, timeout=3)
+        self.assertEqual(timeouts, [3, runner.KILL_GRACE_SECONDS])  # 收輸出有上界
+        self.assertEqual(kills, [1])  # Job 終結成功後仍殺父行程
+        tree.assert_not_called()
+        self.assertTrue(res.timed_out)
+        self.assertEqual(res.note, "job-terminated output-incomplete")
+
+    def test_AT_749_6_E_19_naive_timestamps_are_not_accepted_by_the_guard(self):
+        self.assertIsNone(pushguard._t("2026-11-11T12:00:00"))  # noqa: SLF001
+        self.assertIsNone(pushguard._t(None))  # noqa: SLF001
+        self.assertIsNotNone(pushguard._t("2026-11-11T12:00:00+08:00"))  # noqa: SLF001
+
     def test_AT_749_12_E_4_credential_helpers_are_recorded_and_limited_at_arm_time(self):
         arm = TestOsTasks.arm
         R = TestOsTasks.repo(self)
@@ -3654,15 +3894,20 @@ class TestSecRound3(RunTestCase):
         self.blocked(res, "PUSH-LEDGER-RULE", sha)
         self.assertIn("處置欄", res["detail"])
         self.assertIn(fx.obs_id(1), res["detail"])
-        rr = self.rr()  # ⑤處置欄寫入植入的機密樣式（詞表內的形態，值為權杖）
+        rr = self.rr()  # ⑤處置欄格式合規（retired＋座標）、但寫入植入的機密樣式（值為權杖）
         token = "gh" + "p_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4"
         text = obs_edit(rr.R, lambda ls: [set_cell(ln, 7,
-                f"retired；依據 {token}:1") if ln.startswith(
+                f"retired；依據 tools/lib/si_demo.py:12 {token}") if ln.startswith(
             f"| {fx.obs_id(1)} |") else ln for ln in ls])
         sha = self.manual(rr, {OBS: text})
         res = rr.evaluate()
-        self.assertIn(res["code"], ("PUSH-SECRET-PATTERN", "PUSH-LEDGER-RULE"), res)
+        self.assertEqual(res["code"], "PUSH-SECRET-PATTERN", res)
         self.assertNotIn(token, json.dumps(res, ensure_ascii=False))
+        rr = self.rr()  # ⑥處置欄格式不合、也不含權杖：碼恆為 PUSH-LEDGER-RULE（兩條判準各自獨立）
+        text = obs_edit(rr.R, lambda ls: [set_cell(ln, 7, "retired；沒有座標") if ln.startswith(
+            f"| {fx.obs_id(1)} |") else ln for ln in ls])
+        sha = self.manual(rr, {OBS: text})
+        self.blocked(rr.evaluate(), "PUSH-LEDGER-RULE", sha)
 
     def test_AT_749_4_E_25_mode_verdict_is_one_function_for_commit_and_guard(self):
         table = (("D", "100644", "000000", True), ("A", None, "100644", True),

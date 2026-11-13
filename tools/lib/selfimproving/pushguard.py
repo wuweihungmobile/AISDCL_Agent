@@ -420,11 +420,15 @@ class _Judge:
 
 
 def config_recheck(repo: Path, si: Path, exe: str) -> tuple[str, str] | None:
-    """送出前的設定再驗（E-29）：同 `evaluate` 的設定檢查；不合回（碼, 說明），讀取失敗回
-    `PUSH-GIT-UNAVAILABLE`，合規 None。"""
+    """送出前的設定與 repo 狀態再驗（E-29、E-65）：同 `evaluate` 的設定檢查，其後再跑一次
+    `repo_state_problem`（替換物件／grafts／shallow／屬性／hooks 目錄隱藏檔）；不合回（碼, 說明），
+    讀取失敗回 `PUSH-GIT-UNAVAILABLE`，合規 None。"""
     try:
-        return pushcontent.config_problem(_Judge(repo, si, [], exe),
-                                          _read_json(si / "push" / "armed.json"))
+        armed = _read_json(si / "push" / "armed.json")
+        if (bad := pushcontent.config_problem(_Judge(repo, si, [], exe), armed)):
+            return bad
+        return pushcontent.repo_state_problem(
+            _Judge(repo, si, [], exe, tuple(PIN_ARGS(repo, armed_pins(armed)))))
     except (_GitFail, OSError):
         return "PUSH-GIT-UNAVAILABLE", "git 設定讀取失敗"
 

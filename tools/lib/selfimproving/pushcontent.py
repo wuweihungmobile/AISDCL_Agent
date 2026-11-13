@@ -331,21 +331,24 @@ CODE_REPO_STATE = "PUSH-REPO-STATE-UNSAFE"  # 物件庫狀態會改變守門所�
 
 
 def repo_state_problem(j) -> tuple[str, str] | None:
-    """repo 狀態檢查（E-53、E-56；在設定檢查之後、任何 `rev-list`／`show`／`cat-file` 之前）：
-    `refs/replace/` 非空、`info/grafts` 存在、`shallow` 存在、`info/attributes` 含 `filter=`
-    任一 ⇒（碼, `refs/replace`／`info/grafts`／`shallow`／`info/attributes`）；git 讀取失敗拋
+    """repo 狀態檢查（E-53、E-56、E-65；在設定檢查之後、任何 `rev-list`／`show`／`cat-file` 之前，
+    送出推送前再跑一次）：`refs/replace/` 非空、`info/grafts` 存在、`shallow` 存在、
+    `info/attributes` 含 `filter=`、hooks 目錄有被隱藏的已追蹤檔或未追蹤檔任一 ⇒（碼,
+    `refs/replace`／`info/grafts`／`shallow`／`info/attributes`／`hooks`）；git 讀取失敗拋
     `OSError`（呼叫端 fail-closed）。"""
     cp = j.run("for-each-ref", "--format=%(refname)", "refs/replace/")
     if cp.returncode != 0:
         raise OSError("for-each-ref 失敗")
     if cp.stdout.strip():
         return CODE_REPO_STATE, "refs/replace"
-    gp = j.run("rev-parse", "--git-path", "info/grafts", "--git-path", "shallow",  # 一次 spawn
+    # 一次 spawn。grafts 位置由共用目錄自己拼：`--git-path info/grafts` 會被子行程環境的
+    # `GIT_GRAFT_FILE`（固定指向不存在的路徑，E-66）改寫成那個路徑、永遠偵測不到
+    gp = j.run("rev-parse", "--git-common-dir", "--git-path", "shallow",
                "--git-path", "info/attributes")
     rels = gp.stdout.splitlines()
     if gp.returncode != 0 or len(rels) != 3 or not all(r.strip() for r in rels):
         raise OSError("rev-parse --git-path 失敗")
-    for rel, found in zip(("info/grafts", "shallow"), rels):
+    for rel, found in (("info/grafts", f"{rels[0].strip()}/info/grafts"), ("shallow", rels[1])):
         if (j.g.repo / found.strip()).exists():
             return CODE_REPO_STATE, rel
     attr = j.g.repo / rels[2].strip()
@@ -355,6 +358,14 @@ def repo_state_problem(j) -> tuple[str, str] | None:
         lines = []
     if any(re.search(r"(?:^|\s)filter=", ln) for ln in lines if not ln.lstrip().startswith("#")):
         return CODE_REPO_STATE, "info/attributes"
+    # hooks 目錄（E-65）：一次 `ls-files -v`——被標 skip-worktree（S）或 assume-unchanged（小寫）的已
+    # 追蹤檔、或目錄內任何未追蹤檔（?，含被忽略者）＝工作樹上的 hook 內容可能與 HEAD 不同
+    hl = j.run("ls-files", "-v", "-c", "-o", "--", si_git.EXPECTED_HOOKS)
+    if hl.returncode != 0:
+        raise OSError("ls-files 失敗")
+    for ln in hl.stdout.splitlines():
+        if ln[:1] and (ln[0] in "S?" or ln[0].islower()):
+            return CODE_REPO_STATE, "hooks"
     return None
 
 
