@@ -44,6 +44,7 @@
     "tools/lib/sentinel_lifecycle.py",
     "tools/lib/session_brief.py",
     "tools/lib/selfimproving/**",
+    "tools/lib/sessionctl/**",
     "tools/lib/transcript_activity.py",
     "tools/probe/selfimproving_measure.py",
     "tools/selfimproving.py",

@@ -504,6 +504,204 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 ---
 
+### 2.13 session 掌控與切換（sessionctl）：續跑成本選路、過期 session 不續跑、交接包、背景代理名冊、模型平衡（2026-11-14；第一段已落地，第二段設計定案待實作；DEF-200-580～584）
+
+> 量測值一律現查（`python tools/lib/quota_policy.py --print-env-example`），本節只寫判準、資料來源與方向。
+> 🔴 **落地狀態是本節的第一張表；表內標「未落地」的段落是設計，不是現行行為，不得當成已生效的守衛引用。第二段尚不存在的檔案路徑刻意不加反引號（`TestR81GhostPathClaims` 會把反引號內的不存在路徑判為幽靈宣稱）；建檔時再加回。**
+
+| 決策 | 內容 | 狀態 | 證據座標 |
+|---|---|---|---|
+| D2 | 無人選路量續跑成本（R1～R3）而非檔案大小 | 已落地（2026-11-14） | `tools/lib/sessionctl/switch.py`；`tools/tests/test_sessionctl_switch.py`（RouteTest、ThresholdTest）；AT-SC-01～18 |
+| D3 | 過期 session 不續跑（SUPERSEDED），`sentinel_decide`＋`_resume_tick` 兩處接線、`reap_verdict` 一致 | 已落地（2026-11-14） | 同上（SupersededTest）；`tools/tests/test_context_budget_guard.py`（SentinelDecisionTest、E2ReplayTest、ReapSupersededTest）；AT-SC-19～33 |
+| 圍籬修正 | 洩漏圍籬不把活著的互動 session 合法武裝的哨兵判成洩漏（§2.13.11） | 已落地（2026-11-14） | `tools/lib/sentinel_lifecycle.py::leak_fence`；`LeakFenceTest` |
+| D4 | 交接包（機械層＋主控層、公告／ack／過期） | **設計定案、尚未落地** | 第二段；TCS AT-SC-34～49 |
+| D5 | 三條切換路（無人／互動自動／手動）、洗環境 | **設計定案、尚未落地**（FRESH prompt 的 `handoff_path` 參數縫已預留，預設不用） | 第二段；AT-SC-50～60 |
+| D6 | SendMessage 續棒成本閘 | **設計定案、尚未落地**（門檻鍵 `AUTOSDD_RESUME_AGENT_TOKENS` 已入 `ENV_SPEC` 與方向鎖，無消費端） | 第二段；AT-SC-61～65 |
+| D7 | 名冊、`sessionctl status`／`stop`、Stop 出聲、無人窗口結局、`pct_before`／`pct_after` | **設計定案、尚未落地** | 第二段；AT-SC-66～80 |
+| D8 | 模型平衡建議（`--pace` 一行） | **設計定案、尚未落地** | 第二段；AT-SC-81～84 |
+| hook 面 | 新增 `sessionctl_guard.py`、`context_budget_guard` 加一行呼叫 | **尚未落地**（`.claude/` 受保護路徑，由主控親套） | 第二段；AT-SC-85～88 |
+
+第二段的承接帳本列見缺陷帳本 DEF-200-584（`open`）。入口薄殼 tools/sessionctl.py 與 hook 也屬第二段，現在不存在。
+
+### 2.13.0 立案與暴露證據（守衛面准入：三取一皆成立）
+
+| 代號 | 證據 | 類別 |
+|---|---|---|
+| E1 | sid `d4ed2654-9181-4df1-a6e6-2d712956e23b`：事件檔 `%TEMP%\autosdd_resume_log_autosdd_resume_plan_d4ed2654-….jsonl` 2026-11-13T07:32:03 `route_chosen`＝SESSION_RESUME，理由「逐字稿 20,518,438B ≤ 上限 33,554,432B」；`~/.autosdd/traces/autosdd_resume_cost.jsonl` 同 sid 第一回合 `cache_creation_input_tokens`＝138,811；其後無人窗口以 SendMessage 續棒 40～60 萬 token 的舊子代理 44 分鐘，08:16 `relay_stopped` why=band，五小時窗 95～98%。掌舵者原話（逐字稿第 7846 行）「有背景Subagent執行, 沒有被掌控! 這是嚴重問題」 | 掌舵者真機回報＋非構造性逐字稿 |
+| E2 | `AutoSDD_Sentinel_f1522ddb-bdcf-4104-bb81-614c1118fa9d` 自 11/9 起 state=`waiting`、`allow_resume: true`、NextRunTime 2026/11/15 02:02；逐字稿 29,652,867B、ctx 556,777；其間多個更新 session 已做完後續工作。若不處理，11/15 會無人續跑一個四天前的 session。主控已 `--remove-schtasks` 手動拆除 | 非構造性實況 |
+| E3 | 掌舵者原話「盡量避免Fable Usage已經快100% Weekly Limit All Model Usage還剩很多」；`--pace` 20:27:47→20:39:45：five_hour 40→62、weekly_all 61→64、weekly_scoped(Fable) 9→14 | 掌舵者真機回報 |
+
+結構性根因（三條，各對一個決策群）：
+- **G-cost**：無人選路量「檔案位元組」而非「續跑成本」（上下文 token、壓縮次數、上一次續跑寫了多少快取），20 MB 逐字稿≈60 萬 token 仍判 RESUME（D2）。
+- **G-stale**：哨兵 `waiting` 是唯一「永不收」的狀態（`sentinel_lifecycle.REAPABLE_WHEN_IDLE` 刻意不含它），而 `sentinel_decide` 的撞線分支優先於 `superseded_by`（DEF-200-532 只接在 halt 標記上）⇒ 撞線等待中的舊 session，即使人早已在別的 session 接手，reset 一到仍會被 probe→resume（D3）。
+- **G-blind**：背景代理與無人窗口沒有名冊、沒有停止手段、沒有「本回合結束時還有誰在跑」的出口；續棒舊代理沒有成本閘（D6、D7）。
+
+### 2.13.1 落點（單一家）
+
+> 現況（2026-11-14）：只有 `tools/lib/sessionctl/{__init__,switch}.py` 與 `ENV_SPEC` 八個鍵（`AUTOSDD_SWITCH_R1_CTX_TOKENS`、`AUTOSDD_SWITCH_R2_COMPACTIONS`、`AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS`、`AUTOSDD_STALE_SESSION_HOURS`、`AUTOSDD_RESUME_AGENT_TOKENS`、`AUTOSDD_HANDOFF_TTL_HOURS`、`AUTOSDD_ROSTER_QUIET_MINUTES`、`AUTOSDD_SESSION_SWITCH_MODE`；後三者與 `RESUME_AGENT_TOKENS` 的消費端屬第二段）已建；`handoff`／`roster`／`modelmix` 與入口薄殼、hook 尚未建檔。`choose_resume_route` 判定核心已自 `session_resume_planner.py` 搬進 `switch.py`，planner 留同名委派（LOC 748→725）。
+
+| 元件 | 路徑 | 職責 | 不准做 |
+|---|---|---|---|
+| 選路與過期判準 | `tools/lib/sessionctl/switch.py` | `fresh_reasons()`（R1～R4）、`superseded_by()`（D3 判準唯一的家）、`stale_verdict()`（哨兵／續航用的判決字典） | 不 spawn、不寫檔（純函式＋讀檔） |
+| 交接包 | tools/lib/sessionctl/handoff.py | 機械層產生、主控層驗證（finalize）、公告／ack／過期、洗環境、互動 spawn | 不判「該不該切」（那是 switch） |
+| 名冊與停止 | tools/lib/sessionctl/roster.py | 子代理三態、無人窗口、排程彙整；`stop` 的 pid 身分驗證與砍樹 | 不停視窗內子代理（harness 才做得到） |
+| 模型建議 | tools/lib/sessionctl/modelmix.py | 兩條週軸的「用量比÷時間流逝比」→ 一行建議 | 不改任何派工參數（只出聲） |
+| 入口薄殼 | tools/sessionctl.py | argparse → 上列函式；`from lib.sessionctl import …`（`selfimproving.py` 先例，避開與同名入口檔的 import 撞名） | 不含判準 |
+| 門檻 | `tools/lib/quota_policy_env.py::ENV_SPEC` 新增三鍵＋`STALE_SESSION_HOURS`、`RESUME_AGENT_TOKENS`、`AUTOSDD_SESSION_SWITCH_MODE` | 經 `--print-env-example` 現查、`env.shared` 可覆寫 | 本節不寫數字以外的第二份預設值 |
+
+既有檔只准「薄呼叫」：`session_resume_planner.py`（guardrail_cli，現查餘裕 ≈2 LOC ⇒ 先把 `choose_resume_route` 的判定核心搬進 `switch.py`、planner 留同名委派，騰出空間）、`quota_gate.py`（hub，餘裕 0 ⇒ 不碰）、`context_budget_guard.py`（SPECIAL_FILES raw-line 棘輪，餘裕 0 ⇒ 盡量不碰，見 §2.13.8）。
+
+### 2.13.2 D2 無人選路：量「續跑成本」不量檔案大小（已落地）
+
+**判準**（任一成立 ⇒ FRESH；理由字串逐條列出命中者，皆不成立 ⇒ RESUME）：
+
+| 規則 | 資料來源（讀檔、零 token） | 預設門檻 | 缺值時 |
+|---|---|---|---|
+| R1 上下文 | 優先 `~/.autosdd/context_feed/<sid>.json`（`context_budget_guard.read_context_feed`）；缺席退逐字稿最後一筆 assistant usage（`context_budget_guard.scan_transcript` 的 `used`）；兩者皆缺才以位元組÷經驗比值估並在理由標 `estimated` | `ctx_tokens ≥ 250,000` | 三者皆不可得 ⇒ R1 不成立（量不到≠超標），但理由字串寫「R1 量不到」 |
+| R2 壓縮次數 | 逐字稿 `compact_boundary` 計數（`context_budget_guard.compact_boundary_count`，**不用** `autosdd_compact_events.jsonl`：後者只記 hook 有跑到的那幾次，會少算） | `≥ 2` | 讀不動 ⇒ 0 |
+| R3 上次續跑成本 | `~/.autosdd/traces/autosdd_resume_cost.jsonl` 同 sid 最近一筆 `cache_creation_input_tokens` | `≥ 100,000` | 無記錄 ⇒ 不成立 |
+| R4 既有 | `fresh_why()`：sid 缺席／逐字稿缺檔／空檔／`size > RESUME_MAX_TRANSCRIPT`；`weekly_why()` 週軸 converge | 不變 | 不變 |
+
+- **方向鎖**：三個門檻只准下修（具名測試以「現值 ≤ 出廠值」釘住出廠值，env 覆寫若大於出廠值 ⇒ 退出廠值並出聲，同 `_transcript_cap()` 的病態值處理）。方向理由：放寬＝退回 E1。
+- **fail 方向**：選路的降級只准 RESUME→FRESH（既有方向鎖不變）。量不到一律「不觸發該條」而非「觸發 FRESH」——FRESH 的代價是丟上下文，量不到不應單方面造成資訊損失；但 E1 型輸入（context_feed 不在、逐字稿可讀）R1 經 `scan_transcript` 仍量得到，回歸鎖以 E1 真實數值釘住。
+- FRESH prompt 追加兩條硬規則（字面鎖）：①不得以 SendMessage 續任何舊 session 的代理，一律派新代理＋短任務書；②第一個動作＝重驗 `git status`／HEAD 與交接包內一切「已通過」宣稱。並改指向**交接包**（§2.13.4），任務書仍在 `--add-dir`。
+- 互動視窗同一組 R1～R3（R4 不適用）由 PostToolUse 判定、**一個 session 只出聲一次**（閂鎖鍵 `switch_advised`，住 `state_path(sid)` 的既有閂鎖機制）：出聲同時產生交接包機械層（§2.13.4），訊息附交接包絕對路徑與 `python tools/sessionctl.py handoff --finalize` / `--spawn` 兩行指令。
+- **不調 autocompact 門檻**（90% 不動）：見 §2.13.9 X1。
+
+**實作事實（2026-11-14 落地；與上文有差異處以此為準）**
+
+- `fresh_reasons()` 回傳 `(命中, 量不到說明)` 二元組而非單一清單：AT-SC-10 要求「R1 不成立但理由含『R1 量不到』」，命中與說明必須可分；`choose_resume_route` 的理由字串兩者皆列。
+- R2 以逐字稿 `compact_boundary` 計數；R3 以新增的唯讀函式 `resume_cost.last_cost()` 取同 sid 最近一筆。
+- R1～R3 與 `RESUME_AGENT_TOKENS` 的方向鎖：覆寫值大於出廠值 ⇒ 退出廠值並 stderr 一行；`STALE_SESSION_HOURS` 刻意不納入方向鎖（調小更積極拆哨兵、調大更晚拆，兩向都有風險；主控裁決 7）。
+- FRESH prompt 加入兩條硬規則字面（`FRESH_HARD_RULES`）；`handoff_path` 參數縫已在，傳 None 時沿用任務書路徑、給了才改為「按交接包繼續：讀 <路徑>…」（第二段接線）。
+- **裁決（主控，2026-11-14）：R1 位元組估計比值 40 B/token 接受為出廠值。** 兩個實測點：E1＝20,518,438 B／約 60 萬 token ≈ 34 B/token；E2＝29,652,867 B／ctx 556,777 ≈ 53 B/token。取 40 介於兩者之間、偏保守（少估一點）。該值**只在 feed 與逐字稿 usage 皆缺時使用**，理由字串一律標 `estimated`；它是量測值，不是真值，要重量由 `tools/probe/` 現查，不當常數寫進其他文件。
+
+### 2.13.3 D3 過期 session 不續跑（SUPERSEDED；已落地）
+
+**判準唯一的家**＝`switch.superseded_by(project_dir, own_sid, own_last_epoch, now)`：
+1. `own_idle = now − own_last_epoch ≥ STALE_SESSION_HOURS`（預設 24h；`own_last_epoch`＝`transcript_activity.newest_conversation_at`，對話記錄而非 mtime，DEF-200-560 同尺）；
+2. 同專案逐字稿目錄**直下**另有 `stem ≠ own_sid` 的逐字稿，於 `own_last_epoch` 之後累積到 `sentinel_lifecycle_arm.should_arm` 的門檻（≥24 回合且 ≥600s；同一把「算不算真的工作」的尺，`claude -p ok` 不會被當成接手）。
+實作＝把現有 `superseding_session(project_dir, own_sid, halt_marker)` 的 `since` 來源抽成參數（`since_epoch`），halt 版變成它的一行包裝 ⇒ 兩個用途同一份掃描碼。
+
+**接線（兩處，兩處都要，缺一即 E2 重演）**：
+- `sentinel_decide`：新增最高優先分支（在撞線事件分支**之前**；月度支出上限 `LIMIT_SPEND` 仍先 escalate——錢的事人才能解）：`superseded` ⇒ `{"action": "disarm", "superseded_by": sid, "clear_halt": True, reason}`。理由：E2 的哨兵正處於 `arm_reset`→`waiting`，醒來時撞線事件仍「未處理」，若 SUPERSEDED 排在撞線分支之後，它永遠輪不到。
+- `_resume_tick`（`-Once` 續航排程與 relay 下一窗直接進這裡，不經 `sentinel_decide`）：在 `probe_quota` 之前呼叫同一個判準，命中 ⇒ `_abort_and_unregister(…, event="superseded")`。
+- 兩處命中時一律：自我解除排程、狀態塊寫 `superseded`（新增終態，加入 `TERMINAL_STATES`）、痕跡 `sentinel_superseded`、寫一份 handback（`resume_route.handback_report(sid)`，`## 做了什麼`＝「判定已被 <sid8> 接手，未續跑」、`## 下一步指令`＝`claude -r <sid>` 手動續的指令），由既有 `announce_handbacks` 在下次 SessionStart 出聲。**不叫桌面告警**（這是正常下班，不是故障）。
+- **整週無人仍續航**：條件 2 不成立（沒有更新的 session）⇒ 照舊撞線分支，行為逐位元組不變。
+- **`reap_verdict` 一致性（不得兩個家）**：GC 呼叫端對 `waiting` 的哨兵先算 `switch.superseded_by(...)`，把結果以新關鍵字參數 `superseded: bool` 傳入；`reap_verdict` 只在 ⑥ 加一條「`superseded` ⇒ 收」，判準本身不重寫。`waiting` 且未 superseded ⇒ 仍不收（原紀律不變）。
+- **fail 方向**：fail-closed 往「續航」那側（量不到 ⇒ 不判 SUPERSEDED）。理由同 `superseding_session` 檔頭：判 SUPERSEDED 的後果是拆排程（不可逆），量不到≠已接手。代價誠實寫：讀不到其他逐字稿時 E2 仍會重演——由 `sessionctl status` 的「過期哨兵」欄出聲兜底（§2.13.6）。
+
+**實作事實（2026-11-14 落地）**
+
+- `switch.superseded_by／stale_for／stale_verdict／settle_superseded／write_superseded_handback／own_last_at` 是判準與處置的單一家；`sentinel_lifecycle_arm.superseding_since()` 抽出 `since` 參數，`superseding_session`（halt 版）變成它的包裝，兩個用途同一份掃描碼。
+- `sentinel_decide` 新增關鍵字參數 `stale`：分支位於「有未處理撞線事件」區塊內、`LIMIT_SPEND` 之後、driver／reset 判斷之前（月度支出上限仍先 escalate）。`_resume_tick` 在 `reset_not_reached`／probe 之前也套用同一判準（reset 未到也先拆，因判準與 reset 無關）。
+- 命中處置：狀態塊 `superseded`（`TERMINAL_STATES` 新增）、清 halt、拆排程、痕跡 `sentinel_superseded`、handback `<sid>_superseded.md`（四 marker 齊，含 `claude -r`；檔名刻意不蓋掉同 sid 的續跑 handback）。`reap_verdict(superseded=)` 與 `gc` 只對 `waiting` 計算，判準經 `planner.switch.stale_for`，沒有第二個家。
+- **裁決（主控，2026-11-14）：沒有撞線事件的過期 session 照既有閒置解除路徑處理，狀態為 `disarmed`，不另標 `superseded`、不寫 handback。** 理由：無撞線事件時沒有任何「該續跑而被攔下」的決定需要記錄，既有 idle disarm 與 grace→probe→`_resume_tick`（該處接線攔下）結果等價；若要無事件也標 `superseded`，須把分支提到最頂層並自帶 `LIMIT_SPEND` 豁免，擴大射程而無暴露證據（守衛面准入）。
+- 痕跡 `sentinel_superseded` 與 handback 在 `announce_handbacks` 的標題措辭（「無頭續跑窗口的交接檔」）對它略不貼切，未改（hook 路徑，屬守衛面，無暴露證據不動）。
+
+### 2.13.4 D4 交接包（`~/.autosdd/handoff/<sid>_<UTC 時戳>.md`；**設計定案，尚未落地**）
+
+目錄解析沿 `endurance_env` 的 durable-dir 模式新增 `HANDOFF_DIR_ENV="AUTOSDD_HANDOFF_DIR"`、`HANDOFF_HOME_PARTS=(".autosdd","handoff")`、`handoff_dir_status()`（唯讀時退系統暫存，同 handback），並登記進 `sentinel_lifecycle.CACHE_FENCE_ENV` 圍籬（測試隔離根）。
+
+**機械層**（程式產生、零 token、必在；每欄缺值寫「量不到：<原因>」而非省略——欄位齊全本身是測試斷言）：
+| 欄 | 來源 |
+|---|---|
+| 來源 sid、產生時刻（`datetime.now().astimezone().isoformat()`，帶 offset；鐵律三 naive 時間戳判準） | payload／`CLAUDE_CODE_SESSION_ID` |
+| repo 根、branch、HEAD、領先／落後、`git status --short`（前 40 行＋總數）、`*-wip-preserved` 標籤 | `git -c core.quotepath=false …`（`tools/lib/git_paths.py` 慣例；CREATE_NO_WINDOW） |
+| 最後 K（預設 3）則**真人**提示原文 | 判準＝`transcript_activity` 的 `_origin_kind(record)=="human"`（新增公開函式 `human_prompts(path, k)`，不開第二家）；排除 tool_result、`isMeta`、auto-continuation、子代理逐字稿、`<command-…>`／`<system-reminder>` 注入；每則上限 2,000 字 |
+| 最後兩則 assistant 收尾文字（純 text block） | 同上 |
+| 子代理名冊快照 | `roster.snapshot(sid)`（§2.13.6） |
+| `AutoSDD_*`／`AutoClaude_*` 排程與 NextRunTime | `schedule_backend.select().list_jobs` ＋ 既有 NextRunTime 取數（憑證＝值） |
+| 額度各軸＋量測時刻 | `quota_gate.read_quota(now)`（只讀快取） |
+| 舊 session scratchpad 檔案清單（標記 `*BRIEF*`、`RESTART_POINT*`、`HB_*`） | `%TEMP%\claude\<hash>\<sid>\scratchpad`（Windows；POSIX `$TMPDIR/claude/...`）——路徑樣式量不到時寫「量不到」 |
+| 逐字稿絕對路徑 | `harness_feed.pick_transcript` |
+
+**主控層**（模型寫）：六個固定標題 `## 已驗證`／`## 未完成`／`## 下一步確切指令`／`## 禁止事項`／`## 已代決事項與 WHY`／`## 待掌舵者決定`。`handoff --finalize` 驗：前四節非空、全檔無 `TODO:`、標題比對走 `resume_route.heading_hit`（允許後綴）；不過 ⇒ rc≠0 並列缺項。猝死時沒有主控層 ⇒ 機械層照樣成立，接班提示逐字含「主控層缺席，先以機械層＋逐字稿尾段重建」。
+
+**公告而非搶占**：未 ack 且未過期（`HANDOFF_TTL_HOURS`，預設 72h）的交接包在同 repo 任何新 session 的 SessionStart 出聲（≤3 行＋路徑）；ack＝`<檔>.ack` sidecar（與 handback 的 `.ack` 同形），**只由** `sessionctl handoff --ack <路徑>` 寫。與 `announce_handbacks` 的差異（刻意）：handback 出聲即 ack（一次性通知），交接包要顯式 ack（接班憑證）——共用出聲／sidecar 寫法，不共用 ack 時機。不做認領鎖（X3）。過期者不再出聲，但 `sessionctl status` 仍列出。
+
+### 2.13.5 D5 三條切換路（同一份交接包；**設計定案，尚未落地**）
+
+| 路 | 觸發 | 動作 | 平台 |
+|---|---|---|---|
+| 無人 | 哨兵／續航判 FRESH | `resume_route.fresh_argv(claude, prompt, add_dir)`，prompt＝「讀 <交接包> 接續」＋兩條硬規則；`--add-dir` 增交接目錄 | 雙平台（既有載具） |
+| 互動自動 | PostToolUse R1～R3 出聲 → 主控到可重啟點 → `handoff --finalize` → `--spawn` | spawn 前置（任一不成立 rc≠0 拒絕）：①finalize 已過；②工作樹乾淨或 HEAD 上有 `*-wip-preserved` 標籤；③`roster` 本 session 無「執行中」代理。通過 ⇒ 洗環境、另起可見互動視窗 `claude "<短提示>"`（cwd＝repo 根）、解除本 session 哨兵、痕跡 `session_switch_spawned`（pid＋建立時刻） | Windows 實作；macOS／Linux＝`notify`（印手動指令），不寫未驗證載具 |
+| 手動 | 掌舵者 `/clear` 或自開視窗 | 靠 §2.13.4 公告 | 雙平台 |
+
+- `AUTOSDD_SESSION_SWITCH_MODE`＝`auto`（預設）／`notify`（只出聲＋產機械層，`--spawn` 拒絕並印手動指令）／`off`（PostToolUse 不出聲、不產檔；`--spawn` 拒絕；手動 `handoff` 指令仍可用）。
+- **洗環境**＝`handoff.washed_env(environ)` 純函式：移除 `CLAUDECODE`、所有 `CLAUDE_CODE_*`、`CLAUDE_PROJECT_DIR`、`AUTOSDD_UNATTENDED`、`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`（新 harness 會從 settings 重新套 env）；保留其餘。**不能共用** `resume_route.spawn_env()`：它是「疊加」語意（`{**os.environ, …}`），而這裡要「移除」——兩者正交，共用會讓其中一個語意被偷改。
+- **舊 session 的義務**：spawn 成功後舊 session 不得再動工作樹（同 sid 雙駕駛之外的「同工作樹雙駕駛」）；`--spawn` 印出的最後一行逐字要求主控本回合收尾。機械兜底＝新 session 的活動會讓舊 session 在 24h 後被 D3 判 SUPERSEDED。
+
+### 2.13.6 D6 續棒成本閘、D7 名冊與掌控（**設計定案，尚未落地**）
+
+**名冊資料源**（純讀檔，零 token；F3）：`~/.claude/projects/<slug>/<sid>/subagents/agent-<id>.meta.json`（`description`、`model`、`requestShape`、`finished`）＋同名 `.jsonl`（最後記錄時刻、最後一筆 assistant usage、累計 usage）。三態：
+- **執行中**：`finished != true` 且最後記錄 < `ROSTER_QUIET_MINUTES`（預設 10）前；
+- **安靜**：`finished != true` 且超過；
+- **殘局**（brief 稱「孤兒」）：`finished != true` 且擁有者 session 已不在（擁有者逐字稿最後對話記錄 ≥ 巡邏間隔且無 `claude` 行程命令列含該 sid）。🔴 誠實劃界：子代理跑在擁有者行程內，擁有者死了它也死了——「孤兒」實為**未收尾的記錄**，不是還在燒額度的東西；名冊這樣標，不讓人誤以為能去砍它。
+- 上下文＝最後一筆 assistant usage 的 `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`（`context_budget_guard.used_of` 同式；以參數注入，`session_brief` 先例，不從 lib 反向 import hook）。
+
+**D6 閘**（PreToolUse／`SendMessage`）：解析 `tool_input` 的目標（欄位名待沙盒驗，V-S2）→ 本 session `subagents/agent-<id>.meta.json`；上下文 ≥ `RESUME_AGENT_TOKENS`（150,000）⇒ 互動：stderr＋`additionalContext` 出聲、rc 0；`AUTOSDD_UNATTENDED` 有設 ⇒ exit 2 阻斷，訊息「改派新代理＋短任務書（handback／交卷檔路徑）」。解析不到目標／檔讀不動 ⇒ 放行（fail-open：誤擋只差一步的代理代價可能更高；E1 那種長代理在名冊裡一定解析得到）。
+
+**D7 指令**：`sessionctl status`（唯讀）列：子代理（三態）、無人窗口（pid、sid、起訖、路線、花費百分點、handback 路徑）、`AutoSDD_*` 排程與 NextRunTime、**過期哨兵**（`waiting` 且 D3 判準成立者，§2.13.3 兜底）、未 ack 交接包。`sessionctl stop --window <sid>｜--all-unattended`：
+1. 列舉候選行程（Windows：`Get-CimInstance Win32_Process` 取 `ProcessId,CreationDate,CommandLine`，經 `console_orphan_census` 既有的外呼形態；POSIX：`ps -o pid=,lstart=,args=`）；
+2. **身分驗證**：命令列含該 sid（RESUME 的 `-r <sid>`、FRESH／互動 spawn 的 prompt 內交接或 handback 路徑含 sid）**且**建立時刻與痕跡記錄（`resumed`／`session_switch_spawned` 前後 120s 內）相符；任一不符 ⇒ 不砍、rc≠0、印候選讓人判斷；
+3. 砍樹：Windows `taskkill /T /F /PID`（絕對路徑 `%SystemRoot%\System32\taskkill.exe`，`selfimproving/runner._taskkill_exe` 同法——建議抽 tools/lib/proctree.py 共用，見 WORK_PACKAGES (f)）；POSIX `killpg`；
+4. 解除該 sid 哨兵、痕跡 `window_stopped`（pid、驗證依據、rc）。
+- 視窗內（互動或無人）的子代理只能由擁有者用 TaskStop 停：本工具不提供（誠實劃界）。
+
+**可見性三處**：
+(a) Stop：本回合結束時本 session 仍有「執行中」代理 ⇒ 輸出 JSON `systemMessage`「本回合結束時仍有 N 支背景代理在跑：<描述/模型/上下文>」（rc 0、不阻斷）。🔴 用 `systemMessage` 而非裸 stderr：exit 0 的 stderr 不顯示給人（見 WORK_PACKAGES (f)-1）。
+(b) 無人窗口結局：單一家＝`endurance_env.record_unattended_outcome` ＋ `unattended_outcome_banner`（游標制，已讀即不再出聲）。本節把記錄時機由「relay 停下」擴為「每一窗收窗」（`relay_machine.settle_window` 內），欄位補 `started_at`、`ended_at`、`route`、`pct_before`、`pct_after`、`handback`；SessionStart 簡報（`session_brief.sessionstart_brief`）多接一次 banner。互動視窗 PostToolUse 不另開出口（banner 游標已保證「一次」；SessionStart 之後才發生的無人窗口由 Stop／`--pace` 的 banner 補）。
+(c) `resume_cost.jsonl` 的 `pct_before`／`pct_after`：`_run_resume` spawn 前後各讀一次 `quota_gate.read_quota` 的 five_hour 軸，傳入既有 `build_record(pct_before=, pct_after=)`（兩者皆有才填的既有規則不變）。
+
+### 2.13.7 D8 模型平衡建議（只出聲；**設計定案，尚未落地**）
+
+`modelmix.advice(axes, now)`：對 `weekly_all` 與模型專屬週軸（`weekly_scoped`，依 `context_budget_guard.model_family` 比對主控家族）各算 `ratio = pct/100 ÷ elapsed`，`elapsed = 1 − (resets_at − now)/7d`（夾在 [0.05,1]；`resets_at` 缺 ⇒ 該軸不判）。
+- 專屬軸 ratio − 全模型軸 ratio ≥ 0.15 ⇒「Fable 超前：多外派、主控只做判斷／派工／親驗」；
+- 全模型軸較超前 ≥ 0.15 ⇒「全模型超前：子代理降級（Opus→Sonnet→Haiku）、短任務書、禁續棒；判斷性工作主控可自做」；
+- 兩軸 ratio 皆 < 0.8 ⇒「兩軸皆寬：深度審查可用 Opus」；其餘 ⇒「平衡」。
+接線：`--pace` 多印一行（planner `--pace` 分支一行；`quota_gate` 不動）。選模型準則寫進根 `CLAUDE.md`〈派工模型〉：Haiku＝機械查找清點；Sonnet＝實作／測試／規格／QA 鏡（預設）；Opus＝架構、安全審查、疑難根因；主控只做判斷、派工、親驗。
+
+### 2.13.8 hook 面最小化、跨平台、與既有機制的關係（hook 部分**尚未落地**）
+
+- **hook 面**：新增一支 .claude/hooks/sessionctl_guard.py（Stop、PreToolUse／`SendMessage` 兩個低頻事件；exec form、`_hook_launcher`、不 spawn 子行程）；SessionStart 與 PostToolUse 不新增註冊——SessionStart 經 `session_brief.sessionstart_brief` 與 `sentinel_lifecycle.announce_handbacks` 內部延伸（hook 檔零行），PostToolUse 在 `context_budget_guard.arm_when_earned` 呼叫點旁加一行 `switch_advice(...)` 呼叫（SPECIAL_FILES 棘輪需重釘，帳本寫理由）。理由：PostToolUse 每次工具呼叫都起一個行程，第二支常駐 hook 的成本是 Windows 上每次 ~100ms 級的 python 啟動。
+- **鐵律三觸發清單**：`$env:*`（洗環境：Windows 環境變數大小寫不敏感 ⇒ 比對一律 `upper()`）；路徑分隔符（`Path` 組裝）；console 編碼（git／CIM 輸出 `encoding="utf-8", errors="replace"`，PowerShell 外呼前置 UTF-8 prelude）；行尾（交接包寫入 `newline="\n"`）；naive 時間戳（全部 `astimezone()`）；外部執行檔 argv（`taskkill`／`powershell.exe`／`pwsh`／`ps` 皆在 `sys.platform` 守衛內，`TestForeignExecutableArgvIsGuarded`）；`Win32_Process.CreationDate` 是 CIM datetime（含 UTC 偏移分鐘數）需專門解析；macOS `ps lstart` 本地時間無 offset ⇒ 只用於相等比對不持久化。
+- **單一家關係**：哨兵五分支＋SUPERSEDED 共用 `sentinel_decide`（不另開決策器）；雙駕駛判準仍是 `transcript_activity.live_driver`（D3 不取代它：雙駕駛＝同 sid、一個巡邏間隔內；SUPERSEDED＝他 sid、24h 尺度）；handback 公告沿 `announce_handbacks`；扇出帳（`quota_escalation.fanout_path`）不變，名冊不寫扇出帳；precompact 骨架（`precompact_restart_point`）仍是「壓縮前」的骨架，交接包是「換 session」的載體——交接包機械層把最近一份 precompact 骨架路徑列為一欄（不複寫其內容）。
+
+### 2.13.9 已否決方案
+
+| 代號 | 方案 | 否決理由 |
+|---|---|---|
+| X1 | 調低 autocompact 門檻（90%→更低）來減少重送 | 連動三段水位與 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` 的多把鎖；沒有「提醒不夠用」的暴露證據；E1 是無人選路錯，不是壓縮晚 |
+| X2 | 互動視窗由 hook 直接自動關閉舊視窗、自動開新視窗 | hook 沒有關閉 harness 的能力；自動開窗不經主控到可重啟點＝半套 edit 交棒，違反〈可重啟點四條件〉 |
+| X3 | 交接包「先到先得」認領鎖 | 無關 session（掌舵者另開的別件工作）會搶走；公告＋顯式 ack 已足夠 |
+| X4 | SendMessage 閘在互動視窗也阻斷 | 代理只差一步時逼重做代價可能更高；無人窗口才是 E1 的現場，故只在 `AUTOSDD_UNATTENDED` 阻斷 |
+| X5 | 新增 SubagentStart／SubagentStop hook 建名冊 | F3 已證名冊可純讀檔導出；多一組事件註冊＝多一組 fail-open 盲區與文件宣稱鎖 |
+| X6 | 共用 `resume_route.spawn_env()` 做互動 spawn 洗環境 | 疊加 vs 移除語意正交（§2.13.5） |
+| X7 | SUPERSEDED 只接在 halt 標記（DEF-200-532 現況） | E2 的哨兵沒有 halt 標記、處在撞線 `waiting`，撞線分支優先 ⇒ 永遠輪不到 |
+
+### 2.13.10 誠實劃界
+
+- 無人窗口內的子代理、互動視窗的子代理：本設計只能**看見**，停止只有擁有者 TaskStop 或砍整個無人窗口行程樹。
+- 互動自動切換只在 Windows 實作；macOS 為 notify。睡著的機器不在射程（同 §2.7）。
+- R1 的估計值（位元組÷比值）只在 feed 與逐字稿 usage 皆缺時用，且標 `estimated`；比值是量測值，由 `tools/probe/`（現查）重量，不寫成常數以外的第二份。
+- D3 讀不到其他 session 逐字稿時不判 SUPERSEDED（續航優先）。
+- `meta.json.finished` 在 session 猝死時的值未驗（V-S4）；若猝死時為 `false`，名冊會把它標成「殘局」——這是正確的標法，不是誤報。
+
+### 2.13.11 洩漏圍籬假陽性（已落地）
+
+**事故**：`~/.autosdd/traces/autosdd_leak_fence.jsonl` 2026-11-13T20:48:35 一筆 `rc: 0, fence_rc: 1`——全套測試期間新開的互動 session 的 SessionStart／PostToolUse 合法武裝了自己的哨兵 `AutoSDD_Sentinel_<sid>`，圍籬以「跑前跑後排程差集」判洩漏，把發起該次全套的互動 session 自己的哨兵判成洩漏，全套被判紅而無任何程式碼問題。
+
+**修法**：`sentinel_lifecycle.leak_fence(run, projects_dir=None)`：差集內的哨兵 job 若其 sid 對應的**真實**逐字稿在圍籬起點之後有對話記錄（判準沿用 `transcript_activity`，新增 `sessions_active_since`，不開第二家）⇒ 視為活著的真 session 合法武裝：只出聲、不判死，痕跡新增欄位 `live_session_jobs` 標明。測試種下的假 job（沒有真實逐字稿活動，或活動在圍籬起點之前）照舊判死。正負向鎖＝`LeakFenceTest`。
+
+**fail 方向**：讀不到逐字稿目錄 ⇒ 沿用舊行為（判洩漏），不放寬；代價是讀不到時假陽性仍可能重現，由痕跡檔的 `fence_rc` 與 `live_session_jobs` 兩欄事後可辨。
+
+### 2.13.12 暴露證據與已接受的劃界（第一段）
+
+- 暴露證據三取一皆成立：E1、E3 為掌舵者真機回報，E2 與圍籬事故為非構造性實況（見 §2.13.0）；第二段各項的暴露證據同表，實作時各自再附。
+- 第一段已修缺陷：DEF-200-580（E1）、581（E2）、582（圍籬）；第一波推送守門的跨平台成因另立 DEF-200-583；第二段承接 DEF-200-584。
+- 第一段的假設與界線：R1 的估計值只在量不到時用且標 `estimated`（見 §2.13.2 裁決）；SUPERSEDED 讀不到其他逐字稿時不判（續航優先，§2.13.3）；無撞線事件的過期 session 走既有閒置解除路徑（§2.13.3 裁決）。
+
 ## 3. 被否決的方案（各記為何否決）
 
 | 方案 | 出處 | 否決理由 |
