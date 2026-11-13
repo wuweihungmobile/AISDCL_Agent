@@ -31,7 +31,14 @@ ROOT = TOOLS.parent
 sys.path.insert(0, str(TOOLS))
 
 import selfimproving  # noqa: E402
+from lib.selfimproving import git as _si_git  # noqa: E402
 from lib.selfimproving import sources as si_sources  # noqa: E402
+
+# 套件內 git 子行程的環境是允許清單（E-54）：測試的隔離變數經這道測試縫放行（正式環境恆空）
+_si_git.ENV_TEST_PASSTHROUGH = (
+    "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE")
 
 _STRIP = (
     "GIT_DIR",

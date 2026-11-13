@@ -149,6 +149,8 @@ def _build() -> dict[str, dict]:
                "PUSH-SECRET-PATTERN")
     t |= _rows(admin, True, "repo 的 git 設定含不允許的項目（{detail}），不自動推送，請人檢查",
                "PUSH-GIT-CONFIG-UNSAFE")
+    t |= _rows(admin, True, "repo 的替換物件、grafts、shallow 或屬性檔會改變守門所見內容"
+               "（{detail}），不自動推送", "PUSH-REPO-STATE-UNSAFE")
     t |= _rows(admin, True, "遠端網址與安裝推送排程時記錄的不同（{detail}），不自動推送",
                "PUSH-REMOTE-URL-CHANGED")
     t |= _rows(admin, True,

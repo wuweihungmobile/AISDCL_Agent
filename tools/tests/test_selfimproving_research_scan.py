@@ -53,6 +53,7 @@ from _selfimproving_fixtures import (
 
 from lib.selfimproving import defs as si_defs
 from lib.selfimproving import fetch as si_fetch
+from lib.selfimproving import git as si_git
 from lib.selfimproving import scan as si_scan
 from lib.selfimproving import sources as si_sources
 
@@ -639,7 +640,7 @@ class TestScan(ScanCase):
         self.assertTrue(popen_calls)
         resolved = str(repo.resolve())
         for argv, kw in popen_calls:
-            self.assertEqual(argv[:3], ["git", "-C", resolved])
+            self.assertEqual(argv[:3], [si_git.resolve_git(os.environ), "-C", resolved])
             env = kw["env"]
             self.assertFalse({"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE"} & set(env))
             self.assertEqual(env["GIT_OPTIONAL_LOCKS"], "0")

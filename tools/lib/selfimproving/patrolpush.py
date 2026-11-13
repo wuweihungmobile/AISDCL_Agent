@@ -30,8 +30,8 @@ from lib import apply_lock
 
 from . import check as si_check
 from . import events as si_events
-from . import patrolrun, pushguard, runner, sched, unattended
-from .git import PIN_ARGS, Git, armed_pins, resolve_git, scrub_env
+from . import patrolrun, pushguard, runner, sched
+from .git import PIN_ARGS, Git, armed_pins, env_for_git, resolve_git
 
 AFTER_GUARD_HOOK = None  # 測試縫（僅測試設定）：守門之後、查遠端之前呼叫 `hook(repo)`
 AFTER_LSREMOTE_HOOK = None  # 測試縫：查完遠端、推送前核對之前
@@ -39,7 +39,6 @@ BEFORE_SEND_HOOK = None  # 測試縫：核對之後、送出 `git push` 之前�
 WALL_SECONDS_OVERRIDE = None  # 測試縫：縮短牆鐘（秒）
 LOCK_SLACK_SECONDS = 600  # 陳舊鎖＝牆鐘＋此值
 LOCK_WAIT_SECONDS = 1  # 取鎖等待（秒）：逾時＝另一個 push-run 在跑；也讓陳舊鎖在一輪內回收
-DROP_ENV = ("AUTOCLAUDE_SKIP_HOOKS",)  # git 環境變數另走 `git.scrub_env`（與守門同一份集合）
 LS_REMOTE_SECONDS = 60  # 推送前查遠端實值的牆鐘（秒）
 RUNNER_NOTE_MAX = 160  # 結果檔 runner_note 上限（字元）
 PARAM_KEYS = ("sched_auto_push", "sched_heartbeat_minutes", "sched_push_wall_minutes",
@@ -49,19 +48,15 @@ _FAILED = ("PUSH-AUTH", "PUSH-REJECTED", "PUSH-HOOK-FAILED", "PUSH-WALL-EXCEEDED
 
 
 def push_env(parent) -> dict[str, str]:
-    """傳給 git 的環境：父環境副本（pre-push 閘門要用人用的同一組變數；憑證類變數也保留，
-    git 要用）剔除 `DROP_ENV` 與名稱含 `AUDIT_KEY` 者，另明示 `GIT_TERMINAL_PROMPT=0`、
-    `GCM_INTERACTIVE=never`。"""
-    kept = unattended.without_run_scope(scrub_env(parent))  # 去 git 注入類與無人值守／運轉範圍變數
-    env = {k: v for k, v in kept.items() if k not in DROP_ENV and "AUDIT_KEY" not in k}
-    env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
-    return env
+    """傳給 git 的環境：只走 `git.env_for_git(parent, "push")` 的允許清單（E-54；push profile 含
+    pre-push 閘門要用的 `PYTHONUTF8`／`AUTOSDD_*`，排除無人值守與運轉範圍變數與 `AUDIT_KEY`）。"""
+    return env_for_git(parent, "push")
 
 
 MULTI = "<多筆>"  # `ls-remote` 有多行恰為 `refs/heads/main`：不明確，不採任何一行
 
 
-def push_argv(repo: Path, sha: str, remote_sha: str, git_exe: str = "git",
+def push_argv(repo: Path, sha: str, remote_sha: str, git_exe: str,
               pin: tuple[str, ...] = ()) -> list[str]:
     """推送 argv：明寫判定過的 sha 為來源、`refs/heads/main` 為目的，並以 `--force-with-lease`
     把「遠端此刻恰為 `remote_sha`」變成伺服器端的原子條件（審查 F-01；`remote_sha` 已驗證是
@@ -72,7 +67,7 @@ def push_argv(repo: Path, sha: str, remote_sha: str, git_exe: str = "git",
             f"{sha}:{pushguard.BRANCH_REF}"]
 
 
-def remote_main(repo: Path, env: dict, run_argv, git_exe: str = "git",
+def remote_main(repo: Path, env: dict, run_argv, git_exe: str,
                 pin: tuple[str, ...] = ()) -> tuple[str | None, object]:
     """`git ls-remote origin refs/heads/main`：回（遠端實值 sha；遠端沒有該分支＝""；多行恰為該
     分支＝`MULTI`；查不到＝None, 原始執行結果）。逐行以空白或 tab 切成恰兩欄，只採第二欄**完全等於**

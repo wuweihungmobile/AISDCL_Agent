@@ -327,6 +327,37 @@ def _host_of(url: str) -> str:
 parse_config_list = si_git.parse_config_list  # 單一家在 git.py（`sched arm` 與守門共用）
 
 
+CODE_REPO_STATE = "PUSH-REPO-STATE-UNSAFE"  # 物件庫狀態會改變守門所見內容（E-53）
+
+
+def repo_state_problem(j) -> tuple[str, str] | None:
+    """repo 狀態檢查（E-53、E-56；在設定檢查之後、任何 `rev-list`／`show`／`cat-file` 之前）：
+    `refs/replace/` 非空、`info/grafts` 存在、`shallow` 存在、`info/attributes` 含 `filter=`
+    任一 ⇒（碼, `refs/replace`／`info/grafts`／`shallow`／`info/attributes`）；git 讀取失敗拋
+    `OSError`（呼叫端 fail-closed）。"""
+    cp = j.run("for-each-ref", "--format=%(refname)", "refs/replace/")
+    if cp.returncode != 0:
+        raise OSError("for-each-ref 失敗")
+    if cp.stdout.strip():
+        return CODE_REPO_STATE, "refs/replace"
+    gp = j.run("rev-parse", "--git-path", "info/grafts", "--git-path", "shallow",  # 一次 spawn
+               "--git-path", "info/attributes")
+    rels = gp.stdout.splitlines()
+    if gp.returncode != 0 or len(rels) != 3 or not all(r.strip() for r in rels):
+        raise OSError("rev-parse --git-path 失敗")
+    for rel, found in zip(("info/grafts", "shallow"), rels):
+        if (j.g.repo / found.strip()).exists():
+            return CODE_REPO_STATE, rel
+    attr = j.g.repo / rels[2].strip()
+    try:
+        lines = attr.read_text(encoding="utf-8", errors="replace").splitlines()
+    except FileNotFoundError:
+        lines = []
+    if any(re.search(r"(?:^|\s)filter=", ln) for ln in lines if not ln.lstrip().startswith("#")):
+        return CODE_REPO_STATE, "info/attributes"
+    return None
+
+
 def config_problem(j, armed_doc: dict | None, env=None) -> tuple[str, str] | None:
     """推送前的 git 設定與遠端網址檢查（審查 F-04；E-29）：行程環境含 `GIT_CONFIG_*` 注入、任一層
     （system／global／local／worktree／command，含 `--includes` 展開）的設定依 `git.CONFIG_RULES`
@@ -346,8 +377,10 @@ def config_problem(j, armed_doc: dict | None, env=None) -> tuple[str, str] | Non
             hooks.append(_norm_hooks(val))
         elif (shown := config_rule_hit(scope, key, val)) is not None:
             bad.append(shown)
-    if hooks != [_norm_hooks(si_git.EXPECTED_HOOKS)]:  # 不存在、重複或不等於既定目錄，一律不合
-        bad.append("core.hookspath")
+    want = _norm_hooks(si_git.EXPECTED_HOOKS)
+    absolute = _norm_hooks(str(j.g.repo / si_git.EXPECTED_HOOKS))  # 安裝腳本寫的是絕對路徑
+    if len(hooks) != 1 or hooks[0].lower() not in (want.lower(), absolute.lower()):
+        bad.append("core.hookspath")  # 不存在、重複或不等於既定目錄，一律不合
     if bad:
         return CODE_CONFIG, " ".join(sorted(set(bad))[:3])
     url = j.run_plain("config", "--get", "remote.origin.url")

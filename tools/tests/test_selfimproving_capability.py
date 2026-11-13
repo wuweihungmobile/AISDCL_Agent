@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 import socket
 import subprocess
@@ -27,6 +28,8 @@ from unittest import mock
 
 import _selfimproving_fixtures as fx
 from _selfimproving_fixtures import SiTestCase, aid, obs_id, pid, rid
+
+from lib.selfimproving import git as si_git
 
 TOOLS = fx.TOOLS
 PKG = TOOLS / "lib" / "selfimproving"
@@ -682,7 +685,8 @@ class TestDynamicPurity(SiTestCase):
 
         with mock.patch.object(subprocess, "run", side_effect=spy):
             self.check(repo)
-        self.assertTrue(calls and all(c[0] == "git" for c in calls), calls[:3])
+        exe = si_git.resolve_git(os.environ)  # 套件內 git 一律絕對路徑（E-57）
+        self.assertTrue(calls and all(c[0] == exe for c in calls), calls[:3])
 
 
 

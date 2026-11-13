@@ -62,9 +62,14 @@ GIT_ALLOWED = {"apply", "archive", "status", "rev-parse", "log", "show", "grep",
                "ls-files"}
 
 
+def is_git(exe) -> bool:
+    """套件內 git 一律絕對路徑（E-57）：以檔名主幹判斷是不是 git 執行檔。"""
+    return isinstance(exe, str) and Path(exe).stem.lower() == "git"
+
+
 def git_subcommand(argv) -> str | None:
     """§5.6 `git_subcommands`：`git` 之後略過 `-C <目錄>` 與 `-c <鍵=值>` 的第一個非旗標位置詞。"""
-    items = [a for a in argv[1:]] if argv and argv[0] == "git" else list(argv)
+    items = [a for a in argv[1:]] if argv and is_git(argv[0]) else list(argv)
     i = 0
     while i < len(items):
         if items[i] in ("-C", "-c"):
@@ -314,7 +319,7 @@ class TestSandbox(P2TestCase):
         real_run = subprocess.run
 
         def spy(argv, *a, **kw):
-            if argv and argv[0] == "git":
+            if argv and is_git(argv[0]):
                 argvs.append(list(argv))
             return real_run(argv, *a, **kw)
         env = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": str(cfg)}
@@ -495,7 +500,7 @@ class TestSandbox(P2TestCase):
         paused = [False]
 
         def rec(argv, *a, **kw):
-            if argv and argv[0] == "git" and not paused[0]:
+            if argv and is_git(argv[0]) and not paused[0]:
                 seen.append(list(argv))
             return real_run(argv, *a, **kw)
 
@@ -559,7 +564,7 @@ class TestSandbox(P2TestCase):
         real_run = subprocess.run
 
         def rec(argv, *a, **kw):
-            if argv and argv[0] == "git":
+            if argv and is_git(argv[0]):
                 seen.append(list(argv))
             return real_run(argv, *a, **kw)
         with mock.patch.object(si_git.subprocess, "run", rec):
@@ -675,7 +680,7 @@ class TestSandbox(P2TestCase):
             return real_run(argv, *a, **kw)
 
         def no_git(argv, *a, **kw):
-            if argv and argv[0] == "git" and "archive" in argv:
+            if argv and is_git(argv[0]) and "archive" in argv:
                 raise FileNotFoundError("git")
             return real_run(argv, *a, **kw)
         for label, fake, cause in (("a", git_failed, "SANDBOX-GIT-FAILED"),

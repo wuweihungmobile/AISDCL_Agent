@@ -248,26 +248,43 @@ def kill_pid_tree(pid: int) -> None:
 
 def pid_started_at(pid: int) -> float | None:
     """行程啟動時刻（epoch 秒）；不存在或量不到＝None（供「pid 被重用」核對：呼叫端比對 spawn.json
-    記的啟動時刻）。Windows 問 PowerShell、POSIX 問 `ps`（經過秒數換算）。"""
-    if sys.platform.startswith("win"):
-        argv = ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-                f"$p = Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue; "
-                "if ($p) { [DateTimeOffset]::new($p.StartTime).ToUnixTimeSeconds() }"]
-    else:
-        argv = ["ps", "-o", "etimes=", "-p", str(int(pid))]
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform.startswith("win") else 0
+    記的啟動時刻）。Windows 以 ctypes `GetProcessTimes` 直接查（不起 powershell 子行程：平行負載下
+    每次起 powershell 要數百毫秒到數秒，逾牆終止路徑吃不起）、POSIX 問 `ps`（經過秒數換算）。"""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            k32.GetProcessTimes.restype = wintypes.BOOL
+            ft = ctypes.POINTER(wintypes.FILETIME)
+            k32.GetProcessTimes.argtypes = [wintypes.HANDLE, ft, ft, ft, ft]
+            k32.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = k32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return None
+            try:
+                created, a, b, c = (wintypes.FILETIME() for _ in range(4))
+                if not k32.GetProcessTimes(handle, *map(ctypes.byref, (created, a, b, c))):
+                    return None
+            finally:
+                k32.CloseHandle(handle)
+            ticks = (created.dwHighDateTime << 32) | created.dwLowDateTime  # 100ns、自 1601
+            return float((ticks - 116444736000000000) // 10_000_000)
+        except Exception:  # noqa: BLE001  # 量不到＝None（呼叫端 fail-closed）
+            return None
     try:
-        cp = subprocess.run(argv, capture_output=True, encoding="utf-8", errors="replace",
-                            timeout=20, shell=False, check=False, creationflags=flags)
+        cp = subprocess.run(["ps", "-o", "etimes=", "-p", str(int(pid))], capture_output=True,
+                            encoding="utf-8", errors="replace", timeout=20, shell=False,
+                            check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     text = cp.stdout.strip()
     if cp.returncode != 0 or not text.isdigit():
         return None
-    value = int(text)
-    if sys.platform.startswith("win"):
-        return float(value)
-    return time.time() - value
+    return time.time() - int(text)
 
 
 IDENTITY_TOLERANCE_SECONDS = 5  # 行程建立時間與 `spawn.json` 記的實測值允許的誤差（秒）
@@ -345,11 +362,11 @@ def started_utc(pid: int) -> str | None:
 
 def run_probe(argv: list[str], *, cwd: Path, sandbox_root: Path, timeout: float) -> ProbeResult:
     """執行一個探針；回 `ProbeResult`（逾時時 `rc` 為 None、`timed_out` 為 True）。"""
-    flags: dict = {}
+    # 探針是 console 程式：Windows 要 NO_WINDOW，否則 pythonw 之下會多配一個 conhost
+    flags: dict = {"start_new_session": True}
     if sys.platform.startswith("win"):
-        flags["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    else:
-        flags["start_new_session"] = True
+        flags = {"creationflags": (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                                   | getattr(subprocess, "CREATE_NO_WINDOW", 0))}
     proc = subprocess.Popen(
         expand(argv, sandbox_root), cwd=str(cwd), env=_env(sandbox_root), shell=False,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **flags)

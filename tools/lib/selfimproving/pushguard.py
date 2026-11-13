@@ -472,6 +472,8 @@ def evaluate(repo: Path, params: dict, si: Path, now: datetime, *, alive=None,
         inside = j.run("rev-parse", "--is-inside-work-tree")  # 與其餘呼叫同走總預算
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             raise _GitFail
+        if (bad := pushcontent.repo_state_problem(j)):  # 替換物件等：在任何讀物件的呼叫之前（E-53）
+            return _result(bad[0], bad[1])
         # HEAD 與遠端追蹤參照各只解析一次、固定成 sha；之後所有查詢都用這兩個 sha，不再用符號
         # `HEAD`／`origin/main`（審查 F-01／F-02：符號參照在判定途中被移動，守門就判到別的範圍）
         head = _sha_of(j.run("rev-parse", "HEAD"))

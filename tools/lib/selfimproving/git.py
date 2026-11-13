@@ -17,17 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-#: 守門判定與實際推送**共用**的 git 環境剔除集合（單一來源，資安審查 F-14）：改變 repo／物件庫
-#: 位置的變數，加上能從環境注入設定、改變 ssh 命令或 git 程式路徑的變數。`GIT_ASKPASS`、
-#: `GIT_CONFIG_GLOBAL`、`GIT_CONFIG_NOSYSTEM` 是使用者既有的憑證與設定來源，不在此列。
-STRIP_ENV = (
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_PREFIX",
-    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE",
-    "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_SSH_COMMAND", "GIT_SSH", "GIT_EXEC_PATH",
-)
-_STRIP_PREFIXES = ("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 _TIMEOUT = 60
-_BARE = "git"  # 未給 `exe` 的舊呼叫端（check、心跳）沿用的名稱；推送守門路徑一律傳絕對路徑
 _VALUE_CHARS = re.compile(r"[A-Za-z0-9+/_.=\-]{12,}")
 # 值＝連續的非空白、非引號、非 `,;)}]` 字元；鍵後允許閉合引號（JSON 形）、值前允許開頭引號（E-42）
 _KV = (r"(?i)\b([A-Z0-9_]*(?:token|password|passwd|secret|key|(?<![a-z])pat(?![a-z]))[A-Z0-9_]*)"
@@ -100,13 +90,76 @@ def scan_names(text: str) -> list[str]:
     return out
 
 
-def scrub_env(env) -> dict[str, str]:
-    """去掉 `STRIP_ENV` 與 `GIT_CONFIG_KEY_*`／`GIT_CONFIG_VALUE_*`（守門與推送共用）。"""
-    return {k: v for k, v in env.items()
-            if k not in STRIP_ENV and not k.startswith(_STRIP_PREFIXES)}
+# ── git 子行程環境：允許清單（TCS-P7 附錄 A.10、勘誤 E-54）─────────────────────────────────
+#: 允許清單（鍵名；win32 大小寫不分）。`-c` 蓋不過環境變數（`GIT_SSL_NO_VERIFY`、`*_PROXY`、
+#: `GIT_TRACE*`、`GCM_*`、`GIT_ASKPASS`…，實測 E-61），所以環境用允許清單而不是黑名單剔除。
+ENV_ALLOW = {
+    "win32": (
+        "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT", "OS", "COMPUTERNAME",
+        "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE", "PROGRAMDATA", "PROGRAMFILES",
+        "PROGRAMFILES(X86)", "PROGRAMW6432", "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432", "USERNAME", "USERDOMAIN", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+        "HOME", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "LANG", "LC_ALL", "LC_CTYPE"),
+    "posix": (
+        "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "LANG", "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "SSH_AUTH_SOCK"),
+}
+_ENV_PREFIX = {"win32": (), "posix": ("LC_",)}
+#: 只在 push profile（pre-push 閘門要用的變數）：名稱、前綴（前綴另排除名稱含下列字樣者：無人值守
+#: 自述、運轉範圍、稽核金鑰；整個套件讀前兩個變數名的站點只有 `unattended.py`，這裡只用字樣）
+_PUSH_NAMES = ("PYTHONUTF8", "PYTHONIOENCODING")
+_PUSH_PREFIX = "AUTOSDD_"
+_PUSH_EXCLUDE_WORDS = ("UNATTENDED", "PATROL_RUN", "AUDIT_KEY")
+#: 固定值（覆寫）；各 profile 另加
+ENV_FIXED = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_REPLACE_OBJECTS": "1", "GIT_ATTR_NOSYSTEM": "1"}
+_PROFILE_FIXED = {"read": {"GIT_OPTIONAL_LOCKS": "0"}, "push": {"GCM_INTERACTIVE": "never"}}
+#: 測試縫：額外放行的變數名（測試夾具用它把 `GIT_CONFIG_GLOBAL` 等隔離變數傳給 git）；正式環境恆空
+ENV_TEST_PASSTHROUGH: tuple[str, ...] = ()
 
 
-# ── git 設定規則：全套件唯一宣告表（TCS-P7 附錄 A.9、勘誤 E-29、E-49） ─────────────────────────
+def env_for_git(parent, profile: str, *, platform: str | None = None,
+                extra: tuple[str, ...] | None = None) -> dict[str, str]:
+    """套件內**所有** git 子行程的環境（單一函式）：只從 `parent` 取 `ENV_ALLOW` 內的變數，`PATH`
+    取 `safe_path` 結果（再去掉 cwd 之下的段），加固定值；`profile`＝`read`／`push`；`platform`
+    ＝`win32` 或其他（posix），預設取目前平台；`extra` 缺省＝測試縫 `ENV_TEST_PASSTHROUGH`
+    （正式環境恆空）。其餘一律不傳。"""
+    extra = ENV_TEST_PASSTHROUGH if extra is None else extra
+    win = (platform or ("win32" if os.name == "nt" else "posix")).startswith("win")
+    plat = "win32" if win else "posix"
+    names = set(ENV_ALLOW[plat]) | {n.upper() if win else n for n in extra}
+    if profile == "push":
+        names |= set(_PUSH_NAMES)
+    out: dict[str, str] = {}
+    path_value = ""
+    for key, value in parent.items():
+        kk = key.upper() if win else key
+        if kk == "PATH":
+            path_value = value
+        elif kk in names or kk.startswith(_ENV_PREFIX[plat]):
+            out[key] = value
+        elif (profile == "push" and kk.startswith(_PUSH_PREFIX)
+              and not any(w in kk for w in _PUSH_EXCLUDE_WORDS)):
+            out[key] = value
+    segments = []
+    try:
+        cwd = Path.cwd().resolve()
+    except OSError:
+        cwd = None
+    for seg in safe_path({"PATH": path_value}).split(os.pathsep):
+        try:
+            under = (cwd is not None and cwd.parent != cwd
+                     and Path(seg).resolve().is_relative_to(cwd))
+        except OSError:
+            under = True
+        if seg and not under:
+            segments.append(seg)
+    out["PATH"] = os.pathsep.join(segments)
+    out.update(ENV_FIXED)
+    out.update(_PROFILE_FIXED[profile])
+    return out
+
+
+# ── git 設定規則：全套件唯一宣告表（TCS-P7 附錄 A.9、勘誤 E-29、E-49、E-55、E-56） ─────────────
 #: 推送守門認可的憑證輔助程式（system／global 層只准這些；`sched arm` 記入 `armed.json`）
 SAFE_HELPERS = ("manager", "manager-core", "osxkeychain", "wincred", "libsecret", "cache")
 #: repo 既定的 hooks 目錄（`core.hookspath` 須存在且等於它；測試縫：夾具以 mock 替換）
@@ -131,13 +184,15 @@ def _any(_scope: str, _val: str) -> bool:
 # 三類：甲＝可釘定且無副作用（每次呼叫 -c 釘安全值；system／global 層出現不擋，local／worktree／
 # command 層與 GIT_CONFIG_* 環境變數出現仍擋）；乙＝不能釘固定值但有合法值（`RECORDED_PATTERN`：
 # arm 時記下 system＋global 的有效值到 `armed.json` 的 `config_pins`、推送時以記錄值釘定、現值與
-# 記錄不同即擋、arm 時沒有值則不釘且任何層出現即擋、不釘空值；local 層出現一律擋）；
-# 丙＝不可釘定且無合法用途（任何層出現即擋，只偵測不釘）。
+# 記錄不同即擋、arm 時沒有值則不釘且任何層出現即擋、不釘空值〔`http.proxy` 與 helper 清空例外〕；
+# local 層出現一律擋）；丙＝不可釘定且無合法用途（任何層出現即擋，只偵測不釘）。
 CONFIG_RULES: tuple[Rule, ...] = (
     # ── 乙（local 層一律擋；system／global 層由 `recorded_problems` 比對記錄）
     Rule(r"credential\.helper", LOCAL_LAYERS, _any, (("credential.helper", ""),)),  # 清空後接記錄值
-    Rule(r"credential\..+\.helper", LOCAL_LAYERS, _any),
+    Rule(r"credential\..+", LOCAL_LAYERS, _any),  # 前綴涵蓋全部鍵與子區段（E-55）
     Rule(r"core\.sshcommand", LOCAL_LAYERS, _any),
+    Rule(r"core\.attributesfile", LOCAL_LAYERS, _any),
+    Rule(r"filter\..+", LOCAL_LAYERS, _any),  # clean／smudge／process／required（E-56）
     Rule(r"http\.sslcainfo", LOCAL_LAYERS, _any),
     Rule(r"http\.sslcapath", LOCAL_LAYERS, _any),
     Rule(r"http\.sslbackend", LOCAL_LAYERS, _any),
@@ -149,6 +204,10 @@ CONFIG_RULES: tuple[Rule, ...] = (
          (("core.fsmonitor", "false"),)),
     Rule(r"core\.gitproxy", LOCAL_LAYERS, _any, (("core.gitProxy", ""),)),
     Rule(r"core\.askpass", LOCAL_LAYERS, _any, (("core.askPass", ""),)),
+    Rule(r"core\.usereplacerefs", LOCAL_LAYERS, lambda s, v: v.strip().lower() not in _FALSY,
+         (("core.useReplaceRefs", "false"),)),
+    Rule(r"log\.showsignature", LOCAL_LAYERS, lambda s, v: v.strip().lower() not in _FALSY,
+         (("log.showSignature", "false"),)),
     Rule(r"http\.sslverify", LOCAL_LAYERS, lambda s, v: v.strip().lower() in _FALSY,
          (("http.sslVerify", "true"),)),
     Rule(r"remote\..+\.uploadpack", LOCAL_LAYERS, _any,
@@ -167,13 +226,14 @@ CONFIG_RULES: tuple[Rule, ...] = (
 )
 #: 行程環境中任一存在即不合的變數（`detail`＝`env:<名>`）
 ENV_RULES = re.compile(r"^GIT_CONFIG_(?:COUNT|PARAMETERS|KEY_.*|VALUE_.*)$")
-#: 乙類鍵（小寫）的比對式；`PINNABLE`＝其中可（用標準大小寫寫法）釘定的單一鍵
+#: 乙類鍵的比對式（鍵＝小寫的段與變數名、子區段保留原大小寫）；`PINNABLE`＝可用標準大小寫寫法
+#: 釘定的單一鍵（其餘乙類鍵以原鍵名釘定）
 RECORDED_PATTERN = re.compile(
-    r"credential\.helper|credential\..+\.helper|core\.sshcommand|http\.sslcainfo|http\.sslcapath"
-    r"|http\.sslbackend|http\.proxy|http\..+\.proxy")
+    r"credential\..+|core\.sshcommand|core\.attributesfile|filter\..+|http\.sslcainfo"
+    r"|http\.sslcapath|http\.sslbackend|http\.proxy|http\..+\.proxy")
 PINNABLE = {"http.sslcainfo": "http.sslCAInfo", "http.sslcapath": "http.sslCAPath",
             "http.sslbackend": "http.sslBackend", "core.sshcommand": "core.sshCommand",
-            "http.proxy": "http.proxy"}
+            "http.proxy": "http.proxy", "core.attributesfile": "core.attributesFile"}
 
 
 def _shown(key: str) -> str:
@@ -183,10 +243,10 @@ def _shown(key: str) -> str:
 
 
 def config_rule_hit(scope: str, key: str, val: str) -> str | None:
-    """依 `CONFIG_RULES` 判一筆設定（`key` 小寫）：不合回要顯示的鍵名；合規回 None。
+    """依 `CONFIG_RULES` 判一筆設定（`key` 的段與變數名小寫）：不合回要顯示的鍵名；合規回 None。
     `core.hookspath` 由呼叫端另判（存在、唯一、等於既定值）。"""
     for rule in CONFIG_RULES:
-        if not re.fullmatch(rule.match, key) or rule.match == r"core\.hookspath":
+        if not re.fullmatch(rule.match, key.lower()) or rule.match == r"core\.hookspath":
             continue
         if rule.layers is not None and scope not in rule.layers:
             continue
@@ -195,36 +255,62 @@ def config_rule_hit(scope: str, key: str, val: str) -> str | None:
     return None
 
 
+def _norm_key(key: str) -> str:
+    """段與變數名轉小寫、子區段（網址等，區分大小寫）保留原樣。"""
+    parts = key.split(".")
+    if len(parts) < 3:
+        return key.lower()
+    return ".".join([parts[0].lower(), *parts[1:-1], parts[-1].lower()])
+
+
 def parse_config_list(raw: str) -> list[tuple[str, str, str]]:
-    """`git config --list --show-scope --includes -z` 的輸出→[(層, 鍵小寫, 值)]。"""
+    """`git config --list --show-scope --includes -z` 的輸出→[(層, 鍵, 值)]（鍵見 `_norm_key`）。"""
     toks, out = raw.split("\0"), []  # `-z` 格式：`<scope>\0<key>\n<value>\0`（scope 自成一段）
     for i in range(0, len(toks) - 1, 2):
         key, _, val = toks[i + 1].partition("\n")
-        out.append((toks[i], key.lower(), val))
+        out.append((toks[i], _norm_key(key), val))
     return out
 
 
+def _is_recorded(key: str) -> bool:
+    return RECORDED_PATTERN.fullmatch(key.lower()) is not None
+
+
 def _is_helper(key: str) -> bool:
-    return key == "credential.helper" or re.fullmatch(r"credential\..+\.helper", key) is not None
+    return key.startswith("credential.") and key.rsplit(".", 1)[-1] == "helper"
+
+
+def _arm_refused(key: str, val: str) -> bool:
+    """讓權杖明文落地或寫追蹤檔的值（E-55）：`credentialStore=plaintext`、任何 `plaintext*`、
+    非空且非 false 的 `trace*`；`helper` 值須屬 `SAFE_HELPERS`。"""
+    if not key.startswith("credential."):
+        return False
+    var, val = key.rsplit(".", 1)[-1], val.strip().lower()
+    return ((var == "credentialstore" and val == "plaintext") or var.startswith("plaintext")
+            or (var.startswith("trace") and val not in ("", *_FALSY))
+            or (var == "helper" and val not in SAFE_HELPERS))
 
 
 def arm_record(repo: Path) -> tuple[dict | None, str]:
     """`sched arm` 時記下乙類鍵的有效值（system＋global 層）：回（`armed.json` 的 `config_pins`
-    ＝{鍵小寫: [值…]}, ""）；local／worktree／command 層出現乙類鍵、或任一 credential helper
-    不在 `SAFE_HELPERS` ⇒（None, 鍵名）。沒有值的鍵不記、之後任何層出現即擋。"""
-    cp = Git(repo, resolve_git(os.environ)).run("config", "--list", "--show-scope",
-                                                "--includes", "-z")
+    ＝{鍵: [值…]}, ""）；local／worktree／command 層出現乙類鍵、或值屬明文儲存／追蹤設定／不安全
+    helper ⇒（None, 鍵名）。沒有值的鍵不記、之後任何層出現即擋。arm 行程環境含 `*_PROXY` 時印
+    警告（推送任務不使用環境代理）。"""
+    cp = Git(repo).run("config", "--list", "--show-scope", "--includes", "-z")
     if cp is None or cp.returncode not in (0, 1):
         return None, "git 設定讀取失敗"
     pins: dict[str, list[str]] = {}
     for scope, key, val in parse_config_list(cp.stdout):
-        if RECORDED_PATTERN.fullmatch(key) is None:
+        if not _is_recorded(key):
             continue
         val = val.strip()
-        if scope in LOCAL_LAYERS or (_is_helper(key) and val not in SAFE_HELPERS):
+        if scope in LOCAL_LAYERS or _arm_refused(key, val):
             return None, _shown(key).replace("\n", " ")
         if val:
             pins.setdefault(key, []).append(val)
+    if any(k.upper().endswith("_PROXY") for k in os.environ):
+        sys.stderr.write("警告：目前環境含 *_PROXY；推送任務不使用環境代理，需代理請改設 global "
+                         "http.proxy 後重新 sched arm\n")
     return pins, ""
 
 
@@ -234,7 +320,7 @@ def recorded_problems(entries, armed: dict | None) -> list[str]:
     pins = armed_pins(armed)
     seen: dict[str, list[str]] = {}
     for scope, key, val in entries:
-        if RECORDED_PATTERN.fullmatch(key) and scope not in LOCAL_LAYERS:
+        if _is_recorded(key) and scope not in LOCAL_LAYERS:
             seen.setdefault(key, []).append(val.strip())
     return sorted({_shown(k) for k in seen.keys() | pins.keys()
                    if seen.get(k, []) != pins.get(k, [])
@@ -242,16 +328,18 @@ def recorded_problems(entries, armed: dict | None) -> list[str]:
 
 
 def armed_pins(armed: dict | None) -> dict[str, list[str]]:
-    """`armed.json` 的 `config_pins`→{鍵小寫: [值…]}；形態不對的項一律當沒記。"""
+    """`armed.json` 的 `config_pins`→{鍵: [值…]}；形態不對的項一律當沒記。"""
     raw = (armed or {}).get("config_pins")
     return {k: [x for x in v if isinstance(x, str)] for k, v in (raw.items() if isinstance(
         raw, dict) else ()) if isinstance(k, str) and isinstance(v, list)}
 
 
 def PIN_ARGS(repo: Path, pins=None) -> list[str]:  # noqa: N802  # 規格名稱
-    """推送端釘定序列（最高優先序的 `-c`；甲類固定值依 `CONFIG_RULES` 由上而下，`credential.helper=`
-    清空在最前，後接記錄的 helper 各一個；乙類單值鍵以 `config_pins` 的記錄值釘定、不釘空值，
-    接在最後）。除設定檢查那一次外，守門與推送的每個 git 呼叫在子命令之前帶它（勘誤 E-29）。"""
+    """推送端釘定序列（最高優先序的 `-c`）：甲類固定值依 `CONFIG_RULES` 由上而下，
+    `credential.helper=` 清空在最前、後接記錄的 helper 各一個；其後乙類記錄值——helper 類
+    （含網址限定）先清空再依序補、
+    單值鍵以記錄值釘定、不釘空值；`http.proxy` 無記錄時釘空值（空字串＝不用代理，E-54 例外）。
+    除設定檢查那一次外，守門與推送的每個 git 呼叫在子命令之前帶它（勘誤 E-29、E-60）。"""
     pins = pins or {}
     hooks = EXPECTED_HOOKS
     if not os.path.isabs(hooks):
@@ -263,9 +351,16 @@ def PIN_ARGS(repo: Path, pins=None) -> list[str]:  # noqa: N802  # 規格名稱
             if key == "credential.helper":
                 for helper in pins.get("credential.helper", ()):
                     out += ["-c", f"credential.helper={helper}"]
-    for key, name in PINNABLE.items():
-        if pins.get(key) and pins[key][-1].strip():  # 不釘空值
-            out += ["-c", f"{name}={pins[key][-1]}"]
+    for key in sorted(pins):
+        vals = [v for v in pins[key] if v.strip()]
+        if key == "credential.helper" or not vals:
+            continue
+        if _is_helper(key):
+            out += ["-c", f"{key}="] + [a for v in vals for a in ("-c", f"{key}={v}")]
+        else:
+            out += ["-c", f"{PINNABLE.get(key, key)}={vals[-1]}"]
+    if not any(pins.get("http.proxy", ())):
+        out += ["-c", "http.proxy="]
     return out
 
 
@@ -273,9 +368,10 @@ def safe_path(env=None) -> str:
     """`PATH` 去掉 repo 與虛擬環境之下的目錄（審查 F-10／F-16：那裡的 `git` 是被攻擊面）。"""
     env = os.environ if env is None else env
     repo = Path(__file__).resolve().parents[3]
-    banned = [repo]
-    if sys.prefix != sys.base_prefix:  # 在虛擬環境內：環境根本身也不可信（可能不在 repo 之下）
-        banned.append(Path(sys.prefix).resolve())
+    # `sys.prefix`（venv 根、pyenv 版本目錄）目前使用者可寫才排除（E-21 ③）：防有人放假 `git`，
+    # 不可寫的系統前綴（POSIX `/usr`）放不進東西、排除它會讓 `/usr/bin/git` 找不到
+    prefix = Path(sys.prefix).resolve()
+    banned = [repo, prefix] if os.access(prefix, os.W_OK) else [repo]
     keep = []
     for d in (env.get("PATH") or "").split(os.pathsep):
         try:
@@ -336,21 +432,22 @@ def apply_numstat(repo: Path, patch_file: Path) -> list[str]:
 
 class Git:
     def __init__(self, repo: Path, exe: str | None = None, pin: tuple[str, ...] = ()) -> None:
-        """`exe`＝git 的絕對路徑（推送守門路徑一律傳；未傳沿用裸名，check 與心跳的舊行為）；
-        `pin`＝每個呼叫在子命令之前帶的 `-c` 釘定序列（`PIN_ARGS`）。"""
+        """`exe`＝git 的絕對路徑；未傳即 `resolve_git` 解析，解析不到則 `run` 回 None（呼叫端
+        fail-closed），**絕不退回裸名 `git`**（E-57）；`pin`＝每個呼叫在子命令之前帶的 `-c`
+        釘定序列（`PIN_ARGS`）。"""
         self.repo = repo.resolve()
-        self.exe, self.pin = exe, tuple(pin)
+        self.exe, self.pin = exe or resolve_git(os.environ), tuple(pin)
         self._ok: bool | None = None
         self.timed_out = False  # 最近一次 `run` 是否因逾時而回 None（分辨逾時與 git 不可用）
 
     def _env(self) -> dict[str, str]:
-        env = scrub_env(os.environ)
-        env["GIT_OPTIONAL_LOCKS"] = "0"
-        return env
+        return env_for_git(os.environ, "read")
 
     def run(self, *args: str, timeout: int | None = None) -> subprocess.CompletedProcess | None:
         """`timeout` 選用（牆鐘秒數；預設仍為 60 秒，P1 的呼叫不變）。"""
-        argv = [self.exe or _BARE, "-C", str(self.repo), *self.pin, *args]
+        if self.exe is None:
+            return None
+        argv = [self.exe, "-C", str(self.repo), *self.pin, *args]
         self.timed_out = False
         try:
             return subprocess.run(
@@ -366,7 +463,9 @@ class Git:
     def run_bytes(self, *args: str,
                   timeout: int | None = None) -> subprocess.CompletedProcess | None:
         """同 `run`，但 stdout／stderr 原樣回位元組（不解碼、不換行轉換）。"""
-        argv = [self.exe or _BARE, "-C", str(self.repo), *self.pin, *args]
+        if self.exe is None:
+            return None
+        argv = [self.exe, "-C", str(self.repo), *self.pin, *args]
         self.timed_out = False
         try:
             return subprocess.run(
