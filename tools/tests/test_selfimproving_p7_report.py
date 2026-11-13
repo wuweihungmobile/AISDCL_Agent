@@ -1208,7 +1208,7 @@ class TestSystem(P7TestCase):
         self.assertEqual(sorted(si_params.FINGERPRINT_EXCLUDED),
                          ["research_registry.json", "research_sources.json"])
         self.assertEqual(len(export.KINDS), 6)
-        sys.path.insert(0, str(ROOT / "AutoClaude" / "tools"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "AutoClaude" / "tools"))
         try:
             import check_loc_budget as loc
         finally:
