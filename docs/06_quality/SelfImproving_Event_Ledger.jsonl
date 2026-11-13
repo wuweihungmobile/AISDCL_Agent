@@ -128,3 +128,4 @@
 {"seq":128,"t":"2026-11-13T01:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"quota-band","detail":"額度帶 halt"}
 {"seq":129,"t":"2026-11-13T02:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AutoClaude/.perf_baseline.toml, ONBOARDING.md, docs/01_requirements/SelfImproving_PRD.md"}
 {"seq":130,"t":"2026-11-13T02:45:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-12T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":131,"t":"2026-11-13T21:00:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-13T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
