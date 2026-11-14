@@ -22,6 +22,11 @@
 #           維持「push 範圍變更含根層檔（不在兩子專案底下的任何路徑，如 tools/、
 #           docs/、.github/workflows/）」才跑——同機實測 111.89s，無條件跑等於每次
 #           子專案 push 都付兩分鐘，與 R67-C18 對整合閘門所做的取捨同一判準。
+#         · 🔴 快層**先行並可短路**（浪費帳 G4）：快層在任何 leg（含背景並行）啟動之前先跑，
+#           任一道紅 ⇒ 印「修完再推」、不啟動慢層與子專案 leg、直接進末段摘要 exit 1。
+#           WHY：快層秒級、慢層數十分鐘；舊序（快層最後）使快層一紅前面全白跑，而慢層結果
+#           在快層紅時不會被用到。取捨＝只動「快→慢」之間；快層內部逐支跑完累積（一次看到
+#           全部紅）、慢層內部照舊累積進 rc 不中斷。不提供「強制全跑」開關。
 #         · 「刪除遠端分支」不觸發任一層（無東西可驗證，見下方分流條件）。
 #     - push 範圍命中「根層消費檔」（aisdlc-sdd-ci.yml paths 承認的非 AISDLC_SDD/
 #       條目，如 tools/check_ntfs_paths.py、.claude/hooks/sdd_hook_router.py）且
@@ -268,6 +273,169 @@ elif [ -n "$PY" ]; then
   esac
 fi
 
+# 快層先行（Dev 浪費帳 G4）：十一支守門＋ruff 抽成函式，於**任何 leg 啟動之前**先跑。
+# WHY：快層全程秒級，慢層（root-infra unittest、AutoClaude／SDD leg）動輒數十分鐘；
+#   舊序是慢層先、快層最後，快層一紅（例：ruff 一行 import）前面數十分鐘全白跑，
+#   而且慢層的結果在快層紅時根本不會被用到——累積只換來等待與重推。
+# 取捨（Rule 7）：「失敗累積進 rc、不中斷其他 leg」紀律的邊界＝只動「快→慢」之間的短路：
+#   快層內部仍逐支跑完累積（一次看到全部紅，不要修一支再紅一支）；慢層內部照舊累積。
+#   不提供「強制全跑」開關（會把空轉搬回來）。
+# 呼叫端在 `$PY` 解析與 cpu_budget 廣播完成後、啟動任何 leg 之前呼叫；回 0 全綠／1 有紅。
+_run_rootinfra_fast_layer() {
+  local fl_rc=0
+  if [ -z "$PY" ]; then
+    echo "[pre-push dispatcher] ❌ 找不到 python／python3 — root-infra 快層守門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
+    return 1
+  fi
+  (
+    cd "$TOPLEVEL" || exit 1
+    leg_rc=0
+      # ③ 十一支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（R79 增
+      #    _script_scan_surface.py --check-floors——.ps1 掃描面 SSOT 的 per-tree 檔數
+      #    下限，對齊 root-infra-ci.yml 第 2 道；該道自 R79 起由 CI 呼叫本 SSOT 取得
+      #    掃描面，本地原本零接線）（逐支跑完累積，不因單支失敗提早退出；R13 增
+      #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
+      #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
+      #    對齊 CI 第 12 道；R60 增 archive_defect_log.py --check——帳本保全稽核，
+      #    對齊 CI 第 13 道。R60 round 1 四方複審 ARCH-R60-02／QA-R60-01 實證：帳本
+      #    **體積**硬閘（check_defect_log_crossref.py）本來就在這個迴圈裡，而同一份
+      #    帳本的**保全**稽核卻零接線——「可重跑但沒有任何閘門看它的 rc」與「不可
+      #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。R100 增
+      #    check_handoff_carriers.py——交接項的機械承接載體（`DEF-200-188`）：
+      #    帳本內的列有硬規則② 在守，只寫在交接散文／commit 訊息裡的項**零守衛**，
+      #    本地這一格是它的第一個消費者，對齊 CI 第 9.5 道。）
+      #    R208 增 refresh_nightly_anchor.py --check-head——ONBOARDING §7 表③ nightly 錨的 HEAD
+      #    判準（離線、不打 gh）：本機 nightly 把錨寫回工作樹後，「工作樹新、HEAD 舊」是它自己
+      #    造成的縫，本格在 push 時把它擋下並分兩型指路；對齊 CI 第 17 道。
+      #    迴圈項改為「指令字串」（可帶子指令參數），故 $PY 後刻意不加引號以分詞。
+      for guard in "tools/check_script_parity.py" "tools/check_ntfs_paths.py" \
+                   "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
+                   "tools/check_handoff_carriers.py" \
+                   "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
+                   "tools/archive_defect_log.py --check" \
+                   "tools/sync_onboarding_baselines.py --check-snapshot" \
+                   "tools/refresh_nightly_anchor.py --check-head" \
+                   "tools/_script_scan_surface.py --list --suffix .ps1 --with-latest --check-floors"; do
+        # shellcheck disable=SC2086  # 刻意分詞：項目可帶子指令（archive_defect_log --check）
+        if ! "$PY" $guard; then
+          echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
+          leg_rc=1
+        fi
+      done
+      # ④ 根層護欄層 ruff（**快層**，R69）：對齊 root-infra-ci.yml 第 16 道。
+      #    `tools/ruff.toml` 落地當下全 repo 零執行者——設定檔正確但沒人跑它，
+      #    等於把假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」，本段即該道的本地執行者。
+      #    射程含 `.claude/hooks/`（DEF-200-209：該樹此前零 ruff 閘門＝出廠預設假綠；
+      #    設定走 `.claude/ruff.toml` 的 extend，一份規則一個家）。
+      #    刻意不寫 `--config tools/ruff.toml`：帶 `--config` 會把 project root 挪到 cwd，
+      #    per-file-ignores 與 isort src 判定全部錯位（同機實測 140 errors vs 0），
+      #    走 ruff 自己的「由檔往上尋找」才會解析到 tools/ruff.toml（判定見
+      #    tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy）。
+      #    同機實測：冷 cache 0.02s／熱 cache 0.01s——比快層任一支守門都便宜。
+      #    ruff 缺席＝fail-loud（同本 leg 對 python 的處置）：軟跳過會讓本道退回
+      #    「宣告有、執行者無」的原病，而 ruff 本來就在 ONBOARDING 的開發環境安裝清單內。
+      #    🔴 R69 終審 P1：ruff 的 `warning:` 走 **stderr 且不改變 rc**——`Invalid noqa
+      #    directive`（指令寫壞 ⇒ 該行其實完全沒被豁免）正是這樣落地無人消費，本 repo
+      #    因此真的留了一個壞豁免整輪沒人發現（tools/tests/test_no_invalid_escape_sequences.py
+      #    當時還以整檔自我豁免掩護它）。本段改為收下 stderr 並在有 `warning:` 時 fail：
+      #    「只看 rc」等於自願對工具說出口的話裝作沒聽見。
+      #    `--no-cache` 不可省（同機實測）：該 warning **只在冷 cache 時印**，第二次跑起
+      #    就靜默 ⇒ 不帶它的話本道的鑑別力取決於「這台機器剛好有沒有 cache」。冷跑 0.02s。
+      # DEF-200-275（2026-09-10）：`ruff` 由 git 呼叫的子行程只繼承呼叫端 shell 的
+      # PATH——venv 沒 source 過就找不到，逼人每次手動啟用才能 push（同一坑撞了
+      # 多輪，見 memory project_bash_shell_state_not_persisted_zshrc_leak）。
+      # 比照上面 $PY 候選鏈的精神（DEF-101-740）：先認 PATH 上現成的 `ruff`，
+      # 找不到才退而在 repo 內已知的 .venv 位置找，兩處都沒有才真正 fail-loud
+      # ——是擴大候選來源，不是軟跳過（原設計意圖見上方大段註解仍然成立）。
+      # 🔴 找到候選後把它的目錄塞進 PATH、後面沿用裸 `ruff check tools/` 字面呼叫
+      # （不要改成 `"$RUFF_BIN" check ...`）：`test_root_infra_parity.py` 的
+      # `_RUFF_COMMAND_RE` 鎖要求「命令位置」出現字面 `ruff check tools/`，換成
+      # 變數呼叫會讓這道防「執行行被偷偷刪掉只留 echo」的鎖失去鑑別力（R69 終審 P2）。
+      # DEF-200-294：加入 Windows 佈局（`Scripts/ruff.exe`）——舊清單只列 POSIX
+      # 佈局（`bin/ruff`），單一 .venv 設計下 Windows 開發者的根層 venv 一律是
+      # `Scripts/` 而非 `bin/`，原候選鏈在 Windows 上等同只剩 PATH 一條路。
+      # DEF-200-297：`AutoClaude/.venv` 兩筆候選已移除——子專案 venv 依單一
+      # .venv 設計永不進候選鏈（與子 hook DEF-200-294 的根層優先精神一致，
+      # 不同機制：本檔上方 `$PY` 是 PATH 語意，見 DEF-101-740／DEF-101-506
+      # 註解，刻意不做 .venv 優先判斷）。
+      RUFF_BIN=""
+      if command -v ruff >/dev/null 2>&1; then
+        RUFF_BIN="ruff"
+      else
+        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/.venv/Scripts/ruff.exe"; do
+          if [ -x "$_ruff_cand" ]; then RUFF_BIN="$_ruff_cand"; break; fi
+        done
+      fi
+      if [ -z "$RUFF_BIN" ]; then
+        echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff（PATH 與 repo 內 .venv 候選皆無）— 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
+        leg_rc=1
+      else
+        if [ "$RUFF_BIN" != "ruff" ]; then
+          PATH="$(dirname "$RUFF_BIN"):$PATH"
+        fi
+        # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 裸 mktemp＝usage error ⇒ `$_ruff_err`
+        #   為空、`2>""` 重導向失敗、ruff 被判成非零 ⇒ 印出「ruff check tools/ 失敗」
+        #   並擋下 push。那句診斷確定為假（ruff 根本沒跑），且 mac 開發者無從自 log
+        #   看出真因。故先建檔、建不出來就指名真因。
+        _ruff_err="$(mktemp "${TMPDIR:-/tmp}/prepush_ruff.XXXXXX")" || _ruff_err=""
+        if [ -z "$_ruff_err" ]; then
+          echo "[pre-push dispatcher] ❌ root-infra：無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ruff.XXXXXX' 失敗）→ ruff 的 stderr 無處落地，本道無法驗證，擋下" >&2
+          echo "                        真因在暫存目錄不是 ruff：請確認 TMPDIR（現值 '${TMPDIR:-/tmp}'）存在且可寫" >&2
+          leg_rc=1
+        elif ! ruff check tools/ .claude/hooks/ --no-cache 2>"$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ .claude/hooks/ 失敗（設定＝tools/ruff.toml＋.claude/ruff.toml）" >&2
+          leg_rc=1
+        # R213／DEF-101-018 結案的本地執行者：repo 根 `ruff check .`（根 ruff.toml 只排除凍結版；
+        #   AutoClaude 走其 pyproject、tools/ 與 .claude/ 走各自設定、SDD LATEST 走出廠預設）。
+        #   stderr 追加到同一個暫存檔，讓下方的 warning 判準一併涵蓋本道。
+        elif ! ruff check . --no-cache 2>>"$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff check .（repo 根）失敗——DEF-101-018 已結案，存量不得回升" >&2
+          leg_rc=1
+        elif grep -q '^warning:' "$_ruff_err"; then
+          cat "$_ruff_err" >&2
+          echo "[pre-push dispatcher] ❌ root-infra：ruff 印出 warning（rc=0 但 warning 不得靜默吞掉；最常見是壞掉的 noqa 指令＝該行根本沒被豁免）" >&2
+          leg_rc=1
+        else
+          cat "$_ruff_err" >&2
+        fi
+        [ -n "$_ruff_err" ] && rm -f "$_ruff_err"
+      fi
+    exit $leg_rc
+  ) || fl_rc=1
+  return "$fl_rc"
+}
+
+# 末段失敗摘要（原本在檔尾；抽成函式好讓「快層紅 ⇒ 提早 exit」與「全部 leg 跑完」共用同一份文字）。
+# DEF-200-117：git 對 hook 非零一律只印通用的「failed to push some refs」，真因常落在 log 中段、
+# 被後面子步驟的成功訊息蓋掉；故**依 rc 分流**且 **rc≠0 時絕不印任何『全過』語意的句子**。
+_prepush_final_summary() {
+  if [ "$rc" -ne 0 ]; then
+    echo "" >&2
+    echo "[pre-push dispatcher] ❌❌❌ 本次 push 被擋下（rc=${rc}）——不是全過" >&2
+    echo "[pre-push dispatcher] git 稍後印的「failed to push some refs」不會指出是哪個 leg 壞的；" >&2
+    echo "[pre-push dispatcher] 真因＝上面輸出裡**最後一個 ❌ 開頭的行**，往上捲找它，" >&2
+    echo "[pre-push dispatcher] 不要被同一段輸出裡任何子步驟自己印的成功訊息（如 ruff 乾淨時的" >&2
+    echo "[pre-push dispatcher] 出廠訊息）誤導成「已經全過」" >&2
+  else
+    echo "[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）"
+  fi
+}
+
+# 快層先行的呼叫點：legs 已判定、`$PY` 與 cpu_budget 廣播已就緒，尚未啟動任何 leg／背景行程。
+# 紅 ⇒ 印「修完再推」、直接進末段摘要並 exit，**不啟動**慢層、AutoClaude／SDD leg、
+# 消費檔 leg、整合閘門 leg（也就不會有任何背景並行段）。
+if [ "$run_rootinfra_guards" -eq 1 ]; then
+  echo "[pre-push dispatcher] root-infra 快層守門先行（跨子專案不變式＋ruff，任何 push 皆跑；紅則不啟動慢層）"
+  if ! _run_rootinfra_fast_layer; then
+    echo "[pre-push dispatcher] ❌ 快層守門未過——不啟動慢層與子專案 leg；修完再推（快層全程秒級）" >&2
+    rc=1
+    _prepush_final_summary
+    exit "$rc"
+  fi
+fi
+
 # skip 分群天花板（S3）接線 — R79 收輪（QA-R79／SA-R79）
 # ---------------------------------------------------------------------------
 # 缺陷本體：R79 落地的「skip 分群天花板」唯一的消費者是 AutoClaude/tools/ 底下的本機
@@ -433,19 +601,15 @@ else
   fi
 fi
 
-# root-infra leg（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
+# root-infra 慢層（R9 複審接線）：純根層變更（tools/、docs/、workflows 等）原本
 # 一個閘門都不跑——root-infra-ci.yml 的守門在 CI 帳單停擺期間本地零接線。
-# 內容對齊 root-infra-ci.yml：py_compile 全 tools/*.py + tools/tests unittest +
-# 十一支守門工具；失敗累積進 rc（不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
-# （R56 訂正：R55 由五支增為六支時本行漏改，與 L12／L211 及實際迴圈不一致；
-#  三處計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
+# 內容＝py_compile 全 tools/*.py ＋ tools/tests unittest；十一支守門＋ruff 已由上方
+# `_run_rootinfra_fast_layer` 先行跑過（快層先行，見該函式 WHY）。慢層內部失敗累積進 rc
+# （不中斷其他 leg），python 缺席 fail-loud 不軟跳過。
+# （R56 訂正：守門計數宣稱現由 test_root_infra_parity.py::test_guard_count_claims_match_loop
 #  機械斷言與迴圈項數相等，不再靠人工同步。）
-if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
-  if [ "$run_rootinfra" -eq 1 ]; then
-    echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 閘門（快層守門 + 慢層 py_compile/unittest）"
-  else
-    echo "[pre-push dispatcher] root-infra 快層守門（跨子專案不變式，任何 push 皆跑）"
-  fi
+if [ "$run_rootinfra" -eq 1 ]; then
+  echo "[pre-push dispatcher] push 範圍含根層檔 → 執行 root-infra 慢層（py_compile／unittest；快層守門已先行通過）"
   if [ -z "$PY" ]; then
     echo "[pre-push dispatcher] ❌ 找不到 python／python3 — root-infra 閘門無法執行；請先啟用 venv（Windows: .venv/Scripts/activate；macOS/Linux: source .venv/bin/activate，見 ONBOARDING.md §3）" >&2
     rc=1
@@ -454,7 +618,6 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       cd "$TOPLEVEL" || exit 1
       leg_rc=0
       # ①② 為**慢層**（同機實測 111.89s）：僅在 push 真的動到根層檔時執行。
-      if [ "$run_rootinfra" -eq 1 ]; then
       # ① 根層 Python 全量 py_compile：tools/ + .claude/hooks/（R10 ARCH-1 補：
       #    sdd_hook_router.py 等根層消費檔有 CI paths 覆蓋，本地原本連語法檢查
       #    都沒有）。DEF-200-274 第九輪 D7：改用 `compileall -j0`（`-j 0` 讓
@@ -474,119 +637,6 @@ if [ "$run_rootinfra" -eq 1 ] || [ "$run_rootinfra_guards" -eq 1 ]; then
       if ! "$PY" tools/run_root_unittests.py; then
         echo "[pre-push dispatcher] ❌ root-infra：tools/tests unittest 失敗" >&2
         leg_rc=1
-      fi
-      fi
-      # ③ 十一支守門工具（**快層**，R69 起任何 push 皆跑，見檔頭）（R79 增
-      #    _script_scan_surface.py --check-floors——.ps1 掃描面 SSOT 的 per-tree 檔數
-      #    下限，對齊 root-infra-ci.yml 第 2 道；該道自 R79 起由 CI 呼叫本 SSOT 取得
-      #    掃描面，本地原本零接線）（逐支跑完累積，不因單支失敗提早退出；R13 增
-      #    check_pytest_baseline_sites.py——pytest 基線數字站點鎖，對齊 CI 第 11 道；
-      #    R55 增 check_gha_action_versions.py——GitHub Actions 版本一致性鎖，
-      #    對齊 CI 第 12 道；R60 增 archive_defect_log.py --check——帳本保全稽核，
-      #    對齊 CI 第 13 道。R60 round 1 四方複審 ARCH-R60-02／QA-R60-01 實證：帳本
-      #    **體積**硬閘（check_defect_log_crossref.py）本來就在這個迴圈裡，而同一份
-      #    帳本的**保全**稽核卻零接線——「可重跑但沒有任何閘門看它的 rc」與「不可
-      #    重跑」是同一個病的兩種形狀，故本輪把 rc 真正接上。R100 增
-      #    check_handoff_carriers.py——交接項的機械承接載體（`DEF-200-188`）：
-      #    帳本內的列有硬規則② 在守，只寫在交接散文／commit 訊息裡的項**零守衛**，
-      #    本地這一格是它的第一個消費者，對齊 CI 第 9.5 道。）
-      #    R208 增 refresh_nightly_anchor.py --check-head——ONBOARDING §7 表③ nightly 錨的 HEAD
-      #    判準（離線、不打 gh）：本機 nightly 把錨寫回工作樹後，「工作樹新、HEAD 舊」是它自己
-      #    造成的縫，本格在 push 時把它擋下並分兩型指路；對齊 CI 第 17 道。
-      #    迴圈項改為「指令字串」（可帶子指令參數），故 $PY 後刻意不加引號以分詞。
-      for guard in "tools/check_script_parity.py" "tools/check_ntfs_paths.py" \
-                   "tools/check_defect_log_crossref.py" "tools/check_wrapper_thinness.py" \
-                   "tools/check_handoff_carriers.py" \
-                   "tools/check_pytest_baseline_sites.py" "tools/check_gha_action_versions.py" \
-                   "tools/archive_defect_log.py --check" \
-                   "tools/sync_onboarding_baselines.py --check-snapshot" \
-                   "tools/refresh_nightly_anchor.py --check-head" \
-                   "tools/_script_scan_surface.py --list --suffix .ps1 --with-latest --check-floors"; do
-        # shellcheck disable=SC2086  # 刻意分詞：項目可帶子指令（archive_defect_log --check）
-        if ! "$PY" $guard; then
-          echo "[pre-push dispatcher] ❌ root-infra：$guard 失敗" >&2
-          leg_rc=1
-        fi
-      done
-      # ④ 根層護欄層 ruff（**快層**，R69）：對齊 root-infra-ci.yml 第 16 道。
-      #    `tools/ruff.toml` 落地當下全 repo 零執行者——設定檔正確但沒人跑它，
-      #    等於把假綠從「ruff 出廠預設」換成「根本沒人跑 ruff」，本段即該道的本地執行者。
-      #    射程含 `.claude/hooks/`（DEF-200-209：該樹此前零 ruff 閘門＝出廠預設假綠；
-      #    設定走 `.claude/ruff.toml` 的 extend，一份規則一個家）。
-      #    刻意不寫 `--config tools/ruff.toml`：帶 `--config` 會把 project root 挪到 cwd，
-      #    per-file-ignores 與 isort src 判定全部錯位（同機實測 140 errors vs 0），
-      #    走 ruff 自己的「由檔往上尋找」才會解析到 tools/ruff.toml（判定見
-      #    tools/tests/test_subprocess_encoding_hygiene.py::TestRootToolsLintPolicy）。
-      #    同機實測：冷 cache 0.02s／熱 cache 0.01s——比快層任一支守門都便宜。
-      #    ruff 缺席＝fail-loud（同本 leg 對 python 的處置）：軟跳過會讓本道退回
-      #    「宣告有、執行者無」的原病，而 ruff 本來就在 ONBOARDING 的開發環境安裝清單內。
-      #    🔴 R69 終審 P1：ruff 的 `warning:` 走 **stderr 且不改變 rc**——`Invalid noqa
-      #    directive`（指令寫壞 ⇒ 該行其實完全沒被豁免）正是這樣落地無人消費，本 repo
-      #    因此真的留了一個壞豁免整輪沒人發現（tools/tests/test_no_invalid_escape_sequences.py
-      #    當時還以整檔自我豁免掩護它）。本段改為收下 stderr 並在有 `warning:` 時 fail：
-      #    「只看 rc」等於自願對工具說出口的話裝作沒聽見。
-      #    `--no-cache` 不可省（同機實測）：該 warning **只在冷 cache 時印**，第二次跑起
-      #    就靜默 ⇒ 不帶它的話本道的鑑別力取決於「這台機器剛好有沒有 cache」。冷跑 0.02s。
-      # DEF-200-275（2026-09-10）：`ruff` 由 git 呼叫的子行程只繼承呼叫端 shell 的
-      # PATH——venv 沒 source 過就找不到，逼人每次手動啟用才能 push（同一坑撞了
-      # 多輪，見 memory project_bash_shell_state_not_persisted_zshrc_leak）。
-      # 比照上面 $PY 候選鏈的精神（DEF-101-740）：先認 PATH 上現成的 `ruff`，
-      # 找不到才退而在 repo 內已知的 .venv 位置找，兩處都沒有才真正 fail-loud
-      # ——是擴大候選來源，不是軟跳過（原設計意圖見上方大段註解仍然成立）。
-      # 🔴 找到候選後把它的目錄塞進 PATH、後面沿用裸 `ruff check tools/` 字面呼叫
-      # （不要改成 `"$RUFF_BIN" check ...`）：`test_root_infra_parity.py` 的
-      # `_RUFF_COMMAND_RE` 鎖要求「命令位置」出現字面 `ruff check tools/`，換成
-      # 變數呼叫會讓這道防「執行行被偷偷刪掉只留 echo」的鎖失去鑑別力（R69 終審 P2）。
-      # DEF-200-294：加入 Windows 佈局（`Scripts/ruff.exe`）——舊清單只列 POSIX
-      # 佈局（`bin/ruff`），單一 .venv 設計下 Windows 開發者的根層 venv 一律是
-      # `Scripts/` 而非 `bin/`，原候選鏈在 Windows 上等同只剩 PATH 一條路。
-      # DEF-200-297：`AutoClaude/.venv` 兩筆候選已移除——子專案 venv 依單一
-      # .venv 設計永不進候選鏈（與子 hook DEF-200-294 的根層優先精神一致，
-      # 不同機制：本檔上方 `$PY` 是 PATH 語意，見 DEF-101-740／DEF-101-506
-      # 註解，刻意不做 .venv 優先判斷）。
-      RUFF_BIN=""
-      if command -v ruff >/dev/null 2>&1; then
-        RUFF_BIN="ruff"
-      else
-        for _ruff_cand in "$TOPLEVEL/.venv/bin/ruff" "$TOPLEVEL/.venv/Scripts/ruff.exe"; do
-          if [ -x "$_ruff_cand" ]; then RUFF_BIN="$_ruff_cand"; break; fi
-        done
-      fi
-      if [ -z "$RUFF_BIN" ]; then
-        echo "[pre-push dispatcher] ❌ root-infra：找不到 ruff（PATH 與 repo 內 .venv 候選皆無）— 根層護欄層 lint 無法執行；請先啟用 .venv 並安裝開發相依（cd AutoClaude && uv pip install -e '.[dev,notifications]'）" >&2
-        leg_rc=1
-      else
-        if [ "$RUFF_BIN" != "ruff" ]; then
-          PATH="$(dirname "$RUFF_BIN"):$PATH"
-        fi
-        # 🔴 模板不可省（R82 MAC-01）：BSD/macOS 裸 mktemp＝usage error ⇒ `$_ruff_err`
-        #   為空、`2>""` 重導向失敗、ruff 被判成非零 ⇒ 印出「ruff check tools/ 失敗」
-        #   並擋下 push。那句診斷確定為假（ruff 根本沒跑），且 mac 開發者無從自 log
-        #   看出真因。故先建檔、建不出來就指名真因。
-        _ruff_err="$(mktemp "${TMPDIR:-/tmp}/prepush_ruff.XXXXXX")" || _ruff_err=""
-        if [ -z "$_ruff_err" ]; then
-          echo "[pre-push dispatcher] ❌ root-infra：無法建立暫存檔（mktemp '${TMPDIR:-/tmp}/prepush_ruff.XXXXXX' 失敗）→ ruff 的 stderr 無處落地，本道無法驗證，擋下" >&2
-          echo "                        真因在暫存目錄不是 ruff：請確認 TMPDIR（現值 '${TMPDIR:-/tmp}'）存在且可寫" >&2
-          leg_rc=1
-        elif ! ruff check tools/ .claude/hooks/ --no-cache 2>"$_ruff_err"; then
-          cat "$_ruff_err" >&2
-          echo "[pre-push dispatcher] ❌ root-infra：ruff check tools/ .claude/hooks/ 失敗（設定＝tools/ruff.toml＋.claude/ruff.toml）" >&2
-          leg_rc=1
-        # R213／DEF-101-018 結案的本地執行者：repo 根 `ruff check .`（根 ruff.toml 只排除凍結版；
-        #   AutoClaude 走其 pyproject、tools/ 與 .claude/ 走各自設定、SDD LATEST 走出廠預設）。
-        #   stderr 追加到同一個暫存檔，讓下方的 warning 判準一併涵蓋本道。
-        elif ! ruff check . --no-cache 2>>"$_ruff_err"; then
-          cat "$_ruff_err" >&2
-          echo "[pre-push dispatcher] ❌ root-infra：ruff check .（repo 根）失敗——DEF-101-018 已結案，存量不得回升" >&2
-          leg_rc=1
-        elif grep -q '^warning:' "$_ruff_err"; then
-          cat "$_ruff_err" >&2
-          echo "[pre-push dispatcher] ❌ root-infra：ruff 印出 warning（rc=0 但 warning 不得靜默吞掉；最常見是壞掉的 noqa 指令＝該行根本沒被豁免）" >&2
-          leg_rc=1
-        else
-          cat "$_ruff_err" >&2
-        fi
-        [ -n "$_ruff_err" ] && rm -f "$_ruff_err"
       fi
       exit $leg_rc
     ) || rc=1
@@ -704,19 +754,5 @@ PYEOF
   fi
 fi
 
-# DEF-200-117：末段失敗摘要——git 對 hook 非零一律只印通用的
-# 「! [remote rejected] ... failed to push some refs」，外觀與網路／權限問題無法
-# 分辨；而真因（某個 leg 的 ❌ 行）常落在 log 中段，被後面子步驟自己印出的成功
-# 訊息（例如 ruff 乾淨時的出廠預設訊息）蓋掉，讀者容易停在最後一行、誤以為
-# 「全過」。故末段**依 rc 分流**且**rc≠0 時絕不印任何『全過』語意的句子**：
-if [ "$rc" -ne 0 ]; then
-  echo "" >&2
-  echo "[pre-push dispatcher] ❌❌❌ 本次 push 被擋下（rc=${rc}）——不是全過" >&2
-  echo "[pre-push dispatcher] git 稍後印的「failed to push some refs」不會指出是哪個 leg 壞的；" >&2
-  echo "[pre-push dispatcher] 真因＝上面輸出裡**最後一個 ❌ 開頭的行**，往上捲找它，" >&2
-  echo "[pre-push dispatcher] 不要被同一段輸出裡任何子步驟自己印的成功訊息（如 ruff 乾淨時的" >&2
-  echo "[pre-push dispatcher] 出廠訊息）誤導成「已經全過」" >&2
-else
-  echo "[pre-push dispatcher] ✅ 本次 push 觸發的所有 leg 皆通過（rc=0）"
-fi
+_prepush_final_summary
 exit $rc

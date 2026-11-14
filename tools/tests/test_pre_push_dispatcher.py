@@ -475,6 +475,9 @@ class TestPrePushDispatcher(unittest.TestCase):
         重跑，徒增執行時間與 MIN_TESTS 計數，對本測試意圖毫無貢獻。
         """
         self._write("tools/bad_syntax.py", "def f(:\n")
+        # 快層先行後 ruff 會先抓到語法錯誤並短路，py_compile 永遠輪不到；本測試要鎖的是
+        # 「compileall 本身偵測不倒退」，故讓 ruff 排除該檔（只剩 compileall 看得到）。
+        self._write("tools/ruff.toml", 'extend-exclude = ["bad_syntax.py"]\n')
         sha = self._commit_all("introduce a syntax error under tools/")
         rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
         self.assertEqual(
@@ -745,6 +748,104 @@ class TestPrePushDispatcher(unittest.TestCase):
             "[cpu_budget] parallel legs:", out, "單 leg 觸發不應印並行憑證行"
         )
 
+    # ---------------------------------------------------- 快層先行（浪費帳 G4）
+
+    def _commit_three_leg_change(self) -> str:
+        """AutoClaude／SDD／根層檔各一行 ⇒ 兩子專案 leg＋慢層三者全觸發（事故形態）。"""
+        self._write("AutoClaude/fl_probe.txt", "x\n")
+        self._write("AISDLC_SDD/fl_probe.txt", "x\n")
+        self._write("docs/x.md", "# changed for fast-layer test\n")
+        return self._commit_all("three legs change")
+
+    def _all_leg_markers(self) -> dict[str, Path]:
+        return {
+            "autoclaude": self.marker_autoclaude,
+            "sdd": self.marker_sdd,
+            "rootinfra_slow": self.marker_rootinfra,
+        }
+
+    def test_at_tw_40_red_fast_layer_launches_no_slow_leg(self) -> None:
+        """tools/git-hooks/pre-push：快層紅 ⇒ 慢層與兩子專案 leg 一個都不啟動（AT-TW-40）。
+
+        WHY：這是事故形態——快層（ruff／守門）秒級、慢層數十分鐘；舊序快層在最後，
+        一紅則前面全白跑。若順序被改回去，三個 marker 會存在、輸出會有並行標頭。
+        """
+        self._write("tools/check_ntfs_paths.py", "raise SystemExit(1)\n")
+        sha = self._commit_three_leg_change()
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertIn("check_ntfs_paths.py 失敗", out + err)
+        self.assertIn("修完再推", out + err)
+        for name, marker in self._all_leg_markers().items():
+            self.assertFalse(marker.exists(), f"快層紅時不得啟動 {name}：\n{out}\n{err}")
+        self.assertNotIn("背景並行", out + err)
+        self.assertNotIn("push 範圍含 AutoClaude/", out + err)
+        self.assertIn("本次 push 被擋下", err)
+
+    def test_at_tw_41_green_fast_layer_runs_before_every_leg(self) -> None:
+        """tools/git-hooks/pre-push：快層全綠 ⇒ 三條慢 leg 皆跑，快層標頭行先於它們（AT-TW-41）。
+
+        WHY：守的是「先」而不只是「有」——快層被誤刪或排回慢層之後，仍可能 rc 0
+        且 marker 俱全，只有輸出順序（字串 index）才看得出來。
+        """
+        sha = self._commit_three_leg_change()
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 0, f"stdout={out}\nstderr={err}")
+        for name, marker in self._all_leg_markers().items():
+            self.assertTrue(marker.exists(), f"快層全綠後 {name} 必須跑：\n{out}\n{err}")
+        fast_at = out.index("root-infra 快層守門先行")
+        for later in ("push 範圍含 AutoClaude/", "push 範圍含 AISDLC_SDD/",
+                      "push 範圍含根層檔", "[cpu_budget] parallel legs:"):
+            self.assertIn(later, out)
+            self.assertLess(fast_at, out.index(later), f"快層必須先於「{later}」：\n{out}")
+        self.assertTrue(self.marker_rootinfra_guards.exists())
+
+    def test_at_tw_42_red_fast_layer_blocks_pure_subproject_push_leg(self) -> None:
+        """tools/git-hooks/pre-push：純子專案 push、快層紅 ⇒ AutoClaude leg 不啟動（AT-TW-42）。
+
+        WHY：既有 test_root_guard_fast_tier_failure_blocks_push 只斷言 rc 與訊息，
+        不斷言「慢層未啟動」——順序缺陷因此能通過全部既有鎖；本案補這個洞。
+        """
+        self._write("tools/check_ntfs_paths.py", "raise SystemExit(1)\n")
+        broken_base = self._commit_all("break a root guard (not part of pushed diff)")
+        self._write("AutoClaude/x.txt", "x\n")
+        sha = self._commit_all("autoclaude change with failing root guard")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, broken_base))
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertFalse(self.marker_autoclaude.exists(), f"快層紅不得先啟動子專案 leg：\n{out}")
+        self.assertFalse(self.marker_census_bytes.exists(), "census 屬 AutoClaude leg，也不得跑")
+
+    def test_at_tw_43_fast_layer_accumulates_all_reds_before_stopping(self) -> None:
+        """tools/git-hooks/pre-push：快層多支同紅 ⇒ 兩支皆被列出，只在快層出口短路（AT-TW-43）。
+
+        WHY：判準是「快層全跑完再決定停」而非「第一支紅就停」——否則修一個再推又紅
+        另一個，多一輪。
+        """
+        self._write("tools/check_ntfs_paths.py", "raise SystemExit(1)\n")
+        self._write("tools/check_wrapper_thinness.py", "raise SystemExit(1)\n")
+        sha = self._commit_all("two red guards")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertIn("check_ntfs_paths.py 失敗", out + err)
+        self.assertIn("check_wrapper_thinness.py 失敗", out + err)
+        self.assertFalse(self.marker_rootinfra.exists(), "快層紅後慢層不得啟動")
+
+    def test_at_tw_44_slow_layer_still_accumulates_internally(self) -> None:
+        """tools/git-hooks/pre-push：快層綠、慢層雙紅 ⇒ 兩者都印（AT-TW-44）。
+
+        WHY：取捨只動「快→慢」之間的短路；慢層內部「失敗累積進 rc、不中斷」紀律不得
+        被順手改掉。
+        """
+        self._write("tools/bad_syntax.py", "def f(:\n")
+        self._write("tools/ruff.toml", 'extend-exclude = ["bad_syntax.py"]\n')  # 讓快層綠
+        self._write("tools/run_root_unittests.py", "raise SystemExit(1)\n")
+        sha = self._commit_all("slow layer double red")
+        rc, out, err = self._run_dispatcher(self._push_line(sha, self.base_sha))
+        self.assertEqual(rc, 1, f"stdout={out}\nstderr={err}")
+        self.assertIn("py_compile 失敗", out + err)
+        self.assertIn("tools/tests unittest 失敗", out + err)
+        self.assertNotIn("修完再推", out + err, "快層是綠的，不應走短路出口")
+
 
 class TestParallelLegsWaitFormLock(unittest.TestCase):
     """多 CPU 平衡負載第二十二輪（鐵律六，DEF-200-044）：`wait` 只能以帶 pid 的
@@ -772,6 +873,22 @@ class TestParallelLegsWaitFormLock(unittest.TestCase):
             f"發現裸 `wait`（無 pid 參數）：{bare_wait}——鐵律六：等待必須有明確的"
             "事件源，裸 wait 會把多支背景 leg 的離開碼攪在一起",
         )
+
+    def test_fast_layer_call_precedes_every_leg_launch(self) -> None:
+        """tools/git-hooks/pre-push：快層呼叫點的文字位置先於所有 leg 啟動點（AT-TW-41 靜態對應）。
+
+        WHY：fake-repo 測試在無 bash 的環境會 skip；順序缺陷（快層排到慢層之後）必須
+        有一條不依賴 bash 的形態鎖。呼叫點＝`if ! _run_rootinfra_fast_layer`。
+        """
+        text = "\n".join(_non_comment_lines(DISPATCHER.read_text(encoding="utf-8")))
+        call = text.index("if ! _run_rootinfra_fast_layer")
+        for launch in ("_run_autoclaude_leg || rc=1", "_run_sdd_leg || rc=1",
+                       "_run_autoclaude_leg\n", "python tools/run_root_unittests.py",
+                       '"$PY" tools/run_root_unittests.py',
+                       "tools/integration_gate.sh --skip-full"):
+            if launch in text:
+                self.assertLess(call, text.index(launch), f"快層呼叫必須先於 {launch!r}")
+        self.assertIn('exit "$rc"', text[call:call + 600], "快層紅必須就地 exit，不得落入慢層")
 
     def test_int_term_trap_kills_pids_and_removes_the_log_dir(self) -> None:
         """QA-2 V5 ③：INT/TERM trap 只 kill 沒有 `rm -rf` 並行 log 暫存目錄，Ctrl-C
