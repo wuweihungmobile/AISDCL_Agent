@@ -282,6 +282,8 @@ PowerShell 工具的 cwd **跨呼叫持續**。✅ 絕對路徑；✅ `Push-Loca
 | ✅ | 掛 Monitor／until-loop，且**條件的比對面不含自己**（字元類自我否定）：`until ! pgrep -f 'run_root[_]unittests'; do …; done` | 只否定自己、不減損鑑別力 |
 | ❌ | `nohup <cmd> > log 2>&1 &` | 工作脫離 harness 的完成追蹤：外層殼 0 秒返回 rc=0，通知講的是外層殼 |
 | ❌ | 裸 `pgrep -f <字面>`／`pgrep -f "python.*X"` | 兩支並行時兄弟互匹 ⇒ `until ! …` 永不退出；單支試跑永遠是綠的，死鎖只在並行時現形 |
+| ❌ | 手寫迴圈輪詢 `gh run list`／`view`／`watch` 等 CI（DEF-200-586：短 SHA 查無資料回 `[]` 且 rc=0，條件永不成立，CI 全綠後閒置 78 分鐘） | 手寫迴圈沒有自己的截止時間、分不出「未跑完」與「查不到」；連 `# waitform-ok:` 都擋不住它（判準⑤不吃豁免） |
+| ✅ | `python tools/ci_wait.py --commit <rev>`，`run_in_background: true`、輸出導檔 | 自帶硬截止時間（`--timeout-min`，須小於背景工具 timeout）、先解完整 SHA、查無 run 大聲失敗（rc 0／1／2／3，末行 `CI_WAIT_VERDICT=`） |
 | ❌ | 讀 rc 時接管線 | 真 rc 被吃掉（接 `tail -1` → rc=0）。mac 工具殼是 zsh：`${PIPESTATUS[0]}` 回空字串、要寫 `${pipestatus[1]}`——機制與修法住 `useMacWin.md` §C，本節不複寫 |
 
 - 機械物＝`block_destructive_git.py` 的 `waitform_hits()`（行內豁免 `# waitform-ok: <WHY>`）。**判準有哪幾條、各判什麼，唯一真相源＝該函式 docstring**（本段刻意不複寫條列），現查：`sed -n "/^def waitform_hits/,/\"\"\"$/p" .claude/hooks/block_destructive_git.py`。
@@ -404,6 +406,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | LOC 分級／絕對紅線 | `python AutoClaude/tools/check_loc_budget.py --json` |
 | hook 佈線／shell form 普查 | `tools/lib/hook_wiring.py`（`SHELL_FORM_CENSUS`／`FROZEN_SHELL_FORM_MAX`） |
 | hook 活性（開發機出聲層） | `tools/check_hooks_liveness.py`；正面現查 `claude -p --debug hooks`（見〈hook 載具〉） |
+| 推送後等 CI | `python tools/ci_wait.py --commit <rev>`（背景跑、輸出導檔；不要手寫 `gh run` 輪詢迴圈，鐵律六判準⑤會擋） |
 | 破壞性 git 擋不到什麼 | `grep -n "擋不到" .claude/hooks/block_destructive_git.py` |
 | 等待形態判準條列 | `sed -n "/^def waitform_hits/,/\"\"\"$/p" .claude/hooks/block_destructive_git.py` |
 | mac 睡眠姿態 | `pmset -g custom`（不隨 clone 走，不得寫成常數） |

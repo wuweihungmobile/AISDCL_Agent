@@ -75,3 +75,92 @@ def unquote_exe_paths(text: str) -> str:
     """
     return _QUOTED_EXE_RE.sub(
         lambda m: re.split(r"[\\/]", m.group(2))[-1].ljust(len(m.group(0))), text)
+
+
+# ── 判準⑤（迴圈內輪詢 `gh run`）──────────────────────────────────────────────────
+# WHY 住在這裡而不是 hook：hook 屬 `guardrail_cli<=750` 分級（只算斷言行），判準⑤是與毀滅性
+# git 無關的「迴圈區間辨識」原語，依 R84 先例抽成共用模組；hook 只剩三行薄接線。
+# 立案＝掌舵者真機回報 sid 680d8411-58ac-4adb-9e23-521f6a7bb557（2026-11-14）：手寫輪詢以短 SHA
+# 查 `gh run list --commit` 回 `[]` 且 rc=0，結束條件永不成立，CI 全綠後主控閒置 78 分鐘。
+CI_POLL_TAG = "迴圈內輪詢 `gh run`"
+CI_POLL_MESSAGE = (
+    CI_POLL_TAG + "：手寫迴圈沒有自己的截止時間，也分不出「還沒跑完」與「查不到」（`gh run list "
+    "--commit <短 SHA>` 回 `[]` 且 rc=0 ⇒ 結束條件永不成立；2026-11-14 事故：CI 約 20 分鐘全綠、"
+    "主控閒置 78 分鐘）。改用 `python tools/ci_wait.py --commit <rev>`（`run_in_background: "
+    "true`、輸出導檔；自帶硬截止時間、先解完整 SHA、查無 run 大聲失敗）。🔴 本條不吃 "
+    "`# waitform-ok:`，人的逃生口只有 `AUTOSDD_GIT_GUARD_OFF`")
+_GH_RUN_RE = re.compile(
+    r"(?<![\w./-])gh(?:\.exe)?\s+(?:[^\s;|&(){}]+\s+){0,2}?run\s+(?:list|view|watch)(?![\w.-])")
+#: 迴圈頭：bash／PowerShell 的 `while`／`until`、PowerShell 的 `do {`、無限 `for(;;)`。
+_LOOP_HEAD_RE = re.compile(
+    r"(?<![\w.-])(?:while|until|do(?=\s*\{)|for(?=\s*\(\(?\s*;\s*;\s*\)?\)?))(?![\w.-])")
+_OPENER_OR_DONE_RE = re.compile(r"(?<![\w.-])(?:while|until|for|select|done)(?![\w.-])")
+_DONE_RE = re.compile(r"(?<![\w.-])done(?![\w.-])")
+_DO_TAIL_RE = re.compile(r"\s*(?:while|until)\s*\(")
+_BLOCK_RE = re.compile(r"\s*\{")
+
+
+def ci_poll_is(reason: str) -> bool:
+    """這條命中理由是不是判準⑤的（`main()` 用它讓行內 `# waitform-ok:` 對⑤無效）。"""
+    return reason.startswith(CI_POLL_TAG)
+
+
+def _balanced_end(view: str, i: int, op: str, cl: str) -> int:
+    """`view[i]` 是 `op` ⇒ 回配對 `cl` 之後的位置；配不起來回 -1。"""
+    depth = 0
+    for j in range(i, len(view)):
+        if view[j] == op:
+            depth += 1
+        elif view[j] == cl:
+            depth -= 1
+            if depth == 0:
+                return j + 1
+    return -1
+
+
+def _loop_regions(view: str) -> list[tuple[int, int]]:
+    """遮蔽面（字串／註解已是空白）上所有迴圈構造的 (起, 迄)。
+
+    PowerShell：`while|until|for (cond) { … }`、`do { … } while|until (cond)`（尾巴併入區間，
+    尾巴的 `while` 不另算一個迴圈）；bash：`while|until cond; do … done`（`done` 依巢狀深度
+    配對，配不到就到字串尾）。只有條件、沒有區塊也沒有 `done` 的單獨 `while (cond)` 只算
+    條件本身，不把它之後的獨立指令吞進區間（否則「迴圈後的單次查詢」會被誤判）。
+    """
+    regions: list[tuple[int, int]] = []
+    tails: list[tuple[int, int]] = []
+    for head in _LOOP_HEAD_RE.finditer(view):
+        if any(a <= head.start() < b for a, b in tails):
+            continue
+        k = head.end()
+        while k < len(view) and view[k] in " \t\r\n":
+            k += 1
+        end = -1
+        if head.group(0) == "do":
+            end = _balanced_end(view, k, "{", "}")
+            tail = _DO_TAIL_RE.match(view, end) if end > 0 else None
+            if tail and (cond_end := _balanced_end(view, tail.end() - 1, "(", ")")) > 0:
+                tails.append((end, cond_end))
+                end = cond_end
+        elif view.startswith("(", k) and (cond_end := _balanced_end(view, k, "(", ")")) > 0:
+            block = _BLOCK_RE.match(view, cond_end)
+            if block:
+                end = _balanced_end(view, block.end() - 1, "{", "}")
+            elif not _DONE_RE.search(view, cond_end):
+                end = cond_end
+        if end < 0:
+            depth, end = 1, len(view)
+            for m in _OPENER_OR_DONE_RE.finditer(view, head.end()):
+                depth += -1 if m.group(0) == "done" else 1
+                if depth == 0:
+                    end = m.end()
+                    break
+        regions.append((head.start(), end))
+    return regions
+
+
+def ci_poll_hit(view: str) -> str | None:
+    """判準⑤：`view`（hook 的遮蔽面）裡有迴圈構造的條件或迴圈體含 `gh run list|view|watch`
+    ⇒ 回命中理由 `CI_POLL_MESSAGE`，否則 None。單次查詢與迴圈後的單次查詢不判。"""
+    if any(_GH_RUN_RE.search(view, a, b) for a, b in _loop_regions(view)):
+        return CI_POLL_MESSAGE
+    return None

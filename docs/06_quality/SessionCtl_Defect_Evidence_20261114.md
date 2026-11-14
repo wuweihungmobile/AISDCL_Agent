@@ -74,3 +74,18 @@
 - **現象**：主控 2026-11-14 以 Linux 容器（Python 3.12）跑根層全套：`test_bash_probe_spec_contract.TestStubFormIsLaunchableOnItsOwnPlatform.test_windows_form_is_findable_by_the_production_helper` 把 `sys.platform` 換成 `win32` 後，3.12 的 `shutil.which` 走到 `_winapi.NeedCurrentDirectoryForExePath`，非 Windows host 上 `_winapi` 為 None；`test_selfimproving_schedule_advance.TestIngestAndLog.test_D_IMP_9_m_class_asks_for_memory_dir_only_when_a_step_is_pending` 的 `mock.Mock(cls="M", …)` 在 3.12 撞 `__new__` 的參數名。CI 與本機用 3.11 故未現形；影響＝升級直譯器時才會紅。
 - **修法**：前者補一個等價的 `_winapi` 替身（`create=True`，3.11 無此屬性也成立）；後者改為 `Mock(...)` 後以屬性賦值設 `cls`。兩處只動測試檔、不改語意。
 - **驗證**：以 `aisdcl-act/ubuntu:act-latest`（Python 3.12.3）唯讀掛載 repo 實跑兩條，皆 ok。同一次實跑 `TestIngestAndLog` 另有三條（`run.open` 計數）失敗，與本缺陷無關、疑為容器唯讀掛載或環境差異，未追。
+
+## DEF-200-586　手寫輪詢等 CI 的結束條件永不成立（已結案，2026-11-14）
+
+**暴露證據（守衛面准入）**：掌舵者真機回報，sid `680d8411-58ac-4adb-9e23-521f6a7bb557`，2026-11-14 20:52～22:10 +08:00，原話「這種中斷是AutoClaude的BUG, 請找出根因, 徹底修復, 不要再發生!」「CI已經完成, 但是並沒有被偵測到!」。
+
+**事故**：主控推送後以 PowerShell 背景任務（timeout 60 分鐘）手寫輪詢 `do { Start-Sleep 90; $j = gh run list --commit 43b4b0f9 … } while ($pending -gt 0 -or @($j).Count -lt 6)  # waitform-ok: …`。`gh run list --commit <短 SHA>` 回 `[]` 且 rc=0（完整 40 碼才列得出六支 workflow），所以 `Count -lt 6` 永遠成立；CI 約 20 分鐘全綠，主控閒置 78 分鐘直到掌舵者回來問。
+
+**兩層根因**：① 結束條件分不出「還沒跑完」與「查詢本身查不到東西」——憑證該是值（有幾支 run、各自什麼狀態），不是 rc（與根 CLAUDE.md〈反事後諸葛取證規則〉同型）；② 鐵律六的機械物 `waitform_hits()` 只守 `pgrep`／`nohup` 等形態，「輪詢外部狀態的手寫迴圈沒有自己的截止時間、也沒有查無資料的出口」無人守，且該行帶了 `# waitform-ok:`。
+
+**修法（消除成因）**：
+- 專用工具 `python tools/ci_wait.py --commit <rev>`（`tools/lib/ciwait/core.py`；測試 `tools/tests/test_ci_wait.py`）：rev 先解成完整 SHA 才查、每筆核對 `headSha`、同 workflow 重跑取最新、超過 `--grace-min` 仍 0 支即 `no-runs` 失敗、連續查詢失敗上限、自帶硬截止時間；結束碼 0 pass／1 fail／2 timeout／3 no-runs，末行 `CI_WAIT_VERDICT=…`。
+- 守衛判準⑤「迴圈內輪詢 `gh run`」（本體 `tools/lib/shell_tokens.py::ci_poll_hit`；`waitform_hits()` docstring 為條數 SSOT）：Bash／PowerShell 皆判，**不吃** `# waitform-ok:`。本體抽出是因 hook 檔 `count_loc` 747／750（`guardrail_cli`）只剩 3 行餘裕。
+- 假紅普查（`--corpus transcripts` 母體，去重 25,012 筆指令）：判準⑤命中 27 筆，逐筆判讀全部是迴圈內輪詢 `gh run`（含事故那筆），假紅 0；含迴圈字與 `gh run` 卻未命中 0 筆。多數命中者原本有 `$deadline`、屬可運作形態，被擋是設計（統一導向 `ci_wait`）。
+
+**未證實項**：背景任務的 60 分鐘 timeout 到時為何沒有完成通知（逐字稿只有啟動回執、無完成事件）——不影響修法（`ci_wait` 在 `--timeout-min`＝預設 40 分鐘內自己結束，且須小於背景工具的 timeout）。不在本案內另挖。
