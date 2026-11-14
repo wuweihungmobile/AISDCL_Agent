@@ -2514,22 +2514,22 @@ class TestR84TheWaitformDocstringIsTheSingleHome(unittest.TestCase):
     帳本的③ 又是第三種東西）。**SSOT ＝ `waitform_hits()` 的 docstring**（實作所在）。
     史料搬至 CrossPlatform_Guard_Line_History_2.md〈R190 收尾棒〉§3。 round-label-ok"""
 
-    def test_the_docstring_declares_four_and_all_four_can_fire_alone(self) -> None:
+    def test_the_docstring_declares_five_and_all_five_can_fire_alone(self) -> None:
         doc = G.waitform_hits.__doc__ or ""
-        self.assertIn("**四條**判準", doc, "docstring 沒有明說幾條 ⇒ 讀者只能去猜")
-        for marker in ("· ①", "· ②", "· ③", "· ④"):
+        self.assertIn("**五條**判準", doc, "docstring 沒有明說幾條 ⇒ 讀者只能去猜")
+        for marker in ("· ①", "· ②", "· ③", "· ④", "· ⑤"):
             self.assertIn(marker, doc)
-        # ①：nohup ＋ 背景 &（前景呼叫，旗標為 False）
         self.assertTrue(G.waitform_hits("nohup python x.py > log 2>&1 &"))
-        # ②：until 條件內的裸 pgrep -f
         self.assertTrue(G.waitform_hits("until ! pgrep -f 'run_root_unittests'; do :; done"))
         # ③：只有旗標為真時才成立（同一條指令在前景是放行的）
         self.assertEqual(G.waitform_hits("python x.py &"), [])
         self.assertTrue(G.waitform_hits("python x.py &", run_in_background=True))
-        # ④：只有 Bash 工具才成立（同一條指令在 PowerShell 是放行的；DEF-200-086）
         four = "sh -c 'exit 7' | tail -1; echo $?"
         self.assertTrue(G.waitform_hits(four))
         self.assertEqual(G.waitform_hits(four, tool="PowerShell"), [])
+        five = "while true; do gh run list --limit 1; done"
+        self.assertTrue(G.waitform_hits(five) and G.waitform_hits(five, tool="PowerShell"))
+        self.assertEqual(G.waitform_hits("gh run list --limit 1"), [])
 
     def test_the_wait_carve_out_asymmetry_is_documented_and_real(self) -> None:
         """docstring 宣稱 `wait` 豁免**只罩 ①③、不罩 ②④** ⇒ 兩向都實測。"""
@@ -3418,6 +3418,78 @@ class TestMaskInertNestedScanIsBounded(unittest.TestCase):
         small, large = best(500), best(4_000)
         self.assertLess(large / small, 24, f"輸入放大 8 倍、成本放大 {large / small:.1f} 倍")
         self.assertLess(large, 2.0, f"4,000 個未收尾開頭 {large:.2f}s：逼近 hook 逾時＝fail-open")
+
+
+class TestIronLaw6CiPollLoopIsBlocked(unittest.TestCase):
+    """判準⑤（掌舵者真機回報 sid 680d8411，2026-11-14）：迴圈內輪詢 `gh run` 一律擋，且不吃
+    `# waitform-ok:`。WHY：手寫輪詢以短 SHA 查 `gh run list --commit` 得 `[]` 且 rc=0、結束條件
+    永不成立，CI 約 20 分鐘全綠、主控閒置 78 分鐘；事故那一行就帶著豁免註解。出口是
+    `python tools/ci_wait.py --commit <rev>`（受測模組 `tools/lib/ciwait/core.py` 的入口）。"""
+
+    _INCIDENT = (
+        "do { Start-Sleep -Seconds 90; $j = gh run list --commit 43b4b0f9 --json "
+        "workflowName,status,conclusion | ConvertFrom-Json; $pending = @($j | Where-Object "
+        "{ $_.status -ne 'completed' }).Count } while ($pending -gt 0 -or @($j).Count -lt 6)"
+        "  # waitform-ok: 外部 CI 狀態只能輪詢，迴圈阻塞到六支都 completed 才返回")
+
+    @staticmethod
+    def _ps(command: str) -> dict:
+        return {"tool_name": "PowerShell", "tool_input": {"command": command}}
+
+    def _hit(self, command: str, tool: str = "PowerShell") -> bool:
+        return any(G._ci_poll_is(h) for h in G.waitform_hits(command, tool=tool))
+
+    def test_the_incident_line_is_blocked_even_with_its_waitform_exemption(self) -> None:
+        proc = run_hook(self._ps(self._INCIDENT))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("python tools/ci_wait.py --commit <rev>", proc.stderr)
+
+    def test_the_exemption_does_not_open_this_criterion_but_still_opens_the_others(self) -> None:
+        """⑤不吃豁免，①～④照舊吃：同一個註解對 nohup 形態仍有效（不能把整個豁免機制拆掉）。"""
+        proc = run_hook(bash_payload("nohup ./a.sh > log 2>&1 &  # waitform-ok: 刻意"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_the_human_hatch_and_only_it_still_opens(self) -> None:
+        self.assertEqual(run_hook(self._ps(self._INCIDENT),
+                                  env={G.GUARD_OFF_ENV: "1"}).returncode, 0)
+        proc = run_hook(self._ps(self._INCIDENT), env={G.UNATTENDED_ENV: "1"})
+        self.assertEqual(proc.returncode, 2, "無人看管時一樣擋")
+
+    def test_loop_forms_in_both_tools_are_blocked(self) -> None:
+        cases = [
+            ("until gh run view 123 --json status | grep -q completed; do sleep 30; done", "Bash"),
+            ("while true; do gh run list --limit 1; sleep 10; done", "Bash"),
+            ("while true; do gh -R o/r run list; done", "Bash"),
+            ("while ($true) { gh run watch 5; Start-Sleep 5 }", "PowerShell"),
+            ("for (;;) { gh run list; Start-Sleep 5 }", "PowerShell"),
+            ("do { Start-Sleep 5 } until ((gh run view 9 --json status | ConvertFrom-Json)"
+             ".status -eq 'completed')", "PowerShell"),
+        ]
+        for command, tool in cases:
+            with self.subTest(command=command):
+                self.assertTrue(self._hit(command, tool))
+
+    def test_bash_loop_end_to_end_exits_two(self) -> None:
+        proc = run_hook(bash_payload(
+            "until gh run view 123 --json status | grep -q completed; do sleep 30; done"))
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+
+    def test_single_queries_and_the_dedicated_tool_pass(self) -> None:
+        """單次查詢、迴圈後的單次查詢、迴圈內別的指令、專用工具本身，一律放行。"""
+        passes = [
+            ("gh run list --commit abc --json status", "PowerShell"),
+            ("gh run view 123 --log-failed", "Bash"),
+            ("while true; do git fetch; sleep 5; done", "Bash"),
+            ("python tools/ci_wait.py --commit HEAD > ci.log 2>&1", "PowerShell"),
+            ("do { Start-Sleep 1 } while ($c -gt 0); gh run list --limit 1", "PowerShell"),
+            ("for i in 1 2; do echo $i; done; gh run list", "Bash"),
+            ("foreach ($id in 1..3) { gh run view $id }", "PowerShell"),
+            ("echo 'while true; do gh run list; done'", "Bash"),
+        ]
+        for command, tool in passes:
+            with self.subTest(command=command):
+                self.assertFalse(self._hit(command, tool))
+        self.assertEqual(run_hook(self._ps("gh run list --limit 1")).returncode, 0)
 
 
 if __name__ == "__main__":  # pragma: no cover
