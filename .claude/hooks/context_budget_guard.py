@@ -941,6 +941,20 @@ def hard_message(used: int, window: int, source: str, plan: str,
     )
 
 
+def switch_advice(payload: dict, transcript: Path) -> None:
+    """sessionctl D2：R1～R3 任一成立 ⇒ 一個 session 只出聲一次並產交接包機械層（本體＝
+    `handoff.advise_once`）。例外一律吞掉：出聲是增益，不得反過來擋住量測主線。"""
+    try:
+        tools = str(Path(__file__).resolve().parents[2] / "tools")
+        if tools not in sys.path:
+            sys.path.append(tools)  # `lib.sessionctl` 套件在 tools/ 之下（只 append，不改既有優先序）
+        from lib.sessionctl import handoff  # noqa: PLC0415 — lazy：多數呼叫（模式 off／閂鎖已設）不付成本
+        emit_to_model(str(payload.get("hook_event_name") or "PostToolUse"), handoff.advise_once(
+            session_id_of(transcript), transcript, guard=sys.modules[__name__]))
+    except Exception:  # noqa: BLE001 — fail-open 是 P0
+        pass
+
+
 def block_message(used: int, window: int, source: str, tool: str) -> str:
     """PreToolUse 阻斷訊息。必須逐字給出下一步，否則擋下來只是製造挫折。"""
     return (
@@ -1025,6 +1039,7 @@ def main() -> int:
         # 做一次 `Path.exists()`，所以放在每次工具呼叫都會經過的路徑上是付得起的。
         if not blocking:
             arm_when_earned(transcript)
+            switch_advice(payload, transcript)
 
         used, peak, model = scanned if scanned is not None else scan_transcript(transcript)
         if used is None:
