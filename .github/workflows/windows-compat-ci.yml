@@ -232,6 +232,7 @@ on:
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
       - "tools/lib/sessionctl/**"  # sessionctl（續跑成本選路、過期 session 不續跑）：tools/tests/test_sessionctl_switch.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
+      - "tools/lib/wastecensus/**"  # wastecensus（Token 浪費帳量測）：tools/tests/test_waste_census_metrics.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/sessionctl.py"  # sessionctl 入口薄殼：tools/tests/test_sessionctl_handoff.py 經 subprocess／import 消費
       - "tools/lib/ciwait/**"  # ciwait（推送後等 CI）：tools/tests/test_ci_wait.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/ci_wait.py"  # ciwait 入口薄殼：tools/tests/test_ci_wait.py 經 import 消費
@@ -737,6 +738,7 @@ on:
       - "tools/lib/cpu_budget.py"  # DEF-200-289：ci-gate.sh／pre-push 消費的跨 leg CPU 預算 SSOT
       - "tools/lib/dev_platform_provenance.py"  # DEF-200-358：dev_start [1/7] git 平台 provenance，tools/tests 消費
       - "tools/lib/sessionctl/**"  # sessionctl（續跑成本選路、過期 session 不續跑）：tools/tests/test_sessionctl_switch.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
+      - "tools/lib/wastecensus/**"  # wastecensus（Token 浪費帳量測）：tools/tests/test_waste_census_metrics.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/sessionctl.py"  # sessionctl 入口薄殼：tools/tests/test_sessionctl_handoff.py 經 subprocess／import 消費
       - "tools/lib/ciwait/**"  # ciwait（推送後等 CI）：tools/tests/test_ci_wait.py 消費；落點規範 docs/02_architecture/Root_Layout_and_Module_Placement.md
       - "tools/ci_wait.py"  # ciwait 入口薄殼：tools/tests/test_ci_wait.py 經 import 消費

@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9270,
+    "test_adr_xplat001_c1c2_lock.py": 9290,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -635,13 +635,13 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3954,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3830,
+    "test_check_hooks_liveness.py": 3832,
     "test_check_pending_handoff.py": 206,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2007,
     "test_check_wrapper_thinness.py": 1153,
     "test_ci_gate_xdist_allowlist.py": 395,
-    "test_ci_wait.py": 234,
+    "test_ci_wait.py": 238,
     "test_claim_provenance_r86.py": 2001,
     "test_clean_venv_carrier.py": 281,
     "test_component_sanitizer_shared_layer_lock.py": 274,
@@ -676,7 +676,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_platform_neutral_paths.py": 5759,
     "test_platform_utils_dedup.py": 1168,
     "test_pre_commit_dispatcher_sigpipe.py": 954,
-    "test_pre_push_dispatcher.py": 1205,
+    "test_pre_push_dispatcher.py": 1322,
     "test_ps1_bom.py": 248,
     "test_ps51_compat.py": 599,
     "test_ps_engine_ssot.py": 899,
@@ -731,11 +731,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_verify.py": 1067,
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1544,
+    "test_sessionctl_cachegate.py": 243,
+    "test_sessionctl_converge.py": 368,
     "test_sessionctl_handoff.py": 1097,
-    "test_sessionctl_hooks.py": 331,
+    "test_sessionctl_hooks.py": 451,
     "test_sessionctl_modelmix.py": 94,
     "test_sessionctl_roster.py": 662,
-    "test_sessionctl_switch.py": 562,
+    "test_sessionctl_switch.py": 563,
+    "test_waste_census_metrics.py": 303,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
@@ -3076,6 +3079,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "（本列、回歸鎖軌同輪列、接鏈列、名冊句）。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/SessionCtl_Defect_Evidence_20261114.md。"),
+    ("R214", 162556, 163734, +1178,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第三十七列（Token 浪費：續棒看快取冷熱、收斂閘、回合結束推回、"
+     "pre-push 快層先行、浪費帳探針）：新鎖檔 test_sessionctl_converge.py 368、"
+     "test_waste_census_metrics.py 303、test_sessionctl_cachegate.py 243，既有 "
+     "test_sessionctl_hooks.py +120、test_pre_push_dispatcher.py +117、"
+     "test_check_hooks_liveness.py +2、test_sessionctl_switch.py +1、"
+     "test_ci_wait.py +4（FR-TW-12 預設逾時釘住）＋本檔自身漂移"
+     "（本列、回歸鎖軌同輪列、名冊句）。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/03_testing/contracts/TCS-TokenWaste-20261114.md。"),
 )
 
 
@@ -3177,7 +3191,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (34044, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (35222, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3239,7 +3253,8 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "同標籤第三十四列（CI 根因修復與獨立 QA 缺口補測）再 +81，精確淨額為 31490；"
         "同標籤第三十五列（sessionctl 第二段）再 +2237，精確淨額為 33727；"
         "同標籤第三十六列（ciwait 等待工具與鐵律六判準⑤，DEF-200-586）再 +317，"
-        "精確淨額為 34044。"
+        "精確淨額為 34044；同標籤第三十七列（Token 浪費：續棒冷熱閘、收斂閘、快層先行、"
+        "浪費帳探針）再 +1178，精確淨額為 35222。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3796,6 +3811,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "sessionctl 第二段（交接包、名冊、成本閘、模型建議、hook 面）："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok
+     "Token 浪費（冷續閘、收斂閘、快層先行、浪費帳探針）："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -3971,10 +3990,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 383
+_REPIN_LOG_FROZEN_PREFIX_LEN = 384
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "43e55f02b2bc581beab27b5000607c756fdc5318fcca4f369ee2ecec11979439")
+    "09a73e82e42d7ad94736257a275a86e18b97c0065c62de99cafb9b6deab5b0c9")
 
 
 def repin_log_history_digest(
@@ -4199,6 +4218,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "078360ab6561", "8a10cade41e9", "DEF-200-583"),  # round-label-ok：CI 修復
     ("R214", "8a10cade41e9", "9568a51dc704", "DEF-200-584"),  # round-label-ok：sessionctl 第二段
     ("R214", "9568a51dc704", "43e55f02b2bc", "DEF-200-586"),  # round-label-ok：ciwait 等待工具
+    ("R214", "43e55f02b2bc", "09a73e82e42d", "DEF-200-587"),  # round-label-ok：Token 浪費
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -290,7 +290,8 @@ class CliAndStructureTest(_Base):
         shell = guard_line_taxonomy.classify_file(_PROBE)
         self.assertLessEqual(shell.assertion, 80)
         text = _PROBE.read_text(encoding="utf-8")
-        self.assertNotIn("\ndef ", text, "入口薄殼不得定義判準函式")
+        defs = [ln for ln in text.splitlines() if ln.startswith("def ")]
+        self.assertEqual(defs, [], "入口薄殼不得定義判準函式")
         self.assertIn("from lib.wastecensus", text)
         pkg = sorted((_REPO / "tools" / "lib" / "wastecensus").glob("*.py"))
         self.assertGreaterEqual(len(pkg), 9, "套件檔數不應少於拆分後的九支")

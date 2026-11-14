@@ -14,6 +14,7 @@ _TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_TOOLS))
 sys.path.insert(0, str(_TOOLS / "lib"))
 
+import _stdio_utf8  # noqa: E402,F401  （side effect：強制 stdout/stderr 為 UTF-8）
 from lib.wastecensus.report import main  # noqa: E402
 
 if __name__ == "__main__":

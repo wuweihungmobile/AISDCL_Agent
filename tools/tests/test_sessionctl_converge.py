@@ -108,7 +108,7 @@ class ConvergeVerdictTest(_Fence):
         self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env), (0, ""))
 
     def test_at_tw_22_not_yet_advised_is_never_blocked(self) -> None:
-        """tools/lib/sessionctl/converge.py：沒被告知就被擋＝不公平且不可解釋，出聲在先是閘的前提。"""
+        """tools/lib/sessionctl/converge.py：沒被告知就被擋＝不公平，出聲在先是閘的前提。"""
         self.main(400_000)
         self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env), (0, ""))
 
@@ -159,7 +159,8 @@ class ConvergeVerdictTest(_Fence):
         self.assertEqual(converge.converge_verdict(missing, self.env), (0, ""))
         bare = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": SID}
         self.assertEqual(converge.converge_verdict(bare, self.env), (0, ""))
-        self.assertEqual(converge.converge_verdict("不是 dict", self.env), (0, ""))  # type: ignore[arg-type]
+        got = converge.converge_verdict("不是 dict", self.env)  # type: ignore[arg-type]
+        self.assertEqual(got, (0, ""))
 
     def test_at_tw_28_a_subagents_own_call_is_not_gated(self) -> None:
         """tools/lib/sessionctl/converge.py：

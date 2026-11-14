@@ -169,6 +169,10 @@ class RobustnessTest(unittest.TestCase):
         started = datetime(2026, 11, 14, 20, 52, tzinfo=UTC)
         self.assertLessEqual((w.t - started).total_seconds(), 3 * 60)
 
+    def test_default_deadline_is_shorter_than_the_main_cache_lifetime(self):
+        # WHY：等待若超過主控 1 小時快取壽命，醒來時快取已冷、整包重寫（FR-TW-12）。
+        self.assertLess(core.Options(sha=FULL).timeout_min, 60)
+
     def test_foreign_head_sha_rows_are_dropped_even_if_gh_returned_them(self):
         """不相信 gh 的過濾：headSha 不等於完整 SHA 的筆一律丟掉（否則別筆提交的綠燈會混入）。"""
         w = _World([[r("a", sha=OTHER), r("b")]])

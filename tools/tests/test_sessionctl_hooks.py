@@ -24,7 +24,7 @@ from lib.sessionctl import roster  # noqa: E402
 
 ROOT = _TOOLS.parent
 #: hook 與 settings 的所在根。缺省＝本 repo；`SESSIONCTL_APPLIED_ROOT` 指向「套用後佈局」的鏡像根
-#: （`.claude/hooks/sessionctl_guard.py`、`.claude/settings.json`、`tools` 連結）時，套用前也能驗成品。
+#: （hook、settings、`tools` 連結）時，套用前也能驗成品。
 GUARD_ROOT = Path(os.environ.get("SESSIONCTL_APPLIED_ROOT") or ROOT)
 HOOK = GUARD_ROOT / ".claude" / "hooks" / "sessionctl_guard.py"
 SID = "d4ed2654-9181-4df1-a6e6-2d712956e23b"
@@ -365,7 +365,8 @@ class HookConvergeTest(unittest.TestCase):
         """AT-TW-37：空 payload／無人／notify／逃生口 ⇒ rc 0；擴射程沒破壞既有 fail-open。"""
         slug, env = _advised_session(self, 400_000)
         self.assertEqual(_run_hook({}, **env).returncode, 0)
-        self.assertEqual(_run_hook(_tool(slug, "Agent"), AUTOSDD_UNATTENDED="1", **env).returncode, 0)
+        got = _run_hook(_tool(slug, "Agent"), AUTOSDD_UNATTENDED="1", **env)
+        self.assertEqual(got.returncode, 0)
         self.assertEqual(_run_hook(_tool(slug, "Agent"), AUTOSDD_SESSION_SWITCH_MODE="notify",
                                    **env).returncode, 0)
         off = _run_hook(_tool(slug, "Agent"), AUTOSDD_SESSIONCTL_GUARD_OFF="1", **env)
@@ -393,8 +394,8 @@ class HookConvergeTest(unittest.TestCase):
         self.assertNotIn("decision", doc)
 
     def test_at_tw_78_stacked_with_check_pending_handoff_there_is_no_deadlock(self) -> None:
-        """AT-TW-78：兩支 Stop 守衛同回合都推回（最壞一個額外回合），第二次 Stop（`stop_hook_active`）
-        兩者皆放行——疊加不死鎖。"""
+        """AT-TW-78：兩支 Stop 守衛同回合都推回（最壞一個額外回合），第二次 Stop
+        （`stop_hook_active`）兩者皆放行——疊加不死鎖。"""
         slug, env = _advised_session(self, 300_000)
         real = ROOT / ".claude" / "hooks" / "check_pending_handoff.py"
         self.assertTrue(real.is_file(), real)
@@ -425,7 +426,8 @@ class GuardRegistrationTest(unittest.TestCase):
     """
 
     def _entries(self, event: str) -> list[dict]:
-        settings = json.loads((GUARD_ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        path = GUARD_ROOT / ".claude" / "settings.json"
+        settings = json.loads(path.read_text(encoding="utf-8"))
         return [e for e in settings["hooks"][event]
                 if any("sessionctl_guard.py" in (h.get("args") or [""])[-1] for h in e["hooks"])]
 

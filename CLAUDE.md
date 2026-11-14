@@ -83,7 +83,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `check_ps1_encoding.py` | PostToolUse／Write、Edit | `.ps1` 寫入當下就地補回 CRLF（橋接自 AutoClaude tools/hooks） | 無 |
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
 | `precompact_restart_point.py` | PreCompact | 壓縮前把可重啟點任務書骨架寫到磁碟（PRD §4.3；零 token、只讀逐字稿）＋持久痕跡目錄落一行壓縮事件；同 session 距上次壓縮 < 600s 只出聲不阻止；恆 exit 0 | `AUTOSDD_PRECOMPACT_OFF` |
-| `sessionctl_guard.py` | Stop；PreToolUse／SendMessage | Stop：回合結束時本 session 仍有背景代理在跑 ⇒ 輸出 JSON `systemMessage` 出聲（rc 0、**永不阻斷**）；SendMessage：續棒目標代理上下文超過 `AUTOSDD_RESUME_AGENT_TOKENS` 時互動只出聲、`AUTOSDD_UNATTENDED` 有設則 rc 2 阻斷並要求改派新代理＋短任務書；解析不到目標一律放行（fail-open）；判準全在 `tools/lib/sessionctl/roster.py`，設計全文 ADR-XPLAT-004 §2.13 | `AUTOSDD_SESSIONCTL_GUARD_OFF` |
+| `sessionctl_guard.py` | Stop；PreToolUse／SendMessage、Agent、Task、Workflow | Stop：回合結束時本 session 仍有背景代理在跑 ⇒ 輸出 JSON `systemMessage` 出聲（rc 0、不阻斷）；無背景代理且滿足收斂條件（已被提醒換 session、上下文達硬門檻、無已 finalize 的交接包、非無人窗口）⇒ `decision:block` 推回一次（第二次 Stop 放行、不寫閂鎖）。PreToolUse／SendMessage：目標代理快取「熱」放行不出聲、「冷」且上下文超過 `AUTOSDD_RESUME_AGENT_TOKENS` 則互動與無人皆 rc 2 阻斷並要求改派新代理＋短任務書（互動逃生口＝訊息本文寫 `續棒理由：<WHY>`；無人窗口不論冷熱照舊阻斷）。PreToolUse／Agent、Task、Workflow：已被提醒換 session 且上下文達硬門檻 ⇒ rc 2 擋展開型派工（`/compact` 或交接換手後自動放行）；解析不到一律放行（fail-open）。判準在 `tools/lib/sessionctl/`（`cachestate.py`、`converge.py`、`roster.py`），設計全文 ADR-XPLAT-004 §2.13／§2.14 | `AUTOSDD_SESSIONCTL_GUARD_OFF`（同時關掉全部分支）；`AUTOSDD_SESSION_SWITCH_MODE=notify／off` |
 
 文件宣稱 ↔ 註冊實況由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration` 與 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR79EveryRegisteredHookIsNamedInClaudeMd` 雙向＋第三向機械釘住（已註冊未點名、未註冊卻寫成會跑，皆紅）。
 
@@ -170,7 +170,8 @@ claude -c               # 續接最近一次對話
 - **何時該換**：PostToolUse 出聲「建議換 session」（R1 上下文 token／R2 壓縮次數／R3 上次續跑寫入快取任一成立，門檻只准下修、數字現查 `python tools/lib/quota_policy.py --print-env-example`）；一個 session 只出聲一次，並已產交接包機械層。久等 reset 前、換帳號前也一樣先換（長 session 重寫快取吃額度）。現況查 `python tools/sessionctl.py status`。
 - **流程**：到〈可重啟點〉四條件成立 → `python tools/sessionctl.py handoff --build`（機械層，零 token；出聲時已產則補寫主控層即可）→ 在交接包「主控層」六節寫完（已驗證／未完成／下一步確切指令／禁止事項／已代決事項與 WHY／待掌舵者決定，不得留 `TODO:`）→ `python tools/sessionctl.py handoff --finalize <交接包路徑>`（驗不過 rc≠0 並列缺項）→ `python tools/sessionctl.py handoff --spawn <交接包路徑>`（Windows 才會開新互動視窗；前置：finalize 過、工作樹乾淨或 HEAD 有 `*-wip-preserved` 標籤、本 session 無執行中的背景代理；macOS／Linux 只印手動指令；同一交接包不重複 spawn，已 ack 者拒絕）。`--spawn` 成功後**本回合就收尾**，舊 session 不得再動工作樹。**無人窗口不出聲、不開互動視窗**（`AUTOSDD_UNATTENDED` 有設時 `--spawn` 一律拒絕；無人續跑的換 session 由 planner 的 FRESH 路負責）。
 - **新 session 第一動作＝重驗**：SessionStart 會公告未接手的交接包；讀完交接包後先 `git status`／HEAD 與包內每一條「已通過」宣稱重跑一遍，確認接手後 `python tools/sessionctl.py handoff --ack <路徑>`（只有這條指令寫接手憑證）。猝死時沒有主控層，機械層加逐字稿尾段仍可重建。
-- **不能做**：不以 SendMessage 續舊 session 的代理（一律派新代理＋短任務書；無人窗口會被 `sessionctl_guard.py` 擋下）；不在 spawn 前後同時讓兩個視窗動同一棵工作樹；`AUTOSDD_SESSION_SWITCH_MODE=notify` 只出聲不開窗、`off` 連出聲都不做。
+- **收斂閘與硬門檻（2026-11-15；ADR-XPLAT-004 §2.14）**：已被提醒換 session 後，上下文若再達**硬門檻**（`AUTOSDD_SWITCH_HARD_CTX_TOKENS`，只准下修且須嚴格大於 R1；數字現查 `python tools/lib/quota_policy.py --print-env-example`，本檔不複寫），`Agent`／`Task`／`Workflow` 派工會被 `sessionctl_guard.py` 擋下，回合結束也會被推回一次；出口只有三條：做完交接包主控層 → `handoff --finalize` → `--spawn`、`/compact`、或把模式設 notify。續棒看快取冷熱：熱放行、冷且上下文大則阻斷，互動逃生口是訊息本文寫 `續棒理由：<WHY>`。浪費帳現查 `python tools/probe/waste_census.py --since-days 14`。
+- **不能做**：不以 SendMessage 續舊 session 的代理（一律派新代理＋短任務書；無人窗口不論冷熱、互動在快取已冷時，皆會被 `sessionctl_guard.py` 擋下）；不在 spawn 前後同時讓兩個視窗動同一棵工作樹；`AUTOSDD_SESSION_SWITCH_MODE=notify` 只出聲不開窗、`off` 連出聲都不做。
 
 ### 工具選型（別再選錯）
 
@@ -406,7 +407,9 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | LOC 分級／絕對紅線 | `python AutoClaude/tools/check_loc_budget.py --json` |
 | hook 佈線／shell form 普查 | `tools/lib/hook_wiring.py`（`SHELL_FORM_CENSUS`／`FROZEN_SHELL_FORM_MAX`） |
 | hook 活性（開發機出聲層） | `tools/check_hooks_liveness.py`；正面現查 `claude -p --debug hooks`（見〈hook 載具〉） |
-| 推送後等 CI | `python tools/ci_wait.py --commit <rev>`（背景跑、輸出導檔；不要手寫 `gh run` 輪詢迴圈，鐵律六判準⑤會擋） |
+| 推送後等 CI | `python tools/ci_wait.py --commit <rev>`（背景跑、輸出導檔；不要手寫 `gh run` 輪詢迴圈，鐵律六判準⑤會擋；預設逾時 40 分，短於主控 1 小時快取壽命） |
+| 推送前閘門順序（pre-push） | `tools/git-hooks/pre-push` 先跑快層（十一支守門＋ruff），**快層任一紅即不啟動慢層與子專案 leg**，修完再推；快層全綠才並行跑慢層與各 leg（慢層內部仍累積多項失敗一次列出） |
+| Token 浪費帳（量測，不接閘門） | `python tools/probe/waste_census.py --since-days 14`（零 token、只讀逐字稿；判準在 `tools/lib/wastecensus/`；收斂門檻重放 `--replay-hard-ctx`） |
 | 破壞性 git 擋不到什麼 | `grep -n "擋不到" .claude/hooks/block_destructive_git.py` |
 | 等待形態判準條列 | `sed -n "/^def waitform_hits/,/\"\"\"$/p" .claude/hooks/block_destructive_git.py` |
 | mac 睡眠姿態 | `pmset -g custom`（不隨 clone 走，不得寫成常數） |
