@@ -235,13 +235,14 @@ def _stale_sentinels(runner) -> list[str]:
 
 
 def _handoffs(env) -> list[str]:
-    """未 ack 的交接包路徑（唯讀、不 mkdir；目錄解析與 `endurance_env` 同鍵）。"""
-    env = os.environ if env is None else env
-    base = env.get("AUTOSDD_HANDOFF_DIR") or str(Path.home() / ".autosdd" / "handoff")
+    """未 ack 且未過期的交接包路徑（唯讀、不 mkdir）。判準（檔名形態、`<stem>.ack` sidecar、過期、
+    目錄解析）全住 `handoff.list_handoffs`——不在這裡抄第二份（舊版查 `<檔名>.md.ack`，與
+    `handoff.ack` 實際寫的 `<stem>.ack` 對不上，已 ack 的包永遠被當成未接手）。"""
     try:
-        return sorted(str(p) for p in Path(base).glob("*.md")
-                      if not p.with_name(p.name + ".ack").exists())
-    except OSError:
+        from . import handoff  # noqa: PLC0415 — lazy：handoff 也 lazy import 本檔，避免環
+
+        return [str(r["path"]) for r in handoff.list_handoffs(env=env) if r["state"] == "live"]
+    except Exception:  # noqa: BLE001 — 名冊是唯讀診斷，量不到不拋
         return []
 
 

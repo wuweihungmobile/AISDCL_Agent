@@ -38,12 +38,12 @@ import sentinel_lifecycle as SL  # noqa: E402
 import transcript_activity  # noqa: E402
 
 from lib import sessionctl as sessionctl_pkg  # noqa: E402
-from lib.sessionctl import handoff, switch  # noqa: E402
+from lib.sessionctl import handoff, procstop, roster, switch  # noqa: E402
 from lib.sessionctl import handoff_build as build  # noqa: E402
 
 
 def _load_entry():
-    """入口檔 `tools/sessionctl.py` 與 `tools/lib/sessionctl/` 套件同名：以檔案路徑載入，不用裸名。"""
+    """入口檔 `tools/sessionctl.py` 與 `tools/lib/sessionctl/` 套件同名：以路徑載入，不用裸名。"""
     spec = importlib.util.spec_from_file_location(
         "sessionctl_entry", _REPO_ROOT / "tools" / "sessionctl.py")
     module = importlib.util.module_from_spec(spec)
@@ -365,7 +365,7 @@ class AnnounceTest(_Base):
         return path
 
     def test_at44_missing_main_layer_says_so(self) -> None:
-        """AT-SC-44：猝死（沒有 finalize 的主控層）⇒ 出聲含「主控層缺席，先以機械層＋逐字稿尾段重建」。"""
+        """AT-SC-44：猝死（沒 finalize）⇒ 出聲含「主控層缺席，先以機械層＋逐字稿尾段重建」。"""
         self._pkg("sudden", main=False)
         said: list[str] = []
         handoff.announce(lambda m: said.append(m) or True, base=self.base)
@@ -421,7 +421,7 @@ class AnnounceTest(_Base):
             self.assertEqual(handoff.ack(self.tmp / "nope.md"), 1)
 
     def test_at49_unwritable_handoff_dir_falls_back_to_system_temp(self) -> None:
-        """AT-SC-49：`AUTOSDD_HANDOFF_DIR` 指向建不出來的路徑 ⇒ 退系統暫存且回 True（同 handback）。"""
+        """AT-SC-49：`AUTOSDD_HANDOFF_DIR` 建不出來 ⇒ 退系統暫存、degraded（同 handback）。"""
         blocker = self.tmp / "afile"
         blocker.write_text("x", encoding="utf-8")
         with unittest.mock.patch.dict(os.environ, {
@@ -435,6 +435,35 @@ class AnnounceTest(_Base):
         with unittest.mock.patch.dict(os.environ, {endurance_env.HANDOFF_DIR_ENV: str(self.base)}):
             self.assertEqual(endurance_env.handoff_dir_status(), (self.base, False))
         self.assertIn(endurance_env.HANDOFF_DIR_ENV, SL.CACHE_FENCE_ENV)
+
+    def test_without_a_handoff_the_handback_announcement_is_byte_for_byte_unchanged(self) -> None:
+        """既有 handback 出聲行為不變：交接包目錄與 handback 目錄是**同一個**目錄（測試圍籬根、
+        寫入端退化到系統暫存時都會如此）、裡面只有 handback ⇒ `handoff.announce` 完全安靜，
+        `emit` 恰被呼叫一次且內容就是 handback 自己的文字，並照舊寫 `.ack`。
+        （vb3 紅的成因＝舊版 `list_handoffs` 把 handback 的 `*.md` 當成交接包先出聲。）"""
+        shared = self.tmp / "shared"
+        shared.mkdir()
+        report = shared / "sid-hb.md"
+        report.write_text("## 做了什麼\nA\n\n## 下一步指令\nB\n", encoding="utf-8")
+        said: list[str] = []
+        with unittest.mock.patch.dict(os.environ, {endurance_env.HANDOFF_DIR_ENV: str(shared)}):
+            self.assertEqual(handoff.announce(lambda m: said.append(m) or True), "")
+            self.assertEqual(said, [], "沒有交接包時 announce 必須完全安靜")
+            text = SL.announce_handbacks(lambda m: said.append(m) or True, base=shared)
+        self.assertEqual(said, [text])
+        self.assertIn("未讀 handback", text)
+        self.assertNotIn("交接包", text)
+        self.assertTrue(report.with_suffix(".ack").exists())
+
+    def test_nothing_at_all_stays_silent(self) -> None:
+        """兩邊都沒有東西 ⇒ `emit` 一次都不被呼叫、回空字串。"""
+        said: list[str] = []
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        with unittest.mock.patch.dict(os.environ, {endurance_env.HANDOFF_DIR_ENV: str(empty)}):
+            got = SL.announce_handbacks(lambda m: said.append(m) or True, base=empty)
+        self.assertEqual(got, "")
+        self.assertEqual(said, [])
 
     def test_session_start_announce_handbacks_also_announces_handoffs(self) -> None:
         """接線：`announce_handbacks` 在沒有任何 handback 時仍會出聲交接包（獨立 ack）。"""
@@ -536,8 +565,8 @@ class SpawnTest(_Base):
         self.assertTrue(any(str(self.pkg) in str(a) for a in call["argv"]))
         self.assertTrue(call["flags"] & 0x10, "沒有 CREATE_NEW_CONSOLE（可見視窗）")
         self.assertEqual(self.disarmed, [SID])
-        rows = [json.loads(ln) for ln in (endurance_env.trace_dir() / "autosdd_session_switch.jsonl")
-                .read_text(encoding="utf-8").splitlines()]
+        log = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
+        rows = [json.loads(ln) for ln in log.read_text(encoding="utf-8").splitlines()]
         spawned = [r for r in rows if r["event"] == "session_switch_spawned"][-1]
         self.assertEqual((spawned["pid"], spawned["sid"], spawned["ok"]), (4242, SID, True))
         self.assertIsNotNone(datetime.fromisoformat(spawned["at"]).tzinfo)
@@ -638,7 +667,7 @@ class AdviseOnceTest(_Base):
         self.assertEqual(list(self.base.glob("*.md")), [])
 
     def test_evaluation_is_throttled_within_a_minute(self) -> None:
-        """R2 要掃整份逐字稿：一分鐘內同 session 只評估一次（量不到成本的 hook 不能每個工具呼叫都付）。"""
+        """R2 要掃整份逐字稿：一分鐘內同 session 只評估一次（hook 不能每個工具呼叫都付這成本）。"""
         self.assertEqual(self.advise(10), "")
         self.assertEqual(self.advise(5000, now=NOW + timedelta(seconds=10)), "")
         self.assertNotEqual(self.advise(5000, now=NOW + timedelta(minutes=2)), "")
@@ -679,7 +708,8 @@ class EntryAndWiringTest(unittest.TestCase):
     def test_entry_dispatches_each_verb_lazily(self) -> None:
         """入口薄殼：handoff／status／stop／advice 各自分派到對應模組；未知子指令 rc 3。"""
         seen: list[tuple] = []
-        self._install("roster", types.SimpleNamespace(cli=lambda argv: seen.append(("r", argv)) or 5))
+        self._install("roster", types.SimpleNamespace(
+            cli=lambda argv: seen.append(("r", argv)) or 5))
         self._install("modelmix", types.SimpleNamespace(
             advice_line=lambda axes, now=None, family="x": seen.append(("m", family)) or "建議"))
         with unittest.mock.patch.object(handoff, "cli", return_value=7) as hcli:
@@ -747,6 +777,219 @@ class EntryAndWiringTest(unittest.TestCase):
                 tail = argv[argv.index("--add-dir") + 1:]
                 self.assertEqual(tail, [str(self.tmp), str(resume_route.handback_dir()),
                                         str(self.tmp / "ho")])
+
+
+def _real_roster(projects: Path):
+    """真的 `roster` 函式，只把 projects 目錄指向測試目錄（不讀本機真實 `~/.claude`）。"""
+    return types.SimpleNamespace(
+        snapshot=lambda sid=None, **kw: roster.snapshot(sid, projects_dir=projects, now=NOW, **kw),
+        render_snapshot=roster.render_snapshot,
+        running=lambda sid, **_kw: roster.running(sid, projects_dir=projects, now=NOW))
+
+
+def _agent_files(projects: Path, sid: str, minutes_ago: float, text: str = "跑全套的QA鏡") -> None:
+    folder = projects / "slug" / sid / "subagents"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "agent-a1.meta.json").write_text(
+        json.dumps({"description": text, "model": "sonnet"}), encoding="utf-8")
+    stamp = (NOW - timedelta(minutes=minutes_ago)).isoformat()
+    (folder / "agent-a1.jsonl").write_text(json.dumps(
+        {"type": "assistant", "timestamp": stamp, "message": {"id": "m", "usage": {
+            "input_tokens": 5, "cache_read_input_tokens": 100,
+            "cache_creation_input_tokens": 7}}}) + "\n", encoding="utf-8")
+
+
+class RealRosterIntegrationTest(_Base):
+    """兩半接線：用**真的** `roster` 模組（不是 FakeRoster）驗 handoff↔roster、planner→handoff。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.projects = self.tmp / "projects"
+        self.projects.mkdir()
+        self.roster = _real_roster(self.projects)
+
+    def test_mechanical_layer_embeds_the_real_roster_snapshot(self) -> None:
+        """機械層「背景代理名冊」欄＝`roster.render_snapshot(roster.snapshot(sid))` 的真輸出。"""
+        _agent_files(self.projects, SID, minutes_ago=1)
+        text = self.make(roster_mod=self.roster).read_text(encoding="utf-8")
+        self.assertIn("跑全套的QA鏡", text)
+        self.assertIn("[執行中]", text)
+        self.assertNotIn("名冊不可用", text)
+
+    def test_snapshot_handoffs_key_follows_the_real_ack_sidecar(self) -> None:
+        """`roster.snapshot` 的 `handoffs` 讀 Dev-2a 的清單：`handoff.ack` 寫的 `<stem>.ack` 要被
+        認得（舊版查 `<檔名>.md.ack`，已 ack 的包永遠被當成未接手）；過期與別人的 `*.md` 不列。"""
+        pkg = self.make(roster_mod=self.roster)
+        (self.base / "plan.md").write_text("x", encoding="utf-8")
+        env = {endurance_env.HANDOFF_DIR_ENV: str(self.base)}
+        with unittest.mock.patch.dict(os.environ, env):
+            before = roster.snapshot(projects_dir=self.projects, now=NOW, env=env)["handoffs"]
+            self.assertEqual(handoff.ack(pkg), 0)
+            after = roster.snapshot(projects_dir=self.projects, now=NOW, env=env)["handoffs"]
+        self.assertEqual((before, after), ([str(pkg)], []))
+
+    def test_status_listing_does_not_create_the_handoff_dir(self) -> None:
+        """唯讀名冊：`handoffs` 欄不得為了讀而 mkdir 交接包目錄。"""
+        absent = self.tmp / "never-made"
+        env = {endurance_env.HANDOFF_DIR_ENV: str(absent)}
+        self.assertEqual(roster.snapshot(projects_dir=self.projects, now=NOW,
+                                         env=env)["handoffs"], [])
+        self.assertFalse(absent.exists())
+
+    def test_spawn_refuses_when_the_real_roster_has_a_running_agent(self) -> None:
+        """spawn 的「無執行中代理」前置呼叫真的 `roster.running`：有 running 代理 ⇒ 拒絕並列出；
+        同一代理在 `finished: true` 後放行（名冊判準與 spawn 閘接得上）。"""
+        pkg = self.make(roster_mod=self.roster)
+        self.fill_main(pkg)
+        _agent_files(self.projects, SID, minutes_ago=1)
+        proj = self.tmp / "sessions"
+        proj.mkdir()
+
+        def go(runner) -> tuple[int, str]:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+                rc = handoff.spawn(pkg, runner=runner, platform_name="win32", env={}, now=NOW,
+                                   repo=self.repo, projects_dir=proj, roster_mod=self.roster,
+                                   alive=lambda _p: True, sleep=lambda _s: None,
+                                   disarm=lambda _s: 0, wait_seconds=0.0)
+            return rc, err.getvalue()
+
+        runner = FakeRunner(make_file=proj / "new.jsonl")
+        rc, err = go(runner)
+        self.assertEqual(rc, 1)
+        self.assertIn("跑全套的QA鏡", err)
+        self.assertFalse([c for c in runner.calls if not c["wait"]])
+        meta = self.projects / "slug" / SID / "subagents" / "agent-a1.meta.json"
+        meta.write_text(json.dumps({"description": "x", "finished": True}), encoding="utf-8")
+        self.assertEqual(go(FakeRunner(make_file=proj / "new.jsonl"))[0], 0)
+
+    def test_entry_point_runs_every_verb_against_the_real_modules(self) -> None:
+        """入口 `tools/sessionctl.py` 的每個子指令走真模組：status（名冊含代理）、stop（壞 sid 在
+        任何外呼前就拒）、advice（真 modelmix）、handoff --list（真交接包清單）。"""
+        _agent_files(self.projects, SID, minutes_ago=1)
+        pkg = self.make(roster_mod=self.roster)
+        env = {endurance_env.HANDOFF_DIR_ENV: str(self.base)}
+
+        def call(argv):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = sessionctl.main(argv)
+            return rc, out.getvalue(), err.getvalue()
+
+        fake_quota = types.SimpleNamespace(read_quota=_quota)
+        with unittest.mock.patch.dict(os.environ, env), \
+                unittest.mock.patch.dict(sys.modules, {"quota_gate": fake_quota}), \
+                unittest.mock.patch.object(roster, "_projects", lambda _p=None: self.projects), \
+                unittest.mock.patch.object(procstop, "list_processes", lambda *_a, **_k: []), \
+                unittest.mock.patch.object(roster, "_schedules", lambda _r: []), \
+                unittest.mock.patch.object(roster, "_stale_sentinels", lambda _r: []):
+            status = call(["status"])
+            stop = call(["stop", "--window", "x; rm"])
+            advice = call(["advice"])
+            listing = call(["handoff", "--list"])
+        self.assertEqual(status[0], 0)
+        self.assertIn("跑全套的QA鏡", status[1])
+        self.assertIn(str(pkg), status[1], "名冊的未 ack 交接包欄看不到真的交接包")
+        self.assertEqual(stop[0], 2)
+        self.assertEqual(advice[0], 0)
+        self.assertTrue(advice[1].strip(), "advice 沒有出聲")
+        self.assertEqual(listing[0], 0)
+        self.assertIn(f"live\t{SID}\t{pkg}", listing[1])
+
+    def test_planner_fresh_route_uses_the_real_handoff_and_roster(self) -> None:
+        """planner 的 FRESH 路呼叫真的 `handoff.ensure_mechanical`；產出的交接包含真名冊輸出，
+        prompt 指向它（planner→handoff→roster 一條鏈，沒有任何假物件）。"""
+        hooks = str(_REPO_ROOT / ".claude" / "hooks")
+        if hooks not in sys.path:
+            sys.path.insert(0, hooks)
+        import session_resume_planner as planner  # noqa: PLC0415 — 需先有 hook 路徑
+
+        _agent_files(self.projects, "sid-fresh", minutes_ago=1, text="鏈上的審查鏡")
+        plan = self.tmp / "plan.md"
+        plan.write_text("# 任務書", encoding="utf-8")
+        env = {endurance_env.HANDOFF_DIR_ENV: str(self.base)}
+        with unittest.mock.patch.dict(os.environ, env), \
+                unittest.mock.patch.object(build, "default_runner", FakeRunner()), \
+                unittest.mock.patch.object(roster, "_projects", lambda _p=None: self.projects), \
+                unittest.mock.patch("quota_gate.read_quota", _quota):
+            route = planner.choose_resume_route("claude", "sid-fresh", None, str(plan))
+        self.assertEqual(route["strategy"], planner.STRATEGY_FRESH)
+        prompt = route["argv"][2]
+        package = Path(prompt.split("按交接包繼續：讀 ", 1)[1].split("（機械層", 1)[0])
+        self.assertEqual(package.parent, self.base)
+        self.assertIn("鏈上的審查鏡", package.read_text(encoding="utf-8"))
+
+
+class SpawnTraceToStopIdentityTest(_Base):
+    """`handoff.spawn` 留的痕跡 ↔ `procstop` 驗身分：痕跡要帶 sid、時間；驗不到就不砍。"""
+
+    class _Proc:
+        def __init__(self, rc: int = 0, out: str = "") -> None:
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.trace = self.tmp / "traces"
+        self.proj = self.tmp / "sessions"
+        self.proj.mkdir()
+        patcher = unittest.mock.patch.dict(
+            os.environ, {endurance_env.TRACE_DIR_ENV: str(self.trace)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.pkg = self.make()
+        self.fill_main(self.pkg)
+        runner = FakeRunner(make_file=self.proj / "new.jsonl", pid=4242)
+        with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(handoff.spawn(
+                self.pkg, runner=runner, platform_name="win32", env={}, now=NOW, repo=self.repo,
+                projects_dir=self.proj, roster_mod=FakeRoster(), alive=lambda _p: True,
+                sleep=lambda _s: None, disarm=lambda _s: 0, wait_seconds=0.0), 0)
+        self.cmd = f'claude.exe "按交接包繼續：讀 {self.pkg}（機械層＋主控層）"'
+
+    def stop(self, created_offset: float, *, cmd: str | None = None) -> tuple[int, list, str]:
+        calls: list = []
+
+        def run(argv):
+            calls.append(list(argv))
+            return self._Proc()
+
+        procs = [{"pid": 4242, "ppid": 1, "created": NOW.timestamp() + created_offset,
+                  "cmd": cmd or self.cmd, "name": "claude.exe"}]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = procstop.stop_window(SID, runner=run, platform_name="win32", procs=procs,
+                                      disarm=lambda _s: 0, trace=lambda _r: None)
+        return rc, calls, err.getvalue()
+
+    def test_anchor_comes_from_the_spawn_trace_with_sid_and_spawn_time(self) -> None:
+        """痕跡的 `session_switch_spawned` 帶 sid 與 `at`（＝spawn 當下，不是等逐字稿之後）。"""
+        anchors = procstop.trace_anchors(SID, self.trace, self.tmp / "no-logs")
+        self.assertEqual(anchors, [NOW.timestamp()])
+
+    def test_a_window_created_at_spawn_time_is_verified_and_killed(self) -> None:
+        """身分吻合（命令列含交接包路徑內的 sid ∧ 建立時刻貼近痕跡）⇒ 走到砍樹那一步。"""
+        rc, calls, _err = self.stop(created_offset=8)
+        self.assertEqual(rc, 0)
+        self.assertEqual([c[-1] for c in calls], ["4242"])
+        self.assertEqual(calls[0][1:3], ["/" + f for f in "TF"])  # taskkill 旗標，不是路徑
+
+    def test_pid_reuse_created_long_before_the_spawn_is_not_killed(self) -> None:
+        """建立時刻與痕跡差一小時（pid 被重用）⇒ 不砍。"""
+        rc, calls, err = self.stop(created_offset=-3600)
+        self.assertEqual((rc != 0, calls), (True, []))
+        self.assertIn("不符", err)
+
+    def test_command_line_without_the_sid_is_not_killed(self) -> None:
+        """建立時刻吻合但命令列不含 sid（別人的 claude）⇒ 不砍。"""
+        rc, calls, _err = self.stop(created_offset=8, cmd='claude.exe "別的視窗"')
+        self.assertEqual((rc != 0, calls), (True, []))
+
+    def test_missing_trace_means_identity_cannot_be_verified(self) -> None:
+        """痕跡檔被清掉 ⇒ 沒有 spawn 時刻 ⇒ 驗不到身分 ⇒ 不砍（不放寬）。"""
+        (self.trace / "autosdd_session_switch.jsonl").unlink()
+        rc, calls, err = self.stop(created_offset=8)
+        self.assertEqual((rc != 0, calls), (True, []))
+        self.assertIn("沒有 spawn 時刻記錄", err)
 
 
 if __name__ == "__main__":

@@ -196,13 +196,17 @@ class RosterStateTest(unittest.TestCase):
         self.assertIn("未 ack 交接包：無", text)
 
     def test_unacked_handoffs_are_listed_and_acked_ones_are_not(self) -> None:
-        """名冊的未 ack 交接包欄：`<檔>.ack` sidecar 存在者不列。"""
+        """名冊的未 ack 交接包欄：用 `handoff.ack` 真的寫出的 `<stem>.ack` sidecar（不是手造的
+        `<檔名>.md.ack`）；非交接包檔名的 `*.md` 不列。"""
+        from lib.sessionctl import handoff  # noqa: PLC0415 — 與 roster 同一個真模組
+
         folder = _tmp(self)
-        (folder / "a.md").write_text("x", encoding="utf-8")
-        (folder / "b.md").write_text("x", encoding="utf-8")
-        (folder / "b.md.ack").write_text("", encoding="utf-8")
-        self.assertEqual(roster._handoffs({"AUTOSDD_HANDOFF_DIR": str(folder)}),
-                         [str(folder / "a.md")])
+        first = folder / f"{SID}_20261114T100000Z.md"
+        second = folder / f"{SID}_20261114T110000Z.md"
+        for pkg in (first, second, folder / "plan.md"):
+            pkg.write_text(f"# 交接包 <!-- sessionctl-handoff sid={SID} -->\n", encoding="utf-8")
+        self.assertEqual(handoff.ack(second), 0)
+        self.assertEqual(roster._handoffs({"AUTOSDD_HANDOFF_DIR": str(folder)}), [str(first)])
 
 
 class StopWindowTest(unittest.TestCase):
@@ -233,7 +237,7 @@ class StopWindowTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(len(kills), 1, kills)
         self.assertEqual(kills[0][0], str(root / "System32" / "taskkill.exe"))
-        self.assertTrue(kills[0][1:] == ["/T", "/F", "/PID", "4321"], kills[0])
+        self.assertEqual(kills[0][1:], ["/" + f for f in ("T", "F", "PID")] + ["4321"])  # 旗標
         self.assertEqual(disarmed, [SID])
         self.assertEqual((traces[0]["event"], traces[0]["pids"]), ("window_stopped", [4321]))
         self.assertIn("cmdline-sid", traces[0]["basis"])
@@ -409,6 +413,44 @@ class OutcomeAndCostTest(unittest.TestCase):
                                        pct_before_at=None, pct_after_at="t")
         self.assertEqual((rec["pct_before"], rec["pct_after"], rec["pct_after_at"]),
                          (None, None, None))
+
+    def test_unreadable_after_reading_is_recorded_as_none_with_a_said_reason(self) -> None:
+        """主控裁決（AT-SC-80 補強）：收窗讀不到新鮮讀數 ⇒ `pct_after` 記 None、附「量不到：…」
+        與檢查時刻；兩邊都讀到時沒有備註。不是靜默的 None，也不是猜一個數。"""
+        lost = resume_cost.build_record("s", 0, None, pct_before=40, pct_after=None,
+                                        recorded_at="2026-11-14T12:00:00+00:00")
+        self.assertEqual((lost["pct_before"], lost["pct_after"]), (None, None))
+        self.assertTrue(lost["pct_note"].startswith("量不到："), lost["pct_note"])
+        self.assertIn("後讀數", lost["pct_note"])
+        self.assertEqual(lost["pct_checked_at"], "2026-11-14T12:00:00+00:00")
+        both = resume_cost.build_record("s", 0, None, pct_before=40, pct_after=62,
+                                        recorded_at="t")
+        self.assertEqual((both["pct_note"], both["pct_checked_at"]), (None, None))
+
+    def test_closing_a_window_never_calls_the_network_for_the_reading(self) -> None:
+        """讀不到新鮮讀數時**不**為它外呼量測（無人窗口不得多燒額度）：`five_hour_reading` 只碰
+        `read_quota`（快取）；碰任何別的屬性（`refresh_*`／`pace_state`）一律當場失敗。"""
+        stale = type("S", (), {"axes": (), "measured_at": "", "reason": "stale-cache"})()
+
+        class Gate:
+            def read_quota(self, _now):
+                return stale
+
+            def __getattr__(self, name):
+                raise AssertionError(f"收窗不得碰 quota_gate.{name}（外呼量測）")
+
+        self.assertEqual(resume_cost.five_hour_reading(Gate()), (None, None))
+
+    def test_outcome_record_says_why_the_reading_is_missing(self) -> None:
+        """每窗結局檔：前後讀數缺 ⇒ 沒有 `pct_after` 鍵、有 `pct_note`「量不到：…」。"""
+        trace = _tmp(self)
+        state = {"session_id": "sid-n", "pct_before": 40.0, "pct_after": None}
+        with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace)}):
+            relay_machine._record_outcome(state, relay_machine.STATE_DONE, "free", NOW)
+        rec = json.loads((trace / endurance_env.UNATTENDED_OUTCOME_NAME)
+                         .read_text(encoding="utf-8").splitlines()[0])
+        self.assertNotIn("pct_after", rec)
+        self.assertTrue(rec["pct_note"].startswith("量不到："), rec)
 
     def test_record_window_takes_the_readings_from_state(self) -> None:
         """`record_window` 從狀態塊取 `pct_*`（`_run_resume` 前後各讀一次寫進去的那四個鍵）。"""

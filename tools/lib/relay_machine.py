@@ -594,7 +594,9 @@ def _record_outcome(state: dict, next_st: str, band: str, now: datetime) -> None
     base = {"reset_returned": band_ok(band), "handback_path": str(state.get("handback_path") or "")}
     extra = {"started_at": state.get("window_started_at"), "ended_at": now.isoformat(timespec="seconds"),  # noqa: E501
              "route": state.get("route_strategy"), "pct_before": state.get("pct_before"),
-             "pct_after": state.get("pct_after"), "handback": base["handback_path"]}
+             "pct_after": state.get("pct_after"), "handback": base["handback_path"],
+             "pct_note": resume_cost.pct_lost_note(state.get("pct_before"),
+                                                   state.get("pct_after"))}
     with contextlib.suppress(Exception):
         try:
             endurance_env.record_unattended_outcome(sid, reason, **base, **extra)

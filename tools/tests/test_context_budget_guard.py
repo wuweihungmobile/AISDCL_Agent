@@ -2969,8 +2969,8 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         def _fake_run(argv, **kwargs):
             if isinstance(argv, list) and argv[:1] == ["git"]:
                 return real(argv, **kwargs)
-            if isinstance(argv, list) and argv[:1] != ["claude"]:
-                return _Done()  # sessionctl：FRESH 路的交接包機械層另會外呼（排程查詢等），不是續跑 spawn
+            if isinstance(argv, list) and argv[:1] == ["powershell.exe"]:
+                return _Done()  # sessionctl：交接包機械層的排程查詢（唯讀），非續跑 spawn
             self.calls.append({"argv": argv, **kwargs})
             return _Done()
 
@@ -3102,8 +3102,13 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
                          "FRESH 還帶著 -r ⇒ 對一個不可用的 session 下注，喚醒照樣失敗"
                          "——這正是本包立案要補的那個洞")
         prompt = route["argv"][2]
-        # sessionctl 第二段：有交接包時改為「按交接包繼續」（任務書路徑仍在 prompt 內）
-        self.assertTrue("按磁碟任務書繼續" in prompt or "按交接包繼續" in prompt, prompt[:80])
+        # sessionctl 第二段：FRESH 路一律產交接包機械層 ⇒ prompt 必須指向它（不是「兩者皆可」：
+        # 退回「按磁碟任務書繼續」＝planner 接線壞了，新 session 拿不到機械層事實），任務書仍在。
+        self.assertIn("按交接包繼續：讀 ", prompt)
+        package = prompt.split("按交接包繼續：讀 ", 1)[1].split("（機械層", 1)[0]
+        self.assertTrue(Path(package).is_file(), f"prompt 指的交接包不存在：{package}")
+        self.assertEqual(Path(package).parent, endurance_env.handoff_dir())
+        self.assertNotIn("按磁碟任務書繼續", prompt)
         self.assertIn(str(self.plan), prompt, "FRESH 的 prompt 沒有指向磁碟任務書 ⇒ "
                                               "全新 session 拿不到 state，交棒斷裂")
 
@@ -3462,6 +3467,13 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.tmp = _tmpdir(self)
+        # sessionctl 第二段：SessionStart 另會公告「未接手的交接包」，而本模組別的測試（FRESH 選路）
+        # 會在圍籬內的交接包目錄留下真交接包。這個類別測的是 handback 公告本身 ⇒ 交接包目錄給
+        # 一個空的專屬目錄（隔離輸入，不放寬任何斷言；交接包公告另有 test_sessionctl_handoff 鎖）。
+        patcher = unittest.mock.patch.dict(os.environ, {
+            endurance_env.HANDOFF_DIR_ENV: str(_tmpdir(self, "vb3-handoff-"))})
+        patcher.start()
+        self.addCleanup(patcher.stop)
         (self.tmp / "sid-x.md").write_text(
             "## 做了什麼\n修好 Y\n細節第二行\n## 驗了什麼\nrc=0\n"
             "## 卡在哪\n無\n## 下一步指令\npython tools/run_root_unittests.py\n",
@@ -3614,8 +3626,8 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
         def _fake_run(argv, **kwargs):
             if isinstance(argv, list) and argv[:1] == ["git"]:
                 return real(argv, **kwargs)
-            if isinstance(argv, list) and argv[:1] != ["claude"]:
-                return _Done()  # sessionctl：同上（交接包機械層的外呼不是續跑 spawn）
+            if isinstance(argv, list) and argv[:1] == ["powershell.exe"]:
+                return _Done()  # sessionctl：同上（只放交接包機械層的排程查詢，不是續跑 spawn）
             self.calls.append({"argv": argv, **kwargs})
             return _Done()
 

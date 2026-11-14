@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +45,21 @@ def _aware(now: datetime | None) -> datetime:
 
 def _base(base: Path | None) -> Path:
     return Path(base) if base is not None else endurance_env.handoff_dir()
+
+
+def _read_bases(base: Path | None, env) -> list[Path]:
+    """唯讀列舉用的目錄（**不 mkdir**；`status`／SessionStart 公告是讀取端，不得為了讀而建目錄）：
+    給了 `base` 就只看它；否則複製 `endurance_env.handoff_dir` 的決策（主居所存在且可寫＝它，
+    否則寫入端已退化到系統暫存＝看暫存），但**只二選一、不併讀**：併讀會讓指定了專屬目錄的呼叫端
+    （含測試）仍被暫存裡別處留下的交接包污染。只認交接包檔名。"""
+    if base is not None:
+        return [Path(base)]
+    override = str(env.get(endurance_env.HANDOFF_DIR_ENV, "") or "").strip()
+    primary = Path(override) if override else Path.home().joinpath(
+        *endurance_env.HANDOFF_HOME_PARTS)
+    if primary.is_dir() and os.access(primary, os.W_OK):
+        return [primary]
+    return [Path(tempfile.gettempdir())]
 
 
 def _project_dir(repo: Path) -> Path:
@@ -82,7 +98,8 @@ def list_handoffs(base: Path | None = None, now: datetime | None = None,
     now, env = _aware(now), os.environ if env is None else env
     try:
         # 只認交接包檔名：目錄退回系統暫存（或測試圍籬根）時，裡面還有別人的 *.md
-        files = sorted((p for p in _base(base).glob("*.md") if _NAME_RE.search(p.name)),
+        files = sorted((p for d in _read_bases(base, env) for p in d.glob("*.md")
+                        if _NAME_RE.search(p.name)),
                        key=lambda p: (p.stat().st_mtime, p.name))
     except OSError:
         return []
@@ -278,6 +295,7 @@ def _disarm_sentinel(sid: str) -> int:
 
 def _trace(event: str, **fields) -> None:
     try:
+        # fields 可覆寫 at（spawn 痕跡要記 spawn 當下）
         row = {"event": event, "at": datetime.now().astimezone().isoformat(), **fields}
         target = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
         with target.open("a", encoding="utf-8", newline="\n") as handle:
@@ -356,8 +374,11 @@ def spawn(path, *, runner=None, platform_name: str | None = None, env=None,
         sleep(1)
         fresh = _new_files(proj, before)
     up = alive(pid)
-    _trace("session_switch_spawned", pid=pid, sid=sid, handoff=str(path),
-           spawned_at=started.isoformat(), new_transcripts=fresh, ok=bool(fresh) and up)
+    # `at`＝spawn 當下（不是等完逐字稿之後）：`procstop.trace_anchors` 以 `at` 為首選時間鍵驗行程
+    # 建立時刻，錨點必須貼近行程真實起點；`sid`／`pid` 也是它與 `stop --window` 驗身分的依據。
+    _trace("session_switch_spawned", at=started.isoformat(), pid=pid, sid=sid,
+           handoff=str(path), spawned_at=started.isoformat(), new_transcripts=fresh,
+           ok=bool(fresh) and up)
     if not (fresh and up):
         print(f"❌ 已起行程 pid={pid} 但{'未見逐字稿' if up else '行程已不在'}"
               f"（{wait_seconds:g}s 內 {proj} 沒有新檔）⇒ 不報成功；請自行檢視新視窗。",

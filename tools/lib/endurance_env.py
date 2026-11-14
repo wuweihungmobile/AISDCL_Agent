@@ -281,7 +281,8 @@ def record_unattended_outcome(session_id: str, reason: str, *,
                               started_at: str | None = None, ended_at: str | None = None,
                               route: str | None = None, pct_before: float | None = None,
                               pct_after: float | None = None,
-                              handback: str | None = None) -> bool:
+                              handback: str | None = None,
+                              pct_note: str | None = None) -> bool:
     """(a) 無人續跑在 no_progress／exhausted 停下時，append 一行持久結局；回「寫了沒」。
 
     `reason`＝no_progress／exhausted／other_driver（呼叫端 `relay_machine.settle_window` 只在
@@ -294,7 +295,7 @@ def record_unattended_outcome(session_id: str, reason: str, *,
               "handback": str(handback_path or ""), "at": time.strftime(_OUTCOME_STAMP)}
     # 第二段（FR-SC-21）選填欄：有值才寫，舊讀取端（`unattended_outcome_banner`）不受影響。
     extra = {"started_at": started_at, "ended_at": ended_at, "route": route,
-             "pct_before": pct_before, "pct_after": pct_after}
+             "pct_before": pct_before, "pct_after": pct_after, "pct_note": pct_note}
     record.update({k: v for k, v in extra.items() if v is not None})
     if handback:
         record["handback"] = str(handback)

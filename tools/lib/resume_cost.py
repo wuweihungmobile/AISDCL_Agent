@@ -14,7 +14,8 @@ build_record 這個唯一出口守，取值函式只回原始事實。
  ① 量不到一律 measured 為假、數值欄為 None，絕不寫 0——合成佔位與全零 usage 都不算量到。
  ② 同一 reset 週期的第二個起接力窗（relay_seq>=1）以 reset_at 為錨會抓到第一窗的首筆，
     故誠實標 measured 為假（reason=relay-chain-anchor），不拿別窗的數字冒充。
- ③ pct_before／pct_after 須兩者皆有值才填；spawn 前讀數目前沒有持久來源，v1 接線不傳⇒恆 None。
+ ③ pct_before／pct_after 須兩者皆有值才填（`_run_resume` 前後各讀一次額度快取，不連網）；缺任一 ⇒
+    兩欄皆 None，並以 `pct_note`「量不到：…」＋`pct_checked_at` 說明（收窗絕不為它外呼量測）。
 """
 from __future__ import annotations
 
@@ -87,6 +88,14 @@ def first_assistant_usage_after(source, after_ts: object) -> dict | None:
     return None
 
 
+def pct_lost_note(pct_before: object, pct_after: object) -> str | None:
+    """前後讀數有缺 ⇒ 「量不到：<哪一側>（原因）」；兩者皆有 ⇒ `None`（成本帳與結局檔共用）。"""
+    lost = [n for n, p in (("前讀數", pct_before), ("後讀數", pct_after))
+            if type(p) not in (int, float)]
+    return (f"量不到：{'、'.join(lost)}（額度快取缺、過期或無五小時軸；收窗不外呼量測）"
+            if lost else None)
+
+
 def build_record(session_id: str, relay_seq: int | None, usage: dict | None, *, reason: str = "",
                  pct_before: float | None = None, pct_after: float | None = None,
                  recorded_at: str = "", pct_before_at: str | None = None,
@@ -100,7 +109,11 @@ def build_record(session_id: str, relay_seq: int | None, usage: dict | None, *, 
     measured = any(got.values())  # 全 None／全 0 都不是量到（合成佔位長這樣）
     why = "" if measured else (reason or ("no-usage-count" if usage else "no-assistant-usage"))
     both = all(type(p) in (int, float) for p in (pct_before, pct_after))  # 兩次讀數皆有才填
+    # 量不到要**說出來**（主控裁決：收窗時讀不到新鮮讀數就記 None＋原因，絕不為它外呼量測——
+    # 無人窗口不得多燒額度）；`pct_checked_at`＝本列檢查時刻，不是額度量測時刻（量不到就沒有後者）。
+    note = pct_lost_note(pct_before, pct_after)
     return {"session_id": session_id, "relay_seq": relay_seq, "measured": measured,
+            "pct_note": note, "pct_checked_at": recorded_at if note else None,
             "first_assistant_ts": raw.get("ts"),
             "model": model if isinstance(model, str) and model else None,
             **(got if measured else dict.fromkeys(USAGE_KEYS)),
