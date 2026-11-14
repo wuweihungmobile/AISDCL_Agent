@@ -590,7 +590,7 @@ def stop_reason(next_st: str, state: dict) -> str:
 def _record_outcome(state: dict, next_st: str, band: str, now: datetime) -> None:
     """sessionctl D7b：每窗收窗落一行持久結局（起訖、路線、五小時軸前後讀數、handback 路徑）。
     `endurance_env` 舊簽名（無新欄）時退回舊呼叫；永不拋（落帳失敗不得擋收窗）。"""
-    sid, reason = str(state.get("session_id") or ""), _OUTCOME_REASON[next_st]
+    sid, reason = str(state.get("session_id") or ""), _OUTCOME_REASON.get(next_st, str(next_st))
     base = {"reset_returned": band_ok(band), "handback_path": str(state.get("handback_path") or "")}
     extra = {"started_at": state.get("window_started_at"), "ended_at": now.isoformat(timespec="seconds"),  # noqa: E501
              "route": state.get("route_strategy"), "pct_before": state.get("pct_before"),

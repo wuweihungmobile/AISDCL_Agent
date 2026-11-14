@@ -1931,6 +1931,10 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     # AskUserQuestion ⇒ decision:block 推回一次（第二次 Stop 放行）。契約見該條目 _comment。
     ("Stop", ".claude/hooks/check_pending_handoff.py"): frozenset({"*"}),
     ("PreCompact", ".claude/hooks/precompact_restart_point.py"): frozenset({"*"}),
+    # sessionctl 第二段（ADR-XPLAT-004 §2.13；TCS AT-SC-85／86）：SendMessage 續棒成本閘
+    # 與 Stop 出聲；Stop 無 matcher ⇒ `*`。逃生口 AUTOSDD_SESSIONCTL_GUARD_OFF。
+    ("PreToolUse", ".claude/hooks/sessionctl_guard.py"): frozenset({"SendMessage"}),
+    ("Stop", ".claude/hooks/sessionctl_guard.py"): frozenset({"*"}),
 }
 
 

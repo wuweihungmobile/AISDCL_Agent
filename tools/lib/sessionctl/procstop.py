@@ -2,8 +2,10 @@
 
 WHY 獨立一檔：`roster.py` 只做「看見」（純讀檔）；會動行程的部分（砍樹）安全敏感，單獨成檔、
 單獨測。**先驗身分再砍，驗不到就不砍**——pid 會被重用、命令列可能是別人的，砍錯＝砍掉掌舵者
-手上的互動視窗。身分判準兩條缺一不可：①命令列含該 sid；②行程建立時刻與痕跡記錄的 spawn 時刻
-相差 ≤ `CREATED_TOLERANCE` 秒（pid 重用的新行程建立時刻對不上）。外部執行檔（`powershell.exe`／
+手上的互動視窗。身分判準缺一不可：①命令列含該 sid；②行程建立時刻與痕跡記錄的 spawn 時刻
+相差 ≤ `CREATED_TOLERANCE` 秒（pid 重用的新行程建立時刻對不上）；③痕跡帶 pid 者要 pid 相符
+（SEC-2：同 sid 的接手新視窗不是舊 session），痕跡無 pid 者（續跑日誌）只認 print 模式行程；
+`--all-unattended` 另限 print 模式（SEC-1）。外部執行檔（`powershell.exe`／
 `ps`／`taskkill`／`kill`）一律經注入的 `runner`，且只在對應平台分支內組 argv（鐵律三）；測試
 只傳假 runner，不砍真行程。誠實劃界：視窗內子代理只能由擁有者 TaskStop，本檔不碰。
 """
@@ -120,9 +122,10 @@ def _trace_dir() -> Path:
     return Path(override) if override else Path.home() / ".autosdd" / "traces"
 
 
-def _event_stamps(path: Path, sid: str, per_sid_file: bool) -> list[float]:
-    """`per_sid_file`＝檔名已含 sid（續跑日誌；其行內沒有 sid 欄）⇒ 不再逐行比對 sid。"""
-    found: list[float] = []
+def _event_stamps(path: Path, sid: str, per_sid_file: bool) -> list[tuple[float, int | None]]:
+    """`(時刻, 痕跡記的 pid 或 None)`。`per_sid_file`＝檔名已含 sid（續跑日誌；其行內沒有 sid
+    欄）⇒ 不再逐行比對 sid。"""
+    found: list[tuple[float, int | None]] = []
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -136,7 +139,9 @@ def _event_stamps(path: Path, sid: str, per_sid_file: bool) -> list[float]:
                     continue
                 if isinstance(rec, dict) and rec.get("event") in _ANCHOR_EVENTS:
                     stamps = [parse_iso(rec.get(k)) for k in _ANCHOR_KEYS if rec.get(k)]
-                    found.extend(s for s in stamps[:1] if s is not None)
+                    pid = rec.get("pid")
+                    pid = pid if isinstance(pid, int) and not isinstance(pid, bool) else None
+                    found.extend((s, pid) for s in stamps[:1] if s is not None)
     except OSError:
         pass
     return found
@@ -144,9 +149,16 @@ def _event_stamps(path: Path, sid: str, per_sid_file: bool) -> list[float]:
 
 def trace_anchors(sid: str, trace_dir: Path | None = None,
                   tmp_dir: Path | None = None) -> list[float]:
-    """痕跡裡該 sid 的 spawn 時刻（epoch 秒）：續跑日誌 `relay_snapshot_before`（spawn 前一刻落）
-    ＋持久痕跡目錄裡的 `session_switch_spawned`。都沒有回空清單（⇒ 身分驗不到、不砍）。"""
-    found: list[float] = []
+    """痕跡裡該 sid 的 spawn 時刻（epoch 秒；只看時間）。身分驗證用 `trace_records`。"""
+    return [stamp for stamp, _pid in trace_records(sid, trace_dir, tmp_dir)]
+
+
+def trace_records(sid: str, trace_dir: Path | None = None,
+                  tmp_dir: Path | None = None) -> list[tuple[float, int | None]]:
+    """痕跡裡該 sid 的 spawn 記錄 `(epoch 秒, pid)`：續跑日誌 `relay_snapshot_before`（spawn 前
+    一刻落、**無 pid**）＋持久痕跡目錄裡的 `session_switch_spawned`（帶 pid）。都沒有回空清單
+    （⇒ 身分驗不到、不砍）。"""
+    found: list[tuple[float, int | None]] = []
     try:
         logs = list((tmp_dir or Path(tempfile.gettempdir())).glob(
             f"autosdd_resume_log_*{sid}*.jsonl"))
@@ -160,21 +172,54 @@ def trace_anchors(sid: str, trace_dir: Path | None = None,
     return found
 
 
-def verify(procs: list[dict], sid: str, anchors: list[float]) -> tuple[list[dict], list[str]]:
-    """`(通過身分驗證者, 拒絕理由列)`。claude 行程且命令列含 sid 且建立時刻吻合任一錨點才通過。"""
+def _norm_anchors(anchors) -> list[tuple[float, int | None]]:
+    """錨點正規化：純數字＝只有時刻（續跑日誌那種，無 pid）；`(時刻, pid)` 原樣。"""
+    return [a if isinstance(a, tuple) else (a, None) for a in anchors or ()]
+
+
+def _anchor_match(proc: dict, anchors: list[tuple[float, int | None]]) -> str | None:
+    """行程對得上哪種錨點：`"pid"`（痕跡記的 pid 相符且時刻吻合）、`"print"`（無 pid 的錨點時刻
+    吻合，且行程是 print 模式——無人續跑的 spawn 痕跡本來就沒有 pid）、否則 `None`。
+    互動視窗**只有** pid 相符一條路：命令列帶舊 sid 的接手新視窗（SEC-2）不會被當成舊 session。"""
+    if proc["created"] is None:
+        return None
+    printed = bool(_PRINT_RE.search(proc["cmd"]))
+    for stamp, pid in anchors:
+        if abs(proc["created"] - stamp) > CREATED_TOLERANCE:
+            continue
+        if pid is not None and pid == proc["pid"]:
+            return "pid"
+        if pid is None and printed:
+            return "print"
+    return None
+
+
+def _has_sid(cmd: str, sid: str) -> bool:
+    """sid 要與命令列裡某個完整 UUID 相等（8 碼前綴不得子字串命中，SEC-3）；harness 的 session id
+    一律是 UUID，非 UUID 形＝驗不到＝不砍（只准收緊）。"""
+    return bool(_UUID_RE.fullmatch(sid)) and sid.lower() in {
+        u.lower() for u in _UUID_RE.findall(cmd or "")}
+
+
+def verify(procs: list[dict], sid: str, anchors: list,
+           require_print: bool = False) -> tuple[list[dict], list[str]]:
+    """`(通過身分驗證者, 拒絕理由列)`。claude 行程、命令列含 sid、且 `_anchor_match` 對得上才通過。
+    `require_print`（`--all-unattended`）：非 print 模式的行程一律不在集合內（SEC-1）。"""
     ok: list[dict] = []
     notes: list[str] = []
+    anchors = _norm_anchors(anchors)
     for proc in procs:
         if not is_claude(proc):
             continue
-        has_sid = sid in proc["cmd"]
-        near = bool(anchors and proc["created"] is not None
-                    and any(abs(proc["created"] - a) <= CREATED_TOLERANCE for a in anchors))
+        if require_print and not _PRINT_RE.search(proc["cmd"]):
+            continue
+        has_sid = _has_sid(proc["cmd"], sid)
+        near = _anchor_match(proc, anchors) is not None
         if has_sid and near:
             ok.append(proc)
         elif has_sid:
             why = ("痕跡沒有 spawn 時刻記錄" if not anchors
-                   else "建立時刻與痕跡不符（疑似 pid 重用）")
+                   else "痕跡的 pid 或建立時刻不符（疑似 pid 重用，或同 sid 的別個視窗）")
             notes.append(f"pid {proc['pid']}：命令列含 sid 但{why} ⇒ 不砍")
         elif near:
             notes.append(f"pid {proc['pid']}：建立時刻吻合但命令列不含 sid ⇒ 不砍")
@@ -221,7 +266,7 @@ def _default_trace(record: dict) -> None:
 
 
 def stop_window(session_id: str, *, runner=None, platform_name=None, now=None, anchors=None,
-                disarm=None, trace=None, procs=None) -> int:
+                disarm=None, trace=None, procs=None, require_print: bool = False) -> int:
     """停某 session 的視窗行程樹（先驗身分）。rc：0＝已停或沒有東西要停；1＝驗不到／砍失敗。
     `anchors`／`disarm`／`trace`／`procs` 是測試縫（缺席走真實痕跡、真排程、真列舉）。"""
     sid = str(session_id or "")
@@ -234,7 +279,8 @@ def stop_window(session_id: str, *, runner=None, platform_name=None, now=None, a
     if procs is None:
         print("❌ 量不到：行程列舉失敗 ⇒ 不砍（量不到≠沒有）", file=sys.stderr)
         return 1
-    ok, notes = verify(procs, sid, trace_anchors(sid) if anchors is None else anchors)
+    ok, notes = verify(procs, sid, trace_records(sid) if anchors is None else anchors,
+                       require_print)
     for note in notes:
         print(f"⚠️ {note}", file=sys.stderr)
     if not ok:
@@ -248,12 +294,14 @@ def stop_window(session_id: str, *, runner=None, platform_name=None, now=None, a
     stamp = (now or datetime.now().astimezone()).isoformat(timespec="seconds")
     (trace or _default_trace)({"event": "window_stopped", "session": sid, "at": stamp,
                                "pids": [p["pid"] for p in ok], "kill_rc": rcs,
-                               "basis": "cmdline-sid+created-time", "disarm_rc": disarm_rc})
+                               "basis": "cmdline-sid+trace-pid+created-time",
+                               "disarm_rc": disarm_rc})
     return 0 if all(rc == 0 for rc in rcs) else 1
 
 
 def stop_all_unattended(*, runner=None, platform_name=None, **seams) -> int:
-    """停所有無人視窗（claude -p 且命令列含 sid）；逐 sid 各自驗身分。無則 rc 0。"""
+    """停所有無人視窗（claude -p 且命令列含 sid）；逐 sid 各自驗身分，且驗證集合只收 print 模式行程
+    （`require_print`：同 sid 的互動視窗即使時刻吻合也不砍，SEC-1）。無則 rc 0。"""
     procs = list_processes(runner, platform_name)
     if procs is None:
         print("❌ 量不到：行程列舉失敗 ⇒ 不砍", file=sys.stderr)
@@ -263,6 +311,6 @@ def stop_all_unattended(*, runner=None, platform_name=None, **seams) -> int:
     if not sids:
         print("沒有執行中的無人視窗。")
         return 0
-    rcs = [stop_window(sid, runner=runner, platform_name=platform_name, procs=procs, **seams)
-           for sid in sids]
+    rcs = [stop_window(sid, runner=runner, platform_name=platform_name, procs=procs,
+                       require_print=True, **seams) for sid in sids]
     return 0 if all(rc == 0 for rc in rcs) else 1

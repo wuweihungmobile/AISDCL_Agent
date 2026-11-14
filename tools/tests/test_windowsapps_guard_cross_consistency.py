@@ -1351,6 +1351,11 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "（`\"python -m pip install \" + …`）——本行程只 print 它、不 spawn。"
         "R68 新增：缺第三方相依時 runner fail-fast 並印出這行修法"
     ),
+    "tools/lib/sessionctl/handoff.py": (
+        "非呼叫：`_CMD = \"python tools/sessionctl.py handoff\"` 是組進出聲訊息、給**人**複製貼上的"
+        "指令前綴（--finalize／--spawn 提示），本行程只 print、不 spawn；"
+        "互動 spawn 的 argv[0] 是已解析的 claude"
+    ),
     "tools/probe/console_spawn_watch.py": (
         "非呼叫：`str(record.get(\"ParentName\") or \"\").lower().startswith(\"python\")` "
         "的**比對字面**。那個字串是 WMI 從 OS **讀回來**的行程映像名，判準只拿它分類"

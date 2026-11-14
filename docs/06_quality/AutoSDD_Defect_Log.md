@@ -354,7 +354,8 @@
 | DEF-200-581 | 2026-11-13 | 哨兵 f1522ddb 自 11/9 `waiting`（本欄刻意零輪號） | **撞線等待中的過期哨兵會續跑四天前的舊 session**：撞線分支優先於 `superseded_by` | P2 | SUPERSEDED 兩處接線（`sentinel_decide`、`_resume_tick`），詳同證據檔 | fixed@R214（本列同 commit）：鎖 SupersededTest／E2ReplayTest（AT-SC-19～33） |
 | DEF-200-582 | 2026-11-13 | 洩漏圍籬 20:48:35 `fence_rc: 1`（本欄刻意零輪號） | **洩漏圍籬把活著的互動 session 合法武裝的哨兵判成洩漏** | P3 | 有真實逐字稿活動者只出聲不判死，詳同證據檔 | fixed@R214（本列同 commit）：鎖 LeakFenceTest（AT-SC-89／90） |
 | DEF-200-583 | 2026-11-13 | 第一波推送守門在 GitHub 三平台 runner 紅（本欄刻意零輪號） | **跨平台八個成因**（測試偽裝平台、BSD ps、路徑別名、runner 計時範圍等） | P2 | 修測試五處、修實作三處（`runner.py`、`pushcontent._same_dir`），成因表詳同證據檔 | fixed@R214（本列同 commit）：Windows p7 152 OK、Linux 容器 151／152；GitHub Windows runner 已驗（ed9bc12d windows-compat-ci 通過），Linux／macOS 測試失敗清零、餘 skip 閘由 TCS-P7 E-78 消除 |
-| DEF-200-584 | 2026-11-14 | sessionctl 第一段收尾（本欄刻意零輪號） | **sessionctl 第二段尚未實作**：交接包、名冊與停止、SendMessage 閘、Stop 出聲、模型建議、新 hook | P2 | 承接輪次：**R215**，設計見 ADR-XPLAT-004 §2.13，詳同證據檔 | open（承接輪次：R215） |
+| DEF-200-584 | 2026-11-14 | sessionctl 第一段收尾（本欄刻意零輪號） | **sessionctl 第二段尚未實作（立案時；已於本輪落地）**：交接包、名冊與停止、SendMessage 閘、Stop 出聲、模型建議、新 hook | P2 | 承接輪次：**R215**，設計見 ADR-XPLAT-004 §2.13，詳同證據檔 | fixed@R215（本列同 commit）：第二段七檔落地（handoff、handoff_build、roster、procstop、modelmix、入口 sessionctl.py、hook sessionctl_guard.py）；鎖四個 test_sessionctl_* 測試檔（AT-SC-34～88）；SPECIAL 棘輪 context_budget_guard 1089→1104，理由詳 `SessionCtl_Defect_Evidence_20261114.md`；TCS 真機 V1～V8 待主控目視 |
+| DEF-200-585 | 2026-11-14 | 主控以 Linux 容器（Python 3.12）跑根層全套（本欄刻意零輪號） | **根層兩條測試在 Python 3.12 出錯**：偽 win32 的 `shutil.which` 撞 `_winapi` 為 None；`mock.Mock(cls=…)` 撞 `__new__` 參數名；CI 用 3.11 故未現形 | P3 | 兩處測試檔內小改（補 `_winapi` 替身、`cls` 改屬性賦值），不改語意，詳同證據檔 | fixed@R215（本列同 commit）：兩條在 3.12 容器實跑通過（`test_bash_probe_spec_contract`、`test_selfimproving_schedule_advance`） |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

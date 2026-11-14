@@ -320,11 +320,11 @@ def stop_message(payload: dict, *, env=None, now=None) -> str:
         sid, projects = _payload_sid(payload), _payload_projects(payload)
         tasks = _tasks(payload)
         if tasks is not None:
+            live = [t for t in tasks if str(t.get("status") or "running") == "running"]
             agents = [{"id": t.get("id"), "description": t.get("description") or "",
                        "model": t.get("agent_type") or ""}
-                      for t in tasks if t.get("type") == "subagent"
-                      and str(t.get("status") or "running") == "running"]
-            shells = sum(1 for t in tasks if t.get("type") == "shell")
+                      for t in live if t.get("type") == "subagent"]
+            shells = sum(1 for t in live if t.get("type") == "shell")  # 已結束的 shell 不算在跑
         else:
             agents, shells = (running(sid, projects_dir=projects, now=now) if sid else []), 0
         if not agents and not shells:

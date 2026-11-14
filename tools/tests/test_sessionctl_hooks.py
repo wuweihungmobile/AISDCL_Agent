@@ -2,7 +2,7 @@
 
 兩層：函式層（`roster.resume_gate`／`roster.stop_message`）一律能跑；子行程層把 payload 餵給
 **最終路徑** `.claude/hooks/sessionctl_guard.py`——`.claude/` 是受保護路徑，成品先 staged 在
-scratchpad 由主控套用，**套用前 `HookSubprocessTest` 全數紅是預期**（檔案不存在 ⇒ rc≠期望）。
+scratchpad 由主控套用（2026-11-14 已套用）；`GuardRegistrationTest` 釘註冊面（AT-SC-85）。
 """
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "lib")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TOOLS = _REPO_ROOT / "tools"
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 from lib.sessionctl import roster  # noqa: E402
 
@@ -157,6 +157,19 @@ class StopMessageFunctionTest(unittest.TestCase):
         self.assertIn("1 支", mixed)
         self.assertIn("1 個背景 shell", mixed)
 
+    def test_finished_background_tasks_are_never_reported_as_running(self) -> None:
+        """`status` 不是 running 的子代理與 shell 一律不計入（已結束的被報成在跑＝Stop 誤報）。"""
+        slug = _project(self)
+        done = [{"id": "a1", "type": "subagent", "status": "completed",
+                 "description": "已完成審查"},
+                {"id": "b1", "type": "shell", "status": "completed", "command": "sleep 1"}]
+        self.assertEqual(roster.stop_message(_stop(slug, background_tasks=done)), "")
+        live = {"id": "a2", "type": "subagent", "status": "running", "description": "還在跑"}
+        text = roster.stop_message(_stop(slug, background_tasks=[*done, live]))
+        self.assertIn("1 支", text)
+        self.assertNotIn("已完成審查", text)
+        self.assertNotIn("背景 shell", text)
+
     def test_at_sc_75_nothing_running_or_unreadable_roster_is_silent(self) -> None:
         """AT-SC-75：無執行中（含 `background_tasks: []`、檔案名冊讀不動）⇒ 空字串。"""
         slug = _project(self)
@@ -285,6 +298,33 @@ class HookSubprocessTest(unittest.TestCase):
         for payload in (wide, post):
             proc = _run_hook(payload, AUTOSDD_UNATTENDED="1")
             self.assertEqual((proc.returncode, proc.stdout.strip()), (0, ""), proc.stderr)
+
+
+class GuardRegistrationTest(unittest.TestCase):
+    """AT-SC-85：新 hook 以 exec form 註冊於兩個事件，且在機械守衛總表點名。
+
+    WHY：註冊面是 fail-open 的——少註冊一個事件，守衛就靜默失效而表徵與「修好了」相同。
+    受測對象＝`.claude/settings.json` 的註冊與 `tools/lib/sessionctl/roster.py` 的 hook 跳板。
+    """
+
+    def _entries(self, event: str) -> list[dict]:
+        settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        return [e for e in settings["hooks"][event]
+                if any("sessionctl_guard.py" in (h.get("args") or [""])[-1] for h in e["hooks"])]
+
+    def test_registered_exec_form_on_sendmessage_and_stop(self) -> None:
+        pre, stop = self._entries("PreToolUse"), self._entries("Stop")
+        self.assertEqual([e.get("matcher") for e in pre], ["SendMessage"])
+        self.assertEqual(len(stop), 1)
+        self.assertNotIn("matcher", stop[0])
+        for entry in (*pre, *stop):
+            args = entry["hooks"][0]["args"]
+            self.assertTrue(args[0].endswith("_hook_launcher.py"), args)
+
+    def test_named_in_the_root_claude_md_guard_table_with_its_escape_hatch(self) -> None:
+        text = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("sessionctl_guard.py", text)
+        self.assertIn("AUTOSDD_SESSIONCTL_GUARD_OFF", text)
 
 
 if __name__ == "__main__":

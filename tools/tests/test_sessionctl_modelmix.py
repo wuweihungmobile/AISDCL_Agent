@@ -6,10 +6,10 @@ import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "lib")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TOOLS = _REPO_ROOT / "tools"
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 from lib.sessionctl import modelmix  # noqa: E402
 

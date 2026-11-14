@@ -673,9 +673,12 @@ class TestStubFormIsLaunchableOnItsOwnPlatform(unittest.TestCase):
         # 個字串，直接塞 Windows 原字面值（`;` 分隔）在 macOS 上整串切不開 ⇒ 恆不
         # 命中，模擬本身失效卻看不出來（實測確認過這個陷阱）。
         pathext = os.pathsep.join(_WINDOWS_LAUNCHABLE_SUFFIXES)
+        # Python 3.12 的 `shutil.which` 在 win32 分支呼叫 `_winapi.NeedCurrentDirectoryForExePath`；
+        # 非 Windows host 上 `_winapi` 為 None ⇒ 補一個等價替身（3.11 無此屬性，故 create=True）。
+        fake_winapi = mock.Mock(NeedCurrentDirectoryForExePath=lambda _exe: False)
         with mock.patch.object(sys, "platform", "win32"), mock.patch.dict(
             os.environ, {"PATHEXT": pathext}, clear=False
-        ):
+        ), mock.patch.object(shutil, "_winapi", fake_winapi, create=True):
             found = shutil.which("bash", path=str(tmp))
         self.assertIsNotNone(
             found,

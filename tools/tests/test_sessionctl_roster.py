@@ -15,16 +15,17 @@ import unittest.mock
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-_TOOLS = Path(__file__).resolve().parents[1]
-for _p in (str(_TOOLS), str(_TOOLS / "lib")):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_TOOLS = _REPO_ROOT / "tools"
+sys.path.insert(0, str(_REPO_ROOT / "tools"))
+sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import endurance_env  # noqa: E402
 import relay_machine  # noqa: E402
 import resume_cost  # noqa: E402
 import session_brief  # noqa: E402
 
+import lib.sessionctl as sessionctl_pkg  # noqa: E402
 from lib.sessionctl import procstop, roster  # noqa: E402
 
 NOW = datetime(2026, 11, 14, 12, 0, 0, tzinfo=UTC)
@@ -255,7 +256,7 @@ class StopWindowTest(unittest.TestCase):
     def test_at_sc_72_created_time_ok_but_no_sid_is_not_killed(self) -> None:
         """AT-SC-72：建立時刻吻合、命令列不含 sid（別人的 claude）⇒ 不砍。"""
         rc, kills, _d, _t, err = self._stop(
-            [_win_row(555, 'claude.exe --model haiku "別的視窗"', NOW)], [NOW.timestamp()])
+            [_win_row(555, 'claude.exe --model haiku "別的視窗"', NOW)], [(NOW.timestamp(), 555)])
         self.assertEqual(kills, [])
         self.assertNotEqual(rc, 0)
         self.assertIn("不含 sid", err)
@@ -272,6 +273,32 @@ class StopWindowTest(unittest.TestCase):
         rc, kills, _d, _t, err = self._stop([_win_row(9, self.CMD, NOW)], [])
         self.assertEqual((kills, rc != 0), ([], True))
         self.assertIn("沒有 spawn 時刻記錄", err)
+
+    def test_kill_failure_is_rc_one_and_said_not_stopped(self) -> None:
+        """身分驗過但 taskkill rc≠0 ⇒ stop_window rc 1（「已停」不得是假的）；痕跡記下 kill_rc。"""
+        rc, kills, _d, traces, _e = self._stop(
+            [_win_row(4321, self.CMD, NOW)], [NOW.timestamp()], kill_rc=1)
+        self.assertEqual((rc, len(kills), traces[0]["kill_rc"]), (1, 1, [1]))
+
+    def test_a_non_claude_process_with_the_sid_in_its_cmdline_is_never_killed(self) -> None:
+        """POSIX 列全部行程：命令列含 sid、建立時刻吻合的 tail／編輯器不是 claude ⇒ 不砍。"""
+        rows = [_win_row(77, f"tail -f {SID}.jsonl", NOW, name="tail")]
+        rc, kills, disarmed, traces, _e = self._stop(rows, [NOW.timestamp()])
+        self.assertEqual((rc, kills, disarmed, traces), (0, [], [], []))
+        ok, notes = procstop.verify(procstop._parse_windows(json.dumps(rows)), SID,
+                                    [NOW.timestamp()])
+        self.assertEqual((ok, notes), ([], []))
+
+    def test_trace_anchors_ignore_other_sessions_spawn_records(self) -> None:
+        """別的 sid 的 `session_switch_spawned` 不得變成本 sid 的錨點（削弱建立時刻判準）。"""
+        tmp, traces = _tmp(self), _tmp(self)
+        other = "11111111-2222-3333-4444-555555555555"
+        (traces / "x.jsonl").write_text(
+            json.dumps({"event": "session_switch_spawned", "session": other,
+                        "at": (NOW + timedelta(hours=2)).isoformat()}) + "\n"
+            + json.dumps({"event": "session_switch_spawned", "session": SID,
+                          "at": NOW.isoformat()}) + "\n", encoding="utf-8")
+        self.assertEqual(procstop.trace_anchors(SID, traces, tmp), [NOW.timestamp()])
 
     def test_nothing_running_is_rc_zero(self) -> None:
         """沒有任何候選行程 ⇒ rc 0（沒有東西要停不是失敗）。"""
@@ -317,6 +344,58 @@ class StopWindowTest(unittest.TestCase):
                 anchors=[NOW.timestamp()], disarm=lambda sid: 0, trace=lambda rec: None)
         kills = [c[-1] for c in calls if c[0] != "powershell.exe"]
         self.assertEqual((rc, kills), (0, ["10"]))
+
+    def test_sec1_all_unattended_spares_an_interactive_window_of_the_same_sid(self) -> None:
+        """SEC-1（雙駕駛）：同 sid 一個互動（pid 11）、一個無人（pid 10），建立時刻都貼近錨點，
+        痕跡也替互動那個記了 pid ⇒ `--all-unattended` 只砍無人那個。"""
+        interactive = f"claude.exe -r {SID}"
+        rows = [_win_row(10, self.CMD, NOW), _win_row(11, interactive, NOW)]
+        calls: list = []
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = procstop.stop_all_unattended(
+                runner=_runner(rows, calls), platform_name="win32",
+                anchors=[NOW.timestamp(), (NOW.timestamp(), 11)],
+                disarm=lambda sid: 0, trace=lambda rec: None)
+        self.assertEqual((rc, [c[-1] for c in calls if c[0] != "powershell.exe"]), (0, ["10"]))
+        ok, _notes = procstop.verify(procstop._parse_windows(json.dumps(rows)), SID,
+                                     [(NOW.timestamp(), 11)])  # 對照：不限 print 時互動那個會中
+        self.assertEqual([p["pid"] for p in ok], [11])
+
+    def test_sec2_pid_must_match_the_trace_pid_for_an_interactive_window(self) -> None:
+        """SEC-2：命令列含舊 sid、建立時刻貼近、但 pid 與痕跡記的不同（接手的新互動視窗）⇒ 不砍；
+        pid 相符才砍；痕跡沒有 pid（只有時刻）⇒ 互動視窗驗不到 ⇒ 不砍。"""
+        rows = [_win_row(4242, f"claude.exe -r {SID}", NOW)]
+        for anchors, killed in (([(NOW.timestamp(), 9999)], []),
+                                ([NOW.timestamp()], []),
+                                ([(NOW.timestamp(), 4242)], ["4242"])):
+            rc, kills, _d, _t, err = self._stop(rows, anchors)
+            self.assertEqual([k[-1] for k in kills], killed, anchors)
+            if not killed:
+                self.assertNotEqual(rc, 0)
+                self.assertIn("不符", err + "沒有 spawn 時刻記錄")
+
+    def test_sec2_a_print_window_with_a_mismatched_trace_pid_is_not_killed(self) -> None:
+        """SEC-2：痕跡帶 pid 時，print 模式也要 pid 相符（無 pid 的續跑日誌錨點才放行 print）。"""
+        rc, kills, *_rest = self._stop([_win_row(5, self.CMD, NOW)], [(NOW.timestamp(), 9)])
+        self.assertEqual((rc != 0, kills), (True, []))
+
+    def test_sec3_a_uuid_prefix_never_matches_a_command_line_by_substring(self) -> None:
+        """SEC-3：`status` 只顯示 8 碼；照 8 碼下 `stop --window` 不得子字串命中完整 UUID 視窗。"""
+        rows = procstop._parse_windows(json.dumps([_win_row(10, self.CMD, NOW)]))
+        anchors = [(NOW.timestamp(), 10)]
+        self.assertEqual(procstop.verify(rows, SID[:8], anchors)[0], [])
+        self.assertEqual([p["pid"] for p in procstop.verify(rows, SID.upper(), anchors)[0]], [10])
+
+    def test_trace_records_carry_the_pid_of_the_spawn_event(self) -> None:
+        """`trace_records`：`session_switch_spawned` 的 pid 帶出來；續跑日誌那種沒有 pid ⇒ None。"""
+        tmp, traces = _tmp(self), _tmp(self)
+        (tmp / f"autosdd_resume_log_{SID}.jsonl").write_text(json.dumps(
+            {"event": "relay_snapshot_before", "at": NOW.isoformat()}) + "\n", encoding="utf-8")
+        (traces / "x.jsonl").write_text(json.dumps(
+            {"event": "session_switch_spawned", "sid": SID, "pid": 4242,
+             "at": NOW.isoformat()}) + "\n", encoding="utf-8")
+        self.assertEqual(sorted(procstop.trace_records(SID, traces, tmp), key=lambda r: r[1] or 0),
+                         [(NOW.timestamp(), None), (NOW.timestamp(), 4242)])
 
     def test_trace_anchors_read_spawn_times_from_resume_log_and_trace_dir(self) -> None:
         """痕跡錨點：續跑日誌 `relay_snapshot_before` 與痕跡目錄 `session_switch_spawned`。"""
@@ -474,6 +553,17 @@ class OutcomeAndCostTest(unittest.TestCase):
         self.assertEqual(resume_cost.five_hour_reading(empty), (None, None))
         self.assertEqual(resume_cost.five_hour_reading(object()), (None, None))
 
+    def test_five_hour_reading_only_takes_the_five_hour_axis(self) -> None:
+        """週軸排在前面也不得被記成五小時讀數；只有週軸 ⇒ 量不到（不猜）。"""
+        def gate(*kinds):
+            axes = tuple(type("A", (), {"kind": k, "pct": p})() for k, p in kinds)
+            return type("G", (), {"read_quota": staticmethod(
+                lambda now: type("S", (), {"axes": axes, "measured_at": "T"})())})
+
+        self.assertEqual(resume_cost.five_hour_reading(
+            gate(("weekly_all", 88), ("session", 12))), (12.0, "T"))
+        self.assertEqual(resume_cost.five_hour_reading(gate(("weekly_all", 88))), (None, None))
+
 
 class PlannerWiringTest(unittest.TestCase):
     """planner 三處薄接線（D2 交接包路徑、D7c 五小時軸前後讀數、D8 `--pace` 一行）的真行為。"""
@@ -491,6 +581,7 @@ class PlannerWiringTest(unittest.TestCase):
         self.tmp = _tmp(self)
         patcher = unittest.mock.patch.dict(os.environ, {
             endurance_env.HANDBACK_DIR_ENV: str(self.tmp / "hb"),
+            endurance_env.HANDOFF_DIR_ENV: str(self.tmp / "ho"),
             endurance_env.TRACE_DIR_ENV: str(self.tmp / "tr")})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -498,7 +589,11 @@ class PlannerWiringTest(unittest.TestCase):
         self.plan.write_text("# 任務書", encoding="utf-8")
 
     def _route(self, handoff_module):
-        with unittest.mock.patch.dict(sys.modules, {"lib.sessionctl.handoff": handoff_module}):
+        # 套件屬性與 sys.modules 兩處一起換：別的測試檔先載入真 handoff 時，套件已有 `handoff`
+        # 屬性，`from lib.sessionctl import handoff` 先取屬性、不看 sys.modules（P1-1）。
+        with unittest.mock.patch.dict(sys.modules, {"lib.sessionctl.handoff": handoff_module}), \
+                unittest.mock.patch.object(sessionctl_pkg, "handoff", handoff_module,
+                                           create=True):
             return self.planner.choose_resume_route("claude", "sid-x", None, str(self.plan))
 
     def test_fresh_route_points_the_prompt_at_the_handoff_package(self) -> None:

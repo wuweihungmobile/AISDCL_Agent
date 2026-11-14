@@ -664,7 +664,8 @@ class TestIngestAndLog(P4TestCase):
                  ("approved", 0, None, [un]), ("sandboxed", 0, None, [un]),
                  ("verified", 0, "dec", [un]), ("measuring", 1, None, [un]))
         for state, rollbacks, pend, want in cases:
-            p = mock.Mock(cls="M", state=state, pending_promote=pend, pending_rollbacks=rollbacks)
+            p = mock.Mock(state=state, pending_promote=pend, pending_rollbacks=rollbacks)
+            p.cls = "M"  # Python 3.12：`Mock(cls=…)` 撞 `__new__` 的參數名，改屬性賦值
             codes, ctx = [], mock.Mock()
             ctx.fold.return_value.props = {"P": p}
             ctx.log.side_effect = lambda *a, codes=codes: codes.append(a[2])

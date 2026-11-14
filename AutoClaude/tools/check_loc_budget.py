@@ -194,7 +194,10 @@ SPECIAL_FILES: dict[str, int] = {
     # DEF-101-701：R213 史料搬遷後重釘 777→765  round-label-ok
     # （只准往下；現值 763、留 2 行 headroom 解該債鎖）
     "../tools/run_root_unittests.py": 765,
-    "../.claude/hooks/context_budget_guard.py": 1089,
+    # DEF-200-584：sessionctl 第二段新增 switch_advice（1089→1104），確認不可再壓縮：
+    # 判準與交接包邏輯全在 tools/lib/sessionctl/handoff.py，hook 內只剩薄接線；
+    # 該 hook 由 runpy 起、不能反向 import lib，接線必須住在本檔（ADR-XPLAT-004 §2.13.8）。
+    "../.claude/hooks/context_budget_guard.py": 1104,
     # commit fab2d0e：runtime_carrier_verdict() 誤判修復。已抽出可抽的部分
     # （_SPAWN_FAILURE_RE／is_spawn_failure → tools/lib/spawn_failure.py，先例：
     # tools/lib/ci_liveness.py），回收 4 個斷言行後仍餘 3 行不可壓縮的真實新邏輯
