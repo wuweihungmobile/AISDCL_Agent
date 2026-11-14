@@ -947,8 +947,8 @@ def switch_advice(payload: dict, transcript: Path) -> None:
     try:
         tools = str(Path(__file__).resolve().parents[2] / "tools")
         if tools not in sys.path:
-            sys.path.append(tools)  # `lib.sessionctl` 套件在 tools/ 之下（只 append，不改既有優先序）
-        from lib.sessionctl import handoff  # noqa: PLC0415 — lazy：多數呼叫（模式 off／閂鎖已設）不付成本
+            sys.path.append(tools)  # `lib.sessionctl` 在 tools/ 之下（只 append，不改既有優先序）
+        from lib.sessionctl import handoff  # noqa: PLC0415 — lazy：多數呼叫不付成本
         emit_to_model(str(payload.get("hook_event_name") or "PostToolUse"), handoff.advise_once(
             session_id_of(transcript), transcript, guard=sys.modules[__name__]))
     except Exception:  # noqa: BLE001 — fail-open 是 P0

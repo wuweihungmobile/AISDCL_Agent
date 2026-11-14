@@ -18,7 +18,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 sys.path.insert(0, os.path.join(_ROOT, "tools", "lib"))
 sys.path.append(os.path.join(_ROOT, "tools"))  # `lib.sessionctl` 套件在 tools/ 之下
 try:
-    from platform_utils import init_utf8_streams, read_hook_payload  # type: ignore[import-not-found]
+    from platform_utils import init_utf8_streams, read_hook_payload  # type: ignore
 
     init_utf8_streams()
 except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰（fail-open 是 P0）
