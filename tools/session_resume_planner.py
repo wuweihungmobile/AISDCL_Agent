@@ -92,6 +92,7 @@ import quota_gate  # noqa: E402  # R84／SA-02：`--pace` 的內容產生者（�
 import quota_limits  # noqa: E402  # DEF-200-266：探針三層判讀 `classify_probe_output`（裸名，同 hook；勿改 `from lib import`）
 import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入面出處守衛）
 import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家（tools/lib）
+import resume_cost  # noqa: E402  # sessionctl D7c：_run_resume 前後五小時軸讀數（只讀快取）
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家（tools/lib）
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
@@ -100,7 +101,7 @@ import transcript_activity  # noqa: E402  # DEF-200-560／562：session 存活�
 import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界（牆鐘／harness 背景等待上限）的家（tools/lib）
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
-from lib.sessionctl import switch  # noqa: E402  # WP0：選路與過期判準的家
+from lib.sessionctl import modelmix, switch  # noqa: E402  # 選路判準（WP0）；--pace 模型建議（D8）
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -1109,9 +1110,17 @@ _transcript_cap = switch._transcript_cap
 
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                         plan_path: str, max_bytes: int | None = None, weekly: str = "") -> dict:
-    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None。本體＝`switch.choose_resume_route`。"""  # noqa: E501
-    return switch.choose_resume_route(claude, session_id, transcript, plan_path, max_bytes, weekly,
-                                      guard=guard)
+    """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None。本體＝`switch.choose_resume_route`。
+    FRESH 時另產交接包機械層（`handoff.ensure_mechanical`；缺席／失敗＝沿用任務書路徑）並重組 prompt。"""  # noqa: E501
+    args = (claude, session_id, transcript, plan_path, max_bytes, weekly)
+    route = switch.choose_resume_route(*args, guard=guard)
+    if route["strategy"] != switch.STRATEGY_FRESH or not session_id:
+        return route
+    try:
+        from lib.sessionctl import handoff  # noqa: PLC0415 — lazy：第二段另一支檔（缺席＝退任務書）
+        return switch.choose_resume_route(*args, guard=guard, handoff_path=str(handoff.ensure_mechanical(session_id, transcript)))  # noqa: E501
+    except Exception:  # noqa: BLE001 — 交接包是增益，失敗不得讓選路失敗
+        return route
 
 
 # 真的開一個無人看管的模型回合（R79 起**預設開啟**，見上方 Auto Pilot 區塊的 WHY 與
@@ -1181,6 +1190,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
     # （`sys.stderr is None`），`TimeoutExpired`／`FileNotFoundError` 會一路往上炸穿、
     # 整支行程消失，而呼叫端此前已經把狀態塊寫成 `"resumed"`、排程也刪了（謊稱成功、
     # 無法重試）。同 `probe_quota()` 既有的 except 寫法。
+    state["window_started_at"] = datetime.now().astimezone().isoformat(timespec="seconds"); state["pct_before"], state["pct_before_at"] = resume_cost.five_hour_reading(quota_gate)  # noqa: E501,E702 — sessionctl D7b／D7c：本窗起點與五小時軸前讀數（各自帶量測時刻）
     try:
         lock = relay_machine.stale_index_lock(_REPO_ROOT, datetime.now().astimezone()); before = relay_machine.git_status_snapshot(_REPO_ROOT); append_log(log, "relay_snapshot_before", **relay_machine.snapshot_log_fields(before, lock)); proc = subprocess.run(route["argv"], capture_output=True, encoding="utf-8", errors="replace", timeout=unattended_authz.RESUME_HARD_WALL_SECONDS, check=False, creationflags=guard.NO_WINDOW, cwd=str(_REPO_ROOT), env={**os.environ, UNATTENDED_ENV: "1", **resume_route.spawn_env()})  # noqa: E501,E702 — v2.1.13 G3：spawn 前快照（判準④ files_changed 差集）；R115 修復 F3：前快照落 resume log（V-c3 半格，不灌 porcelain 全文）；§8-3：快照前先處置陳舊 index.lock（改名可逆）並留痕 round-label-ok；DEF-200-575：timeout 與 env 的 harness 背景等待上限同源（unattended_authz），不再寫死 3600、不再只帶 role_env
     except (OSError, subprocess.SubprocessError) as exc:
@@ -1188,6 +1198,7 @@ def _run_resume(args, state: dict, log: Path) -> int | None:
         print(f"❌ 續跑呼叫本身失敗：{exc}", file=sys.stderr); return None  # noqa: E702
     # v2.1.13 G2 批 (b)：spawn 返回後的交接後檢（不依賴模型合作；判準本體住 resume_route，
     # 非 written ⇒ `handback_missing` 事件＋alert loud——痕跡與叫人載體由本檔注入）。
+    state["pct_after"], state["pct_after_at"] = resume_cost.five_hour_reading(quota_gate)  # noqa: E501 — sessionctl D7c：spawn 後五小時軸讀數
     after = relay_machine.git_status_snapshot(_REPO_ROOT); state["files_changed"] = relay_machine.files_changed(before, after); state["other_driver"] = relay_machine.other_driver(transcript, spawn_at); state["harness_bg_kill"] = resume_route.harness_bg_kill(proc.stderr)  # noqa: E501,E702 — v2.1.13 G3：spawn 後快照；DEF-200-565：spawn 後逐字稿鏈頭 ≥2＝另有駕駛（判準⓪的取數）；DEF-200-575：harness 停扇出標記落 state（settle_window 叫人時點名成因）
     hbv = resume_route.handback_postcheck(route, spawn_at, state, log, append_log, escalation.alert); state["handback_verdict"] = hbv  # noqa: E501,E702 — v2.1.13 G3
     # 🔴 `err=` 是 R80 補的：此前只記 stdout，而上面那個 argv 缺陷的表現正好是
@@ -1543,6 +1554,7 @@ def main(argv: list[str]) -> int:
         aim, source = resolve_transcript_source(args.session_id, args.transcript)
         print(quota_gate.pace_report(model=args.model or harness_feed.active_model_of(aim, guard), sid=guard.session_id_of(aim) if aim else None), end="")  # noqa: E501 — DEF-200-420：自動推導，顯式 --model 優先
         print(quota_reconcile.ledger_gap_line(), end="")  # DEF-200-203：落款斷層提醒（只出聲）
+        print(modelmix.pace_line(quota_gate, guard.model_family(args.model or harness_feed.active_model_of(aim, guard)) or None), end="")  # noqa: E501 — sessionctl D8：模型平衡建議（只出聲）
         if aim:  # DEF-200-431：印出 session 來源（stderr，stdout 的四欄判定不動）
             print(harness_feed.session_line(source, guard.session_id_of(aim)), file=sys.stderr)
         liveness = sentinel_lifecycle.liveness_line(guard.session_id_of(aim)) if aim else ""

@@ -216,6 +216,22 @@ def handback_dir_status() -> tuple[Path, bool]:
     return _durable_dir_status(HANDBACK_DIR_ENV, HANDBACK_HOME_PARTS)
 
 
+#: 交接包（sessionctl handoff，ADR-XPLAT-004 §2.13.4）目錄的逃生口；慣例同 HANDBACK_DIR_ENV。
+HANDOFF_DIR_ENV = "AUTOSDD_HANDOFF_DIR"
+
+#: 家目錄下的持久交接包居所（＝`~/.autosdd/handoff`）。
+HANDOFF_HOME_PARTS = (".autosdd", "handoff")
+
+
+def handoff_dir_status() -> tuple[Path, bool]:
+    """`(目錄, 是否已退回系統暫存)`——與 `handback_dir_status()` 同一份解析形態。"""
+    return _durable_dir_status(HANDOFF_DIR_ENV, HANDOFF_HOME_PARTS)
+
+
+def handoff_dir() -> Path:
+    return handoff_dir_status()[0]
+
+
 #: 可重啟點任務書目錄的逃生口（慣例同 TRACE_DIR_ENV／HANDBACK_DIR_ENV）。
 PLAN_DIR_ENV = "AUTOSDD_PLAN_DIR"
 
@@ -261,7 +277,11 @@ def unattended_outcome_path() -> Path:
 
 
 def record_unattended_outcome(session_id: str, reason: str, *,
-                              reset_returned: bool, handback_path: str) -> bool:
+                              reset_returned: bool, handback_path: str,
+                              started_at: str | None = None, ended_at: str | None = None,
+                              route: str | None = None, pct_before: float | None = None,
+                              pct_after: float | None = None,
+                              handback: str | None = None) -> bool:
     """(a) 無人續跑在 no_progress／exhausted 停下時，append 一行持久結局；回「寫了沒」。
 
     `reason`＝no_progress／exhausted／other_driver（呼叫端 `relay_machine.settle_window` 只在
@@ -272,6 +292,12 @@ def record_unattended_outcome(session_id: str, reason: str, *,
     record = {"event": "unattended_stop", "session": str(session_id or ""),
               "reason": str(reason or ""), "reset_returned": bool(reset_returned),
               "handback": str(handback_path or ""), "at": time.strftime(_OUTCOME_STAMP)}
+    # 第二段（FR-SC-21）選填欄：有值才寫，舊讀取端（`unattended_outcome_banner`）不受影響。
+    extra = {"started_at": started_at, "ended_at": ended_at, "route": route,
+             "pct_before": pct_before, "pct_after": pct_after}
+    record.update({k: v for k, v in extra.items() if v is not None})
+    if handback:
+        record["handback"] = str(handback)
     try:
         with unattended_outcome_path().open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")

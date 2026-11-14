@@ -2969,6 +2969,8 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         def _fake_run(argv, **kwargs):
             if isinstance(argv, list) and argv[:1] == ["git"]:
                 return real(argv, **kwargs)
+            if isinstance(argv, list) and argv[:1] != ["claude"]:
+                return _Done()  # sessionctl：FRESH 路的交接包機械層另會外呼（排程查詢等），不是續跑 spawn
             self.calls.append({"argv": argv, **kwargs})
             return _Done()
 
@@ -3047,10 +3049,10 @@ class ResumeSpawnCarriesTheUnattendedSignalTest(unittest.TestCase):
         self.assertLess(
             prompt_at[0], idx,
             "prompt 排在 --add-dir 後面 ⇒ 會被那個變長參數吃掉，那一跑會拿不到 prompt")
-        # `--add-dir` 之後是兩個目錄值（任務書目錄＋現解後的 handback 目錄），尾端形狀不變。
+        # `--add-dir` 之後是三個目錄值（任務書目錄＋handback 目錄＋交接包目錄），尾端形狀不變。
         self.assertEqual(
-            len(argv) - idx, 3,
-            f"--add-dir 後面必須剛好兩個目錄值（任務書＋handback），否則多出來的東西"
+            len(argv) - idx, 4,
+            f"--add-dir 後面必須剛好三個目錄值（任務書＋handback＋交接包），否則多出來的東西"
             f"會被它吃掉，或 handback 目錄漏帶：{argv}")
         self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
                          f"--add-dir 第二個值不是現解後的 handback 目錄：{argv}")
@@ -3100,7 +3102,8 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
                          "FRESH 還帶著 -r ⇒ 對一個不可用的 session 下注，喚醒照樣失敗"
                          "——這正是本包立案要補的那個洞")
         prompt = route["argv"][2]
-        self.assertIn("按磁碟任務書繼續", prompt)
+        # sessionctl 第二段：有交接包時改為「按交接包繼續」（任務書路徑仍在 prompt 內）
+        self.assertTrue("按磁碟任務書繼續" in prompt or "按交接包繼續" in prompt, prompt[:80])
         self.assertIn(str(self.plan), prompt, "FRESH 的 prompt 沒有指向磁碟任務書 ⇒ "
                                               "全新 session 拿不到 state，交棒斷裂")
 
@@ -3158,8 +3161,8 @@ class ResumeRouteDegradesOneWayTest(unittest.TestCase):
         prompt_at = [i for i, a in enumerate(argv) if "第 3 節" in a]
         self.assertTrue(prompt_at and prompt_at[0] < idx)
         # v2.1.13 C5：同上（RESUME 路姊妹鎖）——現在是兩個目錄值。
-        self.assertEqual(len(argv) - idx, 3,
-                         f"--add-dir 後面必須剛好兩個目錄值（任務書＋handback）：{argv}")
+        self.assertEqual(len(argv) - idx, 4,
+                         f"--add-dir 後面必須剛好三個目錄值（任務書＋handback＋交接包）：{argv}")
         self.assertEqual(argv[idx + 2], str(resume_route.handback_dir()),
                          f"--add-dir 第二個值不是現解後的 handback 目錄：{argv}")
 
@@ -3611,6 +3614,8 @@ class RunResumeConsumesTheRouteTest(unittest.TestCase):
         def _fake_run(argv, **kwargs):
             if isinstance(argv, list) and argv[:1] == ["git"]:
                 return real(argv, **kwargs)
+            if isinstance(argv, list) and argv[:1] != ["claude"]:
+                return _Done()  # sessionctl：同上（交接包機械層的外呼不是續跑 spawn）
             self.calls.append({"argv": argv, **kwargs})
             return _Done()
 
@@ -5024,9 +5029,9 @@ class RelaySettleWindowTest(unittest.TestCase):
                 f"_run 未把 TRACE_DIR 隔離到 tmpdir（居所={home!r}）⇒ 無人續跑結局檔會寫進"
                 " 開發者真實 ~/.autosdd/traces（測試污染）")
 
-    def test_quota_stop_does_not_record_an_unattended_outcome(self) -> None:
-        """控制組（鑑別力）：QUOTA_STOP（band 收緊、交回哨兵巡邏、不吵）不是「需要人」的結局
-        ⇒ 不落結局檔（否則每次額度收緊都在 --pace 洗版）。DONE（正常完成）同理不在 _LOUD_STATES。"""
+    def test_quota_stop_records_a_quiet_outcome(self) -> None:
+        """sessionctl 第二段（FR-SC-21，取代原「QUOTA_STOP 不落結局檔」）：每一窗收窗都記結局，
+        QUOTA_STOP 記為 `quota_stop`（仍不 loud、不吵桌面；banner 游標制只出聲一次）。"""
         trace = _tmpdir(self, "fix3a-trace-q-")
         hb = self._handback(_tmpdir(self, "relay-hb-fix3q-"), next_step="還沒做完")
         with unittest.mock.patch.dict(os.environ, {endurance_env.TRACE_DIR_ENV: str(trace)}):
@@ -5035,8 +5040,9 @@ class RelaySettleWindowTest(unittest.TestCase):
                                          "route_strategy": planner.STRATEGY_RESUME},
                       band=quota_policy.BAND_UNMEASURED)
         outcome = trace / endurance_env.UNATTENDED_OUTCOME_NAME
-        self.assertFalse(outcome.is_file(),
-                         "QUOTA_STOP 落了結局檔 ⇒ 每次額度收緊都會在 --pace 洗版")
+        recs = [json.loads(ln) for ln in outcome.read_text(encoding="utf-8").splitlines()
+                if ln.strip()]
+        self.assertEqual([r["reason"] for r in recs], ["quota_stop"], recs)
 
     def test_another_driver_stops_the_relay_loudly_and_hands_back_to_the_sentinel(self) -> None:
         """DEF-200-565：另有駕駛 ⇒ relay_stopped(other_driver)、不續棒、loud 一次、重掛哨兵。"""

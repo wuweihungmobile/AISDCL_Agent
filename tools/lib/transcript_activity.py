@@ -127,6 +127,66 @@ def newest_conversation_at(paths: list[Path]) -> float | None:
     return best
 
 
+#: 交接包引用單則文字的字數上限（ADR-XPLAT-004 §2.13.4）；超過截斷並標示原文字數。
+EXCERPT_LIMIT = 2000
+#: 不是人打的字、卻會以 `origin.kind=human` 出現的注入前綴（harness 的 system-reminder／指令回顯）。
+_INJECTED_PREFIXES = ("<system-reminder>", "<command-", "<local-command-")
+
+
+def _text_of(record: dict) -> str | None:
+    """一筆記錄的純文字（字串或所有 text block 串接）；含 tool_result 回 `None`。"""
+    message = record.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return None
+    if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+        return None
+    return "\n".join(str(b.get("text") or "") for b in content
+                     if isinstance(b, dict) and b.get("type") == "text")
+
+
+def _excerpt(text: str, limit: int) -> str:
+    return text if len(text) <= limit else f"{text[:limit]}…（已截斷，原文 {len(text)} 字）"
+
+
+def human_prompts(path: Path | None, k: int = 3, limit: int = EXCERPT_LIMIT) -> list[str]:
+    """逐字稿 `path`（**主檔**；子代理檔不讀）最後 `k` 則**真人**提示原文（時序由舊到新）。
+
+    判準＝`_origin_kind(record) == "human"`（與 `_is_conversation` 同一家，不開第二家），另排除
+    `isMeta`、tool_result、`<system-reminder>`／`<command-…>` 注入。每則上限 `limit` 字並標截斷。
+    讀不到檔／沒有真人提示＝空 list（呼叫端寫「量不到」）。
+    """
+    if path is None:
+        return []
+    found: list[str] = []
+    for record in _records(path, '"origin"'):
+        if record.get("type") != "user" or record.get("isMeta") or _origin_kind(record) != "human":
+            continue
+        text = (_text_of(record) or "").strip()
+        if text and not text.startswith(_INJECTED_PREFIXES):
+            found.append(text)
+    return [_excerpt(t, limit) for t in found[-k:]] if k > 0 else []
+
+
+def assistant_tail(path: Path | None, k: int = 2, limit: int = EXCERPT_LIMIT) -> list[str]:
+    """逐字稿 `path`（主檔）最後 `k` 則 assistant 的純 text 回覆（略過只有 tool_use／`<synthetic>`
+    的記錄）；由舊到新，每則上限 `limit` 字。讀不到＝空 list。"""
+    if path is None:
+        return []
+    found: list[str] = []
+    for record in _records(path, '"assistant"'):
+        message = record.get("message")
+        if record.get("type") != "assistant" or (
+                isinstance(message, dict) and message.get("model") == "<synthetic>"):
+            continue
+        text = (_text_of(record) or "").strip()
+        if text:
+            found.append(text)
+    return [_excerpt(t, limit) for t in found[-k:]] if k > 0 else []
+
+
 def sessions_active_since(sids, since_epoch: float, projects_dir: Path | None = None) -> set[str]:
     """這些 sid 裡，**真實**逐字稿（`<projects>/<slug>/<sid>.jsonl`，跨 slug 找）在
     `since_epoch` 之後有對話記錄者（尺與 `newest_conversation_at` 同一把）。

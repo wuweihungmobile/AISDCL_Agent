@@ -245,8 +245,8 @@ def _argv_shape_problems(argv: list[str], sid: str | None, prompt: str) -> list[
     if "--add-dir" not in argv:
         return [*problems, "沒有 --add-dir"]
     tail = argv.index("--add-dir")
-    if len(argv) - tail - 1 != 2:
-        problems.append(f"--add-dir 之後不是恰兩個目錄值：{argv[tail:]}")
+    if len(argv) - tail - 1 != 3:
+        problems.append(f"--add-dir 之後不是恰三個目錄值：{argv[tail:]}")
     if "--model" in argv:
         at = argv.index("--model")
         if not argv.index("--settings") + 1 < at < tail:

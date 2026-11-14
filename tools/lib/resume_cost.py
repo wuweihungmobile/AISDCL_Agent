@@ -89,8 +89,10 @@ def first_assistant_usage_after(source, after_ts: object) -> dict | None:
 
 def build_record(session_id: str, relay_seq: int | None, usage: dict | None, *, reason: str = "",
                  pct_before: float | None = None, pct_after: float | None = None,
-                 recorded_at: str = "") -> dict:
-    """組一行成本 record（純函式）。usage＝first_assistant_usage_after 的回傳或 None。"""
+                 recorded_at: str = "", pct_before_at: str | None = None,
+                 pct_after_at: str | None = None) -> dict:
+    """組一行成本 record（純函式）。usage＝first_assistant_usage_after 的回傳或 None。
+    `pct_*_at`＝各自讀數的量測時刻（兩次讀數都有才填，與 pct 同一條規則）。"""
     raw = usage or {}
     model = raw.get("model")
     # type() 比對而非 isinstance：bool 是 int 的子類，True 會被收成 1（同 quota_gate 的紀律）。
@@ -103,6 +105,8 @@ def build_record(session_id: str, relay_seq: int | None, usage: dict | None, *, 
             "model": model if isinstance(model, str) and model else None,
             **(got if measured else dict.fromkeys(USAGE_KEYS)),
             "pct_before": pct_before if both else None, "pct_after": pct_after if both else None,
+            "pct_before_at": pct_before_at if both else None,
+            "pct_after_at": pct_after_at if both else None,
             "reason": why or None, "recorded_at": recorded_at}
 
 
@@ -156,14 +160,33 @@ def last_cost(session_id: str, path: Path | None = None) -> int | None:
     return last if type(last) is int else None
 
 
+_FIVE_HOUR_KINDS = ("session", "five_hour", "5h")
+
+
+def five_hour_reading(quota_gate: object, now: datetime | None = None) -> tuple[float | None, str | None]:  # noqa: E501
+    """`(五小時軸 pct, 量測時刻)`：只讀額度快取（不連網）；快取不可用／無該軸 ⇒ `(None, None)`
+    （量不到不猜）。`quota_gate` 由呼叫端注入（planner 傳自己的），本檔不 import 它。"""
+    try:
+        state = quota_gate.read_quota(now or datetime.now().astimezone())
+        axis = next((a for a in state.axes if a.kind in _FIVE_HOUR_KINDS), None)
+    except Exception:  # noqa: BLE001 — 旁路取數不得讓 spawn 失敗
+        return None, None
+    return (float(axis.pct), state.measured_at) if axis is not None else (None, None)
+
+
 def record_window(state: dict, path: Path | None = None, log: object = None) -> dict:
-    """settle_window 的單一接線點：量本窗首個請求並落一行；永不拋（旁路落帳不得讓收窗失敗）。"""
+    """settle_window 的單一接線點：量本窗首個請求並落一行；永不拋（旁路落帳不得讓收窗失敗）。
+    五小時軸前後讀數取自 `state["pct_before"／"pct_after"]`（`_run_resume` 前後各讀一次，各自帶
+    `…_at` 量測時刻）；缺任一 ⇒ 兩欄皆 None（既有「兩者皆有才填」規則）。"""
     sid, seq, stamp = str(state.get("session_id") or ""), None, ""
     try:
         stamp = datetime.now().astimezone().isoformat(timespec="seconds")
         seq = int(state.get("relay_seq") or 0)
         usage, why = _locate(state, seq, log)
-        rec = build_record(sid, seq, usage, reason=why, recorded_at=stamp)
+        rec = build_record(sid, seq, usage, reason=why, recorded_at=stamp,
+                           pct_before=state.get("pct_before"), pct_after=state.get("pct_after"),
+                           pct_before_at=state.get("pct_before_at"),
+                           pct_after_at=state.get("pct_after_at"))
     except Exception as exc:  # noqa: BLE001 — 量不到也要留一行說明，不得讓 settle_window 失敗
         rec = build_record(sid, seq, None, reason=f"error:{type(exc).__name__}", recorded_at=stamp)
     with contextlib.suppress(Exception):  # 落帳失敗同樣只吞不拋（痕跡缺一行＝可偵測）

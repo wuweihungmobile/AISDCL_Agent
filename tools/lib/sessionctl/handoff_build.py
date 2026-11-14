@@ -1,0 +1,163 @@
+"""交接包機械層（ADR-XPLAT-004 §2.13.4）：程式產生、零 token；每欄取不到寫「量不到：<原因>」。
+
+WHY 獨立一檔：`handoff.py`（公告、ack、finalize、spawn、CLI）已近 LOC 上限；本檔只負責
+「把量得到的事實寫成 Markdown」，不判斷、不寫檔、不 spawn（外部指令一律經注入的 `runner`）。
+
+🔴 縫：`runner(argv, *, cwd=None, env=None, creationflags=0, wait=True) -> (rc, stdout, pid)`
+是整個套件唯一的外部指令出口（git／排程查詢／互動 spawn 共用）；`wait=False` 時回 `(0, "", pid)`。
+11 欄標題＝`MECH_HEADINGS`（TCS AT-SC-34 逐欄斷言）。
+"""
+from __future__ import annotations
+
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+import transcript_activity
+
+#: 交接包機械層的 11 個欄位標題（順序即輸出順序；測試逐一斷言它們都在）。
+MECH_HEADINGS = (
+    "來源與時刻", "Git 分支與 HEAD", "工作樹狀態", "wip-preserved 標籤", "最近真人提示",
+    "最近 assistant 收尾", "背景代理名冊", "排程與 NextRunTime", "額度各軸", "舊 scratchpad 檔案",
+    "逐字稿路徑")
+STATUS_LIMIT = 40  # `git status --short` 最多列幾行（其餘只報總數）
+WIP_SUFFIX = "-wip-preserved"
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_SCHED_PS = ("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);"
+             "Get-ScheduledTask | Where-Object { $_.TaskName -like 'AutoSDD_*' -or "
+             "$_.TaskName -like 'AutoClaude*' } | ForEach-Object { "
+             "$i = $_ | Get-ScheduledTaskInfo; \"$($_.TaskName)`t$($i.NextRunTime)\" }")
+
+
+def default_runner(argv, *, cwd=None, env=None, creationflags=0, wait=True):
+    """預設 runner（測試一律注入假的）；失敗不拋，回 `(rc≠0, 錯誤文字, None)`。"""
+    try:
+        if not wait:
+            proc = subprocess.Popen(argv, cwd=cwd, env=env, creationflags=creationflags)
+            return 0, "", proc.pid
+        done = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60, check=False,
+                              creationflags=creationflags or _NO_WINDOW)
+        return done.returncode, done.stdout, None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 127, f"{type(exc).__name__}: {exc}", None
+
+
+def git_lines(runner, repo: Path, *args: str) -> tuple[list[str] | None, str]:
+    """跑一條 git：回 `(非空行 | None, 原因)`；rc≠0 一律 None（呼叫端寫「量不到：…」）。"""
+    argv = ["git", "-c", "core.quotepath=false", "-C", str(repo), *args]
+    rc, out, _ = runner(argv, cwd=str(repo))
+    if rc != 0:
+        return None, f"git {' '.join(args)} rc={rc}"
+    return [ln for ln in str(out).splitlines() if ln.strip()], ""
+
+
+def wip_tags(runner, repo: Path) -> tuple[list[str] | None, str]:
+    """HEAD 上的 `*-wip-preserved` 標籤（〈可重啟點四條件〉第 1 條的保全手法）。"""
+    lines, why = git_lines(runner, repo, "tag", "--points-at", "HEAD")
+    return (None if lines is None else [t.strip() for t in lines if t.strip().endswith(WIP_SUFFIX)],
+            why)
+
+
+def _unknown(why: str) -> str:
+    return f"量不到：{why}"
+
+
+def _quote(text: str) -> str:
+    """引文逐行加 `> `：真人提示可能含 `## 已驗證` 之類的標題行，不得被當成主控層標題。"""
+    return "\n".join(f"> {ln}" for ln in text.splitlines()) or ">"
+
+
+def _git_sections(runner, repo: Path) -> tuple[str, str, str]:
+    branch, why_b = git_lines(runner, repo, "rev-parse", "--abbrev-ref", "HEAD")
+    head, why_h = git_lines(runner, repo, "rev-parse", "HEAD")
+    sync, why_s = git_lines(runner, repo, "rev-list", "--left-right", "--count", "@{u}...HEAD")
+    parts = [f"- branch：{branch[0] if branch else _unknown(why_b)}",
+             f"- HEAD：{head[0] if head else _unknown(why_h)}"]
+    behind_ahead = sync[0].split() if sync else []
+    parts.append("- 落後／領先上游：" + (f"落後 {behind_ahead[0]}／領先 {behind_ahead[1]}"
+                                       if len(behind_ahead) == 2 else _unknown(why_s or "無上游")))
+    status, why_t = git_lines(runner, repo, "status", "--short")
+    if status is None:
+        tree = _unknown(why_t)
+    elif not status:
+        tree = "（乾淨）"
+    else:
+        cut = f"（僅列前 {STATUS_LIMIT} 行）" if len(status) > STATUS_LIMIT else ""
+        tree = "```\n" + "\n".join(status[:STATUS_LIMIT]) + f"\n```\n共 {len(status)} 行{cut}"
+    tags, why_w = wip_tags(runner, repo)
+    tag_text = (_unknown(why_w) if tags is None
+                else "\n".join(f"- {t}" for t in tags) or "（HEAD 上無）")
+    return "\n".join(parts), tree, tag_text
+
+
+def _schedule_rows(runner, platform_name: str) -> str:
+    """排程與 NextRunTime：憑證是**值**（空值寫「NextRunTime 量不到」，不寫成已排程）。"""
+    if platform_name != "win32":
+        return _unknown(f"平台 {platform_name} 未實作排程列舉（launchd 無下次時刻，憑證是 rc）")
+    rc, out, _ = runner(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _SCHED_PS])
+    if rc != 0:
+        return _unknown(f"排程查詢 rc={rc}")
+    rows = []
+    for line in str(out).splitlines():
+        name, _, moment = line.partition("\t")
+        if name.strip():
+            shown = moment.strip() or "NextRunTime 量不到（不可視為已排程）"
+            rows.append(f"- {name.strip()}：{shown}")
+    return "\n".join(rows) or "（沒有 AutoSDD_／AutoClaude 排程）"
+
+
+def _quota_text(now: datetime, quota_fn) -> str:
+    try:
+        if quota_fn is None:
+            import quota_gate  # noqa: PLC0415 — lazy：只有真的要讀額度快取時才載入
+            quota_fn = quota_gate.read_quota
+        state = quota_fn(now)
+        axes = "\n".join(f"- {a.kind}：{a.pct:g}%（reset {a.resets_at or '量不到'}）"
+                         for a in state.axes) or "（無軸）"
+        return f"量測時刻 {state.measured_at}（來源 {state.source}）\n{axes}"
+    except Exception as exc:  # noqa: BLE001 — 取不到寫「量不到」，不拋
+        return _unknown(f"{type(exc).__name__}: {exc}")
+
+
+def _scratchpad_text(sid: str, temp_root: Path | None) -> str:
+    root = Path(temp_root) if temp_root is not None else Path(tempfile.gettempdir())
+    try:
+        pads = sorted(root.glob(f"claude/*/{sid}/scratchpad"))
+        files = sorted(p for pad in pads for p in pad.rglob("*") if p.is_file())
+    except OSError as exc:
+        return _unknown(f"scratchpad 讀不動（{type(exc).__name__}）")
+    if not pads:
+        return _unknown(f"找不到 {root}/claude/*/{sid}/scratchpad")
+    mark = ("BRIEF", "RESTART_POINT", "HB_")
+    return "\n".join(f"- {'★ ' if any(m in p.name for m in mark) else ''}{p}" for p in files[:60]) \
+        or "（scratchpad 內沒有檔案）"
+
+
+def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, now: datetime,
+                     runner=None, roster_mod=None, quota_fn=None, temp_root: Path | None = None,
+                     platform_name: str = "") -> str:
+    """交接包機械層全文（只含 `### ` 欄位，不含主控層）。`now` 須帶 offset。"""
+    runner = runner or default_runner
+    plat = platform_name or sys.platform
+    branch_head, tree, tags = _git_sections(runner, repo)
+    humans = transcript_activity.human_prompts(transcript)
+    tail = transcript_activity.assistant_tail(transcript)
+    try:
+        if roster_mod is None:
+            from . import roster as roster_mod  # noqa: PLC0415 — lazy（Dev-2b 的模組）
+        roster_text = roster_mod.render_snapshot(roster_mod.snapshot(session_id))
+    except Exception as exc:  # noqa: BLE001
+        roster_text = _unknown(f"名冊不可用（{type(exc).__name__}）")
+    body = (
+        f"- 來源 session：{session_id}\n- 產生時刻：{now.isoformat()}\n- repo 根：{repo}",
+        branch_head, tree, tags,
+        "\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"),
+        "\n\n".join(_quote(t) for t in tail) or _unknown("逐字稿無 assistant 文字或讀不到"),
+        roster_text, _schedule_rows(runner, plat), _quota_text(now, quota_fn),
+        _scratchpad_text(session_id, temp_root),
+        str(transcript) if transcript else _unknown("逐字稿路徑未知"))
+    return "\n\n".join(f"### {i} {title}\n{text}"
+                       for i, (title, text) in enumerate(zip(MECH_HEADINGS, body), 1))

@@ -109,7 +109,10 @@ _LOUD_STATES = frozenset({STATE_NO_PROGRESS_STOP, STATE_RELAY_EXHAUSTED, STATE_O
 #: FIX3(a)：持久結局檔記的 reason 字面（恰對應 _LOUD_STATES 三個「需要人知道」的停止次態）。
 #: 刻意與 `_STOP_WHY` 分開（後者 exhausted＝"cap"；本檔結局檔對外語意用 "exhausted"）。
 _OUTCOME_REASON = {STATE_NO_PROGRESS_STOP: "no_progress", STATE_RELAY_EXHAUSTED: "exhausted",
-                   STATE_OTHER_DRIVER_STOP: "other_driver"}
+                   STATE_OTHER_DRIVER_STOP: "other_driver",
+                   # sessionctl D7b（FR-SC-21）：每一窗收窗都記結局，非 loud 次態也有字面
+                   STATE_DONE: "done", STATE_QUOTA_STOP: "quota_stop",
+                   STATE_RELAY_NEXT: "relay_next"}
 
 
 def _int_env(name: str, default: int) -> int:
@@ -584,6 +587,21 @@ def stop_reason(next_st: str, state: dict) -> str:
     return _STOP_REASON[next_st] + (HARNESS_KILL_NOTE if state.get("harness_bg_kill") else "")
 
 
+def _record_outcome(state: dict, next_st: str, band: str, now: datetime) -> None:
+    """sessionctl D7b：每窗收窗落一行持久結局（起訖、路線、五小時軸前後讀數、handback 路徑）。
+    `endurance_env` 舊簽名（無新欄）時退回舊呼叫；永不拋（落帳失敗不得擋收窗）。"""
+    sid, reason = str(state.get("session_id") or ""), _OUTCOME_REASON[next_st]
+    base = {"reset_returned": band_ok(band), "handback_path": str(state.get("handback_path") or "")}
+    extra = {"started_at": state.get("window_started_at"), "ended_at": now.isoformat(timespec="seconds"),  # noqa: E501
+             "route": state.get("route_strategy"), "pct_before": state.get("pct_before"),
+             "pct_after": state.get("pct_after"), "handback": base["handback_path"]}
+    with contextlib.suppress(Exception):
+        try:
+            endurance_env.record_unattended_outcome(sid, reason, **base, **extra)
+        except TypeError:
+            endurance_env.record_unattended_outcome(sid, reason, **base)
+
+
 def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | None) -> int:
     """v2.1.13 G3+G4：`_resume_tick()` resume 分支收尾——rc 落定＋handback 後檢之後，
     接力狀態機判定 → `RELAY_NEXT` 重排下一窗，或四個停止次態之一重掛哨兵。
@@ -623,6 +641,7 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
                           no_progress_limit=no_progress_limit())
         next_st = outcome.pop("next_state")
         state.update(outcome)
+        _record_outcome(state, next_st, band, now)  # sessionctl D7b：任何結局都落帳（含非 loud）
         if next_st == STATE_RELAY_NEXT:
             # DEF-200-564：收窗時刻隨狀態塊落盤，下一窗 D5 閘以它為錨（前一棒自己的記錄不算別人）。
             state.update(planner._cleared_credentials(), relay_prev_end=now.isoformat())
@@ -653,14 +672,7 @@ def settle_window(args, state: dict, plan: Path, log: Path, resume_rc: int | Non
                                         loud=next_st in _LOUD_STATES)
         planner.append_log(log, _STOP_EVENT[next_st], why=_STOP_WHY.get(next_st, ""),
                            band=band, harness_bg_kill=bool(state.get("harness_bg_kill")), **told)
-        if next_st in _LOUD_STATES:
-            # FIX3(a)：無人需知的停止次態（no_progress／exhausted）落一行持久結局到
-            # trace_dir()——alert 的桌面通知在 dead_agents==0 時不敲、AUTOSDD_ATTENTION.md
-            # 會蒸發，這份是使用者回來跑 --pace／--check 一定看得到的那一條（FIX3(b)）。
-            endurance_env.record_unattended_outcome(
-                str(state.get("session_id") or ""), _OUTCOME_REASON[next_st],
-                reset_returned=band_ok(band),
-                handback_path=str(state.get("handback_path") or ""))
+        # FIX3(a)（原僅 loud 次態）：持久結局已在上方 `_record_outcome` 對每一窗落帳。
         state.update(planner._cleared_credentials())
         planner.write_relay(plan, state)
         unregister_rc = _remove_unless_self(planner, state)
