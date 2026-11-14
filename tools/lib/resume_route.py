@@ -218,10 +218,11 @@ def _posture_argv() -> list[str]:
 # 逃生口覆寫／唯讀時退回系統暫存），靜態字面與動態現解可能分歧。修法（SD 複審建議）：
 # spawn argv 組裝處**每次現解** `handback_dir()`，讓 L1② 不依賴 `~` 展開這個未經核對的
 # harness 行為；settings 檔本身保留原樣字面（repo 檔不可寫死機器絕對路徑）。
-# `--add-dir` 是變長參數，兩個目錄值放同一個旗標之後（而不是開第二個 `--add-dir`）——
-# 尾端仍是「一個旗標＋其後全部剩餘值」的形狀，姊妹鎖只需認得值的**個數**變成 2。
+# `--add-dir` 是變長參數，目錄值放同一個旗標之後（而不是開第二個 `--add-dir`）——
+# 尾端仍是「一個旗標＋其後全部剩餘值」的形狀，姊妹鎖只需認得值的**個數**（現為 3）。
 def _add_dir_argv(task_dir: Path) -> list[str]:
-    return ["--add-dir", str(task_dir), str(handback_dir())]
+    # sessionctl 第二段：第三個值＝交接包目錄（FRESH 的新 session 要讀 `<sid>_<時戳>.md`）。
+    return ["--add-dir", str(task_dir), str(handback_dir()), str(endurance_env.handoff_dir())]
 
 
 def resume_argv(claude: str, session_id: str, prompt: str, add_dir: Path) -> list[str]:

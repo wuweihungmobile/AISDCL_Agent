@@ -649,6 +649,19 @@ def si_status_line(root: Path | None = None, *,
         return f"量不到（{type(exc).__name__}：{why}）——主控請手跑 {_SI_MANUAL}"
 
 
+def _outcome_note(banner: Callable[[], str] | None = None) -> str:
+    """sessionctl D7b：無人視窗未讀結局（`endurance_env.unattended_outcome_banner`，游標制：讀過即
+    不再出聲）折成單行段落接在簡報末尾；沒有／失敗＝不印，不得反過來擋 SessionStart。"""
+    try:
+        if banner is None:
+            import endurance_env  # noqa: PLC0415 — lazy：簡報其餘部分不需要
+            banner = endurance_env.unattended_outcome_banner
+        text = " ".join(banner().split())
+    except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+        return ""
+    return f" {text}" if text else ""
+
+
 def sessionstart_brief(
     payload: dict,
     quota_gate: object,
@@ -661,6 +674,7 @@ def sessionstart_brief(
     check_statusline: Callable[[], dict] = _default_check_statusline,
     guard: object = None,
     si_status: Callable[[], str] | None = None,
+    outcome_banner: Callable[[], str] | None = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
@@ -696,4 +710,5 @@ def sessionstart_brief(
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。{_models_note(quota_gate)}"
            f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}"
-           f"{_hatch_note(quota_gate)}；自我精進（si status，唯讀）：{si_line}")
+           f"{_hatch_note(quota_gate)}；自我精進（si status，唯讀）：{si_line}"
+           f"{_outcome_note(outcome_banner)}")

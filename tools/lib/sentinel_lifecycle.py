@@ -117,6 +117,7 @@ def announce_handbacks(emit, base: Path | None = None) -> str:
     """
     try:
         import resume_route  # noqa: PLC0415 — 見 docstring（lazy：壞掉不得拖垮武裝側）
+        _announce_handoffs(emit)  # sessionctl 第二段：交接包公告（獨立出聲與 ack）
         home = base if base is not None else resume_route.handback_dir()
         rows = [p for p in sorted(home.glob("*.md"))
                 if not p.with_suffix(".ack").exists()]
@@ -130,6 +131,15 @@ def announce_handbacks(emit, base: Path | None = None) -> str:
                 f.write(f"acked {time.time()}\n")
         return text
     except Exception:  # noqa: BLE001 — 見 docstring
+        return ""
+
+
+def _announce_handoffs(emit) -> str:
+    try:  # 永不拋：交接包公告壞掉不得拖垮 handback 公告
+        sys.path.append(str(Path(__file__).resolve().parents[1]))  # tools/：`lib.sessionctl` 的根
+        from lib.sessionctl import handoff  # noqa: PLC0415 — lazy
+        return handoff.announce(emit)
+    except Exception:  # noqa: BLE001
         return ""
 
 
@@ -659,7 +669,7 @@ TEMP_FENCE_ENV = ("TEMP", "TMP", "TMPDIR")
 #: CLI 同一個家（`plan_dir()`，跟 `$HOME` 走）之後，圍籬不指進隔離根的話，全套 in-process 跑的
 #: hook 路徑會把 fixture 任務書寫進開發者真實 `~/.autosdd/plans`。
 CACHE_FENCE_ENV = (quota_meter.CACHE_DIR_ENV, endurance_env.TRACE_DIR_ENV,
-                   endurance_env.PLAN_DIR_ENV)
+                   endurance_env.PLAN_DIR_ENV, endurance_env.HANDOFF_DIR_ENV)
 
 #: 隔離根前綴。刻意**不以 `autosdd_` 開頭**：`leak_fence` 的輔助訊號 glob 就是 `autosdd_*`，
 #: 隔離根自己不得被它算成「新增的洩漏」。
