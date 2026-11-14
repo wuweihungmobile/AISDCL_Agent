@@ -158,6 +158,19 @@ def ensure_mechanical(session_id: str, transcript: Path | None, *, repo: Path | 
     return path
 
 
+def is_advised(session_id: str, base: Path | None = None, env=None) -> bool:
+    """本 session 已被 `advise_once` 出過聲嗎（`<dir>/<sid>.advised` 存在）。唯讀、不 mkdir，
+    目錄決策與寫入端 `_base` 一致（`_read_bases`）；sid 形態不合 ⇒ False。"""
+    sid = str(session_id or "")
+    if not _SID_RE.match(sid):
+        return False
+    env = os.environ if env is None else env
+    try:
+        return any((d / f"{sid}.advised").exists() for d in _read_bases(base, env))
+    except OSError:
+        return False
+
+
 def _checked_recently(stamp: Path, now: datetime) -> bool:
     """上次評估時刻（stamp 檔內容，帶 offset 的 ISO）距 `now` 不到 `ADVISE_INTERVAL_SECONDS`。"""
     try:
@@ -302,14 +315,7 @@ def _disarm_sentinel(sid: str) -> int:
 
 
 def _trace(event: str, **fields) -> None:
-    try:
-        # fields 可覆寫 at（spawn 痕跡要記 spawn 當下）
-        row = {"event": event, "at": datetime.now().astimezone().isoformat(), **fields}
-        target = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
-        with target.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    switch.trace(event, **fields)  # 本體在 switch.trace（fields 可覆寫 at：spawn 痕跡記當下）
 
 
 def _refusals(path: Path, runner, repo: Path, roster_mod) -> list[str]:

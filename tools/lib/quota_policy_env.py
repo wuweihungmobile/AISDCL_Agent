@@ -140,8 +140,11 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "過期 session：閒置達此小時數且同專案有更新的 session 做過事 ⇒ 不續跑、"
            "哨兵自我解除", "policy"),
     EnvVar("AUTOSDD_RESUME_AGENT_TOKENS", None, 150000, "int", 1.0, None,
-           "續棒成本閘：SendMessage 目標代理上下文達此 token 數 ⇒ 無人窗口阻斷"
-           "（只准下修）", "policy"),
+           "續棒成本閘：SendMessage 目標代理上下文達此 token 數 ⇒ 無人窗口阻斷；"
+           "互動僅在其快取已冷時阻斷（只准下修）", "policy"),
+    EnvVar("AUTOSDD_SWITCH_HARD_CTX_TOKENS", None, 290000, "int", 1.0, None,
+           "收斂閘：已出聲且主控上下文達此 token 數 ⇒ 擋 Agent／Task／Workflow、回合結束推回一次"
+           "（只准下修；須高於 R1）", "policy"),
     EnvVar("AUTOSDD_HANDOFF_TTL_HOURS", None, 72, "int", 1.0, None,
            "交接包公告的存活小時數（逾時不再於 SessionStart 出聲）", "policy"),
     EnvVar("AUTOSDD_ROSTER_QUIET_MINUTES", None, 10, "int", 1.0, None,
