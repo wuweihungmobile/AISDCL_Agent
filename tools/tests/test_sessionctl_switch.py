@@ -254,6 +254,11 @@ class ThresholdTest(_Env):
             value, note = switch.threshold(switch.R1_KEY, {switch.R1_KEY: "400000"})
         self.assertEqual(value, int(switch._factory(switch.R1_KEY)))
         self.assertTrue(note and "只准下修" in err.getvalue())
+        for key in (switch.R2_KEY, switch.R3_KEY, switch.AGENT_TOKENS_KEY):  # 四個鍵都要有方向鎖
+            with self.subTest(key), contextlib.redirect_stderr(io.StringIO()) as e:
+                loose = str(int(switch._factory(key)) + 1)
+                self.assertEqual(switch.threshold(key, {key: loose})[0], int(switch._factory(key)))
+                self.assertIn("只准下修", e.getvalue())
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(switch.threshold(switch.STALE_HOURS_KEY,
                                           {switch.STALE_HOURS_KEY: "48"}), (48, ""),
@@ -330,8 +335,16 @@ class SupersededTest(_Env):
 
     def test_at_sc_20_not_yet_idle_enough_is_none(self) -> None:
         """AT-SC-20：本 sid 閒置 23h（< 24h 門檻）⇒ None。"""
-        self.peer(30)
-        self.assertIsNone(self.check(last=self.now.timestamp() - 23 * 3600))
+        last = self.now.timestamp() - 23 * 3600
+        self.peer(30, start=last + 60)  # 他 sid 的活動晚於本 sid 最後活動 ⇒ 擋下它的只剩閒置門檻
+        self.assertIsNone(self.check(last=last))
+
+    def test_the_idle_threshold_boundary_is_inclusive(self) -> None:
+        """AT-SC-20 的邊界：恰等於門檻（24h）命中；差 1 秒不命中（`<` 不是 `<=`）。"""
+        edge = self.now.timestamp() - 24 * 3600
+        self.peer(30, start=edge + 60)
+        self.assertEqual(self.check(last=edge)["sid"], "peer")
+        self.assertIsNone(self.check(last=edge + 1))
 
     def test_at_sc_21_a_one_turn_probe_is_not_a_takeover(self) -> None:
         """AT-SC-21：他 sid 只有 1 回合（`claude -p ok`）⇒ None（同武裝門檻那把尺）。"""
@@ -346,7 +359,10 @@ class SupersededTest(_Env):
     def test_at_sc_23_subagent_files_are_not_another_session(self) -> None:
         """AT-SC-23：他 sid 的活動只在 `<sid>/subagents/` 下 ⇒ None（子代理不是另一個 session）。"""
         rows = [_asst(self.last + 60 + i * 32) for i in range(30)]
-        _write(self.tmp / "peer" / "subagents" / "agent-a.jsonl", rows)
+        sub = _write(self.tmp / "peer" / "subagents" / "agent-a.jsonl", rows)
+        # 明確設 mtime 晚於 since（不依賴真實時鐘）⇒ 流程真的走到「只掃目錄直下」的判準
+        os.utime(sub, (self.now.timestamp(), self.now.timestamp()))
+        self.assertGreater(sub.stat().st_mtime, self.last)
         self.assertIsNone(self.check())
 
     def test_at_sc_24_unreadable_directory_fails_towards_continuing(self) -> None:
@@ -458,6 +474,33 @@ class E2ReplayTest(_Env):
         task = "T-e2-resume"
         plan, rc, probes, spawns, remove = self.run_tick("--resume-tick", task)
         self.check_superseded(plan, rc, probes, spawns, remove, task)
+
+    def gc_rows(self) -> list[dict]:
+        """`gc(apply=False)` 的假後端列舉：一支 waiting 哨兵、逐字稿閒置 4 天（遠超 6h）。
+        當前 session 保護關掉（否則 SID 自己被當成「最近仍在寫」而恆保留，測不到接線）。"""
+        task = SL.TASK_PREFIX + SID
+        plan = self.tmp / f"autosdd_resume_plan_{SID}.md"
+        plan.write_text("# E2\n\n" + planner.render_relay(_plan_state(plan, self.tr, task)),
+                        encoding="utf-8")
+        os.utime(self.tr, (self.t_old, self.t_old))
+        with unittest.mock.patch.object(SL, "sentinel_task_names", return_value=[task]), \
+                unittest.mock.patch.object(SL, "_newest_session", return_value=""):
+            rows = SL.gc(apply=False, tmp_dir=str(self.tmp))
+        self.assertEqual([r["session_id"] for r in rows], [SID])
+        self.assertEqual(rows[0]["state"], "waiting")
+        return rows
+
+    def test_gc_reaps_a_waiting_sentinel_only_when_a_newer_session_took_over(self) -> None:
+        """FR-SC-09 的呼叫端接線（兩向）：waiting＋已被接手 ⇒ 收（理由含 superseded）；
+        waiting＋沒人接手 ⇒ 留（等額度期間不拆，E2 反向的誤拆後果）。判準只有 `switch` 一個家。"""
+        self.peer()
+        taken = self.gc_rows()[0]
+        self.assertTrue(taken["reap"], taken)
+        self.assertIn("superseded", taken["why"])
+        (self.tmp / "peer-new.jsonl").unlink()
+        quiet = self.gc_rows()[0]
+        self.assertFalse(quiet["reap"], quiet)
+        self.assertIn("可能還在等額度", quiet["why"])
 
     def test_a_week_with_nobody_else_still_goes_the_old_way(self) -> None:
         """對照（AT-SC-27 的 tick 版／FR-SC-07）：同一份 E2 數值但**沒有更新的 session** ⇒

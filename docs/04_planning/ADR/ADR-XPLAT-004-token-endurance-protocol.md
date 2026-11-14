@@ -512,7 +512,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 | 決策 | 內容 | 狀態 | 證據座標 |
 |---|---|---|---|
 | D2 | 無人選路量續跑成本（R1～R3）而非檔案大小 | 已落地（2026-11-14） | `tools/lib/sessionctl/switch.py`；`tools/tests/test_sessionctl_switch.py`（RouteTest、ThresholdTest）；AT-SC-01～18 |
-| D3 | 過期 session 不續跑（SUPERSEDED），`sentinel_decide`＋`_resume_tick` 兩處接線、`reap_verdict` 一致 | 已落地（2026-11-14） | 同上（SupersededTest）；`tools/tests/test_context_budget_guard.py`（SentinelDecisionTest、E2ReplayTest、ReapSupersededTest）；AT-SC-19～33 |
+| D3 | 過期 session 不續跑（SUPERSEDED），`sentinel_decide`＋`_resume_tick` 兩處接線、`reap_verdict` 一致 | 已落地（2026-11-14） | 同上（SupersededTest、E2ReplayTest、ReapSupersededTest、SupersedingSinceTest 皆在 `tools/tests/test_sessionctl_switch.py`）；`tools/tests/test_context_budget_guard.py`（SentinelDecisionTest、SentinelReapVerdictTest）；AT-SC-19～33 |
 | 圍籬修正 | 洩漏圍籬不把活著的互動 session 合法武裝的哨兵判成洩漏（§2.13.11） | 已落地（2026-11-14） | `tools/lib/sentinel_lifecycle.py::leak_fence`；`LeakFenceTest` |
 | D4 | 交接包（機械層＋主控層、公告／ack／過期） | **設計定案、尚未落地** | 第二段；TCS AT-SC-34～49 |
 | D5 | 三條切換路（無人／互動自動／手動）、洗環境 | **設計定案、尚未落地**（FRESH prompt 的 `handoff_path` 參數縫已預留，預設不用） | 第二段；AT-SC-50～60 |
@@ -542,7 +542,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 | 元件 | 路徑 | 職責 | 不准做 |
 |---|---|---|---|
-| 選路與過期判準 | `tools/lib/sessionctl/switch.py` | `fresh_reasons()`（R1～R4）、`superseded_by()`（D3 判準唯一的家）、`stale_verdict()`（哨兵／續航用的判決字典） | 不 spawn、不寫檔（純函式＋讀檔） |
+| 選路與過期判準 | `tools/lib/sessionctl/switch.py` | `fresh_reasons()`（R1～R4）、`superseded_by()`（D3 判準唯一的家）、`stale_verdict()`（哨兵／續航用的判決字典） | 不 spawn；以純函式＋讀檔為主，只有兩處寫入：handback 目錄解析的冪等 mkdir、SUPERSEDED 命中後的處置（`settle_superseded`／`write_superseded_handback`：狀態塊、handback；由 planner 的哨兵與續航兩處呼叫）——以 `switch.py` 檔頭自述為準 |
 | 交接包 | tools/lib/sessionctl/handoff.py | 機械層產生、主控層驗證（finalize）、公告／ack／過期、洗環境、互動 spawn | 不判「該不該切」（那是 switch） |
 | 名冊與停止 | tools/lib/sessionctl/roster.py | 子代理三態、無人窗口、排程彙整；`stop` 的 pid 身分驗證與砍樹 | 不停視窗內子代理（harness 才做得到） |
 | 模型建議 | tools/lib/sessionctl/modelmix.py | 兩條週軸的「用量比÷時間流逝比」→ 一行建議 | 不改任何派工參數（只出聲） |
@@ -564,8 +564,8 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 - **方向鎖**：三個門檻只准下修（具名測試以「現值 ≤ 出廠值」釘住出廠值，env 覆寫若大於出廠值 ⇒ 退出廠值並出聲，同 `_transcript_cap()` 的病態值處理）。方向理由：放寬＝退回 E1。
 - **fail 方向**：選路的降級只准 RESUME→FRESH（既有方向鎖不變）。量不到一律「不觸發該條」而非「觸發 FRESH」——FRESH 的代價是丟上下文，量不到不應單方面造成資訊損失；但 E1 型輸入（context_feed 不在、逐字稿可讀）R1 經 `scan_transcript` 仍量得到，回歸鎖以 E1 真實數值釘住。
-- FRESH prompt 追加兩條硬規則（字面鎖）：①不得以 SendMessage 續任何舊 session 的代理，一律派新代理＋短任務書；②第一個動作＝重驗 `git status`／HEAD 與交接包內一切「已通過」宣稱。並改指向**交接包**（§2.13.4），任務書仍在 `--add-dir`。
-- 互動視窗同一組 R1～R3（R4 不適用）由 PostToolUse 判定、**一個 session 只出聲一次**（閂鎖鍵 `switch_advised`，住 `state_path(sid)` 的既有閂鎖機制）：出聲同時產生交接包機械層（§2.13.4），訊息附交接包絕對路徑與 `python tools/sessionctl.py handoff --finalize` / `--spawn` 兩行指令。
+- FRESH prompt 追加兩條硬規則（字面鎖）：①不得以 SendMessage 續任何舊 session 的代理，一律派新代理＋短任務書；②第一個動作＝重驗 `git status`／HEAD 與交接包內一切「已通過」宣稱。並改指向**交接包**（§2.13.4），任務書仍在 `--add-dir`（🔴 「改指向交接包」屬第二段設計，**尚未落地**：現行只有兩條硬規則字面，`handoff_path` 縫未接線）。
+- 🔴 **（設計，尚未落地；屬第二段 D4／D5，不是 D2 的現行行為）** 互動視窗同一組 R1～R3（R4 不適用）由 PostToolUse 判定、**一個 session 只出聲一次**（閂鎖鍵 `switch_advised`，住 `state_path(sid)` 的既有閂鎖機制）：出聲同時產生交接包機械層（§2.13.4），訊息附交接包絕對路徑與 `python tools/sessionctl.py handoff --finalize` / `--spawn` 兩行指令。
 - **不調 autocompact 門檻**（90% 不動）：見 §2.13.9 X1。
 
 **實作事實（2026-11-14 落地；與上文有差異處以此為準）**

@@ -37,8 +37,8 @@
 
 另：Console 側 compose 展開 JSON 省略 `create_host_path`，使 `test_AT_966_2_E_1` 一條斷言紅；移除該項斷言（Console TCS 勘誤 E-26）。
 
-- **驗證（當回合）**：Windows 全檔 p7 152 條 OK、engine-bridge `tests/test_si_deploy_config.py` 17 passed；Linux 容器（ubuntu、python3.12）修前重現 11 條紅、修後 151／152（餘 1 條為容器偽影：python 在 root 擁有的 `/usr/local`，CI 的 toolcache python 該條本來就綠）；手動破壞 `_timeout_kill` 使 AT-749-9-2 轉紅。
-- **尚未驗證**：macOS 與 GitHub Windows runner 以下一次 CI 結果為憑，結果見 commit 訊息。
+- **驗證（當回合）**：p7 全檔條數——跨平台修復第一包後 152 條（Windows 全過；Linux 容器 151／152，餘 1 條為容器偽影：python 在 root 擁有的 `/usr/local`，CI 的 toolcache python 該條本來就綠）；第二包（成因 8，AT-749-5-E-2-c）加一條後 153 條；本輪 CI 修復包再加 `_parse_etime` 純函式測試一條（AT-749-9-E-5）後 154 條，AT-749-5-E-2-c 改為各平台都真跑的同一方法（不再是 Windows 限定 skip）。engine-bridge `tests/test_si_deploy_config.py` 17 passed；手動破壞 `_timeout_kill` 使 AT-749-9-2 轉紅。
+- **已驗（2026-11-14，`ed9bc12d`）**：macOS 與 GitHub Windows runner 以 CI 為憑——windows-compat-ci 通過；Linux、macOS 的測試失敗已清零，剩餘紅燈只來自本批 Windows 限定 skip 觸發的 skip 治理閘（root-infra-ci、macos-compat-ci），由 TCS-P7 勘誤 E-78 把該測試改為各平台都跑而消除。
 
 ## DEF-200-584　sessionctl 第二段尚未實作（open）
 
