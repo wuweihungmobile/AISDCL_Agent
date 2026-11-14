@@ -235,7 +235,8 @@ class ThresholdTest(_Env):
         （方向鎖：改大即紅）。"""
         got = {s.name: s.default for s in quota_policy_env.ENV_SPEC}
         for key, ceiling in ((switch.R1_KEY, 250_000), (switch.R2_KEY, 2),
-                             (switch.R3_KEY, 100_000), (switch.AGENT_TOKENS_KEY, 150_000)):
+                             (switch.R3_KEY, 100_000), (switch.AGENT_TOKENS_KEY, 150_000),
+                             (switch.HARD_CTX_KEY, 290_000)):
             self.assertLessEqual(got[key], ceiling, f"{key} 出廠值被放寬＝退回 E1")
         self.assertNotIn(switch.STALE_HOURS_KEY, switch._DOWNWARD_ONLY)
 

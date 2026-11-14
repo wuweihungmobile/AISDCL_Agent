@@ -255,12 +255,18 @@ def running(session_id: str, *, projects_dir=None, now=None) -> list[dict]:
 def agent_context(session_id: str, agent_id: str, *, projects_dir=None) -> int | None:
     """該代理逐字稿最後一筆 assistant usage 的 input＋cache_read＋cache_creation；找不到／讀不動 ⇒
     `None`。不要求代理未結束——續一個已結束的代理一樣整份重讀（E1）。"""
+    path = _agent_path(session_id, agent_id, projects_dir)
+    return _scan(path, False)["ctx_tokens"] if path is not None else None
+
+
+def _agent_path(session_id: str, agent_id: str, projects_dir=None) -> Path | None:
+    """該代理的 `agent-<id>.jsonl`；id／sid 形態不合或檔不存在 ⇒ `None`。"""
     if not _ID_RE.match(str(agent_id or "")) or not _ID_RE.match(str(session_id or "")):
         return None
     for _owner, folder in _agent_dirs(_projects(projects_dir), session_id):
         path = folder / f"agent-{agent_id}.jsonl"
         if path.is_file():
-            return _scan(path, False)["ctx_tokens"]
+            return path
     return None
 
 
@@ -277,12 +283,14 @@ def _payload_sid(payload: dict) -> str:
     return Path(raw).stem if isinstance(raw, str) and raw.strip() else ""
 
 
-def resume_gate(payload: dict, env) -> tuple[int, str]:
-    """PreToolUse／SendMessage 成本閘（D6）。目標＝`tool_input.to`（缺則 `recipient`）；解析不到、
-    meta／逐字稿讀不動、payload 退化一律 `(0, "")`（fail-open：誤擋只差一步的代理代價更高）。
-    上下文 ≥ `RESUME_AGENT_TOKENS`：互動 ⇒ `(0, 提醒)`；`AUTOSDD_UNATTENDED` 有設 ⇒ `(2, 訊息)`。"""
+def resume_gate(payload: dict, env, now: datetime | None = None) -> tuple[int, str]:
+    """PreToolUse／SendMessage 成本閘（D6＋快取冷熱）。目標＝`tool_input.to`（缺則 `recipient`）；
+    解析不到、meta／逐字稿讀不動、payload 退化、任何例外一律 `(0, "")`（fail-open）。
+    上下文 < `RESUME_AGENT_TOKENS` ⇒ 放行。≥ 門檻時：`AUTOSDD_UNATTENDED` 有設 ⇒ 不論冷熱
+    `(2, 訊息)`（逃生口無效）；互動 ⇒ 熱＝放行不出聲；冷＝`(2, 訊息)`，除非 message 帶合格的
+    `續棒理由：<≥8 字>`（放行並落痕跡 `resume_gate_override`；阻斷落 `resume_gate_block`）。"""
     try:
-        from . import switch  # noqa: PLC0415 — lazy
+        from . import cachestate, switch  # noqa: PLC0415 — lazy
 
         tool_input = payload.get("tool_input")
         target = (tool_input.get("to") or tool_input.get("recipient")) if isinstance(
@@ -290,16 +298,33 @@ def resume_gate(payload: dict, env) -> tuple[int, str]:
         sid = _payload_sid(payload)
         if not isinstance(target, str) or not sid:
             return 0, ""
-        ctx = agent_context(sid, target, projects_dir=_payload_projects(payload))
+        path = _agent_path(sid, target, _payload_projects(payload))
+        ctx = _scan(path, False)["ctx_tokens"] if path is not None else None
         limit = switch.threshold(switch.AGENT_TOKENS_KEY, env)[0]
         if ctx is None or ctx < limit:
             return 0, ""
-        text = (f"續棒成本閘：代理 {target} 上下文約 {ctx:,} tokens（≥ {limit:,}），"
-                "SendMessage 會把它整份重讀（E1：無人窗口續 40～60 萬 token 的舊代理 44 分鐘）。"
-                "請改派新代理＋短任務書（handback／交卷檔路徑）。")
         if env.get("AUTOSDD_UNATTENDED"):
+            text = (f"續棒成本閘：代理 {target} 上下文約 {ctx:,} tokens（≥ {limit:,}），"
+                    "SendMessage 會把它整份重讀"
+                    "（E1：無人窗口續 40～60 萬 token 的舊代理 44 分鐘）。"
+                    "請改派新代理＋短任務書（handback／交卷檔路徑）。")
             return 2, "🔴 已阻斷（無人窗口）。" + text.replace("請改派", "改派") + "\n"
-        return 0, "⚠️ " + text
+        state = cachestate.cache_state(path, now)
+        if not state["cold"]:
+            return 0, ""
+        fields = {"target": target, "ctx": ctx, "idle_s": round(state["idle_s"]),
+                  "tier": state["tier"]}
+        reason = cachestate.override_reason(tool_input.get("message"))
+        if reason:
+            switch.trace("resume_gate_override", reason=reason, **fields)
+            return 0, ""
+        switch.trace("resume_gate_block", **fields)
+        return 2, (
+            f"🔴 續棒成本閘：代理 {target} 上下文約 {ctx:,} tokens（≥ {limit:,}），"
+            f"已閒置 {round(state['idle_s'] / 60)} 分鐘（快取壽命 {state['tier']}）⇒ 快取已冷，"
+            "SendMessage 會把它整份重寫。請改派新代理＋短任務書（指向它的交卷檔／handback 路徑）。"
+            f"\n確有必要續棒時，在 message 內加一行 `{cachestate.OVERRIDE_PREFIX}<原因，至少 "
+            f"{cachestate.OVERRIDE_MIN_CHARS} 字>`（互動才有效，會落痕跡）。\n")
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
         return 0, ""
 

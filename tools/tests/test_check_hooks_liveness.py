@@ -1933,7 +1933,9 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PreCompact", ".claude/hooks/precompact_restart_point.py"): frozenset({"*"}),
     # sessionctl 第二段（ADR-XPLAT-004 §2.13；TCS AT-SC-85／86）：SendMessage 續棒成本閘
     # 與 Stop 出聲；Stop 無 matcher ⇒ `*`。逃生口 AUTOSDD_SESSIONCTL_GUARD_OFF。
-    ("PreToolUse", ".claude/hooks/sessionctl_guard.py"): frozenset({"SendMessage"}),
+    # 收斂閘（TCS-TokenWaste AT-TW-38／39）：同一條目多認 Agent／Task／Workflow。
+    ("PreToolUse", ".claude/hooks/sessionctl_guard.py"):
+        frozenset({"SendMessage", "Agent", "Task", "Workflow"}),
     ("Stop", ".claude/hooks/sessionctl_guard.py"): frozenset({"*"}),
 }
 

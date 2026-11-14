@@ -9,11 +9,13 @@ WHY 住這裡（ADR-XPLAT-004 §2.13.1）：`tools/session_resume_planner.py` �
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
+import endurance_env
 import resume_route
 import unattended_authz  # DEF-200-575：harness 背景等待上限的唯一家
 
@@ -131,9 +133,13 @@ AGENT_TOKENS_KEY = "AUTOSDD_RESUME_AGENT_TOKENS"  # D6 續棒閘（下一包的�
 HANDOFF_TTL_KEY = "AUTOSDD_HANDOFF_TTL_HOURS"  # D4 公告存活（下一包）
 ROSTER_QUIET_KEY = "AUTOSDD_ROSTER_QUIET_MINUTES"  # D7 名冊「安靜」門檻（下一包）
 MODE_KEY = "AUTOSDD_SESSION_SWITCH_MODE"
-#: 方向鎖：這四個只准下修（放寬＝退回 E1：20 MB／60 萬 token 的舊 session 仍被整份重讀）。
+#: 收斂閘硬門檻（已出聲且主控上下文達此值 ⇒ 擋 Agent／Task／Workflow、Stop 推回一次）；
+#: 判準住 `converge.py`。
+HARD_CTX_KEY = "AUTOSDD_SWITCH_HARD_CTX_TOKENS"
+#: 方向鎖：這五個只准下修（放寬＝退回 E1：20 MB／60 萬 token 的舊 session 仍被整份重讀；
+#: 硬門檻放寬＝出聲後可無限續做）。
 #: `STALE_SESSION_HOURS` 刻意不在內：調小更積極拆哨兵、調大更晚拆，兩向都有風險（主控裁決 7）。
-_DOWNWARD_ONLY = (R1_KEY, R2_KEY, R3_KEY, AGENT_TOKENS_KEY)
+_DOWNWARD_ONLY = (R1_KEY, R2_KEY, R3_KEY, AGENT_TOKENS_KEY, HARD_CTX_KEY)
 #: R1 在 feed 與逐字稿 usage 皆缺時的估計比值（位元組／token）。🔴 這是量測值不是定律：E1 的
 #: 20,518,438 B 逐字稿對應約 60 萬 token ⇒ ≈34 B/token，取 40 偏保守（少估一點）；結果一律標
 #: `estimated`，要重量由 `tools/probe/`（現查）做，本檔不當它是真值。
@@ -181,6 +187,17 @@ def switch_mode(env=None) -> str:
     if raw:
         print(f"⚠️ {MODE_KEY}={raw!r} 不是 {'／'.join(MODES)} ⇒ 退回 auto", file=sys.stderr)
     return "auto"
+
+
+def trace(event: str, **fields) -> None:
+    """落一列痕跡到 `trace_dir()/autosdd_session_switch.jsonl`（`fields` 可覆寫 `at`）；不拋。"""
+    try:
+        row = {"event": event, "at": datetime.now().astimezone().isoformat(), **fields}
+        target = endurance_env.trace_dir() / "autosdd_session_switch.jsonl"
+        with target.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def fresh_reasons(session_id: str, transcript: Path | None, size: int | None, *, guard=None,
