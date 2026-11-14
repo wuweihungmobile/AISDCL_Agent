@@ -3234,22 +3234,46 @@ class TestSecRound3(RunTestCase):
         self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
         fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
 
-    @unittest.skipUnless(sys.platform == "win32", "[WINDOWS-NATIVE-ONLY] 8.3 短檔名與長度前綴")
-    def test_AT_749_5_E_2_c_hooks_path_in_windows_alias_forms_is_the_same_directory(self):
-        import ctypes
+    def hooks_alias_forms(self, rr, hooks: Path) -> list[str]:
+        """同一個 hooks 目錄的別名寫法（依平台構造；兩個平台都有，沒有任何一邊是 skip）。"""
+        if sys.platform == "win32":
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            ctypes.windll.kernel32.GetShortPathNameW(str(rr.R), buf, 1024)
+            return [str(Path(buf.value) / si_git.EXPECTED_HOOKS),  # 8.3 短名（runner 的 RUNNER~1）
+                    "\\\\?\\" + str(hooks), str(hooks).upper(), str(hooks).replace("\\", "/")]
+        link = rr.R.parent / (rr.R.name + "_hooks_alias")  # 指向 hooks 目錄的符號連結別名
+        link.symlink_to(hooks, target_is_directory=True)
+        self.addCleanup(link.unlink)
+        elsewhere = rr.R / "elsewhere"
+        elsewhere.mkdir(exist_ok=True)
+        return [str(link), str(hooks) + "/", str(elsewhere / ".." / si_git.EXPECTED_HOOKS)]
+
+    def test_AT_749_5_E_2_c_hooks_path_in_alias_forms_is_the_same_directory(self):
         rr = self.prr()
         rr.patrol()
         hooks = rr.R / si_git.EXPECTED_HOOKS
-        buf = ctypes.create_unicode_buffer(1024)
-        ctypes.windll.kernel32.GetShortPathNameW(str(rr.R), buf, 1024)
-        forms = [str(Path(buf.value) / si_git.EXPECTED_HOOKS),  # 8.3 短名（runner 的 RUNNER~1）
-                 "\\\\?\\" + str(hooks), str(hooks).upper(), str(hooks).replace("\\", "/")]
-        for form in forms:
+        for form in self.hooks_alias_forms(rr, hooks):
             fx.git(rr.R, "config", "core.hooksPath", form)
             self.assertTrue(rr.evaluate()["ok"], form)  # 解析後同一目錄＝接受
         fx.git(rr.R, "config", "core.hooksPath", str(rr.R / "elsewhere"))
         self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
+        # 相對路徑仍拒：即使它以行程 cwd 解析會落在同一目錄（_same_dir 不得靠 cwd 放行）
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(rr.R)
+        fx.git(rr.R, "config", "core.hooksPath", f"elsewhere/../{si_git.EXPECTED_HOOKS}")
+        self.assertEqual(self.unsafe(rr), ("PUSH-GIT-CONFIG-UNSAFE", "core.hookspath"))
         fx.git(rr.R, "config", "core.hooksPath", p7x.HOOKS_DIR)
+
+    def test_AT_749_9_E_5_parse_etime_reads_the_three_ps_forms_and_fails_closed(self):
+        """`ps -o etime=` 的 `[[DD-]hh:]mm:ss`（純函式，三平台都跑；Windows 不經 ps 但函式照測）：
+        天數乘數或小時欄位算錯會讓身分比對偏移而放行被重用的 pid。畸形一律 None（fail-closed）。"""
+        for text, want in (("05:09", 309), (" 01:05:09\n", 3909), ("2-01:05:09", 176709),
+                           ("00:00", 0), ("1-00:00:00", 86400)):
+            self.assertEqual(runner._parse_etime(text), want, text)
+        for bad in ("", "12", "abc", "1:2:3:4", "-05:09", "05:", ":05", "x1-01:05:09", "5.5:09"):
+            self.assertIsNone(runner._parse_etime(bad), bad)
 
     def test_AT_749_6_E_12_the_guard_reads_the_real_objects_even_with_detection_off(self):
         rr, h, patrol, _base = self.replaced_repo()

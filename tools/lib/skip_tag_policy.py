@@ -670,11 +670,11 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 「pythonw 起 `session_resume_planner.py --check` 不得讓 Windows 新開可見 terminal」
         # 的**行為**鎖（console 配置是 Windows 專屬概念，鐵律三），與既有 `NoWindowBehaviourTest`
         # 同型，帶標籤的 skipUnless 是正確形態，不是隱藏失敗。
-        # 🔴 第一波推送守門跨平台修復再重釘 `windows-only` 15→16（**非放寬**，同上）：新站點＝
-        # `test_selfimproving_p7_push.py::test_AT_749_5_E_2_c_…` 的 `@unittest.skipUnless(
-        # sys.platform == "win32", "[WINDOWS-NATIVE-ONLY] …")`——8.3 短檔名與 `\\?\` 前綴
-        # 是 Windows 專屬路徑形態（鐵律三），POSIX 上無可比對對象。
-        "windows-only": 16,
+        # 🔴 第一波推送守門跨平台修復曾短暫把 `windows-only` 重釘 15→16（為
+        # `test_selfimproving_p7_push.py::test_AT_749_5_E_2_c_…` 的 Windows 限定 skip）；
+        # 該測試其後改為各平台都真的會跑（Windows 用 8.3 短名／`\\?\`／大小寫／斜線別名，POSIX 用
+        # 符號連結／結尾斜線／`..` 別名），skip 站點移除 ⇒ 改回 15（TCS-P7 勘誤 E-78）。
+        "windows-only": 15,
         "posix-only": 10,
         # 🔴 本輪重釘 `tool-absence` 36 → 37（**非放寬**：本表判準是「相等」，任一格變動都
         # 必須有人回來改，失敗訊息自己會印出該填的數字 ⇒ 重釘是設計好的流程）。新站點＝
