@@ -1148,6 +1148,8 @@ except Exception:  # noqa: BLE001 — 共用層不可達＝退化，不是崩潰
     _st = None  # type: ignore[assignment]
 _shell_tokens = getattr(_st, "shell_tokens", lambda text: [])
 unquote_exe_paths = getattr(_st, "unquote_exe_paths", lambda text: text)
+_ci_poll_hit = getattr(_st, "ci_poll_hit", lambda view: None)  # 判準⑤的本體住 shell_tokens
+_ci_poll_is = getattr(_st, "ci_poll_is", lambda reason: False)
 
 
 def _pgrep_full_operand(rest: str) -> str | None:
@@ -1232,7 +1234,7 @@ def _rcmask_filter(view: str) -> str | None:
 
 def waitform_hits(command: str, *, run_in_background: bool = False,
                   tool: str = "Bash") -> list[str]:
-    """鐵律六的命中理由（空 list＝通過）。**四條**判準，共用同一個遮蔽面。
+    """鐵律六的命中理由（空 list＝通過）。**五條**判準，共用同一個遮蔽面。
 
     · ① `nohup`／`disown`／`setsid` 與背景 `&` 同一 statement
     · ② `until`／`while` 的**條件內**出現裸 `pgrep -f <非自我否定 pattern>`
@@ -1256,6 +1258,19 @@ def waitform_hits(command: str, *, run_in_background: bool = False,
       有效，zsh 一格仍會擋。出口：行內 `# waitform-ok: <WHY>`（理由必填；
       `AUTOSDD_UNATTENDED` 有設時無效），或改讀 `${PIPESTATUS[0]}`（bash）／
       `${pipestatus[1]}`（zsh）。
+    · ⑤ （Bash 與 PowerShell 兩種工具都判；本體住 `tools/lib/shell_tokens.py::ci_poll_hit`，hook
+      只剩薄接線以守 `guardrail_cli<=750`；立案＝掌舵者真機回報 sid 680d8411-58ac-4adb-9e23-
+      521f6a7bb557，2026-11-14）**迴圈內輪詢 `gh run`**：`while`／`until`／`do { } while|until`／
+      `for (;;)` 的條件或迴圈體內出現 `gh run list|view|watch`。事故形狀：手寫背景輪詢以短 SHA
+      查 `gh run list --commit`，回 `[]` 且 rc=0，結束條件永不成立，CI 全綠後主控閒置 78 分鐘——
+      手寫迴圈沒有自己的截止時間，也分不出「還沒跑完」與「查不到」。出口＝`python tools/ci_wait.py
+      --commit <rev>`（背景跑、輸出導檔；自帶硬截止時間、先解完整 SHA、查無 run 大聲失敗）。
+      🔴 **本條不吃行內 `# waitform-ok:`**（事故那一行就帶著豁免；`main()` 只對①～④套用豁免），
+      `AUTOSDD_UNATTENDED` 與否都一樣；給人的逃生口 `AUTOSDD_GIT_GUARD_OFF` 照舊有效。單次（不在
+      迴圈內）的 `gh run list|view` 一律不判；迴圈後的單次查詢也不判（`do { } while (…); gh run
+      list` 的尾巴 `while` 不另算迴圈）。誠實劃界：看不到 `-c`／`Invoke-Expression` operand 內
+      的迴圈、經變數或別名間接呼叫的 gh、`foreach`／`for x in` 這類有限迴圈（刻意不判）；
+      `shell_tokens` 不可達時退化為不判⑤（同其他共用原語的 fail-open 方向）。
 
     🔴 `wait` 豁免（全指令任一處出現即成立）**只罩 ①③、不罩 ②④**——`until ! pgrep …` 的
     死鎖與有沒有 `wait` 無關。這個不對稱是實作逐字的形狀（①③ 住在 `if not waited:` 內、
@@ -1300,6 +1315,7 @@ def waitform_hits(command: str, *, run_in_background: bool = False,
                  f"改成字元類自我否定：`{operand[:1]}[{operand[1:2] or '_'}]{operand[2:]}` "
                  f"這種形態（只否定自己、不減損鑑別力）"] = None
 
+    hits.update(dict.fromkeys(filter(None, [_ci_poll_hit(masked)])))  # ⑤
     zsh = _tool_shell_is_zsh()
     # 豁免標記：大寫 `PIPESTATUS` 只在殼不是 zsh 時算；小寫 `pipestatus` 與 `pipefail` 一律算
     safe = [m for m in _RCMASK_SAFE_RE.findall(command) if not (zsh and m == "PIPESTATUS")]
@@ -1318,7 +1334,7 @@ def waitform_hits(command: str, *, run_in_background: bool = False,
 
 
 def has_waitform_exemption(command: str) -> bool:
-    """判準①～④的行內豁免（只認住在**真註解**裡的 `# waitform-ok: <理由>`）。"""
+    """判準①～④的行內豁免（只認住在**真註解**裡的 `# waitform-ok: <理由>`）；⑤不吃豁免。"""
     return bool(_WAITFORM_EXEMPT_RE.search(mask_inert(command, keep_comments=True)))
 
 
@@ -1360,7 +1376,7 @@ _WAITFORM_FOOTER = (
     "一個\n"
     "     會**主動叫醒你**的事件源；掛不掛得上，是派工前就要決定的事，不是事後補救。\n"
     "\n"
-    "  真的確定要這樣寫？在指令內加行內豁免 `# waitform-ok: <理由>`（理由必填）。\n"
+    "  真的確定要這樣寫？行內豁免 `# waitform-ok: <理由>`（必填；gh run 輪詢不適用）。\n"
 )
 _RCPIPE_FOOTER = (
     "\n"
@@ -1615,7 +1631,7 @@ def main() -> int:
         if hits and has_exemption(command) and not unattended:
             hits = []
         if wait_hits and has_waitform_exemption(command) and not unattended:
-            wait_hits = []
+            wait_hits = [h for h in wait_hits if _ci_poll_is(h)]  # ⑤ 不吃豁免
 
         # 偵測層（見上方 R84 偵測層說明）：只是提醒、**絕不阻斷**，也不得佔 rc=1——CC 只認
         # 0（放行）與 2（阻斷），其餘碼一律顯示成 hook error（DEF-200-440 同族）。⇒ 不阻斷
