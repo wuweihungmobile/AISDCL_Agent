@@ -140,3 +140,5 @@
 {"seq":140,"t":"2026-11-15T04:00:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AutoClaude/.perf_baseline.toml"}
 {"seq":141,"t":"2026-11-15T08:45:08+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
 {"seq":142,"t":"2026-11-15T21:00:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-15T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":143,"t":"2026-11-16T01:30:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-15T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":144,"t":"2026-11-16T02:15:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-15T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}
