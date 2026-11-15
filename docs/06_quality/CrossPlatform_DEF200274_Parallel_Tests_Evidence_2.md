@@ -1651,3 +1651,32 @@ Ran 113 tests in 2.278s
 OK
 ```
 `ruff check tools/tests/test_mac_endurance_r83.py`：All checks passed!
+
+## DEF-200-593 tools/tests 跨機分片（windows-compat-ci 加速；2026-11-15）
+
+### 問題與取捨
+windows-compat-ci 的「tools/tests/」一步在 4 核 runner 上 45 分鐘以上（總工作量約 10,294 s，多 CPU 已吃滿；整支 workflow 最近一次 59 分鐘、`timeout-minutes: 60`），隨時逾時。掌舵者要求縮短、**不減任何測試、不放寬任何門檻、不調 skip 上限**。單機再平行吃不到更多核數，夾具模板化最多省該步約 6～9 分（調查估計，未實測）而達不到 ≤25 分，故採「分片到多台 runner」。
+
+### 前置：p7_push 類別級派工
+現行派工單位＝模組，`test_selfimproving_p7_push` 單一單位約 1948 s（154 條、每條各跑真 git 鏈）。分片後每片每 worker 份額僅約 860 s，這個單一單位成了關鍵路徑——N=3 的牆鐘仍被它單獨卡住（≥32 分）。已加入 `dispatch_granularity.CLASS_LEVEL_DISPATCH_MODULES`，並在 `_MODULE_FIXTURE_SAFE_EXCEPTIONS` 舉證：`setUpModule` 只建行程私有暫存根（`mkdtemp` 隨機尾碼）、歸零行程內計數器與快取，`tearDownModule` 只刪自己那份，每個類別 subprocess 各自重跑 setUpModule 是正確且必要的；六個類別（TestPushExecution／TestLockAndWall／TestOsTasks／TestSnapshotPushBlock／TestClassify／TestAuthAndRc）同時並行單跑皆 OK。其餘四支重的 selfimproving 檔（events／console_obs／verify／props，各約 400～540 s）在 N=3 下不是關鍵路徑（每片每 worker 份額約 860 s），不動。
+
+### 機制（`tools/lib/suite_shard.py`；環境變數，不加旗標）
+- `AUTOSDD_TEST_SHARD=i/N`：未設或空字串＝現行行為逐字不變；格式錯誤（`0/3`、`4/3`、`a/b`…）在 `main()` 早退 rc=1（`_bail`），不是跑到一半才炸。`AUTOSDD_TEST_SHARD_OUT=<dir>`：分片模式下每片落 `shard-<i>-of-<N>.json`。
+- 切分確定性：只對**靜態派工單位**（`suite_dispatch_units`，人工白名單）切，片內再各自做自動細分（只會把單位拆成子單位，不跨片）；權重只讀 git 追蹤的種子檔（不讀各機不同的活體快取）；LPT、同權重以單位鍵字典序破平手、權重轉整數毫秒加總。種子沒有的單位：子鍵加總 → 母模組鍵按測試數分攤 → 種子平均「秒／測試」。
+- 只對真實 `tools/tests` 生效：合成樹（單元測試餵的）一律不分片；`parallel_shard.run_parallel` 的 worker 子行程環境拔掉兩個分片變數。
+
+### 分片下各檢查的語意
+| 檢查 | 分片下的語意 | 為何 |
+|------|--------------|------|
+| `MIN_TESTS`、收集面盤存／指紋、收集缺口、discovery 佔位測試、漂移提醒 | 每片都對**全集**做（發生在切片之前） | 便宜（discovery 一次），且不放寬 |
+| 執行落差（收集 vs 實跑） | 改用**本片應跑數** | 否則每片都報「收集了卻沒執行」 |
+| skip 明細、`[WINDOWS-NATIVE-ONLY]` 清單、未標籤 skip 漏標（逐筆） | 每片判自己跑到的 skip | 逐筆判準，聯集＝全集 |
+| skip 天花板、M6 id 集合、具名豁免表 stale | **延後**到彙總 job（`windows-unittests-census`，`tools/shard_census.py`） | 單片只看得到一部分 skip：天花板永遠不紅、M6 集合永遠漂移（誤紅）。彙總以與未分片時**同一組函式**判合併後的紀錄 |
+| 分片機制本身（缺片、N 不一致、切分摘要與本機重算不符、各片計畫測試集合有交集、聯集≠全集） | 彙總步驟先驗，任一項 rc=1 | 這是分片存在的前提 |
+| 本機 pre-push／`local_ci_gate`／nightly | **不分片**，全部判準照舊在 runner 內判 | 單機沒有多台 runner；環境變數未設即現行行為 |
+
+### CI 形狀
+`windows-smoke` 搬出 tools/tests 一步及其前置（舊直譯器 3.10 備置、失敗明細上傳）；新 job `windows-unittests`（matrix `shard: [1,2,3]`、`fail-fast: false`、N＝`strategy.job-total`、concurrency group 含 `matrix.shard`、artifact 名含片號、`timeout-minutes: 35`）與 `windows-unittests-census`（`needs`、`!cancelled()` 且分片聚合結果非 `cancelled`——同 ref 連推時舊 run 的分片被 job 層 concurrency 取消，彙總不跑，舊 run 維持 cancelled 不變 failure；artifact `retention-days: 7`；彙總只收集不跑測試，checkout 深度與第三方相依與分片同條件）。審查後另補：分片模式不做計時種子過期比對（每片活體快取只有約 1/N 熱點，必誤報）、彙總核對每片計畫數＝實跑數、`shard_census.main` 的 rc 組合端到端測試、成長 tripwire（`test_suite_shard.py::GrowthTripwireTest`：N=3 最重片種子負載上限 9,700 s＝現值 7,737.6 s×1.25；不分片 leg 全集上限 29,000 s＝macOS 現約 24 分外推到 30 分；兩者皆為以現況實測錨定的比例、不是牆鐘預測，紅燈＝加片數或重量測後重釘）；windows-smoke 內已無消費者的兩個 tools/tests 相依安裝步已刪。ci-gate／bootstrap 等其餘約 14 分鐘的步驟留在 windows-smoke 與分片並行，牆鐘＝max(兩者)＋彙總。macOS 單 runner 約 24 分、timeout 35，已低於 25 分目標且 macOS 分鐘數成本高，**暫不分片**；機制平台中立，觸發條件＝macOS 單 runner 逼近 30 分。ubuntu（root-infra-ci）約 11 分不動。
+
+### 誠實劃界
+分片後的牆鐘是**預期值**（三片各約 15～18 分＋彙總約 3 分），要等第一次真實 CI run 才有實測；`actions/download-artifact@v6` 是本 repo 首次使用，其行為（`merge-multiple`、`pattern`）未在本機驗證。

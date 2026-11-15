@@ -68,13 +68,18 @@ _PLACEHOLDER_MODULE = "unittest.loader"
 #: `test_context_budget_guard`（QA 2026-09-23 核實追加）：**有**
 #: `setUpModule`／`tearDownModule`，但只 pin／還原 `os.environ`＋進出模組級圍籬（私有暫存
 #: 目錄，DEF-200-446；行程內狀態，子行程天然隔離、per-subprocess 重跑成本可忽略）——見
-#: `_MODULE_FIXTURE_SAFE_EXCEPTIONS` 的核實結論，本模組是目前唯一的例外。
+#: `_MODULE_FIXTURE_SAFE_EXCEPTIONS` 的核實結論。
+#: `test_selfimproving_p7_push`（DEF-200-593 追加，windows-compat-ci 分片的前置條件）：CI
+#: 整檔 1948 s 是全套唯一超過「分片後每片每 worker 份額」（約 860 s）的單一派工單位——分片後
+#: 最長單位成為關鍵路徑，不細分則 N=3 的牆鐘仍被它單獨卡住（≥32 分）。**有**
+#: `setUpModule`／`tearDownModule`，核實結論見 `_MODULE_FIXTURE_SAFE_EXCEPTIONS`。
 CLASS_LEVEL_DISPATCH_MODULES: frozenset[str] = frozenset({
     "test_doc_loc_baseline_freshness_r60",
     "test_archive_defect_log",
     "test_run_root_unittests",
     "test_platform_neutral_paths",
     "test_context_budget_guard",
+    "test_selfimproving_p7_push",
 })
 
 #: `CLASS_LEVEL_DISPATCH_MODULES` 裡「**有**模組層 fixture、但已人工核實安全」
@@ -89,8 +94,18 @@ CLASS_LEVEL_DISPATCH_MODULES: frozenset[str] = frozenset({
 #: 環境變數，隨各自的 subprocess 建立與清除，不跨 subprocess 共享）。細分後每個 class 級
 #: subprocess 各自重跑一次的成本可忽略（dict 讀寫加一次 mkdir／rmtree，毫秒等級，且每個
 #: subprocess 本就需要自己一份 pin 與圍籬，重跑不是浪費而是必要）。
+#:
+#: `test_selfimproving_p7_push`（DEF-200-593 核實）：`setUpModule` 只呼叫
+#: `_selfimproving_fixtures.setup("si_p7p_")`＝`tempfile.mkdtemp` 建**行程私有**暫存根
+#: （名稱含隨機尾碼，同機並行的多個 subprocess 不會互踩）、寫一份 gitconfig、歸零行程內
+#: 計數器與基線 repo 快取 `_CACHE`；`tearDownModule` 只 `rmtree` 自己那份。沒有任何寫到
+#: 該暫存根之外的共享路徑（測試對真 repo 零 commit／push，見該檔檔頭）。per-subprocess
+#: 重跑的代價＝每個類別 subprocess 各重建一次基線 repo 快取（約 1～2 s），遠小於把 1948 s
+#: 的單一單位拆開的收益。類別間無跨類別共享可變狀態：`BEAT_NOW` 等為 import 期常數、
+#: `_CACHE` 在夾具模組級而每個 subprocess 各自重建。
 _MODULE_FIXTURE_SAFE_EXCEPTIONS: frozenset[str] = frozenset({
     "test_context_budget_guard",
+    "test_selfimproving_p7_push",
 })
 
 #: 第三級派工鍵（`模組.類別.方法`）的人工白名單——`(module, qualname)` 對。本輪

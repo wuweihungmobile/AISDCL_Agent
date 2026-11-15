@@ -277,7 +277,7 @@ class TestWindowsCiHeaderSnapshotLock(unittest.TestCase):
         兩側同時為空而假綠。"""
         snapshot = parse_header_snapshot(self.text)
         self.assertEqual(
-            len(snapshot), 3, f"檔頭快照表應有 3 個 job，實抽到 {sorted(snapshot)}"
+            len(snapshot), 5, f"檔頭快照表應有 5 個 job，實抽到 {sorted(snapshot)}"
         )
 
     def test_header_cross_reference_anchor_still_exists(self):

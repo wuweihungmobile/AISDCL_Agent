@@ -149,8 +149,13 @@
 #     pwsh step 後由 21 → 22；windows-nightly-full 於 2026-10-13 新增 6 個 pwsh step（census
 #     腿／孤兒行程探針／根 .venv 重建／smoke 實跑／.env 同步 E2E／engine_resume）後 pwsh
 #     由 3 → 9，本表隨之更新；2026-10-25 windows-smoke 新增「以 pyenv 佈局把 3.10 暴露給
-#     候選掃描」pwsh step（同時新增的 setup-python 3.10 是 uses 步、不計入）後由 22 → 23）
-#   windows-smoke         windows-latest {'pwsh': 23, 'bash': 1, 'powershell': 1}
+#     候選掃描」pwsh step（同時新增的 setup-python 3.10 是 uses 步、不計入）後由 22 → 23；
+#     DEF-200-593 把 tools/tests 一步連同其前置「以 pyenv 佈局…」搬出到新 job
+#     windows-unittests 後由 23 → 21，其後再刪兩個無消費者的 tools/tests 相依安裝步而 21 → 19，
+#     新 job windows-unittests／windows-unittests-census 各自的 pwsh 步數為 4／2）
+#   windows-smoke              windows-latest {'pwsh': 19, 'bash': 1, 'powershell': 1}
+#   windows-unittests          windows-latest {'pwsh': 4}
+#   windows-unittests-census   windows-latest {'pwsh': 2}
 #   windows-nightly-full  windows-latest {'powershell': 2, 'pwsh': 9}
 #   windows-nightly-alert ubuntu-latest  {'<implicit>': 3}
 #   （全檔無 workflow 層／job 層 `defaults:` 區塊，故上表即實際生效的引擎分佈；
@@ -441,6 +446,10 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-593：tools/tests 跨機分片（AUTOSDD_TEST_SHARD）的判準與彙總薄殼；run_root_unittests.py
+      # 無條件 import suite_shard，shard_census.py 由分片 job 的彙總步驟執行。
+      - "tools/lib/suite_shard.py"
+      - "tools/shard_census.py"
       # DEF-200-274 第九輪：parallel_shard.py 的新相依（歷史耗時快取／LPT 排序）
       - "tools/lib/parallel_timing_cache.py"
       # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），
@@ -942,6 +951,10 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-593：tools/tests 跨機分片（AUTOSDD_TEST_SHARD）的判準與彙總薄殼；run_root_unittests.py
+      # 無條件 import suite_shard，shard_census.py 由分片 job 的彙總步驟執行。
+      - "tools/lib/suite_shard.py"
+      - "tools/shard_census.py"
       # DEF-200-274 第九輪：parallel_shard.py 的新相依（歷史耗時快取／LPT 排序）
       - "tools/lib/parallel_timing_cache.py"
       # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），
@@ -1303,79 +1316,12 @@ jobs:
           }
           Write-Host "PS 5.1 core check passed: engine=$($PSVersionTable.PSVersion) Get-PythonGeMin=$py"
 
-      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
-        shell: pwsh
-        # R68：tools/tests/ 有三支測試 import `autoclaude.*`，連帶拉進 yaml→pydantic→httpx。
-        # 缺相依時 discovery 把它們整份覆蓋塌成佔位測試，122 支迴歸鎖靜默不跑而本 step 紅
-        # 在一句「測試疑似大規模靜默消失」上——三平台實測同一數字，是環境維度不是平台維度。
-        run: python -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx pytest psutil 'pytest-xdist==3.8.0'  # xdist：DEF-200-274 第九輪起 pre-push SDD consumer leg 以 -n auto 跑（test_pre_push_dispatcher 真跑 dispatcher）；psutil：DEF-200-366 平台分支 oracle 交叉比對
-
-      - name: tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 _EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 ExternalToolPrereqDeclarationTest 多紅一支點名）
-        shell: pwsh
-        # R69：tools/tests/test_pre_push_dispatcher.py 有 5 支測試在 tmp repo 內**真跑**根層
-        # dispatcher 並斷言 rc==0，而其 root-infra 快層第 ④ 段對缺 ruff 是 fail-loud（刻意不
-        # 軟跳過，見 tools/ruff.toml 檔頭）⇒ 本目錄自此隱性需要 PATH 上有 ruff。此前只有
-        # root-infra-ci.yml 裝 ruff，本 job 沒裝 ⇒ 同一批 tools/tests 在三平台有兩種結果
-        # （SD 單變因 A/B 實測：有 ruff → Ran 17 OK；唯一差別拿掉 ruff → failures=5）。
-        # 版本釘選對齊 root-infra-ci.yml 與 AutoClaude/pyproject.toml（勿單邊升版）。
-        # 本 job 刻意**不**跑 `ruff check tools/`（那是 root-infra-ci.yml 第 16 道的職責）：
-        # 這裡要的只是「跑 runner 的環境前置一致」，不是把 lint 閘門複製三份。
-        run: python -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
-
-      - name: 舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；不動 PATH）
-        # 2026-10-25（run 40161349494）：windows-latest 映像的 Python Launcher 對 `py -3.7`～`-3.10`
-        # 全部回 rc=103「No suitable Python runtime found」（launcher 在、舊 runtime 的登錄不在），
-        # 該 class 兩支測試改以 [TOOL-ABSENCE] skip ⇒ tools/tests@win32 live skip 集合（45）≠
-        # 落款（43）而本 job 紅。修法照 skip 紀律「tool-absence＝裝上該裝的東西」：由
-        # setup-python 裝一個 3.10（< dev_start._MIN_PY），`update-environment: false` 使它
-        # 不進 PATH、不改 `python`（下方各步仍是 3.11）；只以輸出 `python-path` 供下一步使用。
-        id: submin-py
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
-          update-environment: false
-
-      - name: 以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；junction、不複製檔案）
-        shell: pwsh
-        # `_sub_min_interpreter_candidates()` 的發現路徑之一＝`$PYENV_ROOT/versions/<ver>/python.exe`
-        # （pyenv-win 佈局）。junction 不需管理員權限；先自驗該直譯器真能印出 3.10 再放行，
-        # 否則本 step 自己紅（fail-loud，不讓下一步再回到靜默 skip）。
-        run: |
-          $root = Join-Path $env:RUNNER_TEMP 'submin-pyenv'
-          $versions = Join-Path $root 'versions'
-          New-Item -ItemType Directory -Force -Path $versions | Out-Null
-          $target = Split-Path -Parent '${{ steps.submin-py.outputs.python-path }}'
-          New-Item -ItemType Junction -Path (Join-Path $versions '3.10') -Target $target | Out-Null
-          $exe = Join-Path $versions '3.10\python.exe'
-          $ver = & $exe -c "import sys;print('%d.%d' % sys.version_info[:2])"
-          $rc = $LASTEXITCODE
-          Write-Output "submin interpreter: $exe -> $ver (rc=$rc)"
-          if ($rc -ne 0 -or $ver -ne '3.10') { throw "舊直譯器未就緒：rc=$rc ver=$ver" }
-
-      - name: tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）
-        shell: pwsh
-        # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
-        # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
-        # DEF-200-274 第七輪：四方獨立複審共同點名「CI 從未在平行模式下執行，
-        # 負載不均自動偵測永遠不會被人看見」——本行接上 opt-in 開關。這也是
-        # `AUTOSDD_PARALLEL_TESTS` 第一次真的在 Windows 真機（windows-latest
-        # runner）跑到，六輪以來記載的「Windows 真機驗證未解」缺口由此第一次
-        # 有機械訊號（非人工驗證，僅是自動化路徑第一次真的被執行）。worker 數
-        # 沿用 `parallel_shard.worker_count()` 出廠公式，不寫死數字。
-        # PYENV_ROOT 只在本 step 生效（上兩步備好的 3.10 佈局），不進 GITHUB_ENV。
-        env:
-          AUTOSDD_PARALLEL_TESTS: "1"
-          PYENV_ROOT: ${{ runner.temp }}\submin-pyenv
-        run: python tools/run_root_unittests.py
-
-      - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: windows-compat-ci-last-failure-log
-          path: tools/.last_failure_*.log
-          if-no-files-found: ignore
-
+      # DEF-200-593 F6：此處原有「tools/tests 第三方相依」與「tools/tests 外部工具相依（ruff）」兩步，
+      # 只為 tools/tests 一步備環境；該步搬到 windows-unittests 後，兩步已無消費者而刪除（歷史理由
+      # R68／R69 隨 windows-unittests 同名兩步保留）。逐項核對 smoke 其餘步驟：ruff 零引用（只有
+      # pre-push 與 tools/tests 會用）；python 腳本類步驟（bootstrap／dev_start／check_script_parity／
+      # check_ntfs_paths／integration_gate_core／sdd_version）皆只 import 標準庫或自建 venv，AutoClaude 與
+      # AISDLC_SDD 的測試步驟各自在其前有「Install AutoClaude deps」「安裝 AISDLC_SDD pinned deps」。
       - name: install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）
         # -WhatIf 不需 elevation、不真的呼叫 Register-ScheduledTask，windows-latest runner
         # 可安全直跑。斷言寫法鏡射 tools/windows_smoke_local.ps1 [9/9]（獨立子行程呼叫，
@@ -1890,6 +1836,171 @@ jobs:
       - name: tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑；R4 複審發現：本工具本質為 Windows/NTFS 相容性檢查，先前卻只在 macOS/Linux 上被驗證過，從未在真正的目標平台 Windows 上跑過）
         shell: pwsh
         run: python tools/check_ntfs_paths.py
+
+  windows-unittests:
+    name: Windows tools/tests 分片（跨 runner 平行；分片判準與 WHY＝tools/lib/suite_shard.py）
+    if: github.event_name != 'schedule'
+    runs-on: windows-latest
+    # DEF-200-593：原本 windows-smoke 內的「tools/tests/」一步在 4 核 runner 上要 45 分鐘以上
+    # （總工作量約 10,294 s、多 CPU 已吃滿；整支 workflow 最近一次 59 分鐘、上限 60），隨時會逾時。
+    # 單機再怎麼平行都吃不到多台 runner 的核數 ⇒ 把派工單位切成 N 片、各片跑在自己的 runner：
+    # 本 job 是 matrix（N＝strategy.job-total，不寫死第二份數字），ci-gate／bootstrap 等其餘
+    # 約 14 分鐘的步驟留在 windows-smoke 與本 job **並行**，牆鐘＝max(兩者)＋彙總 job。
+    # 不減任何測試、不放寬任何門檻：每片仍對全集做 MIN_TESTS／收集面盤存／缺口檢查；全集級的
+    # skip 天花板／M6 id 集合／豁免表 stale 在分片下無法成立，改由 windows-unittests-census 對
+    # 各片紀錄合併後判（見該 job）。timeout 35：預期每片約 15～18 分鐘，不放寬 windows-smoke 的 60。
+    timeout-minutes: 35
+    strategy:
+      # 一片紅不取消其餘片：三片各自的失敗明細都要看得到，取消只會讓修一個紅要多跑一輪才見下一個。
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    concurrency:
+      # group 必須含 matrix.shard：同一 job 的各 leg 共用同一個 group 運算式，缺了它
+      # cancel-in-progress 會讓三片互相取消（只剩最後啟動的那一片）。
+      group: windows-compat-ci-unittests-${{ github.ref }}-${{ matrix.shard }}
+      cancel-in-progress: true
+
+    steps:
+      # fetch-depth: 0 的理由同 windows-smoke（test_sanitize_component_frozen_sdd_versions_lock
+      # 需要歷史；淺層 clone 會讓那 7 支落入 skip 分支而撐大 tools/tests@win32 的 skip 分群）。
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
+        shell: pwsh
+        run: python -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx pytest psutil 'pytest-xdist==3.8.0'
+
+      - name: tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 _EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 ExternalToolPrereqDeclarationTest 多紅一支點名）
+        shell: pwsh
+        run: python -m pip install --quiet --disable-pip-version-check 'ruff==0.15.21'
+
+      - name: 舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；不動 PATH）
+        # 原樣自 windows-smoke 搬來（該 class 只有 tools/tests 一步會跑，備置跟著它走）。
+        # 2026-10-25（run 40161349494）：windows-latest 映像的 Python Launcher 對 `py -3.7`～`-3.10`
+        # 全部回 rc=103「No suitable Python runtime found」，該 class 兩支測試改以 [TOOL-ABSENCE]
+        # skip ⇒ tools/tests@win32 live skip 集合 ≠ 落款而紅。修法照 skip 紀律「tool-absence＝裝上
+        # 該裝的東西」：由 setup-python 裝一個 3.10（< dev_start._MIN_PY），`update-environment:
+        # false` 使它不進 PATH、不改 `python`；只以輸出 `python-path` 供下一步使用。
+        id: submin-py
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          update-environment: false
+
+      - name: 以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；junction、不複製檔案）
+        shell: pwsh
+        # `_sub_min_interpreter_candidates()` 的發現路徑之一＝`$PYENV_ROOT/versions/<ver>/python.exe`
+        # （pyenv-win 佈局）。junction 不需管理員權限；先自驗該直譯器真能印出 3.10 再放行，
+        # 否則本 step 自己紅（fail-loud，不讓下一步再回到靜默 skip）。
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'submin-pyenv'
+          $versions = Join-Path $root 'versions'
+          New-Item -ItemType Directory -Force -Path $versions | Out-Null
+          $target = Split-Path -Parent '${{ steps.submin-py.outputs.python-path }}'
+          New-Item -ItemType Junction -Path (Join-Path $versions '3.10') -Target $target | Out-Null
+          $exe = Join-Path $versions '3.10\python.exe'
+          $ver = & $exe -c "import sys;print('%d.%d' % sys.version_info[:2])"
+          $rc = $LASTEXITCODE
+          Write-Output "submin interpreter: $exe -> $ver (rc=$rc)"
+          if ($rc -ne 0 -or $ver -ne '3.10') { throw "舊直譯器未就緒：rc=$rc ver=$ver" }
+
+      - name: tools/tests/ 分片（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；本片只跑 AUTOSDD_TEST_SHARD 指定的那一份派工單位）
+        shell: pwsh
+        # R10 QA-2（DEF-101-127）：裸 discover 對「發現 0 個測試」回 rc=0——改走
+        # tools/run_root_unittests.py（數量下限釘選，低於下限紅燈不執行）。
+        # AUTOSDD_TEST_SHARD=i/N：N 取 strategy.job-total（matrix 長度，不寫死第二份數字）；
+        # 判準（確定性切分、全集級守門每片都做、全集級 skip 判準延後）全文＝tools/lib/suite_shard.py。
+        # AUTOSDD_TEST_SHARD_OUT：本片紀錄落點，下一步上傳給彙總 job。worker 數沿用
+        # `parallel_shard.worker_count()` 出廠公式，不寫死數字；日誌會印
+        # `[cpu_budget] root-unittest workers=N`（鎖＝多 CPU 常態規則）。
+        # PYENV_ROOT 只在本 step 生效（上兩步備好的 3.10 佈局），不進 GITHUB_ENV。
+        env:
+          AUTOSDD_PARALLEL_TESTS: "1"
+          AUTOSDD_TEST_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
+          AUTOSDD_TEST_SHARD_OUT: ${{ runner.temp }}\shard-records
+          PYENV_ROOT: ${{ runner.temp }}\submin-pyenv
+        run: python tools/run_root_unittests.py
+
+      - name: 分片紀錄上傳（供 windows-unittests-census 合併判全集級 skip 判準；紅燈時也要上傳）
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-unittests-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}\shard-records\shard-*-of-*.json
+          if-no-files-found: error
+          # 只供同一 run 的彙總 job 消費的小檔：取 repo 既有「單次 run 診斷物」慣例值 7 天
+          # （aisdlc-sdd-ci／fsm-chaos-nightly／arch-fitness 同款），不讓每次 push 多留三個 90 天預設檔。
+          retention-days: 7
+
+      - name: 失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          # 名稱含片號：同一 workflow run 內 artifact 名稱必須唯一，三片同名會互相覆蓋或上傳失敗。
+          name: windows-compat-ci-last-failure-log-shard-${{ matrix.shard }}
+          path: tools/.last_failure_*.log
+          if-no-files-found: ignore
+          retention-days: 7  # 同上：單次 run 的診斷物
+
+  windows-unittests-census:
+    name: Windows tools/tests 分片彙總（全集級 skip 判準：天花板／M6 id 集合／豁免表 stale）
+    # DEF-200-593 F1：`!cancelled()` 只看 workflow 層取消；同 ref 連推時舊 run 的分片是被**job 層**
+    # concurrency 取消（workflow 層 cancelled() 仍為 false），分片紀錄因此不存在，彙總若照跑會判
+    # 「缺片」而把舊 run 由 cancelled 變 failure（假紅、白燒一台 runner）。matrix job 的
+    # `needs.<job>.result` 是整個 matrix 的聚合值：任一 leg 被取消 ⇒ 'cancelled'，故再加一條
+    # `!= 'cancelled'` 讓「被取代」的 run 保持 cancelled。不削弱保護：某片測試失敗 ⇒ 聚合為 failure、
+    # 彙總照跑（缺紀錄照樣判紅，且那片本身已讓 run 紅）；某片逾時被回報成 cancelled 時彙總雖不跑，
+    # 但該片的 job 結論本身即非綠 ⇒ run 不會綠（取消≠成功，不會變成假綠）。
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.windows-unittests.result != 'cancelled' }}
+    needs: windows-unittests
+    runs-on: windows-latest
+    # 為何存在：分片 runner 把三項全集級判準延後（單片只看得到一部分 skip——天花板永遠不紅、
+    # M6 集合永遠漂移），本 job 把各片紀錄合併後用與未分片時同一組函式判，並先驗分片機制
+    # 本身（缺片／切分摘要不符／各片測試集合有交集或聯集≠全集一律紅）。沒有它，這三項保護
+    # 在 CI 上就沒人跑了——這是它存在的唯一理由，不是附帶檢查。
+    timeout-minutes: 15
+    concurrency:
+      group: windows-compat-ci-unittests-census-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      # DEF-200-593 F4：本 job **只做收集（discovery）、不跑任何測試**——`shard_census.py` 為重算
+      # `plan_sha` 與全集 id 而 import 全部測試模組，所以收集面必須與分片 job **完全同條件**，否則
+      # 兩邊看到不同測試集合 ⇒ 假紅。對齊的兩件：(a) checkout 同為 fetch-depth: 0；(b) 第三方相依
+      # 同一行（缺它們 discovery 會把模組塌成佔位測試）。刻意**不**備的：ruff、舊直譯器 3.10／PYENV_ROOT
+      # ——它們只影響「測試執行期」的 skip／fail（外部工具相依與 sub-min 直譯器掃描），不影響收集；
+      # 該前提由 test_suite_shard.py::CensusJobMatchesShardCollectionConditionsTest 機械鎖住
+      # （若彙總 job 日後開始跑測試，該鎖紅、逼人把這幾項補齊）。
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）
+        shell: pwsh
+        run: python -m pip install --quiet --disable-pip-version-check pyyaml pydantic httpx pytest psutil 'pytest-xdist==3.8.0'
+
+      - name: 下載各片紀錄
+        uses: actions/download-artifact@v6
+        with:
+          pattern: windows-unittests-shard-*
+          path: ${{ runner.temp }}\shard-records
+          merge-multiple: true
+
+      - name: 合併各片紀錄並判全集級 skip 判準（tools/shard_census.py）
+        shell: pwsh
+        run: python tools/shard_census.py "${{ runner.temp }}\shard-records"
 
   windows-nightly-full:
     name: Windows nightly full suite（深度回歸，非阻斷）

@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9336,
+    "test_adr_xplat001_c1c2_lock.py": 9352,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -674,7 +674,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5761,
+    "test_platform_neutral_paths.py": 5763,
     "test_platform_utils_dedup.py": 1168,
     "test_pre_commit_dispatcher_sigpipe.py": 954,
     "test_pre_push_dispatcher.py": 1322,
@@ -720,7 +720,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_p2_meta.py": 515,
     "test_selfimproving_p3_meta.py": 429,
     "test_selfimproving_p7_memory.py": 403,
-    "test_selfimproving_p7_push.py": 4659,
+    "test_selfimproving_p7_push.py": 4664,
     "test_selfimproving_p7_report.py": 1364,
     "test_selfimproving_promote.py": 724,
     "test_selfimproving_props.py": 1556,
@@ -745,10 +745,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
-    "test_smoke_ci_sync.py": 1587,
+    "test_smoke_ci_sync.py": 1646,
     "test_statusline_context_feed.py": 230,
     "test_stdio_utf8.py": 76,
     "test_subprocess_encoding_hygiene.py": 1519,
+    "test_suite_shard.py": 756,
     "test_tlc_runner_timeout.py": 313,
     "test_wake_chain_halt_r278.py": 1264,
     "test_windows_forbidden_filename_parity.py": 931,
@@ -3118,6 +3119,15 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_quota_rush.py +62、test_tlc_runner_timeout.py +21（時序偶發修復）＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-200-590／591／592。"),
+    ("R214", 165269, 166107, +838,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第四十一列（tools/tests 跨機分片的回歸鎖，DEF-200-593，含兩份"
+     "獨立審查條件的修正：彙總取消守衛、種子過期比對、main rc 端到端、成長 tripwire）："
+     "新鎖檔 test_suite_shard.py 756，既有 test_smoke_ci_sync.py +59（job 登記表搬移、smoke 兩步刪除）、"
+     "test_platform_neutral_paths.py +2（tools 樹下限重釘）、test_selfimproving_p7_push.py +5"
+     "（E_8 改假時鐘，消除全套高負載下的時序偶發）＋本檔自身漂移。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/AutoSDD_Defect_Log.md 的 DEF-200-593。"),
 )
 
 
@@ -3219,7 +3229,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (36757, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (37595, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3285,7 +3295,8 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "浪費帳探針）再 +1178，精確淨額為 35222；同標籤第三十八列（額度配速：窗內配速床、"
         "趕工戳記）再 +1122，精確淨額為 36344；同標籤第三十九列（獨立 QA 存活突變補測）"
         "再 +48，精確淨額為 36392；同標籤第四十列（額度閘三缺陷修復回歸鎖）"
-        "再 +365，精確淨額為 36757。"
+        "再 +365，精確淨額為 36757；同標籤第四十一列（tools/tests 跨機分片回歸鎖）"
+        "再 +838，精確淨額為 37595。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3858,6 +3869,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "額度閘三缺陷修復回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok
+     "tools/tests 跨機分片回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4033,10 +4048,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 387
+_REPIN_LOG_FROZEN_PREFIX_LEN = 388
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "2bc6af6831bebd40ff4c4a87d1134e5d6689f1d540558781e83332b02ced67fe")
+    "d118c40c2214304323f64dfa566e50f91957fbe0f97a35d3ce7461dc418a9768")
 
 
 def repin_log_history_digest(
@@ -4265,6 +4280,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "09a73e82e42d", "8ab57ea0031c", "DEF-200-589"),  # round-label-ok：額度配速
     ("R214", "8ab57ea0031c", "4f8e48e47730", "DEF-200-589"),  # round-label-ok：QA 補測
     ("R214", "4f8e48e47730", "2bc6af6831be", "DEF-200-590"),  # round-label-ok：額度閘三缺陷
+    ("R214", "2bc6af6831be", "d118c40c2214", "DEF-200-593"),  # round-label-ok：tools/tests 跨機分片
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

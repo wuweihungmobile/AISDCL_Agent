@@ -122,6 +122,7 @@ import sentinel_lifecycle  # noqa: E402  ← M-03：leak_fence 底線防護（�
 import skip_group_policy  # noqa: E402  ← R80 包 A（S3-04）：skip 分群天花板的政策 SSOT
 import skip_profile_key  # noqa: E402  ← DEF-200-183：剖面鍵的文法（軸宣告）SSOT
 import skip_runtime_report  # noqa: E402  ← M6 的 id 集合面（計數面答不了「有沒有跑過」）
+import suite_shard  # noqa: E402  ← DEF-200-593：AUTOSDD_TEST_SHARD=i/N 跨機分片（判準全在該檔）
 
 _PATTERN = "test_*.py"
 
@@ -517,6 +518,7 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
         return 1  # 量測本身已不可信，fail-closed：不放行、也不假裝跑完
     placeholders, known_ids = report_discovery_placeholders(suite), {t.id() for t in _flatten(suite)}  # DEF-200-233：兩者都必須在 run() **之前**讀——`TestSuite.run()` 會把跑完的每一支就地換成 `None`（`_removeTestAtIndex`），WHY 全文見 `windows_skip_tags.report_windows_skip_tag_exemption_problems`
     warn_ratchet_drift(count, min_tests, suite_modules(suite))
+    suite, ran = suite_shard.restrict(suite, start_dir, _TESTS_DIR)  # DEF-200-593：全集級守門已在上面做完；此後只看本片（未設 AUTOSDD_TEST_SHARD＝原 suite、全數）
     dispatch_units = dispatch_granularity.auto_suite_dispatch_units(_flatten(suite), parallel_shard.worker_count())
     result = (parallel_shard.run_parallel(suite, start_dir, dispatch_units)
         if parallel_shard.should_run_parallel(start_dir, _TESTS_DIR, parallel_shard.worker_count())
@@ -530,12 +532,12 @@ def run_with_floor(start_dir: Path, min_tests: int) -> int:
     untagged = report_untagged_windows_like_skips(result)
     # 本輪：具名豁免表的 stale／格式自檢。刻意**不**提早 return——早退會遮蔽下面
     # 的執行落差與失敗明細，而遮蔽的方向是「看起來變乾淨」（Scan-H⑦）。
-    exempt_problems = report_windows_skip_tag_exemption_problems(result, known_ids=known_ids)
+    exempt_problems = suite_shard.judge(report_windows_skip_tag_exemption_problems, [], result, known_ids=known_ids)
     # R80 包 A（S3-04）：把這 43 支 skip 納入天花板管轄。同樣刻意不提早 return。
-    census_rc = report_skip_census(result, start_dir)
+    census_rc = suite_shard.judge(report_skip_census, 0, result, start_dir)
     # 無法歸因的「收集了卻沒執行」＝量測不完整（例如 result.stop() 中途中止）。
     # 可歸因者（fixture 層 skip／error）只點名不判紅，理由見 report_execution_gap。
-    unexplained_gap = report_execution_gap(count, result) > 0 and not fixture_level_entries(result)
+    unexplained_gap = report_execution_gap(suite_shard.record(ran, result), result) > 0 and not fixture_level_entries(result)
     if not result.wasSuccessful():
         dump_failure_detail(result)
     # 佔位測試刻意**不**提早 return：讓 suite 照跑，`_FailedTest` 才會把真正的
@@ -713,8 +715,8 @@ def main() -> int:
         return _bail("MIN_TESTS 取證敘述保鮮自檢")
     # 同理先於全套執行：相依不齊時收集數必然低於下限，讓它照跑只是把一個**環境
     # 問題**包裝成一則看起來像「測試消失」的紅字（R68：三支 CI 連續多輪的實況）。
-    if report_missing_third_party_prereqs():
-        return _bail("第三方相依齊備性檢查")
+    if report_missing_third_party_prereqs() or suite_shard.spec_problem():
+        return _bail("第三方相依齊備性／分片參數檢查")
     # R72：**不分平台**的靜態標籤掃描。刻意放在這裡而非 `run_with_floor` 內：
     #   ① `run_with_floor` 會被單元測試餵各種合成樹呼叫，把 repo 專屬的掃描綁進去
     #      會讓那些合成樹莫名其妙地受本判準管轄；

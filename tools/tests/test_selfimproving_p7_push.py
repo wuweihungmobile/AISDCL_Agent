@@ -4422,14 +4422,19 @@ class TestSecRound3(RunTestCase):
             with self.subTest(label), mock.patch.object(Git, "run", failing(match, result)):
                 res = rr.evaluate()  # 不拋例外
             self.assertEqual((res["ok"], res["code"]), (False, "PUSH-GIT-UNAVAILABLE"), label)
-        seen = []
+        seen, clock = [], [0.0]
 
         def slow(git_self, *a, **kw):  # 第 3 次呼叫後總預算用盡
-            seen.append(a)
+            seen.append(a)  # 假時鐘：全套高負載下牆鐘會讓預算提早耗盡
             if len(seen) == 3:
-                time.sleep(0.6)
+                clock[0] = 1.0
             return real(git_self, *a, **kw)
-        with mock.patch.object(pushguard, "TOTAL_BUDGET", 0.5), mock.patch.object(Git, "run", slow):
+        fake_time = types.SimpleNamespace(
+            **{k: getattr(time, k) for k in dir(time) if not k.startswith("_")})
+        fake_time.monotonic = lambda: clock[0]
+        with mock.patch.object(pushguard, "TOTAL_BUDGET", 0.5), \
+                mock.patch.object(pushguard, "time", fake_time), \
+                mock.patch.object(Git, "run", slow):
             res = rr.evaluate()
         self.assertEqual((res["ok"], res["code"]), (False, "PUSH-GIT-UNAVAILABLE"))
         self.assertEqual(len(seen), 3)  # 其後不再呼叫 git

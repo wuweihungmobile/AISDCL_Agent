@@ -520,6 +520,11 @@ def run_parallel(
 
     child_env = dict(os.environ)
     child_env.pop(_ENV_ON, None)
+    # DEF-200-593：分片參數只屬於最外層 runner。worker 內若有測試自己呼叫 run_with_floor 或再
+    # 啟 runner 子行程，繼承 AUTOSDD_TEST_SHARD 會讓它們各自又切一次片（合成樹雖有 start_dir 保護，
+    # 子行程 runner 沒有）；與上一行拔 AUTOSDD_PARALLEL_TESTS 同一理由。
+    for _name in ("AUTOSDD_TEST_SHARD", "AUTOSDD_TEST_SHARD_OUT"):
+        child_env.pop(_name, None)
 
     started: list[subprocess.Popen] = []
     started_lock = threading.Lock()
@@ -657,7 +662,14 @@ def run_parallel(
             # `save_live_cache()` 剛寫回磁碟的合併後活體快取，不再拿「本輪原始
             # module_timings」（無父鍵 rollup／無歷史鍵）跟種子檔比，見該函式
             # docstring 的根因說明。
-            staleness_msg = parallel_timing_cache.current_staleness_report()
+            #
+            # DEF-200-593 F2：跨機分片模式下不做這項比對——本片活體快取只含約 1/N 的單位
+            # （LPT 把前幾大熱點輪流分到各片），其 Top-N 與整份種子的重疊率結構上低於門檻，
+            # 每片每次都會誤報「種子可能過期」，久了人就習慣忽略真正的過期訊號。分片時種子
+            # 仍是切分的唯一權重來源，過期與否改在未分片的本機／nightly 路徑上判。
+            import suite_shard  # 延遲 import：suite_shard 不 import 本模組，無環
+            staleness_msg = (None if suite_shard.is_sharded()
+                             else parallel_timing_cache.current_staleness_report())
             if staleness_msg:
                 print(staleness_msg)
                 if os.environ.get("GITHUB_ACTIONS") == "true":

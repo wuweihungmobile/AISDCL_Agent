@@ -674,44 +674,9 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
             "這一步逮得到。刻意不把它搬進 pre-push：那會讓每次 push 多跑一次 guard 探測，"
             "而 pre-push 已是本 repo 最重的閘門，換到的覆蓋則與既有代理指標高度重疊"
         ),
-        "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 _THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）": (
-            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
-            "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"
-            "CiPrereqInstallLockTest 機械看守"
-        ),
-        # key 折行理由同 macOS 側（E501 shrink-only 棘輪，新行不得加高天花板）。
-        (
-            "tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 "
-            "_EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 "
-            "ExternalToolPrereqDeclarationTest 多紅一支點名）"
-        ): (
-            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備 ruff（pre-push 快層"
-            "第 ④ 段本來就要求它）；「CI 有沒有裝」由 "
-            "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
-            "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
-        ),
-        # 2026-10-25：windows-latest 的 py launcher 失去 3.7～3.10 登錄（run 40161349494），
-        # 兩步替 TestRealSubMinInterpreterPrelude 備一支 3.10；本機由 pyenv-win／py 自備。
-        (
-            "舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；"
-            "不動 PATH）"
-        ): (
-            f"{_INFRA}: 環境設定，非驗證步——本機開發機自備舊直譯器（pyenv-win、"
-            "py launcher 或 PATH 上的 python3.x）；該鎖有沒有真跑由 skip census 的 "
-            "[TOOL-ABSENCE] 落款集合機械看守（tools/tests@win32 live≠落款即紅）"
-        ),
-        (
-            "以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；"
-            "junction、不複製檔案）"
-        ): (
-            f"{_INFRA}: 環境設定，非驗證步——同上；候選掃描路徑＝"
-            "tools/tests/test_dev_start.py::_sub_min_interpreter_candidates 的 pyenv 佈局"
-        ),
-        "tools/tests/（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；R3 QA 發現：先前只在 root-infra-ci.yml 的 ubuntu-latest 上以 mock 跑過，從未在真實 Windows 執行過）": "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.ps1（掛在 local-ci-gate stage 內的第二道檢查）＋ pre-push root-infra leg",
-        "失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）": (
-            f"{_NO_CARRIER}: 同 macOS 側——actions/upload-artifact 是 GitHub Actions "
-            "專屬機制，本機執行時失敗明細本來就留在磁碟、不會隨 job 結束銷毀"
-        ),
+        # DEF-200-593：舊直譯器 3.10 備置、tools/tests 一步與失敗明細上傳搬到 windows-unittests
+        # （分片 matrix），登記見下方 `windows-compat-ci.yml::windows-unittests`；tools/tests 的
+        # 第三方相依／外部工具（ruff）兩個安裝步在 smoke 已無消費者而刪除（F6）。
         "install_windows_nightly.ps1 -WhatIf 預覽（R26 Scan-C 發現：從未在真實 CI 執行過；鏡射 macos-compat-ci.yml install_mac_nightly.sh --render-only 步驟，DEF-101-269）": "windows_smoke_local.ps1 [9/9]",
         "執行 tools/bootstrap.ps1（R1 SA 發現：Windows 新人上手入口從未被實測）": f"{_NO_CARRIER}: 同 macOS 側——需乾淨 checkout 建全新 .venv，破壞性且分鐘級",
         "重跑 tools/bootstrap.ps1（既有 .venv 沿用情境；R9 Fix-D）": f"{_NO_CARRIER}: 同上，驗證對象是「既有 .venv 沿用」路徑",
@@ -750,11 +715,95 @@ _CI_STEP_LOCAL_CARRIER: dict[str, dict[str, str]] = {
         "tools/check_script_parity.py（雙平台腳本對等 + pytest 釘選一致；R4 複審發現：先前僅 macOS 側涵蓋）": "windows_smoke_local.ps1 [8/9]",
         "tools/check_ntfs_paths.py（NTFS 敵意檔名，全量 tracked 路徑；R4 複審發現：本工具本質為 Windows/NTFS 相容性檢查，先前卻只在 macOS/Linux 上被驗證過，從未在真正的目標平台 Windows 上跑過）": "windows_smoke_local.ps1 [8/9]",
     },
+    # DEF-200-593：自 windows-smoke 搬出的 tools/tests 分片 job（3.10 備置、tools/tests、失敗明細
+    # 上傳三類步驟原樣帶著各自的載具歸屬走）。
+    "windows-compat-ci.yml::windows-unittests": {
+        "uses:actions/checkout": f"{_INFRA}: 取原始碼",
+        "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
+        (
+            "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 "
+            "_THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）"
+        ): (
+            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
+            "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"
+            "CiPrereqInstallLockTest 機械看守"
+        ),
+        (
+            "tools/tests 外部工具相依（清單 SSOT＝tools/tests/test_run_root_unittests.py 的 "
+            "_EXTERNAL_TOOL_PREREQS；runner 無此層 fail-fast，漏裝時由 "
+            "ExternalToolPrereqDeclarationTest 多紅一支點名）"
+        ): (
+            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備 ruff（pre-push 快層"
+            "第 ④ 段本來就要求它）；「CI 有沒有裝」由 "
+            "tools/tests/test_run_root_unittests.py::CiPrereqInstallLockTest::"
+            "test_every_ci_job_running_the_runner_installs_all_external_tools 機械看守"
+        ),
+        # 2026-10-25：windows-latest 的 py launcher 失去 3.7～3.10 登錄（run 40161349494），
+        # 兩步替 TestRealSubMinInterpreterPrelude 備一支 3.10；本機由 pyenv-win／py 自備。
+        (
+            "舊直譯器 Python 3.10（供 test_dev_start.TestRealSubMinInterpreterPrelude 真跑；"
+            "不動 PATH）"
+        ): (
+            f"{_INFRA}: 環境設定，非驗證步——本機開發機自備舊直譯器（pyenv-win、"
+            "py launcher 或 PATH 上的 python3.x）；該鎖有沒有真跑由 skip census 的 "
+            "[TOOL-ABSENCE] 落款集合機械看守（tools/tests@win32 live≠落款即紅）"
+        ),
+        (
+            "以 pyenv 佈局把 3.10 暴露給候選掃描（PYENV_ROOT/versions/3.10/python.exe；"
+            "junction、不複製檔案）"
+        ): (
+            f"{_INFRA}: 環境設定，非驗證步——同上；候選掃描路徑＝"
+            "tools/tests/test_dev_start.py::_sub_min_interpreter_candidates 的 pyenv 佈局"
+        ),
+        (
+            "tools/tests/ 分片（SIGPIPE 回歸鎖 + dev_start.py 平台邏輯；本片只跑 "
+            "AUTOSDD_TEST_SHARD 指定的那一份派工單位）"
+        ): (
+            "nightly:run_root_unittests.py@AutoClaude/tools/run_local_nightly.ps1"
+            "（掛在 local-ci-gate stage 內的第二道檢查，不分片）"
+            "＋ pre-push root-infra leg（不分片）"
+        ),
+        "分片紀錄上傳（供 windows-unittests-census 合併判全集級 skip 判準；紅燈時也要上傳）": (
+            f"{_NO_CARRIER}: actions/upload-artifact 是 GitHub Actions 專屬機制；本機不分片、"
+            "全集級 skip 判準在 runner 內直接判，沒有「跨 runner 合併紀錄」這件事可跑"
+        ),
+        "失敗明細落檔上傳（DEF-200-274 CI 事故：落檔在 runner 臨時工作目錄，job 結束即銷毀）": (
+            f"{_NO_CARRIER}: 同 macOS 側——actions/upload-artifact 是 GitHub Actions "
+            "專屬機制，本機執行時失敗明細本來就留在磁碟、不會隨 job 結束銷毀"
+        ),
+    },
+    "windows-compat-ci.yml::windows-unittests-census": {
+        "uses:actions/checkout": f"{_INFRA}: 取原始碼",
+        "Set up Python 3.11": f"{_INFRA}: 準備直譯器",
+        (
+            "tools/tests 第三方相依（清單 SSOT＝tools/run_root_unittests.py 的 "
+            "_THIRD_PARTY_PREREQS；漏裝時該 runner 會 fail-fast 指路）"
+        ): (
+            f"{_INFRA}: 裝依賴，非驗證步——本機開發環境早已具備這些相依；"
+            "「CI 有沒有裝」由 tools/tests/test_run_root_unittests.py::"
+            "CiPrereqInstallLockTest 機械看守"
+        ),
+        "下載各片紀錄": (
+            f"{_NO_CARRIER}: actions/download-artifact 是 GitHub Actions 專屬機制；本機不分片，"
+            "沒有跨 runner 的分片紀錄可下載"
+        ),
+        "合併各片紀錄並判全集級 skip 判準（tools/shard_census.py）": (
+            "tools/tests/test_suite_shard.py（MergeRecordsTest：缺片／切分摘要不符／交集／"
+            "聯集≠全集四向＋正控組；本機等價判準＝未分片時 run_root_unittests.py 內的"
+            "天花板／M6／豁免表）"
+        ),
+    },
 }
 
 # 抽取數量下限釘選（比照 `_MIN_GROUPS`／`check_script_parity._MIN_EXTRACT_COUNTS` 慣例）：
 # 防「step 抽取式漂移導致 0 命中，於是包含關係恆成立而靜默假綠」。
 _MIN_CI_STEPS = 20
+#: 個別 job 的下限覆寫：步驟本來就少的 job（分片 job 9 步、彙總 job 5 步）用預設 20 會恆紅；
+#: 值＝該 job 現有步數，抽取式漂移讓步數掉下去仍會紅（DEF-200-593）。
+_MIN_CI_STEPS_BY_SPEC = {
+    "windows-compat-ci.yml::windows-unittests": 9,
+    "windows-compat-ci.yml::windows-unittests-census": 5,
+}
 
 # 一個 step 起始行：`      - name: …` / `      - uses: …`（steps 清單縮排 6 空格）。
 _CI_STEP_START_RE = re.compile(r"^      - (\w+): (.*)$", re.MULTILINE)
@@ -810,9 +859,10 @@ class TestCiStepLocalCarrierCoverage(unittest.TestCase):
         for spec, registry in _CI_STEP_LOCAL_CARRIER.items():
             filename, job = spec.split("::")
             steps = _ci_smoke_steps(_REPO_ROOT / ".github" / "workflows" / filename, job)
+            floor = _MIN_CI_STEPS_BY_SPEC.get(spec, _MIN_CI_STEPS)
             self.assertGreaterEqual(
-                len(steps), _MIN_CI_STEPS,
-                f"{spec} 只抽到 {len(steps)} 個 step < 下限 {_MIN_CI_STEPS}——step 抽取式"
+                len(steps), floor,
+                f"{spec} 只抽到 {len(steps)} 個 step < 下限 {floor}——step 抽取式"
                 f"疑似漂移（0 命中會讓下方包含關係恆成立而靜默假綠）",
             )
             missing = sorted(set(steps) - set(registry))
@@ -1132,6 +1182,15 @@ _ACT_NO_LOCAL_RUNNER_JOBS: dict[str, str] = {
     "windows-compat-ci.yml::windows-nightly-full": (
         "runs-on=windows-latest —— 同上。"
         "替代＝Windows 真機直接跑 AutoClaude/tools/run_local_nightly.ps1"
+    ),
+    "windows-compat-ci.yml::windows-unittests": (
+        "runs-on=windows-latest —— 同上（DEF-200-593：tools/tests 分片 matrix）。"
+        "替代＝Windows 真機直接跑 python tools/run_root_unittests.py"
+        "（不設 AUTOSDD_TEST_SHARD＝全集）"
+    ),
+    "windows-compat-ci.yml::windows-unittests-census": (
+        "runs-on=windows-latest —— 同上（DEF-200-593：分片彙總）。"
+        "替代＝本機全集單跑 run_root_unittests.py 本身就判全集級 skip 判準，無分片紀錄可合併"
     ),
 }
 

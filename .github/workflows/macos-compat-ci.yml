@@ -314,6 +314,10 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-593：tools/tests 跨機分片（AUTOSDD_TEST_SHARD）的判準與彙總薄殼；run_root_unittests.py
+      # 無條件 import suite_shard，shard_census.py 由分片 job 的彙總步驟執行。
+      - "tools/lib/suite_shard.py"
+      - "tools/shard_census.py"
       # DEF-200-274 第九輪：parallel_shard.py 的新相依（歷史耗時快取／LPT 排序）
       - "tools/lib/parallel_timing_cache.py"
       # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），
@@ -814,6 +818,10 @@ on:
       # DEF-200-274：本機平行執行 opt-in 模組，由 tools/run_root_unittests.py 消費，
       # test_ci_paths_cover_root_consumers.py 當場攔下（DEF-101-042 同構）。
       - "tools/lib/parallel_shard.py"
+      # DEF-200-593：tools/tests 跨機分片（AUTOSDD_TEST_SHARD）的判準與彙總薄殼；run_root_unittests.py
+      # 無條件 import suite_shard，shard_census.py 由分片 job 的彙總步驟執行。
+      - "tools/lib/suite_shard.py"
+      - "tools/shard_census.py"
       # DEF-200-274 第九輪：parallel_shard.py 的新相依（歷史耗時快取／LPT 排序）
       - "tools/lib/parallel_timing_cache.py"
       # DEF-200-274 第五輪：hook_wiring.py 無條件 import 本檔（spawn 失敗分類抽出），

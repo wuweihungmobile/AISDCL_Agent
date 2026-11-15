@@ -120,7 +120,9 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # R85／F1 重釘 17→27（腐化上界逐字要求；`tools/probe/guard_layer_dedup_census.py` 觸發）。
         # 🔴 R158 重釘 27→36（新增 install_statusline.py，37→38 支，過腐化上界，詳 round-label-ok
         # CrossPlatform_R158_SessionGate_Statusline_Evidence.md〈棘輪重釘〉）。
-        (_REPO_ROOT / "tools", True, 46),
+        # 🔴 2026-11-15 重釘 46→55（DEF-200-593 新增薄殼 `tools/shard_census.py`，實測 58，過
+        # 腐化上界 57；腐化上界逐字指示，照填不推算）。
+        (_REPO_ROOT / "tools", True, 55),
         (_REPO_ROOT / ".claude" / "hooks", True, 2),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts", True, 13),
         # 沿革已搬至 CrossPlatform_R151_Guard_Prose_Migration.md〈_scan_roots tools/lib 重釘〉節。
