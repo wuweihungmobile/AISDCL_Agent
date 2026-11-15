@@ -203,6 +203,14 @@ class EvaluateApplyTest(unittest.TestCase):
         _rows_, floors = _eval((("session", 61, 13.5), ("weekly_all", 57, 8233)))
         self.assertEqual({f.state for f in floors}, {"n/a"})
 
+    def test_at_qp_17c_short_window_ceiling_includes_exactly_1440_minutes(self):
+        """窗長恰 1440 分仍算短窗（套床）、1441 分起不算；上界取「含等號」，邊界不釘就能
+        被偷偷改成 `>=` 而把整個日窗軸排除在床外。"""
+        for kind, state in (("1440_minute", "lifted"), ("1441_minute", "n/a")):
+            with self.subTest(kind=kind):
+                _r, floors = _eval(((kind, 85, 1000),))
+                self.assertEqual(floors[0].state, state)
+
     def test_at_qp_18_masked_axis_is_neither_short_nor_long(self):
         """遮罩軸不得影響本模型的床（與攤提同尺，DEF-200-438 的同型）。"""
         specs = (("five_hour", 38, 247), ("weekly_all", 60, 8000), ("weekly_scoped", 50, 100))

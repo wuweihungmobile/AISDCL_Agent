@@ -445,6 +445,7 @@ def cli(argv) -> int
 | AT-QP-15 | five_hour 的 resets_at 為 `None`／非字串；pct 為 `"x"` | 同 | state＝`unknown`、不拋、feed 不變 | 免套用③＋畸形輸入 fail-open；拋例外會讓整條 gate 變故障源 |
 | AT-QP-16 | `hold` 遮罩對 five_hour 為真 | 同 | state＝`exempt-hold`、feed 不變 | 免套用④：床不得與清倉授權相抗；少了它床會把使用者明示要用盡的額度又擋回去 |
 | AT-QP-17 | weekly_all 90@8000（極度超前）、seven_day 同；five_hour 在允許線內 | 同 | weekly_all／seven_day state＝`n/a`、feed 不變；five_hour state＝`within` | 只作用最短窗軸（X24）；套到週軸會與週用滿目標直接衝突 |
+| AT-QP-17c | 窗長恰 1440 分（`1440_minute`）與 1441 分各一軸、pct 85、剩 1000 分 | 同 | 1440 分 state＝`lifted`；1441 分 state＝`n/a` | 短窗上界 `SHORT_WINDOW_MAX_MINUTES`＝1440 **含等號**（`shortest > 1440` 才排除）；邊界不釘則上界可被改成 `>=` 而無測試察覺（獨立 QA 存活突變 M06） |
 | AT-QP-18 | weekly_scoped 為別家模型（`skip` 遮罩為真）且其 reset 為 100 分 | 同 | **不**構成免②（five_hour 仍 `lifted`） | 遮罩軸不得影響本模型的床（與攤提同尺，DEF-200-438 的同型） |
 | AT-QP-19 | session 與 five_hour 同 reset、水位不同（40 與 60，剩 200 分） | 同 | 兩軸各以自己的水位算：level 各自為 70 與 85、皆 `lifted` | 同窗長的多軸要逐軸算；只算第一軸會漏另一軸 |
 | AT-QP-20 | 攤提已把 five_hour 的 feed 抬到 90（以 ratio 構造）；床 level＝70 | 同 | apply 後 feed 仍 90、note **不含** `pace-floor` | `max` 不是覆寫：覆寫會把更高的攤提水位壓回 70，變成放寬 |

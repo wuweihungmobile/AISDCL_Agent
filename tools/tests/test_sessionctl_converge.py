@@ -364,7 +364,7 @@ class StopVerdictTest(_Fence):
         self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
 
     def test_def_200_588_finalized_package_with_a_running_task_is_pushed_back(self) -> None:
-        """tools/lib/sessionctl/converge.py::_finalized_wake：事故 sid eb1cb524（2026-11-15）——
+        """AT-TW-79 tools/lib/sessionctl/converge.py::_finalized_wake：事故 sid eb1cb524（11-15）——
         交接後留著等 CI 的背景 shell，它結束時把 26.8 萬上下文的舊 session 冷叫醒、整份重寫。
         已 finalize ∧ 有執行中背景任務 ⇒ 推回並要求 TaskStop；不需出聲、不看硬門檻
         （事故當時在門檻之下）。這條放行＝交棒後的 session 還會自己醒來燒額度。"""
@@ -380,7 +380,7 @@ class StopVerdictTest(_Fence):
                                                     self.env))
 
     def test_def_200_588_the_wake_gate_stays_silent_when_nothing_can_wake_it(self) -> None:
-        """tools/lib/sessionctl/converge.py::_finalized_wake：假紅面——任務已結束、沒有
+        """AT-TW-80 tools/lib/sessionctl/converge.py::_finalized_wake：假紅面——任務已結束、沒有
         finalize 包（平常掛著等 CI 是正當用法）、他人的包、第二次 Stop、無人、off、
         payload 沒有該欄，一律不推回。"""
         self.main(HARD - 20_000)

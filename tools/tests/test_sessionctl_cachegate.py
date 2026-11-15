@@ -115,6 +115,18 @@ class CacheStateTest(_Fence):
         self.assertTrue(got["cold"])
         self.assertAlmostEqual(got["idle_s"], 480, delta=1)
 
+    def test_at_tw_07_the_clock_runs_from_the_latest_of_many_usage_records(self) -> None:
+        """AT-TW-07 tools/lib/sessionctl/cachestate.py：真實逐字稿尾端必有多筆 assistant usage，
+        計時取最後一筆；取到最早一筆會把仍熱的代理判冷、誤擋熱續棒（比 AT-TW-10 更隱蔽）。"""
+        warm = self.state(_rec(150_000, 20), _rec(150_000, 1))
+        self.assertIs(warm["cold"], False)
+        self.assertAlmostEqual(warm["idle_s"], 60, delta=1)
+        cold = self.state(_rec(150_000, 1), _rec(150_000, 20))  # 檔內順序與時間先後無關
+        self.assertIs(cold["cold"], False)
+        late_cold = self.state(_rec(150_000, 20), _rec(150_000, 10))
+        self.assertIs(late_cold["cold"], True)
+        self.assertAlmostEqual(late_cold["idle_s"], 600, delta=1)
+
     def test_at_tw_08_unreadable_transcripts_fail_open(self) -> None:
         """tools/lib/sessionctl/cachestate.py：
         檔不存在／空／壞 JSON／無 assistant ⇒ 不冷、idle None。"""
@@ -183,6 +195,19 @@ class ResumeGateTest(_Fence):
         self.agent("a1", _rec(LIMIT, 10))
         send = self.send(message="續棒理由：因為")
         self.assertEqual(self.gate(send, self.INTERACTIVE)[0], 2)
+
+    def test_at_tw_13_the_reason_floor_is_exactly_eight_characters(self) -> None:
+        """AT-TW-13 tools/lib/sessionctl/cachestate.py::override_reason：下界恰 8 字（strip 後
+        計字）——7 字不接受、8 字接受；邊界不釘，必填門檻可被偷偷抬高或放低。"""
+        eight, seven = "一二三四五六七八", "一二三四五六七"
+        self.assertEqual(cachestate.OVERRIDE_MIN_CHARS, 8)
+        self.assertEqual(cachestate.override_reason(f"續棒理由：  {eight}  "), eight)
+        self.assertIsNone(cachestate.override_reason(f"續棒理由：  {seven}  "))
+        self.agent("a1", _rec(LIMIT, 10))
+        self.assertEqual(self.gate(self.send(message=f"續棒理由：{eight}"), self.INTERACTIVE),
+                         (0, ""))
+        self.assertEqual(self.gate(self.send(message=f"續棒理由：{seven}"),
+                                   self.INTERACTIVE)[0], 2)
 
     def test_at_tw_14_unattended_ignores_the_override(self) -> None:
         """tools/lib/sessionctl/roster.py：無人窗口沒有人可問——合格理由也無效。"""

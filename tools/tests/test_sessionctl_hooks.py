@@ -394,7 +394,7 @@ class HookConvergeTest(unittest.TestCase):
         self.assertNotIn("decision", doc)
 
     def test_def_200_588_a_background_shell_never_masks_the_stop_pushback(self) -> None:
-        """DEF-200-588（hook 層）：只有背景 shell 在跑（事故形態＝掛著等 CI）時，出聲不得蓋掉
+        """AT-TW-81 DEF-200-588（hook 層）：僅背景 shell 在跑（事故形態＝掛著等 CI）時，出聲不得蓋掉
         推回——原接線先出聲就 return，判準層說要推回、hook 卻只印一句話放行。"""
         slug, env = _advised_session(self, 300_000)
         shell = {"id": "b1", "type": "shell", "status": "running"}
