@@ -655,6 +655,8 @@ _GOVERNANCE_DOCS = (
     / "CrossPlatform_R210_Debt_Closure_Final_Evidence.md",
     # 護欄層行數棘輪史料歸檔的第二冊（第一冊逼近 Read 工具上限，淨減法搬遷改落本檔）：即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_2.md",
+    # 同冊第三冊（第一、二冊皆逼近 Read 工具上限；R184／R185 兩節原文逐字搬入、往後史料續於本檔）：即刻登記。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_Guard_Line_History_3.md",
     # improving_113（R211）零信任審計證據檔：PRD 剩餘收斂輪（模型角色參數化／喚醒成本落帳／
     # 引擎分片休眠）；四方複審 findings 逐條原文、裁決、理論洞、結案帳皆在此（複審者要重驗
     # 就得讀完它 ⇒ 體積守門；逐筆寫出 DEF-ID 居所與當回合實測值 ⇒ 指針稽核）：即刻登記。
@@ -690,6 +692,8 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R212_Row5_Findings_QA2.md",
     # R213：掌舵者「做完＝無積欠 BUG 與技術債」輪證據檔（PRD §16.2 清倉、長債結案）  round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_Evidence.md",
+    # R213 附錄 B 任務書姊妹檔（主檔越 warn 線，〈附錄 B〉整節逐字搬入；主檔原位留指針）  round-label-ok
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_AppendixB.md",
     # R213 第四窗姊妹檔（DEF-101-587 體例）：三問零信任重驗＋乾淨樹 nightly  round-label-ok
     # 真跑＋兩鏡判決＋理論洞 W4-*；主檔已越 warn 線，只留一行指針。即刻登記。
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W4.md",

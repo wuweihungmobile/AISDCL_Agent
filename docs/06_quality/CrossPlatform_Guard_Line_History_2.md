@@ -3286,3 +3286,5 @@ DEF-200-482：Q3′ 量的是「兩個來源是否一致」，不是「逐字稿
     # R102 既有列），同體例「追加後立即自我凍結」——本輪追加兩列（crossref 檔 round-label-ok
     # +103 ＋ 本檔自身編修 +18），prefix_len 59→61 涵蓋兩列本身。
 ```
+
+> 🔴 本冊已逼近 Read 工具 WARN 線（245,760 bytes）；往後新增史料續於 `CrossPlatform_Guard_Line_History_3.md`，本冊不再追加。
