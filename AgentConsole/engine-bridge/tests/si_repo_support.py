@@ -54,6 +54,7 @@ CLI_CLOSURE: tuple[str, ...] = (
     "tools/lib/quota_policy.py",
     "tools/lib/quota_policy_env.py",
     "tools/lib/quota_pace.py",
+    "tools/lib/quota_pace_floor.py",  # quota_policy 頂層 import（配速床；ADR-XPLAT-004 §2.15）
     "tools/lib/quota_burndown.py",
     "tools/lib/endurance_env.py",
     "tools/lib/unattended_authz.py",
