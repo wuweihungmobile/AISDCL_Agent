@@ -99,7 +99,9 @@ import quota_burndown  # noqa: E402  # DEF-200-528：清倉授權疊層（操作
 import quota_env_layers  # noqa: E402  # 檔案層載入鏈（env.shared → .env）的 SSOT
 import quota_messages  # noqa: E402  # DEF-200-435：新 helper 走模組屬性（from-import 每名佔一行，tier 餘裕僅 1 行）
 import quota_pace  # noqa: E402  # R86：窗長／燃燒率／跨窗攤提（同樣是判讀原語）
+import quota_pace_floor  # noqa: E402  # ADR-XPLAT-004 §2.15：配速床說明行（純函式）
 import quota_policy  # noqa: E402
+import quota_rush  # noqa: E402  # §2.15：趕工戳記疊入 policy_env()／gate 落款（內部已 fail-soft）
 import quota_stability  # noqa: E402  # R102／PRD §4.2.4(b)(c)(d)：死區／變化率／最小停留時間  round-label-ok
 import session_brief  # noqa: E402  # DEF-200-561：`--pace` 的續跑逃生口出聲（純函式 escape_hatch_note，單向相依）
 
@@ -111,6 +113,11 @@ import session_brief  # noqa: E402  # DEF-200-561：`--pace` 的續跑逃生口�
 # `test_quota_is_not_wired_into_the_context_blocking_path` 在守。`flush_to_model` 只被
 # 測試與 `atexit` 呼叫，在本檔是純 re-export（讓消費端沿用 `quota_gate.<name>`）。
 from platform_utils import emit_to_model, flush_to_model  # noqa: E402,F401
+from quota_halt_marker import (  # noqa: E402,F401
+    halt_marker_path,
+    read_halt_marker,
+    write_halt_marker,
+)
 from quota_limits import LIMIT_NONE, parse_reset_at, unhandled_limit_event  # noqa: E402
 
 # 🔴 R88／LOC-01：**人話面**整族搬到 `quota_messages.py`（立案與射程劃界見該檔檔頭）。
@@ -237,7 +244,7 @@ BURN_LEDGER_NAME = "quota_burn.jsonl"
 def policy_env(root: Path | None = None) -> dict:
     """門檻的環境來源：檔案層（env.shared → .env）當**預設**、`os.environ` 覆寫（訴求 6c）。"""
     base = root or Path(__file__).resolve().parents[2]
-    return {**quota_env_layers.merged_file_env(base), **os.environ}
+    return quota_rush.overlay({**quota_env_layers.merged_file_env(base), **os.environ})
 
 
 # 🔴 R82／C2：**逃生口也必須吃 `.env`**，否則 `.env.example` 印出來的那四個開關是假話。
@@ -505,7 +512,7 @@ def draining(now: datetime | None = None) -> str:
     at = now or datetime.now().astimezone()
     try:
         policy, _problems = quota_policy.load_policy(policy_env())
-        decision = quota_policy.decide(read_quota(at), at, policy)
+        decision = quota_policy.decide(read_quota(at), at, policy, pace_floor=False)  # §2.15.3
     except Exception:  # noqa: BLE001 — 判不出來就說判不出來，不得反過來變成故障源
         return "unknown"
     if decision.band == quota_policy.BAND_UNMEASURED:
@@ -803,32 +810,7 @@ def resolve_halt_transcript(payload: dict) -> tuple[Path | None, str]:
     return None, "unavailable"
 
 
-def halt_marker_path(sid: str) -> Path:
-    """DEF-200-278／INV-H1c 落盤處，SSOT＝`endurance_env.trace_dir()`（同哨兵痕跡的家）。"""
-    return endurance_env.trace_dir() / f"halt_{sid}.json"
-
-
-def write_halt_marker(sid: str, data: dict) -> Path:
-    """落一份持久 halt 標記，供哨兵下一輪巡邏讀（`halt_verdict()`）。寫檔失敗吞掉——
-    標記是輔助憑證而非安全煞車（fail-open 是 P0）。"""
-    path = halt_marker_path(sid)
-    try:
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8", newline="\n")
-    except OSError:
-        pass
-    return path
-
-
-def read_halt_marker(sid: str) -> dict | None:
-    """讀不出來（沒有 sid／檔不存在／壞 JSON）一律回 `None`，呼叫端據此落回既有判定。"""
-    if not sid:
-        return None
-    try:
-        return json.loads(halt_marker_path(sid).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
+# halt 標記的路徑／寫／讀三支住 `quota_halt_marker`（為配速床接線騰 hub 餘裕而抽出；re-export）。
 def quota_halt_actions(payload: dict, decision: quota_policy.Decision, now: datetime, *,
                        plan_writer, waker) -> dict:
     """halt 閂鎖那一刻真的做的事。回稽核欄位（給訊息與測試讀）。
@@ -995,6 +977,7 @@ def pace_report(now: datetime | None = None, model: str | None = None,
             f"  {quota_policy.describe(decision, burndown=False)}\n"
             f"{quota_burndown.full_line(decision)}"  # DEF-200-528：清倉全文段，整份輸出只這一處
             f"  {quota_pace.explain(decision.amort, policy.converge_pct)}\n"
+            f"{quota_pace_floor.line(decision.pace)}"  # §2.15：配速床一段（每行自帶縮排與換行）
             f"  {posture_line(quota_cache_path())}\n"
             f"{fanout_window_line(window, live, FANOUT_WINDOW_SECONDS)}"
             f"{horizon}{quota_messages.model_lines(decision, policy_env())}"
@@ -1185,6 +1168,7 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 也沒有節流要擋**——派發帳只屬於 PreToolUse 那一刻（見本函式 docstring）。
     if decision.cap is None or event != "PreToolUse":
         return 0
+    quota_rush.log_floor(decision, now)  # §2.15：只在派發邊緣落一列（M-P4 分子；失敗吞掉）
     cap, root = decision.cap, fanout_ledger_path()
     # 🔴 R82 訂正判準（舊版是「只要不是 normal 帶就擋 Workflow」）：那條在新階梯下會讓
     # 55% 這種**還很寬鬆**的水位把 `Workflow` 整個鎖死。改成「cap 已收斂到 converge 檔

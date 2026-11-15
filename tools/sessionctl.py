@@ -1,11 +1,12 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
-用法：python tools/sessionctl.py <handoff|status|stop|advice> [旗標]
+用法：python tools/sessionctl.py <handoff|status|stop|advice|rush> [旗標]
   handoff --build｜--finalize <檔>｜--ack <檔>｜--spawn <檔>｜--list
       交接包（`handoff.cli`）
   status                                  名冊與掌控面（`roster.cli`，唯讀）
   stop --window <sid>｜--all-unattended   停無人視窗（`roster.cli`）
   advice [--family fable]                 模型平衡建議（只出聲）
+  rush --hours <H> --why "<WHY>"｜--off｜--status   趕工戳記（只關配速床，≤5 小時）
 子模組一律在分派時才 import（某一支還沒好，其餘子指令照常）；未知子指令 rc 3。
 """
 from __future__ import annotations
@@ -29,6 +30,14 @@ def _advice(argv: list[str]) -> int:
     return 0
 
 
+def _rush(argv: list[str]) -> int:
+    import importlib  # noqa: PLC0415
+
+    import lib.sessionctl  # noqa: F401,PLC0415 — 副作用：把 tools/lib 放進 sys.path
+
+    return importlib.import_module("quota_rush").cli(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     verb, rest = (args[0], args[1:]) if args else ("", [])
@@ -42,7 +51,9 @@ def main(argv: list[str] | None = None) -> int:
         return roster.cli(args)
     if verb == "advice":
         return _advice(rest)
-    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice\n")
+    if verb == "rush":  # ADR-XPLAT-004 §2.15 D2：趕工戳記（判準與讀寫全在 `lib/quota_rush.py`）
+        return _rush(rest)
+    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush\n")
     return _USAGE_RC
 
 

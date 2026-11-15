@@ -86,12 +86,41 @@ def _agents_running(payload: dict, sid: str) -> bool:
     return bool(roster.running(sid, projects_dir=roster._payload_projects(payload)))
 
 
+def _finalized_wake(payload: dict, env) -> str:
+    """已 finalize 交接包的 session 還掛著執行中的背景任務 ⇒ 推回（DEF-200-588）。
+
+    WHY：背景任務一結束 harness 就叫醒這個 session；交接後它本來就不該再動，醒來那一下
+    快取已冷、整份上下文重寫（sid eb1cb524，2026-11-15 08:34：一次 235,445 token）。
+    重寫發生在模型能反應之前，所以唯一擋得住的時點是交接後結束回合的這一刻。
+    不看出聲與上下文門檻（事故當時 26.8 萬，在硬門檻之下）；payload 沒有
+    `background_tasks` 欄就不判（fail-open）。"""
+    if env.get("AUTOSDD_UNATTENDED") or switch.switch_mode(env) == "off":
+        return ""
+    sid = roster._payload_sid(payload)
+    live = [t for t in (roster._tasks(payload) or [])
+            if str(t.get("status") or "running") == "running"]
+    if not sid or not live:
+        return ""
+    path, done = _latest_live(sid, env)
+    if not done:
+        return ""
+    switch.trace("finalized_wake_block", sid=sid, tasks=len(live))
+    return (f"冷叫醒閘（Stop）：交接包已 finalize（{path}），但本 session 還有 {len(live)} 個"
+            "背景任務在跑——它一結束就會把這個已交棒的 session 叫醒，快取已冷、整份上下文重寫。"
+            "請現在用 TaskStop 停掉它們（輸出已導檔者由新 session 重查，例："
+            "python tools/ci_wait.py --commit <完整 SHA>），再結束回合。"
+            "（只推回這一次；第二次 Stop 放行。）")
+
+
 def stop_verdict(payload: dict, env=None) -> str:
     """Stop 推回：回要放進 `decision:block` 的 reason；不成立 ⇒ `""`。任何例外 `""`。"""
     env = os.environ if env is None else env
     try:
         if not isinstance(payload, dict) or payload.get("stop_hook_active"):
             return ""  # 迴圈煞車：第二次 Stop 一律放行
+        wake = _finalized_wake(payload, env)
+        if wake:
+            return wake
         got = _gate(payload, env)
         if got is None:
             return ""

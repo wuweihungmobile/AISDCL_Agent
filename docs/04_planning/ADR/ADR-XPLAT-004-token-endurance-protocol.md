@@ -768,8 +768,188 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - 純讀、改、跑測試的連續小工作不被收斂閘與 Stop 推回擋（O-1 已接受的缺口）；以痕跡 `converge_block`／`converge_stop_block` 與逃生口使用量監看。
 - 決策 3 依賴自訂子代理仍收到根 CLAUDE.md 與 1 小時寫入真的生效，兩者皆以真機驗證為前提；驗不過即撤回該檔。
 - 主控在真人離開時閒置超過一小時的重寫沒有機械解；收斂閘只壓住單件代價的上界。
+- **冷叫醒閘（DEF-200-588，2026-11-15 補）**：交接包已 finalize 的 session 若還掛著執行中的背景任務，任務結束時 harness 會把它叫醒；重寫發生在模型能反應之前，所以唯一擋得住的時點是交接後結束回合那一刻。`converge._finalized_wake` 在 Stop 時推回一次、要求 TaskStop（不看出聲、不看硬門檻；payload 沒有 `background_tasks` 欄就不判）。立案證據＝sid `eb1cb524` 於 2026-11-15 08:34:57 +08:00 的一筆 `cache_creation_input_tokens=235445`（電腦喚醒後等 CI 的背景行程結束，叫醒上下文 26.8 萬、已交棒的 session；五小時窗一次 13pp）。同案修掉接線順序：原 hook 先出聲就返回，只有背景 shell 在跑時判準層要推回、hook 卻只印一句話放行；改為先判推回、沒有才出聲。劃界：沒有交接包的 session 掛背景等待仍放行（平常等 CI 的正當用法，靠等待自帶截止時間小於快取壽命保護）；電腦睡眠會讓這個保護失效，此時代價上界由收斂閘的上下文門檻壓住。
 - 額度百分比在逐字稿裡量不到；所有省下的量是公開價格比換算的推估，用來排序，不是額度承諾。
 - 冷熱判準的 30 秒安全邊際是量測偏差補償（hook 判斷時刻早於實際請求時刻；探針實見一筆 299.995 秒間隔仍整份重寫），不是調參旋鈕，不開環境變數。
+
+### 2.15 額度配速與快取保全：窗內配速床、趕工戳記、主控保溫的有條件裁定（2026-11-15；第一期＝配速床＋趕工戳記＋量測；保溫實作屬第二期）
+
+> 數字一律現查：門檻與兩個配速床常數 `python tools/lib/quota_policy.py --print-env-example`；`--pace` 現況 `python tools/session_resume_planner.py --pace`；配速指標 `python tools/probe/waste_census.py --pace-metrics`（第一期落地後）。本節只寫判準、出處、方向與撤回門檻。驗收契約＝`docs/03_testing/contracts/TCS-TokenWaste-20261114.md` §10。
+> 係數口徑：下列 pp＝五小時窗百分點（Fable 自軸，除非註明）。換算係數取 SA 兩個乾淨區間聯立（寫 5.5e-5、讀 1.7e-6、出 1.4e-4 pp／token），**樣本 n＝2、寫讀比可落 10～60**；本節每個結論都對「悲觀比 10」再驗一次，驗不過的標「不穩健」。所有省下的量是換算推估，用來排序與定門檻，不是額度承諾。
+
+#### 2.15.0 立案與暴露證據（守衛面准入：三取一皆成立；`quota_gate.py`、`quota_policy.py` 皆在守衛面清單內）
+
+掌舵者原話（2026-11-15 00:1x，sid `eb1cb524-de09-4ad5-a068-69fa180dc64b`）：「要解決LLM Cache消失的問題, 導致下次啟動會浪費很多Token……當Token一小時就用完時, 再次啟動就會有Cache消失浪費Token問題……是否需要保留5%~10%進行慢速工作或只與MML做簡易對話, 維持Cache, 等下一個五小時在繼續正常作業 2. 若沒有需要趕工, 將Token盡量維持分配五小時進行作業!」
+
+1. **掌舵者真機回報**：同 sid 原話如上；主控親驗同 sid 2026-11-14 23:03 五小時窗 8%、2026-11-15 00:1x 56%（約 70 分鐘用掉 48pp，全是並行派工）。
+2. **非構造性逐字稿**：sid `04b38d83` 2026-11-13T13:22:57Z `apiError:"usage_limit_reached"`、`status:"rejected"`、usage 全 0；halt 標記（binding＝five_hour）近 14 天 5 件（11-07 17:13、11-13 04:43、11-14 00:49、11-14 22:44 等；SA Q5），等待 15／47／164／167／191 分鐘。
+3. **真實輸出**：本棒鏈 sid `ff7d69c4-aa33-4ced-bbf0-cbd780a539cd` 約 2026-11-15 08:56 的 gate 輸出 `kind=five_hour 43% … band=free horizon=far cap=None note=burn-ahead`＝已判超前、致動器零煞車；同 sid 08:51:17 的 `--pace`：weekly_scoped(Fable) 78%、剩 8467 分鐘、攤提 r=4.3（n=84）⇒ 每個五小時窗只配 3.4pp、本窗已用 38pp、餘裕 −34.6pp，而輸出寫「長窗自軸未達 converge ⇒ 出聲不收緊」。
+
+#### 2.15.1 平台事實與資料來源（查閱日期 2026-11-15）
+
+| 代號 | 事實（原文要點） | 出處 | 讀取者／可信度 |
+|---|---|---|---|
+| P1 | 主對話（互動回合、非互動 `-p`、Agent SDK）在訂閱額度內快取 **1 小時**；子代理、workflow、fork、compaction、session title 為 5 分鐘 | https://code.claude.com/docs/en/prompt-caching.md | Architect 親讀，SD 未覆核；高 |
+| P2 | 每次命中快取會重設計時器 | 同上 | 同上 |
+| P3 | `resume` 保留原 session 的系統提示並讀回仍在壽命內的前綴；**互動與 `-p` 的工具集是否相同文件未載** | 同上 | 同上；互動／`-p` 一致性＝待真機驗證 |
+| P4 | 閒置超過壽命後的 `/compact`，摘要請求把整份歷史當未快取輸入重算（冷 `/compact` 最貴） | 同上 | 同上 |
+| P5 | 閒置的 1 小時快取 session，Claude Code 可能自行壓縮（`idleCompaction`，v2.1.290 起可關） | 同上 | 同上；與保溫的交互＝待真機驗證（V-K3） |
+| P6 | `/usage` 有「Prompt cache (main)」行；statusline 有 `prompt_cache` 物件（v2.1.251 起，likely cause v2.1.260 起） | 同上 | 同上；細節頁未讀 |
+| P7 | 換模型、換 effort（Fable 5.1 起例外）、fast mode、非 deferred 的 MCP 增減、升級 Claude Code 皆失效；改 CLAUDE.md 中途不失效也不生效；nested CLAUDE.md 與 `paths:` rules 按需載入 | 同上 | 同上 |
+| P8 | 循序 session 只有啟動時 git status 快照相同才共享前綴 | 同上 | 同上；與 SA 實測「新 session 讀約 3.26 萬＝系統層」一致 |
+| S1 | 達上限時 harness 先注入 wrap_up 寬限，其後請求被拒、usage 全 0、拒絕請求不寫快取也不耗額度；此帳號 `overageDisabledReason:"out_of_credits"` 無超額緩衝 | 逐字稿 sid `04b38d83` 2026-11-13T13:22:50Z～13:22:57Z | SA 實證；高 |
+| S2 | `claude -p -r` 在 TTL 內可命中：e9f8e2cb relay_seq 0（冷續）cache 寫 863,852；relay_seq 1（10 分後）寫 13,713／讀 143,329 | `autosdd_resume_cost.jsonl` | SA 實證；n＝1 組 |
+| S3 | API 層快取：層級 tools→system→messages；改工具定義使其下全部失效 | https://platform.claude.com/docs/en/build-with-claude/prompt-caching | SA 親讀；高 |
+| 補1 | 牌價倍數（相對基礎輸入價）：5 分鐘寫入 ×1.25、1 小時寫入 ×2，各模型皆同；**快取讀取因模型而異**——Fable 5.x／Mythos 5.x ×0.025、Opus 5.5 與 Sonnet 5.5 ×0.05、Haiku 5.5 與其餘模型 ×0.1 | https://platform.claude.com/docs/en/about-claude/pricing ；寫入倍數另見 https://platform.claude.com/docs/en/build-with-claude/prompt-caching 原文 | 主控派查閱棒 2026-11-15 補讀；寫入倍數為原文、讀取倍數由表內單價自除，抓取工具回傳未與原始 HTML 逐字比對；中高 |
+| 補2 | 覆核 P1：訂閱額度內主對話預設 1 小時（API 金鑰／雲端／超額 credits 為 5 分鐘）；子代理即使在訂閱下也是 5 分鐘，**但可自行選較長的壽命** | https://code.claude.com/docs/en/prompt-caching | 同上；與 Architect 親讀一致＝兩次獨立讀取 |
+| 補3 | 預設壽命 5 分鐘、每次使用刷新；壽命自「寫入或讀取該筆的請求開始」起算，不是回應結束 | https://platform.claude.com/docs/en/build-with-claude/prompt-caching | 同上；原文 |
+| 補4 | 官方降低用量建議（任務間 `/clear`、自訂壓縮指示、Sonnet 做多數工作、冗長操作外派子代理、hook 先濾輸出、CLAUDE.md 目標 200 行內、閒置時的提示建議／回顧／閒置壓縮可關）；`/usage` 的「Prompt cache (main)」行顯示冷熱與壽命 | https://code.claude.com/docs/en/costs | 同上；原文 |
+| 補5 | **快取讀取 token 如何折算進訂閱的五小時窗與週額度：文件未載**（費用頁只說方案內用量不以金額計） | 同 補4、補1 | 同上；待真機回歸量測 |
+
+**對損益表的影響（2026-11-15 補讀後）**：SA／Architect 先前口述的「讀取 ×0.1」只對 Haiku 成立；主控（Fable）的牌價讀取是 ×0.025，牌價上冷重寫（×2）對保溫讀取的比是 80 比 1、不是 20 比 1。§2.15.2 的損益表以本帳號逐字稿回歸出的「每 token 佔五小時窗百分點」為準、不以牌價推算（補5：折算方式文件未載），故表內數字不改；牌價只作方向佐證——「等待 ≤5 小時時保溫勝過冷重寫」的結論方向不變且餘裕更大。補2 的「子代理可選較長壽命」是 §2.14.4 X9 之外的新選項，列入第二期前置評估，本期不動。
+
+**仍未讀到**：settings-reference 的 `idleCompaction` 與 statusline 頁細節、changelog 2026-08-15～11-06 區段（只讀到 2.1.319～2.1.325，其中無快取壽命變更條目）、Anthropic 工程部落格與相關論文（未搜尋）。依賴這些頁的結論（statusline 是否帶 rate limit 欄位、idle compaction 觸發條件）維持「待真機驗證」或「未查證」，第二期動工前先讀。查閱受阻的成因＝唯讀網路查閱與派代理共用同一個扇出上限（本輪兩個 session 共 5 筆以上真實阻斷）；修法會動守衛面，另成一批、立案與修復同一個 commit。
+
+#### 2.15.2 決策
+
+**D1　窗內配速床（pace floor）：把「超前」由出聲變成 cap 的煞車力**
+
+缺口（讀程式確認）：`quota_pace.burn_step` 判超前只把該軸視野夾到 far（乘數 0.5），而 free 帶（<50%）`_base_cap=None`，`None×0.5` 仍是 `None` ⇒ **超前在 free 帶對 cap 零煞車力**（上列證據 3）；攤提 `band_inputs` 只在長窗自軸達 converge 才收緊（2026-08-16 掌舵者「use-it-or-lose-it」裁決），週軸 <70% 時五小時窗完全不攤平。
+
+機制：只抬高餵給 `pct_band` 的水位、永不調低。
+
+- 允許線 `allowed(t) ＝ 100 × elapsed_frac ＋ B`，`B ＝ pace_burst_pp`（出廠 20，窗初容許一波並行派工）；`elapsed_frac ＝ 1 − 剩餘分鐘／窗長`（與 `quota_pace.lead_pp` 同一算式，不另寫第二份）。
+- `over ＝ pct − allowed`：`over ≤ 0` ⇒ 不動；`0 < over ≤ S` ⇒ 餵入水位至少 `converge_pct`；`over > S` ⇒ 至少 `prepare_pct`；`S ＝ pace_step_pp`（出廠 10）；上界 `halt_pct − 1`（推導值永不觸發 halt，同攤提）。
+- 只作用在**最短窗軸**（由 `quota_pace.windows()` 的窗長導出，不認桶名；`session` 與 `five_hour` 同窗長者各自以自己的水位算）。
+- 動作＝既有致動器：水位抬進 converge／prepare 帶後，`quota_gate` 的 300 秒扇出 cap（rc 2 擋 `Agent`／`Task`／`Workflow`／`WebFetch`／`WebSearch`）自然收緊；**零新致動器**。主控自己的呼叫不受 cap 管（那是 §2.15 之外的成本題，見 D4／分期表）。
+- 免套用（回原值，逐位元等於無本功能）：① 趕工戳記有效；② 任一更長窗軸距 reset 的分鐘數**小於**短窗剩餘分鐘（長窗在本短窗內就翻頁⇒用掉不留；等於不免）；③ 窗長或距離不明（`lead_pp` 回 `None` 的同一組前置）；④ 清倉授權（`quota_burndown`）對該軸 `hold` 為真（SD 補：清倉＝操作者明示要把剩餘額度用盡，配速床不得與之相抗）。別家模型的 model-scoped 軸（`_amort_skip` 遮罩）既不算短窗也不算免套用②的長窗。
+- 與 2026-08-16 裁決相容：`B＝20` 時允許線在已過 80% 窗長（300 分窗的第 240 分鐘）起 ≥100 ⇒ 床自動消失，短窗剩餘額度照樣可在窗尾用完；床改變的是**速率**、不是總量。
+
+例算（五小時窗＝300 分、預設 B＝20／S＝10／converge 70／prepare 85；cap 為 `quota_policy._cap_for` 現值：converge×far＝2、prepare×far＝1）：
+
+| 情境（已用／剩餘分鐘） | 允許線 | over | 餵入水位 | 預期 cap | 出處 |
+|---|---|---|---|---|---|
+| 38pp／247 分（已過 53 分） | 37.7 | +0.3 | ≥70（converge） | 2 | 2026-11-15 08:51 `--pace` 實測點 |
+| 43pp／244 分 | 38.7 | +4.3 | converge | 2（今天印 `cap=None`） | 同日 08:56 gate 輸出 |
+| 48pp／230 分（已過 70 分） | 43.3 | +4.7 | converge | 2 | 2026-11-14 夜「70 分鐘 48pp」形態 |
+| 60pp／210 分（已過 90 分） | 50.0 | +10.0 | converge（邊界：`over＝S` 不進 prepare） | 2 | 邊界例 |
+| 61pp／210 分 | 50.0 | +11.0 | ≥85（prepare） | 1 | 邊界例 |
+| 99pp／30 分（已過 270 分） | 110 | −11 | 原值 | 不動 | use-it-or-lose-it |
+
+**D2　趕工戳記 `sessionctl rush`：自帶到期的人工宣告，只關配速床**
+
+- 形態＝有效期戳記，不是環境變數（X23）。`python tools/sessionctl.py rush --hours <H> --why "<WHY≥8字>"` 寫戳記檔（`endurance_env.trace_dir()/quota_rush.json`，持久目錄，跟 `quota_burndown` 的落款同一個家）；`--off` 撤銷；`--status` 查。到期即失效（讀取端判斷，無常駐程式）。
+- 有效期上限 5 小時（`H` 須 `0 < H ≤ 5`）；超過、非數字、`why` 去頭尾空白後少於 8 字，或 `AUTOSDD_UNATTENDED` 有設 ⇒ 拒絕（rc 2）。讀取端對無人窗口同樣一律忽略戳記（無人窗口無人可宣告趕工；較緊的方向）。
+- **射程只有配速床**：既有四道門檻、攤提、halt、cap 階梯一律照舊 ⇒ 不放寬任何既有門檻。誰能開：掌舵者明示或任務書宣告「趕工」時由主控執行，`why` 引座標。
+- 承載（SD 對 Architect 稿的修正，見 §2.15.3）：戳記由 `quota_gate.policy_env()` 的出口疊成 `AUTOSDD_QUOTA_PACE_RUSH_UNTIL`（epoch 秒；自帶到期；hook 每次觸發重讀 ⇒ 開了戳記後**已在跑的其他 session 下一次呼叫即生效**，不必重啟），經 `load_policy` 進 `Policy.pace_rush_until`；`decide()` 以 `now` 判有效。所有走 `policy_env()` 的消費端（gate、`--pace`、簡報、無人巡邏）因此看到同一個 cap，不會出現「同一件事兩個數」。
+- 痕跡：`pace_rush_on`／`pace_rush_off` 與配速床抬水位的 `pace_floor` 落同一個檔 `autosdd_pace_floor.jsonl`（持久痕跡目錄），供 M-P4／M-P7 取數。
+
+**D3　與「週額度常態用到 100%」（掌舵者 2026-11-07 指令）如何同時成立**
+
+- 換算：同一次 `--pace`（2026-11-15T08:51:17+08:00，sid `ff7d69c4`）Fable 週軸剩 22pp、剩 8467 分鐘、r＝4.3（n＝84）⇒ 一個滿 100pp 的五小時窗約等於週軸 23pp ⇒ **週額度只夠約 4.3 個滿窗**。窗多、週少：把五小時窗攤平不會讓週額度用不完，真正稀缺的是 Fable 週軸，不是五小時窗。
+- 床只改速率不改總量（見 D1 末條）；週軸在短窗內翻頁時免套用（免②）；掌舵者宣告趕工時全關。
+- 護欄指標 M-P4 持續量週軸 reset 前的最後讀數；基線與撤回條件見 §2.15.7。**任一週低於基線且該週 reset 前 24 小時內有 `pace_floor` 落款 ⇒ 撤 D1**（週用滿是上位目標）。
+
+**D4　保溫（keep-warm）裁定：主控在條件內有條件推翻 X9；子代理維持否決；實作屬第二期**
+
+損益（Fable 主控、1 小時快取、每 50 分保溫一次；K＝⌈T／50⌉；c＝單次保溫、W＝冷重寫、S＝交接開新 session；中心係數／悲觀比 10）：
+
+| 上下文 N | c（pp） | 等 3 小時（K＝4） | 冷重寫 W | 交接開新 S | 保溫勝過重寫的 K* 上限（中心／悲觀） |
+|---|---|---|---|---|---|
+| 10 萬 | 0.18 | 0.7 | 5.5 | 5.7 | 31／10 |
+| 20 萬 | 0.35 | 1.4 | 11.0 | 6.2 | 31／10 |
+| 30 萬 | 0.52 | 2.1 | 16.5 | 6.7 | 32／10 |
+
+撞牆等待實測 5 件（15／47／164／167／191 分）⇒ K≤4，**悲觀比下仍 ≤10 ⇒「≤5 小時等待時保溫勝過冷重寫」穩健**。保溫 vs 交接：N≥20 萬時 S≈6～7pp 一次付清，之後每次呼叫少讀 (N−11 萬)×1.7e-6 ⇒ 30 萬時約 13 次回本、25 萬約 25 次、20 萬約 39 次（悲觀比約 ×2.4；SA 同表另以 27 次計 20 萬，口徑差在讀取係數取整，兩者皆 n＝2 聯立）。
+
+決策表（純函式 `keepwarm_verdict(N, 預期等待 T, 是否有下一步)` 的契約；第二期實作；6 萬下界與表格取值為判斷值、不穩健，以回放校）：
+
+| N ＼ 等待 T | ≤55 分 | 55 分～3 小時 | 3～5 小時 | >5 小時／未知 |
+|---|---|---|---|---|
+| <6 萬 | 無動作 | 放棄 | 放棄 | 放棄 |
+| 6 萬～R1(25 萬)，有下一步 | 無動作 | 保溫 | 保溫 | 保溫至 K_max＝6 後放棄 |
+| 6 萬～R1，無下一步 | 無動作 | 放棄 | 放棄 | 放棄 |
+| ≥R1 | 無動作 | 交接 | 交接 | 交接 |
+
+- 情境一（五小時窗提前用完等 reset）：`five_hour ≥ 100−R`（保溫保留 **R＝5pp**，只作用在 five_hour 軸、不碰週軸 halt，`HALT_PCT=100` 的週額度用滿目標不受影響）∧ 距 reset ≥55 分 ∧ N<R1 ⇒ 停工後保溫（每 50 分一次至 reset）；N≥R1 ⇒ 牆前預先交接；距 reset <55 分 ⇒ 無動作（1 小時 TTL 覆蓋）；**撞到 100% 才想保溫不可行**（S1：被拒請求不讀不寫）⇒ 保溫必須在牆前預留。5pp 夠用的依據：K≤4×c≤0.45＝1.8pp，×2 誤差＝3.6≤5；保留 10pp 多留 5pp 純浪費（X17）。
+- 情境二（主控閒置等人／等背景任務）：背景任務不保溫，維持 §2.14.2 決策 4（等待自帶截止 40 分 <60）；等人且 N<R1 且有明確下一步 ⇒ 回合結束前排保溫，上限 K_max＝6（約 5 小時），人回來即自然停止（6×0.45＝2.7pp 低於 W 的悲觀上限）；等人且 N≥R1 ⇒ 交接；無下一步 ⇒ 放棄（讓它過期，0 成本）。
+- **誰發保溫請求**：互動視窗＝本 session 自己的 `ScheduleWakeup`（50 分）——同行程、同系統提示、同工具表，前綴相同是結構保證（P2）；外部 `claude -p -r` 只用於無人窗口（本就是 `-p`；S2＋P1），互動視窗不用（X16）。保溫回合固定字面：「保溫回合：不做任何工作，重排下一次 ScheduleWakeup（50 分）後結束」，輸出 ≤50 token。
+- 與 X9 的關係：§2.14.4 X9 否決的是「子代理以 5 分鐘內短輪詢保溫」（每小時 12 次、屬定時喚醒保溫），**維持不變**；本決策是**主控（1 小時桶）在上列條件內的保溫**，推翻 X9 對主控的適用範圍，不推翻對子代理的否決。前置真機驗證 V-K1～V-K4（TCS §10.7）全數通過前不得實作；任一不過 ⇒ 本決策改寫為「已驗證不可行」。
+
+**D5　量測：補指標，不新增只出聲的提醒**
+
+原定第一期補量測 M-P1、M-P3、M-P4、M-P7、M-C1（`waste_census` 套件新增配速指標模組）與 AC-7 回放（`--replay-pace-floor`）；**實作回填（2026-11-15）：兩者本期未做，改列後續期**（見 §2.15.5 實作狀態回填）；M-P2、M-P5、M-P6 的分子要等第二期保溫上線才有，第一期以既有 M1（主控閒置逾 1 小時重寫）作 M-P2 代理指標。定義與基線見 §2.15.7。
+
+#### 2.15.3 設計取捨與落點
+
+- 判準住新檔 `tools/lib/quota_pace_floor.py`（純函式、零 I/O、Python 3.9 可載入，同 `quota_pace` 的相容紀律）；趕工戳記與痕跡住新檔 `tools/lib/quota_rush.py`（含 `cli`）；`tools/sessionctl.py` 只加分派 `rush`。兩檔皆在已登記的扁平家族 `tools/lib/quota_*.py`（Root_Layout §3 額度守衛列），不另成套件。
+- **對 Architect 稿的三處以程式為準的修正**：(a) `quota_pace.py` 現為 371／400 斷言行（餘裕 29），配速床＋說明行約 50 行放不進 ⇒ 判準獨立成檔，`quota_pace.resolve()` **不動**，由 `quota_policy.axes_of` 在 `resolve()` 之後以 `quota_pace_floor.apply` 後處理（無循環匯入）；(b) Architect 稿的 `decide(..., rush=False)` 逐呼叫端透傳，但 `decide()` 的生產消費端有八處以上（`quota_gate` 四處、`quota_messages`、`session_brief` 兩處、`quota_escalation`、`relay_machine`、`selfimproving`…），逐點改會漏、且 `quota_gate.py` 是 hub tier（500／500，餘裕 0）⇒ 改以 `Policy.pace_rush_until` 承載、由 `policy_env()` 出口一次疊入（見 D2）；(c) 戳記檔放持久痕跡目錄（`endurance_env.trace_dir()`，與 `quota_burndown` 落款同家，沙箱可由 `AUTOSDD_TRACE_DIR` 圍籬）而非 `~/.autosdd/quota_rush.json`，避免測試讀到開發機真實戳記。
+- **`draining()` 不吃配速床**（`decide(..., pace_floor=False)`）：PRD §4.3 的 DRAIN 判準是原始 U5h 對 DRAIN 線；床把水位抬進 prepare 帶後 `band ∈ DRAINING_BANDS` 會讓「不得壓縮」在水位 55pp（已過 60 分、允許線 40）時就成立，與 context 守衛要求壓縮相衝（TCS §10 AT-QP-37）。`compact_margin_breached` 本來就讀 `axis.pct` 原值，不受影響。
+- **床抬到 prepare 帶的副作用**：`quota_gate.quota_prepare_actions` 掛在 `band == PREPARE`（寫可重啟點任務書，一個 reset 視窗只做一次）；床把水位抬進 prepare 時同樣會觸發（攤提抬水位今天已是同一路徑）。列入 §2.15.6 劃界與 M-P 監看，不另設旁路。
+- `quota_gate.py` 淨行數須 ≤0：現餘裕 0，需要新增的接線約 3～4 行（匯入 `quota_rush`／`quota_pace_floor`、gate 路徑一行落款、`pace_report` 一段）——Developer 動工前先抽出等量程式（候選：halt 標記三函式、`pace_state`＋`settled_quota`），同 commit 重釘 hub 棘輪，**不得調高 hub 預算**。
+- 回放（**後續期，未落地**）：`--replay-pace-floor` 以 `quota_burn.jsonl` 每列（需帶 `resets_at`）重建 `QuotaState` 各算一次有床／無床的 cap，輸出「床會開的列數」與五件撞牆窗各自最早開床時刻；不設通過數字，交 QA 判讀。
+
+#### 2.15.4 已否決（續 §2.14.4 的 X8～X15；F3＝X9、F14＝X8 沿用不另編）
+
+| 代號 | 方案 | 理由 |
+|---|---|---|
+| X16 | 互動視窗由外部排程 `claude -p -r <sid>` 保溫 | 互動行程不會看到 `-p` 追加的回合 ⇒ 同一逐字稿兩條鏈頭（§2.11 的 OTHER_DRIVER 判準會誤觸）；互動與 `-p` 工具集是否相同文件未載；同行程 `ScheduleWakeup` 是結構保證 |
+| X17 | 額度保留 10%（掌舵者提案的上緣） | 實測等待 K≤4×c≤0.45＝1.8pp，×2 誤差仍 <5；多留 5pp 純浪費；5% 夠 |
+| X18 | 換 session 門檻改成「pp／回合」 | 逐字稿量不到每請求 pp（落款 691 筆／2.5 月）；閘門輸入必須逐請求可量；pp 模型只用來**選** token 門檻的值 |
+| X19 | 撞牆後才保溫、或等 harness 寬限再做 | 100% 後請求被拒（S1）；wrap_up 寬限只夠收尾 |
+| X20 | 第一期就以 `updatedInput` 自動改派工模型 | 平台行為未驗證；阻斷形態可做但暴露證據不足，移第二期（`model_hint` 仍只建議） |
+| X21 | 以 `pace_ceiling` 驅動攤平 | 它只改 horizon，free 帶 cap=None 時零煞車（D1 缺口） |
+| X22 | 用 sleep／延後派工攤平 | 屬等待壞形態（鐵律六）；cap＋阻斷是既有致動器 |
+| X23 | 趕工用環境變數 | 改 env 要重啟、易忘關；戳記自帶到期、可稽核 |
+| X24 | 配速床也套長窗（週） | 週已有攤提；套上會與「週用滿」直接衝突 |
+| X25 | CLAUDE.md 改 `@import` 拆檔瘦身 | import 在載入時展開，token 不變 |
+| X26 | fork 子代理共用父快取 | fork 跑主控模型、`model` 覆寫被忽略（根 CLAUDE.md 已禁） |
+| X27 | 快取冷時仍以 `/compact` 當收斂出口 | P4：冷 compact 整份 uncached 重算加摘要輸出，比交接貴；出口文字改「只給交接」屬第二期（C-5） |
+
+#### 2.15.5 分期
+
+| 期 | 內容 | 前置驗證（不依賴者標「無」） |
+|---|---|---|
+| 第一期（一支開發棒、一個五小時窗；**已落地＝D1、D2、文件與連動面**；D5 量測與 AC-7 回放未做，順延至後續期） | D1 配速床、D2 趕工戳記、D5 量測（M-P1／P3／P4／P7、M-C1、AC-7 回放）、文件與連動面 | 無（不依賴未驗證的平台行為）；真機 V-P1～V-P5（TCS §10.6） |
+| 第二期 | 保溫致動（`keepwarm_verdict`＋ScheduleWakeup 50 分，R＝5pp 的 five_hour 專屬停工線）；牆前預先交接＋reset 時一次性 `handoff --spawn`；R1 下修（25 萬→20 萬；以 `--replay-hard-ctx` 回放「首次 ≥20 萬後的主控呼叫數」中位 >95 為條件）；冷時只給交接出口（C-5）；模型降級阻斷（opus／fable 在 converge 以上被擋、行內理由逃生；另需暴露證據，無則登記理論洞）；statusline 每請求取樣；扇出 cap 外加同時在跑代理數上限（第一期上線 7 天後 M-P1 未改善才做） | V-K1～V-K4（保溫）、V-S1（schtasks 開互動視窗）、V-M1（statusline 欄位）；動 `.claude/` 須主控親套 |
+| 第三期 | 無人窗口 `claude -p -r` 保溫；C-4 開場瘦身（根 CLAUDE.md 82.6 KB→約 45～50 KB，估算非量測；獨立 SDD 鍵）；C-1 主控模型切換自動化（Fable 週軸收緊且超前時主控改 Sonnet，「Fable 當用則用」偏好衝突，待掌舵者以互動選項裁定） | V-U1（同 sid 連續兩次 `-p -r` 間隔 50 分仍命中，且與哨兵雙駕駛判準共存不誤判）、V-C4（子代理與 `-p` 是否收到 rules 與 skill 描述） |
+
+後續期的細項本節只登記前置與方向，**本期不寫 AT**。
+
+**實作狀態回填（2026-11-15，依實作事實改規格；WHY＝規格不得宣稱磁碟上不存在的東西）**：第一期實際落地 D1 配速床（`quota_pace_floor`）、D2 趕工戳記（`quota_rush`，經 `sessionctl rush`）、為騰出 hub 餘裕自 `quota_gate` 抽出的 `quota_halt_marker`（原稿未列、gate 以單行 re-export）。**未落地、順延後續期**：D5 的配速指標與回放模組（TCS §10 的 AT-QP-56～63）。實作與原稿的六處差異：
+1. 免套用的「短窗」加上界（最長 1440 分鐘）：只剩週軸時 session 無鄰軸可繼承窗長，最短窗軸會變週軸，床會對週軸生效、違反 X24 與「週用滿」；AT-QP-17b 釘住。
+2. AT-QP-19 的數字改 55／70（窗 200）：原稿 40／60 算不出 70／85。
+3. AT-QP-38 原稿「既有 M7 判準對全文綠」於改前即不成立（`pace_report` 第一行本無 `kind=`）；改為只對本期新增的床段與 describe 句判 M7（AT-QP-70）。
+4. `log_floor` 一次決策只落一列（取超線最多的軸）。
+5. `Decision.pace` 的 hold 固定為空；`burndown.apply` 內部呼叫 `axes_of` 仍預設套床（生產無 `pace_floor=False` 搭 `burndown` 的組合）。
+6. AT-QP-55 的站點表登記 11 個檔（含三支探針模擬器與 doctor 的直接 `load_policy`）。
+另：趕工戳記讀取端改走唯讀路徑查找（不得在 `--check` 時憑空建立痕跡目錄），回歸鎖＝`ReadSideCreatesNothingTest`。
+
+#### 2.15.6 誠實劃界
+
+- 床與趕工戳記是**判斷值**：`B＝20`、`S＝10` 未量測，只准下修；第一期以回放（AC-7）與 M-P7 校正。M-P7 過高（>50% 窗有趕工戳記）代表床太緊，處置是檢討判準，不是放寬方向鎖。
+- 換算係數 n＝2、寫讀比可落 10～60；Sonnet／Opus 係數量不到，D4 的表只適用 Fable 主控。落款稀疏（691 筆／2.5 月）是換算率與曲線的最大誤差源，上線後若有 statusline 取樣才能收斂到 ±5%（V-M1）。
+- 配速床只管**扇出**（cap）；主控自己的呼叫（本窗 5.5k 新增寫入／呼叫、0.4～0.75pp／呼叫）不受 cap 管，真正的省量要靠 C-1／C-4／C-6（第二、三期與慣例），本期不宣稱解決。
+- 「床擋過派工」的證據＝`pace_floor` 落款存在（床抬過水位、cap 因而比無床時更緊），不證明某一次派工因此被拒；M-P4 的撤回條件以此為近似。
+- 床抬到 prepare 帶會觸發 `quota_prepare_actions`（任務書落盤，視窗內只做一次）；若觀察期內該副作用過於頻繁，檢討的是 S（`pace_step_pp`）的取值，不是在 prepare 帶開旁路。
+- 趕工戳記與 `AUTOSDD_QUOTA_PACE_RUSH_UNTIL` 載體**不具防偽性質**（同 `quota_burndown` 的誠實聲明）：只讓事後可稽核、失效可偵測；手設該環境變數等同趕工至該時刻，仍受 5 小時上限約束。
+- `ScheduleWakeup` 沒有任何憑證（不寫磁碟、無登錄），保溫的失效是靜默的；第二期以 M-P5（保溫請求命中率，逐字稿事後量）與 V-K1 的「喚醒間隔≈50 分」判準補這個洞。
+- 第二期前置真機驗證**全數未做**；statusline 欄位、idle compaction 觸發條件、價格比皆「未讀到」，不得據以宣稱。
+
+#### 2.15.7 指標、基線與撤回門檻（觀察期：2 個完整週額度週期＝14 天；第 7 天中期檢查只看回退判定；評估法＝中斷時間序列＋逐列回放，n 小時不做 A/B）
+
+| 指標 | 定義與資料來源 | 基線（含樣本與不確定度） | 改善判定 | 撤回判定 |
+|---|---|---|---|---|
+| M-P1 撞牆次數 | halt 標記（binding 為五小時窗軸，窗長以文法判）件數／週 | 2.5／週（14 天 5 件，SA Q5；n 小） | 連 2 週 ≤1／週 | ≥基線 |
+| M-P2 牆後冷重寫 | 第一期以既有 M1（主控閒置逾 1 小時重寫）作代理；起因＝額度牆的細分待第二期 | 13 件（SA；起因判讀為 SA 腳本，未入 repo） | −50% | 不降 |
+| M-P3 窗內早燒 | 窗前 40% 時間內水位 ≥70 的窗占比（`quota_burn.jsonl`，需帶 `resets_at`、窗內 ≥3 樣本） | 28 個可辨窗中 1 個＋2 個撞牆窗（落款稀疏） | 降為 0 | — |
+| **M-P4 週用滿（護欄）** | 週軸 reset 前最後讀數（`quota_burn.jsonl`，末列距 reset ≤24 小時者；以窗長 ≥10080 分的軸、reset 時刻取整到小時分組） | **weekly_all：9 週、中位 90、範圍 72～98**；weekly_scoped 同 9 週中位 83、範圍 43～96（SD 本棒自 790 列、2026-08-19～11-15 現算；末列常在 reset 前數小時，**低估偏差**；reset 時刻在不同週漂移） | 不低於基線中位（不退化線 90；目標 95） | 任一週低於 90 **且** 該週 reset 前 24 小時內有 `pace_floor` 落款 ⇒ 撤 D1 |
+| M-P5 保溫命中（第二期） | 保溫請求 read／(read＋creation)（逐字稿） | 無 | ≥0.95 | <0.8 ⇒ 撤保溫 |
+| M-P6 保溫成本（第二期） | 保溫實耗 pp 對預測 | 無 | 實耗 ≤2×預測 | >保留 R ⇒ 撤 |
+| M-P7 趕工使用率 | 有趕工戳記的窗占比（`autosdd_pace_floor.jsonl` 的 on 事件與 `until`） | 0（本功能新） | — | >50% ⇒ 床太緊，回頭校判準 |
+| M-C1 主控每呼叫新增寫入 | 主控 sid 平均 `cache_creation`／請求（逐字稿） | 本窗 5.5k（SA 單窗） | ≤2.5k | — |
+
+證偽前提：上線後若 statusline 取樣可得，重算換算係數；寫讀比落在 10～60 以外，D4 的表全部重算。
 
 ## 3. 被否決的方案（各記為何否決）
 

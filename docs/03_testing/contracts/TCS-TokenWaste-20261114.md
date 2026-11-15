@@ -174,6 +174,9 @@
 | AT-TW-76 | 逐字稿缺／無 `transcript_path`／非 dict payload | 同 | `""`，不拋 | fail-open |
 | AT-TW-77 | 先推回（ctx=300,000）；逐字稿尾端追加 ctx=100,000 的新回合 | 同一 payload 再判 | 第二次 `""` | 不寫閂鎖，`/compact` 之後自動解除 |
 | AT-TW-78 | 同一 Stop payload（含 `last_assistant_message`＝「這件事待掌舵者決定。」）依序餵 `sessionctl_guard.py` 與 `check_pending_handoff.py`（子行程） | 同 | 第一次兩者皆 `decision:block`；`stop_hook_active` 為真時兩者皆無輸出 | 疊加最壞兩個額外回合、不死鎖：兩支各自「每回合至多推一次」，且都吃 CC 給的同一個迴圈煞車旗標 |
+| AT-TW-79 | 本 sid 有已 finalize 的 live 包；ctx 在硬門檻之下、未出聲；`background_tasks` 含執行中的 `shell`（另驗執行中的 `subagent`） | `stop_verdict` | 非空 reason，含 `冷叫醒閘`、`TaskStop`、任務數、`只推回這一次`；痕跡一列 `finalized_wake_block` | DEF-200-588 事故形態：交棒後留著的背景任務結束時把舊 session 冷叫醒、整份重寫；放行這條＝交棒後的 session 還會自己燒額度 |
+| AT-TW-80 | 同上，逐一換成：任務已結束／空陣列／payload 無該欄／無 finalize 包／只有他 sid 的包／`stop_hook_active`／無人／`off` | 同 | 皆 `""` | 假紅面：沒交棒時掛著等 CI 是正當用法；無欄位不猜 |
+| AT-TW-81 | 已出聲、ctx=300,000、`background_tasks` 只有執行中的 `shell` | hook 層餵 Stop payload | stdout JSON `decision=="block"` | 出聲不得蓋掉推回：原接線先出聲就返回，判準層的推回在掛著背景 shell 時永遠到不了 |
 
 
 ### 2.9 AT 實作狀態對照（2026-11-15 收尾；單檔 `discover` 實跑）
@@ -192,6 +195,7 @@
 | AT-TW-62 | `test_root_module_layout.py` 登記面 | 綠 |
 | AT-TW-63 | 既有 `test_sessionctl_*` | 綠 |
 | AT-TW-73～77 | `test_sessionctl_converge.py::StopVerdictTest` | 綠 |
+| AT-TW-79～81（DEF-200-588） | `test_sessionctl_converge.py::StopVerdictTest` 的兩條 `test_def_200_588_*`；`test_sessionctl_hooks.py::HookConvergeTest::test_def_200_588_a_background_shell_never_masks_the_stop_pushback` | 綠 |
 
 真機驗證 V-G1、V-G2、V-P1、V-C2、V-T1～V-T3 全數待主控；`long-runner` 只有 staged 檔、不接線、無 repo 測試。
 
@@ -270,3 +274,325 @@
 ## 9. 缺陷帳本列
 
 DEF-200-587（`docs/06_quality/AutoSDD_Defect_Log.md`，fixed@R215 同 commit）涵蓋四件：續棒不看快取冷熱、出聲後無機械收斂（含 Stop 推回）、pre-push 快層在慢層之後、浪費帳無可重跑量測。G3 `long-runner` 為條件項，依 V-T1～V-T3 結案，不在本列。
+
+## 10. 額度配速與快取保全（第一期：配速床＋趕工戳記＋量測；2026-11-15；設計全文＝ADR-XPLAT-004 §2.15）
+
+> 來源任務書＝第二主題四方任務書（掌舵者原話 sid `eb1cb524-de09-4ad5-a068-69fa180dc64b` 2026-11-15 00:1x，全文見 ADR §2.15.0）；Architect 定稿＝`ARCH_PACE.md`；SA 數據＝`HB_SA.md`。缺陷帳本列＝DEF-200-589（草稿見 §10.9）。
+> **狀態（2026-11-15）**：規格階段；實作尚未開始，AT 尚無測試；§10.6 真機驗證 V-P1～V-P5 與 §10.7 第二期前置 V-K1～V-K4、V-S1、V-M1、V-U1、V-C4 皆**待真機驗證**，未驗，不得寫成已驗。
+> 測試注入縫沿用 §2 前言：`now`（aware datetime）、`AUTOSDD_TRACE_DIR` 指 tmp（戳記與痕跡落此）、`env` mapping、tmp 快取檔；**不讀本機真實 `~/.claude` 與 `~/.autosdd`、不起真排程、不起真 claude、不外呼網路**。
+
+### 10.0 範圍
+
+第一期做：D1 窗內配速床、D2 趕工戳記。**實作狀態回填（2026-11-15）：D5 量測補指標與 AC-7 回放（本章 §10.4 的 AT-QP-56～63、§10.6 的 V-P6）本期未做，改列後續期（未落地）；本章對應 AT 與 V 保留為後續期規格，不計入第一期驗收。**WHY：規格不得宣稱磁碟上不存在的元件；第一期已落地的另含為騰出 hub 餘裕自 `quota_gate` 抽出的 `tools/lib/quota_halt_marker.py`。**不做**：保溫致動（ADR §2.15.2 D4 只記決策與決策表，實作屬第二期）、模型降級阻斷、R1 下修、開場瘦身、statusline 取樣、牆前預先交接與 reset 自動開窗、C-5 冷時只給交接出口（皆列 ADR §2.15.5 分期表，本期不寫 AT）。DEF-200-588（冷叫醒閘）已另案完成，見 ADR §2.14.5，不在本章。
+
+### 10.1 模組落點與所有權表（照 Root_Layout §2；全部在已登記的扁平額度守衛家族 `tools/lib/quota_*.py` 與 wastecensus 套件內，無新落點格）
+
+| 元件 | 路徑 | 動作 | 持有者 |
+|---|---|---|---|
+| 配速床判準（純函式、零 I/O、Python 3.9 可載入） | `tools/lib/quota_pace_floor.py` | 新 | Dev（單人串行） |
+| 趕工戳記讀寫、疊入、痕跡、`cli` | `tools/lib/quota_rush.py` | 新 | 同上 |
+| halt 標記三函式（自 `quota_gate` 抽出，gate 單行 re-export；實作時新增） | `tools/lib/quota_halt_marker.py` | 新 | 同上 |
+| 政策欄位與接線：`Policy` 三欄、`decide`／`axes_of` 的 `pace_floor` 參數、`Decision.pace`、`describe` 提示句、單調性判準 | `tools/lib/quota_policy.py`（現 301／400） | 改 | 同上 |
+| `ENV_SPEC` 三鍵 | `tools/lib/quota_policy_env.py`（現 215／400） | 改 | 同上 |
+| env 疊入一行、`draining()` 傳 `pace_floor=False`、gate 路徑落款一行、`pace_report` 一段 | `tools/lib/quota_gate.py`（**hub tier 500／500，餘裕 0**） | 改（淨行數 ≤0） | 同上；先抽出等量程式再接線 |
+| `rush` 分派 | `tools/sessionctl.py`（薄殼） | 改 | 同上 |
+| 配速指標與回放（**後續期，未落地**） | wastecensus 套件內的 `pace_metrics`、`pace_replay` 兩模組（尚無檔）；`report.py` 加旗標 | 後續期 | 同上 |
+| 入口薄殼 | `tools/probe/waste_census.py` | 只分派新旗標 | 同上 |
+| 測試（新） | `tools/tests/test_quota_pace_floor.py`、`tools/tests/test_quota_rush.py` | 新 | 同上 |
+| 測試（既有檔增量） | `test_quota_policy.py`、`test_waste_census_metrics.py` | 改 | 同上 |
+| 不動 | `quota_pace.py`（現 371／400；`resolve` 簽名與行為不改）、`.claude/**`（本期無 hook 與 settings 變更） | — | — |
+| 文件連動 | 見 §10.8 | — | Closer |
+
+並行紀律（根 CLAUDE.md 鐵律七）：以上全是同一條判準的常數／判準／消費端，**不得切給並行包**；一棒做完、主控親驗後才派下一棒。
+
+### 10.2 介面契約（以真實函式簽名為準；以下為新增或改動部分）
+
+**常數與政策欄位**
+
+| 名稱 | 住處 | 出廠值／格式 | 方向鎖 |
+|---|---|---|---|
+| `Policy.pace_burst_pp` ／ `AUTOSDD_QUOTA_PACE_BURST_PP` | `quota_policy.Policy`／`ENV_SPEC` | `20.0`，`float`，`lo=0.0`、`hi=20.0` | 只准下修：大於出廠值＝越界＝該鍵退預設＋進 `problems`（`_parse_env_number` 現行語意：**單鍵退預設，不是整組**） |
+| `Policy.pace_step_pp` ／ `AUTOSDD_QUOTA_PACE_STEP_PP` | 同上 | `10.0`，`float`，`lo=1.0`、`hi=10.0` | 同上 |
+| `Policy.pace_rush_until` ／ `AUTOSDD_QUOTA_PACE_RUSH_UNTIL` | 同上 | 預設 `None`（範例檔留空）；`float`，`lo=0.0`、`hi=None`；值＝epoch 秒 | 有效判準在 `decide`：`0 < until − now ≤ RUSH_MAX_SECONDS`；其餘一律當未趕工（較緊方向） |
+| `RUSH_MAX_SECONDS` | `quota_pace_floor` | `18000.0`（5 小時）；`quota_rush.issue` 的 `hours` 上限由它導出 | 只准下修 |
+| `NOTE_PACE` | `quota_pace_floor` | `"pace-floor"`（併入逐軸 note 與 `Decision.reason`） | — |
+| 無環境變數形態的總開關 | — | **刻意不提供**（床的逃生口只有趕工戳記；burst 只能往 0 調） | — |
+
+`policy_monotonicity_problems(p)` 新增：`pace_burst_pp < 0` 或 `pace_step_pp <= 0` ⇒ 一條以 `[方向]` 起首的 problem。
+
+**`tools/lib/quota_pace_floor.py`**
+
+```
+class PaceFloor(NamedTuple):
+    kind: str; pct: float; minutes: float | None; window: float | None
+    allowed_pp: float | None   # 100×elapsed + burst；算不出為 None
+    over_pp: float | None      # pct − allowed_pp
+    level: float | None        # 餵入水位下限；無則 None
+    state: str                 # "lifted" | "within" | "exempt-rush" | "exempt-weekly-reset"
+                               # | "exempt-hold" | "unknown" | "n/a"
+
+def pace_floor(pct, minutes, window, burst, step, converge, prepare, halt) -> float | None
+    # lead = quota_pace.lead_pp(pct, minutes, window)；None ⇒ None
+    # over = lead − burst；over <= 0 ⇒ None
+    # level = prepare if over > step else converge；回 min(level, halt − 1.0)
+
+def rush_active(policy, now) -> bool
+    # policy.pace_rush_until 非 None 且 0 < until − now.timestamp() <= RUSH_MAX_SECONDS
+
+def evaluate(rows, deltas, policy, now, *, skip=(), hold=()) -> tuple[PaceFloor, ...]
+    # rows＝quota_policy._rows(state) 形狀 [(kind, pct, resets_at, pct_note)]；deltas＝[(帶號分鐘|None, note)]
+    # 與 rows 同序；最短窗軸（quota_pace.mask_windows(quota_pace.windows(...), skip) 之窗長最小者）
+    # 逐軸判：趕工 ⇒ "exempt-rush"；lead 為 None ⇒ "unknown"；hold 為真 ⇒ "exempt-hold"；
+    # 存在更長窗軸且其分鐘數 0<=m<本軸剩餘分鐘（嚴格小於）⇒ "exempt-weekly-reset"；
+    # pace_floor 回 None ⇒ "within"；否則 "lifted"。其餘軸 "n/a"。
+    # converge／prepare／halt／burst／step 一律取自傳入的 policy（恆有值，無「錨點缺席」分支）；
+    # 畸形輸入（pct 非數、resets_at 非字串）不拋，該軸 "unknown"。
+
+def apply(resolved, floors) -> tuple
+    # resolved＝quota_pace.resolve 的 [(feed, horizon, minutes, note)]；回同形狀；
+    # state=="lifted" 的軸 feed = max(feed, level)；僅當 level > feed 時 note 以 "+" 併入 NOTE_PACE
+
+def line(floors) -> str
+    # 每個最短窗軸一行（兩空格縮排、換行結尾）；無最短窗軸 ⇒ ""；全文不得出現 "%"，一律 pp；每行帶 "kind=<k>" 與整數剩餘分鐘
+```
+
+**接線契約（`quota_policy`）**
+
+- `axes_of(state, now, p, ratio=None, ratio_note="", active_model=None, relax=None, pace_floor=True)`：`resolve()` 之後，`pace_floor` 為真時 `resolved = quota_pace_floor.apply(resolved, evaluate(_rows(state), deltas, p, now, skip=_amort_skip(state, active_model), hold=(relax[1] if relax else ())))`；為假時**不呼叫** evaluate／apply（逐位元等於改前）。
+- `decide(state, now, p, ratio=None, ratio_note="", active_model=None, burndown=None, pace_floor=True)`：透傳；`Decision` 新增欄位 `pace: object = ()`（`PaceFloor` 的 tuple，同 `amort` 先例；`pace_floor=False` 時為 `()`）。`pace_contract.write` 不序列化它。
+- `describe(decision)`：reason 含 `pace-floor` 時尾端附一句出口：`（配速床：如需趕工 python tools/sessionctl.py rush --hours <H> --why <WHY>）`；不含時不附；全文不得新增孤立 `%`。
+- `quota_gate.policy_env(root=None)`：回傳前經 `quota_rush.overlay`（見下）；`quota_gate.draining()` 以 `pace_floor=False` 呼叫 `decide`；`pace_report` 把 `quota_pace_floor.line(decision.pace)` 併入輸出（位置在攤提行之後）；`quota_gate()` 路徑在 `if decision.cap is None or event != "PreToolUse": return 0` 之後呼叫 `quota_rush.log_floor(decision, now)`。
+
+**`tools/lib/quota_rush.py`**
+
+```
+SCHEMA = "autosdd.quota_rush/1";  STAMP_NAME = "quota_rush.json"
+EVENTS_NAME = "autosdd_pace_floor.jsonl";  RUSH_KEY = "AUTOSDD_QUOTA_PACE_RUSH_UNTIL"
+MIN_WHY_CHARS = 8;  UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
+
+def stamp_path() -> Path                      # endurance_env.trace_dir() / STAMP_NAME
+def read_stamp(path=None) -> dict | None      # fail-closed：缺檔／壞 JSON／schema 不符／缺欄／型別錯／until 或 issued_at 為 naive／
+                                              # until_epoch 與 until 不一致／until − issued_at > RUSH_MAX_SECONDS + 1 ⇒ None
+def active(now=None, env=None, path=None) -> dict | None
+    # env 有 UNATTENDED_ENV ⇒ None；read_stamp 有效且 0 < until − now ≤ RUSH_MAX_SECONDS ⇒ 該 dict 加 "left_minutes"
+def overlay(env, now=None, path=None) -> dict
+    # 回 dict(env) 的複本（不改原 mapping）；RUSH_KEY 缺席／空白／數值 <=0 且 active(...) 成立 ⇒ 設 RUSH_KEY=str(until_epoch)；
+    # 已有正值不覆蓋；任何例外吞掉並回無疊入的複本
+def issue(hours, why, sid="", now=None, env=None, path=None) -> tuple[int, str]
+    # rc 0 寫入（覆寫舊戳記＝延長）並落 pace_rush_on；rc 2 拒絕（無人窗口／hours 不是 0<H<=5 的有限數／why 去頭尾空白（含全形）後 <8 字）不寫檔；rc 1 檔案系統錯誤
+def revoke(now=None, path=None) -> tuple[int, str]    # 有檔：刪除＋落 pace_rush_off，rc 0；無檔：rc 0、訊息「無趕工戳記」、不落事件
+def status_text(now=None, env=None, path=None) -> str
+def log_event(event, path=None, **fields) -> bool
+def log_floor(decision, now, path=None) -> bool       # decision.pace 內有 state=="lifted" ⇒ 追加一列 pace_floor；否則不寫；寫不進去回 False 不拋
+def cli(argv) -> int
+```
+
+戳記檔（`endurance_env.trace_dir()/quota_rush.json`）：`{"schema":"autosdd.quota_rush/1","issued_at":"<ISO 帶 offset>","until":"<ISO 帶 offset>","until_epoch":<float>,"hours":<float>,"why":"<str>","sid":"<str，預設取 CLAUDE_CODE_SESSION_ID>"}`。痕跡檔（同目錄 `autosdd_pace_floor.jsonl`，單行 JSON、`ensure_ascii=False`、`\n` 結尾）事件：`pace_rush_on`（`at`、`until`、`hours`、`why`、`sid`）、`pace_rush_off`（`at`、`reason:"revoked"`）、`pace_floor`（`at`、`kind`、`pct`、`minutes`、`allowed_pp`、`level`、`cap`、`band`）。只用 `Path.write_text`／`open(...,"a")`／`unlink`，不引入 `os.replace`／`rename`（Windows 檔案鎖原語鎖）。
+
+**命令列 `python tools/sessionctl.py rush`（分派到 `quota_rush.cli`）**
+
+| 形式 | 行為 | rc |
+|---|---|---|
+| `rush --hours <H> --why "<WHY>" [--sid <SID>]` | 發戳記；成功輸出到期時刻與剩餘分鐘 | 0 成功；2 拒絕（見 `issue`）；1 檔案系統錯誤 |
+| `rush --off` | 撤銷 | 0 |
+| `rush --status` | 輸出有效／已過期／無戳記與 why | 0（無戳記也是 0） |
+| 無旗標、`--hours` 缺 `--why`、`--off` 與 `--hours` 並用、未知旗標 | 用法錯誤（與 `sessionctl.py` 既有 `_USAGE_RC` 同值） | 3 |
+
+`tools/sessionctl.py` 的用法錯誤訊息與檔頭用法說明加入 `rush`。
+
+**`--pace` 新行文字契約**（逐字措辭由開發棒定，AT 只釘關鍵片段）：最短窗軸一行以 `配速床：` 起首、含 `kind=<軸名>`、整數剩餘分鐘、`pp`；各 state 的必含片段——`lifted`：`允許線`、`超線`、`水位至少抬到`；`within`：`未超線`；`exempt-rush`：`趕工戳記`；`exempt-weekly-reset`：`先 reset`；`exempt-hold`：`清倉`；`unknown`：`不明`。
+
+### 10.3 需求（FR）
+
+| FR | 內容 | 對應 | 暴露證據 |
+|---|---|---|---|
+| FR-QP-01 | 最短窗軸超出允許線 ⇒ 餵入水位至少抬到 converge（`over≤S`）或 prepare（`over>S`），上界 `halt−1`；永不調低 | ADR D1；AC-1、AC-3 | E-P1～E-P3 |
+| FR-QP-02 | 窗尾（允許線 ≥100）與長窗先翻頁、窗長／距離不明、清倉 hold 時不抬 | AC-2、AC-5 | 同上 |
+| FR-QP-03 | 趕工戳記有效 ⇒ `decide` 輸出與無本功能逐位元相同；過期、超過 5 小時、無人窗口、結構錯誤一律當無戳記（較緊方向） | AC-4 | 同上 |
+| FR-QP-04 | `sessionctl rush` 寫／撤／查；`hours` 上限 5、`why` ≥8 字、無人窗口拒絕 | AC-4 | 同上 |
+| FR-QP-05 | 三個新鍵進 `ENV_SPEC`，burst／step 只准下修；`.env.example` 為生成物 | AC-6 | 同上 |
+| FR-QP-06 | 所有走 `policy_env()` 的消費端看到同一個 cap；`draining()` 不吃床 | ADR D2、§2.15.3 | 同上 |
+| FR-QP-07 | `--pace` 說出床的狀態；床造成的阻斷訊息附趕工出口 | AC-8 | 同上 |
+| FR-QP-08 | 補量測 M-P1／P3／P4／P7、M-C1 與 AC-7 回放；零 token、不接閘門 rc | ADR D5 | 同上 |
+
+### 10.4 驗收測試（AT；AT-QP-56～63 為後續期，第一期未落地）
+
+縫：`NOW`＝`now`（aware）；`TRACE`＝`AUTOSDD_TRACE_DIR` 指 tmp；`ENV`＝`env` mapping；`CACHE`＝tmp 額度快取（`quota_gate.read_quota` 讀的那份）；`FS`＝tmp 合成逐字稿／落款／halt 標記。預設政策＝burst 20、step 10、converge 70、prepare 85、halt 95；窗長 300 分；「X 分」＝剩餘分鐘。預期 cap 以現行 `quota_policy._cap_for` 為準（converge×far＝2、prepare×far＝1，SD 已以真實函式核對）。
+
+#### 10.4.1 `pace_floor()` 純函式（`test_quota_pace_floor.py::PaceFloorFnTest`）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅（意圖） |
+|---|---|---|---|---|
+| AT-QP-01 | 三個實測點：(38, 247)、(43, 244)、(48, 230)，窗 300 | `pace_floor` | 皆回 `70.0` | 三個真實事故點（ADR §2.15.0）；少算 burst 或把允許線算錯，三點之一會偏離 |
+| AT-QP-02 | 邊界 over＝0：(50, 210)；over＝+1：(51, 210) | 同 | 前者 `None`、後者 `70.0` | `over <= 0` 寫成 `< 0` 會把「剛好在線上」也煞車，床變成嚴格線性 |
+| AT-QP-03 | 邊界 over＝S：(60, 210)；over＝S+1：(61, 210) | 同 | 前者 `70.0`、後者 `85.0` | `over > S` 寫成 `>= S` 會讓邊界點越級進 prepare，觸發任務書落盤副作用 |
+| AT-QP-04 | 窗尾：(99, 30)；並掃 minutes∈{0,5,…,60}×pct∈{0,…,100} | 同 | 全部 `None` | AC-2：窗尾 use-it-or-lose-it 不得被床破壞（B＝20 時第 240 分起允許線 ≥100） |
+| AT-QP-05 | minutes 為 `None`／負數；window 為 `None`／0 | 同 | 皆 `None` | 期程不明不得抬水位（同 `lead_pp` 前置；抬了就是無證據的新煞車） |
+| AT-QP-06 | `prepare=96`、`halt=95`（病態政策）；(61, 210) | 同 | 回 `94.0`（`halt−1`） | 推導值永不觸發 halt（halt 只由伺服器真實水位開火）；去掉夾層即回 96 |
+| AT-QP-07 | pct 0～100（步長 1）×minutes 0～300（步長 5） | 掃描 | 結果∈{`None`}∪[converge, halt−1]；固定 minutes 時 pct 增加結果不遞減；固定 pct 時剩餘分鐘減少（時間流逝）結果不遞增 | AC-3 的網格性質；任何符號寫反或單位寫錯會在某一格破單調 |
+| AT-QP-08 | 同網格；burst 20→10→0、step 10→5→1 逐步調小 | 同 | 每格結果「不更鬆」（`None` 視為 −∞；level 只增不減） | 方向鎖：調小一定更緊，調大才是放寬；方向反了＝可調旋鈕成了放寬後門 |
+| AT-QP-09 | window＝600、minutes＝540、pct＝35；對照 window＝300、minutes＝270、pct＝35 | 同 | 兩者結果相同（皆 `70.0`） | 窗長歸一化；若寫死 300，非五小時窗軸（如日窗）會錯 |
+| AT-QP-10 | 資料自相矛盾：minutes＝400 > window＝300，pct＝25 | 同 | `70.0`（lead＝pct＝25、over＝5） | 與 `lead_pp` 夾 0 的保守側一致；用負 elapsed 計算會得到放寬的錯誤答案 |
+| AT-QP-11 | 以 `AUTOSDD_QUOTA_PACE_BURST_PP=0`、`AUTOSDD_*` 全清兩種 `os.environ` 各呼叫一次 | 同 | 結果相同 | 純函式不讀環境、不讀時鐘；環境只能經 `Policy` 進場 |
+
+#### 10.4.2 `evaluate()`／`apply()`（`test_quota_pace_floor.py::EvaluateApplyTest`；夾具 `_rows`、`_deltas`、預設 `Policy`，resolved 由 `quota_pace.resolve` 現算）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅 |
+|---|---|---|---|---|
+| AT-QP-12 | five_hour 38@247、session 同 reset、weekly_all 60@8000 | `evaluate`＋`apply` | five_hour／session 的 state＝`lifted`、level＝70；apply 後兩軸 feed＝70.0、note 含 `pace-floor`；weekly_all feed 不變 | AC-1 的軸級形態；少了 `max` 或套錯軸會立刻現形 |
+| AT-QP-13 | 同 AT-QP-12，`Policy.pace_rush_until`＝now＋1 小時 | 同 | 兩軸 state＝`exempt-rush`；`apply` 輸出與 `resolve` 原值逐位元相等（tuple 相等） | AC-4 免套用①；若趕工只「壓低」不「還原」，輸出會差一格 |
+| AT-QP-14 | weekly_all 的 reset 為 100 分（<247）；對照 247 分（相等）與 248 分 | 同 | 100 分：five_hour state＝`exempt-weekly-reset`、feed 不變；247／248 分：`lifted` | AC-5 與嚴格小於的邊界；寫成 `<=` 會讓「週軸剛好同時結束」也免套用 |
+| AT-QP-15 | five_hour 的 resets_at 為 `None`／非字串；pct 為 `"x"` | 同 | state＝`unknown`、不拋、feed 不變 | 免套用③＋畸形輸入 fail-open；拋例外會讓整條 gate 變故障源 |
+| AT-QP-16 | `hold` 遮罩對 five_hour 為真 | 同 | state＝`exempt-hold`、feed 不變 | 免套用④：床不得與清倉授權相抗；少了它床會把使用者明示要用盡的額度又擋回去 |
+| AT-QP-17 | weekly_all 90@8000（極度超前）、seven_day 同；five_hour 在允許線內 | 同 | weekly_all／seven_day state＝`n/a`、feed 不變；five_hour state＝`within` | 只作用最短窗軸（X24）；套到週軸會與週用滿目標直接衝突 |
+| AT-QP-18 | weekly_scoped 為別家模型（`skip` 遮罩為真）且其 reset 為 100 分 | 同 | **不**構成免②（five_hour 仍 `lifted`） | 遮罩軸不得影響本模型的床（與攤提同尺，DEF-200-438 的同型） |
+| AT-QP-19 | session 與 five_hour 同 reset、水位不同（40 與 60，剩 200 分） | 同 | 兩軸各以自己的水位算：level 各自為 70 與 85、皆 `lifted` | 同窗長的多軸要逐軸算；只算第一軸會漏另一軸 |
+| AT-QP-20 | 攤提已把 five_hour 的 feed 抬到 90（以 ratio 構造）；床 level＝70 | 同 | apply 後 feed 仍 90、note **不含** `pace-floor` | `max` 不是覆寫：覆寫會把更高的攤提水位壓回 70，變成放寬 |
+| AT-QP-21 | five_hour 90@230（已在 prepare 帶上方，level＝85） | 同 | state＝`lifted` 但 feed 仍 90、note 不含 `pace-floor` | note 只在「真的抬了」時出現；否則 M-P4 的「床擋過」近似會被稀釋 |
+
+#### 10.4.3 說明行（`test_quota_pace_floor.py::LineTest`）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅 |
+|---|---|---|---|---|
+| AT-QP-22 | 六種 state 各造一組 floors | `line` | 各行含 §10.2 該 state 的必含片段、`kind=<軸名>`、整數分鐘、`pp`；全文**無** `%` 字元 | AC-8／M7：畫面必須一行內回答「為什麼空著也不能衝」與「為什麼這次放行」 |
+| AT-QP-23 | 全為 `n/a`（無最短窗軸）或空 tuple | 同 | 回 `""` | 沒有最短窗軸時不得印一句空話（本 repo 判例：訊息混一句假話比少一欄更難看見） |
+| AT-QP-24 | session＋five_hour 兩個最短窗軸 | 同 | 兩行，各帶自己的 kind | 逐軸說明；合併成一行會把不同水位說成同一個數 |
+
+#### 10.4.4 決策、政策、env、gate（`test_quota_policy.py` 增量：`PaceFloorDecideTest`、`PaceFloorPolicyTest`；縫 NOW、CACHE、TRACE）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅 |
+|---|---|---|---|---|
+| AT-QP-25 | AC-1：five_hour 38@247＋session 同＋weekly_all 71@8467＋weekly_scoped(Fable) 78@8467；`active_model="fable"` | `decide` | five_hour 的 per_axis 讀數 band＝`converge`、horizon＝`far`、cap＝2；reason 含 `pace-floor`；`Decision.pace` 含 `lifted`。對照 `decide(pace_floor=False)`：five_hour 讀數 band＝`free`、cap＝`None`（整體 `Decision.cap` 因 weekly_scoped 78 本來就 ≤2，不具鑑別力；鑑別看 five_hour 的逐軸讀數） | 事故實測點；對照組證明差異來自床而非其他軸（證據 3 的 `cap=None` 就是對照組現狀） |
+| AT-QP-26 | 08:56 點（43@244）與 70 分鐘點（48@230） | 同 | band＝`converge`、cap＝2 | 另外兩個真實點，防止只對單點調參 |
+| AT-QP-27 | 61@210 | 同 | band＝`prepare`、cap＝1 | S 的分級要真的進致動器，不只停在函式層 |
+| AT-QP-28 | AC-2：80@40（已過 86.7%） | `decide` 與 `decide(pace_floor=False)` | 兩者 cap、recommended_fanout、band、binding.kind、per_axis 全欄、reason **逐欄相等**，reason 不含 `pace-floor` | use-it-or-lose-it 在 `decide` 層同樣成立 |
+| AT-QP-29 | AC-5：weekly_all 的 reset 為 100 分、five_hour 38@247 | 同 | 同 AT-QP-28 的逐欄相等 | 免套用②在整合層成立；軸級對、整合層漏接線是本 repo 反覆記載的失敗型 |
+| AT-QP-30 | AC-4：`Policy.pace_rush_until`＝now＋3600 | `decide` 與 `decide(pace_floor=False)` | 逐欄相等（含 reason、per_axis 的 note、`Decision.pace`＝`()` 或全為 `exempt-rush`） | 「與無本功能逐位元相同」的直接斷言 |
+| AT-QP-31 | 趕工邊界：until＝now＋18000 秒（有效）；＋18001 秒（超上限）；now（恰好到期）；now−1（已過期） | 同 | 有效者＝趕工（逐欄同 `pace_floor=False`）；其餘三者床照常套用 | 上限與到期都是嚴格不等式；`<=`／`<` 寫錯一格就讓 6 小時戳記或剛到期的戳記仍然生效 |
+| AT-QP-32 | 確定性網格：pct∈{0,10,…,100}×minutes∈{0,30,…,300}×weekly 狀態三種（低／在 converge 上方／同時 reset） | `decide` 對 `decide(pace_floor=False)` | 每格：cap（`None`＝∞）不大於無床 cap；recommended_fanout 不大於；band 序不低於 | AC-3「餵入≥原值、永不放寬」的整合層網格；任何一格變鬆即紅 |
+| AT-QP-33 | `GOLDEN_LEGACY`：12 個 state 的 `(cap, recommended_fanout, band, binding.kind)` 字面表，**Developer 動工前（step 0）從未改版程式擷取** | `decide(pace_floor=False)` | 逐一相等 | 證明關閉路徑＝改前行為；沒有凍結的外部基準，「與自己比」永遠綠 |
+| AT-QP-34 | `Policy()` 預設；`replace` 出 burst＝−1、step＝0、step＝−5 | `policy_monotonicity_problems` | 預設空；三種病態各自非空且含 `[方向]` | 單調判準管「值與值之間的關係」，`ENV_SPEC` 的 lo／hi 管不到（既有判詞） |
+| AT-QP-35 | AC-6：`AUTOSDD_QUOTA_PACE_BURST_PP` 為 `"25"`、`"15"`、`"-1"`；`..._STEP_PP` 為 `"11"`、`"0.5"`、`"0"`；`..._RUSH_UNTIL` 為 `"abc"`、`"1e12"`；並同帶 `AUTOSDD_QUOTA_CONVERGE_PCT="65"` | `load_policy` | `"25"`→ problems 含鍵名與「高於上界 20.0」、值 20.0；`"15"`→ 15.0 無 problems；`"-1"`、`"11"`、`"0.5"`、`"0"`→ 各自 problems 且退預設；`"abc"`→ problems、`None`；`"1e12"`→ 解析成功（`decide` 層忽略）；CONVERGE＝65 仍生效（單鍵退預設，不連坐） | 只准下修由 `hi` 鎖住；放寬＝可調旋鈕變後門；單鍵語意與 Architect 稿「整組退預設」不同，以程式為準，此條釘現況 |
+| AT-QP-36 | 既有 `.env.example` 生成物鎖與「ENV_SPEC 每鍵有讀取點」鎖 | 跑既有＋新斷言 | 三鍵出現於 `render_env_example()`；`env_example_problems(磁碟檔)`＝`[]`；`RUSH_UNTIL` 範例行為空值（不是 `0`） | 生成物不同步＝使用者抄範例得到錯誤預設；範例值 `0` 會讓 `overlay` 的「空白或 ≤0 才覆蓋」判準失去意義 |
+| AT-QP-37 | CACHE：five_hour 55@240（已過 60 分、允許線 40、over＝15＞S ⇒ 床會抬到 prepare）；其餘軸低 | `quota_gate.draining()`；`compact_margin_breached` | `draining()`＝`"no"`（55＋3＜85、band 以無床計為 notice）；同狀態 `decide()` 預設 band＝`prepare`（證明床確實會讓 `band ∈ DRAINING_BANDS`） | `draining` 若吃床，水位 55 就被判「不得壓縮」，與 context 守衛要求壓縮相衝（ADR §2.15.3）；用 45@240 這種只抬到 converge 的點測不出差別 |
+| AT-QP-38 | AC-8：CACHE 同 AT-QP-25、注入 `now` | `quota_gate.pace_report` | 輸出含 `配速床：`、`kind=five_hour`、整數剩餘分鐘、`pp`；既有 M7 判準（每個 `%` 皆帶 kind 與分鐘）對全文綠；未超線的情境印 `within` 說明行 | `--pace` 是派工前的詢問口；不說床就看不出為何被擋 |
+| AT-QP-39 | CACHE：five_hour／session 38@247，**weekly 軸一律低（30，以免週軸本身就擋而失去鑑別力）**；TRACE tmp、tmp 派發帳；payload＝`Agent` 的 PreToolUse | `quota_gate.quota_gate` 連呼 3 次（同一 300 秒內） | 前 2 次 rc 0、第 3 次 rc 2 且 stderr 含 `pace-floor`；同情境 `quota_rush.issue` 後 3 次皆 rc 0 | 致動器真的接上了：函式層對、gate 層沒人叫＝「機制蓋好沒接電」 |
+| AT-QP-40 | 床造成的阻斷（AT-QP-39 第 3 次）與非床阻斷（一般 prepare 帶） | 讀 stderr | 床阻斷含 `sessionctl.py rush --hours`；非床阻斷**不含** | 阻斷必有確切下一步；非床阻斷不得推銷趕工（誤導） |
+
+#### 10.4.5 趕工戳記與痕跡（`test_quota_rush.py`；縫 NOW、ENV、TRACE）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅 |
+|---|---|---|---|---|
+| AT-QP-41 | now 固定、`hours`＝1、why 合格、sid 給定 | `issue` | rc 0；檔存在；JSON 欄位齊（schema、issued_at、until＝now＋1 小時、until_epoch、hours、why、sid）；痕跡檔一列 `pace_rush_on` | 戳記格式是讀取端 fail-closed 的對手；欄位缺漏讀取端會全當無效 |
+| AT-QP-42 | `hours`＝0、−1、5.01、`nan`、`"abc"`；另 5.0、0.01 | `issue` | 前五者 rc 2 且**不寫檔**；5.0 與 0.01 rc 0 | 上限 5 小時是 §2.15 的安全邊界；`<=` 寫成 `<` 或上限放寬一格即紅 |
+| AT-QP-43 | why 為 7 字、8 字、前後半形／全形空白包住的 8 字、全形空白 only | `issue` | 7 字與空白 only rc 2；8 字（含包空白）rc 0 | 理由必填是戳記不淪為隨手關閉的唯一約束；字數以去頭尾空白後計 |
+| AT-QP-44 | `env` 帶 `AUTOSDD_UNATTENDED=1`，其餘合格 | `issue` | rc 2、不寫檔、訊息含 `無人` | 無人窗口無人可宣告趕工；放行＝夜間自動窗口可自我解除煞車 |
+| AT-QP-45 | 有效戳記；until＝now；until＝now−1s；壞 JSON；缺欄；schema 不符；until 為 naive；until−issued_at＞5 小時＋1 秒；until 與 until_epoch 不一致；有效戳記但 `env` 帶 UNATTENDED | `active` | 有效者回 dict 且 `left_minutes`＞0；其餘各自回 `None`（九種） | 每一種結構異常都必須 fail-closed（當無戳記＝床套用＝較緊）；任一種誤判有效＝放寬 |
+| AT-QP-46 | 有效戳記；原 mapping 已有正值鍵；鍵為空字串／`"0"`；無戳記／過期／UNATTENDED；戳記檔不可讀 | `overlay` | 有效且鍵缺席／空白／≤0 ⇒ 回複本含 `RUSH_KEY`＝until_epoch 字串、原 mapping 未被改；鍵已有正值 ⇒ 不覆蓋；其餘 ⇒ 與輸入相等且無新鍵；不可讀 ⇒ 不拋 | `policy_env` 是所有 hook 的熱路徑，疊入失敗不得變故障源；覆蓋明示環境值＝吞掉操作者意圖 |
+| AT-QP-47 | TRACE tmp；`issue(hours=1)` | `quota_gate.policy_env()` → `load_policy` → `decide`；再 `revoke` 後重跑 | 疊入後 `Policy.pace_rush_until`＝until_epoch、床不套用；撤銷後床恢復 | 端到端：戳記經唯一出口抵達 `Policy`；少接一段就是「戳記寫了沒生效」 |
+| AT-QP-48 | 有戳記／無戳記 | `revoke` | 有：檔刪除、rc 0、一列 `pace_rush_off`；無：rc 0、訊息含「無趕工戳記」、**不**落事件 | M-P7 的 off 事件只能是真撤銷；無檔也寫事件會稀釋指標 |
+| AT-QP-49 | 已有戳記後再 `issue` | 同 | 新戳記取代舊戳記（until 為新值）；痕跡兩列 `pace_rush_on` | 延長趕工＝重發；讀取端只認單一戳記 |
+| AT-QP-50 | `cli` 各形式：發、`--off`、`--status`；無旗標；`--hours` 缺 `--why`；`--off` 與 `--hours` 並用；未知旗標；值不合法 | `cli` | 前三者 rc 0（`--status` 輸出含到期時刻、剩餘分鐘、why；無戳記亦 rc 0）；四種用法錯誤 rc 3；值不合法 rc 2 | rc 契約是呼叫端（主控）判斷成敗的依據；用法錯誤與拒絕要分得開 |
+| AT-QP-51 | 子行程 `python tools/sessionctl.py rush …`（`AUTOSDD_TRACE_DIR` tmp） | 跑 | rc 0、stdout 含到期時刻；未知子指令的 rc 3 訊息含 `rush` | 薄殼分派真的接上；漏接＝文件宣稱有、命令列沒有 |
+| AT-QP-52 | `decision.pace` 含 `lifted`；含 `within`；含 `exempt-*`；路徑指向目錄 | `log_floor` | 僅 `lifted` 追加一列 `pace_floor`（含 `at`、`kind`、`pct`、`minutes`、`allowed_pp`、`level`、`cap`、`band`）；其餘不寫；目錄路徑回 `False` 不拋 | M-P4 撤回條件的分子；不在 lifted 時寫＝分子灌水 |
+| AT-QP-53 | PreToolUse＋`Agent`＋床抬水位；PostToolUse＋`Read`＋同水位；PreToolUse＋床未抬 | `quota_gate.quota_gate` | 僅第一種新增一列 `pace_floor` | PostToolUse 對每個工具都判，若也落款，一個窗內會寫出數千列；落款點只在派發邊緣 |
+| AT-QP-54 | 痕跡檔 | 讀回 | 每列單行合法 JSON、`ensure_ascii=False`、`\n` 結尾；檔位於 `AUTOSDD_TRACE_DIR` 圍籬內，不寫真實 home | 測試不得污染開發機真實痕跡（本 repo 的圍籬慣例） |
+| AT-QP-55 | 掃描 `tools/`、`.claude/hooks/` 下生產碼的 `load_policy(` 站點 | AST 掃 | 站點清單等於釘住的 frozenset（逐站點標註是否經 `quota_gate.policy_env()`）；新增站點即紅 | 戳記只經 `policy_env()` 進場；新站點若自建 env 就看不到戳記（床恆套用＝較緊，但同一件事兩個數）；只准縮不准長 |
+
+#### 10.4.6 量測與回放（`test_waste_census_metrics.py` 增量；縫 FS）
+
+| AT | 前置 | 動作 | 預期 | 為何會紅 |
+|---|---|---|---|---|
+| AT-QP-56 | tmp halt 目錄：五個標記——三個 binding 為五小時窗軸（窗長以文法判，不寫桶名）、一個週軸、一個早於 `--since-days`；另一個壞 JSON | `pace_metrics.m_p1` | `count==3`、`per_week==3/(days/7)`、`skipped==1` | M-P1 是主指標；把週軸 halt 算進來會讓「撞牆次數」被週額度事件污染 |
+| AT-QP-57 | 合成落款：A 窗前 40% 時間內達 75pp；B 窗平穩；C 窗僅 2 樣本；一列缺 `resets_at` | `m_p3` | `windows==2`、`early_burn==1`、`share==0.5`、缺欄列計入 `skipped` | 分母須排除樣本不足的窗（落款稀疏是最大誤差源）；否則占比被稀釋成假改善 |
+| AT-QP-58 | 合成三個週：末列距 reset 6 小時／30 小時／12 小時；reset 字串帶 `:59:59.9` 與 `:00:00.1` 微秒抖動；桶名 `seven_day_foo` | `m_p4` | 只計末列 ≤24 小時者（2 週）；抖動兩字串同組；中位數與最小值正確；`seven_day_foo` 以窗長文法判為長窗 | M-P4 是週用滿護欄；分組錯誤或把 30 小時前的讀數當「reset 前最後讀數」會偽造不退化 |
+| AT-QP-59 | 事件檔含兩筆 `pace_rush_on`（各帶 `until`）；兩個五小時窗中一個與戳記區間重疊；無事件檔 | `m_p7` | `share==0.5`；無檔回全 0、不拋 | M-P7 的「床太緊」訊號；區間重疊判錯會讓 50% 門檻失去鑑別力 |
+| AT-QP-60 | 合成主控逐字稿 4 個請求，`cache_creation` 為 1000／2000／3000／6000；另有子代理檔 | `m_c1` | `n==4`、`mean==3000`、`median==2500`；子代理不計 | M-C1 是主控成本的唯一量測；混入子代理會稀釋 |
+| AT-QP-61 | CLI `--pace-metrics`（子行程，`--base` 等指 tmp） | 跑 | rc 0；stdout 含 `M-P1`、`M-P3`、`M-P4`、`M-P7`、`M-C1`；不寫 repo 內任何檔；缺全部輸入時印無資料說明、rc 0 | 探針不接閘門 rc、不污染工作樹（同 AT-TW-57） |
+| AT-QP-62 | AC-7：合成 burn 三列（帶 `resets_at`）：38@247、30@247、99@30；一列缺 `resets_at`；halt 標記一件 | `--replay-pace-floor` | 輸出「會開床的列數＝1」與各列 `cap_with`／`cap_without`；撞牆窗的最早開床時刻有值；缺欄列計入 `skipped`；全程不呼叫網路、不讀真實 home | AC-7 要交 QA 判讀的回放；少了有／無床對照就無法回答「床會不會擋掉正常工作」 |
+| AT-QP-63 | 套件結構 | 斷言 | `pace_metrics`、`pace_replay` 兩模組各 ≤400 斷言行；`tools/probe/waste_census.py` 仍為薄殼（新旗標只分派、無判準函式定義） | 落點規範與 LOC 分級（同 AT-TW-59） |
+
+#### 10.4.7 其他與既有鎖（不得退化）
+
+| AT | 內容 |
+|---|---|
+| AT-QP-64 | `python AutoClaude/tools/check_loc_budget.py --json` rc 0：`quota_gate.py` count_loc ≤500（淨 ≤0）、`quota_pace_floor.py`、`quota_rush.py`、`quota_policy.py`、`quota_policy_env.py` 皆在 guardrail_lib 400 內；`quota_pace.resolve` 的簽名參數名序列與改前相等（本期不改它） |
+| AT-QP-65 | 既有 `test_quota_policy.py`、`test_context_budget_guard.py`、`test_quota_burndown.py`、`test_session_brief.py`、`test_selfimproving_*` 全綠。**因床而改的既有測試**逐條列於交卷檔，改法只准兩種：把該測試的狀態改到允許線內，或顯式 `pace_floor=False`；**不得刪除或弱化斷言**；每條附 WHY |
+| AT-QP-66 | `quota_pace_floor.py`、`quota_rush.py` 以既有 Python 3.9 相容鎖（現查名稱）檢查：無 `match`、無執行期 `A\|B`、無 `slots=`、無 `zip(strict=)` |
+| AT-QP-67 | AST 掃：`quota_pace_floor.py` 無 `open`／`write_text`／`os.environ`／`datetime.now`（零 I/O、零時鐘）；寫戳記與痕跡的呼叫只出現在 `quota_rush.py` |
+| AT-QP-68 | `test_root_module_layout.py`、`test_doc_loc_baseline_freshness_r60.py` 的 `TestR74…`／`TestR79…` 綠；`.env.example` 與 `render_env_example()` 同步 |
+| AT-QP-69 | Windows 檔案鎖原語鎖（`test_platform_neutral_paths.py::TestDirEntryPrimitivesAreAccountedFor`）綠：`quota_rush.py` 只用 `write_text`／`open(…,"a")`／`unlink`，不引入 `os.replace`／`rename` |
+| AT-QP-70 | M7 全文鎖：`quota_pace_floor.line` 與 `describe` 新增句對 `quota_policy` 既有 M7 判準（每個 `%` 皆帶 `kind=` 與剩餘分鐘）綠；新增文字不出現孤立 `%` |
+
+### 10.5 突變清單（QA 逐條實打；每條至少一條 AT 應轉紅，未轉紅＝補斷言）
+
+| 編號 | 突變 | 應被殺掉的 AT |
+|---|---|---|
+| MU-01 | `apply` 把 `max(feed, level)` 改成 `feed`（不抬）或 `level`（覆寫） | AT-QP-12、20、25、32 |
+| MU-02 | 免套用②的 `<` 改 `>` 或 `<=` | AT-QP-14、29 |
+| MU-03 | `over <= 0` 改 `< 0` | AT-QP-02 |
+| MU-04 | `over > step` 改 `>= step` | AT-QP-03 |
+| MU-05 | 移除 `min(level, halt−1)` | AT-QP-06 |
+| MU-06 | 床套到非最短窗軸 | AT-QP-17 |
+| MU-07 | `active` 不看 UNATTENDED | AT-QP-44、45 |
+| MU-08 | `rush_active` 到期判準 `>` 改 `>=`，或移除上限 `<= RUSH_MAX_SECONDS` | AT-QP-31 |
+| MU-09 | `issue` 的 hours 上限 5 改 6，或下限放寬到負數 | AT-QP-42 |
+| MU-10 | why 最小字數 8 改 4，或不剝全形空白 | AT-QP-43 |
+| MU-11 | burst 或 step 的 `hi` 移除 | AT-QP-35 |
+| MU-12 | `draining()` 不傳 `pace_floor=False` | AT-QP-37 |
+| MU-13 | `overlay` 覆蓋已有的明示正值 | AT-QP-46 |
+| MU-14 | `read_stamp` 放寬（結構異常仍判有效） | AT-QP-45 |
+| MU-15 | `log_floor` 在非 lifted 時也寫 | AT-QP-52、53 |
+| MU-16 | 免套用④（hold）移除 | AT-QP-16 |
+| MU-17 | 免②計入被 `skip` 遮罩的軸 | AT-QP-18 |
+| MU-18 | 窗長寫死 300 | AT-QP-09 |
+| MU-19 | `pace_floor=False` 路徑仍呼叫 evaluate／apply 並改動輸出 | AT-QP-33、28 |
+| MU-20 | `policy_env` 忘記疊入戳記 | AT-QP-47、39 |
+| MU-21 | `decide` 未把 `pace_floor` 透傳給 `axes_of` | AT-QP-25、33 |
+| MU-22 | `line` 在 state 為 `n/a` 時仍輸出一行 | AT-QP-23 |
+
+### 10.6 真機驗證（本期；主控親跑；不得由開發棒代驗；結果寫進缺陷帳本列；一律「待真機驗證」）
+
+| V | 步驟 | 通過判準 | 對應 |
+|---|---|---|---|
+| V-P1 | 下一個真實五小時窗內，窗前 90 分鐘內以並行派工把水位推過允許線（或回放確認某時刻已超線）後，跑 `python tools/session_resume_planner.py --pace`，再連續派 `Agent` 三次（同一 300 秒內） | `--pace` 印出 `配速床：` 且 state 為超線；第三次被擋、訊息含 `pace-floor` 與 `sessionctl.py rush --hours`；貼輸出與時間戳 | AT-QP-25、38～40 |
+| V-P2 | 同情境 `python tools/sessionctl.py rush --hours 0.05 --why "<≥8 字>"`，再派三次；等 3 分鐘到期後再派 | 趕工期間三次皆放行、`--pace` 印趕工戳記生效；到期後床自動恢復（第三次又被擋）；痕跡檔有 `pace_rush_on`；`rush --status` 在到期前後各印一次 | AT-QP-30、39、41、47 |
+| V-P3 | 另開一個**已在跑**的 Claude session，在主視窗發戳記後，於該 session 直接派 `Agent` | 該 session 下一次呼叫即生效，不必重啟（驗 `policy_env` 出口熱讀） | AT-QP-46、47 |
+| V-P4 | 本機 `.env` 設 `AUTOSDD_QUOTA_PACE_BURST_PP=25` 後跑 `--pace`；移除後再跑 | 輸出尾端出聲「⚠️ … 高於上界 20.0」、實際用 20；移除後無出聲 | AT-QP-35 |
+| V-P5 | `AUTOSDD_UNATTENDED=1 python tools/sessionctl.py rush --hours 1 --why "<≥8 字>"` | rc 2、無戳記檔、訊息含 `無人` | AT-QP-44 |
+| V-P6 | 跑 `python tools/probe/waste_census.py --since-days 14 --pace-metrics` 與 `--replay-pace-floor`（真實 `quota_burn.jsonl`） | rc 0；M-P4 基線與 ADR §2.15.7 的現算值同量級；回放輸出「會開床的列數」與五件撞牆窗最早開床時刻，交 QA 判讀（不設通過數字） | AT-QP-61、62 |
+
+### 10.7 第二期前置真機驗證（本期**只登記、不寫 AT、不實作**；全數待真機驗證）
+
+| V | 步驟 | 通過判準 |
+|---|---|---|
+| V-K1 | 互動主控以自己的 `ScheduleWakeup`（50 分）發保溫請求（固定字面：不做任何工作、重排下一次、結束） | 保溫請求 usage `cache_read ≥ 0.95×N`、`cache_creation ≤ 5k`；逐字稿 assistant 時戳間隔≈50 分（同時驗「喚醒真的發生」——`ScheduleWakeup` 無憑證） |
+| V-K2 | five_hour 在 95～99% 時 wake 仍發得出 | 請求未被拒、`status` 非 rejected |
+| V-K3 | 先讀 settings-reference 的 `idleCompaction`，再在保溫期間觀察 | 閒置 50 分內 idle compaction 不觸發（逐字稿無 `compact_boundary`） |
+| V-K4 | 保溫回合結束時 | 不被 `check_pending_handoff`／`sessionctl_guard` 的 Stop 推回而多出回合 |
+| V-S1 | schtasks（使用者登入時）一次性 `handoff --spawn` | 能開互動視窗；新 session 的 SessionStart 公告交接包 |
+| V-M1 | 先讀 statusline 文件，再在 statusline 腳本取樣 | 確認 `prompt_cache` 與（若有）rate limit 欄位；有才接每請求取樣，無則維持落款稀疏的誠實劃界 |
+| V-U1 | 同 sid 連續兩次 `claude -p -r` 間隔 50 分 | 仍命中；與哨兵雙駕駛判準（§2.11）共存不誤判 OTHER_DRIVER（第三期） |
+| V-C4 | 子代理與 `-p` 是否收到根 CLAUDE.md 的 rules 與 skill 描述 | 確認後才動開場瘦身（第三期） |
+
+### 10.8 連動面清單（Developer 與 Closer 同一個 commit 收齊；不分批）
+
+1. **`.env.example`**：以 `render_env_example()` 重生（三個新鍵；不手寫）；`python tools/lib/quota_policy.py --print-env-example` 現查。
+2. **根 `CLAUDE.md`（只改兩處，不動機械守衛總表——本期無 hook）**：(a)〈現查指令速查表〉新增一列「配速床狀態／趕工戳記」→ `python tools/sessionctl.py rush --status`、`python tools/session_resume_planner.py --pace`（配速床行）；(b)〈額度哨兵〉所在段「額度 ≠ context 水位」之後加一句：五小時窗內另有配速床（`quota_pace_floor`），逃生口＝趕工戳記，數字現查 `--print-env-example`。不複寫任何數字。
+3. **落點表 `docs/02_architecture/Root_Layout_and_Module_Placement.md`**：額度守衛列的「測試」欄補 `test_quota_pace_floor.py`、`test_quota_rush.py`；wastecensus 列的 `pace_metrics`、`pace_replay` 屬後續期、待落地時再補；同步 `test_root_module_layout.py` 的登記面。
+4. **測試檔下限與棘輪重釘**：新增兩個測試檔與既有檔增量，依本 repo 重釘儀式（`_TREE_FILE_FLOORS`、onboarding 基線與 `python tools/sync_onboarding_baselines.py`；順序與數字現查，不在本章複寫）。
+5. **CI paths**：套件目錄（`tools/lib/wastecensus/**`）已在 compat workflow 的 `paths`；扁平檔則是**逐檔名**列在 `paths`（現況例：`tools/lib/quota_meter.py`、`quota_escalation.py`、`quota_limits.py`、`quota_ledger.py`；`quota_pace.py`／`quota_gate.py` 是否列名現查）。新增的 `quota_pace_floor.py`、`quota_rush.py` 是否必須列名，以 CI paths 覆蓋鎖的判準為準（現查該鎖測試），需要則兩支 compat workflow 同 commit 補；`non_evolvable_globs` 不納入量測套件（沿用 §0 判斷），`quota_pace_floor.py`／`quota_rush.py` 屬守衛面判準檔，納入須先現查 SelfImproving 設定。
+6. **LOC**：`quota_gate.py` 先抽出等量程式再接線（候選：halt 標記三函式、`pace_state`＋`settled_quota`），同 commit 重釘 hub 棘輪，不得調高 hub 預算。
+7. **缺陷帳本**：DEF-200-589 一條（草稿見 §10.9），由 Closer／主控寫，本章不改帳本。
+8. **ADR §2.15**：已落檔；實作落地後把 §2.15.5 第一期欄位改「已落地」，並把 §2.15.7 的 M-P 基線以實測回填。
+9. **既有測試改動清單**：交卷檔列出（AT-QP-65）。
+
+### 10.9 守衛面暴露證據座標與缺陷帳本草稿
+
+| 編號 | 座標 | 類別 |
+|---|---|---|
+| E-P1 | 掌舵者原話：sid `eb1cb524-de09-4ad5-a068-69fa180dc64b` 2026-11-15 00:1x「當Token一小時就用完時…將Token盡量維持分配五小時」；主控親驗同 sid 23:03 8% → 00:1x 56%（70 分 48pp） | 掌舵者回報 |
+| E-P2 | 逐字稿 sid `04b38d83` 2026-11-13T13:22:57Z `apiError:"usage_limit_reached"`、`status:"rejected"`；halt 標記 binding＝five_hour 近 14 天 5 件（11-07 17:13、11-13 04:43、11-14 00:49、11-14 22:44 等） | 非構造性逐字稿 |
+| E-P3 | 真實輸出：sid `ff7d69c4-aa33-4ced-bbf0-cbd780a539cd` 約 2026-11-15 08:56 gate 輸出 `kind=five_hour 43% 剩 244 分鐘 band=free horizon=far cap=None note=burn-ahead` | 真實輸出 |
+
+**DEF-200-589 草稿（Closer 貼入缺陷帳本；內容不得改動語意）**：「額度配速：五小時窗內超前燃燒對 cap 零煞車力，且無『非趕工時攤平五小時』的動作層。根因：`quota_pace.burn_step` 判超前只把視野夾到 far，free 帶 `_base_cap=None` ⇒ `None×0.5` 仍不設限；攤提只在長窗自軸達 converge 才收緊。表徵：2026-11-14 23:03～2026-11-15 00:1x 五小時窗 70 分鐘用掉 48pp，08:56 gate 輸出 `band=free cap=None note=burn-ahead`。修法（第一期）：新增窗內配速床（`quota_pace_floor`：允許線＝100×已過比例＋`AUTOSDD_QUOTA_PACE_BURST_PP`（出廠 20、只准下修），超線抬水位至 converge／prepare，窗尾與長窗先翻頁免套用）與趕工戳記（`sessionctl rush`，上限 5 小時、`why`≥8 字、無人窗口拒絕，戳記由 `policy_env()` 疊入），並補量測 M-P1／P3／P4／P7、M-C1 與回放。保溫（主控有條件推翻 X9）僅記決策，實作屬第二期，前置真機驗證 V-K1～V-K4。設計＝ADR-XPLAT-004 §2.15；驗收＝本 TCS §10；真機驗證 V-P1～V-P6 待主控。」

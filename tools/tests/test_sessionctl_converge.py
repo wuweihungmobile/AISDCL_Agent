@@ -363,6 +363,42 @@ class StopVerdictTest(_Fence):
             handle.write(_assistant(100_000) + "\n")
         self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
 
+    def test_def_200_588_finalized_package_with_a_running_task_is_pushed_back(self) -> None:
+        """tools/lib/sessionctl/converge.py::_finalized_wake：事故 sid eb1cb524（2026-11-15）——
+        交接後留著等 CI 的背景 shell，它結束時把 26.8 萬上下文的舊 session 冷叫醒、整份重寫。
+        已 finalize ∧ 有執行中背景任務 ⇒ 推回並要求 TaskStop；不需出聲、不看硬門檻
+        （事故當時在門檻之下）。這條放行＝交棒後的 session 還會自己醒來燒額度。"""
+        self.main(HARD - 20_000)  # 門檻之下、也沒出過聲
+        self.package(finalized=True)
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        why = converge.stop_verdict(self.stop(background_tasks=shell), self.env)
+        for needle in ("冷叫醒閘", "TaskStop", "1 個", "只推回這一次"):
+            self.assertIn(needle, why)
+        self.assertEqual([r["event"] for r in self.traces()], ["finalized_wake_block"])
+        agent = {"id": "a1", "type": "subagent", "status": "running"}
+        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
+                                                    self.env))
+
+    def test_def_200_588_the_wake_gate_stays_silent_when_nothing_can_wake_it(self) -> None:
+        """tools/lib/sessionctl/converge.py::_finalized_wake：假紅面——任務已結束、沒有
+        finalize 包（平常掛著等 CI 是正當用法）、他人的包、第二次 Stop、無人、off、
+        payload 沒有該欄，一律不推回。"""
+        self.main(HARD - 20_000)
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        self.assertEqual(converge.stop_verdict(self.stop(background_tasks=[shell]), self.env), "")
+        self.package(finalized=True, sid="other-sid")
+        self.assertEqual(converge.stop_verdict(self.stop(background_tasks=[shell]), self.env), "")
+        self.package(finalized=True)
+        done = {"id": "b2", "type": "shell", "status": "completed"}
+        for payload, extra in ((self.stop(background_tasks=[done]), {}),
+                               (self.stop(background_tasks=[]), {}),
+                               (self.stop(), {}),
+                               (self.stop(background_tasks=[shell], stop_hook_active=True), {}),
+                               (self.stop(background_tasks=[shell]), {"AUTOSDD_UNATTENDED": "1"}),
+                               (self.stop(background_tasks=[shell]), {switch.MODE_KEY: "off"})):
+            with self.subTest(payload=payload, extra=extra):
+                self.assertEqual(converge.stop_verdict(payload, {**self.env, **extra}), "")
+
 
 if __name__ == "__main__":
     unittest.main()

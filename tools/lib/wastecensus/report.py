@@ -196,8 +196,6 @@ def _run_replay(args: argparse.Namespace, base: Path) -> int:
 
 
 def main(argv: list[str]) -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
     args = _build_parser().parse_args(argv)
     base = Path(args.base)
     if not base.is_dir():

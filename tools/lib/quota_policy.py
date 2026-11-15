@@ -93,6 +93,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 import quota_pace as W
+import quota_pace_floor as PF  # §2.15：配速床（純函式；不 import 本檔，無循環）
 
 #: 時間視野檔位（由 `resets_at` 導出，**不由桶名**）。🔴 R86：常數與判定門檻一起搬到
 #: `quota_pace`（判定的程式在那裡，常數留在這裡就是同一份知識兩個家）；這裡再匯出，
@@ -285,6 +286,13 @@ class Policy:
     # 🔴 DEF-200-198 拆殘（T_WRAP）：收尾保留段門檻（分鐘）。出廠 5＝`FANOUT_WINDOW_SECONDS/60`——
     # policy 不得 import gate，同值由 `test_quota_policy.py` 的對等測試釘；須 < accel_window。
     wrap_minutes: float = 5.0
+    # 🔴 ADR-XPLAT-004 §2.15 D1／D2（配速床）：允許線 ＝ 100×已過窗長比例 ＋ burst；超線 ≤ step
+    # 抬到 converge、> step 抬到 prepare。burst／step 只准下修（ENV_SPEC 的 hi＝出廠值）；
+    # `pace_rush_until`＝趕工戳記 epoch 秒（`quota_rush.overlay` 經 `policy_env()` 疊入；
+    # 有效判準在 `PF.rush_active`）。
+    pace_burst_pp: float = 20.0
+    pace_step_pp: float = 10.0
+    pace_rush_until: float | None = None
 
 
 DEFAULT_POLICY = Policy()
@@ -327,6 +335,8 @@ class Decision:
     # （`quota_burndown.Applied`＝id／effect／text）；`()`＝沒有授權在場，所有既有呼叫端逐字不變。
     # 與 `amort` 同理走 `object`：本檔不 import `quota_burndown`（它單向依賴本檔）。
     burndown: object = ()
+    # §2.15：配速床各軸判準（`quota_pace_floor.PaceFloor` 的 tuple；`pace_floor=False` 時為 `()`）。
+    pace: object = ()
 
 
 # ── 時間：只把伺服器給的瞬時字串轉成「現在還剩幾分鐘」，不持久化任何時長 ──────────
@@ -525,6 +535,9 @@ def policy_monotonicity_problems(p: Policy) -> list[str]:
     if not p.pace_far <= 1.0 <= p.pace_near:
         problems.append(f"[方向] pace 倍率必須 far({p.pace_far}) ≤ 1 ≤ near({p.pace_near})"
                         "，否則「近 reset 加速／遠 reset 減速」是反的")
+    if p.pace_burst_pp < 0 or p.pace_step_pp <= 0:  # §2.15：負 burst／零 step 讓允許線失去意義
+        problems.append(f"[方向] 配速床 burst({p.pace_burst_pp}) 須 ≥ 0、"
+                        f"step({p.pace_step_pp}) 須 > 0")
     return problems
 
 
@@ -549,20 +562,31 @@ def axis_recommended(pct: float, minutes: float | None, p: Policy) -> int:
 #   · `band_inputs`（缺陷 C）＝**跨軸**的事：把長窗（總量）配額攤提到本個短窗（速率），
 #     只調高餵給 `pct_band` 的水位、永不調低 ⇒ 結構上不可能放寬。
 #   `axis.pct` 仍是伺服器給的原值（事實不得被改寫）；被攤提調高過的軸在 note 裡具名。
+def _floors(state: QuotaState, now: datetime, p: Policy, active_model: str | None,
+            relax: tuple | None = None) -> tuple:
+    """§2.15：逐軸配速床判準（`hold`＝清倉授權的第二個遮罩；與攤提共用同一份 `skip` 遮罩）。"""
+    return PF.evaluate(_rows(state), tuple(_delta_minutes(a.resets_at, now, state.measured_at)
+                                           for a in state.axes), p, now,
+                       skip=_amort_skip(state, active_model), hold=relax[1] if relax else ())
+
+
 def axes_of(state: QuotaState, now: datetime, p: Policy,
             ratio: float | None = None, ratio_note: str = "",
             active_model: str | None = None,
-            relax: tuple | None = None) -> tuple[AxisReading, ...]:
+            relax: tuple | None = None, pace_floor: bool = True) -> tuple[AxisReading, ...]:
     """逐軸解析的**唯一正規路徑**：`minutes` 只能從 `axis.resets_at` 導出。
 
     `relax`＝清倉授權的 `(floor, hold)` 兩個逐軸遮罩（DEF-200-528，由 `quota_burndown` 產生）；
-    `None`＝無授權，逐字不變。
+    `None`＝無授權，逐字不變。`pace_floor`＝是否疊配速床（§2.15）；`False` 時**不呼叫**判準，
+    逐位元同改前。
     """
     resolved = W.resolve(  # 🔴 帶號分鐘進去：負值的 mid 強制在 `horizon()`，不在這裡
         _rows(state), tuple(_delta_minutes(a.resets_at, now, state.measured_at)
                             for a in state.axes),
         ratio, ratio_note, p.accel_window_minutes, p.far_horizon_minutes, p.halt_pct,
         p.pace_ceiling, p.converge_pct, _amort_skip(state, active_model), *(relax or ((), ())))
+    if pace_floor:
+        resolved = PF.apply(resolved, _floors(state, now, p, active_model, relax))
     readings = []
     for axis, (pct, horizon, minutes, note) in zip(state.axes, resolved):
         band = pct_band(pct, p)
@@ -690,7 +714,7 @@ def _amort_skip(state: QuotaState, active_model: str | None) -> tuple[bool, ...]
 # 實測「快取過期 600s ＋ 額度 99%」時 42 次派發放行 42。同時**永不 halt**。
 def decide(state: QuotaState, now: datetime, p: Policy,
            ratio: float | None = None, ratio_note: str = "",
-           active_model: str | None = None, burndown=None) -> Decision:
+           active_model: str | None = None, burndown=None, pace_floor: bool = True) -> Decision:
     # 🔴 `burndown`（DEF-200-528）＝已驗證生效的清倉授權（`quota_burndown.Burn`），`None`＝無授權、
     # 既有呼叫端逐字不變。它**只改逐軸輸入**（見下方 `burndown.apply`），聚合律、must-finish、
     # model_hint 一字不改；建構順序＝逐軸 cap/rec（含放寬）→ min 聚合 → must-finish → model_hint。
@@ -702,7 +726,7 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     # 同樣不進 `Policy`：它是**這一次呼叫**的性質，不是門檻，見 `_in_cap_gate()`。
     # DEF-200-438：同一個值也決定攤提要不要遮掉別家模型的軸（`_amort_skip()`）。
     """跨軸聚合：`cap = min(逐軸 cap)`＝煞車；`rec` 見 `_rec_of_gate`（加速臂／逐軸 min）。"""
-    readings = axes_of(state, now, p, ratio, ratio_note, active_model)
+    readings = axes_of(state, now, p, ratio, ratio_note, active_model, pace_floor=pace_floor)
     if not readings:
         # 🔴 R100／PRD F1：`axes == ()` ⇒ `cap ≤ cap_prepare`。夾在**這裡**而不是只靠出廠
         # 值，是為了讓 operator 顯式把 `AUTOSDD_QUOTA_DEGRADED_CAP` 調鬆時不變式仍然成立
@@ -805,7 +829,8 @@ def decide(state: QuotaState, now: datetime, p: Policy,
                           tuple(_delta_minutes(a.resets_at, now, state.measured_at)
                                 for a in state.axes), ratio, ratio_note,
                           _amort_skip(state, active_model)),
-        model_hint=hint, burndown=applied)
+        model_hint=hint, burndown=applied,
+        pace=_floors(state, now, p, active_model) if pace_floor else ())
 
 
 # M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。
@@ -828,6 +853,8 @@ def describe(d: Decision, *, burndown: bool = True) -> str:
     if not d.per_axis:
         return f"額度量不到（reason={d.reason}）{tail}"
     text = "；".join(_axis_phrase(r) for r in d.per_axis) + "　" + tail
+    if PF.NOTE_PACE in d.reason:  # §2.15：床造成的阻斷必附確切下一步（非床阻斷不附）
+        text += "（配速床：如需趕工 python tools/sessionctl.py rush --hours <H> --why <WHY>）"
     return text + (d.burndown.text if burndown and d.burndown else "")
 
 

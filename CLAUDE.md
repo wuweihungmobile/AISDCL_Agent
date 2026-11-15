@@ -83,7 +83,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 | `check_ps1_encoding.py` | PostToolUse／Write、Edit | `.ps1` 寫入當下就地補回 CRLF（橋接自 AutoClaude tools/hooks） | 無 |
 | `check_sh_eol.py` | PostToolUse／Write、Edit | `.sh`／`.bash` 行尾守門（非 `.sh`／`.bash` → exit 0；橋接自 AutoClaude tools/hooks） | 無 |
 | `precompact_restart_point.py` | PreCompact | 壓縮前把可重啟點任務書骨架寫到磁碟（PRD §4.3；零 token、只讀逐字稿）＋持久痕跡目錄落一行壓縮事件；同 session 距上次壓縮 < 600s 只出聲不阻止；恆 exit 0 | `AUTOSDD_PRECOMPACT_OFF` |
-| `sessionctl_guard.py` | Stop；PreToolUse／SendMessage、Agent、Task、Workflow | Stop：回合結束時本 session 仍有背景代理在跑 ⇒ 輸出 JSON `systemMessage` 出聲（rc 0、不阻斷）；無背景代理且滿足收斂條件（已被提醒換 session、上下文達硬門檻、無已 finalize 的交接包、非無人窗口）⇒ `decision:block` 推回一次（第二次 Stop 放行、不寫閂鎖）。PreToolUse／SendMessage：目標代理快取「熱」放行不出聲、「冷」且上下文超過 `AUTOSDD_RESUME_AGENT_TOKENS` 則互動與無人皆 rc 2 阻斷並要求改派新代理＋短任務書（互動逃生口＝訊息本文寫 `續棒理由：<WHY>`；無人窗口不論冷熱照舊阻斷）。PreToolUse／Agent、Task、Workflow：已被提醒換 session 且上下文達硬門檻 ⇒ rc 2 擋展開型派工（`/compact` 或交接換手後自動放行）；解析不到一律放行（fail-open）。判準在 `tools/lib/sessionctl/`（`cachestate.py`、`converge.py`、`roster.py`），設計全文 ADR-XPLAT-004 §2.13／§2.14 | `AUTOSDD_SESSIONCTL_GUARD_OFF`（同時關掉全部分支）；`AUTOSDD_SESSION_SWITCH_MODE=notify／off` |
+| `sessionctl_guard.py` | Stop；PreToolUse／SendMessage、Agent、Task、Workflow | Stop：回合結束時本 session 仍有背景代理在跑 ⇒ 輸出 JSON `systemMessage` 出聲（rc 0、不阻斷）；無背景代理且滿足收斂條件（已被提醒換 session、上下文達硬門檻、無已 finalize 的交接包、非無人窗口）⇒ `decision:block` 推回一次（第二次 Stop 放行、不寫閂鎖）；交接包已 finalize 而仍有執行中的背景任務 ⇒ 同樣推回一次並要求 TaskStop（冷叫醒閘，DEF-200-588：背景任務結束會把已交棒的 session 叫醒、整份上下文重寫）。PreToolUse／SendMessage：目標代理快取「熱」放行不出聲、「冷」且上下文超過 `AUTOSDD_RESUME_AGENT_TOKENS` 則互動與無人皆 rc 2 阻斷並要求改派新代理＋短任務書（互動逃生口＝訊息本文寫 `續棒理由：<WHY>`；無人窗口不論冷熱照舊阻斷）。PreToolUse／Agent、Task、Workflow：已被提醒換 session 且上下文達硬門檻 ⇒ rc 2 擋展開型派工（`/compact` 或交接換手後自動放行）；解析不到一律放行（fail-open）。判準在 `tools/lib/sessionctl/`（`cachestate.py`、`converge.py`、`roster.py`），設計全文 ADR-XPLAT-004 §2.13／§2.14 | `AUTOSDD_SESSIONCTL_GUARD_OFF`（同時關掉全部分支）；`AUTOSDD_SESSION_SWITCH_MODE=notify／off` |
 
 文件宣稱 ↔ 註冊實況由 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR74RootClaudeMdHookClaimsMatchRegistration` 與 `tools/tests/test_doc_loc_baseline_freshness_r60.py::TestR79EveryRegisteredHookIsNamedInClaudeMd` 雙向＋第三向機械釘住（已註冊未點名、未註冊卻寫成會跑，皆紅）。
 
@@ -97,7 +97,7 @@ monorepo 根目錄（`AISDCL_Agent/`，各機器 checkout 路徑不同）＝**�
 
 ### 守衛面准入（R197 裁決：量、不挖）
 
-- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_policy,quota_stability,sentinel_lifecycle,transcript_activity}.py`、`tools/session_resume_planner.py`、`tools/lib/sessionctl/**`（2026-11-14 起；續跑選路與過期判準自 planner 搬入）。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq 或畫面字樣／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
+- 守衛面＝`.claude/hooks/**`、`.claude/settings*.json`（含 permissions.allow）、`tools/lib/{session_brief,quota_messages,harness_feed,quota_gate,quota_halt_marker,quota_pace_floor,quota_policy,quota_rush,quota_stability,sentinel_lifecycle,transcript_activity}.py`、`tools/session_resume_planner.py`、`tools/lib/sessionctl/**`（2026-11-14 起；續跑選路與過期判準自 planner 搬入）。**新增任何一行守衛碼或鎖的前提＝暴露證據**（`docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`〈暴露度〉三取一：掌舵者真機回報 sid＋seq 或畫面字樣／非構造性逐字稿實際發生／真實語料非探針種子 ≥1 命中）；沒有就登記證據檔〈理論洞清單〉（P4）、不立輪、不同輪修。
 - 審查角色「量、不挖」：跑既有指標與重測（Q1′～Q4′、答案表兩引擎、語料重放），不構造變體去找新缺陷；構造性命中 NEW_P_LE_2 計 0。WHY：R179～R196 十八輪有 17 輪守衛面淨增（合計 +10,139 行）、74/80 筆缺陷同輪修，審查對擴張中的面做對抗搜尋 ⇒ 發現率約 0.8 P2／輪、結構上無不動點（DEF-200-481→483→484 連三輪即此型：後兩者在 9,646 筆真實指令自然寫法命中 0）。
 - 收斂宣告看症狀閘、不看發現率：判定式與指令住 `docs/06_quality/FiveQuestion_Audit_Protocol/README.md`〈窗口規則與收斂判定〉；家族計數降為資訊欄。再評（再開四方）的觸發條件以上述 README〈窗口規則與收斂判定〉的 S1～S6（症狀驅動）為唯一真相源、本檔只引用；時間型的 T3／T7／兜底已於 R207 退役；守衛面准入的反轉（README S5）照舊：動到守衛面 ⇒ 先附暴露證據，而不是擴大搜尋。
 
@@ -134,6 +134,7 @@ claude -p --model haiku --debug hooks --debug-file h.log "ok"; grep 'Hook Sessio
 | 撞上限 | 記下 CLI 印出的 **reset 時間**＋**本 session ID**；reset 後 `claude -r <sessionId>`。額度哨兵（見下）已機械接手，不只靠人記得 |
 
 🔴 **這張表量 context 水位；額度是另一把尺**：額度四道門檻（注意／收斂／準備／停止）住 `tools/lib/quota_policy.py`，**百分比一律現查** `python tools/lib/quota_policy.py --print-env-example`，本檔不複寫數字。兩者分母不同、守衛不同，**不要互相換算**（兩把尺不得同值，有測試釘住）。「準備」帶會動作：進帶後第一次工具呼叫出聲一次＋把可重啟點任務書寫到磁碟，一個 reset 視窗只做一次、不改 rc。機械物＝`context_budget_guard.py`（見機械守衛總表）。
+🔴 **窗內配速床（2026-11-15；ADR-XPLAT-004 §2.15）**：窗內用量超過「允許線」（時間比例＋突發額度）時，把餵給門檻判定的水位墊高到收斂／準備帶（只抬不降），超前不再只出聲、真的收緊 cap；只作用於短窗軸、週軸不套用。允許線與步距參數住 `tools/lib/quota_policy.py`、判準住 `tools/lib/quota_pace_floor.py`，數字一律現查 `python tools/lib/quota_policy.py --print-env-example`。唯一逃生口＝**趕工戳記**：`python tools/sessionctl.py rush --hours <H> --why "<WHY>"`（`--off` 解除、`--status` 現查；自帶到期、有上限、無人窗口無效、讀不到一律當無戳記），判準住 `tools/lib/quota_rush.py`。
 
 ### 額度哨兵（額度尺；設計全文 ADR-XPLAT-004 §2.6／§2.7）
 
@@ -171,6 +172,7 @@ claude -c               # 續接最近一次對話
 - **流程**：到〈可重啟點〉四條件成立 → `python tools/sessionctl.py handoff --build`（機械層，零 token；出聲時已產則補寫主控層即可）→ 在交接包「主控層」六節寫完（已驗證／未完成／下一步確切指令／禁止事項／已代決事項與 WHY／待掌舵者決定，不得留 `TODO:`）→ `python tools/sessionctl.py handoff --finalize <交接包路徑>`（驗不過 rc≠0 並列缺項）→ `python tools/sessionctl.py handoff --spawn <交接包路徑>`（Windows 才會開新互動視窗；前置：finalize 過、工作樹乾淨或 HEAD 有 `*-wip-preserved` 標籤、本 session 無執行中的背景代理；macOS／Linux 只印手動指令；同一交接包不重複 spawn，已 ack 者拒絕）。`--spawn` 成功後**本回合就收尾**，舊 session 不得再動工作樹。**無人窗口不出聲、不開互動視窗**（`AUTOSDD_UNATTENDED` 有設時 `--spawn` 一律拒絕；無人續跑的換 session 由 planner 的 FRESH 路負責）。
 - **新 session 第一動作＝重驗**：SessionStart 會公告未接手的交接包；讀完交接包後先 `git status`／HEAD 與包內每一條「已通過」宣稱重跑一遍，確認接手後 `python tools/sessionctl.py handoff --ack <路徑>`（只有這條指令寫接手憑證）。猝死時沒有主控層，機械層加逐字稿尾段仍可重建。
 - **收斂閘與硬門檻（2026-11-15；ADR-XPLAT-004 §2.14）**：已被提醒換 session 後，上下文若再達**硬門檻**（`AUTOSDD_SWITCH_HARD_CTX_TOKENS`，只准下修且須嚴格大於 R1；數字現查 `python tools/lib/quota_policy.py --print-env-example`，本檔不複寫），`Agent`／`Task`／`Workflow` 派工會被 `sessionctl_guard.py` 擋下，回合結束也會被推回一次；出口只有三條：做完交接包主控層 → `handoff --finalize` → `--spawn`、`/compact`、或把模式設 notify。續棒看快取冷熱：熱放行、冷且上下文大則阻斷，互動逃生口是訊息本文寫 `續棒理由：<WHY>`。浪費帳現查 `python tools/probe/waste_census.py --since-days 14`。
+- **換不換自己決定，交棒後不留會叫醒自己的東西**（掌舵者 2026-11-15 指令，原文「這個不是你可以自己決定處理嗎? 然後你還要問我? 等我來了, 又浪費Token了」；DEF-200-588）：條件成立就直接 finalize → `--spawn`，不用互動選項問掌舵者要不要換（在大上下文裡等人回來，快取過期後整份重寫）；finalize 之後、結束回合之前先 TaskStop 本 session 所有背景任務（等 CI 的結果由新 session 用完整 SHA 重查），否則任務結束時 harness 會把舊 session 冷叫醒。機械物＝`sessionctl_guard.py` 的冷叫醒閘。
 - **不能做**：不以 SendMessage 續舊 session 的代理（一律派新代理＋短任務書；無人窗口不論冷熱、互動在快取已冷時，皆會被 `sessionctl_guard.py` 擋下）；不在 spawn 前後同時讓兩個視窗動同一棵工作樹；`AUTOSDD_SESSION_SWITCH_MODE=notify` 只出聲不開窗、`off` 連出聲都不做。
 
 ### 工具選型（別再選錯）
@@ -397,6 +399,7 @@ bash tools/fsm_runtime/formal/run_tlc.sh                      # TLA+/TLC（自�
 | 額度門檻百分比 | `python tools/lib/quota_policy.py --print-env-example` |
 | context 水位 | `python tools/session_resume_planner.py --check` |
 | session 掌控現況（背景代理名冊、無人窗口、排程、未接手交接包、過期哨兵） | `python tools/sessionctl.py status`（唯讀；停無人窗口 `stop --window <sid>`、交接包 `handoff --list`） |
+| 配速床趕工戳記（是否生效、剩多久） | `python tools/sessionctl.py rush --status`（開／關：`rush --hours <H> --why "<WHY>"`／`rush --off`） |
 | harness autocompact 姿態 | `python tools/session_resume_planner.py --check-autocompact`（關閉時 rc=1） |
 | 可派 agent 數（每次派工前） | `python tools/session_resume_planner.py --pace` |
 | reset 後自動重啟排程 | `python tools/session_resume_planner.py --register-schtasks`／`--verify-schtasks`／`--remove-schtasks`（手動路徑自 DEF-200-456 修復起同樣寫續航狀態塊、醒來依 `allow_resume` 續跑；預防性武裝仍用 `--arm-sentinel`、已撞線用 `--arm-endurance`） |

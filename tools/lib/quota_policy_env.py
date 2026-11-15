@@ -78,6 +78,15 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     EnvVar("AUTOSDD_QUOTA_WRAP_MINUTES", "wrap_minutes", 5.0, "float", 2.0, None,
            "收尾保留段：進 cap 聚合的軸剩餘分鐘低於此值 ⇒ 建議派工數收到 cap_prepare"
            "（出廠＝一個扇出視窗；須 < accel_window）", "policy"),
+    # §2.15 配速床：burst／step 的上界＝出廠值（只准下修，調大＝放寬＝越界⇒該鍵退預設＋出聲）。
+    EnvVar("AUTOSDD_QUOTA_PACE_BURST_PP", "pace_burst_pp", 20.0, "float", 0.0, 20.0,
+           "配速床：窗初容許一波並行派工的 pp（允許線＝已過窗長比例×100＋此值；只准調小）",
+           "policy"),
+    EnvVar("AUTOSDD_QUOTA_PACE_STEP_PP", "pace_step_pp", 10.0, "float", 1.0, 10.0,
+           "配速床：超線超過此 pp ⇒ 水位抬到 prepare、否則 converge（只准調小）", "policy"),
+    EnvVar("AUTOSDD_QUOTA_PACE_RUSH_UNTIL", "pace_rush_until", None, "float", 0.0, None,
+           "趕工戳記到期時刻（epoch 秒；由 sessionctl rush 經 policy_env 疊入，勿手寫常駐）",
+           "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_NOTICE", "cap_notice", 8, "int", 1.0, None,
            "notice 帶的 base cap", "policy"),
     EnvVar("AUTOSDD_QUOTA_CAP_CONVERGE", "cap_converge", 4, "int", 1.0, None,

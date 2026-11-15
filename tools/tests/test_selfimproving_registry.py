@@ -875,7 +875,7 @@ class TestNoRegression(RgCase):
         # sched_auto_push 預設改回 false（明確開啟才生效），活值 sha 更新
         raw = (ROOT / "docs/06_quality/SelfImproving_Protocol/params.json").read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         "042b4adc83e756d6f4383af861bc8455bf1db679bdbbe976e66de5476db97e76")
+                         "aab9ca2d64f846920952fa469af43135ac582c166de3bd9593765572a7b13943")
         self.assertEqual(len(params.PARAM_SPECS), 47)
         self.assertEqual(params.CHECK_RULES_REV, 6)
         self.assertEqual(self.check(ROOT)["_item"]["params.globs"]["status"], "PASS")

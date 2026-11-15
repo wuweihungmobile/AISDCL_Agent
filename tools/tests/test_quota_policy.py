@@ -4522,5 +4522,319 @@ class TestDef200199RecFollowsOneAxisUnlessANearAxisAccelerates(unittest.TestCase
         self.assertEqual(_g_decide(gate).recommended_fanout, 1)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ADR-XPLAT-004 §2.15 配速床：decide／政策／env／gate 接線（TCS-TokenWaste-20261114 §10.4.4）
+# ═══════════════════════════════════════════════════════════════════════════
+_PWHY = "測試用趕工理由八字以上"
+_PINF = float("inf")
+
+
+def _pace_state(fh: float, fh_min: float, wk: float = 30.0, wk_min: float = 8000.0,
+                scoped: float | None = None, session: bool = True) -> Q.QuotaState:
+    """五小時＋（選配）session 同 reset、weekly_all，（選配）別家分軌 weekly_scoped(Fable)。"""
+    axes = [axis("five_hour", fh, fh_min)]
+    if session:
+        axes.append(axis("session", fh, fh_min))
+    axes.append(axis("weekly_all", wk, wk_min))
+    if scoped is not None:
+        axes.append(axis("weekly_scoped", scoped, wk_min, scope_model="Fable"))
+    return Q.QuotaState(tuple(axes), NOW.isoformat(), "test")
+
+
+def _five(decision: Q.Decision) -> Q.AxisReading:
+    return next(r for r in decision.per_axis if r.axis.kind == "five_hour")
+
+
+def _same_but_pace(on: Q.Decision, off: Q.Decision) -> bool:
+    """除 `pace` 欄外逐欄相等（`Decision` 是 frozen dataclass，`==` 比全部欄位含 reason）。"""
+    return dataclasses.replace(on, pace=()) == off
+
+
+class PaceFloorDecideTest(unittest.TestCase):
+    """AT-QP-25～33：床進致動器；關閉路徑＝改前行為。"""
+
+    def test_at_qp_25_the_incident_point_gets_converge_and_the_control_group_proves_it(self):
+        """事故實測點；對照組（`pace_floor=False`）證明差異來自床而非其他軸（證據 3 的 cap=None）。
+        整體 `Decision.cap` 因 weekly_scoped 78 本來就 <=2 不具鑑別力，
+        鑑別看 five_hour 逐軸讀數。"""
+        st = _pace_state(38, 247, wk=71, wk_min=8467, scoped=78)
+        on = Q.decide(st, NOW, P, active_model="fable")
+        off = Q.decide(st, NOW, P, active_model="fable", pace_floor=False)
+        five = _five(on)
+        self.assertEqual((five.band, five.horizon, five.cap), ("converge", "far", 2))
+        self.assertIn("pace-floor", on.reason)
+        self.assertTrue(any(f.state == "lifted" for f in on.pace))
+        self.assertEqual((_five(off).band, _five(off).cap), ("free", None))
+        self.assertNotIn("pace-floor", off.reason)
+        self.assertEqual(off.pace, ())
+
+    def test_at_qp_26_the_other_two_real_points(self):
+        """另外兩個真實點，防止只對單點調參。"""
+        for pct, minutes in ((43, 244), (48, 230)):
+            with self.subTest(pct=pct, minutes=minutes):
+                d = Q.decide(_pace_state(pct, minutes), NOW, P)
+                self.assertEqual((d.band, d.cap), ("converge", 2))
+
+    def test_at_qp_27_a_big_overshoot_reaches_prepare(self):
+        """S 的分級要真的進致動器，不只停在函式層。"""
+        d = Q.decide(_pace_state(61, 210), NOW, P)
+        self.assertEqual((d.band, d.cap), ("prepare", 1))
+
+    def test_at_qp_28_window_tail_decides_exactly_as_without_the_floor(self):
+        """use-it-or-lose-it 在 `decide` 層同樣成立：逐欄相等且 reason 不含 pace-floor。"""
+        st = _pace_state(80, 40)
+        on, off = Q.decide(st, NOW, P), Q.decide(st, NOW, P, pace_floor=False)
+        self.assertTrue(_same_but_pace(on, off))
+        self.assertNotIn("pace-floor", on.reason)
+
+    def test_at_qp_29_a_weekly_reset_inside_the_window_exempts_at_decide_level(self):
+        """免套用②在整合層成立；軸級對、整合層漏接線是本 repo 反覆記載的失敗型。"""
+        st = _pace_state(38, 247, wk_min=100)
+        on, off = Q.decide(st, NOW, P), Q.decide(st, NOW, P, pace_floor=False)
+        self.assertTrue(_same_but_pace(on, off))
+
+    def test_at_qp_30_a_valid_rush_is_bit_identical_to_no_floor(self):
+        """「與無本功能逐位元相同」的直接斷言（含 reason、per_axis 的 note）。"""
+        st = _pace_state(38, 247)
+        p = dataclasses.replace(P, pace_rush_until=NOW.timestamp() + 3600)
+        on, off = Q.decide(st, NOW, p), Q.decide(st, NOW, p, pace_floor=False)
+        self.assertTrue(_same_but_pace(on, off))
+        self.assertTrue(on.pace and all(f.state in ("exempt-rush", "n/a") for f in on.pace))
+        self.assertEqual(Q.decide(st, NOW, P).band, "converge", "控制組：沒戳記床照常套用")
+
+    def test_at_qp_31_rush_boundaries_are_strict(self):
+        """上限與到期都是嚴格不等式；`<=`／`<` 寫錯一格就讓 6 小時戳記或剛到期的戳記仍然生效。"""
+        st = _pace_state(38, 247)
+        off = Q.decide(st, NOW, P, pace_floor=False)
+        for delta, rushed in ((18000, True), (18001, False), (0, False), (-1, False)):
+            with self.subTest(delta=delta):
+                p = dataclasses.replace(P, pace_rush_until=NOW.timestamp() + delta)
+                self.assertEqual(_same_but_pace(Q.decide(st, NOW, p), off), rushed)
+
+    def test_at_qp_32_the_floor_never_loosens_anywhere_on_a_grid(self):
+        """AC-3 的整合層網格：任何一格 cap／rec／band 變鬆即紅。"""
+        weeklies = ((20.0, 8000.0), (75.0, 8000.0), (20.0, 100.0))
+        order = {b: i for i, b in enumerate(Q._BAND_LADDER)}
+        for pct in range(0, 101, 10):
+            for minutes in range(0, 301, 30):
+                for wk, wk_min in weeklies:
+                    st = _pace_state(pct, minutes, wk=wk, wk_min=wk_min)
+                    on, off = Q.decide(st, NOW, P), Q.decide(st, NOW, P, pace_floor=False)
+                    where = (pct, minutes, wk, wk_min)
+                    self.assertLessEqual(_PINF if on.cap is None else on.cap,
+                                         _PINF if off.cap is None else off.cap, where)
+                    self.assertLessEqual(on.recommended_fanout, off.recommended_fanout, where)
+                    self.assertGreaterEqual(order[on.band], order[off.band], where)
+
+    def test_at_qp_70_new_floor_text_passes_the_existing_m7_criterion(self):
+        """M7：每個 `%` 都要帶 `kind=` 與剩餘分鐘。
+        床段一律用 pp、`describe` 的新增句不得出現孤立 `%`。"""
+        import quota_pace_floor as PF
+
+        d = Q.decide(_pace_state(38, 247), NOW, P)
+        self.assertIn("sessionctl.py rush --hours", Q.describe(d))
+        self.assertEqual(QC.m7_problems(Q.describe(d)), [])
+        self.assertEqual(QC.m7_problems(PF.line(d.pace)), [])
+        self.assertNotIn("%", PF.line(d.pace))
+        calm = Q.describe(Q.decide(_pace_state(80, 40), NOW, P))
+        self.assertNotIn("sessionctl.py rush", calm, "非床阻斷不附趕工句")
+
+    #: 凍結的外部基準：動工前（step 0）自**未改版**程式擷取，`(cap, rec, band, binding.kind)`。
+    #: 沒有它，「關閉路徑逐位元相同」只是與自己比、永遠綠（AT-QP-33）。
+    GOLDEN_LEGACY = {
+        "g01": (None, 4, "free", "weekly_all"), "g02": (None, 4, "free", "weekly_all"),
+        "g03": (None, 4, "free", "weekly_all"), "g04": (4, 2, "notice", "five_hour"),
+        "g05": (4, 2, "converge", "five_hour"), "g06": (0, 0, "halt", "five_hour"),
+        "g07": (None, 4, "free", "weekly_all"), "g08": (4, 2, "notice", "weekly_all"),
+        "g09": (2, 1, "converge", "weekly_all"), "g10": (None, 16, "free", "five_hour"),
+        "g11": (1, 1, "prepare", "five_hour"), "g12": (2, 2, "unmeasured", None),
+    }
+
+    def test_at_qp_33_floor_off_equals_the_frozen_pre_change_baseline(self):
+        """證明關閉路徑＝改前行為；基準是外部凍結的字面表，不是跟現行 decide 自比。"""
+        cases = {
+            "g01": _pace_state(38, 247), "g02": _pace_state(43, 244), "g03": _pace_state(48, 230),
+            "g04": _pace_state(61, 210), "g05": _pace_state(80, 40), "g06": _pace_state(99, 30),
+            "g07": _pace_state(10, 280), "g08": _pace_state(55, 240, wk=60.0),
+            "g09": _pace_state(38, 247, wk=71.0, wk_min=8467, scoped=78.0),
+            "g10": _pace_state(38, 247, wk_min=100), "g11": _pace_state(90, 230),
+            "g12": Q.QuotaState((), NOW.isoformat(), "test", reason="unmeasurable"),
+        }
+        for name, st in cases.items():
+            with self.subTest(case=name):
+                d = Q.decide(st, NOW, P, active_model="fable", pace_floor=False)
+                got = (d.cap, d.recommended_fanout, d.band, d.binding.kind if d.binding else None)
+                self.assertEqual(got, self.GOLDEN_LEGACY[name])
+
+    def test_at_qp_33b_default_path_changes_exactly_where_the_floor_lifts(self):
+        """對照：沒超線（窗尾、窗初低水位）或被免套用（週軸先 reset）的案例，
+        預設路徑仍逐位元同改前；
+        床只改「超線」的案例。若床誤傷這四格，這條會紅。"""
+        cases = {"g05": _pace_state(80, 40), "g06": _pace_state(99, 30),
+                 "g07": _pace_state(10, 280), "g10": _pace_state(38, 247, wk_min=100)}
+        for name in cases:
+            with self.subTest(case=name):
+                d = Q.decide(cases[name], NOW, P, active_model="fable")
+                got = (d.cap, d.recommended_fanout, d.band, d.binding.kind if d.binding else None)
+                self.assertEqual(got, self.GOLDEN_LEGACY[name])
+
+
+class PaceFloorPolicyTest(unittest.TestCase):
+    """AT-QP-34～36：政策欄位、方向鎖、env 與生成物。"""
+
+    def test_at_qp_34_monotonicity_criterion_rejects_pathological_pace_values(self):
+        """單調判準管「值與值之間的關係」，`ENV_SPEC` 的 lo／hi 管不到（既有判詞）。"""
+        self.assertEqual(Q.policy_monotonicity_problems(P), [])
+        for fields in ({"pace_burst_pp": -1.0}, {"pace_step_pp": 0.0}, {"pace_step_pp": -5.0}):
+            with self.subTest(fields=fields):
+                problems = Q.policy_monotonicity_problems(dataclasses.replace(P, **fields))
+                self.assertTrue(problems and all(x.startswith("[方向]") for x in problems))
+
+    def test_at_qp_35_env_bounds_are_per_key_and_only_tighten(self):
+        """只准下修由 `hi` 鎖住（放寬＝可調旋鈕變後門）；越界是「該鍵退預設」不連坐其他鍵，
+        與 Architect 稿「整組退預設」不同，以程式為準，此條釘現況。"""
+        def load(**kv):
+            return Q.load_policy({"AUTOSDD_QUOTA_CONVERGE_PCT": "65", **kv})
+
+        pol, problems = load(AUTOSDD_QUOTA_PACE_BURST_PP="25")
+        self.assertEqual(pol.pace_burst_pp, 20.0)
+        self.assertTrue(any("AUTOSDD_QUOTA_PACE_BURST_PP" in x and "高於上界 20.0" in x
+                            for x in problems), problems)
+        self.assertEqual(pol.converge_pct, 65.0, "單鍵退預設，不連坐")
+        pol, problems = load(AUTOSDD_QUOTA_PACE_BURST_PP="15")
+        self.assertEqual((pol.pace_burst_pp, problems), (15.0, []))
+        for key, raw in (("BURST_PP", "-1"), ("STEP_PP", "11"), ("STEP_PP", "0.5"),
+                         ("STEP_PP", "0"), ("RUSH_UNTIL", "abc")):
+            with self.subTest(key=key, raw=raw):
+                pol, problems = load(**{f"AUTOSDD_QUOTA_PACE_{key}": raw})
+                self.assertTrue(any(f"AUTOSDD_QUOTA_PACE_{key}" in x for x in problems))
+                self.assertEqual((pol.pace_burst_pp, pol.pace_step_pp, pol.pace_rush_until),
+                                 (20.0, 10.0, None))
+        pol, problems = load(AUTOSDD_QUOTA_PACE_RUSH_UNTIL="1e12")
+        self.assertEqual((pol.pace_rush_until, problems), (1e12, []))
+        far = Q.decide(_pace_state(38, 247), NOW, pol)
+        self.assertEqual(far.band, "converge", "遠超過上限的 until 在 decide 層被忽略")
+
+    def test_at_qp_36_example_file_carries_the_three_keys_and_stays_in_sync(self):
+        """生成物不同步＝使用者抄範例得到錯誤預設；範例值 `0` 會讓 `overlay` 的「空白或 <=0」判準
+        失去意義，所以 RUSH_UNTIL 範例必須是空值。"""
+        text = Q.render_env_example()
+        parsed = Q.parse_env_text(text)
+        for key in ("AUTOSDD_QUOTA_PACE_BURST_PP", "AUTOSDD_QUOTA_PACE_STEP_PP",
+                    "AUTOSDD_QUOTA_PACE_RUSH_UNTIL"):
+            self.assertIn(key, parsed)
+        self.assertEqual(parsed["AUTOSDD_QUOTA_PACE_RUSH_UNTIL"], "")
+        self.assertEqual(parsed["AUTOSDD_QUOTA_PACE_BURST_PP"], "20")
+        disk = (_REPO / ".env.example").read_text(encoding="utf-8")
+        self.assertEqual(Q.env_example_problems(disk), [])
+
+
+class _GateHarness(unittest.TestCase):
+    """真 `quota_gate`／`draining`／`pace_report`，快取／帳／痕跡全落 tmp、環境全清。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="pace_gate_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        patcher = mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: str(self.tmp / "traces")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key in [k for k in os.environ if k.startswith("AUTOSDD_QUOTA")] + [
+                "AUTOSDD_UNATTENDED"]:
+            os.environ.pop(key, None)
+        swaps = {"quota_cache_path": lambda: self.tmp / "c.json",
+                 "fanout_ledger_path": lambda: self.tmp / "l.d",
+                 "quota_latch_path": lambda: self.tmp / "latch.json",
+                 "quota_trace_path": lambda: self.tmp / "trace.jsonl",
+                 "degraded_stamp_path": lambda source: self.tmp / f"stamp-{source}"}
+        for name, value in swaps.items():
+            p = mock.patch.object(QG, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        for target, name, value in ((QG.quota_env_layers, "merged_file_env", lambda _b: {}),
+                                    (PC, "contract_path", lambda: self.tmp / "pace.json")):
+            p = mock.patch.object(target, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def cache(self, fh: float, fh_min: float = 247.0, wk: float = 30.0) -> datetime:
+        now = datetime.now().astimezone()
+        reset = (now + timedelta(minutes=fh_min)).isoformat()
+        (self.tmp / "c.json").write_text(json.dumps({
+            "schema": QG.quota_schema(),
+            "measured_at": (now - timedelta(seconds=10)).isoformat(),
+            "axes": [{"kind": "five_hour", "pct": fh, "resets_at": reset},
+                     {"kind": "session", "pct": fh, "resets_at": reset},
+                     {"kind": "weekly_all", "pct": wk,
+                      "resets_at": (now + timedelta(minutes=8000)).isoformat()}]}),
+            encoding="utf-8")
+        return now
+
+    def gate(self, event: str = "PreToolUse", tool: str = "Agent") -> tuple[int, str]:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = QG.quota_gate({"hook_event_name": event, "tool_name": tool,
+                                "transcript_path": ""}, blocking=("Agent",),
+                               latch_read=lambda _p: set(), latch_write=lambda _p, _k: None,
+                               plan_writer=lambda *_a, **_k: "", waker=lambda *_a, **_k: {},
+                               event=event)
+            QG.flush_to_model()
+        return rc, err.getvalue()
+
+
+class PaceFloorGateTest(_GateHarness):
+    """AT-QP-37～40：致動器真的接上電。"""
+
+    def test_at_qp_37_draining_ignores_the_floor_while_decide_does_not(self):
+        """`draining` 若吃床，水位 55 就被判「不得壓縮」，與 context 守衛要求壓縮相衝；
+        用只抬到 converge 的點（45@240）測不出差別，所以取會抬到 prepare 的 55@240。"""
+        now = self.cache(55.0, 240.0)
+        self.assertEqual(QG.draining(now), "no")
+        policy, _ = Q.load_policy(QG.policy_env())
+        with_floor = Q.decide(QG.read_quota(now), now, policy)
+        self.assertEqual(with_floor.band, "prepare")
+        self.assertIn(with_floor.band, QG.DRAINING_BANDS)
+
+    def test_at_qp_38_pace_report_says_the_floor_and_stays_m7_clean(self):
+        """`--pace` 是派工前的詢問口；不說床就看不出為何被擋。"""
+        now = self.cache(38.0, 247.0)
+        text = QG.pace_report(now)
+        for part in ("配速床：", "kind=five_hour", "pp", "超線"):
+            self.assertIn(part, text)
+        self.assertRegex(text, r"剩 24[67] 分鐘，已用")
+        # 全文的第一行（`pace_line`）自帶既有的 `五小時軸 % 剩 N 分鐘` 形態、不在本期射程；
+        # 本期新增的床段必須單獨過 M7（AT-QP-70 同判準）。
+        floor_lines = "".join(x + "\n" for x in text.splitlines() if x.startswith("  配速床："))
+        self.assertTrue(floor_lines)
+        self.assertEqual(QC.m7_problems(floor_lines), [])
+        calm = QG.pace_report(self.cache(10.0, 247.0))
+        self.assertIn("未超線", calm)
+
+    def test_at_qp_39_the_third_dispatch_is_blocked_and_a_rush_unblocks_all(self):
+        """函式層對、gate 層沒人叫＝「機制蓋好沒接電」；weekly 軸一律低以免週軸本身就擋。"""
+        self.cache(38.0, 247.0)
+        results = [self.gate() for _ in range(3)]
+        self.assertEqual([rc for rc, _ in results], [0, 0, 2])
+        self.assertIn("pace-floor", results[2][1])
+        shutil.rmtree(self.tmp / "l.d", ignore_errors=True)
+        import quota_rush as R
+
+        self.assertEqual(R.issue(1, _PWHY, now=datetime.now().astimezone(), env={})[0], 0)
+        self.cache(38.0, 247.0)
+        self.assertEqual([self.gate()[0] for _ in range(3)], [0, 0, 0])
+
+    def test_at_qp_40_only_floor_blocks_advertise_the_rush_exit(self):
+        """阻斷必有確切下一步；非床阻斷不得推銷趕工（誤導）。"""
+        self.cache(38.0, 247.0)
+        blocked = [self.gate() for _ in range(3)][2][1]
+        self.assertIn("sessionctl.py rush --hours", blocked)
+        shutil.rmtree(self.tmp / "l.d", ignore_errors=True)
+        self.cache(72.0, 60.0)  # 窗尾：床不抬
+        with mock.patch.dict(os.environ, {"AUTOSDD_QUOTA_FANOUT_CAP": "1"}):
+            second = [self.gate() for _ in range(2)]
+        self.assertEqual(second[1][0], 2, "控制組：覆寫 cap=1 時第二次被擋")
+        self.assertNotIn("pace-floor", second[1][1])
+        self.assertNotIn("sessionctl.py rush", second[1][1])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -393,6 +393,14 @@ class HookConvergeTest(unittest.TestCase):
         self.assertIn("systemMessage", doc)
         self.assertNotIn("decision", doc)
 
+    def test_def_200_588_a_background_shell_never_masks_the_stop_pushback(self) -> None:
+        """DEF-200-588（hook 層）：只有背景 shell 在跑（事故形態＝掛著等 CI）時，出聲不得蓋掉
+        推回——原接線先出聲就 return，判準層說要推回、hook 卻只印一句話放行。"""
+        slug, env = _advised_session(self, 300_000)
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        doc = json.loads(_run_hook(_stop(slug, background_tasks=[shell]), **env).stdout)
+        self.assertEqual(doc.get("decision"), "block", doc)
+
     def test_at_tw_78_stacked_with_check_pending_handoff_there_is_no_deadlock(self) -> None:
         """AT-TW-78：兩支 Stop 守衛同回合都推回（最壞一個額外回合），第二次 Stop
         （`stop_hook_active`）兩者皆放行——疊加不死鎖。"""
