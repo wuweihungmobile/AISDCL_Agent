@@ -47,6 +47,7 @@ from collections.abc import Mapping
 #: `::test_the_declared_collapsing_set_matches_the_real_sandbox`（真探針，非第二份猜測）。
 PREREQ_DEPENDENT_MODULES: frozenset[str] = frozenset(
     {
+        "test_ci_paths_cover_root_consumers",  # 以 yaml 解析 workflow paths（DEF-200-592）
         "test_gha_action_versions",
         "test_ntfs_trailing_space_device_name",
         # DEF-200-274 第八輪：新增 TestParallelTestsCiWiring 改用 `yaml.safe_load`

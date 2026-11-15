@@ -821,7 +821,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - 允許線 `allowed(t) ＝ 100 × elapsed_frac ＋ B`，`B ＝ pace_burst_pp`（出廠 20，窗初容許一波並行派工）；`elapsed_frac ＝ 1 − 剩餘分鐘／窗長`（與 `quota_pace.lead_pp` 同一算式，不另寫第二份）。
 - `over ＝ pct − allowed`：`over ≤ 0` ⇒ 不動；`0 < over ≤ S` ⇒ 餵入水位至少 `converge_pct`；`over > S` ⇒ 至少 `prepare_pct`；`S ＝ pace_step_pp`（出廠 10）；上界 `halt_pct − 1`（推導值永不觸發 halt，同攤提）。
 - 只作用在**最短窗軸**（由 `quota_pace.windows()` 的窗長導出，不認桶名；`session` 與 `five_hour` 同窗長者各自以自己的水位算）。
-- 動作＝既有致動器：水位抬進 converge／prepare 帶後，`quota_gate` 的 300 秒扇出 cap（rc 2 擋 `Agent`／`Task`／`Workflow`／`WebFetch`／`WebSearch`）自然收緊；**零新致動器**。主控自己的呼叫不受 cap 管（那是 §2.15 之外的成本題，見 D4／分期表）。
+- 動作＝既有致動器：水位抬進 converge／prepare 帶後，`quota_gate` 的 300 秒扇出 cap（rc 2 擋 `Agent`／`Task`／`Workflow`；`WebFetch`／`WebSearch` 自 §2.16 起不進此帳）自然收緊；**零新致動器**。主控自己的呼叫不受 cap 管（那是 §2.15 之外的成本題，見 D4／分期表）。
 - 免套用（回原值，逐位元等於無本功能）：① 趕工戳記有效；② 任一更長窗軸距 reset 的分鐘數**小於**短窗剩餘分鐘（長窗在本短窗內就翻頁⇒用掉不留；等於不免）；③ 窗長或距離不明（`lead_pp` 回 `None` 的同一組前置）；④ 清倉授權（`quota_burndown`）對該軸 `hold` 為真（SD 補：清倉＝操作者明示要把剩餘額度用盡，配速床不得與之相抗）。別家模型的 model-scoped 軸（`_amort_skip` 遮罩）既不算短窗也不算免套用②的長窗。
 - 與 2026-08-16 裁決相容：`B＝20` 時允許線在已過 80% 窗長（300 分窗的第 240 分鐘）起 ≥100 ⇒ 床自動消失，短窗剩餘額度照樣可在窗尾用完；床改變的是**速率**、不是總量。
 
@@ -839,7 +839,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 **D2　趕工戳記 `sessionctl rush`：自帶到期的人工宣告，只關配速床**
 
 - 形態＝有效期戳記，不是環境變數（X23）。`python tools/sessionctl.py rush --hours <H> --why "<WHY≥8字>"` 寫戳記檔（`endurance_env.trace_dir()/quota_rush.json`，持久目錄，跟 `quota_burndown` 的落款同一個家）；`--off` 撤銷；`--status` 查。到期即失效（讀取端判斷，無常駐程式）。
-- 有效期上限 5 小時（`H` 須 `0 < H ≤ 5`）；超過、非數字、`why` 去頭尾空白後少於 8 字，或 `AUTOSDD_UNATTENDED` 有設 ⇒ 拒絕（rc 2）。讀取端對無人窗口同樣一律忽略戳記（無人窗口無人可宣告趕工；較緊的方向）。
+- 有效期上限 5 小時（`H` 須 `0 < H ≤ 5`）；超過、非數字、`why` 去頭尾空白後少於 8 字，或 `AUTOSDD_UNATTENDED` 有設 ⇒ 拒絕（rc 2）。讀取端對無人窗口同樣一律忽略戳記（無人窗口無人可宣告趕工；較緊的方向），**不分載體**：`overlay()` 在 `AUTOSDD_UNATTENDED` 有設時連手設的 `AUTOSDD_QUOTA_PACE_RUSH_UNTIL` 一併移除。讀取端對 `why` 去頭尾空白後不足 8 字的戳記也視為無戳記（與寫入端同一條下限）；讀取位置＝寫入端此刻會落腳的那一處（`endurance_env.trace_dir_peek()`，與 `trace_dir()` 同判準、不 mkdir），主居所健康時不併讀系統暫存（2026-11-15 安全審查 P3-1～P3-3 修復）。
 - **射程只有配速床**：既有四道門檻、攤提、halt、cap 階梯一律照舊 ⇒ 不放寬任何既有門檻。誰能開：掌舵者明示或任務書宣告「趕工」時由主控執行，`why` 引座標。
 - 承載（SD 對 Architect 稿的修正，見 §2.15.3）：戳記由 `quota_gate.policy_env()` 的出口疊成 `AUTOSDD_QUOTA_PACE_RUSH_UNTIL`（epoch 秒；自帶到期；hook 每次觸發重讀 ⇒ 開了戳記後**已在跑的其他 session 下一次呼叫即生效**，不必重啟），經 `load_policy` 進 `Policy.pace_rush_until`；`decide()` 以 `now` 判有效。所有走 `policy_env()` 的消費端（gate、`--pace`、簡報、無人巡邏）因此看到同一個 cap，不會出現「同一件事兩個數」。
 - 痕跡：`pace_rush_on`／`pace_rush_off` 與配速床抬水位的 `pace_floor` 落同一個檔 `autosdd_pace_floor.jsonl`（持久痕跡目錄），供 M-P4／M-P7 取數。
@@ -921,7 +921,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 2. AT-QP-19 的數字改 55／70（窗 200）：原稿 40／60 算不出 70／85。
 3. AT-QP-38 原稿「既有 M7 判準對全文綠」於改前即不成立（`pace_report` 第一行本無 `kind=`）；改為只對本期新增的床段與 describe 句判 M7（AT-QP-70）。
 4. `log_floor` 一次決策只落一列（取超線最多的軸）。
-5. `Decision.pace` 的 hold 固定為空；`burndown.apply` 內部呼叫 `axes_of` 仍預設套床（生產無 `pace_floor=False` 搭 `burndown` 的組合）。
+5. ~~`Decision.pace` 的 hold 固定為空~~（2026-11-15 安全審查 P3-4 修復：`decide()` 帶 burndown 時以 `burndown.masks()` 的 hold 傳入 `_floors`，`pace` 與實際餵入水位同源，hold 軸報 `exempt-hold`、不再誤落 `pace_floor` 列污染 M-P4 撤回分子；回歸鎖＝`test_quota_rush.py::ReviewP3HardeningTest::test_p3_4_*`）；`burndown.apply` 內部呼叫 `axes_of` 仍預設套床（生產無 `pace_floor=False` 搭 `burndown` 的組合）。
 6. AT-QP-55 的站點表登記 11 個檔（含三支探針模擬器與 doctor 的直接 `load_policy`）。
 另：趕工戳記讀取端改走唯讀路徑查找（不得在 `--check` 時憑空建立痕跡目錄），回歸鎖＝`ReadSideCreatesNothingTest`。
 
@@ -934,6 +934,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - 床抬到 prepare 帶會觸發 `quota_prepare_actions`（任務書落盤，視窗內只做一次）；若觀察期內該副作用過於頻繁，檢討的是 S（`pace_step_pp`）的取值，不是在 prepare 帶開旁路。
 - 趕工戳記與 `AUTOSDD_QUOTA_PACE_RUSH_UNTIL` 載體**不具防偽性質**（同 `quota_burndown` 的誠實聲明）：只讓事後可稽核、失效可偵測；手設該環境變數等同趕工至該時刻，仍受 5 小時上限約束。
 - `ScheduleWakeup` 沒有任何憑證（不寫磁碟、無登錄），保溫的失效是靜默的；第二期以 M-P5（保溫請求命中率，逐字稿事後量）與 V-K1 的「喚醒間隔≈50 分」判準補這個洞。
+- 理論洞（P4，登記不修；DEF-200-591 審查所列，無暴露證據）：`quota_policy_env._parse_env_number` 不判 NaN；互動窗口內子代理也能發戳記（設計自承只可稽核）；子代理 PreToolUse payload 是否必帶 `agent_id` 未真機驗證。
 - 第二期前置真機驗證**全數未做**；statusline 欄位、idle compaction 觸發條件、價格比皆「未讀到」，不得據以宣稱。
 
 #### 2.15.7 指標、基線與撤回門檻（觀察期：2 個完整週額度週期＝14 天；第 7 天中期檢查只看回退判定；評估法＝中斷時間序列＋逐列回放，n 小時不做 A/B）
@@ -950,6 +951,16 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 | M-C1 主控每呼叫新增寫入 | 主控 sid 平均 `cache_creation`／請求（逐字稿） | 本窗 5.5k（SA 單窗） | ≤2.5k | — |
 
 證偽前提：上線後若 statusline 取樣可得，重算換算係數；寫讀比落在 10～60 以外，D4 的表全部重算。
+
+### 2.16 網頁讀取不進派發帳（2026-11-15；DEF-200-590）
+
+- **暴露證據**（真實逐字稿）：subagent `agent-a4e1e457bf095f721.jsonl` 第 155／156／167 筆、`agent-aaf1e558ab98a0469.jsonl` 第 127 筆，`PreToolUse:WebFetch hook error` ⇒ 逐字「`band=converge … cap=2 … 每 300s 最多 2 次扇出，本視窗已用 2 次 ⇒ WebFetch 本次不執行`」（binding=`weekly_scoped` 78%）。查閱型子代理連讀兩頁即被擋。
+- **成因**：`quota_gate.quota_gate()` 對 `BLOCKING_TOOLS` 全員一視同仁——`WebFetch`／`WebSearch` 與 `Agent`／`Task` 共用同一本派發帳（`claim_dispatch`）與同一個 `cap`。派發帳的設計前提（§2.6／ADR-XPLAT-005）是「一次派發＝生出一個會持續燒額度的 agent」；網頁讀取不生出任何 agent、單次成本是一頁文字，不屬於該前提。後果雙向：網頁讀取吃光 cap 名額 ⇒ 擋住真正的 `Agent` 派發；`Agent` 派發吃光名額 ⇒ 擋住查閱。
+- **決策**：新增 `quota_gate.WEB_READ_TOOLS = ("WebFetch", "WebSearch")`；PreToolUse 於派發邊緣對它們**不記帳、不比 cap**（`decision.cap > 0` 時直接放行）。零新環境變數、零新逃生口、不放寬任何門檻。
+- **保護不變弱（三處仍擋）**：① halt 帶（≥ `halt_pct`）在豁免之前就 rc=2 返回，網頁類照擋；② `cap <= 0`（量不到而持久沿用 0 的遲滯）不豁免，落回派發帳照擋；③ context 尺的高水位阻斷走 `context_budget_guard.BLOCKING_TOOLS`（本修不動，仍含網頁類）。`Agent`／`Task`／`Workflow` 行為逐字不變。
+- **已否決**：另開第二本網頁專用帳與第二個 cap（多一組門檻與環境變數，而網頁讀取本身不生出併發，計數無對象）。
+- **劃界**：網頁讀取的 token 成本仍落在本 session 的 context 與額度，由 context 尺與額度 halt 帶節制；本節只修「被當成派人」。
+- 回歸鎖：`tools/tests/test_context_budget_guard.py::WebReadsAreNotDispatchesTest`。
 
 ## 3. 被否決的方案（各記為何否決）
 

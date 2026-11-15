@@ -10271,6 +10271,52 @@ class WorkflowFanoutIsOutOfReachTest(unittest.TestCase):
         self.assertTrue(set(qg.UNBOUNDED_FANOUT_TOOLS) <= set(guard.BLOCKING_TOOLS))
 
 
+class WebReadsAreNotDispatchesTest(unittest.TestCase):
+    """DEF-200-590：查閱型子代理連讀網頁被「每 300s 最多 cap 次扇出」擋下（converge 帶 cap=2、
+    WebFetch 第 3 次 rc=2）。網頁讀取不派人，不得進派發帳、不得吃派代理的名額；halt 仍擋。"""
+
+    def setUp(self) -> None:
+        self.tmp = _tmpdir(self)
+        self.transcript = str(_write_jsonl(self.tmp / "s.jsonl", [36_000]))
+
+    def _call(self, tool: str) -> int:
+        return _run_hook({"hook_event_name": "PreToolUse", "tool_name": tool,
+                          "transcript_path": self.transcript}, self.tmp)[0]
+
+    def test_many_web_reads_in_the_throttle_band_are_never_denied_nor_booked(self) -> None:
+        _quota_cache(self.tmp, 85.0)
+        codes = [self._call(t) for t in ("WebFetch", "WebSearch") * 6]
+        self.assertEqual(codes, [0] * 12, "網頁讀取被當成扇出擋下")
+        live = qg.live_dispatches(self.tmp / qg.FANOUT_LEDGER_NAME,
+                                  datetime.now(UTC).astimezone())
+        self.assertEqual(live, 0, "網頁讀取不得進派發帳")
+
+    def test_web_reads_do_not_eat_the_agent_dispatch_budget(self) -> None:
+        _quota_cache(self.tmp, 85.0)
+        for _ in range(8):
+            self._call("WebFetch")
+        self.assertEqual(self._call("Agent"), 0, "WebFetch 吃掉了 Agent 的名額")
+
+    def test_exhausted_agent_budget_does_not_block_web_reads(self) -> None:
+        _quota_cache(self.tmp, 85.0)
+        for _ in range(20):
+            if self._call("Agent") == 2:
+                break
+        else:
+            self.fail("對照組失效：Agent 從未被節流")
+        self.assertEqual(self._call("WebFetch"), 0)
+
+    def test_halt_band_still_denies_web_reads(self) -> None:
+        """保護不變弱：停止帶的 PreToolUse 對網頁類照擋（走 halt 分支，在豁免之前）。"""
+        _quota_cache(self.tmp, 99.0)
+        self.assertEqual(self._call("WebFetch"), 2)
+        self.assertEqual(self._call("WebSearch"), 2)
+
+    def test_web_tools_stay_in_the_context_blocking_set(self) -> None:
+        self.assertTrue(set(qg.WEB_READ_TOOLS) <= set(guard.BLOCKING_TOOLS),
+                        "網頁類必須仍在 context 尺的阻斷名單（高水位照擋）")
+
+
 # ══════════════════════ R82／HELM-04：判讀層接線（M1／M7／M10 ＋ 訴求 6c 的 .env）
 class QuotaDecisionEntryIsSingleTest(unittest.TestCase):
     """🔴 M10：「函式對了但沒人叫它」＝本 repo 反覆記載的『機制蓋好沒接電』。

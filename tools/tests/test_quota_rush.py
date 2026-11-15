@@ -26,6 +26,7 @@ from unittest import mock
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tools" / "lib"))
 import endurance_env as EE  # noqa: E402
+import quota_burndown as B  # noqa: E402
 import quota_gate as QG  # noqa: E402
 import quota_pace_floor as PF  # noqa: E402
 import quota_policy as Q  # noqa: E402
@@ -195,6 +196,67 @@ class ReadActiveOverlayTest(_Base):
         self.assertEqual(rushed_band, "free", "戳記生效：床暫停")
         self.assertEqual(R.revoke(now)[0], 0)
         self.assertEqual(band(), (None, "converge"), "撤銷後床恢復")
+
+
+class ReviewP3HardeningTest(_Base):
+    """安全審查 P3-1～P3-4：讀取端對「規格說無效」的輸入也一律視為無趕工。"""
+
+    def test_p3_1_unattended_window_ignores_the_env_carrier_too(self):
+        """規格「趕工戳記在無人窗口無效」不分載體：手設 `RUSH_KEY` 若在無人窗口仍生效，夜間窗口
+        的環境（`.env`／排程）就能自我解除煞車；`overlay` 不移除該鍵即紅。"""
+        until = str(NOW.timestamp() + 3600)
+        env = {R.UNATTENDED_ENV: "1", R.RUSH_KEY: until}
+        self.assertNotIn(R.RUSH_KEY, R.overlay(env, NOW))
+        policy, _problems = Q.load_policy(R.overlay(env, NOW))
+        self.assertIsNone(policy.pace_rush_until)
+        self.assertEqual(env[R.RUSH_KEY], until, "原 mapping 不得被改")
+        self.assertIn(R.RUSH_KEY, R.overlay({R.RUSH_KEY: until}, NOW), "有人窗口的明示值照舊")
+
+    def test_p3_2_reader_requires_the_same_why_floor_as_the_writer(self):
+        """寫入端拒絕短 WHY，讀取端卻收手寫戳記＝可稽核性只剩一半；讀取端少了下限即紅。"""
+        for why in ("x", "1234567", "　" * 12, "  1234567  "):
+            with self.subTest(why=why):
+                self.put(self.good_stamp(why=why))
+                self.assertIsNone(R.read_stamp())
+                self.assertIsNone(R.active(NOW, env={}))
+        self.put(self.good_stamp(why="12345678"))
+        self.assertIsNotNone(R.active(NOW, env={}))
+
+    def test_p3_3_reader_looks_only_where_the_writer_would_write(self):
+        """健康的主居所不併讀系統暫存（暫存人人可寫）；寫入端退回暫存時兩端才一起落在暫存。
+        讀取端寫死「兩處都找」＝第一個斷言紅；只看主居所＝第二個斷言紅。"""
+        temp_stamp = Path(tempfile.gettempdir()) / R.STAMP_NAME
+        self.addCleanup(temp_stamp.unlink, missing_ok=True)
+        temp_stamp.write_text(json.dumps(self.good_stamp()), encoding="utf-8")
+        self.assertEqual(EE.trace_dir_peek(), (self.traces, False))
+        self.assertIsNone(R.read_stamp(), "主居所健康＝暫存裡的戳記不採信")
+        blocker = self.tmp / "afile"
+        blocker.write_text("x", encoding="utf-8")
+        with mock.patch.dict(os.environ, {EE.TRACE_DIR_ENV: str(blocker / "sub")}):
+            self.assertEqual(EE.trace_dir_peek()[1], True)
+            self.assertEqual(EE.trace_dir_status()[1], True, "寫入端同樣退化（兩端同一判準）")
+            self.assertIsNotNone(R.read_stamp(), "主居所不可用＝讀寫兩端都落在暫存")
+            temp_stamp.unlink()
+            self.assertEqual(R.issue(1, WHY, now=NOW, env={})[0], 0)
+            self.assertTrue(temp_stamp.is_file(), "前提：寫入端確實退回暫存")
+            self.assertIsNotNone(R.read_stamp())
+
+    def test_p3_4_decision_pace_carries_the_burndown_hold(self):
+        """清倉授權 hold 某軸時實際餵入水位未被床抬；`Decision.pace` 若仍報 `lifted`，
+        gate 會落一列沒真的抬水位的 `pace_floor`（M-P4 撤回判定的分子灌水）。"""
+        week = (NOW + timedelta(minutes=7663)).isoformat()
+        five = (NOW + timedelta(minutes=233)).isoformat()
+        state = Q.QuotaState((Q.Axis("session", 60.0, five), Q.Axis("weekly_all", 75.0, week),
+                              Q.Axis("five_hour", 60.0, five), Q.Axis("seven_day", 75.0, week)),
+                             NOW.isoformat(), "cache")
+        burn = B.Burn("0123456789", NOW.isoformat(), "weekly_all",
+                      (NOW + timedelta(minutes=7663)).isoformat(), 7663.0, week)
+        plain = Q.decide(state, NOW, Q.DEFAULT_POLICY, 5.0, "n=67")
+        held = Q.decide(state, NOW, Q.DEFAULT_POLICY, 5.0, "n=67", burndown=burn)
+        self.assertIn("lifted", {f.state for f in plain.pace}, "前提：無授權時床真的抬")
+        self.assertNotIn("lifted", {f.state for f in held.pace})
+        self.assertIn("exempt-hold", {f.state for f in held.pace})
+        self.assertFalse(R.log_floor(held, NOW), "hold 軸沒被床抬 ⇒ 不落 pace_floor 列")
 
 
 class ReadSideCreatesNothingTest(_Base):

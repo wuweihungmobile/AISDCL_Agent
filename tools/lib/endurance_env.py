@@ -144,6 +144,21 @@ def trace_dir_status() -> tuple[Path, bool]:
     return _durable_dir_status(TRACE_DIR_ENV, TRACE_HOME_PARTS)
 
 
+def trace_dir_peek() -> tuple[Path, bool]:
+    """`trace_dir_status()` 的**唯讀**對應（不 mkdir）：回「寫入端此刻會落腳的目錄」與是否退化。
+    判準與 `_durable_dir_status` 同形——目標或其最近存在的祖先是可寫目錄＝`mkdir` 會成功＝居所健康；
+    否則退回系統暫存。給熱路徑的讀取端用，讀寫兩端因此不會看向不同的家。"""
+    override = os.environ.get(TRACE_DIR_ENV, "").strip()
+    try:
+        want = Path(override) if override else Path.home().joinpath(*TRACE_HOME_PARTS)
+    except RuntimeError:  # 家目錄不可得：寫入端也無法建立居所
+        return Path(tempfile.gettempdir()), True
+    anchor = next((c for c in (want, *want.parents) if c.exists()), None)
+    if anchor is None or not anchor.is_dir() or not os.access(anchor, os.W_OK):
+        return Path(tempfile.gettempdir()), True
+    return want, False
+
+
 def trace_dir() -> Path:
     return trace_dir_status()[0]
 

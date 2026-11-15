@@ -195,6 +195,9 @@ _QUOTA_CTX: dict[str, str | None] = {"model": None}
 #: 扇出（它在內部生出 agent 的那一刻沒有任何 hook 會被叫到；R81 實測數字見
 #: `docs/06_quality/CrossPlatform_R81_Quota_Review.md`）⇒ 節流帶唯一誠實的處置就是不讓它啟動。
 UNBOUNDED_FANOUT_TOOLS = ("Workflow",)
+#: DEF-200-590：網頁讀取不是「派人」——不生出 agent、單次成本是一頁文字，不進派發帳（成因與
+#: 設計 ADR-XPLAT-004 §2.16）。halt／cap<=0 仍擋；context 尺 `BLOCKING_TOOLS` 不動。
+WEB_READ_TOOLS = ("WebFetch", "WebSearch")
 
 #: 派發帳。🔴 **刻意不帶 session id**（SA-B5／SD-B1）：額度是 per-account 的單一池，而
 #: 每個 subagent／每一次 headless 跑都有自己的 sid ⇒ per-sid 的帳等於 N 個載體各拿一份
@@ -1168,6 +1171,8 @@ def quota_gate(payload: dict, *, blocking, latch_read, latch_write,
     # 也沒有節流要擋**——派發帳只屬於 PreToolUse 那一刻（見本函式 docstring）。
     if decision.cap is None or event != "PreToolUse":
         return 0
+    if tool in WEB_READ_TOOLS and decision.cap > 0:
+        return 0  # DEF-200-590：不記帳、不比 cap（halt 已在上面擋；cap=0 落到下面照擋）
     quota_rush.log_floor(decision, now)  # §2.15：只在派發邊緣落一列（M-P4 分子；失敗吞掉）
     cap, root = decision.cap, fanout_ledger_path()
     # 🔴 R82 訂正判準（舊版是「只要不是 normal 帶就擋 Workflow」）：那條在新階梯下會讓

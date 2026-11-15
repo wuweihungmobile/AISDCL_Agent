@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import shutil
 import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from importlib import util as importlib_util
 from pathlib import Path
@@ -122,18 +125,36 @@ class BehaviorTimeoutLockTest(unittest.TestCase):
 
     def test_real_subprocess_timeout_with_partial_stdout_does_not_raise(self):
         """WHY：真子行程端對端，讓 CPython 自己建例外；修法前炸 TypeError（str＋bytes）。"""
-        real_run = subprocess.run
+        popen = subprocess.Popen
+        ready = Path(tempfile.mkdtemp(prefix="tlc_ready_")) / "ready"
+        self.addCleanup(shutil.rmtree, str(ready.parent), True)
 
         def wrapper(cmd, **kwargs):
-            # 忽略傳入的 cmd（假 java 命令），改跑一個真的會印 partial 輸出
-            # 後睡著的 Python 子行程，讓 timeout kwargs 原樣透傳給真正的
-            # subprocess.run，藉此讓 CPython 自己建構 TimeoutExpired。
-            real_cmd = [
-                sys.executable, "-c",
-                "import sys,time; print('partial'); sys.stdout.flush(); time.sleep(5)",
-            ]
-            return real_run(real_cmd, **kwargs)
-
+            # 子行程「已寫出 partial 並 flush」後才建立 ready 檔；計時起點延後到 ready 之後，
+            # 成因（直譯器冷啟動 > timeout_s，負載下 partial 尚未寫出）即消除，不靠加大逾時。
+            code = (
+                "import sys,time,pathlib;"
+                "print('partial');sys.stdout.flush();"
+                "pathlib.Path(sys.argv[1]).write_text('1');time.sleep(30)"
+            )
+            timeout = kwargs.pop("timeout")
+            kwargs.pop("capture_output", None)
+            kwargs.pop("check", None)
+            with popen([sys.executable, "-c", code, str(ready)],
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs) as proc:
+                deadline = time.monotonic() + 60
+                while not ready.exists():
+                    if time.monotonic() > deadline or proc.poll() is not None:
+                        proc.kill()
+                        raise AssertionError("假子行程未能寫出 partial（測試載具故障，非受測行為）")
+                    time.sleep(0.01)
+                try:
+                    proc.communicate(timeout=timeout)  # CPython 自己建 TimeoutExpired
+                except subprocess.TimeoutExpired as exc:
+                    proc.kill()
+                    exc.stdout, exc.stderr = proc.communicate()  # 與 subprocess.run 同法收部分輸出
+                    raise
+            raise AssertionError("子行程應逾時而非正常結束")
         with mock.patch.object(self.module.subprocess, "run", side_effect=wrapper):
             result = self.module.run_tlc(timeout_s=0.5)
 

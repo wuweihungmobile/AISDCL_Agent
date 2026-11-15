@@ -818,6 +818,14 @@ def decide(state: QuotaState, now: datetime, p: Policy,
     #    `account_posture()["fallback_available"] is False` **且**訂閱軸已進 prepare 帶；
     #    本輪沒有任何量測支持任何一個門檻值 ⇒ 不在這裡發明數字。
     rec = _rec_of_gate(gate, p, binding.cap)
+    # 🔴 `Decision.pace` 必須與實際餵入水位同源：清倉授權對某軸 hold 時，`burndown.apply` 內部
+    # 的 `axes_of` 帶 relax 而判床 `exempt-hold`；這裡也得帶同一份 hold，否則 `pace` 對該軸
+    # 仍報 `lifted` ⇒ gate 落一列沒真的抬水位的 `pace_floor`（污染 M-P4 撤回判定的分子）。
+    relax = None
+    if burndown is not None:
+        relax = burndown.masks(state, tuple(_delta_minutes(a.resets_at, now, state.measured_at)
+                                            for a in state.axes), ratio, ratio_note, p,
+                               active_model)[:2]
     return Decision(
         cap=binding.cap,
         recommended_fanout=min(rec, max(1, p.cap_prepare)) if wrap else rec,
@@ -830,7 +838,7 @@ def decide(state: QuotaState, now: datetime, p: Policy,
                                 for a in state.axes), ratio, ratio_note,
                           _amort_skip(state, active_model)),
         model_hint=hint, burndown=applied,
-        pace=_floors(state, now, p, active_model) if pace_floor else ())
+        pace=_floors(state, now, p, active_model, relax) if pace_floor else ())
 
 
 # M7：每一段只帶**一個** %，且同段必有 `kind=` 與剩餘分鐘（或明文不明）。

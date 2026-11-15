@@ -73,6 +73,7 @@
 3. compat-ci `paths` 兩支、`non_evolvable_globs`（若適用）、`tools/tests` 棘輪重釘、CI paths 覆蓋鎖同一個 commit 內收齊。
 4. 搬遷既有模組：同步改 PRD／TCS 路徑並依 FSM 重凍或 SPEC_AUDIT 記錄；帳本以追加列記錄搬遷，舊列座標依「該列 commit 當時的路徑」解讀，不原地改。
 5. 本檔 §3 登記表加一列。
+6. 新增被 `tools/selfimproving.py` import 閉包內模組（模組層 import）引用的 `tools/lib` 模組時，AgentConsole engine-bridge 假 repo 的三個落點同一個 commit 補齊：`AgentConsole/engine-bridge/tests/si_repo_support.py` 的 `CLI_CLOSURE`、同目錄 `test_si_deploy_config.py` 的 `FULL_PATHS`、`.github/workflows/agentconsole-ci.yml` 的 `push`／`pull_request` 兩段 `paths`（6a229fe4 的回歸：漏了 `quota_pace_floor`）。機械鎖＝`tools/tests/test_ci_paths_cover_root_consumers.py`，缺哪處、缺哪個檔直接列出。
 
 ## 5. 誠實劃界
 

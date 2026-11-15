@@ -19,7 +19,6 @@ import json
 import math
 import os
 import sys
-import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -37,6 +36,11 @@ _EPOCH_TOL = 1.0
 _USAGE = ("用法：sessionctl rush --hours <H> --why \"<WHY≥8字>\" [--sid <SID>]｜--off｜--status\n")
 
 
+def _unattended(env) -> bool:
+    """無人窗口判準的**唯一**家：發戳記、讀戳記、狀態文字、環境變數載體都問它。"""
+    return bool(str(env.get(UNATTENDED_ENV, "")).strip())
+
+
 def stamp_path() -> Path:
     return endurance_env.trace_dir() / STAMP_NAME
 
@@ -44,18 +48,12 @@ def stamp_path() -> Path:
 def _find_stamp():
     """讀取端**唯讀**定位（不 mkdir）：`policy_env()` 在 `--check`／`--pace` 這類唯讀查詢的熱路徑，
     不得像 `stamp_path()`（寫入端，`trace_dir()` 會建目錄）那樣憑空長出 `~/.autosdd/traces`
-    （回歸鎖＝`PlannerCliTest::test_check_prints_usage_and_writes_nothing`）。候選＝寫入端會落腳
-    的兩處（主居所＋退化後的系統暫存），常數沿用 `endurance_env`，不開第二個家。"""
-    override = os.environ.get(endurance_env.TRACE_DIR_ENV, "").strip()
-    try:
-        home = Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)
-        primary = Path(override) if override else home
-    except RuntimeError:  # 家目錄不可得
-        primary = None
-    for base in (primary, Path(tempfile.gettempdir())):
-        if base is not None and (base / STAMP_NAME).is_file():
-            return base / STAMP_NAME
-    return None
+    （回歸鎖＝`PlannerCliTest::test_check_prints_usage_and_writes_nothing`）。
+    只看**寫入端此刻會落腳的那一處**（`endurance_env.trace_dir_peek()`：與 `trace_dir()` 同一份
+    判準、不建目錄）——主居所健康時不併讀系統暫存（暫存是任何本機行程都寫得進的面，
+    DEF／審查 P3-3）；唯有主居所不可用、寫入端會退回暫存時才讀暫存。"""
+    base = endurance_env.trace_dir_peek()[0]
+    return base / STAMP_NAME if (base / STAMP_NAME).is_file() else None
 
 
 def _events_path() -> Path:
@@ -90,6 +88,8 @@ def read_stamp(path=None):
         return None
     if not all(isinstance(data.get(k), str) for k in ("issued_at", "until", "why", "sid")):
         return None
+    if len(data["why"].strip()) < MIN_WHY_CHARS:  # 與寫入端 `issue` 同一條下限（手寫戳記不得繞過）
+        return None
     epoch, hours = _number(data.get("until_epoch")), _number(data.get("hours"))
     issued, until = _aware(data["issued_at"]), _aware(data["until"])
     if epoch is None or hours is None or issued is None or until is None:
@@ -104,7 +104,7 @@ def read_stamp(path=None):
 def active(now=None, env=None, path=None):
     """有效戳記（附 `left_minutes`）；無人窗口、無戳記、過期、超上限一律 `None`。"""
     env = os.environ if env is None else env
-    if str(env.get(UNATTENDED_ENV, "")).strip():
+    if _unattended(env):
         return None
     stamp = read_stamp(path)
     if stamp is None:
@@ -117,9 +117,13 @@ def active(now=None, env=None, path=None):
 
 
 def overlay(env, now=None, path=None) -> dict:
-    """`env` 的複本；有效戳記且 `RUSH_KEY` 缺席／空白／≤0 ⇒ 疊入。例外一律吞掉（熱路徑）。"""
+    """`env` 的複本；有效戳記且 `RUSH_KEY` 缺席／空白／≤0 ⇒ 疊入。例外一律吞掉（熱路徑）。
+    無人窗口：不論載體（戳記或手設的 `RUSH_KEY`）一律無趕工——複本移除 `RUSH_KEY`（規格 D2）。"""
     out = dict(env)
     try:
+        if _unattended(out):
+            out.pop(RUSH_KEY, None)
+            return out
         raw = str(out.get(RUSH_KEY, "")).strip()
         if raw:
             try:
@@ -163,7 +167,7 @@ def log_floor(decision, now, path=None) -> bool:
 def issue(hours, why, sid="", now=None, env=None, path=None):
     """發戳記（覆寫舊戳記＝延長）。`(rc, 訊息)`：0 成功／2 拒絕（不寫檔）／1 檔案系統錯誤。"""
     env = os.environ if env is None else env
-    if str(env.get(UNATTENDED_ENV, "")).strip():
+    if _unattended(env):
         return 2, "拒絕：無人窗口無人可宣告趕工（AUTOSDD_UNATTENDED 有設）"
     try:
         span = float(hours)
@@ -213,7 +217,7 @@ def status_text(now=None, env=None, path=None) -> str:
         return (f"趕工戳記有效：到期 {live['until']}（剩 {int(live['left_minutes'])} 分鐘）"
                 f"，why={live['why']}")
     env = os.environ if env is None else env
-    why = ("無人窗口一律忽略戳記" if str(env.get(UNATTENDED_ENV, "")).strip() else "已過期")
+    why = ("無人窗口一律忽略戳記" if _unattended(env) else "已過期")
     return f"趕工戳記無效（{why}）：到期 {stamp['until']}，why={stamp['why']}；配速床照常套用"
 
 
