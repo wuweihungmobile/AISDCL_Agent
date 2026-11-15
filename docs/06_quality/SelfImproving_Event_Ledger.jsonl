@@ -136,3 +136,6 @@
 {"seq":136,"t":"2026-11-14T13:04:41+08:00","kind":"fourq.review","by":"fourq-reviewer","run":"RUN-SI-011","path":"docs/06_quality/SelfImproving_Proposals/_fourq/RUN-SI-011.md","sha256":"sha256:1740cd817069e739ebdecf26f805d81d3eebc4f050e6bdf48098f29f80160ed2","q1":2,"q2":2,"q3":2,"q4":2,"gaps":0,"qhits":"0,0,0,0","loop":"M1=NE(no-evaluable-window);M4=read(0);M5a=NE(sample-below-w-min);M5b=NE(sample-below-w-min)"}
 {"seq":137,"t":"2026-11-14T13:15:02+08:00","kind":"run.close","by":"patrol","run":"RUN-SI-011","no_event":true}
 {"seq":138,"t":"2026-11-14T21:00:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":139,"t":"2026-11-15T01:30:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"quota-band","detail":"額度帶 halt"}
+{"seq":140,"t":"2026-11-15T04:00:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AutoClaude/.perf_baseline.toml"}
+{"seq":141,"t":"2026-11-15T08:45:08+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-14T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
