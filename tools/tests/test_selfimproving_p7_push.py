@@ -3031,6 +3031,37 @@ class TestSecRound3(RunTestCase):
         with mock.patch.dict(os.environ, quiet):  # 使用者既有的設定來源：不擋（經所有層檢查把關）
             self.assertTrue(rr.evaluate()["ok"])
 
+    def test_E_bridge_safe_directory_is_the_only_config_env_the_read_profile_passes(self):
+        # WHY：容器內執行身分與掛載目錄擁有者不同，engine-bridge 靠這三個變數免 dubious ownership；
+        # 放寬成「任何 GIT_CONFIG_*」會重開注入面，所以只認恰合的約定形態、其餘照舊全濾。
+        repo = Git(fx.new_dir("sd")).repo
+        ok = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory",
+              "GIT_CONFIG_VALUE_0": str(repo), "PATH": "p"}
+        trio = {k: v for k, v in ok.items() if k != "PATH"}
+        self.assertEqual({k: v for k, v in si_git.env_for_git(ok, "read", repo=repo).items()
+                          if k.startswith("GIT_CONFIG_")}, trio)
+        bad = {"count": {"GIT_CONFIG_COUNT": "2"}, "key": {"GIT_CONFIG_KEY_0": "core.x"},
+               "star": {"GIT_CONFIG_VALUE_0": "*"}, "path": {"GIT_CONFIG_VALUE_0": str(repo / "x")},
+               "key1": {"GIT_CONFIG_KEY_1": "a"}, "val1": {"GIT_CONFIG_VALUE_1": "b"},
+               "params": {"GIT_CONFIG_PARAMETERS": "'a=b'"}}
+        for name, patch in bad.items():
+            env = si_git.env_for_git({**ok, **patch}, "read", repo=repo)
+            self.assertEqual([k for k in env if k.startswith("GIT_CONFIG_")], [], name)
+        for drop in trio:  # 缺任一個也不放行
+            env = si_git.env_for_git({k: v for k, v in ok.items() if k != drop}, "read", repo=repo)
+            self.assertEqual([k for k in env if k.startswith("GIT_CONFIG_")], [], drop)
+        self.assertEqual([k for k in si_git.env_for_git(ok, "read") if k.startswith("GIT_CONFIG_")],
+                         [])  # 沒給 repo 不放行
+        self.assertEqual([k for k in si_git.env_for_git(ok, "push", repo=repo)
+                          if k.startswith("GIT_CONFIG_")], [])  # push profile 一律不放行
+        low = {k.lower(): v for k, v in ok.items()}  # win32 鍵名不分大小寫
+        env = si_git.env_for_git(low, "read", platform="win32", repo=repo)
+        self.assertEqual(sorted(k for k in env if k.lower().startswith("git_config_")),
+                         sorted(k.lower() for k in trio))
+        with mock.patch.dict(os.environ, trio):  # 接線：Git._env() 真的用到這條放行
+            self.assertEqual({k: v for k, v in Git(repo)._env().items()  # noqa: SLF001
+                              if si_git.ENV_RULES.match(k)}, trio)
+
     def test_AT_749_6_E_8_every_git_call_carries_the_pinned_overrides(self):
         rr = self.prr()
         sha = rr.patrol().sha

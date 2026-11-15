@@ -123,8 +123,19 @@ _PROFILE_FIXED = {"read": {"GIT_OPTIONAL_LOCKS": "0"}, "push": {"GCM_INTERACTIVE
 ENV_TEST_PASSTHROUGH: tuple[str, ...] = ()
 
 
+def _bridge_safe_directory(parent, profile: str, repo, win: bool) -> dict[str, str]:
+    """read profile 唯一放行的 `GIT_CONFIG_*`（engine-bridge 約定，E-79）：注入類變數（`ENV_RULES`）
+    恰為 `COUNT=1`、`KEY_0=safe.directory`、`VALUE_0`＝本 repo 時原樣傳；任何偏離與 push 一律空。"""
+    up = (lambda k: k.upper()) if win else (lambda k: k)
+    got = {up(k): (k, v) for k, v in parent.items() if ENV_RULES.match(up(k))}
+    vals = {k: v for k, (_, v) in got.items()}
+    want = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "safe.directory",
+            "GIT_CONFIG_VALUE_0": str(repo)}
+    return dict(got.values()) if profile == "read" and repo and vals == want else {}
+
+
 def env_for_git(parent, profile: str, *, platform: str | None = None,
-                extra: tuple[str, ...] | None = None) -> dict[str, str]:
+                extra: tuple[str, ...] | None = None, repo=None) -> dict[str, str]:
     """套件內**所有** git 子行程的環境（單一函式）：只從 `parent` 取 `ENV_ALLOW` 內的變數，`PATH`
     取 `safe_path` 結果（再去掉 cwd 之下的段），加固定值；`profile`＝`read`／`push`；`platform`
     ＝`win32` 或其他（posix），預設取目前平台；`extra` 缺省＝測試縫 `ENV_TEST_PASSTHROUGH`
@@ -157,6 +168,7 @@ def env_for_git(parent, profile: str, *, platform: str | None = None,
         if seg and not under:
             segments.append(seg)
     out["PATH"] = os.pathsep.join(segments)
+    out.update(_bridge_safe_directory(parent, profile, repo, win))
     out.update(ENV_FIXED)
     out.update(_PROFILE_FIXED[profile])
     return out
@@ -455,7 +467,7 @@ class Git:
         self.timed_out = False  # 最近一次 `run` 是否因逾時而回 None（分辨逾時與 git 不可用）
 
     def _env(self) -> dict[str, str]:
-        return env_for_git(os.environ, "read")
+        return env_for_git(os.environ, "read", repo=self.repo)
 
     def run(self, *args: str, timeout: int | None = None) -> subprocess.CompletedProcess | None:
         """`timeout` 選用（牆鐘秒數；預設仍為 60 秒，P1 的呼叫不變）。"""

@@ -413,6 +413,25 @@ def test_AT_940_2_E_1_build_env_whitelist_is_case_insensitive_and_pure(tmp_path:
     assert si_cli.build_env({}, tmp_path) == fixed
 
 
+def test_build_env_fixed_safe_directory_survives_the_root_read_profile_filter(
+        tmp_path: Path) -> None:
+    """WHY：根層 `env_for_git` 是允許清單，曾把 Bridge 固定的 safe.directory 三變數濾掉，容器內
+    git 因 dubious ownership 回 128（議題中心顯示 git-unavailable）。鎖住「Bridge 產生的環境餵進
+    根層 read profile（repo＝si_root）後三者仍在」，兩側任一邊改約定都會紅。"""
+    import importlib.util
+    path = Path(__file__).resolve().parents[3] / "tools" / "lib" / "selfimproving" / "git.py"
+    spec = importlib.util.spec_from_file_location("_si_git_for_bridge_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclass／NamedTuple 解析需要
+    spec.loader.exec_module(module)
+    repo = tmp_path.resolve()
+    bridge_env = si_cli.build_env({"PATH": "/usr/bin"}, repo)
+    got = module.env_for_git(bridge_env, "read", repo=repo)
+    for key in ("GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"):
+        assert got[key] == bridge_env[key], key
+
+
 # ── 補：活 Bridge 上 SI_ROOT 未設的 503 與 200 的形狀（settings → router → si_cli 串接）─────────
 def test_AT_932_3_1_a_bridge_without_si_root_answers_503_not_an_empty_list(
         settings: Settings, make_bridge: Any) -> None:
