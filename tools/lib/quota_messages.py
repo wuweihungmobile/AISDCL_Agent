@@ -729,12 +729,13 @@ def halt_actions_guarded(run, payload: dict, decision: quota_policy.Decision, no
 #   可重啟點**，節流本身仍由既有的 cap／派發帳承接（prepare 帶 cap=2 已經在擋 Workflow）。
 def quota_prepare_message(decision: quota_policy.Decision, plan: str, now: datetime) -> str:
     """prepare 帶那一次性的訊息。**不擋任何東西**，只說話 ＋ 指向已落磁碟的任務書。"""
-    return (f"🟡 額度進入**準備**水位（85~95%）⇒ 現在就收斂，別開新戰場。\n"
+    return (f"🟡 額度進入**準備**水位 ⇒ 現在就收斂，別開新戰場。\n"
             f"   {quota_policy.describe(decision)}\n"
             f"   可重啟點任務書：{plan or '（寫不出來——逐字稿路徑不可得）'}\n"
             + throttle_horizon_line(decision, now)
             + "   下一步：把手上的工作收到可重啟點（工作樹狀態確定／任務書落磁碟），"
-              "現查還能派幾個：`python tools/session_resume_planner.py --pace`。\n")
+              "現查還能派幾個：`python tools/session_resume_planner.py --pace`。\n"
+              "   停工前先跑 `python tools/sessionctl.py park` 掛續航憑證；不要叫人回視窗接手。\n")
 
 
 # 🔴 binding 一律具名（SA-06）：此前它恆是資訊量最低的那一軸（cap 平手時期程不明的軸

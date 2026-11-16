@@ -24,7 +24,7 @@ from types import SimpleNamespace
 
 import platform_utils
 
-from . import metrics, replay, sections_cache, sections_cuts, sections_misc
+from . import metrics, replay, resume, sections_cache, sections_cuts, sections_misc
 from .annotate import annotate, units
 from .reader import collect
 
@@ -74,6 +74,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--r1", type=int, default=250_000, help="重放用的 R1（出聲門檻）")
     ap.add_argument("--candidates", default=None, help="重放候選 H，逗號分隔（預設內建九個）")
+    ap.add_argument(
+        "--resume-metrics",
+        action="store_true",
+        help="續航量測 M-R1～M-R4（ADR-XPLAT-004 §2.17.7）",
+    )
+    ap.add_argument("--burn-file", default=None, help="quota_burn.jsonl（預設痕跡目錄下）")
     ap.add_argument(
         "--trace-file",
         default=None,
@@ -203,6 +209,9 @@ def main(argv: list[str]) -> int:
         return 1
     if args.replay_hard_ctx:
         return _run_replay(args, base)
+    if args.resume_metrics:
+        trace = _trace_path(args.trace_file)
+        return resume.run(base, args.since_days, trace, args.burn_file, args.out)
     out = Path(args.out) if args.out else Path(tempfile.gettempdir()) / "autosdd_waste_census.jsonl"
     since = time.time() - args.since_days * 86400
     data = collect(base, args.since_days, args.sid)

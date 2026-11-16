@@ -1356,6 +1356,10 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "指令前綴（--finalize／--spawn 提示），本行程只 print、不 spawn；"
         "互動 spawn 的 argv[0] 是已解析的 claude"
     ),
+    "tools/lib/sessionctl/park.py": (
+        "非呼叫：`PARK_CMD = \"python tools/sessionctl.py park\"` 是組進 Stop 推回訊息、給主控"
+        "照抄的指令前綴，本行程只輸出文字、不 spawn；排程 argv[0] 由 engine_resume_job 解析"
+    ),
     "tools/probe/console_spawn_watch.py": (
         "非呼叫：`str(record.get(\"ParentName\") or \"\").lower().startswith(\"python\")` "
         "的**比對字面**。那個字串是 WMI 從 OS **讀回來**的行程映像名，判準只拿它分類"

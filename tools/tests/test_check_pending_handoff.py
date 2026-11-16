@@ -97,6 +97,36 @@ class TestPendingHandoffJudgement(unittest.TestCase):
             self.assertIn(token, msg)
 
 
+class TestSecondPersonVocabulary(unittest.TestCase):
+    """`.claude/hooks/check_pending_handoff.py::pending_handoff_hits`：
+    「你」系列交棒詞（AT-PK-74～75）。
+    WHY：2026-11-15 事故收尾寫「是否輪替仍由你決定」——詞表只認「您」，同義的「你」整句漏網。
+    🔴 AT-PK-74 在 staged hook 套用前紅屬預期（`.claude/` 由主控套用）。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.hook = _load(_HOOK)
+
+    def test_at_pk_74_second_person_handoffs_are_red(self) -> None:
+        for claim in ("`BRIDGE_SI_WRITE_TOKEN` 是否輪替仍由你決定。", "待你處理", "留給你",
+                      "交給你", "需要你", "你來決定"):
+            with self.subTest(claim=claim):
+                self.assertTrue(self.hook.pending_handoff_hits(claim), claim)
+
+    def test_everyday_second_person_narration_stays_green(self) -> None:
+        """「請你」「等你」不收：真實面普查 214 回合裡它們造成 3 回合假紅（事後敘述，不是交棒）。
+        額度停工等人這一類由 park 的結構判準守，不靠詞表。"""
+        for claim in ("結果我反而請你回到這個舊視窗", "結果就是等你回來，快取早已過期"):
+            with self.subTest(claim=claim):
+                self.assertEqual(self.hook.pending_handoff_hits(claim), [], claim)
+
+    def test_at_pk_75_negated_quoted_and_k1_second_person_forms_are_green(self) -> None:
+        for claim in ("你不需要做任何事", "你可以隨時回來看", "沒有任何事卡在等你", "不用等你",
+                      "「由你決定」字樣是舊稿的寫法", "這個決定須掌舵者親打，由你決定也行"):
+            with self.subTest(claim=claim):
+                self.assertEqual(self.hook.pending_handoff_hits(claim), [], claim)
+
+
 class TestAskedThisTurn(unittest.TestCase):
     """`.claude/hooks/check_pending_handoff.py::asked_this_turn` 的回合邊界。"""
 

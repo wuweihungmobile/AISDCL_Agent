@@ -102,6 +102,7 @@ import unattended_authz  # noqa: E402  # DEF-200-575：無人回合時間邊界�
 
 import _stdio_utf8  # noqa: E402,F401  # Windows 非 UTF-8 終端印中文／emoji 防崩潰
 from lib.sessionctl import modelmix, switch  # noqa: E402  # 選路判準（WP0）；--pace 模型建議（D8）
+from lib.sessionctl import park as sessionctl_park  # noqa: E402  # park 標記讓路（ADR §2.17 D7）
 from probe.audit_session import project_transcript_dir  # noqa: E402
 
 #: 任務書預設落點＝系統暫存。刻意不落在 repo 內：`tools/tests/test_platform_neutral_paths.py`
@@ -610,7 +611,7 @@ def tick_plan(state: dict, verdict: dict, now: datetime) -> dict:
 # 痕跡上仍分得開，而分得開本來就是當初把它做成 fail-loud 的唯一正當理由。
 # 「叫人」的門檻同輪收緊成「有未處理撞線 **且** 有扇出待救」，落在 `escalation.alert`。
 def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: float | None,
-                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None, driver: dict | None = None, stale: dict | None = None) -> dict:  # noqa: E501
+                    now: datetime, halt: dict | None = None, superseded_by: dict | None = None, grace: dict | None = None, driver: dict | None = None, stale: dict | None = None, park: dict | None = None) -> dict:  # noqa: E501
     """哨兵醒來後的**五**分支判定。純函式——預防鏈的大腦，每一支都要能單獨注入。
 
     🔴 R100 訂正：此前逐字寫「四分支」而函式體實有 **5** 個相異 `action`
@@ -632,7 +633,11 @@ def sentinel_decide(event: dict | None, handled_through: object, idle_seconds: f
     DEF-200-564：`driver`＝撞線事件之後另一駕駛的對話記錄（`transcript_activity.live_driver`，
     一個巡邏間隔內仍有動靜）；有 ⇒ 撞線分支在 reset 判斷**之前**先 patrol（由它接手，不花探測、
     不 spawn 第二個駕駛）；月度上限仍 escalate（錢的事人才能解）；`driver=None` 逐位元組同舊行為。
+    ADR §2.17 D7：`park`＝park 標記（`sessionctl.park.read_marker`）；armed 的 H 標記在有效窗內 ⇒
+    patrol 讓路（排程待命，不搶駕駛；窗過後恢復原判準）；`LIMIT_SPEND` 仍先 escalate；
+    `park=None` 逐位元組同舊行為。
     """
+    if park is not None and not (event and event.get("kind") == guard.LIMIT_SPEND) and sessionctl_park.yields(park, now): return {"action": "patrol", "at": now + timedelta(seconds=SENTINEL_INTERVAL_SECONDS), "reason": sessionctl_park.YIELD_REASON}  # noqa: E501,E701 — park 讓路（ADR §2.17 D7）
     if event and str(event.get("timestamp") or "") > str(handled_through or ""):
         if event["kind"] == guard.LIMIT_SPEND:
             return {"action": "escalate", "at": None, "reason": "月度支出上限——等待無效，只有人去 claude.ai 提額才會回來"}  # noqa: E501
@@ -1462,7 +1467,7 @@ def _sentinel_tick(args) -> int:
     fan = escalation.patrol_housekeeping(transcript, event, now, state, SENTINEL_INTERVAL_SECONDS, SENTINEL_TICK, log)  # noqa: E501
     idle, grace = transcript_activity.conversation_view(transcript, now); driver = transcript_activity.live_driver(transcript, now, event) if event else None  # noqa: E501,E702 — DEF-200-560／562；DEF-200-564：撞線事件之後另一駕駛（一個巡邏間隔內仍在動）
     halt = quota_gate.read_halt_marker(sid := state.get("session_id") or "")
-    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver, stale=switch.stale_for(transcript, sid, now, project_transcript_dir(_REPO_ROOT)))  # noqa: E501
+    decision = sentinel_decide(event, "", idle, now, halt=halt, superseded_by=sentinel_lifecycle.superseding_session(transcript.parent if transcript.is_file() else project_transcript_dir(_REPO_ROOT), sid, halt), grace=grace, driver=driver, stale=switch.stale_for(transcript, sid, now, project_transcript_dir(_REPO_ROOT)), park=sessionctl_park.read_marker(sid))  # noqa: E501
     append_log(log, "sentinel_decided", action=decision["action"], reason=decision["reason"], grace_note_at=(grace or {}).get("timestamp", ""), conversation_idle_seconds=idle, driver_after=driver, anchor={"timestamp": event["timestamp"], "source": "limit_event"} if event else None, plan_in_temp=plan.parent.resolve() == Path(tempfile.gettempdir()).resolve(), **fan)  # noqa: E501 — DEF-200-566：修前武裝的哨兵任務書仍在系統暫存 ⇒ 痕跡出聲（不自動搬）
     print(f"哨兵判定 {decision['action']}：{decision['reason']}")
     if decision.get("state") == "superseded": return switch.settle_superseded(plan, state, decision, log, append_log, _schtasks_remove, _write_relay_best_effort, _cleared_credentials())  # noqa: E501,E701 — sessionctl WP2（D3）：過期 session 不續跑、自我解除

@@ -63,6 +63,9 @@ MIN_LEAD_SECONDS = 90
 STALE_FIRE_SECONDS = 30 * 86400
 #: plist 的環境變數白名單。刻意不含任何機密。
 _CARRY_ENV = ("PATH", "PYTHONUTF8", "LANG", "LC_ALL", EXTERNAL_RESUME_CMD_ENV)
+#: 一次性互動工作的 Principal：Interactive 才開得出看得見的視窗（S4U 落 session 0）。需登入才跑。
+INTERACTIVE_PRINCIPAL = ('New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" '
+                         '-LogonType Interactive -RunLevel Limited')
 _REPO = Path(__file__).resolve().parents[2]
 _KNOWN = ("--playbook", "--at", "--cwd", "--config", "--remove", "--run", "--job", "--fire-at",
           "--help")
@@ -148,8 +151,14 @@ def _arm_launchd(backend, label: str, argv: list[str], cwd: str, fire: datetime)
 
 
 def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
-                  fire: datetime) -> tuple[int, str]:
+                  fire: datetime, *, interactive: bool = False) -> tuple[int, str]:
     q = planner._ps_single_quote
+    principal = INTERACTIVE_PRINCIPAL if interactive else planner._SCHTASKS_PRINCIPAL
+    register = ("Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null\n"
+                if interactive else
+                "try { Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null }\n"
+                "catch { Register-ScheduledTask @common | Out-Null"
+                "; Write-Output 'PRINCIPAL-FALLBACK=default-interactive' }\n")
     python = q(win_spawn.quiet_python())              # 載具＝pythonw（無 console；同 argv[0]）
     args = " ".join(f'"{a}"' for a in argv[1:])
     script = (
@@ -157,12 +166,9 @@ def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
         f"$action = New-ScheduledTaskAction -Execute '{python}' -Argument '{q(args)}' "
         f"-WorkingDirectory '{q(cwd)}'\n"
         f"$trigger = New-ScheduledTaskTrigger -Once -At '{fire:%Y-%m-%d %H:%M:%S}'\n"
-        f"$settings = {planner._SCHTASKS_SETTINGS}\n$principal = {planner._SCHTASKS_PRINCIPAL}\n"
+        f"$settings = {planner._SCHTASKS_SETTINGS}\n$principal = {principal}\n"
         f"$common = @{{TaskName='{q(label)}'; Action=$action; Trigger=$trigger; "
-        "Settings=$settings; Force=$true}\n"
-        "try { Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null }\n"
-        "catch { Register-ScheduledTask @common | Out-Null"
-        "; Write-Output 'PRINCIPAL-FALLBACK=default-interactive' }\n\n"
+        f"Settings=$settings; Force=$true}}\n{register}\n"
         f"{planner._EVIDENCE_TEMPLATE.format(task=q(label))}\n")
     proc = planner.run_powershell(script)
     print(proc.stdout, end="")
@@ -172,6 +178,18 @@ def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
               "已排程。\n" + (proc.stderr or ""), file=sys.stderr)
         return 1, ""
     return 0, f"NextRunTime = {moment}（排程器自報；憑證，宣稱『已排程』時必須連它一起貼）"
+
+
+def arm_oneshot(label: str, argv: list[str], cwd: str, fire: datetime, *,
+                interactive: bool = False) -> tuple[int, str]:
+    """註冊一次性工作（任意動作）並取證；`(rc, 憑證)`，拿不到憑證一律 `(1, "")`。不做同族取代。"""
+    backend, planner = sb.select(), sb._planner()
+    if backend.name not in ("launchd", "schtasks") or planner is None:
+        print(f"❌ 拒絕註冊：本平台沒有已實作的排程載具（載具＝{backend.name}）", file=sys.stderr)
+        return 1, ""
+    if backend.name == "launchd":
+        return _arm_launchd(backend, label, argv, cwd, fire)
+    return _arm_schtasks(planner, label, argv, cwd, fire, interactive=interactive)
 
 
 def _refusal(backend, planner, playbook: str, cwd: str) -> str:

@@ -209,7 +209,8 @@ def _run_hook(payload: dict, **env_extra: str) -> subprocess.CompletedProcess:
                         "AUTOSDD_SESSIONCTL_GUARD_OFF", "AUTOSDD_ROSTER_QUIET_MINUTES",
                         "AUTOSDD_SWITCH_HARD_CTX_TOKENS", "AUTOSDD_SESSION_SWITCH_MODE",
                         "AUTOSDD_HANDOFF_DIR", "AUTOSDD_TRACE_DIR")}
-    env.update(PYTHONUTF8="1", **env_extra)
+    # park 判準（Stop 尾端）預設會讀真實額度快取、必要時補量：既有測試只測收斂／續棒，一律關掉
+    env.update({"PYTHONUTF8": "1", "AUTOSDD_PARK_GUARD_OFF": "1", **env_extra})
     return subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload),
                           capture_output=True, encoding="utf-8", errors="replace", timeout=60,
                           check=False, cwd=str(ROOT), env=env)
@@ -413,7 +414,7 @@ class HookConvergeTest(unittest.TestCase):
             outs = []
             for hook in (HOOK, real):
                 cmd_env = {k: v for k, v in os.environ.items() if k != "AUTOSDD_UNATTENDED"}
-                cmd_env.update(PYTHONUTF8="1", **env)
+                cmd_env.update(PYTHONUTF8="1", AUTOSDD_PARK_GUARD_OFF="1", **env)
                 proc = subprocess.run([sys.executable, str(hook)], capture_output=True,
                                       input=json.dumps(_stop(slug, **claim, **extra)),
                                       encoding="utf-8", errors="replace", timeout=60, check=False,
@@ -424,6 +425,53 @@ class HookConvergeTest(unittest.TestCase):
         first = both({})
         self.assertEqual([d.get("decision") for d in first], ["block", "block"])
         self.assertEqual(both({"stop_hook_active": True}), [{}, {}])
+
+
+class HookParkTest(unittest.TestCase):
+    """AT-PK-35：`.claude/hooks/sessionctl_guard.py` Stop 接線經 `converge.stop_verdict` 尾端走到
+    `tools/lib/sessionctl/park.py`：短窗額度 98% 且無續航憑證 ⇒ 推回；`stop_hook_active`／逃生口 ⇒
+    靜默。
+    WHY：判準層全綠而 hook 層沒接到＝守衛靜默失效（fail-open 的表徵與「修好了」相同）。
+    縫：`AUTOSDD_QUOTA_CACHE_DIR` 指向 tmp 內的合成快取，不打網路、不讀真實額度。"""
+
+    def _env(self) -> dict:
+        import quota_meter
+        holder = tempfile.TemporaryDirectory(prefix="sc-park-")
+        self.addCleanup(holder.cleanup)
+        tmp = Path(holder.name)
+        now = datetime.now(UTC)
+        axes = [{"kind": kind, "pct": 98.0, "resets_at": (now + timedelta(minutes=43)).isoformat()}
+                for kind in ("five_hour", "session")]
+        (tmp / "autosdd_quota.json").write_text(json.dumps({
+            "schema": quota_meter.SCHEMA, "axes": axes, "source": "endpoint",
+            "measured_at": now.isoformat(timespec="seconds")}), encoding="utf-8")
+        (tmp / "handoff").mkdir()
+        return {"AUTOSDD_QUOTA_CACHE_DIR": str(tmp), "AUTOSDD_TRACE_DIR": str(tmp),
+                "AUTOSDD_HANDOFF_DIR": str(tmp / "handoff"), "AUTOSDD_PARK_GUARD_OFF": ""}
+
+    def test_at_pk_35_stop_pushes_back_a_quota_stop_without_a_credential(self) -> None:
+        """sessionctl_guard.py：有排程載具的平台上 ⇒ rc 0＋`decision:block`（含 park 指令）、牆鐘
+        < 5 秒；
+        沒有載具的平台（Linux）⇒ 靜默（與 `park` rc 4 同源）。`stop_hook_active`／GUARD_OFF ⇒
+        靜默。"""
+        import time
+
+        import schedule_backend
+        env, slug = self._env(), _project(self)
+        started = time.monotonic()
+        first = _run_hook(_stop(slug), **env)
+        self.assertLess(time.monotonic() - started, 5.0 + 3.0)  # 子行程啟動也算進去，留裕度
+        self.assertEqual(first.returncode, 0, first.stderr)
+        if schedule_backend.has_carrier():
+            doc = json.loads(first.stdout)
+            self.assertEqual(doc["decision"], "block")
+            self.assertIn("python tools/sessionctl.py park", doc["reason"])
+        else:
+            self.assertEqual(first.stdout.strip(), "")
+        for extra in ({"stop_hook_active": True},):
+            self.assertEqual(_run_hook(_stop(slug, **extra), **env).stdout.strip(), "")
+        off = _run_hook(_stop(slug), **{**env, "AUTOSDD_PARK_GUARD_OFF": "1"})
+        self.assertEqual((off.returncode, off.stdout.strip()), (0, ""))
 
 
 class GuardRegistrationTest(unittest.TestCase):

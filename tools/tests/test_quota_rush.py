@@ -429,6 +429,9 @@ class StaticLocksTest(unittest.TestCase):
             "tools/lib/relay_machine.py": (1, 0),
             "tools/lib/resume_route.py": (1, 0),
             "tools/lib/session_brief.py": (2, 0),
+            "tools/lib/sessionctl/park.py": (1, 0),
+            "tools/lib/sessionctl/park_cli.py": (1, 0),
+            "tools/lib/wastecensus/resume.py": (1, 0),
             "tools/lib/quota_burndown.py": (0, 1),   # env 由 gate 傳入（policy_env 的產物）
             "tools/lib/quota_env_layers.py": (0, 1),  # doctor：檢查檔層，刻意不疊戳記
             "tools/probe/day_long_relay_sim.py": (0, 1),   # 模擬器：固定預設政策

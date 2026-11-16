@@ -55,6 +55,10 @@ class _Fence(unittest.TestCase):
                                              "AUTOSDD_HANDOFF_DIR": str(self.hdir)})
         patch.start()
         self.addCleanup(patch.stop)
+        # park 判準（converge.stop_verdict 尾端）預設會讀真實額度快取：本檔只測收斂閘，圍住它
+        carrier = mock.patch("lib.sessionctl.park._has_carrier", return_value=False)
+        carrier.start()
+        self.addCleanup(carrier.stop)
 
     def main(self, *ctxs: int) -> Path:
         path = self.slug / f"{SID}.jsonl"

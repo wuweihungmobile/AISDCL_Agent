@@ -4174,6 +4174,27 @@ class RunParallelPersistsLiveCacheOnlyForLargeRunsTest(unittest.TestCase):
             parallel_shard.run_parallel(suite, Path(__file__).resolve().parent, modules)
         saved.assert_called_once()
 
+    def test_every_finished_unit_prints_a_flushed_progress_line(self) -> None:
+        """WHY：全套輸出導檔時 Python 整塊緩衝，跑完前檔案是 0 bytes——2026-11-15 掌舵者看到
+        「沒有續跑」其實是還在跑。每完成一個派工單位必須即時印一行且 `flush=True`；拿掉 flush
+        或少印任何一個單位，這條就紅。"""
+        parallel_shard = run_root_unittests.parallel_shard
+        modules = {f"mod.{i}": 1 for i in range(5)}
+        with mock.patch.object(parallel_shard, "worker_count", return_value=2), \
+                mock.patch.object(parallel_shard.subprocess, "Popen",
+                                   side_effect=self._fake_popen_factory()), \
+                mock.patch("builtins.print") as printed:
+            parallel_shard.run_parallel(
+                unittest.TestSuite(), Path(__file__).resolve().parent, modules)
+        lines = [(c.args[0], c.kwargs) for c in printed.call_args_list if c.args]
+        progress = [(t, k) for t, k in lines if str(t).startswith("[progress] ")]
+        self.assertEqual(sorted(t.split()[1] for t, _ in progress),
+                         [f"{i}/5" for i in range(1, 6)])
+        self.assertEqual({t.split()[2] for t, _ in progress}, set(modules))
+        self.assertTrue(all(k.get("flush") is True for _, k in progress), progress)
+        workers = [k for t, k in lines if str(t).startswith("[cpu_budget] root-unittest")]
+        self.assertEqual([k.get("flush") for k in workers], [True])
+
 
 class RunParallelStalenessAdvisoryCiSymmetryTest(unittest.TestCase):
     """DEF-200-274 第十輪 D2：`run_parallel()` 的種子過期 advisory 與 `report_dispatch_imbalance()`

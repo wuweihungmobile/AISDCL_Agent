@@ -8,6 +8,7 @@ WHY：`advise_once` 出聲只是提醒，之後在 30 萬 token 的上下文裡�
   · `stop_verdict`：Stop 時（主控結束回合、即將閒置的唯一時點）推回一次，另要求無背景代理
     在跑、無已 finalize 的交接包、`stop_hook_active` 為假（至多一個額外回合，同
     `check_pending_handoff`）。
+第三個判準＝park（`park.stop_verdict`：短窗額度快撞線卻沒有續航憑證）。
 兩者都不寫閂鎖：`/compact` 之後上下文降下來就自動解除。任何例外一律放行（fail-open）。
 """
 from __future__ import annotations
@@ -113,8 +114,20 @@ def _finalized_wake(payload: dict, env) -> str:
 
 
 def stop_verdict(payload: dict, env=None) -> str:
-    """Stop 推回：回要放進 `decision:block` 的 reason；不成立 ⇒ `""`。任何例外 `""`。"""
+    """Stop 推回：先判收斂閘／冷叫醒閘，再判 park（額度停工憑證）；回 reason，不成立 ⇒ `""`。"""
     env = os.environ if env is None else env
+    return _converge_stop(payload, env) or _park_stop(payload, env)
+
+
+def _park_stop(payload: dict, env) -> str:
+    try:
+        from . import park  # noqa: PLC0415 — lazy：Stop 沒走到這裡就不付 import 成本
+        return park.stop_verdict(payload, env)
+    except Exception:  # noqa: BLE001 — fail-open（P0）
+        return ""
+
+
+def _converge_stop(payload: dict, env) -> str:
     try:
         if not isinstance(payload, dict) or payload.get("stop_hook_active"):
             return ""  # 迴圈煞車：第二次 Stop 一律放行

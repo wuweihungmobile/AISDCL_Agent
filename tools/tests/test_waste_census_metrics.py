@@ -299,5 +299,105 @@ class CliAndStructureTest(_Base):
             self.assertLessEqual(guard_line_taxonomy.classify_file(path).assertion, 400, path.name)
 
 
+_INC_LAST = "2026-11-15T19:17:12.620Z"
+_INC_RESET = "2026-11-15T20:00:00+00:00"
+_INC_HUMAN = "2026-11-16T00:54:03.896Z"
+_INC_ASST = "2026-11-16T00:54:22.783Z"
+
+
+def _burn(ts: str = "2026-11-15T19:16:55Z", five: float = 98.0) -> dict:
+    return {"ts": ts, "pct": {"five_hour": five, "session": five},
+            "resets_at": {"five_hour": _INC_RESET, "session": _INC_RESET}}
+
+
+def _a(ts: str, cc: int = 1482) -> dict:
+    return {"type": "assistant", "timestamp": ts,
+            "message": {"id": ts, "model": "claude-fable-5", "usage": {
+                "input_tokens": 2, "cache_read_input_tokens": 217_962,
+                "cache_creation_input_tokens": cc, "output_tokens": 5}}}
+
+
+def _u(ts: str, text: str, kind: str = "human") -> dict:
+    return {"type": "user", "timestamp": ts, "origin": {"kind": kind},
+            "message": {"role": "user", "content": text}}
+
+
+class ResumeMetricsTest(_Base):
+    """`tools/lib/wastecensus/resume.py`：續航量測 M-R1～M-R4（AT-PK-77～81）。
+    WHY：2026-11-15 事故停工到有人回來隔 294 分鐘、重寫 188,230 token；park 上線後要能重跑量出
+    這四個數字，沒有量測就無從證明「不再靠人叫醒」。"""
+
+    def _metrics(self, recs: list, burn: list, traces=()):
+        from lib.wastecensus import resume
+        self._main("s1", recs)
+        records = resume.load_records(self.base, 36500)
+        stops, unmeasured = resume.find_stops(records, burn, 85.0)
+        return resume.metrics(stops, records, list(traces)), stops, unmeasured
+
+    def _incident(self, wake: dict) -> list:
+        return [_a(_INC_LAST), wake, _a(_INC_ASST, cc=188_230)]
+
+    def test_at_pk_77_incident_fixture(self) -> None:
+        """resume.py：事故夾具 ⇒ M-R1≈294.4 分、M-R2＝1（真人 443 字提示，字數判準會漏）、
+        M-R3＝188,230 tok≈10.4pp。"""
+        got, stops, _un = self._metrics(self._incident(_u(_INC_HUMAN, "請繼續" * 147)), [_burn()])
+        self.assertEqual(len(stops), 1)
+        self.assertAlmostEqual(got["m_r1"]["median"], 294.4, delta=0.1)
+        self.assertEqual(got["m_r2"], 1)
+        self.assertEqual((got["m_r3"]["tokens"], got["m_r3"]["pp"]), (188_230, 10.4))
+
+    def test_at_pk_78_machine_wakeups_are_not_a_human(self) -> None:
+        """resume.py：spawn 提示／auto-continuation／sdk 起的喚醒 ⇒ M-R2＝0（機器喚醒不算靠人）。"""
+        for wake in (_u(_INC_HUMAN, "按交接包繼續：讀 x.md"),
+                     _u(_INC_HUMAN, "continue", kind="auto-continuation"),
+                     _u(_INC_HUMAN, "go", kind="sdk")):
+            with self.subTest(kind=wake["origin"]["kind"]):
+                got, _stops, _un = self._metrics(self._incident(wake), [_burn()])
+                self.assertEqual(got["m_r2"], 0)
+                self.assertEqual(got["m_r1"]["n"], 1)
+
+    def test_at_pk_79_unmeasured_gaps_are_counted_not_dropped(self) -> None:
+        """resume.py：間隔夠長但停點前 15 分鐘內沒有 quota_burn 樣本 ⇒ 計入 unmeasured、不進分母
+        （不得靜默丟棄：量不到≠沒有停點）。"""
+        got, stops, unmeasured = self._metrics(
+            self._incident(_u(_INC_HUMAN, "請繼續")), [_burn(ts="2026-11-15T18:00:00Z")])
+        self.assertEqual((stops, unmeasured, got["m_r1"]["n"]), ([], 1, 0))
+
+    def test_at_pk_80_stops_without_a_credential_are_listed(self) -> None:
+        """resume.py：停點前後 10 分鐘內有 park_armed／park_done ⇒ 有憑證；否則計入「無憑證停點」；
+        park_stop_block 件數獨立列出。"""
+        recs = self._incident(_u(_INC_HUMAN, "請繼續"))
+        armed = [{"event": "park_armed", "at": "2026-11-15T19:15:00+00:00"}]
+        blocks = [{"event": "park_stop_block", "at": "2026-11-15T19:17:00+00:00"}] * 3
+        with_cred, _s, _u2 = self._metrics(recs, [_burn()], armed + blocks)
+        without, _s, _u3 = self._metrics(recs, [_burn()], blocks)
+        self.assertEqual(with_cred["m_r4"], {"stop_block": 3, "stops_without_credential": 0})
+        self.assertEqual(without["m_r4"], {"stop_block": 3, "stops_without_credential": 1})
+
+    def test_at_pk_81_resume_metrics_cli_coexists_with_replay_and_writes_nothing(self) -> None:
+        """waste_census.py：`--replay-hard-ctx` 優先於 `--resume-metrics`（既有行為不變）；單用
+        `--resume-metrics` 印 unmeasured 欄，且不在 repo 內留下任何檔。"""
+        self._main("s1", self._incident(_u(_INC_HUMAN, "請繼續")))
+        burn = self.tmp / "burn.jsonl"
+        burn.write_text(json.dumps(_burn()) + "\n", encoding="utf-8")
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHONUTF8": "1"}
+        before = sorted(p.name for p in _REPO.iterdir())
+
+        def run(*extra):
+            return subprocess.run(
+                [sys.executable, str(_PROBE), "--base", str(self.base), "--since-days", "36500",
+                 "--trace-file", str(self.tmp / "no-trace.jsonl"), "--burn-file", str(burn),
+                 *extra],
+                capture_output=True, env=env, cwd=str(self.tmp), timeout=120)
+        both = run("--replay-hard-ctx", "--resume-metrics")
+        self.assertIn("收斂硬門檻重放", both.stdout.decode("utf-8"))
+        only = run("--resume-metrics")
+        text = only.stdout.decode("utf-8")
+        self.assertEqual(only.returncode, 0, only.stderr.decode("utf-8", "replace"))
+        self.assertIn("unmeasured=0", text)
+        self.assertIn("M-R1", text)
+        self.assertEqual(sorted(p.name for p in _REPO.iterdir()), before)
+
+
 if __name__ == "__main__":
     unittest.main()

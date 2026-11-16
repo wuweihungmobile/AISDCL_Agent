@@ -1,6 +1,7 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
-用法：python tools/sessionctl.py <handoff|status|stop|advice|rush> [旗標]
+用法：python tools/sessionctl.py <handoff|status|stop|advice|rush|park> [旗標]
+  park [旗標]  額度自願停工的續航（lib/sessionctl/park_cli）
   handoff --build｜--finalize <檔>｜--ack <檔>｜--spawn <檔>｜--list
       交接包（`handoff.cli`）
   status                                  名冊與掌控面（`roster.cli`，唯讀）
@@ -53,7 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         return _advice(rest)
     if verb == "rush":  # ADR-XPLAT-004 §2.15 D2：趕工戳記（判準與讀寫全在 `lib/quota_rush.py`）
         return _rush(rest)
-    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush\n")
+    if verb == "park":  # ADR-XPLAT-004 §2.17：額度自願停工續航
+        from lib.sessionctl import park_cli
+
+        return park_cli.cli(rest)
+    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush／park\n")
     return _USAGE_RC
 
 

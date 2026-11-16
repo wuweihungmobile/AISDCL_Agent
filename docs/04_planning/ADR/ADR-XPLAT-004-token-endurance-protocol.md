@@ -911,7 +911,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 | 期 | 內容 | 前置驗證（不依賴者標「無」） |
 |---|---|---|
 | 第一期（一支開發棒、一個五小時窗；**已落地＝D1、D2、文件與連動面**；D5 量測與 AC-7 回放未做，順延至後續期） | D1 配速床、D2 趕工戳記、D5 量測（M-P1／P3／P4／P7、M-C1、AC-7 回放）、文件與連動面 | 無（不依賴未驗證的平台行為）；真機 V-P1～V-P5（TCS §10.6） |
-| 第二期 | 保溫致動（`keepwarm_verdict`＋ScheduleWakeup 50 分，R＝5pp 的 five_hour 專屬停工線）；牆前預先交接＋reset 時一次性 `handoff --spawn`；R1 下修（25 萬→20 萬；以 `--replay-hard-ctx` 回放「首次 ≥20 萬後的主控呼叫數」中位 >95 為條件）；冷時只給交接出口（C-5）；模型降級阻斷（opus／fable 在 converge 以上被擋、行內理由逃生；另需暴露證據，無則登記理論洞）；statusline 每請求取樣；扇出 cap 外加同時在跑代理數上限（第一期上線 7 天後 M-P1 未改善才做） | V-K1～V-K4（保溫）、V-S1（schtasks 開互動視窗）、V-M1（statusline 欄位）；動 `.claude/` 須主控親套 |
+| 第二期 | 保溫致動（`keepwarm_verdict`＋ScheduleWakeup 50 分，R＝5pp 的 five_hour 專屬停工線）；牆前預先交接＋reset 時一次性 `handoff --spawn`（**已由 §2.17 落地**）；R1 下修（25 萬→20 萬；以 `--replay-hard-ctx` 回放「首次 ≥20 萬後的主控呼叫數」中位 >95 為條件）；冷時只給交接出口（C-5）；模型降級阻斷（opus／fable 在 converge 以上被擋、行內理由逃生；另需暴露證據，無則登記理論洞）；statusline 每請求取樣；扇出 cap 外加同時在跑代理數上限（第一期上線 7 天後 M-P1 未改善才做） | V-K1～V-K4（保溫）、V-S1（schtasks 開互動視窗）、V-M1（statusline 欄位）；動 `.claude/` 須主控親套 |
 | 第三期 | 無人窗口 `claude -p -r` 保溫；C-4 開場瘦身（根 CLAUDE.md 82.6 KB→約 45～50 KB，估算非量測；獨立 SDD 鍵）；C-1 主控模型切換自動化（Fable 週軸收緊且超前時主控改 Sonnet，「Fable 當用則用」偏好衝突，待掌舵者以互動選項裁定） | V-U1（同 sid 連續兩次 `-p -r` 間隔 50 分仍命中，且與哨兵雙駕駛判準共存不誤判）、V-C4（子代理與 `-p` 是否收到 rules 與 skill 描述） |
 
 後續期的細項本節只登記前置與方向，**本期不寫 AT**。
@@ -961,6 +961,126 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - **已否決**：另開第二本網頁專用帳與第二個 cap（多一組門檻與環境變數，而網頁讀取本身不生出併發，計數無對象）。
 - **劃界**：網頁讀取的 token 成本仍落在本 session 的 context 與額度，由 context 尺與額度 halt 帶節制；本節只修「被當成派人」。
 - 回歸鎖：`tools/tests/test_context_budget_guard.py::WebReadsAreNotDispatchesTest`。
+
+### 2.17 額度自願停工的續航（park）：停工必掛憑證、到點由新 session 帶交接包接手、Stop 守衛只看短窗原始讀數（2026-11-16；DEF-200-594～596；已實作，真機驗證待做）
+
+> 數字一律現查：額度門檻 `python tools/lib/quota_policy.py --print-env-example`；續航量測 `python tools/probe/waste_census.py --resume-metrics --since-days 14`；park 現況 `python tools/sessionctl.py park --status`。本節只寫判準、出處、方向與撤回門檻。驗收契約＝`docs/03_testing/contracts/TCS-SessionPark-20261116.md`（下稱 TCS）。**本輪只做 H 路**；同 session 背景等待者（W 路）列為否決案 X38。
+
+#### 2.17.0 立案與暴露證據（守衛面准入：三取一皆成立；`session_resume_planner.py`、`tools/lib/sessionctl/**`、`.claude/hooks/check_pending_handoff.py` 皆在守衛面清單內）
+
+1. **掌舵者真機回報**：sid `798a7bf1-a991-4a08-8ab8-d0736296f823`，2026-11-16 08:54（+08:00）「為何又停在這理要我下指令繼續做呢?」。
+2. **非構造性逐字稿**（座標＝`~/.claude/projects/<repo slug>/798a7bf1-….jsonl` 的行號）：
+   - 行 634（2026-11-15T19:17:12.620Z＝03:17 +08:00）最後一則 assistant：「…五小時額度已到 98%（約 04:00 重置），這一窗先停在這裡…」；usage input 2／cache_read 217,962／cache_creation 1,482（上下文約 219,446）。
+   - 行 635 `stop_hook_summary`：三支 Stop hook 都跑了，無輸出、未阻斷。
+   - 行 637（2026-11-16T00:54:03.896Z＝08:54，`origin.kind=human`，443 字）：掌舵者回來。行 640（00:54:22.783Z）第一個回合 cache_creation 188,230／cache_read 32,748（只命中系統層，約 10.4pp）。
+   - 04:00 reset 到 08:54 之間沒有任何 assistant 記錄＝**閒置約 294 分鐘**；`quota_burn.jsonl` 該窗 `resets_at.five_hour` 為 2026-11-15T20:00Z（＝04:00 +08:00）。
+3. **真實輸出（墊高現象）**：五小時軸原始 23%、剩 43 分，加上 `seven_day`／`weekly_scoped(Fable)` 各 78%、剩 8467 分、攤提比 4.3 ⇒ `Decision.per_axis` 的五小時軸 `band=prepare`、`note=burn-thrifty+amortized`（`Axis.pct` 仍為 23.0）。照 `Decision.band` 判，每一回合都會被推回（見 D2、否決 X32）。
+
+成因鏈：準備帶訊息叫主控「收斂到可重啟點」，而能讓哨兵接手的 halt 標記在 `AUTOSDD_QUOTA_HALT_PCT=100` 下要到 100% 才寫 ⇒ 從 prepare 帶停工到真正撞線之間是無人區；哨兵只認撞線、寬限提示、halt 標記、idle，這一場三者皆無而判 `patrol`（要靜止滿 6 小時才解除，任何分支都不續跑）；`check_pending_handoff.py` 詞表只收「您」字系列，漏掉「仍由你決定」；另一項暴露：停工訊息把人導向「在冷掉的 21.9 萬上下文舊視窗說一聲繼續」。
+
+#### 2.17.1 平台事實（查閱日期 2026-11-16）
+
+| 代號 | 事實 | 出處 |
+|---|---|---|
+| Q1 | `autoContinueAtUsageLimit` 只在「用量上限在任務進行中擋下 Claude」時等待並續接；`quota_auto_resume_fired／stale／disabled` 為 Notification（v2.1.234 起）；睡眠逾約 30 分改等 Enter | https://code.claude.com/docs/en/interactive-mode（§2.10 已引同源） |
+| Q2 | `ScheduleWakeup` 1 分～1 小時、只用於自訂步調 `/loop`；無憑證 | https://code.claude.com/docs/en/tools-reference；根 CLAUDE.md〈工具選型〉 |
+| Q3 | 主控快取 1 小時、子代理 5 分鐘；每次命中重設計時器 | https://code.claude.com/docs/en/prompt-caching；§2.15.1 |
+| Q7 | Windows 排程工作的 `S4U` 登入類型落在 session 0（無桌面）；`Interactive` 只在使用者登入時跑 | `session_resume_planner._SCHTASKS_PRINCIPAL` 註解；官方 Task Scheduler 語意 |
+| Q8 | launchd 不報 next-run；睡著的 Mac 不被喚醒 | `schedule_backend.py` 檔頭〈誠實劃界〉（本 repo 真機實測） |
+
+`ScheduleWakeup` 在用量等待期間觸發時保留或丟棄＝查不到，本節不依賴它（X29）。
+
+#### 2.17.2 決策（實作座標：`tools/lib/sessionctl/park.py`、`park_cli.py`）
+
+**D1　`park`：停工是一個有型別的狀態轉移。** 因額度停工前必跑 `python tools/sessionctl.py park`。流程順序是契約（測試以呼叫序列斷言）：政策閘 → 讀 reset → 交接包 `finalize`＋`spawn_preflight` 預演 → 取代舊標記（先撤舊排程並驗證）→ 登記一次性排程取憑證 → 寫標記（寫失敗即回滾排程）。純函式 `park_route(wait_s, *, unattended, mode, carrier_ok)` 只回 `H`／`REFUSE`：無人窗口、模式非 `auto`、無排程載具、reset 量不到（不假設 5 小時，§2.1）皆 `REFUSE`，其餘一律 `H`。`park --done --why "<≥8 字>"` 是「沒有剩餘工作」的唯一豁免；`park --cancel` 撤排程；`park --status [--verify]` 現況；`park --at <ISO> --why …` 供週額度等明示停工（須帶 offset、在未來、上限 8 天）。成功時多印一行：「park 已掛好：到點（…）若這個 session 沒有人在動，就由新 session 帶交接包接手。現在可以結束回合；不要請人回這個視窗接手。」
+
+**D2　Stop 判準 `park.stop_verdict`（純函式；接在 `converge.stop_verdict` 尾端：`_converge_stop(...) or _park_stop(...)`，`sessionctl_guard.py` 行為零改動）。** 全部成立才推回一次（`decision:block`）：① 非 `stop_hook_active`、非 `AUTOSDD_UNATTENDED`、`AUTOSDD_SESSION_SWITCH_MODE=auto`、`AUTOSDD_PARK_GUARD_OFF` 未設、`schedule_backend.has_carrier()` 為真；② **只看短窗軸**（`session`／`five_hour`／`5h`，或由窗長導出為 300 分者；模型分軸與 FALLBACK 不算），週軸一律不算——週額度常態用到 100%（掌舵者 2026-11-07），以週軸判會每回合推回；③ 🔴 **用原始讀數**：該軸 `Axis.pct`（`quota_gate.pace_state` 回的伺服器原值，須為有限 int／float、排除 bool）≥ `Policy.prepare_pct` 且 `resets_at` 為帶 offset 的未來時刻；**不得**用 `Decision.band`、`AxisReading.band`、`decide()` 的任何輸出——它們吃過攤提（`quota_pace.resolve`）與配速床（`quota_pace_floor.apply`）墊高後的水位（證據 3：原始 23% 的軸 band＝prepare）。唯一入口是 `park.prepare_hits`；先例＝`quota_gate.compact_margin_breached` 與 §2.15.3 `draining()` 都讀 `axis.pct` 原值；④ 沒有有效續航憑證（D4）；⑤ 本 session 沒有已 `--spawn` 的交接包（`handed_off`，既有換 session 路徑已處理）。量不到（`axes==()`、快取過期、reset 不明）＝不判（fail-open，落痕跡 `park_verdict_unmeasured`）。前一步不成立即回 `""`，不做後面的 I/O；任何例外放行（P0）。標記壞掉＝無憑證（fail-closed，推回至多一次，與例外放行是兩回事）。**不變式**：推回的前提必能被 `park` 滿足——Stop 守衛 no-op 的條件（無人、模式非 auto、無載具）與 `park` 的拒絕條件同源。
+
+**D3　選路只剩一條可走（W 路否決，見 X38）。** `wait_s`＝距**觸發時刻**（reset＋`HALT_RESET_SKEW_SECONDS`＝120 秒，向後取整到分鐘；`--at` 則取整後即為該時刻）的秒數，只用於說明文字；`park_route` 不讀上下文、不讀快取壽命。
+
+**D3b　未達準備門檻的自願停工：`park --why "<WHY≥8字>"`（2026-11-16 真機補，sid f2260ce7）。** 主控在短窗 84% 判斷「下一棒約 20pp、這一窗放不下」要停工，`park` 自動選路卻因未達準備門檻回 rc 4（痕跡 `park_refused` 兩列，2026-11-16T10:09 +08:00），只剩手打 `--at`。「放不下」是相對下一棒大小的判斷，不是固定門檻 ⇒ 沒有短窗軸達標但帶合格 `--why` 時，reset 取短窗軸的**觀測值**（`park.measured_short`：短窗軸 ∧ 有限讀數 ∧ reset 在未來，取最大值），其餘流程（交接包 finalize、spawn 前置預演、憑證、標記）逐字相同，`why` 寫進標記。短窗 reset 量不到時即使帶 why 仍 rc 4（不假設 5 小時）。**Stop 推回門檻不動**（D2 仍只走 `prepare_hits`）：放寬的是主控「可以停」的出口，不是守衛「必須停」的判準。驗收＝TCS AT-PK-46b。
+
+**D4　續航憑證是「值」，不是宣稱。** 憑證寫在 park 標記（`endurance_env.trace_dir()/park/<sid>.json`，schema `autosdd.park/1`；讀取端走 `trace_dir_peek()`、不 mkdir、結構異常一律當無憑證，同 `quota_rush`；寫入端與讀取端共用同一份 `marker_problem` 驗證）。有效憑證兩種：`H`＝標記 `status=armed`、未過 `valid_until`（＝觸發時刻＋900 秒）、且 primary job 的排程憑證字串非空（Windows＝`NextRunTime` 的值；macOS＝`launchctl print` rc＋descriptor 回讀，憑證是 rc 不是時間值）；`DONE`＝`--done` 戳記未過期（有效到最早短窗 reset，上限 5 小時；無人窗口無效）。Stop 判準只讀檔、不 spawn、不打排程器（Stop 逾時 15 秒）；`park --status --verify` 才現場向排程器取證。排程憑證取不到（含 rc=0 但無值）⇒ `park` rc 1、不寫標記、落 `park_arm_failed`，stderr 明說「本工具不會說它已排程」。
+
+**D5　順序與回滾。** H 路：前置 → 登記主排程取憑證 → 寫標記；標記寫失敗即 `disarm` 並以 `list_jobs` 驗證不在（量不到不宣稱已移除），落 `park_arm_failed`。`park` 要求交接包已 finalize 且 `spawn_preflight` 通過（工作樹乾淨或有 `*-wip-preserved` 標籤、無執行中代理）——**登記前**就失敗，不等到點才失敗，rc 2 並列缺項。同 sid 第二次 `park` 取代舊標記：舊排程先撤並驗證（`--done` 亦然）；任一失敗即不登記新的。排程標籤 `AutoSDD_HandoffSpawn_<sid8>_<YYYYMMDDHHMM>`（含觸發分鐘，避免對正在跑的自己 bootout，DEF-200-526 的形狀）。
+
+**D6　到點動作＝`park --fire`（排程的 job 本體），先查「有人在動」才 spawn。** 判準依序：標記不屬於本 job 或已不是 `armed` ⇒ 跳過（`reason=cancelled|not_armed`）；無人窗口 ⇒ 拒絕（rc 4）；交接包已 ack ⇒ 跳過（`acked`）；交接包不在或已過期 ⇒ 跳過（`expired`）；`transcript_activity.live_driver(舊逐字稿, now)`（一個巡邏間隔 900 秒內有非合成對話記錄；**對話記錄判活，不是檔案 mtime**，DEF-200-560）非空 ⇒ 跳過（`live_driver`）；其餘呼叫既有 `handoff.spawn(pkg)`（其前置與 SEC-6／SEC-7 照舊）。成功＝標記 `fired`、`disarm` 自己；失敗＝標記 `failed`、寫一份 handback（`resume_route.handback_report`，下次 SessionStart 的 `announce_handbacks` 出聲）、`disarm` 自己。跳過一律落 `handoff_spawn_skipped`、標記 `skipped`、自拆。**不新增 `handoff --spawn --if-idle` 旗標**（X35）：檢查屬於 job 本體，`handoff.spawn` 語意零改動；`handoff.py` 只加一個公開預演函式 `spawn_preflight`。
+
+**D7　哨兵讓路。** `sentinel_decide` 多一個選配參數 `park`：標記為 `armed`、`route=H`、現在 ≤ `valid_until`（觸發時刻＋900 秒）⇒ 回既有的 `patrol`（理由字面標明讓路）；`LIMIT_SPEND` 事件仍先 `escalate`；無標記或已過窗＝逐位元組同舊行為，action 集合仍恰為五個。`_sentinel_tick` 以 `park=sessionctl_park.read_marker(sid)` 傳入。成因：最後一則訊息本身撞線時，哨兵的 `arm_reset` 與 park 的排程會在同一個 reset 時刻各起一個駕駛——新 session 寫的是**另一份**逐字稿，哨兵的 `driver` 判準看不到它。
+
+**D8　準備帶訊息與詞表。** `quota_prepare_message` 拿掉寫死的「（85~95%）」字面（門檻值已由同則訊息的 `describe()` 逐軸印出），「下一步」加「若要因額度停工：先跑 `python tools/sessionctl.py park`；不要叫人回這個視窗說繼續」。`check_pending_handoff.HANDOFF_RE` 補「你」字系列，**最終詞表只收**：待你、留給你、交給你、交由你、由你決定、你來決定、需要你、需你、你裁決。「請你」「等你」**不收**：真實面普查（`python tools/probe/handoff_census.py`，214 回合命中 14）顯示收入時造成 3 回合假紅（事後敘述，不是交棒）；不收後該 3 回合假紅消失。這兩件是順手修；根治靠 D2（結構判準，不看措辭）。
+
+**D9　逃生口與零新門檻變數。** `AUTOSDD_PARK_GUARD_OFF`：只關 Stop 推回（讀自 hook 行程環境，模型碰不到）；`park --done --why`：行內可稽核豁免，無人窗口無效；`AUTOSDD_SESSION_SWITCH_MODE=notify|off`：park 一律 REFUSE、Stop 判準 no-op。`YIELD_GRACE_SECONDS`（900 秒，與 `quota_messages.HALT_QUIESCE_SECONDS` 同值並由 parity 測試釘住）、`MIN_WHY_CHARS`（8）、`DONE_MAX_SECONDS`（5 小時）、`AT_MAX_SECONDS`（8 天）為 `park.py` 內的具名常數、不開環境變數。
+
+#### 2.17.3 換手判準是成本，不是容量百分比（回答「上下文才 24%，為什麼要換」）
+
+快取成本與帳戶額度都**按 token 計**，與「佔該模型 1M 視窗的幾 %」無關；上下文 21.9 萬在 1M 視窗只佔約 22%，但冷喚醒時要整份重寫 21.9 萬 token。判準（係數取 §2.15 本帳號回歸：寫 5.5e-5、讀 1.7e-6 pp／token，n＝2；結論以**比值**表達）：
+
+1. **冷喚醒（等待超過快取壽命，或沒有任何東西準時喚醒）**：舊 session 付 `N × w`（N＝上下文 token）；新 session 付 `N₀ × w`（N₀＝新 session 起步上下文，實測基線 92,522，見 `waste_census --fresh-baseline-ctx`；§2.15.2 表列 S≈5.7～6.7pp）。**換手划算 ⇔ N > N₀**——與視窗大小、與 w 的數值無關。本案 N＝219,446 ⇒ 舊 session 冷喚醒約 12.1pp（實付 188,230 token ≈ 10.4pp），新 session 約 5～6pp。
+2. **這是「24% 為什麼要換」的答案**：不是因為 24% 很高，而是因為**舊 session 的喚醒保證不了是熱的**——實際發生的是沒有任何東西喚醒、人在 294 分鐘後回來＝冷。H 路把「喚醒」放到 OS 排程（獨立於視窗與行程），新 session 起步就是熱的 N₀。
+3. **每回合熱讀**：留在大上下文的每次呼叫多付 `(N − N₀) × r`；§2.15.2 表：30 萬約 13 次呼叫回本。
+
+**R1 絕對門檻（250,000）本輪不改。** 理由：① park 本身就是成本判準的落地點，**不依賴 R1 出聲**（本案未出聲：R1 要 25 萬、停工時 21.9 萬）；② §2.15.5 第二期的下修條件「首次 ≥20 萬後的主控呼叫數中位 >95」，該統計 `waste_census --replay-hard-ctx` **不產出**（它的 `room_med` 是 R1 到硬門檻之間的回合數；以 R1＝200,000、H＝230,000／250,000／290,000 重放：reach_H＝15／14／12、room_med＝7／10.5／18.0，與條件無關）⇒ 條件**未能判定**，不得據以下修；③ R1 下修與 park 互不依賴，併一個 commit 只會擴大爆炸半徑。要下修時先補該統計（`wastecensus` 新指標），再依 §2.15.5 走。
+
+#### 2.17.4 設計取捨與落點
+
+- 判準與標記住 `tools/lib/sessionctl/park.py`（純函式＋標記讀寫＋`stop_verdict`）；CLI、job 本體、排程編排住 `park_cli.py`（皆在既有套件，Root_Layout §3 sessionctl 列已補 `park`、`park_cli`；不另成模組）。`tools/sessionctl.py` 只加分派 `park`。
+- **排程原語不進 park*.py**：`CarrierPrimitivesHaveOneHomeTest` 規定排程器原語只能住宣告過的家。一次性工作的註冊住 `tools/lib/engine_resume_job.py`，新增公開的 `arm_oneshot(label, argv, cwd, fire, *, interactive)`；Windows 另需 `-LogonType Interactive` 的 Principal（Q7：S4U 在 session 0，開不出使用者看得見的互動視窗），故 `_arm_schtasks` 加 `interactive` 參數、預設值逐位元組同舊腳本；`interactive=True` 的腳本不含 S4U 也不含 fallback 分支。macOS 沿用 LaunchAgent（gui 網域＝互動）。
+- Stop 接線：`converge.stop_verdict` 尾端；與 `_finalized_wake`（冷叫醒閘）互斥：交接包已 `--spawn` 則 park 不判（D2⑤），H 路要求 finalize 後 TaskStop 全部背景任務（§2.13.5）。
+- 痕跡（`autosdd_session_switch.jsonl`，`switch.trace` 單一家）：`park_armed`、`park_refused`、`park_arm_failed`、`park_done`、`park_cancelled`、`park_stop_block`、`park_verdict_unmeasured`、`park_job_start`、`handoff_spawn_skipped`（欄 `reason`＝`live_driver|acked|expired|cancelled|not_armed`）、`park_spawned`、`park_spawn_failed`。
+- `quota_gate.py`（hub）**不動**；其餘連動檔：`quota_messages.py`（+1 行）、`session_resume_planner.py`（+2 行）、`tools/lib/wastecensus/resume.py`（新，`report.py` 加旗標）。
+- 既有測試的圍籬：`converge.stop_verdict` 尾端會呼叫 park 判準（預設讀 `quota_gate.pace_state`，快取缺時可能補量一次＝真網路），故 `test_sessionctl_converge.py::_Fence` 以 `mock.patch("lib.sessionctl.park._has_carrier", return_value=False)` 圍住、`test_sessionctl_hooks.py` 子行程 env 帶 `AUTOSDD_PARK_GUARD_OFF=1`。
+
+#### 2.17.5 已否決（續 §2.15.4 的 X16～X27；本節 X28～X38）
+
+| 代號 | 方案 | 理由 |
+|---|---|---|
+| X28 | 哨兵新增「自願停工」分支，到點 `claude -p -r` 續跑 | 與開著的互動視窗形成雙駕駛（§2.11；X16 已否決同型）；整份冷寫（S2 實證 863,852）；無人窗口牆鐘上限（§2.12） |
+| X29 | harness 原生 `autoContinueAtUsageLimit`／`ScheduleWakeup` 當自願停工解 | 射程不涵蓋自願停工（Q1）；`ScheduleWakeup` 無憑證且上限 1 小時（Q2） |
+| X30 | 禁止自願停工、硬撞 100% 交給 harness 續接 | 撞線時刻不可控、寬限只夠收尾（半套工作）、連續自動續接三次後 harness 停下問人、大上下文仍在舊 session 冷續 |
+| X31 | 只補 `check_pending_handoff` 的「你」字詞表 | 該守衛判「把決定留給人」；「自己停工、等人說繼續」不是決定，是第五類停——補詞表是打地鼠；詞表只作順手修（D8） |
+| X32 | Stop 判準吃 `Decision.band`／`per_axis[].band` | 它們是攤提與配速床墊高後的水位：原始 23% 的五小時軸 band＝prepare（§2.17.0 證據 3）⇒ 每回合推回；判準必須讀 `Axis.pct` 原值（D2） |
+| X33 | 以語意詞表／`TodoWrite` 狀態／工作樹髒否猜「有未完成工作」 | 無可靠機械來源（模型未必用 TodoWrite；乾淨工作樹不代表做完）⇒ 預設視為有，唯一豁免＝`park --done --why`（可稽核） |
+| X34 | 重用 halt 標記，或把 `HALT_PCT` 降到 85 | 改 halt 語意與 DEF-200-281 自檢；與「週額度用到 100%」（掌舵者 2026-11-07）直接衝突 |
+| X35 | 新增 `handoff --spawn --if-idle` 旗標 | 「有人在動」檢查屬於排程 job 本體；加旗標會改 `handoff.spawn` 語意與 `handoff.py` 的 LOC 餘裕 |
+| X36 | 一次性排程沿用 planner 的 S4U Principal | S4U 落 session 0，`CREATE_NEW_CONSOLE` 的視窗看不見＝「已 spawn、使用者沒有視窗」（假綠）；改 Interactive，代價見 §2.17.6 |
+| X37 | 以下修 R1 取代 park | 不涵蓋「上下文小、等待長」的情況；§2.15.5 下修條件未能判定（§2.17.3） |
+| X38 | **W 路**：同 session 起一支會等到 reset 才結束的背景等待者（含心跳檔、兜底 H 排程、`--wait-until`），小上下文短等待時由它叫醒舊 session | ① **無暴露證據**：事故（21.9 萬 token、43 分鐘）本來就走 H，W 沒有任何一件真實暴露；守衛面准入規則＝沒有暴露證據不加碼。② 等待者存活超過 40 分**未驗**：唯一實證過的背景等待是 `ci_wait` 預設 40 分。③ 兜底排程與已醒的舊 session 並存有**雙駕駛風險**（只靠 900 秒對話記錄判活擋，主控靜止超過 900 秒即可能並存）。**再開條件**：M-R3 顯示「小上下文、短等待」的換手成本成為主要浪費（即該類停點的恢復首回合成本顯著高於 H 路的新 session 起步成本）；再開須先驗背景等待存活與雙駕駛判準，並補暴露證據。 |
+
+#### 2.17.6 誠實劃界
+
+- **Windows 互動排程只在使用者已登入時跑**（Interactive 登入類型）；登出或關機時 `StartWhenAvailable` 讓它在下次可用時補跑，補跑晚多久＝M-R1 會看見的量。鎖屏、睡眠後喚醒（`WakeToRun` 需 RTCWAKE）屬可用。要完全無人在場的恢復走既有哨兵／無人窗口 FRESH 路，不在本節射程。`_arm_schtasks(interactive=True)` 無 fallback：使用者未登入互動 session 註冊會直接失敗（符合「不得悄悄退回 S4U」），RDP 斷線情境待真機驗證。
+- **macOS**：憑證是 `launchctl print` rc＋descriptor 回讀，**不是**時間值；睡著的 Mac 不被喚醒（`pmset -g custom` 現查、不得寫成常數）；`StartCalendarInterval` 的 `print` 回讀形態在 `engine_resume_job` 內只有合成輸出驗過（真機未驗）。
+- **`park --done` 到 reset 前一律有效**：同一窗內若掌舵者又給了新工作，Stop 判準不會再推回；以 `park` 重跑覆蓋標記補救。此洞無法由 M-R4 看見（沒有 block 事件），列入理論洞、無暴露證據（登記不修）。
+- **週軸以天計的停工不在 Stop 判準內**（D2②）；需要時以 `park --at <ISO> --why …` 明示（上限 8 天）。
+- Stop 判準讀的是快取（`pace_state`，每 TTL 至多補量一次）；快取過期且補量失敗＝不判（`park_verdict_unmeasured`），代價是漏推一次。
+- `park_cli._cmd_fire` 以 `--session-id` 明示找舊 session 逐字稿（排程器環境無 `CLAUDE_CODE_SESSION_ID`）；真排程啟動時的 cwd／`CLAUDE_PROJECT_DIR` 差異待真機驗證。
+- 成本數字沿用 §2.15 的 n＝2 係數與 N₀ 基線 92,522（量自 sid `680d8411` 的單一事例），用於排序與定門檻，不是額度承諾。
+- 真機驗證（TCS §3）：V-PK2 的 ①②⑤ 已於 2026-11-16 由第一次真實停工驗到（sid f2260ce7 於 10:10 `park`、13:03:00 排程開出 sid ff1000ed 接手）；V-PK2 ③④⑥、V-PK3、V-PK4 仍**待真機**，未驗不得寫成已驗。
+- **狀態列仍只顯示容量百分比，沒有「現在冷重寫要花多少額度」**（問題總表 B5）：本輪不做。換手的機械判準已不靠人讀狀態列（R1～R3、收斂閘、park 皆由程式判），狀態列加成本欄只改善「掌舵者看得懂為什麼換」；成本估計要用 §2.15 的 n＝2 係數，樣本太少，先印在畫面上會被當成承諾。登記於觀察帳 OBS-SI-417，再開條件＝M-R3 累積 n ≥ 5 後係數可校準。
+
+#### 2.17.7 指標、上線前基線與撤回門檻（觀察期：2 個完整週額度週期＝14 天；評估法＝逐列回放，n 小時不做 A/B；入口 `python tools/probe/waste_census.py --resume-metrics --since-days 14`，判準在 `tools/lib/wastecensus/resume.py`）
+
+「額度停點」＝專案內相鄰兩筆對話記錄間隔 ≥ 30 分鐘，且間隔起點前 15 分鐘內的 `quota_burn.jsonl` 樣本顯示短窗軸（`five_hour`／`session`）`pct ≥ prepare` 且 `resets_at` 在起點之後；取不到樣本者另計 `unmeasured`（不得靜默丟棄）。
+
+| 指標 | 定義 | 改善判定 | 撤回／檢討 |
+|---|---|---|---|
+| M-R1 reset 後閒置 | 停點的 reset 到同專案下一筆 assistant 記錄的分鐘數 | 中位 ≤ 20 且 P90 ≤ 60 | 上線後兩週不降 ⇒ 檢討排程時刻與 Interactive 登入前提 |
+| M-R2 靠人恢復 | 結構判準：停點後 reset 起的**第一筆對話記錄**為真人提示（非 `origin.kind=sdk`／`auto-continuation`）且文字不以機器提示前綴（`按交接包繼續：`、`按磁碟任務書繼續：`）開頭 | 14 天 0 件 | ≥1 ⇒ 逐件看為何沒有憑證（M-R4）。不採「第一筆真人訊息 ≤30 字」判準：對事故事例為偽（行 637 共 443 字、`origin=human`） |
+| M-R3 恢復首回合成本 | 該記錄之後第一個 assistant 回合的 `cache_creation_input_tokens` 與 ×5.5e-5 的 pp | H 中位 ≤ 45k；任一件 >100k 即紅 | 任一件 >100k ⇒ 回頭檢查 H 的 spawn 前置；同時是 X38 再開條件的觀察量 |
+| M-R4 停工無憑證 | `park_stop_block` 件數 ＋ 回放：停點起點前後 10 分鐘內無 `park_armed`／`park_done` 痕跡者 | 逐週降到 0 | `park --done` 使用率 >50% ⇒ 判準太緊；`park_stop_block` 逃生口使用率 >50% ⇒ 同 |
+
+**上線前基線**（主控 2026-11-16 親跑 `python tools/probe/waste_census.py --resume-metrics --since-days 14`；事故 sid `798a7bf1` 含在內）：額度停點 6 個、`unmeasured` 55；M-R1 n=3，中位 274.9 分鐘、P90 294.4 分鐘；M-R2 1 件；M-R3 589,565 token（約 32.4pp，係數 5.5e-5）；M-R4 `park_stop_block` 0 件、無憑證停點 6 個（park 上線前自然全無憑證）。n 小，只作方向，不作統計宣稱。
+
+撤回條件：`OTHER_DRIVER_STOP` 或「有人在動卻 spawn」≥1 件 ⇒ 停用 H 排程路、回頭檢查 `live_driver` 判準與錨；`handoff_spawn_skipped` 的 `live_driver` 比例異常高（>30%）⇒ 檢討排程時刻。收斂判準：連續 2 個週額度週期 M-R1 與 M-R3 不回升。
+
+#### 2.17.8 與既有章節的關係
+
+- §2.11（雙駕駛）：D6 沿用 `live_driver`；D7 補哨兵在 park 窗內讓路；park 不新增 spawn 駕駛以外的駕駛。
+- §2.13（sessionctl）：交接包、`handoff.spawn` 的前置與 SEC-6／SEC-7 全數沿用；冷叫醒閘（DEF-200-588）互斥由 D2⑤ 與 finalize 後 TaskStop 保證。
+- §2.14：Stop 推回與既有兩支各至多一次、同吃 `stop_hook_active`，最壞多兩三個回合、不死鎖；收斂閘先判（`_converge_stop(...) or _park_stop(...)`）。
+- §2.15：**本節即 §2.15.5 第二期「牆前預先交接＋reset 時一次性 `handoff --spawn`」的落地**（V-S1 的「schtasks 開互動視窗」＝TCS V-PK2）；保溫（`keepwarm_verdict`）與 R1 下修仍屬第二期、不在本節。D2 的原始讀數判準與 §2.15.3「`draining()` 不吃配速床」同源。
+- §2.10／§2.6：halt 標記語意不動；park 標記是另一份檔，哨兵只讀它做讓路判斷。
 
 ## 3. 被否決的方案（各記為何否決）
 

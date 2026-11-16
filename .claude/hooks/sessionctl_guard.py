@@ -5,7 +5,8 @@
 （續棒看快取冷熱）；Agent／Task／Workflow 走 `converge.converge_verdict`（出聲後上下文達
 硬門檻）。Stop：仍有背景代理在跑 ⇒ `{"systemMessage": ...}` rc 0；否則收斂閘成立 ⇒
 `{"decision":"block","reason":...}` 推回一次（`stop_hook_active` 為真即放行，判準
-`converge.stop_verdict`）。PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
+`converge.stop_verdict`；其尾端另判 park＝額度停工憑證 `park.stop_verdict`，
+逃生口 `AUTOSDD_PARK_GUARD_OFF`）。PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
 任何例外 rc 0（fail-open，P0）；不 spawn、不 import planner。逃生口：
 `AUTOSDD_SESSIONCTL_GUARD_OFF`（刻意不與其他守衛共用）。回歸鎖
 `tools/tests/test_sessionctl_hooks.py`；設計＝ADR-XPLAT-004 §2.13.6、§2.14。

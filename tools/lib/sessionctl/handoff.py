@@ -343,6 +343,11 @@ def _refusals(path: Path, runner, repo: Path, roster_mod) -> list[str]:
     return out
 
 
+def spawn_preflight(path, *, runner=None, repo: Path | None = None, roster_mod=None) -> list[str]:
+    """`spawn` 的三個前置（finalize、工作樹保全、無執行中代理）預演；`[]`＝都過。只讀。"""
+    return _refusals(Path(path), runner or build.default_runner, Path(repo or _REPO), roster_mod)
+
+
 def _duplicate_refusals(path: Path, now: datetime, alive) -> list[str]:
     """SEC-7：已 ack、或同一交接包已有 spawn 痕跡且（pid 仍活著或痕跡在 `SPAWN_DEDUP_SECONDS` 內）
     ⇒ 拒絕再開（驗不到時間也當剛開過）。讀痕跡失敗＝沒有痕跡（不擋）。"""

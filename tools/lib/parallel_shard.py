@@ -528,6 +528,7 @@ def run_parallel(
 
     started: list[subprocess.Popen] = []
     started_lock = threading.Lock()
+    progress = [0]  # 已完成的派工單位數（`started_lock` 保護）
     results: queue.SimpleQueue = queue.SimpleQueue()
     thread_errors: queue.SimpleQueue = queue.SimpleQueue()
     #: Ctrl-C／SIGTERM 收尾用（見下方 `except KeyboardInterrupt`）；平常路徑恆為 False。
@@ -560,6 +561,12 @@ def run_parallel(
                 elapsed = time.monotonic() - started_at
                 finish_at = time.monotonic() - overall_start
                 results.put((module, proc.returncode, stdout, stderr, elapsed, finish_at))
+                # 每完成一個派工單位即時印一行並 flush：輸出導檔時 Python 是整塊緩衝，
+                # 跑完前檔案 0 bytes、看不出死活（掌舵者 2026-11-15 回報「沒有續跑」實為仍在跑）。
+                with started_lock:
+                    progress[0] += 1
+                    print(f"[progress] {progress[0]}/{len(modules_sorted)} {module} "
+                          f"rc={proc.returncode} {elapsed:.1f}s", flush=True)
         except BaseException as exc:  # noqa: BLE001 — 蒐集後交主 thread 直接收尾，故意不窄化
             thread_errors.put(exc)
 
@@ -570,7 +577,7 @@ def run_parallel(
     try:
         n = min(worker_count(), len(modules_sorted)) or 1
         source = "env" if os.environ.get(_ENV_WORKERS) else "cpu_budget"
-        print(f"[cpu_budget] root-unittest workers={n} source={source}")
+        print(f"[cpu_budget] root-unittest workers={n} source={source}", flush=True)
         threads = [threading.Thread(target=_worker_thread_loop) for _ in range(n)]
         try:
             for t in threads:
