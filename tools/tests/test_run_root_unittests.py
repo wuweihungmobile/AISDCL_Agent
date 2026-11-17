@@ -3379,14 +3379,21 @@ class LoadBalancingRegressionTest(unittest.TestCase):
 
         for name in (self._SLOW_MODULE_A, self._SLOW_MODULE_B):
             slow_path = self._tests_dir / f"{name}.py"
+            # 每支慢模組把自己的起訖時刻寫進同名 .span：判準看「兩段是否重疊」而非總耗時，
+            # 機器滿載（pre-push 並行 leg）只會拉長兩段、不會讓真並行變成不重疊。
             slow_path.write_text(
                 "import time\n"
-                "import unittest\n\n\n"
+                "import unittest\n"
+                "from pathlib import Path\n\n\n"
                 "class SlowTest(unittest.TestCase):\n"
-                f"    def test_sleep(self):\n        time.sleep({self._SLEEP_SECONDS})\n",
+                "    def test_sleep(self):\n"
+                "        start = time.time()\n"
+                f"        time.sleep({self._SLEEP_SECONDS})\n"
+                "        Path(__file__).with_suffix('.span').write_text(\n"
+                "            f'{start} {time.time()}', encoding='utf-8')\n",
                 encoding="utf-8",
             )
-            self._paths.append(slow_path)
+            self._paths.extend((slow_path, slow_path.with_suffix(".span")))
 
         for p in self._paths:
             self.addCleanup(p.unlink, missing_ok=True)
@@ -3405,20 +3412,23 @@ class LoadBalancingRegressionTest(unittest.TestCase):
         # 這種會疊加兩次 Popen 啟動延遲的複合效應（見上方 docstring 的 Architect
         # finding 段落）。
         with mock.patch.object(parallel_shard, "worker_count", return_value=3):
-            start = time.monotonic()
             merged = parallel_shard.run_parallel(suite, self._tests_dir, module_counts)
-            elapsed = time.monotonic() - start
 
         self.assertTrue(
             merged.wasSuccessful(),
             f"合成模組應該全部通過：errors={merged.errors} failures={merged.failures}",
         )
         self.assertEqual(merged.testsRun, 12)
-        self.assertLess(
-            elapsed, self._SLEEP_SECONDS * 1.6,
-            f"總耗時 {elapsed:.3f}s 過於接近兩個慢模組序列相加"
-            f"（{self._SLEEP_SECONDS * 2}s）——動態負載平衡疑似失效，"
-            "兩個慢模組被綁進同一條 thread 序列執行",
+        # 原判準「總耗時 < 1.6×單支」是負載相依的牆鐘門檻：2026-11-18 pre-push 滿載時 pytest
+        # 載具量到 4.516s 翻紅（DEF-200-608）。改判兩段時間是否重疊——序列執行必不重疊。
+        a_start, a_end = (float(x) for x in (self._tests_dir / f"{self._SLOW_MODULE_A}.span")
+                          .read_text(encoding="utf-8").split())
+        b_start, b_end = (float(x) for x in (self._tests_dir / f"{self._SLOW_MODULE_B}.span")
+                          .read_text(encoding="utf-8").split())
+        self.assertTrue(
+            a_start < b_end and b_start < a_end,
+            f"兩個慢模組時段不重疊（A {a_start:.3f}～{a_end:.3f}、B {b_start:.3f}～{b_end:.3f}）"
+            "——動態負載平衡疑似失效，兩個慢模組被綁進同一條 thread 序列執行",
         )
 
 

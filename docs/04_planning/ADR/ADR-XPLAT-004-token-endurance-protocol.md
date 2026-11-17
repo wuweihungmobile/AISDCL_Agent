@@ -1128,8 +1128,9 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - 轉送依「冷」判，冷熱由逐字稿最後一筆 assistant usage 時刻推定（±30 秒邊際）；ADR P5 `idleCompaction` 可能改變快取狀態（V-W3）。圖片提示不轉送、冷重寫照付；轉送只在 Windows 開窗，macOS／Linux 只注入提醒。
 - 跨 session 訊息、排程提示在 UserPromptSubmit 上與人打字不可分：靠機器注入前綴與 `session_crons` 記錄兩道；無標籤純文字的跨 session 訊息會被當成人打的字（TH-6），但仍需「已封存＋冷」才轉送、原文必落檔。實測（REV Q2 真實語料重放 75 逐字稿 1,630 筆）判假者中像真人 0。
 - **互動畫面是否顯示 Stop／UserPromptSubmit 的 block 理由未實測**（V-F1、V-W2）。若完全不顯示，掌舵者會看到提示「消失」⇒ 依 PLAN 裁決降為 notify（只注入提醒）；所以本節轉送與已交棒告知的「掌舵者看得到」仍屬**待真機目視**，未驗不得寫成已驗。
-- **理論洞 REV F10 不修**：`handoff --spawn` 與 `park_cli` 只做純驗證、不要求 `.sealed`；漏跑 `--finalize` 而直接 spawn／park 時，冷叫醒閘失明、I-4 封存被跳過。WHY 不修：**無暴露證據**（SOP 兩條路都先 `--finalize`；E-CW-1 只在偏離 SOP 時露出），依守衛面准入「量、不挖」登記證據檔〈理論洞清單〉、不同輪修；再開條件＝真實語料出現一例。其餘理論洞（TH-3 workflow／monitor 型監督、TH-4 環境變數差異入包、TH-5 scratchpad 被清、TH-6 無標籤跨 session 訊息、REV F4～F9／F11、auto-continuation 被標成掌舵者原文）同登記、同理由。
-- 測試寫真實家目錄／暫存（E-TR-1、REV S1）已逐檔圍住；同族新測試須圍 `AUTOSDD_TRACE_DIR` 與 `tempfile.tempdir`。
+- **理論洞 REV F10 不修**：`handoff --spawn` 與 `park_cli` 只做純驗證、不要求 `.sealed`；漏跑 `--finalize` 而直接 spawn／park 時，冷叫醒閘失明、I-4 封存被跳過。WHY 不修：**無暴露證據**（SOP 兩條路都先 `--finalize`；E-CW-1 只在偏離 SOP 時露出），依守衛面准入「量、不挖」登記證據檔〈理論洞清單〉、不同輪修；再開條件＝真實語料出現一例。其餘理論洞（TH-3 workflow／monitor 型監督、TH-4 環境變數差異入包、TH-5 scratchpad 被清、TH-6 無標籤跨 session 訊息、REV F4～F9／F11、auto-continuation 被標成掌舵者原文、P6H F5 watch 監督憑證以命令列子字串比對 sid，遇帶引號或含空白的路徑寫法可能落空）同登記、同理由。
+- 名冊認 TaskStop（DEF-200-606）只讀擁有者主逐字稿尾端 256 KB：killed 通知若早於該窗，代理在名冊上仍顯示為「殘局（未收尾記錄，非燒額度中）」，要等 10 分安靜門檻才不擋 `park`／`--spawn`；2026-11-18 `sessionctl status` 實見 `a51fe52e56c8ed299` 一例（只影響顯示，不燒額度），無阻斷暴露 ⇒ 登記不修。
+- 測試寫真實家目錄／暫存（E-TR-1、REV S1）已逐檔圍住；同族新測試須圍 `AUTOSDD_TRACE_DIR` 與 `tempfile.tempdir`；會寫額度快取（`quota_meter.write_cache`）或以子行程量額度的測試另須接模組級圍籬並預種讀數，不得讓子行程以真憑證量真額度（DEF-200-607；`test_run_root_unittests.py::TestWriterModulesDeclareTheModuleFence` 機械守寫端清單）。
 - 成本數字沿用 §2.15 的 n＝2 係數與起步底盤中位，只作排序與定門檻，不是額度承諾。
 
 #### 2.18.4 指標、基線與撤回門檻（觀察期 14 天＝2 個週額度週期；入口 `python tools/probe/waste_census.py --supervision-metrics --since-days 14`，判準在 `tools/lib/wastecensus/supervision.py`；基線量於 2026-11-17、21 天窗，只作方向）
