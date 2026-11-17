@@ -148,3 +148,4 @@
 {"seq":148,"t":"2026-11-17T19:00:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-16T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：.claude/hooks/check_pending_handoff.py, .claude/hooks/context_budget_guard.py, .env.example"}
 {"seq":149,"t":"2026-11-17T19:15:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-16T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
 {"seq":150,"t":"2026-11-17T21:00:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-17T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":151,"t":"2026-11-18T01:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-17T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
