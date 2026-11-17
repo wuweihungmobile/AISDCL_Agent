@@ -331,7 +331,7 @@ class ResumeMetricsTest(_Base):
         from lib.wastecensus import resume
         self._main("s1", recs)
         records = resume.load_records(self.base, 36500)
-        stops, unmeasured = resume.find_stops(records, burn, 85.0)
+        stops, unmeasured = resume.find_stops(records, burn, 85.0, list(traces))
         return resume.metrics(stops, records, list(traces)), stops, unmeasured
 
     def _incident(self, wake: dict) -> list:
@@ -373,6 +373,41 @@ class ResumeMetricsTest(_Base):
         without, _s, _u3 = self._metrics(recs, [_burn()], blocks)
         self.assertEqual(with_cred["m_r4"], {"stop_block": 3, "stops_without_credential": 0})
         self.assertEqual(without["m_r4"], {"stop_block": 3, "stops_without_credential": 1})
+
+    def test_at_c1_park_trace_stop_below_prepare_threshold_is_counted(self) -> None:
+        """resume.py：f2260ce7 形態——五小時窗只有 84%（< 準備門檻 85，park 走 --why 路徑）、間隔起點
+        附近有 park_armed ⇒ 仍計為停點（reset 取 fire_at）；沒有痕跡的同樣 84% 閒置不計。
+        WHY：park 的 --why／--at 路徑結構上永不達門檻，只看百分比會系統性漏算停工停點。"""
+        last, wake = "2026-11-16T02:10:35Z", "2026-11-16T05:03:03Z"
+        recs = [_a(last), _u(wake, "go", kind="sdk"), _a("2026-11-16T05:03:10Z")]
+        burn = [_burn(ts="2026-11-16T02:07:08Z", five=84.0)]
+        armed = [{"event": "park_armed", "at": "2026-11-16T10:10:13+08:00",
+                  "fire_at": "2026-11-16T13:03:00+08:00"}]
+        got, stops, _un = self._metrics(recs, burn, armed)
+        self.assertEqual(len(stops), 1)
+        self.assertEqual(stops[0]["reset"], 1_794_805_380.0)  # 2026-11-16T05:03:00Z
+        self.assertEqual(got["m_r4"]["stops_without_credential"], 0)
+        plain, stops2, un2 = self._metrics(recs, burn, [])
+        self.assertEqual((stops2, un2), ([], 0))
+
+    def test_at_c1_trace_far_from_the_gap_start_does_not_make_a_stop(self) -> None:
+        """resume.py：park_armed 離間隔起點超過 TRACE_NEAR_S ⇒ 不算停點（一般閒置不得被痕跡誤收）。
+        """
+        recs = [_a("2026-11-16T02:10:35Z"), _a("2026-11-16T05:03:03Z")]
+        far = [{"event": "park_armed", "at": "2026-11-16T10:40:00+08:00",
+                "fire_at": "2026-11-16T13:03:00+08:00"}]
+        _got, stops, _un = self._metrics(recs, [_burn(ts="2026-11-16T02:07:08Z", five=84.0)], far)
+        self.assertEqual(stops, [])
+
+    def test_at_c1_park_done_without_reset_is_a_stop_but_not_a_wait(self) -> None:
+        """resume.py：park_done 沒有 fire_at ⇒ 停點成立（有憑證），但 reset 未知 ⇒ 不進 M-R1 分母。
+        """
+        recs = [_a("2026-11-16T02:10:35Z"), _a("2026-11-16T05:03:03Z")]
+        done = [{"event": "park_done", "at": "2026-11-16T10:10:13+08:00"}]
+        got, stops, _un = self._metrics(recs, [], done)
+        self.assertEqual(len(stops), 1)
+        self.assertIsNone(stops[0]["reset"])
+        self.assertEqual((got["m_r1"]["n"], got["m_r4"]["stops_without_credential"]), (0, 0))
 
     def test_at_pk_81_resume_metrics_cli_coexists_with_replay_and_writes_nothing(self) -> None:
         """waste_census.py：`--replay-hard-ctx` 優先於 `--resume-metrics`（既有行為不變）；單用

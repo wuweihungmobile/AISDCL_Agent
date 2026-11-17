@@ -138,8 +138,9 @@ def _scratchpad_text(sid: str, temp_root: Path | None) -> str:
 
 def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, now: datetime,
                      runner=None, roster_mod=None, quota_fn=None, temp_root: Path | None = None,
-                     platform_name: str = "") -> str:
-    """交接包機械層全文（只含 `### ` 欄位，不含主控層）。`now` 須帶 offset。"""
+                     platform_name: str = "", package: Path | None = None) -> str:
+    """交接包機械層全文（只含 `### ` 欄位，不含主控層）。`now` 須帶 offset。
+    `package` 給了就在「最近真人提示」欄末指向全文 sidecar（該欄只留 3 則摘錄，全文在 sidecar）。"""
     runner = runner or default_runner
     plat = platform_name or sys.platform
     branch_head, tree, tags = _git_sections(runner, repo)
@@ -154,7 +155,8 @@ def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, no
     body = (
         f"- 來源 session：{session_id}\n- 產生時刻：{now.isoformat()}\n- repo 根：{repo}",
         branch_head, tree, tags,
-        "\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"),
+        ("\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"))
+        + (f"\n\n全文見 {package.stem}.prompts.md" if package is not None else ""),
         "\n\n".join(_quote(t) for t in tail) or _unknown("逐字稿無 assistant 文字或讀不到"),
         roster_text, _schedule_rows(runner, plat), _quota_text(now, quota_fn),
         _scratchpad_text(session_id, temp_root),

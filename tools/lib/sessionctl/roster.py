@@ -4,7 +4,8 @@
 資料源全是讀檔、零 token：`<projects>/<slug>/<sid>/subagents/agent-<id>.{meta.json,jsonl}`。
 `projects_dir` 缺省＝`claude_home()/projects`；給 slug 目錄（內含 `<sid>/subagents`）也認，hook 從
 payload 的 `transcript_path.parent` 傳入即屬此形。三態（只列 `finished` 不是 true 者——缺鍵與 false
-同義，V-S4 實測 session 被砍時 meta 沒有該鍵）：
+同義，V-S4 實測 session 被砍時 meta 沒有該鍵；被 TaskStop 者另由主逐字稿的 killed 通知排除，見
+`_killed_ids`）：
   · running：最後記錄 < `ROSTER_QUIET_MINUTES` 前；
   · quiet：超過該門檻；
   · residue（殘局）：quiet ∧ 擁有者逐字稿閒置 ≥ 巡邏間隔 ∧ 無 claude 行程命令列含該 sid（只在
@@ -149,13 +150,37 @@ def _iso(epoch: float | None) -> str | None:
         timespec="seconds")
 
 
-def _owner_last(projects: Path, owner: str) -> float | None:
-    """擁有者**主**逐字稿最後一筆 assistant／user 記錄時刻（不含 subagent 檔，否則代理一寫就算活著）。"""  # noqa: E501
+def _main_transcript(projects: Path, owner: str) -> Path | None:
     try:
-        main = next(iter(projects.glob(f"{owner}.jsonl")), None) or next(
+        return next(iter(projects.glob(f"{owner}.jsonl")), None) or next(
             iter(projects.glob(f"*/{owner}.jsonl")), None)
     except OSError:
         return None
+
+
+_KILLED_RE = re.compile(r"<task-id>([A-Za-z0-9_-]{1,80})</task-id>.{0,600}?<status>killed</status>",
+                        re.DOTALL)
+
+
+def _killed_ids(projects: Path, owner: str) -> set[str]:
+    """DEF-200-606（E-TS-1）：被 TaskStop 的代理，harness 不在 meta 寫 `finished`，只在擁有者主
+    逐字稿留 `<status>killed</status>` 的 task-notification。只認 harness 自己寫的記錄型別
+    （`queue-operation` 的 `content`、`attachment` 的 `prompt`；人貼的文字是 `user`，不算）。
+    誠實劃界：只讀尾端 256 KB——通知若已被擠出尾端，代理照舊等 quiet 門檻降級（不更糟）。"""
+    main = _main_transcript(projects, owner)
+    found: set[str] = set()
+    for rec in _records(main, tail=True) if main else ():
+        kind, att = rec.get("type"), rec.get("attachment")
+        text = (rec.get("content") if kind == "queue-operation" else
+                att.get("prompt") if kind == "attachment" and isinstance(att, dict) else None)
+        if isinstance(text, str) and text.startswith("<task-notification>"):
+            found.update(_KILLED_RE.findall(text))
+    return found
+
+
+def _owner_last(projects: Path, owner: str) -> float | None:
+    """擁有者**主**逐字稿最後一筆 assistant／user 記錄時刻（不含 subagent 檔，否則代理一寫就算活著）。"""  # noqa: E501
+    main = _main_transcript(projects, owner)
     best = None
     for rec in _records(main, tail=True) if main else ():
         if rec.get("type") in ("assistant", "user"):
@@ -177,10 +202,13 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
     alive = {procstop.sid_of(p["cmd"]) for p in procs or () if procstop.is_claude(p)}
     agents: list[dict] = []
     for owner, folder in _agent_dirs(projects, session_id):
+        killed: set[str] | None = None  # 惰性：有未結束的代理才讀主逐字稿尾端
         for path in sorted(folder.glob("agent-*.jsonl")):
             meta = _meta(path)
+            if meta.get("finished") is not True:
+                killed = _killed_ids(folder.parent.parent, owner) if killed is None else killed
             try:
-                if meta.get("finished") is True or (
+                if meta.get("finished") is True or path.stem.removeprefix("agent-") in killed or (
                         not session_id and now_ts - path.stat().st_mtime > _LOOKBACK_SECONDS):
                     continue
             except OSError:
@@ -354,6 +382,12 @@ def stop_message(payload: dict, *, env=None, now=None) -> str:
             agents, shells = (running(sid, projects_dir=projects, now=now) if sid else []), 0
         if not agents and not shells:
             return ""
+        if agents:  # FR-W7：憑證 valid ⇒ 改「看管中」字樣；否則維持原字樣（量測判準認開頭）
+            from . import supervise  # noqa: PLC0415 — lazy：supervise 也 import 本檔
+
+            watched = supervise.watching_text(payload, sid, len(agents), now)
+            if watched:
+                return watched
         parts = []
         for agent in agents[:5]:
             ctx = agent_context(sid, str(agent.get("id") or ""), projects_dir=projects)

@@ -942,15 +942,15 @@ def hard_message(used: int, window: int, source: str, plan: str,
 
 
 def switch_advice(payload: dict, transcript: Path) -> None:
-    """sessionctl D2：R1～R3 任一成立 ⇒ 一個 session 只出聲一次並產交接包機械層（本體＝
-    `handoff.advise_once`）。例外一律吞掉：出聲是增益，不得反過來擋住量測主線。"""
+    """sessionctl D2：R1～R3 成立 ⇒ 每 session 出聲一次；子代理不出聲；例外吞掉。"""
     try:
         tools = str(Path(__file__).resolve().parents[2] / "tools")
         if tools not in sys.path:
             sys.path.append(tools)  # `lib.sessionctl` 在 tools/ 之下（只 append，不改既有優先序）
         from lib.sessionctl import handoff  # noqa: PLC0415 — lazy：多數呼叫不付成本
         emit_to_model(str(payload.get("hook_event_name") or "PostToolUse"), handoff.advise_once(
-            session_id_of(transcript), transcript, guard=sys.modules[__name__]))
+            session_id_of(transcript), transcript, guard=sys.modules[__name__],
+            agent_id=payload.get("agent_id")))
     except Exception:  # noqa: BLE001 — fail-open 是 P0
         pass
 

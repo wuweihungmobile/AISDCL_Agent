@@ -129,8 +129,9 @@ def newest_conversation_at(paths: list[Path]) -> float | None:
 
 #: 交接包引用單則文字的字數上限（ADR-XPLAT-004 §2.13.4）；超過截斷並標示原文字數。
 EXCERPT_LIMIT = 2000
-#: 不是人打的字、卻會以 `origin.kind=human` 出現的注入前綴（harness 的 system-reminder／指令回顯）。
-_INJECTED_PREFIXES = ("<system-reminder>", "<command-", "<local-command-")
+
+#: 不是人的意圖、卻會以 `origin.kind=human` 出現的 harness 注入前綴（提醒、指令回顯、背景回報）。
+_INJECTED_PREFIXES = ("<system-reminder>", "<command-", "<local-command-", "<task-notification>")
 
 
 def _text_of(record: dict) -> str | None:
@@ -165,9 +166,107 @@ def human_prompts(path: Path | None, k: int = 3, limit: int = EXCERPT_LIMIT) -> 
         if record.get("type") != "user" or record.get("isMeta") or _origin_kind(record) != "human":
             continue
         text = (_text_of(record) or "").strip()
-        if text and not text.startswith(_INJECTED_PREFIXES):
+        if not is_machine_prompt(text):
             found.append(text)
     return [_excerpt(t, limit) for t in found[-k:]] if k > 0 else []
+
+
+def is_machine_prompt(text: str) -> bool:
+    """這段 `origin.kind=human` 的文字其實是 harness 注入、不是人的意圖嗎：去頭空白後空字串，
+    或以 `_INJECTED_PREFIXES` 具名包裝開頭。**只認具名前綴**：掌舵者貼上的長指令在逐字稿裡以
+    `<pasted_content …>` 開頭、也可能貼 HTML／XML，「任何 `<` 開頭」會把本輪任務書從交接包
+    裡丟掉（接續漏資訊）。交接包收錄用它（偏收）；轉送用 `is_forwardable_prompt`（偏放行）。"""
+    body = (text or "").lstrip()
+    return not body or body.startswith(_INJECTED_PREFIXES)
+
+
+def is_forwardable_prompt(text: str) -> bool:
+    """這則提示可以原文落檔、轉到新 session 嗎。轉送會擋下人的輸入，判不出來一律 `False`：
+    機器注入、`<` 開頭但不是 `<pasted_content`（未知包裝，可能是排程／跨 session 訊息）、
+    `/` 開頭（slash 指令）、含圖片標記（圖片帶不進檔案）皆不轉。"""
+    body = (text or "").lstrip()
+    if is_machine_prompt(body) or body.startswith("/"):
+        return False
+    if body.startswith("<") and not body.startswith("<pasted_content"):
+        return False
+    return "[Image #" not in body and "[Pasted image" not in body
+
+
+def all_human_prompts(path: Path | None) -> list[dict]:
+    """主檔**全部**真人提示（時序由舊到新、全文不截斷、不 strip 內文，只排除機器提示）。每筆
+    `{"text", "at"（記錄的原始 timestamp 字串，可能缺＝""）, "line"（逐字稿 1 起算行號）}`。
+    讀不到檔＝空 list。供交接包 prompts sidecar 與轉送用；判準與 `human_prompts` 同一家。"""
+    if path is None:
+        return []
+    found: list[dict] = []
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for number, line in enumerate(handle, 1):
+                if '"origin"' not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if (not isinstance(record, dict) or record.get("type") != "user"
+                        or record.get("isMeta") or _origin_kind(record) != "human"):
+                    continue
+                text = (_text_of(record) or "").strip()
+                if not is_machine_prompt(text):
+                    found.append({"text": text, "at": str(record.get("timestamp") or ""),
+                                  "line": number})
+    except OSError:
+        return []
+    return found
+
+
+def last_prompt_at(path: Path | None) -> datetime | None:
+    """主檔最後一筆「提示記錄」的時刻（帶時區的 datetime；沒有／讀不到＝`None`）。提示記錄＝
+    真人提示，或 `<task-notification>`（背景任務回報也會叫醒主控、開新回合）。tool_result 與
+    `isMeta` 不算。供封存閘判斷「封存之後有沒有新回合」。"""
+    if path is None:
+        return None
+    best: float | None = None
+    for record in _records(path, '"user"'):
+        if record.get("type") != "user" or record.get("isMeta"):
+            continue
+        text = (_text_of(record) or "").strip()
+        if not text:
+            continue
+        human = _origin_kind(record) == "human" and not is_machine_prompt(text)
+        if not (human or text.startswith("<task-notification>")):
+            continue
+        stamp = _epoch(record.get("timestamp"))
+        if stamp is not None and (best is None or stamp > best):
+            best = stamp
+    return None if best is None else datetime.fromtimestamp(best).astimezone()
+
+
+#: 不算「工作」的唯讀工具：封存之後主控只是讀東西（回答追問）不使封存失效（裁決 A-1）。
+READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob"})
+
+
+def worked_since(path: Path | None, since_iso: str) -> bool:
+    """`since_iso` 之後，**主**逐字稿有沒有主控自己的 tool_use，且工具名不在 `READ_ONLY_TOOLS`。
+    子代理的記錄住在 `<sid>/subagents/agent-*.jsonl`（不在主檔）；主檔若仍混入 `isSidechain`
+    記錄也一律略過。讀不到檔、`since_iso` 解析失敗 ⇒ 回 `False`（**偏放行**：呼叫端據此「不要求
+    重新封存」，寧可少推回也不誤擋人）。"""
+    cut = _epoch(since_iso)
+    if path is None or cut is None or not path.is_file():
+        return False
+    for record in _records(path, '"tool_use"'):
+        if record.get("type") != "assistant" or record.get("isSidechain"):
+            continue
+        stamp = _epoch(record.get("timestamp"))
+        if stamp is None or stamp <= cut:
+            continue
+        message = record.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_use"
+                and b.get("name") not in READ_ONLY_TOOLS for b in content):
+            return True
+    return False
 
 
 def assistant_tail(path: Path | None, k: int = 2, limit: int = EXCERPT_LIMIT) -> list[str]:

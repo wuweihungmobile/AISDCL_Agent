@@ -128,6 +128,26 @@ class RosterStateTest(unittest.TestCase):
         make_agent(root, SID, "a1", minutes_ago=1, finished=None)
         self.assertEqual([a["state"] for a in _snap(self, root)["agents"]], ["running"])
 
+    def test_def_200_606_taskstopped_agent_leaves_the_roster(self) -> None:
+        """DEF-200-606（E-TS-1）：TaskStop 後 meta 無 `finished`，只有主逐字稿的 harness 記錄帶
+        `<status>killed</status>` ⇒ 立即離開名冊（否則 park 前置被擋到 quiet 門檻）。反例：人貼上的
+        同字樣（`user` 記錄）不算；別支代理的通知不波及。"""
+        root = _tmp(self)
+        for aid in ("a1", "a2", "a3"):
+            make_agent(root, SID, aid, minutes_ago=1, finished=None)
+
+        def note(aid: str) -> str:
+            return (f"<task-notification>\n<task-id>{aid}</task-id>\n<tool-use-id>t</tool-use-id>\n"
+                    f"<output-file>C:\\x\\{aid}.output</output-file>\n<status>killed</status>\n")
+        rows = [{"type": "queue-operation", "timestamp": "2026-11-17T22:26:00+08:00",
+                 "content": note("a1")},
+                {"type": "attachment", "attachment": {"type": "queued_command",
+                                                      "prompt": note("a3")}},
+                {"type": "user", "message": {"role": "user", "content": note("a2")}}]
+        (root / "slug" / f"{SID}.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+        self.assertEqual([a["id"] for a in _snap(self, root)["agents"]], ["a2"])
+
     def test_at_sc_67_old_unfinished_agent_is_quiet(self) -> None:
         """AT-SC-67：同上、40 分鐘前 ⇒ 安靜（不是執行中）。"""
         root = _tmp(self)
@@ -585,6 +605,15 @@ class PlannerWiringTest(unittest.TestCase):
             endurance_env.TRACE_DIR_ENV: str(self.tmp / "tr")})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # 系統暫存目錄也圍住：`_run_resume` 收窗時會寫叫人用的 `AUTOSDD_ATTENTION.md`／扇出清單
+        # （`quota_escalation.note_path` 取 `tempfile.gettempdir()`）。REV S1（2026-11-17 20:38:40）
+        # ：
+        # 不圍就把測試假內容（sid-w）覆寫進掌舵者真的那一張，可能蓋掉真通知或造成假警報。
+        systmp = self.tmp / "systmp"
+        systmp.mkdir()
+        tmp_patch = unittest.mock.patch.object(tempfile, "tempdir", str(systmp))
+        tmp_patch.start()
+        self.addCleanup(tmp_patch.stop)
         self.plan = self.tmp / "plan.md"
         self.plan.write_text("# 任務書", encoding="utf-8")
 

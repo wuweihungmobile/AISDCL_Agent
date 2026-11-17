@@ -69,10 +69,34 @@ def scan(path: str, hook) -> list[tuple[str, str, str, bool]]:
     return turns
 
 
+def _midwork_census(files: list[str], hook) -> int:
+    """`--midwork`：回合結尾命中「接下來我還要做事」詞表的數量與前 15 筆（人工判真假陽性）。"""
+    turns = hits = 0
+    shown: list[str] = []
+    for path in files:
+        for sid, when, text, asked in scan(path, hook):
+            turns += 1
+            found = hook.midwork_hits(text)
+            if not found:
+                continue
+            hits += 1
+            if len(shown) < 15:
+                shown.append(f"[{sid}] {when} ask={asked} {found[0]['word']} :: "
+                             f"{found[0]['sentence'][:140]}")
+    print("\n".join(shown))
+    print(f"files={len(files)} turns={turns} midwork_wording_hits={hits} "
+          f"rate={hits / max(1, turns):.4f}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     hook = _load_hook()
+    midwork = "--midwork" in argv  # 半路停工措辭那一半（狀態那一半在 Stop payload，逐字稿重放不到）
+    argv = [a for a in argv if a != "--midwork"]
     roots = argv or [os.path.expanduser("~/.claude/projects")]
     files = sorted(f for root in roots for f in glob.glob(os.path.join(root, "*", "*.jsonl")))
+    if midwork:
+        return _midwork_census(files, hook)
     turns = hits = silenced = 0
     words: Counter = Counter()
     for path in files:

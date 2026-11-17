@@ -1360,6 +1360,14 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "非呼叫：`PARK_CMD = \"python tools/sessionctl.py park\"` 是組進 Stop 推回訊息、給主控"
         "照抄的指令前綴，本行程只輸出文字、不 spawn；排程 argv[0] 由 engine_resume_job 解析"
     ),
+    "tools/lib/sessionctl/seal.py": (
+        "非呼叫：`_SEAL_CMD = \"python tools/sessionctl.py handoff\"` 是組進 Stop 推回訊息、給主控"
+        "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `handoff.py` 同型"
+    ),
+    "tools/lib/sessionctl/supervise.py": (
+        "非呼叫：`WATCH_CMD = \"python tools/sessionctl.py watch\"` 是組進出聲訊息、給主控"
+        "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `park.py` 同型"
+    ),
     "tools/probe/console_spawn_watch.py": (
         "非呼叫：`str(record.get(\"ParentName\") or \"\").lower().startswith(\"python\")` "
         "的**比對字面**。那個字串是 WMI 從 OS **讀回來**的行程映像名，判準只拿它分類"

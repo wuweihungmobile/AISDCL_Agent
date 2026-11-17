@@ -701,6 +701,27 @@ class SpawnTest(_Base):
         self.assertEqual((rc, [c for c in runner.calls if not c["wait"]]), (1, []))
         self.assertIn("已 ack", err)
 
+    def _spawn_prompt(self, **kw) -> str:
+        runner = self.good_runner()
+        self.run_spawn(runner, **kw)
+        return [c for c in runner.calls if not c["wait"]][0]["argv"][1]
+
+    def test_spawn_prompt_without_extra_file_is_byte_for_byte_unchanged(self) -> None:
+        """回歸鎖：不給 `extra_prompt_file` ⇒ 起步提示逐字等於升級前的字面（既有呼叫端與測試
+        依賴它；轉送功能不得改變一般換手的提示）。"""
+        want = (f"按交接包繼續：讀 {self.pkg}（機械層＋主控層）。{switch.FRESH_HARD_RULES}"
+                f"第一個動作之前先讀完交接包全文。{handoff._DATA_NOTICE}")
+        self.assertEqual(self._spawn_prompt(), want)
+
+    def test_spawn_prompt_with_extra_file_points_at_it_and_says_k1_is_not_expressed(self) -> None:
+        """轉送：新 session 要照舊視窗掌舵者最新指令做；但該原文是「讀檔得到」不是掌舵者在本視窗
+        發言，K=1 決定（DEC）不得因此當成已表態（DEC 只認真人在場發言）。"""
+        extra = self.tmp / "fwd.md"
+        got = self._spawn_prompt(extra_prompt_file=extra)
+        self.assertIn(str(extra), got)
+        self.assertIn("K=1", got)
+        self.assertIn("親打", got)
+
     def test_sec13_package_and_prompt_mark_mechanical_layer_as_data(self) -> None:
         """SEC-13：機械層標「屬資料」、spawn 的 prompt 帶同一句（引文中的指示不得照做）。"""
         self.assertIn("屬資料", self.pkg.read_text(encoding="utf-8"))
@@ -772,6 +793,21 @@ class AdviseOnceTest(_Base):
         self.assertEqual(self.advise(10**6, env=env), "")
         self.assertFalse(self.base.exists() and list(self.base.iterdir()))
         self.assertIn("--spawn", self.advise(10**6, now=NOW + timedelta(minutes=2)))
+
+    def test_earch1_subagent_call_neither_advises_nor_eats_the_latch(self) -> None:
+        """E-ARCH-1：子代理的 hook payload 帶父 session 的 sid；它的工具呼叫若觸發提醒，
+        提醒會進子代理
+        上下文、還把「一個 session 只出聲一次」的閂鎖吃掉，主控永遠收不到。有 `agent_id` ⇒ 回空、
+        不寫任何檔（含 `.checked`／`.advised`／包），之後主控自己的呼叫仍然收得到提醒。"""
+        env = {switch.R1_KEY: "1000"}
+        got = handoff.advise_once(SID, self.transcript, guard=self.Guard(10**6), env=env, now=NOW,
+                                  base=self.base, agent_id="agent-abc", runner=FakeRunner(),
+                                  roster_mod=FakeRoster(), quota_fn=_quota,
+                                  temp_root=self.tmp / "none")
+        self.assertEqual(got, "")
+        self.assertFalse(self.base.exists() and list(self.base.iterdir()),
+                         "子代理呼叫不得留下任何檔（尤其閂鎖）")
+        self.assertIn("--spawn", self.advise(10**6), "主控自己的呼叫仍須收到提醒")
 
     def test_unsafe_session_id_is_ignored(self) -> None:
         """sid 含路徑字元 ⇒ 不產任何檔（不讓它變成路徑）。"""

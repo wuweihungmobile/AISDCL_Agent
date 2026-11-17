@@ -14,6 +14,7 @@ import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS = _REPO_ROOT / "tools"
@@ -29,6 +30,18 @@ GUARD_ROOT = Path(os.environ.get("SESSIONCTL_APPLIED_ROOT") or ROOT)
 HOOK = GUARD_ROOT / ".claude" / "hooks" / "sessionctl_guard.py"
 SID = "d4ed2654-9181-4df1-a6e6-2d712956e23b"
 LIMIT = 150_000  # 出廠門檻（`quota_policy_env.ENV_SPEC` 現查；本檔只在函式層用，env 另行釘死）
+
+
+def setUpModule() -> None:
+    """整檔圍住痕跡目錄。WHY：續棒成本閘阻斷時會落 `resume_gate_block`；函式層直接吃
+    `os.environ`、子行程層繼承它——沒圍住時每跑一次本檔就往開發者真實的
+    `~/.autosdd/traces/autosdd_session_switch.jsonl` 寫兩列假資料（2026-11-17 實測 140→142 列），
+    污染 `waste_census` 的量測。個別測試另以 `env_extra` 指定者照舊蓋過本值。"""
+    holder = tempfile.TemporaryDirectory(prefix="sc-hook-traces-")
+    unittest.addModuleCleanup(holder.cleanup)
+    fence = mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": holder.name})
+    fence.start()
+    unittest.addModuleCleanup(fence.stop)
 
 
 def _project(case: unittest.TestCase) -> Path:
@@ -208,7 +221,7 @@ def _run_hook(payload: dict, **env_extra: str) -> subprocess.CompletedProcess:
            if k not in ("AUTOSDD_UNATTENDED", "AUTOSDD_RESUME_AGENT_TOKENS",
                         "AUTOSDD_SESSIONCTL_GUARD_OFF", "AUTOSDD_ROSTER_QUIET_MINUTES",
                         "AUTOSDD_SWITCH_HARD_CTX_TOKENS", "AUTOSDD_SESSION_SWITCH_MODE",
-                        "AUTOSDD_HANDOFF_DIR", "AUTOSDD_TRACE_DIR")}
+                        "AUTOSDD_HANDOFF_DIR")}  # AUTOSDD_TRACE_DIR 刻意繼承 setUpModule 的圍籬
     # park 判準（Stop 尾端）預設會讀真實額度快取、必要時補量：既有測試只測收斂／續棒，一律關掉
     env.update({"PYTHONUTF8": "1", "AUTOSDD_PARK_GUARD_OFF": "1", **env_extra})
     return subprocess.run([sys.executable, str(HOOK)], input=json.dumps(payload),
@@ -389,7 +402,10 @@ class HookConvergeTest(unittest.TestCase):
         """AT-TW-72（hook 層）：仍有背景代理在跑 ⇒ 只出 systemMessage、不 block（既有出聲照舊）。"""
         slug, env = _advised_session(self, 300_000)
         agent = {"id": "a1", "type": "subagent", "status": "running", "description": "跑著"}
-        proc = _run_hook(_stop(slug, background_tasks=[agent]), **env)
+        # WP-4B：帶有效監督憑證（watch shell）才是「只出聲」；沒憑證會被監督閘推回
+        watch_shell = {"id": "w1", "type": "shell", "status": "running",
+                       "command": "python tools/sessionctl.py watch"}
+        proc = _run_hook(_stop(slug, background_tasks=[agent, watch_shell]), **env)
         doc = json.loads(proc.stdout)
         self.assertIn("systemMessage", doc)
         self.assertNotIn("decision", doc)

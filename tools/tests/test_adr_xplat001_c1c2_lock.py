@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9379,
+    "test_adr_xplat001_c1c2_lock.py": 9423,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -635,8 +635,8 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_archive_required.py": 160,
     "test_check_defect_log_crossref.py": 3954,
     "test_check_gha_action_versions.py": 295,
-    "test_check_hooks_liveness.py": 3832,
-    "test_check_pending_handoff.py": 236,
+    "test_check_hooks_liveness.py": 3835,
+    "test_check_pending_handoff.py": 380,
     "test_check_pytest_baseline_sites.py": 301,
     "test_check_script_parity.py": 2007,
     "test_check_wrapper_thinness.py": 1153,
@@ -674,7 +674,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
-    "test_platform_neutral_paths.py": 5763,
+    "test_platform_neutral_paths.py": 5764,
     "test_platform_utils_dedup.py": 1168,
     "test_pre_commit_dispatcher_sigpipe.py": 954,
     "test_pre_push_dispatcher.py": 1322,
@@ -694,7 +694,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
     "test_root_module_layout.py": 355,
-    "test_run_root_unittests.py": 5467,
+    "test_run_root_unittests.py": 5468,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
@@ -735,29 +735,34 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1544,
     "test_sessionctl_cachegate.py": 268,
-    "test_sessionctl_converge.py": 408,
-    "test_sessionctl_handoff.py": 1097,
-    "test_sessionctl_hooks.py": 507,
+    "test_sessionctl_converge.py": 527,
+    "test_sessionctl_forward.py": 340,
+    "test_sessionctl_handoff.py": 1133,
+    "test_sessionctl_hooks.py": 523,
     "test_sessionctl_modelmix.py": 94,
     "test_sessionctl_park.py": 985,
-    "test_sessionctl_roster.py": 662,
+    "test_sessionctl_roster.py": 691,
+    "test_sessionctl_seal.py": 309,
+    "test_sessionctl_supervise.py": 285,
     "test_sessionctl_switch.py": 563,
-    "test_waste_census_metrics.py": 403,
+    "test_sessionctl_watch.py": 359,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
     "test_smoke_ci_sync.py": 1646,
     "test_statusline_context_feed.py": 230,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1519,
+    "test_subprocess_encoding_hygiene.py": 1520,
     "test_suite_shard.py": 756,
     "test_tlc_runner_timeout.py": 313,
     "test_wake_chain_halt_r278.py": 1264,
+    "test_waste_census_metrics.py": 438,
+    "test_waste_census_supervision.py": 173,
     "test_windows_forbidden_filename_parity.py": 931,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 1016,
-    "test_windowsapps_guard_cross_consistency.py": 2081,
+    "test_windowsapps_guard_cross_consistency.py": 2089,
     "test_workflow_permission_concurrency_lock.py": 1808,
     "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
@@ -3143,6 +3148,35 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_sessionctl_converge.py +4、既有名冊登記新檔 +7＋本檔自身漂移。逐檔清單見 "
      "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/03_testing/contracts/TCS-SessionPark-20261116.md。"),
+    ("R214", 167360, 169201, +1841,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第四十四列（背景子代理監督、封存、轉送與半路停工的回歸鎖，"
+     "DEF-200-597～605）：新鎖檔 test_sessionctl_seal.py 304、_watch.py 332、"
+     "_supervise.py 279、_forward.py 327、test_waste_census_supervision.py 170，"
+     "既有 test_check_pending_handoff.py +133、test_sessionctl_converge.py +115、"
+     "test_sessionctl_handoff.py +35、test_waste_census_metrics.py +33、"
+     "test_sessionctl_hooks.py +16、test_sessionctl_roster.py +8、"
+     "test_check_hooks_liveness.py +3、跨檔鎖重釘站點與 E501 折行＋本檔自身漂移。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/03_testing/contracts/TCS-SessionCtl-20261113.md。"),
+    ("R214", 169201, 169216, +15,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第四十五列（nightly 2026-11-17 暴露的測試不密閉：watch CLI "
+     "測試的子行程以真憑證量真額度，短窗過門檻即 rc 5；改為隔離快取預種低水位讀數）："
+     "test_sessionctl_watch.py +8＋本檔自身漂移 +7。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 "
+     "R214 標記行。"),
+    ("R214", 169216, 169243, +27,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第四十六列（DEF-200-606 E-TS-1：名冊認 harness 的 TaskStop "
+     "killed 通知）：test_sessionctl_roster.py +20＋本檔自身漂移 +7。逐檔清單見 "
+     "CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 169243, 169263, +20,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第四十七列（DEF-200-607 收尾：watch 測試寫額度快取＝寫端，"
+     "補模組級圍籬並登記為第七支寫端；E501 折行）：test_sessionctl_watch.py +11、"
+     "test_run_root_unittests.py +1＋本檔自身漂移 +8。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 
@@ -3244,7 +3278,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (38848, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (40751, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3313,7 +3347,9 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "再 +365，精確淨額為 36757；同標籤第四十一列（tools/tests 跨機分片回歸鎖）"
         "再 +838，精確淨額為 37595；同標籤第四十二列（DEF-AC-041 的測試）"
         "再 +42，精確淨額為 37637；同標籤第四十三列（額度自願停工續航 park 回歸鎖）"
-        "再 +1211，精確淨額為 38848。"
+        "再 +1211，精確淨額為 38848；同標籤第四十四列（背景子代理監督／封存／轉送／"
+        "半路停工回歸鎖）再 +1841，精確淨額為 40689；第四十五列（watch 測試）+15＝40704；"
+        "第四十六列（E-TS-1）+27＝40731；第四十七列（watch 圍籬）+20＝40751。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -3898,6 +3934,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "額度自願停工續航 park 回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok
+     "背景子代理監督／封存／轉送／半路停工回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4073,10 +4113,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 390
+_REPIN_LOG_FROZEN_PREFIX_LEN = 394
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "21769bb93053326ec07752b7f2e572450a3846c4335710e95cfacdbf4eda3aae")
+    "9e1b5538c133b343d7d4c79d21edbe482b75f6943fcd2625b3160dc62cc60d31")
 
 
 def repin_log_history_digest(
@@ -4308,6 +4348,10 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "2bc6af6831be", "d118c40c2214", "DEF-200-593"),  # round-label-ok：tools/tests 跨機分片
     ("R214", "d118c40c2214", "81641b927c60", "DEF-200-593"),  # round-label-ok：DEF-AC-041 safe.directory 測試
     ("R214", "81641b927c60", "21769bb93053", "DEF-200-594"),  # round-label-ok：額度停工續航 park
+    ("R214", "21769bb93053", "05d437b2b95b", "DEF-200-597"),  # round-label-ok：背景子代理監督
+    ("R214", "05d437b2b95b", "591cd46fa96b", "DEF-200-607"),  # round-label-ok：watch 測試額度隔離
+    ("R214", "591cd46fa96b", "de089bc8a02a", "DEF-200-606"),  # round-label-ok：名冊認 TaskStop
+    ("R214", "de089bc8a02a", "9e1b5538c133", "DEF-200-607"),  # round-label-ok：watch 圍籬收尾
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

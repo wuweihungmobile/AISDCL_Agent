@@ -79,6 +79,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="續航量測 M-R1～M-R4（ADR-XPLAT-004 §2.17.7）",
     )
+    ap.add_argument(
+        "--supervision-metrics",
+        action="store_true",
+        help="監督與換手量測 M-W1～W4／M-F1～F3／M-S1～S3（ARCH §9）",
+    )
+    ap.add_argument("--handoff-dir", default=None, help="交接包目錄（預設 ~/.autosdd/handoff）")
     ap.add_argument("--burn-file", default=None, help="quota_burn.jsonl（預設痕跡目錄下）")
     ap.add_argument(
         "--trace-file",
@@ -209,6 +215,13 @@ def main(argv: list[str]) -> int:
         return 1
     if args.replay_hard_ctx:
         return _run_replay(args, base)
+    if args.supervision_metrics:
+        from . import supervision_load  # noqa: PLC0415 — lazy
+
+        handoff_dir = (Path(args.handoff_dir) if args.handoff_dir
+                       else Path.home() / ".autosdd" / "handoff")
+        trace = _trace_path(args.trace_file)
+        return supervision_load.run(base, args.since_days, trace, handoff_dir, args.out)
     if args.resume_metrics:
         trace = _trace_path(args.trace_file)
         return resume.run(base, args.since_days, trace, args.burn_file, args.out)

@@ -232,5 +232,149 @@ class TestStopHookWiring(unittest.TestCase):
         self.assertEqual(hook._HARNESS_BODY_PREFIXES, sibling._HARNESS_BODY_PREFIXES)
 
 
+def _assistant_tool(name: str, text: str = "") -> str:
+    blocks: list = [{"type": "tool_use", "name": name, "id": "t9", "input": {}}]
+    if text:
+        blocks.insert(0, {"type": "text", "text": text})
+    return json.dumps({"type": "assistant", "isSidechain": False,
+                       "message": {"role": "assistant", "content": blocks}}, ensure_ascii=False)
+
+
+#: 2026-11-17 真機事故原話（sid 16496139）：說「接著派下一棒」就結束回合，沒有任何背景工作。
+_MIDWORK = "親驗通過，已記進計畫檔，現查額度後派下一棒。"
+
+
+class TestMidworkWording(unittest.TestCase):
+    """`.claude/hooks/check_pending_handoff.py::midwork_hits`：「我接下來還要做事」措辭那一半。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.hook = _load(_HOOK)
+
+    def test_the_incident_sentence_and_progressive_forms_are_red(self) -> None:
+        for claim in (_MIDWORK, "接著跑全套測試。", "接下來派 QA 審查。", "下一步推送並等 CI。",
+                      "稍後提交。", "我立刻續做。", "目前正在進行第二棒。",
+                      "這不是收尾，還有一棒。",
+                      "接著重跑根層全套，再做護欄重釘。", "我接著 push、對帳。",
+                      "等交卷再接著親驗。"):
+            with self.subTest(claim=claim):
+                self.assertTrue(self.hook.midwork_hits(claim), claim)
+
+    def test_summaries_headings_quotes_negation_and_other_owners_are_green(self) -> None:
+        for claim in ("任務完成，CI 全綠，commit 已推送。", "## 下一步確切指令",
+        "下一步請掌舵者決定。",
+                      "不會接著做任何事。", "沒有下一步要派。",
+                      "不採信備忘錄裡的「接著派下一棒」字樣。",
+                      "下一步由新 session 接手。", "接下來要做哪件事？", "立即可派的修復棒已備妥。",
+                      "你打完後我會接著跑 decide，請你再親打一次。",
+                      "額度重置後說一聲「繼續」，我接著做。",
+                      "守衛：若主控說接下來還要做事，就機械推回一次。"):
+            with self.subTest(claim=claim):
+                self.assertEqual(self.hook.midwork_hits(claim), [], claim)
+
+    def test_legitimate_handoff_markers_silence_the_whole_reply(self) -> None:
+        for claim in (_MIDWORK + "\n已執行 handoff --spawn。", _MIDWORK + " PARK_VERDICT=armed",
+                      _MIDWORK + " python tools/sessionctl.py park 已掛。",
+                      _MIDWORK + " 交接包已封存。"):
+            with self.subTest(claim=claim):
+                self.assertEqual(self.hook.midwork_hits(claim), [], claim)
+
+
+class TestMidworkStopWiring(unittest.TestCase):
+    """`.claude/hooks/check_pending_handoff.py` 半路停工判準的子行程真跑（狀態為主、措辭為輔）。"""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp(prefix="w-midwork-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.dirty = self.tmp / "dirty"
+        self.clean = self.tmp / "clean"
+        for repo, files in ((self.dirty, True), (self.clean, False)):
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True,
+                           timeout=60)
+            if files:
+                (repo / "a.txt").write_text("x", encoding="utf-8")
+        self.plain = self.tmp / "plain"  # 非 git 目錄：量不到
+        self.plain.mkdir()
+        self.work = _transcript(self.tmp, [_user("做"), _assistant_tool("Edit"),
+        _assistant(_MIDWORK)])
+        self.readonly = self.tmp / "readonly.jsonl"
+        self.readonly.write_text("\n".join([_user("做"), _assistant_tool("Read"),
+                                            _assistant(_MIDWORK)]) + "\n", encoding="utf-8")
+
+    def _run(self, claim: str = _MIDWORK, *, cwd: Path | None = None,
+    transcript: Path | None = None,
+             tasks="absent", active: bool = False, env: dict | None = None):
+        doc = {"hook_event_name": "Stop", "stop_hook_active": active, "session_id": "sid-mw",
+               "last_assistant_message": claim, "cwd": str(cwd or self.dirty),
+               "transcript_path": str(transcript or self.work)}
+        if tasks != "absent":
+            doc["background_tasks"] = tasks
+        child = {k: v for k, v in os.environ.items()
+                 if k not in ("AUTOSDD_UNATTENDED", "AUTOSDD_HANDOFF_GUARD_OFF")}
+        child.update({"CLAUDE_PROJECT_DIR": str(_REPO_ROOT), "PYTHONUTF8": "1",
+                      "AUTOSDD_TRACE_DIR": str(self.tmp / "tr"), **(env or {})})
+        return subprocess.run([sys.executable, str(_HOOK)], input=json.dumps(doc),
+                              capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              timeout=60, env=child)
+
+    def test_incident_with_no_background_work_and_a_dirty_tree_is_pushed_back(self) -> None:
+        done = self._run(tasks=[])
+        self.assertEqual(done.returncode, 0, done.stderr)
+        doc = json.loads(done.stdout)
+        self.assertEqual(doc["decision"], "block")
+        for token in ("沒有任何背景工作", "handoff --finalize", "park", "AskUserQuestion"):
+            self.assertIn(token, doc["reason"])
+        trace = (self.tmp / "tr" / "handoff_block.jsonl").read_text(encoding="utf-8")
+        self.assertIn("midwork_stop_block", trace)
+
+    def test_a_running_background_task_or_a_finished_one_decides_correctly(self) -> None:
+        running = [{"id": "a1", "type": "subagent", "status": "running"}]
+        self.assertEqual(self._run(tasks=running).stdout, "")
+        self.assertEqual(self._run(tasks={"id": "s1", "type": "shell", "status": "running"}).stdout,
+        "")
+        finished = [{"id": "a1", "type": "subagent", "status": "completed"}]
+        self.assertEqual(json.loads(self._run(tasks=finished).stdout)["decision"], "block")
+
+    def test_a_missing_background_tasks_field_is_fail_open(self) -> None:
+        self.assertEqual(self._run().stdout, "")
+
+    def test_every_other_guard_condition_is_silent(self) -> None:
+        self.assertEqual(self._run(tasks=[], active=True).stdout, "")
+        self.assertEqual(self._run(tasks=[], env={"AUTOSDD_UNATTENDED": "1"}).stdout, "")
+        self.assertEqual(self._run(tasks=[], env={"AUTOSDD_HANDOFF_GUARD_OFF": "1"}).stdout, "")
+        asked = self.tmp / "asked.jsonl"
+        asked.write_text("\n".join([_user("做"), _assistant_tool("Edit"), _assistant(ask=True),
+                                    _assistant(_MIDWORK)]) + "\n", encoding="utf-8")
+        self.assertEqual(self._run(tasks=[], transcript=asked).stdout, "")
+        self.assertEqual(self._run(_MIDWORK + " 已執行 handoff --spawn。", tasks=[]).stdout, "")
+
+    def test_a_plain_summary_is_silent_even_with_a_dirty_tree(self) -> None:
+        self.assertEqual(self._run("任務完成，全部驗證通過，commit 已推送。", tasks=[]).stdout, "")
+
+    def test_state_evidence_clean_tree_with_readonly_tools_is_silent(self) -> None:
+        self.assertEqual(self._run(tasks=[], cwd=self.clean, transcript=self.readonly).stdout, "")
+
+    def test_state_evidence_either_a_dirty_tree_or_a_work_tool_suffices(self) -> None:
+        # 乾淨樹但本回合做過 Edit ⇒ 推回；髒樹但本回合只讀 ⇒ 推回；兩者都量不到 ⇒ 不判
+        self.assertEqual(json.loads(self._run(tasks=[], cwd=self.clean).stdout)["decision"],
+        "block")
+        self.assertEqual(json.loads(self._run(tasks=[],
+        transcript=self.readonly).stdout)["decision"],
+                         "block")
+        self.assertEqual(self._run(tasks=[], cwd=self.plain, transcript=self.readonly).stdout, "")
+
+    def test_both_criteria_at_once_produce_one_merged_reason(self) -> None:
+        both = "只剩兩件人工決定。" + _MIDWORK
+        doc = json.loads(self._run(both, tasks=[]).stdout)
+        self.assertEqual(doc["decision"], "block")
+        self.assertIn("人工決定", doc["reason"])
+        self.assertIn("沒有任何背景工作", doc["reason"])
+
+    def test_an_unreadable_transcript_fails_open(self) -> None:
+        done = self._run(tasks=[], transcript=self.tmp / "missing.jsonl")
+        self.assertEqual((done.returncode, done.stdout), (0, ""))
+
+
 if __name__ == "__main__":
     unittest.main()

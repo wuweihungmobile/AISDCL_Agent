@@ -263,6 +263,21 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/Scripts/pythonw.exe",
+            "args": [
+              "${CLAUDE_PROJECT_DIR}/.claude/hooks/_hook_launcher.py",
+              ".claude/hooks/sessionctl_guard.py"
+            ],
+            "timeout": 50
+          }
+        ]
+      }
     ]
   }
 }

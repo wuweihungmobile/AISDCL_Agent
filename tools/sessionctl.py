@@ -1,6 +1,8 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
-用法：python tools/sessionctl.py <handoff|status|stop|advice|rush|park> [旗標]
+用法：python tools/sessionctl.py <handoff|status|stop|advice|rush|park|watch> [旗標]
+  watch [--sid] [--stall-min] [--wall-min] [--ctx-max] [--poll-sec]
+      背景代理監督（lib/sessionctl/watch；以 run_in_background 掛著，結束＝叫醒主控）
   park [旗標]  額度自願停工的續航（lib/sessionctl/park_cli）
   handoff --build｜--finalize <檔>｜--ack <檔>｜--spawn <檔>｜--list
       交接包（`handoff.cli`）
@@ -12,6 +14,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from datetime import datetime
 
@@ -49,7 +52,14 @@ def main(argv: list[str] | None = None) -> int:
     if verb in ("status", "stop"):
         from lib.sessionctl import roster
 
-        return roster.cli(args)
+        rc = roster.cli(args)
+        if verb == "status" and rc == 0:  # R3 WP-4B FR-W9：監督一行（依心跳檔）
+            from lib.sessionctl import supervise
+
+            sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
+            sys.stdout.write((supervise.status_line(sid) if sid
+                              else "監督：無法判斷（缺 CLAUDE_CODE_SESSION_ID）") + "\n")
+        return rc
     if verb == "advice":
         return _advice(rest)
     if verb == "rush":  # ADR-XPLAT-004 §2.15 D2：趕工戳記（判準與讀寫全在 `lib/quota_rush.py`）
@@ -58,7 +68,12 @@ def main(argv: list[str] | None = None) -> int:
         from lib.sessionctl import park_cli
 
         return park_cli.cli(rest)
-    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush／park\n")
+    if verb == "watch":  # R3 WP-4A：背景代理監督（阻塞到有事發生才結束＝叫醒主控）
+        from lib.sessionctl import watch
+
+        return watch.cli(rest)
+    sys.stderr.write(
+        "sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush／park／watch\n")
     return _USAGE_RC
 
 

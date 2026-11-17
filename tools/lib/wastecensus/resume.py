@@ -36,30 +36,66 @@ def _pct(raw) -> float | None:
     return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
 
 
-def find_stops(records: list[dict], burn: list[dict],
-               prepare_pct: float) -> tuple[list[dict], int]:
+PARK_TRACE_EVENTS = ("park_armed", "park_done")  # 額度自願停工留下的續航憑證痕跡
+
+
+def trace_anchors(traces: list[dict]) -> list[tuple[float, float | None]]:
+    """痕跡停點來源（判準唯一家，`find_stops` 與 M-R4 共用）：`(事件時刻, reset 時刻或 None)`。
+    reset 取 `fire_at`，其次 `reset_at`；`park_done`（沒有剩餘工作）不帶時刻 ⇒ None。"""
+    out = []
+    for row in traces:
+        if row.get("event") not in PARK_TRACE_EVENTS:
+            continue
+        at = _epoch(row.get("at"))
+        if at is None:
+            continue
+        reset = _epoch(row.get("fire_at")) or _epoch(row.get("reset_at"))
+        out.append((at, reset))
+    return out
+
+
+def _trace_hit(start: float,
+               anchors: list[tuple[float, float | None]]) -> tuple[float | None] | None:
+    """間隔起點前後 TRACE_NEAR_S 內的痕跡；回 `(reset,)`（多筆取最晚 reset），無則 None。"""
+    near = [r for a, r in anchors if abs(a - start) <= TRACE_NEAR_S]
+    if not near:
+        return None
+    resets = [r for r in near if r is not None]
+    return (max(resets) if resets else None,)
+
+
+def find_stops(records: list[dict], burn: list[dict], prepare_pct: float,
+               traces: list[dict] | None = None) -> tuple[list[dict], int]:
     """回 `(停點列表, unmeasured 件數)`。records＝`{ts, kind, text, cc}`（ts 為 epoch）；
-    burn＝quota_burn.jsonl 列（ts、pct{kind}、resets_at{kind}）。停點＝gap ≥ STOP_GAP_S ∧ 起點前
-    BURN_LOOKBACK_S 內有樣本 ∧ 樣本短窗 pct ≥ prepare_pct ∧ 該軸 resets_at > 起點；
-    兩軸皆達標取較晚。
-    間隔夠長但缺樣本者計 unmeasured，不丟棄。"""
+    burn＝quota_burn.jsonl 列（ts、pct{kind}、resets_at{kind}）。停點＝gap ≥ STOP_GAP_S 且二者其一：
+    (a) 起點前 BURN_LOOKBACK_S 內有樣本 ∧ 樣本短窗 pct ≥ prepare_pct ∧ 該軸 resets_at > 起點
+    （兩軸皆達標取較晚）；(b) 痕跡停點——起點前後 TRACE_NEAR_S 內有 park_armed／park_done
+    （不論百分比：park 的 --why／--at 路徑結構上永不達門檻，只看百分比會漏算）。
+    (a) 優先；(b) 的 reset 取事件 fire_at（park_done 為 None）。
+    間隔夠長但兩者皆無且缺樣本者計 unmeasured，不丟棄。"""
     recs = sorted(records, key=lambda r: r["ts"])
     samples = sorted(((_epoch(b.get("ts")), b) for b in burn if _epoch(b.get("ts")) is not None),
                      key=lambda x: x[0])
+    anchors = trace_anchors(traces or [])
     stops, unmeasured = [], 0
     for cur, nxt in zip(recs, recs[1:]):
         if nxt["ts"] - cur["ts"] < STOP_GAP_S:
             continue
         near = [b for t, b in samples if cur["ts"] - BURN_LOOKBACK_S <= t <= cur["ts"]]
-        if not near:
-            unmeasured += 1
-            continue
-        pcts, resets = near[-1].get("pct") or {}, near[-1].get("resets_at") or {}
-        hits = [_epoch(resets.get(k)) for k in SHORT_KINDS
-                if (_pct(pcts.get(k)) or 0.0) >= prepare_pct]
-        hits = [h for h in hits if h is not None and h > cur["ts"]]
+        hits = []
+        if near:
+            pcts, resets = near[-1].get("pct") or {}, near[-1].get("resets_at") or {}
+            hits = [_epoch(resets.get(k)) for k in SHORT_KINDS
+                    if (_pct(pcts.get(k)) or 0.0) >= prepare_pct]
+            hits = [h for h in hits if h is not None and h > cur["ts"]]
         if hits:
             stops.append({"start": cur["ts"], "reset": max(hits), "next": nxt["ts"]})
+            continue
+        traced = _trace_hit(cur["ts"], anchors)
+        if traced is not None:
+            stops.append({"start": cur["ts"], "reset": traced[0], "next": nxt["ts"]})
+        elif not near:
+            unmeasured += 1
     return stops, unmeasured
 
 
@@ -78,8 +114,8 @@ def metrics(stops: list[dict], records: list[dict], traces: list[dict]) -> dict:
     recs = sorted(records, key=lambda r: r["ts"])
     waits, by_human, rewrite = [], 0, 0
     for stop in stops:
-        if stop["reset"] >= stop["next"]:
-            continue  # 續跑發生在 reset 之前，不是「reset 之後等人」
+        if stop["reset"] is None or stop["reset"] >= stop["next"]:
+            continue  # reset 未知（park_done）或續跑發生在 reset 之前，不是「reset 之後等人」
         after = [r for r in recs if r["ts"] > stop["reset"]]
         first = next((r for r in after if r["kind"] == "assistant"), None)
         if first is not None:
@@ -90,9 +126,8 @@ def metrics(stops: list[dict], records: list[dict], traces: list[dict]) -> dict:
         hit = next((r for r in after[1:] if r["kind"] == "assistant" and r.get("cc") is not None),
                    None)
         rewrite += int(hit["cc"]) if hit else 0
-    armed = [t for t in (_epoch(x.get("at")) for x in traces
-                         if x.get("event") in ("park_armed", "park_done")) if t is not None]
-    bare = [s for s in stops if not any(abs(a - s["start"]) <= TRACE_NEAR_S for a in armed)]
+    anchors = trace_anchors(traces)
+    bare = [s for s in stops if _trace_hit(s["start"], anchors) is None]
     return {"stops": len(stops), "m_r1": _quantiles(waits), "m_r2": by_human,
             "m_r3": {"tokens": rewrite, "pp": round(rewrite * COEF_WRITE_PP, 1)},
             "m_r4": {"stop_block": sum(1 for t in traces if t.get("event") == "park_stop_block"),
@@ -167,8 +202,9 @@ def run(base: Path, since_days: float, trace_file: Path, burn_file: str | None,
     burn_path = (Path(burn_file) if burn_file
                  else endurance_env.trace_dir_peek()[0] / "quota_burn.jsonl")
     records = load_records(base, since_days)
-    stops, unmeasured = find_stops(records, _load_jsonl(burn_path), prepare)
-    got = metrics(stops, records, _load_jsonl(trace_file))
+    traces = _load_jsonl(trace_file)
+    stops, unmeasured = find_stops(records, _load_jsonl(burn_path), prepare, traces)
+    got = metrics(stops, records, traces)
     got["unmeasured"] = unmeasured
     r1 = got["m_r1"]
     print(f"== 續航量測 M-R1～M-R4（近 {since_days:g} 天；停點 {got['stops']}；"

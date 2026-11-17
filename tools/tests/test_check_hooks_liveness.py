@@ -1937,6 +1937,9 @@ _REGISTRATION_BASELINE: dict[tuple[str, str], frozenset[str]] = {
     ("PreToolUse", ".claude/hooks/sessionctl_guard.py"):
         frozenset({"SendMessage", "Agent", "Task", "Workflow"}),
     ("Stop", ".claude/hooks/sessionctl_guard.py"): frozenset({"*"}),
+    # R3 WP-5（ADR-XPLAT-004 §2.13）：冷舊窗真人提示自動轉送新 session／已交棒舊窗回說明；
+    # UserPromptSubmit 無 matcher ⇒ `*`。測試鎖 tools/tests/test_sessionctl_forward.py。
+    ("UserPromptSubmit", ".claude/hooks/sessionctl_guard.py"): frozenset({"*"}),
 }
 
 

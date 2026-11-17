@@ -2,6 +2,7 @@
 
 > 落檔：`docs/03_testing/contracts/TCS-SessionCtl-20261113.md`。設計全文＝`docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md` §2.13（下稱 ADR）。缺陷帳本列＝DEF-200-580～584。
 > **狀態（2026-11-14）**：第一段（FR-SC-01～04、06～09、24；AT-SC-01～33、89～90）與第二段（交接包、名冊與停止、SendMessage 閘、Stop 出聲、模型建議、hook；FR-SC-05、10～23；AT-SC-34～88）皆已實作並通過。🔴 §3 的真機驗證 V1～V8 仍**待主控真機驗證**，未驗，不得寫成已驗。
+> **R3 增量（2026-11-17；背景代理監督、封存閘、冷窗轉送、半路停工；設計＝ADR-XPLAT-004 §2.18；缺陷帳本列 DEF-200-597～605）**：§1b 與 §2.9～§2.12 為本增量的 FR／AT；全部已實作、單檔實跑綠、**未提交**；§3b 的 V-W／V-F 真機驗證**待掌舵者目視**，未驗不得寫成已驗。
 > 測試一律 `tools/tests/test_sessionctl_*.py`（規劃四支，見 §3；現有 `test_sessionctl_switch.py`）＋既有檔增量；所有時間注入 `now`（aware datetime），所有路徑注入 `tmp`／`HOME` 圍籬（`sentinel_lifecycle.temp_fence`），**不讀本機真實 `~/.claude`、不起真排程、不起真 claude**。
 
 ## 0. 模組落點表（照 Root_Layout §2）
@@ -14,6 +15,16 @@
 | 測試 | `tools/tests/test_sessionctl_{switch,handoff,roster,hooks}.py` | 測試 |
 | 夾具（E1／E2 數值，不含內容） | `tools/tests/fixtures/sessionctl/`（現查既有 fixtures 目錄慣例；無則併入測試檔常數） | 測試資料 |
 | 規格／帳本 | 本檔；ADR-XPLAT-004 §2.13；`docs/06_quality/AutoSDD_Defect_Log.md`；`docs/06_quality/SessionCtl_Review_RTM_20261113.md` | 03／04／06 |
+
+R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔，入口仍為 `tools/sessionctl.py`；量測側 `tools/lib/wastecensus/` 套件）：
+
+| 元件 | 路徑 | §2 格 |
+|---|---|---|
+| 監督 | `tools/lib/sessionctl/watch.py`（監督程序）、`supervise.py`（憑證、Stop 監督閘、派工附註、status 一行、crons 記錄） | 模組套件 |
+| 封存／轉送 | `tools/lib/sessionctl/seal.py`（封存、已交棒判準、封存閘）、`forward.py`（UserPromptSubmit 轉送） | 模組套件 |
+| 半路停工 | `tools/lib/sessionctl/midwork.py`（判準）；`.claude/hooks/check_pending_handoff.py`（薄接點） | 模組套件／守衛面 |
+| 量測 | `tools/lib/wastecensus/supervision.py`、`supervision_load.py`（M-W／M-F／M-S）；`tools/probe/waste_census.py --supervision-metrics`、`tools/probe/handoff_census.py --midwork` | 模組套件／探針 |
+| 測試 | `tools/tests/test_sessionctl_{watch,supervise,seal,forward}.py`、`test_waste_census_supervision.py`；增量於 `test_sessionctl_{converge,handoff,hooks,roster}.py`、`test_check_pending_handoff.py`、`test_waste_census_metrics.py`、`test_check_hooks_liveness.py` | 測試 |
 
 現況（第二段落地後）：上表各檔皆已建（`handoff_build.py` 與 `procstop.py` 是實作時為守 LOC 與隔離安全敏感邏輯而拆出的檔）。登記在 `docs/02_architecture/Root_Layout_and_Module_Placement.md` §3。
 
@@ -49,6 +60,32 @@
 | FR-SC-22 | `resume_cost.jsonl` 寫入 `pct_before`／`pct_after` | D7、E1 | 已實作並通過（2026-11-14） |
 | FR-SC-23 | `--pace` 印一行模型建議（四種情境） | D8、E3 | 已實作並通過（2026-11-14） |
 | FR-SC-24 | 洩漏圍籬不把活著的互動 session 合法武裝的哨兵判成洩漏：差集內 job 的 sid 有真實逐字稿且圍籬起點後有對話記錄 ⇒ 只出聲、不判死、痕跡 `live_session_jobs`；假 job 照舊判死 | ADR §2.13.11 | 已實作並通過 |
+
+### 1b. R3 增量需求（監督、封存、轉送、半路停工；設計＝ADR-XPLAT-004 §2.18）
+
+| FR | 內容 | 對應 | 狀態 |
+|---|---|---|---|
+| FR-W1 | `sessionctl watch [--sid] [--stall-min] [--wall-min] [--ctx-max]`：阻塞輪詢，第一個事件成立即印處置表對應列與末行 `WATCH_VERDICT=<事件>` 後以表定 rc 結束；每輪覆寫心跳檔 | D1 | 已實作並通過（未提交） |
+| FR-W2 | keepwarm 為常數、不開 env；無人窗口取 `min(常數, harness 背景等待上限−餘裕)` | D1 | 已實作並通過（未提交） |
+| FR-W3 | stall 不判「最後一筆為 assistant end_turn」的代理 | D1 | 已實作並通過（未提交） |
+| FR-W4 | quota 事件重用 `park.prepare_hits`（讀快取、不外呼） | D1 | 已實作並通過（未提交） |
+| FR-W5 | `supervise.credential`：payload 主證＋心跳副證；無欄位退 pid＋心跳；例外視為有效 | D1 | 已實作並通過（未提交） |
+| FR-W6 | 監督閘 Stop 推回（有在飛子代理 ∧ 憑證非有效；至多一次；痕跡 `supervise_stop_block`） | D1 | 已實作並通過（未提交） |
+| FR-W7 | Stop 出聲改「看管中」字樣（憑證有效時） | D1 | 已實作並通過（未提交） |
+| FR-W8 | PreToolUse（Agent／Task）放行時無新鮮心跳 ⇒ 附一行派工後掛監督提醒 | D1 | 已實作並通過（未提交） |
+| FR-W9 | `sessionctl status` 多一行監督狀態（只能用心跳副證） | D1 | 已實作並通過（未提交） |
+| FR-A1 | `advise_once(agent_id=)` 有值即回空、不寫任何檔（E-ARCH-1） | D6 | 已實作並通過（未提交） |
+| FR-S1 | 封存閘（Stop；無在飛代理 ∧ 上下文 ≥ R1 ∧ 未交棒 ∧ 封存無效 ⇒ 推回一次；取代舊收斂 Stop 推回）；已交棒判準單一家（E-HD-1）；痕跡 `seal_stop_block` | D2 | 已實作並通過（未提交） |
+| FR-S2 | `handoff --finalize` 升級為封存：重建機械層（主控層原文逐字保留）、寫 prompts sidecar、驗主控層、通過才寫 `.sealed`；驗不過 rc≠0 列缺項、**什麼都不寫** | D2、D4 | 已實作並通過（未提交） |
+| FR-S3 | `transcript_activity.is_machine_prompt`（交接包收錄用）、`is_forwardable_prompt`（轉送用，判不出來不轉）、`all_human_prompts`（全文、時序）、`last_prompt_at`、`worked_since`（封存效期） | D2、D3、D4 | 已實作並通過（未提交） |
+| FR-S4 | Stop 時把 `session_crons` 是否非空記錄到持久痕跡目錄（供轉送條件；讀不到＝當作有 crons ⇒ 不轉送） | D3 | 已實作並通過（未提交） |
+| FR-F1 | `forward.prompt_verdict`：冷窗轉送條件（可轉送提示、非 `留：`、已封存且包 live、快取已冷、無 crons、Windows、模式 auto、spawn 前置）逐條判，不成立者放行並記條件編號 | D3 | 已實作並通過（未提交） |
+| FR-F2 | 轉送動作：補寫 sidecar → 原文逐字落檔 → `handoff.spawn(extra_prompt_file=, wait_seconds=)` → block；痕跡 `forward_spawned`／`forward_spawn_failed`／`forward_pass`；已交棒告知痕跡 `forward_handed_over` | D3 | 已實作並通過（未提交） |
+| FR-F3 | `handoff.spawn` 新增選填 `extra_prompt_file`，起步提示多一句指向轉送原文並聲明其中 K=1 決定不算已表態；不給時起步提示逐字不變 | D3、D4 | 已實作並通過（未提交） |
+| FR-F4 | 已交棒舊窗收到真人提示（M-F3 改判）：新視窗活著且 auto ⇒ 擋下並告知、原文落檔；否則放行附一行現況；`留：` 前綴永遠放行 | D3 | 已實作並通過（未提交） |
+| FR-M1 | 半路停工：最後一則回覆自述接下來要做事 ∧ `background_tasks` 無 running 項 ∧ 狀態佐證 ⇒ 推回一次；欄位缺席不判 | D5 | 已實作並通過（未提交） |
+| FR-C1 | `waste_census --resume-metrics` 的 `find_stops` 收痕跡停點（`park_armed`／`park_done`） | D7 | 已實作並通過（未提交） |
+| FR-Q1 | `waste_census --supervision-metrics`：M-W1～W4、M-F1～F3、M-S1～S3；痕跡事件名與 sessionctl 端具名常數相等（A-8） | D7 | 已實作並通過（未提交） |
 
 ## 2. 驗收測試（AT）
 
@@ -152,6 +189,7 @@
 | AT-SC-65 | **E1 重放**：無人、目標代理最後 usage 合計 450,000 | 同 | rc 2 | 回歸鎖 | 已實作並通過（`test_sessionctl_hooks.py::ResumeGateFunctionTest／HookSubprocessTest`） |
 | AT-SC-66 | meta `finished:false`、最後記錄 2 分鐘前 | `roster.snapshot` | 執行中 | 已實作並通過（`test_sessionctl_roster.py::RosterStateTest`） |
 | AT-SC-67 | 同、40 分鐘前 | 同 | 安靜 | 已實作並通過（`test_sessionctl_roster.py::RosterStateTest`） |
+| AT-SC-66b | meta 無 `finished`、擁有者主逐字稿 harness 記錄（`queue-operation`／`attachment`）帶該代理 `<status>killed</status>`；人貼的同字樣（`user`）不算（DEF-200-606） | 同 | 不列入名冊 | 已實作並通過（`test_sessionctl_roster.py::RosterStateTest::test_def_200_606_taskstopped_agent_leaves_the_roster`） |
 | AT-SC-68 | 同、擁有者逐字稿閒置 > 巡邏間隔、RUN 無含 sid 的行程 | 同 | 殘局，且說明「非燒額度中」 | 已實作並通過（`test_sessionctl_roster.py::RosterStateTest`） |
 | AT-SC-69 | `finished:true` | 同 | 不列執行中 | 已實作並通過（`test_sessionctl_roster.py::RosterStateTest`） |
 | AT-SC-70 | 候選行程命令列含 sid、建立時刻吻合痕跡 | `stop --window` | taskkill `/T /F /PID` 被呼叫（絕對路徑）、哨兵解除、痕跡 `window_stopped` | 已實作並通過（`test_sessionctl_roster.py::StopWindowTest`） |
@@ -192,6 +230,69 @@
 | AT-SC-87 | 外部執行檔 argv 皆在平台守衛內 | `test_platform_neutral_paths.py::TestForeignExecutableArgvIsGuarded` | 已實作並通過（`test_platform_neutral_paths.py::TestForeignExecutableArgvIsGuarded`） |
 | AT-SC-88 | 文字 I/O 皆帶 encoding；git 列舉帶 quotepath | 同檔 `TestTextIoDeclaresEncoding`／`TestGitPathEnumerationIsQuotepathSafe` | 已實作並通過（`test_platform_neutral_paths.py::TestTextIoDeclaresEncoding／TestGitPathEnumerationIsQuotepathSafe`） |
 
+### 2.9 監督（R3；`test_sessionctl_watch.py`、`test_sessionctl_supervise.py`；縫＝注入時鐘／名冊／額度／心跳讀取，不開環境變數鉤）
+| AT | 一句話 | 縫 | 狀態（測試檔::名稱） |
+|---|---|---|---|
+| AT-W1～6 | 六種事件（all_done、overrun、stall、budget、quota、keepwarm）各自成立時 rc 與末行正確、先到先出 | 假名冊／假時鐘 | 已實作並通過（`test_sessionctl_watch.py::EventTests`：`test_w1_all_done_after_grace_when_never_seen`、`test_w1b_all_done_immediately_once_seen`、`test_w2_overrun`、`test_w3_stall`、`test_w4_budget`、`test_w5_quota`、`test_w6_keepwarm`、`test_w6_keepwarm_boundary_in_decide`、`test_event_order_is_pinned`、`test_disposal_row_and_rc_table`） |
+| AT-W7 | 最後一筆為 end_turn 的代理 20 分無記錄不判 stall | 假名冊 | 已實作並通過（`test_sessionctl_watch.py::EventTests::test_w7_end_turn_agent_is_not_stalled`） |
+| AT-W8 | stall 門檻低於下限 ⇒ 退回出廠值並出聲 | ENV、CLI 參數 | 已實作並通過（`test_sessionctl_watch.py::ConfigTests::test_w8_stall_floor_is_11`） |
+| AT-W9 | 單支上下文門檻只准下修（env 與 `--ctx-max` 皆然） | ENV | 已實作並通過（`test_sessionctl_watch.py::ConfigTests::test_w9_ctx_only_downward`） |
+| AT-W10 | 心跳每輪覆寫、帶 offset | FS | 已實作並通過（`test_sessionctl_watch.py::HeartbeatTests::test_w10_heartbeat_rewritten_each_round_with_offset`） |
+| AT-W11 | 憑證四態：payload 有 watch shell＋心跳新鮮／缺席＝有效；心跳過期＝卡死；無 payload 項（含別終端手跑、已結束的 watch）＝無效；無欄位退 pid＋心跳；例外＝有效 | 假 payload、假心跳 | 已實作並通過（`test_sessionctl_supervise.py::CredentialTests`：`test_main_proof_with_fresh_or_missing_heartbeat_is_valid`、`test_main_proof_with_stale_heartbeat_is_stuck`、`test_no_main_proof_is_none_even_with_fresh_heartbeat`、`test_finished_or_other_shell_is_not_proof`、`test_old_harness_without_field_needs_fresh_heartbeat_and_live_pid`、`test_any_exception_fails_open_to_valid`） |
+| AT-W12 | 監督閘：有在飛子代理無憑證 ⇒ block；有憑證 ⇒ 不推回且字樣為看管中；`stop_hook_active`／無人／模式非 auto ⇒ 放行；只有子代理觸發 | 假 payload | 已實作並通過（`test_sessionctl_supervise.py::StopGateTests`：`test_no_credential_blocks_with_exact_command_and_traces`、`test_stuck_reason_says_taskstop_first`、`test_valid_credential_does_not_block_and_message_says_watched`、`test_loop_brake_unattended_and_modes`、`test_only_subagents_trigger`、`test_event_name_matches_the_measurement_side`） |
+| AT-W13 | 冷叫醒閘與監督閘同時成立 ⇒ 只出冷叫醒 reason；未封存者落到監督閘（E-CW-1） | 假 payload＋假交接包 | 已實作並通過（`test_sessionctl_supervise.py::ColdWakeVsSuperviseTests::test_finalized_package_wins_over_supervise`、`::test_unfinalized_falls_to_supervise_gate`） |
+| AT-W14 | PreToolUse（Agent／Task）：無新鮮心跳附一行、有心跳不附、子代理自己的呼叫不附 | 假 payload | 已實作並通過（`test_sessionctl_supervise.py::DispatchNoteTests`：`test_note_when_no_fresh_heartbeat`、`test_silent_with_fresh_heartbeat_subagent_call_unattended_or_other_tool`、`test_converge_verdict_carries_the_note_when_the_gate_passes`） |
+| AT-W15 | `status` 一行監督（有效／卡死／無）、`session_crons` 三態記錄 | FS | 已實作並通過（`test_sessionctl_supervise.py::StatusAndCronsTests`） |
+| AT-A1 | 子代理 payload 呼叫 `advise_once` ⇒ 回空、無 `.advised`、無包 | FS | 已實作並通過（`test_sessionctl_handoff.py::` 內 `test_earch1_subagent_call_neither_advises_nor_eats_the_latch`） |
+
+### 2.10 封存閘與封存（R3；`test_sessionctl_converge.py::StopVerdictTest`、`test_sessionctl_seal.py`；縫 FS、NOW、ENV）
+| AT | 一句話 | 縫 | 狀態（測試檔::名稱） |
+|---|---|---|---|
+| AT-S1 | 封存閘四格（N<R1／有在飛代理／已封存且之後無工作／已交棒 各使其放行）＋一格推回 | FS | 已實作並通過（`test_sessionctl_converge.py::StopVerdictTest::test_at_s1_each_of_the_four_conditions_releases_and_the_fifth_blocks`） |
+| AT-S2 | 封存閘與 park 同時成立 ⇒ 一則合併 reason（先封存再 park） | FS、Q | 已實作並通過（`test_sessionctl_converge.py::StopVerdictTest::test_at_s2_seal_gate_and_park_merge_into_one_reason`） |
+| AT-S3 | finalize 通過：機械層重建、主控層逐字保留、寫 sidecar 與封存戳 | FS、NOW | 已實作並通過（`test_sessionctl_seal.py::SealTest::test_seal_rebuilds_mechanical_keeps_main_verbatim_and_writes_sidecar_and_stamp`、`::test_cli_finalize_goes_through_seal`、`::test_finalize_stays_a_pure_check_with_no_side_effects`） |
+| AT-S4 | prompts sidecar 收全部真人提示、排除機器注入；超過字數上限時保留第一則與最後十則全文、中段列索引 | FS | 已實作並通過（`test_sessionctl_seal.py::SealTest::test_sidecar_over_limit_keeps_first_and_last_ten_full_and_indexes_the_middle`、`::test_refresh_prompts_rewrites_only_the_sidecar`；`::TranscriptCriteriaTest::test_is_machine_prompt_table`、`::test_all_human_prompts_full_text_in_order_with_lines`） |
+| AT-S5 | 主控層有 `TODO:` ⇒ rc≠0 且**無** `.sealed`、無 sidecar | FS | 已實作並通過（`test_sessionctl_seal.py::SealTest::test_seal_with_todo_returns_rc1_and_writes_nothing`） |
+| AT-S6 | ff1000ed 形態（上下文 ≥ R1、包停在機械層、無 `.advised`）⇒ Stop 推回 | FS（以實測數值造假逐字稿） | 已實作並通過（`test_sessionctl_converge.py::StopVerdictTest::test_at_s6_the_ff1000ed_shape_pushes_back_without_any_advised_latch`） |
+| AT-S7 | 封存效期：封存後只讀檔不使其失效，非唯讀工作使其失效（裁決 A-1）；`worked_since` 讀不到 ⇒ 不推回 | FS | 已實作並通過（`test_sessionctl_converge.py::StopVerdictTest::test_a1_reading_after_the_seal_does_not_invalidate_but_work_does`；`test_sessionctl_seal.py::TranscriptCriteriaTest::test_worked_since_ignores_read_only_tools_and_old_and_sidechain`、`::test_worked_since_unreadable_or_bad_since_is_false_the_release_direction`） |
+| AT-S8 | 已交棒判準（E-HD-1）：寫完且〔已 ack ∨ 有 spawn 痕跡〕才算；已交棒 session 不被封存閘推回、但掛背景任務仍被冷叫醒閘推回；只寫完未封存不啟動冷叫醒閘（E-CW-1） | FS | 已實作並通過（`test_sessionctl_converge.py::StopVerdictTest::test_e_hd_1_handed_over_session_is_not_pushed_back_but_a_wake_task_is`、`::test_handed_over_needs_a_written_package_and_a_hand_off_signal`、`::test_e_cw_1_a_written_but_unsealed_package_does_not_arm_the_wake_gate`、`::test_def_200_588_finalized_package_with_a_running_task_is_pushed_back`、`::test_def_200_588_the_wake_gate_stays_silent_when_nothing_can_wake_it`） |
+
+### 2.11 轉送與已交棒告知（R3；`test_sessionctl_forward.py`；縫＝注入 spawn／alive／cache／crons／preflight／refresh／platform，不開環境變數鉤）
+| AT | 一句話 | 縫 | 狀態（測試檔::名稱） |
+|---|---|---|---|
+| AT-F0 | 條件全成立 ⇒ block、原文已落檔、已 spawn、痕跡 `forward_spawned` | 假 spawn 等 | 已實作並通過（`test_sessionctl_forward.py::PathOneForwardTest::test_all_nine_conditions_hold_then_block_with_original_saved_and_spawned`） |
+| AT-F1 | 各條件逐一使其不成立 ⇒ 放行且 `forward_pass` 帶第一個不成立條件編號 | 同上 | 已實作並通過（`::PathOneForwardTest::test_each_failing_condition_passes_and_records_its_number`） |
+| AT-F2 | `<task-notification>` 開頭永不擋（F1-8 回歸鎖）；`<pasted_content` 可轉、未知角括號包裝不轉 | 同上 | 已實作並通過（`::PathOneForwardTest::test_task_notification_is_never_forwarded`、`::test_pasted_content_is_forwardable_unknown_angle_wrapper_is_not`） |
+| AT-F3 | 原文落檔逐字一致、SHA-256 相符 | FS | 已實作並通過（`::PathOneForwardTest::test_original_prompt_is_saved_verbatim_with_matching_sha256`） |
+| AT-F4 | spawn 失敗 ⇒ 放行、原文檔保留、痕跡 failed；行程活著但逐字稿未見仍算已轉送；落檔失敗不擋 | 假 spawn | 已實作並通過（`::PathOneForwardTest::test_spawn_failure_passes_and_keeps_the_saved_original`、`::test_alive_process_without_transcript_still_counts_as_forwarded`、`::test_write_failure_of_the_original_never_blocks`） |
+| AT-F5 | 非 Windows／模式 notify ⇒ 放行＋additionalContext（附手動 spawn 指令） | 注入 platform | 已實作並通過（`::PathOneForwardTest::test_notify_and_non_windows_pass_with_a_spawn_hint`） |
+| AT-F6 | 快取熱 ⇒ 放行（留原地較便宜） | 假 cache | 已實作並通過（`::PathOneForwardTest::test_hot_cache_stays_in_place`） |
+| AT-F7 | `session_crons` 記錄非空或讀不到 ⇒ 放行 | 假 crons | 已實作並通過（`::PathOneForwardTest::test_cron_record_nonempty_or_unreadable_never_forwards`） |
+| AT-F8 | 任何例外 ⇒ rc 0 放行（函式層與子行程跑 hook、注入壞 payload） | 子行程 | 已實作並通過（`::PathOneForwardTest::test_any_exception_fails_open`、`::HookLayerTest::test_malformed_input_exits_zero_and_silent`、`::test_task_notification_through_the_real_hook_is_silent`） |
+| AT-F9 | 已交棒舊窗：新視窗活著 ⇒ block 並告知（不 spawn、不論快取冷熱）；新視窗不在 ⇒ 放行附現況；`留：`／機器注入／notify ⇒ 放行 | 假 alive | 已實作並通過（`::PathTwoHandedOverTest`：`test_new_window_alive_blocks_with_notice_and_never_spawns`、`test_hot_cache_blocks_too`、`test_new_window_gone_passes_with_a_status_line`、`test_escape_prefix_task_notification_and_notify_mode_pass`；hook 層 `::HookLayerTest::test_handed_over_window_gets_block_json_without_spawning`） |
+| AT-F10 | 痕跡事件名與量測端 `EV_FORWARD_*` 常數相等；`UserPromptSubmit` 以 exec form、timeout 大於 spawn 等待秒數註冊 | — | 已實作並通過（`::PathOneForwardTest::test_trace_event_names_match_the_census_constants`、`::RegistrationTest::test_user_prompt_submit_registered_exec_form_with_timeout_50`） |
+
+### 2.12 半路停工與量測（R3；`test_check_pending_handoff.py`、`test_waste_census_metrics.py`、`test_waste_census_supervision.py`）
+| AT | 一句話 | 狀態（測試檔::名稱） |
+|---|---|---|
+| AT-M1 | 事故原句與進行式詞表命中；摘要、標題、引號、否定、他人負責、合法換手標記整則不命中 | 已實作並通過（`test_check_pending_handoff.py::TestMidworkWording`） |
+| AT-M2 | Stop 接線：無背景工作＋髒工作樹 ⇒ 推回；有 running 背景任務、欄位缺席、其他守衛條件（第二次 Stop、無人、開關）、乾淨工作樹且只讀工具 ⇒ 放行；兩種判準同時命中合併一則；讀不到逐字稿 fail-open | 已實作並通過（`test_check_pending_handoff.py::TestMidworkStopWiring`） |
+| AT-C1 | f2260ce7 重現：低於 prepare 的樣本＋`park_armed` 痕跡 ⇒ 計為停點；無痕跡的閒置不計 | 已實作並通過（`test_waste_census_metrics.py::test_at_c1_park_trace_stop_below_prepare_threshold_is_counted`） |
+| AT-Q1 | M-W1～W4、M-F1～F3、M-S1～S3 各自的判準與缺資料時寫明「無資料」而非乾淨的零；CLI 全印且不寫進 repo | 已實作並通過（`test_waste_census_supervision.py`，含 `test_missing_trace_events_say_no_data_instead_of_a_clean_zero`、`test_cli_prints_every_metric_and_writes_nothing_into_the_repo`） |
+| AT-HV2-9 | 接續測驗四題（沙盒 haiku 自動驗交接包 v2 是否足以接續） | **未實作**（H 縫；待真機／後續包，未驗不得寫成已驗） |
+
+### 2.13 既有 AT 的語意改動（舊收斂 Stop 推回 → 封存閘；`test_sessionctl_converge.py` 內改名）
+舊 AT-TW-70～77 與 AT-TW-79／AT-TW-80 的原文住 `docs/03_testing/contracts/TCS-TokenWaste-20261114.md` §2（該檔不在本增量改動範圍，其對應列以本表為準）：
+
+| 舊 AT | 新語意與測試 |
+|---|---|
+| AT-TW-70 | 改為 AT-S6／AT-S1：不再要求「已出聲」與硬門檻，上下文 ≥ R1 即推回；痕跡 `converge_stop_block` 改 `seal_stop_block`；測試 `test_at_tw_70_…` 改名 `test_at_s6_the_ff1000ed_shape_pushes_back_without_any_advised_latch`（hook 層 `test_sessionctl_hooks.py::HookConvergeTest::test_at_tw_70_hook_stop_pushes_back_once_with_a_block_decision` 保留） |
+| AT-TW-71、72／72b、77 | 保留（`test_at_tw_71_a_second_stop_is_never_pushed_back`、`test_at_tw_72_…`、`test_at_tw_72b_…`、`test_at_tw_77_pushback_lifts_after_the_context_comes_down`；77 去掉「已出聲」前提） |
+| AT-TW-73 | 刪除：「寫完≠封存」，改由 AT-S1（已封存且之後無工作放行）與 AT-S8（已交棒）涵蓋 |
+| AT-TW-74、76 | 合併為 `test_at_tw_74_unattended_notify_off_and_broken_payloads_are_noops` |
+| AT-TW-75 | 刪除：「已出聲在先」的邊界不再存在，改為 AT-S1 的「N<R1」邊界 |
+| AT-TW-79、80 | 保留，前提改為先封存（`.sealed`）或已交棒（E-CW-1）；AT-TW-80 的上下文改 R1 減 50,000 以避開封存閘 |
+
 ## 3. 真機驗證（主控親跑；V 步驟）
 
 | V | 步驟 | 通過憑證 |
@@ -204,3 +305,14 @@
 | V6 | `stop --window <假 sid>`：起一支命令列含該 sid 的 `pwsh -NoExit` 佔位行程 | 被砍；對另一支命令列不含 sid 的行程不動 |
 | V7 | `--pace` | 多一行模型建議，與當下兩週軸數字一致 |
 | V8 | `claude -p --debug hooks` 正面現查新 hook | `Hook Stop.*success`、`PreToolUse` 於 SendMessage 觸發記錄 |
+
+### 3b. R3 增量的真機驗證（**待真機，未驗不得寫成已驗**；已驗的一項見末列）
+
+| V | 步驟 | 通過憑證 |
+|---|---|---|
+| V-W2 | 互動視窗：派背景子代理後不掛 watch 就結束回合；再掛 watch 結束回合 | 前者見監督閘推回理由、後者見「看管中」字樣（互動畫面是否顯示 block 理由與 `systemMessage` 本身即待驗項） |
+| V-W3 | 掛 watch 後主控閒置至保溫點 | watch 結束叫醒主控、首回合以讀快取為主（M-W2 不新增冷重寫）；若 `idleCompaction` 提前壓縮主控，保溫點需下調 |
+| V-W4 | 背景子代理交 interim 卷時看 `meta.finished` 與 `background_tasks` | 記錄實值；all_done 不提早成立 |
+| V-F1 | 封存後等快取冷，在舊視窗打一句真人提示 | 舊視窗畫面顯示轉送說明、新視窗自動開出並讀到轉送原文檔；失敗路徑原文檔仍在；`留：` 開頭的提示留在原視窗 |
+| V-F2 | 已交棒（已 spawn／已 ack）的舊視窗打一句提示 | 畫面顯示「本視窗已交棒」說明與原文檔路徑 |
+| V-HOOK | `claude -p --model haiku --debug hooks`（正面現查） | `Hooks: UserPromptSubmit [...sessionctl_guard.py] finished with status 0`（**已驗**：2026-11-17 主控親跑，註冊後真 harness 觸發記錄） |

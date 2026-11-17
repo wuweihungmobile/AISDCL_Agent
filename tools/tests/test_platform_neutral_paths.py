@@ -132,7 +132,8 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # 實測 128，過腐化上界 122；腐化上界逐字指示，照填不推算）。
         # 🔴 2026-11-12 重釘 122→150（SelfImproving P7 `tools/lib/selfimproving/` 新增 6 支，
         # 實測 158，過腐化上界 152；腐化上界逐字指示，照填不推算）。
-        (_REPO_ROOT / "tools" / "lib", True, 150),
+        # 🔴 2026-11-17 重釘 150→183（sessionctl 監督／封存／轉送新模組，實測 193，過上界 187）。
+        (_REPO_ROOT / "tools" / "lib", True, 183),
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]

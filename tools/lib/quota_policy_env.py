@@ -158,6 +158,14 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "交接包公告的存活小時數（逾時不再於 SessionStart 出聲）", "policy"),
     EnvVar("AUTOSDD_ROSTER_QUIET_MINUTES", None, 10, "int", 1.0, None,
            "名冊：背景代理超過此分鐘數無新記錄 ⇒ 標為「安靜」", "policy"),
+    EnvVar("AUTOSDD_WATCH_STALL_MINUTES", None, 15, "int", 11.0, None,
+           "背景代理監督（sessionctl watch）：代理最後一筆記錄距今達此分鐘數 ⇒ 判停滯"
+           "（下限 11＝前景工具逾時上限 10 分鐘＋餘裕，低於即退回出廠值）", "policy"),
+    EnvVar("AUTOSDD_WATCH_AGENT_WALL_MINUTES", None, 120, "int", 1.0, None,
+           "背景代理監督：代理自啟動起達此分鐘數仍未交卷 ⇒ 判逾時（--wall-min 可逐次覆寫）",
+           "policy"),
+    EnvVar("AUTOSDD_WATCH_AGENT_CTX_TOKENS", None, 700000, "int", 1.0, None,
+           "背景代理監督：代理上下文達此 token 數 ⇒ 判預算超支（只准下修）", "policy"),
     EnvVar("AUTOSDD_SESSION_SWITCH_MODE", None, "auto", "str", None, None,
            "互動視窗自動切換 session：auto（出聲＋可 spawn）／notify（只出聲）／off", "policy"),
     # 🔴 v2.1.13 G3（PRD_Amendment_R113_WakeChain_LastMile.md §3(c)）：接力狀態機的

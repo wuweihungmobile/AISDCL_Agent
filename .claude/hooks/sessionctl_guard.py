@@ -7,8 +7,10 @@
 `{"decision":"block","reason":...}` 推回一次（`stop_hook_active` 為真即放行，判準
 `converge.stop_verdict`；其尾端另判 park＝額度停工憑證 `park.stop_verdict`，
 逃生口 `AUTOSDD_PARK_GUARD_OFF`）。PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
-任何例外 rc 0（fail-open，P0）；不 spawn、不 import planner。逃生口：
-`AUTOSDD_SESSIONCTL_GUARD_OFF`（刻意不與其他守衛共用）。回歸鎖
+UserPromptSubmit：呼叫 `forward.hook_output`（冷舊窗的真人提示自動轉送新 session；已交棒舊窗回
+說明；R3 WP-5，ADR-XPLAT-004 §2.13）；輸出 block／additionalContext JSON，其餘無輸出。
+任何例外 rc 0（fail-open，P0）；不 import planner（轉送的 spawn 在 `forward`／`handoff` 內）。
+逃生口：`AUTOSDD_SESSIONCTL_GUARD_OFF`（刻意不與其他守衛共用）。回歸鎖
 `tools/tests/test_sessionctl_hooks.py`；設計＝ADR-XPLAT-004 §2.13.6、§2.14。
 """
 from __future__ import annotations
@@ -38,9 +40,16 @@ def main() -> int:
         if os.environ.get("AUTOSDD_SESSIONCTL_GUARD_OFF"):
             return 0
         payload = read_hook_payload()
+        event, tool = payload.get("hook_event_name"), payload.get("tool_name")
+        if event == "UserPromptSubmit":  # 判準全在 forward.py：舊窗冷快取轉送／已交棒告知
+            from lib.sessionctl import forward  # noqa: PLC0415
+
+            out = forward.hook_output(payload, os.environ)
+            if out:
+                _emit(out)
+            return 0
         from lib.sessionctl import converge, roster  # noqa: PLC0415 — 真的要判才付 import 成本
 
-        event, tool = payload.get("hook_event_name"), payload.get("tool_name")
         if event == "Stop":
             why = converge.stop_verdict(payload, os.environ)  # 先判推回：背景 shell 不得蓋掉它
             msg = "" if why else roster.stop_message(payload)

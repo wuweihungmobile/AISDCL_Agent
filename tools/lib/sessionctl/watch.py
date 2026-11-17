@@ -1,0 +1,273 @@
+"""背景代理監督程序 `sessionctl watch`（R3 WP-4A；ARCH §1.2／§1.3／§1.5／§1.8）。
+
+主控派出背景子代理後常直接結束回合，沒有人看管。本程序**阻塞到「有事發生」才結束**：主控把它當
+背景任務掛著，它一結束 harness 就叫醒主控——這就是會主動叫醒主控的事件源（鐵律六）。
+
+分層：`decide`（純函式、判準）／`resolve_cfg`（門檻解析）／`run`（迴圈；時鐘、sleep、名冊、額度
+一律參數注入，不開任何測試用環境變數）。本檔不 import `wastecensus`（守衛面不依賴量測探針）。
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+import endurance_env
+import unattended_authz
+
+from . import procstop, roster, switch
+
+#: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
+EV_WATCH_VERDICT = "watch_verdict"
+SCHEMA = "autosdd.watch/1"
+#: 判決 → rc（ARCH §1.2）。
+RC = {"all_done": 0, "overrun": 2, "stall": 3, "budget": 4, "quota": 5, "keepwarm": 6}
+#: 同一輪多事件並存時的先後：quota（跨代理、不可逆的額度牆）＞ budget（每多一輪都更貴）＞
+#: stall（代理已死，繼續等純浪費）＞ overrun（慢但可能仍在做事）＞ all_done（只在無未交卷代理時才
+#: 成立，與前四者互斥）＞ keepwarm（純保溫，任何實質事件都比它重要）。
+ORDER = ("quota", "budget", "stall", "overrun", "all_done", "keepwarm")
+#: 主控快取壽命 1 小時（EV 2c）；留 10 分鐘給「主控最後一筆請求晚於 watch 啟動」與排程誤差。
+KEEPWARM_MINUTES = 50
+_KEEPWARM_MARGIN_MINUTES = 5  # 無人窗口：離 harness 背景等待上限至少留這麼多分鐘
+STALL_FLOOR_MINUTES = 11  # 前景工具逾時 600 秒＋餘裕
+STALL_DEFAULT_MINUTES = 15
+WALL_DEFAULT_MINUTES = 120
+GRACE_SECONDS = 150.0
+POLL_SECONDS = 30.0
+#: 判決後主控該做什麼（ARCH §1.5 處置表，逐字）；判決行之後印對應那一列。
+DISPOSAL = {
+    "all_done": "收交卷；若上下文 ≥ R1 且無後續自主工作 ⇒ 封存（Stop 也會推）；有後續 ⇒ 繼續派工並重掛 watch",  # noqa: E501
+    "keepwarm": "什麼都不判、`python tools/sessionctl.py status` 不必跑；只重掛 watch 後結束回合（本回合輸出 ≤ 50 token）",  # noqa: E501
+    "stall": "`sessionctl status` 看該代理最後一筆；確定卡住 ⇒ TaskStop 它、派新代理＋短任務書（指向它的 HB 檔；不得 SendMessage 冷續，`resume_gate` 也會擋）；重掛 watch",  # noqa: E501
+    "overrun": "讀它的 HB：快完成 ⇒ 重掛 watch 並 `--wall-min <現值+30>`（每支至多一次）；否則 TaskStop＋拆小重派",  # noqa: E501
+    "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
+    "quota": "估剩餘：代理快完成 ⇒ 重掛 watch，等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
+}
+UNKNOWN_DISPOSAL = "watch 自己壞了（未知 rc／無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
+
+
+@dataclass(frozen=True)
+class Cfg:
+    stall_min: float = STALL_DEFAULT_MINUTES
+    wall_min: float = WALL_DEFAULT_MINUTES
+    ctx_max: int = 700000
+    keepwarm_min: float = KEEPWARM_MINUTES
+    grace_sec: float = GRACE_SECONDS
+
+
+def keepwarm_minutes(env=None) -> float:
+    """50 分常數；無人窗口（`AUTOSDD_UNATTENDED`）＝min(50, harness 背景等待上限分鐘−5)。"""
+    env = os.environ if env is None else env
+    if env.get("AUTOSDD_UNATTENDED"):
+        ceiling = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS / 60
+        return min(KEEPWARM_MINUTES, ceiling - _KEEPWARM_MARGIN_MINUTES)
+    return KEEPWARM_MINUTES
+
+
+def _num(raw) -> float | None:
+    try:
+        return float(str(raw).strip())
+    except ValueError:
+        return None
+
+
+def _stall(raw, label: str) -> float:
+    val = _num(raw)
+    if val is None or val < STALL_FLOOR_MINUTES:
+        print(f"⚠️ {label}={raw!r} 低於下限 {STALL_FLOOR_MINUTES}（前景工具逾時上限 10 分鐘＋餘裕）"
+              f"⇒ 退回 {STALL_DEFAULT_MINUTES}", file=sys.stderr)
+        return float(STALL_DEFAULT_MINUTES)
+    return val
+
+
+def resolve_cfg(env=None, *, stall_min=None, wall_min=None, ctx_max=None,
+                grace_sec: float = GRACE_SECONDS) -> Cfg:
+    """env 缺席＝出廠值；CLI 值蓋過 env。stall 下限 11（兩個入口同規則）；ctx 只准下修（CLI 值不得
+    大於 env 生效值，否則退回該生效值並出聲）。"""
+    env = os.environ if env is None else env
+    raw_stall = str(env.get(switch.WATCH_STALL_KEY) or "").strip()
+    stall = _stall(raw_stall, switch.WATCH_STALL_KEY) if raw_stall else float(STALL_DEFAULT_MINUTES)
+    if stall_min is not None:
+        stall = _stall(stall_min, "--stall-min")
+    raw_wall = str(env.get(switch.WATCH_WALL_KEY) or "").strip()
+    wall = _num(raw_wall) if raw_wall else None
+    if raw_wall and (wall is None or wall <= 0):
+        print(f"⚠️ {switch.WATCH_WALL_KEY}={raw_wall!r} 是病態值 ⇒ 退回 {WALL_DEFAULT_MINUTES}",
+              file=sys.stderr)
+    wall = wall if wall and wall > 0 else float(WALL_DEFAULT_MINUTES)
+    if wall_min is not None and wall_min > 0:
+        wall = float(wall_min)
+    ctx = switch.threshold(switch.WATCH_CTX_KEY, env)[0]
+    if ctx_max is not None:
+        if ctx_max > ctx or ctx_max < 1:
+            print(f"⚠️ --ctx-max={ctx_max} 不得大於生效值 {ctx:,}（只准下修）⇒ 沿用 {ctx:,}",
+                  file=sys.stderr)
+        else:
+            ctx = int(ctx_max)
+    return Cfg(stall, wall, ctx, keepwarm_minutes(env), grace_sec)
+
+
+def _epoch(iso) -> float | None:
+    return procstop.parse_iso(iso)
+
+
+def _label(agent: dict) -> str:
+    return (f"{str(agent.get('id'))[:10]} {agent.get('model') or '?'}"
+            f"｜{agent.get('description') or '?'}")
+
+
+def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
+           seen: bool = False) -> tuple[str, int, str] | None:
+    """純函式：回 `(事件, rc, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
+    `finished!=true`），每項可帶 `end_turn: bool`（最後一筆是 assistant end_turn＝在等自己的
+    背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。"""
+    found: dict[str, str] = {}
+    if quota_hit:
+        found["quota"] = "短窗額度原始讀數已達 prepare 門檻（reset 在未來）"
+    over = [a for a in agents if isinstance(a.get("ctx_tokens"), int)
+            and a["ctx_tokens"] >= cfg.ctx_max]
+    if over:
+        rows = "\n".join(f"  - {_label(a)}｜{a['ctx_tokens']:,} token" for a in over)
+        found["budget"] = f"上下文達 {cfg.ctx_max:,}：\n{rows}"
+    stalled = []
+    for a in agents:
+        last = _epoch(a.get("last_at"))
+        if last is not None and now - last >= cfg.stall_min * 60 and not a.get("end_turn"):
+            stalled.append((a, (now - last) / 60))
+    if stalled:
+        rows = "\n".join(f"  - {_label(a)}｜靜默 {m:.1f} 分" for a, m in stalled)
+        found["stall"] = f"最後一筆記錄距今 ≥ {cfg.stall_min:g} 分：\n{rows}"
+    late = []
+    for a in agents:
+        began = _epoch(a.get("started_at"))
+        if began is not None and now - began >= cfg.wall_min * 60:
+            late.append((a, (now - began) / 60))
+    if late:
+        rows = "\n".join(f"  - {_label(a)}｜已跑 {m:.1f} 分" for a, m in late)
+        found["overrun"] = f"自啟動起已 ≥ {cfg.wall_min:g} 分仍未交卷：\n{rows}"
+    if not agents and (seen or now - started_at >= cfg.grace_sec):
+        found["all_done"] = "全部交卷（或寬限期後從未出現未交卷代理）"
+    if now - started_at >= cfg.keepwarm_min * 60:
+        found["keepwarm"] = f"watch 已啟動 ≥ {cfg.keepwarm_min:g} 分（主控快取壽命 1 小時，保溫點）"
+    for name in ORDER:
+        if name in found:
+            return name, RC[name], found[name]
+    return None
+
+
+def heartbeat_path(sid: str) -> Path:
+    """心跳檔：`trace_dir()/watch/<sid>.json`（WP-4B 憑證判準的副證；唯一的路徑解析處）。"""
+    return endurance_env.trace_dir() / "watch" / f"{sid}.json"
+
+
+def _stamp(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds")
+
+
+def write_heartbeat(sid: str, cfg: Cfg, started_at: float, now: float, pid: int) -> None:
+    """每輪覆寫；時間戳帶 offset。不用 os.replace（非原子，同 `park.write_marker`／`quota_rush`）：
+    讀端解析失敗一律當「讀不動」fail-open，不會因撕裂讀取而誤判。"""
+    row = {"schema": SCHEMA, "pid": pid, "started_at": _stamp(started_at),
+           "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(started_at + cfg.keepwarm_min * 60),
+           "stall_min": cfg.stall_min, "wall_min": cfg.wall_min, "ctx_max": cfg.ctx_max}
+    try:
+        path = heartbeat_path(sid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8", newline="\n")
+    except OSError:
+        pass
+
+
+def _drop_heartbeat(sid: str) -> None:
+    try:
+        heartbeat_path(sid).unlink()
+    except OSError:
+        pass
+
+
+def ended_turn(sid: str, agent_id: str, projects_dir=None) -> bool:
+    """代理逐字稿最後一筆 user／assistant 記錄是 assistant 且 `stop_reason=="end_turn"`
+    （只讀尾端）。讀不到 ⇒ False（不豁免，寧可多報 stall 也不漏）。"""
+    path = roster._agent_path(sid, agent_id, projects_dir)
+    last = None
+    for rec in roster._records(path, tail=True) if path else ():
+        if rec.get("type") in ("assistant", "user"):
+            last = rec
+    msg = last.get("message") if isinstance(last, dict) else None
+    return (isinstance(last, dict) and last.get("type") == "assistant" and isinstance(msg, dict)
+            and msg.get("stop_reason") == "end_turn")
+
+
+def quota_hit_now(now: float | None = None) -> bool:
+    """短窗軸原始讀數 ≥ prepare 且 reset 在未來；重用 `park.prepare_hits`（讀快取、不外呼）。
+    讀不到／任何例外 ⇒ False（不成立）。"""
+    try:
+        from . import park  # noqa: PLC0415 — lazy：park 吃 quota 模組，監督迴圈不該為此付匯入成本
+
+        when = datetime.fromtimestamp(now).astimezone() if now else datetime.now().astimezone()
+        hits = park.prepare_hits(park._pace_state(when), park._policy(), when)
+        return bool(hits)
+    except Exception:  # noqa: BLE001 — 額度快取讀不到不得讓監督崩潰
+        return False
+
+
+def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
+        poll_sec: float = POLL_SECONDS, roster_fn=None, end_turn_fn=None, quota_fn=None,
+        out=None, pid: int | None = None, projects_dir=None) -> int:
+    """阻塞輪詢；第一個事件成立即印明細、處置表對應列、`WATCH_VERDICT=` 末行並回 rc。
+    縫（全可注入）：now_fn()->epoch、sleep_fn(sec)、roster_fn()->未交卷代理 list、
+    end_turn_fn(agent)->bool、quota_fn()->bool。"""
+    out = out or sys.stdout
+    roster_fn = roster_fn or (
+        lambda: roster.snapshot(sid, projects_dir=projects_dir, full=False)["agents"])
+    end_turn_fn = end_turn_fn or (lambda a: ended_turn(sid, str(a.get("id")), projects_dir))
+    quota_fn = quota_fn or (lambda: quota_hit_now(now_fn()))
+    pid = os.getpid() if pid is None else pid
+    started, seen = now_fn(), False
+    try:
+        while True:
+            now = now_fn()
+            agents = [dict(a) for a in roster_fn()]
+            seen = seen or bool(agents)
+            for a in agents:  # 只對靜默夠久者讀尾端（省 I/O）
+                last = _epoch(a.get("last_at"))
+                if last is not None and now - last >= cfg.stall_min * 60:
+                    a["end_turn"] = bool(end_turn_fn(a))
+            verdict = decide(agents, now, started, cfg, quota_fn(), seen=seen)
+            if verdict is not None:
+                event, rc, detail = verdict
+                print(f"[{_stamp(now)}] {event}：{detail}", file=out)
+                print(f"處置：{DISPOSAL[event]}", file=out)
+                switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, rc=rc, agents=len(agents))
+                print(f"WATCH_VERDICT={event} n={len(agents)} rc={rc}", file=out, flush=True)
+                return rc
+            write_heartbeat(sid, cfg, started, now, pid)
+            sleep_fn(poll_sec)
+    finally:
+        _drop_heartbeat(sid)
+
+
+def cli(argv: list[str]) -> int:
+    import argparse  # noqa: PLC0415
+
+    ap = argparse.ArgumentParser(prog="sessionctl watch")
+    ap.add_argument("--sid")
+    ap.add_argument("--stall-min", type=float)
+    ap.add_argument("--wall-min", type=float)
+    ap.add_argument("--ctx-max", type=int)
+    ap.add_argument("--poll-sec", type=float, default=POLL_SECONDS)
+    ap.add_argument("--grace-sec", type=float, default=GRACE_SECONDS)
+    ap.add_argument("--projects-dir", help="逐字稿根目錄（預設＝Claude home 的 projects；測試用）")
+    args = ap.parse_args(argv)
+    sid = args.sid or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not sid:
+        print("sessionctl watch：缺 --sid，且環境變數 CLAUDE_CODE_SESSION_ID 未設 "
+              "⇒ 無法判定要看管哪個 session", file=sys.stderr)
+        return 2
+    cfg = resolve_cfg(stall_min=args.stall_min, wall_min=args.wall_min, ctx_max=args.ctx_max,
+                      grace_sec=args.grace_sec)
+    return run(sid, cfg, poll_sec=args.poll_sec, projects_dir=args.projects_dir)

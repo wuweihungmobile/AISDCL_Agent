@@ -106,6 +106,15 @@ try:
 except Exception:  # noqa: BLE001
     trace_dir = None  # type: ignore[assignment]
 
+# 半路停工判準（掌舵者 2026-11-17 真機回報，sid 16496139）住 `tools/lib/sessionctl/midwork.py`；
+# import 不到＝該判準停用（fail-open），不影響上面的散文交棒判準。
+sys.path.append(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "tools"))
+try:
+    from lib.sessionctl import midwork  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001
+    midwork = None  # type: ignore[assignment]
+
 #: 交棒詞：把決定／待辦留給掌舵者的說法。「掌舵者」「您」「你」是本 repo 的稱謂（「你」＝ADR X31；
 #: 「請你」「等你」在真實面普查造成 3 回合假紅，不收）。
 HANDOFF_RE = re.compile(
@@ -215,13 +224,19 @@ def asked_this_turn(transcript_path: str, byte_cap: int = BYTE_CAP) -> bool:
     🔴 讀不到／超上限一律 **raise**，讓 `main()` 走 fail-open 靜默放行；絕不可回 False——
     「證據面拿不到」與「本回合沒問」必須分開，否則逐字稿壞掉就會把每一則收尾都推回。
     """
+    return ASK_TOOL in tools_this_turn(transcript_path, byte_cap)
+
+
+def tools_this_turn(transcript_path: str, byte_cap: int = BYTE_CAP) -> set[str]:
+    """本回合（最後一則真人 role=user 訊息之後）主 session 用過的 tool 名集合（不含 sidechain）。
+    同樣讀不到／超上限一律 raise（理由見 `asked_this_turn`）。"""
     if os.path.getsize(transcript_path) > byte_cap:  # OSError ⇒ 交給 main() fail-open
         raise ValueError("transcript exceeds byte cap")
-    asked = False
+    tools: set[str] = set()
     with open(transcript_path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
             is_user = any(token in line for token in _USER_TOKENS)
-            if not is_user and ASK_TOOL not in line:
+            if not is_user and '"tool_use"' not in line:
                 continue
             try:
                 rec = json.loads(line)
@@ -230,10 +245,13 @@ def asked_this_turn(transcript_path: str, byte_cap: int = BYTE_CAP) -> bool:
             if not isinstance(rec, dict):
                 continue
             if _is_operator_turn(rec):
-                asked = False
-            elif _asks_user(rec):
-                asked = True
-    return asked
+                tools.clear()
+            elif rec.get("type") == "assistant" and not rec.get("isSidechain"):
+                content = (rec.get("message") or {}).get("content")
+                for block in content if isinstance(content, list) else ():
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        tools.add(str(block.get("name")))
+    return tools
 
 
 def block_message(hits: list[dict]) -> str:
@@ -247,14 +265,28 @@ def block_message(hits: list[dict]) -> str:
             ".claude/hooks/check_pending_handoff.py；關閉：AUTOSDD_HANDOFF_GUARD_OFF=1）")
 
 
-def _trace(hits: list[dict], session_id: str) -> None:
+def midwork_hits(claim_text: str) -> list[dict]:
+    """半路停工的措辭那一半（判準住 `tools/lib/sessionctl/midwork.py`；供本檔與普查探針共用）。"""
+    return midwork.midwork_hits(claim_text, _is_quoted) if midwork else []
+
+
+def midwork_stop(payload: dict, claim: str, tools: set[str]) -> list[dict]:
+    """半路停工全判準（措辭已命中時才呼叫）：沒有任何背景工作 ＋ 狀態佐證。命中回措辭列。"""
+    hits = midwork_hits(claim)
+    if not hits or not midwork.background_idle(payload):
+        return []
+    cwd = str(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+    return hits if midwork.did_work(tools, cwd) else []
+
+
+def _trace(hits: list[dict], session_id: str, event: str = "handoff_block") -> None:
     """落一列痕跡（「沒觸發＝檔不長大」）。任何 I/O 失敗吞掉：痕跡不得反過來變成守衛的故障源。"""
     if trace_dir is None:
         return
     try:
         path = os.path.join(str(trace_dir()), TRACE_NAME)
         row = {"ts": datetime.now(timezone.utc).isoformat(), "session_id": session_id,
-               "words": sorted({str(h.get("word")) for h in hits})}
+               "event": event, "words": sorted({str(h.get("word")) for h in hits})}
         with open(path, "a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=True) + "\n")
     except Exception:  # noqa: BLE001 — 見 docstring
@@ -274,12 +306,26 @@ def main() -> int:
         if not claim or not transcript:
             return 0
         hits = pending_handoff_hits(claim)
-        if not hits or asked_this_turn(transcript):
+        mid = midwork_hits(claim) if midwork and midwork.background_idle(payload) else []
+        if not hits and not mid:
             return 0
-        _trace(hits, str(payload.get("session_id") or ""))
-        doc = {"decision": "block", "reason": block_message(hits),
+        tools = tools_this_turn(transcript)
+        if ASK_TOOL in tools:
+            return 0
+        mid = midwork_stop(payload, claim, tools) if mid else []
+        if not hits and not mid:
+            return 0
+        sid = str(payload.get("session_id") or "")
+        if hits:
+            _trace(hits, sid)
+        if mid:
+            _trace(mid, sid, "midwork_stop_block")
+        reason = "\n".join(part for part in (block_message(hits) if hits else "",
+                                            midwork.block_message(mid) if mid else "") if part)
+        doc = {"decision": "block", "reason": reason,
                "systemMessage": ("⏸ check_pending_handoff：收尾把決定留給掌舵者卻沒給互動選項，"
-                                 "已推回主控一次（第二次 Stop 放行）。")}
+                                 "或說要接著做卻沒有任何背景工作會叫醒主控；已推回主控一次"
+                                 "（第二次 Stop 放行）。")}
         sys.stdout.write(json.dumps(doc, ensure_ascii=True) + "\n")
         sys.stdout.flush()
         return 0

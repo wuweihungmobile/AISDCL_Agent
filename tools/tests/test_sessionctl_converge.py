@@ -23,7 +23,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 import quota_policy_env  # noqa: E402
 from test_sessionctl_handoff import FakeRoster, FakeRunner, _quota  # noqa: E402
 
-from lib.sessionctl import converge, handoff, switch  # noqa: E402
+from lib.sessionctl import converge, handoff, seal, switch  # noqa: E402
 
 SID = "680d8411-58ac-4adb-9e23-521f6a7bb557"
 HARD = 290_000
@@ -109,12 +109,13 @@ class ConvergeVerdictTest(_Fence):
         邊界再被吃掉一格。"""
         self.main(HARD - 1)
         self.advise()
-        self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env), (0, ""))
+        # WP-4B：放行時會帶派工附註（FR-W8）⇒ 只判 rc 0，不再要求空字串
+        self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env)[0], 0)
 
     def test_at_tw_22_not_yet_advised_is_never_blocked(self) -> None:
         """tools/lib/sessionctl/converge.py：沒被告知就被擋＝不公平，出聲在先是閘的前提。"""
         self.main(400_000)
-        self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(self.pre("Agent"), self.env)[0], 0)
 
     def test_at_tw_23_convergence_tools_are_never_blocked(self) -> None:
         """tools/lib/sessionctl/converge.py：Read／Edit／PowerShell／Grep／SendMessage／Bash 不擋——
@@ -155,14 +156,14 @@ class ConvergeVerdictTest(_Fence):
         逐字稿不存在／無 usage／壞 JSON／無 transcript_path ⇒ 放行。"""
         self.advise()
         missing = self.pre("Agent")
-        self.assertEqual(converge.converge_verdict(missing, self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(missing, self.env)[0], 0)
         (self.slug / f"{SID}.jsonl").write_text("{{壞 JSON\n", encoding="utf-8")
-        self.assertEqual(converge.converge_verdict(missing, self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(missing, self.env)[0], 0)
         (self.slug / f"{SID}.jsonl").write_text(json.dumps({"type": "user"}) + "\n",
                                                 encoding="utf-8")
-        self.assertEqual(converge.converge_verdict(missing, self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(missing, self.env)[0], 0)
         bare = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "session_id": SID}
-        self.assertEqual(converge.converge_verdict(bare, self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(bare, self.env)[0], 0)
         got = converge.converge_verdict("不是 dict", self.env)  # type: ignore[arg-type]
         self.assertEqual(got, (0, ""))
 
@@ -192,7 +193,7 @@ class ConvergeVerdictTest(_Fence):
         self.assertEqual(converge.converge_verdict(payload, self.env)[0], 2)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(_assistant(120_000) + "\n")
-        self.assertEqual(converge.converge_verdict(payload, self.env), (0, ""))
+        self.assertEqual(converge.converge_verdict(payload, self.env)[0], 0)
         self.assertEqual(sorted(p.name for p in self.hdir.iterdir()), [f"{SID}.advised"])
 
     def test_the_hard_ctx_override_only_lowers_it(self) -> None:
@@ -275,105 +276,205 @@ class IsAdvisedTest(_Fence):
         self.assertFalse(handoff.is_advised(SID, env=self.env))
 
 
+R1 = 250_000
+
+
 class StopVerdictTest(_Fence):
-    """tools/lib/sessionctl/converge.py::stop_verdict：Stop 時推回一次（AT-TW-70～77）。"""
+    """tools/lib/sessionctl/converge.py::stop_verdict＋seal.stop_verdict：封存閘（Stop，WP-3）。
+
+    舊「收斂閘（Stop）」＝出聲 ∧ ≥ 硬門檻 ∧ 無 live 已 finalize 包；新語意＝N ≥ R1（直接量逐字稿，
+    不看 `.advised`）∧ 未交棒 ∧ 封存無效（AT-S1／S2／S6、A-1、E-HD-1）。"""
 
     def ready(self, ctx: int = 300_000) -> None:
         self.main(ctx)
-        self.advise()
 
-    def test_at_tw_70_advised_over_hard_no_agents_no_finalized_package_pushes_back(self) -> None:
-        """tools/lib/sessionctl/converge.py：
-        事故形態（出聲＋大上下文＋無代理＋無 finalize 包）⇒ 推回，
-        訊息給確切下一步；落 converge_stop_block 痕跡。"""
+    def seal_it(self, path: Path, minutes_ago: float = 5.0) -> str:
+        stamp = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
+        path.with_suffix(".sealed").write_text(stamp + "\n", encoding="utf-8")
+        return stamp
+
+    def tool_use(self, name: str, minutes_ago: float) -> None:
+        stamp = (datetime.now(UTC) - timedelta(minutes=minutes_ago)).isoformat()
+        row = {"type": "assistant", "timestamp": stamp,
+               "message": {"content": [{"type": "tool_use", "name": name, "input": {}}]}}
+        with (self.slug / f"{SID}.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+
+    def spawned(self, path: Path) -> None:
+        switch.trace("session_switch_spawned", handoff=str(path), sid=SID, ok=True, pid=1)
+
+    def test_at_s6_the_ff1000ed_shape_pushes_back_without_any_advised_latch(self) -> None:
+        """AT-S6 seal.stop_verdict：sid ff1000ed 形態——N 266,687、包停在機械層（主控層全 TODO）、
+        沒有 `.advised`——必須推回；舊閘要求出聲在先＋硬門檻，這個形態整個漏掉。
+        訊息給確切指令、封存後兩條路、不必重抄；落 seal_stop_block（原因＝未封存）。"""
+        self.main(266_687)
+        draft = self.package(finalized=False)
+        why = converge.stop_verdict(self.stop(), self.env)
+        for needle in ("封存閘（Stop）", "266,687", str(draft), "handoff --finalize", "--spawn",
+                       "結束回合即可", "不必重抄", "只推回這一次"):
+            self.assertIn(needle, why)
+        row = [r for r in self.traces() if r["event"] == "seal_stop_block"]
+        self.assertEqual([(r["sid"], r["ctx"], r["r1"], r["reason"]) for r in row],
+                         [(SID, 266_687, R1, "未封存")])
+
+    def test_no_package_at_all_says_build_first(self) -> None:
+        """seal.stop_verdict：沒有任何包 ⇒ 推回，指令先 `--build`；原因＝無包。"""
         self.ready()
         why = converge.stop_verdict(self.stop(), self.env)
-        for needle in ("收斂閘（Stop）", "300,000", "handoff --finalize", "--spawn", "/compact",
-                       "只推回這一次"):
-            self.assertIn(needle, why)
-        self.assertEqual([r["event"] for r in self.traces()], ["converge_stop_block"])
+        self.assertIn("--build", why)
+        self.assertEqual([r["reason"] for r in self.traces() if r["event"] == "seal_stop_block"],
+                         ["無包"])
+
+    def test_at_s1_each_of_the_four_conditions_releases_and_the_fifth_blocks(self) -> None:
+        """AT-S1：N < R1／封存有效／有在飛代理／已交棒，各自單獨成立都放行；四者皆不成立 ⇒ 推回。
+        少任何一格放行，掌舵者就會在對應情境被誤推回；多放行一格，就是封存空窗重現。"""
+        self.main(R1 - 1)
+        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")  # N < R1（邊界 `>=`）
+        self.main(R1)
+        agent = {"id": "a1", "type": "subagent", "status": "running"}  # 無包：在飛代理 ⇒ 放行
+        # WP-4B：在飛代理＋沒有監督憑證會被監督閘推回，所以這格帶有效憑證（watch shell）
+        # 才測「封存閘放行」
+        watch_shell = {"id": "w1", "type": "shell", "status": "running",
+                       "command": "python tools/sessionctl.py watch"}
+        self.assertEqual(converge.stop_verdict(
+            self.stop(background_tasks=[agent, watch_shell]), self.env), "")
+        self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")  # 恰等於 R1 ⇒ 推回
+        pkg = self.package(finalized=True)
+        self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")  # 寫完≠封存
+        self.seal_it(pkg)
+        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")  # 封存有效
+        pkg.with_suffix(".sealed").unlink()  # 拿掉封存 ⇒ 回到推回
+        self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")
+        self.spawned(pkg)  # 已交棒（已寫完 ∧ spawn 痕跡）
+        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
+
+    def test_a1_reading_after_the_seal_does_not_invalidate_but_work_does(self) -> None:
+        """A-1：封存後主控只有 Read／Grep／Glob（回答追問）⇒ 不推回；封存後一次 Edit 或
+        PowerShell ⇒ 推回，原因＝封存後有工作。拿掉唯讀集合或把封存改成永遠有效，兩半各紅一個。"""
+        self.ready()
+        pkg = self.package(finalized=True)
+        self.seal_it(pkg, minutes_ago=10)
+        for name in ("Read", "Grep", "Glob"):
+            self.tool_use(name, 2)
+        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
+        self.tool_use("Edit", 1)
+        self.assertIn("封存閘", converge.stop_verdict(self.stop(), self.env))
+        self.assertEqual([r["reason"] for r in self.traces() if r["event"] == "seal_stop_block"],
+                         ["封存後有工作"])
+        self.main(300_000)  # 換成只含 PowerShell 的一份
+        self.tool_use("PowerShell", 1)
+        self.assertIn("封存閘", converge.stop_verdict(self.stop(), self.env))
+
+    def test_at_s2_seal_gate_and_park_merge_into_one_reason(self) -> None:
+        """AT-S2：封存閘與 park 同時成立 ⇒ 一則合併 reason（先封存再 park），兩件事都講到；
+        不是先到先贏。各自單獨成立只出各自那一個。"""
+        self.ready(270_000)
+        parked = "額度停工守衛（Stop）：PARK-REASON"
+        with mock.patch("lib.sessionctl.park.stop_verdict", return_value=parked):
+            both = converge.stop_verdict(self.stop(), self.env)
+        self.assertIn("封存閘（Stop）", both)
+        self.assertIn(parked, both)
+        self.assertLess(both.index("封存閘"), both.index("PARK-REASON"))
+        with mock.patch("lib.sessionctl.park.stop_verdict", return_value=parked):
+            self.main(R1 - 1)  # 只剩 park
+            self.assertEqual(converge.stop_verdict(self.stop(), self.env), parked)
+        self.main(270_000)  # 只剩封存閘（park 無憑證載具 ⇒ ""）
+        only = converge.stop_verdict(self.stop(), self.env)
+        self.assertIn("封存閘", only)
+        self.assertNotIn("PARK-REASON", only)
+
+    def test_e_hd_1_handed_over_session_is_not_pushed_back_but_a_wake_task_is(self) -> None:
+        """E-HD-1（2026-11-16 20:45 sid 70f1bbb5 真機）：finalize → spawn 痕跡 → ack 之後，Stop
+        不得推回（舊 `_latest_live` 只認 live，包一 ack 就「尚無交接包」）；同狀態加一個 running
+        背景任務 ⇒ 冷叫醒閘照樣推回（舊版對已 ack 的包失明）；PreToolUse 訊息說「已交棒」、
+        不再叫它 build。"""
+        self.main(306_818)
+        self.advise()
+        pkg = self.package(finalized=True)
+        self.spawned(pkg)
+        pkg.with_suffix(".ack").write_text("acked x\n", encoding="utf-8")
+        self.assertEqual(handoff.list_handoffs(None, None, self.env)[-1]["state"], "acked")
+        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[shell]),
+                                                    self.env))
+        rc, text = converge.converge_verdict(self.pre("Agent"), self.env)
+        self.assertEqual(rc, 2)
+        self.assertIn("已交棒", text)
+        self.assertIn(str(pkg), text)
+        self.assertNotIn("尚無交接包", text)
+
+    def test_handed_over_needs_a_written_package_and_a_hand_off_signal(self) -> None:
+        """seal.handed_over：寫完但沒 ack／spawn ⇒ 否；spawn 了但主控層仍 TODO ⇒ 否（半成品不算）；
+        他人的 spawn 痕跡不算。"""
+        pkg = self.package(finalized=True)
+        self.assertIsNone(seal.handed_over(SID, self.env))
+        switch.trace("session_switch_spawned", handoff=str(self.hdir / "other.md"), ok=True)
+        self.assertIsNone(seal.handed_over(SID, self.env))
+        self.spawned(pkg)
+        self.assertEqual(seal.handed_over(SID, self.env), pkg)
+        self.package(finalized=False)  # 同檔覆寫成半成品
+        self.assertIsNone(seal.handed_over(SID, self.env))
 
     def test_at_tw_71_a_second_stop_is_never_pushed_back(self) -> None:
-        """tools/lib/sessionctl/converge.py：
-        stop_hook_active 為真 ⇒ 放行（每回合至多一個額外回合）。"""
+        """tools/lib/sessionctl/converge.py：stop_hook_active 為真 ⇒ 放行（每回合至多一個額外回合）
+        。"""
         self.ready()
         self.assertEqual(converge.stop_verdict(self.stop(stop_hook_active=True), self.env), "")
         self.assertEqual(self.traces(), [])
 
     def test_at_tw_72_running_background_agents_suppress_the_pushback(self) -> None:
-        """tools/lib/sessionctl/converge.py：
-        有執行中背景代理 ⇒ 不推回（既有 Stop 出聲照舊）；背景 shell
-        不算代理，仍推回；已結束的代理不算。"""
+        """tools/lib/sessionctl/converge.py：有執行中背景代理 ⇒ 不推回（既有 Stop 出聲照舊）；背景
+        shell 不算代理，仍推回；已結束的代理不算。"""
         self.ready()
         agent = {"id": "a1", "type": "subagent", "status": "running"}
-        self.assertEqual(converge.stop_verdict(self.stop(background_tasks=[agent]), self.env), "")
+        # WP-4B：無憑證的在飛代理改由監督閘推回（另見 test_sessionctl_supervise）；本格測封存閘讓路
+        watch_shell = {"id": "w1", "type": "shell", "status": "running",
+                       "command": "python tools/sessionctl.py watch"}
+        self.assertEqual(converge.stop_verdict(
+            self.stop(background_tasks=[agent, watch_shell]), self.env), "")
         shell = {"id": "b1", "type": "shell", "status": "running"}
         done = {"id": "a2", "type": "subagent", "status": "completed"}
         self.assertNotEqual(converge.stop_verdict(self.stop(background_tasks=[shell, done]),
                                                   self.env), "")
 
     def test_at_tw_72b_without_the_payload_field_the_file_roster_decides(self) -> None:
-        """tools/lib/sessionctl/converge.py：
-        payload 缺 background_tasks 時讀檔名冊（執行中＝最近有記錄）。"""
+        """tools/lib/sessionctl/converge.py：payload 缺 background_tasks
+        時讀檔名冊（執行中＝最近有記錄）。"""
         self.ready()
         folder = self.slug / SID / "subagents"
         folder.mkdir(parents=True)
         (folder / "agent-a1.jsonl").write_text(_assistant(5000, 0.2) + "\n", encoding="utf-8")
         self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
 
-    def test_at_tw_73_a_finalized_package_lets_the_turn_end(self) -> None:
-        """tools/lib/sessionctl/converge.py：
-        已 finalize 的交接包 ⇒ 放行；只有骨架（含 TODO）仍推回，
-        且訊息指向那個包。他人的包不算。"""
-        self.ready()
-        self.package(finalized=False, sid="other-sid")
-        self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")
-        draft = self.package(finalized=False)
-        self.assertIn(str(draft), converge.stop_verdict(self.stop(), self.env))
-        self.package(finalized=True)  # 同檔名覆寫成 finalize 版
-        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
-
-    def test_at_tw_74_unattended_notify_and_off_are_noops(self) -> None:
-        """tools/lib/sessionctl/converge.py：無人、notify、off ⇒ 不推回。"""
+    def test_at_tw_74_unattended_notify_off_and_broken_payloads_are_noops(self) -> None:
+        """tools/lib/sessionctl/converge.py：無人、notify、off ⇒ 不推回；壞 payload、缺逐字稿、
+        無 transcript_path ⇒ 放行（fail-open），不拋。"""
         self.ready()
         for extra in ({"AUTOSDD_UNATTENDED": "1"}, {switch.MODE_KEY: "notify"},
                       {switch.MODE_KEY: "off"}):
             with self.subTest(extra):
                 self.assertEqual(converge.stop_verdict(self.stop(), {**self.env, **extra}), "")
-
-    def test_at_tw_75_not_advised_or_below_the_hard_ctx_never_pushes_back(self) -> None:
-        """tools/lib/sessionctl/converge.py：沒出過聲、或 289,999 ⇒ 放行（出聲在先；邊界 `>=`）。"""
-        self.main(400_000)
-        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
-        self.main(HARD - 1)
-        self.advise()
-        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
-        self.main(HARD)
-        self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")
-
-    def test_at_tw_76_unreadable_inputs_fail_open(self) -> None:
-        """tools/lib/sessionctl/converge.py：缺逐字稿／無 transcript_path／非 dict ⇒ 放行，不拋。"""
-        self.advise()
-        self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
         self.assertEqual(converge.stop_verdict({"hook_event_name": "Stop"}, self.env), "")
         self.assertEqual(converge.stop_verdict("x", self.env), "")  # type: ignore[arg-type]
+        gone = {"hook_event_name": "Stop", "session_id": SID,
+                "transcript_path": str(self.slug / "nope.jsonl")}
+        self.assertEqual(converge.stop_verdict(gone, self.env), "")
 
     def test_at_tw_77_pushback_lifts_after_the_context_comes_down(self) -> None:
         """tools/lib/sessionctl/converge.py：不寫閂鎖——`/compact` 後同一 Stop 不再推回。"""
         path = self.main(300_000)
-        self.advise()
         self.assertNotEqual(converge.stop_verdict(self.stop(), self.env), "")
         with path.open("a", encoding="utf-8") as handle:
             handle.write(_assistant(100_000) + "\n")
         self.assertEqual(converge.stop_verdict(self.stop(), self.env), "")
-
     def test_def_200_588_finalized_package_with_a_running_task_is_pushed_back(self) -> None:
         """AT-TW-79 tools/lib/sessionctl/converge.py::_finalized_wake：事故 sid eb1cb524（11-15）——
         交接後留著等 CI 的背景 shell，它結束時把 26.8 萬上下文的舊 session 冷叫醒、整份重寫。
         已 finalize ∧ 有執行中背景任務 ⇒ 推回並要求 TaskStop；不需出聲、不看硬門檻
         （事故當時在門檻之下）。這條放行＝交棒後的 session 還會自己醒來燒額度。"""
-        self.main(HARD - 20_000)  # 門檻之下、也沒出過聲
-        self.package(finalized=True)
+        self.main(HARD - 20_000)  # 門檻之下、也沒出過聲（≥ R1：封存閘本身也會成立，但冷叫醒閘優先）
+        self.seal_it(self.package(finalized=True))  # `--finalize`＝封存（E-CW-1：純寫完不算）
         shell = {"id": "b1", "type": "shell", "status": "running"}
         why = converge.stop_verdict(self.stop(background_tasks=shell), self.env)
         for needle in ("冷叫醒閘", "TaskStop", "1 個", "只推回這一次"):
@@ -384,15 +485,16 @@ class StopVerdictTest(_Fence):
                                                     self.env))
 
     def test_def_200_588_the_wake_gate_stays_silent_when_nothing_can_wake_it(self) -> None:
-        """AT-TW-80 tools/lib/sessionctl/converge.py::_finalized_wake：假紅面——任務已結束、沒有
+        """AT-TW-80 tools/lib/sessionctl/converge.py::_finalized_wake：假紅面（N < R1，
+        封存閘不介入）——任務已結束、沒有
         finalize 包（平常掛著等 CI 是正當用法）、他人的包、第二次 Stop、無人、off、
         payload 沒有該欄，一律不推回。"""
-        self.main(HARD - 20_000)
+        self.main(R1 - 50_000)
         shell = {"id": "b1", "type": "shell", "status": "running"}
         self.assertEqual(converge.stop_verdict(self.stop(background_tasks=[shell]), self.env), "")
         self.package(finalized=True, sid="other-sid")
         self.assertEqual(converge.stop_verdict(self.stop(background_tasks=[shell]), self.env), "")
-        self.package(finalized=True)
+        self.seal_it(self.package(finalized=True))  # 已封存：下列各格放行全靠各自那一個條件
         done = {"id": "b2", "type": "shell", "status": "completed"}
         for payload, extra in ((self.stop(background_tasks=[done]), {}),
                                (self.stop(background_tasks=[]), {}),
@@ -402,6 +504,23 @@ class StopVerdictTest(_Fence):
                                (self.stop(background_tasks=[shell]), {switch.MODE_KEY: "off"})):
             with self.subTest(payload=payload, extra=extra):
                 self.assertEqual(converge.stop_verdict(payload, {**self.env, **extra}), "")
+
+    def test_e_cw_1_a_written_but_unsealed_package_does_not_arm_the_wake_gate(self) -> None:
+        """E-CW-1（2026-11-17 約 09:10 sid e4f80b15 真機）：主控在 WP-5 仍在飛時先寫完主控層（未
+        `--finalize`、無 `.sealed`、未 spawn），結束回合就被冷叫醒閘推回、要它 TaskStop 做到一半的
+        代理。「先備包、等代理交卷親驗後再封存」是合理路徑：純寫完 ⇒ 冷叫醒閘不成立（在飛代理改由
+        監督閘看管）；封存後同一狀態 ⇒ 冷叫醒閘成立。把前提退回「寫完即算」，第一半就紅。"""
+        self.main(R1 - 50_000)
+        pkg = self.package(finalized=True)
+        agent = {"id": "a1", "type": "subagent", "status": "running"}
+        self.assertIsNone(seal.wake_package(SID, self.env))
+        why = converge.stop_verdict(self.stop(background_tasks=[agent]), self.env)
+        self.assertNotIn("冷叫醒閘", why)
+        self.assertIn("監督閘", why)
+        self.seal_it(pkg)
+        self.assertEqual(seal.wake_package(SID, self.env), pkg)
+        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
+                                                    self.env))
 
 
 if __name__ == "__main__":

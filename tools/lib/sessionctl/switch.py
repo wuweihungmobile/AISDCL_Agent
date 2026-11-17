@@ -139,7 +139,11 @@ HARD_CTX_KEY = "AUTOSDD_SWITCH_HARD_CTX_TOKENS"
 #: 方向鎖：這五個只准下修（放寬＝退回 E1：20 MB／60 萬 token 的舊 session 仍被整份重讀；
 #: 硬門檻放寬＝出聲後可無限續做）。
 #: `STALE_SESSION_HOURS` 刻意不在內：調小更積極拆哨兵、調大更晚拆，兩向都有風險（主控裁決 7）。
-_DOWNWARD_ONLY = (R1_KEY, R2_KEY, R3_KEY, AGENT_TOKENS_KEY, HARD_CTX_KEY)
+#: 背景代理監督（`watch.py`）的三個門檻鍵；只有 ctx 上限方向鎖（放大＝代理可無限長大）。
+WATCH_STALL_KEY = "AUTOSDD_WATCH_STALL_MINUTES"
+WATCH_WALL_KEY = "AUTOSDD_WATCH_AGENT_WALL_MINUTES"
+WATCH_CTX_KEY = "AUTOSDD_WATCH_AGENT_CTX_TOKENS"
+_DOWNWARD_ONLY = (R1_KEY, R2_KEY, R3_KEY, AGENT_TOKENS_KEY, HARD_CTX_KEY, WATCH_CTX_KEY)
 #: R1 在 feed 與逐字稿 usage 皆缺時的估計比值（位元組／token）。🔴 這是量測值不是定律：E1 的
 #: 20,518,438 B 逐字稿對應約 60 萬 token ⇒ ≈34 B/token，取 40 偏保守（少估一點）；結果一律標
 #: `estimated`，要重量由 `tools/probe/`（現查）做，本檔不當它是真值。

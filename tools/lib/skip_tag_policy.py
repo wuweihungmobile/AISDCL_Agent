@@ -433,7 +433,7 @@ _TREE_FILE_FLOORS: dict[str, int] = {
     # SelfImproving P5 2026-11-10（收尾單人窗口）：新增 `_selfimproving_p5_fixtures.py`、
     # `test_selfimproving_fourq_{model,gate}.py` 後實測 127 支，99 只剩實測的 78%，
     # `tree_floor_problems` 重釘為 101 ⇒ 照填（只升不降）。
-    "tools/tests": 112,  # 2026-11-16 重釘 111→112（DEF-200-594 新鎖檔，實測 140；只升不降）
+    "tools/tests": 116,  # 2026-11-17 重釘 112→116（DEF-200-597～605 新鎖檔，實測 145；只升不降）
     # 🔴 R82 包 A2（DEBT-01）：204 → 205。新增 `AutoClaude/tests/contract/test_w6_deletion.py`
     # （AC2-2 的真斷言落點）後掃描面變 257，下限只剩實測的 79% ⇒ 依 `TREE_FLOOR_RATIO` 的
     # 防腐那一向轉紅。這正是它的設計意圖：下限不跟著長就會愈來愈鬆而沒有任何東西說話。
@@ -766,7 +766,10 @@ _SITE_CLASS_CENSUS: dict[str, dict[str, int]] = {
         # 哨兵 GC 隔離 HOME 根因修復（DEF-200-455）的進程級 e2e 曾以 `[MAC-NATIVE-ONLY]` skip 退場
         # （本格一度 33→34）；雲端 linux／win32 的 M6 與分群天花板當場紅（platform 群只准降）⇒
         # 改為非 macOS 走行程內同判準、不跳過，本格回到 33。
-        "runtime-skipTest": 33,
+        # 2026-11-17 重釘 `runtime-skipTest` 33→35（**非放寬**，同上：本表判準是「相等」）。
+        # 新站點＝`test_sessionctl_forward.py` 兩個測試函式體內的 `self.skipTest(...)`
+        # （hook／settings 尚未套用 UserPromptSubmit 時明說跳過、不假綠；套用後即真跑）。
+        "runtime-skipTest": 35,
         "unclassified": 0,
     },
     # 🔴 R81 包 F 重釘 `windows-only` 9→10：並行包在

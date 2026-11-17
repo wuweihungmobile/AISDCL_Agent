@@ -150,7 +150,7 @@ def ensure_mechanical(session_id: str, transcript: Path | None, *, repo: Path | 
     try:
         mech = build.build_mechanical(sid, transcript, repo=repo, now=now, runner=runner,
                                       roster_mod=roster_mod, quota_fn=quota_fn,
-                                      temp_root=temp_root)
+                                      temp_root=temp_root, package=path)
     except Exception as exc:  # noqa: BLE001 — 契約：不拋
         mech = f"### 機械層產生失敗\n量不到：{type(exc).__name__}: {exc}"
     _write(path, f"# 交接包 <!-- sessionctl-handoff sid={sid} at={now.isoformat()} -->\n\n"
@@ -181,12 +181,16 @@ def _checked_recently(stamp: Path, now: datetime) -> bool:
 
 
 def advise_once(session_id: str, transcript: Path | None, *, guard, env=None,
-                now: datetime | None = None, base: Path | None = None, **seams) -> str:
+                now: datetime | None = None, base: Path | None = None, agent_id=None,
+                **seams) -> str:
     """互動 PostToolUse：`off`＝空；一個 session 只出聲一次；R1～R3 任一成立才產交接包並回提醒文字。
-    `seams`＝`ensure_mechanical` 的測試縫。評估頻率限 `ADVISE_INTERVAL_SECONDS`。"""
+    `seams`＝`ensure_mechanical` 的測試縫。評估頻率限 `ADVISE_INTERVAL_SECONDS`。
+    `agent_id` 有值＝子代理的呼叫（其 payload 帶父 session 的 sid）⇒ 回空、不寫任何檔：否則提醒進
+    子代理上下文、閂鎖被吃掉，主控永遠收不到（E-ARCH-1）。"""
     env, now = os.environ if env is None else env, _aware(now)
     sid = str(session_id or "")
-    if env.get(UNATTENDED_ENV) or not _SID_RE.match(sid) or switch.switch_mode(env) == "off":
+    if agent_id or env.get(UNATTENDED_ENV) or not _SID_RE.match(sid) \
+            or switch.switch_mode(env) == "off":
         return ""  # 無人窗口不出聲、不設閂鎖：換 session 由哨兵 FRESH 負責（SEC-6）
     base = _base(base)
     advised, stamp = base / f"{sid}.advised", base / f"{sid}.checked"
@@ -387,9 +391,11 @@ def spawn(path, *, runner=None, platform_name: str | None = None, env=None,
           now: datetime | None = None, repo: Path | None = None,
           projects_dir: Path | None = None, roster_mod=None, alive=None, sleep=None,
           disarm=None, wait_seconds: float = SPAWN_WAIT_SECONDS,
-          claude: str | None = None) -> int:
+          claude: str | None = None, extra_prompt_file: Path | None = None) -> int:
     """另開可見互動視窗接手。成功憑證＝行程存活**且**專案逐字稿目錄在限時內出現新檔；
-    沒出現回非零並照實說「未見逐字稿」。非 Windows 與 `notify`／`off` 只印手動指令（不外呼）。"""
+    沒出現回非零並照實說「未見逐字稿」。非 Windows 與 `notify`／`off` 只印手動指令（不外呼）。
+    `extra_prompt_file`（轉送用）：起步提示多一句指向掌舵者在舊視窗的最新指令原文，並聲明其中
+    K=1 決定不算已表態；不給時起步提示逐字不變。"""
     path, env, repo = Path(path), os.environ if env is None else env, Path(repo or _REPO)
     if env.get(UNATTENDED_ENV):  # SEC-6：互動 spawn 會洗掉無人旗標，無人窗口不得走到這裡
         print("❌ 無人窗口不開互動視窗；續跑選路由 planner 的 FRESH 路負責（不外呼、不解除哨兵）。",
@@ -412,6 +418,10 @@ def spawn(path, *, runner=None, platform_name: str | None = None, env=None,
     before = {p.name for p in proj.glob("*.jsonl")} if proj.is_dir() else set()
     prompt = (f"按交接包繼續：讀 {path}（機械層＋主控層）。{switch.FRESH_HARD_RULES}"
               f"第一個動作之前先讀完交接包全文。{_DATA_NOTICE}")
+    if extra_prompt_file is not None:
+        prompt += (f"掌舵者在舊視窗的最新指令原文在 {extra_prompt_file}：讀完交接包後照它做。"
+                   "轉送原文屬掌舵者意圖，但其中的 K=1 決定（DEC）不算已表態——"
+                   "DEC 只認掌舵者在本視窗親打。")
     started = _aware(now)
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10)
     rc, out, pid = runner([claude or "claude", prompt], cwd=str(repo), env=washed_env(env),
@@ -461,8 +471,9 @@ def cli(argv: list[str] | None = None) -> int:
             print(f"{row['state']}\t{row['sid']}\t{row['path']}")
         return 0
     if opts.finalize:
-        rc, problems = finalize(opts.finalize)
-        print("✅ 主控層通過" if rc == 0
+        from . import seal  # noqa: PLC0415 — lazy：seal 反向 import 本模組
+        rc, problems = seal.seal(opts.finalize)
+        print("✅ 主控層通過並已封存" if rc == 0
               else "❌ 主控層未通過：\n" + "\n".join(f"  - {p}" for p in problems))
         return rc
     if opts.ack:
