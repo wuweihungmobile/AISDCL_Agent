@@ -29,8 +29,10 @@ EXPORT_ARMED = NE_PREFIX + "export-reads-no-home"
 SOP_REL = "docs/05_development/SelfImproving_Operations_SOP.md"
 OBS_LEDGER_PREFIX = "docs/06_quality/SelfImproving_Observation_Ledger"
 BACKTEST_PREFIX = "docs/06_quality/SelfImproving_Backtest/"  # P6：回測案例檔與結果帳本（SI 自有）
-_OWN_PREFIXES = (si_events.LEDGER_REL, si_events.PROPOSALS_REL + "/", OBS_LEDGER_PREFIX,
-                 "docs/06_quality/SelfImproving_Protocol/research_registry.json", BACKTEST_PREFIX)
+#: SI 自有寫入面（巡邏與 SI 動詞會自動寫的路徑前綴）。公開 SSOT：sessionctl 的 spawn 前置也據此
+#: 排除巡邏寫入（DEF-200-609），別處不得另抄一份。
+OWN_PREFIXES = (si_events.LEDGER_REL, si_events.PROPOSALS_REL + "/", OBS_LEDGER_PREFIX,
+                "docs/06_quality/SelfImproving_Protocol/research_registry.json", BACKTEST_PREFIX)
 _PS_QUERY = (f"$t = Get-ScheduledTask -TaskName '{ARMED_TASK}' -ErrorAction SilentlyContinue; "
              "if (-not $t) { 'ABSENT'; exit 0 }; $i = $t | Get-ScheduledTaskInfo; "
              "if ($i.NextRunTime) { $i.NextRunTime.ToString('o') } else { 'NONEXT' }")
@@ -295,7 +297,7 @@ def dirty_paths(repo: Path, git: Git | None = None) -> list[str]:
         if tok[0] in "RC" or tok[1] in "RC":
             paths.append(toks[i] if i < len(toks) else "")
             i += 1
-        out += [p for p in paths if p and not p.startswith(_OWN_PREFIXES)]
+        out += [p for p in paths if p and not p.startswith(OWN_PREFIXES)]
     return out
 
 

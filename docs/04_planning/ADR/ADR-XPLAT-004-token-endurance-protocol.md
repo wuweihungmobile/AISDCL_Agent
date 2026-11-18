@@ -521,7 +521,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 | D8 | 模型平衡建議（`--pace` 一行） | 已落地（2026-11-14） | `tools/lib/sessionctl/modelmix.py`；`tools/tests/test_sessionctl_modelmix.py`；AT-SC-81～84 |
 | hook 面 | 新增 `sessionctl_guard.py`、`context_budget_guard` 加 `switch_advice` 呼叫 | 已落地（2026-11-14；`.claude/` 由主控親套） | `.claude/hooks/sessionctl_guard.py`；`tools/tests/test_sessionctl_hooks.py::GuardRegistrationTest`；AT-SC-85～88 |
 | watch／監督（R3） | `sessionctl watch` 背景監督程序（交卷／停滯／超時／額度／保溫叫醒）、監督憑證與 Stop 監督閘、PreToolUse 派工附註、`status` 監督一行 | 已落地（2026-11-17，未提交；真機待做）→ §2.18 D1 | `tools/lib/sessionctl/watch.py`、`supervise.py`；`tools/tests/test_sessionctl_watch.py`、`test_sessionctl_supervise.py`；FR-W1～W9、FR-S4、AT-W* |
-| 封存／轉送（R3） | `--finalize` 升級為封存（`.sealed`＋prompts sidecar）、封存閘、已交棒判準、冷窗轉送與已交棒告知（`UserPromptSubmit`） | 已落地（2026-11-17，未提交；V-F1 真機待做）→ §2.18 D2～D4 | `tools/lib/sessionctl/seal.py`、`forward.py`；`.claude/hooks/sessionctl_guard.py`、`.claude/settings.json`；`tools/tests/test_sessionctl_seal.py`、`test_sessionctl_forward.py`；AT-S*、AT-F1～F8 |
+| 封存／轉送（R3） | `--finalize` 升級為封存（`.sealed`＋prompts sidecar）、封存閘、已交棒判準、冷窗轉送與已交棒告知（`UserPromptSubmit`） | 已落地（2026-11-17，`7c38492c`；V-F1 第一步 PASS、第二步暴露 DEF-200-609 已修、待重測，見 §2.18.3）→ §2.18 D2～D4 | `tools/lib/sessionctl/seal.py`、`forward.py`；`.claude/hooks/sessionctl_guard.py`、`.claude/settings.json`；`tools/tests/test_sessionctl_seal.py`、`test_sessionctl_forward.py`；AT-S*、AT-F1～F8 |
 
 第二段的承接帳本列 DEF-200-584 已結案；入口薄殼 `tools/sessionctl.py` 與 hook 皆已落地。🔴 互動視窗是否把 Stop 的 `systemMessage` 顯示給人、以及 TCS §3 的真機驗證 V1～V8，仍待主控真機目視，未驗。
 
@@ -1127,7 +1127,10 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - `background_tasks[].status` 值域只見 `running`；「在陣列裡＝進行中」是假設，缺 status 視為 running。interim 交卷時 `meta.finished` 未實測（V-W4）。
 - 轉送依「冷」判，冷熱由逐字稿最後一筆 assistant usage 時刻推定（±30 秒邊際）；ADR P5 `idleCompaction` 可能改變快取狀態（V-W3）。圖片提示不轉送、冷重寫照付；轉送只在 Windows 開窗，macOS／Linux 只注入提醒。
 - 跨 session 訊息、排程提示在 UserPromptSubmit 上與人打字不可分：靠機器注入前綴與 `session_crons` 記錄兩道；無標籤純文字的跨 session 訊息會被當成人打的字（TH-6），但仍需「已封存＋冷」才轉送、原文必落檔。實測（REV Q2 真實語料重放 75 逐字稿 1,630 筆）判假者中像真人 0。
-- **互動畫面是否顯示 Stop／UserPromptSubmit 的 block 理由未實測**（V-F1、V-W2）。若完全不顯示，掌舵者會看到提示「消失」⇒ 依 PLAN 裁決降為 notify（只注入提醒）；所以本節轉送與已交棒告知的「掌舵者看得到」仍屬**待真機目視**，未驗不得寫成已驗。
+- **V-F1 真機目視（2026-11-18）**：
+  - 第一步「已交棒告知」＝**PASS**（08:29:59，`claude -r 7f29adfb…` 叫回已交棒舊 session 打一句）：畫面顯示「UserPromptSubmit operation blocked by hook」＋完整理由＋`Original prompt`；轉送檔原文逐字一致（11 字、SHA-256 相符）；痕跡 `forward_handed_over outcome=block`。⇒ **互動畫面會顯示 UserPromptSubmit 的 block 理由**，不必降為 notify。
+  - 第二步「冷窗轉送」＝**FAIL → 已修（DEF-200-609）**（09:46:35，封存＋冷的 sid `85bcbec8` 打一句）：快取判冷，但 spawn 前置以「工作樹 3 行未提交」擋下（痕跡 `forward_pass cond=8`）；那 3 行是封存後 03:00 SI 巡邏自動寫入的帳本，巡邏每天寫 ⇒ 轉送實務上永遠開不了窗。且條件 8 的原因只進模型 context，畫面空白。修法：spawn 前置排除 SI 自有寫入面（SSOT＝`selfimproving.sched.OWN_PREFIXES`，混有非 SI 檔、改名出自有面、引號化路徑一律照舊拒絕）；條件 7／8 放行另帶 `systemMessage`。修後第二步待重測。
+  - Stop 的 `systemMessage`／block 理由（V-W2）仍待目視。
 - **理論洞 REV F10 不修**：`handoff --spawn` 與 `park_cli` 只做純驗證、不要求 `.sealed`；漏跑 `--finalize` 而直接 spawn／park 時，冷叫醒閘失明、I-4 封存被跳過。WHY 不修：**無暴露證據**（SOP 兩條路都先 `--finalize`；E-CW-1 只在偏離 SOP 時露出），依守衛面准入「量、不挖」登記證據檔〈理論洞清單〉、不同輪修；再開條件＝真實語料出現一例。其餘理論洞（TH-3 workflow／monitor 型監督、TH-4 環境變數差異入包、TH-5 scratchpad 被清、TH-6 無標籤跨 session 訊息、REV F4～F9／F11、auto-continuation 被標成掌舵者原文、P6H F5 watch 監督憑證以命令列子字串比對 sid，遇帶引號或含空白的路徑寫法可能落空）同登記、同理由。
 - 名冊認 TaskStop（DEF-200-606）只讀擁有者主逐字稿尾端 256 KB：killed 通知若早於該窗，代理在名冊上仍顯示為「殘局（未收尾記錄，非燒額度中）」，要等 10 分安靜門檻才不擋 `park`／`--spawn`；2026-11-18 `sessionctl status` 實見 `a51fe52e56c8ed299` 一例（只影響顯示，不燒額度），無阻斷暴露 ⇒ 登記不修。
 - 測試寫真實家目錄／暫存（E-TR-1、REV S1）已逐檔圍住；同族新測試須圍 `AUTOSDD_TRACE_DIR` 與 `tempfile.tempdir`；會寫額度快取（`quota_meter.write_cache`）或以子行程量額度的測試另須接模組級圍籬並預種讀數，不得讓子行程以真憑證量真額度（DEF-200-607；`test_run_root_unittests.py::TestWriterModulesDeclareTheModuleFence` 機械守寫端清單）。

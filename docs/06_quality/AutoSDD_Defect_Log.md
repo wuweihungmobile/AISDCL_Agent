@@ -379,6 +379,7 @@
 | DEF-200-606 | 2026-11-17 | 真機暴露（主控 sid `7ba13bb7` 22:26；本欄刻意零輪號） | **E-TS-1 名冊認不出 TaskStop**：被 TaskStop 的背景代理，harness 不在 `agent-*.meta.json` 寫 `finished`，`roster.running()` 要等 `AUTOSDD_ROSTER_QUIET_MINUTES` 才降 quiet ⇒ `park` 前置被擋 | P3 | 消除成因：名冊另認主逐字稿 harness 記錄（`queue-operation`／`attachment`）的 killed 通知，不縮門檻；`roster._killed_ids` | fixed：`7c38492c`；回歸 `test_sessionctl_roster.py::RosterStateTest::test_def_200_606_taskstopped_agent_leaves_the_roster`；突變轉紅；真逐字稿重放只抓到被停那支 |
 | DEF-200-607 | 2026-11-17 | nightly 2026-11-17 22:48 根層全套唯一紅（`nightly_2026-11-17_223002.log`；本欄刻意零輪號） | **watch CLI 測試不密閉**：`test_cli_all_done_after_shortened_grace` 的子行程在隔離快取為空時由 `pace_state` 以真憑證量真額度，短窗過門檻即 rc 5（quota） | P3 | 隔離快取預種新鮮低水位讀數（各平台皆不外呼） | fixed：`7c38492c`；負向自證＝種 99% 得 rc 5、種 1% 得 rc 0 |
 | DEF-200-608 | 2026-11-18 | pre-push 真機翻紅（commit `7c38492c`，`tools/.last_failure_7c38492c_20261117T171437Z.log`；本欄刻意零輪號） | **負載平衡測試用牆鐘門檻**：`LoadBalancingRegressionTest` 斷言總耗時 < 1.6×單支，pre-push 並行 leg 滿載時 pytest 載具量到 4.516s ⇒ 載具一致性鎖報兩載具分歧 | P3 | 消除成因：兩支慢模組各記起訖時刻，改判兩段是否重疊（序列執行必不重疊，與負載無關），不放寬門檻 | fixed：同輪修；突變 `worker_count=1` ⇒ 紅、還原 ⇒ 綠 |
+| DEF-200-609 | 2026-11-18 | 真機暴露（V-F1 第二步，sid `85bcbec8` 09:46，痕跡 `forward_pass cond=8`；本欄刻意零輪號） | **冷窗轉送被 SI 巡邏寫入擋死且畫面無聲**：spawn 前置把巡邏自動寫的帳本算成未提交工作 | P2 | 前置排除 SI 自有寫入面（SSOT `selfimproving.sched.OWN_PREFIXES`）；條件 7／8 帶 `systemMessage`；詳情 ADR-XPLAT-004 §2.18.3 | fixed：同輪修；回歸 `test_def609_*`（含真實重放）；突變轉紅；待重測 |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

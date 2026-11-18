@@ -97,9 +97,13 @@ def _hhmm(iso) -> str:
 
 
 # ───────────────────────────────────────────────────────────────── 判準
-def _passed(cond: int, sid: str, *, context: str = "", **fields) -> dict:
+def _passed(cond: int, sid: str, *, context: str = "", show: str = "", **fields) -> dict:
+    """`show`＝要讓掌舵者在畫面上看到的一行（hook 的 `systemMessage`）；空＝只進模型 context。"""
     switch.trace(EV_PASS, sid=sid, cond=cond, **fields)
-    return {"kind": "context" if context else "pass", "text": context}
+    out = {"kind": "context" if context else "pass", "text": context}
+    if show:
+        out["show"] = show
+    return out
 
 
 def _handed_over_verdict(pkg: Path, payload: dict, mode: str, now: datetime, alive) -> dict:
@@ -134,11 +138,17 @@ def _forward_verdict(pkg: Path, payload: dict, env, now: datetime, *, spawn, ali
     if crons(sid) is not False:
         return _passed(6, sid)  # 有排程或讀不到 ⇒ 不轉送（偏放行）
     hint = f"建議改到新 session（快取已冷）：python tools/sessionctl.py handoff --spawn {pkg}"
+    # 7／8 放行時掌舵者也要看得到「沒轉送、原因是 X」（DEF-200-609：原本只進模型 context，
+    # 真機畫面一片空白，無從得知轉送為何沒發生）。
     if mode != "auto" or plat != "win32":
-        return _passed(7, sid, context=hint)
+        why = f"模式＝{mode}" if mode != "auto" else f"平台＝{plat}（只有 Windows 自動開窗）"
+        return _passed(7, sid, context=hint,
+                       show=f"ℹ️ 快取已冷但沒有自動轉到新 session：{why}。這句照常送進本視窗。")
     left = preflight(pkg)
     if left:
-        return _passed(8, sid, context=hint + "（目前不能自動開：" + "；".join(left) + "）")
+        return _passed(8, sid, context=hint + "（目前不能自動開：" + "；".join(left) + "）",
+                       show="ℹ️ 快取已冷但沒有自動轉到新 session：" + "；".join(left)
+                       + "。這句照常送進本視窗。")
     refresh(pkg, transcript=tpath)  # A-2：封存後才打的真人提示補進 sidecar
     saved = write_forward(pkg, payload, now)
     if saved is None:
@@ -209,8 +219,11 @@ def hook_output(payload, env=None, **inject) -> dict | None:
         if verdict["kind"] == "block":
             return {"decision": "block", "reason": verdict["text"]}
         if verdict["kind"] == "context":
-            return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                           "additionalContext": verdict["text"]}}
+            out = {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                          "additionalContext": verdict["text"]}}
+            if verdict.get("show"):
+                out["systemMessage"] = verdict["show"]
+            return out
     except Exception:  # noqa: BLE001
         pass
     return None

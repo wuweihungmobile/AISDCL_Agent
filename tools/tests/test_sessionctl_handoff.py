@@ -534,6 +534,39 @@ class SpawnTest(_Base):
         rc, err = self.run_spawn(self.good_runner(status=" M a.py\n", tags="r1-wip-preserved\n"))
         self.assertEqual((rc, err), (0, ""))
 
+    #: 2026-11-18 09:46 真機重放（DEF-200-609）：封存後 03:00 SI 巡邏寫入的三行。
+    SI_PATROL_STATUS = (" M docs/06_quality/SelfImproving_Event_Ledger.jsonl\n"
+                        " M docs/06_quality/SelfImproving_Observation_Ledger.md\n"
+                        "?? docs/06_quality/SelfImproving_Proposals/_fourq/RUN-SI-012.md\n")
+
+    def test_def609_si_patrol_writes_alone_do_not_block_spawn(self) -> None:
+        """DEF-200-609 WHY：SI 巡邏每天自動寫帳本；若這些寫入也算「未提交工作」，封存後的轉送與
+        spawn 實務上永遠開不了窗（真機 09:46 即此）。只有 SI 自有寫入面時該條須通過。"""
+        rc, err = self.run_spawn(self.good_runner(status=self.SI_PATROL_STATUS))
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_def609_real_work_mixed_with_si_writes_is_still_refused(self) -> None:
+        """WHY：排除只限 SI 自有面；混著一支真正做到一半的檔、改名出自有面、或引號化路徑
+        都必須照舊拒絕，否則等於把可重啟點第 1 條整個拿掉。行數只算非 SI 那幾行。"""
+        cases = {
+            "mixed": self.SI_PATROL_STATUS + " M tools/lib/sessionctl/forward.py\n",
+            "rename-out": "R  docs/06_quality/SelfImproving_Event_Ledger.jsonl -> a.jsonl\n",
+            "quoted": '?? "docs/06_quality/SelfImproving_Proposals/a b.md"\n',
+        }
+        for name, status in cases.items():
+            with self.subTest(case=name):
+                rc, err = self.run_spawn(self.good_runner(status=status))
+                self.assertEqual(rc, 1)
+                self.assertIn("工作樹有 1 行未提交變更", err)
+
+    def test_def609_ssot_is_the_selfimproving_prefix_tuple(self) -> None:
+        """WHY：SI 自有路徑只准一份（sched.OWN_PREFIXES）；SI 新增寫入面時 spawn 前置自動跟上。"""
+        from lib.selfimproving import sched  # noqa: PLC0415
+        with unittest.mock.patch.object(sched, "OWN_PREFIXES", ("zzz/",)):
+            self.assertTrue(handoff._si_owned(" M zzz/x.md"))
+            self.assertFalse(
+                handoff._si_owned(" M docs/06_quality/SelfImproving_Event_Ledger.jsonl"))
+
     def test_git_failure_refuses_conservatively(self) -> None:
         """量不到工作樹狀態 ⇒ 保守拒絕（量不到不等於乾淨）。"""
         rc, err = self.run_spawn(self.good_runner(git_rc=128))

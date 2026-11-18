@@ -197,6 +197,31 @@ class PathOneForwardTest(_Base):
             self.assertIn("handoff --spawn", out["text"])
         self.assertEqual(self.spawned, [])
 
+    def test_def609_not_forwarding_is_shown_on_screen_with_the_reason(self) -> None:
+        """DEF-200-609 WHY：真機 09:46 條件 8 放行時原因只進模型 context，掌舵者畫面一片空白、
+        無從得知轉送為何沒發生。7／8 放行必須帶 `systemMessage`（畫面可見）且寫出原因。"""
+        payload = {"session_id": SID, "transcript_path": str(self.transcript),
+                   "prompt_id": "abcdef0123", "prompt": "測試 V-F1 轉送",
+                   "hook_event_name": "UserPromptSubmit"}
+        base = {"spawn": self.fake_spawn, "alive": lambda pid: False,
+                "cache": lambda p, n: {"cold": True, "idle_s": 4000.0},
+                "crons": lambda sid: False, "refresh": lambda p, **kw: None, "now": NOW}
+        cases = {8: ({"preflight": lambda p: ["工作樹有 3 行未提交變更"], "platform_name": "win32"},
+                     "工作樹有 3 行未提交變更"),
+                 7: ({"preflight": lambda p: [], "platform_name": "linux"}, "linux")}
+        for cond, (over, reason) in cases.items():
+            with self.subTest(cond=cond):
+                out = forward.hook_output(payload, os.environ, **base, **over)
+                self.assertIn(reason, out["systemMessage"])
+                self.assertIn("沒有自動轉到新 session", out["systemMessage"])
+                self.assertIn("handoff --spawn",
+                              out["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.spawned, [])
+        # 其他放行（熱快取）維持靜默：不讓每句話都冒一行
+        self.assertIsNone(forward.hook_output(
+            payload, os.environ, **{**base, "cache": lambda p, n: {"cold": False}},
+            preflight=lambda p: [], platform_name="win32"))
+
     def test_hot_cache_stays_in_place(self) -> None:
         """AT-F6 WHY：快取熱時留下更便宜（ARCH §2.4 例二：<22 次呼叫），不轉。"""
         out = self.verdict("短追問", cache=lambda p, n: {"cold": False, "idle_s": 30.0})

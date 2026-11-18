@@ -322,6 +322,23 @@ def _trace(event: str, **fields) -> None:
     switch.trace(event, **fields)  # 本體在 switch.trace（fields 可覆寫 at：spawn 痕跡記當下）
 
 
+def _si_owned(line: str) -> bool:
+    """`git status --short` 一行是否只動 SI 自有寫入面（DEF-200-609）。
+
+    WHY：SI 巡邏每天 03:00 自動寫事件帳本／觀察帳本／四問答案檔；封存後這些寫入讓工作樹變髒，
+    轉送與 spawn 因此永遠開不了窗（2026-11-18 09:46 真機）。這些檔是巡邏的產物、不是本 session
+    做到一半的工作，新 session 接手同一棵樹後照慣例另開 chore(si) 提交即可，不會遺失。
+    路徑前綴 SSOT＝`selfimproving.sched.OWN_PREFIXES`；載入失敗、引號化路徑（非 ASCII）或
+    改名任一端不在自有面 ⇒ 不排除（保守，回到原本的拒絕）。"""
+    try:
+        from lib.selfimproving.sched import OWN_PREFIXES  # noqa: PLC0415 — 只在要判時付成本
+    except Exception:  # noqa: BLE001 — 讀不到 SSOT 就不排除任何一行
+        return False
+    body = line[3:] if len(line) > 3 else ""
+    paths = body.split(" -> ") if " -> " in body else [body]
+    return all(p and not p.startswith('"') and p.startswith(OWN_PREFIXES) for p in paths)
+
+
 def _refusals(path: Path, runner, repo: Path, roster_mod) -> list[str]:
     """spawn 三前置（缺一拒絕）：①finalize ②工作樹乾淨或 HEAD 有 wip-preserved ③無執行中代理。"""
     rc, problems = finalize(path)
@@ -332,6 +349,7 @@ def _refusals(path: Path, runner, repo: Path, roster_mod) -> list[str]:
     if status is None or tags is None:
         return [f"量不到工作樹狀態（{why or 'git tag 失敗'}）⇒ 保守拒絕"]
     out = []
+    status = [ln for ln in status if not _si_owned(ln)]
     if status and not tags:
         out.append(f"工作樹有 {len(status)} 行未提交變更且 HEAD 無 *{build.WIP_SUFFIX} 標籤"
                    "（先 commit，或 `git stash create`＋tag 保全）")

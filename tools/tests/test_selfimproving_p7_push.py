@@ -379,7 +379,7 @@ class TestCommit(ChainTestCase):
         other = fx.pid(77)
         fx.put(R, f"{PROPS}/{other}/x.md", "別的提案目錄的未提交檔\n")  # ① 另一個 PROP 的目錄
         reg = f"{si_params.PROTOCOL_REL}/research_registry.json"
-        # ② 已暫存的 research_registry.json（在 _OWN_PREFIXES、不在 commit_allow）
+        # ② 已暫存的 research_registry.json（在 OWN_PREFIXES、不在 commit_allow）
         fx.put(R, reg, "{}\n")
         fx.git(R, "add", "--", reg)
         bare = self.with_remote(R)
