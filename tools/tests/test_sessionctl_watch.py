@@ -25,7 +25,7 @@ import quota_policy_env  # noqa: E402
 import sentinel_lifecycle as SL  # noqa: E402  # 模組級圍籬原語（本模組寫額度快取＝寫端）
 import unattended_authz  # noqa: E402
 
-from lib.sessionctl import switch, watch  # noqa: E402
+from lib.sessionctl import keepwarm, switch, watch  # noqa: E402
 from lib.wastecensus import supervision  # noqa: E402
 
 _MODULE_FENCES: list[dict] = []  # 模組級圍籬 handle 堆疊（後進先出）
@@ -82,7 +82,7 @@ class _Clock:
     def now(self) -> float:
         return self.t
 
-    #: 合法案例最多睡約 100 輪（保溫點 50 分÷輪詢 30 秒）；超過＝watch 迴圈不會自己停。
+    #: 合法案例最多睡約 100 輪（保溫點 45 分÷輪詢 30 秒）；超過＝watch 迴圈不會自己停。
     #: WHY（QA P3-1）：突變拿掉保溫判斷時，測試是無限迴圈而不是紅燈，CI 只能等 job 逾時、
     #: 也看不出根因；有上限就變成一條指名的失敗。
     MAX_SLEEPS = 10_000
@@ -97,12 +97,15 @@ class _Clock:
 
 
 def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None, quota=False,
-         poll: float = 30.0) -> tuple[int, str, _Clock]:
+         poll: float = 30.0, anchor=None) -> tuple[int, str, _Clock]:
+    """`anchor`＝主控最後一筆 usage 記錄的 epoch（`None`＝量不到，退回 watch 啟動時刻）。
+    縫一律注入：
+    不讓測試去讀真實 `~/.claude/projects` 裡剛好同 sid 的逐字稿（那會讓時鐘假值與真記錄相減）。"""
     clock = clock or _Clock()
     out = io.StringIO()
     rc = watch.run(SID, cfg or watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=poll,
                    roster_fn=roster_fn, end_turn_fn=lambda a: bool(a.get("end_turn")),
-                   quota_fn=lambda: quota, out=out, pid=4242)
+                   quota_fn=lambda: quota, anchor_fn=lambda: anchor, out=out, pid=4242)
     return rc, out.getvalue(), clock
 
 
@@ -162,15 +165,42 @@ class EventTests(_Fence):
                           cfg=watch.Cfg(wall_min=9999), clock=clock)
         self.assertEqual(rc, 6)
         self.assertIn("WATCH_VERDICT=keepwarm", out)
-        self.assertGreaterEqual(clock.t - T0, 50 * MIN)
+        self.assertGreaterEqual(clock.t - T0, 45 * MIN)
 
     def test_w6_keepwarm_boundary_in_decide(self) -> None:
         """保溫點邊界（QA P3-1）。WHY：只靠常數值斷言與迴圈時，拿掉 `decide` 的保溫判斷不會紅
-        （迴圈卡住）；這條直接釘「watch 啟動滿 50 分成立、差 1 秒不成立」。"""
+        （迴圈卡住）；這條直接釘「錨點（量不到時為 watch 啟動）滿 45 分成立、差 1 秒不成立」。
+        45 分＝R216 保溫截止（早於閒置約 55 分的自動壓縮）；改回 50 分這條會紅。"""
         agents = [_agent(last=T0, started=T0)]
         cfg = watch.Cfg(wall_min=9999)
-        self.assertEqual(watch.decide(agents, T0, T0 - 50 * MIN, cfg, False)[0], "keepwarm")
-        self.assertIsNone(watch.decide(agents, T0, T0 - 50 * MIN + 1, cfg, False))
+        self.assertEqual(watch.decide(agents, T0, T0 - 45 * MIN, cfg, False)[0], "keepwarm")
+        self.assertIsNone(watch.decide(agents, T0, T0 - 45 * MIN + 1, cfg, False))
+
+    def test_at_ss_24_keepwarm_is_anchored_on_the_last_main_record_not_on_watch_start(self) -> None:
+        """AT-SS-24（MU-05）。WHY：主控在 watch 執行前已閒置 10 分鐘——快取是從主控最後一筆請求起算
+        的，不是從 watch 啟動起算；錨 started_at 會晚 10 分鐘叫醒、越過閒置自動壓縮的邊緣。"""
+        clock = _Clock(start=T0 + 10 * MIN)  # watch 啟動於 T0+10，主控最後記錄 T0
+        rc, out, clock = _run(lambda: [_agent(last=clock.now(), started=clock.now())],
+                              cfg=watch.Cfg(wall_min=9999), clock=clock, anchor=T0)
+        self.assertEqual(rc, 6)
+        self.assertEqual(clock.t - T0, 45 * MIN)  # 於 T0+45 判 keepwarm（不是 T0+55）
+        self.assertIn("WATCH_VERDICT=keepwarm", out)
+        # 反向：錨點新（主控剛剛才動過）⇒ 保溫點往後延，不因 watch 啟動久了而提早叫醒
+        late = T0 + 50 * MIN
+        decided = watch.decide([_agent(last=late, started=late)], late, T0, watch.Cfg(
+            wall_min=9999), False, kw_anchor=T0 + 40 * MIN)
+        self.assertIsNone(decided)
+
+    def test_heartbeat_keepwarm_at_follows_the_anchor(self) -> None:
+        """WHY：`status`／Stop 出聲的「下次叫醒最晚 HH:MM」讀心跳的 keepwarm_at；錨點變了它不跟著
+        變，主控看到的叫醒時間就是假的。"""
+        seen: list[dict] = []
+        clock = _Clock(on_sleep=lambda c: seen.append(
+            json.loads(watch.heartbeat_path(SID).read_text(encoding="utf-8"))))
+        _run(lambda: [_agent(last=clock.now(), started=clock.now())],
+             cfg=watch.Cfg(wall_min=9999), clock=clock, anchor=T0 - 10 * MIN)
+        stamp = datetime.fromisoformat(seen[0]["keepwarm_at"]).timestamp()
+        self.assertEqual(stamp, T0 - 10 * MIN + 45 * MIN)
 
     def test_w7_end_turn_agent_is_not_stalled(self) -> None:
         """AT-W7（FR-W3）。WHY：代理已 end_turn 在等自己的背景 shell 時合法長時間靜默，判 stall
@@ -225,6 +255,77 @@ class EventTests(_Fence):
         ""))
 
 
+class QuotaLatchTests(_Fence):
+    """D14／AT-SS-20～23：prepare 帶時 `quota_hit` 每輪都成立，舊版 watch 一掛即 rc 5、重掛照樣
+    觸發（2026-11-18 21:26 真機：prepare 帶內監督形同失效）。定案＝同 reset 窗同帶只觸發一次。"""
+
+    def _two_rounds(self, first, second) -> tuple[int, int]:
+        cfg = watch.Cfg(wall_min=9999)
+        rcs = []
+        for key in (first, second):
+            clock = _Clock()
+            rcs.append(_run(lambda c=clock: [_agent(last=c.now(), started=c.now())], cfg=cfg,
+                            clock=clock, quota=key)[0])
+        return rcs[0], rcs[1]
+
+    def test_at_ss_20_same_window_same_band_fires_once(self) -> None:
+        """WHY：重掛後又立刻 rc 5，主控就沒有任何辦法在 prepare 帶內監督代理（缺陷本體）。"""
+        first, second = self._two_rounds(("prepare", "R"), ("prepare", "R"))
+        self.assertEqual(first, 5)
+        self.assertEqual(second, 6)  # 第二次不因 quota 結束，改由保溫點結束
+        rows = [json.loads(x) for x in (self.tmp / "trace" / "autosdd_session_switch.jsonl")
+                .read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(sum(r["event"] == keepwarm.EV_QUOTA_LATCHED for r in rows), 1)
+
+    def test_at_ss_21_band_upgrade_fires_again(self) -> None:
+        """WHY（MU-10 閂鎖鍵漏帶級）：prepare→halt 是更嚴重的事，被前一次的閂鎖吞掉＝盲區。"""
+        self.assertEqual(self._two_rounds(("prepare", "R"), ("halt", "R")), (5, 5))
+
+    def test_a_lower_band_in_the_same_window_stays_latched(self) -> None:
+        """WHY：同窗內 halt 已提醒過，讀數抖回 prepare 不該再吵一次（閂鎖記的是該窗最高帶）。"""
+        self.assertEqual(self._two_rounds(("halt", "R"), ("prepare", "R")), (5, 6))
+
+    def test_at_ss_22_new_reset_window_fires_again(self) -> None:
+        """WHY（MU-11 閂鎖鍵漏 reset）：閂鎖作用域＝一個 reset 窗；新窗是新的額度週期。"""
+        self.assertEqual(self._two_rounds(("prepare", "R"), ("prepare", "R+5h")), (5, 5))
+
+    def test_reset_jitter_across_a_minute_boundary_is_the_same_window(self) -> None:
+        """WHY（2026-11-19 00:48／00:54 主控真機）：端點 reset 落在 :59:59.99 一帶，取分鐘後在 03:59
+        與 04:00 間跳；字串比對把同窗當新窗，重掛又 rc 5——閂鎖修了等於沒修。"""
+        a, b = "2026-11-19T04:00:00+08:00", "2026-11-19T03:59:00+08:00"
+        self.assertEqual(self._two_rounds(("prepare", a), ("prepare", b)), (5, 6))
+        far = "2026-11-19T09:00:00+08:00"  # 反向：真的新窗（差數小時）仍要再觸發
+        self.assertEqual(self._two_rounds(("prepare", b), ("prepare", far))[1], 5)
+
+    def test_a_bare_true_from_the_seam_is_a_latchable_prepare(self) -> None:
+        """WHY：舊縫回 bool；True 視為「無鍵的 prepare」也要受閂鎖管，不然舊呼叫端繞過缺陷修復。"""
+        self.assertEqual(self._two_rounds(True, True), (5, 6))
+
+    def test_at_ss_23_broken_latch_file_still_fires_and_says_so(self) -> None:
+        """WHY（MU-12 讀失敗時吞事件）：額度牆是不可逆的事；閂鎖壞了寧可再吵一次，也不靜默吞掉。"""
+        path = keepwarm.latch_path(SID)
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            rc, _out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
+        self.assertEqual(rc, 5)
+        self.assertIn("額度閂鎖", buf.getvalue())
+
+    def test_unwritable_latch_still_fires_and_says_so(self) -> None:
+        """WHY：寫不進閂鎖＝無法保證「只一次」，但絕不能因此吞掉事件。"""
+        (self.tmp / "trace" / "watch").write_text("我是檔案不是目錄", encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            rc, _out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
+        self.assertEqual(rc, 5)
+        self.assertIn("額度閂鎖寫不進", buf.getvalue())
+
+    def test_quota_disposal_row_says_a_rehang_will_not_refire(self) -> None:
+        """WHY：被叫醒的主控沒有上下文，處置表是它唯一知道「重掛安全」的地方。"""
+        self.assertIn("同一 reset 窗同一帶不會再觸發", watch.DISPOSAL["quota"])
+
+
 class ConfigTests(_Fence):
     def test_w8_stall_floor_is_11(self) -> None:
         """AT-W8。WHY：前景工具逾時上限 600 秒；門檻低於 11 分會把合法的長指令誤判停滯。"""
@@ -258,15 +359,27 @@ class ConfigTests(_Fence):
         self.assertEqual(watch.resolve_cfg({switch.WATCH_WALL_KEY: "30"}, wall_min=45).wall_min, 45)
 
     def test_keepwarm_constant_is_below_cache_lifetime(self) -> None:
-        """方向鎖。WHY：主控快取壽命 1 小時；保溫點 ≥ 60 分就等於沒保溫（醒來時快取已冷）。"""
-        self.assertLess(watch.KEEPWARM_MINUTES, 60)
+        """方向鎖。WHY：主控快取壽命 1 小時、閒置約 55 分鐘 harness 會自動壓縮；保溫點 ≥ 55 分就
+        等於沒保溫（醒來時快取已冷或上下文已被砍）。出廠值唯一的家是 ENV_SPEC，常數與它漂開時
+        `watch.Cfg` 預設就和 env 解析不一致。"""
+        self.assertLess(watch.KEEPWARM_MINUTES, 55)
+        self.assertEqual(watch.KEEPWARM_MINUTES, 45)
         self.assertEqual(watch.keepwarm_minutes({}), watch.KEEPWARM_MINUTES)
+        spec = {s.name: s.default for s in quota_policy_env.ENV_SPEC}
+        self.assertEqual(spec[keepwarm.MINUTES_KEY], watch.KEEPWARM_MINUTES)
+
+    def test_keepwarm_env_only_lowers_the_watch_keepwarm_point(self) -> None:
+        """WHY：env 只准下修（放寬＝保溫點越過閒置壓縮）；watch 與 keepwarm 指令吃同一個解析。"""
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            self.assertEqual(watch.keepwarm_minutes({keepwarm.MINUTES_KEY: "30"}), 30)
+            self.assertEqual(watch.keepwarm_minutes({keepwarm.MINUTES_KEY: "60"}), 45)
 
     def test_keepwarm_in_unattended_window_stays_below_harness_ceiling(self) -> None:
         """WHY：無人窗口 harness 會在背景等待上限把行程全停掉；keepwarm 必須先於它醒。"""
         ceiling = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS / 60
         got = watch.keepwarm_minutes({"AUTOSDD_UNATTENDED": "1"})
-        self.assertEqual(got, min(watch.KEEPWARM_MINUTES, ceiling - 5))
+        self.assertEqual(got, min(watch.KEEPWARM_MINUTES, ceiling - 5))  # 數字現查常數，不寫死
         with mock.patch.object(unattended_authz, "RESUME_BG_WAIT_CEILING_SECONDS", 600):
             self.assertEqual(watch.keepwarm_minutes({"AUTOSDD_UNATTENDED": "1"}), 5)
 

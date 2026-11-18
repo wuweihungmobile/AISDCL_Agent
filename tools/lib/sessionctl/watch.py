@@ -19,7 +19,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz
 
-from . import procstop, roster, switch
+from . import keepwarm, procstop, roster, switch
 
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
@@ -30,8 +30,9 @@ RC = {"all_done": 0, "overrun": 2, "stall": 3, "budget": 4, "quota": 5, "keepwar
 #: stall（代理已死，繼續等純浪費）＞ overrun（慢但可能仍在做事）＞ all_done（只在無未交卷代理時才
 #: 成立，與前四者互斥）＞ keepwarm（純保溫，任何實質事件都比它重要）。
 ORDER = ("quota", "budget", "stall", "overrun", "all_done", "keepwarm")
-#: 主控快取壽命 1 小時（EV 2c）；留 10 分鐘給「主控最後一筆請求晚於 watch 啟動」與排程誤差。
-KEEPWARM_MINUTES = 50
+#: 保溫點＝主控**最後一筆帶 usage 的 assistant 記錄**＋45 分（R216：早於閒置約 55 分的自動壓縮與
+#: 1 小時快取壽命；錨點不是 watch 啟動時刻）。數字與錨點函式唯一的家＝`keepwarm.py`。
+KEEPWARM_MINUTES = keepwarm.DEFAULT_MINUTES
 _KEEPWARM_MARGIN_MINUTES = 5  # 無人窗口：離 harness 背景等待上限至少留這麼多分鐘
 STALL_FLOOR_MINUTES = 11  # 前景工具逾時 600 秒＋餘裕
 STALL_DEFAULT_MINUTES = 15
@@ -40,12 +41,12 @@ GRACE_SECONDS = 150.0
 POLL_SECONDS = 30.0
 #: 判決後主控該做什麼（ARCH §1.5 處置表，逐字）；判決行之後印對應那一列。
 DISPOSAL = {
-    "all_done": "收交卷；若上下文 ≥ R1 且無後續自主工作 ⇒ 封存（Stop 也會推）；有後續 ⇒ 繼續派工並重掛 watch",  # noqa: E501
+    "all_done": "收交卷；若上下文 ≥ 硬線 HARD 且無後續自主工作 ⇒ 封存（Stop 也會推）；有後續 ⇒ 繼續派工並重掛 watch",  # noqa: E501
     "keepwarm": "什麼都不判、`python tools/sessionctl.py status` 不必跑；只重掛 watch 後結束回合（本回合輸出 ≤ 50 token）",  # noqa: E501
     "stall": "`sessionctl status` 看該代理最後一筆；確定卡住 ⇒ TaskStop 它、派新代理＋短任務書（指向它的 HB 檔；不得 SendMessage 冷續，`resume_gate` 也會擋）；重掛 watch",  # noqa: E501
     "overrun": "讀它的 HB：快完成 ⇒ 重掛 watch 並 `--wall-min <現值+30>`（每支至多一次）；否則 TaskStop＋拆小重派",  # noqa: E501
     "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
-    "quota": "估剩餘：代理快完成 ⇒ 重掛 watch，等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
+    "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
 }
 UNKNOWN_DISPOSAL = "watch 自己壞了（未知 rc／無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
 
@@ -60,12 +61,14 @@ class Cfg:
 
 
 def keepwarm_minutes(env=None) -> float:
-    """50 分常數；無人窗口（`AUTOSDD_UNATTENDED`）＝min(50, harness 背景等待上限分鐘−5)。"""
+    """`T_kw`（`keepwarm.t_kw_minutes`：出廠 45、env 只准下修）；無人窗口（`AUTOSDD_UNATTENDED`）＝
+    min(T_kw, harness 背景等待上限分鐘−5)。"""
     env = os.environ if env is None else env
+    base = keepwarm.t_kw_minutes(env)
     if env.get("AUTOSDD_UNATTENDED"):
         ceiling = unattended_authz.RESUME_BG_WAIT_CEILING_SECONDS / 60
-        return min(KEEPWARM_MINUTES, ceiling - _KEEPWARM_MARGIN_MINUTES)
-    return KEEPWARM_MINUTES
+        return min(base, ceiling - _KEEPWARM_MARGIN_MINUTES)
+    return base
 
 
 def _num(raw) -> float | None:
@@ -121,10 +124,12 @@ def _label(agent: dict) -> str:
 
 
 def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
-           seen: bool = False) -> tuple[str, int, str] | None:
+           seen: bool = False, kw_anchor: float | None = None) -> tuple[str, int, str] | None:
     """純函式：回 `(事件, rc, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
     `finished!=true`），每項可帶 `end_turn: bool`（最後一筆是 assistant end_turn＝在等自己的
-    背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。"""
+    背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。
+    `kw_anchor`＝主控最後一筆帶 usage 的 assistant 記錄時刻（`keepwarm.anchor`）；保溫點＝它＋
+    `keepwarm_min`，量不到（`None`）才退回 `started_at`（舊行為，只會更晚）。"""
     found: dict[str, str] = {}
     if quota_hit:
         found["quota"] = "短窗額度原始讀數已達 prepare 門檻（reset 在未來）"
@@ -151,8 +156,10 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
         found["overrun"] = f"自啟動起已 ≥ {cfg.wall_min:g} 分仍未交卷：\n{rows}"
     if not agents and (seen or now - started_at >= cfg.grace_sec):
         found["all_done"] = "全部交卷（或寬限期後從未出現未交卷代理）"
-    if now - started_at >= cfg.keepwarm_min * 60:
-        found["keepwarm"] = f"watch 已啟動 ≥ {cfg.keepwarm_min:g} 分（主控快取壽命 1 小時，保溫點）"
+    ref = started_at if kw_anchor is None else kw_anchor
+    if now - ref >= cfg.keepwarm_min * 60:
+        found["keepwarm"] = (f"距主控最後一筆記錄已 ≥ {cfg.keepwarm_min:g} 分"
+                             "（主控快取壽命 1 小時，保溫點）")
     for name in ORDER:
         if name in found:
             return name, RC[name], found[name]
@@ -168,11 +175,14 @@ def _stamp(epoch: float) -> str:
     return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds")
 
 
-def write_heartbeat(sid: str, cfg: Cfg, started_at: float, now: float, pid: int) -> None:
+def write_heartbeat(sid: str, cfg: Cfg, started_at: float, now: float, pid: int,
+                    kw_anchor: float | None = None) -> None:
     """每輪覆寫；時間戳帶 offset。不用 os.replace（非原子，同 `park.write_marker`／`quota_rush`）：
-    讀端解析失敗一律當「讀不動」fail-open，不會因撕裂讀取而誤判。"""
+    讀端解析失敗一律當「讀不動」fail-open，不會因撕裂讀取而誤判。`keepwarm_at`＝保溫錨點
+    （`kw_anchor`，量不到退回 `started_at`）＋保溫分鐘數。"""
+    ref = started_at if kw_anchor is None else kw_anchor
     row = {"schema": SCHEMA, "pid": pid, "started_at": _stamp(started_at),
-           "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(started_at + cfg.keepwarm_min * 60),
+           "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(ref + cfg.keepwarm_min * 60),
            "stall_min": cfg.stall_min, "wall_min": cfg.wall_min, "ctx_max": cfg.ctx_max}
     try:
         path = heartbeat_path(sid)
@@ -202,32 +212,53 @@ def ended_turn(sid: str, agent_id: str, projects_dir=None) -> bool:
             and msg.get("stop_reason") == "end_turn")
 
 
-def quota_hit_now(now: float | None = None) -> bool:
-    """短窗軸原始讀數 ≥ prepare 且 reset 在未來；重用 `park.prepare_hits`（讀快取、不外呼）。
-    讀不到／任何例外 ⇒ False（不成立）。"""
+def quota_key_now(now: float | None = None) -> tuple[str, str] | None:
+    """短窗軸原始讀數 ≥ prepare 且 reset 在未來 ⇒ 閂鎖鍵 `(帶級, reset 分鐘)`；重用
+    `park.prepare_hits`（讀快取、不外呼）。帶級＝原始讀數 ≥ halt 門檻為 `halt`、否則 `prepare`。
+    沒命中／讀不到／任何例外 ⇒ `None`（不成立）。"""
     try:
         from . import park  # noqa: PLC0415 — lazy：park 吃 quota 模組，監督迴圈不該為此付匯入成本
 
         when = datetime.fromtimestamp(now).astimezone() if now else datetime.now().astimezone()
-        hits = park.prepare_hits(park._pace_state(when), park._policy(), when)
-        return bool(hits)
+        policy = park._policy()
+        hits = park.prepare_hits(park._pace_state(when), policy, when)
+        if not hits:
+            return None
+        reset = park.reset_of(hits)
+        band = "halt" if max(a.pct for a in hits) >= policy.halt_pct else "prepare"
+        return band, (reset.astimezone().replace(second=0, microsecond=0).isoformat()
+                      if reset is not None else "unknown")
     except Exception:  # noqa: BLE001 — 額度快取讀不到不得讓監督崩潰
-        return False
+        return None
+
+
+def _anchor_reader(sid: str, projects_dir):
+    """每輪讀主控逐字稿尾端的保溫錨點；逐字稿路徑找到就快取（找不到每輪再找）。"""
+    found: list[Path | None] = [None]
+
+    def read() -> float | None:
+        if found[0] is None:
+            found[0] = keepwarm.find_transcript(sid, projects_dir)
+        return keepwarm.anchor(found[0])
+    return read
 
 
 def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         poll_sec: float = POLL_SECONDS, roster_fn=None, end_turn_fn=None, quota_fn=None,
-        out=None, pid: int | None = None, projects_dir=None) -> int:
+        out=None, pid: int | None = None, projects_dir=None, anchor_fn=None) -> int:
     """阻塞輪詢；第一個事件成立即印明細、處置表對應列、`WATCH_VERDICT=` 末行並回 rc。
     縫（全可注入）：now_fn()->epoch、sleep_fn(sec)、roster_fn()->未交卷代理 list、
-    end_turn_fn(agent)->bool、quota_fn()->bool。"""
+    end_turn_fn(agent)->bool、quota_fn()->None｜(帶級, reset 分鐘)｜True（True＝無鍵的 prepare）、
+    anchor_fn()->主控最後一筆 usage 記錄的 epoch｜None。額度事件過閂鎖（`keepwarm.quota_latch`）：
+    同 reset 窗同帶只觸發一次，之後該輪視為未命中。"""
     out = out or sys.stdout
     roster_fn = roster_fn or (
         lambda: roster.snapshot(sid, projects_dir=projects_dir, full=False)["agents"])
     end_turn_fn = end_turn_fn or (lambda a: ended_turn(sid, str(a.get("id")), projects_dir))
-    quota_fn = quota_fn or (lambda: quota_hit_now(now_fn()))
+    quota_fn = quota_fn or (lambda: quota_key_now(now_fn()))
+    anchor_fn = anchor_fn or _anchor_reader(sid, projects_dir)
     pid = os.getpid() if pid is None else pid
-    started, seen = now_fn(), False
+    started, seen, latched = now_fn(), False, False
     try:
         while True:
             now = now_fn()
@@ -237,7 +268,15 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 last = _epoch(a.get("last_at"))
                 if last is not None and now - last >= cfg.stall_min * 60:
                     a["end_turn"] = bool(end_turn_fn(a))
-            verdict = decide(agents, now, started, cfg, quota_fn(), seen=seen)
+            hit, anchor = quota_fn(), anchor_fn()
+            quota_hit = False
+            if hit:
+                band, reset = hit if isinstance(hit, tuple) else ("prepare", "unknown")
+                quota_hit = keepwarm.quota_latch(sid, band, reset)
+                if not quota_hit and not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
+                    latched = True
+                    switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=band, reset=reset)
+            verdict = decide(agents, now, started, cfg, quota_hit, seen=seen, kw_anchor=anchor)
             if verdict is not None:
                 event, rc, detail = verdict
                 print(f"[{_stamp(now)}] {event}：{detail}", file=out)
@@ -245,7 +284,7 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, rc=rc, agents=len(agents))
                 print(f"WATCH_VERDICT={event} n={len(agents)} rc={rc}", file=out, flush=True)
                 return rc
-            write_heartbeat(sid, cfg, started, now, pid)
+            write_heartbeat(sid, cfg, started, now, pid, anchor)
             sleep_fn(poll_sec)
     finally:
         _drop_heartbeat(sid)

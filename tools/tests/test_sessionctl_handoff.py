@@ -402,7 +402,10 @@ class AnnounceTest(_Base):
     def test_at47_after_ack_it_stays_silent(self) -> None:
         """AT-SC-47：`ack(path)` 後 ⇒ 該份不再出聲。"""
         path = self._pkg("live1")
-        self.assertEqual(handoff.ack(path), 0)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(handoff.ack(path), 0)
+        self.assertIn("舊視窗可以關閉", out.getvalue())  # DEF-200-611 D-2b：只提醒、不自動關窗
         self.assertTrue(path.with_suffix(".ack").is_file())
         said: list[str] = []
         self.assertEqual(handoff.announce(lambda m: said.append(m) or True, base=self.base), "")
@@ -533,6 +536,20 @@ class SpawnTest(_Base):
         """AT-SC-52：工作樹髒但 HEAD 有 `r1-wip-preserved` ⇒ 該條通過（整體成功）。"""
         rc, err = self.run_spawn(self.good_runner(status=" M a.py\n", tags="r1-wip-preserved\n"))
         self.assertEqual((rc, err), (0, ""))
+
+    def test_def611_successful_spawn_says_the_old_window_can_be_closed(self) -> None:
+        """DEF-200-611 D-2b：spawn 成功輸出提醒關舊視窗（只提醒，絕不自動關：命令列含舊 sid
+        會命中新視窗）；斷言連 runner 呼叫都沒有 taskkill。"""
+        out, runner = io.StringIO(), self.good_runner()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = handoff.spawn(self.pkg, runner=runner, platform_name="win32", env=self.env,
+                               now=NOW, repo=self.repo, projects_dir=self.proj,
+                               roster_mod=FakeRoster(), alive=lambda _p: True,
+                               sleep=lambda _s: None, disarm=self.disarmed.append,
+                               wait_seconds=0.0)
+        self.assertEqual(rc, 0)
+        self.assertIn("舊視窗可以關閉", out.getvalue())
+        self.assertFalse([c for c in runner.calls if "taskkill" in str(c)])
 
     #: 2026-11-18 09:46 真機重放（DEF-200-609）：封存後 03:00 SI 巡邏寫入的三行。
     SI_PATROL_STATUS = (" M docs/06_quality/SelfImproving_Event_Ledger.jsonl\n"
@@ -770,6 +787,9 @@ class SpawnTest(_Base):
             self.assertEqual(handoff.cli(["--build", "--session-id", "../x"]), 2)
 
 
+HARD_USED = 900_000  # 高於出廠硬線 850,000（R216）
+
+
 class AdviseOnceTest(_Base):
     class Guard:
         def __init__(self, used):
@@ -785,7 +805,7 @@ class AdviseOnceTest(_Base):
             return 0
 
     def advise(self, used, *, env=None, now=NOW):
-        env = {switch.R1_KEY: "1000"} if env is None else env
+        env = {} if env is None else env  # 出廠硬線 850,000（R216：不再有 R1 的 25 萬）
         return handoff.advise_once(SID, self.transcript, guard=self.Guard(used), env=env,
                                    now=now, base=self.base, runner=FakeRunner(),
                                    roster_mod=FakeRoster(), quota_fn=_quota,
@@ -793,36 +813,61 @@ class AdviseOnceTest(_Base):
 
     def test_at58_off_mode_says_nothing_and_writes_nothing(self) -> None:
         """AT-SC-58：MODE=off ⇒ PostToolUse 判定不出聲、不產檔。"""
-        got = self.advise(10**6, env={switch.MODE_KEY: "off", switch.R1_KEY: "1000"})
+        got = self.advise(10**6, env={switch.MODE_KEY: "off"})
         self.assertEqual(got, "")
         self.assertFalse(self.base.exists() and list(self.base.iterdir()))
 
     def test_at59_advises_exactly_once_per_session(self) -> None:
-        """AT-SC-59：MODE=auto、R1 成立 ⇒ 出聲含交接包路徑與兩行指令；同 session 第二次（兩分鐘後，
+        """AT-SC-59：MODE=auto、上下文達硬線 ⇒ 出聲含交接包路徑與兩行指令；同 session
+        第二次（兩分鐘後，
         已過評估節流）不再出聲（閂鎖）。"""
-        first = self.advise(5000)
+        first = self.advise(HARD_USED)
         path = next(self.base.glob("*.md"))
         self.assertIn(str(path), first)
         self.assertIn("--finalize", first)
         self.assertIn("--spawn", first)
-        self.assertIn("R1", first)
-        self.assertEqual(self.advise(5000, now=NOW + timedelta(minutes=2)), "")
+        self.assertIn("硬線", first)
+        self.assertEqual(self.advise(HARD_USED, now=NOW + timedelta(minutes=2)), "")
         self.assertEqual(len(list(self.base.glob("*.md"))), 1)
 
     def test_at60_nothing_met_says_nothing_and_makes_no_package(self) -> None:
-        """AT-SC-60：R1～R3 全不成立 ⇒ 不出聲、不產交接包（只留評估節流戳）。"""
+        """AT-SC-60：硬線與 R2 皆不成立 ⇒ 不出聲、不產交接包（只留評估節流戳）。"""
         self.assertEqual(self.advise(10), "")
         self.assertEqual(list(self.base.glob("*.md")), [])
+
+    def test_ss_44_the_old_r1_line_and_everything_below_the_hard_line_stay_silent(self) -> None:
+        """R216／AT-SS-44（裁決造成的語意改變，不是放寬）：舊 R1＝25 萬、29 萬、60 萬、849,999
+        都不出聲、
+        不產包——人在這個區間工作，不該被提醒換窗；850,000 才出聲（邊界 `>=`）。
+        把門檻退回 25 萬的突變，前四格必紅；把 `>=` 寫成 `>`，最後一格必紅。"""
+        for used in (250_000, 290_000, 600_000, 849_999):
+            with self.subTest(used=used):
+                self.assertEqual(self.advise(used), "")
+                self.assertEqual(list(self.base.glob("*.md")), [])
+                (self.base / f"{SID}.checked").unlink(missing_ok=True)  # 洗掉節流戳，下一格重判
+        self.assertIn("--spawn", self.advise(850_000))
+
+    def test_ss_44_the_retired_r1_key_has_no_effect(self) -> None:
+        """R1 鍵已退役：舊 .env 設 `AUTOSDD_SWITCH_R1_CTX_TOKENS=1000` 也不會讓 5,000 token 的
+        session 被提醒（否則退役只是改名，舊設定會把換窗線悄悄拉回 1000）。"""
+        self.assertEqual(self.advise(5000, env={switch.R1_KEY: "1000"}), "")
+        self.assertEqual(list(self.base.glob("*.md")), [])
+
+    def test_advise_writes_the_advised_latch_that_nothing_else_reads_anymore(self) -> None:
+        """出聲後 `<sid>.advised` 仍是「一個 session 只出聲一次」的閂鎖（D12 移除的是收斂閘對它的
+        依賴，不是閂鎖本身）。"""
+        self.advise(HARD_USED)
+        self.assertTrue((self.base / f"{SID}.advised").exists())
 
     def test_evaluation_is_throttled_within_a_minute(self) -> None:
         """R2 要掃整份逐字稿：一分鐘內同 session 只評估一次（hook 不能每個工具呼叫都付這成本）。"""
         self.assertEqual(self.advise(10), "")
-        self.assertEqual(self.advise(5000, now=NOW + timedelta(seconds=10)), "")
-        self.assertNotEqual(self.advise(5000, now=NOW + timedelta(minutes=2)), "")
+        self.assertEqual(self.advise(HARD_USED, now=NOW + timedelta(seconds=10)), "")
+        self.assertNotEqual(self.advise(HARD_USED, now=NOW + timedelta(minutes=2)), "")
 
     def test_sec6_unattended_window_is_not_advised_and_leaves_no_latch(self) -> None:
         """SEC-6：無人窗口不出聲、不產交接包、不設 `.advised`；同 sid 之後的互動視窗仍會被提醒。"""
-        env = {switch.R1_KEY: "1000", "AUTOSDD_UNATTENDED": "1"}
+        env = {"AUTOSDD_UNATTENDED": "1"}
         self.assertEqual(self.advise(10**6, env=env), "")
         self.assertFalse(self.base.exists() and list(self.base.iterdir()))
         self.assertIn("--spawn", self.advise(10**6, now=NOW + timedelta(minutes=2)))
@@ -832,7 +877,7 @@ class AdviseOnceTest(_Base):
         提醒會進子代理
         上下文、還把「一個 session 只出聲一次」的閂鎖吃掉，主控永遠收不到。有 `agent_id` ⇒ 回空、
         不寫任何檔（含 `.checked`／`.advised`／包），之後主控自己的呼叫仍然收得到提醒。"""
-        env = {switch.R1_KEY: "1000"}
+        env: dict = {}
         got = handoff.advise_once(SID, self.transcript, guard=self.Guard(10**6), env=env, now=NOW,
                                   base=self.base, agent_id="agent-abc", runner=FakeRunner(),
                                   roster_mod=FakeRoster(), quota_fn=_quota,
@@ -845,7 +890,7 @@ class AdviseOnceTest(_Base):
     def test_unsafe_session_id_is_ignored(self) -> None:
         """sid 含路徑字元 ⇒ 不產任何檔（不讓它變成路徑）。"""
         got = handoff.advise_once("../x", self.transcript, guard=self.Guard(10**6),
-                                  env={switch.R1_KEY: "1000"}, now=NOW, base=self.base)
+                                  env={}, now=NOW, base=self.base)
         self.assertEqual(got, "")
         self.assertFalse(self.base.exists())
 

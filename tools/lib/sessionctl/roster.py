@@ -25,6 +25,7 @@ from pathlib import Path
 from . import procstop
 
 OWNER_IDLE_SECONDS = 900  # 擁有者逐字稿閒置的「巡邏間隔」（哨兵每 15 分鐘巡邏一次）
+RESIDUE_MAX_AGE_SECONDS = 24 * 3600  # 殘局壽命上限：最後記錄超過它，預設 status 不列（--all 才列）
 _TAIL_BYTES = 262144
 _LOOKBACK_SECONDS = 48 * 3600  # 無 sid 的全域名冊只看近 48 小時有動過的代理檔
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -84,6 +85,10 @@ def _usage(rec: dict) -> dict | None:
     return use if rec.get("type") == "assistant" and isinstance(use, dict) else None
 
 
+def _is_compact_boundary(rec: dict) -> bool:
+    return rec.get("type") == "system" and rec.get("subtype") == "compact_boundary"
+
+
 def _ctx(use: dict) -> int:
     """上下文＝input＋cache_read＋cache_creation（`context_budget_guard.used_of` 同式）。"""
     return sum(int(use.get(k) or 0) for k in
@@ -99,8 +104,11 @@ def _scan(path: Path, full: bool) -> dict:
     for rec in reversed(recs):
         if out["last_at"] is None:
             out["last_at"] = procstop.parse_iso(rec.get("timestamp"))
-        if out["ctx_tokens"] is None and (use := _usage(rec)) is not None:
-            out["ctx_tokens"] = _ctx(use)
+        if out["ctx_tokens"] is None:
+            if _is_compact_boundary(rec):
+                out["ctx_tokens"] = 0  # DEF-200-611：壓縮後尚無新 usage ⇒ 上下文視為小
+            elif (use := _usage(rec)) is not None:
+                out["ctx_tokens"] = _ctx(use)
     first = next(_records_head(path), None)
     out["started_at"] = procstop.parse_iso(first.get("timestamp")) if first else None
     if full:
@@ -190,7 +198,7 @@ def _owner_last(projects: Path, owner: str) -> float | None:
 
 
 def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=None,
-             runner=None, full: bool = True) -> dict:
+             runner=None, full: bool = True, include_old: bool = False) -> dict:
     """名冊快照：`agents`／`windows`／`schedules`／`stale_sentinels`／`handoffs`。`runner=None`＝
     純讀檔（不列舉行程、不查排程；也就不判殘局）。"""
     from . import switch  # noqa: PLC0415 — lazy
@@ -220,6 +228,10 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
                 last = _owner_last(folder.parent.parent, owner)
                 if last is not None and now_ts - last >= OWNER_IDLE_SECONDS:
                     state = "residue"
+            # DEF-200-611 D-3：殘局是歷史記錄、不是待辦；超過壽命上限不再列入預設名冊
+            if state == "residue" and not include_old and info["last_at"] is not None and (
+                    now_ts - info["last_at"] > RESIDUE_MAX_AGE_SECONDS):
+                continue
             agents.append({
                 "id": path.stem.removeprefix("agent-"), "owner_sid": owner,
                 "description": str(meta.get("description") or ""),
@@ -231,10 +243,27 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
             "stale_sentinels": _stale_sentinels(runner), "handoffs": _handoffs(env)}
 
 
+def _spawned_from(pid, sid: str, created) -> bool:
+    """痕跡 `session_switch_spawned` 是否記著「該 sid 交棒時開出了這個 pid」（DEF-200-611 D-2a：
+    交棒開出的新視窗命令列含**舊** sid，單看命令列會把新視窗誤讀成舊視窗）。pid 之外再要求行程
+    建立時刻貼近 spawn 時刻（60 秒內），擋 pid 被回收重用。讀不到＝False。"""
+    try:
+        return bool(sid) and created is not None and any(
+            p == pid and abs(created - t) <= 60
+            for t, p in procstop.trace_records(sid) if p is not None)
+    except Exception:  # noqa: BLE001 — status 是唯讀診斷，量不到不拋
+        return False
+
+
 def _windows(procs) -> list[dict]:
-    return [{"pid": p["pid"], "sid": procstop.sid_of(p["cmd"]),
-             "created": _iso(p["created"]), "unattended": bool(procstop._PRINT_RE.search(p["cmd"]))}
-            for p in procs or () if procstop.is_claude(p)]
+    rows = []
+    for p in procs or ():
+        if procstop.is_claude(p):
+            sid = procstop.sid_of(p["cmd"])
+            rows.append({"pid": p["pid"], "sid": sid, "created": _iso(p["created"]),
+                         "unattended": bool(procstop._PRINT_RE.search(p["cmd"])),
+                         "spawned_from": _spawned_from(p["pid"], sid, p["created"])})
+    return rows
 
 
 def _schedules(runner) -> list[str]:
@@ -415,7 +444,9 @@ def render_snapshot(snap: dict) -> str:
                      f"{a['model'] or '模型未知'}｜上下文 {a['ctx_tokens'] if a['ctx_tokens'] is not None else '量不到'}"  # noqa: E501
                      f"{total}｜最後 {a['last_at']}｜擁有者 {a['owner_sid'][:8]}")
     lines.append("視窗行程：" + ("；".join(
-        f"pid {w['pid']} sid {w['sid'][:8] or '?'}{'（無人）' if w['unattended'] else ''}"
+        (f"交棒開出的新視窗：pid {w['pid']}（來源 {w['sid'][:8]}）" if w.get("spawned_from")
+         else f"pid {w['pid']} sid {w['sid'][:8] or '?'}")
+        + ("（無人）" if w["unattended"] else "")
         for w in snap["windows"]) or "無（或未列舉）"))
     lines.append("排程：" + ("、".join(snap["schedules"]) or "無（或未查詢）"))
     lines.append("過期哨兵：" + ("、".join(snap["stale_sentinels"]) or "無"))
@@ -437,13 +468,15 @@ def cli(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     status = sub.add_parser("status", help="唯讀名冊")
     status.add_argument("--session", default=None)
+    status.add_argument("--all", action="store_true", help="連超過 24 小時的殘局也列")
     stop = sub.add_parser("stop", help="停無人／互動視窗行程樹（先驗身分）")
     group = stop.add_mutually_exclusive_group(required=True)
     group.add_argument("--window", metavar="SID")
     group.add_argument("--all-unattended", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "status":
-        sys.stdout.write(render_snapshot(snapshot(args.session, runner=procstop.default_runner)))
+        sys.stdout.write(render_snapshot(snapshot(
+            args.session, runner=procstop.default_runner, include_old=args.all)))
         return 0
     if args.window:
         return stop_window(args.window)

@@ -57,10 +57,21 @@ class _Base(unittest.TestCase):
                             encoding="utf-8")
         self.pkg.with_suffix(".sealed").write_text(NOW.isoformat() + "\n", encoding="utf-8")
         self.transcript = self.tmp / "t.jsonl"
-        self.transcript.write_text("{}\n", encoding="utf-8")
+        self.set_ctx(600_000)  # R216 F4：快取冷時只有上下文夠大（> 480,000）才轉送；夾具預設走轉送
         self.spawned: list[dict] = []
         self.refreshed: list[Path] = []
         self.spawn_rc = 0
+
+    def set_ctx(self, ctx: int | None) -> None:
+        """逐字稿最後一筆 assistant usage 合計 `ctx`；`None`＝沒有任何 usage（上下文量不到）。"""
+        if ctx is None:
+            self.transcript.write_text("{}\n", encoding="utf-8")
+            return
+        usage = {"input_tokens": 1, "cache_read_input_tokens": ctx - 1,
+                 "cache_creation_input_tokens": 0, "output_tokens": 7}
+        row = {"type": "assistant", "timestamp": NOW.isoformat(),
+               "message": {"id": "m", "usage": usage}}
+        self.transcript.write_text(json.dumps(row) + "\n", encoding="utf-8")
 
     # ── 假縫
     def fake_spawn(self, path, **kw) -> int:
@@ -221,6 +232,36 @@ class PathOneForwardTest(_Base):
         self.assertIsNone(forward.hook_output(
             payload, os.environ, **{**base, "cache": lambda p, n: {"cold": False}},
             preflight=lambda p: [], platform_name="win32"))
+
+    def test_ss_48_cold_but_small_context_stays_because_resuming_is_cheaper(self) -> None:
+        """R216／AT-SS-48／D9／MU-22 WHY：快取冷了，續跑重寫 2.0×c 與換新 F(1+q)＝960,000 比——c 小時
+        續跑便宜，轉走反而多付（掌舵者原話：專注在不要讓 Cache 過期，不是換 session）。40 萬 ⇒ 放行
+        ＋畫面一行原因（cond 10）、不 spawn；60 萬（夾具預設）⇒ 轉送；不等式反向的突變兩邊必紅。"""
+        self.set_ctx(400_000)
+        out = forward.hook_output(
+            {"session_id": SID, "transcript_path": str(self.transcript), "prompt_id": "abcdef0123",
+             "prompt": "指令", "hook_event_name": "UserPromptSubmit"}, os.environ,
+            spawn=self.fake_spawn, alive=lambda pid: False,
+            cache=lambda p, n: {"cold": True, "idle_s": 4000.0}, crons=lambda sid: False,
+            preflight=lambda p: [], refresh=lambda p, **kw: None, platform_name="win32", now=NOW)
+        self.assertIn("比換新", out["systemMessage"])
+        self.assertIn("便宜", out["systemMessage"])
+        self.assertEqual(self.spawned, [])
+        self.assertEqual(self.events(forward.EV_PASS)[-1]["cond"], 10)
+        self.set_ctx(600_000)
+        self.assertEqual(self.verdict("指令")["kind"], "block")
+
+    def test_ss_48_f4_boundary_and_unmeasurable_context(self) -> None:
+        """AT-SS-48 邊界：480,000 相等不換（放行）、480,001 轉送；上下文量不到 ⇒ 放行（FRESH 會
+        丟上下文，量不到不單方面造成資訊損失）。"""
+        self.set_ctx(480_000)
+        self.assertNotEqual(self.verdict("x")["kind"], "block")
+        self.assertEqual(self.events(forward.EV_PASS)[-1]["cond"], 10)
+        self.set_ctx(480_001)
+        self.assertEqual(self.verdict("x")["kind"], "block")
+        self.set_ctx(None)
+        self.assertNotEqual(self.verdict("x")["kind"], "block")
+        self.assertEqual(self.events(forward.EV_PASS)[-1]["cond"], 10)
 
     def test_hot_cache_stays_in_place(self) -> None:
         """AT-F6 WHY：快取熱時留下更便宜（ARCH §2.4 例二：<22 次呼叫），不轉。"""

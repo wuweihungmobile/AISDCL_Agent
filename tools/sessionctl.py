@@ -1,8 +1,13 @@
 """sessionctl 命令列入口（薄殼：只分派，判準全在 `lib/sessionctl/`；ADR-XPLAT-004 §2.13）。
 
-用法：python tools/sessionctl.py <handoff|status|stop|advice|rush|park|watch> [旗標]
+用法：python tools/sessionctl.py <子指令> [旗標]
+  子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|runlong|waitfor
   watch [--sid] [--stall-min] [--wall-min] [--ctx-max] [--poll-sec]
       背景代理監督（lib/sessionctl/watch；以 run_in_background 掛著，結束＝叫醒主控）
+  keepwarm [--sid] [--min] [--poll-sec]
+      主控快取保溫（lib/sessionctl/keepwarm；閒置到「最後一筆記錄＋45 分」才結束＝叫醒主控）
+  runlong --out <檔> -- <argv…>｜waitfor --done <檔>.done [--max-sec]
+      子代理長等待（lib/sessionctl/longwait；runlong 背景跑、waitfor 每段 <5 分鐘前景回來看）
   park [旗標]  額度自願停工的續航（lib/sessionctl/park_cli）
   handoff --build｜--finalize <檔>｜--ack <檔>｜--spawn <檔>｜--list
       交接包（`handoff.cli`）
@@ -72,8 +77,16 @@ def main(argv: list[str] | None = None) -> int:
         from lib.sessionctl import watch
 
         return watch.cli(rest)
-    sys.stderr.write(
-        "sessionctl: 用法錯誤：子指令須為 handoff／status／stop／advice／rush／park／watch\n")
+    if verb == "keepwarm":  # R216：主控快取保溫（阻塞到截止才結束＝叫醒主控，鐵律六的事件源）
+        from lib.sessionctl import keepwarm
+
+        return keepwarm.cli(rest)
+    if verb in ("runlong", "waitfor"):  # R216 WP-D：子代理長等待（背景跑＋每段 <5 分鐘前景回來看）
+        from lib.sessionctl import longwait
+
+        return longwait.cli_runlong(rest) if verb == "runlong" else longwait.cli_waitfor(rest)
+    sys.stderr.write("sessionctl: 用法錯誤：子指令須為 "
+                     "handoff／status／stop／advice／rush／park／watch／keepwarm／runlong／waitfor\n")
     return _USAGE_RC
 
 

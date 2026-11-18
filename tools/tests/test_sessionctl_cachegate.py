@@ -127,6 +127,30 @@ class CacheStateTest(_Fence):
         self.assertIs(late_cold["cold"], True)
         self.assertAlmostEqual(late_cold["idle_s"], 600, delta=1)
 
+    def test_def611_compaction_after_last_usage_restarts_the_clock_and_shrinks_context(
+            self) -> None:
+        """DEF-200-611 D-1 真實重放（85bcbec8 第 1244 行形態：最後 assistant 之後 20 分才有
+        system/compact_boundary，preTokens 255860）：壓縮本身重寫快取 ⇒ 計時起點＝壓縮時刻
+        （剛壓縮＝熱），且主逐字稿上下文改視為小（壓縮前的 25 萬不得再被當成現值）。"""
+        boundary = json.dumps({
+            "type": "system", "subtype": "compact_boundary",
+            "timestamp": (NOW - timedelta(minutes=1)).isoformat(),
+            "compactMetadata": {"trigger": "auto", "preTokens": 255860}})
+        path = self.agent("a1", _rec(255_860, 20), boundary)
+        got = cachestate.cache_state(path, NOW)
+        self.assertEqual((got["cold"], got.get("compacted")), (False, True))
+        self.assertAlmostEqual(got["idle_s"], 60, delta=1)
+        self.assertEqual(roster._scan(path, False)["ctx_tokens"], 0)
+        # 壓縮之後又有新 assistant：以新 usage 為準，不受舊壓縮影響
+        newer = self.agent("a2", boundary, _rec(40_000, 0.5))
+        self.assertEqual(roster._scan(newer, False)["ctx_tokens"], 40_000)
+        self.assertNotIn("compacted", cachestate.cache_state(newer, NOW))
+        # 壓縮本身也過了壽命 ⇒ 照常判冷（不是永遠熱）
+        old = self.agent("a3", _rec(255_860, 90), json.dumps({
+            "type": "system", "subtype": "compact_boundary",
+            "timestamp": (NOW - timedelta(minutes=30)).isoformat()}))
+        self.assertIs(cachestate.cache_state(old, NOW)["cold"], True)
+
     def test_at_tw_08_unreadable_transcripts_fail_open(self) -> None:
         """tools/lib/sessionctl/cachestate.py：
         檔不存在／空／壞 JSON／無 assistant ⇒ 不冷、idle None。"""

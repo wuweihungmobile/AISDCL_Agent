@@ -3,9 +3,10 @@
 AT-SC-01～24、28～33）。
 
 守的判準（WHY 全文＝ADR-XPLAT-004 §2.13）：
-- 無人喚醒選路量「續跑成本」不量檔案大小（R1 上下文／R2 壓縮次數／R3 上次續跑快取寫入）：事故 E1
+- 無人喚醒選路量「續跑成本」不量檔案大小（F4 快取冷後按帳選路／R2 壓縮次數；R1／R3 於 R216
+退役）：事故 E1
   （20,518,438 B 逐字稿≈60 萬 token 仍判 RESUME，續棒舊代理燒掉五小時窗）；
-- 三個成本門檻與 `RESUME_AGENT_TOKENS` 只准下修（放寬＝退回 E1）；
+- 成本門檻（R2、硬線 HARD）與 `RESUME_AGENT_TOKENS` 只准下修（放寬＝退回 E1）；
 - 過期 session 不續跑（SUPERSEDED）：事故 E2（waiting 的哨兵 reset 一到會無人續跑四天前的
   session），
   整週無人（沒有更新的 session）仍照舊續航。
@@ -33,11 +34,10 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import context_budget_guard as guard  # noqa: E402
 import quota_policy_env  # noqa: E402
-import resume_cost  # noqa: E402
 import sentinel_lifecycle as SL  # noqa: E402
 
 import session_resume_planner as planner  # noqa: E402
-from lib.sessionctl import switch  # noqa: E402
+from lib.sessionctl import costmodel, switch  # noqa: E402
 
 _MODULE_FENCES: list[dict] = []  # 單模組直跑也不得碰真實 TEMP／快取／痕跡目錄（DEF-200-446）
 
@@ -95,7 +95,6 @@ class _Env(unittest.TestCase):
             os.environ.pop(key, None)
         self.plan = self.tmp / "plan.md"
         self.plan.write_text("# 任務書\n", encoding="utf-8")
-        self.cost = self.tmp / "cost.jsonl"
         self.tr = self.tmp / f"{SID}.jsonl"
 
     def feed(self, used: int | None, sid: str = SID) -> None:
@@ -106,38 +105,53 @@ class _Env(unittest.TestCase):
         (self.tmp / "feed").mkdir(exist_ok=True)
         (self.tmp / "feed" / f"{sid}.json").write_text(json.dumps(doc), encoding="utf-8")
 
-    def cost_rows(self, *values: int | None) -> None:
-        rows = [{"session_id": SID, "cache_creation_input_tokens": v} for v in values]
-        self.cost.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
-
     def reasons(self, size: int | None = 5000, **kw):
-        return switch.fresh_reasons(SID, self.tr, size, guard=guard, env={}, cost_path=self.cost,
-                                    **kw)
+        return switch.fresh_reasons(SID, self.tr, size, guard=guard, env={}, **kw)
 
     def route(self, **kw) -> dict:
         return switch.choose_resume_route("claude", SID, self.tr, str(self.plan), guard=guard,
-                                          env={}, cost_path=self.cost, **kw)
+                                          env={}, **kw)
 
 
 class RouteTest(_Env):
-    """AT-SC-01～13：`switch.fresh_reasons`／`choose_resume_route` 的 R1～R4 判準與缺值處理。"""
+    """AT-SC-01～13＋AT-SS-46／47：`switch.fresh_reasons`／`choose_resume_route` 的 F4／R2／R4
+    判準。
+
+    R216（掌舵者 2026-11-18「專注在不要讓 Cache 過期」）語意改變，不是放寬：R1（25 萬）與 R3
+    （上次續跑寫入）退役；快取**已冷**之後才按帳選路（F4：續跑重寫 2.0c > 換新 F(1+q)＝960,000，
+    即 c > 480,000）。夾具逐字稿時間戳是 1970 年代 ⇒ 快取恆冷；要測「熱」就寫當下時間的記錄。"""
 
     def setUp(self) -> None:
         super().setUp()
         _write(self.tr, [_asst(1_000_000.0, 1000)])
 
-    def test_at_sc_01_r1_fires_at_exactly_the_threshold(self) -> None:
-        """AT-SC-01：feed ctx=250,000 ⇒ 只命中 R1（R1 是 `>=`；WHY：E1）。"""
+    def test_at_sc_01_25_wan_is_no_longer_a_switch_line(self) -> None:
+        """AT-SC-01（改）：冷、feed ctx=250,000（舊 R1 線）⇒ 不命中、RESUME。WHY：重寫 25 萬只要
+        50 萬單位 < 換新 96 萬單位，續跑比換新便宜；舊版此處判 FRESH 是方向錯誤。"""
         self.feed(250_000)
-        hits, _ = self.reasons()
-        self.assertEqual([h[:2] for h in hits], ["R1"], hits)
-        self.assertEqual(self.route()["strategy"], switch.STRATEGY_FRESH)
-
-    def test_at_sc_02_r1_boundary_just_below_is_not_a_hit(self) -> None:
-        """AT-SC-02：249,999 不成立（邊界的另一側；證明門檻不是「恆命中」）。"""
-        self.feed(249_999)
         self.assertEqual(self.reasons()[0], [])
         self.assertEqual(self.route()["strategy"], switch.STRATEGY_RESUME)
+
+    def test_at_sc_02_f4_boundary_cold_480000_resumes_480001_goes_fresh(self) -> None:
+        """AT-SC-02／AT-SS-46：冷，480,000 ⇒ 不命中（相等不換）、480,001 ⇒ 只命中 F4、FRESH。"""
+        self.feed(480_000)
+        self.assertEqual(self.reasons()[0], [])
+        self.assertEqual(self.route()["strategy"], switch.STRATEGY_RESUME)
+        self.feed(480_001)
+        hits, _ = self.reasons()
+        self.assertEqual([h[:2] for h in hits], ["F4"], hits)
+        self.assertEqual(self.route()["strategy"], switch.STRATEGY_FRESH)
+
+    def test_f4_does_not_judge_a_warm_cache_however_big_the_context_is(self) -> None:
+        """AT-SS-46（熱）／MU-20：快取仍熱（最後一筆 assistant 在現在）、ctx 800,000 ⇒ 不命中、
+        RESUME（讀價 0.1c 必小於 F；對熱快取判 F4 的突變必紅）。R2 與快取冷熱無關：同一份熱逐字稿
+        加兩個 compact_boundary ⇒ 仍命中 R2。"""
+        now = datetime.now(UTC).timestamp()
+        _write(self.tr, [_asst(now - 5, 800_000)])
+        self.assertEqual(self.reasons()[0], [])
+        self.assertEqual(self.route()["strategy"], switch.STRATEGY_RESUME)
+        _write(self.tr, [_boundary(now - 30), _boundary(now - 20), _asst(now - 5, 800_000)])
+        self.assertEqual([h[:2] for h in self.reasons()[0]], ["R2"])
 
     def test_at_sc_03_two_compact_boundaries_hit_only_r2(self) -> None:
         """AT-SC-03：逐字稿 2 個 compact_boundary ⇒ 只命中 R2（計數取逐字稿，不取 hook 事件檔）。"""
@@ -145,13 +159,17 @@ class RouteTest(_Env):
         hits, _ = self.reasons()
         self.assertEqual([h[:2] for h in hits], ["R2"], hits)
 
-    def test_at_sc_04_r3_uses_the_most_recent_cost_record(self) -> None:
-        """AT-SC-04：成本檔同 sid 較舊 0、最近 100,000 ⇒ 只命中 R3（取最近一筆，非最大）。"""
-        self.cost_rows(0, 100_000)
-        hits, _ = self.reasons()
-        self.assertEqual([h[:2] for h in hits], ["R3"], hits)
-        self.cost_rows(100_000, 0)
-        self.assertEqual(self.reasons()[0], [], "最近一筆是 0 卻仍命中＝取到舊值")
+    def test_at_ss_47_r3_is_retired_a_big_last_resume_no_longer_forces_fresh(self) -> None:
+        """AT-SS-47／MU-21：舊 R3 情境（上次續跑首回合寫入 15 萬）、冷、c=170,000 ⇒ 不命中
+        （按帳續跑 34 萬單位 < 換新 96 萬單位，R3 是錯方向）；env 設了 R3 鍵 ⇒ notes 說「已退役」
+        且仍不命中——舊 .env 不會壞、也不會讓退役變成改名。"""
+        self.feed(170_000)
+        env = {switch.R3_KEY: "100000"}
+        hits, notes = switch.fresh_reasons(SID, self.tr, 5000, guard=guard, env=env)
+        self.assertEqual(hits, [])
+        self.assertTrue(any("已退役" in n and switch.R3_KEY in n for n in notes), notes)
+        self.assertEqual(switch.fresh_reasons(SID, self.tr, 5000, guard=guard, env={})[1], [],
+                         "沒設退役鍵就不該出聲")
 
     def test_at_sc_05_r4_oversized_transcript_still_degrades(self) -> None:
         """AT-SC-05（R4 回歸）：逐字稿 > 上限 ⇒ FRESH，理由含既有字串「超上限」。"""
@@ -172,38 +190,61 @@ class RouteTest(_Env):
         self.assertEqual(route["argv"][route["argv"].index("-r") + 1], SID)
 
     def test_at_sc_08_transcript_usage_is_the_fallback_when_feed_is_absent(self) -> None:
-        """AT-SC-08：feed 缺、逐字稿最後 usage 合計 300,000 ⇒ R1 命中且理由標 transcript 來源。"""
-        _write(self.tr, [_asst(1_000_000.0, 300_000)])
+        """AT-SC-08：feed 缺、冷、逐字稿最後 usage 合計 500,001 ⇒ F4 命中且理由標 transcript
+        來源。"""
+        _write(self.tr, [_asst(1_000_000.0, 500_000)])
         hits, _ = self.reasons()
-        self.assertTrue(hits and hits[0].startswith("R1") and "transcript" in hits[0], hits)
+        self.assertTrue(hits and hits[0].startswith("F4") and "transcript" in hits[0], hits)
 
     def test_at_sc_09_size_estimate_is_flagged_estimated(self) -> None:
-        """AT-SC-09：feed 缺、逐字稿無 usage、size 20,518,438 ⇒ R1 命中且理由含 `estimated`。"""
+        """AT-SC-09：feed 缺、逐字稿無 usage、size 20,518,438（≈51 萬 token 估計）、冷（注入）⇒ F4
+        命中且理由含 `estimated`。同一份逐字稿不注入時冷熱量不到＝當熱 ⇒ 不命中（量不到不單方面
+        造成資訊損失）。"""
         _write(self.tr, [{"type": "user", "timestamp": _iso(1_000_000.0)}])
-        hits, _ = self.reasons(size=20_518_438)
+        hits, _ = self.reasons(size=20_518_438, cache=lambda _p, _n: {"cold": True})
         self.assertTrue(hits and "estimated" in hits[0], hits)
+        self.assertEqual(self.reasons(size=20_518_438)[0], [])
 
-    def test_at_sc_10_unmeasurable_r1_is_said_but_does_not_fire(self) -> None:
-        """AT-SC-10：三個來源皆缺 ⇒ R1 不成立、說明含「R1 量不到」，其餘規則照判（量不到≠超標）。"""
+    def test_at_sc_10_unmeasurable_context_is_said_but_does_not_fire(self) -> None:
+        """AT-SC-10：三個來源皆缺 ⇒ 不命中、說明含「上下文量不到」（量不到≠超標）。"""
         _write(self.tr, [{"type": "user", "timestamp": _iso(1_000_000.0)}])
-        self.cost_rows(100_000)
         hits, notes = self.reasons(size=None)
-        self.assertEqual([h[:2] for h in hits], ["R3"], "R1 量不到時 R3 仍要照判")
-        self.assertTrue(any("R1 量不到" in n for n in notes), notes)
+        self.assertEqual(hits, [])
+        self.assertTrue(any("上下文量不到" in n for n in notes), notes)
 
     def test_at_sc_11_e1_replay_with_the_real_numbers(self) -> None:
         """AT-SC-11（E1 回歸鎖）：size 20,518,438 B（上限 33,554,432）、feed 缺、最後
-        usage≈600,000、壓縮 2 次、上次續跑 cache_creation 138,811 ⇒ FRESH，理由同時含
-        R1／R2／R3。修前（只看位元組）判 RESUME——這條是 sessionctl 存在的理由。"""
-        _write(self.tr, [_asst(1_000_000.0, 100_000), _boundary(1_000_010.0),
-                         _boundary(1_000_020.0), _asst(1_000_030.0, 599_000)], pad_to=20_518_438)
+        usage≈600,000、壓縮 2 次、冷 ⇒ FRESH，理由同時含 F4／R2。修前（只看位元組）判 RESUME——
+        這條是 sessionctl 存在的理由；R1／R3 退役後同一事故改由 F4（60 萬 > 48 萬臨界）接住。"""
+        rows = "".join(json.dumps(r) + "\n" for r in (
+            _asst(1_000_000.0, 100_000), _boundary(1_000_010.0), _boundary(1_000_020.0),
+            _asst(1_000_030.0, 599_000))).encode("utf-8")
+        # 填充放在**前面**：真實逐字稿的尾端一定是最近的記錄，快取冷熱只讀尾端 256 KB
+        self.tr.write_bytes(b"x" * (20_518_438 - len(rows) - 1) + b"\n" + rows)
         self.assertEqual(self.tr.stat().st_size, 20_518_438)
-        self.cost_rows(138_811)
         route = self.route(max_bytes=33_554_432)
         self.assertEqual(route["strategy"], switch.STRATEGY_FRESH)
-        for rule in ("R1", "R2", "R3"):
+        for rule in ("F4", "R2"):
             self.assertIn(rule, route["reason"])
         self.assertNotIn("-r", route["argv"])
+
+    def test_advise_purpose_judges_only_the_hard_line_and_ignores_cache_state(self) -> None:
+        """`advise=True`（handoff.advise_once 用）：只看硬線——849,999 不命中、850,000 命中；
+        熱／冷都一樣（硬線防的是 autocompact，不是快取過期）；不判 F4（冷、60 萬不命中）。"""
+        now = datetime.now(UTC).timestamp()
+        for label, rows in (("冷", [_asst(1_000_000.0, 600_000)]),
+                            ("熱", [_asst(now - 5, 600_000)])):
+            _write(self.tr, rows)
+            with self.subTest(label):
+                self.assertEqual(self.reasons(advise=True)[0], [], "60 萬在硬線下，不得出聲")
+        for used, expect in ((849_999, False), (850_000, True)):
+            for label, stamp in (("冷", 1_000_000.0), ("熱", now - 5)):
+                _write(self.tr, [_asst(stamp, used - 1)])  # input_tokens 1 ＋ cache_read used-1
+                with self.subTest(used=used, label=label):
+                    hits = self.reasons(advise=True)[0]
+                    self.assertEqual(bool(hits), expect, hits)
+                    if expect:
+                        self.assertIn("硬線", hits[0])
 
     def test_at_sc_12_fresh_prompt_carries_handoff_path_and_both_hard_rules(self) -> None:
         """AT-SC-12：FRESH 的 prompt 含交接包路徑與兩條硬規則字面（不得 SendMessage 續舊
@@ -231,31 +272,35 @@ class ThresholdTest(_Env):
     """AT-SC-14～18：門檻住 ENV_SPEC、方向鎖、病態值。"""
 
     def test_at_sc_14_factory_values_are_pinned_downward_only(self) -> None:
-        """AT-SC-14：出廠 R1≤250,000、R2≤2、R3≤100,000、RESUME_AGENT_TOKENS≤150,000
-        （方向鎖：改大即紅）。"""
+        """AT-SC-14：出廠 R2≤2、RESUME_AGENT_TOKENS≤150,000、HARD＝850,000 且嚴格小於觀測到的
+        autocompact 最小點（方向鎖：改大即紅）；R1／R3 已退役＝無出廠值、不在 `_DOWNWARD_ONLY`。"""
         got = {s.name: s.default for s in quota_policy_env.ENV_SPEC}
-        for key, ceiling in ((switch.R1_KEY, 250_000), (switch.R2_KEY, 2),
-                             (switch.R3_KEY, 100_000), (switch.AGENT_TOKENS_KEY, 150_000),
-                             (switch.HARD_CTX_KEY, 290_000)):
+        for key, ceiling in ((switch.R2_KEY, 2), (switch.AGENT_TOKENS_KEY, 150_000),
+                             (switch.HARD_CTX_KEY, 850_000)):
             self.assertLessEqual(got[key], ceiling, f"{key} 出廠值被放寬＝退回 E1")
+        self.assertLess(got[switch.HARD_CTX_KEY], costmodel.OBSERVED_AUTOCOMPACT_MIN)
+        for key in (switch.R1_KEY, switch.R3_KEY):
+            self.assertIsNone(got[key], f"{key} 已退役，出廠值必須移除")
+            self.assertNotIn(key, switch._DOWNWARD_ONLY)
         self.assertNotIn(switch.STALE_HOURS_KEY, switch._DOWNWARD_ONLY)
 
     def test_at_sc_15_a_lower_override_takes_effect(self) -> None:
-        """AT-SC-15：env 覆寫 R1=200,000 生效（可收緊）。"""
-        self.assertEqual(switch.threshold(switch.R1_KEY, {switch.R1_KEY: "200000"}), (200_000, ""))
+        """AT-SC-15：env 覆寫 HARD=200,000 生效（可收緊）；feed 200,000 ⇒ advise 判準命中硬線。"""
+        env = {switch.HARD_CTX_KEY: "200000"}
+        self.assertEqual(switch.threshold(switch.HARD_CTX_KEY, env), (200_000, ""))
         self.feed(200_000)
-        hits, _ = switch.fresh_reasons(SID, self.tr, 5000, guard=guard, cost_path=self.cost,
-                                       env={switch.R1_KEY: "200000"})
-        self.assertEqual([h[:2] for h in hits], ["R1"])
+        hits, _ = switch.fresh_reasons(SID, self.tr, 5000, guard=guard, env=env, advise=True)
+        self.assertEqual(len(hits), 1)
+        self.assertIn("硬線 200,000", hits[0])
 
     def test_at_sc_16_a_looser_override_falls_back_and_says_so(self) -> None:
-        """AT-SC-16：R1=400,000（大於出廠）⇒ 退出廠值＋stderr 一行（只收緊不放寬）。"""
+        """AT-SC-16：HARD=900,000（大於出廠）⇒ 退出廠值＋stderr 一行（只收緊不放寬）。"""
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            value, note = switch.threshold(switch.R1_KEY, {switch.R1_KEY: "400000"})
-        self.assertEqual(value, int(switch._factory(switch.R1_KEY)))
+            value, note = switch.threshold(switch.HARD_CTX_KEY, {switch.HARD_CTX_KEY: "900000"})
+        self.assertEqual(value, int(switch._factory(switch.HARD_CTX_KEY)))
         self.assertTrue(note and "只准下修" in err.getvalue())
-        for key in (switch.R2_KEY, switch.R3_KEY, switch.AGENT_TOKENS_KEY):  # 四個鍵都要有方向鎖
+        for key in (switch.R2_KEY, switch.AGENT_TOKENS_KEY):  # 其餘方向鎖鍵一樣要有
             with self.subTest(key), contextlib.redirect_stderr(io.StringIO()) as e:
                 loose = str(int(switch._factory(key)) + 1)
                 self.assertEqual(switch.threshold(key, {key: loose})[0], int(switch._factory(key)))
@@ -276,7 +321,8 @@ class ThresholdTest(_Env):
     def test_at_sc_18_new_keys_are_in_the_env_example(self) -> None:
         """AT-SC-18：新鍵全在生成物與 repo `.env.example`（新鮮度鎖同步，生成物不得手寫）。"""
         text = quota_policy_env.render_env_example()
-        for key in _KEYS + ("AUTOSDD_HANDOFF_TTL_HOURS", "AUTOSDD_ROSTER_QUIET_MINUTES"):
+        for key in _KEYS + ("AUTOSDD_HANDOFF_TTL_HOURS", "AUTOSDD_ROSTER_QUIET_MINUTES",
+                            costmodel.FRESH_COST_KEY, costmodel.VALUE_Q_KEY):
             self.assertIn(f"{key}=", text)
         on_disk = (_REPO_ROOT / ".env.example").read_text(encoding="utf-8")
         self.assertEqual(quota_policy_env.env_example_problems(on_disk), [])
@@ -288,23 +334,6 @@ class ThresholdTest(_Env):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(switch.switch_mode({switch.MODE_KEY: "wat"}), "auto")
         self.assertEqual(switch.switch_mode({}), "auto")
-
-
-class LastCostTest(_Env):
-    """`resume_cost.last_cost`（R3 的資料源）：唯讀、取同 sid 最近一筆、量不到回 None。"""
-
-    def test_last_cost_picks_the_latest_row_of_that_sid_only(self) -> None:
-        """WHY：R3 要「上次」那一次的成本；別的 sid 或沒量到的列不得頂替。"""
-        rows = [{"session_id": SID, "cache_creation_input_tokens": 1},
-                {"session_id": "other", "cache_creation_input_tokens": 999_999},
-                {"session_id": SID, "cache_creation_input_tokens": 138_811}]
-        self.cost.write_text("".join(json.dumps(r) + "\n" for r in rows) + "壞行\n",
-                             encoding="utf-8")
-        self.assertEqual(resume_cost.last_cost(SID, self.cost), 138_811)
-        self.assertIsNone(resume_cost.last_cost("nobody", self.cost))
-        self.assertIsNone(resume_cost.last_cost(SID, self.tmp / "absent.jsonl"))
-        self.cost_rows(None)
-        self.assertIsNone(resume_cost.last_cost(SID, self.cost), "未量到的最近一列要回 None")
 
 
 class SupersededTest(_Env):

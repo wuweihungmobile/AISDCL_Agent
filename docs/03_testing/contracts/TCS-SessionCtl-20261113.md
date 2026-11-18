@@ -3,6 +3,7 @@
 > 落檔：`docs/03_testing/contracts/TCS-SessionCtl-20261113.md`。設計全文＝`docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md` §2.13（下稱 ADR）。缺陷帳本列＝DEF-200-580～584。
 > **狀態（2026-11-14）**：第一段（FR-SC-01～04、06～09、24；AT-SC-01～33、89～90）與第二段（交接包、名冊與停止、SendMessage 閘、Stop 出聲、模型建議、hook；FR-SC-05、10～23；AT-SC-34～88）皆已實作並通過。🔴 §3 的真機驗證 V1～V8 仍**待主控真機驗證**，未驗，不得寫成已驗。
 > **R3 增量（2026-11-17；背景代理監督、封存閘、冷窗轉送、半路停工；設計＝ADR-XPLAT-004 §2.18；缺陷帳本列 DEF-200-597～605）**：§1b 與 §2.9～§2.12 為本增量的 FR／AT；全部已實作、單檔實跑綠、**未提交**；§3b 的 V-W／V-F 真機驗證**待掌舵者目視**，未驗不得寫成已驗。
+> 🔴 **R216 取代註記（2026-11-19，掌舵者 2026-11-18「專注在不要讓 Cache 過期」；設計 SessionSwitch_CostModel_Design、驗收 TCS-SessionSwitch-CostModel-20261118、ADR-XPLAT-004 §2.19）**：本檔所有提到 **R1（25 萬）／R3（上次續跑寫入 10 萬）** 的 FR／AT 列（FR-SC-01／02／03／05、FR-S1 的「≥ R1」、AT-SC-01／02／04／08～11／14～16／59／92、AT-S1／S6、AT-TW-70／75／79／80）為**決策史料，不再是現行判準**：R1／R3 已退役，換窗上下文線改為硬線 HARD、續跑選路改 F4（快取已冷才判），現行驗收見 TCS-SessionSwitch-CostModel 的 AT-SS-40～48 與 RealVerify 家族 sessionctl_costmodel。FR-W2（保溫點）與 V-W3 已就地更新。
 > 測試一律 `tools/tests/test_sessionctl_*.py`（規劃四支，見 §3；現有 `test_sessionctl_switch.py`）＋既有檔增量；所有時間注入 `now`（aware datetime），所有路徑注入 `tmp`／`HOME` 圍籬（`sentinel_lifecycle.temp_fence`），**不讀本機真實 `~/.claude`、不起真排程、不起真 claude**。
 
 ## 0. 模組落點表（照 Root_Layout §2）
@@ -66,7 +67,7 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 | FR | 內容 | 對應 | 狀態 |
 |---|---|---|---|
 | FR-W1 | `sessionctl watch [--sid] [--stall-min] [--wall-min] [--ctx-max]`：阻塞輪詢，第一個事件成立即印處置表對應列與末行 `WATCH_VERDICT=<事件>` 後以表定 rc 結束；每輪覆寫心跳檔 | D1 | 已實作並通過（未提交） |
-| FR-W2 | keepwarm 為常數、不開 env；無人窗口取 `min(常數, harness 背景等待上限−餘裕)` | D1 | 已實作並通過（未提交） |
+| FR-W2 | keepwarm 保溫點＝**主控最後一筆帶 usage 的 assistant 記錄**＋`AUTOSDD_KEEPWARM_MINUTES`（出廠 45、只准下修、下限 15；R216 改，原為「watch 啟動後 50 分」常數、不開 env）；無人窗口取 `min(T_kw, harness 背景等待上限−餘裕)`；錨點函式住 `keepwarm.py` | D1 | 已實作並通過（未提交） |
 | FR-W3 | stall 不判「最後一筆為 assistant end_turn」的代理 | D1 | 已實作並通過（未提交） |
 | FR-W4 | quota 事件重用 `park.prepare_hits`（讀快取、不外呼） | D1 | 已實作並通過（未提交） |
 | FR-W5 | `supervise.credential`：payload 主證＋心跳副證；無欄位退 pid＋心跳；例外視為有效 | D1 | 已實作並通過（未提交） |
@@ -311,7 +312,7 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 | V | 步驟 | 通過憑證 |
 |---|---|---|
 | V-W2 | 互動視窗：派背景子代理後不掛 watch 就結束回合；再掛 watch 結束回合 | 前者見監督閘推回理由、後者見「看管中」字樣（互動畫面是否顯示 block 理由與 `systemMessage` 本身即待驗項） |
-| V-W3 | 掛 watch 後主控閒置至保溫點 | watch 結束叫醒主控、首回合以讀快取為主（M-W2 不新增冷重寫）；若 `idleCompaction` 提前壓縮主控，保溫點需下調 |
+| V-W3 | 掛 watch 後主控閒置至保溫點（**最後一筆主控 usage 記錄＋45 分**，R216 起；原為 watch 啟動後 50 分） | watch 結束叫醒主控、首回合以讀快取為主（M-W2 不新增冷重寫）；保溫點 45 分早於 harness 閒置約 55 分的自動壓縮（`idleCompaction`），判準另須「保溫之前逐字稿沒有 `compact_boundary`」；真機＝RealVerify `RV-W6`（`--long`，nightly）、`RV-KW1`～`RV-KW5` |
 | V-W4 | 背景子代理交 interim 卷時看 `meta.finished` 與 `background_tasks` | 記錄實值；all_done 不提早成立 |
 | V-F1 | 封存後等快取冷，在舊視窗打一句真人提示 | 舊視窗畫面顯示轉送說明、新視窗自動開出並讀到轉送原文檔；失敗路徑原文檔仍在；`留：` 開頭的提示留在原視窗 |
 | V-F2 | 已交棒（已 spawn／已 ack）的舊視窗打一句提示 | 畫面顯示「本視窗已交棒」說明與原文檔路徑 |

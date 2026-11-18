@@ -29,7 +29,13 @@ def cache_state(path, now: datetime | None = None) -> dict:
     out = {"tier": "5m", "idle_s": None, "cold": False}
     try:
         last_at = None
+        compact_at = None
         for rec in roster._records(Path(path), tail=True):
+            if roster._is_compact_boundary(rec):  # DEF-200-611：壓縮本身重寫快取
+                stamp = procstop.parse_iso(rec.get("timestamp"))
+                if stamp is not None and (compact_at is None or stamp >= compact_at):
+                    compact_at = stamp
+                continue
             use = roster._usage(rec)
             if use is None:
                 continue
@@ -40,6 +46,9 @@ def cache_state(path, now: datetime | None = None) -> dict:
             stamp = procstop.parse_iso(rec.get("timestamp"))
             if stamp is not None and (last_at is None or stamp >= last_at):
                 last_at = stamp
+        if compact_at is not None and (last_at is None or compact_at > last_at):
+            last_at = compact_at  # 最後一次快取寫入＝壓縮時刻（壓縮後尚無新 assistant 記錄）
+            out["compacted"] = True
         if last_at is None:
             return out
         now_ts = (now or datetime.now().astimezone()).timestamp()

@@ -230,8 +230,9 @@ def agents_running(payload: dict, sid: str) -> bool:
 def stop_verdict(payload: dict, env=None) -> str:
     """封存閘（Stop）：回 reason；不推回 ⇒ `""`。任何例外 `""`（fail-open）。
 
-    推回 ⇔ 非 `stop_hook_active`、非無人、模式 auto、無在飛代理、主控上下文 N ≥ R1（直接量逐字稿，
-    不依賴 `.advised` 閂鎖——閂鎖會被吃掉）、尚未交棒、且封存無效（沒有 `.sealed`，或封存戳之後主控
+    推回 ⇔ 非 `stop_hook_active`、非無人、模式 auto、無在飛代理、主控上下文 N ≥ 硬線 HARD
+    （R216：原 R1＝25 萬，掌舵者裁決不再為「大」而換窗；直接量逐字稿，不依賴 `.advised` 閂鎖——
+    閂鎖會被吃掉）、尚未交棒、且封存無效（沒有 `.sealed`，或封存戳之後主控
     做過工作；裁決 A-1：之後只讀檔答追問不算）。不寫閂鎖：第二次 Stop 放行。"""
     env = os.environ if env is None else env
     try:
@@ -245,8 +246,8 @@ def stop_verdict(payload: dict, env=None) -> str:
         if agents_running(payload, sid):
             return ""
         ctx = roster._scan(Path(raw), False)["ctx_tokens"]
-        r1 = switch.threshold(switch.R1_KEY, env)[0]
-        if ctx is None or ctx < r1 or handed_over(sid, env) is not None:
+        hard = switch.threshold(switch.HARD_CTX_KEY, env)[0]
+        if ctx is None or ctx < hard or handed_over(sid, env) is not None:
             return ""
         row, why = latest_package(sid, env), "無包"
         stamp = None
@@ -257,19 +258,20 @@ def stop_verdict(payload: dict, env=None) -> str:
             if not transcript_activity.worked_since(Path(raw), stamp):
                 return ""
             why = "封存後有工作"
-        switch.trace("seal_stop_block", sid=sid, ctx=ctx, r1=r1, reason=why)
-        return _seal_text(ctx, r1, why, row)
+        switch.trace("seal_stop_block", sid=sid, ctx=ctx, hard=hard, reason=why)
+        return _seal_text(ctx, hard, why, row)
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
         return ""
 
 
-def _seal_text(ctx: int, r1: int, why: str, row: dict | None) -> str:
+def _seal_text(ctx: int, hard: int, why: str, row: dict | None) -> str:
     step = (f"  {_SEAL_CMD} --build（產生機械層），再把主控層六節寫完，\n"
             f"  然後 {_SEAL_CMD} --finalize <包路徑>\n"
             if row is None else
             f"  把交接包主控層六節寫完 → {_SEAL_CMD} --finalize {row['path']}\n")
-    return (f"封存閘（Stop）：主控上下文 {ctx:,} ≥ 換手門檻 R1 {r1:,}（原因：{why}），尚未交棒。"
-            "現在結束回合只會閒置在大上下文裡，下一次醒來整份重寫快取。請這一回合就封存交接包：\n"
+    return (f"封存閘（Stop）：主控上下文 {ctx:,} ≥ 硬線 {hard:,}（原因：{why}），尚未交棒。"
+            "再長就會撞上 autocompact（一次砍到 1～2 萬，比交接包更失真），"
+            "現在結束回合也只會閒置在大上下文裡。請這一回合就封存交接包：\n"
             + step
             + "封存後：還有自主工作要做 ⇒ " + f"{_SEAL_CMD} --spawn <包路徑>；"
             "在等掌舵者 ⇒ 結束回合即可。\n"

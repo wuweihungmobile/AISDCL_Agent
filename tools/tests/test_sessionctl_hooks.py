@@ -333,11 +333,12 @@ class HookSubprocessTest(unittest.TestCase):
 
 
 def _advised_session(case: unittest.TestCase, ctx: int) -> tuple[Path, dict]:
-    """tmp 圍籬：主控逐字稿（最後 usage 合計 `ctx`）＋已出聲閂鎖；回 `(slug, 子行程 env 覆寫)`。"""
+    """tmp 圍籬：主控逐字稿（最後 usage 合計 `ctx`）；回 `(slug, 子行程 env 覆寫)`。R216：
+    收斂閘不再看
+    出聲閂鎖（D12），所以這裡刻意**不**寫 `.advised`——沒有它也必須擋／推回。"""
     slug = _project(case)
     handoff_dir = slug.parent / "handoff"
     handoff_dir.mkdir()
-    (handoff_dir / f"{SID}.advised").write_text("x", encoding="utf-8")
     usage = {"input_tokens": 1, "cache_read_input_tokens": ctx - 1,
              "cache_creation_input_tokens": 0, "output_tokens": 7}
     rec = {"type": "assistant", "timestamp": datetime.now(UTC).isoformat(),
@@ -357,8 +358,10 @@ class HookConvergeTest(unittest.TestCase):
     （判準在 `tools/lib/sessionctl/converge.py`）。🔴 hook 套用前整組紅屬預期，見檔頭。"""
 
     def test_at_tw_33_agent_task_workflow_are_blocked_after_the_voice(self) -> None:
-        """AT-TW-33：已出聲、ctx 400,000、三個展開型工具 ⇒ rc 2、stderr 含「收斂閘」、stdout 空。"""
-        slug, env = _advised_session(self, 400_000)
+        """AT-TW-33：ctx 900,000（過硬線 850,000、未出聲）、三個展開型工具 ⇒ rc 2、stderr
+        含「收斂閘」、
+        stdout 空。"""
+        slug, env = _advised_session(self, 900_000)
         for tool in ("Agent", "Task", "Workflow"):
             with self.subTest(tool):
                 proc = _run_hook(_tool(slug, tool), **env)
@@ -368,7 +371,7 @@ class HookConvergeTest(unittest.TestCase):
 
     def test_at_tw_34_other_tools_pass_even_when_the_gate_would_trip(self) -> None:
         """AT-TW-34：Bash／Read／Edit／PowerShell 同條件仍 rc 0 無輸出（收斂本身需要它們）。"""
-        slug, env = _advised_session(self, 400_000)
+        slug, env = _advised_session(self, 900_000)
         for tool in ("Bash", "Read", "Edit", "PowerShell"):
             with self.subTest(tool):
                 proc = _run_hook(_tool(slug, tool), **env)
@@ -377,7 +380,7 @@ class HookConvergeTest(unittest.TestCase):
 
     def test_at_tw_37_degenerate_payloads_and_the_escape_hatch_stay_open(self) -> None:
         """AT-TW-37：空 payload／無人／notify／逃生口 ⇒ rc 0；擴射程沒破壞既有 fail-open。"""
-        slug, env = _advised_session(self, 400_000)
+        slug, env = _advised_session(self, 900_000)
         self.assertEqual(_run_hook({}, **env).returncode, 0)
         got = _run_hook(_tool(slug, "Agent"), AUTOSDD_UNATTENDED="1", **env)
         self.assertEqual(got.returncode, 0)
@@ -387,9 +390,9 @@ class HookConvergeTest(unittest.TestCase):
         self.assertEqual((off.returncode, off.stdout.strip(), off.stderr.strip()), (0, "", ""))
 
     def test_at_tw_70_hook_stop_pushes_back_once_with_a_block_decision(self) -> None:
-        """AT-TW-70／71（hook 層）：Stop、已出聲、ctx 300,000、無代理 ⇒ rc 0＋`decision:block`；
+        """AT-TW-70／71（hook 層）：Stop、ctx 900,000（過硬線）、無代理 ⇒ rc 0＋`decision:block`；
         `stop_hook_active` 為真 ⇒ 無輸出。"""
-        slug, env = _advised_session(self, 300_000)
+        slug, env = _advised_session(self, 900_000)
         first = _run_hook(_stop(slug), **env)
         self.assertEqual(first.returncode, 0, first.stderr)
         doc = json.loads(first.stdout)
@@ -400,7 +403,7 @@ class HookConvergeTest(unittest.TestCase):
 
     def test_at_tw_72_hook_stop_with_running_agents_only_announces(self) -> None:
         """AT-TW-72（hook 層）：仍有背景代理在跑 ⇒ 只出 systemMessage、不 block（既有出聲照舊）。"""
-        slug, env = _advised_session(self, 300_000)
+        slug, env = _advised_session(self, 900_000)
         agent = {"id": "a1", "type": "subagent", "status": "running", "description": "跑著"}
         # WP-4B：帶有效監督憑證（watch shell）才是「只出聲」；沒憑證會被監督閘推回
         watch_shell = {"id": "w1", "type": "shell", "status": "running",
@@ -413,7 +416,7 @@ class HookConvergeTest(unittest.TestCase):
     def test_def_200_588_a_background_shell_never_masks_the_stop_pushback(self) -> None:
         """AT-TW-81 DEF-200-588（hook 層）：僅背景 shell 在跑（事故形態＝掛著等 CI）時，出聲不得蓋掉
         推回——原接線先出聲就 return，判準層說要推回、hook 卻只印一句話放行。"""
-        slug, env = _advised_session(self, 300_000)
+        slug, env = _advised_session(self, 900_000)
         shell = {"id": "b1", "type": "shell", "status": "running"}
         doc = json.loads(_run_hook(_stop(slug, background_tasks=[shell]), **env).stdout)
         self.assertEqual(doc.get("decision"), "block", doc)
@@ -421,7 +424,7 @@ class HookConvergeTest(unittest.TestCase):
     def test_at_tw_78_stacked_with_check_pending_handoff_there_is_no_deadlock(self) -> None:
         """AT-TW-78：兩支 Stop 守衛同回合都推回（最壞一個額外回合），第二次 Stop
         （`stop_hook_active`）兩者皆放行——疊加不死鎖。"""
-        slug, env = _advised_session(self, 300_000)
+        slug, env = _advised_session(self, 900_000)
         real = ROOT / ".claude" / "hooks" / "check_pending_handoff.py"
         self.assertTrue(real.is_file(), real)
         claim = {"last_assistant_message": "這件事待掌舵者決定。"}
@@ -490,6 +493,61 @@ class HookParkTest(unittest.TestCase):
         self.assertEqual((off.returncode, off.stdout.strip()), (0, ""))
 
 
+def _shell_call(tool: str = "PowerShell", *, agent: str | None = "ae69f50e699e37cc2",
+                timeout: int | None = 300_000, **tool_input) -> dict:
+    """真 `claude -p` 傾印（2026-11-19）的 PreToolUse payload 形狀：子代理呼叫帶 agent_id／
+    agent_type。"""
+    tin = {"command": "Write-Output hi", "description": "d", **tool_input}
+    if timeout is not None:
+        tin["timeout"] = timeout
+    pl = {"hook_event_name": "PreToolUse", "tool_name": tool, "tool_input": tin, "session_id": SID,
+          "cwd": str(ROOT), "permission_mode": "default", "tool_use_id": "toolu_x"}
+    if agent:
+        pl.update(agent_id=agent, agent_type="general-purpose")
+    return pl
+
+
+class HookLongForegroundGateTest(unittest.TestCase):
+    """AT-SS-33／34／35（hook 層，R216 WP-D）：最終路徑 hook 的 PowerShell／Bash 分支。
+
+    WHY：判準函式單測過、hook 沒接線＝閘靜默失效（fail-open），表徵與「修好了」相同；
+    這裡把真實形狀 payload 餵給真 hook 行程。"""
+
+    def test_subagent_long_foreground_shell_is_blocked_rc2_with_both_commands(self) -> None:
+        for tool in ("PowerShell", "Bash"):
+            proc = _run_hook(_shell_call(tool))
+            self.assertEqual(proc.returncode, 2, (tool, proc.stdout, proc.stderr))
+            self.assertIn("runlong", proc.stderr)
+            self.assertIn("waitfor", proc.stderr)
+
+    def test_main_agent_background_short_and_exempt_calls_pass_silently(self) -> None:
+        for payload in (_shell_call(agent=None), _shell_call(run_in_background=True),
+                        _shell_call(timeout=270_000), _shell_call(timeout=None),
+                        _shell_call(command="big-download  # keepwarm-ok: 一次性下載無法分段")):
+            proc = _run_hook(payload)
+            self.assertEqual((proc.returncode, proc.stdout.strip(), proc.stderr.strip()),
+                             (0, "", ""), payload)
+
+    def test_unattended_window_cannot_self_exempt(self) -> None:
+        payload = _shell_call(command="big-download  # keepwarm-ok: 一次性下載無法分段")
+        self.assertEqual(_run_hook(payload, AUTOSDD_UNATTENDED="1").returncode, 2)
+
+    def test_escape_hatch_and_broken_input_fail_open(self) -> None:
+        self.assertEqual(_run_hook(_shell_call(), AUTOSDD_SESSIONCTL_GUARD_OFF="1").returncode, 0)
+        broken = subprocess.run([sys.executable, str(HOOK)], input="{{not json",
+                                capture_output=True,
+                                encoding="utf-8", timeout=60, check=False, cwd=str(ROOT),
+                                env={**os.environ, "PYTHONUTF8": "1"})
+        self.assertEqual(broken.returncode, 0)
+
+    def test_the_main_agent_shell_branch_does_not_import_the_judgement_module(self) -> None:
+        """成本契約：每次 PowerShell／Bash 呼叫都多一支 hook；主控的呼叫必須在 import
+        之前就放行。"""
+        text = HOOK.read_text(encoding="utf-8")
+        branch = text[text.index('tool in ("PowerShell", "Bash")'):]
+        self.assertLess(branch.index('payload.get("agent_id")'), branch.index("import longwait"))
+
+
 class GuardRegistrationTest(unittest.TestCase):
     """AT-SC-85：新 hook 以 exec form 註冊於兩個事件，且在機械守衛總表點名。
 
@@ -506,7 +564,8 @@ class GuardRegistrationTest(unittest.TestCase):
     def test_registered_exec_form_on_send_message_expansion_tools_and_stop(self) -> None:
         """AT-TW-38：恰一條 PreToolUse 條目、matcher 含四個工具名；Stop 條目不變。"""
         pre, stop = self._entries("PreToolUse"), self._entries("Stop")
-        self.assertEqual([e.get("matcher") for e in pre], ["SendMessage|Agent|Task|Workflow"])
+        self.assertEqual([e.get("matcher") for e in pre],
+                         ["SendMessage|Agent|Task|Workflow|PowerShell|Bash"])
         self.assertEqual(len(stop), 1)
         self.assertNotIn("matcher", stop[0])
         for entry in (*pre, *stop):

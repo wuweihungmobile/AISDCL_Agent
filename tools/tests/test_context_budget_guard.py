@@ -10732,7 +10732,8 @@ class QuotaEnvFileIsActuallyLoadedTest(unittest.TestCase):
             _REPO_ROOT / "tools" / "lib" / "quota_burndown.py",  # DEF-200-528：清倉 kill-switch
             # sessionctl WP0：喚醒選路本體（含 AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES 的讀取點）自
             # planner 搬到這裡；WP1 的成本門檻鍵也由它讀。讀取點搬家，判準（要有消費者）不放寬。
-            _REPO_ROOT / "tools" / "lib" / "sessionctl" / "switch.py"))
+            *(_REPO_ROOT / "tools" / "lib" / "sessionctl" / n
+              for n in ("switch.py", "costmodel.py", "keepwarm.py"))))
         fields = set(quota_policy.Policy.__dataclass_fields__)
         for spec in quota_policy.ENV_SPEC:
             with self.subTest(key=spec.name):

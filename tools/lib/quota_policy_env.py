@@ -134,26 +134,35 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # choose_resume_route() os.environ 直讀（attr=None 不進 Policy）；選值見 Resume 證據檔 §2。
     EnvVar("AUTOSDD_RESUME_MAX_TRANSCRIPT_BYTES", None, None, "int", 1.0, None,
            "喚醒選路：逐字稿超此位元組數即降級 FRESH（留空＝內建 32MiB）", "policy"),
-    # 🔴 sessionctl（ADR-XPLAT-004 §2.13，WP1）：成本選路 R1～R3、過期 session、續棒閘、
+    # 🔴 sessionctl（ADR-XPLAT-004 §2.13，WP1）：成本選路 R2／F4、過期 session、續棒閘、
     # 交接包與名冊門檻。消費端＝`tools/lib/sessionctl/switch.py`（`attr=None`，同上一鍵判例）。
-    # R1～R3 與 RESUME_AGENT_TOKENS **只准下修**：覆寫值大於出廠值就退回出廠值並出聲
+    # R2、HARD 與 RESUME_AGENT_TOKENS **只准下修**：覆寫值大於出廠值就退回出廠值並出聲
     # （放寬＝退回 E1 事故）。
-    EnvVar("AUTOSDD_SWITCH_R1_CTX_TOKENS", None, 250000, "int", 1.0, None,
-           "切新 session R1：續跑前上下文達此 token 數 ⇒ 改開新 session（只准下修）", "policy"),
+    # R216（掌舵者 2026-11-18：不再 25 萬就換 session）：R1／R3 退役——出廠值拿掉、有設時只出聲
+    # 「已退役」不生效；R1 的換窗職責由硬線 HARD 承接、R3 由 F4（成本選路）取代。
+    EnvVar("AUTOSDD_SWITCH_R1_CTX_TOKENS", None, None, "int", 1.0, None,
+           "【已退役】原 R1（25 萬換窗）；有設也不生效，換窗改由 HARD 硬線承接", "policy"),
     EnvVar("AUTOSDD_SWITCH_R2_COMPACTIONS", None, 2, "int", 1.0, None,
            "切新 session R2：逐字稿已壓縮達此次數 ⇒ 改開新 session（只准下修）", "policy"),
-    EnvVar("AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS", None, 100000, "int", 1.0, None,
-           "切新 session R3：上次續跑首回合寫入快取達此 token 數 ⇒ 改開新 session"
-           "（只准下修）", "policy"),
+    EnvVar("AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS", None, None, "int", 1.0, None,
+           "【已退役】原 R3（上次續跑寫入快取達標即換新）；有設也不生效，由 F4 成本選路取代",
+           "policy"),
+    EnvVar("AUTOSDD_SWITCH_FRESH_COST_UNITS", None, 480000, "int", 1.0, None,
+           "成本選路 F4：新 session 接手成本 F（加權單位；出廠＝實測中位 480,734 取整）。"
+           "快取已冷時，同 session 續跑重寫（2.0×上下文）> F×(1+q) 即改開新 session", "policy"),
+    EnvVar("AUTOSDD_SWITCH_CONTEXT_VALUE_Q", None, 1.0, "float", 0.0, None,
+           "成本選路 F4：上下文價值係數 q（失去上下文的品質損失＝q×F；0＝只看 token 成本，"
+           "出廠 1.0＝治理決定）", "policy"),
     EnvVar("AUTOSDD_STALE_SESSION_HOURS", None, 24, "int", 1.0, None,
            "過期 session：閒置達此小時數且同專案有更新的 session 做過事 ⇒ 不續跑、"
            "哨兵自我解除", "policy"),
     EnvVar("AUTOSDD_RESUME_AGENT_TOKENS", None, 150000, "int", 1.0, None,
            "續棒成本閘：SendMessage 目標代理上下文達此 token 數 ⇒ 無人窗口阻斷；"
            "互動僅在其快取已冷時阻斷（只准下修）", "policy"),
-    EnvVar("AUTOSDD_SWITCH_HARD_CTX_TOKENS", None, 290000, "int", 1.0, None,
-           "收斂閘：已出聲且主控上下文達此 token 數 ⇒ 擋 Agent／Task／Workflow、回合結束推回一次"
-           "（只准下修；須高於 R1）", "policy"),
+    EnvVar("AUTOSDD_SWITCH_HARD_CTX_TOKENS", None, 850000, "int", 1.0, None,
+           "換 session 硬線（唯一的上下文換窗線）：主控上下文達此 token 數 ⇒ 擋 Agent／Task／"
+           "Workflow、回合結束推回封存一次、PostToolUse 出聲建議換窗（只准下修；須低於觀測到的"
+           "流程內 autocompact 最小點 881,938）", "policy"),
     EnvVar("AUTOSDD_HANDOFF_TTL_HOURS", None, 72, "int", 1.0, None,
            "交接包公告的存活小時數（逾時不再於 SessionStart 出聲）", "policy"),
     EnvVar("AUTOSDD_ROSTER_QUIET_MINUTES", None, 10, "int", 1.0, None,
@@ -166,6 +175,12 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "policy"),
     EnvVar("AUTOSDD_WATCH_AGENT_CTX_TOKENS", None, 700000, "int", 1.0, None,
            "背景代理監督：代理上下文達此 token 數 ⇒ 判預算超支（只准下修）", "policy"),
+    # R216 快取保溫：消費端＝`tools/lib/sessionctl/keepwarm.py`（設計 SessionSwitch_CostModel）。
+    EnvVar("AUTOSDD_KEEPWARM_MINUTES", None, 45, "int", 15.0, 45.0,
+           "主控快取保溫（sessionctl keepwarm）：距主控最後一筆 assistant 記錄這麼多分鐘就叫醒一次"
+           "（只准下修、下限 15；出廠 45＝早於閒置約 55 分的自動壓縮與 1 小時快取壽命）", "policy"),
+    EnvVar("AUTOSDD_KEEPWARM_MIN_CTX_TOKENS", None, 30000, "int", 1.0, None,
+           "主控快取保溫：上下文低於此 token 數就不保溫（重寫很便宜，不值得叫醒）", "policy"),
     EnvVar("AUTOSDD_SESSION_SWITCH_MODE", None, "auto", "str", None, None,
            "互動視窗自動切換 session：auto（出聲＋可 spawn）／notify（只出聲）／off", "policy"),
     # 🔴 v2.1.13 G3（PRD_Amendment_R113_WakeChain_LastMile.md §3(c)）：接力狀態機的
@@ -204,6 +219,8 @@ ENV_SPEC: tuple[EnvVar, ...] = (
     # 而清倉是「一次、一個視窗、一組軸」的事。`attr=None`：不進 Policy，消費端住 `quota_burndown`。
     EnvVar("AUTOSDD_QUOTA_BURNDOWN_OFF", None, "", "flag", None, None,
            "1 ⇒ 清倉授權（操作者落款）全部失效；只准關不准開（quota_burndown.py 專屬）", "escape"),
+    EnvVar("AUTOSDD_KEEPWARM_OFF", None, "", "flag", None, None,
+           "1 ⇒ 只關主控快取保溫（Stop 保溫閘與 keepwarm 指令；sessionctl 專屬）", "escape"),
 )
 
 _ENV_HEADER = (

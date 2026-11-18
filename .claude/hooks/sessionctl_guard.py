@@ -2,11 +2,15 @@
 """sessionctl 守衛（跳板）：Stop 出聲／推回；PreToolUse 續棒成本閘與收斂閘。
 
 判準全在 `tools/lib/sessionctl/`（本檔零判準）：SendMessage 走 `roster.resume_gate`
-（續棒看快取冷熱）；Agent／Task／Workflow 走 `converge.converge_verdict`（出聲後上下文達
-硬門檻）。Stop：仍有背景代理在跑 ⇒ `{"systemMessage": ...}` rc 0；否則收斂閘成立 ⇒
+（續棒看快取冷熱）；Agent／Task／Workflow 走 `converge.converge_verdict`（主控上下文達
+硬線 850,000，不再要求先出聲；R216）。Stop：仍有背景代理在跑 ⇒
+`{"systemMessage": ...}` rc 0；否則收斂閘成立 ⇒
 `{"decision":"block","reason":...}` 推回一次（`stop_hook_active` 為真即放行，判準
 `converge.stop_verdict`；其尾端另判 park＝額度停工憑證 `park.stop_verdict`，
 逃生口 `AUTOSDD_PARK_GUARD_OFF`）。PreToolUse：rc 2 ＝阻斷（stderr 回饋模型）；解析不到一律放行。
+PreToolUse／PowerShell、Bash：子代理（payload 有 `agent_id`）的前景呼叫 timeout > 270000 ms ⇒ rc 2，
+指路 `sessionctl runlong`／`waitfor`（`longwait.pretool_verdict`；R216 WP-D、設計 §4.5 D13；行內豁免
+`# keepwarm-ok: <WHY>`）；主控的 shell 呼叫不判、不付 import 成本。
 UserPromptSubmit：呼叫 `forward.hook_output`（冷舊窗的真人提示自動轉送新 session；已交棒舊窗回
 說明；R3 WP-5，ADR-XPLAT-004 §2.13）；輸出 block／additionalContext JSON，其餘無輸出。
 任何例外 rc 0（fail-open，P0）；不 import planner（轉送的 spawn 在 `forward`／`handoff` 內）。
@@ -47,6 +51,16 @@ def main() -> int:
             out = forward.hook_output(payload, os.environ)
             if out:
                 _emit(out)
+            return 0
+        if event == "PreToolUse" and tool in ("PowerShell", "Bash"):
+            # 長前景閘（R216 WP-D）：只判子代理（帶 agent_id）；主控不付 import 成本
+            if payload.get("agent_id"):
+                from lib.sessionctl import longwait  # noqa: PLC0415
+
+                rc, text = longwait.pretool_verdict(payload, os.environ)
+                if rc == 2:
+                    sys.stderr.write(text)
+                    return 2
             return 0
         from lib.sessionctl import converge, roster  # noqa: PLC0415 — 真的要判才付 import 成本
 

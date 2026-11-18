@@ -1,8 +1,9 @@
-"""sessionctl 收斂閘：出聲之後主控 session 的上下文長到硬門檻，就不准再展開、回合結束要推回收斂。
+"""sessionctl 收斂閘：主控 session 的上下文長到硬線，就不准再展開、回合結束要推回收斂。
 
-WHY：`advise_once` 出聲只是提醒，之後在 30 萬 token 的上下文裡繼續派工或閒置，
-每一輪都重付整份快取。兩個接點共用同一組判準（出聲在先 ∧ 主控上下文 ≥
-`AUTOSDD_SWITCH_HARD_CTX_TOKENS` ∧ 非無人 ∧ `AUTOSDD_SESSION_SWITCH_MODE=auto`）：
+WHY（R216 改寫）：硬線 85 萬是 autocompact（最小 881,938）之前的最後防線——autocompact 一次把上下文
+砍到 1～2 萬，比交接包更失真；25 萬到 85 萬之間人要的是保留上下文，不是被推著換窗
+（掌舵者 2026-11-18），所以不再要求「已出聲」（D12）。兩個接點共用同一組判準
+（主控上下文 ≥ `AUTOSDD_SWITCH_HARD_CTX_TOKENS` ∧ 非無人 ∧ `AUTOSDD_SESSION_SWITCH_MODE=auto`）：
   · `converge_verdict`：PreToolUse 擋 Agent／Task／Workflow
     （只擋展開型；讀、改、測、SendMessage 不擋）；
   · `stop_verdict`：Stop 時（主控結束回合、即將閒置的唯一時點）推回一次，另要求無背景代理
@@ -16,7 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from . import handoff, roster, seal, supervise, switch
+from . import keepwarm, roster, seal, supervise, switch
 
 EXPAND_TOOLS = frozenset({"Agent", "Task", "Workflow"})
 _LATCHLESS = "（不寫閂鎖：上下文降到門檻下即自動解除）"
@@ -28,8 +29,6 @@ def _gate(payload: dict, env) -> tuple[str, int, int] | None:
         return None
     sid, raw = roster._payload_sid(payload), payload.get("transcript_path")
     if not sid or not isinstance(raw, str) or not raw.strip() or not Path(raw).is_file():
-        return None
-    if not handoff.is_advised(sid, env=env):
         return None
     ctx = roster._scan(Path(raw), False)["ctx_tokens"]
     hard = switch.threshold(switch.HARD_CTX_KEY, env)[0]
@@ -63,9 +62,8 @@ def converge_verdict(payload: dict, env) -> tuple[int, str]:
             return 0, supervise.dispatch_note(payload, env)  # FR-W8：放行時帶一行掛監督附註
         sid, ctx, hard = got
         switch.trace("converge_block", sid=sid, ctx=ctx, hard=hard, tool=payload.get("tool_name"))
-        return 2, (f"🔴 收斂閘：本 session 已出聲要求換 session，"
-                   f"且主控上下文 {ctx:,} ≥ 門檻 {hard:,}，"
-                   f"不再展開 {payload.get('tool_name')}（每多一輪就重付整份快取）。"
+        return 2, (f"🔴 收斂閘：主控上下文 {ctx:,} ≥ 硬線 {hard:,}（再長就撞 autocompact），"
+                   f"不再展開 {payload.get('tool_name')}。"
                    "只擋 Agent／Task／Workflow，讀、改、跑測試、SendMessage 不擋。\n"
                    + _exits(sid, env) + _LATCHLESS + "\n")
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
@@ -92,6 +90,12 @@ def _finalized_wake(payload: dict, env) -> str:
     path = seal.wake_package(sid, env)
     if path is None:
         return ""
+    if seal.handed_over(sid, env) is None:
+        # 只封存、還在等掌舵者（沒交棒）：`sessionctl.py keepwarm` shell 豁免——它就是要把這個
+        # session 叫醒保溫，醒來讀的是熱快取（R216；已交棒者照舊全停，醒來就是整份重寫）。
+        live = [t for t in live if not keepwarm.is_keepwarm_task(t)]
+        if not live:
+            return ""
     switch.trace("finalized_wake_block", sid=sid, tasks=len(live))
     return (f"冷叫醒閘（Stop）：交接包已封存（{path}），但本 session 還有 {len(live)} 個"
             "背景任務在跑——它一結束就會把這個已交棒的 session 叫醒，快取已冷、整份上下文重寫。"
@@ -104,8 +108,9 @@ def stop_verdict(payload: dict, env=None) -> str:
     """Stop 推回的合成（ARCH §1.4 互斥兩組）；回 reason，不成立 ⇒ `""`；任何例外 `""`。
 
     · 有在飛子代理：只判冷叫醒閘（監督閘接點見下，WP-4 補）。
-    · 無在飛子代理：冷叫醒閘（已交棒卻掛背景 shell）優先；否則封存閘與 park 都成立 ⇒ **合併成一則**
-      （先封存再 park），只一個成立就出那一個。"""
+    · 無在飛子代理：冷叫醒閘（已交棒卻掛背景 shell）優先；否則封存閘、park、保溫閘
+      （`keepwarm.stop_verdict`：沒有任何背景任務在跑、人離開後快取會冷）成立者 **合併成一則**，
+      次序 封存→park→保溫，只一個成立就出那一個。"""
     env = os.environ if env is None else env
     try:
         if not isinstance(payload, dict) or payload.get("stop_hook_active"):
@@ -120,7 +125,7 @@ def stop_verdict(payload: dict, env=None) -> str:
         if wake:
             return wake
         sealed, parked = seal.stop_verdict(payload, env), _park_stop(payload, env)
-        return "\n\n".join(x for x in (sealed, parked) if x)
+        return "\n\n".join(x for x in (sealed, parked, keepwarm.stop_verdict(payload, env)) if x)
     except Exception:  # noqa: BLE001 — fail-open
         return ""
 

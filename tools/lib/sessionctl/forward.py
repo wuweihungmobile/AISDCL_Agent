@@ -28,7 +28,7 @@ from pathlib import Path
 import endurance_env
 import transcript_activity
 
-from . import cachestate, handoff, roster, seal, supervise, switch
+from . import cachestate, costmodel, handoff, roster, seal, supervise, switch
 
 EV_PASS = "forward_pass"
 EV_SPAWNED = "forward_spawned"
@@ -130,13 +130,22 @@ def _handed_over_verdict(pkg: Path, payload: dict, mode: str, now: datetime, ali
 
 def _forward_verdict(pkg: Path, payload: dict, env, now: datetime, *, spawn, alive, cache,
                      crons, preflight, refresh, plat: str, mode: str) -> dict:
-    """路徑一的條件 5～9（1～4 已由呼叫端判過）。"""
+    """路徑一的條件 5～9（1～4 已由呼叫端判過）＋條件 10（R216 F4：冷但續跑較便宜 ⇒ 留原視窗）。"""
     sid, tpath = payload["session_id"], Path(payload["transcript_path"])
     state = cache(tpath, now)
     if not state.get("cold"):
         return _passed(5, sid)  # 熱：留在原地較便宜（ARCH §2.4 例二）
     if crons(sid) is not False:
         return _passed(6, sid)  # 有排程或讀不到 ⇒ 不轉送（偏放行）
+    # D9／F4（R216）：快取冷了也未必該換——上下文不夠大時續跑重寫比換新便宜，
+    # 留在原視窗（量不到＝不轉送）。
+    held = roster._scan(tpath, False).get("ctx_tokens")
+    if not costmodel.fresh_is_cheaper(held, cold=True, env=env):
+        why = ("上下文量不到" if held is None else
+               f"上下文 {held:,} tokens 續跑重寫（{costmodel.W_CC1 * held:,.0f} 單位）比換新"
+               f"（{costmodel.fresh_total(env):,.0f} 單位）便宜")
+        note = f"快取已冷，但{why}，所以這句照常送進本視窗（沒有轉送）。"
+        return _passed(10, sid, context=note, show=f"ℹ️ {note}", why="f4_resume_cheaper", ctx=held)
     hint = f"建議改到新 session（快取已冷）：python tools/sessionctl.py handoff --spawn {pkg}"
     # 7／8 放行時掌舵者也要看得到「沒轉送、原因是 X」（DEF-200-609：原本只進模型 context，
     # 真機畫面一片空白，無從得知轉送為何沒發生）。
@@ -164,7 +173,7 @@ def _forward_verdict(pkg: Path, payload: dict, env, now: datetime, *, spawn, ali
         switch.trace(EV_FAILED, sid=sid, handoff=str(pkg), forward=str(saved), rc=rc,
                      detail=err.getvalue().strip()[-300:])
         return {"kind": "pass", "text": ""}  # 失敗＝放行；原文檔保留
-    ctx = roster._scan(tpath, False).get("ctx_tokens") or 0
+    ctx = held or 0
     idle = state.get("idle_s")
     switch.trace(EV_SPAWNED, sid=sid, handoff=str(pkg), forward=str(saved), pid=rec.get("pid"),
                  ctx=ctx, idle_s=idle, confirmed=not pending)

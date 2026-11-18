@@ -703,6 +703,13 @@ _GOVERNANCE_DOCS = (
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R213_DebtZero_FourParty_W6.md",
     # R214：哨兵自願停機後不續跑三根因（DEF-200-560～562）  round-label-ok
     _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R214_Sentinel_GracefulHalt_Evidence.md",
+    # R215：待驗項全覆蓋表與真機自驗載具設計＋一次性證據（DEF-200-612）。資格同上：逐條寫出
+    # 「某 V 項／DEF-ID 的座標在某檔某案例」（⇒ 指針稽核），覆核者要重驗就得讀完（⇒ 體積守門）。
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R215_PendingVerification_Closure.md",
+    _REPO_ROOT / "docs" / "06_quality" / "CrossPlatform_R215_WP7_OneShot_Evidence.md",
+    # R216：換 session 依快取成本收尾的連動面座標與誠實未結清單（DEF-200-611～615）。資格同上。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R216_SessionSwitch_CostModel_Closure_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

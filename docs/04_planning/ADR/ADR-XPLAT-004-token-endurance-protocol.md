@@ -511,7 +511,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 | 決策 | 內容 | 狀態 | 證據座標 |
 |---|---|---|---|
-| D2 | 無人選路量續跑成本（R1～R3）而非檔案大小 | 已落地（2026-11-14） | `tools/lib/sessionctl/switch.py`；`tools/tests/test_sessionctl_switch.py`（RouteTest、ThresholdTest）；AT-SC-01～18 |
+| D2 | 無人選路量續跑成本（R1～R3）而非檔案大小 | 已落地（2026-11-14）；**R1／R3 自 v2.1.22 起退役、改 F4 成本選路，見 §2.19** | `tools/lib/sessionctl/switch.py`；`tools/tests/test_sessionctl_switch.py`（RouteTest、ThresholdTest）；AT-SC-01～18 |
 | D3 | 過期 session 不續跑（SUPERSEDED），`sentinel_decide`＋`_resume_tick` 兩處接線、`reap_verdict` 一致 | 已落地（2026-11-14） | 同上（SupersededTest、E2ReplayTest、ReapSupersededTest、SupersedingSinceTest 皆在 `tools/tests/test_sessionctl_switch.py`）；`tools/tests/test_context_budget_guard.py`（SentinelDecisionTest、SentinelReapVerdictTest）；AT-SC-19～33 |
 | 圍籬修正 | 洩漏圍籬不把活著的互動 session 合法武裝的哨兵判成洩漏（§2.13.11） | 已落地（2026-11-14） | `tools/lib/sentinel_lifecycle.py::leak_fence`；`LeakFenceTest` |
 | D4 | 交接包（機械層＋主控層、公告／ack／過期） | 已落地（2026-11-14） | `tools/lib/sessionctl/handoff.py`、`tools/lib/sessionctl/handoff_build.py`；`tools/tests/test_sessionctl_handoff.py`；AT-SC-34～49 |
@@ -563,6 +563,8 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 | R2 壓縮次數 | 逐字稿 `compact_boundary` 計數（`context_budget_guard.compact_boundary_count`，**不用** `autosdd_compact_events.jsonl`：後者只記 hook 有跑到的那幾次，會少算） | `≥ 2` | 讀不動 ⇒ 0 |
 | R3 上次續跑成本 | `~/.autosdd/traces/autosdd_resume_cost.jsonl` 同 sid 最近一筆 `cache_creation_input_tokens` | `≥ 100,000` | 無記錄 ⇒ 不成立 |
 | R4 既有 | `fresh_why()`：sid 缺席／逐字稿缺檔／空檔／`size > RESUME_MAX_TRANSCRIPT`；`weekly_why()` 週軸 converge | 不變 | 不變 |
+
+> 🔴 **v2.1.22 註記（R216，見 §2.19）**：上表 R1（25 萬）與 R3（上次續跑寫入 10 萬）**已退役**（掌舵者 2026-11-18：「專注在不要讓 Cache 過期」）；R1 的換窗職責由硬線 `AUTOSDD_SWITCH_HARD_CTX_TOKENS` 承接、R3 由 F4 成本選路取代（快取已冷才判）；R2 保留。本節 R1／R3 的文字與數字保留作決策史料，不再是現行判準。
 
 - **方向鎖**：三個門檻只准下修（具名測試以「現值 ≤ 出廠值」釘住出廠值，env 覆寫若大於出廠值 ⇒ 退出廠值並出聲，同 `_transcript_cap()` 的病態值處理）。方向理由：放寬＝退回 E1。
 - **fail 方向**：選路的降級只准 RESUME→FRESH（既有方向鎖不變）。量不到一律「不觸發該條」而非「觸發 FRESH」——FRESH 的代價是丟上下文，量不到不應單方面造成資訊損失；但 E1 型輸入（context_feed 不在、逐字稿可讀）R1 經 `scan_transcript` 仍量得到，回歸鎖以 E1 真實數值釘住。
@@ -738,12 +740,12 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 #### 2.14.2 決策
 
 1. **續棒看快取冷熱（取代 §2.13.9 X4 的「互動只出聲」）**：SendMessage 的目標代理「冷」＝最後一筆 **assistant** 記錄距今 ≥ 它實際使用的快取壽命減 30 秒安全邊際（壽命由其逐字稿尾端 usage 的 `cache_creation.ephemeral_1h_input_tokens` 是否大於 0 判 1 小時或 5 分；缺欄＝5 分；tool_result 記錄不重設計時器，故不以「任何記錄」起算）。冷 ∧ 上下文 ≥ `AUTOSDD_RESUME_AGENT_TOKENS` ⇒ **互動與無人皆阻斷**，要求改派新代理＋短任務書（指向交卷檔）。熱 ⇒ 互動放行且**不出聲**。互動逃生口＝訊息本文 `續棒理由：<WHY>`（全形冒號、理由 ≥ 8 字；落痕跡 `resume_gate_override`；`AUTOSDD_UNATTENDED` 有設時無效）。**無人窗口不放寬**：上下文 ≥ 門檻一律照 §2.13.6 阻斷，不論冷熱（E1 的現場是無人窗口，熱放行只適用互動）。X4 的原否決理由（只差一步的代理）由「熱續放行＋逃生口」承接。
-2. **收斂閘**：本 session 已被提醒換 session（`<handoff>/<sid>.advised` 存在）且主控上下文 ≥ `AUTOSDD_SWITCH_HARD_CTX_TOKENS` ⇒ PreToolUse 擋 `Agent`／`Task`／`Workflow`；讀、改、跑測試、等交卷、SendMessage 不擋。出口：代理交卷後 `handoff --finalize` → `--spawn`，或 `/compact`（上下文降到門檻下自動解除，阻斷不進閂鎖）。`AUTOSDD_SESSION_SWITCH_MODE=notify|off` 與無人窗口不擋；阻斷事件落痕跡 `converge_block`。門檻出廠值取自探針重放（TCS §7）：**290,000，只准下修，且須嚴格大於 R1**。
+2. **收斂閘**：本 session 已被提醒換 session（`<handoff>/<sid>.advised` 存在）且主控上下文 ≥ `AUTOSDD_SWITCH_HARD_CTX_TOKENS` ⇒ PreToolUse 擋 `Agent`／`Task`／`Workflow`；讀、改、跑測試、等交卷、SendMessage 不擋。出口：代理交卷後 `handoff --finalize` → `--spawn`，或 `/compact`（上下文降到門檻下自動解除，阻斷不進閂鎖）。`AUTOSDD_SESSION_SWITCH_MODE=notify|off` 與無人窗口不擋；阻斷事件落痕跡 `converge_block`。門檻出廠值取自探針重放（TCS §7）：**290,000，只准下修，且須嚴格大於 R1**。🔴 **v2.1.22 起（§2.19 D1）**：「須先出聲」前置取消、R1 退役、硬線出廠改 850,000（低於 autocompact 最小點 881,938）；本條 290,000 與「須大於 R1」為史料。
 3. **長等待角色用 1 小時快取（條件項）**：任務書含預期超過 4 分鐘的指令（全套、E2E、Docker、CI 等待）的棒，派 `subagent_type: long-runner`（long-runner 定義檔（.claude/agents/ 下，尚未進 repo）：`model: sonnet`、`experimental.cacheTtl: 1h`、不寫 `tools`）；其餘維持預設。**真機驗證（TCS §3 V-T1～V-T3：1 小時寫入真的出現、自訂型別仍收到根 CLAUDE.md、等待後讀回 ≥90%）全數通過才落地**，任一不過即刪該檔並把本條改寫為「已驗證不可行」。全域把子代理改 1 小時經實測淨虧，否決（X8）。
 4. **等待自帶截止且短於主控快取壽命**：互動主控的 CI 等待（`tools/ci_wait.py`）預設逾時短於主控快取壽命（現值 40 分，主控壽命 1 小時；以 `tools/tests/test_ci_wait.py` 的一測釘住不得 ≥ 60）；逾時醒來若未完成且上下文已達換 session 門檻，下一步是交接換手（§2.13.4／§2.13.5），不是再掛一次等待。
 5. **推送快層先行**：`tools/git-hooks/pre-push` 在啟動任何 leg 之前先跑快層（十一支守門＋`ruff check tools/ .claude/hooks/` 與其後兩道），快層**全部跑完**後任一紅即停：不啟動慢層、不啟動子專案 leg、不開背景並行，印出紅的那一道與「修完再推」。慢層內部維持「失敗累積進 rc、不中斷其他 leg」。取捨（Rule 7）：該紀律的目的是一次看到所有紅，但快層紅時推送必被擋、慢層結果不會被用到，累積只換來等待；故只在「快→慢」之間短路，快層內部與慢層內部照舊累積。
 
-6. **回合結束推回（C2；原條件項，主控裁決 O-1 升入第一期）**：🔴 **已由 §2.18 D2 取代（R3，2026-11-17）**：Stop 推回改為「封存閘」——不再要求「已被提醒＋達硬門檻＋無已 finalize 的 live 包」，改為無在飛代理 ∧ 主控上下文 ≥ R1（直接量逐字稿）∧ 尚未交棒 ∧ 封存無效；`converge._converge_stop` 已刪、痕跡 `converge_stop_block` 改 `seal_stop_block`；「已 finalize」判準升級為「已封存（`.sealed`）／已交棒」，並補上 E-HD-1（包被 ack 後舊判準失明）。以下為原決策文字，保留作史料：Stop 事件是主控結束回合、即將閒置的唯一時點。本 session 已出聲 ∧ 主控上下文 ≥ `AUTOSDD_SWITCH_HARD_CTX_TOKENS` ∧ 無執行中背景代理（背景 shell 不算）∧ 無已 finalize 的 live 交接包 ∧ `stop_hook_active` 為假 ∧ 非無人窗口 ∧ 模式為 auto ⇒ `sessionctl_guard.py` 的 Stop 分支輸出 `decision:block` 推回一次，reason 給確切下一步（補交接包主控層 → `handoff --finalize` → `--spawn`，或 `/compact`，或改 notify）；第二次 Stop 一律放行，每回合至多一個額外回合，不寫閂鎖。判準與收斂閘共用同一份 `_gate`，兩者不會漂移；與 `check_pending_handoff.py` 疊加最壞兩個額外回合、不死鎖（兩支各自至多推一次、都吃同一個 `stop_hook_active`）。痕跡 `converge_stop_block`。真機驗證 V-C2 待主控。
+6. **回合結束推回（C2；原條件項，主控裁決 O-1 升入第一期）**：🔴 **已由 §2.18 D2 取代（R3，2026-11-17）**：Stop 推回改為「封存閘」——不再要求「已被提醒＋達硬門檻＋無已 finalize 的 live 包」，改為無在飛代理 ∧ 主控上下文 ≥ R1（直接量逐字稿；**v2.1.22 起改為 ≥ 硬線 HARD，R1 退役，見 §2.19 D1**）∧ 尚未交棒 ∧ 封存無效；`converge._converge_stop` 已刪、痕跡 `converge_stop_block` 改 `seal_stop_block`；「已 finalize」判準升級為「已封存（`.sealed`）／已交棒」，並補上 E-HD-1（包被 ack 後舊判準失明）。以下為原決策文字，保留作史料：Stop 事件是主控結束回合、即將閒置的唯一時點。本 session 已出聲 ∧ 主控上下文 ≥ `AUTOSDD_SWITCH_HARD_CTX_TOKENS` ∧ 無執行中背景代理（背景 shell 不算）∧ 無已 finalize 的 live 交接包 ∧ `stop_hook_active` 為假 ∧ 非無人窗口 ∧ 模式為 auto ⇒ `sessionctl_guard.py` 的 Stop 分支輸出 `decision:block` 推回一次，reason 給確切下一步（補交接包主控層 → `handoff --finalize` → `--spawn`，或 `/compact`，或改 notify）；第二次 Stop 一律放行，每回合至多一個額外回合，不寫閂鎖。判準與收斂閘共用同一份 `_gate`，兩者不會漂移；與 `check_pending_handoff.py` 疊加最壞兩個額外回合、不死鎖（兩支各自至多推一次、都吃同一個 `stop_hook_active`）。痕跡 `converge_stop_block`。真機驗證 V-C2 待主控。
 
 #### 2.14.3 設計取捨與落點
 
@@ -767,7 +769,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 #### 2.14.5 誠實劃界
 
 - **收斂閘對事故本身不介入**：以派工事件重放事故 session，19:21:07 出聲後到 22:12:38 之間沒有任何 `Agent`／`Task`／`Workflow` 呼叫（事故的 78 分鐘是背景 `PowerShell` 輪詢加結束回合）。收斂閘壓住的是出聲後的**派工**與其上下文成長；事故形態本身由決策 4（等待自己會結束）與 Stop 時點的推回（決策 6，已升入第一期）處理。
-- 出聲後多數 session 的後續派工都會被擋（重放：首次 ≥R1 後 202 次派工，門檻 290,000 時 174 次落在 ≥門檻）。這是設計意圖，也是守衛被整個關掉的最大風險；以痕跡 `converge_block` 與逃生口使用量監看，過高即回頭檢討（不是放寬方向鎖，而是檢討出聲條件）。
+- 🔴 v2.1.22 起「出聲後」前置取消、硬線出廠 850,000（§2.19 D1），以下為史料。出聲後多數 session 的後續派工都會被擋（重放：首次 ≥R1 後 202 次派工，門檻 290,000 時 174 次落在 ≥門檻）。這是設計意圖，也是守衛被整個關掉的最大風險；以痕跡 `converge_block` 與逃生口使用量監看，過高即回頭檢討（不是放寬方向鎖，而是檢討出聲條件）。
 - 純讀、改、跑測試的連續小工作不被收斂閘與 Stop 推回擋（O-1 已接受的缺口）；以痕跡 `converge_block`／`converge_stop_block` 與逃生口使用量監看。
 - 決策 3 依賴自訂子代理仍收到根 CLAUDE.md 與 1 小時寫入真的生效，兩者皆以真機驗證為前提；驗不過即撤回該檔。
 - 主控在真人離開時閒置超過一小時的重寫沒有機械解；收斂閘只壓住單件代價的上界。
@@ -1023,7 +1025,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 2. **這是「24% 為什麼要換」的答案**：不是因為 24% 很高，而是因為**舊 session 的喚醒保證不了是熱的**——實際發生的是沒有任何東西喚醒、人在 294 分鐘後回來＝冷。H 路把「喚醒」放到 OS 排程（獨立於視窗與行程），新 session 起步就是熱的 N₀。
 3. **每回合熱讀**：留在大上下文的每次呼叫多付 `(N − N₀) × r`；§2.15.2 表：30 萬約 13 次呼叫回本。
 
-**R1 絕對門檻（250,000）本輪不改。** 理由：① park 本身就是成本判準的落地點，**不依賴 R1 出聲**（本案未出聲：R1 要 25 萬、停工時 21.9 萬）；② §2.15.5 第二期的下修條件「首次 ≥20 萬後的主控呼叫數中位 >95」，該統計 `waste_census --replay-hard-ctx` **不產出**（它的 `room_med` 是 R1 到硬門檻之間的回合數；以 R1＝200,000、H＝230,000／250,000／290,000 重放：reach_H＝15／14／12、room_med＝7／10.5／18.0，與條件無關）⇒ 條件**未能判定**，不得據以下修；③ R1 下修與 park 互不依賴，併一個 commit 只會擴大爆炸半徑。要下修時先補該統計（`wastecensus` 新指標），再依 §2.15.5 走。
+**R1 絕對門檻（250,000）本輪不改。**（🔴 v2.1.22 註記：R1 已於 R216 退役、25 萬不再是換窗線，見 §2.19 D1；本段與下修討論為史料。） 理由：① park 本身就是成本判準的落地點，**不依賴 R1 出聲**（本案未出聲：R1 要 25 萬、停工時 21.9 萬）；② §2.15.5 第二期的下修條件「首次 ≥20 萬後的主控呼叫數中位 >95」，該統計 `waste_census --replay-hard-ctx` **不產出**（它的 `room_med` 是 R1 到硬門檻之間的回合數；以 R1＝200,000、H＝230,000／250,000／290,000 重放：reach_H＝15／14／12、room_med＝7／10.5／18.0，與條件無關）⇒ 條件**未能判定**，不得據以下修；③ R1 下修與 park 互不依賴，併一個 commit 只會擴大爆炸半徑。要下修時先補該統計（`wastecensus` 新指標），再依 §2.15.5 走。
 
 #### 2.17.4 設計取捨與落點
 
@@ -1097,8 +1099,8 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 #### 2.18.1 決策
 
-- **D1 監督（`watch.py`、`supervise.py`）**：派出背景子代理的同一回合，主控掛 `python tools/sessionctl.py watch`（`run_in_background`、輸出導檔）——它是 harness 追蹤的背景 shell，結束即以 task-notification 叫醒主控，是文件有依據的「主控閒置時叫醒它」載具（本節否決所有外部行程叫醒方案）。輪詢純讀檔、零 token；第一個成立的事件即印判決與處置表對應列、末行 `WATCH_VERDICT=<事件>` 並以表定 rc 結束。事件先後＝quota ＞ budget ＞ stall ＞ overrun ＞ all_done ＞ keepwarm。門檻三鍵（stall 下限、單支牆鐘、單支上下文只准下修）在 `quota_policy_env.ENV_SPEC`／`switch.py`；**keepwarm 是常數、不開 env**（主控快取壽命 1 小時，留餘裕給排程誤差；無人窗口取 harness 背景等待上限減餘裕）。stall 不判「最後一筆為 end_turn」的代理（它在等自己的背景 shell）。quota 重用 `park.prepare_hits`（原始讀數，不吃配速床墊高）。**憑證**：主證＝Stop payload `background_tasks` 內 running 的 `sessionctl.py watch` shell（harness 自己作證「它結束會叫醒我」），副證＝心跳檔新鮮（判卡死）；payload 無該欄的舊 harness 退回 pid＋心跳；例外一律視為有效（fail-open）。**監督閘**（Stop）：有在飛子代理 ∧ 憑證非有效 ⇒ 推回一次並指路 watch（背景 shell／workflow／monitor 不觸發）；有效時改出「看管中」字樣；PreToolUse（Agent／Task）放行時沒有新鮮心跳附一行提醒。`sessionctl status` 多一行「監督」（只能用心跳副證）。
-- **D2 封存閘（`seal.py`；取代 `converge._converge_stop`）**：Stop 時無在飛代理 ∧ 主控上下文 ≥ R1（直接量逐字稿，不依賴 `.advised` 閂鎖）∧ 尚未交棒 ∧ 封存無效 ⇒ 推回一次，要求寫主控層後 `handoff --finalize`。**`--finalize` 升級為封存**：主控層驗不過 ⇒ rc≠0、什麼都不寫；通過 ⇒ 重建機械層（主控層原文逐字保留）→ 全部真人提示全文寫 `<包 stem>.prompts.md` → 最後才寫 `<包 stem>.sealed`。**封存效期（裁決 A-1）**：封存有效 ⇔ 封存戳之後主逐字稿沒有「工作」（主控非唯讀 tool_use；唯讀集合 Read／Grep／Glob，判準 `transcript_activity.worked_since`），否則 ≥R1 的熱快取短追問會每回合被推回。**已交棒判準（E-HD-1；`seal.handed_over`，單一家）**：最新包已寫完 ∧〔已 ack ∨ 痕跡有該包的 `session_switch_spawned`〕——包一被 ack 就變 `acked`，舊判準只認 `live` 會讓已交棒的 session 被當成沒交棒；封存閘對已交棒放行，PreToolUse 收斂閘對已交棒 session 仍擋派工但訊息改為「已交棒，請到新視窗」。**冷叫醒閘前提（E-CW-1；`seal.wake_package`）**：已交棒，或「`.sealed` 存在且包仍 live」；只寫完主控層不算——代理仍在飛時先備好包、等交卷親驗才封存是合理路徑，不該被叫去砍代理。Stop 兩組以「有無在飛子代理」互斥：有 ⇒ 冷叫醒閘優先、其次監督閘；無 ⇒ 冷叫醒閘優先，否則封存閘與 park 合併成一則（先封存再 park）。
+- **D1 監督（`watch.py`、`supervise.py`）**：派出背景子代理的同一回合，主控掛 `python tools/sessionctl.py watch`（`run_in_background`、輸出導檔）——它是 harness 追蹤的背景 shell，結束即以 task-notification 叫醒主控，是文件有依據的「主控閒置時叫醒它」載具（本節否決所有外部行程叫醒方案）。輪詢純讀檔、零 token；第一個成立的事件即印判決與處置表對應列、末行 `WATCH_VERDICT=<事件>` 並以表定 rc 結束。事件先後＝quota ＞ budget ＞ stall ＞ overrun ＞ all_done ＞ keepwarm。門檻三鍵（stall 下限、單支牆鐘、單支上下文只准下修）在 `quota_policy_env.ENV_SPEC`／`switch.py`；**keepwarm 原為常數、不開 env**（🔴 v2.1.22 起保溫點＝主控最後一筆帶 usage 的 assistant 記錄＋`AUTOSDD_KEEPWARM_MINUTES`〔出廠 45、只准下修〕，見 §2.19 D3；無人窗口取 harness 背景等待上限減餘裕）。stall 不判「最後一筆為 end_turn」的代理（它在等自己的背景 shell）。quota 重用 `park.prepare_hits`（原始讀數，不吃配速床墊高）。**憑證**：主證＝Stop payload `background_tasks` 內 running 的 `sessionctl.py watch` shell（harness 自己作證「它結束會叫醒我」），副證＝心跳檔新鮮（判卡死）；payload 無該欄的舊 harness 退回 pid＋心跳；例外一律視為有效（fail-open）。**監督閘**（Stop）：有在飛子代理 ∧ 憑證非有效 ⇒ 推回一次並指路 watch（背景 shell／workflow／monitor 不觸發）；有效時改出「看管中」字樣；PreToolUse（Agent／Task）放行時沒有新鮮心跳附一行提醒。`sessionctl status` 多一行「監督」（只能用心跳副證）。
+- **D2 封存閘（`seal.py`；取代 `converge._converge_stop`）**：Stop 時無在飛代理 ∧ 主控上下文 ≥ R1（直接量逐字稿，不依賴 `.advised` 閂鎖；🔴 v2.1.22 起門檻改硬線 HARD、R1 退役，見 §2.19 D1）∧ 尚未交棒 ∧ 封存無效 ⇒ 推回一次，要求寫主控層後 `handoff --finalize`。**`--finalize` 升級為封存**：主控層驗不過 ⇒ rc≠0、什麼都不寫；通過 ⇒ 重建機械層（主控層原文逐字保留）→ 全部真人提示全文寫 `<包 stem>.prompts.md` → 最後才寫 `<包 stem>.sealed`。**封存效期（裁決 A-1）**：封存有效 ⇔ 封存戳之後主逐字稿沒有「工作」（主控非唯讀 tool_use；唯讀集合 Read／Grep／Glob，判準 `transcript_activity.worked_since`），否則 ≥R1 的熱快取短追問會每回合被推回。**已交棒判準（E-HD-1；`seal.handed_over`，單一家）**：最新包已寫完 ∧〔已 ack ∨ 痕跡有該包的 `session_switch_spawned`〕——包一被 ack 就變 `acked`，舊判準只認 `live` 會讓已交棒的 session 被當成沒交棒；封存閘對已交棒放行，PreToolUse 收斂閘對已交棒 session 仍擋派工但訊息改為「已交棒，請到新視窗」。**冷叫醒閘前提（E-CW-1；`seal.wake_package`）**：已交棒，或「`.sealed` 存在且包仍 live」；只寫完主控層不算——代理仍在飛時先備好包、等交卷親驗才封存是合理路徑，不該被叫去砍代理。Stop 兩組以「有無在飛子代理」互斥：有 ⇒ 冷叫醒閘優先、其次監督閘；無 ⇒ 冷叫醒閘優先，否則封存閘與 park 合併成一則（先封存再 park；v2.1.22 起再加保溫閘，次序 封存→park→保溫，見 §2.19 D3）。
 - **D3 轉送（`forward.py`；hook 只有 `UserPromptSubmit` 分支，零判準）**：路徑一（冷窗轉送）——最新包 live、已封存、尚未 spawn，且本 session 快取已冷（`cachestate`）∧ 提示可轉送（`transcript_activity.is_forwardable_prompt`；機器注入前綴永不擋、`<pasted_content` 長貼可轉；裁決 A-6 把「交接包收錄用 `is_machine_prompt`」與「轉送用 `is_forwardable_prompt`」拆開，後者判不出來不轉）∧ 非 `留：` 前綴 ∧ 沒有 `session_crons`（Stop 時記錄；讀不到＝當作有 ⇒ 不轉送）∧ Windows ∧ 模式 auto ∧ spawn 前置 OK ⇒ 補寫 sidecar（裁決 A-2，封存後才打的真人提示不漏）→ 原文逐字落檔 → `handoff.spawn(extra_prompt_file=, wait_seconds=)` → `decision:block` 擋下舊窗該則並說明；spawn 失敗、行程未見、落檔失敗一律放行、原文檔保留。路徑二（已交棒告知，M-F3 改判）——包已 spawn／ack 的舊窗收到真人提示 ⇒ 新視窗活著且 auto 時擋下並說「本視窗已交棒」、存原文；否則放行並附一行現況。**不上鎖**：`留：` 前綴永遠放行。**熱快取不轉送**（留原地較便宜）。成本條件由「已封存」蘊含（封存門檻 R1 遠大於新 session 起步成本），不另設門檻。
 - **D4 交接包第二版**：封存時重建機械層與 prompts sidecar（全文、不截斷；超過字數上限時保留第一則與最後若干則全文、中段只列索引）；新 session 起步提示指向兩檔；`handoff.spawn` 新增選填 `extra_prompt_file`。
 - **D5 半路停工（第六類停；`midwork.py`、`check_pending_handoff.py`）**：最後一則回覆自述「接下來還要做事」（進行式詞表；引號內、緊鄰否定、他人負責、假設句、含合法換手標記者不算）∧ Stop payload 有 `background_tasks` 欄位且沒有任何 running 項 ∧ 狀態佐證（本回合有非唯讀工具，或工作樹髒）⇒ 推回一次，句內給三條出路（現在就做、封存＋spawn／park、AskUserQuestion）。欄位缺席（舊 harness）不判。
@@ -1158,6 +1160,43 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - §2.14：決策 6（回合結束推回）已由本節 D2 取代；決策 2 收斂閘（PreToolUse）保留，對已交棒 session 的訊息改寫；冷叫醒閘（§2.14.5）前提由 E-CW-1 收緊為「已封存／已交棒」。決策 4（等待自帶截止且短於主控快取壽命）套到子代理即 D1 的 keepwarm。
 - §2.15：D4「背景任務不保溫」之外，在飛代理期間的保溫見本節 D1；不做「等人時保溫」（仍屬第二期）。
 - §2.17：park 判準不動；Stop 上封存閘與 park 同時成立時合併成一則（先封存再 park）。
+
+#### 2.18.6 實作補註：DEF-200-611（2026-11-18；暴露證據＝sid `85bcbec8` 第 1244 行 `compact_boundary` 與 `autosdd_session_switch.jsonl` 09:46:35 `forward_pass cond 8`）
+
+- **D-1 快取冷熱看得到壓縮**：壓縮請求本身重寫快取，閒置壓縮後逐字稿最後一筆 assistant usage 已是壓縮前。`cachestate.cache_state` 現在認 `system/compact_boundary`：其時刻晚於最後一筆 assistant ⇒ 計時起點改為壓縮時刻（回傳多一鍵 `compacted: true`）；`roster._scan` 於壓縮後尚無新 usage 時 `ctx_tokens=0`（記錄只帶 `preTokens`、無壓縮後值，拿不到視為小）。消費端（`forward` 條件 5／上下文顯示、`converge`／`seal` 的 R1 判準、`resume_gate`）全經這兩處，語意一致；壓縮後出現新 assistant 則以新值為準。
+- **D-2a 視窗標示**：交棒開出的新視窗命令列含舊 sid。`status` 以痕跡 `session_switch_spawned` 的 `pid`（＋行程建立時刻與 spawn 時刻差 ≤ 60 秒，擋 pid 重用）辨識，字樣改「交棒開出的新視窗：pid X（來源 sid8）」。**D-2b**：`handoff --spawn` 成功與 `--ack` 成功輸出加「舊視窗可以關閉」提醒；刻意不自動關窗（命令列辨識會命中新視窗）。
+- **D-3 殘局壽命**：`roster.RESIDUE_MAX_AGE_SECONDS`＝24 小時；最後記錄超過它的殘局預設 `status` 不列，`status --all` 才列。
+- **D-4 結論**：`status` 的「排程」欄只列名稱（`schedule_backend.list_jobs`），NextRunTime 只在 `park --status --verify`／`--verify-schtasks` 才查，屬設計（唯讀、零外呼）；未改。
+
+### 2.19 換 session 改依快取成本：專注不讓快取過期（R216；2026-11-18～19；已實作，真機驗證見 RealVerify 帳本）
+
+> 設計全文＝`docs/02_architecture/SessionSwitch_CostModel_Design.md`（下稱 DES；**§11 開頭的掌舵者裁決段優先於全文**）；驗收契約＝`docs/03_testing/contracts/TCS-SessionSwitch-CostModel-20261118.md`；上游需求＝PRD v2.1 修訂表 v2.1.22 列（§16.5 (i) 修憲）。數字一律現查：`python tools/lib/quota_policy.py --print-env-example`、量測 `python tools/probe/waste_census.py --since-days 14`。
+
+#### 2.19.0 立案與暴露證據
+
+- **掌舵者原話（2026-11-18）**：「請檢討context 25萬就切換Session的合理性, 是否應該專注在不要讓Cache過期! … 是否變成自我閹割功能, 本末倒置!」，再指令三連「專注在不要讓Cache過期!」。
+- **非構造性逐字稿**（DES §1.3～§1.4，14 天母體）：快取過期後整份重寫才是浪費主因（子代理 189 件／8,046 萬 token、主控 36 件／1,101 萬 token）；主控閒置約 55 分鐘時 harness 會自動壓縮大上下文（17 次自動壓縮中 9 次發生在閒置 54.6～56.5 分之後、壓縮後只剩 1.2 萬～2.2 萬）；子代理前景等待超過 5 分鐘（77 件長等待重寫）；真機缺陷：`sessionctl watch` 在 prepare 帶一掛就 rc 5（主控 2026-11-18 21:26 實證）。
+
+#### 2.19.1 決策（掌舵者裁決後的落地版；與 DES §4.4 軟線／hold 草案牴觸處從本節）
+
+- **D1 只留硬線，不設軟線、不做 hold**（掌舵者 D-1＝③、D-2）：換 session 的上下文線只剩 `AUTOSDD_SWITCH_HARD_CTX_TOKENS`（出廠值現查；低於觀測到的流程內 autocompact 最小點 881,938，只准下修）。到線 ⇒ PreToolUse 擋 `Agent`／`Task`／`Workflow`、Stop 封存閘推回、PostToolUse 出聲；**不再要求「已出聲」**（舊收斂閘的前置）。25 萬固定換手（原 R1）與「上次續跑寫入 ≥10 萬 ⇒ FRESH」（原 R3）**退役**：`AUTOSDD_SWITCH_R1_CTX_TOKENS`／`..._R3_CACHE_CREATION_TOKENS` 出廠值移除，有設值只出聲「已退役」、不生效、不拋（舊 `.env` 不壞）。R2（壓縮 ≥2 次 ⇒ 續跑改 FRESH）保留——它是品質訊號。
+- **D2 F4 成本選路（取代 R1／R3，只在快取已冷後判）**：`costmodel.fresh_is_cheaper`＝`W_CC1·c > F·(1+q)`（`W_CC1`＝2.0；F、q 出廠值現查 `AUTOSDD_SWITCH_FRESH_COST_UNITS`／`AUTOSDD_SWITCH_CONTEXT_VALUE_Q`；`q`＝失去上下文的品質損失係數、治理決定）。快取仍熱 ⇒ 不判（讀價必小於 F）；量不到 ⇒ 當熱（FRESH 的代價是丟上下文）。消費端：無人續跑選路 `switch.fresh_reasons`、UserPromptSubmit 冷窗轉送（`forward.py` 條件 10：冷但續跑較便宜 ⇒ 留原視窗並顯示原因）。`handoff.advise_once` 的出聲判準走硬線（`fresh_reasons(advise=True)`），與快取冷熱無關。
+- **D3 主控保溫 `sessionctl keepwarm`（`keepwarm.py`）**：截止＝主控**最後一筆帶 usage 的 assistant 記錄**＋`T_kw`（`AUTOSDD_KEEPWARM_MINUTES`，出廠 45、只准下修、下限 15；不是任何程序的啟動時刻）；末行 `KEEPWARM_VERDICT=ping|cap|skip`（rc 6／7／0）。保溫帳 `trace_dir()/keepwarm/<sid>.json` 記 `pings`，真人提示一出現歸零；上限 `n*` 依 F1（ski-rental，約 9～10 次）。不掛的情形：無人窗口、模式非 auto、`AUTOSDD_KEEPWARM_OFF`、已交棒、park 標記有效、上下文低於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`。**Stop 保溫閘**（`converge` 合成，次序 封存→park→保溫）：無任何 running 背景任務 ∧ 非不掛情形 ∧ `pings < n*` ⇒ 推回一次。**冷叫醒閘**：已交棒照舊全停；只封存、在等掌舵者 ⇒ `sessionctl.py keepwarm` shell 豁免（`seal.handed_over` 判）。`watch` 的保溫點改用同一錨點函式。
+- **D4 watch 額度閂鎖**：quota 事件以 `(sid, reset 分鐘, 帶級)` 為鍵寫 `trace_dir()/watch/<sid>.quota.json`，同窗同帶只觸發一次；帶升級（prepare→halt）或 reset 改變再觸發；閂鎖讀寫失敗一律觸發＋stderr 出聲（失效往保守）。reset 時刻抖動（讀數在分鐘邊界來回 ±1 分）由 `keepwarm._same_reset` 吸收：字面相同或差 ≤300 秒視為同窗（DEF-200-614）。否決 `--ack-quota`（DES §4.3）。
+- **D5 子代理長等待 `runlong`／`waitfor`＋長前景閘（`longwait.py`）**：子代理快取壽命 5 分鐘。`runlong --out <檔> -- <argv…>` 背景跑、結束原子寫 `<檔>.done`；`waitfor --done <檔>.done --max-sec S` 前景至多等 S 秒（預設 240，**上限 255**）：完成 rc 0＋尾端 40 行＋`WAITFOR_VERDICT=done rc=<子行程 rc>`、未完成 rc 3 `pending`、參數錯 rc 2。**上限取 255 而非 270 的 WHY**：waitfor 自己是前景呼叫，等 270 秒需要 timeout > 270000，會被長前景閘自己擋住。**長前景閘**（PreToolUse，`.claude/hooks/sessionctl_guard.py`；`.claude/settings.json` matcher 含 PowerShell／Bash）：呼叫帶 `agent_id`（子代理；主控 1 小時快取不判）∧ 工具 PowerShell／Bash ∧ 非背景 ∧ `timeout > 270000` ⇒ rc 2 指路 runlong／waitfor；行內 `# keepwarm-ok: <WHY>` 豁免（`AUTOSDD_UNATTENDED` 下無效）；解析不到一律放行。依據：工具預設 timeout 120 秒，要等超過 5 分鐘必須顯式設大 timeout，判準精確。
+- **D6 park 選路（階段 3）**：本輪未實作（TCS WP-F 仍待做；park 照舊一律開新 session 帶交接包），不得在文件宣稱已落地。
+
+#### 2.19.2 對 §2.13／§2.14／§2.18 的修正（就地註記指向本節）
+
+§2.13.2 D2 判準表的 R1／R3 列、§2.14.2 決策 2（收斂閘的「已出聲」前置與「290,000／須大於 R1」）、決策 6 與 §2.18.1 D2／§2.18.5 的「達 R1」、§2.17.3／§2.15.5 的 R1 下修討論，一律已被 D1／D2 取代；各處就地加註「v2.1.22 起見 §2.19」，原決策文字保留作史料。
+
+#### 2.19.3 誠實劃界
+
+- 保溫（D3）與長等待分段（D5）的真機效果（`-p` 模式快取層是否 1 小時、互動主控閒置 3 小時回來 `cache_read ≥ 0.9×`）仍待 V-SS1～V-SS4 與 E2E-SS-04／08；RealVerify 帳本已入帳者以帳本為準，未入帳＝未結。
+- 閒置約 55 分自動壓縮為 harness 行為，保溫 45 分截止擋在它前面，但機器睡眠時失效（醒來那一下是冷的，同 §2.14.5）。
+- 保溫回合會消耗 token，但不是遙測、也不探測額度（PRD §1.2 原則 2 的就地註記）；成本擬以 `waste_census` M-K5 入帳（量測端未實作，見上）。
+- F、q、`P_FIX` 為量測／治理值，不當常數；🔴 **量測端未實作**：TCS WP-G（`waste_census` M-K1～M-K6、`--replay-switch`、`--calibrate-switch`）本輪沒做，M-K5 保溫成本入帳與校準目前只能靠手算——列未結，不得宣稱已有指標。
+- 立案缺陷：DEF-200-613（watch 額度條件一掛上即觸發）、DEF-200-614（reset 抖動閂鎖）、DEF-200-615（監督憑證字面子字串比對落空；§2.18.3 的 P6H F5 理論洞由此轉實例並已修）、DEF-200-612（缺真機自驗載具）；座標見缺陷帳本。
 
 ## 3. 被否決的方案（各記為何否決）
 

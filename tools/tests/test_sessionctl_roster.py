@@ -171,6 +171,42 @@ class RosterStateTest(unittest.TestCase):
         self.assertEqual([a["state"] for a in snap["agents"]], ["residue"])
         self.assertIn("非燒額度中", roster.render_snapshot(snap))
 
+    def test_def611_old_residue_leaves_the_default_roster_but_all_still_lists_it(self) -> None:
+        """DEF-200-611 D-3（證據：status 仍列昨日 22:24 的殘局 a51fe52e56c8ed299）：殘局是歷史、
+        不是待辦；最後記錄超過 `RESIDUE_MAX_AGE_SECONDS` 預設不列，`include_old`（--all）才列；
+        24 小時內的殘局照列（不得把近期殘局也吞掉）。"""
+        self.assertEqual(roster.RESIDUE_MAX_AGE_SECONDS, 24 * 3600)
+        root = _tmp(self)
+        make_agent(root, SID, "old", minutes_ago=25 * 60, finished=False)
+        make_agent(root, SID, "new", minutes_ago=60, finished=False)
+        make_owner(root, SID, minutes_ago=26 * 60)
+        ids = [a["id"] for a in _snap(self, root, runner=_runner([], []))["agents"]]
+        self.assertEqual(ids, ["new"])
+        ids_all = [a["id"] for a in _snap(self, root, runner=_runner([], []),
+                                          include_old=True)["agents"]]
+        self.assertEqual(sorted(ids_all), ["new", "old"])
+
+    def test_def611_a_window_spawned_by_handoff_is_not_read_as_the_old_window(self) -> None:
+        """DEF-200-611 D-2a：交棒開出的新視窗命令列含舊 sid；痕跡記著該 pid 由舊 sid 開出 ⇒ 標示
+        「交棒開出的新視窗…（來源 sid）」；沒有痕跡的視窗維持原字樣；建立時刻對不上（pid 被
+        回收重用）不算。"""
+        trace_dir = _tmp(self)
+        spawned = NOW - timedelta(minutes=3)
+        (trace_dir / "autosdd_session_switch.jsonl").write_text(json.dumps({
+            "event": "session_switch_spawned", "at": spawned.isoformat(), "pid": 8136,
+            "sid": SID}) + "\n", encoding="utf-8")
+        rows = [_win_row(8136, f"claude.exe {SID}", spawned),
+                _win_row(9000, "claude.exe --resume other-sid-0000", spawned)]
+        reused = [_win_row(8136, f"claude.exe {SID}", spawned + timedelta(hours=2))]
+        with unittest.mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(trace_dir)}):
+            wins = roster._windows(procstop.list_processes(_runner(rows, [])))
+            reused_wins = roster._windows(procstop.list_processes(_runner(reused, [])))
+        text = roster.render_snapshot({"agents": [], "windows": wins, "schedules": [],
+                                       "stale_sentinels": [], "handoffs": []})
+        self.assertIn(f"交棒開出的新視窗：pid 8136（來源 {SID[:8]}）", text)
+        self.assertNotIn("交棒開出的新視窗：pid 9000", text)
+        self.assertIs(reused_wins[0]["spawned_from"], False)
+
     def test_residue_needs_the_process_listing_and_a_dead_owner(self) -> None:
         """殘局的兩個反例：①有 claude 行程命令列含該 sid（擁有者還活著）⇒ 安靜；②沒給 runner
         （純讀檔、不列舉行程）⇒ 無從證明擁有者已死，一律安靜，不得誤標殘局。"""

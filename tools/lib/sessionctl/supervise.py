@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -26,7 +27,6 @@ EV_SUPERVISE_STOP_BLOCK = "supervise_stop_block"
 # WHY 180 秒＝6 個輪詢間隔（watch.POLL_SECONDS＝30）：連 6 輪沒寫心跳才算卡死，
 # 單次磁碟／排程抖動不誤判。
 HEARTBEAT_FRESH_SECONDS = 180.0
-WATCH_CMD_MARK = "sessionctl.py watch"
 WATCH_CMD = "python tools/sessionctl.py watch"
 VALID, STUCK, NONE = "valid", "stuck", "none"
 _BASE_CTX_NOTE = "子代理起步底盤約 8.4 萬 token，上下文預算＝底盤＋工作空間"
@@ -69,9 +69,14 @@ def _fresh(beat: dict, now: float) -> bool:
     return stamp is not None and now - stamp <= HEARTBEAT_FRESH_SECONDS
 
 
+# WHY 容忍腳本路徑後的引號：PowerShell／路徑含空白時命令是 `& 'py' 'C:\..\sessionctl.py' watch`
+# （真機 RV-S2 2026-11-19 實證：字面子字串 `sessionctl.py watch` 比不到、憑證被誤判為無）。
+_WATCH_CMD_RE = re.compile(r"sessionctl\.py[\"']?\s+watch\b")
+
+
 def _main_proof(tasks: list[dict]) -> bool:
     return any(t.get("type") == "shell" and str(t.get("status") or "running") == "running"
-               and WATCH_CMD_MARK in str(t.get("command") or "") for t in tasks)
+               and _WATCH_CMD_RE.search(str(t.get("command") or "")) for t in tasks)
 
 
 def credential(payload: dict, sid: str, now=None, *, heartbeat_reader=read_heartbeat,

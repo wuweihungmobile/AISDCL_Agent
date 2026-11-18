@@ -1368,6 +1368,16 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "非呼叫：`WATCH_CMD = \"python tools/sessionctl.py watch\"` 是組進出聲訊息、給主控"
         "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `park.py` 同型"
     ),
+    "tools/lib/sessionctl/keepwarm.py": (
+        "非呼叫：`CMD = \"python tools/sessionctl.py keepwarm\"` 是組進 Stop 保溫閘推回訊息、給主控"
+        "照抄的指令前綴，本行程只輸出文字、不 spawn；與同表 `supervise.py`／`park.py` 同型"
+    ),
+    "tools/lib/realverify/sandbox.py": (
+        "非呼叫：`REPO / \".venv\" / \"bin\" / \"python\"` 的**路徑片段**"
+        "（`venv_python()` 組出 hook 載具的 venv 內絕對路徑，POSIX 側；"
+        "Windows 側取 `Scripts/pythonw.exe`），不經 PATH 解析；"
+        "與同表 `tools/lib/platform_utils.py`／`tools/lib/selfimproving/schedarm.py` 逐字同型"
+    ),
     "tools/probe/console_spawn_watch.py": (
         "非呼叫：`str(record.get(\"ParentName\") or \"\").lower().startswith(\"python\")` "
         "的**比對字面**。那個字串是 WMI 從 OS **讀回來**的行程映像名，判準只拿它分類"

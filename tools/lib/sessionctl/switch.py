@@ -19,6 +19,8 @@ import endurance_env
 import resume_route
 import unattended_authz  # DEF-200-575：harness 背景等待上限的唯一家
 
+from . import costmodel
+
 #: ── R95／Pkg-D：喚醒降級選路（PRD §4.5.4／§8-10）─────────────────────────────
 #: `-r <sessionId>` 的前提是逐字稿可用；缺檔／為空／超上限時整條喚醒鏈此前**沒有退路**
 #: （指令直接失敗且靜默）。降級目標＝FRESH_SESSION_WITH_STATE：不帶 `-r` 的全新
@@ -79,14 +81,13 @@ def _transcript_cap() -> tuple[int, str]:
 # test_the_variadic_add_dir_does_not_swallow_the_prompt。
 def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
                         plan_path: str, max_bytes: int | None = None, weekly: str = "", *,
-                        guard=None, handoff_path: str | None = None, env=None,
-                        cost_path: Path | None = None) -> dict:
+                        guard=None, handoff_path: str | None = None, env=None) -> dict:
     """喚醒選路：回 `{strategy, reason, argv}`；REFUSE 時 argv=None（呼叫端 fail-loud）。
 
-    WP1（D2）：RESUME 的條件多一條「R1～R3 皆未命中」（`fresh_reasons`；R4＝既有的逐字稿
-    上限與 `weekly`），命中即降 FRESH、理由逐條列出。`guard`＝hook 模組（planner 傳入；
-    `None`＝只判 R3，測試縫）；`handoff_path`＝交接包路徑的參數縫（下一包注入；`None` 時
-    FRESH 的 prompt 沿用任務書路徑）；`env`／`cost_path` 為門檻與成本帳的注入縫。
+    WP1（D2）＋R216：RESUME 的條件多一條「F4／R2 皆未命中」（`fresh_reasons`；R4＝既有的
+    逐字稿上限與 `weekly`），命中即降 FRESH、理由逐條列出。`guard`＝hook 模組（planner 傳入；
+    `None`＝全不判，測試縫）；`handoff_path`＝交接包路徑的參數縫（下一包注入；`None` 時
+    FRESH 的 prompt 沿用任務書路徑）；`env` 為門檻的注入縫。
 
     🔴 2026-09-07 掌舵者裁決（SA＋SD 兩位獨立審查通過）：此前有一個 `followup_ok` 參數
     （＝INV3「前一窗確實起來」的判準結果，往下傳成 `resume_argv(allow_followup=…)`），
@@ -108,7 +109,7 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
     # session id 缺席（FRESH 降級因之一）時退 plan.stem——任務書檔名本就以 sid 命名。
     hb = resume_route.handback_report(str(session_id or "") or plan.stem)
     size = transcript.stat().st_size if (transcript and transcript.is_file()) else None
-    hits, notes = fresh_reasons(session_id, transcript, size, guard=guard, env=env, cost_path=cost_path)  # noqa: E501
+    hits, notes = fresh_reasons(session_id, transcript, size, guard=guard, env=env)
     if session_id and size and size <= limit and not weekly and not hits:
         return {"strategy": STRATEGY_RESUME, "handback": str(hb),
                 "reason": f"逐字稿可用（{size:,}B ≤ 上限 {limit:,}B）⇒ 帶完整 context 續跑{suffix}",  # noqa: E501
@@ -125,26 +126,30 @@ def choose_resume_route(claude: str, session_id: str, transcript: Path | None,
 
 # ───────────────────────── WP1（D2）：成本選路——量「續跑成本」不量檔案大小（ADR §2.13.2）
 #: 門檻的環境變數名；出廠值與說明只有 `quota_policy_env.ENV_SPEC` 一個家（本檔不寫第二份數字）。
-R1_KEY = "AUTOSDD_SWITCH_R1_CTX_TOKENS"
+R1_KEY = "AUTOSDD_SWITCH_R1_CTX_TOKENS"  # 退役（R216）：25 萬換窗由硬線承接，只剩讀取＋出聲
 R2_KEY = "AUTOSDD_SWITCH_R2_COMPACTIONS"
-R3_KEY = "AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS"
+R3_KEY = "AUTOSDD_SWITCH_R3_CACHE_CREATION_TOKENS"  # 退役（R216）：由 F4 成本選路取代
+#: 退役鍵→一句理由。有設值時 `retired_notes` 出聲「已退役」，不生效、不拋（舊 .env 不會因此壞掉）。
+RETIRED_KEYS = {R1_KEY: "25 萬不再換窗，換窗只看硬線 AUTOSDD_SWITCH_HARD_CTX_TOKENS",
+                R3_KEY: "改由 F4 成本選路取代，見 costmodel.fresh_is_cheaper"}
 STALE_HOURS_KEY = "AUTOSDD_STALE_SESSION_HOURS"
 AGENT_TOKENS_KEY = "AUTOSDD_RESUME_AGENT_TOKENS"  # D6 續棒閘（下一包的消費端用 `threshold()` 取）
 HANDOFF_TTL_KEY = "AUTOSDD_HANDOFF_TTL_HOURS"  # D4 公告存活（下一包）
 ROSTER_QUIET_KEY = "AUTOSDD_ROSTER_QUIET_MINUTES"  # D7 名冊「安靜」門檻（下一包）
 MODE_KEY = "AUTOSDD_SESSION_SWITCH_MODE"
-#: 收斂閘硬門檻（已出聲且主控上下文達此值 ⇒ 擋 Agent／Task／Workflow、Stop 推回一次）；
-#: 判準住 `converge.py`。
+#: 換 session 的唯一上下文線（R216 起 850,000，低於流程內 autocompact 最小點 881,938；
+#: 不再要求「已出聲」）：主控上下文達此值 ⇒ 擋 Agent／Task／Workflow、Stop 推回封存、
+#: `advise_once` 出聲。判準住 `converge.py`／`seal.py`／`handoff.py`。
 HARD_CTX_KEY = "AUTOSDD_SWITCH_HARD_CTX_TOKENS"
-#: 方向鎖：這五個只准下修（放寬＝退回 E1：20 MB／60 萬 token 的舊 session 仍被整份重讀；
-#: 硬門檻放寬＝出聲後可無限續做）。
+#: 方向鎖：這四個只准下修（放寬＝退回 E1：20 MB／60 萬 token 的舊 session 仍被整份重讀；
+#: 硬線放寬＝越過 autocompact 點、上下文被摘要砍光）。R1／R3 已退役，不在此列。
 #: `STALE_SESSION_HOURS` 刻意不在內：調小更積極拆哨兵、調大更晚拆，兩向都有風險（主控裁決 7）。
 #: 背景代理監督（`watch.py`）的三個門檻鍵；只有 ctx 上限方向鎖（放大＝代理可無限長大）。
 WATCH_STALL_KEY = "AUTOSDD_WATCH_STALL_MINUTES"
 WATCH_WALL_KEY = "AUTOSDD_WATCH_AGENT_WALL_MINUTES"
 WATCH_CTX_KEY = "AUTOSDD_WATCH_AGENT_CTX_TOKENS"
-_DOWNWARD_ONLY = (R1_KEY, R2_KEY, R3_KEY, AGENT_TOKENS_KEY, HARD_CTX_KEY, WATCH_CTX_KEY)
-#: R1 在 feed 與逐字稿 usage 皆缺時的估計比值（位元組／token）。🔴 這是量測值不是定律：E1 的
+_DOWNWARD_ONLY = (R2_KEY, AGENT_TOKENS_KEY, HARD_CTX_KEY, WATCH_CTX_KEY)
+#: 上下文在 feed 與逐字稿 usage 皆缺時的估計比值（位元組／token）。🔴 這是量測值不是定律：E1 的
 #: 20,518,438 B 逐字稿對應約 60 萬 token ⇒ ≈34 B/token，取 40 偏保守（少估一點）；結果一律標
 #: `estimated`，要重量由 `tools/probe/`（現查）做，本檔不當它是真值。
 BYTES_PER_TOKEN_ESTIMATE = 40
@@ -183,6 +188,13 @@ def threshold(name: str, env=None) -> tuple[int, str]:
     return base, note
 
 
+def retired_notes(env=None) -> list[str]:
+    """退役鍵（R1／R3）有設值時的出聲文字；沒設＝空。不拋、不影響任何判準。"""
+    env = os.environ if env is None else env
+    return [f"{key} 已退役（{why}）⇒ 設了也不生效"
+            for key, why in RETIRED_KEYS.items() if str(env.get(key) or "").strip()]
+
+
 def switch_mode(env=None) -> str:
     """`AUTOSDD_SESSION_SWITCH_MODE`：auto／notify／off；缺席或未知值退出廠值 `auto`。"""
     raw = str((os.environ if env is None else env).get(MODE_KEY) or "").strip().lower()
@@ -205,21 +217,28 @@ def trace(event: str, **fields) -> None:
 
 
 def fresh_reasons(session_id: str, transcript: Path | None, size: int | None, *, guard=None,
-                  env=None, cost_path: Path | None = None) -> tuple[list[str], list[str]]:
-    """R1～R3 成本規則：回 `(命中理由, 量不到的說明)`；任一規則命中 ⇒ 呼叫端走 FRESH（R4＝既有判準，
-    由 `resume_route.fresh_why` 提供，不在此重寫）。命中理由逐條列出、不合併。
+                  env=None, advise: bool = False, cache=None,
+                  now: datetime | None = None) -> tuple[list[str], list[str]]:
+    """換新 session 的成本規則：回 `(命中理由, 量不到的說明)`；任一規則命中 ⇒ 呼叫端走 FRESH
+    （R4＝既有判準，由 `resume_route.fresh_why` 提供，不在此重寫）。命中理由逐條列出、不合併。
 
-    · R1 上下文：feed（`guard.read_context_feed`）→ 逐字稿最後一筆 assistant usage
-      （`guard.scan_transcript`）→ 位元組估計（標 `estimated`）；三者皆缺＝量不到。
+    R216（掌舵者 2026-11-18「專注在不要讓 Cache 過期」；設計 §4.4／§5 D10）——**25 萬不再是換窗線**，
+    只剩兩個換新理由，外加硬線：
+    · F4（`advise=False`，喚醒選路）：快取**已冷**才判；冷 ∧ 續跑重寫 > 換新代價 ⇒ 命中
+      （`costmodel.fresh_is_cheaper`）。快取熱＝不判（讀價必小於 F）；冷熱量不到＝當熱。
     · R2 壓縮次數：逐字稿 `compact_boundary` 計數（`guard.compact_boundary_count`；不用 hook 的
-      事件檔——它只記有跑到的壓縮，會少算）。讀不動＝0。
-    · R3 上次續跑成本：`resume_cost.last_cost` 的同 sid 最近一筆 cache_creation；無記錄＝不成立。
-    `guard=None`（呼叫端沒給 hook 模組）⇒ R1／R2 不判，只判 R3。量不到不觸發該條：FRESH 的
-    代價是丟上下文，量不到不該單方面造成資訊損失（缺值處理，ADR §2.13.2）。
+      事件檔——它只記有跑到的壓縮，會少算）。品質訊號（摘要疊摘要），與成本、快取冷熱無關。
+    · 硬線（`advise=True`，`handoff.advise_once` 的出聲判準）：上下文 ≥ `HARD_CTX_KEY` 才命中，
+      與快取冷熱無關（硬線防的是 autocompact，不是快取過期）；不判 F4。
+    · R1／R3 已退役：env 有設只在 `notes` 出聲「已退役」，不影響任何判準。
+    上下文取數：feed（`guard.read_context_feed`）→ 逐字稿最後一筆 assistant usage
+    （`guard.scan_transcript`）→ 位元組估計（標 `estimated`）；三者皆缺＝量不到。
+    `guard=None`（呼叫端沒給 hook 模組）⇒ 全部不判。量不到不觸發該條：FRESH 的代價是丟上下文，
+    量不到不該單方面造成資訊損失（缺值處理，ADR §2.13.2）。`cache`／`now`＝快取冷熱的注入縫。
     """
-    t1, t2, t3 = (threshold(key, env)[0] for key in (R1_KEY, R2_KEY, R3_KEY))
+    t2 = threshold(R2_KEY, env)[0]
     hits: list[str] = []
-    notes: list[str] = []
+    notes = retired_notes(env)
     ready = guard is not None and transcript is not None and transcript.is_file()
     if guard is not None:
         used, source = None, ""
@@ -231,18 +250,23 @@ def fresh_reasons(session_id: str, transcript: Path | None, size: int | None, *,
         elif size:
             used, source = size // BYTES_PER_TOKEN_ESTIMATE, f"estimated（{size:,}B÷{BYTES_PER_TOKEN_ESTIMATE}）"  # noqa: E501
         if used is None:
-            notes.append("R1 量不到（feed／逐字稿 usage／檔案大小皆缺）⇒ 本條不判")
-        elif used >= t1:
-            hits.append(f"R1 上下文 {used:,} ≥ {t1:,} tokens（{source}）")
+            notes.append("上下文量不到（feed／逐字稿 usage／檔案大小皆缺）⇒ 硬線／F4 不判")
+        elif advise:
+            if used >= (hard := threshold(HARD_CTX_KEY, env)[0]):
+                hits.append(f"上下文 {used:,} ≥ 硬線 {hard:,} tokens（{source}）")
+        elif ready and costmodel.fresh_is_cheaper(used, cold=_cold(transcript, cache, now), env=env):  # noqa: E501
+            hits.append(f"{costmodel.f4_reason(used, env)}（{source}）")
         compactions = guard.compact_boundary_count(transcript) if ready else 0
         if compactions >= t2:
             hits.append(f"R2 已壓縮 {compactions} 次 ≥ {t2} 次")
-    import resume_cost  # noqa: PLC0415 — lazy：只有選路時需要
-
-    cost = resume_cost.last_cost(session_id, cost_path) if session_id else None
-    if cost is not None and cost >= t3:
-        hits.append(f"R3 上次續跑第一回合寫入快取 {cost:,} ≥ {t3:,} tokens")
     return hits, notes
+
+
+def _cold(transcript: Path, cache, now: datetime | None) -> bool:
+    """快取已冷嗎（`cachestate.cache_state`；量不到＝熱，fail-open）。"""
+    from . import cachestate  # noqa: PLC0415 — lazy：冷熱只在選路時需要
+
+    return bool((cache or cachestate.cache_state)(transcript, now).get("cold"))
 
 
 # ───────────────────── WP2（D3）：過期 session 不續跑（SUPERSEDED；ADR §2.13.3）

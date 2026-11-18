@@ -82,6 +82,22 @@ class CredentialTests(_Env):
                 self.assertEqual(supervise.credential(_payload(AGENT, WATCH_SHELL), SID, NOW,
                                                       **_kw(beat)), "valid")
 
+    def test_main_proof_recognises_quoted_script_path(self):
+        """WHY：PowerShell／含空白路徑的真機命令是「& 'py' '<repo>\\sessionctl.py' watch」，
+        字面子字串比不到會把有效 watch 誤判成沒掛（RV-S2 真機實證）；反向變體＝別的子命令仍不算。"""
+        for cmd in ("& 'py.exe' 'C:\\r\\tools\\sessionctl.py' watch --sid x",  # platform-ok: 命令串
+                    "python \"C:/r/tools/sessionctl.py\" watch"):  # platform-ok: 命令字串形態
+            shell = {"type": "shell", "id": "s2", "status": "running", "command": cmd}
+            with self.subTest(cmd=cmd):
+                self.assertEqual(supervise.credential(_payload(AGENT, shell), SID, NOW,
+                                                      **_kw(None)), "valid")
+        for cmd in ("python tools/sessionctl.py watcher", "python tools/sessionctl.py status",
+                    "python tools/sessionctl.py' park"):
+            shell = {"type": "shell", "id": "s3", "status": "running", "command": cmd}
+            with self.subTest(cmd=cmd):
+                self.assertEqual(supervise.credential(_payload(AGENT, shell), SID, NOW,
+                                                      **_kw(None)), "none")
+
     def test_main_proof_with_stale_heartbeat_is_stuck(self):
         """WHY：shell 還在但心跳停了＝watch 卡死，掛著等於沒掛；要先 TaskStop 再重掛。"""
         got = supervise.credential(_payload(AGENT, WATCH_SHELL), SID, NOW, **_kw(_beat(999)))

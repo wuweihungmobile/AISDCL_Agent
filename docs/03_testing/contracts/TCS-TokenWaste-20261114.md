@@ -3,6 +3,7 @@
 > 落檔：`docs/03_testing/contracts/TCS-TokenWaste-20261114.md`。設計全文＝`docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md` §2.14（下稱 ADR；本棒 `ADR_SECTION.md`）。缺陷帳本列＝DEF-200-587（一列涵蓋續棒冷熱、收斂、快層先行、探針四件，見 §9）。
 > 來源任務書＝四方任務書（sid `680d8411-58ac-4adb-9e23-521f6a7bb557`，2026-11-14）；SA 浪費帳＝`SA_WASTE_REPORT.md`＋探針；Architect 定案＝`ARCH_DESIGN.md`。
 > **狀態（2026-11-15）**：實作已併入 main；AT 全數有測試（狀態對照見 §2.9）。hook 與 settings 接線隨 `.claude/` 批次由主控親套，套用前 hook 層 AT 為預期紅。🔴 §3 真機驗證 V-T1～V-T3／V-G1／V-G2／V-P1／V-C2 皆**待主控真機驗證**，未驗，不得寫成已驗。
+> 🔴 **R216 取代註記（2026-11-19；ADR-XPLAT-004 §2.19、TCS-SessionSwitch-CostModel-20261118）**：本檔凡涉 **R1（25 萬）、R3、硬門檻 290,000、收斂閘「須先出聲」** 的 FR／AT／數字，為 2026-11-14 的決策史料，**不是現行判準**（R1／R3 已退役、硬線改 850,000 且不再要求先出聲、續跑選路改 F4）；現行驗收見 TCS-SessionSwitch-CostModel 的 AT-SS-40～48。
 > 測試一律注入縫：時間注入 `now`（aware datetime）、路徑注入 tmp 圍籬（`projects_dir`／`HOME`／`AUTOSDD_TRACE_DIR`／`AUTOSDD_HANDOFF_DIR`），**不讀本機真實 `~/.claude`、不起真排程、不起真 claude、不起 Docker、不外呼 GitHub**。
 
 ## 0. 範圍與模組落點表（照 Root_Layout §2）

@@ -942,7 +942,7 @@ def hard_message(used: int, window: int, source: str, plan: str,
 
 
 def switch_advice(payload: dict, transcript: Path) -> None:
-    """sessionctl D2：R1～R3 成立 ⇒ 每 session 出聲一次；子代理不出聲；例外吞掉。"""
+    """sessionctl D2：達硬線（85 萬）或 R2 成立 ⇒ 每 session 出聲一次；子代理不出聲；例外吞掉。"""
     try:
         tools = str(Path(__file__).resolve().parents[2] / "tools")
         if tools not in sys.path:
