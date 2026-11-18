@@ -3641,3 +3641,8 @@ Scenario: 明示的錯誤值保持錯誤
 
 - **事由**：2026-10-25 掌舵者核准 PROP-SI-004（DEC-SI-001）後，主控在 Windows 真機跑 `sandbox`：家目錄（`C:\…\.autosdd\selfimproving\sandbox`）與 repo（`D:\…`）在不同磁碟機，R85 (a) 的「沙盒根是否在 repo 樹內」以 `os.path.commonpath` 判，Windows 對不同磁碟機拋 `ValueError: Paths don't have the same drive` ⇒ traceback、零事件（`app.sandbox` 未寫）；`verify` 的載具自證（R88）是同一形態。合成 AT 的 repo 與家目錄都落在同一磁碟機的暫存目錄，所以看不到。鐵律三自問表「路徑分隔符」列的同族：磁碟機代號。
 - **訂正**：R85 (a) 補「不同磁碟機（`commonpath` 拋 `ValueError`）＝不在 repo 樹內」；R88 載具自證補「模組 `__file__` 落在另一磁碟機＝`carrier_proof` 為 `false`，不是 traceback」。回歸鎖：`test_d21_sandbox_root_on_another_drive_is_outside_the_repo`（`test_selfimproving_sandbox.py`）、`test_d22_carrier_proof_on_another_drive_is_false_not_a_traceback`（`test_selfimproving_verify.py`）；觀察入帳＝OBS 帳本同日主控列（真實運轉首次 `sandbox`）。修後真實重跑：PROP-SI-004 `app.sandbox` applied／touched_ok／rollback_ok 皆 true、`app.verify` NE（`NO-PROBES`，M 類預期）、held-out digest 相符、無暴露。
+
+### 勘誤五（RELEASE 後的訂正：AT-217-1-1 的整體上界改用與負載無關的量法；AT id、判定碼與期望 verdict 一字未改、一個 AT 也未刪）
+
+- **事由**：2026-11-18 pre-push 真機翻紅（commit `9f757344`，`tools/.last_failure_9f757344_20261118T030949Z.log`）：AT-217-1-1 單次 `verify` 牆鐘 15.03 秒，超過「每次整體小於 15 秒」。同一測試單獨跑每次約 3.5 秒（主行程 CPU 0.14～0.17 秒，其餘是探針子行程的啟動與 1 秒 sleep）；pre-push 並行 leg 滿載時本模組總耗時由 578 秒拉長到 1188 秒，牆鐘量到的是負載，不是 `verify` 本身。與 DEF-200-608、TCS-IssueCenter 勘誤五 5-1 同型。
+- **訂正**：AT-217-1-1 的 Then「每次整體小於 15 秒」改為兩條與負載無關的約束：①每次 `verify` 主行程 CPU 秒數（`time.process_time`）小於 5（同 NFR-P2-2 單次寫入動詞的上界）；②每個驗證檔恰 3 筆探針記錄（baseline／patched／mutated 各一，不重試、不加跑）且皆 `timed_out` 為 `false`——探針耗時由 `probe_timeout_seconds` 逐筆約束，筆數固定即整體有界。上界數字未放寬；NFR-P2-2 探針逾時案例的 15 秒與行程樹 3 秒條款不在本勘誤範圍（無暴露）。缺陷帳本＝DEF-200-610。突變自證：主行程空轉 6 CPU 秒 ⇒ 紅；baseline 多跑一筆 ⇒ 紅。

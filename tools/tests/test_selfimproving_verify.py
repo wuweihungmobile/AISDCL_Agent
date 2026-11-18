@@ -206,16 +206,19 @@ class TestVerify(P2TestCase):
         R, p = self.fresh(heldout=self.held(probes="slow", delay=1))
         fx.set_params(R, probe_timeout_seconds=4, verify_runs_max=2)
         for k in (1, 2):
-            t0 = time.monotonic()
+            # 勘誤五（DEF-200-610）：量主行程 CPU 秒數，不量牆鐘——pre-push 滿載時牆鐘量到的是負載
+            # （平常 3.5 秒、滿載 15.03 秒）。探針耗時另由下方筆數固定＋每筆未逾時兩條結構性約束。
+            t0 = time.process_time()
             rc, out, err = self.M(R, "verify", p, "--json")
             self.assertEqual(rc, 0, out + err)
-            self.assertLess(time.monotonic() - t0, 15)
+            self.assertLess(time.process_time() - t0, 5)
             obj = json.loads(out)
             self.assertEqual((obj["verdict"], obj["reasons"]), ("PASS", []), out)
         docs = [json.loads(x.read_text(encoding="utf-8")) for x in verify_files(R, p)]
         self.assertEqual(len(docs), 2)
         for d in docs:
             recs = [r for s in ("baseline", "patched", "mutated") for r in d["steps"][s]]
+            self.assertEqual(len(recs), 3)  # 有界：每步恰一筆探針，不重試、不加跑
             self.assertTrue(all(r["timed_out"] is False for r in recs))
         res = self.check(R)
         for item in ("events.transitions", "events.prop_files", "events.verdict"):
