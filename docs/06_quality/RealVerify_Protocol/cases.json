@@ -56,6 +56,10 @@
     "RV-CM1": {"family": "sessionctl_costmodel", "refs": ["AT-SS-40", "AT-SS-42", "MU-17", "E2E-SS-06"], "wp": "R216"},
     "RV-CM2": {"family": "sessionctl_costmodel", "refs": ["AT-SS-43", "MU-19", "E2E-SS-11"], "wp": "R216"},
     "RV-CM3": {"family": "sessionctl_costmodel", "refs": ["AT-SS-46", "AT-SS-47", "MU-20", "MU-21", "E2E-SS-13"], "wp": "R216"},
-    "RV-CM4": {"family": "sessionctl_costmodel", "refs": ["AT-SS-48", "MU-22", "E2E-SS-12"], "wp": "R216"}
+    "RV-CM4": {"family": "sessionctl_costmodel", "refs": ["AT-SS-48", "MU-22", "E2E-SS-12"], "wp": "R216"},
+    "RV-PR1": {"family": "sessionctl_parkroute", "refs": ["REQ-SS-19", "E2E-SS-14"], "wp": "R216"},
+    "RV-PR2": {"family": "sessionctl_parkroute", "refs": ["REQ-SS-19", "E2E-SS-14"], "wp": "R216"},
+    "RV-SC1": {"family": "sessionctl_switchcensus", "refs": ["E2E-SS-01", "REQ-SS-20"], "wp": "R216"},
+    "RV-SC2": {"family": "sessionctl_switchcensus", "refs": ["E2E-SS-02", "REQ-SS-20"], "wp": "R216"}
   }
 }

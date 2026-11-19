@@ -13569,8 +13569,10 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
         self.plans: list[object] = []
         self.err = io.StringIO()
 
-    def _gate_with_spy(self, event: str, tool: str = "Read", pct: float = 86.0) -> int:
-        _quota_cache(self.tmp, pct)
+    def _gate_with_spy(self, event: str, tool: str = "Read", pct: float = 86.0, *,
+                       reseed: bool = True) -> int:
+        if reseed:
+            _quota_cache(self.tmp, pct)
         payload = {"hook_event_name": event, "tool_name": tool,
                    "transcript_path": str(self.transcript)}
 
@@ -13618,13 +13620,35 @@ class QuotaPrepareBandActuallyPreparesTest(unittest.TestCase):
         self.assertEqual(self.plans, [])
 
     def test_it_speaks_once_per_reset_window_not_once_per_tool_call(self) -> None:
-        """去重沿用 halt 那套閂鎖鍵：否則 85% 之後每一次 Read 都 spawn 一支 planner。"""
-        first = self._gate_with_spy("PostToolUse")
+        """去重沿用 halt 那套閂鎖鍵：否則 85% 之後每一次 Read 都 spawn 一支 planner。
+        reset 是伺服器給的**絕對**時刻，所以整個視窗只種一次快取；逐次重種會讓
+        `now+3600s` 在每次呼叫重算，閂鎖鍵（reset 取到分鐘）跨過整分鐘就換鍵
+        （偶發 2≠1 的成因，DEF-200-616）。"""
+        _quota_cache(self.tmp, 86.0)
+        first = self._gate_with_spy("PostToolUse", reseed=False)
         for _ in range(9):
-            self._gate_with_spy("PostToolUse")
+            self._gate_with_spy("PostToolUse", reseed=False)
         self.assertEqual(first, 0)
         self.assertEqual(len(self.plans), 1,
                          f"prepare 帶寫了 {len(self.plans)} 份任務書 ⇒ spawn 風暴")
+
+    def test_the_latch_follows_the_servers_reset_not_the_wall_clock(self) -> None:
+        """與時鐘無關的決定性版本：同一個絕對 reset 重讀快取多次（讀數新舊不同）⇒ 一份任務書；
+        reset 換到下一個視窗（差 5 分鐘）⇒ 才會再出一份。"""
+        def seed(resets_at: str, age: float) -> None:
+            path = _quota_cache(self.tmp, 86.0, age=age)
+            body = json.loads(path.read_text(encoding="utf-8"))
+            body["axes"][0]["resets_at"] = resets_at
+            path.write_text(json.dumps(body), encoding="utf-8", newline="\n")
+
+        window = datetime.now(UTC).astimezone() + timedelta(hours=1)
+        for age in (0.0, 5.0, 20.0):
+            seed(window.isoformat(), age)
+            self._gate_with_spy("PostToolUse", reseed=False)
+        self.assertEqual(len(self.plans), 1, "同一個 reset 視窗被當成多個視窗")
+        seed((window + timedelta(minutes=5)).isoformat(), 0.0)
+        self._gate_with_spy("PostToolUse", reseed=False)
+        self.assertEqual(len(self.plans), 2, "新視窗沒有重新武裝")
 
     def test_the_other_bands_stay_silent(self) -> None:
         """鑑別力：這一段不得把 notice／free 帶也變吵（那會讓守衛被整個關掉）。"""

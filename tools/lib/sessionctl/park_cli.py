@@ -273,12 +273,13 @@ def _cmd_status(opts, sid: str, S: dict) -> int:
     return 0
 
 
-def _write_failed_handback(sid: str, pkg: Path, rc: int) -> None:
+def _write_failed_handback(sid: str, pkg: Path, rc: int, route: str = park.FIRE_FRESH) -> None:
     import resume_route  # noqa: PLC0415
 
-    body = (f"## 做了什麼\npark 排程到點，spawn 新 session 失敗（rc={rc}）。\n\n"
-            "## 驗了什麼\n標記 armed、交接包 live、舊 session 無人在動後才 spawn。\n\n"
-            f"## 卡在哪\nhandoff.spawn rc={rc}（原因見 autosdd_session_switch 痕跡）。\n\n"
+    what = "續跑原 session（claude -r）" if route == park.FIRE_RESUME else "spawn 新 session"
+    body = (f"## 做了什麼\npark 排程到點，{what}失敗（rc={rc}）。\n\n"
+            "## 驗了什麼\n標記 armed、交接包 live、舊 session 無人在動後才動手。\n\n"
+            f"## 卡在哪\n{route} 路 rc={rc}（原因見 autosdd_session_switch 痕跡）。\n\n"
             f"## 下一步指令\n`claude -r {sid}` 手動回舊 session，或 "
             f"`python tools/sessionctl.py handoff --spawn {pkg}`。\n")
     try:
@@ -293,6 +294,77 @@ def _find_transcript(sid: str, env):
     import harness_feed  # noqa: PLC0415
 
     return harness_feed.pick_transcript(handoff._project_dir(_REPO), sid, env)[0]
+
+
+def _fire_route(transcript, env, now: datetime) -> tuple[str, str, int | None]:
+    """到點選路（`park.fire_route`）：讀上下文與快取冷熱；任何讀取問題 ⇒ 量不到 ⇒ FRESH。"""
+    from . import cachestate, roster  # noqa: PLC0415 — lazy：只有 job 本體需要
+
+    held, cold = None, False
+    try:
+        if transcript is not None and Path(transcript).is_file():
+            held = roster._scan(Path(transcript), False).get("ctx_tokens")
+            cold = bool(cachestate.cache_state(transcript, now).get("cold"))
+    except Exception:  # noqa: BLE001 — 讀不動不等於可以續跑，走既有交接包路
+        held = None
+    route, why = park.fire_route(held, cold, env)
+    return route, why, held
+
+
+RESUME_PROMPT = ("park 排程到點（額度已 reset）：續跑停工前的工作。停工前封存的交接包在 {pkg}"
+                 "（供參考；以本 session 的上下文為主）。{rules}")
+
+
+def spawn_resume(sid: str, pkg, *, runner=None, platform_name: str | None = None, env=None,
+                 repo: Path | None = None, projects_dir: Path | None = None, alive=None, sleep=None,
+                 wait_seconds: float = handoff.SPAWN_WAIT_SECONDS,
+                 claude: str | None = None) -> int:
+    """F4 的 RESUME 路：另開可見互動視窗 `claude -r <sid> <提示>` 續原 session。成功憑證＝行程
+    存活**且**原逐字稿變大（或專案目錄出現新檔）；沒出現就照實回非零，不報成功。
+    非 Windows／模式非 auto／無人窗口一律不外呼（同 `handoff.spawn` 的圍籬）。"""
+    import subprocess  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    env = os.environ if env is None else env
+    if env.get(park.UNATTENDED_ENV):
+        _err("❌ 無人窗口不開互動視窗。")
+        return 1
+    if switch.switch_mode(env) != "auto" or (platform_name or sys.platform) != "win32":
+        _err("❌ 不自動續跑：只有 Windows 且 AUTOSDD_SESSION_SWITCH_MODE=auto 才開窗。"
+             f"手動做法：在 repo 根執行 `claude -r {sid}`。")
+        return 1
+    repo = Path(repo or _REPO)
+    proj = Path(projects_dir) if projects_dir is not None else handoff._project_dir(repo)
+    tpath = proj / f"{sid}.jsonl"
+    before = {p.name for p in proj.glob("*.jsonl")} if proj.is_dir() else set()
+    size0 = tpath.stat().st_size if tpath.is_file() else 0
+    prompt = RESUME_PROMPT.format(pkg=pkg, rules=switch.FRESH_HARD_RULES)
+    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x10)
+    rc, out, pid = (runner or handoff.build.default_runner)(
+        [claude or "claude", "-r", sid, prompt], cwd=str(repo), env=handoff.washed_env(env),
+        creationflags=flags, wait=False)
+    if rc != 0 or pid is None:
+        _err(f"❌ 續跑視窗開啟失敗（rc={rc}）{out}")
+        return 1
+    sleep, alive = sleep or time.sleep, alive or handoff._alive
+
+    def grew() -> bool:
+        return (tpath.is_file() and tpath.stat().st_size > size0) or bool(
+            handoff._new_files(proj, before))
+
+    deadline = time.monotonic() + wait_seconds
+    ok = grew()
+    while not ok and time.monotonic() < deadline and alive(pid):
+        sleep(1)
+        ok = grew()
+    up = alive(pid)
+    switch.trace("session_resume_spawned", sid=sid, pid=pid, handoff=str(pkg), ok=ok and up)
+    if not (ok and up):
+        _err(f"❌ 已起行程 pid={pid} 但{'逐字稿未增長' if up else '行程已不在'}"
+             f"（{wait_seconds:g}s 內）⇒ 不報成功；請自行檢視新視窗。")
+        return 1
+    print(f"✅ 已續跑原 session（pid={pid}，claude -r {sid[:8]}）。")
+    return 0
 
 
 def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
@@ -328,16 +400,24 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
     import transcript_activity  # noqa: PLC0415
 
     find = S.get("transcript") or (lambda s: _find_transcript(s, env))
-    driver = transcript_activity.live_driver(find(sid), now)
+    transcript = find(sid)
+    driver = transcript_activity.live_driver(transcript, now)
     if driver is not None:
         return skip("live_driver", driver_kind=driver["kind"], driver_at=driver["timestamp"])
-    rc = (S.get("spawn") or handoff.spawn)(pkg)
+    route, why, held = _fire_route(transcript, env, now)
+    switch.trace("park_route", sid=sid, job=label, route=route, why=why, ctx=held)
+    if route == park.FIRE_RESUME:
+        rc = (S.get("resume") or spawn_resume)(sid, pkg, env=env)
+        done, failed = "park_resumed", "park_resume_failed"
+    else:
+        rc = (S.get("spawn") or handoff.spawn)(pkg)
+        done, failed = "park_spawned", "park_spawn_failed"
     if rc == 0:
-        switch.trace("park_spawned", sid=sid, job=label, pkg=str(pkg), rc=rc)
-        return finish(0, "fired", "park_spawned")
-    switch.trace("park_spawn_failed", sid=sid, job=label, pkg=str(pkg), rc=rc)
-    _write_failed_handback(sid, pkg, rc)
-    return finish(1, "failed", "park_spawn_failed", spawn_rc=rc)
+        switch.trace(done, sid=sid, job=label, pkg=str(pkg), rc=rc, route=route)
+        return finish(0, "fired", done)
+    switch.trace(failed, sid=sid, job=label, pkg=str(pkg), rc=rc, route=route)
+    _write_failed_handback(sid, pkg, rc, route)
+    return finish(1, "failed", failed, spawn_rc=rc, route=route)
 
 
 def _parser() -> argparse.ArgumentParser:

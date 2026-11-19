@@ -19,10 +19,20 @@
 
 ## 二、誠實未結（不得宣稱已完成）
 
-- TCS WP-G（`waste_census` M-K1～M-K6、`--replay-switch`、`--calibrate-switch`）本輪未實作；park 選路（階段 3，REQ-SS-19）未實作。
+- 〔已於 2026-11-19 WP-F／WP-G 補做，見〈四〉〕TCS WP-G 量測端與 park 選路（REQ-SS-19）原列未實作，現已落地。
 - E2E-SS-04（`-p` 模式快取層）、E2E-SS-05（上線 14 天後 M-K2＝0）、V-SS1～V-SS4 互動真機項：以 `docs/06_quality/RealVerify_Result_Ledger.md` 已入帳者為準，未入帳＝未結。
 - PRD §16.6 v2.1.22 列因此維持 ⏸。
 
 ## 三、當回合驗證輸出
 
 見收尾回報（指令、Ran／OK／rc）；本檔刻意不抄數字。
+
+## 四、WP-F／WP-G／偶發測試補做（2026-11-19，SD 單人窗口）
+
+| 項 | 落點與驗證座標 |
+|---|---|
+| WP-F park 到點選路（REQ-SS-19） | 判準 `tools/lib/sessionctl/park.py::fire_route`；執行 `park_cli.py::_fire_route／spawn_resume`；單元＋整合 `tools/tests/test_sessionctl_park_route.py`（含反向變體：熱快取大上下文仍續跑、失敗不退回 spawn）；真排程＋真行程 RealVerify `RV-PR1`（冷＋17 萬⇒RESUME）／`RV-PR2`（冷＋60 萬⇒FRESH），家族 `sessionctl_parkroute` |
+| WP-G 量測（REQ-SS-20／21） | 判準 `tools/lib/wastecensus/sections_keep.py`、I/O `keep_load.py`、入口旗標 `report.py`；`reader.py` 增 `kw_calls`（保溫類指令配對叫醒通知）；`tools/tests/test_waste_census_keep.py`（AT-SS-50～52、決定性快照重放、事件名與 sessionctl 常數相等）；真逐字稿 RealVerify `RV-SC1`／`RV-SC2`，家族 `sessionctl_switchcensus` |
+| 偶發測試 DEF-200-616 | 成因＝測試逐次重種「now+3600s」的 reset 而閂鎖鍵取到分鐘，跨整分鐘換鍵（被測物無缺陷）；重現載具＝在整分鐘前 5ms 起跑（修前 2/2 紅、修後 2/2 綠）；修法＝整視窗只種一次快取＋時鐘無關的決定性回歸；帳本 `AutoSDD_Defect_Log.md` |
+| DES §7 對帳 | M-K1／M-K2／M-K3／M-K4、P1、S2 與 DES 逐位相符；P3／P4b／S1 差異＝母體多一支交接包開場 session（F 中位 480,734→467,949）與 `annotate.units` 對「分層未標」寫入記 1.25（DES 腳本記 2.0，F_a 差 6 單位）；逐項核過、非缺陷 |
+| 仍未結 | E2E-SS-05（上線 14 天後 M-K2＝0）；park RESUME 路「到點真開 `claude -r` 視窗並續寫原逐字稿」（V-SS5，待掌舵者目視；folder trust＋禁開窗）；E2E-SS-04、V-SS1～V-SS4 沿用上節 |

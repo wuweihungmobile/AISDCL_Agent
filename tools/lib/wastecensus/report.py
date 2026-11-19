@@ -84,6 +84,25 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="監督與換手量測 M-W1～W4／M-F1～F3／M-S1～S3（ARCH §9）",
     )
+    ap.add_argument(
+        "--switch-metrics",
+        action="store_true",
+        help="換 session 成本量測 M-K1～M-K6（設計 SessionSwitch_CostModel_Design §2）",
+    )
+    ap.add_argument(
+        "--replay-switch",
+        action="store_true",
+        help="把新判準套回真實逐字稿，重現設計 §7 全表（零 token）",
+    )
+    ap.add_argument(
+        "--calibrate-switch",
+        action="store_true",
+        help="重算 F、B、N_lo、P_fix 建議值（讀逐字稿與 autosdd_resume_cost.jsonl）",
+    )
+    ap.add_argument("--ping-min", type=float, default=45.0, help="重放／校準用的主控保溫間隔（分）")
+    ap.add_argument("--population", default=None, help="讀母體快照 JSON，不讀逐字稿（CI 用）")
+    ap.add_argument("--dump-population", default=None, help="母體存成快照 JSON（只含 usage）")
+    ap.add_argument("--resume-cost-file", default=None, help="resume_cost 痕跡檔（預設痕跡目錄）")
     ap.add_argument("--handoff-dir", default=None, help="交接包目錄（預設 ~/.autosdd/handoff）")
     ap.add_argument("--burn-file", default=None, help="quota_burn.jsonl（預設痕跡目錄下）")
     ap.add_argument(
@@ -210,6 +229,13 @@ def _run_replay(args: argparse.Namespace, base: Path) -> int:
 def main(argv: list[str]) -> int:
     args = _build_parser().parse_args(argv)
     base = Path(args.base)
+    if args.switch_metrics or args.replay_switch or args.calibrate_switch:
+        from . import keep_load  # noqa: PLC0415 — lazy
+
+        if not args.population and not base.is_dir():
+            print(f"逐字稿目錄不存在：{base}（或改用 --population 快照）", file=sys.stderr)
+            return 1
+        return keep_load.run(args, base, _trace_path(args.trace_file))
     if not base.is_dir():
         print(f"逐字稿目錄不存在：{base}", file=sys.stderr)
         return 1

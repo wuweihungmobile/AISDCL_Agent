@@ -2,7 +2,7 @@
 
 > 角色：SA（R216 Architect＋SA 合一棒）。設計全文＝`docs/02_architecture/SessionSwitch_CostModel_Design.md`（下稱 DES）；上游需求＝`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`（下稱 PRD，修憲草案見 DES §8）。
 > 命名照本目錄 `TCS-<模組>-<日期>.md`；不併入 TCS-SessionCtl／TCS-SessionPark／TCS-TokenWaste（已凍結的狀態對照帳），本案 AT 前綴 `AT-SS-`、E2E 前綴 `E2E-SS-`。
-> **狀態（2026-11-19）**：已實作並收尾（R216 收尾窗口）。🔴 **掌舵者裁決（2026-11-18）優先於本檔全文**：不設軟線 `T_soft`、不做 hold 戳記、只留硬線 HARD——凡涉軟線／hold 的 REQ／AT／MU 一律標「依裁決不實作」、不再是待實作項；`waitfor` 單段上限由原稿的 240 改為 **255**（WHY：長前景閘擋線 270000 ms；等 270 秒需要的前景 timeout 會被擋線自己擋住，故上限取擋線以下的 255，預設仍 240）。park 選路（階段 3，REQ-SS-19）未實作。🔴 **量測端（WP-G：REQ-SS-20／21 的 M-K1～M-K6、`--replay-switch`、`--calibrate-switch`、AT-SS-50～52、E2E-SS-01／02／05）本輪未實作＝未結**，不得宣稱已有指標。真機自驗結果以 `docs/06_quality/RealVerify_Result_Ledger.md` 為準，未入帳者＝未結。
+> **狀態（2026-11-19）**：已實作並收尾（R216 收尾窗口）。🔴 **掌舵者裁決（2026-11-18）優先於本檔全文**：不設軟線 `T_soft`、不做 hold 戳記、只留硬線 HARD——凡涉軟線／hold 的 REQ／AT／MU 一律標「依裁決不實作」、不再是待實作項；`waitfor` 單段上限由原稿的 240 改為 **255**（WHY：長前景閘擋線 270000 ms；等 270 秒需要的前景 timeout 會被擋線自己擋住，故上限取擋線以下的 255，預設仍 240）。park 選路（階段 3，REQ-SS-19）與量測端（WP-G：REQ-SS-20／21 的 M-K1～M-K6、`--replay-switch`、`--calibrate-switch`、AT-SS-50～52）已於 R216 WP-F／WP-G 實作（2026-11-19；park 選路驗證＝`tools/tests/test_sessionctl_park_route.py`＋RealVerify RV-PR1／PR2，量測驗證＝`tools/tests/test_waste_census_keep.py`＋RV-SC1／SC2）。🔴 **仍未結**：E2E-SS-05（上線 14 天後 M-K2＝0，`--switch-metrics` 已能量，等時間）；E2E-SS-14 到點「真的開出 `claude -r` 視窗並續寫原逐字稿」那一步（受 folder trust 限制且禁開窗，選路／痕跡／失敗 handback 已由真排程＋真行程驗，開窗待掌舵者目視 V-SS5）。真機自驗結果以 `docs/06_quality/RealVerify_Result_Ledger.md` 為準，未入帳者＝未結。
 > 測試慣例沿用 sessionctl：時間注入 `now`、路徑圍籬 tmp、不讀本機真實 `~/.claude`（E2E 除外，見 §4）、不起真排程、不開測試用環境變數鉤（A-3）、禁用 skip。
 > 🔴 掌舵者 2026-11-18 指令：每個功能都要有 E2E（真行程／真排程／真 `claude -p` 子行程／真逐字稿重放才算，單元測試不算）；待真機尾巴＝未完成。§4 逐功能列齊，做不到真機的以「替代 E2E」寫明並計入未結。
 
@@ -136,11 +136,11 @@
 
 | 功能 | E2E | 載具 | 斷言 | 不可達時的替代與未結標記 |
 |---|---|---|---|---|
-| F4／F3 判準與重放 | E2E-SS-01 | 真行程 `python tools/probe/waste_census.py --replay-switch --since-days 14`，讀本機真實逐字稿 | 印出 DES §7 各列；P1 改變決定件數、P3 FRESH 件數與 DES 同母體重跑一致（母體變動時只斷言公式一致：以同一份 `turns` 快照 JSON 重放兩次結果相同） | CI 無真逐字稿 ⇒ CI 跑快照 JSON（從真逐字稿抽出、去內容只留 usage／時間戳），本機跑全量 |
-| 校準 | E2E-SS-02 | 真行程 `--calibrate-switch`，讀真逐字稿＋真 `autosdd_resume_cost.jsonl` | F 建議值落在 p25～p75（DES §1.4） | 同上 |
+| F4／F3 判準與重放 | E2E-SS-01 | 真行程 `python tools/probe/waste_census.py --replay-switch --since-days 14`，讀本機真實逐字稿 | 印出 DES §7 各列；P1 改變決定件數、P3 FRESH 件數與 DES 同母體重跑一致（母體變動時只斷言公式一致：以同一份 `turns` 快照 JSON 重放兩次結果相同） | CI 無真逐字稿 ⇒ CI 跑快照 JSON（從真逐字稿抽出、去內容只留 usage／時間戳），本機跑全量。**已實作**：本機＝RealVerify RV-SC1（`--dump-population` 抽快照，斷言決定性、P3 與正式 F4 逐筆一致、M-K3／M-K4 與 S2／S1 事件數相等、快照無對話欄位）；CI 形態＝`test_waste_census_keep.py::SnapshotAndEntryPointTest` |
+| 校準 | E2E-SS-02 | 真行程 `--calibrate-switch`，讀真逐字稿＋真 `autosdd_resume_cost.jsonl` | F 建議值落在 p25～p75（DES §1.4） | 同上。**已實作**：RealVerify RV-SC2（F 分位序、n≥5、B 量級、真 resume_cost 列讀到；出廠 F 是否在實測 p25～p75 內寫進證據、不當失敗）；母體漂移故不寫死 DES 當日絕對數字 |
 | keepwarm 指令 | E2E-SS-03 | 真行程 `python tools/sessionctl.py keepwarm --sid X --projects-dir <tmp> --min 1`（`--min` 為正式 CLI 參數，下限 1、<15 出聲）；tmp 放**真實逐字稿截取**（usage 與時間戳原樣、內容去除） | 約 60 秒後 rc 6、末行 `KEEPWARM_VERDICT=ping`；期間另一行程追加 assistant 記錄 ⇒ 延後 | — |
 | keepwarm 真機效果（主前提） | E2E-SS-04 | 真 `claude -p --model haiku` 子行程三次：t0 建 session（上下文≥4,096 token 以啟用快取）、t0+45 分 `-r` 輕觸、t0+100 分 `-r` | 第三次 `cache_read ≥ 0.9×前一回合上下文`；對照組（不輕觸、t0+70 分）`cache_read < 0.1×` | 若 `-p` 模式的快取層不是 1h（以 usage 的 `ephemeral_1h_input_tokens` 判），改量 5m 版本（4 分輕觸 vs 7 分）並標「1h 層待互動真機 V-SS1」，**計未結** |
-| 閒置自動壓縮被擋 | E2E-SS-05 | 真逐字稿重放：`waste_census` M-K2 對上線後 14 天 | M-K2＝0 | 上線前不可達；上線 14 天後由 SI 巡邏或主控收尾跑一次，**計未結**直到跑過 |
+| 閒置自動壓縮被擋 | E2E-SS-05 | 真逐字稿重放：`waste_census` M-K2 對上線後 14 天 | M-K2＝0 | 上線前不可達；上線 14 天後由 SI 巡邏或主控收尾跑一次（`python tools/probe/waste_census.py --switch-metrics --since-days 14`，看 M-K2 行），**計未結**直到跑過 |
 | Stop 保溫閘／封存閘／冷叫醒閘豁免 | E2E-SS-06 | 真 hook 行程：以 `.venv` 載具執行 `.claude/hooks/sessionctl_guard.py`，stdin 餵 harness 真實 Stop payload 形態（含 `background_tasks`）＋真實逐字稿截取 | AT-SS-15～18 四情境的 stdout JSON（`decision:block` 與否、reason 字樣） | — |
 | PreToolUse 長前景閘 | E2E-SS-07 | 同上載具，餵真實子代理 PreToolUse payload（從真逐字稿取 `agent_id`、`tool_input.timeout` 形態） | rc 2／0 對應 AT-SS-33～35 | — |
 | 子代理分段等待 | E2E-SS-08 | 真 `claude -p --model haiku` 主控，提示派一支前景子代理（`model: haiku`）用 `runlong` 跑 `python -c "import time;time.sleep(420)"` 並以 `waitfor --max-sec 240` 等待 | 子代理逐字稿：相鄰回合間隔皆 < 300 秒；`waitfor` 回合 `cache_read ≥ 0.9×前回合上下文`；`.done` rc 0 | print 模式背景上限 10 分鐘：本案用前景子代理＋總長 < 9 分；若 harness 擋，**計未結**並改互動真機 V-SS2 |
@@ -149,7 +149,7 @@
 | 收斂閘 HARD | E2E-SS-11 | 真 hook 行程 PreToolUse Agent，真逐字稿截取 ctx 850,000 | rc 2 | — |
 | 轉送 F4 | E2E-SS-12 | 真 hook 行程 UserPromptSubmit，真逐字稿截取＋已封存交接包；以 `AUTOSDD_SESSION_SWITCH_MODE=notify` 走條件 7 路（不 spawn）驗 F4 前段；spawn 本體沿用 TCS-SessionCtl 既有 E2E | c=400k 放行且 `systemMessage` 含原因；c=600k 達條件 7 | spawn 全路徑沿用既有 V-F1（未結照舊） |
 | 無人續跑選路 F4 | E2E-SS-13 | 真行程 `python tools/session_resume_planner.py` 的選路預演（既有 `--dry-run`／`--check` 類旗標；SD 現查）餵真逐字稿 | 冷＋c=170k ⇒ RESUME（舊 R3 判 FRESH） | 若 planner 無預演旗標，SD 不得新增測試專用旗標；改以真 `claude -p` 無人窗口一次（haiku、小上下文）驗，**計未結**直到跑過 |
-| park 選路（階段 3） | E2E-SS-14 | 真排程：`sessionctl park` 以 `--at <now+2 分>` 登記，真 schtasks 觸發 `park --fire` | c 小 ⇒ 以 `-r` 續原 sid（新逐字稿行附加於原檔）；c 大 ⇒ 開新 sid | macOS／Linux 只印手動指令（既有劃界）；Windows 實跑 |
+| park 選路（階段 3） | E2E-SS-14 | 真排程：`sessionctl park` 以 `--at <now+2 分>` 登記，真 schtasks 觸發 `park --fire` | c 小 ⇒ 以 `-r` 續原 sid（新逐字稿行附加於原檔）；c 大 ⇒ 開新 sid | macOS／Linux 只印手動指令（既有劃界）；Windows 實跑。**R216 WP-F 落地形態＝RealVerify RV-PR1／PR2**：真 schtasks 登記＋真行程跑 job 本體（`--fire`，`AUTOSDD_SESSION_SWITCH_MODE=notify` 擋下開窗這最後一步），驗 `park_route` 痕跡（c＝170,000⇒RESUME、600,000⇒FRESH）、`park_resume_failed`／`park_spawn_failed` 對應、handback、job 自拆、無 claude 行程；**「真的開出 `claude -r` 視窗並續寫原逐字稿」計未結（V-SS5，待掌舵者目視）** |
 
 ## 5. SD 工作包（鎖持有面；鐵律七：常數／史料／消費端不在同一持有面者不得並行）
 

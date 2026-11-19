@@ -20,13 +20,14 @@ from pathlib import Path
 
 import endurance_env
 
-from . import roster, switch
+from . import costmodel, roster, switch
 
 SCHEMA = "autosdd.park/1"
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 GUARD_OFF_ENV = "AUTOSDD_PARK_GUARD_OFF"  # 只關 Stop 推回；讀自 hook 行程環境
 PARK_CMD = "python tools/sessionctl.py park"
 ROUTE_H, ROUTE_DONE, ROUTE_REFUSE = "H", "DONE", "REFUSE"
+FIRE_RESUME, FIRE_FRESH = "RESUME", "FRESH"  # 到點換手的兩種開法（設計 §4.6）
 STATUSES = ("armed", "fired", "skipped", "cancelled", "failed")
 # parity：quota_gate._FIVE_HOUR_KINDS／_FIVE_HOUR_MINUTES
 SHORT_WINDOW_KINDS = frozenset({"session", "five_hour", "5h"})
@@ -56,6 +57,25 @@ def park_route(wait_s: float | None, *, unattended: bool, mode: str,
     if wait_s is None:
         return ROUTE_REFUSE, "量不到 reset 時刻：reset 是滾動視窗、只能觀測不能算，不假設 5 小時"
     return ROUTE_H, f"到點（約 {max(0.0, float(wait_s)) / 60:.0f} 分鐘後）由新 session 帶交接包接手"
+
+
+def fire_route(held: int | float | None, cold: bool, env=None) -> tuple[str, str]:
+    """到點（reset 後）怎麼接手：回 `(FIRE_RESUME | FIRE_FRESH, 理由)`（R216 設計 §4.6、F4）。
+
+    · 上下文量不到 ⇒ FRESH：`claude -r` 需要讀得到逐字稿，量不到就不冒險，走已封存交接包這條
+      既有的路（也保住 AT-PK-57～64 的既有契約）；
+    · 快取仍熱 ⇒ RESUME（讀價必小於接手成本 F）；
+    · 快取已冷 ⇒ `costmodel.fresh_is_cheaper`（`W_CC1·c > F(1+q)`，與喚醒選路、轉送同一條判準）：
+      命中 ⇒ FRESH，否則 RESUME（小上下文續跑重寫比接手便宜，且不丟上下文）。"""
+    if held is None or held <= 0:
+        return FIRE_FRESH, "上下文量不到（-r 需要讀得到逐字稿）⇒ 沿用交接包換手"
+    if costmodel.fresh_is_cheaper(held, cold=cold, env=env):
+        return FIRE_FRESH, costmodel.f4_reason(held, env)
+    if not cold:
+        return FIRE_RESUME, f"快取仍熱（上下文 {held:,} tokens），續跑只付讀價，保留上下文"
+    rewrite = costmodel.W_CC1 * held
+    return FIRE_RESUME, (f"快取已冷但上下文 {held:,} tokens 續跑重寫 {rewrite:,.0f} 單位"
+                         f" ≤ 換新 {costmodel.fresh_total(env):,.0f} 單位，保留上下文")
 
 
 # ───────────────────────────────────────────────────────────────────── 原始讀數

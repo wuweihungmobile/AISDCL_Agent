@@ -1184,7 +1184,7 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 - **D3 主控保溫 `sessionctl keepwarm`（`keepwarm.py`）**：截止＝主控**最後一筆帶 usage 的 assistant 記錄**＋`T_kw`（`AUTOSDD_KEEPWARM_MINUTES`，出廠 45、只准下修、下限 15；不是任何程序的啟動時刻）；末行 `KEEPWARM_VERDICT=ping|cap|skip`（rc 6／7／0）。保溫帳 `trace_dir()/keepwarm/<sid>.json` 記 `pings`，真人提示一出現歸零；上限 `n*` 依 F1（ski-rental，約 9～10 次）。不掛的情形：無人窗口、模式非 auto、`AUTOSDD_KEEPWARM_OFF`、已交棒、park 標記有效、上下文低於 `AUTOSDD_KEEPWARM_MIN_CTX_TOKENS`。**Stop 保溫閘**（`converge` 合成，次序 封存→park→保溫）：無任何 running 背景任務 ∧ 非不掛情形 ∧ `pings < n*` ⇒ 推回一次。**冷叫醒閘**：已交棒照舊全停；只封存、在等掌舵者 ⇒ `sessionctl.py keepwarm` shell 豁免（`seal.handed_over` 判）。`watch` 的保溫點改用同一錨點函式。
 - **D4 watch 額度閂鎖**：quota 事件以 `(sid, reset 分鐘, 帶級)` 為鍵寫 `trace_dir()/watch/<sid>.quota.json`，同窗同帶只觸發一次；帶升級（prepare→halt）或 reset 改變再觸發；閂鎖讀寫失敗一律觸發＋stderr 出聲（失效往保守）。reset 時刻抖動（讀數在分鐘邊界來回 ±1 分）由 `keepwarm._same_reset` 吸收：字面相同或差 ≤300 秒視為同窗（DEF-200-614）。否決 `--ack-quota`（DES §4.3）。
 - **D5 子代理長等待 `runlong`／`waitfor`＋長前景閘（`longwait.py`）**：子代理快取壽命 5 分鐘。`runlong --out <檔> -- <argv…>` 背景跑、結束原子寫 `<檔>.done`；`waitfor --done <檔>.done --max-sec S` 前景至多等 S 秒（預設 240，**上限 255**）：完成 rc 0＋尾端 40 行＋`WAITFOR_VERDICT=done rc=<子行程 rc>`、未完成 rc 3 `pending`、參數錯 rc 2。**上限取 255 而非 270 的 WHY**：waitfor 自己是前景呼叫，等 270 秒需要 timeout > 270000，會被長前景閘自己擋住。**長前景閘**（PreToolUse，`.claude/hooks/sessionctl_guard.py`；`.claude/settings.json` matcher 含 PowerShell／Bash）：呼叫帶 `agent_id`（子代理；主控 1 小時快取不判）∧ 工具 PowerShell／Bash ∧ 非背景 ∧ `timeout > 270000` ⇒ rc 2 指路 runlong／waitfor；行內 `# keepwarm-ok: <WHY>` 豁免（`AUTOSDD_UNATTENDED` 下無效）；解析不到一律放行。依據：工具預設 timeout 120 秒，要等超過 5 分鐘必須顯式設大 timeout，判準精確。
-- **D6 park 選路（階段 3）**：本輪未實作（TCS WP-F 仍待做；park 照舊一律開新 session 帶交接包），不得在文件宣稱已落地。
+- **D6 park 到點選路（階段 3，R216 WP-F；已實作）**：park job 到點（`park --fire`，查過沒人在動之後）不再一律 spawn 新 session——`park.fire_route(held, cold)` 與 D2 同一條判準：上下文量不到 ⇒ FRESH（`claude -r` 需要讀得到逐字稿，沿用已封存交接包這條既有路）；快取仍熱 ⇒ RESUME；快取已冷 ⇒ `costmodel.fresh_is_cheaper` 命中 FRESH、否則 RESUME。RESUME＝`park_cli.spawn_resume`：另開互動視窗 `claude -r <原 sid> <提示>`（提示帶交接包路徑供參考＋`FRESH_HARD_RULES`），成功憑證＝行程活著**且**原逐字稿變大（或專案目錄出現新檔），否則照實非零；**失敗不自動退回 spawn**（行程可能已起，雙開＝同一棵工作樹雙駕駛），標記 failed＋handback 寫明走的是哪條路。痕跡：`park_route`（route／why／ctx）、`park_resumed`／`park_resume_failed`、`session_resume_spawned`；FRESH 路沿用 `park_spawned`／`park_spawn_failed`。哨兵讓路（`park.yields`）不分路線；RESUME 不 disarm 哨兵（同一個 session 繼續）。
 
 #### 2.19.2 對 §2.13／§2.14／§2.18 的修正（就地註記指向本節）
 
@@ -1194,8 +1194,9 @@ NextRunTime，rc 才是憑證）；Windows＝`NextRunTime` 非空值。宣稱「
 
 - 保溫（D3）與長等待分段（D5）的真機效果（`-p` 模式快取層是否 1 小時、互動主控閒置 3 小時回來 `cache_read ≥ 0.9×`）仍待 V-SS1～V-SS4 與 E2E-SS-04／08；RealVerify 帳本已入帳者以帳本為準，未入帳＝未結。
 - 閒置約 55 分自動壓縮為 harness 行為，保溫 45 分截止擋在它前面，但機器睡眠時失效（醒來那一下是冷的，同 §2.14.5）。
-- 保溫回合會消耗 token，但不是遙測、也不探測額度（PRD §1.2 原則 2 的就地註記）；成本擬以 `waste_census` M-K5 入帳（量測端未實作，見上）。
-- F、q、`P_FIX` 為量測／治理值，不當常數；🔴 **量測端未實作**：TCS WP-G（`waste_census` M-K1～M-K6、`--replay-switch`、`--calibrate-switch`）本輪沒做，M-K5 保溫成本入帳與校準目前只能靠手算——列未結，不得宣稱已有指標。
+- 保溫回合會消耗 token，但不是遙測、也不探測額度（PRD §1.2 原則 2 的就地註記）；成本以 `waste_census --switch-metrics` 的 M-K5 入帳。
+- F、q、`P_FIX` 為量測／治理值，不當常數。**量測端（R216 WP-G）已實作**：`python tools/probe/waste_census.py --switch-metrics`（M-K1～M-K6）、`--replay-switch`（重現 DES §7 全表：P1 保溫／P3 F4 選路／P4b 軟線掃描〔史料〕／S1 冷續棒／S2 分段等待）、`--calibrate-switch`（F、B、N_lo、P_fix 建議值＋`autosdd_resume_cost.jsonl` 驗 F4 前提）；判準在 `tools/lib/wastecensus/sections_keep.py`、I/O 在 `keep_load.py`，母體可存快照 JSON（`--dump-population`／`--population`，CI 無真逐字稿時用）。當日對帳：M-K1 21 件／7,362,729 tok、M-K2 9 次、M-K3 77 件／31,263,469 tok、M-K4 146 件／70,155,830 tok、P1 14,725,458→7,069,932（保溫 86 次）、S2 39,079,336→6,017,201，皆與 DES §7 逐位相符；P3／P4b／S1 差異＝母體多一支交接包開場 session（F 中位 480,734→467,949，n 23→24）與 `annotate.units` 對「分層未標」寫入記 1.25 而 DES 腳本記 2.0（F_a 差 6 單位），已逐項核過。M-K5 的 P_fix 目前只有 waitfor／少量 keepwarm 回合的實測，keepwarm 痕跡 0 筆＝尚無資料（不是好消息）。
+- 🔴 **仍未結（不得宣稱已驗）**：E2E-SS-05（上線 14 天後 M-K2＝0；`--switch-metrics` 已能量，等時間）；park RESUME 路「到點真的開出 `claude -r` 互動視窗並續寫原逐字稿」（受 folder trust 限制且禁開窗；選路、痕跡、失敗 handback 已由真排程＋真行程驗，RealVerify RV-PR1／PR2，開窗那一步待掌舵者目視 V-SS5）。
 - 立案缺陷：DEF-200-613（watch 額度條件一掛上即觸發）、DEF-200-614（reset 抖動閂鎖）、DEF-200-615（監督憑證字面子字串比對落空；§2.18.3 的 P6H F5 理論洞由此轉實例並已修）、DEF-200-612（缺真機自驗載具）；座標見缺陷帳本。
 
 ## 3. 被否決的方案（各記為何否決）

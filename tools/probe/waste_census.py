@@ -3,6 +3,7 @@
 
 用法：python tools/probe/waste_census.py [--since-days 14] [--sid <sid>] [--out <jsonl>]
       python tools/probe/waste_census.py --replay-hard-ctx [--r1 250000] [--candidates 260000,...]
+      python tools/probe/waste_census.py --switch-metrics | --replay-switch | --calibrate-switch
 零 token、只讀逐字稿；逐筆 jsonl 預設寫系統暫存（不寫 repo 內任何檔）。
 """
 from __future__ import annotations

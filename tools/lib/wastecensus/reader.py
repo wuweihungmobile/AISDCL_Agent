@@ -52,6 +52,17 @@ GAP_BUCKETS = [
 _PUSH_RE = re.compile(r"(?<![\w-])git\s+(?:-C\s+\S+\s+)?push\b")
 
 
+#: 保溫類指令字樣（M-K5 要把「保溫自身成本」從一般回合裡分出來；字面同 sessionctl 的
+#: `keepwarm.CMD_MARK`，wastecensus 不 import 守衛碼，由 test_waste_census_keep 斷言相等）。
+KW_MARKS = (("sessionctl.py keepwarm", "keepwarm"), ("sessionctl.py waitfor", "waitfor"))
+
+
+def _kw_kind(command: object) -> str | None:
+    if not isinstance(command, str):
+        return None
+    return next((kind for mark, kind in KW_MARKS if mark in command), None)
+
+
 def parse_ts(raw: object) -> float | None:
     if not isinstance(raw, str):
         return None
@@ -115,6 +126,7 @@ def read_thread(path: Path, sid: str, thread: str) -> dict:
             "voices": [],
             "pushes": [],
             "notifs": [],
+            "kw_calls": [],
             "first_ts": None,
             "skipped": 0,
         }
@@ -328,6 +340,18 @@ def read_thread(path: Path, sid: str, thread: str) -> dict:
         for tid, c in tool_calls.items()
         if c["bg"] and c["name"] in ("PowerShell", "Bash")
     ]
+    kw_calls = [
+        {
+            "ts": c["ts"],
+            "kind": kind,
+            "bg": c["bg"],
+            "notif_ts": (notif_by_tool.get(tid) or {}).get("ts"),
+        }
+        for tid, c in tool_calls.items()
+        if c["name"] in ("PowerShell", "Bash")
+        for kind in [_kw_kind(c.get("command"))]
+        if kind
+    ]
     writes = [
         (c["ts"], c["path"])
         for c in tool_calls.values()
@@ -341,6 +365,7 @@ def read_thread(path: Path, sid: str, thread: str) -> dict:
         "notifs": notifs,
         "first_ts": first_ts,
         "bg_calls": bg_calls,
+        "kw_calls": kw_calls,
         "hook_ms": hook_ms,
         "hook_ctx_chars": hook_ctx_chars,
         "writes": writes,
