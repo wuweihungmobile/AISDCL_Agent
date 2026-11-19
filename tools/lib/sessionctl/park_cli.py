@@ -363,6 +363,8 @@ def spawn_resume(sid: str, pkg, *, runner=None, platform_name: str | None = None
         _err(f"❌ 已起行程 pid={pid} 但{'逐字稿未增長' if up else '行程已不在'}"
              f"（{wait_seconds:g}s 內）⇒ 不報成功；請自行檢視新視窗。")
         return 1
+    from . import seal  # noqa: PLC0415
+    seal.mark_resumed(pkg)  # 同 sid 自續跑不算交棒：作廢封存（失敗不影響續跑結果，見 mark_resumed）
     print(f"✅ 已續跑原 session（pid={pid}，claude -r {sid[:8]}）。")
     return 0
 

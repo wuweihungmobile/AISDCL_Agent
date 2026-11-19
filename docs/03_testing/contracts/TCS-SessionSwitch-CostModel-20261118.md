@@ -124,6 +124,17 @@
 | AT-SS-47 | `fresh_reasons`：上次續跑寫入 150,000（舊 R3 命中情境）、c=170,000、冷 | 不命中；設了 R3 鍵 ⇒ notes 含「R3 已退役」 |
 | AT-SS-48 | 轉送：已封存、冷、c=400,000 | 放行＋`show` 含原因；c=600,000 ⇒ 轉送 |
 
+### 3.5b 自續跑不算交棒（R216 QA 退件 P2-1／P3-1，DEF-200-617／618；`test_sessionctl_seal.py::SelfResumeTest`、`_converge.py`、`_keepwarm.py`、`_handoff.py`、`_park_route.py`）
+
+| AT | 輸入 | 預期 |
+|---|---|---|
+| AT-SS-60 | `.ack` 記自己的 sid／別的 sid／舊格式無 sid | `handed_over`：否／是／是（舊格式保守） |
+| AT-SS-61 | 已封存包 `mark_resumed` | `.sealed` 消失、`.resumed` 在、狀態 resumed、`handed_over`／`wake_package` 皆 None；重做冪等；再封存後 `.resumed` 消失、`wake_package` 回包 |
+| AT-SS-62 | 同 sid 自 `--ack`／park RESUME 成功後：Stop 帶 running shell／在飛代理；PreToolUse Agent（硬線） | 不出冷叫醒閘、訊息不含「已交棒」；別的 sid ack ⇒ 照推、照說已交棒；spawn 痕跡仍是交棒 |
+| AT-SS-63 | 同上情境的 keepwarm `skip_reason` | 自己 ack／續跑標記 ⇒ `""`；別的 sid ack、舊格式 ack ⇒ `handed_over` |
+| AT-SS-64 | `handoff.ack` 由原主人／別的 sid 跑；`announce(sid=原主人)` | 原主人＝`.resumed`、無 `.ack`、不再公告；別的 sid＝`.ack` 含 `sid=`；對原主人的公告改「自己封存的包、直接續做」，對別人不變 |
+| AT-SS-65 | `keepwarm._same_reset`：差 0／299／300／-300 秒、301／-301／3600 秒、解析失敗 | 同窗／同窗／同窗／同窗；新窗／新窗／新窗；False（字面相同 True）；`RESET_JITTER_SECONDS==300` |
+
 ### 3.6 量測（增量 `test_waste_census_metrics.py`）
 
 | AT | 輸入 | 預期 |
@@ -150,6 +161,7 @@
 | 轉送 F4 | E2E-SS-12 | 真 hook 行程 UserPromptSubmit，真逐字稿截取＋已封存交接包；以 `AUTOSDD_SESSION_SWITCH_MODE=notify` 走條件 7 路（不 spawn）驗 F4 前段；spawn 本體沿用 TCS-SessionCtl 既有 E2E | c=400k 放行且 `systemMessage` 含原因；c=600k 達條件 7 | spawn 全路徑沿用既有 V-F1（未結照舊） |
 | 無人續跑選路 F4 | E2E-SS-13 | 真行程 `python tools/session_resume_planner.py` 的選路預演（既有 `--dry-run`／`--check` 類旗標；SD 現查）餵真逐字稿 | 冷＋c=170k ⇒ RESUME（舊 R3 判 FRESH） | 若 planner 無預演旗標，SD 不得新增測試專用旗標；改以真 `claude -p` 無人窗口一次（haiku、小上下文）驗，**計未結**直到跑過 |
 | park 選路（階段 3） | E2E-SS-14 | 真排程：`sessionctl park` 以 `--at <now+2 分>` 登記，真 schtasks 觸發 `park --fire` | c 小 ⇒ 以 `-r` 續原 sid（新逐字稿行附加於原檔）；c 大 ⇒ 開新 sid | macOS／Linux 只印手動指令（既有劃界）；Windows 實跑。**R216 WP-F 落地形態＝RealVerify RV-PR1／PR2**：真 schtasks 登記＋真行程跑 job 本體（`--fire`，`AUTOSDD_SESSION_SWITCH_MODE=notify` 擋下開窗這最後一步），驗 `park_route` 痕跡（c＝170,000⇒RESUME、600,000⇒FRESH）、`park_resume_failed`／`park_spawn_failed` 對應、handback、job 自拆、無 claude 行程；**「真的開出 `claude -r` 視窗並續寫原逐字稿」計未結（V-SS5，待掌舵者目視）** |
+| 同 session 自續跑不算交棒 | E2E-SS-15 | 真 CLI `handoff --ack`（`CLAUDE_CODE_SESSION_ID`＝原 sid／別的 sid）＋真 `claude -p`（haiku）背景 shell＋真 Stop hook＋真 `keepwarm --min 1`；**已實作**＝RealVerify RV-C4 | 甲（自續跑）：無冷叫醒閘、keepwarm 照 ping（rc 6）；乙（別的 sid，對照）：冷叫醒閘恰推回一次、`KEEPWARM_VERDICT=skip reason=handed_over rc=0` | park RESUME 開真互動視窗那一步仍待掌舵者目視 V-SS5（`spawn_resume` 成功後標記續跑由單元測試＋此案例的 CLI 路徑覆蓋） |
 
 ## 5. SD 工作包（鎖持有面；鐵律七：常數／史料／消費端不在同一持有面者不得並行）
 
@@ -194,6 +206,9 @@
 | MU-21 | R3 仍生效 | AT-SS-47 |
 | MU-22 | 轉送 F4 不等式反向 | AT-SS-48 |
 | MU-23 | M-K2 閒置窗 50～60 分改成任何閒置 | AT-SS-50 |
+| MU-24 | `handed_over` 不分接手者（回到舊判準：有 `.ack` 即交棒） | AT-SS-60、62、63、E2E-SS-15 |
+| MU-25 | `mark_resumed` 不刪 `.sealed`／狀態不變 resumed | AT-SS-61、62 |
+| MU-26 | `_same_reset` 的 `<=` 改 `<`／300 改 3600 | AT-SS-65 |
 
 QA 另驗：DES §7 重放數字以 E2E-SS-01 重跑（不得採信 DES 內數字）；保溫成本 M-K5 是否確實入帳（不可只報命中率）。
 

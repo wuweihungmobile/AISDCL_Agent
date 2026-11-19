@@ -83,6 +83,8 @@ def _project_dir(repo: Path) -> Path:
 def _state(path: Path, now: datetime, env) -> str:
     if path.with_suffix(".ack").exists():
         return "acked"
+    if path.with_suffix(".resumed").exists():  # 原 session 自己續跑（seal.mark_resumed）
+        return "resumed"
     try:
         age = now.timestamp() - path.stat().st_mtime
     except OSError:
@@ -206,13 +208,21 @@ def advise_once(session_id: str, transcript: Path | None, *, guard, env=None,
 
 # ─────────────────────────────────────────────────────── 公告／ack／finalize
 def announce(emit, *, base: Path | None = None, now: datetime | None = None,
-             env=None) -> str:
-    """未 ack 且未過期的交接包各出聲至多 3 行（含路徑）；**不寫 ack**。回出聲文字（無則空）。"""
+             env=None, sid: str | None = None) -> str:
+    """未 ack 且未過期的交接包各出聲至多 3 行（含路徑）；**不寫 ack**。回出聲文字（無則空）。
+    `sid`（hook payload 的 session_id，缺則讀環境變數）＝本 session：包的原主人就是自己（續跑）⇒
+    改提示「直接續做、不要接手」——叫自己 ack 自己的包是 R216 QA P2-1 的誘因。"""
     notes = []
+    me = str(sid or (os.environ if env is None else env).get("CLAUDE_CODE_SESSION_ID") or "")
     for row in list_handoffs(base, now, env):
         if row["state"] != "live":
             continue
         path = row["path"]
+        if me and row["sid"] == me:
+            notes.append(f"🔴 這是本 session 自己封存的交接包：{path}\n"
+                         "  你是原主人在續跑，不是接手者：直接續做，不要當成別人的包去接手。\n"
+                         f"  要標記為已續跑（作廢封存）：{_CMD} --ack {path}")
+            continue
         ready = finalize(path)[0] == 0
         notes.append(f"🔴 未接手的交接包：{path}（來自 session {row['sid']}）\n"
                      + ("  主控層已 finalize，請先讀完再接手。\n" if ready
@@ -228,8 +238,15 @@ def ack(path) -> int:
     if not path.is_file():
         print(f"❌ 交接包不存在：{path}", file=sys.stderr)
         return 1
+    me = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if me and me == _sid_of(path):  # 原主人自己回來＝續跑、不是交棒（seal.mark_resumed 有 WHY）
+        from . import seal  # noqa: PLC0415 — lazy：seal 反向 import 本檔
+        if not seal.mark_resumed(path):
+            return 1
+        print("✅ 本 session 就是這個包的原主人：記為「續跑」、封存已作廢，不算交棒。")
+        return 0
     stamp = datetime.now().astimezone().isoformat()
-    if not _write(path.with_suffix(".ack"), f"acked {stamp}\n"):
+    if not _write(path.with_suffix(".ack"), f"acked {stamp} sid={me}\n"):
         return 1
     print(f"✅ 已接手。{CLOSE_OLD_WINDOW_HINT}")
     return 0

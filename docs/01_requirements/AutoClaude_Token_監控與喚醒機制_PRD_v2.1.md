@@ -2384,7 +2384,7 @@ API_AUTO_CONTINUE_NEXT_PERIOD=false          # 【新增】
 > `measured`／`reason`／`recorded_at`。量不到一律 `measured:false` 且數值欄為 `null`，**不得寫 0**。v1 誠實劃界：`pct_before`／`pct_after` 恆 `null`
 > （spawn 前讀數無持久來源，守衛面不動）；接力窗（relay_seq ≥ 1）以本窗 spawn 時刻（planner 於 subprocess.run 前落的 `relay_snapshot_before` 事件）錨定；沒有 spawn 痕跡時才標 `measured:false`（reason＝relay-chain-anchor）；
 > 被 3600s timeout 砍掉的窗（state=resume_failed）不落帳。§9 的 `autoclaude_resume_cost_pp` 指標仍未接（Prometheus 面依設計未做）。
-> 🔴 【v2.1.22 註記】autosdd_resume_cost.jsonl 自本版起同時是 §4.5.4 成本判準 F 與 SESSION_RESUME 成本的校準來源（`waste_census --calibrate-switch`；🔴 該旗標尚未實作，目前以 F 出廠值＝實測中位 480,734 取整、手動重算）。
+> 🔴 【v2.1.22 註記】autosdd_resume_cost.jsonl 自本版起同時是 §4.5.4 成本判準 F 與 SESSION_RESUME 成本的校準來源（`waste_census --calibrate-switch`；🔴 該旗標尚未實作，目前以 F 出廠值＝實測中位 480,734 取整、手動重算）。**【R216 QA P3-2 就地註記】** 上句「尚未實作」是 v2.1.22 當時的事實；`--calibrate-switch` 已於 R216 WP-G 落地（`tools/lib/wastecensus/report.py`），解除記錄見 §16.6 2026-11-18 列〈⏸ 的原因〉①，以該處為準。
 
 ### 11.4 週上限與長休眠
 - 注入 `U7d = 92%` → 斷言進入 `LONG_HIBERNATE`、成功註冊 OS 排程任務、Daemon 退出、排程時間到能自行重啟並恢復。

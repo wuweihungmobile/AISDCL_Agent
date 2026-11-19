@@ -77,6 +77,63 @@ def rv_c2(ctx: CaseContext) -> None:
     ctx.evidence(f"RV-C2 {tr.coords(gate[0])} 冷叫醒閘")
 
 
+_BG_SHELL = ("Start exactly ONE background shell command by calling the shell tool with "
+             "run_in_background=true and the command: ping -n 21 127.0.0.1 . "
+             "Do NOT wait for it. Then end your turn immediately with the single word LAUNCHED.")
+
+
+def _keepwarm_verdict(sb, transcript) -> tuple[int, str]:
+    """真跑沙盒內安裝的 `sessionctl.py keepwarm --min 1`（小上下文門檻下修，額度不查）；回 (rc, 末行判決)。"""  # noqa: E501
+    from .sessionctl_keepwarm import LOW_CTX, NO_QUOTA  # noqa: PLC0415 — 只有本案例需要
+    r = subprocess.run(  # noqa: S603
+        [sys.executable, str(sb.root / "tools" / "sessionctl.py"), "keepwarm", "--sid", sb.sid,
+         "--projects-dir", str(transcript.parent), "--min", "1", "--poll-sec", "5"],
+        cwd=str(sb.root), env=sb.env(sc_env(sb, **NO_QUOTA, **LOW_CTX)), capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=200, creationflags=_NOWIN)
+    last = [ln for ln in r.stdout.splitlines() if ln.startswith("KEEPWARM_VERDICT=")]
+    return r.returncode, (last[-1] if last else r.stdout[-200:])
+
+
+@case("RV-C4", "sessionctl_converge", refs=("DEF-200-617",))
+def rv_c4(ctx: CaseContext) -> None:
+    """同一 session 自己續跑不算交棒（R216 QA P2-1；暴露證據 sid 31ea79d4）。
+
+    甲（自續跑）：封存後由**同 sid** 跑真 CLI `handoff --ack` ⇒ 記為續跑（`.resumed`、無 `.ack`、封存作廢）；
+    再用真 `claude -p`＋真 Stop hook 掛背景 shell ⇒ 冷叫醒閘**不推**；真 keepwarm ⇒ 不 skip（照常 ping）。
+    乙（對照＝真交棒）：**別的 sid** ack ⇒ `.ack` 記下接手者；同樣的背景 shell ⇒ 冷叫醒閘照推恰一次；
+    keepwarm ⇒ `skip reason=handed_over`。兩組同一套載具，差別只有 ack 者是誰，斷言才不是恆真。
+    """  # noqa: E501
+    sb = ctx.sandbox()
+    pkg = seal_session(ctx, sb)
+    rc, out, err = run_cli(sb, "handoff", "--ack", str(pkg), env_extra={"CLAUDE_CODE_SESSION_ID": sb.sid})  # noqa: E501
+    ctx.check(rc == 0 and "續跑" in out, f"自己 --ack rc={rc} {out[:160]!r} {err[:160]!r}")
+    ctx.check(pkg.with_suffix(".resumed").is_file() and not pkg.with_suffix(".ack").exists()
+              and not pkg.with_suffix(".sealed").exists(), "自續跑後應有 .resumed、無 .ack、無 .sealed")  # noqa: E501
+    r = ctx.run_claude(sb, _BG_SHELL, env_extra=sc_env(sb), timeout_s=280,
+                       extra_args=("--allowedTools=Bash,PowerShell",))
+    ctx.check(r.rc == 0 and not r.timed_out, f"甲組 claude -p rc={r.rc} timed_out={r.timed_out}")
+    tr = ctx.transcript(sb)
+    ctx.check(not tr.hook_blocking_errors("Stop", "冷叫醒閘"), "同 sid 自續跑卻被冷叫醒閘推回（把自己當成已交棒）")  # noqa: E501
+    ctx.check(len(tr.stop_hook_summaries()) >= 1, "Stop hook 沒跑（甲組斷言恆真）")
+    rc_k, last = _keepwarm_verdict(sb, tr.path)
+    ctx.check(rc_k == 6 and last.startswith("KEEPWARM_VERDICT=ping"), f"自續跑後 keepwarm 不該 skip：rc={rc_k} {last!r}")  # noqa: E501
+
+    sb2 = ctx.sandbox()
+    pkg2 = seal_session(ctx, sb2)
+    rc, out, err = run_cli(sb2, "handoff", "--ack", str(pkg2), env_extra={"CLAUDE_CODE_SESSION_ID": "newcomer-sid-0001"})  # noqa: E501
+    ctx.check(rc == 0 and "sid=newcomer-sid-0001" in pkg2.with_suffix(".ack").read_text(encoding="utf-8"), f"別的 sid ack rc={rc} {err[:160]!r}")  # noqa: E501
+    ctx.check(not pkg2.with_suffix(".resumed").exists(), "別的 sid ack 不該寫 .resumed")
+    r2 = ctx.run_claude(sb2, _BG_SHELL, env_extra=sc_env(sb2), timeout_s=280,
+                        extra_args=("--allowedTools=Bash,PowerShell",))
+    ctx.check(r2.rc == 0 and not r2.timed_out, f"乙組 claude -p rc={r2.rc} timed_out={r2.timed_out}")  # noqa: E501
+    tr2 = ctx.transcript(sb2)
+    gate = tr2.hook_blocking_errors("Stop", "冷叫醒閘")
+    ctx.check(len(gate) == 1, f"真交棒（別的 sid ack）應被冷叫醒閘推回恰一次，實為 {len(gate)}")
+    rc_k2, last2 = _keepwarm_verdict(sb2, tr2.path)
+    ctx.check(rc_k2 == 0 and last2 == "KEEPWARM_VERDICT=skip reason=handed_over rc=0", f"真交棒後 keepwarm 應 skip：rc={rc_k2} {last2!r}")  # noqa: E501
+    ctx.evidence(f"RV-C4 甲 {sb.sid[:8]} 自續跑 無冷叫醒閘＋{last}；乙 {sb2.sid[:8]} {tr2.coords(gate[0])} 推回＋{last2}")  # noqa: E501
+
+
 @case("RV-C3", "sessionctl_converge", refs=("CR1",))
 def rv_c3(ctx: CaseContext) -> None:
     """事故重放 CR1（2026-11-14 20:52）：大上下文＋無背景代理＋有交接包但沒 finalize ⇒ 結束回合被推回。

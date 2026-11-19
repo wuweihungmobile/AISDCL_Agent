@@ -36,3 +36,16 @@
 | 偶發測試 DEF-200-616 | 成因＝測試逐次重種「now+3600s」的 reset 而閂鎖鍵取到分鐘，跨整分鐘換鍵（被測物無缺陷）；重現載具＝在整分鐘前 5ms 起跑（修前 2/2 紅、修後 2/2 綠）；修法＝整視窗只種一次快取＋時鐘無關的決定性回歸；帳本 `AutoSDD_Defect_Log.md` |
 | DES §7 對帳 | M-K1／M-K2／M-K3／M-K4、P1、S2 與 DES 逐位相符；P3／P4b／S1 差異＝母體多一支交接包開場 session（F 中位 480,734→467,949）與 `annotate.units` 對「分層未標」寫入記 1.25（DES 腳本記 2.0，F_a 差 6 單位）；逐項核過、非缺陷 |
 | 仍未結 | E2E-SS-05（上線 14 天後 M-K2＝0）；park RESUME 路「到點真開 `claude -r` 視窗並續寫原逐字稿」（V-SS5，待掌舵者目視；folder trust＋禁開窗）；E2E-SS-04、V-SS1～V-SS4 沿用上節 |
+
+## 五、QA 退件修復：同 session 自續跑不算交棒（2026-11-19，SD 單人窗口；DEF-200-617／618）
+
+| 項 | 落點與驗證座標 |
+|---|---|
+| P2-1 成因 | `.ack` 沒記接手者、`seal.handed_over` 只看 `.ack` 存在；暴露證據＝主控 sid 31ea79d4 逐字稿第 675 行（SessionStart 公告叫它 ack 自己的包）、第 808／852 行（Stop 冷叫醒閘推回兩次），`.ack` 落款 09:02:43 |
+| 修法（消除成因，不在各消費者各打補丁） | `handoff.ack` 記 `sid=`；原主人 ack／`park_cli.spawn_resume` 成功 ⇒ `seal.mark_resumed`（寫 `.resumed`、刪 `.sealed`、清自己與舊格式 `.ack`）；`handed_over` 只認別的 sid 的 ack 或 spawn 痕跡；`announce` 對自己的包改提示續做；`seal()` 重新封存時清 `.resumed`；`handoff._state` 新增 `resumed` 狀態。ADR-XPLAT-004 §2.19 D7、TCS §3.5b／E2E-SS-15 |
+| 消費者處置 | `wake_package`（冷叫醒閘）、keepwarm `skip_reason`、`converge._exits`／PreToolUse 訊息、`forward._handed_over_verdict`、封存閘 `seal.stop_verdict` 全經 `handed_over`／`wake_package`／`is_sealed`，零改動即修好；SessionStart `announce` 與 `ack`／`spawn_resume` 為資料寫入端，已改 |
+| 驗證 | 單元：`test_sessionctl_seal.py::SelfResumeTest`、`_converge.py::…test_p2_1…`、`_keepwarm.py::…self_resumed…`、`_handoff.py::AnnounceTest`、`_park_route.py::SpawnResumeTest`（皆含反向變體：別的 sid／spawn 痕跡仍是交棒）；真機 RealVerify `RV-C4`（甲＝同 sid 自續跑、乙＝別的 sid 對照） |
+| P3-1 | `test_sessionctl_keepwarm.py::test_p3_1_the_same_reset_window_boundary_is_pinned`；M12／M13 突變在 worktree 皆被殺 |
+| P3-2 | PRD v2.1 §11.3 line 2387 就地註記指向 §16.6 2026-11-18 列①（不改既有條文本體） |
+| 本機殘留（主控 sid 31ea79d4 的 `.ack`） | 本修復不動它；主控在 31ea79d4 視窗內跑 `python tools/sessionctl.py handoff --ack <交接包路徑>`（該視窗的 `CLAUDE_CODE_SESSION_ID` 即原主人）⇒ 轉成 `.resumed`、清掉舊格式 `.ack` |
+| 守衛面 hook 一行（待主控套用） | `.claude/hooks/context_budget_guard.py` SessionStart 呼叫 `announce_handbacks(..., sid=payload.get("session_id"))`；不套用時 `announce` 退用環境變數 `CLAUDE_CODE_SESSION_ID`，功能不缺只少一條來源 |

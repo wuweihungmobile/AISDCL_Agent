@@ -14,6 +14,7 @@
     "RV-C1": {"family": "sessionctl_converge", "refs": ["V5"], "wp": "WP-2"},
     "RV-C2": {"family": "sessionctl_converge", "refs": ["DEF-200-588"], "wp": "WP-2"},
     "RV-C3": {"family": "sessionctl_converge", "refs": ["CR1"], "wp": "WP-2"},
+    "RV-C4": {"family": "sessionctl_converge", "refs": ["DEF-200-617"], "wp": "WP-2"},
     "RV-S1": {"family": "sessionctl_watch", "refs": ["V-W2"], "wp": "WP-3"},
     "RV-S2": {"family": "sessionctl_watch", "refs": ["V-W2"], "wp": "WP-3"},
     "RV-W1": {"family": "sessionctl_watch", "refs": ["V-W4"], "wp": "WP-3"},

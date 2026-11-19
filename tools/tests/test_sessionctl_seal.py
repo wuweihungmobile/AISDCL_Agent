@@ -305,5 +305,75 @@ class IsSealedTest(_Base):
         self.assertFalse(seal.is_sealed(SID, base=self.base, env={}))
 
 
+class SelfResumeTest(_Base):
+    """tools/lib/sessionctl/seal.py::mark_resumed／handed_over／wake_package：同一個 session 自己
+    續跑不是交棒（R216 QA P2-1，暴露證據＝sid 31ea79d4 自續跑後 Stop 冷叫醒閘推回兩次）。
+
+    WHY：交接包語意是「這個 session 交給別人」。舊版只看有沒有 `.ack`，原主人續跑後 handed_over
+    恆真 ⇒ keepwarm 判 handed_over 失效、冷叫醒閘叫它 TaskStop 在飛代理、封存閘失效。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.env = {handoff.endurance_env.HANDOFF_DIR_ENV: str(self.base)}
+        patch = unittest.mock.patch.dict(os.environ, {
+            "AUTOSDD_TRACE_DIR": str(self.tmp / "traces"),
+            handoff.endurance_env.HANDOFF_DIR_ENV: str(self.base)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.pkg = self.package()
+        self.assertEqual(self.do_seal(self.pkg)[0], 0)
+        self.assertEqual(seal.wake_package(SID, self.env), self.pkg, "前提：已封存的 live 包")
+
+    def ack(self, text: str) -> None:
+        self.pkg.with_suffix(".ack").write_text(text, encoding="utf-8")
+
+    def test_an_ack_by_the_owner_is_not_a_hand_over_but_another_sid_or_legacy_is(self) -> None:
+        """三格：自己的 sid ⇒ 否；別的 sid ⇒ 是；舊格式（沒記 sid）無從分辨 ⇒ 保守視為別人接手。"""
+        self.ack(f"acked x sid={SID}\n")
+        self.assertIsNone(seal.handed_over(SID, self.env))
+        self.ack("acked x sid=other-sid\n")
+        self.assertEqual(seal.handed_over(SID, self.env), self.pkg)
+        self.ack("acked x\n")
+        self.assertEqual(seal.handed_over(SID, self.env), self.pkg)
+
+    def test_mark_resumed_voids_the_seal_and_every_consumer_sees_it(self) -> None:
+        """續跑後：封存作廢（forward／封存閘的輸入）、包狀態 resumed（不再被公告、不是 live，所以
+        冷叫醒閘的 wake_package 也不認）、handed_over 否。"""
+        self.assertTrue(seal.is_sealed(SID, base=self.base, env=self.env))
+        self.assertTrue(seal.mark_resumed(self.pkg))
+        self.assertFalse(seal.is_sealed(SID, base=self.base, env=self.env))
+        self.assertFalse(seal.sealed_path(self.pkg).exists())
+        self.assertEqual(handoff.list_handoffs(self.base)[-1]["state"], "resumed")
+        self.assertIsNone(seal.handed_over(SID, self.env))
+        self.assertIsNone(seal.wake_package(SID, self.env))
+        self.assertTrue(seal.mark_resumed(self.pkg), "冪等：重做一次不得出錯")
+
+    def test_mark_resumed_clears_the_owners_and_legacy_ack_but_keeps_another_sessions(self) -> None:
+        """遷移面：舊格式與自己的 `.ack`（本機殘留的 31ea79d4 形態）清掉；別的 sid 的 `.ack` 是真的
+        被接手過，保留——反向變體，否則續跑會抹掉真交棒的證據。"""
+        for text, kept in ((f"acked x sid={SID}\n", False), ("acked x\n", False),
+                           ("acked x sid=other-sid\n", True)):
+            with self.subTest(text=text):
+                self.ack(text)
+                self.assertTrue(seal.mark_resumed(self.pkg))
+                self.assertEqual(self.pkg.with_suffix(".ack").exists(), kept)
+                self.pkg.with_suffix(".ack").unlink(missing_ok=True)
+
+    def test_a_real_spawn_trace_stays_a_hand_over_even_after_a_resume_mark(self) -> None:
+        """反向變體：spawn 痕跡＝新視窗真的開過，不因原 session 的續跑標記而消失。"""
+        from lib.sessionctl import switch  # noqa: PLC0415
+        switch.trace("session_switch_spawned", handoff=str(self.pkg), sid=SID, ok=True, pid=1)
+        seal.mark_resumed(self.pkg)
+        self.assertEqual(seal.handed_over(SID, self.env), self.pkg)
+
+    def test_sealing_again_after_a_resume_rearms_the_package(self) -> None:
+        """WHY：續跑後上下文再長到硬線會被封存閘推去重封存；`seal()` 寫戳時清掉 `.resumed`，
+        包回到 live＋已封存，之後的冷叫醒／轉送照常運作。"""
+        seal.mark_resumed(self.pkg)
+        self.assertEqual(self.do_seal(self.pkg)[0], 0)
+        self.assertFalse(seal.resumed_path(self.pkg).exists())
+        self.assertEqual(seal.wake_package(SID, self.env), self.pkg)
+
+
 if __name__ == "__main__":
     unittest.main()

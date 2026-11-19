@@ -218,6 +218,8 @@ class SpawnResumeTest(_CliFence, unittest.TestCase):
         self.assertIn("已續跑原 session", out)
         self.assertTrue(any(t["event"] == "session_resume_spawned" and t["ok"]
                             for t in self.traces()))
+        # R216 QA P2-1：續跑成功＝原主人回來，不是交棒 ⇒ 包被標記 resumed（封存作廢）
+        self.assertTrue(self.pkg.with_suffix(".resumed").is_file())
 
     def test_a_process_that_never_writes_is_not_reported_as_success(self) -> None:
         """反向變體：行程活著但逐字稿沒變大（例如卡在 folder trust 對話框）⇒ 非零、
@@ -225,6 +227,7 @@ class SpawnResumeTest(_CliFence, unittest.TestCase):
         rc, _out, err = self.go(_Runner(), grow=False)
         self.assertEqual(rc, 1)
         self.assertIn("逐字稿未增長", err)
+        self.assertFalse(self.pkg.with_suffix(".resumed").exists(), "沒接上就不得標記續跑")
         self.assertTrue(any(t["event"] == "session_resume_spawned" and t["ok"] is False
                             for t in self.traces()))
 

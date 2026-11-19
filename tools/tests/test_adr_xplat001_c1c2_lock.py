@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9470,
+    "test_adr_xplat001_c1c2_lock.py": 9479,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -736,18 +736,18 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sentinel_tick_e2e_r145.py": 466,
     "test_session_brief.py": 1544,
     "test_sessionctl_cachegate.py": 292,
-    "test_sessionctl_converge.py": 497,
+    "test_sessionctl_converge.py": 522,
     "test_sessionctl_costmodel.py": 158,
     "test_sessionctl_forward.py": 406,
-    "test_sessionctl_handoff.py": 1211,
+    "test_sessionctl_handoff.py": 1246,
     "test_sessionctl_hooks.py": 582,
-    "test_sessionctl_keepwarm.py": 460,
+    "test_sessionctl_keepwarm.py": 490,
     "test_sessionctl_longwait.py": 318,
     "test_sessionctl_modelmix.py": 94,
     "test_sessionctl_park.py": 985,
-    "test_sessionctl_park_route.py": 248,
+    "test_sessionctl_park_route.py": 251,
     "test_sessionctl_roster.py": 727,
-    "test_sessionctl_seal.py": 309,
+    "test_sessionctl_seal.py": 379,
     "test_sessionctl_supervise.py": 301,
     "test_sessionctl_switch.py": 592,
     "test_sessionctl_watch.py": 472,
@@ -3215,6 +3215,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_waste_census_keep.py，既有 test_context_budget_guard.py（閂鎖鍵時鐘回歸）"
      "＋本檔自身漂移。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R216_SessionSwitch_CostModel_Closure_Evidence.md。"),
+    ("R214", 171508, 171680, +172,  # round-label-ok
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE 的"
+     "R214 名冊列承接] 同標籤第五十三列（QA 退件：同 session 自續跑不算交棒，DEF-200-617／618）："
+     "既有 test_sessionctl_seal.py、_handoff.py、_keepwarm.py、_converge.py、"
+     "_park_route.py 的回歸鎖與反向變體＋本檔自身漂移。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R216_SessionSwitch_CostModel_Closure_Evidence.md。"),
 )
 
 
@@ -3316,7 +3323,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (42996, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (43168, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3392,6 +3399,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第五十列（DEF-200-610）+10＝40842。"
         "第五十一列（換 session 依快取成本）+1523＝42365。"
         "第五十二列（park 到點選路與量測端，DEF-200-616）+631＝42996。"
+        "第五十三列（自續跑不算交棒，DEF-200-617／618）+172＝43168。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4155,10 +4163,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 399
+_REPIN_LOG_FROZEN_PREFIX_LEN = 400
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "bcc8f9827abdb1471b13ea4abb711651be0874e518e804a8e61a33557eaab6b1")
+    "d4fbfdf160c3ee8a22ef21e610b8f8a219189301920ae1df3a02e694461b1e54")
 
 
 def repin_log_history_digest(
@@ -4399,6 +4407,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "99edc2d3ff94", "881892d9d411", "DEF-200-610"),  # round-label-ok：verify 改量 CPU
     ("R214", "881892d9d411", "637b4c8dad81", "DEF-200-613"),  # round-label-ok：快取成本換窗
     ("R214", "637b4c8dad81", "bcc8f9827abd", "DEF-200-616"),  # round-label-ok：park 選路
+    ("R214", "bcc8f9827abd", "d4fbfdf160c3", "DEF-200-617"),  # round-label-ok：自續跑不算交棒
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

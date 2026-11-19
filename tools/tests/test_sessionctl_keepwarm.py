@@ -281,6 +281,36 @@ class RunTest(_Base):
         self.package(acked=False)
         self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), "")
 
+    def test_a_self_resumed_session_is_kept_warm_but_a_real_hand_over_is_not(self) -> None:
+        """R216 QA P2-1（掌舵者主軸「不要讓 Cache 過期」）：park RESUME／自己 `--ack` 回到原 session
+        後，保溫不得因 handed_over 失效。三格：自己 sid 的 ack ⇒ 保溫；別的 sid 的 ack ⇒ 跳過
+        （真交棒，反向變體）；續跑標記（`seal.mark_resumed`，含清掉舊格式 ack）⇒ 保溫。"""
+        from lib.sessionctl import seal  # noqa: PLC0415
+        self.write(_asst(T0))
+        self.package(acked=False)
+        pkg = next(self.hdir.glob("*.md"))
+        for text, want in ((f"acked x sid={SID}", ""), ("acked x sid=other-sid", "handed_over")):
+            with self.subTest(text=text):
+                pkg.with_suffix(".ack").write_text(text, encoding="utf-8")
+                self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), want)
+        pkg.with_suffix(".ack").write_text("acked x", encoding="utf-8")  # 舊格式＝本機殘留形態
+        self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), "handed_over")
+        self.assertTrue(seal.mark_resumed(pkg))
+        self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), "")
+
+    def test_p3_1_the_same_reset_window_boundary_is_pinned(self) -> None:
+        """P3-1（QA 突變 M12／M13 存活）：reset 觀測值抖動容差＝300 秒、含邊界。300 秒＝同窗、
+        301 秒＝新窗、3600 秒＝新窗（視窗以小時計，容差不可大到把真的新窗吃掉）。WHY：`<=` 改 `<`
+        或 300 改 3600 都不會被任何其他測試看見，卻會讓 watch 重掛立刻再 rc 5 或漏報真新窗。"""
+        base = "2026-11-19T04:00:00+00:00"
+        for delta, same in ((0, True), (299, True), (300, True), (301, False), (3600, False),
+                            (-300, True), (-301, False)):
+            other = (datetime.fromisoformat(base) + timedelta(seconds=delta)).isoformat()
+            self.assertEqual(keepwarm._same_reset(base, other), same, delta)
+        self.assertFalse(keepwarm._same_reset(base, "壞掉的時刻"), "解析失敗＝照觸發")
+        self.assertTrue(keepwarm._same_reset("壞", "壞"), "字面相同即同窗")
+        self.assertEqual(keepwarm.RESET_JITTER_SECONDS, 300)
+
     def test_a_ledger_that_cannot_be_written_ends_as_cap_and_says_so(self) -> None:
         """WHY：寫不進保溫帳就沒有 n* 的計數基礎；繼續保溫＝成本無界，停止保溫＝退回沒有保溫的現況
         （失效往少花走，PRD §1.2 原則 5）。"""

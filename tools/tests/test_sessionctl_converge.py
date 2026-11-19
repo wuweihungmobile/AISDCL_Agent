@@ -492,6 +492,31 @@ class StopVerdictTest(_Fence):
         self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
                                                     self.env))
 
+    def test_p2_1_a_self_resumed_session_is_never_told_it_was_handed_over(self) -> None:
+        """R216 QA P2-1（暴露證據：sid 31ea79d4 自續跑後 Stop 冷叫醒閘推回兩次）：同 sid 自己 ack
+        ／park RESUME 標記之後，冷叫醒閘不推（背景 shell 與在飛代理都不被叫去 TaskStop）、PreToolUse
+        收斂閘不說「已交棒，請到新視窗」。反向變體：別的 sid ack 照推、照說已交棒。"""
+        self.main(HARD + 1_000)
+        pkg = self.package(finalized=True)
+        self.seal_it(pkg)
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        agent = {"id": "a1", "type": "subagent", "status": "running"}
+        pkg.with_suffix(".ack").write_text(f"acked x sid={SID}\n", encoding="utf-8")
+        for tasks in ([shell], [agent]):
+            self.assertNotIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=tasks),
+                                                           self.env), tasks)
+        text = converge.converge_verdict(self.pre("Agent"), self.env)[1]
+        self.assertNotIn("已交棒", text)
+        seal.mark_resumed(pkg)  # park RESUME 走這條：作廢封存
+        self.assertNotIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[shell]),
+                                                       self.env))
+        pkg.with_suffix(".ack").write_text("acked x sid=newcomer\n", encoding="utf-8")
+        self.seal_it(pkg)
+        pkg.with_suffix(".resumed").unlink()
+        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[shell]),
+                                                    self.env))
+        self.assertIn("已交棒", converge.converge_verdict(self.pre("Agent"), self.env)[1])
+
 
 if __name__ == "__main__":
     unittest.main()

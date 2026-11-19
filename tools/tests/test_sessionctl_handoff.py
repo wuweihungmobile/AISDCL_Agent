@@ -411,6 +411,41 @@ class AnnounceTest(_Base):
         self.assertEqual(handoff.announce(lambda m: said.append(m) or True, base=self.base), "")
         self.assertEqual(said, [])
 
+    def _ack_as(self, path: Path, session: str) -> int:
+        env = {**os.environ, "CLAUDE_CODE_SESSION_ID": session}
+        with unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()):
+            return handoff.ack(path)
+
+    def test_ack_by_the_package_owner_is_a_resume_not_a_hand_over(self) -> None:
+        """R216 QA P2-1：包的原主人自己 `--ack`＝續跑，不寫 `.ack`、狀態變 resumed、不再被公告；
+        WHY：舊版一律寫 `.ack`，自續跑後 handed_over 恆真（keepwarm 失效、冷叫醒閘誤推）。"""
+        path = self._pkg("owner")
+        self.assertEqual(self._ack_as(path, "owner"), 0)
+        self.assertFalse(path.with_suffix(".ack").exists())
+        self.assertTrue(path.with_suffix(".resumed").is_file())
+        self.assertEqual(handoff.list_handoffs(self.base)[-1]["state"], "resumed")
+        self.assertEqual(handoff.announce(lambda _m: True, base=self.base), "")
+
+    def test_ack_by_another_session_records_who_and_stays_a_hand_over(self) -> None:
+        """反向變體：別的 sid 接手＝真交棒，`.ack` 記下接手者 sid、狀態 acked、不寫 `.resumed`。"""
+        path = self._pkg("owner")
+        self.assertEqual(self._ack_as(path, "newcomer"), 0)
+        self.assertIn("sid=newcomer", path.with_suffix(".ack").read_text(encoding="utf-8"))
+        self.assertFalse(path.with_suffix(".resumed").exists())
+        self.assertEqual(handoff.list_handoffs(self.base)[-1]["state"], "acked")
+
+    def test_announce_tells_the_owner_session_to_continue_instead_of_acking(self) -> None:
+        """WHY（暴露證據 sid 31ea79d4 line 675）：SessionStart 叫原主人去 ack 自己的包是自續跑被
+        判已交棒的誘因；對別的 session 公告文字不變（仍要求接手）。"""
+        path = self._pkg("owner")
+        mine = handoff.announce(lambda _m: True, base=self.base, sid="owner")
+        self.assertIn("本 session 自己封存", mine)
+        self.assertIn("不要當成別人的包去接手", mine)
+        other = handoff.announce(lambda _m: True, base=self.base, sid="newcomer")
+        self.assertIn("未接手的交接包", other)
+        self.assertIn(str(path), other)
+        self.assertNotIn("本 session 自己封存", other)
+
     def test_at48_list_keeps_expired_and_acked_with_state(self) -> None:
         """AT-SC-48：`--list`／status 仍列出過期與已 ack 的包，並標狀態。"""
         self._pkg("live1")

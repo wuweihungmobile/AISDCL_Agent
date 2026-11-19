@@ -128,6 +128,8 @@ def seal(path, *, transcript: Path | None = None, repo: Path | None = None,
     ok = (handoff._write(path, whole)
           and handoff._write(sidecar_path(path), render_prompts(sid, prompts, now))
           and handoff._write(sealed_path(path), now.isoformat() + "\n"))
+    if ok:
+        resumed_path(path).unlink(missing_ok=True)  # 續跑後重新封存＝再次待交棒，包回到 live
     return (0, []) if ok else (1, ["封存寫檔失敗（見 stderr）；未取得完整封存戳"])
 
 
@@ -185,16 +187,52 @@ def is_written(path) -> bool:
     return sealed_path(path).exists() or handoff.finalize(path)[0] == 0
 
 
+def acker_sid(path) -> str | None:
+    """`.ack` 內記的接手者 sid（`acked <時刻> sid=<sid>`）；無 `.ack`／舊格式（無 sid）⇒ `None`。"""
+    try:
+        text = Path(path).with_suffix(".ack").read_text(encoding="utf-8")
+        found = re.search(r"\bsid=(\S+)", text)
+    except OSError:
+        return None
+    return found.group(1) if found else None
+
+
+def resumed_path(path) -> Path:
+    return Path(path).with_suffix(".resumed")
+
+
+def mark_resumed(path, now: datetime | None = None) -> bool:
+    """包的原主人 session 自己續跑（park RESUME／`claude -r`／自己 `--ack`）⇒ 作廢封存、記續跑。
+
+    WHY（R216 QA P2-1；2026-11-19 sid 31ea79d4 真機）：交接包的語意是「這個 session 交給別人」；
+    同一個 session 自己回來續做＝沒有交棒。舊版只看有沒有 `.ack`／`.sealed`，自續跑後
+    `handed_over` 恆真 ⇒ keepwarm 判 `handed_over` 而失效、冷叫醒閘叫它 TaskStop 在飛代理、
+    封存閘失效、每則提示被注入「已交棒」。成因在於「接手者是誰」沒被記下，故：
+    ①記續跑（`.resumed`，包狀態變 `resumed`，不再被公告、不是 live）。
+    ②刪 `.sealed`（封存是對「當時」的交代，續跑後已失效；之後真要換窗會重封存，
+      `seal()` 寫戳時清掉 `.resumed`）。
+    ③舊格式（無 sid）或自己的 `.ack` 一併清掉（遷移）；別的 sid 的 `.ack` 保留＝真的被接手過。
+    全部是檔案層動作，冪等。"""
+    path, now = Path(path), handoff._aware(now)
+    if not handoff._write(resumed_path(path), now.isoformat() + "\n"):
+        return False
+    sealed_path(path).unlink(missing_ok=True)
+    if acker_sid(path) in (None, handoff._sid_of(path)):
+        path.with_suffix(".ack").unlink(missing_ok=True)
+    return True
+
+
 def handed_over(sid: str, env=None) -> Path | None:
-    """已交棒判準（單一家；E-HD-1）：最新包已寫完 ∧〔已 ack ∨ 痕跡有該包的 spawn〕⇒ 回包路徑。
-    WHY 不分狀態：包一被新視窗 ack 就變 `acked`，只認 `live` 會讓舊 session 被誤判成「還沒交棒」
-    （2026-11-16 20:45 真機：Stop 被推回還叫它重 build；冷叫醒閘也對已 ack 的包失明）。"""
+    """已交棒判準（單一家；E-HD-1）：最新包已寫完 ∧〔被**別的** session ack ∨ 痕跡有該包的 spawn〕
+    ⇒ 回包路徑。WHY 不分 live／acked 狀態：包一被新視窗 ack 就變 `acked`，只認 `live` 會讓舊
+    session 被誤判成「還沒交棒」（2026-11-16 20:45 真機）。WHY 要排除自己的 ack：同 sid 自續跑不是
+    交棒（見 `mark_resumed`）；舊格式 `.ack`（沒記 sid）無從分辨，保守視為別人接手。"""
     row = latest_package(sid, env)
     if row is None or not is_written(row["path"]):
         return None
     path = Path(row["path"])
-    return path if row["state"] == "acked" or path.with_suffix(".ack").exists() \
-        or _spawned(path) else None
+    acked = path.with_suffix(".ack").exists() and acker_sid(path) != str(sid)
+    return path if acked or _spawned(path) else None
 
 
 def wake_package(sid: str, env=None) -> Path | None:
