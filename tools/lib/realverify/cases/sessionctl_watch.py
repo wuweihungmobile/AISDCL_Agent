@@ -153,11 +153,12 @@ def _watch(sb: Sandbox, *args: str, env_extra: dict | None = None, timeout_s: fl
     return proc.returncode, text, (verdicts[-1] if verdicts else "")
 
 
-def _check_verdict(ctx: CaseContext, got, want_event: str, want_rc: int, label: str) -> str:
+def _check_verdict(ctx: CaseContext, got, want_event: str, label: str) -> str:
+    """判決一律 rc 0（DEF-200-622：harness 把非 0 背景指令顯示成 failed），事件只看末行。"""
     rc, text, last = got
-    ctx.check(rc == want_rc, f"{label}：watch rc={rc}（要 {want_rc}）；輸出：{text[-400:]!r}")
+    ctx.check(rc == 0, f"{label}：watch rc={rc}（要 0；判決只看末行）；輸出：{text[-400:]!r}")
     ctx.check(last.startswith(f"WATCH_VERDICT={want_event} "), f"{label}：末行判決={last!r}（要 {want_event}）")  # noqa: E501
-    ctx.check(f"rc={want_rc}" in last, f"{label}：判決行 rc 欄不符：{last!r}")
+    ctx.check("rc=" not in last, f"{label}：判決行不該再帶 rc 欄：{last!r}")
     return last
 
 
@@ -232,7 +233,7 @@ def rv_s2(ctx: CaseContext) -> None:
 # ───────────────────────────── RV-W1～W5：watch 判決 ─────────────────────────────
 @case("RV-W1", "sessionctl_watch", refs=("V-W4",))
 def rv_w1(ctx: CaseContext) -> None:
-    """真背景代理交卷 ⇒ watch 末行 all_done、rc 0；記錄 `meta.finished` 實值（V-W4），斷言 all_done 不提早成立。"""  # noqa: E501
+    """真背景代理交卷 ⇒ watch 末行 all_done（一律 rc 0）；記錄 `meta.finished` 實值（V-W4），斷言 all_done 不提早成立。"""  # noqa: E501
     sb = ctx.sandbox()
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(30), extra_args=BYPASS, timeout_s=420)
@@ -243,7 +244,7 @@ def rv_w1(ctx: CaseContext) -> None:
     # --grace-sec 600：寬限期後備援不可能成立 ⇒ all_done 只能走「看過代理、現在全交卷」那條
     got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20")
     elapsed = time.monotonic() - t0
-    last = _check_verdict(ctx, got, "all_done", 0, "RV-W1")
+    last = _check_verdict(ctx, got, "all_done", "RV-W1")
     after = _meta_of(agent).get("finished")
     ctx.check(after is True, f"all_done 成立時代理 meta.finished={after!r}（提早成立）")
     ctx.check(elapsed >= 3, f"watch 只跑了 {elapsed:.1f}s，疑似未等代理交卷")
@@ -254,13 +255,13 @@ def rv_w1(ctx: CaseContext) -> None:
 
 @case("RV-W2", "sessionctl_watch")
 def rv_w2(ctx: CaseContext) -> None:
-    """單支逾時門檻調低（--wall-min 0.2＝12 秒）而代理還在跑 ⇒ overrun、rc 2。"""
+    """單支逾時門檻調低（--wall-min 0.2＝12 秒）而代理還在跑 ⇒ overrun（rc 0）。"""
     sb = ctx.sandbox()
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(60), extra_args=BYPASS, timeout_s=420)
     agent = _wait_running_agent(ctx, sb, bg)
     got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20", "--wall-min", "0.2")  # noqa: E501
-    last = _check_verdict(ctx, got, "overrun", 2, "RV-W2")
+    last = _check_verdict(ctx, got, "overrun", "RV-W2")
     ctx.check(_agent_id(agent)[:10] in got[1], "overrun 明細沒有列出該代理")
     ctx.check(_meta_of(agent).get("finished") is not True, "overrun 成立時代理其實已交卷（不是在跑時判逾時）")  # noqa: E501
     bg.join(300)
@@ -269,7 +270,7 @@ def rv_w2(ctx: CaseContext) -> None:
 
 @case("RV-W3", "sessionctl_watch")
 def rv_w3(ctx: CaseContext) -> None:
-    """代理停住（最後一筆是 tool_use、靜默 ≥ 門檻）⇒ stall、rc 3。
+    """代理停住（最後一筆是 tool_use、靜默 ≥ 門檻）⇒ stall（rc 0）。
 
     `--stall-min` 下限 11 分鐘（低於即退回 15），真等不划算 ⇒ 把**沙盒自己的**真代理逐字稿截到
     「發出工具呼叫、尚無結果」並整份時間戳往前推 40 分鐘，複製到 `--projects-dir`（不動原檔）。"""
@@ -297,7 +298,7 @@ def rv_w3(ctx: CaseContext) -> None:
         (sub / agent.with_name(agent.stem + ".meta.json").name).write_text(json.dumps(meta), encoding="utf-8")  # noqa: E501
         got = _watch(sb, "--projects-dir", str(tmp), "--stall-min", "11", "--poll-sec", "1",
                      "--grace-sec", "600")
-        last = _check_verdict(ctx, got, "stall", 3, "RV-W3")
+        last = _check_verdict(ctx, got, "stall", "RV-W3")
         ctx.check("靜默" in got[1], "stall 明細沒有靜默分鐘數")
         # 反向：同一份資料若最後一筆是 assistant end_turn（代理在等自己的背景 shell）不該判 stall
         # ——由單元測試守，這裡不重造；本案例只證明「真代理逐字稿格式」被真 watch 判成 stall。
@@ -309,13 +310,13 @@ def rv_w3(ctx: CaseContext) -> None:
 
 @case("RV-W4", "sessionctl_watch")
 def rv_w4(ctx: CaseContext) -> None:
-    """代理上下文 ≥ 門檻（--ctx-max 1，只准下修）⇒ budget、rc 4。"""
+    """代理上下文 ≥ 門檻（--ctx-max 1，只准下修）⇒ budget（rc 0）。"""
     sb = ctx.sandbox()
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(40), extra_args=BYPASS, timeout_s=420)
     agent = _wait_running_agent(ctx, sb, bg)
     got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20", "--ctx-max", "1")
-    last = _check_verdict(ctx, got, "budget", 4, "RV-W4")
+    last = _check_verdict(ctx, got, "budget", "RV-W4")
     ctx.check("token" in got[1], "budget 明細沒有上下文 token 數")
     bg.join(300)
     ctx.evidence(f"RV-W4 {last}；代理 {_agent_id(agent)[:10]}")
@@ -323,7 +324,7 @@ def rv_w4(ctx: CaseContext) -> None:
 
 @case("RV-W5", "sessionctl_watch")
 def rv_w5(ctx: CaseContext) -> None:
-    """短窗額度原始讀數 ≥ prepare 門檻 ⇒ quota、rc 5。
+    """短窗額度原始讀數 ≥ prepare 門檻 ⇒ quota（rc 0）。
 
     讀數＝**沙盒專屬**額度快取（`AUTOSDD_QUOTA_CACHE_DIR` 指向沙盒，絕不碰主控的真快取）：session 軸 50pp、
     reset 在 2 小時後；prepare 門檻合法下修到 40（env 只准下修）。本機真實讀數通常遠低於門檻（2026-11-19
@@ -337,12 +338,12 @@ def rv_w5(ctx: CaseContext) -> None:
     _wait_running_agent(ctx, sb, bg)
     got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20",
                  env_extra={**_LOW_QUOTA, "AUTOSDD_QUOTA_CACHE_DIR": str(sb.root / "qcache")})
-    rc, text, last = got
-    if rc != 5 and last.startswith("WATCH_VERDICT=") and "quota" not in last:
+    _rc, text, last = got
+    if last.startswith("WATCH_VERDICT=") and "quota" not in last:
         # 本機量不到短窗軸（或 reset 不在未來）⇒ 是環境缺件，不是被測物壞掉；不得當綠
         bg.join(300)
         raise EnvMissing(f"本機量不到短窗額度讀數，無法觸發 quota 判決：{last}")
-    _check_verdict(ctx, got, "quota", 5, "RV-W5")
+    _check_verdict(ctx, got, "quota", "RV-W5")
     ctx.check("prepare" in text, "quota 明細沒有 prepare 門檻字樣")
     bg.join(300)
     ctx.evidence(f"RV-W5 {last}")
@@ -352,7 +353,7 @@ def rv_w5(ctx: CaseContext) -> None:
 @case("RV-W6", "sessionctl_watch", refs=("V-W3", "DEF-200-597"), long=True)
 def rv_w6(ctx: CaseContext) -> None:
     """V-W3：沒有任何事件時 watch 在保溫點（主控最後一筆帶 usage 的 assistant 記錄＋45 分鐘；R216 起不再是
-    watch 啟動＋50 分）才結束＝keepwarm、rc 6；保溫之前主控沒有 compact_boundary；叫醒後 `-r` 的第一個回合
+    watch 啟動＋50 分）才結束＝keepwarm（rc 0）；保溫之前主控沒有 compact_boundary；叫醒後 `-r` 的第一個回合
     cache_read ≥ 0.95×前一回合上下文。"""  # noqa: E501
     sb = ctx.sandbox()
     r1 = ctx.run_claude(sb, "Reply with exactly: ok")
@@ -375,7 +376,7 @@ def rv_w6(ctx: CaseContext) -> None:
     elapsed = time.monotonic() - t0
     text = out.decode("utf-8", errors="replace")
     last = [ln for ln in text.splitlines() if ln.startswith("WATCH_VERDICT=")][-1:]
-    ctx.check(proc.returncode == 6 and last and last[0].startswith("WATCH_VERDICT=keepwarm"),
+    ctx.check(proc.returncode == 0 and last and last[0].startswith("WATCH_VERDICT=keepwarm"),
               f"watch rc={proc.returncode} 末行={last}：{text[-300:]!r}")
     ctx.check(time.time() >= anchor + 45 * 60 - 3, f"keepwarm 只等了 {elapsed / 60:.1f} 分（早於主控最後記錄＋45 分的保溫點）")  # noqa: E501
     tr = ctx.transcript(sb)

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import time
 from datetime import datetime
@@ -71,7 +70,7 @@ def _fresh(beat: dict, now: float) -> bool:
 
 # WHY 容忍腳本路徑後的引號：PowerShell／路徑含空白時命令是 `& 'py' 'C:\..\sessionctl.py' watch`
 # （真機 RV-S2 2026-11-19 實證：字面子字串 `sessionctl.py watch` 比不到、憑證被誤判為無）。
-_WATCH_CMD_RE = re.compile(r"sessionctl\.py[\"']?\s+watch\b")
+_WATCH_CMD_RE = roster.WATCH_CMD_RE
 
 
 def _main_proof(tasks: list[dict]) -> bool:

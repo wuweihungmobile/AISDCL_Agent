@@ -8,8 +8,9 @@ WHY：子代理的提示快取壽命只有 5 分鐘。子代理用前景 PowerSh
 其中長等待 77 件、重放省 85%）。補法＝把「等」切成每段 < 5 分鐘的前景呼叫，每段都讀得到快取、
 順便讓快取續命：
   · `runlong --out <檔> -- <argv…>`：子代理以 `run_in_background` 跑；結束時才寫 `<檔>.done`。
-  · `waitfor --done <檔>.done --max-sec 240`：前景至多等 `--max-sec` 秒；完成 rc 0＋尾端 40 行，
-    未完成 rc 3（`WAITFOR_VERDICT=pending`）。子代理迴圈呼叫它。
+  · `waitfor --done <檔>.done --max-sec 240`：前景至多等 `--max-sec` 秒；完成印尾端 40 行與
+    `WAITFOR_VERDICT=done rc=<被等指令的 rc>`，未完成印 `WAITFOR_VERDICT=pending`；兩者自身 rc 皆 0
+    （DEF-200-622：判決只看末行，不看 rc）。子代理迴圈呼叫它。
   · `pretool_verdict`（D13 長前景閘）：子代理的前景 PowerShell／Bash 呼叫帶 `timeout > 270000`
     ⇒ 擋、指路上兩條。依據：工具預設 timeout 120 秒，要等超過 5 分鐘**必須**顯式設大 timeout
     ⇒ 判準精確、零猜測。
@@ -44,7 +45,6 @@ TAIL_LINES = 40
 #: （放冷重寫比續分段便宜）。
 N_S_STAR = 12
 EXEMPT_RE = re.compile(r"(?:^|\s)#\s*keepwarm-ok:\s*(\S.{3,})$", re.MULTILINE)
-RC_PENDING = 3
 POLL_SEC = 0.5
 _TOOLS = ("PowerShell", "Bash")
 
@@ -98,7 +98,8 @@ def pretool_verdict(payload: dict, env=None) -> tuple[int, str]:
             f"  ② 前景（timeout 設 {WAIT_FG_TIMEOUT_MS:,}）：\n"
             "     python tools/sessionctl.py waitfor --done <輸出檔>.done "
             f"--max-sec {WAIT_DEFAULT_SEC:g}\n"
-            "     rc 3＝還沒好、原樣再呼叫一次；rc 0＝完成（印尾端與子行程 rc）。\n"
+            "     末行 WAITFOR_VERDICT=pending＝還沒好、原樣再呼叫一次；"
+            "WAITFOR_VERDICT=done＝完成（印尾端與子行程 rc）。\n"
             "真的無法分段（例：單一阻塞下載）才在指令行尾加 `# keepwarm-ok: <原因>`"
             "（無人窗口無效）。\n")
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
@@ -212,7 +213,7 @@ def waitfor(done: Path, max_sec: float, *, now_fn=time.monotonic, sleep_fn=time.
            f"尚未完成：原樣再呼叫同一條 waitfor（前景 timeout 設 {WAIT_FG_TIMEOUT_MS:,}）。")
     print(f"處置：{nxt}", file=out_stream)
     print(f"WAITFOR_VERDICT=pending seg={seg}/{N_S_STAR}", file=out_stream, flush=True)
-    return RC_PENDING
+    return 0  # 「還沒好」是正常結果：判決只看末行（DEF-200-622），非 0 留給真錯誤（參數錯＝2）
 
 
 # ───────────────────────────────────────────────────────────── CLI

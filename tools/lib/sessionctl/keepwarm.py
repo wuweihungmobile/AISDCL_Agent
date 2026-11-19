@@ -39,7 +39,8 @@ DEFAULT_MINUTES = 45
 FLOOR_MINUTES = 15
 CMD_MARK = "sessionctl.py keepwarm"
 CMD = "python tools/sessionctl.py keepwarm"
-RC = {"ping": 6, "cap": 7}  # ping 沿用 watch 的 keepwarm rc 6
+#: 判決一律 rc 0、只看末行 `KEEPWARM_VERDICT=`（DEF-200-622：ping／cap 是設計內的正常叫醒，harness
+#: 卻把非 0 的背景指令顯示成「failed」）。非 0 只留給真錯誤（缺 --sid／形態不合＝2）。
 POLL_SECONDS = 60.0
 #: F1 的單位（`tools/lib/wastecensus/reader.py` 同一組）：cache_read 0.1、主控 1h 層 cache_write
 #: 2.0；P_FIX＝每次保溫的固定單位（叫醒＋重掛兩回合的輸出與新增上下文；推估值，M-K5 實測回寫）。
@@ -191,7 +192,8 @@ def skip_reason(sid: str, env, *, ctx, now: datetime | None = None) -> str:
 
 def is_keepwarm_task(task: dict) -> bool:
     """payload `background_tasks` 的一項是不是 keepwarm 背景 shell（冷叫醒閘豁免用）。"""
-    return task.get("type") == "shell" and CMD_MARK in str(task.get("command") or "")
+    cmd = str(task.get("command") or "")
+    return task.get("type") == "shell" and roster.KEEPWARM_CMD_RE.search(cmd) is not None
 
 
 # ───────────────────────────────────────────────────────────── Stop 保溫閘（D6）
@@ -233,29 +235,28 @@ def _stamp(epoch: float) -> str:
 
 def run(sid: str, transcript, *, t_kw_min: float, env=None, now_fn=time.time, sleep_fn=time.sleep,
         poll_sec: float = POLL_SECONDS, out=None) -> int:
-    """阻塞到截止才結束：不掛的情形 ⇒ rc 0 `skip`；到截止 ⇒ rc 6 `ping` 或 rc 7 `cap`。
+    """阻塞到截止才結束：不掛的情形 ⇒ `skip`；到截止 ⇒ `ping` 或 `cap`；一律 rc 0，判決看末行。
     每輪重讀逐字稿尾端的錨點，有新記錄就把截止往後延（人回來工作時不會提早叫醒）。"""
     env, out = os.environ if env is None else env, out or sys.stdout
 
-    def finish(verdict: str, rc: int, tail: str, detail: str, **fields) -> int:
+    def finish(verdict: str, tail: str, detail: str, **fields) -> int:
         print(f"[{_stamp(now_fn())}] {verdict}：{detail}", file=out)
         print(f"處置：{DISPOSAL[verdict]}", file=out)
-        switch.trace(EV_VERDICT, sid=sid, verdict=verdict, rc=rc, **fields)
-        print(f"KEEPWARM_VERDICT={verdict} {tail} rc={rc}", file=out, flush=True)
-        return rc
+        switch.trace(EV_VERDICT, sid=sid, verdict=verdict, **fields)
+        print(f"KEEPWARM_VERDICT={verdict} {tail}".rstrip(), file=out, flush=True)
+        return 0
 
     ctx = roster._scan(Path(transcript), False)["ctx_tokens"] if transcript is not None else None
     why = "no_transcript" if transcript is None else skip_reason(sid, env, ctx=ctx)
     if why:
-        return finish("skip", 0, f"reason={why}", f"不掛保溫（{why}）", reason=why)
+        return finish("skip", f"reason={why}", f"不掛保溫（{why}）", reason=why)
     row, star = load_ledger(sid, transcript), n_star(ctx)
     if row["pings"] >= star:
-        return finish("cap", RC["cap"], f"k={star}", f"保溫帳已達上限 {star} 次",
-                      k=star, n_star=star)
+        return finish("cap", f"k={star}", f"保溫帳已達上限 {star} 次", k=star, n_star=star)
     while True:
         due, now = deadline(transcript, t_kw_min), now_fn()
         if due is None:
-            return finish("skip", 0, "reason=no_usage", "逐字稿尾端找不到帶 usage 的記錄",
+            return finish("skip", "reason=no_usage", "逐字稿尾端找不到帶 usage 的記錄",
                           reason="no_usage")
         if now >= due:
             break
@@ -265,9 +266,9 @@ def run(sid: str, transcript, *, t_kw_min: float, env=None, now_fn=time.time, sl
     k = row["pings"] + 1
     saved = record_ping(sid, k, ctx, star, human_mark(transcript))
     if k >= star or not saved:
-        return finish("cap", RC["cap"], f"k={star}", f"第 {k} 次、上限 {star}（寫帳成功＝{saved}）",
+        return finish("cap", f"k={star}", f"第 {k} 次、上限 {star}（寫帳成功＝{saved}）",
                       k=k, n_star=star, ctx=ctx)
-    return finish("ping", RC["ping"], f"k={k} n={star}",
+    return finish("ping", f"k={k} n={star}",
                   f"距主控最後一筆記錄已 ≥ {t_kw_min:g} 分，第 {k}／{star} 次",
                   k=k, n_star=star, ctx=ctx)
 

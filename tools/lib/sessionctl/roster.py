@@ -395,9 +395,28 @@ def _tasks(payload: dict) -> list[dict] | None:
     return [r for r in rows if isinstance(r, dict)]
 
 
+# 判準唯一的家（supervise 的監督憑證、keepwarm 的冷叫醒閘豁免、Stop 出聲共用）：容忍腳本路徑後的
+# 引號（PowerShell 形態 `& 'py' 'C:\..\sessionctl.py' watch`，DEF-200-615）。
+WATCH_CMD_RE = re.compile(r"sessionctl\.py[\"']?\s+watch\b")
+KEEPWARM_CMD_RE = re.compile(r"sessionctl\.py[\"']?\s+keepwarm\b")
+
+
+def is_supervision_shell(task: dict) -> bool:
+    """background_tasks 的一項是不是**依設計掛著**的監督／保溫背景 shell（`sessionctl.py watch`／
+    `keepwarm`；不論狀態，呼叫端自己看 running）。"""
+    cmd = str(task.get("command") or "")
+    return task.get("type") == "shell" and (
+        WATCH_CMD_RE.search(cmd) is not None or KEEPWARM_CMD_RE.search(cmd) is not None)
+
+
 def stop_message(payload: dict, *, env=None, now=None) -> str:
     """Stop 事件文字（D7a）：本回合結束時仍在跑的背景代理。優先讀 payload 的 `background_tasks`，
-    缺席才退回 `running()` 讀檔；沒有就回空字串。只出聲、不阻斷。"""
+    缺席才退回 `running()` 讀檔；沒有就回空字串。只出聲、不阻斷。
+
+    DEF-200-623：依設計掛著的 `sessionctl watch`／`keepwarm` shell 不算「在跑的背景任務」——它們是
+    主軸（不讓快取過期）的機械物，這句「仍有背景任務在跑…TaskStop」會被掌舵者讀成要處理的警告
+    （真機 2026-11-19 回報）。只剩它們時**不出聲**（它們存在與否已由監督閘、保溫閘各自推回把關，
+    正常運作不需要每回合再說一次）；另有其他背景 shell 時照舊出聲，且只數那些。"""
     try:
         sid, projects = _payload_sid(payload), _payload_projects(payload)
         tasks = _tasks(payload)
@@ -406,7 +425,8 @@ def stop_message(payload: dict, *, env=None, now=None) -> str:
             agents = [{"id": t.get("id"), "description": t.get("description") or "",
                        "model": t.get("agent_type") or ""}
                       for t in live if t.get("type") == "subagent"]
-            shells = sum(1 for t in live if t.get("type") == "shell")  # 已結束的 shell 不算在跑
+            shells = sum(1 for t in live if t.get("type") == "shell"
+                         and not is_supervision_shell(t))  # 已結束的 shell 不算在跑
         else:
             agents, shells = (running(sid, projects_dir=projects, now=now) if sid else []), 0
         if not agents and not shells:

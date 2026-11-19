@@ -128,7 +128,7 @@ def rv_c4(ctx: CaseContext) -> None:
     ctx.check(not tr.hook_blocking_errors("Stop", "冷叫醒閘"), "同 sid 自續跑卻被冷叫醒閘推回（把自己當成已交棒）")  # noqa: E501
     ctx.check(len(tr.stop_hook_summaries()) >= 1, "Stop hook 沒跑（甲組斷言恆真）")
     rc_k, last = _keepwarm_verdict(sb, tr.path)
-    ctx.check(rc_k == 6 and last.startswith("KEEPWARM_VERDICT=ping"), f"自續跑後 keepwarm 不該 skip：rc={rc_k} {last!r}")  # noqa: E501
+    ctx.check(rc_k == 0 and last.startswith("KEEPWARM_VERDICT=ping"), f"自續跑後 keepwarm 不該 skip：rc={rc_k} {last!r}")  # noqa: E501
 
     # 丙（P3-a，純 CLI）：舊格式（無 sid）`.ack` 無從分辨 ⇒ 原主人再 `--ack` 不刪、並印處置
     pkg.with_suffix(".ack").write_text("acked 2026-01-01T00:00:00+00:00\n", encoding="utf-8")
@@ -148,7 +148,7 @@ def rv_c4(ctx: CaseContext) -> None:
     gate = tr2.hook_blocking_errors("Stop", "冷叫醒閘")
     ctx.check(len(gate) == 1, f"真交棒（別的 sid ack）應被冷叫醒閘推回恰一次，實為 {len(gate)}")
     rc_k2, last2 = _keepwarm_verdict(sb2, tr2.path)
-    ctx.check(rc_k2 == 0 and last2 == "KEEPWARM_VERDICT=skip reason=handed_over rc=0", f"真交棒後 keepwarm 應 skip：rc={rc_k2} {last2!r}")  # noqa: E501
+    ctx.check(rc_k2 == 0 and last2 == "KEEPWARM_VERDICT=skip reason=handed_over", f"真交棒後 keepwarm 應 skip：rc={rc_k2} {last2!r}")  # noqa: E501
     ctx.evidence(f"RV-C4 甲 {sb.sid[:8]} 自續跑 無冷叫醒閘＋{last}；乙 {sb2.sid[:8]} {tr2.coords(gate[0])} 推回＋{last2}")  # noqa: E501
 
 

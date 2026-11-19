@@ -192,10 +192,10 @@ class RunTest(_Base):
         self.write(_asst(T0))
         clock = _Clock(T0 + 10 * MIN)
         rc, out = self.run_kw(clock)
-        self.assertEqual(rc, 6)
+        self.assertEqual(rc, 0)  # DEF-200-622：判決一律 rc 0，harness 才不會把 ping 顯示成 failed
         self.assertEqual(clock.t - T0, 45 * MIN)
         lines = out.splitlines()
-        self.assertEqual(lines[-1], "KEEPWARM_VERDICT=ping k=1 n=9 rc=6")
+        self.assertEqual(lines[-1], "KEEPWARM_VERDICT=ping k=1 n=9")
         self.assertEqual(lines[-2], f"處置：{keepwarm.DISPOSAL['ping']}")  # 處置列在判決行之前
         ledger = json.loads(keepwarm.ledger_path(SID).read_text(encoding="utf-8"))
         self.assertEqual(ledger["pings"], 1)
@@ -212,8 +212,8 @@ class RunTest(_Base):
                 self.append(_asst(clock.t))
 
         clock = _Clock(T0 + 1 * MIN, on_sleep=on_sleep)
-        rc, _out = self.run_kw(clock)
-        self.assertEqual(rc, 6)
+        rc, out = self.run_kw(clock)
+        self.assertEqual((rc, out.splitlines()[-1].split()[0]), (0, "KEEPWARM_VERDICT=ping"))
         self.assertEqual(clock.t, woke[0] + 45 * MIN)  # 不是 T0+45
 
     def test_at_ss_12_last_ping_is_cap_and_says_dont_rehang(self) -> None:
@@ -222,17 +222,19 @@ class RunTest(_Base):
         self.write(_asst(T0))
         self.ledger(pings=8)  # n*(400,000)＝9
         rc, out = self.run_kw(_Clock(T0 + 44 * MIN))
-        self.assertEqual(rc, 7)
-        self.assertEqual(out.splitlines()[-1], "KEEPWARM_VERDICT=cap k=9 rc=7")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[-1], "KEEPWARM_VERDICT=cap k=9")
         self.assertIn("不重掛", keepwarm.DISPOSAL["cap"])
+        self.assertFalse(hasattr(keepwarm, "RC"), "不再留一張會被誤用的 rc 表")
 
     def test_a_ledger_already_at_the_cap_ends_without_waiting(self) -> None:
         """WHY：被誤重掛時不得再常駐一小時才說「已達上限」——立刻 cap，省下一個空等的背景任務。"""
         self.write(_asst(T0))
         self.ledger(pings=9)
         clock = _Clock(T0 + 1 * MIN)
-        rc, _out = self.run_kw(clock)
-        self.assertEqual((rc, clock.sleeps), (7, 0))
+        rc, out = self.run_kw(clock)
+        self.assertEqual((rc, clock.sleeps, out.splitlines()[-1]),
+                         (0, 0, "KEEPWARM_VERDICT=cap k=9"))
 
     def test_at_ss_13_real_prompt_resets_pings_but_machine_notifications_do_not(self) -> None:
         """AT-SS-13（MU-07）。WHY：人回來並說話＝新的一輪閒置，保溫帳從零算；但
@@ -248,7 +250,7 @@ class RunTest(_Base):
         self.append(_human(T0 + 5 * MIN, "我回來了"), _asst(T0 + 6 * MIN))
         self.assertEqual(keepwarm.load_ledger(SID, self.path)["pings"], 0)  # 真人提示歸零
         rc, out = self.run_kw(_Clock(T0 + 6 * MIN))
-        self.assertEqual((rc, out.splitlines()[-1]), (6, "KEEPWARM_VERDICT=ping k=1 n=9 rc=6"))
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "KEEPWARM_VERDICT=ping k=1 n=9"))
 
     def test_at_ss_14_every_skip_condition_ends_at_once_with_its_reason(self) -> None:
         """AT-SS-14。WHY：不掛的情形必須立刻 rc 0 結束（不得常駐一個永遠不會有用的背景任務）：
@@ -273,7 +275,7 @@ class RunTest(_Base):
                 clock = _Clock(T0 + 1 * MIN)
                 rc, out = self.run_kw(clock, env=env)
                 self.assertEqual((rc, clock.sleeps), (0, 0))
-                self.assertEqual(out.splitlines()[-1], f"KEEPWARM_VERDICT=skip reason={name} rc=0")
+                self.assertEqual(out.splitlines()[-1], f"KEEPWARM_VERDICT=skip reason={name}")
 
     def test_a_sealed_but_not_handed_over_session_is_still_kept_warm(self) -> None:
         """WHY（MU-08 的另一面）：只封存、在等掌舵者的 session 正是最該保溫的——封存不等於不掛。"""
@@ -323,8 +325,8 @@ class RunTest(_Base):
         buf = io.StringIO()
         with redirect_stderr(buf):
             rc, out = self.run_kw(_Clock(T0 + 44 * MIN))
-        self.assertEqual(rc, 7)
-        self.assertEqual(out.splitlines()[-1], "KEEPWARM_VERDICT=cap k=9 rc=7")
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.splitlines()[-1], "KEEPWARM_VERDICT=cap k=9")
         self.assertIn("保溫帳寫不進", buf.getvalue())
 
     def test_a_broken_ledger_reads_as_zero_and_says_so(self) -> None:
@@ -344,8 +346,8 @@ class RunTest(_Base):
         self.write(_asst(T0))
         self.run_kw(_Clock(T0 + 44 * MIN))
         row = self.traces()[-1]
-        self.assertEqual((row["event"], row["verdict"], row["rc"], row["k"]),
-                         ("keepwarm_verdict", "ping", 6, 1))
+        self.assertEqual((row["event"], row["verdict"], row["k"]), ("keepwarm_verdict", "ping", 1))
+        self.assertNotIn("rc", row)
 
 
 class StopGateTest(_Base):
@@ -427,6 +429,9 @@ class StopGateTest(_Base):
         self.assertTrue(keepwarm.is_keepwarm_task(running))
         self.assertFalse(keepwarm.is_keepwarm_task(dict(running, command="python watch")))
         self.assertFalse(keepwarm.is_keepwarm_task(dict(running, type="subagent")))
+        # PowerShell 形態：腳本路徑後帶引號（DEF-200-615 同族）；字面子字串比對會漏
+        quoted = dict(running, command="& 'py.exe' 'tools\\sessionctl.py' keepwarm --sid x")
+        self.assertTrue(keepwarm.is_keepwarm_task(quoted))
 
 
 def _hook(payload: dict, env_extra: dict) -> subprocess.CompletedProcess:
@@ -467,8 +472,8 @@ class ProcessLevelTest(_Base):
             [sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"), "keepwarm", "--sid", SID,
              "--projects-dir", str(self.slug), "--min", "1", "--poll-sec", "0.2"],
             capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
-        self.assertEqual(proc.returncode, 6, proc.stderr)
-        self.assertIn("KEEPWARM_VERDICT=ping k=1 n=9 rc=6", proc.stdout)
+        self.assertEqual(proc.returncode, 0, proc.stderr)  # DEF-200-622：ping 不得再是 rc 6
+        self.assertEqual(proc.stdout.strip().splitlines()[-1], "KEEPWARM_VERDICT=ping k=1 n=9")
         self.assertIn("低於建議下限", proc.stderr)  # --min < 15 出聲
 
     def test_the_cli_refuses_to_raise_the_cutoff_and_needs_a_sid(self) -> None:

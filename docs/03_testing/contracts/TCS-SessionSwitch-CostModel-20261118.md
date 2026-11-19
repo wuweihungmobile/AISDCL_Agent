@@ -24,7 +24,7 @@
 |---|---|---|---|
 | REQ-SS-01 | 成本公式 F1／F4 為純函式；參數全由 `ENV_SPEC` 解析（DES §3.2 出廠值），壞值退出廠值並出聲；（`T_soft` 由 F3 推導的部分 **依掌舵者裁決不實作（2026-11-18，DES §11 D-1＝③ 不設軟線、D-2＝hold 不實作）**；`AUTOSDD_SWITCH_R1_CTX_TOKENS` 退役、有設只出聲「已退役」） | §3 | 1 |
 | REQ-SS-02 | **依掌舵者裁決不實作（2026-11-18，DES §11 D-1＝③ 不設軟線、D-2＝hold 不實作）**（原：不變式 `T_soft < HARD`）；實作面只留「HARD 須低於觀測到的流程內 autocompact 最小點」 | §4.4 | 1 |
-| REQ-SS-03 | `sessionctl keepwarm`：截止＝主控最後一筆帶 usage 的 assistant 記錄＋`T_kw`（45 分），每 60 秒重讀尾端延後；末行 `KEEPWARM_VERDICT=ping|cap …`、rc 6／7；判決行前印處置表對應列 | §4.1 | 2 |
+| REQ-SS-03 | `sessionctl keepwarm`：截止＝主控最後一筆帶 usage 的 assistant 記錄＋`T_kw`（45 分），每 60 秒重讀尾端延後；末行 `KEEPWARM_VERDICT=ping|cap …`、一律 rc 0（DEF-200-622：判決只看末行）；判決行前印處置表對應列 | §4.1 | 2 |
 | REQ-SS-04 | 保溫帳 `trace_dir()/keepwarm/<sid>.json`：`pings` 每次 ping 判決 +1；本 session 出現可轉送真人提示即歸零；`n*`＝F1 | §4.1 | 2 |
 | REQ-SS-05 | 不掛條件：無人窗口、模式非 auto、`AUTOSDD_KEEPWARM_OFF`、已交棒、park 標記有效、ctx < `KEEPWARM_MIN_CTX`；指令在這些條件下 rc 0 印 `KEEPWARM_VERDICT=skip reason=…` 立即結束（不得常駐） | §4.1 | 2 |
 | REQ-SS-06 | Stop 保溫閘：無 running 背景任務 ∧ 非 REQ-SS-05 各條 ∧ `pings < n*` ⇒ 推回一次；`stop_hook_active` 放行；與封存閘／park 合併一則，次序 封存→park→keepwarm | §4.1、§5 D6 | 2 |
@@ -32,7 +32,7 @@
 | REQ-SS-08 | watch 保溫條件改用 REQ-SS-03 的同一錨點函式 | §4.2 | 1 |
 | REQ-SS-09 | watch quota 閂鎖：鍵 `(sid, reset 分鐘, 帶級)`；同鍵不再觸發；帶升級或 reset 改變再觸發；讀／寫失敗 ⇒ 觸發＋stderr 出聲；處置表 quota 列文字更新 | §4.3 | 1 |
 | REQ-SS-10 | `sessionctl runlong --out <f> -- argv…`：子行程結束後原子寫 `<f>.done`（rc、結束時刻）；子行程 stdout／stderr 落 `<f>`（UTF-8） | §4.5 | 2 |
-| REQ-SS-11 | `sessionctl waitfor --done <f>.done --max-sec S`（預設 240；S ≤ 255，超過夾到 255 並出聲；WHY 不是 270：見狀態列）：完成 rc 0 印尾端 40 行＋`WAITFOR_VERDICT=done rc=<子行程 rc>`；未完成 rc 3 `WAITFOR_VERDICT=pending`；參數錯 rc 2 | §4.5 | 2 |
+| REQ-SS-11 | `sessionctl waitfor --done <f>.done --max-sec S`（預設 240；S ≤ 255，超過夾到 255 並出聲；WHY 不是 270：見狀態列）：完成 rc 0 印尾端 40 行＋`WAITFOR_VERDICT=done rc=<子行程 rc>`；未完成 `WAITFOR_VERDICT=pending`（同為 rc 0，DEF-200-622）；參數錯 rc 2 | §4.5 | 2 |
 | REQ-SS-12 | PreToolUse 長前景閘：payload 有 `agent_id` ∧ 工具 PowerShell／Bash ∧ 非背景 ∧ `timeout > 270000` ⇒ rc 2＋指路；行內 `# keepwarm-ok: <WHY>` 豁免（`AUTOSDD_UNATTENDED` 下無效）；主控（無 `agent_id`）不判；解析失敗放行 | §4.5 | 2 |
 | REQ-SS-13 | 封存閘門檻：ctx ≥ HARD；（原稿的 T_soft／hold 分支 **依掌舵者裁決不實作（2026-11-18，DES §11 D-1＝③ 不設軟線、D-2＝hold 不實作）**）其餘前提同現行（無在飛代理、未交棒、封存無效） | §4.4、§5 D3／D4 | 2 |
 | REQ-SS-14 | **依掌舵者裁決不實作（2026-11-18，DES §11 D-1＝③ 不設軟線、D-2＝hold 不實作）**：`sessionctl hold`（原稿：H ≤ 12、W ≥ 8 字、自帶到期）——hold 沒有作用對象（硬線本來就不受 hold 影響） | §4.4 | 2 |
@@ -77,9 +77,9 @@
 
 | AT | 輸入 | 預期 |
 |---|---|---|
-| AT-SS-10 | TR 最後 usage 記錄 T0；NOW=T0+44:59 | 未到期；T0+45:00 ⇒ `ping`、rc 6 |
+| AT-SS-10 | TR 最後 usage 記錄 T0；NOW=T0+44:59 | 未到期；T0+45:00 ⇒ `ping`、rc 0、末行 `KEEPWARM_VERDICT=ping k=1 n=<n*>` |
 | AT-SS-11 | 執行中 TR 追加一筆 T1 的 assistant usage | 截止延到 T1+45；不得以啟動時刻為錨（錨 started_at 的突變必紅） |
-| AT-SS-12 | 保溫帳 pings=n*−1，再 ping | 判決 `cap`、rc 7；處置表列含「不重掛」 |
+| AT-SS-12 | 保溫帳 pings=n*−1，再 ping | 判決 `cap`、rc 0、末行 `KEEPWARM_VERDICT=cap k=<n*>`；處置表列含「不重掛」 |
 | AT-SS-13 | 保溫帳 pings=3，TR 出現可轉送真人提示 | 歸零；`<task-notification>` 不歸零 |
 | AT-SS-14 | REQ-SS-05 六種條件逐一 | rc 0、`KEEPWARM_VERDICT=skip reason=<對應>`、1 秒內結束 |
 | AT-SS-15 | Stop PL：無背景任務、ctx 400,000、可保溫 | 保溫閘推回，文字含 `sessionctl.py keepwarm`；`stop_hook_active=True` ⇒ 空 |
@@ -92,10 +92,10 @@
 
 | AT | 輸入 | 預期 |
 |---|---|---|
-| AT-SS-20 | quota_fn 恆真（prepare、reset R）；連續兩次 `run` | 第一次 rc 5；第二次不因 quota 結束（以 keepwarm／all_done 結束），痕跡有 `watch_quota_latched` |
-| AT-SS-21 | 閂鎖存在（prepare,R）；quota 升 halt | 再觸發 rc 5 |
+| AT-SS-20 | quota_fn 恆真（prepare、reset R）；連續兩次 `run` | 第一次末行 `WATCH_VERDICT=quota`；第二次不因 quota 結束（以 keepwarm／all_done 結束）；兩次皆 rc 0；痕跡有 `watch_quota_latched` |
+| AT-SS-21 | 閂鎖存在（prepare,R）；quota 升 halt | 再觸發 `WATCH_VERDICT=quota`（rc 0） |
 | AT-SS-22 | 閂鎖存在（prepare,R）；reset 變 R+5h | 再觸發 |
-| AT-SS-23 | 閂鎖檔壞 JSON／不可寫 | 觸發 rc 5＋stderr 出聲 |
+| AT-SS-23 | 閂鎖檔壞 JSON／不可寫 | 觸發 `WATCH_VERDICT=quota`（rc 0）＋stderr 出聲 |
 | AT-SS-24 | keepwarm 錨點：watch 啟動於 T0+10，主控最後記錄 T0 | 於 T0+45 判 keepwarm（不是 T0+60） |
 
 ### 3.4 長等待（`test_sessionctl_longwait.py`）
@@ -103,7 +103,7 @@
 | AT | 輸入 | 預期 |
 |---|---|---|
 | AT-SS-30 | runlong 跑 `python -c "import sys;print('中');sys.exit(3)"` | `<f>` 含「中」（UTF-8）；`<f>.done` 記 rc 3；`.done` 在 `<f>` 寫完後才出現 |
-| AT-SS-31 | waitfor：done 不存在、max-sec=1 | rc 3、`pending`；done 存在 ⇒ rc 0、`done rc=3` |
+| AT-SS-31 | waitfor：done 不存在、max-sec=1 | rc 0、末行 `pending`（DEF-200-622：還沒好是正常結果）；done 存在 ⇒ rc 0、`done rc=3` |
 | AT-SS-32 | waitfor `--max-sec 600` | 夾到 255（上限）＋出聲 |
 | AT-SS-33 | PreToolUse PL：agent_id、PowerShell、timeout 300000、非背景 | rc 2，訊息含 `runlong` 與 `waitfor` |
 | AT-SS-34 | 同上 timeout 270000 ／ 背景 ／ 無 agent_id ／ Read 工具 | 放行（邊界 270000 放行、270001 擋） |
@@ -138,6 +138,16 @@
 | AT-SS-67 | R216 複審 P3-b：SessionStart hook 以 payload `session_id`＝原主人／別人跑同一個交接包（`guard.main()` 實跑） | 原主人得「本 session 自己封存」、別人得「未接手的交接包」；hook 把 `sid` 突變成 `None` 時此測試紅（`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`） |
 | AT-SS-68 | R216 複審 P3-c／RV-C3：RealVerify 案例判失敗／例外；通過；env 缺件；在 git worktree 內跑 RV-C3 | 失敗＝逐字稿＋hook 事件＋debug 日誌＋traces 複製到 `~/.autosdd/realverify_kept/<案例>_<時刻>/`、路徑印在失敗訊息與帳本證據、沙盒仍清掉；通過／env＝不留；worktree＝`--base` 指向主 checkout 專案目錄，不存在則 `EnvMissing`（rc 2，不默默 skip）；RV-C4 的 `claude -p` 回合關保溫閘（根因＝模型照推回掛 45 分鐘 keepwarm ⇒ `-p` 等背景行程至逾時）；逾時連子行程樹一併砍 |
 
+### 3.5c 監督／保溫的正常結果不得呈現成錯誤（DEF-200-622／623，掌舵者 2026-11-19 真機回報；`test_sessionctl_watch.py`、`_keepwarm.py`、`_longwait.py`、`_hooks.py`）
+
+| AT | 輸入 | 預期 |
+|---|---|---|
+| AT-SS-70 | watch 六種判決（all_done／overrun／stall／budget／quota／keepwarm）逐一，函式層與 CLI 子行程 | 一律 rc 0；末行 `WATCH_VERDICT=<事件> n=<N>` 不帶 `rc=`；痕跡 `watch_verdict` 無 `rc` 欄；模組無 `RC` 表 |
+| AT-SS-71 | keepwarm ping／cap（含寫帳失敗 cap）／skip 六種原因；CLI 子行程 `--min 1` | 一律 rc 0；末行 `KEEPWARM_VERDICT=<判決> …` 不帶 `rc=`；痕跡 `keepwarm_verdict` 無 `rc` 欄；缺 `--sid` 仍 rc 2（真錯誤） |
+| AT-SS-72 | waitfor 未完成（含 `.done` 寫一半、CLI） | rc 0、末行 `WAITFOR_VERDICT=pending seg=i/12`；參數錯仍 rc 2 |
+| AT-SS-73 | Stop 出聲：background_tasks 只有 keepwarm／watch shell（含 PowerShell 引號形態）；混別的 shell；有子代理；字面相近的 `echo keepwarm watch` | 前者不出聲；混別的 ⇒ 照舊出聲且只數別的 1 個；有子代理 ⇒ 只報代理；字面相近者照報（判準不過寬） |
+| E2E-SS-14／15（RealVerify `RV-KW6`／`RV-KW7`） | 真 `claude -p`＋repo 真 Stop 守衛，背景掛真 `keepwarm --min 1`／真 `watch`（`--grace-sec 20`） | Stop 當下 background_tasks 恰一個 running 的該 shell；真 hook 無「背景任務在跑／TaskStop」警告語；harness 完成通知 `completed (exit code 0)`；痕跡判決 ping／all_done |
+
 ### 3.6 量測（增量 `test_waste_census_metrics.py`）
 
 | AT | 輸入 | 預期 |
@@ -152,19 +162,19 @@
 |---|---|---|---|---|
 | F4／F3 判準與重放 | E2E-SS-01 | 真行程 `python tools/probe/waste_census.py --replay-switch --since-days 14`，讀本機真實逐字稿 | 印出 DES §7 各列；P1 改變決定件數、P3 FRESH 件數與 DES 同母體重跑一致（母體變動時只斷言公式一致：以同一份 `turns` 快照 JSON 重放兩次結果相同） | CI 無真逐字稿 ⇒ CI 跑快照 JSON（從真逐字稿抽出、去內容只留 usage／時間戳），本機跑全量。**已實作**：本機＝RealVerify RV-SC1（`--dump-population` 抽快照，斷言決定性、P3 與正式 F4 逐筆一致、M-K3／M-K4 與 S2／S1 事件數相等、快照無對話欄位）；CI 形態＝`test_waste_census_keep.py::SnapshotAndEntryPointTest` |
 | 校準 | E2E-SS-02 | 真行程 `--calibrate-switch`，讀真逐字稿＋真 `autosdd_resume_cost.jsonl` | F 建議值落在 p25～p75（DES §1.4） | 同上。**已實作**：RealVerify RV-SC2（F 分位序、n≥5、B 量級、真 resume_cost 列讀到；出廠 F 是否在實測 p25～p75 內寫進證據、不當失敗）；母體漂移故不寫死 DES 當日絕對數字 |
-| keepwarm 指令 | E2E-SS-03 | 真行程 `python tools/sessionctl.py keepwarm --sid X --projects-dir <tmp> --min 1`（`--min` 為正式 CLI 參數，下限 1、<15 出聲）；tmp 放**真實逐字稿截取**（usage 與時間戳原樣、內容去除） | 約 60 秒後 rc 6、末行 `KEEPWARM_VERDICT=ping`；期間另一行程追加 assistant 記錄 ⇒ 延後 | — |
+| keepwarm 指令 | E2E-SS-03 | 真行程 `python tools/sessionctl.py keepwarm --sid X --projects-dir <tmp> --min 1`（`--min` 為正式 CLI 參數，下限 1、<15 出聲）；tmp 放**真實逐字稿截取**（usage 與時間戳原樣、內容去除） | 約 60 秒後 rc 0、末行 `KEEPWARM_VERDICT=ping`；期間另一行程追加 assistant 記錄 ⇒ 延後 | — |
 | keepwarm 真機效果（主前提） | E2E-SS-04 | 真 `claude -p --model haiku` 子行程三次：t0 建 session（上下文≥4,096 token 以啟用快取）、t0+45 分 `-r` 輕觸、t0+100 分 `-r` | 第三次 `cache_read ≥ 0.9×前一回合上下文`；對照組（不輕觸、t0+70 分）`cache_read < 0.1×` | 若 `-p` 模式的快取層不是 1h（以 usage 的 `ephemeral_1h_input_tokens` 判），改量 5m 版本（4 分輕觸 vs 7 分）並標「1h 層待互動真機 V-SS1」，**計未結** |
 | 閒置自動壓縮被擋 | E2E-SS-05 | 真逐字稿重放：`waste_census` M-K2 對上線後 14 天 | M-K2＝0 | 上線前不可達；上線 14 天後由 SI 巡邏或主控收尾跑一次（`python tools/probe/waste_census.py --switch-metrics --since-days 14`，看 M-K2 行），**計未結**直到跑過 |
 | Stop 保溫閘／封存閘／冷叫醒閘豁免 | E2E-SS-06 | 真 hook 行程：以 `.venv` 載具執行 `.claude/hooks/sessionctl_guard.py`，stdin 餵 harness 真實 Stop payload 形態（含 `background_tasks`）＋真實逐字稿截取 | AT-SS-15～18 四情境的 stdout JSON（`decision:block` 與否、reason 字樣） | — |
 | PreToolUse 長前景閘 | E2E-SS-07 | 同上載具，餵真實子代理 PreToolUse payload（從真逐字稿取 `agent_id`、`tool_input.timeout` 形態） | rc 2／0 對應 AT-SS-33～35 | — |
 | 子代理分段等待 | E2E-SS-08 | 真 `claude -p --model haiku` 主控，提示派一支前景子代理（`model: haiku`）用 `runlong` 跑 `python -c "import time;time.sleep(420)"` 並以 `waitfor --max-sec 240` 等待 | 子代理逐字稿：相鄰回合間隔皆 < 300 秒；`waitfor` 回合 `cache_read ≥ 0.9×前回合上下文`；`.done` rc 0 | print 模式背景上限 10 分鐘：本案用前景子代理＋總長 < 9 分；若 harness 擋，**計未結**並改互動真機 V-SS2 |
-| watch quota 閂鎖 | E2E-SS-09 | 真行程兩次 `python tools/sessionctl.py watch --sid X --grace-sec 5 --poll-sec 1`，`AUTOSDD_TRACE_DIR`＝tmp，額度快取放真實格式快照（prepare 帶、reset 未來） | 第一次 rc 5；第二次 rc 0（all_done）且非 5；把快照改 halt 後第三次 rc 5 | — |
+| watch quota 閂鎖 | E2E-SS-09 | 真行程兩次 `python tools/sessionctl.py watch --sid X --grace-sec 5 --poll-sec 1`，`AUTOSDD_TRACE_DIR`＝tmp，額度快取放真實格式快照（prepare 帶、reset 未來） | 第一次末行 quota；第二次 all_done 且非 quota；把快照改 halt 後第三次 quota（三次皆 rc 0） | — |
 | hold | E2E-SS-10 | **依掌舵者裁決不實作（2026-11-18，DES §11 D-1＝③ 不設軟線、D-2＝hold 不實作）** | — | 不適用（無作用對象，不計未結） |
 | 收斂閘 HARD | E2E-SS-11 | 真 hook 行程 PreToolUse Agent，真逐字稿截取 ctx 850,000 | rc 2 | — |
 | 轉送 F4 | E2E-SS-12 | 真 hook 行程 UserPromptSubmit，真逐字稿截取＋已封存交接包；以 `AUTOSDD_SESSION_SWITCH_MODE=notify` 走條件 7 路（不 spawn）驗 F4 前段；spawn 本體沿用 TCS-SessionCtl 既有 E2E | c=400k 放行且 `systemMessage` 含原因；c=600k 達條件 7 | spawn 全路徑沿用既有 V-F1（未結照舊） |
 | 無人續跑選路 F4 | E2E-SS-13 | 真行程 `python tools/session_resume_planner.py` 的選路預演（既有 `--dry-run`／`--check` 類旗標；SD 現查）餵真逐字稿 | 冷＋c=170k ⇒ RESUME（舊 R3 判 FRESH） | 若 planner 無預演旗標，SD 不得新增測試專用旗標；改以真 `claude -p` 無人窗口一次（haiku、小上下文）驗，**計未結**直到跑過 |
 | park 選路（階段 3） | E2E-SS-14 | 真排程：`sessionctl park` 以 `--at <now+2 分>` 登記，真 schtasks 觸發 `park --fire` | c 小 ⇒ 以 `-r` 續原 sid（新逐字稿行附加於原檔）；c 大 ⇒ 開新 sid | macOS／Linux 只印手動指令（既有劃界）；Windows 實跑。**R216 WP-F 落地形態＝RealVerify RV-PR1／PR2**：真 schtasks 登記＋真行程跑 job 本體（`--fire`，`AUTOSDD_SESSION_SWITCH_MODE=notify` 擋下開窗這最後一步），驗 `park_route` 痕跡（c＝170,000⇒RESUME、600,000⇒FRESH）、`park_resume_failed`／`park_spawn_failed` 對應、handback、job 自拆、無 claude 行程；**「真的開出 `claude -r` 視窗並續寫原逐字稿」計未結（V-SS5，待掌舵者目視）** |
-| 同 session 自續跑不算交棒 | E2E-SS-15 | 真 CLI `handoff --ack`（`CLAUDE_CODE_SESSION_ID`＝原 sid／別的 sid）＋真 `claude -p`（haiku）背景 shell＋真 Stop hook＋真 `keepwarm --min 1`；**已實作**＝RealVerify RV-C4 | 甲（自續跑）：無冷叫醒閘、keepwarm 照 ping（rc 6）；乙（別的 sid，對照）：冷叫醒閘恰推回一次、`KEEPWARM_VERDICT=skip reason=handed_over rc=0` | park RESUME 開真互動視窗那一步仍待掌舵者目視 V-SS5（`spawn_resume` 成功後標記續跑由單元測試＋此案例的 CLI 路徑覆蓋） |
+| 同 session 自續跑不算交棒 | E2E-SS-15 | 真 CLI `handoff --ack`（`CLAUDE_CODE_SESSION_ID`＝原 sid／別的 sid）＋真 `claude -p`（haiku）背景 shell＋真 Stop hook＋真 `keepwarm --min 1`；**已實作**＝RealVerify RV-C4 | 甲（自續跑）：無冷叫醒閘、keepwarm 照 ping（rc 0、末行 ping）；乙（別的 sid，對照）：冷叫醒閘恰推回一次、`KEEPWARM_VERDICT=skip reason=handed_over`（rc 0） | park RESUME 開真互動視窗那一步仍待掌舵者目視 V-SS5（`spawn_resume` 成功後標記續跑由單元測試＋此案例的 CLI 路徑覆蓋） |
 
 ## 5. SD 工作包（鎖持有面；鐵律七：常數／史料／消費端不在同一持有面者不得並行）
 
@@ -221,7 +231,7 @@ QA 另驗：DES §7 重放數字以 E2E-SS-01 重跑（不得採信 DES 內數�
 |---|---|---|
 | V-SS1 | 互動主控閒置 3 小時（掛 keepwarm）後回來 | 回來第一回合 `cache_read ≥ 0.9×上下文`；期間無 auto 壓縮；保溫回合輸出 ≤50 token |
 | V-SS2 | 互動主控派背景子代理跑 >5 分測試（照 runlong／waitfor） | 子代理逐字稿無 >300 秒間隔、無重寫 |
-| V-SS3 | prepare 帶內掛 watch 兩次 | 第二次不立即 rc 5（真機缺陷回歸） |
+| V-SS3 | prepare 帶內掛 watch 兩次 | 第二次不立即判 quota（真機缺陷回歸） |
 | V-SS4 | 畫面目視：保溫閘、長前景閘的訊息顯示 | 文字可見、繁中 |
 
 ## 8. 禁止事項（SD／QA 任務書必帶）

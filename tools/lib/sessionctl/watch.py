@@ -24,8 +24,9 @@ from . import keepwarm, procstop, roster, switch
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
 SCHEMA = "autosdd.watch/1"
-#: 判決 → rc（ARCH §1.2）。
-RC = {"all_done": 0, "overrun": 2, "stall": 3, "budget": 4, "quota": 5, "keepwarm": 6}
+#: 判決一律 rc 0、事件只看末行 `WATCH_VERDICT=`（DEF-200-622：harness 把背景指令的任何非 0 結束
+#: 都顯示成「failed」，掌舵者真機看到十多次「exit code 5／6」以為是錯誤；叫醒事件是設計內的正常
+#: 結果）。非 0 只留給真錯誤（缺 --sid＝2、內部例外）。
 #: 同一輪多事件並存時的先後：quota（跨代理、不可逆的額度牆）＞ budget（每多一輪都更貴）＞
 #: stall（代理已死，繼續等純浪費）＞ overrun（慢但可能仍在做事）＞ all_done（只在無未交卷代理時才
 #: 成立，與前四者互斥）＞ keepwarm（純保溫，任何實質事件都比它重要）。
@@ -48,7 +49,7 @@ DISPOSAL = {
     "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
     "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
 }
-UNKNOWN_DISPOSAL = "watch 自己壞了（未知 rc／無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
+UNKNOWN_DISPOSAL = "watch 自己壞了（rc≠0 或無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
 
 
 @dataclass(frozen=True)
@@ -124,8 +125,8 @@ def _label(agent: dict) -> str:
 
 
 def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
-           seen: bool = False, kw_anchor: float | None = None) -> tuple[str, int, str] | None:
-    """純函式：回 `(事件, rc, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
+           seen: bool = False, kw_anchor: float | None = None) -> tuple[str, str] | None:
+    """純函式：回 `(事件, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
     `finished!=true`），每項可帶 `end_turn: bool`（最後一筆是 assistant end_turn＝在等自己的
     背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。
     `kw_anchor`＝主控最後一筆帶 usage 的 assistant 記錄時刻（`keepwarm.anchor`）；保溫點＝它＋
@@ -162,7 +163,7 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
                              "（主控快取壽命 1 小時，保溫點）")
     for name in ORDER:
         if name in found:
-            return name, RC[name], found[name]
+            return name, found[name]
     return None
 
 
@@ -278,12 +279,12 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                     switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=band, reset=reset)
             verdict = decide(agents, now, started, cfg, quota_hit, seen=seen, kw_anchor=anchor)
             if verdict is not None:
-                event, rc, detail = verdict
+                event, detail = verdict
                 print(f"[{_stamp(now)}] {event}：{detail}", file=out)
                 print(f"處置：{DISPOSAL[event]}", file=out)
-                switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, rc=rc, agents=len(agents))
-                print(f"WATCH_VERDICT={event} n={len(agents)} rc={rc}", file=out, flush=True)
-                return rc
+                switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents))
+                print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
+                return 0
             write_heartbeat(sid, cfg, started, now, pid, anchor)
             sleep_fn(poll_sec)
     finally:

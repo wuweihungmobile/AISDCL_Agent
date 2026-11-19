@@ -122,7 +122,7 @@ FRESH ⇔ `W_CC1·c > F·(1+q)` ⇔ `c > F(1+q)/2 = 480,000`（出廠）。快�
 - **事件源**：`python tools/sessionctl.py keepwarm --sid <sid>`，主控以 `run_in_background`、輸出導檔掛上（鐵律六的合法事件源：阻塞到截止才結束，結束即叫醒主控）。
 - **截止錨點**：主控逐字稿**最後一筆帶 usage 的 assistant 記錄**時間 ＋ `T_kw`（45 分）；每 60 秒重讀尾端，有新記錄就往後延（人回來工作時不會提早叫醒）。不錨 `started_at`。
 - **保溫帳**：`trace_dir()/keepwarm/<sid>.json` 記 `pings`、`n_star`、`ctx`；**本 session 出現真人提示（`transcript_activity.is_forwardable_prompt` 為真者）即歸零**。
-- **結束輸出**：末行 `KEEPWARM_VERDICT=ping k=<k> n=<n*> rc=6`（沿用 watch 的 keepwarm rc 6）或 `KEEPWARM_VERDICT=cap k=<n*> rc=7`（已達上限）。處置表（印在判決行前）：`ping`＝什麼都不判、重掛 keepwarm、本回合輸出 ≤50 token；`cap`＝不重掛；若 `c ≥ T_soft` 先封存（§4.4），否則直接結束回合（讓它冷，ski-rental 已到損益點）。
+- **結束輸出**：末行 `KEEPWARM_VERDICT=ping k=<k> n=<n*>` 或 `KEEPWARM_VERDICT=cap k=<n*>`（已達上限）；**一律 rc 0**（原稿的 rc 6／7 於 DEF-200-622 取消：harness 把非 0 背景指令顯示成「failed」，掌舵者 2026-11-19 真機回報；見 ADR-XPLAT-004 §2.19.1 D8）。處置表（印在判決行前）：`ping`＝什麼都不判、重掛 keepwarm、本回合輸出 ≤50 token；`cap`＝不重掛；若 `c ≥ T_soft` 先封存（§4.4），否則直接結束回合（讓它冷，ski-rental 已到損益點）。
 - **不掛的情形**：無人窗口（`AUTOSDD_UNATTENDED`；print 模式背景上限會殺掉它）、模式非 auto、已交棒（spawned／acked）、park 標記 armed 且仍有效（park 接手）、`c < 30,000`（重寫便宜，不值得叫醒）。
 - **與既有守衛的互動**（SD 必須同包處理，不留後遺症）：
   - **保溫閘（Stop，新）**：無任何 running 背景任務 ∧ 上述「不掛的情形」皆不成立 ∧ 保溫帳 `pings < n*` ⇒ 推回一次：「掛 keepwarm」。與封存閘、park 閘的合成次序見 §5。
@@ -154,7 +154,7 @@ FRESH ⇔ `W_CC1·c > F·(1+q)` ⇔ `c > F(1+q)/2 = 480,000`（出廠）。快�
 
 - **長等待（新，補 5m TTL 洞）**：
   - `python tools/sessionctl.py runlong --out <檔> -- <argv…>`：子代理以 `run_in_background` 執行；結束時原子寫 `<檔>.done`（內容＝rc 與結束時刻）。
-  - `python tools/sessionctl.py waitfor --done <檔>.done --max-sec 240`：前景阻塞至多 `--max-sec` 秒（預設 240、**上限 255**；WHY 不是 270：waitfor 自己是前景呼叫，等 270 秒需要 timeout > 270000，會被下一條長前景閘自己擋住）；完成 rc 0 並印尾端 40 行，未完成 rc 3（`WAITFOR_VERDICT=pending`），參數錯 rc 2。子代理迴圈呼叫直到 rc 0 或達 `n_s*` 段（之後改一次前景等到底，照付重寫）。
+  - `python tools/sessionctl.py waitfor --done <檔>.done --max-sec 240`：前景阻塞至多 `--max-sec` 秒（預設 240、**上限 255**；WHY 不是 270：waitfor 自己是前景呼叫，等 270 秒需要 timeout > 270000，會被下一條長前景閘自己擋住）；完成印尾端 40 行（`WAITFOR_VERDICT=done`），未完成 `WAITFOR_VERDICT=pending`（兩者皆 rc 0，DEF-200-622；原稿 rc 3 取消），參數錯 rc 2。子代理迴圈呼叫直到末行為 done 或達 `n_s*` 段（之後改一次前景等到底，照付重寫）。
   - **長前景閘（PreToolUse，新）**：呼叫帶 `agent_id`（子代理）∧ 工具＝PowerShell／Bash ∧ 非 `run_in_background` ∧ `timeout > 270000` ⇒ rc 2，訊息指路 runlong／waitfor。依據：工具預設 timeout 120 秒，要跑超過 5 分鐘**必須**顯式設大 timeout ⇒ 這個判準精確、零猜測。行內豁免 `# keepwarm-ok: <WHY>`（無人窗口無效，同其他守衛）。主控不判（1h TTL）。
   - 暴露證據（守衛面准入）：77 件真實逐字稿長等待重寫（非構造），`waste_census` §1 子代理前一工具 PowerShell 52 件。
 - **冷續棒閘**：**不改**。重放：現行「冷 ∧ ctx≥150k 擋」淨省 44,939,955；成本式（ctx > F_a/1.25 = 238,363）淨省 45,873,225，差 2%、在量測雜訊內（Rule 2：不為 2% 換判準）。

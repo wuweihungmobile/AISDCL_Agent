@@ -60,3 +60,35 @@
 | P3-c 根因（已重現並查明） | 本棒真機 RV-C4 前 6 次連跑全 pass，第 7 次（改動 handoff 輸出後重驗）於 2026-11-19 15:47 重現逾時 280 秒，**保留證據機制當場救下逐字稿**（`~/.autosdd/realverify_kept/RV-C4_20261119T154738/`，已於查明後清除）。時間線（hook_events＋逐字稿＋debug 日誌）：15:42:59 甲組提示 ⇒ 15:43:03 Stop（背景 shell 啟動）⇒ 15:43:22 背景 shell 結束的 task-notification ⇒ 15:43:24 Stop 被**保溫閘**推回「請掛 `sessionctl keepwarm`」⇒ 15:43:31 模型（haiku）照做、把 `keepwarm`（預設 45 分鐘）掛成背景行程 ⇒ 15:43:33 Stop 放行 ⇒ debug 日誌 15:43:38「Waiting for background work to finish」⇒ `claude -p` 一直等到牆鐘 280 秒逾時被砍。成因＝甲組（自續跑）正是保溫閘「該掛」的情形，模型是否照推回指示做是隨機的（故低頻；2026-11-19T02:07:49Z 那次 291 秒同型）。修法（消除成因）＝RV-C4 的兩個 `claude -p` 回合設 `AUTOSDD_KEEPWARM_OFF=1`（只關保溫閘；被測的冷叫醒閘不受影響，保溫判決本來就由後面真跑 `keepwarm` CLI 驗）。連帶發現：逾時只砍 claude 本體 ⇒ 背景行程握著沙盒目錄，清理報 RESIDUE；`driver._kill_tree` 改連子行程樹一併砍（`test_realverify_lib.py::TimeoutKillsTheWholeTreeTest`） |
 | RV-C3 在 worktree 內 rc=1 | 成因＝事故重放的真逐字稿母體住主 checkout 的 `~/.claude/projects/<主 checkout slug>`，worktree 路徑 slug 對不上。修法＝`sandbox.main_checkout_root`（`git rev-parse --git-common-dir`）算主 checkout，worktree 內改以 `--base` 指向它；母體目錄不存在 ⇒ `EnvMissing`（rc 2，大聲報、不默默 skip）；非 worktree 行為逐位元組不變。驗證＝`test_realverify_lib.py::MainCheckoutRootTest`（真 git worktree）；真機＝在拋棄式 worktree（junction `.venv`）跑 `realverify run --case RV-C3` ⇒ `REALVERIFY_VERDICT=pass n=1`（已移除 worktree） |
 | 真機自驗末行（本棒，最終程式碼） | converge 家族 `pass n=4` 連 2 次、RV-C4 單跑 3 次 `pass n=1`（關保溫閘後）、`sessionctl_handoff pass n=5`、`sessionctl_keepwarm pass n=5`、RV-C3 於 worktree `pass n=1`（該次於逾時修法前跑，RV-C3 不受其影響）；殘留 0（`AutoSDD_RV_*` 排程、`AutoSDD_RV_sbx_*` 沙盒、worktree 皆查過） |
+
+## 七、UX：監督／保溫的正常結果不得呈現成錯誤（2026-11-19，SD 單人窗口；DEF-200-622／623）
+
+暴露證據＝掌舵者真機畫面回報（sid `31ea79d4`）：`Background command "Arm main-session keepwarm" failed with exit code 6`（一天十多次），與 Stop 出聲「本回合結束時仍有 背景任務在跑：（1 個背景 shell）…TaskStop」（當時唯一在跑的是依設計掛的 keepwarm）。設計全文＝ADR-XPLAT-004 §2.19.1 D8。
+
+**新舊 rc 對照**（harness 對背景指令任何非 0 結束都標 `failed`，正常叫醒不得非 0）：
+
+| 指令／判決 | 舊 rc | 新 rc | 末行 |
+|---|---|---|---|
+| `keepwarm` ping／cap／skip | 6／7／0 | 0／0／0 | `KEEPWARM_VERDICT=<判決> …`（不再帶 `rc=`） |
+| `watch` all_done／overrun／stall／budget／quota／keepwarm | 0／2／3／4／5／6 | 全 0 | `WATCH_VERDICT=<事件> n=<N>`（不再帶 `rc=`） |
+| `waitfor` done／pending | 0／3 | 0／0 | `WAITFOR_VERDICT=done rc=<被等指令 rc>`／`pending seg=i/12` |
+| 缺 `--sid`、`waitfor` 參數錯 | 2 | 2（真錯誤，不變） | stderr |
+| `runlong` | 被跑指令的 rc | 不變（被等指令真失敗時標 failed 是正確訊息） | — |
+
+**rc 消費者盤點**（先 grep 全 repo 的 `KEEPWARM_VERDICT`／`WATCH_VERDICT`／`RC[`／`returncode`／`rc ?[=＝] ?[2-7]`；無任何消費者真需要靠 rc 分辨事件，故未停下回報）：
+
+| 消費者 | 處置 |
+|---|---|
+| `tools/lib/sessionctl/{watch,keepwarm,longwait}.py`（`RC`／`RC_PENDING` 表、處置表、閘訊息、`UNKNOWN_DISPOSAL`） | 表刪除、一律 `return 0`、訊息改「看末行」 |
+| `tools/sessionctl.py` | 薄分派、原樣回傳模組 rc，不需改 |
+| `sessionctl_guard.py`／`supervise.py`／`converge.py`／`wastecensus/{supervision,sections_keep,reader}.py` | 不讀 rc（痕跡 `rc` 欄無讀者；`EV_*` 名稱不變）；`supervise._WATCH_CMD_RE` 改指 `roster.WATCH_CMD_RE`（單一家） |
+| `.claude/**` | 零處需改（`sessionctl_guard.py` 文字不含 rc 語意；本棒未動 `.claude/`） |
+| 單元測試 `test_sessionctl_{watch,keepwarm,longwait,hooks}.py` | 改斷言末行與 rc 0，附反向變體（`hasattr(RC)`、末行無 `rc=`、痕跡無 `rc`、CLI 子行程 quota 事件 rc 0、字面相近的 `echo keepwarm watch` 仍報） |
+| RealVerify `sessionctl_{keepwarm,watch,longwait,converge}`（RV-KW1～4、RV-W1～6、RV-LW1、RV-C4） | `_check_verdict` 簽名去 `want_rc`；環境缺件判定由「rc≠5」改為「末行非 quota」；其餘斷言 rc 0＋末行 |
+| CLAUDE.md、ADR §2.18.1／§2.19.1（D3／D5／新 D8）、TCS-SessionCtl、TCS-SessionSwitch-CostModel（REQ／AT／E2E／V 列＋新 §3.5c）、DES §4 | 同 commit 改寫；歷史帳（`RealVerify_Result_Ledger.md` 舊行、缺陷帳舊列）保留作史料 |
+
+**Stop 出聲（DEF-200-623）**：`roster.is_supervision_shell`（`WATCH_CMD_RE`／`KEEPWARM_CMD_RE`，容忍腳本路徑後引號）判出的 shell 不計入「仍在跑的背景任務」；只剩它們時**不出聲**。二擇一取「不出聲」的 WHY＝存在與否已由監督閘（有在飛代理時）、保溫閘（無背景工作時）各自推回把關，正常運作不需每回合再說；「保溫中（下次叫醒約 HH:MM）」需讀逐字稿算錨點，增加 Stop 路徑 I/O 與失效面。有別的背景 shell 時照舊出聲且只數別的；有子代理時 `watching_text` 看管中字樣照舊。
+
+**真機自驗（當回合真跑）**：新增 `RV-KW6`（真 `claude -p`＋repo 真 Stop 守衛，背景掛真 `keepwarm --min 1`）、`RV-KW7`（同載具掛真 `watch --grace-sec 20`）：Stop payload 恰一個 running 的該 shell（前提）、真 Stop hook 無「背景任務在跑／TaskStop／擁有者」警告語、harness 完成通知 `completed (exit code 0)` 且無 failed、痕跡判決 ping／all_done。首次 RV-KW7 因斷言面錯誤（逐字稿只收完成通知、不收背景指令輸出）自己報紅並留證據，改取痕跡判決後 `RV-KW6 pass`、`RV-KW7 pass`（`realverify.py run --case`，逐字稿座標見 `RealVerify_Result_Ledger.md` 本輪入帳列）。誠實劃界：畫面上「failed」字樣的**渲染**由 harness 決定，本載具只能機驗「完成通知為 completed／exit code 0」這個成因面；掌舵者目視仍可補一次（非阻塞）。
+
+**帳本順手修正**：`AutoSDD_Defect_Log.md` DEF-200-604／605 補 `7c38492c`（`git log -S` 查實）、DEF-200-609 補 `9f757344`；609「待重測」查實＝V-F1 已於 R215 盤點改列備援路徑、由 RV-F1 機驗（見 `CrossPlatform_R215_PendingVerification_Closure.md` 盤點列 46），冷窗轉送的真機畫面目視＝掌舵者目視（非阻塞），已據實改寫。

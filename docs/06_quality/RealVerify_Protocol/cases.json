@@ -50,6 +50,8 @@
     "RV-KW3": {"family": "sessionctl_keepwarm", "refs": ["V-SS3"], "wp": "R216"},
     "RV-KW4": {"family": "sessionctl_keepwarm", "refs": ["V-SS3"], "wp": "R216"},
     "RV-KW5": {"family": "sessionctl_keepwarm", "refs": ["V-SS4"], "wp": "R216"},
+    "RV-KW6": {"family": "sessionctl_keepwarm", "refs": ["DEF-200-622", "DEF-200-623"], "wp": "R216"},
+    "RV-KW7": {"family": "sessionctl_keepwarm", "refs": ["DEF-200-622", "DEF-200-623"], "wp": "R216"},
     "RV-LW1": {"family": "sessionctl_longwait", "refs": ["AT-SS-30", "AT-SS-31"], "wp": "R216"},
     "RV-LW2": {"family": "sessionctl_longwait", "refs": ["AT-SS-33", "AT-SS-34", "AT-SS-35"], "wp": "R216"},
     "RV-LW3": {"family": "sessionctl_longwait", "refs": ["V-SS2"], "wp": "R216", "long": true},

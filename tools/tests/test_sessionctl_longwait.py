@@ -222,7 +222,7 @@ class _Clock:
 
 
 class WaitforTest(unittest.TestCase):
-    """AT-SS-31／32：完成 rc 0＋尾端＋判決；未完成 rc 3；參數錯 rc 2；`--max-sec` 夾到上限。"""
+    """AT-SS-31／32：完成與未完成皆 rc 0（判決看末行）；參數錯 rc 2；`--max-sec` 夾到上限。"""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -235,10 +235,13 @@ class WaitforTest(unittest.TestCase):
         rc = longwait.waitfor(self.done, max_sec, now_fn=clock.now, sleep_fn=clock.sleep, out=buf)
         return rc, buf.getvalue()
 
-    def test_pending_returns_3_with_verdict_last_line_and_waits_the_whole_budget(self) -> None:
+    def test_pending_returns_0_with_verdict_last_line_and_waits_the_whole_budget(self) -> None:
+        """DEF-200-622。WHY：「還沒好」是正常結果；rc≠0 會讓 harness／工具把它顯示成失敗，子代理與
+        掌舵者都讀成錯誤。判決只看末行 `WAITFOR_VERDICT=pending`。"""
         clock = _Clock()
         rc, text = self._run(5, clock)
-        self.assertEqual(rc, longwait.RC_PENDING)
+        self.assertEqual(rc, 0)
+        self.assertFalse(hasattr(longwait, "RC_PENDING"))
         self.assertEqual(text.splitlines()[-1], "WAITFOR_VERDICT=pending seg=1/12")
         self.assertAlmostEqual(clock.t, 5.0, places=6,
                                msg="要把 max-sec 等滿才回（每段都續命快取）")
@@ -272,7 +275,9 @@ class WaitforTest(unittest.TestCase):
         """`.done` 不用 rename：讀到寫一半的內容當未完成，下一輪再讀。"""
         for junk in ("", "{", '{"rc": "3"}', "[]"):
             self.done.write_text(junk, encoding="utf-8")
-            self.assertEqual(self._run(1)[0], longwait.RC_PENDING, repr(junk))
+            rc, text = self._run(1)
+            self.assertEqual((rc, text.splitlines()[-1].split(" seg")[0]),
+                             (0, "WAITFOR_VERDICT=pending"), repr(junk))
 
     def test_segment_counter_climbs_and_the_cap_message_stops_further_splitting(self) -> None:
         seen = [self._run(1)[1].splitlines()[-1] for _ in range(longwait.N_S_STAR)]
@@ -284,11 +289,12 @@ class WaitforTest(unittest.TestCase):
         self.assertNotIn("keepwarm-ok", last, "waitfor 上限 < 閘線，沒有任何理由叫子代理去繞閘")
 
     def test_cli_exit_codes_and_clamp(self) -> None:
-        """AT-SS-31／32 的 CLI 面：done 不存在＋max-sec 1 ⇒ rc 3；缺參數／非 .done／非正數 ⇒ rc 2；
+        """AT-SS-31／32 的 CLI 面：done 不存在＋max-sec 1 ⇒ rc 0＋末行 pending（DEF-200-622）；
+        缺參數／非 .done／非正數 ⇒ rc 2（真錯誤才非 0）；
         `--max-sec 600` 夾到上限並出聲（此處只驗出聲，不真等 270 秒：done 已存在即刻回）。"""
         got = _cli("waitfor", "--done", str(self.done), "--max-sec", "1")
         self.assertEqual((got.returncode, got.stdout.splitlines()[-1].split(" seg")[0]),
-                         (3, "WAITFOR_VERDICT=pending"), got.stderr)
+                         (0, "WAITFOR_VERDICT=pending"), got.stderr)
         self.assertEqual(_cli("waitfor").returncode, 2)
         self.assertEqual(_cli("waitfor", "--done", str(self.out)).returncode, 2)
         self.assertEqual(_cli("waitfor", "--done", str(self.done), "--max-sec", "0").returncode, 2)

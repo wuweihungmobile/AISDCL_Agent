@@ -66,7 +66,7 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 
 | FR | 內容 | 對應 | 狀態 |
 |---|---|---|---|
-| FR-W1 | `sessionctl watch [--sid] [--stall-min] [--wall-min] [--ctx-max]`：阻塞輪詢，第一個事件成立即印處置表對應列與末行 `WATCH_VERDICT=<事件>` 後以表定 rc 結束；每輪覆寫心跳檔 | D1 | 已實作並通過（未提交） |
+| FR-W1 | `sessionctl watch [--sid] [--stall-min] [--wall-min] [--ctx-max]`：阻塞輪詢，第一個事件成立即印處置表對應列與末行 `WATCH_VERDICT=<事件>` 後一律 rc 0 結束（原表定 rc 2～6 於 DEF-200-622 取消：harness 把非 0 背景指令顯示成 failed）；每輪覆寫心跳檔 | D1 | 已實作並通過（未提交） |
 | FR-W2 | keepwarm 保溫點＝**主控最後一筆帶 usage 的 assistant 記錄**＋`AUTOSDD_KEEPWARM_MINUTES`（出廠 45、只准下修、下限 15；R216 改，原為「watch 啟動後 50 分」常數、不開 env）；無人窗口取 `min(T_kw, harness 背景等待上限−餘裕)`；錨點函式住 `keepwarm.py` | D1 | 已實作並通過（未提交） |
 | FR-W3 | stall 不判「最後一筆為 assistant end_turn」的代理 | D1 | 已實作並通過（未提交） |
 | FR-W4 | quota 事件重用 `park.prepare_hits`（讀快取、不外呼） | D1 | 已實作並通過（未提交） |
@@ -234,7 +234,7 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 ### 2.9 監督（R3；`test_sessionctl_watch.py`、`test_sessionctl_supervise.py`；縫＝注入時鐘／名冊／額度／心跳讀取，不開環境變數鉤）
 | AT | 一句話 | 縫 | 狀態（測試檔::名稱） |
 |---|---|---|---|
-| AT-W1～6 | 六種事件（all_done、overrun、stall、budget、quota、keepwarm）各自成立時 rc 與末行正確、先到先出 | 假名冊／假時鐘 | 已實作並通過（`test_sessionctl_watch.py::EventTests`：`test_w1_all_done_after_grace_when_never_seen`、`test_w1b_all_done_immediately_once_seen`、`test_w2_overrun`、`test_w3_stall`、`test_w4_budget`、`test_w5_quota`、`test_w6_keepwarm`、`test_w6_keepwarm_boundary_in_decide`、`test_event_order_is_pinned`、`test_disposal_row_and_rc_table`） |
+| AT-W1～6 | 六種事件（all_done、overrun、stall、budget、quota、keepwarm）各自成立時末行 `WATCH_VERDICT=<事件>` 正確且一律 rc 0、先到先出 | 假名冊／假時鐘 | 已實作並通過（`test_sessionctl_watch.py::EventTests`：`test_w1_all_done_after_grace_when_never_seen`、`test_w1b_all_done_immediately_once_seen`、`test_w2_overrun`、`test_w3_stall`、`test_w4_budget`、`test_w5_quota`、`test_w6_keepwarm`、`test_w6_keepwarm_boundary_in_decide`、`test_event_order_is_pinned`、`test_disposal_row_and_rc_table`） |
 | AT-W7 | 最後一筆為 end_turn 的代理 20 分無記錄不判 stall | 假名冊 | 已實作並通過（`test_sessionctl_watch.py::EventTests::test_w7_end_turn_agent_is_not_stalled`） |
 | AT-W8 | stall 門檻低於下限 ⇒ 退回出廠值並出聲 | ENV、CLI 參數 | 已實作並通過（`test_sessionctl_watch.py::ConfigTests::test_w8_stall_floor_is_11`） |
 | AT-W9 | 單支上下文門檻只准下修（env 與 `--ctx-max` 皆然） | ENV | 已實作並通過（`test_sessionctl_watch.py::ConfigTests::test_w9_ctx_only_downward`） |

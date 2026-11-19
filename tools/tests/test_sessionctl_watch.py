@@ -109,6 +109,13 @@ def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None
     return rc, out.getvalue(), clock
 
 
+def _event(out: str) -> str:
+    """末行 `WATCH_VERDICT=<事件> n=…` 的事件名。WHY：判決一律 rc 0（DEF-200-622），只看末行。"""
+    last = out.strip().splitlines()[-1]
+    assert last.startswith("WATCH_VERDICT="), last
+    return last.split()[0].split("=", 1)[1]
+
+
 class EventTests(_Fence):
     def test_w1_all_done_after_grace_when_never_seen(self) -> None:
         """AT-W1。WHY：主控派工失敗或代理瞬間交卷時，watch 不能永遠等；但剛啟動時名冊可能還空，
@@ -127,7 +134,7 @@ class EventTests(_Fence):
         self.assertLess(clock.t - T0, watch.GRACE_SECONDS)
 
     def test_w2_overrun(self) -> None:
-        """AT-W2（rc 2）。WHY：代理自啟動起超過牆鐘仍未交卷＝失控，要叫醒主控決定繼續或拆小。"""
+        """AT-W2。WHY：代理自啟動起超過牆鐘仍未交卷＝失控，要叫醒主控決定繼續或拆小。"""
         clock = _Clock()
 
         def roster():
@@ -135,36 +142,31 @@ class EventTests(_Fence):
             return [_agent(last=now, started=T0)]  # 一直有活動（不停滯），只是太久
         cfg = watch.Cfg(wall_min=10, keepwarm_min=999)
         rc, out, _ = _run(roster, cfg=cfg, clock=clock)
-        self.assertEqual(rc, 2)
-        self.assertIn("WATCH_VERDICT=overrun", out)
+        self.assertEqual((rc, _event(out)), (0, "overrun"))
 
     def test_w3_stall(self) -> None:
-        """AT-W3（rc 3）。WHY：代理最後一筆記錄過久＝卡死，閒置的主控沒人發現就是整段浪費。"""
+        """AT-W3。WHY：代理最後一筆記錄過久＝卡死，閒置的主控沒人發現就是整段浪費。"""
         rc, out, _ = _run(lambda: [_agent(last=T0)], cfg=watch.Cfg(stall_min=15, keepwarm_min=999))
-        self.assertEqual(rc, 3)
-        self.assertIn("WATCH_VERDICT=stall", out)
+        self.assertEqual((rc, _event(out)), (0, "stall"))
         self.assertIn("任務a1", out)
 
     def test_w4_budget(self) -> None:
-        """AT-W4（rc 4）。WHY：代理上下文越大每輪越貴，1M 視窗前要先叫醒主控 TaskStop。"""
+        """AT-W4。WHY：代理上下文越大每輪越貴，1M 視窗前要先叫醒主控 TaskStop。"""
         rc, out, _ = _run(lambda: [_agent(last=T0 + 29, ctx=800_000)],
-        cfg=watch.Cfg(ctx_max=700_000))
-        self.assertEqual(rc, 4)
-        self.assertIn("WATCH_VERDICT=budget", out)
+                          cfg=watch.Cfg(ctx_max=700_000))
+        self.assertEqual((rc, _event(out)), (0, "budget"))
 
     def test_w5_quota(self) -> None:
-        """AT-W5（rc 5）。WHY：主控閒置期間額度警報沒人聽（PostToolUse 只在主控呼叫工具時出聲）。"""
+        """AT-W5。WHY：主控閒置期間額度警報沒人聽（PostToolUse 只在主控呼叫工具時出聲）。"""
         rc, out, _ = _run(lambda: [_agent(last=T0 + 29)], quota=True)
-        self.assertEqual(rc, 5)
-        self.assertIn("WATCH_VERDICT=quota", out)
+        self.assertEqual((rc, _event(out)), (0, "quota"))
 
     def test_w6_keepwarm(self) -> None:
-        """AT-W6（rc 6）。WHY：主控快取 1 小時；在冷掉前叫醒主控重掛，避免交卷時整份重寫。"""
+        """AT-W6。WHY：主控快取 1 小時；在冷掉前叫醒主控重掛，避免交卷時整份重寫。"""
         clock = _Clock()
         rc, out, _ = _run(lambda: [_agent(last=clock.now(), started=clock.now())],
                           cfg=watch.Cfg(wall_min=9999), clock=clock)
-        self.assertEqual(rc, 6)
-        self.assertIn("WATCH_VERDICT=keepwarm", out)
+        self.assertEqual((rc, _event(out)), (0, "keepwarm"))
         self.assertGreaterEqual(clock.t - T0, 45 * MIN)
 
     def test_w6_keepwarm_boundary_in_decide(self) -> None:
@@ -182,9 +184,8 @@ class EventTests(_Fence):
         clock = _Clock(start=T0 + 10 * MIN)  # watch 啟動於 T0+10，主控最後記錄 T0
         rc, out, clock = _run(lambda: [_agent(last=clock.now(), started=clock.now())],
                               cfg=watch.Cfg(wall_min=9999), clock=clock, anchor=T0)
-        self.assertEqual(rc, 6)
+        self.assertEqual((rc, _event(out)), (0, "keepwarm"))
         self.assertEqual(clock.t - T0, 45 * MIN)  # 於 T0+45 判 keepwarm（不是 T0+55）
-        self.assertIn("WATCH_VERDICT=keepwarm", out)
         # 反向：錨點新（主控剛剛才動過）⇒ 保溫點往後延，不因 watch 啟動久了而提早叫醒
         late = T0 + 50 * MIN
         decided = watch.decide([_agent(last=late, started=late)], late, T0, watch.Cfg(
@@ -230,14 +231,23 @@ class EventTests(_Fence):
         self.assertEqual(watch.ORDER, ("quota", "budget", "stall", "overrun", "all_done",
         "keepwarm"))
 
-    def test_disposal_row_and_rc_table(self) -> None:
-        """判決後印 ARCH §1.5 對應列＋rc 表固定。WHY：被叫醒的主控沒有上下文，處置要隨判決一起印。
-        """
+    def test_every_verdict_exits_rc_zero_and_the_verdict_is_the_last_line(self) -> None:
+        """判決後印 ARCH §1.5 對應列、判決一律 rc 0、事件只看末行（DEF-200-622）。WHY：harness
+        把背景指令的任何非 0 結束都顯示成「failed」，掌舵者真機把正常的叫醒事件（舊 rc 2～6）
+        讀成錯誤；被叫醒的主控沒有上下文，處置要隨判決一起印。反向：事件名全數可由末行分辨
+        （rc 不再承載資訊），且模組不再留一張會被誤用的 rc 表。"""
         rc, out, _ = _run(lambda: [_agent(last=T0)], cfg=watch.Cfg(keepwarm_min=999))
         self.assertIn(watch.DISPOSAL["stall"], out)
-        self.assertEqual(watch.RC, {"all_done": 0, "overrun": 2, "stall": 3, "budget": 4,
-                                    "quota": 5, "keepwarm": 6})
-        self.assertEqual(rc, watch.RC["stall"])
+        self.assertEqual((rc, _event(out)), (0, "stall"))
+        self.assertFalse(hasattr(watch, "RC"))
+        seen = {_event(_run(*a, **k)[1]) for a, k in (
+            ((lambda: [],), {}),
+            ((lambda: [_agent(last=T0)],), {"quota": True}),
+            ((lambda: [_agent(last=T0 + 29, ctx=800_000)],), {"cfg": watch.Cfg(ctx_max=700_000)}),
+            ((lambda: [_agent(last=T0)],), {"cfg": watch.Cfg(keepwarm_min=999)}))}
+        self.assertEqual(seen, {"all_done", "quota", "budget", "stall"})
+        for line in out.splitlines():
+            self.assertNotIn("rc=", line)
 
     def test_verdict_is_traced_with_the_shared_event_name(self) -> None:
         """WHY：sessionctl 不得 import wastecensus（A-8），事件名兩邊各定義——這條防它們漂開。"""
@@ -246,7 +256,8 @@ class EventTests(_Fence):
         rows = (self.tmp / "trace" / "autosdd_session_switch.jsonl").read_text(
             encoding="utf-8").splitlines()
         row = json.loads(rows[-1])
-        self.assertEqual((row["event"], row["verdict"], row["rc"]), ("watch_verdict", "stall", 3))
+        self.assertEqual((row["event"], row["verdict"]), ("watch_verdict", "stall"))
+        self.assertNotIn("rc", row)
 
     def test_watch_module_does_not_import_wastecensus(self) -> None:
         """A-8。WHY：守衛面不依賴量測探針，也避免 engine-bridge 閉包連動。"""
@@ -259,47 +270,49 @@ class QuotaLatchTests(_Fence):
     """D14／AT-SS-20～23：prepare 帶時 `quota_hit` 每輪都成立，舊版 watch 一掛即 rc 5、重掛照樣
     觸發（2026-11-18 21:26 真機：prepare 帶內監督形同失效）。定案＝同 reset 窗同帶只觸發一次。"""
 
-    def _two_rounds(self, first, second) -> tuple[int, int]:
+    def _two_rounds(self, first, second) -> tuple[str, str]:
+        """兩次連續掛 watch 各自結束的事件名（原先用 rc 5／6 分辨，判決改一律 rc 0 後看末行）。"""
         cfg = watch.Cfg(wall_min=9999)
-        rcs = []
+        events = []
         for key in (first, second):
             clock = _Clock()
-            rcs.append(_run(lambda c=clock: [_agent(last=c.now(), started=c.now())], cfg=cfg,
-                            clock=clock, quota=key)[0])
-        return rcs[0], rcs[1]
+            events.append(_event(_run(lambda c=clock: [_agent(last=c.now(), started=c.now())],
+                                      cfg=cfg, clock=clock, quota=key)[1]))
+        return events[0], events[1]
 
     def test_at_ss_20_same_window_same_band_fires_once(self) -> None:
-        """WHY：重掛後又立刻 rc 5，主控就沒有任何辦法在 prepare 帶內監督代理（缺陷本體）。"""
+        """WHY：重掛後又立刻 quota，主控就沒有任何辦法在 prepare 帶內監督代理（缺陷本體）。"""
         first, second = self._two_rounds(("prepare", "R"), ("prepare", "R"))
-        self.assertEqual(first, 5)
-        self.assertEqual(second, 6)  # 第二次不因 quota 結束，改由保溫點結束
+        self.assertEqual(first, "quota")
+        self.assertEqual(second, "keepwarm")  # 第二次不因 quota 結束，改由保溫點結束
         rows = [json.loads(x) for x in (self.tmp / "trace" / "autosdd_session_switch.jsonl")
                 .read_text(encoding="utf-8").splitlines()]
         self.assertEqual(sum(r["event"] == keepwarm.EV_QUOTA_LATCHED for r in rows), 1)
 
     def test_at_ss_21_band_upgrade_fires_again(self) -> None:
         """WHY（MU-10 閂鎖鍵漏帶級）：prepare→halt 是更嚴重的事，被前一次的閂鎖吞掉＝盲區。"""
-        self.assertEqual(self._two_rounds(("prepare", "R"), ("halt", "R")), (5, 5))
+        self.assertEqual(self._two_rounds(("prepare", "R"), ("halt", "R")), ("quota", "quota"))
 
     def test_a_lower_band_in_the_same_window_stays_latched(self) -> None:
         """WHY：同窗內 halt 已提醒過，讀數抖回 prepare 不該再吵一次（閂鎖記的是該窗最高帶）。"""
-        self.assertEqual(self._two_rounds(("halt", "R"), ("prepare", "R")), (5, 6))
+        self.assertEqual(self._two_rounds(("halt", "R"), ("prepare", "R")), ("quota", "keepwarm"))
 
     def test_at_ss_22_new_reset_window_fires_again(self) -> None:
         """WHY（MU-11 閂鎖鍵漏 reset）：閂鎖作用域＝一個 reset 窗；新窗是新的額度週期。"""
-        self.assertEqual(self._two_rounds(("prepare", "R"), ("prepare", "R+5h")), (5, 5))
+        self.assertEqual(self._two_rounds(("prepare", "R"), ("prepare", "R+5h")),
+                         ("quota", "quota"))
 
     def test_reset_jitter_across_a_minute_boundary_is_the_same_window(self) -> None:
         """WHY（2026-11-19 00:48／00:54 主控真機）：端點 reset 落在 :59:59.99 一帶，取分鐘後在 03:59
         與 04:00 間跳；字串比對把同窗當新窗，重掛又 rc 5——閂鎖修了等於沒修。"""
         a, b = "2026-11-19T04:00:00+08:00", "2026-11-19T03:59:00+08:00"
-        self.assertEqual(self._two_rounds(("prepare", a), ("prepare", b)), (5, 6))
+        self.assertEqual(self._two_rounds(("prepare", a), ("prepare", b)), ("quota", "keepwarm"))
         far = "2026-11-19T09:00:00+08:00"  # 反向：真的新窗（差數小時）仍要再觸發
-        self.assertEqual(self._two_rounds(("prepare", b), ("prepare", far))[1], 5)
+        self.assertEqual(self._two_rounds(("prepare", b), ("prepare", far))[1], "quota")
 
     def test_a_bare_true_from_the_seam_is_a_latchable_prepare(self) -> None:
         """WHY：舊縫回 bool；True 視為「無鍵的 prepare」也要受閂鎖管，不然舊呼叫端繞過缺陷修復。"""
-        self.assertEqual(self._two_rounds(True, True), (5, 6))
+        self.assertEqual(self._two_rounds(True, True), ("quota", "keepwarm"))
 
     def test_at_ss_23_broken_latch_file_still_fires_and_says_so(self) -> None:
         """WHY（MU-12 讀失敗時吞事件）：額度牆是不可逆的事；閂鎖壞了寧可再吵一次，也不靜默吞掉。"""
@@ -308,8 +321,8 @@ class QuotaLatchTests(_Fence):
         path.write_text("{not json", encoding="utf-8")
         buf = io.StringIO()
         with redirect_stderr(buf):
-            rc, _out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
-        self.assertEqual(rc, 5)
+            _rc, out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
+        self.assertEqual(_event(out), "quota")
         self.assertIn("額度閂鎖", buf.getvalue())
 
     def test_unwritable_latch_still_fires_and_says_so(self) -> None:
@@ -317,8 +330,8 @@ class QuotaLatchTests(_Fence):
         (self.tmp / "trace" / "watch").write_text("我是檔案不是目錄", encoding="utf-8")
         buf = io.StringIO()
         with redirect_stderr(buf):
-            rc, _out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
-        self.assertEqual(rc, 5)
+            _rc, out, _ = _run(lambda: [_agent(last=T0)], quota=("prepare", "R"))
+        self.assertEqual(_event(out), "quota")
         self.assertIn("額度閂鎖寫不進", buf.getvalue())
 
     def test_quota_disposal_row_says_a_rehang_will_not_refire(self) -> None:
@@ -457,6 +470,26 @@ class RealReaderTests(_Fence):
             capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("WATCH_VERDICT=all_done", proc.stdout)
+
+    def test_cli_non_all_done_verdict_still_exits_rc_zero(self) -> None:
+        """DEF-200-622 的真子行程鎖。WHY：舊版 quota 事件 rc 5，harness 把它顯示成「failed」；
+        現在事件只看末行、行程 rc 0。種 99% 讀數讓 quota 事件成立（反向＝上一條種 1% 得
+        all_done）。"""
+        import quota_meter  # noqa: PLC0415
+        now = datetime.now().astimezone()
+        (self.tmp / "quota").mkdir()
+        axis = {"kind": "five_hour", "pct": 99.0, "via": "test", "resets_at":
+                datetime.fromtimestamp(now.timestamp() + 7200).astimezone().isoformat()}
+        self.assertTrue(quota_meter.write_cache({"schema": quota_meter.SCHEMA, "axes": [axis],
+            "measured_at": now.isoformat(timespec="seconds")}, quota_meter.cache_path()))
+        (self.tmp / "projects" / SID).mkdir(parents=True)
+        env = {**os.environ, "PYTHONUTF8": "1"}
+        proc = subprocess.run(
+            [sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"), "watch", "--sid", SID,
+             "--projects-dir", str(self.tmp / "projects"), "--grace-sec", "1", "--poll-sec", "0.2"],
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(_event(proc.stdout), "quota")
 
     def test_cli_without_sid_is_rc2(self) -> None:
         """WHY：沒有 sid 就不知道看管誰；靜默亂猜會看管到別的 session。"""

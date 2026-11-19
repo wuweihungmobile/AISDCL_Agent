@@ -194,6 +194,31 @@ class StopMessageFunctionTest(unittest.TestCase):
         self.assertNotIn("已完成審查", text)
         self.assertNotIn("背景 shell", text)
 
+    def test_def_200_623_designed_keepwarm_and_watch_shells_are_not_a_warning(self) -> None:
+        """DEF-200-623（掌舵者 2026-11-19 真機：只掛著依設計的保溫 shell，Stop 卻說「仍有背景
+        任務在跑…TaskStop」，被讀成錯誤）。WHY：保溫／監督是主軸「不讓快取過期」的機械物，它們
+        存在就是正常運作，不是要人處理的警告。反向三格：①只有 keepwarm／watch（含 PowerShell
+        引號形態）⇒ 不出聲；②混著別的背景 shell ⇒ 照舊出聲、且只數別的那 1 個；③已有子代理 ⇒
+        照舊出聲、shell 不計監督那支。"""
+        slug = _project(self)
+        kw = {"id": "k", "type": "shell", "status": "running",
+              "command": "python tools/sessionctl.py keepwarm --sid x"}
+        wt = {"id": "w", "type": "shell", "status": "running",
+              "command": "& 'py.exe' 'tools\\sessionctl.py' watch --sid x"}
+        other = {"id": "o", "type": "shell", "status": "running", "command": "pytest -q"}
+        agent = {"id": "a1", "type": "subagent", "status": "running", "description": "審查"}
+        self.assertEqual(roster.stop_message(_stop(slug, background_tasks=[kw])), "")
+        self.assertEqual(roster.stop_message(_stop(slug, background_tasks=[kw, wt])), "")
+        text = roster.stop_message(_stop(slug, background_tasks=[kw, other]))
+        self.assertIn("（1 個背景 shell）", text)
+        self.assertIn("背景任務在跑", text)
+        with_agent = roster.stop_message(_stop(slug, background_tasks=[agent, kw]))
+        self.assertIn("1 支背景代理", with_agent)
+        self.assertNotIn("背景 shell", with_agent)
+        # 字面相近但不是監督指令的 shell 仍要報（不得過寬）
+        fake = {"id": "f", "type": "shell", "status": "running", "command": "echo keepwarm watch"}
+        self.assertIn("背景 shell", roster.stop_message(_stop(slug, background_tasks=[fake])))
+
     def test_at_sc_75_nothing_running_or_unreadable_roster_is_silent(self) -> None:
         """AT-SC-75：無執行中（含 `background_tasks: []`、檔案名冊讀不動）⇒ 空字串。"""
         slug = _project(self)

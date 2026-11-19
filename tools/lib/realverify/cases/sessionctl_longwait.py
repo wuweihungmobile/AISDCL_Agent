@@ -58,7 +58,7 @@ def _last(text: str) -> str:
 # ───────────────────────────── RV-LW1：runlong＋waitfor 真跑 ─────────────────────────────
 @case("RV-LW1", "sessionctl_longwait", refs=("AT-SS-30", "AT-SS-31"))
 def rv_lw1(ctx: CaseContext) -> None:
-    """真跑：被等的指令睡 8 秒。waitfor --max-sec 2 ⇒ rc 3＋`WAITFOR_VERDICT=pending`、`.done` 尚不存在；
+    """真跑：被等的指令睡 8 秒。waitfor --max-sec 2 ⇒ rc 0（DEF-200-622：「還沒好」是正常結果）＋`WAITFOR_VERDICT=pending`、`.done` 尚不存在；
     再 waitfor --max-sec 30 ⇒ rc 0＋尾端含子行程輸出（UTF-8 中文）＋`WAITFOR_VERDICT=done rc=0`；`.done` 內容 rc 0；runlong 自身 rc 0。"""  # noqa: E501
     sb = ctx.sandbox(probe_hooks=False)
     out, done = sb.root / "long.txt", sb.root / "long.txt.done"
@@ -69,7 +69,7 @@ def rv_lw1(ctx: CaseContext) -> None:
     sb.procs.append(proc)
     t0 = time.time()
     first = _py("waitfor", "--done", str(done), "--max-sec", "2", env=sb.env())
-    ctx.check(first.returncode == 3 and _last(first.stdout).startswith("WAITFOR_VERDICT=pending"),
+    ctx.check(first.returncode == 0 and _last(first.stdout).startswith("WAITFOR_VERDICT=pending"),
               f"第一段 waitfor rc={first.returncode} 末行={_last(first.stdout)!r} stderr={first.stderr[:200]!r}")  # noqa: E501
     ctx.check(not done.exists(), "子行程還在跑，`.done` 卻已存在")
     second = _py("waitfor", "--done", str(done), "--max-sec", "30", env=sb.env())
