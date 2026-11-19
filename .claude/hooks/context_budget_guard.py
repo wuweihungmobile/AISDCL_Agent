@@ -997,8 +997,7 @@ def main() -> int:
             # handback 以 additionalContext 出聲（本體住 sentinel_lifecycle，此處只接線）。
             arm_sentinel(payload)
             if sentinel_lifecycle is not None:
-                sentinel_lifecycle.announce_handbacks(
-                    lambda m: emit_to_model(event, m), sid=payload.get("session_id"))
+                sentinel_lifecycle.announce_handbacks(lambda m: emit_to_model(event, m), sid=payload.get("session_id"))  # noqa: E501
             if session_brief is not None and quota_gate is not None:  # R158／P6 round-label-ok
                 emit_to_model(event, session_brief.sessionstart_brief(
                     payload, quota_gate, scan_transcript, resolve_window,
