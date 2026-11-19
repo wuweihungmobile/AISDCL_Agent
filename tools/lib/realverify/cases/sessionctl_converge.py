@@ -8,8 +8,10 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+from pathlib import Path
 
-from ..sandbox import REPO
+from ..driver import EnvMissing
+from ..sandbox import REPO, main_checkout_root, slug_of
 from ..transcript import Transcript
 from . import CaseContext, case
 from .sessionctl_handoff import (
@@ -82,6 +84,16 @@ _BG_SHELL = ("Start exactly ONE background shell command by calling the shell to
              "Do NOT wait for it. Then end your turn immediately with the single word LAUNCHED.")
 
 
+def _env_without_keepwarm_gate(sb) -> dict:
+    """RV-C4 的 `claude -p` 回合關掉 Stop 保溫閘（只關保溫閘，不影響被測的冷叫醒閘）。
+
+    WHY（R216 複審 P3-c，2026-11-19 保留證據重現 RV-C4 逾時 280 秒）：甲組是自續跑＝保溫閘「該掛」
+    的情形，閘會在背景 shell 結束後推回「請掛 `sessionctl keepwarm`」；haiku 偶爾照做、掛上 45 分鐘
+    的背景行程，`claude -p` 便停在「Waiting for background work to finish」直到牆鐘逾時（低頻，故
+    多數次 pass）。保溫判決本來就由下面的 `_keepwarm_verdict` 真跑 CLI 驗，不需要讓模型掛。"""
+    return sc_env(sb, AUTOSDD_KEEPWARM_OFF="1")
+
+
 def _keepwarm_verdict(sb, transcript) -> tuple[int, str]:
     """真跑沙盒內安裝的 `sessionctl.py keepwarm --min 1`（小上下文門檻下修，額度不查）；回 (rc, 末行判決)。"""  # noqa: E501
     from .sessionctl_keepwarm import LOW_CTX, NO_QUOTA  # noqa: PLC0415 — 只有本案例需要
@@ -94,7 +106,7 @@ def _keepwarm_verdict(sb, transcript) -> tuple[int, str]:
     return r.returncode, (last[-1] if last else r.stdout[-200:])
 
 
-@case("RV-C4", "sessionctl_converge", refs=("DEF-200-617",))
+@case("RV-C4", "sessionctl_converge", refs=("DEF-200-617", "DEF-200-619", "DEF-200-621"))
 def rv_c4(ctx: CaseContext) -> None:
     """同一 session 自己續跑不算交棒（R216 QA P2-1；暴露證據 sid 31ea79d4）。
 
@@ -109,7 +121,7 @@ def rv_c4(ctx: CaseContext) -> None:
     ctx.check(rc == 0 and "續跑" in out, f"自己 --ack rc={rc} {out[:160]!r} {err[:160]!r}")
     ctx.check(pkg.with_suffix(".resumed").is_file() and not pkg.with_suffix(".ack").exists()
               and not pkg.with_suffix(".sealed").exists(), "自續跑後應有 .resumed、無 .ack、無 .sealed")  # noqa: E501
-    r = ctx.run_claude(sb, _BG_SHELL, env_extra=sc_env(sb), timeout_s=280,
+    r = ctx.run_claude(sb, _BG_SHELL, env_extra=_env_without_keepwarm_gate(sb), timeout_s=280,
                        extra_args=("--allowedTools=Bash,PowerShell",))
     ctx.check(r.rc == 0 and not r.timed_out, f"甲組 claude -p rc={r.rc} timed_out={r.timed_out}")
     tr = ctx.transcript(sb)
@@ -118,12 +130,18 @@ def rv_c4(ctx: CaseContext) -> None:
     rc_k, last = _keepwarm_verdict(sb, tr.path)
     ctx.check(rc_k == 6 and last.startswith("KEEPWARM_VERDICT=ping"), f"自續跑後 keepwarm 不該 skip：rc={rc_k} {last!r}")  # noqa: E501
 
+    # 丙（P3-a，純 CLI）：舊格式（無 sid）`.ack` 無從分辨 ⇒ 原主人再 `--ack` 不刪、並印處置
+    pkg.with_suffix(".ack").write_text("acked 2026-01-01T00:00:00+00:00\n", encoding="utf-8")
+    rc, out, err = run_cli(sb, "handoff", "--ack", str(pkg), env_extra={"CLAUDE_CODE_SESSION_ID": sb.sid})  # noqa: E501
+    ctx.check(rc == 0 and "舊格式 .ack" in out and pkg.with_suffix(".ack").exists(),
+              f"舊格式 ack 應保留並提示：rc={rc} {out[:200]!r} {err[:120]!r}")
+
     sb2 = ctx.sandbox()
     pkg2 = seal_session(ctx, sb2)
     rc, out, err = run_cli(sb2, "handoff", "--ack", str(pkg2), env_extra={"CLAUDE_CODE_SESSION_ID": "newcomer-sid-0001"})  # noqa: E501
     ctx.check(rc == 0 and "sid=newcomer-sid-0001" in pkg2.with_suffix(".ack").read_text(encoding="utf-8"), f"別的 sid ack rc={rc} {err[:160]!r}")  # noqa: E501
     ctx.check(not pkg2.with_suffix(".resumed").exists(), "別的 sid ack 不該寫 .resumed")
-    r2 = ctx.run_claude(sb2, _BG_SHELL, env_extra=sc_env(sb2), timeout_s=280,
+    r2 = ctx.run_claude(sb2, _BG_SHELL, env_extra=_env_without_keepwarm_gate(sb2), timeout_s=280,
                         extra_args=("--allowedTools=Bash,PowerShell",))
     ctx.check(r2.rc == 0 and not r2.timed_out, f"乙組 claude -p rc={r2.rc} timed_out={r2.timed_out}")  # noqa: E501
     tr2 = ctx.transcript(sb2)
@@ -134,7 +152,21 @@ def rv_c4(ctx: CaseContext) -> None:
     ctx.evidence(f"RV-C4 甲 {sb.sid[:8]} 自續跑 無冷叫醒閘＋{last}；乙 {sb2.sid[:8]} {tr2.coords(gate[0])} 推回＋{last2}")  # noqa: E501
 
 
-@case("RV-C3", "sessionctl_converge", refs=("CR1",))
+def _census_base_args() -> list[str]:
+    """真事故逐字稿母體的 `--base`：在 git worktree 內跑時，母體住**主 checkout** 的專案目錄，
+    不是 worktree 路徑的 slug（否則重放找不到 290,000 事故而誤判紅＝載具問題）。
+    非 worktree ⇒ 不帶參數（行為與舊版逐位元組相同）；worktree 且母體目錄不存在 ⇒
+    明確報 `EnvMissing`（rc 2），**不默默 skip、不誤判成被測物壞掉**。"""
+    main = main_checkout_root()
+    if main == REPO:
+        return []
+    base = Path.home() / ".claude" / "projects" / slug_of(main)
+    if not base.is_dir():
+        raise EnvMissing(f"RV-C3 在 git worktree（{REPO}）內跑，事故逐字稿母體應在主 checkout 的專案目錄 {base}，但該目錄不存在")  # noqa: E501
+    return ["--base", str(base)]
+
+
+@case("RV-C3", "sessionctl_converge", refs=("CR1", "DEF-200-621"))
 def rv_c3(ctx: CaseContext) -> None:
     """事故重放 CR1（2026-11-14 20:52）：大上下文＋無背景代理＋有交接包但沒 finalize ⇒ 結束回合被推回。
 
@@ -143,7 +175,8 @@ def rv_c3(ctx: CaseContext) -> None:
     """  # noqa: E501
     out = subprocess.run(  # noqa: S603
         [sys.executable, str(REPO / "tools" / "probe" / "waste_census.py"), "--replay-hard-ctx",
-         "--since-days", "14", "--candidates", "290000,850000"], cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",  # noqa: E501
+         "--since-days", "14", "--candidates", "290000,850000", *_census_base_args()],
+        cwd=str(REPO), capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=180, creationflags=_NOWIN)
     ctx.check(out.returncode == 0, f"waste_census 重放 rc={out.returncode}")
     row = next((ln for ln in out.stdout.splitlines() if re.match(r"\s*290,000\s", ln)), "")

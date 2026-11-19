@@ -284,7 +284,8 @@ class RunTest(_Base):
     def test_a_self_resumed_session_is_kept_warm_but_a_real_hand_over_is_not(self) -> None:
         """R216 QA P2-1（掌舵者主軸「不要讓 Cache 過期」）：park RESUME／自己 `--ack` 回到原 session
         後，保溫不得因 handed_over 失效。三格：自己 sid 的 ack ⇒ 保溫；別的 sid 的 ack ⇒ 跳過
-        （真交棒，反向變體）；續跑標記（`seal.mark_resumed`，含清掉舊格式 ack）⇒ 保溫。"""
+        （真交棒，反向變體）；續跑標記（`seal.mark_resumed`）清掉自己 sid 的 ack ⇒ 保溫；
+        舊格式 ack（無從分辨）不被續跑標記抹掉，仍保守視為別人接手（R216 複審 P3-a）。"""
         from lib.sessionctl import seal  # noqa: PLC0415
         self.write(_asst(T0))
         self.package(acked=False)
@@ -295,6 +296,9 @@ class RunTest(_Base):
                 self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), want)
         pkg.with_suffix(".ack").write_text("acked x", encoding="utf-8")  # 舊格式＝本機殘留形態
         self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), "handed_over")
+        self.assertTrue(seal.mark_resumed(pkg))
+        self.assertTrue(pkg.with_suffix(".ack").exists(), "舊格式 ack 無從分辨，續跑標記不得抹掉")
+        pkg.with_suffix(".ack").write_text(f"acked x sid={SID}", encoding="utf-8")
         self.assertTrue(seal.mark_resumed(pkg))
         self.assertEqual(keepwarm.skip_reason(SID, self.env, ctx=400_000), "")
 

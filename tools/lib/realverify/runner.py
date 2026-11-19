@@ -37,6 +37,16 @@ def select(cases: dict[str, Case], *, case_id: str | None, family: str | None, a
     return sorted([c for c in pool if long or not c.long], key=lambda c: c.id)
 
 
+def _with_kept(detail: str, ctx: CaseContext) -> str:
+    """失敗時（沙盒還沒清）先把證據複製到持久目錄，並把路徑接到失敗訊息與 notes（P3-c）。
+    env 缺件沒有可判的行為，不走這裡。"""
+    kept = ctx.keep_failure_evidence()
+    if not kept:
+        return detail
+    ctx.evidences.append(f"保留證據：{kept}")  # 進帳本列，事後找得到
+    return f"{detail}\n保留證據：{kept}"
+
+
 def run_case(c: Case) -> Outcome:
     ctx = CaseContext(c.id)
     try:
@@ -49,9 +59,10 @@ def run_case(c: Case) -> Outcome:
     except EnvMissing as e:
         out = Outcome(c.id, "env", str(e))
     except AssertionError as e:
-        out = Outcome(c.id, "fail", str(e))
+        out = Outcome(c.id, "fail", _with_kept(str(e), ctx))
     except Exception as e:  # noqa: BLE001 - 案例內任何例外都是失敗，不是 skip
-        out = Outcome(c.id, "fail", f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}")
+        out = Outcome(c.id, "fail", _with_kept(
+            f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=3)}", ctx))
     finally:
         residue = ctx.close()
     out.evidence, out.notes = ctx.evidences, ctx.notes + residue

@@ -348,16 +348,29 @@ class SelfResumeTest(_Base):
         self.assertIsNone(seal.wake_package(SID, self.env))
         self.assertTrue(seal.mark_resumed(self.pkg), "冪等：重做一次不得出錯")
 
-    def test_mark_resumed_clears_the_owners_and_legacy_ack_but_keeps_another_sessions(self) -> None:
-        """遷移面：舊格式與自己的 `.ack`（本機殘留的 31ea79d4 形態）清掉；別的 sid 的 `.ack` 是真的
-        被接手過，保留——反向變體，否則續跑會抹掉真交棒的證據。"""
-        for text, kept in ((f"acked x sid={SID}\n", False), ("acked x\n", False),
+    def test_mark_resumed_clears_only_the_owners_own_ack(self) -> None:
+        """R216 複審 P3-a：只清自己 sid 的 `.ack`；別的 sid 的 `.ack` 是真的被接手過、舊格式（沒記
+        sid）無從分辨，兩者都保留——續跑不得抹掉真交棒的證據。WHY：舊版把舊格式也刪，而
+        `handed_over` 對舊格式保守視為別人接手，兩處不一致 ⇒「先被別人舊格式 ack、原主人再自續跑」
+        會被誤判未交棒＝雙駕駛。`handed_over` 與 `mark_resumed` 必須對同一種 ack 給同一個答案。"""
+        for text, kept in ((f"acked x sid={SID}\n", False), ("acked x\n", True),
                            ("acked x sid=other-sid\n", True)):
             with self.subTest(text=text):
                 self.ack(text)
                 self.assertTrue(seal.mark_resumed(self.pkg))
                 self.assertEqual(self.pkg.with_suffix(".ack").exists(), kept)
+                self.assertEqual(seal.handed_over(SID, self.env) is not None, kept,
+                                 "保留的 ack 就必須仍被判已交棒（兩處判準一致）")
                 self.pkg.with_suffix(".ack").unlink(missing_ok=True)
+
+    def test_legacy_ack_predicate_only_matches_an_ack_without_sid(self) -> None:
+        """`seal.legacy_ack`（供 `--ack` 提示）：只認「有 .ack 沒記 sid」；有 sid／無 ack 皆否。"""
+        self.ack("acked x\n")
+        self.assertTrue(seal.legacy_ack(self.pkg))
+        self.ack(f"acked x sid={SID}\n")
+        self.assertFalse(seal.legacy_ack(self.pkg))
+        self.pkg.with_suffix(".ack").unlink()
+        self.assertFalse(seal.legacy_ack(self.pkg))
 
     def test_a_real_spawn_trace_stays_a_hand_over_even_after_a_resume_mark(self) -> None:
         """反向變體：spawn 痕跡＝新視窗真的開過，不因原 session 的續跑標記而消失。"""

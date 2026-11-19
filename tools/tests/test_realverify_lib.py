@@ -7,8 +7,10 @@ runner rc 對映都要有可失敗的測試。
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -19,11 +21,12 @@ if str(_TOOLS) not in sys.path:
 
 from lib.realverify import cases as rv_cases  # noqa: E402
 from lib.realverify import ledger, runner, sched  # noqa: E402
-from lib.realverify.driver import EnvMissing  # noqa: E402
+from lib.realverify.driver import EnvMissing, _kill_tree  # noqa: E402
 from lib.realverify.sandbox import (  # noqa: E402
     PROBE_HOOK_SRC,
     Sandbox,
     cleanup_handoff_for,
+    main_checkout_root,
     slug_of,
 )
 from lib.realverify.transcript import Transcript, find_transcript  # noqa: E402
@@ -205,6 +208,106 @@ class RunnerTest(unittest.TestCase):
             txt = p.read_text(encoding="utf-8")
             self.assertEqual(txt.count("# RealVerify 結果帳本"), 1)
             self.assertIn("a\\|b", txt)
+
+
+def _kept_to(d: str):
+    """把失敗證據的持久目錄指到測試暫存（不污染真 `~/.autosdd/realverify_kept`）。"""
+    return mock.patch.object(rv_cases, "kept_dir", lambda: Path(d))
+
+
+class FailureEvidenceIsKeptTest(unittest.TestCase):
+    """tools/lib/realverify/runner.py＋sandbox.py：失敗時沙盒逐字稿與 hook 輸出在清理前被保留。
+
+    WHY（R216 複審 P3-c）：RV-C4 低頻逾時 291 秒，沙盒逐字稿隨清理一起刪掉，根因再也查不到。
+    證據只在失敗時留；通過的案例照舊清乾淨（不累積殘留）。"""
+
+    def _failing_case(self, fail: bool):
+        def fn(ctx):
+            sb = ctx.sandbox()
+            (sb.root / "hook_events.jsonl").write_text('{"ev":"Stop"}\n', encoding="utf-8")
+            (sb.root / "debug_abc123.log").write_text("dbg", encoding="utf-8")
+            tdir = Path.home() / ".claude" / "projects" / slug_of(sb.root)
+            tdir.mkdir(parents=True, exist_ok=True)
+            (tdir / f"{sb.sid}.jsonl").write_text('{"type":"user"}\n', encoding="utf-8")
+            self.sb_root = sb.root
+            ctx.check(not fail, "boom")
+        return rv_cases.Case("RV-T-keep", "fake", fn, (), False, False)
+
+    def test_a_failed_case_keeps_transcript_and_hook_output_a_passing_one_keeps_nothing(self):
+        with tempfile.TemporaryDirectory() as d, _kept_to(d):
+            ok = runner.run_case(self._failing_case(False))
+            self.assertEqual(ok.status, "pass")
+            self.assertEqual(list(Path(d).iterdir()), [], "通過的案例不得留證據")
+            bad = runner.run_case(self._failing_case(True))
+            self.assertEqual(bad.status, "fail")
+            kept = [p for p in Path(d).iterdir() if p.name.startswith("RV-T-keep_")]
+            self.assertEqual(len(kept), 1)
+            self.assertIn(str(kept[0]), bad.detail, "失敗訊息必須印出保留路徑")
+            self.assertTrue(any(str(kept[0]) in e for e in bad.evidence), "保留路徑要進帳本證據")
+            box = next(kept[0].iterdir())
+            names = {p.name for p in box.rglob("*") if p.is_file()}
+            self.assertTrue({"hook_events.jsonl", "debug_abc123.log"} <= names, names)
+            self.assertTrue(any(n.endswith(".jsonl") and n != "hook_events.jsonl" for n in names),
+                            f"逐字稿沒被保留：{names}")
+        self.assertFalse(self.sb_root.exists(), "保留證據後沙盒仍必須清掉")
+
+    def test_env_missing_keeps_nothing(self):
+        def fn(ctx):
+            ctx.sandbox()
+            raise EnvMissing("no claude")
+        with tempfile.TemporaryDirectory() as d, _kept_to(d):
+            out = runner.run_case(rv_cases.Case("RV-T-env2", "fake", fn, (), False, False))
+            self.assertEqual(out.status, "env")
+            self.assertEqual(list(Path(d).iterdir()), [])
+
+
+class TimeoutKillsTheWholeTreeTest(unittest.TestCase):
+    """tools/lib/realverify/driver.py::_kill_tree：逾時要連子行程樹一起砍。
+
+    WHY（R216 複審 P3-c）：RV-C4 逾時時 claude 派生的背景行程活下來、握著沙盒目錄 ⇒ 清理報 RESIDUE。
+    只砍本體（舊 `proc.kill()`）時，子行程的心跳檔會繼續更新。POSIX 沒有零依賴的等價做法，
+    只斷言本體已死；樹的斷言限 Windows（誠實劃界，不是 skip）。"""
+
+    def test_parent_and_child_both_stop_writing(self):
+        with tempfile.TemporaryDirectory() as d:
+            beat = Path(d) / "beat"
+            child = ("import time,sys\nwhile True:\n"
+                     f" open(r'{beat}','w').write(str(time.time())); time.sleep(0.1)\n")
+            parent = ("import subprocess,sys,time\n"
+                      f"subprocess.Popen([sys.executable,'-c',{child!r}])\ntime.sleep(60)\n")
+            proc = subprocess.Popen([sys.executable, "-c", parent])
+            for _ in range(100):  # 等子行程第一次心跳（最多 10 秒）
+                if beat.exists():
+                    break
+                time.sleep(0.1)
+            self.assertTrue(beat.exists(), "前提：子行程已在寫心跳")
+            _kill_tree(proc)
+            proc.wait(timeout=10)
+            self.assertIsNotNone(proc.poll())
+            if sys.platform == "win32":
+                time.sleep(0.5)
+                first = beat.stat().st_mtime
+                time.sleep(0.8)
+                self.assertEqual(beat.stat().st_mtime, first, "子行程仍在寫心跳＝只砍了本體")
+
+
+class MainCheckoutRootTest(unittest.TestCase):
+    """tools/lib/realverify/sandbox.py::main_checkout_root：worktree 內回主 checkout，否則回自己。
+
+    WHY：RV-C3 的事故逐字稿母體住主 checkout 的專案目錄；在 worktree 跑時 slug 對不上而誤判紅。"""
+
+    def test_worktree_resolves_to_the_main_checkout_and_plain_repo_to_itself(self):
+        with tempfile.TemporaryDirectory() as d:
+            main, wt = Path(d).resolve() / "main", Path(d).resolve() / "wt"
+            main.mkdir()
+            git = ["git", "-c", "user.email=a@b.c", "-c", "user.name=t"]
+            for argv in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "x"],
+                         ["worktree", "add", "-q", str(wt)]):
+                subprocess.run([*git, "-C", str(main), *argv], check=True, capture_output=True)
+            self.assertEqual(main_checkout_root(main), main)
+            self.assertEqual(main_checkout_root(wt), main)
+            subprocess.run([*git, "-C", str(main), "worktree", "remove", str(wt)],
+                           check=True, capture_output=True)
 
 
 class RegistryTest(unittest.TestCase):

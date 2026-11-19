@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import sched
 from ..driver import RunResult, run_claude
-from ..sandbox import Sandbox
+from ..sandbox import Sandbox, kept_dir
 from ..transcript import Transcript
 
 
@@ -82,6 +83,18 @@ class CaseContext:
 
     def evidence(self, text: str) -> None:
         self.evidences.append(text)
+
+    def keep_failure_evidence(self, base: Path | None = None, stamp: str | None = None) -> str:
+        """案例判失敗時、清理前呼叫：把每個沙盒的逐字稿／hook 輸出複製到持久目錄；回保留路徑
+        （沒有可留的沙盒或複製失敗 ⇒ `""`，失敗原因照舊由案例自己的訊息報，不吞）。"""
+        root = (base or kept_dir()) / f"{self.case_id}_{stamp or time.strftime('%Y%m%dT%H%M%S')}"
+        kept = False
+        for i, sb in enumerate(self.sandboxes):
+            try:
+                kept = bool(sb.preserve(root / f"sandbox{i}_{sb.sid[:8]}")) or kept
+            except OSError as e:
+                self.notes.append(f"保留證據失敗（sandbox{i}）：{e}")
+        return str(root) if kept else ""
 
     # ---- 收尾（runner 的 finally 呼叫；案例本身不用管）----
     def close(self) -> list[str]:

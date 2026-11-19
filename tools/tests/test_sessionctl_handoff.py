@@ -426,6 +426,24 @@ class AnnounceTest(_Base):
         self.assertEqual(handoff.list_handoffs(self.base)[-1]["state"], "resumed")
         self.assertEqual(handoff.announce(lambda _m: True, base=self.base), "")
 
+    def test_owner_ack_over_a_legacy_ack_keeps_it_and_says_so(self) -> None:
+        """R216 複審 P3-a：舊格式（沒記 sid）`.ack` 無從分辨＝保守視為別人接手，原主人 `--ack`
+        不得默默刪掉它（否則雙駕駛）；也不默默保留——須告知路徑與處置。反向：無舊 ack 不印。"""
+        path = self._pkg("owner")
+        path.with_suffix(".ack").write_text("acked x\n", encoding="utf-8")
+        env = {**os.environ, "CLAUDE_CODE_SESSION_ID": "owner"}
+        out = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out):
+            self.assertEqual(handoff.ack(path), 0)
+        self.assertTrue(path.with_suffix(".ack").exists())
+        self.assertIn("舊格式 .ack", out.getvalue())
+        clean = self._pkg("owner2")
+        out2 = io.StringIO()
+        env2 = {**os.environ, "CLAUDE_CODE_SESSION_ID": "owner2"}
+        with unittest.mock.patch.dict(os.environ, env2), contextlib.redirect_stdout(out2):
+            self.assertEqual(handoff.ack(clean), 0)
+        self.assertNotIn("舊格式", out2.getvalue())
+
     def test_ack_by_another_session_records_who_and_stays_a_hand_over(self) -> None:
         """反向變體：別的 sid 接手＝真交棒，`.ack` 記下接手者 sid、狀態 acked、不寫 `.resumed`。"""
         path = self._pkg("owner")

@@ -131,9 +131,12 @@
 | AT-SS-60 | `.ack` 記自己的 sid／別的 sid／舊格式無 sid | `handed_over`：否／是／是（舊格式保守） |
 | AT-SS-61 | 已封存包 `mark_resumed` | `.sealed` 消失、`.resumed` 在、狀態 resumed、`handed_over`／`wake_package` 皆 None；重做冪等；再封存後 `.resumed` 消失、`wake_package` 回包 |
 | AT-SS-62 | 同 sid 自 `--ack`／park RESUME 成功後：Stop 帶 running shell／在飛代理；PreToolUse Agent（硬線） | 不出冷叫醒閘、訊息不含「已交棒」；別的 sid ack ⇒ 照推、照說已交棒；spawn 痕跡仍是交棒 |
-| AT-SS-63 | 同上情境的 keepwarm `skip_reason` | 自己 ack／續跑標記 ⇒ `""`；別的 sid ack、舊格式 ack ⇒ `handed_over` |
+| AT-SS-63 | 同上情境的 keepwarm `skip_reason` | 自己 sid 的 ack／續跑標記清掉自己的 ack ⇒ `""`；別的 sid ack、舊格式 ack（含續跑標記之後仍在）⇒ `handed_over` |
 | AT-SS-64 | `handoff.ack` 由原主人／別的 sid 跑；`announce(sid=原主人)` | 原主人＝`.resumed`、無 `.ack`、不再公告；別的 sid＝`.ack` 含 `sid=`；對原主人的公告改「自己封存的包、直接續做」，對別人不變 |
 | AT-SS-65 | `keepwarm._same_reset`：差 0／299／300／-300 秒、301／-301／3600 秒、解析失敗 | 同窗／同窗／同窗／同窗；新窗／新窗／新窗；False（字面相同 True）；`RESET_JITTER_SECONDS==300` |
+| AT-SS-66 | R216 複審 P3-a：`mark_resumed` 遇自己 sid／別的 sid／舊格式（無 sid）的 `.ack`；原主人 `handoff --ack` 遇舊格式 `.ack` | 只刪自己 sid 的；別的 sid 與舊格式保留且 `handed_over` 仍為是（兩處判準一致）；`--ack` 印出舊 `.ack` 路徑與處置、無舊 ack 不印 |
+| AT-SS-67 | R216 複審 P3-b：SessionStart hook 以 payload `session_id`＝原主人／別人跑同一個交接包（`guard.main()` 實跑） | 原主人得「本 session 自己封存」、別人得「未接手的交接包」；hook 把 `sid` 突變成 `None` 時此測試紅（`test_context_budget_guard.py::HandbackSessionStartAnnounceTest`） |
+| AT-SS-68 | R216 複審 P3-c／RV-C3：RealVerify 案例判失敗／例外；通過；env 缺件；在 git worktree 內跑 RV-C3 | 失敗＝逐字稿＋hook 事件＋debug 日誌＋traces 複製到 `~/.autosdd/realverify_kept/<案例>_<時刻>/`、路徑印在失敗訊息與帳本證據、沙盒仍清掉；通過／env＝不留；worktree＝`--base` 指向主 checkout 專案目錄，不存在則 `EnvMissing`（rc 2，不默默 skip）；RV-C4 的 `claude -p` 回合關保溫閘（根因＝模型照推回掛 45 分鐘 keepwarm ⇒ `-p` 等背景行程至逾時）；逾時連子行程樹一併砍 |
 
 ### 3.6 量測（增量 `test_waste_census_metrics.py`）
 

@@ -3541,6 +3541,38 @@ class HandbackSessionStartAnnounceTest(unittest.TestCase):
         self.assertEqual(len(handback_seen_again), 1,
                          ".ack 落地後重跑仍出聲＝已讀憑證沒被讀")
 
+    def test_the_hook_hands_the_payload_session_id_down_to_the_announcement(self) -> None:
+        """R216 複審 P3-b：`.claude/hooks/context_budget_guard.py` SessionStart 臂把 payload 的
+        `session_id` 傳給 `sentinel_lifecycle.announce_handbacks(..., sid=…)`，交接包公告才認得
+        「你就是原主人」。WHY：該行突變成 `sid=None` 時舊測試全綠（突變存活）；後果是原主人自續跑
+        的 session 每次開場被叫去「接手自己的包」——正是 DEF-200-617 的誘因。判準住 lib
+        （`tools/lib/sessionctl/handoff.py::announce`），這裡只釘 hook 接線：同一個包、同一個
+        hook，原主人 sid 與別人的 sid 必須得到不同的公告（反向變體）。"""
+        base = Path(os.environ[endurance_env.HANDOFF_DIR_ENV])
+        (base / "owner-sid_20261119T000000Z.md").write_text(
+            "# 交接包 sid=owner-sid\n## 機械層\nx\n", encoding="utf-8")
+        off_was = os.environ.get(guard.SENTINEL_OFF_ENV)
+        os.environ[guard.SENTINEL_OFF_ENV] = "1"
+        self.addCleanup(lambda: os.environ.update({guard.SENTINEL_OFF_ENV: off_was})
+                        if off_was is not None
+                        else os.environ.pop(guard.SENTINEL_OFF_ENV, None))
+        self.addCleanup(setattr, guard, "read_payload", guard.read_payload)
+        self.addCleanup(setattr, guard, "emit_to_model", guard.emit_to_model)
+
+        def announced(session_id: str) -> str:
+            seen: list[str] = []
+            guard.read_payload = lambda: {"hook_event_name": "SessionStart",
+                                          "session_id": session_id}
+            guard.emit_to_model = lambda _event, msg, *_: seen.append(msg) is None
+            self.assertEqual(guard.main(), 0)
+            return "\n".join(m for m in seen if "交接包" in m)
+
+        mine = announced("owner-sid")
+        self.assertIn("本 session 自己封存", mine, "hook 沒把 session_id 傳下去（sid=None）")
+        other = announced("newcomer-sid")
+        self.assertIn("未接手的交接包", other)
+        self.assertNotIn("本 session 自己封存", other)
+
     def test_r158_sessionstart_emits_real_number_brief(self) -> None:
         """R158／P6（Q2 機制）：SessionStart 無條件多送一行真實數字簡報（額度＋ round-label-ok
         context＋兩條查證指令＋rc=2 誤讀澄清句），且與未讀 handback 是否存在的出聲各自獨立

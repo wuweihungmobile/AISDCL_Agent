@@ -211,15 +211,36 @@ def mark_resumed(path, now: datetime | None = None) -> bool:
     ①記續跑（`.resumed`，包狀態變 `resumed`，不再被公告、不是 live）。
     ②刪 `.sealed`（封存是對「當時」的交代，續跑後已失效；之後真要換窗會重封存，
       `seal()` 寫戳時清掉 `.resumed`）。
-    ③舊格式（無 sid）或自己的 `.ack` 一併清掉（遷移）；別的 sid 的 `.ack` 保留＝真的被接手過。
+    ③只清「自己的」`.ack`（sid 等於原主人）；別的 sid 的 `.ack` 保留＝真的被接手過；
+      舊格式（沒記 sid，e7645e25 以前的產物）同樣保留——無從分辨是誰寫的，與 `handed_over`
+      「舊格式保守視為別人接手」同一判準（R216 複審 P3-a：舊版在此刪、在 `handed_over` 卻留，
+      兩處不一致會讓「先被別人舊格式 ack、原主人再自續跑」變成雙駕駛）。
+      不自動遷移的取捨見 ADR-XPLAT-004 §2.19 D7；原主人要接回時 `handoff --ack` 會提示處置。
     全部是檔案層動作，冪等。"""
     path, now = Path(path), handoff._aware(now)
     if not handoff._write(resumed_path(path), now.isoformat() + "\n"):
         return False
     sealed_path(path).unlink(missing_ok=True)
-    if acker_sid(path) in (None, handoff._sid_of(path)):
+    owner = handoff._sid_of(path)
+    if owner and acker_sid(path) == owner:
         path.with_suffix(".ack").unlink(missing_ok=True)
     return True
+
+
+def legacy_ack(path) -> bool:
+    """`.ack` 存在但沒記接手者 sid（舊格式）。供 `handoff --ack` 提示用。"""
+    p = Path(path)
+    return p.with_suffix(".ack").exists() and acker_sid(p) is None
+
+
+def resumed_notice(path) -> str:
+    """原主人 `handoff --ack` 記為續跑後印的訊息；若包上留有舊格式 `.ack`，附上處置（P3-a）。"""
+    text = "✅ 本 session 就是這個包的原主人：記為「續跑」、封存已作廢，不算交棒。"
+    if not legacy_ack(path):
+        return text
+    return (f"{text}\n🔴 偵測到舊格式 .ack（沒記接手者）：{Path(path).with_suffix('.ack')}\n"
+            "  無從分辨是誰寫的，保守視為別的 session 已接手、本 session 仍會被判「已交棒」。"
+            "確認沒有別的視窗在動同一棵工作樹後，手動刪除該 .ack 即可接回。")
 
 
 def handed_over(sid: str, env=None) -> Path | None:

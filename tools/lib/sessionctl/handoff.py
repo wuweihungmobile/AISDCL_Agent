@@ -243,7 +243,7 @@ def ack(path) -> int:
         from . import seal  # noqa: PLC0415 — lazy：seal 反向 import 本檔
         if not seal.mark_resumed(path):
             return 1
-        print("✅ 本 session 就是這個包的原主人：記為「續跑」、封存已作廢，不算交棒。")
+        print(seal.resumed_notice(path))
         return 0
     stamp = datetime.now().astimezone().isoformat()
     if not _write(path.with_suffix(".ack"), f"acked {stamp} sid={me}\n"):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -42,6 +43,20 @@ class RunResult:
             return ""
 
 
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """逾時收尾：連同子行程樹一起砍（R216 複審 P3-c）。
+
+    WHY：`proc.kill()` 只砍 claude 本身，它派生的背景行程（如被 Stop 閘要求掛上的 keepwarm）
+    活下來並握著沙盒目錄 ⇒ 清理報 RESIDUE、孤兒行程遺留。Windows 用 `taskkill /T /F`（只砍我們自己
+    spawn 的這個 pid 的樹）；POSIX 沒有等價的零依賴做法時退回只砍本體（沙盒仍可能殘留，會被
+    runner 的殘留檢查大聲報出，不默默放過）。"""
+    if os.name == "nt":
+        subprocess.run(  # noqa: S603
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,  # noqa: S607
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
+    proc.kill()
+
+
 def run_claude(
     sb: Sandbox,
     prompt: str,
@@ -71,7 +86,7 @@ def run_claude(
         out, err = proc.communicate(timeout=timeout_s)
     except subprocess.TimeoutExpired:
         timed_out = True
-        proc.kill()
+        _kill_tree(proc)
         out, err = proc.communicate()
     sb.used_resume = True
     return RunResult(

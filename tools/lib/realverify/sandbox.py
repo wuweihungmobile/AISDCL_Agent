@@ -61,6 +61,26 @@ def projects_dir() -> Path:
     return Path.home() / ".claude" / "projects"
 
 
+def kept_dir() -> Path:
+    """失敗證據保留根目錄（持久，不在沙盒內；`Sandbox.preserve` 的去處）。"""
+    return Path.home() / ".autosdd" / "realverify_kept"
+
+
+def main_checkout_root(repo: Path = REPO) -> Path:
+    """主工作樹根：`repo` 是 git worktree 時回主 checkout（經 `--git-common-dir`），否則回 `repo`。
+
+    WHY（R216 複審 RV-C3）：真逐字稿住 `~/.claude/projects/<主 checkout 路徑 slug>`，worktree 路徑的
+    slug 對不上 ⇒ 事故重放找不到母體而判紅，是載具問題不是被測物問題。"""
+    out = subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    common = out.stdout.strip()
+    if out.returncode != 0 or not common:
+        return repo
+    return Path(common).resolve().parent
+
+
 def handoff_dir() -> Path:
     """真交接包目錄（§6b-2：不加 env 出口；沙盒 sid 天生唯一，只刪自己 sid 開頭的檔）。"""
     return Path.home() / ".autosdd" / "handoff"
@@ -160,6 +180,30 @@ class Sandbox:
         if not p.is_file():
             return []
         return [json.loads(ln) for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    # ---- 失敗保留 ----
+    def preserve(self, dest: Path) -> list[str]:
+        """把判失敗所需的證據複製到 `dest`（沙盒清理前呼叫）：逐字稿目錄、探針 hook 觸發記錄、
+        `claude --debug hooks` 日誌、沙盒內 traces（守衛痕跡）。回複製成功的項目名；缺的略過。
+
+        WHY（R216 複審 P3-c）：RV-C4 低頻逾時 291 秒，因沙盒逐字稿隨清理一起刪掉，根因再也查不到。
+        證據只在**失敗**時留（過案例照舊清乾淨，不累積殘留）。"""
+        got: list[str] = []
+        dest.mkdir(parents=True, exist_ok=True)
+        for d in self.transcript_dirs():
+            shutil.copytree(d, dest / "transcripts", dirs_exist_ok=True)
+            got.append("transcripts")
+        for name in ("hook_events.jsonl",):
+            if (self.root / name).is_file():
+                shutil.copy2(self.root / name, dest / name)
+                got.append(name)
+        for dbg in sorted(self.root.glob("debug_*.log")):
+            shutil.copy2(dbg, dest / dbg.name)
+            got.append(dbg.name)
+        if (self.root / "traces").is_dir():
+            shutil.copytree(self.root / "traces", dest / "traces", dirs_exist_ok=True)
+            got.append("traces")
+        return got
 
     # ---- 清理 ----
     def transcript_dirs(self) -> list[Path]:
