@@ -49,7 +49,7 @@ def px35(ctx: CaseContext) -> None:
 
 
 SECRETS = (
-    "sk-ant-api03-RVSECRET0123456789abcdefghijklmnop",  # secret-scan-ok: RV-PX40 遮蔽測試的假金鑰夾具
+    "sk-ant-api03-RVSECRET0123456789abcdefghijklmnop",  # secret-scan-ok: RV-PX40 假金鑰夾具
     "password=hunter2RVsecret",
 )
 
