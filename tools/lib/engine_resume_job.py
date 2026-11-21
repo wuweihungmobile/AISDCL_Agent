@@ -150,9 +150,30 @@ def _arm_launchd(backend, label: str, argv: list[str], cwd: str, fire: datetime)
                "｜🔴 這**不是** NextRunTime（launchd 不報下次幾點跑），也不證明睡著的 Mac 會醒")
 
 
+def expiry_ps(fire: datetime, expire_at: datetime | None) -> tuple[str, str]:
+    """沙盒目標的 OS 自毀（DES RealVerify_SideEffect_Isolation §5.4、D-5）：
+    `(觸發器後綴, 設定後綴)` 兩段
+    PowerShell。`expire_at=None`（正式目標）⇒ 兩段皆空字串，腳本與修前逐位元組相同。EndBoundary 以
+    `fire` 同一時區框架書寫（與 StartBoundary 同框，兩者相對順序不受機器時區影響）。真機實測
+    （`tools/probe/sandbox_scope_endboundary.py`，2026-11-21）：已停用、從未執行而過了
+    EndBoundary 的
+    工作被 OS 於數秒內刪除（`DeleteExpiredTaskAfter=PT0S`），故 D-5 的自毀成立。"""
+    if expire_at is None:
+        return "", ""
+    end = expire_at.astimezone(fire.tzinfo) if fire.tzinfo and expire_at.tzinfo else expire_at
+    return (f"$trigger.EndBoundary = '{end:%Y-%m-%dT%H:%M:%S}'\n",
+            "$settings.DeleteExpiredTaskAfter = 'PT0S'\n")
+
+
 def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
-                  fire: datetime, *, interactive: bool = False) -> tuple[int, str]:
+                  fire: datetime, *, interactive: bool = False,
+                  expire_at: datetime | None = None) -> tuple[int, str]:
     q = planner._ps_single_quote
+    if expire_at is not None and expire_at <= fire:
+        print(f"❌ 拒絕註冊：expire_at（{expire_at:%H:%M:%S}）不晚於觸發時刻（{fire:%H:%M:%S}）"
+              "⇒ EndBoundary 必須晚於 StartBoundary（D-15 應已在登記站點攔下）", file=sys.stderr)
+        return 1, ""
+    end_trigger, end_settings = expiry_ps(fire, expire_at)
     principal = INTERACTIVE_PRINCIPAL if interactive else planner._SCHTASKS_PRINCIPAL
     register = ("Register-ScheduledTask @common -Principal $principal -EA Stop | Out-Null\n"
                 if interactive else
@@ -165,8 +186,8 @@ def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
         "$ErrorActionPreference = 'Stop'\n"
         f"$action = New-ScheduledTaskAction -Execute '{python}' -Argument '{q(args)}' "
         f"-WorkingDirectory '{q(cwd)}'\n"
-        f"$trigger = New-ScheduledTaskTrigger -Once -At '{fire:%Y-%m-%d %H:%M:%S}'\n"
-        f"$settings = {planner._SCHTASKS_SETTINGS}\n$principal = {principal}\n"
+        f"$trigger = New-ScheduledTaskTrigger -Once -At '{fire:%Y-%m-%d %H:%M:%S}'\n{end_trigger}"
+        f"$settings = {planner._SCHTASKS_SETTINGS}\n{end_settings}$principal = {principal}\n"
         f"$common = @{{TaskName='{q(label)}'; Action=$action; Trigger=$trigger; "
         f"Settings=$settings; Force=$true}}\n{register}\n"
         f"{planner._EVIDENCE_TEMPLATE.format(task=q(label))}\n")
@@ -181,15 +202,19 @@ def _arm_schtasks(planner, label: str, argv: list[str], cwd: str,
 
 
 def arm_oneshot(label: str, argv: list[str], cwd: str, fire: datetime, *,
-                interactive: bool = False) -> tuple[int, str]:
-    """註冊一次性工作（任意動作）並取證；`(rc, 憑證)`，拿不到憑證一律 `(1, "")`。不做同族取代。"""
+                interactive: bool = False,
+                expire_at: datetime | None = None) -> tuple[int, str]:
+    """註冊一次性工作（任意動作）並取證；`(rc, 憑證)`，拿不到憑證一律 `(1, "")`。不做同族取代。
+    `expire_at`＝沙盒目標的 OS 自毀時刻（`sandbox_scope.job_expiry`；正式目標傳 None）：Windows 寫
+    EndBoundary＋DeleteExpiredTaskAfter=PT0S；launchd 無對等物、忽略（誠實劃界，靠 L1＋L2）。"""
     backend, planner = sb.select(), sb._planner()
     if backend.name not in ("launchd", "schtasks") or planner is None:
         print(f"❌ 拒絕註冊：本平台沒有已實作的排程載具（載具＝{backend.name}）", file=sys.stderr)
         return 1, ""
     if backend.name == "launchd":
         return _arm_launchd(backend, label, argv, cwd, fire)
-    return _arm_schtasks(planner, label, argv, cwd, fire, interactive=interactive)
+    return _arm_schtasks(planner, label, argv, cwd, fire, interactive=interactive,
+                         expire_at=expire_at)
 
 
 def _refusal(backend, planner, playbook: str, cwd: str) -> str:

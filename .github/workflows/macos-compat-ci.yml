@@ -155,6 +155,7 @@ on:
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
+      - "tools/lib/session_brief_oi.py"  # R217 OIR 完成閘簡報段，tools/tests 消費
       - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
@@ -368,6 +369,7 @@ on:
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_policy.py"
       - "tools/lib/quota_rush.py"
+      - "tools/lib/sandbox_scope.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
       # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、
@@ -679,6 +681,7 @@ on:
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
       - "tools/lib/session_brief.py"
+      - "tools/lib/session_brief_oi.py"  # R217 OIR 完成閘簡報段，tools/tests 消費
       - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
       # R79（同一個形態的第三次：新增判準消費了根層檔卻沒補 paths，由
       # AISDLC_SDD/scripts/tests/test_ci_paths_cover_root_consumers.py 逐字點名）。
@@ -875,6 +878,7 @@ on:
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_policy.py"
       - "tools/lib/quota_rush.py"
+      - "tools/lib/sandbox_scope.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
       # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、

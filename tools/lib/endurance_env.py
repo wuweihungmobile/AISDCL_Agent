@@ -267,6 +267,118 @@ def plan_dir() -> Path:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# job 環境允許表（RealVerify SideEffect Isolation DES §4.1、D-6／D-17／D-20；L4）
+# ══════════════════════════════════════════════════════════════════════════
+# 病：OS 排程器以登入者的真環境起 job，行程環境變數一個都帶不過去——居所鍵與行為開關（模式、通知、
+# 哨兵）都一樣（57d0ccad 事故）。解法不是「多帶幾個 env」而是**允許表**：只有這張表內的鍵、且值在
+# 各鍵允許值內，才經 job argv 的 `--job-env KEY=VAL` 帶過邊界；入口最先 `apply_job_env` 套用。
+# 🔴 行為開關只准**關閉值**（通知＝空、哨兵＝1）：job 環境轉送是「把案例的圍籬帶過去」，不是給案例
+# 一個在真環境開啟功能的管道。刻意**不收** `AUTOSDD_UNATTENDED`（會在 L1 之前以另一個理由拒絕，遮住
+# L1 的真機驗證）。判準不讀 env 的鎖在 sandbox_scope；這裡只是搬運與驗值。
+RESIDENCE_KEYS = ("AUTOSDD_TRACE_DIR", "AUTOSDD_HANDOFF_DIR", "AUTOSDD_HANDBACK_DIR",
+                  "AUTOSDD_PLAN_DIR", "AUTOSDD_QUOTA_CACHE_DIR", "AUTOSDD_CONTEXT_FEED_DIR",
+                  "AUTOSDD_SI_DIR")
+MODE_KEY, NOTIFY_KEY, SENTINEL_KEY = ("AUTOSDD_SESSION_SWITCH_MODE", "AUTOSDD_DESKTOP_NOTIFY",
+                                      "AUTOSDD_SENTINEL_OFF")
+JOB_ENV_KEYS = RESIDENCE_KEYS + (MODE_KEY, NOTIFY_KEY, SENTINEL_KEY)
+JOB_ENV_FLAG = "--job-env"
+#: 居所值位於沙盒路徑段而家目錄已不存在時的 rc（D-17）；與 sessionctl `_USAGE_RC`／park 的
+#: 缺 sid rc＝3
+#: 不撞號（`LastTaskResult=3` 當唯一證據會假綠），也不等於
+#: `sandbox_scope.RC_SIDEEFFECT_REFUSED`（10）。
+RC_RESIDENCE_MISSING = 9
+_JOB_ENV_BAD_RC = 2
+_MODE_VALUES = ("auto", "notify", "off")
+
+
+class JobEnvError(Exception):
+    rc = _JOB_ENV_BAD_RC
+
+
+class JobEnvValueError(JobEnvError):
+    """鍵不在允許表或值不在該鍵允許值內（登記站點 rc 2、入口 rc 2）。"""
+
+
+class ResidenceMissing(JobEnvError):
+    """居所值位於已不存在的沙盒家目錄之下 ⇒ 不套用、不建目錄（D-17）。"""
+    rc = RC_RESIDENCE_MISSING
+
+
+def _job_env_value_ok(key: str, value: str) -> bool:
+    if key in RESIDENCE_KEYS:
+        return bool(value) and os.path.isabs(value)
+    return {MODE_KEY: value in _MODE_VALUES, NOTIFY_KEY: value == "", SENTINEL_KEY: value == "1"}.get(key, False)  # noqa: E501
+
+
+def job_env_argv(env, *, sandbox: bool) -> list[str]:
+    """對 `JOB_ENV_KEYS` 中 **env 顯式有值**者產 `--job-env KEY=VAL`（鍵序固定）。
+
+    `sandbox` 取自同站點先跑的 `sandbox_scope.register_verdict` 判決，站點不得自行推斷（D-20）。
+    沙盒目標：值不在允許值 ⇒ 拋 `JobEnvValueError`（登記站點 rc 2、不登記）；正式目標：永不拋，不在
+    允許值的鍵一律不轉送（掌舵者自行 opt-in 的 `AUTOSDD_DESKTOP_NOTIFY=1` 不得讓正式登記失敗）。
+    顯式空值的 `AUTOSDD_SENTINEL_OFF` 兩種目標皆視同未設。正式環境無顯式值 ⇒ `[]`
+    （argv 逐字不變）。"""
+    out: list[str] = []
+    for key in JOB_ENV_KEYS:
+        if key not in env or (key == SENTINEL_KEY and env[key] == ""):
+            continue
+        value = str(env[key])
+        if _job_env_value_ok(key, value):
+            out += [JOB_ENV_FLAG, f"{key}={value}"]
+        elif sandbox:
+            raise JobEnvValueError(
+                f"{key}={value!r}：不在 job 環境允許值內（{_allowed_text(key)}）")
+    return out
+
+
+def _allowed_text(key: str) -> str:
+    return {MODE_KEY: "auto|notify|off", NOTIFY_KEY: "只准空字串（關閉）",
+            SENTINEL_KEY: "只准 1（關閉）"}.get(key, "絕對路徑")
+
+
+def apply_job_env(argv: list[str]) -> list[str]:
+    """入口最先呼叫：剝掉 `--job-env KEY=VAL`、寫進 `os.environ`，回剝完的 argv。
+    **遇第一個 `--` 即停**
+    （其後原樣保留，`runlong -- <argv…>` 的子指令旗標不得被吃）。全部驗過才套用
+    （不半套）：非允許鍵或
+    值 ⇒ `JobEnvValueError`（rc 2）；居所值位於沙盒路徑段而其家目錄不存在 ⇒ `ResidenceMissing`
+    （rc `RC_RESIDENCE_MISSING`），且不寫任何檔、不建任何目錄。"""
+    import sandbox_scope  # noqa: PLC0415 — lazy：本檔 stdlib-only 且被 hook 鏈 import，判準模組只在這裡才需要
+
+    rest, pairs, index = [], [], 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            rest += argv[index:]
+            break
+        if token != JOB_ENV_FLAG:
+            rest.append(token)
+            index += 1
+            continue
+        pair = argv[index + 1] if index + 1 < len(argv) else ""
+        key, sep, value = pair.partition("=")
+        if not sep or key not in JOB_ENV_KEYS or not _job_env_value_ok(key, value):
+            raise JobEnvValueError(f"{JOB_ENV_FLAG} {pair!r}：鍵不在允許表或值不在允許值內")
+        pairs.append((key, value))
+        index += 2
+    for key, value in pairs:
+        home = sandbox_scope.sandbox_home(value) if key in RESIDENCE_KEYS else None
+        if home is not None and not home.exists():
+            raise ResidenceMissing(f"{key}={value!r}：沙盒家目錄 {home} 已不存在")
+    os.environ.update(dict(pairs))
+    return rest
+
+
+def apply_job_env_or_exit(argv: list[str]) -> list[str]:
+    """入口用：`apply_job_env`，失敗時 stderr 一行並以該例外的 rc 結束（2／9）。"""
+    try:
+        return apply_job_env(argv)
+    except JobEnvError as exc:
+        print(f"❌ job 環境轉送拒絕：{exc}", file=sys.stderr)
+        raise SystemExit(exc.rc) from exc
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # F3-FIX3（複審必修，正中使用者原始痛點）：無人續跑「停下來時使用者收不到」
 # ══════════════════════════════════════════════════════════════════════════
 # 病：INV4 無人 no_progress／exhausted 停下時走 quota_escalation.alert(loud=True)，但

@@ -505,7 +505,7 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
     return [
         # 🔴 2026-10-25 重釘 89→109（SelfImproving P3 六支新檔，實測 115，過腐化上界 111；
         # 腐化上界逐字指示，照填不推算）。
-        (_TESTS_DIR, False, 133),  # 2026-11-14 重釘 109→133（sessionctl，實測 140）
+        (_TESTS_DIR, False, 159),  # 2026-11-21 重釘 133→159（S1 新鎖檔，實測 167）
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
         (_REPO_ROOT / "AutoClaude" / "tests", True, 319),  # 2026-11-21 重釘 268→319（實測 336）
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78
