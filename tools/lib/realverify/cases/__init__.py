@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import sched
+from .. import leases, sched
 from ..driver import RunResult, run_claude
 from ..sandbox import Sandbox, kept_dir
 from ..transcript import Transcript
@@ -74,7 +74,13 @@ class CaseContext:
     def sched_register(self, name: str, run_at_local_iso: str, arguments: str) -> dict:
         n = sched.rv_name(name)
         self.sched_names.append(n)
-        return sched.register_once(n, run_at_local_iso, arguments)
+        return leases.register_once(n, run_at_local_iso, arguments)
+
+    def sched_track(self, name: str) -> str:
+        """被測產品代為註冊排程時（案例只知道名字）：**註冊前**先把名字記上租約帳，收尾由帳撤銷。"""
+        n = leases.track(name)
+        self.sched_names.append(n)
+        return n
 
     # ---- 斷言／證據 ----
     def check(self, cond: bool, msg: str) -> None:
@@ -99,8 +105,8 @@ class CaseContext:
     # ---- 收尾（runner 的 finally 呼叫；案例本身不用管）----
     def close(self) -> list[str]:
         out: list[str] = []
-        for n in self.sched_names:
-            sched.remove(n)
+        if self.sched_names:
+            out += [f"RESIDUE sched {n}" for n in leases.revoke_run()]
         for sb in self.sandboxes:
             out += sb.cleanup()
         return out

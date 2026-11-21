@@ -82,8 +82,13 @@ def read_back(name: str) -> dict | None:
     return json.loads(out) if rc == 0 and out.startswith("{") else None
 
 
-def register_once(name: str, run_at_local_iso: str, arguments: str) -> dict:
+def register_once(name: str, run_at_local_iso: str, arguments: str, *,
+                  expire_at_local_iso: str | None = None) -> dict:
     """註冊一次性工作（Interactive 登入型態），回讀後回傳 read_back 結果；讀不到 next_run_time 即 RuntimeError。
+
+    `expire_at_local_iso`（本機時間、不帶 offset）給了就加 OS 自毀：觸發器 `EndBoundary`＋設定
+    `DeleteExpiredTaskAfter=PT0S`（真機實測過了 EndBoundary 的工作數秒內被 OS 刪除；DES §5.4）。
+    本函式是低階原語；正式入口是 `leases.register_once`（先寫帳列）。
 
     載具固定走 `quiet_python()`（GUI 子系統 pythonw）：驗證載具自己不得在掌舵者桌面畫 console 視窗
     （`test_check_hooks_liveness` 的排程 Action 判準認 `quiet_python` 賦值來源）。
@@ -91,11 +96,16 @@ def register_once(name: str, run_at_local_iso: str, arguments: str) -> dict:
     name = rv_name(name)
     q = lambda s: s.replace("'", "''")  # noqa: E731
     python = q(quiet_python())
+    end = (f"$t.EndBoundary = '{q(expire_at_local_iso)}'; "
+           "$s = New-ScheduledTaskSettingsSet; $s.DeleteExpiredTaskAfter = 'PT0S'; "
+           if expire_at_local_iso else "")
+    settings = " -Settings $s" if expire_at_local_iso else ""
     rc, out = _ps(
         f"$a = New-ScheduledTaskAction -Execute '{python}' -Argument '{q(arguments)}'; "
         f"$t = New-ScheduledTaskTrigger -Once -At ([datetime]'{q(run_at_local_iso)}'); "
+        f"{end}"
         "$p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; "
-        f"Register-ScheduledTask -TaskName '{name}' -Action $a -Trigger $t -Principal $p -Force | Out-Null"  # noqa: E501
+        f"Register-ScheduledTask -TaskName '{name}' -Action $a -Trigger $t -Principal $p{settings} -Force | Out-Null"  # noqa: E501
     )
     if rc != 0:
         raise RuntimeError(f"Register-ScheduledTask rc={rc}: {out[:300]}")
@@ -115,10 +125,3 @@ def list_rv() -> list[str]:
         return []
     rc, out = _ps(f"Get-ScheduledTask | Where-Object TaskName -like '{PREFIX}*' | Select-Object -ExpandProperty TaskName")  # noqa: E501
     return [ln.strip() for ln in out.splitlines() if ln.strip()] if rc == 0 else []
-
-
-def cleanup_all_rv() -> list[str]:
-    gone = list_rv()
-    for n in gone:
-        remove(n)
-    return gone

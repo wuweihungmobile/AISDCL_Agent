@@ -27,8 +27,7 @@ def _arm(ctx: CaseContext, payload: dict, tag: str) -> tuple[dict, float, str]:
     """沙盒＋替身讀數 ⇒ `--pace`（暖快取）→ `--register-schtasks`；回 (排程器回讀, planner 牆鐘秒, 任務名)。"""  # noqa: E501
     sb = ctx.sandbox(probe_hooks=False)
     install_tools(sb)
-    name = f"AutoSDD_RV_{tag}_{sb.sid[:8]}"
-    ctx.sched_names.append(name)  # runner 收尾時 sched.remove(name)；下方 finally 也精確移除
+    name = ctx.sched_track(f"AutoSDD_RV_{tag}_{sb.sid[:8]}")  # 註冊前先記租約帳；收尾由帳撤銷
     try:
         tp = seed_session(ctx, sb)
         with t5(sb, ok_responder(payload)) as stub:

@@ -8,7 +8,7 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import interactive, ledger, sched
+from . import interactive, leases, ledger, sched
 from .cases import Case, CaseContext, discover
 from .driver import EnvMissing
 from .sandbox import REPO
@@ -76,10 +76,17 @@ def run_case(c: Case) -> Outcome:
 
 def run(selection: str, cases: list[Case], *, write_ledger: bool = True, ledger_path: Path | None = None) -> int:  # noqa: E501
     t0 = time.monotonic()
+    uses_sched = any(c.uses_sched for c in cases)
+    if uses_sched:
+        # 開頭先依租約帳撤「主人已死」的孤兒（前一棒被殺漏掉的排程）；主人存活者（別的視窗）不動
+        stuck = leases.replay()
+        if stuck:
+            print(f"❌ 租約帳有撤不掉的孤兒排程，整批拒跑：{', '.join(stuck)}")
+            print(f"REALVERIFY_VERDICT=fail n=0 fail={['lease-orphan:' + ','.join(stuck)]}")
+            return 2
     outs = [run_case(c) for c in cases]
-    # 只在本批含真 schtasks 案例時掃殘（避免單元測試／純 hook 批次去動別的視窗正在跑的
-    # AutoSDD_RV_ 工作）
-    leaked = sched.cleanup_all_rv() if any(c.uses_sched for c in cases) else []
+    # 只在本批含真 schtasks 案例時掃殘：依帳判斷，不動別的視窗（主人存活）的合法排程
+    leaked = (leases.revoke_run() + leases.discover_sweep(own_run_id=leases.current_run_id())) if uses_sched else []  # noqa: E501
     failed = [o.case_id for o in outs if o.status == "fail"]
     envs = [o.case_id for o in outs if o.status == "env"]
     for o in outs:

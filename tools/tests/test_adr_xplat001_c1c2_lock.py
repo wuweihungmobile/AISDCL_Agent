@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9533,
+    "test_adr_xplat001_c1c2_lock.py": 9546,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -693,6 +693,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_policy.py": 4840,
     "test_quota_reconcile_gap.py": 146,
     "test_quota_rush.py": 481,
+    "test_realverify_leases.py": 218,
     "test_realverify_lib.py": 634,
     "test_recovery_hint_passes_ps_lint.py": 103,
     "test_refresh_nightly_anchor.py": 305,
@@ -3261,6 +3262,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_platform_neutral_paths.py 的 tools/tests 掃描面下限重釘 133→159＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R217_WorkProgress_Closure_Evidence.md。"),
+    ("R214", 176890, 177121, +231,  # round-label-ok r218bs5
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第五十八列（R218-B 副作用隔離 S5：realverify 排程租約帳 "
+     "leases.py 與 sched.py 的 OS 自毀的回歸鎖）：新鎖檔 test_realverify_leases.py"
+     "（假排程器＋假主人存活縫；真排程 E2E 在 tools/probe/realverify_leases_e2e.py）"
+     "＋本檔自身漂移。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R217_WorkProgress_Closure_Evidence.md。"),
 )
 
 
@@ -3362,7 +3370,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (48378, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (48609, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -4038,6 +4046,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "R218-B 副作用隔離 S1 回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218bs5
+     "R218-B 副作用隔離 S5 回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4213,10 +4225,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 404
+_REPIN_LOG_FROZEN_PREFIX_LEN = 405
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "c964e562c427d578031225eae15ffc1304a588eca6fefdf0ac7859e51463d7e7")
+    "9de605874ba405d3b42e7d6d55e8a89bc2981ce30bd22cc12c6a0b3ef2ba7607")
 
 
 def repin_log_history_digest(
@@ -4462,6 +4474,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "6c485cb85da7", "166cd12ed3dc", "DEF-200-622"),  # round-label-ok：監督結果非錯誤
     ("R214", "166cd12ed3dc", "71669857899e", "DEF-200-631"),  # round-label-ok r217a9ledger
     ("R214", "71669857899e", "c964e562c427", "DEF-200-632"),  # round-label-ok r218bs1ledger
+    ("R214", "c964e562c427", "9de605874ba4", "DEF-200-632"),  # round-label-ok r218bs5ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。
