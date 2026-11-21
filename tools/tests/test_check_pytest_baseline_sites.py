@@ -150,6 +150,20 @@ class TestScan(unittest.TestCase):
         self.assertEqual(m.scan([ssot, ok], ssot), [])
 
 
+class TestOirIdIsNotABaselineNumber(unittest.TestCase):
+    """受測：`tools/check_pytest_baseline_sites.py::_line_is_claim`。
+    OIR 識別碼（`OI-YYYYMMDD-NNN`）的 8 位日期不是測試數量；同一行讀到 skipped／passed 字樣
+    也不得被當成基線數字（R217：每處待驗標記都帶 OI id，TCS-SessionPark V-PK3 因此變成新的家）。"""
+
+    def test_an_oi_id_beside_the_word_skipped_is_not_a_claim(self) -> None:
+        line = "| V-PK3 | 痕跡 `handoff_spawn_skipped` | 〔OI-20261120-015〕待真機 |"
+        self.assertFalse(m._line_is_claim(line))
+
+    def test_a_real_count_on_the_same_line_is_still_a_claim(self) -> None:
+        line = "〔OI-20261120-015〕全套 5933 passed"  # baseline-ok: 合成語料，驗判準仍認真實數字
+        self.assertTrue(m._line_is_claim(line))
+
+
 class TestPairShorthandForm(unittest.TestCase):
     """案 12~14（R78 QA-02）：計數簡寫 `NNNN/NNN` 形態。
 

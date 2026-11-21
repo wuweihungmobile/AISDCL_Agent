@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import procstop
+from . import procstop, rosterscan
 
 OWNER_IDLE_SECONDS = 900  # 擁有者逐字稿閒置的「巡邏間隔」（哨兵每 15 分鐘巡邏一次）
 RESIDUE_MAX_AGE_SECONDS = 24 * 3600  # 殘局壽命上限：最後記錄超過它，預設 status 不列（--all 才列）
@@ -166,24 +166,12 @@ def _main_transcript(projects: Path, owner: str) -> Path | None:
         return None
 
 
-_KILLED_RE = re.compile(r"<task-id>([A-Za-z0-9_-]{1,80})</task-id>.{0,600}?<status>killed</status>",
-                        re.DOTALL)
-
-
 def _killed_ids(projects: Path, owner: str) -> set[str]:
-    """DEF-200-606（E-TS-1）：被 TaskStop 的代理，harness 不在 meta 寫 `finished`，只在擁有者主
-    逐字稿留 `<status>killed</status>` 的 task-notification。只認 harness 自己寫的記錄型別
-    （`queue-operation` 的 `content`、`attachment` 的 `prompt`；人貼的文字是 `user`，不算）。
-    誠實劃界：只讀尾端 256 KB——通知若已被擠出尾端，代理照舊等 quiet 門檻降級（不更糟）。"""
-    main = _main_transcript(projects, owner)
-    found: set[str] = set()
-    for rec in _records(main, tail=True) if main else ():
-        kind, att = rec.get("type"), rec.get("attachment")
-        text = (rec.get("content") if kind == "queue-operation" else
-                att.get("prompt") if kind == "attachment" and isinstance(att, dict) else None)
-        if isinstance(text, str) and text.startswith("<task-notification>"):
-            found.update(_KILLED_RE.findall(text))
-    return found
+    """DEF-200-606（E-TS-1）＋R217 DEF-01：被 TaskStop 的代理，harness 不在 meta 寫 `finished`，只在
+    擁有者主逐字稿留 `<status>killed</status>` 的 task-notification。改為**增量全掃**（舊版只讀尾端
+    256 KB，通知被擠出尾端就漏判）；判準與快取住 `rosterscan.killed_ids`。`_TAIL_BYTES` 只留給「最後
+    記錄時間」。"""
+    return rosterscan.killed_ids(_main_transcript(projects, owner), owner)
 
 
 def _owner_last(projects: Path, owner: str) -> float | None:
@@ -197,17 +185,31 @@ def _owner_last(projects: Path, owner: str) -> float | None:
     return best
 
 
+def _handed_over(owner: str, env) -> bool:
+    """擁有者已交棒（R217 REQ-WP-42）：判準單一家＝`seal.handed_over`（`.ack` 或 spawn 痕跡）。"""
+    from . import seal  # noqa: PLC0415 — lazy：seal 反向 import 本檔
+
+    try:
+        return seal.handed_over(owner, env) is not None
+    except Exception:  # noqa: BLE001 — 名冊是唯讀診斷，量不到不拋（不判殘局）
+        return False
+
+
 def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=None,
-             runner=None, full: bool = True, include_old: bool = False) -> dict:
-    """名冊快照：`agents`／`windows`／`schedules`／`stale_sentinels`／`handoffs`。`runner=None`＝
-    純讀檔（不列舉行程、不查排程；也就不判殘局）。"""
+             runner=None, full: bool = True, include_old: bool = False,
+             sessions_dir=None) -> dict:
+    """名冊快照：`agents`／`windows`／`schedules`／`stale_sentinels`／`handoffs`／`retired`。`runner=None`＝
+    純讀檔（不列舉行程、不查排程；也就不判殘局、不寫退役帳）。擁有者「活著」＝登記檔
+    （`sessions_dir`，缺省 `~/.claude/sessions`）或旗標形態命令列自報的 sid（DEF-02）。`include_old`
+    保留作相容旗標：滿壽命殘局一律改寫退役帳、只顯示計數（REQ-WP-43）。"""
     from . import switch  # noqa: PLC0415 — lazy
 
     now_ts = (now or datetime.now().astimezone()).timestamp()
     quiet = switch.threshold(switch.ROSTER_QUIET_KEY, env)[0] * 60
     projects = _projects(projects_dir)
     procs = procstop.list_processes(runner) if runner is not None else None
-    alive = {procstop.sid_of(p["cmd"]) for p in procs or () if procstop.is_claude(p)}
+    alive = procstop.alive_sids(procs or (), sessions_dir)
+    handed: dict[str, bool] = {}
     agents: list[dict] = []
     for owner, folder in _agent_dirs(projects, session_id):
         killed: set[str] | None = None  # 惰性：有未結束的代理才讀主逐字稿尾端
@@ -224,13 +226,19 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
             info = _scan(path, full)
             idle = now_ts - info["last_at"] if info["last_at"] is not None else None
             state = "running" if idle is not None and idle < quiet else "quiet"
+            if state == "quiet" and handed.setdefault(owner, _handed_over(owner, env)):
+                state = "residue"  # REQ-WP-42：擁有者已交棒 ⇒ quiet 不會有人收尾，直接降為殘局
             if state == "quiet" and procs is not None and owner not in alive:
                 last = _owner_last(folder.parent.parent, owner)
                 if last is not None and now_ts - last >= OWNER_IDLE_SECONDS:
                     state = "residue"
-            # DEF-200-611 D-3：殘局是歷史記錄、不是待辦；超過壽命上限不再列入預設名冊
-            if state == "residue" and not include_old and info["last_at"] is not None and (
+            # DEF-200-611 D-3＋REQ-WP-43：殘局是歷史記錄、不是待辦；滿壽命寫退役帳、不再逐筆列
+            if state == "residue" and info["last_at"] is not None and (
                     now_ts - info["last_at"] > RESIDUE_MAX_AGE_SECONDS):
+                if procs is not None:  # 只有 status（有 runner）寫帳；hook 路徑純讀檔
+                    rosterscan.retire(path.stem.removeprefix("agent-"), owner,
+                                      _iso(info["last_at"]),
+                                      datetime.fromtimestamp(now_ts).astimezone())
                 continue
             agents.append({
                 "id": path.stem.removeprefix("agent-"), "owner_sid": owner,
@@ -240,7 +248,8 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
                 "last_at": _iso(info["last_at"]), "ctx_tokens": info["ctx_tokens"],
                 "total_tokens": info["total_tokens"]})
     return {"agents": agents, "windows": _windows(procs), "schedules": _schedules(runner),
-            "stale_sentinels": _stale_sentinels(runner), "handoffs": _handoffs(env)}
+            "stale_sentinels": _stale_sentinels(runner), "handoffs": _handoffs(env),
+            "retired": len(rosterscan.retired_ids()) if procs is not None else 0}
 
 
 def _spawned_from(pid, sid: str, created) -> bool:
@@ -259,7 +268,7 @@ def _windows(procs) -> list[dict]:
     rows = []
     for p in procs or ():
         if procstop.is_claude(p):
-            sid = procstop.sid_of(p["cmd"])
+            sid = procstop.first_uuid_of(p["cmd"])
             rows.append({"pid": p["pid"], "sid": sid, "created": _iso(p["created"]),
                          "unattended": bool(procstop._PRINT_RE.search(p["cmd"])),
                          "spawned_from": _spawned_from(p["pid"], sid, p["created"])})
@@ -471,6 +480,8 @@ def render_snapshot(snap: dict) -> str:
     lines.append("排程：" + ("、".join(snap["schedules"]) or "無（或未查詢）"))
     lines.append("過期哨兵：" + ("、".join(snap["stale_sentinels"]) or "無"))
     lines.append("未 ack 交接包：" + ("、".join(snap["handoffs"]) or "無"))
+    if snap.get("retired"):  # REQ-WP-43：滿壽命殘局只顯示計數，逐字稿保留
+        lines.append(f"已退役殘局：{snap['retired']} 筆（滿 24 小時；只顯示計數，逐字稿未刪）")
     return "\n".join(lines) + "\n"
 
 
@@ -488,7 +499,7 @@ def cli(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     status = sub.add_parser("status", help="唯讀名冊")
     status.add_argument("--session", default=None)
-    status.add_argument("--all", action="store_true", help="連超過 24 小時的殘局也列")
+    status.add_argument("--all", action="store_true", help="相容旗標（滿壽命殘局已改只顯示計數）")
     stop = sub.add_parser("stop", help="停無人／互動視窗行程樹（先驗身分）")
     group = stop.add_mutually_exclusive_group(required=True)
     group.add_argument("--window", metavar="SID")

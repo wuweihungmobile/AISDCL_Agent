@@ -78,7 +78,7 @@
 
 ### DEF-200-128
 
-- 訴求：R89 交棒書「待驗清單」漏 6 筆 ⇒ 治本「待驗清單須附可重跑腳本」。採等效兌現方案：原失效模式（改派出口靜默過期、靠人工清單核對）已由機械判準覆蓋——人工清單漏列的列會被判準自己抓到，毋須第二份同知識的腳本。
+- 訴求：R89 交棒書〔OI-20261120-019〕「待驗清單」漏 6 筆 ⇒ 治本「待驗清單須附可重跑腳本」。採等效兌現方案：原失效模式（改派出口靜默過期、靠人工清單核對）已由機械判準覆蓋——人工清單漏列的列會被判準自己抓到，毋須第二份同知識的腳本。
 - 驗證①（Read 當回合）：`tools/tests/test_check_defect_log_crossref.py:3145` `_REASSIGN_FRESHNESS_FROM = 84`（發現輪 ≥84 的列，「改派」出口輪號 < 當前輪即**阻斷**）＋ :3148 `_EXPIRED_REASSIGN_LEGACY_CENSUS = 25`／:3150 `_UNPARSEABLE_REASSIGN_CENSUS = 3`（生效輪外存量走 shrink-only 相等棘輪，只准變小）＋ :3153 `_reassign_escape_rows()` 三堆分類純函式。
 - 驗證②：`python -m pytest tools/tests/test_check_defect_log_crossref.py -q` → **241 passed, 46 subtests passed, rc=0**。
   - 過程實錄（誠實記載）：第一次跑出 2 failed，皆為本包自身動作的連帶而非本列判準失效——(a) `governance_docs.py:321` 註解「R107」超前帳本時鐘 R100（round-label 鎖抓到，照該鎖訊息的正解加 `round-label-ok` 豁免）；(b) 多列瘦身使超標總量 37058→36796，零餘裕相等自檢（`test_the_real_ledger_baselines_are_exact_not_padded`）要求下修——**兩道鎖都有牙**。依取值紀律重釘：`defect_ledger_index.py` `OVERSIZE_ROW_EXCESS_CEILING` 37058→**36796**（收緊）；`ledger_rotation.py` 史料尾端追加 36796、封印延長納入 37058、`_SEAL_TOTAL_MIN_LEN` 35→36、`_SEAL_TABLE_SHA256` 重釘為當回合 `seal_table_digest()` 實測值 `e72801a4b9a300cf`。重跑即全綠。

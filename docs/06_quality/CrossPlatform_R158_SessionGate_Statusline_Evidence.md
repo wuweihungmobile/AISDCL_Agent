@@ -355,7 +355,7 @@ Pop-Location
 
 誠實劃界（QA 自述）：6.1/6.2/6.3 三者互斥或並存皆有可能；本 QA 未能在 mac 上重現 Windows
 環境的 `SDD_ACTIVE_VERSION` 缺漏或版本落差情境，這是本分析最大的未驗證假設，Windows 親驗前
-一律標「待驗證」。
+一律標〔OI-20261120-016〕「待驗證」。
 
 ### 7.3 Status line 安裝三步（P5 交付物）
 

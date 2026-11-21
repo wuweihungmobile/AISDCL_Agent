@@ -217,6 +217,13 @@ _CARRIER_EXEMPT = {
     "tools/lib/engine_resume_job.py":
         "引擎續跑軸：一次性工作、動作是 `python -m autoclaude` 而非 planner tick（`arm()` 寫死 "
         "planner tick＋StartInterval，收進去要動守衛面且該檔 LOC 貼頂）；平台經 `select()`",
+    "tools/lib/openitems/schedcache.py":
+        "未結項驅動器軸（OIR，R217 DES §4.5／§5.2），不是續航哨兵軸：一次性工作、動作是 "
+        "`openitems run-driver`；Windows 的 PowerShell 載具與 NextRunTime 解析一律沿用 "
+        "`session_resume_planner`（不抄第二份排程知識），launchd 後端只在此註冊／撤銷一次性工作",
+    "tools/probe/openitems_drive_e2e.py":
+        "驅動器真機 E2E 探針：只對 `AutoSDD_OpenItemSbx_` 沙盒前綴經 planner 的 PowerShell 載具"
+        "回讀排程憑證與殘留數，不註冊續航哨兵、不屬續航哨兵軸",
 }
 
 

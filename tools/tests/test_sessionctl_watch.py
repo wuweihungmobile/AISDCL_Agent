@@ -96,8 +96,27 @@ class _Clock:
         self.t += sec
 
 
+class _Budget:
+    """叫醒預算的縫（`keepwarm.WakeBudget` 形狀）：`why`＝不掛原因（空＝適用）、`pings`／`star`＝
+    保溫帳與上限；`charge` 記下被收費的次數並照 `saved` 回報是否寫進帳
+    （真帳的行為另有整合測試）。"""
+
+    def __init__(self, why: str = "", pings: int = 0, star: int = 9, saved: bool = True) -> None:
+        self.why, self.pings, self.star, self.saved = why, pings, star, saved
+        self.checks, self.charged = 0, []
+
+    def check(self) -> tuple[str, int, int, int]:
+        self.checks += 1
+        return self.why, self.pings, self.star, 400_000
+
+    def charge(self, pings: int, ctx: int, star: int) -> bool:
+        self.charged.append((pings + 1, ctx, star))
+        return self.saved
+
+
 def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None, quota=False,
-         poll: float = 30.0, anchor=None) -> tuple[int, str, _Clock]:
+         poll: float = 30.0, anchor=None, budget: _Budget | None = None, pid: int = 4242,
+         ) -> tuple[int, str, _Clock]:
     """`anchor`＝主控最後一筆 usage 記錄的 epoch（`None`＝量不到，退回 watch 啟動時刻）。
     縫一律注入：
     不讓測試去讀真實 `~/.claude/projects` 裡剛好同 sid 的逐字稿（那會讓時鐘假值與真記錄相減）。"""
@@ -105,7 +124,8 @@ def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None
     out = io.StringIO()
     rc = watch.run(SID, cfg or watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=poll,
                    roster_fn=roster_fn, end_turn_fn=lambda a: bool(a.get("end_turn")),
-                   quota_fn=lambda: quota, anchor_fn=lambda: anchor, out=out, pid=4242)
+                   quota_fn=lambda: quota, anchor_fn=lambda: anchor, out=out, pid=pid,
+                   budget=budget or _Budget())
     return rc, out.getvalue(), clock
 
 
@@ -117,21 +137,34 @@ def _event(out: str) -> str:
 
 
 class EventTests(_Fence):
-    def test_w1_all_done_after_grace_when_never_seen(self) -> None:
-        """AT-W1。WHY：主控派工失敗或代理瞬間交卷時，watch 不能永遠等；但剛啟動時名冊可能還空，
-        所以要寬限 150 秒才當「全部交卷」。"""
-        rc, out, clock = _run(lambda: [])
-        self.assertEqual(rc, 0)
-        self.assertIn("WATCH_VERDICT=all_done", out.splitlines()[-1])
-        self.assertGreaterEqual(clock.t - T0, watch.GRACE_SECONDS)
+    def test_at_wp_30_all_delivered_does_not_end_the_watch_no_all_done_event(self) -> None:
+        """AT-WP-30／MU-WP-06。WHY：harness 對每支背景子代理完成都會送 task-notification；watch 再因
+        「全部交卷」退出＝同一事件叫醒主控兩次（M-WB2＝14 天 21 次，每次冷讀 40 萬～99 萬 token）。
+        所以全部交卷（曾見過代理後名冊清空、或從來沒有代理）watch 都不退出，輪詢一直走到保溫點
+        才由保溫族結束；ORDER、處置表、CLI 都不得再有 `all_done`。"""
+        self.assertNotIn("all_done", watch.ORDER)
+        self.assertNotIn("all_done", watch.DISPOSAL)
+        seq = iter([[_agent(last=T0 + 30)]])  # 先有代理、之後名冊清空
+        clock = _Clock()
+        rc, out, clock = _run(lambda: next(seq, []), clock=clock)
+        self.assertEqual((rc, _event(out)), (0, "keepwarm"))
+        self.assertGreaterEqual(clock.t - T0, 45 * MIN)  # 交卷那一刻不退出，等到保溫點
+        self.assertGreater(clock.sleeps, 10)
+        # 反向：從來沒有代理（過去的寬限期備援）也不會在寬限後就退出
+        rc2, out2, clock2 = _run(lambda: [])
+        self.assertEqual((rc2, _event(out2)), (0, "keepwarm"))
+        self.assertGreaterEqual(clock2.t - T0, 45 * MIN)
 
-    def test_w1b_all_done_immediately_once_seen(self) -> None:
-        """AT-W1 續。WHY：曾見過代理、之後名冊清空＝真的交卷，不必再等寬限（主控越早醒越暖）。"""
-        seq = iter([[_agent(last=T0 + 30)], []])
-        rc, out, clock = _run(lambda: next(seq))
-        self.assertEqual(rc, 0)
-        self.assertIn("WATCH_VERDICT=all_done", out)
-        self.assertLess(clock.t - T0, watch.GRACE_SECONDS)
+    def test_at_wp_31_after_all_delivered_the_point_wakes_once_with_keepwarm_and_charges_a_ping(
+            self) -> None:
+        """AT-WP-31／REQ-WP-36。WHY：全部交卷後 watch 只在保溫點再叫醒一次（不與 harness 的完成通知
+        重疊），而且這一次要算進共用的保溫帳——否則 watch 與 keepwarm 各算各的、預算形同虛設。"""
+        budget = _Budget(pings=3, star=9)
+        rc, out, clock = _run(lambda: [], budget=budget)
+        self.assertEqual((rc, _event(out)), (0, "keepwarm"))
+        self.assertEqual(budget.charged, [(4, 400_000, 9)])
+        self.assertIn(watch.DISPOSAL["keepwarm"], out)
+        self.assertEqual(clock.t - T0, 45 * MIN)
 
     def test_w2_overrun(self) -> None:
         """AT-W2。WHY：代理自啟動起超過牆鐘仍未交卷＝失控，要叫醒主控決定繼續或拆小。"""
@@ -212,8 +245,62 @@ class EventTests(_Fence):
         self.assertEqual(watch.decide(agents, T0, T0 - 5, watch.Cfg(keepwarm_min=999), False)[0],
                          "stall")
 
+    def test_at_wp_37_keepwarm_family_after_all_delivered(self) -> None:
+        """AT-WP-37／MU-WP-11。WHY：全部交卷後 watch 在保溫點只有三種結局，而且每一種都要行程結束
+        （否則 watch 永不退出＝一個永遠掛著的背景任務）：(a) 帳已達 n* ⇒ cap（再叫醒比放冷更貴）、
+        (b) 保溫不適用（無人窗口…）⇒ idle、(c) 還有預算 ⇒ keepwarm；(d) 還沒到保溫點就不退出。
+        (a) 回到「達上限後不退出」的舊稿行為時，這條會變成假時鐘跑滿 10,000 輪而指名失敗。"""
+        for name, budget, want in (("a", _Budget(pings=9, star=9), "cap"),
+                                   ("b", _Budget(why="unattended"), "idle"),
+                                   ("c", _Budget(pings=2, star=9), "keepwarm")):
+            with self.subTest(name):
+                rc, out, clock = _run(lambda: [], budget=budget)
+                self.assertEqual((rc, _event(out)), (0, want))
+                self.assertEqual(clock.t - T0, 45 * MIN)
+                self.assertEqual(budget.charged != [], want == "keepwarm")  # 只有 keepwarm 收費
+                self.assertIn(watch.DISPOSAL[want], out)
+        # (d)：保溫點前不呼叫預算、不退出（用 decide 直接釘邊界，避免靠時鐘上限的間接失敗）
+        probe = _Budget()
+        self.assertIsNone(watch.decide([], T0, T0 - 45 * MIN + 1, watch.Cfg(), False,
+                                       kw_verdict=lambda: probe.check()[0] or "keepwarm"))
+        self.assertEqual(probe.checks, 0)
+
+    def test_cap_with_agents_still_running_is_silent_but_keepwarm_and_idle_still_end(self) -> None:
+        """REQ-WP-36 的邊界。WHY：代理還在跑時保溫預算已用完——再為保溫叫醒主控只是白付一次冷讀，
+        watch 繼續看管代理（stall／overrun…仍有效）；而 keepwarm（還有預算）與 idle（不適用，例如
+        無人窗口 harness 會在背景等待上限殺掉 watch，主控必須先被叫醒）照舊退出。"""
+        live = [_agent(last=T0 + 45 * MIN, started=T0 + 45 * MIN)]
+        cfg = watch.Cfg(wall_min=9999)
+        self.assertIsNone(
+            watch.decide(live, T0 + 45 * MIN, T0, cfg, False, kw_verdict=lambda: "cap")
+        )
+        self.assertEqual(watch.decide(live, T0 + 45 * MIN, T0, cfg, False,
+                                      kw_verdict=lambda: "idle")[0], "idle")
+        self.assertEqual(watch.decide(live, T0 + 45 * MIN, T0, cfg, False,
+                                      kw_verdict=lambda: "keepwarm")[0], "keepwarm")
+        # 整條迴圈：cap 時不退出，直到代理停滯（stall）這個實質事件
+        budget = _Budget(pings=9, star=9)
+        rc, out, _ = _run(lambda: [_agent(last=T0, started=T0)], budget=budget,
+                          cfg=watch.Cfg(wall_min=9999, stall_min=60))
+        self.assertEqual((rc, _event(out)), (0, "stall"))
+        self.assertEqual(budget.checks, 1)  # 錨點沒變 ⇒ cap 結果快取，不每輪重讀逐字稿與帳
+
+    def test_a_ledger_that_cannot_be_charged_ends_as_cap(self) -> None:
+        """WHY（與 keepwarm 指令同一原則）：寫不進保溫帳＝沒有計數基礎，繼續叫醒成本無界；停止叫醒
+        ＝退回沒有保溫的現況。"""
+        rc, out, _ = _run(lambda: [], budget=_Budget(pings=1, star=9, saved=False))
+        self.assertEqual((rc, _event(out)), (0, "cap"))
+
+    def test_verdict_trace_carries_the_budget_numbers_for_the_keepwarm_family(self) -> None:
+        """WHY：量測端（M-WB／M-K5）從痕跡讀 pings／n*；
+        沒有它就只能事後猜每次叫醒花了預算的哪一格。"""
+        _run(lambda: [], budget=_Budget(pings=4, star=9))
+        row = json.loads((self.tmp / "trace" / "autosdd_session_switch.jsonl").read_text(
+            encoding="utf-8").splitlines()[-1])
+        self.assertEqual((row["verdict"], row["pings"], row["n_star"]), ("keepwarm", 4, 9))
+
     def test_event_order_is_pinned(self) -> None:
-        """先後次序（quota＞budget＞stall＞overrun＞all_done＞keepwarm）。WHY：同輪多事件時，
+        """先後次序（quota＞budget＞stall＞overrun＞保溫族）。WHY：同輪多事件時，
         主控只看到一個判決——要先講不可逆／最貴的（額度牆、預算），保溫最輕所以排最後。"""
         cfg = watch.Cfg(stall_min=15, wall_min=10, ctx_max=100, keepwarm_min=1)
         agents = [_agent(last=T0 - 60 * MIN, started=T0 - 60 * MIN, ctx=500)]
@@ -225,11 +312,10 @@ class EventTests(_Fence):
         self.assertEqual(names, ["quota", "quota", "budget", "stall"])
         ag = [_agent(last=T0, started=T0 - 60 * MIN, ctx=1)]
         self.assertEqual(watch.decide(ag, T0, T0 - 3600, cfg, False)[0], "overrun")
-        self.assertEqual(watch.decide([], T0, T0 - 3600, cfg, False)[0], "all_done")
         self.assertEqual(watch.decide(ag, T0, T0 - 3600, watch.Cfg(wall_min=9999, keepwarm_min=1),
                                       False)[0], "keepwarm")
-        self.assertEqual(watch.ORDER, ("quota", "budget", "stall", "overrun", "all_done",
-        "keepwarm"))
+        self.assertEqual(watch.ORDER, ("quota", "budget", "stall", "overrun", "keepwarm", "cap",
+                                       "idle"))
 
     def test_every_verdict_exits_rc_zero_and_the_verdict_is_the_last_line(self) -> None:
         """判決後印 ARCH §1.5 對應列、判決一律 rc 0、事件只看末行（DEF-200-622）。WHY：harness
@@ -242,10 +328,12 @@ class EventTests(_Fence):
         self.assertFalse(hasattr(watch, "RC"))
         seen = {_event(_run(*a, **k)[1]) for a, k in (
             ((lambda: [],), {}),
+            ((lambda: [],), {"budget": _Budget(pings=9)}),
+            ((lambda: [],), {"budget": _Budget(why="off")}),
             ((lambda: [_agent(last=T0)],), {"quota": True}),
             ((lambda: [_agent(last=T0 + 29, ctx=800_000)],), {"cfg": watch.Cfg(ctx_max=700_000)}),
             ((lambda: [_agent(last=T0)],), {"cfg": watch.Cfg(keepwarm_min=999)}))}
-        self.assertEqual(seen, {"all_done", "quota", "budget", "stall"})
+        self.assertEqual(seen, {"keepwarm", "cap", "idle", "quota", "budget", "stall"})
         for line in out.splitlines():
             self.assertNotIn("rc=", line)
 
@@ -264,6 +352,69 @@ class EventTests(_Fence):
         src = Path(watch.__file__).read_text(encoding="utf-8")
         self.assertNotIn("wastecensus", src.replace("`wastecensus`", "").replace("wastecensus.",
         ""))
+
+
+class HolderInterplayTests(_Fence):
+    """REQ-WP-31：同 sid 只准一個保溫持有者。watch 與 keepwarm
+    指令同時掛著＝同一個保溫點被叫醒兩次。"""
+
+    def _live_other(self) -> int:
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        from lib.sessionctl import holder  # noqa: PLC0415
+        target = holder.path(SID, write=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({"pid": proc.pid, "proc_start": holder.start_token(proc.pid)
+                                      or ""}), encoding="utf-8")
+        return proc.pid
+
+    def test_at_wp_32_watch_takes_the_anchor_and_gives_it_back(self) -> None:
+        """AT-WP-32（watch 側）。WHY：watch 持有期間 keepwarm 指令會 skip；watch 結束必須釋放，
+        否則下一個保溫持有者永遠拿不到錨（保溫從此失效而不自知）。"""
+        from lib.sessionctl import holder  # noqa: PLC0415
+        mid: list[bool] = []
+        clock = _Clock(on_sleep=lambda c: mid.append(holder.live_other(SID, 1) is not None))
+        _run(lambda: [], clock=clock, pid=os.getpid())
+        self.assertTrue(mid and all(mid), "watch 執行中，別的行程看得到持有者")
+        self.assertFalse(holder.path(SID).exists())
+
+    def test_watch_yields_the_keepwarm_family_while_another_process_holds_the_anchor(self) -> None:
+        """AT-WP-35 的 watch 對偶／MU-WP-31。WHY：別的行程（keepwarm 指令）持有時，watch 在保溫點
+        不得再叫醒一次（那正是重複叫醒）；持有者結束後 watch 接手，於接手後的下一輪判保溫族。"""
+        from lib.sessionctl import holder  # noqa: PLC0415
+        self._live_other()
+        budget = _Budget()
+
+        def release_late(clock: _Clock) -> None:
+            if clock.t >= T0 + 50 * MIN and holder.path(SID).exists():
+                holder.path(SID).unlink()
+        rc, out, clock = _run(lambda: [], clock=_Clock(on_sleep=release_late), budget=budget)
+        self.assertEqual((rc, _event(out)), (0, "keepwarm"))
+        self.assertGreaterEqual(clock.t - T0, 50 * MIN)  # 45 分時沒有叫醒，持有者放手後才叫
+        self.assertEqual(len(budget.charged), 1)  # 全程只收費一次
+
+    def test_other_events_are_not_suppressed_by_a_foreign_holder(self) -> None:
+        """WHY：互斥只管保溫族；代理停滯／額度牆這些實質事件，不因別人持有保溫錨就不報。"""
+        self._live_other()
+        rc, out, _ = _run(lambda: [_agent(last=T0)], cfg=watch.Cfg(keepwarm_min=999))
+        self.assertEqual((rc, _event(out)), (0, "stall"))
+
+    def test_a_dead_or_reused_holder_is_taken_over(self) -> None:
+        """AT-WP-32 的接手格。WHY：持有者行程已死、或 pid 被別的行程重用（建立時間不符）時，不接手＝
+        保溫錨永遠被鬼佔著，之後每個 watch／keepwarm 都 skip，快取保溫從此失效。"""
+        from lib.sessionctl import holder  # noqa: PLC0415
+        pid = self._live_other()
+        row = json.loads(holder.path(SID).read_text(encoding="utf-8"))
+        if row["proc_start"]:  # 取得到建立時間的平台才有「重用」這一格
+            holder.path(SID).write_text(json.dumps({"pid": pid, "proc_start": "0"}),
+                                        encoding="utf-8")
+            self.assertTrue(holder.acquire(SID, os.getpid()))
+        holder.path(SID).write_text(json.dumps({"pid": 2_999_999, "proc_start": ""}),
+                                    encoding="utf-8")
+        self.assertTrue(holder.acquire(SID, os.getpid()))
+        holder.release(SID, os.getpid())
+        self.assertFalse(holder.path(SID).exists())
 
 
 class QuotaLatchTests(_Fence):
@@ -407,23 +558,22 @@ class HeartbeatTests(_Fence):
             seen.append(json.loads(watch.heartbeat_path(SID).read_text(encoding="utf-8")))
 
         clock = _Clock(on_sleep=grab)
-        calls = {"n": 0}
 
         def roster():
-            calls["n"] += 1
-            return [_agent(last=clock.now(), started=clock.now())] if calls["n"] < 4 else []
-        rc, _out, _ = _run(roster, cfg=watch.Cfg(keepwarm_min=999, wall_min=9999), clock=clock)
+            return [_agent(last=clock.now(), started=clock.now())]
+        # 保溫點 2 分鐘、輪詢 30 秒 ⇒ 前 4 輪（0／30／60／90 秒）寫心跳，第 5 輪到點結束
+        rc, _out, _ = _run(roster, cfg=watch.Cfg(keepwarm_min=2, wall_min=9999), clock=clock)
         self.assertEqual(rc, 0)
-        self.assertEqual(len(seen), 3)
+        self.assertEqual(len(seen), 4)
         stamps = [row["heartbeat_at"] for row in seen]
-        self.assertEqual(len(set(stamps)), 3)  # 每輪覆寫（值在變）
+        self.assertEqual(len(set(stamps)), 4)  # 每輪覆寫（值在變）
         for row in seen:
             self.assertEqual(row["schema"], "autosdd.watch/1")
             self.assertEqual(row["pid"], 4242)
             for key in ("started_at", "heartbeat_at", "keepwarm_at"):
                 self.assertIsNotNone(datetime.fromisoformat(row[key]).tzinfo, key)
             self.assertEqual((row["stall_min"], row["wall_min"], row["ctx_max"]), (15, 9999,
-            700_000))
+                                                                                   700_000))
         self.assertFalse(watch.heartbeat_path(SID).exists())  # 結束時刪除
 
     def test_heartbeat_path_lives_under_trace_dir_watch(self) -> None:
@@ -451,43 +601,74 @@ class RealReaderTests(_Fence):
         self.assertFalse(watch.ended_turn(SID, "a1", base))
         self.assertFalse(watch.ended_turn(SID, "nope", base))
 
-    def test_cli_all_done_after_shortened_grace(self) -> None:
-        """CLI 層。WHY：子行程真跑 `sessionctl.py watch`——驗分派、sid 解析、rc
-        與末行（寬限以參數縮短）。隔離額度快取先種一份新鮮低水位讀數：空目錄會讓子行程的
-        `pace_state` 拿真憑證量真額度（2026-11-17 nightly 短窗過門檻 ⇒ rc 5＝quota）。"""
+    def _seed_low_quota(self, pct: float) -> None:
+        """隔離額度快取先種一份新鮮讀數：空目錄會讓子行程的 `pace_state` 拿真憑證量真額度
+        （2026-11-17 nightly 短窗過門檻 ⇒ quota）。"""
         import quota_meter  # noqa: PLC0415
         now = datetime.now().astimezone()
-        (self.tmp / "quota").mkdir()
-        axis = {"kind": "five_hour", "pct": 1.0, "via": "test", "resets_at":
+        (self.tmp / "quota").mkdir(exist_ok=True)
+        axis = {"kind": "five_hour", "pct": pct, "via": "test", "resets_at":
                 datetime.fromtimestamp(now.timestamp() + 7200).astimezone().isoformat()}
         self.assertTrue(quota_meter.write_cache({"schema": quota_meter.SCHEMA, "axes": [axis],
             "measured_at": now.isoformat(timespec="seconds")}, quota_meter.cache_path()))
-        (self.tmp / "projects" / SID).mkdir(parents=True)
-        env = {**os.environ, "PYTHONUTF8": "1"}
-        proc = subprocess.run(
-            [sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"), "watch", "--sid", SID,
-             "--projects-dir", str(self.tmp / "projects"), "--grace-sec", "1", "--poll-sec", "0.2"],
-            capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
-        self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn("WATCH_VERDICT=all_done", proc.stdout)
 
-    def test_cli_non_all_done_verdict_still_exits_rc_zero(self) -> None:
+    def _cli(self, *extra: str) -> subprocess.CompletedProcess:
+        env = {**os.environ, "PYTHONUTF8": "1"}
+        return subprocess.run(
+            [sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"), "watch", "--sid", SID,
+             "--projects-dir", str(self.tmp / "projects"), "--poll-sec", "0.2", *extra],
+            capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
+
+    def _seed_main_transcript(self, ctx: int) -> None:
+        """主控逐字稿最後一筆 usage 記錄在 50 分鐘前 ⇒ 保溫點（錨＋45 分）早已到。"""
+        (self.tmp / "projects" / SID).mkdir(parents=True, exist_ok=True)
+        at = datetime.now().astimezone().timestamp() - 50 * MIN
+        rec = {
+            "type": "assistant",
+            "timestamp": datetime.fromtimestamp(at).astimezone().isoformat(),
+            "message": {
+                "id": "m1",
+                "usage": {
+                    "input_tokens": 1,
+                    "cache_read_input_tokens": ctx - 1,
+                    "cache_creation_input_tokens": 0,
+                    "output_tokens": 7,
+                },
+            },
+        }
+        (self.tmp / "projects" / f"{SID}.jsonl").write_text(json.dumps(rec) + "\n",
+                                                            encoding="utf-8")
+
+    def test_cli_with_no_agents_ends_at_the_keepwarm_point_not_before(self) -> None:
+        """CLI 層（AT-WP-30／31 的子行程對照）。WHY：真跑 `sessionctl.py watch`——驗分派、sid 解析、
+        rc 與末行。沒有任何代理也不會因「全部交卷」退出；主控 50 分鐘前說過話 ⇒ 保溫點已到 ⇒
+        `keepwarm`、記一次叫醒進共用帳。"""
+        self._seed_low_quota(1.0)
+        self._seed_main_transcript(400_000)
+        proc = self._cli()
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(_event(proc.stdout), "keepwarm")
+        ledger = json.loads(keepwarm.ledger_path(SID).read_text(encoding="utf-8"))
+        self.assertEqual(ledger["pings"], 1)
+        self.assertFalse(watch.heartbeat_path(SID).exists())  # 結束清心跳
+        from lib.sessionctl import holder  # noqa: PLC0415
+        self.assertFalse(holder.path(SID).exists(), "結束時必須釋放保溫錨")
+
+    def test_cli_small_context_ends_as_idle_without_charging(self) -> None:
+        """WHY：上下文太小＝重寫便宜，保溫不適用 ⇒ `idle`（不重掛）；不得記一次叫醒。"""
+        self._seed_low_quota(1.0)
+        self._seed_main_transcript(20_000)
+        proc = self._cli()
+        self.assertEqual((proc.returncode, _event(proc.stdout)), (0, "idle"))
+        self.assertFalse(keepwarm.ledger_path(SID).exists())
+
+    def test_cli_non_keepwarm_verdict_still_exits_rc_zero(self) -> None:
         """DEF-200-622 的真子行程鎖。WHY：舊版 quota 事件 rc 5，harness 把它顯示成「failed」；
         現在事件只看末行、行程 rc 0。種 99% 讀數讓 quota 事件成立（反向＝上一條種 1% 得
-        all_done）。"""
-        import quota_meter  # noqa: PLC0415
-        now = datetime.now().astimezone()
-        (self.tmp / "quota").mkdir()
-        axis = {"kind": "five_hour", "pct": 99.0, "via": "test", "resets_at":
-                datetime.fromtimestamp(now.timestamp() + 7200).astimezone().isoformat()}
-        self.assertTrue(quota_meter.write_cache({"schema": quota_meter.SCHEMA, "axes": [axis],
-            "measured_at": now.isoformat(timespec="seconds")}, quota_meter.cache_path()))
+        keepwarm）。"""
+        self._seed_low_quota(99.0)
         (self.tmp / "projects" / SID).mkdir(parents=True)
-        env = {**os.environ, "PYTHONUTF8": "1"}
-        proc = subprocess.run(
-            [sys.executable, str(_REPO_ROOT / "tools" / "sessionctl.py"), "watch", "--sid", SID,
-             "--projects-dir", str(self.tmp / "projects"), "--grace-sec", "1", "--poll-sec", "0.2"],
-            capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
+        proc = self._cli()
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(_event(proc.stdout), "quota")
 

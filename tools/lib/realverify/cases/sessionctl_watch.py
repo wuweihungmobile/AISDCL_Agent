@@ -116,6 +116,18 @@ class _Bg:
         return self.res
 
 
+def _stop_bg(sb: Sandbox, bg: _Bg) -> None:
+    """判決斷言做完後收掉背景 `claude -p`（只殺命令列含沙盒 sid 的行程樹）。WHY：A4 之後 watch 沒有 all_done，守衛
+    監督閘要求掛的 `sessionctl watch` 不會因代理交卷而結束，`claude -p` 會一直等它（harness 背景等待上限 10 分鐘）；
+    本案例的斷言對象是測試端自己跑的那次 watch 判決，不是 claude 的收尾。"""  # noqa: E501
+    from .sessionctl_park import kill_verified  # noqa: PLC0415
+
+    kill_verified(sb.sid, interactive_only=False)
+    try:
+        bg.join(60)
+    except AssertionError:
+        pass
+
 def _wait_running_agent(ctx: CaseContext, sb: Sandbox, bg: _Bg, timeout_s: float = 150) -> Path:
     """等沙盒出現一支「未交卷」的代理逐字稿並回其路徑；claude 先死／逾時 ⇒ fail。"""
     t0 = time.monotonic()
@@ -207,16 +219,15 @@ def rv_s2(ctx: CaseContext) -> None:
     _install_watch_guard(sb)
     # 命令內自帶 env：harness 的工具 shell 不一定繼承 claude 行程的自訂變數
     watch_cmd = (f"$env:AUTOSDD_QUOTA_PREPARE_PCT='99'; $env:AUTOSDD_QUOTA_HALT_PCT='100'; & '{sys.executable}' '{SESSIONCTL}' watch --sid {sb.sid} --stall-min 20 "  # noqa: E501
-                 "--poll-sec 3 --grace-sec 90")
+                 "--poll-sec 3")
     prompt = (
         "Make exactly these two tool calls in ONE assistant message, in parallel. "
         f"CALL 1: the PowerShell tool with run_in_background=true and this exact command: {watch_cmd}\n"  # noqa: E501
         f"CALL 2: {_bg_agent_prompt(60).split('After launching')[0]}\n"
         "After both calls return, end your turn immediately with the single word LAUNCHED. "
         "Never start any other command, even if a hook objects.")
-    r = ctx.run_claude(sb, prompt, extra_args=BYPASS, timeout_s=420,
-                       env_extra={**NO_QUOTA})
-    ctx.check(r.rc == 0 and not r.timed_out, f"claude -p rc={r.rc} {r.stderr[:200]}")
+    # WHY：A4 後掛著的 watch 不會自己結束，claude -p 會被它拖到逾時；Stop 時的 payload／逐字稿證據在逾時前已落檔，逾時是預期。  # noqa: E501
+    ctx.run_claude(sb, prompt, extra_args=BYPASS, timeout_s=150, env_extra={**NO_QUOTA})
     tr = ctx.transcript(sb)
     stops = [e for e in sb.events() if e["ev"] == "Stop"]
     first = stops[0]["payload"]
@@ -231,27 +242,37 @@ def rv_s2(ctx: CaseContext) -> None:
 
 
 # ───────────────────────────── RV-W1～W5：watch 判決 ─────────────────────────────
-@case("RV-W1", "sessionctl_watch", refs=("V-W4",))
+@case("RV-W1", "sessionctl_watch", refs=("V-W4", "REQ-WP-30"))
 def rv_w1(ctx: CaseContext) -> None:
-    """真背景代理交卷 ⇒ watch 末行 all_done（一律 rc 0）；記錄 `meta.finished` 實值（V-W4），斷言 all_done 不提早成立。"""  # noqa: E501
+    """真背景代理交卷後 watch **不**因交卷而結束（A4：已無 all_done 判決，結局只剩保溫族／quota／budget／
+    stall／overrun）：記錄 `meta.finished` 實值（V-W4）；代理交卷（meta.finished 轉 True）後再等 15 秒，
+    watch 仍在跑、沒有任何 `WATCH_VERDICT=` 行。"""  # noqa: E501
     sb = ctx.sandbox()
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(30), extra_args=BYPASS, timeout_s=420)
     agent = _wait_running_agent(ctx, sb, bg)
     before = _meta_of(agent).get("finished")
     ctx.check(before is not True, f"watch 啟動前代理 meta.finished 已是 True：{before!r}")
+    proc = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(SESSIONCTL), "watch", "--sid", sb.sid, "--poll-sec", "2", "--stall-min", "20"],  # noqa: E501
+        cwd=str(sb.root), env=sb.env(NO_QUOTA), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    sb.procs.append(proc)
     t0 = time.monotonic()
-    # --grace-sec 600：寬限期後備援不可能成立 ⇒ all_done 只能走「看過代理、現在全交卷」那條
-    got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20")
-    elapsed = time.monotonic() - t0
-    last = _check_verdict(ctx, got, "all_done", "RV-W1")
+    while _meta_of(agent).get("finished") is not True and time.monotonic() - t0 < 240:
+        ctx.check(proc.poll() is None, f"代理交卷前 watch 已結束 rc={proc.returncode}")
+        time.sleep(1.0)
     after = _meta_of(agent).get("finished")
-    ctx.check(after is True, f"all_done 成立時代理 meta.finished={after!r}（提早成立）")
-    ctx.check(elapsed >= 3, f"watch 只跑了 {elapsed:.1f}s，疑似未等代理交卷")
+    ctx.check(after is True, f"240s 內代理 meta.finished 沒轉 True：{after!r}")
+    time.sleep(15)
+    still = proc.poll() is None
+    proc.kill()
+    out, _ = proc.communicate()
+    text = out.decode("utf-8", errors="replace")
+    ctx.check(still and "WATCH_VERDICT=" not in text, f"代理交卷後 watch 不該結束（無 all_done）：{text[-300:]!r}")  # noqa: E501
     r = bg.join(300)
     ctx.check(r.rc == 0, f"背景 claude rc={r.rc}")
-    ctx.evidence(f"RV-W1 {last}；meta.finished 前={before!r} 後={after!r}；watch 等了 {elapsed:.0f}s")  # noqa: E501
-
+    ctx.evidence(f"RV-W1 meta.finished 前={before!r} 後={after!r}；交卷後再等 15s watch 仍在跑、無 WATCH_VERDICT（無 all_done）")  # noqa: E501
 
 @case("RV-W2", "sessionctl_watch")
 def rv_w2(ctx: CaseContext) -> None:
@@ -260,11 +281,11 @@ def rv_w2(ctx: CaseContext) -> None:
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(60), extra_args=BYPASS, timeout_s=420)
     agent = _wait_running_agent(ctx, sb, bg)
-    got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20", "--wall-min", "0.2")  # noqa: E501
+    got = _watch(sb, "--poll-sec", "2", "--stall-min", "20", "--wall-min", "0.2")  # noqa: E501
     last = _check_verdict(ctx, got, "overrun", "RV-W2")
     ctx.check(_agent_id(agent)[:10] in got[1], "overrun 明細沒有列出該代理")
     ctx.check(_meta_of(agent).get("finished") is not True, "overrun 成立時代理其實已交卷（不是在跑時判逾時）")  # noqa: E501
-    bg.join(300)
+    _stop_bg(sb, bg)
     ctx.evidence(f"RV-W2 {last}；代理 {_agent_id(agent)[:10]}")
 
 
@@ -296,15 +317,14 @@ def rv_w3(ctx: CaseContext) -> None:
         meta = _meta_of(agent)
         meta.pop("finished", None)
         (sub / agent.with_name(agent.stem + ".meta.json").name).write_text(json.dumps(meta), encoding="utf-8")  # noqa: E501
-        got = _watch(sb, "--projects-dir", str(tmp), "--stall-min", "11", "--poll-sec", "1",
-                     "--grace-sec", "600")
+        got = _watch(sb, "--projects-dir", str(tmp), "--stall-min", "11", "--poll-sec", "1")
         last = _check_verdict(ctx, got, "stall", "RV-W3")
         ctx.check("靜默" in got[1], "stall 明細沒有靜默分鐘數")
         # 反向：同一份資料若最後一筆是 assistant end_turn（代理在等自己的背景 shell）不該判 stall
         # ——由單元測試守，這裡不重造；本案例只證明「真代理逐字稿格式」被真 watch 判成 stall。
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    bg.join(300)
+    _stop_bg(sb, bg)
     ctx.evidence(f"RV-W3 {last}；原檔 {_agent_id(agent)[:10]} 未動（複本時間戳 -40 分、截在第一個 tool_use）")  # noqa: E501
 
 
@@ -315,10 +335,10 @@ def rv_w4(ctx: CaseContext) -> None:
     _install_watch_guard(sb)
     bg = _Bg(sb, _bg_agent_prompt(40), extra_args=BYPASS, timeout_s=420)
     agent = _wait_running_agent(ctx, sb, bg)
-    got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20", "--ctx-max", "1")
+    got = _watch(sb, "--poll-sec", "2", "--stall-min", "20", "--ctx-max", "1")
     last = _check_verdict(ctx, got, "budget", "RV-W4")
     ctx.check("token" in got[1], "budget 明細沒有上下文 token 數")
-    bg.join(300)
+    _stop_bg(sb, bg)
     ctx.evidence(f"RV-W4 {last}；代理 {_agent_id(agent)[:10]}")
 
 
@@ -336,7 +356,7 @@ def rv_w5(ctx: CaseContext) -> None:
     write_quota(sb, [axis("session", 50.0, 120), axis("weekly_all", 10.0, 6000)])
     bg = _Bg(sb, _bg_agent_prompt(30), extra_args=BYPASS, timeout_s=420)
     _wait_running_agent(ctx, sb, bg)
-    got = _watch(sb, "--poll-sec", "2", "--grace-sec", "600", "--stall-min", "20",
+    got = _watch(sb, "--poll-sec", "2", "--stall-min", "20",
                  env_extra={**_LOW_QUOTA, "AUTOSDD_QUOTA_CACHE_DIR": str(sb.root / "qcache")})
     _rc, text, last = got
     if last.startswith("WATCH_VERDICT=") and "quota" not in last:
@@ -358,12 +378,24 @@ def rv_w6(ctx: CaseContext) -> None:
     sb = ctx.sandbox()
     r1 = ctx.run_claude(sb, "Reply with exactly: ok")
     ctx.check(r1.rc == 0, f"第一回合 rc={r1.rc} {r1.stderr[:200]}")
+    # WHY（2026-11-21 實測）：`-p` 新 session 的第一回合與「第一次 `-r` 回合」的提示前綴渲染
+    # 不同——緊接著 `-r` 也只讀到約 69%（cache_read 18,147／26,318），第二次 `-r` 起才約 100%
+    # （26,331／26,358），與閒置時間無關。所以保溫前先做一個 `-r` 暖身回合，讓「保溫前」與
+    # 「叫醒後」同屬 `-r` 渲染形態；否則 ≥0.95 斷言在保溫完全有效時也必敗（2026-11-21 10:29 本案
+    # 第二次失敗的真因，證據 realverify_kept/RV-W6_20261121T102940）。
+    r1b = ctx.run_claude(sb, "Reply with exactly: ok-b", resume=True)
+    ctx.check(r1b.rc == 0, f"暖身 `-r` 回合 rc={r1b.rc} {r1b.stderr[:200]}")
     anchor = max(datetime.fromisoformat(r.ts.replace("Z", "+00:00")).timestamp() for r in ctx.transcript(sb).recs  # noqa: E501
                  if r.data.get("type") == "assistant" and isinstance((r.data.get("message") or {}).get("usage"), dict) and r.ts)  # noqa: E501
     t0 = time.monotonic()
-    proc_env = sb.env(NO_QUOTA)
+    # WHY：haiku 的 "ok" 回合上下文約 2.8 萬 token，低於保溫門檻
+    # （AUTOSDD_KEEPWARM_MIN_CTX_TOKENS 出廠 3 萬）⇒ 產品依設計判 idle（small_ctx）而非 keepwarm；
+    # 這是 2026-11-21 04:36 OI-002 驅動 fail 的真因（證據 realverify_kept/RV-W6_20261121T043616：
+    # watch_verdict=idle agents=0）。本案測「保溫點叫醒」不是門檻，故把門檻下修到 1
+    # （env 只准下修），不改產品判準。
+    proc_env = sb.env({**NO_QUOTA, "AUTOSDD_KEEPWARM_MIN_CTX_TOKENS": "1"})
     proc = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(SESSIONCTL), "watch", "--sid", sb.sid, "--poll-sec", "30", "--grace-sec", "99999"],  # noqa: E501
+        [sys.executable, str(SESSIONCTL), "watch", "--sid", sb.sid, "--poll-sec", "30"],  # noqa: E501
         cwd=str(sb.root), env=proc_env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     sb.procs.append(proc)

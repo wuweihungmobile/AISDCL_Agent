@@ -99,13 +99,33 @@ class _GitError(RuntimeError):
     pass
 
 
-def _git(worktree: str | Path, *args: str, env: dict | None = None) -> tuple[int, bytes]:
+def _git(worktree: str | Path, *args: str, env: dict | None = None,
+         stdin: bytes | None = None) -> tuple[int, bytes]:
     # shell=False ＋ argv 陣列：救援序列不經任何殼，`shell=True` 的原生殼差異
     # （Windows cmd.exe / POSIX /bin/sh）在這條路上沒有任何用處。
     proc = subprocess.run(
         ["git", "-C", str(worktree), *args],
-        capture_output=True, env=env, check=False)
+        capture_output=True, env=env, check=False, input=stdin)
     return proc.returncode, proc.stdout
+
+
+def resolve_base(worktree: str | Path) -> tuple[str, str]:
+    """回 (diff 基準 ref, base_sha 標記)。
+
+    🔴 R217：全新 `git init` 還沒有任何 commit 時 `HEAD` 不存在（`rev-parse HEAD` rc=128），
+    但工作樹可以很髒（全是 untracked／staged 新檔，恰是最貴的那一半）。原實作在此拋 `_GitError`，
+    被消費端讀成「救援拋錯 ⇒ 禁止自動喚醒」——把「沒有 HEAD」誤歸類成「救援失敗」，且工作沒被存。
+    正解＝以該 repo 物件格式（sha1／sha256）的**空樹**當基準：相對空樹的 diff 就是「全部內容」，
+    `read-tree <空樹> ＋ apply --check --cached` 的第二道閘語意不變。HEAD 存在時行為逐字不變。
+    真正的 git 錯誤（不在 repo 內、git 壞了）仍由後續指令照常拋出。"""
+    rc, _ = _git(worktree, "rev-parse", "--verify", "-q", "HEAD")
+    if rc == 0:
+        return "HEAD", _git_text(worktree, "rev-parse", "--short", "HEAD")
+    rc, out = _git(worktree, "hash-object", "-t", "tree", "--stdin", stdin=b"")
+    empty = out.decode("ascii", errors="replace").strip()
+    if rc != 0 or not empty:
+        raise _GitError(f"git hash-object（空樹）rc={rc}")
+    return empty, empty
 
 
 def _git_text(worktree: str | Path, *args: str) -> str:
@@ -145,13 +165,15 @@ def build_patch_bytes(worktree: str | Path) -> tuple[bytes, list[str]]:
     """兩段輸出依序落成**同一份** patch（順序是規範性的：① 在前，② 在後）。
 
     回 (patch_bytes, expected_paths)。expected_paths＝tracked ∪ untracked，來自
-    **列舉**而不是 patch 自己——後者是拿答案去對答案。
+    **列舉**而不是 patch 自己——後者是拿答案去對答案。基準由 `resolve_base()` 決定：
+    有 HEAD 即 HEAD（行為不變）、無 HEAD 的空 repo 給空樹。
     """
-    tracked = _z_paths(worktree, "diff", "HEAD", "--name-only", "-z")
+    base, _ = resolve_base(worktree)
+    tracked = _z_paths(worktree, "diff", base, "--name-only", "-z")
     untracked = _z_paths(worktree, "ls-files", "--others", "--exclude-standard", "-z")
-    rc, part1 = _git(worktree, "diff", "HEAD", "--binary", "--no-color")
+    rc, part1 = _git(worktree, "diff", base, "--binary", "--no-color")
     if rc != 0:
-        raise _GitError(f"git diff HEAD rc={rc}")
+        raise _GitError(f"git diff {base} rc={rc}")
     chunks = [part1]
     for path in untracked:
         # `--no-index` 對「兩份檔不同」回 rc=1，那是**正常**輸出不是錯誤；只有 >1 才是壞。
@@ -291,7 +313,7 @@ def rescue_dirty_worktree(
     # 步驟 0：base_sha 在跑 ① **之前**取、之後不再重取（PRD R-4.5.9-2 寫死）。
     # 它決定第二道閘的成敗：① 產出的 hunk 是相對該 HEAD 的 diff，基準寫錯，閘門測的
     # 就是另一個問題。
-    base_sha = _git_text(wt, "rev-parse", "--short", "HEAD")
+    _, base_sha = resolve_base(wt)
     hazard = _selfrecursion_hazard(wt, ck_dir)
     if hazard:
         return _unsaved(RescueResult(status=DIRTY_UNSAVED, base_sha=base_sha,

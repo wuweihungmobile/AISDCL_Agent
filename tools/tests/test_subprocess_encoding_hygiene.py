@@ -122,7 +122,7 @@ def _scan_roots() -> list[tuple[Path, int]]:
         (_REPO_ROOT / "tools", 414),
         (_REPO_ROOT / "AutoClaude" / "tools", 41),
         (_REPO_ROOT / "AutoClaude" / "autoclaude", 194),
-        (_REPO_ROOT / "AutoClaude" / "tests", 268),
+        (_REPO_ROOT / "AutoClaude" / "tests", 319),  # 2026-11-21 重釘 268→319（實測 336）
         (_REPO_ROOT / "AutoClaude" / "scripts", 1),
         (_REPO_ROOT / "AutoClaude" / "alembic", 18),
         (_REPO_ROOT / ".claude" / "hooks", 2),
@@ -527,7 +527,8 @@ def scan_files_child_encoding(
 #: 算法。上界讓它不必靠人記得（R89：35→45＝實測 47×0.95；R100：45→54＝實測 57×0.95，皆收緊）。
 #: DEF-200-410 回歸鎖新增 `--plan` 子行程站點：54→65＝實測 68×0.95，判準逐字給值，收緊。
 # 2026-11-17 重釘 65→79（sessionctl 監督／封存新模組，實測 83，過上界 81；判準逐字給值）。
-_CHILD_SITE_FLOOR = 79
+# 2026-11-21 重釘 79→94（R217 期 A 新測試檔與探針，實測 99；判準逐字給值）。
+_CHILD_SITE_FLOOR = 94
 
 
 class TestSubprocessEncodingHygiene(unittest.TestCase):

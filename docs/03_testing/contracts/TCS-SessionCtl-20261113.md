@@ -2,7 +2,7 @@
 
 > 落檔：`docs/03_testing/contracts/TCS-SessionCtl-20261113.md`。設計全文＝`docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md` §2.13（下稱 ADR）。缺陷帳本列＝DEF-200-580～584。
 > **狀態（2026-11-14）**：第一段（FR-SC-01～04、06～09、24；AT-SC-01～33、89～90）與第二段（交接包、名冊與停止、SendMessage 閘、Stop 出聲、模型建議、hook；FR-SC-05、10～23；AT-SC-34～88）皆已實作並通過。🔴 §3 的真機驗證 V1～V8 仍**待主控真機驗證**，未驗，不得寫成已驗。
-> **R3 增量（2026-11-17；背景代理監督、封存閘、冷窗轉送、半路停工；設計＝ADR-XPLAT-004 §2.18；缺陷帳本列 DEF-200-597～605）**：§1b 與 §2.9～§2.12 為本增量的 FR／AT；全部已實作、單檔實跑綠、**未提交**；§3b 的 V-W／V-F 真機驗證**待掌舵者目視**，未驗不得寫成已驗。
+> **R3 增量（2026-11-17；背景代理監督、封存閘、冷窗轉送、半路停工；設計＝ADR-XPLAT-004 §2.18；缺陷帳本列 DEF-200-597～605）**：§1b 與 §2.9～§2.12 為本增量的 FR／AT；全部已實作、單檔實跑綠、**未提交**；§3b 的 V-W／V-F 真機驗證**〔OI-20261120-010、OI-20261120-015〕待掌舵者目視**，未驗不得寫成已驗。
 > 🔴 **R216 取代註記（2026-11-19，掌舵者 2026-11-18「專注在不要讓 Cache 過期」；設計 SessionSwitch_CostModel_Design、驗收 TCS-SessionSwitch-CostModel-20261118、ADR-XPLAT-004 §2.19）**：本檔所有提到 **R1（25 萬）／R3（上次續跑寫入 10 萬）** 的 FR／AT 列（FR-SC-01／02／03／05、FR-S1 的「≥ R1」、AT-SC-01／02／04／08～11／14～16／59／92、AT-S1／S6、AT-TW-70／75／79／80）為**決策史料，不再是現行判準**：R1／R3 已退役，換窗上下文線改為硬線 HARD、續跑選路改 F4（快取已冷才判），現行驗收見 TCS-SessionSwitch-CostModel 的 AT-SS-40～48 與 RealVerify 家族 sessionctl_costmodel。FR-W2（保溫點）與 V-W3 已就地更新。
 > 測試一律 `tools/tests/test_sessionctl_*.py`（規劃四支，見 §3；現有 `test_sessionctl_switch.py`）＋既有檔增量；所有時間注入 `now`（aware datetime），所有路徑注入 `tmp`／`HOME` 圍籬（`sentinel_lifecycle.temp_fence`），**不讀本機真實 `~/.claude`、不起真排程、不起真 claude**。
 
@@ -280,7 +280,7 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 | AT-M2 | Stop 接線：無背景工作＋髒工作樹 ⇒ 推回；有 running 背景任務、欄位缺席、其他守衛條件（第二次 Stop、無人、開關）、乾淨工作樹且只讀工具 ⇒ 放行；兩種判準同時命中合併一則；讀不到逐字稿 fail-open | 已實作並通過（`test_check_pending_handoff.py::TestMidworkStopWiring`） |
 | AT-C1 | f2260ce7 重現：低於 prepare 的樣本＋`park_armed` 痕跡 ⇒ 計為停點；無痕跡的閒置不計 | 已實作並通過（`test_waste_census_metrics.py::test_at_c1_park_trace_stop_below_prepare_threshold_is_counted`） |
 | AT-Q1 | M-W1～W4、M-F1～F3、M-S1～S3 各自的判準與缺資料時寫明「無資料」而非乾淨的零；CLI 全印且不寫進 repo | 已實作並通過（`test_waste_census_supervision.py`，含 `test_missing_trace_events_say_no_data_instead_of_a_clean_zero`、`test_cli_prints_every_metric_and_writes_nothing_into_the_repo`） |
-| AT-HV2-9 | 接續測驗四題（沙盒 haiku 自動驗交接包 v2 是否足以接續） | **未實作**（H 縫；待真機／後續包，未驗不得寫成已驗） |
+| AT-HV2-9 | 接續測驗四題（沙盒 haiku 自動驗交接包 v2 是否足以接續） | **未實作**（H 縫；〔OI-20261120-015〕待真機／後續包，未驗不得寫成已驗） |
 
 ### 2.13 既有 AT 的語意改動（舊收斂 Stop 推回 → 封存閘；`test_sessionctl_converge.py` 內改名）
 舊 AT-TW-70～77 與 AT-TW-79／AT-TW-80 的原文住 `docs/03_testing/contracts/TCS-TokenWaste-20261114.md` §2（該檔不在本增量改動範圍，其對應列以本表為準）：
@@ -307,11 +307,11 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 | V7 | `--pace` | 多一行模型建議，與當下兩週軸數字一致 |
 | V8 | `claude -p --debug hooks` 正面現查新 hook | `Hook Stop.*success`、`PreToolUse` 於 SendMessage 觸發記錄 |
 
-### 3b. R3 增量的真機驗證（**待真機，未驗不得寫成已驗**；已驗的一項見末列）
+### 3b. R3 增量的真機驗證（**〔OI-20261120-010、OI-20261120-015〕待真機，未驗不得寫成已驗**；已驗的一項見末列）
 
 | V | 步驟 | 通過憑證 |
 |---|---|---|
-| V-W2 | 互動視窗：派背景子代理後不掛 watch 就結束回合；再掛 watch 結束回合 | 前者見監督閘推回理由、後者見「看管中」字樣（互動畫面是否顯示 block 理由與 `systemMessage` 本身即待驗項） |
+| V-W2 | 互動視窗：派背景子代理後不掛 watch 就結束回合；再掛 watch 結束回合 | 前者見監督閘推回理由、後者見「看管中」字樣（互動畫面是否顯示 block 理由與 `systemMessage` 本身即〔OI-20261120-010〕待驗項） |
 | V-W3 | 掛 watch 後主控閒置至保溫點（**最後一筆主控 usage 記錄＋45 分**，R216 起；原為 watch 啟動後 50 分） | watch 結束叫醒主控、首回合以讀快取為主（M-W2 不新增冷重寫）；保溫點 45 分早於 harness 閒置約 55 分的自動壓縮（`idleCompaction`），判準另須「保溫之前逐字稿沒有 `compact_boundary`」；真機＝RealVerify `RV-W6`（`--long`，nightly）、`RV-KW1`～`RV-KW5` |
 | V-W4 | 背景子代理交 interim 卷時看 `meta.finished` 與 `background_tasks` | 記錄實值；all_done 不提早成立 |
 | V-F1 | 封存後等快取冷，在舊視窗打一句真人提示 | 舊視窗畫面顯示轉送說明、新視窗自動開出並讀到轉送原文檔；失敗路徑原文檔仍在；`留：` 開頭的提示留在原視窗 |

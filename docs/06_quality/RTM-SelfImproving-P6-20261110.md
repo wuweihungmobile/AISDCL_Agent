@@ -2,7 +2,7 @@
 
 **版本**: 1.2（2026-11-11：`AT-645-4-1` 與 `V-P6-1` 回填巡邏自動入帳真機結果；1.1＝2026-11-10 夜：真機 V-P6-1／V-P6-2 回填、勘誤 E-8／E-9 新增 AT 四列；1.0＝SCG-4 二審 PASS 後回填；表格形沿用 `docs/06_quality/RTM-SelfImproving-P4-20261109.md`；Console 半見 `AgentConsole/docs/06_quality/RTM-ResearchRegistry-20261110.md`）
 **日期**: 2026-11-10
-**狀態**: 根層半實作與自動測試完成。實作 commit `914e0adc`（研究來源登記與抓取，RR）、`0bea20e4`（回測 BT 與範圍守衛）、`11067dd1`（重釘）；SCG-4 修正 `12c93c65`（QA4R-01、QA4R-02）、`8bf9b648`（重釘二十三列）、`0f65773a`（非 UTF-8 XML 拒收 AT 改編號 AT-630-8-E-3）；勘誤 `0638fdd5`（TCS-P6 勘誤 E-1～E-7）。SCG-4 獨立審查報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P6-20261110.md`：一審 FAIL（P2 2、P3 1、P4 1）→ 修復 → 聚焦二審 PASS。根層全套 `tools/run_root_unittests.py` rc=0（發現 6295 個測試、下限 6207）；`0f65773a` 之後再改名一條，netfetch 單檔 27 條、c1c2 單檔 187 條皆綠。**真機項 V-P6-1（登記、入帳、實抓）與 V-P6-2（K=5 回測）尚未執行，一律標「真機待驗」，不得視為已驗。**（1.0 原文保留）**1.1 更新**：OBS-SI-383／384（回測洩漏稽核對齊真實 harness 逐字稿）修正 `924e0975`、`e298f324`、`89766d18`，勘誤 `3371129b`、`d6ba3e36`、`61d53f84`（PRD v0.15.1、TCS E-8／E-9），QA 聚焦複核 FAIL→修→PASS；V-P6-1 與 V-P6-2 已真機驗（見文末表），唯 AT-645-4-1 的巡邏自動入帳路徑仍待真機觸發。
+**狀態**: 根層半實作與自動測試完成。實作 commit `914e0adc`（研究來源登記與抓取，RR）、`0bea20e4`（回測 BT 與範圍守衛）、`11067dd1`（重釘）；SCG-4 修正 `12c93c65`（QA4R-01、QA4R-02）、`8bf9b648`（重釘二十三列）、`0f65773a`（非 UTF-8 XML 拒收 AT 改編號 AT-630-8-E-3）；勘誤 `0638fdd5`（TCS-P6 勘誤 E-1～E-7）。SCG-4 獨立審查報告 `docs/06_quality/SCG4-REVIEW-SelfImproving-P6-20261110.md`：一審 FAIL（P2 2、P3 1、P4 1）→ 修復 → 聚焦二審 PASS。根層全套 `tools/run_root_unittests.py` rc=0（發現 6295 個測試、下限 6207）；`0f65773a` 之後再改名一條，netfetch 單檔 27 條、c1c2 單檔 187 條皆綠。**真機項 V-P6-1（登記、入帳、實抓）與 V-P6-2（K=5 回測）尚未執行，一律標〔OI-20261120-013〕「真機待驗」，不得視為已驗。**（1.0 原文保留）**1.1 更新**：OBS-SI-383／384（回測洩漏稽核對齊真實 harness 逐字稿）修正 `924e0975`、`e298f324`、`89766d18`，勘誤 `3371129b`、`d6ba3e36`、`61d53f84`（PRD v0.15.1、TCS E-8／E-9），QA 聚焦複核 FAIL→修→PASS；V-P6-1 與 V-P6-2 已真機驗（見文末表），唯 AT-645-4-1 的巡邏自動入帳路徑仍待真機觸發。
 **覆蓋率**: AT 100／100 有對應（測試函式以 AT 底線形於 `tools/tests/test_selfimproving_{registry,netfetch,backtest}.py` 現查；其中 NF 檔另有兩個規格外輔助測試 `AT_630_3_E_5`、`AT_630_3_E_6`，不計入 100）；AC 29 個（FR-SI-30 的 9 條、FR-SI-45 的 8 條、FR-SI-46 的 8 條、自增 4 條）。找不到測試函式的 AT：無。
 **規格**: `docs/03_testing/contracts/TCS-SelfImproving-P6-20261110.md`（鍵 `monorepo-si-p6-registry-backtest`，含勘誤 E-1～E-9；AT 共 100，正控 58、負控 42）；上游 `docs/01_requirements/SelfImproving_PRD.md` v0.15.1。
 **FSM**: 本檔回填時 RELEASE 尚未執行；狀態以本檔 E2E 欄與 SCG-4 報告為準。（1.0 原文保留）**1.1**：2026-11-10 雲端 CI（`c3f43217` root-infra／macos-compat／windows-compat）全綠後 `gate RELEASE_READY PASS` ⇒ 鍵 `monorepo-si-p6-registry-backtest` 為 RELEASE（OBS-SI-372 規則：本鍵真機項 V-P6-1／V-P6-2 皆已驗）。
@@ -112,7 +112,7 @@
 | `AT-690-3-2` | `AC-P6-090-3` | SOP 機械判準通過且有牙（新節位置） | 根層 | P6 | `docs/05_development/SelfImproving_Operations_SOP.md`（判準在測試） | `RG::test_AT_690_3_2_sop_criteria_pass_and_have_teeth` | — | ✅ 實作+測試（SCG-4 二審 PASS） |
 | `AT-690-4-1` | `AC-P6-090-4` | 範圍守衛：差分 ⊆ 允許集合，逐 commit 以 `SI_SCOPE_BASE`／`SI_SCOPE_TIP` 驗 | 根層 | P6 | （範圍守衛；勘誤 E-6、E-7） | `BT::test_AT_690_4_1_scope_guard_needs_an_explicit_base` | 本鍵五個 commit 逐一驗全綠（二審；見 SCG-4 報告） | ✅ 實作+測試（SCG-4 二審 PASS） |
 
-## 真機待驗項（TCS-P6 §1 末與運行期資料列；不入 AT）
+## 真機〔OI-20261120-013〕待驗項（TCS-P6 §1 末與運行期資料列；不入 AT）
 
 | 編號 | 內容 | 前置 | 目前狀態 |
 |------|------|------|----------|

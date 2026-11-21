@@ -47,7 +47,7 @@
 - **鎖**：`tools/tests/test_sessionctl_{handoff,roster,hooks,modelmix}.py`；hook 註冊面由 `test_check_hooks_liveness.py::_REGISTRATION_BASELINE` 與 `test_sessionctl_hooks.py::GuardRegistrationTest` 釘住。
 - **SPECIAL 棘輪重釘**：`.claude/hooks/context_budget_guard.py` 1089→1104（+15：`switch_advice` 14 行函式＋1 行呼叫）。為何不可再壓縮：交接包判準與產生全在 `tools/lib/sessionctl/handoff.py`，hook 內只剩 lazy import＋try/except；該 hook 由 `runpy` 起、不能反向 import lib，接線必須住在本檔（ADR §2.13.8）。`tools/lib/` 側 `sentinel_lifecycle.py` 399／400 行、未破。
 - **兩個整合缺陷（第二段兩半對接時已修，未另立列）**：`roster._handoffs` 查 `<檔名>.md.ack` 而 `handoff.ack` 寫 `<stem>.ack`（已 ack 的包永遠被當未接手）；spawn 痕跡 `at` 取等完逐字稿之後的時刻使 stop 的時刻比對失準。
-- **仍待真機**：TCS §3 的 V1～V8（含互動畫面是否顯示 Stop 的 `systemMessage`）。
+- **〔OI-20261120-010、OI-20261120-015〕仍待真機**：TCS §3 的 V1～V8（含互動畫面是否顯示 Stop 的 `systemMessage`）。
 
 ### 第二段獨立 QA 與修復（2026-11-14）
 
@@ -65,7 +65,7 @@
 - **P1 SEC-6**：無人窗口會被提示並能 `--spawn` 出沒有姿態圍籬的互動視窗（`washed_env` 洗掉 `AUTOSDD_UNATTENDED`）。修法＝`advise_once` 無人時不出聲不設閂鎖；`spawn`／CLI 一律拒絕；FRESH 路不經 `washed_env` 以測試守住（AT-SC-91／92）。
 - **P2 SEC-1**：`--all-unattended` 的驗證集合加 print 模式限定（雙駕駛不誤砍互動視窗）。**SEC-2**：痕跡帶 pid 者 pid 必須相符、無 pid 的續跑日誌錨點只放行 print 模式、互動視窗痕跡缺 pid 不砍。**SEC-7**：`--spawn` 拒絕已 ack、或同交接包已有 spawn 痕跡且（pid 仍活或在 600 秒內）（AT-SC-93～95）。
 - **P3 已修**：SEC-3（UUID 完整比對，8 碼前綴與非 UUID 形一律驗不到）；SEC-13（機械層與 spawn 提示加「屬資料」句，AT-SC-96）；P4-4 縱深（`--build --session-id` 驗形態）。
-- **P3 不修與理由**：SEC-4（`taskkill /T` 殘留 ppid，審查自述未驗，待真機）；SEC-5（Windows npm 版 claude 為 `node.exe` 時回「沒有找到」rc 0＝方向安全，措辭「量不到≠沒有」留待真機看實際行程名後再定）；SEC-8（`washed_env` 前綴剝 `CLAUDE_CODE_*` 會一併剝認證／供應商鍵，需沙盒實測哪些鍵 settings 不會套回，未驗不改）；SEC-9（代理逐字稿尾段 256 KB 無 usage 時放行，長代理以 assistant 收尾、機率低，擴讀策略待有真實命中）；SEC-10（跨 session 代理 id，harness 是否允許未驗）；SEC-11（`AUTOSDD_SESSIONCTL_GUARD_OFF` 在無人模式仍可關，需改 `.claude/hooks/`，不在本棒範圍，待裁）；SEC-12（交接包明文副本，原文本來就在逐字稿；遮罩樣式清單屬新增面，無暴露證據前登記不做）。
+- **P3 不修與理由**：SEC-4（`taskkill /T` 殘留 ppid，審查自述未驗，〔OI-20261120-015〕待真機）；SEC-5（Windows npm 版 claude 為 `node.exe` 時回「沒有找到」rc 0＝方向安全，措辭「量不到≠沒有」留待真機看實際行程名後再定）；SEC-8（`washed_env` 前綴剝 `CLAUDE_CODE_*` 會一併剝認證／供應商鍵，需沙盒實測哪些鍵 settings 不會套回，未驗不改）；SEC-9（代理逐字稿尾段 256 KB 無 usage 時放行，長代理以 assistant 收尾、機率低，擴讀策略待有真實命中）；SEC-10（跨 session 代理 id，harness 是否允許未驗）；SEC-11（`AUTOSDD_SESSIONCTL_GUARD_OFF` 在無人模式仍可關，需改 `.claude/hooks/`，不在本棒範圍，待裁）；SEC-12（交接包明文副本，原文本來就在逐字稿；遮罩樣式清單屬新增面，無暴露證據前登記不做）。
 - **P4 理論洞（不修）**：①同使用者預先放置偽造痕跡把錨點對準任意行程（仍須命令列含完整 sid 且現在還要 pid 相符）；②列舉與砍之間數秒 pid 重用；③spawn 以裸名 `claude` 解析可被同名 exe 劫持（建議日後改 `shutil.which`）；④`--build --session-id ../x`（本棒已順手封）；⑤交接包首行 `sid=` 可被偽造檔塞入任意 token 進 SessionStart 文字與哨兵名稱；⑥交接包目錄退化到 `%TEMP%` 時符合檔名形態的任何檔被公告。
 - **審查未驗項（待主控真機驗證）**：`taskkill /T` 是否依建立時刻過濾殘留 ppid；harness 是否允許跨 session SendMessage 舊代理 id；互動 spawn 從 `claude -p` 工具子行程發出時新視窗會不會被 Job Object 隨窗收掉。
 

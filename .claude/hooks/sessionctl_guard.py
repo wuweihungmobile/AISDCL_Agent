@@ -46,11 +46,16 @@ def main() -> int:
         payload = read_hook_payload()
         event, tool = payload.get("hook_event_name"), payload.get("tool_name")
         if event == "UserPromptSubmit":  # 判準全在 forward.py：舊窗冷快取轉送／已交棒告知
-            from lib.sessionctl import forward  # noqa: PLC0415
+            from lib.sessionctl import forward, oldwin  # noqa: PLC0415
 
             out = forward.hook_output(payload, os.environ)
             if out:
                 _emit(out)
+            elif note := "\n".join(filter(None, (
+                    oldwin.take_unread_notice(str(payload.get("session_id") or "")),
+                    oldwin.pending_manual_close(str(payload.get("session_id") or ""))))):
+                _emit({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",  # 舊窗關（§7.1）
+                                              "additionalContext": note}, "systemMessage": note})
             return 0
         if event == "PreToolUse" and tool in ("PowerShell", "Bash"):
             # 長前景閘（R216 WP-D）：只判子代理（帶 agent_id）；主控不付 import 成本
@@ -62,11 +67,30 @@ def main() -> int:
                     sys.stderr.write(text)
                     return 2
             return 0
-        from lib.sessionctl import converge, roster  # noqa: PLC0415 — 真的要判才付 import 成本
+        from lib.sessionctl import (  # noqa: PLC0415 — 真的要判才付 import 成本
+            converge,
+            oldwin,
+            roster,
+        )
 
         if event == "Stop":
-            why = converge.stop_verdict(payload, os.environ)  # 先判推回：背景 shell 不得蓋掉它
+            env = os.environ
+            if not payload.get("stop_hook_active"):  # 完成閘讓路：OIR undriven 不叫掛保溫（§4.4）
+                try:
+                    from lib.openitems import gate  # noqa: PLC0415
+
+                    if gate.keepwarm_yields(str(payload.get("session_id") or "")):
+                        env = {**os.environ, "AUTOSDD_KEEPWARM_OFF": "1"}
+                except Exception:  # noqa: BLE001 — 讓路壞了不得連累其他 Stop 閘
+                    pass
+            why = converge.stop_verdict(payload, env)  # 先判推回：背景 shell 不得蓋掉它
             msg = "" if why else roster.stop_message(payload)
+            sid = str(payload.get("session_id") or "")
+            if not why and (note := "\n".join(filter(None, (
+                    oldwin.take_unread_notice(sid), oldwin.pending_manual_close(sid))))):
+                # 舊窗關閉出聲（§7.1；notice 出聲一次、讀過即標已讀；放棄／降級後的
+                # 「請手動關閉」每回合重提醒、直到舊視窗真的關掉為止——R217 F7，不得無聲）
+                msg = f"{msg}\n{note}".strip()
             if why:
                 _emit({"decision": "block", "reason": why})
             elif msg:

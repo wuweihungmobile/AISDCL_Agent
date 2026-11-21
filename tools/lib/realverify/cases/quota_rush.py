@@ -84,11 +84,14 @@ def rv_r2(ctx: CaseContext) -> None:
     un = _rush(sb, "--hours", "1", "--why", "realverify R2 無人窗口", AUTOSDD_UNATTENDED="1")
     ctx.check(un.returncode == 2 and "無人" in un.stderr, f"無人 rush 應 rc 2 含「無人」：rc={un.returncode} {un.stderr}")  # noqa: E501
     ctx.check(not (sb.root / "traces" / "quota_rush.json").exists(), "無人 rush 不該寫出戳記檔")
-    # V-P6：TCS-TokenWaste §10 明載 D5（`--pace-metrics`／`--replay-pace-floor`）本期未做、順延後續期；  # noqa: E501
-    # 旗標在 waste_census 不存在（argparse rc 2）。規格不得宣稱磁碟上沒有的元件 ⇒ 這裡只釘「它確實未落地」，  # noqa: E501
-    # 一旦落地此斷言轉紅、提醒補上真跑 rc 0 的驗證（不是假裝它已驗）。
+    # V-P6（R217 A7 已落地，反轉）：`--pace-metrics`（M-P1／P3／P4／P7／M-C1）與
+    # `--replay-pace-floor`（AC-7 回放）對本機真逐字稿真跑，rc 0 且欄位齊。
     census = REPO / "tools" / "probe" / "waste_census.py"
-    r = run([PY, str(census), "--since-days", "14", "--pace-metrics"], cwd=sb.root, env=_env(sb), timeout=120)  # noqa: E501
-    ctx.check(r.returncode == 2 and "unrecognized arguments" in r.stderr,
-              "waste_census --pace-metrics 已落地？請把 V-P6 改成真跑 rc 0 的驗證")
-    ctx.evidence("RV-R2 burst 25→20 出聲；無人 rush rc 2；V-P6＝D5 順延未落地（旗標不存在，已釘）")
+    r = run([PY, str(census), "--since-days", "14", "--pace-metrics"], cwd=sb.root, env=_env(sb), timeout=240)  # noqa: E501
+    ctx.check(r.returncode == 0, f"--pace-metrics rc={r.returncode} {r.stderr[-300:]}")
+    for key in ("M-P1", "M-P3", "M-P4", "M-P7", "M-C1"):
+        ctx.check(key in r.stdout, f"--pace-metrics 輸出缺 {key}：\n{r.stdout[:500]}")
+    rp = run([PY, str(census), "--since-days", "14", "--replay-pace-floor"], cwd=sb.root, env=_env(sb), timeout=240)  # noqa: E501
+    ctx.check(rp.returncode == 0 and "配速床回放 AC-7" in rp.stdout and "會開床的列數" in rp.stdout,
+              f"--replay-pace-floor rc={rp.returncode}\n{rp.stdout[:400]}{rp.stderr[-300:]}")
+    ctx.evidence("RV-R2 burst 25→20 出聲；無人 rush rc 2；V-P6 --pace-metrics／--replay-pace-floor 真跑 rc 0 欄位齊")  # noqa: E501

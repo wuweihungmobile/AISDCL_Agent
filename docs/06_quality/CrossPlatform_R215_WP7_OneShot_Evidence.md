@@ -1,4 +1,4 @@
-# R215 WP-7 一次性真機驗證證據（非 sessionctl 待驗項）
+# R215 WP-7 一次性真機驗證證據（非 sessionctl 〔OI-20261120-017〕待驗項）
 
 **執行**：2026-11-18 20:4x～21:0x，WP-7 驗證棒（Sonnet），主控 sid 89c354d9 親驗殘留與 smoke。
 **設計**：`CrossPlatform_R215_PendingVerification_Closure.md` §2 #38～#57、§6b-6。原始輸出原在主控 scratchpad `wp7\`（臨時，以本檔為準）。
@@ -14,7 +14,7 @@
 | 52 | PASS | `node:22-alpine` 唯讀 bind：主機 `os.replace` 三次，容器讀到 v2／v3／v4；容器寫入回 Read-only file system |
 | 53 | PASS（Windows） | 內容同 #51；launchd 側在 mac，本機不可達（C：另機） |
 | 54 | PASS | `windows_smoke_local.ps1`（`powershell.exe` 5.1）rc 0、`PASS=13 FAIL=0`（主控親驗）；「LATEST .sh 可啟動」step PASS |
-| 55 | PASS | 事件帳本 seq 98／99：`by=patrol`、`kind=research.registry`、`carrier=console`、2026-11-11 10:30:02；RTM-SelfImproving-P6 檔頭「AT-645-4-1 仍待真機觸發」為過時文字 |
+| 55 | PASS | 事件帳本 seq 98／99：`by=patrol`、`kind=research.registry`、`carrier=console`、2026-11-11 10:30:02；RTM-SelfImproving-P6 檔頭〔OI-20261120-017〕「AT-645-4-1 仍待真機觸發」為過時文字 |
 | 56 SEC-4 | PASS | `taskkill /T /F` 殺 cmd→cmd→ping 三層樹 rc 0、子孫無殘留 |
 | 56 SEC-5 | PASS（本機） | 原生 `claude.exe` 名稱符合 `claude*` 過濾；npm 版 `node.exe` 本機不可重現（C：另機） |
 | 56 SEC-8 | PASS | `washed_env` 洗掉 `CLAUDE_CODE_*`、`CLAUDECODE`、`CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`，洗後 `claude -p --model haiku` rc 0、認證正常 |

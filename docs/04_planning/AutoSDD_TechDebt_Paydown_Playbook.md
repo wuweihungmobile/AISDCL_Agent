@@ -367,7 +367,7 @@ run_root_unittests.py 759/759），鎖面跨三持有面，只能收尾單人窗
 | DEF-200-121 | P2 | quick | M | 高 | DUE_ROUND 無防延期後設鎖：改 9999 全綠 | 加 due_round 上界判準＋紅綠；DUE=107 恰到期順勢兌現 |
 | DEF-200-124 | P2 | dev | L | 中 | prose 分桶棘輪量 chunk 歸類非行數，兩向訊號皆假 | 路徑指標行單獨歸屬；動基準需四方複審後單人窗口落地 |
 | DEF-200-125 | P2 | quick | S | 中 | PRD 權威 status 枚舉零讀取，出口＝取樣一次未做 | 真打一次 fetch_usage 列鍵集合：有補帶出、無則劃界結案 |
-| DEF-200-128 | P2 | quick | S | 中 | 待驗清單治本腳本未建，同型失效已被 crossref 覆蓋 | 建議 (a)：以輪號比較機制為等效兌現 closed-by-decision |
+| DEF-200-128 | P2 | quick | S | 中 | 〔OI-20261120-019〕待驗清單治本腳本未建，同型失效已被 crossref 覆蓋 | 建議 (a)：以輪號比較機制為等效兌現 closed-by-decision |
 | DEF-200-129 | P2 | quick | M | 高 | 自列「改派」出口純布林不比輪號＝永久免驗 | 自列出口加輪號下限；🔴 須與批次結案同窗上鎖防大片假紅 |
 | DEF-200-133 | P1 | dev | M | 高 | 「tracked 引用 untracked」這一向零判準 | 新判準收窄至 Python import 層 AST；劃界動態 import 不在射程 |
 | DEF-200-134 | P1 | dev | M | 中 | 並行包自陳未完成後誰承接零機械物 | check_handoff_carriers 加「未完成項節」義務＋對映帳本列 |

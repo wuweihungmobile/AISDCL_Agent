@@ -872,10 +872,11 @@ class TestNoRegression(RgCase):
 
     def test_AT_690_2_1_params_json_is_untouched(self):
         # P7（TCS-P7 AC-SI-49-1）改版加三個 sched_push_* 鍵；2026-11-12 資安審查修復把
-        # sched_auto_push 預設改回 false（明確開啟才生效），活值 sha 更新
+        # sched_auto_push 預設改回 false（明確開啟才生效），活值 sha 更新；2026-11-21 R217
+        # `non_evolvable_globs` 補 openitems 套件，活值 sha 再更新
         raw = (ROOT / "docs/06_quality/SelfImproving_Protocol/params.json").read_bytes()
         self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         "aab9ca2d64f846920952fa469af43135ac582c166de3bd9593765572a7b13943")
+                         "36f87e5d9d0feec5130bba22d77b1dbd1cde1f1b70c9b1879f5c91dfa2cfc7a7")
         self.assertEqual(len(params.PARAM_SPECS), 47)
         self.assertEqual(params.CHECK_RULES_REV, 6)
         self.assertEqual(self.check(ROOT)["_item"]["params.globs"]["status"], "PASS")

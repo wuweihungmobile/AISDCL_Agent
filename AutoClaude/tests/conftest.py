@@ -812,6 +812,28 @@ def _hermetic_external_resume_cmd(monkeypatch):
 
 
 # ──────────────────────────────────────────────────────────────
+# 同家族（R217 RV-WP35／REQ-WP-62）：`AppConfig.checkpoint_dir` 預設是相對路徑 "checkpoints"，
+# 測試 cwd＝AutoClaude/ ⇒ 全套每跑一次就把 escalation_*.md、evolved*.checkpoint.json*、
+# failure_knowledge_base.jsonl、goal_progress.jsonl 等寫進**真的** AutoClaude/checkpoints/（實測
+# 每次全套 +7～10 檔；那是 nightly 與開發機的真實執行目錄，不是測試場）。把出廠預設改指 tmp；
+# 顯式傳 checkpoint_dir 的測試不受影響。
+# 鎖：tests/test_r217_f1_product_defects.py::TestDefaultCheckpointDirIsHermetic。
+@pytest.fixture(autouse=True)
+def _hermetic_default_checkpoint_dir(tmp_path_factory):
+    from autoclaude.utils.config import AppConfig
+
+    field = AppConfig.model_fields["checkpoint_dir"]
+    original = field.default
+    field.default = str(tmp_path_factory.mktemp("ckpt_iso"))
+    AppConfig.model_rebuild(force=True)
+    try:
+        yield
+    finally:
+        field.default = original
+        AppConfig.model_rebuild(force=True)
+
+
+# ──────────────────────────────────────────────────────────────
 # 同家族（improving_115／ADR-XPLAT-016 §7.1）：開發機殼層 export 的 `SDD_PROJECT` 不得漏進測試
 # ──────────────────────────────────────────────────────────────
 # SddToPlaybookAdapter 在**建構時**讀 `SDD_PROJECT` 選 FSM 狀態檔。在 SDD session 的殼層（匯出它是

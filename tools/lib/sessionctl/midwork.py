@@ -76,8 +76,18 @@ def background_idle(payload: dict) -> bool:
         return False
     raw = payload["background_tasks"]
     rows = [raw] if isinstance(raw, dict) else raw if isinstance(raw, list) else []
+    # 純保溫／監督 shell（`sessionctl.py watch`／`keepwarm`）不算「會叫醒主控做事」的背景工作：
+    # 判準單一家＝roster.is_supervision_shell（REQ-WP-22；不複製正則）；子代理另有 agent 項。
     return not any(isinstance(r, dict) and str(r.get("status") or "running") == "running"
-                   for r in rows)
+                   and not _is_supervision(r) for r in rows)
+
+
+def _is_supervision(task: dict) -> bool:
+    try:
+        from . import roster  # noqa: PLC0415 — lazy：hook 鏈不為這一格預付 import 成本
+        return roster.is_supervision_shell(task)
+    except Exception:  # noqa: BLE001 — 判不出來＝不排除（退回舊行為：任何 running 都算工作）
+        return False
 
 
 def tree_dirty(cwd: str) -> bool | None:

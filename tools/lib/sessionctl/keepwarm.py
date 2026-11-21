@@ -25,7 +25,7 @@ from pathlib import Path
 
 import endurance_env
 
-from . import procstop, roster, seal, switch
+from . import holder, procstop, roster, seal, switch
 
 EV_VERDICT = "keepwarm_verdict"
 EV_STOP_BLOCK = "keepwarm_stop_block"
@@ -46,8 +46,8 @@ POLL_SECONDS = 60.0
 #: 2.0；P_FIX＝每次保溫的固定單位（叫醒＋重掛兩回合的輸出與新增上下文；推估值，M-K5 實測回寫）。
 W_CR, W_CC1, P_FIX = 0.1, 2.0, 4500.0
 DISPOSAL = {
-    "ping": "什麼都不判、`python tools/sessionctl.py status` 不必跑；用同一條指令重掛 keepwarm"
-            "（run_in_background、輸出導檔）後結束回合（本回合輸出 ≤ 50 token）",
+    "ping": "重掛同一指令並結束回合，不做任何判斷（`python tools/sessionctl.py status` 也不必跑；"
+            "run_in_background、輸出導檔；本回合輸出 ≤ 50 token）",
     "cap": "已到保溫損益點（再保溫比放冷重寫更貴）：不重掛，直接結束回合讓快取過期",
     "skip": "本情形不需要保溫：什麼都不做、不要重掛",
 }
@@ -234,7 +234,7 @@ def _stamp(epoch: float) -> str:
 
 
 def run(sid: str, transcript, *, t_kw_min: float, env=None, now_fn=time.time, sleep_fn=time.sleep,
-        poll_sec: float = POLL_SECONDS, out=None) -> int:
+        poll_sec: float = POLL_SECONDS, out=None, pid: int | None = None) -> int:
     """阻塞到截止才結束：不掛的情形 ⇒ `skip`；到截止 ⇒ `ping` 或 `cap`；一律 rc 0，判決看末行。
     每輪重讀逐字稿尾端的錨點，有新記錄就把截止往後延（人回來工作時不會提早叫醒）。"""
     env, out = os.environ if env is None else env, out or sys.stdout
@@ -250,27 +250,61 @@ def run(sid: str, transcript, *, t_kw_min: float, env=None, now_fn=time.time, sl
     why = "no_transcript" if transcript is None else skip_reason(sid, env, ctx=ctx)
     if why:
         return finish("skip", f"reason={why}", f"不掛保溫（{why}）", reason=why)
+    me = os.getpid() if pid is None else pid
     row, star = load_ledger(sid, transcript), n_star(ctx)
     if row["pings"] >= star:
         return finish("cap", f"k={star}", f"保溫帳已達上限 {star} 次", k=star, n_star=star)
-    while True:
-        due, now = deadline(transcript, t_kw_min), now_fn()
-        if due is None:
-            return finish("skip", "reason=no_usage", "逐字稿尾端找不到帶 usage 的記錄",
-                          reason="no_usage")
-        if now >= due:
-            break
-        sleep_fn(max(min(poll_sec, due - now), 0.0))
-    ctx = roster._scan(Path(transcript), False)["ctx_tokens"] or ctx
-    star, row = n_star(ctx), load_ledger(sid, transcript)
-    k = row["pings"] + 1
-    saved = record_ping(sid, k, ctx, star, human_mark(transcript))
-    if k >= star or not saved:
-        return finish("cap", f"k={star}", f"第 {k} 次、上限 {star}（寫帳成功＝{saved}）",
+    # REQ-WP-31：同 sid 只准一個保溫持有者（watch 或另一個 keepwarm）；活著的別人持有 ⇒ 立即結束
+    if not holder.acquire(sid, me):
+        return finish("skip", "reason=holder_running",
+                      "同一 sid 已有保溫持有者（watch 或 keepwarm）在叫醒，不重複叫醒",
+                      reason="holder_running")
+    try:
+        while True:
+            due, now = deadline(transcript, t_kw_min), now_fn()
+            if due is None:
+                return finish("skip", "reason=no_usage", "逐字稿尾端找不到帶 usage 的記錄",
+                              reason="no_usage")
+            if now >= due:
+                break
+            sleep_fn(max(min(poll_sec, due - now), 0.0))
+        ctx = roster._scan(Path(transcript), False)["ctx_tokens"] or ctx
+        star, row = n_star(ctx), load_ledger(sid, transcript)
+        k = row["pings"] + 1
+        saved = record_ping(sid, k, ctx, star, human_mark(transcript))
+        if k >= star or not saved:
+            return finish("cap", f"k={star}", f"第 {k} 次、上限 {star}（寫帳成功＝{saved}）",
+                          k=k, n_star=star, ctx=ctx)
+        return finish("ping", f"k={k} n={star}",
+                      f"距主控最後一筆記錄已 ≥ {t_kw_min:g} 分，第 {k}／{star} 次",
                       k=k, n_star=star, ctx=ctx)
-    return finish("ping", f"k={k} n={star}",
-                  f"距主控最後一筆記錄已 ≥ {t_kw_min:g} 分，第 {k}／{star} 次",
-                  k=k, n_star=star, ctx=ctx)
+    finally:
+        holder.release(sid, me)
+
+
+class WakeBudget:
+    """叫醒預算（REQ-WP-32）：`watch` 的 keepwarm 事件與 `keepwarm` 指令共用同一本保溫帳 `pings`
+    與上限 `n*`。`check` 讀（不寫）、`charge` 才記一次叫醒；兩者各自重讀逐字稿與帳，不快取
+    （主控在兩次叫醒之間可能說了話，真人提示會讓帳歸零）。"""
+
+    def __init__(self, sid: str, projects_dir=None, env=None) -> None:
+        self.sid, self.projects_dir = sid, projects_dir
+        self.env = os.environ if env is None else env
+
+    def check(self) -> tuple[str, int, int, int]:
+        """`(不掛原因｜"", pings, n*, ctx)`；找不到逐字稿 ⇒ 原因 `no_transcript`。"""
+        transcript = find_transcript(self.sid, self.projects_dir)
+        if transcript is None:
+            return "no_transcript", 0, 0, 0
+        ctx = roster._scan(Path(transcript), False)["ctx_tokens"]
+        why = skip_reason(self.sid, self.env, ctx=ctx)
+        return why, load_ledger(self.sid, transcript)["pings"], n_star(ctx), int(ctx or 0)
+
+    def charge(self, pings: int, ctx: int, star: int) -> bool:
+        """記一次叫醒（帳上 pings 設為 `pings+1`）；寫不進去／找不到逐字稿 ⇒ `False`。"""
+        transcript = find_transcript(self.sid, self.projects_dir)
+        return transcript is not None and record_ping(self.sid, pings + 1, ctx, star,
+                                                      human_mark(transcript))
 
 
 def cli(argv: list[str]) -> int:

@@ -61,7 +61,7 @@ payload 無 plan 欄位，`member_dashboard_available=false`。
 
 ```
 總額度(加權 token) = 累計加權 token ÷ Δpct × 100
-加權和暫用 in + 5*out + 0.1*cache_read + 1.25*cache_creation   ← 係數待驗證
+加權和暫用 in + 5*out + 0.1*cache_read + 1.25*cache_creation   ← 係數〔OI-20261120-018〕待驗證
 ```
 
 **本輪實測標定（2026-08-13 22:29→22:40:56，Pro 帳號）**

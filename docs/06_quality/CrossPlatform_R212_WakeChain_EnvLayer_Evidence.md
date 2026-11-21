@@ -685,7 +685,7 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 | SA P2-2 | 對掌舵者的轉述句：「PRD 落款完成」＋「還沒做的仍只等症狀（例如 24 小時連續多次 reset、Windows 真機）」——功能沒做的有 31 列，且舉的兩個例子都不是延後格 | 〈六-3〉第一段改句；〈轉述句型〉第 3 句 |
 | SA P2-3 | 〈八〉驗收條件寫成「看 pull 畫面」，但「畫面完全沒有 hook 字樣」是真實、靜默的分支（失效的表徵與成功相同） | 〈八〉header 與〈八-1〉改為「pull 後一律再跑唯讀驗收一行」；新增〈八-1b〉診斷 hook 為何沒出聲 |
 | SA P2-4 | 本列在證據檔沒有落款；兩個 guard-total 站與鎖檔 repin 列都寫「逐檔清單見…〈二〉」而〈二〉沒有第三列段落；〈二-10〉舊數字、〈九〉「共六處」過期 | 〈二-12〉與〈二-13〉＋〈二-10〉第三列 bullet（Developer 第三棒已寫）＋〈九〉導言改寫 |
-| SA P2-5 | 對掌舵者的轉述句：不可宣稱「windows-compat-ci 已修好」（修法在工作樹、未 push；#335 步驟 9～28 共 20 步被略過）；帳本 525 狀態格缺「Windows CI 實跑待驗」註記 | 帳本 525 狀態欄已加「CI 實跑待對帳」（690 bytes）；〈四-3〉預留雲端對帳；〈轉述句型〉第 4 句 |
+| SA P2-5 | 對掌舵者的轉述句：不可宣稱「windows-compat-ci 已修好」（修法在工作樹、未 push；#335 步驟 9～28 共 20 步被略過）；帳本 525 狀態格缺〔OI-20261120-012〕「Windows CI 實跑待驗」註記 | 帳本 525 狀態欄已加「CI 實跑待對帳」（690 bytes）；〈四-3〉預留雲端對帳；〈轉述句型〉第 4 句 |
 | SD P2-1 | S14：每個有歷史的真實續跑窗，hook 都會派生 `--arm-sentinel`；哨兵承載的續跑窗內 `arm()` 同步 bootout 會殺掉在跑的 job | **DEF-200-526**：主控以 B+ 真機量測確認（修前紅、修後綠），修法與鎖見〈二-13〉；〈十一-5〉S14 列同步改寫 |
 
 **P3／P4 去向**（已修＝本輪文件或第二棒程式面已處理；登〈五〉＝只登記、不修）
@@ -700,7 +700,7 @@ PRD §4.5.2／§4.5.5／§4.5.6／§4.5.8／§4.5.10 在 mac 路徑上被真機�
 | SA P3-6 | `.venv\Scripts\python.exe` 不存在時 `"doctor rc=$LASTEXITCODE"` 會沿用上一個指令的 0，印出假的 `doctor rc=0` | 已修：〈八-1〉各指令加 `$LASTEXITCODE = $null;` |
 | SA P4-1 | dev_start 的 [2/7] pull 早於 [4/7] .venv 與 [5/7] hooksPath | 登〈五〉#49 |
 | SA P4-2 | Mac nightly 最近一次彙總「PASS=3 FAIL=2」（SA 寫於 2026-10-12 01:40；失敗簽名與兩列已修缺陷吻合） | 不立項。其後 2026-10-12 02:00 的排程樣本：`AutoClaude/logs/nightly_mac_latest.log` 尾段「===== nightly 彙總：PASS=5 FAIL=0 =====」、heartbeat 2026-10-11T18:04:10Z〔Docs 包親跑，讀檔〕；該次排程跑的是當時的工作樹（並行編修期間），不保證等同乾淨 HEAD |
-| SA P4-3 | Windows 待驗沒有外部阻塞軌載體 | 不登帳（〈八-4〉自稱非再開事件；符合「不製造日期義務」）；〈八〉header 已明講要在 Windows 親跑驗收一行並回報 |
+| SA P4-3 | Windows 〔OI-20261120-012〕待驗沒有外部阻塞軌載體 | 不登帳（〈八-4〉自稱非再開事件；符合「不製造日期義務」）；〈八〉header 已明講要在 Windows 親跑驗收一行並回報 |
 | SD P3-1 | `AUTOCLAUDE_SKIP_HOOKS=1` 時 post-merge 零輸出，與「hook 沒被叫到」同畫面 | 已修：Developer 第二棒補一行出聲 |
 | SD P3-2 | 使用者面缺五件（hook 沒跑的畫面、無標記行會被刪、UTF-16LE、改了 env.shared 沒 push、dev_start 建議的 `git pull --rebase` 不觸發 hook） | 已修：ONBOARDING §2.2 與〈八〉header／〈八-4〉；UTF-16LE 的程式面偵測登〈五〉#41 |
 | SD P3-3 | 自動修復總結行沒說刪了什麼、怎麼還原（`AutoClaude/.env` 內刻意更嚴的引擎停機線會被靜默放寬） | 已修：Developer 第二棒總結行帶「刪除 N 行（內容見上方 diff；還原＝把備份檔複製回原檔）」；ONBOARDING 補「無標記行會被刪」 |
@@ -811,7 +811,7 @@ Push-Location (git rev-parse --show-toplevel); git config --get core.hooksPath; 
   Get-ChildItem -LiteralPath (git rev-parse --show-toplevel) -Filter '.env.bak.*'
   ```
 
-### 八-4 Windows 真機未驗項（該機專屬待驗清單＝非再開事件：不開輪，只在該機做該機的事）
+### 八-4 Windows 真機未驗項（該機專屬〔OI-20261120-012〕待驗清單＝非再開事件：不開輪，只在該機做該機的事）
 
 1. 〈八-1〉三步的指令與 `--env-doctor`／`--fix` 的輸出形狀只在 mac 以合成的 Windows 式舊複本實跑（26 個問題、`--fix` 後 `0 個問題 ⇒ rc=0`）〔他包回報：Dev-C〕；cp950 終端機顯示中文與 `≠` 可能亂碼（不影響 rc 與旗標英文名）；`utf8NoBOM` 僅 pwsh 7。
 2. schtasks `-Once` 路徑：A-1 閘在 Windows 常態不觸發（單觸發器）；只有前提釘（`New-ScheduledTaskTrigger -Once -At` 在、`Repetition` 不在）靜態守著，真機 `Register-ScheduledTask` 路徑零量測。

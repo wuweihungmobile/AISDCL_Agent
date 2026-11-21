@@ -4147,7 +4147,7 @@ Scenario: 少一個片段的訊息不合格；格 ⑤ 只是文件宣稱，不�
 
 | 狀態字串 | 預期分類 |
 |----------|----------|
-| `open`、`open（workaround-applied）`、`partial（只修了一半）`、`workaround`、`修復後open尚待驗證`、`open；後續 fixed` | `open` |
+| `open`、`open（workaround-applied）`、`partial（只修了一半）`、`workaround`、〔OI-20261120-016〕`修復後open尚待驗證`、`open；後續 fixed` | `open` |
 | `fixed@abc1234`、`fixed`、`fixed；後續 open` | `fixed` |
 | `wontfix` | `wontfix` |
 | `closed-by-decision`、`no_action_needed`、`no action needed` | `closed-by-decision` |

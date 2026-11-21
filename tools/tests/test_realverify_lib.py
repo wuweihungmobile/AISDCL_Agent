@@ -7,6 +7,7 @@ runner rc 對映都要有可失敗的測試。
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
 from lib.realverify import cases as rv_cases  # noqa: E402
-from lib.realverify import ledger, runner, sched  # noqa: E402
+from lib.realverify import interactive, ledger, runner, sched  # noqa: E402
 from lib.realverify.driver import EnvMissing, _kill_tree  # noqa: E402
 from lib.realverify.sandbox import (  # noqa: E402
     PROBE_HOOK_SRC,
@@ -291,6 +292,136 @@ class TimeoutKillsTheWholeTreeTest(unittest.TestCase):
                 self.assertEqual(beat.stat().st_mtime, first, "子行程仍在寫心跳＝只砍了本體")
 
 
+class R217SandboxCleanupTest(unittest.TestCase):
+    """R217 DEF-03（REQ-WP-44／AT-WP-47／AT-WP-48／MU-WP-08）：沙盒逐字稿目錄不再殘留。
+
+    成因（P6）：舊 cleanup 只殺本體、`rmtree(ignore_errors=True)` 吞掉錯誤，而 claude 的子孫行程在
+    cleanup
+    之後還在寫逐字稿 ⇒ 目錄 mtime 晚於案例結束。修法＝先砍樹、等退出、再刪並**驗證**，刪不掉就回報
+    RESIDUE（runner 已把 RESIDUE 判 fail）。路徑用 tmp 圍起來，不碰真實 `~/.claude/projects`。"""
+
+    def setUp(self):
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.projects = Path(self._td.name) / "projects"
+        self.projects.mkdir()
+        patcher = mock.patch("lib.realverify.sandbox.projects_dir", lambda: self.projects)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _sandbox_with_transcripts(self) -> tuple[Sandbox, Path]:
+        sb = Sandbox.create()
+        folder = self.projects / slug_of(sb.root)
+        folder.mkdir()
+        (folder / f"{sb.sid}.jsonl").write_text("{}\n", encoding="utf-8")
+        return sb, folder
+
+    def test_at_wp_47_a_failed_transcript_dir_removal_is_reported_not_swallowed(self):
+        """假 rmtree 對逐字稿目錄失敗 ⇒ cleanup 回報 `RESIDUE transcript-dir`（舊版 ignore_errors
+        靜默）。"""
+        sb, folder = self._sandbox_with_transcripts()
+        real = shutil.rmtree
+
+        def flaky(path, *a, **kw):
+            if Path(path) == folder:
+                raise PermissionError("假的：被占用")
+            return real(path, *a, **kw)
+        with mock.patch("lib.realverify.sandbox.shutil.rmtree", flaky), \
+                mock.patch("lib.realverify.sandbox.time.sleep", lambda s: None):
+            notes = sb.cleanup()
+        self.assertTrue(any(n.startswith("RESIDUE transcript-dir") and "PermissionError" in n
+                            for n in notes), notes)
+        self.assertFalse(sb.root.exists(), "沙盒根照常刪掉；殘留只回報逐字稿目錄那一個")
+        shutil.rmtree(folder)
+
+    def test_a_leftover_process_still_writing_is_killed_before_the_directory_is_removed(self):
+        """成因重現：沙盒的行程樹仍在往逐字稿目錄寫 ⇒ cleanup 先砍樹、等退出，目錄才刪得乾淨。"""
+        sb, folder = self._sandbox_with_transcripts()
+        child = ("import time,sys\nwhile True:\n"
+                 f" open(r'{folder / 'late.jsonl'}','a').write('x'); time.sleep(0.05)\n")
+        parent = ("import subprocess,sys,time\n"
+                  f"subprocess.Popen([sys.executable,'-c',{child!r}])\ntime.sleep(60)\n")
+        proc = subprocess.Popen(
+            [sys.executable, "-c", parent], cwd=str(sb.root),
+            start_new_session=(sys.platform != "win32"),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        sb.procs.append(proc)
+        for _ in range(100):
+            if (folder / "late.jsonl").exists():
+                break
+            time.sleep(0.1)
+        self.assertTrue((folder / "late.jsonl").exists(), "前提：子孫行程已在寫逐字稿")
+        notes = sb.cleanup()
+        self.assertFalse(any(n.startswith("RESIDUE") for n in notes), notes)
+        self.assertFalse(folder.exists() or sb.root.exists())
+        self.assertIsNotNone(proc.poll())
+
+    def test_a_process_that_will_not_die_is_reported_as_residue(self):
+        """行程退不出去（假 Popen）⇒ RESIDUE process，案例不得判綠。"""
+        sb, folder = self._sandbox_with_transcripts()
+
+        class Stubborn:
+            pid = 4242
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                return None
+
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired("x", timeout)
+        sb.procs.append(Stubborn())
+        with mock.patch("lib.realverify.sandbox.kill_tree", lambda p: None):
+            notes = sb.cleanup()
+        self.assertTrue(any(n.startswith("RESIDUE process pid 4242") for n in notes), notes)
+        self.assertFalse(folder.exists())
+
+    def test_at_wp_48_sweep_keeps_live_roots_and_registry_cwd_and_removes_true_orphans(self):
+        """sweep：沙盒根存在 ⇒ 留；根不存在 ∧ 無登記檔 cwd ⇒ 刪；根不存在但登記檔 cwd 指向它 ⇒ 留；
+        名稱
+        不含前綴的別的專案目錄絕不碰；`--dry-run` 只列不刪。"""
+        tmp_root = Path(self._td.name) / "tmp"
+        tmp_root.mkdir()
+        sessions = Path(self._td.name) / "sessions"
+        sessions.mkdir()
+        alive_root = tmp_root / "AutoSDD_RV_sbx_alive1"
+        alive_root.mkdir()
+        gone = tmp_root / "AutoSDD_RV_sbx_gone01"
+        used = tmp_root / "AutoSDD_RV_sbx_used01"
+        orphan2 = tmp_root / "AutoSDD_RV_sbx_gone02"
+        for p in (alive_root, gone, used, orphan2):
+            (self.projects / slug_of(p)).mkdir()
+        other = self.projects / "C--Users-me-Projects-real"
+        other.mkdir()
+        (sessions / "7.json").write_text(json.dumps({"pid": 7, "cwd": str(used)}), encoding="utf-8")
+        from lib.realverify.sandbox import sweep_orphans  # noqa: PLC0415
+
+        dry = sweep_orphans(projects=self.projects, sessions=sessions, tmp_root=tmp_root,
+                            dry_run=True)
+        self.assertEqual(sorted(dry["removed"]), sorted(slug_of(p) for p in (gone, orphan2)))
+        self.assertTrue((self.projects / slug_of(gone)).exists(), "dry-run 不刪")
+        res = sweep_orphans(projects=self.projects, sessions=sessions, tmp_root=tmp_root)
+        self.assertEqual(sorted(res["removed"]), sorted(slug_of(p) for p in (gone, orphan2)))
+        self.assertEqual(sorted(n for n, _w in res["kept"]),
+                         sorted(slug_of(p) for p in (alive_root, used)))
+        self.assertTrue((self.projects / slug_of(alive_root)).exists())
+        self.assertTrue((self.projects / slug_of(used)).exists())
+        self.assertTrue(other.exists(), "別的專案絕不碰")
+        self.assertFalse((self.projects / slug_of(gone)).exists())
+
+    def test_the_oldwin_prefix_is_written_to_the_sandbox_own_trace_dir(self):
+        """REQ-WP-101：沙盒前綴是資料檔（`traces/oldwin/task_prefix`），不是環境變數；
+        與真機前綴不同。"""
+        sb = Sandbox.create()
+        self.addCleanup(sb.cleanup)
+        prefix = sb.oldwin_prefix()
+        self.assertTrue(prefix.startswith("AutoSDD_OldWinCloseSbx_") and prefix.endswith("_"))
+        self.assertNotEqual(prefix, "AutoSDD_OldWinClose_")
+        self.assertEqual((sb.root / "traces" / "oldwin" / "task_prefix").read_text(encoding="utf-8")
+                         .strip(), prefix)
+
+
 class MainCheckoutRootTest(unittest.TestCase):
     """tools/lib/realverify/sandbox.py::main_checkout_root：worktree 內回主 checkout，否則回自己。
 
@@ -324,6 +455,179 @@ class RegistryTest(unittest.TestCase):
         rv_cases.discover()
         with self.assertRaises(ValueError):
             rv_cases.case("RV-L1", "hooks")(lambda ctx: None)
+
+
+class InteractiveWindowEntryLockTest(unittest.TestCase):
+    """tools/lib/realverify/interactive.py：開互動視窗只准經唯一入口（R217 F5）。
+
+    WHY（2026-11-20 10:4x 掌舵者真機回報）：沙盒是 `git init` 新 repo＝新信任鍵，互動 claude 必跳
+    信任框；繞過入口的開窗寫法就是事故形態。掃描結果必須與 `UNMIGRATED` 完全相等（新繞過紅、
+    改好沒刪列也紅），runner 對 `UNMIGRATED` 判 ENV 不執行。"""
+
+    RED = {
+        "a.py::direct_console": (
+            "def direct_console(ctx):\n    subprocess.Popen(['x'], creationflags="
+            "subprocess.CREATE_NEW_CONSOLE)\n"
+        ),
+        "a.py::getattr_console": "def getattr_console(ctx):\n    f = getattr(subprocess, "
+        "'CREATE_NEW_CONSOLE', 0)\n",
+        "a.py::flag_literal": "def flag_literal(ctx):\n    run(['x'], creationflags=0x10)\n",
+        "a.py::cli_spawn": "def cli_spawn(ctx):\n    run_cli(sb, 'handoff', '--spawn', p)\n",
+        "a.py::lib_spawn": "def lib_spawn(ctx):\n    handoff.spawn(p)\n",
+        "a.py::resume": "def resume(ctx):\n    park_cli.spawn_resume(sid)\n",
+        "a.py::bare_claude": "def bare_claude(ctx):\n    exe = find_claude()\n"
+        "    subprocess.Popen([exe, '--model', 'haiku', 'hi'])\n",
+        "a.py::literal_claude": (
+            "def literal_claude(ctx):\n    subprocess.Popen(['claude', 'hi'])\n"
+        ),
+        "a.py::_helper": "def _helper(sb):\n    subprocess.Popen(['claude', 'hi'])\n",
+        "a.py::uses_helper": "def uses_helper(ctx):\n    _helper(ctx.sandbox())\n",
+    }
+    GREEN = (
+        "def ok_p(ctx):\n    exe = find_claude()\n    subprocess.Popen([exe, '-p', 'hi'])\n"
+        "def ok_ver(ctx):\n    subprocess.run([real_claude(), '--version'])\n"
+        "def ok_ps(ctx):\n    exe = 'powershell.exe'\n    subprocess.run([exe, '-NoProfile'])\n"
+        "def ok_entry(ctx):\n    sb = interactive.trusted_sandbox(ctx)\n"
+        "    run_cli(sb, 'handoff', '--spawn', p)\n"
+        "def _h2(sb):\n    open_it(['claude', 'x'], creationflags=CREATE_NEW_CONSOLE)\n"
+        "def ok_via_helper(ctx):\n    sb = trusted_sandbox(ctx)\n    _h2(sb)\n"
+        "def ok_needle(ctx):\n    for needle in ('--spawn', '--fire'):\n        pass\n"
+    )
+
+    def test_scan_of_the_real_tree_equals_the_unmigrated_list(self):
+        found = interactive.find_bypasses(interactive.realverify_sources())
+        self.assertEqual(set(found), set(interactive.UNMIGRATED),
+                         f"繞過入口的開窗寫法與 UNMIGRATED 不一致：{found}")
+
+    def test_red_forms_are_caught_and_green_forms_are_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            red, green = Path(d) / "a.py", Path(d) / "b.py"
+            red.write_text("".join(self.RED.values()), encoding="utf-8")
+            green.write_text(self.GREEN, encoding="utf-8")
+            found = interactive.find_bypasses([red, green])
+        self.assertEqual(set(found), set(self.RED), found)
+        self.assertEqual(found["a.py::uses_helper"], ["經 _helper()"])
+
+    def test_runner_refuses_an_unmigrated_case_without_running_it(self):
+        ran: list[int] = []
+
+        def rv_fake(ctx):
+            ran.append(1)
+
+        c = rv_cases.Case("RV-ZZ1", "x", rv_fake)
+        key = f"{rv_fake.__module__.rsplit('.', 1)[-1]}.py::rv_fake"
+        with mock.patch.object(interactive, "UNMIGRATED", frozenset({key})):
+            out = runner.run_case(c)
+        self.assertEqual((out.status, ran), ("env", []))
+        self.assertIn("信任框", out.detail)
+        self.assertEqual(runner.run_case(c).status, "pass")  # 不在名單就照常跑
+
+
+class TrustGateTest(unittest.TestCase):
+    """interactive.trusted_sandbox：確認不了「不跳信任框」就拒絕（ENV），絕不建出可開窗的沙盒。
+
+    WHY：入口若在未信任時放行，開出的視窗就停在信任框——正是要根治的事故。"""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
+        self.host = self.tmp / "host"
+        self.cfg = self.tmp / "claude.json"
+        self.probed: list[Path] = []
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _trust(self, key: str, value=True):
+        self.cfg.write_text(json.dumps({"projects": {key: {"hasTrustDialogAccepted": value}}}),
+                            encoding="utf-8")
+
+    def _prober(self, verdict):
+        def p(cwd):
+            self.probed.append(Path(cwd))
+            return verdict, "fake"
+        return p
+
+    def _worktrees(self) -> str:
+        return subprocess.run(["git", "-C", str(self.host), "worktree", "list", "--porcelain"],
+                              capture_output=True, text=True, encoding="utf-8",
+                              errors="replace").stdout
+
+    def test_config_key_forms(self):
+        key = interactive.host_key(self.host)
+        self._trust(key)
+        self.assertTrue(interactive.trusted_in_config(self.host, self.cfg))
+        if sys.platform == "win32":
+            self._trust(key.replace("/", "\\").lower())
+            self.assertTrue(interactive.trusted_in_config(self.host, self.cfg))
+        self._trust(key, value=False)
+        self.assertFalse(interactive.trusted_in_config(self.host, self.cfg))
+        self._trust(interactive.host_key(self.tmp))  # 父目錄信任不算（巢狀 repo）
+        self.assertFalse(interactive.trusted_in_config(self.host, self.cfg))
+        self.cfg.write_text("{broken", encoding="utf-8")
+        self.assertFalse(interactive.trusted_in_config(self.host, self.cfg))
+        self.assertFalse(interactive.trusted_in_config(self.host, self.tmp / "missing.json"))
+
+    def test_debug_log_classification_fails_closed(self):
+        self.assertEqual(interactive.classify_debug(f"x\n{interactive.READY_MARK}\n"), "ready")
+        self.assertEqual(interactive.classify_debug(interactive.UNTRUSTED_MARK), "untrusted")
+        self.assertEqual(interactive.classify_debug("[STARTUP] Running showSetupScreens()"),
+                         "unknown")
+
+    def test_untrusted_host_is_refused_before_any_sandbox_or_probe(self):
+        with self.assertRaises(interactive.NotTrusted) as cm:
+            interactive.trusted_sandbox(host=self.host, claude_json=self.cfg,
+                                        prober=self._prober("ready"))
+        self.assertIsInstance(cm.exception, EnvMissing)  # runner 判 ENV，不是綠
+        self.assertEqual(self.probed, [])
+        self.assertEqual(self._worktrees().count("worktree "), 1, "未信任時不得加任何 worktree")
+        self.assertIn(interactive.host_key(self.host), str(cm.exception))  # 告訴人要信任哪把鍵
+
+    def test_probe_not_ready_refuses_and_leaves_no_worktree(self):
+        interactive.ensure_host(self.host)
+        self._trust(interactive.host_key(self.host))
+        with self.assertRaises(interactive.NotTrusted):
+            interactive.trusted_sandbox(host=self.host, claude_json=self.cfg,
+                                        prober=self._prober("unknown"))
+        self.assertEqual(len(self.probed), 1)
+        self.assertFalse(self.probed[0].exists(), "拒絕後沙盒目錄應已清掉")
+        self.assertNotIn(str(self.probed[0]).replace("\\", "/").lower(),
+                         self._worktrees().replace("\\", "/").lower())
+
+    def test_ready_builds_a_host_worktree_sandbox_and_cleans_it(self):
+        interactive.ensure_host(self.host)
+        self._trust(interactive.host_key(self.host))
+        sb = interactive.trusted_sandbox(host=self.host, claude_json=self.cfg,
+                                         prober=self._prober("ready"))
+        try:
+            self.assertEqual(self.probed, [sb.root])  # 探針跑在沙盒本身
+            common = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(sb.root),
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            ).stdout
+            self.assertEqual(Path(common.strip()).resolve(), (self.host / ".git").resolve())
+            self.assertTrue((sb.root / ".claude" / "settings.json").is_file())
+            interactive.assert_trusted(sb)
+            with self.assertRaises(ValueError):
+                interactive.open_window(sb, ["-p", "x"])
+        finally:
+            notes = sb.cleanup()
+        self.assertFalse([n for n in notes if n.startswith("RESIDUE")], notes)
+        self.assertFalse(sb.root.exists())
+        self.assertNotIn(sb.root.name.lower(), self._worktrees().lower())
+
+    def test_plain_sandbox_cannot_open_a_window(self):
+        with self.assertRaises(interactive.NotTrusted):
+            interactive.open_window(Sandbox(root=self.tmp), ["hi"])
 
 
 if __name__ == "__main__":

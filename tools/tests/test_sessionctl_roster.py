@@ -26,7 +26,7 @@ import resume_cost  # noqa: E402
 import session_brief  # noqa: E402
 
 import lib.sessionctl as sessionctl_pkg  # noqa: E402
-from lib.sessionctl import procstop, roster  # noqa: E402
+from lib.sessionctl import procstop, roster, rosterscan, winproc  # noqa: E402
 
 NOW = datetime(2026, 11, 14, 12, 0, 0, tzinfo=UTC)
 SID = "d4ed2654-9181-4df1-a6e6-2d712956e23b"
@@ -103,9 +103,11 @@ def _runner(rows: list[dict] | None, calls: list, list_rc: int = 0, kill_rc: int
 
 
 def _snap(case: unittest.TestCase, root: Path, **kw) -> dict:
+    # R217：killed 快取與退役帳住 trace_dir，名冊測試一律把它圍到 tmp（不寫真實 ~/.autosdd）
     env = {"AUTOSDD_HANDOFF_DIR": str(_tmp(case))}
     with unittest.mock.patch.object(roster, "_schedules", return_value=[]), \
-            unittest.mock.patch.object(roster, "_stale_sentinels", return_value=[]):
+            unittest.mock.patch.object(roster, "_stale_sentinels", return_value=[]), \
+            unittest.mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(_tmp(case))}):
         return roster.snapshot(SID, projects_dir=root, now=NOW, env=env, **kw)
 
 
@@ -171,20 +173,29 @@ class RosterStateTest(unittest.TestCase):
         self.assertEqual([a["state"] for a in snap["agents"]], ["residue"])
         self.assertIn("非燒額度中", roster.render_snapshot(snap))
 
-    def test_def611_old_residue_leaves_the_default_roster_but_all_still_lists_it(self) -> None:
-        """DEF-200-611 D-3（證據：status 仍列昨日 22:24 的殘局 a51fe52e56c8ed299）：殘局是歷史、
-        不是待辦；最後記錄超過 `RESIDUE_MAX_AGE_SECONDS` 預設不列，`include_old`（--all）才列；
-        24 小時內的殘局照列（不得把近期殘局也吞掉）。"""
+    def test_def611_old_residue_leaves_the_default_roster_and_is_retired_with_a_count(self) -> None:
+        """DEF-200-611 D-3＋R217 AT-WP-46（REQ-WP-43）：殘局是歷史、不是待辦；最後記錄超過
+        `RESIDUE_MAX_AGE_SECONDS` 寫一行退役帳、之後**連 `include_old`（--all）也只顯示計數**；
+        24 小時內的殘局照列（不得把近期殘局也吞掉）；同一代理只寫一次；不刪任何逐字稿。"""
         self.assertEqual(roster.RESIDUE_MAX_AGE_SECONDS, 24 * 3600)
-        root = _tmp(self)
-        make_agent(root, SID, "old", minutes_ago=25 * 60, finished=False)
+        root, trace = _tmp(self), _tmp(self)
+        old = make_agent(root, SID, "old", minutes_ago=25 * 60, finished=False)
         make_agent(root, SID, "new", minutes_ago=60, finished=False)
         make_owner(root, SID, minutes_ago=26 * 60)
-        ids = [a["id"] for a in _snap(self, root, runner=_runner([], []))["agents"]]
-        self.assertEqual(ids, ["new"])
-        ids_all = [a["id"] for a in _snap(self, root, runner=_runner([], []),
-                                          include_old=True)["agents"]]
-        self.assertEqual(sorted(ids_all), ["new", "old"])
+        env = {"AUTOSDD_HANDOFF_DIR": str(_tmp(self))}
+        with unittest.mock.patch.object(roster, "_schedules", return_value=[]), \
+                unittest.mock.patch.object(roster, "_stale_sentinels", return_value=[]), \
+                unittest.mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(trace)}):
+            snaps = [roster.snapshot(SID, projects_dir=root, now=NOW, env=env,
+                                     runner=_runner([], []), include_old=flag)
+                     for flag in (False, True)]
+        for snap in snaps:
+            self.assertEqual([a["id"] for a in snap["agents"]], ["new"])
+            self.assertEqual(snap["retired"], 1)
+        lines = (trace / "roster" / "retired.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([json.loads(ln)["id"] for ln in lines], ["old"], "同一代理只寫一次")
+        self.assertTrue(old.is_file(), "退役不刪逐字稿")
+        self.assertIn("已退役殘局：1 筆", roster.render_snapshot(snaps[1]))
 
     def test_def611_a_window_spawned_by_handoff_is_not_read_as_the_old_window(self) -> None:
         """DEF-200-611 D-2a：交棒開出的新視窗命令列含舊 sid；痕跡記著該 pid 由舊 sid 開出 ⇒ 標示
@@ -721,6 +732,221 @@ class PlannerWiringTest(unittest.TestCase):
             rc = planner.main(["--pace", "--transcript", str(transcript)])
         self.assertEqual(rc, 0)
         self.assertIn("PACE\n模型建議：量不到", out.getvalue())
+
+
+OTHER = "31ea79d4-7f1e-4b6c-9f2a-0b3c5d7e9a11"
+PKG_UUID = "05d1b770-2c34-4d56-8e78-9a0b1c2d3e4f"
+
+
+def _note(aid: str) -> str:
+    return (f"<task-notification>\n<task-id>{aid}</task-id>\n<tool-use-id>t</tool-use-id>\n"
+            "<status>killed</status>\n")
+
+
+class R217KilledScanIsIncrementalTest(unittest.TestCase):
+    """REQ-WP-40（DEF-01）：killed 通知超出 256 KB 尾讀的漏判，改增量全掃。AT-WP-40／41；MU-WP-03。
+    """
+
+    def _fixture(self):
+        trace, root = _tmp(self), _tmp(self)
+        patcher = unittest.mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(trace)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        main = root / "slug" / f"{SID}.jsonl"
+        main.parent.mkdir(parents=True)
+        return trace, root, main
+
+    def test_at_wp_40_a_killed_note_300kb_before_the_tail_is_found_and_only_new_bytes_are_read(
+            self) -> None:
+        """通知距檔尾 300 KB（舊版只讀尾端 256 KB ⇒ 漏判、代理一直掛在名冊）；第二次呼叫只讀新增。
+        """
+        trace, root, main = self._fixture()
+        make_agent(root, SID, "a1", minutes_ago=1, finished=None)
+        filler = json.dumps({"type": "user", "message": {"content": "x" * 990}}) + "\n"
+        rows = [json.dumps({"type": "queue-operation", "content": _note("a1")}) + "\n"]
+        rows += [filler] * 320  # ≈ 320 KB，把通知擠出尾端
+        main.write_text("".join(rows), encoding="utf-8")
+        self.assertGreater(main.stat().st_size - len(rows[0]), roster._TAIL_BYTES)
+        self.assertEqual([a["id"] for a in _snap_at(self, root)["agents"]], [])
+        self.assertEqual(rosterscan.killed_ids(main, SID), {"a1"})
+        new = json.dumps({"type": "user", "message": {"content": "新增"}}) + "\n"
+        with main.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(new)
+        self.assertEqual(rosterscan.killed_ids(main, SID), {"a1"})
+        self.assertEqual(rosterscan.last_read_bytes, len(new.encode("utf-8")),
+                         "第二次只讀新增的位元組")
+        cache = json.loads((trace / "roster" / f"{SID}.killed.json").read_text(encoding="utf-8"))
+        self.assertEqual((cache["ids"], cache["size"] == cache["offset"]), (["a1"], True))
+
+    def test_at_wp_41_a_shrunk_transcript_is_rescanned_from_the_start(self) -> None:
+        """檔案被改寫變小 ⇒ 從頭重掃：快取不得讓已不存在的 id 殘留，也不得漏掉新內容。"""
+        _trace, _root, main = self._fixture()
+        main.write_text(json.dumps({"type": "queue-operation", "content": _note("a1")}) + "\n"
+                        + "x\n" * 200, encoding="utf-8")
+        self.assertEqual(rosterscan.killed_ids(main, SID), {"a1"})
+        main.write_text(json.dumps({"type": "queue-operation", "content": _note("a2")}) + "\n",
+                        encoding="utf-8")
+        self.assertEqual(rosterscan.killed_ids(main, SID), {"a2"})
+
+    def test_a_half_written_tail_line_is_left_for_the_next_scan(self) -> None:
+        """半截尾行（沒有換行）不得被消化：下次補完那一行，通知才算數（不吃掉寫到一半的通知）。"""
+        _trace, _root, main = self._fixture()
+        line = json.dumps({"type": "queue-operation", "content": _note("a9")})
+        main.write_text(line[:30], encoding="utf-8")
+        self.assertEqual(rosterscan.killed_ids(main, SID), set())
+        main.write_text(line + "\n", encoding="utf-8")
+        self.assertEqual(rosterscan.killed_ids(main, SID), {"a9"})
+
+    def test_a_human_pasted_killed_text_is_still_not_a_notification(self) -> None:
+        """只認 harness 自己寫的記錄型別；人貼的同字樣（`user` 記錄）不算（DEF-200-606 的反例保留）
+        。"""
+        _trace, _root, main = self._fixture()
+        main.write_text(json.dumps({"type": "user", "message": {"content": _note("a1")}}) + "\n",
+                        encoding="utf-8")
+        self.assertEqual(rosterscan.killed_ids(main, SID), set())
+
+
+def _snap_at(case: unittest.TestCase, root: Path, **kw) -> dict:
+    """沿用 `_snap`（已把 trace 圍到 tmp 的版本會另開 tmp；這裡要沿用呼叫端已設的 trace）。"""
+    env = {"AUTOSDD_HANDOFF_DIR": str(_tmp(case))}
+    with unittest.mock.patch.object(roster, "_schedules", return_value=[]), \
+            unittest.mock.patch.object(roster, "_stale_sentinels", return_value=[]):
+        return roster.snapshot(SID, projects_dir=root, now=NOW, env=env, **kw)
+
+
+def _reg(folder: Path, pid: int, sid: str, start: int, **extra) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{pid}.json").write_text(json.dumps(
+        {"pid": pid, "sessionId": sid, "procStart": start, **extra}), encoding="utf-8")
+
+
+class R217OwnerSidTest(unittest.TestCase):
+    """REQ-WP-41（DEF-02）：擁有者是否活著，看行程**自己**的 sid，不是命令列第一個 UUID。"""
+
+    def test_at_wp_42_the_registry_sid_beats_a_package_uuid_in_the_command_line(self) -> None:
+        """命令列 `claude "讀 …\\05d1b770-….md"`（第一個 UUID 是交接包檔名）＋登記檔
+        sessionId＝31ea79d4
+        ⇒ owner＝31ea79d4（舊版取第一個 UUID，把已死的 05d1b770 擁有者誤判成活著）。MU-WP-02。"""
+        folder = _tmp(self) / "sessions"
+        _reg(folder, 4242, OTHER, 134395057212197555)
+        cmd = f'claude "讀 C:\\x\\{PKG_UUID}.md"'
+        got = procstop.owner_sid_of(4242, cmd, folder=folder, platform_name="win32",
+                                    created_of=lambda pid: 134395057212197555)
+        self.assertEqual(got, OTHER)
+        self.assertEqual(procstop.first_uuid_of(cmd), PKG_UUID,
+                         "顯示用的舊行為只留在 first_uuid_of")
+
+    def test_at_wp_43_without_a_registry_only_the_flag_form_counts(self) -> None:
+        """無登記檔：只認 `-r`／`--resume`／`--session-id` 後緊接的 UUID；路徑裡的 UUID 不算；
+        都沒有＝空
+        字串（不判活，不是判死）。"""
+        empty = _tmp(self) / "none"
+        kw = {"folder": empty, "platform_name": "win32", "created_of": lambda pid: None}
+        self.assertEqual(procstop.owner_sid_of(1, f"claude.exe -r {OTHER}", **kw), OTHER)
+        self.assertEqual(procstop.owner_sid_of(1, f"claude.exe --resume={OTHER}", **kw), OTHER)
+        self.assertEqual(procstop.owner_sid_of(1, f"claude --session-id {OTHER} hi", **kw), OTHER)
+        self.assertEqual(procstop.owner_sid_of(1, f'claude "讀 C:\\x\\{PKG_UUID}.md"', **kw), "")
+        self.assertEqual(procstop.owner_sid_of(1, f"claude {OTHER}", **kw), "")
+
+    def test_at_wp_44_a_registry_row_with_a_different_proc_start_is_not_trusted(self) -> None:
+        """pid 被重用（procStart 與行程建立時間不符）⇒ 不採信，退回旗標形態／空字串。"""
+        folder = _tmp(self) / "sessions"
+        _reg(folder, 4242, OTHER, 100)
+        got = procstop.owner_sid_of(4242, "claude.exe", folder=folder, platform_name="win32",
+                                    created_of=lambda pid: 101)
+        self.assertEqual(got, "")
+
+    def test_at_wp_59_the_match_rules_exact_cim_tolerance_and_non_windows(self) -> None:
+        """AT-WP-59：(a) GetProcessTimes 全等採信；(b) 它取不到、CIM 差 5 採信；(c) CIM 差 10,000,
+        000 不
+        採信；(d) 非 Windows 跳過登記檔走旗標形態；(e) 同 sid 兩個登記檔其一 pid 已死仍判活。"""
+        folder = _tmp(self) / "sessions"
+        start = 134395057212197555
+        _reg(folder, 15660, OTHER, start)
+        _reg(folder, 22096, OTHER, start + 777)  # (e) 另一個行程同 sid；15660 這一份任一通過即可
+        kw = {"folder": folder, "platform_name": "win32"}
+        self.assertEqual(procstop.owner_sid_of(15660, "claude", created_of=lambda p: start, **kw),
+                         OTHER, "(a)")
+        self.assertEqual(procstop.owner_sid_of(15660, "claude", created_of=lambda p: None,
+                                               cim_created=start + 5, **kw), OTHER, "(b)")
+        self.assertEqual(procstop.owner_sid_of(15660, "claude", created_of=lambda p: None,
+                                               cim_created=start + 10_000_000, **kw), "", "(c)")
+        self.assertEqual(procstop.owner_sid_of(15660, "claude", created_of=lambda p: None,
+                                               cim_created=start + 10, **kw), "",
+                         "容差是嚴格小於 10")
+        self.assertEqual(procstop.owner_sid_of(15660, f"claude -r {PKG_UUID}", folder=folder,
+                                               platform_name="darwin",
+                                               created_of=lambda p: start), PKG_UUID, "(d)")
+        procs = [{"pid": 22096, "ppid": 1, "name": "claude.exe", "cmd": "claude.exe",
+                  "created": None}]  # 15660 已死（不在行程列表）；22096 仍在、sid 相同
+        _reg(folder, 22096, OTHER, start)
+        with unittest.mock.patch.object(procstop, "created_filetime", lambda pid: start):
+            self.assertEqual(procstop.alive_sids(procs, folder),
+                             {OTHER} if os.name == "nt" else set(),
+                             "(e) 僅 Windows 讀登記檔；其他平台降級＝不判活也不判死")
+
+    def test_live_windows_of_needs_an_exact_stamp_and_reports_status_and_entrypoint(self) -> None:
+        """`live_windows_of`（D-8）：procStart 與 GetProcessTimes 全等才算；差 1 不算（不退用 CIM）
+        ；回
+        `entrypoint`／`status`（供 oldwin 判條件①②）。"""
+        folder = _tmp(self) / "sessions"
+        _reg(folder, 10, SID, 500, entrypoint="cli", status="idle", cwd="sandbox-x")
+        _reg(folder, 11, SID, 501, entrypoint="cli", status="idle")
+        _reg(folder, 12, OTHER, 502, entrypoint="cli", status="idle")
+        rows = procstop.live_windows_of(SID, folder=folder, created_of=lambda pid: 500)
+        self.assertEqual([(r["pid"], r["entrypoint"], r["status"]) for r in rows],
+                         [(10, "cli", "idle")])
+        self.assertEqual(
+            procstop.live_windows_of(SID, folder=folder, created_of=lambda p: None), [])
+
+    def test_a_snapshot_judges_the_owner_alive_by_its_own_sid_not_the_package_uuid(self) -> None:
+        """名冊整合：行程命令列第一個 UUID＝SID（交接包路徑），行程自己的 sid 是別人 ⇒ SID
+        的擁有者不在
+        alive ⇒ quiet 代理降為殘局（05d1b770 類案例歸零）。"""
+        root = _tmp(self)
+        make_agent(root, SID, "a1", minutes_ago=40, finished=False)
+        make_owner(root, SID, minutes_ago=90)
+        rows = [_win_row(77, f'claude.exe "讀 C:\\x\\{SID}.md"', NOW)]
+        agents = _snap(self, root, runner=_runner(rows, []))["agents"]
+        self.assertEqual([a["state"] for a in agents],
+                         ["residue"])
+
+
+class R217QuietLifetimeTest(unittest.TestCase):
+    """REQ-WP-42：quiet 代理的擁有者已交棒 ⇒ 殘局（不必等行程列舉）。AT-WP-45。"""
+
+    def _package(self, handoff_dir: Path, *, acked_by: str | None) -> None:
+        stem = f"{SID}_20261114T110000Z"
+        handoff_dir.mkdir(parents=True, exist_ok=True)
+        (handoff_dir / f"{stem}.md").write_text(f"sid={SID}\n", encoding="utf-8")
+        (handoff_dir / f"{stem}.sealed").write_text(NOW.isoformat() + "\n", encoding="utf-8")
+        if acked_by:
+            (handoff_dir / f"{stem}.ack").write_text(f"acked {NOW.isoformat()} sid={acked_by}\n",
+                                                     encoding="utf-8")
+
+    def _states(self, acked_by: str | None) -> list[str]:
+        root, hdir = _tmp(self), _tmp(self) / "handoff"
+        make_agent(root, SID, "a1", minutes_ago=40, finished=False)
+        self._package(hdir, acked_by=acked_by)
+        env = {"AUTOSDD_HANDOFF_DIR": str(hdir)}
+        with unittest.mock.patch.object(roster, "_schedules", return_value=[]), \
+                unittest.mock.patch.object(roster, "_stale_sentinels", return_value=[]), \
+                unittest.mock.patch.dict(os.environ, {"AUTOSDD_TRACE_DIR": str(_tmp(self))}):
+            snap = roster.snapshot(SID, projects_dir=root, now=NOW, env=env)
+        return [a["state"] for a in snap["agents"]]
+
+    def test_at_wp_45_a_quiet_agent_of_an_acked_owner_is_residue(self) -> None:
+        self.assertEqual(self._states(OTHER), ["residue"])
+
+    def test_without_a_handover_the_quiet_agent_stays_quiet(self) -> None:
+        """對照組：包只封存、沒有被接手 ⇒ 仍是 quiet（不得把沒交棒的擁有者的代理降級）。"""
+        self.assertEqual(self._states(None), ["quiet"])
+
+
+class R217WinprocHelpersTest(unittest.TestCase):
+    def test_epoch_to_filetime_round_trips_the_unix_epoch(self) -> None:
+        self.assertEqual(winproc.epoch_to_filetime(0), 116444736000000000)
+        self.assertEqual(winproc.epoch_to_filetime(1.5), 116444736000000000 + 15_000_000)
 
 
 if __name__ == "__main__":

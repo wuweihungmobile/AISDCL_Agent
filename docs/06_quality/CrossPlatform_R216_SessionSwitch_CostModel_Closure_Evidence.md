@@ -35,7 +35,7 @@
 | WP-G 量測（REQ-SS-20／21） | 判準 `tools/lib/wastecensus/sections_keep.py`、I/O `keep_load.py`、入口旗標 `report.py`；`reader.py` 增 `kw_calls`（保溫類指令配對叫醒通知）；`tools/tests/test_waste_census_keep.py`（AT-SS-50～52、決定性快照重放、事件名與 sessionctl 常數相等）；真逐字稿 RealVerify `RV-SC1`／`RV-SC2`，家族 `sessionctl_switchcensus` |
 | 偶發測試 DEF-200-616 | 成因＝測試逐次重種「now+3600s」的 reset 而閂鎖鍵取到分鐘，跨整分鐘換鍵（被測物無缺陷）；重現載具＝在整分鐘前 5ms 起跑（修前 2/2 紅、修後 2/2 綠）；修法＝整視窗只種一次快取＋時鐘無關的決定性回歸；帳本 `AutoSDD_Defect_Log.md` |
 | DES §7 對帳 | M-K1／M-K2／M-K3／M-K4、P1、S2 與 DES 逐位相符；P3／P4b／S1 差異＝母體多一支交接包開場 session（F 中位 480,734→467,949）與 `annotate.units` 對「分層未標」寫入記 1.25（DES 腳本記 2.0，F_a 差 6 單位）；逐項核過、非缺陷 |
-| 仍未結 | E2E-SS-05（上線 14 天後 M-K2＝0）；park RESUME 路「到點真開 `claude -r` 視窗並續寫原逐字稿」（V-SS5，待掌舵者目視；folder trust＋禁開窗）；E2E-SS-04、V-SS1～V-SS4 沿用上節 |
+| 仍未結 | E2E-SS-05（上線 14 天後 M-K2＝0）；park RESUME 路「到點真開 `claude -r` 視窗並續寫原逐字稿」（V-SS5，〔OI-20261120-009〕待掌舵者目視；folder trust＋禁開窗）；E2E-SS-04、V-SS1～V-SS4 沿用上節 |
 
 ## 五、QA 退件修復：同 session 自續跑不算交棒（2026-11-19，SD 單人窗口；DEF-200-617／618）
 

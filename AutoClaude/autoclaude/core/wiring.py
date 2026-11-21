@@ -466,6 +466,7 @@ def build_kernel(
         observability=observability,
         limit_retry=plugins["token_guard"].limit_retry_wait,
         limit_sleep=_backoff_sleeper(cfg, hotkey),
+        step_timeout_seconds=cfg.playbook.step_timeout_seconds,
     )
 
 

@@ -104,7 +104,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # 腐化上界逐字指示，照填不推算）。
         (_TESTS_DIR, True, 139),
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", True, 28),
-        (_REPO_ROOT / "AutoClaude" / "tests", True, 268),
+        (_REPO_ROOT / "AutoClaude" / "tests", True, 319),  # 重釘 268→319（實測 336）
         # LATEST fsm_runtime **整棵遞迴**（原本 tests/ 與頂層分兩列、頂層還是 flat
         # ⇒ `meta_halt/`／`modality/` 兩個子樹整組在射程外）。
         (latest / "tools" / "fsm_runtime", True, 158),
@@ -133,7 +133,7 @@ def _scan_roots() -> list[tuple[Path, bool, int]]:
         # 🔴 2026-11-12 重釘 122→150（SelfImproving P7 `tools/lib/selfimproving/` 新增 6 支，
         # 實測 158，過腐化上界 152；腐化上界逐字指示，照填不推算）。
         # 🔴 2026-11-17 重釘 150→183（sessionctl 監督／封存／轉送新模組，實測 193，過上界 187）。
-        (_REPO_ROOT / "tools" / "lib", True, 183),
+        (_REPO_ROOT / "tools" / "lib", True, 267),  # 2026-11-21 重釘 183→267（R217，實測 281）
         (latest / "tools" / "arch_fitness", True, 2),
         (latest / ".claude" / "hooks", True, 5),
     ]
@@ -507,7 +507,7 @@ def _tmpdir_scan_roots() -> list[tuple[Path, bool, int]]:
         # 腐化上界逐字指示，照填不推算）。
         (_TESTS_DIR, False, 133),  # 2026-11-14 重釘 109→133（sessionctl，實測 140）
         (_REPO_ROOT / "AISDLC_SDD" / "scripts" / "tests", False, 28),  # 實測 29
-        (_REPO_ROOT / "AutoClaude" / "tests", True, 268),              # 實測 282
+        (_REPO_ROOT / "AutoClaude" / "tests", True, 319),  # 2026-11-21 重釘 268→319（實測 336）
         (_latest_fsm_tests_dir(), True, 74),                           # 實測 78
         (_REPO_ROOT / "AISDLC_SDD" / "AISDLC_SDD_v0.01"                # 實測 54
          / "tools" / "fsm_runtime" / "tests", True, 51),

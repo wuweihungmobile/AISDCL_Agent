@@ -175,8 +175,19 @@ _LIVE_DOC_ANCHORS: tuple[str, ...] = (
 _UNMANAGED_HIT_FILES_RATCHET = 114
 
 
+#: OIR 識別碼樣式（與 `tools/lib/openitems/scan.py::OI_RE` 同形；本檔不 import 它，保持零相依）。
+_OI_ID_RE = re.compile(r"OI-\d{8}-\d{3,}")
+
+
 def _line_is_claim(line: str) -> bool:
-    """行是否構成「pytest 基線數字宣稱」命中（兩種形態，判準見模組 docstring）。"""
+    """行是否構成「pytest 基線數字宣稱」命中（兩種形態，判準見模組 docstring）。
+
+    OIR 識別碼（`OI-YYYYMMDD-NNN`）先剝掉再判：它的 8 位日期是識別碼不是測試數量，
+    而 R217 起每處待驗標記都必須帶一個，讀到「skipped／passed」字樣的同一行就會被
+    `_NUMBER_RE` 當成基線數字（TCS-SessionPark V-PK3 那行即是；
+    反向鎖＝tools/tests/test_check_pytest_baseline_sites.py）。
+    """
+    line = _OI_ID_RE.sub("", line)
     if _KEYWORD_RE.search(line) and _NUMBER_RE.search(line):
         return True
     return bool(_PAIR_RE.search(line) and _PAIR_CONTEXT_RE.search(line))

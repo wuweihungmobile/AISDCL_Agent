@@ -1,0 +1,43 @@
+{
+  "max_attempts": 2,
+  "max_deferrals": 6,
+  "human_cap": 7,
+  "marker_regex": "待真機|待掌舵者目視|待目視|仍待真機|待驗|計未結",
+  "scan_globs": ["docs/**/*.md", "CLAUDE.md"],
+  "vocabulary_definers": [
+    "docs/02_architecture/WorkProgress_Axis_Design.md",
+    "docs/03_testing/contracts/TCS-WorkProgress-20261119.md",
+    "docs/06_quality/R217_WorkProgress_Architect_Review.md",
+    "docs/06_quality/R217_WorkProgress_SA_Traceability.md"
+  ],
+  "immutable_records": [
+    "docs/06_quality/SelfImproving_Observation_Ledger.md",
+    "docs/06_quality/SelfImproving_Proposals/_fourq/**"
+  ],
+  "retry_backoff_minutes": 360,
+  "start_grace_minutes": 15,
+  "run_budget_margin_minutes": 15,
+  "observe_timeout_minutes": 30,
+  "max_runs_per_window": 2,
+  "cap_window_minutes": 300,
+  "stagger_minutes": 10,
+  "busy_backoff_minutes": 20,
+  "sched_cache_ttl_seconds": 600,
+  "driver_own_prefixes": [
+    "docs/06_quality/OpenItems_Event_Ledger.jsonl",
+    "docs/06_quality/RealVerify_Result_Ledger.md",
+    "docs/06_quality/PRD_E2E_Coverage_Table.md"
+  ],
+  "task_prefix": "AutoSDD_OpenItem_",
+  "followup_grace_minutes": 15,
+  "source_prefixes": [
+    "docs/01_requirements/",
+    "docs/02_architecture/",
+    "docs/03_testing/contracts/",
+    "docs/04_planning/ADR/",
+    "docs/06_quality/",
+    "AutoClaude/docs/03_testing/",
+    "AutoClaude/docs/04_planning/ADR/",
+    "AgentConsole/docs/03_testing/"
+  ]
+}

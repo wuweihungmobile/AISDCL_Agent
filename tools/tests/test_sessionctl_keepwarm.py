@@ -28,7 +28,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import quota_policy_env  # noqa: E402
 
-from lib.sessionctl import converge, keepwarm, midwork, park, switch  # noqa: E402
+from lib.sessionctl import converge, holder, keepwarm, midwork, park, switch, watch  # noqa: E402
 
 SID = "5b0c2f6e-7a41-4c1d-9d0e-3a52c1d8e911"
 T0 = datetime(2026, 11, 18, 12, 0, 0, tzinfo=UTC).timestamp()
@@ -350,6 +350,109 @@ class RunTest(_Base):
         self.assertNotIn("rc", row)
 
 
+class WakeBudgetTest(_Base):
+    """R217 WP-A4（REQ-WP-31／32／34；AT-WP-32／33／35）：watch 與 keepwarm 指令共用保溫錨與保溫帳，
+    同一 sid 不會被兩個行程各叫醒一次（M-WB2：舊 session 14 天 21 次重複叫醒）。"""
+
+    def _foreign_holder(self, *, start: str | None = None) -> int:
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+        self.addCleanup(proc.wait)
+        self.addCleanup(proc.kill)
+        target = holder.path(SID, write=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        stamp = holder.start_token(proc.pid) or "" if start is None else start
+        target.write_text(json.dumps({"pid": proc.pid, "proc_start": stamp}), encoding="utf-8")
+        return proc.pid
+
+    def _watch(self, clock: _Clock) -> tuple[int, str]:
+        """真 `WakeBudget`（讀同一份逐字稿與保溫帳）＋無代理的名冊，證明共用的是同一本帳。"""
+        out = io.StringIO()
+        rc = watch.run(SID, watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=60.0,
+                       roster_fn=lambda: [], quota_fn=lambda: False, out=out, pid=4242,
+                       projects_dir=str(self.slug))
+        return rc, out.getvalue()
+
+    def test_at_wp_32_a_live_holder_makes_the_second_keepwarm_skip_with_rc_zero(self) -> None:
+        """AT-WP-32／AT-WP-35／MU-WP-31。WHY：同 sid 已有保溫持有者（watch 或另一個 keepwarm）
+        在叫醒時，
+        第二個行程再等到截止叫醒＝同一個保溫點叫醒主控兩次；它必須立刻、rc 0（DEF-200-622：
+        正常判決不得顯示成 failed）、不睡、不碰保溫帳地結束。"""
+        self.write(_asst(T0))
+        self._foreign_holder()
+        clock = _Clock(T0 + 1 * MIN)
+        rc, out = self.run_kw(clock)
+        self.assertEqual((rc, clock.sleeps), (0, 0))
+        self.assertEqual(out.splitlines()[-1], "KEEPWARM_VERDICT=skip reason=holder_running")
+        self.assertFalse(keepwarm.ledger_path(SID).exists())
+
+    def test_a_dead_or_pid_reused_holder_is_taken_over_and_released_at_the_end(self) -> None:
+        """AT-WP-32 的接手格。WHY：持有者行程已死、或 pid 被別的行程重用（建立時間不符）＝鬼佔著；
+        不接手
+        ＝之後每個保溫都 skip、快取保溫從此失效。結束時必須釋放，下一個持有者才拿得到錨。"""
+        self.write(_asst(T0))
+        cases = [("dead", lambda: (holder.path(SID, write=True).parent.mkdir(
+            parents=True, exist_ok=True), holder.path(SID, write=True).write_text(
+                json.dumps({"pid": 2_999_999, "proc_start": ""}), encoding="utf-8")))]
+        if holder.start_token(os.getpid()):  # 取得到建立時間的平台才有「重用」這一格
+            cases.append(("reused", lambda: self._foreign_holder(start="0")))
+        for name, setup in cases:
+            with self.subTest(name):
+                self.reset_state()
+                setup()
+                rc, out = self.run_kw(_Clock(T0 + 44 * MIN))
+                self.assertEqual((rc, out.splitlines()[-1]), (0, "KEEPWARM_VERDICT=ping k=1 n=9"))
+                self.assertFalse(holder.path(SID).exists(), "結束必須釋放保溫錨")
+
+    def test_the_holder_is_released_even_when_the_run_ends_as_skip_or_cap(self) -> None:
+        """WHY：任何結局都釋放，不只 ping（finally）；漏釋放＝下一次保溫被自己留下的鬼擋住。"""
+        self.write(_asst(T0))
+        self.ledger(pings=8)
+        self.run_kw(_Clock(T0 + 44 * MIN))  # 第 9 次＝cap
+        self.assertFalse(holder.path(SID).exists())
+
+    def test_at_wp_33_watch_and_keepwarm_share_one_ping_ledger(self) -> None:
+        """AT-WP-33／MU-WP-32。WHY：watch 的 keepwarm 事件收一次費，之後 keepwarm 指令看到的是
+        同一本帳——各算各的，預算上限 n* 就會被繞過（兩邊各叫 n* 次）。帳預置 n*−1：watch 叫醒一次
+        （仍是 `keepwarm`，因為叫醒當下還有預算），帳達 n* ⇒ keepwarm 指令立即印 cap、不睡。"""
+        self.write(_asst(T0))
+        self.ledger(pings=8)  # n*(400,000)＝9
+        rc, out = self._watch(_Clock(T0 + 1 * MIN))
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "WATCH_VERDICT=keepwarm n=0"))
+        self.assertEqual(json.loads(keepwarm.ledger_path(SID).read_text(encoding="utf-8"))["pings"],
+                         9)
+        clock = _Clock(T0 + 46 * MIN)
+        rc, out = self.run_kw(clock)
+        self.assertEqual((rc, clock.sleeps, out.splitlines()[-1]),
+                         (0, 0, "KEEPWARM_VERDICT=cap k=9"))
+
+    def test_watch_at_the_cap_ends_as_cap_uncharged_and_idle_when_not_applicable(self) -> None:
+        """AT-WP-37 的真帳版（MU-WP-11）。WHY：全部交卷後 watch 帳已達上限 ⇒ cap、不再收費；保溫
+        不適用（此處用 AUTOSDD_KEEPWARM_OFF）⇒ idle；兩者都讓行程結束（不是永遠掛著）。"""
+        self.write(_asst(T0))
+        self.ledger(pings=9)
+        rc, out = self._watch(_Clock(T0 + 1 * MIN))
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "WATCH_VERDICT=cap n=0"))
+        self.assertIn("不重掛", out)
+        self.assertEqual(json.loads(keepwarm.ledger_path(SID).read_text(encoding="utf-8"))["pings"],
+                         9)
+        self.reset_state()
+        with mock.patch.dict(os.environ, {keepwarm.OFF_ENV: "1"}):
+            rc, out = self._watch(_Clock(T0 + 1 * MIN))
+        self.assertEqual((rc, out.splitlines()[-1]), (0, "WATCH_VERDICT=idle n=0"))
+
+    def test_at_wp_34_the_ping_row_says_rehang_the_same_command_and_make_no_judgement(self) -> None:
+        """AT-WP-34。WHY：被叫醒的主控沒有上下文，處置列是它唯一知道
+        「什麼都不用判、重掛同一指令、結束回合」的地方；
+        少了這句，它會跑 status、讀名冊、寫一大段分析＝一叫三回合（M-WB1）。keepwarm
+        指令與 watch 的 keepwarm 列同一句。"""
+        phrase = "重掛同一指令並結束回合，不做任何判斷"
+        self.assertIn(phrase, keepwarm.DISPOSAL["ping"])
+        self.assertIn(phrase, watch.DISPOSAL["keepwarm"])
+        self.write(_asst(T0))
+        _rc, out = self.run_kw(_Clock(T0 + 44 * MIN))
+        self.assertIn(phrase, out)
+
+
 class StopGateTest(_Base):
     def test_at_ss_15_pushes_back_once_when_nothing_would_wake_the_session(self) -> None:
         """AT-SS-15。WHY：結束回合後沒有任何背景工作會叫醒主控＝快取會冷、閒置 55 分還會被壓縮；
@@ -418,13 +521,15 @@ class StopGateTest(_Base):
         self.assertIn("冷叫醒閘", text)
         self.assertIn("1 個", text)
 
-    def test_at_ss_19_a_running_keepwarm_is_an_event_source_for_the_midwork_judge(self) -> None:
-        """AT-SS-19（回歸）。WHY：半路停工判準只在「沒有任何 running 背景任務」時成立；
-        「保溫中」自述
-        搭一個 running 的 keepwarm shell 是有事件源的合法等待，不得被判成半路停工。"""
+    def test_at_ss_19_a_running_keepwarm_is_not_an_event_source_for_the_midwork_judge(self) -> None:
+        """AT-SS-19 → R217 REQ-WP-22／AT-WP-25（取代原斷言）。WHY：keepwarm 只叫醒主控「ping
+        保溫」、
+        不做任何工作；主控說要接著做事卻只剩保溫 shell ⇒ 仍是半路停工（2026-11-19 事故：保溫 shell
+        掩蓋了判準）。原斷言（保溫 shell 算事件源）被 R217 凍結規格明文推翻；判準單一家＝
+        `roster.is_supervision_shell`。"""
         running = {"id": "b1", "type": "shell", "status": "running",
                    "command": "python tools/sessionctl.py keepwarm --sid x"}
-        self.assertFalse(midwork.background_idle({"background_tasks": [running]}))
+        self.assertTrue(midwork.background_idle({"background_tasks": [running]}))
         self.assertTrue(midwork.background_idle({"background_tasks": []}))
         self.assertTrue(keepwarm.is_keepwarm_task(running))
         self.assertFalse(keepwarm.is_keepwarm_task(dict(running, command="python watch")))

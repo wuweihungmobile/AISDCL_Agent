@@ -239,6 +239,7 @@ def write_text_with_fallback(path: Path, content: str, fallback_prefix: str) -> 
 # 串流寫入給 PTY 輸出的原始 log
 class RawStreamLogger:
     def __init__(self, path: Path):
+        self._pending = b""
         safe_path = path.with_name(_sanitize_log_filename(path.name))
         try:
             self._file = open(safe_path, "ab")
@@ -253,9 +254,34 @@ class RawStreamLogger:
             )
             self._file = open(fallback, "ab")
 
-    def write(self, data: bytes) -> None:
-        self._file.write(data)
+    # R217 PX40：寫檔前套 `utils/redaction.py` 同一份樣式表（開關同為 REDACT_SECRETS_IN_LOGS）。
+    # PTY 位元組串流可能把一個金鑰切在兩個 chunk 之間，所以只落盤「完整行」，未換行的尾段留在
+    # 緩衝、等下一個 chunk 補齊或 close() 時才寫；無換行的超長串流（互動提示、進度列）以
+    # `_PENDING_CAP` 為界、保留最後 `_PENDING_KEEP` 位元組當作跨界尾巴，免得緩衝無限長。
+    _PENDING_CAP = 16384
+    _PENDING_KEEP = 512
+
+    def _emit(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        if secrets_redaction_enabled():
+            # surrogateescape：非 UTF-8 位元組（或被切半的多位元組字）原樣來回，不改動內容
+            text = chunk.decode("utf-8", errors="surrogateescape")
+            chunk = redact_secrets(text).encode("utf-8", errors="surrogateescape")
+        self._file.write(chunk)
         self._file.flush()
 
+    def write(self, data: bytes) -> None:
+        pending = self._pending + data
+        cut = pending.rfind(b"\n") + 1
+        if cut == 0 and len(pending) > self._PENDING_CAP:
+            cut = len(pending) - self._PENDING_KEEP
+        self._pending = pending[cut:]
+        self._emit(pending[:cut])
+
     def close(self) -> None:
-        self._file.close()
+        try:
+            self._emit(self._pending)
+            self._pending = b""
+        finally:
+            self._file.close()

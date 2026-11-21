@@ -2,7 +2,7 @@
 
 > 2026-09-06 產出。來源＝背景 Workflow `wf_e22124d0-ce1` 撞 session 上限前完成的 8 個 agent
 > （4 份獨立審計 Architect/SA/SD/Developer ＋ 合併 22 筆）。**對抗證偽 66 個 agent 與 design 未跑**
-> （撞上限）。合併清單各筆為**單一來源、未經三鏡證偽**，除下列已由主控親驗者外，餘為待驗假設。
+> （撞上限）。合併清單各筆為**單一來源、未經三鏡證偽**，除下列已由主控親驗者外，餘為〔OI-20261120-016〕待驗假設。
 > 原始四份 JSON：`/private/tmp/claude-501/-Users-wuweihong-Antigravity-AISDCL-Agent/812a9c3b-75a2-4b8a-a5da-1c0ddb38baf8/scratchpad/salvage/`。
 
 ## 主控親驗（2026-09-06，rc/檔實讀）

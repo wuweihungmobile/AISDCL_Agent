@@ -6,8 +6,10 @@
   · 日誌（`utils/logger.py` 的 `RedactSecretsFilter`）：`redact_secrets` ＝ 上面兩者再加補充樣式。
 
 誠實劃界（不是「已全面涵蓋」）：
-  · 只遮 `logging` 路徑。`RawStreamLogger` 寫的是 PTY 原始位元組串流（非 logging、可能把一個
-    token 切在兩個 chunk 之間），不在本檔射程；
+  · 兩條出口：`logging` 路徑（`RedactSecretsFilter`）與 PTY 原始串流 log（`RawStreamLogger`，
+    R217 PX40 起套同一份 `redact_secrets`；它以「完整行才落盤、無換行超長串流留跨界尾巴」處理
+    被切在兩個 chunk 之間的金鑰）。這兩條之外的檔案寫入（使用者自己的 evaluator 輸出、
+    子行程自行寫的檔）不在射程；跨界尾巴只保留有限位元組，超過該長度、又無換行的單一秘密不保證遮蔽；
   · 樣式是啟發式：只認有形狀的秘密（鍵值形、`sk-`／`Bearer`／DSN 密碼段）。一個沒有任何前後文的
     隨機字串認不出來；寧可多遮（`password: see docs` 的 `see` 會被遮）也不漏遮。
 """

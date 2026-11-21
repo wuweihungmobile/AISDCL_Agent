@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9497,
+    "test_adr_xplat001_c1c2_lock.py": 9520,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -637,7 +637,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_check_gha_action_versions.py": 295,
     "test_check_hooks_liveness.py": 3835,
     "test_check_pending_handoff.py": 380,
-    "test_check_pytest_baseline_sites.py": 301,
+    "test_check_pytest_baseline_sites.py": 315,
     "test_check_script_parity.py": 2007,
     "test_check_wrapper_thinness.py": 1153,
     "test_ci_gate_xdist_allowlist.py": 395,
@@ -664,7 +664,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_hook_carrier_symlink.py": 153,
     "test_install_statusline.py": 446,
     "test_install_windows_nightly.py": 1396,
-    "test_mac_endurance_r83.py": 2391,
+    "test_mac_endurance_r83.py": 2398,
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
@@ -674,6 +674,11 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_no_invalid_escape_sequences.py": 308,
     "test_ntfs_trailing_space_device_name.py": 698,
     "test_onboarding_parity_interlock.py": 233,
+    "test_openitems_drive.py": 720,
+    "test_openitems_gate.py": 547,
+    "test_openitems_ledger.py": 440,
+    "test_openitems_marker_lock.py": 173,
+    "test_openitems_scan.py": 119,
     "test_platform_neutral_paths.py": 5764,
     "test_platform_utils_dedup.py": 1168,
     "test_pre_commit_dispatcher_sigpipe.py": 954,
@@ -687,14 +692,14 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_quota_pace_floor.py": 338,
     "test_quota_policy.py": 4840,
     "test_quota_reconcile_gap.py": 146,
-    "test_quota_rush.py": 480,
+    "test_quota_rush.py": 481,
+    "test_realverify_lib.py": 634,
     "test_recovery_hint_passes_ps_lint.py": 103,
     "test_refresh_nightly_anchor.py": 305,
     "test_resume_cost.py": 197,
     "test_root_guard_known_model_r145.py": 240,
     "test_root_infra_parity.py": 437,
     "test_root_module_layout.py": 355,
-    "test_realverify_lib.py": 330,
     "test_run_root_unittests.py": 5478,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
     "test_schedule_capability_parity.py": 598,
@@ -725,7 +730,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_p7_report.py": 1364,
     "test_selfimproving_promote.py": 724,
     "test_selfimproving_props.py": 1556,
-    "test_selfimproving_registry.py": 903,
+    "test_selfimproving_registry.py": 904,
     "test_selfimproving_research_scan.py": 1085,
     "test_selfimproving_sandbox.py": 859,
     "test_selfimproving_schedule_advance.py": 679,
@@ -734,41 +739,42 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_selfimproving_schedule_patrol.py": 757,
     "test_selfimproving_verify.py": 1070,
     "test_sentinel_tick_e2e_r145.py": 466,
-    "test_session_brief.py": 1544,
+    "test_session_brief.py": 1546,
     "test_sessionctl_cachegate.py": 292,
     "test_sessionctl_converge.py": 522,
     "test_sessionctl_costmodel.py": 158,
     "test_sessionctl_forward.py": 406,
     "test_sessionctl_handoff.py": 1264,
-    "test_sessionctl_hooks.py": 606,
-    "test_sessionctl_keepwarm.py": 498,
+    "test_sessionctl_hooks.py": 607,
+    "test_sessionctl_keepwarm.py": 604,
     "test_sessionctl_longwait.py": 324,
     "test_sessionctl_modelmix.py": 94,
+    "test_sessionctl_oldwin.py": 1220,
     "test_sessionctl_park.py": 985,
     "test_sessionctl_park_route.py": 251,
-    "test_sessionctl_roster.py": 727,
+    "test_sessionctl_roster.py": 953,
     "test_sessionctl_seal.py": 392,
     "test_sessionctl_supervise.py": 301,
     "test_sessionctl_switch.py": 592,
-    "test_sessionctl_watch.py": 504,
+    "test_sessionctl_watch.py": 686,
     "test_single_venv_identity.py": 162,
     "test_skip_ceiling_ratchet_direction.py": 719,
     "test_skip_discoverability_r83.py": 731,
     "test_smoke_ci_sync.py": 1646,
     "test_statusline_context_feed.py": 230,
     "test_stdio_utf8.py": 76,
-    "test_subprocess_encoding_hygiene.py": 1520,
+    "test_subprocess_encoding_hygiene.py": 1521,
     "test_suite_shard.py": 756,
     "test_tlc_runner_timeout.py": 313,
     "test_wake_chain_halt_r278.py": 1264,
     "test_waste_census_keep.py": 348,
-    "test_waste_census_metrics.py": 438,
+    "test_waste_census_metrics.py": 686,
     "test_waste_census_supervision.py": 173,
     "test_windows_forbidden_filename_parity.py": 931,
     "test_windows_nightly_anchor_parity.py": 119,
     "test_windows_smoke_heartbeat_doc_sync.py": 197,
     "test_windowsapps_guard_bash_parity.py": 1016,
-    "test_windowsapps_guard_cross_consistency.py": 2099,
+    "test_windowsapps_guard_cross_consistency.py": 2112,
     "test_workflow_permission_concurrency_lock.py": 1808,
     "test_workflow_schedule_sync.py": 305,
     "test_workflow_timeout_coverage.py": 158,
@@ -3236,6 +3242,17 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "既有 test_sessionctl_watch.py、_keepwarm.py、_longwait.py、_hooks.py 的回歸鎖與反向變體"
      "＋本檔自身漂移。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R216_SessionSwitch_CostModel_Closure_Evidence.md。"),
+    ("R214", 171934, 176282, +4348,  # round-label-ok r217a9
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第五十六列（R217 工作推進軸期 A 收尾單人窗口：未結項登記簿 OIR、完成"
+     "閘、叫醒預算、名冊收斂與交棒後舊視窗自動關閉的回歸鎖與真行程鎖）：新鎖檔 test_openitems_driv"
+     "e.py、test_openitems_gate.py、test_openitems_ledger.py、tes"
+     "t_openitems_marker_lock.py、test_openitems_scan.py、test_s"
+     "essionctl_oldwin.py，既有 test_realverify_lib.py、test_sessi"
+     "onctl_roster.py、_watch.py、_keepwarm.py、_hooks.py、test_wa"
+     "ste_census_metrics.py（併入 A7 量測鎖）＋本檔自身漂移。逐檔清單見 CrossPlatf"
+     "orm_R145_Scan_Findings.md 尾端 R214 標記行；證據＝docs/06_quality"
+     "/CrossPlatform_R217_WorkProgress_Closure_Evidence.md。"),
 )
 
 
@@ -3337,7 +3354,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (43422, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (47770, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3416,6 +3433,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第五十三列（自續跑不算交棒，DEF-200-617／618）+172＝43168。"
         "第五十四列（複審 P3 三條收尾，DEF-200-619～621）+180＝43348。"
         "第五十五列（監督／保溫的正常結果不得呈現成錯誤，DEF-200-622／623）+74＝43422。"
+        "第五十六列（R217 工作推進軸期 A 收尾）+4348＝47770。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4004,6 +4022,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "背景子代理監督／封存／轉送／半路停工回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r217a9
+     "R217 工作推進軸期 A 收尾回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4179,10 +4201,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 402
+_REPIN_LOG_FROZEN_PREFIX_LEN = 403
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "166cd12ed3dcd823770c116ff36d87266e38521236c7251d1c19ba69dca5543e")
+    "71669857899e7a5b37a14ed718f821a00f7753c78d64e98c4a3d8caf784119da")
 
 
 def repin_log_history_digest(
@@ -4426,6 +4448,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "bcc8f9827abd", "d4fbfdf160c3", "DEF-200-617"),  # round-label-ok：自續跑不算交棒
     ("R214", "d4fbfdf160c3", "6c485cb85da7", "DEF-200-619"),  # round-label-ok：複審 P3 收尾
     ("R214", "6c485cb85da7", "166cd12ed3dc", "DEF-200-622"),  # round-label-ok：監督結果非錯誤
+    ("R214", "166cd12ed3dc", "71669857899e", "DEF-200-631"),  # round-label-ok r217a9ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -21,7 +21,7 @@
 | 來源 | 條目 | 本輪處置 |
 |---|---|---|
 | `docs/04_planning/AutoSDD_improving_112.md` §4-1 | 水位預警哨兵擴充＋PRD v2.1.6 落款 | ✅ 已落地：`tools/lib/quota_escalation.py` B1～B3 與 `tools/tests/test_context_budget_guard.py` 的鎖；帳本 DEF-200-148 fixed（`docs/06_quality/AutoSDD_Defect_Log_archive_67.md`）；程序債＝PRD 修訂表 L11（v2.1.6）字面仍寫「待實作」（登記證據檔〈三〉） |
-| 同 §4-2 | Windows 側待驗清單 | 承接載體＝`docs/06_quality/CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉（只能在 Windows 機驗；本輪 mac，不排） |
+| 同 §4-2 | Windows 側〔OI-20261120-012〕待驗清單 | 承接載體＝`docs/06_quality/CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉（只能在 Windows 機驗；本輪 mac，不排） |
 | 同 §4-3 | 引擎側額度軸接電（第三方刷新者） | ❌ 未做且全 docs 零追蹤列（`AutoClaude/autoclaude/core/ports/quota_meter.py:15-45` 自陳缺刷新者、`AutoClaude/tests/test_r82_quota_axis_and_shipped_defaults.py:797` 釘住「引擎側零寫入者」）；本輪登記證據檔〈三〉、列入 improving_114 候選（W-C′(i)） |
 | 同 §4-4 | SD/Arch 順手項（prepare 閂鎖鍵、混軸鍵補記來源軸） | ❓ 本輪未逐項重驗（誠實標記） |
 | 同 §5 | 「PRD 收斂度 65%→估 72~75%，精確值下輪開場重盤」 | 本輪 §2.2 重盤（兩種算法各給一個數字） |

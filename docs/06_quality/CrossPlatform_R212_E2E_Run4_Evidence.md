@@ -197,7 +197,7 @@ Push-Location (git rev-parse --show-toplevel); git pull --ff-only; $p = $LASTEXI
 
 **最可能的失敗畫面與處置**：pull 被 nightly 弄髒的 `ONBOARDING.md` 擋下：`error: Your local changes to the following files would be overwritten by merge: ONBOARDING.md … Aborting`、pull_rc=1〔推論，該機未見過；訊息形狀已在暫存 repo 見到〕；其後 doctor 在舊樹跑，不認 `--env-doctor`、rc=2 ⇒ `RESULT: FAIL pull_rc=1 doctor_rc=2`，不會是假綠。處置：`git status --short` 確認髒的只有 ` M ONBOARDING.md`，再 `git diff --stat ONBOARDING.md` 確認只有錨那幾行（若含表② 回填，改走主檔〈八-2〉步驟 2：先 `git add`＋commit 再 `git pull --no-rebase`）；確認後在一般 PowerShell 視窗（非 Claude 視窗；Claude 視窗內 `block_destructive_git.py` 會擋 `git restore`，見主檔〈八-2〉）執行 `git restore ONBOARDING.md`，再貼一次。**先 pull、再做表② 回填**：回填（`clean_venv_carrier.py`）會寫 ONBOARDING.md，restore 會抹掉它。髒內容通常是 nightly 寫回的錨〔推論，該機未見過〕。一行版只是備援，實務入口是 `useMacWin.md` 啟動提示詞。
 
-**要不要馬上切 Windows**：不需要。開發留 mac；Windows 面的待驗清單在主檔〈八-4〉（該機專屬、非再開事件），在該機做該機的事時含三件（估 1～2 小時〔估計〕）：①啟動提示詞（同步＋post-merge 首次實跑＋dev_start）；②表② Windows 欄回填 `.venv\Scripts\python.exe tools/lib/clean_venv_carrier.py`（需 Docker daemon；先 pull 再回填）；③上面的驗收一行。理由：mac 專屬工作（launchd 真機，本列 W1 已跑）在 Windows 驗不了；雲端 windows-compat-ci #336 success（主檔〈四-3〉）；晚切的代價只是首次 pull 帶更多 commit（`--ff-only` 失敗時 loud 且不改樹）。**這個理由沒覆蓋的面**：Windows 喚醒鏈（schtasks 後端，主檔〈五〉#10／#11／#39）R212 第四列零量測，不因「不需要切」而變成已驗。
+**要不要馬上切 Windows**：不需要。開發留 mac；Windows 面的〔OI-20261120-012〕待驗清單在主檔〈八-4〉（該機專屬、非再開事件），在該機做該機的事時含三件（估 1～2 小時〔估計〕）：①啟動提示詞（同步＋post-merge 首次實跑＋dev_start）；②表② Windows 欄回填 `.venv\Scripts\python.exe tools/lib/clean_venv_carrier.py`（需 Docker daemon；先 pull 再回填）；③上面的驗收一行。理由：mac 專屬工作（launchd 真機，本列 W1 已跑）在 Windows 驗不了；雲端 windows-compat-ci #336 success（主檔〈四-3〉）；晚切的代價只是首次 pull 帶更多 commit（`--ff-only` 失敗時 loud 且不改樹）。**這個理由沒覆蓋的面**：Windows 喚醒鏈（schtasks 後端，主檔〈五〉#10／#11／#39）R212 第四列零量測，不因「不需要切」而變成已驗。
 
 ---
 

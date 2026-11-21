@@ -114,6 +114,12 @@ try:
     from lib.sessionctl import midwork  # type: ignore[import-not-found]
 except Exception:  # noqa: BLE001
     midwork = None  # type: ignore[assignment]
+# 完成閘（R217 第七類停＝宣告式完成）判準住 `tools/lib/openitems/gate.py`；
+# import 不到＝該判準停用（fail-open）。
+try:
+    from lib.openitems import gate  # type: ignore[import-not-found]
+except Exception:  # noqa: BLE001
+    gate = None  # type: ignore[assignment]
 
 #: 交棒詞：把決定／待辦留給掌舵者的說法。「掌舵者」「您」「你」是本 repo 的稱謂（「你」＝ADR X31；
 #: 「請你」「等你」在真實面普查造成 3 回合假紅，不收）。
@@ -270,13 +276,19 @@ def midwork_hits(claim_text: str) -> list[dict]:
     return midwork.midwork_hits(claim_text, _is_quoted) if midwork else []
 
 
-def midwork_stop(payload: dict, claim: str, tools: set[str]) -> list[dict]:
+def work_evidence(payload: dict, tools: set[str]) -> bool:
+    """狀態佐證（本回合做過非唯讀工具，或工作樹髒）；半路停工與完成閘共用，hook 內只算一次。"""
+    cwd = str(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
+    return midwork.did_work(tools, cwd)
+
+
+def midwork_stop(payload: dict, claim: str, tools: set[str],
+                 evidence: bool | None = None) -> list[dict]:
     """半路停工全判準（措辭已命中時才呼叫）：沒有任何背景工作 ＋ 狀態佐證。命中回措辭列。"""
     hits = midwork_hits(claim)
     if not hits or not midwork.background_idle(payload):
         return []
-    cwd = str(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
-    return hits if midwork.did_work(tools, cwd) else []
+    return hits if (work_evidence(payload, tools) if evidence is None else evidence) else []
 
 
 def _trace(hits: list[dict], session_id: str, event: str = "handoff_block") -> None:
@@ -293,6 +305,13 @@ def _trace(hits: list[dict], session_id: str, event: str = "handoff_block") -> N
         pass
 
 
+def _say(note: str) -> int:
+    """不阻斷時只出聲（人工清單滿額的一行；沒有就靜默）。"""
+    if note:
+        sys.stdout.write(json.dumps({"systemMessage": note}, ensure_ascii=True) + "\n")
+    return 0
+
+
 def main() -> int:
     try:
         if os.environ.get("AUTOSDD_HANDOFF_GUARD_OFF") or os.environ.get("AUTOSDD_UNATTENDED"):
@@ -305,26 +324,43 @@ def main() -> int:
         transcript = str(payload.get("transcript_path") or "")
         if not claim or not transcript:
             return 0
+        sid = str(payload.get("session_id") or "")
+        # 已交棒（新視窗已 ack 或 spawn）的舊 session：收尾只寫「決定請到新視窗回答」，不推回
+        # （R217 F7：推回會逼舊視窗再問一次，兩個視窗問同一件事）。判準單一家＝seal.handed_over。
+        try:
+            from lib.sessionctl import seal  # type: ignore[import-not-found]  # noqa: PLC0415
+
+            if sid and seal.handed_over(sid) is not None:
+                return 0
+        except Exception:  # noqa: BLE001 — 判不出就照常判（fail-open 方向＝維持既有守衛）
+            pass
+        state = gate.load_state() if gate else None  # 只讀帳本、零子行程；讀不到＝None＝放行
+        note = gate.cap_note(state, sid) if gate else ""
         hits = pending_handoff_hits(claim)
         mid = midwork_hits(claim) if midwork and midwork.background_idle(payload) else []
-        if not hits and not mid:
-            return 0
+        und = bool(state and state.undriven)
+        if not hits and not mid and not und:
+            return _say(note)
         tools = tools_this_turn(transcript)
         if ASK_TOOL in tools:
-            return 0
-        mid = midwork_stop(payload, claim, tools) if mid else []
-        if not hits and not mid:
-            return 0
-        sid = str(payload.get("session_id") or "")
+            return _say(note)
+        evidence = work_evidence(payload, tools) if (mid or und) else False
+        mid = midwork_stop(payload, claim, tools, evidence) if mid else []
+        oi = gate.stop_verdict(state, payload, os.environ, evidence=evidence) if und else ""
+        if not hits and not mid and not oi:
+            return _say(note)
         if hits:
             _trace(hits, sid)
         if mid:
             _trace(mid, sid, "midwork_stop_block")
-        reason = "\n".join(part for part in (block_message(hits) if hits else "",
-                                            midwork.block_message(mid) if mid else "") if part)
+        if oi:
+            gate.mark_pushed(sid)  # 供保溫閘讓路（同回合不再叫主控掛保溫）
+        reason = "\n".join(part for part in (midwork.block_message(mid) if mid else "",
+                                            block_message(hits) if hits else "", oi, note) if part)
         doc = {"decision": "block", "reason": reason,
                "systemMessage": ("⏸ check_pending_handoff：收尾把決定留給掌舵者卻沒給互動選項，"
-                                 "或說要接著做卻沒有任何背景工作會叫醒主控；已推回主控一次"
+                                 "、說要接著做卻沒有任何背景工作會叫醒主控，"
+                                 "或 OIR 有未驅動的未結項；已推回主控一次"
                                  "（第二次 Stop 放行）。")}
         sys.stdout.write(json.dumps(doc, ensure_ascii=True) + "\n")
         sys.stdout.flush()

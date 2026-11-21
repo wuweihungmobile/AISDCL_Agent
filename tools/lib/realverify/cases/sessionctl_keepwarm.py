@@ -17,6 +17,7 @@ import json
 import re
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ from ..driver import EnvMissing
 from ..sandbox import Sandbox
 from ..transcript import Transcript
 from . import CaseContext, case
+from .sessionctl_park import age_transcript
 from .sessionctl_watch import (  # noqa: E501
     BYPASS,
     GUARD,
@@ -138,15 +140,18 @@ def _quota_prepare_or_missing(got, label: str) -> None:
 @case("RV-KW3", "sessionctl_keepwarm", refs=("V-SS3",))
 def rv_kw3(ctx: CaseContext) -> None:
     """真 `sessionctl.py watch` ×2：prepare 帶（env 整組下修；讀數取自本機真實額度快取）第一次 quota 判決、**重掛不再觸發**
-    （同 reset 窗同帶）；第二次改由寬限期後的 all_done 結束，痕跡有 `watch_quota_latched`。真機缺陷回歸：
+    （同 reset 窗同帶）；第二次把沙盒主控逐字稿時間戳往前推 1 小時（保溫點已過），改由保溫族判決 `keepwarm`
+    結束（REQ-WP-30：watch 沒有 all_done），痕跡有 `watch_quota_latched`。真機缺陷回歸：
     2026-11-18 21:26 主控 watch 一掛即 rc 5、重掛照樣觸發。"""  # noqa: E501
     sb = ctx.sandbox()
-    args = ("--poll-sec", "1", "--grace-sec", "4", "--stall-min", "20")
+    ctx.check(ctx.run_claude(sb, "Reply with exactly: ok").rc == 0, "沙盒種子回合失敗")  # 真主控逐字稿＝保溫錨點來源  # noqa: E501
+    args = ("--poll-sec", "1", "--stall-min", "20")
     first = _watch(sb, *args, env_extra=LOW_PREPARE)
     _quota_prepare_or_missing(first, "RV-KW3")
     _check_verdict(ctx, first, "quota", "RV-KW3 第一次")
-    second = _watch(sb, *args, env_extra=LOW_PREPARE)
-    _check_verdict(ctx, second, "all_done", "RV-KW3 重掛")
+    age_transcript(ctx.transcript(sb).path, 3600)  # 保溫點（最後記錄＋T_kw）已過；錨點讀逐字稿時間戳  # noqa: E501
+    second = _watch(sb, *args, env_extra={**LOW_PREPARE, **LOW_CTX})
+    _check_verdict(ctx, second, "keepwarm", "RV-KW3 重掛")
     rows = [json.loads(x) for x in (sb.root / "traces" / "autosdd_session_switch.jsonl").read_text(encoding="utf-8").splitlines()]  # noqa: E501
     ctx.check(any(x.get("event") == "watch_quota_latched" for x in rows), f"沒有 watch_quota_latched 痕跡（事件={[x.get('event') for x in rows]}）")  # noqa: E501
     latch = json.loads((sb.root / "traces" / "watch" / f"{sb.sid}.quota.json").read_text(encoding="utf-8"))  # noqa: E501
@@ -157,9 +162,10 @@ def rv_kw3(ctx: CaseContext) -> None:
 @case("RV-KW4", "sessionctl_keepwarm", refs=("V-SS3",))
 def rv_kw4(ctx: CaseContext) -> None:
     """帶升級再觸發：prepare 帶觸發並閂住後，同一 reset 窗、同一份真實讀數改把 halt 門檻下修到讀數之下 ⇒ 帶級變 halt，
-    閂鎖放行再判 quota；之後同 halt 再重掛又被閂住（改判 all_done）。"""  # noqa: E501
+    閂鎖放行再判 quota；之後同 halt 再重掛又被閂住（保點已過時改判保溫族 `keepwarm`，不是 quota）。"""  # noqa: E501
     sb = ctx.sandbox()
-    args = ("--poll-sec", "1", "--grace-sec", "4", "--stall-min", "20")
+    ctx.check(ctx.run_claude(sb, "Reply with exactly: ok").rc == 0, "沙盒種子回合失敗")  # 真主控逐字稿＝保溫錨點來源  # noqa: E501
+    args = ("--poll-sec", "1", "--stall-min", "20")
     first = _watch(sb, *args, env_extra=LOW_PREPARE)
     _quota_prepare_or_missing(first, "RV-KW4")
     _check_verdict(ctx, first, "quota", "RV-KW4 prepare")
@@ -169,21 +175,34 @@ def rv_kw4(ctx: CaseContext) -> None:
     ctx.check(up[0] == 0, f"帶升級那次 rc={up[0]}（判決一律 rc 0）")
     latch = json.loads((sb.root / "traces" / "watch" / f"{sb.sid}.quota.json").read_text(encoding="utf-8"))  # noqa: E501
     ctx.check(latch.get("band") == "halt", f"帶升級後閂鎖沒有記成 halt：{latch}")
-    again = _watch(sb, *args, env_extra=LOW_HALT)
-    _check_verdict(ctx, again, "all_done", "RV-KW4 halt 重掛")
+    age_transcript(ctx.transcript(sb).path, 3600)
+    again = _watch(sb, *args, env_extra={**LOW_HALT, **LOW_CTX})
+    _check_verdict(ctx, again, "keepwarm", "RV-KW4 halt 重掛")
     ctx.evidence(f"RV-KW4 {sb.sid[:8]} prepare {first[2]}；升 halt {up[2]}；halt 重掛 {again[2]}；閂鎖 {latch}")  # noqa: E501
 
 
 _WARNING_WORDS = ("背景任務在跑", "TaskStop", "擁有者")  # 舊 Stop 警告語（DEF-200-623 之前）
 
 
-def _bg_supervision_run(ctx: CaseContext, kind: str):
+def _age_after_launch_stop(sb: Sandbox, path: Path, done: list, *, limit_s: float = 400) -> None:
+    """背景執行緒：等第二次 Stop（＝掛 watch 那一回合結束，此後 claude -p 只等背景完成通知、不再寫逐字稿）
+    出現後，把沙盒逐字稿往前推 1 小時 ⇒ 保溫點立即到期（保溫下限 15 分 > 任何可跑的牆鐘，只能改錨點）。"""  # noqa: E501
+    t0 = time.time()
+    while time.time() - t0 < limit_s:
+        if len([e for e in sb.events() if e["ev"] == "Stop"]) >= 2:
+            time.sleep(1.0)  # 讓該回合最後的寫入落地
+            done.append(age_transcript(path, 3600))
+            return
+        time.sleep(0.5)
+
+
+def _bg_supervision_run(ctx: CaseContext, kind: str, *, age_after_stop: bool = False):
     """真 `claude -p`（沙盒＋repo 真 Stop 守衛）在背景掛真的 `sessionctl.py <kind>`（keepwarm 或 watch）；
     回 (sb, 逐字稿, RunResult, 第一次 Stop 的 background_tasks)。
 
     WHY 命令內自帶 env：工具 shell 不一定繼承 claude 行程的自訂變數（同 RV-S2）；沙盒 settings 的
     `AUTOSDD_KEEPWARM_OFF` 只讓 hook 側保溫閘不介入，命令內把它清成空字串（falsy）才讓被測的 keepwarm 真的
-    保溫而非 skip。`--min 1`／`--grace-sec 20` 讓它在一分鐘內自己結束，`claude -p` 才收得了尾。"""  # noqa: E501
+    保溫而非 skip。`--min 1` 讓它在一分鐘內自己結束，`claude -p` 才收得了尾。"""  # noqa: E501
     sb = ctx.sandbox()
     r1 = ctx.run_claude(sb, "Reply with exactly: ok")
     ctx.check(r1.rc == 0, f"第一回合 rc={r1.rc} {r1.stderr[:200]}")
@@ -194,14 +213,22 @@ def _bg_supervision_run(ctx: CaseContext, kind: str):
     env = ("$env:AUTOSDD_KEEPWARM_OFF=''; $env:AUTOSDD_KEEPWARM_MIN_CTX_TOKENS='1'; "
            "$env:AUTOSDD_QUOTA_PREPARE_PCT='99'; $env:AUTOSDD_QUOTA_HALT_PCT='100'; ")
     tail = (f"keepwarm --sid {sb.sid} --projects-dir '{tr1.path.parent}' --min 1 --poll-sec 3"
-            if kind == "keepwarm" else f"watch --sid {sb.sid} --stall-min 20 --poll-sec 3 --grace-sec 20")  # noqa: E501
+            if kind == "keepwarm" else f"watch --sid {sb.sid} --stall-min 20 --poll-sec 3")  # noqa: E501
     cmd = f"{env}& '{sys.executable}' '{SESSIONCTL}' {tail}"
     prompt = ("Make exactly one tool call: the PowerShell tool with run_in_background=true and "
               f"this exact command: {cmd}\nAfter it returns, end your turn immediately with the "
               "single word LAUNCHED. Never start any other command, even if a hook objects; "
               "when the background command later finishes, just reply with the single word DONE.")
+    aged: list = []
+    th = None
+    if age_after_stop:
+        th = threading.Thread(target=_age_after_launch_stop, args=(sb, tr1.path, aged), daemon=True)
+        th.start()
     r = ctx.run_claude(sb, prompt, extra_args=BYPASS, timeout_s=420,
                        env_extra={**NO_QUOTA, **LOW_CTX})
+    if th is not None:
+        th.join(timeout=5)
+        ctx.check(bool(aged), "沒有等到掛 watch 那一回合的 Stop，逐字稿未老化（保溫點不會到期）")
     ctx.check(r.rc == 0 and not r.timed_out, f"claude -p rc={r.rc} timed_out={r.timed_out} {r.stderr[:200]}")  # noqa: E501
     tr = ctx.transcript(sb)
     stops = [e for e in sb.events() if e["ev"] == "Stop"]
@@ -243,11 +270,12 @@ def rv_kw6(ctx: CaseContext) -> None:
 
 @case("RV-KW7", "sessionctl_keepwarm", refs=("DEF-200-622", "DEF-200-623"))
 def rv_kw7(ctx: CaseContext) -> None:
-    """同上，被掛的是真 `watch`（無代理、寬限 20 秒後 all_done）：判決一律 rc 0、不被標 failed，Stop 當下只有
+    """同上，被掛的是真 `watch`（無代理；A4 後無 all_done，結局只剩保溫族／quota／budget…）：掛上後把沙盒逐字稿
+    往前推 1 小時讓保溫點立即到期 ⇒ 判決為保溫族（`keepwarm`／`cap`／`idle`）、rc 0、不被標 failed，Stop 當下只有
     watch shell 時真 hook 同樣不出警告語。"""  # noqa: E501
-    sb, tr, _r, tasks = _bg_supervision_run(ctx, "watch")
+    sb, tr, _r, tasks = _bg_supervision_run(ctx, "watch", age_after_stop=True)
     last = _assert_no_failed_wording(ctx, sb, tr, tasks, "watch", "RV-KW7")
-    ctx.check(last == "all_done", f"watch 判決不是 all_done：{last!r}")
+    ctx.check(last in ("keepwarm", "cap", "idle"), f"watch 判決不是保溫族：{last!r}")
     ctx.evidence(f"RV-KW7 {sb.sid[:8]} WATCH_VERDICT={last}；完成通知 completed (exit code 0)；Stop 當下 background_tasks 只有 watch shell，無警告語；無 failed 字樣")  # noqa: E501
 
 

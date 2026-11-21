@@ -710,6 +710,9 @@ _GOVERNANCE_DOCS = (
     # R216：換 session 依快取成本收尾的連動面座標與誠實未結清單（DEF-200-611～615）。資格同上。
     _REPO_ROOT / "docs" / "06_quality"
     / "CrossPlatform_R216_SessionSwitch_CostModel_Closure_Evidence.md",
+    # R217：工作推進軸期 A 收尾的缺陷明細、決策與理論洞清單（DEF-200-624～637）。資格同上。
+    _REPO_ROOT / "docs" / "06_quality"
+    / "CrossPlatform_R217_WorkProgress_Closure_Evidence.md",
 )
 
 # 姊妹治理文件的命名慣例：`docs/06_quality/{CrossPlatform,Quota}_*.md`。這**不是**把具名

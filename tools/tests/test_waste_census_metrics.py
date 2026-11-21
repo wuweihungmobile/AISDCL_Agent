@@ -12,8 +12,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -21,8 +22,16 @@ sys.path.insert(0, str(_REPO / "tools"))
 sys.path.insert(0, str(_REPO / "tools" / "lib"))
 
 import guard_line_taxonomy  # noqa: E402
+import quota_policy as qp  # noqa: E402
 
-from lib.wastecensus import metrics, reader, replay  # noqa: E402
+from lib.wastecensus import (  # noqa: E402
+    metrics,
+    pace_metrics,
+    pace_replay,
+    reader,
+    replay,
+    sections_wake,
+)
 
 _TZ = timezone(timedelta(hours=8))
 _T0 = datetime(2026, 11, 14, 10, 0, 0, tzinfo=_TZ)
@@ -432,6 +441,245 @@ class ResumeMetricsTest(_Base):
         self.assertIn("unmeasured=0", text)
         self.assertIn("M-R1", text)
         self.assertEqual(sorted(p.name for p in _REPO.iterdir()), before)
+
+
+# ---- R217 A7：叫醒量測 M-WB／配速床量測 M-P／M-C1／回放（AT-WP-34／36、AT-QP-56～63）----
+# WHY：量測探針若數錯，「叫醒重複已消除」「床沒有擋掉正常工作」的結案宣稱就建立在假數字上；
+# 每條測的都是會讓數字說謊的方向（週軸 halt 混進撞牆、窗樣本不足稀釋占比、reset 微秒抖動拆窗…）。
+NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+HOUR = 3600.0
+
+
+def iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
+
+
+def jl(path: Path, rows: list[dict]) -> Path:
+    path.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def burn(ts: float, pct: float, reset: float | None, kinds=("five_hour", "session")) -> dict:
+    row = {"ts": iso(ts), "pct": {k: pct for k in kinds}}
+    if reset is not None:
+        row["resets_at"] = {k: iso(reset) for k in kinds}
+    return row
+
+
+class WakeMetricsTest(unittest.TestCase):
+    """AT-WP-34：M-WB2＝子代理完成通知後 60 秒內的重複叫醒；M-WB1＝叫醒後主控回合數。"""
+
+    @staticmethod
+    def enq(ts: float, tid: str, summary: str) -> dict:
+        body = (f"<task-notification>\n<task-id>{tid}</task-id>\n"
+                f"<summary>{summary}</summary>\n</task-notification>")
+        return {"type": "queue-operation", "operation": "enqueue", "timestamp": iso(ts),
+                "content": body}
+
+    @staticmethod
+    def prompt(ts: float, tid: str | None) -> dict:
+        text = "hi"
+        if tid:
+            text = f"<task-notification>\n<task-id>{tid}</task-id>\n</task-notification>"
+        return {"type": "user", "timestamp": iso(ts), "message": {"role": "user", "content": text},
+                "origin": {"kind": "task-notification" if tid else "human"}}
+
+    @staticmethod
+    def asst(ts: float, mid: str) -> dict:
+        return {"type": "assistant", "timestamp": iso(ts),
+                "message": {"id": mid, "model": "m", "usage": {"cache_creation_input_tokens": 1}}}
+
+    def lines(self, rows: list[dict]) -> list[str]:
+        return [json.dumps(r, ensure_ascii=False) for r in rows]
+
+    def test_duplicate_wake_within_60s_after_agent_done_is_counted_and_a_late_one_is_not(self):
+        t = 1_800_000_000.0
+        rows = [self.enq(t, "a1", 'Agent "X" finished'),
+                self.enq(t + 15, "w1",
+                         'Background command "Supervise X agent" completed (exit code 0)'),
+                self.enq(t + 500, "w2",
+                         'Background command "Re-arm watch after keepwarm tick" completed'),
+                self.enq(t + 20, "c1", 'Background command "Run unit tests" completed')]
+        got = sections_wake.m_wb2(sections_wake.parse_events(self.lines(rows)))
+        self.assertEqual((got["count"], got["agent_done"]), (1, 1))
+        self.assertEqual(got["hits"][0]["tid"], "w1")  # 非叫醒字樣的背景指令不算、60 秒外的不算
+
+    def test_same_task_id_enqueued_twice_is_one_notification(self):
+        t = 1_800_000_000.0
+        rows = [self.enq(t, "a1", 'Agent "X" finished'),
+                self.enq(t + 5, "w1", 'Background command "Supervise" completed'),
+                self.enq(t + 6, "w1", 'Background command "Supervise" completed')]
+        events = sections_wake.parse_events(self.lines(rows))
+        self.assertEqual(sections_wake.m_wb2(events)["count"], 1)
+
+    def test_turns_after_a_wake_stop_at_the_next_prompt_and_duplicate_message_ids_count_once(self):
+        t = 1_800_000_000.0
+        rows = [self.enq(t, "w1", 'Background command "Re-arm watch" completed'),
+                self.prompt(t + 1, "w1"),
+                self.asst(t + 2, "m1"), self.asst(t + 2.5, "m1"),  # 串流同一 message 兩筆 ⇒ 1 回合
+                self.asst(t + 3, "m2"), self.asst(t + 4, "m3"),
+                self.prompt(t + 100, None),
+                self.asst(t + 101, "m4")]
+        got = sections_wake.m_wb1(sections_wake.parse_events(self.lines(rows)))
+        self.assertEqual((got["turns"], got["wakes"], got["undelivered"]), ([3], 1, 0))
+
+    def test_wake_without_a_delivery_record_is_undelivered_not_guessed(self):
+        rows = [self.enq(1_800_000_000.0, "w9", 'Background command "Supervise" completed')]
+        got = sections_wake.m_wb1(sections_wake.parse_events(self.lines(rows)))
+        self.assertEqual((got["measured"], got["undelivered"]), (0, 1))
+
+    def test_cli_wake_metrics_runs_on_a_sandbox_transcript_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            now = time.time() - 3600
+            jl(
+                Path(tmp) / "s1.jsonl",
+                [
+                    self.enq(now, "a1", 'Agent "X" finished'),
+                    self.enq(now + 9, "w1", 'Background command "Supervise" done'),
+                    self.prompt(now + 10, "w1"),
+                    self.asst(now + 11, "m1"),
+                ],
+            )
+            proc = subprocess.run([sys.executable, str(_PROBE), "--base", tmp, "--wake-metrics"],
+                                  text=True, capture_output=True, encoding="utf-8", timeout=120,
+                                  creationflags=NOWIN, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("M-WB1", proc.stdout)
+        self.assertRegex(proc.stdout, r"M-WB2.*：1 件")
+
+
+class PaceMetricsTest(unittest.TestCase):
+    def test_m_p1_counts_only_five_hour_axis_halts_inside_the_range_and_skips_bad_json(self):
+        now = 1_800_000_000.0
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            for i, (binding, at) in enumerate(
+                [
+                    ("five_hour", now - 86400),
+                    ("five_hour", now - 2 * 86400),
+                    ("five_hour", now - 3 * 86400),
+                    ("weekly_all", now - 86400),
+                    ("five_hour", now - 40 * 86400),
+                ]
+            ):
+                (d / f"halt_{i}.json").write_text(json.dumps({"binding": binding, "at": iso(at)}),
+                                                  encoding="utf-8")
+            (d / "halt_bad.json").write_text("{not json", encoding="utf-8")
+            got = pace_metrics.m_p1(d, 14.0, now)
+        self.assertEqual((got["count"], got["skipped"]), (3, 1))
+        self.assertAlmostEqual(got["per_week"], round(3 / (14 / 7), 2))
+
+    def test_m_p3_excludes_thin_windows_from_denominator_and_counts_missing_reset(self):
+        r_a, r_b, r_c = 1_800_000_000.0, 1_800_000_000.0 + 10 * HOUR, 1_800_000_000.0 + 20 * HOUR
+        rows = []
+        for r, pcts in ((r_a, (75, 80, 90)), (r_b, (10, 20, 30))):
+            start = r - 5 * HOUR
+            rows += [burn(start + (i + 1) * 20 * 60, p, r) for i, p in enumerate(pcts)]
+        rows += [burn(r_c - 4 * HOUR, 80, r_c), burn(r_c - 3 * HOUR, 85, r_c)]  # C 窗只有 2 樣本
+        rows.append(burn(r_a - HOUR, 50, None))  # 缺 resets_at
+        got = pace_metrics.m_p3(rows)
+        self.assertEqual((got["windows"], got["early_burn"], got["share"], got["skipped"]),
+                         (2, 1, 0.5, 1))
+
+    def test_m_p4_takes_last_reads_within_24h_groups_jittered_resets_judges_window(self):
+        base = 1_800_000_000.0
+        w1, w2, w3 = base, base + 7 * 86400, base + 14 * 86400
+        wk = "seven_day_foo"
+
+        def row(ts, pct, reset_iso):
+            return {"ts": iso(ts), "pct": {wk: pct}, "resets_at": {wk: reset_iso}}
+
+        rows = [row(w1 - 20 * HOUR, 60, iso(w1 - 0.1)),  # 早的讀數，應被 6 小時前那筆取代
+                row(w1 - 6 * HOUR, 95, iso(w1 + 0.1)),  # 抖動 ±0.1s 同組
+                row(w2 - 30 * HOUR, 99, iso(w2)),  # 距 reset 30 小時 ⇒ 不計
+                row(w3 - 12 * HOUR, 85, iso(w3))]
+        got = pace_metrics.m_p4(rows, [])["by_kind"][wk]
+        self.assertEqual((got["weeks"], got["median"], got["min"]), (2, 90.0, 85.0))
+
+    def test_m_p4_withdraw_needs_both_a_low_reading_and_a_pace_floor_event_within_24h(self):
+        reset = 1_800_000_000.0
+        rows = [{"ts": iso(reset - 5 * HOUR), "pct": {"weekly_all": 80},
+                 "resets_at": {"weekly_all": iso(reset)}}]
+        near = [{"event": "pace_floor", "at": iso(reset - 10 * HOUR)}]
+        far = [{"event": "pace_floor", "at": iso(reset - 60 * HOUR)}]
+        self.assertEqual(len(pace_metrics.m_p4(rows, near)["withdraw"]), 1)
+        self.assertEqual(pace_metrics.m_p4(rows, far)["withdraw"], [])
+
+    def test_m_p7_counts_windows_overlapping_a_rush_stamp_and_empty_input_is_all_zero(self):
+        r1, r2 = 1_800_000_000.0, 1_800_000_000.0 + 10 * HOUR
+        rows = [burn(r1 - HOUR, 20, r1), burn(r2 - HOUR, 20, r2)]
+        events = [
+            {"event": "pace_rush_on", "at": iso(r1 - 3 * HOUR), "until": iso(r1 - 2 * HOUR)},
+            {"event": "pace_rush_on", "at": iso(r1 - 4 * HOUR), "until": iso(r1 - 3.5 * HOUR)},
+        ]
+        got = pace_metrics.m_p7(rows, events)
+        self.assertEqual((got["windows"], got["rush_windows"], got["share"]), (2, 1, 0.5))
+        self.assertEqual(pace_metrics.m_p7([], [])["share"], 0.0)
+
+    def test_m_c1_counts_main_transcript_requests_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            now = time.time() - 600
+            msgs = [{"type": "assistant", "timestamp": iso(now), "message": {
+                "id": f"m{i}", "model": "m", "usage": {"cache_creation_input_tokens": cc}}}
+                for i, cc in enumerate((1000, 2000, 3000, 6000))]
+            jl(d / "main.jsonl", msgs)
+            (d / "sub").mkdir()
+            jl(d / "sub" / "agent.jsonl", [dict(msgs[0], message=dict(msgs[0]["message"], id="x"))])
+            got = pace_metrics.m_c1(d, 14.0)
+        self.assertEqual((got["n"], got["mean"], got["median"]), (4, 3000.0, 2500.0))
+
+    def test_cli_pace_metrics_with_no_inputs_prints_a_no_data_note_and_rc0(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            proc = subprocess.run(
+                [sys.executable, str(_PROBE), "--base", tmp, "--pace-metrics", "--halt-dir", tmp,
+                 "--burn-file", str(d / "none.jsonl"), "--pace-file", str(d / "none2.jsonl")],
+                text=True, capture_output=True, encoding="utf-8", timeout=120, creationflags=NOWIN,
+                check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        for key in ("M-P1", "M-P3", "M-P7", "M-C1", "無資料"):
+            self.assertIn(key, proc.stdout)
+
+
+class PaceReplayTest(unittest.TestCase):
+    def test_only_the_row_whose_decision_actually_changes_counts_as_a_bed_opening(self):
+        reset = 1_800_000_000.0
+        rows = [burn(reset - 247 * 60, 38, reset), burn(reset - 247 * 60, 30, reset),
+                burn(reset - 30 * 60, 99, reset), burn(reset - 100 * 60, 50, None)]
+        got = pace_replay.replay(rows, qp.Policy())
+        self.assertEqual((got["rows"], got["opened"], got["skipped"]), (3, 1, 1))
+        row = got["table"][0]
+        self.assertIsNone(row["cap_without"])
+        self.assertIsNotNone(row["cap_with"])
+        halt = [{"at": iso(reset - 20 * 60), "reset_at": iso(reset), "binding": "five_hour"}]
+        self.assertIsNotNone(pace_replay.hit_windows(got["table"], halt)[0]["earliest_open"])
+
+    def test_cli_replay_runs_offline_on_sandbox_inputs(self):
+        reset = time.time() + 3600
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            jl(d / "burn.jsonl", [burn(time.time() - 60, 38, reset + 247 * 60 - 3600)])
+            proc = subprocess.run(
+                [sys.executable, str(_PROBE), "--base", tmp, "--replay-pace-floor",
+                 "--burn-file", str(d / "burn.jsonl"), "--halt-dir", tmp],
+                text=True, capture_output=True, encoding="utf-8", timeout=120, creationflags=NOWIN,
+                check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("會開床的列數", proc.stdout)
+
+
+class PackageShapeTest(unittest.TestCase):
+    def test_new_modules_stay_within_the_loc_ceiling_and_the_probe_stays_a_thin_shell(self):
+        # AT-QP-63：兩模組各 ≤400 行；入口薄殼不得出現任何 def（判準全在套件內）
+        for mod in (pace_metrics, pace_replay, sections_wake):
+            self.assertLessEqual(
+                len(Path(mod.__file__).read_text(encoding="utf-8").splitlines()), 400
+            )
+        defs = [ln for ln in _PROBE.read_text(encoding="utf-8").splitlines() if "def " in ln]
+        self.assertEqual(defs, [], "入口薄殼不得有任何 def")
 
 
 if __name__ == "__main__":

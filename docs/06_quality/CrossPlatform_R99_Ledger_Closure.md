@@ -96,7 +96,7 @@ AutoClaude/.claude/settings.json` 命中 9 處，橫跨兩份 settings.json，�
 |---|---|---|
 | DEF-101-803 | `grep -n "結構性修法.*已登記 DEF-101-803" tools/tests/test_run_root_unittests.py` | 命中 `:1553`，程式碼**自己**仍逐字宣告本缺陷未結案。遞迴主因已斷（`_ZERO_DEP_PROBE_ENV`），但外層探針仍跑一次整棵樹的殘留原封不動。**不成立**，維持 `partial` |
 | DEF-101-876 | 查其自身狀態欄引用的 `DEF-101-060`（依賴債） | DEF-101-060 現況仍為 `open`（「13 條無上限相依要先建白名單機械物」未做）。DEF-101-876 自己的邏輯是「依賴債未清前不得結案」，前提未變 ⇒ **不成立**，維持 `open` |
-| DEF-200-128 | `grep -rn "待驗清單.*可重跑腳本" docs/06_quality/CrossPlatform_R91_Scan_Findings.md` | R91 已明載「尚無通用可重跑腳本落地」；`find . -iname "*rerunnable*"` 全 repo零命中，本輪複查同樣零命中 ⇒ 結構性修法（可重跑載體）從未建置。**不成立**，維持 `open` |
+| DEF-200-128 | 〔OI-20261120-019〕`grep -rn "待驗清單.*可重跑腳本" docs/06_quality/CrossPlatform_R91_Scan_Findings.md` | R91 已明載「尚無通用可重跑腳本落地」；`find . -iname "*rerunnable*"` 全 repo零命中，本輪複查同樣零命中 ⇒ 結構性修法（可重跑載體）從未建置。**不成立**，維持 `open` |
 | DEF-200-141 | `grep -n "^| \*\*v2.1.4" docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md` | PRD 版本表原文逐字仍是「經掌舵者 2026-08-16 拍板、**待四方複審後生效**」，未見任何後續版本項訂正此狀態（對照 v2.1.6→v2.1.7 那樣的「已完整實作並回歸鎖驗證通過」寫法，v2.1.4 沒有對應的後繼確認列）。**不成立**，維持 `open` |
 | DEF-200-142 | `grep -n "仍標注.*待四方複審" docs/06_quality/CrossPlatform_R95_Pace_Actuator_Evidence.md` | 命中 :67，證據檔自己承認「掌舵者裁決的授權放寬）仍標注待四方複審」，且未見任何後續複審完成紀錄。**不成立**，維持 `open` |
 

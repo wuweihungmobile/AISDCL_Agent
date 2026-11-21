@@ -42,5 +42,5 @@
 
 ## 未驗與待辦
 
-- 真機 V-P6-1（登記、入帳、實抓）與 V-P6-2（K=5 回測）尚未執行，見 `docs/06_quality/RTM-SelfImproving-P6-20261110.md`，標「真機待驗」。
+- 真機 V-P6-1（登記、入帳、實抓）與 V-P6-2（K=5 回測）尚未執行，見 `docs/06_quality/RTM-SelfImproving-P6-20261110.md`，標〔OI-20261120-013〕「真機待驗」。
 - Console 半（登記 UI、同步端點、種子遷移）由 `agentconsole-research-registry` 鍵交付，審查報告見 `AgentConsole/docs/06_quality/SCG4-REVIEW-ResearchRegistry-20261110.md`。

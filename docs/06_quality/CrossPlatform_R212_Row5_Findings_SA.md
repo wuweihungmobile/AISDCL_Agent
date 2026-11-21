@@ -240,7 +240,7 @@ cd tools/tests && AUTOSDD_SENTINEL_OFF=1 python -B -m unittest test_context_budg
 | 子項 | 前六次宣稱 | 本鏡驗到（座標） | 判定 |
 |---|---|---|---|
 | 4a 結論 | 不需要；開發留 Mac；理由＝mac 專屬驗收在 Windows 驗不了、windows-compat-ci 綠、晚切代價小（`--ff-only` 失敗時 loud 且不改樹） | 〔本鏡親跑〕`gh run list --commit 1818de87fbbb5a96673008d50eeb1e619ce22223` 回 6 支 completed success（windows-compat-ci 38230301093、root-infra-ci 38230301052、AutoClaude CI 38230301082、macos-compat-ci 38230301062、arch-fitness 38231604962、drift-daily 38230947003）；`git show --stat 1818de87` 為 29 個檔；理由三點與證據一致 | 完備 |
-| 4b 「你只剩在 Windows 貼一行指令，沒有別的事」 | 第六次結論三句 | 〔讀檔〕主檔〈八-4〉列 6 項 Windows 專屬待驗；Run4〈五〉自己寫「含三件（估 1～2 小時）」（啟動提示詞、表② 回填、驗收一行）。「只剩一行」低估 | 部分（結論成立；措辭過樂觀，〈六-F1〉） |
+| 4b 「你只剩在 Windows 貼一行指令，沒有別的事」 | 第六次結論三句 | 〔讀檔〕主檔〈八-4〉列 6 項 Windows 專屬〔OI-20261120-012〕待驗；Run4〈五〉自己寫「含三件（估 1～2 小時）」（啟動提示詞、表② 回填、驗收一行）。「只剩一行」低估 | 部分（結論成立；措辭過樂觀，〈六-F1〉） |
 | 4c 本列新增的 Windows 驗證面 | Dev 報告只列「Windows 實機」未做 | 〔讀檔〕`quota_gate.py` 第 98 行無 try 直接 import `quota_burndown`；其 CLI 於 cp950 的中文輸出屬 DEF-200-525 同型風險面（`__main__` 已呼叫 `init_utf8_streams()`）。建議把 `& .\.venv\Scripts\python.exe tools/lib/quota_burndown.py --status` 加進 Windows 驗收（預期 rc=1、首行「清倉授權：沒有有效落款」、中文不亂碼），一行同時驗載入與編碼 | 建議（〈六-E6〉） |
 
 ### 一-5 新增指令與清倉模式（DEF-200-528）的需求追溯

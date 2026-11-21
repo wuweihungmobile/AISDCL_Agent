@@ -13,7 +13,10 @@ import json
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -23,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[3]
 SANDBOX_PREFIX = "AutoSDD_RV_sbx_"
 PROBE_HOOK_REL = ".claude/rv_probe_hook.py"
+PROC_EXIT_WAIT_S = 5.0  # cleanup 砍樹後等行程真的退出的上限（DEF-03）
 
 # 沙盒專用探針 hook（放沙盒裡、不進 repo `.claude/`）：每次觸發把 payload 追加進
 # hook_events.jsonl（證明真的跑過）；Stop 在 stop_hook_active 為假時 decision:block 一次；
@@ -205,6 +209,31 @@ class Sandbox:
             got.append("traces")
         return got
 
+    # ---- 舊視窗關閉（oldwin）的沙盒前綴 ----
+    def oldwin_prefix(self) -> str:
+        """沙盒專屬的重試排程前綴 `AutoSDD_OldWinCloseSbx_<沙盒根 8 碼>_`，寫進沙盒自己的
+        `traces/oldwin/task_prefix`（資料檔；`oldwin_sched.task_prefix` 讀它，不開環境變數鉤）。
+        沙盒的 trace_dir 本來就與真機分開，所以不會與真的 `AutoSDD_OldWinClose_*` 混在一起。"""
+        prefix = f"AutoSDD_OldWinCloseSbx_{uuid.uuid5(uuid.NAMESPACE_URL, str(self.root)).hex[:8]}_"
+        self.write_file("traces/oldwin/task_prefix", prefix + "\n")
+        return prefix
+
+    def _disarm_oldwin_tasks(self) -> list[str]:
+        """沙盒若登記過舊窗重試排程（有 `task_prefix` 檔），cleanup 時全數撤掉並回報剩餘。"""
+        marker = self.root / "traces" / "oldwin" / "task_prefix"
+        if not marker.is_file():
+            return []
+        prefix = marker.read_text(encoding="utf-8").strip()
+        try:
+            import schedule_backend  # noqa: PLC0415 — lazy
+            backend = schedule_backend.select()
+            for name in backend.list_jobs(prefix) or []:
+                backend.disarm(name)
+            left = backend.list_jobs(prefix) or []
+        except Exception as exc:  # noqa: BLE001 — 查不到不能假裝乾淨
+            return [f"RESIDUE oldwin-tasks 量不到：{type(exc).__name__}: {exc}"]
+        return [f"RESIDUE oldwin-tasks {left}"] if left else []
+
     # ---- 清理 ----
     def transcript_dirs(self) -> list[Path]:
         """只認 slug 與沙盒根吻合的專案目錄（絕不碰別的專案）。"""
@@ -213,27 +242,104 @@ class Sandbox:
         return [d for d in (base / want,) if d.is_dir()]
 
     def cleanup(self) -> list[str]:
+        """行程樹先結束、等行程真的退出，才刪目錄；刪不掉**回報 RESIDUE**（不吞錯，案例判 fail）。
+
+        WHY（R217 DEF-03；ARC E4c／SA §4.3 實證本機殘留 5 個孤兒逐字稿目錄）：舊版只 `proc.kill()`
+        本體、`rmtree(ignore_errors=True)` 吞掉一切錯誤，目錄 mtime 還晚於案例結束時間——claude 的
+        子孫行程在 cleanup 之後仍在寫逐字稿。所以順序是：①連子孫一起砍（`kill_tree`）②等行程退出
+        （≤ 5 秒）③才 rmtree，且逐字稿目錄與沙盒根一樣要驗證確實不在了。"""
         notes: list[str] = []
         for pr in self.procs:
             try:
                 if pr.poll() is None:
-                    pr.kill()
+                    kill_tree(pr)
                     notes.append(f"killed pid {pr.pid}")
             except OSError:
                 pass
+        deadline = time.monotonic() + PROC_EXIT_WAIT_S
+        for pr in self.procs:
+            try:
+                pr.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                notes.append(f"RESIDUE process pid {pr.pid} still alive")
         try:
             gone = cleanup_handoff_for(self.sid)
             if gone:
                 notes.append(f"handoff removed {len(gone)}")
         except ValueError:
             pass
+        notes += self._disarm_oldwin_tasks()
         for d in self.transcript_dirs():
-            shutil.rmtree(d, ignore_errors=True)
-        for _ in range(5):
-            shutil.rmtree(self.root, ignore_errors=True)
-            if not self.root.exists():
-                break
-            time.sleep(0.4)
-        if self.root.exists():
-            notes.append(f"RESIDUE sandbox {self.root}")
-        return notes
+            notes += _remove_tree(d, "transcript-dir")
+        return notes + _remove_tree(self.root, "sandbox")
+
+
+def _writable_then_retry(func, path, _exc_info) -> None:
+    """`rmtree` 的錯誤處理：唯讀檔（git 物件）先去唯讀再重試；仍失敗就把錯誤往外拋。"""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def _remove_tree(path: Path, kind: str, attempts: int = 5) -> list[str]:
+    """刪目錄並**驗證**它真的不在；刪不掉回 `RESIDUE <kind> <path>: <最後的錯誤>`（絕不吞錯）。"""
+    last = ""
+    for _ in range(attempts):
+        try:
+            kwarg = "onexc" if sys.version_info >= (3, 12) else "onerror"  # onerror 自 3.12 棄用
+            shutil.rmtree(path, **{kwarg: _writable_then_retry})
+        except OSError as exc:
+            last = f"{type(exc).__name__}: {exc}"
+        if not path.exists():
+            return []
+        time.sleep(0.4)
+    return [f"RESIDUE {kind} {path}" + (f": {last}" if last else "")]
+
+
+def kill_tree(proc: subprocess.Popen) -> None:
+    """連同子行程樹一起砍（只砍我們自己 spawn 的這個 pid 的樹）。Windows 用 `taskkill /T /F`；
+    POSIX 砍行程群組（`driver.run_claude` 以 `start_new_session` 開，群組＝它的樹）。"""
+    if os.name == "nt":
+        subprocess.run(  # noqa: S603
+            ["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,  # noqa: S607
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
+    else:
+        try:
+            if os.getpgid(proc.pid) == proc.pid:  # 只在它是群組領頭時砍群組（否則會砍到呼叫者）
+                os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def sweep_orphans(*, projects: Path | None = None, sessions: Path | None = None,
+                  tmp_root: Path | None = None, dry_run: bool = False) -> dict:
+    """清孤兒沙盒逐字稿目錄（DES §7 DEF-03；`realverify sweep`）。目錄名含 `AutoSDD-RV-sbx-`（沙盒根
+    前綴的 slug）∧ 對應沙盒根已不存在 ∧ `~/.claude/sessions/*.json` 沒有任何 `cwd` 指向它 ⇒ 刪；任一
+    不成立 ⇒ 留。回 `{removed: [名], kept: [(名, 原因)]}`；`dry_run` 只列不刪。只動 `projects` 下
+    名稱符合前綴者——別的專案絕不碰。"""
+    from lib.sessionctl import procstop  # noqa: PLC0415 — lazy：避免載入時的套件相依
+
+    base = Path(projects) if projects is not None else projects_dir()
+    tmp = Path(tmp_root) if tmp_root is not None else Path(tempfile.gettempdir())
+    mark = slug_of(SANDBOX_PREFIX)
+    live_roots = {slug_of(p) for p in tmp.glob(f"{SANDBOX_PREFIX}*") if p.is_dir()}
+    cwd_slugs = {slug_of(row["cwd"]) for row in procstop.registry_rows(sessions)
+                 if isinstance(row.get("cwd"), str)}
+    out: dict = {"removed": [], "kept": []}
+    for folder in sorted(base.glob("*")) if base.is_dir() else []:
+        if not folder.is_dir() or mark not in folder.name:
+            continue
+        if folder.name in live_roots:
+            out["kept"].append((folder.name, "沙盒根仍存在"))
+        elif any(s == folder.name or s.startswith(folder.name + "-") for s in cwd_slugs):
+            out["kept"].append((folder.name, "登記檔 cwd 指向它（有行程在用）"))
+        elif dry_run:
+            out["removed"].append(folder.name)
+        elif not _remove_tree(folder, "orphan"):
+            out["removed"].append(folder.name)
+        else:
+            out["kept"].append((folder.name, "刪除失敗（RESIDUE）"))
+    return out

@@ -5,7 +5,7 @@
 # PRD v2.1 覆蓋度零信任重盤（improving_113 輸入）
 
 - 基準：repo HEAD `93929947`（工作樹乾淨），日期 2026-10-09；PRD＝`docs/01_requirements/AutoClaude_Token_監控與喚醒機制_PRD_v2.1.md`（2657 行）。
-- 方法：PRD 逐章讀完；每個 ✅ 都附本輪 grep／Read 現查的 `file:line`（全檔共 408 個 `path:line` 引用，已用腳本逐一驗證行號未超出檔案長度；PRD 行座標逐行比對過標題文字）；R98 差距分析只當待驗清單，不當證據。
+- 方法：PRD 逐章讀完；每個 ✅ 都附本輪 grep／Read 現查的 `file:line`（全檔共 408 個 `path:line` 引用，已用腳本逐一驗證行號未超出檔案長度；PRD 行座標逐行比對過標題文字）；R98 差距分析只當〔OI-20261120-016〕待驗清單，不當證據。
 - 唯讀紀律：未改 repo 任何檔、未跑 git 寫入、未跑全套測試、未起背景任務、未打 `/api/oauth/usage`。唯一的執行動作：`python AutoClaude/tools/check_loc_budget.py --json`（唯讀）、`claude --help`／`claude --version`、三個 `claude <旗標> --help` 零 token 探針（見 §4）。
 - 圖例：✅ 落地（規範性機制在、且有測試／鎖）｜⚠️ 部分（有規範性機制缺漏；括號內 S/M/L＝缺口量級）｜❌ 未做｜➖ 架構性替代或依設計不做（不計分母）｜❓ 本輪未查證。僅『驗收資料／校準值』缺漏者仍計 ✅ 並在備註登記殘留。
 
@@ -380,7 +380,7 @@
 | 項 | 內容 | 現況 | 證據 |
 | :--- | :--- | :---: | :--- |
 | §4-1 | 水位預警哨兵擴充＋PRD v2.1.6 落款 | ✅ 已落地（程序債未清） | 機制：`tools/lib/quota_escalation.py:292,328,525`（B1~B3）、`tools/tests/test_context_budget_guard.py:6945,7057`；帳本 DEF-200-148 fixed@R95（`docs/06_quality/AutoSDD_Defect_Log_archive_67.md:98`）；PRD 修訂表 `L12`（v2.1.7）已寫『落地』，但 `L11`（v2.1.6）仍『規格化後待實作』＝§5 N1 |
-| §4-2 | Windows 側待驗清單 | ➖ 本輪不排 | 只能在 Windows 機驗；承接＝`docs/06_quality/CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉 |
+| §4-2 | Windows 側〔OI-20261120-012〕待驗清單 | ➖ 本輪不排 | 只能在 Windows 機驗；承接＝`docs/06_quality/CrossPlatform_R210_Debt_Closure_Final_Evidence.md`〈八〉 |
 | §4-3 | 引擎側額度軸接電（第三方刷新者） | ❌ 未做，**已知且被測試釘住** | `AutoClaude/autoclaude/core/ports/quota_meter.py:15-45`、`AutoClaude/tests/test_r82_quota_axis_and_shipped_defaults.py:797-830`；`grep -rn '第三方刷新' docs AutoClaude/autoclaude` 只命中 improving_112 ⇒ 帳本／ADR 零追蹤列；建議開帳列或併 W-C′(i)。前置『AutoClaude 總量 cap 重校雙簽程序』本輪未查證 |
 | §4-4 | SD/Arch 順手項（prepare 閂鎖鍵、混軸鍵補記來源軸） | ❓ 未查證 | 本輪未逐項重驗 |
 ## 7. 附錄：§6 78 個 .env 鍵逐鍵普查

@@ -8,6 +8,7 @@ R142～R145、R158）。
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -288,6 +289,7 @@ def dirty_paths(repo: Path, git: Git | None = None) -> list[str]:
     if cp is None or cp.returncode != 0:
         return ["<git-unavailable>"]
     toks, out, i = cp.stdout.split("\0"), [], 0
+    own = OWN_PREFIXES + _driver_own_prefixes(repo)  # 驅動器寫入不得擋 SI 巡邏；提交白名單不變
     while i < len(toks):
         tok = toks[i]
         i += 1
@@ -297,8 +299,21 @@ def dirty_paths(repo: Path, git: Git | None = None) -> list[str]:
         if tok[0] in "RC" or tok[1] in "RC":
             paths.append(toks[i] if i < len(toks) else "")
             i += 1
-        out += [p for p in paths if p and not p.startswith(OWN_PREFIXES)]
+        out += [p for p in paths if p and not p.startswith(own)]
     return out
+
+
+def _driver_own_prefixes(repo: Path) -> tuple[str, ...]:
+    """OIR 驅動器自有寫入面（§5.5）：只讀資料檔 `params.json`，不 import openitems、不併入
+    `OWN_PREFIXES`（SI 提交白名單語意不變）。讀不到／形狀不符＝空（保守：不排除）。"""
+    try:
+        data = json.loads((Path(repo) / "docs/06_quality/OpenItems_Protocol/params.json")
+                          .read_text(encoding="utf-8"))
+        rows = data["driver_own_prefixes"]
+        ok = isinstance(rows, list) and all(isinstance(r, str) and r for r in rows)
+        return tuple(rows) if ok else ()
+    except Exception:  # noqa: BLE001 — 量不到不排除
+        return ()
 
 
 def open_runs(events: list[dict], exclude: str | None = None) -> list[str]:

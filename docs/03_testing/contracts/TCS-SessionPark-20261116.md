@@ -1,7 +1,7 @@
 # TCS-SessionPark-20261116：額度自願停工的續航 park（需求＋驗收合一）
 
 > 設計全文＝`docs/04_planning/ADR/ADR-XPLAT-004-token-endurance-protocol.md` §2.17（下稱 ADR）；缺陷帳本列＝DEF-200-594～596（`docs/06_quality/AutoSDD_Defect_Log.md`）。命名照本目錄既有 `TCS-<模組>-<日期>.md`；不併入 SessionCtl／TokenWaste 兩檔，因二者是已凍結的狀態對照帳，本案新 AT 前綴 `AT-PK-`。
-> **狀態（2026-11-16）**：**H 路已實作**（`tools/lib/sessionctl/park.py`、`park_cli.py` 與連動檔）。**本輪不做 W 路**（同 session 背景等待者；ADR §2.17 否決案 X38）：W 路 AT 編號保留不重排，狀態欄標「本輪不做」。§3 真機驗證：V-PK2 的 ①②⑤ 已於 2026-11-16 由第一次真實停工驗到（sid f2260ce7 → ff1000ed），其餘（V-PK2 ③④⑥、V-PK3、V-PK4）仍**待真機**，未驗不得寫成已驗。
+> **狀態（2026-11-16）**：**H 路已實作**（`tools/lib/sessionctl/park.py`、`park_cli.py` 與連動檔）。**本輪不做 W 路**（同 session 背景等待者；ADR §2.17 否決案 X38）：W 路 AT 編號保留不重排，狀態欄標「本輪不做」。§3 真機驗證：V-PK2 的 ①②⑤ 已於 2026-11-16 由第一次真實停工驗到（sid f2260ce7 → ff1000ed），其餘（V-PK2 ③④⑥、V-PK3、V-PK4）仍**〔OI-20261120-015〕待真機**，未驗不得寫成已驗。
 > 測試一律 `tools/tests/test_sessionctl_park.py`（新）＋既有檔增量；所有時間注入 `now`（aware datetime）、所有路徑圍籬到 tmp，**不讀本機真實 `~/.claude`、不起真排程、不起真 claude、不打真額度端點**。禁用 skip。
 > 狀態欄的測試座標一律為 `test 檔::類::方法`；`PK`＝`tools/tests/test_sessionctl_park.py`。
 
@@ -213,13 +213,13 @@ W 路專屬突變（M-PK-01、05、09、10、16、21）本輪不做（ADR §2.17
 | M-PK-19 | 標記路徑對 sid 不驗形態（路徑穿越） | AT-PK-36 |
 | M-PK-20 | 哨兵讓路窗不設上界（永遠讓路）／讓路不看 `status` | AT-PK-69 |
 
-## 3. 真機驗證（主控親跑；不得由開發棒代驗；結果寫進缺陷帳本列；一律「待真機」）
+## 3. 真機驗證（主控親跑；不得由開發棒代驗；結果寫進缺陷帳本列；一律〔OI-20261120-015〕「待真機」）
 
 W 路專屬的 V-PK1（W 路真等一次 reset）與 V-PK6（背景等待者 55 分鐘存活）本輪不做（ADR X38）；編號保留，餘者沿用原編號。
 
 | V | 步驟 | 通過憑證 | 狀態 |
 |---|---|---|---|
 | V-PK2 | **H 路排程與換手**：大上下文視窗 `handoff --build`→補主控層→`--finalize`→`park`；等到點 | ① 貼出 `park` 印的 `NextRunTime` 實測值與同時間的 `Get-ScheduledTask -TaskName 'AutoSDD_HandoffSpawn_*' \| Get-ScheduledTaskInfo` 輸出；② 到點（reset＋2 分內）使用者桌面**可見**的新互動視窗開出、新逐字稿出現（貼新 sid 與 `park_spawned` 痕跡列）；③ 新視窗 `$env:CLAUDECODE` 為空、SessionStart 出聲交接包；④ Principal 回讀為 Interactive；⑤ job 自拆；⑥ macOS 欄（另機）：憑證是 `launchctl print` rc 0＋descriptor 回讀，睡眠姿態以 `pmset -g custom` 現查 | **①②⑤ 已驗（Windows，2026-11-16）**：sid `f2260ce7` 於 10:10:13 +08:00 `park`（痕跡 `park_armed`，憑證 `NextRunTime = 2026/11/16 下午 01:03:00`，job `AutoSDD_HandoffSpawn_f2260ce7_202611161303`）；13:03:00.127 `park_job_start`（late_s 0.127）、13:03:00.367 `session_switch_spawned`（新逐字稿 `ff1000ed-171a-4299-b309-80a632fb8cba.jsonl`，建立 13:03:03）、13:03:03.912 `park_spawned rc 0`；新 session SessionStart 出聲未接手交接包並已 `handoff --ack`；事後 `Get-ScheduledTask` 查 `AutoSDD_HandoffSpawn_*` 為 0 筆、`park --status --verify` 回 `status=fired`「排程器中：不在」。停工 10:10 到接手 13:03 之間無人介入。**③④ 未驗**（job 已自拆，Principal 無從回讀；新視窗啟動前的 `$env:CLAUDECODE` 無法從 session 內回看）；⑥ macOS 待另機 |
-| V-PK3 | **到點前在舊視窗說話 ⇒ 排程跳過**：同 V-PK2，到點前 5 分鐘於舊視窗打一句話 | 到點後沒有新視窗；痕跡 `handoff_spawn_skipped reason=live_driver`；job 自拆 | 待真機 |
-| V-PK4 | **Stop 推回訊息互動畫面可見**：互動視窗、短窗軸 ≥ prepare、無 park 憑證時結束一個回合 | 掌舵者畫面看到推回訊息（含 `park` 指令一行）；第二次 Stop 放行。**若互動畫面不顯示 block reason ⇒ 本守衛退為只出聲，須回 ADR 改寫** | 待真機 |
-| V-PK5 | **基線回放**：`python tools/probe/waste_census.py --resume-metrics --since-days 14` | 上線前基線已由主控 2026-11-16 親跑（ADR §2.17.7：停點 6、unmeasured 55；M-R1 n=3 中位 274.9／P90 294.4 分；M-R2 1；M-R3 589,565 token；M-R4 無憑證停點 6）；park 上線後的對照待觀察期（14 天）後重跑 | 基線已量；上線後對照待真機 |
+| V-PK3 | **到點前在舊視窗說話 ⇒ 排程跳過**：同 V-PK2，到點前 5 分鐘於舊視窗打一句話 | 到點後沒有新視窗；痕跡 `handoff_spawn_skipped reason=live_driver`；job 自拆 | 〔OI-20261120-015〕待真機 |
+| V-PK4 | **Stop 推回訊息互動畫面可見**：互動視窗、短窗軸 ≥ prepare、無 park 憑證時結束一個回合 | 掌舵者畫面看到推回訊息（含 `park` 指令一行）；第二次 Stop 放行。**若互動畫面不顯示 block reason ⇒ 本守衛退為只出聲，須回 ADR 改寫** | 〔OI-20261120-010〕待真機 |
+| V-PK5 | **基線回放**：`python tools/probe/waste_census.py --resume-metrics --since-days 14` | 上線前基線已由主控 2026-11-16 親跑（ADR §2.17.7：停點 6、unmeasured 55；M-R1 n=3 中位 274.9／P90 294.4 分；M-R2 1；M-R3 589,565 token；M-R4 無憑證停點 6）；park 上線後的對照待觀察期（14 天）後重跑 | 基線已量；上線後對照〔OI-20261120-008〕待真機 |

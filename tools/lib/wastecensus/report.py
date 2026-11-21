@@ -85,6 +85,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="監督與換手量測 M-W1～W4／M-F1～F3／M-S1～S3（ARCH §9）",
     )
     ap.add_argument(
+        "--wake-metrics",
+        action="store_true",
+        help="叫醒量測 M-WB1／M-WB2（DES WorkProgress_Axis_Design §6.4；零 token、不接閘門）",
+    )
+    ap.add_argument(
+        "--pace-metrics",
+        action="store_true",
+        help="配速床量測 M-P1／P3／P4／P7／M-C1（ADR-XPLAT-004 §2.15.7）",
+    )
+    ap.add_argument(
+        "--replay-pace-floor",
+        action="store_true",
+        help="AC-7：把真實 quota_burn 各列跑有床／無床兩次對照（ADR-XPLAT-004 §2.15.7）",
+    )
+    ap.add_argument("--halt-dir", default=None, help="halt 標記目錄（預設持久痕跡目錄）")
+    ap.add_argument("--pace-file", default=None, help="autosdd_pace_floor.jsonl（預設痕跡目錄下）")
+    ap.add_argument(
         "--switch-metrics",
         action="store_true",
         help="換 session 成本量測 M-K1～M-K6（設計 SessionSwitch_CostModel_Design §2）",
@@ -241,6 +258,25 @@ def main(argv: list[str]) -> int:
         return 1
     if args.replay_hard_ctx:
         return _run_replay(args, base)
+    if args.wake_metrics:
+        from . import sections_wake  # noqa: PLC0415 — lazy
+
+        return sections_wake.run(base, args.since_days, args.sid, args.out)
+    if args.pace_metrics or args.replay_pace_floor:
+        import endurance_env  # noqa: PLC0415 — lazy：只有取痕跡目錄預設值時才需要
+
+        trace_dir = endurance_env.trace_dir_peek()[0]
+        halt_dir = Path(args.halt_dir) if args.halt_dir else trace_dir
+        burn_path = Path(args.burn_file) if args.burn_file else trace_dir / "quota_burn.jsonl"
+        if args.replay_pace_floor:
+            from . import pace_replay  # noqa: PLC0415
+
+            return pace_replay.run(burn_path, halt_dir, args.since_days, args.out)
+        from . import pace_metrics  # noqa: PLC0415
+
+        pace_file = (Path(args.pace_file) if args.pace_file
+                     else trace_dir / "autosdd_pace_floor.jsonl")
+        return pace_metrics.run(base, args.since_days, halt_dir, burn_path, pace_file, args.out)
     if args.supervision_metrics:
         from . import supervision_load  # noqa: PLC0415 — lazy
 

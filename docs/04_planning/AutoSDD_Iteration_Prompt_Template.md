@@ -366,7 +366,7 @@ AutoClaude 驅動 AISDLC_SDD 做真實開發。
 `python tools/refresh_nightly_anchor.py --check-head`，照訊息末行處置（通常＝`git add ONBOARDING.md` 併入 commit；本機 nightly 沒跑時依 ADVICE_WRITE）；
 ② root-infra-ci 的 nightly-full 排程陳舊度哨兵 10 天（排程通道活性，線上）。側軌帳本複查日的 14 天 warn 已於 2026-10-10 退役
 （掌舵者 T1 立案，不再是機器時鐘）：側軌列由各自的解鎖事件喚醒，或任一視窗新立 DEF／寫證據檔時對照（觀察者機制同 T4）。
-該機專屬待驗清單（如 Windows 真機項）＝非再開事件：不開輪，只在該機做該機的事。
+該機專屬〔OI-20261120-012〕待驗清單（如 Windows 真機項）＝非再開事件：不開輪，只在該機做該機的事。
 
 ### 審查閉環的終止（輪內迴圈的停止條件）
 - PASS＝**無 P≤2**。P3 當輪改文字或退役；P4 只登記（口徑引 `docs/06_quality/FiveQuestion_Audit_Protocol/severity.md`）。

@@ -78,7 +78,7 @@
 | 側軌帳本複查日 14 天 warn | `tools/lib/ledger_closing_guards.py`（原 `STALE_REVIEW_DAYS`） | （已退役）原本 2026-10-24 起每次 crossref／pre-push 會印 11 條 ⚠️ | **已於同日退役**：掌舵者 T1 立案後同批落地——刪常數與逾期分支、兩支測試改為「舊日期不再 warn」、兩本帳檔頭與循環令同步；「最近複查日」欄保留為資料（格式不合仍 fail） |
 | CLI 已驗證清單 | `AutoClaude/autoclaude/utils/verified_cli_versions.py` | （已治好 patch 升版那一半）原本每次 Claude Code 升 patch 就 DRY_RUN＋通知 | **已於同日落地**：掌舵者 T1 立案後同批改為家族級判定（純函式 `family_verdict`：major.minor 相同且 patch ≥ 該家族最低已驗證版 ⇒ 視為已驗證、不 DRY_RUN 不通知；新 minor／major 或讀不到版本仍 DRY_RUN＋loud）；本機 2.1.296 親驗不再 DRY_RUN；PRD §16.6 第 1 列 |
 
-- Windows 側本輪零專屬改動；雲端 windows-compat-ci 的 `paths` 含 `tools/tests/**`、PRD、CLAUDE.md，push 後會跑；Windows 真機待驗清單（R211 證據檔〈六〉、R210〈八〉）＝**非載體、無義務**，只在該機做該機的事（範本〈休眠期間〉已明寫；證據檔〈三〉#6）。
+- Windows 側本輪零專屬改動；雲端 windows-compat-ci 的 `paths` 含 `tools/tests/**`、PRD、CLAUDE.md，push 後會跑；Windows 真機〔OI-20261120-012〕待驗清單（R211 證據檔〈六〉、R210〈八〉）＝**非載體、無義務**，只在該機做該機的事（範本〈休眠期間〉已明寫；證據檔〈三〉#6）。
 - 範本既有段落（〈核心任務〉、設計說明表「{{N}} 遞增」）保留為史料，由〈🏁〉效力句宣告以新節為準；improving_113 §8 末兩句以史料註記對齊。
 - 本輪未派 Explore 重測 AutoClaude／AISDLC_SDD 全套（零改動，N/A 類型標註見 §4）。
 - 本檔 §2 ① 的「2699 行」為 HEAD 值（R211 矩陣撰寫時 2657，QA P3-01 訂正）。

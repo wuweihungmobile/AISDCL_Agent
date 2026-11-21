@@ -93,6 +93,11 @@ try:
 except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律；不可達就不加無人值守那句
     unattended_authz = None  # type: ignore[assignment]
 
+try:
+    import session_brief_oi  # type: ignore[import-not-found]  # 同目錄：OIR 人工清單＋舊窗出聲
+except Exception:  # noqa: BLE001 — 見檔頭 fail-open 紀律
+    session_brief_oi = None  # type: ignore[assignment]
+
 #: 查證指令，人／模型都看得到的兩條「現查」出口（根 CLAUDE.md〈現查指令速查表〉）。
 _CHECK_PACE = ("context 現查 `python tools/session_resume_planner.py --check`；"
                "額度現查 `python tools/session_resume_planner.py --pace`。")
@@ -675,6 +680,8 @@ def sessionstart_brief(
     guard: object = None,
     si_status: Callable[[], str] | None = None,
     outcome_banner: Callable[[], str] | None = None,
+    openitems: Callable[[], str] | None = None,
+    oldwin: Callable[[str | None], str] | None = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
@@ -706,9 +713,10 @@ def sessionstart_brief(
         quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
         statusline = statusline_line(check_statusline)
         si_line = (si_status or si_status_line)()  # 與上同一個 stderr 吞噬區（DEF-200-344）
+        oi_win = session_brief_oi.extra(sid, openitems, oldwin) if session_brief_oi else ""  # R217
     lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。{_models_note(quota_gate)}"
            f"{verify_hint(feed=feed, quota=quota_file)}{rc2_clarify()}{_unattended_note()}"
            f"{_hatch_note(quota_gate)}；自我精進（si status，唯讀）：{si_line}"
-           f"{_outcome_note(outcome_banner)}")
+           f"{_outcome_note(outcome_banner)}{oi_win}")

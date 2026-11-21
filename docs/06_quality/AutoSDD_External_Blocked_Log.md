@@ -54,7 +54,7 @@ Windows smoke job 31 步（30 success＋1 略過＝`if: failure()` 上傳步）�
 同 run nightly-full 步驟 #12（`powershell.exe -NoProfile -ExecutionPolicy Bypass -File`，PS 5.1）success，逐字 `smoke-local: rc=0`、
 `smoke-local: PASS=13 FAIL=0 (the script's own floor MinPass=13)`（此前 CI 從未執行過該腳本本身：workflow 內該檔名只在註解）；前一筆實體機紀錄＝
 R114（2026-08-31）PASS=12 FAIL=0，故「不是實體機紀錄」只指本次。殘留（誠實）＝掌舵者機器專屬的 cp950 主控台／Defender／schtasks 帳號特異性，
-不由雲端覆蓋；`AutoClaude_WindowsSmoke` 每日排程維持（退場判準 E1 現不成立）；列入 R213 證據檔〈十一-4〉(c) 該機專屬待驗清單。本表筆數 3→2。
+不由雲端覆蓋；`AutoClaude_WindowsSmoke` 每日排程維持（退場判準 E1 現不成立）；列入 R213 證據檔〈十一-4〉(c) 該機專屬〔OI-20261120-012〕待驗清單。本表筆數 3→2。
 
 ### DEF-200-313（複查 2026-10-14＝機制改寫達成：win32 Job Object＋雲端硬殺探針，列已移出本表）
 

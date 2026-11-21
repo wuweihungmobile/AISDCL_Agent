@@ -13,14 +13,13 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
 import endurance_env
 
-from . import handoff, procstop, roster, switch, watch
+from . import holder, procstop, roster, switch, watch
 
 EV_SUPERVISE_STOP_BLOCK = "supervise_stop_block"
 # WHY 180 秒＝6 個輪詢間隔（watch.POLL_SECONDS＝30）：連 6 輪沒寫心跳才算卡死，
@@ -48,19 +47,7 @@ def read_heartbeat(sid: str) -> dict | None:
     return data
 
 
-def pid_alive(pid) -> bool:
-    """Windows 沿 `handoff._alive`；其他平台 `os.kill(pid, 0)`（sys.platform 守衛內）。"""
-    if sys.platform == "win32":
-        return handoff._alive(pid)
-    if not isinstance(pid, int) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True  # PermissionError 等：行程存在
-    return True
+pid_alive = holder.pid_alive  # 判活的唯一實作在 holder（保溫錨互斥同用，不各寫一份）
 
 
 def _fresh(beat: dict, now: float) -> bool:
@@ -114,7 +101,8 @@ def _reason(cred: str, n: int) -> str:
                 f"再重掛：{WATCH_CMD}（run_in_background、輸出導檔）。" + tail)
     return (head + f"請現在掛上：{WATCH_CMD}"
             "（Bash／PowerShell 工具用 run_in_background、輸出導檔），"
-            "它在代理交卷、停滯、超時、額度到線或快取快冷時結束，harness 會叫醒你。" + tail)
+            "它在代理停滯、超時、上下文過大、額度到線或快取快冷時結束，harness 會叫醒你"
+            "（代理交卷由 harness 的完成通知叫醒你，watch 不重複叫醒）。" + tail)
 
 
 def stop_verdict(payload: dict, env=None, now=None, *, heartbeat_reader=read_heartbeat,

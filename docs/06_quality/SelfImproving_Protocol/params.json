@@ -38,6 +38,7 @@
     "docs/06_quality/SelfImproving_Protocol/**",
     "tools/lib/harness_feed.py",
     "tools/lib/quota_gate.py",
+    "tools/lib/openitems/**",
     "tools/lib/quota_halt_marker.py",
     "tools/lib/quota_messages.py",
     "tools/lib/quota_pace_floor.py",

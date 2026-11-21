@@ -1088,7 +1088,7 @@ DEF-200-313；`useMacWin.md` 不再攜帶該待辦——一次性的單平台待
 
 ### 四項對照（本場現查，物理機＝Windows 11 Pro 10.0.26200）
 
-| 項 | 第九輪待驗內容 | 物理機證據 | 判定 |
+| 項 | 第九輪〔OI-20261120-018〕待驗內容 | 物理機證據 | 判定 |
 |---|---|---|---|
 | ① 多核 runner | `run_root_unittests.py` rc=0、log 含 `worker=` | schtasks 觸發之 nightly（2026-09-15 14:55，RunId 具名檔 `AutoClaude/logs/nightly_2026-09-15_145513.log`——刻意不引 `nightly_latest.log`：它是會被後續 nightly 覆寫的滾動指標，22:30 那次已使行號推移一行；取證紀律 #3）L210 `模組耗時排行（前 5，共 151 模組，平行模式，worker=9）`；L303 `local_ci_gate=0 root_unittests=0` | 已驗（排程環境） |
 | ② `compileall -j 0` | pre-push 慢層該段無 ❌，或手動 `python -m compileall -q -j 0 tools .claude/hooks` rc=0 | 本場以根層 `.venv\Scripts\python.exe` 手動實跑：輸出 0 行、rc=0（pre-push 呼叫點＝`tools/git-hooks/pre-push:354`） | 已驗（互動 session） |

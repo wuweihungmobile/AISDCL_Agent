@@ -1329,6 +1329,19 @@ _ZERO_GUARD_BARE_PY_SITES = {
         "非呼叫：docker image tag 白名單元素（`\"busybox\", \"alpine\", \"python\", "
         "\"python:3.11-slim\"…`）——交給 `docker run` 當 image 名，不經 PATH 解析"
     ),
+    "tools/lib/openitems/drive.py": (
+        "非呼叫：OIR check 的 argv 資料（`[\"python\", \"tools/realverify.py\", …]`）"
+        "與 `console_run` 內的 `argv[0] in (\"python\", \"python3\")` 比對；"
+        "spawn 前一律換成 `throttle.console_python()`（當前直譯器絕對路徑），裸名不經 PATH 解析"
+    ),
+    "tools/lib/openitems/driver_run.py": (
+        "非呼叫：交給 `deps.run`（預設 `drive.console_run`）的 argv 資料，spawn 前由 `console_run` "
+        "把 `python` 換成當前直譯器絕對路徑，裸名不經 PATH 解析"
+    ),
+    "tools/probe/openitems_drive_e2e.py": (
+        "非呼叫：寫進沙盒 OIR 的 check argv 資料（`python -c \"print('HELLO')\"`），由驅動器的 "
+        "`console_run` 換成當前直譯器後才執行，裸名不經 PATH 解析"
+    ),
     "AutoClaude/autoclaude/models/escalation.py": (
         "非呼叫：ESCALATION 報告內給人看的建議修復指令字串（`python -m py_compile …`），"
         "本行程不 spawn 它"

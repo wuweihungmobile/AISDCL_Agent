@@ -406,9 +406,22 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
     driver = transcript_activity.live_driver(transcript, now)
     if driver is not None:
         return skip("live_driver", driver_kind=driver["kind"], driver_at=driver["timestamp"])
+    if handoff._duplicate_refusals(pkg, now, S.get("alive") or handoff._alive):
+        return skip("spawned")  # forward／--spawn 已開出新 session、對方還沒 ack：不再動舊 sid
     route, why, held = _fire_route(transcript, env, now)
     switch.trace("park_route", sid=sid, job=label, route=route, why=why, ctx=held)
     if route == park.FIRE_RESUME:
+        from . import oldwin_park  # noqa: PLC0415 — lazy：舊視窗處置只有 job 本體需要
+
+        gate = oldwin_park.resume_gate(sid, pkg, env, now, S)  # 先關舊窗再開，不讓同 sid 有兩個行程
+        if gate["act"] == "retry":
+            _disarm_verified(label, S)  # park 已把自己的到點排程重排到下一個觸發時刻
+            return 0
+        if gate["act"] == "skip":
+            return skip(gate["reason"])
+        if gate["act"] == "fail":
+            _write_failed_handback(sid, pkg, 1, route)
+            return finish(1, "failed", "park_resume_failed", spawn_rc=1, route=route)
         rc = (S.get("resume") or spawn_resume)(sid, pkg, env=env)
         done, failed = "park_resumed", "park_resume_failed"
     else:

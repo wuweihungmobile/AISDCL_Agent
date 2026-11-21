@@ -110,10 +110,201 @@ def is_claude(proc: dict) -> bool:
     return str(proc.get("name") or "").lower().removesuffix(".exe") == "claude"
 
 
-def sid_of(cmd: str) -> str:
-    """命令列裡的第一個 UUID（`-r <sid>`、交接／handback 路徑皆含 sid）；沒有回空字串。"""
+def first_uuid_of(cmd: str) -> str:
+    """命令列裡的第一個 UUID；**只供顯示與無人視窗列舉**。🔴 不是行程的 session id：
+    `claude "讀 …\\05d1b770-….md"` 的第一個 UUID 是交接包檔名，不是該行程的 sid（DEF-02：舊名
+    `sid_of` 被拿去判「擁有者還活著」，把已死的擁有者誤判成活著）。判活用 `owner_sid_of`。"""
     match = _UUID_RE.search(cmd or "")
     return match.group(0) if match else ""
+
+
+#: 旗標形態：`-r`／`--resume`／`--session-id` 後面**緊接**的 UUID 才是該行程的 sid。
+_FLAG_SID_RE = re.compile(
+    r"(?:^|\s)(?:-r|--resume|--session-id)(?:\s+|=)[\"']?(" + _UUID_RE.pattern + ")", re.I)
+#: CIM `CreationDate` 只到微秒（DMTF 字串），與 GetProcessTimes 差在 100ns 刻度個位數（實測差 5）。
+CIM_TOLERANCE_100NS = 10
+
+
+def sessions_dir() -> Path:
+    """`~/.claude/sessions`（harness 的行程登記目錄：`<pid>.json`＝`sessionId`／`procStart`／
+    `status`…）。"""
+    return Path.home() / ".claude" / "sessions"
+
+
+def registry_rows(folder: Path | None = None) -> list[dict]:
+    """登記檔全部列（壞檔略過）；每列補 `pid`（取檔名，檔內 `pid` 優先）。讀不到回空。"""
+    rows: list[dict] = []
+    try:
+        for path in (folder or sessions_dir()).glob("*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                pid = data.get("pid") if isinstance(data.get("pid"), int) else (
+                    int(path.stem) if path.stem.isdigit() else None)
+                rows.append(dict(data, pid=pid))
+    except OSError:
+        pass
+    return rows
+
+
+def created_filetime(pid) -> int | None:
+    """行程建立時刻的 FILETIME（GetProcessTimes，只在 Windows；其餘平台或取不到＝`None`）。"""
+    if sys.platform != "win32" or not isinstance(pid, int):
+        return None
+    from . import winproc  # noqa: PLC0415 — lazy
+
+    api = winproc.WinApi()
+    handle = api.open(pid)
+    try:
+        return api.created(handle)
+    finally:
+        api.close(handle)
+
+
+def _stamp_matches(row: dict, exact: int | None, cim: int | None) -> bool:
+    """登記檔 `procStart` 與行程建立時刻相符：GetProcessTimes **全等**；它取不到才退用 CIM，
+    容差 `CIM_TOLERANCE_100NS`（絕對值嚴格小於）。兩者都取不到 ⇒ 不採信。"""
+    try:
+        start = int(row.get("procStart"))
+    except (TypeError, ValueError):
+        return False
+    if exact is not None:
+        return start == exact
+    return cim is not None and abs(start - cim) < CIM_TOLERANCE_100NS
+
+
+def owner_sid_of(pid, cmd: str, *, cim_created: int | None = None, folder: Path | None = None,
+                 created_of=None, platform_name: str | None = None) -> str:
+    """行程**自己**的 session id（DEF-02）：①登記檔 `sessionId` 且 `procStart` 相符才採信（只在
+    Windows；非 Windows 的 `procStart` 單位時基未現查，不猜 ⇒ 跳過）；②命令列只認 `-r`／
+    `--resume`／`--session-id` 緊接的 UUID；③都沒有 ⇒ 空字串（＝不判活，**不是**判死）。
+    不讀 `kind`／`entrypoint`（`claude -p` 也寫 `kind=interactive`）。"""
+    if (platform_name or sys.platform).startswith("win") and isinstance(pid, int):
+        exact = (created_of or created_filetime)(pid)
+        for row in registry_rows(folder):
+            if row.get("pid") == pid and isinstance(row.get("sessionId"), str) and _stamp_matches(
+                    row, exact, cim_created):
+                return row["sessionId"]
+    match = _FLAG_SID_RE.search(cmd or "")
+    return match.group(1) if match else ""
+
+
+def alive_sids(procs, folder: Path | None = None) -> set[str]:
+    """名冊判活：所有 claude 行程各自 `owner_sid_of` 自報的 sid（不再取命令列第一個 UUID，DEF-02）。
+    `procs` 的 `created`（epoch 秒，CIM 微秒精度）換成 FILETIME 當 CIM 後備比對值。"""
+    from .winproc import epoch_to_filetime  # noqa: PLC0415 — lazy
+
+    return {sid for p in procs if is_claude(p) and (sid := owner_sid_of(
+        p["pid"], p["cmd"], folder=folder,
+        cim_created=None if p.get("created") is None else epoch_to_filetime(p["created"])))}
+
+
+def live_windows_of(sid: str, *, folder: Path | None = None, created_of=None) -> list[dict]:
+    """某 sid 目前活著的視窗行程（D-8 比對法）：登記檔 `sessionId`＝sid **且** `procStart` 與
+    GetProcessTimes **全等**（這裡不退用 CIM——要拿來關視窗，驗不到就當沒有）。同一 sid 可有多列。
+    回 `[{pid, procStart, entrypoint, status, cwd}]`。"""
+    out = []
+    for row in registry_rows(folder):
+        pid = row.get("pid")
+        if row.get("sessionId") == sid and isinstance(pid, int) and _stamp_matches(
+                row, (created_of or created_filetime)(pid), None):
+            out.append({k: row.get(k) for k in ("pid", "procStart", "entrypoint", "status", "cwd")})
+    return out
+
+
+def pid_reused(pid, at_iso, created_of=None) -> bool:
+    """spawn 痕跡的 pid 是不是已被**別的**行程重用（現行行程建立時刻晚於痕跡 `at` 超過 30 秒）。
+    取不到建立時刻或 `at` 解析不了 ⇒ `False`（偏安全：照舊當同一個行程、繼續拒絕重複 spawn）。"""
+    stamp, created = parse_iso(at_iso), (created_of or created_filetime)(pid)
+    if stamp is None or created is None:
+        return False
+    return (created - 116444736000000000) / 1e7 > stamp + 30
+
+
+#: 關閉視窗目標的映像名家族（DES §7.1 第 5 點；QuotaWall DES §9 D-I）：`claude.exe`、自動更新改名後
+#: 仍在跑的 `claude.exe.old.<數字>.<pid>`（2026-11-21 真機：`claude.exe.old.1795116108051.41752`
+#: 被精確比對擋下）、`node.exe`。身分驗證（procStart 全等、非呼叫者祖先）不放鬆，映像僅縱深防禦。
+_IMAGE_FAMILY_RE = re.compile(r"^(claude\.exe(\.old\.\d+\.\d+)?|node\.exe)$", re.I)
+TERMINATE_WAIT_SECONDS = 5.0
+#: `terminate_tree_verified` 因這兩個理由拒絕時，視窗「關不了」而非「不該關」：可降級為出聲請人關。
+DEGRADABLE_REASONS = frozenset({"image_not_allowed", "open_failed"})
+
+
+def image_allowed(name: str) -> bool:
+    """映像名（`winproc.image` 回小寫含副檔名）屬於可關閉的家族。空字串（取不到）＝不允許。"""
+    return bool(_IMAGE_FAMILY_RE.match(str(name or "")))
+
+
+def terminate_tree_verified(pid: int, proc_start: int, *, api, images=image_allowed, self_pid=None,
+                            intent=None, recheck=None, sleep=None,
+                            wait: float = TERMINATE_WAIT_SECONDS) -> dict:
+    """以 **handle** 為基礎砍「視窗行程樹」（DES §7.1「怎麼關」）：開 handle → 在 handle 上驗建立
+    時刻＝`proc_start` ∧ 映像在白名單 ∧ 目標不是呼叫者或其祖先 → Toolhelp 快照沿 parent 往下收
+    子孫（只收建立時刻 ≥ 父者，每個也開 handle 驗）→ `intent(plan)`（呼叫端在此寫
+    `oldwin_close_intent`）→
+    `recheck()`（TOCTOU 重驗；回非空字串＝中止）→ 由葉往根 `TerminateProcess`，最後才是本體 → 等
+    `TERMINATE_WAIT_SECONDS` 秒確認本體已不在。回 `{ok, reason, pids, killed}`；`reason` 空＝成功。
+    之後所有動作都對 handle，不再用 pid ⇒ pid 被重用也砍不到別人。主控台宿主不主動砍。"""
+    import os  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    res: dict = {"ok": False, "reason": "", "pids": [], "killed": []}
+    held: list[tuple[int, object]] = []
+
+    def refuse(why: str) -> dict:
+        res["reason"] = why
+        return res
+
+    try:
+        root = api.open(pid)
+        if root is None:
+            return refuse("open_failed")
+        held.append((pid, root))
+        born = api.created(root)
+        if born is None or born != int(proc_start):
+            return refuse("procstart_mismatch")
+        image = api.image(root)
+        if not (images(image) if callable(images) else image in images):
+            return refuse("image_not_allowed")
+        me = os.getpid() if self_pid is None else self_pid
+        if pid == me or pid in api.ancestors(me):
+            return refuse("target_is_caller_or_ancestor")
+        kids: dict[int, list[int]] = {}
+        for child, parent in api.snapshot():
+            kids.setdefault(parent, []).append(child)
+        queue, seen = [(pid, born)], {pid}
+        while queue:
+            cur, cur_born = queue.pop(0)
+            for child in kids.get(cur, []):
+                handle = api.open(child) if child not in seen else None
+                seen.add(child)
+                cb = api.created(handle) if handle is not None else None
+                if cb is None or cb < cur_born:  # 建立時刻早於父 ⇒ 只是碰巧同 parent pid，不是子孫
+                    api.close(handle)
+                    continue
+                held.append((child, handle))
+                queue.append((child, cb))
+        res["pids"] = [p for p, _h in held]
+        if intent is not None:
+            intent({"pid": pid, "proc_start": int(proc_start), "descendants": res["pids"][1:]})
+        why = recheck() if recheck is not None else ""
+        if why:
+            return refuse(why)
+        for child, handle in reversed(held):  # BFS 反序＝葉在前、本體最後
+            if api.terminate(handle):
+                res["killed"].append(child)
+        deadline = time.monotonic() + wait
+        while api.running(root) and time.monotonic() < deadline:
+            (sleep or time.sleep)(0.1)
+        if api.running(root):
+            return refuse("still_running")
+        res["ok"] = True
+        return res
+    finally:
+        for _p, handle in held:
+            api.close(handle)
 
 
 def _trace_dir() -> Path:
@@ -306,8 +497,8 @@ def stop_all_unattended(*, runner=None, platform_name=None, **seams) -> int:
     if procs is None:
         print("❌ 量不到：行程列舉失敗 ⇒ 不砍", file=sys.stderr)
         return 1
-    sids = sorted({sid_of(p["cmd"]) for p in procs if is_claude(p) and _PRINT_RE.search(p["cmd"])}
-                  - {""})
+    sids = sorted({first_uuid_of(p["cmd"]) for p in procs
+                   if is_claude(p) and _PRINT_RE.search(p["cmd"])} - {""})
     if not sids:
         print("沒有執行中的無人視窗。")
         return 0

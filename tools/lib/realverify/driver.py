@@ -10,7 +10,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .sandbox import Sandbox
+from .sandbox import Sandbox, kill_tree
 
 DEFAULT_TIMEOUT_S = 240
 
@@ -47,14 +47,9 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     """逾時收尾：連同子行程樹一起砍（R216 複審 P3-c）。
 
     WHY：`proc.kill()` 只砍 claude 本身，它派生的背景行程（如被 Stop 閘要求掛上的 keepwarm）
-    活下來並握著沙盒目錄 ⇒ 清理報 RESIDUE、孤兒行程遺留。Windows 用 `taskkill /T /F`（只砍我們自己
-    spawn 的這個 pid 的樹）；POSIX 沒有等價的零依賴做法時退回只砍本體（沙盒仍可能殘留，會被
-    runner 的殘留檢查大聲報出，不默默放過）。"""
-    if os.name == "nt":
-        subprocess.run(  # noqa: S603
-            ["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,  # noqa: S607
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), check=False)
-    proc.kill()
+    活下來並握著沙盒目錄 ⇒ 清理報 RESIDUE、孤兒行程遺留。實作搬到 `sandbox.kill_tree`（R217 DEF-03：
+    `Sandbox.cleanup` 也要用同一個，POSIX 另補行程群組）；本名留著給既有呼叫端與測試。"""
+    kill_tree(proc)
 
 
 def run_claude(
@@ -79,6 +74,7 @@ def run_claude(
         argv, cwd=str(sb.root), env=sb.env(env_extra),
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        start_new_session=os.name != "nt",  # POSIX：自成行程群組，`kill_tree` 才砍得到整棵樹
     )
     sb.procs.append(proc)
     timed_out = False

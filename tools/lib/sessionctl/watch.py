@@ -19,7 +19,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz
 
-from . import keepwarm, procstop, roster, switch
+from . import holder, keepwarm, procstop, roster, switch
 
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
@@ -28,9 +28,12 @@ SCHEMA = "autosdd.watch/1"
 #: 都顯示成「failed」，掌舵者真機看到十多次「exit code 5／6」以為是錯誤；叫醒事件是設計內的正常
 #: 結果）。非 0 只留給真錯誤（缺 --sid＝2、內部例外）。
 #: 同一輪多事件並存時的先後：quota（跨代理、不可逆的額度牆）＞ budget（每多一輪都更貴）＞
-#: stall（代理已死，繼續等純浪費）＞ overrun（慢但可能仍在做事）＞ all_done（只在無未交卷代理時才
-#: 成立，與前四者互斥）＞ keepwarm（純保溫，任何實質事件都比它重要）。
-ORDER = ("quota", "budget", "stall", "overrun", "all_done", "keepwarm")
+#: stall（代理已死，繼續等純浪費）＞ overrun（慢但可能仍在做事）＞ 保溫族（keepwarm／cap／idle，
+#: 純保溫，任何實質事件都比它重要；三者互斥，由叫醒預算決定是哪一個）。
+#: REQ-WP-30：**沒有 `all_done`**——harness 對每支背景子代理完成都會送 task-notification，watch
+#: 再因「全部交卷」退出＝同一事件叫醒主控兩次（M-WB2：14 天 21 次，每次冷讀 40 萬～99 萬 token）。
+ORDER = ("quota", "budget", "stall", "overrun", "keepwarm", "cap", "idle")
+KEEPWARM_FAMILY = ("keepwarm", "cap", "idle")
 #: 保溫點＝主控**最後一筆帶 usage 的 assistant 記錄**＋45 分（R216：早於閒置約 55 分的自動壓縮與
 #: 1 小時快取壽命；錨點不是 watch 啟動時刻）。數字與錨點函式唯一的家＝`keepwarm.py`。
 KEEPWARM_MINUTES = keepwarm.DEFAULT_MINUTES
@@ -38,12 +41,13 @@ _KEEPWARM_MARGIN_MINUTES = 5  # 無人窗口：離 harness 背景等待上限至
 STALL_FLOOR_MINUTES = 11  # 前景工具逾時 600 秒＋餘裕
 STALL_DEFAULT_MINUTES = 15
 WALL_DEFAULT_MINUTES = 120
-GRACE_SECONDS = 150.0
 POLL_SECONDS = 30.0
-#: 判決後主控該做什麼（ARCH §1.5 處置表，逐字）；判決行之後印對應那一列。
+#: 判決後主控該做什麼（ARCH §1.5 處置表；R217 §6.4）；判決行之後印對應那一列。
+#: 代理交卷不在此表：它由 harness 的子代理完成通知叫醒主控（根 CLAUDE.md〈派背景代理〉）。
 DISPOSAL = {
-    "all_done": "收交卷；若上下文 ≥ 硬線 HARD 且無後續自主工作 ⇒ 封存（Stop 也會推）；有後續 ⇒ 繼續派工並重掛 watch",  # noqa: E501
-    "keepwarm": "什麼都不判、`python tools/sessionctl.py status` 不必跑；只重掛 watch 後結束回合（本回合輸出 ≤ 50 token）",  # noqa: E501
+    "keepwarm": "重掛同一指令並結束回合，不做任何判斷（重掛的是 watch；`python tools/sessionctl.py status` 也不必跑；本回合輸出 ≤ 50 token）",  # noqa: E501
+    "cap": "已到保溫損益點（再保溫比放冷重寫更貴）：不重掛、直接結束回合讓快取過期；若仍有背景子代理在跑，才重掛 watch（它不再為保溫叫醒）",  # noqa: E501
+    "idle": "本情形不需要保溫（無人窗口／模式非 auto／已交棒／上下文太小…）：不重掛 keepwarm、結束回合；若仍有背景子代理在跑，才重掛 watch",  # noqa: E501
     "stall": "`sessionctl status` 看該代理最後一筆；確定卡住 ⇒ TaskStop 它、派新代理＋短任務書（指向它的 HB 檔；不得 SendMessage 冷續，`resume_gate` 也會擋）；重掛 watch",  # noqa: E501
     "overrun": "讀它的 HB：快完成 ⇒ 重掛 watch 並 `--wall-min <現值+30>`（每支至多一次）；否則 TaskStop＋拆小重派",  # noqa: E501
     "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
@@ -58,7 +62,6 @@ class Cfg:
     wall_min: float = WALL_DEFAULT_MINUTES
     ctx_max: int = 700000
     keepwarm_min: float = KEEPWARM_MINUTES
-    grace_sec: float = GRACE_SECONDS
 
 
 def keepwarm_minutes(env=None) -> float:
@@ -88,8 +91,7 @@ def _stall(raw, label: str) -> float:
     return val
 
 
-def resolve_cfg(env=None, *, stall_min=None, wall_min=None, ctx_max=None,
-                grace_sec: float = GRACE_SECONDS) -> Cfg:
+def resolve_cfg(env=None, *, stall_min=None, wall_min=None, ctx_max=None) -> Cfg:
     """env 缺席＝出廠值；CLI 值蓋過 env。stall 下限 11（兩個入口同規則）；ctx 只准下修（CLI 值不得
     大於 env 生效值，否則退回該生效值並出聲）。"""
     env = os.environ if env is None else env
@@ -112,7 +114,7 @@ def resolve_cfg(env=None, *, stall_min=None, wall_min=None, ctx_max=None,
                   file=sys.stderr)
         else:
             ctx = int(ctx_max)
-    return Cfg(stall, wall, ctx, keepwarm_minutes(env), grace_sec)
+    return Cfg(stall, wall, ctx, keepwarm_minutes(env))
 
 
 def _epoch(iso) -> float | None:
@@ -125,12 +127,18 @@ def _label(agent: dict) -> str:
 
 
 def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
-           seen: bool = False, kw_anchor: float | None = None) -> tuple[str, str] | None:
+           kw_anchor: float | None = None, kw_enabled: bool = True,
+           kw_verdict=None) -> tuple[str, str] | None:
     """純函式：回 `(事件, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
     `finished!=true`），每項可帶 `end_turn: bool`（最後一筆是 assistant end_turn＝在等自己的
     背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。
     `kw_anchor`＝主控最後一筆帶 usage 的 assistant 記錄時刻（`keepwarm.anchor`）；保溫點＝它＋
-    `keepwarm_min`，量不到（`None`）才退回 `started_at`（舊行為，只會更晚）。"""
+    `keepwarm_min`，量不到（`None`）才退回 `started_at`（舊行為，只會更晚）。
+
+    保溫族（REQ-WP-30／36）：到保溫點才問 `kw_verdict()`（`keepwarm`｜`cap`｜`idle`；未給＝
+    `keepwarm`）。`keepwarm`（還有預算、保溫適用）與 `idle`（保溫不適用）一律退出；`cap`（預算
+    用完）**只在沒有未交卷代理時**退出——代理還在跑時再為保溫叫醒主控，只是白付一次冷讀。
+    `kw_enabled=False`（別的行程持有保溫錨）⇒ 整個保溫族不判，避免兩個行程重複叫醒。"""
     found: dict[str, str] = {}
     if quota_hit:
         found["quota"] = "短窗額度原始讀數已達 prepare 門檻（reset 在未來）"
@@ -155,12 +163,12 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
     if late:
         rows = "\n".join(f"  - {_label(a)}｜已跑 {m:.1f} 分" for a, m in late)
         found["overrun"] = f"自啟動起已 ≥ {cfg.wall_min:g} 分仍未交卷：\n{rows}"
-    if not agents and (seen or now - started_at >= cfg.grace_sec):
-        found["all_done"] = "全部交卷（或寬限期後從未出現未交卷代理）"
     ref = started_at if kw_anchor is None else kw_anchor
-    if now - ref >= cfg.keepwarm_min * 60:
-        found["keepwarm"] = (f"距主控最後一筆記錄已 ≥ {cfg.keepwarm_min:g} 分"
-                             "（主控快取壽命 1 小時，保溫點）")
+    if kw_enabled and now - ref >= cfg.keepwarm_min * 60:
+        kind = kw_verdict() if kw_verdict is not None else "keepwarm"
+        if kind == "keepwarm" or kind == "idle" or not agents:
+            found[kind] = (f"距主控最後一筆記錄已 ≥ {cfg.keepwarm_min:g} 分"
+                           "（主控快取壽命 1 小時，保溫點）")
     for name in ORDER:
         if name in found:
             return name, found[name]
@@ -244,32 +252,52 @@ def _anchor_reader(sid: str, projects_dir):
     return read
 
 
+def _kw_resolver(budget, state: dict):
+    """`decide` 的 `kw_verdict`：到保溫點才讀叫醒預算（讀逐字稿與帳不便宜，不每輪做）。結果依
+    錨點快取——錨點沒變（主控沒動）時預算不會變，`cap`／`idle` 在代理還在跑的輪詢裡不重讀。"""
+    def resolve() -> str:
+        if "kind" not in state or state.get("anchor_key") != state.get("anchor"):
+            why, pings, star, ctx = budget.check()
+            state.update(why=why, pings=pings, star=star, ctx=ctx, anchor_key=state.get("anchor"),
+                         kind="idle" if why else "cap" if pings >= star else "keepwarm")
+        return state["kind"]
+    return resolve
+
+
 def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         poll_sec: float = POLL_SECONDS, roster_fn=None, end_turn_fn=None, quota_fn=None,
-        out=None, pid: int | None = None, projects_dir=None, anchor_fn=None) -> int:
+        out=None, pid: int | None = None, projects_dir=None, anchor_fn=None,
+        budget=None) -> int:
     """阻塞輪詢；第一個事件成立即印明細、處置表對應列、`WATCH_VERDICT=` 末行並回 rc。
     縫（全可注入）：now_fn()->epoch、sleep_fn(sec)、roster_fn()->未交卷代理 list、
     end_turn_fn(agent)->bool、quota_fn()->None｜(帶級, reset 分鐘)｜True（True＝無鍵的 prepare）、
-    anchor_fn()->主控最後一筆 usage 記錄的 epoch｜None。額度事件過閂鎖（`keepwarm.quota_latch`）：
-    同 reset 窗同帶只觸發一次，之後該輪視為未命中。"""
+    anchor_fn()->主控最後一筆 usage 記錄的 epoch｜None、budget＝叫醒預算（`keepwarm.WakeBudget`
+    形狀：`check()`／`charge()`）。額度事件過閂鎖（`keepwarm.quota_latch`）：同 reset 窗同帶只
+    觸發一次，之後該輪視為未命中。
+
+    叫醒預算（REQ-WP-30～32）：watch 持有保溫錨（`holder`）時才判保溫族；別的行程持有 ⇒ 每輪
+    重試取得，取得前只看實質事件。`keepwarm` 事件才記一次叫醒（與 `keepwarm` 指令共用帳）；記不進
+    帳 ⇒ 改判 `cap`（失效往少花走）。"""
     out = out or sys.stdout
     roster_fn = roster_fn or (
         lambda: roster.snapshot(sid, projects_dir=projects_dir, full=False)["agents"])
     end_turn_fn = end_turn_fn or (lambda a: ended_turn(sid, str(a.get("id")), projects_dir))
     quota_fn = quota_fn or (lambda: quota_key_now(now_fn()))
     anchor_fn = anchor_fn or _anchor_reader(sid, projects_dir)
+    budget = budget or keepwarm.WakeBudget(sid, projects_dir)
     pid = os.getpid() if pid is None else pid
-    started, seen, latched = now_fn(), False, False
+    started, latched, holding, state = now_fn(), False, False, {}
+    resolver = _kw_resolver(budget, state)
     try:
         while True:
             now = now_fn()
             agents = [dict(a) for a in roster_fn()]
-            seen = seen or bool(agents)
             for a in agents:  # 只對靜默夠久者讀尾端（省 I/O）
                 last = _epoch(a.get("last_at"))
                 if last is not None and now - last >= cfg.stall_min * 60:
                     a["end_turn"] = bool(end_turn_fn(a))
             hit, anchor = quota_fn(), anchor_fn()
+            state["anchor"] = anchor
             quota_hit = False
             if hit:
                 band, reset = hit if isinstance(hit, tuple) else ("prepare", "unknown")
@@ -277,18 +305,27 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 if not quota_hit and not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
                     latched = True
                     switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=band, reset=reset)
-            verdict = decide(agents, now, started, cfg, quota_hit, seen=seen, kw_anchor=anchor)
+            holding = holding or holder.acquire(sid, pid)
+            verdict = decide(agents, now, started, cfg, quota_hit, kw_anchor=anchor,
+                             kw_enabled=holding, kw_verdict=resolver)
             if verdict is not None:
                 event, detail = verdict
+                extra: dict = {}
+                if event in KEEPWARM_FAMILY:
+                    extra = {"pings": state["pings"], "n_star": state["star"]}
+                    if event == "keepwarm" and not budget.charge(state["pings"], state["ctx"],
+                                                                 state["star"]):
+                        event, detail = "cap", "叫醒帳寫不進去 ⇒ 不再保溫（失效往少花走）"
                 print(f"[{_stamp(now)}] {event}：{detail}", file=out)
                 print(f"處置：{DISPOSAL[event]}", file=out)
-                switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents))
+                switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents), **extra)
                 print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
                 return 0
             write_heartbeat(sid, cfg, started, now, pid, anchor)
             sleep_fn(poll_sec)
     finally:
         _drop_heartbeat(sid)
+        holder.release(sid, pid)
 
 
 def cli(argv: list[str]) -> int:
@@ -300,7 +337,6 @@ def cli(argv: list[str]) -> int:
     ap.add_argument("--wall-min", type=float)
     ap.add_argument("--ctx-max", type=int)
     ap.add_argument("--poll-sec", type=float, default=POLL_SECONDS)
-    ap.add_argument("--grace-sec", type=float, default=GRACE_SECONDS)
     ap.add_argument("--projects-dir", help="逐字稿根目錄（預設＝Claude home 的 projects；測試用）")
     args = ap.parse_args(argv)
     sid = args.sid or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -308,6 +344,5 @@ def cli(argv: list[str]) -> int:
         print("sessionctl watch：缺 --sid，且環境變數 CLAUDE_CODE_SESSION_ID 未設 "
               "⇒ 無法判定要看管哪個 session", file=sys.stderr)
         return 2
-    cfg = resolve_cfg(stall_min=args.stall_min, wall_min=args.wall_min, ctx_max=args.ctx_max,
-                      grace_sec=args.grace_sec)
+    cfg = resolve_cfg(stall_min=args.stall_min, wall_min=args.wall_min, ctx_max=args.ctx_max)
     return run(sid, cfg, poll_sec=args.poll_sec, projects_dir=args.projects_dir)

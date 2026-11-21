@@ -28,7 +28,7 @@ from pathlib import Path
 import endurance_env
 import transcript_activity
 
-from . import cachestate, costmodel, handoff, roster, seal, supervise, switch
+from . import cachestate, costmodel, handoff, oldwin, roster, seal, supervise, switch
 
 EV_PASS = "forward_pass"
 EV_SPAWNED = "forward_spawned"
@@ -203,6 +203,7 @@ def prompt_verdict(payload, env=None, *, now: datetime | None = None, spawn=None
         if not transcript_activity.is_forwardable_prompt(text):
             return _passed(2, sid)
         if text.lstrip().startswith(ESCAPE_PREFIXES):
+            oldwin.record_keep_veto(sid, raw, env, now)  # R217 D-17：`留：`＝否決自動關閉舊窗
             return _passed(3, sid)
         now, alive = handoff._aware(now), alive or handoff._alive
         pkg = seal.handed_over(sid, env)

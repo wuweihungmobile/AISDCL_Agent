@@ -8,7 +8,7 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import ledger, sched
+from . import interactive, ledger, sched
 from .cases import Case, CaseContext, discover
 from .driver import EnvMissing
 from .sandbox import REPO
@@ -48,6 +48,9 @@ def _with_kept(detail: str, ctx: CaseContext) -> str:
 
 
 def run_case(c: Case) -> Outcome:
+    key = f"{c.fn.__module__.rsplit('.', 1)[-1]}.py::{c.fn.__name__}"
+    if key in interactive.UNMIGRATED:  # R217 F5：未改走互動入口的開窗案例不跑（會跳信任框）
+        return Outcome(c.id, "env", f"{key} 會開互動視窗卻未經 interactive.trusted_sandbox，拒跑以免跳信任框")  # noqa: E501
     ctx = CaseContext(c.id)
     try:
         if c.uses_sched:

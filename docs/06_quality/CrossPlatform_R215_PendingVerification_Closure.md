@@ -1,14 +1,14 @@
-# R215 待驗清單收斂設計（Pending Verification Closure）
+# R215 〔OI-20261120-017〕待驗清單收斂設計（Pending Verification Closure）
 
 **狀態**：設計稿（Architect＋SA 合一棒，2026-11-18；唯讀分析，未改程式／帳本）。
-**立案**：掌舵者 2026-11-18 20:40 原話：「請把待驗清單改正，冷窗轉送改列為備援, 將所有的問題與帳本,Bug 全部清除, 才算完成本次任務! 若AutoClaude沒有辦法執行完任務, 應算BUG」；同日追加：「請將所有功能都寫好完整的E To E測試案例,不要遺漏任何一個!」。
+**立案**：掌舵者 2026-11-18 20:40 原話：〔OI-20261120-017〕「請把待驗清單改正，冷窗轉送改列為備援, 將所有的問題與帳本,Bug 全部清除, 才算完成本次任務! 若AutoClaude沒有辦法執行完任務, 應算BUG」；同日追加：「請將所有功能都寫好完整的E To E測試案例,不要遺漏任何一個!」。
 **判準**：本檔所有「已驗」都附逐字稿座標或指令輸出；沒有座標的一律寫「未驗」。
 
 ---
 
 ## 0. 結論先講
 
-1. 38 處「待真機／待重測／待目視」＋帳本「fixed 但帶待驗尾巴」各列＋SI 2 筆＋殘局 1 筆，去重後**獨立項目 54 項**，分類：**A 34／B 8／C 9／D 2 項（產出 4 個缺陷 D-1～D-4）／✅ 已驗可直接關 1**（V-F2）。混合項以主類計。分類規則見 §1。
+1. 38 處〔OI-20261120-017〕「待真機／待重測／待目視」＋帳本「fixed 但帶待驗尾巴」各列＋SI 2 筆＋殘局 1 筆，去重後**獨立項目 54 項**，分類：**A 34／B 8／C 9／D 2 項（產出 4 個缺陷 D-1～D-4）／✅ 已驗可直接關 1**（V-F2）。混合項以主類計。分類規則見 §1。
 2. **B 類大多其實可以用機器驗**：Claude Code 逐字稿把 hook 的輸出存成固定格式的記錄，介面畫面就是讀這些記錄畫出來的——
    - Stop 推回 ⇒ `attachment.type=hook_blocking_error`（含 `blockingError` 全文）＋`hook_system_message`（例：sid `245e80aa` 2026-11-01T17:50:57.673Z，check_pending_handoff）；
    - Stop `systemMessage` ⇒ `attachment.type=hook_system_message, hookEvent=Stop`（sessionctl_guard 目前共 114 筆）；
@@ -32,7 +32,7 @@
 |---|---|---|
 | A | 本機可用真行程自己驗（真 `claude -p`、真 schtasks、真逐字稿重放、`--debug hooks` 日誌、`gh`、docker） | 寫進 `realverify` 案例或一次性指令；判準＝§2 寫的通過條件；結果寫進帳本 |
 | B | 只能靠互動畫面看 | 先找機器可驗的替代證據（§0-2）；找到就把判準改成可機驗，殘留的「畫面有沒有畫出來」改列「掌舵者目視（非阻塞）」並寫 WHY |
-| C | 正常流程結構上走不到／不在本機或本期範圍 | 改列「備援／另機／第二期」，寫明觸發條件與已有的自動測試覆蓋；不再算待驗主項 |
+| C | 正常流程結構上走不到／不在本機或本期範圍 | 改列「備援／另機／第二期」，寫明觸發條件與已有的自動測試覆蓋；不再算〔OI-20261120-017〕待驗主項 |
 | D | 真缺陷（有暴露證據） | 給修法；守衛面依〈守衛面准入〉附暴露證據 |
 
 ---
@@ -43,17 +43,17 @@
 
 | # | 座標 | 項目 | 現狀 | 類 | 處置／判準 |
 |---|---|---|---|---|---|
-| 1 | CLAUDE.md:86 | 守衛總表 sessionctl 列：「互動畫面是否顯示 block 理由、真 spawn 新視窗是否讀到轉送檔」仍待目視 | 待目視 | B→機驗 | 改寫成：「block 理由以逐字稿 `hook_blocking_error`／`system informational` 記錄機驗（RV-C1、RV-F2）；畫面渲染＝掌舵者目視（非阻塞，2026-11-18 V-F2 已人眼對照一次）；轉送檔讀取＝備援路徑 RV-F1」 |
-| 2 | CLAUDE.md:147 | 「Stop 的 systemMessage 與 TCS §3 V1～V8 仍待真機目視」 | 待目視 | B→機驗 | 改指向本檔 §5；V1～V8 逐條依 #8～#15 結案後刪掉這句 |
-| 3 | CLAUDE.md:177 | 「轉送與告知的真機畫面顯示待掌舵者目視（V-F1）」 | 待目視 | C | 改寫成：「告知（V-F2）已驗；轉送（V-F1）＝備援路徑，只在『已封存未 spawn＋快取冷＋未被閒置壓縮』時觸發」 |
+| 1 | CLAUDE.md:86 | 守衛總表 sessionctl 列：「互動畫面是否顯示 block 理由、真 spawn 新視窗是否讀到轉送檔」仍〔OI-20261120-017〕待目視 | 待目視 | B→機驗 | 改寫成：「block 理由以逐字稿 `hook_blocking_error`／`system informational` 記錄機驗（RV-C1、RV-F2）；畫面渲染＝掌舵者目視（非阻塞，2026-11-18 V-F2 已人眼對照一次）；轉送檔讀取＝備援路徑 RV-F1」 |
+| 2 | CLAUDE.md:147 | 〔OI-20261120-017〕「Stop 的 systemMessage 與 TCS §3 V1～V8 仍待真機目視」 | 待目視 | B→機驗 | 改指向本檔 §5；V1～V8 逐條依 #8～#15 結案後刪掉這句 |
+| 3 | CLAUDE.md:177 | 〔OI-20261120-017〕「轉送與告知的真機畫面顯示待掌舵者目視（V-F1）」 | 待目視 | C | 改寫成：「告知（V-F2）已驗；轉送（V-F1）＝備援路徑，只在『已封存未 spawn＋快取冷＋未被閒置壓縮』時觸發」 |
 
 ### 2.2 TCS-SessionCtl-20261113.md（3 處，展開成 V1～V8、V-W2～V-F2、AT-HV2-9）
 
 | # | 座標 | 項目 | 類 | 通過判準（機驗） |
 |---|---|---|---|---|
-| 4 | :5 | R3 增量「§3b 待掌舵者目視」 | — | 隨 #16～#21 結案改寫 |
+| 4 | :5 | R3 增量〔OI-20261120-017〕「§3b 待掌舵者目視」 | — | 隨 #16～#21 結案改寫 |
 | 5 | :282 | AT-HV2-9 接續測驗四題（未實作） | A | RV-H5：沙盒 haiku 只讀交接包回答四題，四題答案用 regex 比對機械層事實（HEAD、未完成項、下一步指令、禁止事項），4/4 才算通過 |
-| 6 | :309 | §3b 標題「待真機」 | — | 隨項目結案改寫 |
+| 6 | :309 | §3b 標題〔OI-20261120-017〕「待真機」 | — | 隨項目結案改寫 |
 | 8 | §3 V1 | `sessionctl status` | A | 今天 20:4x 主控／本棒實跑 rc 0，列出代理與排程**名稱**，但**沒有印 NextRunTime 值**（判準要值）⇒ 先確認是不是要加 `--verify`；不是的話列 D-4 |
 | 9 | §3 V2 | E2 重放 `--sentinel-tick` 隔離目錄 | A | RV-N4：痕跡 `sentinel_superseded`、無 `probed`、`Get-ScheduledTask` 查不到該名 |
 | 10 | §3 V3 | 互動 handoff→finalize→spawn→ack | A | **事實上已驗多次**：`85bcbec8`→`742135ef`（`.sealed` 09:47:48、`.ack` 09:48:14）、`742135ef`→`89c354d9`（`.sealed` 11:16:00、`.ack` 11:16:25）。「新視窗 `$env:CLAUDECODE` 為空」判準本身有問題（Claude Code 行程內這個變數一定是 1；真正的風險是「巢狀 claude 拒絕啟動」，新逐字稿有產生就證明沒有發生）⇒ 判準改寫，重跑交給 RV-H3 |
@@ -73,7 +73,7 @@
 
 | # | 座標 | 項目 | 類 | 判準 |
 |---|---|---|---|---|
-| 22 | :4／:216 | 狀態行／章標題「待真機」 | — | 隨下列項目改寫 |
+| 22 | :4／:216 | 狀態行／章標題〔OI-20261120-017〕「待真機」 | — | 隨下列項目改寫 |
 | 23 | :222 V-PK2 ③ | 新視窗 `CLAUDECODE` 為空 | A（判準改寫） | 同 #10：改成「新逐字稿有產生、SessionStart 有公告交接包」；11-16 那次 `ff1000ed` 已符合 |
 | 24 | :222 V-PK2 ④ | Principal＝Interactive | A | RV-K1：排程註冊後、觸發前先 `(Get-ScheduledTask …).Principal.LogonType` 回讀 `Interactive` |
 | 25 | :222 V-PK2 ⑥ | macOS launchd | C（另機） | 本機是 Windows，結構上走不到；改列「mac 另機 A」，用 `test_mac_endurance_r83.py` 的既有測試覆蓋 |
@@ -95,7 +95,7 @@
 | # | 座標 | 項目 | 類 | 處置 |
 |---|---|---|---|---|
 | 33 | :524 | R3 落地狀態列「V-F1 待重測」 | C | 跟 #19 同 |
-| 34 | :721 | 第二段「V1～V8 待真機目視」 | A/B | 跟 #8～#15 同 |
+| 34 | :721 | 第二段〔OI-20261120-017〕「V1～V8 待真機目視」 | A/B | 跟 #8～#15 同 |
 | 35 | :797 P3 | 互動與 `-p` 工具集是否一致 | A | RV-L2：兩邊逐字稿的 `deferred_tools_delta`／`agent_listing_delta` 附件做 diff |
 | 36 | :799 P5 | idleCompaction 跟保溫的交互 | D（→D-1、D-2） | 官方文件已查證；實證見 §3 |
 | 37 | :810 補5 | 快取讀取怎麼折算進額度 | C（研究題） | 不是驗收項：改列「研究題」，沒有掛任何閘門 |
@@ -103,22 +103,22 @@
 | 39 | :1055 | RDP 斷線情境 | C | 本機使用型態沒有 RDP；改列「情境外」 |
 | 40 | :1060 | 真排程啟動時的 cwd | A | 11-16 那次 `ff1000ed` 逐字稿的 `cwd` 欄位可以直接回讀（WP-7 一行指令）；RV-K1 也會斷言 |
 | 41 | :1062 | 同 #23～#26 | — | 同上 |
-| 42 | :1132／:1133 | V-F1 第二步重測、V-W2 待目視 | C／B→機驗 | 同 #19、#16 |
+| 42 | :1132／:1133 | V-F1 第二步重測、V-W2 〔OI-20261120-017〕待目視 | C／B→機驗 | 同 #19、#16 |
 
-### 2.6 帳本 AutoSDD_Defect_Log.md（fixed 但帶待驗尾巴，共 11 列）
+### 2.6 帳本 AutoSDD_Defect_Log.md（fixed 但帶〔OI-20261120-017〕待驗尾巴，共 11 列）
 
 | # | 列 | 尾巴 | 類 | 處置 |
 |---|---|---|---|---|
-| 43 | DEF-200-594（:367） | V-PK2 其他項待真機 | A | 隨 #23～#27 結案 |
+| 43 | DEF-200-594（:367） | V-PK2 其他項〔OI-20261120-017〕待真機 | A | 隨 #23～#27 結案 |
 | 44 | DEF-200-596（:369） | V-PK4 | B→機驗 | 隨 #27 |
 | 45 | DEF-200-597（:370） | V-W3 | A | 隨 #17 |
 | 46 | DEF-200-609（:382） | 待重測 | C | 前置排除邏輯已有 `test_def609_*` 真實重放；路徑本身是備援 ⇒ 狀態改成「fixed；E2E RV-F1」 |
 | 47 | DEF-200-584（:357）／587（:360） | V1～V8／「真機項待主控」 | A/B | 隨 #8～#16 |
 | 48 | DEF-200-593（:366） | CI 牆鐘待首次真跑 | A | `gh run list --workflow windows-compat-ci` 取分片後各 job 的牆鐘（< 60 分鐘、而且比 59 分鐘的基線短）。用 `ci_wait.py`，不要自己寫輪詢迴圈 |
 | 49 | DEF-200-461（:234）／462（:235） | 「效果待量」／「TUI 人眼待」 | A／B→機驗 | 461：重跑 `tools/probe/misstep_attribution.py` 比對 R191 之後的命中；462：逐字稿 SessionStart 的 `hook_system_message` 有安裝提示 ⇒ 機驗 |
-| 50 | DEF-200-266／267（:166／:167） | 「工作樹待收尾 commit」 | A | 這是過時的文字：`git log -S` 確認修法已經在 HEAD，改寫狀態欄（不是待驗） |
+| 50 | DEF-200-266／267（:166／:167） | 「工作樹待收尾 commit」 | A | 這是過時的文字：`git log -S` 確認修法已經在 HEAD，改寫狀態欄（不是〔OI-20261120-017〕待驗） |
 
-（DEF-200-313、419、458 的「待」字分別是：已移出外部軌結案、修法說明文字、closed-by-decision 的重開條件 ⇒ 都不是待驗，不計入。）
+（DEF-200-313、419、458 的「待」字分別是：已移出外部軌結案、修法說明文字、closed-by-decision 的重開條件 ⇒ 都不是〔OI-20261120-017〕待驗，不計入。）
 
 ### 2.7 其他文件（6 處）
 
@@ -126,7 +126,7 @@
 |---|---|---|---|---|
 | 51 | AutoClaude_Token_…PRD_v2.1.md:2715 | `AutoResumeService._wait` 拒絕長睡後交給排程器 | A | AutoClaude 側：真 schtasks、睡眠秒數設短的整合案例（WP-7） |
 | 52 | SelfImproving_PRD.md:1430 V-P7-2 | Docker Desktop 對 `os.replace` 後新檔的可見性 | A | `docker run -v` 唯讀 bind；主機 `os.replace` 之後容器 `cat` 讀到新內容 |
-| 53 | CrossPlatform_R213…W4.md:38 | §4.5.2 自標待真機 | A | WP-7 讀該節再定；先列為 A |
+| 53 | CrossPlatform_R213…W4.md:38 | §4.5.2 自標〔OI-20261120-017〕待真機 | A | WP-7 讀該節再定；先列為 A |
 | 54 | CrossPlatform_R68…:52 | Windows smoke 新 step 沒在 Windows 實跑 | A | 本機就是 Windows：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools/windows_smoke_local.ps1`，rc 0＋該 step 有 PASS |
 | 55 | RTM-SelfImproving-P6:5 | AT-645-4-1 巡邏自動入帳路徑 | A | SI 巡邏每天都在跑：查事件帳本有沒有巡邏寫入的對應事件（seq 151～155 已經有巡邏寫入，需比對 AT 斷言） |
 | 56 | SessionCtl_Defect_Evidence:50／:68 | V1～V8；SEC-4／5／8／9／10／11／12 | A／C | SEC-4 `taskkill /T` 殘留 ppid、SEC-5 行程名、SEC-8 `washed_env`、SEC-10 跨 session 代理 id ⇒ A（WP-7 沙盒實測）；SEC-9、SEC-12 沒有暴露證據 ⇒ C（理論洞清單）；SEC-11 ⇒ 主控代決：無人模式下 GUARD_OFF 可以關屬於設計取捨（逃生口要在啟動 claude 前設、模型碰不到），寫 WHY 結案 |
@@ -237,7 +237,7 @@
 | **WP-3** 案例：supervise／watch／SendMessage／派工擋／pending_handoff／midwork | `cases/sessionctl_watch.py`、`cases/sessionctl_gates.py`、`cases/pending_handoff.py` | 同左 | RV-S1～S2、W1～W6、M1～M2、P1～P2 | 同上 | 跟 WP-2、WP-4 並行 |
 | **WP-4** 案例：park／rush／status／stop／pace／哨兵 | `cases/sessionctl_park.py`、`cases/quota_rush.py`、`cases/sessionctl_status.py`、`cases/sentinel.py` | 同左 | RV-K1～K7、R1～R2、T1～T3、N1～N5；真 schtasks 一律 `AutoSDD_RV_` 前綴 | 同上；**真 schtasks 案例彼此串行**（同一個排程器命名空間），由 runner 鎖控制 | 跟 WP-2、WP-3 並行 |
 | **WP-7** 非 sessionctl 的 A 項一次性驗證 | #48 CI 牆鐘、#49 misstep、#50 `git log -S`、#51 AutoResumeService、#52 docker、#53 R213 §4.5.2、#54 windows smoke、#55 RTM P6、#56 SEC-4／5／8／10、#57 M-19、#38 statusline 文件、#40 cwd 回讀 | 不改程式；只產證據到 scratchpad | 每項附指令＋rc＋輸出座標 | 無（唯讀＋執行） | 跟 WP-1、WP-5 並行 |
-| **WP-6** 收尾單人窗口 | 依 WP-2～4、7 的結果改寫 #1～#57 全部座標的文字（待驗 → 已驗／備援／非阻塞目視）；缺陷帳本 11 列狀態欄、立案 DEF-200-612（缺自驗載具）＋D-1～D-4；SI S1／S2 由掌舵者或獨立審查者 `attr.confirm`；殘局 R1 收尾；測試棘輪重釘；nightly 接上 realverify stage | CLAUDE.md、TCS×3、ADR、帳本、`run_local_nightly.ps1` | `check_defect_log_crossref.py` 未結 0，而且全 repo Grep「待真機\|待重測\|待目視\|待掌舵者目視\|仍待真機」只剩明寫「掌舵者目視（非阻塞）」或「備援」的列 | 三本帳、棘輪重釘、CLAUDE.md（鐵律七：只能單窗） | 不並行，最後做 |
+| **WP-6** 收尾單人窗口 | 依 WP-2～4、7 的結果改寫 #1～#57 全部座標的文字（〔OI-20261120-017〕待驗 → 已驗／備援／非阻塞目視）；缺陷帳本 11 列狀態欄、立案 DEF-200-612（缺自驗載具）＋D-1～D-4；SI S1／S2 由掌舵者或獨立審查者 `attr.confirm`；殘局 R1 收尾；測試棘輪重釘；nightly 接上 realverify stage | CLAUDE.md、TCS×3、ADR、帳本、`run_local_nightly.ps1` | `check_defect_log_crossref.py` 未結 0，而且全 repo Grep「待真機\|待重測\|待目視\|待掌舵者目視\|仍待真機」只剩明寫「掌舵者目視（非阻塞）」或「備援」的列 | 三本帳、棘輪重釘、CLAUDE.md（鐵律七：只能單窗） | 不並行，最後做 |
 
 **派工順序**：第一波並行 {WP-1、WP-5、WP-7} → 主控親驗 → 第二波並行 {WP-2、WP-3、WP-4}（真 schtasks 案例由 runner 串行）→ WP-6 收尾單人窗口。
 
@@ -253,7 +253,7 @@
 4. **D-4**：WP-5 先讀 `tools/lib/sessionctl/roster.py`／`sessionctl.py status` 實作確認；`--verify` 才查排程器屬設計者，改 TCS V1 判準為 `status --verify`（WP-6 改文字）；否則補印值。
 
 5. **WP-5 親驗（主控 21:0x）**：`unittest -p "test_sessionctl_*.py"` rc 0；`ruff` rc 0；`sessionctl status` 實印「交棒開出的新視窗：pid 8136（來源 742135ef）」。D-4 結論＝設計如此（status 唯讀零外呼，NextRunTime 由 `park --status --verify`／`--verify-schtasks` 查）⇒ WP-6 把 TCS V1 判準改為這兩條。
-6. **WP-7 親驗**：報告存 `docs/06_quality/CrossPlatform_R215_WP7_OneShot_Evidence.md`（原始輸出在主控 scratchpad wp7\，會隨重開機消失，報告為準）。主控現查殘留 `AutoSDD_EngineResume*`／`AutoSDD_RV_*` 排程＝0、smoke `PASS=13 FAIL=0`。**SEC-10 改判 C（理論洞清單）**：需兩個互動 session 互打 agent id，屬 harness 行為、無暴露證據（守衛面准入）。WP-6 另改兩處過時文字：帳本 :166／:167「工作樹待收尾 commit」（修法 b1ef81f5／bfb07cf1 已在 HEAD）、RTM-SelfImproving-P6 檔頭「AT-645-4-1 仍待真機觸發」（表內已 ✅ seq 98／99）。#51 AutoResumeService 只驗到排程觸發與自拆（engine 用壞 yaml 免耗 token）⇒ 第二波 RV 案例補「engine 真跑出結果」一支。
+6. **WP-7 親驗**：報告存 `docs/06_quality/CrossPlatform_R215_WP7_OneShot_Evidence.md`（原始輸出在主控 scratchpad wp7\，會隨重開機消失，報告為準）。主控現查殘留 `AutoSDD_EngineResume*`／`AutoSDD_RV_*` 排程＝0、smoke `PASS=13 FAIL=0`。**SEC-10 改判 C（理論洞清單）**：需兩個互動 session 互打 agent id，屬 harness 行為、無暴露證據（守衛面准入）。WP-6 另改兩處過時文字：帳本 :166／:167「工作樹待收尾 commit」（修法 b1ef81f5／bfb07cf1 已在 HEAD）、RTM-SelfImproving-P6 檔頭〔OI-20261120-017〕「AT-645-4-1 仍待真機觸發」（表內已 ✅ seq 98／99）。#51 AutoResumeService 只驗到排程觸發與自拆（engine 用壞 yaml 免耗 token）⇒ 第二波 RV 案例補「engine 真跑出結果」一支。
 
 ## 7. 不確定處（交棒前請主控親驗）
 

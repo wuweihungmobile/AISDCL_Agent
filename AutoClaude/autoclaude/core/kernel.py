@@ -39,8 +39,12 @@ class PlaybookKernel:
         observability: IObservabilityPort | None = None,
         limit_retry: Callable[[str, int], float | None] | None = None,
         limit_sleep: Callable[[float], object] | None = None,
+        step_timeout_seconds: int = 600,
     ):
         self._exec = executor
+        # R217 PX46：每步最大等待秒數。SSOT＝AppConfig.playbook.step_timeout_seconds，
+        # 由 wiring.build_kernel 注入（GlobalInvariants 沒有此欄位，舊 getattr 恆落預設）。
+        self._step_timeout = step_timeout_seconds
         self._eval = evaluator
         self._bus = bus or EventBus()
         self._brain = brain
@@ -193,7 +197,7 @@ class PlaybookKernel:
                 )
 
             full_prompt = (pre_attempt.accumulated_prefix or "") + task.prompt
-            timeout = getattr(playbook.global_invariants, "step_timeout_seconds", 600)
+            timeout = self._step_timeout
             # improving_78 W-78-1（DEF-78-001）：token 觀測器作為 on_event callback，
             # 蒐集 executor 真實 token% 峰值（SDK TOKEN_PCT / PTY PARTIAL_OUTPUT）。
             observer = TokenObserver()
