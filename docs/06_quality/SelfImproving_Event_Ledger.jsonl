@@ -167,3 +167,10 @@
 {"seq":167,"t":"2026-11-19T11:19:12+08:00","kind":"fourq.review","by":"fourq-reviewer","run":"RUN-SI-014","path":"docs/06_quality/SelfImproving_Proposals/_fourq/RUN-SI-014.md","sha256":"sha256:85ee225bf8cb9abcfa0d2aab5d23e8178aac8762cd7aba54c04498b2848baa46","q1":1,"q2":1,"q3":1,"q4":1,"gaps":0,"qhits":"0,5","loop":"M1=NE(no-evaluable-window);M4=read(0);M5a=NE(sample-below-w-min);M5b=NE(sample-below-w-min)"}
 {"seq":168,"t":"2026-11-19T11:30:05+08:00","kind":"run.close","by":"patrol","run":"RUN-SI-014","no_event":true}
 {"seq":169,"t":"2026-11-19T21:00:06+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-19T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":170,"t":"2026-11-20T01:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-19T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}
+{"seq":171,"t":"2026-11-20T05:45:09+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-19T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":172,"t":"2026-11-20T06:45:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-19T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：.claude/hooks/check_pending_handoff.py, .claude/hooks/sessionctl_guard.py, AutoClaude/autoclaude/core/kern"}
+{"seq":173,"t":"2026-11-20T21:00:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-20T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":174,"t":"2026-11-21T01:30:05+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-20T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}
+{"seq":175,"t":"2026-11-21T04:00:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-20T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":176,"t":"2026-11-21T13:30:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-20T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：.claude/hooks/check_pending_handoff.py, .claude/hooks/sessionctl_guard.py, AutoClaude/.perf_baseline.toml"}
