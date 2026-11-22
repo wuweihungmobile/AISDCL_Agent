@@ -17,14 +17,19 @@
 # 🔴 守衛面（根 CLAUDE.md〈守衛面准入〉）：暴露證據同 DES §1（幽靈 session 57d0ccad、A6f 鑑定）。
 from __future__ import annotations
 
+import json
 import re
 import sys
 from collections.abc import Callable, Mapping
 from datetime import datetime
+from pathlib import Path
 from typing import NamedTuple
 
 import endurance_env
 import sandbox_scope
+
+#: `jsonl_trace` 缺省落的痕跡檔名（站點自帶痕跡者不用它）。
+TRACE_NAME = "autosdd_sideeffect_refused.jsonl"
 
 #: 登記站點被 L1 拒絕的 rc（CLI 既有拒絕碼＝4，D-24）；與 `RC_SIDEEFFECT_REFUSED`（10）、
 #: `endurance_env.RC_RESIDENCE_MISSING`（9）、job 環境值不合法（2）互異。
@@ -92,6 +97,69 @@ def register_gate(repo_root, env: Mapping[str, str], fire_at: datetime | None,
         _refuse(site, f"job_env:{exc}", trace, roots=list(verdict.roots))
         return endurance_env.JobEnvValueError.rc
     return 0
+
+
+def sandboxed(repo_root) -> bool:
+    """本 checkout（或資料根）是不是驗證沙盒；`job_env_argv(sandbox=…)` 的唯一來源（D-20）。"""
+    return sandbox_scope.sandbox_home(repo_root) is not None
+
+
+def job_env_pairs(repo_root, env: Mapping[str, str]) -> list[str]:
+    """job argv 的 `--job-env KEY=VAL` 串（正式且無顯式 env ⇒ `[]`，argv 逐字不變）。沙盒目標值不在
+    允許值內拋 `JobEnvValueError`——站點的 `register_gate` 已先以 rc 2 攔下，這裡不再重複包裝。"""
+    return endurance_env.job_env_argv(env, sandbox=sandboxed(repo_root))
+
+
+def expire_for(repo_root, now: datetime) -> datetime | None:
+    """沙盒目標的排程 OS 自毀時刻（租約有效才有值）；正式目標 ⇒ None。"""
+    return sandbox_scope.job_expiry(sandbox_scope.sandbox_home(repo_root), now)
+
+
+def jsonl_trace(path=None) -> Callable:
+    """給沒有自帶 `trace(event, **fields)` 的站點（quota_escalation、openitems、SI）用的痕跡寫入器：
+    append 一行 JSONL 到 `path`（缺省＝持久痕跡目錄的 `autosdd_sideeffect_refused.jsonl`）；
+    寫不進去不得升級為故障（同本 repo 各 `append_log` 的紀律）。"""
+    def _trace(event: str, **fields) -> None:
+        row = {"event": event, "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+               **fields}
+        try:
+            target = Path(path) if path else endurance_env.trace_dir() / TRACE_NAME
+            with target.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+    return _trace
+
+
+def headless_refusal(repo_root, site: str, run: str, exe: str) -> str | None:
+    """headless 站點（起 `claude -p` 前）首判：None＝放行；否則回說明字串。
+
+    說明＝`sideeffect-refused: rc=<n>`；執行檔一併判（`sandbox_real_exe`：沙盒不得用真 claude）。"""
+    rc = tick_gate(repo_root, site, run, jsonl_trace(), exe=exe)
+    return None if rc is None else f"sideeffect-refused: rc={rc}"
+
+
+def notify_refused(repo_root, transcript, site: str, log_path=None) -> bool:
+    """有目標上下文的通知呼叫者（`patrol_housekeeping`、`alert`）首判：True＝拒絕——呼叫端不得出
+    toast、不得入佇列。`transcript`＝該目標的逐字稿（slug 帶沙盒字樣也算沙盒）；缺席只判 cwd。"""
+    refused = tick_gate(repo_root, site, None, jsonl_trace(log_path),
+                        transcript=transcript or None)
+    return refused is not None
+
+
+def si_arm_problem(repo, env: Mapping[str, str], claude: str | None, win: bool) -> str | None:
+    """SelfImproving `sched arm` 登記前首判（DES S3 REQ-SE-12／25）。None＝放行；否則回拒絕理由
+    （已落痕跡 `sideeffect_refused`）。Windows 巡邏任務由安裝器 `install_windows_nightly.ps1` 註冊，
+    它自己寫 argv：沙盒目標帶不進 `--job-env`／OS 自毀、非預設 `--claude` 也帶不進——一律拒絕，
+    不靜默丟掉（偏離 DES 的「登記時帶 job_env」：安裝器是守衛面外的固定腳本，改它屬另案）。"""
+    trace = jsonl_trace()
+    if (rc := register_gate(repo, env, None, trace, "selfimproving.sched_arm")):
+        return f"副作用隔離拒絕登記（rc={rc}；理由見 stderr 與痕跡）"
+    if win and (sandboxed(repo) or claude):
+        why = "sandbox_installer_no_job_env" if sandboxed(repo) else "claude_flag_unsupported"
+        trace("sideeffect_refused", site="selfimproving.sched_arm", reason=why)
+        return f"Windows 巡邏任務由安裝器註冊，無法帶 job 環境／OS 自毀／--claude（{why}）"
+    return None
 
 
 def tick_gate(repo_root, site: str, task: str | None, trace: Callable, *, transcript=None,

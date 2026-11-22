@@ -1975,10 +1975,15 @@ class TestOsTasks(RunTestCase):
         hb = json.loads(fx.read(R, fx.PARAMS))["sched_heartbeat_minutes"]
         self.assertEqual((data["Label"], data["StartInterval"], data["RunAtLoad"]),
                          ("AutoSDD_SI_Push", hb * 60, False))
+        # DES S3 REQ-SE-22：登記行程顯式設定的居所／開關鍵經 `--job-env` 帶過排程邊界（排程 job
+        # 不繼承登記者環境）；固件把 AUTOSDD_SI_DIR 設進環境，所以尾端必有 `--job-env`（零鍵＝
+        # 逐字無尾巴，見 test_se_s3_sites.SelfImprovingSiteTest 的 plist 測試）
+        from lib import endurance_env
+        tail = endurance_env.job_env_argv(os.environ, sandbox=False)
+        self.assertIn("--job-env", tail, "固件環境應含顯式居所鍵，否則本測試失去鑑別力")
         self.assertEqual(data["ProgramArguments"], [str(R / ".venv" / "bin" / "python"),
                                                     str(R / "tools" / "selfimproving.py"),
-                                                        "push-run",
-                                                    "--repo", str(R)])
+                                                    "push-run", "--repo", str(R), *tail])
         self.assertIn("push_task_credential=launchctl-rc-0", text)
         self.assertTrue(all(c[0] == "launchctl" for c in fake.calls))
         self.assertTrue(

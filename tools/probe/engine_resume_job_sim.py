@@ -151,7 +151,8 @@ class TestLaunchdArming(_Case):
         args = body["ProgramArguments"]
         self.assertEqual(args[2:9], ["--run", "--job", plist.stem, "--playbook", str(self.pb),
                                      "--cwd", str(self.cwd)])
-        self.assertEqual(args[-2:], ["--config", config])
+        # `--config` 後可能接 DES S3 的 `--job-env`（顯式 env 的居所／開關過排程邊界），故不判尾兩項
+        self.assertEqual(args[args.index("--config") + 1], config)
         self.assertEqual(body["EnvironmentVariables"].get("PATH"), path)
         self.assertNotIn("MINIMAX_API_KEY", body["EnvironmentVariables"], "機密不得落進 plist")
         boots = [c for c in self.seen if c[:2] == ["launchctl", "bootstrap"]]

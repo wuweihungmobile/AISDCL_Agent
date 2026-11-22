@@ -34,6 +34,13 @@ from . import runner, sched
 from . import writeverbs as wv
 from .git import Git, arm_record, resolve_git, safe_path
 
+# `lib.sched_isolation` 以頂層名 import 同層的 endurance_env／sandbox_scope（`patrolrun` 同款）：
+# 先把 tools/lib 放進 sys.path；套件只准 import stdlib 與 `lib`（能力登記表判準）
+_LIB = str(Path(__file__).resolve().parents[1])
+if _LIB not in sys.path:
+    sys.path.insert(0, _LIB)
+from lib import sched_isolation  # noqa: E402  # RealVerify 副作用隔離（DES S3）：登記首判／job 環境
+
 LABEL = sched.ARMED_TASK
 PUSH_LABEL = "AutoSDD_SI_Push"
 _ENV_KEYS = ("PATH", "SYSTEMROOT", "TEMP", "TMP", "HOME", "USERPROFILE", "APPDATA",
@@ -181,11 +188,13 @@ def _push_value(run_argv, plist_dir: Path | None) -> dict:
 
 # ── arm ───────────────────────────────────────────────────────────────────────
 def _write_plist(repo: Path, plist_dir: Path | None, *, label: str = LABEL, verb: str = "patrol",
-                 logs: bool = True) -> Path:
+                 logs: bool = True, claude: str | None = None) -> Path:
     py, script = str(repo / ".venv" / "bin" / "python"), str(repo / "tools" / "selfimproving.py")
+    # DES S3 REQ-SE-22／25：`--claude` 與 `--job-env` 原樣寫進 job argv（入口最先 apply_job_env）
+    tail = [*(["--claude", claude] if claude else []), *sched_isolation.job_env_pairs(repo, os.environ)]  # noqa: E501
     plist = {"Label": label, "RunAtLoad": False,
              "StartInterval": _heartbeat_minutes(repo) * 60,
-             "ProgramArguments": [py, script, verb, "--repo", str(repo)],
+             "ProgramArguments": [py, script, verb, "--repo", str(repo), *tail],
              "WorkingDirectory": str(repo)}
     if logs:
         folder = si_events.si_dir() / "patrol"
@@ -204,8 +213,8 @@ def _write_plist(repo: Path, plist_dir: Path | None, *, label: str = LABEL, verb
 
 
 def _arm_mac(repo: Path, run_argv, plist_dir: Path | None, *, label: str = LABEL,
-             verb: str = "patrol", logs: bool = True):
-    path = _write_plist(repo, plist_dir, label=label, verb=verb, logs=logs)
+             verb: str = "patrol", logs: bool = True, claude: str | None = None):
+    path = _write_plist(repo, plist_dir, label=label, verb=verb, logs=logs, claude=claude)
     uid = _uid()
     run_argv(_launchctl("bootout", f"gui/{uid}/{label}"), env=_env(), timeout=30, cwd=None)
     res = run_argv(_launchctl("bootstrap", f"gui/{uid}", str(path)), env=_env(), timeout=30,
@@ -213,13 +222,14 @@ def _arm_mac(repo: Path, run_argv, plist_dir: Path | None, *, label: str = LABEL
     return res, _launchctl("bootstrap", f"gui/{uid}", str(path))
 
 
-def _arm_patrol(repo: Path, run_argv, plist_dir: Path | None, win: bool) -> tuple[str | None, str]:
+def _arm_patrol(repo: Path, run_argv, plist_dir: Path | None, win: bool,
+                claude: str | None = None) -> tuple[str | None, str]:
     """巡邏任務安裝並以憑證驗證：回（失敗碼或 None, 詳情或憑證值）。"""
     if win:
         argv = _installer_argv(repo)
         res = run_argv(argv, env=_env(), timeout=_TIMEOUT, cwd=repo)
     else:
-        res, argv = _arm_mac(repo, run_argv, plist_dir)
+        res, argv = _arm_mac(repo, run_argv, plist_dir, claude=claude)
     body = _body(res)
     if getattr(res, "timed_out", False) or getattr(res, "rc", 1) != 0:
         if _ELEVATION_RE.search(body):
@@ -420,12 +430,15 @@ def _remove_push_if_present(repo: Path, run_argv, plist_dir: Path | None, win: b
 
 
 def arm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
-        plist_dir: Path | None = None, push_only: bool = False) -> tuple[int, str]:
+        plist_dir: Path | None = None, push_only: bool = False,
+        claude: str | None = None) -> tuple[int, str]:
     """安裝 OS 任務並以憑證（值）驗證；回 (rc, 輸出)。`sched_auto_push` 為 true 時另裝推送任務
     （與巡邏段獨立，互不牽連）；`push_only` 只裝推送任務。"""
     win = sys.platform.startswith("win")
     if not win and sys.platform != "darwin":
         return _reject(repo, "SCHED-NO-CREDENTIAL", "此平台沒有 OS 任務載具", as_json, "arm")
+    if (why := sched_isolation.si_arm_problem(repo, os.environ, claude, win)):  # DES S3 登記首判
+        return _reject(repo, "SCHED-SIDEEFFECT-REFUSED", why, as_json, "arm")
     params = _params(repo)
     enabled = params.get("sched_auto_push") is True
     minutes = params["sched_heartbeat_minutes"]
@@ -442,7 +455,7 @@ def arm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
             return _reject(repo, code, detail, as_json, "arm")
         return _ok("arm", {"task": PUSH_LABEL, "push_task_credential": detail,
                            **_mac_env_detail()}, as_json)
-    p_code, p_detail = _arm_patrol(repo, run_argv, plist_dir, win)
+    p_code, p_detail = _arm_patrol(repo, run_argv, plist_dir, win, claude)
     s_code, s_detail = (_arm_push(repo, run_argv, plist_dir, win, minutes) if enabled
                         else _remove_push_if_present(repo, run_argv, plist_dir, win))
     patrol_line = "巡邏任務：" + (p_code or "已建立")
@@ -512,8 +525,9 @@ def disarm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
     return _ok("disarm", ok, as_json)
 
 
-def run(repo: Path, cmd: str, as_json: bool, push_only: bool = False) -> tuple[int, str]:
+def run(repo: Path, cmd: str, as_json: bool, push_only: bool = False,
+        claude: str | None = None) -> tuple[int, str]:
     """入口 `sched arm|disarm` 的分派（授權閘已在入口通過）。"""
     if cmd == "arm":
-        return arm(repo, runner.run_argv, as_json=as_json, push_only=push_only)
+        return arm(repo, runner.run_argv, as_json=as_json, push_only=push_only, claude=claude)
     return disarm(repo, runner.run_argv, as_json=as_json, push_only=push_only)

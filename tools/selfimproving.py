@@ -31,6 +31,7 @@ from lib.selfimproving.git import Git
 
 _REPO = Path(__file__).resolve().parents[1]
 _USAGE_ERROR_RC = 3
+_SCHEDULED_VERBS = ("patrol", "push-run", "sched")
 _ITEM_CLS = ("M", "P", "R", "D", "evaluator-change", "loop-self")
 _HELP = {
     "check": "檢查觀察帳本、協定參數與歷史（唯讀）", "status": "啟動事件偵測與狀態摘要（唯讀）",
@@ -203,6 +204,7 @@ def _build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
     pt.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="零寫入，印此心跳會做什麼")
+    pt.add_argument("--claude", help="無人運轉的 claude 執行檔（預設 PATH 的 claude）")
     pr = _verb(sub, "push-run")
     pr.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="只評估、印碼，不寫任何檔、不推送")
@@ -221,6 +223,7 @@ def _sched_parser(sub) -> None:
             p.add_argument("--push-only", dest="push_only", action="store_true",
                            help="只處理推送任務 AutoSDD_SI_Push（不動巡邏任務）")
     ssub.choices["show"].add_argument("--now", help="帶 offset 的 ISO 8601（預設現在）")
+    ssub.choices["arm"].add_argument("--claude", help="寫進巡邏任務 argv 的 claude 執行檔")
     st = ssub.choices["set"]
     st.add_argument("--enabled", choices=("true", "false"))
     st.add_argument("--period-minutes", dest="period_minutes", type=int)
@@ -418,11 +421,21 @@ def _armed():
 
 def _patrol(repo: Path, args: argparse.Namespace) -> int:
     """`patrol`（R137）：參數原樣交給 `patrol.main`（授權閘、鎖、OFF 與用法錯誤都在那裡）。"""
-    from lib.selfimproving import patrol  # exec：巡邏心跳才載入
+    from lib.selfimproving import (
+        patrol,  # exec：巡邏心跳才載入
+        schedarm,
+    )
 
+    # DES S3 REQ-SE-14：到點入口最先判（讀 SI 帳之前）；沙盒租約失效／真 claude 進沙盒 ⇒ 不運轉、
+    # rc 0（排程照 SI 既有一次性語意），痕跡 `sideeffect_refused site=selfimproving.patrol`
+    isolation = schedarm.sched_isolation
+    if isolation.tick_gate(repo, "selfimproving.patrol", None, isolation.jsonl_trace(),
+                           exe=args.claude or "claude") is not None:
+        return 0
     argv = ["--repo", str(repo)] + (["--now", args.now] if args.now else [])
+    deps = patrol.Deps(which=lambda _name: args.claude) if args.claude else None
     return patrol.main(argv + (["--dry-run"] if args.dry_run else [])
-                       + (["--json"] if args.json else []))
+                       + (["--json"] if args.json else []), deps)
 
 
 def _push_run(repo: Path, args: argparse.Namespace) -> int:
@@ -457,7 +470,8 @@ def _sched(repo: Path, args: argparse.Namespace) -> int:
             from lib.selfimproving import schedarm
         except ImportError as exc:
             raise check.InputError("sched arm／disarm 的 schedarm 模組尚未建立") from exc
-        rc, text = schedarm.run(repo, args.sched_cmd, args.json, args.push_only)
+        rc, text = schedarm.run(repo, args.sched_cmd, args.json, args.push_only,
+                                getattr(args, "claude", None))
         _emit(text)
         return rc
     if args.sched_cmd == "set":
@@ -640,9 +654,24 @@ _HANDLERS = {"check": _check, "status": _status, "scan": _scan, "card": _card, "
              "backtest": _backtest}
 
 
+def _apply_job_env(argv: list[str]) -> list[str]:
+    """DES S3 REQ-SE-22：排程動詞（`patrol`／`push-run`／`sched`）最先套用 `--job-env`。
+
+    排程 job 不繼承登記者的環境，居所與開關靠它過邊界；其餘動詞原樣放行（互動動詞不改環境）。"""
+    if not argv or argv[0] not in _SCHEDULED_VERBS:
+        return argv
+    lib = str(Path(__file__).resolve().parent / "lib")  # `endurance_env`／`sandbox_scope` 頂層名
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    from lib import endurance_env
+
+    return endurance_env.apply_job_env_or_exit(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
-        args = _build_parser().parse_args(argv)
+        raw = list(sys.argv[1:] if argv is None else argv)
+        args = _build_parser().parse_args(_apply_job_env(raw))
         repo = Path(args.repo) if args.repo else _REPO
         if not repo.is_dir():
             raise check.InputError(f"--repo 不是目錄：{repo}")

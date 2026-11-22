@@ -16,14 +16,20 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from lib import endurance_env, git_paths, win_spawn
+from lib import git_paths, win_spawn
 
-from . import evidence, throttle
+from . import evidence, schedcache, throttle
 from . import ledger as oi_ledger
 from . import params as oi_params
 from .fold import fold
 
 _TOOLS = Path(__file__).resolve().parents[2]
+# `sched_isolation`／`endurance_env` 以頂層名 import 同層模組（planner 同款）：先把 tools/lib 放進
+# sys.path；`apply_job_env`（入口）也要靠它 import `sandbox_scope`。
+if str(_TOOLS / "lib") not in sys.path:
+    sys.path.insert(0, str(_TOOLS / "lib"))
+import sched_isolation  # noqa: E402  # RealVerify 副作用隔離（DES S3）：登記首判／job 環境搬運／OS 自毀
+
 #: 案例沒宣告牆鐘時的預設（分鐘）：一般案例、long 案例（TCS AT-WP-29 的 180 分即 long 預設）。
 #: 這是**預設值**不是案例的真實上限；案例模組宣告 `MIN_WALL_SECONDS`／
 #: `DESIGNED_WAIT_SECONDS`／`WALL_SECONDS` 時一律以宣告為準（REQ-WP-99：E1 強制 long／soak）。
@@ -34,6 +40,17 @@ DRIVE_LEAD_MINUTES = 2  # 排程器要未來的分鐘；期望時刻預設＝現
 
 class DriveFailed(Exception):
     """排程沒有成立（載具缺、註冊失敗、憑證空）；帳本未變動。"""
+
+
+class DriveRefused(DriveFailed):
+    """副作用隔離的登記首判拒絕（沙盒租約／主人／存在性不成立，或 job 環境值不合法）。
+
+    `rc` 是 `sched_isolation.register_gate` 的 rc（4 判準拒絕、2 job 環境值不合法）；理由已落
+    痕跡與 stderr。"""
+
+    def __init__(self, rc: int) -> None:
+        super().__init__(f"副作用隔離拒絕登記（rc={rc}）")
+        self.rc = rc
 
 
 @dataclass(frozen=True)
@@ -85,11 +102,11 @@ def _round_up_minute(moment: datetime) -> datetime:
 
 
 def action_argv(root: Path, item_id: str, task: str) -> list[str]:
-    """排程要跑的指令；沙盒的 `AUTOSDD_TRACE_DIR` 一併帶進引數（排程行程不繼承我們的環境）。"""
+    """排程要跑的指令；居所與行為開關經 `--job-env` 帶進引數（排程行程不繼承我們的環境；DES S3
+    取代舊的 `--trace-dir`，入口仍相容舊旗標一版）。正式且無顯式 env ⇒ 沒有任何 `--job-env`。"""
     argv = [win_spawn.quiet_python(), str(_TOOLS / "openitems.py"), "--root", str(root)]
-    trace = os.environ.get(endurance_env.TRACE_DIR_ENV, "").strip()
-    tail = ["--trace-dir", trace] if trace else []
-    return [*argv, *tail, "run-driver", item_id, "--task", task]
+    return [*argv, *sched_isolation.job_env_pairs(root, os.environ), "run-driver", item_id,
+            "--task", task]
 
 
 def task_name(params: dict, item_id: str, at: datetime) -> str:
@@ -119,7 +136,14 @@ def drive_item(root: Path, params: dict, item_id: str, *, backend, now: datetime
         others = throttle.taken_slots(folded.items, item_id)
         slot = throttle.pick_slot(_round_up_minute(want), others, params["stagger_minutes"])
         task = task_name(params, item_id, slot)
-        credential = backend.register(task, slot, action_argv(root, item_id, task), str(root))
+        # DES S3 REQ-SE-12／18：登記前先判目標；拒絕＝不登記、帳本不變（沙盒才帶 OS 自毀）
+        if (denied := sched_isolation.register_gate(root, os.environ, slot,
+                                                    sched_isolation.jsonl_trace(),
+                                                    "openitems.drive")):
+            raise DriveRefused(denied)
+        expire = sched_isolation.expire_for(root, now)
+        credential = backend.register(task, slot, action_argv(root, item_id, task), str(root),
+                                      **({"expire_at": expire} if expire is not None else {}))
         registered.append(task)
         if not credential:
             raise DriveFailed(f"排程已送出但回讀不到憑證（NextRunTime 空）：{task}")
@@ -135,8 +159,12 @@ def drive_item(root: Path, params: dict, item_id: str, *, backend, now: datetime
         for task in registered:  # 憑證回讀失敗或帳本拒收：撤掉剛建的工作，不留孤兒排程
             backend.unregister(task)
         raise
+    dropped = None
     if prior and prior.get("task") not in (None, written[0]["task"]):
-        backend.unregister(prior["task"])  # 重掛：舊工作作廢（best effort，殘留也只是 stale 排程）
+        # 重掛：舊工作作廢（best effort，殘留也只是 stale 排程）
+        dropped = prior["task"] if backend.unregister(prior["task"]) else None
+    # 寫入排程的這一方同步快取：否則 TTL 內的舊快取（登記前拍的）會讓新排程被完成閘判成不存在
+    schedcache.note(params, backend, now, add={written[0]["task"]: written[0]["at"]}, drop=dropped)
     return written[0]
 
 

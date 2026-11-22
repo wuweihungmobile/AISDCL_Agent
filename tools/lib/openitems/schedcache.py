@@ -52,9 +52,15 @@ class WindowsBackend:
 
     name = "schtasks"
 
-    def register(self, task: str, at: datetime, argv: list[str], cwd: str) -> str | None:
+    def register(self, task: str, at: datetime, argv: list[str], cwd: str, *,
+                 expire_at: datetime | None = None) -> str | None:
         pl = planner()
         q = pl._ps_single_quote
+        # 沙盒目標的 OS 自毀（DES S3、§5.4）：EndBoundary＋DeleteExpiredTaskAfter；正式目標兩段皆空
+        from engine_resume_job import (
+            expiry_ps,  # noqa: PLC0415 — 頂層名；planner() 已把 tools/lib 放進 sys.path
+        )
+        end_trigger, end_settings = expiry_ps(at.astimezone(), expire_at)
         # 載具一律由 SSOT 算（pythonw、無 console）；argv[0] 只是呼叫端的同源預填，不另信。
         python = q(win_spawn.quiet_python())
         argument = " ".join(f'"{a}"' for a in argv[1:])
@@ -63,8 +69,8 @@ class WindowsBackend:
             "$ErrorActionPreference = 'Stop'\n"
             f"$action = New-ScheduledTaskAction -Execute '{python}'-Argument '{q(argument)}' "
             f"-WorkingDirectory '{q(cwd)}'\n"
-            f"$trigger = New-ScheduledTaskTrigger -Once -At ([datetime]'{stamp}')\n"
-            f"$settings = {pl._SCHTASKS_SETTINGS}\n"
+            f"$trigger = New-ScheduledTaskTrigger -Once -At ([datetime]'{stamp}')\n{end_trigger}"
+            f"$settings = {pl._SCHTASKS_SETTINGS}\n{end_settings}"
             f"$principal = {pl._SCHTASKS_PRINCIPAL}\n"
             f"$common = @{{TaskName='{q(task)}'; Action=$action; Trigger=$trigger; "
             "Settings=$settings; Force=$true}\n"
@@ -116,7 +122,9 @@ class LaunchdBackend:
             return 127, str(exc)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
 
-    def register(self, task: str, at: datetime, argv: list[str], cwd: str) -> str | None:
+    def register(self, task: str, at: datetime, argv: list[str], cwd: str, *,
+                 expire_at: datetime | None = None) -> str | None:
+        # launchd 無 EndBoundary 對等物，`expire_at` 刻意忽略（DES 誠實劃界：靠 L1 首判＋L2 清掃）
         local = at.astimezone()
         items = "".join(f"<string>{a}</string>" for a in argv)
         plist = (
@@ -172,6 +180,30 @@ def refresh(params: dict, backend, now: datetime) -> dict[str, str] | None:
             "prefix": params["task_prefix"], "tasks": tasks}
     path.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")  # 撕裂讀＝量不到
     return tasks
+
+
+def note(params: dict, backend, now: datetime, *, add: dict[str, str] | None = None,
+         drop: str | None = None, path: Path | None = None) -> bool:
+    """寫入排程的一方同步快取（`drive` 登記成功、重掛作廢舊工作之後）。
+
+    只併進**仍有效**（`read` 認得：TTL 內、前綴相符）且平台相符的快取；沒有有效快取（沒檔、逾
+    TTL、壞檔）⇒ 什麼都不做、回 False——那時完成閘讀到的本來就是「量不到」，fold 依帳本判
+    （量不到 ≠ 存在，不得把「量不到」寫成「存在」，也不憑空造一份快取）。`at`（拍快取的時刻）
+    原樣保留，不延長 TTL。
+    """
+    target = path or cache_path()
+    tasks = read(params, now, target)
+    if tasks is None:
+        return False
+    try:
+        body = json.loads(target.read_text(encoding="utf-8"))
+        if body.get("platform") != getattr(backend, "name", body.get("platform")):
+            return False
+        body["tasks"] = {**{k: v for k, v in tasks.items() if k != drop}, **(add or {})}
+        target.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    except (OSError, ValueError, AttributeError, TypeError):
+        return False
+    return True
 
 
 def read(params: dict, now: datetime, path: Path | None = None) -> dict[str, str] | None:

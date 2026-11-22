@@ -239,6 +239,47 @@ class SchedCacheTest(DriverCase):
         unknown = fold(self.events(), self.params, stale_at, lookup)
         self.assertFalse(unknown.items[item_id]["undriven"])  # 快取過期＝量不到＝依帳本視為有效
 
+    def test_drive_syncs_a_valid_cache_so_the_new_task_is_not_judged_missing(self):
+        """tools/lib/openitems/drive.py＋schedcache.py：登記前拍的快取（TTL 內、不含新工作）不得讓
+        剛登記成功的排程被完成閘判 `scheduled_task_missing`（2026-11-22 真實推回的成因）。"""
+        schedcache.refresh(self.params, self.backend, T0)  # 登記前拍的快取：空
+        item_id = self.open_item()
+        ev = self.drive_item(item_id, at=T0 + timedelta(minutes=60))
+        got = fold(self.events(), self.params, T0, schedcache.exists_fn(self.params, T0))
+        self.assertFalse(got.items[item_id]["undriven"], got.items[item_id]["undriven_reason"])
+        self.assertIn(ev["task"], schedcache.read(self.params, T0))
+
+    def test_redrive_drops_the_superseded_task_from_the_cache(self):
+        item_id = self.open_item()
+        first = self.drive_item(item_id, at=T0 + timedelta(minutes=60))
+        schedcache.refresh(self.params, self.backend, T0)
+        second = self.drive_item(item_id, at=T0 + timedelta(minutes=120))
+        tasks = schedcache.read(self.params, T0)
+        self.assertIn(second["task"], tasks)
+        self.assertNotIn(first["task"], tasks)
+
+    def test_without_a_usable_cache_drive_neither_creates_nor_extends_one(self):
+        """量不到 ≠ 存在：沒檔不憑空造快取；逾 TTL 的舊快取原樣保留、不延長壽命。"""
+        item_id = self.open_item()
+        self.drive_item(item_id, at=T0 + timedelta(minutes=60))
+        self.assertFalse(schedcache.cache_path().exists())
+        old = {"at": (T0 - timedelta(seconds=self.params["sched_cache_ttl_seconds"] + 60))
+               .isoformat(timespec="seconds"), "platform": "fake",
+               "prefix": self.params["task_prefix"], "tasks": {}}
+        schedcache.cache_path().parent.mkdir(parents=True, exist_ok=True)
+        schedcache.cache_path().write_text(json.dumps(old), encoding="utf-8")
+        before = schedcache.cache_path().read_bytes()
+        self.drive_item(self.open_item(), at=T0 + timedelta(minutes=90))
+        self.assertEqual(schedcache.cache_path().read_bytes(), before)
+        self.assertIsNone(schedcache.read(self.params, T0))
+
+    def test_cache_of_another_platform_is_not_touched(self):
+        schedcache.refresh(self.params, types.SimpleNamespace(
+            name="other", list_tasks=lambda _p: {}), T0)
+        before = schedcache.cache_path().read_bytes()
+        self.drive_item(self.open_item(), at=T0 + timedelta(minutes=60))
+        self.assertEqual(schedcache.cache_path().read_bytes(), before)
+
     def test_failed_enumeration_keeps_the_old_cache(self):
         schedcache.refresh(self.params, self.backend, T0)
         blind = types.SimpleNamespace(name="x", list_tasks=lambda _p: None)

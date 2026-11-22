@@ -23,7 +23,7 @@ _LIB = str(Path(__file__).resolve().parents[1])
 if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 
-from lib import resume_route, unattended_authz  # noqa: E402
+from lib import resume_route, sched_isolation, unattended_authz  # noqa: E402
 
 from . import events as si_events  # noqa: E402
 from . import fold as si_fold  # noqa: E402
@@ -280,6 +280,9 @@ def launch(ctx, run: str, *, trigger: str, due_at: str) -> tuple[str, str]:
     path = tdir / "brief.md"
     path.write_bytes(brief.encode("utf-8"))
     claude = (ctx.deps.which or shutil.which)("claude") or "claude"
+    # DES S3 REQ-SE-08（headless）：起 `claude -p` 前再判一次（帶執行檔；真 claude 不進沙盒目標）。
+    # 單行：本檔 P7 淨增上限只剩 1 行（邏輯在 sched_isolation.headless_refusal）
+    if (why := sched_isolation.headless_refusal(ctx.repo, "patrolrun.launch", run, claude)): return "failed", why  # noqa: E501,E701
     prompt = (f"你是無人運轉 {run} 的主控：先完整讀任務書 {path}，依其角色序與禁止事項執行；"
               f"handback 寫到 {tdir / 'handback.md'}（四節標題逐字，邊做邊寫）。")
     argv = resume_route.fresh_argv(claude, prompt, tdir)

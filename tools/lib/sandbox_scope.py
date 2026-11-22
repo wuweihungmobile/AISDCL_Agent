@@ -52,6 +52,17 @@ SITES: tuple[Site, ...] = (
     Site("session_resume_planner", "_sentinel_tick", "tick"),
     Site("session_resume_planner", "_resume_tick", "tick"),
     Site("session_resume_planner", "main", "headless"),  # `--probe-quota` 動詞
+    # 非 sessionctl 站點（DES S3；模組名＝`tools/` 起算的匯入路徑；哨兵武裝走 planner
+    # `_register_and_record`，已在上列）
+    Site("lib.engine_resume_job", "arm", "register"),
+    Site("lib.engine_resume_job", "run_job", "tick"),
+    Site("lib.openitems.drive", "drive_item", "register"),
+    Site("lib.openitems.verbs", "_do_run_driver", "fire"),
+    Site("lib.selfimproving.schedarm", "arm", "register"),
+    Site("lib.selfimproving.patrolrun", "launch", "headless"),
+    Site("selfimproving", "_patrol", "fire"),
+    Site("lib.quota_escalation", "patrol_housekeeping", "notify"),
+    Site("lib.quota_escalation", "alert", "notify"),
     # sessionctl 站點（DES S2；模組名＝`tools/` 起算的匯入路徑）
     Site("lib.sessionctl.park_cli", "_cmd_fire", "fire"),
     Site("lib.sessionctl.park_cli", "spawn_resume", "spawn"),

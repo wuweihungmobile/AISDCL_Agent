@@ -961,8 +961,9 @@ def build_parser() -> argparse.ArgumentParser:
                              f"（掌舵者拍板）。要關：`--no-allow-resume` 或設 {RESUME_OFF_ENV}=1"
                              f"（排程／hook 路徑唯一有效的出口）。無人看管 ⇒ {UNATTENDED_ENV} 配 "
                              "PreToolUse 守衛硬擋 commit／push")
-    parser.add_argument("--probe-command", default="claude",
-                        help="探針用的 claude 執行檔（測試注入用）")
+    parser.add_argument("--probe-command", "--claude", dest="probe_command", default="claude",
+                        help="探針與續跑用的 claude 執行檔（`--claude` 為正名、`--probe-command` 為"
+                             "相容別名；沙盒驗證與測試注入用）")
     return parser
 
 

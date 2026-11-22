@@ -83,6 +83,7 @@ import endurance_env  # noqa: E402
 import quota_gate  # noqa: E402
 import quota_ledger  # noqa: E402
 import quota_policy  # noqa: E402
+import sched_isolation  # noqa: E402  # RealVerify 副作用隔離（DES S3）：通知呼叫者的首判
 import schedule_backend  # noqa: E402
 import sentinel_lifecycle  # noqa: E402
 
@@ -449,19 +450,12 @@ def _agents_liveness(transcript: Path, now: float, idle_threshold: float) -> str
         return "unmeasurable"
     try:
         mtimes = [p.stat().st_mtime for run in runs for p in run["agents"]
-                 if _exists(p) and not quota_killed(p)]
+                 if os.path.isfile(p) and not quota_killed(p)]  # isfile 不拋（OSError⇒False）
     except OSError:
         return "unmeasurable"  # N-3：_exists 與 stat 之間的 TOCTOU 競態，量不到就說量不到
     if not mtimes:
         return "idle"
     return "alive" if (now - max(mtimes)) < idle_threshold else "idle"
-
-
-def _exists(path: Path) -> bool:
-    try:
-        return path.is_file()
-    except OSError:
-        return False
 
 
 def ownerless_verdict(main_dead: bool, agents_state: str) -> str:
@@ -528,6 +522,8 @@ def patrol_housekeeping(transcript: Path, event: object, now: datetime, state: d
     偵測（PRD_Amendment_R112 §3-1 A-4）＋武裝狀態漂移自癒（§4.5.8）＋通知補投佇列
     重投（§3-4）。合成一個字典，直接 `**` 進 `sentinel_decided` 痕跡。
     """
+    if sched_isolation.notify_refused(_REPO_ROOT, transcript, "patrol_housekeeping", log):
+        return {"sideeffect_refused": True}  # DES S3：失效沙盒 ⇒ 不出 toast、不入佇列
     audit = dict(snapshot_fanout(transcript, event))
     if event is None:
         audit.update(_idle_prepare_watch(transcript, now, idle_threshold))
@@ -772,6 +768,9 @@ def alert(reason: str, state: dict, *, loud: bool = True, plan: object = None,
     """終態處置：不吵時收殘骸；要吵時寫紙，且只有真的有東西要救才敲人。回稽核欄位。"""
     if not loud:
         return gc_plans(plan)
+    # DES S3：目標是失效的驗證沙盒 ⇒ 不寫紙、不出 toast、不入佇列
+    if sched_isolation.notify_refused(_REPO_ROOT, state.get("transcript"), "alert", state.get("log_path")):  # noqa: E501
+        return {"sideeffect_refused": True, "notify_queued": False}
     fanout = fanout_path(str(state.get("session_id") or ""))
     note = note_path()
     ok = _write(note, "\n".join([

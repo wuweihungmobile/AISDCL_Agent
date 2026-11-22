@@ -13,11 +13,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from lib import endurance_env
+
 from . import drive, driver_run, evidence, scan, schedcache
 from . import ledger as oi_ledger
 from . import params as oi_params
 from .fold import fold
 
+sched_isolation = drive.sched_isolation  # 同一個模組物件（tools/lib 的 sys.path 由 drive 備妥）
 _REPO = Path(__file__).resolve().parents[3]
 _ENV_RC = 3
 _DRIVE_RC = 4  # 排程沒有成立（載具缺／憑證空）：帳本不變
@@ -165,6 +168,8 @@ def _do_drive(a, params, now) -> int:
     except oi_ledger.Reject as exc:
         sys.stderr.write("拒收（帳本未變動）：" + "；".join(exc.problems) + "\n")
         return 2
+    except drive.DriveRefused as exc:  # 副作用隔離拒絕登記：理由已由 register_gate 印出並落痕跡
+        return exc.rc
     except drive.DriveFailed as exc:
         sys.stderr.write(f"驅動器沒有掛上（帳本未變動）：{exc}\n")
         return _DRIVE_RC
@@ -175,6 +180,12 @@ def _do_drive(a, params, now) -> int:
 
 def _do_run_driver(a, params, now) -> int:
     deps = driver_run.Deps(backend=schedcache.select_backend())
+    # DES S3 到點首判（REQ-SE-14）：沙盒租約過期／主人已死／家已刪 ⇒ 不執行案例、自拆排程、落痕跡
+    if (refused := sched_isolation.tick_gate(a.root, "openitems.run_driver", a.task,
+                                             sched_isolation.jsonl_trace())) is not None:
+        if a.task and deps.backend is not None:
+            deps.backend.unregister(a.task)
+        return refused
     if Path(a.root).resolve() == _REPO:  # stale-pass 只對真 repo 有意義（沙盒根沒有案例 SOURCES）
         deps.stale = drive.stale_pass
     line = driver_run.run_driver(a.root, params, a.id, a.task, deps)
@@ -247,7 +258,9 @@ _READERS = {"list": _do_list, "check": _do_check, "scan": _do_scan, "drive": _do
 
 
 def main(argv: list[str] | None = None) -> int:
-    a = _parser().parse_args(argv)
+    # DES S3 REQ-SE-22：入口最先套用 `--job-env`（排程 job 不繼承登記者環境，居所靠它過邊界）
+    a = _parser().parse_args(endurance_env.apply_job_env_or_exit(
+        list(sys.argv[1:] if argv is None else argv)))
     a.root = Path(a.root)
     if a.trace_dir:
         os.environ["AUTOSDD_TRACE_DIR"] = a.trace_dir

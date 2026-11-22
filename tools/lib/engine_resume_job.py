@@ -45,6 +45,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import endurance_env
+import sched_isolation
 import schedule_backend as sb
 import win_spawn
 from schedule_backend_calendar import _append_trace, _calendar_of, _descriptor_problems
@@ -101,7 +102,9 @@ def fire_time(at: datetime, skew_seconds: int, now: datetime) -> datetime:
 def _job_argv(label: str, playbook: str, cwd: str, config: str | None, fire: datetime) -> list[str]:
     argv = [win_spawn.quiet_python(), str(Path(__file__).resolve()), "--run", "--job", label,
             "--playbook", playbook, "--cwd", cwd, "--fire-at", fire.isoformat(timespec="seconds")]
-    return argv + (["--config", config] if config else [])
+    # DES S3：沙盒／顯式 env 的居所與行為開關經 `--job-env` 帶過排程邊界（正式且無顯式 env ⇒ 空）
+    return argv + (["--config", config] if config else []) + sched_isolation.job_env_pairs(
+        _REPO, os.environ)
 
 
 def _engine_python() -> str:
@@ -242,6 +245,9 @@ def arm(playbook: str, at: datetime, *, cwd: str, config: str | None = None,
         _trace("refused", playbook=pb, why=why)
         return 1, ""
     fire, prefix = fire_time(at, planner.RESET_SKEW_SECONDS, now), job_prefix(pb)
+    # DES S3 REQ-SE-12／18：登記前先判目標（沙盒租約／主人／存在性／租約須長於觸發）；拒絕＝不登記
+    if (denied := sched_isolation.register_gate(_REPO, os.environ, fire, _trace, "engine_resume_job.arm")):  # noqa: E501
+        return denied, ""
     label, inside = f"{prefix}{fire:%Y%m%d%H%M}", os.environ.get(JOB_ENV, "")
     for old in _mine(backend, prefix) or []:         # None＝量不到：寧可多一支也不要沒有
         if old not in (label, inside):
@@ -249,7 +255,8 @@ def arm(playbook: str, at: datetime, *, cwd: str, config: str | None = None,
             _trace("superseded", old=old, label=label)
     argv = _job_argv(label, pb, cwd, config, fire)
     rc, cred = (_arm_launchd(backend, label, argv, cwd, fire) if backend.name == "launchd"
-                else _arm_schtasks(planner, label, argv, cwd, fire))
+                else _arm_schtasks(planner, label, argv, cwd, fire,
+                                   expire_at=sched_isolation.expire_for(_REPO, now)))
     _trace("armed" if rc == 0 else "arm_failed", label=label, playbook=pb, backend=backend.name,
            fire_at=fire.isoformat(timespec="seconds"), cwd=cwd)
     return rc, cred
@@ -279,6 +286,9 @@ def run_job(label: str, playbook: str, cwd: str, config: str | None, fire_at: st
     except ValueError:
         late = float("inf")                          # 解析不出預定時刻＝無法證明不是誤觸發 ⇒ 拒絕
     _trace("job_start", label=label, playbook=playbook, cwd=cwd, fire_at=fire_at, late_seconds=late)
+    if (refused := sched_isolation.tick_gate(_REPO, "engine_resume_job.run_job", label, _trace)) is not None:  # noqa: E501
+        backend.disarm(label)  # DES S3：沙盒租約過期／主人已死／家已刪 ⇒ 不跑引擎、自拆
+        return refused
     if late > STALE_FIRE_SECONDS:
         _trace("stale_refused", label=label)
         backend.disarm(label)
@@ -297,7 +307,7 @@ def run_job(label: str, playbook: str, cwd: str, config: str | None, fire_at: st
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
+    args = endurance_env.apply_job_env_or_exit(list(sys.argv[1:] if argv is None else argv))
     sys.path.insert(0, str(_REPO / "tools"))
     import _cli_flags  # noqa: PLC0415 — 只有 CLI 才要；`tools/` 不在 lib 的預設 sys.path
     rejected = _cli_flags.reject_unknown_argv("engine_resume_job.py",
