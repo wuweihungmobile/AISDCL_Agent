@@ -322,7 +322,9 @@ class SelfResumeTest(_Base):
         self.addCleanup(patch.stop)
         self.pkg = self.package()
         self.assertEqual(self.do_seal(self.pkg)[0], 0)
-        self.assertEqual(seal.wake_package(SID, self.env), self.pkg, "前提：已封存的 live 包")
+        # AT-CTL-15 遷移：補傳逐字稿夾具（封存戳之後無工作 ⇒ effective）；斷言語意不變
+        self.assertEqual(seal.wake_package(SID, self.env, self.transcript), self.pkg,
+                         "前提：已封存的 live 包")
 
     def ack(self, text: str) -> None:
         self.pkg.with_suffix(".ack").write_text(text, encoding="utf-8")
@@ -345,7 +347,7 @@ class SelfResumeTest(_Base):
         self.assertFalse(seal.sealed_path(self.pkg).exists())
         self.assertEqual(handoff.list_handoffs(self.base)[-1]["state"], "resumed")
         self.assertIsNone(seal.handed_over(SID, self.env))
-        self.assertIsNone(seal.wake_package(SID, self.env))
+        self.assertIsNone(seal.wake_package(SID, self.env, self.transcript))
         self.assertTrue(seal.mark_resumed(self.pkg), "冪等：重做一次不得出錯")
 
     def test_mark_resumed_clears_only_the_owners_own_ack(self) -> None:
@@ -385,7 +387,7 @@ class SelfResumeTest(_Base):
         seal.mark_resumed(self.pkg)
         self.assertEqual(self.do_seal(self.pkg)[0], 0)
         self.assertFalse(seal.resumed_path(self.pkg).exists())
-        self.assertEqual(seal.wake_package(SID, self.env), self.pkg)
+        self.assertEqual(seal.wake_package(SID, self.env, self.transcript), self.pkg)
 
 
 if __name__ == "__main__":

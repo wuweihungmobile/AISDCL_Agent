@@ -246,8 +246,9 @@ def last_prompt_at(path: Path | None) -> datetime | None:
 READ_ONLY_TOOLS = frozenset({"Read", "Grep", "Glob"})
 
 
-def worked_since(path: Path | None, since_iso: str) -> bool:
+def worked_since(path: Path | None, since_iso: str, ignore=None) -> bool:
     """`since_iso` 之後，**主**逐字稿有沒有主控自己的 tool_use，且工具名不在 `READ_ONLY_TOOLS`。
+    `ignore`（`Callable[[dict], bool]`，A4）：對 tool_use 區塊回真＝不計（監督呼叫）；預設不變。
     子代理的記錄住在 `<sid>/subagents/agent-*.jsonl`（不在主檔）；主檔若仍混入 `isSidechain`
     記錄也一律略過。讀不到檔、`since_iso` 解析失敗 ⇒ 回 `False`（**偏放行**：呼叫端據此「不要求
     重新封存」，寧可少推回也不誤擋人）。"""
@@ -264,7 +265,8 @@ def worked_since(path: Path | None, since_iso: str) -> bool:
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list) and any(
                 isinstance(b, dict) and b.get("type") == "tool_use"
-                and b.get("name") not in READ_ONLY_TOOLS for b in content):
+                and b.get("name") not in READ_ONLY_TOOLS
+                and not (ignore is not None and ignore(b)) for b in content):
             return True
     return False
 

@@ -23,7 +23,7 @@ sys.path.insert(0, str(_ROOT / "tools" / "tests"))
 from test_sessionctl_converge import SID  # noqa: E402
 from test_sessionctl_converge import _Fence as _ConvFenceTestCase  # noqa: E402
 
-from lib.sessionctl import converge, roster, supervise, watch  # noqa: E402
+from lib.sessionctl import converge, roster, supervise, switch, watch  # noqa: E402
 from lib.wastecensus import supervision  # noqa: E402
 
 NOW = 1_800_000_000.0
@@ -211,11 +211,26 @@ class ColdWakeVsSuperviseTests(_ConvFenceTestCase):
         """WHY：已交棒的 session 該 TaskStop 而不是再掛 watch——掛了反而多一個會叫醒它的背景任務。"""
         self.main(100_000)
         # E-CW-1：冷叫醒閘的前提是「已封存」（`--finalize` 寫 `.sealed`），不是主控層寫完
-        self.package(finalized=True).with_suffix(".sealed").write_text(
-            "2026-11-17T09:00:00+08:00\n", encoding="utf-8")
+        pkg = self.package(finalized=True)
+        pkg.with_suffix(".sealed").write_text("2026-11-17T09:00:00+08:00\n", encoding="utf-8")
+        # A4（DES §4.2）遷移：只封存、未交棒時在飛代理交監督閘；本案的 WHY 是「已交棒」，
+        # 故補 spawn 痕跡（真交棒）——斷言語意與強度不變
+        switch.trace("session_switch_spawned", handoff=str(pkg), sid=SID, ok=True, pid=1)
         why = converge.stop_verdict(self.stop(background_tasks=[AGENT, WATCH_SHELL]), self.env)
         self.assertIn("冷叫醒閘", why)
         self.assertNotIn("監督閘", why)
+
+    def test_sealed_but_not_handed_over_leaves_the_agents_to_the_supervise_gate(self):
+        """tools/lib/sessionctl/converge.py：A4——封存有效、未交棒時冷叫醒閘不叫人殺在飛代理；
+        有憑證 ⇒ 放行，無憑證 ⇒ 監督閘（兩閘互斥，不得要求 TaskStop 監督者）。"""
+        self.main(100_000)
+        pkg = self.package(finalized=True)
+        pkg.with_suffix(".sealed").write_text("2026-11-17T09:00:00+08:00\n", encoding="utf-8")
+        self.assertEqual(converge.stop_verdict(
+            self.stop(background_tasks=[AGENT, WATCH_SHELL]), self.env), "")
+        why = converge.stop_verdict(self.stop(background_tasks=[AGENT]), self.env)
+        self.assertIn("監督閘", why)
+        self.assertNotIn("冷叫醒閘", why)
 
     def test_unfinalized_falls_to_supervise_gate(self):
         """WHY：沒交棒的在飛代理沒憑證 ⇒ 走監督閘；Stop 路徑同時記 crons，不影響判決。"""

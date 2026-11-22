@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from . import keepwarm, roster, seal, supervise, switch
+from . import control, keepwarm, roster, seal, supervise, switch
 
 EXPAND_TOOLS = frozenset({"Agent", "Task", "Workflow"})
 _LATCHLESS = "（不寫閂鎖：上下文降到門檻下即自動解除）"
@@ -87,13 +87,15 @@ def _finalized_wake(payload: dict, env) -> str:
             if str(t.get("status") or "running") == "running"]
     if not sid or not live:
         return ""
-    path = seal.wake_package(sid, env)
+    path = seal.wake_package(sid, env, payload.get("transcript_path"))
     if path is None:
         return ""
     if seal.handed_over(sid, env) is None:
-        # 只封存、還在等掌舵者（沒交棒）：`sessionctl.py keepwarm` shell 豁免——它就是要把這個
-        # session 叫醒保溫，醒來讀的是熱快取（R216；已交棒者照舊全停，醒來就是整份重寫）。
-        live = [t for t in live if not keepwarm.is_keepwarm_task(t)]
+        # 封存有效、尚未交棒（DES §4.2，A4）：只列「非代理、非監督」的背景任務（`ci_wait` 等）。
+        # 在飛代理交監督閘看管（兩閘互斥，CI-1(d)：不得同時叫人殺代理又叫人掛 watch 監督它）；
+        # keepwarm／watch shell 依設計掛著，保溫就是要叫醒本 session、醒來讀熱快取。
+        # 已交棒者照舊全停（醒來就是整份重寫）。
+        live = control.wakeable_tasks(live)
         if not live:
             return ""
     switch.trace("finalized_wake_block", sid=sid, tasks=len(live))

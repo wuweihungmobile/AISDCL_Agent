@@ -447,9 +447,12 @@ class StopVerdictTest(_Fence):
         for needle in ("冷叫醒閘", "TaskStop", "1 個", "只推回這一次"):
             self.assertIn(needle, why)
         self.assertEqual([r["event"] for r in self.traces()], ["finalized_wake_block"])
+        # A4（DES §4.2）：封存有效、未交棒時在飛代理交監督閘看管，冷叫醒閘不再叫人殺它
+        # （舊斷言「代理也被推 TaskStop」正是 A4 病灶；遷移＝語意改變、不是放寬）
         agent = {"id": "a1", "type": "subagent", "status": "running"}
-        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
-                                                    self.env))
+        verdict = converge.stop_verdict(self.stop(background_tasks=[agent]), self.env)
+        self.assertNotIn("冷叫醒閘", verdict)
+        self.assertIn("監督閘", verdict)
 
     def test_def_200_588_the_wake_gate_stays_silent_when_nothing_can_wake_it(self) -> None:
         """AT-TW-80 tools/lib/sessionctl/converge.py::_finalized_wake：假紅面（N < 硬線，
@@ -483,14 +486,20 @@ class StopVerdictTest(_Fence):
         self.main(HARD - 50_000)
         pkg = self.package(finalized=True)
         agent = {"id": "a1", "type": "subagent", "status": "running"}
-        self.assertIsNone(seal.wake_package(SID, self.env))
+        transcript = self.slug / f"{SID}.jsonl"
+        self.assertIsNone(seal.wake_package(SID, self.env, transcript))
         why = converge.stop_verdict(self.stop(background_tasks=[agent]), self.env)
         self.assertNotIn("冷叫醒閘", why)
         self.assertIn("監督閘", why)
         self.seal_it(pkg)
-        self.assertEqual(seal.wake_package(SID, self.env), pkg)
-        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
+        # 遷移（AT-CTL-15）：補傳逐字稿夾具（封存戳之後無工作）；省略 transcript ⇒ 封存分支 None
+        self.assertEqual(seal.wake_package(SID, self.env, transcript), pkg)
+        self.assertIsNone(seal.wake_package(SID, self.env))
+        shell = {"id": "b1", "type": "shell", "status": "running"}
+        self.assertIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[shell]),
                                                     self.env))
+        self.assertNotIn("冷叫醒閘", converge.stop_verdict(self.stop(background_tasks=[agent]),
+                                                       self.env))
 
     def test_p2_1_a_self_resumed_session_is_never_told_it_was_handed_over(self) -> None:
         """R216 QA P2-1（暴露證據：sid 31ea79d4 自續跑後 Stop 冷叫醒閘推回兩次）：同 sid 自己 ack

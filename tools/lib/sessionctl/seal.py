@@ -23,7 +23,7 @@ from pathlib import Path
 import endurance_env
 import transcript_activity
 
-from . import handoff, qw_schema, roster, switch
+from . import control, handoff, qw_schema, roster, switch
 from . import handoff_build as build
 
 #: prompts sidecar 的總字數上限；超過就只留第一則＋最後 `KEEP_TAIL` 則全文，中段改列索引。
@@ -271,25 +271,34 @@ def handed_over(sid: str, env=None, now: datetime | None = None) -> Path | None:
     return path if acked or _spawned(path, now) else None
 
 
-def wake_package(sid: str, env=None) -> Path | None:
-    """冷叫醒閘要的包：已交棒，或「已封存（`--finalize` 寫了 `.sealed`）、尚 live」。
+def _stamp(path) -> str | None:
+    """`.sealed` 戳原文；檔不存在／讀不到 ⇒ `None`（從未封存）。**不驗 ISO**：戳壞要被
+    `control.sealed_effective` 分成 `unreadable`，不能在這裡就吞成「從未封存」（DES §3.2）。"""
+    try:
+        return sealed_path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def effective(path, transcript) -> str:
+    """包 `path` 的封存目前是否有效：`control.sealed_effective` 四值（單一謂詞，DES §3）。"""
+    return control.sealed_effective(_stamp(path), transcript)
+
+
+def wake_package(sid: str, env=None, transcript=None) -> Path | None:
+    """冷叫醒閘要的包：已交棒，或「已封存、尚 live、且封存**仍有效**」（`effective`）。
     WHY 純寫完不算（E-CW-1，2026-11-17 sid e4f80b15 真機）：主控在代理仍在飛時先備好主控層、
-    等交卷親驗後才封存，是合理路徑；把「寫完」當前提會叫它 TaskStop 做到一半的代理。"""
+    等交卷親驗後才封存，是合理路徑；把「寫完」當前提會叫它 TaskStop 做到一半的代理。
+    WHY 要看封存是否仍有效（A4，65389f03）：封存後主控又派工＝封存已失效（封存閘同判準），
+    不是已交棒；缺 `transcript` ⇒ 封存分支回 `None`（`unreadable` 不推，偏放行）。"""
     done = handed_over(sid, env)
     if done is not None:
         return done
     row = latest_package(sid, env)
-    return Path(row["path"]) if row and row["state"] == "live" \
-        and sealed_path(row["path"]).exists() else None
-
-
-def _stamp(path) -> str | None:
-    try:
-        text = sealed_path(path).read_text(encoding="utf-8").strip()
-        datetime.fromisoformat(text)
-        return text
-    except (OSError, ValueError):
+    if row is None or row["state"] != "live" or transcript is None:
         return None
+    return Path(row["path"]) if effective(row["path"], transcript) == control.SEAL_EFFECTIVE \
+        else None
 
 
 def agents_running(payload: dict, sid: str) -> bool:
@@ -324,14 +333,11 @@ def stop_verdict(payload: dict, env=None) -> str:
         if ctx is None or ctx < hard or handed_over(sid, env) is not None:
             return ""
         row, why = latest_package(sid, env), "無包"
-        stamp = None
         if row is not None:
-            stamp = _stamp(row["path"])
-            why = "未封存"
-        if stamp is not None:
-            if not transcript_activity.worked_since(Path(raw), stamp):
+            state = effective(row["path"], Path(raw))  # 四值依 DES §3.2 表；none 照推「未封存」
+            if state in (control.SEAL_EFFECTIVE, control.SEAL_UNREADABLE):
                 return ""
-            why = "封存後有工作"
+            why = "封存後有工作" if state == control.SEAL_INVALIDATED else "未封存"
         switch.trace("seal_stop_block", sid=sid, ctx=ctx, hard=hard, reason=why)
         return _seal_text(ctx, hard, why, row)
     except Exception:  # noqa: BLE001 — hook 內任何例外一律放行
