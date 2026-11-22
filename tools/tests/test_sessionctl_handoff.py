@@ -3,7 +3,7 @@
 AT-SC-34～60，加上入口與接線的補強）。
 
 守的判準（WHY 全文＝ADR-XPLAT-004 §2.13.4／§2.13.5）：
-- 換 session 不遺漏資訊：機械層 11 欄一個都不省略（取不到寫「量不到：<原因>」，不拋例外）；
+- 換 session 不遺漏資訊：機械層 13 欄一個都不省略（取不到寫「量不到：<原因>」，不拋例外）；
 - 公告而非搶占：未 ack、未過期者出聲，只有顯式 `ack` 才算接手（出聲不 ack）；
 - 互動自動切換有三道前置（finalize／工作樹保全／無執行中代理），非 Windows 與 notify 一律不外呼；
 - spawn 成功的憑證是「行程存活且出現新逐字稿」，不是「rc 0」。
@@ -171,12 +171,20 @@ class _Base(unittest.TestCase):
 
 
 class MechanicalLayerTest(_Base):
-    def test_at34_all_eleven_headings_and_aware_timestamp(self) -> None:
-        """AT-SC-34：11 欄標題全在；時間字串帶 offset（鐵律三 naive 時間戳）。"""
+    def test_at34_all_thirteen_headings_and_aware_timestamp(self) -> None:
+        """AT-SC-34（Control_Handover W4 連動：11 欄→13 欄逐欄斷言）：欄 1～11 標題與順序不變（文件
+        引用「第 7 欄」不位移）、第 12／13 欄為末尾追加；每欄都有編號節；時間字串帶 offset。"""
         text = self.make().read_text(encoding="utf-8")
-        self.assertEqual(len(build.MECH_HEADINGS), 11)
-        for title in build.MECH_HEADINGS:
-            self.assertIn(title, text, f"機械層缺欄：{title}")
+        legacy = ("來源與時刻", "Git 分支與 HEAD", "工作樹狀態", "wip-preserved 標籤",
+                  "最近真人提示", "最近 assistant 收尾", "背景代理名冊", "排程與 NextRunTime",
+                  "額度各軸", "舊 scratchpad 檔案", "逐字稿路徑")
+        self.assertEqual(len(build.MECH_HEADINGS), 13)
+        self.assertEqual(build.MECH_HEADINGS[:11], legacy)
+        self.assertEqual(build.MECH_HEADINGS[11:], ("在飛／被切代理", "鏈上前幾棒"))
+        for number, title in enumerate(build.MECH_HEADINGS, 1):
+            self.assertIn(f"### {number} {title}\n", text, f"機械層缺欄：{number} {title}")
+        self.assertIn("- 主控模型：claude-fable-5", text)
+        self.assertIn("worktree（`git worktree list`）", text)
         stamp = next(ln for ln in text.splitlines() if ln.startswith("- 產生時刻："))
         self.assertIsNotNone(datetime.fromisoformat(stamp.split("：", 1)[1]).tzinfo)
         self.assertIn("B 也完成", text)

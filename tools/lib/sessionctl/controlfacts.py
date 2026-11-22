@@ -20,7 +20,18 @@ from pathlib import Path
 
 import endurance_env
 
-from . import control, handoff, holder, park, procstop, qw_schema, roster, seal, supervise
+from . import (
+    agentbrief,
+    control,
+    handoff,
+    holder,
+    park,
+    procstop,
+    qw_schema,
+    roster,
+    seal,
+    supervise,
+)
 
 SEG_CACHE_TTL = 10.0   # 秒；DES §6.5
 SEG_TIMEOUT = 0.15     # 秒；DES §6.5（statusLine 不得因本檔變慢）
@@ -43,16 +54,19 @@ def _transcript(payload: Mapping, sid: str) -> Path | None:
 
 def _agent_facts(payload: Mapping, sid: str, env: Mapping) -> tuple[int, int, list]:
     """`(running, quiet, cut)`；running 優先取 payload 的 `background_tasks`（同
-    `seal.agents_running`）。被切清單目前只有 `residue`（名冊既有狀態）；`usage_limit`／`stopped`
-    由 W4 的 `rosterscope.cut_kind` 補，`classify` 已逐種收納，屆時只換這一處的來源。"""
-    snap = roster.snapshot(sid, projects_dir=roster._payload_projects(dict(payload)), env=env,
-                           full=False)["agents"]
+    `seal.agents_running`）。被切清單的判準單一家＝`agentbrief.cut_kind`（`usage_limit`／`stopped`／
+    `residue`；W4）；被切的代理不再算 running／quiet（末筆是額度切斷訊息的代理，名冊可能仍因最後
+    記錄很新而判 running）。"""
+    projects = roster._payload_projects(dict(payload))
+    snap = roster.snapshot(sid, projects_dir=projects, env=env, full=False)["agents"]
     tasks = roster._tasks(dict(payload))
+    cut = agentbrief.cut_list(snap, sid, _transcript(payload, sid), projects)
+    cut_ids = {c["id"] for c in cut}
+    live = [a for a in snap if a["id"] not in cut_ids]
     running = (sum(1 for t in tasks if t.get("type") == "subagent"
                    and str(t.get("status") or "running") == "running")
-               if tasks is not None else sum(1 for a in snap if a["state"] == "running"))
-    quiet = sum(1 for a in snap if a["state"] == "quiet")
-    cut = [{"id": a["id"], "kind": "residue"} for a in snap if a["state"] == "residue"]
+               if tasks is not None else sum(1 for a in live if a["state"] == "running"))
+    quiet = sum(1 for a in live if a["state"] == "quiet")
     return running, quiet, cut
 
 

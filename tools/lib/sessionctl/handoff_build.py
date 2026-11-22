@@ -5,7 +5,8 @@ WHY 獨立一檔：`handoff.py`（公告、ack、finalize、spawn、CLI）已近
 
 🔴 縫：`runner(argv, *, cwd=None, env=None, creationflags=0, wait=True) -> (rc, stdout, pid)`
 是整個套件唯一的外部指令出口（git／排程查詢／互動 spawn 共用）；`wait=False` 時回 `(0, "", pid)`。
-11 欄標題＝`MECH_HEADINGS`（TCS AT-SC-34 逐欄斷言）。
+13 欄標題＝`MECH_HEADINGS`（TCS AT-SC-34 逐欄斷言；第 12／13 欄 Control_Handover W4 追加於末尾，
+欄 1～11 編號不變）。第 12 欄邏輯在 `agentbrief`、第 13 欄在 `promptchain`，本檔只呼叫。
 """
 from __future__ import annotations
 
@@ -18,11 +19,15 @@ from pathlib import Path
 import sandbox_scope
 import transcript_activity
 
-#: 交接包機械層的 11 個欄位標題（順序即輸出順序；測試逐一斷言它們都在）。
+from . import agentbrief, promptchain
+
+#: 交接包機械層的 13 個欄位標題（順序即輸出順序；測試逐一斷言它們都在）。
 MECH_HEADINGS = (
     "來源與時刻", "Git 分支與 HEAD", "工作樹狀態", "wip-preserved 標籤", "最近真人提示",
     "最近 assistant 收尾", "背景代理名冊", "排程與 NextRunTime", "額度各軸", "舊 scratchpad 檔案",
-    "逐字稿路徑")
+    "逐字稿路徑", "在飛／被切代理", "鏈上前幾棒")
+#: scratchpad 檔名含這些字樣者標 ★（第 10 欄與第 13 欄共用辨識）。
+STAR_MARKS = ("BRIEF", "RESTART_POINT", "HB_", "_report")
 STATUS_LIMIT = 40  # `git status --short` 最多列幾行（其餘只報總數）
 WIP_SUFFIX = "-wip-preserved"
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -88,6 +93,9 @@ def _git_sections(runner, repo: Path) -> tuple[str, str, str]:
     else:
         cut = f"（僅列前 {STATUS_LIMIT} 行）" if len(status) > STATUS_LIMIT else ""
         tree = "```\n" + "\n".join(status[:STATUS_LIMIT]) + f"\n```\n共 {len(status)} 行{cut}"
+    trees, why_wt = git_lines(runner, repo, "worktree", "list")
+    tree += "\n- worktree（`git worktree list`）：" + (
+        _unknown(why_wt) if trees is None else "\n" + "\n".join(f"  - {t}" for t in trees))
     tags, why_w = wip_tags(runner, repo)
     tag_text = (_unknown(why_w) if tags is None
                 else "\n".join(f"- {t}" for t in tags) or "（HEAD 上無）")
@@ -123,45 +131,75 @@ def _quota_text(now: datetime, quota_fn) -> str:
         return _unknown(f"{type(exc).__name__}: {exc}")
 
 
-def _scratchpad_text(sid: str, temp_root: Path | None) -> str:
+def _pad_files(sid: str, temp_root: Path | None) -> tuple[list[Path] | None, str]:
+    """該 sid 的 scratchpad 檔案（排序）；`(None, 原因)`＝找不到／讀不動。"""
     root = Path(temp_root) if temp_root is not None else Path(tempfile.gettempdir())
     try:
         pads = sorted(root.glob(f"claude/*/{sid}/scratchpad"))
         files = sorted(p for pad in pads for p in pad.rglob("*") if p.is_file())
     except OSError as exc:
-        return _unknown(f"scratchpad 讀不動（{type(exc).__name__}）")
-    if not pads:
-        return _unknown(f"找不到 {root}/claude/*/{sid}/scratchpad")
-    mark = ("BRIEF", "RESTART_POINT", "HB_")
-    return "\n".join(f"- {'★ ' if any(m in p.name for m in mark) else ''}{p}" for p in files[:60]) \
-        or "（scratchpad 內沒有檔案）"
+        return None, f"scratchpad 讀不動（{type(exc).__name__}）"
+    return (files, "") if pads else (None, f"找不到 {root}/claude/*/{sid}/scratchpad")
+
+
+def star_files(sid: str, temp_root: Path | None) -> tuple[list[Path] | None, str]:
+    """該 sid scratchpad 內的 ★檔（`STAR_MARKS`），最近修改者在前（第 13 欄用）。"""
+    files, why = _pad_files(sid, temp_root)
+    if files is None:
+        return None, why
+
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return sorted((p for p in files if any(m in p.name for m in STAR_MARKS)),
+                  key=_mtime, reverse=True), ""
+
+
+def _scratchpad_text(sid: str, temp_root: Path | None) -> str:
+    files, why = _pad_files(sid, temp_root)
+    if files is None:
+        return _unknown(why)
+    return "\n".join(f"- {'★ ' if any(m in p.name for m in STAR_MARKS) else ''}{p}"
+                     for p in files[:60]) or "（scratchpad 內沒有檔案）"
 
 
 def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, now: datetime,
                      runner=None, roster_mod=None, quota_fn=None, temp_root: Path | None = None,
-                     platform_name: str = "", package: Path | None = None) -> str:
+                     platform_name: str = "", package: Path | None = None, oi_fn=None,
+                     chain_base: Path | None = None) -> str:
     """交接包機械層全文（只含 `### ` 欄位，不含主控層）。`now` 須帶 offset。
-    `package` 給了就在「最近真人提示」欄末指向全文 sidecar（該欄只留 3 則摘錄，全文在 sidecar）。"""
+    `package` 給了就在「最近真人提示」欄末指向全文 sidecar（該欄只留 3 則摘錄，全文在 sidecar）。
+    第 13 欄的交接包目錄＝`chain_base`，缺則取 `package` 所在目錄（W4）；`oi_fn`＝OI 摘要注入縫。"""
     runner = runner or default_runner
     plat = platform_name or sys.platform
     branch_head, tree, tags = _git_sections(runner, repo)
     humans = transcript_activity.human_prompts(transcript)
     tail = transcript_activity.assistant_tail(transcript)
+    agents, why_roster = None, ""
     try:
         if roster_mod is None:
             from . import roster as roster_mod  # noqa: PLC0415 — lazy（Dev-2b 的模組）
-        roster_text = roster_mod.render_snapshot(roster_mod.snapshot(session_id))
+        snap = roster_mod.snapshot(session_id)
+        roster_text, agents = roster_mod.render_snapshot(snap), snap.get("agents") or []
     except Exception as exc:  # noqa: BLE001
         roster_text = _unknown(f"名冊不可用（{type(exc).__name__}）")
+        why_roster = f"名冊不可用（{type(exc).__name__}）"
+    model = agentbrief.main_model(transcript) or _unknown("逐字稿無 assistant 記錄或讀不到")
+    base = chain_base if chain_base is not None else (package.parent if package else None)
     body = (
         f"- 來源 session：{session_id}\n- 產生時刻：{now.isoformat()}\n"
-        f"- {sandbox_scope.PKG_REPO_LABEL}{repo}",
+        f"- {sandbox_scope.PKG_REPO_LABEL}{repo}\n- 主控模型：{model}",
         branch_head, tree, tags,
         ("\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"))
         + (f"\n\n全文見 {package.stem}.prompts.md" if package is not None else ""),
         "\n\n".join(_quote(t) for t in tail) or _unknown("逐字稿無 assistant 文字或讀不到"),
         roster_text, _schedule_rows(runner, plat), _quota_text(now, quota_fn),
         _scratchpad_text(session_id, temp_root),
-        str(transcript) if transcript else _unknown("逐字稿路徑未知"))
+        str(transcript) if transcript else _unknown("逐字稿路徑未知"),
+        agentbrief.column12(agents, session_id, transcript, why=why_roster, oi_fn=oi_fn),
+        promptchain.column13(session_id, base, lambda sid: star_files(sid, temp_root)))
     return "\n\n".join(f"### {i} {title}\n{text}"
                        for i, (title, text) in enumerate(zip(MECH_HEADINGS, body), 1))

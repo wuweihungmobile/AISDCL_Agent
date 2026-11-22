@@ -145,6 +145,8 @@ R3 增量落點（照 Root_Layout §2；`tools/lib/sessionctl/` 套件內新檔�
 
 附：AT-SC-28／29 的實測對照＝`test_sessionctl_switch.py::E2ReplayTest`（E2 真值 29,652,867 B／ctx 556,777／`waiting`／`allow_resume`／閒置 4 天）；整週無人對照＝`test_a_week_with_nobody_else_still_goes_the_old_way`；E1 重放＝AT-SC-11（20,518,438 B、33,554,432、138,811）。AT-SC-09 的位元組估計比值 40 B/token 為出廠值（裁決見 ADR §2.13.2），只在 feed 與逐字稿 usage 皆缺時使用並標 `estimated`。AT-SC-33 的「無撞線事件的過期 session 狀態＝`disarmed`」裁決見 ADR §2.13.3。
 
+> 追加註記（Control_Handover W4，2026-11-23；上表既有條文不改）：AT-SC-34 的「11 欄」自 W4 起為 **13 欄**——欄 1～11 標題與順序不變，第 12 欄「在飛／被切代理」、第 13 欄「鏈上前幾棒」追加於末尾（`MECH_HEADINGS` 長度 13；欄 1 加「主控模型」、欄 3 加 `git worktree list`）；逐欄斷言現為 `test_sessionctl_handoff.py::MechanicalLayerTest::test_at34_all_thirteen_headings_and_aware_timestamp`，第 12／13 欄內容見 TCS-Control-20261122 AT-CTL-30～38（`test_sessionctl_agentbrief.py`）。舊包（只有 11 欄）讀取端容忍。
+
 ### 2.4 交接包（`test_sessionctl_handoff.py`；縫 FS、RUN、NOW、Q）
 | AT | 前置 | 動作 | 預期 | 狀態 |
 |---|---|---|---|---|
