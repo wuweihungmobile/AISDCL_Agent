@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lib import endurance_env
 
-from . import drive, driver_run, evidence, scan, schedcache
+from . import drive, driver_run, evidence, liveness, scan, schedcache
 from . import ledger as oi_ledger
 from . import params as oi_params
 from .fold import fold
@@ -124,7 +124,8 @@ def _do_list(a, params, now) -> int:
     events, bad = oi_ledger.read_events(oi_params.ledger_path(a.root))
     if a.verify and schedcache.refresh(params, schedcache.select_backend(), now) is None:
         sys.stderr.write("list --verify：排程列舉量不到（依帳本判定，不覆蓋舊快取）\n")
-    folded = fold(events, params, now, sched_exists=schedcache.exists_fn(params, now))
+    folded = fold(events, params, now, sched_exists=schedcache.exists_fn(params, now),
+                  run_alive=liveness.default_run_alive(now))
     rows = [i for i in folded.items.values() if i["undriven"] or not a.undriven]
     if a.json:
         sys.stdout.write(json.dumps(rows, ensure_ascii=False, default=str, indent=1) + "\n")

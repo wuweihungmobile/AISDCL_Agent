@@ -85,8 +85,12 @@ def _apply(item: dict, ev: dict) -> bool:
 
 
 def driven_verdict(item: dict, params: dict, now: datetime,
-                   sched_exists: Callable[[str], bool | None] | None) -> tuple[bool, str]:
-    """`driven` 項目的憑證此刻是否有效；回 `(有效, 無效原因)`（DES §3.3 對帳表）。"""
+                   sched_exists: Callable[[str], bool | None] | None,
+                   run_alive: Callable[[dict], bool | None] | None = None) -> tuple[bool, str]:
+    """`driven` 項目的憑證此刻是否有效；回 `(有效, 無效原因)`（DES §3.3 對帳表）。
+
+    `run_alive(start 事件)`：執行者是否還活著（`True`／`False`／`None`＝量不到）。只有明確 `False`
+    才判 `run_died`；`None`／未注入一律退回預算界（fail-safe：量不到不得誤判死亡）。"""
     d, s, a = item["drive"], item["start"], item["attempt"]
     at = parse_ts(d.get("at")) if d else None
     if at is None:
@@ -94,7 +98,9 @@ def driven_verdict(item: dict, params: dict, now: datetime,
     if a is not None:  # attempt 之後 run-driver 還沒接上後續事件：只給 followup_grace
         ok = now < parse_ts(a["ts"]) + timedelta(minutes=params["followup_grace_minutes"])
         return ok, "" if ok else "followup_lapsed"
-    if s is not None:  # 有 start 無 attempt：以 start 宣告的預算為界（pid 存活只作輔證，不作判準）
+    if s is not None:  # 有 start 無 attempt：執行者已死（關機／被殺）立即判死；否則以預算為界
+        if run_alive is not None and run_alive(s) is False:
+            return False, "run_died"
         ok = now < parse_ts(s["ts"]) + timedelta(minutes=s["budget_minutes"])
         return ok, "" if ok else "run_budget_exceeded"
     if now < at:
@@ -105,7 +111,8 @@ def driven_verdict(item: dict, params: dict, now: datetime,
 
 
 def fold(events: list[dict], params: dict, now: datetime,
-         sched_exists: Callable[[str], bool | None] | None = None) -> Folded:
+         sched_exists: Callable[[str], bool | None] | None = None,
+         run_alive: Callable[[dict], bool | None] | None = None) -> Folded:
     out = Folded()
     for ev in sorted(events, key=_sort_key):
         item = out.items.get(ev["id"])
@@ -121,6 +128,6 @@ def fold(events: list[dict], params: dict, now: datetime,
         if item["state"] == "open":
             item["undriven"], item["undriven_reason"] = True, "no_drive"
         elif item["state"] == "driven":
-            ok, why = driven_verdict(item, params, now, sched_exists)
+            ok, why = driven_verdict(item, params, now, sched_exists, run_alive)
             item["undriven"], item["undriven_reason"] = (not ok), why
     return out

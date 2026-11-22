@@ -104,7 +104,54 @@ def _after_reset(now: datetime, pace: throttle.Pace | None, fallback_minutes: in
 
 
 def run_driver(root: Path, params: dict, item_id: str, task: str | None, deps: Deps) -> str:
-    """跑一次驅動器；回末行字串。例外代表真錯誤（呼叫端 rc 1），判決一律在末行。"""
+    """跑一次驅動器；回末行字串。例外代表真錯誤（呼叫端 rc 1），判決一律在末行。
+
+    `start` 之後不論怎麼結束（任何例外、`KeyboardInterrupt`、`SystemExit`）帳本都補一筆 `attempt`
+    再重拋——否則帳本停在「有 start 無 attempt」，要靠讀端對帳才發現（W5-FIX1）。被外力硬殺（關機、
+    `taskkill /F`）行內補不到，那一面由 `fold.driven_verdict` 的 `run_died` 判準負責。"""
+    guard: dict = {}
+    try:
+        return _run(root, params, item_id, task, deps, guard)
+    except BaseException as exc:
+        _seal_attempt(root, params, item_id, deps, guard, exc)
+        raise
+
+
+def _seal_attempt(root: Path, params: dict, item_id: str, deps: Deps, guard: dict,
+                  exc: BaseException) -> None:
+    """例外離開時，若本次的 `start` 還沒有任何 `attempt` ⇒ 補寫（中斷＝deferred，不耗重試預算；
+    其他例外＝fail，計入 attempts、達上限即升級）。補寫自己失敗只落 driver log，不遮蔽原例外。"""
+    if not guard:
+        return
+    try:
+        now = deps.now()
+        item = fold(oi_ledger.read_events(oi_params.ledger_path(root))[0], params, now
+                    ).items.get(item_id)
+        start = item["start"] if item else None
+        if (not item or item["state"] != "driven" or item["attempt"] is not None or not start
+                or start.get("pid") != deps.pid or item["drive"]["seq"] != guard["seq"]):
+            return
+        interrupted = not isinstance(exc, Exception)
+        base = {"ev": "attempt", "id": item_id, "by": guard["who"], "ts": _iso(now),
+                "n": guard["n"], "drive_seq": guard["seq"]}
+        if interrupted:
+            batch = [{**base, "result": "deferred", "reason": "interrupted"}]
+        else:
+            batch = [{**base, "result": "fail", "reason": f"error:{type(exc).__name__}",
+                      "evidence": f"driver exception {type(exc).__name__}: {str(exc)[:160]}"}]
+            if guard["n"] >= params["max_attempts"]:
+                batch.append({"ev": "escalate", "id": item_id, "by": guard["who"],
+                              "ts": _iso(now), "reason": "attempts_exhausted"})
+        oi_ledger.append(root, lambda _e: batch)
+        log(item_id, f"sealed attempt after {type(exc).__name__}", now)
+        if interrupted:
+            _redrive(root, params, item_id, deps, now, _delay(now, params["retry_backoff_minutes"]))
+    except Exception as inner:  # noqa: BLE001 — 補寫失敗不得遮蔽原例外
+        log(item_id, f"seal attempt failed: {inner!r}", None)
+
+
+def _run(root: Path, params: dict, item_id: str, task: str | None, deps: Deps,
+         guard: dict) -> str:
     root = Path(root)
     now = deps.now()
     events, _bad = oi_ledger.read_events(oi_params.ledger_path(root))
@@ -137,6 +184,7 @@ def run_driver(root: Path, params: dict, item_id: str, task: str | None, deps: D
         stamp = _iso(deps.now())
         return {"ev": name, "id": item_id, "by": who, "ts": stamp, **fields}
 
+    guard.update(seq=d["seq"], n=n, who=who)  # 從這裡起，任何例外都由 run_driver 補 attempt
     oi_ledger.append(root, lambda _e: [event(
         "start", drive_seq=d["seq"], pid=deps.pid, proc_start=deps.identity(deps.pid) or "",
         budget_minutes=budget)])

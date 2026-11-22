@@ -243,13 +243,22 @@ def stale_pass(root: Path, params: dict, now: datetime, *, registry: dict | None
 def console_run(argv: list[str], timeout_s: float, env: dict, cwd: Path) -> tuple[int, str]:
     """驅動器執行 check 的預設 runner：`python` 一律換成當前直譯器（排程行程的 PATH 沒有 venv）。"""
     argv = [throttle.console_python() if argv[0] in ("python", "python3") else argv[0], *argv[1:]]
+    from lib.realverify.sandbox import kill_tree  # noqa: PLC0415 — 逾時／中斷才用，不在載入時付
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=timeout_s, env=env, cwd=str(cwd),
-                              check=False,
-                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except subprocess.TimeoutExpired:
-        return 124, "timeout"
+        proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                encoding="utf-8", errors="replace", env=env, cwd=str(cwd),
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                                start_new_session=os.name != "nt")  # POSIX：自成群組才砍得整棵
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, exc.__class__.__name__
-    return proc.returncode, proc.stdout or ""
+    try:
+        out, _err = proc.communicate(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        # 只砍直接子行程會留下孫行程（claude／runlong）握著沙盒與鎖：整棵樹一起砍
+        kill_tree(proc)
+        proc.communicate()
+        return 124, "timeout"
+    except BaseException:  # 含 KeyboardInterrupt／SystemExit：不留孤兒子樹，重拋給 run_driver
+        kill_tree(proc)
+        raise
+    return proc.returncode, out or ""

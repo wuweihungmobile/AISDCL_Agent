@@ -25,7 +25,7 @@ ID_RE = re.compile(r"^OI-(\d{8})-(\d{3,})$")
 KINDS = ("auto", "observe", "human", "k1")
 EVENTS = ("open", "drive", "start", "attempt", "close", "escalate", "convert", "retire")
 RESULTS = ("pass", "fail", "deferred")
-DEFER_REASONS = ("interactive", "quota", "busy", "window_cap")
+DEFER_REASONS = ("interactive", "quota", "busy", "window_cap", "interrupted")
 WHY_MIN_CHARS = 8
 LOCK_TIMEOUT_SECONDS = 30.0
 LOCK_STALE_SECONDS = 120.0
@@ -110,7 +110,7 @@ def _attempt_problems(ev: dict) -> list[str]:
     if ev.get("result") not in RESULTS:
         out.append("attempt.result 必須是 pass／fail／deferred")
     if ev.get("result") == "deferred" and ev.get("reason") not in DEFER_REASONS:
-        out.append("deferred 必有 reason（interactive／quota／busy／window_cap）")
+        out.append("deferred 必有 reason（interactive／quota／busy／window_cap／interrupted）")
     if not _int(ev.get("drive_seq")):
         out.append("attempt 缺 drive_seq")
     return out

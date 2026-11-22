@@ -22,8 +22,8 @@ from lib import endurance_env
 
 from . import fold as oi_fold
 from . import ledger as oi_ledger
+from . import liveness, schedcache
 from . import params as oi_params
-from . import schedcache
 
 UNATTENDED_ENV = "AUTOSDD_UNATTENDED"
 #: 推回訊息列出的 undriven 上限（DES §4.1：前 5 個）。
@@ -60,7 +60,8 @@ def load_state(root: Path | None = None, now: datetime | None = None) -> State |
         params = oi_params.load(base)
         events, _bad = oi_ledger.read_events(oi_params.ledger_path(base))
         at = now or datetime.now().astimezone()
-        folded = oi_fold.fold(events, params, at, schedcache.exists_fn(params, at))
+        folded = oi_fold.fold(events, params, at, schedcache.exists_fn(params, at),
+                              liveness.default_run_alive(at))
     except Exception as exc:  # noqa: BLE001 — OIR 讀不到一律放行，不得把閘變成阻斷源
         _warn(f"OIR 讀取失敗，本次放行（{type(exc).__name__}：{str(exc).splitlines()[0][:100]}）")
         return None

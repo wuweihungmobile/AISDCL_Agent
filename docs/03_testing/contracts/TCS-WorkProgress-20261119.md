@@ -633,3 +633,11 @@
 | B03 | §16.6 2026-10-14（PRD:2786）：halt 標記辨識他 session 接手 | RV-PX49（long） | S＋R | 沙盒 halt 標記，另一沙盒 session 逐字稿於標記後累積 ≥24 回合且 ≥600 s 活動，真哨兵巡邏 | `disarm_superseded`：`sentinel_decided` 理由含「接手」且 `cleared_halt=true`；`marker_removed`：halt 標記檔已移除 |
 
 **本附錄判準**：CI 鎖 (f) 逐列比對本表與案例模組（REQ-WP-100）；E2E-WP-66 要求每列最近一次有效結果為 PASS 且證據含本表的全部斷言鍵。標「long」者另依 REQ-WP-99 宣告 `MIN_WALL_SECONDS`／`DESIGNED_WAIT_SECONDS`，並只認驅動器跑完的帳列。
+
+## 11. 追加註記 r5（W5-FIX1，2026-11-23；只追加，不改既有條文）
+**事故**：2026-11-22 14:46 整機重開機殺掉正在跑 RV-LW3 的 OIR 驅動器（OI-20261120-001），帳本只留 `start`；§1.1 REQ-WP-03 的「有 `start` 無 `attempt` 且逾 `start.ts＋budget_minutes` ⇒ undriven」要等 195 分才成立，完成閘約 4 小時後才發現。
+- **REQ-WP-03／08 追加（執行者存活）**：driven 有效性在「有 `start` 無 `attempt`」時，另以 `start` 的 `pid`＋`proc_start` 對照現況；任一成立 ⇒ undriven，原因新值 `run_died`，立即生效、不等預算：(i) `start.ts` 早於本次開機時間；(ii) pid 不存在；(iii) pid 存在但建立時間與 `proc_start` 差超過 2 秒（pid 復用）。**量不到（開機時間／建立時間讀不到、`pid` 欄位缺）一律退回預算界**，不得把活驅動器判死。判準只用 ctypes／標準庫（完成閘不開子行程，DES §4.5）；載具＝`tools/lib/openitems/liveness.py`，注入點＝`fold(…, run_alive)`，呼叫端＝完成閘 `gate.load_state` 與 `openitems list`。`run_died` 不寫 `attempt`，故不計入 `attempts`／`deferrals`；重掛（`drive`）即接得上。
+- **REQ-WP-27 追加（行內補寫）**：`run-driver` 在 `start` 之後以 `BaseException` 為界保證補寫 `attempt`：`KeyboardInterrupt`／`SystemExit` ⇒ `attempt(deferred, reason=interrupted)`（不耗重試預算）並重掛；其他例外 ⇒ `attempt(fail, reason=error:<類名>)`（計入 attempts，達上限同批 `escalate`）；補寫後原例外照常重拋（rc 1）。`reason` 集合追加 `interrupted`。被外力硬殺（關機、`taskkill /F`）行內補不到，由上一條對帳負責。`console_run` 逾時／中斷改殺整棵子行程樹（沿用 `realverify.sandbox.kill_tree`）。
+- **AT-WP-50 追加 (e)(f)**：(e) 有 `start`、`budget`＝195、start 後 1 分、存活探針回「已死」⇒ undriven（`run_died`）；(f) 同 (e) 但探針回「量不到」⇒ driven（退回預算界）。(c)(d) 判決不變。
+- **E2E-WP-46 修訂**：「殺後立即 `openitems list`：driven」改為「殺後立即 `openitems list`：undriven(run_died)、帳本末列為 `start`、完成閘 `load_state` 列出該 id」；「`start.ts`＋預算後 undriven」一段仍成立（存活探針量不到的平台的後備界）。正式案例由 S6 持有；開發棒的真行程 smoke＝`tools/tests/test_openitems_run_died.py::RealRunnerDeathE2ETest`（真子行程＋真 `taskkill /T /F`＋真 CLI）。
+- 對應測試：`tools/tests/test_openitems_run_died.py`（`RunDiedFoldTest`／`StartAliveTest`／`DriverSealsAnAttemptTest`／`ConsoleRunKillsTheWholeTreeTest`／`RealRunnerDeathE2ETest`）。
