@@ -1,7 +1,8 @@
 """換 session 成本模型的量測與重放（R216 WP-G；設計 SessionSwitch_CostModel_Design §2／§3.2／§7）。
 
 三個入口共用同一份「母體」（population，純 JSON 可序列化）：
-- `--switch-metrics`：M-K1～M-K6（目標達成與否的指標；量測探針，不接閘門 rc）；
+- `--switch-metrics`：M-K1～M-K6（目標達成與否的指標；量測探針，不接閘門 rc）＋額度牆的
+  M-K7～M-K9（判準在 `sections_wall.py`，R218 Q5）；
 - `--replay-switch`：把新判準套回真實逐字稿，重現設計 §7 全表（P1 保溫／P3 額度續跑 F4／
   P4b 邊界軟線掃描／S1 冷續棒／S2 分段等待）；
 - `--calibrate-switch`：由逐字稿與 `autosdd_resume_cost.jsonl` 重算 F、B、N_lo、P_fix 建議值。
@@ -18,6 +19,7 @@ from __future__ import annotations
 import statistics
 import time
 
+from . import sections_wall as sw
 from .annotate import units
 from .reader import W_CC1, W_CC5, W_CR
 
@@ -68,8 +70,10 @@ def idle_gaps(mains: list[dict]) -> list[dict]:
             if gap < IDLE_MIN_MIN:
                 continue
             rew = cur["cc"] >= 0.5 * ctx(cur) and ctx(prev) >= REWRITE_MIN_PREV_CTX
+            wall = sw.wall_between(main.get("walls"), prev["ts_last"] or prev["ts_first"],
+                                   cur["ts_first"])
             out.append({"sid": main["sid"][:8], "gap": gap, "ctx": ctx(prev), "cause": cur["cause"],
-                        "rew": rew, "cc": cur["cc"] if rew else 0})
+                        "rew": rew, "cc": cur["cc"] if rew else 0, "wall": wall})
     return out
 
 
@@ -92,8 +96,9 @@ def sub_rewrites(subs: list[dict]) -> tuple[list[dict], list[dict]]:
 
 # ───────────────────────────────────────────────────────────────────────── M-K1～M-K6
 def m_k1(mains: list[dict]) -> dict:
-    """主控「可保溫」閒置後重寫（起因人／通知／交卷／其他 user，間隔 ≥55 分）。基線 21 件。"""
-    hits = [g for g in idle_gaps(mains) if g["cause"] in KEEPABLE and g["rew"]]
+    """主控「可保溫」閒置後重寫（起因人／通知／交卷／其他 user，間隔 ≥55 分）。基線 21 件。
+    間隔中有額度牆者改歸 M-K7（`sections_wall.m_k7`），這裡不再重複計（MU-QW-11）。"""
+    hits = [g for g in idle_gaps(mains) if g["cause"] in KEEPABLE and g["rew"] and not g["wall"]]
     return {"count": len(hits), "tokens": sum(g["cc"] for g in hits),
             "units": sum(W_CC1 * g["cc"] for g in hits)}
 
@@ -197,11 +202,16 @@ def trace_counts(traces: list[dict]) -> dict:
     return {n: sum(1 for r in traces if r.get("event") == n) for n in names}
 
 
-def switch_metrics(pop: dict, traces: list[dict]) -> dict:
+def switch_metrics(pop: dict, traces: list[dict], oldwin: list[dict] | None = None,
+                   now: float | None = None) -> dict:
+    """M-K1～M-K9。M-K7／M-K8／M-K9（額度牆，R218 Q5）判準在 `sections_wall`；`oldwin` 是
+    oldwin 痕跡列（舊資料 park 失敗原因的對應來源）、`now` 供「reset＋30 分」判斷（缺省取現在）。"""
     k1 = m_k1(pop["main"])
     return {"m_k1": k1, "m_k2": m_k2(pop["main"]), "m_k3": m_k3(pop["sub"]),
             "m_k4": m_k4(pop["sub"]), "m_k5": m_k5(pop["main"], pop["sub"], k1["units"]),
-            "m_k6": m_k6(pop["main"], traces), "trace": trace_counts(traces)}
+            "m_k6": m_k6(pop["main"], traces), "trace": trace_counts(traces),
+            **sw.switch_wall_metrics(pop, traces, oldwin or [],
+                                     time.time() if now is None else now)}
 
 
 # ───────────────────────────────────────────────────────────────────────────── 重放

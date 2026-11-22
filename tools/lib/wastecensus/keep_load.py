@@ -11,7 +11,8 @@ import json
 from pathlib import Path
 
 from . import sections_keep as sk
-from .reader import collect, parse_ts
+from . import sections_wall as sw
+from .reader import SYNTHETIC_MODEL, collect, parse_ts
 
 _TURN_KEYS = ("ts_first", "ts_last", "inp", "cc", "cr", "out", "cc5", "cc1", "cause", "tools")
 _FIRST_PROMPT_CHARS = 400
@@ -73,6 +74,35 @@ def scan_main_file(path: Path) -> tuple[str, list[dict]]:
     return first, comps
 
 
+def scan_walls(path: Path) -> list[dict]:
+    """主逐字稿裡的額度牆記錄 `[{ts, kind}]`（時間序）：`cut`＝harness 切斷通知（system，內文含
+    `continuing automatically at`）、`synthetic`＝主鏈 `<synthetic>` assistant 且內文含限額字樣
+    （同 sessionctl/qw_wall 的 ①②；③短窗讀數逐字稿裡沒有）。只認這兩個字樣，壞行略過。"""
+    walls: list[dict] = []
+    try:
+        handle = path.open(encoding="utf-8", errors="replace")
+    except OSError:
+        return walls
+    with handle:
+        for line in handle:
+            if sw.CUT_MARK not in line and "<synthetic>" not in line:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            ts = parse_ts(rec.get("timestamp")) if isinstance(rec, dict) else None
+            if ts is None:
+                continue
+            if rec.get("type") == "system" and sw.CUT_MARK in str(rec.get("content") or ""):
+                walls.append({"ts": ts, "kind": "cut"})
+            elif (rec.get("type") == "assistant" and rec.get("isSidechain") is not True
+                  and (rec.get("message") or {}).get("model") == SYNTHETIC_MODEL
+                  and sw.WALL_TEXT_RE.search(_first_prompt(rec))):
+                walls.append({"ts": ts, "kind": "synthetic"})
+    return sorted(walls, key=lambda w: w["ts"])
+
+
 def load_population(base: Path, since_days: float) -> dict:
     data = collect(base, since_days, None)
     mains = []
@@ -82,7 +112,8 @@ def load_population(base: Path, since_days: float) -> dict:
             continue
         first, comps = scan_main_file(path)
         mains.append({"sid": sid, "handoff_start": sk.is_handoff_start(first), "turns": turns,
-                      "compactions": comps, "kw_calls": thread.get("kw_calls") or []})
+                      "compactions": comps, "kw_calls": thread.get("kw_calls") or [],
+                      "walls": scan_walls(path)})
     subs = [{"sid": sid, "turns": _slim(thread["turns"]), "kw_calls": thread.get("kw_calls") or []}
             for sid, _path, thread in data["sub"]]
     return {"schema": _SNAPSHOT_SCHEMA, "since_days": since_days, "main": mains, "sub": subs}
@@ -125,7 +156,7 @@ def _u(x) -> str:
 def print_metrics(got: dict, pop: dict) -> None:
     k1, k2, k3, k4, k5, k6 = (got[f"m_k{i}"] for i in range(1, 7))
     n_main, n_sub = len(pop["main"]), len(pop["sub"])
-    print(f"== 換 session 成本量測 M-K1～M-K6（母體：主控 {n_main}／子代理 {n_sub}；"
+    print(f"== 換 session 成本量測 M-K1～M-K9（母體：主控 {n_main}／子代理 {n_sub}；"
           f"近 {pop.get('since_days', '?')} 天）==")
     print(f"   M-K1 主控可保溫閒置後重寫：{k1['count']} 件／{k1['tokens']:,} tok"
           "（基線 21 件，目標 ≤2）")
@@ -140,6 +171,29 @@ def print_metrics(got: dict, pop: dict) -> None:
     print(f"   M-K6 換手 {k6['spawns']} 次；新 session 前 {sk.F_TURNS} 回合實付 "
           f"n={k6['f_paid_n']} 中位 {_u(paid['median'])} 單位")
     print(f"   機制自身痕跡：{got['trace']}（0＝尚無資料或機制沒觸發，不是好消息）")
+    print_wall_metrics(got)
+
+
+def print_wall_metrics(got: dict) -> None:
+    k7, k8, k9 = got["m_k7"], got["m_k8"], got["m_k9"]
+    print(f"   M-K7 額度牆冷重寫：{k7['count']} 件／{k7['tokens']:,} tok／{_u(k7['units'])} 單位"
+          "（牆後回來整份重寫；M-K1 不再重複計）")
+    print(f"   M-K8 保溫成效：run {len(k8['runs'])}（(sid, reset) {k8['windows']} 組）：chain "
+          f"{k8['chain']}／single {k8['single']}／periodic {k8['periodic']}／已交棒 "
+          f"{k8['handed_over']}／未終結 {k8['open']}；跨重置保住快取 {k8['cross_ok']}、沒保住 "
+          f"{k8['cross_fail']}、量不到 {k8['cross_unknown']}；省下 {_u(k8['saved_units'])} 單位")
+    print(f"        備援觸發 {k8['fired']}／讓路 {k8['yield']}；牆 {k8['walls']} 面中牆前無觸發 "
+          f"{k8['no_trigger_walls']}；牆中靜音 Stop {k8['stop_muted']} 次")
+    failed, lost = k9["failed"], k9["not_resumed"]
+    print(f"   M-K9 park 到點結局：job {k9['jobs']}＝fired {k9['fired']}／skipped {k9['skipped']}／"
+          f"failed {failed['count']} {failed['reasons']}／無終態 {k9['unresolved']}")
+    for item in failed["items"]:
+        print(f"        failed：{item['sid']} {item['at']} 原因 {item['reasons']}")
+    print(f"        宣稱已排程但未續上 {lost['count']} 件（已判 {lost['judged']}、reset＋"
+          f"{sw.NOT_RESUMED_MIN} 分未到而待判 {lost['pending']}）")
+    for item in lost["items"]:
+        print(f"        未續上：{item['sid']} 排程於 {item['armed_at']}"
+              f"（reset {item['reset_at']}）")
 
 
 def print_replay(r: dict) -> None:
@@ -184,8 +238,23 @@ def print_calibration(c: dict) -> None:
           f"{rc['write_share_ge_80pct_cold']} 筆")
 
 
+def print_wall_calibration(c: dict) -> None:
+    """三鍵建議值；輸出只含輸入的函式（無時間、無路徑），同輸入兩次逐位元組相同（REQ-QW-52）。"""
+    print(f"== 額度牆校準建議值（量測值；不寫任何設定檔，寫入須人審後另行 commit；"
+          f"區間 < {c['min_n']} ⇒ 未校準）==")
+    rows = (("PP", sw.KEY_PP, c["pp"], "{:.4f}", "pp／每千加權單位（一次保溫＝p(c)/1000×此值）"),
+            ("BURN", sw.KEY_BURN, c["burn"], "{:.3f}", "pp／分（活躍區間 p75）"),
+            ("AGENT", sw.KEY_AGENT, c["agent"], "{:.2f}", "pp（在飛代理收尾預估，p75）"))
+    for _name, key, item, fmt, note in rows:
+        if item["rec"] is None:
+            print(f"   {key}：未校準（{item['reason']}）")
+        else:
+            print(f"   {key}={fmt.format(item['rec'])}  區間 n={item['n']}；{note}")
+    print(f"   PP 區間來源：{c['pp']['sources']}；Δ 合計 {c['pp']['sum_delta']:g} pp")
+
+
 def run(args, base: Path, trace_file: Path) -> int:
-    """三個旗標共用的進入點；`args` 來自 report 的 parser。回 rc（量測探針，成功恆 0）。"""
+    """四個旗標共用的進入點；`args` 來自 report 的 parser。回 rc（量測探針，成功恆 0）。"""
     if args.population:
         pop = read_population(Path(args.population))
     else:
@@ -196,8 +265,15 @@ def run(args, base: Path, trace_file: Path) -> int:
     traces = _jsonl(trace_file)
     body: dict = {}
     if args.switch_metrics:
-        body["metrics"] = sk.switch_metrics(pop, traces)
+        oldwin = _jsonl(Path(args.oldwin_file) if args.oldwin_file
+                        else trace_file.parent / "oldwin" / "events.jsonl")
+        body["metrics"] = sk.switch_metrics(pop, traces, oldwin)
         print_metrics(body["metrics"], pop)
+    if args.calibrate_quotawall:
+        burn = _jsonl(Path(args.burn_file) if args.burn_file
+                      else trace_file.parent / "quota_burn.jsonl")
+        body["calibrate_quotawall"] = sw.calibrate_quotawall(pop, traces, burn)
+        print_wall_calibration(body["calibrate_quotawall"])
     if args.replay_switch:
         body["replay"] = sk.replay_all(pop, args.ping_min)
         print_replay(body["replay"])

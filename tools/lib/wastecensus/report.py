@@ -104,7 +104,18 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--switch-metrics",
         action="store_true",
-        help="換 session 成本量測 M-K1～M-K6（設計 SessionSwitch_CostModel_Design §2）",
+        help="換 session 成本量測 M-K1～M-K9（設計 SessionSwitch_CostModel_Design §2；"
+        "M-K7～M-K9 額度牆量測見 QuotaWall_CacheContinuity_Design §15）",
+    )
+    ap.add_argument(
+        "--calibrate-quotawall",
+        action="store_true",
+        help="額度牆三鍵建議值（S-3／S-4／S-15）；只印不寫，區間 <8 印「未校準」",
+    )
+    ap.add_argument(
+        "--oldwin-file",
+        default=None,
+        help="oldwin 痕跡檔（預設痕跡檔旁 oldwin/events.jsonl）",
     )
     ap.add_argument(
         "--replay-switch",
@@ -246,7 +257,8 @@ def _run_replay(args: argparse.Namespace, base: Path) -> int:
 def main(argv: list[str]) -> int:
     args = _build_parser().parse_args(argv)
     base = Path(args.base)
-    if args.switch_metrics or args.replay_switch or args.calibrate_switch:
+    if (args.switch_metrics or args.replay_switch or args.calibrate_switch
+            or args.calibrate_quotawall):
         from . import keep_load  # noqa: PLC0415 — lazy
 
         if not args.population and not base.is_dir():

@@ -301,7 +301,7 @@ class SnapshotAndEntryPointTest(unittest.TestCase):
             body = json.loads(snap.read_text(encoding="utf-8"))
             # 沒有對話內容：每個 session 只有結構欄位，回合只有 usage／時間戳／起因／工具名
             self.assertEqual(sorted(body["main"][0]),
-                             ["compactions", "handoff_start", "kw_calls", "sid", "turns"])
+                             ["compactions", "handoff_start", "kw_calls", "sid", "turns", "walls"])
             self.assertEqual(sorted(body["main"][0]["turns"][0]),
                              sorted(("ts_first", "ts_last", "inp", "cc", "cr", "out", "cc5",
                                      "cc1", "cause", "tools")))
