@@ -8,10 +8,9 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 from ..driver import EnvMissing
-from ..sandbox import REPO, main_checkout_root, slug_of
+from ..sandbox import REPO, main_checkout_root, projects_dir, slug_of
 from ..transcript import Transcript
 from . import CaseContext, case
 from .sessionctl_handoff import (
@@ -160,7 +159,7 @@ def _census_base_args() -> list[str]:
     main = main_checkout_root()
     if main == REPO:
         return []
-    base = Path.home() / ".claude" / "projects" / slug_of(main)
+    base = projects_dir() / slug_of(main)
     if not base.is_dir():
         raise EnvMissing(f"RV-C3 在 git worktree（{REPO}）內跑，事故逐字稿母體應在主 checkout 的專案目錄 {base}，但該目錄不存在")  # noqa: E501
     return ["--base", str(base)]

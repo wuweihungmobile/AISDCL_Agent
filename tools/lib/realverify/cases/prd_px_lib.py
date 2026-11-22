@@ -1,7 +1,8 @@
 """RV-PX 家族共用 helper（不登記案例）：載具 E（T5 端點替身＝本機 TLS CONNECT 代理）與沙盒環境組裝。
 
 載具 E 的結構（TCS-WorkProgress §10.3「載具」表）：被測行程（`session_resume_planner.py --pace`）以
-`urllib.request.urlopen` 打 `https://api.anthropic.com/api/oauth/usage`；預設 opener 讀 `HTTPS_PROXY`，
+`urllib.request.urlopen` 打額度取數端點（常數 `quota_meter.USAGE_URL`，端點字面只准住該檔，
+PRD §15.5 紅線 1 條件 (b)）；預設 opener 讀 `HTTPS_PROXY`，
 預設 SSL context 讀 `SSL_CERT_FILE`。本替身是一個 CONNECT 代理：回 200 後以自簽 CA 簽發的
 `api.anthropic.com` 葉憑證做伺服端 TLS 交握，逐筆記錄請求（方法、路徑、時間、是否帶 Authorization），
 回應由案例給的腳本決定。CA 與假憑證檔只放沙盒；`HTTPS_PROXY`／`SSL_CERT_FILE`／`CLAUDE_CONFIG_DIR`

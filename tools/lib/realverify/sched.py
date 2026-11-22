@@ -10,6 +10,7 @@ import base64
 import contextlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -17,8 +18,6 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from lib.win_spawn import quiet_python
-
-from .driver import EnvMissing
 
 PREFIX = "AutoSDD_RV_"
 LOCK_PATH = Path(tempfile.gettempdir()) / "AutoSDD_RV_sched.lock"
@@ -34,6 +33,7 @@ def rv_name(suffix: str) -> str:
 
 def _ps(script: str, timeout: int = 60) -> tuple[int, str]:
     if os.name != "nt":
+        from .driver import EnvMissing  # noqa: PLC0415 — lazy：driver→sandbox→leases→sched 會成環
         raise EnvMissing("真 schtasks 案例只在 Windows 可跑")
     exe = "powershell.exe" if os.name == "nt" else ""
     enc = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
@@ -69,10 +69,39 @@ def sched_lock(timeout_s: int = 1800) -> Iterator[None]:
             LOCK_PATH.unlink()
 
 
+_TASK_NAME_RE = re.compile(r"^AutoSDD_[A-Za-z0-9_.\-]+$")
+
+
+def task_name(name: str) -> str:
+    """撤銷／回讀用的工作名：`AutoSDD_` 起頭者（產品正式前綴，如 `AutoSDD_HandoffSpawn_*`、
+    `AutoSDD_Sentinel_*`；字元集限定，免得名字被拿去拼進 PowerShell 腳本）原樣用，其餘走 `rv_name`。"""  # noqa: E501
+    if name.startswith("AutoSDD_") and not name.startswith(PREFIX):
+        if not _TASK_NAME_RE.match(name):
+            raise ValueError(f"排程名含不允許字元：{name!r}")
+        return name
+    return rv_name(name)
+
+
+def list_actions(pattern: str = "AutoSDD_*") -> dict[str, str]:
+    """`{工作名: "<Execute> <Arguments> <WorkingDirectory>"}`（發現式掃描判斷 Action 含沙盒字樣用）。
+    非 Windows 回空表（真 schtasks 載具只在 Windows）。"""  # noqa: E501
+    if os.name != "nt":
+        return {}
+    rc, out = _ps(
+        f"Get-ScheduledTask | Where-Object TaskName -like '{pattern}' | ForEach-Object {{ "
+        "$a = $_.Actions[0]; [pscustomobject]@{n=$_.TaskName; "
+        "a=(@($a.Execute, $a.Arguments, $a.WorkingDirectory) -join ' ')} } | ConvertTo-Json -Compress")  # noqa: E501
+    if rc != 0 or not out:
+        return {}
+    data = json.loads(out)
+    rows = [data] if isinstance(data, dict) else data
+    return {r["n"]: r["a"] for r in rows}
+
+
 def read_back(name: str) -> dict | None:
     """回讀工作：{state, next_run_time, logon_type, execute, arguments}；不存在回 None。
     憑證是 NextRunTime 這個「值」，不是 rc（Get-ScheduledTask 對不存在的工作 rc 也是 0）。"""
-    name = rv_name(name)
+    name = task_name(name)
     rc, out = _ps(
         f"$t = Get-ScheduledTask -TaskName '{name}' -ErrorAction SilentlyContinue; if (-not $t) {{ exit 0 }}; "  # noqa: E501
         f"$i = $t | Get-ScheduledTaskInfo; $a = $t.Actions[0]; "
@@ -116,7 +145,7 @@ def register_once(name: str, run_at_local_iso: str, arguments: str, *,
 
 
 def remove(name: str) -> None:
-    name = rv_name(name)
+    name = task_name(name)
     _ps(f"Unregister-ScheduledTask -TaskName '{name}' -Confirm:$false -ErrorAction SilentlyContinue")  # noqa: E501
 
 

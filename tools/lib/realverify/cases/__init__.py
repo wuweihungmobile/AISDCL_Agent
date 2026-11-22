@@ -14,9 +14,12 @@ import pkgutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from .. import leases, sched
+from lib import sandbox_scope
+
+from .. import fakeclaude, leases, sched, snapshot
 from ..driver import RunResult, run_claude
 from ..sandbox import Sandbox, kept_dir
 from ..transcript import Transcript
@@ -34,16 +37,18 @@ class Case:
     refs: tuple[str, ...] = ()
     long: bool = False  # 長等案例（如保溫 55 分鐘）：只在 --long／nightly 跑
     uses_sched: bool = False  # 用真 schtasks：runner 以全域鎖串行
+    lease_minutes: int = 0  # 宣告的租約上限（分；0＝用 `sandbox_scope.LEASE_MAX`，上限 `LEASE_CAP`，REQ-SE-03）  # noqa: E501
 
 
 REGISTRY: dict[str, Case] = {}
 
 
-def case(case_id: str, family: str, *, refs: tuple[str, ...] = (), long: bool = False, sched: bool = False):  # noqa: E501
+def case(case_id: str, family: str, *, refs: tuple[str, ...] = (), long: bool = False, sched: bool = False,  # noqa: E501
+         lease_minutes: int = 0):
     def deco(fn: Callable[[CaseContext], None]):
         if case_id in REGISTRY:
             raise ValueError(f"重複的案例 id：{case_id}")
-        REGISTRY[case_id] = Case(case_id, family, fn, tuple(refs), long, sched)
+        REGISTRY[case_id] = Case(case_id, family, fn, tuple(refs), long, sched, lease_minutes)
         return fn
     return deco
 
@@ -55,6 +60,8 @@ class CaseContext:
     sched_names: list[str] = field(default_factory=list)
     evidences: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    lease_minutes: int = 0
+    extra_tokens: list[str] = field(default_factory=list)  # 快照字樣補充（例：正式目標替身 repo 的名稱／sid）  # noqa: E501
 
     # ---- 建構 ----
     def sandbox(self, probe_hooks: bool = True) -> Sandbox:
@@ -82,6 +89,32 @@ class CaseContext:
         self.sched_names.append(n)
         return n
 
+    # ---- 副作用租約與替身（REQ-SE-03／27／50）----
+    def grant_side_effects(self, sb: Sandbox, minutes: int | None = None, window: bool = True) -> datetime:  # noqa: E501
+        """授與沙盒租約（預設拒絕，案例當下明示；存 `min(now+minutes, now+min(宣告上限, LEASE_CAP))`）。
+        `window=True` 先 `interactive.assert_trusted(sb)`——不過即 `NotTrusted`（判 ENV，不寫身分檔）；
+        身分檔 `window=true` 是 D-18 唯一允許「沙盒目標用沙盒外執行檔」的授權（REQ-SE-50）。
+        `window=False`＝只授租約（配合假 `claude` 的案例，不碰 F5 信任）。回實際存下的 `allow_until`。"""  # noqa: E501
+        from .. import (
+            interactive,  # noqa: PLC0415 — lazy：interactive 頂層會 import leases／sandbox
+        )
+        if window:
+            interactive.assert_trusted(sb)
+        now = datetime.now().astimezone()
+        cap = self.lease_minutes or sandbox_scope.LEASE_MAX
+        return sandbox_scope.grant(sb.home, until=now + timedelta(minutes=minutes or cap), now=now,
+                                   max_minutes=cap, window=window)
+
+    def fake_claude(self, sb: Sandbox, mode: str = "fail", *, sleep: int | None = None, rc: int | None = None,  # noqa: E501
+                    projdir: Path | str | None = None) -> Path:
+        """在沙盒家目錄編出假 `claude`（`<家>/bin/claude.exe`）並寫設定檔；回執行檔路徑。預設模式 `fail`。"""  # noqa: E501
+        exe = fakeclaude.build(sb.home)
+        fakeclaude.configure(sb.home, mode, sleep=sleep, rc=rc, projdir=projdir)
+        return exe
+
+    def tokens(self) -> list[str]:
+        return snapshot.tokens_for(self.sandboxes, leases.current_run_id()) + self.extra_tokens
+
     # ---- 斷言／證據 ----
     def check(self, cond: bool, msg: str) -> None:
         if not cond:
@@ -104,11 +137,20 @@ class CaseContext:
 
     # ---- 收尾（runner 的 finally 呼叫；案例本身不用管）----
     def close(self) -> list[str]:
+        """收尾順序（REQ-SE-31／AT-SE-23）：**第一步撤全部沙盒租約**（拆到一半時到點的 job 必被 L1 拒），
+        再撤排程、拆行程與目錄、最後收帳上其餘載具暫存（假 claude、探針 log…）。"""  # noqa: E501
         out: list[str] = []
+        for sb in self.sandboxes:
+            try:
+                sandbox_scope.revoke(sb.home)
+            except Exception:  # noqa: BLE001 — 身分檔已不在＝沒有租約可撤
+                pass
         if self.sched_names:
-            out += [f"RESIDUE sched {n}" for n in leases.revoke_run()]
+            out += [f"RESIDUE sched {n}" for n in leases.revoke_run_kinds(("sched_job",))]
         for sb in self.sandboxes:
             out += sb.cleanup()
+        out += [f"RESIDUE ledger {i}" for i in leases.revoke_run_kinds(
+            ("temp_file", "worktree", "sandbox_root", "transcript_dir"))]
         return out
 
 

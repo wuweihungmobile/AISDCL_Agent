@@ -102,11 +102,14 @@ def wake_chain(ctx: CaseContext, sb: Sandbox, *, notify: bool) -> dict:
     stop = threading.Event()
     th = threading.Thread(target=_spawn_watch, args=(sb, seen, stop), daemon=True)
     th.start()
-    extra = {"AUTOSDD_DESKTOP_NOTIFY": "1"} if notify else {}
+    # WHY（D-20）：通知開啟值只准關閉值進 job 環境；wake tick 會重排哨兵＝登記，帶 `AUTOSDD_DESKTOP_NOTIFY=1`
+    # 對沙盒目標登記 ⇒ rc 2。重投需要通知開啟值，所以改由**不登記**的 junk tick 承擔（見下）。
     t0 = time.time()
-    r2 = tick(sb, plan, **base, **extra)
+    r2 = tick(sb, plan, **base)
     stop.set()
     th.join(timeout=5)
+    if notify:  # 重投：不登記的 junk tick（第一次投遞已入列，這一輪巡邏重投並寫 delivered 憑證）
+        planner(sb, "--sentinel-tick", "--plan", str(junk), "--task-name", "AutoSDD_Sentinel_junk", AUTOSDD_DESKTOP_NOTIFY="1", **base)
     out.update(r2=r2, spawn_cmds=seen, t0=t0)
     out["states"].append(("after_wake", relay_state(plan).get("state")))
     return out

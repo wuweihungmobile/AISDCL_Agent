@@ -20,7 +20,7 @@ _TOOLS = Path(__file__).resolve().parents[1]
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 
-from lib.realverify import leases, runner, sched  # noqa: E402
+from lib.realverify import leases, leases_discover, runner, sched  # noqa: E402
 
 NOW = datetime(2026, 11, 21, 12, 0, 0).astimezone()
 STARTED = "2026-11-21T10:00:00+08:00"
@@ -89,7 +89,7 @@ class LedgerBeforeActionTest(_Base):
 
     def test_unknown_kind_is_refused_loudly(self):
         with self.assertRaises(ValueError):
-            leases.append("r", "process", "x", "intent")
+            leases.append("r", "bogus_kind", "x", "intent")
 
     def test_sched_script_carries_endboundary_and_delete_expired_only_when_asked(self):
         with mock.patch.object(sched, "_ps", return_value=(0, "")) as ps, \
@@ -188,14 +188,17 @@ class RunnerWiringTest(_Base):
         return runner.Case("RV-T-s", "t", lambda ctx: None, (), False, True)
 
     def test_orphan_that_cannot_be_revoked_refuses_the_whole_batch(self):
-        with mock.patch.object(leases, "replay", return_value=["AutoSDD_RV_z"]), \
+        stuck = ([], {"AutoSDD_RV_z": "stuck"})
+        with mock.patch.object(leases_discover, "preflight", return_value=stuck), \
+                mock.patch.object(leases_discover, "refusal_handback", return_value=None), \
                 mock.patch.object(runner, "run_case") as rc:
             self.assertEqual(runner.run("t", [self._case()], write_ledger=False), 2)
         rc.assert_not_called()
 
     def test_leaked_task_after_batch_fails_the_run(self):
         passed = runner.Outcome("RV-T-s", "pass")
-        with mock.patch.object(leases, "replay", return_value=[]), \
+        with mock.patch.object(leases_discover, "preflight", return_value=([], {})), \
+                mock.patch.object(runner, "_take", return_value=None), \
                 mock.patch.object(runner, "run_case", return_value=passed), \
                 mock.patch.object(sched, "sched_lock", mock.MagicMock()), \
                 mock.patch.object(leases, "revoke_run", return_value=[]), \

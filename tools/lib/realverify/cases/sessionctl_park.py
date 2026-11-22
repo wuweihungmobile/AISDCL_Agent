@@ -24,15 +24,19 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from .. import sched
+from lib import sandbox_scope
+
+from .. import leases, sched
 from ..driver import EnvMissing
-from ..sandbox import REPO, Sandbox, cleanup_handoff_for
+from ..sandbox import LOCAL_EXCLUDES, REPO, Sandbox
 from . import CaseContext, case
 
 PY = str(REPO / ".venv" / "Scripts" / "python.exe") if (REPO / ".venv" / "Scripts" / "python.exe").is_file() else sys.executable  # noqa: E501
 _NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _COPY_IGNORE = shutil.ignore_patterns("tests", "act", "git-hooks", "__pycache__", ".pytest_cache", ".ruff_cache", "*.pyc")  # noqa: E501
-_EXCLUDES = "debug_*.log\nhook_events.jsonl\ntraces/\nqcache/\nplans/\n__pycache__/\n*.pyc\n.claude/settings.local.json\nstdin_*.txt\ntmp/\n"  # noqa: E501
+# 由 `sandbox.LOCAL_EXCLUDES`（身分檔、7 居所、bin、替身設定）推得，再加本家族案例自己的暫存樣式（D-23）  # noqa: E501
+_EXCLUDES = "\n".join([*LOCAL_EXCLUDES, "debug_*.log", "hook_events.jsonl", "__pycache__/", "*.pyc",
+                       ".claude/settings.local.json", "stdin_*.txt", "tmp/"]) + "\n"
 
 
 # ───────────────────────────────────────────────────────────────── 通用 helper
@@ -62,13 +66,9 @@ def tasks_like(pattern: str) -> list[str]:
 
 
 def remove_tasks_like(pattern: str) -> list[str]:
-    """依精確前綴（含沙盒 sid）移除；pattern 必須帶完整 sid 或 sid8，絕不接受寬泛樣式。"""
-    if not re.search(r"[0-9a-f]{8}", pattern):
-        raise ValueError(f"拒絕寬泛樣式：{pattern}")
-    gone = tasks_like(pattern)
-    for n in gone:
-        ps(f"Unregister-ScheduledTask -TaskName '{n}' -Confirm:$false -ErrorAction SilentlyContinue")  # noqa: E501
-    return gone
+    """薄殼（REQ-SE-34）：依精確前綴（含沙盒 sid）撤排程——排程撤銷全套件唯一家是 `leases.revoke_sched_like`；
+    pattern 必須帶完整 sid 或 sid8，絕不接受寬泛樣式。"""  # noqa: E501
+    return leases.revoke_sched_like(pattern)
 
 
 def claude_procs(sid: str) -> list[dict]:
@@ -98,10 +98,6 @@ def kill_verified(sid: str, *, interactive_only: bool = True) -> list[int]:
     return killed
 
 
-def real_trace_dir() -> Path:
-    return Path.home() / ".autosdd" / "traces"
-
-
 def install_tools(sb: Sandbox) -> None:
     """工具副本沙盒（見模組 docstring）：複製 tools／unattended 姿態檔，commit，之後工作樹必須乾淨。"""  # noqa: E501
     shutil.copytree(REPO / "tools", sb.root / "tools", ignore=_COPY_IGNORE)
@@ -118,20 +114,42 @@ def tree_clean(sb: Sandbox) -> str:
     return r.stdout.strip()
 
 
-def ctl_env(sb: Sandbox, *, real_traces: bool = False, extra: dict | None = None) -> dict:
+def ctl_env(sb: Sandbox, *, arm_sentinel: bool = False, extra: dict | None = None) -> dict:
+    """沙盒一律帶 `AUTOSDD_SENTINEL_OFF=1`（D-25：撤除舊的無條件 pop）；需要真武裝沙盒哨兵的案例顯式
+    `arm_sentinel=True`，且呼叫點上方三行內必須有 `# WHY` 註解（AT-SE-18 AST 鎖）。居所一律在沙盒家目錄下
+    （`real_traces` 已撤，REQ-SE-23）。"""  # noqa: E501
     e = sb.env()
     e["PYTHONDONTWRITEBYTECODE"] = "1"
-    e.pop("AUTOSDD_SENTINEL_OFF", None)
-    e["AUTOSDD_QUOTA_CACHE_DIR"] = str(sb.root / "qcache")
-    if real_traces:
-        e.pop("AUTOSDD_TRACE_DIR", None)
+    if arm_sentinel:
+        e.pop("AUTOSDD_SENTINEL_OFF", None)
     e.update(extra or {})
     return e
 
 
-def ctl(sb: Sandbox, *args: str, real_traces: bool = False, extra: dict | None = None, timeout: int = 180) -> subprocess.CompletedProcess:  # noqa: E501
-    return run([PY, str(sb.root / "tools" / "sessionctl.py"), *args], cwd=sb.root,
-               env=ctl_env(sb, real_traces=real_traces, extra=extra), timeout=timeout)
+_NO_REGISTER = ("--done", "--cancel", "--status")
+
+
+def ensure_fake_claude(sb: Sandbox) -> Path:
+    """沙盒的假 `claude`（`<家>/bin/claude.exe`，模式 `fail`）；每個沙盒只編一次。"""
+    from .. import fakeclaude  # noqa: PLC0415
+    exe = sb.home / fakeclaude.EXE_REL
+    if not exe.is_file():
+        fakeclaude.build(sb.home)
+        fakeclaude.configure(sb.home, "fail")
+    return exe
+
+
+def ctl(sb: Sandbox, *args: str, extra: dict | None = None, timeout: int = 180, lease_min: int = sandbox_scope.LEASE_MAX) -> subprocess.CompletedProcess:  # noqa: E501
+    """跑沙盒內的 `sessionctl.py`。會**登記 park 排程**的呼叫（`park` 且非 done／cancel／status）先授與預設
+    租約並帶 `--claude <沙盒假 claude>`：沙盒目標預設拒絕（L1），到點 job 的每次 spawn 嘗試都只准打替身
+    （D-14／D-18）——案例不得靠真 `claude` 通過。"""  # noqa: E501
+    argv = list(args)
+    if argv[:1] == ["park"] and not any(a in argv for a in _NO_REGISTER) and "--claude" not in argv:
+        now = datetime.now().astimezone()
+        sandbox_scope.grant(sb.home, until=now + timedelta(minutes=lease_min), now=now, max_minutes=lease_min)  # noqa: E501
+        argv += ["--claude", str(ensure_fake_claude(sb))]
+    return run([PY, str(sb.root / "tools" / "sessionctl.py"), *argv], cwd=sb.root,
+               env=ctl_env(sb, extra=extra), timeout=timeout)
 
 
 def write_quota(sb: Sandbox, axes: list[dict]) -> None:
@@ -189,7 +207,7 @@ def seed_session(ctx: CaseContext, sb: Sandbox) -> Path:
 
 def make_package(ctx: CaseContext, sb: Sandbox) -> Path:
     """`handoff --build` ＋ 填滿主控層（機械層是真的）；回交接包路徑（真目錄，檔名以沙盒 sid 開頭）。"""  # noqa: E501
-    r = ctl(sb, "handoff", "--build", "--session-id", sb.sid, real_traces=True)
+    r = ctl(sb, "handoff", "--build", "--session-id", sb.sid)
     ctx.check(r.returncode == 0, f"handoff --build rc={r.returncode} {r.stderr[:300]}")
     pkg = Path(r.stdout.strip().splitlines()[-1])
     ctx.check(pkg.is_file() and pkg.name.startswith(sb.sid), f"交接包路徑不合：{pkg}")
@@ -208,8 +226,9 @@ def read_marker(sid: str, base: Path) -> dict | None:
 
 
 @contextlib.contextmanager
-def park_cleanup(sb: Sandbox, *, real: bool = False):
-    """finally：依沙盒 sid 精確移除 park 排程／標記、收視窗；並斷言排程查不到。"""
+def park_cleanup(sb: Sandbox):
+    """finally：依沙盒 sid 精確撤 park 排程（薄殼，委派 `leases.revoke_sched_like`）、收視窗；居所都在沙盒
+    家目錄下，隨沙盒一起刪（不再碰真 `~/.autosdd`，REQ-SE-23／34）。"""  # noqa: E501
     try:
         yield
     finally:
@@ -217,13 +236,6 @@ def park_cleanup(sb: Sandbox, *, real: bool = False):
         remove_tasks_like(f"AutoSDD_HandoffSpawn_{sid8}_*")
         remove_tasks_like(f"AutoSDD_Sentinel_{sb.sid}")
         kill_verified(sb.sid)
-        for base in ([real_trace_dir()] if real else []):
-            (base / "park" / f"{sb.sid}.json").unlink(missing_ok=True)
-        for pat in (f"{sb.sid}*",):
-            for d in (Path.home() / ".autosdd" / "handback",):
-                for f in (d.glob(pat) if d.is_dir() else []):
-                    f.unlink(missing_ok=True)
-        cleanup_handoff_for(sb.sid)
         force_rmtree(sb.root / ".git")  # git 物件檔唯讀：核心的 rmtree(ignore_errors) 刪不掉，會留殘骸  # noqa: E501
         force_rmtree(sb.root / "tools")
 
@@ -240,7 +252,7 @@ def force_rmtree(path: Path) -> None:
         shutil.rmtree(path, onerror=_onerr)
 
 
-def park_arm(ctx: CaseContext, sb: Sandbox, *, lead_s: float = 100, real: bool = False, why: str = "realverify 案例：沙盒續航", age_s: float = 0) -> tuple[Path, dict]:  # noqa: E501
+def park_arm(ctx: CaseContext, sb: Sandbox, *, lead_s: float = 100, why: str = "realverify 案例：沙盒續航", age_s: float = 0) -> tuple[Path, dict]:  # noqa: E501
     """建 session＋交接包＋`park --at`；回 (交接包, 標記)。工作樹必須乾淨（否則前置必拒，直接 fail 並列出）。
     `age_s`＞0：把沙盒逐字稿時間戳往前推（讓「到點時沒人在動」成立）。"""  # noqa: E501
     tp = seed_session(ctx, sb)
@@ -249,9 +261,9 @@ def park_arm(ctx: CaseContext, sb: Sandbox, *, lead_s: float = 100, real: bool =
     pkg = make_package(ctx, sb)
     dirty = tree_clean(sb)
     ctx.check(not dirty, f"沙盒工作樹不乾淨，park 前置會拒：{dirty[:200]}")
-    r = ctl(sb, "park", "--session-id", sb.sid, "--at", iso_in(lead_s), "--why", why, "--pkg", str(pkg), real_traces=real)  # noqa: E501
+    r = ctl(sb, "park", "--session-id", sb.sid, "--at", iso_in(lead_s), "--why", why, "--pkg", str(pkg))  # noqa: E501
     ctx.check(r.returncode == 0, f"park rc={r.returncode} stdout={r.stdout[-300:]} stderr={r.stderr[-400:]}")  # noqa: E501
-    base = real_trace_dir() if real else sb.root / "traces"
+    base = sb.home / "traces"
     mk = read_marker(sb.sid, base)
     ctx.check(mk is not None and mk["status"] == "armed", f"沒有 armed 標記：{mk}")
     ctx.check("PARK_VERDICT=armed" in r.stdout, f"stdout 缺 PARK_VERDICT=armed：{r.stdout[-300:]}")
@@ -300,8 +312,8 @@ def rv_k1(ctx: CaseContext) -> None:
     到點行為的另一半（跳過判準）由 RV-K2 真排程觸發驗到。"""  # noqa: E501
     sb = ctx.sandbox(probe_hooks=False)
     install_tools(sb)
-    with park_cleanup(sb, real=True):
-        pkg, mk = park_arm(ctx, sb, real=True, age_s=7200)
+    with park_cleanup(sb):
+        pkg, mk = park_arm(ctx, sb, age_s=7200)
         t = check_armed_task(ctx, mk)
         label = mk["jobs"][0]["label"]
         ctx.check(Path(t["workdir"]).resolve() == sb.root.resolve(), f"job WorkingDirectory={t['workdir']} 不是沙盒根")  # noqa: E501
@@ -312,7 +324,7 @@ def rv_k1(ctx: CaseContext) -> None:
         ctx.check(str(sb.root / "tools" / "sessionctl.py") in args, "Action 沒指向沙盒內的 sessionctl.py")  # noqa: E501
         ctx.check(Path(t["execute"]).name.lower() == "pythonw.exe", f"載具不是 pythonw：{t['execute']}")  # noqa: E501
         # 撤銷：排程不留（cancel 之後 Get-ScheduledTask 查不到）
-        c = ctl(sb, "park", "--cancel", "--session-id", sb.sid, real_traces=True)
+        c = ctl(sb, "park", "--cancel", "--session-id", sb.sid)
         ctx.check(c.returncode == 0 and get_task(label) is None, f"cancel 後仍查得到排程 rc={c.returncode}")  # noqa: E501
         ctx.check(not claude_procs(sb.sid), "不該有任何含沙盒 sid 的 claude 行程（本案例不開視窗）")
         ctx.evidence(f"RV-K1 Action 命令列含 --fire／sid／pkg／job 名；execute={Path(t['execute']).name}")  # noqa: E501
@@ -324,24 +336,24 @@ def rv_k2(ctx: CaseContext) -> None:
     """到點前沙盒 session 有人在動（真 `claude -p -r` 寫新對話記錄）⇒ job 跳過（live_driver）、不 spawn、自拆。"""  # noqa: E501
     sb = ctx.sandbox(probe_hooks=False)
     install_tools(sb)
-    with park_cleanup(sb, real=True):
+    with park_cleanup(sb):
         seed_session(ctx, sb)
         age_transcript(transcript_path(sb), 7200)  # 先老化：證明「跳過」是下一句話造成的、不是本來就老  # noqa: E501
         pkg = make_package(ctx, sb)
-        r = ctl(sb, "park", "--session-id", sb.sid, "--at", iso_in(100), "--why", "realverify K2 有人在動", "--pkg", str(pkg), real_traces=True)  # noqa: E501
+        r = ctl(sb, "park", "--session-id", sb.sid, "--at", iso_in(100), "--why", "realverify K2 有人在動", "--pkg", str(pkg))  # noqa: E501
         ctx.check(r.returncode == 0, f"park rc={r.returncode} {r.stderr[-300:]}")
-        mk = read_marker(sb.sid, real_trace_dir())
+        mk = read_marker(sb.sid, sb.home / "traces")
         label = mk["jobs"][0]["label"]
         r2 = ctx.run_claude(sb, "Reply with exactly: still here")
         ctx.check(r2.rc == 0, f"到點前的 -r 呼叫 rc={r2.rc}")
         ctx.check(get_task(label) is not None, "到點前排程不該已消失")
 
         def done():
-            return get_task(label) is None and (read_marker(sb.sid, real_trace_dir()) or {}).get("status") != "armed"  # noqa: E501
+            return get_task(label) is None and (read_marker(sb.sid, sb.home / "traces") or {}).get("status") != "armed"  # noqa: E501
 
         ctx.check(bool(wait_until(done, 330, 3.0)), "到點後 job 沒自拆")
-        mk2 = read_marker(sb.sid, real_trace_dir())
-        skips = [r for r in trace_lines(real_trace_dir(), "autosdd_session_switch.jsonl", sb.sid) if r.get("event") == "handoff_spawn_skipped"]  # noqa: E501
+        mk2 = read_marker(sb.sid, sb.home / "traces")
+        skips = [r for r in trace_lines(sb.home / "traces", "autosdd_session_switch.jsonl", sb.sid) if r.get("event") == "handoff_spawn_skipped"]  # noqa: E501
         ctx.check(any(s.get("reason") == "live_driver" for s in skips), f"痕跡沒有 handoff_spawn_skipped reason=live_driver：{skips}")  # noqa: E501
         ctx.check(mk2["status"] == "skipped", f"標記應為 skipped：{mk2['status']}")
         ctx.check(not claude_procs(sb.sid), "跳過案例不該開出任何視窗")

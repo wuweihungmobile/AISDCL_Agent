@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from lib import sandbox_scope
+
 from ..sandbox import Sandbox
 from . import CaseContext, case
 from .sessionctl_park import (
@@ -22,6 +24,7 @@ from .sessionctl_park import (
     axis,
     ctl,
     ctl_env,
+    ensure_fake_claude,
     get_task,
     install_tools,
     iso_in,
@@ -36,7 +39,9 @@ PLANNER_REL = Path("tools") / "session_resume_planner.py"
 
 
 def _env(sb: Sandbox, **extra) -> dict:
-    e = ctl_env(sb, extra=extra)
+    # WHY：sentinel 家族的案例本體就是驗哨兵武裝／巡邏，必須真武裝沙盒哨兵；
+    # 一律在有效租約＋沙盒假 claude 內（L1／L2／D-18 兜底），收尾經 park_cleanup 撤。
+    e = ctl_env(sb, arm_sentinel=True, extra=extra)
     tmp = sb.root / "tmp"
     tmp.mkdir(exist_ok=True)
     e["TEMP"] = e["TMP"] = str(tmp)
@@ -44,8 +49,24 @@ def _env(sb: Sandbox, **extra) -> dict:
     return e
 
 
+_TRIGGERS = ("--arm-sentinel", "--sentinel-tick", "--probe-quota")
+
+
 def planner(sb: Sandbox, *args: str, timeout: int = 180, **extra) -> subprocess.CompletedProcess:
-    return run([PY, str(sb.root / PLANNER_REL), *args], cwd=sb.root, env=_env(sb, **extra), timeout=timeout)  # noqa: E501
+    """跑沙盒內 planner。會武裝哨兵／起 `claude` 的動詞（`_TRIGGERS`）先授與預設租約並帶 `--claude <沙盒假
+    claude>`：沙盒目標預設拒絕（L1），到點 tick 的每次 spawn 嘗試都只准打替身（D-14／D-18）。"""  # noqa: E501
+    argv = list(args)
+    if any(a in argv for a in _TRIGGERS):
+        grant_default(sb)
+        if not {"--claude", "--probe-command"} & set(argv):  # 案例自帶替身（--probe-command 是 --claude 的別名）就尊重  # noqa: E501
+            argv += ["--claude", str(ensure_fake_claude(sb))]
+    return run([PY, str(sb.root / PLANNER_REL), *argv], cwd=sb.root, env=_env(sb, **extra), timeout=timeout)  # noqa: E501
+
+
+def grant_default(sb: Sandbox) -> None:
+    """授與預設租約（`LEASE_MAX` 分；沙盒目標預設拒絕，案例當下明示，REQ-SE-03）。"""
+    now = datetime.now().astimezone()
+    sandbox_scope.grant(sb.home, until=now + timedelta(minutes=sandbox_scope.LEASE_MAX), now=now)
 
 
 def task_name(sb: Sandbox) -> str:

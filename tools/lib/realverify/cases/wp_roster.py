@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 from ..driver import EnvMissing
-from ..sandbox import REPO, slug_of
+from ..sandbox import REPO, claude_home, projects_dir, slug_of
 from . import CaseContext, case
 from .prd_px_lib import ev
 from .sessionctl_park import PY, run
@@ -38,7 +38,7 @@ print("A=" + json.dumps(sorted(procstop.alive_sids(procs or ()))))
 
 
 def _real_owner_dir() -> Path | None:
-    base = Path.home() / ".claude" / "projects"
+    base = projects_dir()
     for d in base.glob("*"):
         if (d / f"{OWNER}.jsonl").is_file():
             return d
@@ -93,7 +93,7 @@ def rv_t5(ctx: CaseContext) -> None:
     proc = subprocess.Popen([exe, "-p", "--model", "haiku", "--session-id", sb.sid, "--allowedTools=PowerShell,Bash", prompt], cwd=str(sb.root), env=sb.env(),  # noqa: S603
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     sb.procs.append(proc)
-    reg = Path.home() / ".claude" / "sessions"
+    reg = claude_home() / "sessions"
     row = None
     t0 = time.monotonic()
     while time.monotonic() - t0 < 90 and row is None and proc.poll() is None:

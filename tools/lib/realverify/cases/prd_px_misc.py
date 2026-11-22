@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import subprocess
 import time
 from datetime import datetime
-from pathlib import Path
 
-from ..sandbox import REPO
+from ..sandbox import REPO, real_autosdd
 from . import CaseContext
 from .prd_px_engine import run_engine, write_py_shim
 from .prd_px_lib import FAKE_TOKEN, ev, ok_responder, px, t5, t5_sandbox_env, usage_payload
@@ -56,7 +54,7 @@ def px20(ctx: CaseContext) -> None:
 
 def _feed_sample() -> dict:
     """本機真 feed 樣本（最近一份，取其 rate_limits／model／context_window 組成 statusLine payload）。"""  # noqa: E501
-    d = Path(os.path.expanduser("~")) / ".autosdd" / "context_feed"
+    d = real_autosdd("context_feed")  # 真 feed 樣本：唯讀
     files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []  # noqa: E501
     for p in files:
         doc = json.loads(p.read_text(encoding="utf-8"))

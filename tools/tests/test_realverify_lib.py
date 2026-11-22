@@ -34,6 +34,28 @@ from lib.realverify.transcript import Transcript, find_transcript  # noqa: E402
 
 SID = "11111111-2222-3333-4444-555555555555"
 
+_MODULE_PATCHES: list = []
+
+
+def setUpModule():
+    """本檔的測試都不得碰真環境：租約帳指到 tmp、行程列舉／快照／開頭重放換成空殼（真快照與真重放在
+    `test_realverify_se_*.py` 以假家目錄驗；這裡只驗載具本身的行為）。"""
+    from lib.realverify import leases, leases_discover, leases_undo  # noqa: PLC0415
+    tmp = tempfile.TemporaryDirectory()
+    _MODULE_PATCHES.append(tmp)
+    for p in (mock.patch.object(leases, "LEASE_DIR", Path(tmp.name) / "leases"),
+              mock.patch.object(leases_undo, "list_procs", return_value=[]),
+              mock.patch.object(runner, "_take", return_value=None),
+              mock.patch.object(leases_discover, "preflight", return_value=([], {}))):
+        p.start()
+        _MODULE_PATCHES.append(p)
+
+
+def tearDownModule():
+    for p in reversed(_MODULE_PATCHES):
+        p.stop() if hasattr(p, "stop") else p.cleanup()
+    _MODULE_PATCHES.clear()
+
 
 def _write_transcript(d: Path, recs: list[dict]) -> Path:
     p = d / f"{SID}.jsonl"

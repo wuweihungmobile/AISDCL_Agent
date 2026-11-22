@@ -12,7 +12,7 @@ from ..sandbox import REPO, Sandbox
 from . import CaseContext
 from .prd_px_lib import ev, px, t5, t5_sandbox_env
 from .prd_px_wake import events
-from .sentinel import arm, task_name, tick
+from .sentinel import arm, grant_default, task_name, tick
 from .sessionctl_park import (
     PY,
     age_transcript,
@@ -44,6 +44,7 @@ def px33(ctx: CaseContext) -> None:
     with t5(sb, lambda n, r: (429, {"Retry-After": "120"}, None)) as stub:
         env = t5_sandbox_env(sb, stub, RV_SHIM_LOG=str(log))
         t_start = time.time()
+        grant_default(sb)  # 沙盒目標預設拒絕（L1）：`--probe-quota` 會起 claude，須有租約；shim 在沙盒家目錄下
         r = run([PY, PLANNER, "--probe-quota", "--probe-command", str(shim)], cwd=sb.root, env=env, timeout=200)
         t_end = time.time()
     calls = log.read_text(encoding="utf-8").split() if log.is_file() else []
@@ -140,21 +141,21 @@ def px44(ctx: CaseContext) -> None:
     m = re.search(r"cap=(\w+) recommended=(\d+) band=(\w+)", out.stdout)
     ctx.check(bool(m) and m.group(1) == "0" and m.group(3) == "halt", f"halt 讀數應 cap=0 band=halt：{out.stdout[:500]}")
     ev(ctx, "rl2_freeze", f"cap={m.group(1)} recommended={m.group(2)} band={m.group(3)}（無超額路徑：gate_excluded=extra_usage 不參與）")
-    # 紅線 3／4：作業系統排程（park --at now＋5h）
+    # 紅線 3／4：作業系統排程（park --at now＋4h）
     sb3 = ctx.sandbox(probe_hooks=False)
     install_tools(sb3)
     with park_cleanup(sb3):
         seed_session(ctx, sb3)
         pkg = make_package(ctx, sb3)
-        at = iso_in(5 * 3600)
-        r = ctl(sb3, "park", "--session-id", sb3.sid, "--at", at, "--why", "realverify PX44 紅線3/4", "--pkg", str(pkg), real_traces=False)
+        at = iso_in(4 * 3600)  # 沙盒租約上限 LEASE_CAP＝300 分（fire 須 ≤ allow_until，D-15），故由 now＋5h 改 now＋4h；驗的仍是「等待由 OS 排程承擔」
+        r = ctl(sb3, "park", "--session-id", sb3.sid, "--at", at, "--why", "realverify PX44 紅線3/4", "--pkg", str(pkg), lease_min=300)
         ctx.check(r.returncode == 0, f"park rc={r.returncode} {r.stderr[-300:]}")
         names = tasks_like(f"AutoSDD_HandoffSpawn_{sb3.sid[:8]}_*")
         ctx.check(len(names) == 1, f"應恰有 1 支 park 排程：{names}")
         t = get_task(names[0])
         diff = (datetime.fromisoformat(t["next_run_time"]) - datetime.fromisoformat(at)).total_seconds()
-        ctx.check(abs(diff) <= 60, f"NextRunTime 與 now＋5h 相差 {diff:.0f}s（>60）")
-        ev(ctx, "rl3_4_os_schedule", f"{names[0]} NextRunTime={t['next_run_time']} 與 now＋5h 差 {diff:+.0f}s（≤60；等待由作業系統排程承擔，不在行程內睡）")
+        ctx.check(abs(diff) <= 60, f"NextRunTime 與 now＋4h 相差 {diff:.0f}s（>60）")
+        ev(ctx, "rl3_4_os_schedule", f"{names[0]} NextRunTime={t['next_run_time']} 與 now＋4h 差 {diff:+.0f}s（≤60；等待由作業系統排程承擔，不在行程內睡）")
     ctx.evidence("rl5／rl7：依矩陣判 ➖（不判）")
     for key, fn in (("rl6_degrade", px04), ("rl8_429", px35), ("rl9_bypass", px38), ("rl10_gov", px39), ("rl11_cli", px34), ("rl12_token", px20)):
         n0 = len(ctx.evidences)

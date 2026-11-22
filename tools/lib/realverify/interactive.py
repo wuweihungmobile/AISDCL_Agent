@@ -29,8 +29,20 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import leases
 from .driver import EnvMissing, find_claude
-from .sandbox import _DROP_ENV, PROBE_HOOK_REL, PROBE_HOOK_SRC, SANDBOX_PREFIX, Sandbox, kill_tree
+from .sandbox import (
+    _DROP_ENV,
+    LOCAL_EXCLUDES,
+    PROBE_HOOK_REL,
+    PROBE_HOOK_SRC,
+    Sandbox,
+    kill_tree,
+    projects_dir,
+    reserve_home,
+    slug_of,
+    write_excludes,
+)
 
 HOST = Path.home() / ".autosdd" / "rv_host"
 READY_MARK = "[REPL:mount] REPL mounted"  # 越過信任框／onboarding 等全部啟動畫面才會出現
@@ -108,6 +120,8 @@ def probe_ready(cwd: Path, *, timeout_s: float = PROBE_TIMEOUT_S, claude: str | 
     dbg = Path(tempfile.gettempdir()) / f"AutoSDD_RV_trustprobe_{uuid.uuid4().hex[:8]}.log"
     env = {k: v for k, v in os.environ.items() if k not in _DROP_ENV}
     env["AUTOSDD_SENTINEL_OFF"] = "1"
+    leases.track_kind("temp_file", dbg)  # 探針 debug log：先登記後建立（REQ-SE-52）
+    leases.track_process([str(dbg)])  # 探針行程的命令列含這支 log 路徑（cwd 不在命令列上），以它驗身分  # noqa: E501
     proc = subprocess.Popen(  # noqa: S603
         [exe, "--model", "haiku", "--debug-file", str(dbg)], cwd=str(cwd), env=env,
         creationflags=_NOWIN)
@@ -129,6 +143,9 @@ def probe_ready(cwd: Path, *, timeout_s: float = PROBE_TIMEOUT_S, claude: str | 
             dbg.unlink()
         except OSError:
             pass
+        leases.settle("process", f"sid:{dbg}")
+        if not dbg.exists():
+            leases.settle("temp_file", dbg)
     return verdict, f"{time.monotonic() - t0:.1f}s cwd={cwd}"
 
 
@@ -140,6 +157,12 @@ class WorktreeSandbox(Sandbox):
     host: Path | None = None
     trust_verdict: str = ""
 
+    @property
+    def home(self) -> Path:
+        """家目錄＝外層（`mkdtemp` 那層，身分檔與 7 居所住這裡）；worktree 本身在 `<外層>/wt`（D-1：
+        `git worktree add` 的目的目錄必須不存在或為空，身分檔不能放進去）。"""
+        return self.root.parent
+
     def cleanup(self) -> list[str]:
         notes = super().cleanup()
         if self.host is None:
@@ -148,6 +171,8 @@ class WorktreeSandbox(Sandbox):
         listed = _git(["worktree", "list", "--porcelain"], self.host).stdout
         if _norm(str(self.root)) in _norm(listed.replace("\n", " ")):
             notes.append(f"RESIDUE worktree-registration {self.root}")
+        else:
+            leases.settle("worktree", self.root)
         return notes
 
 
@@ -159,14 +184,20 @@ def trusted_sandbox(ctx=None, *, host: Path = HOST, probe_hooks: bool = True, cl
     if not trusted_in_config(host, claude_json):
         raise NotTrusted(f"互動沙盒宿主 {host} 未受信任，拒絕開窗以免跳信任框。"
                          + TRUST_HOWTO.format(host=host, key=host_key(host)))
-    root = Path(tempfile.mkdtemp(prefix=SANDBOX_PREFIX)).resolve()
-    sb = WorktreeSandbox(root=root, host=host)
+    sid = str(uuid.uuid4())
+    outer = reserve_home(sid).resolve()  # 外層家目錄：先登記後建立、第一動作寫身分檔（帳列 sandbox_root）  # noqa: E501
+    root = outer / "wt"
+    leases.track_kind("transcript_dir", projects_dir() / slug_of(root))  # 逐字稿落 worktree 自己的 slug  # noqa: E501
+    sb = WorktreeSandbox(root=root, sid=sid, host=host)
     if ctx is not None:
         ctx.sandboxes.append(sb)
     try:
+        write_excludes(host, LOCAL_EXCLUDES)  # 宿主 common-dir 的 info/exclude（冪等；縱深防禦）
+        leases.track_kind("worktree", root, meta={"host": str(host)})
         r = _git(["worktree", "add", "-q", "--detach", str(root), "HEAD"], host)
         if r.returncode != 0:
             raise EnvMissing(f"worktree add 失敗：{r.stderr.strip()[:200]}")
+        leases.made("worktree", root)
         verdict, why = prober(root)
         if verdict != "ready":
             raise NotTrusted(f"隱藏探針判 {verdict}（{why}）：開窗會停在啟動畫面，拒絕。"
@@ -196,6 +227,7 @@ def open_window(sb: Sandbox, args: list[str], *, visible: bool = True,
     assert_trusted(sb)
     if "-p" in args or "--print" in args:
         raise ValueError("`-p` 不是互動視窗，請用 driver.run_claude")
+    leases.track_process([sb.sid, str(sb.home)])  # 視窗行程以沙盒 sid 為鍵：先登記後開（REQ-SE-52）
     proc = subprocess.Popen(  # noqa: S603
         [claude or find_claude(), *args], cwd=str(sb.root), env=sb.env(env_extra),
         creationflags=_NEWCON if visible else _NOWIN)
@@ -214,18 +246,35 @@ def _call_name(node: ast.Call) -> str:
     return f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
 
 
-def _yields_claude(v: ast.AST) -> bool:
-    """`find_claude()`／`real_claude()`／`shutil.which("claude")`／字面 `"claude"`。"""
+def yields_claude(v: ast.AST) -> bool:
+    """`find_claude()`／`real_claude()`／`shutil.which("claude")`／字面 `"claude"`／`<名> or "claude"`
+    （BoolOp：任一運算元產出 claude 即算，D-22）。`sandbox_scope.SITES` 的普查與本檔的開窗鎖共用這一支
+    （同一函式物件，AT-SE-17），不再各寫一份。"""  # noqa: E501
     if isinstance(v, ast.Constant):
         return v.value in {"claude", "claude.exe"}
+    if isinstance(v, ast.BoolOp):
+        return any(yields_claude(x) for x in v.values)
     if isinstance(v, ast.Call):
         return _call_name(v) in _CLAUDE_FUNCS or (
-            _call_name(v) == "which" and bool(v.args) and _yields_claude(v.args[0]))
+            _call_name(v) == "which" and bool(v.args) and yields_claude(v.args[0]))
     return False
 
 
+def claude_param_names(fn: ast.AST) -> set[str]:
+    """函式參數預設值為 `"claude"` 的參數名（`def f(claude="claude")`，D-22）；非函式節點回空集。"""
+    if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return set()
+    args = fn.args
+    pairs = list(zip(reversed(args.posonlyargs + args.args), reversed(args.defaults), strict=False))
+    pairs += [(a, d) for a, d in zip(args.kwonlyargs, args.kw_defaults, strict=True) if d is not None]  # noqa: E501
+    return {a.arg for a, d in pairs if yields_claude(d)}
+
+
+_yields_claude = yields_claude  # 舊名保留為別名（相容一版）
+
+
 def _is_interactive_argv(lst: ast.List, claude_names: set[str]) -> bool:
-    has = any(_yields_claude(e) or (isinstance(e, ast.Name) and e.id in claude_names)
+    has = any(yields_claude(e) or (isinstance(e, ast.Name) and e.id in claude_names)
               for e in lst.elts)
     flags = {e.value for e in lst.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
     return has and not (flags & _NON_INTERACTIVE)
@@ -240,8 +289,8 @@ def _is_handoff_spawn(n: ast.Call) -> bool:
 def spawn_markers(fn: ast.AST) -> list[str]:
     """函式本體裡會開出互動視窗的寫法（紅綠自證見 InteractiveWindowEntryLockTest）。"""
     claude_names = {t.id for n in ast.walk(fn)
-                    if isinstance(n, ast.Assign) and _yields_claude(n.value)
-                    for t in n.targets if isinstance(t, ast.Name)}
+                    if isinstance(n, ast.Assign) and yields_claude(n.value)
+                    for t in n.targets if isinstance(t, ast.Name)} | claude_param_names(fn)
     out: list[str] = []
     for n in ast.walk(fn):
         if (isinstance(n, ast.Attribute) and n.attr == "CREATE_NEW_CONSOLE") or (

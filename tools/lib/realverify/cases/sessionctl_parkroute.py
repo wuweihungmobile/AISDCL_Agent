@@ -14,8 +14,6 @@ claude 會卡 folder trust 對話框，且本輪禁止再開窗（同 RV-K1 的�
 """  # noqa: E501
 from __future__ import annotations
 
-from pathlib import Path
-
 from ..sandbox import Sandbox
 from . import CaseContext, case
 from .sessionctl_handoff import set_ctx
@@ -75,7 +73,7 @@ def rv_pr1(ctx: CaseContext) -> None:
         ctx.check("claude -r" in r.stderr, f"拒絕訊息沒有指向 claude -r：{r.stderr[-300:]}")
         mk2 = read_marker(sb.sid, base)
         ctx.check(mk2 and mk2["status"] == "failed", f"標記應為 failed：{mk2 and mk2['status']}")
-        hb = next((p for p in (_handback_dir().glob(f"{sb.sid}_park_failed.md"))), None)
+        hb = next((p for p in ((sb.home / "handback").glob(f"{sb.sid}_park_failed.md"))), None)
         ctx.check(hb is not None and "續跑原 session" in hb.read_text(encoding="utf-8"), "沒有寫明續跑路的失敗 handback")  # noqa: E501
         ctx.check(get_task(label) is None, "job 沒有自拆（排程器仍查得到）")
         ctx.check(not claude_procs(sb.sid), "不該有任何含沙盒 sid 的 claude 行程（本案例不開窗）")
@@ -102,5 +100,3 @@ def rv_pr2(ctx: CaseContext) -> None:
         ctx.evidence(f"RV-PR2 {sb.sid[:8]} 冷＋600,000 ⇒ route=FRESH；{ev['why'][:80]}；job 自拆")
 
 
-def _handback_dir() -> Path:
-    return Path.home() / ".autosdd" / "handback"

@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 
 from ..driver import EnvMissing
-from ..sandbox import REPO, projects_dir
+from ..sandbox import REPO, projects_dir, real_autosdd
 from . import CaseContext, case
 from .prd_px_lib import ev
 from .sessionctl_park import PY, run
@@ -90,7 +90,7 @@ def rv_wp27(ctx: CaseContext) -> None:
     ctx.check(not re.search(r"安靜", out), f"status 仍出現「安靜」：{[ln for ln in out.splitlines() if '安靜' in ln][:2]}")
     m = re.search(r"已退役殘局：(\d+) 筆", out)
     ctx.check(m is not None and int(m[1]) >= 1, f"沒有「已退役殘局：N 筆」計數行：{out[-300:]}")
-    p = Path.home() / ".autosdd" / "traces" / "roster" / "retired.jsonl"
+    p = real_autosdd("traces", "roster", "retired.jsonl")  # 真帳：唯讀比對
     rows = []
     for ln in (p.read_text(encoding="utf-8", errors="replace").splitlines() if p.is_file() else []):
         try:

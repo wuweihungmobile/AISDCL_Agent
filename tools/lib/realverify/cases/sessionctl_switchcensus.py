@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 
 from ..driver import EnvMissing
-from ..sandbox import REPO
+from ..sandbox import REPO, real_autosdd
 from . import CaseContext, case
 
 _PROBE = REPO / "tools" / "probe" / "waste_census.py"
@@ -98,7 +98,7 @@ def rv_sc2(ctx: CaseContext) -> None:
         ctx.check(f["n"] >= 5, f"F 樣本數過少（{f['n']}）：母體不足，量不出建議值")
         ctx.check(f["p25"] <= f["median"] <= f["p75"], f"F 分位數順序錯：{f}")
         ctx.check(100_000 <= b["median"] <= 300_000, f"B 中位 {b['median']} 不在合理量級")
-        real = Path.home() / ".autosdd" / "traces" / "autosdd_resume_cost.jsonl"
+        real = real_autosdd("traces", "autosdd_resume_cost.jsonl")  # 真帳：唯讀比對
         if real.is_file() and real.stat().st_size:
             ctx.check(rcost["n"] >= 1, f"本機有真 resume_cost 檔卻讀到 {rcost['n']} 列")
         for needle in ("F 接手成本", "B 接手後穩定上下文", "P_fix", "SESSION_RESUME 首回合實付"):

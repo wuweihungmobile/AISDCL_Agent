@@ -10,7 +10,7 @@ import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from ..sandbox import REPO
+from ..sandbox import REPO, real_autosdd
 from . import CaseContext
 from .prd_px_lib import ev as ev
 from .prd_px_lib import ok_responder, px, t5, t5_sandbox_env, usage_payload
@@ -72,7 +72,7 @@ def px41(ctx: CaseContext) -> None:
     sim = str(REPO / "tools" / "probe" / "pacing_simulator.py")
     code = ("import sys; sys.path.insert(0, r'%s'); import quota_gate as g; "
             "print(g.burn_ledger_path()); print(g.quota_trace_path())") % (REPO / "tools" / "lib")
-    genv = {k: v for k, v in sb.env().items() if k != "AUTOSDD_TRACE_DIR"}  # 生產（本機真）痕跡路徑
+    genv = sb.env({"AUTOSDD_TRACE_DIR": str(real_autosdd("traces"))})  # 生產（本機真）痕跡路徑：唯讀取路徑字串，不寫（REQ-SE-23 撤 real_traces）  # noqa: E501
     paths = run([PY, "-c", code], cwd=REPO, env=genv, timeout=60).stdout.strip().splitlines()
     ctx.check(len(paths) == 2, f"取不到生產痕跡路徑：{paths}")
     copied = []

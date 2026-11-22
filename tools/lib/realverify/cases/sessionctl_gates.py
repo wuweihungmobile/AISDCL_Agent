@@ -11,7 +11,7 @@ import json
 import re
 from datetime import datetime, timedelta
 
-from ..sandbox import Sandbox, handoff_dir
+from ..sandbox import Sandbox
 from . import CaseContext, case
 from .sessionctl_watch import (
     BYPASS,
@@ -114,7 +114,7 @@ def rv_m2(ctx: CaseContext) -> None:
     ctx.check(r.rc == 0, f"出廠硬線回合 rc={r.rc}")
     ctx.check(not _hook_errors(ctx.transcript(sb), "Agent"), "出廠硬線下就被收斂閘擋了（25 萬換窗沒拿乾淨）")  # noqa: E501
     ctx.check(len(_subagent_files(sb)) == 1, "出廠硬線回合沒有真的派出代理")
-    hd = handoff_dir()
+    hd = sb.home / "handoff"  # 交接包居所＝沙盒自己的（Sandbox.env 的 AUTOSDD_HANDOFF_DIR；REQ-SE-23）  # noqa: E501
     ctx.check(not (hd.is_dir() and list(hd.glob(f"{sb.sid}*.advised"))), "前提：沒有任何出聲閂鎖（D12 不依賴它）")  # noqa: E501
     r = ctx.run_claude(sb, _ECHO_AGENT, extra_args=BYPASS, env_extra=env, timeout_s=300)
     ctx.check(r.rc == 0, f"硬線下修回合 rc={r.rc}")
