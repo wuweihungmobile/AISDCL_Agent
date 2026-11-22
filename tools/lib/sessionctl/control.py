@@ -147,6 +147,8 @@ class Facts:
     agents_cut: tuple = ()
     supervision: str = "none"
     supervision_source: str | None = None
+    supervision_pid: int | None = None      # 憑證值（取自心跳檔），給 `status_line` 印
+    supervision_hb_age: int | None = None   # 心跳距今秒數
     next_wake: str | None = None
     next_wake_carrier: str | None = None
     sealed: str = SEAL_NONE  # `sealed_effective` 的原值
@@ -165,6 +167,8 @@ class ControlState:
     agents_cut: list = field(default_factory=list)
     supervision: str = "none"
     supervision_source: str | None = None
+    supervision_pid: int | None = None
+    supervision_hb_age: int | None = None
     next_wake: str | None = None
     next_wake_carrier: str | None = None
     sealed: str = "none"
@@ -194,8 +198,74 @@ def classify(facts: Facts) -> ControlState:
     return ControlState(
         sid=facts.sid, agents_running=_count(facts.agents_running),
         agents_quiet=_count(facts.agents_quiet), agents_cut=cut, supervision=supervision,
-        supervision_source=source, next_wake=facts.next_wake or None, next_wake_carrier=carrier,
+        supervision_source=source,
+        supervision_pid=facts.supervision_pid if supervision != "none" and _count(
+            facts.supervision_pid) else None,
+        supervision_hb_age=_nonneg(facts.supervision_hb_age) if supervision != "none" else None,
+        next_wake=facts.next_wake or None, next_wake_carrier=carrier,
         sealed=_SEALED_DISPLAY.get(facts.sealed, "unknown"),
         handed_over=str(facts.handed_over) if facts.handed_over else None,
         pending_switch=pending, wall=bool(facts.wall), park=facts.park or None,
         unacked_pkg=str(facts.unacked_pkg) if facts.unacked_pkg else None)
+
+
+def _nonneg(value: object) -> int | None:
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+    return int(value) if ok else None  # type: ignore[arg-type]
+
+
+# ───────────────────────────────────────────────────────── 人眼文字（DES §3.4、§6.5）
+def _hhmm(stamp: str | None) -> str:
+    """ISO 字串 → `HH:MM`（用字串自帶的 offset，不依賴本機時區 ⇒ 決定性）；解不出 ⇒ `?`。"""
+    try:
+        return datetime.fromisoformat(str(stamp).strip().replace("Z", "+00:00")).strftime("%H:%M")
+    except ValueError:
+        return "?"
+
+
+def status_line(state: ControlState) -> str:
+    """`status` 的 `control:` 一行（DES §3.4 範例逐字格式）；量不到的欄位印 `?`，不猜。"""
+    agents = f"{state.agents_running}(running)"
+    if state.agents_quiet:
+        agents += f"+{state.agents_quiet}(quiet)"
+    if state.agents_cut:
+        agents += f"+{len(state.agents_cut)}(cut)"
+    if state.supervision == "none":
+        watch = "none"
+    else:
+        detail = ", ".join(x for x in (
+            f"pid {state.supervision_pid}" if state.supervision_pid else "",
+            f"hb {state.supervision_hb_age}s" if state.supervision_hb_age is not None else "",
+            "" if state.supervision_pid or state.supervision_hb_age is not None
+            else f"source {state.supervision_source or '?'}") if x)
+        watch = f"{state.supervision}({detail})"
+    wake = (f"{_hhmm(state.next_wake)}({state.next_wake_carrier or '?'})"
+            if state.next_wake else "?")
+    pending = f"yes({state.pending_switch['reason']})" if state.pending_switch else "no"
+    park = str((state.park or {}).get("status") or "none") if state.park else "none"
+    line = (f"control: sid={state.sid[:8] or '?'} agents={agents} watch={watch} next_wake={wake} "
+            f"sealed={state.sealed} handed_over={'yes' if state.handed_over else 'no'} "
+            f"pending_switch={pending} park={park}")
+    return line + (f" unacked_pkg={Path(state.unacked_pkg).name}" if state.unacked_pkg else "")
+
+
+def _agents_word(n: int) -> str:
+    return f"{n} agent" if n == 1 else f"{n} agents"
+
+
+def segment_text(state: ControlState) -> str:
+    """statusLine 區段（DES §6.5；純 ASCII；無內容 ⇒ `""` 使既有輸出逐字不變）。已交棒時只剩
+    `HANDED-OVER`（舊視窗不該再被當成還在運轉）；在飛代理＝running＋quiet；被切另列。"""
+    if state.handed_over:
+        return "ctl: HANDED-OVER"
+    parts: list[str] = []
+    flying = state.agents_running + state.agents_quiet
+    if flying:
+        parts.append(f"{_agents_word(flying)} {'watch ok' if state.supervision == 'valid' else 'NO WATCH'}")  # noqa: E501
+    if state.agents_cut:
+        parts.append(f"{_agents_word(len(state.agents_cut))} CUT")
+    if state.sealed == "effective":
+        parts.append("sealed")
+    if state.pending_switch:
+        parts.append("switch pending")
+    return "ctl: " + "; ".join(parts) if parts else ""

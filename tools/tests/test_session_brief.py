@@ -837,8 +837,9 @@ class SiStatusLineTest(unittest.TestCase):
         return _REAL_SI_STATUS_LINE(Path("."), build=lambda _repo: obj)
 
     def _brief(self, **extra: object) -> str:
-        # R217：簡報尾端另有 OIR／舊窗兩段附註（真取數），本類只驗自我精進那一段，故注入為空
-        extra = {"openitems": lambda: "", "oldwin": lambda _sid: "", **extra}
+        # R217＋W3：簡報尾端另有 OIR／舊窗／sessionctl 三段附註（真取數），本類只驗自我精進那一段
+        extra = {"openitems": lambda: "", "oldwin": lambda _sid: "", "ctl": lambda _sid: "",
+                 **extra}
         return sb.sessionstart_brief(
             {"transcript_path": None}, _cache_miss_gate(), scan_transcript=None,
             resolve_window=None, window_evidence=None, read_context_feed=None, now=_NOW,

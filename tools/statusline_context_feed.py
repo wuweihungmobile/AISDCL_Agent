@@ -31,6 +31,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -137,7 +138,33 @@ def _current_usage_sum(cw: dict) -> int | None:
     return int(total) if seen else None
 
 
-def ui_line(payload: dict) -> str:
+def ctl_segment(payload: dict) -> str:
+    """statusLine 的 sessionctl 控制態區段（`ctl: …`；DES §6.5）。`tools/lib` 在呼叫當下才掛上
+    `sys.path`（本檔 stdlib-only 紀律）；缺 session_id、import 失敗、任何例外一律 `""`。"""
+    try:
+        sid = payload.get("session_id")
+        if not isinstance(sid, str) or not sid.strip():
+            return ""
+        tools_dir = str(Path(__file__).resolve().parent)
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        from lib.sessionctl import controlfacts  # noqa: PLC0415 — 見上：刻意延遲
+
+        return _ascii(controlfacts.segment(sid, payload.get("transcript_path")))
+    except Exception:  # noqa: BLE001 — status line 永不可因本檔而空白／報錯
+        return ""
+
+
+def ui_line(payload: dict, *, control: Callable[[dict], str] | None = None) -> str:
+    """一行 ASCII 給 status line 顯示；`control`（`main` 傳 `ctl_segment`）有內容時於行尾加
+    ` | ` ＋ 區段，缺省／無內容 ⇒ 輸出與沒有這個參數時逐字相同（既有測試與 parity 不動）。
+    """
+    base = _base_line(payload)
+    seg = control(payload) if control is not None else ""
+    return f"{base} | {seg}" if seg else base
+
+
+def _base_line(payload: dict) -> str:
     """`--print-settings-snippet` 之外的主路徑：一行 ASCII 給 status line 顯示。
 
     DEF-200-416（掌舵者裁決 (a)）：百分比印 `:.0f`——harness 的 `used_percentage`
@@ -288,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("payload 不是物件")
         doc = build_feed_doc(payload)
         _atomic_write_json(context_feed_path(doc["session_id"]), doc)
-        print(ui_line(payload))
+        print(ui_line(payload, control=ctl_segment))
     except Exception:  # noqa: BLE001 — status line 永不可因本檔而空白／報錯
         print("ctx ? (feed error)")
     return 0

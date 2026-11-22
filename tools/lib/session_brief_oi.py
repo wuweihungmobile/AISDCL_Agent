@@ -1,4 +1,4 @@
-"""SessionStart 簡報的兩段附註（R217 A5）：OIR 掌舵者目視清單、舊窗關閉出聲。
+"""SessionStart 簡報的三段附註（R217 A5＋W3）：OIR 目視清單、舊窗關閉出聲、sessionctl 殘局公告。
 
 從 `session_brief.py` 抽出（根層護欄層 LOC 分級：該檔逼近上限）。與主檔同紀律：唯讀、零子行程、
 任何例外＝不印，簡報失敗不得反過來擋 SessionStart。兩個來源各住自己的套件（openitems／sessionctl），
@@ -40,7 +40,18 @@ def oldwin_line(sid: str | None) -> str:
     return f" {text}" if text else ""
 
 
+def ctl_line(sid: str | None) -> str:
+    """sessionctl 殘局／被切公告（W3；邏輯在 `sessionctl/briefline`，沙盒專案不公告）。"""
+    try:
+        _tools_on_path()
+        from lib.sessionctl import briefline  # noqa: PLC0415
+        return briefline.lines(sid)
+    except Exception:  # noqa: BLE001 — fail-open
+        return ""
+
+
 def extra(sid: str | None, openitems: Callable[[], str] | None = None,
-          oldwin: Callable[[str | None], str] | None = None) -> str:
-    """兩段附註串接（注入縫給測試；缺席＝真取數）。"""
-    return (openitems or openitems_line)() + (oldwin or oldwin_line)(sid)
+          oldwin: Callable[[str | None], str] | None = None,
+          ctl: Callable[[str | None], str] | None = None) -> str:
+    """三段附註串接（注入縫給測試；缺席＝真取數）。"""
+    return (openitems or openitems_line)() + (oldwin or oldwin_line)(sid) + (ctl or ctl_line)(sid)

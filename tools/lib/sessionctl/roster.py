@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import procstop, rosterscan
+from . import procstop, rosterscan, rosterscope
 
 OWNER_IDLE_SECONDS = 900  # 擁有者逐字稿閒置的「巡邏間隔」（哨兵每 15 分鐘巡邏一次）
 RESIDUE_MAX_AGE_SECONDS = 24 * 3600  # 殘局壽命上限：最後記錄超過它，預設 status 不列（--all 才列）
@@ -41,20 +41,9 @@ def _projects(projects_dir) -> Path:
 
 
 def _agent_dirs(projects: Path, session_id: str | None):
-    """`(owner_sid, subagents 目錄)`；給 slug 目錄（`<sid>/subagents`）或 projects 根皆可。"""
-    seen: set[Path] = set()
-    try:
-        if session_id:
-            pats = (f"{session_id}/subagents", f"*/{session_id}/subagents")
-        else:
-            pats = ("*/subagents", "*/*/subagents")
-        for pat in pats:
-            for path in projects.glob(pat):
-                if path.is_dir() and path not in seen:
-                    seen.add(path)
-                    yield path.parent.name, path
-    except OSError:
-        return
+    """`(owner_sid, subagents 目錄)`（全部專案）；給 slug 目錄或 projects 根皆可。
+    預設範圍（只本 repo）與沙盒判準住 `rosterscope`（DES §6.1）。"""
+    return rosterscope.scope_dirs(projects, session_id, True)
 
 
 def _records(path: Path, tail: bool):
@@ -197,7 +186,7 @@ def _handed_over(owner: str, env) -> bool:
 
 def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=None,
              runner=None, full: bool = True, include_old: bool = False,
-             sessions_dir=None) -> dict:
+             sessions_dir=None, all_projects: bool = False) -> dict:
     """名冊快照：`agents`／`windows`／`schedules`／`stale_sentinels`／`handoffs`／`retired`。`runner=None`＝
     純讀檔（不列舉行程、不查排程；也就不判殘局、不寫退役帳）。擁有者「活著」＝登記檔
     （`sessions_dir`，缺省 `~/.claude/sessions`）或旗標形態命令列自報的 sid（DEF-02）。`include_old`
@@ -211,6 +200,8 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
     alive = procstop.alive_sids(procs or (), sessions_dir)
     handed: dict[str, bool] = {}
     agents: list[dict] = []
+    inside = {p for _o, p in rosterscope.scope_dirs(projects, session_id, all_projects)}
+    others = 0  # 預設範圍之外（他專案／沙盒）、過了同一組過濾的代理數；`--all-projects` 才列
     for owner, folder in _agent_dirs(projects, session_id):
         killed: set[str] | None = None  # 惰性：有未結束的代理才讀主逐字稿尾端
         for path in sorted(folder.glob("agent-*.jsonl")):
@@ -240,8 +231,12 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
                                       _iso(info["last_at"]),
                                       datetime.fromtimestamp(now_ts).astimezone())
                 continue
+            if folder not in inside:
+                others += 1
+                continue
             agents.append({
                 "id": path.stem.removeprefix("agent-"), "owner_sid": owner,
+                "sandbox": rosterscope.is_sandbox_slug(folder.parent.parent.name),
                 "description": str(meta.get("description") or ""),
                 "model": str(meta.get("model") or meta.get("pickedEffortModel") or ""),
                 "state": state, "started_at": _iso(info["started_at"]),
@@ -249,7 +244,8 @@ def snapshot(session_id: str | None = None, *, projects_dir=None, now=None, env=
                 "total_tokens": info["total_tokens"]})
     return {"agents": agents, "windows": _windows(procs), "schedules": _schedules(runner),
             "stale_sentinels": _stale_sentinels(runner), "handoffs": _handoffs(env),
-            "retired": len(rosterscan.retired_ids()) if procs is not None else 0}
+            "retired": len(rosterscan.retired_ids()) if procs is not None else 0,
+            "others": others}
 
 
 def _spawned_from(pid, sid: str, created) -> bool:
@@ -469,7 +465,8 @@ def render_snapshot(snap: dict) -> str:
              else ["背景代理：無（量到的零）"])
     for a in snap["agents"]:
         total = f"、累計 {a['total_tokens']:,}" if a.get("total_tokens") else ""
-        lines.append(f"  [{names[a['state']]}] {a['id']}｜{a['description'] or '（無描述）'}｜"
+        sbx = "[沙盒]" if a.get("sandbox") else ""
+        lines.append(f"  [{names[a['state']]}]{sbx} {a['id']}｜{a['description'] or '（無描述）'}｜"
                      f"{a['model'] or '模型未知'}｜上下文 {a['ctx_tokens'] if a['ctx_tokens'] is not None else '量不到'}"  # noqa: E501
                      f"{total}｜最後 {a['last_at']}｜擁有者 {a['owner_sid'][:8]}")
     lines.append("視窗行程：" + ("；".join(
@@ -482,6 +479,8 @@ def render_snapshot(snap: dict) -> str:
     lines.append("未 ack 交接包：" + ("、".join(snap["handoffs"]) or "無"))
     if snap.get("retired"):  # REQ-WP-43：滿壽命殘局只顯示計數，逐字稿保留
         lines.append(f"已退役殘局：{snap['retired']} 筆（滿 24 小時；只顯示計數，逐字稿未刪）")
+    if snap.get("others"):  # DES §6.1：被範圍藏起來的不得靜默
+        lines.append(f"（另有 {snap['others']} 支代理在其他專案／沙盒，--all-projects 查看）")
     return "\n".join(lines) + "\n"
 
 
@@ -500,6 +499,7 @@ def cli(argv: list[str]) -> int:
     status = sub.add_parser("status", help="唯讀名冊")
     status.add_argument("--session", default=None)
     status.add_argument("--all", action="store_true", help="相容旗標（滿壽命殘局已改只顯示計數）")
+    status.add_argument("--all-projects", action="store_true", help="列全部專案（含沙盒）")
     stop = sub.add_parser("stop", help="停無人／互動視窗行程樹（先驗身分）")
     group = stop.add_mutually_exclusive_group(required=True)
     group.add_argument("--window", metavar="SID")
@@ -507,7 +507,8 @@ def cli(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     if args.cmd == "status":
         sys.stdout.write(render_snapshot(snapshot(
-            args.session, runner=procstop.default_runner, include_old=args.all)))
+            args.session, runner=procstop.default_runner, include_old=args.all,
+            all_projects=args.all_projects)))
         return 0
     if args.window:
         return stop_window(args.window)

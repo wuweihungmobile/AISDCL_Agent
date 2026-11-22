@@ -14,7 +14,7 @@
   park [旗標]  額度自願停工的續航（lib/sessionctl/park_cli）
   handoff --build｜--finalize <檔>｜--ack <檔>｜--spawn <檔>｜--list
       交接包（`handoff.cli`）
-  status                                  名冊與掌控面（`roster.cli`，唯讀）
+  status [--session] [--all-projects] [--json]  控制行＋名冊與掌控面（唯讀；預設只列本 repo）
   stop --window <sid>｜--all-unattended   停無人視窗（`roster.cli`）
   advice [--family fable]                 模型平衡建議（只出聲）
   rush --hours <H> --why "<WHY>"｜--off｜--status   趕工戳記（只關配速床，≤5 小時）
@@ -67,6 +67,20 @@ def main(argv: list[str] | None = None) -> int:
     if verb in ("status", "stop"):
         from lib.sessionctl import roster
 
+        if verb == "status":  # W3：名冊之前先印 `control:` 一行；`--json` 另走（DES §6.3）
+            # 控制行是輔助資訊：算不出來就降級一行、名冊照常
+            # （status 不因它中斷；同 statusLine 的 fail-open 紀律）
+            try:
+                from lib.sessionctl import statuscmd
+
+                if (json_rc := statuscmd.json_or_none(args[1:])) is not None:
+                    return json_rc
+                sys.stdout.write(statuscmd.control_text(args[1:]))
+            except Exception as exc:  # noqa: BLE001 — 見上；降級行帶例外類名，不靜默
+                if "--json" in args[1:]:
+                    sys.stdout.write(f'{{"control": null, "error": "{type(exc).__name__}"}}\n')
+                    return 1
+                sys.stdout.write(f"control: ?（量不到：{type(exc).__name__}）\n")
         rc = roster.cli(args)
         if verb == "status" and rc == 0:  # R3 WP-4B FR-W9：監督一行（依心跳檔）
             from lib.sessionctl import oldwin_sched, rv_orphans, supervise

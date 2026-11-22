@@ -682,6 +682,7 @@ def sessionstart_brief(
     outcome_banner: Callable[[], str] | None = None,
     openitems: Callable[[], str] | None = None,
     oldwin: Callable[[str | None], str] | None = None,
+    ctl: Callable[[str | None], str] | None = None,
 ) -> str:
     """組出 SessionStart 要 `emit_to_model` 的那一整行簡報
     （額度＋context＋statusLine 安裝狀態＋查證指令＋唯讀退路；無人值守時另附治理檔唯讀一句；
@@ -713,7 +714,7 @@ def sessionstart_brief(
         quota = quota_line(quota_gate, now, _active_model(payload, transcript, guard))
         statusline = statusline_line(check_statusline)
         si_line = (si_status or si_status_line)()  # 與上同一個 stderr 吞噬區（DEF-200-344）
-        oi_win = session_brief_oi.extra(sid, openitems, oldwin) if session_brief_oi else ""  # R217
+        oi_win = session_brief_oi.extra(sid, openitems, oldwin, ctl) if session_brief_oi else ""
     lead = windows_lead()  # 僅 Windows 非空；緊接標記、先於一切（POSIX 簡報逐字不變）
     return (f"[SDD-CTX-GUARD]{lead} 本 session 啟動時真實水位——context：{ctx}；額度：{quota}；"
            f"{statusline}。{_models_note(quota_gate)}"

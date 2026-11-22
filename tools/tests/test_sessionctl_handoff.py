@@ -1151,13 +1151,16 @@ class RealRosterIntegrationTest(_Base):
                 unittest.mock.patch.object(procstop, "list_processes", lambda *_a, **_k: []), \
                 unittest.mock.patch.object(roster, "_schedules", lambda _r: []), \
                 unittest.mock.patch.object(roster, "_stale_sentinels", lambda _r: []):
-            status = call(["status"])
+            default_status = call(["status"])  # W3：夾具 slug 非本 repo ⇒ 預設只出「另有」
+            status = call(["status", "--all-projects"])
             stop = call(["stop", "--window", "x; rm"])
             advice = call(["advice"])
             listing = call(["handoff", "--list"])
         self.assertEqual(status[0], 0)
         self.assertIn("跑全套的QA鏡", status[1])
         self.assertIn(str(pkg), status[1], "名冊的未 ack 交接包欄看不到真的交接包")
+        self.assertNotIn("跑全套的QA鏡", default_status[1])
+        self.assertIn("另有 1 支代理在其他專案／沙盒", default_status[1])
         self.assertEqual(stop[0], 2)
         self.assertEqual(advice[0], 0)
         self.assertTrue(advice[1].strip(), "advice 沒有出聲")
