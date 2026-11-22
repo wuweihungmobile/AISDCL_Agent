@@ -11,6 +11,7 @@ sessionctl 不得 import wastecensus；事件名常數由測試與量測端核�
 """
 from __future__ import annotations
 
+import glob
 import json
 import os
 import time
@@ -37,14 +38,33 @@ def _epoch_now(now) -> float:
 
 
 def read_heartbeat(sid: str) -> dict | None:
-    """心跳檔內容；不存在 ⇒ `None`；讀不動／壞 JSON ⇒ 拋（呼叫端 fail-open 當 valid）。"""
-    path = watch.heartbeat_path(sid)
-    if not path.is_file():
+    """心跳內容（任一新鮮優先；W6-W2）：候選＝`<sid>.<pid>.json` 全部＋舊格式 `<sid>.json`；
+    有「新鮮且 pid 活著」者取其中最新，其次新鮮者，否則取最新的一份（讓呼叫端判 stuck）。
+    沒有任何檔 ⇒ `None`；只有讀不動／壞 JSON 的檔 ⇒ 拋（呼叫端 fail-open 當 valid）；
+    有好檔時壞檔略過。"""
+    base = watch.heartbeat_path(sid)
+    cands = [base, *sorted(base.parent.glob(f"{glob.escape(sid)}.*.json"))]
+    good: list[tuple[float, dict]] = []
+    bad: Exception | None = None
+    for path in cands:
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("heartbeat is not an object")
+        except (OSError, ValueError) as exc:
+            bad = exc
+            continue
+        good.append((procstop.parse_iso(data.get("heartbeat_at")) or 0.0, data))
+    if not good:
+        if bad is not None:
+            raise bad
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
-        raise ValueError("heartbeat is not an object")
-    return data
+    now = time.time()
+    fresh = [g for g in good if now - g[0] <= HEARTBEAT_FRESH_SECONDS and g[0] > 0]
+    live = [g for g in fresh if pid_alive(g[1].get("pid"))]  # 被殺者的殘檔在新鮮窗內也不算數
+    return max(live or fresh or good, key=lambda g: g[0])[1]
 
 
 pid_alive = holder.pid_alive  # 判活的唯一實作在 holder（保溫錨互斥同用，不各寫一份）

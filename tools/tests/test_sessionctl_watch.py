@@ -234,7 +234,7 @@ class EventTests(_Fence):
         變，主控看到的叫醒時間就是假的。"""
         seen: list[dict] = []
         clock = _Clock(on_sleep=lambda c: seen.append(
-            json.loads(watch.heartbeat_path(SID).read_text(encoding="utf-8"))))
+            json.loads(watch.heartbeat_path(SID, 4242).read_text(encoding="utf-8"))))
         _run(lambda: [_agent(last=clock.now(), started=clock.now())],
              cfg=watch.Cfg(wall_min=9999), clock=clock, anchor=T0 - 10 * MIN)
         stamp = datetime.fromisoformat(seen[0]["keepwarm_at"]).timestamp()
@@ -559,7 +559,7 @@ class HeartbeatTests(_Fence):
         seen: list[dict] = []
 
         def grab(clock: _Clock) -> None:
-            seen.append(json.loads(watch.heartbeat_path(SID).read_text(encoding="utf-8")))
+            seen.append(json.loads(watch.heartbeat_path(SID, 4242).read_text(encoding="utf-8")))
 
         clock = _Clock(on_sleep=grab)
 
@@ -578,11 +578,12 @@ class HeartbeatTests(_Fence):
                 self.assertIsNotNone(datetime.fromisoformat(row[key]).tzinfo, key)
             self.assertEqual((row["stall_min"], row["wall_min"], row["ctx_max"]), (15, 9999,
                                                                                    700_000))
-        self.assertFalse(watch.heartbeat_path(SID).exists())  # 結束時刪除
+        self.assertFalse(watch.heartbeat_path(SID, 4242).exists())  # 結束時刪除（只刪自己的）
 
     def test_heartbeat_path_lives_under_trace_dir_watch(self) -> None:
-        """WHY：WP-4B 與 status 讀同一個路徑函式，不各算各的。"""
-        self.assertEqual(watch.heartbeat_path(SID), self.tmp / "trace" / "watch" / f"{SID}.json")
+        """WHY：WP-4B 與 status 讀同一個路徑函式，不各算各的；W6-W2 起檔名帶 pid。"""
+        self.assertEqual(watch.heartbeat_path(SID, 7),
+                         self.tmp / "trace" / "watch" / f"{SID}.7.json")
 
 
 class RealReaderTests(_Fence):
@@ -654,7 +655,8 @@ class RealReaderTests(_Fence):
         self.assertEqual(_event(proc.stdout), "keepwarm")
         ledger = json.loads(keepwarm.ledger_path(SID).read_text(encoding="utf-8"))
         self.assertEqual(ledger["pings"], 1)
-        self.assertFalse(watch.heartbeat_path(SID).exists())  # 結束清心跳
+        left = list(watch.heartbeat_path(SID, 1).parent.glob(f"{SID}.*json"))
+        self.assertEqual(left, [])  # 結束清心跳
         from lib.sessionctl import holder  # noqa: PLC0415
         self.assertFalse(holder.path(SID).exists(), "結束時必須釋放保溫錨")
 

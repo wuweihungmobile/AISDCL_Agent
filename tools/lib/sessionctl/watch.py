@@ -19,7 +19,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz
 
-from . import holder, keepwarm, procstop, qw_plan, roster, switch, watch_wake
+from . import holder, keepwarm, procstop, qw_plan, roster, switch, watch_wake, watchlock
 
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
@@ -56,6 +56,8 @@ DISPOSAL = {
     "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
     "resume": keepwarm.DISPOSAL["resume"],
     "handed_over": keepwarm.DISPOSAL["handed_over"],
+    # 入口判決（不是 decide 的事件，ORDER 不含它）：同 sid 已有活 watch。
+    "duplicate": "已有同 sid 的 watch 在掛：不需重掛，繼續本回合或結束回合",
 }
 UNKNOWN_DISPOSAL = "watch 自己壞了（rc≠0 或無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
 
@@ -183,9 +185,11 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
     return None
 
 
-def heartbeat_path(sid: str) -> Path:
-    """心跳檔：`trace_dir()/watch/<sid>.json`（WP-4B 憑證判準的副證；唯一的路徑解析處）。"""
-    return endurance_env.trace_dir() / "watch" / f"{sid}.json"
+def heartbeat_path(sid: str, pid: int | None = None) -> Path:
+    """心跳檔：`trace_dir()/watch/<sid>.<pid>.json`（pid 化，W6-W2：各 watch 只動自己的檔）；
+    `pid=None` 回舊格式 `<sid>.json`（只供讀端相容舊檔；唯一的路徑解析處）。"""
+    name = f"{sid}.json" if pid is None else f"{sid}.{pid}.json"
+    return endurance_env.trace_dir() / "watch" / name
 
 
 def _stamp(epoch: float) -> str:
@@ -204,16 +208,16 @@ def write_heartbeat(sid: str, cfg: Cfg, started_at: float, now: float, pid: int,
            "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(nxt),
            "stall_min": cfg.stall_min, "wall_min": cfg.wall_min, "ctx_max": cfg.ctx_max}
     try:
-        path = heartbeat_path(sid)
+        path = heartbeat_path(sid, pid)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8", newline="\n")
     except OSError:
         pass
 
 
-def _drop_heartbeat(sid: str) -> None:
+def _drop_heartbeat(sid: str, pid: int) -> None:
     try:
-        heartbeat_path(sid).unlink()
+        heartbeat_path(sid, pid).unlink()
     except OSError:
         pass
 
@@ -295,6 +299,10 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
     wctl = watch_wake.WakeCtl(sid, transcript, env, cfg, budget, anchor_fn, read_quota=read_quota,
                               refresh=refresh)
     pid = os.getpid() if pid is None else pid
+    if not watchlock.acquire(sid, pid):  # 單例（DES §5）：同 sid 已有活 watch ⇒ 本支不跑
+        print(f"處置：{DISPOSAL['duplicate']}\nWATCH_VERDICT=duplicate n=0", file=out, flush=True)
+        switch.trace(EV_WATCH_VERDICT, sid=sid, verdict="duplicate", agents=0)
+        return 0
     started, latched, holding, state, band = now_fn(), False, False, {}, "prepare"
     resolver = _kw_resolver(budget, state)
     try:
@@ -347,8 +355,9 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
             write_heartbeat(sid, cfg, started, now, pid, anchor, wctl.due() if holding else None)
             sleep_fn(poll_sec)
     finally:
-        _drop_heartbeat(sid)
+        _drop_heartbeat(sid, pid)
         holder.release(sid, pid)
+        watchlock.release(sid, pid)
 
 def cli(argv: list[str]) -> int:
     import argparse  # noqa: PLC0415
