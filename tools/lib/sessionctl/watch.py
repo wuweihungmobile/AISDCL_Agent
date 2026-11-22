@@ -19,7 +19,7 @@ from pathlib import Path
 import endurance_env
 import unattended_authz
 
-from . import holder, keepwarm, procstop, roster, switch
+from . import holder, keepwarm, procstop, qw_plan, roster, switch, watch_wake
 
 #: 痕跡事件名；測試斷言它等於 supervision 的 `EV_WATCH_VERDICT`（兩邊各自定義、不互 import）。
 EV_WATCH_VERDICT = "watch_verdict"
@@ -32,7 +32,9 @@ SCHEMA = "autosdd.watch/1"
 #: 純保溫，任何實質事件都比它重要；三者互斥，由叫醒預算決定是哪一個）。
 #: REQ-WP-30：**沒有 `all_done`**——harness 對每支背景子代理完成都會送 task-notification，watch
 #: 再因「全部交卷」退出＝同一事件叫醒主控兩次（M-WB2：14 天 21 次，每次冷讀 40 萬～99 萬 token）。
-ORDER = ("quota", "budget", "stall", "overrun", "keepwarm", "cap", "idle")
+#: R218 Q2：`handed_over`（本視窗已交棒，別的 session 在動工作樹）最優先；`resume`（主載具到預定
+#: 時刻）排在保溫族之前——它不是保溫，是「該接著做事了」。
+ORDER = ("handed_over", "quota", "budget", "stall", "overrun", "resume", "keepwarm", "cap", "idle")
 KEEPWARM_FAMILY = ("keepwarm", "cap", "idle")
 #: 保溫點＝主控**最後一筆帶 usage 的 assistant 記錄**＋45 分（R216：早於閒置約 55 分的自動壓縮與
 #: 1 小時快取壽命；錨點不是 watch 啟動時刻）。數字與錨點函式唯一的家＝`keepwarm.py`。
@@ -52,6 +54,8 @@ DISPOSAL = {
     "overrun": "讀它的 HB：快完成 ⇒ 重掛 watch 並 `--wall-min <現值+30>`（每支至多一次）；否則 TaskStop＋拆小重派",  # noqa: E501
     "budget": "TaskStop（續下去每輪都更貴）＋派新代理接它的 HB",
     "quota": "估剩餘：代理快完成 ⇒ 重掛 watch（同一 reset 窗同一帶不會再觸發），等交卷後 封存→`park`；否則 TaskStop 全部 → 封存 → `park`（park 前置要求無在飛代理）",  # noqa: E501
+    "resume": keepwarm.DISPOSAL["resume"],
+    "handed_over": keepwarm.DISPOSAL["handed_over"],
 }
 UNKNOWN_DISPOSAL = "watch 自己壞了（rc≠0 或無判決行）：重掛；連兩次 ⇒ 依 watch 輸出檔立案"
 
@@ -128,7 +132,7 @@ def _label(agent: dict) -> str:
 
 def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
            kw_anchor: float | None = None, kw_enabled: bool = True,
-           kw_verdict=None) -> tuple[str, str] | None:
+           kw_verdict=None, kw_due: float | None = None) -> tuple[str, str] | None:
     """純函式：回 `(事件, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
     `finished!=true`），每項可帶 `end_turn: bool`（最後一筆是 assistant end_turn＝在等自己的
     背景 shell，FR-W3 不判 stall）。`now`／`started_at` 為 epoch 秒；多事件先後見 `ORDER`。
@@ -138,7 +142,9 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
     保溫族（REQ-WP-30／36）：到保溫點才問 `kw_verdict()`（`keepwarm`｜`cap`｜`idle`；未給＝
     `keepwarm`）。`keepwarm`（還有預算、保溫適用）與 `idle`（保溫不適用）一律退出；`cap`（預算
     用完）**只在沒有未交卷代理時**退出——代理還在跑時再為保溫叫醒主控，只是白付一次冷讀。
-    `kw_enabled=False`（別的行程持有保溫錨）⇒ 整個保溫族不判，避免兩個行程重複叫醒。"""
+    `kw_enabled=False`（別的行程持有保溫錨）⇒ 整個保溫族不判，避免兩個行程重複叫醒。
+    `kw_due`（R218 Q2：主載具有目標時的排程第一個叫醒時刻）蓋過「錨點＋keepwarm_min」；
+    `kw_verdict()` 回 `None`＝本輪不判（牆內延後）、`resume`／`handed_over`＝無論有無代理都退出。"""
     found: dict[str, str] = {}
     if quota_hit:
         found["quota"] = "短窗額度原始讀數已達 prepare 門檻（reset 在未來）"
@@ -164,11 +170,13 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
         rows = "\n".join(f"  - {_label(a)}｜已跑 {m:.1f} 分" for a, m in late)
         found["overrun"] = f"自啟動起已 ≥ {cfg.wall_min:g} 分仍未交卷：\n{rows}"
     ref = started_at if kw_anchor is None else kw_anchor
-    if kw_enabled and now - ref >= cfg.keepwarm_min * 60:
+    due = ref + cfg.keepwarm_min * 60 if kw_due is None else kw_due
+    if kw_enabled and now >= due:
         kind = kw_verdict() if kw_verdict is not None else "keepwarm"
-        if kind == "keepwarm" or kind == "idle" or not agents:
+        if kind in ("keepwarm", "idle", "resume", "handed_over") or (kind and not agents):
             found[kind] = (f"距主控最後一筆記錄已 ≥ {cfg.keepwarm_min:g} 分"
-                           "（主控快取壽命 1 小時，保溫點）")
+                           "（主控快取壽命 1 小時，保溫點）") if kw_due is None else (
+                f"主載具到預定叫醒時刻（{_stamp(due)}）")
     for name in ORDER:
         if name in found:
             return name, found[name]
@@ -185,13 +193,15 @@ def _stamp(epoch: float) -> str:
 
 
 def write_heartbeat(sid: str, cfg: Cfg, started_at: float, now: float, pid: int,
-                    kw_anchor: float | None = None) -> None:
+                    kw_anchor: float | None = None, kw_due: float | None = None) -> None:
     """每輪覆寫；時間戳帶 offset。不用 os.replace（非原子，同 `park.write_marker`／`quota_rush`）：
     讀端解析失敗一律當「讀不動」fail-open，不會因撕裂讀取而誤判。`keepwarm_at`＝保溫錨點
-    （`kw_anchor`，量不到退回 `started_at`）＋保溫分鐘數。"""
+    （`kw_anchor`，量不到退回 `started_at`）＋保溫分鐘數；主載具有目標時（`kw_due`）＝排程的
+    下一個叫醒時刻。"""
     ref = started_at if kw_anchor is None else kw_anchor
+    nxt = ref + cfg.keepwarm_min * 60 if kw_due is None else kw_due
     row = {"schema": SCHEMA, "pid": pid, "started_at": _stamp(started_at),
-           "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(ref + cfg.keepwarm_min * 60),
+           "heartbeat_at": _stamp(now), "keepwarm_at": _stamp(nxt),
            "stall_min": cfg.stall_min, "wall_min": cfg.wall_min, "ctx_max": cfg.ctx_max}
     try:
         path = heartbeat_path(sid)
@@ -221,25 +231,9 @@ def ended_turn(sid: str, agent_id: str, projects_dir=None) -> bool:
             and msg.get("stop_reason") == "end_turn")
 
 
-def quota_key_now(now: float | None = None) -> tuple[str, str] | None:
-    """短窗軸原始讀數 ≥ prepare 且 reset 在未來 ⇒ 閂鎖鍵 `(帶級, reset 分鐘)`；重用
-    `park.prepare_hits`（讀快取、不外呼）。帶級＝原始讀數 ≥ halt 門檻為 `halt`、否則 `prepare`。
-    沒命中／讀不到／任何例外 ⇒ `None`（不成立）。"""
-    try:
-        from . import park  # noqa: PLC0415 — lazy：park 吃 quota 模組，監督迴圈不該為此付匯入成本
-
-        when = datetime.fromtimestamp(now).astimezone() if now else datetime.now().astimezone()
-        policy = park._policy()
-        hits = park.prepare_hits(park._pace_state(when), policy, when)
-        if not hits:
-            return None
-        reset = park.reset_of(hits)
-        band = "halt" if max(a.pct for a in hits) >= policy.halt_pct else "prepare"
-        return band, (reset.astimezone().replace(second=0, microsecond=0).isoformat()
-                      if reset is not None else "unknown")
-    except Exception:  # noqa: BLE001 — 額度快取讀不到不得讓監督崩潰
-        return None
-
+def quota_key_now(now: float | None = None, plan=None) -> tuple[str, str] | None:
+    """額度事件閂鎖鍵 `(帶級, reset 分鐘)`；判準住 `watch_wake.quota_key`（四級帶級，R218 Q2）。"""
+    return watch_wake.quota_key(now, plan)
 
 def _anchor_reader(sid: str, projects_dir):
     """每輪讀主控逐字稿尾端的保溫錨點；逐字稿路徑找到就快取（找不到每輪再找）。"""
@@ -267,26 +261,41 @@ def _kw_resolver(budget, state: dict):
 def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         poll_sec: float = POLL_SECONDS, roster_fn=None, end_turn_fn=None, quota_fn=None,
         out=None, pid: int | None = None, projects_dir=None, anchor_fn=None,
-        budget=None) -> int:
+        budget=None, plan_fn=None, read_quota=None, refresh=None, env=None) -> int:
     """阻塞輪詢；第一個事件成立即印明細、處置表對應列、`WATCH_VERDICT=` 末行並回 rc。
     縫（全可注入）：now_fn()->epoch、sleep_fn(sec)、roster_fn()->未交卷代理 list、
     end_turn_fn(agent)->bool、quota_fn()->None｜(帶級, reset 分鐘)｜True（True＝無鍵的 prepare）、
     anchor_fn()->主控最後一筆 usage 記錄的 epoch｜None、budget＝叫醒預算（`keepwarm.WakeBudget`
-    形狀：`check()`／`charge()`）。額度事件過閂鎖（`keepwarm.quota_latch`）：同 reset 窗同帶只
-    觸發一次，之後該輪視為未命中。
+    形狀：`check()`／`charge()`）、plan_fn(now)->額度牆 `Plan`、read_quota／refresh（短窗讀數與
+    補量，餵預設的 plan_fn 與主載具計畫）。額度事件過閂鎖（`keepwarm.quota_latch`）：同 reset 窗
+    同帶只觸發一次，之後該輪視為未命中；事件前印 `plan_lines`，處置依階段。
 
     叫醒預算（REQ-WP-30～32）：watch 持有保溫錨（`holder`）時才判保溫族；別的行程持有 ⇒ 每輪
     重試取得，取得前只看實質事件。`keepwarm` 事件才記一次叫醒（與 `keepwarm` 指令共用帳）；記不進
-    帳 ⇒ 改判 `cap`（失效往少花走）。"""
-    out = out or sys.stdout
+    帳 ⇒ 改判 `cap`（失效往少花走）。R218 Q2（REQ-QW-17／18／29）：額度牆 `wall` 階段不判任何事件、
+    不記帳、只寫心跳；持錨者有目標（`wake_target`）時用同一份 schedule／牆內延後／resume／交棒重判
+    （`watch_wake.WakeCtl`），無目標時照 R216 periodic。"""
+    out, env = out or sys.stdout, os.environ if env is None else env
     roster_fn = roster_fn or (
         lambda: roster.snapshot(sid, projects_dir=projects_dir, full=False)["agents"])
     end_turn_fn = end_turn_fn or (lambda a: ended_turn(sid, str(a.get("id")), projects_dir))
-    quota_fn = quota_fn or (lambda: quota_key_now(now_fn()))
     anchor_fn = anchor_fn or _anchor_reader(sid, projects_dir)
     budget = budget or keepwarm.WakeBudget(sid, projects_dir)
+    found_tx: list = []
+
+    def transcript():
+        if not found_tx or found_tx[0] is None:
+            found_tx[:] = [keepwarm.find_transcript(sid, projects_dir)]
+        return found_tx[0]
+    plan_fn = plan_fn or (lambda t: qw_plan.plan(
+        sid, transcript(), env, datetime.fromtimestamp(t).astimezone(), read_quota=read_quota,
+        refresh=refresh))
+    plans = watch_wake.PlanCache(plan_fn)
+    quota_fn = quota_fn or (lambda: quota_key_now(now_fn(), plans.get(now_fn())))
+    wctl = watch_wake.WakeCtl(sid, transcript, env, cfg, budget, anchor_fn, read_quota=read_quota,
+                              refresh=refresh)
     pid = os.getpid() if pid is None else pid
-    started, latched, holding, state = now_fn(), False, False, {}
+    started, latched, holding, state, band = now_fn(), False, False, {}, "prepare"
     resolver = _kw_resolver(budget, state)
     try:
         while True:
@@ -298,6 +307,13 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                     a["end_turn"] = bool(end_turn_fn(a))
             hit, anchor = quota_fn(), anchor_fn()
             state["anchor"] = anchor
+            if not holding and holder.acquire(sid, pid):
+                holding = True
+                wctl.start(now, pid)
+            if plans.get(now).stage == qw_plan.WALL:  # REQ-QW-18：牆中不判事件、不記帳、只寫心跳
+                write_heartbeat(sid, cfg, started, now, pid, anchor, wctl.due())
+                sleep_fn(poll_sec)
+                continue
             quota_hit = False
             if hit:
                 band, reset = hit if isinstance(hit, tuple) else ("prepare", "unknown")
@@ -305,28 +321,34 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 if not quota_hit and not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
                     latched = True
                     switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=band, reset=reset)
-            holding = holding or holder.acquire(sid, pid)
             verdict = decide(agents, now, started, cfg, quota_hit, kw_anchor=anchor,
-                             kw_enabled=holding, kw_verdict=resolver)
+                             kw_enabled=holding, kw_due=wctl.due() if holding else None,
+                             kw_verdict=lambda: wctl.classify(now, state, resolver))
             if verdict is not None:
                 event, detail = verdict
                 extra: dict = {}
-                if event in KEEPWARM_FAMILY:
+                if event == "quota":
+                    print("\n".join(qw_plan.plan_lines(plans.get(now, force=True))), file=out)
+                elif event in KEEPWARM_FAMILY:
                     extra = {"pings": state["pings"], "n_star": state["star"]}
-                    if event == "keepwarm" and not budget.charge(state["pings"], state["ctx"],
-                                                                 state["star"]):
+                    if wctl.settle(event, now, state) != event:
                         event, detail = "cap", "叫醒帳寫不進去 ⇒ 不再保溫（失效往少花走）"
+                elif event == "resume":
+                    wctl.settle(event, now, state)
+                    wctl.trace_early(now, state)
                 print(f"[{_stamp(now)}] {event}：{detail}", file=out)
-                print(f"處置：{DISPOSAL[event]}", file=out)
+                how = DISPOSAL[event]
+                if event == "quota":
+                    how = watch_wake.quota_disposal(band) or how
+                print(f"處置：{how}", file=out)
                 switch.trace(EV_WATCH_VERDICT, sid=sid, verdict=event, agents=len(agents), **extra)
                 print(f"WATCH_VERDICT={event} n={len(agents)}", file=out, flush=True)
                 return 0
-            write_heartbeat(sid, cfg, started, now, pid, anchor)
+            write_heartbeat(sid, cfg, started, now, pid, anchor, wctl.due() if holding else None)
             sleep_fn(poll_sec)
     finally:
         _drop_heartbeat(sid)
         holder.release(sid, pid)
-
 
 def cli(argv: list[str]) -> int:
     import argparse  # noqa: PLC0415

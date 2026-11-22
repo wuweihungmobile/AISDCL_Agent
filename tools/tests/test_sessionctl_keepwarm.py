@@ -28,7 +28,7 @@ sys.path.insert(0, str(_REPO_ROOT / "tools" / "lib"))
 
 import quota_policy_env  # noqa: E402
 
-from lib.sessionctl import converge, holder, keepwarm, midwork, park, switch, watch  # noqa: E402
+from lib.sessionctl import converge, holder, keepwarm, midwork, switch, watch  # noqa: E402
 
 SID = "5b0c2f6e-7a41-4c1d-9d0e-3a52c1d8e911"
 T0 = datetime(2026, 11, 18, 12, 0, 0, tzinfo=UTC).timestamp()
@@ -50,6 +50,10 @@ def _asst(epoch: float, ctx: int = 400_000, **extra) -> dict:
 def _human(epoch: float, text: str = "請繼續") -> dict:
     return {"type": "user", "timestamp": _iso(epoch), "origin": {"kind": "human"},
             "message": {"role": "user", "content": text}}
+
+
+def _no_refresh(_now):
+    raise RuntimeError("測試：補量端點不可用")
 
 
 class _Clock:
@@ -99,10 +103,14 @@ class _Base(unittest.TestCase):
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write("\n".join(json.dumps(r) for r in records) + "\n")
 
-    def run_kw(self, clock: _Clock, *, env=None, t_kw: float = 45) -> tuple[int, str]:
+    def run_kw(self, clock: _Clock, *, env=None, t_kw: float = 45, **seams) -> tuple[int, str]:
+        """額度讀數縫預設＝量不到（⇒ 無目標＝periodic，R216 行為）；補量縫預設拋例外。不讓測試
+        去讀這台機器的真額度快取或打真端點。"""
         out = io.StringIO()
+        seams.setdefault("read_quota", lambda _now: None)
+        seams.setdefault("refresh", _no_refresh)
         rc = keepwarm.run(SID, self.path, t_kw_min=t_kw, env={**self.env, **(env or {})},
-                          now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=60.0, out=out)
+                          now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=60.0, out=out, **seams)
         return rc, out.getvalue()
 
     def ledger(self, pings: int, human: str = "") -> None:
@@ -253,19 +261,15 @@ class RunTest(_Base):
         self.assertEqual((rc, out.splitlines()[-1]), (0, "KEEPWARM_VERDICT=ping k=1 n=9"))
 
     def test_at_ss_14_every_skip_condition_ends_at_once_with_its_reason(self) -> None:
-        """AT-SS-14。WHY：不掛的情形必須立刻 rc 0 結束（不得常駐一個永遠不會有用的背景任務）：
-        無人窗口（print 模式背景上限會殺掉它）、模式非 auto、AUTOSDD_KEEPWARM_OFF、已交棒、park 標記
-        有效（park 接手）、上下文太小（重寫便宜）。"""
-        marker = {"schema": park.SCHEMA, "sid": SID, "route": park.ROUTE_DONE, "status": "armed",
-                  "parked_at": datetime.now(UTC).isoformat(),
-                  "valid_until": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
-                  "why": "測試：沒有剩餘工作", "jobs": []}
+        """AT-SS-14（REQ-QW-20 改：不再有 park 一格）。WHY：不掛的情形必須立刻 rc 0 結束（不得常駐
+        一個永遠不會有用的背景任務）：無人窗口（print 模式背景上限會殺掉它）、模式非 auto、
+        AUTOSDD_KEEPWARM_OFF、已交棒、上下文太小（重寫便宜）；park 標記有效不再是不掛的理由——
+        park 只是備援，主載具照掛（見 test_sessionctl_keepwarm_q2.py）。"""
         for name, env, ctx, setup in (
                 ("unattended", {"AUTOSDD_UNATTENDED": "1"}, 400_000, None),
                 ("mode", {switch.MODE_KEY: "notify"}, 400_000, None),
                 ("off", {keepwarm.OFF_ENV: "1"}, 400_000, None),
                 ("handed_over", {}, 400_000, lambda: self.package(acked=True)),
-                ("park", {}, 400_000, lambda: self.assertTrue(park.write_marker(marker)[0])),
                 ("small_ctx", {}, 20_000, None)):
             with self.subTest(name):
                 self.reset_state()
@@ -369,7 +373,8 @@ class WakeBudgetTest(_Base):
         out = io.StringIO()
         rc = watch.run(SID, watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=60.0,
                        roster_fn=lambda: [], quota_fn=lambda: False, out=out, pid=4242,
-                       projects_dir=str(self.slug))
+                       projects_dir=str(self.slug), read_quota=lambda _now: None,
+                       refresh=_no_refresh)
         return rc, out.getvalue()
 
     def test_at_wp_32_a_live_holder_makes_the_second_keepwarm_skip_with_rc_zero(self) -> None:

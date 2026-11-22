@@ -4,8 +4,9 @@
   子指令：handoff|status|stop|advice|rush|park|watch|keepwarm|runlong|waitfor|oldwin
   watch [--sid] [--stall-min] [--wall-min] [--ctx-max] [--poll-sec]
       背景代理監督（lib/sessionctl/watch；以 run_in_background 掛著，結束＝叫醒主控）
-  keepwarm [--sid] [--min] [--poll-sec]
-      主控快取保溫（lib/sessionctl/keepwarm；閒置到「最後一筆記錄＋45 分」才結束＝叫醒主控）
+  keepwarm [--sid] [--min] [--poll-sec] [--idle-min] [--heartbeat-min]
+      主載具／主控快取保溫（lib/sessionctl/keepwarm；閒置到「最後一筆記錄＋45 分」才結束＝叫醒
+      主控；有額度牆目標時跨 reset 保溫或單跳到 reset＋s；--idle-min／--heartbeat-min 只准下修）
   runlong --out <檔> -- <argv…>｜waitfor --done <檔>.done [--max-sec]
       子代理長等待（lib/sessionctl/longwait；runlong 背景跑、waitfor 每段 <5 分鐘前景回來看）
   oldwin --retry <舊 sid> --pkg <包> [--new-sid --job --trace-dir --quiet]｜--sweep｜--status

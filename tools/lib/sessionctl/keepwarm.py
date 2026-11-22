@@ -25,12 +25,12 @@ from pathlib import Path
 
 import endurance_env
 
-from . import holder, procstop, roster, seal, switch
+from . import kw_ledger, procstop, roster, seal, switch
+from .kw_ledger import SCHEMA
 
 EV_VERDICT = "keepwarm_verdict"
 EV_STOP_BLOCK = "keepwarm_stop_block"
 EV_QUOTA_LATCHED = "watch_quota_latched"
-SCHEMA = "autosdd.keepwarm/1"
 MINUTES_KEY = "AUTOSDD_KEEPWARM_MINUTES"
 MIN_CTX_KEY = "AUTOSDD_KEEPWARM_MIN_CTX_TOKENS"
 OFF_ENV = "AUTOSDD_KEEPWARM_OFF"
@@ -50,8 +50,12 @@ DISPOSAL = {
             "run_in_background、輸出導檔；本回合輸出 ≤ 50 token）",
     "cap": "已到保溫損益點（再保溫比放冷重寫更貴）：不重掛，直接結束回合讓快取過期",
     "skip": "本情形不需要保溫：什麼都不做、不要重掛",
+    "resume": "已到預定時刻：照停工前計畫繼續；交接包已自動記為續跑（DES §8）；park 備援會自行讓路",
+    "handed_over": "本視窗已交棒（備援已在別的 session 接手）：不得動工作樹、不得重掛，"
+                   "直接結束回合",
 }
-_BANDS = {"prepare": 1, "halt": 2}
+#: watch 額度閂鎖的帶級（R218 Q2：四級 prepare＜nodispatch＜close＜halt；REQ-QW-17）。
+_BANDS = {"prepare": 1, "nodispatch": 2, "close": 3, "halt": 4}
 
 
 def _warn(msg: str) -> None:
@@ -117,62 +121,20 @@ def deadline(transcript, t_kw_min: float) -> float | None:
 
 
 # ───────────────────────────────────────────────────────────── 保溫帳
-def ledger_path(sid: str, *, write: bool = False) -> Path:
-    root = endurance_env.trace_dir() if write else endurance_env.trace_dir_peek()[0]
-    return root / "keepwarm" / f"{sid}.json"
-
-
-def human_mark(transcript) -> str:
-    """最後一則**可轉送真人提示**的標記（`時戳|行號`）；`<task-notification>` 等機器注入不算。"""
-    import transcript_activity  # noqa: PLC0415 — lazy：只有帳上已有 ping 時才需要全檔掃描
-
-    last = ""
-    for p in transcript_activity.all_human_prompts(Path(transcript)):
-        if transcript_activity.is_forwardable_prompt(p["text"]):
-            last = f"{p['at']}|{p['line']}"
-    return last
-
-
-def read_ledger(sid: str) -> dict:
-    """`{pings, human}`；缺檔＝零；壞檔／結構不符＝零並出聲。"""
-    path = ledger_path(sid)
-    try:
-        row = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(row, dict) and type(row.get("pings")) is int and row["pings"] >= 0:
-            return {"pings": row["pings"], "human": str(row.get("human") or "")}
-        _warn(f"保溫帳 {path} 結構不符 ⇒ 當作零")
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError) as exc:
-        _warn(f"保溫帳 {path} 讀不動（{type(exc).__name__}）⇒ 當作零")
-    return {"pings": 0, "human": ""}
-
-
-def load_ledger(sid: str, transcript) -> dict:
-    """讀帳並套用「真人提示歸零」：帳上已有 ping 且最後一則真人提示標記變了 ⇒ pings 歸零。"""
-    row = read_ledger(sid)
-    if row["pings"] > 0 and human_mark(transcript) != row["human"]:
-        row["pings"] = 0
-    return row
-
-
-def record_ping(sid: str, pings: int, ctx: int, star: int, mark: str) -> bool:
-    """寫帳（pings 為新值）；寫不進去回 `False`（呼叫端判 cap）。"""
-    path = ledger_path(sid, write=True)
-    row = {"schema": SCHEMA, "sid": sid, "pings": pings, "n_star": star, "ctx": ctx, "human": mark}
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(row, ensure_ascii=False), encoding="utf-8", newline="\n")
-    except OSError as exc:
-        _warn(f"保溫帳寫不進 {path}（{type(exc).__name__}）⇒ 判 cap（不保溫，退回沒有保溫的現況）")
-        return False
-    return True
+# 帳的讀寫與歸零標記住 kw_ledger.py（LOC 分級抽出）；此處重新匯出，呼叫端與測試不變。
+ledger_path, human_mark, work_mark = (kw_ledger.ledger_path, kw_ledger.human_mark,
+                                      kw_ledger.work_mark)
+read_ledger, load_ledger, record_ping = (kw_ledger.read_ledger, kw_ledger.load_ledger,
+                                         kw_ledger.record_ping)
 
 
 # ───────────────────────────────────────────────────────────── 不掛的情形
 def skip_reason(sid: str, env, *, ctx, now: datetime | None = None) -> str:
-    """§4.1 不掛的情形；回原因代號，需要保溫 ⇒ `""`。無人窗口（print 模式背景上限會殺掉它）、模式非
-    auto、`AUTOSDD_KEEPWARM_OFF`、已交棒、park 標記有效（park 接手）、上下文太小。"""
+    """§5.1 不掛的情形；回原因代號，需要保溫 ⇒ `""`。次序 `unattended → mode → off → handed_over →
+    no_usage → small_ctx`：無人窗口（print 模式背景上限會殺掉它）、模式非 auto、
+    `AUTOSDD_KEEPWARM_OFF`、已交棒、量不到上下文、上下文太小。R218 Q2 起**沒有 `park`**：park 只是
+    備援，主載具照掛（REQ-QW-20）；有 `wake_target` 時只有前四項會讓指令不掛，`no_usage`／
+    `small_ctx` 只讓它不付費 ping、仍單跳到目標（`kw_run`）。`now` 保留供呼叫端相容。"""
     if env.get("AUTOSDD_UNATTENDED"):
         return "unattended"
     if switch.switch_mode(env) != "auto":
@@ -181,10 +143,6 @@ def skip_reason(sid: str, env, *, ctx, now: datetime | None = None) -> str:
         return "off"
     if seal.handed_over(sid, env) is not None:
         return "handed_over"
-    from . import park  # noqa: PLC0415 — lazy
-
-    if park.credential_ok(park.read_marker(sid), now or datetime.now().astimezone())[0]:
-        return "park"
     if ctx is None:
         return "no_usage"
     return "small_ctx" if ctx < switch.threshold(MIN_CTX_KEY, env)[0] else ""
@@ -229,57 +187,13 @@ def stop_verdict(payload: dict, env=None, now: datetime | None = None) -> str:
 
 
 # ───────────────────────────────────────────────────────────── 指令本體（D7／D8）
-def _stamp(epoch: float) -> str:
-    return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="seconds")
+def run(sid: str, transcript, **kw) -> int:
+    """阻塞到叫醒時刻才結束；本體住 `kw_run.py`（LOC 分級抽出）。簽名見 `kw_run.run`：`t_kw_min`／
+    `env`／`now_fn`／`sleep_fn`／`poll_sec`／`out`／`pid`／`idle_min`／`heartbeat_min`／
+    `read_quota`／`refresh`／`platform_name`。"""
+    from . import kw_run  # noqa: PLC0415 — kw_run 反向 import 本檔，頂層會成環
 
-
-def run(sid: str, transcript, *, t_kw_min: float, env=None, now_fn=time.time, sleep_fn=time.sleep,
-        poll_sec: float = POLL_SECONDS, out=None, pid: int | None = None) -> int:
-    """阻塞到截止才結束：不掛的情形 ⇒ `skip`；到截止 ⇒ `ping` 或 `cap`；一律 rc 0，判決看末行。
-    每輪重讀逐字稿尾端的錨點，有新記錄就把截止往後延（人回來工作時不會提早叫醒）。"""
-    env, out = os.environ if env is None else env, out or sys.stdout
-
-    def finish(verdict: str, tail: str, detail: str, **fields) -> int:
-        print(f"[{_stamp(now_fn())}] {verdict}：{detail}", file=out)
-        print(f"處置：{DISPOSAL[verdict]}", file=out)
-        switch.trace(EV_VERDICT, sid=sid, verdict=verdict, **fields)
-        print(f"KEEPWARM_VERDICT={verdict} {tail}".rstrip(), file=out, flush=True)
-        return 0
-
-    ctx = roster._scan(Path(transcript), False)["ctx_tokens"] if transcript is not None else None
-    why = "no_transcript" if transcript is None else skip_reason(sid, env, ctx=ctx)
-    if why:
-        return finish("skip", f"reason={why}", f"不掛保溫（{why}）", reason=why)
-    me = os.getpid() if pid is None else pid
-    row, star = load_ledger(sid, transcript), n_star(ctx)
-    if row["pings"] >= star:
-        return finish("cap", f"k={star}", f"保溫帳已達上限 {star} 次", k=star, n_star=star)
-    # REQ-WP-31：同 sid 只准一個保溫持有者（watch 或另一個 keepwarm）；活著的別人持有 ⇒ 立即結束
-    if not holder.acquire(sid, me):
-        return finish("skip", "reason=holder_running",
-                      "同一 sid 已有保溫持有者（watch 或 keepwarm）在叫醒，不重複叫醒",
-                      reason="holder_running")
-    try:
-        while True:
-            due, now = deadline(transcript, t_kw_min), now_fn()
-            if due is None:
-                return finish("skip", "reason=no_usage", "逐字稿尾端找不到帶 usage 的記錄",
-                              reason="no_usage")
-            if now >= due:
-                break
-            sleep_fn(max(min(poll_sec, due - now), 0.0))
-        ctx = roster._scan(Path(transcript), False)["ctx_tokens"] or ctx
-        star, row = n_star(ctx), load_ledger(sid, transcript)
-        k = row["pings"] + 1
-        saved = record_ping(sid, k, ctx, star, human_mark(transcript))
-        if k >= star or not saved:
-            return finish("cap", f"k={star}", f"第 {k} 次、上限 {star}（寫帳成功＝{saved}）",
-                          k=k, n_star=star, ctx=ctx)
-        return finish("ping", f"k={k} n={star}",
-                      f"距主控最後一筆記錄已 ≥ {t_kw_min:g} 分，第 {k}／{star} 次",
-                      k=k, n_star=star, ctx=ctx)
-    finally:
-        holder.release(sid, me)
+    return kw_run.run(sid, transcript, **kw)
 
 
 class WakeBudget:
@@ -300,11 +214,23 @@ class WakeBudget:
         why = skip_reason(self.sid, self.env, ctx=ctx)
         return why, load_ledger(self.sid, transcript)["pings"], n_star(ctx), int(ctx or 0)
 
-    def charge(self, pings: int, ctx: int, star: int) -> bool:
-        """記一次叫醒（帳上 pings 設為 `pings+1`）；寫不進去／找不到逐字稿 ⇒ `False`。"""
+    def charge(self, pings: int, ctx: int, star: int, *, plan=None,
+               now: float | None = None) -> bool:
+        """記一次叫醒（帳上 pings 設為 `pings+1`）；寫不進去／找不到逐字稿 ⇒ `False`。`plan`／`now`
+        （叫醒當下補量後的 `Plan` 與時刻，watch 傳入）供 S-25 記相鄰兩次 ping 的實測 Δ。"""
+        from . import (
+            kw_wake,  # noqa: PLC0415 — kw_wake 不 import 本檔，但保持與 run 同一種 lazy 形態
+        )
+
         transcript = find_transcript(self.sid, self.projects_dir)
-        return transcript is not None and record_ping(self.sid, pings + 1, ctx, star,
-                                                      human_mark(transcript))
+        if transcript is None:
+            return False
+        row = load_ledger(self.sid, transcript)
+        last, costs, last_reset = kw_wake.ping_cost(
+            self.sid, row, plan, time.time() if now is None else now)
+        return record_ping(self.sid, pings + 1, ctx, star, human_mark(transcript),
+                           work=work_mark(transcript), last=last, costs=costs,
+                           last_reset=last_reset)
 
 
 def cli(argv: list[str]) -> int:
@@ -314,6 +240,10 @@ def cli(argv: list[str]) -> int:
     ap.add_argument("--sid")
     ap.add_argument("--min", type=float, help="截止分鐘數（1～生效值，只准下修；<15 出聲；E2E 用）")
     ap.add_argument("--poll-sec", type=float, default=POLL_SECONDS)
+    ap.add_argument("--idle-min", type=float,
+                    help="最後一段閒置上限分鐘（只准下修，供 E2E 縮時；出廠 IDLE_LIMIT_MIN）")
+    ap.add_argument("--heartbeat-min", type=float,
+                    help="darwin 心跳間隔分鐘（只准下修，供 E2E 縮時；出廠 MAC_HEARTBEAT_MIN）")
     ap.add_argument("--projects-dir", help="逐字稿根目錄（預設＝Claude home 的 projects；測試用）")
     args = ap.parse_args(argv)
     sid = args.sid or os.environ.get("CLAUDE_CODE_SESSION_ID", "")
@@ -329,7 +259,8 @@ def cli(argv: list[str]) -> int:
             if args.min < FLOOR_MINUTES:
                 _warn(f"--min={args.min:g} 低於建議下限 {FLOOR_MINUTES}（只該用於實測）")
             t_kw = args.min
-    return run(sid, find_transcript(sid, args.projects_dir), t_kw_min=t_kw, poll_sec=args.poll_sec)
+    return run(sid, find_transcript(sid, args.projects_dir), t_kw_min=t_kw, poll_sec=args.poll_sec,
+               idle_min=args.idle_min, heartbeat_min=args.heartbeat_min)
 
 
 # ───────────────────────────────────────────────────────────── watch 額度閂鎖（D14）

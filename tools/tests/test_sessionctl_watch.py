@@ -114,6 +114,10 @@ class _Budget:
         return self.saved
 
 
+def _no_refresh(_now):
+    raise RuntimeError("測試：補量端點不可用")
+
+
 def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None, quota=False,
          poll: float = 30.0, anchor=None, budget: _Budget | None = None, pid: int = 4242,
          ) -> tuple[int, str, _Clock]:
@@ -125,7 +129,7 @@ def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None
     rc = watch.run(SID, cfg or watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=poll,
                    roster_fn=roster_fn, end_turn_fn=lambda a: bool(a.get("end_turn")),
                    quota_fn=lambda: quota, anchor_fn=lambda: anchor, out=out, pid=pid,
-                   budget=budget or _Budget())
+                   budget=budget or _Budget(), read_quota=lambda _now: None, refresh=_no_refresh)
     return rc, out.getvalue(), clock
 
 
@@ -314,8 +318,8 @@ class EventTests(_Fence):
         self.assertEqual(watch.decide(ag, T0, T0 - 3600, cfg, False)[0], "overrun")
         self.assertEqual(watch.decide(ag, T0, T0 - 3600, watch.Cfg(wall_min=9999, keepwarm_min=1),
                                       False)[0], "keepwarm")
-        self.assertEqual(watch.ORDER, ("quota", "budget", "stall", "overrun", "keepwarm", "cap",
-                                       "idle"))
+        self.assertEqual(watch.ORDER, ("handed_over", "quota", "budget", "stall", "overrun",
+                                       "resume", "keepwarm", "cap", "idle"))
 
     def test_every_verdict_exits_rc_zero_and_the_verdict_is_the_last_line(self) -> None:
         """判決後印 ARCH §1.5 對應列、判決一律 rc 0、事件只看末行（DEF-200-622）。WHY：harness
