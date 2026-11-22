@@ -177,3 +177,6 @@
 {"seq":177,"t":"2026-11-21T21:00:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-21T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
 {"seq":178,"t":"2026-11-22T14:30:04+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-21T21:00:00+08:00","reason":"dirty-tree","detail":"工作樹有非 SI 自有改動：AutoClaude/.perf_baseline.toml, tools/lib/sandbox_scope.py, tools/session_resume_planner.py"}
 {"seq":179,"t":"2026-11-22T15:15:02+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-21T21:00:00+08:00","reason":"other-driver","detail":"近 30 分鐘內有對話記錄"}
+{"seq":180,"t":"2026-11-22T16:00:02+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-21T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}
+{"seq":181,"t":"2026-11-22T21:00:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-22T21:00:00+08:00","reason":"blackout","detail":"本機時分 21:00 落在黑窗 ['21:00-01:30']"}
+{"seq":182,"t":"2026-11-23T01:30:03+08:00","kind":"sched.skip","by":"patrol","due_at":"2026-11-22T21:00:00+08:00","reason":"quota-band","detail":"額度帶 prepare"}

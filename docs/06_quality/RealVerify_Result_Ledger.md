@@ -305,3 +305,7 @@
 | 2026-11-21T06:23:11Z | RV-WP27 | pass | 1 | - | status_quiet_retired=status 無 ab573c773ef06f035／「安靜」；已退役殘局：3 筆＝retired.jsonl 的 3 筆 id；ab573c773ef06f035 不在退役表（由 E2E-WP-07 不列規則排除，非靠退役） | 4 |
 | 2026-11-21T06:28:10Z | RV-WP01 | pass | 1 | - | scan_totals=mapped=146 unmapped=0 命中處=146（ARC E6 基準 143 處／61 檔；差額 3）、涉及檔=61（基準差 0） | 0 |
 | 2026-11-21T06:28:11Z | RV-WP40 | pass | 1 | - | revision_row_verbatim=PRD 修訂表 v2.1.23 列＝DES 附錄 A-1 引文（逐字）; oir_clean=scan unmapped=0、undriven=0 | 1 |
+| 2026-11-22T08:06:14Z | RV-KW8 | fail | 1 | RV-KW8 | 保留證據：C:\Users\wuwei\.autosdd\realverify_kept\RV-KW8_20261122T160614 | 4211 |
+| 2026-11-22T17:08:46Z | RV-K3 | pass | 1 | - | RV-K3 valid_until=2026-11-23T06:08:40.751414+08:00 | 9 |
+| 2026-11-22T17:09:16Z | RV-K4 | pass | 1 | - | AutoSDD_HandoffSpawn_7cdba318_202611230115 NextRunTime=2026-11-23T01:15:00.0000000+08:00 LogonType=Interactive workdir=C:\Users\wuwei\AppData\Local\Temp\AutoSDD_RV_sbx_40fda9f7 | 20 |
+| 2026-11-22T17:15:47Z | RV-N2 | pass | 1 | - | RV-N2 patrol；重排 NextRunTime=2026-11-23T01:30:37.0000000+08:00；痕跡 ['sentinel_armed', 'sentinel_decided', 'sentinel_rearmed', 'sentinel_woken'] | 20 |
