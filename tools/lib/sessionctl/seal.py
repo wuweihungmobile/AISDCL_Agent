@@ -23,7 +23,7 @@ from pathlib import Path
 import endurance_env
 import transcript_activity
 
-from . import handoff, roster, switch
+from . import handoff, qw_schema, roster, switch
 from . import handoff_build as build
 
 #: prompts sidecar 的總字數上限；超過就只留第一則＋最後 `KEEP_TAIL` 則全文，中段改列索引。
@@ -164,22 +164,37 @@ def latest_package(sid: str, env=None) -> dict | None:
     return rows[-1] if rows else None
 
 
-def _spawned(path: Path) -> bool:
-    """痕跡檔有該包的 `session_switch_spawned`（`handoff` 欄＝包路徑，`ok` 為真）。唯讀。"""
+def _spawned(path: Path, now: datetime | None = None) -> bool:
+    """痕跡檔有該包的 `session_switch_spawned`（`handoff` 欄＝包路徑，`ok` 為真）；或有**未過期**
+    的 `session_switch_spawning` 意圖（R218 Q1，DES S-13）。唯讀。
+
+    意圖＝「job 即將／正在開窗」，先於任何 spawn 呼叫寫下，才沒有「窗已開、痕跡還沒落」的競態窗。
+    其後同 attempt 有失敗列（`qw_schema.is_failure_row`）者不算；意圖只在 `at` 起
+    `SPAWN_INTENT_TTL_SEC` 內有效，逾時且無成功列 ⇒ 不算交棒（job 已死，不得永久「已交棒」）。"""
     try:
         lines = (endurance_env.trace_dir_peek()[0] / _TRACE_NAME).read_text(
             encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return False
+    stamp = handoff._aware(now).timestamp()
+    intents: dict = {}  # attempt → at
+    failed: set = set()
     for line in lines:
         try:
             rec = json.loads(line)
         except ValueError:
             continue
-        if (isinstance(rec, dict) and rec.get("event") == "session_switch_spawned"
-                and rec.get("handoff") == str(path) and rec.get("ok") is True):
+        if not isinstance(rec, dict) or rec.get("handoff") != str(path):
+            continue
+        attempt = rec.get(qw_schema.SPAWN_ATTEMPT_KEY)
+        if rec.get("event") == "session_switch_spawned" and rec.get("ok") is True:
             return True
-    return False
+        if qw_schema.is_failure_row(rec):
+            failed.add(attempt)
+        elif rec.get("event") == qw_schema.EV_SPAWNING:
+            intents[attempt] = rec.get("at")
+    return any(qw_schema.intent_live(at, stamp) for attempt, at in intents.items()
+               if attempt not in failed)
 
 
 def is_written(path) -> bool:
@@ -243,7 +258,7 @@ def resumed_notice(path) -> str:
             "確認沒有別的視窗在動同一棵工作樹後，手動刪除該 .ack 即可接回。")
 
 
-def handed_over(sid: str, env=None) -> Path | None:
+def handed_over(sid: str, env=None, now: datetime | None = None) -> Path | None:
     """已交棒判準（單一家；E-HD-1）：最新包已寫完 ∧〔被**別的** session ack ∨ 痕跡有該包的 spawn〕
     ⇒ 回包路徑。WHY 不分 live／acked 狀態：包一被新視窗 ack 就變 `acked`，只認 `live` 會讓舊
     session 被誤判成「還沒交棒」（2026-11-16 20:45 真機）。WHY 要排除自己的 ack：同 sid 自續跑不是
@@ -253,7 +268,7 @@ def handed_over(sid: str, env=None) -> Path | None:
         return None
     path = Path(row["path"])
     acked = path.with_suffix(".ack").exists() and acker_sid(path) != str(sid)
-    return path if acked or _spawned(path) else None
+    return path if acked or _spawned(path, now) else None
 
 
 def wake_package(sid: str, env=None) -> Path | None:

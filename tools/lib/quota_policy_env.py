@@ -181,6 +181,15 @@ ENV_SPEC: tuple[EnvVar, ...] = (
            "（只准下修、下限 15；出廠 45＝早於閒置約 55 分的自動壓縮與 1 小時快取壽命）", "policy"),
     EnvVar("AUTOSDD_KEEPWARM_MIN_CTX_TOKENS", None, 30000, "int", 1.0, None,
            "主控快取保溫：上下文低於此 token 數就不保溫（重寫很便宜，不值得叫醒）", "policy"),
+    # R218 QuotaWall（DES §4、S-3／S-15）：額度牆預留閘三鍵，消費端＝`sessionctl/quotawall.py`
+    # （`attr=None`）。空＝未校準（用程式內預設並逐鍵標 calibrated=no）；非 >0 有限數視為未校準。
+    EnvVar("AUTOSDD_QUOTAWALL_PP_PER_KUNIT", None, None, "float", 0.0, None,
+           "額度牆：p(c) 每千單位耗的短窗 pp（一次保溫＝p(c)/1000×此值）；空＝未校準",
+           "policy"),
+    EnvVar("AUTOSDD_QUOTAWALL_BURN_PP_PER_MIN", None, None, "float", 0.0, None,
+           "額度牆：偵測延遲內的燒速 pp／分；空＝未校準（1.0）", "policy"),
+    EnvVar("AUTOSDD_QUOTAWALL_AGENT_EST_PP", None, None, "float", 0.0, None,
+           "額度牆：一支在飛代理收尾預估 pp；空＝未校準（5）", "policy"),
     EnvVar("AUTOSDD_SESSION_SWITCH_MODE", None, "auto", "str", None, None,
            "互動視窗自動切換 session：auto（出聲＋可 spawn）／notify（只出聲）／off", "policy"),
     # 🔴 v2.1.13 G3（PRD_Amendment_R113_WakeChain_LastMile.md §3(c)）：接力狀態機的

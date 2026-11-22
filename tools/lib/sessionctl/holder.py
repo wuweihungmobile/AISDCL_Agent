@@ -16,7 +16,7 @@ from pathlib import Path
 
 import endurance_env
 
-from . import procstop
+from . import procstop, qw_schema
 
 SCHEMA = "autosdd.keepwarm.holder/1"
 
@@ -84,15 +84,19 @@ def live_other(sid: str, pid: int, *, alive=pid_alive, token=start_token) -> dic
         row, alive=alive, token=token) else None
 
 
-def acquire(sid: str, pid: int, *, alive=pid_alive, token=start_token) -> bool:
+def acquire(sid: str, pid: int, *, alive=pid_alive, token=start_token,
+            extra: dict | None = None) -> bool:
     """取得保溫錨：活著的別人持有（或同時搶的別人先建成）⇒ `False`；否則寫入自己（`O_CREAT|O_EXCL`
     原子建立）並回 `True`。檔案系統寫不進去（唯讀、目錄被檔案佔住）⇒ 也回 `True`：互斥是
     「避免重複叫醒」的優化，不是叫醒的前提——寫不進去時不能讓 watch 永遠不叫醒；保溫帳同樣寫不進
-    會在叫醒當下判 cap（`keepwarm.record_ping`），失效仍往少花走。"""
+    會在叫醒當下判 cap（`keepwarm.record_ping`），失效仍往少花走。
+    `extra`（R218 Q1，DES §5.6）：主載具計畫欄（欄名住 `qw_schema.holder_extra`）；自己再呼叫一次
+    即改寫該列（defer 後 wake_at 變了）；不得覆蓋 schema／sid／pid／proc_start。"""
     if live_other(sid, pid, alive=alive, token=token) is not None:
         return False
     target = path(sid, write=True)
-    row = {"schema": SCHEMA, "sid": sid, "pid": pid, "proc_start": token(pid) or ""}
+    row = {**qw_schema.safe_holder_extra(extra),
+           "schema": SCHEMA, "sid": sid, "pid": pid, "proc_start": token(pid) or ""}
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         current = read(sid)
