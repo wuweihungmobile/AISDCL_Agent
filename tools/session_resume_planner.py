@@ -94,6 +94,7 @@ import quota_reconcile  # noqa: E402  # R100：`--reconcile` 的判準（輸入�
 import relay_machine  # noqa: E402  # v2.1.13 G3+G4：接力狀態機＋哨兵自癒的家（tools/lib）
 import resume_cost  # noqa: E402  # sessionctl D7c：_run_resume 前後五小時軸讀數（只讀快取）
 import resume_route  # noqa: E402  # v2.1.13 G1：喚醒 argv 權限姿態＋A-PRE 預檢的家（tools/lib）
+import sched_isolation  # noqa: E402  # RealVerify 副作用隔離（DES S2）：登記首判／job 環境搬運／到點首判的接點
 import schedule_backend  # noqa: E402  # R83：平台差異（schtasks／launchd）唯一收斂點
 import sentinel_lifecycle  # noqa: E402  # R95 修3：哨兵活性欄（armed stamp vs 現查）
 import session_brief  # noqa: E402  # DEF-200-231：觸發時刻解析＋--check 末行 FSM（lib）
@@ -720,7 +721,9 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
     python = _ps_single_quote(guard.quiet_python())
     plan_q = _ps_single_quote(plan_path)
     task_q = _ps_single_quote(task_name)
-    argument = _ps_single_quote(runner_action_argument(plan_path, task_name, tick))
+    # DES S2：`--job-env`／OS 自毀由 `sched_isolation.carriage` 搬運；正式且無顯式 env ⇒ 空
+    iso = sched_isolation.carriage(_REPO_ROOT, os.environ, datetime.now().astimezone(), at_expr)
+    argument = _ps_single_quote(runner_action_argument(plan_path, task_name, tick) + iso.argument)
     return (
         "$ErrorActionPreference = 'Stop'\n"
         f"if (-not (Test-Path '{plan_q}')) {{ throw '任務書不存在，拒絕註冊：{plan_q}' }}\n"
@@ -737,8 +740,8 @@ def endurance_schtasks_script(plan_path: str, task_name: str, at_expr: str,
         # 本檔的絕對路徑，所以這個推導在排程行程裡同樣成立（端到端已實證）。
         f"$action  = New-ScheduledTaskAction -Execute '{python}' "
         f"-Argument '{argument}' -WorkingDirectory '{_ps_single_quote(str(_REPO_ROOT))}'\n"
-        f"$trigger = New-ScheduledTaskTrigger -Once -At {at_expr}\n"
-        f"$settings = {_SCHTASKS_SETTINGS}\n"
+        f"$trigger = New-ScheduledTaskTrigger -Once -At {at_expr}\n{iso.trigger_ps}"
+        f"$settings = {_SCHTASKS_SETTINGS}\n{iso.settings_ps}"
         f"$principal = {_SCHTASKS_PRINCIPAL}\n"
         f"$common = @{{TaskName='{task_q}'; Action=$action; Trigger=$trigger; "
         "Settings=$settings; Force=$true}\n"
@@ -1034,6 +1037,8 @@ def _register_and_record(plan: Path, state: dict, at: datetime | None, tick: str
     """
     if relay_machine.single_owner_conflict(state.get("session_id"), state.get("task_name"), plan):  # noqa: E501
         return 0, relay_machine.DEFERRED_CREDENTIAL
+    # DES S2 登記首判：沙盒租約／主人／存在性不成立 ⇒ 不登記（rc 4；job env 值錯 rc 2）
+    if (denied := sched_isolation.register_gate(_REPO_ROOT, os.environ, at, switch.trace, "_register_and_record")): return denied, ""  # noqa: E501,E701
     # 🔴 事故座標（2026-09-05 23:03）：任務書檔在等待期間消失（易失暫存目錄）⇒
     # write_relay() 的 read_text() 丟 FileNotFoundError（OSError 子類別，write_relay
     # 只接 ValueError）未捕捉往外拋，整支無人巡邏行程崩潰——呼叫端既有的
@@ -1088,7 +1093,7 @@ def _arm_endurance(args, transcript: Path, plan: Path) -> int:
     state.update(reset_at=reset_at.isoformat(), reset_source="transcript-verbatim", observed_at=event["timestamp"], observed_text=event["text"], transcript=str(transcript))  # noqa: E501
     rc, moment = _register_and_record(plan, state, reset_at + timedelta(seconds=RESET_SKEW_SECONDS), RESUME_TICK)  # noqa: E501
     if rc != 0:
-        return 1
+        return rc  # 同 `_arm_sentinel`：不洗掉 DES S2 的拒絕碼
     if moment == relay_machine.DEFERRED_CREDENTIAL:
         print(f"ℹ️  INV5 單一擁有者：session {guard.session_id_of(transcript)} 已由其他排程巡邏/續跑，不重複武裝（擇一擁有，零重複探測）。")  # noqa: E501
         return 0
@@ -1234,6 +1239,7 @@ def _resume_tick(args) -> int:
     """**schtasks 叫起來的那一支**。第一件事就是留痕——讓「觸發了但失敗」與「沒觸發」分得開。"""
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
+    if (refused := sched_isolation.tick_gate(_REPO_ROOT, "_resume_tick", args.task_name, switch.trace)) is not None: _schtasks_remove(args.task_name); return refused  # noqa: E501,E701,E702 — DES S2 到點首判（沙盒租約過期／主人已死／家已刪 ⇒ 不探測、自拆、rc 10）；刻意在 `woken` 之前：留痕走 job 環境轉送的 TRACE_DIR（`sideeffect_refused`），`woken` 落系統暫存（job 沒有沙盒 TEMP）會把沙盒 sid 洩進真暫存
     append_log(log, "woken", plan=str(plan))
     if not plan.is_file():
         return _abort_and_unregister(log, args.task_name, "任務書不存在", "aborted", f"❌ 任務書不存在：{plan}（地板沒了，無法續跑）")  # noqa: E501
@@ -1267,6 +1273,7 @@ def _resume_tick(args) -> int:
         append_log(log, "resume_tick_early", due_at=due.isoformat(), rc=rc, credential=moment, **early)  # noqa: E501
         _alert_on_rearm_failure(state, plan, rc, "等待 reset 重掛失敗"); return rc  # noqa: E702
 
+    if (refused := sched_isolation.tick_gate(_REPO_ROOT, "_resume_tick:probe", args.task_name, switch.trace, transcript=state.get("transcript") or None, exe=args.probe_command)) is not None: _schtasks_remove(args.task_name); return refused  # noqa: E501,E701,E702 — DES S2：探測／續跑（起 `claude`）前再判一次，帶逐字稿與執行檔（真 claude 不得被沙盒目標呼叫）
     verdict = probe_quota(args.probe_command)
     # DEF-200-266 L4：`text`／`source` 必記（此前只記 rc/kind/open ⇒ 假陰性那次「哪個子字串命中」
     # 量不到）；rc=0 ∧ unknown ⇒ `probe_unclassified` loud alert 附輸出（仍掛回巡邏，不猜）。
@@ -1376,7 +1383,7 @@ def _arm_sentinel(args, transcript: Path, plan: Path) -> int:
     rc, moment = _register_and_record(plan, state, at, SENTINEL_TICK)
     append_log(endurance_log_path(plan), "sentinel_armed" if rc == 0 else "arm_failed", task=state["task_name"], credential=moment, handled_through=state["handled_through"])  # noqa: E501
     if rc != 0:
-        return 1
+        return rc  # 1＝後端失敗；4／2＝DES S2 登記首判拒絕（rc 不被洗成 1，驗收斷言 reason）
     print(schedule_backend.select().credential_line(moment) + "\n"
           f"   哨兵 {state['task_name']}：每 {SENTINEL_INTERVAL_SECONDS}s 醒一次，平時只讀逐字稿＝零 token；只有真的撞線那一次才花一次探測。\n"  # noqa: E501
           f"   已處理到：{state['handled_through'] or '（本 session 尚無撞線事件）'}\n   任務書＋狀態塊：{plan}\n   稽核痕跡：{state['log_path']}（沒觸發＝這個檔不會長大，是可偵測的）")  # noqa: E501
@@ -1412,6 +1419,7 @@ def _sentinel_tick(args) -> int:
     """schtasks 叫起來的巡邏那一支：留痕 → 讀檔判定（讀不出先自癒）→ 四分支。"""
     plan = Path(args.plan or "unknown")
     log = endurance_log_path(plan)
+    if (refused := sched_isolation.tick_gate(_REPO_ROOT, "_sentinel_tick", args.task_name, switch.trace)) is not None: _schtasks_remove(args.task_name); return refused  # noqa: E501,E701,E702 — DES S2 到點首判（巡邏只讀檔，exe 不判；探測分支交棒 `_resume_tick`，那裡帶 exe 再判）；在 `sentinel_woken` 之前，理由同 `_resume_tick`
     append_log(log, "sentinel_woken", plan=str(plan))
     try:
         text, read_fault = (plan.read_text(encoding="utf-8") if plan.is_file() else ""), ""
@@ -1523,7 +1531,7 @@ def main(argv: list[str]) -> int:
             quota_gate, SENTINEL_INTERVAL_SECONDS)):
         print("❌ R16 啟動自檢失敗：\n" + "\n".join(r16), file=sys.stderr)
         return 2
-    args = build_parser().parse_args(argv)
+    args = build_parser().parse_args(endurance_env.apply_job_env_or_exit(argv))  # DES S2 job-env
 
     # 🔴 M-01（DEF-200-272）：排程器叫起的 tick 行程結構上沒有 AUTOSDD_UNATTENDED
     # （launchd plist EnvironmentVariables 只帶 PATH／schtasks -Once 同），於是 INV1 零付費
@@ -1544,6 +1552,7 @@ def main(argv: list[str]) -> int:
     if args.resume_tick: return _resume_tick(args)  # noqa: E701
     if args.reconcile: return quota_reconcile.cli(args.reconcile, args.reconcile_at)  # noqa: E701,E501
     if args.probe_quota:
+        if (refused := sched_isolation.tick_gate(_REPO_ROOT, "main:probe_quota", None, switch.trace, exe=args.probe_command)) is not None: return refused  # noqa: E501,E701 — DES S2：互動動詞同樣不得由沙盒工具副本呼叫真 `claude`
         verdict = probe_quota(args.probe_command)
         print(f"quota_open={verdict['open']}  kind={verdict['kind']}  rc={verdict['rc']}")
         print(verdict["text"][:600])
@@ -1661,7 +1670,7 @@ def main(argv: list[str]) -> int:
             print()
             state = relay_machine.manual_state(data["session_id"], out, args, task, transcript, at)
             rc, moment = _register_and_record(out, state, at, RESUME_TICK, at_expr)
-            if rc != 0: return 1  # noqa: E701
+            if rc != 0: return rc  # noqa: E701 — 同上
             print(schedule_backend.select().credential_line(moment))
             print("   ℹ️  醒來那一跑" + ("會自動續跑。" if args.allow_resume else "只探測＋留痕。"))
     return 0

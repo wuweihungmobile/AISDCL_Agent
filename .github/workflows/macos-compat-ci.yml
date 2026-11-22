@@ -370,6 +370,7 @@ on:
       - "tools/lib/quota_policy.py"
       - "tools/lib/quota_rush.py"
       - "tools/lib/sandbox_scope.py"
+      - "tools/lib/sched_isolation.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
       # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、
@@ -879,6 +880,7 @@ on:
       - "tools/lib/quota_policy.py"
       - "tools/lib/quota_rush.py"
       - "tools/lib/sandbox_scope.py"
+      - "tools/lib/sched_isolation.py"
       - "tools/lib/secret_scan.py"
       - "tools/lib/sentinel_lifecycle.py"
       # 🔴 R84 收尾：本輪兩支新建 tools/lib/ 共用層（同 R80~R83 連續四輪的同一形態、

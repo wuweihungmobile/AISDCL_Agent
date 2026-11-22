@@ -45,8 +45,14 @@ class Site(NamedTuple):
     kind: str
 
 
-#: 站點登記表（AST 鎖用，AT-SE-17）。S2／S3／QW Q3 在寫出站點的同一 commit 加列；本棒只建介面。
-SITES: tuple[Site, ...] = ()
+#: 站點登記表（AST 鎖用，AT-SE-17）。S2／S3／QW Q3 在寫出站點的同一 commit 加列。
+#: planner 站點（DES S2）：接點在 `sched_isolation`（register_gate／tick_gate），呼叫在下列函式內。
+SITES: tuple[Site, ...] = (
+    Site("session_resume_planner", "_register_and_record", "register"),
+    Site("session_resume_planner", "_sentinel_tick", "tick"),
+    Site("session_resume_planner", "_resume_tick", "tick"),
+    Site("session_resume_planner", "main", "headless"),  # `--probe-quota` 動詞
+)
 
 
 def _norm(path) -> str:
