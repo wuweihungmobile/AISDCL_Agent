@@ -17,7 +17,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import handoff, oldwin, procstop
+from . import handoff, oldwin, procstop, se_gate
 
 DEFAULT_PREFIX = "AutoSDD_OldWinClose_"
 _REPO = Path(__file__).resolve().parents[3]
@@ -77,9 +77,10 @@ def _index(write: dict | None = None) -> dict:
     return data
 
 
-def job_argv(label: str, old_sid: str, new_sid: str, pkg, env) -> list[str]:
+def job_argv(label: str, old_sid: str, new_sid: str, pkg, env, extra=()) -> list[str]:
     """重試工作的 argv：排程不帶環境變數 ⇒ trace_dir 與 quiet 分鐘數隨 argv 帶過去（沙盒才不會
-    讀到真機的痕跡目錄）。"""
+    讀到真機的痕跡目錄）。`extra`＝`se_gate.register` 判決的 `--job-env`（居所與行為開關的允許表
+    轉送；舊 `--trace-dir` 相容保留一版）。"""
     import endurance_env  # noqa: PLC0415
     import win_spawn  # noqa: PLC0415
 
@@ -88,7 +89,7 @@ def job_argv(label: str, old_sid: str, new_sid: str, pkg, env) -> list[str]:
             "--trace-dir", str(endurance_env.trace_dir())]
     if env.get(oldwin.QUIET_ENV):
         argv += ["--quiet", str(env[oldwin.QUIET_ENV])]
-    return argv
+    return argv + list(extra)
 
 
 def schedule_retry(old_sid: str, new_sid: str, pkg, when: float, *, env=None,
@@ -99,14 +100,19 @@ def schedule_retry(old_sid: str, new_sid: str, pkg, when: float, *, env=None,
 
     env, now = os.environ if env is None else env, handoff._aware(now)
     fire = erj.fire_time(datetime.fromtimestamp(when).astimezone(), 0, now)
+    reg = se_gate.register("oldwin_sched.schedule_retry", repo=_REPO, pkg=pkg, fire=fire, env=env,
+                           sid=old_sid)
+    if reg.rc:
+        return reg.rc, ""  # L1 拒絕：不刪既有工作、不登記
     prefix = task_prefix()
     label = f"{prefix}{old_sid[:8]}_{fire:%H%M}"
     be = _backend(backend)
     for old in be.list_jobs(f"{prefix}{old_sid[:8]}") or []:
         if old != label:
             be.disarm(old)
-    rc, cred = (arm or erj.arm_oneshot)(label, job_argv(label, old_sid, new_sid, pkg, env),
-                                        str(_REPO), fire)
+    rc, cred = (arm or erj.arm_oneshot)(
+        label, job_argv(label, old_sid, new_sid, pkg, env, reg.extra), str(_REPO), fire,
+        **({"expire_at": reg.expire} if reg.expire else {}))
     if rc == 0 and str(cred).strip():
         _index({label: {"handoff": str(pkg), "old": old_sid, "new": new_sid}})
     return rc, str(cred)

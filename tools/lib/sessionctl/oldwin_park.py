@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import handoff, oldwin, park, procstop
+from . import handoff, oldwin, park, procstop, se_gate
 
 
 def _rearm(sid: str, pkg, when: float, env, now: datetime, S: dict) -> bool:
@@ -31,10 +31,14 @@ def _rearm(sid: str, pkg, when: float, env, now: datetime, S: dict) -> bool:
     if marker is None or marker.get("status") != "armed":
         return False
     fire = erj.fire_time(datetime.fromtimestamp(when).astimezone(), 0, now)
+    reg = se_gate.register("oldwin_park._rearm", repo=park_cli._REPO, pkg=pkg, fire=fire, env=env,
+                           sid=sid, claude=marker.get("claude"))
+    if reg.rc:
+        return False  # L1 拒絕：舊排程保留（到點的下一次首判會拒絕並自拆）
     label = park_cli.job_label(sid, fire)
     rc, cred = (S.get("arm") or erj.arm_oneshot)(
-        label, park_cli.job_argv(label, sid, pkg, fire), str(park_cli._REPO), fire,
-        interactive=True)
+        label, park_cli.job_argv(label, sid, pkg, fire, reg.extra), str(park_cli._REPO), fire,
+        interactive=True, **({"expire_at": reg.expire} if reg.expire else {}))
     if rc != 0 or not str(cred).strip():
         return False
     job = {"label": label, "role": "primary", "fire_at": fire.isoformat(), "credential": str(cred)}

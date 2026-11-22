@@ -15,6 +15,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+import sandbox_scope
 import transcript_activity
 
 #: 交接包機械層的 11 個欄位標題（順序即輸出順序；測試逐一斷言它們都在）。
@@ -153,7 +154,8 @@ def build_mechanical(session_id: str, transcript: Path | None, *, repo: Path, no
     except Exception as exc:  # noqa: BLE001
         roster_text = _unknown(f"名冊不可用（{type(exc).__name__}）")
     body = (
-        f"- 來源 session：{session_id}\n- 產生時刻：{now.isoformat()}\n- repo 根：{repo}",
+        f"- 來源 session：{session_id}\n- 產生時刻：{now.isoformat()}\n"
+        f"- {sandbox_scope.PKG_REPO_LABEL}{repo}",
         branch_head, tree, tags,
         ("\n\n".join(_quote(t) for t in humans) or _unknown("逐字稿無真人提示或讀不到"))
         + (f"\n\n全文見 {package.stem}.prompts.md" if package is not None else ""),

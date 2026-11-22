@@ -28,7 +28,8 @@ GUARD_OFF_ENV = "AUTOSDD_PARK_GUARD_OFF"  # 只關 Stop 推回；讀自 hook 行
 PARK_CMD = "python tools/sessionctl.py park"
 ROUTE_H, ROUTE_DONE, ROUTE_REFUSE = "H", "DONE", "REFUSE"
 FIRE_RESUME, FIRE_FRESH = "RESUME", "FRESH"  # 到點換手的兩種開法（設計 §4.6）
-STATUSES = ("armed", "fired", "skipped", "cancelled", "failed")
+# `refused`＝到點被產品面（L1 副作用隔離）拒絕：終局、非失敗、非 armed（SE DES D-21）
+STATUSES = ("armed", "fired", "skipped", "cancelled", "failed", "refused")
 # parity：quota_gate._FIVE_HOUR_KINDS／_FIVE_HOUR_MINUTES
 SHORT_WINDOW_KINDS = frozenset({"session", "five_hour", "5h"})
 SHORT_WINDOW_MINUTES = 300.0

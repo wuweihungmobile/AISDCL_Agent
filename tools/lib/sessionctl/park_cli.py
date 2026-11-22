@@ -13,7 +13,9 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import handoff, park, switch
+import sandbox_scope
+
+from . import handoff, park, park_reset, se_gate, switch
 
 PARK_CMD = park.PARK_CMD
 _REPO = Path(__file__).resolve().parents[3]
@@ -25,12 +27,13 @@ def job_label(sid: str, fire: datetime) -> str:
     return f"AutoSDD_HandoffSpawn_{sid[:8]}_{fire:%Y%m%d%H%M}"
 
 
-def job_argv(label: str, sid: str, pkg, fire: datetime) -> list[str]:
+def job_argv(label: str, sid: str, pkg, fire: datetime, extra=()) -> list[str]:
+    """`extra`＝`se_gate.register` 判決的 `--job-env`／`--claude`（無顯式值 ⇒ 空 ⇒ 逐字不變）。"""
     import win_spawn  # noqa: PLC0415 — lazy
 
     return [win_spawn.quiet_python(), str(_REPO / "tools" / "sessionctl.py"), "park", "--fire",
             "--job", label, "--session-id", sid, "--pkg", str(pkg), "--fire-at",
-            fire.isoformat(timespec="seconds")]
+            fire.isoformat(timespec="seconds"), *extra]
 
 
 def _err(text: str) -> None:
@@ -85,19 +88,6 @@ def _refusal_text(env, S: dict) -> tuple[int, str]:
     return 0, ""
 
 
-def _reset_from_at(opts, now: datetime):
-    """`--at`：`(reset, 錯誤)`。須帶 `--why`（≥8 字）、aware、在未來、≤8 天。"""
-    if len((opts.why or "").strip()) < park.MIN_WHY_CHARS:
-        return None, f"❌ --at 需要 --why（至少 {park.MIN_WHY_CHARS} 字的原因）。"
-    try:
-        at = datetime.fromisoformat(opts.at)
-    except ValueError:
-        return None, "❌ --at 須為 ISO 8601 且帶 offset。"
-    if at.tzinfo is None or at <= now or (at - now).total_seconds() > park.AT_MAX_SECONDS:
-        return None, "❌ --at 須帶 offset、在未來、且不超過 8 天。"
-    return at, ""
-
-
 def _pick_package(sid: str, opts, env):
     if opts.pkg:
         return Path(opts.pkg)
@@ -111,47 +101,9 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
         _err(text)
         switch.trace("park_refused", sid=sid, why=text, code=rc)
         return rc
-    skew = 0
-    if opts.at:
-        reset, text = _reset_from_at(opts, now)
-        if reset is None:
-            _err(text)
-            return _RC_PRECOND
-        axis = None
-    else:
-        import quota_gate  # noqa: PLC0415
-        import quota_policy  # noqa: PLC0415
-
-        state = (S.get("quota") or quota_gate.pace_state)(now)
-        pol = (S.get("policy")
-               or (lambda: quota_policy.load_policy(quota_gate.policy_env())[0]))()
-        hits = park.prepare_hits(state, pol, now)
-        why_ok = len((opts.why or "").strip()) >= park.MIN_WHY_CHARS
-        if hits == [] and why_ok:
-            hits = park.measured_short(state, now)  # 未達門檻但主控判斷下一棒放不下
-        reset = park.reset_of(hits) if hits else None
-        # 已達標但 reset 解不出＝reset 不明，不是沒達標
-        high = [a for a in park.short_axes(state.axes)
-                if park._real_pct(a.pct) and a.pct >= pol.prepare_pct]
-        if hits is None or (not hits and (high or why_ok)):
-            text = ("❌ park 拒絕：量不到短窗軸的 reset 時刻（"
-                    f"{state.source}／{state.reason}）。reset 是滾動視窗、只能觀測不能算，"
-                    "本工具不假設 5 小時。請稍後重試，或明示 --at <ISO> --why \"<WHY>\"。")
-        elif not hits:
-            text = (f"❌ park 拒絕：沒有短窗軸達準備門檻（{pol.prepare_pct:.0f}pp）。"
-                    "若判斷下一棒這一窗放不下，加 --why \"<WHY≥8字>\"（reset 取短窗觀測值）；"
-                    "若因週額度等停工，請明示 --at <ISO> --why \"<WHY≥8字>\"（上限 8 天）。")
-        else:
-            text = ""
-        if text:
-            _err(text)
-            switch.trace("park_refused", sid=sid, why=text, code=_RC_REFUSED)
-            return _RC_REFUSED
-        top = max(hits, key=lambda a: a.pct)
-        axis = {"kind": top.kind, "pct": top.pct}
-        import quota_messages  # noqa: PLC0415
-
-        skew = quota_messages.HALT_RESET_SKEW_SECONDS
+    reset, axis, skew, rc = park_reset.resolve(opts, sid, S, now)
+    if rc:
+        return rc
     pkg = _pick_package(sid, opts, env)
     if pkg is None or not Path(pkg).is_file():
         _err(f"❌ park 前置不成立：session {sid} 沒有 live 的交接包。先 python tools/sessionctl.py "
@@ -172,12 +124,17 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
     fire = erj.fire_time(reset, skew, now)
     route, reason = park.park_route((fire - now).total_seconds(), unattended=False, mode="auto",
                                     carrier_ok=True)
+    reg = se_gate.register("park_cli._cmd_park", repo=_REPO, pkg=pkg, fire=fire, env=env,
+                           sid=sid, claude=opts.claude)
+    if reg.rc:
+        return reg.rc  # L1 拒絕：不取代舊標記、不登記（rc 4／job 環境值不合法 2）
     if not _supersede(sid, S):
         _err("❌ 舊的 park 排程沒有真的被移除 ⇒ 不登記新的（避免雙排程）。")
         return 1
     label = job_label(sid, fire)
     arm = S.get("arm") or erj.arm_oneshot
-    arc, cred = arm(label, job_argv(label, sid, pkg, fire), str(_REPO), fire, interactive=True)
+    arc, cred = arm(label, job_argv(label, sid, pkg, fire, reg.extra), str(_REPO), fire,
+                    interactive=True, **({"expire_at": reg.expire} if reg.expire else {}))
     if arc != 0 or not str(cred).strip():
         _err(f"❌ 排程沒有成立（rc={arc}，憑證取不到）⇒ 本工具不會說它已排程。")
         switch.trace("park_arm_failed", sid=sid, label=label, rc=arc, why="no-credential",
@@ -189,6 +146,8 @@ def _cmd_park(opts, sid: str, env, S: dict, now: datetime) -> int:
               "valid_until": (fire + timedelta(seconds=park.YIELD_GRACE_SECONDS)).isoformat(),
               "jobs": [{"label": label, "role": "primary", "fire_at": fire.isoformat(),
                         "credential": str(cred)}], "reason": reason, "outcome": None}
+    if opts.claude:
+        marker["claude"] = opts.claude  # 供 QW §7.6 哨兵接手沿用同一執行檔（未給 ⇒ 標記逐字不變）
     ok, msg = park.write_marker(marker)
     if not ok:
         gone = _disarm_verified(label, S)
@@ -263,6 +222,8 @@ def _cmd_status(opts, sid: str, S: dict) -> int:
         return 0
     print(f"route={marker['route']} status={marker['status']} fire_at={marker['fire_at']} "
           f"valid_until={marker['valid_until']}")
+    if marker["status"] == "refused":
+        print(f"  refused：{(marker.get('outcome') or {}).get('detail', '')}")
     for job in marker["jobs"]:
         live = ""
         if opts.verify:
@@ -329,6 +290,9 @@ def spawn_resume(sid: str, pkg, *, runner=None, platform_name: str | None = None
     if env.get(park.UNATTENDED_ENV):
         _err("❌ 無人窗口不開互動視窗。")
         return 1
+    if se_gate.check("park_cli.spawn_resume", repo=repo or _REPO, pkg=pkg, sid=sid, claude=claude,
+                     projects_dir=projects_dir):  # L1：早於 runner；與無人旗標互不相依
+        return sandbox_scope.RC_SIDEEFFECT_REFUSED
     if switch.switch_mode(env) != "auto" or (platform_name or sys.platform) != "win32":
         _err("❌ 不自動續跑：只有 Windows 且 AUTOSDD_SESSION_SWITCH_MODE=auto 才開窗。"
              f"手動做法：在 repo 根執行 `claude -r {sid}`。")
@@ -377,7 +341,15 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
     except (TypeError, ValueError):
         late = None
     switch.trace("park_job_start", job=label, sid=sid, fire_at=opts.fire_at, late_s=late)
+    refusal = se_gate.check("park_cli._cmd_fire", repo=_REPO, pkg=pkg, sid=sid, claude=opts.claude,
+                            job=label)  # L1：先於一切讀標記／讓路觀察／spawn；拒絕＝終局
     marker = park.read_marker(sid)
+    if refusal is not None:
+        if marker is not None and marker["status"] == "armed" and label in {
+                j["label"] for j in marker["jobs"]}:
+            _settle(marker, "refused", "sideeffect_refused", reason=refusal.reason)
+        _disarm_verified(label, S)
+        return 0
 
     def finish(rc: int, status: str | None = None, event: str = "", **extra) -> int:
         if marker is not None and marker["status"] == "armed" and status:
@@ -408,6 +380,7 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
         return skip("live_driver", driver_kind=driver["kind"], driver_at=driver["timestamp"])
     if handoff._duplicate_refusals(pkg, now, S.get("alive") or handoff._alive):
         return skip("spawned")  # forward／--spawn 已開出新 session、對方還沒 ack：不再動舊 sid
+    claude_kw = {"claude": opts.claude} if opts.claude else {}  # 每次 spawn 嘗試同一執行檔（D-14）
     route, why, held = _fire_route(transcript, env, now)
     switch.trace("park_route", sid=sid, job=label, route=route, why=why, ctx=held)
     if route == park.FIRE_RESUME:
@@ -422,11 +395,13 @@ def _cmd_fire(opts, sid: str, env, S: dict, clock) -> int:
         if gate["act"] == "fail":
             _write_failed_handback(sid, pkg, 1, route)
             return finish(1, "failed", "park_resume_failed", spawn_rc=1, route=route)
-        rc = (S.get("resume") or spawn_resume)(sid, pkg, env=env)
+        rc = (S.get("resume") or spawn_resume)(sid, pkg, env=env, **claude_kw)
         done, failed = "park_resumed", "park_resume_failed"
     else:
-        rc = (S.get("spawn") or handoff.spawn)(pkg)
+        rc = (S.get("spawn") or handoff.spawn)(pkg, **claude_kw)
         done, failed = "park_spawned", "park_spawn_failed"
+    if rc == sandbox_scope.RC_SIDEEFFECT_REFUSED:  # spawn 站點 L1 拒絕＝終局，不算失敗、不走另一路
+        return finish(0, "refused", "sideeffect_refused", route=route)
     if rc == 0:
         switch.trace(done, sid=sid, job=label, pkg=str(pkg), rc=rc, route=route)
         return finish(0, "fired", done)
@@ -440,7 +415,7 @@ def _parser() -> argparse.ArgumentParser:
     group = ap.add_mutually_exclusive_group()
     for flag in ("done", "cancel", "status", "fire"):
         group.add_argument(f"--{flag}", action="store_true")
-    for flag in ("session-id", "pkg", "at", "why", "job", "fire-at"):
+    for flag in ("session-id", "pkg", "at", "why", "job", "fire-at", "claude"):
         ap.add_argument(f"--{flag}")
     ap.add_argument("--verify", action="store_true")
     return ap

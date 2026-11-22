@@ -51,7 +51,14 @@ def _rush(argv: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
+    import importlib  # noqa: PLC0415
+
+    import lib.sessionctl  # noqa: F401,PLC0415 — 副作用：把 tools/lib 放進 sys.path
+
+    # 排程 job 的環境不帶過邊界：居所與行為開關隨 argv 的 `--job-env` 轉送，入口最先套用
+    # （值不合法 rc 2、沙盒居所已刪 rc 9；遇第一個 `--` 即停，`runlong -- <argv…>` 的旗標不被吃）
+    args = importlib.import_module("endurance_env").apply_job_env_or_exit(
+        list(sys.argv[1:] if argv is None else argv))
     verb, rest = (args[0], args[1:]) if args else ("", [])
     if verb == "handoff":
         from lib.sessionctl import handoff
@@ -62,12 +69,13 @@ def main(argv: list[str] | None = None) -> int:
 
         rc = roster.cli(args)
         if verb == "status" and rc == 0:  # R3 WP-4B FR-W9：監督一行（依心跳檔）
-            from lib.sessionctl import oldwin_sched, supervise
+            from lib.sessionctl import oldwin_sched, rv_orphans, supervise
 
             sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "").strip()
             sys.stdout.write((supervise.status_line(sid) if sid
                               else "監督：無法判斷（缺 CLAUDE_CODE_SESSION_ID）") + "\n")
             sys.stdout.write(oldwin_sched.status_text())  # R217：舊窗重試排程與「只提醒」列
+            sys.stdout.write(rv_orphans.status_line() + "\n")  # 真機驗證租約帳孤兒（只讀）
         return rc
     if verb == "oldwin":  # R217 §7.1：舊視窗有條件自動關閉的重試／回收入口
         from lib.sessionctl import oldwin_sched
