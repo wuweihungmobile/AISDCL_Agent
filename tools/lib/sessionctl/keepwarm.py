@@ -26,7 +26,7 @@ from pathlib import Path
 import endurance_env
 
 from . import kw_ledger, procstop, roster, seal, switch
-from .kw_ledger import SCHEMA
+from .kw_ledger import SCHEMA as SCHEMA  # 再匯出：保溫帳 schema 對外仍以 `keepwarm.SCHEMA` 取用
 
 EV_VERDICT = "keepwarm_verdict"
 EV_STOP_BLOCK = "keepwarm_stop_block"
@@ -288,26 +288,52 @@ def latch_path(sid: str) -> Path:
     return endurance_env.trace_dir() / "watch" / f"{sid}.quota.json"
 
 
-def quota_latch(sid: str, band: str, reset: str) -> bool:
-    """`True`＝該觸發（並記入閂鎖）；`False`＝同 reset 窗、同帶或更低帶已觸發過。帶升級
-    （prepare→halt）或 reset 改變（新窗）⇒ 再觸發。閂鎖讀／寫失敗一律照觸發並出聲（寧可再吵一次，也
-    不靜默吞掉額度事件；PRD 原則 5）。"""
-    path, rank = latch_path(sid), _BANDS.get(band, 1)
+#: 閂鎖檔 schema v2（r9 W11d；REQ-QW-75）：兩條序列各自一格。舊（v1 單一序列）檔讀回＝無閂鎖。
+QUOTA_LATCH_SCHEMA = "autosdd.watch.quota/2"
+#: 帶級所屬序列：原始讀數序列 prepare＜halt、計畫序列 nodispatch＜close（序列內才比級）。
+SERIES = {"prepare": "raw", "halt": "raw", "nodispatch": "plan", "close": "plan"}
+
+
+def _read_latch(path: Path) -> dict:
+    """v2 閂鎖列；不存在、舊 schema ⇒ `{}`（視為無閂鎖、不報錯）；壞檔 ⇒ 出聲後 `{}`（照觸發）。"""
     try:
         got = json.loads(path.read_text(encoding="utf-8"))
-        if not (isinstance(got, dict) and isinstance(got.get("reset"), str)
-                and got.get("band") in _BANDS):
+        if not isinstance(got, dict):
             raise ValueError("結構不符")
-        if _same_reset(got["reset"], reset) and _BANDS[got["band"]] >= rank:
-            return False
     except FileNotFoundError:
-        pass
+        return {}
     except (OSError, ValueError) as exc:
         _warn(f"額度閂鎖 {path} 讀不動（{type(exc).__name__}: {exc}）⇒ 照觸發")
+        return {}
+    return got if got.get("schema") == QUOTA_LATCH_SCHEMA else {}
+
+
+def quota_latch(sid: str, band: str, reset: str, *, n: int | None = None) -> bool:
+    """`True`＝該觸發（並記入閂鎖）；`False`＝該序列在同 reset 窗、同帶或更低帶已觸發過。閂鎖鍵＝
+    `(序列, 帶級, reset)`：序列內升級（prepare→halt、nodispatch→close）或 reset 改變（新窗）⇒
+    再觸發；兩條序列各自閂鎖，互不吃掉對方的訊號。`n`＝當下在飛代理數：計畫序列已閂鎖後 `n` 比
+    `n_latched` 大（新派工）⇒ 再觸發一次並更新 `n_latched`（REQ-QW-76；呼叫端只在 stage ≥
+    nodispatch 才帶計畫序列的鍵，N 不增不連發）。閂鎖讀／寫失敗一律照觸發並出聲（寧可再吵一次，
+    也不靜默吞掉額度事件；PRD 原則 5）。"""
+    path, rank, series = latch_path(sid), _BANDS.get(band, 1), SERIES.get(band, "raw")
+    row = _read_latch(path)
+    cur = row.get(series)
+    if isinstance(cur, dict) and isinstance(cur.get("reset"), str) and cur.get("band") in _BANDS \
+            and _same_reset(cur["reset"], reset):
+        latched_rank = _BANDS[cur["band"]]
+        grown = (series == "plan" and isinstance(n, int) and not isinstance(n, bool)
+                 and isinstance(row.get("n_latched"), int) and n > row["n_latched"])
+        if latched_rank >= rank and not grown:
+            return False
+        if latched_rank > rank:  # 新派工重判：帶級不降（閂鎖記該窗該序列最高帶）
+            band = cur["band"]
+    n_known = isinstance(n, int) and not isinstance(n, bool)
+    row = {"schema": QUOTA_LATCH_SCHEMA, "sid": sid, "raw": row.get("raw"), "plan": row.get("plan"),
+           "n_latched": n if n_known else row.get("n_latched"),
+           series: {"band": band, "reset": reset}}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"schema": SCHEMA, "sid": sid, "band": band, "reset": reset}),
-                        encoding="utf-8", newline="\n")
+        path.write_text(json.dumps(row), encoding="utf-8", newline="\n")
     except OSError as exc:
         _warn(f"額度閂鎖寫不進 {path}（{type(exc).__name__}）⇒ 照觸發")
     return True

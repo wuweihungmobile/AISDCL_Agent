@@ -132,7 +132,7 @@ def _label(agent: dict) -> str:
             f"｜{agent.get('description') or '?'}")
 
 
-def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool, *,
+def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hit: bool | str, *,
            kw_anchor: float | None = None, kw_enabled: bool = True,
            kw_verdict=None, kw_due: float | None = None) -> tuple[str, str] | None:
     """純函式：回 `(事件, 明細)`；無事件 ⇒ `None`。`agents`＝**未交卷**代理（名冊
@@ -148,8 +148,8 @@ def decide(agents: list[dict], now: float, started_at: float, cfg: Cfg, quota_hi
     `kw_due`（R218 Q2：主載具有目標時的排程第一個叫醒時刻）蓋過「錨點＋keepwarm_min」；
     `kw_verdict()` 回 `None`＝本輪不判（牆內延後）、`resume`／`handed_over`＝無論有無代理都退出。"""
     found: dict[str, str] = {}
-    if quota_hit:
-        found["quota"] = "短窗額度原始讀數已達 prepare 門檻（reset 在未來）"
+    if quota_hit:  # 字串＝依來源分開的文案（watch_wake.quota_detail）；裸 True 不知來源，不冒稱
+        found["quota"] = quota_hit if isinstance(quota_hit, str) else "額度事件成立（短窗額度）"
     over = [a for a in agents if isinstance(a.get("ctx_tokens"), int)
             and a["ctx_tokens"] >= cfg.ctx_max]
     if over:
@@ -235,9 +235,10 @@ def ended_turn(sid: str, agent_id: str, projects_dir=None) -> bool:
             and msg.get("stop_reason") == "end_turn")
 
 
-def quota_key_now(now: float | None = None, plan=None) -> tuple[str, str] | None:
-    """額度事件閂鎖鍵 `(帶級, reset 分鐘)`；判準住 `watch_wake.quota_key`（四級帶級，R218 Q2）。"""
-    return watch_wake.quota_key(now, plan)
+def quota_keys_now(now: float | None = None, plan=None) -> list[tuple]:
+    """額度事件閂鎖鍵（兩條序列各至多一把）；判準住 `watch_wake.quota_keys`（r9 W11d）。"""
+    return watch_wake.quota_keys(now, plan)
+
 
 def _anchor_reader(sid: str, projects_dir):
     """每輪讀主控逐字稿尾端的保溫錨點；逐字稿路徑找到就快取（找不到每輪再找）。"""
@@ -295,7 +296,7 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
         sid, transcript(), env, datetime.fromtimestamp(t).astimezone(), read_quota=read_quota,
         refresh=refresh))
     plans = watch_wake.PlanCache(plan_fn)
-    quota_fn = quota_fn or (lambda: quota_key_now(now_fn(), plans.get(now_fn())))
+    quota_fn = quota_fn or (lambda: quota_keys_now(now_fn(), plans.get(now_fn())))
     wctl = watch_wake.WakeCtl(sid, transcript, env, cfg, budget, anchor_fn, read_quota=read_quota,
                               refresh=refresh)
     pid = os.getpid() if pid is None else pid
@@ -322,13 +323,17 @@ def run(sid: str, cfg: Cfg, *, now_fn=time.time, sleep_fn=time.sleep,
                 write_heartbeat(sid, cfg, started, now, pid, anchor, wctl.due())
                 sleep_fn(poll_sec)
                 continue
-            quota_hit = False
-            if hit:
-                band, reset = hit if isinstance(hit, tuple) else ("prepare", "unknown")
-                quota_hit = keepwarm.quota_latch(sid, band, reset)
-                if not quota_hit and not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
+            quota_hit: bool | str = False
+            hits = watch_wake.norm_hits(hit)
+            if hits:  # 兩條序列各自閂鎖（W11d）；計畫序列另以在飛代理數 N 做新派工重判
+                fired = watch_wake.fire_hits(sid, hits, getattr(plans.get(now), "n_live", None))
+                if fired:
+                    band = watch_wake.top_band(fired)
+                    quota_hit = watch_wake.quota_detail(fired, plans.get(now))
+                elif not latched:  # 同一個 run 只落一次痕跡，免得每輪洗版
                     latched = True
-                    switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=band, reset=reset)
+                    switch.trace(keepwarm.EV_QUOTA_LATCHED, sid=sid, band=watch_wake.top_band(hits),
+                                 reset=hits[0][1])
             verdict = decide(agents, now, started, cfg, quota_hit, kw_anchor=anchor,
                              kw_enabled=holding, kw_due=wctl.due() if holding else None,
                              kw_verdict=lambda: wctl.classify(now, state, resolver))

@@ -120,7 +120,7 @@ def _no_refresh(_now):
 
 def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None, quota=False,
          poll: float = 30.0, anchor=None, budget: _Budget | None = None, pid: int = 4242,
-         ) -> tuple[int, str, _Clock]:
+         plan_fn=None) -> tuple[int, str, _Clock]:
     """`anchor`＝主控最後一筆 usage 記錄的 epoch（`None`＝量不到，退回 watch 啟動時刻）。
     縫一律注入：
     不讓測試去讀真實 `~/.claude/projects` 裡剛好同 sid 的逐字稿（那會讓時鐘假值與真記錄相減）。"""
@@ -129,7 +129,8 @@ def _run(roster_fn, *, cfg: watch.Cfg | None = None, clock: _Clock | None = None
     rc = watch.run(SID, cfg or watch.Cfg(), now_fn=clock.now, sleep_fn=clock.sleep, poll_sec=poll,
                    roster_fn=roster_fn, end_turn_fn=lambda a: bool(a.get("end_turn")),
                    quota_fn=lambda: quota, anchor_fn=lambda: anchor, out=out, pid=pid,
-                   budget=budget or _Budget(), read_quota=lambda _now: None, refresh=_no_refresh)
+                   budget=budget or _Budget(), read_quota=lambda _now: None, refresh=_no_refresh,
+                   plan_fn=plan_fn)
     return rc, out.getvalue(), clock
 
 
@@ -492,6 +493,125 @@ class QuotaLatchTests(_Fence):
     def test_quota_disposal_row_says_a_rehang_will_not_refire(self) -> None:
         """WHY：被叫醒的主控沒有上下文，處置表是它唯一知道「重掛安全」的地方。"""
         self.assertIn("同一 reset 窗同一帶不會再觸發", watch.DISPOSAL["quota"])
+
+
+def _plan(stage: str, n_live: int | None = 1):
+    """`qw_plan.Plan` 的完整替身（`plan_lines` 要格式化全部數值欄位）。"""
+    from lib.sessionctl import qw_plan  # noqa: PLC0415
+    return qw_plan.Plan(stage=stage, d_min=90.0, k=2, v=20.0, limit=57.0, r=53.0, reset=T0 + 5400,
+                        ping_pp=1.5, ping_pp_src="measured", n_live=n_live)
+
+
+class QuotaSeriesLatchTests(_Fence):
+    """tools/lib/sessionctl/{watch,watch_wake,keepwarm}.py：r9 W11d 兩條序列各自閂鎖（REQ-QW-75～77；
+    AT-QW-89～91）。WHY：07:43 一次計畫序列 close 誤報鎖住單一序列，之後 85% prepare 與新派工都沒出聲，
+    到 100% halt 才響（2026-11-23 撞牆事件 RCA 第 2 題）。"""
+
+    def _once(self, keys, *, plan=None, anchor=None) -> tuple[str, str]:
+        """掛一次 watch（共用同一個閂鎖檔）；回 `(事件名, 輸出全文)`。"""
+        clock = _Clock()
+        rc, out, _ = _run(lambda c=clock: [_agent(last=c.now(), started=c.now())],
+                          cfg=watch.Cfg(wall_min=9999), clock=clock, quota=keys,
+                          plan_fn=(lambda _t, p=plan: p) if plan is not None else None)
+        self.assertEqual(rc, 0)
+        return _event(out), out
+
+    def _events(self, *rounds) -> list[str]:
+        return [self._once(keys, plan=plan)[0] for keys, plan in rounds]
+
+    def test_at_qw_89_the_two_series_latch_independently(self) -> None:
+        """AT-QW-89。WHY（MU-QW-57 閂鎖回單一序列）：計畫序列的 close 已閂鎖，原始讀數跨 prepare 仍要
+        出聲；反向亦然。同序列同級或降級不出聲。"""
+        close, prep = ("close", "R", None), ("prepare", "R", 90.0)
+        self.assertEqual(self._events(([close], _plan("close")), ([prep], None)),
+                         ["quota", "quota"])
+        nodis, prep2 = ("nodispatch", "R2", None), ("prepare", "R2", 85.0)  # 新 reset 窗＝乾淨起點
+        self.assertEqual(self._events(([prep2], None), ([nodis], _plan("nodispatch"))),
+                         ["quota", "quota"])
+
+    def test_at_qw_89_same_series_same_or_lower_band_stays_latched(self) -> None:
+        """AT-QW-89。WHY：序列內規則不變——同級、降級不重複叫醒。"""
+        close, nodis = ("close", "R", None), ("nodispatch", "R", None)
+        self.assertEqual(self._events(([close], _plan("close")), ([close], _plan("close")),
+                                      ([nodis], _plan("nodispatch"))),
+                         ["quota", "keepwarm", "keepwarm"])
+        self.assertEqual(self._events(([("halt", "R", 99.0)], None), ([("prepare", "R", 90.0)], None)),
+                         ["quota", "keepwarm"])
+
+    def test_at_qw_89_raw_halt_still_outranks_raw_prepare(self) -> None:
+        """AT-QW-89。WHY：原始讀數序列內 prepare＜halt，升級照樣再觸發。"""
+        self.assertEqual(self._events(([("prepare", "R", 85.0)], None),
+                                      ([("halt", "R", 100.0)], None)), ["quota", "quota"])
+
+    def test_at_qw_89_a_v1_latch_file_means_no_latch_and_no_error(self) -> None:
+        """AT-QW-89。WHY：舊（單一序列）閂鎖檔讀回＝無閂鎖、fail-open，不得報錯或卡住升級後的新路徑。"""
+        path = keepwarm.latch_path(SID)
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({"schema": keepwarm.SCHEMA, "sid": SID, "band": "close",
+                                    "reset": "R"}), encoding="utf-8")
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            event, _ = self._once([("close", "R", None)], plan=_plan("close"))
+        self.assertEqual(event, "quota")
+        self.assertNotIn("額度閂鎖", buf.getvalue())
+        row = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(row["schema"], keepwarm.QUOTA_LATCH_SCHEMA)
+        self.assertEqual(row["plan"]["band"], "close")
+
+    def test_at_qw_90_new_dispatch_retriggers_once_per_increase(self) -> None:
+        """AT-QW-90①②④。WHY（MU-QW-58）：閂鎖後主控又派一支代理（N 增）是新的風險，要重新評估；
+        N 不增（含連續重掛）不得連發，否則回到每掛必叫的吵。"""
+        nodis = ("nodispatch", "R", None)
+        self.assertEqual(
+            self._events(([nodis], _plan("nodispatch", 1)), ([nodis], _plan("nodispatch", 2)),
+                         ([nodis], _plan("nodispatch", 2)), ([nodis], _plan("nodispatch", 2))),
+            ["quota", "quota", "keepwarm", "keepwarm"])
+        row = json.loads(keepwarm.latch_path(SID).read_text(encoding="utf-8"))
+        self.assertEqual(row["n_latched"], 2)
+
+    def test_at_qw_90_n_increase_without_a_plan_stage_does_not_fire(self) -> None:
+        """AT-QW-90③。WHY：stage 未到 nodispatch（free）時 N 增是正常工作，不是額度事件。"""
+        nodis = ("nodispatch", "R", None)
+        self.assertEqual(self._events(([nodis], _plan("nodispatch", 1)), ([], _plan("free", 2))),
+                         ["quota", "keepwarm"])
+
+    def test_at_qw_90_a_lower_n_does_not_rearm_below_the_latched_count(self) -> None:
+        """AT-QW-90 延伸。WHY：N 掉回 1 再升到 2 並非新增派工量（`n_latched` 仍是 2），不再叫醒。"""
+        nodis = ("nodispatch", "R", None)
+        self.assertEqual(
+            self._events(([nodis], _plan("nodispatch", 2)), ([nodis], _plan("nodispatch", 1)),
+                         ([nodis], _plan("nodispatch", 2))), ["quota", "keepwarm", "keepwarm"])
+
+    def test_at_qw_91_plan_trigger_text_names_the_wall_not_the_raw_reading(self) -> None:
+        """AT-QW-91①。WHY（MU-QW-59）：12:16 計畫階段觸發卻寫「原始讀數已達 prepare」是假話，主控據此
+        誤判讀數；文案必須指向實際來源與數字。"""
+        _event_name, out = self._once([("nodispatch", "R", None)], plan=_plan("nodispatch"))
+        line = next(x for x in out.splitlines() if "quota：" in x)
+        for word in ("額度牆判 nodispatch", "R=", "L=", "ping_pp 來源=measured"):
+            self.assertIn(word, line)
+        self.assertNotIn("原始讀數已達", out)
+
+    def test_at_qw_91_raw_trigger_text_quotes_the_reading(self) -> None:
+        """AT-QW-91②。WHY：原始讀數觸發要寫實際讀數，且不得冒稱計畫階段。"""
+        _event_name, out = self._once([("prepare", "R", 90.0)])
+        line = next(x for x in out.splitlines() if "quota：" in x)
+        self.assertIn("短窗原始讀數 90% 已達 prepare", line)
+        self.assertNotIn("額度牆判", line)
+
+    def test_at_qw_91_both_sources_are_stated_together(self) -> None:
+        """AT-QW-91③。WHY：兩條序列同時成立時兩句並陳，主控才知道是兩件事。"""
+        _event_name, out = self._once([("prepare", "R", 90.0), ("close", "R", None)],
+                                      plan=_plan("close"))
+        line = next(x for x in out.splitlines() if "quota：" in x)
+        self.assertIn("短窗原始讀數 90% 已達 prepare", line)
+        self.assertIn("額度牆判 close", line)
+        self.assertIn(watch.watch_wake.CLOSE_STEPS, out)  # 處置依最高帶（close）
+
+    def test_a_bare_true_into_decide_does_not_claim_a_raw_reading(self) -> None:
+        """AT-QW-91 延伸。WHY：呼叫端沒給來源時，文案不得冒稱「原始讀數已達」。"""
+        got = watch.decide([], T0, T0, watch.Cfg(), True)
+        self.assertIsNotNone(got)
+        self.assertNotIn("原始讀數已達", got[1])
 
 
 class ConfigTests(_Fence):
