@@ -615,6 +615,12 @@ def _resolve_import_request(
             pkg = os.path.join(base, *segs, "__init__.py")
             if os.path.isfile(pkg):
                 hits.append(pkg)
+        # `from . import X`（相對、無模組名）：X 可能是套件 `__init__.py` 內定義的名稱
+        # 而非子模組檔——此時消費的檔就是該 `__init__.py`（2026-11-23 realverify cases 首見）。
+        if req.level and req.top == "." and not hits:
+            init = os.path.join(base, "__init__.py")
+            if os.path.isfile(init):
+                hits.append(init)
     return hits
 
 

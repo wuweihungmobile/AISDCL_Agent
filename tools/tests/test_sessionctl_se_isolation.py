@@ -28,9 +28,9 @@ from pathlib import Path
 from unittest import mock
 
 _ROOT = Path(__file__).resolve().parents[2]
-for _p in (_ROOT / "tools", _ROOT / "tools" / "lib"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# 逐行明寫（靜態可解析；ci_paths 鎖不解析迴圈變數）
+sys.path.insert(0, str(_ROOT / "tools"))
+sys.path.insert(0, str(_ROOT / "tools" / "lib"))
 
 import sandbox_scope  # noqa: E402
 from test_sessionctl_handoff import FakeRoster, FakeRunner  # noqa: E402

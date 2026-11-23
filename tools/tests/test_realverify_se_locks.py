@@ -22,9 +22,9 @@ from unittest import mock
 
 _TOOLS = Path(__file__).resolve().parents[1]
 _REPO = _TOOLS.parent
-for _p in (_TOOLS, _TOOLS / "lib"):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# 逐行明寫（靜態可解析；ci_paths 鎖不解析迴圈變數）
+sys.path.insert(0, str(_TOOLS))
+sys.path.insert(0, str(_TOOLS / "lib"))
 
 from lib import endurance_env, sandbox_scope  # noqa: E402
 from lib.realverify import cases as rv_cases  # noqa: E402

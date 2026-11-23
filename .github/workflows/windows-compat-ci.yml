@@ -296,6 +296,7 @@ on:
       - "tools/install_statusline.py"
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
+      - "docs/06_quality/OpenItems_Protocol/params.json"  # DEF-200-644：check_pending_handoff 密閉測試複製此檔
       - "tools/lib/session_brief.py"
       - "tools/lib/session_brief_oi.py"  # R217 OIR 完成閘簡報段，tools/tests 消費
       - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
@@ -815,6 +816,7 @@ on:
       - "tools/install_statusline.py"
       - "tools/session_gate_acceptance.py"
       - "docs/06_quality/FiveQuestion_Audit_Protocol/params.json"
+      - "docs/06_quality/OpenItems_Protocol/params.json"  # DEF-200-644：check_pending_handoff 密閉測試複製此檔
       - "tools/lib/session_brief.py"
       - "tools/lib/session_brief_oi.py"  # R217 OIR 完成閘簡報段，tools/tests 消費
       - "tools/lib/transcript_activity.py"  # DEF-200-560/562：哨兵對話活動判準與 harness 限額記錄辨識，planner 與 tools/tests 消費
