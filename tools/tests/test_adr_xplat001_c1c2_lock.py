@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9614,
+    "test_adr_xplat001_c1c2_lock.py": 9627,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -709,7 +709,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_run_root_unittests.py": 5480,
     "test_sandbox_scope.py": 597,
     "test_sanitize_component_frozen_sdd_versions_lock.py": 309,
-    "test_sched_isolation.py": 468,
+    "test_sched_isolation.py": 495,
     "test_schedule_capability_parity.py": 598,
     "test_script_scan_surface_ssot.py": 376,
     "test_sdd_hook_router_r158.py": 189,
@@ -756,7 +756,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_sessionctl_converge.py": 539,
     "test_sessionctl_costmodel.py": 158,
     "test_sessionctl_forward.py": 415,
-    "test_sessionctl_handoff.py": 1325,
+    "test_sessionctl_handoff.py": 1330,
     "test_sessionctl_hooks.py": 607,
     "test_sessionctl_keepwarm.py": 612,
     "test_sessionctl_keepwarm_q2.py": 672,
@@ -3315,6 +3315,13 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_openitems_run_died.py 等的回歸鎖＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md。"),
+    ("R214", 187428, 187473, +45,  # round-label-ok r218fix6
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第六十三列（W20-FIX6：CI 6b043a7b 的 skip 天花板與 Windows "
+     "handoff spawn 測試修正）：既有 test_sched_isolation.py 三支 E2E 改為各平台真跑、"
+     "test_sessionctl_handoff.py 決定性補丁＋本檔自身漂移。"
+     "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md。"),
 )
 
 
@@ -3416,7 +3423,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (58916, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (58961, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3498,6 +3505,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第五十六列（R217 工作推進軸期 A 收尾）+4348＝47770。"
         "第六十一列（DEF-200-645 沙箱居所圍籬防回歸）+28＝58810。"
         "第六十二列（W11b 短窗判準抽出與 FIX5 跨平台測試修正）+106＝58916。"
+        "第六十三列（W20-FIX6 skip 天花板與 handoff spawn 決定性）+45＝58961。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4114,6 +4122,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "W11b 短窗判準與 FIX5 跨平台測試修正回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218fix6
+     "W20-FIX6 skip 天花板與 handoff spawn 決定性回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4289,10 +4301,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 409
+_REPIN_LOG_FROZEN_PREFIX_LEN = 410
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "e52133197c88c491720d813916bbe4fed0a2a0c7c80b5e5bc1ce80cb93b551c9")
+    "d340f0beb0bf896e966fcb4258f2d4284f2236f46d60a2da81403e404096d743")
 
 
 def repin_log_history_digest(
@@ -4543,6 +4555,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "219eda6e0ad6", "47d7b7ffdd67", "DEF-200-638"),  # round-label-ok r218clos1ledger
     ("R214", "47d7b7ffdd67", "464bf30ccc49", "DEF-200-645"),  # round-label-ok r218fix4ledger
     ("R214", "464bf30ccc49", "e52133197c88", "DEF-200-645"),  # round-label-ok r218w19bledger
+    ("R214", "e52133197c88", "d340f0beb0bf", "DEF-200-645"),  # round-label-ok r218fix6ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

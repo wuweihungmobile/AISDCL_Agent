@@ -37,6 +37,7 @@ sys.path.insert(0, str(_REPO_ROOT / ".claude" / "hooks"))
 import endurance_env  # noqa: E402
 import sandbox_scope as ss  # noqa: E402
 import sched_isolation as si  # noqa: E402
+import schedule_backend  # noqa: E402
 import sentinel_lifecycle as SL  # noqa: E402  # DEF-200-446：模組級圍籬原語
 
 import session_resume_planner as planner  # noqa: E402
@@ -323,10 +324,10 @@ def _ps(script: str, timeout: int = 60) -> str:
     return out.stdout.strip()
 
 
-@unittest.skipUnless(_WIN, "真 schtasks（Windows）；launchd 無 EndBoundary，job env 不過其邊界")
 class SentinelSandboxE2ETest(unittest.TestCase):
-    """E2E-S2：真子行程＋真 schtasks。沙盒＝`%TEMP%\\AutoSDD_RV_sbx_*` 的工具副本；排程環境＝
-    不帶任何 AUTOSDD_*。"""
+    """E2E-S2：真子行程。沙盒＝暫存目錄 `AutoSDD_RV_sbx_*` 的工具副本；排程環境不帶 AUTOSDD_*。
+    Windows 另走真 schtasks（Action／XML 的 EndBoundary 只有 schtasks 有）；其他平台走同一組判準的
+    子行程路徑（登記搬運、到點首判、探測拒絕），不 skip——launchd／無載具沒有 EndBoundary 可驗。"""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -359,8 +360,9 @@ class SentinelSandboxE2ETest(unittest.TestCase):
 
     @classmethod
     def _cleanup(cls) -> None:
-        _ps(f"Unregister-ScheduledTask -TaskName '{cls.task}' -Confirm:$false "
-            "-ErrorAction SilentlyContinue")
+        if _WIN:
+            _ps(f"Unregister-ScheduledTask -TaskName '{cls.task}' -Confirm:$false "
+                "-ErrorAction SilentlyContinue")
         shutil.rmtree(cls.home, ignore_errors=True)
 
     @staticmethod
@@ -395,6 +397,8 @@ class SentinelSandboxE2ETest(unittest.TestCase):
             ss.grant(self.home, until=now + timedelta(minutes=minutes), now=now)
 
     def _task_exists(self) -> bool:
+        if not _WIN:  # 排程載具的唯一提問點（Linux 無載具＝量到「零」）
+            return self.task in (schedule_backend.select().list_jobs("AutoSDD_Sentinel_") or [])
         name = _ps(f"(Get-ScheduledTask -TaskName '{self.task}' "
                    "-ErrorAction SilentlyContinue).TaskName")
         return bool(name)
@@ -418,25 +422,44 @@ class SentinelSandboxE2ETest(unittest.TestCase):
         self,
     ) -> None:
         self._lease(20)
-        res = self._arm()
-        self.assertEqual(res.returncode, 0, res.stdout[-600:] + res.stderr[-600:])
-        self.assertIn("NextRunTime", res.stdout)
-        # (02) 真排程器的 Action 與 XML：居所＋行為開關、EndBoundary＝租約到期、自刪設定
-        action = _ps(f"(Get-ScheduledTask -TaskName '{self.task}').Actions[0].Arguments")
-        for key in endurance_env.RESIDENCE_KEYS:
-            self.assertIn(f'--job-env "{key}={self.res[key]}"', action, key)
-        self.assertIn('--job-env "AUTOSDD_SENTINEL_OFF=1"', action)
-        xml = _ps(f"Export-ScheduledTask -TaskName '{self.task}'")
-        until = ss.job_expiry(self.home, datetime.now().astimezone())
-        self.assertIn(f"<EndBoundary>{until:%Y-%m-%dT%H:%M:%S}", xml)
-        self.assertIn("<DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>", xml)
-        # (03) 到點（排程器登記的真 Action 引數、機器環境不帶 AUTOSDD_*）而主人已死 ⇒ rc 10、自拆
+        if _WIN:
+            res = self._arm()
+            self.assertEqual(res.returncode, 0, res.stdout[-600:] + res.stderr[-600:])
+            self.assertIn("NextRunTime", res.stdout)
+            # (02) 真排程器的 Action 與 XML：居所＋行為開關、EndBoundary＝租約到期、自刪設定
+            action = _ps(f"(Get-ScheduledTask -TaskName '{self.task}').Actions[0].Arguments")
+            for key in endurance_env.RESIDENCE_KEYS:
+                self.assertIn(f'--job-env "{key}={self.res[key]}"', action, key)
+            self.assertIn('--job-env "AUTOSDD_SENTINEL_OFF=1"', action)
+            xml = _ps(f"Export-ScheduledTask -TaskName '{self.task}'")
+            until = ss.job_expiry(self.home, datetime.now().astimezone())
+            self.assertIn(f"<EndBoundary>{until:%Y-%m-%dT%H:%M:%S}", xml)
+            self.assertIn("<DeleteExpiredTaskAfter>PT0S</DeleteExpiredTaskAfter>", xml)
+            tick_argv, tick_line = None, f'"{_PY}" {action}'
+        else:
+            # (02) 非 Windows：載具（launchd／無）不吃 EndBoundary，改驗登記搬運本身（同一支
+            # `carriage`／`expire_for`，planner 登記時呼叫的就是它）：居所＋行為開關帶進 job argv、
+            # 租約到期 ⇒ 有 OS 自毀時刻
+            now = datetime.now().astimezone()
+            pairs = si.job_env_pairs(self.home, self._case_env())
+            carried = si.carriage(self.home, self._case_env(), now).argument
+            for key in endurance_env.RESIDENCE_KEYS:
+                self.assertIn(f'--job-env "{key}={self.res[key]}"', carried, key)
+            self.assertIn('--job-env "AUTOSDD_SENTINEL_OFF=1"', carried)
+            self.assertEqual(pairs.count("--job-env"), len(pairs) // 2)
+            self.assertEqual(si.expire_for(self.home, now), ss.job_expiry(self.home, now))
+            self.assertIsNotNone(si.expire_for(self.home, now), "租約有效 ⇒ 必有自毀時刻")
+            script = str(self.home / "tools" / "session_resume_planner.py")
+            tick_argv = [_PY, script, "--sentinel-tick", "--plan", str(self.plan),
+                         "--task-name", self.task, *pairs]
+            tick_line = None
+        # (03) 到點（登記帶的引數、機器環境不帶 AUTOSDD_*）而主人已死 ⇒ rc 10、自拆
         dead = subprocess.Popen([_PY, "-c", "pass"], creationflags=_NOWIN)
         dead.wait()
         self._lease(20, owner_pid=dead.pid)
         real = Path.home().joinpath(*endurance_env.TRACE_HOME_PARTS)  # 真痕跡目錄（只讀比對）
         before = {p: p.stat().st_size for p in real.glob("*.jsonl")} if real.is_dir() else {}
-        tick = self._run(None, self._machine_env(), shell_line=f'"{_PY}" {action}')
+        tick = self._run(tick_argv, self._machine_env(), shell_line=tick_line)
         self.assertEqual(tick.returncode, ss.RC_SIDEEFFECT_REFUSED, tick.stdout + tick.stderr)
         self.assertFalse(self._task_exists(), "到點首判拒絕 ⇒ 自拆（既有 disarm 路）")
         rows = [r for r in self._trace_rows() if r["event"] == "sideeffect_refused"]
@@ -453,9 +476,13 @@ class SentinelSandboxE2ETest(unittest.TestCase):
         res = self._planner("--probe-quota")  # `--probe-command` 預設裸名 "claude"
         self.assertEqual(res.returncode, ss.RC_SIDEEFFECT_REFUSED, res.stdout + res.stderr)
         self.assertIn("sandbox_real_exe", res.stderr)
-        fake = self.home / "bin" / "fakeclaude.cmd"
+        fake = self.home / "bin" / ("fakeclaude.cmd" if _WIN else "fakeclaude.sh")
         fake.parent.mkdir(exist_ok=True)
-        fake.write_text("@echo off\r\necho Hi\r\n", encoding="utf-8")
+        if _WIN:
+            fake.write_text("@echo off\r\necho Hi\r\n", encoding="utf-8")
+        else:
+            fake.write_text("#!/bin/sh\necho Hi\n", encoding="utf-8", newline="\n")
+            fake.chmod(0o755)
         res = self._planner("--probe-quota", "--probe-command", str(fake))
         self.assertNotEqual(res.returncode, ss.RC_SIDEEFFECT_REFUSED, res.stdout + res.stderr)
         self.assertIn("quota_open=", res.stdout, "通過首判後進到探測（零成本端點可能先答）")

@@ -550,6 +550,11 @@ class AnnounceTest(_Base):
 class SpawnTest(_Base):
     def setUp(self) -> None:
         super().setUp()
+        # 決定性：FakeRunner 的假 pid 可能恰是 CI 機上真實行程（建立時刻晚於固定的 NOW ⇒ 被判
+        # 「pid 已被重用」而不再算活）；痕跡 pid 的建立時刻一律當量不到（偏安全＝同一行程）
+        patcher = unittest.mock.patch.object(procstop, "created_filetime", lambda _pid: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.proj = self.tmp / "projects"
         self.proj.mkdir()
         self.disarmed: list[str] = []
