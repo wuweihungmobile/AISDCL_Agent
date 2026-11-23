@@ -415,7 +415,7 @@
 | DEF-200-642 | 2026-11-23 | Q3 smoke 首跑 park 到點未起（原因未明；本欄刻意零輪號） | **park 到點未起且原因未明**：無法區分未到點／被讓路／失敗鏈終局 | P3 | Q6 偵測並分類 | routed：Q6 承接；承接輪次：**R218** |
 | DEF-200-643 | 2026-11-23 | S6 RV-SE18 FAIL（本欄刻意零輪號） | **沙盒清理失敗後身分檔寫回順序錯誤、abandoned 下 note 項未處置** | P2 | 修清理順序與 note 處置；RV-K5 宣告 150 分租約 | fixed：6f4a9a86（FIX2）；回歸 `test_realverify_*` 與真機 RV-SE18、RV-K5 PASS |
 | DEF-200-644 | 2026-11-23 | `test_check_pending_handoff` 7 案例隨真帳本內容變紅（本欄刻意零輪號） | **測試讀真 OIR 帳本的 capnote，不密閉** | P3 | 測試改密閉 | fixed：c720b865（FIX3） |
-| DEF-200-645 | 2026-11-23 | 2026-11-23 18:14 FIX3 以 pytest xdist `-n 14` 全量跑，真 `~/.autosdd/handoff/sid-1_20261123T101410Z.md` 出現（HEAD 059253c2；本欄刻意零輪號） | **測試把交接包寫進真 handoff 目錄**：疑似 `setUpModule`／行程環境設 `AUTOSDD_HANDOFF_DIR` 在 xdist 下失效；同族 `test_sessionctl_handoff.setUpModule` 洩漏 `AUTOSDD_SENTINEL_OFF`（明細見同證據檔） | P2 | 逐支定位並改密閉（每測試自設環境與還原） | open：待修，承接輪次：**R218** |
+| DEF-200-645 | 2026-11-23 | 2026-11-23 18:14 真 `~/.autosdd/handoff/sid-1_*.md` 出現（本欄刻意零輪號） | **測試把交接包寫進真 handoff 目錄**（明細見同證據檔〈DEF-200-645〉） | P2 | 沙箱圍 HANDOFF／TRACE 居所＋替身只計 claude 續跑＋防回歸 | fixed：FIX4（`test_model_roles`；真 handoff 檔數 127→127） |
 
 > **R41「四方複審裁決總結」敘事段落已搬遷至 [`AutoSDD_Defect_Log_archive_17.md`](AutoSDD_Defect_Log_archive_17.md)（R43 帳本 housekeeping，逐字保全）。**
 

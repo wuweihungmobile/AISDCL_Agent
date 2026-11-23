@@ -623,7 +623,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "_selfimproving_p6_fixtures.py": 687,
     "_selfimproving_p7_fixtures.py": 494,
     "test_act_local_runner_image.py": 307,
-    "test_adr_xplat001_c1c2_lock.py": 9588,
+    "test_adr_xplat001_c1c2_lock.py": 9600,
     "test_apply_lock.py": 475,
     "test_archive_apply_locked.py": 102,
     "test_archive_defect_log.py": 4068,
@@ -668,7 +668,7 @@ _FROZEN_GUARD_LINES: dict[str, int] = {
     "test_mac_readiness_r82.py": 626,
     "test_macos_smoke_skip_honesty.py": 221,
     "test_maturity_criteria_r79.py": 412,
-    "test_model_roles.py": 573,
+    "test_model_roles.py": 589,
     "test_negative_existence_claims_r82.py": 362,
     "test_nightly_interpreter_determinism.py": 749,
     "test_no_invalid_escape_sequences.py": 308,
@@ -3301,6 +3301,12 @@ _GUARD_LINES_REPIN_LOG: tuple[tuple[str, int, int, int, str], ...] = (
      "test_se_s3_sites.py、test_realverify_se_locks.py 等與既有測試檔的回歸鎖＋本檔自身漂移。"
      "逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
      "證據＝docs/06_quality/CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md。"),
+    ("R214", 187294, 187322, +28,  # round-label-ok r218fix4
+     "[非淨減法輪][回歸鎖軌已滿軌上限，全額歸主軌，由 _REPIN_APPROVED_ROUND_OVERAGE "
+     "的R214 名冊列承接] 同標籤第六十一列（DEF-200-645 修復：測試沙箱把交接包與痕跡居所"
+     "圍進暫存的防回歸鎖）：既有 test_model_roles.py 的沙箱居所圍籬與其防回歸測試"
+     "＋本檔自身漂移。逐檔清單見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行；"
+     "證據＝docs/06_quality/CrossPlatform_R218_QuotaWall_Control_Closure_Evidence.md。"),
 )
 
 
@@ -3402,7 +3408,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "數字本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R213 標記行。"
     )),
-    "R214": (58782, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
+    "R214": (58810, (  # round-label-ok：主控依凍結常態規則裁定的一次性例外，非帳本追蹤輪號
         "主控依掌舵者授權（凍結常態規則 2026-10-20，sid d6dfce97-92bd-4d34-b7d3-73cf5feaa23d "
         "line 13；P2 TCS 已凍結，digest c2617409…，QA 三審 PASS）裁定本輪走一次性例外："
         "本筆熄滅的是款(10)[超出每輪上限]——主軌淨額全數為哨兵雙駕駛（DEF-200-564／565）"
@@ -3482,6 +3488,7 @@ _REPIN_APPROVED_ROUND_OVERAGE: dict[str, tuple[int, str]] = {
         "第五十四列（複審 P3 三條收尾，DEF-200-619～621）+180＝43348。"
         "第五十五列（監督／保溫的正常結果不得呈現成錯誤，DEF-200-622／623）+74＝43422。"
         "第五十六列（R217 工作推進軸期 A 收尾）+4348＝47770。"
+        "第六十一列（DEF-200-645 沙箱居所圍籬防回歸）+28＝58810。"
         "net_cap_for_round() 與 _REPIN_MAX_CONSECUTIVE_RISING_ROUNDS 的判準邏輯與門檻數字"
         "本輪一個字未動，本表只涵蓋本輪這一個精確主軌淨額，往後任何一輪照原判準阻擋。"
         "紀錄見 docs/06_quality/CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"
@@ -4090,6 +4097,10 @@ _REGRESSION_LANE_LOG: tuple[tuple[str, int, str], ...] = (
      "R218 本批收尾回歸鎖："
      "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
      "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
+    ("R214", 0,  # round-label-ok r218fix4
+     "DEF-200-645 沙箱居所圍籬防回歸鎖："
+     "回歸鎖軌本輪已申報至上限，本列申報 0、全額歸主軌（由 R214 名冊列承接）；"
+     "見 CrossPlatform_R145_Scan_Findings.md 尾端 R214 標記行。"),
 )
 
 #: 生效輪次＝落地輪（R116）之後的下一輪。**只准調大**——它閘的是一條**減免軌**： round-label-ok
@@ -4265,10 +4276,10 @@ _GUARD_LINE_DRIFT_TOLERANCE = 0
 #: `_REPIN_LOG_MAX_UNFROZEN_TAIL` 尾端寬限窗口的設計全文搬至
 #: CrossPlatform_R97_Scan_Findings.md〈凍結前綴指紋設計 WHY〉節。兩個值皆由
 #: `--print-guard-lines` 印出。
-_REPIN_LOG_FROZEN_PREFIX_LEN = 407
+_REPIN_LOG_FROZEN_PREFIX_LEN = 408
 _REPIN_LOG_MAX_UNFROZEN_TAIL = 1
 _REPIN_LOG_HISTORY_SHA256 = (
-    "47d7b7ffdd67bb5a2977020371aebb126488649db2863dc3530b171170c60f62")
+    "464bf30ccc49a6d2323a1c62c5e23f7bdcc01989b3ecaac8a3c263586e57a1b5")
 
 
 def repin_log_history_digest(
@@ -4517,6 +4528,7 @@ _FROZEN_PREFIX_REWRITE_LEDGER: tuple[tuple[str, str, str, str], ...] = (
     ("R214", "c964e562c427", "9de605874ba4", "DEF-200-632"),  # round-label-ok r218bs5ledger
     ("R214", "9de605874ba4", "219eda6e0ad6", "DEF-200-632"),  # round-label-ok r218bs2ledger
     ("R214", "219eda6e0ad6", "47d7b7ffdd67", "DEF-200-638"),  # round-label-ok r218clos1ledger
+    ("R214", "47d7b7ffdd67", "464bf30ccc49", "DEF-200-645"),  # round-label-ok r218fix4ledger
 )
 
 #: 本機制上線當下的指紋快照（**永不隨 `_REPIN_LOG_HISTORY_SHA256` 之後的異動而動**）。

@@ -49,3 +49,9 @@ S6（48a6cecb）RV-SE18 FAIL：沙盒清理失敗後身分檔寫回順序錯誤�
 ## 三、未完成
 
 W11b、W11e、W6 續棒、W5、Q6、W7、終局 E2E 全跑與獨立 QA 審查。另列待修：`test_subprocess_encoding_hygiene` 指出四處 `text=True` 無 `encoding="utf-8", errors="replace"` 的真違規，屬 `tools/lib`／`tools/probe` 產品面，本窗依任務書不動，列交主控：`tools/lib/realverify/cases/sideeffect_prod.py:76`、`tools/lib/realverify/leases_undo.py:42`、`tools/probe/realverify_se_s5_smoke.py:45` 與 `:57`（測試側 `test_realverify_se_locks.py:672` 已於本窗補齊）。
+
+## DEF-200-645（測試把交接包寫進真 handoff 目錄）明細
+- 暴露：2026-11-23 18:14（FIX3 以 pytest xdist `-n 14` 全量跑）與 20:4x（CLOSE1 序列重跑）兩度在真 `~/.autosdd/handoff/` 出現 `sid-1_<時刻>.md`（HEAD 059253c2／c720b865）；主控皆已刪除。
+- 成因：`tools/tests/test_model_roles.py::_Sandbox` 只圍 `AUTOSDD_HANDBACK_DIR`；`WakeSpawnCarriesTheRolesTest` 走 planner `choose_resume_route → handoff.ensure_mechanical`，交接包機械層寫進真居所。
+- 「續跑應只 spawn 一次」紅：圍住 HANDOFF 後機械層真的跑到 `handoff_build._schedule_rows` 的 powershell 排程列舉，被 `subprocess.run` 替身誤計為第二次 spawn——測試替身過時，非產品回歸。
+- 修法（FIX4）：沙箱併圍 `AUTOSDD_HANDOFF_DIR`／`AUTOSDD_TRACE_DIR`；替身只錄 `argv[0]=="claude"`，其餘回 rc1 空輸出；新增 `RoleEnvTest.test_the_sandbox_pins_every_residence_dir_inside_the_temp_home` 防回歸。驗證：`test_model_roles` 61 OK、真 handoff 檔數 127→127、同族 sessionctl／context_budget_guard／realverify 全綠。

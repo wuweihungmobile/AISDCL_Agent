@@ -52,7 +52,9 @@ class _Sandbox(unittest.TestCase):
         super().setUp()
         self.tmp = Path(tempfile.mkdtemp(prefix="model-roles-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.set_env({"AUTOSDD_HANDBACK_DIR": str(self.tmp / "hb")})
+        self.set_env({"AUTOSDD_HANDBACK_DIR": str(self.tmp / "hb"),
+                      "AUTOSDD_HANDOFF_DIR": str(self.tmp / "ho"),
+                      "AUTOSDD_TRACE_DIR": str(self.tmp / "tr")})
         for key in (*_ALL_KEYS, _CHILD_KEY, _CHILD_KEY + "_FORCE", "AUTOSDD_UNATTENDED"):
             os.environ.pop(key, None)
 
@@ -316,6 +318,11 @@ class ProbeArgvTest(_Sandbox):
 
 
 class RoleEnvTest(_Sandbox):
+    def test_the_sandbox_pins_every_residence_dir_inside_the_temp_home(self) -> None:
+        """DEF-200-645 防回歸：續跑選路會建交接包、落痕跡；任一居所沒圍＝寫進真 `~/.autosdd`。"""
+        for key in ("AUTOSDD_HANDBACK_DIR", "AUTOSDD_HANDOFF_DIR", "AUTOSDD_TRACE_DIR"):
+            self.assertTrue(Path(os.environ[key]).is_relative_to(self.tmp), key)
+
     def test_the_spawn_env_extra_is_the_subagent_default_from_the_process_env(self) -> None:
         self.assertEqual(resume_route.role_env(), {_CHILD_KEY: "sonnet"})
         self.set_env({_SUB: "opus"})
@@ -324,7 +331,11 @@ class RoleEnvTest(_Sandbox):
 
 # ═══════════════════════════ 5. planner：spawn 的 argv／環境、付費探針 ═══════════════════════════
 class WakeSpawnCarriesTheRolesTest(_Sandbox):
-    """打真的 `_run_resume()`，只把 `subprocess.run` 換成錄影替身（計算面全程真跑）。"""
+    """打真的 `_run_resume()`，只把 `subprocess.run` 換成錄影替身（計算面全程真跑）。
+
+    只錄 `claude` 開頭的續跑 spawn：FRESH／REFUSE 之外，選路會為續跑建交接包機械層
+    （`handoff.ensure_mechanical`，WP-2 起），其中的排程列舉另走 `powershell.exe`／`launchctl`，
+    不是續跑；沙箱把 handoff／trace 目錄圍進暫存（DEF-200-645：先前寫進真 `~/.autosdd`）。"""
 
     def setUp(self) -> None:
         super().setUp()
@@ -337,9 +348,14 @@ class WakeSpawnCarriesTheRolesTest(_Sandbox):
         class _Done:
             returncode, stdout, stderr = 0, "ok", ""
 
+        class _Idle:
+            returncode, stdout, stderr = 1, "", ""
+
         def _fake_run(argv, **kwargs):
             if isinstance(argv, list) and argv[:1] == ["git"]:
                 return real(argv, **kwargs)  # 唯讀快照照跑，self.calls 只留續跑那一次
+            if not (isinstance(argv, list) and argv[:1] == ["claude"]):
+                return _Idle()  # 機械層的排程列舉（powershell／launchctl）：非續跑，不計
             self.calls.append({"argv": argv, **kwargs})
             return _Done()
 
