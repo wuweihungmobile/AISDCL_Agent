@@ -30,6 +30,7 @@ from lib.sessionctl import (  # noqa: E402
     keepwarm,
     kw_ledger,
     park,
+    qw_plan,
     qw_schema,
     seal,
     switch,
@@ -116,6 +117,15 @@ class _Base(unittest.TestCase):
             os.environ.pop(key, None)
         self.env = {"AUTOSDD_HANDOFF_DIR": str(self.hdir)}
         self.path = self.slug / f"{SID}.jsonl"
+        self.live: tuple | Exception = (0, True)  # 在飛單位數 `(N, 量得到)`；測試改它即可
+        probe = mock.patch.object(qw_plan, "live_count", side_effect=self._live_probe)
+        probe.start()
+        self.addCleanup(probe.stop)
+
+    def _live_probe(self, _sid, _transcript):
+        if isinstance(self.live, Exception):
+            raise self.live
+        return self.live
 
     def write(self, *records: dict) -> None:
         self.path.write_text("\n".join(json.dumps(r) for r in records) + "\n", encoding="utf-8")
@@ -485,17 +495,86 @@ class PingCostTest(_Base):
         self.assertTrue(_verdict(out).startswith("KEEPWARM_VERDICT=ping"), out)
         return self.ledger()
 
+    def _chain(self, readings, lives=None) -> dict:
+        """連跑 len(readings) 次 ping 叫醒（每次相隔 46 分）；`lives[i]`＝第 i 次叫醒的在飛數。"""
+        reset = T0 + 400 * MIN
+        self.write(_asst(T0, ctx=200_000))
+        for i, pct in enumerate(readings):
+            if i:
+                self.append(_asst(T0 + 46 * i * MIN, ctx=200_000))
+            self.live = (lives[i], True) if lives else (0, True)
+            _rc, out = self.run_kw(_Clock(T0 + (46 * i + 1) * MIN), _const(pct, reset))
+            self.assertTrue(_verdict(out).startswith("KEEPWARM_VERDICT=ping"), out)
+        return self.ledger()
+
     def test_the_delta_between_adjacent_pings_is_recorded_and_raises_the_plan(self) -> None:
-        """REQ-QW-66①。WHY：未校準的每次保溫成本是縮放推估；實測 Δ 取大才能在上線到校準之間自行
-        收斂。Δ＝相鄰兩次 ping 叫醒的讀數差（重掛啟動時不量）。"""
-        row = self._two_pings(80, 83)
-        self.assertEqual(qw_schema.ping_costs(row), [3.0])
-        self.assertEqual(len(self.traces("keepwarm_ping_cost")), 1)
-        from lib.sessionctl import qw_plan  # noqa: PLC0415
-        plan = qw_plan.plan(SID, self.path, {}, datetime.fromtimestamp(T0 + 48 * MIN, UTC),
-                            read_quota=_const(83, T0 + 400 * MIN).read, refresh=_no_refresh)
-        self.assertEqual((plan.ping_pp, plan.ping_pp_src, plan.calibrated),
-                         (3.0, "measured", False))
+        """REQ-QW-66①、74。WHY：未校準的每次保溫成本是縮放推估；乾淨的實測 Δ 取大才能在上線到校準
+        之間自行收斂。Δ＝相鄰兩次 ping 叫醒的讀數差（重掛啟動時不量）。採用量測值要乾淨樣本 ≥ 3
+        （W11c③）：兩筆時仍用縮放值，第三筆進帳後才生效。"""
+        row = self._two_pings(80, 81)
+        self.assertEqual(qw_schema.ping_costs(row), [1.0])
+        self.assertEqual([t["clean"] for t in self.traces("keepwarm_ping_cost")], [True])
+        read = _const(81, T0 + 400 * MIN).read
+        now = datetime.fromtimestamp(T0 + 48 * MIN, UTC)
+
+        def plan_now():
+            return qw_plan.plan(SID, self.path, {}, now, read_quota=read, refresh=_no_refresh,
+                                live_fn=lambda *_a: (0, True))
+        self.assertEqual((plan_now().ping_pp_src, plan_now().ping_pp), ("scaled", 0.5))
+        self.setUp()  # 乾淨起點：連四次 ping ⇒ 三筆乾淨樣本
+        row = self._chain([80, 81, 82, 83])
+        self.assertEqual(qw_schema.ping_costs(row), [1.0, 1.0, 1.0])
+        plan = plan_now()
+        self.assertEqual((round(plan.ping_pp, 2), plan.ping_pp_src, plan.calibrated),
+                         (1.0, "measured", False))
+        self.assertEqual(row["schema"], "autosdd.keepwarm/2")
+        self.assertEqual(sorted(row["ping_costs"][0]), ["clean", "pp"])  # 每筆 {pp, clean}
+
+    def test_in_flight_interval_deltas_are_traced_unclean_and_never_recorded(self) -> None:
+        """REQ-QW-73、AT-QW-86、MU-QW-55。WHY：兩次 ping 之間有子代理或背景 claude 在跑，讀數差
+        是它們的燒量不是保溫成本（12:16 的 6.0 即此）；只落 `clean=false` 痕跡、不入帳。
+        ①本次叫醒時在飛 ②上一次叫醒時在飛 ③全無（對照組，記一筆 clean=true）④在飛數讀取拋例外。"""
+        cases = (("now_in_flight", [0, 1], 0), ("prev_in_flight", [2, 0], 0),
+                 ("none", [0, 0], 1))
+        for name, lives, kept in cases:
+            with self.subTest(name):
+                self.setUp()
+                row = self._chain([80, 83], lives)
+                self.assertEqual(len(qw_schema.ping_costs(row)), kept)
+                self.assertEqual([t["clean"] for t in self.traces("keepwarm_ping_cost")],
+                                 [bool(kept)])
+        self.setUp()  # ④：讀取拋例外 ⇒ 視為不乾淨，叫醒本身不得因此失敗
+        reset = T0 + 400 * MIN
+        self.write(_asst(T0, ctx=200_000))
+        self.run_kw(_Clock(T0 + 1 * MIN), _const(80, reset))
+        self.append(_asst(T0 + 46 * MIN, ctx=200_000))
+        self.live = OSError("roster down")
+        _rc, out = self.run_kw(_Clock(T0 + 47 * MIN), _const(83, reset))
+        self.assertTrue(_verdict(out).startswith("KEEPWARM_VERDICT=ping"), out)
+        self.assertEqual(qw_schema.ping_costs(self.ledger()), [])
+
+    def test_interval_clean_needs_both_endpoints_and_no_dispatch_in_between(self) -> None:
+        """tools/lib/sessionctl/kw_wake.py interval_clean／_dispatched_between（REQ-QW-73）。
+        WHY：判準＝兩端點在飛數皆量到且為 0，且逐字稿區間內無主控派工 tool_use；子代理自己的
+        記錄（sidechain）不算；讀不到逐字稿 ⇒ 不乾淨。"""
+        from lib.sessionctl import kw_wake  # noqa: PLC0415
+        t0, t1 = T0, T0 + 46 * MIN
+        row = {"last": (80.0, t0, 0), "last_n": 0}
+        self.write(_asst(T0 + 10 * MIN, tools=[("Read", {"file_path": "x"})]))
+        self.assertTrue(kw_wake.interval_clean(row, t1, 0, self.path))
+        self.assertFalse(kw_wake.interval_clean(row, t1, None, self.path))     # 本端量不到
+        self.assertFalse(kw_wake.interval_clean({**row, "last_n": None}, t1, 0, self.path))
+        self.assertFalse(kw_wake.interval_clean({**row, "last": None}, t1, 0, self.path))
+        self.assertFalse(kw_wake.interval_clean(row, t1, 0, self.tmp / "missing.jsonl"))
+        self.assertFalse(kw_wake.interval_clean(row, t1, 0, None))
+        self.write(_asst(T0 + 10 * MIN, tools=[("Agent", {"prompt": "x"})]))
+        self.assertFalse(kw_wake.interval_clean(row, t1, 0, self.path))        # 區間內派工
+        self.write(_asst(T0 - 10 * MIN, tools=[("Agent", {})]))                # 區間外
+        self.assertTrue(kw_wake.interval_clean(row, t1, 0, self.path))
+        side = _asst(T0 + 10 * MIN, tools=[("Agent", {})])
+        side["isSidechain"] = True
+        self.write(side)
+        self.assertTrue(kw_wake.interval_clean(row, t1, 0, self.path))
 
     def test_unreliable_intervals_are_not_recorded(self) -> None:
         """REQ-QW-66③～⑦。WHY：區間內有真工作、換窗、讀數反降的 Δ 不是保溫成本，記了會把

@@ -64,6 +64,16 @@ def _reader(state):
     return lambda _now: state
 
 
+def _live(n: int, known: bool = True):
+    """`plan(live_fn=)` 縫：在飛單位數 N（子代理＋背景 claude 行程）與是否量得到。"""
+    return lambda _sid, _transcript: (n, known)
+
+
+def _ledger(costs, **extra) -> dict:
+    """保溫帳列（/2）：乾淨樣本 pp 串。"""
+    return {"schema": "autosdd.keepwarm/2", **qw_schema.ledger_extra(None, None, costs), **extra}
+
+
 def _write_transcript(path: Path, ctx: int = 200_000, extra=()) -> Path:
     usage = {"input_tokens": 1, "cache_read_input_tokens": ctx - 1,
              "cache_creation_input_tokens": 0, "output_tokens": 7}
@@ -91,6 +101,7 @@ class _Base(unittest.TestCase):
 
     def plan(self, pct, reset_min=150, **kw):
         env = {**self.env, **kw.pop("env", {})}
+        kw.setdefault("live_fn", _live(0))  # 不讀真行程表：在飛數一律由測試明給
         return quotawall.plan(SID, self.transcript, env, NOW,
                               read_quota=_reader(kw.pop("state", None) or _state(pct, reset_min)),
                               ledger=kw.pop("ledger", {}), **kw)
@@ -277,9 +288,9 @@ class PlanSeamsTest(_Base):
 
     def test_measured_mean_only_raises(self):
         """實測近 3 筆平均較大 ⇒ 用實測；較小 ⇒ 仍用縮放（只抬不降；MU-QW-49 取 min 即紅）。"""
-        hi = self.plan(88, ledger={qw_schema.LEDGER_PING_COSTS: [0.9, 1.0, 1.1]})
+        hi = self.plan(88, ledger=_ledger([0.9, 1.0, 1.1]))
         self.assertEqual((hi.ping_pp_src, round(hi.ping_pp, 2)), ("measured", 1.0))
-        lo = self.plan(88, ledger={qw_schema.LEDGER_PING_COSTS: [0.1, 0.2, 0.3]})
+        lo = self.plan(88, ledger=_ledger([0.1, 0.2, 0.3]))
         self.assertEqual((lo.ping_pp_src, lo.ping_pp), ("scaled", 0.5))
 
     def test_stale_reading_triggers_one_refresh(self):
@@ -720,8 +731,16 @@ class SchemaTest(unittest.TestCase):
         self.assertEqual(qw_schema.ping_costs({}), [])
         self.assertEqual(qw_schema.ping_costs(None), [])
         self.assertEqual(qw_schema.ping_costs({"ping_costs": "x"}), [])
-        row = {"ping_costs": [1, True, -1, float("inf"), "a", 0.5, 2, 3, 4, 5, 6]}
-        self.assertEqual(qw_schema.ping_costs(row), [0.5, 2.0, 3.0, 4.0, 5.0, 6.0][-5:])
+        # /1 舊檔的裸數字一律不乾淨（W11c③、MU-QW-65）；/2 只認 clean 為 true 的有限非負 pp
+        self.assertEqual(qw_schema.ping_costs({"ping_costs": [1, 0.5, 6.0]}), [])
+        ok = {"pp": 2, "clean": True}
+        row = {"ping_costs": [ok, {"pp": 3, "clean": False}, {"pp": -1, "clean": True},
+                              {"pp": float("inf"), "clean": True}, {"pp": "a", "clean": True},
+                              {"pp": 4, "clean": 1}, "x", {"clean": True},
+                              {"pp": 5, "clean": True}]}
+        self.assertEqual(qw_schema.ping_costs(row), [2.0, 5.0])
+        many = {"ping_costs": [{"pp": i, "clean": True} for i in range(8)]}
+        self.assertEqual(qw_schema.ping_costs(many), [3.0, 4.0, 5.0, 6.0, 7.0])
 
     def test_ledger_helpers(self):
         costs = qw_schema.append_cost([1, 2, 3, 4, 5], 6)
@@ -919,6 +938,156 @@ class FieldNameScanLockTest(unittest.TestCase):
             self.assertNotIn("keepwarm", top_level_imports(base / f"{name}.py"), name)
         parked = top_level_imports(base / "park.py")
         self.assertFalse(parked & {"quotawall", "qw_plan", "qw_verdict", "qw_wall"})
+
+
+# ═════════════════════════════════════════════════════════════ W11c：在飛燒量與樣本污染（r9）
+_BIG = {"AUTOSDD_QUOTAWALL_BURN_PP_PER_MIN": "0.663", "AUTOSDD_QUOTAWALL_AGENT_EST_PP": "1.18",
+        "AUTOSDD_QUOTAWALL_PP_PER_KUNIT": "0.0061"}
+_CTX = 289_728
+
+
+class LiveBurnTest(_Base):
+    """tools/lib/sessionctl/qw_plan.py 與 qw_calc.py：L 加在飛燒量（REQ-QW-72；AT-QW-85、88；
+    MU-QW-54）。"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.transcript = _write_transcript(self.tmp / "t.jsonl", ctx=_CTX)
+        self.env = dict(_BIG)
+
+    def _p(self, pct: float, d: float, n: int, known: bool = True):
+        return self.plan(pct, d, live_fn=_live(n, known))
+
+    def test_in_flight_units_add_burn_over_min_d_and_t_obs(self) -> None:
+        """AT-QW-85。WHY：r8 的 L 只算「待派的那一支」，在飛者的燒量沒進去，所以 10:02 R＝20 時
+        還有 1 支在飛卻判 free；N 個在飛單位在 min(D,T_OBS) 分鐘內各燒 BURN pp。"""
+        burn, base = 0.663, self._p(80, 38, 0)
+        self.assertAlmostEqual(base.limit, base.v + 1.18)  # ② N＝0 ⇒ 與 r8 公式逐位相同
+        self.assertEqual(base.stage, "free")
+        one = self._p(80, 38, 1)  # ① 在飛 1：L＝V＋AGENT＋0.663×30
+        self.assertAlmostEqual(one.limit, one.v + 1.18 + burn * qw_calc.T_OBS)
+        self.assertEqual((one.stage, one.n_live), ("nodispatch", 1))
+        three = self._p(80, 38, 3)  # ③ 在飛 1＋背景 claude 2＝N 3：線性放大
+        self.assertAlmostEqual(three.limit - base.limit, 3 * (one.limit - base.limit))
+        short = self._p(80, 10, 2)  # ④ D＝10 ⇒ min(D,T_OBS)＝10
+        self.assertAlmostEqual(short.limit - short.v - 1.18, burn * 2 * 10)
+        long_ = self._p(80, 90, 2)  # ⑤ D＝90 ⇒ 取 T_OBS＝30
+        self.assertAlmostEqual(long_.limit - long_.v - 1.18, burn * 2 * 30)
+
+    def test_close_criterion_ignores_in_flight_units(self) -> None:
+        """AT-QW-85 末句。WHY：close 是「連收尾回合都付不起」，只看 V；在飛者不改它。"""
+        for n in (0, 1, 3):
+            with self.subTest(n=n):
+                p = self._p(80, 38, n)
+                self.assertEqual(p.stage == "close", p.r <= p.v)
+                self.assertGreater(p.r, p.v)
+
+    def test_unmeasurable_n_counts_zero_and_is_marked_in_the_plan_line(self) -> None:
+        """REQ-QW-72。WHY：量不到在飛數時 fail-open（與 r8 同），但 PLAN 行必須標 `n_live=?`，
+        不得讓人把「沒量到」讀成「沒有在飛」。"""
+        unknown, zero = self._p(80, 38, 0, known=False), self._p(80, 38, 0)
+        self.assertEqual((unknown.n_live, unknown.limit), (None, zero.limit))
+        self.assertIn("n_live=?", quotawall.plan_lines(unknown)[-1])
+        partial = self._p(80, 38, 2, known=False)  # 行程表量不到但名冊已數到 2：已數到的照算
+        self.assertEqual(partial.n_live, None)
+        self.assertAlmostEqual(partial.limit, self._p(80, 38, 2).limit)
+        self.assertIn("n_live=3", quotawall.plan_lines(self._p(80, 38, 3))[-1])
+
+    def test_acceptance_replay_12_16_and_10_02(self) -> None:
+        """AT-QW-88、驗收重放。WHY：2026-11-23 12:16 讀數 47%（R＝53、D＝204）被誤擋；N＝0 ⇒ free
+        （V≈5.70、L≈6.88）；N＝3 ⇒ nodispatch 且非 close。10:02（R＝20、D＝38）N＝1 ⇒
+        nodispatch。"""
+        free = self._p(47, 204, 0)
+        self.assertEqual(free.stage, "free")
+        self.assertAlmostEqual(free.ping_pp, 0.381, places=3)
+        self.assertAlmostEqual(free.v, 5.70, places=2)
+        self.assertAlmostEqual(free.limit, 6.88, places=2)
+        busy = self._p(47, 204, 3)
+        self.assertEqual(busy.stage, "nodispatch")
+        self.assertNotEqual(busy.stage, "close")
+        self.assertEqual(self._p(80, 38, 1).stage, "nodispatch")
+
+    def test_live_count_reads_running_agents_and_background_claude(self) -> None:
+        """tools/lib/sessionctl/qw_plan.py live_count：N＝在飛子代理（名冊）＋背景 `claude -p`
+        行程（命令列不含本 sid、互動視窗不算）；列舉失敗 ⇒ 該半算 0 並回「量不到」。"""
+        from lib.sessionctl import qw_plan  # noqa: PLC0415
+        sub = self.tmp / SID / "subagents"
+        sub.mkdir(parents=True)
+        now = datetime.now(UTC).isoformat()
+        rec = {"type": "assistant", "timestamp": now,
+               "message": {"id": "a", "usage": {"input_tokens": 1}}}
+        (sub / "agent-a1.jsonl").write_text(json.dumps(rec) + "\n", encoding="utf-8")
+        (sub / "agent-a1.meta.json").write_text("{}", encoding="utf-8")
+        procs = [{"pid": 1, "cmd": "claude.exe -p x", "name": "claude.exe"},
+                 {"pid": 2, "cmd": f"claude.exe -p --resume {SID}", "name": "claude.exe"},
+                 {"pid": 3, "cmd": "claude.exe --resume zzz", "name": "claude.exe"},
+                 {"pid": 4, "cmd": "node -p y", "name": "node.exe"}]
+        for listed, want in ((procs, (2, True)), (None, (1, False))):
+            with self.subTest(listed=listed is not None):
+                qw_plan._proc_cache[:] = [0.0, None]
+                with mock.patch.object(qw_plan.procstop, "list_processes", return_value=listed):
+                    self.assertEqual(qw_plan.live_count(SID, self.transcript), want)
+        qw_plan._proc_cache[:] = [0.0, None]
+
+
+class CleanSampleTest(_Base):
+    """tools/lib/sessionctl/qw_calc.py 與 qw_plan.py：ping 樣本採用門檻（REQ-QW-74；AT-QW-87、88；
+    MU-QW-53、56、65）。"""
+
+    def test_eff_needs_three_clean_samples_and_stays_raise_only(self) -> None:
+        """AT-QW-87①②④⑥。WHY：12:16 只靠 1 筆被污染的 6.0 就把估值抬到 12 倍；採用量測至少要 3 筆
+        乾淨樣本，且（S-25）只抬不降——保溫預留偏低的代價是撞牆冷重寫，偏高只是少派一支。"""
+        eff = qw_calc.ping_pp_eff
+        self.assertEqual(eff(0.5, []), (0.5, "scaled"))
+        self.assertEqual(eff(0.5, [6.0]), (0.5, "scaled"))               # n＝1（含污染樣本）
+        self.assertEqual(eff(0.5, [0.8, 0.9]), (0.5, "scaled"))          # ④ 僅 2 筆
+        self.assertEqual(eff(0.5, [0.4, 0.5, 0.45]), (0.5, "scaled"))    # ② 合格但低於縮放
+        value, src = eff(0.5, [0.8, 0.9, 0.85])                          # ⑥ 合格且較高
+        self.assertEqual((round(value, 2), src), (0.85, "measured"))
+
+    def test_outlier_batch_is_dropped_and_traced_once(self) -> None:
+        """AT-QW-87③。WHY：均值超過縮放×3 的整批樣本不是保溫成本（量到的是別人的燒量）；整批丟棄、
+        退縮放值，並落 `ping_cost_outlier`（含樣本、縮放值、倍數）供事後查。同一批只落一次。"""
+        from lib.sessionctl import qw_plan  # noqa: PLC0415
+        qw_plan._outlier_seen.clear()
+        ledger = _ledger([2.0, 2.2, 2.1])
+        for _ in range(2):
+            p = self.plan(88, ledger=ledger)
+        self.assertEqual((p.ping_pp_src, p.ping_pp), ("scaled", 0.5))
+        rows = [json.loads(ln) for f in (self.tmp / "trace").rglob("*.jsonl")
+                for ln in f.read_text(encoding="utf-8").splitlines()]
+        got = [r for r in rows if r.get("event") == "ping_cost_outlier"]
+        self.assertEqual(len(got), 1)
+        self.assertEqual((got[0]["samples"], got[0]["scaled"], got[0]["x"]), ([2.0, 2.2, 2.1], 0.5,
+                                                                              qw_calc.OUTLIER_X))
+
+    def test_v1_ledger_samples_are_never_clean_but_progress_is_kept(self) -> None:
+        """AT-QW-87⑤、MU-QW-65。WHY：既有污染樣本 `[6.0]` 住在 /1 檔；升版只汰除樣本，不吞
+        pings／last_ping（QA P3：升版不得讓保溫進度歸零）。"""
+        from lib.sessionctl import kw_ledger  # noqa: PLC0415
+        path = kw_ledger.ledger_path(SID, write=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"schema": "autosdd.keepwarm/1", "sid": SID, "pings": 4,
+                                    "ping_costs": [6.0], "last_ping_pct": 80.0,
+                                    "last_ping_at": _iso(NOW.timestamp())}), encoding="utf-8")
+        row = kw_ledger.read_ledger(SID)
+        self.assertEqual((row["pings"], row["costs"], row["last"][0]), (4, [], 80.0))
+        self.assertEqual(kw_ledger.SCHEMA, "autosdd.keepwarm/2")
+        p = self.plan(88, ledger=json.loads(path.read_text(encoding="utf-8")))
+        self.assertEqual((p.ping_pp_src, p.ping_pp), ("scaled", 0.5))
+
+    def test_the_polluted_sample_no_longer_blocks_the_12_16_reading(self) -> None:
+        """AT-QW-88、REQ-QW-71。WHY：把 `[6.0]` 當量測值採用時 V＝52（watch 實印）而讀數 47% 被擋；
+        乾淨門檻下該樣本不生效。對照組（MU-QW-53）：n＝1 即採用量測值就會回到 V≈52。"""
+        self.transcript = _write_transcript(self.tmp / "t.jsonl", ctx=_CTX)
+        env = dict(_BIG)
+        legacy = {"schema": "autosdd.keepwarm/1", "ping_costs": [6.0]}
+        p = self.plan(47, 204, env=env, ledger=legacy)
+        self.assertEqual((p.stage, round(p.v, 2)), ("free", 5.70))
+        forced = self.plan(47, 204, env=env, ledger=_ledger([6.0, 6.0, 6.0]))
+        self.assertEqual(forced.ping_pp_src, "scaled")  # 三筆 6.0 也是離群（> 縮放×3）
+        self.assertGreater(forced.r, forced.limit)
+
 
 if __name__ == "__main__":
     unittest.main()

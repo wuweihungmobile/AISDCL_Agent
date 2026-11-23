@@ -227,7 +227,7 @@ class WakeBudget:
             return False
         row = load_ledger(self.sid, transcript)
         last, costs, last_reset = kw_wake.ping_cost(
-            self.sid, row, plan, time.time() if now is None else now)
+            self.sid, row, plan, time.time() if now is None else now, transcript=transcript)
         return record_ping(self.sid, pings + 1, ctx, star, human_mark(transcript),
                            work=work_mark(transcript), last=last, costs=costs,
                            last_reset=last_reset)

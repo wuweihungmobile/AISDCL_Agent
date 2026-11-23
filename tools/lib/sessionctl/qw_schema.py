@@ -25,6 +25,9 @@ LEDGER_LAST_PING_PCT = "last_ping_pct"      # 保溫帳：上一次 ping 叫醒�
 LEDGER_LAST_PING_AT = "last_ping_at"        # 保溫帳：上一次 ping 叫醒時刻
 LEDGER_PING_COSTS = "ping_costs"            # 保溫帳：相鄰兩次 ping 的讀數差（最近 5 筆）
 # ── 不在掃描鎖內的欄名（太通用、掃描會製造假紅）；同樣只由本檔定義
+LEDGER_COST_PP = "pp"                       # ping_costs 每筆 `{pp, clean}`（保溫帳 /2；W11c③）
+LEDGER_COST_CLEAN = "clean"                 # 乾淨樣本旗標；/1 舊檔的裸數字一律視為不乾淨
+LEDGER_LAST_PING_N = "last_ping_n"          # 上一次 ping 叫醒時的在飛單位數（W11c②；缺＝量不到）
 HOLDER_MODE = "mode"
 SPAWN_ATTEMPT_KEY = "attempt"               # spawning／失敗列的同 attempt 配對鍵
 
@@ -125,11 +128,19 @@ def is_failure_row(rec: dict) -> bool:
 
 # ───────────────────────────────────────────────────────────── 保溫帳（S-25）
 def ping_costs(row) -> list[float]:
-    """保溫帳 `ping_costs`（最近 5 筆，舊→新）；缺席／壞值 ⇒ []。非有限或負值整筆丟棄。"""
+    """保溫帳 `ping_costs` 的**乾淨樣本** pp（最近 5 筆，舊→新）；缺席／壞值 ⇒ []。只認 /2 形態
+    `{pp, clean: true}`；/1 舊檔的裸數字（含污染樣本 `[6.0]`）、`clean` 非真、非有限或負值整筆
+    丟棄。"""
     raw = row.get(LEDGER_PING_COSTS) if isinstance(row, dict) else None
     if not isinstance(raw, list):
         return []
-    out = [float(x) for x in raw if type(x) in (int, float) and 0 <= x < float("inf")]
+    out = []
+    for x in raw:
+        if not isinstance(x, dict) or x.get(LEDGER_COST_CLEAN) is not True:
+            continue
+        pp = x.get(LEDGER_COST_PP)
+        if type(pp) in (int, float) and 0 <= pp < float("inf"):
+            out.append(float(pp))
     return out[-COSTS_KEEP:]
 
 
@@ -141,11 +152,21 @@ def last_ping(row) -> tuple[float, float] | None:
     return (float(pct), at) if type(pct) in (int, float) and at is not None else None
 
 
-def ledger_extra(last_pct: float | None, last_at: float | None, costs) -> dict:
-    """保溫帳三欄（生產端 Q2 併進 `record_ping` 的列）；`last_*` 為 None ⇒ 寫空（＝清空）。"""
+def last_ping_n(row) -> int | None:
+    """上一次 ping 叫醒時的在飛單位數；缺（舊格式）／壞值 ⇒ None（讀不到＝不乾淨）。"""
+    n = row.get(LEDGER_LAST_PING_N) if isinstance(row, dict) else None
+    return n if type(n) is int and n >= 0 else None
+
+
+def ledger_extra(last_pct: float | None, last_at: float | None, costs,
+                 last_n: int | None = None) -> dict:
+    """保溫帳四欄（生產端 Q2 併進 `record_ping` 的列）；`last_*` 為 None ⇒ 寫空（＝清空）。
+    `costs` 是乾淨樣本 pp 串，落帳一律標 `clean=true`（不乾淨的 Δ 不寫帳，只落痕跡）。"""
     return {LEDGER_LAST_PING_PCT: last_pct,
             LEDGER_LAST_PING_AT: None if last_at is None else iso(last_at),
-            LEDGER_PING_COSTS: [float(c) for c in list(costs)[-COSTS_KEEP:]]}
+            LEDGER_LAST_PING_N: last_n,
+            LEDGER_PING_COSTS: [{LEDGER_COST_PP: float(c), LEDGER_COST_CLEAN: True}
+                                for c in list(costs)[-COSTS_KEEP:]]}
 
 
 def append_cost(costs, delta: float) -> list[float]:

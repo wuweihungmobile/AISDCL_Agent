@@ -18,7 +18,9 @@ import transcript_activity
 
 from . import control, midwork, qw_schema
 
-SCHEMA = "autosdd.keepwarm/1"
+#: /2（W11c③）：`ping_costs` 每筆 `{pp, clean}`；/1 檔的樣本一律不乾淨（讀回 `[]`），
+#: `pings`／`last_ping_*` 照舊保留（升版只汰除污染樣本，不吞既有保溫進度）。
+SCHEMA = "autosdd.keepwarm/2"
 #: 非跨包欄名（只有保溫帳自己讀寫）：真工作標記、上一次 ping 時的 reset（同窗判準用）。
 _WORK, _LAST_RESET = "work", "last_ping_reset"
 
@@ -77,17 +79,19 @@ def work_mark(transcript) -> str:
 
 
 def read_ledger(sid: str) -> dict:
-    """`{pings, human, work, last, last_reset, costs}`；缺檔＝零；壞檔／結構不符＝零並出聲。"""
+    """`{pings, human, work, last, last_n, last_reset, costs}`；缺檔＝零；壞檔／結構不符＝零並出聲。
+    `costs`＝乾淨樣本 pp；非 /2 檔一律 `[]`。"""
     path, empty = ledger_path(sid), {"pings": 0, "human": "", "work": "", "last": None,
-                                     "last_reset": None, "costs": []}
+                                     "last_n": None, "last_reset": None, "costs": []}
     try:
         row = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(row, dict) and type(row.get("pings")) is int and row["pings"] >= 0:
             reset = row.get(_LAST_RESET)
             return {"pings": row["pings"], "human": str(row.get("human") or ""),
                     "work": str(row.get(_WORK) or ""), "last": qw_schema.last_ping(row),
+                    "last_n": qw_schema.last_ping_n(row),
                     "last_reset": reset if type(reset) in (int, float) else None,
-                    "costs": qw_schema.ping_costs(row)}
+                    "costs": qw_schema.ping_costs(row) if row.get("schema") == SCHEMA else []}
         _warn(f"保溫帳 {path} 結構不符 ⇒ 當作零")
     except FileNotFoundError:
         pass
@@ -102,17 +106,18 @@ def load_ledger(sid: str, transcript) -> dict:
     row = read_ledger(sid)
     if row["pings"] > 0 and (human_mark(transcript) != row["human"]
                              or work_mark(transcript) != row["work"]):
-        row.update(pings=0, last=None, last_reset=None)
+        row.update(pings=0, last=None, last_n=None, last_reset=None)
     return row
 
 
 def record_ping(sid: str, pings: int, ctx: int, star: int, mark: str, *, work: str = "",
                 last=None, costs=(), last_reset=None) -> bool:
-    """寫帳（pings 為新值）；`last`＝`(pct, at_epoch)｜None`（None＝清空）；寫不進去回 `False`
-    （呼叫端判 cap）。"""
+    """寫帳（pings 為新值）；`last`＝`(pct, at_epoch[, n_live])｜None`（None＝清空）；`costs`＝乾淨
+    樣本 pp；寫不進去回 `False`（呼叫端判 cap）。"""
     path = ledger_path(sid, write=True)
+    pct, at, n_live = (tuple(last) + (None,))[:3] if last else (None, None, None)
     row = {"schema": SCHEMA, "sid": sid, "pings": pings, "n_star": star, "ctx": ctx, "human": mark,
-           _WORK: work, **qw_schema.ledger_extra(*(last or (None, None)), costs),
+           _WORK: work, **qw_schema.ledger_extra(pct, at, costs, n_live),
            _LAST_RESET: last_reset if last else None}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)

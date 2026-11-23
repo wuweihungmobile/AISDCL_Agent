@@ -123,7 +123,7 @@ def _conclude(sid, transcript, env, car, oc, now, finish, ctx0) -> int:
                       resumed=resumed)
     star, row = keepwarm.n_star(ctx), kw_ledger.load_ledger(sid, transcript)
     k = row["pings"] + 1
-    last, costs, last_reset = kw_wake.ping_cost(sid, row, oc.plan, now)
+    last, costs, last_reset = kw_wake.ping_cost(sid, row, oc.plan, now, transcript=transcript)
     saved = kw_ledger.record_ping(sid, k, ctx, star, kw_ledger.human_mark(transcript),
                                   work=kw_ledger.work_mark(transcript), last=last, costs=costs,
                                   last_reset=last_reset)

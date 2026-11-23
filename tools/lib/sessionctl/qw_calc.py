@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import sys
 
+from . import qw_schema
+
 # ── 程式常數（DES §4；其餘跨包欄名在 qw_schema）
 IDLE_LIMIT_MIN = 50          # L_idle：最後一段閒置上限（＜55 harness 閒置壓縮＜60 快取）
 W_CLOSE = 4                  # 收尾回合（封存＋park＋掛 keepwarm）的保溫等價次數
@@ -21,6 +23,9 @@ MAC_HEARTBEAT_MIN = 10       # darwin keepwarm 心跳間隔
 LATCH_RESET_TOL_MIN = 60     # S-18 閂鎖視窗：已過閂鎖 reset＋此分鐘必屬新窗
 BURN_DEFAULT_PP_PER_MIN = 1.0
 AGENT_EST_DEFAULT_PP = 5.0
+T_OBS = 30                   # W11c①：在飛者燒量觀察窗（分鐘）；只准下修（過大＝大 D 恆 nodispatch）
+MIN_CLEAN_SAMPLES = 3        # W11c③：量測值採用的乾淨樣本下限；只准上修
+OUTLIER_X = 3                # W11c③：量測均值超過縮放／校準值×此倍數即整批離群；只准下修
 KEY_PP = "AUTOSDD_QUOTAWALL_PP_PER_KUNIT"
 KEY_BURN = "AUTOSDD_QUOTAWALL_BURN_PP_PER_MIN"
 KEY_AGENT = "AUTOSDD_QUOTAWALL_AGENT_EST_PP"
@@ -66,11 +71,36 @@ def ping_pp(ctx, env) -> tuple[float, bool]:
     return (p_of(ctx) / 1000.0 * per_kunit, True) if cal else (base, False)
 
 
-def ping_pp_eff(scaled: float, measured_mean: float | None) -> tuple[float, str]:
-    """S-25：`max(縮放／校準值, 實測近 3 筆平均)`，只抬不降；回 `(值, "scaled"|"measured")`。"""
-    if measured_mean is not None and measured_mean > scaled:
-        return measured_mean, "measured"
+def qualified_mean(scaled: float, clean_costs) -> float | None:
+    """W11c③：合格的量測均值；乾淨樣本不足 `MIN_CLEAN_SAMPLES`、或均值超過縮放×`OUTLIER_X`
+    （整批離群）⇒ None。`clean_costs`＝`qw_schema.ping_costs` 的乾淨 pp 串。"""
+    if len(list(clean_costs)) < MIN_CLEAN_SAMPLES:
+        return None
+    mean = qw_schema.measured_mean(clean_costs)
+    return None if mean is None or mean > scaled * OUTLIER_X else mean
+
+
+def is_outlier(scaled: float, clean_costs) -> bool:
+    """乾淨樣本夠數、但均值超過縮放×`OUTLIER_X`（呼叫端落 `ping_cost_outlier` 痕跡）。"""
+    if len(list(clean_costs)) < MIN_CLEAN_SAMPLES:
+        return False
+    mean = qw_schema.measured_mean(clean_costs)
+    return mean is not None and mean > scaled * OUTLIER_X
+
+
+def ping_pp_eff(scaled: float, clean_costs) -> tuple[float, str]:
+    """S-25＋W11c③：`max(縮放／校準值, 合格量測均值)`，只抬不降（低於縮放值的量測不降估值）；
+    無合格量測 ⇒ 縮放／校準值。回 `(值, "scaled"|"measured")`。"""
+    mean = qualified_mean(scaled, clean_costs)
+    if mean is not None and mean > scaled:
+        return mean, "measured"
     return scaled, "scaled"
+
+
+def limit_of(v: float, agent: float, burn: float, n_live: int, d_min: float) -> float:
+    """W11c①：`L＝V＋AGENT_EST＋burn×N×min(D, T_OBS)`；N＝在飛單位數（不含主控與待派者），
+    `N＝0` ⇒ 與 r8 的 `V＋AGENT_EST` 逐位相同。"""
+    return v + agent + burn * max(int(n_live), 0) * min(max(d_min, 0.0), T_OBS)
 
 
 def skew_min() -> float:

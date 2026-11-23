@@ -10,11 +10,12 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import qw_calc, qw_schema, qw_wall, roster, switch
+from . import procstop, qw_calc, qw_schema, qw_wall, roster, switch
 
 NONE, WALL, CLOSE, NODISPATCH, FREE = "none", "wall", "close", "nodispatch", "free"
 STAGES = (NONE, WALL, CLOSE, NODISPATCH, FREE)
@@ -42,10 +43,42 @@ class Plan:
     ping_pp: float | None = None     # ping_pp_eff（S-25）
     ping_pp_src: str = "scaled"
     wall: dict | None = None
+    n_live: int | None = None        # N：在飛子代理＋背景 claude 行程；None＝量不到（算 0）
 
 
 def _warn(msg: str) -> None:
     print(f"⚠️ {msg}", file=sys.stderr)
+
+
+#: 行程列舉要起 powershell／ps（數百毫秒），hook 與 watch 每輪都會算 plan ⇒ 短期快取。
+_PROC_TTL_SEC = 20.0
+_proc_cache: list = [0.0, None]
+_outlier_seen: set = set()
+
+
+def _background_claude(sid: str) -> int | None:
+    """背景真 `claude` 行程數（`claude -p` 形態、命令列不含本 sid；與互動視窗無關——額度是帳號
+    共用，真機驗證／無人窗口燒的是同一池）。行程身分判準＝`procstop`；列舉失敗 ⇒ None。"""
+    now = time.monotonic()
+    if _proc_cache[1] is None or now - _proc_cache[0] > _PROC_TTL_SEC:
+        _proc_cache[:] = [now, procstop.list_processes()]
+    procs = _proc_cache[1]
+    if procs is None:
+        return None
+    return sum(1 for p in procs if procstop.is_claude(p)
+               and procstop._PRINT_RE.search(p["cmd"]) and sid not in p["cmd"])
+
+
+def live_count(sid: str, transcript) -> tuple[int, bool]:
+    """W11c①的 N：在飛背景子代理（`roster.running`，純讀檔）＋背景 claude 行程；不含主控與待派者。
+    回 `(N, 量得到)`；任一半量不到 ⇒ 該半算 0 且第二值 False（PLAN 行標 `n_live=?`）。零 token。"""
+    try:
+        slug_dir = Path(transcript).parent if transcript is not None else None
+        agents = len(roster.running(sid, projects_dir=slug_dir))
+        procs = _background_claude(sid)
+        return agents + (procs or 0), procs is not None
+    except Exception:  # noqa: BLE001 — fail-open：量不到＝不加燒量（與 r8 公式同）
+        return 0, False
 
 
 def _ledger_row(sid: str) -> dict:
@@ -77,9 +110,20 @@ def _ctx_of(transcript) -> int | None:
         return None
 
 
+def _note_outlier(sid: str, costs, scaled: float) -> None:
+    """乾淨樣本夠數卻整批離群 ⇒ 落 `ping_cost_outlier` 痕跡（同一批只落一次；plan 每輪重算）。"""
+    key = (sid, tuple(costs))
+    if key in _outlier_seen:
+        return
+    _outlier_seen.add(key)
+    switch.trace("ping_cost_outlier", sid=sid, samples=list(costs), scaled=scaled,
+                 x=qw_calc.OUTLIER_X)
+
+
 def plan(sid: str, transcript, env, now: datetime, *, read_quota=None, refresh=None,
-         ledger=None) -> Plan:
-    """見檔頭。縫：`read_quota(now)`、`refresh(now)`（補量一次）、`ledger`（保溫帳列，缺＝讀檔）。"""
+         ledger=None, live_fn=None) -> Plan:
+    """見檔頭。縫：`read_quota(now)`、`refresh(now)`（補量一次）、`ledger`（保溫帳列，缺＝讀檔）、
+    `live_fn(sid, transcript)->(N, 量得到)`（在飛單位數，缺＝`live_count`）。"""
     try:
         env = os.environ if env is None else env
         if env.get(UNATTENDED_ENV):
@@ -102,7 +146,11 @@ def plan(sid: str, transcript, env, now: datetime, *, read_quota=None, refresh=N
         agent, cal_agent = cv(env, qw_calc.KEY_AGENT, qw_calc.AGENT_EST_DEFAULT_PP)
         scaled, cal_pp = qw_calc.ping_pp(ctx, env)
         row = ledger if ledger is not None else _ledger_row(sid)
-        pp, src = qw_calc.ping_pp_eff(scaled, qw_schema.measured_mean(qw_schema.ping_costs(row)))
+        costs = qw_schema.ping_costs(row)
+        pp, src = qw_calc.ping_pp_eff(scaled, costs)
+        if qw_calc.is_outlier(scaled, costs):
+            _note_outlier(sid, costs, scaled)
+        n_live, n_known = (live_fn or live_count)(sid, transcript)
         r = max(0.0, 100.0 - pct)
         age = None if reading.age is None else int(reading.age)
         if reading.stale:
@@ -110,7 +158,7 @@ def plan(sid: str, transcript, env, now: datetime, *, read_quota=None, refresh=N
         d_min = (reset - now.timestamp()) / 60.0
         k = qw_calc.k_of(d_min, ctx, env)
         v = qw_calc.v_of(k, pp, burn)
-        limit = v + agent
+        limit = qw_calc.limit_of(v, agent, burn, n_live, d_min)
         invariant = "ok" if v < 100.0 - _prepare_pct(env) else "broken"
         if invariant == "broken":
             _warn(f"額度牆 invariant=broken：V={v:.2f} ≥ 100−準備門檻（k={k}、ping_pp={pp:.3f}）"
@@ -118,7 +166,8 @@ def plan(sid: str, transcript, env, now: datetime, *, read_quota=None, refresh=N
         wall = qw_wall.wall_state(transcript, now, read_quota=lambda _n: reading.state)
         stage = (WALL if wall["wall"] else CLOSE if r <= v else NODISPATCH if r <= limit else FREE)
         return Plan(stage, "", d_min, k, v, limit, r, reset, ctx, cal_pp, cal_burn, cal_agent,
-                    invariant, reading.reading_at, age, reading.stale, pp, src, wall)
+                    invariant, reading.reading_at, age, reading.stale, pp, src, wall,
+                    n_live if n_known else None)
     except Exception as exc:  # noqa: BLE001 — fail-open：量不到＝不擋
         switch.trace("quotawall_unmeasured", sid=sid, reason=f"error:{type(exc).__name__}")
         return Plan(NONE, "error")
@@ -140,7 +189,8 @@ def plan_lines(p: Plan) -> list[str]:
                f"R={p.r:.1f} ctx={p.ctx if p.ctx is not None else 'unknown'} "
                f"calibrated={_yn(p.calibrated)} burn_calibrated={_yn(p.cal_burn)} "
                f"agent_calibrated={_yn(p.cal_agent)} invariant={p.invariant} {stale} "
-               f"ping_pp={p.ping_pp:.3f} ping_pp_src={p.ping_pp_src}")
+               f"ping_pp={p.ping_pp:.3f} ping_pp_src={p.ping_pp_src} "
+               f"n_live={'?' if p.n_live is None else p.n_live}")
     return [human, machine]
 
 

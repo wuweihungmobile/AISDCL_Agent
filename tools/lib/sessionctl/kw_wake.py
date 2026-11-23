@@ -10,11 +10,13 @@
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
 
 from . import qw_calc, qw_plan, qw_schema, seal, switch
+from .qw_verdict import DISPATCH_TOOLS
 
 HARD_SKIPS = ("unattended", "mode", "off", "handed_over")
 EV_DEFER, EV_EARLY_RESET = "keepwarm_defer", "keepwarm_early_reset"
@@ -188,16 +190,62 @@ def at_due(c: Carrier, now: float, due: float) -> Outcome:
     return Outcome("ping", "保溫點", p)
 
 
-def ping_cost(sid: str, row: dict, p, now: float):
-    """S-25：相鄰兩次 ping 叫醒的讀數差。回 `(last, costs, last_reset)` 供寫帳。Δ 只在上一筆存在、
-    兩筆皆非 stale、同一視窗、Δ ≥ 0 時入 `ping_costs`；本次讀數 stale／量不到 ⇒ `last` 清空。"""
+def _dispatched_between(transcript, t0: float, t1: float) -> bool | None:
+    """兩叫醒時刻之間，主控是否發過 Agent／Task／Workflow（`tool_use`）；讀不到 ⇒ None。
+    子代理自己的記錄（sidechain）不算；時戳缺／壞的記錄保守算「在區間內」。"""
+    try:
+        with open(transcript, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                if '"tool_use"' not in line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                msg = rec.get("message") if isinstance(rec, dict) else None
+                blocks = msg.get("content") if isinstance(msg, dict) else None
+                if (rec.get("type") != "assistant" or rec.get("isSidechain")
+                        or not isinstance(blocks, list)
+                        or not any(isinstance(b, dict) and b.get("type") == "tool_use"
+                                   and b.get("name") in DISPATCH_TOOLS for b in blocks)):
+                    continue
+                at = qw_schema.parse_epoch(rec.get("timestamp"))
+                if at is None or t0 < at <= t1:
+                    return True
+    except (OSError, TypeError):
+        return None
+    return False
+
+
+def interval_clean(row: dict, now: float, n_now, transcript) -> bool:
+    """W11c②：相鄰兩次 ping 叫醒之間沒有在飛子代理／背景 claude 行程才算乾淨。判準＝兩端點
+    的在飛數（上一次記在帳上 `last_n`、這次 `n_now`）皆量得到且為 0，且逐字稿在區間內沒有
+    派工 `tool_use`；任一讀不到 ⇒ 不乾淨（寧可少記樣本，也不讓污染樣本墊高估值）。"""
+    prev = row["last"]
+    if prev is None or row.get("last_n") != 0 or n_now != 0 or transcript is None:
+        return False
+    return _dispatched_between(transcript, prev[1], now) is False
+
+
+def ping_cost(sid: str, row: dict, p, now: float, *, transcript=None, live=None):
+    """S-25：相鄰兩次 ping 叫醒的讀數差。回 `(last, costs, last_reset)` 供寫帳（`last` 帶本次
+    在飛數作第三欄）。Δ 只在上一筆存在、兩筆皆非 stale、同一視窗、Δ ≥ 0 時**候選**；候選 Δ 再過
+    `interval_clean`（W11c②）：乾淨才入 `ping_costs`，不乾淨只落痕跡 `clean=false`。本次讀數
+    stale／量不到 ⇒ `last` 清空。`live(sid, transcript)->(N, 量得到)` 缺＝`qw_plan.live_count`。"""
     costs, prev = list(row["costs"]), row["last"]
     pct = _pct(p)
     if p is None or pct is None or p.reset is None or p.stale:
         return None, costs, None
+    try:
+        n_now, known = (live or qw_plan.live_count)(sid, transcript)
+        n_now = n_now if known else None
+    except Exception:  # noqa: BLE001 — 讀不到在飛數 ⇒ 不乾淨（不是例外）
+        n_now = None
     if (prev is not None and row["last_reset"] is not None
             and _same_window(row["last_reset"], p.reset) and pct - prev[0] >= 0):
         delta = pct - prev[0]
-        costs = qw_schema.append_cost(costs, delta)
-        switch.trace(EV_PING_COST, sid=sid, delta=delta, pct=pct)
-    return (pct, now), costs, p.reset
+        clean = interval_clean(row, now, n_now, transcript)
+        if clean:
+            costs = qw_schema.append_cost(costs, delta)
+        switch.trace(EV_PING_COST, sid=sid, delta=delta, pct=pct, clean=clean)
+    return (pct, now, n_now), costs, p.reset
