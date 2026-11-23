@@ -567,7 +567,9 @@ class ParkCliTest(_CliFence):
         self.assertTrue(self.armed[0]["interactive"])
         self.assertIn(self.CRED, out)
         self.assertIn("現在可以結束回合；不要請人回這個視窗接手", out)
-        self.assertRegex(out.strip().splitlines()[-1], r"^PARK_VERDICT=armed route=H sid=798a7bf1 ")
+        self.assertRegex(
+            out.strip().splitlines()[-1],
+            r"^PARK_VERDICT=armed route=H(?: backup=absent\(platform\))? sid=798a7bf1 ")
         self.assertIn("park_armed", [t["event"] for t in self.traces()])
 
     def test_at_pk_38_no_credential_means_no_marker(self) -> None:

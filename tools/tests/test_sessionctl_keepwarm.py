@@ -561,15 +561,18 @@ class ProcessLevelTest(_Base):
         這條用真 hook 子行程證明 Stop payload 進去、`decision:block`＋保溫閘文字出來（hook 套用
         前後都要綠）。"""
         self.write(_asst(T0, ctx=400_000))
-        proc = _hook(self.stop(background_tasks=[]), {"AUTOSDD_TRACE_DIR": str(self.tdir),
-                                                      "AUTOSDD_HANDOFF_DIR": str(self.hdir)})
+        # WHY：hook 內「完成閘讓路」讀 `CLAUDE_PROJECT_DIR` 下的真 OIR 帳本；帳本有 undriven 項
+        # 就讓路、保溫閘靜默（CI 簽出的已提交帳本即如此）。指到空目錄＝讀不到＝不讓路，
+        # 測試才不隨 repo 帳本內容與平台的行程存活判準漂移。
+        iso = {"AUTOSDD_TRACE_DIR": str(self.tdir), "AUTOSDD_HANDOFF_DIR": str(self.hdir),
+               "CLAUDE_PROJECT_DIR": str(self.tdir)}
+        proc = _hook(self.stop(background_tasks=[]), iso)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         doc = json.loads(proc.stdout)
         self.assertEqual(doc["decision"], "block")
         self.assertIn("保溫閘", doc["reason"])
         quiet = _hook(self.stop(background_tasks=[{"id": "b", "type": "shell",
-                                                   "status": "running"}]),
-                      {"AUTOSDD_TRACE_DIR": str(self.tdir), "AUTOSDD_HANDOFF_DIR": str(self.hdir)})
+                                                   "status": "running"}]), iso)
         self.assertNotIn("保溫閘", quiet.stdout)
 
     def test_the_cli_pings_for_real_once_the_anchor_is_old_enough(self) -> None:

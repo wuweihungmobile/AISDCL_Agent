@@ -45,7 +45,10 @@ on:
       - "tools/lib/quota_pace.py"
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_burndown.py"
+      - "tools/lib/quota_short_window.py"
       - "tools/lib/endurance_env.py"
+      - "tools/lib/sandbox_scope.py"
+      - "tools/lib/sched_isolation.py"
       - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
       - "tools/tests/fixtures/selfimproving/p7/**"   # Bridge 測試讀根層黃金樣本（P7；TCS-P7 §3、AT-790-5-1）
@@ -78,7 +81,10 @@ on:
       - "tools/lib/quota_pace.py"
       - "tools/lib/quota_pace_floor.py"
       - "tools/lib/quota_burndown.py"
+      - "tools/lib/quota_short_window.py"
       - "tools/lib/endurance_env.py"
+      - "tools/lib/sandbox_scope.py"
+      - "tools/lib/sched_isolation.py"
       - "tools/lib/unattended_authz.py"
       - "docs/06_quality/SelfImproving_Protocol/params.json"
       - "tools/tests/fixtures/selfimproving/p7/**"   # Bridge 測試讀根層黃金樣本（P7；TCS-P7 §3、AT-790-5-1）

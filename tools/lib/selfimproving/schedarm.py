@@ -435,10 +435,10 @@ def arm(repo: Path, run_argv=runner.run_argv, *, as_json: bool = False,
     """安裝 OS 任務並以憑證（值）驗證；回 (rc, 輸出)。`sched_auto_push` 為 true 時另裝推送任務
     （與巡邏段獨立，互不牽連）；`push_only` 只裝推送任務。"""
     win = sys.platform.startswith("win")
+    if (why := sched_isolation.si_arm_problem(repo, os.environ, claude, win)):  # DES S3 L1 登記首判
+        return _reject(repo, "SCHED-SIDEEFFECT-REFUSED", why, as_json, "arm")
     if not win and sys.platform != "darwin":
         return _reject(repo, "SCHED-NO-CREDENTIAL", "此平台沒有 OS 任務載具", as_json, "arm")
-    if (why := sched_isolation.si_arm_problem(repo, os.environ, claude, win)):  # DES S3 登記首判
-        return _reject(repo, "SCHED-SIDEEFFECT-REFUSED", why, as_json, "arm")
     params = _params(repo)
     enabled = params.get("sched_auto_push") is True
     minutes = params["sched_heartbeat_minutes"]

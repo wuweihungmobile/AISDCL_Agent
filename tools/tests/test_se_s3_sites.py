@@ -336,6 +336,19 @@ class SelfImprovingSiteTest(_Base):
         self.assertIn("SCHED-SIDEEFFECT-REFUSED", text)
         run_argv.assert_not_called()
 
+    def test_arm_sandbox_verdict_precedes_the_platform_carrier_verdict(self) -> None:
+        """tools/lib/selfimproving/schedarm.py：L1 沙盒判準在站點首判，
+        先於「此平台沒有 OS 任務載具」（DES S3）。
+        WHY：無載具平台（Linux）上無租約沙盒若先吃平台拒絕，L1 的拒絕碼就不可見。"""
+        home = self.sandbox(lease_min=None)
+        run_argv = mock.Mock()
+        with clean_env(AUTOSDD_TRACE_DIR=str(home / "traces")), mock.patch("sys.stderr"), \
+                mock.patch.object(schedarm.sys, "platform", "linux"):
+            rc, text = schedarm.arm(home, run_argv, as_json=False)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("SCHED-SIDEEFFECT-REFUSED", text)
+        run_argv.assert_not_called()
+
     def test_windows_installer_cannot_carry_job_env_so_sandbox_or_claude_is_refused(self) -> None:
         home = self.sandbox()
         with clean_env(AUTOSDD_TRACE_DIR=str(home / "traces")):

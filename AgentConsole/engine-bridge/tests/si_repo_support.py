@@ -56,7 +56,10 @@ CLI_CLOSURE: tuple[str, ...] = (
     "tools/lib/quota_pace.py",
     "tools/lib/quota_pace_floor.py",  # quota_policy 頂層 import（配速床；ADR-XPLAT-004 §2.15）
     "tools/lib/quota_burndown.py",
+    "tools/lib/quota_short_window.py",  # quota_messages 頂層 import（短窗讀數；R218 W11b）
     "tools/lib/endurance_env.py",
+    "tools/lib/sandbox_scope.py",  # endurance_env.apply_job_env 執行期 import；sched_isolation 頂層 import
+    "tools/lib/sched_isolation.py",  # selfimproving/schedarm.py、patrolrun.py 頂層 import（R218-B S3）
     "tools/lib/unattended_authz.py",
 )
 #: 只被寫入動詞 import 的根層檔（SA 實測：缺任一個，寫入動詞即 `ImportError`——`evwrite` 要

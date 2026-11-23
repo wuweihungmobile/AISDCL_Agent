@@ -260,7 +260,10 @@ class DriverSealsAnAttemptTest(unittest.TestCase):
             "acquire": (None, {"identity": second_identity_call_blows}, lambda: None,
                         "RuntimeError"),
             "pace": (None, {"pace": pace_blows}, lambda: None, "RuntimeError"),
-            "record_run": (None, {}, block_record_run, "PermissionError"),
+            # 以目錄佔住檔名：以附加模式開啟，Windows 丟 PermissionError、POSIX 丟 IsADirectoryError
+            # （同為 OSError 子類；封存記錄依實際例外類名，故期望值依平台）
+            "record_run": (None, {}, block_record_run,
+                           "PermissionError" if sys.platform == "win32" else "IsADirectoryError"),
         }
         for name, (backend, kw, prep, cls) in sites.items():
             with self.subTest(site=name):
@@ -269,7 +272,7 @@ class DriverSealsAnAttemptTest(unittest.TestCase):
                 backend = backend or FakeBackend()
                 item_id, d = self.armed(FakeBackend())
                 prep()
-                with self.assertRaises(OSError if cls == "PermissionError" else RuntimeError):
+                with self.assertRaises(RuntimeError if cls == "RuntimeError" else OSError):
                     driver_run.run_driver(self.root, self.params, item_id, d["task"],
                                           self.deps(backend, **kw))
                 last = self.assertSealed(item_id, "fail", f"error:{cls}")

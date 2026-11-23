@@ -69,10 +69,12 @@ class IdentityAndHomeTest(_Tmp):
         self.assertTrue(ss.is_sandbox(marked))  # ①身分檔、名稱無前綴
         (marked / "wt").mkdir()
         self.assertTrue(ss.is_sandbox(marked / "wt"))  # ⑤身分檔在上一層
-        self.assertTrue(
-            ss.is_sandbox(self.tmp / "autosdd_rv_SBX_x")
-        )  # ②大小寫異、無身分檔（Windows）
-        self.assertTrue(ss.is_sandbox(self.tmp / "C--x-AutoSDD-RV-sbx-abc"))  # ③slug 段
+        # ②大小寫異、無身分檔：判準走 normcase＝只在大小寫不敏感檔案系統（Windows）才同名；
+        # POSIX 上 `autosdd_rv_SBX_x` 是另一個目錄名，不得誤認為沙盒（那會把一般目錄鎖成唯讀）
+        self.assertEqual(
+            ss.is_sandbox(self.tmp / "autosdd_rv_SBX_x"), os.path.normcase("A") == "a"
+        )
+        self.assertTrue(ss.is_sandbox(self.tmp / "C--x-AutoSDD-RV-sbx-abc"))  # ③slug 段（原大小寫）
         self.assertEqual(
             ss.sandbox_home(self.tmp / "AutoSDD_RV_sbx_q" / "a" / "b").name.lower(),
             "autosdd_rv_sbx_q",
