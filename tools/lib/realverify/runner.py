@@ -127,7 +127,10 @@ def run(selection: str, cases: list[Case], *, write_ledger: bool = True, ledger_
     outs = [run_case(c) for c in cases]
     # 本批結束：收帳（依帳判斷，不動別的視窗〔主人存活〕的合法排程）；含真 schtasks 案例才額外掃殘
     uses_sched = any(c.uses_sched for c in cases)
-    leaked = (leases.revoke_run() + leases.discover_sweep(own_run_id=leases.current_run_id())) if uses_sched else []  # noqa: E501
+    # 收帳（寫 closed）不論案例用不用排程都要做，否則不碰排程的家族（watch／keepwarm）帳不 closed
+    leaked = leases.revoke_run()
+    if uses_sched:
+        leaked += leases.discover_sweep(own_run_id=leases.current_run_id())
     failed = [o.case_id for o in outs if o.status == "fail"]
     envs = [o.case_id for o in outs if o.status == "env"]
     reason = ""

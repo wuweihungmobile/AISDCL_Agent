@@ -9,6 +9,7 @@ WHY：任一條退化，孤兒就會在掌舵者桌面再冒出一次（DEF-200-
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -402,9 +403,25 @@ class DiscoverTest(_Fake):
         self.assertEqual(
             {f.action for f in found if f.kind == "dir"}, {"note"}
         )
-        done, stuck = leases_discover.apply(found)
-        self.assertEqual((done, stuck), ([], {}))
+        with mock.patch.object(
+            leases_undo, "revoke_path", return_value=(False, "locked")
+        ):
+            done, stuck = leases_discover.apply(found)
+        self.assertEqual(
+            (done, stuck), ([], {}), "abandoned 之下撤不掉：只記 note、不計入 unrevoked"
+        )
         self.assertTrue(root.exists())
+
+    def test_abandoned_leftover_is_still_disposed_once_it_can_be(self):
+        """`leases_discover.apply`：DES §5.3「殘留物仍由發現式掃描在條件成立時處理」（E2E-SE-18：
+        殺 P1 後 sweep 刪 X 根）。abandon 不等於永久豁免處置。"""
+        root = self.ours("AutoSDD_RV_sbx_aban0008")
+        self.put("r1", "sandbox_root", root)
+        leases.abandon("r1", "放棄這個沙盒根的帳")
+        found = [leases_discover.Finding("dir", str(root), "x", "note")]
+        done, stuck = leases_discover.apply(found)
+        self.assertEqual((done, stuck), ([str(root)], {}))
+        self.assertFalse(root.exists())
 
     def test_projects_dir_of_a_vanished_sandbox_is_swept_unless_a_live_cwd_uses_it(
         self,
@@ -420,6 +437,82 @@ class DiscoverTest(_Fake):
         )
         self.assertEqual(res["removed"], [gone.name])
         self.assertTrue(gone.exists(), "dry_run 不刪")
+
+
+class RootLockedKeepsIdentityTest(_Fake):
+    """`tools/lib/realverify/sandbox.py::_remove_tree`：根被行程 cwd 卡住而刪不掉時，身分檔須留著
+    （E2E-SE-18：內容被清空、身分檔一起沒了，主人已死的孤兒就被發現式掃描誤判 live）。"""
+
+    def _locked_rmtree(self, path, **_kw):
+        for child in Path(path).iterdir():  # 模擬 Windows：內容清得掉、根因 cwd 佔用刪不掉
+            child.unlink()
+        raise PermissionError("WinError 32 root is the cwd of another process")
+
+    def test_identity_survives_a_failed_root_removal_and_marks_the_owner_dead(self):
+        root = self.tmp / "AutoSDD_RV_sbx_locked1"
+        root.mkdir()
+        sandbox_scope.write_identity(root, run_id="r1", sid=SID, owner_pid=2**22 + 7, now=NOW)
+        (root / "payload.txt").write_text("x", encoding="utf-8")
+        with mock.patch.object(sandbox.shutil, "rmtree", self._locked_rmtree), \
+                mock.patch.object(sandbox.time, "sleep"):
+            notes = sandbox._remove_tree(root, "sandbox")  # noqa: SLF001
+        self.assertTrue(notes and notes[0].startswith("RESIDUE sandbox"), notes)
+        self.assertFalse((root / "payload.txt").exists())
+        self.assertTrue((root / sandbox_scope.IDENTITY_NAME).is_file(), "身分檔必須寫回")
+        self.assertEqual(leases_discover._home_state(root, NOW), "dead")  # noqa: SLF001
+        found = leases_discover.scan(NOW, tmp_root=self.tmp, projects=self.tmp / "p")
+        self.assertIn(str(root), [f.ident for f in found if f.kind == "dir"])
+
+    def test_no_identity_is_not_invented(self):
+        root = self.tmp / "AutoSDD_RV_sbx_locked2"
+        root.mkdir()
+        (root / "payload.txt").write_text("x", encoding="utf-8")
+        with mock.patch.object(sandbox.shutil, "rmtree", self._locked_rmtree), \
+                mock.patch.object(sandbox.time, "sleep"):
+            sandbox._remove_tree(root, "sandbox")  # noqa: SLF001
+        self.assertFalse((root / sandbox_scope.IDENTITY_NAME).exists())
+
+
+class AllSettledStillClosesTest(_Fake):
+    """`tools/lib/realverify/leases.py::_revoke_rows`：項目都已個別結清時，案例收尾仍須補寫 closed
+    （RV-SE11「本批所有帳檔都應 closed」；沒補＝帳永遠停在 revoked）。"""
+
+    def test_revoke_run_appends_closed_when_everything_was_settled_individually(self):
+        root = self.ours("AutoSDD_RV_sbx_settled1")
+        self.put("r9", "sandbox_root", root)
+        self.put("r9", "sandbox_root", root, "revoked")
+        self.assertEqual(leases.revoke_run("r9"), [])
+        rows = leases.read_rows(leases.LEASE_DIR / "r9.jsonl")
+        self.assertEqual((rows[-1]["kind"], rows[-1]["state"]), ("run", "closed"))
+        before = len(rows)
+        leases.revoke_run("r9")
+        self.assertEqual(len(leases.read_rows(leases.LEASE_DIR / "r9.jsonl")), before)
+
+
+class DeadRegistryRowsTest(_Fake):
+    """`tools/lib/realverify/sandbox.py::_drop_dead_registry_rows_in`：被強殺行程的 `~/.claude/sessions`
+    登記檔由 cleanup 收掉（否則 RV-SE11／sessionctl_watch 的快照在 cleanup 後量到洩漏）。"""
+
+    def _row(self, folder, pid, cwd):
+        body = {"pid": pid, "sessionId": "s", "cwd": str(cwd)}
+        (folder / f"{pid}.json").write_text(json.dumps(body), encoding="utf-8")
+
+    def test_only_dead_rows_inside_the_sandbox_are_removed(self):
+        folder = self.tmp / "sessions"
+        folder.mkdir()
+        box = self.tmp / "AutoSDD_RV_sbx_dr1"
+        other = self.tmp / "AutoSDD_RV_sbx_dr1x"
+        self._row(folder, 2**22 + 11, box / "wt")  # 死行程、cwd 在沙盒內 ⇒ 刪
+        self._row(folder, 2**22 + 12, other)  # 死行程、別的沙盒（前綴相同）⇒ 留
+        self.alive[os.getpid()] = (True, None)
+        self._row(folder, os.getpid(), box)  # 活行程 ⇒ 留
+        with mock.patch.object(sandbox.time, "sleep"):
+            notes = sandbox._drop_dead_registry_rows_in(  # noqa: SLF001
+                folder, [box], wait_s=0.0
+            )
+        self.assertEqual(notes, [])
+        left = sorted(p.name for p in folder.glob("*.json"))
+        self.assertEqual(left, sorted([f"{2**22 + 12}.json", f"{os.getpid()}.json"]))
 
 
 class RefusalOutletTest(_Fake):

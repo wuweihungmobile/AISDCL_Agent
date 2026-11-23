@@ -324,6 +324,9 @@ class Sandbox:
         return [f"RESIDUE oldwin-tasks {left}"] if left else []
 
     # ---- 清理 ----
+    def _drop_dead_registry_rows(self) -> list[str]:
+        return _drop_dead_registry_rows_in(claude_home() / "sessions", [self.root, self.home])
+
     def transcript_dirs(self) -> list[Path]:
         """只認 slug 與沙盒根吻合的專案目錄（絕不碰別的專案）。"""
         base = projects_dir()
@@ -359,6 +362,7 @@ class Sandbox:
         left = leases.revoke_items([("process", f"sid:{self.sid}")])  # 產品自己開的視窗／行程（D-8）  # noqa: E501
         notes += [f"RESIDUE process {i}" for i in left]
         notes += self._disarm_oldwin_tasks()
+        notes += self._drop_dead_registry_rows()
         for d in self.transcript_dirs():
             notes += _remove_tree(d, "transcript-dir")
         for base in dict.fromkeys((self.root, self.home)):  # worktree 沙盒另有外層的 slug 列
@@ -373,6 +377,47 @@ class Sandbox:
         return notes
 
 
+def _drop_dead_registry_rows_in(
+    folder: Path, bases: list[Path], *, wait_s: float = 3.0
+) -> list[str]:
+    """刪 `folder`（harness 行程登記目錄）下 cwd 落在沙盒內、行程已不在的 `<pid>.json`。
+
+    WHY（RV-SE11／sessionctl_watch 的 SIDE-EFFECT LEAK）：被我們強殺（`taskkill /F`）的 claude
+    沒機會自己撤登記檔，快照在 cleanup 之後量到「sessions 多一檔、字樣含沙盒」；檔案要等下一次
+    別的 claude 啟動才被清掉＝洩漏判定取決於時序。登記檔是我們殺掉的行程的殘留，由我們收。
+    活著的行程一律不動。"""  # noqa: E501
+    keys = [os.path.normcase(str(b)) for b in bases]
+    notes: list[str] = []
+    deadline = time.monotonic() + wait_s
+    while True:
+        pending = False
+        try:
+            files = sorted(folder.glob("*.json"))
+        except OSError:
+            return notes
+        for p in files:
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            cwd = data.get("cwd") if isinstance(data, dict) else None
+            norm = os.path.normcase(cwd) if isinstance(cwd, str) else ""
+            if not any(norm == k or norm.startswith(k.rstrip(os.sep) + os.sep) for k in keys):
+                continue
+            raw = data.get("pid")
+            pid = raw if isinstance(raw, int) else (int(p.stem) if p.stem.isdigit() else None)
+            if pid is not None and sandbox_scope.proc_probe(pid)[0]:
+                pending = True
+                continue
+            try:
+                p.unlink(missing_ok=True)
+            except OSError as exc:
+                notes.append(f"RESIDUE registry-row {p}: {type(exc).__name__}: {exc}")
+        if not pending or time.monotonic() >= deadline:
+            return notes
+        time.sleep(0.3)
+
+
 def _writable_then_retry(func, path, _exc_info) -> None:
     """`rmtree` 的錯誤處理：唯讀檔（git 物件）先去唯讀再重試；仍失敗就把錯誤往外拋。"""
     os.chmod(path, stat.S_IWRITE)
@@ -382,6 +427,7 @@ def _writable_then_retry(func, path, _exc_info) -> None:
 def _remove_tree(path: Path, kind: str, attempts: int = 5) -> list[str]:
     """刪目錄並**驗證**它真的不在；刪不掉回 `RESIDUE <kind> <path>: <最後的錯誤>`（絕不吞錯）。"""
     last = ""
+    identity = _read_identity_bytes(path)
     for _ in range(attempts):
         try:
             kwarg = "onexc" if sys.version_info >= (3, 12) else "onerror"  # onerror 自 3.12 棄用
@@ -391,7 +437,29 @@ def _remove_tree(path: Path, kind: str, attempts: int = 5) -> list[str]:
         if not path.exists():
             return []
         time.sleep(0.4)
+    _restore_identity(path, identity)
     return [f"RESIDUE {kind} {path}" + (f": {last}" if last else "")]
+
+
+def _read_identity_bytes(path: Path) -> bytes | None:
+    try:
+        return (path / sandbox_scope.IDENTITY_NAME).read_bytes()
+    except OSError:
+        return None
+
+
+def _restore_identity(path: Path, identity: bytes | None) -> None:
+    """刪不掉根（例：行程 cwd 卡住）時，`rmtree` 已先清空內容、連身分檔一起沒了：把身分檔寫回。
+
+    WHY（E2E-SE-18）：無身分檔的殘留目錄在發現式掃描只剩 mtime 判準（< `LEASE_CAP` 一律 live），
+    主人已死的孤兒因此變成「查無主人、看似活著」，之後 sweep 永遠不處置。
+    身分檔留著＝主人可驗證已死，行程放開 cwd 後下一次 sweep 即可刪。"""
+    if identity is None or not path.is_dir() or (path / sandbox_scope.IDENTITY_NAME).exists():
+        return
+    try:
+        (path / sandbox_scope.IDENTITY_NAME).write_bytes(identity)
+    except OSError:
+        pass
 
 
 def kill_tree(proc: subprocess.Popen) -> None:

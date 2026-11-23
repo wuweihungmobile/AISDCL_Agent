@@ -254,6 +254,11 @@ def _undo_row(row: dict) -> tuple[str, str]:
 def _revoke_rows(run_id: str, rows: list[dict], report: Report, *, close: bool = True) -> None:
     pend = _pending(rows)
     if not pend:
+        # 全部項目都已個別結清（`settle`／`revoke_items`）：仍須補寫 closed，否則帳永遠停在
+        # revoked 而非 closed（RV-SE11「本批所有帳檔都應 closed」；`account_state` 也靠它判）。
+        last = rows[-1] if rows else None
+        if close and last is not None and not (last.get("kind") == "run" and last.get("state") == "closed"):  # noqa: E501
+            append(run_id, "run", "*", "closed")
         return
     ordered = sorted(pend.items(), key=lambda kv: (UNDO_ORDER.index(kv[0][0]), kv[0][1]))
     clean = True

@@ -183,12 +183,14 @@ def scan(now: datetime | None = None, *, tmp_root: Path | None = None, projects:
 
 
 def apply(findings: list[Finding]) -> tuple[list[str], dict[str, str]]:
-    """撤銷 `revoke` 項；回 `(已撤 ident 清單, {撤不掉的 ident: 原因})`。`note` 項不動、也不計入撤不掉。"""  # noqa: E501
+    """撤銷項；回 `(已撤 ident 清單, {撤不掉的 ident: 原因})`。
+
+    `note` 項（位於 abandoned ident 之下）也會嘗試處置——DES §5.3「殘留物仍由發現式掃描在條件成立時
+    處理」：主人已死、行程放開之後就該被刪（E2E-SE-18「殺 P1 後 sweep 刪 X 根」）；撤不掉只記 note、
+    **不計入撤不掉**（D-11：abandon 的意義是不再因它拒跑）。"""  # noqa: E501
     done: list[str] = []
     stuck: dict[str, str] = {}
     for f in findings:
-        if f.action != "revoke":
-            continue
         try:
             if f.kind == "sched":
                 ok, why = leases.revoke_sched(f.ident), "回讀仍在"
@@ -198,7 +200,7 @@ def apply(findings: list[Finding]) -> tuple[list[str], dict[str, str]]:
             ok, why = False, f"{type(exc).__name__}: {exc}"
         if ok:
             done.append(f.ident)
-        else:
+        elif f.action == "revoke":
             stuck[f.ident] = f"{f.why}；{why}"
     return done, stuck
 
@@ -213,7 +215,7 @@ def preflight() -> tuple[list[str], dict[str, str]]:
     done, bad = apply(found)
     lines += [f"↩ 發現式掃描：已撤殘留 {i}" for i in done]
     lines += [f"note: {f.ident} 位於已放棄（abandoned）的 ident 之下，只記錄不處置（{f.why}）"
-              for f in found if f.action == "note"]
+              for f in found if f.action == "note" and f.ident not in done]
     stuck.update(bad)
     return lines, stuck
 

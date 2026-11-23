@@ -139,6 +139,9 @@ def ensure_fake_claude(sb: Sandbox) -> Path:
     return exe
 
 
+K5_LEASE_MIN = 150  # RV-K5 的 reset 在 +120 分，租約須涵蓋 fire（≤ sandbox_scope.LEASE_CAP）
+
+
 def ctl(sb: Sandbox, *args: str, extra: dict | None = None, timeout: int = 180, lease_min: int = sandbox_scope.LEASE_MAX) -> subprocess.CompletedProcess:  # noqa: E501
     """跑沙盒內的 `sessionctl.py`。會**登記 park 排程**的呼叫（`park` 且非 done／cancel／status）先授與預設
     租約並帶 `--claude <沙盒假 claude>`：沙盒目標預設拒絕（L1），到點 job 的每次 spawn 嘗試都只准打替身
@@ -399,9 +402,12 @@ def rv_k4(ctx: CaseContext) -> None:
         ctx.check(again.returncode == 0, "--status --verify rc 非 0")
 
 
-@case("RV-K5", "sessionctl_park", refs=(), sched=True)
+@case("RV-K5", "sessionctl_park", refs=(), sched=True, lease_minutes=K5_LEASE_MIN)
 def rv_k5(ctx: CaseContext) -> None:
-    """`park --why`（無 --at）：額度未達準備門檻、但主控判斷放不下 ⇒ reset 取短窗觀測值；不帶 --why ⇒ rc 4（反向）。"""  # noqa: E501
+    """`park --why`（無 --at）：額度未達準備門檻、但主控判斷放不下 ⇒ reset 取短窗觀測值；不帶 --why ⇒ rc 4（反向）。
+
+    租約：reset ＋120 分的 job 遠於預設 30 分租約，L1 會以 `lease_shorter_than_fire` 拒絕登記（產品判準正確：
+    沙盒 job 不得活得比租約久，REQ-SE-18）；本案例據實宣告 150 分租約（≤ `LEASE_CAP`）。"""  # noqa: E501
     sb = ctx.sandbox(probe_hooks=False)
     install_tools(sb)
     with park_cleanup(sb):
@@ -411,7 +417,7 @@ def rv_k5(ctx: CaseContext) -> None:
         no = ctl(sb, "park", "--session-id", sb.sid, "--pkg", str(pkg))
         ctx.check(no.returncode == 4, f"未達門檻且無 --why 應 rc 4，實得 {no.returncode} {no.stderr[-200:]}")  # noqa: E501
         ctx.check(read_marker(sb.sid, sb.root / "traces") is None and not tasks_like(f"AutoSDD_HandoffSpawn_{sb.sid[:8]}_*"), "拒絕時不該留標記／排程")  # noqa: E501
-        r = ctl(sb, "park", "--session-id", sb.sid, "--pkg", str(pkg), "--why", "realverify K5 下一棒放不下")  # noqa: E501
+        r = ctl(sb, "park", "--session-id", sb.sid, "--pkg", str(pkg), "--why", "realverify K5 下一棒放不下", lease_min=K5_LEASE_MIN)  # noqa: E501
         ctx.check(r.returncode == 0, f"--why rc={r.returncode} {r.stderr[-300:]}")
         mk = read_marker(sb.sid, sb.root / "traces")
         ctx.check(mk["axis"]["kind"] == "five_hour" and mk["status"] == "armed", f"標記不合：{mk}")
